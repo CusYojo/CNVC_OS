@@ -9,6 +9,12 @@ import {
 import { appendMessages, getConversation } from './conversationService.js'
 import { loadAiSkill } from './aiSkillService.js'
 import { AI_QA_TEMPLATE, assertAiTemplateReferences } from './aiTemplateCatalog.js'
+import {
+  collapseRepeatedText,
+  curateEvidenceSources,
+  dedupeTextList,
+  isNearDuplicate,
+} from './aiEvidenceQualityService.js'
 import { cleanCorruptedText } from './textQualityService.js'
 
 export const PROJECT_QA_CATEGORIES = [
@@ -78,7 +84,7 @@ const GW_KEY = process.env.OPENAI_API_KEY || process.env.LLM_API_KEY || ''
 const MODEL = process.env.LLM_MODEL || 'claude-sonnet-4-6'
 
 function cleanText(value: unknown, fallback: string) {
-  const text = cleanCorruptedText(value).cleaned.replace(/\s+/g, ' ').trim()
+  const text = collapseRepeatedText(cleanCorruptedText(value).cleaned).replace(/\s+/g, ' ').trim()
   return text || fallback
 }
 
@@ -146,7 +152,7 @@ async function evidenceForProject(
         ].join('\n'),
       }]
     : []
-  return [
+  const candidates = [
     ...projectEvidence,
     ...rows.map((row): QaEvidence => ({
       sourceType: row.sourceType,
@@ -156,11 +162,34 @@ async function evidenceForProject(
       versionOrDate: row.createdAt.toISOString().slice(0, 10),
       content: row.content,
     })),
-  ].flatMap((source) => {
-    const quality = cleanCorruptedText(source.content)
-    if (!quality.usable || !quality.cleaned) return []
-    return [{ ...source, content: quality.cleaned }]
+  ]
+  return curateEvidenceSources(candidates, { maxTotal: 12, maxPerDocument: 2 }).usable
+}
+
+function groupQaEvidence(evidence: QaEvidence[], indexes: number[]) {
+  const groups = new Map<string, { indexes: number[]; source: QaEvidence }>()
+  indexes.forEach((index) => {
+    const source = evidence[index]
+    if (!source) return
+    const key = `${source.sourceType}:${source.sourceId || source.sourceName}`
+    const existing = groups.get(key) ?? { indexes: [], source }
+    existing.indexes.push(index)
+    groups.set(key, existing)
   })
+  const citationByIndex = new Map<number, string>()
+  const sources = [...groups.values()].map((group, groupIndex) => {
+    const id = `S${groupIndex + 1}`
+    group.indexes.forEach((index) => citationByIndex.set(index, id))
+    const locators = [...new Set(group.indexes.map((index) => evidence[index].chunkIndex))]
+      .sort((left, right) => left - right)
+    return {
+      id,
+      title: group.source.sourceName,
+      locator: `知识片段 ${locators.join('、')}`,
+      versionOrDate: group.source.versionOrDate,
+    }
+  })
+  return { sources, citationByIndex }
 }
 
 function fallbackAnswer(input: {
@@ -173,8 +202,15 @@ function fallbackAnswer(input: {
   skillSha256: string
   evidence: QaEvidence[]
 }): ProjectQaAnswer {
-  const evidence = input.evidence.slice(0, 3)
-  const hasEvidence = evidence.length > 0
+  const uniqueGroups = groupQaEvidence(input.evidence, input.evidence.map((_, index) => index))
+  const selectedSources = uniqueGroups.sources.slice(0, 3)
+  const selectedIds = new Set(selectedSources.map((source) => source.id))
+  const selectedEvidence = input.evidence.flatMap((source, index) => {
+    const citation = uniqueGroups.citationByIndex.get(index)
+    return citation && selectedIds.has(citation) ? [{ source, citation }] : []
+  }).filter((item, index, all) =>
+    all.findIndex((candidate) => candidate.citation === item.citation) === index)
+  const hasEvidence = selectedEvidence.length > 0
   return {
     id: randomUUID(),
     projectId: input.projectId,
@@ -184,10 +220,12 @@ function fallbackAnswer(input: {
     directAnswer: hasEvidence
       ? `现有资料可以形成关于“${input.category}”的初步判断，但证据强度不足以支持确定性结论，仍需结合原件和访谈核验。`
       : '当前项目知识库没有足够证据回答该问题，不能据此形成项目事实或投资结论。',
-    keyPoints: evidence.map((source, index) => ({
-      text: cleanText(source.content, '该来源内容需进一步核验').slice(0, 360),
+    keyPoints: selectedEvidence.map(({ source, citation }) => ({
+      text: cleanText(source.content, '该来源内容需进一步核验')
+        .split(/(?<=[。！？!?；;])/)[0]
+        .slice(0, 220),
       status: source.sourceType === 'project_record' ? '企业自述' : '待核验',
-      citations: [`S${index + 1}`],
+      citations: [citation],
     })),
     risksOrUncertainties: [
       '项目档案、企业陈述与独立第三方证据尚未完成交叉验证。',
@@ -197,13 +235,8 @@ function fallbackAnswer(input: {
       '补充支持该问题的原始文件并确认版本和资料日期。',
       '由投资经理结合访谈、财务底稿或法律文件复核关键陈述。',
     ],
-    sources: evidence.map((source, index) => ({
-      id: `S${index + 1}`,
-      title: source.sourceName,
-      locator: `知识片段 ${source.chunkIndex}`,
-      versionOrDate: source.versionOrDate,
-    })),
-    evidenceCount: evidence.length,
+    sources: selectedSources,
+    evidenceCount: selectedSources.length,
     confidenceStatus: hasEvidence ? '低' : '证据不足',
     disclaimer: DISCLAIMER,
     skillName: 'answer-project-qa',
@@ -223,7 +256,8 @@ function normalizeAnswer(raw: unknown, fallback: ProjectQaAnswer, evidence: QaEv
   const allowedStatuses = ['已核验事实', '企业自述', 'AI推断', '待核验'] as const
   const points = Array.isArray(value.keyPoints) ? value.keyPoints : []
   const used = new Set<number>()
-  const keyPoints = points.slice(0, 6).map((point) => {
+  const seenPointTexts: string[] = []
+  const normalizedPoints = points.slice(0, 10).flatMap((point) => {
     const item = point && typeof point === 'object' ? point as Record<string, unknown> : {}
     const indexes = Array.isArray(item.sourceIndexes)
       ? item.sourceIndexes
@@ -231,48 +265,57 @@ function normalizeAnswer(raw: unknown, fallback: ProjectQaAnswer, evidence: QaEv
           Number.isInteger(index) && Number(index) >= 0 && Number(index) < evidence.length)
         .slice(0, 6)
       : []
-    indexes.forEach((index) => used.add(index))
     const requestedStatus = allowedStatuses.includes(item.status as typeof allowedStatuses[number])
       ? item.status as ProjectQaFindingStatus
       : '待核验'
-    return {
-      text: cleanText(item.text, '该要点需要进一步核验'),
+    const pointText = cleanText(item.text, '')
+    if (!pointText || isNearDuplicate(pointText, seenPointTexts)) return []
+    seenPointTexts.push(pointText)
+    indexes.forEach((index) => used.add(index))
+    return [{
+      text: pointText,
       status: requestedStatus === '已核验事实' && indexes.length === 0 ? '待核验' : requestedStatus,
-      citations: indexes.map((index) => `S${index + 1}`),
-    }
-  })
+      sourceIndexes: indexes,
+    }]
+  }).slice(0, 5)
   // 模型偶尔会返回空 keyPoints。此时完整采用可追溯兜底结果，避免出现
   // “要点仍引用 S1、来源列表却为空”的前后不一致。
-  if (keyPoints.length === 0) {
+  if (normalizedPoints.length === 0) {
     return {
       ...fallback,
       directAnswer: cleanText(value.directAnswer, fallback.directAnswer),
     } satisfies ProjectQaAnswer
   }
-  const stringList = (input: unknown, defaultValue: string[]) =>
-    Array.isArray(input)
-      ? input.map((item) => cleanText(item, '')).filter(Boolean).slice(0, 8)
-      : defaultValue
+  const groupedEvidence = groupQaEvidence(evidence, [...used].sort((left, right) => left - right))
+  const keyPoints = normalizedPoints.map((point) => ({
+    text: point.text,
+    status: point.status,
+    citations: [...new Set(point.sourceIndexes
+      .map((index) => groupedEvidence.citationByIndex.get(index))
+      .filter((citation): citation is string => Boolean(citation)))],
+  }))
+  const risksOrUncertainties = dedupeTextList(
+    Array.isArray(value.risksOrUncertainties) ? value.risksOrUncertainties : fallback.risksOrUncertainties,
+    { limit: 5, against: seenPointTexts },
+  )
+  const verificationActions = dedupeTextList(
+    Array.isArray(value.verificationActions) ? value.verificationActions : fallback.verificationActions,
+    { limit: 5, against: [...seenPointTexts, ...risksOrUncertainties] },
+  )
   const confidenceValues = ['高', '中', '低', '证据不足'] as const
   let confidence = confidenceValues.includes(value.confidenceStatus as typeof confidenceValues[number])
     ? value.confidenceStatus as ProjectQaConfidence
     : fallback.confidenceStatus
-  if (used.size === 0) confidence = '证据不足'
-  if (confidence === '高' && used.size < 2) confidence = '中'
-  const selectedSources = [...used].sort((left, right) => left - right)
+  if (groupedEvidence.sources.length === 0) confidence = '证据不足'
+  if (confidence === '高' && groupedEvidence.sources.length < 2) confidence = '中'
   return {
     ...fallback,
     directAnswer: cleanText(value.directAnswer, fallback.directAnswer),
     keyPoints,
-    risksOrUncertainties: stringList(value.risksOrUncertainties, fallback.risksOrUncertainties),
-    verificationActions: stringList(value.verificationActions, fallback.verificationActions),
-    sources: selectedSources.map((index) => ({
-      id: `S${index + 1}`,
-      title: evidence[index].sourceName,
-      locator: `知识片段 ${evidence[index].chunkIndex}`,
-      versionOrDate: evidence[index].versionOrDate,
-    })),
-    evidenceCount: selectedSources.length,
+    risksOrUncertainties,
+    verificationActions,
+    sources: groupedEvidence.sources,
+    evidenceCount: groupedEvidence.sources.length,
     confidenceStatus: confidence,
     disclaimer: DISCLAIMER,
   } satisfies ProjectQaAnswer
@@ -303,6 +346,8 @@ async function composeProjectQaAnswer(input: {
 4. 只有直接证据支持的内容才可标“已核验事实”；企业单方陈述标“企业自述”；分析标“AI推断”；其余标“待核验”。
 5. 只输出 JSON，不输出 Markdown 代码块或额外说明。
 6. Skill 版本、模板版本及内部文件名只用于审计，不得出现在用户可见回答中。
+7. 同一事实、风险或核验行动只能完整表述一次；不得把证据原文整段复制为回答。
+8. 先对重复片段和重复来源去重，只在回答末尾保留关键要点实际引用的来源。
 
 已激活 Skill：${skill.name}
 Skill 版本：${skill.version}

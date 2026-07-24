@@ -104,6 +104,19 @@ async function main() {
       !/(德塔智能|佳量脑科学|蓝成应急|中数睿智)/.test(referenceSource),
       'SKILL 可登记已批准模板路径，但引用契约不得复制样本项目正文',
     )
+    assert(
+      `${definition.label} 明确证据与内容去重`,
+      /重复|去重/.test(skillSource)
+        && /重复|去重|不得复述|只(?:能|列)/.test(referenceSource)
+        && /同一(?:事实|文件|数字|来源)/.test(`${skillSource}\n${referenceSource}`),
+      '证据分片去重、一个事实只出现一次',
+    )
+    assert(
+      `${definition.label} 明确末尾来源披露`,
+      /末尾|文尾|最后一页/.test(`${skillSource}\n${referenceSource}`)
+        && /来源|引用资料/.test(referenceSource),
+      '仅列实际使用来源并置于末尾',
+    )
   }
 
   assert(

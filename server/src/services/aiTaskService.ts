@@ -6,7 +6,11 @@ import { and, asc, desc, eq, inArray, lte, sql } from 'drizzle-orm'
 import JSZip from 'jszip'
 import { db } from '../db/client.js'
 import { aiArtifacts, aiTaskSources, aiTasks, auditLogs, chatConversations, knowledgeChunks, projects, users } from '../db/schema.js'
-import { composeBusinessContent, type EvidenceSource } from './aiBusinessContentService.js'
+import {
+  composeBusinessContent,
+  usedBusinessSourceIndexes,
+  type EvidenceSource,
+} from './aiBusinessContentService.js'
 import {
   generateBusinessDocx,
   generateBusinessPptx,
@@ -21,7 +25,10 @@ import {
   type AiBusinessTaskType,
 } from './aiTemplateCatalog.js'
 import { loadAiSkill } from './aiSkillService.js'
-import { cleanCorruptedText } from './textQualityService.js'
+import {
+  curateEvidenceSources,
+  dedupeTextList,
+} from './aiEvidenceQualityService.js'
 
 export type AiTaskStatus = 'pending' | 'running' | 'succeeded' | 'failed' | 'cancelled'
 
@@ -109,31 +116,13 @@ async function sourcesForProject(projectId: string, sourceCutoffDate: string): P
     sourceId: row.sourceId,
     sourceName: row.sourceName || '项目资料',
     chunkIndex: row.chunkIndex,
+    versionOrDate: row.createdAt.toISOString().slice(0, 10),
     content: row.content,
   }))
 }
 
 export function screenEvidenceSources(sources: EvidenceSource[]) {
-  const rejected: Array<{ sourceName: string; chunkIndex?: number; reason: string }> = []
-  const usable = sources.flatMap((source) => {
-    const quality = cleanCorruptedText(source.content)
-    if (!quality.corrupted) return [{ ...source, content: quality.cleaned }]
-    if (quality.usable && quality.cleaned) {
-      rejected.push({
-        sourceName: source.sourceName,
-        chunkIndex: source.chunkIndex,
-        reason: '片段含损坏字符，已删除损坏片段后使用剩余可读内容',
-      })
-      return [{ ...source, content: quality.cleaned }]
-    }
-    rejected.push({
-      sourceName: source.sourceName,
-      chunkIndex: source.chunkIndex,
-      reason: '片段编码异常，已从本次生成中排除',
-    })
-    return []
-  })
-  return { usable, rejected }
+  return curateEvidenceSources(sources, { maxTotal: 18, maxPerDocument: 3 })
 }
 
 async function getTaskRow(userId: string, taskId: string) {
@@ -174,9 +163,16 @@ async function inspectGeneratedArtifact(filePath: string, format: 'docx' | 'pptx
     if (!documentXml.includes('<w:t')) throw new Error('DOCX 没有可编辑文本')
     if (documentXml.includes('\uFFFD')) throw new Error('DOCX 正文包含损坏的 Unicode 字符')
     if (/w:eastAsia="Arial Unicode MS"/.test(documentXml)) throw new Error('DOCX 使用了不兼容的中文字体')
+    if (!documentXml.includes('引用资料')) throw new Error('DOCX 文尾缺少引用资料')
     return {
       qualityStatus: 'passed',
-      metadata: { bytes: fileStat.size, editableText: true, encodingClean: true, cjkFontValidated: true },
+      metadata: {
+        bytes: fileStat.size,
+        editableText: true,
+        encodingClean: true,
+        cjkFontValidated: true,
+        endReferencesValidated: true,
+      },
     }
   }
   if (!zip.file('ppt/presentation.xml')) throw new Error('PPTX 缺少 presentation.xml')
@@ -190,6 +186,8 @@ async function inspectGeneratedArtifact(filePath: string, format: 'docx' | 'pptx
     }
     editableTextElements += (xml.match(/<a:t>/g) || []).length
   }
+  const finalSlideXml = await zip.file(`ppt/slides/slide${slides.length}.xml`)?.async('string') || ''
+  if (!finalSlideXml.includes('引用资料与责任声明')) throw new Error('PPTX 最后一页缺少引用资料与责任声明')
   const themeXml = await zip.file('ppt/theme/theme1.xml')?.async('string')
   if (!themeXml || !/<a:ea[^>]+typeface="[^"]+"/.test(themeXml)) throw new Error('PPTX 缺少东亚主题字体')
   if (slides.length < 3 || editableTextElements < slides.length * 2) throw new Error('PPTX 可编辑文本元素不足')
@@ -202,6 +200,7 @@ async function inspectGeneratedArtifact(filePath: string, format: 'docx' | 'pptx
       openXmlValid: true,
       encodingClean: true,
       cjkFontValidated: true,
+      endReferencesValidated: true,
     },
   }
 }
@@ -237,6 +236,7 @@ async function executeTask(taskId: string) {
         sourceId: project.id,
         sourceName: '项目档案',
         chunkIndex: 0,
+        versionOrDate: project.updatedAt.toISOString().slice(0, 10),
         content: [
           `项目名称：${project.name}`,
           `公司主体：${project.companyName || '待核验'}`,
@@ -268,10 +268,10 @@ async function executeTask(taskId: string) {
     })
     if (evidenceScreening.rejected.length) {
       const affectedFiles = [...new Set(evidenceScreening.rejected.map((item) => item.sourceName))]
-      content.missing = [
+      content.missing = dedupeTextList([
         ...content.missing,
-        `有 ${evidenceScreening.rejected.length} 个知识片段存在编码异常，已自动排除损坏内容；请重新上传原文件：${affectedFiles.slice(0, 5).join('、')}`,
-      ]
+        `有 ${evidenceScreening.rejected.length} 个重复、测试、占位或损坏的知识片段未用于正文；如其中包含有效资料，请重新上传原文件：${affectedFiles.slice(0, 5).join('、')}`,
+      ], { limit: 8 })
     }
     if (await cancelIfRequested(taskId)) return
 
@@ -402,8 +402,11 @@ async function executeTask(taskId: string) {
         },
       })
     }
-    if (sources.length) {
-      await db.insert(aiTaskSources).values(sources.map((source, index) => ({
+    const usedSourceIndexes = usedBusinessSourceIndexes(content, sources.length)
+    if (usedSourceIndexes.length) {
+      await db.insert(aiTaskSources).values(usedSourceIndexes.map((index) => {
+        const source = sources[index]
+        return {
         taskId: task.id,
         artifactId: artifact.id,
         sourceType: source.sourceType,
@@ -411,7 +414,8 @@ async function executeTask(taskId: string) {
         sourceName: source.sourceName,
         locator: `知识片段 ${source.chunkIndex ?? index}`,
         verificationStatus: '资料记载',
-      })))
+        }
+      }))
     }
     await db.update(aiTasks).set({
       status: 'succeeded',

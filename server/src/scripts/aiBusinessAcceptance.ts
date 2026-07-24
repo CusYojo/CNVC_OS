@@ -3,7 +3,12 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import JSZip from 'jszip'
-import type { BusinessContent, BusinessFinding, EvidenceSource } from '../services/aiBusinessContentService.js'
+import {
+  normalizeBusinessContent,
+  type BusinessContent,
+  type BusinessFinding,
+  type EvidenceSource,
+} from '../services/aiBusinessContentService.js'
 import {
   generateBusinessDocx,
   generateBusinessPptx,
@@ -16,6 +21,7 @@ import {
   type AiBusinessTaskType,
 } from '../services/aiTemplateCatalog.js'
 import { cleanCorruptedText, decodeTextBuffer } from '../services/textQualityService.js'
+import { curateEvidenceSources } from '../services/aiEvidenceQualityService.js'
 
 type Check = { name: string; passed: boolean; detail: string }
 
@@ -53,11 +59,25 @@ const sources: EvidenceSource[] = [
     content: '企业自述产品已形成标准化模块，客户、收入和续费数据仍需底稿核验。',
   },
   {
+    sourceType: 'file',
+    sourceId: 'acceptance-bp',
+    sourceName: '示例项目商业计划书（脱敏）',
+    chunkIndex: 4,
+    content: '商业计划书另行说明产品采用订阅和实施服务模式，合同与收入确认口径仍需底稿核验。',
+  },
+  {
     sourceType: 'meeting',
     sourceId: 'acceptance-interview',
     sourceName: '管理层访谈纪要（脱敏）',
     chunkIndex: 1,
     content: '管理层说明本轮资金主要用于产品研发和市场拓展；实际用途以交易文件为准。',
+  },
+  {
+    sourceType: 'file',
+    sourceId: 'acceptance-unused',
+    sourceName: '未使用来源（不得进入文尾）',
+    chunkIndex: 9,
+    content: '这是一条格式完整但未被任何正文发现引用的验收资料。',
   },
 ]
 
@@ -66,7 +86,7 @@ function findings(sectionIndex: number): BusinessFinding[] {
     {
       text: `本节已根据脱敏项目档案与样本证据整理；第 ${sectionIndex + 1} 项事实须回到原始资料复核。`,
       status: '资料记载',
-      sourceIndexes: [sectionIndex % sources.length],
+      sourceIndexes: [sectionIndex % 4],
     },
     {
       text: '基于现有证据形成的分析判断不等同于经审计事实，投资团队应完成交叉验证。',
@@ -83,7 +103,7 @@ function findings(sectionIndex: number): BusinessFinding[] {
 
 function contentFor(type: AiBusinessTaskType): BusinessContent {
   const template = AI_TEMPLATE_CATALOG[type]
-  return {
+  const raw: BusinessContent = {
     title: `${project.name}${template.label}`,
     executiveSummary: `本初稿采用公司标准模板，依据截至 ${sourceCutoffDate} 的脱敏证据形成。资料记载、AI 推断、待核验事项及资料缺口已分开标识，所有结论仍须业务审核。`,
     sections: template.sections.map((title, index) => ({
@@ -95,6 +115,7 @@ function contentFor(type: AiBusinessTaskType): BusinessContent {
     risks: ['关键财务及客户数据尚未经独立核验', '法律合规结论必须由法务审核', '模型生成内容不得替代最终投资决策'],
     missing: ['审计口径财务底稿', '核心客户合同及访谈记录', '工商、知识产权及合规原件'],
   }
+  return normalizeBusinessContent(raw, template, raw, sources.length)
 }
 
 async function openXmlText(filePath: string, prefix: RegExp) {
@@ -148,6 +169,37 @@ async function main() {
       && !/[äåæçèé][\u0080-\u00FF\u2010-\u2030]{1,2}/.test(mojibakeProbe.cleaned),
     mojibakeProbe.cleaned,
   )
+  const curatedProbe = curateEvidenceSources([
+    {
+      sourceType: 'file',
+      sourceId: 'quality-a',
+      sourceName: '有效经营资料.docx',
+      chunkIndex: 1,
+      content: '公司已签署两份客户合同，合同金额、交付进度和回款情况仍需以合同原件及银行流水核验。',
+    },
+    {
+      sourceType: 'file',
+      sourceId: 'quality-a',
+      sourceName: '有效经营资料.docx',
+      chunkIndex: 2,
+      content: '公司已签署两份客户合同，合同金额、交付进度和回款情况仍需以合同原件及银行流水核验。',
+    },
+    {
+      sourceType: 'file',
+      sourceId: 'quality-test',
+      sourceName: '大文件测试.txt',
+      chunkIndex: 0,
+      content: '赛智伯乐投资中台大文件上传测试。'.repeat(60),
+    },
+  ])
+  assert(
+    checks,
+    '证据预处理排除测试与重复片段',
+    curatedProbe.usable.length === 1
+      && curatedProbe.usable[0].sourceName === '有效经营资料.docx'
+      && curatedProbe.rejected.length >= 2,
+    `采用 ${curatedProbe.usable.length} 条，排除 ${curatedProbe.rejected.length} 条`,
+  )
 
   for (const type of AI_TASK_TYPES) {
     const template = AI_TEMPLATE_CATALOG[type]
@@ -196,6 +248,16 @@ async function main() {
       )
       assert(checks, 'AI-009 含免责声明', xml.includes(template.disclaimer), template.disclaimer)
       assert(checks, 'AI-009 含来源与截止日', xml.includes('来源：') && xml.includes(sourceCutoffDate), sourceCutoffDate)
+      const finalSlideXml = await zip.file(`ppt/slides/slide${names.length}.xml`)?.async('string') || ''
+      assert(
+        checks,
+        'AI-009 文尾包含去重后的引用资料',
+        finalSlideXml.includes('引用资料与责任声明')
+          && finalSlideXml.includes('示例项目商业计划书（脱敏）')
+          && !finalSlideXml.includes('未使用来源（不得进入文尾）')
+          && (finalSlideXml.match(/示例项目商业计划书（脱敏）/g) || []).length === 1,
+        '最后一页只列正文实际使用来源，同一文件合并片段',
+      )
       assert(checks, 'AI-009 生成元数据页数一致', result.slideCount === names.length, `${result.slideCount}/${names.length}`)
       const themeXml = await zip.file('ppt/theme/theme1.xml')?.async('string') || ''
       const forbiddenSampleTerms = ['佳量', '德塔', 'Epilcure', '曹鹏', 'recommendation-jialiang']
@@ -226,6 +288,29 @@ async function main() {
     assert(checks, `${type} 章节完整`, template.sections.every((section) => xml.includes(section)), template.sections.join('、'))
     assert(checks, `${type} 含免责声明`, xml.includes(template.disclaimer), template.disclaimer)
     assert(checks, `${type} 含来源和核验状态`, xml.includes('引用资料') && xml.includes('资料记载') && xml.includes('待核验'), '来源/状态')
+    const documentXml = await zip.file('word/document.xml')?.async('string') || ''
+    const lastSectionTitle = template.sections[template.sections.length - 1]
+    assert(
+      checks,
+      `${type} 引用资料位于文尾且只列已用来源`,
+      documentXml.lastIndexOf('引用资料') > documentXml.lastIndexOf(lastSectionTitle)
+        && documentXml.includes('示例项目商业计划书（脱敏）')
+        && !documentXml.includes('未使用来源（不得进入文尾）')
+        && (documentXml.match(/示例项目商业计划书（脱敏）/g) || []).length === 1,
+      '引用在最后章节；同一文件合并片段；未使用来源不列示',
+    )
+    assert(
+      checks,
+      `${type} 全篇不重复同一分析段落`,
+      (documentXml.match(/基于现有证据形成的分析判断不等同于经审计事实/g) || []).length <= 1,
+      '重复分析段落最多出现一次',
+    )
+    assert(
+      checks,
+      `${type} 不使用通用元数据封面`,
+      !documentXml.includes('文件性质') && !documentXml.includes('生成时间'),
+      '遵循对应 docs 模板的正文结构',
+    )
     const expectedBodyFont = type === 'compliance_statement' ? '宋体' : '仿宋'
     const forbiddenSampleTerms = ['佳量', '德塔', 'Epilcure', '曹鹏', template.templateVersion]
     assert(checks, `${type} 不含损坏字符`, !xml.includes('\uFFFD'), '未发现 U+FFFD')
@@ -240,6 +325,9 @@ async function main() {
     )
     if (type !== 'compliance_statement') {
       assert(checks, `${type} 包含模板式页眉页码`, Boolean(zip.file('word/header1.xml')) && Boolean(zip.file('word/footer1.xml')), '页眉与页码')
+    }
+    if (type === 'investment_proposal') {
+      assert(checks, 'AI-008 使用模板式投委会称谓', documentXml.includes('各位投资决策委员会成员：'), '提案正式开篇')
     }
 
     if (type === 'compliance_statement') {
