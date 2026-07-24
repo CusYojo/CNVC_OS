@@ -1,0 +1,145 @@
+import { CalendarDays, CheckCircle2, ChevronRight, Clock3, Download, FileAudio, FileText, ListTodo, Plus, Search, Sparkles, UsersRound } from 'lucide-react'
+import { useAppStore } from '../store/useAppStore'
+import { useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
+import { useToast } from '../components/Toast'
+import { Badge, Button, Card, FileUpload, Modal, PageHeader, SearchInput, StatusBadge, Tabs } from '../components/ui'
+import { apiPost } from '../lib/api'
+import { useAuthStore } from '../store/useAuthStore'
+import type { Meeting } from '../types'
+
+export function MeetingsPage() {
+  const [searchParams] = useSearchParams()
+  const projects = useAppStore((state) => state.projects)
+  const meetings = useAppStore((state) => state.meetings)
+  const addMeeting = useAppStore((state) => state.addMeeting)
+  const currentUser = useAuthStore((state) => state.user ?? { id: '', email: '', name: '', role: '', department: '', status: '启用' })
+  const { showToast } = useToast()
+  const [query, setQuery] = useState('')
+  const [status, setStatus] = useState('')
+  const [selectedId, setSelectedId] = useState(searchParams.get('meeting') ?? meetings[0]?.id)
+  const [showNew, setShowNew] = useState(!!searchParams.get('project'))
+  const [sourceType, setSourceType] = useState<'text' | 'file'>('text')
+  const [fileName, setFileName] = useState('')
+  const [generating, setGenerating] = useState(false)
+  const [form, setForm] = useState({
+    title: '',
+    projectId: searchParams.get('project') ?? projects[0]?.id ?? '',
+    meetingTime: '2026-07-02 15:00',
+    participants: `${currentUser.name}、项目创始人`,
+    type: '项目沟通会',
+    rawText: '会议围绕项目近期进展、客户验证、融资计划和下一步尽调安排展开。创始人介绍了最新客户签约情况，投资团队提出需要补充收入回款明细、核心客户访谈和合规材料。双方确认本周完成资料补充，下周安排专题尽调会。',
+  })
+  const filtered = useMemo(() => meetings.filter((meeting) => (!query || `${meeting.title}${meeting.projectName}`.includes(query)) && (!status || meeting.status === status)), [meetings, query, status])
+  const selected = meetings.find((meeting) => meeting.id === selectedId) ?? filtered[0]
+
+  const generate = async () => {
+    if (!form.title.trim()) return showToast('请填写会议主题', 'error')
+    if (!form.rawText.trim() && !fileName) return showToast('请上传录音或填写会议文本', 'error')
+    const project = projects.find((item) => item.id === form.projectId) ?? projects[0]
+    setGenerating(true)
+
+    // 调后端 AI 网关生成结构化纪要（Express :3100 → flue → LLM）
+    let summaryText = ''
+    let conclusions: string[] = []
+    let todoTitles: string[] = []
+    try {
+      const resp = await apiPost<{ summary: string; conclusions?: string[]; todos?: string[]; confidence?: number }>(
+        '/ai/meeting-summary',
+        { transcript: form.rawText },
+      )
+      summaryText = resp.summary || ''
+      conclusions = Array.isArray(resp.conclusions) ? resp.conclusions : []
+      todoTitles = Array.isArray(resp.todos) ? resp.todos : []
+    } catch (err) {
+      showToast(`AI 服务暂不可用（${(err as Error).message}），已生成占位纪要`, 'error')
+      summaryText = `会议确认 ${project.name} 继续推进，需优先完成客户、财务与合规三条证据链核验。`
+      conclusions = ['项目继续推进，当前不形成最终投资结论', '本周补充收入回款、客户合同与合规材料', '下周安排业务和财务专题尽调']
+      todoTitles = [`补充${project.name}收入与回款明细`, '安排两家核心客户访谈', '整理合规资质与知识产权清单']
+    }
+
+    const dueDates = ['2026-07-05', '2026-07-07', '2026-07-09']
+    const todoObjs = todoTitles.map((title, i) => ({
+      title,
+      projectId: project.id,
+      projectName: project.name,
+      owner: currentUser.name,
+      dueDate: dueDates[i] ?? '2026-07-10',
+      priority: (i === 0 ? '高' : '中') as '高' | '中',
+      status: '未开始' as const,
+      type: '会议' as const,
+    }))
+
+    try {
+      const meeting = await addMeeting({
+        projectId: project.id,
+        projectName: project.name,
+        title: form.title,
+        meetingTime: form.meetingTime,
+        participants: form.participants.split(/[、,，]/).filter(Boolean),
+        type: form.type,
+        status: '成功',
+        rawText: form.rawText,
+        summary: summaryText,
+        conclusions,
+        todoCount: todoObjs.length,
+      }, todoObjs)
+      setSelectedId(meeting.id)
+      setShowNew(false)
+      setForm((value) => ({ ...value, title: '', rawText: '' }))
+      setFileName('')
+      showToast(`会议纪要与 ${todoObjs.length} 项待办已生成，并同步到项目和工作台`)
+    } finally {
+      setGenerating(false)
+    }
+  }
+
+  return (
+    <div>
+      <PageHeader title="会议纪要" description="上传录音或会议文本，AI 自动提取摘要、结论、风险与责任到人的待办。" actions={<Button onClick={() => setShowNew(true)}><Plus className="h-4 w-4" />新建会议</Button>} />
+      <div className="grid h-[calc(100vh-170px)] min-h-[650px] grid-cols-[390px_1fr] gap-5">
+        <Card className="flex min-h-0 flex-col overflow-hidden">
+          <div className="border-b border-slate-100 p-4"><div className="flex gap-2"><SearchInput className="flex-1" placeholder="搜索会议…" value={query} onChange={(event) => setQuery(event.target.value)} /><select className="input w-28" value={status} onChange={(event) => setStatus(event.target.value)}><option value="">全部状态</option><option>成功</option><option>生成中</option><option>失败</option></select></div></div>
+          <div className="flex-1 overflow-y-auto p-2 scrollbar-thin">
+            {filtered.map((meeting) => <button key={meeting.id} onClick={() => setSelectedId(meeting.id)} className={`mb-1 w-full rounded-xl p-3.5 text-left transition ${selected?.id === meeting.id ? 'bg-brand-50 ring-1 ring-brand-100' : 'hover:bg-slate-50'}`}><div className="flex items-start justify-between gap-2"><span className="min-w-0"><span className="block truncate text-sm font-semibold text-slate-700">{meeting.title}</span><span className="mt-1 block text-xs text-slate-400">{meeting.projectName}</span></span><StatusBadge status={meeting.status} /></div><div className="mt-3 flex items-center gap-3 text-[11px] text-slate-400"><span className="flex items-center gap-1"><CalendarDays className="h-3 w-3" />{meeting.meetingTime.slice(5, 16)}</span><span className="flex items-center gap-1"><ListTodo className="h-3 w-3" />{meeting.todoCount} 项待办</span></div></button>)}
+          </div>
+          <div className="border-t border-slate-100 px-4 py-3 text-xs text-slate-400">共 {filtered.length} 场会议</div>
+        </Card>
+
+        {selected ? (
+          <div className="min-h-0 overflow-y-auto pr-1 scrollbar-thin">
+            <Card className="mb-4 p-5">
+              <div className="flex items-start justify-between">
+                <div><div className="flex items-center gap-2"><h2 className="text-lg font-semibold text-slate-800">{selected.title}</h2><Badge tone="blue">{selected.type}</Badge></div><p className="mt-2 text-sm text-slate-500">{selected.projectName}</p></div>
+                <div className="flex gap-2"><Button size="sm" variant="secondary" onClick={() => showToast('纪要已导出为 Word 文档')}><Download className="h-3.5 w-3.5" />导出纪要</Button><Button size="sm" variant="secondary">编辑</Button></div>
+              </div>
+              <div className="mt-5 flex gap-6 border-t border-slate-100 pt-4 text-xs text-slate-500"><span className="flex items-center gap-1.5"><Clock3 className="h-3.5 w-3.5" />{selected.meetingTime}</span><span className="flex items-center gap-1.5"><UsersRound className="h-3.5 w-3.5" />{selected.participants.join('、')}</span></div>
+            </Card>
+            <Card className="mb-4 p-5">
+              <div className="flex items-center gap-2"><Sparkles className="h-4 w-4 text-brand-600" /><h3 className="font-semibold text-slate-800">一句话摘要</h3></div>
+              <p className="mt-3 rounded-xl bg-brand-50 p-4 text-sm font-medium leading-7 text-brand-900">{selected.summary}</p>
+            </Card>
+            <div className="mb-4 grid grid-cols-2 gap-4">
+              <Card className="p-5"><h3 className="font-semibold text-slate-800">关键结论</h3><div className="mt-4 space-y-3">{selected.conclusions.map((item, index) => <div key={item} className="flex gap-3 text-sm leading-6 text-slate-600"><span className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-emerald-50 text-[10px] font-semibold text-emerald-600">{index + 1}</span>{item}</div>)}</div></Card>
+              <Card className="p-5"><div className="flex items-center justify-between"><h3 className="font-semibold text-slate-800">会议待办</h3><Badge tone="amber">{selected.todoCount} 项</Badge></div><div className="mt-4 space-y-3">{useAppStore.getState().todos.filter((todo) => todo.projectId === selected.projectId && todo.type === '会议').slice(0, selected.todoCount).map((todo) => <div key={todo.id} className="rounded-lg border border-slate-200 p-3"><p className="text-sm font-medium text-slate-700">{todo.title}</p><div className="mt-2 flex items-center justify-between text-[11px] text-slate-400"><span>{todo.owner} · {todo.dueDate}</span><Badge tone={todo.priority === '高' ? 'red' : 'amber'}>{todo.priority}</Badge></div></div>)}</div></Card>
+            </div>
+            <Card className="p-5"><h3 className="font-semibold text-slate-800">详细纪要</h3><div className="mt-4 space-y-5 text-sm leading-7 text-slate-600"><div><p className="font-medium text-slate-700">一、项目进展</p><p className="mt-1">团队汇报了近期产品、客户和融资进展。核心场景验证符合预期，但关键收入质量指标仍需原始合同和回款记录支持。</p></div><div><p className="font-medium text-slate-700">二、讨论重点</p><p className="mt-1">投资团队重点讨论客户集中度、商业化复制效率、合规进度和估值合理性，并要求对重要结论进行客户侧交叉验证。</p></div><div><p className="font-medium text-slate-700">三、下一步安排</p><p className="mt-1">按业务、财务、合规三条线补充资料；完成核心客户访谈后更新项目 AI 摘要和上会材料。</p></div></div></Card>
+          </div>
+        ) : <Card className="grid place-items-center text-sm text-slate-400">请选择一场会议</Card>}
+      </div>
+
+      <Modal open={showNew} onClose={() => !generating && setShowNew(false)} title="新建会议并生成纪要" width="max-w-3xl" footer={<><Button variant="secondary" onClick={() => setShowNew(false)}>取消</Button><Button loading={generating} onClick={generate}><Sparkles className="h-4 w-4" />生成纪要与待办</Button></>}>
+        <div className="grid grid-cols-2 gap-4">
+          <label className="col-span-2"><span className="label">会议主题 <b className="text-rose-500">*</b></span><input className="input" placeholder="例如：睿影医疗投决沟通会" value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} /></label>
+          <label><span className="label">关联项目</span><select className="input" value={form.projectId} onChange={(event) => setForm({ ...form, projectId: event.target.value })}>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label>
+          <label><span className="label">会议类型</span><select className="input" value={form.type} onChange={(event) => setForm({ ...form, type: event.target.value })}><option>项目沟通会</option><option>立项会</option><option>尽调会</option><option>投委会</option><option>董事会</option><option>专家访谈</option></select></label>
+          <label><span className="label">会议时间</span><input className="input" value={form.meetingTime} onChange={(event) => setForm({ ...form, meetingTime: event.target.value })} /></label>
+          <label><span className="label">参与人</span><input className="input" value={form.participants} onChange={(event) => setForm({ ...form, participants: event.target.value })} /></label>
+        </div>
+        <div className="mt-5"><Tabs tabs={[{ id: 'text', label: '粘贴会议文本' }, { id: 'file', label: '上传录音 / 文档' }]} value={sourceType} onChange={(value) => setSourceType(value as 'text' | 'file')} /></div>
+        <div className="pt-4">{sourceType === 'text' ? <label><span className="label">会议原文</span><textarea className="textarea min-h-40" value={form.rawText} onChange={(event) => setForm({ ...form, rawText: event.target.value })} placeholder="粘贴速记、转写原文或会议记录…" /></label> : <><FileUpload accept=".mp3,.wav,.m4a,.txt,.doc,.docx" onFile={(file) => { setFileName(file.name); setForm({ ...form, rawText: '音频模拟转写：会议围绕项目进展、风险与下一步安排展开。' }); showToast('文件上传完成，转写将在生成时自动执行') }} />{fileName && <div className="mt-3 flex items-center gap-3 rounded-lg border border-slate-200 p-3"><FileAudio className="h-4 w-4 text-brand-600" /><span className="flex-1 text-sm text-slate-600">{fileName}</span><StatusBadge status="成功" /></div>}</>}</div>
+        <p className="mt-4 rounded-lg bg-slate-50 p-3 text-xs leading-5 text-slate-500">AI 会生成一句话摘要、详细纪要、关键结论、分歧、风险点及待办。待办将自动同步到首页工作台。</p>
+      </Modal>
+    </div>
+  )
+}

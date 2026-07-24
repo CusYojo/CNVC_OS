@@ -1,0 +1,4 @@
+interface:
+  display_name: "生成投资提案"
+  short_description: "根据项目证据生成面向立项、基金汇报或合作沟通的投资提案初稿"
+  default_prompt: "使用 $draft-investment-proposal，根据所选项目证据起草供内部使用的中文投资提案。"
