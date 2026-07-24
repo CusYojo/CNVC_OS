@@ -1,0 +1,4 @@
+interface:
+  display_name: "生成投资建议书 PPT"
+  short_description: "根据项目证据生成核心文字、表格、图表和形状可编辑的投资建议书 PPTX"
+  default_prompt: "使用 $build-investment-recommendation-ppt 根据授权项目证据生成一份核心内容可编辑、来源可追溯的中文投资建议书 PPTX。"

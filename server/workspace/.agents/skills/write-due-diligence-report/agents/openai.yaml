@@ -1,0 +1,4 @@
+interface:
+  display_name: "生成尽调报告"
+  short_description: "根据授权证据生成带来源、核验状态、风险和资料缺口的商业尽调报告"
+  default_prompt: "使用 $write-due-diligence-report 根据授权项目证据起草一份来源可追溯、区分证据状态的中文商业尽调报告。"

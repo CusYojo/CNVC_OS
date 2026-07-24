@@ -1,0 +1,4 @@
+interface:
+  display_name: "生成合规性说明"
+  short_description: "依据授权项目证据生成可追溯、待法务审核的合规性说明初稿"
+  default_prompt: "使用 $generate-compliance-statement，根据所选项目的授权证据生成可追溯的中文合规性说明初稿。"

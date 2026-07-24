@@ -1,0 +1,4 @@
+interface:
+  display_name: "项目 Q&A"
+  short_description: "基于当前项目资料回答投资问题，并展示来源、证据数量、置信状态和责任声明"
+  default_prompt: "使用 $answer-project-qa 基于当前项目资料回答投资问题，并提供来源引用、证据数量、置信状态和责任声明。"
