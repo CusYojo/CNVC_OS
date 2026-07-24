@@ -22,8 +22,7 @@ server-dist/
 *.tmp
 *.swp
 
-# Local databases, dumps, and runtime data
-cybernaut_mvp_dump.sql
+# Local databases and runtime data
 project-discovery/data/
 project-discovery/公众号来源.xlsx
 server/ai-artifacts/
