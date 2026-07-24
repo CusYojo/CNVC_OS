@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import {
   BriefcaseBusiness,
   ClipboardCheck,
@@ -125,7 +125,6 @@ export function AiQuickActions({
 }) {
   const [activeAction, setActiveAction] = useState<ActionConfig | null>(null)
   const [qaOpen, setQaOpen] = useState(false)
-  const [projectId, setProjectId] = useState(currentProjectId)
   const [sourceCutoffDate, setSourceCutoffDate] = useState(today)
   const [audience, setAudience] = useState('内部立项')
   const [length, setLength] = useState('标准版')
@@ -135,22 +134,17 @@ export function AiQuickActions({
   const [diligenceScope, setDiligenceScope] = useState('商业尽调')
   const [submitting, setSubmitting] = useState(false)
 
-  useEffect(() => {
-    if (currentProjectId) setProjectId(currentProjectId)
-  }, [currentProjectId])
-
   const selectedProject = useMemo(
-    () => projects.find((project) => project.id === projectId) ?? projects[0],
-    [projectId, projects],
+    () => projects.find((project) => project.id === currentProjectId),
+    [currentProjectId, projects],
   )
 
   const openAction = (action: ActionConfig) => {
-    if (disabled || projects.length === 0) return
+    if (disabled || !selectedProject) return
     if (action.mode === 'question-library') {
       setQaOpen(true)
       return
     }
-    setProjectId(currentProjectId || projects[0].id)
     setActiveAction(action)
   }
 
@@ -192,8 +186,8 @@ export function AiQuickActions({
               <button
                 key={action.id}
                 type="button"
-                disabled={disabled || projects.length === 0}
-                title={projects.length === 0 ? '暂无可用项目' : action.description}
+                disabled={disabled || !selectedProject}
+                title={!selectedProject ? '当前会话未绑定可用项目' : action.description}
                 onClick={() => openAction(action)}
                 className="group flex min-w-[142px] items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-left transition hover:border-brand-200 hover:bg-brand-50/50 disabled:cursor-not-allowed disabled:opacity-45"
               >
@@ -227,10 +221,10 @@ export function AiQuickActions({
             任务进度、来源引用、版本和文件质量检查会随任务保存；样本版本及生成结果仍须由业务负责人审核批准。
           </p>
           <label className="block">
-            <span className="label">项目</span>
-            <select className="input" value={selectedProject?.id ?? ''} onChange={(event) => setProjectId(event.target.value)}>
-              {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
-            </select>
+            <span className="label">项目（随当前会话固定）</span>
+            <div className="input flex items-center bg-slate-50 text-slate-600" aria-label="当前会话项目">
+              {selectedProject?.name ?? '未绑定项目'}
+            </div>
           </label>
           <label className="block">
             <span className="label">资料截止日</span>
@@ -261,10 +255,10 @@ export function AiQuickActions({
       <Modal open={qaOpen} title="项目 Q&A 问题库" onClose={() => setQaOpen(false)} width="max-w-2xl">
         <div className="space-y-4">
           <label className="block">
-            <span className="label">项目</span>
-            <select className="input" value={selectedProject?.id ?? ''} onChange={(event) => setProjectId(event.target.value)}>
-              {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
-            </select>
+            <span className="label">项目（随当前会话固定）</span>
+            <div className="input flex items-center bg-slate-50 text-slate-600" aria-label="当前会话项目">
+              {selectedProject?.name ?? '未绑定项目'}
+            </div>
           </label>
           <p className="text-xs text-slate-500">选择问题后只会填入输入框，不会立即发送。</p>
           {QA_GROUPS.map((group) => (

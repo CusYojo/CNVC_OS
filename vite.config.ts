@@ -13,8 +13,9 @@ export default defineConfig(({ mode }) => {
       proxy: {
         '/api': 'http://127.0.0.1:3100',
         '/generated': 'http://127.0.0.1:3100',
-        // Flue SDK 使用同源 /ai/api；本地开发时转发到 .env 的 Agent 服务。
-        '/ai': {
+        // 只代理 Flue SDK 的接口前缀。不能代理整个 /ai，否则刷新 AI 助手
+        // 页面时会把前端路由也转发到 Flue，加载远端旧页面并导致本地 API 失联。
+        '/ai/api': {
           target: flueTarget,
           changeOrigin: true,
         },

@@ -7,7 +7,7 @@ import { FlueProvider, useFlueAgent } from '@flue/react'
 import { createFlueClient } from '@flue/sdk'
 import { useAppStore } from '../store/useAppStore'
 import { useAuthStore, authedFetch } from '../store/useAuthStore'
-import { Button } from '../components/ui'
+import { Button, Modal } from '../components/ui'
 import {
   AiQuickActions,
   type AiQuickTaskRequest,
@@ -554,7 +554,9 @@ function Chat() {
     rowId: string
     agentId: string
     title: string
+    scope: 'project' | 'global'
     projectId?: string | null
+    projectName?: string | null
   }
   const LS_KEY = 'cybernaut-ai-sessions' // 仅用于一次性迁移旧的浏览器本地会话
   const [sessions, setSessions] = useState<ChatSession[]>([])
@@ -567,8 +569,12 @@ function Chat() {
   const [qaAnswersLoading, setQaAnswersLoading] = useState(false)
   const [taskMutationId, setTaskMutationId] = useState<string | null>(null)
   const quickTaskLockRef = useRef(false)
+  const [newSessionOpen, setNewSessionOpen] = useState(false)
+  const [newSessionProjectId, setNewSessionProjectId] = useState(initialProject)
+  const [creatingSession, setCreatingSession] = useState(false)
 
   const currentProject = projects.find((project) => project.id === projectId) ?? projects[0]
+  const newSessionProject = projects.find((project) => project.id === newSessionProjectId)
   const projectFiles = files.filter((file) => file.projectId === currentProject?.id)
   const currentSession = sessions.find((session) => session.agentId === convId)
   const currentConversationRowId = currentSession?.rowId ?? ''
@@ -583,6 +589,15 @@ function Chat() {
   useEffect(() => { if (projectId) localStorage.setItem(LS_LAST_PROJECT, projectId) }, [projectId])
   // 记住当前会话(下次进来恢复)
   useEffect(() => { if (convId) localStorage.setItem(LS_LAST_CONV, convId) }, [convId])
+  useEffect(() => {
+    if (
+      newSessionOpen
+      && projects.length > 0
+      && !projects.some((project) => project.id === newSessionProjectId)
+    ) {
+      setNewSessionProjectId(projects[0].id)
+    }
+  }, [newSessionOpen, newSessionProjectId, projects])
   useEffect(() => {
     if (qaSkillMode && (scope !== 'project' || qaSkillMode.projectId !== projectId)) {
       setQaSkillMode(null)
@@ -809,9 +824,25 @@ function Chat() {
         + uploads.map((u) => `- ${u.path}${u.rag ? '（已入项目知识库，也可用 search_docs 检索）' : ''}`).join('\n')
       : ''
     // 把项目上下文随消息带给 agent（agent 的 search_project_docs 工具会用到）
-    const effectiveScope = contextOverride ? 'project' : scope
+    const sessionProject = currentSession?.projectId
+      ? projects.find((project) => project.id === currentSession.projectId)
+      : undefined
+    // 普通问答始终使用会话创建时保存的项目，避免项目选择框与会话状态
+    // 短暂不同步时把其他项目资料混进当前上下文。
+    const effectiveScope = contextOverride
+      ? 'project'
+      : currentSession
+        ? (currentSession.projectId ? 'project' : 'global')
+        : scope
     const effectiveProject = contextOverride ?? (
-      currentProject ? { projectId: currentProject.id, projectName: currentProject.name } : undefined
+      currentSession?.projectId
+        ? {
+            projectId: currentSession.projectId,
+            projectName: currentSession.projectName ?? sessionProject?.name ?? '',
+          }
+        : currentProject
+          ? { projectId: currentProject.id, projectName: currentProject.name }
+          : undefined
     )
     const activeQaMode = qaSkillMode
       && effectiveScope === 'project'
@@ -857,18 +888,49 @@ function Chat() {
     }
   }
 
+  // 统一切换会话及其固定上下文。项目会话恢复所属项目；无项目的历史/全局
+  // 会话按全局知识库打开，绝不沿用上一个会话的项目选择。
+  const activateSession = (session: ChatSession) => {
+    setConvId(session.agentId)
+    if (session.projectId) {
+      setScope('project')
+      setProjectId(session.projectId)
+    } else {
+      setScope('global')
+    }
+    setInput('')
+    setQaSkillMode(null)
+    setAiTasks([])
+    setQaAnswers([])
+  }
+
   // 新建一个服务端会话并选中
   const createSession = async (
     title = '新会话',
     contextOverride?: { scope: 'project' | 'global'; projectId?: string | null; projectName?: string | null },
   ): Promise<ChatSession | null> => {
     try {
-      const context = contextOverride ?? {
-        scope,
-        projectId: currentProject?.id ?? null,
-        projectName: currentProject?.name ?? null,
-      }
-      const row = await apiPost<{ id: string; agentId?: string; title: string; projectId?: string | null }>('/conversations', {
+      const context = contextOverride ?? (
+        scope === 'project'
+          ? {
+              scope: 'project' as const,
+              projectId: currentProject?.id ?? null,
+              projectName: currentProject?.name ?? null,
+            }
+          : {
+              scope: 'global' as const,
+              projectId: null,
+              projectName: null,
+            }
+      )
+      const row = await apiPost<{
+        id: string
+        agentId?: string
+        title: string
+        scope?: string
+        projectId?: string | null
+        projectName?: string | null
+      }>('/conversations', {
         title,
         ...context,
       })
@@ -876,13 +938,12 @@ function Chat() {
         rowId: row.id,
         agentId: row.agentId || row.id,
         title: row.title,
+        scope: row.scope === 'global' ? 'global' : context.scope,
         projectId: row.projectId ?? context.projectId ?? null,
+        projectName: row.projectName ?? context.projectName ?? null,
       }
       setSessions((prev) => [s, ...prev])
-      setConvId(s.agentId)
-      setInput('')
-      setQaSkillMode(null)
-      setQaAnswers([])
+      activateSession(s)
       return s
     } catch (err) {
       showToast(`新建会话失败：${(err as Error).message}`, 'error')
@@ -897,13 +958,22 @@ function Chat() {
     void (async () => {
       try {
         const { list } = await apiGet<{
-          list: { id: string; agentId?: string; title: string; projectId?: string | null }[]
+          list: {
+            id: string
+            agentId?: string
+            title: string
+            scope?: string
+            projectId?: string | null
+            projectName?: string | null
+          }[]
         }>('/conversations')
         let mapped: ChatSession[] = (list ?? []).map((r) => ({
           rowId: r.id,
           agentId: r.agentId || r.id,
           title: r.title,
+          scope: r.scope === 'global' || !r.projectId ? 'global' : 'project',
           projectId: r.projectId ?? null,
+          projectName: r.projectName ?? null,
         }))
         try {
           const legacy: { id: string; title?: string }[] = JSON.parse(localStorage.getItem(LS_KEY) || '[]')
@@ -914,13 +984,17 @@ function Chat() {
               id: string
               agentId?: string
               title: string
+              scope?: string
               projectId?: string | null
+              projectName?: string | null
             }>('/conversations', { title: s.title || '新会话', agentId: s.id })
             mapped = [{
               rowId: row.id,
               agentId: row.agentId || s.id,
               title: row.title,
+              scope: row.scope === 'global' || !row.projectId ? 'global' : 'project',
               projectId: row.projectId ?? null,
+              projectName: row.projectName ?? null,
             }, ...mapped]
           }
           localStorage.removeItem(LS_KEY)
@@ -930,8 +1004,13 @@ function Chat() {
           // 恢复上次选中的会话(若仍存在),否则用最近的一条
           const lastConv = localStorage.getItem(LS_LAST_CONV)
           const restored = lastConv && mapped.some((m) => m.agentId === lastConv) ? lastConv : mapped[0].agentId
-          setConvId((prev) => prev || restored)
-        } else await createSession()
+          const restoredSession = mapped.find((session) => session.agentId === restored) ?? mapped[0]
+          activateSession(restoredSession)
+        } else {
+          const preferredProject = projects.find((project) => project.id === initialProject) ?? projects[0]
+          setNewSessionProjectId(preferredProject?.id ?? '')
+          setNewSessionOpen(true)
+        }
       } catch (err) {
         showToast(`会话列表加载失败：${(err as Error).message}`, 'error')
       }
@@ -974,7 +1053,30 @@ function Chat() {
       .catch(() => { /* 失败保留占位标题 */ })
   }, [busy, messages, convId, sessions])
 
-  const newSession = () => { void createSession() }
+  const openNewSessionDialog = () => {
+    const preferredProject = (
+      currentSession?.projectId
+        ? projects.find((project) => project.id === currentSession.projectId)
+        : currentProject
+    ) ?? projects[0]
+    setNewSessionProjectId(preferredProject?.id ?? '')
+    setNewSessionOpen(true)
+  }
+
+  const confirmNewSession = async () => {
+    if (!newSessionProject || creatingSession) return
+    setCreatingSession(true)
+    try {
+      const created = await createSession('新会话', {
+        scope: 'project',
+        projectId: newSessionProject.id,
+        projectName: newSessionProject.name,
+      })
+      if (created) setNewSessionOpen(false)
+    } finally {
+      setCreatingSession(false)
+    }
+  }
 
   const deleteSession = async (rowId: string, agentId: string, e: React.MouseEvent) => {
     e.stopPropagation()
@@ -982,8 +1084,8 @@ function Chat() {
     const next = sessions.filter((s) => s.rowId !== rowId)
     setSessions(next)
     if (agentId === convId) {
-      if (next.length) setConvId(next[0].agentId)
-      else await createSession()
+      if (next.length) activateSession(next[0])
+      else openNewSessionDialog()
     }
   }
 
@@ -1000,13 +1102,7 @@ function Chat() {
       showToast(`“${request.projectName}”是未入库的演示项目，不能提交正式 AI 任务。请先创建或选择已入库项目。`, 'error')
       return false
     }
-    if (!currentConversationRowId) {
-      showToast('当前会话尚未完成初始化，请稍后重试', 'error')
-      return false
-    }
     quickTaskLockRef.current = true
-    setScope('project')
-    setProjectId(request.projectId)
     const parameters: Record<string, unknown> = {
       sourceCutoffDate: request.sourceCutoffDate,
       outputFormat: request.outputFormat,
@@ -1022,11 +1118,15 @@ function Chat() {
       parameters.diligenceScope = request.diligenceScope || '商业尽调'
     }
     try {
+      if (!currentSession?.projectId || currentSession.projectId !== request.projectId) {
+        showToast('当前项目随会话固定，请重新打开快捷任务后再试', 'error')
+        return false
+      }
       const task = await apiPost<AiTask>('/ai/tasks', {
         type: AI_TASK_TYPE_BY_ACTION[request.actionId],
         projectId: request.projectId,
         // 任务关联 chat_conversations 的 UUID 主键，而不是 Flue agentId。
-        conversationId: currentConversationRowId,
+        conversationId: currentSession.rowId,
         parameters,
         idempotencyKey: `quick-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`,
       })
@@ -1077,18 +1177,11 @@ function Chat() {
       showToast('所选项目不存在或已不可访问', 'error')
       return
     }
-    setScope('project')
-    setProjectId(selection.projectId)
-    // 会话和正式 Q&A 都有明确项目归属。若用户从其他项目会话中选择问题，
-    // 自动建立该项目的新会话，避免混用项目证据或触发项目不一致。
-    if (!currentSession || currentSession.projectId !== selection.projectId) {
-      const created = await createSession('项目 Q&A', {
-        scope: 'project',
-        projectId: selection.projectId,
-        projectName: selectedProject.name,
-      })
-      if (!created) return
+    if (!currentSession?.projectId || currentSession.projectId !== selection.projectId) {
+      showToast('当前项目随会话固定，请重新打开 Q&A 后再试', 'error')
+      return
     }
+    activateSession(currentSession)
     setQaSkillMode(selection)
     setInput(selection.question)
   }
@@ -1096,14 +1189,18 @@ function Chat() {
   return (
     <div className="-m-6 flex h-[calc(100vh-64px)] min-h-[720px] overflow-hidden bg-white">
       <aside className="flex w-[250px] shrink-0 flex-col border-r border-slate-200 bg-slate-50/60">
-        <div className="p-4"><Button className="w-full" onClick={newSession}><MessageSquarePlus className="h-4 w-4" />新建会话</Button></div>
+        <div className="p-4">
+          <Button className="w-full" onClick={openNewSessionDialog} disabled={projects.length === 0}>
+            <MessageSquarePlus className="h-4 w-4" />新建会话
+          </Button>
+        </div>
         <div className="flex-1 overflow-y-auto px-3">
           <p className="px-2 py-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">会话历史</p>
           {sessions.length === 0 && <p className="px-2 py-2 text-[11px] text-slate-400">暂无会话</p>}
           {sessions.map((s) => (
             <div
               key={s.rowId}
-              onClick={() => { setConvId(s.agentId); setInput(''); setQaSkillMode(null) }}
+              onClick={() => activateSession(s)}
               className={`group mb-1 flex cursor-pointer items-center justify-between rounded-lg px-3 py-2.5 ${s.agentId === convId ? 'bg-white shadow-sm ring-1 ring-brand-200' : 'hover:bg-white/60'}`}
             >
               <span className="truncate text-xs font-medium text-slate-700">{s.title || '新会话'}</span>
@@ -1116,8 +1213,19 @@ function Chat() {
 
       <div className="flex min-w-0 flex-1 flex-col">
         <div className="flex items-center gap-3 border-b border-slate-200 px-6 py-3">
-          <select className="input h-9 w-36 text-xs" value={scope} onChange={(e) => setScope(e.target.value as 'project' | 'global')}><option value="project">当前项目</option><option value="global">全局知识库</option></select>
-          {scope === 'project' && <select className="input h-9 w-48 text-xs" value={projectId} onChange={(e) => setProjectId(e.target.value)}>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select>}
+          <div className="input flex h-9 w-36 items-center bg-slate-50 text-xs text-slate-600" aria-label="知识范围">
+            {scope === 'project' ? '当前项目' : '全局知识库'}
+          </div>
+          {scope === 'project' && (
+            <div
+              className="input flex h-auto min-h-9 min-w-0 flex-1 items-center bg-slate-50 py-2 text-xs text-slate-600"
+              aria-label="当前项目"
+            >
+              <span className="whitespace-normal break-words leading-5">
+                {currentProject?.name ?? currentSession?.projectName ?? '未绑定项目'}
+              </span>
+            </div>
+          )}
         </div>
 
         <AiErrorBoundary level="section" title="消息区域显示异常" resetKey={convId}>
@@ -1171,9 +1279,9 @@ function Chat() {
         <div className="border-t border-slate-200 px-6 py-4">
           <AiErrorBoundary level="section" title="快捷任务区域显示异常" resetKey={String(sending)}>
             <AiQuickActions
-              disabled={sending}
+              disabled={sending || scope !== 'project' || !currentSession?.projectId}
               projects={projects}
-              currentProjectId={currentProject?.id ?? ''}
+              currentProjectId={scope === 'project' ? currentSession?.projectId ?? '' : ''}
               onRunTask={runQuickTask}
               onSelectQuestion={selectQaQuestion}
             />
@@ -1276,6 +1384,46 @@ function Chat() {
           <FilePreview file={preview} onClose={() => setPreview(null)} />
         </AiErrorBoundary>
       )}
+      <Modal
+        open={newSessionOpen}
+        title="新建会话"
+        onClose={() => { if (!creatingSession && sessions.length > 0) setNewSessionOpen(false) }}
+        footer={(
+          <>
+            {sessions.length > 0 && (
+              <Button variant="secondary" onClick={() => setNewSessionOpen(false)} disabled={creatingSession}>
+                取消
+              </Button>
+            )}
+            <Button
+              onClick={() => { void confirmNewSession() }}
+              loading={creatingSession}
+              disabled={!newSessionProject}
+            >
+              创建会话
+            </Button>
+          </>
+        )}
+      >
+        <div className="space-y-4">
+          <p className="text-xs leading-5 text-slate-500">
+            请选择该会话所属项目。创建后项目不可更改，后续问答、快捷任务和交付物均使用该项目资料。
+          </p>
+          <label className="block">
+            <span className="label">项目</span>
+            <select
+              className="input"
+              value={newSessionProjectId}
+              onChange={(event) => setNewSessionProjectId(event.target.value)}
+              disabled={creatingSession}
+            >
+              {projects.map((project) => (
+                <option key={project.id} value={project.id}>{project.name}</option>
+              ))}
+            </select>
+          </label>
+        </div>
+      </Modal>
     </div>
   )
 }
