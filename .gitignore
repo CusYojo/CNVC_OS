@@ -27,6 +27,9 @@ project-discovery/data/
 project-discovery/公众号来源.xlsx
 server/ai-artifacts/
 
+# Docker images and runtime artifacts
+*.tar
+
 # Generated acceptance artifacts
 docs/ai-assistant/验收产物/
 

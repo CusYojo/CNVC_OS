@@ -14,7 +14,20 @@
 4. [PostgreSQL 配置](#4-postgresql-配置)
 5. [Nginx 反向代理（生产）](#5-nginx-反向代理生产)
 6. [systemd 进程守护（生产）](#6-systemd-进程守护生产)
+   - 6.1 [主 API 服务](#61-主-api-服务)
+   - 6.2 [Flue Agent 服务](#62-flue-agent-服务ai-功能必须)
+   - 6.3 [情报雷达服务（可选）](#63-情报雷达服务可选)
+   - 6.4 [启用](#64-启用)
 7. [Flue Agent 编排层](#7-flue-agent-编排层)
+   - 7.1 [架构](#71-架构)
+   - 7.2 [克隆 Flue 源码](#72-克隆-flue-源码)
+   - 7.3 [安装依赖并构建核心包](#73-安装依赖并构建核心包)
+   - 7.4 [创建 Cybernaut Flue 项目](#74-创建-cybernaut-flue-项目)
+   - 7.5 [安装并验证](#75-安装并验证)
+   - 7.6 [systemd 进程守护](#76-systemd-进程守护)
+   - 7.7 [端点验证](#77-端点验证)
+   - 7.8 [.env 配置](#78-env-配置)
+   - 7.9 [Skill 工作区](#79-skill-工作区)
 8. [情报雷达（project-discovery）](#8-情报雷达project-discovery)
 9. [工具脚本运行](#9-工具脚本运行)
 10. [故障排查](#10-故障排查)
@@ -35,6 +48,7 @@ python3 --version 2>/dev/null || echo "情报雷达需要 Python ≥ 3.10"
 | 软件 | 版本 | 用途 |
 |---|---|---|
 | Node.js | ≥ 20 | 前端 + 后端运行时 |
+| pnpm | ≥ 11 | Flue Agent 构建（`npm install -g pnpm@11`） |
 | PostgreSQL | ≥ 16 | 主数据库，端口 5432 |
 | Docker | ≥ 24 | 快速启动 PG（推荐） |
 | Python | ≥ 3.10 | 情报雷达（可选） |
@@ -67,7 +81,7 @@ curl http://localhost:3100/api/health
 # → {"ok":true,"service":"intelligent-investment-platform-api",...}
 ```
 
-浏览器打开 `http://localhost:5173`，用 `admin@cybernaut.com / admin123` 登录。
+浏览器打开 `http://localhost:5173`，用 `admin@cybernaut.com / 123456` 登录。
 
 ---
 
@@ -267,6 +281,16 @@ server {
         add_header Cache-Control "no-cache";
     }
 
+    # Flue Agent 编排层（长前缀优先于 /api/，必须放在 /api/ 前面）
+    location /ai/api/ {
+        proxy_pass http://127.0.0.1:3584/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_read_timeout 300s;        # Agent 推理耗时较长
+        proxy_connect_timeout 10s;
+    }
+
     # 后端 API 反代
     location /api/ {
         proxy_pass http://127.0.0.1:3100;
@@ -284,6 +308,8 @@ server {
     }
 }
 ```
+
+> **重要**：`/ai/api/` 必须放在 `/api/` **前面**，否则 nginx 会用 `/api/` 规则拦截 Flue 请求转发到 Express，导致前端 Flue SDK 解析 HTML 报错 `Cannot read properties of undefined (reading 'map')`。
 
 ### 5.2 生效
 
@@ -327,7 +353,31 @@ StandardError=append:/path/to/cybernaut-dist/logs/server.log
 WantedBy=multi-user.target
 ```
 
-### 6.2 情报雷达服务（可选）
+### 6.2 Flue Agent 服务（AI 功能必须）
+
+```ini
+# /etc/systemd/system/cybernaut-flue.service
+[Unit]
+Description=Cybernaut Flue Agent Server
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/www/flue-cybernaut
+Environment=ANTHROPIC_API_KEY=sk-xxxxxxxx
+ExecStart=/usr/bin/npx vite dev --port 3584 --host 127.0.0.1
+Restart=on-failure
+RestartSec=5
+
+StandardOutput=append:/path/to/cybernaut-dist/logs/flue.log
+StandardError=append:/path/to/cybernaut-dist/logs/flue.log
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### 6.3 情报雷达服务（可选）
 
 ```ini
 # /etc/systemd/system/cybernaut-radar.service
@@ -347,7 +397,7 @@ RestartSec=5
 WantedBy=multi-user.target
 ```
 
-### 6.3 启用
+### 6.4 启用
 
 ```bash
 # 先编译
@@ -360,6 +410,7 @@ mkdir -p logs server/generated
 # 注册并启动
 systemctl daemon-reload
 systemctl enable --now cybernaut-api
+systemctl enable --now cybernaut-flue     # AI 功能必须
 systemctl enable --now cybernaut-radar   # 可选
 ```
 
@@ -367,40 +418,251 @@ systemctl enable --now cybernaut-radar   # 可选
 
 ## 7. Flue Agent 编排层
 
-Flue 是独立的 Agent 编排服务，通过 HTTP 与主平台通信。AI 对话、RAG 检索、PPT 生成都依赖它。
+Flue 是独立的 Agent 编排框架，通过 HTTP 与主平台通信。AI 对话、RAG 检索、PPT 生成都依赖它。
 
 ### 7.1 架构
 
 ```
-浏览器 → :5173 前端
-           ↓ POST /api/conversations/:id/messages
-         :3100 后端 (aiService.ts)
-           ↓ HTTP POST
-         :3584 Flue Agent
-           ↓ tools 回调
-         :3100 /api/internal (RAG 检索等)
+浏览器 → :80 nginx
+           ├─ /          → dist/ (React SPA)
+           ├─ /api/*     → :3100 Express 后端
+           └─ /ai/api/*  → :3584 Flue Agent
+                              ↓ tools 回调
+                            :3100 /api/internal (RAG 检索等)
+                              ↓ LLM 调用
+                            Anthropic API (claude-sonnet-4-6)
 ```
 
-### 7.2 部署说明
+### 7.2 克隆 Flue 源码
 
-Flue Agent 项目独立部署（不在本包内）。后端通过 `.env` 中的 `FLUE_BASE_URL` 连接：
+```bash
+cd /www
+git clone https://github.com/withastro/flue.git
+cd flue
+```
+
+### 7.3 安装依赖并构建核心包
+
+```bash
+# 需要 pnpm ≥ 11
+npm install -g pnpm@11
+
+# 安装 Flue monorepo 依赖
+pnpm install
+
+# 构建核心包（runtime / vite / cli）
+pnpm build
+# 注：examples 下的 Cloudflare 等示例构建失败属正常，core 包构建成功即可
+# 验证：ls packages/runtime/dist/ packages/vite/dist/ packages/cli/dist/
+```
+
+### 7.4 创建 Cybernaut Flue 项目
+
+为 cybernaut 创建独立的 Flue assistant 项目：
+
+```bash
+mkdir -p /www/flue-cybernaut/src/agents
+cd /www/flue-cybernaut
+```
+
+`package.json`：
+
+```json
+{
+  "name": "cybernaut-assistant",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite dev --port 3584",
+    "build": "vite build",
+    "start": "node dist/server.mjs"
+  },
+  "dependencies": {
+    "@flue/runtime": "file:/www/flue/packages/runtime",
+    "hono": "^4.7.0",
+    "just-bash": "^3.0.1"
+  },
+  "devDependencies": {
+    "@flue/vite": "file:/www/flue/packages/vite",
+    "vite": "^8.0.14"
+  }
+}
+```
+
+`vite.config.ts`：
+
+```ts
+import { flue } from '@flue/vite';
+import { defineConfig } from 'vite';
+
+export default defineConfig({
+  plugins: [flue()],
+  server: {
+    allowedHosts: ['cybernaut.newmin.cn', 'localhost', '127.0.0.1'],
+  },
+});
+```
+
+`flue.config.ts`：
+
+```ts
+import { defineConfig } from '@flue/runtime/config';
+
+export default defineConfig({
+  target: 'node',
+});
+```
+
+`src/app.ts` — 路由注册，挂载 assistant agent + health 端点：
+
+```ts
+import { createAgentRouter } from '@flue/runtime/routing';
+import { Hono } from 'hono';
+import { Assistant } from './agents/assistant.ts';
+
+const app = new Hono();
+
+app.get('/health', (c) =>
+  c.json({ ok: true, service: 'cybernaut-flue', timestamp: new Date().toISOString() }),
+);
+
+app.route('/agents/assistant', createAgentRouter(Assistant));
+
+export default app;
+```
+
+`src/agents/assistant.ts` — AI 投研助手 agent，包含 `search_project_docs` 和 `collect_intel` 两个工具回调：
+
+```ts
+'use agent';
+import { bash, useModel, useSandbox, useTool } from '@flue/runtime';
+import { Bash, InMemoryFs } from 'just-bash';
+
+export function Assistant() {
+  useModel('anthropic/claude-sonnet-4-6');
+  useSandbox(bash(() =>
+    new Bash({ fs: new InMemoryFs(), network: { dangerouslyAllowFullInternetAccess: true } }),
+  ));
+
+  // 情报采集工具 → Express /api/internal/collect-intel
+  useTool({
+    name: 'collect_intel',
+    description: '从外部源采集公司情报',
+    async run({ data }) {
+      const res = await fetch('http://127.0.0.1:3100/api/internal/collect-intel', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-internal-secret': process.env.INTERNAL_SECRET || 'cybernaut-internal-2026',
+        },
+        body: JSON.stringify(data),
+      });
+      return res.json();
+    },
+  });
+
+  // 项目文档检索 → Express /api/internal/search-docs
+  useTool({
+    name: 'search_project_docs',
+    description: '检索项目资料库中的文档',
+    async run({ data }) {
+      const res = await fetch('http://127.0.0.1:3100/api/internal/search-docs', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-internal-secret': process.env.INTERNAL_SECRET || 'cybernaut-internal-2026',
+        },
+        body: JSON.stringify(data),
+      });
+      return res.json();
+    },
+  });
+
+  return '你是赛智伯乐（Cybernaut）投资中台的 AI 投研助手。使用中文回复，基于检索证据回答，区分事实与分析。';
+}
+```
+
+### 7.5 安装并验证
+
+```bash
+cd /www/flue-cybernaut
+npm install
+
+# 设置 Anthropic API Key（Flue 调用 LLM 需要）
+export ANTHROPIC_API_KEY=sk-xxxxxxxx
+
+# 开发模式启动（前台验证）
+npx vite dev --port 3584 --host 127.0.0.1
+
+# 另开终端验证
+curl http://127.0.0.1:3584/health
+# → {"ok":true,"service":"cybernaut-flue",...}
+```
+
+### 7.6 systemd 进程守护
+
+```ini
+# /etc/systemd/system/cybernaut-flue.service
+[Unit]
+Description=Cybernaut Flue Agent Server
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/www/flue-cybernaut
+Environment=ANTHROPIC_API_KEY=sk-xxxxxxxx
+ExecStart=/usr/bin/npx vite dev --port 3584 --host 127.0.0.1
+Restart=on-failure
+RestartSec=5
+
+StandardOutput=append:/path/to/cybernaut-dist/logs/flue.log
+StandardError=append:/path/to/cybernaut-dist/logs/flue.log
+
+[Install]
+WantedBy=multi-user.target
+```
+
+启用：
+
+```bash
+systemctl daemon-reload
+systemctl enable --now cybernaut-flue
+systemctl status cybernaut-flue
+```
+
+### 7.7 端点验证
+
+```bash
+# Flue 本地
+curl http://127.0.0.1:3584/health
+
+# 通过 Nginx 反代
+curl http://your-domain.com/ai/api/health
+# 预期: {"ok":true,"service":"cybernaut-flue",...}
+
+# Express 同样正常
+curl http://127.0.0.1:3100/api/health
+# 预期: {"ok":true,"service":"intelligent-investment-platform-api",...}
+```
+
+### 7.8 .env 配置
 
 ```ini
 FLUE_BASE_URL=http://127.0.0.1:3584
+
+# Flue 需要的 LLM API Key（在 .env 或 Flue systemd 的 Environment 中设置）
+ANTHROPIC_API_KEY=sk-xxxxxxxx
 ```
+
+### 7.9 Skill 工作区
 
 合规性说明、投资提案、投资建议书、尽调报告和 Q&A 的 Agent Skill
-位于分发包 `server/workspace/.agents/skills/`。部署时将该目录只读同步或挂载到：
+位于 `server/workspace/.agents/skills/`。Flue assistant 通过 Express 的
+`/api/internal/*` 回调间接使用这些 Skill——Skill 的执行逻辑在 Express 后端，
+Flue agent 只负责编排调度。
 
-```ini
-AI_SKILL_ROOT=/data/cybernaut-assistant/workspace/.agents/skills
-```
-
-外部 Flue `assistant` 的工作目录也应指向同一 `AGENT_WORKSPACE`，以便自动发现
-`.agents/skills/`。如果外部 Flue 工程选择显式 import 这些 Skill，则不要再以同名
-工作区 Skill 重复注册，否则 Flue 会拒绝初始化。
-
-如果暂时没有 Flue，基础 CRUD 功能不受影响，但以下功能不可用：
+如果暂时没有 Flue，基础 CRUD 功能不受影响，以下功能不可用：
 - AI 智能问答
 - 文档 RAG 检索
 - AI 摘要生成
@@ -563,7 +825,7 @@ curl -o /dev/null -s -w '%{http_code}' http://localhost:5173
 # □ 4. 登录可用
 curl -s http://localhost:3100/api/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"email":"admin@cybernaut.com","password":"admin123"}' | grep -o '"token":"[^"]*"'
+  -d '{"email":"admin@cybernaut.com","password":"123456"}' | grep -o '"token":"[^"]*"'
 # → 应返回 JWT token
 
 # □ 5. LLM 网关（如配置了）
