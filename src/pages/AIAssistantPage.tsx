@@ -675,7 +675,7 @@ function Chat() {
   }, [currentConversationRowId, hasActiveAiTask])
 
   // —— 核心：flue 官方 agent hook，流式/工具可见/记忆全内建 ——
-  const agent = useFlueAgent({ name: 'assistant', id: convId || undefined })
+  const agent = useFlueAgent({ name: 'assistant', id: convId || undefined, live: 'long-poll' })
   // Flue 是独立运行时，消息不能假设始终符合 SDK 静态类型。先归一化，后续渲染和
   // “生成结束”副作用都只读取安全结构，单条畸形消息不会再拖垮整个 AI 页面。
   const messages = useMemo(() => normalizeFlueMessages(agent.messages), [agent.messages])
