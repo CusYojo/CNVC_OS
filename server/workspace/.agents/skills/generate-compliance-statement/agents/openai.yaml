@@ -1,4 +1,5 @@
 interface:
   display_name: "生成合规性说明"
-  short_description: "依据授权项目证据生成可追溯、待法务审核的合规性说明初稿"
-  default_prompt: "使用 $generate-compliance-statement，根据所选项目的授权证据生成可追溯的中文合规性说明初稿。"
+  short_description: "解析公司Word模板，按项目证据逐章生成并审校合规说明"
+  default_prompt: "使用 $generate-compliance-statement，先解析 docs/合规性说明 模板建立 Document Blueprint，再仅依据当前项目证据逐章节生成，经 Reviewer 和 Formatter 校验后输出 Word 与 PDF；无依据时明确写“当前项目暂无相关资料。”"
+

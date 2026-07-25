@@ -1,4 +1,4 @@
 interface:
   display_name: "项目 Q&A"
-  short_description: "基于当前项目资料回答投资问题，并展示来源、证据数量、置信状态和责任声明"
-  default_prompt: "使用 $answer-project-qa 基于当前项目资料回答投资问题，并提供来源引用、证据数量、置信状态和责任声明。"
+  short_description: "读取 docs/Q&A 模板，生成会话内可追溯结构化回答"
+  default_prompt: "使用 $answer-project-qa，读取 docs/Q&A 的 PDF 模板并根据当前项目数据与用户输入生成会话内结构化回答，不生成 PPT 或其他文件。"
