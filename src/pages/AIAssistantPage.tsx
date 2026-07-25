@@ -542,8 +542,8 @@ function Chat() {
   const { showToast } = useToast()
   const LS_LAST_PROJECT = 'cybernaut-ai-last-project'
   const LS_LAST_CONV = 'cybernaut-ai-last-conv'
-  // 项目优先级: URL ?project= > 上次选的(localStorage) > 默认 p-1001
-  const initialProject = searchParams.get('project') ?? localStorage.getItem(LS_LAST_PROJECT) ?? 'p-1001'
+  // 项目优先级: URL ?project= > 上次选的(localStorage) > 空（等待 store 加载）
+  const initialProject = searchParams.get('project') ?? localStorage.getItem(LS_LAST_PROJECT) ?? ''
   const [scope, setScope] = useState<'project' | 'global'>('project')
   const [projectId, setProjectId] = useState(initialProject)
   const [input, setInput] = useState('')
@@ -684,7 +684,7 @@ function Chat() {
   if (agentErrorMessage && agentErrorRef.current.message !== agentErrorMessage) {
     agentErrorRef.current = { message: agentErrorMessage, errorId: createAiErrorId() }
   }
-  const agentError = agentErrorMessage ? agentErrorRef.current : null
+  const agentError = (agentErrorMessage && agent.status === 'error') ? agentErrorRef.current : null
   useEffect(() => {
     if (!agentError) return
     console.error(`[${agentError.errorId}] Flue Agent 返回错误`, agentError.message)
@@ -888,8 +888,6 @@ function Chat() {
     }
   }
 
-  // 统一切换会话及其固定上下文。项目会话恢复所属项目；无项目的历史/全局
-  // 会话按全局知识库打开，绝不沿用上一个会话的项目选择。
   const activateSession = (session: ChatSession) => {
     setConvId(session.agentId)
     if (session.projectId) {
@@ -923,6 +921,10 @@ function Chat() {
               projectName: null,
             }
       )
+      // 过滤掉 mock ID（如 p-1001），避免 PostgreSQL UUID 类型错误
+      const safeProjectId = context.projectId && UUID_PATTERN.test(context.projectId)
+        ? context.projectId
+        : null
       const row = await apiPost<{
         id: string
         agentId?: string
@@ -932,7 +934,9 @@ function Chat() {
         projectName?: string | null
       }>('/conversations', {
         title,
-        ...context,
+        scope: context.scope,
+        projectId: safeProjectId,
+        projectName: safeProjectId ? context.projectName : null,
       })
       const s: ChatSession = {
         rowId: row.id,
