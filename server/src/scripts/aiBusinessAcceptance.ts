@@ -7,6 +7,7 @@ import {
   normalizeBusinessContent,
   type BusinessContent,
   type BusinessFinding,
+  type BusinessTable,
   type EvidenceSource,
 } from '../services/aiBusinessContentService.js'
 import {
@@ -29,6 +30,12 @@ const outputDir = path.resolve(
   process.env.AI_ACCEPTANCE_DIR || path.join(tmpdir(), 'cybernaut-ai-business-acceptance'),
 )
 const sourceCutoffDate = '2026-07-24'
+const requestedTypes = new Set(
+  String(process.env.AI_ACCEPTANCE_TYPES || '')
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean),
+)
 
 const project = {
   name: '业务验收示例项目',
@@ -103,6 +110,33 @@ function findings(sectionIndex: number): BusinessFinding[] {
 
 function contentFor(type: AiBusinessTaskType): BusinessContent {
   const template = AI_TEMPLATE_CATALOG[type]
+  const tablesFor = (title: string): BusinessTable[] => {
+    if (type !== 'investment_proposal') return []
+    if (title === '（六）财务摘要') {
+      return [{
+        title: '历史财务摘要',
+        unit: '万元',
+        columns: ['项目', '2024A', '2025A'],
+        rows: [
+          ['营业收入', '1,200', '2,000'],
+          ['净利润', '-100', '120'],
+        ],
+        status: '资料记载',
+        sourceIndexes: [1],
+      }]
+    }
+    if (title === '（二）本轮公司估值和投资方案') {
+      return [{
+        title: '本轮投资方案',
+        unit: '万元',
+        columns: ['投资形式', '投资金额', '估值口径'],
+        rows: [['增资', '待核验', '以正式交易文件为准']],
+        status: '待核验',
+        sourceIndexes: [3],
+      }]
+    }
+    return []
+  }
   const raw: BusinessContent = {
     title: `${project.name}${template.label}`,
     executiveSummary: `本初稿采用公司标准模板，依据截至 ${sourceCutoffDate} 的脱敏证据形成。资料记载、AI 推断、待核验事项及资料缺口已分开标识，所有结论仍须业务审核。`,
@@ -110,6 +144,7 @@ function contentFor(type: AiBusinessTaskType): BusinessContent {
       title,
       summary: `${title}按照 docs 中可编辑主样本提炼的章节结构生成。`,
       findings: findings(index),
+      tables: tablesFor(title),
     })),
     highlights: ['产品定位较清晰，但商业证据仍需补强', '业务模式具备可讨论基础，尚不能作为已核验结论', '任务产物保留模板版本和来源定位'],
     risks: ['关键财务及客户数据尚未经独立核验', '法律合规结论必须由法务审核', '模型生成内容不得替代最终投资决策'],
@@ -201,10 +236,31 @@ async function main() {
     `采用 ${curatedProbe.usable.length} 条，排除 ${curatedProbe.rejected.length} 条`,
   )
 
-  for (const type of AI_TASK_TYPES) {
+  for (const type of AI_TASK_TYPES.filter((type) =>
+    requestedTypes.size === 0 || requestedTypes.has(type))) {
     const template = AI_TEMPLATE_CATALOG[type]
     assert(checks, `${type} 主样本存在`, existsSync(template.referencePath), template.referencePath)
     const content = contentFor(type)
+    if (type === 'compliance_statement') {
+      const analysis = content.sections.find((section) => section.title === '投资情形分析')
+      const container = content.sections.find((section) => section.title === '公司情况介绍')
+      assert(
+        checks,
+        'AI-007 逻辑槽映射为模板固定检查结构',
+        container?.findings.length === 0
+          && analysis?.findings.length === 7
+          && [
+            '投资方式及投资限制',
+            '返投要求',
+            '关联交易',
+            '投资方向',
+            '投资配置',
+            '投资集中度',
+            '其他法律法规、监管规定及基金合规要求',
+          ].every((topic, index) => analysis.findings[index]?.text.startsWith(topic)),
+        '公司情况介绍仅作容器；投资情形分析固定七项并按模板顺序返回',
+      )
+    }
     if (template.outputFormat === 'pptx') {
       const outputPath = path.join(outputDir, 'AI-009_业务验收_投资建议书.pptx')
       const result = await generateBusinessPptx({
@@ -285,20 +341,40 @@ async function main() {
     const { zip, xml } = await openXmlText(outputPath, /^word\/.*\.xml$/)
     assert(checks, `${type} DOCX 为有效 OpenXML`, Boolean(zip.file('word/document.xml')), outputPath)
     assert(checks, `${type} 含可编辑文本`, (xml.match(/<w:t/g) || []).length > template.sections.length * 2, `章节 ${template.sections.length}`)
-    assert(checks, `${type} 章节完整`, template.sections.every((section) => xml.includes(section)), template.sections.join('、'))
-    assert(checks, `${type} 含免责声明`, xml.includes(template.disclaimer), template.disclaimer)
-    assert(checks, `${type} 含来源和核验状态`, xml.includes('引用资料') && xml.includes('资料记载') && xml.includes('待核验'), '来源/状态')
     const documentXml = await zip.file('word/document.xml')?.async('string') || ''
-    const lastSectionTitle = template.sections[template.sections.length - 1]
-    assert(
-      checks,
-      `${type} 引用资料位于文尾且只列已用来源`,
-      documentXml.lastIndexOf('引用资料') > documentXml.lastIndexOf(lastSectionTitle)
-        && documentXml.includes('示例项目商业计划书（脱敏）')
-        && !documentXml.includes('未使用来源（不得进入文尾）')
-        && (documentXml.match(/示例项目商业计划书（脱敏）/g) || []).length === 1,
-      '引用在最后章节；同一文件合并片段；未使用来源不列示',
-    )
+    if (type === 'compliance_statement') {
+      assert(
+        checks,
+        'AI-007 正式正文仅保留核心规范结构',
+        ['公司情况介绍', '公司简介', '核心团队', '产品及技术', '投资理由', '投资计划', '投资情形分析']
+          .every((section) => documentXml.includes(section))
+          && ['摘要', '已核验事实', '风险提示', '待核验事项', '资料缺口', '免责声明', '引用资料']
+            .every((section) => !documentXml.includes(section))
+          && !documentXml.includes(template.disclaimer),
+        '四章、三个公司子节、无模板外正文板块',
+      )
+    } else {
+      assert(checks, `${type} 章节完整`, template.sections.every((section) => xml.includes(section)), template.sections.join('、'))
+      assert(checks, `${type} 含免责声明`, xml.includes(template.disclaimer), template.disclaimer)
+      assert(
+        checks,
+        `${type} 含来源和核验状态`,
+        xml.includes('引用资料')
+          && xml.includes('资料记载')
+          && (xml.includes('待核验') || xml.includes('资料缺口')),
+        '来源/状态',
+      )
+      const lastSectionTitle = template.sections[template.sections.length - 1]
+      assert(
+        checks,
+        `${type} 引用资料位于文尾且只列已用来源`,
+        documentXml.lastIndexOf('引用资料') > documentXml.lastIndexOf(lastSectionTitle)
+          && documentXml.includes('示例项目商业计划书（脱敏）')
+          && !documentXml.includes('未使用来源（不得进入文尾）')
+          && (documentXml.match(/示例项目商业计划书（脱敏）/g) || []).length === 1,
+        '引用在最后章节；同一文件合并片段；未使用来源不列示',
+      )
+    }
     assert(
       checks,
       `${type} 全篇不重复同一分析段落`,
@@ -311,37 +387,215 @@ async function main() {
       !documentXml.includes('文件性质') && !documentXml.includes('生成时间'),
       '遵循对应 docs 模板的正文结构',
     )
-    const expectedBodyFont = type === 'compliance_statement' ? '宋体' : '仿宋'
+    const expectedBodyFont = type === 'compliance_statement'
+      ? (process.env.AI_DOCUMENT_SONG_FONT || '宋体')
+      : (process.env.AI_DOCUMENT_FANGSONG_FONT || '仿宋')
+    const expectedHeadingFont = process.env.AI_DOCUMENT_SANS_FONT || '黑体'
+    const expectedCoverFont = process.env.AI_DOCUMENT_SONG_FONT || '宋体'
     const forbiddenSampleTerms = ['佳量', '德塔', 'Epilcure', '曹鹏', template.templateVersion]
     assert(checks, `${type} 不含损坏字符`, !xml.includes('\uFFFD'), '未发现 U+FFFD')
     assert(checks, `${type} 不使用 Arial Unicode MS`, !xml.includes('Arial Unicode MS'), expectedBodyFont)
-    assert(checks, `${type} 使用模板中文字体`, xml.includes(`w:eastAsia="${expectedBodyFont}"`) && xml.includes('w:eastAsia="黑体"'), `${expectedBodyFont}/黑体`)
+    assert(
+      checks,
+      `${type} 使用模板中文字体`,
+      (xml.includes(`w:eastAsia="${expectedBodyFont}"`)
+        || ((type === 'compliance_statement' || type === 'investment_proposal')
+          && xml.includes('w:eastAsia="Songti SC"')))
+        && (xml.includes(`w:eastAsia="${expectedHeadingFont}"`)
+          || (type === 'compliance_statement' && xml.includes('w:eastAsia="STHeiti"'))
+          || (type === 'investment_proposal' && xml.includes('w:eastAsia="Heiti SC"'))),
+      `${expectedBodyFont}/${expectedHeadingFont}`,
+    )
     assert(checks, `${type} 不泄露示例项目与内部模板编号`, forbiddenSampleTerms.every((term) => !xml.includes(term)), forbiddenSampleTerms.join('、'))
     assert(
       checks,
       `${type} 已应用公司模板可复用部件`,
-      result.templateApplied && result.templateParts.length > 0 && Boolean(result.templateSha256),
-      `模板部件 ${result.templateParts.join('、')}，摘要 ${result.templateSha256.slice(0, 12)}`,
+      result.templateApplied
+        && (type === 'investment_proposal'
+          ? result.templateCorpus.length === 9
+          : result.templateParts.length > 0)
+        && Boolean(result.templateSha256),
+      `模板部件 ${result.templateParts.join('、') || '按蒸馏令牌生成'}，摘要 ${result.templateSha256.slice(0, 12)}`,
     )
     if (type !== 'compliance_statement') {
       assert(checks, `${type} 包含模板式页眉页码`, Boolean(zip.file('word/header1.xml')) && Boolean(zip.file('word/footer1.xml')), '页眉与页码')
     }
     if (type === 'investment_proposal') {
       assert(checks, 'AI-008 使用模板式投委会称谓', documentXml.includes('各位投资决策委员会成员：'), '提案正式开篇')
+      assert(
+        checks,
+        'AI-008 使用模板中文章节层级',
+        ['一、基本情况简介', '（一）公司简介', '六、结论'].every((title) => documentXml.includes(title))
+          && !documentXml.includes('1. 一、基本情况简介'),
+        '中文一级/二级标题，不添加英文数字前缀',
+      )
+      assert(
+        checks,
+        'AI-008 使用 16pt 标题、12pt 正文和固定 24pt 行距',
+        documentXml.includes('<w:sz w:val="32"')
+          && documentXml.includes('<w:sz w:val="24"')
+          && documentXml.includes('w:line="480"')
+          && documentXml.includes('w:lineRule="exact"')
+          && (
+            documentXml.includes(`w:eastAsia="${process.env.AI_DOCUMENT_KAITI_FONT || '楷体'}"`)
+            || documentXml.includes('w:eastAsia="Kaiti SC"')
+          ),
+        '标题 32 半点；正文 24 半点；固定 480 twips；二级标题楷体',
+      )
+      assert(
+        checks,
+        'AI-008 不创建独立封面或目录页',
+        !documentXml.includes('>目录</w:t>')
+          && !/TOC\b/.test(documentXml)
+          && !/<w:br\b[^>]*w:type="page"/.test(documentXml),
+        '单节自然流排，无封面分页、目录域或手动分页',
+      )
+      assert(
+        checks,
+        'AI-008 生成模板式原生表格',
+        documentXml.includes('<w:tbl>')
+          && documentXml.includes('历史财务摘要')
+          && documentXml.includes('w:fill="D9D9D9"'),
+        '原生可编辑表格、灰底表头',
+      )
+      assert(
+        checks,
+        'AI-008 全部九份模板进入生成元数据',
+        result.templateCorpus.length === 9,
+        `${result.templateCorpus.length} 份`,
+      )
+    }
+
+    if (type === 'due_diligence_report') {
+      const dueHeaderXml = await zip.file('word/header1.xml')?.async('string') || ''
+      const dueSettingsXml = await zip.file('word/settings.xml')?.async('string') || ''
+      assert(
+        checks,
+        'AI-010 使用模板八章与十六个二级模块',
+        [
+          '1、投资概要',
+          '2、公司概况',
+          '3、产品与技术',
+          '4、业务情况',
+          '5、行业和市场',
+          '6、未来发展规划',
+          '7、投资方案',
+          '8、风险提示与对策',
+          ...template.sections,
+        ].every((title) => documentXml.includes(title)),
+        '目录与正文均采用八章、十六模块层级',
+      )
+      assert(
+        checks,
+        'AI-010 正文标题与目录使用相同编号',
+        /<w:pStyle w:val="79"\/>[\s\S]*?<w:t[^>]*>1、投资概要<\/w:t>/.test(documentXml)
+          && /<w:pStyle w:val="86"\/>[\s\S]*?<w:t[^>]*>2\.1 公司概况<\/w:t>/.test(documentXml)
+          && /<w:pStyle w:val="79"\/>[\s\S]*?<w:t[^>]*>8、风险提示与对策<\/w:t>/.test(documentXml),
+        '一级标题 1、～8、；二级标题 2.1 等与目录一致',
+      )
+      assert(
+        checks,
+        'AI-010 使用 Word/WPS 可更新目录域',
+        /TOC (?=[^<]*\\h)(?=[^<]*\\o &quot;1-2&quot;)(?=[^<]*\\u)/.test(documentXml)
+          && documentXml.includes('w:outlineLvl w:val="0"')
+          && documentXml.includes('w:outlineLvl w:val="1"')
+          && documentXml.includes('w:dirty="true"')
+          && dueSettingsXml.includes('<w:updateFields')
+          && (documentXml.match(/>1、投资概要<\/w:t>/g) || []).length >= 2
+          && (documentXml.match(/>8、风险提示与对策<\/w:t>/g) || []).length >= 2,
+        'TOC 域覆盖一、二级标题，并含首次打开可读的缓存条目；更新后生成页码和点引导符',
+      )
+      assert(
+        checks,
+        'AI-010 真实引用主模板样式并保留三分节',
+        (documentXml.match(/<w:pStyle w:val="79"\/>/g) || []).length >= 8
+          && (documentXml.match(/<w:pStyle w:val="86"\/>/g) || []).length >= 16
+          && documentXml.includes('<w:pStyle w:val="91"/>')
+          && documentXml.includes('<w:pStyle w:val="101"/>')
+          && (documentXml.match(/<w:numId w:val="0"\/>/g) || []).length >= 24
+          && (documentXml.match(/<w:sectPr/g) || []).length >= 3,
+        '星实一标 79、二标 86、正文 91、来源批注 101；段落级关闭模板中文编号；封面/目录/正文三分节',
+      )
+      assert(
+        checks,
+        'AI-010 封面字体字号与主模板一致',
+        (documentXml.match(/w:sz w:val="44"/g) || []).length >= 7
+          && (documentXml.match(/w:sz w:val="32"/g) || []).length >= 2
+          && documentXml.includes(`w:eastAsia="${expectedCoverFont}"`)
+          && ['尽', '职', '调', '查', '报', '告'].every((character) =>
+            new RegExp(`<w:t[^>]*>${character}</w:t>`).test(documentXml)),
+        `公司名及六字纵排为 ${expectedCoverFont} 22 pt；年月和机构为 ${expectedCoverFont} 16 pt`,
+      )
+      assert(
+        checks,
+        'AI-010 页眉沿用主模板细线且不写死机构名称',
+        dueHeaderXml.includes('<w:pBdr>')
+          && dueHeaderXml.includes('<w:bottom')
+          && !dueHeaderXml.includes('浙江赛智伯乐'),
+        '封面无页眉；目录与正文使用无文字的黑色细线页眉',
+      )
+      assert(
+        checks,
+        'AI-010 生成模板式项目概览表',
+        documentXml.includes('<w:tbl>')
+          && ['公司主体', '所属行业', '项目阶段', '融资安排', '估值口径'].every((term) =>
+            documentXml.includes(term)),
+        '投资概要中的原生可编辑项目概览表',
+      )
+      assert(
+        checks,
+        'AI-010 全部十二份模板进入生成元数据',
+        result.templateCorpus.length === 12,
+        `${result.templateCorpus.length} 份`,
+      )
     }
 
     if (type === 'compliance_statement') {
+      assert(
+        checks,
+        'AI-007 使用模板四段式层级而非八个同级标题',
+        !documentXml.includes('1. 公司情况介绍')
+          && !documentXml.includes('2. 公司简介')
+          && ['公司情况介绍', '公司简介', '核心团队', '产品及技术', '投资理由', '投资计划', '投资情形分析']
+            .every((title) => documentXml.includes(title))
+          && documentXml.includes('<w:numId w:val="1"/>')
+          && documentXml.includes('<w:numId w:val="2"/>')
+          && documentXml.includes('<w:numId w:val="4"/>'),
+        '四个一级部分、三个公司子节、独立重启的七项检查编号',
+      )
+      assert(
+        checks,
+        'AI-007 页面和字体令牌与模板一致',
+        documentXml.includes('<w:pgSz w:w="11906" w:h="16838"')
+          && documentXml.includes('<w:pgMar w:top="1440" w:right="1800" w:bottom="1440" w:left="1800"')
+          && (documentXml.includes('w:eastAsia="黑体"') || documentXml.includes('w:eastAsia="STHeiti"'))
+          && (documentXml.includes('w:eastAsia="宋体"') || documentXml.includes('w:eastAsia="Songti SC"'))
+          && !zip.file('word/header1.xml')
+          && !zip.file('word/footer1.xml'),
+        'A4、上下1440/左右1800 DXA、黑体标题、宋体正文、无可见页眉页脚',
+      )
       const markdownPath = path.join(outputDir, `${prefix}.md`)
       const markdown = renderBusinessMarkdown({ template, project, content, sources, sourceCutoffDate })
       await writeFile(markdownPath, markdown, 'utf8')
       artifacts.push(markdownPath)
       assert(
         checks,
-        'AI-007 Markdown 固定责任分区完整',
-        ['已核验事实', '风险提示', '待核验事项', '资料缺口', '免责声明'].every((title) => markdown.includes(`## ${title}`)),
+        'AI-007 Markdown 与核心规范正文结构一致',
+        ['一、公司情况介绍', '二、投资理由', '三、投资计划', '四、投资情形分析']
+          .every((title) => markdown.includes(`## ${title}`))
+          && ['## 摘要', '## 已核验事实', '## 风险提示', '## 待核验事项', '## 资料缺口', '## 免责声明', '## 引用资料']
+            .every((title) => !markdown.includes(title)),
         markdownPath,
       )
-      assert(checks, 'AI-007 Markdown 与 DOCX 免责声明一致', markdown.includes(template.disclaimer) && xml.includes(template.disclaimer), template.disclaimer)
+      assert(
+        checks,
+        'AI-007 Markdown 与 DOCX 均隔离审计元数据',
+        !markdown.includes(template.disclaimer)
+          && !xml.includes(template.disclaimer)
+          && !markdown.includes('[S1]')
+          && !xml.includes('[S1]'),
+        '免责声明、来源标记、风险和缺口只保留在审计元数据',
+      )
     }
   }
 

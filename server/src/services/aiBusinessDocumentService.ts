@@ -4,11 +4,17 @@ import {
   Document,
   Footer,
   Header,
+  LevelFormat,
+  LevelSuffix,
   PageNumber,
   Packer,
   Paragraph,
   Table,
+  TableCell,
+  TableOfContents,
+  TableRow,
   TextRun,
+  WidthType,
 } from 'docx'
 import { createCanvas, loadImage, type SKRSContext2D } from '@napi-rs/canvas'
 import PptxGenJS from 'pptxgenjs'
@@ -23,6 +29,16 @@ import {
 } from './aiBusinessContentService.js'
 import { dedupeTextList } from './aiEvidenceQualityService.js'
 import type { AiTemplateDefinition } from './aiTemplateCatalog.js'
+import {
+  COMPLIANCE_MISSING_DATA_SENTENCE,
+  parseComplianceDocumentBlueprint,
+  type ComplianceDocumentBlueprint,
+} from './aiComplianceBlueprintService.js'
+import {
+  COMPLIANCE_CHECKLIST_TOPICS,
+  COMPLIANCE_INVESTMENT_REASON_TOPICS,
+} from './aiComplianceWorkflowService.js'
+import { generateInvestmentProposalDocx } from './aiInvestmentProposalDocumentService.js'
 
 type ProjectLike = {
   name: string
@@ -48,6 +64,7 @@ const TEMPLATE_PALE = 'F3F3FA'
 const DOCX_SANS_FONT = process.env.AI_DOCUMENT_SANS_FONT || '黑体'
 const DOCX_SONG_FONT = process.env.AI_DOCUMENT_SONG_FONT || '宋体'
 const DOCX_FANGSONG_FONT = process.env.AI_DOCUMENT_FANGSONG_FONT || '仿宋'
+const DOCX_KAITI_FONT = process.env.AI_DOCUMENT_KAITI_FONT || '楷体'
 const PPT_FONT = process.env.AI_PRESENTATION_FONT || '微软雅黑'
 const PPT_FALLBACK_FONT = process.env.AI_PRESENTATION_FALLBACK_FONT || 'Hiragino Sans GB'
 
@@ -57,6 +74,40 @@ const docxFont = (eastAsia: string) => ({
   cs: 'Times New Roman',
   eastAsia,
 })
+
+function setDocxFontAltName(xml: string, fontName: string, altName: string) {
+  const fontPattern = new RegExp(
+    `<w:font w:name="${fontName}">([\\s\\S]*?)<\\/w:font>`,
+  )
+  return xml.replace(fontPattern, (fontXml) => {
+    if (/<w:altName\b[^>]*\/>/.test(fontXml)) {
+      return fontXml.replace(
+        /<w:altName\b[^>]*\/>/,
+        `<w:altName w:val="${altName}"/>`,
+      )
+    }
+    return fontXml.replace(
+      `<w:font w:name="${fontName}">`,
+      `<w:font w:name="${fontName}"><w:altName w:val="${altName}"/>`,
+    )
+  })
+}
+
+function ensureDocxFontAltName(xml: string, fontName: string, altName: string) {
+  if (new RegExp(`<w:font w:name="${fontName}">`).test(xml)) {
+    return setDocxFontAltName(xml, fontName, altName)
+  }
+  return xml.replace(
+    '</w:fonts>',
+    `<w:font w:name="${fontName}"><w:altName w:val="${altName}"/><w:charset w:val="86"/><w:family w:val="auto"/><w:pitch w:val="default"/></w:font></w:fonts>`,
+  )
+}
+
+function complianceCompatibleFont(font: string) {
+  if (font === DOCX_SONG_FONT) return 'Songti SC'
+  if (font === DOCX_SANS_FONT) return 'STHeiti'
+  return font
+}
 
 function docxTemplateProfile(template: AiTemplateDefinition) {
   if (template.type === 'compliance_statement') {
@@ -84,9 +135,33 @@ const statusStyle = {
   资料缺口: { color: 'A13B3B', fill: RED },
 } as const
 
+const DUE_DILIGENCE_OUTLINE = [
+  { title: '投资概要', modules: ['投资概要'] },
+  {
+    title: '公司概况',
+    modules: ['公司概况', '股权结构及融资历程', '公司治理与管理团队', '法律合规与资质'],
+  },
+  { title: '产品与技术', modules: ['产品与核心技术'] },
+  { title: '业务情况', modules: ['商业模式与经营情况', '客户与商业化进展'] },
+  { title: '行业和市场', modules: ['行业概况与市场空间', '产业链与竞争格局'] },
+  { title: '未来发展规划', modules: ['财务分析'] },
+  { title: '投资方案', modules: ['估值合理性分析', '投资方案', '投资亮点'] },
+  { title: '风险提示与对策', modules: ['风险分析', '资料缺口与后续核验'] },
+] as const
+
+const DUE_DILIGENCE_STYLES = {
+  level1: '79',
+  level2: '86',
+  body: '91',
+  sourceNote: '101',
+} as const
+
 const safeName = (value: string) => value.replace(/[\\/:*?"<>|]/g, '-').slice(0, 60)
 const text = (value: unknown, fallback = '待核验') => String(value ?? '').trim() || fallback
 const generatedDateLabel = (sourceCutoffDate: string) => `资料截止：${sourceCutoffDate}`
+const complianceProjectName = (value: string) => value.trim().replace(/项目$/, '')
+const complianceDateLabel = (value: Date) =>
+  `${value.getFullYear()}年   ${value.getMonth() + 1}   月   ${value.getDate()}   日`
 
 function sectionLabelFor(title: string) {
   if (/行业|市场|竞争/.test(title)) return '行业研究'
@@ -182,6 +257,7 @@ function paragraph(value: string, options: {
   after?: number
   keepNext?: boolean
   firstLine?: number
+  line?: number
   align?: (typeof AlignmentType)[keyof typeof AlignmentType]
 } = {}) {
   return new Paragraph({
@@ -192,7 +268,7 @@ function paragraph(value: string, options: {
       size: options.size ?? 21,
       font: docxFont(options.font ?? DOCX_SONG_FONT),
     })],
-    spacing: { before: options.before ?? 0, after: options.after ?? 140, line: 330 },
+    spacing: { before: options.before ?? 0, after: options.after ?? 140, line: options.line ?? 330 },
     indent: options.firstLine ? { firstLine: options.firstLine } : undefined,
     alignment: options.align,
     keepNext: options.keepNext,
@@ -207,23 +283,66 @@ export async function generateBusinessDocx(input: {
   sources: EvidenceSource[]
   sourceCutoffDate: string
   generatedAt?: Date
+  blueprint?: ComplianceDocumentBlueprint
 }) {
   await mkdir(path.dirname(input.outputPath), { recursive: true })
+  if (String(input.template.type) === 'investment_proposal') {
+    const generation = await generateInvestmentProposalDocx({
+      outputPath: input.outputPath,
+      template: input.template,
+      project: input.project,
+      content: input.content,
+      sources: input.sources,
+      sourceCutoffDate: input.sourceCutoffDate,
+      generatedAt: input.generatedAt,
+    })
+    const templateBuffer = await readFile(input.template.referencePath)
+    const templateCorpus = await Promise.all(
+      (input.template.referencePaths?.length
+        ? input.template.referencePaths
+        : [input.template.referencePath])
+        .map(async (referencePath) => ({
+          fileName: path.basename(referencePath),
+          sha256: createHash('sha256').update(await readFile(referencePath)).digest('hex'),
+        })),
+    )
+    return {
+      pageIntent: 'brief',
+      templateApplied: true,
+      templateSha256: createHash('sha256').update(templateBuffer).digest('hex'),
+      templateCorpus,
+      templateParts: [],
+      typography: { body: DOCX_FANGSONG_FONT, heading: DOCX_SANS_FONT },
+      ...generation,
+    }
+  }
   const generatedAt = input.generatedAt ?? new Date()
   const profile = docxTemplateProfile(input.template)
-  const runFont = (font = profile.bodyFont) => docxFont(font)
+  const complianceBlueprint = input.template.type === 'compliance_statement'
+    ? input.blueprint ?? await parseComplianceDocumentBlueprint(input.template)
+    : undefined
+  const runFont = (font = profile.bodyFont) => input.template.type === 'compliance_statement'
+    ? {
+        ascii: complianceCompatibleFont(font),
+        hAnsi: complianceCompatibleFont(font),
+        cs: complianceCompatibleFont(font),
+        eastAsia: complianceCompatibleFont(font),
+      }
+    : docxFont(font)
+  const isProposal = input.template.type === 'investment_proposal'
   const heading = (value: string, level: 1 | 2 = 1, pageBreakBefore = false) => new Paragraph({
+    style: level === 1 ? 'Heading1' : 'Heading2',
     pageBreakBefore,
     keepNext: true,
     spacing: {
-      before: level === 1 ? 300 : 220,
-      after: level === 1 ? 180 : 120,
+      before: isProposal ? (level === 1 ? 240 : 120) : (level === 1 ? 300 : 220),
+      after: isProposal ? 0 : (level === 1 ? 180 : 120),
       line: 360,
     },
     children: [new TextRun({
       text: value,
-      font: runFont(level === 1 ? profile.headingFont : profile.bodyFont),
-      size: level === 1 ? 30 : 26,
+      font: runFont(level === 1 ? profile.headingFont : (isProposal ? DOCX_KAITI_FONT : profile.bodyFont)),
+      size: isProposal ? 28 : (level === 1 ? 30 : 26),
       bold: level === 1,
       color: '000000',
     })],
@@ -237,29 +356,39 @@ export async function generateBusinessDocx(input: {
   } = {}) => paragraph(value, {
     font: profile.bodyFont,
     color: options.color ?? '000000',
-    size: options.size ?? 24,
+    size: options.size ?? (isProposal ? 28 : 24),
     bold: options.bold,
-    firstLine: options.firstLine === false ? 0 : 480,
+    firstLine: options.firstLine === false ? 0 : (isProposal ? 560 : 480),
     keepNext: options.keepNext,
-    after: 160,
+    after: isProposal ? 0 : 160,
+    line: 360,
+    align: isProposal ? AlignmentType.JUSTIFIED : undefined,
   })
-  const templateHeader = profile.header
+  const templateHeader = input.template.type === 'due_diligence_report'
     ? new Header({
-      children: [
-        new Paragraph({
-          alignment: AlignmentType.CENTER,
-          border: { bottom: { style: BorderStyle.SINGLE, color: '000000', size: 8 } },
-          spacing: { after: 80 },
-          children: [new TextRun({
-            text: profile.header,
-            font: runFont(profile.bodyFont),
-            size: 19,
-            color: '000000',
-          })],
-        }),
-      ],
+      children: [new Paragraph({
+        border: { bottom: { style: BorderStyle.SINGLE, color: '000000', size: 8 } },
+        spacing: { after: 80 },
+        children: [],
+      })],
     })
-    : undefined
+    : profile.header
+      ? new Header({
+        children: [
+          new Paragraph({
+            alignment: AlignmentType.CENTER,
+            border: { bottom: { style: BorderStyle.SINGLE, color: '000000', size: 8 } },
+            spacing: { after: 80 },
+            children: [new TextRun({
+              text: profile.header,
+              font: runFont(profile.bodyFont),
+              size: 19,
+              color: '000000',
+            })],
+          }),
+        ],
+      })
+      : undefined
   const pageFooter = new Footer({
     children: [new Paragraph({
       alignment: AlignmentType.CENTER,
@@ -272,178 +401,633 @@ export async function generateBusinessDocx(input: {
     })],
   })
   const disclaimerParagraph = new Paragraph({
-    spacing: { before: 260, after: 220, line: 330 },
+    spacing: { before: 240, after: 120, line: 330 },
     border: { top: { color: '888888', size: 6, style: BorderStyle.SINGLE } },
     children: [new TextRun({
-      text: input.template.disclaimer,
+      text: `${input.template.disclaimer} 资料截止日：${input.sourceCutoffDate}。`,
       font: runFont(profile.bodyFont),
       size: 20,
       color: '555555',
-      italics: true,
+      italics: !isProposal,
     })],
   })
 
+  const references = usedSourceGroups(input.content, input.sources)
   const contentChildren: Array<Paragraph | Table> = []
-  if (input.template.type === 'due_diligence_report') {
-    contentChildren.push(
-      heading('执行摘要'),
-      bodyParagraph(input.content.executiveSummary),
-    )
-  }
 
-  input.content.sections.forEach((section, sectionIndex) => {
-    const shouldBreak = input.template.type === 'due_diligence_report'
-      ? sectionIndex > 0
-      : input.template.type === 'investment_proposal' && sectionIndex > 0 && sectionIndex % 2 === 0
-    contentChildren.push(heading(`${sectionIndex + 1}. ${section.title}`, 1, shouldBreak))
-    contentChildren.push(bodyParagraph(section.summary, {
-      bold: true,
-      color: profile.accent,
-      firstLine: false,
-      keepNext: section.findings.length > 0,
-    }))
-    section.findings.forEach((finding, findingIndex) => {
-      const style = statusStyle[finding.status]
-      const refs = sourceText(finding.sourceIndexes, input.sources)
-      contentChildren.push(new Paragraph({
-        spacing: { after: 150, line: 360 },
-        keepNext: findingIndex < section.findings.length - 1,
-        indent: { firstLine: 480 },
+  if (input.template.type === 'compliance_statement') {
+    const sectionByTitle = new Map(input.content.sections.map((section) => [section.title, section]))
+    const section = (title: string) => sectionByTitle.get(title)
+    const findingParagraph = (
+      finding: BusinessContent['sections'][number]['findings'][number],
+      options: {
+        boldLead?: boolean
+        numberingInstance?: number
+        keepNext?: boolean
+        before?: number
+      } = {},
+    ) => {
+      const normalizedText = finding.text.replace(/^\s*\d+[、.．]\s*/, '')
+      const leadMatch = options.boldLead
+        ? normalizedText.match(/^(.{1,60}?[：。])([\s\S]*)$/)
+        : null
+      return new Paragraph({
+        numbering: options.numberingInstance === undefined
+          ? undefined
+          : { reference: 'compliance-item', level: 0, instance: options.numberingInstance },
+        spacing: {
+          before: options.before ?? (options.numberingInstance === undefined ? 0 : 240),
+          after: 0,
+          line: 360,
+        },
+        keepNext: options.keepNext,
+        keepLines: true,
+        indent: options.numberingInstance === undefined ? { firstLine: 480 } : undefined,
+        alignment: AlignmentType.JUSTIFIED,
         children: [
-          new TextRun({ text: `【${finding.status}】`, bold: true, color: style.color, size: 22, font: runFont(profile.bodyFont) }),
-          new TextRun({ text: finding.text, color: '000000', size: 24, font: runFont(profile.bodyFont) }),
-          ...(refs ? [new TextRun({ text: `\n${refs}`, color: '666666', size: 18, font: runFont(profile.bodyFont), italics: true })] : []),
+          ...(leadMatch
+            ? [
+                new TextRun({
+                  text: leadMatch[1],
+                  bold: true,
+                  color: '000000',
+                  size: 24,
+                  font: runFont(profile.bodyFont),
+                }),
+                new TextRun({
+                  text: leadMatch[2],
+                  color: '000000',
+                  size: 24,
+                  font: runFont(profile.bodyFont),
+                }),
+              ]
+            : [new TextRun({
+                text: normalizedText,
+                color: '000000',
+                size: 24,
+                font: runFont(profile.bodyFont),
+              })]),
         ],
-      }))
+      })
+    }
+    const complianceHeading = (value: string, level: 1 | 2) => new Paragraph({
+      numbering: {
+        reference: level === 1 ? 'compliance-level-1' : 'compliance-level-2',
+        level: 0,
+      },
+      keepNext: true,
+      keepLines: true,
+      spacing: { before: level === 1 ? 240 : 0, after: 0, line: 360 },
+      children: [new TextRun({
+        text: value,
+        font: runFont(profile.bodyFont),
+        size: 24,
+        bold: level === 1,
+        color: '000000',
+      })],
     })
-  })
+    const addFindingSection = (title: string) => {
+      const current = section(title)
+      contentChildren.push(complianceHeading(title, 2))
+      const findings = current?.findings.length
+        ? current.findings
+        : [{
+            text: `${COMPLIANCE_MISSING_DATA_SENTENCE}需补充能够支持“${title}”撰写的专项原始文件后再行核验。`,
+            status: '资料缺口' as const,
+            sourceIndexes: [],
+          }]
+      findings.forEach((finding, index) => contentChildren.push(findingParagraph(finding, {
+        keepNext: index < findings.length - 1,
+      })))
+    }
 
-  const addListSection = (title: string, values: string[], tone: string) => {
-    contentChildren.push(heading(title))
-    const safeValues = values.length ? values : ['当前无可列示内容，需补充资料后核验。']
-    safeValues.forEach((value) => contentChildren.push(new Paragraph({
-      spacing: { after: 120, line: 360 },
-      indent: { left: 420, hanging: 300 },
-      children: [
-        new TextRun({ text: '• ', font: runFont(profile.bodyFont), size: 24, color: tone, bold: true }),
-        new TextRun({ text: value, font: runFont(profile.bodyFont), size: 24, color: '000000' }),
-      ],
+    contentChildren.push(complianceHeading('公司情况介绍', 1))
+    addFindingSection('公司简介')
+    addFindingSection('核心团队')
+    addFindingSection('产品及技术')
+
+    contentChildren.push(complianceHeading('投资理由', 1))
+    const reasons = section('投资理由')?.findings ?? []
+    const renderedReasons = COMPLIANCE_INVESTMENT_REASON_TOPICS.map((topic, index) =>
+      reasons[index] ?? {
+          text: `${topic}：${COMPLIANCE_MISSING_DATA_SENTENCE}需补充能够支持本项投资价值判断的一手项目材料后再行核验。`,
+          status: '资料缺口' as const,
+          sourceIndexes: [],
+        })
+    renderedReasons.forEach((finding, index) => contentChildren.push(findingParagraph(finding, {
+      boldLead: true,
+      numberingInstance: 0,
+      keepNext: index < renderedReasons.length - 1,
     })))
-  }
-  // 提案和尽调模板本身已经包含亮点、风险、资料缺口章节，禁止在文尾再复制一遍。
-  // 合规性说明只追加模板正文中没有独立承载的风险和补证清单。
-  if (input.template.type === 'compliance_statement') {
-    addListSection('风险提示', input.content.risks, '9B3A3A')
-    addListSection('资料缺口与后续核验', input.content.missing, '9A6200')
-  }
 
-  if (input.template.type === 'compliance_statement') {
+    contentChildren.push(complianceHeading('投资计划', 1))
+    const plan = section('投资计划')?.findings ?? []
+    const renderedPlan = plan.length
+      ? plan
+      : [{
+          text: '尚缺少本轮估值、融资额、本基金投资金额、投资方式及交易条款等资料。',
+          status: '资料缺口' as const,
+          sourceIndexes: [],
+        }]
+    renderedPlan.forEach((finding, index) => contentChildren.push(findingParagraph(finding, {
+      keepNext: index < renderedPlan.length - 1,
+    })))
+
+    contentChildren.push(complianceHeading('投资情形分析', 1))
+    const analyses = section('投资情形分析')?.findings ?? []
+    const renderedAnalyses = COMPLIANCE_CHECKLIST_TOPICS.map((topic, index) =>
+      analyses[index] ?? {
+          text: `${topic}：${COMPLIANCE_MISSING_DATA_SENTENCE}需补充对应基金条款、项目事实和核验材料后再行核验。`,
+          status: '资料缺口' as const,
+          sourceIndexes: [],
+        })
+    renderedAnalyses.forEach((finding, index) => contentChildren.push(findingParagraph(finding, {
+      boldLead: true,
+      numberingInstance: 1,
+      keepNext: index < renderedAnalyses.length - 1,
+    })))
+
+    const conclusion = section('结论')?.findings[0]
+    contentChildren.push(findingParagraph(conclusion ?? {
+      text: input.content.executiveSummary,
+      status: '待核验',
+      sourceIndexes: [],
+    }, { before: 240 }))
     contentChildren.push(
       new Paragraph({
         alignment: AlignmentType.RIGHT,
-        spacing: { before: 420, after: 120 },
+        spacing: { before: 240, after: 0, line: 360 },
+        keepNext: true,
+        children: [new TextRun({
+          text: complianceBlueprint?.fixedContent.issuer
+            ?? '浙江赛智伯乐股权投资管理有限公司',
+          font: runFont(profile.bodyFont),
+          size: 24,
+          color: '000000',
+        })],
+      }),
+      new Paragraph({
+        alignment: AlignmentType.RIGHT,
+        spacing: { before: 240, after: 0, line: 360 },
+        children: [new TextRun({
+          text: complianceDateLabel(generatedAt),
+          font: runFont(profile.bodyFont),
+          size: 24,
+          color: '000000',
+        })],
+      }),
+    )
+  } else if (input.template.type === 'investment_proposal') {
+    const tableBorders = {
+      top: { style: BorderStyle.SINGLE, color: '000000', size: 4 },
+      bottom: { style: BorderStyle.SINGLE, color: '000000', size: 4 },
+      left: { style: BorderStyle.SINGLE, color: '000000', size: 4 },
+      right: { style: BorderStyle.SINGLE, color: '000000', size: 4 },
+      insideHorizontal: { style: BorderStyle.SINGLE, color: '000000', size: 4 },
+      insideVertical: { style: BorderStyle.SINGLE, color: '000000', size: 4 },
+    }
+    const proposalTable = (
+      table: NonNullable<BusinessContent['sections'][number]['tables']>[number],
+    ): Array<Paragraph | Table> => {
+      const width = 8300
+      const baseColumn = Math.floor(width / table.columns.length)
+      const columnWidths = table.columns.map((_, index) =>
+        index === table.columns.length - 1
+          ? width - baseColumn * (table.columns.length - 1)
+          : baseColumn)
+      const cellParagraph = (value: string, bold = false) => new Paragraph({
+        alignment: AlignmentType.CENTER,
+        spacing: { before: 0, after: 0, line: 260 },
+        children: [new TextRun({
+          text: value,
+          font: runFont(profile.bodyFont),
+          size: 21,
+          bold,
+          color: '000000',
+        })],
+      })
+      const row = (values: string[], header = false) => new TableRow({
+        tableHeader: header,
+        cantSplit: true,
+        children: values.map((value, index) => new TableCell({
+          width: { size: columnWidths[index], type: WidthType.DXA },
+          shading: header ? { fill: 'D9D9D9' } : undefined,
+          margins: { top: 70, right: 90, bottom: 70, left: 90 },
+          children: [cellParagraph(value, header)],
+        })),
+      })
+      const refs = sourceText(table.sourceIndexes, input.sources)
+      return [
+        new Paragraph({
+          alignment: AlignmentType.CENTER,
+          keepNext: true,
+          spacing: { before: 120, after: 0, line: 360 },
+          children: [new TextRun({
+            text: table.title,
+            font: runFont(profile.bodyFont),
+            size: 28,
+            bold: true,
+            color: '000000',
+          })],
+        }),
+        new Paragraph({
+          alignment: AlignmentType.RIGHT,
+          keepNext: true,
+          spacing: { before: 0, after: 60, line: 260 },
+          children: [new TextRun({
+            text: `单位：${table.unit || '无'}`,
+            font: runFont(profile.bodyFont),
+            size: 21,
+            color: '555555',
+          })],
+        }),
+        new Table({
+          width: { size: width, type: WidthType.DXA },
+          columnWidths,
+          borders: tableBorders,
+          rows: [
+            row(table.columns, true),
+            ...table.rows.map((values) => row(values)),
+          ],
+        }),
+        new Paragraph({
+          spacing: { before: 40, after: 80, line: 260 },
+          children: [new TextRun({
+            text: `（${table.status}${refs ? `；${refs}` : ''}）`,
+            font: runFont(profile.bodyFont),
+            size: 18,
+            color: '666666',
+          })],
+        }),
+      ]
+    }
+    input.content.sections.forEach((currentSection, sectionIndex) => {
+      const level: 1 | 2 = /^（[一二三四五六七八九十]+）/.test(currentSection.title) ? 2 : 1
+      const nextSection = input.content.sections[sectionIndex + 1]
+      const hasChildSection = level === 1
+        && Boolean(nextSection && /^（[一二三四五六七八九十]+）/.test(nextSection.title))
+      contentChildren.push(heading(currentSection.title, level))
+      if (hasChildSection) return
+      if (currentSection.summary) {
+        contentChildren.push(bodyParagraph(currentSection.summary, {
+          keepNext: Boolean(currentSection.tables?.length || currentSection.findings.length),
+        }))
+      }
+      currentSection.tables?.forEach((table) => {
+        contentChildren.push(...proposalTable(table))
+      })
+      currentSection.findings.forEach((finding, findingIndex) => {
+        const refs = sourceText(finding.sourceIndexes, input.sources)
+        contentChildren.push(new Paragraph({
+          spacing: { after: 0, line: 360 },
+          keepNext: findingIndex < currentSection.findings.length - 1,
+          keepLines: true,
+          indent: { firstLine: 560 },
+          alignment: AlignmentType.JUSTIFIED,
+          children: [
+            new TextRun({
+              text: finding.text,
+              color: '000000',
+              size: 28,
+              font: runFont(profile.bodyFont),
+            }),
+            new TextRun({
+              text: `\n（${finding.status}${refs ? `；${refs}` : ''}）`,
+              color: '666666',
+              size: 18,
+              font: runFont(profile.bodyFont),
+            }),
+          ],
+        }))
+      })
+    })
+    contentChildren.push(
+      new Paragraph({
+        alignment: AlignmentType.RIGHT,
+        spacing: { before: 240, after: 0, line: 360 },
+        keepNext: true,
         children: [new TextRun({
           text: '浙江赛智伯乐股权投资管理有限公司',
           font: runFont(profile.bodyFont),
-          size: 24,
+          size: 28,
           color: '000000',
         })],
       }),
       new Paragraph({
         alignment: AlignmentType.RIGHT,
-        spacing: { after: 220 },
+        spacing: { before: 0, after: 120, line: 360 },
         children: [new TextRun({
-          text: generatedAt.toLocaleDateString('zh-CN'),
+          text: generatedAt.toLocaleDateString('zh-CN', { year: 'numeric', month: 'long' }),
           font: runFont(profile.bodyFont),
-          size: 24,
+          size: 28,
           color: '000000',
         })],
       }),
+      disclaimerParagraph,
+      heading('引用资料', 1),
     )
-  }
+    if (references.length) {
+      references.forEach((source) => contentChildren.push(paragraph(
+        bibliographyLine(source),
+        { size: 19, color: '555555', after: 60, font: profile.bodyFont, firstLine: 0, line: 280 },
+      )))
+    } else {
+      contentChildren.push(paragraph('当前项目知识库无可用引用资料；所有实质性内容均需补证并人工核验。', {
+        color: '555555',
+        size: 20,
+        font: profile.bodyFont,
+        firstLine: 0,
+        line: 300,
+      }))
+    }
+  } else if (input.template.type === 'due_diligence_report') {
+    const sectionByTitle = new Map(input.content.sections.map((section) => [section.title, section]))
+    const dueHeading = (
+      value: string,
+      level: 1 | 2,
+      pageBreakBefore = false,
+      numbered = true,
+    ) => new Paragraph({
+      style: numbered
+        ? level === 1
+          ? DUE_DILIGENCE_STYLES.level1
+          : DUE_DILIGENCE_STYLES.level2
+        : undefined,
+      pageBreakBefore,
+      keepNext: true,
+      keepLines: true,
+      outlineLevel: numbered ? level - 1 : undefined,
+      spacing: numbered ? undefined : { before: 0, after: 0, line: 360 },
+      children: [new TextRun({
+        text: value,
+        font: runFont(level === 1 ? profile.headingFont : '楷体'),
+        size: 28,
+        bold: true,
+        color: '000000',
+      })],
+    })
+    const dueBody = (
+      value: string,
+      options: { bold?: boolean; keepNext?: boolean; firstLine?: boolean } = {},
+    ) => new Paragraph({
+      style: DUE_DILIGENCE_STYLES.body,
+      keepNext: options.keepNext,
+      keepLines: true,
+      alignment: AlignmentType.JUSTIFIED,
+      indent: options.firstLine === false ? { firstLine: 0 } : undefined,
+      children: [new TextRun({
+        text: value,
+        font: runFont(profile.bodyFont),
+        size: 28,
+        bold: options.bold,
+        color: '000000',
+      })],
+    })
+    const dueSourceNote = (value: string) => new Paragraph({
+      style: DUE_DILIGENCE_STYLES.sourceNote,
+      spacing: { before: 0, after: 60, line: 260 },
+      children: [new TextRun({
+        text: value,
+        font: runFont(profile.bodyFont),
+        size: 21,
+        color: '555555',
+      })],
+    })
+    const tableBorders = {
+      top: { style: BorderStyle.SINGLE, color: '7F7F7F', size: 4 },
+      bottom: { style: BorderStyle.SINGLE, color: '7F7F7F', size: 4 },
+      left: { style: BorderStyle.SINGLE, color: '7F7F7F', size: 4 },
+      right: { style: BorderStyle.SINGLE, color: '7F7F7F', size: 4 },
+      insideHorizontal: { style: BorderStyle.SINGLE, color: 'BFBFBF', size: 4 },
+      insideVertical: { style: BorderStyle.SINGLE, color: 'BFBFBF', size: 4 },
+    }
+    const overviewWidths = [1200, 2950, 1200, 2950]
+    const overviewCell = (value: string, label = false) => new TableCell({
+      width: { size: overviewWidths[label ? 0 : 1], type: WidthType.DXA },
+      shading: label ? { fill: 'E7E6E6' } : undefined,
+      margins: { top: 90, right: 100, bottom: 90, left: 100 },
+      children: [new Paragraph({
+        alignment: label ? AlignmentType.CENTER : AlignmentType.LEFT,
+        spacing: { before: 0, after: 0, line: 280 },
+        children: [new TextRun({
+          text: value,
+          font: runFont(profile.bodyFont),
+          size: 21,
+          bold: label,
+          color: '000000',
+        })],
+      })],
+    })
+    const overviewRow = (leftLabel: string, leftValue: string, rightLabel: string, rightValue: string) =>
+      new TableRow({
+        cantSplit: true,
+        children: [
+          overviewCell(leftLabel, true),
+          overviewCell(leftValue),
+          overviewCell(rightLabel, true),
+          overviewCell(rightValue),
+        ],
+      })
+    const overviewTable = new Table({
+      width: { size: 8300, type: WidthType.DXA },
+      columnWidths: overviewWidths,
+      borders: tableBorders,
+      rows: [
+        overviewRow('公司主体', text(input.project.companyName), '所属行业', text(input.project.industry)),
+        overviewRow('项目阶段', text(input.project.stage), '资料截止日', input.sourceCutoffDate),
+        overviewRow('融资安排', text(input.project.financing), '估值口径', text(input.project.valuation)),
+      ],
+    })
 
-  contentChildren.push(disclaimerParagraph, heading('引用资料', 1, true))
-  const references = usedSourceGroups(input.content, input.sources)
-  if (references.length) {
-    references.forEach((source) => contentChildren.push(paragraph(
-      bibliographyLine(source),
-      { size: 19, color: '555555', after: 90, font: profile.bodyFont, firstLine: 0 },
-    )))
+    contentChildren.push(
+      dueHeading('执行摘要', 1, false, false),
+      dueBody(input.content.executiveSummary),
+      dueSourceNote(generatedDateLabel(input.sourceCutoffDate)),
+    )
+
+    DUE_DILIGENCE_OUTLINE.forEach((group, groupIndex) => {
+      contentChildren.push(dueHeading(`${groupIndex + 1}、${group.title}`, 1, groupIndex > 0))
+      group.modules.forEach((moduleTitle, moduleIndex) => {
+        const currentSection = sectionByTitle.get(moduleTitle)
+        if (!currentSection) return
+        contentChildren.push(dueHeading(`${groupIndex + 1}.${moduleIndex + 1} ${moduleTitle}`, 2))
+        if (group.title === '投资概要' && moduleTitle === '投资概要') {
+          contentChildren.push(overviewTable, dueSourceNote('资料来源：项目档案及本报告实际引用资料'))
+        }
+        contentChildren.push(dueBody(currentSection.summary, {
+          bold: true,
+          keepNext: currentSection.findings.length > 0,
+        }))
+        currentSection.findings.forEach((finding, findingIndex) => {
+          const refs = sourceText(finding.sourceIndexes, input.sources)
+          contentChildren.push(new Paragraph({
+            style: DUE_DILIGENCE_STYLES.body,
+            keepNext: findingIndex < currentSection.findings.length - 1,
+            keepLines: true,
+            alignment: AlignmentType.JUSTIFIED,
+            children: [
+              new TextRun({
+                text: `【${finding.status}】`,
+                bold: true,
+                color: '000000',
+                size: 28,
+                font: runFont(profile.bodyFont),
+              }),
+              new TextRun({
+                text: finding.text,
+                color: '000000',
+                size: 28,
+                font: runFont(profile.bodyFont),
+              }),
+              ...(refs
+                ? [new TextRun({
+                    text: `\n${refs}`,
+                    color: '555555',
+                    size: 21,
+                    font: runFont(profile.bodyFont),
+                  })]
+                : []),
+            ],
+          }))
+        })
+      })
+    })
+
+    contentChildren.push(
+      new Paragraph({
+        spacing: { before: 240, after: 0, line: 300 },
+        border: { top: { color: '888888', size: 4, style: BorderStyle.SINGLE } },
+        children: [
+          new TextRun({
+            text: '责任声明：',
+            bold: true,
+            font: runFont(profile.bodyFont),
+            size: 21,
+            color: '000000',
+          }),
+          new TextRun({
+            text: input.template.disclaimer,
+            font: runFont(profile.bodyFont),
+            size: 21,
+            color: '555555',
+          }),
+        ],
+      }),
+      dueHeading('引用资料', 1, true, false),
+    )
+    if (references.length) {
+      references.forEach((source) => contentChildren.push(dueSourceNote(bibliographyLine(source))))
+    } else {
+      contentChildren.push(dueSourceNote('当前项目知识库无可用引用资料；所有实质性内容均需补证并人工核验。'))
+    }
   } else {
-    contentChildren.push(paragraph('当前项目知识库无可用引用资料；所有实质性内容均需补证并人工核验。', {
-      color: 'A13B3B',
-      size: 22,
-      font: profile.bodyFont,
-    }))
+    input.content.sections.forEach((currentSection, sectionIndex) => {
+      const shouldBreak = input.template.type === 'investment_proposal'
+        && sectionIndex > 0
+        && sectionIndex % 2 === 0
+      contentChildren.push(heading(`${sectionIndex + 1}. ${currentSection.title}`, 1, shouldBreak))
+      contentChildren.push(bodyParagraph(currentSection.summary, {
+        bold: true,
+        color: profile.accent,
+        firstLine: false,
+        keepNext: currentSection.findings.length > 0,
+      }))
+      currentSection.findings.forEach((finding, findingIndex) => {
+        const style = statusStyle[finding.status]
+        const refs = sourceText(finding.sourceIndexes, input.sources)
+        contentChildren.push(new Paragraph({
+          spacing: { after: 150, line: 360 },
+          keepNext: findingIndex < currentSection.findings.length - 1,
+          indent: { firstLine: 480 },
+          children: [
+            new TextRun({ text: `【${finding.status}】`, bold: true, color: style.color, size: 22, font: runFont(profile.bodyFont) }),
+            new TextRun({ text: finding.text, color: '000000', size: 24, font: runFont(profile.bodyFont) }),
+            ...(refs ? [new TextRun({ text: `\n${refs}`, color: '666666', size: 18, font: runFont(profile.bodyFont), italics: true })] : []),
+          ],
+        }))
+      })
+    })
+    contentChildren.push(disclaimerParagraph, heading('引用资料', 1, true))
+    if (references.length) {
+      references.forEach((source) => contentChildren.push(paragraph(
+        bibliographyLine(source),
+        { size: 19, color: '555555', after: 90, font: profile.bodyFont, firstLine: 0 },
+      )))
+    } else {
+      contentChildren.push(paragraph('当前项目知识库无可用引用资料；所有实质性内容均需补证并人工核验。', {
+        color: 'A13B3B',
+        size: 22,
+        font: profile.bodyFont,
+      }))
+    }
   }
 
+  const blueprintPage = complianceBlueprint?.primary.page
   const basePage = {
-    size: { width: 11906, height: 16838 },
-    margin: { top: 1440, right: 1800, bottom: 1498, left: 1800, header: 720, footer: 720 },
-    pageNumbers: { start: 1 },
+    size: {
+      width: blueprintPage?.widthDxa ?? 11906,
+      height: blueprintPage?.heightDxa ?? 16838,
+    },
+    margin: {
+      top: blueprintPage?.marginTopDxa ?? 1440,
+      right: blueprintPage?.marginRightDxa ?? 1800,
+      bottom: blueprintPage?.marginBottomDxa
+        ?? (input.template.type === 'compliance_statement' ? 1440 : 1498),
+      left: blueprintPage?.marginLeftDxa ?? 1800,
+      header: blueprintPage?.headerDistanceDxa
+        ?? (input.template.type === 'compliance_statement' ? 851 : 720),
+      footer: blueprintPage?.footerDistanceDxa
+        ?? (input.template.type === 'compliance_statement' ? 992 : 720),
+    },
+    ...(input.template.type === 'compliance_statement' ? {} : { pageNumbers: { start: 1 } }),
   }
   const commonSection = {
     properties: { page: basePage },
     headers: templateHeader ? { default: templateHeader } : undefined,
-    footers: { default: pageFooter },
+    footers: input.template.type === 'compliance_statement' ? undefined : { default: pageFooter },
   }
+  const proposalCompany = text(input.project.companyName, input.project.name)
+  const proposalTitle = input.content.title.includes(proposalCompany) && input.content.title.includes('提案')
+    ? input.content.title
+    : `关于对${proposalCompany}实施股权投资的提案`
   const title = input.template.type === 'compliance_statement'
-    ? `关于${input.project.name}项目投资合规性的说明`
-    : `${input.project.name}${input.template.label}`
+    ? `关于${complianceProjectName(input.project.name)}项目投资合规性的说明`
+    : input.template.type === 'investment_proposal'
+      ? proposalTitle
+      : `${input.project.name}${input.template.label}`
   let coverChildren: Array<Paragraph | Table>
   if (input.template.type === 'compliance_statement') {
     coverChildren = [
       new Paragraph({
         alignment: AlignmentType.CENTER,
-        spacing: { before: 120, after: 360, line: 420 },
+        spacing: { before: 0, after: 0, line: 360 },
         keepNext: true,
         children: [new TextRun({
           text: title,
           font: runFont(profile.headingFont),
-          size: 36,
-          bold: true,
+          size: 28,
           color: '000000',
         })],
       }),
-      new Paragraph({
-        alignment: AlignmentType.RIGHT,
-        spacing: { after: 260 },
-        children: [new TextRun({
-          text: generatedDateLabel(input.sourceCutoffDate),
-          font: runFont(profile.bodyFont),
-          size: 19,
-          color: '555555',
-        })],
-      }),
-      bodyParagraph(input.content.executiveSummary),
     ]
   } else if (input.template.type === 'investment_proposal') {
     coverChildren = [
       new Paragraph({
+        style: 'Title',
         alignment: AlignmentType.CENTER,
-        spacing: { before: 120, after: 360, line: 420 },
+        spacing: { before: 120, after: 240, line: 360 },
         keepNext: true,
         children: [new TextRun({
           text: title,
           font: runFont(profile.headingFont),
-          size: 36,
+          size: 44,
           bold: true,
           color: '000000',
         })],
       }),
       bodyParagraph('各位投资决策委员会成员：', { firstLine: false, keepNext: true }),
       bodyParagraph(input.content.executiveSummary),
-      bodyParagraph('现将本次投资提案及相关分析提交审阅，具体投资安排以尽调、投决及正式交易文件为准。'),
-      new Paragraph({
-        alignment: AlignmentType.RIGHT,
-        spacing: { after: 220 },
-        children: [new TextRun({
-          text: generatedDateLabel(input.sourceCutoffDate),
-          font: runFont(profile.bodyFont),
-          size: 19,
-          color: '555555',
-        })],
-      }),
+      bodyParagraph('在投资决策委员会审议通过后，将按照审议确定原则实施本次投资的具体操作；实际投资安排以完成尽调、正式投决及签署交易文件为准。'),
     ]
   } else {
     coverChildren = [
@@ -452,30 +1036,32 @@ export async function generateBusinessDocx(input: {
         spacing: { before: 1150, after: 480 },
         children: [new TextRun({
           text: text(input.project.companyName, input.project.name),
-          font: runFont(profile.headingFont),
-          size: 28,
+          font: runFont(DOCX_SONG_FONT),
+          size: 44,
           bold: true,
           color: '000000',
         })],
       }),
-      new Paragraph({
+      ...'尽职调查报告'.split('').map((character, index) => new Paragraph({
         alignment: AlignmentType.CENTER,
-        spacing: { before: 480, after: 520, line: 520 },
+        spacing: { before: 0, after: index === 5 ? 900 : 0, line: 440 },
+        keepNext: index < 5,
         children: [new TextRun({
-          text: '尽\n职\n调\n查\n报\n告',
-          font: runFont(profile.headingFont),
-          size: 42,
+          text: character,
+          font: runFont(DOCX_SONG_FONT),
+          size: 44,
           bold: true,
           color: '000000',
         })],
-      }),
+      })),
       new Paragraph({
         alignment: AlignmentType.CENTER,
-        spacing: { before: 650, after: 180 },
+        spacing: { before: 0, after: 180 },
         children: [new TextRun({
           text: generatedAt.toLocaleDateString('zh-CN', { year: 'numeric', month: 'long' }),
-          font: runFont(profile.bodyFont),
-          size: 24,
+          font: runFont(DOCX_SONG_FONT),
+          size: 32,
+          bold: true,
           color: '000000',
         })],
       }),
@@ -484,8 +1070,9 @@ export async function generateBusinessDocx(input: {
         spacing: { before: 300 },
         children: [new TextRun({
           text: '浙江赛智伯乐股权投资管理有限公司',
-          font: runFont(profile.bodyFont),
-          size: 24,
+          font: runFont(DOCX_SONG_FONT),
+          size: 32,
+          bold: true,
           color: '000000',
         })],
       }),
@@ -499,16 +1086,49 @@ export async function generateBusinessDocx(input: {
         children: coverChildren,
       },
       {
-        ...commonSection,
         properties: { page: { ...basePage, pageNumbers: { start: 1 } } },
+        headers: templateHeader ? { default: templateHeader } : undefined,
         children: [
-          heading('目录'),
-          ...input.template.sections.map((section, index) => new Paragraph({
-            spacing: { after: 140 },
-            children: [
-              new TextRun({ text: `${index + 1}. ${section}`, font: runFont(profile.bodyFont), size: 24, color: '000000' }),
-            ],
-          })),
+          new Paragraph({
+            keepNext: true,
+            spacing: { after: 160, line: 360 },
+            children: [new TextRun({
+              text: '目录',
+              font: runFont(profile.headingFont),
+              size: 28,
+              bold: true,
+              color: '000000',
+            })],
+          }),
+          new TableOfContents('目录', {
+            hyperlink: true,
+            headingStyleRange: '1-2',
+            useAppliedParagraphOutlineLevel: true,
+            beginDirty: true,
+            contentChildren: DUE_DILIGENCE_OUTLINE.flatMap((group, groupIndex) => [
+              new Paragraph({
+                keepNext: group.modules.length > 1,
+                spacing: { after: 80, line: 360 },
+                children: [new TextRun({
+                  text: `${groupIndex + 1}、${group.title}`,
+                  font: runFont(profile.headingFont),
+                  size: 28,
+                  bold: true,
+                  color: '000000',
+                })],
+              }),
+              ...group.modules.map((moduleTitle, moduleIndex) => new Paragraph({
+                spacing: { after: 60, line: 330 },
+                indent: { left: 560 },
+                children: [new TextRun({
+                  text: `${groupIndex + 1}.${moduleIndex + 1} ${moduleTitle}`,
+                  font: runFont(profile.bodyFont),
+                  size: 24,
+                  color: '000000',
+                })],
+              })),
+            ]),
+          }),
         ],
       },
       {
@@ -524,21 +1144,72 @@ export async function generateBusinessDocx(input: {
 
   const doc = new Document({
     creator: '浙江赛智伯乐股权投资管理有限公司投资中台',
-    title: input.content.title,
+    title,
     description: `${input.template.label} AI 初稿；使用 docs 公司参考模板的版式规范`,
+    features: input.template.type === 'due_diligence_report'
+      ? { updateFields: true }
+      : undefined,
+    numbering: input.template.type === 'compliance_statement'
+      ? {
+          config: [
+            {
+              reference: 'compliance-level-1',
+              levels: [{
+                level: 0,
+                format: LevelFormat.CHINESE_COUNTING,
+                text: '%1、',
+                alignment: AlignmentType.LEFT,
+                suffix: LevelSuffix.NOTHING,
+                style: {
+                  run: { font: runFont(profile.bodyFont), size: 24, bold: true },
+                  paragraph: { indent: { left: 720, hanging: 720 } },
+                },
+              }],
+            },
+            {
+              reference: 'compliance-level-2',
+              levels: [{
+                level: 0,
+                format: LevelFormat.DECIMAL,
+                text: '（%1）',
+                alignment: AlignmentType.LEFT,
+                suffix: LevelSuffix.NOTHING,
+                style: {
+                  run: { font: runFont(profile.bodyFont), size: 24, bold: false },
+                  paragraph: { indent: { left: 1140, hanging: 720 } },
+                },
+              }],
+            },
+            {
+              reference: 'compliance-item',
+              levels: [{
+                level: 0,
+                format: LevelFormat.DECIMAL,
+                text: '%1、',
+                alignment: AlignmentType.LEFT,
+                suffix: LevelSuffix.NOTHING,
+                style: {
+                  run: { font: runFont(profile.bodyFont), size: 24, bold: true },
+                  paragraph: { indent: { left: 0, hanging: 0 } },
+                },
+              }],
+            },
+          ],
+        }
+      : undefined,
     styles: {
       default: {
         document: {
-          run: { font: runFont(profile.bodyFont), size: 24, color: '000000' },
-          paragraph: { spacing: { after: 160, line: 360 } },
+          run: { font: runFont(profile.bodyFont), size: isProposal ? 28 : 24, color: '000000' },
+          paragraph: { spacing: { after: isProposal ? 0 : 160, line: 360 } },
         },
         heading1: {
-          run: { font: runFont(profile.headingFont), size: 30, bold: true, color: '000000' },
-          paragraph: { spacing: { before: 300, after: 180 }, keepNext: true },
+          run: { font: runFont(profile.headingFont), size: isProposal ? 28 : 30, bold: true, color: '000000' },
+          paragraph: { spacing: { before: isProposal ? 240 : 300, after: isProposal ? 0 : 180 }, keepNext: true },
         },
         heading2: {
-          run: { font: runFont(profile.bodyFont), size: 26, bold: true, color: '000000' },
-          paragraph: { spacing: { before: 240, after: 120 }, keepNext: true },
+          run: { font: runFont(isProposal ? DOCX_KAITI_FONT : profile.bodyFont), size: isProposal ? 28 : 26, bold: false, color: '000000' },
+          paragraph: { spacing: { before: isProposal ? 120 : 240, after: isProposal ? 0 : 120 }, keepNext: true },
         },
       },
     },
@@ -548,13 +1219,18 @@ export async function generateBusinessDocx(input: {
   const templateBuffer = await readFile(input.template.referencePath)
   const outputZip = await JSZip.loadAsync(await readFile(input.outputPath))
   const templateZip = await JSZip.loadAsync(templateBuffer)
-  const templateParts = [
-    'word/styles.xml',
-    'word/stylesWithEffects.xml',
-    'word/numbering.xml',
-    'word/theme/theme1.xml',
-    'word/fontTable.xml',
-  ]
+  // 投资提案按已蒸馏的精确令牌创建样式。不要在生成后覆盖 styles.xml 或
+  // numbering.xml/fontTable.xml，否则新文档中的样式、编号或字体引用可能
+  // 指向模板中不同的 ID，或删除运行时使用的中文字体声明。
+  const templateParts = input.template.type === 'investment_proposal'
+    ? []
+    : [
+        'word/styles.xml',
+        'word/stylesWithEffects.xml',
+        'word/numbering.xml',
+        'word/theme/theme1.xml',
+        'word/fontTable.xml',
+      ]
   const appliedParts: string[] = []
   for (const part of templateParts) {
     const sourcePart = templateZip.file(part)
@@ -562,13 +1238,131 @@ export async function generateBusinessDocx(input: {
     outputZip.file(part, await sourcePart.async('nodebuffer'))
     appliedParts.push(part)
   }
+  if (input.template.type === 'due_diligence_report') {
+    const documentPart = outputZip.file('word/document.xml')
+    if (documentPart) {
+      const documentXml = await documentPart.async('string')
+      // 主模板的星实一标/二标样式自带中文编号。生成器已经把统一的
+      // 1、/1.1 编号写入标题文本，因此必须在段落级关闭样式编号，
+      // 否则 Word/WPS 会显示“一、1、…”或“（一）1.1 …”的双重编号。
+      const unnumberedHeadingXml = documentXml.replace(
+        /(<w:pStyle w:val="(?:79|86)"\/>)(?!<w:numPr>)/g,
+        '$1<w:numPr><w:ilvl w:val="0"/><w:numId w:val="0"/></w:numPr>',
+      )
+      outputZip.file('word/document.xml', unnumberedHeadingXml)
+    }
+  }
+  if (input.template.type === 'compliance_statement') {
+    const fontTablePart = outputZip.file('word/fontTable.xml')
+    if (fontTablePart) {
+      const fontTableXml = await fontTablePart.async('string')
+      const compatibleFontTableXml = ensureDocxFontAltName(
+        ensureDocxFontAltName(
+          setDocxFontAltName(
+            setDocxFontAltName(fontTableXml, '宋体', 'Songti SC'),
+            '黑体',
+            'STHeiti',
+          ),
+          'Songti SC',
+          '宋体',
+        ),
+        'STHeiti',
+        '黑体',
+      )
+      outputZip.file(
+        'word/fontTable.xml',
+        compatibleFontTableXml.replace(
+          /<w:embed(?:Regular|Bold|Italic|BoldItalic)\b[^>]*\/>/g,
+          '',
+        ),
+      )
+    }
+    const templateTheme = templateZip.file('word/theme/theme1.xml')
+    if (templateTheme && !outputZip.file('word/theme/theme1.xml')) {
+      outputZip.file('word/theme/theme1.xml', await templateTheme.async('nodebuffer'))
+      const relationshipsPart = outputZip.file('word/_rels/document.xml.rels')
+      if (relationshipsPart) {
+        let relationshipsXml = await relationshipsPart.async('string')
+        if (!/relationships\/theme/.test(relationshipsXml)) {
+          const usedIds = [...relationshipsXml.matchAll(/\bId="rId(\d+)"/g)]
+            .map((match) => Number(match[1]))
+          const nextId = Math.max(0, ...usedIds) + 1
+          relationshipsXml = relationshipsXml.replace(
+            '</Relationships>',
+            `<Relationship Id="rId${nextId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme" Target="theme/theme1.xml"/></Relationships>`,
+          )
+          outputZip.file('word/_rels/document.xml.rels', relationshipsXml)
+        }
+      }
+      const contentTypesPart = outputZip.file('[Content_Types].xml')
+      if (contentTypesPart) {
+        let contentTypesXml = await contentTypesPart.async('string')
+        if (!contentTypesXml.includes('/word/theme/theme1.xml')) {
+          contentTypesXml = contentTypesXml.replace(
+            '</Types>',
+            '<Override PartName="/word/theme/theme1.xml" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/></Types>',
+          )
+          outputZip.file('[Content_Types].xml', contentTypesXml)
+        }
+      }
+      appliedParts.push('word/theme/theme1.xml')
+    }
+    const documentPart = outputZip.file('word/document.xml')
+    const numberingPart = outputZip.file('word/numbering.xml')
+    if (documentPart && numberingPart) {
+      const documentXml = await documentPart.async('string')
+      const templateListStyleId = complianceBlueprint?.primary.paragraphRoles.level1.styleId
+      const mappedDocumentXml = documentXml
+        .replace(
+          /<w:numId w:val="([2-5])"\/>/g,
+          (_match, value: string) => `<w:numId w:val="${({ 2: 1, 3: 2, 4: 3, 5: 4 } as Record<string, number>)[value]}"/>`,
+        )
+        // docx 会为编号段落写入内置 ListParagraph。合规模板的 styles.xml
+        // 来自 WPS，实际列表样式是模板解析所得的数字 ID；若不映射，
+        // Word XML 中虽然有 numPr，LibreOffice/PDF 却不会渲染可见编号。
+        .replace(
+          /<w:pStyle w:val="ListParagraph"\/>/g,
+          templateListStyleId
+            ? `<w:pStyle w:val="${templateListStyleId}"/>`
+            : '',
+        )
+      let numberingXml = await numberingPart.async('string')
+      numberingXml = numberingXml
+        .split('japaneseCounting').join('chineseCounting')
+        .split('宋体').join('Songti SC')
+        .split('黑体').join('STHeiti')
+      if (!/<w:num w:numId="4">/.test(numberingXml)) {
+        numberingXml = numberingXml.replace(
+          '</w:numbering>',
+          '<w:num w:numId="4"><w:abstractNumId w:val="2"/><w:lvlOverride w:ilvl="0"><w:startOverride w:val="1"/></w:lvlOverride></w:num></w:numbering>',
+        )
+      }
+      outputZip.file('word/document.xml', mappedDocumentXml)
+      outputZip.file('word/numbering.xml', numberingXml)
+    }
+  }
   await writeFile(input.outputPath, await outputZip.generateAsync({ type: 'nodebuffer' }))
+  const templateCorpus = await Promise.all(
+    (input.template.referencePaths?.length ? input.template.referencePaths : [input.template.referencePath])
+      .map(async (referencePath) => ({
+        fileName: path.basename(referencePath),
+        sha256: createHash('sha256').update(await readFile(referencePath)).digest('hex'),
+      })),
+  )
   return {
     pageIntent: input.template.type === 'due_diligence_report' ? 'long-form' : 'brief',
     templateApplied: true,
     templateSha256: createHash('sha256').update(templateBuffer).digest('hex'),
+    templateCorpus,
     templateParts: appliedParts,
     typography: { body: profile.bodyFont, heading: profile.headingFont },
+    ...(complianceBlueprint
+      ? {
+          blueprintSha256: complianceBlueprint.blueprintSha256,
+          blueprintVersion: complianceBlueprint.version,
+          sectionTree: complianceBlueprint.sectionTree,
+        }
+      : {}),
   }
 }
 
@@ -930,6 +1724,39 @@ export function renderBusinessMarkdown(input: {
   sources: EvidenceSource[]
   sourceCutoffDate: string
 }) {
+  if (input.template.type === 'compliance_statement') {
+    const sectionByTitle = new Map(input.content.sections.map((section) => [section.title, section]))
+    const findingTexts = (title: string) => (sectionByTitle.get(title)?.findings ?? [])
+      .map((finding) => finding.text.replace(/^\s*\d+[、.．]\s*/, '').trim())
+      .filter(Boolean)
+    const lines = [
+      `# ${input.content.title}`,
+      '',
+      '## 一、公司情况介绍',
+    ]
+    ;(['公司简介', '核心团队', '产品及技术'] as const).forEach((title, index) => {
+      lines.push('', `### （${index + 1}）${title}`, '', ...findingTexts(title))
+    })
+    lines.push('', '## 二、投资理由', '')
+    findingTexts('投资理由').slice(0, 5).forEach((value, index) => {
+      lines.push(`${index + 1}、${value}`, '')
+    })
+    lines.push('## 三、投资计划', '', ...findingTexts('投资计划'))
+    lines.push('', '## 四、投资情形分析', '')
+    findingTexts('投资情形分析').slice(0, 7).forEach((value, index) => {
+      lines.push(`${index + 1}、${value}`, '')
+    })
+    const conclusion = findingTexts('结论')
+    lines.push(
+      ...(conclusion.length ? conclusion : [input.content.executiveSummary]),
+      '',
+      '浙江赛智伯乐股权投资管理有限公司',
+      '',
+      complianceDateLabel(new Date()),
+    )
+    return `${lines.join('\n')}\n`
+  }
+
   const lines = [
     `# ${input.content.title}`,
     '',
@@ -945,28 +1772,6 @@ export function renderBusinessMarkdown(input: {
     input.content.executiveSummary,
   ]
   const emitted = new Set<string>()
-  if (input.template.type === 'compliance_statement') {
-    const verified = input.content.sections.flatMap((section) => section.findings)
-      .filter((finding) => finding.status === '资料记载')
-      .map((finding) => finding.text)
-      .slice(0, 8)
-    const pending = input.content.sections.flatMap((section) => section.findings)
-      .filter((finding) => finding.status === '待核验' || finding.status === 'AI推断')
-      .map((finding) => finding.text)
-      .slice(0, 8)
-    const blocks = [
-      ['已核验事实', verified],
-      ['风险提示', input.content.risks],
-      ['待核验事项', pending],
-      ['资料缺口', input.content.missing],
-      ['免责声明', [input.template.disclaimer]],
-    ] as const
-    blocks.forEach(([title, values]) => {
-      const uniqueValues = dedupeTextList(values, { limit: 8, against: [...emitted] })
-      uniqueValues.forEach((value) => emitted.add(value))
-      lines.push('', `## ${title}`, '', ...(uniqueValues.length ? uniqueValues : ['当前无可列示内容，须由法务或风控人员补充核验。']).map((value) => `- ${value}`))
-    })
-  }
   input.content.sections.forEach((section, sectionIndex) => {
     lines.push('', `## ${sectionIndex + 1}. ${section.title}`, '', section.summary)
     section.findings.forEach((finding) => {

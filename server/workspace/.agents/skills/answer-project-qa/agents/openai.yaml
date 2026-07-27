@@ -1,4 +1,4 @@
 interface:
   display_name: "项目 Q&A"
-  short_description: "读取 docs/Q&A 模板，生成会话内可追溯结构化回答"
-  default_prompt: "使用 $answer-project-qa，读取 docs/Q&A 的 PDF 模板并根据当前项目数据与用户输入生成会话内结构化回答，不生成 PPT 或其他文件。"
+  short_description: "按核心规范生成投委会/尽调 Q&A 与可追溯单题回答"
+  default_prompt: "使用 $answer-project-qa，基于当前项目资料和 docs/Q&A 核心规范生成投资委员会或尽调 Q&A；正式任务输出 Word 与 PDF，不生成 PPT。"

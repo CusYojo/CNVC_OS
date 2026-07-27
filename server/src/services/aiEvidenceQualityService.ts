@@ -192,8 +192,10 @@ export function curateEvidenceSources<T extends EvidenceLike>(
       .sort((left, right) => right._score - left._score || left._order - right._order)
       .slice(0, maxPerDocument))
     .sort((left, right) => {
-      if (left.sourceType === 'project_record' && right.sourceType !== 'project_record') return -1
-      if (right.sourceType === 'project_record' && left.sourceType !== 'project_record') return 1
+      const priority = (sourceType: string) =>
+        sourceType === 'user_input' ? 0 : sourceType === 'project_record' ? 1 : 2
+      const priorityDiff = priority(left.sourceType) - priority(right.sourceType)
+      if (priorityDiff) return priorityDiff
       return left._order - right._order
     })
     .slice(0, maxTotal)

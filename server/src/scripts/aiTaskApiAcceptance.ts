@@ -54,6 +54,11 @@ const apiBase = (process.env.AI_ACCEPTANCE_API_BASE || 'http://127.0.0.1:3100/ap
 const apiOrigin = new URL(apiBase).origin
 const databaseUrl = process.env.DATABASE_URL
 const reportPath = process.env.AI_API_ACCEPTANCE_REPORT
+const acceptanceScope = process.env.AI_ACCEPTANCE_SCOPE === 'qa'
+  ? 'qa'
+  : process.env.AI_ACCEPTANCE_SCOPE === 'compliance'
+    ? 'compliance'
+    : 'all'
 const checks: Check[] = []
 
 function apiUrl(resourcePath: string) {
@@ -64,6 +69,22 @@ function apiUrl(resourcePath: string) {
 function assert(name: string, condition: boolean, detail: string) {
   checks.push({ name, passed: condition, detail })
   if (!condition) throw new Error(`${name}：${detail}`)
+}
+
+async function outputReport(note: string) {
+  const report = {
+    generatedAt: new Date().toISOString(),
+    apiBase,
+    scope: acceptanceScope,
+    passed: checks.every((check) => check.passed),
+    checks,
+    note,
+  }
+  if (reportPath) {
+    await mkdir(path.dirname(reportPath), { recursive: true })
+    await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`, 'utf8')
+  }
+  process.stdout.write(`${JSON.stringify(report, null, 2)}\n`)
 }
 
 async function request<T>(
@@ -130,14 +151,16 @@ async function main() {
       /^sha256-[a-f0-9]{12}$/.test(skill.version) && /^[a-f0-9]{64}$/.test(skill.sha256)),
     skillCatalog.list.map((skill) => `${skill.name}:${skill.version}`).join(', '),
   )
-  const { data: taskTypes } = await request<{
-    list: Array<{ type: string; skillName: string }>
-  }>('/ai/task-types', {}, adminToken)
-  assert(
-    '四类文档任务配置均暴露 Skill 绑定',
-    taskTypes.list.length === 4 && taskTypes.list.every((item) => Boolean(item.skillName)),
-    taskTypes.list.map((item) => `${item.type}:${item.skillName}`).join(', '),
-  )
+  if (acceptanceScope === 'all') {
+    const { data: taskTypes } = await request<{
+      list: Array<{ type: string; skillName: string }>
+    }>('/ai/task-types', {}, adminToken)
+    assert(
+      '四类文档任务配置均暴露 Skill 绑定',
+      taskTypes.list.length === 4 && taskTypes.list.every((item) => Boolean(item.skillName)),
+      taskTypes.list.map((item) => `${item.type}:${item.skillName}`).join(', '),
+    )
+  }
 
   const { data: project } = await request<{ id: string; name: string }>('/projects', {
     method: 'POST',
@@ -165,7 +188,7 @@ async function main() {
   const { data: conversation } = await request<{ id: string }>('/conversations', {
     method: 'POST',
     body: JSON.stringify({
-      title: 'AI-007～AI-010 API 验收',
+      title: acceptanceScope === 'qa' ? 'AI-011 Q&A API 验收' : 'AI-007～AI-011 API 验收',
       scope: 'project',
       projectId: project.id,
       projectName: project.name,
@@ -173,6 +196,7 @@ async function main() {
   }, adminToken, 201)
   assert('API 创建项目会话', Boolean(conversation.id), conversation.id)
 
+  if (acceptanceScope !== 'compliance') {
   const qaQuestion = '该项目当前最需要优先核验的核心风险是什么？'
   const { data: qaAnswer } = await request<ProjectQaAnswer>('/ai/qa', {
     method: 'POST',
@@ -205,10 +229,17 @@ async function main() {
   )
   assert(
     'AI-011 记录 docs Q&A 模板版本',
-    /^qa-docs-samples-/.test(qaAnswer.templateVersion)
-      && qaAnswer.referenceTemplates.length >= 1
+    qaAnswer.templateVersion === 'qa-core-rules-20260726-v5'
+      && qaAnswer.referenceTemplates.length === 5
       && qaAnswer.referenceTemplates.every((item) => item.toLowerCase().endsWith('.pdf')),
     `${qaAnswer.templateVersion} / ${qaAnswer.referenceTemplates.join('、')}`,
+  )
+  assert(
+    'AI-011 Q&A 使用模板一致的连续分维度编号',
+    qaAnswer.keyPoints.length >= 1
+      && qaAnswer.keyPoints.every((point, index) =>
+        point.text.startsWith(`（${index + 1}）`)),
+    qaAnswer.keyPoints.map((point) => point.text.slice(0, 20)).join(' | '),
   )
   assert(
     'AI-011 Q&A 返回去重来源及定位',
@@ -259,6 +290,61 @@ async function main() {
   })
   assert('无项目权限用户不能创建 Q&A 回答', otherQaCreate.status === 403, `HTTP ${otherQaCreate.status}`)
 
+  const qaAnswerRecord = qaAnswer as unknown as Record<string, unknown>
+  assert(
+    'AI-011 兼容单题接口不误创建文档',
+    !('artifacts' in qaAnswerRecord)
+      && !('outputFormat' in qaAnswerRecord)
+      && !('downloadUrl' in qaAnswerRecord)
+      && qaAnswer.referenceTemplates.every((item) => item.toLowerCase().endsWith('.pdf')),
+    '兼容结构化单题回答 / 5 份 PDF 输入模板 / 无 artifacts',
+  )
+
+  const qaTaskKey = `accept-project-qa-${suffix}`
+  const { data: qaTaskCreated } = await request<Task>('/ai/tasks', {
+    method: 'POST',
+    body: JSON.stringify({
+      projectId: project.id,
+      conversationId: conversation.id,
+      type: 'project_qa',
+      parameters: {
+        sourceCutoffDate: cutoff,
+        qaMode: '投资委员会 Q&A',
+        questionDepth: '标准版',
+        outputFormat: 'DOCX+PDF',
+      },
+      idempotencyKey: qaTaskKey,
+    }),
+  }, adminToken, 202)
+  const qaTask = await pollTask(adminToken, qaTaskCreated.id, 180_000)
+  assert(
+    'AI-011 正式 Q&A 文档任务完成',
+    qaTask.status === 'succeeded' && qaTask.progress === 100,
+    `${qaTask.status} / ${qaTask.progress}`,
+  )
+  assert(
+    'AI-011 同时输出 Word 与 PDF',
+    ['docx', 'pdf'].every((format) =>
+      qaTask.artifacts.some((artifact) => artifact.format === format)),
+    qaTask.artifacts.map((artifact) => artifact.format).join(','),
+  )
+  assert(
+    'AI-011 记录 Generator、Reviewer、模板和 Skill 审计信息',
+    qaTask.artifacts.every((artifact) =>
+      artifact.metadata?.skillName === 'answer-project-qa'
+      && artifact.metadata?.questionCount === 15
+      && artifact.metadata?.categoryCount === 15
+      && Boolean(artifact.metadata?.templateCorpusSha256)
+      && Boolean(artifact.metadata?.reviewerChecks)),
+    qaTask.artifacts.map((artifact) => JSON.stringify(artifact.metadata)).join(' | '),
+  )
+
+  if (acceptanceScope === 'qa') {
+    await outputReport('Q&A 专项验收覆盖兼容单题接口及正式 project_qa 文档任务，验证 Word/PDF 双产物。')
+    return
+  }
+  }
+
   const basePayload = {
     projectId: project.id,
     conversationId: conversation.id,
@@ -297,8 +383,9 @@ async function main() {
     `${compliance.status} / ${compliance.progress}%`,
   )
   assert(
-    'AI-007 同时登记 DOCX 与 Markdown',
-    ['docx', 'md'].every((format) => compliance.artifacts.some((artifact) => artifact.format === format)),
+    'AI-007 同时登记 DOCX、PDF 与 Markdown',
+    ['docx', 'pdf', 'md'].every((format) =>
+      compliance.artifacts.some((artifact) => artifact.format === format)),
     compliance.artifacts.map((artifact) => artifact.format).join(','),
   )
   assert('AI-007 登记项目来源', compliance.sources.length >= 1, `${compliance.sources.length} 条`)
@@ -311,6 +398,15 @@ async function main() {
   )
 
   const docx = compliance.artifacts.find((artifact) => artifact.format === 'docx')!
+  const compliancePdf = compliance.artifacts.find((artifact) => artifact.format === 'pdf')!
+  const complianceMarkdown = compliance.artifacts.find((artifact) => artifact.format === 'md')!
+  assert(
+    'AI-007 PDF 由最终 Word 同源生成并通过 Reviewer',
+    compliancePdf.metadata?.derivedFromArtifactId === docx.id
+      && compliancePdf.metadata?.pdfReviewerPassed === true
+      && compliancePdf.metadata?.visibleNumberingValidated === true,
+    JSON.stringify(compliancePdf.metadata),
+  )
   const download = await fetch(apiUrl(docx.downloadUrl), {
     headers: { Authorization: `Bearer ${adminToken}` },
   })
@@ -321,6 +417,19 @@ async function main() {
       && downloadBytes > 1000
       && (download.headers.get('content-disposition') || '').includes('filename*=UTF-8'),
     `HTTP ${download.status}，${downloadBytes} bytes`,
+  )
+  const markdownDownload = await fetch(apiUrl(complianceMarkdown.downloadUrl), {
+    headers: { Authorization: `Bearer ${adminToken}` },
+  })
+  const markdownText = await markdownDownload.text()
+  assert(
+    'AI-007 Markdown 遵循核心正文结构且不泄露审计元数据',
+    markdownDownload.status === 200
+      && ['一、公司情况介绍', '二、投资理由', '三、投资计划', '四、投资情形分析']
+        .every((title) => markdownText.includes(`## ${title}`))
+      && ['## 摘要', '## 风险提示', '## 资料缺口', '## 免责声明', '## 引用资料', '[S1]']
+        .every((term) => !markdownText.includes(term)),
+    `${markdownDownload.status} / ${markdownText.slice(0, 120)}`,
   )
 
   const otherTask = await fetch(apiUrl(`/ai/tasks/${compliance.id}`), {
@@ -349,10 +458,21 @@ async function main() {
   )
   assert('其他用户的交付物中心不泄露项目产物', otherArtifacts.list.length === 0, `${otherArtifacts.list.length} 个`)
 
+  if (acceptanceScope === 'compliance') {
+    await outputReport('合规性说明专项 API 验收覆盖任务生成、DOCX/PDF/Markdown 登记、下载鉴权与审计元数据。')
+    return
+  }
+
   const taskInputs = [
     {
       type: 'investment_proposal',
-      parameters: { sourceCutoffDate: cutoff, outputFormat: 'DOCX', audience: '内部立项', length: '标准版' },
+      parameters: {
+        sourceCutoffDate: cutoff,
+        outputFormat: 'DOCX',
+        audience: '内部立项',
+        length: '标准版',
+        userInstructions: '重点说明本轮拟议交易安排；如与项目证据冲突，请标记为待核验。',
+      },
       formats: ['docx'],
       skillName: 'draft-investment-proposal',
     },
@@ -493,18 +613,7 @@ async function main() {
   )
   assert('交付物中心按项目返回正式产物', artifacts.list.length >= 6, `${artifacts.list.length} 个`)
 
-  const report = {
-    generatedAt: new Date().toISOString(),
-    apiBase,
-    passed: checks.every((check) => check.passed),
-    checks,
-    note: '该脚本必须对隔离测试数据库运行；会创建脱敏项目、会话和任务记录。',
-  }
-  if (reportPath) {
-    await mkdir(path.dirname(reportPath), { recursive: true })
-    await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`, 'utf8')
-  }
-  process.stdout.write(`${JSON.stringify(report, null, 2)}\n`)
+  await outputReport('全量验收必须对隔离测试数据库运行；会创建脱敏项目、会话和任务记录。')
 }
 
 main().catch((error) => {

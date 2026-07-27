@@ -1,0 +1,754 @@
+import {
+  AlignmentType,
+  BorderStyle,
+  Document,
+  Footer,
+  Header,
+  HeadingLevel,
+  LineRuleType,
+  PageNumber,
+  Packer,
+  Paragraph,
+  ShadingType,
+  Table,
+  TableCell,
+  TableLayoutType,
+  TableRow,
+  TextRun,
+  VerticalAlign,
+  WidthType,
+} from 'docx'
+import JSZip from 'jszip'
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
+import path from 'node:path'
+import {
+  usedBusinessSourceIndexes,
+  type BusinessContent,
+  type BusinessFinding,
+  type BusinessTable,
+  type EvidenceSource,
+} from './aiBusinessContentService.js'
+import {
+  loadInvestmentProposalBlueprint,
+  type InvestmentProposalDocumentBlueprint,
+} from './aiInvestmentProposalBlueprintService.js'
+import type { AiTemplateDefinition } from './aiTemplateCatalog.js'
+
+type ProjectLike = {
+  name: string
+  companyName?: string | null
+}
+
+const MACOS = process.platform === 'darwin'
+const SANS_FONT = process.env.AI_DOCUMENT_SANS_FONT || (MACOS ? 'Heiti SC' : '黑体')
+const SONG_FONT = process.env.AI_DOCUMENT_SONG_FONT || (MACOS ? 'Songti SC' : '宋体')
+const FANGSONG_FONT = process.env.AI_DOCUMENT_FANGSONG_FONT || (MACOS ? 'Songti SC' : '仿宋')
+const KAITI_FONT = process.env.AI_DOCUMENT_KAITI_FONT || (MACOS ? 'Kaiti SC' : '楷体')
+const NUMBER_FONT = 'Times New Roman'
+
+const font = (eastAsia: string) => ({
+  ascii: eastAsia,
+  hAnsi: eastAsia,
+  cs: eastAsia,
+  eastAsia,
+})
+
+const xmlEntities: Record<string, string> = {
+  amp: '&',
+  lt: '<',
+  gt: '>',
+  quot: '"',
+  apos: "'",
+}
+
+function decodeXml(value: string) {
+  return value
+    .replace(/&#x([0-9a-f]+);/gi, (_match, code: string) =>
+      String.fromCodePoint(Number.parseInt(code, 16)))
+    .replace(/&#([0-9]+);/g, (_match, code: string) =>
+      String.fromCodePoint(Number.parseInt(code, 10)))
+    .replace(/&(amp|lt|gt|quot|apos);/g, (_match, name: string) => xmlEntities[name] ?? '')
+}
+
+function xmlText(value: string) {
+  return [...value.matchAll(/<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>/g)]
+    .map((match) => decodeXml(match[1]))
+    .join('')
+}
+
+function validSourceIndexes(indexes: number[], sources: EvidenceSource[]) {
+  return [...new Set(indexes.filter((index) =>
+    Number.isInteger(index) && index >= 0 && index < sources.length))]
+}
+
+function citationLabel(indexes: number[], sources: EvidenceSource[]) {
+  const valid = validSourceIndexes(indexes, sources)
+  return valid.length ? valid.map((index) => `S${index + 1}`).join('、') : ''
+}
+
+function visibleStatus(status: BusinessFinding['status']) {
+  return status === 'AI推断' ? '分析判断' : status
+}
+
+function findingParagraph(finding: BusinessFinding, sources: EvidenceSource[]) {
+  const citations = citationLabel(finding.sourceIndexes, sources)
+  const statusLabel = visibleStatus(finding.status)
+  const auditLabel = citations
+    ? `〔${statusLabel}；${citations}〕`
+    : `〔${statusLabel}〕`
+  return new Paragraph({
+    spacing: { before: 0, after: 0, line: 480, lineRule: LineRuleType.EXACT },
+    indent: { firstLine: 480 },
+    alignment: AlignmentType.JUSTIFIED,
+    keepLines: true,
+    children: [
+      new TextRun({
+        text: finding.text,
+        size: 24,
+        color: '000000',
+        font: font(FANGSONG_FONT),
+      }),
+      new TextRun({
+        text: auditLabel,
+        size: 21,
+        color: '666666',
+        font: font(SONG_FONT),
+      }),
+    ],
+  })
+}
+
+function tableColumnWidths(columnCount: number) {
+  const width = 8306
+  const base = Math.floor(width / columnCount)
+  const values = Array.from({ length: columnCount }, () => base)
+  values[values.length - 1] += width - base * columnCount
+  return values
+}
+
+function proposalTable(table: BusinessTable, sources: EvidenceSource[]) {
+  const widths = tableColumnWidths(table.columns.length)
+  const cell = (value: string, index: number, header = false) => new TableCell({
+    width: { size: widths[index], type: WidthType.DXA },
+    verticalAlign: VerticalAlign.CENTER,
+    margins: { top: 70, right: 80, bottom: 70, left: 80 },
+    shading: header
+      ? { fill: 'D9D9D9', type: ShadingType.CLEAR, color: 'auto' }
+      : undefined,
+    children: [new Paragraph({
+      alignment: header ? AlignmentType.CENTER : AlignmentType.LEFT,
+      spacing: { before: 0, after: 0, line: 360, lineRule: LineRuleType.EXACT },
+      children: [new TextRun({
+        text: value,
+        bold: header,
+        size: 21,
+        color: '000000',
+        font: font(header ? SONG_FONT : FANGSONG_FONT),
+      })],
+    })],
+  })
+  const citation = citationLabel(table.sourceIndexes, sources)
+  return [
+    new Paragraph({
+      keepNext: true,
+      spacing: { before: 0, after: 0, line: 480, lineRule: LineRuleType.EXACT },
+      alignment: AlignmentType.CENTER,
+      children: [new TextRun({
+        text: `${table.title}${table.unit && table.unit !== '无' ? `（单位：${table.unit}）` : ''}`,
+        bold: true,
+        size: 24,
+        color: '000000',
+        font: font(FANGSONG_FONT),
+      })],
+    }),
+    new Table({
+      width: { size: 8306, type: WidthType.DXA },
+      layout: TableLayoutType.FIXED,
+      borders: {
+        top: { style: BorderStyle.SINGLE, size: 4, color: '000000' },
+        bottom: { style: BorderStyle.SINGLE, size: 4, color: '000000' },
+        left: { style: BorderStyle.SINGLE, size: 4, color: '000000' },
+        right: { style: BorderStyle.SINGLE, size: 4, color: '000000' },
+        insideHorizontal: { style: BorderStyle.SINGLE, size: 4, color: '000000' },
+        insideVertical: { style: BorderStyle.SINGLE, size: 4, color: '000000' },
+      },
+      rows: [
+        new TableRow({
+          tableHeader: true,
+          cantSplit: true,
+          children: table.columns.map((value, index) => cell(value, index, true)),
+        }),
+        ...table.rows.map((row) => new TableRow({
+          cantSplit: true,
+          children: row.map((value, index) => cell(value, index)),
+        })),
+      ],
+    }),
+    new Paragraph({
+      spacing: { before: 0, after: 0, line: 360, lineRule: LineRuleType.EXACT },
+      children: [new TextRun({
+        text: citation
+          ? `资料来源：${citation}〔${visibleStatus(table.status)}〕`
+          : `资料来源：〔${visibleStatus(table.status)}〕`,
+        size: 21,
+        color: '666666',
+        font: font(FANGSONG_FONT),
+      })],
+    }),
+  ]
+}
+
+function bibliography(content: BusinessContent, sources: EvidenceSource[]) {
+  const used = usedBusinessSourceIndexes(content, sources.length)
+  const grouped = new Map<string, {
+    sourceName: string
+    sourceType: string
+    versionOrDate?: string
+    markers: number[]
+    chunks: number[]
+  }>()
+  used.forEach((index) => {
+    const source = sources[index]
+    if (!source) return
+    const key = `${source.sourceType}:${source.sourceId || source.sourceName}`
+    const entry = grouped.get(key) ?? {
+      sourceName: source.sourceName,
+      sourceType: source.sourceType,
+      versionOrDate: source.versionOrDate,
+      markers: [],
+      chunks: [],
+    }
+    entry.markers.push(index + 1)
+    if (Number.isInteger(source.chunkIndex)) entry.chunks.push(Number(source.chunkIndex))
+    grouped.set(key, entry)
+  })
+  return [...grouped.values()].map((entry) => {
+    const markers = [...new Set(entry.markers)].sort((a, b) => a - b).map((item) => `S${item}`).join('、')
+    const chunks = [...new Set(entry.chunks)].sort((a, b) => a - b)
+    return `[${markers}] ${entry.sourceName}；${chunks.length ? `知识片段 ${chunks.join('、')}` : '文件级定位'}${entry.versionOrDate ? `；版本/日期 ${entry.versionOrDate}` : ''}`
+  })
+}
+
+function headingParagraph(title: string, level: 1 | 2 | 3, pageBreakBefore: boolean) {
+  const heading = level === 1
+    ? HeadingLevel.HEADING_1
+    : level === 2
+      ? HeadingLevel.HEADING_2
+      : HeadingLevel.HEADING_3
+  const headingFont = level === 1 ? SANS_FONT : level === 2 ? KAITI_FONT : FANGSONG_FONT
+  return new Paragraph({
+    heading,
+    pageBreakBefore,
+    keepNext: true,
+    keepLines: true,
+    spacing: {
+      before: 0,
+      after: 0,
+      line: 480,
+      lineRule: LineRuleType.EXACT,
+    },
+    children: [new TextRun({
+      text: title,
+      size: level === 3 ? 24 : 28,
+      bold: level === 1 || level === 3,
+      font: font(headingFont),
+      color: '000000',
+    })],
+  })
+}
+
+export async function generateInvestmentProposalDocx(input: {
+  outputPath: string
+  template: AiTemplateDefinition
+  project: ProjectLike
+  content: BusinessContent
+  sources: EvidenceSource[]
+  sourceCutoffDate: string
+  generatedAt?: Date
+  blueprint?: InvestmentProposalDocumentBlueprint
+}) {
+  const blueprint = input.blueprint ?? await loadInvestmentProposalBlueprint(input.template)
+  const generatedAt = input.generatedAt ?? new Date()
+  const company = input.project.companyName?.trim() || input.project.name
+  const byTitle = new Map(input.content.sections.map((section) => [section.title, section]))
+  const body: Array<Paragraph | Table> = [
+    new Paragraph({
+      style: 'Title',
+      alignment: AlignmentType.CENTER,
+      spacing: { before: 0, after: 0, line: 480, lineRule: LineRuleType.EXACT },
+      keepNext: true,
+      children: [new TextRun({
+        text: input.content.title || `关于对${company}实施股权投资的提案`,
+        size: 32,
+        bold: true,
+        color: '000000',
+        font: font(SANS_FONT),
+      })],
+    }),
+    new Paragraph({
+      spacing: { before: 0, after: 0, line: 480, lineRule: LineRuleType.EXACT },
+      children: [new TextRun({
+        text: blueprint.fixedBlocks.salutation,
+        size: 24,
+        bold: true,
+        color: '000000',
+        font: font(FANGSONG_FONT),
+      })],
+    }),
+    new Paragraph({
+      spacing: { before: 0, after: 0, line: 480, lineRule: LineRuleType.EXACT },
+      indent: { firstLine: 480 },
+      alignment: AlignmentType.JUSTIFIED,
+      children: [new TextRun({
+        text: input.content.executiveSummary,
+        size: 24,
+        color: '000000',
+        font: font(FANGSONG_FONT),
+      })],
+    }),
+    new Paragraph({
+      spacing: { before: 0, after: 0, line: 480, lineRule: LineRuleType.EXACT },
+      indent: { firstLine: 480 },
+      alignment: AlignmentType.JUSTIFIED,
+      children: [new TextRun({
+        text: blueprint.fixedBlocks.authorization,
+        size: 24,
+        color: '000000',
+        font: font(FANGSONG_FONT),
+      })],
+    }),
+  ]
+
+  blueprint.sections.forEach((definition) => {
+    const current = byTitle.get(definition.title)
+    body.push(headingParagraph(
+      definition.title,
+      definition.level,
+      false,
+    ))
+    if (definition.container) return
+    const findings = current?.findings ?? []
+    findings.forEach((finding) => body.push(findingParagraph(finding, input.sources)))
+    ;(current?.tables ?? []).forEach((table) => body.push(...proposalTable(table, input.sources)))
+  })
+
+  body.push(
+    new Paragraph({
+      alignment: AlignmentType.RIGHT,
+      spacing: { before: 0, after: 0, line: 480, lineRule: LineRuleType.EXACT },
+      children: [new TextRun({
+        text: blueprint.fixedBlocks.managementCompany,
+        size: 24,
+        color: '000000',
+        font: font(FANGSONG_FONT),
+      })],
+    }),
+    new Paragraph({
+      alignment: AlignmentType.RIGHT,
+      spacing: { before: 0, after: 0, line: 480, lineRule: LineRuleType.EXACT },
+      children: [new TextRun({
+        text: `${generatedAt.getFullYear()}年${generatedAt.getMonth() + 1}月${generatedAt.getDate()}日`,
+        size: 24,
+        color: '000000',
+        font: font(FANGSONG_FONT),
+      })],
+    }),
+    new Paragraph({
+      keepNext: true,
+      border: { top: { style: BorderStyle.SINGLE, size: 6, color: '777777' } },
+      spacing: { before: 0, after: 0, line: 480, lineRule: LineRuleType.EXACT },
+      children: [new TextRun({
+        text: '免责声明',
+        size: 28,
+        bold: true,
+        color: '000000',
+        font: font(SANS_FONT),
+      })],
+    }),
+    new Paragraph({
+      spacing: { before: 0, after: 0, line: 480, lineRule: LineRuleType.EXACT },
+      alignment: AlignmentType.JUSTIFIED,
+      indent: { firstLine: 480 },
+      keepLines: true,
+      children: [new TextRun({
+        text: `${input.template.disclaimer} 本文件仅基于截至${input.sourceCutoffDate}当前项目内已授权资料形成；资料缺失、冲突或未核验事项不应被视为事实。投资具有风险，历史信息、预测及估值不构成收益承诺，最终结论以完成尽调、正式投决及签署交易文件为准。`,
+        size: 24,
+        color: '555555',
+        font: font(FANGSONG_FONT),
+      })],
+    }),
+    headingParagraph(blueprint.fixedBlocks.finalSectionTitle, 1, false),
+  )
+
+  const references = bibliography(input.content, input.sources)
+  if (references.length) {
+    references.forEach((line) => body.push(new Paragraph({
+      spacing: { before: 0, after: 0, line: 360, lineRule: LineRuleType.EXACT },
+      indent: { hanging: 420 },
+      children: [new TextRun({
+        text: line,
+        size: 21,
+        color: '333333',
+        font: font(FANGSONG_FONT),
+      })],
+    })))
+  } else {
+    body.push(new Paragraph({
+      spacing: { before: 0, after: 0, line: 360, lineRule: LineRuleType.EXACT },
+      children: [new TextRun({
+        text: blueprint.fixedBlocks.noDataText,
+        size: 21,
+        color: '333333',
+        font: font(FANGSONG_FONT),
+      })],
+    }))
+  }
+
+  const proposalHeader = () => new Header({
+    children: [new Paragraph({
+      alignment: AlignmentType.CENTER,
+      border: { bottom: { style: BorderStyle.SINGLE, size: 8, color: '000000' } },
+      spacing: { after: 80 },
+      children: [new TextRun({
+        text: blueprint.fixedBlocks.headerCompany,
+        size: 21,
+        color: '000000',
+        font: font(SONG_FONT),
+      })],
+    })],
+  })
+  const proposalFooter = () => new Footer({
+    children: [new Paragraph({
+      alignment: AlignmentType.CENTER,
+      children: [new TextRun({
+        children: [PageNumber.CURRENT],
+        size: 21,
+        color: '000000',
+        font: font(NUMBER_FONT),
+      })],
+    })],
+  })
+  const document = new Document({
+    features: { updateFields: true },
+    evenAndOddHeaderAndFooters: true,
+    styles: {
+      default: {
+        document: {
+          run: { size: 24, color: '000000', font: font(FANGSONG_FONT) },
+          paragraph: {
+            spacing: { before: 0, after: 0, line: 480, lineRule: LineRuleType.EXACT },
+          },
+        },
+      },
+      paragraphStyles: [
+        {
+          id: 'Title',
+          name: 'Title',
+          basedOn: 'Normal',
+          next: 'Normal',
+          quickFormat: true,
+          run: { size: 32, bold: true, color: '000000', font: font(SANS_FONT) },
+          paragraph: {
+            alignment: AlignmentType.CENTER,
+            spacing: { before: 0, after: 0, line: 480, lineRule: LineRuleType.EXACT },
+          },
+        },
+        {
+          id: 'Heading1',
+          name: 'heading 1',
+          basedOn: 'Normal',
+          next: 'Normal',
+          quickFormat: true,
+          run: { size: 28, bold: true, color: '000000', font: font(SANS_FONT) },
+          paragraph: {
+            spacing: { before: 0, after: 0, line: 480, lineRule: LineRuleType.EXACT },
+            outlineLevel: 0,
+          },
+        },
+        {
+          id: 'Heading2',
+          name: 'heading 2',
+          basedOn: 'Normal',
+          next: 'Normal',
+          quickFormat: true,
+          run: { size: 28, color: '000000', font: font(KAITI_FONT) },
+          paragraph: {
+            spacing: { before: 0, after: 0, line: 480, lineRule: LineRuleType.EXACT },
+            outlineLevel: 1,
+          },
+        },
+        {
+          id: 'Heading3',
+          name: 'heading 3',
+          basedOn: 'Normal',
+          next: 'Normal',
+          quickFormat: true,
+          run: { size: 24, bold: true, color: '000000', font: font(FANGSONG_FONT) },
+          paragraph: {
+            spacing: { before: 0, after: 0, line: 480, lineRule: LineRuleType.EXACT },
+            outlineLevel: 2,
+          },
+        },
+      ],
+    },
+    sections: [{
+      properties: {
+        page: {
+          size: {
+            width: blueprint.page.widthDxa,
+            height: blueprint.page.heightDxa,
+          },
+          margin: {
+            top: blueprint.page.marginTopDxa,
+            right: blueprint.page.marginRightDxa,
+            bottom: blueprint.page.marginBottomDxa,
+            left: blueprint.page.marginLeftDxa,
+            header: blueprint.page.headerDxa,
+            footer: blueprint.page.footerDxa,
+          },
+        },
+      },
+      headers: {
+        default: proposalHeader(),
+        even: proposalHeader(),
+        first: proposalHeader(),
+      },
+      footers: {
+        default: proposalFooter(),
+        even: proposalFooter(),
+        first: proposalFooter(),
+      },
+      children: body,
+    }],
+  })
+  await mkdir(path.dirname(input.outputPath), { recursive: true })
+  const buffer = await Packer.toBuffer(document)
+  await writeFile(input.outputPath, buffer)
+  return {
+    bytes: buffer.length,
+    blueprintVersion: blueprint.version,
+    coreStandardSha256: blueprint.coreStandardSha256,
+    templateCorpusSha256: blueprint.corpusSha256,
+    sectionCount: blueprint.sections.length,
+    tableCount: input.content.sections.reduce((count, section) => count + (section.tables?.length ?? 0), 0),
+    headingLevels: [1, 2],
+    tocField: false,
+    updateFields: true,
+    pageGeometry: blueprint.page,
+    formatter: 'investment-proposal-core-standard-formatter-v2',
+  }
+}
+
+export type InvestmentProposalOutputIssue = {
+  code: string
+  message: string
+}
+
+export type InvestmentProposalOutputReview = {
+  passed: boolean
+  issues: InvestmentProposalOutputIssue[]
+  metadata: {
+    bytes: number
+    expectedSectionCount: number
+    foundSectionCount: number
+    headingLevelCounts: Record<string, number>
+    tableCount: number
+    tocField: boolean
+    updateFields: boolean
+    evenAndOddHeaders: boolean
+    fixedBlocksValidated: boolean
+    pageGeometryValidated: boolean
+    bodyClaimsValidated: boolean
+  }
+}
+
+export async function reviewInvestmentProposalDocx(input: {
+  filePath: string
+  template: AiTemplateDefinition
+  blueprint: InvestmentProposalDocumentBlueprint
+  content: BusinessContent
+  projectName: string
+}) {
+  const issues: InvestmentProposalOutputIssue[] = []
+  const fileStat = await stat(input.filePath)
+  if (!fileStat.isFile() || fileStat.size < 1000) {
+    issues.push({ code: 'DOCX_EMPTY', message: 'Word 文件为空或不完整' })
+  }
+  const zip = await JSZip.loadAsync(await readFile(input.filePath))
+  const documentXml = await zip.file('word/document.xml')?.async('string') ?? ''
+  const stylesXml = await zip.file('word/styles.xml')?.async('string') ?? ''
+  const settingsXml = await zip.file('word/settings.xml')?.async('string') ?? ''
+  const headersXml = (await Promise.all(
+    Object.keys(zip.files)
+      .filter((name) => /^word\/header\d+\.xml$/.test(name))
+      .map((name) => zip.file(name)!.async('string')),
+  )).join('\n')
+  const footersXml = (await Promise.all(
+    Object.keys(zip.files)
+      .filter((name) => /^word\/footer\d+\.xml$/.test(name))
+      .map((name) => zip.file(name)!.async('string')),
+  )).join('\n')
+  if (!documentXml || !stylesXml) {
+    issues.push({ code: 'OPENXML_MISSING', message: 'Word 缺少 document.xml 或 styles.xml' })
+  }
+
+  const paragraphs = [...documentXml.matchAll(/<w:p(?:\s[^>]*)?>[\s\S]*?<\/w:p>/g)]
+    .map((match) => ({
+      text: xmlText(match[0]),
+      styleId: match[0].match(/<w:pStyle\b[^>]*w:val="([^"]+)"/)?.[1] ?? '',
+    }))
+  const allText = paragraphs.map((item) => item.text).join('\n')
+  const expectedTitles = input.blueprint.sections.map((item) => item.title)
+  const foundTitles = paragraphs
+    .filter((item) => expectedTitles.includes(item.text))
+    .map((item) => item.text)
+  if (foundTitles.length !== expectedTitles.length
+    || foundTitles.some((title, index) => title !== expectedTitles[index])) {
+    issues.push({ code: 'SECTION_TREE_MISMATCH', message: '章节存在遗漏、增删或顺序错误' })
+  }
+  input.blueprint.sections.forEach((section) => {
+    const paragraph = paragraphs.find((item) => item.text === section.title)
+    if (!paragraph) return
+    const expectedStyle = `Heading${section.level}`
+    if (paragraph.styleId !== expectedStyle) {
+      issues.push({
+        code: 'HEADING_STYLE_MISMATCH',
+        message: `${section.title}应使用${expectedStyle}，实际为${paragraph.styleId || '无样式'}`,
+      })
+    }
+  })
+
+  const fixedTexts = [
+    input.blueprint.fixedBlocks.salutation,
+    input.blueprint.fixedBlocks.authorization,
+    '免责声明',
+    input.blueprint.fixedBlocks.finalSectionTitle,
+    input.template.disclaimer,
+  ]
+  if (fixedTexts.some((value) => !allText.includes(value))) {
+    issues.push({ code: 'FIXED_BLOCK_MISSING', message: '固定称谓、授权说明、免责声明或引用资料缺失' })
+  }
+  const leakedSamples = [
+    '佳量脑科学',
+    '飞阔科技',
+    '轻蜓光电',
+    '普雷赛斯',
+    '微纳核芯',
+    '中数睿智',
+    '德塔智能',
+    '蓝成应急',
+  ].filter((value) => allText.includes(value) && !input.projectName.includes(value))
+  if (leakedSamples.length) {
+    issues.push({ code: 'TEMPLATE_SAMPLE_LEAK', message: `发现模板项目事实泄露：${leakedSamples.join('、')}` })
+  }
+  const expectedClaims = input.content.sections.flatMap((section) =>
+    section.findings.map((finding) => finding.text))
+  if (expectedClaims.some((claim) => !allText.includes(claim))) {
+    issues.push({ code: 'BODY_CLAIM_MISSING', message: 'Word 正文遗漏已通过内容 Reviewer 的事实项' })
+  }
+
+  const finalSection = [...documentXml.matchAll(/<w:sectPr\b[\s\S]*?<\/w:sectPr>/g)].at(-1)?.[0] ?? ''
+  const pageSize = finalSection.match(/<w:pgSz\b[^>]*\/>/)?.[0] ?? ''
+  const pageMargin = finalSection.match(/<w:pgMar\b[^>]*\/>/)?.[0] ?? ''
+  const number = (xml: string, key: string) =>
+    Number.parseInt(xml.match(new RegExp(`\\b${key}="(\\d+)"`))?.[1] ?? '-1', 10)
+  const geometryValidated =
+    number(pageSize, 'w:w') === input.blueprint.page.widthDxa
+    && number(pageSize, 'w:h') === input.blueprint.page.heightDxa
+    && number(pageMargin, 'w:top') === input.blueprint.page.marginTopDxa
+    && number(pageMargin, 'w:right') === input.blueprint.page.marginRightDxa
+    && number(pageMargin, 'w:bottom') === input.blueprint.page.marginBottomDxa
+    && number(pageMargin, 'w:left') === input.blueprint.page.marginLeftDxa
+  if (!geometryValidated) {
+    issues.push({ code: 'PAGE_GEOMETRY_MISMATCH', message: 'A4 页面或页边距与 Document Blueprint 不一致' })
+  }
+  if (!headersXml.includes(input.blueprint.fixedBlocks.headerCompany)) {
+    issues.push({ code: 'HEADER_MISSING', message: '固定页眉缺失' })
+  }
+  if (!/PAGE/.test(footersXml)) {
+    issues.push({ code: 'PAGE_NUMBER_MISSING', message: '页脚页码字段缺失' })
+  }
+  const tocField = /TOC\b/.test(documentXml)
+  if (tocField || paragraphs.some((item) => item.text.trim() === '目录')) {
+    issues.push({ code: 'TOC_FIELD_FORBIDDEN', message: '核心规范不创建独立目录页或 TOC 域' })
+  }
+  if (/<w:br\b[^>]*w:type="page"/.test(documentXml)) {
+    issues.push({ code: 'MANUAL_PAGE_BREAK_FORBIDDEN', message: '核心规范要求正文自然流排，不设置手动分页' })
+  }
+  const updateFields = /<w:updateFields\s*\/>/.test(settingsXml)
+    || /<w:updateFields\b[^>]*w:val="true"/.test(settingsXml)
+    || /<w:updateFields\b[^>]*w:val="1"/.test(settingsXml)
+  if (!updateFields) issues.push({ code: 'UPDATE_FIELDS_DISABLED', message: 'Word 打开时未启用字段更新' })
+  const evenAndOddHeaders = /<w:evenAndOddHeaders\s*\/>/.test(settingsXml)
+    || /<w:evenAndOddHeaders\b[^>]*w:val="true"/.test(settingsXml)
+    || /<w:evenAndOddHeaders\b[^>]*w:val="1"/.test(settingsXml)
+  if (!evenAndOddHeaders) {
+    issues.push({ code: 'EVEN_PAGE_HEADER_DISABLED', message: '偶数页页眉页脚未启用，导出后可能缺少固定页眉或页码' })
+  }
+
+  const styleXml = (styleId: string) =>
+    [...stylesXml.matchAll(/<w:style\b[\s\S]*?<\/w:style>/g)]
+      .filter((match) => match[0].includes(`w:styleId="${styleId}"`))
+      .at(-1)?.[0] ?? ''
+  const styleSize = (styleId: string) => {
+    const style = styleXml(styleId)
+    return Number.parseInt(style.match(/<w:sz\b[^>]*w:val="(\d+)"/)?.[1] ?? '-1', 10)
+  }
+  if (
+    styleSize('Title') !== 32
+    || styleSize('Heading1') !== 28
+    || styleSize('Heading2') !== 28
+    || styleSize('Heading3') !== 24
+  ) {
+    issues.push({ code: 'TYPOGRAPHY_MISMATCH', message: '标题字号层级与 Document Blueprint 不一致' })
+  }
+  if (paragraphs.some((item) => item.styleId === 'Heading3')) {
+    issues.push({ code: 'HEADING3_FORBIDDEN', message: '标准 17 节结构不得新增三级标题' })
+  }
+  const defaultStyle = stylesXml.match(/<w:docDefaults>[\s\S]*?<\/w:docDefaults>/)?.[0]
+    ?? styleXml('Normal')
+  const defaultSize = Number.parseInt(
+    defaultStyle.match(/<w:sz\b[^>]*w:val="(\d+)"/)?.[1] ?? '-1',
+    10,
+  )
+  if (
+    defaultSize !== 24
+    || !/<w:spacing\b[^>]*w:line="480"[^>]*w:lineRule="exact"/.test(defaultStyle)
+  ) {
+    issues.push({ code: 'BODY_STYLE_MISMATCH', message: '正文应为 12pt、固定 24pt 行距' })
+  }
+  const expectedTableCount = input.content.sections.reduce(
+    (count, section) => count + (section.tables?.length ?? 0),
+    0,
+  )
+  const tableCount = (documentXml.match(/<w:tbl\b/g) || []).length
+  if (tableCount !== expectedTableCount) {
+    issues.push({ code: 'TABLE_COUNT_MISMATCH', message: `表格应为${expectedTableCount}个，实际为${tableCount}个` })
+  }
+  if (expectedTableCount && !documentXml.includes('D9D9D9')) {
+    issues.push({ code: 'TABLE_FORMAT_MISMATCH', message: '表格表头底纹缺失' })
+  }
+
+  const result: InvestmentProposalOutputReview = {
+    passed: issues.length === 0,
+    issues,
+    metadata: {
+      bytes: fileStat.size,
+      expectedSectionCount: expectedTitles.length,
+      foundSectionCount: foundTitles.length,
+      headingLevelCounts: {
+        Heading1: paragraphs.filter((item) => item.styleId === 'Heading1').length,
+        Heading2: paragraphs.filter((item) => item.styleId === 'Heading2').length,
+        Heading3: paragraphs.filter((item) => item.styleId === 'Heading3').length,
+      },
+      tableCount,
+      tocField,
+      updateFields,
+      evenAndOddHeaders,
+      fixedBlocksValidated: !issues.some((item) => item.code === 'FIXED_BLOCK_MISSING'),
+      pageGeometryValidated: geometryValidated,
+      bodyClaimsValidated: !issues.some((item) => item.code === 'BODY_CLAIM_MISSING'),
+    },
+  }
+  return result
+}

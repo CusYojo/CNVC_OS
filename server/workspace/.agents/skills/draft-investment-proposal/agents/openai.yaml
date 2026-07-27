@@ -1,5 +1,4 @@
 interface:
   display_name: "生成投资提案"
-  short_description: "按模板 Blueprint、项目 Evidence 和三重 Reviewer 生成 Word/PDF 投资提案"
-  default_prompt: "使用 $draft-investment-proposal：先解析 docs/投资提案 并建立不可变 Document Blueprint，仅检索当前项目资料，按章节建立 Evidence 并逐章生成；无依据时明确写“当前项目暂无相关资料。”；通过内容、Word、PDF Reviewer 后交付同源 Word/PDF。"
-
+  short_description: "按 17 节核心规范和项目证据生成同源 Word/PDF 投资提案"
+  default_prompt: "使用 $draft-investment-proposal：先读取投资提案核心规范和模板共性，以用户明确输入、项目结构化字段和授权证据为事实边界，按标准 17 节 Blueprint 逐章生成；无依据时写“当前项目暂无相关资料。”，冲突数据标记待核验；通过内容、Word、PDF Reviewer 后交付同源文件。"

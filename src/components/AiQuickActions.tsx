@@ -10,15 +10,8 @@ import {
 import type { Project } from '../types'
 import { Button, Modal } from './ui'
 
-export type AiDocumentActionId = 'compliance' | 'proposal' | 'investment_ppt' | 'due_diligence'
-export type AiQuickActionId = AiDocumentActionId | 'qa'
-
-export type QaSkillSelection = {
-  projectId: string
-  category: string
-  question: string
-  skillName: 'answer-project-qa'
-}
+export type AiDocumentActionId = 'compliance' | 'proposal' | 'investment_ppt' | 'due_diligence' | 'qa'
+export type AiQuickActionId = AiDocumentActionId
 
 export type AiQuickTaskRequest = {
   actionId: AiDocumentActionId
@@ -28,45 +21,31 @@ export type AiQuickTaskRequest = {
   sourceCutoffDate: string
   audience?: string
   length?: string
+  userInstructions?: string
   template?: string
   pageCount?: string
   language?: string
   diligenceScope?: string
-  outputFormat: 'DOCX' | 'PPTX'
+  qaMode?: string
+  questionDepth?: string
+  outputFormat: 'DOCX' | 'PPTX' | 'DOCX+PDF'
 }
 
 type ActionConfig = {
   id: AiQuickActionId
   label: string
   description: string
-  mode: 'task' | 'question-library'
+  mode: 'task'
   icon: typeof ShieldCheck
 }
 
 const ACTIONS: ActionConfig[] = [
   { id: 'compliance', label: '合规性说明', description: '基于项目资料生成合规分析初稿', mode: 'task', icon: ShieldCheck },
-  { id: 'proposal', label: '投资提案', description: '生成内部立项或项目推介材料', mode: 'task', icon: BriefcaseBusiness },
+  { id: 'proposal', label: '投资提案', description: '按核心规范生成内部立项或投委会材料', mode: 'task', icon: BriefcaseBusiness },
   { id: 'investment_ppt', label: '投资建议书（PPT）', description: '生成公司模板投资建议书', mode: 'task', icon: Presentation },
   { id: 'due_diligence', label: '尽调报告', description: '梳理事实、风险和资料缺口', mode: 'task', icon: ClipboardCheck },
-  { id: 'qa', label: 'Q&A', description: '从项目问题库选择提问', mode: 'question-library', icon: HelpCircle },
+  { id: 'qa', label: 'Q&A', description: '自动生成投资委员会或尽调 Q&A，并输出 Word/PDF', mode: 'task', icon: HelpCircle },
 ]
-
-const QA_GROUPS = [
-  { label: '投资亮点', questions: ['请提炼这个项目最值得关注的 3 个投资亮点', '这个项目的核心投资逻辑是否成立？'] },
-  { label: '核心风险', questions: ['这个项目最大的风险是什么？', '哪些风险可能直接影响投资决策？'] },
-  { label: '财务', questions: ['当前财务数据还存在哪些关键缺口？', '收入质量、现金流和估值依据是否充分？'] },
-  { label: '客户', questions: ['客户质量、集中度和回款情况如何？', '现有客户证据能否验证商业化进展？'] },
-  { label: '竞争', questions: ['项目所在市场的空间和增长驱动是什么？', '项目相对主要竞争对手的差异化是什么？'] },
-  { label: '合规', questions: ['还需要核验哪些法律或合规事项？', '主体、资质、知识产权和治理方面有哪些风险？'] },
-  { label: '资料缺口', questions: ['还缺哪些关键尽调资料？', '下一步最优先应补充或访谈哪些证据？'] },
-]
-
-const REFERENCE_TEMPLATES: Record<AiDocumentActionId, string> = {
-  compliance: '《关于德塔智能项目投资合规性的说明》当前版本样本',
-  proposal: '《佳量脑科学项目投资提案》当前版本样本',
-  investment_ppt: '《佳量脑科学投资建议书》当前版本 PPT 样本',
-  due_diligence: '《佳量脑科学业务尽调报告》当前版本样本',
-}
 
 const today = () => new Date().toISOString().slice(0, 10)
 
@@ -89,8 +68,10 @@ export function buildAiQuickTaskPrompt(request: AiQuickTaskRequest): string {
       ...common,
       `【目标受众】${request.audience || '内部立项'}`,
       `【篇幅】${request.length || '标准版'}`,
-      '请生成投资提案初稿，至少包含项目概览、投资逻辑、市场机会、产品与商业模式、团队、当前进展、核心风险和下一步建议。',
-      '请分开呈现事实、投资判断和待核验假设，并注明本材料不替代正式投资建议书。',
+      ...(request.userInstructions?.trim() ? [`【用户补充输入】${request.userInstructions.trim()}`] : []),
+      '请读取投资提案核心规范及 docs/投资提案 模板共性，按标准 17 节结构、投委会书面语、原生财务/交易表格和黑白公文版式生成投资提案。',
+      '正文固定覆盖基本情况简介、交易条件、公司业务计划、项目亮点总结、风险提示与对策及条件式结论；不得按单份模板差异扩章。',
+      '按“我的明确输入、项目结构化数据、截止日前授权证据、审慎分析”的优先级取值；请分开呈现资料记载、分析判断、待核验和资料缺口，不得复制模板项目事实。',
     ].join('\n')
   }
   if (request.actionId === 'investment_ppt') {
@@ -100,6 +81,16 @@ export function buildAiQuickTaskPrompt(request: AiQuickTaskRequest): string {
       `【建议页数】${request.pageCount || '12-15页'}`,
       '请生成投资建议书 PPTX。优先使用可编辑文字、表格、基础图表和形状；复杂装饰与背景可图片化。',
       '内容应覆盖项目概览、投资结论、行业市场、产品技术、商业模式、客户经营、团队、竞争、财务估值、风险、尽调缺口和投资建议。',
+    ].join('\n')
+  }
+  if (request.actionId === 'qa') {
+    return [
+      ...common,
+      `【Q&A 类型】${request.qaMode || '投资委员会 Q&A'}`,
+      `【问题深度】${request.questionDepth || '标准版'}`,
+      '仅基于当前项目资料，自动完成 Template Parser、Question Generator、Duplicate Checker、Answer Generator、Reviewer 与 Formatter。',
+      '覆盖企业介绍、商业模式、产品能力、团队、市场、竞争、财务、融资、风险、合规、知识产权、客户、行业、运营和未来规划。',
+      '每一个非空回答必须引用当前项目资料；资料不足时必须明确写“暂无相关资料。”；最终同时输出可编辑 Word 和版式一致的 PDF。',
     ].join('\n')
   }
   return [
@@ -115,23 +106,23 @@ export function AiQuickActions({
   projects,
   currentProjectId,
   onRunTask,
-  onSelectQuestion,
 }: {
   disabled: boolean
   projects: Project[]
   currentProjectId: string
   onRunTask: (request: AiQuickTaskRequest) => Promise<boolean>
-  onSelectQuestion: (selection: QaSkillSelection) => void
 }) {
   const [activeAction, setActiveAction] = useState<ActionConfig | null>(null)
-  const [qaOpen, setQaOpen] = useState(false)
   const [sourceCutoffDate, setSourceCutoffDate] = useState(today)
   const [audience, setAudience] = useState('内部立项')
   const [length, setLength] = useState('标准版')
+  const [proposalInstructions, setProposalInstructions] = useState('')
   const [template, setTemplate] = useState('公司标准模板')
   const [pageCount, setPageCount] = useState('12-15页')
   const [language, setLanguage] = useState('中文')
   const [diligenceScope, setDiligenceScope] = useState('商业尽调')
+  const [qaMode, setQaMode] = useState('投资委员会 Q&A')
+  const [questionDepth, setQuestionDepth] = useState('标准版')
   const [submitting, setSubmitting] = useState(false)
 
   const selectedProject = useMemo(
@@ -141,10 +132,6 @@ export function AiQuickActions({
 
   const openAction = (action: ActionConfig) => {
     if (disabled || !selectedProject) return
-    if (action.mode === 'question-library') {
-      setQaOpen(true)
-      return
-    }
     setActiveAction(action)
   }
 
@@ -160,11 +147,18 @@ export function AiQuickActions({
         sourceCutoffDate,
         audience,
         length,
+        userInstructions: proposalInstructions.trim(),
         template,
         pageCount,
         language,
         diligenceScope,
-        outputFormat: activeAction.id === 'investment_ppt' ? 'PPTX' : 'DOCX',
+        qaMode,
+        questionDepth,
+        outputFormat: activeAction.id === 'investment_ppt'
+          ? 'PPTX'
+          : activeAction.id === 'qa'
+            ? 'DOCX+PDF'
+            : 'DOCX',
       })
       if (ok) setActiveAction(null)
     } finally {
@@ -196,7 +190,7 @@ export function AiQuickActions({
                 </span>
                 <span className="min-w-0">
                   <span className="block whitespace-nowrap text-[11px] font-medium text-slate-700">{action.label}</span>
-                  <span className="block truncate text-[9px] text-slate-400">{action.mode === 'task' ? '确认参数后执行' : '选择后填入输入框'}</span>
+                  <span className="block truncate text-[9px] text-slate-400">确认参数后执行</span>
                 </span>
               </button>
             )
@@ -216,10 +210,6 @@ export function AiQuickActions({
         )}
       >
         <div className="space-y-4">
-          <p className="rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-700">
-            将参照 docs 中的{activeAction && activeAction.id !== 'qa' ? REFERENCE_TEMPLATES[activeAction.id] : '业务样本'}生成正式初稿。
-            任务进度、来源引用、版本和文件质量检查会随任务保存；样本版本及生成结果仍须由业务负责人审核批准。
-          </p>
           <label className="block">
             <span className="label">项目（随当前会话固定）</span>
             <div className="input flex items-center bg-slate-50 text-slate-600" aria-label="当前会话项目">
@@ -231,10 +221,23 @@ export function AiQuickActions({
             <input className="input" type="date" value={sourceCutoffDate} max={today()} onChange={(event) => setSourceCutoffDate(event.target.value)} />
           </label>
           {activeAction?.id === 'proposal' && (
-            <div className="grid grid-cols-2 gap-4">
-              <label><span className="label">目标受众</span><select className="input" value={audience} onChange={(event) => setAudience(event.target.value)}><option>内部立项</option><option>基金内部汇报</option><option>合作方沟通</option></select></label>
-              <label><span className="label">篇幅</span><select className="input" value={length} onChange={(event) => setLength(event.target.value)}><option>精简版</option><option>标准版</option><option>详细版</option></select></label>
-            </div>
+            <>
+              <div className="grid grid-cols-2 gap-4">
+                <label><span className="label">目标受众</span><select className="input" value={audience} onChange={(event) => setAudience(event.target.value)}><option>内部立项</option><option>基金内部汇报</option><option>合作方沟通</option></select></label>
+                <label><span className="label">篇幅</span><select className="input" value={length} onChange={(event) => setLength(event.target.value)}><option>精简版</option><option>标准版</option><option>详细版</option></select></label>
+              </div>
+              <label className="block">
+                <span className="label">补充项目数据或写作要求（可选）</span>
+                <textarea
+                  className="input min-h-24 resize-y"
+                  value={proposalInstructions}
+                  maxLength={2000}
+                  placeholder="例如：本轮拟投资金额、投资主体、需重点说明的交易安排；与项目资料冲突时系统会标记为待核验。"
+                  onChange={(event) => setProposalInstructions(event.target.value)}
+                />
+                <span className="mt-1 block text-right text-[10px] text-slate-400">{proposalInstructions.length}/2000</span>
+              </label>
+            </>
           )}
           {activeAction?.id === 'investment_ppt' && (
             <div className="grid grid-cols-3 gap-4">
@@ -246,49 +249,30 @@ export function AiQuickActions({
           {activeAction?.id === 'due_diligence' && (
             <label className="block"><span className="label">尽调范围</span><select className="input" value={diligenceScope} onChange={(event) => setDiligenceScope(event.target.value)}><option>商业尽调</option></select></label>
           )}
+          {activeAction?.id === 'qa' && (
+            <div className="grid grid-cols-2 gap-4">
+              <label>
+                <span className="label">Q&amp;A 类型</span>
+                <select className="input" value={qaMode} onChange={(event) => setQaMode(event.target.value)}>
+                  <option>投资委员会 Q&amp;A</option>
+                  <option>尽调 Q&amp;A</option>
+                </select>
+              </label>
+              <label>
+                <span className="label">问题深度</span>
+                <select className="input" value={questionDepth} onChange={(event) => setQuestionDepth(event.target.value)}>
+                  <option>标准版</option>
+                  <option>深度版</option>
+                </select>
+              </label>
+            </div>
+          )}
           <div className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
-            输出格式：<strong className="text-slate-700">{activeAction?.id === 'investment_ppt' ? 'PPTX' : 'DOCX'}</strong>
+            输出格式：<strong className="text-slate-700">{activeAction?.id === 'investment_ppt' ? 'PPTX' : activeAction?.id === 'qa' ? 'DOCX + PDF' : 'DOCX'}</strong>
           </div>
         </div>
       </Modal>
 
-      <Modal open={qaOpen} title="项目 Q&A 问题库" onClose={() => setQaOpen(false)} width="max-w-2xl">
-        <div className="space-y-4">
-          <label className="block">
-            <span className="label">项目（随当前会话固定）</span>
-            <div className="input flex items-center bg-slate-50 text-slate-600" aria-label="当前会话项目">
-              {selectedProject?.name ?? '未绑定项目'}
-            </div>
-          </label>
-          <p className="text-xs text-slate-500">选择问题后只会填入输入框，不会立即发送。</p>
-          {QA_GROUPS.map((group) => (
-            <section key={group.label}>
-              <h3 className="mb-2 text-xs font-semibold text-slate-700">{group.label}</h3>
-              <div className="grid gap-2 sm:grid-cols-2">
-                {group.questions.map((question) => (
-                  <button
-                    key={question}
-                    type="button"
-                    onClick={() => {
-                      if (!selectedProject) return
-                      onSelectQuestion({
-                        projectId: selectedProject.id,
-                        category: group.label,
-                        question,
-                        skillName: 'answer-project-qa',
-                      })
-                      setQaOpen(false)
-                    }}
-                    className="rounded-lg border border-slate-200 px-3 py-2.5 text-left text-xs leading-5 text-slate-600 hover:border-brand-200 hover:bg-brand-50/50 hover:text-brand-700"
-                  >
-                    {question}
-                  </button>
-                ))}
-              </div>
-            </section>
-          ))}
-        </div>
-      </Modal>
     </>
   )
 }

@@ -11,6 +11,12 @@
     "check": "tsc -b && tsc -p server/tsconfig.json --noEmit",
     "accept:ai-business": "node --import tsx server/src/scripts/aiBusinessAcceptance.ts",
     "accept:ai-api": "node --import tsx server/src/scripts/aiTaskApiAcceptance.ts",
+    "accept:ai-compliance": "node --import tsx server/src/scripts/aiComplianceAcceptance.ts",
+    "accept:ai-compliance-api": "AI_ACCEPTANCE_SCOPE=compliance node --import tsx server/src/scripts/aiTaskApiAcceptance.ts",
+    "dev:ai-acceptance-llm": "node --import tsx server/src/scripts/aiAcceptanceLlmGateway.ts",
+    "accept:ai-proposal": "node --import tsx server/src/scripts/aiInvestmentProposalAcceptance.ts",
+    "accept:ai-qa": "node --import tsx server/src/scripts/aiQaPipelineAcceptance.ts",
+    "accept:ai-qa-api": "AI_ACCEPTANCE_SCOPE=qa node --import tsx server/src/scripts/aiTaskApiAcceptance.ts",
     "accept:ai-skills": "node --import tsx server/src/scripts/aiSkillAcceptance.ts",
     "start": "node server-dist/index.js",
     "preview": "vite preview"

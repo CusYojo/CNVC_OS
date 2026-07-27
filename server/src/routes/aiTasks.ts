@@ -27,6 +27,7 @@ const typeSchema = z.enum([
   'investment_proposal',
   'investment_recommendation_ppt',
   'due_diligence_report',
+  'project_qa',
 ])
 
 const createSchema = z.object({
@@ -56,6 +57,14 @@ const createSchema = z.object({
   if (body.type === 'investment_proposal') {
     requireAllowed('audience', ['内部立项', '基金内部汇报', '合作方沟通'], '目标受众无效')
     requireAllowed('length', ['精简版', '标准版', '详细版'], '篇幅无效')
+    const userInstructions = body.parameters.userInstructions
+    if (userInstructions !== undefined) {
+      if (typeof userInstructions !== 'string') {
+        ctx.addIssue({ code: 'custom', path: ['parameters', 'userInstructions'], message: '补充输入必须为文本' })
+      } else if (userInstructions.trim().length > 2000) {
+        ctx.addIssue({ code: 'custom', path: ['parameters', 'userInstructions'], message: '补充输入不能超过 2000 字' })
+      }
+    }
   }
   if (body.type === 'investment_recommendation_ppt') {
     requireAllowed('template', ['公司标准模板'], '公司模板无效')
@@ -65,7 +74,15 @@ const createSchema = z.object({
   if (body.type === 'due_diligence_report') {
     requireAllowed('diligenceScope', ['商业尽调'], '首期仅支持商业尽调')
   }
-  const expectedOutputFormat = body.type === 'investment_recommendation_ppt' ? 'PPTX' : 'DOCX'
+  if (body.type === 'project_qa') {
+    requireAllowed('qaMode', ['投资委员会 Q&A', '尽调 Q&A'], 'Q&A 类型无效')
+    requireAllowed('questionDepth', ['标准版', '深度版'], '问题深度无效')
+  }
+  const expectedOutputFormat = body.type === 'investment_recommendation_ppt'
+    ? 'PPTX'
+    : body.type === 'project_qa'
+      ? 'DOCX+PDF'
+      : 'DOCX'
   if (body.parameters.outputFormat !== undefined && body.parameters.outputFormat !== expectedOutputFormat) {
     ctx.addIssue({
       code: 'custom',

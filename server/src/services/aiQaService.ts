@@ -88,6 +88,14 @@ function cleanText(value: unknown, fallback: string) {
   return text || fallback
 }
 
+function cleanDirectAnswer(value: unknown, fallback: string) {
+  return cleanText(value, fallback).replace(/^(?:答复|回答)\s*[：:]\s*/, '').trim() || fallback
+}
+
+function ensurePointNumber(text: string, index: number) {
+  return /^[（(]\s*\d+\s*[）)]/.test(text) ? text : `（${index + 1}）${text}`
+}
+
 async function assertQaAccess(user: QaUser, projectId: string, conversationId: string) {
   const [project] = await db.select().from(projects).where(eq(projects.id, projectId)).limit(1)
   if (!project) {
@@ -220,10 +228,13 @@ function fallbackAnswer(input: {
     directAnswer: hasEvidence
       ? `现有资料可以形成关于“${input.category}”的初步判断，但证据强度不足以支持确定性结论，仍需结合原件和访谈核验。`
       : '当前项目知识库没有足够证据回答该问题，不能据此形成项目事实或投资结论。',
-    keyPoints: selectedEvidence.map(({ source, citation }) => ({
-      text: cleanText(source.content, '该来源内容需进一步核验')
-        .split(/(?<=[。！？!?；;])/)[0]
-        .slice(0, 220),
+    keyPoints: selectedEvidence.map(({ source, citation }, index) => ({
+      text: ensurePointNumber(
+        `现有资料：${cleanText(source.content, '该来源内容需进一步核验')
+          .split(/(?<=[。！？!?；;])/)[0]
+          .slice(0, 210)}`,
+        index,
+      ),
       status: source.sourceType === 'project_record' ? '企业自述' : '待核验',
       citations: [citation],
     })),
@@ -283,12 +294,12 @@ function normalizeAnswer(raw: unknown, fallback: ProjectQaAnswer, evidence: QaEv
   if (normalizedPoints.length === 0) {
     return {
       ...fallback,
-      directAnswer: cleanText(value.directAnswer, fallback.directAnswer),
+      directAnswer: cleanDirectAnswer(value.directAnswer, fallback.directAnswer),
     } satisfies ProjectQaAnswer
   }
   const groupedEvidence = groupQaEvidence(evidence, [...used].sort((left, right) => left - right))
-  const keyPoints = normalizedPoints.map((point) => ({
-    text: point.text,
+  const keyPoints = normalizedPoints.map((point, index) => ({
+    text: ensurePointNumber(point.text, index),
     status: point.status,
     citations: [...new Set(point.sourceIndexes
       .map((index) => groupedEvidence.citationByIndex.get(index))
@@ -310,7 +321,7 @@ function normalizeAnswer(raw: unknown, fallback: ProjectQaAnswer, evidence: QaEv
   if (confidence === '高' && groupedEvidence.sources.length < 2) confidence = '中'
   return {
     ...fallback,
-    directAnswer: cleanText(value.directAnswer, fallback.directAnswer),
+    directAnswer: cleanDirectAnswer(value.directAnswer, fallback.directAnswer),
     keyPoints,
     risksOrUncertainties,
     verificationActions,
@@ -348,20 +359,27 @@ async function composeProjectQaAnswer(input: {
 6. Skill 版本、模板版本及内部文件名只用于审计，不得出现在用户可见回答中。
 7. 同一事实、风险或核验行动只能完整表述一次；不得把证据原文整段复制为回答。
 8. 先对重复片段和重复来源去重，只在回答末尾保留关键要点实际引用的来源。
+9. 用户问题中包含的项目数据或判断不自动成为事实；没有项目证据支持时标为“企业自述”或“待核验”。
+10. 只生成会话内结构化 Q&A JSON；禁止生成或请求 PPT/PPTX、DOCX、PDF、图片、预览图、下载链接或任何文档任务。
 
 已激活 Skill：${skill.name}
 Skill 版本：${skill.version}
 业务模板版本：${AI_QA_TEMPLATE.templateVersion}
-模板约束：仅复用 docs/Q&A 样本提炼出的分类、回答结构、来源披露和责任边界；严禁把样本项目正文视为当前项目证据。
+模板约束：按 docs/Q&A/Q&A模板核心规则.md 将“问题—直接答复—分维度论证—风险/核验—文尾来源”映射为单题会话结构；五份 PDF 只是只读样本，严禁把样本正文视为当前项目证据，也不得转换为 PPT/PPTX。
 
-${skill.instructions}`
+${skill.instructions}
+
+Skill 必读参考：
+${skill.referenceInstructions}`
   const userPrompt = `请回答当前项目问题。
 问题分类：${input.category}
 用户确认的问题：${input.question}
 资料截止日：${input.sourceCutoffDate}
 
-输出 JSON：
+输出 JSON（键名使用下列 camelCase；语义遵守回答契约中的字段映射）：
 {"directAnswer":"","keyPoints":[{"text":"","status":"已核验事实|企业自述|AI推断|待核验","sourceIndexes":[0]}],"risksOrUncertainties":[""],"verificationActions":[""],"confidenceStatus":"高|中|低|证据不足"}
+
+写作要求：directAnswer 用一至三句结论先行的正式中文，不要重复“答复：”标签；keyPoints 返回二至五项，每项写成“（序号）维度标题：核心判断。证据与口径。投资含义或适用边界。”，维度标题必须根据当前问题和证据动态生成。
 
 证据索引从 0 开始，对应下列 S1、S2 顺序：
 ${evidenceText || '无可用项目证据。必须返回证据不足，不得生成项目事实。'}`

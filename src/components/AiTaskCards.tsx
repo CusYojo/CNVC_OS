@@ -69,6 +69,7 @@ const TASK_LABELS: Record<string, string> = {
   investment_proposal: '投资提案',
   investment_recommendation_ppt: '投资建议书（PPT）',
   due_diligence_report: '尽调报告',
+  project_qa: '项目 Q&A',
 }
 
 function artifactQualityLabel(artifact: AiTaskArtifact) {

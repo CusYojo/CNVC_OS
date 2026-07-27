@@ -31,8 +31,8 @@ export const AI_BUSINESS_SKILLS = [
   {
     name: 'answer-project-qa',
     label: 'Q&A',
-    mode: 'question-library',
-    taskType: null,
+    mode: 'document-task',
+    taskType: 'project_qa',
   },
 ] as const
 
@@ -42,6 +42,8 @@ export type LoadedAiSkill = {
   name: AiBusinessSkillName
   description: string
   instructions: string
+  referenceInstructions: string
+  referenceNames: string[]
   sha256: string
   version: string
 }
@@ -96,6 +98,13 @@ function parseSkillFile(source: string) {
   return { name, description, instructions }
 }
 
+function referencedMarkdownFiles(instructions: string) {
+  return [...new Set(
+    [...instructions.matchAll(/\]\((references\/[^)\s]+\.md)\)/g)]
+      .map((match) => match[1]),
+  )]
+}
+
 export function getAiSkillRoot() {
   return skillRoot
 }
@@ -127,11 +136,33 @@ export async function loadAiSkill(name: AiBusinessSkillName): Promise<LoadedAiSk
   if (parsed.name !== name) {
     throw new Error(`AI Skill 名称与目录不一致：${parsed.name} / ${name}`)
   }
-  const sha256 = createHash('sha256').update(source).digest('hex')
+  const referenceNames = referencedMarkdownFiles(parsed.instructions)
+  const referenceSources: string[] = []
+  for (const referenceName of referenceNames) {
+    const referencePath = path.resolve(skillDir, referenceName)
+    if (!referencePath.startsWith(`${skillDir}${path.sep}`)) {
+      throw new Error(`AI Skill 引用路径越界：${referenceName}`)
+    }
+    const referenceStat = await lstat(referencePath)
+    if (!referenceStat.isFile() || referenceStat.isSymbolicLink()) {
+      throw new Error(`AI Skill 引用文件无效：${referenceName}`)
+    }
+    referenceSources.push(await readFile(referencePath, 'utf8'))
+  }
+  const referenceInstructions = referenceSources
+    .map((reference, index) => `## ${referenceNames[index]}\n\n${reference.trim()}`)
+    .join('\n\n')
+  const sha256 = createHash('sha256')
+    .update(source)
+    .update('\n\n')
+    .update(referenceInstructions)
+    .digest('hex')
   return {
     name,
     description: parsed.description,
     instructions: parsed.instructions,
+    referenceInstructions,
+    referenceNames,
     sha256,
     version: `sha256-${sha256.slice(0, 12)}`,
   }

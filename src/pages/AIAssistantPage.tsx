@@ -11,7 +11,6 @@ import { Button, Modal } from '../components/ui'
 import {
   AiQuickActions,
   type AiQuickTaskRequest,
-  type QaSkillSelection,
 } from '../components/AiQuickActions'
 import { AiArtifactCenter, AiTaskCards, type AiTask } from '../components/AiTaskCards'
 import { AiQaCards, type ProjectQaAnswer } from '../components/AiQaCards'
@@ -45,6 +44,7 @@ const AI_TASK_TYPE_BY_ACTION: Record<AiQuickTaskRequest['actionId'], string> = {
   proposal: 'investment_proposal',
   investment_ppt: 'investment_recommendation_ppt',
   due_diligence: 'due_diligence_report',
+  qa: 'project_qa',
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -547,7 +547,6 @@ function Chat() {
   const [scope, setScope] = useState<'project' | 'global'>('project')
   const [projectId, setProjectId] = useState(initialProject)
   const [input, setInput] = useState('')
-  const [qaSkillMode, setQaSkillMode] = useState<QaSkillSelection | null>(null)
   // 每个"会话"= 一个 flue agent 实例(agentId)。列表存服务端(/api/conversations)，跟账号跨设备同步。
   // rowId = chat_conversations 主键(改名/删除用)，agentId = flue agent id(加载会话内容用)。
   type ChatSession = {
@@ -598,12 +597,6 @@ function Chat() {
       setNewSessionProjectId(projects[0].id)
     }
   }, [newSessionOpen, newSessionProjectId, projects])
-  useEffect(() => {
-    if (qaSkillMode && (scope !== 'project' || qaSkillMode.projectId !== projectId)) {
-      setQaSkillMode(null)
-    }
-  }, [projectId, qaSkillMode, scope])
-
   // 正式业务任务与 chat_conversations 主键关联。切换或刷新会话时从服务端恢复，
   // 不依赖 Flue 的瞬时消息状态。
   useEffect(() => {
@@ -844,38 +837,12 @@ function Chat() {
           ? { projectId: currentProject.id, projectName: currentProject.name }
           : undefined
     )
-    const activeQaMode = qaSkillMode
-      && effectiveScope === 'project'
-      && effectiveProject?.projectId === qaSkillMode.projectId
-      ? qaSkillMode
-      : null
     const ctx = effectiveScope === 'global'
       ? `【范围】全局知识库\n【用户问题】${clean}${fileCtx}`
       : `【当前项目】${effectiveProject?.projectName ?? ''}\n【projectId】${effectiveProject?.projectId ?? ''}\n【用户问题】${clean}${fileCtx}`
     try {
-      if (activeQaMode) {
-        if (!currentConversationRowId) throw new Error('当前会话尚未完成初始化，请稍后重试')
-        if (!effectiveProject || !UUID_PATTERN.test(effectiveProject.projectId)) {
-          throw new Error('请选择已入库且有权访问的项目')
-        }
-        const answer = await apiPost<ProjectQaAnswer>('/ai/qa', {
-          projectId: effectiveProject.projectId,
-          conversationId: currentConversationRowId,
-          category: activeQaMode.category,
-          question: clean,
-          sourceCutoffDate: new Date().toISOString().slice(0, 10),
-        })
-        setQaAnswers((items) => [
-          ...items.filter((item) => item.id !== answer.id),
-          answer,
-        ].sort((left, right) => left.createdAt.localeCompare(right.createdAt)))
-        setUploads([])
-        setQaSkillMode(null)
-        return true
-      }
       await agent.sendMessage(ctx)
       setUploads([])
-      setQaSkillMode(null)
       return true
     } catch (err) {
       showToast(`发送失败：${(err as Error).message}`, 'error')
@@ -897,7 +864,6 @@ function Chat() {
       setScope('global')
     }
     setInput('')
-    setQaSkillMode(null)
     setAiTasks([])
     setQaAnswers([])
   }
@@ -1114,12 +1080,18 @@ function Chat() {
     if (request.actionId === 'proposal') {
       parameters.audience = request.audience || '内部立项'
       parameters.length = request.length || '标准版'
+      if (request.userInstructions?.trim()) {
+        parameters.userInstructions = request.userInstructions.trim()
+      }
     } else if (request.actionId === 'investment_ppt') {
       parameters.template = request.template || '公司标准模板'
       parameters.pageCount = request.pageCount || '12-15页'
       parameters.language = request.language || '中文'
     } else if (request.actionId === 'due_diligence') {
       parameters.diligenceScope = request.diligenceScope || '商业尽调'
+    } else if (request.actionId === 'qa') {
+      parameters.qaMode = request.qaMode || '投资委员会 Q&A'
+      parameters.questionDepth = request.questionDepth || '标准版'
     }
     try {
       if (!currentSession?.projectId || currentSession.projectId !== request.projectId) {
@@ -1173,21 +1145,6 @@ function Chat() {
     } finally {
       setTaskMutationId(null)
     }
-  }
-
-  const selectQaQuestion = async (selection: QaSkillSelection) => {
-    const selectedProject = projects.find((project) => project.id === selection.projectId)
-    if (!selectedProject) {
-      showToast('所选项目不存在或已不可访问', 'error')
-      return
-    }
-    if (!currentSession?.projectId || currentSession.projectId !== selection.projectId) {
-      showToast('当前项目随会话固定，请重新打开 Q&A 后再试', 'error')
-      return
-    }
-    activateSession(currentSession)
-    setQaSkillMode(selection)
-    setInput(selection.question)
   }
 
   return (
@@ -1287,23 +1244,9 @@ function Chat() {
               projects={projects}
               currentProjectId={scope === 'project' ? currentSession?.projectId ?? '' : ''}
               onRunTask={runQuickTask}
-              onSelectQuestion={selectQaQuestion}
             />
           </AiErrorBoundary>
           <div className="rounded-xl border border-slate-200 p-2">
-            {qaSkillMode && (
-              <div className="mb-2 flex items-center justify-between rounded-lg border border-brand-100 bg-brand-50 px-2.5 py-1.5 text-[11px] text-brand-700">
-                <span>已启用项目 Q&amp;A · {qaSkillMode.category} · 发送前可编辑问题</span>
-                <button
-                  type="button"
-                  className="ml-2 text-brand-500 hover:text-brand-800"
-                  onClick={() => setQaSkillMode(null)}
-                  aria-label="退出项目 Q&A"
-                >
-                  ×
-                </button>
-              </div>
-            )}
             {uploadProgress && uploadProgress.total > 0 && (
               <div className="mb-1 flex items-center gap-2 px-1 text-[11px] text-brand-600">
                 <RefreshCw className="h-3 w-3 animate-spin" />
@@ -1326,21 +1269,21 @@ function Chat() {
               onKeyDown={(e) => {
                 // 中文输入法选词确认也会产生 Enter；组合态绝不能触发发送。
                 if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) return
-                // 普通 Enter 始终换行，只有 Ctrl/Cmd+Enter 才发送。
-                if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                // Enter 发送；Shift+Enter 保留多行输入能力。
+                if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault()
                   void send()
                 }
               }}
-              aria-keyshortcuts="Control+Enter Meta+Enter"
+              aria-keyshortcuts="Enter Shift+Enter"
               rows={2}
               className="w-full resize-none border-0 px-2 py-1 text-sm leading-6 outline-none placeholder:text-slate-400"
               placeholder={`向 AI 询问 ${scope === 'project' ? currentProject?.name : '机构知识库'}…`}
             />
             <input ref={fileInputRef} type="file" multiple className="hidden" onChange={onPickFiles} accept=".pdf,.xlsx,.xls,.csv,.docx,.txt,.md,.png,.jpg,.jpeg" />
-            <div className="flex items-center justify-between px-1"><div className="flex min-w-0 items-center gap-2 text-[10px] text-slate-400"><button onClick={() => fileInputRef.current?.click()} disabled={uploading} title="上传文件（PDF/Excel/CSV 等，agent 可直接读）" className="grid h-6 w-6 shrink-0 place-items-center rounded text-slate-400 hover:bg-slate-100 hover:text-brand-600 disabled:opacity-50">{uploading ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Paperclip className="h-3.5 w-3.5" />}</button><CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-500" /><span className="truncate">Enter 换行 · Ctrl/⌘ + Enter 发送</span></div>{busy
+            <div className="flex items-center justify-between px-1"><div className="flex min-w-0 items-center gap-2 text-[10px] text-slate-400"><button onClick={() => fileInputRef.current?.click()} disabled={uploading} title="上传文件（PDF/Excel/CSV 等，agent 可直接读）" className="grid h-6 w-6 shrink-0 place-items-center rounded text-slate-400 hover:bg-slate-100 hover:text-brand-600 disabled:opacity-50">{uploading ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Paperclip className="h-3.5 w-3.5" />}</button><CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-500" /><span className="truncate">Enter 发送 · Shift + Enter 换行</span></div>{busy
               ? <button aria-label="停止" title="停止生成" onClick={stop} className="grid h-8 w-8 place-items-center rounded-lg bg-rose-500 text-white hover:bg-rose-600"><Square className="h-3.5 w-3.5" /></button>
-              : <button aria-label="发送" title="发送（Ctrl/⌘ + Enter）" disabled={sending || (!input.trim() && uploads.length === 0)} onClick={() => { void send() }} className="grid h-8 w-8 place-items-center rounded-lg bg-brand-600 text-white disabled:cursor-not-allowed disabled:bg-slate-200"><Send className="h-4 w-4" /></button>}</div>
+              : <button aria-label="发送" title="发送（Enter）" disabled={sending || (!input.trim() && uploads.length === 0)} onClick={() => { void send() }} className="grid h-8 w-8 place-items-center rounded-lg bg-brand-600 text-white disabled:cursor-not-allowed disabled:bg-slate-200"><Send className="h-4 w-4" /></button>}</div>
           </div>
           {agentError && (
             <div className="mt-2 flex items-center gap-2 rounded-lg border border-rose-100 bg-rose-50 px-3 py-2 text-[11px] text-rose-600">
