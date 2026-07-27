@@ -9,7 +9,8 @@
 环境要求：Node.js 20+，npm 10+。
 
 ```bash
-npm install
+npm ci
+npm ci --prefix cybernaut-assistant
 npm run dev
 ```
 
@@ -18,6 +19,12 @@ npm run dev
 - Web：`http://127.0.0.1:5173`（端口被占用时 Vite 会自动顺延）
 - Mock API：`http://127.0.0.1:3100`
 - 健康检查：`http://127.0.0.1:3100/api/health`
+- Agent Runtime：`http://127.0.0.1:3584`
+- Agent 健康检查：`http://127.0.0.1:3584/health`
+
+`npm run dev` 会同时启动 Web、API 和 `cybernaut-assistant`。如只调试
+Agent Runtime，可运行 `npm run dev:agent`；启动后可运行
+`npm run check:agent-runtime` 验证服务契约。
 
 生产构建与启动：
 

@@ -16,7 +16,7 @@
 │  POST :3100/api/*                                     │
 ├─────────────────────────────────────────────────────┤
 │  Flue Agent 编排层 (独立服务, :3584)                   │
-│  - advisor agent: AI 对话 / RAG 检索 / PPT 生成       │
+│  - assistant agent: AI 对话 / RAG 检索 / PPT 生成     │
 │  - 通过 FLUE_BASE_URL 与后端通信                      │
 ├─────────────────────────────────────────────────────┤
 │  PostgreSQL 16 (cybernaut_mvp)                        │
@@ -203,7 +203,7 @@ npm start            # 生产启动（需先 build）
 前端 AI 对话
   → POST /api/conversations/:id/messages
   → aiService.answerQuestion()
-  → Flue Agent (FLUE_BASE_URL/agents/advisor/:sessionId)
+  → Flue Agent (FLUE_BASE_URL/agents/assistant/:sessionId)
     → search_project_docs (RAG, 走 /api/internal)
     → PPT 生成 / 其他工具
   → 流式返回结果

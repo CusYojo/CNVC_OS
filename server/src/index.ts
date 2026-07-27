@@ -39,7 +39,7 @@ app.get('/api/health', (_req, res) => res.json({
   ok: true, service: 'intelligent-investment-platform-api', timestamp: new Date().toISOString(),
 }))
 
-// 内部端点（供 flue advisor agent 的 tools 回调）：x-internal-secret 校验，挂在用户鉴权之前
+// 内部端点（供 flue assistant agent 的 tools 回调）：x-internal-secret 校验，挂在用户鉴权之前
 app.use('/api/internal', internalRouter)
 
 // 受保护业务路由（除 /auth/login, /auth/me, /health, /llm-health）

@@ -128,15 +128,15 @@ INTERNAL_SECRET=cybernaut-internal-2026       # 内部服务间调用密钥，�
 ### 3.4 外部服务集成
 
 ```ini
-# 情报雷达 — 外部线索采集服务
-RADAR_BASE_URL=http://101.126.93.130:8121
+# 情报雷达 — 本地多信源服务
+RADAR_BASE_URL=http://127.0.0.1:8121
 
 # Agent 工作空间 — PPT/文件产物存储目录
-AGENT_WORKSPACE=/data/cybernaut-assistant/workspace
+AGENT_WORKSPACE=/var/lib/cybernaut-assistant/workspace
 
 # AI 业务 Skill — 默认读取 $AGENT_WORKSPACE/.agents/skills
 # 若 Skill 以独立只读卷部署，可显式覆盖
-AI_SKILL_ROOT=/data/cybernaut-assistant/workspace/.agents/skills
+AI_SKILL_ROOT=/var/lib/cybernaut-assistant/workspace/.agents/skills
 ```
 
 ### 3.5 性能调优
@@ -186,11 +186,11 @@ FLUE_BASE_URL=http://127.0.0.1:3584
 INTERNAL_SECRET=cybernaut-internal-2026
 
 # ---- 情报雷达 ----
-RADAR_BASE_URL=http://101.126.93.130:8121
+RADAR_BASE_URL=http://127.0.0.1:8121
 
 # ---- Agent 工作空间 ----
-AGENT_WORKSPACE=/data/cybernaut-assistant/workspace
-AI_SKILL_ROOT=/data/cybernaut-assistant/workspace/.agents/skills
+AGENT_WORKSPACE=/var/lib/cybernaut-assistant/workspace
+AI_SKILL_ROOT=/var/lib/cybernaut-assistant/workspace/.agents/skills
 
 # ---- 性能 ----
 SCORE_QUEUE_CONCURRENCY=3
@@ -677,19 +677,23 @@ Flue agent 只负责编排调度。
 
 ```bash
 cd project-discovery
-pip install -r requirements.txt
-bash start.sh     # 启动在 :9888
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+./start.sh     # 默认仅监听 127.0.0.1:8121
 ```
 
-### 8.2 连接生产雷达
+### 8.2 恢复旧雷达数据
 
-如果已有运行中的雷达实例，只需在 `.env` 中配置：
+本地数据为空时，可通过旧雷达的只读接口恢复候选记录和公众号清单：
 
-```ini
-RADAR_BASE_URL=http://101.126.93.130:8121
+```bash
+.venv/bin/python scripts/bootstrap_from_remote.py \
+  --remote-base http://101.126.93.130:8121
 ```
 
-然后在平台后台触发「同步线索」，数据会从雷达拉取入库。
+生产环境的 `deploy.sh` 会自动完成这一步，并将数据保存在
+`/var/lib/cybernaut-radar`。GSData 凭据不能从旧接口导出，需在 `.env`
+单独配置 `GSDATA_APP_KEY` 和 `GSDATA_APP_SECRET`。
 
 ### 8.3 Skills 说明
 
@@ -835,5 +839,5 @@ curl -s http://127.0.0.1:18081/v1/models | head -c 100
 curl -s http://127.0.0.1:3584/health
 
 # □ 7. 情报雷达（如配置了）
-curl -s http://101.126.93.130:8121/api/candidates?limit=1 | head -c 100
+curl -s http://127.0.0.1:8121/api/candidates?limit=1 | head -c 100
 ```

@@ -2,7 +2,8 @@ const { db } = require("./server-dist/db/client.js");
 const { leads } = require("./server-dist/db/schema.js");
 const { eq, sql } = require("drizzle-orm");
 async function main() {
-  const radar = await (await fetch("http://101.126.93.130:8121/api/candidates?limit=200&source=arxiv")).json();
+  const radarBase = process.env.RADAR_BASE_URL || "http://127.0.0.1:8121";
+  const radar = await (await fetch(`${radarBase}/api/candidates?limit=200&source=arxiv`)).json();
   const items = radar.items || [];
   const rows = await db.select({ id: leads.id, name: leads.name }).from(leads).where(
     sql`(${leads.radarProfile}->>channel = 论文 AND ${leads.radarProfile}->>sourceName = arxiv)`

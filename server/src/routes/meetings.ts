@@ -3,6 +3,7 @@ import { z } from 'zod'
 import type { AuthedRequest } from '../middleware/requireAuth.js'
 import { createMeeting, createTodo, deleteTodo, getMeeting, listMeetings, listTodos, todoCounts, updateMeeting, updateTodo } from '../services/meetingService.js'
 import { projectSummary as projectSummaryLLM, answerQuestion, meetingSummary } from '../services/aiService.js'
+import { FLUE_AGENT_NAME, FLUE_BASE_URL } from '../config/agentRuntime.js'
 
 export const meetingsRouter = Router()
 
@@ -92,7 +93,7 @@ todosRouter.delete('/:id', async (req, res, next) => {
 
 export const aiRouter = Router()
 
-// /chat：纯转发给 flue advisor agent（真·agent，自带 RAG/PPT/情报工具 + 投研/PPT skill，自主决策）。
+// /chat：纯转发给 flue assistant agent（真·agent，自带 RAG/PPT/情报工具 + 投研/PPT skill，自主决策）。
 // 不再用正则硬分流：无论用户如何措辞，由 agent 判断该调哪个能力。
 aiRouter.post('/chat', async (req, res, next) => {
   try {
@@ -106,9 +107,8 @@ aiRouter.post('/chat', async (req, res, next) => {
   } catch (err) { next(err) }
 })
 
-// /chat-stream：真流式（SSE）。把问题转发给 flue advisor agent，逐 token 把回答 + 工具调用推给前端，
+// /chat-stream：真流式（SSE）。把问题转发给 flue assistant agent，逐 token 把回答 + 工具调用推给前端，
 // 像 Pi Agent Web 那样实时滚动。底层 flue=pi，用其 SSE 契约：POST ?stream=true 拿 offset，再 GET ?view=updates&live=sse。
-const FLUE_STREAM_BASE = process.env.FLUE_BASE_URL || 'http://127.0.0.1:8790'
 aiRouter.post('/chat-stream', async (req: AuthedRequest, res) => {
   const parsed = z.object({
     question: z.string().min(1),
@@ -140,7 +140,7 @@ aiRouter.post('/chat-stream', async (req: AuthedRequest, res) => {
   const sid = conversationId
     ? `conv-${conversationId.replace(/[^A-Za-z0-9_-]/g, '')}`
     : `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-  const agentUrl = `${FLUE_STREAM_BASE}/agents/advisor/${sid}`
+  const agentUrl = `${FLUE_BASE_URL}/agents/${FLUE_AGENT_NAME}/${sid}`
   const ac = new AbortController()
   res.on('close', () => ac.abort())
 
