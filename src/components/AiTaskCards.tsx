@@ -299,7 +299,7 @@ function TaskCard({
       {task.status === 'succeeded' && task.artifacts?.length > 0 && (
         <div className="mt-3 flex flex-wrap gap-2">
           {task.artifacts
-            .filter((artifact) => ['docx', 'pptx'].includes(artifact.format.toLowerCase()))
+            .filter((artifact) => ['docx', 'pptx', 'pdf'].includes(artifact.format.toLowerCase()))
             .map((artifact) => (
               <Button
                 key={artifact.id}
@@ -311,7 +311,9 @@ function TaskCard({
               >
                 <Download className="h-3.5 w-3.5" />
                 下载 {artifact.format.toUpperCase()} · V{artifact.version}
-                {artifact.metadata?.encodingClean !== true && '（历史未校验）'}
+                {['docx', 'pptx'].includes(artifact.format.toLowerCase())
+                  && artifact.metadata?.encodingClean !== true
+                  && '（历史未校验）'}
               </Button>
             ))}
         </div>
@@ -408,7 +410,7 @@ export function AiArtifactCenter({
     apiGet<{ list: AiTaskArtifact[] }>(`/ai/artifacts?projectId=${encodeURIComponent(projectId!)}`)
       .then((result) => {
         if (!active) return
-        setArtifacts((result.list ?? []).filter((artifact) => ['docx', 'pptx'].includes(artifact.format.toLowerCase())))
+        setArtifacts((result.list ?? []).filter((artifact) => ['docx', 'pptx', 'pdf'].includes(artifact.format.toLowerCase())))
         setError('')
       })
       .catch((fetchError) => {
