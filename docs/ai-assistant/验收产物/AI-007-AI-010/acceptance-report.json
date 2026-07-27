@@ -1,0 +1,291 @@
+{
+  "generatedAt": "2026-07-24T06:34:05.943Z",
+  "outputDir": "/Users/lh/Documents/cybernaut-dist/docs/ai-assistant/验收产物/AI-007-AI-010",
+  "passed": true,
+  "checks": [
+    {
+      "name": "文本导入可识别 UTF-16LE 中文",
+      "passed": true,
+      "detail": "utf-16le:中文编码验收"
+    },
+    {
+      "name": "文本导入可识别 GB18030 中文",
+      "passed": true,
+      "detail": "gb18030:中文"
+    },
+    {
+      "name": "历史损坏片段不会把替换字符带入产物",
+      "passed": true,
+      "detail": "这是一份用于验收的中文项目资料，包含足够的可读内容。"
+    },
+    {
+      "name": "历史 Windows-1252 错译可恢复为中文",
+      "passed": true,
+      "detail": "项目摘要：中文编码测试，后续中文内容保持正常。"
+    },
+    {
+      "name": "compliance_statement 主样本存在",
+      "passed": true,
+      "detail": "/Users/lh/Documents/cybernaut-dist/docs/合规性说明/关于德塔智能项目投资合规性的说明_20260701.docx"
+    },
+    {
+      "name": "compliance_statement DOCX 为有效 OpenXML",
+      "passed": true,
+      "detail": "/Users/lh/Documents/cybernaut-dist/docs/ai-assistant/验收产物/AI-007-AI-010/AI-007_业务验收_合规性说明.docx"
+    },
+    {
+      "name": "compliance_statement 含可编辑文本",
+      "passed": true,
+      "detail": "章节 8"
+    },
+    {
+      "name": "compliance_statement 章节完整",
+      "passed": true,
+      "detail": "公司情况介绍、公司简介、核心团队、产品及技术、投资理由、投资计划、投资情形分析、结论"
+    },
+    {
+      "name": "compliance_statement 含免责声明",
+      "passed": true,
+      "detail": "本文件由 AI 基于已授权资料生成，仅供内部合规初审，不构成正式法律意见；须经法务或风控人员审核后方可作为正式材料。"
+    },
+    {
+      "name": "compliance_statement 含来源和核验状态",
+      "passed": true,
+      "detail": "来源/状态"
+    },
+    {
+      "name": "compliance_statement 不含损坏字符",
+      "passed": true,
+      "detail": "未发现 U+FFFD"
+    },
+    {
+      "name": "compliance_statement 不使用 Arial Unicode MS",
+      "passed": true,
+      "detail": "宋体"
+    },
+    {
+      "name": "compliance_statement 使用模板中文字体",
+      "passed": true,
+      "detail": "宋体/黑体"
+    },
+    {
+      "name": "compliance_statement 不泄露示例项目与内部模板编号",
+      "passed": true,
+      "detail": "佳量、德塔、Epilcure、曹鹏、compliance-deita-20260701-v1"
+    },
+    {
+      "name": "compliance_statement 已应用公司模板可复用部件",
+      "passed": true,
+      "detail": "模板部件 word/fontTable.xml，摘要 5b51cda59273"
+    },
+    {
+      "name": "AI-007 Markdown 固定责任分区完整",
+      "passed": true,
+      "detail": "/Users/lh/Documents/cybernaut-dist/docs/ai-assistant/验收产物/AI-007-AI-010/AI-007_业务验收_合规性说明.md"
+    },
+    {
+      "name": "AI-007 Markdown 与 DOCX 免责声明一致",
+      "passed": true,
+      "detail": "本文件由 AI 基于已授权资料生成，仅供内部合规初审，不构成正式法律意见；须经法务或风控人员审核后方可作为正式材料。"
+    },
+    {
+      "name": "investment_proposal 主样本存在",
+      "passed": true,
+      "detail": "/Users/lh/Documents/cybernaut-dist/docs/投资提案/佳量脑科学项目投资提案0622(1).docx"
+    },
+    {
+      "name": "investment_proposal DOCX 为有效 OpenXML",
+      "passed": true,
+      "detail": "/Users/lh/Documents/cybernaut-dist/docs/ai-assistant/验收产物/AI-007-AI-010/AI-008_业务验收_投资提案.docx"
+    },
+    {
+      "name": "investment_proposal 含可编辑文本",
+      "passed": true,
+      "detail": "章节 10"
+    },
+    {
+      "name": "investment_proposal 章节完整",
+      "passed": true,
+      "detail": "公司基本情况、核心团队、产品及技术、市场与竞争、财务摘要、本次交易方案、风险控制及保护性条款、公司业务计划、项目亮点总结、风险与待核验事项"
+    },
+    {
+      "name": "investment_proposal 含免责声明",
+      "passed": true,
+      "detail": "本文件为 AI 辅助生成的内部投资提案初稿，不替代投资建议书、尽职调查报告或投资决策文件。"
+    },
+    {
+      "name": "investment_proposal 含来源和核验状态",
+      "passed": true,
+      "detail": "来源/状态"
+    },
+    {
+      "name": "investment_proposal 不含损坏字符",
+      "passed": true,
+      "detail": "未发现 U+FFFD"
+    },
+    {
+      "name": "investment_proposal 不使用 Arial Unicode MS",
+      "passed": true,
+      "detail": "仿宋"
+    },
+    {
+      "name": "investment_proposal 使用模板中文字体",
+      "passed": true,
+      "detail": "仿宋/黑体"
+    },
+    {
+      "name": "investment_proposal 不泄露示例项目与内部模板编号",
+      "passed": true,
+      "detail": "佳量、德塔、Epilcure、曹鹏、proposal-jialiang-20260622-v1"
+    },
+    {
+      "name": "investment_proposal 已应用公司模板可复用部件",
+      "passed": true,
+      "detail": "模板部件 word/fontTable.xml，摘要 0686dc7cd3bc"
+    },
+    {
+      "name": "investment_proposal 包含模板式页眉页码",
+      "passed": true,
+      "detail": "页眉与页码"
+    },
+    {
+      "name": "investment_recommendation_ppt 主样本存在",
+      "passed": true,
+      "detail": "/Users/lh/Documents/cybernaut-dist/docs/投资建议书/佳量脑科学_投资建议书6月.pptx"
+    },
+    {
+      "name": "AI-009 PPTX 为有效 OpenXML",
+      "passed": true,
+      "detail": "/Users/lh/Documents/cybernaut-dist/docs/ai-assistant/验收产物/AI-007-AI-010/AI-009_业务验收_投资建议书.pptx"
+    },
+    {
+      "name": "AI-009 页数符合 12-15 页参数",
+      "passed": true,
+      "detail": "实际 12 页"
+    },
+    {
+      "name": "AI-009 核心文本为可编辑对象",
+      "passed": true,
+      "detail": "文本对象 161"
+    },
+    {
+      "name": "AI-009 含原生可编辑表格与形状",
+      "passed": true,
+      "detail": "项目核心信息表格及状态标识形状"
+    },
+    {
+      "name": "AI-009 预览图有效且与封面元数据一致",
+      "passed": true,
+      "detail": "1600×900，329295 bytes"
+    },
+    {
+      "name": "AI-009 含免责声明",
+      "passed": true,
+      "detail": "本演示文稿由 AI 基于已授权资料生成，仅供内部讨论，不构成最终投资决策。"
+    },
+    {
+      "name": "AI-009 含来源与截止日",
+      "passed": true,
+      "detail": "2026-07-24"
+    },
+    {
+      "name": "AI-009 生成元数据页数一致",
+      "passed": true,
+      "detail": "12/12"
+    },
+    {
+      "name": "AI-009 中文文本语言标记正确",
+      "passed": true,
+      "detail": "全部中文文本使用 zh-CN"
+    },
+    {
+      "name": "AI-009 设置东亚主题字体",
+      "passed": true,
+      "detail": "微软雅黑"
+    },
+    {
+      "name": "AI-009 不含损坏字符",
+      "passed": true,
+      "detail": "未发现 U+FFFD"
+    },
+    {
+      "name": "AI-009 不泄露示例项目与内部模板编号",
+      "passed": true,
+      "detail": "佳量、德塔、Epilcure、曹鹏、recommendation-jialiang"
+    },
+    {
+      "name": "AI-009 已应用公司模板资产",
+      "passed": true,
+      "detail": "资产 3，模板摘要 623e986c2ca0"
+    },
+    {
+      "name": "due_diligence_report 主样本存在",
+      "passed": true,
+      "detail": "/Users/lh/Documents/cybernaut-dist/docs/尽调报告/佳量脑科学业务尽调报告6月.docx"
+    },
+    {
+      "name": "due_diligence_report DOCX 为有效 OpenXML",
+      "passed": true,
+      "detail": "/Users/lh/Documents/cybernaut-dist/docs/ai-assistant/验收产物/AI-007-AI-010/AI-010_业务验收_尽调报告.docx"
+    },
+    {
+      "name": "due_diligence_report 含可编辑文本",
+      "passed": true,
+      "detail": "章节 16"
+    },
+    {
+      "name": "due_diligence_report 章节完整",
+      "passed": true,
+      "detail": "投资概要、公司概况、股权结构及融资历程、公司治理与管理团队、行业概况与市场空间、产业链与竞争格局、产品与核心技术、商业模式与经营情况、财务分析、客户与商业化进展、法律合规与资质、估值合理性分析、投资方案、投资亮点、风险分析、资料缺口与后续核验"
+    },
+    {
+      "name": "due_diligence_report 含免责声明",
+      "passed": true,
+      "detail": "本报告为 AI 基于截至资料截止日已授权资料生成的尽调初稿，不表示尽调程序已经完成，不构成法律、财务或投资意见。"
+    },
+    {
+      "name": "due_diligence_report 含来源和核验状态",
+      "passed": true,
+      "detail": "来源/状态"
+    },
+    {
+      "name": "due_diligence_report 不含损坏字符",
+      "passed": true,
+      "detail": "未发现 U+FFFD"
+    },
+    {
+      "name": "due_diligence_report 不使用 Arial Unicode MS",
+      "passed": true,
+      "detail": "仿宋"
+    },
+    {
+      "name": "due_diligence_report 使用模板中文字体",
+      "passed": true,
+      "detail": "仿宋/黑体"
+    },
+    {
+      "name": "due_diligence_report 不泄露示例项目与内部模板编号",
+      "passed": true,
+      "detail": "佳量、德塔、Epilcure、曹鹏、dd-jialiang-202606-v1"
+    },
+    {
+      "name": "due_diligence_report 已应用公司模板可复用部件",
+      "passed": true,
+      "detail": "模板部件 word/fontTable.xml，摘要 424d11d345d7"
+    },
+    {
+      "name": "due_diligence_report 包含模板式页眉页码",
+      "passed": true,
+      "detail": "页眉与页码"
+    }
+  ],
+  "artifacts": [
+    "/Users/lh/Documents/cybernaut-dist/docs/ai-assistant/验收产物/AI-007-AI-010/AI-007_业务验收_合规性说明.docx",
+    "/Users/lh/Documents/cybernaut-dist/docs/ai-assistant/验收产物/AI-007-AI-010/AI-007_业务验收_合规性说明.md",
+    "/Users/lh/Documents/cybernaut-dist/docs/ai-assistant/验收产物/AI-007-AI-010/AI-008_业务验收_投资提案.docx",
+    "/Users/lh/Documents/cybernaut-dist/docs/ai-assistant/验收产物/AI-007-AI-010/AI-009_业务验收_投资建议书.pptx",
+    "/Users/lh/Documents/cybernaut-dist/docs/ai-assistant/验收产物/AI-007-AI-010/AI-009_业务验收_投资建议书.preview.png",
+    "/Users/lh/Documents/cybernaut-dist/docs/ai-assistant/验收产物/AI-007-AI-010/AI-010_业务验收_尽调报告.docx"
+  ],
+  "note": "自动验收使用脱敏虚构数据；法务签字及 Microsoft Office/WPS 人工兼容验收仍需业务人员完成。"
+}

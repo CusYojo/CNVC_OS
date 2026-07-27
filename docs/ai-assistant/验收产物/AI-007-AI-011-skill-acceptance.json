@@ -1,0 +1,207 @@
+{
+  "generatedAt": "2026-07-24T06:39:18.082Z",
+  "skillRoot": "/Users/lh/Documents/cybernaut-dist/server/workspace/.agents/skills",
+  "passed": true,
+  "checks": [
+    {
+      "name": "登记五个业务 Skill",
+      "passed": true,
+      "detail": "5 个"
+    },
+    {
+      "name": "Skill 名称唯一",
+      "passed": true,
+      "detail": "generate-compliance-statement, draft-investment-proposal, build-investment-recommendation-ppt, write-due-diligence-report, answer-project-qa"
+    },
+    {
+      "name": "合规性说明 frontmatter 仅含 name/description",
+      "passed": true,
+      "detail": "name,description"
+    },
+    {
+      "name": "合规性说明 无脚手架占位符",
+      "passed": true,
+      "detail": "generate-compliance-statement"
+    },
+    {
+      "name": "合规性说明 UI 默认提示显式调用 Skill",
+      "passed": true,
+      "detail": "generate-compliance-statement"
+    },
+    {
+      "name": "合规性说明 用户可见内容使用中文",
+      "passed": true,
+      "detail": "description/SKILL/reference/UI 中文化；UI=生成合规性说明 | 依据授权项目证据生成可追溯、待法务审核的合规性说明初稿 | 使用 $generate-compliance-statement，根据所选项目的授权证据生成可追溯的中文合规性说明初稿。"
+    },
+    {
+      "name": "合规性说明 版本和摘要可审计",
+      "passed": true,
+      "detail": "sha256-b6a2a4e8db1b"
+    },
+    {
+      "name": "合规性说明 未打包已知项目样本正文",
+      "passed": true,
+      "detail": "SKILL 可登记已批准模板路径，但引用契约不得复制样本项目正文"
+    },
+    {
+      "name": "投资提案 frontmatter 仅含 name/description",
+      "passed": true,
+      "detail": "name,description"
+    },
+    {
+      "name": "投资提案 无脚手架占位符",
+      "passed": true,
+      "detail": "draft-investment-proposal"
+    },
+    {
+      "name": "投资提案 UI 默认提示显式调用 Skill",
+      "passed": true,
+      "detail": "draft-investment-proposal"
+    },
+    {
+      "name": "投资提案 用户可见内容使用中文",
+      "passed": true,
+      "detail": "description/SKILL/reference/UI 中文化；UI=生成投资提案 | 根据项目证据生成面向立项、基金汇报或合作沟通的投资提案初稿 | 使用 $draft-investment-proposal，根据所选项目证据起草供内部使用的中文投资提案。"
+    },
+    {
+      "name": "投资提案 版本和摘要可审计",
+      "passed": true,
+      "detail": "sha256-1f41318b6032"
+    },
+    {
+      "name": "投资提案 未打包已知项目样本正文",
+      "passed": true,
+      "detail": "SKILL 可登记已批准模板路径，但引用契约不得复制样本项目正文"
+    },
+    {
+      "name": "投资建议书（PPT） frontmatter 仅含 name/description",
+      "passed": true,
+      "detail": "name,description"
+    },
+    {
+      "name": "投资建议书（PPT） 无脚手架占位符",
+      "passed": true,
+      "detail": "build-investment-recommendation-ppt"
+    },
+    {
+      "name": "投资建议书（PPT） UI 默认提示显式调用 Skill",
+      "passed": true,
+      "detail": "build-investment-recommendation-ppt"
+    },
+    {
+      "name": "投资建议书（PPT） 用户可见内容使用中文",
+      "passed": true,
+      "detail": "description/SKILL/reference/UI 中文化；UI=生成投资建议书 PPT | 根据项目证据生成核心文字、表格、图表和形状可编辑的投资建议书 PPTX | 使用 $build-investment-recommendation-ppt 根据授权项目证据生成一份核心内容可编辑、来源可追溯的中文投资建议书 PPTX。"
+    },
+    {
+      "name": "投资建议书（PPT） 版本和摘要可审计",
+      "passed": true,
+      "detail": "sha256-f7266944a38e"
+    },
+    {
+      "name": "投资建议书（PPT） 未打包已知项目样本正文",
+      "passed": true,
+      "detail": "SKILL 可登记已批准模板路径，但引用契约不得复制样本项目正文"
+    },
+    {
+      "name": "尽调报告 frontmatter 仅含 name/description",
+      "passed": true,
+      "detail": "name,description"
+    },
+    {
+      "name": "尽调报告 无脚手架占位符",
+      "passed": true,
+      "detail": "write-due-diligence-report"
+    },
+    {
+      "name": "尽调报告 UI 默认提示显式调用 Skill",
+      "passed": true,
+      "detail": "write-due-diligence-report"
+    },
+    {
+      "name": "尽调报告 用户可见内容使用中文",
+      "passed": true,
+      "detail": "description/SKILL/reference/UI 中文化；UI=生成尽调报告 | 根据授权证据生成带来源、核验状态、风险和资料缺口的商业尽调报告 | 使用 $write-due-diligence-report 根据授权项目证据起草一份来源可追溯、区分证据状态的中文商业尽调报告。"
+    },
+    {
+      "name": "尽调报告 版本和摘要可审计",
+      "passed": true,
+      "detail": "sha256-6205a7b140c9"
+    },
+    {
+      "name": "尽调报告 未打包已知项目样本正文",
+      "passed": true,
+      "detail": "SKILL 可登记已批准模板路径，但引用契约不得复制样本项目正文"
+    },
+    {
+      "name": "Q&A frontmatter 仅含 name/description",
+      "passed": true,
+      "detail": "name,description"
+    },
+    {
+      "name": "Q&A 无脚手架占位符",
+      "passed": true,
+      "detail": "answer-project-qa"
+    },
+    {
+      "name": "Q&A UI 默认提示显式调用 Skill",
+      "passed": true,
+      "detail": "answer-project-qa"
+    },
+    {
+      "name": "Q&A 用户可见内容使用中文",
+      "passed": true,
+      "detail": "description/SKILL/reference/UI 中文化；UI=项目 Q&A | 基于当前项目资料回答投资问题，并展示来源、证据数量、置信状态和责任声明 | 使用 $answer-project-qa 基于当前项目资料回答投资问题，并提供来源引用、证据数量、置信状态和责任声明。"
+    },
+    {
+      "name": "Q&A 版本和摘要可审计",
+      "passed": true,
+      "detail": "sha256-67280c87458c"
+    },
+    {
+      "name": "Q&A 未打包已知项目样本正文",
+      "passed": true,
+      "detail": "SKILL 可登记已批准模板路径，但引用契约不得复制样本项目正文"
+    },
+    {
+      "name": "四类文档任务均绑定唯一 Skill",
+      "passed": true,
+      "detail": "compliance_statement:generate-compliance-statement, investment_proposal:draft-investment-proposal, investment_recommendation_ppt:build-investment-recommendation-ppt, due_diligence_report:write-due-diligence-report"
+    },
+    {
+      "name": "AI-007～AI-011 均绑定 docs 业务模板",
+      "passed": true,
+      "detail": "/Users/lh/Documents/cybernaut-dist/docs/合规性说明/关于德塔智能项目投资合规性的说明_20260701.docx | /Users/lh/Documents/cybernaut-dist/docs/投资提案/佳量脑科学项目投资提案0622(1).docx | /Users/lh/Documents/cybernaut-dist/docs/投资建议书/佳量脑科学_投资建议书6月.pptx | /Users/lh/Documents/cybernaut-dist/docs/尽调报告/佳量脑科学业务尽调报告6月.docx | /Users/lh/Documents/cybernaut-dist/docs/Q&A/中数睿智项目Q&A.pdf | /Users/lh/Documents/cybernaut-dist/docs/Q&A/德塔智能项目Q&A(1).pdf | /Users/lh/Documents/cybernaut-dist/docs/Q&A/浙江蓝成应急信息科技有限公司 Q&A(1).pdf"
+    },
+    {
+      "name": "Q&A 七类问题与回答契约完整",
+      "passed": true,
+      "detail": "完整"
+    },
+    {
+      "name": "Q&A 问题选择后不自动发送",
+      "passed": true,
+      "detail": "问题库模式必须等待用户明确确认"
+    },
+    {
+      "name": "PPT Skill 明确单一可编辑 PPTX 链路",
+      "passed": true,
+      "detail": "核心内容原生可编辑 / 仅一份正式 PPTX"
+    },
+    {
+      "name": "Q&A 前端提供七类问题库",
+      "passed": true,
+      "detail": "完整"
+    },
+    {
+      "name": "Q&A 用户确认后直接调用持久化 Skill API",
+      "passed": true,
+      "detail": "POST /api/ai/qa"
+    },
+    {
+      "name": "Q&A 按会话恢复持久化回答",
+      "passed": true,
+      "detail": "GET /api/ai/qa?conversationId=..."
+    }
+  ]
+}
