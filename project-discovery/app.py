@@ -25,8 +25,15 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 
+def env_flag(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 BASE_DIR = Path(__file__).resolve().parent
-DATA_DIR = BASE_DIR / "data"
+DATA_DIR = Path(os.getenv("RADAR_DATA_DIR", str(BASE_DIR / "data"))).expanduser().resolve()
 STATIC_DIR = BASE_DIR / "static"
 ARXIV_FILE = DATA_DIR / "arxiv_candidates.jsonl"
 WECHAT_FILE = DATA_DIR / "wechat_985_candidates.jsonl"
@@ -38,7 +45,9 @@ INVESTMENT_FILE = DATA_DIR / "investment_candidates.jsonl"
 WECHAT_SOURCES_FILE = DATA_DIR / "wechat_985_sources.json"
 AUTO_STATUS_FILE = DATA_DIR / "auto_crawler_status.json"
 WECHAT_DAILY_STATUS_FILE = DATA_DIR / "wechat_daily_status.json"
-WECHAT_ACCOUNTS_XLSX = BASE_DIR / "公众号来源.xlsx"
+WECHAT_ACCOUNTS_XLSX = Path(
+    os.getenv("RADAR_WECHAT_ACCOUNTS_XLSX", str(BASE_DIR / "公众号来源.xlsx"))
+).expanduser().resolve()
 GSDATA_CREDENTIALS_FILE = DATA_DIR / "gsdata_credentials.json"
 GSDATA_API_URL = "http://databus.gsdata.cn:8888/api/service"
 GSDATA_WECHAT_ROUTER = "/weixin/article/search1"
@@ -57,6 +66,8 @@ CHAT_CONTEXT_BEFORE = 4
 CHAT_CONTEXT_AFTER = 4
 AUTO_CRAWL_INTERVAL_SECONDS = 30 * 60
 AUTO_CRAWL_GROUPS = ["创投新闻", "海外项目"]
+AUTO_CRAWL_ENABLED = env_flag("RADAR_AUTO_CRAWL_ENABLED", True)
+WECHAT_DAILY_ENABLED = env_flag("RADAR_WECHAT_DAILY_ENABLED", True)
 CHINA_TZ = ZoneInfo("Asia/Shanghai")
 WECHAT_DAILY_RUN_HOUR = 8
 WECHAT_DAILY_RUN_MINUTE = 30
@@ -1802,7 +1813,7 @@ def utc_now_iso() -> str:
 
 def default_auto_status() -> dict:
     return {
-        "enabled": True,
+        "enabled": AUTO_CRAWL_ENABLED,
         "running": False,
         "interval_seconds": AUTO_CRAWL_INTERVAL_SECONDS,
         "groups": AUTO_CRAWL_GROUPS,
@@ -1834,7 +1845,7 @@ def write_auto_status(status: dict) -> None:
 
 def default_wechat_daily_status() -> dict:
     return {
-        "enabled": True,
+        "enabled": WECHAT_DAILY_ENABLED,
         "running": False,
         "run_hour": WECHAT_DAILY_RUN_HOUR,
         "run_minute": WECHAT_DAILY_RUN_MINUTE,
@@ -1900,6 +1911,14 @@ def load_gsdata_credentials() -> tuple[str, str]:
     if not app_key or not app_secret:
         raise RuntimeError("缺少 GSData app_key/app_secret，请设置环境变量或 data/gsdata_credentials.json。")
     return app_key, app_secret
+
+
+def gsdata_credentials_configured() -> bool:
+    try:
+        load_gsdata_credentials()
+        return True
+    except (OSError, ValueError, RuntimeError, json.JSONDecodeError):
+        return False
 
 
 def gsdata_access_token(params: dict[str, str], router: str) -> str:
@@ -2918,14 +2937,30 @@ async def wechat_daily_loop() -> None:
 async def start_auto_crawler():
     global auto_crawler_task, wechat_daily_task
     status = read_auto_status()
-    status["enabled"] = True
+    status["enabled"] = AUTO_CRAWL_ENABLED
     status["running"] = False
     status["interval_seconds"] = AUTO_CRAWL_INTERVAL_SECONDS
     status["groups"] = AUTO_CRAWL_GROUPS
-    status["next_run_at"] = (datetime.now(timezone.utc) + timedelta(seconds=5)).isoformat()
+    status["next_run_at"] = (
+        (datetime.now(timezone.utc) + timedelta(seconds=5)).isoformat()
+        if AUTO_CRAWL_ENABLED else ""
+    )
     write_auto_status(status)
-    auto_crawler_task = asyncio.create_task(auto_crawler_loop())
-    wechat_daily_task = asyncio.create_task(wechat_daily_loop())
+    if AUTO_CRAWL_ENABLED:
+        auto_crawler_task = asyncio.create_task(auto_crawler_loop())
+
+    daily_enabled = WECHAT_DAILY_ENABLED and gsdata_credentials_configured()
+    daily_status = read_wechat_daily_status()
+    daily_status["enabled"] = daily_enabled
+    daily_status["running"] = False
+    daily_status["next_run_at"] = next_wechat_daily_run_at().isoformat() if daily_enabled else ""
+    if WECHAT_DAILY_ENABLED and not daily_enabled:
+        daily_status["last_error"] = "GSData 凭据未配置，公众号定时采集未启动"
+    elif daily_status.get("last_error") == "GSData 凭据未配置，公众号定时采集未启动":
+        daily_status["last_error"] = ""
+    write_wechat_daily_status(daily_status)
+    if daily_enabled:
+        wechat_daily_task = asyncio.create_task(wechat_daily_loop())
 
 
 @app.on_event("shutdown")
@@ -2951,7 +2986,15 @@ async def index():
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "name": "project-discovery-radar"}
+    return {
+        "status": "ok",
+        "name": "project-discovery-radar",
+        "data_dir": str(DATA_DIR),
+        "accounts_file": str(WECHAT_ACCOUNTS_XLSX),
+        "gsdata_configured": gsdata_credentials_configured(),
+        "auto_crawl_enabled": AUTO_CRAWL_ENABLED,
+        "wechat_daily_enabled": WECHAT_DAILY_ENABLED and gsdata_credentials_configured(),
+    }
 
 
 @app.get("/api/auto/status")

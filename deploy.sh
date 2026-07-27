@@ -5,8 +5,9 @@
 # 用法:
 #   bash deploy.sh              # 首次部署（完整流程）
 #   bash deploy.sh update       # 快速更新（git pull + build + restart）
-#   bash deploy.sh restart      # 重启 API 与 Agent Runtime
+#   bash deploy.sh restart      # 重启 API、Agent Runtime 与情报雷达
 #   bash deploy.sh restart-all  # restart 的兼容别名
+#   bash deploy.sh radar-configure # 安全写入 GSData 凭据
 #   bash deploy.sh status       # 查看服务状态
 #   bash deploy.sh logs         # 查看最近日志
 #=============================================================================
@@ -25,6 +26,12 @@ FLUE_SERVICE="cybernaut-flue"
 FLUE_DIR="${DEPLOY_DIR}/cybernaut-assistant"
 FLUE_STATE_DIR="/var/lib/cybernaut-assistant"
 FLUE_PORT="3584"
+RADAR_SERVICE="cybernaut-radar"
+RADAR_DIR="${DEPLOY_DIR}/project-discovery"
+RADAR_STATE_DIR="/var/lib/cybernaut-radar"
+RADAR_VENV="${RADAR_DIR}/.venv"
+RADAR_PORT="8121"
+RADAR_BOOTSTRAP_DEFAULT="http://101.126.93.130:8121"
 SYSTEMD_SERVICE="$API_SERVICE"
 LOG_DIR="${DEPLOY_DIR}/logs"
 GENERATED_DIR="${DEPLOY_DIR}/server/generated"
@@ -95,6 +102,19 @@ check_prereqs() {
         ok=false
     else
         log "npm $("$NPM_BIN" -v) ✓"
+    fi
+
+    if ! command -v python3 &>/dev/null; then
+        err "Python 3 未安装，情报雷达需要 Python ≥ 3.9"
+        ok=false
+    else
+        local pyv; pyv=$(python3 -c 'import sys; print(".".join(map(str, sys.version_info[:3])))')
+        if ! python3 -c 'import sys; raise SystemExit(sys.version_info < (3, 9))'; then
+            err "Python ${pyv} 版本过低，情报雷达需要 Python ≥ 3.9"
+            ok=false
+        else
+            log "Python ${pyv} ✓"
+        fi
     fi
 
     if ! command -v nginx &>/dev/null; then
@@ -222,7 +242,14 @@ SOURCING_MODEL=zeelin-oai/gpt-5.5
 INTERNAL_SECRET=cybernaut-internal-2026
 
 # ---- 情报雷达 ----
-RADAR_BASE_URL=http://101.126.93.130:8121
+RADAR_BASE_URL=http://127.0.0.1:${RADAR_PORT}
+RADAR_DATA_DIR=${RADAR_STATE_DIR}/data
+RADAR_WECHAT_ACCOUNTS_XLSX=${RADAR_STATE_DIR}/公众号来源.xlsx
+RADAR_BOOTSTRAP_URL=${RADAR_BOOTSTRAP_DEFAULT}
+RADAR_AUTO_CRAWL_ENABLED=true
+RADAR_WECHAT_DAILY_ENABLED=true
+GSDATA_APP_KEY=
+GSDATA_APP_SECRET=
 
 # ---- Agent 工作空间 ----
 AGENT_WORKSPACE=${FLUE_STATE_DIR}/workspace
@@ -244,13 +271,21 @@ EOF
     set_env_value "$ENV_FILE" "AGENT_WORKSPACE" "${FLUE_STATE_DIR}/workspace"
     set_env_value "$ENV_FILE" "AI_SKILL_ROOT" "${FLUE_STATE_DIR}/workspace/.agents/skills"
     set_env_value "$ENV_FILE" "FLUE_DB_PATH" "${FLUE_STATE_DIR}/flue.db"
+    set_env_value "$ENV_FILE" "RADAR_BASE_URL" "http://127.0.0.1:${RADAR_PORT}"
+    set_env_value "$ENV_FILE" "RADAR_DATA_DIR" "${RADAR_STATE_DIR}/data"
+    set_env_value "$ENV_FILE" "RADAR_WECHAT_ACCOUNTS_XLSX" "${RADAR_STATE_DIR}/公众号来源.xlsx"
 
     # 模型选择允许运维在 .env 中覆盖；缺失时补当前源码默认值。
     ensure_env_value "$ENV_FILE" "FLUE_MODEL" "zeelin-oai/gpt-5.5"
     ensure_env_value "$ENV_FILE" "SCORE_MODEL" "zeelin/DeepSeek-V4-Flash"
     ensure_env_value "$ENV_FILE" "SOURCING_MODEL" "zeelin-oai/gpt-5.5"
+    ensure_env_value "$ENV_FILE" "RADAR_BOOTSTRAP_URL" "$RADAR_BOOTSTRAP_DEFAULT"
+    ensure_env_value "$ENV_FILE" "RADAR_AUTO_CRAWL_ENABLED" "true"
+    ensure_env_value "$ENV_FILE" "RADAR_WECHAT_DAILY_ENABLED" "true"
+    ensure_env_value "$ENV_FILE" "GSDATA_APP_KEY" ""
+    ensure_env_value "$ENV_FILE" "GSDATA_APP_SECRET" ""
     chmod 600 "$ENV_FILE"
-    log "Agent Runtime 环境变量已对齐 ✓"
+    log "Agent Runtime 与本地情报雷达环境变量已对齐 ✓"
 }
 
 #---------------------------------------
@@ -337,16 +372,20 @@ migrate_legacy_agent_state() {
 }
 
 #---------------------------------------
-# 构建主项目和 Agent Runtime
+# 构建主项目、Agent Runtime 和情报雷达
 #---------------------------------------
 build_project() {
-    step "构建主项目和 Agent Runtime"
+    step "构建主项目、Agent Runtime 和情报雷达"
 
     cd "$DEPLOY_DIR"
 
     if [ ! -f "${FLUE_DIR}/package.json" ] || [ ! -f "${FLUE_DIR}/package-lock.json" ]; then
         err "缺少 Agent Runtime 源码或锁文件: ${FLUE_DIR}"
         err "请确认 cybernaut-assistant 已纳入当前发布版本"
+        exit 1
+    fi
+    if [ ! -f "${RADAR_DIR}/app.py" ] || [ ! -f "${RADAR_DIR}/requirements.txt" ]; then
+        err "缺少情报雷达源码或依赖清单: ${RADAR_DIR}"
         exit 1
     fi
 
@@ -356,6 +395,10 @@ build_project() {
     log "按锁文件安装 Agent Runtime 依赖..."
     "$NPM_BIN" ci --include=dev --prefix "$FLUE_DIR"
 
+    log "创建情报雷达 Python 虚拟环境并安装依赖..."
+    python3 -m venv "$RADAR_VENV"
+    "$RADAR_VENV/bin/python" -m pip install --disable-pip-version-check -r "${RADAR_DIR}/requirements.txt"
+
     log "执行主项目与 Runtime 类型检查..."
     "$NPM_BIN" run check
 
@@ -363,7 +406,7 @@ build_project() {
     "$NPM_BIN" run build
 
     # 确保必要目录存在
-    install -d -m 0750 "$LOG_DIR" "$GENERATED_DIR" "${FLUE_STATE_DIR}/workspace"
+    install -d -m 0750 "$LOG_DIR" "$GENERATED_DIR" "${FLUE_STATE_DIR}/workspace" "${RADAR_STATE_DIR}/data"
     sync_agent_skills
 
     if [ ! -f "${FLUE_DIR}/dist/server/server.mjs" ]; then
@@ -371,7 +414,109 @@ build_project() {
         exit 1
     fi
 
-    log "主项目和 Agent Runtime 构建完成 ✓"
+    "$RADAR_VENV/bin/python" -m py_compile "${RADAR_DIR}/app.py" "${RADAR_DIR}/scripts/bootstrap_from_remote.py"
+    log "主项目、Agent Runtime 和情报雷达构建完成 ✓"
+}
+
+#---------------------------------------
+# 恢复 / 初始化雷达持久化数据
+#---------------------------------------
+prepare_radar_state() {
+    step "恢复情报雷达数据"
+
+    local env_file="${DEPLOY_DIR}/.env"
+    local bootstrap_url="$RADAR_BOOTSTRAP_DEFAULT"
+    local candidate source_root state_complete=true candidate_file
+    install -d -m 0750 "${RADAR_STATE_DIR}/data"
+
+    if [ -f "$env_file" ]; then
+        candidate=$(awk -F= '$1 == "RADAR_BOOTSTRAP_URL" {sub(/^[^=]*=/, ""); print; exit}' "$env_file")
+        if [ -n "$candidate" ]; then
+            bootstrap_url="$candidate"
+        fi
+    fi
+
+    # 优先接管同机旧部署或人工随源码上传的数据，不覆盖已恢复的持久化状态。
+    for source_root in \
+        "${RADAR_DIR}" \
+        "/project/zhitou/project-discovery" \
+        "/www/project-discovery"
+    do
+        if [ "$source_root" = "$RADAR_STATE_DIR" ] || [ ! -d "$source_root" ]; then
+            continue
+        fi
+        if [ -d "${source_root}/data" ]; then
+            cp -an "${source_root}/data/." "${RADAR_STATE_DIR}/data/"
+        fi
+        if [ -f "${source_root}/公众号来源.xlsx" ] && [ ! -f "${RADAR_STATE_DIR}/公众号来源.xlsx" ]; then
+            cp -a "${source_root}/公众号来源.xlsx" "${RADAR_STATE_DIR}/公众号来源.xlsx"
+        fi
+    done
+
+    for candidate_file in \
+        arxiv_candidates.jsonl \
+        wechat_985_candidates.jsonl \
+        wechat_api_candidates.jsonl \
+        wechat_chat_candidates.jsonl \
+        investment_candidates.jsonl
+    do
+        if [ ! -f "${RADAR_STATE_DIR}/data/${candidate_file}" ]; then
+            state_complete=false
+        fi
+    done
+    if [ ! -s "${RADAR_STATE_DIR}/公众号来源.xlsx" ]; then
+        state_complete=false
+    fi
+
+    if [ "$state_complete" = false ]; then
+        if [ -z "$bootstrap_url" ]; then
+            err "雷达状态为空，且 RADAR_BOOTSTRAP_URL 未配置"
+            exit 1
+        fi
+        log "本机缺少完整雷达数据，从旧服务只读恢复..."
+        "$RADAR_VENV/bin/python" "${RADAR_DIR}/scripts/bootstrap_from_remote.py" \
+            --remote-base "$bootstrap_url" \
+            --project-dir "$RADAR_STATE_DIR"
+    else
+        log "已存在雷达候选数据和公众号清单，保留现有状态"
+    fi
+
+    chown -R root:root "$RADAR_STATE_DIR"
+    chmod 0750 "$RADAR_STATE_DIR" "${RADAR_STATE_DIR}/data"
+    if [ -f "${RADAR_STATE_DIR}/data/gsdata_credentials.json" ]; then
+        chmod 0600 "${RADAR_STATE_DIR}/data/gsdata_credentials.json"
+    fi
+    log "雷达持久化状态就绪: ${RADAR_STATE_DIR} ✓"
+}
+
+#---------------------------------------
+# 交互式写入 GSData 凭据，避免密钥出现在命令行和 Git
+#---------------------------------------
+configure_radar_credentials() {
+    local env_file="${DEPLOY_DIR}/.env"
+    local app_key app_secret
+    if [ ! -f "$env_file" ]; then
+        create_env
+    fi
+
+    read -r -p "GSData app_key: " app_key
+    read -r -s -p "GSData app_secret: " app_secret
+    echo ""
+    if [ -z "$app_key" ] || [ -z "$app_secret" ]; then
+        err "app_key 和 app_secret 均不能为空"
+        exit 1
+    fi
+
+    set_env_value "$env_file" "GSDATA_APP_KEY" "$app_key"
+    set_env_value "$env_file" "GSDATA_APP_SECRET" "$app_secret"
+    chmod 600 "$env_file"
+    unset app_key app_secret
+    log "GSData 凭据已安全写入 ${env_file} ✓"
+
+    if systemctl cat "$RADAR_SERVICE" &>/dev/null; then
+        systemctl restart "$RADAR_SERVICE"
+        wait_for_http "情报雷达" "http://127.0.0.1:${RADAR_PORT}/api/health" 30
+    fi
 }
 
 #---------------------------------------
@@ -473,7 +618,32 @@ setup_systemd() {
 
     local node_exec
     node_exec=$(command -v "$NODE_BIN")
-    install -d -m 0750 "$LOG_DIR" "$GENERATED_DIR" "${FLUE_STATE_DIR}/workspace"
+    install -d -m 0750 "$LOG_DIR" "$GENERATED_DIR" "${FLUE_STATE_DIR}/workspace" "${RADAR_STATE_DIR}/data"
+
+    # 本地情报雷达。仅监听回环地址，由主 API 通过 RADAR_BASE_URL 消费。
+    local RADAR_SERVICE_FILE="/etc/systemd/system/${RADAR_SERVICE}.service"
+    cat > "$RADAR_SERVICE_FILE" <<RADAR_EOF
+[Unit]
+Description=Cybernaut Project Discovery Radar
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=${RADAR_DIR}
+EnvironmentFile=${DEPLOY_DIR}/.env
+ExecStart=${RADAR_VENV}/bin/python -m uvicorn app:app --host 127.0.0.1 --port ${RADAR_PORT}
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=60
+
+StandardOutput=append:${LOG_DIR}/radar.log
+StandardError=append:${LOG_DIR}/radar.log
+
+[Install]
+WantedBy=multi-user.target
+RADAR_EOF
 
     # 主 API 服务
     local API_SERVICE_FILE="/etc/systemd/system/${API_SERVICE}.service"
@@ -481,7 +651,7 @@ setup_systemd() {
 [Unit]
 Description=Cybernaut Investment Platform API
 Wants=network-online.target
-After=network-online.target
+After=network-online.target ${RADAR_SERVICE}.service
 
 [Service]
 Type=simple
@@ -528,6 +698,7 @@ WantedBy=multi-user.target
 FLUE_EOF
 
     systemctl daemon-reload
+    systemctl enable "$RADAR_SERVICE"
     systemctl enable "$API_SERVICE"
     systemctl enable "$FLUE_SERVICE"
     log "systemd 服务已注册 ✓"
@@ -557,6 +728,17 @@ start_services() {
         err "Agent Runtime 构建产物不存在，请先执行部署构建"
         exit 1
     fi
+    if [ ! -x "${RADAR_VENV}/bin/python" ]; then
+        err "情报雷达虚拟环境不存在，请先执行部署构建"
+        exit 1
+    fi
+
+    log "重启情报雷达..."
+    systemctl restart "$RADAR_SERVICE"
+    wait_for_http "情报雷达" "http://127.0.0.1:${RADAR_PORT}/api/health" 30 || {
+        journalctl -u "$RADAR_SERVICE" -n 50 --no-pager || true
+        exit 1
+    }
 
     log "重启 API 服务..."
     systemctl restart "$API_SERVICE"
@@ -583,16 +765,24 @@ show_status() {
     systemctl status "$API_SERVICE" --no-pager -l 2>/dev/null | head -5 || echo "服务未找到"
 
     echo ""
+    echo "--- 情报雷达 ---"
+    systemctl status "$RADAR_SERVICE" --no-pager -l 2>/dev/null | head -5 || echo "服务未找到"
+
+    echo ""
     echo "--- Agent Runtime ---"
     systemctl status "$FLUE_SERVICE" --no-pager -l 2>/dev/null | head -5 || echo "服务未找到"
 
     echo ""
     echo "--- 端口监听 ---"
-    ss -tlnp 2>/dev/null | grep -E "3100|${FLUE_PORT}|5432|:80 " || echo "(无)"
+    ss -tlnp 2>/dev/null | grep -E "3100|${FLUE_PORT}|${RADAR_PORT}|5432|:80 " || echo "(无)"
 
     echo ""
     echo "--- API 健康检查 ---"
     curl -s http://127.0.0.1:3100/api/health 2>/dev/null || echo "后端不可达"
+
+    echo ""
+    echo "--- 情报雷达健康检查 ---"
+    curl -s "http://127.0.0.1:${RADAR_PORT}/api/health" 2>/dev/null || echo "情报雷达不可达"
 
     echo ""
     echo "--- Agent Runtime 健康检查 ---"
@@ -614,6 +804,13 @@ show_logs() {
         tail -50 "${LOG_DIR}/server.log"
     else
         journalctl -u "$API_SERVICE" -n 50 --no-pager
+    fi
+    echo ""
+    echo "=== 情报雷达日志 ==="
+    if [ -f "${LOG_DIR}/radar.log" ]; then
+        tail -30 "${LOG_DIR}/radar.log"
+    else
+        journalctl -u "$RADAR_SERVICE" -n 30 --no-pager 2>/dev/null || echo "情报雷达日志不存在"
     fi
     echo ""
     echo "=== Agent Runtime 日志 ==="
@@ -639,6 +836,7 @@ do_init() {
     init_database
     create_env
     build_project
+    prepare_radar_state
     setup_nginx
     setup_systemd
     migrate_legacy_agent_state
@@ -686,6 +884,7 @@ do_update() {
 
     create_env
     build_project
+    prepare_radar_state
     setup_systemd
     migrate_legacy_agent_state
     setup_nginx   # 确保 nginx 配置最新
@@ -723,6 +922,13 @@ case "${1:-init}" in
         systemctl restart "$FLUE_SERVICE"
         wait_for_http "Agent Runtime" "http://127.0.0.1:${FLUE_PORT}/health" 30
         ;;
+    radar-restart)
+        systemctl restart "$RADAR_SERVICE"
+        wait_for_http "情报雷达" "http://127.0.0.1:${RADAR_PORT}/api/health" 30
+        ;;
+    radar-configure)
+        configure_radar_credentials
+        ;;
     status)
         show_status
         ;;
@@ -730,13 +936,15 @@ case "${1:-init}" in
         show_logs
         ;;
     *)
-        echo "用法: bash deploy.sh [init|update|restart|restart-all|flue-restart|status|logs]"
+        echo "用法: bash deploy.sh [init|update|restart|restart-all|flue-restart|radar-restart|radar-configure|status|logs]"
         echo ""
         echo "  init          - 首次完整部署"
         echo "  update        - 拉取代码 + 重新构建 + 重启服务"
-        echo "  restart       - 重启 API 与 Agent Runtime"
-        echo "  restart-all   - 重启 API 与 Agent Runtime"
+        echo "  restart       - 重启 API、Agent Runtime 与情报雷达"
+        echo "  restart-all   - 重启 API、Agent Runtime 与情报雷达"
         echo "  flue-restart  - 仅重启 Agent Runtime"
+        echo "  radar-restart - 仅重启情报雷达"
+        echo "  radar-configure - 安全配置 GSData 凭据并重启雷达"
         echo "  status        - 查看服务运行状态"
         echo "  logs          - 查看最近日志"
         exit 1

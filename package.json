@@ -4,10 +4,11 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "concurrently -k -n API,WEB,AGENT -c green,blue,magenta \"npm:dev:server\" \"npm:dev:web\" \"npm:dev:agent\"",
+    "dev": "concurrently -k -n API,WEB,AGENT,RADAR -c green,blue,magenta,yellow \"npm:dev:server\" \"npm:dev:web\" \"npm:dev:agent\" \"npm:dev:radar\"",
     "dev:web": "vite",
     "dev:server": "node --env-file-if-exists=.env --import tsx --watch server/src/index.ts",
     "dev:agent": "npm --prefix cybernaut-assistant run dev:local",
+    "dev:radar": "project-discovery/start.sh",
     "build": "npm run build:platform && npm run build:agent",
     "build:platform": "tsc -b && tsc -p server/tsconfig.build.json && vite build",
     "build:agent": "npm --prefix cybernaut-assistant run build",
@@ -26,7 +27,8 @@
     "accept:ai-skills": "node --import tsx server/src/scripts/aiSkillAcceptance.ts",
     "start": "node --env-file-if-exists=.env server-dist/index.js",
     "start:agent": "npm --prefix cybernaut-assistant run start:local",
-    "start:all": "concurrently -k -n API,AGENT -c green,magenta \"npm:start\" \"npm:start:agent\"",
+    "start:radar": "project-discovery/start.sh",
+    "start:all": "concurrently -k -n API,AGENT,RADAR -c green,magenta,yellow \"npm:start\" \"npm:start:agent\" \"npm:start:radar\"",
     "preview": "vite preview"
   },
   "dependencies": {

@@ -141,7 +141,7 @@ metaRouter.post('/leads/collect', async (req: AuthedRequest, res, next) => {
 })
 
 // 从「项目发现雷达」(project-discovery :8121) 同步真实融资线索到线索池
-const RADAR_BASE = process.env.RADAR_BASE_URL || 'http://101.126.93.130:8121'
+const RADAR_BASE = process.env.RADAR_BASE_URL || 'http://127.0.0.1:8121'
 const RADAR_PLACEHOLDER_TEXT = new Set([
   '',
   '待核验',
