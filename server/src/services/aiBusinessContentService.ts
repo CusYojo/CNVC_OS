@@ -63,6 +63,9 @@ export type BusinessContent = {
     regeneratedChapters: string[]
     reviewerPassed: boolean
     reviewerIssueCodes: string[]
+    limitedDraft?: boolean
+    limitationCount?: number
+    limitationIssueCodes?: string[]
   }
 }
 

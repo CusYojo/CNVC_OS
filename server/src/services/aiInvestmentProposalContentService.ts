@@ -21,6 +21,7 @@ import {
   investmentProposalEvidencePrompt,
 } from './aiInvestmentProposalEvidenceService.js'
 import {
+  isInvestmentProposalDeliveryLimitation,
   reviewInvestmentProposalContent,
   reviewIssuesForPrompt,
   safeInvestmentProposalSection,
@@ -183,35 +184,127 @@ function normalizeChapterSections(input: {
   })
 }
 
-async function requestChapterJson(input: {
+function parseChapterJson(text: string) {
+  const normalized = text
+    .trim()
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```$/i, '')
+    .trim()
+  if (!normalized) {
+    throw Object.assign(new Error('LLM 返回空章节'), {
+      code: 'INVESTMENT_PROPOSAL_EMPTY_CHAPTER',
+    })
+  }
+  try {
+    return JSON.parse(normalized) as unknown
+  } catch {
+    const firstBrace = normalized.indexOf('{')
+    const lastBrace = normalized.lastIndexOf('}')
+    if (firstBrace >= 0 && lastBrace > firstBrace) {
+      try {
+        return JSON.parse(normalized.slice(firstBrace, lastBrace + 1)) as unknown
+      } catch {
+        // 继续抛出统一的安全错误，不记录模型原文或项目内容。
+      }
+    }
+    throw Object.assign(new Error('LLM 返回的章节 JSON 不完整'), {
+      code: 'INVESTMENT_PROPOSAL_INVALID_CHAPTER_JSON',
+    })
+  }
+}
+
+function retryableChapterError(error: unknown) {
+  const code = String((error as { code?: unknown })?.code ?? '')
+  const status = Number((error as { status?: unknown })?.status ?? 0)
+  return code === 'INVESTMENT_PROPOSAL_EMPTY_CHAPTER'
+    || code === 'INVESTMENT_PROPOSAL_INVALID_CHAPTER_JSON'
+    || code === 'INVESTMENT_PROPOSAL_LLM_INVALID_RESPONSE'
+    || code === 'INVESTMENT_PROPOSAL_LLM_NETWORK_ERROR'
+    || code === 'INVESTMENT_PROPOSAL_LLM_TIMEOUT'
+    || code === 'INVESTMENT_PROPOSAL_LLM_TRUNCATED'
+    || status === 408
+    || status === 425
+    || status === 429
+    || status >= 500
+}
+
+export async function requestInvestmentProposalChapterJson(input: {
   systemPrompt: string
   userPrompt: string
   maxTokens: number
-}) {
-  const response = await fetch(`${GW_BASE}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(GW_KEY ? { Authorization: `Bearer ${GW_KEY}` } : {}),
-    },
-    body: JSON.stringify({
-      model: MODEL,
-      messages: [
-        { role: 'system', content: input.systemPrompt },
-        { role: 'user', content: input.userPrompt },
-      ],
-      temperature: 0,
-      max_tokens: input.maxTokens,
-      response_format: { type: 'json_object' },
-    }),
-    signal: AbortSignal.timeout(120000),
-  })
-  if (!response.ok) throw new Error(`LLM ${response.status}`)
-  const data = await response.json() as { choices?: Array<{ message?: { content?: string } }> }
-  const text = data.choices?.[0]?.message?.content?.trim() ?? ''
-  const clean = text.replace(/^```json\s*/i, '').replace(/\s*```$/, '')
-  if (!clean) throw new Error('LLM 返回空章节')
-  return JSON.parse(clean) as unknown
+}, options: {
+  fetchImpl?: typeof fetch
+  maxAttempts?: number
+} = {}) {
+  const fetchImpl = options.fetchImpl ?? fetch
+  const maxAttempts = Math.max(1, Math.min(options.maxAttempts ?? 3, 3))
+  let lastError: unknown
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      const response = await fetchImpl(`${GW_BASE}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(GW_KEY ? { Authorization: `Bearer ${GW_KEY}` } : {}),
+        },
+        body: JSON.stringify({
+          model: MODEL,
+          messages: [
+            { role: 'system', content: input.systemPrompt },
+            {
+              role: 'user',
+              content: attempt === 1
+                ? input.userPrompt
+                : `${input.userPrompt}\n\n重试要求：上一次返回不是完整可解析的 JSON。只返回一个完整 JSON 对象，不得使用 Markdown 代码块或附加解释。`,
+            },
+          ],
+          temperature: 0,
+          max_tokens: Math.min(input.maxTokens + (attempt - 1) * 1200, 8000),
+          response_format: { type: 'json_object' },
+        }),
+        signal: AbortSignal.timeout(120000),
+      })
+      if (!response.ok) {
+        throw Object.assign(new Error(`LLM 请求失败（HTTP ${response.status}）`), {
+          code: 'INVESTMENT_PROPOSAL_LLM_HTTP_ERROR',
+          status: response.status,
+        })
+      }
+      const data = await response.json() as {
+        choices?: Array<{
+          finish_reason?: string
+          message?: { content?: string }
+        }>
+      }
+      const choice = data.choices?.[0]
+      if (choice?.finish_reason === 'length') {
+        throw Object.assign(new Error('LLM 章节输出被截断'), {
+          code: 'INVESTMENT_PROPOSAL_LLM_TRUNCATED',
+        })
+      }
+      return parseChapterJson(choice?.message?.content ?? '')
+    } catch (error) {
+      const codedError = error as { code?: unknown }
+      lastError = codedError?.code
+        ? error
+        : error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')
+          ? Object.assign(new Error('LLM 章节请求超时'), {
+            code: 'INVESTMENT_PROPOSAL_LLM_TIMEOUT',
+          })
+          : error instanceof SyntaxError
+            ? Object.assign(new Error('LLM 网关返回格式异常'), {
+                code: 'INVESTMENT_PROPOSAL_LLM_INVALID_RESPONSE',
+              })
+            : error instanceof TypeError
+              ? Object.assign(new Error('LLM 网络请求失败'), {
+                  code: 'INVESTMENT_PROPOSAL_LLM_NETWORK_ERROR',
+                })
+              : error
+      if (attempt >= maxAttempts || !retryableChapterError(lastError)) throw lastError
+      await new Promise((resolve) => setTimeout(resolve, attempt * 250))
+    }
+  }
+  throw lastError
 }
 
 function listValues(sections: BusinessSection[], title: string) {
@@ -323,7 +416,7 @@ ${priorReview ? `上一次 Reviewer 未通过，必须修复以下错误后完�
 {"text":"${CURRENT_PROJECT_NO_DATA}需补充该主题相关原始文件或经确认的项目记录后再行分析。","status":"资料缺口","sourceIndexes":[]}`
       let raw: unknown
       try {
-        raw = await requestChapterJson({ systemPrompt, userPrompt, maxTokens })
+        raw = await requestInvestmentProposalChapterJson({ systemPrompt, userPrompt, maxTokens })
       } catch (error) {
         throw Object.assign(
           new Error(`投资提案章节生成失败（${root.title}）：${(error as Error).message}`),
@@ -375,6 +468,14 @@ ${priorReview ? `上一次 Reviewer 未通过，必须修复以下错误后完�
       review,
     })
   }
+  const limitationIssues = review.issues.filter((item) =>
+    isInvestmentProposalDeliveryLimitation(item.code))
+  if (limitationIssues.length) {
+    content.executiveSummary = [
+      content.executiveSummary,
+      `受限初稿提示：当前有${limitationIssues.length}个章节因证据不足未形成可核验结论，已保留资料缺口及补证要求；不得将相关内容作为正式投资判断。`,
+    ].join('')
+  }
   content.generationAudit = {
     blueprintVersion: blueprint.version,
     corpusSha256: blueprint.corpusSha256,
@@ -383,6 +484,9 @@ ${priorReview ? `上一次 Reviewer 未通过，必须修复以下错误后完�
     regeneratedChapters: [...new Set(regeneratedChapters)],
     reviewerPassed: true,
     reviewerIssueCodes: review.issues.map((item) => item.code),
+    limitedDraft: limitationIssues.length > 0,
+    limitationCount: limitationIssues.length,
+    limitationIssueCodes: [...new Set(limitationIssues.map((item) => item.code))],
   }
   return content
 }

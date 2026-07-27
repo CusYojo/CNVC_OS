@@ -5,9 +5,9 @@ import JSZip from 'jszip'
 import { PDFParse } from 'pdf-parse'
 import type { AiTemplateDefinition } from './aiTemplateCatalog.js'
 
-export const INVESTMENT_PROPOSAL_BLUEPRINT_VERSION = 'proposal-blueprint-20260727-v6-web'
+export const INVESTMENT_PROPOSAL_BLUEPRINT_VERSION = 'proposal-blueprint-20260727-v7-limited-draft'
 export const CURRENT_PROJECT_NO_DATA = '当前项目暂无相关资料。'
-const CORE_STANDARD_SHA256 = '4f2e3673e70439ed919f054cdb1cd4f293c41d49a062f77aba2feca51f0f8f6b'
+const CORE_STANDARD_SHA256 = 'b1c0145946c78ec3d5d8d3c7ebe4b027601464a8d7e27bd60bb0a677ef1e1563'
 
 export type InvestmentProposalAnalysisKind =
   | 'company_profile'

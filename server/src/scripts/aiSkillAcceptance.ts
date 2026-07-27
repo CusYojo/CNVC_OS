@@ -215,8 +215,8 @@ async function main() {
   assert(
     'AI-008 核心规范来源指纹和关键规则已固化',
     createHash('sha256').update(proposalCanonicalSpec).digest('hex')
-        === '4f2e3673e70439ed919f054cdb1cd4f293c41d49a062f77aba2feca51f0f8f6b'
-      && proposalCoreSpec.includes('4f2e3673e70439ed919f054cdb1cd4f293c41d49a062f77aba2feca51f0f8f6b')
+        === 'b1c0145946c78ec3d5d8d3c7ebe4b027601464a8d7e27bd60bb0a677ef1e1563'
+      && proposalCoreSpec.includes('b1c0145946c78ec3d5d8d3c7ebe4b027601464a8d7e27bd60bb0a677ef1e1563')
       && [
         '用户本次明确输入',
         '文档主标题 | 黑体 | 16pt',
@@ -227,6 +227,7 @@ async function main() {
         '六、结论',
         '联网公开信息只作为补充线索',
         '正文末尾不增加“免责声明”或“引用资料”板块',
+        '受限初稿',
       ].every((term) => proposalCanonicalSpec.includes(term))
       && [
         '标准 17 节',

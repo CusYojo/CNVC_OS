@@ -66,6 +66,15 @@ const RISK_REQUIRED_PARTS = [
   { label: '执行时点', pattern: /(?:时点|交割前|投决前|签约前|持续|定期|截至|阶段|完成后)/ },
 ]
 
+const DELIVERY_LIMITATION_CODES = new Set([
+  'MISSING_EVIDENCE_RESEARCH_REQUIRED',
+  'EVIDENCE_AVAILABLE_BUT_MISSING',
+])
+
+export function isInvestmentProposalDeliveryLimitation(code: string) {
+  return DELIVERY_LIMITATION_CODES.has(code)
+}
+
 function numericTokens(value: string) {
   return [...new Set(
     value.match(/(?<![A-Za-z])(?:\d{1,4}(?:[.,]\d+)*%?)(?![A-Za-z])/g) ?? [],
@@ -359,15 +368,19 @@ export function reviewInvestmentProposalContent(input: {
     }
     if (coverageBySection.get(definition.id) === 'missing') {
       issue(issues, {
+        severity: 'warning',
         sectionId: definition.id,
         code: 'MISSING_EVIDENCE_RESEARCH_REQUIRED',
-        message: `章节“${definition.title}”既没有项目证据，也没有联网检索记录，不得生成资料缺口文档`,
+        message: `章节“${definition.title}”既没有项目证据，也没有联网检索记录；受限初稿中保留资料缺口并提示补充原始资料`,
       })
     } else if (sectionValue.findings.every((finding) => finding.status === '资料缺口')) {
       issue(issues, {
+        // 章节生成阶段仍先要求模型按已有 Evidence 重生；两次生成后若仍无法
+        // 形成受支持的结论，全篇 Reviewer 将其降级为可交付限制项。
+        severity: sectionIds ? 'error' : 'warning',
         sectionId: definition.id,
         code: 'EVIDENCE_AVAILABLE_BUT_MISSING',
-        message: `章节“${definition.title}”已有项目或联网证据，不得仍输出资料缺口`,
+        message: `章节“${definition.title}”已有项目或联网证据，但未形成可安全引用的结论；受限初稿中保留资料缺口`,
       })
     }
     sectionValue.findings.forEach((finding, findingIndex) => {

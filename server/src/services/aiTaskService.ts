@@ -90,6 +90,7 @@ import {
   collectDueDiligencePublicEvidence,
   type DueDiligenceResearchResult,
 } from './aiDueDiligenceResearchService.js'
+import { safeAiTaskFailureMessage } from './aiTaskErrorService.js'
 
 export type AiTaskStatus = 'pending' | 'running' | 'succeeded' | 'failed' | 'cancelled'
 
@@ -945,6 +946,9 @@ async function executeTask(taskId: string) {
         ...(content.generationAudit
           ? {
               contentGenerationAudit: content.generationAudit,
+              limitedDraft: content.generationAudit.limitedDraft ?? false,
+              limitationCount: content.generationAudit.limitationCount ?? 0,
+              limitationIssueCodes: content.generationAudit.limitationIssueCodes ?? [],
             }
           : {}),
         ...(diligenceResearch
@@ -1069,6 +1073,9 @@ async function executeTask(taskId: string) {
           skillVersion: skill.version,
           skillSha256: skill.sha256,
           pdfReviewerPassed: true,
+          limitedDraft: content.generationAudit?.limitedDraft ?? false,
+          limitationCount: content.generationAudit?.limitationCount ?? 0,
+          limitationIssueCodes: content.generationAudit?.limitationIssueCodes ?? [],
         },
       }).returning()
       proposalPdfArtifactId = pdfArtifact.id
@@ -1176,10 +1183,14 @@ async function executeTask(taskId: string) {
           }
         })))
     }
+    const limitedProposal = task.type === 'investment_proposal'
+      && (content.generationAudit?.limitedDraft ?? false)
     await db.update(aiTasks).set({
       status: 'succeeded',
-      stage: task.type === 'investment_proposal'
-        ? 'Word/PDF 已生成并通过 Reviewer'
+      stage: limitedProposal
+        ? '受限初稿已生成并通过安全检查'
+        : task.type === 'investment_proposal'
+          ? 'Word/PDF 已生成并通过 Reviewer'
         : '生成完成',
       progress: 100,
       resultSummary: content.executiveSummary,
@@ -1203,9 +1214,9 @@ async function executeTask(taskId: string) {
     )
     await db.update(aiTasks).set({
       status: 'failed',
-      stage: '生成失败',
+      stage: context?.stage ? `${context.stage}失败` : '生成失败',
       errorId,
-      errorMessage: '任务生成失败，请重试；如问题持续，请凭错误编号联系管理员。',
+      errorMessage: safeAiTaskFailureMessage(error),
       completedAt: new Date(),
       updatedAt: new Date(),
     }).where(eq(aiTasks.id, taskId)).catch(() => {})

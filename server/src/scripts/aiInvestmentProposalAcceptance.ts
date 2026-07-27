@@ -17,6 +17,9 @@ import {
   buildInvestmentProposalEvidencePlan,
 } from '../services/aiInvestmentProposalEvidenceService.js'
 import {
+  requestInvestmentProposalChapterJson,
+} from '../services/aiInvestmentProposalContentService.js'
+import {
   generateInvestmentProposalDocx,
   reviewInvestmentProposalDocx,
 } from '../services/aiInvestmentProposalDocumentService.js'
@@ -24,6 +27,7 @@ import {
   exportAndReviewInvestmentProposalPdf,
 } from '../services/aiInvestmentProposalPdfService.js'
 import {
+  isInvestmentProposalDeliveryLimitation,
   reviewInvestmentProposalContent,
 } from '../services/aiInvestmentProposalReviewerService.js'
 import {
@@ -31,10 +35,40 @@ import {
 } from '../services/aiDueDiligenceResearchService.js'
 import { loadAiSkill } from '../services/aiSkillService.js'
 import { AI_TEMPLATE_CATALOG } from '../services/aiTemplateCatalog.js'
+import { safeAiTaskFailureMessage } from '../services/aiTaskErrorService.js'
 
 const template = AI_TEMPLATE_CATALOG.investment_proposal
 const blueprint = await loadInvestmentProposalBlueprint(template)
 const skill = await loadAiSkill('draft-investment-proposal')
+let chapterRequestAttempts = 0
+const retriedChapterJson = await requestInvestmentProposalChapterJson({
+  systemPrompt: '只返回 JSON。',
+  userPrompt: '生成测试章节。',
+  maxTokens: 100,
+}, {
+  fetchImpl: async () => {
+    chapterRequestAttempts += 1
+    return new Response(JSON.stringify({
+      choices: [{
+        finish_reason: 'stop',
+        message: {
+          content: chapterRequestAttempts === 1
+            ? '{"sections":['
+            : '{"sections":[]}',
+        },
+      }],
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+  },
+})
+assert.deepEqual(retriedChapterJson, { sections: [] })
+assert.equal(chapterRequestAttempts, 2)
+assert.match(
+  safeAiTaskFailureMessage(Object.assign(
+    new Error('包含内部模型原文的错误'),
+    { code: 'INVESTMENT_PROPOSAL_CHAPTER_GENERATION_FAILED' },
+  )),
+  /模型请求中断或返回格式异常/,
+)
 const outputDirectory = path.resolve(
   process.env.AI_PROPOSAL_ACCEPTANCE_OUTPUT
     || path.join(process.cwd(), 'server', 'ai-artifacts', 'acceptance', 'investment-proposal'),
@@ -239,6 +273,56 @@ const pendingPublicWebReview = reviewInvestmentProposalContent({
 })
 assert.equal(pendingPublicWebReview.passed, true, JSON.stringify(pendingPublicWebReview.issues, null, 2))
 
+const evidenceAvailableButMissingContent = structuredClone(content)
+const companyProfileSection = evidenceAvailableButMissingContent.sections
+  .find((section) => section.title === '（一）公司简介')!
+companyProfileSection.summary = CURRENT_PROJECT_NO_DATA
+companyProfileSection.findings = [{
+  text: `${CURRENT_PROJECT_NO_DATA}需补充公司主体相关原始文件或经确认的项目记录后再行分析。`,
+  status: '资料缺口',
+  sourceIndexes: [],
+}]
+companyProfileSection.tables = []
+const limitedFullReview = reviewInvestmentProposalContent({
+  content: evidenceAvailableButMissingContent,
+  blueprint,
+  evidencePlan,
+  sources,
+  projectName: '星河机器人项目',
+  companyName: '星河机器人有限公司',
+})
+assert.equal(limitedFullReview.passed, true, JSON.stringify(limitedFullReview.issues, null, 2))
+assert.ok(limitedFullReview.issues.some((reviewIssue) =>
+  reviewIssue.code === 'EVIDENCE_AVAILABLE_BUT_MISSING'
+  && reviewIssue.severity === 'warning'))
+const companyRootSectionIds = new Set(blueprint.sections
+  .filter((definition) => definition.id === 'company' || definition.parentId === 'company')
+  .map((definition) => definition.id))
+const chapterRetryReview = reviewInvestmentProposalContent({
+  content: evidenceAvailableButMissingContent.sections
+    .filter((section) => {
+      const definition = blueprint.sections.find((item) => item.title === section.title)
+      return definition ? companyRootSectionIds.has(definition.id) : false
+    })
+    .reduce<BusinessContent>((partial, section) => ({
+      ...partial,
+      sections: [...partial.sections, section],
+    }), {
+      ...evidenceAvailableButMissingContent,
+      sections: [],
+    }),
+  blueprint,
+  evidencePlan,
+  sources,
+  projectName: '星河机器人项目',
+  companyName: '星河机器人有限公司',
+  sectionIds: companyRootSectionIds,
+})
+assert.equal(chapterRetryReview.passed, false)
+assert.ok(chapterRetryReview.issues.some((reviewIssue) =>
+  reviewIssue.code === 'EVIDENCE_AVAILABLE_BUT_MISSING'
+  && reviewIssue.severity === 'error'))
+
 const malicious = structuredClone(content)
 const firstLeaf = malicious.sections.find((section) => section.findings.length)!
 firstLeaf.findings[0].text += '未经证据支持的金额为9999万元。'
@@ -322,8 +406,11 @@ const missingReview = reviewInvestmentProposalContent({
   companyName: '星河机器人有限公司',
 })
 assert.ok(missingSection.findings[0].text.startsWith(CURRENT_PROJECT_NO_DATA))
-assert.equal(missingReview.passed, false)
-assert.ok(missingReview.issues.some((issue) => issue.code === 'MISSING_EVIDENCE_RESEARCH_REQUIRED'))
+assert.equal(missingReview.passed, true)
+assert.ok(missingReview.issues.some((issue) =>
+  issue.code === 'MISSING_EVIDENCE_RESEARCH_REQUIRED'
+  && issue.severity === 'warning'
+  && isInvestmentProposalDeliveryLimitation(issue.code)))
 
 const docxPath = path.join(outputDirectory, '星河机器人项目投资提案-验收.docx')
 const pdfPath = path.join(outputDirectory, '星河机器人项目投资提案-验收.pdf')
@@ -364,6 +451,38 @@ const pdfReview = await exportAndReviewInvestmentProposalPdf({
 })
 assert.equal(pdfReview.passed, true, JSON.stringify(pdfReview.issues, null, 2))
 
+const limitedDocxPath = path.join(outputDirectory, '星河机器人项目投资提案-受限初稿-验收.docx')
+const limitedPdfPath = path.join(outputDirectory, '星河机器人项目投资提案-受限初稿-验收.pdf')
+await generateInvestmentProposalDocx({
+  outputPath: limitedDocxPath,
+  template,
+  project: {
+    name: '星河机器人项目',
+    companyName: '星河机器人有限公司',
+  },
+  content: evidenceAvailableButMissingContent,
+  sources,
+  sourceCutoffDate: '2026-07-20',
+  generatedAt: new Date('2026-07-25T00:00:00+08:00'),
+  blueprint,
+})
+const limitedWordReview = await reviewInvestmentProposalDocx({
+  filePath: limitedDocxPath,
+  template,
+  blueprint,
+  content: evidenceAvailableButMissingContent,
+  projectName: '星河机器人项目',
+})
+assert.equal(limitedWordReview.passed, true, JSON.stringify(limitedWordReview.issues, null, 2))
+const limitedPdfReview = await exportAndReviewInvestmentProposalPdf({
+  docxPath: limitedDocxPath,
+  pdfPath: limitedPdfPath,
+  template,
+  blueprint,
+  content: evidenceAvailableButMissingContent,
+})
+assert.equal(limitedPdfReview.passed, true, JSON.stringify(limitedPdfReview.issues, null, 2))
+
 console.log(JSON.stringify({
   passed: true,
   skill: {
@@ -390,7 +509,11 @@ console.log(JSON.stringify({
     templateEvidenceRejected: true,
     publicResearchRequired: true,
     publicWebForcedToPendingVerification: true,
-    noDataDocumentRejected: true,
+    limitedNoDataDraftAccepted: true,
+    evidenceGapRetriedThenDowngraded: true,
+    malformedChapterJsonRetried: true,
+    safeFailureReasonExposed: true,
+    limitedDraftWordAndPdfPassed: true,
     disclaimerAndReferencesOmitted: true,
   },
   word: {
@@ -401,5 +524,11 @@ console.log(JSON.stringify({
   pdf: {
     path: pdfPath,
     review: pdfReview,
+  },
+  limitedDraft: {
+    wordPath: limitedDocxPath,
+    wordReview: limitedWordReview,
+    pdfPath: limitedPdfPath,
+    pdfReview: limitedPdfReview,
   },
 }, null, 2))
