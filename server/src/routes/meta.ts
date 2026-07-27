@@ -187,6 +187,7 @@ metaRouter.post('/leads/sync-radar', async (req: AuthedRequest, res, next) => {
     let filteredOut = 0
     let invalid = 0
     const createdIds: string[] = []
+    const scoringLeadIds = new Set<string>()
     const splitList = (s: unknown, n = 6) => (s ? String(s).split(/；|;|\n/).map((x) => x.trim()).filter(Boolean).slice(0, n) : [])
     for (const it of items) {
       const prof = it.project_profile || {}
@@ -371,10 +372,14 @@ metaRouter.post('/leads/sync-radar', async (req: AuthedRequest, res, next) => {
         createdNames.add(name)
         updatedNames.delete(name)
         unchangedNames.delete(name)
-        if (syncResult.row?.id) createdIds.push(syncResult.row.id)
+        if (syncResult.row?.id) {
+          createdIds.push(syncResult.row.id)
+          scoringLeadIds.add(syncResult.row.id)
+        }
       } else if (syncResult.status === 'updated') {
         if (!createdNames.has(name)) updatedNames.add(name)
         unchangedNames.delete(name)
+        if (syncResult.row?.id) scoringLeadIds.add(syncResult.row.id)
       } else if (!createdNames.has(name) && !updatedNames.has(name)) {
         unchangedNames.add(name)
       }
@@ -383,6 +388,8 @@ metaRouter.post('/leads/sync-radar', async (req: AuthedRequest, res, next) => {
     const updated = updatedNames.size
     const unchanged = unchangedNames.size
     const duplicates = batchDuplicates + databaseDuplicates
+    const scoringIds = [...scoringLeadIds]
+    const scoringQueued = scoringIds.filter(scheduleLeadScoring).length
     res.json({
       ok: true,
       fetched: items.length,
@@ -396,6 +403,8 @@ metaRouter.post('/leads/sync-radar', async (req: AuthedRequest, res, next) => {
       filtered: filteredOut,
       invalid,
       createdIds,
+      scoringIds,
+      scoringQueued,
     })
   } catch (err) { next(err) }
 })
@@ -439,6 +448,14 @@ function drainQueue(): void {
 function enqueueScore(leadId: string): void {
   if (!scoreQueue.includes(leadId)) scoreQueue.push(leadId)
   drainQueue()
+}
+
+function scheduleLeadScoring(leadId: string): boolean {
+  const current = scoreStatus.get(leadId)
+  if (current?.status === 'running') return false
+  scoreStatus.set(leadId, { status: 'running', startedAt: Date.now() })
+  enqueueScore(leadId)
+  return true
 }
 
 async function doScore(leadId: string): Promise<void> {
@@ -579,11 +596,8 @@ metaRouter.post('/leads/:id/score', async (req: AuthedRequest, res, next) => {
     // 验证存在用 getLeadById 单条查(不拉全表),score 只需要 leadId
     const lead = await getLeadById(String(req.params.id))
     if (!lead) { res.status(404).json({ code: 'NOT_FOUND', message: '线索不存在' }); return }
-    const cur = scoreStatus.get(lead.id)
-    if (cur?.status === 'running') { res.json({ code: 0, message: 'running', status: 'running' }); return }
-    scoreStatus.set(lead.id, { status: 'running', startedAt: Date.now() })
-    enqueueScore(lead.id)  // 进串行队列，一条一条跑
-    res.json({ code: 0, message: 'started', status: 'running' })
+    const started = scheduleLeadScoring(lead.id)
+    res.json({ code: 0, message: started ? 'started' : 'running', status: 'running' })
   } catch (err) { next(err) }
 })
 
@@ -614,11 +628,7 @@ metaRouter.post('/leads/:id/convert', async (req: AuthedRequest, res, next) => {
     const row = await convertLead(leadId, req.body.projectId, req.user!.uid)
     // 甲方要求"获取(领取)就分析"：领取为专属项目后自动触发 AI 深度分析(后台异步，秒回)。
     // 已在分析中则不重复触发。
-    const cur = scoreStatus.get(leadId)
-    if (!cur || cur.status !== 'running') {
-      scoreStatus.set(leadId, { status: 'running', startedAt: Date.now() })
-      enqueueScore(leadId)
-    }
+    scheduleLeadScoring(leadId)
     res.json(row)
   } catch (err) { next(err) }
 })

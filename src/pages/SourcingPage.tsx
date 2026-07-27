@@ -188,7 +188,14 @@ export function SourcingPage() {
         databaseDuplicates: number
         filtered: number
         invalid: number
+        scoringIds: string[]
+        scoringQueued: number
       }>('/leads/sync-radar', { limit: 100 })
+      const scoringIds = Array.isArray(r.scoringIds) ? r.scoringIds : []
+      if (scoringIds.length) {
+        void Promise.all(scoringIds.map((leadId) => startScoring(leadId)))
+          .then(() => fetchLeadStats())
+      }
       // hydrateFromServer 故意不拉分页线索；同步后回到最新一页并显式重拉列表与统计，
       // 保证新线索（含待分析记录）立即出现在用户当前视野。
       setPage(1)
@@ -200,7 +207,7 @@ export function SourcingPage() {
         ? `，重复 ${r.duplicates} 条（本批 ${r.batchDuplicates}，库内历史 ${r.databaseDuplicates}）`
         : ''
       showToast(
-        `雷达同步完成：检查 ${r.fetched} 条，新增 ${r.created} 条，更新 ${r.updated} 条，无变化 ${r.unchanged} 条${duplicateDetail}，过滤 ${r.filtered} 条${r.invalid ? `，无效 ${r.invalid} 条` : ''}；列表与统计已刷新`,
+        `雷达同步完成：检查 ${r.fetched} 条，新增 ${r.created} 条，更新 ${r.updated} 条，无变化 ${r.unchanged} 条${duplicateDetail}，过滤 ${r.filtered} 条${r.invalid ? `，无效 ${r.invalid} 条` : ''}${scoringIds.length ? `；${scoringIds.length} 条 AI 技术评分正在更新` : ''}；列表与统计已刷新`,
         'success',
       )
     } catch (err) {
@@ -396,6 +403,7 @@ export function SourcingPage() {
             const valuationValue = lead.valuationDisplay?.value ?? funding.valuation
             const valuationStatus = lead.valuationDisplay?.status ?? (valuationValue ? 'available' : lead.analysisStatus === 'pending' ? 'pending' : 'unavailable')
             const technicalScore = getLeadTechnicalScore(lead)
+            const scoreRefreshing = scoringLeadIds.includes(lead.id)
             const industryTags = lead.businessTags?.industry?.length ? lead.businessTags.industry : [lead.industry || '待确认']
             const regionTags = lead.businessTags?.region?.length ? lead.businessTags.region : [lead.region || '待确认']
             return <tr key={lead.id} className="hover:bg-slate-50">
@@ -407,7 +415,9 @@ export function SourcingPage() {
                   : valuationStatus === 'pending' ? <Badge tone="amber">待核验</Badge> : <span className="text-xs text-slate-400">暂无公开估值</span>}
                 {funding.round && <p className="mt-1 truncate text-xs text-slate-400">{funding.round}</p>}
               </div></TableCell>
-              <TableCell>{technicalScore.status === 'ready' && technicalScore.score != null && technicalScore.maxScore
+              <TableCell>{scoreRefreshing
+                ? <Badge tone="blue">更新中…</Badge>
+                : technicalScore.status === 'ready' && technicalScore.score != null && technicalScore.maxScore
                 ? <div className="w-28"><div className="mb-1 flex items-baseline justify-between"><strong className="text-base text-brand-700">{technicalScore.score}</strong><span className="text-xs text-slate-400">/ {technicalScore.maxScore}</span></div><ProgressBar value={Math.round((technicalScore.score / technicalScore.maxScore) * 100)} /></div>
                 : <Badge tone="amber">待分析</Badge>}</TableCell>
               <TableCell><span className="whitespace-nowrap text-xs text-slate-500">{lead.dataUpdatedAt || lead.lastVerifiedAt || '待确认'}</span></TableCell>
