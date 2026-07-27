@@ -5,6 +5,7 @@ import { auditLogs, users, leads } from '../db/schema.js'
 import { z } from 'zod'
 import type { AuthedRequest } from '../middleware/requireAuth.js'
 import { createLead, convertLead, getLeadById, listLeads, listLeadScoresForRanking, syncRadarLeadByName, leadPoolStats } from '../services/aiSummaryService.js'
+import { FLUE_BASE_URL } from '../config/agentRuntime.js'
 
 export const metaRouter = Router()
 
@@ -93,7 +94,6 @@ metaRouter.post('/leads', async (req: AuthedRequest, res, next) => {
 })
 
 // 情报采集：输入公司名 → 调 flue 情报采集 agent 真抓公开信息 → 结构化写入 leads 库
-const FLUE_BASE_URL = process.env.FLUE_BASE_URL || 'http://127.0.0.1:8790'
 metaRouter.post('/leads/collect', async (req: AuthedRequest, res, next) => {
   try {
     const { company } = z.object({ company: z.string().min(2) }).parse(req.body)
@@ -401,7 +401,6 @@ metaRouter.post('/leads/sync-radar', async (req: AuthedRequest, res, next) => {
 })
 
 // 项目评分：异步模式 —— 点击秒回，后台调 flue 评分并存库，前端轮询 lead.scoring。
-const SCORE_FLUE_BASE = process.env.FLUE_BASE_URL || 'http://127.0.0.1:8790'
 // 内存态评分状态（进程级即可：running/done/failed），前端可轮询
 const scoreStatus = new Map<string, { status: 'running' | 'done' | 'failed'; error?: string; startedAt: number }>()
 
@@ -509,7 +508,7 @@ async function doScore(leadId: string): Promise<void> {
           team: (lead as { team?: string }).team ?? undefined,
           articleText: enrichedArticle || undefined,
         }
-    const resp = await fetch(`${SCORE_FLUE_BASE}/workflows/${scoreWorkflow}?wait=result`, {
+    const resp = await fetch(`${FLUE_BASE_URL}/workflows/${scoreWorkflow}?wait=result`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(requestBody),
@@ -522,7 +521,7 @@ async function doScore(leadId: string): Promise<void> {
     // 信源研究 workflow：联网检索 → 6维度结构化(公司官网/工商/团队/股权融资/动态/来源证据)
     let research: Record<string, unknown> = {}
     try {
-      const rResp = await fetch(`${SCORE_FLUE_BASE}/workflows/research-project?wait=result`, {
+      const rResp = await fetch(`${FLUE_BASE_URL}/workflows/research-project?wait=result`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: lead.name, hint: lead.summary ?? undefined, articleText: enrichedArticle || undefined }),

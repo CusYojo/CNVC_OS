@@ -27,7 +27,7 @@ import {
 } from '../lib/aiMessageSafety'
 
 // —— Flue 官方 SDK 客户端 ——
-// baseUrl 走 nginx /flue-api 反代到 flue :8790（同源）。
+// baseUrl 走同源 /ai/api，由 Vite/nginx 反代到统一配置的 Flue Runtime。
 // 自定义 fetch 每次请求注入当前 JWT（token 过期后跟随重新登录自动更新，避免静态 token 失效）。
 const flueClient = createFlueClient({
   baseUrl: '/ai/api',

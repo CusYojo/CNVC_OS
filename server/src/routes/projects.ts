@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { z } from 'zod'
 import type { AuthedRequest } from '../middleware/requireAuth.js'
+import { FLUE_BASE_URL } from '../config/agentRuntime.js'
 import { ingestFile } from '../services/ragService.js'
 import {
   addFile, createProject, finishFileParse, getProject, listFiles, listProjects, moveProjectStage, updateProject, deleteProject, pinProject, listAllFiles } from '../services/projectService.js'
@@ -77,7 +78,6 @@ projectsRouter.post('/:id/stage', async (req: AuthedRequest, res, next) => {
 })
 
 // 项目评分：复用公有线索池同款 score-project workflow（7维+竞品+同赛道分位），异步存 projects.scoring
-const PROJ_FLUE_BASE = process.env.FLUE_BASE_URL || 'http://127.0.0.1:8790'
 const projScoreStatus = new Map<string, { status: 'running' | 'done' | 'failed'; error?: string; startedAt: number }>()
 async function doScoreProject(projectId: string): Promise<void> {
   try {
@@ -92,7 +92,7 @@ async function doScoreProject(projectId: string): Promise<void> {
     const kbText = chunks.map((c) => c.content).join('\n').slice(0, 24000)
     const kbSources = [...new Set(chunks.map((c) => c.sourceName).filter(Boolean))]
     const summaryWithKb = [proj.summary ?? '', kbText ? `\n\n=== 知识库资料(项目已上传文档/纪要，评分请以此为准) ===\n${kbText}` : ''].filter(Boolean).join('')
-    const resp = await fetch(`${PROJ_FLUE_BASE}/workflows/score-project?wait=result`, {
+    const resp = await fetch(`${FLUE_BASE_URL}/workflows/score-project?wait=result`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         projectName: proj.name,

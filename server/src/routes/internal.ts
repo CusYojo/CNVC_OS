@@ -1,12 +1,12 @@
 import { Router } from 'express'
 import { retrieveKnowledge } from '../services/ragService.js'
+import { FLUE_BASE_URL } from '../config/agentRuntime.js'
 
-// 内部端点：仅供 flue advisor agent 的 tools 回调（x-internal-secret 校验，不走用户 JWT）。
+// 内部端点：仅供 flue assistant agent 的 tools 回调（x-internal-secret 校验，不走用户 JWT）。
 // 复用既有 RAG / PPT / 情报编排逻辑，让 agent 能自主调用这些能力。
 export const internalRouter = Router()
 
 const SECRET = process.env.INTERNAL_SECRET || 'cybernaut-internal-2026'
-const FLUE_BASE = process.env.FLUE_BASE_URL || 'http://127.0.0.1:8790'
 
 internalRouter.use((req, res, next) => {
   if (req.header('x-internal-secret') !== SECRET) {
@@ -48,7 +48,7 @@ internalRouter.post('/collect-intel', async (req, res, next) => {
   try {
     const { company } = req.body ?? {}
     if (!company) { res.status(400).json({ code: 'INVALID_ARGUMENT', message: '缺少 company' }); return }
-    const r = await fetch(`${FLUE_BASE}/workflows/intel-collect?wait=result`, {
+    const r = await fetch(`${FLUE_BASE_URL}/workflows/intel-collect?wait=result`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ company }), signal: AbortSignal.timeout(120000),
     })

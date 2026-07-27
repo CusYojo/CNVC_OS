@@ -26,6 +26,9 @@ server-dist/
 project-discovery/data/
 project-discovery/公众号来源.xlsx
 server/ai-artifacts/
+.runtime/
+cybernaut-assistant/data/
+cybernaut-assistant/workspace/
 
 # Docker images and runtime artifacts
 *.tar

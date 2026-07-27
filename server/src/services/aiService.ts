@@ -1,9 +1,8 @@
 // AI 网关层：投资中台的 AI 能力统一走 flue agent/workflow 编排层。
-// flue 层地址由 FLUE_BASE_URL 指定（默认本机 3584）；flue 内部再走 18081 LLM 网关。
-// 想换编排 / 加多智能体只改 flue 项目 (/data/cybernaut-flue)，本文件契约不变。
-// RAG 检索已下沉到 flue advisor agent 的 search_project_docs 工具（走 Express 内部端点），此处不再直接检索。
+// flue 层地址与 Agent 名称由统一配置提供；flue 内部再走 18081 LLM 网关。
+// RAG 检索已下沉到 flue assistant agent 的 search_project_docs 工具（走 Express 内部端点），此处不再直接检索。
 
-const FLUE_BASE_URL = process.env.FLUE_BASE_URL || 'http://127.0.0.1:3584'
+import { FLUE_AGENT_NAME, FLUE_BASE_URL } from '../config/agentRuntime.js'
 
 async function callAgent(agent: string, sessionId: string, message: string): Promise<string> {
   const res = await fetch(`${FLUE_BASE_URL}/agents/${agent}/${sessionId}?wait=result`, {
@@ -31,7 +30,7 @@ async function callWorkflow<T>(workflow: string, input: Record<string, unknown>)
 }
 
 export async function answerQuestion(question: string, projectName = '当前项目', projectId?: string) {
-  // 真·agent：把问题+项目上下文转发给 flue advisor agent，由它自主决定调 RAG/PPT/情报工具。
+  // 真·agent：把问题+项目上下文转发给 flue assistant agent，由它自主决定调 RAG/PPT/情报工具。
   // agent 在回答文本里用标记回传 jobId 与来源，这里解析出来还原成前端契约字段。
   const msg = [
     `【当前项目】${projectName}`,
@@ -40,7 +39,7 @@ export async function answerQuestion(question: string, projectName = '当前项�
   ].join('\n')
 
   try {
-    const raw = await callAgent('advisor', `chat-${Date.now()}`, msg)
+    const raw = await callAgent(FLUE_AGENT_NAME, `chat-${Date.now()}`, msg)
     // 解析标记
     let pptJobId: string | undefined
     let sources: string[] = []
