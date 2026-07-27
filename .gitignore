@@ -37,6 +37,12 @@ cybernaut-assistant/workspace/
 # Generated acceptance artifacts
 docs/ai-assistant/验收产物/
 
+# Python cache
+__pycache__/
+
+# Agent skill generated docs
+server/workspace/.agents/skills/draft-investment-proposal/docs/
+
 # Confidential project reference materials
 docs/Q&A/
 docs/合规性说明/
