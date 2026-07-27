@@ -45,6 +45,7 @@ const AI_TASK_TYPE_BY_ACTION: Record<AiQuickTaskRequest['actionId'], string> = {
   investment_ppt: 'investment_recommendation_ppt',
   due_diligence: 'due_diligence_report',
   qa: 'project_qa',
+  custom_template: 'custom_template_document',
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -295,7 +296,7 @@ function pptStageFromParts(parts: SafeFluePart[]): { active: boolean; stage: str
     if (/discover/i.test(input)) stage = '正在规划大纲与检索资料'
     else if (/generate_gateway_slide_image|slide_image|出图|image-deck/i.test(input)) stage = '正在生成幻灯片图片（逐页出图）'
     else if (/editable|make_.*editable|b7_texts|逆向|pptx/i.test(input)) stage = '正在逆向为可编辑 pptx'
-    else if (/activate_skill/i.test(name) || /activate_skill/i.test(input)) stage = '正在加载 PPT 生成技能'
+    else if (/activate_skill/i.test(name) || /activate_skill/i.test(input)) stage = '正在准备 PPT 生成规则'
     else if (name === 'start_ppt_generation') stage = '正在启动 PPT 生成'
     else stage = '正在生成 PPT'
   }
@@ -1083,6 +1084,11 @@ function Chat() {
       if (request.userInstructions?.trim()) {
         parameters.userInstructions = request.userInstructions.trim()
       }
+    } else if (request.actionId === 'compliance') {
+      parameters.webResearch = true
+      if (request.userInstructions?.trim()) {
+        parameters.userInstructions = request.userInstructions.trim()
+      }
     } else if (request.actionId === 'investment_ppt') {
       parameters.template = request.template || '公司标准模板'
       parameters.pageCount = request.pageCount || '12-15页'
@@ -1092,6 +1098,12 @@ function Chat() {
     } else if (request.actionId === 'qa') {
       parameters.qaMode = request.qaMode || '投资委员会 Q&A'
       parameters.questionDepth = request.questionDepth || '标准版'
+      if (request.userInstructions?.trim()) {
+        parameters.userInstructions = request.userInstructions.trim()
+      }
+    } else if (request.actionId === 'custom_template') {
+      parameters.customTemplateId = request.customTemplateId
+      parameters.customTemplateName = request.customTemplateName
     }
     try {
       if (!currentSession?.projectId || currentSession.projectId !== request.projectId) {
@@ -1243,6 +1255,7 @@ function Chat() {
               disabled={sending || scope !== 'project' || !currentSession?.projectId}
               projects={projects}
               currentProjectId={scope === 'project' ? currentSession?.projectId ?? '' : ''}
+              conversationId={currentConversationRowId}
               onRunTask={runQuickTask}
             />
           </AiErrorBoundary>

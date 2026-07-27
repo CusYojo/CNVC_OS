@@ -25,7 +25,7 @@ export type InvestmentProposalSectionEvidence = {
 }
 
 export type InvestmentProposalEvidencePlan = {
-  projectOnly: true
+  evidenceScope: 'project_and_public_web'
   sections: InvestmentProposalSectionEvidence[]
   usedSourceIndexes: number[]
   coverage: {
@@ -45,6 +45,7 @@ const BROAD_ANALYSIS_KINDS = new Set([
 function sourcePriority(source: EvidenceSource) {
   if (source.sourceType === 'user_input') return 0
   if (source.sourceType === 'project_record') return 1
+  if (source.sourceType === 'public_web') return 3
   return 2
 }
 
@@ -136,17 +137,17 @@ export function buildInvestmentProposalEvidencePlan(
   blueprint: InvestmentProposalDocumentBlueprint,
   options: { maxItemsPerSection?: number } = {},
 ): InvestmentProposalEvidencePlan {
-  const projectSources = sources.filter((source) =>
+  const admissibleSources = sources.filter((source) =>
     source.sourceType === 'project_record'
     || !TEMPLATE_SOURCE_NAME.test(source.sourceName))
-  if (projectSources.length !== sources.length) {
+  if (admissibleSources.length !== sources.length) {
     throw Object.assign(new Error('投资提案模板文件不得进入当前项目证据集合'), {
       code: 'INVESTMENT_PROPOSAL_TEMPLATE_EVIDENCE_LEAK',
     })
   }
   const maxItems = Math.max(1, Math.min(options.maxItemsPerSection ?? 6, 10))
   const sections = proposalLeafSections(blueprint).map((section): InvestmentProposalSectionEvidence => {
-    const evidence = selectSectionEvidence(projectSources, section, maxItems)
+    const evidence = selectSectionEvidence(admissibleSources, section, maxItems)
     return {
       sectionId: section.id,
       sectionTitle: section.title,
@@ -159,7 +160,7 @@ export function buildInvestmentProposalEvidencePlan(
     .sort((left, right) => left - right)
   const coveredLeafSections = sections.filter((section) => section.coverage === 'available').length
   return {
-    projectOnly: true,
+    evidenceScope: 'project_and_public_web',
     sections,
     usedSourceIndexes,
     coverage: {
@@ -192,7 +193,7 @@ export function investmentProposalEvidencePrompt(
 ) {
   if (!evidence.length) return '本章没有可用的当前项目证据。'
   return evidence.map((item) => [
-    `[S${item.sourceIndex}] ${item.sourceName} / 片段${item.chunkIndex ?? item.sourceIndex}`,
+    `[S${item.sourceIndex}] ${item.sourceName} / 来源类型：${item.sourceType} / 片段${item.chunkIndex ?? item.sourceIndex}`,
     item.versionOrDate ? `版本/日期：${item.versionOrDate}` : '',
     item.content,
   ].filter(Boolean).join('\n')).join('\n\n')

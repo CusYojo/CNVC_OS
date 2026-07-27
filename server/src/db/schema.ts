@@ -255,6 +255,66 @@ export const aiTaskSources = pgTable('ai_task_sources', {
   byArtifact: index('idx_ai_task_sources_artifact').on(t.artifactId),
 }))
 
+export type AiCustomTemplateAnalysis = {
+  schemaVersion?: '1.0'
+  analysisVersion?: string
+  format: 'docx' | 'pptx'
+  fileName: string
+  formatProfile: {
+    fonts: string[]
+    primaryFont: string
+    headingFont: string
+    titleSizePt: number | null
+    headingSizePt: number | null
+    bodySizePt: number | null
+    lineSpacing: string
+    paragraphSpacing: string
+    alignment: string[]
+    pageSize: string
+    margins: string
+    orientation: string
+    colors: string[]
+    header: string
+    footer: string
+    hasPageNumbers: boolean
+    tableCount: number
+    imageCount: number
+  }
+  structures: Array<{
+    order: number
+    title: string
+    level: number
+    contentPurpose: string
+    contentSummary: string
+    contentRequirements: string[]
+  }>
+  summary: string
+}
+
+export const aiCustomTemplates = pgTable('ai_custom_templates', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  projectId: uuid('project_id').notNull().references(() => projects.id, { onDelete: 'cascade' }),
+  conversationId: uuid('conversation_id').references(() => chatConversations.id, { onDelete: 'set null' }),
+  originalFileName: varchar('original_file_name', { length: 255 }).notNull(),
+  format: varchar('format', { length: 16 }).notNull(),
+  mimeType: varchar('mime_type', { length: 128 }).notNull(),
+  fileSize: integer('file_size').notNull(),
+  sha256: varchar('sha256', { length: 64 }).notNull(),
+  storagePath: text('storage_path').notNull(),
+  analysis: jsonb('analysis').$type<AiCustomTemplateAnalysis>().notNull(),
+  skillName: varchar('skill_name', { length: 64 }).notNull(),
+  skillPath: text('skill_path').notNull(),
+  skillVersion: varchar('skill_version', { length: 64 }).notNull(),
+  status: varchar('status', { length: 16 }).notNull().default('succeeded'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  byUser: index('idx_ai_custom_templates_user').on(t.userId),
+  byProject: index('idx_ai_custom_templates_project').on(t.projectId),
+  byConversation: index('idx_ai_custom_templates_conversation').on(t.conversationId),
+}))
+
 export const fileChunks = pgTable('file_chunks', {
   id: uuid('id').primaryKey().defaultRandom(),
   fileId: uuid('file_id').notNull().references(() => projectFiles.id, { onDelete: 'cascade' }),

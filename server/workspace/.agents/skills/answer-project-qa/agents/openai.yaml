@@ -1,4 +1,4 @@
 interface:
   display_name: "项目 Q&A"
-  short_description: "按核心规范生成投委会/尽调 Q&A 与可追溯单题回答"
-  default_prompt: "使用 $answer-project-qa，基于当前项目资料和 docs/Q&A 核心规范生成投资委员会或尽调 Q&A；正式任务输出 Word 与 PDF，不生成 PPT。"
+  short_description: "结合项目资料与联网公开信息生成正式 Q&A PDF"
+  default_prompt: "使用 $answer-project-qa，基于当前项目资料、联网公开信息和 docs/Q&A 核心规范生成投资委员会或尽调 Q&A；只输出 PDF，正文不显示引用资料或 Reviewer 结果。"

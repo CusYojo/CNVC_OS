@@ -16,6 +16,10 @@ import {
   reviewCompliancePdfAgainstDocx,
   reviewGeneratedComplianceDocx,
 } from '../services/aiComplianceOutputService.js'
+import {
+  buildComplianceWebSearchQueries,
+  fetchComplianceWebEvidence,
+} from '../services/aiComplianceWebResearchService.js'
 import { generateBusinessDocx } from '../services/aiBusinessDocumentService.js'
 import { loadAiSkill } from '../services/aiSkillService.js'
 import { AI_TEMPLATE_CATALOG } from '../services/aiTemplateCatalog.js'
@@ -99,10 +103,145 @@ async function main() {
     'Skill与reference要求逐章节生成',
   )
   check(
+    'Skill不提及样本文件',
+    !/样本|sample/i.test(`${skill.description}\n${skill.instructions}\n${skill.referenceInstructions}`),
+    'Skill仅引用核心规范，不登记样本DOCX',
+  )
+  check(
+    'Skill要求项目资料不足时受控联网',
+    /受控.*公开网络|公开网络.*受控/.test(`${skill.instructions}\n${skill.referenceInstructions}`)
+      && /URL/.test(skill.referenceInstructions)
+      && /基金合伙协议/.test(`${skill.instructions}\n${skill.referenceInstructions}`),
+    '公开证据可补充、内部基金文件不可由网络替代',
+  )
+  check(
     '缺失资料固定句唯一',
     blueprint.fixedContent.missingDataSentence === COMPLIANCE_MISSING_DATA_SENTENCE
       && skill.referenceInstructions.includes(COMPLIANCE_MISSING_DATA_SENTENCE),
     COMPLIANCE_MISSING_DATA_SENTENCE,
+  )
+
+  const webPlans = buildComplianceWebSearchQueries({
+    name: '联网核验项目',
+    companyName: '联网核验企业有限公司',
+    industry: '人工智能',
+  })
+  check(
+    '公开检索覆盖项目与监管维度',
+    webPlans.length === 7
+      && webPlans.some((plan) => plan.topic === '核心团队')
+      && webPlans.some((plan) => plan.topic === '处罚、诉讼与失信')
+      && webPlans.some((plan) => plan.topic === '投资方式及投资限制'),
+    webPlans.map((plan) => plan.topic).join('、'),
+  )
+  let mockSearchIndex = 0
+  const mockWebFetch = (async () => {
+    mockSearchIndex += 1
+    return new Response(JSON.stringify({
+      results: [
+        {
+          title: `联网核验企业公开资料${mockSearchIndex}`,
+          content: '该页面披露联网核验企业有限公司在人工智能领域的公司、核心团队、产品技术、融资、政策监管及投资限制等公开信息。',
+          url: `https://www.csrc.gov.cn/public-evidence/${mockSearchIndex}`,
+          publishedDate: '2026-07-20',
+        },
+        {
+          title: '截止日后资料',
+          content: '该资料晚于本次资料截止日，不应进入证据。',
+          url: `https://www.csrc.gov.cn/future/${mockSearchIndex}`,
+          publishedDate: '2026-08-01',
+        },
+      ],
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }) as typeof fetch
+  const webResearch = await fetchComplianceWebEvidence({
+    project: {
+      name: '联网核验项目',
+      companyName: '联网核验企业有限公司',
+      industry: '人工智能',
+    },
+    sourceCutoffDate: '2026-07-25',
+    fetchImpl: mockWebFetch,
+    baseUrl: 'https://search.example.test',
+    now: new Date('2026-07-25T08:00:00Z'),
+  })
+  check(
+    '公开检索结果形成可审计证据',
+    webResearch.audit.status === 'succeeded'
+      && webResearch.audit.succeededQueryCount === 7
+      && webResearch.sources.length === 7
+      && webResearch.sources.every((source) =>
+        source.sourceType === 'public_web_official'
+        && source.sourceId?.length === 64
+        && source.locator?.startsWith('https://www.csrc.gov.cn/')
+        && source.versionOrDate === '2026-07-20'),
+    `${webResearch.sources.length}条官方公开证据，状态${webResearch.audit.status}`,
+  )
+  const webPackets = buildComplianceEvidencePackets(webResearch.sources)
+  check(
+    '公开证据进入章节级Evidence Packet',
+    webPackets.find((packet) => packet.sectionTitle === '核心团队')!.items.length > 0
+      && webPackets.find((packet) => packet.sectionTitle === '投资情形分析')!.items
+        .some((item) => item.sourceType === 'public_web_official'),
+    '公开证据保留sourceType并参与相关章节检索',
+  )
+  const officialFallbackFetch = (async (target: string | URL | Request) => {
+    const url = String(target)
+    if (url.includes('/search?')) {
+      return new Response(JSON.stringify({ results: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+    return new Response(
+      '<html><body><h1>私募投资基金监督管理条例</h1><p>2023年7月3日公布。'
+      + '本条例用于规范私募投资基金业务活动和投资运作，保护投资者合法权益。'.repeat(12)
+      + '</p></body></html>',
+      { status: 200, headers: { 'Content-Type': 'text/html' } },
+    )
+  }) as typeof fetch
+  const fallbackResearch = await fetchComplianceWebEvidence({
+    project: { name: '官方规则兜底验收项目' },
+    sourceCutoffDate: '2026-07-25',
+    fetchImpl: officialFallbackFetch,
+    baseUrl: 'https://search.example.test',
+    now: new Date('2026-07-25T08:00:00Z'),
+  })
+  check(
+    '搜索引擎无结果时直取官方监管页面',
+    fallbackResearch.audit.officialFallbackAttempted
+      && fallbackResearch.audit.officialFallbackSourceCount === 2
+      && fallbackResearch.sources.every((source) =>
+        source.sourceType === 'public_web_official'
+        && source.locator?.startsWith('https://www.csrc.gov.cn/')),
+    `${fallbackResearch.audit.officialFallbackSourceCount}条官方监管来源`,
+  )
+  const fallbackPackets = buildComplianceEvidencePackets(fallbackResearch.sources)
+  check(
+    '通用监管资料不污染公司与投资价值章节',
+    fallbackPackets
+      .filter((packet) => packet.items.length > 0)
+      .every((packet) => packet.sectionTitle === '投资情形分析'),
+    fallbackPackets
+      .filter((packet) => packet.items.length > 0)
+      .map((packet) => packet.sectionTitle)
+      .join('、'),
+  )
+  const unavailableResearch = await fetchComplianceWebEvidence({
+    project: { name: '联网不可用项目' },
+    sourceCutoffDate: '2026-07-25',
+    fetchImpl: (async () => { throw new Error('offline') }) as typeof fetch,
+    baseUrl: 'https://search.example.test',
+  })
+  check(
+    '公开检索不可用时不阻断生成',
+    unavailableResearch.audit.status === 'unavailable'
+      && unavailableResearch.sources.length === 0
+      && unavailableResearch.audit.failedQueryCount === 7,
+    `状态${unavailableResearch.audit.status}，失败查询${unavailableResearch.audit.failedQueryCount}`,
   )
 
   const project = {

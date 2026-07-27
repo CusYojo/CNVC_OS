@@ -1,0 +1,4 @@
+interface:
+  display_name: "模板驱动文档生成"
+  short_description: "识别上传模板结构，结合项目资料与联网信息生成全新文档"
+  default_prompt: "使用 $generate-document-from-template 识别上传模板结构，结合当前项目资料与联网公开信息重新生成标题和正文。"

@@ -47,7 +47,7 @@ function yamlString(source: string, key: string) {
 async function main() {
   const root = getAiSkillRoot()
   const listed = await listAiBusinessSkills()
-  assert('登记五个业务 Skill', listed.length === 5, `${listed.length} 个`)
+  assert('登记六个业务 Skill', listed.length === 6, `${listed.length} 个`)
   assert(
     'Skill 名称唯一',
     new Set(listed.map((item) => item.name)).size === listed.length,
@@ -114,23 +114,41 @@ async function main() {
       '证据分片去重、一个事实只出现一次',
     )
     assert(
-      `${definition.label} 明确末尾来源披露`,
-      /末尾|文尾|最后一页/.test(`${skillSource}\n${referenceSource}`)
-        && /来源|引用资料/.test(referenceSource),
-      '仅列实际使用来源并置于末尾',
+      `${definition.label} 明确来源披露位置`,
+      definition.name === 'write-due-diligence-report'
+        ? /系统审计记录/.test(`${skillSource}\n${referenceSource}`)
+          && /不增加文末|不包含免责声明/.test(`${skillSource}\n${referenceSource}`)
+        : definition.name === 'answer-project-qa'
+          ? /系统审计/.test(`${skillSource}\n${referenceSource}`)
+            && /不显示|不得显示/.test(`${skillSource}\n${referenceSource}`)
+            && /引用资料/.test(referenceSource)
+        : definition.name === 'draft-investment-proposal'
+          ? /任务来源表|审计元数据/.test(`${skillSource}\n${referenceSource}`)
+            && /不得生成.*免责声明.*引用资料|不生成文末.*免责声明.*引用资料/.test(
+              `${skillSource}\n${referenceSource}`,
+            )
+        : /末尾|文尾|最后一页/.test(`${skillSource}\n${referenceSource}`)
+          && /来源|引用资料/.test(referenceSource),
+      definition.name === 'write-due-diligence-report'
+        ? '尽调来源保存在系统审计记录，正式正文不显示文末来源'
+        : definition.name === 'answer-project-qa'
+          ? 'Q&A 来源保存在系统审计记录，正式 PDF 不显示来源编号或引用资料'
+        : definition.name === 'draft-investment-proposal'
+          ? '投资提案来源保存在任务来源表和审计元数据，正文不显示免责声明或引用资料'
+        : '仅列实际使用来源并置于末尾',
     )
     if (definition.name === 'answer-project-qa') {
       const documentGeneratorRequirements = [
-        'Structured Q&A Document Generator',
+        'Structured Q&A PDF Generator',
         'Template Parser',
+        'Public Web Research',
         'Question Generator',
         'Duplicate Checker',
         'Answer Generator',
         'Reviewer',
         'Formatter',
-        'Word',
         'PDF',
-        '暂无相关资料。',
+        '联网',
       ]
       assert(
         `${definition.label} 遵守模板学习与内容重建契约`,
@@ -138,10 +156,11 @@ async function main() {
         documentGeneratorRequirements.filter((term) => !skillSource.includes(term)).join(', ') || '完整',
       )
       assert(
-        `${definition.label} 证据不足时不使用样本补写`,
-        /资料不足时必须严格输出/.test(skillSource)
-          && /禁止使用.*模板项目正文/.test(skillSource),
-        '资料不足时写“暂无相关资料。”且不得使用模板项目事实',
+        `${definition.label} 资料不足时联网补证且不使用样本补写`,
+        /资料不能完整回答时.*联网补充/.test(skillSource)
+          && /范例正文永远不是当前项目证据/.test(skillSource)
+          && /不得输出“暂无相关资料”/.test(skillSource),
+        '先联网补证；仍未披露时形成核验边界，且不得使用模板项目事实',
       )
     }
   }
@@ -196,8 +215,8 @@ async function main() {
   assert(
     'AI-008 核心规范来源指纹和关键规则已固化',
     createHash('sha256').update(proposalCanonicalSpec).digest('hex')
-        === '18a87773e412e5bf7127914cb4469f2a64c392cae3e18c37d899730eecf31f4f'
-      && proposalCoreSpec.includes('18a87773e412e5bf7127914cb4469f2a64c392cae3e18c37d899730eecf31f4f')
+        === '4f2e3673e70439ed919f054cdb1cd4f293c41d49a062f77aba2feca51f0f8f6b'
+      && proposalCoreSpec.includes('4f2e3673e70439ed919f054cdb1cd4f293c41d49a062f77aba2feca51f0f8f6b')
       && [
         '用户本次明确输入',
         '文档主标题 | 黑体 | 16pt',
@@ -206,6 +225,8 @@ async function main() {
         '四、项目亮点总结',
         '五、风险提示与对策',
         '六、结论',
+        '联网公开信息只作为补充线索',
+        '正文末尾不增加“免责声明”或“引用资料”板块',
       ].every((term) => proposalCanonicalSpec.includes(term))
       && [
         '标准 17 节',
@@ -284,6 +305,9 @@ async function main() {
     '两端对齐',
     'Word / WPS',
     'TOC 域',
+    '联网公开信息',
+    '后续核验事项',
+    '系统审计记录',
   ]
   assert(
     'AI-010 核心规范与项目唯一规范保持关键规则一致',
@@ -389,21 +413,18 @@ async function main() {
   const qaRequired = [
     '企业介绍', '商业模式', '产品能力', '团队', '市场', '竞争', '财务', '融资',
     '风险', '合规', '知识产权', '客户', '行业', '运营', '未来规划',
-    '暂无相关资料。', 'Reviewer', 'Word', 'PDF',
+    '联网', 'Reviewer', 'PDF', '系统审计记录', '不登记 DOCX',
   ]
   assert(
-    'Q&A 十五类问题、回答和双格式契约完整',
+    'Q&A 动态选题、联网补证、内部审阅与 PDF 契约完整',
     qaRequired.every((term) => qaContract.includes(term)),
     qaRequired.filter((term) => !qaContract.includes(term)).join(', ') || '完整',
   )
   const qaStyleRequired = [
     '模板共识',
     '各内容单元的表达目的',
-    '结论先行',
     '分维度论证',
-    'Word',
     'PDF',
-    '黑白公文',
     'A4',
     '宋体',
     'Times New Roman',
@@ -416,6 +437,8 @@ async function main() {
     '首行缩进 2 个汉字',
     'Q1：',
     '（1）',
+    '联网与证据',
+    '可见正文排除项',
   ]
   assert(
     'Q&A 模板结构与文风规范完整',
@@ -442,13 +465,13 @@ async function main() {
     `${AI_QA_TEMPLATE.templateDirectory} / ${AI_QA_TEMPLATE.referencePaths.length} 份`,
   )
   assert(
-    'Q&A 作为正式文档任务输出 Word 与 PDF',
+    'Q&A 作为正式文档任务只输出 PDF',
     AI_QA_TEMPLATE.outputMode === 'document-task'
       && AI_QA_TEMPLATE.downloadableArtifact === true
-      && AI_QA_TEMPLATE.outputFormats.join(',') === 'docx,pdf'
-      && /Word/.test(qaSkill.instructions)
+      && AI_QA_TEMPLATE.outputFormats.join(',') === 'pdf'
       && /PDF/.test(qaSkill.instructions)
-      && /暂无相关资料。/.test(qaContract),
+      && /只提供一份正式 PDF/.test(qaSkill.instructions)
+      && /联网/.test(qaContract),
     `${AI_QA_TEMPLATE.outputMode} / downloadable=${AI_QA_TEMPLATE.downloadableArtifact}`,
   )
   const qaPipelineSource = await readFile(
@@ -463,6 +486,10 @@ async function main() {
     path.resolve(process.cwd(), 'server', 'src', 'services', 'aiQaTemplateParser.ts'),
     'utf8',
   )
+  const qaWebResearchSource = await readFile(
+    path.resolve(process.cwd(), 'server', 'src', 'services', 'aiQaWebResearchService.ts'),
+    'utf8',
+  )
   assert(
     'Q&A 运行时注入完整 Prompt、Workflow 与模板规范',
     qaPipelineSource.includes('skill.referenceInstructions')
@@ -475,14 +502,16 @@ async function main() {
     '生产契约 + 模板画像 + Workflow + Pipeline Prompts',
   )
   assert(
-    'Q&A Pipeline 包含 Parser、Generator、Duplicate Checker、Reviewer 与双格式导出',
+    'Q&A Pipeline 包含 Parser、联网研究、Generator、Duplicate Checker、Reviewer 与 PDF 导出',
     qaPipelineSource.includes('generateProjectQaQuestions')
       && qaPipelineSource.includes('checkDuplicateQuestions')
       && qaPipelineSource.includes('reviewProjectQaAnswers')
+      && qaWebResearchSource.includes('collectQaPublicEvidence')
+      && qaWebResearchSource.includes('SearXNG')
       && qaDocumentSource.includes('generateProjectQaDocx')
       && qaDocumentSource.includes('convertProjectQaDocxToPdf')
       && qaParserSource.includes('parseQaTemplateCorpus'),
-    'Template Parser / Question Generator / Duplicate Checker / Reviewer / Word / PDF',
+    'Template Parser / Public Web Research / Question Generator / Duplicate Checker / Reviewer / PDF',
   )
   assert(
     'Q&A Formatter 落实统一字号、行距、页边距与问题一级结构',
@@ -497,19 +526,21 @@ async function main() {
       && !qaDocumentSource.includes('function categoryHeading')
       && !qaDocumentSource.includes('function metadataTable')
       && !qaDocumentSource.includes('`${question.question}（${question.category}）`')
+      && !qaDocumentSource.includes("mixedTextRuns('引用资料'")
+      && !qaDocumentSource.includes("mixedTextRuns('Reviewer 审阅结果'")
       && qaPipelineSource.includes('function cleanAnswerText')
       && qaPipelineSource.includes('二至五个换行分隔'),
     '宋体 / 18pt 标题 / 14pt 问题 / 12pt 分维度 / 1.5 倍行距 / 25.4×31.7mm 页边距',
   )
   assert(
-    'Q&A 双模式边界明确且不生成 PPT',
+    'Q&A 双模式边界明确且正式任务只交付 PDF',
     /正式文档模式/.test(qaSkill.instructions)
       && /单题会话模式/.test(qaSkill.instructions)
       && /DOCX/.test(qaSkill.instructions)
       && /PDF/.test(qaSkill.instructions)
-      && /永不生成 PPT\/PPTX/.test(qaSkill.instructions)
+      && /永不生成 DOCX、PPT 或 PPTX 下载产物/.test(qaSkill.instructions)
       && /不创建文档任务或下载产物/.test(qaSkill.instructions),
-    '正式任务 DOCX+PDF / 单题结构化回答 / 禁止 PPT',
+    '正式任务 PDF / 单题结构化回答 / 禁止 DOCX、PPT、PPTX 下载产物',
   )
 
   const pptContract = await readFile(
@@ -532,9 +563,9 @@ async function main() {
     quickActionsSource.includes("id: 'qa'")
       && quickActionsSource.includes("mode: 'task'")
       && quickActionsSource.includes('投资委员会 Q&A')
-      && quickActionsSource.includes('DOCX+PDF')
+      && quickActionsSource.includes("? 'PDF'")
       && !quickActionsSource.includes('QA_GROUPS'),
-    'Q&A task / 投资委员会或尽调 / DOCX+PDF',
+    'Q&A task / 投资委员会或尽调 / PDF',
   )
 
   const assistantPageSource = await readFile(

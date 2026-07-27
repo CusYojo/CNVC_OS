@@ -5,9 +5,9 @@ import JSZip from 'jszip'
 import { PDFParse } from 'pdf-parse'
 import type { AiTemplateDefinition } from './aiTemplateCatalog.js'
 
-export const INVESTMENT_PROPOSAL_BLUEPRINT_VERSION = 'proposal-blueprint-20260726-v5'
+export const INVESTMENT_PROPOSAL_BLUEPRINT_VERSION = 'proposal-blueprint-20260727-v6-web'
 export const CURRENT_PROJECT_NO_DATA = '当前项目暂无相关资料。'
-const CORE_STANDARD_SHA256 = '18a87773e412e5bf7127914cb4469f2a64c392cae3e18c37d899730eecf31f4f'
+const CORE_STANDARD_SHA256 = '4f2e3673e70439ed919f054cdb1cd4f293c41d49a062f77aba2feca51f0f8f6b'
 
 export type InvestmentProposalAnalysisKind =
   | 'company_profile'
@@ -111,7 +111,6 @@ export type InvestmentProposalDocumentBlueprint = {
     managementCompany: '浙江赛智伯乐股权投资管理有限公司'
     headerCompany: '浙江赛智伯乐投资管理有限公司'
     noDataText: typeof CURRENT_PROJECT_NO_DATA
-    finalSectionTitle: '引用资料'
   }
   sections: InvestmentProposalBlueprintSection[]
   requiredAnalysisKinds: InvestmentProposalAnalysisKind[]
@@ -455,6 +454,8 @@ export async function loadInvestmentProposalBlueprint(
     '一、基本情况简介',
     '六、结论',
     '用户补充内容单独标注为“用户补充输入”',
+    '联网公开信息只作为补充线索',
+    '正文末尾不增加“免责声明”或“引用资料”板块',
   ]
   const missingCoreRules = coreRequiredRules.filter((rule) => !coreStandard.includes(rule))
   if (coreStandardSha256 !== CORE_STANDARD_SHA256 || missingCoreRules.length) {
@@ -506,7 +507,6 @@ export async function loadInvestmentProposalBlueprint(
       managementCompany: '浙江赛智伯乐股权投资管理有限公司',
       headerCompany: '浙江赛智伯乐投资管理有限公司',
       noDataText: CURRENT_PROJECT_NO_DATA,
-      finalSectionTitle: '引用资料',
     },
     sections: BLUEPRINT_SECTIONS,
     requiredAnalysisKinds: REQUIRED_ANALYSIS_KINDS,

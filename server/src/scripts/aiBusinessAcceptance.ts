@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import JSZip from 'jszip'
 import {
+  finalizeDueDiligenceContent,
   normalizeBusinessContent,
   type BusinessContent,
   type BusinessFinding,
@@ -23,6 +24,10 @@ import {
 } from '../services/aiTemplateCatalog.js'
 import { cleanCorruptedText, decodeTextBuffer } from '../services/textQualityService.js'
 import { curateEvidenceSources } from '../services/aiEvidenceQualityService.js'
+import {
+  buildDueDiligenceResearchQueries,
+  collectDueDiligencePublicEvidence,
+} from '../services/aiDueDiligenceResearchService.js'
 
 type Check = { name: string; passed: boolean; detail: string }
 
@@ -85,6 +90,14 @@ const sources: EvidenceSource[] = [
     sourceName: '未使用来源（不得进入文尾）',
     chunkIndex: 9,
     content: '这是一条格式完整但未被任何正文发现引用的验收资料。',
+  },
+  {
+    sourceType: 'public_web',
+    sourceId: 'https://example.com/company-profile',
+    sourceName: '公开信息｜示例公司公开信息',
+    chunkIndex: 0,
+    versionOrDate: '2026-06-30',
+    content: '公开网页显示示例公司已发布产品和团队介绍；该信息需结合官网或其他独立来源核验。',
   },
 ]
 
@@ -150,7 +163,20 @@ function contentFor(type: AiBusinessTaskType): BusinessContent {
     risks: ['关键财务及客户数据尚未经独立核验', '法律合规结论必须由法务审核', '模型生成内容不得替代最终投资决策'],
     missing: ['审计口径财务底稿', '核心客户合同及访谈记录', '工商、知识产权及合规原件'],
   }
-  return normalizeBusinessContent(raw, template, raw, sources.length)
+  const normalized = normalizeBusinessContent(raw, template, raw, sources.length)
+  if (type === 'investment_proposal') {
+    normalized.executiveSummary = normalized.executiveSummary
+      .replace('及资料缺口已分开标识', '已分开标识')
+    normalized.sections.forEach((section) => {
+      section.findings.forEach((finding) => {
+        if (finding.status === '资料缺口') finding.status = '待核验'
+      })
+    })
+    normalized.missing = []
+  }
+  return type === 'due_diligence_report'
+    ? finalizeDueDiligenceContent(normalized)
+    : normalized
 }
 
 async function openXmlText(filePath: string, prefix: RegExp) {
@@ -234,6 +260,45 @@ async function main() {
       && curatedProbe.usable[0].sourceName === '有效经营资料.docx'
       && curatedProbe.rejected.length >= 2,
     `采用 ${curatedProbe.usable.length} 条，排除 ${curatedProbe.rejected.length} 条`,
+  )
+  const diligenceQueries = buildDueDiligenceResearchQueries({
+    projectName: project.name,
+    companyName: project.companyName,
+    industry: project.industry,
+  })
+  assert(
+    checks,
+    'AI-010 尽调联网研究覆盖八类主题',
+    diligenceQueries.length === 8
+      && ['工商与股权', '团队与治理', '产品与技术', '客户与经营', '行业与市场', '融资与估值', '资质与合规', '风险与动态']
+        .every((topic) => diligenceQueries.some((query) => query.topic === topic)),
+    diligenceQueries.map((query) => query.topic).join('、'),
+  )
+  const diligenceResearch = await collectDueDiligencePublicEvidence(
+    {
+      projectName: project.name,
+      companyName: project.companyName,
+      industry: project.industry,
+      sourceCutoffDate,
+    },
+    async () => new Response(JSON.stringify({
+      results: [{
+        title: '示例公司公开信息',
+        content: '该公开网页包含工商、团队、产品、市场和融资等可用于初步交叉核验的信息。',
+        url: 'https://example.com/company-profile#overview',
+        publishedDate: '2026-06-30',
+      }],
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+  )
+  assert(
+    checks,
+    'AI-010 联网结果转为内部可追溯证据并按网址去重',
+    diligenceResearch.attemptedQueries === 8
+      && diligenceResearch.successfulQueries === 8
+      && diligenceResearch.sources.length === 1
+      && diligenceResearch.sources[0].sourceType === 'public_web'
+      && diligenceResearch.sources[0].sourceId === 'https://example.com/company-profile',
+    `${diligenceResearch.sources.length} 条公开证据`,
   )
 
   for (const type of AI_TASK_TYPES.filter((type) =>
@@ -353,26 +418,44 @@ async function main() {
           && !documentXml.includes(template.disclaimer),
         '四章、三个公司子节、无模板外正文板块',
       )
-    } else {
+    } else if (type === 'due_diligence_report') {
       assert(checks, `${type} 章节完整`, template.sections.every((section) => xml.includes(section)), template.sections.join('、'))
-      assert(checks, `${type} 含免责声明`, xml.includes(template.disclaimer), template.disclaimer)
       assert(
         checks,
-        `${type} 含来源和核验状态`,
-        xml.includes('引用资料')
-          && xml.includes('资料记载')
-          && (xml.includes('待核验') || xml.includes('资料缺口')),
-        '来源/状态',
+        'AI-010 正文不输出资料缺口占位、免责声明或文末引用资料',
+        !documentXml.includes('资料缺口')
+          && !documentXml.includes('责任声明')
+          && !documentXml.includes('引用资料')
+          && !documentXml.includes('免责声明'),
+        '报告在后续核验事项结束；来源仅留存在系统审计记录',
       )
-      const lastSectionTitle = template.sections[template.sections.length - 1]
       assert(
         checks,
-        `${type} 引用资料位于文尾且只列已用来源`,
-        documentXml.lastIndexOf('引用资料') > documentXml.lastIndexOf(lastSectionTitle)
-          && documentXml.includes('示例项目商业计划书（脱敏）')
-          && !documentXml.includes('未使用来源（不得进入文尾）')
-          && (documentXml.match(/示例项目商业计划书（脱敏）/g) || []).length === 1,
-        '引用在最后章节；同一文件合并片段；未使用来源不列示',
+        'AI-010 保留内部来源索引和审慎核验状态',
+        documentXml.includes('资料记载')
+          && documentXml.includes('待核验')
+          && documentXml.includes('来源明细保存在系统审计记录中'),
+        '资料记载 / 待核验 / 内部审计留痕',
+      )
+    } else if (type === 'investment_proposal') {
+      assert(checks, `${type} 章节完整`, template.sections.every((section) => xml.includes(section)), template.sections.join('、'))
+      assert(
+        checks,
+        `${type} 不生成资料缺口、免责声明或文末引用资料`,
+        !documentXml.includes('资料缺口')
+          && !documentXml.includes('免责声明')
+          && !documentXml.includes('引用资料')
+          && !documentXml.includes(template.disclaimer),
+        '正文以机构落款和日期结束；来源保存在任务审计数据',
+      )
+      assert(
+        checks,
+        `${type} 保留正文核验状态但不展开来源附录`,
+        documentXml.includes('资料记载')
+          && documentXml.includes('待核验')
+          && !documentXml.includes('示例项目商业计划书（脱敏）')
+          && !documentXml.includes('未使用来源（不得进入文尾）'),
+        '资料记载 / 待核验 / 无来源附录',
       )
     }
     assert(

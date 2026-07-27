@@ -3,6 +3,8 @@ import { existsSync } from 'node:fs'
 import { lstat, readFile } from 'node:fs/promises'
 import path from 'node:path'
 
+export const AI_TEMPLATE_DRIVEN_SKILL_NAME = 'generate-document-from-template'
+
 export const AI_BUSINESS_SKILLS = [
   {
     name: 'generate-compliance-statement',
@@ -34,12 +36,18 @@ export const AI_BUSINESS_SKILLS = [
     mode: 'document-task',
     taskType: 'project_qa',
   },
+  {
+    name: AI_TEMPLATE_DRIVEN_SKILL_NAME,
+    label: '上传模板',
+    mode: 'document-task',
+    taskType: 'custom_template_document',
+  },
 ] as const
 
 export type AiBusinessSkillName = typeof AI_BUSINESS_SKILLS[number]['name']
 
 export type LoadedAiSkill = {
-  name: AiBusinessSkillName
+  name: string
   description: string
   instructions: string
   referenceInstructions: string
@@ -109,14 +117,16 @@ export function getAiSkillRoot() {
   return skillRoot
 }
 
-export async function loadAiSkill(name: AiBusinessSkillName): Promise<LoadedAiSkill> {
-  if (!AI_BUSINESS_SKILLS.some((item) => item.name === name)) {
-    throw new Error(`未注册的 AI Skill：${name}`)
-  }
-  const skillDir = path.resolve(skillRoot, name)
+export async function loadAiSkillFromDirectory(input: {
+  name: string
+  directory: string
+  allowedRoot: string
+}): Promise<LoadedAiSkill> {
+  const allowedRoot = path.resolve(input.allowedRoot)
+  const skillDir = path.resolve(input.directory)
   const skillPath = path.resolve(skillDir, 'SKILL.md')
   if (
-    !skillDir.startsWith(`${skillRoot}${path.sep}`)
+    !skillDir.startsWith(`${allowedRoot}${path.sep}`)
     || !skillPath.startsWith(`${skillDir}${path.sep}`)
   ) {
     throw new Error('AI Skill 路径越界')
@@ -133,8 +143,8 @@ export async function loadAiSkill(name: AiBusinessSkillName): Promise<LoadedAiSk
   }
   const source = await readFile(skillPath, 'utf8')
   const parsed = parseSkillFile(source)
-  if (parsed.name !== name) {
-    throw new Error(`AI Skill 名称与目录不一致：${parsed.name} / ${name}`)
+  if (parsed.name !== input.name) {
+    throw new Error(`AI Skill 名称与目录不一致：${parsed.name} / ${input.name}`)
   }
   const referenceNames = referencedMarkdownFiles(parsed.instructions)
   const referenceSources: string[] = []
@@ -158,7 +168,7 @@ export async function loadAiSkill(name: AiBusinessSkillName): Promise<LoadedAiSk
     .update(referenceInstructions)
     .digest('hex')
   return {
-    name,
+    name: input.name,
     description: parsed.description,
     instructions: parsed.instructions,
     referenceInstructions,
@@ -166,6 +176,17 @@ export async function loadAiSkill(name: AiBusinessSkillName): Promise<LoadedAiSk
     sha256,
     version: `sha256-${sha256.slice(0, 12)}`,
   }
+}
+
+export async function loadAiSkill(name: string): Promise<LoadedAiSkill> {
+  if (!AI_BUSINESS_SKILLS.some((item) => item.name === name)) {
+    throw new Error(`未注册的 AI Skill：${name}`)
+  }
+  return loadAiSkillFromDirectory({
+    name,
+    directory: path.resolve(skillRoot, name),
+    allowedRoot: skillRoot,
+  })
 }
 
 export async function listAiBusinessSkills() {

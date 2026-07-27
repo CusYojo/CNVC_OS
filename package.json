@@ -25,6 +25,7 @@
     "accept:ai-qa": "node --import tsx server/src/scripts/aiQaPipelineAcceptance.ts",
     "accept:ai-qa-api": "AI_ACCEPTANCE_SCOPE=qa node --import tsx server/src/scripts/aiTaskApiAcceptance.ts",
     "accept:ai-skills": "node --import tsx server/src/scripts/aiSkillAcceptance.ts",
+    "accept:ai-custom-template": "node --import tsx server/src/scripts/aiCustomTemplateAcceptance.ts",
     "start": "node --env-file-if-exists=.env server-dist/index.js",
     "start:agent": "npm --prefix cybernaut-assistant run start:local",
     "start:radar": "project-discovery/start.sh",

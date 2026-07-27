@@ -22,7 +22,6 @@ import JSZip from 'jszip'
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import {
-  usedBusinessSourceIndexes,
   type BusinessContent,
   type BusinessFinding,
   type BusinessTable,
@@ -76,26 +75,13 @@ function xmlText(value: string) {
     .join('')
 }
 
-function validSourceIndexes(indexes: number[], sources: EvidenceSource[]) {
-  return [...new Set(indexes.filter((index) =>
-    Number.isInteger(index) && index >= 0 && index < sources.length))]
-}
-
-function citationLabel(indexes: number[], sources: EvidenceSource[]) {
-  const valid = validSourceIndexes(indexes, sources)
-  return valid.length ? valid.map((index) => `S${index + 1}`).join('、') : ''
-}
-
 function visibleStatus(status: BusinessFinding['status']) {
   return status === 'AI推断' ? '分析判断' : status
 }
 
-function findingParagraph(finding: BusinessFinding, sources: EvidenceSource[]) {
-  const citations = citationLabel(finding.sourceIndexes, sources)
+function findingParagraph(finding: BusinessFinding) {
   const statusLabel = visibleStatus(finding.status)
-  const auditLabel = citations
-    ? `〔${statusLabel}；${citations}〕`
-    : `〔${statusLabel}〕`
+  const auditLabel = `〔${statusLabel}〕`
   return new Paragraph({
     spacing: { before: 0, after: 0, line: 480, lineRule: LineRuleType.EXACT },
     indent: { firstLine: 480 },
@@ -126,7 +112,7 @@ function tableColumnWidths(columnCount: number) {
   return values
 }
 
-function proposalTable(table: BusinessTable, sources: EvidenceSource[]) {
+function proposalTable(table: BusinessTable) {
   const widths = tableColumnWidths(table.columns.length)
   const cell = (value: string, index: number, header = false) => new TableCell({
     width: { size: widths[index], type: WidthType.DXA },
@@ -147,7 +133,6 @@ function proposalTable(table: BusinessTable, sources: EvidenceSource[]) {
       })],
     })],
   })
-  const citation = citationLabel(table.sourceIndexes, sources)
   return [
     new Paragraph({
       keepNext: true,
@@ -187,46 +172,13 @@ function proposalTable(table: BusinessTable, sources: EvidenceSource[]) {
     new Paragraph({
       spacing: { before: 0, after: 0, line: 360, lineRule: LineRuleType.EXACT },
       children: [new TextRun({
-        text: citation
-          ? `资料来源：${citation}〔${visibleStatus(table.status)}〕`
-          : `资料来源：〔${visibleStatus(table.status)}〕`,
+        text: `资料状态：〔${visibleStatus(table.status)}〕`,
         size: 21,
         color: '666666',
         font: font(FANGSONG_FONT),
       })],
     }),
   ]
-}
-
-function bibliography(content: BusinessContent, sources: EvidenceSource[]) {
-  const used = usedBusinessSourceIndexes(content, sources.length)
-  const grouped = new Map<string, {
-    sourceName: string
-    sourceType: string
-    versionOrDate?: string
-    markers: number[]
-    chunks: number[]
-  }>()
-  used.forEach((index) => {
-    const source = sources[index]
-    if (!source) return
-    const key = `${source.sourceType}:${source.sourceId || source.sourceName}`
-    const entry = grouped.get(key) ?? {
-      sourceName: source.sourceName,
-      sourceType: source.sourceType,
-      versionOrDate: source.versionOrDate,
-      markers: [],
-      chunks: [],
-    }
-    entry.markers.push(index + 1)
-    if (Number.isInteger(source.chunkIndex)) entry.chunks.push(Number(source.chunkIndex))
-    grouped.set(key, entry)
-  })
-  return [...grouped.values()].map((entry) => {
-    const markers = [...new Set(entry.markers)].sort((a, b) => a - b).map((item) => `S${item}`).join('、')
-    const chunks = [...new Set(entry.chunks)].sort((a, b) => a - b)
-    return `[${markers}] ${entry.sourceName}；${chunks.length ? `知识片段 ${chunks.join('、')}` : '文件级定位'}${entry.versionOrDate ? `；版本/日期 ${entry.versionOrDate}` : ''}`
-  })
 }
 
 function headingParagraph(title: string, level: 1 | 2 | 3, pageBreakBefore: boolean) {
@@ -328,8 +280,8 @@ export async function generateInvestmentProposalDocx(input: {
     ))
     if (definition.container) return
     const findings = current?.findings ?? []
-    findings.forEach((finding) => body.push(findingParagraph(finding, input.sources)))
-    ;(current?.tables ?? []).forEach((table) => body.push(...proposalTable(table, input.sources)))
+    findings.forEach((finding) => body.push(findingParagraph(finding)))
+    ;(current?.tables ?? []).forEach((table) => body.push(...proposalTable(table)))
   })
 
   body.push(
@@ -353,56 +305,7 @@ export async function generateInvestmentProposalDocx(input: {
         font: font(FANGSONG_FONT),
       })],
     }),
-    new Paragraph({
-      keepNext: true,
-      border: { top: { style: BorderStyle.SINGLE, size: 6, color: '777777' } },
-      spacing: { before: 0, after: 0, line: 480, lineRule: LineRuleType.EXACT },
-      children: [new TextRun({
-        text: '免责声明',
-        size: 28,
-        bold: true,
-        color: '000000',
-        font: font(SANS_FONT),
-      })],
-    }),
-    new Paragraph({
-      spacing: { before: 0, after: 0, line: 480, lineRule: LineRuleType.EXACT },
-      alignment: AlignmentType.JUSTIFIED,
-      indent: { firstLine: 480 },
-      keepLines: true,
-      children: [new TextRun({
-        text: `${input.template.disclaimer} 本文件仅基于截至${input.sourceCutoffDate}当前项目内已授权资料形成；资料缺失、冲突或未核验事项不应被视为事实。投资具有风险，历史信息、预测及估值不构成收益承诺，最终结论以完成尽调、正式投决及签署交易文件为准。`,
-        size: 24,
-        color: '555555',
-        font: font(FANGSONG_FONT),
-      })],
-    }),
-    headingParagraph(blueprint.fixedBlocks.finalSectionTitle, 1, false),
   )
-
-  const references = bibliography(input.content, input.sources)
-  if (references.length) {
-    references.forEach((line) => body.push(new Paragraph({
-      spacing: { before: 0, after: 0, line: 360, lineRule: LineRuleType.EXACT },
-      indent: { hanging: 420 },
-      children: [new TextRun({
-        text: line,
-        size: 21,
-        color: '333333',
-        font: font(FANGSONG_FONT),
-      })],
-    })))
-  } else {
-    body.push(new Paragraph({
-      spacing: { before: 0, after: 0, line: 360, lineRule: LineRuleType.EXACT },
-      children: [new TextRun({
-        text: blueprint.fixedBlocks.noDataText,
-        size: 21,
-        color: '333333',
-        font: font(FANGSONG_FONT),
-      })],
-    }))
-  }
 
   const proposalHeader = () => new Header({
     children: [new Paragraph({
@@ -535,7 +438,7 @@ export async function generateInvestmentProposalDocx(input: {
     tocField: false,
     updateFields: true,
     pageGeometry: blueprint.page,
-    formatter: 'investment-proposal-core-standard-formatter-v2',
+    formatter: 'investment-proposal-core-standard-formatter-v3-web-audit',
   }
 }
 
@@ -621,12 +524,15 @@ export async function reviewInvestmentProposalDocx(input: {
   const fixedTexts = [
     input.blueprint.fixedBlocks.salutation,
     input.blueprint.fixedBlocks.authorization,
-    '免责声明',
-    input.blueprint.fixedBlocks.finalSectionTitle,
-    input.template.disclaimer,
+    input.blueprint.fixedBlocks.managementCompany,
   ]
   if (fixedTexts.some((value) => !allText.includes(value))) {
-    issues.push({ code: 'FIXED_BLOCK_MISSING', message: '固定称谓、授权说明、免责声明或引用资料缺失' })
+    issues.push({ code: 'FIXED_BLOCK_MISSING', message: '固定称谓、授权说明或机构落款缺失' })
+  }
+  const forbiddenFooterBlocks = ['免责声明', '引用资料', input.template.disclaimer]
+    .filter(Boolean)
+  if (forbiddenFooterBlocks.some((value) => allText.includes(value))) {
+    issues.push({ code: 'FORBIDDEN_FOOTER_BLOCK', message: '文末不得生成免责声明或引用资料板块' })
   }
   const leakedSamples = [
     '佳量脑科学',

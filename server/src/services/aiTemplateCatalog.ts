@@ -1,5 +1,7 @@
 import { existsSync } from 'node:fs'
 import path from 'node:path'
+import type { AiCustomTemplateAnalysis } from '../db/schema.js'
+import { AI_TEMPLATE_DRIVEN_SKILL_NAME } from './aiSkillService.js'
 import { INVESTMENT_PROPOSAL_SECTION_TITLES } from './aiInvestmentProposalBlueprintService.js'
 
 export const AI_TASK_TYPES = [
@@ -11,18 +13,14 @@ export const AI_TASK_TYPES = [
 ] as const
 
 export type AiBusinessTaskType = typeof AI_TASK_TYPES[number]
+export type AiExecutableTaskType = AiBusinessTaskType | 'custom_template_document'
 
 export type AiTemplateDefinition = {
-  type: AiBusinessTaskType
-  skillName:
-    | 'generate-compliance-statement'
-    | 'draft-investment-proposal'
-    | 'build-investment-recommendation-ppt'
-    | 'write-due-diligence-report'
-    | 'answer-project-qa'
+  type: AiExecutableTaskType
+  skillName: string
   label: string
   description: string
-  outputFormat: 'docx' | 'pptx'
+  outputFormat: 'docx' | 'pptx' | 'pdf'
   companionFormats?: Array<'pdf' | 'png' | 'md'>
   additionalOutputFormats?: Array<'pdf'>
   templateVersion: string
@@ -33,6 +31,7 @@ export type AiTemplateDefinition = {
   sections: string[]
   requiredParameters: string[]
   disclaimer: string
+  customAnalysis?: AiCustomTemplateAnalysis
 }
 
 const docsPath = (...segments: string[]) => path.resolve(process.cwd(), 'docs', ...segments)
@@ -48,7 +47,7 @@ export type AiQaTemplateDefinition = {
   categories: string[]
   outputMode: 'document-task'
   downloadableArtifact: true
-  outputFormats: ['docx', 'pdf']
+  outputFormats: ['pdf']
 }
 
 export const AI_TEMPLATE_CATALOG: Record<AiBusinessTaskType, AiTemplateDefinition> = {
@@ -76,7 +75,7 @@ export const AI_TEMPLATE_CATALOG: Record<AiBusinessTaskType, AiTemplateDefinitio
     label: '投资提案',
     description: '生成用于内部立项或基金内部汇报的投资提案初稿',
     outputFormat: 'docx',
-    templateVersion: 'proposal-corpus-20260726-v5',
+    templateVersion: 'proposal-corpus-20260727-v6-web',
     referencePath: docsPath('投资提案', '佳量脑科学项目投资提案0622(1).docx'),
     referencePaths: [
       docsPath('投资提案', '佳量脑科学项目投资提案0622(1).docx'),
@@ -101,7 +100,7 @@ export const AI_TEMPLATE_CATALOG: Record<AiBusinessTaskType, AiTemplateDefinitio
     description: '生成核心文本、表格、基础图表和形状可编辑的投资建议书',
     outputFormat: 'pptx',
     templateVersion: 'recommendation-jialiang-37slides-v2',
-    referencePath: docsPath('投资建议书', '佳量脑科学_投资建议书6月.pptx'),
+    referencePath: docsPath('agent', '投资建议书', '佳量脑科学_投资建议书6月.pptx'),
     editableLevel: 'core-elements',
     sections: ['投资结论', '项目概览', '行业与市场', '产品与技术', '商业模式与客户', '团队', '竞争分析', '财务与估值', '投资方案', '核心风险', '尽调缺口', '下一步建议'],
     requiredParameters: ['projectId', 'sourceCutoffDate', 'template', 'pageCount', 'language'],
@@ -111,9 +110,9 @@ export const AI_TEMPLATE_CATALOG: Record<AiBusinessTaskType, AiTemplateDefinitio
     type: 'due_diligence_report',
     skillName: 'write-due-diligence-report',
     label: '尽调报告',
-    description: '按公司尽调模板库的八章结构生成带来源、核验状态和资料缺口的商业尽调报告初稿',
+    description: '按公司尽调模板库的八章结构，结合项目资料与联网公开信息生成商业尽调报告初稿',
     outputFormat: 'docx',
-    templateVersion: 'dd-corpus-202607-v3',
+    templateVersion: 'dd-corpus-202607-v4-web-research',
     referencePath: docsPath('尽调报告', '佳量脑科学业务尽调报告6月.docx'),
     referencePaths: [
       docsPath('尽调报告', '3. 普雷赛斯尽调报告.pdf'),
@@ -130,18 +129,17 @@ export const AI_TEMPLATE_CATALOG: Record<AiBusinessTaskType, AiTemplateDefinitio
       docsPath('尽调报告', '蓝成应急尽调报告.pdf'),
     ],
     editableLevel: 'text-and-structure',
-    sections: ['投资概要', '公司概况', '股权结构及融资历程', '公司治理与管理团队', '行业概况与市场空间', '产业链与竞争格局', '产品与核心技术', '商业模式与经营情况', '财务分析', '客户与商业化进展', '法律合规与资质', '估值合理性分析', '投资方案', '投资亮点', '风险分析', '资料缺口与后续核验'],
+    sections: ['投资概要', '公司概况', '股权结构及融资历程', '公司治理与管理团队', '行业概况与市场空间', '产业链与竞争格局', '产品与核心技术', '商业模式与经营情况', '财务分析', '客户与商业化进展', '法律合规与资质', '估值合理性分析', '投资方案', '投资亮点', '风险分析', '后续核验事项'],
     requiredParameters: ['projectId', 'sourceCutoffDate', 'diligenceScope'],
-    disclaimer: '本报告为 AI 基于截至资料截止日已授权资料生成的尽调初稿，不表示尽调程序已经完成，不构成法律、财务或投资意见。',
+    disclaimer: '',
   },
   project_qa: {
     type: 'project_qa',
     skillName: 'answer-project-qa',
     label: '项目 Q&A',
-    description: '基于当前项目资料自动生成投资委员会或尽调 Q&A，经问题生成、去重、回答和 Reviewer 审核后输出 Word 与 PDF',
-    outputFormat: 'docx',
-    additionalOutputFormats: ['pdf'],
-    templateVersion: 'qa-core-rules-20260726-v5',
+    description: '结合当前项目资料与联网公开信息生成投资委员会或尽调 Q&A，经问题生成、去重、回答和内部审核后输出正式 PDF',
+    outputFormat: 'pdf',
+    templateVersion: 'qa-core-rules-20260727-v6',
     referencePath: docsPath('Q&A', '中数睿智项目Q&A.pdf'),
     coreRulesPath: docsPath('Q&A', 'Q&A模板核心规则.md'),
     referencePaths: [
@@ -170,7 +168,7 @@ export const AI_TEMPLATE_CATALOG: Record<AiBusinessTaskType, AiTemplateDefinitio
       '未来规划',
     ],
     requiredParameters: ['projectId', 'sourceCutoffDate', 'qaMode', 'questionDepth'],
-    disclaimer: '本文件由 AI 仅基于当前项目资料生成，并已执行重复、完整性、幻觉与引用检查；仅供内部投资研究或尽调使用，不构成正式法律、财务意见或最终投资决策。',
+    disclaimer: '本文件由 AI 基于当前项目资料及联网公开信息生成，仅供内部投资研究或尽调使用，不构成正式法律、财务意见或最终投资决策。',
   },
 }
 
@@ -188,7 +186,7 @@ export const AI_QA_TEMPLATE: AiQaTemplateDefinition = {
   categories: AI_TEMPLATE_CATALOG.project_qa.sections,
   outputMode: 'document-task',
   downloadableArtifact: true,
-  outputFormats: ['docx', 'pdf'],
+  outputFormats: ['pdf'],
 }
 
 export function assertAiTemplateReferences(
@@ -213,7 +211,8 @@ export function assertAiTemplateReferences(
 }
 
 export function listAiTaskTypes() {
-  return AI_TASK_TYPES.map((type) => {
+  return [
+    ...AI_TASK_TYPES.map((type) => {
     const item = AI_TEMPLATE_CATALOG[type]
     return {
       type: item.type,
@@ -230,9 +229,25 @@ export function listAiTaskTypes() {
         ...(item.additionalOutputFormats ?? []),
       ])],
     }
-  })
+    }),
+    {
+      type: 'custom_template_document',
+      label: '上传模板生成',
+      description: '分析用户上传模板的结构和各部分内容要求，并为当前项目创建全新文档',
+      outputFormat: 'dynamic',
+      companionFormats: [],
+      skillName: AI_TEMPLATE_DRIVEN_SKILL_NAME,
+      templateVersion: 'template-analysis-v1',
+      requiredParameters: ['projectId', 'sourceCutoffDate', 'customTemplateId'],
+      outputFormats: ['docx', 'pptx'],
+    },
+  ]
 }
 
 export function isAiBusinessTaskType(value: string): value is AiBusinessTaskType {
   return (AI_TASK_TYPES as readonly string[]).includes(value)
+}
+
+export function isAiExecutableTaskType(value: string): value is AiExecutableTaskType {
+  return value === 'custom_template_document' || isAiBusinessTaskType(value)
 }

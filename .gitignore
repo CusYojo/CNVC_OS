@@ -27,6 +27,8 @@ project-discovery/data/
 project-discovery/公众号来源.xlsx
 project-discovery/.venv/
 server/ai-artifacts/
+server/ai-template-data/
+server/ai-template-skills/
 .runtime/
 cybernaut-assistant/data/
 cybernaut-assistant/workspace/

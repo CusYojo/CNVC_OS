@@ -146,7 +146,7 @@ const DUE_DILIGENCE_OUTLINE = [
   { title: '行业和市场', modules: ['行业概况与市场空间', '产业链与竞争格局'] },
   { title: '未来发展规划', modules: ['财务分析'] },
   { title: '投资方案', modules: ['估值合理性分析', '投资方案', '投资亮点'] },
-  { title: '风险提示与对策', modules: ['风险分析', '资料缺口与后续核验'] },
+  { title: '风险提示与对策', modules: ['风险分析', '后续核验事项'] },
 ] as const
 
 const DUE_DILIGENCE_STYLES = {
@@ -275,6 +275,319 @@ function paragraph(value: string, options: {
   })
 }
 
+function customNumber(value: number | null | undefined, fallback: number, min: number, max: number) {
+  return Number.isFinite(value) ? Math.max(min, Math.min(max, Number(value))) : fallback
+}
+
+function customLineSpacing(value: string) {
+  const exact = value.match(/固定值\s*([\d.]+)\s*pt/i)
+  if (exact) return Math.round(Number(exact[1]) * 20)
+  const multiple = value.match(/([\d.]+)\s*倍/)
+  if (multiple) return Math.round(Number(multiple[1]) * 240)
+  return 360
+}
+
+function customPageProfile(template: AiTemplateDefinition) {
+  const analysis = template.customAnalysis
+  const pageValues = analysis?.formatProfile.pageSize.match(/([\d.]+)\s*[×x]\s*([\d.]+)\s*cm/i)
+  const marginValues = analysis?.formatProfile.margins.match(
+    /上\s*([\d.]+)\s*cm、下\s*([\d.]+)\s*cm、左\s*([\d.]+)\s*cm、右\s*([\d.]+)\s*cm/i,
+  )
+  const dxa = (cm: number) => Math.round(cm * 567)
+  return {
+    width: dxa(Number(pageValues?.[1]) || 21),
+    height: dxa(Number(pageValues?.[2]) || 29.7),
+    marginTop: dxa(Number(marginValues?.[1]) || 2.54),
+    marginBottom: dxa(Number(marginValues?.[2]) || 2.54),
+    marginLeft: dxa(Number(marginValues?.[3]) || 3.18),
+    marginRight: dxa(Number(marginValues?.[4]) || 3.18),
+  }
+}
+
+async function generateCustomTemplateDocx(input: {
+  outputPath: string
+  template: AiTemplateDefinition
+  project: ProjectLike
+  content: BusinessContent
+  sources: EvidenceSource[]
+  sourceCutoffDate: string
+}) {
+  const analysis = input.template.customAnalysis
+  if (!analysis || analysis.format !== 'docx') throw new Error('上传 Word 模板缺少格式分析')
+  const profile = analysis.formatProfile
+  const bodyFont = profile.primaryFont || DOCX_SONG_FONT
+  const headingFont = profile.headingFont || bodyFont
+  const bodySize = Math.round(customNumber(profile.bodySizePt, 12, 8, 24) * 2)
+  const headingSize = Math.round(customNumber(profile.headingSizePt, 16, 10, 34) * 2)
+  const titleSize = Math.round(customNumber(profile.titleSizePt, 22, 14, 48) * 2)
+  const line = customLineSpacing(profile.lineSpacing)
+  const page = customPageProfile(input.template)
+  const references = usedSourceGroups(input.content, input.sources)
+  const runFont = (font: string) => docxFont(font)
+  // 页眉页脚只继承样式，不复用上传模板中的可见文字。
+  const headerText = input.content.title
+  const footerText = input.project.name
+  const children: Array<Paragraph | Table> = [
+    new Paragraph({
+      alignment: AlignmentType.CENTER,
+      spacing: { before: 240, after: 360, line },
+      keepNext: true,
+      children: [new TextRun({
+        text: input.content.title,
+        font: runFont(headingFont),
+        size: titleSize,
+        bold: true,
+        color: profile.colors[0] || '000000',
+      })],
+    }),
+    new Paragraph({
+      spacing: { after: 280, line },
+      alignment: AlignmentType.JUSTIFIED,
+      children: [new TextRun({
+        text: input.content.executiveSummary,
+        font: runFont(bodyFont),
+        size: bodySize,
+        color: '000000',
+      })],
+    }),
+  ]
+  input.content.sections.forEach((section, index) => {
+    children.push(new Paragraph({
+      style: 'Heading1',
+      keepNext: true,
+      pageBreakBefore: index > 0 && analysis.structures[index]?.level === 1
+        && /第[一二三四五六七八九十\d]+[章节篇]|报告|方案/.test(section.title),
+      spacing: { before: 260, after: 160, line },
+      children: [new TextRun({
+        text: section.title,
+        font: runFont(headingFont),
+        size: headingSize,
+        bold: true,
+        color: profile.colors[0] || '000000',
+      })],
+    }))
+    children.push(new Paragraph({
+      spacing: { after: 160, line },
+      alignment: AlignmentType.JUSTIFIED,
+      children: [new TextRun({
+        text: section.summary,
+        font: runFont(bodyFont),
+        size: bodySize,
+        bold: true,
+        color: '000000',
+      })],
+    }))
+    section.findings.forEach((finding) => {
+      const refs = sourceText(finding.sourceIndexes, input.sources)
+      children.push(new Paragraph({
+        spacing: { after: 140, line },
+        indent: { firstLine: Math.round(bodySize * 10) },
+        alignment: AlignmentType.JUSTIFIED,
+        children: [
+          new TextRun({
+            text: `【${finding.status}】`,
+            font: runFont(bodyFont),
+            size: bodySize,
+            bold: true,
+            color: statusStyle[finding.status].color,
+          }),
+          new TextRun({
+            text: finding.text,
+            font: runFont(bodyFont),
+            size: bodySize,
+            color: '000000',
+          }),
+          ...(refs ? [new TextRun({
+            text: `\n${refs}`,
+            font: runFont(bodyFont),
+            size: Math.max(16, bodySize - 4),
+            color: '666666',
+          })] : []),
+        ],
+      }))
+    })
+    ;(section.tables ?? []).forEach((table) => {
+      const rows = [
+        new TableRow({
+          children: table.columns.map((column) => new TableCell({
+            shading: { fill: profile.colors[0] || 'E8E8E8' },
+            children: [new Paragraph({
+              alignment: AlignmentType.CENTER,
+              children: [new TextRun({
+                text: column,
+                bold: true,
+                color: profile.colors[0] ? 'FFFFFF' : '000000',
+                font: runFont(bodyFont),
+                size: Math.max(18, bodySize - 2),
+              })],
+            })],
+          })),
+        }),
+        ...table.rows.map((row) => new TableRow({
+          children: row.map((cell) => new TableCell({
+            children: [new Paragraph({
+              children: [new TextRun({
+                text: cell,
+                font: runFont(bodyFont),
+                size: Math.max(18, bodySize - 2),
+              })],
+            })],
+          })),
+        })),
+      ]
+      children.push(new Table({
+        width: { size: 100, type: WidthType.PERCENTAGE },
+        rows,
+      }))
+    })
+  })
+  children.push(
+    new Paragraph({
+      style: 'Heading1',
+      pageBreakBefore: true,
+      keepNext: true,
+      children: [new TextRun({
+        text: '引用资料与责任声明',
+        font: runFont(headingFont),
+        size: headingSize,
+        bold: true,
+        color: profile.colors[0] || '000000',
+      })],
+    }),
+  )
+  if (references.length) {
+    references.forEach((reference) => children.push(new Paragraph({
+      spacing: { after: 100, line },
+      children: [new TextRun({
+        text: bibliographyLine(reference),
+        font: runFont(bodyFont),
+        size: Math.max(18, bodySize - 2),
+        color: '444444',
+      })],
+    })))
+  } else {
+    children.push(new Paragraph({
+      children: [new TextRun({
+        text: '本文件仅列示正文实际使用且可定位的项目资料或公开来源。',
+        font: runFont(bodyFont),
+        size: bodySize,
+        color: '555555',
+      })],
+    }))
+  }
+  children.push(new Paragraph({
+    spacing: { before: 240, line },
+    border: { top: { style: BorderStyle.SINGLE, color: '888888', size: 6 } },
+    children: [new TextRun({
+      text: `${input.template.disclaimer} 资料截止日：${input.sourceCutoffDate}。`,
+      font: runFont(bodyFont),
+      size: Math.max(18, bodySize - 2),
+      color: '555555',
+    })],
+  }))
+  const doc = new Document({
+    creator: '浙江赛智伯乐股权投资管理有限公司投资中台',
+    title: input.content.title,
+    description: '依据当前项目资料及联网公开信息生成的 AI 初稿',
+    styles: {
+      default: {
+        document: {
+          run: { font: runFont(bodyFont), size: bodySize, color: '000000' },
+          paragraph: { spacing: { after: 140, line } },
+        },
+        heading1: {
+          run: { font: runFont(headingFont), size: headingSize, bold: true, color: profile.colors[0] || '000000' },
+          paragraph: { spacing: { before: 260, after: 160, line }, keepNext: true },
+        },
+      },
+    },
+    sections: [{
+      properties: {
+        page: {
+          size: { width: page.width, height: page.height },
+          margin: {
+            top: page.marginTop,
+            bottom: page.marginBottom,
+            left: page.marginLeft,
+            right: page.marginRight,
+            header: 720,
+            footer: 720,
+          },
+          pageNumbers: { start: 1 },
+        },
+      },
+      headers: headerText
+        ? {
+            default: new Header({
+              children: [new Paragraph({
+                alignment: AlignmentType.CENTER,
+                children: [new TextRun({
+                  text: headerText,
+                  font: runFont(bodyFont),
+                  size: Math.max(16, bodySize - 4),
+                })],
+              })],
+            }),
+          }
+        : undefined,
+      footers: {
+        default: new Footer({
+          children: [new Paragraph({
+            alignment: AlignmentType.CENTER,
+            children: [
+              ...(footerText ? [new TextRun({
+                text: `${footerText}　`,
+                font: runFont(bodyFont),
+                size: Math.max(16, bodySize - 4),
+              })] : []),
+              new TextRun({
+                children: [PageNumber.CURRENT],
+                font: runFont(bodyFont),
+                size: Math.max(16, bodySize - 4),
+              }),
+            ],
+          })],
+        }),
+      },
+      children,
+    }],
+  })
+  await writeFile(input.outputPath, await Packer.toBuffer(doc))
+  const [templateBuffer, generatedBuffer] = await Promise.all([
+    readFile(input.template.referencePath),
+    readFile(input.outputPath),
+  ])
+  const templateZip = await JSZip.loadAsync(templateBuffer)
+  const outputZip = await JSZip.loadAsync(generatedBuffer)
+  const appliedParts: string[] = []
+  for (const part of ['word/theme/theme1.xml', 'word/fontTable.xml']) {
+    const sourcePart = templateZip.file(part)
+    if (!sourcePart || !outputZip.file(part)) continue
+    outputZip.file(part, await sourcePart.async('nodebuffer'))
+    appliedParts.push(part)
+  }
+  await writeFile(input.outputPath, await outputZip.generateAsync({ type: 'nodebuffer' }))
+  return {
+    pageIntent: 'custom-template',
+    templateApplied: true,
+    templateSha256: createHash('sha256').update(templateBuffer).digest('hex'),
+    templateCorpus: [{
+      fileName: path.basename(input.template.referencePath),
+      sha256: createHash('sha256').update(templateBuffer).digest('hex'),
+    }],
+    templateParts: appliedParts,
+    typography: {
+      body: bodyFont,
+      heading: headingFont,
+      bodySizePt: bodySize / 2,
+      headingSizePt: headingSize / 2,
+      titleSizePt: titleSize / 2,
+      lineSpacing: profile.lineSpacing,
+    },
+    customStructureCount: input.template.sections.length,
+  }
+}
+
 export async function generateBusinessDocx(input: {
   outputPath: string
   template: AiTemplateDefinition
@@ -286,6 +599,9 @@ export async function generateBusinessDocx(input: {
   blueprint?: ComplianceDocumentBlueprint
 }) {
   await mkdir(path.dirname(input.outputPath), { recursive: true })
+  if (input.template.type === 'custom_template_document') {
+    return generateCustomTemplateDocx(input)
+  }
   if (String(input.template.type) === 'investment_proposal') {
     const generation = await generateInvestmentProposalDocx({
       outputPath: input.outputPath,
@@ -852,14 +1168,16 @@ export async function generateBusinessDocx(input: {
         if (!currentSection) return
         contentChildren.push(dueHeading(`${groupIndex + 1}.${moduleIndex + 1} ${moduleTitle}`, 2))
         if (group.title === '投资概要' && moduleTitle === '投资概要') {
-          contentChildren.push(overviewTable, dueSourceNote('资料来源：项目档案及本报告实际引用资料'))
+          contentChildren.push(
+            overviewTable,
+            dueSourceNote('资料基础：项目档案、项目资料及联网公开信息；来源明细保存在系统审计记录中。'),
+          )
         }
         contentChildren.push(dueBody(currentSection.summary, {
           bold: true,
           keepNext: currentSection.findings.length > 0,
         }))
         currentSection.findings.forEach((finding, findingIndex) => {
-          const refs = sourceText(finding.sourceIndexes, input.sources)
           contentChildren.push(new Paragraph({
             style: DUE_DILIGENCE_STYLES.body,
             keepNext: findingIndex < currentSection.findings.length - 1,
@@ -879,47 +1197,11 @@ export async function generateBusinessDocx(input: {
                 size: 28,
                 font: runFont(profile.bodyFont),
               }),
-              ...(refs
-                ? [new TextRun({
-                    text: `\n${refs}`,
-                    color: '555555',
-                    size: 21,
-                    font: runFont(profile.bodyFont),
-                  })]
-                : []),
             ],
           }))
         })
       })
     })
-
-    contentChildren.push(
-      new Paragraph({
-        spacing: { before: 240, after: 0, line: 300 },
-        border: { top: { color: '888888', size: 4, style: BorderStyle.SINGLE } },
-        children: [
-          new TextRun({
-            text: '责任声明：',
-            bold: true,
-            font: runFont(profile.bodyFont),
-            size: 21,
-            color: '000000',
-          }),
-          new TextRun({
-            text: input.template.disclaimer,
-            font: runFont(profile.bodyFont),
-            size: 21,
-            color: '555555',
-          }),
-        ],
-      }),
-      dueHeading('引用资料', 1, true, false),
-    )
-    if (references.length) {
-      references.forEach((source) => contentChildren.push(dueSourceNote(bibliographyLine(source))))
-    } else {
-      contentChildren.push(dueSourceNote('当前项目知识库无可用引用资料；所有实质性内容均需补证并人工核验。'))
-    }
   } else {
     input.content.sections.forEach((currentSection, sectionIndex) => {
       const shouldBreak = input.template.type === 'investment_proposal'
@@ -1366,6 +1648,354 @@ export async function generateBusinessDocx(input: {
   }
 }
 
+function customPptSize(template: AiTemplateDefinition) {
+  const match = template.customAnalysis?.formatProfile.pageSize.match(
+    /([\d.]+)\s*[×x]\s*([\d.]+)\s*in/i,
+  )
+  const width = customNumber(match ? Number(match[1]) : null, 13.333, 7.5, 20)
+  const height = customNumber(match ? Number(match[2]) : null, 7.5, 5.625, 15)
+  return { width, height }
+}
+
+function validHex(value: string | undefined, fallback: string) {
+  return value && /^[0-9A-F]{6}$/i.test(value) ? value.toUpperCase() : fallback
+}
+
+async function generateCustomTemplatePptx(input: {
+  outputPath: string
+  template: AiTemplateDefinition
+  project: ProjectLike
+  content: BusinessContent
+  sources: EvidenceSource[]
+  sourceCutoffDate: string
+  pageCount?: string
+}) {
+  const analysis = input.template.customAnalysis
+  if (!analysis || analysis.format !== 'pptx') throw new Error('上传 PPT 模板缺少格式分析')
+  const profile = analysis.formatProfile
+  const { width, height } = customPptSize(input.template)
+  const font = profile.primaryFont || PPT_FONT
+  const headingFont = profile.headingFont || font
+  const primary = validHex(profile.colors[0], '3E3AAE')
+  const secondary = validHex(profile.colors[1], '625FE7')
+  const pale = validHex(profile.colors.find((color) => /^F/i.test(color)), 'F3F3FA')
+  const titleSize = customNumber(profile.titleSizePt, 30, 22, 42)
+  const headingSize = customNumber(profile.headingSizePt, 20, 16, 30)
+  const bodySize = customNumber(profile.bodySizePt, 12, 9, 18)
+  const pptx = new PptxGenJS()
+  pptx.defineLayout({ name: 'UPLOADED_TEMPLATE', width, height })
+  pptx.layout = 'UPLOADED_TEMPLATE'
+  pptx.author = '浙江赛智伯乐股权投资管理有限公司投资中台'
+  pptx.company = '浙江赛智伯乐股权投资管理有限公司'
+  pptx.subject = input.content.title
+  pptx.title = input.content.title
+  pptx.theme = { headFontFace: headingFont, bodyFontFace: font }
+  const references = usedSourceGroups(input.content, input.sources)
+  const marginX = width * 0.06
+  const contentWidth = width - marginX * 2
+  const footerY = height - 0.36
+  const addFooter = (slide: PptxGenJS.Slide, page: number, source = '') => {
+    slide.addShape(pptx.ShapeType.line, {
+      x: marginX,
+      y: footerY - 0.08,
+      w: contentWidth,
+      h: 0,
+      line: { color: secondary, width: 0.6, transparency: 35 },
+    })
+    const footerText = `${input.project.name}　|　资料截止：${input.sourceCutoffDate}`
+    slide.addText(`${footerText}${source ? `　|　来源：${source}` : ''}`, {
+      x: marginX,
+      y: footerY,
+      w: contentWidth - 0.6,
+      h: 0.18,
+      fontFace: font,
+      lang: 'zh-CN',
+      fontSize: Math.max(6.5, bodySize - 4),
+      color: '777777',
+      margin: 0,
+      fit: 'shrink',
+    })
+    slide.addText(String(page), {
+      x: width - marginX - 0.45,
+      y: footerY,
+      w: 0.45,
+      h: 0.18,
+      fontFace: font,
+      lang: 'zh-CN',
+      fontSize: Math.max(7, bodySize - 3),
+      color: '777777',
+      align: 'right',
+      margin: 0,
+    })
+  }
+  const addHeader = (slide: PptxGenJS.Slide, title: string, page: number, source = '') => {
+    slide.background = { color: 'FFFFFF' }
+    slide.addShape(pptx.ShapeType.rect, {
+      x: 0,
+      y: 0,
+      w: width,
+      h: Math.max(0.08, height * 0.018),
+      fill: { color: primary },
+      line: { transparency: 100 },
+    })
+    slide.addText(title, {
+      x: marginX,
+      y: height * 0.075,
+      w: contentWidth,
+      h: Math.max(0.36, height * 0.075),
+      fontFace: headingFont,
+      lang: 'zh-CN',
+      fontSize: headingSize,
+      bold: true,
+      color: primary,
+      margin: 0,
+      fit: 'shrink',
+    })
+    addFooter(slide, page, source)
+  }
+
+  const cover = pptx.addSlide()
+  cover.background = { color: 'FFFFFF' }
+  cover.addShape(pptx.ShapeType.rect, {
+    x: 0,
+    y: 0,
+    w: width,
+    h: height * 0.08,
+    fill: { color: primary },
+    line: { transparency: 100 },
+  })
+  cover.addShape(pptx.ShapeType.rect, {
+    x: 0,
+    y: height * 0.78,
+    w: width,
+    h: height * 0.22,
+    fill: { color: pale },
+    line: { transparency: 100 },
+  })
+  cover.addText(input.project.name, {
+    x: marginX,
+    y: height * 0.23,
+    w: contentWidth,
+    h: height * 0.13,
+    fontFace: headingFont,
+    lang: 'zh-CN',
+    fontSize: titleSize,
+    bold: true,
+    color: primary,
+    align: 'center',
+    valign: 'middle',
+    margin: 0,
+    fit: 'shrink',
+  })
+  cover.addText(input.content.title, {
+    x: marginX,
+    y: height * 0.41,
+    w: contentWidth,
+    h: height * 0.1,
+    fontFace: headingFont,
+    lang: 'zh-CN',
+    fontSize: Math.max(18, headingSize),
+    bold: true,
+    color: '222222',
+    align: 'center',
+    valign: 'middle',
+    margin: 0,
+    fit: 'shrink',
+  })
+  cover.addText(`资料截止：${input.sourceCutoffDate}\nAI 辅助初稿，仅限内部审核使用`, {
+    x: width * 0.25,
+    y: height * 0.6,
+    w: width * 0.5,
+    h: height * 0.09,
+    fontFace: font,
+    lang: 'zh-CN',
+    fontSize: bodySize,
+    color: '666666',
+    align: 'center',
+    margin: 0,
+    fit: 'shrink',
+  })
+
+  const requestedMax = Number.parseInt(String(input.pageCount || '20'), 10)
+  const maxSlides = Number.isFinite(requestedMax) ? Math.max(5, Math.min(requestedMax, 30)) : 20
+  const selectedSections = input.content.sections.slice(0, Math.max(1, maxSlides - 2))
+  selectedSections.forEach((section, index) => {
+    const slide = pptx.addSlide()
+    const sourceNames = uniqueBusinessSourceNames(section, input.sources)
+    addHeader(slide, section.title, index + 2, sourceNames.join('、'))
+    slide.addText(section.summary, {
+      x: marginX,
+      y: height * 0.18,
+      w: contentWidth,
+      h: height * 0.09,
+      fontFace: headingFont,
+      lang: 'zh-CN',
+      fontSize: Math.max(bodySize + 1.5, 11),
+      bold: true,
+      color: primary,
+      margin: 0.02,
+      fit: 'shrink',
+    })
+    const firstTable = section.tables?.[0]
+    if (firstTable?.rows.length && firstTable.columns.length >= 2) {
+      slide.addTable([
+        firstTable.columns.map((column) => ({
+          text: column,
+          options: { bold: true, color: 'FFFFFF', fill: { color: primary } },
+        })),
+        ...firstTable.rows.slice(0, 8).map((row) =>
+          row.map((cell) => ({ text: cell, options: { color: '222222' } }))),
+      ], {
+        x: marginX,
+        y: height * 0.32,
+        w: contentWidth,
+        h: height * 0.48,
+        border: { type: 'solid', color: secondary, pt: 0.7 },
+        fontFace: font,
+        lang: 'zh-CN',
+        fontSize: Math.max(8, bodySize - 1),
+        margin: 0.08,
+        valign: 'middle',
+        breakLine: false,
+      })
+      return
+    }
+    const findings = section.findings.slice(0, 5)
+    const availableHeight = height * 0.54
+    const rowHeight = availableHeight / Math.max(1, findings.length)
+    findings.forEach((finding, findingIndex) => {
+      const y = height * 0.31 + findingIndex * rowHeight
+      const findingStyle = statusStyle[finding.status]
+      slide.addShape(pptx.ShapeType.roundRect, {
+        x: marginX,
+        y,
+        w: Math.max(1.05, width * 0.09),
+        h: Math.min(0.34, rowHeight * 0.4),
+        rectRadius: 0.04,
+        fill: { color: findingStyle.fill },
+        line: { color: findingStyle.color, width: 0.6 },
+      })
+      slide.addText(finding.status, {
+        x: marginX + 0.05,
+        y: y + 0.07,
+        w: Math.max(0.95, width * 0.08),
+        h: 0.16,
+        fontFace: font,
+        lang: 'zh-CN',
+        fontSize: Math.max(7, bodySize - 3),
+        bold: true,
+        color: findingStyle.color,
+        align: 'center',
+        margin: 0,
+        fit: 'shrink',
+      })
+      slide.addText(finding.text, {
+        x: marginX + Math.max(1.3, width * 0.105),
+        y: y - 0.01,
+        w: contentWidth - Math.max(1.3, width * 0.105),
+        h: Math.max(0.4, rowHeight * 0.62),
+        fontFace: font,
+        lang: 'zh-CN',
+        fontSize: bodySize,
+        color: '222222',
+        margin: 0.02,
+        fit: 'shrink',
+        valign: 'top',
+      })
+    })
+  })
+
+  const referencesSlide = pptx.addSlide()
+  addHeader(referencesSlide, '引用资料与责任声明', selectedSections.length + 2)
+  const referenceLines = references.length
+    ? references.slice(0, 16).map((reference) => bibliographyLine(reference))
+    : ['本页仅列示正文实际使用且可定位的项目资料或公开来源。']
+  referencesSlide.addText(referenceLines.map((line) => ({
+    text: line,
+    options: { bullet: { indent: 14 }, breakLine: true },
+  })), {
+    x: marginX,
+    y: height * 0.2,
+    w: contentWidth,
+    h: height * 0.48,
+    fontFace: font,
+    lang: 'zh-CN',
+    fontSize: Math.max(8.5, bodySize - 1),
+    color: '222222',
+    margin: 0.03,
+    fit: 'shrink',
+    breakLine: false,
+    paraSpaceAfter: 7,
+  })
+  referencesSlide.addShape(pptx.ShapeType.rect, {
+    x: marginX,
+    y: height * 0.73,
+    w: contentWidth,
+    h: height * 0.1,
+    fill: { color: pale },
+    line: { color: secondary, width: 0.6 },
+  })
+  referencesSlide.addText(input.template.disclaimer, {
+    x: marginX + 0.2,
+    y: height * 0.755,
+    w: contentWidth - 0.4,
+    h: height * 0.05,
+    fontFace: font,
+    lang: 'zh-CN',
+    fontSize: Math.max(8, bodySize - 1.5),
+    color: '555555',
+    align: 'center',
+    margin: 0,
+    fit: 'shrink',
+  })
+  await pptx.writeFile({ fileName: input.outputPath })
+  const templateBuffer = await readFile(input.template.referencePath)
+  const outputZip = await JSZip.loadAsync(await readFile(input.outputPath))
+  for (const slidePart of Object.keys(outputZip.files).filter((name) => /^ppt\/slides\/slide\d+\.xml$/.test(name))) {
+    const slideFile = outputZip.file(slidePart)
+    if (!slideFile) continue
+    outputZip.file(
+      slidePart,
+      (await slideFile.async('string'))
+        .replace(/lang="en-US"/g, 'lang="zh-CN"')
+        .replace(/Arial Unicode MS/g, font),
+    )
+  }
+  const themePart = outputZip.file('ppt/theme/theme1.xml')
+  if (themePart) {
+    outputZip.file(
+      'ppt/theme/theme1.xml',
+      (await themePart.async('string'))
+        .replace(/<a:ea typeface="[^"]*"\s*\/>/g, `<a:ea typeface="${font}"/>`)
+        .replace(/Arial Unicode MS/g, font),
+    )
+  }
+  await writeFile(input.outputPath, await outputZip.generateAsync({ type: 'nodebuffer' }))
+  return {
+    slideCount: selectedSections.length + 2,
+    editableLevel: 'core-elements',
+    templateApplied: true,
+    templateSha256: createHash('sha256').update(templateBuffer).digest('hex'),
+    inheritedCompanyAssets: 0,
+    cjkFont: font,
+    cjkLanguage: 'zh-CN',
+    customCanvas: { width, height },
+    customStructureCount: input.template.sections.length,
+  }
+}
+
+function uniqueBusinessSourceNames(
+  section: BusinessContent['sections'][number],
+  sources: EvidenceSource[],
+) {
+  return [...new Set(
+    section.findings
+      .flatMap((finding) => finding.sourceIndexes)
+      .map((index) => sources[index]?.sourceName)
+      .filter((value): value is string => Boolean(value)),
+  )]
+}
+
 export async function generateBusinessPptx(input: {
   outputPath: string
   template: AiTemplateDefinition
@@ -1376,6 +2006,9 @@ export async function generateBusinessPptx(input: {
   pageCount?: string
 }) {
   await mkdir(path.dirname(input.outputPath), { recursive: true })
+  if (input.template.type === 'custom_template_document') {
+    return generateCustomTemplatePptx(input)
+  }
   const templateBuffer = await readFile(input.template.referencePath)
   const templateZip = await JSZip.loadAsync(templateBuffer)
   const asDataUri = async (part: string, mime: string) => {
@@ -1668,11 +2301,64 @@ export async function generateBusinessPptxPreview(input: {
   sourceCutoffDate: string
 }) {
   await mkdir(path.dirname(input.outputPath), { recursive: true })
+  const customCanvas = input.template.type === 'custom_template_document'
+    ? customPptSize(input.template)
+    : undefined
   const width = 1600
-  const height = 900
+  const height = customCanvas
+    ? Math.round(width * customCanvas.height / customCanvas.width)
+    : 900
   const canvas = createCanvas(width, height)
   const context = canvas.getContext('2d')
-  const fontStack = `"${PPT_FALLBACK_FONT}", "Hiragino Sans GB", sans-serif`
+  const customProfile = input.template.customAnalysis?.formatProfile
+  const previewFont = customProfile?.primaryFont || PPT_FALLBACK_FONT
+  const fontStack = `"${previewFont}", "Hiragino Sans GB", sans-serif`
+  if (input.template.type === 'custom_template_document') {
+    const primary = validHex(customProfile?.colors[0], '3E3AAE')
+    const pale = validHex(customProfile?.colors.find((color) => /^F/i.test(color)), 'F3F3FA')
+    context.fillStyle = '#FFFFFF'
+    context.fillRect(0, 0, width, height)
+    context.fillStyle = `#${primary}`
+    context.fillRect(0, 0, width, Math.max(10, height * 0.08))
+    context.fillStyle = `#${pale}`
+    context.fillRect(0, height * 0.78, width, height * 0.22)
+    context.textAlign = 'center'
+    context.fillStyle = `#${primary}`
+    context.font = `700 ${Math.round(height * 0.068)}px ${fontStack}`
+    drawWrappedText(
+      context,
+      input.project.name,
+      width / 2,
+      height * 0.31,
+      width * 0.78,
+      height * 0.08,
+      2,
+    )
+    context.fillStyle = '#222222'
+    context.font = `700 ${Math.round(height * 0.047)}px ${fontStack}`
+    drawWrappedText(
+      context,
+      input.content.title,
+      width / 2,
+      height * 0.5,
+      width * 0.72,
+      height * 0.06,
+      2,
+    )
+    context.fillStyle = '#666666'
+    context.font = `400 ${Math.round(height * 0.026)}px ${fontStack}`
+    context.fillText(`资料截止：${input.sourceCutoffDate}`, width / 2, height * 0.67)
+    await writeFile(input.outputPath, canvas.toBuffer('image/png'))
+    return {
+      width,
+      height,
+      previewSlide: 1,
+      templateApplied: true,
+      inheritedCompanyAssets: 0,
+      cjkFont: previewFont,
+      customTemplate: true,
+    }
+  }
   const templateZip = await JSZip.loadAsync(await readFile(input.template.referencePath))
 
   context.fillStyle = '#FFFFFF'
@@ -1713,8 +2399,16 @@ export async function generateBusinessPptxPreview(input: {
   }
 }
 
-export function makeArtifactFileName(projectName: string, template: AiTemplateDefinition, timestamp = Date.now()) {
-  return `${safeName(projectName)}_${template.label}_${timestamp}.${template.outputFormat}`
+export function makeArtifactFileName(
+  projectName: string,
+  template: AiTemplateDefinition,
+  timestamp = Date.now(),
+  generatedTitle?: string,
+) {
+  const documentName = template.type === 'custom_template_document' && generatedTitle
+    ? generatedTitle
+    : template.label
+  return `${safeName(projectName)}_${safeName(documentName)}_${timestamp}.${template.outputFormat}`
 }
 
 export function renderBusinessMarkdown(input: {

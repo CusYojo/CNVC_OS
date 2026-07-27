@@ -261,13 +261,16 @@ export async function exportAndReviewInvestmentProposalPdf(input: {
   const fixedBlocks = [
     input.blueprint.fixedBlocks.salutation,
     input.blueprint.fixedBlocks.authorization,
-    '免责声明',
-    input.blueprint.fixedBlocks.finalSectionTitle,
-    input.template.disclaimer,
+    input.blueprint.fixedBlocks.managementCompany,
   ]
   const fixedBlocksValidated = fixedBlocks.every((value) => compactPdf.includes(compact(value)))
   if (!fixedBlocksValidated) {
-    issues.push({ code: 'PDF_FIXED_BLOCK_MISSING', message: 'PDF 缺少 Word 中的固定说明、免责声明或引用资料' })
+    issues.push({ code: 'PDF_FIXED_BLOCK_MISSING', message: 'PDF 缺少 Word 中的固定说明或机构落款' })
+  }
+  const forbiddenFooterBlocks = ['免责声明', '引用资料', input.template.disclaimer]
+    .filter(Boolean)
+  if (forbiddenFooterBlocks.some((value) => compactPdf.includes(compact(value)))) {
+    issues.push({ code: 'PDF_FORBIDDEN_FOOTER_BLOCK', message: 'PDF 文末不得生成免责声明或引用资料板块' })
   }
   const claims = input.content.sections.flatMap((section) =>
     section.findings.map((finding) => finding.text))
@@ -279,7 +282,7 @@ export async function exportAndReviewInvestmentProposalPdf(input: {
     input.content.title,
     input.blueprint.fixedBlocks.salutation,
     ...input.blueprint.sections.map((section) => section.title),
-    input.blueprint.fixedBlocks.finalSectionTitle,
+    input.blueprint.fixedBlocks.managementCompany,
   ]
   const docxAnchorsValid = sourceAnchors.every((value) => compactDocx.includes(compact(value)))
   const textValidated = pdfText.trim().length >= Math.min(500, compactDocx.length)

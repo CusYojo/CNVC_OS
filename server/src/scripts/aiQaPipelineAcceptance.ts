@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -9,7 +10,7 @@ import {
 } from '../services/aiQaDocumentService.js'
 import {
   PROJECT_QA_DOCUMENT_CATEGORIES,
-  QA_NO_DATA,
+  PROJECT_QA_QUESTION_COUNTS,
   buildProjectQaDocumentContent,
   checkDuplicateQuestions,
   generateProjectQaAnswers,
@@ -19,6 +20,10 @@ import {
 import { loadAiSkill } from '../services/aiSkillService.js'
 import { AI_QA_TEMPLATE, AI_TEMPLATE_CATALOG } from '../services/aiTemplateCatalog.js'
 import { parseQaTemplateCorpus } from '../services/aiQaTemplateParser.js'
+import {
+  buildQaWebSearchQueries,
+  collectQaPublicEvidence,
+} from '../services/aiQaWebResearchService.js'
 import type { EvidenceSource } from '../services/aiBusinessContentService.js'
 
 type Check = { name: string; passed: boolean; detail: string }
@@ -78,6 +83,38 @@ async function main() {
     market: '目标客户为中大型企业，市场规模测算资料待补充。',
     team: '核心团队由产品、研发和行业销售人员组成，详细履历待补充。',
   }
+  const webQueries = buildQaWebSearchQueries(project)
+  assert(
+    '阶段3 Public Web Research：覆盖十个公开信息主题',
+    webQueries.length === 10
+      && ['企业介绍', '产品能力', '团队', '市场', '竞争', '客户', '商业模式', '融资', '合规', '未来规划']
+        .every((category) => webQueries.some((query) => query.category === category)),
+    webQueries.map((query) => query.topic).join('、'),
+  )
+  const mockWebResearch = await collectQaPublicEvidence({
+    project,
+    sourceCutoffDate: '2026-07-25',
+    now: new Date('2026-07-25T08:00:00Z'),
+  }, async (request) => {
+    const requestUrl = new URL(String(request))
+    const query = requestUrl.searchParams.get('q') ?? ''
+    return new Response(JSON.stringify({
+      results: [{
+        title: `自动验收公开资料｜${query.slice(0, 20)}`,
+        content: '公开页面披露了与本次检索主题直接相关的公司、产品或行业信息，具体事实需回到原页面交叉核验。',
+        url: `https://example.com/research/${createHash('sha256').update(query).digest('hex').slice(0, 12)}`,
+        publishedDate: '2026-07-20',
+      }],
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+  })
+  assert(
+    '阶段3 Public Web Research：公开结果与检索审计均进入内部证据',
+    mockWebResearch.successfulQueries === 10
+      && mockWebResearch.failedQueries === 0
+      && mockWebResearch.sources.some((source) => source.sourceType === 'public_web')
+      && mockWebResearch.sources.some((source) => source.sourceType === 'public_web_search_audit'),
+    `${mockWebResearch.successfulQueries}/${mockWebResearch.attemptedQueries}，${mockWebResearch.sources.length} 条`,
+  )
   const sources: EvidenceSource[] = [
     {
       sourceType: 'project_record',
@@ -139,10 +176,10 @@ async function main() {
     skill,
   })
   assert(
-    '阶段3 Question Generator：十五分类完整',
-    duplicateCheck.questions.length === 15
-      && PROJECT_QA_DOCUMENT_CATEGORIES.every((category) =>
-        duplicateCheck.questions.some((question) => question.category === category)),
+    '阶段3 Question Generator：标准版动态选取七个高价值问题',
+    duplicateCheck.questions.length === PROJECT_QA_QUESTION_COUNTS.标准版
+      && new Set(duplicateCheck.questions.map((question) => question.category)).size
+        === duplicateCheck.questions.length,
     `${duplicateCheck.questions.length} 题`,
   )
   assert(
@@ -160,10 +197,8 @@ async function main() {
     skill,
   })
   assert(
-    '阶段3 Question Generator：深度版每类两题且无重复',
-    deepDuplicateCheck.questions.length === 30
-      && PROJECT_QA_DOCUMENT_CATEGORIES.every((category) =>
-        deepDuplicateCheck.questions.filter((question) => question.category === category).length === 2)
+    '阶段3 Question Generator：深度版动态选取十题且无重复',
+    deepDuplicateCheck.questions.length === PROJECT_QA_QUESTION_COUNTS.深度版
       && checkDuplicateQuestions(deepDuplicateCheck.questions).removed.length === 0,
     `${deepDuplicateCheck.questions.length} 题`,
   )
@@ -183,10 +218,13 @@ async function main() {
     skill,
   })
   assert(
-    '阶段4 Answer Generator：每题均有回答，缺资料使用标准短语',
+    '阶段4 Answer Generator：每题均有回答且不使用占位式无资料短语',
     reviewed.answers.length === duplicateCheck.questions.length
       && reviewed.answers.every((answer) =>
-        answer.answer === QA_NO_DATA || answer.sourceIndexes.length > 0),
+        answer.answer.length > 20
+        && !/暂无相关资料|暂无资料|无相关资料/.test(answer.answer)
+        && !/检索式|Q&A 分类|公开检索记录/.test(answer.answer)
+        && (answer.sourceIndexes.length > 0 || answer.confidenceStatus === '证据不足')),
     `${reviewed.answers.length} 个回答 / ${reviewed.review.dataGapCount} 个资料缺口`,
   )
   const productAnswer = reviewed.answers.find((answer) => answer.category === '产品能力')
@@ -212,12 +250,14 @@ async function main() {
     skill,
   })
   assert(
-    '阶段4 Answer Generator：无证据时全部 Fail Closed',
+    '阶段4 Answer Generator：无证据时形成具体核验结论',
     noEvidenceAnswers.every((answer) =>
-      answer.answer === QA_NO_DATA
+      answer.confidenceStatus === '证据不足'
+      && answer.answer.includes('现阶段无法形成确定结论')
+      && !/暂无相关资料|暂无资料|无相关资料/.test(answer.answer)
       && answer.sourceIndexes.length === 0
       && answer.supportingQuotes.length === 0),
-    `${noEvidenceAnswers.filter((answer) => answer.answer === QA_NO_DATA).length}/${noEvidenceAnswers.length}`,
+    `${noEvidenceAnswers.filter((answer) => answer.confidenceStatus === '证据不足').length}/${noEvidenceAnswers.length}`,
   )
 
   const content = buildProjectQaDocumentContent({
@@ -246,14 +286,14 @@ async function main() {
   await convertProjectQaDocxToPdf({ docxPath, pdfPath })
   const pdfReview = await inspectProjectQaPdf(pdfPath)
   assert(
-    '阶段5 Document Generator：Word 结构与 OpenXML 通过',
+    '阶段5 Formatter：内部排版中间件结构与 OpenXML 通过',
     docxReview.qualityStatus === 'passed'
-      && docxReview.metadata.questionCount === 15
+      && docxReview.metadata.questionCount === PROJECT_QA_QUESTION_COUNTS.标准版
       && docxReview.metadata.categoryCount === 15,
     JSON.stringify(docxReview.metadata),
   )
   assert(
-    '阶段5 PDF Export：PDF 有效且来自同一 Word',
+    '阶段5 PDF Export：正式 PDF 有效且来自同源排版中间件',
     pdfReview.qualityStatus === 'passed'
       && pdfReview.metadata.bytes > 2000
       && pdfReview.metadata.cjkFontEmbedded,
@@ -265,7 +305,6 @@ async function main() {
     passed: checks.every((check) => check.passed),
     checks,
     outputDir,
-    docxPath,
     pdfPath,
     templateCorpusSha256: profile.corpusSha256,
     skillVersion: skill.version,

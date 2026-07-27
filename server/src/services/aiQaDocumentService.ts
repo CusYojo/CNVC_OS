@@ -20,8 +20,6 @@ import JSZip from 'jszip'
 import type { EvidenceSource } from './aiBusinessContentService.js'
 import {
   PROJECT_QA_DOCUMENT_CATEGORIES,
-  QA_NO_DATA,
-  usedProjectQaSourceIndexes,
   type ProjectQaDocumentContent,
   type ProjectQaDraftAnswer,
 } from './aiQaPipelineService.js'
@@ -97,18 +95,6 @@ async function resolveQaFontconfigFile(soffice: string) {
     }
   }
   return undefined
-}
-
-function sourceMarkers(answer: ProjectQaDraftAnswer) {
-  return answer.sourceIndexes.map((index) => `[S${index + 1}]`).join(' ')
-}
-
-function bibliographyLine(source: EvidenceSource, index: number) {
-  const locator = Number.isInteger(source.chunkIndex)
-    ? `知识片段 ${source.chunkIndex}`
-    : '文件级定位'
-  const date = source.versionOrDate ? `；版本/日期 ${source.versionOrDate}` : ''
-  return `[S${index + 1}] ${source.sourceName}；${locator}${date}`
 }
 
 function bodyParagraph(value: string, options: {
@@ -192,29 +178,22 @@ function dimensionParagraph(value: string) {
 }
 
 function answerParagraphs(answer: ProjectQaDraftAnswer) {
-  const marker = sourceMarkers(answer)
   const paragraphs = answer.answer
     .split(/\n+/)
     .map((line) => line.trim())
     .filter(Boolean)
-  if (!paragraphs.length) paragraphs.push(QA_NO_DATA)
+  if (!paragraphs.length) {
+    paragraphs.push('现有证据不足以形成确定结论，需取得对应原件、明细数据或相关责任人访谈后判断。')
+  }
   const result = paragraphs.map((line, index) => {
-    const isFinal = index === paragraphs.length - 1
-    const paragraphText = `${line}${isFinal && marker ? ` ${marker}` : ''}`
-    if (index > 0) return dimensionParagraph(paragraphText)
-    return bodyParagraph(`答复：${paragraphText}`, {
+    if (index > 0) return dimensionParagraph(line)
+    return bodyParagraph(`答复：${line}`, {
       boldLead: '答复：',
-      keepNext: !isFinal,
+      keepNext: paragraphs.length > 1,
       firstLine: false,
-      color: line === QA_NO_DATA ? MUTED : '000000',
+      color: '000000',
     })
   })
-  if (answer.missingInformation.length) {
-    result.push(bodyParagraph(
-      `待补资料：${answer.missingInformation.join('；')}`,
-      { firstLine: false, color: MUTED, size: 19, after: 80 },
-    ))
-  }
   return result
 }
 
@@ -276,6 +255,9 @@ export async function generateProjectQaDocx(input: {
           size: 24,
           color: '000000',
         }),
+        // LibreOffice 对连续中文目录段落偶发把下一段接在同一视觉行；
+        // 显式行结束保证每个 Qn 独占一行起点。
+        new TextRun({ text: '', break: 1 }),
       ],
     }))
   })
@@ -287,7 +269,7 @@ export async function generateProjectQaDocx(input: {
       questionId: question.id,
       category: question.category,
       question: question.question,
-      answer: QA_NO_DATA,
+      answer: '本题回答生成异常，现阶段无法形成确定结论；需重新执行项目资料与公开信息核验。',
       sourceIndexes: [],
       supportingQuotes: [],
       confidenceStatus: '证据不足',
@@ -295,71 +277,10 @@ export async function generateProjectQaDocx(input: {
     }))
   })
 
-  const usedIndexes = usedProjectQaSourceIndexes(input.content.answers, input.sources.length)
-  children.push(
-    new Paragraph({
-      keepNext: true,
-      spacing: { before: 360, after: 160, line: 360 },
-      children: mixedTextRuns('引用资料', {
-        bold: true,
-        size: 28,
-        color: '000000',
-        cjkFont: HEADING_FONT,
-      }),
-    }),
-  )
-  if (usedIndexes.length) {
-    usedIndexes.forEach((index) => {
-      children.push(bodyParagraph(
-        bibliographyLine(input.sources[index], index),
-        { firstLine: false, size: 19, color: MUTED, after: 70 },
-      ))
-    })
-  } else {
-    children.push(bodyParagraph(
-      `当前项目无可用于回答的有效来源，全部问题均标注“${QA_NO_DATA}”`,
-      { firstLine: false, size: 20, color: MUTED },
-    ))
-  }
-
-  const review = input.content.review
-  children.push(
-    new Paragraph({
-      keepNext: true,
-      spacing: { before: 280, after: 120, line: 360 },
-      children: mixedTextRuns('Reviewer 审阅结果', {
-        bold: true,
-        size: 26,
-        color: '000000',
-        cjkFont: HEADING_FONT,
-      }),
-    }),
-    bodyParagraph(
-      `重复检查：输入 ${review.duplicateChecker.inputCount} 题，删除 ${review.duplicateChecker.removedCount} 题，输出 ${review.duplicateChecker.outputCount} 题。`,
-      { firstLine: false, size: 20 },
-    ),
-    bodyParagraph(
-      `完整性：${review.checks.allQuestionsAnswered ? '通过' : '未通过'}；幻觉检查：${review.checks.noUnsupportedClaims ? '通过' : '未通过'}；引用检查：${review.checks.citationsValid ? '通过' : '未通过'}；资料不足回答：${review.dataGapCount} 题。`,
-      { firstLine: false, size: 20 },
-    ),
-    bodyParagraph(
-      `模板解析：${input.templateProfile.files.length} 份 PDF；语料指纹 ${input.templateProfile.corpusSha256.slice(0, 16)}；版式 ${input.templateProfile.consensus.pageSize}/${input.templateProfile.consensus.colorMode}。`,
-      { firstLine: false, size: 18, color: MUTED },
-    ),
-    bodyParagraph(`责任声明：${input.disclaimer}`, {
-      boldLead: '责任声明：',
-      firstLine: false,
-      color: MUTED,
-      size: 18,
-      before: 120,
-      after: 0,
-    }),
-  )
-
   const doc = new Document({
     creator: 'Cybernaut Q&A Skill',
     title: input.content.title,
-    description: `${input.content.mode}，仅基于当前项目资料生成`,
+    description: `${input.content.mode}，基于当前项目资料及联网公开信息生成`,
     numbering: {
       config: [{
         reference: 'qa-real-numbering',
@@ -491,8 +412,19 @@ export async function inspectProjectQaDocx(
   if (new Set(questionLabels).size < expected.questionCount) {
     throw new Error(`Q&A DOCX 问题数量不足：${new Set(questionLabels).size}/${expected.questionCount}`)
   }
-  if (!visibleText.includes('引用资料') || !visibleText.includes('Reviewer 审阅结果')) {
-    throw new Error('Q&A DOCX 缺少引用资料或 Reviewer 审阅结果')
+  const forbiddenVisibleTerms = [
+    '暂无相关资料',
+    '引用资料',
+    'Reviewer 审阅结果',
+    '模板解析',
+    '语料指纹',
+    '检索式：',
+    'Q&A 分类：',
+    '公开检索记录',
+  ]
+  const leakedTerm = forbiddenVisibleTerms.find((term) => visibleText.includes(term))
+  if (leakedTerm || /\[S\d+\]/.test(visibleText)) {
+    throw new Error(`Q&A 正文泄露禁止展示的审计或占位内容：${leakedTerm ?? '来源编号'}`)
   }
   return {
     qualityStatus: 'passed' as const,
@@ -503,8 +435,8 @@ export async function inspectProjectQaDocx(
       encodingClean: true,
       categoryCount: expected.categoryCount,
       questionCount: expected.questionCount,
-      referencesValidated: true,
-      reviewerValidated: true,
+      visibleAuditAppendixAbsent: true,
+      placeholderAnswerAbsent: true,
     },
   }
 }

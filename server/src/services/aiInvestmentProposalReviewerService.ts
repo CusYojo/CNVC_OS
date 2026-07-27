@@ -153,6 +153,17 @@ function reviewFinding(input: {
     })
   }
   if (
+    validIndexes.length > 0
+    && validIndexes.every((index) => sources[index]?.sourceType.startsWith('public_web'))
+    && finding.status !== '待核验'
+  ) {
+    issue(issues, {
+      ...location,
+      code: 'PUBLIC_WEB_REQUIRES_VERIFICATION',
+      message: `${section.title}仅由联网公开信息支持，证据状态必须为“待核验”`,
+    })
+  }
+  if (
     validIndexes.length === 0
     && finding.status !== '资料缺口'
     && !finding.text.startsWith(CURRENT_PROJECT_NO_DATA)
@@ -239,6 +250,17 @@ function reviewTable(input: {
     Number.isInteger(index) && index >= 0 && index < sources.length)
   if (!validIndexes.length) {
     issue(issues, { ...location, code: 'TABLE_CITATION_REQUIRED', message: `${section.title}表格必须引用当前项目证据` })
+  }
+  if (
+    validIndexes.length > 0
+    && validIndexes.every((index) => sources[index]?.sourceType.startsWith('public_web'))
+    && table.status !== '待核验'
+  ) {
+    issue(issues, {
+      ...location,
+      code: 'PUBLIC_WEB_TABLE_REQUIRES_VERIFICATION',
+      message: `${section.title}表格仅由联网公开信息支持，证据状态必须为“待核验”`,
+    })
   }
   if (allowedSourceIndexes && validIndexes.some((index) => !allowedSourceIndexes.has(index))) {
     issue(issues, {
@@ -336,17 +358,17 @@ export function reviewInvestmentProposalContent(input: {
       return
     }
     if (coverageBySection.get(definition.id) === 'missing') {
-      const safe = sectionValue.findings.length === 1
-        && sectionValue.findings[0].status === '资料缺口'
-        && sectionValue.findings[0].text.startsWith(CURRENT_PROJECT_NO_DATA)
-        && sectionValue.findings[0].sourceIndexes.length === 0
-      if (!safe) {
-        issue(issues, {
-          sectionId: definition.id,
-          code: 'MISSING_EVIDENCE_MUST_DISCLOSE',
-          message: `章节“${definition.title}”没有 Evidence，必须明确写“${CURRENT_PROJECT_NO_DATA}”`,
-        })
-      }
+      issue(issues, {
+        sectionId: definition.id,
+        code: 'MISSING_EVIDENCE_RESEARCH_REQUIRED',
+        message: `章节“${definition.title}”既没有项目证据，也没有联网检索记录，不得生成资料缺口文档`,
+      })
+    } else if (sectionValue.findings.every((finding) => finding.status === '资料缺口')) {
+      issue(issues, {
+        sectionId: definition.id,
+        code: 'EVIDENCE_AVAILABLE_BUT_MISSING',
+        message: `章节“${definition.title}”已有项目或联网证据，不得仍输出资料缺口`,
+      })
     }
     sectionValue.findings.forEach((finding, findingIndex) => {
       reviewFinding({
@@ -439,41 +461,6 @@ export function reviewInvestmentProposalContent(input: {
         !definition.container && coverageBySection.get(definition.id) === 'missing').length,
     },
   }
-}
-
-export function repairInvestmentProposalContent(input: {
-  content: BusinessContent
-  review: InvestmentProposalReviewResult
-  blueprint: InvestmentProposalDocumentBlueprint
-}) {
-  const failingSections = new Set(
-    input.review.issues
-      .filter((item) => item.severity === 'error' && item.sectionId)
-      .map((item) => item.sectionId!),
-  )
-  const byTitle = new Map(input.content.sections.map((section) => [section.title, section]))
-  const sections = input.blueprint.sections.map((definition): BusinessSection => {
-    if (definition.container) {
-      return { title: definition.title, summary: '', findings: [], tables: [] }
-    }
-    const existing = byTitle.get(definition.title)
-    if (!existing || failingSections.has(definition.id)) {
-      return safeInvestmentProposalSection(definition.title, definition.title)
-    }
-    return existing
-  })
-  const sectionValues = (title: string) =>
-    sections.find((section) => section.title === title)?.findings.map((finding) => finding.text) ?? []
-  return {
-    ...input.content,
-    sections,
-    highlights: sectionValues('四、项目亮点总结'),
-    risks: sectionValues('五、风险提示与对策'),
-    missing: sections
-      .flatMap((section) => section.findings)
-      .filter((finding) => finding.status === '资料缺口')
-      .map((finding) => finding.text),
-  } satisfies BusinessContent
 }
 
 export function reviewIssuesForPrompt(review: InvestmentProposalReviewResult) {

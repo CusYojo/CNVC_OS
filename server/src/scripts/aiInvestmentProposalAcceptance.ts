@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
-import { mkdir } from 'node:fs/promises'
+import { mkdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
+import JSZip from 'jszip'
 import type {
   BusinessContent,
   BusinessSection,
@@ -25,6 +26,9 @@ import {
 import {
   reviewInvestmentProposalContent,
 } from '../services/aiInvestmentProposalReviewerService.js'
+import {
+  collectDueDiligencePublicEvidence,
+} from '../services/aiDueDiligenceResearchService.js'
 import { loadAiSkill } from '../services/aiSkillService.js'
 import { AI_TEMPLATE_CATALOG } from '../services/aiTemplateCatalog.js'
 
@@ -72,6 +76,35 @@ const sources: EvidenceSource[] = leafDefinitions.map((definition, index) => {
   }
 })
 const evidencePlan = buildInvestmentProposalEvidencePlan(sources, blueprint)
+const publicResearch = await collectDueDiligencePublicEvidence({
+  projectName: '星河机器人项目',
+  companyName: '星河机器人有限公司',
+  industry: '具身智能机器人',
+  sourceCutoffDate: '2026-07-20',
+  purpose: 'investment_proposal',
+  maxSources: 60,
+}, async (input) => {
+  const requestUrl = new URL(String(input))
+  const query = requestUrl.searchParams.get('q') || '投资提案公开检索'
+  const slug = encodeURIComponent(query.slice(0, 48))
+  return new Response(JSON.stringify({
+    results: [{
+      title: `${query.slice(0, 20)}公开信息`,
+      content: `公开页面记载与“${query}”有关的基础信息；该摘要仅用于验收联网证据进入章节生成，并须回到原网页交叉核验。`,
+      url: `https://example.com/research/${slug}`,
+      publishedDate: '2026-07-19',
+    }],
+  }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+})
+assert.equal(publicResearch.attemptedQueries, 10)
+assert.equal(publicResearch.successfulQueries, 10)
+assert.equal(publicResearch.failedQueries, 0)
+assert.equal(
+  publicResearch.sources.filter((source) => source.sourceName.startsWith('公开检索记录｜')).length,
+  10,
+)
+assert.ok(publicResearch.sources.some((source) => source.sourceType === 'public_web'
+  && source.sourceId?.startsWith('https://example.com/research/')))
 const priorityPlan = buildInvestmentProposalEvidencePlan([
   {
     sourceType: 'project_record',
@@ -174,6 +207,38 @@ assert.equal(contentReview.checked.leafSectionCount, 14)
 assert.equal(contentReview.checked.leafSectionCount, leafDefinitions.length)
 assert.equal(evidencePlan.coverage.missingLeafSections, 0)
 
+const webOnlySources = structuredClone(sources)
+webOnlySources[0] = {
+  ...webOnlySources[0],
+  sourceType: 'public_web',
+  sourceId: 'https://example.com/company-profile',
+  sourceName: '公开信息｜星河机器人公司简介',
+}
+const webOnlyPlan = buildInvestmentProposalEvidencePlan(webOnlySources, blueprint)
+const publicWebAsFactReview = reviewInvestmentProposalContent({
+  content,
+  blueprint,
+  evidencePlan: webOnlyPlan,
+  sources: webOnlySources,
+  projectName: '星河机器人项目',
+  companyName: '星河机器人有限公司',
+})
+assert.equal(publicWebAsFactReview.passed, false)
+assert.ok(publicWebAsFactReview.issues.some((issue) =>
+  issue.code === 'PUBLIC_WEB_REQUIRES_VERIFICATION'))
+const pendingPublicWebContent = structuredClone(content)
+pendingPublicWebContent.sections.find((section) => section.title === '（一）公司简介')!
+  .findings[0].status = '待核验'
+const pendingPublicWebReview = reviewInvestmentProposalContent({
+  content: pendingPublicWebContent,
+  blueprint,
+  evidencePlan: webOnlyPlan,
+  sources: webOnlySources,
+  projectName: '星河机器人项目',
+  companyName: '星河机器人有限公司',
+})
+assert.equal(pendingPublicWebReview.passed, true, JSON.stringify(pendingPublicWebReview.issues, null, 2))
+
 const malicious = structuredClone(content)
 const firstLeaf = malicious.sections.find((section) => section.findings.length)!
 firstLeaf.findings[0].text += '未经证据支持的金额为9999万元。'
@@ -257,7 +322,8 @@ const missingReview = reviewInvestmentProposalContent({
   companyName: '星河机器人有限公司',
 })
 assert.ok(missingSection.findings[0].text.startsWith(CURRENT_PROJECT_NO_DATA))
-assert.equal(missingReview.passed, true, JSON.stringify(missingReview.issues, null, 2))
+assert.equal(missingReview.passed, false)
+assert.ok(missingReview.issues.some((issue) => issue.code === 'MISSING_EVIDENCE_RESEARCH_REQUIRED'))
 
 const docxPath = path.join(outputDirectory, '星河机器人项目投资提案-验收.docx')
 const pdfPath = path.join(outputDirectory, '星河机器人项目投资提案-验收.pdf')
@@ -282,6 +348,12 @@ const wordReview = await reviewInvestmentProposalDocx({
   projectName: '星河机器人项目',
 })
 assert.equal(wordReview.passed, true, JSON.stringify(wordReview.issues, null, 2))
+const docxZip = await JSZip.loadAsync(await readFile(docxPath))
+const documentXml = await docxZip.file('word/document.xml')!.async('string')
+assert.equal(documentXml.includes('免责声明'), false)
+assert.equal(documentXml.includes('引用资料'), false)
+assert.equal(documentXml.includes(template.disclaimer), false)
+assert.equal(documentXml.includes('资料来源：S'), false)
 
 const pdfReview = await exportAndReviewInvestmentProposalPdf({
   docxPath,
@@ -316,7 +388,10 @@ console.log(JSON.stringify({
     incompleteRiskRejected: true,
     unconditionalConclusionRejected: true,
     templateEvidenceRejected: true,
-    noDataDisclosurePassed: true,
+    publicResearchRequired: true,
+    publicWebForcedToPendingVerification: true,
+    noDataDocumentRejected: true,
+    disclaimerAndReferencesOmitted: true,
   },
   word: {
     path: docxPath,

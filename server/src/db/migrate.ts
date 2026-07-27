@@ -264,6 +264,28 @@ const STATEMENTS = [
   )`,
   `CREATE INDEX IF NOT EXISTS idx_ai_task_sources_task ON ai_task_sources(task_id)`,
   `CREATE INDEX IF NOT EXISTS idx_ai_task_sources_artifact ON ai_task_sources(artifact_id)`,
+  `CREATE TABLE IF NOT EXISTS ai_custom_templates (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    conversation_id UUID REFERENCES chat_conversations(id) ON DELETE SET NULL,
+    original_file_name VARCHAR(255) NOT NULL,
+    format VARCHAR(16) NOT NULL,
+    mime_type VARCHAR(128) NOT NULL,
+    file_size INTEGER NOT NULL,
+    sha256 VARCHAR(64) NOT NULL,
+    storage_path TEXT NOT NULL,
+    analysis JSONB NOT NULL,
+    skill_name VARCHAR(64) NOT NULL,
+    skill_path TEXT NOT NULL,
+    skill_version VARCHAR(64) NOT NULL,
+    status VARCHAR(16) NOT NULL DEFAULT 'succeeded',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_ai_custom_templates_user ON ai_custom_templates(user_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_ai_custom_templates_project ON ai_custom_templates(project_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_ai_custom_templates_conversation ON ai_custom_templates(conversation_id)`,
 ]
 
 export async function ensureSchema(): Promise<void> {

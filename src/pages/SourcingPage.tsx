@@ -1,4 +1,4 @@
-import { Bot, CheckCircle2, ExternalLink, FileSpreadsheet, FileUp, Globe2, RefreshCw, ShieldCheck, Sparkles, UploadCloud, UsersRound } from 'lucide-react'
+import { Bot, CheckCircle2, ExternalLink, FileSpreadsheet, FileUp, FolderInput, Globe2, RefreshCw, ShieldCheck, Sparkles, UploadCloud, UsersRound } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import { useEffect, useRef, useState } from 'react'
 import { useToast } from '../components/Toast'
@@ -123,6 +123,7 @@ export function SourcingPage() {
   const hydrateFromServer = useAppStore((state) => state.hydrateFromServer)
   const addLead = useAppStore((state) => state.addLead)
   const updateLead = useAppStore((state) => state.updateLead)
+  const convertLead = useAppStore((state) => state.convertLead)
   const [page, setPage] = useState(1)
   const [query, setQuery] = useState('')
   const [sort, setSort] = useState('')  // '' = 最新, 'score' = 按评分
@@ -131,6 +132,7 @@ export function SourcingPage() {
   const [filtering, setFiltering] = useState(false)
   const [debouncedQuery, setDebouncedQuery] = useState('')  // 关键词服务端检索(debounce 后)
   const [selected, setSelected] = useState<Lead | null>(null)
+  const [convertingLeadId, setConvertingLeadId] = useState<string | null>(null)
   const [detailTab, setDetailTab] = useState('overview')
   const scoringLeadIds = useAppStore((state) => state.scoringLeadIds) || []
   const startScoring = useAppStore((state) => state.startScoring)
@@ -215,6 +217,26 @@ export function SourcingPage() {
     // 完成后 store 已 merge 新 scoring 进 leads;若当前正看着这条,刷新 selected 展示
     const fresh = await fetchLeadDetail(lead.id)
     if (fresh) setSelected((prev) => (prev && prev.id === lead.id ? fresh : prev))
+  }
+
+  const convertSelectedLead = async () => {
+    if (!selected || selected.poolStatus === '已转专属项目') return
+    setConvertingLeadId(selected.id)
+    try {
+      const project = await convertLead(selected.id)
+      if (!project) {
+        showToast('该线索已转为我的专属项目', 'info')
+        return
+      }
+      setSelected((prev) => prev && prev.id === selected.id
+        ? { ...prev, poolStatus: '已转专属项目', convertedProjectId: project.id }
+        : prev)
+      showToast(`已将「${selected.name}」转为我的专属项目`, 'success')
+    } catch (error) {
+      showToast(`转为专属项目失败：${(error as Error).message}`, 'error')
+    } finally {
+      setConvertingLeadId(null)
+    }
   }
 
   const collectIntel = async () => {
@@ -422,7 +444,23 @@ export function SourcingPage() {
         <div className="mt-4 flex items-start gap-2 rounded-lg bg-brand-50 p-3 text-xs leading-5 text-brand-700"><Bot className="mt-0.5 h-4 w-4 shrink-0" />解析结果会先标记为“企业材料 / 待核验”。官网、监管、客户访谈等来源补齐后，才提升核验等级。</div>
       </Modal>
 
-      <Drawer open={!!selected} title={selected?.name ?? '公司情报'} onClose={() => setSelected(null)} width="w-[900px]" footer={selected && <Button variant="secondary" onClick={() => { updateLead(selected.id, { lastVerifiedAt: new Date().toISOString().slice(0, 10) }); showToast('已刷新核验时间；源数据未被无依据改写') }}><RefreshCw className="h-4 w-4" />刷新核验</Button>}>
+      <Drawer
+        open={!!selected}
+        title={selected?.name ?? '公司情报'}
+        onClose={() => setSelected(null)}
+        width="w-[900px]"
+        footer={selected && <>
+          <Button variant="secondary" onClick={() => { updateLead(selected.id, { lastVerifiedAt: new Date().toISOString().slice(0, 10) }); showToast('已刷新核验时间；源数据未被无依据改写') }}><RefreshCw className="h-4 w-4" />刷新核验</Button>
+          <Button
+            onClick={convertSelectedLead}
+            loading={convertingLeadId === selected.id}
+            disabled={selected.poolStatus === '已转专属项目' || convertingLeadId === selected.id}
+          >
+            <FolderInput className="h-4 w-4" />
+            {selected.poolStatus === '已转专属项目' ? '已转为我的专属项目' : '转为我的专属项目'}
+          </Button>
+        </>}
+      >
         {selected && <div>
           <div className="rounded-xl bg-brand-50 p-4"><div className="flex items-start justify-between"><div><div className="flex items-center gap-2"><Badge tone="blue">{selected.industry}</Badge><Badge tone={verificationTone(selected.verificationStatus)}>{selected.verificationStatus}</Badge><StatusBadge status={selected.status} /></div><p className="mt-3 max-w-[600px] truncate text-lg font-semibold text-slate-900" title={getLeadIdentity(selected).companySubject}>{getLeadIdentity(selected).companySubject}</p><p className="mt-1 max-w-[600px] truncate text-sm text-slate-500" title={getLeadIdentity(selected).projectName}>项目：{getLeadIdentity(selected).projectName}</p><p className="mt-1 text-sm text-slate-500">{selected.region} · {selected.round} · 更新于 {selected.lastVerifiedAt}</p></div><div className="text-right"><p className="text-3xl font-semibold text-brand-700">{selected.score}</p><p className="text-[10px] text-brand-500">AI 初筛分 · 非投决结论</p></div></div><p className="mt-4 text-sm leading-6 text-brand-900">{selected.summary}</p><div className="mt-3"><SourceLink url={selected.scoring?.officialSite && selected.scoring.officialSite !== '待核验' ? selected.scoring.officialSite : selected.website}>公司官网</SourceLink></div></div>
 

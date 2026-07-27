@@ -1,4 +1,4 @@
 interface:
   display_name: "生成尽调报告"
-  short_description: "按统一八章十六模块规范生成来源可追溯、可核验的商业尽调报告"
-  default_prompt: "使用 $write-due-diligence-report 根据项目数据、用户补充输入和授权证据，按统一核心规范起草中文商业尽调报告。"
+  short_description: "结合项目资料与联网公开信息生成八章十六模块商业尽调报告"
+  default_prompt: "使用 $write-due-diligence-report 根据项目资料、用户补充输入和联网公开信息起草中文商业尽调报告，未公开事项集中列入后续核验，正文不附免责声明或引用资料。"

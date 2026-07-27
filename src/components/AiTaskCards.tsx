@@ -70,6 +70,7 @@ const TASK_LABELS: Record<string, string> = {
   investment_recommendation_ppt: '投资建议书（PPT）',
   due_diligence_report: '尽调报告',
   project_qa: '项目 Q&A',
+  custom_template_document: '自定义模板文档',
 }
 
 function artifactQualityLabel(artifact: AiTaskArtifact) {
@@ -213,9 +214,10 @@ function TaskCard({
   const markdownArtifact = task.type === 'compliance_statement'
     ? task.artifacts?.find((artifact) => artifact.format.toLowerCase() === 'md')
     : undefined
-  const imageArtifact = task.type === 'investment_recommendation_ppt'
-    ? task.artifacts?.find((artifact) => artifact.format.toLowerCase() === 'png')
-    : undefined
+  const imageArtifact = task.artifacts?.find((artifact) => artifact.format.toLowerCase() === 'png')
+  const templateLabel = task.type === 'custom_template_document'
+    ? '已分析上传模板'
+    : '公司标准模板'
 
   const download = async (artifact: AiTaskArtifact) => {
     if (downloadingId) return
@@ -246,7 +248,7 @@ function TaskCard({
               <StatusIcon className={`h-3 w-3 ${task.status === 'running' ? 'animate-spin' : ''}`} />
               {meta.label}
             </span>
-            <span className="text-[10px] text-slate-400">公司标准模板</span>
+            <span className="max-w-48 truncate text-[10px] text-slate-400" title={templateLabel}>{templateLabel}</span>
           </div>
           <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-500">
             <span>阶段：{task.stage || meta.label}</span>

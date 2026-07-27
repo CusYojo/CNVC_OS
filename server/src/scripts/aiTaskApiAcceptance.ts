@@ -144,7 +144,19 @@ async function main() {
   const { data: skillCatalog } = await request<{
     list: Array<{ name: string; version: string; sha256: string }>
   }>('/ai/skills', {}, adminToken)
-  assert('API 注册五个业务 Skill', skillCatalog.list.length === 5, `${skillCatalog.list.length} 个`)
+  const requiredBusinessSkills = [
+    'generate-compliance-statement',
+    'draft-investment-proposal',
+    'build-investment-recommendation-ppt',
+    'write-due-diligence-report',
+    'answer-project-qa',
+  ]
+  assert(
+    'API 注册全部必需业务 Skill',
+    requiredBusinessSkills.every((name) =>
+      skillCatalog.list.some((skill) => skill.name === name)),
+    `${skillCatalog.list.length} 个`,
+  )
   assert(
     'API Skill 版本可审计',
     skillCatalog.list.every((skill) =>
@@ -229,7 +241,7 @@ async function main() {
   )
   assert(
     'AI-011 记录 docs Q&A 模板版本',
-    qaAnswer.templateVersion === 'qa-core-rules-20260726-v5'
+    qaAnswer.templateVersion === 'qa-core-rules-20260727-v6'
       && qaAnswer.referenceTemplates.length === 5
       && qaAnswer.referenceTemplates.every((item) => item.toLowerCase().endsWith('.pdf')),
     `${qaAnswer.templateVersion} / ${qaAnswer.referenceTemplates.join('、')}`,
@@ -311,7 +323,7 @@ async function main() {
         sourceCutoffDate: cutoff,
         qaMode: '投资委员会 Q&A',
         questionDepth: '标准版',
-        outputFormat: 'DOCX+PDF',
+        outputFormat: 'PDF',
       },
       idempotencyKey: qaTaskKey,
     }),
@@ -323,24 +335,30 @@ async function main() {
     `${qaTask.status} / ${qaTask.progress}`,
   )
   assert(
-    'AI-011 同时输出 Word 与 PDF',
-    ['docx', 'pdf'].every((format) =>
-      qaTask.artifacts.some((artifact) => artifact.format === format)),
+    'AI-011 只输出正式 PDF',
+    qaTask.artifacts.length === 1
+      && qaTask.artifacts[0]?.format === 'pdf',
     qaTask.artifacts.map((artifact) => artifact.format).join(','),
   )
   assert(
     'AI-011 记录 Generator、Reviewer、模板和 Skill 审计信息',
     qaTask.artifacts.every((artifact) =>
       artifact.metadata?.skillName === 'answer-project-qa'
-      && artifact.metadata?.questionCount === 15
+      && artifact.metadata?.questionCount === 7
       && artifact.metadata?.categoryCount === 15
       && Boolean(artifact.metadata?.templateCorpusSha256)
-      && Boolean(artifact.metadata?.reviewerChecks)),
+      && Boolean(artifact.metadata?.reviewerChecks)
+      && artifact.metadata?.webResearchAttemptedQueries === 10
+      && Number(artifact.metadata?.webResearchSuccessfulQueries) > 0
+      && artifact.metadata?.visibleReferencesIncluded === false
+      && artifact.metadata?.visibleReviewerIncluded === false
+      && Array.isArray(artifact.metadata?.downloadableFormats)
+      && artifact.metadata?.downloadableFormats.join(',') === 'pdf'),
     qaTask.artifacts.map((artifact) => JSON.stringify(artifact.metadata)).join(' | '),
   )
 
   if (acceptanceScope === 'qa') {
-    await outputReport('Q&A 专项验收覆盖兼容单题接口及正式 project_qa 文档任务，验证 Word/PDF 双产物。')
+    await outputReport('Q&A 专项验收覆盖兼容单题接口及正式 project_qa 文档任务，验证联网补证、内部审阅与 PDF 单产物。')
     return
   }
   }
@@ -400,6 +418,18 @@ async function main() {
   const docx = compliance.artifacts.find((artifact) => artifact.format === 'docx')!
   const compliancePdf = compliance.artifacts.find((artifact) => artifact.format === 'pdf')!
   const complianceMarkdown = compliance.artifacts.find((artifact) => artifact.format === 'md')!
+  const complianceWebAudit = docx.metadata?.publicWebResearch as Record<string, unknown> | undefined
+  assert(
+    'AI-007 记录受控公开网络检索审计',
+    complianceWebAudit?.enabled === true
+      && complianceWebAudit?.provider === 'searxng'
+      && complianceWebAudit?.queryCount === 7
+      && typeof complianceWebAudit?.sourceCount === 'number'
+      && typeof complianceWebAudit?.officialFallbackAttempted === 'boolean'
+      && typeof complianceWebAudit?.officialFallbackSourceCount === 'number'
+      && ['succeeded', 'partial', 'no_results', 'unavailable'].includes(String(complianceWebAudit?.status)),
+    JSON.stringify(complianceWebAudit),
+  )
   assert(
     'AI-007 PDF 由最终 Word 同源生成并通过 Reviewer',
     compliancePdf.metadata?.derivedFromArtifactId === docx.id

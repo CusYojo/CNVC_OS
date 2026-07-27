@@ -18,6 +18,11 @@ import {
   listProjectQaAnswers,
   PROJECT_QA_CATEGORIES,
 } from '../services/aiQaService.js'
+import {
+  createAiCustomTemplate,
+  getAiCustomTemplate,
+  listAiCustomTemplates,
+} from '../services/aiCustomTemplateService.js'
 
 export const aiTasksRouter = Router()
 
@@ -28,6 +33,7 @@ const typeSchema = z.enum([
   'investment_recommendation_ppt',
   'due_diligence_report',
   'project_qa',
+  'custom_template_document',
 ])
 
 const createSchema = z.object({
@@ -57,6 +63,12 @@ const createSchema = z.object({
   if (body.type === 'investment_proposal') {
     requireAllowed('audience', ['内部立项', '基金内部汇报', '合作方沟通'], '目标受众无效')
     requireAllowed('length', ['精简版', '标准版', '详细版'], '篇幅无效')
+  }
+  if (
+    body.type === 'investment_proposal'
+    || body.type === 'compliance_statement'
+    || body.type === 'project_qa'
+  ) {
     const userInstructions = body.parameters.userInstructions
     if (userInstructions !== undefined) {
       if (typeof userInstructions !== 'string') {
@@ -65,6 +77,17 @@ const createSchema = z.object({
         ctx.addIssue({ code: 'custom', path: ['parameters', 'userInstructions'], message: '补充输入不能超过 2000 字' })
       }
     }
+  }
+  if (
+    body.type === 'compliance_statement'
+    && body.parameters.webResearch !== undefined
+    && typeof body.parameters.webResearch !== 'boolean'
+  ) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['parameters', 'webResearch'],
+      message: '联网公开资料检索开关必须为布尔值',
+    })
   }
   if (body.type === 'investment_recommendation_ppt') {
     requireAllowed('template', ['公司标准模板'], '公司模板无效')
@@ -78,12 +101,34 @@ const createSchema = z.object({
     requireAllowed('qaMode', ['投资委员会 Q&A', '尽调 Q&A'], 'Q&A 类型无效')
     requireAllowed('questionDepth', ['标准版', '深度版'], '问题深度无效')
   }
+  if (body.type === 'custom_template_document') {
+    const customTemplateId = body.parameters.customTemplateId
+    if (typeof customTemplateId !== 'string' || !z.string().uuid().safeParse(customTemplateId).success) {
+      ctx.addIssue({ code: 'custom', path: ['parameters', 'customTemplateId'], message: '上传模板 ID 无效' })
+    }
+  }
   const expectedOutputFormat = body.type === 'investment_recommendation_ppt'
     ? 'PPTX'
     : body.type === 'project_qa'
-      ? 'DOCX+PDF'
-      : 'DOCX'
-  if (body.parameters.outputFormat !== undefined && body.parameters.outputFormat !== expectedOutputFormat) {
+      ? 'PDF'
+      : body.type === 'custom_template_document'
+        ? null
+        : 'DOCX'
+  if (
+    body.type === 'custom_template_document'
+    && body.parameters.outputFormat !== 'DOCX'
+    && body.parameters.outputFormat !== 'PPTX'
+  ) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['parameters', 'outputFormat'],
+      message: '上传模板任务输出格式必须为 DOCX 或 PPTX',
+    })
+  } else if (
+    expectedOutputFormat
+    && body.parameters.outputFormat !== undefined
+    && body.parameters.outputFormat !== expectedOutputFormat
+  ) {
     ctx.addIssue({
       code: 'custom',
       path: ['parameters', 'outputFormat'],
@@ -125,6 +170,46 @@ aiTasksRouter.get('/task-types', (_req, res) => {
 aiTasksRouter.get('/skills', async (_req, res, next) => {
   try {
     res.json({ list: await listAiBusinessSkills() })
+  } catch (error) {
+    next(error)
+  }
+})
+
+aiTasksRouter.post('/templates/analyze', async (req: AuthedRequest, res, next) => {
+  try {
+    const body = z.object({
+      projectId: z.string().uuid(),
+      conversationId: z.string().uuid().optional(),
+      name: z.string().trim().min(1).max(255),
+      dataBase64: z.string().min(16),
+    }).parse(req.body ?? {})
+    const template = await createAiCustomTemplate(userFrom(req), body)
+    res.status(201).json(template)
+  } catch (error) {
+    next(error)
+  }
+})
+
+aiTasksRouter.get('/templates', async (req: AuthedRequest, res, next) => {
+  try {
+    const query = z.object({
+      projectId: z.string().uuid().optional(),
+      conversationId: z.string().uuid().optional(),
+    }).parse(req.query)
+    res.json({ list: await listAiCustomTemplates(req.user!.uid, query) })
+  } catch (error) {
+    next(error)
+  }
+})
+
+aiTasksRouter.get('/templates/:id', async (req: AuthedRequest, res, next) => {
+  try {
+    const template = await getAiCustomTemplate(req.user!.uid, idSchema.parse(req.params.id))
+    if (!template) {
+      res.status(404).json({ code: 'NOT_FOUND', message: '上传模板不存在', details: null })
+      return
+    }
+    res.json(template)
   } catch (error) {
     next(error)
   }

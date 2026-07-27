@@ -22,10 +22,12 @@ import {
 import {
   AI_TEMPLATE_CATALOG,
   assertAiTemplateReferences,
-  isAiBusinessTaskType,
+  isAiExecutableTaskType,
   type AiBusinessTaskType,
+  type AiExecutableTaskType,
 } from './aiTemplateCatalog.js'
 import { loadAiSkill } from './aiSkillService.js'
+import { resolveAiCustomTemplateForTask } from './aiCustomTemplateService.js'
 import {
   curateEvidenceSources,
   dedupeTextList,
@@ -46,6 +48,10 @@ import {
   type ComplianceOutputReview,
 } from './aiComplianceOutputService.js'
 import {
+  fetchComplianceWebEvidence,
+  type ComplianceWebResearchAudit,
+} from './aiComplianceWebResearchService.js'
+import {
   convertProjectQaDocxToPdf,
   generateProjectQaDocx,
   inspectProjectQaDocx,
@@ -65,6 +71,10 @@ import {
   type QaTemplateProfile,
 } from './aiQaTemplateParser.js'
 import {
+  collectQaPublicEvidence,
+  type QaWebResearchResult,
+} from './aiQaWebResearchService.js'
+import {
   loadInvestmentProposalBlueprint,
   type InvestmentProposalDocumentBlueprint,
 } from './aiInvestmentProposalBlueprintService.js'
@@ -76,6 +86,10 @@ import {
   exportAndReviewInvestmentProposalPdf,
   type InvestmentProposalPdfReview,
 } from './aiInvestmentProposalPdfService.js'
+import {
+  collectDueDiligencePublicEvidence,
+  type DueDiligenceResearchResult,
+} from './aiDueDiligenceResearchService.js'
 
 export type AiTaskStatus = 'pending' | 'running' | 'succeeded' | 'failed' | 'cancelled'
 
@@ -86,7 +100,7 @@ export type AiTaskUser = {
 }
 
 export type CreateAiTaskInput = {
-  type: AiBusinessTaskType
+  type: AiExecutableTaskType
   projectId: string
   conversationId?: string
   parameters: Record<string, unknown>
@@ -172,19 +186,31 @@ async function sourcesForProject(
   }))
 }
 
-export function screenEvidenceSources(sources: EvidenceSource[], type?: AiBusinessTaskType) {
+export function screenEvidenceSources(sources: EvidenceSource[], type?: AiExecutableTaskType) {
   if (type === 'investment_proposal') {
-    return curateEvidenceSources(sources, { maxTotal: 72, maxPerDocument: 10 })
+    // 投资提案同时使用项目资料与多主题公开检索结果。保留更宽的候选集，
+    // 避免公开网页和“未检出”检索记录在章节级 Evidence 建立前被截断。
+    return curateEvidenceSources(sources, { maxTotal: 120, maxPerDocument: 10 })
   }
   if (type === 'compliance_statement') {
     // 合规性说明随后会按章节再次检索和裁剪；这里保留更宽的当前项目候选集，
     // 避免全局前18个片段把合同、基金台账或法律资料提前截掉。
     return curateEvidenceSources(sources, { maxTotal: 96, maxPerDocument: 12 })
   }
+  if (type === 'due_diligence_report') {
+    // 尽调会叠加项目知识库与多主题公开网页；扩大候选集，避免联网结果在生成前被截断。
+    return curateEvidenceSources(sources, { maxTotal: 96, maxPerDocument: 4 })
+  }
+  if (type === 'custom_template_document') {
+    // 上传模板任务也必须先联网补全，再按模板结构生成全新内容。
+    return curateEvidenceSources(sources, { maxTotal: 96, maxPerDocument: 4 })
+  }
   return curateEvidenceSources(
     sources,
     type === 'project_qa'
-      ? { maxTotal: 32, maxPerDocument: 6 }
+      // Q&A 需要同时保留项目证据、多个公开检索主题及检索审计记录，
+      // 避免公开补证在 Question Generator 前被全局裁掉。
+      ? { maxTotal: 72, maxPerDocument: 8 }
       : { maxTotal: 18, maxPerDocument: 3 },
   )
 }
@@ -281,10 +307,32 @@ async function executeTask(taskId: string) {
   running.add(taskId)
   try {
     const [task] = await db.select().from(aiTasks).where(eq(aiTasks.id, taskId)).limit(1)
-    if (!task || !isAiBusinessTaskType(task.type) || ['succeeded', 'cancelled'].includes(task.status)) return
-    const template = AI_TEMPLATE_CATALOG[task.type]
-    assertAiTemplateReferences(template)
-    const skill = await loadAiSkill(template.skillName)
+    if (!task || !isAiExecutableTaskType(task.type) || ['succeeded', 'cancelled'].includes(task.status)) return
+    const parameters = (task.parameters ?? {}) as Record<string, unknown>
+    const resolvedCustomTemplate = task.type === 'custom_template_document'
+      ? await resolveAiCustomTemplateForTask({
+          userId: task.userId,
+          projectId: task.projectId,
+          conversationId: task.conversationId ?? undefined,
+          templateId: String(parameters.customTemplateId || ''),
+        })
+      : undefined
+    const template = resolvedCustomTemplate?.template ?? AI_TEMPLATE_CATALOG[task.type as AiBusinessTaskType]
+    if (!template) throw new Error('AI 任务模板不存在')
+    if (resolvedCustomTemplate) {
+      const expectedOutputFormat = template.outputFormat.toUpperCase()
+      if (parameters.outputFormat !== expectedOutputFormat) {
+        throw Object.assign(new Error(`上传模板输出格式应为 ${expectedOutputFormat}`), {
+          status: 409,
+          code: 'CUSTOM_TEMPLATE_FORMAT_MISMATCH',
+        })
+      }
+    } else {
+      assertAiTemplateReferences(template)
+    }
+    const skill = resolvedCustomTemplate?.skill ?? await loadAiSkill(
+      AI_TEMPLATE_CATALOG[task.type as AiBusinessTaskType].skillName,
+    )
     let complianceBlueprint: ComplianceDocumentBlueprint | undefined
     if (task.type === 'compliance_statement') {
       await updateStage(taskId, '解析合规模板并建立 Blueprint', 6)
@@ -315,7 +363,6 @@ async function executeTask(taskId: string) {
 
     const [project] = await db.select().from(projects).where(eq(projects.id, task.projectId)).limit(1)
     if (!project) throw new Error('项目不存在或已删除')
-    const parameters = (task.parameters ?? {}) as Record<string, unknown>
     const sourceCutoffDate = String(parameters.sourceCutoffDate || new Date().toISOString().slice(0, 10))
     const knowledgeSources = await sourcesForProject(
       project.id,
@@ -324,13 +371,93 @@ async function executeTask(taskId: string) {
         ? 240
         : task.type === 'compliance_statement'
           ? 500
+          : task.type === 'due_diligence_report'
+            ? 80
+            : task.type === 'custom_template_document'
+              ? 80
           : 40,
     )
+    let qaWebResearch: QaWebResearchResult | undefined
+    if (task.type === 'project_qa') {
+      await updateStage(taskId, '联网补充公司、产品、市场、竞争、客户与合规公开信息', 18)
+      qaWebResearch = await collectQaPublicEvidence({
+        project,
+        sourceCutoffDate,
+        maxSources: 60,
+      })
+      if (qaWebResearch.successfulQueries === 0) {
+        throw Object.assign(
+          new Error('Q&A 联网检索服务不可用，已停止生成，避免输出占位式答复。请检查 SearXNG 服务与检索引擎后重试。'),
+          { code: 'PROJECT_QA_WEB_RESEARCH_FAILED' },
+        )
+      }
+    }
+    let diligenceResearch: DueDiligenceResearchResult | undefined
+    if (task.type === 'due_diligence_report') {
+      await updateStage(taskId, '联网检索工商、团队、产品、市场、客户、融资与合规公开信息', 18)
+      diligenceResearch = await collectDueDiligencePublicEvidence({
+        projectName: project.name,
+        companyName: project.companyName,
+        industry: project.industry,
+        sourceCutoffDate,
+      })
+    }
+    let customTemplateResearch: DueDiligenceResearchResult | undefined
+    if (task.type === 'custom_template_document') {
+      await updateStage(taskId, '联网补充当前项目公开信息', 18)
+      customTemplateResearch = await collectDueDiligencePublicEvidence({
+        projectName: project.name,
+        companyName: project.companyName,
+        industry: project.industry,
+        sourceCutoffDate,
+        maxSources: 60,
+      })
+      if (customTemplateResearch.successfulQueries === 0) {
+        throw Object.assign(
+          new Error('上传模板任务联网检索服务不可用，已停止生成，避免输出资料缺口或沿用模板内容。请检查 SearXNG 服务后重试。'),
+          { code: 'CUSTOM_TEMPLATE_WEB_RESEARCH_FAILED' },
+        )
+      }
+    }
+    let proposalResearch: DueDiligenceResearchResult | undefined
+    if (task.type === 'investment_proposal') {
+      await updateStage(taskId, '联网补充公司、团队、交易、财务、市场、估值与风险公开信息', 18)
+      proposalResearch = await collectDueDiligencePublicEvidence({
+        projectName: project.name,
+        companyName: project.companyName,
+        industry: project.industry,
+        sourceCutoffDate,
+        maxSources: 60,
+        purpose: 'investment_proposal',
+      })
+      if (proposalResearch.successfulQueries === 0) {
+        throw Object.assign(
+          new Error('投资提案联网检索服务不可用，已停止生成，避免输出大量资料缺口。请检查 SearXNG 服务后重试。'),
+          { code: 'INVESTMENT_PROPOSAL_WEB_RESEARCH_FAILED' },
+        )
+      }
+    }
+    let complianceWebResearchAudit: ComplianceWebResearchAudit | undefined
+    let complianceWebSources: EvidenceSource[] = []
+    if (task.type === 'compliance_statement') {
+      await updateStage(taskId, '联网检索公开证据', 18)
+      const webResearch = await fetchComplianceWebEvidence({
+        project,
+        sourceCutoffDate,
+        parameters,
+      })
+      complianceWebResearchAudit = webResearch.audit
+      complianceWebSources = webResearch.sources
+    }
     const userInstructions = typeof parameters.userInstructions === 'string'
       ? parameters.userInstructions.trim()
       : ''
     const rawSources: EvidenceSource[] = [
-      ...(task.type === 'investment_proposal' && userInstructions ? [{
+      ...((task.type === 'investment_proposal'
+        || task.type === 'compliance_statement'
+        || task.type === 'project_qa'
+        || task.type === 'custom_template_document')
+        && userInstructions ? [{
         sourceType: 'user_input',
         sourceId: `${task.id}:user-input`,
         sourceName: '用户补充输入',
@@ -358,6 +485,11 @@ async function executeTask(taskId: string) {
         ].join('\n'),
       }] : []),
       ...knowledgeSources,
+      ...(qaWebResearch?.sources ?? []),
+      ...(proposalResearch?.sources ?? []),
+      ...(diligenceResearch?.sources ?? []),
+      ...(customTemplateResearch?.sources ?? []),
+      ...complianceWebSources,
     ]
     const evidenceScreening = screenEvidenceSources(rawSources, task.type)
     const sources = evidenceScreening.usable
@@ -386,7 +518,7 @@ async function executeTask(taskId: string) {
       if (await cancelIfRequested(taskId)) return
 
       await updateStage(taskId, 'Duplicate Checker 去重', 40)
-      await updateStage(taskId, '基于当前项目资料生成回答', 52)
+      await updateStage(taskId, '结合项目资料与联网公开信息生成回答', 52)
       const draftAnswers = await generateProjectQaAnswers({
         project,
         mode: qaMode,
@@ -414,7 +546,7 @@ async function executeTask(taskId: string) {
       })
       if (await cancelIfRequested(taskId)) return
 
-      await updateStage(taskId, 'Formatter 生成 Word 与 PDF', 80)
+      await updateStage(taskId, 'Formatter 生成正式 PDF', 80)
       const taskDir = path.join(ARTIFACT_ROOT, task.userId, task.projectId, task.id)
       await mkdir(taskDir, { recursive: true })
       const names = makeProjectQaFileNames(project.name, qaMode)
@@ -439,12 +571,12 @@ async function executeTask(taskId: string) {
       })
       if (await cancelIfRequested(taskId)) return
 
-      await updateStage(taskId, '执行 Word/PDF 质量检查', 92)
+      await updateStage(taskId, '执行 PDF 内容与版式质量检查', 92)
       const [{ count }] = await db.select({ count: sql<number>`count(*)::int` }).from(aiArtifacts)
         .where(and(
           eq(aiArtifacts.userId, task.userId),
           eq(aiArtifacts.projectId, task.projectId),
-          eq(aiArtifacts.format, 'docx'),
+          eq(aiArtifacts.format, 'pdf'),
         ))
       const version = Number(count ?? 0) + 1
       const sharedMetadata = {
@@ -465,28 +597,17 @@ async function executeTask(taskId: string) {
         reviewerChecks: reviewed.review.checks,
         missingAnswerCount: reviewed.review.dataGapCount,
         rejectedEvidenceChunks: evidenceScreening.rejected.length,
+        webResearchProvider: qaWebResearch?.provider,
+        webResearchAccessedAt: qaWebResearch?.accessedAt,
+        webResearchAttemptedQueries: qaWebResearch?.attemptedQueries ?? 0,
+        webResearchSuccessfulQueries: qaWebResearch?.successfulQueries ?? 0,
+        webResearchFailedQueries: qaWebResearch?.failedQueries ?? 0,
+        webResearchResultCount: qaWebResearch?.resultCount ?? 0,
+        visibleReferencesIncluded: false,
+        visibleReviewerIncluded: false,
+        downloadableFormats: ['pdf'],
       }
-      const [docxArtifact] = await db.insert(aiArtifacts).values({
-        taskId: task.id,
-        userId: task.userId,
-        projectId: task.projectId,
-        conversationId: task.conversationId,
-        fileName: names.docx,
-        format: 'docx',
-        mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        version,
-        storagePath: docxPath,
-        editableLevel: template.editableLevel,
-        sourceCutoffDate,
-        templateVersion: template.templateVersion,
-        qualityStatus: docxQuality.qualityStatus,
-        metadata: {
-          ...docxQuality.metadata,
-          ...docxGeneration,
-          ...sharedMetadata,
-        },
-      }).returning()
-      await db.insert(aiArtifacts).values({
+      const [pdfArtifact] = await db.insert(aiArtifacts).values({
         taskId: task.id,
         userId: task.userId,
         projectId: task.projectId,
@@ -501,29 +622,37 @@ async function executeTask(taskId: string) {
         templateVersion: template.templateVersion,
         qualityStatus: pdfQuality.qualityStatus,
         metadata: {
+          intermediateDocxQuality: docxQuality.metadata,
+          conversionSourceDocxSha256: docxGeneration.documentSha256,
           ...pdfQuality.metadata,
-          sourceDocxArtifactId: docxArtifact.id,
           ...sharedMetadata,
         },
-      })
+      }).returning()
       const usedSourceIndexes = usedProjectQaSourceIndexes(reviewed.answers, sources.length)
       if (usedSourceIndexes.length) {
         await db.insert(aiTaskSources).values(usedSourceIndexes.map((index) => {
           const source = sources[index]
           return {
             taskId: task.id,
-            artifactId: docxArtifact.id,
+            artifactId: pdfArtifact.id,
             sourceType: source.sourceType,
-            sourceId: source.sourceId,
+            sourceId: source.sourceType.startsWith('public_web')
+              ? createHash('sha256')
+                  .update(source.sourceId || source.sourceName)
+                  .digest('hex')
+                  .slice(0, 64)
+              : source.sourceId,
             sourceName: source.sourceName,
-            locator: `知识片段 ${source.chunkIndex ?? index}`,
-            verificationStatus: '资料记载',
+            locator: source.locator || `知识片段 ${source.chunkIndex ?? index}`,
+            verificationStatus: source.sourceType.startsWith('public_web')
+              ? '待核验'
+              : '资料记载',
           }
         }))
       }
       await db.update(aiTasks).set({
         status: 'succeeded',
-        stage: 'Word/PDF 已生成并通过 Reviewer',
+        stage: 'PDF 已生成并通过内部质量检查',
         progress: 100,
         resultSummary: qaContent.executiveSummary,
         completedAt: new Date(),
@@ -561,6 +690,8 @@ async function executeTask(taskId: string) {
       taskId,
       task.type === 'investment_proposal'
         ? '建立章节级 Evidence 并逐章节生成、执行 Reviewer'
+        : task.type === 'custom_template_document'
+          ? '结合项目资料与联网公开信息重建标题和正文'
         : '生成结构化内容',
       35,
     )
@@ -574,7 +705,7 @@ async function executeTask(taskId: string) {
         parameters,
       })
     }
-    if (evidenceScreening.rejected.length) {
+    if (evidenceScreening.rejected.length && task.type !== 'custom_template_document') {
       const affectedFiles = [...new Set(evidenceScreening.rejected.map((item) => item.sourceName))]
       content.missing = dedupeTextList([
         ...content.missing,
@@ -596,7 +727,12 @@ async function executeTask(taskId: string) {
     )
     const taskDir = path.join(ARTIFACT_ROOT, task.userId, task.projectId, task.id)
     await mkdir(taskDir, { recursive: true })
-    const fileName = makeArtifactFileName(project.name, template)
+    const fileName = makeArtifactFileName(
+      project.name,
+      template,
+      Date.now(),
+      task.type === 'custom_template_document' ? content.title : undefined,
+    )
     const outputPath = path.join(taskDir, fileName)
     let previewPath: string | undefined
     let previewMetadata: Record<string, unknown> | undefined
@@ -741,11 +877,17 @@ async function executeTask(taskId: string) {
       }
     }
     await updateStage(taskId, '执行文件质量检查', 88)
-    const quality = await inspectGeneratedArtifact(outputPath, template.outputFormat, {
+    const quality = await inspectGeneratedArtifact(
+      outputPath,
+      template.outputFormat as 'docx' | 'pptx',
+      {
       // 合规性说明核心规范禁止“引用资料”等模板外正文板块；来源只保留在
-      // ai_task_sources 与产物元数据中。其他业务文档继续执行文尾来源门禁。
-      requireEndReferences: task.type !== 'compliance_statement',
-    })
+      // ai_task_sources 与产物元数据中。尽调报告也按用户要求不显示文末来源。
+      requireEndReferences: task.type !== 'compliance_statement'
+        && task.type !== 'due_diligence_report'
+        && task.type !== 'investment_proposal',
+      },
+    )
     const [{ count }] = await db.select({ count: sql<number>`count(*)::int` }).from(aiArtifacts)
       .where(and(eq(aiArtifacts.userId, task.userId), eq(aiArtifacts.projectId, task.projectId), eq(aiArtifacts.format, template.outputFormat)))
     const version = Number(count ?? 0) + 1
@@ -805,6 +947,35 @@ async function executeTask(taskId: string) {
               contentGenerationAudit: content.generationAudit,
             }
           : {}),
+        ...(diligenceResearch
+          ? {
+              publicResearchAttemptedQueries: diligenceResearch.attemptedQueries,
+              publicResearchSuccessfulQueries: diligenceResearch.successfulQueries,
+              publicResearchFailedQueries: diligenceResearch.failedQueries,
+              publicResearchSourceCount: diligenceResearch.sources.length,
+            }
+          : {}),
+        ...(proposalResearch
+          ? {
+              proposalPublicResearchAttemptedQueries: proposalResearch.attemptedQueries,
+              proposalPublicResearchSuccessfulQueries: proposalResearch.successfulQueries,
+              proposalPublicResearchFailedQueries: proposalResearch.failedQueries,
+              proposalPublicResearchSourceCount: proposalResearch.sources.length,
+            }
+          : {}),
+        ...(customTemplateResearch
+          ? {
+              customTemplatePublicResearchAttemptedQueries: customTemplateResearch.attemptedQueries,
+              customTemplatePublicResearchSuccessfulQueries: customTemplateResearch.successfulQueries,
+              customTemplatePublicResearchFailedQueries: customTemplateResearch.failedQueries,
+              customTemplatePublicResearchSourceCount: customTemplateResearch.sources.length,
+            }
+          : {}),
+        ...(complianceWebResearchAudit
+          ? {
+              publicWebResearch: complianceWebResearchAudit,
+            }
+          : {}),
         ...(proposalDocxReview
           ? {
               wordReviewerPassed: proposalDocxReview.passed,
@@ -818,6 +989,13 @@ async function executeTask(taskId: string) {
         skillName: skill.name,
         skillVersion: skill.version,
         skillSha256: skill.sha256,
+        ...(resolvedCustomTemplate
+          ? {
+              customTemplateId: resolvedCustomTemplate.row.id,
+              customTemplateSha256: resolvedCustomTemplate.row.sha256,
+              customTemplateAnalysis: resolvedCustomTemplate.row.analysis,
+            }
+          : {}),
         rejectedEvidenceChunks: evidenceScreening.rejected.length,
       },
     }).returning()
@@ -980,10 +1158,21 @@ async function executeTask(taskId: string) {
             taskId: task.id,
             artifactId,
             sourceType: source.sourceType,
-            sourceId: source.sourceId,
+            sourceId: source.sourceType.startsWith('public_web')
+              ? createHash('sha256')
+                  .update(source.sourceId || source.sourceName)
+                  .digest('hex')
+                  .slice(0, 64)
+              : source.sourceId,
             sourceName: source.sourceName,
-            locator: `知识片段 ${source.chunkIndex ?? index}`,
-            verificationStatus: '资料记载',
+            locator: source.locator ?? (
+              source.sourceType.startsWith('public_web')
+                ? `公开网页 ${source.sourceId || source.sourceName}`
+                : `知识片段 ${source.chunkIndex ?? index}`
+            ),
+            verificationStatus: source.sourceType.startsWith('public_web')
+              ? '待核验'
+              : '资料记载',
           }
         })))
     }
@@ -1041,9 +1230,28 @@ export async function createAiTask(user: AiTaskUser, input: CreateAiTaskInput) {
       throw Object.assign(new Error('会话所属项目与任务项目不一致'), { status: 409, code: 'CONVERSATION_PROJECT_MISMATCH' })
     }
   }
-  const template = AI_TEMPLATE_CATALOG[input.type]
-  assertAiTemplateReferences(template)
-  await loadAiSkill(template.skillName)
+  const resolvedCustomTemplate = input.type === 'custom_template_document'
+    ? await resolveAiCustomTemplateForTask({
+        userId: user.uid,
+        projectId: input.projectId,
+        conversationId: input.conversationId,
+        templateId: String(input.parameters.customTemplateId || ''),
+      })
+    : undefined
+  const template = resolvedCustomTemplate?.template ?? AI_TEMPLATE_CATALOG[input.type as AiBusinessTaskType]
+  if (!template) throw Object.assign(new Error('AI 任务模板不存在'), { status: 400, code: 'INVALID_TASK_TYPE' })
+  if (resolvedCustomTemplate) {
+    const expectedOutputFormat = template.outputFormat.toUpperCase()
+    if (input.parameters.outputFormat !== expectedOutputFormat) {
+      throw Object.assign(new Error(`上传模板输出格式应为 ${expectedOutputFormat}`), {
+        status: 409,
+        code: 'CUSTOM_TEMPLATE_FORMAT_MISMATCH',
+      })
+    }
+  } else {
+    assertAiTemplateReferences(template)
+    await loadAiSkill(AI_TEMPLATE_CATALOG[input.type as AiBusinessTaskType].skillName)
+  }
   const hash = createRequestHash(input)
   const [existing] = await db.select().from(aiTasks)
     .where(and(eq(aiTasks.userId, user.uid), eq(aiTasks.idempotencyKey, input.idempotencyKey)))
@@ -1111,7 +1319,7 @@ export async function cancelAiTask(user: AiTaskUser, taskId: string) {
 export async function retryAiTask(user: AiTaskUser, taskId: string, idempotencyKey: string) {
   const task = await getTaskRow(user.uid, taskId)
   if (!task) return undefined
-  if (!isAiBusinessTaskType(task.type)) throw new Error('不支持重试的任务类型')
+  if (!isAiExecutableTaskType(task.type)) throw new Error('不支持重试的任务类型')
   if (task.status !== 'failed') {
     throw Object.assign(new Error('只有失败任务可以重试'), { status: 409, code: 'TASK_NOT_RETRYABLE' })
   }
