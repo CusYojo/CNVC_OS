@@ -180,7 +180,7 @@ export interface MaterialJob {
 
 export interface LeadScoringDimensionItem { name: string; score: number; max: number; reason: string }
 export interface LeadScoringDimension { key: string; name: string; score: number; max: number; items: LeadScoringDimensionItem[] }
-export interface LeadCompetitor { name: string; is_self: boolean; tech: string; product: string; funding: string; differentiation: string }
+export interface LeadCompetitor { name: string; is_self: boolean; tech: string; product: string; funding: string; differentiation: string; sourceUrl?: string }
 export interface LeadScoring {
   total: number
   verdict: string
@@ -192,17 +192,19 @@ export interface LeadScoring {
   projectName?: string
   whatIsIt?: string
   officialSite?: string
-  fundingRoundsResearched?: Array<{ round: string; date: string; amount: string; valuation: string; investors: string }>
+  fundingRoundsResearched?: Array<{ round: string; date: string; amount: string; valuation: string; investors: string; sourceUrl?: string }>
   researchSources?: Array<{ title: string; url: string; excerpt: string }>
   registry?: Record<string,string>
   structuredTeam?: { name: string; title: string; background: string }[]
-  structuredShareholders?: { name: string; percentage: string; type: string }[]
+  structuredShareholders?: { name: string; percentage: string; type: string; sourceUrl?: string }[]
   structuredNews?: { date: string; title: string; summary: string; sourceName: string; sourceUrl: string }[]
 }
 
 export interface LeadValuationDisplay {
   value?: string
   status: 'available' | 'pending' | 'unavailable'
+  sourceUrl?: string
+  sourceLabel?: string
 }
 
 export interface LeadTechnicalScore {
@@ -252,7 +254,7 @@ export interface Lead {
   highlights: string[]
   risks: string[]
   suggestion: string
-  shareholders: { name: string; percentage: string; type: string }[]
+  shareholders: { name: string; percentage: string; type: string; sourceUrl?: string }[]
   founders: { name: string; title: string; background: string }[]
   fundingRounds: { round: string; date: string; amount: string; valuation: string; investors: string[]; sourceUrl: string }[]
   companyNews: { date: string; type: string; title: string; summary: string; sourceName: string; sourceUrl: string }[]

@@ -150,6 +150,7 @@ async function main() {
     'build-investment-recommendation-ppt',
     'write-due-diligence-report',
     'answer-project-qa',
+    'generate-document-from-template',
   ]
   assert(
     'API 注册全部必需业务 Skill',
@@ -168,8 +169,8 @@ async function main() {
       list: Array<{ type: string; skillName: string }>
     }>('/ai/task-types', {}, adminToken)
     assert(
-      '四类文档任务配置均暴露 Skill 绑定',
-      taskTypes.list.length === 4 && taskTypes.list.every((item) => Boolean(item.skillName)),
+      '六类文档任务配置均暴露 Skill 绑定',
+      taskTypes.list.length === 6 && taskTypes.list.every((item) => Boolean(item.skillName)),
       taskTypes.list.map((item) => `${item.type}:${item.skillName}`).join(', '),
     )
   }
@@ -241,7 +242,7 @@ async function main() {
   )
   assert(
     'AI-011 记录 docs Q&A 模板版本',
-    qaAnswer.templateVersion === 'qa-core-rules-20260727-v6'
+    qaAnswer.templateVersion === 'qa-core-rules-20260728-v9-model-network-research'
       && qaAnswer.referenceTemplates.length === 5
       && qaAnswer.referenceTemplates.every((item) => item.toLowerCase().endsWith('.pdf')),
     `${qaAnswer.templateVersion} / ${qaAnswer.referenceTemplates.join('、')}`,
@@ -323,7 +324,7 @@ async function main() {
         sourceCutoffDate: cutoff,
         qaMode: '投资委员会 Q&A',
         questionDepth: '标准版',
-        outputFormat: 'PDF',
+        outputFormat: 'DOCX',
       },
       idempotencyKey: qaTaskKey,
     }),
@@ -335,9 +336,9 @@ async function main() {
     `${qaTask.status} / ${qaTask.progress}`,
   )
   assert(
-    'AI-011 只输出正式 PDF',
+    'AI-011 只输出正式 DOCX',
     qaTask.artifacts.length === 1
-      && qaTask.artifacts[0]?.format === 'pdf',
+      && qaTask.artifacts[0]?.format === 'docx',
     qaTask.artifacts.map((artifact) => artifact.format).join(','),
   )
   assert(
@@ -348,17 +349,17 @@ async function main() {
       && artifact.metadata?.categoryCount === 15
       && Boolean(artifact.metadata?.templateCorpusSha256)
       && Boolean(artifact.metadata?.reviewerChecks)
-      && artifact.metadata?.webResearchAttemptedQueries === 10
-      && Number(artifact.metadata?.webResearchSuccessfulQueries) > 0
+      && artifact.metadata?.evidencePolicy === 'project_knowledge_primary'
+      && artifact.metadata?.webResearchAttemptedQueries === undefined
       && artifact.metadata?.visibleReferencesIncluded === false
       && artifact.metadata?.visibleReviewerIncluded === false
       && Array.isArray(artifact.metadata?.downloadableFormats)
-      && artifact.metadata?.downloadableFormats.join(',') === 'pdf'),
+      && artifact.metadata?.downloadableFormats.join(',') === 'docx'),
     qaTask.artifacts.map((artifact) => JSON.stringify(artifact.metadata)).join(' | '),
   )
 
   if (acceptanceScope === 'qa') {
-    await outputReport('Q&A 专项验收覆盖兼容单题接口及正式 project_qa 文档任务，验证联网补证、内部审阅与 PDF 单产物。')
+    await outputReport('Q&A 专项验收覆盖兼容单题接口及正式 project_qa 文档任务，验证项目资料库证据、内部审阅与 DOCX 单产物。')
     return
   }
   }
@@ -401,9 +402,9 @@ async function main() {
     `${compliance.status} / ${compliance.progress}%`,
   )
   assert(
-    'AI-007 同时登记 DOCX、PDF 与 Markdown',
-    ['docx', 'pdf', 'md'].every((format) =>
-      compliance.artifacts.some((artifact) => artifact.format === format)),
+    'AI-007 只登记一份 DOCX',
+    compliance.artifacts.length === 1
+      && compliance.artifacts[0]?.format === 'docx',
     compliance.artifacts.map((artifact) => artifact.format).join(','),
   )
   assert('AI-007 登记项目来源', compliance.sources.length >= 1, `${compliance.sources.length} 条`)
@@ -416,26 +417,16 @@ async function main() {
   )
 
   const docx = compliance.artifacts.find((artifact) => artifact.format === 'docx')!
-  const compliancePdf = compliance.artifacts.find((artifact) => artifact.format === 'pdf')!
-  const complianceMarkdown = compliance.artifacts.find((artifact) => artifact.format === 'md')!
-  const complianceWebAudit = docx.metadata?.publicWebResearch as Record<string, unknown> | undefined
   assert(
-    'AI-007 记录受控公开网络检索审计',
-    complianceWebAudit?.enabled === true
-      && complianceWebAudit?.provider === 'searxng'
-      && complianceWebAudit?.queryCount === 7
-      && typeof complianceWebAudit?.sourceCount === 'number'
-      && typeof complianceWebAudit?.officialFallbackAttempted === 'boolean'
-      && typeof complianceWebAudit?.officialFallbackSourceCount === 'number'
-      && ['succeeded', 'partial', 'no_results', 'unavailable'].includes(String(complianceWebAudit?.status)),
-    JSON.stringify(complianceWebAudit),
-  )
-  assert(
-    'AI-007 PDF 由最终 Word 同源生成并通过 Reviewer',
-    compliancePdf.metadata?.derivedFromArtifactId === docx.id
-      && compliancePdf.metadata?.pdfReviewerPassed === true
-      && compliancePdf.metadata?.visibleNumberingValidated === true,
-    JSON.stringify(compliancePdf.metadata),
+    'AI-007 以项目资料库为主并使用项目大模型网络补全',
+    docx.metadata?.evidencePolicy === 'project_knowledge_primary_model_network_supplement'
+      && docx.metadata?.publicWebResearch === undefined
+      && typeof docx.metadata?.projectModelNetworkSupplement === 'object',
+    JSON.stringify({
+      evidencePolicy: docx.metadata?.evidencePolicy,
+      publicWebResearch: docx.metadata?.publicWebResearch,
+      projectModelNetworkSupplement: docx.metadata?.projectModelNetworkSupplement,
+    }),
   )
   const download = await fetch(apiUrl(docx.downloadUrl), {
     headers: { Authorization: `Bearer ${adminToken}` },
@@ -447,19 +438,6 @@ async function main() {
       && downloadBytes > 1000
       && (download.headers.get('content-disposition') || '').includes('filename*=UTF-8'),
     `HTTP ${download.status}，${downloadBytes} bytes`,
-  )
-  const markdownDownload = await fetch(apiUrl(complianceMarkdown.downloadUrl), {
-    headers: { Authorization: `Bearer ${adminToken}` },
-  })
-  const markdownText = await markdownDownload.text()
-  assert(
-    'AI-007 Markdown 遵循核心正文结构且不泄露审计元数据',
-    markdownDownload.status === 200
-      && ['一、公司情况介绍', '二、投资理由', '三、投资计划', '四、投资情形分析']
-        .every((title) => markdownText.includes(`## ${title}`))
-      && ['## 摘要', '## 风险提示', '## 资料缺口', '## 免责声明', '## 引用资料', '[S1]']
-        .every((term) => !markdownText.includes(term)),
-    `${markdownDownload.status} / ${markdownText.slice(0, 120)}`,
   )
 
   const otherTask = await fetch(apiUrl(`/ai/tasks/${compliance.id}`), {
@@ -489,7 +467,7 @@ async function main() {
   assert('其他用户的交付物中心不泄露项目产物', otherArtifacts.list.length === 0, `${otherArtifacts.list.length} 个`)
 
   if (acceptanceScope === 'compliance') {
-    await outputReport('合规性说明专项 API 验收覆盖任务生成、DOCX/PDF/Markdown 登记、下载鉴权与审计元数据。')
+    await outputReport('合规性说明专项 API 验收覆盖项目资料库优先、项目大模型网络补全、DOCX 单产物、下载鉴权与审计元数据。')
     return
   }
 

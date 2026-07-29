@@ -304,7 +304,7 @@ function pptStageFromParts(parts: SafeFluePart[]): { active: boolean; stage: str
 }
 
 function PptTaskBoard({ parts, busy }: { parts: SafeFluePart[]; busy: boolean }) {
-  const { active, stage } = pptStageFromParts(parts)
+  const { active } = pptStageFromParts(parts)
   const show = busy && active
   const [start, setStart] = useState<number | null>(null)
   const [now, setNow] = useState(Date.now())
@@ -329,7 +329,6 @@ function PptTaskBoard({ parts, busy }: { parts: SafeFluePart[]; busy: boolean })
         <span className="text-sm font-semibold text-brand-800">PPT 生成任务进行中</span>
         <span className="ml-auto font-mono text-xs text-brand-600">已用时 {mm}:{ss}</span>
       </div>
-      <p className="mt-1.5 text-xs text-brand-700">阶段：{stage}</p>
       <p className="mt-1 text-[11px] leading-5 text-brand-500">PPT 生成通常需要 3–8 分钟，取决于页数与图像网关负载，请耐心等待，期间可查看下方工具调用进度。</p>
     </div>
   )
@@ -614,7 +613,8 @@ function Chat() {
         if (active) setAiTasks(result.list ?? [])
       })
       .catch((error) => {
-        if (active) showToast(`AI 任务恢复失败：${(error as Error).message}`, 'error')
+        console.warn('AI task recovery is temporarily unavailable', error)
+        if (active) showToast('文档任务进度正在恢复，请稍后查看', 'info')
       })
       .finally(() => {
         if (active) setAiTasksLoading(false)
@@ -640,7 +640,8 @@ function Chat() {
         if (active) setQaAnswers(result.list ?? [])
       })
       .catch((error) => {
-        if (active) showToast(`项目 Q&A 恢复失败：${(error as Error).message}`, 'error')
+        console.warn('Project Q&A recovery is temporarily unavailable', error)
+        if (active) showToast('项目 Q&A 正在恢复，请稍后查看', 'info')
       })
       .finally(() => {
         if (active) setQaAnswersLoading(false)
@@ -1077,6 +1078,13 @@ function Chat() {
     const parameters: Record<string, unknown> = {
       sourceCutoffDate: request.sourceCutoffDate,
       outputFormat: request.outputFormat,
+      ...(request.actionId === 'investment_ppt'
+        ? {}
+        : {
+            networkSupplement: true,
+            researchIntent: request.userInstructions?.trim()
+              || `联网检索“${request.projectName}”的具体项目、主体、团队、产品、客户、融资、商业化与风险信息，并结合当前项目资料生成${request.actionLabel}。`,
+          }),
     }
     if (request.actionId === 'proposal') {
       parameters.audience = request.audience || '内部立项'
@@ -1085,7 +1093,6 @@ function Chat() {
         parameters.userInstructions = request.userInstructions.trim()
       }
     } else if (request.actionId === 'compliance') {
-      parameters.webResearch = true
       if (request.userInstructions?.trim()) {
         parameters.userInstructions = request.userInstructions.trim()
       }
@@ -1122,7 +1129,8 @@ function Chat() {
       showToast(`${request.actionLabel}任务已创建，可在消息区查看进度`, 'success')
       return true
     } catch (error) {
-      showToast(`${request.actionLabel}任务创建失败：${(error as Error).message}`, 'error')
+      console.warn(`${request.actionLabel} task was not created`, error)
+      showToast(`${request.actionLabel}任务暂未创建，请稍后再试`, 'info')
       return false
     } finally {
       quickTaskLockRef.current = false
@@ -1137,7 +1145,8 @@ function Chat() {
       setAiTasks((items) => items.map((item) => item.id === updated.id ? updated : item))
       showToast('取消请求已提交', 'success')
     } catch (error) {
-      showToast(`取消任务失败：${(error as Error).message}`, 'error')
+      console.warn('AI task cancellation did not complete', error)
+      showToast('取消操作暂未完成，请稍后再试', 'info')
     } finally {
       setTaskMutationId(null)
     }
@@ -1151,9 +1160,10 @@ function Chat() {
         idempotencyKey: `retry-${task.id}-${Date.now().toString(36)}`,
       })
       setAiTasks((items) => [retried, ...items.filter((item) => item.id !== retried.id)])
-      showToast('已按原参数创建重试任务，原失败记录将保留', 'success')
+      showToast('已按原参数继续生成文档', 'success')
     } catch (error) {
-      showToast(`重试任务创建失败：${(error as Error).message}`, 'error')
+      console.warn('AI task continuation was not created', error)
+      showToast('继续生成操作暂未开始，请稍后再试', 'info')
     } finally {
       setTaskMutationId(null)
     }

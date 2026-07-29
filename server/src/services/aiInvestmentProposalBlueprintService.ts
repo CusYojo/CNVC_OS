@@ -5,9 +5,9 @@ import JSZip from 'jszip'
 import { PDFParse } from 'pdf-parse'
 import type { AiTemplateDefinition } from './aiTemplateCatalog.js'
 
-export const INVESTMENT_PROPOSAL_BLUEPRINT_VERSION = 'proposal-blueprint-20260727-v7-limited-draft'
+export const INVESTMENT_PROPOSAL_BLUEPRINT_VERSION = 'proposal-blueprint-20260728-v10-local-first-web-cache'
 export const CURRENT_PROJECT_NO_DATA = '当前项目暂无相关资料。'
-const CORE_STANDARD_SHA256 = 'b1c0145946c78ec3d5d8d3c7ebe4b027601464a8d7e27bd60bb0a677ef1e1563'
+const CORE_STANDARD_SHA256 = 'fed1147e287ef8242bf4b6e50ab298f6e5f8f4ba2fbea40e2372de1c2f5e5621'
 
 export type InvestmentProposalAnalysisKind =
   | 'company_profile'
@@ -454,7 +454,21 @@ export async function loadInvestmentProposalBlueprint(
     '一、基本情况简介',
     '六、结论',
     '用户补充内容单独标注为“用户补充输入”',
-    '联网公开信息只作为补充线索',
+    '当前项目资料库是主要事实来源',
+    '你是投资中台的资深投资经理',
+    '当前会话绑定',
+    '本地项目资料库优先，网络补全为辅，补全结果缓存复用',
+    '只联网搜索',
+    '不得一开始就发起宽泛的全网搜索',
+    '不恢复或依赖 SearXNG',
+    '进入初筛',
+    '继续跟踪',
+    '申请立项',
+    '启动尽调',
+    '提请上会',
+    '提交投决',
+    '暂缓推进',
+    '归档',
     '正文末尾不增加“免责声明”或“引用资料”板块',
   ]
   const missingCoreRules = coreRequiredRules.filter((rule) => !coreStandard.includes(rule))

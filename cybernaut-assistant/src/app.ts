@@ -14,7 +14,6 @@ app.get('/health', (c) => c.json({
     'intel-collect',
     'meeting-summary',
     'project-summary',
-    'research-project',
     'score-paper',
     'score-project',
   ],

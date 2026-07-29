@@ -1,9 +1,6 @@
-import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import { pathToFileURL } from 'node:url'
-import { promisify } from 'node:util'
 import {
   AlignmentType,
   Document,
@@ -25,13 +22,29 @@ import {
 } from './aiQaPipelineService.js'
 import type { QaTemplateProfile } from './aiQaTemplateParser.js'
 
-const execFileAsync = promisify(execFile)
-// 核心规范统一使用宋体；生产环境可通过环境变量切换到已批准且可嵌入 PDF 的宋体实现。
+// 核心规范统一使用宋体；生产环境可通过环境变量切换到已批准的宋体实现。
 const BODY_FONT = process.env.AI_QA_BODY_FONT || process.env.AI_DOCUMENT_SONG_FONT || 'Songti SC'
 const HEADING_FONT = process.env.AI_QA_HEADING_FONT || process.env.AI_DOCUMENT_SONG_FONT || 'Songti SC'
 const LATIN_FONT = 'Times New Roman'
-const QA_DOCUMENT_LOCALE = process.env.AI_QA_DOCUMENT_LOCALE || 'zh_CN.UTF-8'
 const MUTED = '595959'
+const ANSWER_HEADING_PATTERN =
+  '(?:已确认事实|判断依据|分析判断|证据边界|下一步核验|升级与失效条件|下一步动作|OA\\s*流转边界)'
+const STANDARD_ANSWER_HEADINGS = [
+  '已确认事实',
+  '分析判断',
+  '证据边界',
+  '下一步核验',
+] as const
+const STAGE_ANSWER_HEADINGS = [
+  '判断依据',
+  '升级与失效条件',
+  '下一步动作',
+  'OA 流转边界',
+] as const
+const ANSWER_HEADING_SCHEMES = [
+  STAGE_ANSWER_HEADINGS,
+  STANDARD_ANSWER_HEADINGS,
+] as const
 
 type ProjectLike = {
   name: string
@@ -63,40 +76,6 @@ function mixedTextRuns(value: string, options: {
   })]
 }
 
-async function resolveQaFontconfigFile(soffice: string) {
-  const candidates = [
-    process.env.AI_QA_FONTCONFIG_FILE,
-    process.env.FONTCONFIG_FILE,
-  ].filter((value): value is string => Boolean(value))
-
-  const executableCandidates = path.isAbsolute(soffice)
-    ? [soffice]
-    : (process.env.PATH ?? '')
-      .split(path.delimiter)
-      .filter(Boolean)
-      .map((directory) => path.join(directory, soffice))
-  executableCandidates.forEach((executable) => {
-    const directory = path.dirname(executable)
-    candidates.push(
-      path.resolve(
-        directory,
-        '../../native/libreoffice-headless/libreoffice/LibreOfficeDev.app/Contents/Resources/fontconfig/fonts.conf',
-      ),
-      path.resolve(directory, '../Resources/fontconfig/fonts.conf'),
-    )
-  })
-  candidates.push('/etc/fonts/fonts.conf')
-
-  for (const candidate of candidates) {
-    try {
-      if ((await stat(candidate)).isFile()) return candidate
-    } catch {
-      // 继续寻找下一个可用的 Fontconfig 配置。
-    }
-  }
-  return undefined
-}
-
 function bodyParagraph(value: string, options: {
   boldLead?: string
   keepNext?: boolean
@@ -122,7 +101,7 @@ function bodyParagraph(value: string, options: {
   return new Paragraph({
     alignment: AlignmentType.JUSTIFIED,
     keepNext: options.keepNext,
-    keepLines: true,
+    keepLines: false,
     spacing: {
       before: options.before ?? 0,
       after: options.after ?? 60,
@@ -133,8 +112,9 @@ function bodyParagraph(value: string, options: {
   })
 }
 
-function questionParagraph(index: number, question: string) {
+function questionParagraph(index: number, question: string, pageBreakBefore = false) {
   return new Paragraph({
+    pageBreakBefore,
     keepNext: true,
     keepLines: true,
     spacing: { before: 240, after: 120, line: 360 },
@@ -160,7 +140,7 @@ function dimensionParagraph(value: string) {
   if (!match) return bodyParagraph(value)
   return new Paragraph({
     alignment: AlignmentType.JUSTIFIED,
-    keepLines: true,
+    keepLines: false,
     spacing: { before: 120, after: 80, line: 360 },
     children: [
       ...mixedTextRuns(match[1], {
@@ -177,11 +157,94 @@ function dimensionParagraph(value: string) {
   })
 }
 
-function answerParagraphs(answer: ProjectQaDraftAnswer) {
-  const paragraphs = answer.answer
-    .split(/\n+/)
-    .map((line) => line.trim())
+function stripAnswerMarkdown(value: string) {
+  return value
+    .replace(/```(?:json|markdown|md)?/gi, '')
+    .replace(/\*\*([^*\n]+)\*\*/g, '$1')
+    .replace(/__([^_\n]+)__/g, '$1')
+    .replace(/^\s{0,3}#{1,6}\s*/gm, '')
+}
+
+function stripSourceOutlineMarkers(value: string) {
+  return value
+    .replace(/[（(][一二三四五六七八九十\d]+[）)]\s*(?=[\u3400-\u9fffA-Za-z])/g, '')
+    .replace(/(^|[\s。；;])\d+[、.．]\s*(?=[\u3400-\u9fffA-Za-z])/g, '$1')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+}
+
+function normalizeAnswerHeading(value: string) {
+  const heading = new RegExp(
+    `^\\s*(?:[（(]?\\s*([1-4])\\s*[）)）]?\\s*[、.．]?)?\\s*(${ANSWER_HEADING_PATTERN})\\s*[：:]\\s*`,
+    'i',
+  )
+  const match = value.match(heading)
+  if (!match) return stripSourceOutlineMarkers(value)
+  const title = match[2].replace(/\s+/g, ' ').replace(/^oa /i, 'OA ')
+  const expectedIndex: Record<string, number> = {
+    已确认事实: 1,
+    判断依据: 1,
+    分析判断: 2,
+    升级与失效条件: 2,
+    证据边界: 3,
+    下一步动作: 3,
+    下一步核验: 4,
+    'OA 流转边界': 4,
+  }
+  const index = expectedIndex[title] ?? Number(match[1])
+  return `（${index}）${title}：${stripSourceOutlineMarkers(value.slice(match[0].length))}`
+}
+
+function canonicalizeAnswerLineOrder(lines: string[]) {
+  const heading = new RegExp(`^（[1-4]）(${ANSWER_HEADING_PATTERN})：`, 'i')
+  const titles = lines.flatMap((line) => {
+    const match = line.match(heading)
+    return match ? [match[1].replace(/\s+/g, ' ').replace(/^oa /i, 'OA ')] : []
+  })
+  const scheme = ANSWER_HEADING_SCHEMES.find((candidate) =>
+    candidate.length === titles.length
+    && candidate.every((title) => titles.filter((item) => item === title).length === 1))
+  if (!scheme) return lines
+
+  const leading: string[] = []
+  const sections = new Map<string, string>()
+  let currentTitle = ''
+  lines.forEach((line) => {
+    const match = line.match(heading)
+    if (match) {
+      currentTitle = match[1].replace(/\s+/g, ' ').replace(/^oa /i, 'OA ')
+      sections.set(currentTitle, line)
+      return
+    }
+    if (currentTitle) {
+      const current = sections.get(currentTitle) ?? ''
+      const separator = /[。！？；;：:]$/.test(current) ? '' : '；'
+      sections.set(currentTitle, `${current}${separator}${line}`)
+    } else {
+      leading.push(line)
+    }
+  })
+  return [
+    leading.join(''),
+    ...scheme.map((title) => sections.get(title) ?? ''),
+  ]
     .filter(Boolean)
+}
+
+function structuredAnswerLines(value: string) {
+  const withoutMarkdown = stripAnswerMarkdown(value)
+    .replace(
+      new RegExp(`\\s+(?=(?:[（(]?\\s*[1-4]\\s*[）)）]?\\s*[、.．]?)?\\s*${ANSWER_HEADING_PATTERN}\\s*[：:])`, 'gi'),
+      '\n',
+    )
+  return canonicalizeAnswerLineOrder(withoutMarkdown
+    .split(/\n+/)
+    .map((line) => normalizeAnswerHeading(line.trim()))
+    .filter(Boolean))
+}
+
+function answerParagraphs(answer: ProjectQaDraftAnswer) {
+  const paragraphs = structuredAnswerLines(answer.answer)
   if (!paragraphs.length) {
     paragraphs.push('现有证据不足以形成确定结论，需取得对应原件、明细数据或相关责任人访谈后判断。')
   }
@@ -201,7 +264,6 @@ export function makeProjectQaFileNames(projectName: string, mode: string, timest
   const base = `${safeName(projectName)}_${safeName(mode)}_${timestamp}`
   return {
     docx: `${base}.docx`,
-    pdf: `${base}.pdf`,
   }
 }
 
@@ -255,21 +317,18 @@ export async function generateProjectQaDocx(input: {
           size: 24,
           color: '000000',
         }),
-        // LibreOffice 对连续中文目录段落偶发把下一段接在同一视觉行；
-        // 显式行结束保证每个 Qn 独占一行起点。
-        new TextRun({ text: '', break: 1 }),
       ],
     }))
   })
-
   input.content.questions.forEach((question, globalIndex) => {
     const answer = input.content.answers.find((item) => item.questionId === question.id)
-    children.push(questionParagraph(globalIndex, question.question))
+    // 目录必须完整结束后再进入正文；不在目录中间人为拆页，也不重复标题。
+    children.push(questionParagraph(globalIndex, question.question, globalIndex === 0))
     children.push(...answerParagraphs(answer ?? {
       questionId: question.id,
       category: question.category,
       question: question.question,
-      answer: '本题回答生成异常，现阶段无法形成确定结论；需重新执行项目资料与公开信息核验。',
+      answer: '本题回答生成异常，现阶段无法形成确定结论；需重新核验项目材料并将结果补充入项目资料库。',
       sourceIndexes: [],
       supportingQuotes: [],
       confidenceStatus: '证据不足',
@@ -277,10 +336,35 @@ export async function generateProjectQaDocx(input: {
     }))
   })
 
+  const makeHeader = () => new Header({
+    children: [new Paragraph({
+      alignment: AlignmentType.CENTER,
+      spacing: { before: 0, after: 0 },
+      children: mixedTextRuns(`${input.project.companyName || input.project.name} Q&A`, {
+        size: 18,
+        color: MUTED,
+      }),
+    })],
+  })
+  const makeFooter = () => new Footer({
+    children: [new Paragraph({
+      alignment: AlignmentType.CENTER,
+      children: [new TextRun({
+        children: [PageNumber.CURRENT],
+        font: font(LATIN_FONT),
+        size: 18,
+        color: MUTED,
+      })],
+    })],
+  })
+  const page = {
+    size: { width: 11906, height: 16838 },
+    margin: { top: 1440, right: 1800, bottom: 1440, left: 1800 },
+  }
   const doc = new Document({
-    creator: 'Cybernaut Q&A Skill',
+    creator: 'Cybernaut Early-stage Lead Q&A Skill',
     title: input.content.title,
-    description: `${input.content.mode}，基于当前项目资料及联网公开信息生成`,
+    description: `${input.content.mode}内部项目投资问答，基于当前会话绑定项目的资料库生成`,
     numbering: {
       config: [{
         reference: 'qa-real-numbering',
@@ -306,36 +390,12 @@ export async function generateProjectQaDocx(input: {
       },
     },
     sections: [{
-      properties: {
-        page: {
-          size: { width: 11906, height: 16838 },
-          margin: { top: 1440, right: 1800, bottom: 1440, left: 1800 },
-        },
-      },
+      properties: { page },
       headers: {
-        default: new Header({
-          children: [new Paragraph({
-            alignment: AlignmentType.CENTER,
-            spacing: { before: 0, after: 0 },
-            children: mixedTextRuns(`${input.project.companyName || input.project.name} Q&A`, {
-              size: 18,
-              color: MUTED,
-            }),
-          })],
-        }),
+        default: makeHeader(),
       },
       footers: {
-        default: new Footer({
-          children: [new Paragraph({
-            alignment: AlignmentType.CENTER,
-            children: [new TextRun({
-              children: [PageNumber.CURRENT],
-              font: font(LATIN_FONT),
-              size: 18,
-              color: MUTED,
-            })],
-          })],
-        }),
+        default: makeFooter(),
       },
       children,
     }],
@@ -350,51 +410,6 @@ export async function generateProjectQaDocx(input: {
     templateCorpusSha256: input.templateProfile.corpusSha256,
     documentSha256: createHash('sha256').update(buffer).digest('hex'),
   }
-}
-
-export async function convertProjectQaDocxToPdf(input: {
-  docxPath: string
-  pdfPath: string
-}) {
-  const outputDir = path.dirname(input.pdfPath)
-  await mkdir(outputDir, { recursive: true })
-  const profileDir = path.join(outputDir, `.qa-lo-profile-${path.basename(input.pdfPath, '.pdf')}`)
-  await mkdir(profileDir, { recursive: true })
-  const soffice = process.env.SOFFICE_BIN || 'soffice'
-  const fontconfigFile = await resolveQaFontconfigFile(soffice)
-  try {
-    await execFileAsync(soffice, [
-      `-env:UserInstallation=${pathToFileURL(profileDir).href}`,
-      '--headless',
-      '--convert-to',
-      'pdf:writer_pdf_Export',
-      '--outdir',
-      outputDir,
-      input.docxPath,
-    ], {
-      timeout: 120000,
-      maxBuffer: 2 * 1024 * 1024,
-      env: {
-        ...process.env,
-        // LibreOffice 在 C locale 下会把有效的 CJK 字体当作缺字字体。
-        // 显式指定中文 UTF-8 locale，保证 Word 与 PDF 的中文渲染一致。
-        LANG: QA_DOCUMENT_LOCALE,
-        LC_ALL: QA_DOCUMENT_LOCALE,
-        ...(fontconfigFile ? { FONTCONFIG_FILE: fontconfigFile } : {}),
-      },
-    })
-    const generatedPath = path.join(
-      outputDir,
-      `${path.basename(input.docxPath, path.extname(input.docxPath))}.pdf`,
-    )
-    if (path.resolve(generatedPath) !== path.resolve(input.pdfPath)) {
-      const buffer = await readFile(generatedPath)
-      await writeFile(input.pdfPath, buffer)
-    }
-  } finally {
-    await rm(profileDir, { recursive: true, force: true }).catch(() => {})
-  }
-  return inspectProjectQaPdf(input.pdfPath)
 }
 
 export async function inspectProjectQaDocx(
@@ -412,6 +427,71 @@ export async function inspectProjectQaDocx(
   if (new Set(questionLabels).size < expected.questionCount) {
     throw new Error(`Q&A DOCX 问题数量不足：${new Set(questionLabels).size}/${expected.questionCount}`)
   }
+  if (visibleText.includes('问题目录（续）')) {
+    throw new Error('Q&A DOCX 不得在固定题号处拆分目录或重复目录标题')
+  }
+  const expectedLabels = Array.from(
+    { length: expected.questionCount },
+    (_, index) => `Q${index + 1}：`,
+  )
+  const secondQ1Index = questionLabels.findIndex((label, index) => index > 0 && label === 'Q1：')
+  const directoryLabels = secondQ1Index > 0 ? questionLabels.slice(0, secondQ1Index) : []
+  const bodyLabels = secondQ1Index > 0
+    ? questionLabels.slice(secondQ1Index, secondQ1Index + expected.questionCount)
+    : []
+  if (
+    directoryLabels.join('|') !== expectedLabels.join('|')
+    || bodyLabels.join('|') !== expectedLabels.join('|')
+  ) {
+    throw new Error('Q&A DOCX 目录或正文题目顺序错误')
+  }
+  const labelMatches = [...visibleText.matchAll(/Q\d+[：:]/g)]
+  const bodyStartMatchIndex = labelMatches.findIndex((match, index) =>
+    index > 0 && match[0] === 'Q1：')
+  const bodyMatches = bodyStartMatchIndex >= 0
+    ? labelMatches.slice(bodyStartMatchIndex, bodyStartMatchIndex + expected.questionCount)
+    : []
+  bodyMatches.forEach((match, index) => {
+    const start = match.index ?? 0
+    const end = bodyMatches[index + 1]?.index ?? visibleText.length
+    const answerText = visibleText.slice(start, end)
+    const heading = new RegExp(
+      `（([1-4])）(${ANSWER_HEADING_PATTERN})：`,
+      'gi',
+    )
+    const actual = [...answerText.matchAll(heading)].map((headingMatch) => ({
+      index: Number(headingMatch[1]),
+      title: headingMatch[2].replace(/\s+/g, ' ').replace(/^oa /i, 'OA '),
+    }))
+    const scheme = ANSWER_HEADING_SCHEMES.find((candidate) =>
+      candidate.some((title) => actual.some((item) => item.title === title)))
+    const valid = Boolean(
+      scheme
+      && actual.length === scheme.length
+      && actual.every((item, headingIndex) =>
+        item.index === headingIndex + 1 && item.title === scheme[headingIndex]),
+    )
+    if (!valid) {
+      const actualText = actual.map((item) => `（${item.index}）${item.title}`).join('→') || '无小标题'
+      throw new Error(`Q&A DOCX 正文 Q${index + 1} 小标题编号或顺序错误：${actualText}`)
+    }
+    const answerBodyStart = answerText.indexOf('答复：')
+    const visibleAnswerBody = answerBodyStart >= 0
+      ? answerText.slice(answerBodyStart + '答复：'.length)
+      : answerText
+    const answerWithoutSystemHeadings = visibleAnswerBody.replace(
+      new RegExp(`（[1-4]）${ANSWER_HEADING_PATTERN}：`, 'gi'),
+      '',
+    )
+    const sourceOutlineMarker = answerWithoutSystemHeadings.match(
+      /(?:[（(][一二三四五六七八九十\d]+[）)]|\d+[、.．])\s*(?=[\u3400-\u9fffA-Za-z])/,
+    )
+    if (sourceOutlineMarker) {
+      throw new Error(
+        `Q&A DOCX 正文 Q${index + 1} 含来源材料章节编号：${sourceOutlineMarker[0].trim()}`,
+      )
+    }
+  })
   const forbiddenVisibleTerms = [
     '暂无相关资料',
     '引用资料',
@@ -421,10 +501,20 @@ export async function inspectProjectQaDocx(
     '检索式：',
     'Q&A 分类：',
     '公开检索记录',
+    '京ICP备',
+    '公网安备',
+    'All Rights Reserved',
+    '英诺嘿呀助手微信号',
   ]
   const leakedTerm = forbiddenVisibleTerms.find((term) => visibleText.includes(term))
-  if (leakedTerm || /\[S\d+\]/.test(visibleText)) {
-    throw new Error(`Q&A 正文泄露禁止展示的审计或占位内容：${leakedTerm ?? '来源编号'}`)
+  const leakedSourceIndex = /\[S\d+\]/.test(visibleText)
+  const leakedMarkdown = /\*\*|__|```/.test(visibleText)
+  if (leakedTerm || leakedSourceIndex || leakedMarkdown) {
+    throw new Error(
+      `Q&A 正文泄露禁止展示的审计、页面框架或格式标记：${
+        leakedTerm ?? (leakedSourceIndex ? '来源编号' : 'Markdown 标记')
+      }`,
+    )
   }
   return {
     qualityStatus: 'passed' as const,
@@ -435,40 +525,13 @@ export async function inspectProjectQaDocx(
       encodingClean: true,
       categoryCount: expected.categoryCount,
       questionCount: expected.questionCount,
+      directoryCompleteBeforeBody: true,
+      subheadingOrderValid: true,
+      sourceOutlineNumberingAbsent: true,
       visibleAuditAppendixAbsent: true,
       placeholderAnswerAbsent: true,
-    },
-  }
-}
-
-export async function inspectProjectQaPdf(filePath: string) {
-  const buffer = await readFile(filePath)
-  if (buffer.length < 2000 || buffer.subarray(0, 5).toString('ascii') !== '%PDF-') {
-    throw new Error('Q&A PDF 为空、损坏或不是有效 PDF')
-  }
-  const searchablePdf = buffer.toString('latin1').replace(/\s+/g, '')
-  const configuredFonts = [BODY_FONT, HEADING_FONT]
-    .map((value) => value.replace(/[^a-z0-9]/gi, ''))
-    .filter(Boolean)
-  const cjkFontPattern = new RegExp(
-    process.env.AI_QA_CJK_FONT_PATTERN
-      || 'Hiragino|Noto(?:Sans|Serif)?CJK|SourceHan|Songti|Heiti|PingFang|SimSun|SimHei|WenQuanYi|DroidSansFallback|ArialUnicode',
-    'i',
-  )
-  const cjkFontEmbedded = configuredFonts.some((fontName) =>
-    searchablePdf.toLowerCase().includes(fontName.toLowerCase()))
-    || cjkFontPattern.test(searchablePdf)
-  if (!cjkFontEmbedded) {
-    throw new Error('Q&A PDF 未嵌入可识别的 CJK 字体，拒绝交付可能出现方框字的文件')
-  }
-  return {
-    qualityStatus: 'passed' as const,
-    metadata: {
-      bytes: buffer.length,
-      pdfHeaderValid: true,
-      fixedLayout: true,
-      cjkFontEmbedded,
-      pdfSha256: createHash('sha256').update(buffer).digest('hex'),
+      markdownDecorationAbsent: true,
+      webPageChromeAbsent: true,
     },
   }
 }

@@ -4,6 +4,11 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import JSZip from 'jszip'
 import {
+  annotateDueDiligencePendingAfterResearch,
+  composeBusinessContent,
+  DUE_DILIGENCE_GENERATION_GROUPS,
+  dueDiligenceContentQualityIssues,
+  dueDiligencePendingResearchTopics,
   finalizeDueDiligenceContent,
   normalizeBusinessContent,
   type BusinessContent,
@@ -15,8 +20,8 @@ import {
   generateBusinessDocx,
   generateBusinessPptx,
   generateBusinessPptxPreview,
-  renderBusinessMarkdown,
 } from '../services/aiBusinessDocumentService.js'
+import { loadAiSkill } from '../services/aiSkillService.js'
 import {
   AI_TASK_TYPES,
   AI_TEMPLATE_CATALOG,
@@ -24,10 +29,7 @@ import {
 } from '../services/aiTemplateCatalog.js'
 import { cleanCorruptedText, decodeTextBuffer } from '../services/textQualityService.js'
 import { curateEvidenceSources } from '../services/aiEvidenceQualityService.js'
-import {
-  buildDueDiligenceResearchQueries,
-  collectDueDiligencePublicEvidence,
-} from '../services/aiDueDiligenceResearchService.js'
+import { fetchDueDiligenceNetworkEvidence } from '../services/aiDueDiligenceNetworkResearchService.js'
 
 type Check = { name: string; passed: boolean; detail: string }
 
@@ -91,14 +93,6 @@ const sources: EvidenceSource[] = [
     chunkIndex: 9,
     content: '这是一条格式完整但未被任何正文发现引用的验收资料。',
   },
-  {
-    sourceType: 'public_web',
-    sourceId: 'https://example.com/company-profile',
-    sourceName: '公开信息｜示例公司公开信息',
-    chunkIndex: 0,
-    versionOrDate: '2026-06-30',
-    content: '公开网页显示示例公司已发布产品和团队介绍；该信息需结合官网或其他独立来源核验。',
-  },
 ]
 
 function findings(sectionIndex: number): BusinessFinding[] {
@@ -123,7 +117,38 @@ function findings(sectionIndex: number): BusinessFinding[] {
 
 function contentFor(type: AiBusinessTaskType): BusinessContent {
   const template = AI_TEMPLATE_CATALOG[type]
+  const dueFocus: Record<string, string> = {
+    投资概要: '客户验证、收入质量与核心权属安排',
+    公司概况: '公司主体、主营业务和发展阶段',
+    股权结构及融资历程: '股东结构、历史融资和资金到位情况',
+    公司治理与管理团队: '核心人员分工、任职稳定性和治理机制',
+    产品与核心技术: '产品能力、技术实现和知识产权边界',
+    商业模式与经营情况: '收费方式、交付流程和收入确认条件',
+    客户与商业化进展: '客户阶段、合同交付和续费回款',
+    行业概况与市场空间: '目标客户范围、采购约束和可服务空间',
+    产业链与竞争格局: '上下游依赖、替代方案和具名竞品差异',
+    财务分析: '历史收入、成本费用和现金消耗',
+    估值合理性分析: '融资口径、可比交易和估值前提',
+    投资方案: '推进前提、责任分工和下一审批动作',
+    投资亮点: '产品差异、客户验证和资本关注信号',
+    法律合规与资质: '主体登记、业务资质和争议风险',
+    风险分析: '可能改变推进结论的触发条件和缓释动作',
+    后续核验事项: '需要原件或相关主体确认的重大未决事项',
+  }
   const tablesFor = (title: string): BusinessTable[] => {
+    if (type === 'due_diligence_report' && title === '财务分析') {
+      return [{
+        title: '历史财务摘要',
+        unit: '万元',
+        columns: ['项目', '2025年', '2024年'],
+        rows: [
+          ['营业收入', '2,000', '1,200'],
+          ['净利润', '120', '-100'],
+        ],
+        status: '资料记载',
+        sourceIndexes: [1],
+      }]
+    }
     if (type !== 'investment_proposal') return []
     if (title === '（六）财务摘要') {
       return [{
@@ -152,13 +177,45 @@ function contentFor(type: AiBusinessTaskType): BusinessContent {
   }
   const raw: BusinessContent = {
     title: `${project.name}${template.label}`,
-    executiveSummary: `本初稿采用公司标准模板，依据截至 ${sourceCutoffDate} 的脱敏证据形成。资料记载、AI 推断、待核验事项及资料缺口已分开标识，所有结论仍须业务审核。`,
-    sections: template.sections.map((title, index) => ({
-      title,
-      summary: `${title}按照 docs 中可编辑主样本提炼的章节结构生成。`,
-      findings: findings(index),
-      tables: tablesFor(title),
-    })),
+    executiveSummary: type === 'due_diligence_report'
+      ? `阶段与推进建议：继续跟踪。杭州示例科技已形成企业知识管理软件产品和订阅加实施服务的商业路径，但客户合同、收入确认、续费回款及核心权属安排尚不足以支持进入下一审批环节。建议优先核对重点客户从试用到合同、交付、验收和回款的完整链条，同时确认核心团队任职、知识产权归属及本轮融资文件；上述事项完成后再评估是否申请进入下一阶段。`
+      : `本初稿采用公司标准模板，依据截至 ${sourceCutoffDate} 的脱敏证据形成。资料记载、AI 推断、待核验事项及资料缺口已分开标识，所有结论仍须业务审核。`,
+    sections: template.sections.map((title, index) => {
+      if (type !== 'due_diligence_report') {
+        return {
+          title,
+          summary: `${title}按照 docs 中可编辑主样本提炼的章节结构生成。`,
+          findings: findings(index),
+          tables: tablesFor(title),
+        }
+      }
+      const focus = dueFocus[title]
+      const sectionFindings: BusinessFinding[] = [
+        {
+          text: `杭州示例科技围绕企业知识管理软件推进${focus}，相关事项已纳入本轮尽调核查范围。`,
+          status: '资料记载',
+          sourceIndexes: [index % 4],
+        },
+        {
+          text: `${focus}将直接影响项目由尽调阶段进入下一审批环节的条件设置，投资团队应据此安排核验优先级和责任分工。`,
+          status: 'AI推断',
+          sourceIndexes: [0, 1],
+        },
+      ]
+      if (title === '公司治理与管理团队') {
+        sectionFindings.push({
+          text: '核心团队成员的完整任职经历及知识产权贡献关系仍需取得劳动合同、履历证明和权属文件确认。',
+          status: '待核验',
+          sourceIndexes: [],
+        })
+      }
+      return {
+        title,
+        summary: `${focus}直接关系到杭州示例科技能否由尽调阶段进入下一审批环节。`,
+        findings: sectionFindings,
+        tables: tablesFor(title),
+      }
+    }),
     highlights: ['产品定位较清晰，但商业证据仍需补强', '业务模式具备可讨论基础，尚不能作为已核验结论', '任务产物保留模板版本和来源定位'],
     risks: ['关键财务及客户数据尚未经独立核验', '法律合规结论必须由法务审核', '模型生成内容不得替代最终投资决策'],
     missing: ['审计口径财务底稿', '核心客户合同及访谈记录', '工商、知识产权及合规原件'],
@@ -195,6 +252,150 @@ async function main() {
   await mkdir(outputDir, { recursive: true })
   const checks: Check[] = []
   const artifacts: string[] = []
+  const dueDiligenceGroupedSections = DUE_DILIGENCE_GENERATION_GROUPS
+    .flatMap((group) => [...group.sections])
+  assert(
+    checks,
+    'AI-010 八个章组完整覆盖且只覆盖十六个固定模块',
+    DUE_DILIGENCE_GENERATION_GROUPS.length === 8
+      && DUE_DILIGENCE_GENERATION_GROUPS.every((group) => group.sections.length <= 4)
+      && dueDiligenceGroupedSections.length === AI_TEMPLATE_CATALOG.due_diligence_report.sections.length
+      && dueDiligenceGroupedSections.every((title, index) =>
+        title === AI_TEMPLATE_CATALOG.due_diligence_report.sections[index])
+      && new Set(dueDiligenceGroupedSections).size === dueDiligenceGroupedSections.length,
+    '单次最多四个模块；合并顺序与模板十六模块完全一致',
+  )
+  const dueDiligenceSkill = await loadAiSkill('write-due-diligence-report')
+  const requestedChapterGroups: string[][] = []
+  const progressEvents: Array<{ completedChapters: number; phase: string }> = []
+  let productChapterTruncated = false
+  const segmentedContent = await composeBusinessContent({
+    type: 'due_diligence_report',
+    template: AI_TEMPLATE_CATALOG.due_diligence_report,
+    skill: dueDiligenceSkill,
+    project,
+    sources,
+    sourceCutoffDate,
+    parameters: { diligenceScope: '商业尽调' },
+    dueDiligencePass: 'gap-analysis',
+    dueDiligenceRuntime: {
+      concurrency: 3,
+      fetchImpl: async (_input, init) => {
+        const body = JSON.parse(String(init?.body ?? '{}')) as {
+          messages?: Array<{ role?: string; content?: string }>
+        }
+        const systemPrompt = body.messages?.find((message) => message.role === 'system')?.content ?? ''
+        if (systemPrompt.includes('形成不重复正文的决策摘要')) {
+          return new Response(JSON.stringify({
+            choices: [{
+              finish_reason: 'stop',
+              message: {
+                content: JSON.stringify({
+                  title: '杭州示例科技有限公司尽调报告',
+                  executiveSummary: '阶段与推进建议：继续跟踪。项目已形成企业知识管理软件与订阅加实施服务的业务方向，产品能力和团队分工仍需以原始记录交叉确认；客户合同、交付验收、收入确认、续费回款、知识产权权属及本轮融资文件可能改变阶段判断。建议依次核对工商与权属、重点客户完整交易链条、历史财务和资金用途，在关键事项闭环后再决定是否申请立项。',
+                  executiveSummarySourceIndexes: [0, 1],
+                  highlights: ['企业知识管理软件已形成明确应用方向'],
+                  risks: ['客户交易链条和权属边界仍需核验'],
+                }),
+              },
+            }],
+          }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+        }
+        const matched = systemPrompt.match(/sections 必须且只能按指定顺序返回：(.+)。/)
+        const sectionTitles = matched?.[1].split('、').filter(Boolean) ?? []
+        requestedChapterGroups.push(sectionTitles)
+        if (sectionTitles.length === 1
+          && sectionTitles[0] === '产品与核心技术'
+          && !productChapterTruncated) {
+          productChapterTruncated = true
+          return new Response(JSON.stringify({
+            choices: [{
+              finish_reason: 'length',
+              message: { content: '{"sections":[' },
+            }],
+          }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+        }
+        return new Response(JSON.stringify({
+          choices: [{
+            finish_reason: 'stop',
+            message: {
+              content: JSON.stringify({
+                sections: sectionTitles.map((title) => ({
+                  title,
+                  summary: `${title}的关键事实和投资影响需结合原始文件完成交叉确认。`,
+                  findings: [{
+                    text: `${title}：应核对具名主体、时间、关系及原始凭证，并据此判断该事项是否改变项目推进条件。`,
+                    status: '待核验',
+                    sourceIndexes: [],
+                  }],
+                  tables: [],
+                })),
+              }),
+            },
+          }],
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      },
+      onProgress: async (event) => {
+        progressEvents.push({
+          completedChapters: event.completedChapters,
+          phase: event.phase,
+        })
+      },
+    },
+  })
+  assert(
+    checks,
+    'AI-010 截断时只重试受影响章组且从未请求整篇十六模块 JSON',
+    requestedChapterGroups.length === 9
+      && requestedChapterGroups.every((group) => group.length >= 1 && group.length <= 4)
+      && requestedChapterGroups.filter((group) =>
+        group.length === 1 && group[0] === '产品与核心技术').length === 2
+      && DUE_DILIGENCE_GENERATION_GROUPS.every((expected) =>
+        requestedChapterGroups.some((actual) =>
+          actual.join('、') === expected.sections.join('、')))
+      && segmentedContent.sections.every((section, index) =>
+        section.title === AI_TEMPLATE_CATALOG.due_diligence_report.sections[index])
+      && segmentedContent.generationAudit?.blueprintVersion === 'due-diligence-eight-chapter-v1'
+      && progressEvents.some((event) => event.phase === 'regenerating')
+      && progressEvents.some((event) => event.completedChapters === 8),
+    '产品与技术首轮截断后仅该章重试；其他章组只请求一次，合并后仍为模板规定的 16 模块',
+  )
+  let researchRequestBody = ''
+  const researchProbe = await fetchDueDiligenceNetworkEvidence({
+    project,
+    sourceCutoffDate,
+    pendingTopics: ['核心团队：核验创始人教育及任职经历'],
+    fetchImpl: async (_input, init) => {
+      researchRequestBody = String(init?.body ?? '')
+      return new Response(JSON.stringify({
+        result: {
+          searchEvidence: [{
+            query: '杭州示例科技有限公司 创始人 教育 任职',
+            title: '杭州示例科技核心团队介绍',
+            snippet: '公司官网披露创始人的教育及任职经历。',
+            url: 'https://example.com/team',
+            publisher: '示例科技',
+            publishedAt: '2026-06-01',
+            reliability: '公司官网',
+          }],
+        },
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    },
+    now: new Date('2026-07-24T08:00:00Z'),
+  })
+  assert(
+    checks,
+    'AI-010 联网检索 Agent 接收待核验问题并形成可缓存证据',
+    researchRequestBody.includes('核心团队：核验创始人教育及任职经历')
+      && researchProbe.audit.provider === 'flue_intel_collect'
+      && researchProbe.audit.status === 'succeeded'
+      && researchProbe.sources[0]?.sourceType === 'public_web_agent_search'
+      && researchProbe.sources[0]?.locator === 'https://example.com/team',
+    JSON.stringify(researchProbe.audit),
+  )
   const utf16Probe = Buffer.concat([
     Buffer.from([0xff, 0xfe]),
     Buffer.from('中文编码验收', 'utf16le'),
@@ -261,50 +462,27 @@ async function main() {
       && curatedProbe.rejected.length >= 2,
     `采用 ${curatedProbe.usable.length} 条，排除 ${curatedProbe.rejected.length} 条`,
   )
-  const diligenceQueries = buildDueDiligenceResearchQueries({
-    projectName: project.name,
-    companyName: project.companyName,
-    industry: project.industry,
-  })
   assert(
     checks,
-    'AI-010 尽调联网研究覆盖八类主题',
-    diligenceQueries.length === 8
-      && ['工商与股权', '团队与治理', '产品与技术', '客户与经营', '行业与市场', '融资与估值', '资质与合规', '风险与动态']
-        .every((topic) => diligenceQueries.some((query) => query.topic === topic)),
-    diligenceQueries.map((query) => query.topic).join('、'),
+    '文档任务以当前项目资料库证据为生成基础',
+    sources.some((source) => source.sourceType === 'file')
+      && sources.some((source) => source.sourceType === 'meeting')
+      && !sources.some((source) => source.sourceType.startsWith('public_web')),
+    `${sources.length} 条项目证据`,
   )
-  const diligenceResearch = await collectDueDiligencePublicEvidence(
-    {
-      projectName: project.name,
-      companyName: project.companyName,
-      industry: project.industry,
-      sourceCutoffDate,
-    },
-    async () => new Response(JSON.stringify({
-      results: [{
-        title: '示例公司公开信息',
-        content: '该公开网页包含工商、团队、产品、市场和融资等可用于初步交叉核验的信息。',
-        url: 'https://example.com/company-profile#overview',
-        publishedDate: '2026-06-30',
-      }],
-    }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
-  )
-  assert(
-    checks,
-    'AI-010 联网结果转为内部可追溯证据并按网址去重',
-    diligenceResearch.attemptedQueries === 8
-      && diligenceResearch.successfulQueries === 8
-      && diligenceResearch.sources.length === 1
-      && diligenceResearch.sources[0].sourceType === 'public_web'
-      && diligenceResearch.sources[0].sourceId === 'https://example.com/company-profile',
-    `${diligenceResearch.sources.length} 条公开证据`,
-  )
-
   for (const type of AI_TASK_TYPES.filter((type) =>
     requestedTypes.size === 0 || requestedTypes.has(type))) {
     const template = AI_TEMPLATE_CATALOG[type]
     assert(checks, `${type} 主样本存在`, existsSync(template.referencePath), template.referencePath)
+    if (type === 'project_qa') {
+      assert(
+        checks,
+        'AI-011 Q&A 由独立 DOCX Pipeline 验收',
+        template.outputFormat === 'docx',
+        '项目 Q&A 使用独立可编辑 DOCX 生成器',
+      )
+      continue
+    }
     const content = contentFor(type)
     if (type === 'compliance_statement') {
       const analysis = content.sections.find((section) => section.title === '投资情形分析')
@@ -419,6 +597,96 @@ async function main() {
         '四章、三个公司子节、无模板外正文板块',
       )
     } else if (type === 'due_diligence_report') {
+      const pendingTopics = dueDiligencePendingResearchTopics(content)
+      assert(
+        checks,
+        'AI-010 将待核验 finding 转成定向联网检索问题',
+        pendingTopics.length > 0
+          && pendingTopics.length <= 16
+          && pendingTopics.every((topic) => topic.includes('：')),
+        `${pendingTopics.length} 个具体检索问题`,
+      )
+      const annotatedPending = annotateDueDiligencePendingAfterResearch(content, 'no_results')
+      const annotatedPendingSection = annotatedPending.sections
+        .find((section) => section.title === '后续核验事项')
+      assert(
+        checks,
+        'AI-010 联网后只集中保留重大后续核验事项',
+        Boolean(annotatedPendingSection)
+          && (annotatedPendingSection?.findings.length ?? 0) > 0
+          && (annotatedPendingSection?.findings.length ?? 0) <= 8
+          && annotatedPending.sections
+            .filter((section) => section.title !== '后续核验事项')
+            .every((section) => section.findings.every((finding) => finding.status !== '待核验'))
+          && !/项目资料库|联网检索|证据不足/.test(annotatedPendingSection!.summary),
+        `${annotatedPendingSection?.findings.length ?? 0} 项集中保留`,
+      )
+      const qualityIssues = dueDiligenceContentQualityIssues(content, template.sections)
+      assert(
+        checks,
+        'AI-010 通过投资经理可读性门禁',
+        qualityIssues.length === 0,
+        qualityIssues.join('；') || '无过程性空话、资料分片、孤立数字或稀疏章节',
+      )
+      const badQualityIssues = dueDiligenceContentQualityIssues({
+        ...content,
+        executiveSummary: '本初稿依据现有资料形成，结论强度以所列状态和引用为准。',
+        sections: content.sections.map((section, index) => index === 1
+          ? {
+              ...section,
+              summary: '现有资料可支持初步梳理。',
+              findings: [{
+                text: '1000',
+                status: '资料记载',
+                sourceIndexes: [0],
+              }],
+            }
+          : section),
+      }, template.sections)
+      assert(
+        checks,
+        'AI-010 拦截问题样本中的过程性空话和原始资料分片',
+        badQualityIssues.some((issue) => issue.includes('资料处理过程'))
+          && badQualityIssues.some((issue) => issue.includes('资料分片')),
+        badQualityIssues.join('；'),
+      )
+      const misplacedContentIssues = dueDiligenceContentQualityIssues({
+        ...content,
+        sections: content.sections.map((section) => {
+          if (section.title === '产品与核心技术') {
+            return {
+              ...section,
+              summary: '页面正文摘录：公司详情、首页、权威榜和行业数据。',
+              findings: [{
+                text: '智灵动力公司详情、产品介绍、企业入驻、小程序、登入、关注、已关注。',
+                status: '资料记载',
+                sourceIndexes: [0],
+              }],
+            }
+          }
+          if (section.title === '财务分析') {
+            return {
+              ...section,
+              summary: '融资估值与投资方信息如下。',
+              findings: [{
+                text: '1亿元',
+                status: '资料记载',
+                sourceIndexes: [0],
+              }],
+              tables: [],
+            }
+          }
+          return section
+        }),
+      }, template.sections)
+      assert(
+        checks,
+        'AI-010 拦截产品网页残留、模块错配和伪财务分析',
+        misplacedContentIssues.some((issue) => issue.includes('网页导航'))
+          && misplacedContentIssues.some((issue) => issue.includes('财务分析的正文主题与标题不匹配'))
+          && misplacedContentIssues.some((issue) => issue.includes('资料分片')),
+        misplacedContentIssues.join('；'),
+      )
       assert(checks, `${type} 章节完整`, template.sections.every((section) => xml.includes(section)), template.sections.join('、'))
       assert(
         checks,
@@ -427,15 +695,63 @@ async function main() {
           && !documentXml.includes('责任声明')
           && !documentXml.includes('引用资料')
           && !documentXml.includes('免责声明'),
-        '报告在后续核验事项结束；来源仅留存在系统审计记录',
+        '报告在 8.2 后续核验事项结束；来源仅留存在系统审计记录',
       )
       assert(
         checks,
-        'AI-010 保留内部来源索引和审慎核验状态',
-        documentXml.includes('资料记载')
-          && documentXml.includes('待核验')
-          && documentXml.includes('来源明细保存在系统审计记录中'),
-        '资料记载 / 待核验 / 内部审计留痕',
+        'AI-010 输出供投资决策使用的项目推进结论',
+        (documentXml.match(/阶段与推进建议：继续跟踪/g) || []).length >= 2,
+        '执行摘要与投资概要均使用同一个项目推进结论',
+      )
+      assert(
+        checks,
+        'AI-010 正式正文不显示内部证据状态标签',
+        !documentXml.includes('【资料记载】')
+          && !documentXml.includes('【AI推断】')
+          && !documentXml.includes('【待核验】')
+          && !documentXml.includes('来源明细保存在系统审计记录中'),
+        '状态和来源索引仅保存在系统审计结构',
+      )
+      assert(
+        checks,
+        'AI-010 正文不向投资经理解释资料处理过程',
+        [
+          '现有资料',
+          '现有材料',
+          '项目资料库',
+          '本节',
+          '证据不足',
+          '结论强度',
+          '初步梳理',
+          '检索问题',
+          '联网检索',
+        ].every((phrase) => !documentXml.includes(phrase)),
+        '正文只写项目事实、投资含义、限制和动作',
+      )
+      assert(
+        checks,
+        'AI-010 使用模板式原生表格呈现结构化数据',
+        documentXml.includes('历史财务摘要')
+          && documentXml.includes('营业收入')
+          && documentXml.includes('净利润'),
+        '财务等行列数据使用可编辑 Word 表格',
+      )
+      assert(
+        checks,
+        'AI-010 财务表使用模板式灰表头、左对齐表题和数字右对齐',
+        /<w:pStyle w:val="91"\/>[\s\S]*?<w:t[^>]*>历史财务摘要<\/w:t>/.test(documentXml)
+          && documentXml.includes('w:fill="E7E6E6"')
+          && documentXml.includes('<w:jc w:val="right"/>'),
+        '财务表题沿用正文样式，单位独立，浅灰表头，数值列右对齐',
+      )
+      assert(
+        checks,
+        'AI-010 小结和分析先于概览及数据表',
+        documentXml.indexOf('客户验证、收入质量与核心权属安排直接关系')
+          < documentXml.indexOf('公司主体')
+          && documentXml.indexOf('历史收入、成本费用和现金消耗将直接影响')
+            < documentXml.indexOf('历史财务摘要'),
+        '先给判断与分析，再呈现概览表或数据表',
       )
     } else if (type === 'investment_proposal') {
       assert(checks, `${type} 章节完整`, template.sections.every((section) => xml.includes(section)), template.sections.join('、'))
@@ -557,13 +873,13 @@ async function main() {
         'AI-010 使用模板八章与十六个二级模块',
         [
           '1、投资概要',
-          '2、公司概况',
+          '2、公司与团队',
           '3、产品与技术',
-          '4、业务情况',
-          '5、行业和市场',
-          '6、未来发展规划',
-          '7、投资方案',
-          '8、风险提示与对策',
+          '4、业务与商业化',
+          '5、行业与竞争',
+          '6、财务与估值',
+          '7、投资判断',
+          '8、风险与核验',
           ...template.sections,
         ].every((title) => documentXml.includes(title)),
         '目录与正文均采用八章、十六模块层级',
@@ -573,8 +889,33 @@ async function main() {
         'AI-010 正文标题与目录使用相同编号',
         /<w:pStyle w:val="79"\/>[\s\S]*?<w:t[^>]*>1、投资概要<\/w:t>/.test(documentXml)
           && /<w:pStyle w:val="86"\/>[\s\S]*?<w:t[^>]*>2\.1 公司概况<\/w:t>/.test(documentXml)
-          && /<w:pStyle w:val="79"\/>[\s\S]*?<w:t[^>]*>8、风险提示与对策<\/w:t>/.test(documentXml),
+          && /<w:pStyle w:val="86"\/>[\s\S]*?<w:t[^>]*>2\.4 法律合规与资质<\/w:t>/.test(documentXml)
+          && /<w:pStyle w:val="86"\/>[\s\S]*?<w:t[^>]*>8\.2 后续核验事项<\/w:t>/.test(documentXml)
+          && /<w:pStyle w:val="79"\/>[\s\S]*?<w:t[^>]*>8、风险与核验<\/w:t>/.test(documentXml),
         '一级标题 1、～8、；二级标题 2.1 等与目录一致',
+      )
+      const orderedHeadings = [
+        '2.3 公司治理与管理团队',
+        '2.4 法律合规与资质',
+        '3.1 产品与核心技术',
+        '4.1 商业模式与经营情况',
+        '4.2 客户与商业化进展',
+        '5.1 行业概况与市场空间',
+        '5.2 产业链与竞争格局',
+        '6.1 财务分析',
+        '6.2 估值合理性分析',
+        '7.1 投资方案',
+        '7.2 投资亮点',
+        '8.1 风险分析',
+        '8.2 后续核验事项',
+      ]
+      assert(
+        checks,
+        'AI-010 二级标题按投资经理阅读顺序排列',
+        orderedHeadings.every((heading, index) => index === 0
+          || documentXml.lastIndexOf(orderedHeadings[index - 1])
+            < documentXml.lastIndexOf(heading)),
+        orderedHeadings.join(' → '),
       )
       assert(
         checks,
@@ -585,7 +926,7 @@ async function main() {
           && documentXml.includes('w:dirty="true"')
           && dueSettingsXml.includes('<w:updateFields')
           && (documentXml.match(/>1、投资概要<\/w:t>/g) || []).length >= 2
-          && (documentXml.match(/>8、风险提示与对策<\/w:t>/g) || []).length >= 2,
+          && (documentXml.match(/>8、风险与核验<\/w:t>/g) || []).length >= 2,
         'TOC 域覆盖一、二级标题，并含首次打开可读的缓存条目；更新后生成页码和点引导符',
       )
       assert(
@@ -607,7 +948,7 @@ async function main() {
           && documentXml.includes(`w:eastAsia="${expectedCoverFont}"`)
           && ['尽', '职', '调', '查', '报', '告'].every((character) =>
             new RegExp(`<w:t[^>]*>${character}</w:t>`).test(documentXml)),
-        `公司名及六字纵排为 ${expectedCoverFont} 22 pt；年月和机构为 ${expectedCoverFont} 16 pt`,
+        `公司名及“尽职调查报告”六字纵排为 ${expectedCoverFont} 22 pt；年月和机构为 ${expectedCoverFont} 16 pt`,
       )
       assert(
         checks,
@@ -657,27 +998,12 @@ async function main() {
           && !zip.file('word/footer1.xml'),
         'A4、上下1440/左右1800 DXA、黑体标题、宋体正文、无可见页眉页脚',
       )
-      const markdownPath = path.join(outputDir, `${prefix}.md`)
-      const markdown = renderBusinessMarkdown({ template, project, content, sources, sourceCutoffDate })
-      await writeFile(markdownPath, markdown, 'utf8')
-      artifacts.push(markdownPath)
       assert(
         checks,
-        'AI-007 Markdown 与核心规范正文结构一致',
-        ['一、公司情况介绍', '二、投资理由', '三、投资计划', '四、投资情形分析']
-          .every((title) => markdown.includes(`## ${title}`))
-          && ['## 摘要', '## 已核验事实', '## 风险提示', '## 待核验事项', '## 资料缺口', '## 免责声明', '## 引用资料']
-            .every((title) => !markdown.includes(title)),
-        markdownPath,
-      )
-      assert(
-        checks,
-        'AI-007 Markdown 与 DOCX 均隔离审计元数据',
-        !markdown.includes(template.disclaimer)
-          && !xml.includes(template.disclaimer)
-          && !markdown.includes('[S1]')
+        'AI-007 DOCX 隔离审计元数据且不生成伴生产物',
+        !xml.includes(template.disclaimer)
           && !xml.includes('[S1]'),
-        '免责声明、来源标记、风险和缺口只保留在审计元数据',
+        '免责声明、来源标记、风险和缺口只保留在审计元数据；只交付 DOCX',
       )
     }
   }

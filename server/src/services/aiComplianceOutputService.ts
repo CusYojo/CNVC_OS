@@ -181,6 +181,9 @@ export async function reviewGeneratedComplianceDocx(input: {
   const compact = compactText(visibleText)
   const paragraphs = paragraphXmls(documentXml)
   const paragraphTexts = paragraphs.map((paragraphXml) => xmlText(paragraphXml).trim())
+  const sourceOutlinePrefix =
+    /^\s*(?:[一二三四五六七八九十百]{1,4}\s*[、．]|[（(]\s*(?:[一二三四五六七八九十百]{1,4}|\d{1,2}|[A-Za-z])\s*[）)]|\d{1,3}\s*(?:[、．]|\.(?!\d)))/
+  const leakedOutlineParagraphs = paragraphTexts.filter((value) => sourceOutlinePrefix.test(value))
   if (!visibleText || visibleText.includes('\uFFFD')) {
     addIssue(issues, {
       code: 'DOCX_TEXT_INVALID',
@@ -329,6 +332,12 @@ export async function reviewGeneratedComplianceDocx(input: {
     addIssue(issues, {
       code: 'DOCX_NUMBERING_MISMATCH',
       message: 'DOCX必须包含四个一级标题、三个二级标题、五项投资理由和独立重启的七项合规核查编号',
+    })
+  }
+  if (leakedOutlineParagraphs.length) {
+    addIssue(issues, {
+      code: 'DOCX_NUMBERING_MISMATCH',
+      message: `正文残留来源材料编号：${leakedOutlineParagraphs.slice(0, 3).join('；')}`,
     })
   }
   const headerParts = Object.keys(zip.files).filter((name) => /^word\/header\d+\.xml$/.test(name))

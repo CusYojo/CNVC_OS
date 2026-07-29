@@ -1,4 +1,3 @@
-version: "3.8"
 services:
   postgres:
     image: postgres:16-alpine
@@ -16,19 +15,5 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
-  searxng:
-    image: searxng/searxng:latest
-    container_name: cybernaut-searxng
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:8888:8080"
-    environment:
-      SEARXNG_BASE_URL: http://127.0.0.1:8888/
-      SEARXNG_SECRET: ${SEARXNG_SECRET:-cybernaut-local-search-change-in-production}
-    volumes:
-      - ./infra/searxng/settings.yml:/etc/searxng/settings.yml:ro
-      - searxng-cache:/var/cache/searxng
-
 volumes:
   pgdata:
-  searxng-cache:

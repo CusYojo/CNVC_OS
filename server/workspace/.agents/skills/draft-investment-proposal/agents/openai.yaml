@@ -1,4 +1,4 @@
 interface:
   display_name: "生成投资提案"
-  short_description: "按 17 节核心规范和项目证据生成同源 Word/PDF 投资提案"
-  default_prompt: "使用 $draft-investment-proposal：先读取投资提案核心规范和模板共性，以用户明确输入、项目结构化字段和授权证据为事实边界，按标准 17 节 Blueprint 逐章生成；无依据时写“当前项目暂无相关资料。”，冲突数据标记待核验；通过内容、Word、PDF Reviewer 后交付同源文件。"
+  short_description: "资深投资经理生成内部17节投资提案"
+  default_prompt: "使用 $draft-investment-proposal，以投资中台资深投资经理身份，仅针对当前会话绑定的线索池或项目库项目，先使用本地项目资料库和已有缓存，再由 Flue 发现候选来源、LLM Gateway 打开并核验页面；只采用核验通过的证据生成内部 17 节投资提案，并结合当前阶段给出推进、暂缓或归档建议。联网失败时继续生成受限 DOCX。"

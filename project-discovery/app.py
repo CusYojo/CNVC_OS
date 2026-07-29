@@ -859,6 +859,105 @@ def is_meaningful_company_name(value: Any) -> bool:
     return bool(name) and name not in COMPANY_NAME_PLACEHOLDERS and len(name) <= 128
 
 
+GENERIC_PROJECT_SUBJECTS = {
+    "人工智能", "大模型", "机器人", "新材料", "新能源",
+    "项目", "团队", "研究团队", "实验室", "课题组", "相关项目", "某项目", "作者", "负责人",
+}
+VAGUE_PROJECT_START_RE = re.compile(
+    r"^(他|她|其|该|这|此|其中|上述|相关|目前|同时|此外|另|据|对于|关于|要求|需要|应当|必须|"
+    r"支持|推动|加强|开展|主动|曾|曾经|担任|联创|联合创始人?|并|基于|后两年|共享|未来|"
+    r"为|以|从|在|将|把|被|联合|面对|通过|围绕|聚焦|一是|二是|三是|四是)"
+)
+VAGUE_PROJECT_BODY_RE = re.compile(
+    r"(岗位记录|关键证明|证明材料|要求主动|主动适应|为核心业务|核心业务的|系统梳理|以及团队|"
+    r"进入导师课题组|共享两个学院|获颁|获评|荣获|获奖|荣誉|Award|"
+    r"等信息|等材料|等证明|等方面|等工作|带来的变化)",
+    flags=re.IGNORECASE,
+)
+VAGUE_PROJECT_END_RE = re.compile(r"(材料|记录|信息|情况|内容|要求|工作|方面|变化|问题|任务|路径|策略|证明)$")
+PROJECT_PREDICATE_RE = re.compile(
+    r"(要求|适应|指出|表示|强调|认为|提出|推动|支持|开展|实现|完成|获得|发布|宣布|提供|形成|"
+    r"建立|构建|促进|提升|加强|记录|证明|担任|任职|毕业|来自|师从|进入|共享|梳理|发表|结合)"
+)
+NUMBERED_TECH_FRAGMENT_RE = re.compile(r"^[\u4e00-\u9fffA-Za-z]{1,8}[-—–][\u4e00-\u9fffA-Za-z]{1,8}\d{1,2}$")
+GENERIC_INSTITUTION_TECH_RE = re.compile(
+    r"^(?:清华|北大|北航|上交大|复旦|浙大|中科大|哈工大).*(?:机器人|芯片|人工智能|团队|项目)$"
+)
+LOW_VALUE_PUBLIC_LEAD_RE = re.compile(
+    r"(?:院系之声.{0,30}(?:荣誉|获奖|Award)|"
+    r"(?:教授|研究员|学者).{0,30}(?:获颁|获评|荣获|获奖|Award|荣誉)|"
+    r"(?:获得|获评|入选|荣获).{0,24}(?:奖|荣誉|称号|教学团队)|"
+    r"(?:科学技术奖|科技奖|自然科学奖|技术发明奖|科技进步奖).{0,40}(?:揭晓|获奖|表彰)|"
+    r"\d+\s*项.{0,12}(?:获奖|获表彰)|"
+    r"(?:国家级|省级).{0,16}(?:教学团队|教学成果|荣誉|奖)|"
+    r"要报.{0,12}专业吗|我要不要学AI|招生(?:简章|宣传|咨询|专业|对象)?|"
+    r"培养方案|课程介绍|实验班介绍|研修班|培训班|结业证书|能力提升计划|名家面对面|"
+    r"学员企业|毕业典礼|毕业致辞|发表致辞|兼任|受聘|履新|任命|"
+    r"(?:记者|人物)?专访|人物访谈|观点访谈|深度解读|系统剖析)",
+    flags=re.IGNORECASE,
+)
+PURE_ACADEMIC_PUBLIC_LEAD_RE = re.compile(
+    r"(?:(?:课题组|团队|实验室).{0,100}(?:发表|论文|研究|揭示|破解|开发|发现|成果)|"
+    r"(?:学术成果|科研成果|研究进展|研究论文|最新研究|多项研究|两项研究).{0,100}"
+    r"(?:课题组|团队|教授|研究员|实验室|突破|发现|揭示|开发)?|"
+    r"(?:团队|课题组).{0,60}(?:算法|模型|数据|机制|通路|架构))",
+    flags=re.IGNORECASE,
+)
+COMMERCIAL_PUBLIC_LEAD_RE = re.compile(
+    r"(?:成果转化|技术转移|转化落地|产业化|中试|技术平台|工程化|技术许可|专利转让|孵化(?:成立|企业|公司)|"
+    r"创办公司|成立公司|产品获批|注册证|临床应用|应用新场景|示范应用|产业应用|"
+    r"客户验证|客户订单|采购|中标|签约|量产|营收|商业化)",
+    flags=re.IGNORECASE,
+)
+REAL_INVESTMENT_EVENT_RE = re.compile(
+    r"(?:(?:完成|宣布|获得|获).{0,16}(?:融资|投资)|(?:融资|投资).{0,16}(?:领投|跟投|交割)|"
+    r"估值.{0,12}(?:亿元|万美元|亿美元|万元)|(?:天使轮|种子轮|Pre-?A|A轮|B轮|C轮|D轮|战略融资|战略投资))",
+    flags=re.IGNORECASE,
+)
+
+
+def is_specific_project_subject_name(value: Any) -> bool:
+    name = clean_text(str(value or "")).strip("“”\"'「」『』 ,，。！？；;：:")
+    if not name or name in COMPANY_NAME_PLACEHOLDERS or name == "未命名项目":
+        return False
+    if len(name) < 2 or len(name) > 60 or name in GENERIC_PROJECT_SUBJECTS:
+        return False
+    if NUMBERED_TECH_FRAGMENT_RE.fullmatch(name):
+        return False
+    if GENERIC_INSTITUTION_TECH_RE.search(name):
+        return False
+    if re.search(r"[，。！？；;：:\n]", name):
+        return False
+    if VAGUE_PROJECT_START_RE.search(name) or VAGUE_PROJECT_BODY_RE.search(name) or VAGUE_PROJECT_END_RE.search(name):
+        return False
+    if "等" in name:
+        return False
+    if PROJECT_PREDICATE_RE.search(name) and not re.search(r"(公司|企业|项目|团队|实验室|研究院|研究中心|工程中心|课题组)$", name):
+        return False
+    if len(name) > 22 and re.search(r"(的|了|是|与|及|以|在|为|将|把|被|对于|关于|之|正在)", name):
+        return False
+    return True
+
+
+def extract_primary_news_subject(text: str) -> str:
+    """Extract the company/brand that is the subject of the opening news event."""
+    opening = clean_text(text)[:1800]
+    name_chars = r"[\u4e00-\u9fffA-Za-z0-9（）()·&＋+\-]"
+    descriptor = rf"(?:{name_chars}{{0,20}}(?:企业|公司))?"
+    event = r"(?=(?:(?:近日|日前|近期)\s*)?(?:(?:连续|已|正式)\s*)*(?:宣布)?(?:完成|获得|获|成立于|是一家))"
+    patterns = (
+        rf"(?:获悉|消息显示|公开信息显示)[，,\s]*(?:(?:近日|日前|近期)[，,\s]*)?{descriptor}\s*[「『“\"]?({name_chars}{{2,40}}?)[」』”\"]?\s*{event}",
+        rf"(?:^|[。；;\n])\s*{descriptor}\s*[「『“\"]?({name_chars}{{2,40}}?)[」』”\"]?\s*{event}",
+        rf"(?:^|[。；;\n])\s*({name_chars}{{2,30}})(?=成立于|是一家|专注于|致力于)",
+    )
+    for pattern in patterns:
+        for match in re.finditer(pattern, opening):
+            candidate = clean_text(match.group(1)).strip("“”\"'「」『』 ,，。！？；;：:")
+            if is_specific_project_subject_name(candidate):
+                return candidate
+    return ""
+
+
 def extract_company_name(item: dict, text: str) -> str:
     """Extract a legal entity only when the source contains explicit evidence.
 
@@ -922,16 +1021,45 @@ def extract_company_name(item: dict, text: str) -> str:
 def infer_project_name(item: dict, text: str) -> str:
     for field in ("project_name",):
         value = clean_text(str(item.get(field, "")))
-        if value:
+        if is_specific_project_subject_name(value):
             return value
     title = clean_text(item.get("title", ""))
     quoted = re.search(r"[“\"]([^”\"]{2,40})[”\"]", title)
-    if quoted:
+    if quoted and is_specific_project_subject_name(quoted.group(1)):
         return quoted.group(1)
-    company = re.search(r"([\u4e00-\u9fffA-Za-z0-9]{2,30}(?:科技|智能|机器人|医药|生物|材料|能源|半导体|电子|医疗|信息|数据|软件|网络|光电|先导院|研究院))(?:有限公司|公司|完成|获|宣布|近日)?", title + " " + text)
-    if company:
-        return company.group(1)
-    return title[:40] or "未命名项目"
+    news_subject = extract_primary_news_subject(text)
+    if news_subject:
+        return news_subject
+
+    # 高校成果文章容易把“超脑网络”“快速消亡”等论文概念误当成公司名。
+    # 文章明确写出实验室/课题组/负责人团队时，先使用可核验的研究主体。
+    subject_patterns = (
+        r"((?:[\u4e00-\u9fff]{2,20}(?:大学|学院|研究所|医院))[\u4e00-\u9fff·]{0,16}(?:教授|研究员|博士)?团队)",
+        r"([\u4e00-\u9fffA-Za-z0-9·]{2,30}(?:重点实验室|实验室|研究中心|工程中心|研究院|课题组))",
+        r"([\u4e00-\u9fff·]{2,6}(?:教授|研究员|博士)?团队)",
+    )
+    if item.get("source_group") == "高校公众号" or re.search(r"(?:学术成果|科研成果|课题组|实验室)", title):
+        for pattern in subject_patterns:
+            candidates = [clean_text(match.group(1)) for match in re.finditer(pattern, title + "\n" + text)]
+            candidates = [candidate for candidate in candidates if is_specific_project_subject_name(candidate)]
+            if candidates:
+                return sorted(set(candidates), key=len, reverse=True)[0]
+
+    for company in re.finditer(r"([\u4e00-\u9fffA-Za-z0-9]{2,30}(?:科技|智能|机器人|医药|生物|材料|能源|半导体|电子|医疗|信息|数据|软件|网络|光电|先导院|研究院))(?:有限公司|公司|完成|获|宣布|近日)?", title + " " + text):
+        candidate = clean_text(company.group(1))
+        if is_specific_project_subject_name(candidate):
+            return candidate
+
+    # 高校成果常以实验室、课题组或“机构 + 负责人 + 团队”为主体。
+    for pattern in subject_patterns:
+        candidates = [clean_text(match.group(1)) for match in re.finditer(pattern, title + "\n" + text)]
+        candidates = [candidate for candidate in candidates if is_specific_project_subject_name(candidate)]
+        if candidates:
+            return sorted(set(candidates), key=len, reverse=True)[0]
+
+    if is_specific_project_subject_name(title):
+        return title[:60]
+    return "未命名项目"
 
 
 def project_profile_text(item: dict) -> str:
@@ -1081,6 +1209,12 @@ def score_private_market_item(group: str, title: str, summary: str, source_name:
     has_private_signal = bool(primary_hits or private_hits or traction_hits or tech_hits or university_value_hits or "高校成果" in group)
     secondary_only = bool(secondary_hits) and not has_private_signal
     explicit_financing_flash = source_type == "36kr_financing_flash" and bool(primary_hits)
+    public_lead_text = "\n".join([title, summary[:1600]])
+    low_value_public_lead = bool(LOW_VALUE_PUBLIC_LEAD_RE.search(public_lead_text))
+    pure_academic_public_lead = bool(PURE_ACADEMIC_PUBLIC_LEAD_RE.search(public_lead_text))
+    commercial_public_lead = bool(COMMERCIAL_PUBLIC_LEAD_RE.search(public_lead_text))
+    real_investment_event = bool(REAL_INVESTMENT_EVENT_RE.search(public_lead_text))
+    has_legal_company_subject = bool(re.search(r"[\u4e00-\u9fffA-Za-z0-9（）()·&＋+\-]{2,80}(?:股份有限公司|有限责任公司|有限公司)", title))
 
     fit_score = 0
     if primary_hits:
@@ -1276,6 +1410,15 @@ def score_private_market_item(group: str, title: str, summary: str, source_name:
     filter_reasons = []
     if secondary_only:
         filter_reasons.append("主要是二级市场/上市公司交易信息，未发现明确一级市场机会。")
+    if is_university_wechat and low_value_public_lead and not (has_legal_company_subject or real_investment_event):
+        filter_reasons.append("高校来源中的获奖、教学、课程或人物任职资讯，没有明确公司、融资或估值，不构成投资线索。")
+    if (
+        is_university_wechat
+        and pure_academic_public_lead
+        and not commercial_public_lead
+        and not (has_legal_company_subject or real_investment_event)
+    ):
+        filter_reasons.append("高校来源中的纯论文或课题组研究，缺少公司主体、投资事实或成果转化信号。")
     if is_university_wechat and hard_noisy_university_content:
         filter_reasons.append("高校来源中的招生、课程、资源、活动或转载类内容，缺少可投资科技成果线索。")
     if is_university_wechat and noisy_university_content and not primary_hits:

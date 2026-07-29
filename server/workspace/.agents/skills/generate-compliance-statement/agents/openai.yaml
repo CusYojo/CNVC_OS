@@ -1,4 +1,4 @@
 interface:
   display_name: "生成合规性说明"
-  short_description: "按核心规范、项目资料与公开证据生成并完成Word/WPS兼容验收"
-  default_prompt: "使用 $generate-compliance-statement，依据核心规范、当前项目资料、用户输入和受控公开网络证据逐章生成固定五项投资理由与七项合规核查，并输出通过 Word/WPS 兼容验收的合规性说明。"
+  short_description: "资深投资经理基于当前项目生成内部合规性说明"
+  default_prompt: "使用 $generate-compliance-statement，以投资中台资深投资经理身份，仅针对当前会话绑定的线索池或项目库项目，先检索当前项目资料库，再按需由项目大模型定向补全公开证据；结合当前阶段形成合规前提、阻断项和下一步建议，并交付一份通过 Word/WPS 结构与编码检查的 DOCX。"

@@ -111,11 +111,37 @@ async function main() {
       `${docxAnalysis.analysis.analysisVersion} / ${pptxAnalysis.analysis.analysisVersion}`,
     )
     assert(
-      '固定中文 Skill 可加载并包含分析与输出规范',
+      '固定中文 Skill 可加载并包含资深投资经理角色、项目分析与输出规范',
       fixedSkill.name === AI_TEMPLATE_DRIVEN_SKILL_NAME
         && fixedSkill.referenceNames.includes('references/template-analysis-schema.md')
+        && fixedSkill.referenceNames.includes('references/evidence-workflow.md')
         && fixedSkill.referenceNames.includes('references/output-contract.md')
         && /不得为单个模板创建新的 Skill/.test(fixedSkill.instructions)
+        && [
+          '投资中台的资深投资经理',
+          '当前会话绑定',
+          '线索池',
+          '进入初筛',
+          '继续跟踪',
+          '申请立项',
+          '启动尽调',
+          '提请上会',
+          '提交投决',
+          '暂缓推进',
+          '归档',
+          '泛泛的行业研究报告',
+          '可核验来源',
+          '本地项目资料库优先',
+          'Flue',
+          'LLM Gateway',
+          '候选 URL',
+          '页面核验',
+          '搜索摘要',
+          '核验结果缓存复用',
+          '只联网搜索',
+          '不得跳过本地项目资料库',
+        ].every((term) =>
+          `${fixedSkill.instructions}\n${fixedSkill.referenceInstructions}`.includes(term))
         && /[\u3400-\u9fff]/.test(fixedSkill.instructions)
         && /^sha256-[a-f0-9]{12}$/.test(fixedSkill.version),
       fixedSkill.version,
@@ -161,6 +187,8 @@ async function main() {
         && generatedDocxXml.includes('引用资料与责任声明')
         && generatedDocxXml.includes('项目档案')
         && generatedDocxXml.includes('模板验收科技有限公司')
+        && generatedDocxXml.includes('项目投资分析报告')
+        && generatedDocxXml.includes('阶段与推进建议：继续跟踪')
         && !generatedDocxXml.includes('资料缺口')
         && !generatedDocxXml.includes('德塔智能'),
       `${generatedDocxXml.length} 字节 XML`,
@@ -213,6 +241,8 @@ async function main() {
         && finalSlide.includes('引用资料与责任声明')
         && finalSlide.includes('<a:t>')
         && allSlidesXml.includes('模板验收科技有限公司')
+        && allSlidesXml.includes('项目投资分析报告')
+        && allSlidesXml.includes('阶段与推进建议：继续跟踪')
         && !allSlidesXml.includes('资料缺口')
         && !allSlidesXml.includes('佳量脑科学'),
       `${slideNames.length} 页`,

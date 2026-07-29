@@ -132,23 +132,42 @@ async function main() {
       definition.name === 'write-due-diligence-report'
         ? '尽调来源保存在系统审计记录，正式正文不显示文末来源'
         : definition.name === 'answer-project-qa'
-          ? 'Q&A 来源保存在系统审计记录，正式 PDF 不显示来源编号或引用资料'
+          ? 'Q&A 来源保存在系统审计记录，正式 DOCX 不显示来源编号或引用资料'
         : definition.name === 'draft-investment-proposal'
           ? '投资提案来源保存在任务来源表和审计元数据，正文不显示免责声明或引用资料'
         : '仅列实际使用来源并置于末尾',
     )
     if (definition.name === 'answer-project-qa') {
       const documentGeneratorRequirements = [
-        'Structured Q&A PDF Generator',
+        '投资中台资深投资经理',
+        '当前会话绑定',
+        '线索池',
+        '项目主体',
+        '股权与治理',
+        '产品与技术',
+        '进入初筛',
+        '继续跟踪',
+        '申请立项',
+        '启动尽调',
+        '提请上会',
+        '提交投决',
+        '暂缓推进',
+        '归档',
+        '泛泛的行业研究报告',
+        'Structured Q&A DOCX Generator',
         'Template Parser',
-        'Public Web Research',
+        'Current Project RAG',
+        'Flue Intel Discovery',
+        'Controlled Search Fallback',
+        'Page Verification',
         'Question Generator',
         'Duplicate Checker',
         'Answer Generator',
         'Reviewer',
         'Formatter',
-        'PDF',
-        '联网',
+        'DOCX',
+        '项目资料库',
+        '项目大模型',
       ]
       assert(
         `${definition.label} 遵守模板学习与内容重建契约`,
@@ -156,11 +175,51 @@ async function main() {
         documentGeneratorRequirements.filter((term) => !skillSource.includes(term)).join(', ') || '完整',
       )
       assert(
-        `${definition.label} 资料不足时联网补证且不使用样本补写`,
-        /资料不能完整回答时.*联网补充/.test(skillSource)
-          && /范例正文永远不是当前项目证据/.test(skillSource)
-          && /不得输出“暂无相关资料”/.test(skillSource),
-        '先联网补证；仍未披露时形成核验边界，且不得使用模板项目事实',
+        `${definition.label} 资料不足时形成核验边界且不使用样本补写`,
+        /资料不能完整回答时.*核验边界/.test(`${skillSource}\n${referenceSource}`)
+          && /Flue `intel-collect`/.test(`${skillSource}\n${referenceSource}`)
+          && /受控公开搜索兜底/.test(`${skillSource}\n${referenceSource}`)
+          && /范例正文永远不是当前项目证据/.test(`${skillSource}\n${referenceSource}`)
+          && /不得输出“暂无相关资料”/.test(`${skillSource}\n${referenceSource}`),
+        '项目资料库优先；关键缺口先由 Flue 发现候选来源，再受控搜索兜底、页面核验并由项目大模型总结，且不得使用模板项目事实',
+      )
+    }
+    if (definition.name === 'generate-document-from-template') {
+      const leadIntelligenceRequirements = [
+        '投资中台的资深投资经理',
+        '当前会话绑定',
+        '线索池',
+        '股权与治理',
+        '产品与技术',
+        '进入初筛',
+        '继续跟踪',
+        '申请立项',
+        '启动尽调',
+        '提请上会',
+        '提交投决',
+        '暂缓推进',
+        '归档',
+        '泛泛的行业研究报告',
+        '当前项目',
+        '融资与估值',
+        '交易方案',
+        '可核验来源',
+        '本地项目资料库优先',
+        'Flue',
+        'LLM Gateway',
+        '候选 URL',
+        '页面核验',
+        '搜索摘要',
+        '核验结果缓存复用',
+        '只联网搜索',
+      ]
+      assert(
+        `${definition.label} 固化投资中台资深投资经理角色`,
+        leadIntelligenceRequirements.every((term) =>
+          `${skillSource}\n${referenceSource}`.includes(term)),
+        leadIntelligenceRequirements
+          .filter((term) => !`${skillSource}\n${referenceSource}`.includes(term))
+          .join('、') || '完整',
       )
     }
   }
@@ -215,9 +274,20 @@ async function main() {
   assert(
     'AI-008 核心规范来源指纹和关键规则已固化',
     createHash('sha256').update(proposalCanonicalSpec).digest('hex')
-        === 'b1c0145946c78ec3d5d8d3c7ebe4b027601464a8d7e27bd60bb0a677ef1e1563'
-      && proposalCoreSpec.includes('b1c0145946c78ec3d5d8d3c7ebe4b027601464a8d7e27bd60bb0a677ef1e1563')
+        === 'fed1147e287ef8242bf4b6e50ab298f6e5f8f4ba2fbea40e2372de1c2f5e5621'
+      && proposalCoreSpec.includes('fed1147e287ef8242bf4b6e50ab298f6e5f8f4ba2fbea40e2372de1c2f5e5621')
       && [
+        '你是投资中台的资深投资经理',
+        '当前会话绑定',
+        '线索池',
+        '进入初筛',
+        '继续跟踪',
+        '申请立项',
+        '启动尽调',
+        '提请上会',
+        '提交投决',
+        '暂缓推进',
+        '归档',
         '用户本次明确输入',
         '文档主标题 | 黑体 | 16pt',
         '正文行距 | 固定值 24pt',
@@ -225,7 +295,10 @@ async function main() {
         '四、项目亮点总结',
         '五、风险提示与对策',
         '六、结论',
-        '联网公开信息只作为补充线索',
+        '本地项目资料库优先，网络补全为辅，补全结果缓存复用',
+        '只联网搜索',
+        '不得一开始就发起宽泛的全网搜索',
+        '不恢复或依赖 SearXNG',
         '正文末尾不增加“免责声明”或“引用资料”板块',
         '受限初稿',
       ].every((term) => proposalCanonicalSpec.includes(term))
@@ -236,7 +309,28 @@ async function main() {
         '用户本次明确输入',
         '不创建独立封面或模板外目录',
       ].every((term) => proposalCoreSpec.includes(term)),
-    '核心规范 SHA-256、17 节结构、16/12pt 字号、24pt 行距和输入优先级',
+    '核心规范 SHA-256、资深投资经理角色、阶段建议、17 节结构与版式规则',
+  )
+  assert(
+    'AI-008 默认本地优先、Flue 发现、LLM Gateway 页面核验并缓存复用',
+    [
+      '本地项目资料库优先',
+      'Flue',
+      'LLM Gateway',
+      '候选 URL',
+      '页面核验',
+      '只联网搜索',
+      '不得一开始就',
+      'Local Project Retrieval',
+      'Network Cache Retrieval',
+      'Evidence Gap Analysis',
+      'Flue Candidate Discovery',
+      'LLM Gateway Page Verification',
+      'Network Cache Writeback',
+      '不恢复或依赖 SearXNG',
+    ].every((term) =>
+      `${proposalSkill.instructions}\n${proposalSkill.referenceInstructions}`.includes(term)),
+    '本地资料库 → 网络缓存 → 缺口分析 → Flue 候选发现 → LLM Gateway 页面核验 → 缓存写回',
   )
   assert(
     'AI-008 Skill 覆盖结构、文风、章节任务与视觉门禁',
@@ -291,13 +385,12 @@ async function main() {
     diligenceSkill.referenceNames.join('、'),
   )
   const diligenceCoreTerms = [
-    '项目数据',
     '用户补充',
     '资料截止日',
     '八章',
     '十六',
     '1、投资概要',
-    '8、风险提示与对策',
+    '8、风险与核验',
     '结论—证据—分析—限制',
     '星实-一标',
     '星实-正文',
@@ -306,9 +399,40 @@ async function main() {
     '两端对齐',
     'Word / WPS',
     'TOC 域',
-    '联网公开信息',
+    '当前项目资料库',
     '后续核验事项',
     '系统审计记录',
+    '投资中台的资深投资经理',
+    '当前会话绑定',
+    '线索池',
+    '进入初筛',
+    '继续跟踪',
+    '申请立项',
+    '启动尽调',
+    '提请上会',
+    '提交投决',
+    '暂缓推进',
+    '归档',
+    '股权与治理',
+    '产品与技术',
+    '融资与估值',
+    '交易方案',
+    '可核验来源',
+    '不要写泛泛的行业研究报告',
+    '本地项目资料库优先',
+    '只联网搜索',
+    '不得一开始就',
+    'Project Knowledge Retrieval',
+    'Network Cache Retrieval',
+    'Evidence Gap Analysis',
+    'Network Cache Writeback',
+    '规范化 URL',
+    '内容指纹',
+    '待核验`是检索触发器',
+    '未执行补全不得直接',
+    '单次模型响应',
+    '最多三个',
+    '受影响章组',
   ]
   assert(
     'AI-010 核心规范与项目唯一规范保持关键规则一致',
@@ -317,7 +441,73 @@ async function main() {
     diligenceCoreTerms
       .filter((term) =>
         !diligenceCanonicalSpec.includes(term) || !diligenceCoreSpec.includes(term))
-      .join('、') || '八章十六模块、章节内容、证据写法、精确版式与 WPS 门禁',
+      .join('、') || '本地资料库 → 网络缓存 → 定向网络补全 → 缓存写回；八章十六模块、证据写法、精确版式与 WPS 门禁',
+  )
+  assert(
+    'AI-010 Skill 使用 Flue 候选发现和 LLM Gateway 页面核验',
+    [
+      'Flue Candidate Discovery',
+      'LLM Gateway Page Verification',
+      'Flue 搜索摘要',
+      '不得因此把主任务标记为失败',
+    ].every((term) =>
+      `${diligenceSkill.instructions}\n${diligenceSkill.referenceInstructions}`.includes(term)),
+    '只将页面核验通过的当前项目来源写入证据；联网异常继续生成受限 DOCX',
+  )
+  const aiTaskServiceSource = await readFile(
+    path.resolve(process.cwd(), 'server', 'src', 'services', 'aiTaskService.ts'),
+    'utf8',
+  )
+  const aiBusinessContentSource = await readFile(
+    path.resolve(process.cwd(), 'server', 'src', 'services', 'aiBusinessContentService.ts'),
+    'utf8',
+  )
+  const dueDiligenceResearchSource = await readFile(
+    path.resolve(
+      process.cwd(),
+      'server',
+      'src',
+      'services',
+      'aiDueDiligenceNetworkResearchService.ts',
+    ),
+    'utf8',
+  )
+  assert(
+    'AI-010 正文按八章分组生成并仅重试受影响章组',
+    aiBusinessContentSource.includes('DUE_DILIGENCE_GENERATION_GROUPS')
+      && aiBusinessContentSource.includes('DUE_DILIGENCE_DEFAULT_CONCURRENCY = 3')
+      && aiBusinessContentSource.includes('runDueDiligenceGroupsWithConcurrency')
+      && aiBusinessContentSource.includes('章节 JSON 未完整返回')
+      && aiBusinessContentSource.includes('assembleSections')
+      && aiBusinessContentSource.includes('requestSummary')
+      && aiBusinessContentSource.includes("if (input.type === 'due_diligence_report')")
+      && aiTaskServiceSource.includes('AI_DUE_DILIGENCE_CHAPTER_CONCURRENCY')
+      && diligenceSkill.instructions.includes('严禁要求模型在一次响应中返回全部十六个模块')
+      && diligenceSkill.referenceInstructions.includes('已通过章组不得重新生成'),
+    '八个固定章组，最多三个并行；单章独立 JSON、独立重试，合并后生成执行摘要和执行全篇 Reviewer',
+  )
+  assert(
+    'AI-010 待核验项触发 Flue 候选发现、LLM Gateway 页面核验、缓存写回和二次生成',
+    [
+      'dueDiligencePendingResearchTopics',
+      '联网检索 Agent 发现待核验事项来源',
+      'LLM Gateway 核验待核验事项公开页面',
+      'fetchDueDiligenceNetworkEvidence',
+      'fetchVerifiedProjectWebEvidence',
+      'cacheProjectNetworkEvidence',
+      '使用本地与联网证据重新生成尽调内容',
+      'project_knowledge_primary_flue_discovery_llm_page_verification',
+    ].every((term) => aiTaskServiceSource.includes(term))
+      && aiBusinessContentSource.includes('source.sourceType.startsWith(\'public_web\')')
+      && aiBusinessContentSource.includes('finding.status !== \'待核验\'')
+      && aiBusinessContentSource.includes('DUE_DILIGENCE_CONTENT_QUALITY_REJECTED')
+      && aiBusinessContentSource.includes('DUE_DILIGENCE_MODEL_UNAVAILABLE')
+      && aiBusinessContentSource.includes('现有资料')
+      && !aiTaskServiceSource.includes('DUE_DILIGENCE_NETWORK_UNAVAILABLE')
+      && aiTaskServiceSource.includes('尽调公开页面核验失败，使用现有证据继续生成')
+      && dueDiligenceResearchSource.includes('/workflows/${WORKFLOW}?wait=result')
+      && dueDiligenceResearchSource.includes('public_web_agent_search'),
+    '首轮生成 → 待核验问题提取 → Flue 候选发现 → LLM Gateway 页面核验 → 缓存写回 → 带补全证据二次生成；联网异常继续生成受限 DOCX',
   )
   assert(
     'AI-007～AI-011 均绑定 docs 业务模板',
@@ -399,6 +589,27 @@ async function main() {
       && /不得交付需要恢复/.test(complianceCorpus),
     'Word/WPS 直接打开、字体、编号、分页和 OpenXML 关系闭包',
   )
+  assert(
+    'AI-007 默认本地优先、网络补全并缓存复用',
+    [
+      '本地项目资料库优先',
+      '网络补全为辅',
+      '补全结果缓存复用',
+      '只联网搜索',
+      '不得一开始就',
+      'Network Cache Retrieval',
+      'Project LLM Network Supplement',
+      'Network Cache Writeback',
+      'NETWORK_CACHE_WRITEBACK',
+      '项目统一大模型网关',
+      'PROJECT_LLM_GROUNDING_UNAVAILABLE',
+      'UNVERIFIABLE_MODEL_SOURCE',
+      '不得仅因联网、模型或内容 Reviewer 异常终止整个任务',
+      '只登记并交付一份',
+      '不得生成或登记 PDF、Markdown',
+    ].every((term) => complianceCorpus.includes(term)),
+    '本地资料库 → 网络缓存 → 项目大模型定向网络补全 → 缓存写回；仅交付 DOCX',
+  )
 
   const qaContract = await readFile(
     path.join(root, 'answer-project-qa', 'references', 'qa-contract.md'),
@@ -411,21 +622,26 @@ async function main() {
   const qaCoreRules = await readFile(AI_QA_TEMPLATE.coreRulesPath, 'utf8')
   const qaCoreRulesSha256 = createHash('sha256').update(qaCoreRules).digest('hex')
   const qaSkill = await loadAiSkill('answer-project-qa')
+  const qaRuntimeCorpus = `${qaSkill.instructions}\n${qaSkill.referenceInstructions}`
   const qaRequired = [
-    '企业介绍', '商业模式', '产品能力', '团队', '市场', '竞争', '财务', '融资',
-    '风险', '合规', '知识产权', '客户', '行业', '运营', '未来规划',
-    '联网', 'Reviewer', 'PDF', '系统审计记录', '不登记 DOCX',
+    '阶段与推进建议', '项目主体', '股权与治理', '创始人与团队', '产品与技术',
+    '知识产权', '商业模式', '客户与商业化', '市场与应用场景', '竞争格局',
+    '财务与现金流', '融资与估值', '交易方案', '合规与权属', '风险与核验',
+    '投资中台资深投资经理', '进入初筛', '继续跟踪', '申请立项', '启动尽调',
+    '提请上会', '提交投决', '暂缓推进', '归档',
+    '泛行业研究',
+    '项目资料库', 'Reviewer', 'DOCX', '系统审计记录', '不生成或登记 PDF',
   ]
   assert(
-    'Q&A 动态选题、联网补证、内部审阅与 PDF 契约完整',
-    qaRequired.every((term) => qaContract.includes(term)),
-    qaRequired.filter((term) => !qaContract.includes(term)).join(', ') || '完整',
+    'Q&A 动态选题、项目资料库证据、内部审阅与 DOCX 契约完整',
+    qaRequired.every((term) => qaRuntimeCorpus.includes(term)),
+    qaRequired.filter((term) => !qaRuntimeCorpus.includes(term)).join(', ') || '完整',
   )
   const qaStyleRequired = [
     '模板共识',
     '各内容单元的表达目的',
     '分维度论证',
-    'PDF',
+    'DOCX',
     'A4',
     '宋体',
     'Times New Roman',
@@ -438,7 +654,7 @@ async function main() {
     '首行缩进 2 个汉字',
     'Q1：',
     '（1）',
-    '联网与证据',
+    '项目资料库与证据',
     '可见正文排除项',
   ]
   assert(
@@ -450,7 +666,30 @@ async function main() {
     'Q&A Skill 核心规则与 docs/Q&A 统一规范一致',
     AI_QA_TEMPLATE.coreRulesPath === path.resolve(process.cwd(), 'docs', 'Q&A', 'Q&A模板核心规则.md')
       && qaCoreRules.includes('# 项目 Q&A 模板核心规则')
-      && ['A4', '宋体', 'Times New Roman', '1.5 倍', '问题目录', '直接答复', '分维度论证']
+      && [
+        '投资中台资深投资经理',
+        '当前会话绑定',
+        '线索池',
+        '进入初筛',
+        '继续跟踪',
+        '申请立项',
+        '启动尽调',
+        '提请上会',
+        '提交投决',
+        '暂缓推进',
+        '归档',
+        '股权与治理',
+        '产品与技术',
+        '融资与估值',
+        '交易方案',
+        'A4',
+        '宋体',
+        'Times New Roman',
+        '1.5 倍',
+        '问题目录',
+        '直接答复',
+        '分维度论证',
+      ]
         .every((term) => qaCoreRules.includes(term))
       && qaTemplateStyleGuide.includes(qaCoreRulesSha256)
       && !/(普雷赛斯|轻蜓光电|中数睿智|德塔智能|浙江蓝成)/.test(qaCoreRules),
@@ -466,13 +705,13 @@ async function main() {
     `${AI_QA_TEMPLATE.templateDirectory} / ${AI_QA_TEMPLATE.referencePaths.length} 份`,
   )
   assert(
-    'Q&A 作为正式文档任务只输出 PDF',
+    'Q&A 作为正式文档任务只输出 DOCX',
     AI_QA_TEMPLATE.outputMode === 'document-task'
       && AI_QA_TEMPLATE.downloadableArtifact === true
-      && AI_QA_TEMPLATE.outputFormats.join(',') === 'pdf'
-      && /PDF/.test(qaSkill.instructions)
-      && /只提供一份正式 PDF/.test(qaSkill.instructions)
-      && /联网/.test(qaContract),
+      && AI_QA_TEMPLATE.outputFormats.join(',') === 'docx'
+      && /DOCX/.test(qaSkill.instructions)
+      && /只提供一份.*正式 DOCX/.test(qaSkill.instructions)
+      && /项目资料库/.test(qaContract),
     `${AI_QA_TEMPLATE.outputMode} / downloadable=${AI_QA_TEMPLATE.downloadableArtifact}`,
   )
   const qaPipelineSource = await readFile(
@@ -487,13 +726,16 @@ async function main() {
     path.resolve(process.cwd(), 'server', 'src', 'services', 'aiQaTemplateParser.ts'),
     'utf8',
   )
-  const qaWebResearchSource = await readFile(
-    path.resolve(process.cwd(), 'server', 'src', 'services', 'aiQaWebResearchService.ts'),
-    'utf8',
-  )
   assert(
     'Q&A 运行时注入完整 Prompt、Workflow 与模板规范',
     qaPipelineSource.includes('skill.referenceInstructions')
+      && qaPipelineSource.includes('只以已激活的 Q&A Skill 及其 references 为业务权威')
+      && qaRuntimeCorpus.includes('投资中台资深投资经理')
+      && !qaPipelineSource.includes('你是早期投资项目线索分析师')
+      && !qaRuntimeCorpus.includes('早期投资项目线索分析师')
+      && qaRuntimeCorpus.includes('泛行业研究')
+      && ['进入初筛', '继续跟踪', '申请立项', '启动尽调', '提请上会', '提交投决', '暂缓推进', '归档']
+        .every((term) => qaRuntimeCorpus.includes(term))
       && qaSkill.referenceNames.includes('references/qa-contract.md')
       && qaSkill.referenceNames.includes('references/qa-template-style-guide.md')
       && qaSkill.referenceNames.includes('references/workflow.md')
@@ -503,16 +745,14 @@ async function main() {
     '生产契约 + 模板画像 + Workflow + Pipeline Prompts',
   )
   assert(
-    'Q&A Pipeline 包含 Parser、联网研究、Generator、Duplicate Checker、Reviewer 与 PDF 导出',
+    'Q&A Pipeline 包含 Parser、项目 RAG、Generator、Duplicate Checker、Reviewer 与 DOCX 生成',
     qaPipelineSource.includes('generateProjectQaQuestions')
       && qaPipelineSource.includes('checkDuplicateQuestions')
       && qaPipelineSource.includes('reviewProjectQaAnswers')
-      && qaWebResearchSource.includes('collectQaPublicEvidence')
-      && qaWebResearchSource.includes('SearXNG')
       && qaDocumentSource.includes('generateProjectQaDocx')
-      && qaDocumentSource.includes('convertProjectQaDocxToPdf')
+      && !qaDocumentSource.includes('convertProjectQaDocxToPdf')
       && qaParserSource.includes('parseQaTemplateCorpus'),
-    'Template Parser / Public Web Research / Question Generator / Duplicate Checker / Reviewer / PDF',
+    'Template Parser / Current Project RAG / Question Generator / Duplicate Checker / Reviewer / DOCX',
   )
   assert(
     'Q&A Formatter 落实统一字号、行距、页边距与问题一级结构',
@@ -530,18 +770,22 @@ async function main() {
       && !qaDocumentSource.includes("mixedTextRuns('引用资料'")
       && !qaDocumentSource.includes("mixedTextRuns('Reviewer 审阅结果'")
       && qaPipelineSource.includes('function cleanAnswerText')
-      && qaPipelineSource.includes('二至五个换行分隔'),
+      && qaPipelineSource.includes('（1）已确认事实：')
+      && qaPipelineSource.includes('（2）分析判断：')
+      && qaPipelineSource.includes('（3）证据边界：')
+      && qaPipelineSource.includes('（4）下一步核验：')
+      && !qaDocumentSource.includes('index === 6')
+      && qaDocumentSource.includes('globalIndex === 0'),
     '宋体 / 18pt 标题 / 14pt 问题 / 12pt 分维度 / 1.5 倍行距 / 25.4×31.7mm 页边距',
   )
   assert(
-    'Q&A 双模式边界明确且正式任务只交付 PDF',
+    'Q&A 双模式边界明确且正式任务只交付 DOCX',
     /正式文档模式/.test(qaSkill.instructions)
       && /单题会话模式/.test(qaSkill.instructions)
       && /DOCX/.test(qaSkill.instructions)
-      && /PDF/.test(qaSkill.instructions)
-      && /永不生成 DOCX、PPT 或 PPTX 下载产物/.test(qaSkill.instructions)
+      && /不生成或登记 PDF、PPT 或 PPTX/.test(qaSkill.instructions)
       && /不创建文档任务或下载产物/.test(qaSkill.instructions),
-    '正式任务 PDF / 单题结构化回答 / 禁止 DOCX、PPT、PPTX 下载产物',
+    '正式任务 DOCX / 单题结构化回答 / 禁止 PDF、PPT、PPTX',
   )
 
   const pptContract = await readFile(
@@ -564,9 +808,42 @@ async function main() {
     quickActionsSource.includes("id: 'qa'")
       && quickActionsSource.includes("mode: 'task'")
       && quickActionsSource.includes('投资委员会 Q&A')
-      && quickActionsSource.includes("? 'PDF'")
+      && quickActionsSource.includes('项目投资问答 DOCX')
+      && !quickActionsSource.includes("activeAction.id === 'qa' ? 'PDF'")
       && !quickActionsSource.includes('QA_GROUPS'),
-    'Q&A task / 投资委员会或尽调 / PDF',
+    'Q&A task / 投资委员会或尽调 / DOCX',
+  )
+  const taskCardsSource = await readFile(
+    path.resolve(process.cwd(), 'src', 'components', 'AiTaskCards.tsx'),
+    'utf8',
+  )
+  assert(
+    'Q&A 前端只展示 DOCX 下载',
+    taskCardsSource.includes("if (task.type === 'project_qa') return format === 'docx'"),
+    '历史或新任务均不展示 Q&A PDF 下载按钮',
+  )
+  assert(
+    '非 PPT 文档任务以主文档交付为优先并自动恢复一次',
+    aiTaskServiceSource.includes('AUTO_RECOVERY_TASK_TYPES')
+      && aiTaskServiceSource.includes('_systemDocumentRecoveryAttempt')
+      && aiTaskServiceSource.includes("retryDocumentStep('DOCX Formatter'")
+      && aiTaskServiceSource.includes("retryDocumentStep('Q&A DOCX 生成与质量检查'")
+      && aiTaskServiceSource.includes('主文档已登记，任务状态恢复为已完成')
+      && aiTaskServiceSource.includes('delete retryParameters._systemDocumentRecoveryAttempt')
+      && aiTaskServiceSource.includes('withTaskHeartbeat')
+      && aiBusinessContentSource.includes('AI_DUE_DILIGENCE_MODEL_TIMEOUT_MS')
+      && aiTaskServiceSource.includes('保留已生成主文档')
+      && aiTaskServiceSource.includes('保留已生成 DOCX'),
+    '联网、模型、Reviewer、来源审计或伴生产物异常不推翻主 DOCX；长耗时尽调模型请求持续更新心跳，生成/质检异常自动继续一次，人工继续生成重新获得完整恢复次数',
+  )
+  assert(
+    '文档任务卡展示安全、可行动的失败原因和错误编号',
+    taskCardsSource.includes('task.errorMessage')
+      && taskCardsSource.includes('错误编号：{task.errorId}')
+      && taskCardsSource.includes('停止阶段：{failureStage}')
+      && taskCardsSource.includes('文档尚未完成，系统已保留本次生成参数')
+      && taskCardsSource.includes('继续生成'),
+    '只展示服务端清洗后的业务原因、停止阶段和错误编号，不展示模型原文或堆栈',
   )
 
   const assistantPageSource = await readFile(
@@ -578,8 +855,16 @@ async function main() {
     assistantPageSource.includes("qa: 'project_qa'")
       && assistantPageSource.includes("apiPost<AiTask>('/ai/tasks'")
       && assistantPageSource.includes('parameters.qaMode')
-      && assistantPageSource.includes('parameters.questionDepth'),
+      && assistantPageSource.includes('parameters.questionDepth')
+      && !assistantPageSource.includes('任务创建失败：${(error as Error).message}'),
     'POST /api/ai/tasks type=project_qa',
+  )
+  assert(
+    'AI 助手生成界面显示安全的实时阶段和进度心跳',
+    !assistantPageSource.includes('阶段：{stage}')
+      && !taskCardsSource.includes('阶段：{visibleStage}')
+      && taskCardsSource.includes("task.stage || '生成进度'"),
+    '任务卡在进度条上显示“正在生成尽调正文/整合联网证据”和等待秒数，不展示技术堆栈',
   )
 
   const report = {

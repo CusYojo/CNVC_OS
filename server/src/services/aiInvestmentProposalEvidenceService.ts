@@ -25,7 +25,7 @@ export type InvestmentProposalSectionEvidence = {
 }
 
 export type InvestmentProposalEvidencePlan = {
-  evidenceScope: 'project_and_public_web'
+  evidenceScope: 'project_knowledge_primary'
   sections: InvestmentProposalSectionEvidence[]
   usedSourceIndexes: number[]
   coverage: {
@@ -43,10 +43,13 @@ const BROAD_ANALYSIS_KINDS = new Set([
 ])
 
 function sourcePriority(source: EvidenceSource) {
-  if (source.sourceType === 'user_input') return 0
+  if (source.sourceType !== 'project_record'
+    && source.sourceType !== 'user_input'
+    && !source.sourceType.startsWith('public_web')) return 0
   if (source.sourceType === 'project_record') return 1
+  if (source.sourceType === 'user_input') return 2
   if (source.sourceType === 'public_web') return 3
-  return 2
+  return 4
 }
 
 function occurrences(haystack: string, needle: string) {
@@ -66,6 +69,65 @@ function evidenceScore(
   source: EvidenceSource,
   section: InvestmentProposalBlueprintSection,
 ) {
+  const evidenceText = `${source.sourceName}\n${source.content}`
+  const markerHits = (patterns: RegExp[]) =>
+    patterns.reduce((count, pattern) => count + (pattern.test(evidenceText) ? 1 : 0), 0)
+  const hasNumber = /\d/.test(evidenceText)
+  const tableEvidenceAllowed = (() => {
+    if (section.tableKind === 'equity_structure') {
+      return /股东|股东名册/.test(evidenceText)
+        && (
+          /持股|出资|股份|股权结构|实控人|治理架构/.test(evidenceText)
+          || /第[一二三四五六七八九十\d]+大股东/.test(evidenceText)
+        )
+    }
+    if (section.tableKind === 'financial_summary') {
+      return hasNumber && markerHits([
+        /财务|审计|报表/,
+        /收入|营收/,
+        /成本|毛利/,
+        /净利润|利润/,
+        /现金流/,
+        /资产|负债/,
+      ]) >= 2
+    }
+    if (section.tableKind === 'financing_history') {
+      return hasNumber
+        && /融资|天使轮|种子轮|A轮|B轮|C轮/.test(evidenceText)
+        && markerHits([
+          /投资方|投资机构/,
+          /融资金额|金额/,
+          /投后估值|估值/,
+          /交割|融资时间|融资日期/,
+        ]) >= 1
+    }
+    if (section.tableKind === 'transaction_plan') {
+      return hasNumber
+        && /本轮|下一轮|融资计划|投资方案|融资规模/.test(evidenceText)
+        && markerHits([
+          /投资金额|融资金额|增资|老股|融资规模/,
+          /投前估值|投后估值|估值/,
+          /股比|持股比例/,
+          /资金用途|交割条件/,
+        ]) >= 1
+    }
+    if (section.tableKind === 'forecast_return') {
+      return hasNumber
+        && /预测|预算|目标|计划/.test(evidenceText)
+        && markerHits([
+          /收入|营收|利润/,
+          /退出|回报|IRR|MOIC/,
+          /估值|倍数/,
+        ]) >= 2
+    }
+    if (section.tableKind === 'comparable_valuation') {
+      return hasNumber
+        && /可比|对标|同行|竞品/.test(evidenceText)
+        && /估值|市值|PE|PS|EV|倍数/i.test(evidenceText)
+    }
+    return true
+  })()
+  if (!tableEvidenceAllowed) return 0
   const normalizedName = comparisonKey(source.sourceName)
   const normalizedContent = comparisonKey(source.content)
   let score = 0
@@ -78,8 +140,9 @@ function evidenceScore(
     score += contentHits * 4
     score += nameHits * 7
   })
-  if (source.sourceType === 'user_input' && keywordHits > 0) score += 8
+  if (sourcePriority(source) === 0 && keywordHits > 0) score += 8
   if (source.sourceType === 'project_record' && keywordHits > 0) score += 3
+  if (source.sourceType === 'user_input' && keywordHits > 0) score += 1
   if (section.tableKind && /表|财务|融资|估值|股权|预测|年度|金额|比例/.test(source.content)) {
     score += 3
   }
@@ -128,7 +191,9 @@ function selectSectionEvidence(
       chunkIndex: source.chunkIndex,
       versionOrDate: source.versionOrDate,
       score,
-      content: source.content.slice(0, 2400),
+      // 章节提示词只保留最相关的证据摘要。完整原文仍保留在 sources 中，
+      // Reviewer 会基于完整原文核验数字与引用，不因提示词减载而放宽质量门槛。
+      content: source.content.slice(0, 1200),
     }))
 }
 
@@ -160,7 +225,7 @@ export function buildInvestmentProposalEvidencePlan(
     .sort((left, right) => left - right)
   const coveredLeafSections = sections.filter((section) => section.coverage === 'available').length
   return {
-    evidenceScope: 'project_and_public_web',
+    evidenceScope: 'project_knowledge_primary',
     sections,
     usedSourceIndexes,
     coverage: {
@@ -174,18 +239,35 @@ export function buildInvestmentProposalEvidencePlan(
 export function investmentProposalEvidenceForSections(
   plan: InvestmentProposalEvidencePlan,
   sectionIds: ReadonlySet<string>,
+  options: { maxItems?: number } = {},
 ) {
-  const bySource = new Map<number, InvestmentProposalEvidenceItem>()
-  plan.sections
+  const maxItems = Math.max(1, Math.min(options.maxItems ?? 10, 12))
+  const selectedSections = plan.sections
     .filter((section) => sectionIds.has(section.sectionId))
+  const bySource = new Map<number, InvestmentProposalEvidenceItem>()
+  const requiredSourceIndexes = new Set<number>()
+
+  // 每个叶子章节至少保留一条最高分证据，避免全局排序把低频章节挤出提示词。
+  selectedSections.forEach((section) => {
+    const first = section.evidence[0]
+    if (!first) return
+    requiredSourceIndexes.add(first.sourceIndex)
+    const existing = bySource.get(first.sourceIndex)
+    if (!existing || first.score > existing.score) bySource.set(first.sourceIndex, first)
+  })
+  selectedSections
     .flatMap((section) => section.evidence)
     .forEach((item) => {
       const existing = bySource.get(item.sourceIndex)
       if (!existing || item.score > existing.score) bySource.set(item.sourceIndex, item)
     })
-  return [...bySource.values()]
+
+  const ranked = [...bySource.values()]
     .sort((left, right) => right.score - left.score || left.sourceIndex - right.sourceIndex)
-    .slice(0, 18)
+  const required = ranked.filter((item) => requiredSourceIndexes.has(item.sourceIndex))
+  const supplemental = ranked.filter((item) => !requiredSourceIndexes.has(item.sourceIndex))
+  return [...required, ...supplemental]
+    .slice(0, Math.max(maxItems, required.length))
 }
 
 export function investmentProposalEvidencePrompt(

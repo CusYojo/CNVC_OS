@@ -236,7 +236,6 @@ FLUE_AGENT_NAME=assistant
 EXPRESS_BASE_URL=http://127.0.0.1:3100
 FLUE_MODEL=zeelin-oai/gpt-5.5
 SCORE_MODEL=zeelin/DeepSeek-V4-Flash
-SOURCING_MODEL=zeelin-oai/gpt-5.5
 
 # ---- 内部密钥 ----
 INTERNAL_SECRET=cybernaut-internal-2026
@@ -278,7 +277,6 @@ EOF
     # 模型选择允许运维在 .env 中覆盖；缺失时补当前源码默认值。
     ensure_env_value "$ENV_FILE" "FLUE_MODEL" "zeelin-oai/gpt-5.5"
     ensure_env_value "$ENV_FILE" "SCORE_MODEL" "zeelin/DeepSeek-V4-Flash"
-    ensure_env_value "$ENV_FILE" "SOURCING_MODEL" "zeelin-oai/gpt-5.5"
     ensure_env_value "$ENV_FILE" "RADAR_BOOTSTRAP_URL" "$RADAR_BOOTSTRAP_DEFAULT"
     ensure_env_value "$ENV_FILE" "RADAR_AUTO_CRAWL_ENABLED" "true"
     ensure_env_value "$ENV_FILE" "RADAR_WECHAT_DAILY_ENABLED" "true"

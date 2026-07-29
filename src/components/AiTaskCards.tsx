@@ -1,10 +1,8 @@
 import { useEffect, useState } from 'react'
 import {
-  AlertCircle,
   Ban,
   CheckCircle2,
   Clock3,
-  Copy,
   Download,
   FileText,
   LoaderCircle,
@@ -12,8 +10,6 @@ import {
   RotateCcw,
   Square,
 } from 'lucide-react'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
 import { apiGet } from '../lib/api'
 import { authedFetch } from '../store/useAuthStore'
 import { Button, ProgressBar } from './ui'
@@ -89,7 +85,7 @@ const STATUS_META: Record<AiTaskStatus, {
   pending: { label: '等待执行', className: 'bg-slate-100 text-slate-600', icon: Clock3 },
   running: { label: '生成中', className: 'bg-brand-50 text-brand-700', icon: LoaderCircle },
   succeeded: { label: '已完成', className: 'bg-emerald-50 text-emerald-700', icon: CheckCircle2 },
-  failed: { label: '生成失败', className: 'bg-rose-50 text-rose-700', icon: AlertCircle },
+  failed: { label: '文档未完成', className: 'bg-amber-50 text-amber-700', icon: Clock3 },
   cancelled: { label: '已取消', className: 'bg-amber-50 text-amber-700', icon: Ban },
 }
 
@@ -103,56 +99,6 @@ function triggerDownload(blob: Blob, filename: string) {
   link.click()
   link.remove()
   setTimeout(() => URL.revokeObjectURL(url), 2000)
-}
-
-function CompliancePreview({
-  artifact,
-  onNotify,
-}: {
-  artifact: AiTaskArtifact
-  onNotify?: (message: string, kind: 'success' | 'error' | 'info') => void
-}) {
-  const [content, setContent] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
-
-  const load = async () => {
-    if (content !== null || loading) return
-    setLoading(true)
-    setError('')
-    try {
-      const preview = await apiGet<{ content: string; fileName: string }>(`/ai/artifacts/${artifact.id}/preview`)
-      setContent(preview.content)
-    } catch (previewError) {
-      const message = (previewError as Error).message || '预览加载失败'
-      setError(message)
-      onNotify?.(`合规性说明预览加载失败：${message}`, 'error')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  return (
-    <details
-      className="mt-3 overflow-hidden rounded-lg border border-slate-200 bg-white"
-      onToggle={(event) => {
-        if (event.currentTarget.open) void load()
-      }}
-    >
-      <summary className="cursor-pointer select-none px-3 py-2 text-xs font-medium text-brand-700 hover:bg-brand-50/40">
-        页面内查看合规性说明
-      </summary>
-      <div className="max-h-96 overflow-y-auto border-t border-slate-100 px-4 py-3">
-        {loading && <div className="flex items-center gap-2 text-xs text-slate-500"><LoaderCircle className="h-3.5 w-3.5 animate-spin" />正在加载预览…</div>}
-        {error && <p className="text-xs text-rose-600">{error}</p>}
-        {content !== null && (
-          <div className="prose prose-sm max-w-none text-slate-700">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
-          </div>
-        )}
-      </div>
-    </details>
-  )
 }
 
 function ProtectedImagePreview({
@@ -211,13 +157,26 @@ function TaskCard({
   const StatusIcon = meta.icon
   const isActive = task.status === 'pending' || task.status === 'running'
   const sourceCount = task.sources?.length ?? 0
-  const markdownArtifact = task.type === 'compliance_statement'
-    ? task.artifacts?.find((artifact) => artifact.format.toLowerCase() === 'md')
-    : undefined
   const imageArtifact = task.artifacts?.find((artifact) => artifact.format.toLowerCase() === 'png')
   const templateLabel = task.type === 'custom_template_document'
     ? '已分析上传模板'
     : '公司标准模板'
+  const sourceLabel = sourceCount > 0
+    ? `引用来源：${sourceCount} 条`
+    : task.status === 'failed'
+      ? '未形成最终引用清单'
+      : '资料读取与引用整理中'
+  const genericFailureMessage = '文档尚未完成，系统已保留本次生成参数，可继续生成。'
+  const failureMessage = task.type === 'due_diligence_report'
+    && task.progress <= 35
+    && (!task.errorMessage || task.errorMessage === genericFailureMessage)
+    ? '尽调正文生成或质量检查未完成，因此未生成文件。系统已保留参数，可点击“继续生成”。'
+    : task.errorMessage || '文档尚未完成，系统已保留本次生成参数，可点击“继续生成”。'
+  const failureStage = task.stage && task.stage !== '文档尚未完成'
+    ? task.stage
+    : task.type === 'due_diligence_report' && task.progress <= 35
+      ? '结构化正文生成或质量检查'
+      : ''
 
   const download = async (artifact: AiTaskArtifact) => {
     if (downloadingId) return
@@ -229,14 +188,15 @@ function TaskCard({
       triggerDownload(await response.blob(), artifact.fileName)
       onNotify?.(`「${artifact.fileName}」已开始下载`, 'success')
     } catch (downloadError) {
-      onNotify?.(`下载失败：${(downloadError as Error).message}`, 'error')
+      console.warn('AI artifact download did not start', downloadError)
+      onNotify?.('文档下载暂未开始，请稍后重试', 'info')
     } finally {
       setDownloadingId(null)
     }
   }
 
   return (
-    <article className={`rounded-xl border bg-white p-4 shadow-sm ${task.status === 'failed' ? 'border-rose-200' : 'border-slate-200'}`}>
+    <article className={`rounded-xl border bg-white p-4 shadow-sm ${task.status === 'failed' ? 'border-amber-200' : 'border-slate-200'}`}>
       <div className="flex items-start gap-3">
         <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg ${task.type === 'investment_recommendation_ppt' ? 'bg-orange-50 text-orange-600' : 'bg-brand-50 text-brand-600'}`}>
           {task.type === 'investment_recommendation_ppt' ? <Presentation className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
@@ -251,8 +211,7 @@ function TaskCard({
             <span className="max-w-48 truncate text-[10px] text-slate-400" title={templateLabel}>{templateLabel}</span>
           </div>
           <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-500">
-            <span>阶段：{task.stage || meta.label}</span>
-            <span>资料来源：{sourceCount} 条</span>
+            <span>{sourceLabel}</span>
             <span>{new Date(task.createdAt).toLocaleString('zh-CN')}</span>
           </div>
         </div>
@@ -261,7 +220,7 @@ function TaskCard({
       {(isActive || task.progress > 0) && (
         <div className="mt-3">
           <div className="mb-1 flex items-center justify-between text-[10px] text-slate-500">
-            <span>{isActive ? '生成进度' : '完成进度'}</span>
+            <span>{isActive ? task.stage || '生成进度' : '完成进度'}</span>
             <span className="font-mono">{Math.max(0, Math.min(100, task.progress || 0))}%</span>
           </div>
           <ProgressBar value={task.progress || 0} tone={task.status === 'succeeded' ? 'green' : task.status === 'cancelled' ? 'amber' : 'blue'} />
@@ -273,33 +232,21 @@ function TaskCard({
       )}
 
       {task.status === 'failed' && (
-        <div className="mt-3 rounded-lg border border-rose-100 bg-rose-50 px-3 py-2 text-xs text-rose-700">
-          <div className="flex items-start gap-2">
-            <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-            <div className="min-w-0 flex-1">
-              <p>{task.errorMessage || '任务执行失败，请重试。'}</p>
-              {task.errorId && (
-                <button
-                  type="button"
-                  className="mt-1 inline-flex items-center gap-1 font-mono text-[10px] text-rose-500 hover:text-rose-700"
-                  title="复制错误编号"
-                  onClick={() => {
-                    void navigator.clipboard.writeText(task.errorId!)
-                    onNotify?.('错误编号已复制', 'success')
-                  }}
-                >
-                  错误编号：{task.errorId}<Copy className="h-3 w-3" />
-                </button>
-              )}
-            </div>
-          </div>
+        <div className="mt-3 rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          <p>{failureMessage}</p>
+          {failureStage && <p className="mt-1 text-[10px] text-amber-700">停止阶段：{failureStage}</p>}
+          {task.errorId && <p className="mt-1 font-mono text-[10px] text-amber-700">错误编号：{task.errorId}</p>}
         </div>
       )}
 
       {task.status === 'succeeded' && task.artifacts?.length > 0 && (
         <div className="mt-3 flex flex-wrap gap-2">
           {task.artifacts
-            .filter((artifact) => ['docx', 'pptx', 'pdf'].includes(artifact.format.toLowerCase()))
+            .filter((artifact) => {
+              const format = artifact.format.toLowerCase()
+              if (task.type === 'project_qa') return format === 'docx'
+              return ['docx', 'pptx', 'pdf'].includes(format)
+            })
             .map((artifact) => (
               <Button
                 key={artifact.id}
@@ -323,10 +270,6 @@ function TaskCard({
         <ProtectedImagePreview artifact={imageArtifact} />
       )}
 
-      {task.status === 'succeeded' && markdownArtifact && (
-        <CompliancePreview artifact={markdownArtifact} onNotify={onNotify} />
-      )}
-
       {(isActive || task.status === 'failed') && (
         <div className="mt-3 flex justify-end">
           {isActive && (
@@ -336,7 +279,7 @@ function TaskCard({
           )}
           {task.status === 'failed' && (
             <Button size="sm" variant="secondary" loading={mutating} onClick={() => { void onRetry(task) }}>
-              <RotateCcw className="h-3.5 w-3.5" />按原参数重试
+              <RotateCcw className="h-3.5 w-3.5" />继续生成
             </Button>
           )}
         </div>
@@ -415,7 +358,8 @@ export function AiArtifactCenter({
       })
       .catch((fetchError) => {
         if (!active) return
-        setError((fetchError as Error).message || '正式交付物加载失败')
+        console.warn('AI artifact list is temporarily unavailable', fetchError)
+        setError('正式交付物正在同步，请稍后查看')
       })
       .finally(() => {
         if (active) setLoading(false)
@@ -433,7 +377,8 @@ export function AiArtifactCenter({
       triggerDownload(await response.blob(), artifact.fileName)
       onNotify?.(`「${artifact.fileName}」已开始下载`, 'success')
     } catch (downloadError) {
-      onNotify?.(`下载失败：${(downloadError as Error).message}`, 'error')
+      console.warn('AI artifact download did not start', downloadError)
+      onNotify?.('文档下载暂未开始，请稍后重试', 'info')
     } finally {
       setDownloadingId(null)
     }
@@ -454,7 +399,7 @@ export function AiArtifactCenter({
             当前为未入库的演示项目，无法生成或读取正式交付物。
           </p>
         )}
-        {validProjectId && error && <p className="px-2 py-2 text-[11px] text-rose-500">{error}</p>}
+        {validProjectId && error && <p className="px-2 py-2 text-[11px] text-slate-400">{error}</p>}
         {validProjectId && artifacts === null && !error && <p className="px-2 py-3 text-[11px] text-slate-400">正在加载正式交付物…</p>}
         {validProjectId && artifacts?.length === 0 && !loading && !error && (
           <p className="rounded-lg border border-dashed border-slate-200 px-3 py-4 text-center text-[11px] text-slate-400">

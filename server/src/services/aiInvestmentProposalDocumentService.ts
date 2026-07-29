@@ -31,6 +31,7 @@ import {
   loadInvestmentProposalBlueprint,
   type InvestmentProposalDocumentBlueprint,
 } from './aiInvestmentProposalBlueprintService.js'
+import { containsInvestmentProposalInternalErrorText } from './aiInvestmentProposalReviewerService.js'
 import type { AiTemplateDefinition } from './aiTemplateCatalog.js'
 
 type ProjectLike = {
@@ -75,13 +76,7 @@ function xmlText(value: string) {
     .join('')
 }
 
-function visibleStatus(status: BusinessFinding['status']) {
-  return status === 'AI推断' ? '分析判断' : status
-}
-
 function findingParagraph(finding: BusinessFinding) {
-  const statusLabel = visibleStatus(finding.status)
-  const auditLabel = `〔${statusLabel}〕`
   return new Paragraph({
     spacing: { before: 0, after: 0, line: 480, lineRule: LineRuleType.EXACT },
     indent: { firstLine: 480 },
@@ -94,36 +89,59 @@ function findingParagraph(finding: BusinessFinding) {
         color: '000000',
         font: font(FANGSONG_FONT),
       }),
-      new TextRun({
-        text: auditLabel,
-        size: 21,
-        color: '666666',
-        font: font(SONG_FONT),
-      }),
     ],
   })
 }
 
-function tableColumnWidths(columnCount: number) {
-  const width = 8306
-  const base = Math.floor(width / columnCount)
-  const values = Array.from({ length: columnCount }, () => base)
-  values[values.length - 1] += width - base * columnCount
-  return values
+function tableTextWidth(value: string) {
+  return [...value].reduce((width, character) =>
+    width + (/[\u3400-\u9FFF]/.test(character) ? 2 : 1), 0)
+}
+
+function tableColumnWidths(table: BusinessTable) {
+  const totalWidth = 8306
+  const columnCount = table.columns.length
+  const minimum = columnCount >= 6 ? 720 : columnCount === 5 ? 820 : 980
+  const narrativeHeader = /备注|说明|要求|依据|用途|投资方|股东姓名|股东名称|事项/
+  const compactHeader = /序号|日期|时间|年度|年份|期间|轮次|比例|股比|金额|估值|倍数|状态|A\/E/i
+  const weights = table.columns.map((header, index) => {
+    const contentWidth = Math.max(
+      tableTextWidth(header) * 1.2,
+      ...table.rows.map((row) => Math.min(36, tableTextWidth(row[index] ?? ''))),
+    )
+    const semanticWeight = narrativeHeader.test(header)
+      ? 1.45
+      : compactHeader.test(header)
+        ? 0.78
+        : 1
+    return Math.max(4, contentWidth * semanticWeight)
+  })
+  const remaining = totalWidth - minimum * columnCount
+  const weightTotal = weights.reduce((sum, weight) => sum + weight, 0)
+  const widths = weights.map((weight) =>
+    minimum + Math.floor(remaining * weight / weightTotal))
+  widths[widths.length - 1] += totalWidth - widths.reduce((sum, width) => sum + width, 0)
+  return widths
 }
 
 function proposalTable(table: BusinessTable) {
-  const widths = tableColumnWidths(table.columns.length)
+  const widths = tableColumnWidths(table)
+  const centeredColumn = (index: number) =>
+    /序号|日期|时间|年度|年份|期间|轮次|比例|股比|金额|估值|倍数|状态|A\/E/i
+      .test(table.columns[index] ?? '')
   const cell = (value: string, index: number, header = false) => new TableCell({
     width: { size: widths[index], type: WidthType.DXA },
     verticalAlign: VerticalAlign.CENTER,
-    margins: { top: 70, right: 80, bottom: 70, left: 80 },
+    margins: { top: 90, right: 120, bottom: 90, left: 120 },
     shading: header
       ? { fill: 'D9D9D9', type: ShadingType.CLEAR, color: 'auto' }
       : undefined,
     children: [new Paragraph({
-      alignment: header ? AlignmentType.CENTER : AlignmentType.LEFT,
-      spacing: { before: 0, after: 0, line: 360, lineRule: LineRuleType.EXACT },
+      alignment: header || centeredColumn(index)
+        ? AlignmentType.CENTER
+        : AlignmentType.LEFT,
+      spacing: { before: 0, after: 0, line: 300, lineRule: LineRuleType.AT_LEAST },
+      keepLines: true,
       children: [new TextRun({
         text: value,
         bold: header,
@@ -136,7 +154,7 @@ function proposalTable(table: BusinessTable) {
   return [
     new Paragraph({
       keepNext: true,
-      spacing: { before: 0, after: 0, line: 480, lineRule: LineRuleType.EXACT },
+      spacing: { before: 80, after: 60, line: 480, lineRule: LineRuleType.EXACT },
       alignment: AlignmentType.CENTER,
       children: [new TextRun({
         text: `${table.title}${table.unit && table.unit !== '无' ? `（单位：${table.unit}）` : ''}`,
@@ -148,6 +166,10 @@ function proposalTable(table: BusinessTable) {
     }),
     new Table({
       width: { size: 8306, type: WidthType.DXA },
+      columnWidths: widths,
+      alignment: AlignmentType.CENTER,
+      indent: { size: 0, type: WidthType.DXA },
+      margins: { top: 90, right: 120, bottom: 90, left: 120 },
       layout: TableLayoutType.FIXED,
       borders: {
         top: { style: BorderStyle.SINGLE, size: 4, color: '000000' },
@@ -170,13 +192,8 @@ function proposalTable(table: BusinessTable) {
       ],
     }),
     new Paragraph({
-      spacing: { before: 0, after: 0, line: 360, lineRule: LineRuleType.EXACT },
-      children: [new TextRun({
-        text: `资料状态：〔${visibleStatus(table.status)}〕`,
-        size: 21,
-        color: '666666',
-        font: font(FANGSONG_FONT),
-      })],
+      spacing: { before: 0, after: 80, line: 120, lineRule: LineRuleType.EXACT },
+      children: [],
     }),
   ]
 }
@@ -438,7 +455,7 @@ export async function generateInvestmentProposalDocx(input: {
     tocField: false,
     updateFields: true,
     pageGeometry: blueprint.page,
-    formatter: 'investment-proposal-core-standard-formatter-v3-web-audit',
+    formatter: 'investment-proposal-core-standard-formatter-v4-project-knowledge',
   }
 }
 
@@ -501,6 +518,12 @@ export async function reviewInvestmentProposalDocx(input: {
       styleId: match[0].match(/<w:pStyle\b[^>]*w:val="([^"]+)"/)?.[1] ?? '',
     }))
   const allText = paragraphs.map((item) => item.text).join('\n')
+  if (containsInvestmentProposalInternalErrorText(allText)) {
+    issues.push({
+      code: 'INTERNAL_ERROR_TEXT_LEAK',
+      message: 'Word 正文包含仅供系统内部记录的技术错误信息',
+    })
+  }
   const expectedTitles = input.blueprint.sections.map((item) => item.title)
   const foundTitles = paragraphs
     .filter((item) => expectedTitles.includes(item.text))
@@ -627,12 +650,34 @@ export async function reviewInvestmentProposalDocx(input: {
     (count, section) => count + (section.tables?.length ?? 0),
     0,
   )
-  const tableCount = (documentXml.match(/<w:tbl\b/g) || []).length
+  const tableXml = [...documentXml.matchAll(/<w:tbl\b[\s\S]*?<\/w:tbl>/g)]
+    .map((match) => match[0])
+  const tableCount = tableXml.length
   if (tableCount !== expectedTableCount) {
     issues.push({ code: 'TABLE_COUNT_MISMATCH', message: `表格应为${expectedTableCount}个，实际为${tableCount}个` })
   }
   if (expectedTableCount && !documentXml.includes('D9D9D9')) {
     issues.push({ code: 'TABLE_FORMAT_MISMATCH', message: '表格表头底纹缺失' })
+  }
+  const invalidTableGeometry = tableXml.some((xml) => {
+    const gridWidths = [...xml.matchAll(/<w:gridCol\b[^>]*w:w="(\d+)"/g)]
+      .map((match) => Number.parseInt(match[1], 10))
+    const gridWidth = gridWidths.reduce((sum, width) => sum + width, 0)
+    return gridWidths.length < 2
+      || gridWidths.length > 8
+      || gridWidth !== 8306
+      || !/<w:tblW\b(?=[^>]*w:w="8306")(?=[^>]*w:type="dxa")[^>]*\/>/.test(xml)
+      || !/<w:tblLayout\b[^>]*w:type="fixed"/.test(xml)
+      || !/<w:jc\b[^>]*w:val="center"/.test(xml)
+      || !/<w:tblHeader\b/.test(xml)
+      || /<w:trHeight\b[^>]*w:hRule="exact"/.test(xml)
+      || !/<w:vAlign\b[^>]*w:val="center"/.test(xml)
+  })
+  if (invalidTableGeometry) {
+    issues.push({
+      code: 'TABLE_GEOMETRY_MISMATCH',
+      message: '表格列宽、总宽、居中、重复表头或单元格垂直对齐不符合 Formatter 规范',
+    })
   }
 
   const result: InvestmentProposalOutputReview = {

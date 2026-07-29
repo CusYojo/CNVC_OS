@@ -8,19 +8,17 @@ import {
 } from '../services/aiComplianceBlueprintService.js'
 import {
   buildComplianceEvidencePackets,
+  cleanComplianceBodyText,
   composeComplianceStatement,
   reviewComplianceContent,
 } from '../services/aiComplianceWorkflowService.js'
 import {
-  convertComplianceDocxToPdf,
-  reviewCompliancePdfAgainstDocx,
   reviewGeneratedComplianceDocx,
 } from '../services/aiComplianceOutputService.js'
-import {
-  buildComplianceWebSearchQueries,
-  fetchComplianceWebEvidence,
-} from '../services/aiComplianceWebResearchService.js'
+import { fetchComplianceModelEvidence } from '../services/aiComplianceModelResearchService.js'
+import { fetchDueDiligenceNetworkEvidence } from '../services/aiDueDiligenceNetworkResearchService.js'
 import { generateBusinessDocx } from '../services/aiBusinessDocumentService.js'
+import { isDiagnosticEvidenceSourceName } from '../services/aiEvidenceQualityService.js'
 import { loadAiSkill } from '../services/aiSkillService.js'
 import { AI_TEMPLATE_CATALOG } from '../services/aiTemplateCatalog.js'
 
@@ -108,146 +106,300 @@ async function main() {
     'Skill仅引用核心规范，不登记样本DOCX',
   )
   check(
-    'Skill要求项目资料不足时受控联网',
-    /受控.*公开网络|公开网络.*受控/.test(`${skill.instructions}\n${skill.referenceInstructions}`)
-      && /URL/.test(skill.referenceInstructions)
-      && /基金合伙协议/.test(`${skill.instructions}\n${skill.referenceInstructions}`),
-    '公开证据可补充、内部基金文件不可由网络替代',
-  )
-  check(
-    '缺失资料固定句唯一',
+    '缺失资料采用专属核验边界并禁用旧占位语',
     blueprint.fixedContent.missingDataSentence === COMPLIANCE_MISSING_DATA_SENTENCE
-      && skill.referenceInstructions.includes(COMPLIANCE_MISSING_DATA_SENTENCE),
+      && skill.referenceInstructions.includes('正文禁止使用')
+      && skill.referenceInstructions.includes('当前项目暂无相关资料'),
     COMPLIANCE_MISSING_DATA_SENTENCE,
   )
-
-  const webPlans = buildComplianceWebSearchQueries({
-    name: '联网核验项目',
-    companyName: '联网核验企业有限公司',
-    industry: '人工智能',
-  })
   check(
-    '公开检索覆盖项目与监管维度',
-    webPlans.length === 7
-      && webPlans.some((plan) => plan.topic === '核心团队')
-      && webPlans.some((plan) => plan.topic === '处罚、诉讼与失信')
-      && webPlans.some((plan) => plan.topic === '投资方式及投资限制'),
-    webPlans.map((plan) => plan.topic).join('、'),
-  )
-  let mockSearchIndex = 0
-  const mockWebFetch = (async () => {
-    mockSearchIndex += 1
-    return new Response(JSON.stringify({
-      results: [
-        {
-          title: `联网核验企业公开资料${mockSearchIndex}`,
-          content: '该页面披露联网核验企业有限公司在人工智能领域的公司、核心团队、产品技术、融资、政策监管及投资限制等公开信息。',
-          url: `https://www.csrc.gov.cn/public-evidence/${mockSearchIndex}`,
-          publishedDate: '2026-07-20',
-        },
-        {
-          title: '截止日后资料',
-          content: '该资料晚于本次资料截止日，不应进入证据。',
-          url: `https://www.csrc.gov.cn/future/${mockSearchIndex}`,
-          publishedDate: '2026-08-01',
-        },
-      ],
-    }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    })
-  }) as typeof fetch
-  const webResearch = await fetchComplianceWebEvidence({
-    project: {
-      name: '联网核验项目',
-      companyName: '联网核验企业有限公司',
-      industry: '人工智能',
-    },
-    sourceCutoffDate: '2026-07-25',
-    fetchImpl: mockWebFetch,
-    baseUrl: 'https://search.example.test',
-    now: new Date('2026-07-25T08:00:00Z'),
-  })
-  check(
-    '公开检索结果形成可审计证据',
-    webResearch.audit.status === 'succeeded'
-      && webResearch.audit.succeededQueryCount === 7
-      && webResearch.sources.length === 7
-      && webResearch.sources.every((source) =>
-        source.sourceType === 'public_web_official'
-        && source.sourceId?.length === 64
-        && source.locator?.startsWith('https://www.csrc.gov.cn/')
-        && source.versionOrDate === '2026-07-20'),
-    `${webResearch.sources.length}条官方公开证据，状态${webResearch.audit.status}`,
-  )
-  const webPackets = buildComplianceEvidencePackets(webResearch.sources)
-  check(
-    '公开证据进入章节级Evidence Packet',
-    webPackets.find((packet) => packet.sectionTitle === '核心团队')!.items.length > 0
-      && webPackets.find((packet) => packet.sectionTitle === '投资情形分析')!.items
-        .some((item) => item.sourceType === 'public_web_official'),
-    '公开证据保留sourceType并参与相关章节检索',
-  )
-  const officialFallbackFetch = (async (target: string | URL | Request) => {
-    const url = String(target)
-    if (url.includes('/search?')) {
-      return new Response(JSON.stringify({ results: [] }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      })
-    }
-    return new Response(
-      '<html><body><h1>私募投资基金监督管理条例</h1><p>2023年7月3日公布。'
-      + '本条例用于规范私募投资基金业务活动和投资运作，保护投资者合法权益。'.repeat(12)
-      + '</p></body></html>',
-      { status: 200, headers: { 'Content-Type': 'text/html' } },
-    )
-  }) as typeof fetch
-  const fallbackResearch = await fetchComplianceWebEvidence({
-    project: { name: '官方规则兜底验收项目' },
-    sourceCutoffDate: '2026-07-25',
-    fetchImpl: officialFallbackFetch,
-    baseUrl: 'https://search.example.test',
-    now: new Date('2026-07-25T08:00:00Z'),
-  })
-  check(
-    '搜索引擎无结果时直取官方监管页面',
-    fallbackResearch.audit.officialFallbackAttempted
-      && fallbackResearch.audit.officialFallbackSourceCount === 2
-      && fallbackResearch.sources.every((source) =>
-        source.sourceType === 'public_web_official'
-        && source.locator?.startsWith('https://www.csrc.gov.cn/')),
-    `${fallbackResearch.audit.officialFallbackSourceCount}条官方监管来源`,
-  )
-  const fallbackPackets = buildComplianceEvidencePackets(fallbackResearch.sources)
-  check(
-    '通用监管资料不污染公司与投资价值章节',
-    fallbackPackets
-      .filter((packet) => packet.items.length > 0)
-      .every((packet) => packet.sectionTitle === '投资情形分析'),
-    fallbackPackets
-      .filter((packet) => packet.items.length > 0)
-      .map((packet) => packet.sectionTitle)
-      .join('、'),
-  )
-  const unavailableResearch = await fetchComplianceWebEvidence({
-    project: { name: '联网不可用项目' },
-    sourceCutoffDate: '2026-07-25',
-    fetchImpl: (async () => { throw new Error('offline') }) as typeof fetch,
-    baseUrl: 'https://search.example.test',
-  })
-  check(
-    '公开检索不可用时不阻断生成',
-    unavailableResearch.audit.status === 'unavailable'
-      && unavailableResearch.sources.length === 0
-      && unavailableResearch.audit.failedQueryCount === 7,
-    `状态${unavailableResearch.audit.status}，失败查询${unavailableResearch.audit.failedQueryCount}`,
+    '性能和解析诊断文件可在候选截断前识别',
+    [
+      'perf_1784264832953.txt',
+      'localperf_1784264895234.txt',
+      '大文件测试_1784264758.txt',
+      '解析测试_1784262637.txt',
+      '卡住排查_1784264322.txt',
+    ].every(isDiagnosticEvidenceSourceName)
+      && !isDiagnosticEvidenceSourceName('智灵动力0611BP.pptx')
+      && !isDiagnosticEvidenceSourceName('20260630-沈阳与智灵FDE团队交流纪要V1.pdf'),
+    '诊断来源被排除，正式BP和纪要保留',
   )
 
   const project = {
     name: '生产验收企业项目',
     companyName: '生产验收企业有限公司',
   }
+  const modelResearch = await fetchComplianceModelEvidence({
+    project: {
+      name: '智灵动力项目',
+      companyName: '智灵动力科技有限公司',
+      industry: '具身智能',
+    },
+    sourceCutoffDate: '2026-07-25',
+    missingSections: ['公司简介', '核心团队', '产品及技术', '投资理由'],
+    fetchImpl: (async (url) => {
+      if (String(url).includes('/chat/completions')) {
+        return new Response(JSON.stringify({
+          choices: [{
+            message: {
+              content: JSON.stringify({
+                results: [{
+                  topic: '官网、产品及技术',
+                  title: '智灵动力项目公开介绍',
+                  url: 'https://example.com/zhiling-power',
+                  publisher: '示例官方来源',
+                  publishedAt: '2026-07-01',
+                }],
+              }),
+            },
+          }],
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      return new Response(
+        '<html><head><title>智灵动力项目公开介绍</title></head><body>'
+        + '智灵动力科技有限公司聚焦具身智能产品与机器人核心技术研发。'
+        + '公司公开介绍包含创始团队、实验室合作、产品验证、融资事件和商业化进展。'.repeat(8)
+        + '</body></html>',
+        { status: 200, headers: { 'Content-Type': 'text/html' } },
+      )
+    }) as typeof fetch,
+    resolveHost: async () => ['93.184.216.34'],
+    now: new Date('2026-07-25T08:00:00Z'),
+  })
+  check(
+    '项目大模型网络补全返回可缓存证据',
+    modelResearch.sources.length === 1
+      && modelResearch.sources[0]?.sourceType === 'public_web_llm'
+      && modelResearch.sources[0]?.locator === 'https://example.com/zhiling-power'
+      && modelResearch.audit.verifiedSourceCount === 1,
+    JSON.stringify(modelResearch.audit),
+  )
+  const researchedPackets = buildComplianceEvidencePackets(modelResearch.sources)
+  check(
+    '项目大模型补全证据进入对应章节',
+    researchedPackets.find((packet) => packet.sectionTitle === '产品及技术')?.items.length === 1,
+    researchedPackets.map((packet) => `${packet.sectionTitle}:${packet.items.length}`).join('、'),
+  )
+  let agentRequestBody = ''
+  const agentResearch = await fetchDueDiligenceNetworkEvidence({
+    project: {
+      name: '阿尔法心理项目',
+      companyName: '南京威豆网络科技有限公司',
+    },
+    sourceCutoffDate: '2026-07-25',
+    pendingTopics: [
+      '公司简介、主体工商、核心团队、创始人、产品技术和商业化公开信息',
+      '投资方式、投资限制、返投政策、返投认定口径及可公开查询的返投记录',
+    ],
+    fetchImpl: async (_input, init) => {
+      agentRequestBody = String(init?.body ?? '')
+      return new Response(JSON.stringify({
+        result: {
+          searchEvidence: [
+            {
+              query: '南京威豆网络科技有限公司 公司简介 主营业务',
+              title: '阿尔法心理公司介绍',
+              snippet: '南京威豆网络科技有限公司运营阿尔法心理产品，提供心理健康相关服务。',
+              url: 'https://example.com/alpha/company',
+              publisher: '公司官网',
+              publishedAt: '2026-06-01',
+              reliability: '公司官网',
+            },
+            {
+              query: '南京威豆网络科技有限公司 核心团队 创始人',
+              title: '阿尔法心理核心团队',
+              snippet: '阿尔法心理公开页面披露创始人和核心团队的职责及经历。',
+              url: 'https://example.com/alpha/team',
+              publisher: '公司官网',
+              publishedAt: '2026-06-02',
+              reliability: '公司官网',
+            },
+            {
+              query: '南京威豆网络科技有限公司 产品 技术 客户',
+              title: '阿尔法心理产品与技术',
+              snippet: '阿尔法心理公开介绍其心理服务产品、技术平台与客户应用场景。',
+              url: 'https://example.com/alpha/product',
+              publisher: '公司官网',
+              publishedAt: '2026-06-03',
+              reliability: '公司官网',
+            },
+            {
+              query: '某政府引导基金 返投政策 返投认定口径 公开记录',
+              title: '政府投资基金返投认定办法',
+              snippet: '公开办法规定返投比例、返投项目认定范围、认定程序和统计口径。',
+              url: 'https://example.gov.cn/fund/return-investment',
+              publisher: '政府部门',
+              publishedAt: '2026-05-01',
+              reliability: '政府官网',
+            },
+          ],
+        },
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    },
+    now: new Date('2026-07-25T08:00:00Z'),
+  })
+  check(
+    '合规任务使用既有联网Agent补全公司团队产品及返投',
+    agentRequestBody.includes('返投认定口径')
+      && agentResearch.audit.provider === 'flue_intel_collect'
+      && agentResearch.sources.length === 4
+      && agentResearch.sources.every((source) =>
+        source.sourceType === 'public_web_agent_search'
+        && source.sourceName.startsWith('项目大模型网络补全·')),
+    JSON.stringify(agentResearch.audit),
+  )
+  const agentPackets = buildComplianceEvidencePackets(agentResearch.sources)
+  check(
+    '联网Agent证据按主题进入公司团队产品及合规核查',
+    ['公司简介', '核心团队', '产品及技术', '投资情形分析'].every((sectionTitle) =>
+      (agentPackets.find((packet) => packet.sectionTitle === sectionTitle)?.items.length ?? 0) > 0),
+    agentPackets.map((packet) => `${packet.sectionTitle}:${packet.items.length}`).join('、'),
+  )
+  const previousAgentDisableLlm = process.env.AI_COMPLIANCE_DISABLE_LLM
+  process.env.AI_COMPLIANCE_DISABLE_LLM = '1'
+  const agentFallbackWorkflow = await composeComplianceStatement({
+    template,
+    skill,
+    blueprint,
+    project: {
+      name: '阿尔法心理项目',
+      companyName: '南京威豆网络科技有限公司',
+    },
+    sources: agentResearch.sources,
+    sourceCutoffDate: '2026-07-25',
+    parameters: {},
+  })
+  if (previousAgentDisableLlm === undefined) delete process.env.AI_COMPLIANCE_DISABLE_LLM
+  else process.env.AI_COMPLIANCE_DISABLE_LLM = previousAgentDisableLlm
+  const returnInvestmentFinding = agentFallbackWorkflow.content.sections
+    .find((section) => section.title === '投资情形分析')
+    ?.findings.find((finding) => finding.text.startsWith('返投要求：'))
+  check(
+    '返投公开依据生成待核验内容而非整项空缺',
+    returnInvestmentFinding?.status === '待核验'
+      && !returnInvestmentFinding.text.includes(COMPLIANCE_MISSING_DATA_SENTENCE)
+      && returnInvestmentFinding.sourceIndexes.length === 1,
+    returnInvestmentFinding?.text ?? '未生成返投核查项',
+  )
+  const agentDocxPath = path.join(outputDirectory, '阿尔法心理_联网补全场景自测.docx')
+  await generateBusinessDocx({
+    outputPath: agentDocxPath,
+    template,
+    project: {
+      name: '阿尔法心理项目',
+      companyName: '南京威豆网络科技有限公司',
+    },
+    content: agentFallbackWorkflow.content,
+    sources: agentResearch.sources,
+    sourceCutoffDate: '2026-07-25',
+    generatedAt: new Date('2026-07-25T00:00:00+08:00'),
+    blueprint,
+  })
+  const agentDocxReview = await reviewGeneratedComplianceDocx({
+    filePath: agentDocxPath,
+    template,
+    blueprint,
+    content: agentFallbackWorkflow.content,
+    projectName: '阿尔法心理项目',
+  })
+  check(
+    '阿尔法心理联网补全场景DOCX通过Word结构与字体验收',
+    agentDocxReview.passed,
+    agentDocxReview.issues.length
+      ? agentDocxReview.issues.map((issue) => `${issue.code}:${issue.message}`).join('；')
+      : agentDocxPath,
+  )
+  const localProjectSources = [
+    {
+      sourceType: 'file',
+      sourceId: 'zhiling-bp',
+      sourceName: '智灵动力BP.pptx',
+      chunkIndex: 0,
+      versionOrDate: '2026-05-16',
+      content: [
+        '智灵动力科技有限公司成立于2024年，定位为企业级自进化智能体技术公司，当前处于天使轮融资阶段。',
+        '公司业务采用FDE交付模式进入企业工作流，商业模式包括项目服务费、软件订阅费和持续运维费。',
+        '核心团队由创始人、CEO和CTO组成，具备人工智能研究、企业服务产品研发和产业客户交付经历。',
+        '产品以ZeeLin自进化智能体平台为底座，具备算法训练、模型调用、工具编排、流程自动化和知识库能力。',
+        '现有客户验证覆盖金融科技、品牌营销和企业研究场景，已形成标杆项目和商业化交付。',
+        '公司正在推进3000万元天使轮融资，拟用于产品研发、客户交付和团队扩充。',
+      ].join('\n'),
+    },
+  ]
+  const localProjectPackets = buildComplianceEvidencePackets(localProjectSources)
+  check(
+    '本地项目BP优先覆盖公开事实章节',
+    ['公司简介', '核心团队', '产品及技术', '投资理由', '投资计划', '投资情形分析'].every((sectionTitle) =>
+      (localProjectPackets.find((packet) => packet.sectionTitle === sectionTitle)?.items.length ?? 0) > 0),
+    localProjectPackets.map((packet) => `${packet.sectionTitle}:${packet.items.length}`).join('、'),
+  )
+  check(
+    '来源材料编号不会进入报告正文',
+    [
+      cleanComplianceBodyText('（二）短剧相关业务'),
+      cleanComplianceBodyText('3 、 学术团队：沈教授负责前沿技术研究'),
+      cleanComplianceBodyText('二、智灵财务尽调相关'),
+      cleanComplianceBodyText('1 沈阳与智灵FDE团队交流纪要'),
+    ].join('、') === [
+      '短剧相关业务',
+      '学术团队：沈教授负责前沿技术研究',
+      '智灵财务尽调相关',
+      '沈阳与智灵FDE团队交流纪要',
+    ].join('、'),
+    '清除一、（二）、3、和页码式前缀',
+  )
+  const outlineRichSources = [{
+    sourceType: 'file',
+    sourceId: 'zhiling-outline-rich',
+    sourceName: '智灵动力交流纪要.pdf',
+    chunkIndex: 0,
+    versionOrDate: '2026-06-30',
+    content: [
+      '（二）短剧相关业务 1 、 TikTok短剧转绘业务 （1）业务主体：由合肥全资子公司运营，面向海外内容客户提供转绘服务。',
+      '3 、 学术团队：沈教授带领清华学生团队负责前沿技术研究与论文产出。',
+      '（三）算法优化业务 1 、 业务模式：为客户提供算法加速、参数优化和性能提升服务。',
+      '四、智灵融资进展相关 （一）存量资产处置 1 、 公司计划推进新一轮融资。',
+    ].join('\n'),
+  }]
+  const outlinePackets = buildComplianceEvidencePackets(outlineRichSources)
+  check(
+    '章节证据切片清除原始目录号',
+    outlinePackets.flatMap((packet) => packet.items)
+      .every((item) => !/^\s*(?:[一二三四五六七八九十百]+[、．]|[（(][^）)]+[）)]|\d+[、．])/.test(item.excerpt)),
+    outlinePackets.flatMap((packet) => packet.items).map((item) => item.excerpt).join('；'),
+  )
+  const previousDisableLlm = process.env.AI_COMPLIANCE_DISABLE_LLM
+  process.env.AI_COMPLIANCE_DISABLE_LLM = '1'
+  const localFallbackWorkflow = await composeComplianceStatement({
+    template,
+    skill,
+    blueprint,
+    project: {
+      name: '智灵动力验收项目',
+      companyName: '智灵动力科技有限公司',
+    },
+    sources: localProjectSources,
+    sourceCutoffDate: '2026-07-25',
+    parameters: {},
+  })
+  if (previousDisableLlm === undefined) delete process.env.AI_COMPLIANCE_DISABLE_LLM
+  else process.env.AI_COMPLIANCE_DISABLE_LLM = previousDisableLlm
+  check(
+    '章节模型不可用时本章兜底不跨章复制事实',
+    localFallbackWorkflow.reviewReports.at(-1)?.passed
+      && localFallbackWorkflow.reviewReports.at(-1)?.issues.every((issue) =>
+        issue.code !== 'DUPLICATED_FACT'),
+    localFallbackWorkflow.reviewReports.at(-1)?.issues
+      .map((issue) => `${issue.code}:${issue.message}`)
+      .join('、') || 'Reviewer无重复事实问题',
+  )
   const evidencePackets = buildComplianceEvidencePackets([])
   check(
     '零证据章节包为空',
@@ -273,13 +425,15 @@ async function main() {
   const missingFindings = workflow.content.sections.flatMap((section) =>
     section.findings.filter((finding) => finding.status === '资料缺口'))
   check(
-    '零证据不调用模型且逐项明确缺口',
+    '零证据不调用模型且逐项给出专属核验边界',
     workflow.reviewerRegenerationRounds === 0
       && missingFindings.length >= 16
       && missingFindings.every((finding) =>
         finding.text.includes(COMPLIANCE_MISSING_DATA_SENTENCE)
+        && !finding.text.includes('当前项目暂无相关资料')
+        && /(?:需取得|需核验|需补充|完成条件|核验边界)/.test(finding.text)
         && finding.sourceIndexes.length === 0),
-    `${missingFindings.length}项资料缺口均使用固定句`,
+    `${missingFindings.length}项资料缺口均提供具体核验边界`,
   )
   check(
     '投资理由固定五项',
@@ -367,7 +521,6 @@ async function main() {
   )
 
   const docxPath = path.join(outputDirectory, '合规性说明_零证据自测.docx')
-  const pdfPath = path.join(outputDirectory, '合规性说明_零证据自测.pdf')
   const generation = await generateBusinessDocx({
     outputPath: docxPath,
     template,
@@ -410,57 +563,7 @@ async function main() {
     '标题黑体14pt常规，二级标题宋体12pt常规，中英文与数字随段落使用中文字体',
   )
 
-  const conversion = await convertComplianceDocxToPdf({ docxPath, pdfPath })
-  const pdfReview = await reviewCompliancePdfAgainstDocx({
-    docxPath,
-    pdfPath,
-    template,
-    blueprint,
-    content: workflow.content,
-  })
-  check(
-    'PDF Reviewer通过',
-    pdfReview.passed,
-    pdfReview.issues.length
-      ? pdfReview.issues.map((issue) => `${issue.code}:${issue.message}`).join('；')
-      : `页面${pdfReview.metadata.pageCount}，中文覆盖率${pdfReview.metadata.docxTextCoverage}`,
-  )
-  check(
-    'Word/PDF 按内容自然分页',
-    Number.isInteger(pdfReview.metadata.pageCount)
-      && Number(pdfReview.metadata.pageCount) >= 1,
-    `不强制固定页数；实际${pdfReview.metadata.pageCount}页`,
-  )
-  check(
-    'PDF正文隔离审计元数据',
-    pdfReview.metadata.forbiddenContentValidated === true,
-    'PDF与Word正文采用同一禁入规则',
-  )
-  check(
-    'PDF中文字体实际可用',
-    pdfReview.metadata.cjkFontValidated === true
-      && Array.isArray(pdfReview.metadata.pdfFontNames)
-      && pdfReview.metadata.pdfFontNames.some((name) =>
-        /Songti|Heiti|Hiragino|CJK|SourceHan/i.test(String(name))),
-    JSON.stringify(pdfReview.metadata.pdfFontNames),
-  )
-  check(
-    'PDF使用可审计CJK字体映射',
-    conversion.fontFallbackApplied
-      && conversion.fontFallbacks['宋体'] === 'Songti SC'
-      && conversion.fontFallbacks['黑体'] === 'STHeiti',
-    JSON.stringify(conversion.fontFallbacks),
-  )
-  check(
-    'PDF与Word同源',
-    pdfReview.metadata.derivedFrom === path.basename(docxPath),
-    String(pdfReview.metadata.derivedFrom),
-  )
-
-  const [docxBuffer, pdfBuffer] = await Promise.all([
-    readFile(docxPath),
-    readFile(pdfPath),
-  ])
+  const docxBuffer = await readFile(docxPath)
   const report = {
     generatedAt: new Date().toISOString(),
     passed: checks.every((item) => item.passed),
@@ -483,13 +586,11 @@ async function main() {
     },
     artifacts: {
       docx: { path: docxPath, bytes: docxBuffer.length, sha256: sha256(docxBuffer) },
-      pdf: { path: pdfPath, bytes: pdfBuffer.length, sha256: sha256(pdfBuffer) },
     },
     generation,
     reviews: {
       content: finalContentReview,
       word: wordReview,
-      pdf: pdfReview,
     },
   }
   const reportPath = path.join(outputDirectory, 'acceptance-report.json')

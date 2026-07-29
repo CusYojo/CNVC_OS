@@ -15,7 +15,7 @@ const REQUIRED_SECTION_TREE = [
   { title: '投资情形分析', level: 1, children: [] },
 ] as const
 
-export const COMPLIANCE_MISSING_DATA_SENTENCE = '当前项目暂无相关资料。'
+export const COMPLIANCE_MISSING_DATA_SENTENCE = '尚未取得能够直接支持本项判断的专项材料。'
 
 export type ComplianceParagraphFingerprint = {
   paragraphIndex: number

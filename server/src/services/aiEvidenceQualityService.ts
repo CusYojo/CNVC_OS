@@ -16,6 +16,29 @@ export type RejectedEvidence = {
 
 const PLACEHOLDER_TEXT = /^(?:待.{0,30}(?:补充|核验|确认|解析).*|项目已创建.{0,60}(?:等待上传|生成).*|暂无(?:相关)?(?:资料|数据|信息|内容)?|无可用(?:资料|数据|信息)|N\/?A|unknown|未提供)$/i
 const DIAGNOSTIC_NOISE = /(?:上传测试|测试文本资料|解析验证|卡住排查|异步上传测试|大文件测试)/
+const DIAGNOSTIC_SOURCE_NAME = /(?:^|[/\\_-])(?:local)?perf[_-]?\d|(?:大文件测试|解析测试|卡住排查|异步上传|日志测试|需求\d*复核|csv测试|pptx测试|txt测试)/i
+const PUBLIC_WEB_FOOTER =
+  /(?:京ICP备\d+号?|京公网安备|Copyright\s*©|All Rights Reserved|英诺嘿呀\s*版权所有|免责声明\s*使用条款\s*隐私政策)/i
+const PUBLIC_WEB_CONTACT_FOOTER =
+  /(?:联系我们\s*(?:北京|中国)|英诺嘿呀(?:助手微信号|邮箱|电话)|企业旗舰店\s*英诺嘿呀|小程序\s*英诺嘿呀)/i
+const PUBLIC_WEB_NAVIGATION_TERMS = [
+  '行情中心',
+  '数据中心',
+  '股吧',
+  '期指',
+  '期权',
+  '龙虎榜',
+  '新股申购',
+  '基金净值',
+  '板块资金',
+  '公告大全',
+  '个股研报',
+  '融资融券',
+]
+
+export function isDiagnosticEvidenceSourceName(value: unknown) {
+  return DIAGNOSTIC_SOURCE_NAME.test(String(value ?? '').trim())
+}
 
 function isPlaceholderLine(value: string) {
   const withoutLabel = value.replace(/^[^：:\n]{1,12}[：:]\s*/, '')
@@ -122,6 +145,22 @@ function informationScore(value: string) {
   return cjk + digits * 1.5 + unique * 0.4
 }
 
+function sanitizePublicWebContent(sourceType: string, value: string) {
+  if (!sourceType.startsWith('public_web')) return { content: value, navigationHeavy: false }
+  const navigationHits = PUBLIC_WEB_NAVIGATION_TERMS
+    .filter((term) => value.includes(term))
+    .length
+  const footerIndexes = [
+    value.search(PUBLIC_WEB_FOOTER),
+    value.search(PUBLIC_WEB_CONTACT_FOOTER),
+  ].filter((index) => index >= 0)
+  const footerIndex = footerIndexes.length ? Math.min(...footerIndexes) : -1
+  return {
+    content: (footerIndex >= 0 ? value.slice(0, footerIndex) : value).trim(),
+    navigationHeavy: navigationHits >= 6,
+  }
+}
+
 function evidenceGroupKey(source: EvidenceLike) {
   return `${source.sourceType}:${source.sourceId || source.sourceName}`
 }
@@ -135,10 +174,28 @@ export function curateEvidenceSources<T extends EvidenceLike>(
   const seenContent: string[] = []
 
   sources.forEach((source, order) => {
+    if (isDiagnosticEvidenceSourceName(source.sourceName)) {
+      rejected.push({
+        sourceName: source.sourceName,
+        chunkIndex: source.chunkIndex,
+        reason: '来源属于性能、解析或上传诊断文件，已排除',
+      })
+      return
+    }
     const quality = cleanCorruptedText(source.content)
     const collapsed = collapseRepeatedText(quality.cleaned)
-    const readableCjk = (collapsed.match(/[\u3400-\u9FFF]/g) || []).length
-    if (!quality.usable || !collapsed) {
+    const publicWeb = sanitizePublicWebContent(source.sourceType, collapsed)
+    const curatedContent = publicWeb.content
+    if (publicWeb.navigationHeavy) {
+      rejected.push({
+        sourceName: source.sourceName,
+        chunkIndex: source.chunkIndex,
+        reason: '公开页面主要为导航、行情或站点目录，未形成可引用的项目事实，已排除',
+      })
+      return
+    }
+    const readableCjk = (curatedContent.match(/[\u3400-\u9FFF]/g) || []).length
+    if (!quality.usable || !curatedContent) {
       rejected.push({
         sourceName: source.sourceName,
         chunkIndex: source.chunkIndex,
@@ -146,7 +203,11 @@ export function curateEvidenceSources<T extends EvidenceLike>(
       })
       return
     }
-    if (DIAGNOSTIC_NOISE.test(collapsed) || readableCjk < 6 || informationScore(collapsed) < 14) {
+    if (
+      DIAGNOSTIC_NOISE.test(curatedContent)
+      || readableCjk < 6
+      || informationScore(curatedContent) < 14
+    ) {
       rejected.push({
         sourceName: source.sourceName,
         chunkIndex: source.chunkIndex,
@@ -154,7 +215,7 @@ export function curateEvidenceSources<T extends EvidenceLike>(
       })
       return
     }
-    if (isNearDuplicate(collapsed, seenContent, 0.9)) {
+    if (isNearDuplicate(curatedContent, seenContent, 0.9)) {
       rejected.push({
         sourceName: source.sourceName,
         chunkIndex: source.chunkIndex,
@@ -169,11 +230,11 @@ export function curateEvidenceSources<T extends EvidenceLike>(
         reason: '片段含损坏字符，已清除损坏部分后使用可读内容',
       })
     }
-    seenContent.push(collapsed)
+    seenContent.push(curatedContent)
     cleanedCandidates.push({
       ...source,
-      content: collapsed.slice(0, 4000),
-      _score: informationScore(collapsed),
+      content: curatedContent.slice(0, 4000),
+      _score: informationScore(curatedContent),
       _order: order,
     })
   })

@@ -57,7 +57,7 @@ conversationsRouter.post('/:id/summarize-title', async (req: AuthedRequest, res,
       const resp = await fetch(`${base}/chat/completions`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model, messages: [{ role: 'user', content: prompt }], max_tokens: 40, temperature: 0.3 }),
+        body: JSON.stringify({ model, messages: [{ role: 'user', content: prompt }], max_tokens: 40 }),
         signal: AbortSignal.timeout(30000),
       })
       if (resp.ok) {

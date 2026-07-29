@@ -5,8 +5,9 @@ import { useToast } from '../components/Toast'
 import { Badge, Button, Card, DataTable, Drawer, FileUpload, Modal, PageHeader, ProgressBar, SearchInput, StatusBadge, TableCell, Tabs } from '../components/ui'
 import { useAuthStore } from '../store/useAuthStore'
 import { apiPost, apiGet } from '../lib/api'
-import type { Lead, LeadChannel, LeadScoring } from '../types'
+import type { Lead, LeadScoring } from '../types'
 
+const CHANNEL_OPTIONS: string[] = ['36氪', '机构公众号', '高校公众号', '创投新闻', '微信群聊', '论文']
 const INDUSTRY_OPTIONS: string[] = [
   '人工智能', '具身智能/机器人', '半导体/芯片', '前沿技术', '产业升级', '先进制造',
   '企业服务', '医疗健康', '生物医药', '新能源', '新材料', '汽车出行',
@@ -28,7 +29,14 @@ const LEAD_PLACEHOLDERS = new Set([
   '待核实',
   '未披露',
   '未披露/待核实',
+  '未披露/待验证',
+  '未识别/待核实',
+  '未公开',
+  '待人工确认',
+  '待工商核验',
+  '主体待确认',
   '融资轮次待核实',
+  '不适用',
   '无',
   '-',
   'N/A',
@@ -42,17 +50,21 @@ function meaningfulLeadText(value: unknown): string | undefined {
   }
   if (typeof value !== 'string' && typeof value !== 'number') return undefined
   const text = String(value).trim()
-  return LEAD_PLACEHOLDERS.has(text) ? undefined : text
+  if (LEAD_PLACEHOLDERS.has(text)) return undefined
+  if (/(?:未披露|未公开|待核验|待核实|待确认|待验证|待工商核验|通常不公开)/.test(text)) return undefined
+  if (/^(?:暂?未|尚未|无法|通常不).*(?:披露|公开|获取|识别|核验|确认|查询)/.test(text)) return undefined
+  return text
 }
 
 function getLeadIdentity(lead: Lead) {
   const companySubject = meaningfulLeadText(lead.scoring?.registry?.companyName)
     ?? meaningfulLeadText(lead.companyName)
-    ?? '公司主体待核验'
+    ?? meaningfulLeadText(lead.name)
+    ?? '公司主体'
   const projectName = meaningfulLeadText(lead.radarProfile?.profile?.projectName)
     ?? meaningfulLeadText(lead.scoring?.projectName)
     ?? meaningfulLeadText(lead.name)
-    ?? '项目名称待核验'
+    ?? companySubject
   return { companySubject, projectName }
 }
 
@@ -111,6 +123,323 @@ function getLeadTechnicalScore(lead: Lead) {
     : { status: 'pending' as const }
 }
 
+function getLeadBasicFacts(lead: Lead) {
+  const funding = getLeadFundingDisplay(lead)
+  const registry = lead.scoring?.registry ?? {}
+  return [
+    ['地区', meaningfulLeadText(lead.region) ?? meaningfulLeadText(registry.regLocation) ?? meaningfulLeadText(registry.registeredAddress)],
+    ['行业', meaningfulLeadText(lead.industry)],
+    ['融资轮次', funding.round],
+    ['融资金额', funding.amount],
+    ['最新估值', lead.valuationDisplay?.value ?? funding.valuation],
+    ['成立时间', meaningfulLeadText(registry.foundedAt) ?? meaningfulLeadText(lead.foundedAt)],
+    ['注册资本', meaningfulLeadText(registry.registeredCapital) ?? meaningfulLeadText(lead.registeredCapital)],
+    ['法定代表人', meaningfulLeadText(registry.legalRepresentative) ?? meaningfulLeadText(lead.legalRepresentative)],
+    ['注册地址', meaningfulLeadText(registry.registeredAddress) ?? meaningfulLeadText(lead.registeredAddress)],
+  ].filter((item): item is [string, string] => Boolean(item[1]))
+}
+
+function getUsefulShareholders(lead: Lead) {
+  const rows = lead.scoring?.structuredShareholders?.length
+    ? lead.scoring.structuredShareholders
+    : lead.shareholders ?? []
+  return rows
+    .map((item) => ({
+      name: meaningfulLeadText(item.name),
+      percentage: meaningfulLeadText(item.percentage),
+      type: meaningfulLeadText(item.type),
+      sourceUrl: item.sourceUrl,
+    }))
+    .filter((item): item is typeof item & { name: string } => Boolean(item.name))
+}
+
+function getUsefulCompetitors(lead: Lead) {
+  return (lead.scoring?.competitors ?? [])
+    .filter((item) => !item.is_self)
+    .map((item) => ({
+      ...item,
+      name: meaningfulLeadText(item.name),
+      tech: meaningfulLeadText(item.tech),
+      product: meaningfulLeadText(item.product),
+      funding: meaningfulLeadText(item.funding),
+      differentiation: meaningfulLeadText(item.differentiation),
+    }))
+    .filter((item): item is typeof item & { name: string } => Boolean(item.name))
+}
+
+function getUsefulFundingRounds(lead: Lead) {
+  const rows = lead.scoring?.fundingRoundsResearched?.length
+    ? lead.scoring.fundingRoundsResearched
+    : lead.fundingRounds ?? []
+  return rows
+    .map((item) => ({
+      round: meaningfulLeadText(item.round),
+      date: meaningfulLeadText(item.date),
+      amount: meaningfulLeadText(item.amount),
+      valuation: meaningfulLeadText(item.valuation),
+      investors: meaningfulLeadText(item.investors),
+      sourceUrl: item.sourceUrl,
+    }))
+    .filter((item) => Boolean(item.round || item.date || item.amount || item.valuation || item.investors))
+}
+
+function getUsefulTeam(lead: Lead) {
+  const rows = lead.scoring?.structuredTeam?.length
+    ? lead.scoring.structuredTeam
+    : lead.founders ?? []
+  return rows
+    .map((item) => ({
+      name: meaningfulLeadText(item.name),
+      title: meaningfulLeadText(item.title),
+      background: meaningfulLeadText(item.background),
+    }))
+    .filter((item): item is typeof item & { name: string } => Boolean(item.name))
+}
+
+function normalizedSourceUrlKey(value: unknown) {
+  const raw = meaningfulLeadText(value)
+  if (!raw) return ''
+  try {
+    const url = new URL(raw, window.location.origin)
+    url.hash = ''
+    for (const key of [...url.searchParams.keys()]) {
+      if (/^(?:utm_|from$|source$|ref$|refer$|share_|scene$|clicktime$|enterid$)/i.test(key)) {
+        url.searchParams.delete(key)
+      }
+    }
+    url.searchParams.sort()
+    return url.toString().replace(/\/$/, '').toLocaleLowerCase()
+  } catch {
+    return raw.replace(/[?#].*$/, '').replace(/\/$/, '').toLocaleLowerCase()
+  }
+}
+
+function normalizedSourceTitleKey(value: unknown) {
+  const title = meaningfulLeadText(value)
+  if (!title || ['公开信息来源', '来源证据', '雷达原文'].includes(title)) return ''
+  return title
+    .replace(/^(?:36氪|硬氪)?(?:首发|前线)?\s*[|｜丨:：-]\s*/i, '')
+    .replace(/[\s“”"'「」『』|｜丨:：,，。！？!?·\-—_]/g, '')
+    .toLocaleLowerCase()
+}
+
+function getUsefulSources(lead: Lead) {
+  const rows = [
+    ...(lead.scoring?.researchSources ?? []).map((item) => ({
+      title: meaningfulLeadText(item.title) ?? '公开信息来源',
+      url: meaningfulLeadText(item.url),
+      excerpt: meaningfulLeadText(item.excerpt),
+      meta: '公开信息',
+    })),
+    ...(lead.sources ?? []).map((item) => ({
+      title: meaningfulLeadText(item.title) ?? '来源证据',
+      url: meaningfulLeadText(item.url),
+      excerpt: meaningfulLeadText(item.excerpt),
+      meta: [meaningfulLeadText(item.publisher), meaningfulLeadText(item.publishedAt), meaningfulLeadText(item.accessedAt)].filter(Boolean).join(' · '),
+    })),
+    ...(meaningfulLeadText(lead.radarProfile?.link) ? [{
+      title: meaningfulLeadText(lead.radarProfile?.sourceName) ?? '雷达原文',
+      url: meaningfulLeadText(lead.radarProfile?.link),
+      excerpt: meaningfulLeadText(lead.radarProfile?.thesis),
+      meta: [meaningfulLeadText(lead.radarProfile?.sourceGroup), meaningfulLeadText(lead.radarProfile?.publishedAt)].filter(Boolean).join(' · '),
+    }] : []),
+  ].filter((item): item is typeof item & { url: string } => Boolean(item.url))
+  const seenUrls = new Set<string>()
+  const seenTitles = new Set<string>()
+  return rows.filter((item) => {
+    const urlKey = normalizedSourceUrlKey(item.url)
+    const titleKey = normalizedSourceTitleKey(item.title)
+    if ((urlKey && seenUrls.has(urlKey)) || (titleKey && seenTitles.has(titleKey))) return false
+    if (urlKey) seenUrls.add(urlKey)
+    if (titleKey) seenTitles.add(titleKey)
+    return true
+  })
+}
+
+function LeadDetailPanel({
+  lead,
+  detailTab,
+  onTabChange,
+  onRunScore,
+  scoreRefreshing,
+}: {
+  lead: Lead
+  detailTab: string
+  onTabChange: (tab: string) => void
+  onRunScore: (lead: Lead) => void
+  scoreRefreshing: boolean
+}) {
+  const identity = getLeadIdentity(lead)
+  const facts = getLeadBasicFacts(lead)
+  const shareholders = getUsefulShareholders(lead)
+  const fundingRounds = getUsefulFundingRounds(lead)
+  const competitors = getUsefulCompetitors(lead)
+  const team = getUsefulTeam(lead)
+  const sources = getUsefulSources(lead)
+  const summary = meaningfulLeadText(lead.summary)
+  const website = meaningfulLeadText(lead.scoring?.officialSite) ?? meaningfulLeadText(lead.website)
+  const tabs = [
+    { id: 'overview', label: '项目概览' },
+    ...(shareholders.length || fundingRounds.length ? [{ id: 'funding', label: '股权融资', count: shareholders.length + fundingRounds.length }] : []),
+    ...(team.length ? [{ id: 'team', label: '核心团队', count: team.length }] : []),
+    ...(sources.length ? [{ id: 'sources', label: '来源证据', count: sources.length }] : []),
+  ]
+  const visibleTab = tabs.some((item) => item.id === detailTab) ? detailTab : 'overview'
+  const valuationSourceUrl = lead.valuationDisplay?.sourceUrl
+
+  return <div>
+    <div className="rounded-xl bg-brand-50 p-4">
+      <div className="flex items-start justify-between gap-6">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            {meaningfulLeadText(lead.industry) && <Badge tone="blue">{lead.industry}</Badge>}
+            <Badge tone={verificationTone(lead.verificationStatus)}>{lead.verificationStatus}</Badge>
+            <StatusBadge status={lead.status} />
+          </div>
+          <p className="mt-3 truncate text-lg font-semibold text-slate-900" title={identity.companySubject}>{identity.companySubject}</p>
+          {identity.projectName !== identity.companySubject && meaningfulLeadText(identity.projectName) &&
+            <p className="mt-1 truncate text-sm text-slate-500" title={identity.projectName}>项目：{identity.projectName}</p>}
+          {summary && <p className="mt-4 text-sm leading-6 text-brand-900">{summary}</p>}
+          {website && <div className="mt-3 text-xs"><SourceLink url={website}>公司官网</SourceLink></div>}
+        </div>
+        {lead.analysisStatus === 'ready' &&
+          <div className="shrink-0 text-right">
+            <p className="text-3xl font-semibold text-brand-700">{lead.score}</p>
+            <p className="text-[10px] text-brand-500">AI 初筛分 · 非投决结论</p>
+          </div>}
+      </div>
+    </div>
+
+    <div className="mt-5"><Tabs tabs={tabs} value={visibleTab} onChange={onTabChange} /></div>
+
+    {visibleTab === 'overview' && <div className="mt-5 space-y-5">
+      {facts.length > 0 && <section className="rounded-xl border border-slate-200 p-4">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-slate-800">基本情况</h3>
+          {valuationSourceUrl && <SourceLink url={valuationSourceUrl}>{lead.valuationDisplay?.sourceLabel ?? '估值来源'}</SourceLink>}
+        </div>
+        <div className="mt-3 grid grid-cols-3 gap-x-6 gap-y-4">
+          {facts.map(([label, value]) => <div key={label}>
+            <p className="text-xs text-slate-400">{label}</p>
+            <p className="mt-1 text-sm font-medium leading-5 text-slate-700">{value}</p>
+          </div>)}
+        </div>
+      </section>}
+
+      {competitors.length > 0 && <section className="rounded-xl border border-slate-200 p-4">
+        <h3 className="text-sm font-semibold text-slate-800">竞对信息</h3>
+        <div className="mt-3 space-y-3">
+          {competitors.map((item, index) => <div key={`${item.name}-${index}`} className="rounded-lg bg-slate-50 p-3">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-sm font-medium text-slate-800">{item.name}</p>
+              {item.sourceUrl && <SourceLink url={item.sourceUrl}>来源</SourceLink>}
+            </div>
+            <div className="mt-2 space-y-1 text-xs leading-5 text-slate-600">
+              {item.tech && <p><span className="text-slate-400">技术：</span>{item.tech}</p>}
+              {item.product && <p><span className="text-slate-400">定位：</span>{item.product}</p>}
+              {item.funding && <p><span className="text-slate-400">融资：</span>{item.funding}</p>}
+              {item.differentiation && <p><span className="text-slate-400">对比：</span>{item.differentiation}</p>}
+            </div>
+          </div>)}
+        </div>
+      </section>}
+
+      {lead.scoring?.dimensions?.length ? <section className="rounded-xl border border-brand-200 bg-brand-50/40 p-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-xs text-slate-500">一级市场评分（多维度加总）</p>
+            <div className="mt-1 flex items-baseline gap-2">
+              <span className="text-3xl font-bold text-brand-700">{lead.scoring.total}</span>
+              <span className="text-sm text-slate-400">/ 100</span>
+              {meaningfulLeadText(lead.scoring.verdict) && <Badge tone="blue">{lead.scoring.verdict}</Badge>}
+            </div>
+          </div>
+          <button onClick={() => onRunScore(lead)} disabled={scoreRefreshing} className="rounded-lg border border-brand-300 px-3 py-1.5 text-xs text-brand-700 hover:bg-brand-100 disabled:opacity-50">
+            {scoreRefreshing ? '评分中…' : '重新评分'}
+          </button>
+        </div>
+        {meaningfulLeadText(lead.scoring.overall_comment) && <p className="mt-3 text-sm leading-6 text-slate-700">{lead.scoring.overall_comment}</p>}
+        <div className="mt-4 grid grid-cols-2 gap-3">
+          {lead.scoring.dimensions.map((dimension) => <div key={dimension.key} className="rounded-lg border border-slate-200 bg-white p-3">
+            <div className="flex items-center justify-between text-sm">
+              <span className="font-medium text-slate-700">{dimension.name}</span>
+              <span className="font-semibold text-brand-700">{dimension.score}/{dimension.max}</span>
+            </div>
+            <div className="mt-2"><ProgressBar value={Math.round((dimension.score / dimension.max) * 100)} /></div>
+          </div>)}
+        </div>
+      </section> : <button onClick={() => onRunScore(lead)} disabled={scoreRefreshing} className="w-full rounded-xl border border-dashed border-brand-300 bg-brand-50/40 p-4 text-sm font-medium text-brand-700 hover:bg-brand-50 disabled:opacity-50">
+        {scoreRefreshing ? 'AI 评分中（约 2-5 分钟）…' : '开始 AI 评分'}
+      </button>}
+
+      {(lead.highlights ?? []).map(meaningfulLeadText).filter(Boolean).length > 0 && <section>
+        <h3 className="text-sm font-semibold text-slate-800">投资亮点</h3>
+        <div className="mt-3 space-y-2">
+          {(lead.highlights ?? []).map(meaningfulLeadText).filter((item): item is string => Boolean(item)).map((item) =>
+            <p key={item} className="flex gap-2 text-xs leading-5 text-slate-600"><CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-500" />{item}</p>)}
+        </div>
+      </section>}
+      {(lead.risks ?? []).map(meaningfulLeadText).filter(Boolean).length > 0 && <section>
+        <h3 className="text-sm font-semibold text-slate-800">风险与核验任务</h3>
+        <div className="mt-3 space-y-2">
+          {(lead.risks ?? []).map(meaningfulLeadText).filter((item): item is string => Boolean(item)).map((item) =>
+            <p key={item} className="flex gap-2 text-xs leading-5 text-slate-600"><span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500" />{item}</p>)}
+        </div>
+      </section>}
+    </div>}
+
+    {visibleTab === 'funding' && <div className="mt-5 space-y-5">
+      {shareholders.length > 0 && <section>
+        <h3 className="text-sm font-semibold text-slate-800">过往 / 当前股东</h3>
+        <div className="mt-3 overflow-hidden rounded-xl border border-slate-200">
+          {shareholders.map((item, index) => <div key={`${item.name}-${index}`} className="grid grid-cols-[1.2fr_0.8fr_1fr_auto] gap-3 border-t border-slate-100 px-4 py-3 text-sm first:border-t-0">
+            <span className="font-medium text-slate-700">{item.name}</span>
+            <span className="text-slate-500">{item.percentage}</span>
+            <span className="text-slate-500">{item.type}</span>
+            {item.sourceUrl ? <SourceLink url={item.sourceUrl}>来源</SourceLink> : <span />}
+          </div>)}
+        </div>
+      </section>}
+      {fundingRounds.length > 0 && <section>
+        <h3 className="text-sm font-semibold text-slate-800">融资历史</h3>
+        <div className="mt-3 space-y-3">
+          {fundingRounds.map((round, index) => <div key={`${round.round}-${round.date}-${index}`} className="rounded-xl border border-slate-200 p-4">
+            <div className="flex items-center justify-between">
+              <div>{round.round && <Badge tone="blue">{round.round}</Badge>}{round.date && <span className="ml-2 text-xs text-slate-400">{round.date}</span>}</div>
+              {round.sourceUrl && <SourceLink url={round.sourceUrl}>融资来源</SourceLink>}
+            </div>
+            <div className="mt-3 grid grid-cols-3 gap-3 text-sm">
+              {round.amount && <div><p className="text-xs text-slate-400">金额</p><p className="mt-1 text-slate-700">{round.amount}</p></div>}
+              {round.valuation && <div><p className="text-xs text-slate-400">估值</p><p className="mt-1 text-slate-700">{round.valuation}</p></div>}
+              {round.investors && <div><p className="text-xs text-slate-400">投资方</p><p className="mt-1 text-slate-700">{round.investors}</p></div>}
+            </div>
+          </div>)}
+        </div>
+      </section>}
+    </div>}
+
+    {visibleTab === 'team' && <div className="mt-5 space-y-3">
+      {team.map((member, index) => <div key={`${member.name}-${index}`} className="flex gap-4 rounded-xl border border-slate-200 p-4">
+        <span className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-brand-50 text-brand-700"><UsersRound className="h-5 w-5" /></span>
+        <div>
+          <div className="flex items-center gap-2"><p className="font-medium text-slate-800">{member.name}</p>{member.title && <Badge tone="slate">{member.title}</Badge>}</div>
+          {member.background && <p className="mt-2 text-sm leading-6 text-slate-600">{member.background}</p>}
+        </div>
+      </div>)}
+    </div>}
+
+    {visibleTab === 'sources' && <div className="mt-5 space-y-3">
+      {sources.map((source) => <div key={source.url} className="rounded-xl border border-slate-200 p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div><p className="font-medium text-slate-800">{source.title}</p>{source.meta && <p className="mt-1 text-xs text-slate-400">{source.meta}</p>}</div>
+          <SourceLink url={source.url}>打开源地址</SourceLink>
+        </div>
+        {source.excerpt && <p className="mt-3 text-sm leading-6 text-slate-600">{source.excerpt}</p>}
+      </div>)}
+    </div>}
+  </div>
+}
+
 export function SourcingPage() {
   const { showToast } = useToast()
   const leads = useAppStore((state) => state.leads)
@@ -127,12 +456,14 @@ export function SourcingPage() {
   const [page, setPage] = useState(1)
   const [query, setQuery] = useState('')
   const [sort, setSort] = useState('')  // '' = 最新, 'score' = 按评分
+  const [channel, setChannel] = useState('')  // 渠道筛选（服务端按 radar_profile.channel 精确匹配）
   const [industry, setIndustry] = useState('')  // 行业检索(服务端 ILIKE 模糊匹配)
   const [region, setRegion] = useState('')  // 地区业务标签（服务端按注册地/项目画像匹配）
   const [filtering, setFiltering] = useState(false)
   const [debouncedQuery, setDebouncedQuery] = useState('')  // 关键词服务端检索(debounce 后)
   const [selected, setSelected] = useState<Lead | null>(null)
   const [convertingLeadId, setConvertingLeadId] = useState<string | null>(null)
+  const [enrichingLeadId, setEnrichingLeadId] = useState<string | null>(null)
   const [detailTab, setDetailTab] = useState('overview')
   const scoringLeadIds = useAppStore((state) => state.scoringLeadIds) || []
   const startScoring = useAppStore((state) => state.startScoring)
@@ -155,9 +486,9 @@ export function SourcingPage() {
   useEffect(() => {
     if (!isAuthed) return
     let active = true
-    // 业务标签、排序和关键词检索全部走服务端，避免只筛当前页。
+    // 渠道、业务标签、排序和关键词检索全部走服务端，避免只筛当前页。
     setFiltering(true)
-    void fetchLeads(page, 50, '', sort, debouncedQuery, '', industry, region)
+    void fetchLeads(page, 50, channel, sort, debouncedQuery, '', industry, region)
       .catch((error) => {
         if (active) showToast(`筛选失败：${(error as Error).message}`, 'error')
       })
@@ -169,7 +500,7 @@ export function SourcingPage() {
     // 滚到表格顶部(略低于 PageHeader, 留 80px 缓冲)
     window.scrollTo({ top: (tableRef.current?.getBoundingClientRect().top ?? 0) + window.scrollY - 80, behavior: 'smooth' })
     return () => { active = false }
-  }, [isAuthed, page, sort, debouncedQuery, industry, region, fetchLeads, fetchLeadStats, showToast])
+  }, [isAuthed, page, sort, debouncedQuery, channel, industry, region, fetchLeads, fetchLeadStats, showToast])
 
   const filtered = leads
 
@@ -190,7 +521,7 @@ export function SourcingPage() {
         invalid: number
         scoringIds: string[]
         scoringQueued: number
-      }>('/leads/sync-radar', { limit: 100 })
+      }>('/leads/sync-radar', { limit: 50 })
       const scoringIds = Array.isArray(r.scoringIds) ? r.scoringIds : []
       if (scoringIds.length) {
         void Promise.all(scoringIds.map((leadId) => startScoring(leadId)))
@@ -200,7 +531,7 @@ export function SourcingPage() {
       // 保证新线索（含待分析记录）立即出现在用户当前视野。
       setPage(1)
       await Promise.all([
-        fetchLeads(1, 50, '', sort, debouncedQuery, '', industry, region),
+        fetchLeads(1, 50, channel, sort, debouncedQuery, '', industry, region),
         fetchLeadStats(),
       ])
       const duplicateDetail = r.duplicates
@@ -243,6 +574,32 @@ export function SourcingPage() {
       showToast(`转为专属项目失败：${(error as Error).message}`, 'error')
     } finally {
       setConvertingLeadId(null)
+    }
+  }
+
+  const enrichSelectedLead = async () => {
+    if (!selected) return
+    setEnrichingLeadId(selected.id)
+    try {
+      const { lead, intel } = await apiPost<{
+        lead: Lead
+        intel: {
+          fundingRounds: unknown[]
+          shareholders: unknown[]
+          competitors: unknown[]
+        }
+      }>(`/leads/${selected.id}/enrich-public-info`, {})
+      setSelected(lead)
+      mergeLeadLocal(selected.id, lead)
+      const valuationCount = getUsefulFundingRounds(lead).filter((item) => item.valuation).length
+      showToast(
+        `公开信息已补充：估值 ${valuationCount ? `${valuationCount} 条` : '未发现明确披露'}，股东 ${intel.shareholders?.length ?? 0} 条，竞对 ${intel.competitors?.length ?? 0} 条`,
+        'success',
+      )
+    } catch (error) {
+      showToast(`补充公开信息失败：${(error as Error).message}`, 'error')
+    } finally {
+      setEnrichingLeadId(null)
     }
   }
 
@@ -353,9 +710,12 @@ export function SourcingPage() {
     }, 2300)
   }
 
+  // 旧版详情 JSX 暂留在文件中便于后续删除；运行时只启用上方的精简详情面板。
+  const renderLegacyDetail = false as boolean
+
   return (
     <div>
-      <PageHeader title="项目获取池 · 公共线索池" description="按合伙人关注的行业、地区筛选线索，并优先查看估值、AI 技术评分与更新时间。" actions={<><Button variant="secondary" onClick={syncRadar} loading={syncing}><RefreshCw className="h-4 w-4" />从雷达同步</Button><Button variant="secondary" onClick={() => showToast('批量导入模板已准备')}><FileSpreadsheet className="h-4 w-4" />批量导入</Button><Button onClick={() => { setUpload(null); setShowUpload(true) }}><UploadCloud className="h-4 w-4" />上传 BP</Button></>} />
+      <PageHeader title="项目获取池 · 公共线索池" description="按渠道及合伙人关注的行业、地区筛选线索，并优先查看估值、AI 技术评分与更新时间。" actions={<><Button variant="secondary" onClick={syncRadar} loading={syncing}><RefreshCw className="h-4 w-4" />从雷达同步</Button><Button variant="secondary" onClick={() => showToast('批量导入模板已准备')}><FileSpreadsheet className="h-4 w-4" />批量导入</Button><Button onClick={() => { setUpload(null); setShowUpload(true) }}><UploadCloud className="h-4 w-4" />上传 BP</Button></>} />
 
       <div className="mb-5 grid grid-cols-3 gap-4">
         {([
@@ -368,6 +728,15 @@ export function SourcingPage() {
       <Card className="mb-4 p-4">
         <div className="flex flex-wrap items-center gap-3">
           <SearchInput className="w-[340px]" placeholder="全库检索：公司、项目、行业、投资方…" value={query} onChange={(event) => setQuery(event.target.value)} />
+          <select
+            aria-label="渠道筛选"
+            className="input w-36"
+            value={channel}
+            onChange={(event) => { setChannel(event.target.value); setPage(1) }}
+          >
+            <option value="">全部渠道</option>
+            {CHANNEL_OPTIONS.map((item) => <option key={item} value={item}>{item}</option>)}
+          </select>
           <select
             aria-label="行业筛选"
             className="input w-40"
@@ -387,7 +756,7 @@ export function SourcingPage() {
             {REGION_OPTIONS.map((item) => <option key={item} value={item}>{item}</option>)}
           </select>
           <select className="input w-36" value={sort} onChange={(event) => { setSort(event.target.value); setPage(1) }} title="排序方式"><option value="">最新入池</option><option value="score">按 AI 总分↓</option></select>
-          {(industry || region) && <button className="text-xs text-brand-600 hover:text-brand-800 hover:underline" onClick={() => { setIndustry(''); setRegion(''); setPage(1) }}>清空标签</button>}
+          {(channel || industry || region) && <button className="text-xs text-brand-600 hover:text-brand-800 hover:underline" onClick={() => { setChannel(''); setIndustry(''); setRegion(''); setPage(1) }}>清空筛选</button>}
           <div className="ml-auto rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
             {filtering ? '正在筛选…' : `当前结果 ${leadPagination.total} 条`}
           </div>
@@ -396,9 +765,9 @@ export function SourcingPage() {
 
       <div ref={tableRef}>
         <Card className="overflow-hidden">
-        <DataTable headers={['公司主体 / 项目', '行业 / 地区标签', '估值', 'AI 技术评分', '更新时间', '详情']}>
+        <DataTable headers={['主体名称', '行业 / 地区标签', '估值', 'AI 技术评分', '更新时间', '详情']}>
           {filtered.map((lead) => {
-            const { companySubject, projectName } = getLeadIdentity(lead)
+            const { companySubject } = getLeadIdentity(lead)
             const funding = getLeadFundingDisplay(lead)
             const valuationValue = lead.valuationDisplay?.value ?? funding.valuation
             const valuationStatus = lead.valuationDisplay?.status ?? (valuationValue ? 'available' : lead.analysisStatus === 'pending' ? 'pending' : 'unavailable')
@@ -407,7 +776,7 @@ export function SourcingPage() {
             const industryTags = lead.businessTags?.industry?.length ? lead.businessTags.industry : [lead.industry || '待确认']
             const regionTags = lead.businessTags?.region?.length ? lead.businessTags.region : [lead.region || '待确认']
             return <tr key={lead.id} className="hover:bg-slate-50">
-              <TableCell><button className="min-w-[240px] text-left" onClick={async () => { setSelected(lead); setDetailTab('overview'); const d = await fetchLeadDetail(lead.id); if (d) setSelected(d) }}><span className="block max-w-[260px] truncate font-medium text-slate-800 hover:text-brand-700" title={companySubject}>{companySubject}</span><span className="mt-1 block max-w-[260px] truncate text-xs text-slate-400" title={projectName}>项目：{projectName}</span></button></TableCell>
+              <TableCell><button className="min-w-[240px] text-left" onClick={async () => { setSelected(lead); setDetailTab('overview'); const d = await fetchLeadDetail(lead.id); if (d) setSelected(d) }}><span className="block max-w-[260px] truncate font-medium text-slate-800 hover:text-brand-700" title={companySubject}>{companySubject}</span></button></TableCell>
               <TableCell><div className="flex max-w-[240px] flex-wrap gap-1">{industryTags.slice(0, 2).map((tag) => <Badge key={`industry-${tag}`} tone="blue">{tag}</Badge>)}{regionTags.slice(0, 1).map((tag) => <Badge key={`region-${tag}`} tone={tag === '待确认' ? 'slate' : 'green'}>{tag}</Badge>)}</div></TableCell>
               <TableCell><div className="max-w-[200px]">
                 {valuationStatus === 'available' && valuationValue
@@ -462,6 +831,15 @@ export function SourcingPage() {
         footer={selected && <>
           <Button variant="secondary" onClick={() => { updateLead(selected.id, { lastVerifiedAt: new Date().toISOString().slice(0, 10) }); showToast('已刷新核验时间；源数据未被无依据改写') }}><RefreshCw className="h-4 w-4" />刷新核验</Button>
           <Button
+            variant="secondary"
+            onClick={enrichSelectedLead}
+            loading={enrichingLeadId === selected.id}
+            disabled={enrichingLeadId === selected.id}
+          >
+            <Globe2 className="h-4 w-4" />
+            补充公开信息
+          </Button>
+          <Button
             onClick={convertSelectedLead}
             loading={convertingLeadId === selected.id}
             disabled={selected.poolStatus === '已转专属项目' || convertingLeadId === selected.id}
@@ -471,7 +849,14 @@ export function SourcingPage() {
           </Button>
         </>}
       >
-        {selected && <div>
+        {selected && <LeadDetailPanel
+          lead={selected}
+          detailTab={detailTab}
+          onTabChange={setDetailTab}
+          onRunScore={runScore}
+          scoreRefreshing={scoringLeadIds.includes(selected.id)}
+        />}
+        {selected && renderLegacyDetail && <div>
           <div className="rounded-xl bg-brand-50 p-4"><div className="flex items-start justify-between"><div><div className="flex items-center gap-2"><Badge tone="blue">{selected.industry}</Badge><Badge tone={verificationTone(selected.verificationStatus)}>{selected.verificationStatus}</Badge><StatusBadge status={selected.status} /></div><p className="mt-3 max-w-[600px] truncate text-lg font-semibold text-slate-900" title={getLeadIdentity(selected).companySubject}>{getLeadIdentity(selected).companySubject}</p><p className="mt-1 max-w-[600px] truncate text-sm text-slate-500" title={getLeadIdentity(selected).projectName}>项目：{getLeadIdentity(selected).projectName}</p><p className="mt-1 text-sm text-slate-500">{selected.region} · {selected.round} · 更新于 {selected.lastVerifiedAt}</p></div><div className="text-right"><p className="text-3xl font-semibold text-brand-700">{selected.score}</p><p className="text-[10px] text-brand-500">AI 初筛分 · 非投决结论</p></div></div><p className="mt-4 text-sm leading-6 text-brand-900">{selected.summary}</p><div className="mt-3"><SourceLink url={selected.scoring?.officialSite && selected.scoring.officialSite !== '待核验' ? selected.scoring.officialSite : selected.website}>公司官网</SourceLink></div></div>
 
           <div className="mt-5"><Tabs tabs={[
@@ -495,7 +880,7 @@ export function SourcingPage() {
 
           {detailTab === 'news' && <div className="mt-5 space-y-3">{((selected.scoring?.structuredNews?.length ? selected.scoring.structuredNews.map((n) => ({ date: n.date, title: n.title, summary: n.summary, type: '动态', sourceName: n.sourceName, sourceUrl: n.sourceUrl })) : selected.companyNews) ?? []).map((news) => <div key={`${news.date}-${news.title}`} className="grid grid-cols-[90px_1fr_130px] gap-4 rounded-xl border border-slate-200 p-4"><div><p className="text-sm font-medium text-slate-700">{news.date}</p><Badge tone="slate">{news.type}</Badge></div><div><p className="font-medium text-slate-800">{news.title}</p><p className="mt-2 text-sm leading-6 text-slate-500">{news.summary}</p></div><div className="text-right text-xs"><p className="mb-2 text-slate-400">{news.sourceName}</p>{news.sourceUrl && <SourceLink url={news.sourceUrl}>查看原文</SourceLink>}</div></div>)}{!((selected.scoring?.structuredNews?.length ? selected.scoring.structuredNews : selected.companyNews) ?? []).length && <div className="rounded-xl border border-dashed border-slate-200 p-10 text-center text-sm text-slate-400">暂无经过来源标注的公司动态</div>}</div>}
 
-          {detailTab === 'sources' && <div className="mt-5 space-y-3"><div className="rounded-lg bg-slate-50 p-3 text-xs leading-5 text-slate-500">可靠性用于描述"来源本身"，不代表来源中的企业自述已经被第三方验证。所有链接均保留访问日期。</div>{selected.scoring?.researchSources?.length ? selected.scoring.researchSources.map((s, i) => <div key={`rs-${i}`} className="rounded-xl border border-slate-200 p-4"><div className="flex items-start justify-between"><div><Badge tone="blue">联网检索</Badge><p className="mt-2 font-medium text-slate-800">{s.title}</p></div>{s.url && <SourceLink url={s.url}>打开源地址</SourceLink>}</div><p className="mt-3 text-sm leading-6 text-slate-600">{s.excerpt}</p></div>) : (selected.sources ?? []).map((source) => <div key={source.id} className="rounded-xl border border-slate-200 p-4"><div className="flex items-start justify-between"><div><div className="flex items-center gap-2"><Badge tone={source.reliability === '高' ? 'green' : source.reliability === '中' ? 'amber' : 'slate'}>{source.reliability}可靠性</Badge><Badge tone="blue">{source.category}</Badge></div><p className="mt-2 font-medium text-slate-800">{source.title}</p><p className="mt-1 text-xs text-slate-400">{source.publisher} · 发布 {source.publishedAt ?? '未标注'} · 访问 {source.accessedAt}</p></div><SourceLink url={source.url}>打开源地址</SourceLink></div><p className="mt-3 text-sm leading-6 text-slate-600">{source.excerpt}</p></div>)}</div>}
+          {detailTab === 'sources' && <div className="mt-5 space-y-3"><div className="rounded-lg bg-slate-50 p-3 text-xs leading-5 text-slate-500">可靠性用于描述"来源本身"，不代表来源中的企业自述已经被第三方验证。所有链接均保留访问日期。</div>{selected.scoring?.researchSources?.length ? selected.scoring.researchSources.map((s, i) => <div key={`rs-${i}`} className="rounded-xl border border-slate-200 p-4"><div className="flex items-start justify-between"><div><Badge tone="blue">入库来源</Badge><p className="mt-2 font-medium text-slate-800">{s.title}</p></div>{s.url && <SourceLink url={s.url}>打开源地址</SourceLink>}</div><p className="mt-3 text-sm leading-6 text-slate-600">{s.excerpt}</p></div>) : (selected.sources ?? []).map((source) => <div key={source.id} className="rounded-xl border border-slate-200 p-4"><div className="flex items-start justify-between"><div><div className="flex items-center gap-2"><Badge tone={source.reliability === '高' ? 'green' : source.reliability === '中' ? 'amber' : 'slate'}>{source.reliability}可靠性</Badge><Badge tone="blue">{source.category}</Badge></div><p className="mt-2 font-medium text-slate-800">{source.title}</p><p className="mt-1 text-xs text-slate-400">{source.publisher} · 发布 {source.publishedAt ?? '未标注'} · 访问 {source.accessedAt}</p></div><SourceLink url={source.url}>打开源地址</SourceLink></div><p className="mt-3 text-sm leading-6 text-slate-600">{source.excerpt}</p></div>)}</div>}
         </div>}
       </Drawer>
     </div>

@@ -147,8 +147,7 @@ export default defineWorkflow({
     highlights: v.optional(v.array(v.string())),
     risks: v.optional(v.array(v.string())),
     sources: v.optional(v.array(v.string())),
-    // 【review P0 修复】联网检索补充 + 工商/结构化资料由主系统拼进 articleText 传入,
-    // 之前缺此字段导致 valibot 非 strict 静默丢弃 → 论文评分吃不到补充资料。
+    // 论文全文和已入库工商/结构化资料由主系统拼进 articleText 传入。
     articleText: v.optional(v.string()),
   }),
   async run({ input, harness }) {
@@ -166,7 +165,7 @@ export default defineWorkflow({
       input.highlights?.length ? `亮点：${input.highlights.join('；')}` : '亮点：未提供',
       input.risks?.length ? `风险：${input.risks.join('；')}` : '风险：未提供',
       input.sources?.length ? `信息来源：${input.sources.join('；')}` : '信息来源：未提供',
-      input.articleText ? `\n【补充资料(论文全文/联网检索/工商结构化,需二次核验)】\n${input.articleText}` : '',
+      input.articleText ? `\n【已入库补充资料（论文全文/工商结构化，需二次核验）】\n${input.articleText}` : '',
     ].join('\n');
 
     const prompt = [

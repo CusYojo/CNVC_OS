@@ -47,7 +47,7 @@ export type AiQaTemplateDefinition = {
   categories: string[]
   outputMode: 'document-task'
   downloadableArtifact: true
-  outputFormats: ['pdf']
+  outputFormats: ['docx']
 }
 
 export const AI_TEMPLATE_CATALOG: Record<AiBusinessTaskType, AiTemplateDefinition> = {
@@ -57,8 +57,7 @@ export const AI_TEMPLATE_CATALOG: Record<AiBusinessTaskType, AiTemplateDefinitio
     label: '合规性说明',
     description: '依据项目资料及基金投资约束生成合规性说明初稿',
     outputFormat: 'docx',
-    companionFormats: ['pdf', 'md'],
-    templateVersion: 'compliance-corpus-blueprint-20260725-v3',
+    templateVersion: 'compliance-corpus-blueprint-20260728-v4-docx-model-research',
     referencePath: docsPath('合规性说明', '关于德塔智能项目投资合规性的说明_20260701.docx'),
     referencePaths: [
       docsPath('合规性说明', '关于德塔智能项目投资合规性的说明_20260701.docx'),
@@ -73,9 +72,9 @@ export const AI_TEMPLATE_CATALOG: Record<AiBusinessTaskType, AiTemplateDefinitio
     type: 'investment_proposal',
     skillName: 'draft-investment-proposal',
     label: '投资提案',
-    description: '生成用于内部立项或基金内部汇报的投资提案初稿',
+    description: '由资深投资经理基于当前线索池或项目库项目生成内部投资提案',
     outputFormat: 'docx',
-    templateVersion: 'proposal-corpus-20260727-v6-web',
+    templateVersion: 'proposal-corpus-20260728-v9-local-first-web-cache',
     referencePath: docsPath('投资提案', '佳量脑科学项目投资提案0622(1).docx'),
     referencePaths: [
       docsPath('投资提案', '佳量脑科学项目投资提案0622(1).docx'),
@@ -110,9 +109,9 @@ export const AI_TEMPLATE_CATALOG: Record<AiBusinessTaskType, AiTemplateDefinitio
     type: 'due_diligence_report',
     skillName: 'write-due-diligence-report',
     label: '尽调报告',
-    description: '按公司尽调模板库的八章结构，结合项目资料与联网公开信息生成商业尽调报告初稿',
+    description: '由资深投资经理按八章十六模块生成当前项目内部尽调报告',
     outputFormat: 'docx',
-    templateVersion: 'dd-corpus-202607-v4-web-research',
+    templateVersion: 'dd-corpus-202607-v11-semantic-order-financial-layout',
     referencePath: docsPath('尽调报告', '佳量脑科学业务尽调报告6月.docx'),
     referencePaths: [
       docsPath('尽调报告', '3. 普雷赛斯尽调报告.pdf'),
@@ -129,7 +128,7 @@ export const AI_TEMPLATE_CATALOG: Record<AiBusinessTaskType, AiTemplateDefinitio
       docsPath('尽调报告', '蓝成应急尽调报告.pdf'),
     ],
     editableLevel: 'text-and-structure',
-    sections: ['投资概要', '公司概况', '股权结构及融资历程', '公司治理与管理团队', '行业概况与市场空间', '产业链与竞争格局', '产品与核心技术', '商业模式与经营情况', '财务分析', '客户与商业化进展', '法律合规与资质', '估值合理性分析', '投资方案', '投资亮点', '风险分析', '后续核验事项'],
+    sections: ['投资概要', '公司概况', '股权结构及融资历程', '公司治理与管理团队', '法律合规与资质', '产品与核心技术', '商业模式与经营情况', '客户与商业化进展', '行业概况与市场空间', '产业链与竞争格局', '财务分析', '估值合理性分析', '投资方案', '投资亮点', '风险分析', '后续核验事项'],
     requiredParameters: ['projectId', 'sourceCutoffDate', 'diligenceScope'],
     disclaimer: '',
   },
@@ -137,9 +136,9 @@ export const AI_TEMPLATE_CATALOG: Record<AiBusinessTaskType, AiTemplateDefinitio
     type: 'project_qa',
     skillName: 'answer-project-qa',
     label: '项目 Q&A',
-    description: '结合当前项目资料与联网公开信息生成投资委员会或尽调 Q&A，经问题生成、去重、回答和内部审核后输出正式 PDF',
-    outputFormat: 'pdf',
-    templateVersion: 'qa-core-rules-20260727-v6',
+    description: '由资深投资经理基于当前线索池或项目库项目生成内部投资 Q&A',
+    outputFormat: 'docx',
+    templateVersion: 'qa-core-rules-20260728-v9-model-network-research',
     referencePath: docsPath('Q&A', '中数睿智项目Q&A.pdf'),
     coreRulesPath: docsPath('Q&A', 'Q&A模板核心规则.md'),
     referencePaths: [
@@ -151,24 +150,24 @@ export const AI_TEMPLATE_CATALOG: Record<AiBusinessTaskType, AiTemplateDefinitio
     ],
     editableLevel: 'text-and-structure',
     sections: [
-      '企业介绍',
-      '商业模式',
-      '产品能力',
-      '团队',
-      '市场',
-      '竞争',
-      '财务',
-      '融资',
-      '风险',
-      '合规',
+      '阶段与推进建议',
+      '项目主体',
+      '股权与治理',
+      '创始人与团队',
+      '产品与技术',
       '知识产权',
-      '客户',
-      '行业',
-      '运营',
-      '未来规划',
+      '商业模式',
+      '客户与商业化',
+      '市场与应用场景',
+      '竞争格局',
+      '财务与现金流',
+      '融资与估值',
+      '交易方案',
+      '合规与权属',
+      '风险与核验',
     ],
     requiredParameters: ['projectId', 'sourceCutoffDate', 'qaMode', 'questionDepth'],
-    disclaimer: '本文件由 AI 基于当前项目资料及联网公开信息生成，仅供内部投资研究或尽调使用，不构成正式法律、财务意见或最终投资决策。',
+    disclaimer: '本文件由投资中台资深投资经理角色基于当前项目资料库及经页面核验的公开资料生成，仅供投资团队、风控法务、投资总监和投委会内部审阅，不构成正式法律、财务意见或最终投资决策；项目阶段以 OA 审批结果为准。',
   },
 }
 
@@ -186,7 +185,7 @@ export const AI_QA_TEMPLATE: AiQaTemplateDefinition = {
   categories: AI_TEMPLATE_CATALOG.project_qa.sections,
   outputMode: 'document-task',
   downloadableArtifact: true,
-  outputFormats: ['pdf'],
+  outputFormats: ['docx'],
 }
 
 export function assertAiTemplateReferences(
@@ -233,7 +232,7 @@ export function listAiTaskTypes() {
     {
       type: 'custom_template_document',
       label: '上传模板生成',
-      description: '分析用户上传模板的结构和各部分内容要求，并为当前项目创建全新文档',
+      description: '分析上传模板的结构和内容要求，为当前项目生成内部投资分析材料',
       outputFormat: 'dynamic',
       companionFormats: [],
       skillName: AI_TEMPLATE_DRIVEN_SKILL_NAME,

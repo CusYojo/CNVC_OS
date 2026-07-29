@@ -78,17 +78,6 @@ const createSchema = z.object({
       }
     }
   }
-  if (
-    body.type === 'compliance_statement'
-    && body.parameters.webResearch !== undefined
-    && typeof body.parameters.webResearch !== 'boolean'
-  ) {
-    ctx.addIssue({
-      code: 'custom',
-      path: ['parameters', 'webResearch'],
-      message: '联网公开资料检索开关必须为布尔值',
-    })
-  }
   if (body.type === 'investment_recommendation_ppt') {
     requireAllowed('template', ['公司标准模板'], '公司模板无效')
     requireAllowed('pageCount', ['8-10页', '12-15页', '18-20页'], '建议页数无效')
@@ -109,9 +98,7 @@ const createSchema = z.object({
   }
   const expectedOutputFormat = body.type === 'investment_recommendation_ppt'
     ? 'PPTX'
-    : body.type === 'project_qa'
-      ? 'PDF'
-      : body.type === 'custom_template_document'
+    : body.type === 'custom_template_document'
         ? null
         : 'DOCX'
   if (

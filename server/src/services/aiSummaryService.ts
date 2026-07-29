@@ -6,6 +6,7 @@ import {
   shouldBackfillCompanyName,
   type RadarLeadSyncFields,
 } from './leadRadarMerge.js'
+import { deriveRadarSubjectName, isSpecificLeadSubjectName } from './leadSubjectName.js'
 
 export async function getSummary(projectId: string) {
   const rows = await db.select().from(aiSummaries).where(eq(aiSummaries.projectId, projectId)).orderBy(desc(aiSummaries.updatedAt)).limit(1)
@@ -51,6 +52,41 @@ const completenessExpr = sql<number>`(
   + ( jsonb_array_length(COALESCE(${leads.sources},'[]'::jsonb)) > 0
       OR (${leads.radarProfile}->>'link' IS NOT NULL AND ${leads.radarProfile}->>'link' <> '') )::int
   ) * 100 / 8
+)`
+
+const publicLeadSignalTextExpr = sql<string>`CONCAT_WS(
+  ' ',
+  COALESCE(${leads.name}, ''),
+  LEFT(COALESCE(${leads.summary}, ''), 1600),
+  LEFT(COALESCE(${leads.radarProfile}->'profile'->>'projectName', ''), 500),
+  LEFT(COALESCE(${leads.radarProfile}->'profile'->>'coreHighlights', ''), 1600),
+  LEFT(COALESCE(${leads.radarProfile}->'profile'->>'teamComposition', ''), 800)
+)`
+
+const publicLeadInvestmentFactsExpr = sql<string>`CONCAT_WS(
+  ' ',
+  COALESCE(${leads.fundingRounds}::text, ''),
+  COALESCE((${leads.scoring}->'fundingRoundsResearched')::text, ''),
+  COALESCE(${leads.radarProfile}->'profile'->>'projectRound', ''),
+  COALESCE(${leads.radarProfile}->'profile'->>'financingAmount', ''),
+  COALESCE(${leads.radarProfile}->'profile'->>'latestValuation', '')
+)`
+
+// 存量 Radar 噪音不做物理删除，但从公共池列表和统计中排除。
+// 无明确公司、融资或估值时，获奖/教学/任职资讯直接隐藏；
+// 纯论文和课题组研究只有具备成果转化、产业化或客户验证信号才保留。
+const visiblePublicLeadExpr = sql<boolean>`NOT (
+  COALESCE(${leads.source}, '') ~ '^项目发现雷达'
+  AND COALESCE(${leads.companyName}, '') !~ '(股份有限公司|有限责任公司|有限公司)$'
+  AND COALESCE(${leads.scoring}->'registry'->>'companyName', '') IN ('', '待核验', '待核实', '未披露', '未披露/待核实', '未披露/待验证')
+  AND ${publicLeadInvestmentFactsExpr} !~* '(天使轮|种子轮|pre-?a|a轮|b轮|c轮|d轮|战略融资|战略投资|新一轮融资|领投|跟投|估值.{0,20}(亿元|万美元|亿美元|万元)|融资金额.{0,20}(亿元|万美元|亿美元|万元))'
+  AND (
+    ${publicLeadSignalTextExpr} ~* '(院系之声.{0,30}(荣誉|获奖|award)|(教授|研究员|学者).{0,30}(获颁|获评|荣获|获奖|award|荣誉)|(获得|获评|入选|荣获).{0,24}(奖|荣誉|称号|教学团队)|(科学技术奖|科技奖|自然科学奖|技术发明奖|科技进步奖).{0,40}(揭晓|获奖|表彰)|[0-9]+[[:space:]]*项.{0,12}(获奖|获表彰)|(国家级|省级).{0,16}(教学团队|教学成果|荣誉|奖)|要报.{0,12}专业吗|招生(简章|宣传|咨询|专业|对象)?|培养方案|课程介绍|实验班介绍|研修班|培训班|结业证书|能力提升计划|名家面对面|学员企业|毕业典礼|毕业致辞|发表致辞|兼任|受聘|履新|任命|(记者|人物)?专访|人物访谈|观点访谈|深度解读|系统剖析)'
+    OR (
+      ${publicLeadSignalTextExpr} ~* '((课题组|团队|实验室).{0,100}(发表|论文|研究|揭示|破解|开发|发现|成果)|(学术成果|科研成果|研究进展|研究论文|最新研究|多项研究|两项研究).{0,100}(课题组|团队|教授|研究员|实验室|突破|发现|揭示|开发)?|(团队|课题组).{0,60}(算法|模型|数据|机制|通路|架构))'
+      AND ${publicLeadSignalTextExpr} !~* '(成果转化|技术转移|转化落地|产业化|中试|技术平台|工程化|技术许可|专利转让|孵化(成立|企业|公司)|创办公司|成立公司|产品获批|注册证|临床应用|应用新场景|示范应用|产业应用|客户验证|客户订单|采购|中标|签约|量产|营收|商业化)'
+    )
+  )
 )`
 
 const BUSINESS_INDUSTRY_RULES: Array<{ label: string; terms: string[] }> = [
@@ -123,14 +159,49 @@ export function deriveValuationDisplay(
 ) {
   const rounds = Array.isArray(scoring.fundingRoundsResearched) ? scoring.fundingRoundsResearched : []
   const researched = rounds
-    .map((round) => (round && typeof round === 'object' ? meaningfulPresentationText((round as Record<string, unknown>).valuation) : undefined))
-    .find(Boolean)
+    .map((round) => {
+      const item = round && typeof round === 'object' ? round as Record<string, unknown> : {}
+      return {
+        value: meaningfulPresentationText(item.valuation),
+        sourceUrl: meaningfulPresentationText(item.sourceUrl),
+      }
+    })
+    .find((item) => Boolean(item.value))
   const profile = (radarProfile.profile && typeof radarProfile.profile === 'object' ? radarProfile.profile : {}) as Record<string, unknown>
   const historical = (Array.isArray(fundingRounds) ? fundingRounds : [])
-    .map((round) => (round && typeof round === 'object' ? meaningfulPresentationText((round as Record<string, unknown>).valuation) : undefined))
-    .find(Boolean)
-  const value = researched ?? meaningfulPresentationText(profile.latestValuation) ?? historical
-  if (value) return { value, status: 'available' as const }
+    .map((round) => {
+      const item = round && typeof round === 'object' ? round as Record<string, unknown> : {}
+      return {
+        value: meaningfulPresentationText(item.valuation),
+        sourceUrl: meaningfulPresentationText(item.sourceUrl),
+      }
+    })
+    .find((item) => Boolean(item.value))
+  const profileValue = meaningfulPresentationText(profile.latestValuation)
+  if (researched?.value) {
+    return {
+      value: researched.value,
+      status: 'available' as const,
+      sourceUrl: researched.sourceUrl,
+      sourceLabel: researched.sourceUrl ? '公开融资来源' : 'AI 评分资料',
+    }
+  }
+  if (profileValue) {
+    return {
+      value: profileValue,
+      status: 'available' as const,
+      sourceUrl: meaningfulPresentationText(radarProfile.link),
+      sourceLabel: '雷达原文',
+    }
+  }
+  if (historical?.value) {
+    return {
+      value: historical.value,
+      status: 'available' as const,
+      sourceUrl: historical.sourceUrl,
+      sourceLabel: historical.sourceUrl ? '融资来源' : '历史融资资料',
+    }
+  }
   return { status: analysisStatus === 'pending' ? 'pending' as const : 'unavailable' as const }
 }
 
@@ -201,6 +272,39 @@ function enrichLead(row: typeof leads.$inferSelect) {
   const src = String(row.source ?? '')
   // 优先用雷达同步时写入的真实渠道(radarProfile.channel)，避免被"项目发现雷达"前缀误判成新闻
   const rp = (row as { radarProfile?: Record<string, unknown> }).radarProfile || {}
+  const profile = (rp.profile && typeof rp.profile === 'object' ? rp.profile : {}) as Record<string, unknown>
+  const isRadarLead = /^项目发现雷达(?:\s|·|$)/.test(src)
+  const isPaper = String(rp.channel ?? '') === '论文'
+  const derivedSubjectName = deriveRadarSubjectName({
+    isPaper,
+    companyNames: [
+      (sc.registry as Record<string, unknown> | undefined)?.companyName,
+      row.companyName,
+      profile.companyName,
+    ],
+    projectName: profile.projectName,
+    lab: profile.lab,
+    team: profile.teamComposition || row.team,
+    title: row.name,
+    articleText: rp.articleText || row.summary,
+    excludedNames: [rp.sourceName, rp.accountName],
+  })
+  // 历史 Radar 数据可能已把正文谓语片段写进 name/companyName。
+  // 接口层即时纠正展示；后续通过质量门槛的同源记录可按原文链接持久化升级。
+  const subjectName = isRadarLead && !isSpecificLeadSubjectName(row.name, isPaper)
+    ? (derivedSubjectName || '主体待确认')
+    : row.name
+  const isResearchSubjectFallback = isRadarLead
+    && row.companyName === row.name
+    && /(?:大学|学院|研究院|研究所|医院|实验室|课题组|教授团队|研究员团队|科研团队|研究团队)$/.test(String(row.companyName ?? ''))
+  const subjectCompanyName = isRadarLead && (!isSpecificLeadSubjectName(row.companyName) || isResearchSubjectFallback)
+    ? null
+    : row.companyName
+  const displayRadarProfile = isRadarLead
+    && profile.projectName
+    && !isSpecificLeadSubjectName(profile.projectName, isPaper)
+    ? { ...rp, profile: { ...profile, projectName: subjectName } }
+    : rp
   const channel = (rp && rp.channel) ? rp.channel
     : /情报|必应|公开信息/.test(src) ? '重点机构'
     : /论文|专利|arxiv/i.test(src) ? '论文专利'
@@ -209,6 +313,9 @@ function enrichLead(row: typeof leads.$inferSelect) {
   const region = deriveRegion(sc, rp)
   return {
     ...row,
+    name: subjectName,
+    companyName: subjectCompanyName,
+    radarProfile: displayRadarProfile,
     completeness,
     verificationStatus,
     analysisStatus,
@@ -243,7 +350,7 @@ export async function listLeads(options: { page?: number; pageSize?: number; cha
   const source = (options.source ?? '').trim()
   const industry = (options.industry ?? '').trim()
   const region = (options.region ?? '').trim()
-  const conds: ReturnType<typeof sql>[] = []
+  const conds: ReturnType<typeof sql>[] = [visiblePublicLeadExpr]
   // 已入库线索全部可见；未完成 AI 分析的记录由 enrichLead 标为 pending。
   // 同步和 AI 评分解耦，避免“已经同步但列表看不到”。
   if (channel) conds.push(sql`${leads.radarProfile}->>'channel' = ${channel}`)
@@ -377,7 +484,7 @@ export async function leadPoolStats() {
       'overall_comment', ${leads.scoring}->'overall_comment',
       'registry', COALESCE(${leads.scoring}->'registry','{}'::jsonb)
     ) END`,
-  }).from(leads)
+  }).from(leads).where(visiblePublicLeadExpr)
   let total = 0, verified = 0, highPriority = 0, compSum = 0
   for (const r of rows) {
     total++
@@ -410,11 +517,20 @@ export async function syncRadarLeadByName(input: RadarLeadSyncFields, userId: st
   row: typeof leads.$inferSelect
   duplicateMatches: number
 }> {
-  // 本期按产品给定的保守默认，仅以 name 精确匹配。若库中已有同名重复记录，
-  // 更新最早入库的一条并把其余数量反馈给调用方，不擅自合并/删除历史数据。
-  const matches = await db.select().from(leads)
+  // 主体名称优化后可能与历史错误短语不同：先按明确名称匹配，匹配不到时
+  // 再按 Radar 原文链接定位同一条线索，使历史模糊名称可被安全升级而不新建重复记录。
+  let matches = await db.select().from(leads)
     .where(eq(leads.name, input.name))
     .orderBy(asc(leads.createdAt))
+  const inputRadarProfile = input.radarProfile && typeof input.radarProfile === 'object'
+    ? input.radarProfile as Record<string, unknown>
+    : {}
+  const sourceLink = typeof inputRadarProfile.link === 'string' ? inputRadarProfile.link.trim() : ''
+  if (!matches.length && sourceLink) {
+    matches = await db.select().from(leads)
+      .where(sql`${leads.radarProfile}->>'link' = ${sourceLink}`)
+      .orderBy(asc(leads.createdAt))
+  }
   const existing = matches[0]
   if (!existing) {
     const row = await createLead({
@@ -425,7 +541,18 @@ export async function syncRadarLeadByName(input: RadarLeadSyncFields, userId: st
     return { status: 'created', row, duplicateMatches: 0 }
   }
 
-  const patch = buildRadarLeadMergePatch(existing, input as RadarLeadSyncFields & Record<string, unknown>)
+  const patch: Record<string, unknown> = {
+    ...buildRadarLeadMergePatch(existing, input as RadarLeadSyncFields & Record<string, unknown>),
+  }
+  const canUpgradeSubjectName = /^项目发现雷达(?:\s|·|$)/.test(String(existing.source ?? ''))
+    && !isSpecificLeadSubjectName(existing.name)
+    && isSpecificLeadSubjectName(input.name)
+  if (canUpgradeSubjectName) {
+    patch.name = input.name
+    if (!isSpecificLeadSubjectName(existing.companyName) && input.companyName) {
+      patch.companyName = input.companyName
+    }
+  }
   if (Object.keys(patch).length === 0) {
     return { status: 'unchanged', row: existing, duplicateMatches: Math.max(0, matches.length - 1) }
   }
@@ -457,8 +584,8 @@ export async function convertLead(leadId: string, projectId: string, userId: str
 }
 
 export async function saveLeadScoring(leadId: string, scoring: unknown, score: number) {
-  // AI 分析(联网补全后)产出的结构化维度,回填到 leads 的独立列 —— 让完整度/前端各维度都反映
-  // 联网补全后的真实数据,而不是入池时的原始缺失值。仅当 AI 拿到了实质内容才回填(不用空值冲掉原有)。
+  // AI 分析只使用已入库资料。结构化维度回填到 leads 独立列时，
+  // 仅用实质内容更新，不以空值覆盖原始资料。
   const sc = (scoring ?? {}) as Record<string, unknown>
   const arr = (v: unknown) => (Array.isArray(v) ? v : [])
   const nonEmpty = (a: unknown[]) => a.length > 0

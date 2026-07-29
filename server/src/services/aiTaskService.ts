@@ -1,13 +1,25 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { createReadStream } from 'node:fs'
-import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { and, asc, desc, eq, inArray, lte, sql } from 'drizzle-orm'
 import JSZip from 'jszip'
 import { db } from '../db/client.js'
-import { aiArtifacts, aiTaskSources, aiTasks, auditLogs, chatConversations, knowledgeChunks, projects, users } from '../db/schema.js'
 import {
+  aiArtifacts,
+  aiTaskSources,
+  aiTasks,
+  auditLogs,
+  chatConversations,
+  fileChunks,
+  knowledgeChunks,
+  projects,
+  users,
+} from '../db/schema.js'
+import {
+  annotateDueDiligencePendingAfterResearch,
   composeBusinessContent,
+  dueDiligencePendingResearchTopics,
   usedBusinessSourceIndexes,
   type BusinessContent,
   type EvidenceSource,
@@ -17,7 +29,6 @@ import {
   generateBusinessPptx,
   generateBusinessPptxPreview,
   makeArtifactFileName,
-  renderBusinessMarkdown,
 } from './aiBusinessDocumentService.js'
 import {
   AI_TEMPLATE_CATALOG,
@@ -31,6 +42,7 @@ import { resolveAiCustomTemplateForTask } from './aiCustomTemplateService.js'
 import {
   curateEvidenceSources,
   dedupeTextList,
+  isDiagnosticEvidenceSourceName,
 } from './aiEvidenceQualityService.js'
 import {
   complianceBlueprintMetadata,
@@ -38,21 +50,23 @@ import {
   type ComplianceDocumentBlueprint,
 } from './aiComplianceBlueprintService.js'
 import {
+  buildComplianceEvidencePackets,
   composeComplianceStatement,
   type ComplianceWorkflowResult,
 } from './aiComplianceWorkflowService.js'
 import {
-  convertComplianceDocxToPdf,
-  reviewCompliancePdfAgainstDocx,
   reviewGeneratedComplianceDocx,
   type ComplianceOutputReview,
 } from './aiComplianceOutputService.js'
 import {
-  fetchComplianceWebEvidence,
-  type ComplianceWebResearchAudit,
-} from './aiComplianceWebResearchService.js'
+  fetchDueDiligenceNetworkEvidence,
+  type DueDiligenceNetworkResearchAudit,
+} from './aiDueDiligenceNetworkResearchService.js'
 import {
-  convertProjectQaDocxToPdf,
+  fetchComplianceModelEvidence,
+  type ComplianceModelResearchAudit,
+} from './aiComplianceModelResearchService.js'
+import {
   generateProjectQaDocx,
   inspectProjectQaDocx,
   makeProjectQaFileNames,
@@ -67,13 +81,17 @@ import {
   type ProjectQaMode,
 } from './aiQaPipelineService.js'
 import {
+  fetchProjectQaModelEvidence,
+  fetchVerifiedProjectWebEvidence,
+  projectQaResearchTopicsForSources,
+  projectWebResearchTopicsForSources,
+  type ProjectQaModelResearchAudit,
+  type ProjectWebResearchAudit,
+} from './aiQaModelResearchService.js'
+import {
   parseQaTemplateCorpus,
   type QaTemplateProfile,
 } from './aiQaTemplateParser.js'
-import {
-  collectQaPublicEvidence,
-  type QaWebResearchResult,
-} from './aiQaWebResearchService.js'
 import {
   loadInvestmentProposalBlueprint,
   type InvestmentProposalDocumentBlueprint,
@@ -87,10 +105,9 @@ import {
   type InvestmentProposalPdfReview,
 } from './aiInvestmentProposalPdfService.js'
 import {
-  collectDueDiligencePublicEvidence,
-  type DueDiligenceResearchResult,
-} from './aiDueDiligenceResearchService.js'
-import { safeAiTaskFailureMessage } from './aiTaskErrorService.js'
+  safeAiTaskFailureMessage,
+  safeAiTaskFailureStage,
+} from './aiTaskErrorService.js'
 
 export type AiTaskStatus = 'pending' | 'running' | 'succeeded' | 'failed' | 'cancelled'
 
@@ -111,6 +128,65 @@ export type CreateAiTaskInput = {
 
 const ARTIFACT_ROOT = path.resolve(process.env.AI_ARTIFACT_ROOT || path.join(process.cwd(), 'server', 'ai-artifacts'))
 const running = new Set<string>()
+const AUTO_RECOVERY_TASK_TYPES = new Set<AiExecutableTaskType>([
+  'compliance_statement',
+  'investment_proposal',
+  'due_diligence_report',
+  'project_qa',
+  'custom_template_document',
+])
+
+async function retryDocumentStep<T>(
+  label: string,
+  operation: (attempt: number) => Promise<T>,
+  maxAttempts = 2,
+) {
+  let lastError: unknown
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      return await operation(attempt)
+    } catch (error) {
+      lastError = error
+      console.warn(
+        `[aiTask] ${label}第 ${attempt} 次未完成${attempt < maxAttempts ? '，自动再次生成' : ''}:`,
+        (error as Error).message,
+      )
+    }
+  }
+  throw lastError
+}
+
+async function withTaskHeartbeat<T>(
+  taskId: string,
+  operation: () => Promise<T>,
+  options: {
+    startProgress: number
+    endProgress: number
+    stage: (elapsedSeconds: number) => string
+  },
+) {
+  const startedAt = Date.now()
+  let progressWrite = Promise.resolve()
+  const heartbeat = setInterval(() => {
+    const elapsedSeconds = Math.max(1, Math.round((Date.now() - startedAt) / 1000))
+    const progress = Math.min(
+      options.endProgress,
+      options.startProgress + Math.floor(elapsedSeconds / 15),
+    )
+    progressWrite = progressWrite
+      .then(() => updateStage(taskId, options.stage(elapsedSeconds), progress))
+      .catch((error) => {
+        console.warn('[aiTask] 任务进度心跳写入未完成:', (error as Error).message)
+      })
+  }, 15_000)
+  heartbeat.unref?.()
+  try {
+    return await operation()
+  } finally {
+    clearInterval(heartbeat)
+    await progressWrite
+  }
+}
 
 function canonicalJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
@@ -169,51 +245,231 @@ async function sourcesForProject(
   limit = 40,
 ): Promise<EvidenceSource[]> {
   const cutoff = new Date(`${sourceCutoffDate}T23:59:59.999Z`)
-  const rows = await db.select().from(knowledgeChunks)
-    .where(and(
-      eq(knowledgeChunks.scope, 'project'),
-      eq(knowledgeChunks.refId, projectId),
-      lte(knowledgeChunks.createdAt, cutoff),
-    ))
-    .orderBy(asc(knowledgeChunks.sourceName), asc(knowledgeChunks.chunkIndex))
-    .limit(limit)
-  return rows.map((row) => ({
-    sourceType: row.sourceType,
-    sourceId: row.sourceId,
-    sourceName: row.sourceName || '项目资料',
-    chunkIndex: row.chunkIndex,
-    versionOrDate: row.createdAt.toISOString().slice(0, 10),
-    content: row.content,
-  }))
+  const [rows, legacyFileRows] = await Promise.all([
+    db.select().from(knowledgeChunks)
+      .where(and(
+        eq(knowledgeChunks.scope, 'project'),
+        eq(knowledgeChunks.refId, projectId),
+        lte(knowledgeChunks.createdAt, cutoff),
+      ))
+      .orderBy(
+        sql`CASE
+          WHEN lower(${knowledgeChunks.sourceName}) LIKE 'perf\_%'
+            OR lower(${knowledgeChunks.sourceName}) LIKE 'localperf\_%'
+            OR ${knowledgeChunks.sourceName} LIKE '%大文件测试%'
+            OR ${knowledgeChunks.sourceName} LIKE '%解析测试%'
+            OR ${knowledgeChunks.sourceName} LIKE '%卡住排查%'
+            OR ${knowledgeChunks.sourceName} LIKE '%异步上传%'
+            OR ${knowledgeChunks.sourceName} LIKE '%日志测试%'
+            OR ${knowledgeChunks.sourceName} LIKE '%需求1复核%'
+            OR lower(${knowledgeChunks.sourceName}) LIKE 'csv测试%'
+            OR lower(${knowledgeChunks.sourceName}) LIKE 'pptx测试%'
+            OR lower(${knowledgeChunks.sourceName}) LIKE 'txt测试%'
+          THEN 2
+          WHEN ${knowledgeChunks.sourceType} LIKE 'public_web%' THEN 1
+          ELSE 0
+        END`,
+        asc(knowledgeChunks.sourceName),
+        asc(knowledgeChunks.chunkIndex),
+      )
+      .limit(limit),
+    // 历史文件可能已解析进 file_chunks，但知识库双写曾失败。这里直接兜底读取，
+    // 避免“资料库有文件、生成任务却判无资料”。
+    db.select().from(fileChunks)
+      .where(and(
+        eq(fileChunks.projectId, projectId),
+        lte(fileChunks.createdAt, cutoff),
+      ))
+      .orderBy(
+        sql`CASE
+          WHEN lower(${fileChunks.fileName}) LIKE 'perf\_%'
+            OR lower(${fileChunks.fileName}) LIKE 'localperf\_%'
+            OR ${fileChunks.fileName} LIKE '%大文件测试%'
+            OR ${fileChunks.fileName} LIKE '%解析测试%'
+            OR ${fileChunks.fileName} LIKE '%卡住排查%'
+            OR ${fileChunks.fileName} LIKE '%异步上传%'
+            OR ${fileChunks.fileName} LIKE '%日志测试%'
+            OR ${fileChunks.fileName} LIKE '%需求1复核%'
+            OR lower(${fileChunks.fileName}) LIKE 'csv测试%'
+            OR lower(${fileChunks.fileName}) LIKE 'pptx测试%'
+            OR lower(${fileChunks.fileName}) LIKE 'txt测试%'
+          THEN 1
+          ELSE 0
+        END`,
+        asc(fileChunks.fileName),
+        asc(fileChunks.chunkIndex),
+      )
+      .limit(limit),
+  ])
+  const knowledgeSources = rows.filter((row) =>
+    !isDiagnosticEvidenceSourceName(row.sourceName)).map((row) => {
+    const cachedUrl = row.sourceType.startsWith('public_web')
+      ? row.content.match(/(?:来源网址|规范化\s*URL|页面\s*URL)[:：]\s*(https?:\/\/\S+)/i)?.[1]
+      : undefined
+    return {
+      sourceType: row.sourceType,
+      sourceId: row.sourceId,
+      sourceName: row.sourceName || '项目资料',
+      chunkIndex: row.chunkIndex,
+      versionOrDate: row.createdAt.toISOString().slice(0, 10),
+      locator: cachedUrl,
+      content: row.content,
+    }
+  })
+  const contentHashes = new Set(knowledgeSources.map((source) =>
+    createHash('sha256').update(source.content.trim()).digest('hex')))
+  const legacyFileSources: EvidenceSource[] = []
+  for (const row of legacyFileRows) {
+    if (isDiagnosticEvidenceSourceName(row.fileName)) continue
+    const content = row.content.trim()
+    if (!content) continue
+    const contentHash = createHash('sha256').update(content).digest('hex')
+    if (contentHashes.has(contentHash)) continue
+    contentHashes.add(contentHash)
+    legacyFileSources.push({
+      sourceType: 'file',
+      sourceId: row.fileId,
+      sourceName: row.fileName || '项目文件',
+      chunkIndex: row.chunkIndex,
+      versionOrDate: row.createdAt.toISOString().slice(0, 10),
+      content,
+    })
+  }
+  return [...knowledgeSources, ...legacyFileSources]
+}
+
+async function cacheProjectNetworkEvidence(projectId: string, sources: EvidenceSource[]) {
+  const cacheable = sources.filter((source) =>
+    source.sourceType.startsWith('public_web') && source.sourceId && source.locator)
+  for (const source of cacheable) {
+    const [existing] = await db.select({ id: knowledgeChunks.id }).from(knowledgeChunks)
+      .where(and(
+        eq(knowledgeChunks.scope, 'project'),
+        eq(knowledgeChunks.refId, projectId),
+        eq(knowledgeChunks.sourceType, source.sourceType),
+        eq(knowledgeChunks.sourceId, source.sourceId!),
+      ))
+      .limit(1)
+    if (existing) continue
+    await db.insert(knowledgeChunks).values({
+      scope: 'project',
+      refId: projectId,
+      sourceType: source.sourceType,
+      sourceId: source.sourceId,
+      sourceName: source.sourceName,
+      chunkIndex: source.chunkIndex ?? 0,
+      content: [
+        source.content,
+        source.locator ? `来源网址：${source.locator}` : '',
+      ].filter(Boolean).join('\n'),
+    })
+  }
+}
+
+function complianceNetworkResearchTopics(
+  sources: EvidenceSource[],
+  project: {
+    name: string
+    companyName?: string | null
+    industry?: string | null
+  },
+) {
+  const packets = buildComplianceEvidencePackets(sources)
+  const emptySections = new Set(
+    packets.filter((packet) => packet.items.length === 0).map((packet) => packet.sectionTitle),
+  )
+  const cachedPublicText = sources
+    .filter((source) => source.sourceType.startsWith('public_web'))
+    .map((source) => `${source.sourceName}\n${source.content}`)
+    .join('\n')
+  const fundEntities = [...new Set(
+    sources
+      .filter((source) => !source.sourceType.startsWith('public_web'))
+      .flatMap((source) =>
+        source.content.match(/[\u3400-\u9fffA-Za-z0-9（）()·-]{2,36}(?:基金|合伙企业)/g) ?? [])
+      .map((name) => name.trim())
+      .filter((name) => name.length <= 40),
+  )].slice(0, 2)
+  const fundScope = fundEntities.length ? `${fundEntities.join('、')} ` : ''
+  const topics: string[] = []
+
+  if (['公司简介', '核心团队', '产品及技术'].some((title) => emptySections.has(title))) {
+    topics.push(`${project.companyName || project.name} 公司简介、主体工商、核心团队、创始人、产品技术、知识产权、客户和商业化公开信息`)
+  }
+  if (emptySections.has('投资理由') || !/行业政策|市场趋势|产业政策/.test(cachedPublicText)) {
+    topics.push(`${project.industry || '项目所属细分领域'} 行业政策、市场趋势和产业政策公开依据`)
+  }
+  if (emptySections.has('投资计划') || !/融资|估值|投资方|资金用途/.test(cachedPublicText)) {
+    topics.push('融资事件、投资方、估值、交易方式和资金用途公开信息')
+  }
+  if (!/返投|投资限制|返投认定|返投台账/.test(cachedPublicText)) {
+    topics.push(`${fundScope}投资方式、投资限制、返投政策、返投认定口径及可公开查询的返投记录`)
+  }
+  if (!/关联交易|投资方向|投资配置|SPV|集中度/.test(cachedPublicText)) {
+    topics.push('关联交易、投资方向、SPV或直投配置和投资集中度监管规则')
+  }
+  if (!/许可|备案|处罚|诉讼|失信|制裁|监管/.test(cachedPublicText)) {
+    topics.push('许可备案、处罚诉讼、失信制裁和其他监管合规公开信息')
+  }
+
+  return topics.slice(0, 8)
+}
+
+function sharedInvestmentResearchTopics(
+  type: AiExecutableTaskType,
+  project: {
+    name: string
+    companyName?: string | null
+  },
+  parameters: Record<string, unknown>,
+) {
+  const subject = project.companyName || project.name
+  const intent = typeof parameters.researchIntent === 'string'
+    ? parameters.researchIntent.trim()
+    : ''
+  const common = [
+    `${subject} 公司主体、股东与治理、创始人和核心团队`,
+    `${subject} 产品、技术指标、知识产权、研发合作和工程化进展`,
+    `${subject} 客户、合同、订单、交付、验收、收入、回款和商业化进展`,
+    `${subject} 融资轮次、融资金额、投资方、估值、资金用途和交易事项`,
+    `${subject} 行政处罚、诉讼、失信、监管、资质和其他重大风险`,
+  ]
+  const typeSpecific = type === 'investment_proposal'
+    ? [`${subject} 商业模式、财务表现、投资亮点、交易条件和退出路径`]
+    : type === 'investment_recommendation_ppt'
+      ? [`${subject} 市场定位、具名竞品、差异化、经营数据和投资判断`]
+      : type === 'due_diligence_report'
+        ? [`${subject} 财务报表、现金流、关联交易、劳动用工和合规事项`]
+        : type === 'project_qa'
+          ? [`${subject} 近期进展、争议事项、公开回应和下一步投资核验重点`]
+          : [`${subject} 近期公开进展、商业化信号和投资判断所需关键信息`]
+  return [...new Set([
+    ...(intent ? [`${subject} ${intent}`] : []),
+    ...common,
+    ...typeSpecific,
+  ])].slice(0, 7)
 }
 
 export function screenEvidenceSources(sources: EvidenceSource[], type?: AiExecutableTaskType) {
-  if (type === 'investment_proposal') {
-    // 投资提案同时使用项目资料与多主题公开检索结果。保留更宽的候选集，
-    // 避免公开网页和“未检出”检索记录在章节级 Evidence 建立前被截断。
-    return curateEvidenceSources(sources, { maxTotal: 120, maxPerDocument: 10 })
+  const options = type === 'investment_proposal'
+    ? { maxTotal: 120, maxPerDocument: 10 }
+    : type === 'compliance_statement'
+      ? { maxTotal: 96, maxPerDocument: 12 }
+      : type === 'due_diligence_report' || type === 'custom_template_document'
+        ? { maxTotal: 96, maxPerDocument: 4 }
+        : type === 'project_qa'
+          ? { maxTotal: 72, maxPerDocument: 8 }
+          : { maxTotal: 18, maxPerDocument: 3 }
+  const result = curateEvidenceSources(sources, options)
+  // 本地项目资料优先，项目档案和用户补充输入其次，缓存公开证据最后。
+  const priority = (sourceType: string) => {
+    if (sourceType.startsWith('public_web')) return 2
+    if (sourceType === 'project_record' || sourceType === 'user_input') return 1
+    return 0
   }
-  if (type === 'compliance_statement') {
-    // 合规性说明随后会按章节再次检索和裁剪；这里保留更宽的当前项目候选集，
-    // 避免全局前18个片段把合同、基金台账或法律资料提前截掉。
-    return curateEvidenceSources(sources, { maxTotal: 96, maxPerDocument: 12 })
-  }
-  if (type === 'due_diligence_report') {
-    // 尽调会叠加项目知识库与多主题公开网页；扩大候选集，避免联网结果在生成前被截断。
-    return curateEvidenceSources(sources, { maxTotal: 96, maxPerDocument: 4 })
-  }
-  if (type === 'custom_template_document') {
-    // 上传模板任务也必须先联网补全，再按模板结构生成全新内容。
-    return curateEvidenceSources(sources, { maxTotal: 96, maxPerDocument: 4 })
-  }
-  return curateEvidenceSources(
-    sources,
-    type === 'project_qa'
-      // Q&A 需要同时保留项目证据、多个公开检索主题及检索审计记录，
-      // 避免公开补证在 Question Generator 前被全局裁掉。
-      ? { maxTotal: 72, maxPerDocument: 8 }
-      : { maxTotal: 18, maxPerDocument: 3 },
-  )
+  result.usable.sort((left, right) =>
+    priority(left.sourceType) - priority(right.sourceType))
+  return result
 }
 
 async function getTaskRow(userId: string, taskId: string) {
@@ -306,6 +562,7 @@ async function inspectGeneratedArtifact(
 async function executeTask(taskId: string) {
   if (running.has(taskId)) return
   running.add(taskId)
+  let rescheduleAfterRecovery = false
   try {
     const [task] = await db.select().from(aiTasks).where(eq(aiTasks.id, taskId)).limit(1)
     if (!task || !isAiExecutableTaskType(task.type) || ['succeeded', 'cancelled'].includes(task.status)) return
@@ -372,100 +629,23 @@ async function executeTask(taskId: string) {
         ? 240
         : task.type === 'compliance_statement'
           ? 500
+          : task.type === 'project_qa'
+            ? 240
           : task.type === 'due_diligence_report'
-            ? 80
+            ? 500
             : task.type === 'custom_template_document'
               ? 80
           : 40,
     )
-    let qaWebResearch: QaWebResearchResult | undefined
-    if (task.type === 'project_qa') {
-      await updateStage(taskId, '联网补充公司、产品、市场、竞争、客户与合规公开信息', 18)
-      qaWebResearch = await collectQaPublicEvidence({
-        project,
-        sourceCutoffDate,
-        maxSources: 60,
-      })
-      if (qaWebResearch.successfulQueries === 0) {
-        throw Object.assign(
-          new Error('Q&A 联网检索服务不可用，已停止生成，避免输出占位式答复。请检查 SearXNG 服务与检索引擎后重试。'),
-          { code: 'PROJECT_QA_WEB_RESEARCH_FAILED' },
-        )
-      }
-    }
-    let diligenceResearch: DueDiligenceResearchResult | undefined
-    if (task.type === 'due_diligence_report') {
-      await updateStage(taskId, '联网检索工商、团队、产品、市场、客户、融资与合规公开信息', 18)
-      diligenceResearch = await collectDueDiligencePublicEvidence({
-        projectName: project.name,
-        companyName: project.companyName,
-        industry: project.industry,
-        sourceCutoffDate,
-      })
-    }
-    let customTemplateResearch: DueDiligenceResearchResult | undefined
-    if (task.type === 'custom_template_document') {
-      await updateStage(taskId, '联网补充当前项目公开信息', 18)
-      customTemplateResearch = await collectDueDiligencePublicEvidence({
-        projectName: project.name,
-        companyName: project.companyName,
-        industry: project.industry,
-        sourceCutoffDate,
-        maxSources: 60,
-      })
-      if (customTemplateResearch.successfulQueries === 0) {
-        throw Object.assign(
-          new Error('上传模板任务联网检索服务不可用，已停止生成，避免输出资料缺口或沿用模板内容。请检查 SearXNG 服务后重试。'),
-          { code: 'CUSTOM_TEMPLATE_WEB_RESEARCH_FAILED' },
-        )
-      }
-    }
-    let proposalResearch: DueDiligenceResearchResult | undefined
-    if (task.type === 'investment_proposal') {
-      await updateStage(taskId, '联网补充公司、团队、交易、财务、市场、估值与风险公开信息', 18)
-      proposalResearch = await collectDueDiligencePublicEvidence({
-        projectName: project.name,
-        companyName: project.companyName,
-        industry: project.industry,
-        sourceCutoffDate,
-        maxSources: 60,
-        purpose: 'investment_proposal',
-      })
-      if (proposalResearch.successfulQueries === 0) {
-        throw Object.assign(
-          new Error('投资提案联网检索服务不可用，已停止生成，避免输出大量资料缺口。请检查 SearXNG 服务后重试。'),
-          { code: 'INVESTMENT_PROPOSAL_WEB_RESEARCH_FAILED' },
-        )
-      }
-    }
-    let complianceWebResearchAudit: ComplianceWebResearchAudit | undefined
-    let complianceWebSources: EvidenceSource[] = []
-    if (task.type === 'compliance_statement') {
-      await updateStage(taskId, '联网检索公开证据', 18)
-      const webResearch = await fetchComplianceWebEvidence({
-        project,
-        sourceCutoffDate,
-        parameters,
-      })
-      complianceWebResearchAudit = webResearch.audit
-      complianceWebSources = webResearch.sources
-    }
+    await updateStage(taskId, '整理当前项目资料库证据', 18)
     const userInstructions = typeof parameters.userInstructions === 'string'
       ? parameters.userInstructions.trim()
       : ''
+    const researchIntent = typeof parameters.researchIntent === 'string'
+      ? parameters.researchIntent.trim()
+      : ''
     const rawSources: EvidenceSource[] = [
-      ...((task.type === 'investment_proposal'
-        || task.type === 'compliance_statement'
-        || task.type === 'project_qa'
-        || task.type === 'custom_template_document')
-        && userInstructions ? [{
-        sourceType: 'user_input',
-        sourceId: `${task.id}:user-input`,
-        sourceName: '用户补充输入',
-        chunkIndex: 0,
-        versionOrDate: new Date().toISOString().slice(0, 10),
-        content: `用户本次明确提供的项目数据和要求：\n${userInstructions}`,
-      }] : []),
+      ...knowledgeSources,
       ...(project.updatedAt.toISOString().slice(0, 10) <= sourceCutoffDate ? [{
         sourceType: 'project_record',
         sourceId: project.id,
@@ -485,15 +665,126 @@ async function executeTask(taskId: string) {
           `团队：${project.team || '待核验'}`,
         ].join('\n'),
       }] : []),
-      ...knowledgeSources,
-      ...(qaWebResearch?.sources ?? []),
-      ...(proposalResearch?.sources ?? []),
-      ...(diligenceResearch?.sources ?? []),
-      ...(customTemplateResearch?.sources ?? []),
-      ...complianceWebSources,
     ]
-    const evidenceScreening = screenEvidenceSources(rawSources, task.type)
-    const sources = evidenceScreening.usable
+    let evidenceScreening = screenEvidenceSources(rawSources, task.type)
+    let sources = evidenceScreening.usable
+    let complianceModelResearch: {
+      agent?: DueDiligenceNetworkResearchAudit
+      projectModel?: ComplianceModelResearchAudit
+    } | undefined
+    let dueDiligenceModelResearch: DueDiligenceNetworkResearchAudit | undefined
+    let dueDiligencePageResearch: ProjectWebResearchAudit | undefined
+    let sharedNetworkResearch: DueDiligenceNetworkResearchAudit | undefined
+    let sharedModelResearch: ProjectWebResearchAudit | undefined
+    let qaAgentResearch: DueDiligenceNetworkResearchAudit | undefined
+    let qaModelResearch: ProjectQaModelResearchAudit | undefined
+    if (task.type === 'compliance_statement') {
+      const pendingTopics = complianceNetworkResearchTopics(sources, project)
+      if (pendingTopics.length > 0) {
+        await updateStage(taskId, '联网检索 Agent 补全公开证据', 22)
+      }
+      try {
+        const research = await fetchDueDiligenceNetworkEvidence({
+          project,
+          sourceCutoffDate,
+          pendingTopics,
+          parameters,
+          maxSources: 24,
+        })
+        complianceModelResearch = {
+          ...complianceModelResearch,
+          agent: research.audit,
+        }
+        if (research.sources.length > 0) {
+          await cacheProjectNetworkEvidence(project.id, research.sources).catch((error) => {
+            console.warn('[aiTask] 合规联网证据缓存失败，跳过缓存继续生成:', (error as Error).message)
+          })
+          rawSources.push(...research.sources)
+          evidenceScreening = screenEvidenceSources(rawSources, task.type)
+          sources = evidenceScreening.usable
+        }
+      } catch (error) {
+        console.warn('[aiTask] 合规联网补充失败，使用项目资料继续生成:', (error as Error).message)
+      }
+      const remainingTopics = complianceNetworkResearchTopics(sources, project)
+      if (remainingTopics.length > 0) {
+        await updateStage(taskId, '项目大模型补全剩余公开证据', 24)
+        try {
+          const research = await fetchComplianceModelEvidence({
+            project,
+            sourceCutoffDate,
+            missingSections: remainingTopics,
+            parameters,
+            maxSources: 24,
+          })
+          complianceModelResearch = {
+            ...complianceModelResearch,
+            projectModel: research.audit,
+          }
+          if (research.sources.length > 0) {
+            await cacheProjectNetworkEvidence(project.id, research.sources).catch((error) => {
+              console.warn('[aiTask] 合规项目大模型证据缓存失败，跳过缓存继续生成:', (error as Error).message)
+            })
+            rawSources.push(...research.sources)
+            evidenceScreening = screenEvidenceSources(rawSources, task.type)
+            sources = evidenceScreening.usable
+          }
+        } catch (error) {
+          console.warn('[aiTask] 合规项目大模型补全失败，使用现有证据继续生成:', (error as Error).message)
+        }
+      }
+    }
+    if ([
+      'investment_proposal',
+      'due_diligence_report',
+      'custom_template_document',
+    ].includes(task.type)) {
+      let agentCandidates: EvidenceSource[] = []
+      await updateStage(taskId, '联网检索 Agent 发现当前项目公开来源', 22)
+      try {
+        const research = await fetchDueDiligenceNetworkEvidence({
+          project,
+          sourceCutoffDate,
+          pendingTopics: sharedInvestmentResearchTopics(task.type, project, parameters),
+          parameters,
+          maxSources: task.type === 'due_diligence_report' ? 24 : 18,
+        })
+        sharedNetworkResearch = research.audit
+        agentCandidates = research.sources
+      } catch (error) {
+        console.warn('[aiTask] 联网检索 Agent 不可用，继续尝试页面核验与受控公开检索:', (error as Error).message)
+      }
+
+      await updateStage(taskId, 'LLM Gateway 补充检索并核验公开页面', 24)
+      try {
+        const research = await fetchVerifiedProjectWebEvidence({
+          project,
+          currentSources: sources,
+          candidateSources: agentCandidates,
+          sourceCutoffDate,
+          parameters: {
+            ...parameters,
+            nativeModelSearch: true,
+          },
+          requestedTopics: projectWebResearchTopicsForSources(
+            sources,
+            task.type === 'due_diligence_report' ? 8 : 6,
+          ),
+          maxSources: task.type === 'due_diligence_report' ? 20 : 14,
+        })
+        sharedModelResearch = research.audit
+        if (research.sources.length > 0) {
+          await cacheProjectNetworkEvidence(project.id, research.sources).catch((error) => {
+            console.warn('[aiTask] 已核验公开证据缓存失败，跳过缓存继续生成:', (error as Error).message)
+          })
+          rawSources.push(...research.sources)
+          evidenceScreening = screenEvidenceSources(rawSources, task.type)
+          sources = evidenceScreening.usable
+        }
+      } catch (error) {
+        console.warn('[aiTask] LLM Gateway 页面核验失败，使用项目资料继续生成:', (error as Error).message)
+      }
+    }
     if (await cancelIfRequested(taskId)) return
 
     if (task.type === 'project_qa') {
@@ -505,13 +796,58 @@ async function executeTask(taskId: string) {
         ? '深度版'
         : '标准版'
 
-      await updateStage(taskId, 'Question Generator 生成专业问题', 28)
+      const qaTopics = projectQaResearchTopicsForSources(sources)
+      let qaAgentCandidates: EvidenceSource[] = []
+      await updateStage(taskId, '联网检索 Agent 发现当前项目公开来源', 22)
+      try {
+        const agentResearch = await fetchDueDiligenceNetworkEvidence({
+          project,
+          sourceCutoffDate,
+          pendingTopics: [...new Set([
+            ...sharedInvestmentResearchTopics(task.type, project, parameters),
+            ...qaTopics.map((topic) => `${project.companyName || project.name} ${topic}`),
+          ])].slice(0, 8),
+          parameters,
+          maxSources: questionDepth === '深度版' ? 24 : 18,
+        })
+        qaAgentResearch = agentResearch.audit
+        qaAgentCandidates = agentResearch.sources
+      } catch (error) {
+        console.warn('[aiTask] Q&A 联网检索 Agent 不可用，继续尝试受控公开检索:', (error as Error).message)
+      }
+      await updateStage(taskId, '核验公开页面并补全项目证据', 24)
+      try {
+        const research = await fetchProjectQaModelEvidence({
+          project,
+          currentSources: sources,
+          candidateSources: qaAgentCandidates,
+          sourceCutoffDate,
+          parameters,
+          requestedTopics: qaTopics,
+          maxSources: questionDepth === '深度版' ? 20 : 14,
+        })
+        qaModelResearch = research.audit
+        if (research.sources.length > 0) {
+          await cacheProjectNetworkEvidence(project.id, research.sources).catch((error) => {
+            console.warn('[aiTask] Q&A 联网证据缓存失败，跳过缓存继续生成:', (error as Error).message)
+          })
+          rawSources.push(...research.sources)
+          evidenceScreening = screenEvidenceSources(rawSources, task.type)
+          sources = evidenceScreening.usable
+        }
+      } catch (error) {
+        console.warn('[aiTask] Q&A 联网补充失败，使用项目资料继续生成:', (error as Error).message)
+      }
+      if (await cancelIfRequested(taskId)) return
+
+      await updateStage(taskId, 'Question Generator 生成线索判断问题', 28)
       const duplicateCheck = await generateProjectQaQuestions({
         project,
         mode: qaMode,
         depth: questionDepth,
         sources,
         skill,
+        userIntent: userInstructions || researchIntent,
       })
       if (duplicateCheck.questions.length === 0) {
         throw new Error('Question Generator 未生成有效问题')
@@ -519,18 +855,20 @@ async function executeTask(taskId: string) {
       if (await cancelIfRequested(taskId)) return
 
       await updateStage(taskId, 'Duplicate Checker 去重', 40)
-      await updateStage(taskId, '结合项目资料与联网公开信息生成回答', 52)
+      await updateStage(taskId, '基于当前项目资料生成投资问答', 52)
       const draftAnswers = await generateProjectQaAnswers({
         project,
         mode: qaMode,
         questions: duplicateCheck.questions,
         sources,
         skill,
+        userIntent: userInstructions || researchIntent,
       })
       if (await cancelIfRequested(taskId)) return
 
-      await updateStage(taskId, 'Reviewer 检查完整性、幻觉与引用', 66)
+      await updateStage(taskId, 'Reviewer 检查阶段建议与证据', 66)
       const reviewed = await reviewProjectQaAnswers({
+        project,
         questions: duplicateCheck.questions,
         answers: draftAnswers,
         sources,
@@ -547,37 +885,37 @@ async function executeTask(taskId: string) {
       })
       if (await cancelIfRequested(taskId)) return
 
-      await updateStage(taskId, 'Formatter 生成正式 PDF', 80)
+      await updateStage(taskId, 'Formatter 生成正式 DOCX', 80)
       const taskDir = path.join(ARTIFACT_ROOT, task.userId, task.projectId, task.id)
       await mkdir(taskDir, { recursive: true })
       const names = makeProjectQaFileNames(project.name, qaMode)
       const docxPath = path.join(taskDir, names.docx)
-      const pdfPath = path.join(taskDir, names.pdf)
-      const docxGeneration = await generateProjectQaDocx({
-        outputPath: docxPath,
-        project,
-        content: qaContent,
-        sources,
-        sourceCutoffDate,
-        templateProfile: qaTemplateProfile,
-        disclaimer: template.disclaimer,
+      const qaDocument = await retryDocumentStep('Q&A DOCX 生成与质量检查', async () => {
+        const generation = await generateProjectQaDocx({
+          outputPath: docxPath,
+          project,
+          content: qaContent,
+          sources,
+          sourceCutoffDate,
+          templateProfile: qaTemplateProfile,
+          disclaimer: template.disclaimer,
+        })
+        const quality = await inspectProjectQaDocx(docxPath, {
+          questionCount: qaContent.questions.length,
+          categoryCount: template.sections.length,
+        })
+        return { generation, quality }
       })
-      const docxQuality = await inspectProjectQaDocx(docxPath, {
-        questionCount: qaContent.questions.length,
-        categoryCount: template.sections.length,
-      })
-      const pdfQuality = await convertProjectQaDocxToPdf({
-        docxPath,
-        pdfPath,
-      })
+      const docxGeneration = qaDocument.generation
+      const docxQuality = qaDocument.quality
       if (await cancelIfRequested(taskId)) return
 
-      await updateStage(taskId, '执行 PDF 内容与版式质量检查', 92)
+      await updateStage(taskId, '执行 DOCX 内容与版式质量检查', 92)
       const [{ count }] = await db.select({ count: sql<number>`count(*)::int` }).from(aiArtifacts)
         .where(and(
           eq(aiArtifacts.userId, task.userId),
           eq(aiArtifacts.projectId, task.projectId),
-          eq(aiArtifacts.format, 'pdf'),
+          eq(aiArtifacts.format, 'docx'),
         ))
       const version = Number(count ?? 0) + 1
       const sharedMetadata = {
@@ -598,34 +936,42 @@ async function executeTask(taskId: string) {
         reviewerChecks: reviewed.review.checks,
         missingAnswerCount: reviewed.review.dataGapCount,
         rejectedEvidenceChunks: evidenceScreening.rejected.length,
-        webResearchProvider: qaWebResearch?.provider,
-        webResearchAccessedAt: qaWebResearch?.accessedAt,
-        webResearchAttemptedQueries: qaWebResearch?.attemptedQueries ?? 0,
-        webResearchSuccessfulQueries: qaWebResearch?.successfulQueries ?? 0,
-        webResearchFailedQueries: qaWebResearch?.failedQueries ?? 0,
-        webResearchResultCount: qaWebResearch?.resultCount ?? 0,
+        evidencePolicy: 'project_knowledge_primary_model_network_supplement',
+        projectKnowledgeSourceCount: sources.filter((source) =>
+          source.sourceType !== 'project_record'
+          && source.sourceType !== 'user_input'
+          && !source.sourceType.startsWith('public_web')).length,
+        modelNetworkResearch: {
+          agent: qaAgentResearch,
+          verifiedPages: qaModelResearch,
+        },
+        networkEvidenceSourceCount: sources.filter((source) =>
+          source.sourceType === 'public_web_llm').length,
+        projectRecordSourceCount: sources.filter((source) =>
+          source.sourceType === 'project_record').length,
+        userInputSourceCount: sources.filter((source) =>
+          source.sourceType === 'user_input').length,
         visibleReferencesIncluded: false,
         visibleReviewerIncluded: false,
-        downloadableFormats: ['pdf'],
+        downloadableFormats: ['docx'],
       }
-      const [pdfArtifact] = await db.insert(aiArtifacts).values({
+      const [qaArtifact] = await db.insert(aiArtifacts).values({
         taskId: task.id,
         userId: task.userId,
         projectId: task.projectId,
         conversationId: task.conversationId,
-        fileName: names.pdf,
-        format: 'pdf',
-        mimeType: 'application/pdf',
+        fileName: names.docx,
+        format: 'docx',
+        mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
         version,
-        storagePath: pdfPath,
-        editableLevel: 'fixed-layout',
+        storagePath: docxPath,
+        editableLevel: 'core-content',
         sourceCutoffDate,
         templateVersion: template.templateVersion,
-        qualityStatus: pdfQuality.qualityStatus,
+        qualityStatus: docxQuality.qualityStatus,
         metadata: {
-          intermediateDocxQuality: docxQuality.metadata,
-          conversionSourceDocxSha256: docxGeneration.documentSha256,
-          ...pdfQuality.metadata,
+          ...docxQuality.metadata,
+          ...docxGeneration,
           ...sharedMetadata,
         },
       }).returning()
@@ -635,7 +981,7 @@ async function executeTask(taskId: string) {
           const source = sources[index]
           return {
             taskId: task.id,
-            artifactId: pdfArtifact.id,
+            artifactId: qaArtifact.id,
             sourceType: source.sourceType,
             sourceId: source.sourceType.startsWith('public_web')
               ? createHash('sha256')
@@ -646,14 +992,16 @@ async function executeTask(taskId: string) {
             sourceName: source.sourceName,
             locator: source.locator || `知识片段 ${source.chunkIndex ?? index}`,
             verificationStatus: source.sourceType.startsWith('public_web')
-              ? '待核验'
+              ? '页面已核验，事实待交叉核验'
               : '资料记载',
           }
-        }))
+        })).catch((error) => {
+          console.warn('[aiTask] Q&A 来源审计写入未完成，保留已生成 DOCX:', (error as Error).message)
+        })
       }
       await db.update(aiTasks).set({
         status: 'succeeded',
-        stage: 'PDF 已生成并通过内部质量检查',
+        stage: 'DOCX 已生成',
         progress: 100,
         resultSummary: qaContent.executiveSummary,
         completedAt: new Date(),
@@ -665,10 +1013,59 @@ async function executeTask(taskId: string) {
           { uid: userRow.id, name: userRow.name, role: userRow.role },
           '生成业务材料',
           `${qaMode}：${project.name}`,
-        )
+        ).catch((error) => {
+          console.warn('[aiTask] Q&A 操作审计写入未完成，保留已生成 DOCX:', (error as Error).message)
+        })
       }
       return
     }
+
+    const taskDir = path.join(ARTIFACT_ROOT, task.userId, task.projectId, task.id)
+    await mkdir(taskDir, { recursive: true })
+    const proposalCheckpointPath = path.join(taskDir, '.investment-proposal-checkpoint.json')
+    const retryCheckpointPath = task.retryOfTaskId
+      ? path.join(
+          ARTIFACT_ROOT,
+          task.userId,
+          task.projectId,
+          task.retryOfTaskId,
+          '.investment-proposal-checkpoint.json',
+        )
+      : undefined
+    let checkpointWrite = Promise.resolve()
+    let progressWrite = Promise.resolve()
+    let proposalProgress = 35
+    const dueDiligenceRuntime = (startProgress: number, endProgress: number) => ({
+      timeoutMs: Number(process.env.AI_DUE_DILIGENCE_CHAPTER_TIMEOUT_MS || 120_000),
+      concurrency: Number(process.env.AI_DUE_DILIGENCE_CHAPTER_CONCURRENCY || 3),
+      maxGenerationAttempts: 2,
+      onProgress: async (event: {
+        chapterTitle: string
+        chapterIndex: number
+        chapterCount: number
+        completedChapters: number
+        phase: 'generating' | 'regenerating' | 'completed' | 'limited'
+      }) => {
+        const progress = Math.min(
+          endProgress,
+          startProgress + Math.round(
+            (event.completedChapters / Math.max(1, event.chapterCount))
+            * (endProgress - startProgress),
+          ),
+        )
+        const phaseLabel = event.phase === 'regenerating'
+          ? '重试受影响章节'
+          : event.phase === 'completed'
+            ? '章节生成完成'
+            : event.phase === 'limited'
+              ? '章节已使用受限内容'
+              : '分章生成尽调正文'
+        const stage = `${phaseLabel}（${event.chapterIndex + 1}/${event.chapterCount}）${event.chapterTitle}`
+          .slice(0, 64)
+        progressWrite = progressWrite.then(() => updateStage(taskId, stage, progress))
+        await progressWrite
+      },
+    })
 
     let complianceWorkflow: ComplianceWorkflowResult | undefined
     let content: BusinessContent
@@ -692,19 +1089,163 @@ async function executeTask(taskId: string) {
       task.type === 'investment_proposal'
         ? '建立章节级 Evidence 并逐章节生成、执行 Reviewer'
         : task.type === 'custom_template_document'
-          ? '结合项目资料与联网公开信息重建标题和正文'
+          ? '基于当前项目资料库重建标题和正文'
         : '生成结构化内容',
       35,
     )
-      content = await composeBusinessContent({
-        type: task.type,
-        template,
-        skill,
-        project,
-        sources,
-        sourceCutoffDate,
-        parameters,
-      })
+      const composeInitialContent = () => composeBusinessContent({
+          type: task.type as AiExecutableTaskType,
+          template,
+          skill,
+          project,
+          sources,
+          sourceCutoffDate,
+          parameters,
+          dueDiligencePass: task.type === 'due_diligence_report' ? 'gap-analysis' : undefined,
+          dueDiligenceRuntime: task.type === 'due_diligence_report'
+            ? dueDiligenceRuntime(35, 49)
+            : undefined,
+          investmentProposalRuntime: task.type === 'investment_proposal'
+            ? {
+              timeoutMs: Number(process.env.AI_INVESTMENT_PROPOSAL_TIMEOUT_MS || 75_000),
+              concurrency: Number(process.env.AI_PROPOSAL_CHAPTER_CONCURRENCY || 3),
+              maxRequestAttempts: 1,
+              maxGenerationAttempts: 1,
+              loadCheckpoint: async () => {
+                for (const checkpointPath of [
+                  proposalCheckpointPath,
+                  retryCheckpointPath,
+                ].filter((value): value is string => Boolean(value))) {
+                  try {
+                    return JSON.parse(await readFile(checkpointPath, 'utf8')) as unknown
+                  } catch {
+                    // 当前任务首次执行或旧任务没有检查点时，从头开始生成。
+                  }
+                }
+                return undefined
+              },
+              saveCheckpoint: async (checkpoint) => {
+                checkpointWrite = checkpointWrite.then(async () => {
+                  const temporaryPath = `${proposalCheckpointPath}.${randomUUID()}.tmp`
+                  await writeFile(temporaryPath, JSON.stringify(checkpoint), 'utf8')
+                  await rename(temporaryPath, proposalCheckpointPath)
+                })
+                await checkpointWrite
+              },
+              onProgress: async (event) => {
+                const completedProgress = 35 + Math.round(
+                  (event.completedChapters / Math.max(1, event.chapterCount)) * 32,
+                )
+                proposalProgress = Math.max(proposalProgress, Math.min(completedProgress, 67))
+                const phaseLabel = event.phase === 'resumed'
+                  ? '恢复已完成章节'
+                  : event.phase === 'reviewing'
+                    ? 'Reviewer 检查章节'
+                    : event.phase === 'regenerating'
+                      ? '按 Reviewer 意见重生章节'
+                      : event.phase === 'completed'
+                        ? '章节生成与 Reviewer 完成'
+                        : event.phase === 'heartbeat'
+                          ? '模型正在生成章节'
+                          : '生成章节'
+                const requestLabel = event.requestAttempt && event.requestAttempt > 1
+                  ? `，请求重试${event.requestAttempt}`
+                  : ''
+                const waitLabel = event.phase === 'heartbeat' && event.elapsedMs
+                  ? `，已等待${Math.max(1, Math.round(event.elapsedMs / 1000))}秒`
+                  : ''
+                const stage = `${phaseLabel}（${event.chapterIndex + 1}/${event.chapterCount}）${event.chapterTitle}${requestLabel}${waitLabel}`
+                  .slice(0, 64)
+                progressWrite = progressWrite.then(() =>
+                  updateStage(taskId, stage, proposalProgress))
+                await progressWrite
+              },
+              }
+            : undefined,
+        })
+      content = task.type === 'due_diligence_report'
+        ? await withTaskHeartbeat(taskId, composeInitialContent, {
+            startProgress: 35,
+            endProgress: 49,
+            stage: (elapsedSeconds) =>
+              `大模型正在分章生成尽调正文（已等待 ${elapsedSeconds} 秒）`,
+          })
+        : await composeInitialContent()
+      if (task.type === 'due_diligence_report') {
+        const pendingTopics = dueDiligencePendingResearchTopics(content)
+        if (pendingTopics.length > 0) {
+          let agentCandidates: EvidenceSource[] = []
+          await updateStage(taskId, '联网检索 Agent 发现待核验事项来源', 52)
+          try {
+            const research = await fetchDueDiligenceNetworkEvidence({
+              project,
+              sourceCutoffDate,
+              pendingTopics,
+              parameters,
+              maxSources: 20,
+            })
+            dueDiligenceModelResearch = research.audit
+            agentCandidates = research.sources
+          } catch (error) {
+            console.warn('[aiTask] 尽调待核验事项来源发现失败，继续生成受限报告:', (error as Error).message)
+          }
+
+          await updateStage(taskId, 'LLM Gateway 核验待核验事项公开页面', 55)
+          try {
+            const research = await fetchVerifiedProjectWebEvidence({
+              project,
+              currentSources: sources,
+              candidateSources: agentCandidates,
+              sourceCutoffDate,
+              parameters: {
+                ...parameters,
+                nativeModelSearch: true,
+              },
+              requestedTopics: projectWebResearchTopicsForSources(sources, 8),
+              maxSources: 16,
+            })
+            dueDiligencePageResearch = research.audit
+            if (research.sources.length > 0) {
+              await cacheProjectNetworkEvidence(project.id, research.sources).catch((error) => {
+                console.warn('[aiTask] 尽调已核验公开证据缓存失败，跳过缓存继续生成:', (error as Error).message)
+              })
+              rawSources.push(...research.sources)
+              evidenceScreening = screenEvidenceSources(rawSources, task.type)
+              sources = evidenceScreening.usable
+            }
+          } catch (error) {
+            console.warn('[aiTask] 尽调公开页面核验失败，使用现有证据继续生成:', (error as Error).message)
+          }
+
+          await updateStage(taskId, '使用本地与联网证据重新生成尽调内容', 58)
+          content = await withTaskHeartbeat(
+            taskId,
+            () => composeBusinessContent({
+              type: task.type as AiExecutableTaskType,
+              template,
+              skill,
+              project,
+              sources,
+              sourceCutoffDate,
+              parameters,
+              dueDiligencePass: 'final',
+              dueDiligenceRuntime: dueDiligenceRuntime(58, 66),
+            }),
+            {
+              startProgress: 58,
+              endProgress: 66,
+              stage: (elapsedSeconds) =>
+                `大模型正在分章整合联网证据（已等待 ${elapsedSeconds} 秒）`,
+            },
+          )
+          content = annotateDueDiligencePendingAfterResearch(
+            content,
+            dueDiligencePageResearch?.status
+              ?? dueDiligenceModelResearch?.status
+              ?? 'unavailable',
+          )
+        }
+      }
     }
     if (evidenceScreening.rejected.length && task.type !== 'custom_template_document') {
       const affectedFiles = [...new Set(evidenceScreening.rejected.map((item) => item.sourceName))]
@@ -726,8 +1267,6 @@ async function executeTask(taskId: string) {
           : '生成 DOCX',
       68,
     )
-    const taskDir = path.join(ARTIFACT_ROOT, task.userId, task.projectId, task.id)
-    await mkdir(taskDir, { recursive: true })
     const fileName = makeArtifactFileName(
       project.name,
       template,
@@ -739,8 +1278,6 @@ async function executeTask(taskId: string) {
     let previewMetadata: Record<string, unknown> | undefined
     let pdfPath: string | undefined
     let complianceDocxReview: ComplianceOutputReview | undefined
-    let compliancePdfReview: ComplianceOutputReview | undefined
-    let pdfConversionMetadata: Record<string, unknown> | undefined
     let proposalDocxReview: InvestmentProposalOutputReview | undefined
     let proposalPdfReview: InvestmentProposalPdfReview | undefined
     let generationMetadata = template.outputFormat === 'pptx'
@@ -755,140 +1292,162 @@ async function executeTask(taskId: string) {
           pageCount: String(parameters.pageCount || '15'),
         })
         previewPath = outputPath.replace(/\.pptx$/i, '.preview.png')
-        previewMetadata = await generateBusinessPptxPreview({
-          outputPath: previewPath,
+        try {
+          previewMetadata = await generateBusinessPptxPreview({
+            outputPath: previewPath,
+            template,
+            project,
+            content,
+            sourceCutoffDate,
+          })
+        } catch (error) {
+          previewPath = undefined
+          console.warn('[aiTask] PPT 预览生成失败，继续交付 PPTX:', (error as Error).message)
+        }
+        return result
+      })()
+      : await retryDocumentStep('DOCX Formatter', () => generateBusinessDocx({
+          outputPath,
           template,
           project,
           content,
           sourceCutoffDate,
-        })
-        return result
-      })()
-      : await generateBusinessDocx({
-        outputPath,
-        template,
-        project,
-        content,
-        sourceCutoffDate,
-        sources,
-        blueprint: complianceBlueprint,
-      })
+          sources,
+          blueprint: complianceBlueprint,
+        }))
     if (await cancelIfRequested(taskId)) return
 
     if (task.type === 'investment_proposal') {
       if (!proposalBlueprint) throw new Error('投资提案缺少 Document Blueprint')
       await updateStage(taskId, 'Reviewer 检查 Word 章节、固定内容、引用及格式', 76)
-      for (let attempt = 1; attempt <= 2; attempt += 1) {
-        proposalDocxReview = await reviewInvestmentProposalDocx({
-          filePath: outputPath,
-          template,
-          blueprint: proposalBlueprint,
-          content,
-          projectName: project.name,
-        })
-        if (proposalDocxReview.passed) break
-        if (attempt === 1) {
-          generationMetadata = await generateBusinessDocx({
-            outputPath,
+      try {
+        for (let attempt = 1; attempt <= 2; attempt += 1) {
+          proposalDocxReview = await reviewInvestmentProposalDocx({
+            filePath: outputPath,
             template,
-            project,
+            blueprint: proposalBlueprint,
             content,
-            sourceCutoffDate,
-            sources,
+            projectName: project.name,
           })
+          if (proposalDocxReview.passed) break
+          if (attempt === 1) {
+            generationMetadata = await generateBusinessDocx({
+              outputPath,
+              template,
+              project,
+              content,
+              sourceCutoffDate,
+              sources,
+            })
+          }
         }
+      } catch (error) {
+        console.warn('[aiTask] 投资提案 Word Reviewer 执行失败，保留已生成 Word:', (error as Error).message)
       }
       if (!proposalDocxReview?.passed) {
-        throw new Error(`投资提案 Word Reviewer 未通过：${proposalDocxReview?.issues
-          .map((issue) => `${issue.code}:${issue.message}`)
-          .join('；')}`)
-      }
-      await updateStage(taskId, '由最终 Word 同源生成 PDF 并复核', 82)
-      pdfPath = outputPath.replace(/\.docx$/i, '.pdf')
-      for (let attempt = 1; attempt <= 2; attempt += 1) {
-        proposalPdfReview = await exportAndReviewInvestmentProposalPdf({
-          docxPath: outputPath,
-          pdfPath,
-          template,
-          blueprint: proposalBlueprint,
-          content,
-        })
-        if (proposalPdfReview.passed) break
-      }
-      if (!proposalPdfReview?.passed) {
-        throw new Error(`投资提案 PDF Reviewer 未通过：${proposalPdfReview?.issues
-          .map((issue) => `${issue.code}:${issue.message}`)
-          .join('；')}`)
+        console.warn(
+          '[aiTask] 投资提案 Word Reviewer 未完全通过，按受限初稿继续交付:',
+          proposalDocxReview?.issues
+            .map((issue) => `${issue.code}:${issue.message}`)
+            .join('；') || 'Reviewer 未返回结果',
+        )
+      } else {
+        await updateStage(taskId, '由最终 Word 同源生成 PDF 并复核', 82)
+        const candidatePdfPath = outputPath.replace(/\.docx$/i, '.pdf')
+        try {
+          for (let attempt = 1; attempt <= 2; attempt += 1) {
+            proposalPdfReview = await exportAndReviewInvestmentProposalPdf({
+              docxPath: outputPath,
+              pdfPath: candidatePdfPath,
+              template,
+              blueprint: proposalBlueprint,
+              content,
+            })
+            if (proposalPdfReview.passed) break
+          }
+          if (proposalPdfReview?.passed) {
+            pdfPath = candidatePdfPath
+          } else {
+            console.warn(
+              '[aiTask] 投资提案 PDF Reviewer 未完全通过，跳过 PDF、继续交付 Word:',
+              proposalPdfReview?.issues
+                .map((issue) => `${issue.code}:${issue.message}`)
+                .join('；') || 'Reviewer 未返回结果',
+            )
+          }
+        } catch (error) {
+          console.warn('[aiTask] 投资提案 PDF 生成或复核失败，跳过 PDF、继续交付 Word:', (error as Error).message)
+        }
       }
     }
 
     if (task.type === 'compliance_statement') {
       if (!complianceBlueprint) throw new Error('合规性说明缺少Document Blueprint')
       await updateStage(taskId, 'Reviewer 检查 Word 结构与格式', 76)
-      for (let attempt = 1; attempt <= 2; attempt += 1) {
-        complianceDocxReview = await reviewGeneratedComplianceDocx({
-          filePath: outputPath,
-          template,
-          blueprint: complianceBlueprint,
-          content,
-          projectName: project.name,
-        })
-        if (complianceDocxReview.passed) break
-        if (attempt === 1) {
-          generationMetadata = await generateBusinessDocx({
-            outputPath,
+      try {
+        for (let attempt = 1; attempt <= 2; attempt += 1) {
+          complianceDocxReview = await reviewGeneratedComplianceDocx({
+            filePath: outputPath,
             template,
-            project,
-            content,
-            sourceCutoffDate,
-            sources,
             blueprint: complianceBlueprint,
+            content,
+            projectName: project.name,
           })
+          if (complianceDocxReview.passed) break
+          if (attempt === 1) {
+            generationMetadata = await generateBusinessDocx({
+              outputPath,
+              template,
+              project,
+              content,
+              sourceCutoffDate,
+              sources,
+              blueprint: complianceBlueprint,
+            })
+          }
         }
+      } catch (error) {
+        console.warn('[aiTask] 合规性说明 Word Reviewer 执行失败，保留已生成 Word:', (error as Error).message)
       }
       if (!complianceDocxReview?.passed) {
-        throw new Error(`合规性说明Word Reviewer未通过：${complianceDocxReview?.issues
-          .map((issue) => `${issue.code}:${issue.message}`)
-          .join('；')}`)
-      }
-      await updateStage(taskId, '由 Word 生成 PDF', 82)
-      pdfPath = outputPath.replace(/\.docx$/i, '.pdf')
-      for (let attempt = 1; attempt <= 2; attempt += 1) {
-        const conversion = await convertComplianceDocxToPdf({
-          docxPath: outputPath,
-          pdfPath,
-          // 合规模板使用宋体/黑体；在无 Office 字体的服务端始终对临时转换副本
-          // 做可审计的 CJK 字体映射，原始可编辑 Word 不作字体替换。
-          fontFallback: true,
-        })
-        pdfConversionMetadata = conversion
-        compliancePdfReview = await reviewCompliancePdfAgainstDocx({
-          docxPath: outputPath,
-          pdfPath,
-          template,
-          blueprint: complianceBlueprint,
-          content,
-        })
-        if (compliancePdfReview.passed) break
-      }
-      if (!compliancePdfReview?.passed) {
-        throw new Error(`合规性说明PDF Reviewer未通过：${compliancePdfReview?.issues
-          .map((issue) => `${issue.code}:${issue.message}`)
-          .join('；')}`)
+        console.warn(
+          '[aiTask] 合规性说明 Word Reviewer 未完全通过，按初稿继续交付:',
+          complianceDocxReview?.issues
+            .map((issue) => `${issue.code}:${issue.message}`)
+            .join('；') || 'Reviewer 未返回结果',
+        )
       }
     }
     await updateStage(taskId, '执行文件质量检查', 88)
-    const quality = await inspectGeneratedArtifact(
-      outputPath,
-      template.outputFormat as 'docx' | 'pptx',
-      {
+    const qualityOptions = {
       // 合规性说明核心规范禁止“引用资料”等模板外正文板块；来源只保留在
       // ai_task_sources 与产物元数据中。尽调报告也按用户要求不显示文末来源。
       requireEndReferences: task.type !== 'compliance_statement'
         && task.type !== 'due_diligence_report'
         && task.type !== 'investment_proposal',
-      },
-    )
+    }
+    let quality
+    try {
+      quality = await inspectGeneratedArtifact(
+        outputPath,
+        template.outputFormat as 'docx' | 'pptx',
+        qualityOptions,
+      )
+    } catch (error) {
+      if (template.outputFormat !== 'docx') throw error
+      console.warn('[aiTask] DOCX 首次质量检查未通过，重新生成主文档:', (error as Error).message)
+      generationMetadata = await retryDocumentStep('DOCX 质量恢复生成', () =>
+        generateBusinessDocx({
+          outputPath,
+          template,
+          project,
+          content,
+          sourceCutoffDate,
+          sources,
+          blueprint: complianceBlueprint,
+        }))
+      quality = await inspectGeneratedArtifact(outputPath, 'docx', qualityOptions)
+    }
     const [{ count }] = await db.select({ count: sql<number>`count(*)::int` }).from(aiArtifacts)
       .where(and(eq(aiArtifacts.userId, task.userId), eq(aiArtifacts.projectId, task.projectId), eq(aiArtifacts.format, template.outputFormat)))
     const version = Number(count ?? 0) + 1
@@ -911,6 +1470,31 @@ async function executeTask(taskId: string) {
       metadata: {
         ...quality.metadata,
         ...generationMetadata,
+        evidencePolicy: task.type === 'compliance_statement'
+          ? 'project_knowledge_primary_model_network_supplement'
+          : ['investment_proposal', 'due_diligence_report', 'custom_template_document'].includes(task.type)
+            ? 'project_knowledge_primary_flue_discovery_llm_page_verification'
+            : 'project_knowledge_primary_flue_network_supplement',
+        ...(complianceModelResearch
+          || dueDiligenceModelResearch
+          || dueDiligencePageResearch
+          || sharedNetworkResearch
+          || sharedModelResearch
+          ? {
+              projectModelNetworkSupplement:
+                complianceModelResearch
+                ?? {
+                  initial: {
+                    agentDiscovery: sharedNetworkResearch,
+                    pageVerification: sharedModelResearch,
+                  },
+                  gapCompletion: {
+                    agentDiscovery: dueDiligenceModelResearch,
+                    pageVerification: dueDiligencePageResearch,
+                  },
+                },
+            }
+          : {}),
         ...(complianceBlueprint
           ? complianceBlueprintMetadata(complianceBlueprint)
           : {}),
@@ -951,35 +1535,6 @@ async function executeTask(taskId: string) {
               limitationIssueCodes: content.generationAudit.limitationIssueCodes ?? [],
             }
           : {}),
-        ...(diligenceResearch
-          ? {
-              publicResearchAttemptedQueries: diligenceResearch.attemptedQueries,
-              publicResearchSuccessfulQueries: diligenceResearch.successfulQueries,
-              publicResearchFailedQueries: diligenceResearch.failedQueries,
-              publicResearchSourceCount: diligenceResearch.sources.length,
-            }
-          : {}),
-        ...(proposalResearch
-          ? {
-              proposalPublicResearchAttemptedQueries: proposalResearch.attemptedQueries,
-              proposalPublicResearchSuccessfulQueries: proposalResearch.successfulQueries,
-              proposalPublicResearchFailedQueries: proposalResearch.failedQueries,
-              proposalPublicResearchSourceCount: proposalResearch.sources.length,
-            }
-          : {}),
-        ...(customTemplateResearch
-          ? {
-              customTemplatePublicResearchAttemptedQueries: customTemplateResearch.attemptedQueries,
-              customTemplatePublicResearchSuccessfulQueries: customTemplateResearch.successfulQueries,
-              customTemplatePublicResearchFailedQueries: customTemplateResearch.failedQueries,
-              customTemplatePublicResearchSourceCount: customTemplateResearch.sources.length,
-            }
-          : {}),
-        ...(complianceWebResearchAudit
-          ? {
-              publicWebResearch: complianceWebResearchAudit,
-            }
-          : {}),
         ...(proposalDocxReview
           ? {
               wordReviewerPassed: proposalDocxReview.passed,
@@ -1004,81 +1559,49 @@ async function executeTask(taskId: string) {
       },
     }).returning()
     let proposalPdfArtifactId: string | undefined
-    if (pdfPath && compliancePdfReview?.passed) {
-      const pdfStat = await stat(pdfPath)
-      if (!pdfStat.isFile() || pdfStat.size < 1000) throw new Error('合规性说明PDF为空或不完整')
-      await db.insert(aiArtifacts).values({
-        taskId: task.id,
-        userId: task.userId,
-        projectId: task.projectId,
-        conversationId: task.conversationId,
-        fileName: fileName.replace(/\.docx$/i, '.pdf'),
-        format: 'pdf',
-        mimeType: 'application/pdf',
-        version,
-        storagePath: pdfPath,
-        editableLevel: 'fixed-layout',
-        sourceCutoffDate,
-        templateVersion: template.templateVersion,
-        qualityStatus: 'passed',
-        metadata: {
-          bytes: pdfStat.size,
-          ...compliancePdfReview.metadata,
-          ...pdfConversionMetadata,
-          derivedFromArtifactId: artifact.id,
-          ...(complianceBlueprint
-            ? complianceBlueprintMetadata(complianceBlueprint)
-            : {}),
-          referenceTemplate: path.basename(template.referencePath),
-          referenceTemplates: (template.referencePaths?.length
-            ? template.referencePaths
-            : [template.referencePath]).map((referencePath) => path.basename(referencePath)),
-          skillName: skill.name,
-          skillVersion: skill.version,
-          skillSha256: skill.sha256,
-          pdfReviewerPassed: true,
-        },
-      })
-    }
     if (pdfPath && proposalPdfReview?.passed && proposalBlueprint) {
-      const pdfStat = await stat(pdfPath)
-      if (!pdfStat.isFile() || pdfStat.size < 1000) throw new Error('投资提案 PDF 为空或不完整')
-      const [pdfArtifact] = await db.insert(aiArtifacts).values({
-        taskId: task.id,
-        userId: task.userId,
-        projectId: task.projectId,
-        conversationId: task.conversationId,
-        fileName: fileName.replace(/\.docx$/i, '.pdf'),
-        format: 'pdf',
-        mimeType: 'application/pdf',
-        version,
-        storagePath: pdfPath,
-        editableLevel: 'fixed-layout',
-        sourceCutoffDate,
-        templateVersion: template.templateVersion,
-        qualityStatus: 'passed',
-        metadata: {
-          ...proposalPdfReview.metadata,
-          derivedFromArtifactId: artifact.id,
-          blueprintVersion: proposalBlueprint.version,
-          coreStandardSha256: proposalBlueprint.coreStandardSha256,
-          templateCorpusSha256: proposalBlueprint.corpusSha256,
-          parsedTemplateCount: proposalBlueprint.templates.length,
-          blueprintSectionCount: proposalBlueprint.sections.length,
-          referenceTemplate: path.basename(template.referencePath),
-          referenceTemplates: (template.referencePaths?.length
-            ? template.referencePaths
-            : [template.referencePath]).map((referencePath) => path.basename(referencePath)),
-          skillName: skill.name,
-          skillVersion: skill.version,
-          skillSha256: skill.sha256,
-          pdfReviewerPassed: true,
-          limitedDraft: content.generationAudit?.limitedDraft ?? false,
-          limitationCount: content.generationAudit?.limitationCount ?? 0,
-          limitationIssueCodes: content.generationAudit?.limitationIssueCodes ?? [],
-        },
-      }).returning()
-      proposalPdfArtifactId = pdfArtifact.id
+      try {
+        const pdfStat = await stat(pdfPath)
+        if (!pdfStat.isFile() || pdfStat.size < 1000) throw new Error('投资提案 PDF 为空或不完整')
+        const [pdfArtifact] = await db.insert(aiArtifacts).values({
+          taskId: task.id,
+          userId: task.userId,
+          projectId: task.projectId,
+          conversationId: task.conversationId,
+          fileName: fileName.replace(/\.docx$/i, '.pdf'),
+          format: 'pdf',
+          mimeType: 'application/pdf',
+          version,
+          storagePath: pdfPath,
+          editableLevel: 'fixed-layout',
+          sourceCutoffDate,
+          templateVersion: template.templateVersion,
+          qualityStatus: 'passed',
+          metadata: {
+            ...proposalPdfReview.metadata,
+            derivedFromArtifactId: artifact.id,
+            blueprintVersion: proposalBlueprint.version,
+            coreStandardSha256: proposalBlueprint.coreStandardSha256,
+            templateCorpusSha256: proposalBlueprint.corpusSha256,
+            parsedTemplateCount: proposalBlueprint.templates.length,
+            blueprintSectionCount: proposalBlueprint.sections.length,
+            referenceTemplate: path.basename(template.referencePath),
+            referenceTemplates: (template.referencePaths?.length
+              ? template.referencePaths
+              : [template.referencePath]).map((referencePath) => path.basename(referencePath)),
+            skillName: skill.name,
+            skillVersion: skill.version,
+            skillSha256: skill.sha256,
+            pdfReviewerPassed: true,
+            limitedDraft: content.generationAudit?.limitedDraft ?? false,
+            limitationCount: content.generationAudit?.limitationCount ?? 0,
+            limitationIssueCodes: content.generationAudit?.limitationIssueCodes ?? [],
+          },
+        }).returning()
+        proposalPdfArtifactId = pdfArtifact.id
+      } catch (error) {
+        console.warn('[aiTask] 投资提案 PDF 登记未完成，保留已生成 DOCX:', (error as Error).message)
+      }
     }
     if (previewPath && previewMetadata) {
       const previewStat = await stat(previewPath)
@@ -1100,48 +1623,6 @@ async function executeTask(taskId: string) {
         metadata: {
           bytes: previewStat.size,
           ...previewMetadata,
-          referenceTemplate: path.basename(template.referencePath),
-          referenceTemplates: (template.referencePaths?.length
-            ? template.referencePaths
-            : [template.referencePath]).map((referencePath) => path.basename(referencePath)),
-          skillName: skill.name,
-          skillVersion: skill.version,
-          skillSha256: skill.sha256,
-        },
-      })
-    }
-    if (task.type === 'compliance_statement') {
-      const markdownFileName = fileName.replace(/\.docx$/i, '.md')
-      const markdownPath = path.join(taskDir, markdownFileName)
-      const markdown = renderBusinessMarkdown({ template, project, content, sources, sourceCutoffDate })
-      await writeFile(markdownPath, markdown, 'utf8')
-      const markdownStat = await stat(markdownPath)
-      const requiredMarkdownSections = ['一、公司情况介绍', '二、投资理由', '三、投资计划', '四、投资情形分析']
-      const forbiddenMarkdownSections = ['## 摘要', '## 已核验事实', '## 风险提示', '## 待核验事项', '## 资料缺口', '## 免责声明', '## 引用资料']
-      if (
-        markdownStat.size < 200
-        || requiredMarkdownSections.some((sectionTitle) => !markdown.includes(sectionTitle))
-        || forbiddenMarkdownSections.some((sectionTitle) => markdown.includes(sectionTitle))
-      ) {
-        throw new Error('合规说明 Markdown 预览不符合核心规范')
-      }
-      await db.insert(aiArtifacts).values({
-        taskId: task.id,
-        userId: task.userId,
-        projectId: task.projectId,
-        conversationId: task.conversationId,
-        fileName: markdownFileName,
-        format: 'md',
-        mimeType: 'text/markdown; charset=utf-8',
-        version,
-        storagePath: markdownPath,
-        editableLevel: 'text-and-structure',
-        sourceCutoffDate,
-        templateVersion: template.templateVersion,
-        qualityStatus: 'passed',
-        metadata: {
-          bytes: markdownStat.size,
-          pagePreview: true,
           referenceTemplate: path.basename(template.referencePath),
           referenceTemplates: (template.referencePaths?.length
             ? template.referencePaths
@@ -1181,40 +1662,143 @@ async function executeTask(taskId: string) {
               ? '待核验'
               : '资料记载',
           }
-        })))
+        }))).catch((error) => {
+          console.warn('[aiTask] 来源审计写入未完成，保留已生成主文档:', (error as Error).message)
+        })
     }
     const limitedProposal = task.type === 'investment_proposal'
-      && (content.generationAudit?.limitedDraft ?? false)
+      && (
+        (content.generationAudit?.limitedDraft ?? false)
+        || proposalDocxReview?.passed !== true
+        || (proposalPdfReview !== undefined && proposalPdfReview.passed !== true)
+      )
     await db.update(aiTasks).set({
       status: 'succeeded',
       stage: limitedProposal
-        ? '受限初稿已生成并通过安全检查'
+        ? '受限初稿已生成'
         : task.type === 'investment_proposal'
-          ? 'Word/PDF 已生成并通过 Reviewer'
-        : '生成完成',
+          ? pdfPath ? 'Word/PDF 已生成' : 'Word 已生成'
+        : task.type === 'compliance_statement'
+          ? 'DOCX 已生成'
+          : '生成完成',
       progress: 100,
       resultSummary: content.executiveSummary,
       completedAt: new Date(),
       updatedAt: new Date(),
     }).where(eq(aiTasks.id, taskId))
     const [userRow] = await db.select().from(users).where(eq(users.id, task.userId)).limit(1)
-    if (userRow) await writeTaskAudit({ uid: userRow.id, name: userRow.name, role: userRow.role }, '生成业务材料', `${template.label}：${project.name}`)
+    if (userRow) {
+      await writeTaskAudit(
+        { uid: userRow.id, name: userRow.name, role: userRow.role },
+        '生成业务材料',
+        `${template.label}：${project.name}`,
+      ).catch((error) => {
+        console.warn('[aiTask] 操作审计写入未完成，保留已生成主文档:', (error as Error).message)
+      })
+    }
   } catch (error) {
     const errorId = `AI-${Date.now().toString(36).toUpperCase()}-${randomUUID().slice(0, 8)}`
     const internalMessage = (error as Error).message
+    const diagnosticError = error as {
+      code?: unknown
+      upstreamCode?: unknown
+      status?: unknown
+      gatewayRequestId?: unknown
+      responseBytes?: unknown
+      requestAttempt?: unknown
+      requestDurationMs?: unknown
+    }
     const [context] = await db.select({
       userId: aiTasks.userId,
       projectId: aiTasks.projectId,
       type: aiTasks.type,
       stage: aiTasks.stage,
+      progress: aiTasks.progress,
+      parameters: aiTasks.parameters,
     }).from(aiTasks).where(eq(aiTasks.id, taskId)).limit(1).catch(() => [])
     console.error(
       `[${errorId}] AI 任务失败 task=${taskId} user=${context?.userId ?? 'unknown'} project=${context?.projectId ?? 'unknown'} type=${context?.type ?? 'unknown'} stage=${context?.stage ?? 'unknown'}:`,
       internalMessage,
+      {
+        code: diagnosticError.code,
+        upstreamCode: diagnosticError.upstreamCode,
+        status: diagnosticError.status,
+        gatewayRequestId: diagnosticError.gatewayRequestId,
+        responseBytes: diagnosticError.responseBytes,
+        requestAttempt: diagnosticError.requestAttempt,
+        requestDurationMs: diagnosticError.requestDurationMs,
+      },
     )
+    const recoveryParameters = (context?.parameters ?? {}) as Record<string, unknown>
+    const recoveryAttempt = Math.max(
+      0,
+      Number(recoveryParameters._systemDocumentRecoveryAttempt ?? 0) || 0,
+    )
+    const nonRecoverableCode = [
+      'CUSTOM_TEMPLATE_FORMAT_MISMATCH',
+      'TASK_NOT_FOUND',
+      'PROJECT_NOT_FOUND',
+    ].includes(String(diagnosticError.code ?? ''))
+    const nonRecoverableMessage = /项目不存在|模板不存在|输出格式应为|缺少 Document Blueprint|缺少Document Blueprint/.test(
+      internalMessage,
+    )
+    if (
+      context
+      && isAiExecutableTaskType(context.type)
+      && AUTO_RECOVERY_TASK_TYPES.has(context.type)
+    ) {
+      const [existingMainArtifact] = await db.select({
+        id: aiArtifacts.id,
+        format: aiArtifacts.format,
+      }).from(aiArtifacts).where(and(
+        eq(aiArtifacts.taskId, taskId),
+        inArray(aiArtifacts.format, ['docx', 'pptx']),
+      )).orderBy(desc(aiArtifacts.createdAt)).limit(1).catch(() => [])
+      if (existingMainArtifact) {
+        await db.update(aiTasks).set({
+          status: 'succeeded',
+          stage: `${existingMainArtifact.format.toUpperCase()} 已生成`,
+          progress: 100,
+          errorId: null,
+          errorMessage: null,
+          completedAt: new Date(),
+          updatedAt: new Date(),
+        }).where(eq(aiTasks.id, taskId)).catch(() => {})
+        console.warn(`[${errorId}] 主文档已登记，任务状态恢复为已完成 task=${taskId}`)
+        return
+      }
+    }
+    if (
+      context
+      && isAiExecutableTaskType(context.type)
+      && AUTO_RECOVERY_TASK_TYPES.has(context.type)
+      && recoveryAttempt < 1
+      && !nonRecoverableCode
+      && !nonRecoverableMessage
+    ) {
+      const [resetTask] = await db.update(aiTasks).set({
+        status: 'pending',
+        stage: '正在继续生成文档',
+        progress: Math.min(Number(context.progress ?? 0), 20),
+        parameters: {
+          ...recoveryParameters,
+          _systemDocumentRecoveryAttempt: recoveryAttempt + 1,
+        },
+        errorId: null,
+        errorMessage: null,
+        completedAt: null,
+        updatedAt: new Date(),
+      }).where(and(eq(aiTasks.id, taskId), eq(aiTasks.status, 'running'))).returning()
+        .catch(() => [])
+      if (resetTask) {
+        rescheduleAfterRecovery = true
+        console.warn(`[${errorId}] 主文档尚未完成，系统自动继续生成 task=${taskId}`)
+        return
+      }
+    }
     await db.update(aiTasks).set({
       status: 'failed',
-      stage: context?.stage ? `${context.stage}失败` : '生成失败',
+      stage: safeAiTaskFailureStage(error),
       errorId,
       errorMessage: safeAiTaskFailureMessage(error),
       completedAt: new Date(),
@@ -1222,6 +1806,7 @@ async function executeTask(taskId: string) {
     }).where(eq(aiTasks.id, taskId)).catch(() => {})
   } finally {
     running.delete(taskId)
+    if (rescheduleAfterRecovery) scheduleTask(taskId)
   }
 }
 
@@ -1334,11 +1919,16 @@ export async function retryAiTask(user: AiTaskUser, taskId: string, idempotencyK
   if (task.status !== 'failed') {
     throw Object.assign(new Error('只有失败任务可以重试'), { status: 409, code: 'TASK_NOT_RETRYABLE' })
   }
+  const retryParameters = {
+    ...(task.parameters as Record<string, unknown>),
+  }
+  // 手动“继续生成”是一轮新的恢复流程，不能继承上一任务已经耗尽的自动恢复次数。
+  delete retryParameters._systemDocumentRecoveryAttempt
   return createAiTask(user, {
     type: task.type,
     projectId: task.projectId,
     conversationId: task.conversationId ?? undefined,
-    parameters: task.parameters as Record<string, unknown>,
+    parameters: retryParameters,
     idempotencyKey,
     retryOfTaskId: task.id,
   })

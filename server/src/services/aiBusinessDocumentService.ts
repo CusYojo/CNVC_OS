@@ -35,6 +35,7 @@ import {
   type ComplianceDocumentBlueprint,
 } from './aiComplianceBlueprintService.js'
 import {
+  cleanComplianceBodyText,
   COMPLIANCE_CHECKLIST_TOPICS,
   COMPLIANCE_INVESTMENT_REASON_TOPICS,
 } from './aiComplianceWorkflowService.js'
@@ -138,15 +139,15 @@ const statusStyle = {
 const DUE_DILIGENCE_OUTLINE = [
   { title: '投资概要', modules: ['投资概要'] },
   {
-    title: '公司概况',
+    title: '公司与团队',
     modules: ['公司概况', '股权结构及融资历程', '公司治理与管理团队', '法律合规与资质'],
   },
   { title: '产品与技术', modules: ['产品与核心技术'] },
-  { title: '业务情况', modules: ['商业模式与经营情况', '客户与商业化进展'] },
-  { title: '行业和市场', modules: ['行业概况与市场空间', '产业链与竞争格局'] },
-  { title: '未来发展规划', modules: ['财务分析'] },
-  { title: '投资方案', modules: ['估值合理性分析', '投资方案', '投资亮点'] },
-  { title: '风险提示与对策', modules: ['风险分析', '后续核验事项'] },
+  { title: '业务与商业化', modules: ['商业模式与经营情况', '客户与商业化进展'] },
+  { title: '行业与竞争', modules: ['行业概况与市场空间', '产业链与竞争格局'] },
+  { title: '财务与估值', modules: ['财务分析', '估值合理性分析'] },
+  { title: '投资判断', modules: ['投资方案', '投资亮点'] },
+  { title: '风险与核验', modules: ['风险分析', '后续核验事项'] },
 ] as const
 
 const DUE_DILIGENCE_STYLES = {
@@ -488,7 +489,7 @@ async function generateCustomTemplateDocx(input: {
   const doc = new Document({
     creator: '浙江赛智伯乐股权投资管理有限公司投资中台',
     title: input.content.title,
-    description: '依据当前项目资料及联网公开信息生成的 AI 初稿',
+    description: '依据当前项目资料库生成的 AI 初稿',
     styles: {
       default: {
         document: {
@@ -743,7 +744,7 @@ export async function generateBusinessDocx(input: {
         before?: number
       } = {},
     ) => {
-      const normalizedText = finding.text.replace(/^\s*\d+[、.．]\s*/, '')
+      const normalizedText = cleanComplianceBodyText(finding.text)
       const leadMatch = options.boldLead
         ? normalizedText.match(/^(.{1,60}?[：。])([\s\S]*)$/)
         : null
@@ -808,7 +809,7 @@ export async function generateBusinessDocx(input: {
       const findings = current?.findings.length
         ? current.findings
         : [{
-            text: `${COMPLIANCE_MISSING_DATA_SENTENCE}需补充能够支持“${title}”撰写的专项原始文件后再行核验。`,
+            text: `${COMPLIANCE_MISSING_DATA_SENTENCE}需取得能够支持“${title}”撰写的专项原始文件，完成主体、日期和口径核验后再形成结论。`,
             status: '资料缺口' as const,
             sourceIndexes: [],
           }]
@@ -826,7 +827,7 @@ export async function generateBusinessDocx(input: {
     const reasons = section('投资理由')?.findings ?? []
     const renderedReasons = COMPLIANCE_INVESTMENT_REASON_TOPICS.map((topic, index) =>
       reasons[index] ?? {
-          text: `${topic}：${COMPLIANCE_MISSING_DATA_SENTENCE}需补充能够支持本项投资价值判断的一手项目材料后再行核验。`,
+          text: `${topic}：现阶段应按本项建立投资判断框架。${COMPLIANCE_MISSING_DATA_SENTENCE}需取得能够支持本项价值判断的一手项目材料后完成专项分析。`,
           status: '资料缺口' as const,
           sourceIndexes: [],
         })
@@ -853,7 +854,7 @@ export async function generateBusinessDocx(input: {
     const analyses = section('投资情形分析')?.findings ?? []
     const renderedAnalyses = COMPLIANCE_CHECKLIST_TOPICS.map((topic, index) =>
       analyses[index] ?? {
-          text: `${topic}：${COMPLIANCE_MISSING_DATA_SENTENCE}需补充对应基金条款、项目事实和核验材料后再行核验。`,
+          text: `${topic}：现阶段应按本项核查标准建立比对底稿。${COMPLIANCE_MISSING_DATA_SENTENCE}需取得对应基金条款、项目事实和交易材料后形成单项结论。`,
           status: '资料缺口' as const,
           sourceIndexes: [],
         })
@@ -1099,16 +1100,6 @@ export async function generateBusinessDocx(input: {
         color: '000000',
       })],
     })
-    const dueSourceNote = (value: string) => new Paragraph({
-      style: DUE_DILIGENCE_STYLES.sourceNote,
-      spacing: { before: 0, after: 60, line: 260 },
-      children: [new TextRun({
-        text: value,
-        font: runFont(profile.bodyFont),
-        size: 21,
-        color: '555555',
-      })],
-    })
     const tableBorders = {
       top: { style: BorderStyle.SINGLE, color: '7F7F7F', size: 4 },
       bottom: { style: BorderStyle.SINGLE, color: '7F7F7F', size: 4 },
@@ -1154,11 +1145,103 @@ export async function generateBusinessDocx(input: {
         overviewRow('融资安排', text(input.project.financing), '估值口径', text(input.project.valuation)),
       ],
     })
+    const dueTable = (
+      table: NonNullable<BusinessContent['sections'][number]['tables']>[number],
+      sectionTitle: string,
+    ): Array<Paragraph | Table> => {
+      const width = 8300
+      const isFinancial = sectionTitle === '财务分析'
+      const weights = table.columns.map((column, columnIndex) => {
+        if (isFinancial) {
+          if (/序号/.test(column)) return 0.7
+          if (/年度|年份|期间|时间/.test(column)) return 1.1
+          if (/指标|科目|项目/.test(column)) return 2.1
+          if (/口径|说明|备注/.test(column)) return 2.8
+          return 1.4
+        }
+        const maxLength = Math.max(
+          column.length,
+          ...table.rows.map((row) => String(row[columnIndex] ?? '').length),
+        )
+        return Math.max(1, Math.min(4, Math.ceil(maxLength / 12)))
+      })
+      const totalWeight = weights.reduce((sum, value) => sum + value, 0)
+      const columnWidths = weights.map((weight, index) =>
+        index === weights.length - 1
+          ? width - weights.slice(0, -1).reduce(
+              (sum, value) => sum + Math.floor(width * value / totalWeight),
+              0,
+            )
+          : Math.floor(width * weight / totalWeight))
+      const row = (values: string[], header = false) => new TableRow({
+        tableHeader: header,
+        cantSplit: true,
+        children: values.map((value, index) => new TableCell({
+          width: { size: columnWidths[index], type: WidthType.DXA },
+          shading: header ? { fill: 'E7E6E6' } : undefined,
+          margins: { top: 90, right: 110, bottom: 90, left: 110 },
+          children: [new Paragraph({
+            alignment: header
+              ? AlignmentType.CENTER
+              : /^[-+]?[\d,.]+(?:%|万|万元|亿|亿元|年|月|天)?$/.test(value.trim())
+                ? AlignmentType.RIGHT
+                : value.length <= 12
+                  ? AlignmentType.CENTER
+                  : AlignmentType.LEFT,
+            spacing: { before: 0, after: 0, line: 280 },
+            children: [new TextRun({
+              text: value,
+              font: runFont(profile.bodyFont),
+              size: 21,
+              bold: header,
+              color: '000000',
+            })],
+          })],
+        })),
+      })
+      return [
+        new Paragraph({
+          style: DUE_DILIGENCE_STYLES.body,
+          alignment: AlignmentType.LEFT,
+          keepNext: true,
+          indent: { firstLine: 0 },
+          spacing: { before: 160, after: 40, line: 320 },
+          children: [new TextRun({
+            text: table.title,
+            font: runFont(profile.bodyFont),
+            size: 28,
+            bold: true,
+            color: '000000',
+          })],
+        }),
+        ...(table.unit ? [new Paragraph({
+          style: DUE_DILIGENCE_STYLES.sourceNote,
+          alignment: AlignmentType.RIGHT,
+          keepNext: true,
+          spacing: { before: 0, after: 60, line: 260 },
+          children: [new TextRun({
+            text: `单位：${table.unit}`,
+            font: runFont(profile.bodyFont),
+            size: 21,
+            color: '000000',
+          })],
+        })] : []),
+        new Table({
+          width: { size: width, type: WidthType.DXA },
+          columnWidths,
+          borders: tableBorders,
+          rows: [
+            row(table.columns, true),
+            ...table.rows.map((values) => row(values)),
+          ],
+        }),
+        new Paragraph({ spacing: { before: 0, after: 80 } }),
+      ]
+    }
 
     contentChildren.push(
       dueHeading('执行摘要', 1, false, false),
       dueBody(input.content.executiveSummary),
-      dueSourceNote(generatedDateLabel(input.sourceCutoffDate)),
     )
 
     DUE_DILIGENCE_OUTLINE.forEach((group, groupIndex) => {
@@ -1168,16 +1251,19 @@ export async function generateBusinessDocx(input: {
         if (!currentSection) return
         contentChildren.push(dueHeading(`${groupIndex + 1}.${moduleIndex + 1} ${moduleTitle}`, 2))
         if (group.title === '投资概要' && moduleTitle === '投资概要') {
-          contentChildren.push(
-            overviewTable,
-            dueSourceNote('资料基础：项目档案、项目资料及联网公开信息；来源明细保存在系统审计记录中。'),
-          )
+          contentChildren.push(dueBody(currentSection.summary, {
+            keepNext: true,
+          }))
+          contentChildren.push(overviewTable)
+        } else {
+          contentChildren.push(dueBody(currentSection.summary, {
+            keepNext: Boolean(currentSection.findings.length || currentSection.tables?.length),
+          }))
         }
-        contentChildren.push(dueBody(currentSection.summary, {
-          bold: true,
-          keepNext: currentSection.findings.length > 0,
-        }))
         currentSection.findings.forEach((finding, findingIndex) => {
+          const prefix = currentSection.title === '后续核验事项'
+            ? `（${findingIndex + 1}）`
+            : ''
           contentChildren.push(new Paragraph({
             style: DUE_DILIGENCE_STYLES.body,
             keepNext: findingIndex < currentSection.findings.length - 1,
@@ -1185,20 +1271,16 @@ export async function generateBusinessDocx(input: {
             alignment: AlignmentType.JUSTIFIED,
             children: [
               new TextRun({
-                text: `【${finding.status}】`,
-                bold: true,
-                color: '000000',
-                size: 28,
-                font: runFont(profile.bodyFont),
-              }),
-              new TextRun({
-                text: finding.text,
+                text: `${prefix}${finding.text}`,
                 color: '000000',
                 size: 28,
                 font: runFont(profile.bodyFont),
               }),
             ],
           }))
+        })
+        currentSection.tables?.forEach((table) => {
+          contentChildren.push(...dueTable(table, currentSection.title))
         })
       })
     })
@@ -1802,7 +1884,21 @@ async function generateCustomTemplatePptx(input: {
     margin: 0,
     fit: 'shrink',
   })
-  cover.addText(`资料截止：${input.sourceCutoffDate}\nAI 辅助初稿，仅限内部审核使用`, {
+  cover.addText(input.content.executiveSummary, {
+    x: width * 0.16,
+    y: height * 0.525,
+    w: width * 0.68,
+    h: height * 0.07,
+    fontFace: font,
+    lang: 'zh-CN',
+    fontSize: Math.max(9, bodySize - 1),
+    color: '444444',
+    align: 'center',
+    valign: 'middle',
+    margin: 0,
+    fit: 'shrink',
+  })
+  cover.addText(`资料截止：${input.sourceCutoffDate}\n项目投资分析`, {
     x: width * 0.25,
     y: height * 0.6,
     w: width * 0.5,

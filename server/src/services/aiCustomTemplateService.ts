@@ -157,7 +157,7 @@ function purposeFor(title: string) {
 function requirementsFor(title: string, sample: string) {
   const requirements = [
     '只使用当前项目字段、用户明确输入和已授权资料，不复制模板中的示例项目事实。',
-    '每项事实或数字保留来源；项目资料不足时先联网补充，公开渠道仍未披露的事项仅标记为待核验。',
+    '每项事实或数字保留来源；以当前项目资料库为主要依据，未覆盖事项仅标记为待核验。',
     '可见标题、章节标题和正文必须针对当前项目重新生成，不复用模板原文。',
   ]
   if (/财务|估值|融资|投资|交易|回报/.test(title)) {
@@ -690,14 +690,14 @@ export async function resolveAiCustomTemplateForTask(input: {
       type: 'custom_template_document',
       skillName: AI_TEMPLATE_DRIVEN_SKILL_NAME,
       label: path.basename(row.originalFileName, path.extname(row.originalFileName)).slice(0, 80),
-      description: '复用用户上传模板的版式与结构，为当前项目生成全新标题和正文',
+      description: '复用用户上传模板的版式与结构，为当前项目生成内部投资分析材料',
       outputFormat,
       templateVersion: `${skill.version}+${analysis.analysisVersion}`,
       referencePath: resolvedAsset,
       editableLevel: outputFormat === 'pptx' ? 'core-elements' : 'text-and-structure',
       sections: sectionTitles.length ? sectionTitles : ['正文'],
       requiredParameters: ['projectId', 'sourceCutoffDate', 'customTemplateId'],
-      disclaimer: '本文件由 AI 基于当前项目资料及联网公开信息生成，仅复用上传模板的版式与结构；须经业务负责人审核后方可作为正式材料。',
+      disclaimer: '本报告以当前项目资料库为主要依据，并按关键缺口采用可核验的定向公开补全；结论以文内所列来源和资料截止日为边界。',
       customAnalysis: analysis,
     },
   }

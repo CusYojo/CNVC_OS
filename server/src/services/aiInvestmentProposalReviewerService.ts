@@ -9,10 +9,11 @@ import {
   CURRENT_PROJECT_NO_DATA,
   proposalLeafSections,
   proposalSectionByTitle,
+  type InvestmentProposalBlueprintSection,
   type InvestmentProposalDocumentBlueprint,
 } from './aiInvestmentProposalBlueprintService.js'
 import type { InvestmentProposalEvidencePlan } from './aiInvestmentProposalEvidenceService.js'
-import { isNearDuplicate } from './aiEvidenceQualityService.js'
+import { comparisonKey, isNearDuplicate } from './aiEvidenceQualityService.js'
 
 export type InvestmentProposalReviewIssue = {
   severity: 'error' | 'warning'
@@ -58,6 +59,10 @@ const TEMPLATE_SAMPLE_TERMS = [
 
 const UNSUPPORTED_CERTAINTY = /(?:行业第一|绝对领先|唯一|必然|确保|确定性强|毫无风险|无可替代)/
 const MISSING_ACTION = /(?:需补充|尚待提供|未提供|无法判断|待取得|待访谈|待核验|资料缺口)/
+const INTERNAL_ERROR_TEXT =
+  /(?:HTTP\s*\d{3}|LLM\s*(?:请求|响应|返回|错误|异常|失败|超时|中断)|网关(?:错误|异常|失败)|错误编号|错误码|invalid_request_error|unsupported_value|请求重试\d*失败|模型请求(?:失败|中断|异常))/i
+const EVIDENCE_PROCESS_OR_BOILERPLATE =
+  /(?:证据属性|Q&A\s*分类|页面标题|发布主体|访问日期|页面正文摘录|内容指纹|项目大模型|来源网址|京ICP备|京公网安备|Copyright\s*©|All Rights Reserved|免责声明|使用条款|隐私政策|财经\s+焦点\s+股票)/i
 const RISK_REQUIRED_PARTS = [
   { label: '触发条件', pattern: /(?:触发|若|如|一旦|当|条件)/ },
   { label: '潜在影响', pattern: /(?:影响|导致|造成|可能|风险)/ },
@@ -73,6 +78,10 @@ const DELIVERY_LIMITATION_CODES = new Set([
 
 export function isInvestmentProposalDeliveryLimitation(code: string) {
   return DELIVERY_LIMITATION_CODES.has(code)
+}
+
+export function containsInvestmentProposalInternalErrorText(value: string) {
+  return INTERNAL_ERROR_TEXT.test(value)
 }
 
 function numericTokens(value: string) {
@@ -143,6 +152,20 @@ function reviewFinding(input: {
     issue(issues, { ...location, code: 'EMPTY_FINDING', message: `${section.title}包含空事实项` })
     return
   }
+  if (containsInvestmentProposalInternalErrorText(finding.text)) {
+    issue(issues, {
+      ...location,
+      code: 'INTERNAL_ERROR_TEXT_LEAK',
+      message: `${section.title}包含仅供系统内部记录的技术错误信息`,
+    })
+  }
+  if (EVIDENCE_PROCESS_OR_BOILERPLATE.test(finding.text)) {
+    issue(issues, {
+      ...location,
+      code: 'EVIDENCE_PROCESS_TEXT_LEAK',
+      message: `${section.title}包含网页导航、站点页脚或内部取证过程文字`,
+    })
+  }
   if (!STATUS_VALUES.has(finding.status)) {
     issue(issues, { ...location, code: 'INVALID_STATUS', message: `${section.title}包含非法证据状态` })
   }
@@ -169,7 +192,7 @@ function reviewFinding(input: {
     issue(issues, {
       ...location,
       code: 'PUBLIC_WEB_REQUIRES_VERIFICATION',
-      message: `${section.title}仅由联网公开信息支持，证据状态必须为“待核验”`,
+      message: `${section.title}仅由资料库中的公开线索支持，证据状态必须为“待核验”`,
     })
   }
   if (
@@ -239,13 +262,70 @@ function reviewTable(input: {
   table: BusinessTable
   section: BusinessSection
   sectionId: string
+  tableKind?: InvestmentProposalBlueprintSection['tableKind']
   tableIndex: number
   sources: EvidenceSource[]
   allowedSourceIndexes?: ReadonlySet<number>
   issues: InvestmentProposalReviewIssue[]
 }) {
-  const { table, section, sectionId, tableIndex, sources, allowedSourceIndexes, issues } = input
+  const {
+    table,
+    section,
+    sectionId,
+    tableKind,
+    tableIndex,
+    sources,
+    allowedSourceIndexes,
+    issues,
+  } = input
   const location = { sectionId, tableIndex }
+  const headerText = table.columns.join(' ')
+  const requiredHeaderGroups: Partial<Record<
+    NonNullable<InvestmentProposalBlueprintSection['tableKind']>,
+    RegExp[]
+  >> = {
+    equity_structure: [/股东|股东姓名|股东名称/, /持股比例|股权比例|比例/],
+    financial_summary: [/期间|年度|年份|报告期|科目/, /收入|营收|利润|现金流|成本|毛利|资产|负债/],
+    financing_history: [/时间|日期|轮次/, /金额|估值|投资方|投资机构|工具/],
+    transaction_plan: [
+      /投资形式|投资方式|交易方式|增资|老股/,
+      /金额|估值|股比|持股比例/,
+      /投前|投后|资金用途|交割/,
+    ],
+    forecast_return: [/年度|年份|期间|A\/E/i, /收入|营收|利润|退出|回报|IRR|MOIC|估值|倍数/i],
+    comparable_valuation: [/公司|企业|标的|可比/, /估值|市值|PE|PS|EV|倍数/i],
+  }
+  if (
+    tableKind
+    && requiredHeaderGroups[tableKind]?.some((pattern) => !pattern.test(headerText))
+  ) {
+    issue(issues, {
+      ...location,
+      code: 'TABLE_SCHEMA_MISMATCH',
+      message: `${section.title}表头不符合“${tableKind}”结构化数据槽位`,
+    })
+  }
+  if (tableKind === 'equity_structure') {
+    const ratioColumnIndex = table.columns.findIndex((column) =>
+      /持股比例|股权比例|比例/.test(column))
+    if (
+      ratioColumnIndex < 0
+      || table.rows.some((row) => !/^\s*\d+(?:\.\d+)?%\s*$/.test(row[ratioColumnIndex] ?? ''))
+    ) {
+      issue(issues, {
+        ...location,
+        code: 'EQUITY_RATIO_REQUIRED',
+        message: `${section.title}股权表必须逐行提供证据支持的明确持股比例`,
+      })
+    }
+  }
+  if (EVIDENCE_PROCESS_OR_BOILERPLATE.test([table.title, headerText, ...table.rows.flat()].join(' '))) {
+    issue(issues, {
+      ...location,
+      code: 'TABLE_EVIDENCE_PROCESS_TEXT_LEAK',
+      message: `${section.title}表格包含网页导航、站点页脚或内部取证过程文字`,
+    })
+  }
   if (table.columns.length < 2 || table.columns.length > 8) {
     issue(issues, { ...location, code: 'INVALID_TABLE_COLUMNS', message: `${section.title}表格列数必须为 2–8` })
   }
@@ -268,7 +348,7 @@ function reviewTable(input: {
     issue(issues, {
       ...location,
       code: 'PUBLIC_WEB_TABLE_REQUIRES_VERIFICATION',
-      message: `${section.title}表格仅由联网公开信息支持，证据状态必须为“待核验”`,
+      message: `${section.title}表格仅由资料库中的公开线索支持，证据状态必须为“待核验”`,
     })
   }
   if (allowedSourceIndexes && validIndexes.some((index) => !allowedSourceIndexes.has(index))) {
@@ -280,6 +360,24 @@ function reviewTable(input: {
   }
   const support = normalizeNumericText(citedText(validIndexes, sources))
   const tableText = [...table.columns, ...table.rows.flat()].join(' ')
+  const supportKey = comparisonKey(citedText(validIndexes, sources))
+  const unsupportedCells = table.rows
+    .flat()
+    .map((cell) => cell.trim())
+    .filter((cell) => {
+      const key = comparisonKey(cell)
+      return key.length >= 2
+        && key.length <= 40
+        && !/^(?:无|未知|未披露|未透露|待核验|不适用|N\/?A)$/i.test(cell)
+        && !supportKey.includes(key)
+    })
+  if (validIndexes.length && unsupportedCells.length) {
+    issue(issues, {
+      ...location,
+      code: 'TABLE_CELL_UNSUPPORTED',
+      message: `${section.title}表格存在未在引用证据中逐字出现的单元格：${unsupportedCells.slice(0, 3).join('、')}`,
+    })
+  }
   numericTokens(tableText).forEach((token) => {
     if (!support.includes(normalizeNumericText(token))) {
       issue(issues, {
@@ -326,6 +424,12 @@ export function reviewInvestmentProposalContent(input: {
   if (!content.title.includes('提案') || !(content.title.includes(companyName || '') || content.title.includes(projectName))) {
     issue(issues, { code: 'INVALID_TITLE', message: '主标题未按目标公司投资提案格式生成' })
   }
+  if (containsInvestmentProposalInternalErrorText(content.executiveSummary)) {
+    issue(issues, {
+      code: 'INTERNAL_ERROR_TEXT_LEAK',
+      message: '执行摘要包含仅供系统内部记录的技术错误信息',
+    })
+  }
   const projectIdentity = `${projectName} ${companyName ?? ''}`
   const evidenceBySection = new Map(evidencePlan.sections.map((section) => [
     section.sectionId,
@@ -358,6 +462,13 @@ export function reviewInvestmentProposalContent(input: {
       }
       return
     }
+    if (containsInvestmentProposalInternalErrorText(sectionValue.summary)) {
+      issue(issues, {
+        sectionId: definition.id,
+        code: 'INTERNAL_ERROR_TEXT_LEAK',
+        message: `章节“${definition.title}”摘要包含仅供系统内部记录的技术错误信息`,
+      })
+    }
     if (!sectionValue.findings.length) {
       issue(issues, {
         sectionId: definition.id,
@@ -371,7 +482,7 @@ export function reviewInvestmentProposalContent(input: {
         severity: 'warning',
         sectionId: definition.id,
         code: 'MISSING_EVIDENCE_RESEARCH_REQUIRED',
-        message: `章节“${definition.title}”既没有项目证据，也没有联网检索记录；受限初稿中保留资料缺口并提示补充原始资料`,
+        message: `章节“${definition.title}”没有项目资料库证据；受限初稿中保留资料缺口并提示补充原始资料`,
       })
     } else if (sectionValue.findings.every((finding) => finding.status === '资料缺口')) {
       issue(issues, {
@@ -380,9 +491,12 @@ export function reviewInvestmentProposalContent(input: {
         severity: sectionIds ? 'error' : 'warning',
         sectionId: definition.id,
         code: 'EVIDENCE_AVAILABLE_BUT_MISSING',
-        message: `章节“${definition.title}”已有项目或联网证据，但未形成可安全引用的结论；受限初稿中保留资料缺口`,
+        message: `章节“${definition.title}”已有项目资料，但未形成可安全引用的结论；受限初稿中保留资料缺口`,
       })
     }
+    const primaryConclusionFindingIndex = definition.analysisKind === 'conclusion'
+      ? sectionValue.findings.findIndex((finding) => finding.status !== '资料缺口')
+      : -1
     sectionValue.findings.forEach((finding, findingIndex) => {
       reviewFinding({
         finding,
@@ -409,9 +523,11 @@ export function reviewInvestmentProposalContent(input: {
       }
       if (
         definition.analysisKind === 'conclusion'
+        && findingIndex === primaryConclusionFindingIndex
         && finding.status !== '资料缺口'
         && (
-          !/(?:建议|推进|暂停|重新评估)/.test(finding.text)
+          !/(?:进入初筛|继续跟踪|申请立项|启动尽调|提请上会|提交投决|暂缓推进|归档)/.test(finding.text)
+          || !/(?:建议|推进|暂停|重新评估|初筛|跟踪|立项|尽调|上会|投决|归档)/.test(finding.text)
           || !/(?:在.+后|完成|落实|经.+确认|若|如|前提|条件)/.test(finding.text)
         )
       ) {
@@ -419,7 +535,7 @@ export function reviewInvestmentProposalContent(input: {
           sectionId: definition.id,
           findingIndex,
           code: 'CONDITIONAL_CONCLUSION_REQUIRED',
-          message: '结论必须包含建议方向和明确的前置条件',
+          message: '结论必须结合当前项目阶段给出一个推进、暂缓或归档主建议，并包含明确的前置条件、下一步动作和 OA 流转边界',
         })
       }
       if (isNearDuplicate(finding.text, priorFindings, 0.86)) {
@@ -438,6 +554,7 @@ export function reviewInvestmentProposalContent(input: {
       table,
       section: sectionValue,
       sectionId: definition.id,
+      tableKind: definition.tableKind,
       tableIndex,
       sources,
       allowedSourceIndexes: evidenceBySection.get(definition.id),

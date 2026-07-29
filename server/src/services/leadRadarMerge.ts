@@ -98,22 +98,48 @@ function normalizedKeyPart(value: unknown): string {
   return typeof value === 'string' ? value.trim().toLocaleLowerCase() : ''
 }
 
-function objectKey(value: unknown, kind: 'source' | 'funding'): string {
-  if (!isPlainObject(value)) return `value:${JSON.stringify(value)}`
+function normalizedSourceUrl(value: unknown): string {
+  const raw = normalizedKeyPart(value)
+  if (!raw) return ''
+  try {
+    const url = new URL(raw)
+    url.hash = ''
+    for (const key of [...url.searchParams.keys()]) {
+      if (/^(?:utm_|from$|source$|ref$|refer$|share_|scene$|clicktime$|enterid$)/i.test(key)) {
+        url.searchParams.delete(key)
+      }
+    }
+    url.searchParams.sort()
+    return url.toString().replace(/\/$/, '').toLocaleLowerCase()
+  } catch {
+    return raw.replace(/[?#].*$/, '').replace(/\/$/, '')
+  }
+}
+
+function normalizedSourceTitle(value: unknown): string {
+  const title = normalizedKeyPart(value)
+    .replace(/^(?:36氪|硬氪)?(?:首发|前线)?\s*[|｜丨:：-]\s*/i, '')
+    .replace(/[\s“”"'「」『』|｜丨:：,，。！？!?·\-—_]/g, '')
+  return ['公开信息来源', '来源证据', '雷达原文'].includes(title) ? '' : title
+}
+
+function objectKeys(value: unknown, kind: 'source' | 'funding'): string[] {
+  if (!isPlainObject(value)) return [`value:${JSON.stringify(value)}`]
   if (kind === 'source') {
-    const url = normalizedKeyPart(value.url || value.sourceUrl || value.link)
-    if (url) return `url:${url}`
-    const title = normalizedKeyPart(value.title || value.name)
-    const publisher = normalizedKeyPart(value.publisher || value.category)
-    if (title) return `title:${title}|${publisher}`
+    const title = normalizedSourceTitle(value.title || value.name)
+    const url = normalizedSourceUrl(value.url || value.sourceUrl || value.link)
+    return [
+      title ? `title:${title}` : '',
+      url ? `url:${url}` : '',
+    ].filter(Boolean)
   } else {
     const round = normalizedKeyPart(value.round)
     const date = normalizedKeyPart(value.date)
-    if (round) return `round:${round}|${date}`
+    if (round) return [`round:${round}|${date}`]
     const sourceUrl = normalizedKeyPart(value.sourceUrl || value.url)
-    if (sourceUrl) return `url:${sourceUrl}`
+    if (sourceUrl) return [`url:${sourceUrl}`]
   }
-  return `object:${JSON.stringify(value)}`
+  return [`object:${JSON.stringify(value)}`]
 }
 
 function mergeObjectArray(existing: unknown, incoming: unknown, kind: 'source' | 'funding'): unknown[] {
@@ -121,16 +147,19 @@ function mergeObjectArray(existing: unknown, incoming: unknown, kind: 'source' |
   const newItems = Array.isArray(incoming) ? incoming.filter(isMeaningfulRadarValue) : []
   const merged = [...oldItems]
   const positions = new Map<string, number>()
-  merged.forEach((item, index) => positions.set(objectKey(item, kind), index))
+  merged.forEach((item, index) => {
+    for (const key of objectKeys(item, kind)) positions.set(key, index)
+  })
 
   for (const item of newItems) {
-    const key = objectKey(item, kind)
-    const index = positions.get(key)
+    const keys = objectKeys(item, kind)
+    const index = keys.map((key) => positions.get(key)).find((position) => position !== undefined)
     if (index === undefined) {
-      positions.set(key, merged.length)
+      for (const key of keys) positions.set(key, merged.length)
       merged.push(item)
     } else {
       merged[index] = mergeNonEmptyValue(merged[index], item)
+      for (const key of objectKeys(merged[index], kind)) positions.set(key, index)
     }
   }
   return merged
