@@ -892,7 +892,15 @@ def extract_lab(text: str, fallback_school: str = "") -> str:
     )
     hits = []
     for pattern in patterns:
-        hits.extend(match.group(1) for match in re.finditer(pattern, text, flags=re.IGNORECASE))
+        for match in re.finditer(pattern, text, flags=re.IGNORECASE):
+            candidate = clean_text(match.group(1))
+            # 过滤被贪婪匹配吃入的谓语片段（例如"引导广大科研团队主动走出实验室"）
+            if VAGUE_PROJECT_START_RE.search(candidate) or PROJECT_PREDICATE_RE.search(candidate):
+                continue
+            if re.search(r"[，。！？；;：:\n]", candidate):
+                continue
+            if candidate:
+                hits.append(candidate)
     if fallback_school and not hits:
         hits.append(fallback_school)
     return "；".join(unique_keep_order(hits, 4)) or "未披露/待核实"
@@ -930,7 +938,7 @@ GENERIC_PROJECT_SUBJECTS = {
 }
 VAGUE_PROJECT_START_RE = re.compile(
     r"^(他|她|其|该|这|此|其中|上述|相关|目前|同时|此外|另|据|对于|关于|要求|需要|应当|必须|"
-    r"支持|推动|加强|开展|主动|曾|曾经|担任|联创|联合创始人?|成立|创始人|科研人员|参赛|"
+    r"支持|推动|加强|开展|主动|引导|曾|曾经|担任|联创|联合创始人?|成立|创始人|科研人员|参赛|"
     r"本次|全体|让更多|并|基于|后两年|共享|未来|"
     r"作为|为|以|从|在|将|把|被|联合|面对|通过|围绕|聚焦|一是|二是|三是|四是)"
 )
@@ -944,7 +952,7 @@ VAGUE_PROJECT_BODY_RE = re.compile(
 )
 VAGUE_PROJECT_END_RE = re.compile(r"(材料|记录|信息|情况|内容|要求|工作|方面|变化|问题|任务|路径|策略|证明|累计|责编|来源|再)$")
 PROJECT_PREDICATE_RE = re.compile(
-    r"(要求|适应|指出|表示|强调|认为|提出|推动|支持|开展|实现|完成|获得|发布|宣布|提供|形成|"
+    r"(要求|适应|指出|表示|强调|认为|提出|推动|支持|引导|开展|实现|完成|获得|发布|宣布|提供|形成|"
     r"建立|构建|促进|提升|加强|记录|证明|担任|任职|毕业|来自|师从|进入|共享|梳理|发表|结合|"
     r"参与|经历|合作者|申请|接受)"
 )
