@@ -53,10 +53,10 @@ const GENERIC_SUBJECTS = new Set([
   '前瞻理论研究与创新平台',
 ])
 
-const VAGUE_START_RE = /^(?:他|她|其|该|这|此|其中|上述|相关|目前|未来|同时|此外|另|据|对于|关于|要求|需要|应当|必须|支持|推动|加强|开展|主动|曾|曾经|担任|联创|联合创始人?|成立|投资|创始人|科研人员|参赛|本次|全体|让更多|并|基于|后两年|共享|作为|为|以|从|在|将|把|被|联合|面对|通过|围绕|聚焦|一是|二是|三是|四是)/
-const VAGUE_BODY_RE = /(?:岗位记录|关键证明|证明材料|要求主动|主动适应|为核心业务|核心业务的|系统梳理|以及团队|进入导师课题组|共享两个学院|获颁|获评|荣获|获奖|荣誉|Award|文章来源|论文合作者|合作者为|受试者|研究参与者|筛选期|完全开放|依托高校|顺利通过|key observation|by the paper|等信息|等材料|等证明|等方面|等工作|带来的变化)/i
+const VAGUE_START_RE = /^(?:他|她|其|该|这|此|其中|上述|相关|目前|未来|同时|此外|另|据|对于|关于|要求|需要|应当|必须|支持|推动|加强|开展|引导|主动|曾|曾经|担任|联创|联合创始人?|成立|投资|创始人|科研人员|参赛|本次|全体|让更多|并|基于|后两年|共享|作为|为|以|从|在|将|把|被|联合|面对|通过|围绕|聚焦|一是|二是|三是|四是)/
+const VAGUE_BODY_RE = /(?:岗位记录|关键证明|证明材料|要求主动|主动适应|走出实验室|为核心业务|核心业务的|系统梳理|以及团队|进入导师课题组|共享两个学院|获颁|获评|荣获|获奖|荣誉|Award|文章来源|论文合作者|合作者为|受试者|研究参与者|筛选期|完全开放|依托高校|顺利通过|key observation|by the paper|等信息|等材料|等证明|等方面|等工作|带来的变化)/i
 const VAGUE_END_RE = /(?:材料|记录|信息|情况|内容|要求|工作|方面|变化|问题|任务|路径|策略|证明|累计|责编|来源|再)$/
-const PREDICATE_RE = /(?:要求|适应|指出|表示|强调|认为|提出|推动|支持|开展|实现|完成|获得|发布|宣布|提供|形成|建立|构建|促进|提升|加强|记录|证明|担任|任职|毕业|来自|师从|进入|共享|梳理|发表|结合|参与|经历|合作者|申请|接受)/
+const PREDICATE_RE = /(?:要求|适应|指出|表示|强调|认为|提出|推动|支持|开展|引导|走出|实现|完成|获得|发布|宣布|提供|形成|建立|构建|促进|提升|加强|记录|证明|担任|任职|毕业|来自|师从|进入|共享|梳理|发表|结合|参与|经历|合作者|申请|接受)/
 const NUMBERED_TECH_FRAGMENT_RE = /^[\u4e00-\u9fffA-Za-z]{1,8}[-—–][\u4e00-\u9fffA-Za-z]{1,8}\d{1,2}$/
 const GENERIC_INSTITUTION_TECH_RE = /^(?:清华|北大|北航|上交大|复旦|浙大|中科大|哈工大)(?:系)?(?:机器人|芯片|人工智能|大模型)(?:团队|项目)?$/
 const SUBJECT_MARKER_RE = /(?:股份有限公司|有限责任公司|有限公司|公司|企业|项目|团队|实验室|研究院|研究所|研究中心|工程中心|课题组|创新群体|创新联合体|中试基地|产业基地|创新平台|技术平台|研发平台|试验平台|装置|系统|产品|计划)$/
@@ -105,12 +105,18 @@ export function isLowValueRadarContent(...values: unknown[]): boolean {
 export function isNonInvestableRadarContent(input: {
   hasCompanySubject?: boolean
   hasInvestmentEvidence?: boolean
+  subjectName?: unknown
   values: unknown[]
 }): boolean {
   if (input.hasInvestmentEvidence) return false
   const text = input.values.map((value) => String(value ?? '').slice(0, 2400)).join('\n')
   if (LOW_VALUE_RADAR_RE.test(text)) return true
   if (input.hasCompanySubject) return false
+  // 高校新闻中的“成果转化、签约、产业化”等词经常只是大会主题或倡议，
+  // 不能单独构成投资线索。没有公司和融资事实时，必须先能识别出一个
+  // 以项目/团队/实验室/平台/产品等结尾的具体标的，再判断商业化信号。
+  const subjectName = cleanSubjectName(input.subjectName)
+  if (!isSpecificLeadSubjectName(subjectName) || !SUBJECT_MARKER_RE.test(subjectName)) return true
   return !COMMERCIAL_RADAR_RE.test(text)
 }
 

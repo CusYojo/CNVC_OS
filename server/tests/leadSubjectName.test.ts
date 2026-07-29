@@ -21,6 +21,7 @@ test('rejects article fragments and editorial labels as lead subjects', () => {
     '会赚钱',
     '保险科技',
     '前瞻理论研究与创新平台',
+    '引导广大科研团队主动走出实验室',
   ]) {
     assert.equal(isSpecificLeadSubjectName(value), false, value)
   }
@@ -132,6 +133,7 @@ test('filters non-investable academic and participant recruitment content', () =
     values: ['研究成果发表于 Nature Communications'],
   }), true)
   assert.equal(isNonInvestableRadarContent({
+    subjectName: '复旦大学光电研究院产业技术中试基地',
     values: ['复旦大学光电研究院产业技术中试基地落地签约'],
   }), false)
   assert.equal(isNonInvestableRadarContent({
@@ -140,4 +142,15 @@ test('filters non-investable academic and participant recruitment content', () =
   assert.equal(isNonInvestableRadarContent({
     values: ['2026年，为什么资本更青睐“会赚钱”的AI应用？'],
   }), true)
+  assert.equal(isNonInvestableRadarContent({
+    subjectName: '引导广大科研团队主动走出实验室',
+    values: [
+      '上海交大-紫竹高新区概念验证协同创新大会',
+      '大会集中开展项目中期评价、项目签约和概念验证中心揭牌仪式，推进科技成果转化。',
+    ],
+  }), true)
+  assert.equal(isNonInvestableRadarContent({
+    subjectName: '上海交通大学智能材料中试基地',
+    values: ['上海交通大学智能材料中试基地完成中试并与产业客户签约。'],
+  }), false)
 })

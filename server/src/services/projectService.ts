@@ -1,8 +1,24 @@
 import { and, desc, eq, ilike, or, sql } from 'drizzle-orm'
+import { readdir, rm } from 'node:fs/promises'
+import path from 'node:path'
 import { db } from '../db/client.js'
 import { projects, projectFiles, auditLogs, knowledgeChunks, fileChunks } from '../db/schema.js'
 
 const STAGES = ['线索', '初筛', '立项', '尽调', '上会', '投决', '投后', '退出'] as const
+const ARTIFACT_ROOT = path.resolve(
+  process.env.AI_ARTIFACT_ROOT || path.join(process.cwd(), 'server', 'ai-artifacts'),
+)
+
+async function deleteProjectArtifactDirectories(projectId: string) {
+  const userDirectories = await readdir(ARTIFACT_ROOT, { withFileTypes: true }).catch(() => [])
+  await Promise.all(userDirectories
+    .filter((entry) => entry.isDirectory())
+    .map(async (entry) => {
+      const projectDirectory = path.resolve(ARTIFACT_ROOT, entry.name, projectId)
+      if (!projectDirectory.startsWith(`${ARTIFACT_ROOT}${path.sep}`)) return
+      await rm(projectDirectory, { recursive: true, force: true })
+    }))
+}
 
 interface ListArgs {
   keyword?: string
@@ -94,6 +110,9 @@ export async function deleteProject(id: string, userId: string) {
   // 删项目(file_chunks/project_files 由 onDelete cascade/set null 处理)
   await db.delete(projects).where(eq(projects.id, id))
   await db.insert(auditLogs).values({ userId, userName: '（系统）', module: '我的专属项目', action: '删除项目(连带知识库)', target: proj.name })
+  await deleteProjectArtifactDirectories(id).catch((error) => {
+    console.warn(`[projects] 清理项目产物目录失败：${id}`, error)
+  })
   return proj
 }
 

@@ -358,7 +358,7 @@ metaRouter.post('/leads/sync-radar', async (req: AuthedRequest, res, next) => {
       const fundingRound = meaningfulRadarText(prof.project_round)
       const financingAmount = meaningfulRadarText(prof.financing_amount)
       const latestValuation = meaningfulRadarText(prof.latest_valuation)
-      const hasExplicitCompany = Boolean(explicitCompanyName)
+      const hasExplicitCompany = isSpecificLeadSubjectName(explicitCompanyName)
       const hasInvestmentEvidence = hasRealRound
         || Boolean(financingAmount || latestValuation)
         || REAL_INVESTMENT_EVENT.test(`${it.title || ''}\n${it.summary || ''}`)
@@ -377,6 +377,7 @@ metaRouter.post('/leads/sync-radar', async (req: AuthedRequest, res, next) => {
       if (!isArxiv && isNonInvestableRadarContent({
         hasCompanySubject: hasExplicitCompany,
         hasInvestmentEvidence,
+        subjectName: name,
         values: [
           it.title,
           it.summary,

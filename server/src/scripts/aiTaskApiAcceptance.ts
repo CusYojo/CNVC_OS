@@ -4,6 +4,11 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 type Check = { name: string; passed: boolean; detail: string }
+type AcceptanceCleanupState = {
+  adminToken?: string
+  project?: { id: string; name: string }
+  conversationId?: string
+}
 type Task = {
   id: string
   status: 'pending' | 'running' | 'succeeded' | 'failed' | 'cancelled'
@@ -122,6 +127,64 @@ async function login(email: string) {
   return data.token
 }
 
+async function cleanupAcceptanceProject(
+  token: string,
+  project: { id: string; name: string },
+) {
+  const response = await fetch(apiUrl(`/projects/${project.id}`), {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  const raw = await response.text()
+  if (response.status !== 200 && response.status !== 404) {
+    throw new Error(`清理验收项目 ${project.name} 失败：HTTP ${response.status} ${raw.slice(0, 500)}`)
+  }
+  process.stderr.write(
+    response.status === 404
+      ? `验收项目已不存在，无需清理：${project.name}\n`
+      : `已自动清理验收项目：${project.name}\n`,
+  )
+}
+
+async function cleanupAcceptanceConversation(token: string, conversationId: string) {
+  const response = await fetch(apiUrl(`/conversations/${conversationId}`), {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  const raw = await response.text()
+  if (response.status !== 200 && response.status !== 404) {
+    throw new Error(`清理验收会话 ${conversationId} 失败：HTTP ${response.status} ${raw.slice(0, 500)}`)
+  }
+  process.stderr.write(
+    response.status === 404
+      ? `验收会话已不存在，无需清理：${conversationId}\n`
+      : `已自动清理验收会话：${conversationId}\n`,
+  )
+}
+
+async function cleanupAcceptanceResources(state: AcceptanceCleanupState) {
+  if (!state.adminToken) return
+  const cleanupErrors: unknown[] = []
+  if (state.conversationId) {
+    try {
+      await cleanupAcceptanceConversation(state.adminToken, state.conversationId)
+    } catch (error) {
+      cleanupErrors.push(error)
+    }
+  }
+  if (state.project) {
+    try {
+      await cleanupAcceptanceProject(state.adminToken, state.project)
+    } catch (error) {
+      cleanupErrors.push(error)
+    }
+  }
+  if (cleanupErrors.length > 0) {
+    process.exitCode = 1
+    cleanupErrors.forEach((error) => console.error(error))
+  }
+}
+
 async function pollTask(token: string, taskId: string, timeoutMs = 30_000): Promise<Task> {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
@@ -132,11 +195,12 @@ async function pollTask(token: string, taskId: string, timeoutMs = 30_000): Prom
   throw new Error(`任务 ${taskId} 在 ${timeoutMs}ms 内未进入终态`)
 }
 
-async function main() {
+async function main(cleanupState: AcceptanceCleanupState) {
   const anonymousTaskTypes = await fetch(apiUrl('/ai/task-types'))
   assert('未登录用户不能读取任务配置', anonymousTaskTypes.status === 401, `HTTP ${anonymousTaskTypes.status}`)
 
   const adminToken = await login('admin@cybernaut.com')
+  cleanupState.adminToken = adminToken
   const userToken = await login('lin@cybernaut.com')
   const suffix = randomUUID().slice(0, 8)
   const cutoff = new Date().toISOString().slice(0, 10)
@@ -196,6 +260,7 @@ async function main() {
       tags: ['自动验收'],
     }),
   }, adminToken, 201)
+  cleanupState.project = project
   assert('API 创建隔离验收项目', Boolean(project.id), project.id)
 
   const { data: conversation } = await request<{ id: string }>('/conversations', {
@@ -207,6 +272,7 @@ async function main() {
       projectName: project.name,
     }),
   }, adminToken, 201)
+  cleanupState.conversationId = conversation.id
   assert('API 创建项目会话', Boolean(conversation.id), conversation.id)
 
   if (acceptanceScope !== 'compliance') {
@@ -628,10 +694,20 @@ async function main() {
   )
   assert('交付物中心按项目返回正式产物', artifacts.list.length >= 6, `${artifacts.list.length} 个`)
 
-  await outputReport('全量验收必须对隔离测试数据库运行；会创建脱敏项目、会话和任务记录。')
+  await outputReport('全量验收必须对隔离测试数据库运行；脱敏项目、会话和任务记录会在验收结束时自动清理。')
 }
 
-main().catch((error) => {
+const cleanupState: AcceptanceCleanupState = {}
+
+async function run() {
+  try {
+    await main(cleanupState)
+  } finally {
+    await cleanupAcceptanceResources(cleanupState)
+  }
+}
+
+run().catch((error) => {
   console.error(error)
   process.exitCode = 1
 })
