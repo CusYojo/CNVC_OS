@@ -11,7 +11,7 @@ from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import parse_qs, quote_plus, urljoin, urlparse
 from zoneinfo import ZoneInfo
 
@@ -466,7 +466,8 @@ SOURCE_DEFAULTS = (
         "type": "rss",
         "url": "https://feeds.pedaily.cn/n/quicknews",
         "frequency": "每小时",
-        "enabled": True,
+        "enabled": False,
+        "note": "2026-07-29 起源站 TLS 握手失败，暂时停用，避免每轮产生确定性错误。",
     },
     {
         "key": "36kr_feed",
@@ -496,7 +497,8 @@ SOURCE_DEFAULTS = (
         "type": "rss",
         "url": "https://www.lieyunwang.com/feed",
         "frequency": "每小时",
-        "enabled": True,
+        "enabled": False,
+        "note": "2026-07-29 起源站 TLS 握手失败，暂时停用，待源站恢复后重新启用。",
     },
     {
         "key": "producthunt",
@@ -514,7 +516,8 @@ SOURCE_DEFAULTS = (
         "type": "rss",
         "url": "https://www.producthunt.com/categories/developer-tools/feed",
         "frequency": "每天",
-        "enabled": True,
+        "enabled": False,
+        "note": "Product Hunt 已移除分类 RSS（当前返回 404），保留官方主 Feed。",
     },
     {
         "key": "cnki_reference",
@@ -665,6 +668,65 @@ def source_key(item: dict) -> str:
         if value:
             return value
     return ""
+
+
+def radar_source_key(item: dict) -> str:
+    key = source_key(item)
+    source = clean_text(str(item.get("source", ""))) or "unknown"
+    return f"{source}:{key}" if key else ""
+
+
+def parse_candidate_datetime(value: Any) -> datetime | None:
+    text = clean_text(str(value or ""))
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        parsed = None
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+            try:
+                parsed = datetime.strptime(text, fmt)
+                break
+            except ValueError:
+                continue
+    if parsed is None:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=CHINA_TZ)
+    return parsed.astimezone(timezone.utc)
+
+
+def candidate_cursor_key(item: dict) -> tuple[int, str]:
+    parsed = None
+    for field in ("collected_at", "published_at", "updated_at"):
+        parsed = parse_candidate_datetime(item.get(field))
+        if parsed is not None:
+            break
+    micros = int(parsed.timestamp() * 1_000_000) if parsed is not None else 0
+    identity = radar_source_key(item) or json.dumps(item, ensure_ascii=False, sort_keys=True)
+    digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()
+    return micros, digest
+
+
+def encode_candidate_cursor(key: tuple[int, str]) -> str:
+    payload = json.dumps({"v": 1, "t": key[0], "k": key[1]}, separators=(",", ":"))
+    return base64.urlsafe_b64encode(payload.encode("utf-8")).decode("ascii").rstrip("=")
+
+
+def decode_candidate_cursor(value: str) -> tuple[int, str]:
+    try:
+        padded = value + "=" * (-len(value) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(padded).decode("utf-8"))
+        if payload.get("v") != 1:
+            raise ValueError("unsupported cursor version")
+        timestamp = int(payload["t"])
+        digest = str(payload["k"])
+        if timestamp < 0 or not re.fullmatch(r"[0-9a-f]{64}", digest):
+            raise ValueError("invalid cursor fields")
+        return timestamp, digest
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise ValueError("invalid candidate cursor") from exc
 
 
 def entry_datetime(entry: dict, field: str) -> str:
@@ -1965,6 +2027,7 @@ def default_auto_status() -> dict:
         "next_run_at": "",
         "last_result": None,
         "last_error": "",
+        "consecutive_error_runs": 0,
         "run_count": 0,
     }
 
@@ -2001,6 +2064,7 @@ def default_wechat_daily_status() -> dict:
         "next_run_at": "",
         "last_result": None,
         "last_error": "",
+        "consecutive_error_runs": 0,
         "run_count": 0,
     }
 
@@ -2062,6 +2126,62 @@ def gsdata_credentials_configured() -> bool:
         return True
     except (OSError, ValueError, RuntimeError, json.JSONDecodeError):
         return False
+
+
+GSDATA_HEALTH_CACHE_SECONDS = 5 * 60
+gsdata_health_cache: dict[str, Any] = {"checked_monotonic": 0.0, "result": None}
+
+
+def probe_gsdata_health(force: bool = False) -> dict[str, Any]:
+    now = time.monotonic()
+    cached = gsdata_health_cache.get("result")
+    if (
+        not force
+        and isinstance(cached, dict)
+        and now - float(gsdata_health_cache.get("checked_monotonic", 0.0)) < GSDATA_HEALTH_CACHE_SECONDS
+    ):
+        return dict(cached)
+    if not gsdata_credentials_configured():
+        result = {"ok": False, "status": "not_configured", "error": "GSData 凭据未配置"}
+    else:
+        accounts = load_wechat_api_accounts()
+        if not accounts:
+            result = {"ok": False, "status": "accounts_missing", "error": "公众号账号清单为空"}
+        else:
+            start, end = date_range_for_wechat_api(yesterday_china_date(), 1)
+            params = {
+                "wx_name": accounts[0]["wx_name"],
+                "posttime_start": start,
+                "posttime_end": end,
+                "order": "desc",
+                "sort": "posttime",
+                "page": "1",
+                "limit": "1",
+            }
+            token = gsdata_access_token(params, GSDATA_WECHAT_ROUTER)
+            try:
+                response = httpx.get(
+                    GSDATA_API_URL,
+                    params=params,
+                    headers={"access-token": token},
+                    timeout=8,
+                )
+                response.raise_for_status()
+                payload = response.json()
+                if payload.get("success"):
+                    result = {"ok": True, "status": "authenticated", "error": ""}
+                else:
+                    result = {
+                        "ok": False,
+                        "status": "rejected",
+                        "error": clean_text(str(payload.get("msg") or payload.get("message") or "GSData 返回失败")),
+                    }
+            except Exception as exc:
+                result = {"ok": False, "status": "unreachable", "error": clean_text(str(exc))[:300]}
+    result["checked_at"] = utc_now_iso()
+    gsdata_health_cache["checked_monotonic"] = now
+    gsdata_health_cache["result"] = dict(result)
+    return result
 
 
 def gsdata_access_token(params: dict[str, str], router: str) -> str:
@@ -2988,12 +3108,19 @@ async def run_auto_crawl_once() -> dict:
             "written": result.get("written", 0),
             "worth_attention": result.get("worth_attention", 0),
             "errors": len(result.get("errors", [])),
+            "error_samples": result.get("errors", [])[:20],
+            "source_results": result.get("source_results", []),
         }
         status["run_count"] = int(status.get("run_count", 0)) + 1
-        status["last_error"] = ""
+        error_count = len(result.get("errors", []))
+        status["consecutive_error_runs"] = (
+            int(status.get("consecutive_error_runs", 0)) + 1 if error_count else 0
+        )
+        status["last_error"] = f"{error_count} 个自动采集源失败" if error_count else ""
     except Exception as exc:
         status = read_auto_status()
         status["last_error"] = str(exc)
+        status["consecutive_error_runs"] = int(status.get("consecutive_error_runs", 0)) + 1
     finally:
         auto_crawler_running = False
         status["running"] = False
@@ -3045,12 +3172,18 @@ async def run_wechat_daily_once(req: WechatApiRunRequest | None = None) -> dict:
             "written": result.get("written", 0),
             "worth_attention": result.get("worth_attention", 0),
             "errors": len(result.get("errors", [])),
+            "error_samples": result.get("errors", [])[:20],
         }
         status["run_count"] = int(status.get("run_count", 0)) + 1
-        status["last_error"] = ""
+        error_count = len(result.get("errors", []))
+        status["consecutive_error_runs"] = (
+            int(status.get("consecutive_error_runs", 0)) + 1 if error_count else 0
+        )
+        status["last_error"] = f"{error_count} 个公众号账号采集失败" if error_count else ""
     except Exception as exc:
         status = read_wechat_daily_status()
         status["last_error"] = str(exc)
+        status["consecutive_error_runs"] = int(status.get("consecutive_error_runs", 0)) + 1
     finally:
         wechat_daily_running = False
         status["running"] = False
@@ -3128,15 +3261,26 @@ async def index():
 
 
 @app.get("/api/health")
-async def health():
+async def health(deep: bool = True):
+    configured = gsdata_credentials_configured()
+    gsdata_health = (
+        await asyncio.to_thread(probe_gsdata_health)
+        if deep and configured
+        else {
+            "ok": configured,
+            "status": "configured_not_probed" if configured else "not_configured",
+            "error": "" if configured else "GSData 凭据未配置",
+        }
+    )
     return {
         "status": "ok",
         "name": "project-discovery-radar",
         "data_dir": str(DATA_DIR),
         "accounts_file": str(WECHAT_ACCOUNTS_XLSX),
-        "gsdata_configured": gsdata_credentials_configured(),
+        "gsdata_configured": configured,
+        "gsdata_health": gsdata_health,
         "auto_crawl_enabled": AUTO_CRAWL_ENABLED,
-        "wechat_daily_enabled": WECHAT_DAILY_ENABLED and gsdata_credentials_configured(),
+        "wechat_daily_enabled": WECHAT_DAILY_ENABLED and configured,
     }
 
 
@@ -3242,6 +3386,8 @@ async def candidates(
     attention_only: bool = False,
     min_score: int = Query(default=0, ge=0, le=100),
     limit: int = Query(default=200, ge=1, le=500),
+    sort: Literal["score", "collected"] = "score",
+    cursor: str = "",
 ):
     q_folded = q.casefold().strip()
     rows = []
@@ -3273,7 +3419,29 @@ async def candidates(
             if q_folded not in haystack:
                 continue
         rows.append(item)
-    return {"items": rows[:limit], "total": len(rows)}
+    total = len(rows)
+    if sort == "collected":
+        rows = sorted(rows, key=candidate_cursor_key, reverse=True)
+        if cursor:
+            try:
+                cursor_key = decode_candidate_cursor(cursor)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail="无效的候选记录游标") from exc
+            rows = [item for item in rows if candidate_cursor_key(item) < cursor_key]
+    page = rows[:limit]
+    has_more = len(rows) > limit
+    next_cursor = (
+        encode_candidate_cursor(candidate_cursor_key(page[-1]))
+        if sort == "collected" and has_more and page
+        else ""
+    )
+    return {
+        "items": page,
+        "total": total,
+        "sort": sort,
+        "has_more": has_more,
+        "next_cursor": next_cursor,
+    }
 
 
 @app.get("/api/wechat/sources")

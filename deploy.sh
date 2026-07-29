@@ -27,6 +27,8 @@ FLUE_DIR="${DEPLOY_DIR}/cybernaut-assistant"
 FLUE_STATE_DIR="/var/lib/cybernaut-assistant"
 FLUE_PORT="3584"
 RADAR_SERVICE="cybernaut-radar"
+RADAR_SYNC_SERVICE="cybernaut-radar-sync"
+RADAR_SYNC_TIMER="cybernaut-radar-sync.timer"
 RADAR_DIR="${DEPLOY_DIR}/project-discovery"
 RADAR_STATE_DIR="/var/lib/cybernaut-radar"
 RADAR_VENV="${RADAR_DIR}/.venv"
@@ -247,6 +249,9 @@ RADAR_WECHAT_ACCOUNTS_XLSX=${RADAR_STATE_DIR}/公众号来源.xlsx
 RADAR_BOOTSTRAP_URL=${RADAR_BOOTSTRAP_DEFAULT}
 RADAR_AUTO_CRAWL_ENABLED=true
 RADAR_WECHAT_DAILY_ENABLED=true
+RADAR_SYNC_PAGE_SIZE=50
+RADAR_SYNC_INCREMENTAL_PAGES=4
+RADAR_SYNC_BACKFILL_PAGES=1
 GSDATA_APP_KEY=
 GSDATA_APP_SECRET=
 
@@ -280,6 +285,9 @@ EOF
     ensure_env_value "$ENV_FILE" "RADAR_BOOTSTRAP_URL" "$RADAR_BOOTSTRAP_DEFAULT"
     ensure_env_value "$ENV_FILE" "RADAR_AUTO_CRAWL_ENABLED" "true"
     ensure_env_value "$ENV_FILE" "RADAR_WECHAT_DAILY_ENABLED" "true"
+    ensure_env_value "$ENV_FILE" "RADAR_SYNC_PAGE_SIZE" "50"
+    ensure_env_value "$ENV_FILE" "RADAR_SYNC_INCREMENTAL_PAGES" "4"
+    ensure_env_value "$ENV_FILE" "RADAR_SYNC_BACKFILL_PAGES" "1"
     ensure_env_value "$ENV_FILE" "GSDATA_APP_KEY" ""
     ensure_env_value "$ENV_FILE" "GSDATA_APP_SECRET" ""
     chmod 600 "$ENV_FILE"
@@ -668,6 +676,43 @@ StandardError=append:${LOG_DIR}/server.log
 WantedBy=multi-user.target
 SERVICE_EOF
 
+    # 将 Radar JSONL 中的增量候选自动同步到主数据库。游标状态保存在数据库，
+    # 每轮优先处理最新数据，并持续推进历史回填。
+    local RADAR_SYNC_SERVICE_FILE="/etc/systemd/system/${RADAR_SYNC_SERVICE}.service"
+    cat > "$RADAR_SYNC_SERVICE_FILE" <<RADAR_SYNC_EOF
+[Unit]
+Description=Cybernaut Radar Incremental Sync
+Wants=network-online.target
+After=network-online.target ${RADAR_SERVICE}.service ${API_SERVICE}.service
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=${DEPLOY_DIR}
+EnvironmentFile=${DEPLOY_DIR}/.env
+ExecStart=${node_exec} ${DEPLOY_DIR}/sync_radar.mjs
+TimeoutStartSec=15min
+
+[Install]
+WantedBy=multi-user.target
+RADAR_SYNC_EOF
+
+    local RADAR_SYNC_TIMER_FILE="/etc/systemd/system/${RADAR_SYNC_TIMER}"
+    cat > "$RADAR_SYNC_TIMER_FILE" <<RADAR_SYNC_TIMER_EOF
+[Unit]
+Description=Run Cybernaut Radar Incremental Sync Every 30 Minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=30min
+RandomizedDelaySec=30
+Persistent=true
+Unit=${RADAR_SYNC_SERVICE}.service
+
+[Install]
+WantedBy=timers.target
+RADAR_SYNC_TIMER_EOF
+
     # 当前仓库内的 Flue Agent Runtime（使用生产构建产物，禁止在线上运行 dev server）。
     local FLUE_SERVICE_FILE="/etc/systemd/system/${FLUE_SERVICE}.service"
     cat > "$FLUE_SERVICE_FILE" <<FLUE_EOF
@@ -698,6 +743,7 @@ FLUE_EOF
     systemctl daemon-reload
     systemctl enable "$RADAR_SERVICE"
     systemctl enable "$API_SERVICE"
+    systemctl enable "$RADAR_SYNC_TIMER"
     systemctl enable "$FLUE_SERVICE"
     log "systemd 服务已注册 ✓"
 }
@@ -745,6 +791,9 @@ start_services() {
         exit 1
     }
 
+    log "启动雷达增量同步定时器..."
+    systemctl restart "$RADAR_SYNC_TIMER"
+
     log "重启 Agent Runtime..."
     systemctl restart "$FLUE_SERVICE"
     wait_for_http "Agent Runtime" "http://127.0.0.1:${FLUE_PORT}/health" 30 || {
@@ -765,6 +814,10 @@ show_status() {
     echo ""
     echo "--- 情报雷达 ---"
     systemctl status "$RADAR_SERVICE" --no-pager -l 2>/dev/null | head -5 || echo "服务未找到"
+
+    echo ""
+    echo "--- 雷达增量同步定时器 ---"
+    systemctl status "$RADAR_SYNC_TIMER" --no-pager -l 2>/dev/null | head -7 || echo "定时器未找到"
 
     echo ""
     echo "--- Agent Runtime ---"
@@ -810,6 +863,9 @@ show_logs() {
     else
         journalctl -u "$RADAR_SERVICE" -n 30 --no-pager 2>/dev/null || echo "情报雷达日志不存在"
     fi
+    echo ""
+    echo "=== 雷达增量同步日志 ==="
+    journalctl -u "$RADAR_SYNC_SERVICE" -n 30 --no-pager 2>/dev/null || echo "雷达增量同步日志不存在"
     echo ""
     echo "=== Agent Runtime 日志 ==="
     if [ -f "${LOG_DIR}/flue.log" ]; then

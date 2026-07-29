@@ -179,6 +179,14 @@ const STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS idx_file_chunks_project ON file_chunks(project_id)`,
   `ALTER TABLE leads ADD COLUMN IF NOT EXISTS scoring JSONB`,
   `ALTER TABLE leads ADD COLUMN IF NOT EXISTS radar_profile JSONB`,
+  `ALTER TABLE leads ADD COLUMN IF NOT EXISTS radar_source_keys JSONB NOT NULL DEFAULT '[]'::jsonb`,
+  `CREATE INDEX IF NOT EXISTS idx_leads_radar_source_keys ON leads USING GIN (radar_source_keys)`,
+  `CREATE TABLE IF NOT EXISTS radar_sync_state (
+    id VARCHAR(64) PRIMARY KEY,
+    backfill_cursor TEXT,
+    backfill_complete BOOLEAN NOT NULL DEFAULT FALSE,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`,
 
   `CREATE TABLE IF NOT EXISTS knowledge_chunks (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

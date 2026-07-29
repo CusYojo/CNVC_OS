@@ -9,6 +9,7 @@ import { requireAuth } from './middleware/requireAuth.js'
 import { ensureSchema } from './db/migrate.js'
 import { seedUsers } from './services/authService.js'
 import { recoverAiTasks } from './services/aiTaskService.js'
+import { recoverLeadScoringQueue } from './routes/meta.js'
 
 const app = express()
 const port = Number(process.env.API_PORT ?? 3100)
@@ -80,6 +81,8 @@ async function start() {
     await ensureSchema()
     await seedUsers()
     await recoverAiTasks()
+    const scoreRecovery = await recoverLeadScoringQueue()
+    console.log(`[lead-score] startup recovery found=${scoreRecovery.found} queued=${scoreRecovery.recovered}`)
     console.log('[db] schema ready & demo users seeded')
   } catch (err) {
     console.error('[db] startup failed:', (err as Error).message)

@@ -4,7 +4,20 @@ import { db } from '../db/client.js'
 import { auditLogs, users, leads } from '../db/schema.js'
 import { z } from 'zod'
 import type { AuthedRequest } from '../middleware/requireAuth.js'
-import { createLead, convertLead, getLeadById, listLeads, listLeadScoresForRanking, syncRadarLeadByName, leadPoolStats } from '../services/aiSummaryService.js'
+import {
+  createLead,
+  convertLead,
+  getLeadById,
+  leadPoolStats,
+  listLeads,
+  listLeadScoresForRanking,
+  listRecoverableLeadScoreIds,
+  readLeadScoreJob,
+  saveLeadScoreJob,
+  syncRadarLeadByName,
+  type LeadScoreJob,
+  type LeadScoreJobStatus,
+} from '../services/aiSummaryService.js'
 import { FLUE_BASE_URL } from '../config/agentRuntime.js'
 import { deriveRadarSubjectName, isNonInvestableRadarContent, isSpecificLeadSubjectName } from '../services/leadSubjectName.js'
 import {
@@ -12,6 +25,11 @@ import {
   mergeLeadPublicIntel,
   type PublicIntelResult,
 } from '../services/leadPublicIntelService.js'
+import {
+  fetchRadarWindow,
+  readRadarSyncState,
+  saveRadarSyncState,
+} from '../services/radarSyncService.js'
 
 export const metaRouter = Router()
 
@@ -190,15 +208,99 @@ const firstMeaningfulRadarText = (...values: unknown[]): string => {
   }
   return ''
 }
+
+const radarCandidateSourceKey = (item: Record<string, unknown>): string => {
+  const source = String(item.source || 'unknown').trim() || 'unknown'
+  for (const field of ['source_id', 'fingerprint', 'link', 'title']) {
+    const value = String(item[field] || '').trim()
+    if (value) return `${source}:${value}`
+  }
+  return ''
+}
+
+let radarSyncRunning = false
+
 metaRouter.post('/leads/sync-radar', async (req: AuthedRequest, res, next) => {
+  if (radarSyncRunning) {
+    res.status(409).json({
+      code: 'RADAR_SYNC_RUNNING',
+      message: '上一轮雷达同步仍在运行，请稍后重试',
+    })
+    return
+  }
+  radarSyncRunning = true
   try {
     const limit = Math.max(1, Math.min(Number(req.body?.limit) || 50, 200))
+    const incrementalPages = Math.max(1, Math.min(Number(req.body?.incrementalPages) || 4, 10))
+    const requestedBackfillPages = Number(req.body?.backfillPages)
+    const backfillPages = Number.isFinite(requestedBackfillPages)
+      ? Math.max(0, Math.min(requestedBackfillPages, 10))
+      : 1
     const src = (req.body?.source ?? 'all').toString()  // 默认全部渠道
-    const srcParam = src === 'all' ? '' : `&source=${encodeURIComponent(src)}`
-    const resp = await fetch(`${RADAR_BASE}/api/candidates?limit=${limit}&attention_only=false${srcParam}`, { signal: AbortSignal.timeout(15000) })
-    if (!resp.ok) throw new Error(`雷达服务 ${resp.status}`)
-    const raw = await resp.json() as unknown
-    const items: any[] = Array.isArray(raw) ? raw : ((raw as any).items || (raw as any).candidates || (raw as any).data || [])
+    const explicitCursor = String(req.body?.cursor || '').trim()
+    const stateId = src === 'all' ? 'main' : `source:${src}`
+    let nextState: { backfillCursor: string | null; backfillComplete: boolean } | null = null
+    let candidateTotal = 0
+    let pagesFetched = 0
+    let nextCursor = ''
+    let hasMore = false
+    const fetchedItems: Record<string, unknown>[] = []
+
+    if (explicitCursor) {
+      const window = await fetchRadarWindow({
+        baseUrl: RADAR_BASE,
+        pageSize: limit,
+        maxPages: incrementalPages,
+        cursor: explicitCursor,
+        source: src,
+      })
+      fetchedItems.push(...window.items)
+      candidateTotal = window.total
+      pagesFetched = window.pages
+      nextCursor = window.nextCursor
+      hasMore = window.hasMore
+    } else {
+      const incremental = await fetchRadarWindow({
+        baseUrl: RADAR_BASE,
+        pageSize: limit,
+        maxPages: incrementalPages,
+        source: src,
+      })
+      fetchedItems.push(...incremental.items)
+      candidateTotal = incremental.total
+      pagesFetched += incremental.pages
+      nextCursor = incremental.nextCursor
+      hasMore = incremental.hasMore
+
+      const state = await readRadarSyncState(stateId)
+      if (!state.backfillComplete && backfillPages > 0 && incremental.hasMore) {
+        const backfillCursor = state.backfillCursor || incremental.nextCursor
+        if (backfillCursor) {
+          const backfill = await fetchRadarWindow({
+            baseUrl: RADAR_BASE,
+            pageSize: limit,
+            maxPages: backfillPages,
+            cursor: backfillCursor,
+            source: src,
+          })
+          fetchedItems.push(...backfill.items)
+          pagesFetched += backfill.pages
+          nextState = {
+            backfillCursor: backfill.hasMore ? backfill.nextCursor : null,
+            backfillComplete: !backfill.hasMore,
+          }
+        }
+      } else if (!incremental.hasMore) {
+        nextState = { backfillCursor: null, backfillComplete: true }
+      }
+    }
+
+    const uniqueItems = new Map<string, Record<string, unknown>>()
+    for (const item of fetchedItems) {
+      const key = radarCandidateSourceKey(item)
+      uniqueItems.set(key || `anonymous:${uniqueItems.size}`, item)
+    }
+    const items: any[] = [...uniqueItems.values()]
     const createdNames = new Set<string>()
     const updatedNames = new Set<string>()
     const unchangedNames = new Set<string>()
@@ -210,6 +312,7 @@ metaRouter.post('/leads/sync-radar', async (req: AuthedRequest, res, next) => {
     let invalid = 0
     const createdIds: string[] = []
     const scoringLeadIds = new Set<string>()
+    const actorUserId = req.user?.uid
     const splitList = (s: unknown, n = 6) => (s ? String(s).split(/；|;|\n/).map((x) => x.trim()).filter(Boolean).slice(0, n) : [])
     for (const it of items) {
       const prof = it.project_profile || {}
@@ -326,6 +429,8 @@ metaRouter.post('/leads/sync-radar', async (req: AuthedRequest, res, next) => {
       // 雷达情报画像：原样存全部字段，前端详情弹窗"雷达情报"板块还原展示。
       // 注意：这里 NOT 写 leads.scoring —— scoring 留给"点击 AI 评测"后的 flue 深度 7 维评分。
       const radarProfile = {
+        sourceId: firstMeaningfulRadarText(it.source_id, it.fingerprint),
+        radarSourceKey: radarCandidateSourceKey(it),
         decisionLabel: it.decision_label || '',
         thesis: prof.private_market_thesis || '',
         sourceName: it.source_name || it.source || '',
@@ -388,9 +493,10 @@ metaRouter.post('/leads/sync-radar', async (req: AuthedRequest, res, next) => {
         team: [prof.team_composition, prof.lab && `实验室：${prof.lab}`].filter(Boolean).join('\n').slice(0, 800) || '待核验',
         fundingRounds,
         riskTags: (it.decision_label ? [it.decision_label] : []),
+        radarSourceKeys: radarCandidateSourceKey(it) ? [radarCandidateSourceKey(it)] : [],
         radarProfile,
         sources: [{ title: it.title || name, url: it.link || prof.source_url || '', reliability: '中', category: it.source_group || '公开渠道', excerpt: (it.summary || '').toString().slice(0, 200) }],
-      }, req.user!.uid)
+      }, actorUserId)
 
       if (syncResult.duplicateMatches > 0 && !countedDatabaseDuplicateNames.has(name)) {
         countedDatabaseDuplicateNames.add(name)
@@ -417,10 +523,25 @@ metaRouter.post('/leads/sync-radar', async (req: AuthedRequest, res, next) => {
     const unchanged = unchangedNames.size
     const duplicates = batchDuplicates + databaseDuplicates
     const scoringIds = [...scoringLeadIds]
-    const scoringQueued = scoringIds.filter(scheduleLeadScoring).length
+    let scoringQueued = 0
+    for (const leadId of scoringIds) {
+      if (await scheduleLeadScoring(leadId)) scoringQueued += 1
+    }
+    if (nextState && !explicitCursor) {
+      await saveRadarSyncState({
+        id: stateId,
+        backfillCursor: nextState.backfillCursor,
+        backfillComplete: nextState.backfillComplete,
+      })
+    }
     res.json({
       ok: true,
       fetched: items.length,
+      candidateTotal,
+      pagesFetched,
+      nextCursor,
+      hasMore,
+      backfillComplete: nextState?.backfillComplete ?? null,
       created,
       updated,
       unchanged,
@@ -434,17 +555,30 @@ metaRouter.post('/leads/sync-radar', async (req: AuthedRequest, res, next) => {
       scoringIds,
       scoringQueued,
     })
-  } catch (err) { next(err) }
+  } catch (err) {
+    next(err)
+  } finally {
+    radarSyncRunning = false
+  }
 })
 
 // 项目评分：异步模式 —— 点击秒回，后台调 flue 评分并存库，前端轮询 lead.scoring。
-// 内存态评分状态（进程级即可：running/done/failed），前端可轮询
-const scoreStatus = new Map<string, { status: 'running' | 'done' | 'failed'; error?: string; startedAt: number }>()
+// 内存状态只负责当前进程调度；任务状态同时写入 leads.scoring.scoreJob，供重启恢复和前端展示。
+const scoreStatus = new Map<string, {
+  status: LeadScoreJobStatus
+  error?: string
+  startedAt: number
+  attempts: number
+  maxAttempts: number
+}>()
 
-// —— 全局评分队列：N 个并发 worker 消费,N=SCORE_QUEUE_CONCURRENCY(默认3)。
-// 适度并发提速批量重评；上限受 flue/zeelin 承载能力约束，默认3是安全值。
+// —— 全局评分队列：N 个并发 worker 消费,N=SCORE_QUEUE_CONCURRENCY(默认2)。
+// 本地模型网关是评分链路的瓶颈，默认并发 2，避免 50 条雷达同步后同时压垮网关。
 const scoreQueue: string[] = []
-const SCORE_QUEUE_CONCURRENCY = Math.max(1, parseInt(process.env.SCORE_QUEUE_CONCURRENCY || '3', 10))
+const SCORE_QUEUE_CONCURRENCY = Math.max(1, parseInt(process.env.SCORE_QUEUE_CONCURRENCY || '2', 10))
+const SCORE_MAX_ATTEMPTS = Math.max(1, Math.min(4, parseInt(process.env.SCORE_MAX_ATTEMPTS || '2', 10)))
+const SCORE_REQUEST_TIMEOUT_MS = Math.max(30_000, parseInt(process.env.SCORE_REQUEST_TIMEOUT_MS || '480000', 10))
+const SCORE_RETRY_BASE_MS = Math.max(1_000, parseInt(process.env.SCORE_RETRY_BASE_MS || '5000', 10))
 let activeWorkers = 0
 async function worker(): Promise<void> {
   while (scoreQueue.length) {
@@ -464,15 +598,92 @@ function enqueueScore(leadId: string): void {
   drainQueue()
 }
 
-function scheduleLeadScoring(leadId: string): boolean {
+async function scheduleLeadScoring(leadId: string, options: { recovering?: boolean } = {}): Promise<boolean> {
   const current = scoreStatus.get(leadId)
-  if (current?.status === 'running') return false
-  scoreStatus.set(leadId, { status: 'running', startedAt: Date.now() })
+  if (current && ['queued', 'running', 'retrying'].includes(current.status)) return false
+  const lead = await getLeadById(leadId)
+  if (!lead) return false
+  const previous = readLeadScoreJob((lead as { scoring?: unknown }).scoring)
+  const now = new Date().toISOString()
+  const attempts = options.recovering
+    ? Math.min(previous?.attempts ?? 0, SCORE_MAX_ATTEMPTS - 1)
+    : 0
+  const job: LeadScoreJob = {
+    status: 'queued',
+    attempts,
+    maxAttempts: SCORE_MAX_ATTEMPTS,
+    queuedAt: previous?.queuedAt ?? now,
+    updatedAt: now,
+    error: undefined,
+  }
+  try {
+    await saveLeadScoreJob(leadId, job)
+  } catch (error) {
+    console.error(`[lead-score] persist queued failed lead=${leadId}:`, (error as Error).message)
+    return false
+  }
+  scoreStatus.set(leadId, {
+    status: 'queued',
+    startedAt: Date.now(),
+    attempts,
+    maxAttempts: SCORE_MAX_ATTEMPTS,
+  })
   enqueueScore(leadId)
   return true
 }
 
+export async function recoverLeadScoringQueue(limit = 50) {
+  const leadIds = await listRecoverableLeadScoreIds(limit)
+  let recovered = 0
+  for (const leadId of leadIds) {
+    if (await scheduleLeadScoring(leadId, { recovering: true })) recovered += 1
+  }
+  return { found: leadIds.length, recovered }
+}
+
+function retryableScoreError(error: unknown) {
+  const value = error as Error & { retryable?: boolean }
+  return value.retryable !== false
+}
+
+function scoreDelay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+type ScoreWorkflowResult = {
+  total: number
+  verdict: string
+  overall_comment: string
+  dimensions: unknown[]
+  projectName?: string
+  [key: string]: unknown
+}
+
+async function requestScoreWorkflow(
+  scoreWorkflow: string,
+  requestBody: Record<string, unknown>,
+): Promise<ScoreWorkflowResult> {
+  const resp = await fetch(`${FLUE_BASE_URL}/workflows/${scoreWorkflow}?wait=result`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(requestBody),
+    signal: AbortSignal.timeout(SCORE_REQUEST_TIMEOUT_MS),
+  })
+  if (!resp.ok) {
+    const detail = (await resp.text()).slice(0, 300)
+    const error = new Error(`评分服务(${scoreWorkflow}) ${resp.status}${detail ? `: ${detail}` : ''}`) as Error & { retryable?: boolean }
+    error.retryable = resp.status === 408 || resp.status === 429 || resp.status >= 500
+    throw error
+  }
+  const { result } = await resp.json() as { result?: ScoreWorkflowResult }
+  if (!result || !Array.isArray(result.dimensions) || result.dimensions.length === 0) {
+    throw new Error('评分服务返回空或缺少评分维度')
+  }
+  return result
+}
+
 async function doScore(leadId: string): Promise<void> {
+  let runStartedAt: string | undefined
   try {
     // 评分需要 lead 完整字段(sources/radarProfile/scoring/fundingRounds),listLeads 不返回这些
     const lead = await getLeadById(leadId)
@@ -533,15 +744,55 @@ async function doScore(leadId: string): Promise<void> {
           team: (lead as { team?: string }).team ?? undefined,
           articleText: baseArticle || undefined,
         }
-    const resp = await fetch(`${FLUE_BASE_URL}/workflows/${scoreWorkflow}?wait=result`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(requestBody),
-      signal: AbortSignal.timeout(600000),
-    })
-    if (!resp.ok) throw new Error(`评分服务(${scoreWorkflow}) ${resp.status}`)
-    const { result } = await resp.json() as { result?: { total: number; verdict: string; overall_comment: string; dimensions: unknown[] } }
-    if (!result) throw new Error('评分服务返回空')
+    let result: ScoreWorkflowResult | null = null
+    let finalError: Error | null = null
+    const persisted = readLeadScoreJob((lead as { scoring?: unknown }).scoring)
+    runStartedAt = persisted?.startedAt ?? new Date().toISOString()
+    const initialAttempts = Math.min(persisted?.attempts ?? 0, SCORE_MAX_ATTEMPTS - 1)
+    for (let attempt = initialAttempts + 1; attempt <= SCORE_MAX_ATTEMPTS; attempt += 1) {
+      const now = new Date().toISOString()
+      const runningJob: LeadScoreJob = {
+        status: 'running',
+        attempts: attempt,
+        maxAttempts: SCORE_MAX_ATTEMPTS,
+        queuedAt: persisted?.queuedAt ?? now,
+        startedAt: runStartedAt,
+        updatedAt: now,
+      }
+      scoreStatus.set(leadId, {
+        status: 'running',
+        startedAt: Date.now(),
+        attempts: attempt,
+        maxAttempts: SCORE_MAX_ATTEMPTS,
+      })
+      await saveLeadScoreJob(leadId, runningJob)
+      try {
+        result = await requestScoreWorkflow(scoreWorkflow, requestBody)
+        finalError = null
+        break
+      } catch (error) {
+        finalError = error as Error
+        if (attempt >= SCORE_MAX_ATTEMPTS || !retryableScoreError(error)) break
+        const retryAt = new Date(Date.now() + SCORE_RETRY_BASE_MS * attempt).toISOString()
+        const retryingJob: LeadScoreJob = {
+          ...runningJob,
+          status: 'retrying',
+          updatedAt: new Date().toISOString(),
+          nextRetryAt: retryAt,
+          error: finalError.message,
+        }
+        scoreStatus.set(leadId, {
+          status: 'retrying',
+          error: finalError.message,
+          startedAt: Date.now(),
+          attempts: attempt,
+          maxAttempts: SCORE_MAX_ATTEMPTS,
+        })
+        await saveLeadScoreJob(leadId, retryingJob)
+        await scoreDelay(SCORE_RETRY_BASE_MS * attempt)
+      }
+    }
+    if (!result) throw finalError ?? new Error('评分服务未返回结果')
 
     const industry = lead.industry
     // 改用 listLeadScoresForRanking 拉全表 industry+total 极轻量列表(避免 listLeads 全表反序列化大 jsonb)
@@ -555,7 +806,7 @@ async function doScore(leadId: string): Promise<void> {
     const scoring = {
       ...result,
       // 评分结果只补充判断字段；工商、团队、股东、融资及来源继续以入库资料为准。
-      projectName: (result as { projectName?: string }).projectName || lead.name,
+      projectName: result.projectName || lead.name,
       whatIsIt: (rp as { profile?: { projectName?: string } }).profile?.projectName || lead.summary,
       officialSite: (rp.officialSite as string) || '待核验',
       registry: (rp.registry || {}) as Record<string, string>,
@@ -568,12 +819,45 @@ async function doScore(leadId: string): Promise<void> {
       researchSources: lead.sources || [],
       rank: { peers_count: allScores.length, position: rankIndex + 1, percentile, industry: industry ?? '未分类' },
       scored_at: new Date().toISOString(),
+      scoreJob: {
+        status: 'done',
+        attempts: scoreStatus.get(leadId)?.attempts ?? 1,
+        maxAttempts: SCORE_MAX_ATTEMPTS,
+        queuedAt: persisted?.queuedAt,
+        startedAt: runStartedAt,
+        updatedAt: new Date().toISOString(),
+        completedAt: new Date().toISOString(),
+      } satisfies LeadScoreJob,
     }
     const { saveLeadScoring } = await import('../services/aiSummaryService.js')
     await saveLeadScoring(lead.id, scoring, result.total)
-    scoreStatus.set(leadId, { status: 'done', startedAt: scoreStatus.get(leadId)?.startedAt ?? Date.now() })
+    scoreStatus.set(leadId, {
+      status: 'done',
+      startedAt: scoreStatus.get(leadId)?.startedAt ?? Date.now(),
+      attempts: scoreStatus.get(leadId)?.attempts ?? 1,
+      maxAttempts: SCORE_MAX_ATTEMPTS,
+    })
   } catch (err) {
-    scoreStatus.set(leadId, { status: 'failed', error: (err as Error).message, startedAt: scoreStatus.get(leadId)?.startedAt ?? Date.now() })
+    const current = scoreStatus.get(leadId)
+    const failedJob: LeadScoreJob = {
+      status: 'failed',
+      attempts: current?.attempts ?? SCORE_MAX_ATTEMPTS,
+      maxAttempts: current?.maxAttempts ?? SCORE_MAX_ATTEMPTS,
+      startedAt: runStartedAt,
+      updatedAt: new Date().toISOString(),
+      completedAt: new Date().toISOString(),
+      error: (err as Error).message,
+    }
+    await saveLeadScoreJob(leadId, failedJob).catch((persistError) => {
+      console.error(`[lead-score] persist failed status lead=${leadId}:`, (persistError as Error).message)
+    })
+    scoreStatus.set(leadId, {
+      status: 'failed',
+      error: failedJob.error,
+      startedAt: current?.startedAt ?? Date.now(),
+      attempts: failedJob.attempts,
+      maxAttempts: failedJob.maxAttempts,
+    })
   }
 }
 
@@ -583,8 +867,10 @@ metaRouter.post('/leads/:id/score', async (req: AuthedRequest, res, next) => {
     // 验证存在用 getLeadById 单条查(不拉全表),score 只需要 leadId
     const lead = await getLeadById(String(req.params.id))
     if (!lead) { res.status(404).json({ code: 'NOT_FOUND', message: '线索不存在' }); return }
-    const started = scheduleLeadScoring(lead.id)
-    res.json({ code: 0, message: started ? 'started' : 'running', status: 'running' })
+    const started = await scheduleLeadScoring(lead.id)
+    const persistedJob = readLeadScoreJob((lead as { scoring?: unknown }).scoring)
+    const status = started ? 'queued' : persistedJob?.status ?? scoreStatus.get(lead.id)?.status ?? 'running'
+    res.json({ code: 0, message: started ? 'started' : 'running', status })
   } catch (err) { next(err) }
 })
 
@@ -596,16 +882,26 @@ metaRouter.get('/leads/:id/score', async (req: AuthedRequest, res, next) => {
     if (!lead) { res.status(404).json({ code: 'NOT_FOUND', message: '线索不存在' }); return }
     const st = scoreStatus.get(lead.id)
     const scoring = (lead as { scoring?: { dimensions?: unknown; total?: unknown } }).scoring
+    const persistedJob = readLeadScoreJob(scoring)
     // AI 深度分析产物特征:含 dimensions(维度打分)。入池时写的结构化 scoring 只有 registry/股东等,不算已分析。
     const hasAiScoring = !!(scoring && scoring.dimensions)
     // 状态判定:内存态优先(running/failed 以内存为准),避免被入池的旧结构化 scoring 误判成 done。
     // 只有内存 done、或已有 AI 分析产物(dimensions)且不在跑,才算 done。
     let status: string
-    if (st?.status === 'running') status = 'running'
+    if (st && ['queued', 'running', 'retrying'].includes(st.status)) status = st.status
     else if (st?.status === 'failed') status = 'failed'
     else if (st?.status === 'done' || hasAiScoring) status = 'done'
+    else if (persistedJob?.status) status = persistedJob.status
     else status = 'idle'
-    res.json({ code: 0, message: 'success', status, error: st?.error, scoring: scoring ?? null })
+    res.json({
+      code: 0,
+      message: 'success',
+      status,
+      error: st?.error ?? persistedJob?.error,
+      attempts: st?.attempts ?? persistedJob?.attempts,
+      maxAttempts: st?.maxAttempts ?? persistedJob?.maxAttempts,
+      scoring: scoring ?? null,
+    })
   } catch (err) { next(err) }
 })
 
@@ -615,7 +911,7 @@ metaRouter.post('/leads/:id/convert', async (req: AuthedRequest, res, next) => {
     const row = await convertLead(leadId, req.body.projectId, req.user!.uid)
     // 甲方要求"获取(领取)就分析"：领取为专属项目后自动触发 AI 深度分析(后台异步，秒回)。
     // 已在分析中则不重复触发。
-    scheduleLeadScoring(leadId)
+    await scheduleLeadScoring(leadId)
     res.json(row)
   } catch (err) { next(err) }
 })

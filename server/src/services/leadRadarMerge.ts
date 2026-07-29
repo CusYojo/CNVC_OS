@@ -39,6 +39,7 @@ export interface RadarLeadSyncFields {
   riskTags?: unknown[]
   sources?: unknown[]
   radarProfile?: unknown
+  radarSourceKeys?: string[]
 }
 
 export interface RadarMergeExistingLead extends RadarLeadSyncFields {
@@ -242,6 +243,12 @@ export function buildRadarLeadMergePatch(
   const mergedRadarProfile = mergeNonEmptyValue(existing.radarProfile, incoming.radarProfile)
   if (!sameValue(existing.radarProfile ?? null, mergedRadarProfile ?? null)) {
     patch.radarProfile = mergedRadarProfile
+  }
+
+  const mergedRadarSourceKeys = mergeUniqueValues(existing.radarSourceKeys, incoming.radarSourceKeys)
+    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+  if (!sameValue(existing.radarSourceKeys ?? [], mergedRadarSourceKeys)) {
+    patch.radarSourceKeys = mergedRadarSourceKeys
   }
 
   return patch as RadarLeadMergePatch

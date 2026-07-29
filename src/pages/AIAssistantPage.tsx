@@ -49,6 +49,10 @@ const AI_TASK_TYPE_BY_ACTION: Record<AiQuickTaskRequest['actionId'], string> = {
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+const AI_UPLOAD_ACCEPT = '.pdf,.xlsx,.xls,.csv,.docx,.txt,.md,.png,.jpg,.jpeg'
+const AI_UPLOAD_EXTENSIONS = new Set(
+  AI_UPLOAD_ACCEPT.split(',').map((extension) => extension.slice(1)),
+)
 
 // —— 模块级 toast 桥 ——
 // downloadWorkspaceFile / OSS 下载等模块级函数与深层组件（WsNode）都需要弹提示，
@@ -697,7 +701,10 @@ function Chat() {
   // 用户上传的文件（本轮待发）：path=沙箱相对路径(agent 可 read/bash 直读)，rag=是否已入项目知识库
   const [uploads, setUploads] = useState<{ name: string; path: string; rag: boolean }[]>([])
   const [uploading, setUploading] = useState(false)
+  const [draggingFiles, setDraggingFiles] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const uploadLockRef = useRef(false)
+  const dragDepthRef = useRef(0)
 
   // 归一文件类型为 <=16 字符的短标签（优先扩展名，回退 MIME 主类型），适配 project_files.type varchar(16)
   const fileTypeLabel = (file: File): string => {
@@ -720,75 +727,132 @@ function Chat() {
   // 并行上传：多选文件并发跑（fileToBase64 + 落沙箱 + 可选入 RAG），
   // 单个失败不影响其他，实时显示「上传中 N/M」，全部结束汇总成功/失败数。
   const [uploadProgress, setUploadProgress] = useState<{ done: number; total: number } | null>(null)
-  const onPickFiles = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const list = Array.from(e.target.files ?? [])
-    e.target.value = ''
+  const uploadFiles = async (inputFiles: File[]) => {
+    const unsupported = inputFiles.filter((file) => {
+      const extension = file.name.split('.').pop()?.toLowerCase() ?? ''
+      return !AI_UPLOAD_EXTENSIONS.has(extension)
+    })
+    const list = inputFiles.filter((file) => !unsupported.includes(file))
+    if (unsupported.length) {
+      showToast(
+        `暂不支持：${unsupported.slice(0, 3).map((file) => file.name).join('、')}${unsupported.length > 3 ? '…' : ''}`,
+        'error',
+      )
+    }
     if (!list.length) return
+    if (uploadLockRef.current) {
+      showToast('已有文件正在上传，请等待完成后再添加', 'info')
+      return
+    }
+    uploadLockRef.current = true
     setUploading(true)
     let done = 0
     setUploadProgress({ done: 0, total: list.length })
 
-    const uploadOne = async (file: File): Promise<{ name: string; path: string; rag: boolean }> => {
-      const dataUrl = await fileToBase64(file)
-      const ws = await apiPost<{ path: string; name: string }>('/workspace/file', {
-        name: file.name, dataBase64: dataUrl, subdir: convId || undefined,
-      })
-      let rag = false
-      if (scope === 'project' && currentProject?.id) {
-        try {
-          // 上传大文件走公网可能慢，用 5 分钟超时覆盖默认 60s，避免大文件被掐断。
-          const upCtrl = new AbortController()
-          const upTimer = setTimeout(() => upCtrl.abort(), 300000)
-          let resp: { file?: { id: string; parseStatus: string } }
+    try {
+      const uploadOne = async (file: File): Promise<{ name: string; path: string; rag: boolean }> => {
+        const dataUrl = await fileToBase64(file)
+        const ws = await apiPost<{ path: string; name: string }>('/workspace/file', {
+          name: file.name, dataBase64: dataUrl, subdir: convId || undefined,
+        })
+        let rag = false
+        if (scope === 'project' && currentProject?.id) {
           try {
-            resp = await apiPost<{ file?: { id: string; parseStatus: string } }>('/projects/files/upload', {
-              // ⚠️ project_files.type 是 varchar(16)：pptx/xlsx/docx 的浏览器 MIME 长达 60+ 字符会触发
-              // PG 22001「value too long」导致入库 500 失败。这里归一为短扩展名标签（PPTX/PDF/XLSX…）。
-              projectId: currentProject.id, name: file.name, type: fileTypeLabel(file),
-              uploader: useAuthStore.getState().user?.name ?? 'AI 助手上传', dataBase64: dataUrl,
-            }, { signal: upCtrl.signal })
-          } finally { clearTimeout(upTimer) }
-          rag = true
-          // 【需求:助手上传马上同步到资料库】把入库的文件并入全局 store.files，
-          // 资料库页(ProjectDetailPage 读同一 store)立即可见，无需刷新。
-          if (resp?.file) {
-            const pid = currentProject.id
-            useAppStore.setState((state) => ({
-              files: [{
-                projectId: pid, name: file.name, type: fileTypeLabel(file), category: '项目资料',
-                size: '', uploader: useAuthStore.getState().user?.name ?? 'AI 助手上传',
-                visibility: '项目成员', version: 1, uploadedAt: new Date().toISOString(), ...resp.file,
-              } as never, ...state.files.filter((f) => !(f as { id?: string }).id || (f as { id?: string }).id !== resp.file!.id)],
-            }))
+            // 上传大文件走公网可能慢，用 5 分钟超时覆盖默认 60s，避免大文件被掐断。
+            const upCtrl = new AbortController()
+            const upTimer = setTimeout(() => upCtrl.abort(), 300000)
+            let resp: { file?: { id: string; parseStatus: string } }
+            try {
+              resp = await apiPost<{ file?: { id: string; parseStatus: string } }>('/projects/files/upload', {
+                // ⚠️ project_files.type 是 varchar(16)：pptx/xlsx/docx 的浏览器 MIME 长达 60+ 字符会触发
+                // PG 22001「value too long」导致入库 500 失败。这里归一为短扩展名标签（PPTX/PDF/XLSX…）。
+                projectId: currentProject.id, name: file.name, type: fileTypeLabel(file),
+                uploader: useAuthStore.getState().user?.name ?? 'AI 助手上传', dataBase64: dataUrl,
+              }, { signal: upCtrl.signal })
+            } finally { clearTimeout(upTimer) }
+            rag = true
+            // 【需求:助手上传马上同步到资料库】把入库的文件并入全局 store.files，
+            // 资料库页(ProjectDetailPage 读同一 store)立即可见，无需刷新。
+            if (resp?.file) {
+              const pid = currentProject.id
+              useAppStore.setState((state) => ({
+                files: [{
+                  projectId: pid, name: file.name, type: fileTypeLabel(file), category: '项目资料',
+                  size: '', uploader: useAuthStore.getState().user?.name ?? 'AI 助手上传',
+                  visibility: '项目成员', version: 1, uploadedAt: new Date().toISOString(), ...resp.file,
+                } as never, ...state.files.filter((f) => !(f as { id?: string }).id || (f as { id?: string }).id !== resp.file!.id)],
+              }))
+            }
+          } catch (err) {
+            // 入 RAG 失败不阻断：文件已落沙箱可用；409=已存在视为已入库
+            if (err instanceof ApiError && err.status === 409) rag = true
+            else showToast(`「${file.name}」入库失败（文件已可用于本轮对话）：${(err as Error).message}`, 'error')
           }
-        } catch (err) {
-          // 入 RAG 失败不阻断：文件已落沙箱可用；409=已存在视为已入库
-          if (err instanceof ApiError && err.status === 409) rag = true
-          else showToast(`「${file.name}」入库失败（文件已可用于本轮对话）：${(err as Error).message}`, 'error')
         }
+        return { name: ws.name, path: ws.path, rag }
       }
-      return { name: ws.name, path: ws.path, rag }
+
+      const results = await Promise.allSettled(
+        list.map((file) =>
+          uploadOne(file).finally(() => { done += 1; setUploadProgress({ done, total: list.length }) }),
+        ),
+      )
+
+      const ok: { name: string; path: string; rag: boolean }[] = []
+      const failed: string[] = []
+      results.forEach((result, index) => {
+        if (result.status === 'fulfilled') ok.push(result.value)
+        else failed.push(list[index].name)
+      })
+      if (ok.length) setUploads((prev) => [...prev, ...ok])
+      if (failed.length === 0) showToast(`已上传 ${ok.length} 个文件`, 'success')
+      else if (ok.length === 0) showToast(`上传失败：${failed.length} 个文件全部失败`, 'error')
+      else showToast(`上传完成：成功 ${ok.length} 个，失败 ${failed.length} 个（${failed.slice(0, 3).join('、')}${failed.length > 3 ? '…' : ''}）`, 'error')
+    } finally {
+      setUploadProgress(null)
+      setUploading(false)
+      uploadLockRef.current = false
     }
+  }
 
-    const results = await Promise.allSettled(
-      list.map((file) =>
-        uploadOne(file).finally(() => { done += 1; setUploadProgress({ done, total: list.length }) }),
-      ),
-    )
+  const onPickFiles = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const list = Array.from(event.target.files ?? [])
+    event.target.value = ''
+    void uploadFiles(list)
+  }
 
-    const ok: { name: string; path: string; rag: boolean }[] = []
-    const failed: string[] = []
-    results.forEach((r, i) => {
-      if (r.status === 'fulfilled') ok.push(r.value)
-      else failed.push(list[i].name)
-    })
-    if (ok.length) setUploads((prev) => [...prev, ...ok])
-    if (failed.length === 0) showToast(`已上传 ${ok.length} 个文件`, 'success')
-    else if (ok.length === 0) showToast(`上传失败：${failed.length} 个文件全部失败`, 'error')
-    else showToast(`上传完成：成功 ${ok.length} 个，失败 ${failed.length} 个（${failed.slice(0, 3).join('、')}${failed.length > 3 ? '…' : ''}）`, 'error')
+  const isFileDrag = (event: React.DragEvent<HTMLElement>) =>
+    Array.from(event.dataTransfer.types).includes('Files')
 
-    setUploadProgress(null)
-    setUploading(false)
+  const onDragEnterFiles = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!isFileDrag(event)) return
+    event.preventDefault()
+    event.stopPropagation()
+    dragDepthRef.current += 1
+    setDraggingFiles(true)
+  }
+
+  const onDragOverFiles = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!isFileDrag(event)) return
+    event.preventDefault()
+    event.stopPropagation()
+    event.dataTransfer.dropEffect = 'copy'
+  }
+
+  const onDragLeaveFiles = (event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1)
+    if (dragDepthRef.current === 0) setDraggingFiles(false)
+  }
+
+  const onDropFiles = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!isFileDrag(event)) return
+    event.preventDefault()
+    event.stopPropagation()
+    dragDepthRef.current = 0
+    setDraggingFiles(false)
+    void uploadFiles(Array.from(event.dataTransfer.files))
   }
 
   const removeUpload = (path: string) => setUploads((prev) => prev.filter((u) => u.path !== path))
@@ -1269,7 +1333,25 @@ function Chat() {
               onRunTask={runQuickTask}
             />
           </AiErrorBoundary>
-          <div className="rounded-xl border border-slate-200 p-2">
+          <div
+            className={`relative rounded-xl border p-2 transition-colors ${
+              draggingFiles
+                ? 'border-brand-400 bg-brand-50/60 ring-2 ring-brand-100'
+                : 'border-slate-200'
+            }`}
+            onDragEnter={onDragEnterFiles}
+            onDragOver={onDragOverFiles}
+            onDragLeave={onDragLeaveFiles}
+            onDrop={onDropFiles}
+          >
+            {draggingFiles && (
+              <div className="pointer-events-none absolute inset-0 z-20 grid place-items-center rounded-xl border-2 border-dashed border-brand-400 bg-white/90">
+                <div className="flex items-center gap-2 text-sm font-medium text-brand-700">
+                  <FileIcon className="h-4 w-4" />
+                  松开以上传文件
+                </div>
+              </div>
+            )}
             {uploadProgress && uploadProgress.total > 0 && (
               <div className="mb-1 flex items-center gap-2 px-1 text-[11px] text-brand-600">
                 <RefreshCw className="h-3 w-3 animate-spin" />
@@ -1303,7 +1385,7 @@ function Chat() {
               className="w-full resize-none border-0 px-2 py-1 text-sm leading-6 outline-none placeholder:text-slate-400"
               placeholder={`向 AI 询问 ${scope === 'project' ? currentProject?.name : '机构知识库'}…`}
             />
-            <input ref={fileInputRef} type="file" multiple className="hidden" onChange={onPickFiles} accept=".pdf,.xlsx,.xls,.csv,.docx,.txt,.md,.png,.jpg,.jpeg" />
+            <input ref={fileInputRef} type="file" multiple className="hidden" onChange={onPickFiles} accept={AI_UPLOAD_ACCEPT} />
             <div className="flex items-center justify-between px-1"><div className="flex min-w-0 items-center gap-2 text-[10px] text-slate-400"><button onClick={() => fileInputRef.current?.click()} disabled={uploading} title="上传文件（PDF/Excel/CSV 等，agent 可直接读）" className="grid h-6 w-6 shrink-0 place-items-center rounded text-slate-400 hover:bg-slate-100 hover:text-brand-600 disabled:opacity-50">{uploading ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Paperclip className="h-3.5 w-3.5" />}</button><CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-500" /><span className="truncate">Enter 发送 · Shift + Enter 换行</span></div>{busy
               ? <button aria-label="停止" title="停止生成" onClick={stop} className="grid h-8 w-8 place-items-center rounded-lg bg-rose-500 text-white hover:bg-rose-600"><Square className="h-3.5 w-3.5" /></button>
               : <button aria-label="发送" title="发送（Enter）" disabled={sending || (!input.trim() && uploads.length === 0)} onClick={() => { void send() }} className="grid h-8 w-8 place-items-center rounded-lg bg-brand-600 text-white disabled:cursor-not-allowed disabled:bg-slate-200"><Send className="h-4 w-4" /></button>}</div>

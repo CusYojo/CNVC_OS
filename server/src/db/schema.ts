@@ -149,9 +149,17 @@ export const leads = pgTable('leads', {
   sources: jsonb('sources').$type<unknown[]>().notNull().default(sql`'[]'::jsonb`),
   scoring: jsonb('scoring').$type<unknown>(),  // 多维度评分结果(total/verdict/overall_comment/dimensions/rank/competitors)
   radarProfile: jsonb('radar_profile').$type<unknown>(),  // 雷达情报画像(project_profile/disclosure/next_actions/lab/contact/article_text/signals)
+  radarSourceKeys: jsonb('radar_source_keys').$type<string[]>().notNull().default(sql`'[]'::jsonb`),
   claimedBy: varchar('claimed_by', { length: 64 }),
   convertedProjectId: uuid('converted_project_id').references(() => projects.id, { onDelete: 'set null' }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const radarSyncState = pgTable('radar_sync_state', {
+  id: varchar('id', { length: 64 }).primaryKey(),
+  backfillCursor: text('backfill_cursor'),
+  backfillComplete: boolean('backfill_complete').notNull().default(false),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })
 
 export const auditLogs = pgTable('audit_logs', {

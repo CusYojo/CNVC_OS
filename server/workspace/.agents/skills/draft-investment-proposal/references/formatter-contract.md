@@ -1,4 +1,4 @@
-# Formatter、Word 与 PDF 契约
+# Formatter 与 Word 契约
 
 ## 页面与字体
 
@@ -43,6 +43,6 @@
 
 不得复制会与运行时冲突的模板样式部件；依据受控令牌安全重建。
 
-## PDF
+## 单产物交付
 
-PDF 只能从最终通过 Word Reviewer 的 DOCX 转换，不允许从 HTML、Markdown 或另一份模型文本另行排版。转换使用隔离的 LibreOffice 用户配置，保留可搜索中文文本层，并与 DOCX 的章节、正文和固定内容逐项对照。PDF 转换或检查失败时跳过 PDF，不影响已通过安全检查的 DOCX 交付。
+投资提案只生成、登记并交付一份 DOCX。不生成或登记 PDF、Markdown、PPT/PPTX、重复 DOCX 或预览产物；版式与内容质量直接由 Word Reviewer 校验。

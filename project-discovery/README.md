@@ -21,6 +21,19 @@ curl http://127.0.0.1:8121/api/health
 curl http://127.0.0.1:8121/api/summary
 ```
 
+`/api/health` 默认执行带 5 分钟缓存的 GSData 最小鉴权探测；只检查本地配置时可用：
+
+```bash
+curl 'http://127.0.0.1:8121/api/health?deep=false'
+```
+
+候选记录默认保持原有的评分排序。主系统增量同步使用采集时间排序和游标分页：
+
+```bash
+curl 'http://127.0.0.1:8121/api/candidates?sort=collected&limit=100'
+# 将响应中的 next_cursor 作为下一页 cursor 参数
+```
+
 ## 持久化数据
 
 - 本地开发默认数据目录：`project-discovery/data/`
@@ -68,5 +81,11 @@ bash deploy.sh radar-configure
 | `RADAR_WECHAT_ACCOUNTS_XLSX` | `project-discovery/公众号来源.xlsx` | 公众号账号清单 |
 | `RADAR_AUTO_CRAWL_ENABLED` | `true` | 创投等自动采集 |
 | `RADAR_WECHAT_DAILY_ENABLED` | `true` | GSData 公众号每日采集 |
+| `RADAR_SYNC_PAGE_SIZE` | `50` | 每页同步候选数 |
+| `RADAR_SYNC_INCREMENTAL_PAGES` | `4` | 每轮优先扫描的最新数据页数 |
+| `RADAR_SYNC_BACKFILL_PAGES` | `1` | 每轮继续回填的历史数据页数 |
 | `PORT` | `8121` | 服务端口 |
 | `HOST` | `127.0.0.1` | 监听地址 |
+
+生产部署会安装 `cybernaut-radar-sync.timer`，每 30 分钟把 Radar JSONL
+中的最新候选同步到主数据库，同时通过数据库游标逐轮完成历史数据回填。

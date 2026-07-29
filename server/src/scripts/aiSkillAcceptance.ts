@@ -347,6 +347,8 @@ async function main() {
       '12 pt',
       '固定值 24 pt',
       'D9D9D9',
+      '只生成、登记并交付一份 DOCX',
+      '不生成或登记 PDF',
     ].every((term) => proposalSkill.referenceInstructions.includes(term)),
     '结构、章节目的、文风、版式、表格与 QA',
   )
@@ -865,6 +867,22 @@ async function main() {
       && !taskCardsSource.includes('阶段：{visibleStage}')
       && taskCardsSource.includes("task.stage || '生成进度'"),
     '任务卡在进度条上显示“正在生成尽调正文/整合联网证据”和等待秒数，不展示技术堆栈',
+  )
+  assert(
+    '任务完成进度下方不显示结果摘要提示栏',
+    !taskCardsSource.includes('{task.resultSummary && (')
+      && !taskCardsSource.includes('>{task.resultSummary}</p>'),
+    '结果摘要保留在任务数据中，不在用户任务卡重复显示',
+  )
+  assert(
+    'AI 助手对话框支持拖拽多文件直接上传',
+    assistantPageSource.includes('onDrop={onDropFiles}')
+      && assistantPageSource.includes('onDragOver={onDragOverFiles}')
+      && assistantPageSource.includes('event.dataTransfer.files')
+      && assistantPageSource.includes('void uploadFiles(Array.from(event.dataTransfer.files))')
+      && assistantPageSource.includes('松开以上传文件')
+      && assistantPageSource.includes('accept={AI_UPLOAD_ACCEPT}'),
+    '拖拽与回形针选择复用同一上传、项目入库、进度和失败隔离流程',
   )
 
   const report = {

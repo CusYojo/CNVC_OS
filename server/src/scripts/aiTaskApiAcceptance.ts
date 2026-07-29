@@ -524,6 +524,13 @@ async function main() {
       item.formats.every((format) => completed.artifacts.some((artifact) => artifact.format === format)),
       completed.artifacts.map((artifact) => artifact.format).join(','),
     )
+    if (item.type === 'investment_proposal') {
+      assert(
+        'investment_proposal 只交付一份 DOCX',
+        completed.artifacts.length === 1 && completed.artifacts[0]?.format === 'docx',
+        completed.artifacts.map((artifact) => artifact.format).join(','),
+      )
+    }
     assert(`${item.type} 有来源记录`, completed.sources.length >= 1, `${completed.sources.length} 条`)
     assert(
       `${item.type} 产物记录 Skill 版本`,

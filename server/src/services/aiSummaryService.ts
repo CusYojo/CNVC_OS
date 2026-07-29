@@ -89,6 +89,75 @@ const visiblePublicLeadExpr = sql<boolean>`NOT (
   )
 )`
 
+export type LeadScoreJobStatus = 'queued' | 'running' | 'retrying' | 'done' | 'failed'
+
+export interface LeadScoreJob {
+  status: LeadScoreJobStatus
+  attempts: number
+  maxAttempts: number
+  queuedAt?: string
+  startedAt?: string
+  updatedAt: string
+  completedAt?: string
+  nextRetryAt?: string
+  error?: string
+}
+
+const LEAD_SCORE_JOB_STATUSES = new Set<LeadScoreJobStatus>(['queued', 'running', 'retrying', 'done', 'failed'])
+
+export function readLeadScoreJob(scoring: unknown): LeadScoreJob | null {
+  if (!scoring || typeof scoring !== 'object' || Array.isArray(scoring)) return null
+  const raw = (scoring as Record<string, unknown>).scoreJob
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  const value = raw as Record<string, unknown>
+  const status = String(value.status ?? '') as LeadScoreJobStatus
+  if (!LEAD_SCORE_JOB_STATUSES.has(status)) return null
+  return {
+    status,
+    attempts: Math.max(0, Number(value.attempts) || 0),
+    maxAttempts: Math.max(1, Number(value.maxAttempts) || 1),
+    queuedAt: typeof value.queuedAt === 'string' ? value.queuedAt : undefined,
+    startedAt: typeof value.startedAt === 'string' ? value.startedAt : undefined,
+    updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : new Date(0).toISOString(),
+    completedAt: typeof value.completedAt === 'string' ? value.completedAt : undefined,
+    nextRetryAt: typeof value.nextRetryAt === 'string' ? value.nextRetryAt : undefined,
+    error: typeof value.error === 'string' ? value.error : undefined,
+  }
+}
+
+export async function saveLeadScoreJob(leadId: string, job: LeadScoreJob) {
+  const payload = JSON.stringify({
+    ...job,
+    error: job.error?.slice(0, 500),
+  })
+  const [row] = await db.update(leads).set({
+    scoring: sql`jsonb_set(COALESCE(${leads.scoring}, '{}'::jsonb), '{scoreJob}', ${payload}::jsonb, true)` as never,
+  }).where(eq(leads.id, leadId)).returning({ id: leads.id })
+  return row ?? null
+}
+
+export async function listRecoverableLeadScoreIds(limit = 50) {
+  const rows = await db.select({ id: leads.id }).from(leads)
+    .where(sql`
+      ${visiblePublicLeadExpr}
+      AND COALESCE(${leads.source}, '') ~ '^项目发现雷达'
+      AND NOT (
+        COALESCE(jsonb_typeof(${leads.scoring}->'dimensions') = 'array', false)
+        AND COALESCE(jsonb_array_length(${leads.scoring}->'dimensions'), 0) > 0
+      )
+      AND (
+        COALESCE(${leads.scoring}->'scoreJob'->>'status', '') IN ('queued', 'running', 'retrying')
+        OR (
+          ${leads.scoring}->'scoreJob' IS NULL
+          AND ${leads.createdAt} >= NOW() - INTERVAL '3 days'
+        )
+      )
+    `)
+    .orderBy(desc(leads.createdAt))
+    .limit(Math.max(1, Math.min(limit, 100)))
+  return rows.map((row) => row.id)
+}
+
 const BUSINESS_INDUSTRY_RULES: Array<{ label: string; terms: string[] }> = [
   { label: '人工智能', terms: ['人工智能', '大模型', '机器学习'] },
   { label: '具身智能/机器人', terms: ['具身智能', '机器人'] },
@@ -311,6 +380,7 @@ function enrichLead(row: typeof leads.$inferSelect) {
     : /院校|大学|高校|实验室/.test(src) ? '院校'
     : /微信|群/.test(src) ? '微信群' : '新闻'
   const region = deriveRegion(sc, rp)
+  const scoreJob = readLeadScoreJob(sc)
   return {
     ...row,
     name: subjectName,
@@ -328,6 +398,7 @@ function enrichLead(row: typeof leads.$inferSelect) {
     },
     valuationDisplay: deriveValuationDisplay(sc, rp, analysisStatus, row.fundingRounds),
     technicalScore: deriveTechnicalScore(sc),
+    scoreJob,
     dataUpdatedAt: deriveDataUpdatedAt(sc, rp, row.createdAt),
   }
 }
@@ -424,6 +495,7 @@ export async function listLeads(options: { page?: number; pageSize?: number; cha
         'researchSources', COALESCE(${leads.scoring}->'researchSources','[]'::jsonb),
         'overall_comment', ${leads.scoring}->'overall_comment',
         'scored_at', ${leads.scoring}->'scored_at',
+        'scoreJob', ${leads.scoring}->'scoreJob',
         'registry', COALESCE(${leads.scoring}->'registry','{}'::jsonb)
       ) END`,
       // 列表只取 radar_profile 里列表渲染需要的字段,保持与详情接口"同构"({profile,channel,sourceName,...})
@@ -506,22 +578,39 @@ export async function getLeadById(leadId: string) {
   return row ? enrichLead(row as typeof leads.$inferSelect & { completeness: number }) : null
 }
 
-export async function createLead(input: typeof leads.$inferInsert, userId: string) {
+export async function createLead(input: typeof leads.$inferInsert, userId?: string) {
   const [row] = await db.insert(leads).values(input).returning()
-  if (row) { await db.insert(auditLogs).values({ userId, userName: '（系统）', module: '项目获取池', action: '上传并解析 BP', target: row.name }); void ingestLeadProfile(row) }
+  if (row) {
+    await db.insert(auditLogs).values({
+      userId: userId ?? null,
+      userName: '（系统）',
+      module: '项目获取池',
+      action: '上传并解析 BP',
+      target: row.name,
+    })
+    void ingestLeadProfile(row)
+  }
   return row
 }
 
-export async function syncRadarLeadByName(input: RadarLeadSyncFields, userId: string): Promise<{
+export async function syncRadarLeadByName(input: RadarLeadSyncFields, userId?: string): Promise<{
   status: 'created' | 'updated' | 'unchanged'
   row: typeof leads.$inferSelect
   duplicateMatches: number
 }> {
   // 主体名称优化后可能与历史错误短语不同：先按明确名称匹配，匹配不到时
   // 再按 Radar 原文链接定位同一条线索，使历史模糊名称可被安全升级而不新建重复记录。
-  let matches = await db.select().from(leads)
-    .where(eq(leads.name, input.name))
-    .orderBy(asc(leads.createdAt))
+  const radarSourceKey = input.radarSourceKeys?.find((value) => value.trim())?.trim() ?? ''
+  let matches = radarSourceKey
+    ? await db.select().from(leads)
+      .where(sql`${leads.radarSourceKeys} @> ${JSON.stringify([radarSourceKey])}::jsonb`)
+      .orderBy(asc(leads.createdAt))
+    : []
+  if (!matches.length) {
+    matches = await db.select().from(leads)
+      .where(eq(leads.name, input.name))
+      .orderBy(asc(leads.createdAt))
+  }
   const inputRadarProfile = input.radarProfile && typeof input.radarProfile === 'object'
     ? input.radarProfile as Record<string, unknown>
     : {}
@@ -563,7 +652,7 @@ export async function syncRadarLeadByName(input: RadarLeadSyncFields, userId: st
     .returning()
   if (!row) throw new Error(`更新 Radar 线索失败：${input.name}`)
   await db.insert(auditLogs).values({
-    userId,
+    userId: userId ?? null,
     userName: '（系统）',
     module: '项目获取池',
     action: 'Radar 增量更新',

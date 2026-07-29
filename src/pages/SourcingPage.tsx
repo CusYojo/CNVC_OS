@@ -5,7 +5,7 @@ import { useToast } from '../components/Toast'
 import { Badge, Button, Card, DataTable, Drawer, FileUpload, Modal, PageHeader, ProgressBar, SearchInput, StatusBadge, TableCell, Tabs } from '../components/ui'
 import { useAuthStore } from '../store/useAuthStore'
 import { apiPost, apiGet } from '../lib/api'
-import type { Lead, LeadScoring } from '../types'
+import type { Lead, LeadScoreJobStatus, LeadScoring } from '../types'
 
 const CHANNEL_OPTIONS: string[] = ['36氪', '机构公众号', '高校公众号', '创投新闻', '微信群聊', '论文']
 const INDUSTRY_OPTIONS: string[] = [
@@ -15,6 +15,13 @@ const INDUSTRY_OPTIONS: string[] = [
 ]
 const REGION_OPTIONS: string[] = ['北京', '上海', '浙江', '江苏', '广东', '安徽', '湖北', '四川', '山东', '福建', '湖南', '河南', '天津', '重庆', '陕西']
 const verificationTone = (status: Lead['verificationStatus']) => status === '已核验' ? 'green' : status === '部分核验' ? 'amber' : 'slate'
+const ACTIVE_SCORE_JOB_STATUSES: LeadScoreJobStatus[] = ['queued', 'running', 'retrying']
+const isScoreJobActive = (status?: LeadScoreJobStatus) => Boolean(status && ACTIVE_SCORE_JOB_STATUSES.includes(status))
+const scoreJobLabel = (status?: LeadScoreJobStatus) => status === 'queued'
+  ? '排队中…'
+  : status === 'retrying'
+    ? '重试中…'
+    : '更新中…'
 
 function SourceLink({ url, children }: { url?: string | null; children: React.ReactNode }) {
   // 容错：来源 url 可能缺失（AI 采集 / 部分线索无链接），无 url 时降级为不可点击的灰色标签，避免 startsWith 崩溃白屏
@@ -369,8 +376,10 @@ function LeadDetailPanel({
           </div>)}
         </div>
       </section> : <button onClick={() => onRunScore(lead)} disabled={scoreRefreshing} className="w-full rounded-xl border border-dashed border-brand-300 bg-brand-50/40 p-4 text-sm font-medium text-brand-700 hover:bg-brand-50 disabled:opacity-50">
-        {scoreRefreshing ? 'AI 评分中（约 2-5 分钟）…' : '开始 AI 评分'}
+        {scoreRefreshing ? `AI 评分${scoreJobLabel(lead.scoreJob?.status)}` : lead.scoreJob?.status === 'failed' ? '评分失败，点击重试' : '开始 AI 评分'}
       </button>}
+      {lead.scoreJob?.status === 'failed' && lead.scoreJob.error &&
+        <p className="rounded-lg bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-700">最近一次评分失败：{lead.scoreJob.error}</p>}
 
       {(lead.highlights ?? []).map(meaningfulLeadText).filter(Boolean).length > 0 && <section>
         <h3 className="text-sm font-semibold text-slate-800">投资亮点</h3>
@@ -502,6 +511,16 @@ export function SourcingPage() {
     return () => { active = false }
   }, [isAuthed, page, sort, debouncedQuery, channel, industry, region, fetchLeads, fetchLeadStats, showToast])
 
+  // 页面刷新后根据数据库里的 scoreJob 接续轮询；服务端会对已在执行的任务去重。
+  useEffect(() => {
+    if (!isAuthed) return
+    for (const lead of leads) {
+      if (isScoreJobActive(lead.scoreJob?.status) && !scoringLeadIds.includes(lead.id)) {
+        void startScoring(lead.id)
+      }
+    }
+  }, [isAuthed, leads, scoringLeadIds, startScoring])
+
   const filtered = leads
 
   const syncRadar = async () => {
@@ -510,6 +529,9 @@ export function SourcingPage() {
       const r = await apiPost<{
         ok: boolean
         fetched: number
+        candidateTotal: number
+        pagesFetched: number
+        backfillComplete: boolean | null
         created: number
         updated: number
         unchanged: number
@@ -538,7 +560,7 @@ export function SourcingPage() {
         ? `，重复 ${r.duplicates} 条（本批 ${r.batchDuplicates}，库内历史 ${r.databaseDuplicates}）`
         : ''
       showToast(
-        `雷达同步完成：检查 ${r.fetched} 条，新增 ${r.created} 条，更新 ${r.updated} 条，无变化 ${r.unchanged} 条${duplicateDetail}，过滤 ${r.filtered} 条${r.invalid ? `，无效 ${r.invalid} 条` : ''}${scoringIds.length ? `；${scoringIds.length} 条 AI 技术评分正在更新` : ''}；列表与统计已刷新`,
+        `雷达同步完成：共 ${r.candidateTotal} 条，本轮读取 ${r.pagesFetched} 页/${r.fetched} 条，新增 ${r.created} 条，更新 ${r.updated} 条，无变化 ${r.unchanged} 条${duplicateDetail}，过滤 ${r.filtered} 条${r.invalid ? `，无效 ${r.invalid} 条` : ''}${r.backfillComplete === false ? '；历史数据将在后续轮次继续回填' : ''}${scoringIds.length ? `；${scoringIds.length} 条 AI 技术评分正在更新` : ''}；列表与统计已刷新`,
         'success',
       )
     } catch (err) {
@@ -772,7 +794,7 @@ export function SourcingPage() {
             const valuationValue = lead.valuationDisplay?.value ?? funding.valuation
             const valuationStatus = lead.valuationDisplay?.status ?? (valuationValue ? 'available' : lead.analysisStatus === 'pending' ? 'pending' : 'unavailable')
             const technicalScore = getLeadTechnicalScore(lead)
-            const scoreRefreshing = scoringLeadIds.includes(lead.id)
+            const scoreRefreshing = scoringLeadIds.includes(lead.id) || isScoreJobActive(lead.scoreJob?.status)
             const industryTags = lead.businessTags?.industry?.length ? lead.businessTags.industry : [lead.industry || '待确认']
             const regionTags = lead.businessTags?.region?.length ? lead.businessTags.region : [lead.region || '待确认']
             return <tr key={lead.id} className="hover:bg-slate-50">
@@ -785,7 +807,9 @@ export function SourcingPage() {
                 {funding.round && <p className="mt-1 truncate text-xs text-slate-400">{funding.round}</p>}
               </div></TableCell>
               <TableCell>{scoreRefreshing
-                ? <Badge tone="blue">更新中…</Badge>
+                ? <Badge tone={lead.scoreJob?.status === 'retrying' ? 'amber' : 'blue'}>{scoreJobLabel(lead.scoreJob?.status)}</Badge>
+                : lead.scoreJob?.status === 'failed'
+                ? <span title={lead.scoreJob.error}><Badge tone="red">评分失败</Badge></span>
                 : technicalScore.status === 'ready' && technicalScore.score != null && technicalScore.maxScore
                 ? <div className="w-28"><div className="mb-1 flex items-baseline justify-between"><strong className="text-base text-brand-700">{technicalScore.score}</strong><span className="text-xs text-slate-400">/ {technicalScore.maxScore}</span></div><ProgressBar value={Math.round((technicalScore.score / technicalScore.maxScore) * 100)} /></div>
                 : <Badge tone="amber">待分析</Badge>}</TableCell>
@@ -854,7 +878,7 @@ export function SourcingPage() {
           detailTab={detailTab}
           onTabChange={setDetailTab}
           onRunScore={runScore}
-          scoreRefreshing={scoringLeadIds.includes(selected.id)}
+          scoreRefreshing={scoringLeadIds.includes(selected.id) || isScoreJobActive(selected.scoreJob?.status)}
         />}
         {selected && renderLegacyDetail && <div>
           <div className="rounded-xl bg-brand-50 p-4"><div className="flex items-start justify-between"><div><div className="flex items-center gap-2"><Badge tone="blue">{selected.industry}</Badge><Badge tone={verificationTone(selected.verificationStatus)}>{selected.verificationStatus}</Badge><StatusBadge status={selected.status} /></div><p className="mt-3 max-w-[600px] truncate text-lg font-semibold text-slate-900" title={getLeadIdentity(selected).companySubject}>{getLeadIdentity(selected).companySubject}</p><p className="mt-1 max-w-[600px] truncate text-sm text-slate-500" title={getLeadIdentity(selected).projectName}>项目：{getLeadIdentity(selected).projectName}</p><p className="mt-1 text-sm text-slate-500">{selected.region} · {selected.round} · 更新于 {selected.lastVerifiedAt}</p></div><div className="text-right"><p className="text-3xl font-semibold text-brand-700">{selected.score}</p><p className="text-[10px] text-brand-500">AI 初筛分 · 非投决结论</p></div></div><p className="mt-4 text-sm leading-6 text-brand-900">{selected.summary}</p><div className="mt-3"><SourceLink url={selected.scoring?.officialSite && selected.scoring.officialSite !== '待核验' ? selected.scoring.officialSite : selected.website}>公司官网</SourceLink></div></div>

@@ -227,10 +227,6 @@ function TaskCard({
         </div>
       )}
 
-      {task.resultSummary && (
-        <p className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600">{task.resultSummary}</p>
-      )}
-
       {task.status === 'failed' && (
         <div className="mt-3 rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-xs text-amber-800">
           <p>{failureMessage}</p>
@@ -245,6 +241,7 @@ function TaskCard({
             .filter((artifact) => {
               const format = artifact.format.toLowerCase()
               if (task.type === 'project_qa') return format === 'docx'
+              if (task.type === 'investment_proposal') return format === 'docx'
               return ['docx', 'pptx', 'pdf'].includes(format)
             })
             .map((artifact) => (

@@ -101,10 +101,6 @@ import {
   type InvestmentProposalOutputReview,
 } from './aiInvestmentProposalDocumentService.js'
 import {
-  exportAndReviewInvestmentProposalPdf,
-  type InvestmentProposalPdfReview,
-} from './aiInvestmentProposalPdfService.js'
-import {
   safeAiTaskFailureMessage,
   safeAiTaskFailureStage,
 } from './aiTaskErrorService.js'
@@ -1276,10 +1272,8 @@ async function executeTask(taskId: string) {
     const outputPath = path.join(taskDir, fileName)
     let previewPath: string | undefined
     let previewMetadata: Record<string, unknown> | undefined
-    let pdfPath: string | undefined
     let complianceDocxReview: ComplianceOutputReview | undefined
     let proposalDocxReview: InvestmentProposalOutputReview | undefined
-    let proposalPdfReview: InvestmentProposalPdfReview | undefined
     let generationMetadata = template.outputFormat === 'pptx'
       ? await (async () => {
         const result = await generateBusinessPptx({
@@ -1351,33 +1345,6 @@ async function executeTask(taskId: string) {
             .map((issue) => `${issue.code}:${issue.message}`)
             .join('；') || 'Reviewer 未返回结果',
         )
-      } else {
-        await updateStage(taskId, '由最终 Word 同源生成 PDF 并复核', 82)
-        const candidatePdfPath = outputPath.replace(/\.docx$/i, '.pdf')
-        try {
-          for (let attempt = 1; attempt <= 2; attempt += 1) {
-            proposalPdfReview = await exportAndReviewInvestmentProposalPdf({
-              docxPath: outputPath,
-              pdfPath: candidatePdfPath,
-              template,
-              blueprint: proposalBlueprint,
-              content,
-            })
-            if (proposalPdfReview.passed) break
-          }
-          if (proposalPdfReview?.passed) {
-            pdfPath = candidatePdfPath
-          } else {
-            console.warn(
-              '[aiTask] 投资提案 PDF Reviewer 未完全通过，跳过 PDF、继续交付 Word:',
-              proposalPdfReview?.issues
-                .map((issue) => `${issue.code}:${issue.message}`)
-                .join('；') || 'Reviewer 未返回结果',
-            )
-          }
-        } catch (error) {
-          console.warn('[aiTask] 投资提案 PDF 生成或复核失败，跳过 PDF、继续交付 Word:', (error as Error).message)
-        }
       }
     }
 
@@ -1558,51 +1525,6 @@ async function executeTask(taskId: string) {
         rejectedEvidenceChunks: evidenceScreening.rejected.length,
       },
     }).returning()
-    let proposalPdfArtifactId: string | undefined
-    if (pdfPath && proposalPdfReview?.passed && proposalBlueprint) {
-      try {
-        const pdfStat = await stat(pdfPath)
-        if (!pdfStat.isFile() || pdfStat.size < 1000) throw new Error('投资提案 PDF 为空或不完整')
-        const [pdfArtifact] = await db.insert(aiArtifacts).values({
-          taskId: task.id,
-          userId: task.userId,
-          projectId: task.projectId,
-          conversationId: task.conversationId,
-          fileName: fileName.replace(/\.docx$/i, '.pdf'),
-          format: 'pdf',
-          mimeType: 'application/pdf',
-          version,
-          storagePath: pdfPath,
-          editableLevel: 'fixed-layout',
-          sourceCutoffDate,
-          templateVersion: template.templateVersion,
-          qualityStatus: 'passed',
-          metadata: {
-            ...proposalPdfReview.metadata,
-            derivedFromArtifactId: artifact.id,
-            blueprintVersion: proposalBlueprint.version,
-            coreStandardSha256: proposalBlueprint.coreStandardSha256,
-            templateCorpusSha256: proposalBlueprint.corpusSha256,
-            parsedTemplateCount: proposalBlueprint.templates.length,
-            blueprintSectionCount: proposalBlueprint.sections.length,
-            referenceTemplate: path.basename(template.referencePath),
-            referenceTemplates: (template.referencePaths?.length
-              ? template.referencePaths
-              : [template.referencePath]).map((referencePath) => path.basename(referencePath)),
-            skillName: skill.name,
-            skillVersion: skill.version,
-            skillSha256: skill.sha256,
-            pdfReviewerPassed: true,
-            limitedDraft: content.generationAudit?.limitedDraft ?? false,
-            limitationCount: content.generationAudit?.limitationCount ?? 0,
-            limitationIssueCodes: content.generationAudit?.limitationIssueCodes ?? [],
-          },
-        }).returning()
-        proposalPdfArtifactId = pdfArtifact.id
-      } catch (error) {
-        console.warn('[aiTask] 投资提案 PDF 登记未完成，保留已生成 DOCX:', (error as Error).message)
-      }
-    }
     if (previewPath && previewMetadata) {
       const previewStat = await stat(previewPath)
       if (previewStat.size < 1000) throw new Error('PPT 预览图为空或不完整')
@@ -1635,10 +1557,7 @@ async function executeTask(taskId: string) {
     }
     const usedSourceIndexes = usedBusinessSourceIndexes(content, sources.length)
     if (usedSourceIndexes.length) {
-      const sourceArtifactIds = [
-        artifact.id,
-        proposalPdfArtifactId,
-      ].filter((id): id is string => Boolean(id))
+      const sourceArtifactIds = [artifact.id]
       await db.insert(aiTaskSources).values(sourceArtifactIds.flatMap((artifactId) =>
         usedSourceIndexes.map((index) => {
           const source = sources[index]
@@ -1670,14 +1589,13 @@ async function executeTask(taskId: string) {
       && (
         (content.generationAudit?.limitedDraft ?? false)
         || proposalDocxReview?.passed !== true
-        || (proposalPdfReview !== undefined && proposalPdfReview.passed !== true)
       )
     await db.update(aiTasks).set({
       status: 'succeeded',
       stage: limitedProposal
         ? '受限初稿已生成'
         : task.type === 'investment_proposal'
-          ? pdfPath ? 'Word/PDF 已生成' : 'Word 已生成'
+          ? 'DOCX 已生成'
         : task.type === 'compliance_statement'
           ? 'DOCX 已生成'
           : '生成完成',
@@ -1888,7 +1806,10 @@ export async function getAiTask(userId: string, taskId: string) {
   if (!task) return undefined
   const artifacts = await db.select().from(aiArtifacts).where(eq(aiArtifacts.taskId, task.id)).orderBy(desc(aiArtifacts.createdAt))
   const sources = await db.select().from(aiTaskSources).where(eq(aiTaskSources.taskId, task.id)).orderBy(asc(aiTaskSources.createdAt))
-  return { ...task, artifacts: artifacts.map(publicArtifact), sources }
+  const deliverables = task.type === 'investment_proposal'
+    ? artifacts.filter((artifact) => artifact.format === 'docx')
+    : artifacts
+  return { ...task, artifacts: deliverables.map(publicArtifact), sources }
 }
 
 export async function listAiTasks(userId: string, options: { projectId?: string; conversationId?: string; limit?: number } = {}) {
@@ -1937,15 +1858,33 @@ export async function retryAiTask(user: AiTaskUser, taskId: string, idempotencyK
 export async function listAiArtifacts(userId: string, projectId?: string) {
   const conditions = [eq(aiArtifacts.userId, userId), eq(aiArtifacts.archived, false)]
   if (projectId) conditions.push(eq(aiArtifacts.projectId, projectId))
-  const rows = await db.select().from(aiArtifacts).where(and(...conditions)).orderBy(desc(aiArtifacts.createdAt)).limit(100)
-  return rows.map(publicArtifact)
+  const rows = await db.select({
+    artifact: aiArtifacts,
+    taskType: aiTasks.type,
+  })
+    .from(aiArtifacts)
+    .innerJoin(aiTasks, eq(aiArtifacts.taskId, aiTasks.id))
+    .where(and(...conditions))
+    .orderBy(desc(aiArtifacts.createdAt))
+    .limit(100)
+  return rows
+    .filter(({ artifact, taskType }) =>
+      taskType !== 'investment_proposal' || artifact.format === 'docx')
+    .map(({ artifact }) => publicArtifact(artifact))
 }
 
 export async function getArtifactDownload(userId: string, artifactId: string) {
-  const [artifact] = await db.select().from(aiArtifacts)
+  const [row] = await db.select({
+    artifact: aiArtifacts,
+    taskType: aiTasks.type,
+  })
+    .from(aiArtifacts)
+    .innerJoin(aiTasks, eq(aiArtifacts.taskId, aiTasks.id))
     .where(and(eq(aiArtifacts.id, artifactId), eq(aiArtifacts.userId, userId), eq(aiArtifacts.archived, false)))
     .limit(1)
+  const artifact = row?.artifact
   if (!artifact || artifact.qualityStatus !== 'passed') return undefined
+  if (row.taskType === 'investment_proposal' && artifact.format !== 'docx') return undefined
   const resolved = path.resolve(artifact.storagePath)
   if (!resolved.startsWith(ARTIFACT_ROOT + path.sep)) return undefined
   const fileStat = await stat(resolved).catch(() => null)

@@ -181,6 +181,18 @@ export interface MaterialJob {
 export interface LeadScoringDimensionItem { name: string; score: number; max: number; reason: string }
 export interface LeadScoringDimension { key: string; name: string; score: number; max: number; items: LeadScoringDimensionItem[] }
 export interface LeadCompetitor { name: string; is_self: boolean; tech: string; product: string; funding: string; differentiation: string; sourceUrl?: string }
+export type LeadScoreJobStatus = 'queued' | 'running' | 'retrying' | 'done' | 'failed'
+export interface LeadScoreJob {
+  status: LeadScoreJobStatus
+  attempts: number
+  maxAttempts: number
+  queuedAt?: string
+  startedAt?: string
+  updatedAt: string
+  completedAt?: string
+  nextRetryAt?: string
+  error?: string
+}
 export interface LeadScoring {
   total: number
   verdict: string
@@ -198,6 +210,7 @@ export interface LeadScoring {
   structuredTeam?: { name: string; title: string; background: string }[]
   structuredShareholders?: { name: string; percentage: string; type: string; sourceUrl?: string }[]
   structuredNews?: { date: string; title: string; summary: string; sourceName: string; sourceUrl: string }[]
+  scoreJob?: LeadScoreJob
 }
 
 export interface LeadValuationDisplay {
@@ -241,6 +254,7 @@ export interface Lead {
   businessTags?: { industry: string[]; region: string[] }
   valuationDisplay?: LeadValuationDisplay
   technicalScore?: LeadTechnicalScore
+  scoreJob?: LeadScoreJob | null
   dataUpdatedAt?: string
   completeness: number
   verificationStatus: '已核验' | '部分核验' | '待核验'

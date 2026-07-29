@@ -620,28 +620,53 @@ export const useAppStore = create<AppState>()(
         const finish = () => set((state) => ({ scoringLeadIds: state.scoringLeadIds.filter((x) => x !== leadId) }))
         try {
           await apiPost(`/leads/${leadId}/score`, {})
-          const deadline = Date.now() + 8 * 60 * 1000
+          const deadline = Date.now() + 20 * 60 * 1000
           while (Date.now() < deadline) {
             await new Promise((r) => setTimeout(r, 6000))
-            const st = await apiGet<{ status: string; error?: string }>(`/leads/${leadId}/score`)
+            const st = await apiGet<{
+              status: 'queued' | 'running' | 'retrying' | 'done' | 'failed' | 'idle'
+              error?: string
+              attempts?: number
+              maxAttempts?: number
+            }>(`/leads/${leadId}/score`)
+            if (st.status === 'queued' || st.status === 'running' || st.status === 'retrying') {
+              const activeStatus: 'queued' | 'running' | 'retrying' = st.status
+              set((state) => ({
+                leads: state.leads.map((lead) => lead.id === leadId ? {
+                  ...lead,
+                  scoreJob: {
+                    status: activeStatus,
+                    attempts: st.attempts ?? lead.scoreJob?.attempts ?? 0,
+                    maxAttempts: st.maxAttempts ?? lead.scoreJob?.maxAttempts ?? 2,
+                    updatedAt: new Date().toISOString(),
+                    error: st.error,
+                  },
+                } : lead),
+              }))
+              continue
+            }
             if (st.status === 'done') {
               const fresh = await apiGet<Lead>(`/leads/${leadId}`)
               if (fresh) set((state) => ({ leads: state.leads.map((l) => l.id === leadId ? { ...l, ...fresh } : l) }))
-              finish()
               return
             }
             if (st.status === 'failed') {
-              get().addAudit('项目获取池', 'AI 评分失败', st.error ?? leadId)
-              finish()
+              const fresh = await apiGet<Lead>(`/leads/${leadId}`).catch(() => null)
+              if (fresh) set((state) => ({ leads: state.leads.map((l) => l.id === leadId ? { ...l, ...fresh } : l) }))
+              const attemptText = st.attempts && st.maxAttempts ? `（${st.attempts}/${st.maxAttempts} 次）` : ''
+              get().addAudit('项目获取池', 'AI 评分失败', `${st.error ?? leadId}${attemptText}`)
               return
             }
           }
-          // 超时兜底:拉一次详情看是否已落库
+          // 浏览器停止高频轮询不等于取消任务；后端会继续排队执行，页面刷新后可从持久状态接续。
           const fresh = await apiGet<Lead>(`/leads/${leadId}`).catch(() => null)
           if (fresh) set((state) => ({ leads: state.leads.map((l) => l.id === leadId ? { ...l, ...fresh } : l) }))
-          finish()
+          if (fresh?.scoreJob && ['queued', 'running', 'retrying'].includes(fresh.scoreJob.status)) {
+            get().addAudit('项目获取池', 'AI 评分仍在后台执行', fresh.name)
+          }
         } catch (e) {
           get().addAudit('项目获取池', 'AI 评分请求失败', (e as Error).message)
+        } finally {
           finish()
         }
       },

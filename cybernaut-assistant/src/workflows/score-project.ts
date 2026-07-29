@@ -12,7 +12,7 @@ export const route: WorkflowRouteHandler = async (_c, next) => next();
 const STANDARD = readFileSync(join(process.cwd(), 'scripts', 'scoring_standard.json'), 'utf-8');
 
 const agent = defineAgent(() => ({
-  model: process.env.SCORE_MODEL ?? 'zeelin/DeepSeek-V4-Flash',
+  model: process.env.SCORE_MODEL ?? 'zeelin-oai/gpt-5.5',
   instructions: [
     '你是浙江赛智伯乐一级市场投资评审 AI，严格依据给定的《评分标准》对项目打分。',
     '',
@@ -78,6 +78,7 @@ export default defineWorkflow({
     risks: v.optional(v.array(v.string())),
     team: v.optional(v.string()),
     sources: v.optional(v.array(v.string())),
+    articleText: v.optional(v.string()),
   }),
   async run({ input, harness }) {
     const session = await harness.session();
@@ -92,6 +93,7 @@ export default defineWorkflow({
       input.highlights?.length ? `亮点：${input.highlights.join('；')}` : '亮点：未提供',
       input.risks?.length ? `风险：${input.risks.join('；')}` : '风险：未提供',
       input.sources?.length ? `信息来源：${input.sources.join('；')}` : '信息来源：未提供',
+      input.articleText ? `入库原始资料：${input.articleText.slice(0, 12000)}` : '',
     ].join('\n');
 
     const prompt = [

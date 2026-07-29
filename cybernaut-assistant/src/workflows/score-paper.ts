@@ -74,7 +74,7 @@ const PAPER_STANDARD = JSON.stringify({
 });
 
 const agent = defineAgent(() => ({
-  model: process.env.SCORE_MODEL ?? 'zeelin/DeepSeek-V4-Flash',
+  model: process.env.SCORE_MODEL ?? 'zeelin-oai/gpt-5.5',
   instructions: [
     '你是浙江赛智伯乐一级市场投资评审 AI，专门评估【来源于论文/学术成果的早期项目】。严格依据给定的《论文评分标准》对项目打分。',
     '',
