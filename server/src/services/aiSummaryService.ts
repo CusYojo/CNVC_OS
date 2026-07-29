@@ -6,7 +6,11 @@ import {
   shouldBackfillCompanyName,
   type RadarLeadSyncFields,
 } from './leadRadarMerge.js'
-import { deriveRadarSubjectName, isSpecificLeadSubjectName } from './leadSubjectName.js'
+import {
+  deriveRadarSubjectName,
+  isBetterLeadSubjectName,
+  isSpecificLeadSubjectName,
+} from './leadSubjectName.js'
 
 export async function getSummary(projectId: string) {
   const rows = await db.select().from(aiSummaries).where(eq(aiSummaries.projectId, projectId)).orderBy(desc(aiSummaries.updatedAt)).limit(1)
@@ -57,34 +61,52 @@ const completenessExpr = sql<number>`(
 const publicLeadSignalTextExpr = sql<string>`CONCAT_WS(
   ' ',
   COALESCE(${leads.name}, ''),
+  COALESCE(${leads.radarProfile}->>'sourceTitle', ''),
+  LEFT(COALESCE(${leads.sources}->0->>'title', ''), 500),
   LEFT(COALESCE(${leads.summary}, ''), 1600),
   LEFT(COALESCE(${leads.radarProfile}->'profile'->>'projectName', ''), 500),
   LEFT(COALESCE(${leads.radarProfile}->'profile'->>'coreHighlights', ''), 1600),
   LEFT(COALESCE(${leads.radarProfile}->'profile'->>'teamComposition', ''), 800)
 )`
 
-const publicLeadInvestmentFactsExpr = sql<string>`CONCAT_WS(
-  ' ',
-  COALESCE(${leads.fundingRounds}::text, ''),
-  COALESCE((${leads.scoring}->'fundingRoundsResearched')::text, ''),
-  COALESCE(${leads.radarProfile}->'profile'->>'projectRound', ''),
-  COALESCE(${leads.radarProfile}->'profile'->>'financingAmount', ''),
-  COALESCE(${leads.radarProfile}->'profile'->>'latestValuation', '')
+const publicLeadTitleExpr = sql<string>`COALESCE(
+  NULLIF(${leads.radarProfile}->>'sourceTitle', ''),
+  NULLIF(${leads.sources}->0->>'title', ''),
+  COALESCE(${leads.name}, '')
 )`
+
+const publicLeadPrimaryTextExpr = sql<string>`CONCAT_WS(
+  ' ',
+  ${publicLeadTitleExpr},
+  LEFT(COALESCE(${leads.summary}, ''), 1200),
+  LEFT(COALESCE(${leads.radarProfile}->'profile'->>'projectName', ''), 300)
+)`
+
+const publicLeadHasCompanyExpr = sql<boolean>`(
+  COALESCE(${leads.companyName}, '') ~ '(股份有限公司|有限责任公司|有限公司)$'
+  OR COALESCE(${leads.scoring}->'registry'->>'companyName', '') ~ '(股份有限公司|有限责任公司|有限公司)$'
+)`
+
+const PUBLIC_LEAD_INVESTMENT_PATTERN = '(完成|获得|获|宣布|官宣).{0,40}(融资|投资)|(融资|投资).{0,28}(完成|领投|跟投|亿元|万元|美元|天使轮|种子轮|pre-?a|a轮|b轮|c轮|d轮)|估值.{0,20}(亿元|万美元|亿美元|万元)'
+const PUBLIC_LEAD_COMMERCIAL_PATTERN = '(成果转化|技术转移|转化落地|产业化|中试|技术平台|工程化|技术许可|专利转让|孵化(成立|企业|公司)|创办公司|成立公司|产品获批|注册证|临床应用|应用新场景|示范应用|产业应用|客户验证|客户订单|采购|中标|签约|量产|营收|商业化)'
+const PUBLIC_LEAD_LOW_VALUE_PATTERN = '(院系之声.{0,30}(荣誉|获奖|award)|(教授|研究员|学者).{0,30}(获颁|获评|荣获|获奖|award|荣誉|发文|发表文章)|(获得|获评|入选|荣获|获).{0,24}(奖|荣誉|称号|教学团队|表彰|标兵|勋章)|(科学技术奖|科技奖|自然科学奖|技术发明奖|科技进步奖).{0,40}(揭晓|获奖|表彰)|[0-9]+[[:space:]]*项.{0,12}(获奖|获表彰)|(国家级|省级|全国高校).{0,16}(教学团队|教学成果|荣誉|奖|标兵)|奖学金|受试者招募|招募(研究参与者|受试者)|参与本研究|临床试验.{0,50}(招募|受试者|研究参与者)|实践成果.{0,24}(申请|硕士学位)|学位答辩|专业学位培养改革|论文.{0,40}(期刊|发表|刊发|接受|接收|accepted)|学术成果|研究论文|文章来源|转载全文|毕业(季|典礼|致辞|生|倒计时|设计)|毕业生去哪儿|校友招聘|社会招聘|诚聘|实习生|招聘|党支部|党员|党务|党建|革命先辈|校史|悼念|缅怀|研修班|训练营|课程|移动课堂|工作坊|讲座(预告)?|活动(预告|抢先知)|information session|参访|探访|师生校友|院友沙龙|创新大赛|参赛队伍|[0-9]+[[:space:]]*家.{0,24}(企业|公司).{0,30}(融资|投资)|专场(科创)?路演|路演举办|加速计划.{0,20}(招募|启动)|最前线|解码硬科技|罚单|行业进入强监管|([0-9]+点[0-9]*氪|氪星|创投|财经)(晚报|早报)?|为什么资本|什么样的.{0,20}(能|会)|行业观察|赛道观察|赴港上市|登陆资本市场|ipo认购|上市获|要报.{0,12}专业吗|招生(简章|宣传|咨询|专业|对象)?|培养方案|课程介绍|实验班介绍|培训班|结业证书|能力提升计划|名家面对面|学员企业|发表致辞|兼任|受聘|履新|任命|(记者|人物)?专访|人物访谈|观点访谈|深度解读|系统剖析)'
 
 // 存量 Radar 噪音不做物理删除，但从公共池列表和统计中排除。
 // 无明确公司、融资或估值时，获奖/教学/任职资讯直接隐藏；
 // 纯论文和课题组研究只有具备成果转化、产业化或客户验证信号才保留。
 const visiblePublicLeadExpr = sql<boolean>`NOT (
   COALESCE(${leads.source}, '') ~ '^项目发现雷达'
-  AND COALESCE(${leads.companyName}, '') !~ '(股份有限公司|有限责任公司|有限公司)$'
-  AND COALESCE(${leads.scoring}->'registry'->>'companyName', '') IN ('', '待核验', '待核实', '未披露', '未披露/待核实', '未披露/待验证')
-  AND ${publicLeadInvestmentFactsExpr} !~* '(天使轮|种子轮|pre-?a|a轮|b轮|c轮|d轮|战略融资|战略投资|新一轮融资|领投|跟投|估值.{0,20}(亿元|万美元|亿美元|万元)|融资金额.{0,20}(亿元|万美元|亿美元|万元))'
   AND (
-    ${publicLeadSignalTextExpr} ~* '(院系之声.{0,30}(荣誉|获奖|award)|(教授|研究员|学者).{0,30}(获颁|获评|荣获|获奖|award|荣誉)|(获得|获评|入选|荣获).{0,24}(奖|荣誉|称号|教学团队)|(科学技术奖|科技奖|自然科学奖|技术发明奖|科技进步奖).{0,40}(揭晓|获奖|表彰)|[0-9]+[[:space:]]*项.{0,12}(获奖|获表彰)|(国家级|省级).{0,16}(教学团队|教学成果|荣誉|奖)|要报.{0,12}专业吗|招生(简章|宣传|咨询|专业|对象)?|培养方案|课程介绍|实验班介绍|研修班|培训班|结业证书|能力提升计划|名家面对面|学员企业|毕业典礼|毕业致辞|发表致辞|兼任|受聘|履新|任命|(记者|人物)?专访|人物访谈|观点访谈|深度解读|系统剖析)'
+    ${publicLeadTitleExpr} ~* ${PUBLIC_LEAD_LOW_VALUE_PATTERN}
     OR (
-      ${publicLeadSignalTextExpr} ~* '((课题组|团队|实验室).{0,100}(发表|论文|研究|揭示|破解|开发|发现|成果)|(学术成果|科研成果|研究进展|研究论文|最新研究|多项研究|两项研究).{0,100}(课题组|团队|教授|研究员|实验室|突破|发现|揭示|开发)?|(团队|课题组).{0,60}(算法|模型|数据|机制|通路|架构))'
-      AND ${publicLeadSignalTextExpr} !~* '(成果转化|技术转移|转化落地|产业化|中试|技术平台|工程化|技术许可|专利转让|孵化(成立|企业|公司)|创办公司|成立公司|产品获批|注册证|临床应用|应用新场景|示范应用|产业应用|客户验证|客户订单|采购|中标|签约|量产|营收|商业化)'
+      ${publicLeadPrimaryTextExpr} !~* ${PUBLIC_LEAD_INVESTMENT_PATTERN}
+      AND ${publicLeadSignalTextExpr} ~* ${PUBLIC_LEAD_LOW_VALUE_PATTERN}
+    )
+    OR (
+      ${publicLeadPrimaryTextExpr} !~* ${PUBLIC_LEAD_INVESTMENT_PATTERN}
+      AND
+      NOT ${publicLeadHasCompanyExpr}
+      AND ${publicLeadPrimaryTextExpr} !~* ${PUBLIC_LEAD_COMMERCIAL_PATTERN}
     )
   )
 )`
@@ -95,6 +117,7 @@ export interface LeadScoreJob {
   status: LeadScoreJobStatus
   attempts: number
   maxAttempts: number
+  retryCycles?: number
   queuedAt?: string
   startedAt?: string
   updatedAt: string
@@ -116,6 +139,7 @@ export function readLeadScoreJob(scoring: unknown): LeadScoreJob | null {
     status,
     attempts: Math.max(0, Number(value.attempts) || 0),
     maxAttempts: Math.max(1, Number(value.maxAttempts) || 1),
+    retryCycles: Math.max(0, Number(value.retryCycles) || 0),
     queuedAt: typeof value.queuedAt === 'string' ? value.queuedAt : undefined,
     startedAt: typeof value.startedAt === 'string' ? value.startedAt : undefined,
     updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : new Date(0).toISOString(),
@@ -344,6 +368,7 @@ function enrichLead(row: typeof leads.$inferSelect) {
   const profile = (rp.profile && typeof rp.profile === 'object' ? rp.profile : {}) as Record<string, unknown>
   const isRadarLead = /^项目发现雷达(?:\s|·|$)/.test(src)
   const isPaper = String(rp.channel ?? '') === '论文'
+  const sourceTitle = String(rp.sourceTitle || ((arr(row.sources)[0] as Record<string, unknown> | undefined)?.title ?? '')).trim()
   const derivedSubjectName = deriveRadarSubjectName({
     isPaper,
     companyNames: [
@@ -354,14 +379,14 @@ function enrichLead(row: typeof leads.$inferSelect) {
     projectName: profile.projectName,
     lab: profile.lab,
     team: profile.teamComposition || row.team,
-    title: row.name,
+    title: sourceTitle || row.name,
     articleText: rp.articleText || row.summary,
     excludedNames: [rp.sourceName, rp.accountName],
   })
   // 历史 Radar 数据可能已把正文谓语片段写进 name/companyName。
   // 接口层即时纠正展示；后续通过质量门槛的同源记录可按原文链接持久化升级。
-  const subjectName = isRadarLead && !isSpecificLeadSubjectName(row.name, isPaper)
-    ? (derivedSubjectName || '主体待确认')
+  const subjectName = isRadarLead
+    ? (derivedSubjectName || (isSpecificLeadSubjectName(row.name, isPaper) ? row.name : '主体待确认'))
     : row.name
   const isResearchSubjectFallback = isRadarLead
     && row.companyName === row.name
@@ -370,8 +395,8 @@ function enrichLead(row: typeof leads.$inferSelect) {
     ? null
     : row.companyName
   const displayRadarProfile = isRadarLead
-    && profile.projectName
-    && !isSpecificLeadSubjectName(profile.projectName, isPaper)
+    && subjectName
+    && profile.projectName !== subjectName
     ? { ...rp, profile: { ...profile, projectName: subjectName } }
     : rp
   const channel = (rp && rp.channel) ? rp.channel
@@ -381,6 +406,12 @@ function enrichLead(row: typeof leads.$inferSelect) {
     : /微信|群/.test(src) ? '微信群' : '新闻'
   const region = deriveRegion(sc, rp)
   const scoreJob = readLeadScoreJob(sc)
+  const publicScoreJob = scoreJob
+    ? {
+        ...scoreJob,
+        error: scoreJob.status === 'failed' ? 'AI 评分暂未完成，可重新生成' : undefined,
+      }
+    : null
   return {
     ...row,
     name: subjectName,
@@ -398,7 +429,7 @@ function enrichLead(row: typeof leads.$inferSelect) {
     },
     valuationDisplay: deriveValuationDisplay(sc, rp, analysisStatus, row.fundingRounds),
     technicalScore: deriveTechnicalScore(sc),
-    scoreJob,
+    scoreJob: publicScoreJob,
     dataUpdatedAt: deriveDataUpdatedAt(sc, rp, row.createdAt),
   }
 }
@@ -506,6 +537,7 @@ export async function listLeads(options: { page?: number; pageSize?: number; cha
         'channel', ${leads.radarProfile}->'channel',
         'sourceName', ${leads.radarProfile}->'sourceName',
         'sourceGroup', ${leads.radarProfile}->'sourceGroup',
+        'sourceTitle', COALESCE(${leads.radarProfile}->'sourceTitle', ${leads.sources}->0->'title'),
         'publishedAt', ${leads.radarProfile}->'publishedAt'
       ) END`,
       // 列表估值兜底：仅保留第一条历史融资的轮次/估值，避免返回完整 funding_rounds。
@@ -634,8 +666,7 @@ export async function syncRadarLeadByName(input: RadarLeadSyncFields, userId?: s
     ...buildRadarLeadMergePatch(existing, input as RadarLeadSyncFields & Record<string, unknown>),
   }
   const canUpgradeSubjectName = /^项目发现雷达(?:\s|·|$)/.test(String(existing.source ?? ''))
-    && !isSpecificLeadSubjectName(existing.name)
-    && isSpecificLeadSubjectName(input.name)
+    && isBetterLeadSubjectName(existing.name, input.name)
   if (canUpgradeSubjectName) {
     patch.name = input.name
     if (!isSpecificLeadSubjectName(existing.companyName) && input.companyName) {

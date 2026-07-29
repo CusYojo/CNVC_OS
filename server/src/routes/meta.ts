@@ -431,6 +431,7 @@ metaRouter.post('/leads/sync-radar', async (req: AuthedRequest, res, next) => {
       const radarProfile = {
         sourceId: firstMeaningfulRadarText(it.source_id, it.fingerprint),
         radarSourceKey: radarCandidateSourceKey(it),
+        sourceTitle: it.title || '',
         decisionLabel: it.decision_label || '',
         thesis: prof.private_market_thesis || '',
         sourceName: it.source_name || it.source || '',
@@ -570,15 +571,19 @@ const scoreStatus = new Map<string, {
   startedAt: number
   attempts: number
   maxAttempts: number
+  retryCycles: number
 }>()
 
 // —— 全局评分队列：N 个并发 worker 消费,N=SCORE_QUEUE_CONCURRENCY(默认2)。
 // 本地模型网关是评分链路的瓶颈，默认并发 2，避免 50 条雷达同步后同时压垮网关。
 const scoreQueue: string[] = []
 const SCORE_QUEUE_CONCURRENCY = Math.max(1, parseInt(process.env.SCORE_QUEUE_CONCURRENCY || '2', 10))
-const SCORE_MAX_ATTEMPTS = Math.max(1, Math.min(4, parseInt(process.env.SCORE_MAX_ATTEMPTS || '2', 10)))
+const SCORE_MAX_ATTEMPTS = Math.max(1, Math.min(4, parseInt(process.env.SCORE_MAX_ATTEMPTS || '3', 10)))
 const SCORE_REQUEST_TIMEOUT_MS = Math.max(30_000, parseInt(process.env.SCORE_REQUEST_TIMEOUT_MS || '480000', 10))
 const SCORE_RETRY_BASE_MS = Math.max(1_000, parseInt(process.env.SCORE_RETRY_BASE_MS || '5000', 10))
+const SCORE_DEFERRED_RETRY_LIMIT = Math.max(0, Math.min(5, parseInt(process.env.SCORE_DEFERRED_RETRY_LIMIT || '3', 10)))
+const SCORE_DEFERRED_RETRY_MS = Math.max(10_000, parseInt(process.env.SCORE_DEFERRED_RETRY_MS || '60000', 10))
+const deferredScoreRetryTimers = new Map<string, ReturnType<typeof setTimeout>>()
 let activeWorkers = 0
 async function worker(): Promise<void> {
   while (scoreQueue.length) {
@@ -608,10 +613,12 @@ async function scheduleLeadScoring(leadId: string, options: { recovering?: boole
   const attempts = options.recovering
     ? Math.min(previous?.attempts ?? 0, SCORE_MAX_ATTEMPTS - 1)
     : 0
+  const retryCycles = options.recovering ? previous?.retryCycles ?? 0 : 0
   const job: LeadScoreJob = {
     status: 'queued',
     attempts,
     maxAttempts: SCORE_MAX_ATTEMPTS,
+    retryCycles,
     queuedAt: previous?.queuedAt ?? now,
     updatedAt: now,
     error: undefined,
@@ -627,6 +634,7 @@ async function scheduleLeadScoring(leadId: string, options: { recovering?: boole
     startedAt: Date.now(),
     attempts,
     maxAttempts: SCORE_MAX_ATTEMPTS,
+    retryCycles,
   })
   enqueueScore(leadId)
   return true
@@ -648,6 +656,72 @@ function retryableScoreError(error: unknown) {
 
 function scoreDelay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function deferLeadScoringRetry(
+  leadId: string,
+  input: {
+    error: Error
+    queuedAt?: string
+    startedAt?: string
+    retryCycles: number
+  },
+) {
+  const retryCycles = input.retryCycles + 1
+  const delayMs = SCORE_DEFERRED_RETRY_MS * retryCycles
+  const now = new Date().toISOString()
+  const nextRetryAt = new Date(Date.now() + delayMs).toISOString()
+  const retryingJob: LeadScoreJob = {
+    status: 'retrying',
+    attempts: SCORE_MAX_ATTEMPTS,
+    maxAttempts: SCORE_MAX_ATTEMPTS,
+    retryCycles,
+    queuedAt: input.queuedAt ?? now,
+    startedAt: input.startedAt,
+    updatedAt: now,
+    nextRetryAt,
+    error: input.error.message,
+  }
+  await saveLeadScoreJob(leadId, retryingJob)
+  scoreStatus.set(leadId, {
+    status: 'retrying',
+    error: input.error.message,
+    startedAt: Date.now(),
+    attempts: SCORE_MAX_ATTEMPTS,
+    maxAttempts: SCORE_MAX_ATTEMPTS,
+    retryCycles,
+  })
+
+  const existingTimer = deferredScoreRetryTimers.get(leadId)
+  if (existingTimer) clearTimeout(existingTimer)
+  const timer = setTimeout(() => {
+    deferredScoreRetryTimers.delete(leadId)
+    void (async () => {
+      const current = scoreStatus.get(leadId)
+      if (!current || current.status !== 'retrying' || current.retryCycles !== retryCycles) return
+      const queuedAt = new Date().toISOString()
+      const queuedJob: LeadScoreJob = {
+        ...retryingJob,
+        status: 'queued',
+        attempts: 0,
+        updatedAt: queuedAt,
+        nextRetryAt: undefined,
+        error: undefined,
+      }
+      await saveLeadScoreJob(leadId, queuedJob)
+      scoreStatus.set(leadId, {
+        status: 'queued',
+        startedAt: Date.now(),
+        attempts: 0,
+        maxAttempts: SCORE_MAX_ATTEMPTS,
+        retryCycles,
+      })
+      enqueueScore(leadId)
+    })().catch((error) => {
+      console.error(`[lead-score] deferred retry enqueue failed lead=${leadId}:`, (error as Error).message)
+    })
+  }, delayMs)
+  deferredScoreRetryTimers.set(leadId, timer)
 }
 
 type ScoreWorkflowResult = {
@@ -748,6 +822,7 @@ async function doScore(leadId: string): Promise<void> {
     let finalError: Error | null = null
     const persisted = readLeadScoreJob((lead as { scoring?: unknown }).scoring)
     runStartedAt = persisted?.startedAt ?? new Date().toISOString()
+    const retryCycles = persisted?.retryCycles ?? 0
     const initialAttempts = Math.min(persisted?.attempts ?? 0, SCORE_MAX_ATTEMPTS - 1)
     for (let attempt = initialAttempts + 1; attempt <= SCORE_MAX_ATTEMPTS; attempt += 1) {
       const now = new Date().toISOString()
@@ -755,6 +830,7 @@ async function doScore(leadId: string): Promise<void> {
         status: 'running',
         attempts: attempt,
         maxAttempts: SCORE_MAX_ATTEMPTS,
+        retryCycles,
         queuedAt: persisted?.queuedAt ?? now,
         startedAt: runStartedAt,
         updatedAt: now,
@@ -764,6 +840,7 @@ async function doScore(leadId: string): Promise<void> {
         startedAt: Date.now(),
         attempts: attempt,
         maxAttempts: SCORE_MAX_ATTEMPTS,
+        retryCycles,
       })
       await saveLeadScoreJob(leadId, runningJob)
       try {
@@ -787,12 +864,29 @@ async function doScore(leadId: string): Promise<void> {
           startedAt: Date.now(),
           attempts: attempt,
           maxAttempts: SCORE_MAX_ATTEMPTS,
+          retryCycles,
         })
         await saveLeadScoreJob(leadId, retryingJob)
         await scoreDelay(SCORE_RETRY_BASE_MS * attempt)
       }
     }
-    if (!result) throw finalError ?? new Error('评分服务未返回结果')
+    if (!result) {
+      const error = finalError ?? new Error('评分服务未返回结果')
+      if (retryableScoreError(error) && retryCycles < SCORE_DEFERRED_RETRY_LIMIT) {
+        console.warn(
+          `[lead-score] transient failure lead=${leadId}, deferred retry cycle=${retryCycles + 1}/${SCORE_DEFERRED_RETRY_LIMIT}:`,
+          error.message,
+        )
+        await deferLeadScoringRetry(leadId, {
+          error,
+          queuedAt: persisted?.queuedAt,
+          startedAt: runStartedAt,
+          retryCycles,
+        })
+        return
+      }
+      throw error
+    }
 
     const industry = lead.industry
     // 改用 listLeadScoresForRanking 拉全表 industry+total 极轻量列表(避免 listLeads 全表反序列化大 jsonb)
@@ -823,6 +917,7 @@ async function doScore(leadId: string): Promise<void> {
         status: 'done',
         attempts: scoreStatus.get(leadId)?.attempts ?? 1,
         maxAttempts: SCORE_MAX_ATTEMPTS,
+        retryCycles,
         queuedAt: persisted?.queuedAt,
         startedAt: runStartedAt,
         updatedAt: new Date().toISOString(),
@@ -836,13 +931,16 @@ async function doScore(leadId: string): Promise<void> {
       startedAt: scoreStatus.get(leadId)?.startedAt ?? Date.now(),
       attempts: scoreStatus.get(leadId)?.attempts ?? 1,
       maxAttempts: SCORE_MAX_ATTEMPTS,
+      retryCycles,
     })
   } catch (err) {
     const current = scoreStatus.get(leadId)
+    console.error(`[lead-score] terminal failure lead=${leadId}:`, (err as Error).message)
     const failedJob: LeadScoreJob = {
       status: 'failed',
       attempts: current?.attempts ?? SCORE_MAX_ATTEMPTS,
       maxAttempts: current?.maxAttempts ?? SCORE_MAX_ATTEMPTS,
+      retryCycles: current?.retryCycles ?? 0,
       startedAt: runStartedAt,
       updatedAt: new Date().toISOString(),
       completedAt: new Date().toISOString(),
@@ -857,6 +955,7 @@ async function doScore(leadId: string): Promise<void> {
       startedAt: current?.startedAt ?? Date.now(),
       attempts: failedJob.attempts,
       maxAttempts: failedJob.maxAttempts,
+      retryCycles: failedJob.retryCycles ?? 0,
     })
   }
 }
@@ -893,13 +992,15 @@ metaRouter.get('/leads/:id/score', async (req: AuthedRequest, res, next) => {
     else if (st?.status === 'done' || hasAiScoring) status = 'done'
     else if (persistedJob?.status) status = persistedJob.status
     else status = 'idle'
+    const publicError = status === 'failed' ? 'AI 评分暂未完成，可重新生成' : undefined
     res.json({
       code: 0,
       message: 'success',
       status,
-      error: st?.error ?? persistedJob?.error,
+      error: publicError,
       attempts: st?.attempts ?? persistedJob?.attempts,
       maxAttempts: st?.maxAttempts ?? persistedJob?.maxAttempts,
+      retryCycles: st?.retryCycles ?? persistedJob?.retryCycles,
       scoring: scoring ?? null,
     })
   } catch (err) { next(err) }

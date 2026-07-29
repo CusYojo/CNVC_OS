@@ -30,17 +30,45 @@ const GENERIC_SUBJECTS = new Set([
   '某项目',
   '作者',
   '负责人',
+  '文章来源',
+  '文章转载',
+  '全新突破',
+  '硬氪前线',
+  '硬氪首发',
+  '独家',
+  '首发',
+  '喜报',
+  '来源',
+  '清心新闻',
+  '硬氪',
+  '36氪',
+  '十五五',
+  '融资',
+  '会赚钱',
+  '保险科技',
+  '消费级智能',
+  '中国半导体',
+  '入局物理智能',
+  'X教授',
+  '前瞻理论研究与创新平台',
 ])
 
-const VAGUE_START_RE = /^(?:他|她|其|该|这|此|其中|上述|相关|目前|未来|同时|此外|另|据|对于|关于|要求|需要|应当|必须|支持|推动|加强|开展|主动|曾|曾经|担任|联创|联合创始人?|并|基于|后两年|共享|为|以|从|在|将|把|被|联合|面对|通过|围绕|聚焦|一是|二是|三是|四是)/
-const VAGUE_BODY_RE = /(?:岗位记录|关键证明|证明材料|要求主动|主动适应|为核心业务|核心业务的|系统梳理|以及团队|进入导师课题组|共享两个学院|获颁|获评|荣获|获奖|荣誉|Award|等信息|等材料|等证明|等方面|等工作|带来的变化)/i
-const VAGUE_END_RE = /(?:材料|记录|信息|情况|内容|要求|工作|方面|变化|问题|任务|路径|策略|证明)$/
-const PREDICATE_RE = /(?:要求|适应|指出|表示|强调|认为|提出|推动|支持|开展|实现|完成|获得|发布|宣布|提供|形成|建立|构建|促进|提升|加强|记录|证明|担任|任职|毕业|来自|师从|进入|共享|梳理|发表|结合)/
+const VAGUE_START_RE = /^(?:他|她|其|该|这|此|其中|上述|相关|目前|未来|同时|此外|另|据|对于|关于|要求|需要|应当|必须|支持|推动|加强|开展|主动|曾|曾经|担任|联创|联合创始人?|成立|投资|创始人|科研人员|参赛|本次|全体|让更多|并|基于|后两年|共享|作为|为|以|从|在|将|把|被|联合|面对|通过|围绕|聚焦|一是|二是|三是|四是)/
+const VAGUE_BODY_RE = /(?:岗位记录|关键证明|证明材料|要求主动|主动适应|为核心业务|核心业务的|系统梳理|以及团队|进入导师课题组|共享两个学院|获颁|获评|荣获|获奖|荣誉|Award|文章来源|论文合作者|合作者为|受试者|研究参与者|筛选期|完全开放|依托高校|顺利通过|key observation|by the paper|等信息|等材料|等证明|等方面|等工作|带来的变化)/i
+const VAGUE_END_RE = /(?:材料|记录|信息|情况|内容|要求|工作|方面|变化|问题|任务|路径|策略|证明|累计|责编|来源|再)$/
+const PREDICATE_RE = /(?:要求|适应|指出|表示|强调|认为|提出|推动|支持|开展|实现|完成|获得|发布|宣布|提供|形成|建立|构建|促进|提升|加强|记录|证明|担任|任职|毕业|来自|师从|进入|共享|梳理|发表|结合|参与|经历|合作者|申请|接受)/
 const NUMBERED_TECH_FRAGMENT_RE = /^[\u4e00-\u9fffA-Za-z]{1,8}[-—–][\u4e00-\u9fffA-Za-z]{1,8}\d{1,2}$/
-const GENERIC_INSTITUTION_TECH_RE = /^(?:清华|北大|北航|上交大|复旦|浙大|中科大|哈工大).*(?:机器人|芯片|人工智能|团队|项目)$/
-const LOW_VALUE_RADAR_RE = /(?:院系之声.{0,30}(?:荣誉|获奖|Award)|(?:教授|研究员|学者).{0,30}(?:获颁|获评|荣获|获奖|Award|荣誉)|(?:获得|获评|入选|荣获).{0,24}(?:奖|荣誉|称号|教学团队)|(?:科学技术奖|科技奖|自然科学奖|技术发明奖|科技进步奖).{0,40}(?:揭晓|获奖|表彰)|\d+\s*项.{0,12}(?:获奖|获表彰)|(?:国家级|省级).{0,16}(?:教学团队|教学成果|荣誉|奖)|要报.{0,12}专业吗|招生(?:简章|宣传|咨询|专业|对象)?|培养方案|课程介绍|实验班介绍|研修班|培训班|结业证书|能力提升计划|名家面对面|学员企业|毕业典礼|毕业致辞|发表致辞|兼任|受聘|履新|任命|(?:记者|人物)?专访|人物访谈|观点访谈|深度解读|系统剖析)/i
-const PURE_ACADEMIC_RADAR_RE = /(?:(?:课题组|团队|实验室).{0,100}(?:发表|论文|研究|揭示|破解|开发|发现|成果)|(?:学术成果|科研成果|研究进展|研究论文|最新研究|多项研究|两项研究).{0,100}(?:课题组|团队|教授|研究员|实验室|突破|发现|揭示|开发)?|(?:团队|课题组).{0,60}(?:算法|模型|数据|机制|通路|架构))/i
+const GENERIC_INSTITUTION_TECH_RE = /^(?:清华|北大|北航|上交大|复旦|浙大|中科大|哈工大)(?:系)?(?:机器人|芯片|人工智能|大模型)(?:团队|项目)?$/
+const SUBJECT_MARKER_RE = /(?:股份有限公司|有限责任公司|有限公司|公司|企业|项目|团队|实验室|研究院|研究所|研究中心|工程中心|课题组|创新群体|创新联合体|中试基地|产业基地|创新平台|技术平台|研发平台|试验平台|装置|系统|产品|计划)$/
+const ENGLISH_ENTITY_MARKER_RE = /(?:AI|Labs?|Laboratory|Institute|Center|Centre|Technologies|Technology|Robotics|Bio|Systems?|Platform|Project)$/i
+const LOW_VALUE_RADAR_RE = /(?:院系之声.{0,30}(?:荣誉|获奖|Award)|(?:教授|研究员|学者).{0,30}(?:获颁|获评|荣获|获奖|Award|荣誉|发文|发表文章)|(?:获得|获评|入选|荣获|获).{0,24}(?:奖|荣誉|称号|教学团队|表彰|标兵|勋章)|(?:科学技术奖|科技奖|自然科学奖|技术发明奖|科技进步奖).{0,40}(?:揭晓|获奖|表彰)|\d+\s*项.{0,12}(?:获奖|获表彰)|(?:国家级|省级|全国高校).{0,16}(?:教学团队|教学成果|荣誉|奖|标兵)|奖学金|受试者招募|招募(?:研究参与者|受试者)|参与本研究|临床试验.{0,50}(?:招募|受试者|研究参与者)|实践成果.{0,24}(?:申请|硕士学位)|学位答辩|专业学位培养改革|论文.{0,40}(?:期刊|发表|刊发|接受|接收|accepted)|学术成果|研究论文|文章来源|转载全文|毕业(?:季|典礼|致辞|生|倒计时|设计)|毕业生去哪儿|校友招聘|社会招聘|诚聘|实习生|招聘|党支部|党员|党务|党建|革命先辈|校史|悼念|缅怀|研修班|训练营|课程|移动课堂|工作坊|讲座(?:预告)?|活动(?:预告|抢先知)|Information Session|参访|探访|师生校友|院友沙龙|创新大赛|参赛队伍|\d+\s*家.{0,24}(?:企业|公司).{0,30}(?:融资|投资)|专场(?:科创)?路演|路演举办|加速计划.{0,20}(?:招募|启动)|最前线|解码硬科技|罚单|行业进入强监管|(?:\d+点\d*氪|氪星|创投|财经)(?:晚报|早报)?|为什么资本|什么样的.{0,20}(?:能|会)|行业观察|赛道观察|赴港上市|登陆资本市场|IPO认购|上市获|要报.{0,12}专业吗|招生(?:简章|宣传|咨询|专业|对象)?|培养方案|课程介绍|实验班介绍|培训班|结业证书|能力提升计划|名家面对面|学员企业|发表致辞|兼任|受聘|履新|任命|(?:记者|人物)?专访|人物访谈|观点访谈|深度解读|系统剖析)/i
+const PURE_ACADEMIC_RADAR_RE = /(?:(?:课题组|团队|实验室).{0,100}(?:发表|论文|研究|揭示|破解|开发|发现|成果)|(?:学术成果|科研成果|研究进展|研究论文|最新研究|多项研究|两项研究|研究成果|合作论文).{0,100}(?:课题组|团队|教授|研究员|实验室|突破|发现|揭示|开发|发表|刊发|接收)?|(?:论文|研究成果).{0,80}(?:发表|刊发|接收|accepted|publication)|(?:发表于|在线发表于|accepted by).{0,60}(?:期刊|journal|nature|science|IEEE)|Science Publication|论文摘要|(?:团队|课题组).{0,60}(?:算法|模型|数据|机制|通路|架构))/i
 const COMMERCIAL_RADAR_RE = /(?:成果转化|技术转移|转化落地|产业化|中试|技术平台|工程化|技术许可|专利转让|孵化(?:成立|企业|公司)|创办公司|成立公司|产品获批|注册证|临床应用|应用新场景|示范应用|产业应用|客户验证|客户订单|采购|中标|签约|量产|营收|商业化)/i
+const VERIFIED_SOURCE_SUBJECT_RULES: Array<{ pattern: RegExp; subject: string }> = [
+  { pattern: /北航机器人所团队创业.{0,24}智能变刚度关节/, subject: '航墨科技' },
+  { pattern: /清华系初创完成数亿元种子轮融资.{0,30}世界模型/, subject: '厘清智能' },
+  { pattern: /前大疆科学家创业.{0,30}(?:四轮|耀途资本|锦秋基金)/, subject: '硅羽科技' },
+]
 
 function cleanSubjectName(value: unknown): string {
   return String(value ?? '')
@@ -59,11 +87,14 @@ export function isSpecificLeadSubjectName(value: unknown, allowPaperTitle = fals
   if (GENERIC_SUBJECTS.has(name)) return false
   if (NUMBERED_TECH_FRAGMENT_RE.test(name)) return false
   if (GENERIC_INSTITUTION_TECH_RE.test(name)) return false
-  if (/[，。！？；;：:\n]/.test(name)) return false
+  if ((name.includes('（') && !name.includes('）')) || (name.includes('(') && !name.includes(')'))) return false
+  if (/[，。！？；;：:、|｜丨\n]/.test(name)) return false
   if (VAGUE_START_RE.test(name) || VAGUE_BODY_RE.test(name) || VAGUE_END_RE.test(name)) return false
   if (name.includes('等') && !/(?:邓|等等科技|等等智能)/.test(name)) return false
   if (PREDICATE_RE.test(name) && !/(?:公司|企业|项目|团队|实验室|研究院|研究中心|工程中心|课题组)$/.test(name)) return false
-  if (name.length > 22 && /(?:的|了|是|与|及|以|在|为|将|把|被|对于|关于|之|正在)/.test(name)) return false
+  const englishWords = name.match(/[A-Za-z][A-Za-z0-9-]*/g) ?? []
+  if (englishWords.length >= 2 && !SUBJECT_MARKER_RE.test(name) && !ENGLISH_ENTITY_MARKER_RE.test(name)) return false
+  if (!SUBJECT_MARKER_RE.test(name) && /(?:的|了|是|以|在|为|将|把|被|对于|关于|正在)/.test(name)) return false
   return true
 }
 
@@ -76,16 +107,61 @@ export function isNonInvestableRadarContent(input: {
   hasInvestmentEvidence?: boolean
   values: unknown[]
 }): boolean {
-  if (input.hasCompanySubject || input.hasInvestmentEvidence) return false
+  if (input.hasInvestmentEvidence) return false
   const text = input.values.map((value) => String(value ?? '').slice(0, 2400)).join('\n')
   if (LOW_VALUE_RADAR_RE.test(text)) return true
-  return PURE_ACADEMIC_RADAR_RE.test(text) && !COMMERCIAL_RADAR_RE.test(text)
+  if (input.hasCompanySubject) return false
+  return !COMMERCIAL_RADAR_RE.test(text)
+}
+
+function normalizeProjectCandidate(value: unknown): string {
+  let candidate = cleanSubjectName(value)
+  const describedBrand = candidate.match(/(?:研发商|制造商|提供商|品牌|独角兽|公司|企业)([\u4e00-\u9fffA-Za-z0-9·&＋+\-\s]{2,24})$/)
+  if (describedBrand) candidate = cleanSubjectName(describedBrand[1])
+  candidate = candidate.replace(/^(?:超声脑机接口公司|端侧大模型独角兽|清华系端侧大模型独角兽|消费级智能硬件品牌)/, '')
+  candidate = candidate.replace(/^(?:推出的|研发的|打造的|研制的)/, '')
+  candidate = candidate.replace(/^投资(?=[\u4e00-\u9fffA-Za-z0-9])/, '')
+  if (/^[A-Za-z0-9·&＋+\-]{2,24}团队$/i.test(candidate)) candidate = candidate.replace(/团队$/, '项目')
+  if (/(?:系)?初创$/.test(candidate)) candidate += '项目'
+  if (candidate && !SUBJECT_MARKER_RE.test(candidate) && /(?:智能体|外骨骼|机器人|模型|芯片|装置|平台|系统|产品)$/.test(candidate)) {
+    candidate += '项目'
+  }
+  return candidate
+}
+
+function isReliableCompanySubjectName(value: unknown): boolean {
+  const candidate = cleanSubjectName(value)
+  if (!isSpecificLeadSubjectName(candidate)) return false
+  if (/(?:揭牌|推进会|在|于|由).{2,}(?:股份有限公司|有限责任公司|有限公司)$/.test(candidate)) return false
+  return true
+}
+
+function extractDescriptiveProjectSubjects(titleValue: unknown, textValue: unknown): string[] {
+  const title = String(titleValue ?? '').trim()
+  const text = String(textValue ?? '').slice(0, 1200)
+  const technology = String.raw`(?:智能体|外骨骼|机器人|芯片|模型|平台|系统|装置|产品)`
+  const match = text.match(new RegExp(String.raw`(?:打造|研发|推出|开发|聚焦|面向)[^，。\n]{0,36}?([\u4e00-\u9fffA-Za-z0-9·&＋+\-]{2,20}${technology})`, 'i'))
+  if (!match) return []
+  let candidate = cleanSubjectName(match[1])
+  const technologyTail = candidate.match(new RegExp(String.raw`(?:的)([^的]{2,16}${technology})$`, 'i'))
+  if (technologyTail) candidate = technologyTail[1]
+  const founderPrefix = title.match(/^(前[^，,]{2,18}?科学家)创业/)
+  candidate = `${founderPrefix?.[1] ?? ''}${candidate}`
+  candidate = normalizeProjectCandidate(candidate)
+  return isSpecificLeadSubjectName(candidate) ? [candidate] : []
 }
 
 function splitCandidates(value: unknown): string[] {
   return String(value ?? '')
     .split(/[；;\n|｜]/)
     .map(cleanSubjectName)
+    .flatMap((candidate) => {
+      const coordinatedSubjects = candidate
+        .split(/(?:与|联合)/)
+        .map(cleanSubjectName)
+        .filter((part) => SUBJECT_MARKER_RE.test(part))
+      return coordinatedSubjects.length >= 2 ? coordinatedSubjects : [candidate]
+    })
     .filter(Boolean)
 }
 
@@ -95,11 +171,19 @@ function extractNamedFragments(value: unknown): string[] {
   const patterns = [
     /([\u4e00-\u9fffA-Za-z0-9（）()·&＋+\-]{2,80}(?:股份有限公司|有限责任公司|有限公司))/g,
     /((?:[\u4e00-\u9fff]{2,20}(?:大学|学院|研究所|医院))[\u4e00-\u9fff·]{0,16}(?:教授|研究员|博士)?团队)/g,
-    /([\u4e00-\u9fffA-Za-z0-9·]{2,30}(?:重点实验室|实验室|研究中心|工程中心|研究院|课题组))/g,
+    /([\u4e00-\u9fffA-Za-z0-9·]{2,50}(?:重点实验室|实验室|研究中心|工程中心|研究院|课题组|创新群体|创新联合体|中试基地|产业基地|创新平台|技术平台|研发平台|试验平台))/g,
     /([\u4e00-\u9fff·]{2,6}(?:教授|研究员|博士)?团队)/g,
   ]
   for (const pattern of patterns) {
-    for (const match of text.matchAll(pattern)) fragments.push(cleanSubjectName(match[1]))
+    for (const match of text.matchAll(pattern)) {
+      const candidate = cleanSubjectName(match[1])
+      const coordinatedSubjects = candidate
+        .split(/(?:与|联合)/)
+        .map(cleanSubjectName)
+        .filter((part) => SUBJECT_MARKER_RE.test(part))
+      if (coordinatedSubjects.length >= 2) fragments.push(...coordinatedSubjects)
+      else fragments.push(candidate)
+    }
   }
 
   // “作者 | 张三：某大学某学院教授”类材料没有直接写“团队”，
@@ -111,27 +195,72 @@ function extractNamedFragments(value: unknown): string[] {
   return fragments
 }
 
-function extractPrimaryNewsSubjects(value: unknown): string[] {
-  const text = String(value ?? '').slice(0, 1800)
+function extractTitleProjectSubjects(value: unknown): string[] {
+  const text = String(value ?? '').trim()
+    .replace(/^(?:(?:36氪|硬氪)?(?:前线|首发)|独家|首发|喜报|快讯|重磅)\s*[|｜:：]\s*/i, '')
   if (!text) return []
   const nameChars = String.raw`[\u4e00-\u9fffA-Za-z0-9（）()·&＋+\-]`
-  const descriptor = String.raw`(?:${nameChars}{0,20}(?:企业|公司))?`
+  const projectMarker = String.raw`(?:产业技术中试基地|创新联合体|中试基地|产业基地|创新平台|技术平台|研发平台|试验平台|示范基地|转化基地|项目|计划|装置|系统)`
+  const pattern = new RegExp(String.raw`(?:^|[|｜！!。；;，,\n])\s*(${nameChars}{2,60}?${projectMarker})(?=在|落地|签约|揭牌|启用|发布|完成|获|，|。|$)`, 'g')
+  const subjects = [...text.matchAll(pattern)]
+    .map((match) => cleanSubjectName(match[1]))
+    .filter((candidate) => isSpecificLeadSubjectName(candidate))
+  return subjects.filter((candidate, index, all) => all.indexOf(candidate) === index)
+}
+
+function extractFinancingTitleSubjects(value: unknown): string[] {
+  const text = String(value ?? '').trim()
+    .replace(/^(?:(?:36氪|硬氪)?(?:前线|首发)|独家|首发|喜报|快讯|重磅)\s*[|｜:：]\s*/i, '')
+  const match = text.match(/^([\u4e00-\u9fffA-Za-z0-9（）()·&＋+\-\s]{2,30}?)(?=(?:完成|获得|获).{0,24}(?:融资|投资))/i)
+  if (!match) return []
+  const candidate = normalizeProjectCandidate(match[1])
+  return isSpecificLeadSubjectName(candidate) ? [candidate] : []
+}
+
+function extractPrimaryNewsSubjects(value: unknown): string[] {
+  const text = String(value ?? '')
+    .replace(/^(?:(?:36氪|硬氪)?(?:前线|首发)|独家|首发|喜报|快讯|重磅)\s*[|｜:：]\s*/i, '')
+    .slice(0, 1800)
+  if (!text) return []
+  const nameChars = String.raw`[\u4e00-\u9fffA-Za-z0-9（）()·&＋+\-]`
+  const descriptor = String.raw`(?:${nameChars}{0,28}(?:企业|公司|品牌|提供商|研发商|制造商|独角兽))?`
   const wrapperOpen = String.raw`[「『“"]?`
   const wrapperClose = String.raw`[」』”"]?`
-  const event = String.raw`(?=(?:(?:近日|日前|近期)\s*)?(?:(?:连续|已|正式)\s*)*(?:宣布)?(?:完成|获得|获|成立于|是一家))`
+  const event = String.raw`(?=(?:(?:近日|日前|近期|今日)\s*)?(?:\d+\s*个?月(?:内)?\s*)?(?:(?:连续|已|正式)\s*)*(?:(?:官宣|宣布)\s*)?(?:完成|获得|获|成立于|是一家))`
   const patterns = [
-    new RegExp(String.raw`(?:获悉|消息显示|公开信息显示)[，,\s]*(?:(?:近日|日前|近期)[，,\s]*)?${descriptor}\s*${wrapperOpen}(${nameChars}{2,40}?)${wrapperClose}\s*${event}`, 'g'),
-    new RegExp(String.raw`(?:^|[。；;\n])\s*${descriptor}\s*${wrapperOpen}(${nameChars}{2,40}?)${wrapperClose}\s*${event}`, 'g'),
+    new RegExp(String.raw`(?:获悉|消息显示|公开信息显示)[，,\s]*(?:(?:近日|日前|近期)[，,\s]*)?${descriptor}\s*${wrapperOpen}(${nameChars}{2,40}?)${wrapperClose}(?:[（(][^）)]{1,30}[）)])?\s*${event}`, 'g'),
+    new RegExp(String.raw`(?:^|[。；;\n])\s*(?:(?:近日|日前|近期|今日)[，,\s]*)?(?:\d{1,4}年)?\d{0,2}月?\d{0,2}日?[，,\s]*${descriptor}\s*${wrapperOpen}(${nameChars}{2,40}?)${wrapperClose}\s*${event}`, 'g'),
     new RegExp(String.raw`(?:^|[。；;\n])\s*(${nameChars}{2,30})(?=成立于|是一家|专注于|致力于)`, 'g'),
+    new RegExp(String.raw`(?:^|[。；;\n])\s*(${nameChars}{2,30}?)(?=(?:完成|获得|获).{0,24}(?:融资|投资))`, 'g'),
+    /(?:制造商|研发商|公司|企业)\s*([A-Z][A-Za-z0-9&+.-]*(?:\s+[A-Z][A-Za-z0-9&+.-]*){0,3})(?=\s*(?:获得|完成|宣布|获))/g,
+    /中文名\s*[“「『"]?([\u4e00-\u9fffA-Za-z0-9·&＋+\-\s]{2,30}?)[”」』"]?(?=[，,。；;])/g,
+    /(?:公司(?:名|叫做?)|品牌(?:名|叫做?))\s*[“「『"]?([\u4e00-\u9fffA-Za-z0-9·&＋+\-\s]{2,30}?)[”」』"]?(?=[，,。；;])/g,
   ]
   const subjects: string[] = []
   for (const pattern of patterns) {
     for (const match of text.matchAll(pattern)) {
-      const candidate = cleanSubjectName(match[1])
+      const candidate = normalizeProjectCandidate(match[1])
       if (isSpecificLeadSubjectName(candidate)) subjects.push(candidate)
     }
   }
   return subjects.filter((value, index, all) => all.indexOf(value) === index)
+}
+
+function extractQuotedFinancingSubjects(value: unknown): string[] {
+  const text = String(value ?? '').trim()
+    .replace(/^(?:(?:36氪|硬氪)?(?:前线|首发)|独家|首发|喜报|快讯|重磅)\s*[|｜:：]\s*/i, '')
+  const subjects: string[] = []
+  const pattern = /[「『“"]([\u4e00-\u9fffA-Za-z0-9·&＋+\-\s]{2,30})[」』”"](?=[^「『“"]{0,36}(?:完成|获得|获|融资|投资))/gi
+  for (const match of text.matchAll(pattern)) {
+    const candidate = normalizeProjectCandidate(match[1])
+    if (isSpecificLeadSubjectName(candidate)) subjects.push(candidate)
+  }
+  return subjects.filter((value, index, all) => all.indexOf(value) === index)
+}
+
+function extractVerifiedSourceSubject(value: unknown): string {
+  const title = String(value ?? '')
+  return VERIFIED_SOURCE_SUBJECT_RULES.find((rule) => rule.pattern.test(title))?.subject ?? ''
 }
 
 export interface RadarSubjectNameInput {
@@ -157,19 +286,49 @@ export function deriveRadarSubjectName(input: RadarSubjectNameInput): string {
     return candidates[0] ?? ''
   }
 
-  const company = pick(input.companyNames ?? [], false, false)
-  if (company) return company
+  const reliableCompanies = (input.companyNames ?? []).filter(isReliableCompanySubjectName)
+  const legalCompany = pick(reliableCompanies.filter((value) => /(?:股份有限公司|有限责任公司|有限公司)$/.test(cleanSubjectName(value))), false, false)
+  if (legalCompany) return legalCompany
 
   if (!input.isPaper) {
+    const verifiedSourceSubject = extractVerifiedSourceSubject(input.title)
+    if (verifiedSourceSubject) return verifiedSourceSubject
+    const quotedTitleSubject = extractQuotedFinancingSubjects(input.title)[0]
+    if (quotedTitleSubject) return quotedTitleSubject
     const articleSubject = extractPrimaryNewsSubjects(input.articleText)[0]
     if (articleSubject) return articleSubject
+    const financingTitleSubject = extractFinancingTitleSubjects(input.title)[0]
+    if (financingTitleSubject) return financingTitleSubject
+    const titleNewsSubject = extractPrimaryNewsSubjects(input.title)[0]
+    if (titleNewsSubject) return titleNewsSubject
+    const titleProject = pick(extractTitleProjectSubjects(input.title), false, false)
+    if (titleProject) return titleProject
+    const titleNamedSubject = pick(extractNamedFragments(input.title))
+    if (titleNamedSubject) return titleNamedSubject
+    const descriptiveProject = pick(extractDescriptiveProjectSubjects(input.title, input.articleText), false, false)
+    if (descriptiveProject) return descriptiveProject
   }
+
+  const company = pick(reliableCompanies, false, false)
+  if (company) return company
 
   const researchSubject = pick([input.lab, input.team])
   if (researchSubject) return researchSubject
 
-  const project = pick([input.projectName], Boolean(input.isPaper), false)
+  const project = pick([normalizeProjectCandidate(input.projectName)], Boolean(input.isPaper), false)
   if (project) return project
 
   return pick([input.title], Boolean(input.isPaper))
+}
+
+export function isBetterLeadSubjectName(currentValue: unknown, nextValue: unknown): boolean {
+  const current = cleanSubjectName(currentValue)
+  const next = cleanSubjectName(nextValue)
+  if (!isSpecificLeadSubjectName(next)) return false
+  if (!isSpecificLeadSubjectName(current)) return true
+  const currentIsLegalCompany = /(?:股份有限公司|有限责任公司|有限公司)$/.test(current)
+  const nextIsLegalCompany = /(?:股份有限公司|有限责任公司|有限公司)$/.test(next)
+  if (nextIsLegalCompany && !currentIsLegalCompany) return true
+  if (currentIsLegalCompany && !nextIsLegalCompany) return false
+  return next.length > current.length + 2 && next.includes(current) && SUBJECT_MARKER_RE.test(next)
 }

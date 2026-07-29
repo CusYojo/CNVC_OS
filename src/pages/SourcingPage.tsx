@@ -20,7 +20,7 @@ const isScoreJobActive = (status?: LeadScoreJobStatus) => Boolean(status && ACTI
 const scoreJobLabel = (status?: LeadScoreJobStatus) => status === 'queued'
   ? '排队中…'
   : status === 'retrying'
-    ? '重试中…'
+    ? '自动重试中…'
     : '更新中…'
 
 function SourceLink({ url, children }: { url?: string | null; children: React.ReactNode }) {
@@ -376,10 +376,10 @@ function LeadDetailPanel({
           </div>)}
         </div>
       </section> : <button onClick={() => onRunScore(lead)} disabled={scoreRefreshing} className="w-full rounded-xl border border-dashed border-brand-300 bg-brand-50/40 p-4 text-sm font-medium text-brand-700 hover:bg-brand-50 disabled:opacity-50">
-        {scoreRefreshing ? `AI 评分${scoreJobLabel(lead.scoreJob?.status)}` : lead.scoreJob?.status === 'failed' ? '评分失败，点击重试' : '开始 AI 评分'}
+        {scoreRefreshing ? `AI 评分${scoreJobLabel(lead.scoreJob?.status)}` : lead.scoreJob?.status === 'failed' ? '重新生成 AI 评分' : '开始 AI 评分'}
       </button>}
-      {lead.scoreJob?.status === 'failed' && lead.scoreJob.error &&
-        <p className="rounded-lg bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-700">最近一次评分失败：{lead.scoreJob.error}</p>}
+      {lead.scoreJob?.status === 'failed' &&
+        <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-700">AI 评分暂未完成。系统已自动重试，仍可点击上方按钮重新生成。</p>}
 
       {(lead.highlights ?? []).map(meaningfulLeadText).filter(Boolean).length > 0 && <section>
         <h3 className="text-sm font-semibold text-slate-800">投资亮点</h3>
@@ -787,7 +787,7 @@ export function SourcingPage() {
 
       <div ref={tableRef}>
         <Card className="overflow-hidden">
-        <DataTable headers={['主体名称', '行业 / 地区标签', '估值', 'AI 技术评分', '更新时间', '详情']}>
+        <DataTable headers={['主体名称 / 项目', '行业 / 地区标签', '估值', 'AI 技术评分', '更新时间', '详情']}>
           {filtered.map((lead) => {
             const { companySubject } = getLeadIdentity(lead)
             const funding = getLeadFundingDisplay(lead)
@@ -809,7 +809,7 @@ export function SourcingPage() {
               <TableCell>{scoreRefreshing
                 ? <Badge tone={lead.scoreJob?.status === 'retrying' ? 'amber' : 'blue'}>{scoreJobLabel(lead.scoreJob?.status)}</Badge>
                 : lead.scoreJob?.status === 'failed'
-                ? <span title={lead.scoreJob.error}><Badge tone="red">评分失败</Badge></span>
+                ? <Badge tone="amber">待重新生成</Badge>
                 : technicalScore.status === 'ready' && technicalScore.score != null && technicalScore.maxScore
                 ? <div className="w-28"><div className="mb-1 flex items-baseline justify-between"><strong className="text-base text-brand-700">{technicalScore.score}</strong><span className="text-xs text-slate-400">/ {technicalScore.maxScore}</span></div><ProgressBar value={Math.round((technicalScore.score / technicalScore.maxScore) * 100)} /></div>
                 : <Badge tone="amber">待分析</Badge>}</TableCell>

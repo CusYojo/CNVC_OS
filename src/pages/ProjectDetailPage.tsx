@@ -216,7 +216,7 @@ export function ProjectDetailPage() {
           showToast('项目评分已生成')
           return
         }
-        if (st.status === 'failed') { showToast(`评分失败：${st.error ?? '未知错误'}`, 'error'); return }
+        if (st.status === 'failed') { showToast('AI 评分暂未完成，请稍后重新生成', 'info'); return }
       }
       showToast('评分仍在进行，稍后重新打开该项目查看', 'error')
     } catch (err) {

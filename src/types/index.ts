@@ -186,6 +186,7 @@ export interface LeadScoreJob {
   status: LeadScoreJobStatus
   attempts: number
   maxAttempts: number
+  retryCycles?: number
   queuedAt?: string
   startedAt?: string
   updatedAt: string
@@ -274,7 +275,7 @@ export interface Lead {
   companyNews: { date: string; type: string; title: string; summary: string; sourceName: string; sourceUrl: string }[]
   sources: SourceEvidence[]
   scoring?: LeadScoring
-  radarProfile?: { decisionLabel?: string; thesis?: string; sourceName?: string; sourceGroup?: string; channel?: string; accountName?: string; publishedAt?: string; profile?: Record<string,string>; team?: { name: string }[]; radarDimensions?: { code: string; label: string; score: number; maxScore: number; detail: string }[]; radarScore?: number; disclosure?: Record<string,string>; nextActions?: string[]; signals?: { code: string; score: number; detail: string }[]; articleText?: string; articleTextLength?: number; link?: string }
+  radarProfile?: { decisionLabel?: string; thesis?: string; sourceName?: string; sourceGroup?: string; sourceTitle?: string; channel?: string; accountName?: string; publishedAt?: string; profile?: Record<string,string>; team?: { name: string }[]; radarDimensions?: { code: string; label: string; score: number; maxScore: number; detail: string }[]; radarScore?: number; disclosure?: Record<string,string>; nextActions?: string[]; signals?: { code: string; score: number; detail: string }[]; articleText?: string; articleTextLength?: number; link?: string }
 }
 
 export interface SourceEvidence {

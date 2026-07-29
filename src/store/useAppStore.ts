@@ -628,6 +628,7 @@ export const useAppStore = create<AppState>()(
               error?: string
               attempts?: number
               maxAttempts?: number
+              retryCycles?: number
             }>(`/leads/${leadId}/score`)
             if (st.status === 'queued' || st.status === 'running' || st.status === 'retrying') {
               const activeStatus: 'queued' | 'running' | 'retrying' = st.status
@@ -637,7 +638,8 @@ export const useAppStore = create<AppState>()(
                   scoreJob: {
                     status: activeStatus,
                     attempts: st.attempts ?? lead.scoreJob?.attempts ?? 0,
-                    maxAttempts: st.maxAttempts ?? lead.scoreJob?.maxAttempts ?? 2,
+                    maxAttempts: st.maxAttempts ?? lead.scoreJob?.maxAttempts ?? 3,
+                    retryCycles: st.retryCycles ?? lead.scoreJob?.retryCycles,
                     updatedAt: new Date().toISOString(),
                     error: st.error,
                   },
@@ -654,7 +656,7 @@ export const useAppStore = create<AppState>()(
               const fresh = await apiGet<Lead>(`/leads/${leadId}`).catch(() => null)
               if (fresh) set((state) => ({ leads: state.leads.map((l) => l.id === leadId ? { ...l, ...fresh } : l) }))
               const attemptText = st.attempts && st.maxAttempts ? `（${st.attempts}/${st.maxAttempts} 次）` : ''
-              get().addAudit('项目获取池', 'AI 评分失败', `${st.error ?? leadId}${attemptText}`)
+              get().addAudit('项目获取池', 'AI 评分暂未完成', `${leadId}${attemptText}`)
               return
             }
           }
