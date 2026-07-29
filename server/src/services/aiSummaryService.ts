@@ -11,6 +11,10 @@ import {
   isBetterLeadSubjectName,
   isSpecificLeadSubjectName,
 } from './leadSubjectName.js'
+import {
+  BUSINESS_REGIONS,
+  resolveLeadBusinessRegion,
+} from './leadRegion.js'
 
 export async function getSummary(projectId: string) {
   const rows = await db.select().from(aiSummaries).where(eq(aiSummaries.projectId, projectId)).orderBy(desc(aiSummaries.updatedAt)).limit(1)
@@ -89,8 +93,9 @@ const publicLeadHasCompanyExpr = sql<boolean>`(
 
 const PUBLIC_LEAD_INVESTMENT_PATTERN = '(完成|获得|获|宣布|官宣).{0,40}(融资|投资)|(融资|投资).{0,28}(完成|领投|跟投|亿元|万元|美元|天使轮|种子轮|pre-?a|a轮|b轮|c轮|d轮)|估值.{0,20}(亿元|万美元|亿美元|万元)'
 const PUBLIC_LEAD_COMMERCIAL_PATTERN = '(成果转化|技术转移|转化落地|产业化|中试|技术平台|工程化|技术许可|专利转让|孵化(成立|企业|公司)|创办公司|成立公司|产品获批|注册证|临床应用|应用新场景|示范应用|产业应用|客户验证|客户订单|采购|中标|签约|量产|营收|商业化)'
-const PUBLIC_LEAD_LOW_VALUE_PATTERN = '(院系之声.{0,30}(荣誉|获奖|award)|(教授|研究员|学者).{0,30}(获颁|获评|荣获|获奖|award|荣誉|发文|发表文章)|(获得|获评|入选|荣获|获).{0,24}(奖|荣誉|称号|教学团队|表彰|标兵|勋章)|(科学技术奖|科技奖|自然科学奖|技术发明奖|科技进步奖).{0,40}(揭晓|获奖|表彰)|[0-9]+[[:space:]]*项.{0,12}(获奖|获表彰)|(国家级|省级|全国高校).{0,16}(教学团队|教学成果|荣誉|奖|标兵)|奖学金|受试者招募|招募(研究参与者|受试者)|参与本研究|临床试验.{0,50}(招募|受试者|研究参与者)|实践成果.{0,24}(申请|硕士学位)|学位答辩|专业学位培养改革|论文.{0,40}(期刊|发表|刊发|接受|接收|accepted)|学术成果|研究论文|文章来源|转载全文|毕业(季|典礼|致辞|生|倒计时|设计)|毕业生去哪儿|校友招聘|社会招聘|诚聘|实习生|招聘|党支部|党员|党务|党建|革命先辈|校史|悼念|缅怀|研修班|训练营|课程|移动课堂|工作坊|讲座(预告)?|活动(预告|抢先知)|information session|参访|探访|师生校友|院友沙龙|创新大赛|参赛队伍|[0-9]+[[:space:]]*家.{0,24}(企业|公司).{0,30}(融资|投资)|专场(科创)?路演|路演举办|加速计划.{0,20}(招募|启动)|最前线|解码硬科技|罚单|行业进入强监管|([0-9]+点[0-9]*氪|氪星|创投|财经)(晚报|早报)?|为什么资本|什么样的.{0,20}(能|会)|行业观察|赛道观察|赴港上市|登陆资本市场|ipo认购|上市获|要报.{0,12}专业吗|招生(简章|宣传|咨询|专业|对象)?|培养方案|课程介绍|实验班介绍|培训班|结业证书|能力提升计划|名家面对面|学员企业|发表致辞|兼任|受聘|履新|任命|(记者|人物)?专访|人物访谈|观点访谈|深度解读|系统剖析)'
+const PUBLIC_LEAD_LOW_VALUE_PATTERN = '(院系之声.{0,30}(荣誉|获奖|award)|(教授|研究员|学者).{0,30}(获颁|获评|荣获|获奖|award|荣誉|发文|发表文章)|(获得|获评|入选|荣获|获).{0,24}(奖|荣誉|称号|教学团队|表彰|标兵|勋章)|(科学技术奖|科技奖|自然科学奖|技术发明奖|科技进步奖).{0,40}(揭晓|获奖|表彰)|[0-9]+[[:space:]]*项.{0,12}(获奖|获表彰)|(国家级|省级|全国高校).{0,16}(教学团队|教学成果|荣誉|奖|标兵)|奖学金|受试者招募|招募(研究参与者|受试者)|参与本研究|临床试验.{0,50}(招募|受试者|研究参与者)|实践成果.{0,24}(申请|硕士学位)|学位答辩|专业学位培养改革|论文.{0,40}(期刊|发表|刊发|接受|接收|accepted)|学术成果|研究论文|文章来源|转载全文|毕业(季|典礼|致辞|生|倒计时|设计)|毕业生去哪儿|校友招聘|社会招聘|诚聘|实习生|招聘|党支部|党员|党务|党建|革命先辈|校史|悼念|缅怀|研修班|训练营|课程|移动课堂|工作坊|讲座(预告)?|活动(预告|抢先知)|information session|参访|探访|走访|到访|企业走访交流活动|师生校友|院友沙龙|创新大赛|参赛队伍|[0-9]+[[:space:]]*家.{0,24}(企业|公司).{0,30}(融资|投资)|专场(科创)?路演|路演举办|加速计划.{0,20}(招募|启动)|最前线|解码硬科技|罚单|行业进入强监管|([0-9]+点[0-9]*氪|氪星|创投|财经)(晚报|早报)?|为什么资本|什么样的.{0,20}(能|会)|行业观察|赛道观察|赴港上市|登陆资本市场|ipo认购|上市获|要报.{0,12}专业吗|招生(简章|宣传|咨询|专业|对象)?|培养方案|课程介绍|实验班介绍|培训班|结业证书|能力提升计划|名家面对面|学员企业|发表致辞|兼任|受聘|履新|任命|(记者|人物)?专访|人物访谈|观点访谈|深度解读|系统剖析)'
 const PUBLIC_LEAD_CONCRETE_SUBJECT_PATTERN = '(股份有限公司|有限责任公司|有限公司|公司|企业|项目|团队|实验室|研究院|研究所|研究中心|工程中心|课题组|创新群体|创新联合体|中试基地|产业基地|创新平台|技术平台|研发平台|试验平台|装置|系统|产品|计划)$'
+const PUBLIC_LEAD_INVALID_SUBJECT_PATTERN = '^(数据|小时|主持|学员们|购票观众即|6氪|新股王|信息系统|文章来源|全新突破)$'
 
 // 存量 Radar 噪音不做物理删除，但从公共池列表和统计中排除。
 // 无明确公司、融资或估值时，获奖/教学/任职资讯直接隐藏；
@@ -98,7 +103,12 @@ const PUBLIC_LEAD_CONCRETE_SUBJECT_PATTERN = '(股份有限公司|有限责任�
 const visiblePublicLeadExpr = sql<boolean>`NOT (
   COALESCE(${leads.source}, '') ~ '^项目发现雷达'
   AND (
-    ${publicLeadTitleExpr} ~* ${PUBLIC_LEAD_LOW_VALUE_PATTERN}
+    COALESCE(${leads.radarProfile}->>'qualityRejected', '') = 'true'
+    OR (
+      NOT ${publicLeadHasCompanyExpr}
+      AND COALESCE(${leads.name}, '') ~* ${PUBLIC_LEAD_INVALID_SUBJECT_PATTERN}
+    )
+    OR ${publicLeadTitleExpr} ~* ${PUBLIC_LEAD_LOW_VALUE_PATTERN}
     OR (
       ${publicLeadPrimaryTextExpr} !~* ${PUBLIC_LEAD_INVESTMENT_PATTERN}
       AND ${publicLeadSignalTextExpr} ~* ${PUBLIC_LEAD_LOW_VALUE_PATTERN}
@@ -164,7 +174,7 @@ export async function saveLeadScoreJob(leadId: string, job: LeadScoreJob) {
   return row ?? null
 }
 
-export async function listRecoverableLeadScoreIds(limit = 50) {
+export async function listRecoverableLeadScoreIds(limit = 500) {
   const rows = await db.select({ id: leads.id }).from(leads)
     .where(sql`
       ${visiblePublicLeadExpr}
@@ -182,7 +192,7 @@ export async function listRecoverableLeadScoreIds(limit = 50) {
       )
     `)
     .orderBy(desc(leads.createdAt))
-    .limit(Math.max(1, Math.min(limit, 100)))
+    .limit(Math.max(1, Math.min(limit, 1000)))
   return rows.map((row) => row.id)
 }
 
@@ -205,10 +215,6 @@ const BUSINESS_INDUSTRY_RULES: Array<{ label: string; terms: string[] }> = [
   { label: '农业科技', terms: ['农业科技', '农业'] },
 ]
 
-const BUSINESS_REGIONS = [
-  '北京', '上海', '浙江', '江苏', '广东', '安徽', '湖北', '四川',
-  '山东', '福建', '湖南', '河南', '天津', '重庆', '陕西',
-]
 const PRESENTATION_PLACEHOLDERS = new Set(['', '待核验', '待核实', '未披露', '未披露/待核实', '融资轮次待核实', '无', '-', 'N/A', 'null', '不适用'])
 
 function meaningfulPresentationText(value: unknown): string | undefined {
@@ -236,16 +242,7 @@ export function deriveIndustryTags(industry: unknown): string[] {
 export function deriveRegion(scoring: Record<string, unknown>, radarProfile: Record<string, unknown>): string {
   const registry = (scoring.registry && typeof scoring.registry === 'object' ? scoring.registry : {}) as Record<string, unknown>
   const profile = (radarProfile.profile && typeof radarProfile.profile === 'object' ? radarProfile.profile : {}) as Record<string, unknown>
-  const locationText = [
-    registry.regLocation,
-    registry.registeredAddress,
-    registry.address,
-    profile.regLocation,
-    profile.registeredAddress,
-    profile.region,
-    profile.location,
-  ].map((value) => meaningfulPresentationText(value)).filter(Boolean).join(' ')
-  return BUSINESS_REGIONS.find((region) => locationText.includes(region)) ?? '待确认'
+  return resolveLeadBusinessRegion({ registry, profile })?.region ?? '待确认'
 }
 
 export function deriveValuationDisplay(
@@ -398,19 +395,44 @@ function enrichLead(row: typeof leads.$inferSelect) {
   const subjectCompanyName = isRadarLead && (!isSpecificLeadSubjectName(row.companyName) || isResearchSubjectFallback)
     ? null
     : row.companyName
-  const displayRadarProfile = isRadarLead
-    && subjectName
-    && profile.projectName !== subjectName
-    ? { ...rp, profile: { ...profile, projectName: subjectName } }
-    : rp
+  // 主体名称与项目名称是两个语义：例如主体“海昶生物”对应
+  // “创新多肽偶联药物 PDC 平台项目”。Drawer 标题使用 subjectName，
+  // 项目字段保留 Radar 原始结构化项目名，不能为了表面一致而互相覆盖。
+  const displayRadarProfile = rp
   const channel = (rp && rp.channel) ? rp.channel
     : /情报|必应|公开信息/.test(src) ? '重点机构'
     : /论文|专利|arxiv/i.test(src) ? '论文专利'
     : /院校|大学|高校|实验室/.test(src) ? '院校'
     : /微信|群/.test(src) ? '微信群' : '新闻'
-  const region = deriveRegion(sc, rp)
+  const regionResolution = resolveLeadBusinessRegion({
+    businessRegion: (row as { businessRegion?: string | null }).businessRegion,
+    businessRegionSource: (row as { businessRegionSource?: string | null }).businessRegionSource,
+    businessRegionConfidence: (row as { businessRegionConfidence?: string | null }).businessRegionConfidence,
+    registry: (sc.registry && typeof sc.registry === 'object' ? sc.registry : {}) as Record<string, unknown>,
+    profile,
+    subjectName,
+    companyName: subjectCompanyName,
+    sourceGroup: rp.sourceGroup,
+    channel: rp.channel,
+    sourceName: rp.sourceName,
+    accountName: rp.accountName,
+    sourceTitle,
+    summary: row.summary,
+    articleText: rp.articleText,
+  })
+  const region = regionResolution?.region ?? '待确认'
   const scoreJob = readLeadScoreJob(sc)
-  const publicScoreJob = scoreJob
+  const publicScoreJob = analysisStatus === 'ready'
+    ? {
+        ...(scoreJob ?? {
+          attempts: 1,
+          maxAttempts: 1,
+          updatedAt: meaningfulPresentationText(sc.scored_at) ?? new Date(0).toISOString(),
+        }),
+        status: 'done' as const,
+        error: undefined,
+      }
+    : scoreJob
     ? {
         ...scoreJob,
         error: scoreJob.status === 'failed' ? 'AI 评分暂未完成，可重新生成' : undefined,
@@ -427,6 +449,8 @@ function enrichLead(row: typeof leads.$inferSelect) {
     lastVerifiedAt: row.createdAt ? new Date(row.createdAt).toISOString().slice(0, 10) : '',
     channel,
     region,
+    regionSource: regionResolution?.source,
+    regionConfidence: regionResolution?.confidence,
     businessTags: {
       industry: deriveIndustryTags(row.industry),
       region: [region],
@@ -482,17 +506,8 @@ export async function listLeads(options: { page?: number; pageSize?: number; cha
       conds.push(sql`(${sql.join(ors, sql` OR `)})`)
     }
   }
-  if (region && BUSINESS_REGIONS.includes(region)) {
-    const regionKw = `%${region}%`
-    conds.push(sql`(
-      COALESCE(${leads.scoring}->'registry'->>'regLocation', '') ILIKE ${regionKw}
-      OR COALESCE(${leads.scoring}->'registry'->>'registeredAddress', '') ILIKE ${regionKw}
-      OR COALESCE(${leads.scoring}->'registry'->>'address', '') ILIKE ${regionKw}
-      OR COALESCE(${leads.radarProfile}->'profile'->>'regLocation', '') ILIKE ${regionKw}
-      OR COALESCE(${leads.radarProfile}->'profile'->>'registeredAddress', '') ILIKE ${regionKw}
-      OR COALESCE(${leads.radarProfile}->'profile'->>'region', '') ILIKE ${regionKw}
-      OR COALESCE(${leads.radarProfile}->'profile'->>'location', '') ILIKE ${regionKw}
-    )`)
+  if (region && BUSINESS_REGIONS.some((candidate) => candidate === region)) {
+    conds.push(sql`${leads.businessRegion} = ${region}`)
   }
   if (keyword) {
     const kw = '%' + keyword + '%'
@@ -516,6 +531,9 @@ export async function listLeads(options: { page?: number; pageSize?: number; cha
       name: leads.name,
       companyName: leads.companyName,
       industry: leads.industry,
+      businessRegion: leads.businessRegion,
+      businessRegionSource: leads.businessRegionSource,
+      businessRegionConfidence: leads.businessRegionConfidence,
       source: leads.source,
       poolStatus: leads.poolStatus,
       score: leads.score,
@@ -736,6 +754,12 @@ export async function saveLeadScoring(leadId: string, scoring: unknown, score: n
   const registry = sc.registry && typeof sc.registry === 'object' && !Array.isArray(sc.registry)
     ? sc.registry as Record<string, unknown>
     : {}
+  const regionResolution = resolveLeadBusinessRegion({ registry })
+  if (regionResolution) {
+    patch.businessRegion = regionResolution.region
+    patch.businessRegionSource = regionResolution.source
+    patch.businessRegionConfidence = regionResolution.confidence
+  }
   const registryCompanyName = typeof registry.companyName === 'string' ? registry.companyName.trim() : ''
   if (registryCompanyName) {
     const [current] = await db.select({

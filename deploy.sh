@@ -238,6 +238,9 @@ FLUE_AGENT_NAME=assistant
 EXPRESS_BASE_URL=http://127.0.0.1:3100
 FLUE_MODEL=zeelin-oai/gpt-5.5
 SCORE_MODEL=zeelin/DeepSeek-V4-Flash
+SCORE_FALLBACK_MODEL=zeelin-oai/gpt-5.5
+SCORE_PRIMARY_MODEL_TIMEOUT_MS=90000
+SCORE_FALLBACK_MODEL_TIMEOUT_MS=240000
 
 # ---- 内部密钥 ----
 INTERNAL_SECRET=cybernaut-internal-2026
@@ -262,6 +265,9 @@ FLUE_DB_PATH=${FLUE_STATE_DIR}/flue.db
 
 # ---- 性能 ----
 SCORE_QUEUE_CONCURRENCY=3
+SCORE_MAX_ATTEMPTS=1
+SCORE_REQUEST_TIMEOUT_MS=360000
+SCORE_DEFERRED_RETRY_LIMIT=1
 INGEST_MAX_ATTEMPTS=3
 EOF
         log ".env 创建完成 ✓"
@@ -282,6 +288,12 @@ EOF
     # 模型选择允许运维在 .env 中覆盖；缺失时补当前源码默认值。
     ensure_env_value "$ENV_FILE" "FLUE_MODEL" "zeelin-oai/gpt-5.5"
     ensure_env_value "$ENV_FILE" "SCORE_MODEL" "zeelin/DeepSeek-V4-Flash"
+    ensure_env_value "$ENV_FILE" "SCORE_FALLBACK_MODEL" "zeelin-oai/gpt-5.5"
+    ensure_env_value "$ENV_FILE" "SCORE_PRIMARY_MODEL_TIMEOUT_MS" "90000"
+    ensure_env_value "$ENV_FILE" "SCORE_FALLBACK_MODEL_TIMEOUT_MS" "240000"
+    ensure_env_value "$ENV_FILE" "SCORE_MAX_ATTEMPTS" "1"
+    ensure_env_value "$ENV_FILE" "SCORE_REQUEST_TIMEOUT_MS" "360000"
+    ensure_env_value "$ENV_FILE" "SCORE_DEFERRED_RETRY_LIMIT" "1"
     ensure_env_value "$ENV_FILE" "RADAR_BOOTSTRAP_URL" "$RADAR_BOOTSTRAP_DEFAULT"
     ensure_env_value "$ENV_FILE" "RADAR_AUTO_CRAWL_ENABLED" "true"
     ensure_env_value "$ENV_FILE" "RADAR_WECHAT_DAILY_ENABLED" "true"

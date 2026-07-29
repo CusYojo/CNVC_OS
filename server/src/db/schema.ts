@@ -137,6 +137,9 @@ export const leads = pgTable('leads', {
   name: varchar('name', { length: 128 }).notNull(),
   companyName: varchar('company_name', { length: 128 }),
   industry: varchar('industry', { length: 64 }),
+  businessRegion: varchar('business_region', { length: 32 }),
+  businessRegionSource: varchar('business_region_source', { length: 64 }),
+  businessRegionConfidence: varchar('business_region_confidence', { length: 8 }),
   source: text('source'),
   poolStatus: varchar('pool_status', { length: 32 }).notNull().default('成功'), // 成功/解析失败/待处理
   score: integer('score').notNull().default(0),

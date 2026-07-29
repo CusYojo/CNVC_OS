@@ -32,3 +32,36 @@ test('does not write a patch for an already linked Radar source key', () => {
 
   assert.equal('radarSourceKeys' in patch, false)
 })
+
+test('upgrades business region only when incoming confidence is not lower', () => {
+  const protectedPatch = buildRadarLeadMergePatch({
+    name: '测试项目',
+    source: '项目发现雷达 · 高校公众号',
+    businessRegion: '广东',
+    businessRegionSource: '工商注册地',
+    businessRegionConfidence: '高',
+  }, {
+    name: '测试项目',
+    source: '项目发现雷达 · 高校公众号',
+    businessRegion: '浙江',
+    businessRegionSource: '所属高校/研究机构',
+    businessRegionConfidence: '中',
+  })
+  assert.equal('businessRegion' in protectedPatch, false)
+
+  const upgradePatch = buildRadarLeadMergePatch({
+    name: '测试项目',
+    source: '项目发现雷达 · 高校公众号',
+    businessRegion: '浙江',
+    businessRegionSource: '所属高校/研究机构',
+    businessRegionConfidence: '中',
+  }, {
+    name: '测试项目',
+    source: '项目发现雷达 · 高校公众号',
+    businessRegion: '广东',
+    businessRegionSource: '工商注册地',
+    businessRegionConfidence: '高',
+  })
+  assert.equal(upgradePatch.businessRegion, '广东')
+  assert.equal(upgradePatch.businessRegionConfidence, '高')
+})

@@ -29,6 +29,9 @@ export interface RadarLeadSyncFields {
   name: string
   companyName?: string | null
   industry?: string | null
+  businessRegion?: string | null
+  businessRegionSource?: string | null
+  businessRegionConfidence?: string | null
   source?: string | null
   poolStatus?: string
   summary?: string | null
@@ -228,6 +231,24 @@ export function buildRadarLeadMergePatch(
   mergeScalar('source', existingIsRadar)
   mergeScalar('summary', existingIsRadar)
   mergeScalar('team', existingIsRadar && !scoringReady)
+
+  const incomingRegion = incoming.businessRegion
+  const currentRegion = existing.businessRegion
+  const confidenceRank = (value: unknown) => value === '高' ? 2 : value === '中' ? 1 : 0
+  const shouldMergeRegion = isMeaningfulRadarValue(incomingRegion)
+    && (
+      !isMeaningfulRadarValue(currentRegion)
+      || confidenceRank(incoming.businessRegionConfidence) >= confidenceRank(existing.businessRegionConfidence)
+    )
+  if (shouldMergeRegion && (
+    !sameValue(currentRegion, incomingRegion)
+    || !sameValue(existing.businessRegionSource, incoming.businessRegionSource)
+    || !sameValue(existing.businessRegionConfidence, incoming.businessRegionConfidence)
+  )) {
+    patch.businessRegion = incomingRegion
+    patch.businessRegionSource = incoming.businessRegionSource
+    patch.businessRegionConfidence = incoming.businessRegionConfidence
+  }
 
   const mergedFunding = mergeRadarFundingRounds(existing.fundingRounds, incoming.fundingRounds)
   if (!sameValue(existing.fundingRounds ?? [], mergedFunding)) patch.fundingRounds = mergedFunding

@@ -10,6 +10,7 @@ import { ensureSchema } from './db/migrate.js'
 import { seedUsers } from './services/authService.js'
 import { recoverAiTasks } from './services/aiTaskService.js'
 import { recoverLeadScoringQueue } from './routes/meta.js'
+import { backfillLeadBusinessRegions } from './services/leadRegionBackfill.js'
 
 const app = express()
 const port = Number(process.env.API_PORT ?? 3100)
@@ -80,6 +81,8 @@ async function start() {
   try {
     await ensureSchema()
     await seedUsers()
+    const regionBackfill = await backfillLeadBusinessRegions()
+    console.log(`[lead-region] startup backfill scanned=${regionBackfill.scanned} updated=${regionBackfill.updated} unresolved=${regionBackfill.unresolved}`)
     await recoverAiTasks()
     const scoreRecovery = await recoverLeadScoringQueue()
     console.log(`[lead-score] startup recovery found=${scoreRecovery.found} queued=${scoreRecovery.recovered}`)

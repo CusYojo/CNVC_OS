@@ -22,9 +22,24 @@ test('rejects article fragments and editorial labels as lead subjects', () => {
     '保险科技',
     '前瞻理论研究与创新平台',
     '引导广大科研团队主动走出实验室',
+    '数据',
+    '学员们',
+    '浙江大学药学院杭州校友分会走访海昶生物',
   ]) {
     assert.equal(isSpecificLeadSubjectName(value), false, value)
   }
+})
+
+test('extracts an explicit visited or invested target before unrelated legal entities', () => {
+  assert.equal(deriveRadarSubjectName({
+    title: '健智聚力 共探药创新途｜浙江大学药学院杭州校友分会走访海昶生物',
+    projectName: '创新多肽偶联药物PDC平台项目',
+    companyNames: ['浙江大学药学院杭州校友分会有限公司'],
+  }), '海昶生物')
+  assert.equal(deriveRadarSubjectName({
+    title: '交研资本投资标的灵巧智能完成新一轮融资',
+    companyNames: ['四川交研私募基金管理有限公司'],
+  }), '灵巧智能')
 })
 
 test('extracts the financed company after a news-column prefix', () => {
@@ -138,6 +153,11 @@ test('filters non-investable academic and participant recruitment content', () =
   }), false)
   assert.equal(isNonInvestableRadarContent({
     values: ['2026未来能源“创变者”加速计划启动全国招募'],
+  }), true)
+  assert.equal(isNonInvestableRadarContent({
+    hasCompanySubject: true,
+    subjectName: '海昶生物',
+    values: ['浙江大学药学院杭州校友分会企业走访交流活动在海昶生物举办'],
   }), true)
   assert.equal(isNonInvestableRadarContent({
     values: ['2026年，为什么资本更青睐“会赚钱”的AI应用？'],

@@ -137,5 +137,49 @@ class ProjectSubjectNameTests(unittest.TestCase):
                 self.assertEqual(app.infer_project_name(item, item.get("summary", "")), expected)
 
 
+class BusinessRegionTests(unittest.TestCase):
+    def test_normalizes_city_address_to_province(self):
+        self.assertEqual(app.normalize_business_region("深圳市南山区科技园"), "广东")
+        self.assertEqual(app.normalize_business_region("南京市江北新区研创园"), "江苏")
+
+    def test_extracts_explicit_headquarters_location(self):
+        result = app.infer_business_region(
+            {"project_name": "某工业软件项目"},
+            "某工业软件项目公司总部位于深圳市南山区，主要从事工业软件研发。",
+        )
+        self.assertEqual(result["region"], "广东")
+        self.assertEqual(result["region_source"], "来源原文明确地点")
+
+    def test_uses_academic_institution_but_not_casual_city_mentions(self):
+        academic = app.infer_business_region(
+            {
+                "project_name": "清华大学机器人实验室",
+                "source_group": "高校公众号",
+                "source_name": "清华大学",
+            },
+            "",
+            lab="清华大学机器人实验室",
+        )
+        self.assertEqual(academic["region"], "北京")
+
+        casual = app.infer_business_region(
+            {"project_name": "某智能项目"},
+            "团队受邀前往上海参加会议，并与北京投资机构交流。",
+        )
+        self.assertEqual(casual["region"], "待确认")
+
+    def test_prefers_subject_prefix_over_collaborator_location(self):
+        result = app.infer_business_region(
+            {
+                "project_name": "武汉中科牛津波谱技术有限公司",
+                "source_group": "高校公众号",
+                "source_name": "西安交通大学",
+            },
+            "",
+            lab="西安交通大学科研团队",
+        )
+        self.assertEqual(result["region"], "湖北")
+
+
 if __name__ == "__main__":
     unittest.main()

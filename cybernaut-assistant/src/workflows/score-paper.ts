@@ -2,6 +2,11 @@ import '../zeelin-provider.ts';
 import { defineAgent, defineWorkflow, type WorkflowRouteHandler } from '@flue/runtime';
 import * as v from 'valibot';
 
+const PRIMARY_SCORE_MODEL = process.env.SCORE_MODEL ?? 'zeelin-oai/gpt-5.5';
+const FALLBACK_SCORE_MODEL = process.env.SCORE_FALLBACK_MODEL ?? 'zeelin-oai/gpt-5.5';
+const PRIMARY_SCORE_TIMEOUT_MS = Math.max(30_000, Number(process.env.SCORE_PRIMARY_MODEL_TIMEOUT_MS) || 90_000);
+const FALLBACK_SCORE_TIMEOUT_MS = Math.max(30_000, Number(process.env.SCORE_FALLBACK_MODEL_TIMEOUT_MS) || 240_000);
+
 // 论文/学术成果专属评分 —— 对应投资中台「项目获取池」中来源为【论文】的早期线索。
 // 与通用 score-project 不同：论文类项目通常没有团队/估值/融资信息，故放宽这些要求，
 // 重点评估技术本身与转化潜力。5 大维度、总分 100、预测性打分、输出结构与 score-project 同构。
@@ -74,7 +79,7 @@ const PAPER_STANDARD = JSON.stringify({
 });
 
 const agent = defineAgent(() => ({
-  model: process.env.SCORE_MODEL ?? 'zeelin-oai/gpt-5.5',
+  model: PRIMARY_SCORE_MODEL,
   instructions: [
     '你是浙江赛智伯乐一级市场投资评审 AI，专门评估【来源于论文/学术成果的早期项目】。严格依据给定的《论文评分标准》对项目打分。',
     '',
@@ -178,7 +183,29 @@ export default defineWorkflow({
       '请严格按标准输出结构化评分：每个维度的得分与原因（items 可放该维度的细化说明），总分=各维度之和，并给出 verdict 与总体评价、竞品对标表。切记：团队/估值/融资缺失属正常，不额外扣分；重点评估技术本身与转化潜力。',
     ].join('\n');
 
-    const { data } = await session.prompt(prompt, { result: ScoreResult });
+    let promptResult;
+    try {
+      promptResult = await session.prompt(prompt, {
+        result: ScoreResult,
+        model: PRIMARY_SCORE_MODEL,
+        signal: AbortSignal.timeout(
+          PRIMARY_SCORE_MODEL === FALLBACK_SCORE_MODEL
+            ? FALLBACK_SCORE_TIMEOUT_MS
+            : PRIMARY_SCORE_TIMEOUT_MS,
+        ),
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const retryable = /(?:connection|fetch failed|408|429|5\d\d|timeout|timed out|ECONN|operation_failed)/i.test(message);
+      if (!retryable || FALLBACK_SCORE_MODEL === PRIMARY_SCORE_MODEL) throw error;
+      console.warn(`[score-paper] primary model failed (${PRIMARY_SCORE_MODEL}), fallback=${FALLBACK_SCORE_MODEL}: ${message}`);
+      promptResult = await session.prompt(prompt, {
+        result: ScoreResult,
+        model: FALLBACK_SCORE_MODEL,
+        signal: AbortSignal.timeout(FALLBACK_SCORE_TIMEOUT_MS),
+      });
+    }
+    const { data } = promptResult;
     // 确定性归一：以本地重算为准，不信任 LLM 自报的聚合值（与 score-project 同策略）。
     const clamp = (x: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, Number.isFinite(x) ? x : 0));
     // 【review P2 修复】权威 max 以 PAPER_STANDARD 为准,不信任 LLM 自报的 dim.max

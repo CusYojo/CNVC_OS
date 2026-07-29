@@ -1307,6 +1307,138 @@ def project_profile_text(item: dict) -> str:
     ])
 
 
+BUSINESS_REGION_PATTERNS = (
+    ("北京", r"北京"),
+    ("上海", r"上海"),
+    ("天津", r"天津"),
+    ("重庆", r"重庆"),
+    ("河北", r"河北|石家庄|唐山|保定|廊坊|雄安|秦皇岛|邯郸|沧州"),
+    ("山西", r"山西|太原|大同|长治|晋城|晋中|运城|临汾|吕梁"),
+    ("内蒙古", r"内蒙古|呼和浩特|包头|鄂尔多斯|赤峰|通辽"),
+    ("辽宁", r"辽宁|沈阳|大连|鞍山|抚顺|丹东|锦州|营口"),
+    ("吉林", r"吉林省|长春|吉林市|延边|四平|通化"),
+    ("黑龙江", r"黑龙江|哈尔滨|齐齐哈尔|大庆|牡丹江|佳木斯"),
+    ("江苏", r"江苏|南京|苏州|无锡|常州|南通|扬州|镇江|泰州|盐城|徐州|常熟|昆山"),
+    ("浙江", r"浙江|杭州|宁波|温州|嘉兴|湖州|绍兴|金华|舟山|台州|丽水|义乌"),
+    ("安徽", r"安徽|合肥|芜湖|蚌埠|马鞍山|安庆|滁州|阜阳|六安"),
+    ("福建", r"福建|福州|厦门|泉州|漳州|莆田|宁德"),
+    ("江西", r"江西|南昌|九江|赣州|景德镇|上饶"),
+    ("山东", r"山东|济南|青岛|烟台|潍坊|济宁|威海|临沂"),
+    ("河南", r"河南|郑州|开封|洛阳|新乡|许昌|南阳|商丘"),
+    ("湖北", r"湖北|武汉|宜昌|襄阳|荆州|黄冈"),
+    ("湖南", r"湖南|长沙|株洲|湘潭|衡阳|岳阳|常德|郴州"),
+    ("广东", r"广东|广州|深圳|珠海|汕头|佛山|东莞|中山|惠州|南沙|前海"),
+    ("广西", r"广西|南宁|柳州|桂林|北海|钦州"),
+    ("海南", r"海南|海口|三亚|儋州"),
+    ("四川", r"四川|成都|绵阳|德阳|宜宾|乐山|南充"),
+    ("贵州", r"贵州|贵阳|遵义|安顺|毕节"),
+    ("云南", r"云南|昆明|曲靖|大理|丽江"),
+    ("西藏", r"西藏|拉萨|日喀则|林芝"),
+    ("陕西", r"陕西|西安|咸阳|宝鸡|渭南|榆林"),
+    ("甘肃", r"甘肃|兰州|天水|酒泉|庆阳"),
+    ("青海", r"青海|西宁|海东"),
+    ("宁夏", r"宁夏|银川|石嘴山|吴忠"),
+    ("新疆", r"新疆|乌鲁木齐|克拉玛依|喀什|伊犁"),
+    ("香港", r"香港"),
+    ("澳门", r"澳门"),
+    ("台湾", r"台湾|台北|新北|台中|台南|高雄|新竹"),
+)
+INSTITUTION_REGION_PATTERNS = (
+    ("北京", r"清华大学|北京大学|北京航空航天大学|北京理工大学|中国人民大学|北京师范大学|中国科学院大学|中关村"),
+    ("上海", r"复旦大学|同济大学|华东师范大学|上海交通大学|上海交大|上海科技大学|紫竹高新区|张江"),
+    ("浙江", r"浙江大学|浙大|西湖大学|之江实验室|良渚实验室"),
+    ("江苏", r"南京大学|东南大学|南京航空航天大学|南京理工大学|苏州大学|江南大学"),
+    ("安徽", r"中国科学技术大学|中科大|合肥工业大学"),
+    ("湖北", r"武汉大学|华中科技大学|华中农业大学|武汉理工大学"),
+    ("湖南", r"中南大学|湖南大学|国防科技大学"),
+    ("广东", r"中山大学|华南理工大学|南方科技大学|深圳大学|香港中文大学（深圳）"),
+    ("四川", r"四川大学|电子科技大学|西南交通大学"),
+    ("陕西", r"西安交通大学|西北工业大学|西安电子科技大学"),
+    ("天津", r"天津大学|南开大学"),
+    ("重庆", r"重庆大学|西南大学"),
+    ("福建", r"厦门大学|福州大学"),
+    ("山东", r"山东大学|中国海洋大学"),
+    ("辽宁", r"大连理工大学|东北大学"),
+    ("吉林", r"吉林大学"),
+    ("黑龙江", r"哈尔滨工业大学|哈工大"),
+)
+
+
+def normalize_business_region(value: Any) -> str:
+    text = clean_text(str(value or ""))
+    if not text or text in {"待确认", "待核验", "待核实", "未披露", "未披露/待核实", "不适用", "无", "-"}:
+        return ""
+    for region, pattern in BUSINESS_REGION_PATTERNS:
+        if re.search(pattern, text):
+            return region
+    return ""
+
+
+def infer_business_region(item: dict, text: str, company_name: str = "", lab: str = "") -> dict:
+    for field in ("business_region", "region", "reg_location", "registered_address", "location", "headquarters"):
+        region = normalize_business_region(item.get(field))
+        if region:
+            return {"region": region, "region_source": "雷达结构化地区", "region_confidence": "高"}
+
+    for value in (company_name, item.get("project_name", "")):
+        candidate = clean_text(str(value or ""))
+        for region, pattern in BUSINESS_REGION_PATTERNS:
+            match = re.search(pattern, candidate)
+            if match and match.start() == 0:
+                return {"region": region, "region_source": "主体名称行政区划", "region_confidence": "中"}
+
+    explicit_pattern = re.compile(
+        r"(?:注册地|注册地址|工商注册地址|注册于|注册在|总部所在地|总部位于|总部设于|总部设在|"
+        r"公司所在地|公司位于|企业所在地|企业位于|公司落户|企业落户|"
+        r"项目所在地|项目位于|项目落地于|项目落户|基地所在地|基地位于|基地落地于|坐落于)"
+        r"\s*[：:为在]?\s*([^，。；;\n]{2,48})"
+    )
+    location_text = text[:12000]
+    subject_tokens = [
+        clean_text(str(value or ""))
+        for value in (company_name, item.get("project_name", ""))
+        if len(clean_text(str(value or ""))) >= 2
+    ]
+    subject_tokens += [
+        re.sub(r"(?:股份有限公司|有限责任公司|有限公司|公司|企业|项目|团队|实验室|研究院|研究所|研究中心)$", "", value)
+        for value in subject_tokens
+    ]
+    subject_tokens = [value for value in unique_keep_order(subject_tokens, 8) if len(value) >= 2]
+    for match in explicit_pattern.finditer(location_text):
+        context = location_text[max(0, match.start() - 160):min(len(location_text), match.end() + 80)]
+        if subject_tokens and not any(token in context for token in subject_tokens):
+            continue
+        region = normalize_business_region(match.group(1))
+        if region:
+            return {"region": region, "region_source": "来源原文明确地点", "region_confidence": "中"}
+
+    academic = "高校" in str(item.get("source_group", "")) or bool(re.search(
+        r"大学|学院|研究院|研究所|实验室|课题组|教授团队|科研团队|研究团队",
+        " ".join([
+            clean_text(str(item.get("project_name", ""))),
+            clean_text(lab),
+            clean_text(str(item.get("source_name", ""))),
+        ]),
+    ))
+    if academic:
+        institution_text = " ".join([
+            clean_text(str(item.get("school", ""))),
+            clean_text(str(item.get("source_name", ""))),
+            clean_text(lab),
+            clean_text(str(item.get("project_name", ""))),
+        ])
+        region = normalize_business_region(institution_text)
+        if not region:
+            for candidate_region, pattern in INSTITUTION_REGION_PATTERNS:
+                if re.search(pattern, institution_text):
+                    region = candidate_region
+                    break
+        if region:
+            return {"region": region, "region_source": "所属高校/研究机构", "region_confidence": "中"}
+
+    return {"region": "待确认", "region_source": "", "region_confidence": ""}
+
+
 def build_project_profile(item: dict) -> dict:
     title = clean_text(item.get("title", ""))
     text = project_profile_text(item)
@@ -1340,6 +1472,12 @@ def build_project_profile(item: dict) -> dict:
         "source_url": link,
         "data_completeness": "自动抽取，缺失字段需人工核实",
     }
+    profile.update(infer_business_region(
+        item,
+        text,
+        company_name=profile["company_name"],
+        lab=profile["lab"],
+    ))
 
     if source == "arxiv":
         profile.update({
@@ -1376,6 +1514,13 @@ def attach_project_profile(item: dict) -> dict:
         # otherwise name-based downstream deduplication could create duplicates.
         company_name = "不适用" if item.get("source") == "arxiv" else extract_company_name(item, project_profile_text(item))
         item["project_profile"]["company_name"] = company_name or "未披露/待核实"
+    if not normalize_business_region(item["project_profile"].get("region")):
+        item["project_profile"].update(infer_business_region(
+            item,
+            project_profile_text(item),
+            company_name=item["project_profile"].get("company_name", ""),
+            lab=item["project_profile"].get("lab", ""),
+        ))
     return item
 
 

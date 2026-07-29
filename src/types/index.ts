@@ -240,6 +240,11 @@ export interface Lead {
   industry: string
   round: string
   region: string
+  businessRegion?: string
+  businessRegionSource?: string
+  businessRegionConfidence?: '高' | '中'
+  regionSource?: string
+  regionConfidence?: '高' | '中'
   website: string
   foundedAt: string
   registeredCapital: string

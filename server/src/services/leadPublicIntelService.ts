@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm'
 import { db } from '../db/client.js'
 import { auditLogs, leads } from '../db/schema.js'
+import { resolveLeadBusinessRegion } from './leadRegion.js'
 
 export interface PublicIntelFundingRound {
   round: string
@@ -263,6 +264,16 @@ export async function mergeLeadPublicIntel(
     scoring: scoringPatch,
     fundingRounds,
     sources,
+  }
+  const regionResolution = resolveLeadBusinessRegion({
+    registry: registryPatch,
+    subjectName: lead.name,
+    companyName: lead.companyName,
+  })
+  if (regionResolution) {
+    patch.businessRegion = regionResolution.region
+    patch.businessRegionSource = regionResolution.source
+    patch.businessRegionConfidence = regionResolution.confidence
   }
   const positioning = meaningfulPublicIntelText(intel.positioning)
   if (positioning && !meaningfulPublicIntelText(lead.summary)) patch.summary = positioning.slice(0, 1000)

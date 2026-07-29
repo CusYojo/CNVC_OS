@@ -13,7 +13,14 @@ const INDUSTRY_OPTIONS: string[] = [
   '企业服务', '医疗健康', '生物医药', '新能源', '新材料', '汽车出行',
   '消费科技', '文化娱乐', '教育', '农业科技',
 ]
-const REGION_OPTIONS: string[] = ['北京', '上海', '浙江', '江苏', '广东', '安徽', '湖北', '四川', '山东', '福建', '湖南', '河南', '天津', '重庆', '陕西']
+const REGION_OPTIONS: string[] = [
+  '北京', '上海', '天津', '重庆',
+  '河北', '山西', '内蒙古', '辽宁', '吉林', '黑龙江',
+  '江苏', '浙江', '安徽', '福建', '江西', '山东',
+  '河南', '湖北', '湖南', '广东', '广西', '海南',
+  '四川', '贵州', '云南', '西藏', '陕西', '甘肃',
+  '青海', '宁夏', '新疆', '香港', '澳门', '台湾',
+]
 const verificationTone = (status: Lead['verificationStatus']) => status === '已核验' ? 'green' : status === '部分核验' ? 'amber' : 'slate'
 const ACTIVE_SCORE_JOB_STATUSES: LeadScoreJobStatus[] = ['queued', 'running', 'retrying']
 const isScoreJobActive = (status?: LeadScoreJobStatus) => Boolean(status && ACTIVE_SCORE_JOB_STATUSES.includes(status))
@@ -799,7 +806,7 @@ export function SourcingPage() {
             const regionTags = lead.businessTags?.region?.length ? lead.businessTags.region : [lead.region || '待确认']
             return <tr key={lead.id} className="hover:bg-slate-50">
               <TableCell><button className="min-w-[240px] text-left" onClick={async () => { setSelected(lead); setDetailTab('overview'); const d = await fetchLeadDetail(lead.id); if (d) setSelected(d) }}><span className="block max-w-[260px] truncate font-medium text-slate-800 hover:text-brand-700" title={companySubject}>{companySubject}</span></button></TableCell>
-              <TableCell><div className="flex max-w-[240px] flex-wrap gap-1">{industryTags.slice(0, 2).map((tag) => <Badge key={`industry-${tag}`} tone="blue">{tag}</Badge>)}{regionTags.slice(0, 1).map((tag) => <Badge key={`region-${tag}`} tone={tag === '待确认' ? 'slate' : 'green'}>{tag}</Badge>)}</div></TableCell>
+              <TableCell><div className="flex max-w-[240px] flex-wrap gap-1">{industryTags.slice(0, 2).map((tag) => <Badge key={`industry-${tag}`} tone="blue">{tag}</Badge>)}{regionTags.slice(0, 1).map((tag) => <span key={`region-${tag}`} title={tag === '待确认' ? '暂无可靠地区证据' : [lead.regionSource, lead.regionConfidence && `可信度${lead.regionConfidence}`].filter(Boolean).join(' · ')}><Badge tone={tag === '待确认' ? 'slate' : 'green'}>{tag}</Badge></span>)}</div></TableCell>
               <TableCell><div className="max-w-[200px]">
                 {valuationStatus === 'available' && valuationValue
                   ? <p className="truncate font-medium text-slate-700" title={valuationValue}>{valuationValue}</p>

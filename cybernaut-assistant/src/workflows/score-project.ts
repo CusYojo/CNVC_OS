@@ -10,9 +10,13 @@ export const route: WorkflowRouteHandler = async (_c, next) => next();
 
 // 评分标准（结构化）随 workflow 一起读；标准文件放 scripts/ 便于统一管理
 const STANDARD = readFileSync(join(process.cwd(), 'scripts', 'scoring_standard.json'), 'utf-8');
+const PRIMARY_SCORE_MODEL = process.env.SCORE_MODEL ?? 'zeelin-oai/gpt-5.5';
+const FALLBACK_SCORE_MODEL = process.env.SCORE_FALLBACK_MODEL ?? 'zeelin-oai/gpt-5.5';
+const PRIMARY_SCORE_TIMEOUT_MS = Math.max(30_000, Number(process.env.SCORE_PRIMARY_MODEL_TIMEOUT_MS) || 90_000);
+const FALLBACK_SCORE_TIMEOUT_MS = Math.max(30_000, Number(process.env.SCORE_FALLBACK_MODEL_TIMEOUT_MS) || 240_000);
 
 const agent = defineAgent(() => ({
-  model: process.env.SCORE_MODEL ?? 'zeelin-oai/gpt-5.5',
+  model: PRIMARY_SCORE_MODEL,
   instructions: [
     '你是浙江赛智伯乐一级市场投资评审 AI，严格依据给定的《评分标准》对项目打分。',
     '',
@@ -106,7 +110,29 @@ export default defineWorkflow({
       '请严格按标准输出结构化评分：每个维度、每个子项的得分与原因，总分=各维度之和，并给出 verdict 与总体评价。',
     ].join('\n');
 
-    const { data } = await session.prompt(prompt, { result: ScoreResult });
+    let promptResult;
+    try {
+      promptResult = await session.prompt(prompt, {
+        result: ScoreResult,
+        model: PRIMARY_SCORE_MODEL,
+        signal: AbortSignal.timeout(
+          PRIMARY_SCORE_MODEL === FALLBACK_SCORE_MODEL
+            ? FALLBACK_SCORE_TIMEOUT_MS
+            : PRIMARY_SCORE_TIMEOUT_MS,
+        ),
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const retryable = /(?:connection|fetch failed|408|429|5\d\d|timeout|timed out|ECONN|operation_failed)/i.test(message);
+      if (!retryable || FALLBACK_SCORE_MODEL === PRIMARY_SCORE_MODEL) throw error;
+      console.warn(`[score-project] primary model failed (${PRIMARY_SCORE_MODEL}), fallback=${FALLBACK_SCORE_MODEL}: ${message}`);
+      promptResult = await session.prompt(prompt, {
+        result: ScoreResult,
+        model: FALLBACK_SCORE_MODEL,
+        signal: AbortSignal.timeout(FALLBACK_SCORE_TIMEOUT_MS),
+      });
+    }
+    const { data } = promptResult;
     // 【批次3·审查AUTO-FIX·需求F】LLM 输出信任边界:valibot 仅校验类型(number),不保证
     // 分值不超上限、也不保证 total=各维度之和。预测性打分放开后 LLM 可能返回超 max 的分
     // 或 total 与子项和不一致,会污染下游排名(doScore 直接用 result.total 算分位)与前端进度条。

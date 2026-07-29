@@ -30,6 +30,7 @@ import {
   readRadarSyncState,
   saveRadarSyncState,
 } from '../services/radarSyncService.js'
+import { resolveLeadBusinessRegion } from '../services/leadRegion.js'
 
 export const metaRouter = Router()
 
@@ -77,6 +78,9 @@ const LeadCreateSchema = z.object({
   name: z.string(),
   companyName: z.string().optional(),
   industry: z.string().optional(),
+  businessRegion: z.string().optional(),
+  businessRegionSource: z.string().optional(),
+  businessRegionConfidence: z.string().optional(),
   source: z.string().optional(),
   summary: z.string().optional(),
   score: z.number().default(0),
@@ -154,10 +158,21 @@ metaRouter.post('/leads/collect', async (req: AuthedRequest, res, next) => {
     const result = await collectPublicIntel(company)
 
     const score = Math.round((result.confidence ?? 0) * 100)
+    const regionResolution = resolveLeadBusinessRegion({
+      registry: {
+        regLocation: result.region,
+        registeredAddress: result.registeredAddress,
+      },
+      subjectName: company,
+      companyName: company,
+    })
     const lead = await createLead({
       name: company,
       companyName: company,
       industry: '待核验',
+      businessRegion: regionResolution?.region,
+      businessRegionSource: regionResolution?.source,
+      businessRegionConfidence: regionResolution?.confidence,
       source: 'AI 情报采集（必应公开信息）',
       poolStatus: score > 0 ? '成功' : '待处理',
       score,
@@ -449,6 +464,16 @@ metaRouter.post('/leads/sync-radar', async (req: AuthedRequest, res, next) => {
           institutions: prof.institutions || '',
           affiliatedInstitutions: prof.affiliated_institutions || '',
           industry: prof.industry || '',
+          region: firstMeaningfulRadarText(
+            prof.region,
+            prof.business_region,
+            prof.location,
+            it.region,
+            it.business_region,
+            it.location,
+          ),
+          regionSource: firstMeaningfulRadarText(prof.region_source, it.region_source),
+          regionConfidence: firstMeaningfulRadarText(prof.region_confidence, it.region_confidence),
           coreHighlights: prof.core_highlights || '',
           riskNotes: prof.risk_notes || '',
           teamComposition: prof.team_composition || '',
@@ -479,12 +504,27 @@ metaRouter.post('/leads/sync-radar', async (req: AuthedRequest, res, next) => {
           publishedAt: it.published_at || '',
         } : {},
       }
+      const regionResolution = resolveLeadBusinessRegion({
+        profile: radarProfile.profile,
+        subjectName: name,
+        companyName,
+        sourceGroup: radarProfile.sourceGroup,
+        channel: radarProfile.channel,
+        sourceName: radarProfile.sourceName,
+        accountName: radarProfile.accountName,
+        sourceTitle: radarProfile.sourceTitle,
+        summary: it.summary,
+        articleText: radarProfile.articleText,
+      })
       const syncResult = await syncRadarLeadByName({
         name,
         companyName: companyName || null,
         industry: (isArxiv
           ? (Array.isArray(it.categories) ? it.categories.slice(0, 3).join(', ') : String(it.categories || prof.industry || '待核验').toString().slice(0, 64))
           : (prof.industry || '待核验').toString().slice(0, 64)),
+        businessRegion: regionResolution?.region,
+        businessRegionSource: regionResolution?.source,
+        businessRegionConfidence: regionResolution?.confidence,
         source: isArxiv
           ? `项目发现雷达 · arxiv`
           : `项目发现雷达 · ${it.source_name || it.source || '公开渠道'}`,
@@ -579,10 +619,10 @@ const scoreStatus = new Map<string, {
 // 本地模型网关是评分链路的瓶颈，默认并发 2，避免 50 条雷达同步后同时压垮网关。
 const scoreQueue: string[] = []
 const SCORE_QUEUE_CONCURRENCY = Math.max(1, parseInt(process.env.SCORE_QUEUE_CONCURRENCY || '2', 10))
-const SCORE_MAX_ATTEMPTS = Math.max(1, Math.min(4, parseInt(process.env.SCORE_MAX_ATTEMPTS || '3', 10)))
-const SCORE_REQUEST_TIMEOUT_MS = Math.max(30_000, parseInt(process.env.SCORE_REQUEST_TIMEOUT_MS || '480000', 10))
+const SCORE_MAX_ATTEMPTS = Math.max(1, Math.min(4, parseInt(process.env.SCORE_MAX_ATTEMPTS || '1', 10)))
+const SCORE_REQUEST_TIMEOUT_MS = Math.max(30_000, parseInt(process.env.SCORE_REQUEST_TIMEOUT_MS || '360000', 10))
 const SCORE_RETRY_BASE_MS = Math.max(1_000, parseInt(process.env.SCORE_RETRY_BASE_MS || '5000', 10))
-const SCORE_DEFERRED_RETRY_LIMIT = Math.max(0, Math.min(5, parseInt(process.env.SCORE_DEFERRED_RETRY_LIMIT || '3', 10)))
+const SCORE_DEFERRED_RETRY_LIMIT = Math.max(0, Math.min(5, parseInt(process.env.SCORE_DEFERRED_RETRY_LIMIT || '1', 10)))
 const SCORE_DEFERRED_RETRY_MS = Math.max(10_000, parseInt(process.env.SCORE_DEFERRED_RETRY_MS || '60000', 10))
 const deferredScoreRetryTimers = new Map<string, ReturnType<typeof setTimeout>>()
 let activeWorkers = 0
@@ -596,7 +636,12 @@ function drainQueue(): void {
   // 补足到 CONCURRENCY 个 worker(每个 worker 跑空队列后自然退出)
   while (activeWorkers < SCORE_QUEUE_CONCURRENCY && scoreQueue.length > 0) {
     activeWorkers++
-    void worker().finally(() => { activeWorkers-- })
+    void worker().finally(() => {
+      activeWorkers--
+      // enqueueScore 可能恰好发生在 worker 看到空队列与 finally 之间。
+      // 退出后再次 drain，避免该竞态留下永久 queued 的任务。
+      drainQueue()
+    })
   }
 }
 function enqueueScore(leadId: string): void {
@@ -609,6 +654,12 @@ async function scheduleLeadScoring(leadId: string, options: { recovering?: boole
   if (current && ['queued', 'running', 'retrying'].includes(current.status)) return false
   const lead = await getLeadById(leadId)
   if (!lead) return false
+  const radarProfile = (lead as { radarProfile?: Record<string, unknown> }).radarProfile ?? {}
+  const isPaper = String(radarProfile.channel ?? '') === '论文'
+  if (!isSpecificLeadSubjectName(lead.name, isPaper)) {
+    console.warn(`[lead-score] skip invalid subject lead=${leadId} name=${lead.name}`)
+    return false
+  }
   const previous = readLeadScoreJob((lead as { scoring?: unknown }).scoring)
   const now = new Date().toISOString()
   const attempts = options.recovering
@@ -641,7 +692,7 @@ async function scheduleLeadScoring(leadId: string, options: { recovering?: boole
   return true
 }
 
-export async function recoverLeadScoringQueue(limit = 50) {
+export async function recoverLeadScoringQueue(limit = 500) {
   const leadIds = await listRecoverableLeadScoreIds(limit)
   let recovered = 0
   for (const leadId of leadIds) {
