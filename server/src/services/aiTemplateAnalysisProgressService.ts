@@ -1,3 +1,6 @@
+import fs from 'node:fs'
+import path from 'node:path'
+
 export type AiTemplateAnalysisProgressStatus = 'running' | 'succeeded' | 'failed'
 
 export type AiTemplateAnalysisProgress = {
@@ -16,6 +19,40 @@ export type AiTemplateAnalysisProgress = {
 const progressById = new Map<string, AiTemplateAnalysisProgress>()
 const COMPLETED_TTL_MS = 10 * 60_000
 const RUNNING_TTL_MS = 40 * 60_000
+
+const PERSIST_PATH = path.resolve(process.cwd(), '.runtime', 'ai-template-analysis-progress.json')
+
+function loadPersistedProgress() {
+  try {
+    const raw = fs.readFileSync(PERSIST_PATH, 'utf-8')
+    const entries: Array<[string, AiTemplateAnalysisProgress]> = JSON.parse(raw)
+    for (const [id, item] of entries) {
+      progressById.set(id, item)
+    }
+  } catch {
+    // file missing or corrupted — start fresh
+  }
+}
+
+function savePersistedProgress() {
+  try {
+    const dir = path.dirname(PERSIST_PATH)
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
+    const entries = Array.from(progressById.entries())
+    fs.writeFileSync(PERSIST_PATH, JSON.stringify(entries, null, 2), 'utf-8')
+  } catch {
+    // best-effort persist; ignore write errors
+  }
+}
+
+let loaded = false
+function ensureLoaded() {
+  if (!loaded) {
+    loadPersistedProgress()
+    loaded = true
+    cleanupExpiredProgress()
+  }
+}
 
 function clampProgress(value: number) {
   return Math.max(0, Math.min(100, Math.round(value)))
@@ -37,6 +74,7 @@ export function startAiTemplateAnalysisProgress(input: {
   userId: string
   fileName: string
 }) {
+  ensureLoaded()
   cleanupExpiredProgress()
   const now = new Date().toISOString()
   const item: AiTemplateAnalysisProgress = {
@@ -48,6 +86,7 @@ export function startAiTemplateAnalysisProgress(input: {
     updatedAt: now,
   }
   progressById.set(input.id, item)
+  savePersistedProgress()
   return item
 }
 
@@ -55,6 +94,7 @@ export function updateAiTemplateAnalysisProgress(
   id: string,
   update: { stage: string; progress: number },
 ) {
+  ensureLoaded()
   const current = progressById.get(id)
   if (!current || current.status !== 'running') return
   progressById.set(id, {
@@ -63,9 +103,11 @@ export function updateAiTemplateAnalysisProgress(
     progress: Math.max(current.progress, clampProgress(update.progress)),
     updatedAt: new Date().toISOString(),
   })
+  savePersistedProgress()
 }
 
 export function completeAiTemplateAnalysisProgress(id: string, result: unknown) {
+  ensureLoaded()
   const current = progressById.get(id)
   if (!current) return
   progressById.set(id, {
@@ -76,9 +118,11 @@ export function completeAiTemplateAnalysisProgress(id: string, result: unknown) 
     updatedAt: new Date().toISOString(),
     result,
   })
+  savePersistedProgress()
 }
 
 export function failAiTemplateAnalysisProgress(id: string, message: string) {
+  ensureLoaded()
   const current = progressById.get(id)
   if (!current) return
   progressById.set(id, {
@@ -88,9 +132,11 @@ export function failAiTemplateAnalysisProgress(id: string, message: string) {
     errorMessage: message,
     updatedAt: new Date().toISOString(),
   })
+  savePersistedProgress()
 }
 
 export function getAiTemplateAnalysisProgress(userId: string, id: string) {
+  ensureLoaded()
   cleanupExpiredProgress()
   const item = progressById.get(id)
   if (!item || item.userId !== userId) return undefined
