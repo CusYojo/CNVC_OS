@@ -41,6 +41,10 @@ fonts-noto-cjk 和 Tesseract。扁平化 OCR 模式还需要
 - Windows 或 Linux，或没有 `swiftc` 的 macOS：Tesseract；
 - 使用 `--ocr-json-dir`：读取外部 OCR JSON。
 
+PPTX 构建脚本需要项目依赖 `pptxgenjs`。当技能目录与项目目录分离部署时，
+必须将 `AI_PDF_TO_PPT_NODE_PROJECT_ROOT` 指向包含 `node_modules` 的项目根目录；
+转换服务会自动传递该变量，手工运行转换器时需继承或显式设置。
+
 在非 macOS 系统运行、安装依赖或执行原生应用验证时，阅读
 [references/cross-platform.md](references/cross-platform.md)。
 

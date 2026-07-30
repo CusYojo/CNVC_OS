@@ -12,6 +12,7 @@ import tempfile
 from pathlib import Path
 
 
+SCRIPT_DIR = Path(__file__).resolve().parent
 LINUX_REQUIRED_FONTS = ("Noto Sans CJK SC", "Noto Serif CJK SC")
 # Minimal valid PPTX for LibreOffice headless smoke test
 _MINIMAL_PPTX_BYTES = bytes.fromhex(
@@ -103,6 +104,47 @@ def command_probe(
         )
     except subprocess.TimeoutExpired:
         return {"passed": False, "error": f"命令检查超过 {timeout_seconds} 秒"}
+    output = (result.stdout or result.stderr).strip()
+    return {
+        "passed": result.returncode == 0,
+        "exitCode": result.returncode,
+        "output": output[:1000],
+        "error": None if result.returncode == 0 else output[:1000],
+    }
+
+
+def pptx_builder_runtime_probe(
+    node: str | None,
+    timeout_seconds: int,
+) -> dict:
+    if not node:
+        return {"passed": False, "error": "未找到 Node.js"}
+    runtime_uri = (
+        SCRIPT_DIR / "public_pptx_runtime.mjs"
+    ).resolve().as_uri()
+    program = (
+        f"const runtime = await import({json.dumps(runtime_uri)});"
+        "const built = runtime.createPresentation(960, 540);"
+        "if (!built?.pptx || built.slideWidth <= 0) process.exit(2);"
+        "console.log(built.pptx.constructor.name);"
+    )
+    try:
+        result = subprocess.run(
+            [node, "--input-type=module", "--eval", program],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout_seconds,
+            env=os.environ.copy(),
+            cwd=os.getcwd(),
+        )
+    except subprocess.TimeoutExpired:
+        return {
+            "passed": False,
+            "error": f"PptxGenJS 运行时检查超过 {timeout_seconds} 秒",
+        }
     output = (result.stdout or result.stderr).strip()
     return {
         "passed": result.returncode == 0,
@@ -381,6 +423,7 @@ def build_report(
     system = platform.system()
     libreoffice = libreoffice_override or executable("libreoffice") or executable("soffice")
     commands = {
+        "node": executable("node"),
         "pdftoppm": pdftoppm_override or executable("pdftoppm"),
         "tesseract": executable("tesseract"),
         "swiftc": executable("swiftc") if system == "Darwin" else None,
@@ -399,6 +442,9 @@ def build_report(
     }
     tesseract = tesseract_languages(commands["tesseract"], smoke_timeout_seconds)
     command_checks = {
+        "pptx_builder": pptx_builder_runtime_probe(
+            commands["node"], smoke_timeout_seconds
+        ),
         "pdftoppm": command_probe(
             commands["pdftoppm"], ("-v",), smoke_timeout_seconds
         ),
@@ -427,6 +473,7 @@ def build_report(
         for name, present in {
             "LibreOffice": commands["libreoffice"] is not None,
             "Poppler pdftoppm": command_checks["pdftoppm"]["passed"],
+            "PptxGenJS 构建运行时": command_checks["pptx_builder"]["passed"],
             "PyMuPDF": modules["PyMuPDF"],
             "Pillow": modules["Pillow"],
             "LibreOffice + pdftoppm 渲染冒烟": libreoffice_smoke["passed"],
@@ -485,6 +532,7 @@ def print_human(report: dict) -> None:
     print(f"系统：{current['system']} {current['release']} ({current['machine']})")
     print(f"Python：{current['python']}")
     for label, key in (
+        ("Node.js", "node"),
         ("Poppler pdftoppm", "pdftoppm"),
         ("Tesseract", "tesseract"),
         ("Swift 编译器", "swiftc"),
@@ -492,6 +540,10 @@ def print_human(report: dict) -> None:
         ("Microsoft PowerPoint", "powerpoint"),
     ):
         print(f"{label}：{report['commands'][key] or '未找到'}")
+    builder = report["command_checks"]["pptx_builder"]
+    print(f"PptxGenJS 构建运行时：{'通过' if builder['passed'] else '失败'}")
+    if builder.get("error"):
+        print("  " + str(builder["error"]).replace("\n", "\n  "))
     for label, present in report["python_modules"].items():
         print(f"Python {label}：{'已安装' if present else '未安装'}")
     smoke = report["libreoffice_smoke"]

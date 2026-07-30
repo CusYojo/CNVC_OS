@@ -165,7 +165,12 @@ function conversionFailureMessage(error: unknown) {
     return 'PDF 模板转换环境缺少 Poppler，请配置 pdftoppm 后重试'
   }
   if (
-    /artifact-tool|缺少 Presentations 技能|Cannot find (?:package|module)[^\n]*pptxgenjs|ERR_MODULE_NOT_FOUND[^\n]*pptxgenjs|LibreOffice[^\n]*(?:not found|No such file|不存在|缺少)/i.test(detail)
+    /PPTXGENJS_MODULE_NOT_FOUND|Cannot find (?:package|module)[^\n]*pptxgenjs|ERR_MODULE_NOT_FOUND[^\n]*pptxgenjs|无法加载 pptxgenjs/i.test(detail)
+  ) {
+    return 'PDF 模板转换环境无法加载 pptxgenjs，请检查项目依赖解析路径'
+  }
+  if (
+    /artifact-tool|缺少 Presentations 技能|LibreOffice[^\n]*(?:not found|No such file|不存在|缺少)/i.test(detail)
   ) {
     return 'PDF 模板转换环境缺少 Presentations 技能或 LibreOffice 渲染管线'
   }
@@ -305,6 +310,8 @@ export async function convertUploadedInvestmentPdfTemplate(input: {
   const conversionEnv = {
     ...process.env,
     XDG_CACHE_HOME: runtimeCacheDir,
+    AI_PDF_TO_PPT_NODE_PROJECT_ROOT:
+      process.env.AI_PDF_TO_PPT_NODE_PROJECT_ROOT || process.cwd(),
     ...(fontconfigFile ? { FONTCONFIG_FILE: fontconfigFile } : {}),
     NODE_PATH: path.resolve(process.cwd(), 'node_modules'),
   }

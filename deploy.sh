@@ -261,6 +261,7 @@ GSDATA_APP_SECRET=
 # ---- Agent 工作空间 ----
 AGENT_WORKSPACE=${FLUE_STATE_DIR}/workspace
 AI_SKILL_ROOT=${FLUE_STATE_DIR}/workspace/.agents/skills
+AI_PDF_TO_PPT_NODE_PROJECT_ROOT=${DEPLOY_DIR}
 FLUE_DB_PATH=${FLUE_STATE_DIR}/flue.db
 
 # ---- 性能 ----
@@ -280,6 +281,7 @@ EOF
     set_env_value "$ENV_FILE" "EXPRESS_BASE_URL" "http://127.0.0.1:3100"
     set_env_value "$ENV_FILE" "AGENT_WORKSPACE" "${FLUE_STATE_DIR}/workspace"
     set_env_value "$ENV_FILE" "AI_SKILL_ROOT" "${FLUE_STATE_DIR}/workspace/.agents/skills"
+    set_env_value "$ENV_FILE" "AI_PDF_TO_PPT_NODE_PROJECT_ROOT" "${DEPLOY_DIR}"
     set_env_value "$ENV_FILE" "FLUE_DB_PATH" "${FLUE_STATE_DIR}/flue.db"
     set_env_value "$ENV_FILE" "RADAR_BASE_URL" "http://127.0.0.1:${RADAR_PORT}"
     set_env_value "$ENV_FILE" "RADAR_DATA_DIR" "${RADAR_STATE_DIR}/data"
