@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
-import { existsSync, readdirSync } from 'node:fs'
+import { existsSync, readdirSync, symlinkSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { promisify } from 'node:util'
@@ -295,6 +295,10 @@ export async function convertUploadedInvestmentPdfTemplate(input: {
     mkdir(runtimeCacheDir, { recursive: true }),
     mkdir(input.workDir, { recursive: true }),
   ])
+  // ESM 模块在临时 workDir 中无法解析 ppxtgenjs（NODE_PATH 对 ESM 无效，Node.js v24），
+  // 用符号链接让 Node 子进程在当前及父目录中都能找到 node_modules。
+  const projectNodeModules = path.resolve(process.cwd(), 'node_modules')
+  try { symlinkSync(projectNodeModules, path.join(input.workDir, 'node_modules'), 'dir') } catch { /* 已存在或不可写则忽略 */ }
   const fontconfigFile = process.env.AI_PDF_TO_PPT_FONTCONFIG_FILE
     || process.env.FONTCONFIG_FILE
     || inferBundledFontconfigFile(pdftoppm)
