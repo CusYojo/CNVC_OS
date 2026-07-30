@@ -134,8 +134,12 @@ function TaskCard({
     : task.status === 'failed'
       ? '未形成最终引用清单'
       : '资料读取与引用整理中'
+  const templatePreparationFailed = task.status === 'failed'
+    && task.parameters._templatePreparationPending === true
   const genericFailureMessage = '文档尚未完成，系统已保留本次生成参数，可继续生成。'
-  const failureMessage = task.type === 'due_diligence_report'
+  const failureMessage = templatePreparationFailed
+    ? task.errorMessage || '模板分析未完成，请重新上传模板。'
+    : task.type === 'due_diligence_report'
     && task.progress <= 35
     && (!task.errorMessage || task.errorMessage === genericFailureMessage)
     ? '尽调正文生成或质量检查未完成，因此未生成文件。系统已保留参数，可点击“继续生成”。'
@@ -238,7 +242,7 @@ function TaskCard({
               <Square className="h-3 w-3" />取消任务
             </Button>
           )}
-          {task.status === 'failed' && (
+          {task.status === 'failed' && !templatePreparationFailed && (
             <Button size="sm" variant="secondary" loading={mutating} onClick={() => { void onRetry(task) }}>
               <RotateCcw className="h-3.5 w-3.5" />继续生成
             </Button>

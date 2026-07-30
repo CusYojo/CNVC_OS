@@ -4,12 +4,16 @@ import type { AuthedRequest } from '../middleware/requireAuth.js'
 import {
   cancelAiTask,
   createAiTask,
+  createInvestmentPptPreparationTask,
+  failInvestmentPptPreparationTask,
   getAiTask,
   getArtifactDownload,
   getArtifactPreview,
   listAiArtifacts,
   listAiTasks,
   retryAiTask,
+  startInvestmentPptTaskAfterPreparation,
+  updateInvestmentPptPreparationTask,
 } from '../services/aiTaskService.js'
 import { listAiTaskTypes } from '../services/aiTemplateCatalog.js'
 import { listAiBusinessSkills } from '../services/aiSkillService.js'
@@ -135,6 +139,26 @@ const createSchema = z.object({
 })
 
 const idSchema = z.string().uuid()
+const investmentPptPreparationSchema = z.object({
+  projectId: z.string().uuid(),
+  conversationId: z.string().uuid(),
+  fileName: z.string().trim().min(1).max(255),
+  progressId: z.string().uuid(),
+  startedAt: z.string().datetime({ offset: true }),
+  sourceCutoffDate: dateSchema,
+  outputFormat: z.literal('PPTX'),
+  language: z.literal('中文'),
+  structureMode: z.literal('strict-template'),
+  idempotencyKey: z.string().trim().min(8).max(128),
+}).superRefine((body, ctx) => {
+  if (body.sourceCutoffDate > new Date().toISOString().slice(0, 10)) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['sourceCutoffDate'],
+      message: '资料截止日不能晚于今天',
+    })
+  }
+})
 const qaSchema = z.object({
   projectId: z.string().uuid(),
   conversationId: z.string().uuid(),
@@ -184,7 +208,14 @@ aiTasksRouter.post('/templates/analyze', async (req: AuthedRequest, res, next) =
         'investment_recommendation_ppt',
       ]).optional(),
       progressId: z.string().uuid().optional(),
+      taskId: z.string().uuid().optional(),
     }).parse(req.body ?? {})
+    if (body.taskId && body.purpose !== 'investment_recommendation_ppt') {
+      throw Object.assign(new Error('只有投资建议书模板分析可以关联正式任务'), {
+        status: 400,
+        code: 'INVALID_TEMPLATE_TASK',
+      })
+    }
 
     // 兼容没有 progressId 的旧调用方；新版前端使用 progressId 后，上传请求
     // 只负责受理任务，耗时的 PDF 转换在请求结束后继续执行，避免被反向代理超时切断。
@@ -196,22 +227,64 @@ aiTasksRouter.post('/templates/analyze', async (req: AuthedRequest, res, next) =
 
     const progressId = body.progressId
     const user = userFrom(req)
+    if (body.taskId) {
+      const task = await updateInvestmentPptPreparationTask(
+        user.uid,
+        body.taskId,
+        { stage: '已接收模板，正在准备分析', progress: 5 },
+        {
+          projectId: body.projectId,
+          conversationId: body.conversationId,
+          progressId,
+        },
+      )
+      if (!task) {
+        throw Object.assign(new Error('投资建议书任务不存在'), {
+          status: 404,
+          code: 'TASK_NOT_FOUND',
+        })
+      }
+    }
     startAiTemplateAnalysisProgress({
       id: progressId,
-      userId: req.user!.uid,
+      userId: user.uid,
       fileName: body.name,
     })
     setImmediate(() => {
       void createAiCustomTemplate(user, body, {
-        onProgress: (update) => updateAiTemplateAnalysisProgress(
-          progressId,
-          update,
-        ),
-      }).then((template) => {
+        onProgress: async (update) => {
+          updateAiTemplateAnalysisProgress(progressId, update)
+          if (body.taskId) {
+            await updateInvestmentPptPreparationTask(
+              user.uid,
+              body.taskId,
+              update,
+            )
+          }
+        },
+      }).then(async (template) => {
+        if (body.taskId) {
+          await startInvestmentPptTaskAfterPreparation(user, body.taskId, {
+            id: template.id,
+            originalFileName: template.originalFileName,
+          })
+        }
         completeAiTemplateAnalysisProgress(progressId, template)
-      }).catch((error) => {
+      }).catch(async (error) => {
         const message = (error as Error).message || '模板分析失败'
         failAiTemplateAnalysisProgress(progressId, message)
+        if (body.taskId) {
+          await failInvestmentPptPreparationTask(
+            user.uid,
+            body.taskId,
+            message,
+          ).catch((taskError) => {
+            console.error(
+              `[ai-template-analysis] 正式任务失败状态写入未完成 taskId=${body.taskId}`,
+              taskError,
+            )
+          })
+        }
         console.error(
           `[ai-template-analysis] 后台模板分析失败 progressId=${progressId}`,
           error,
@@ -302,6 +375,32 @@ aiTasksRouter.post('/tasks', async (req: AuthedRequest, res, next) => {
     const body = createSchema.parse(req.body ?? {})
     const task = await createAiTask(userFrom(req), body)
     res.status(202).json(task)
+  } catch (error) { next(error) }
+})
+
+aiTasksRouter.post('/tasks/preparations/investment-ppt', async (req: AuthedRequest, res, next) => {
+  try {
+    const body = investmentPptPreparationSchema.parse(req.body ?? {})
+    const task = await createInvestmentPptPreparationTask(userFrom(req), body)
+    res.status(201).json(task)
+  } catch (error) { next(error) }
+})
+
+aiTasksRouter.post('/tasks/:id/preparation/fail', async (req: AuthedRequest, res, next) => {
+  try {
+    const body = z.object({
+      errorMessage: z.string().trim().min(1).max(2000),
+    }).parse(req.body ?? {})
+    const task = await failInvestmentPptPreparationTask(
+      req.user!.uid,
+      idSchema.parse(req.params.id),
+      body.errorMessage,
+    )
+    if (!task) {
+      res.status(404).json({ code: 'NOT_FOUND', message: '任务不存在', details: null })
+      return
+    }
+    res.json(task)
   } catch (error) { next(error) }
 })
 

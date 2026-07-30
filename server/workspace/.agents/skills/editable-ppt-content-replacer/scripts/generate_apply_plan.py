@@ -199,7 +199,7 @@ def main() -> None:
         f"{native_output}：{len(native)} 项原生图表/表格操作"
     )
     if not ordinary:
-        print("提示：普通应用计划为空，跳过 apply_template_plan.py。")
+        print("提示：普通应用计划为空，跳过 apply_template_plan_openxml.py。")
     if not structural:
         print("提示：结构删除计划为空，跳过 apply_structural_plan.py。")
 

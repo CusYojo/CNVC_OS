@@ -130,6 +130,19 @@ export type CreateAiTaskInput = {
   retryOfTaskId?: string
 }
 
+export type CreateInvestmentPptPreparationInput = {
+  projectId: string
+  conversationId: string
+  fileName: string
+  progressId: string
+  startedAt: string
+  sourceCutoffDate: string
+  outputFormat: 'PPTX'
+  language: '中文'
+  structureMode: 'strict-template'
+  idempotencyKey: string
+}
+
 const ARTIFACT_ROOT = path.resolve(process.env.AI_ARTIFACT_ROOT || path.join(process.cwd(), 'server', 'ai-artifacts'))
 const running = new Set<string>()
 const AUTO_RECOVERY_TASK_TYPES = new Set<AiExecutableTaskType>([
@@ -546,6 +559,10 @@ async function updateStage(taskId: string, stage: string, progress: number) {
   await db.update(aiTasks).set({ stage, progress, updatedAt: new Date() }).where(eq(aiTasks.id, taskId))
 }
 
+function isTemplatePreparationPending(parameters: Record<string, unknown> | null | undefined) {
+  return parameters?._templatePreparationPending === true
+}
+
 async function cancelIfRequested(taskId: string) {
   if (!(await isCancellationRequested(taskId))) return false
   await db.update(aiTasks).set({
@@ -624,6 +641,8 @@ async function executeTask(taskId: string) {
     const [task] = await db.select().from(aiTasks).where(eq(aiTasks.id, taskId)).limit(1)
     if (!task || !isAiExecutableTaskType(task.type) || ['succeeded', 'cancelled'].includes(task.status)) return
     const parameters = (task.parameters ?? {}) as Record<string, unknown>
+    // 上传模板时会先创建正式任务记录，但模板分析完成前不能进入文档生成流水线。
+    if (isTemplatePreparationPending(parameters)) return
     const resolvedCustomTemplate = (
       task.type === 'custom_template_document'
       || task.type === 'investment_recommendation_ppt'
@@ -1977,18 +1996,249 @@ function scheduleTask(taskId: string) {
   setImmediate(() => { void executeTask(taskId) })
 }
 
-export async function createAiTask(user: AiTaskUser, input: CreateAiTaskInput) {
-  const access = await userCanAccessProject(user, input.projectId)
-  if (!access.allowed || !access.project) throw Object.assign(new Error(access.reason), { status: access.project ? 403 : 404, code: access.project ? 'FORBIDDEN' : 'NOT_FOUND' })
-  if (input.conversationId) {
+async function assertTaskProjectAndConversationAccess(
+  user: AiTaskUser,
+  projectId: string,
+  conversationId?: string,
+) {
+  const access = await userCanAccessProject(user, projectId)
+  if (!access.allowed || !access.project) {
+    throw Object.assign(new Error(access.reason), {
+      status: access.project ? 403 : 404,
+      code: access.project ? 'FORBIDDEN' : 'NOT_FOUND',
+    })
+  }
+  if (conversationId) {
     const [conversation] = await db.select().from(chatConversations)
-      .where(and(eq(chatConversations.id, input.conversationId), eq(chatConversations.userId, user.uid)))
+      .where(and(
+        eq(chatConversations.id, conversationId),
+        eq(chatConversations.userId, user.uid),
+      ))
       .limit(1)
-    if (!conversation) throw Object.assign(new Error('会话不存在或不属于当前用户'), { status: 404, code: 'CONVERSATION_NOT_FOUND' })
-    if (conversation.projectId && conversation.projectId !== input.projectId) {
-      throw Object.assign(new Error('会话所属项目与任务项目不一致'), { status: 409, code: 'CONVERSATION_PROJECT_MISMATCH' })
+    if (!conversation) {
+      throw Object.assign(new Error('会话不存在或不属于当前用户'), {
+        status: 404,
+        code: 'CONVERSATION_NOT_FOUND',
+      })
+    }
+    if (conversation.projectId && conversation.projectId !== projectId) {
+      throw Object.assign(new Error('会话所属项目与任务项目不一致'), {
+        status: 409,
+        code: 'CONVERSATION_PROJECT_MISMATCH',
+      })
     }
   }
+  return access.project
+}
+
+export async function createInvestmentPptPreparationTask(
+  user: AiTaskUser,
+  input: CreateInvestmentPptPreparationInput,
+) {
+  const project = await assertTaskProjectAndConversationAccess(
+    user,
+    input.projectId,
+    input.conversationId,
+  )
+  const parameters: Record<string, unknown> = {
+    sourceCutoffDate: input.sourceCutoffDate,
+    outputFormat: input.outputFormat,
+    language: input.language,
+    structureMode: input.structureMode,
+    customTemplateName: input.fileName,
+    clientPreparationId: input.progressId,
+    clientTimelineStartedAt: input.startedAt,
+    _templatePreparationPending: true,
+  }
+  const hash = createRequestHash({
+    type: 'investment_recommendation_ppt',
+    projectId: input.projectId,
+    conversationId: input.conversationId,
+    parameters,
+    idempotencyKey: input.idempotencyKey,
+  })
+  const [existing] = await db.select().from(aiTasks)
+    .where(and(
+      eq(aiTasks.userId, user.uid),
+      eq(aiTasks.idempotencyKey, input.idempotencyKey),
+    ))
+    .limit(1)
+  if (existing) {
+    if (existing.requestHash && existing.requestHash !== hash) {
+      throw Object.assign(new Error('该幂等键已用于不同的任务参数'), {
+        status: 409,
+        code: 'IDEMPOTENCY_CONFLICT',
+      })
+    }
+    return getAiTask(user.uid, existing.id)
+  }
+  try {
+    const now = new Date()
+    const startedAt = new Date(input.startedAt)
+    const [task] = await db.insert(aiTasks).values({
+      userId: user.uid,
+      projectId: input.projectId,
+      conversationId: input.conversationId,
+      type: 'investment_recommendation_ppt',
+      parameters,
+      templateVersion: '模板上传与预检',
+      status: 'running',
+      stage: '正在读取并上传模板',
+      progress: 1,
+      startedAt,
+      idempotencyKey: input.idempotencyKey,
+      requestHash: hash,
+      updatedAt: now,
+    }).returning()
+    await writeTaskAudit(user, '创建 AI 任务', `投资建议书（PPT）模板准备：${project.name}`)
+    return getAiTask(user.uid, task.id)
+  } catch (error) {
+    if ((error as { code?: string }).code === '23505') {
+      const [raceWinner] = await db.select().from(aiTasks)
+        .where(and(
+          eq(aiTasks.userId, user.uid),
+          eq(aiTasks.idempotencyKey, input.idempotencyKey),
+        ))
+        .limit(1)
+      if (raceWinner) return getAiTask(user.uid, raceWinner.id)
+    }
+    throw error
+  }
+}
+
+export async function updateInvestmentPptPreparationTask(
+  userId: string,
+  taskId: string,
+  update: { stage: string; progress: number },
+  expected?: {
+    projectId: string
+    conversationId?: string
+    progressId: string
+  },
+) {
+  const task = await getTaskRow(userId, taskId)
+  if (!task) return undefined
+  const parameters = task.parameters as Record<string, unknown>
+  if (expected && (
+    task.projectId !== expected.projectId
+    || task.conversationId !== (expected.conversationId ?? null)
+    || parameters.clientPreparationId !== expected.progressId
+    || task.type !== 'investment_recommendation_ppt'
+    || !isTemplatePreparationPending(parameters)
+  )) {
+    throw Object.assign(new Error('模板分析请求与投资建议书任务不匹配'), {
+      status: 409,
+      code: 'TEMPLATE_TASK_MISMATCH',
+    })
+  }
+  if (
+    task.type !== 'investment_recommendation_ppt'
+    || !isTemplatePreparationPending(parameters)
+    || task.status !== 'running'
+  ) return getAiTask(userId, taskId)
+  await db.update(aiTasks).set({
+    stage: update.stage.slice(0, 64),
+    progress: Math.max(1, Math.min(10, Math.ceil(update.progress / 10))),
+    updatedAt: new Date(),
+  }).where(and(eq(aiTasks.id, taskId), eq(aiTasks.userId, userId)))
+  return getAiTask(userId, taskId)
+}
+
+export async function failInvestmentPptPreparationTask(
+  userId: string,
+  taskId: string,
+  errorMessage: string,
+) {
+  const task = await getTaskRow(userId, taskId)
+  if (!task) return undefined
+  const parameters = task.parameters as Record<string, unknown>
+  if (
+    task.type !== 'investment_recommendation_ppt'
+    || !isTemplatePreparationPending(parameters)
+    || ['succeeded', 'failed', 'cancelled'].includes(task.status)
+  ) return getAiTask(userId, taskId)
+  const now = new Date()
+  await db.update(aiTasks).set({
+    status: 'failed',
+    stage: '模板分析失败',
+    progress: Math.max(1, Math.min(10, task.progress || 1)),
+    errorMessage: errorMessage.trim().slice(0, 2000) || '模板分析失败',
+    completedAt: now,
+    updatedAt: now,
+  }).where(and(eq(aiTasks.id, taskId), eq(aiTasks.userId, userId)))
+  return getAiTask(userId, taskId)
+}
+
+export async function startInvestmentPptTaskAfterPreparation(
+  user: AiTaskUser,
+  taskId: string,
+  templateInput: { id: string; originalFileName: string },
+) {
+  const task = await getTaskRow(user.uid, taskId)
+  if (!task) {
+    throw Object.assign(new Error('投资建议书任务不存在'), {
+      status: 404,
+      code: 'TASK_NOT_FOUND',
+    })
+  }
+  const currentParameters = task.parameters as Record<string, unknown>
+  if (
+    task.type !== 'investment_recommendation_ppt'
+    || !isTemplatePreparationPending(currentParameters)
+  ) return getAiTask(user.uid, taskId)
+  if (task.cancellationRequested || task.status === 'cancelled') {
+    await db.update(aiTasks).set({
+      status: 'cancelled',
+      stage: '已取消',
+      completedAt: new Date(),
+      updatedAt: new Date(),
+    }).where(eq(aiTasks.id, taskId))
+    return getAiTask(user.uid, taskId)
+  }
+  const parameters: Record<string, unknown> = {
+    ...currentParameters,
+    customTemplateId: templateInput.id,
+    customTemplateName: templateInput.originalFileName,
+    _templatePreparationPending: false,
+  }
+  const resolved = await resolveAiCustomTemplateForTask({
+    userId: user.uid,
+    projectId: task.projectId,
+    conversationId: task.conversationId ?? undefined,
+    templateId: templateInput.id,
+    taskType: 'investment_recommendation_ppt',
+  })
+  const expectedOutputFormat = resolved.template.outputFormat.toUpperCase()
+  if (parameters.outputFormat !== expectedOutputFormat) {
+    throw Object.assign(new Error(`上传模板输出格式应为 ${expectedOutputFormat}`), {
+      status: 409,
+      code: 'CUSTOM_TEMPLATE_FORMAT_MISMATCH',
+    })
+  }
+  await prepareInvestmentRecommendationPptWorkflow(resolved.template)
+  const now = new Date()
+  await db.update(aiTasks).set({
+    parameters,
+    templateVersion: resolved.template.templateVersion,
+    status: 'pending',
+    stage: '模板分析完成，等待生成',
+    progress: 10,
+    errorId: null,
+    errorMessage: null,
+    completedAt: null,
+    updatedAt: now,
+  }).where(and(eq(aiTasks.id, taskId), eq(aiTasks.userId, user.uid)))
+  await writeTaskAudit(user, '完成 AI 任务模板准备', taskId)
+  scheduleTask(taskId)
+  return getAiTask(user.uid, taskId)
+}
+
+export async function createAiTask(user: AiTaskUser, input: CreateAiTaskInput) {
+  const project = await assertTaskProjectAndConversationAccess(
+    user,
+    input.projectId,
+    input.conversationId,
+  )
   const resolvedCustomTemplate = (
     input.type === 'custom_template_document'
     || input.type === 'investment_recommendation_ppt'
@@ -2040,7 +2290,7 @@ export async function createAiTask(user: AiTaskUser, input: CreateAiTaskInput) {
       requestHash: hash,
       retryOfTaskId: input.retryOfTaskId,
     }).returning()
-    await writeTaskAudit(user, '创建 AI 任务', `${template.label}：${access.project.name}`)
+    await writeTaskAudit(user, '创建 AI 任务', `${template.label}：${project.name}`)
     scheduleTask(task.id)
     return getAiTask(user.uid, task.id)
   } catch (error) {
@@ -2076,9 +2326,14 @@ export async function cancelAiTask(user: AiTaskUser, taskId: string) {
   const task = await getTaskRow(user.uid, taskId)
   if (!task) return undefined
   if (['succeeded', 'failed', 'cancelled'].includes(task.status)) return getAiTask(user.uid, taskId)
+  const templatePreparation = isTemplatePreparationPending(
+    task.parameters as Record<string, unknown>,
+  )
   await db.update(aiTasks).set({
     cancellationRequested: true,
-    ...(task.status === 'pending' ? { status: 'cancelled', stage: '已取消', completedAt: new Date() } : {}),
+    ...(task.status === 'pending' || templatePreparation
+      ? { status: 'cancelled', stage: '已取消', completedAt: new Date() }
+      : {}),
     updatedAt: new Date(),
   }).where(eq(aiTasks.id, taskId))
   await writeTaskAudit(user, '取消 AI 任务', taskId)
@@ -2091,6 +2346,12 @@ export async function retryAiTask(user: AiTaskUser, taskId: string, idempotencyK
   if (!isAiExecutableTaskType(task.type)) throw new Error('不支持重试的任务类型')
   if (task.status !== 'failed') {
     throw Object.assign(new Error('只有失败任务可以重试'), { status: 409, code: 'TASK_NOT_RETRYABLE' })
+  }
+  if (isTemplatePreparationPending(task.parameters as Record<string, unknown>)) {
+    throw Object.assign(new Error('模板分析尚未完成，请重新上传模板'), {
+      status: 409,
+      code: 'TEMPLATE_REUPLOAD_REQUIRED',
+    })
   }
   const retryParameters = {
     ...(task.parameters as Record<string, unknown>),
@@ -2157,11 +2418,24 @@ export async function getArtifactPreview(userId: string, artifactId: string) {
 }
 
 export async function recoverAiTasks() {
-  const recoverable = await db.select({ id: aiTasks.id }).from(aiTasks)
+  const recoverable = await db.select({
+    id: aiTasks.id,
+    parameters: aiTasks.parameters,
+  }).from(aiTasks)
     .where(inArray(aiTasks.status, ['pending', 'running']))
     .orderBy(asc(aiTasks.createdAt))
     .limit(100)
   for (const task of recoverable) {
+    if (isTemplatePreparationPending(task.parameters)) {
+      await db.update(aiTasks).set({
+        status: 'failed',
+        stage: '模板分析中断',
+        errorMessage: '服务重启导致模板分析中断，请重新上传模板。',
+        completedAt: new Date(),
+        updatedAt: new Date(),
+      }).where(eq(aiTasks.id, task.id))
+      continue
+    }
     await db.update(aiTasks).set({ status: 'pending', stage: '等待恢复', updatedAt: new Date() }).where(eq(aiTasks.id, task.id))
     scheduleTask(task.id)
   }

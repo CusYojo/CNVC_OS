@@ -11,6 +11,7 @@ import { Button, Modal } from '../components/ui'
 import {
   AiQuickActions,
   type AiQuickTaskPreparationProgress,
+  type AiQuickTaskPreparationRequest,
   type AiQuickTaskRequest,
 } from '../components/AiQuickActions'
 import { AiArtifactCenter, AiTaskCards, type AiTask } from '../components/AiTaskCards'
@@ -1266,34 +1267,70 @@ function Chat() {
 
   const updateQuickTaskPreparation = (progress: AiQuickTaskPreparationProgress) => {
     if (progress.conversationId !== currentConversationRowIdRef.current) return
-    const clientTaskId = `template-preparation:${progress.id}`
-    const task: AiTask = {
-      id: clientTaskId,
-      clientOnly: true,
-      projectId: progress.projectId,
-      conversationId: progress.conversationId,
-      type: AI_TASK_TYPE_BY_ACTION[progress.actionId],
-      parameters: {
-        customTemplateName: progress.fileName,
-        clientPreparationId: progress.id,
-        clientTimelineStartedAt: progress.startedAt,
-      },
-      templateVersion: '模板上传与预检',
-      status: progress.status,
-      stage: progress.stage,
-      progress: progress.progress,
-      errorMessage: progress.errorMessage,
-      createdAt: progress.startedAt,
-      updatedAt: progress.updatedAt,
-      completedAt: progress.status === 'failed' ? progress.updatedAt : null,
-      artifacts: [],
-      sources: [],
+    setAiTasks((items) => items.map((task) => {
+      if (
+        task.id !== progress.taskId
+        || task.parameters._templatePreparationPending !== true
+      ) return task
+      return {
+        ...task,
+        status: progress.status,
+        stage: progress.stage,
+        progress: progress.progress,
+        errorMessage: progress.errorMessage,
+        updatedAt: progress.updatedAt,
+        completedAt: progress.status === 'failed' ? progress.updatedAt : null,
+      }
+    }))
+  }
+
+  const createQuickTaskPreparation = async (
+    request: AiQuickTaskPreparationRequest,
+  ): Promise<string | null> => {
+    const taskLockKey = `${request.conversationId}:investment_ppt`
+    if (sending || quickTaskLocksRef.current.has(taskLockKey)) return null
+    if (!UUID_PATTERN.test(request.projectId)) {
+      showToast(`“${request.projectName}”是未入库的演示项目，不能提交正式 AI 任务。请先创建或选择已入库项目。`, 'error')
+      return null
     }
-    setAiTasks((items) => {
-      const existingIndex = items.findIndex((item) => item.id === clientTaskId)
-      if (existingIndex < 0) return [task, ...items]
-      return items.map((item) => item.id === clientTaskId ? task : item)
-    })
+    quickTaskLocksRef.current.add(taskLockKey)
+    try {
+      const taskSession = sessions.find(
+        (session) => session.rowId === request.conversationId,
+      )
+      if (!taskSession?.projectId || taskSession.projectId !== request.projectId) {
+        showToast('当前项目随会话固定，请重新打开快捷任务后再试', 'error')
+        return null
+      }
+      const task = await apiPost<AiTask>(
+        '/ai/tasks/preparations/investment-ppt',
+        {
+          projectId: request.projectId,
+          conversationId: request.conversationId,
+          fileName: request.fileName,
+          progressId: request.progressId,
+          startedAt: request.startedAt,
+          sourceCutoffDate: request.sourceCutoffDate,
+          outputFormat: request.outputFormat,
+          language: request.language,
+          structureMode: request.structureMode,
+          idempotencyKey: `ppt-preparation-${request.progressId}`,
+        },
+      )
+      if (currentConversationRowIdRef.current === request.conversationId) {
+        setAiTasks((items) => [
+          task,
+          ...items.filter((item) => item.id !== task.id),
+        ])
+      }
+      return task.id
+    } catch (error) {
+      console.warn('Investment PPT preparation task was not created', error)
+      showToast('投资建议书任务暂未创建，请稍后再试', 'error')
+      return null
+    } finally {
+      quickTaskLocksRef.current.delete(taskLockKey)
+    }
   }
 
   const runQuickTask = async (request: AiQuickTaskRequest): Promise<boolean> => {
@@ -1551,6 +1588,7 @@ function Chat() {
               currentProjectId={scope === 'project' ? currentSession?.projectId ?? '' : ''}
               conversationId={currentConversationRowId}
               onRunTask={runQuickTask}
+              onCreatePreparationTask={createQuickTaskPreparation}
               onPreparationProgress={updateQuickTaskPreparation}
             />
           </AiErrorBoundary>

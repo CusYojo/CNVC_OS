@@ -87,6 +87,7 @@ type TemplateAnalysisAccepted = {
 
 export type AiQuickTaskPreparationProgress = {
   id: string
+  taskId: string
   actionId: 'investment_ppt'
   actionLabel: string
   projectId: string
@@ -100,6 +101,19 @@ export type AiQuickTaskPreparationProgress = {
   updatedAt: string
   elapsedSeconds: number
   errorMessage?: string
+}
+
+export type AiQuickTaskPreparationRequest = {
+  projectId: string
+  projectName: string
+  conversationId: string
+  fileName: string
+  progressId: string
+  startedAt: string
+  sourceCutoffDate: string
+  outputFormat: 'PPTX'
+  language: '中文'
+  structureMode: 'strict-template'
 }
 
 export type AiQuickTaskRequest = {
@@ -167,6 +181,7 @@ export function AiQuickActions({
   currentProjectId,
   conversationId,
   onRunTask,
+  onCreatePreparationTask,
   onPreparationProgress,
 }: {
   disabled: boolean
@@ -174,6 +189,7 @@ export function AiQuickActions({
   currentProjectId: string
   conversationId: string
   onRunTask: (request: AiQuickTaskRequest) => Promise<boolean>
+  onCreatePreparationTask: (request: AiQuickTaskPreparationRequest) => Promise<string | null>
   onPreparationProgress?: (progress: AiQuickTaskPreparationProgress) => void
 }) {
   const [activeAction, setActiveAction] = useState<ActionConfig | null>(null)
@@ -298,6 +314,23 @@ export function AiQuickActions({
     // uid() 在 HTTPS/localhost 使用原生 UUID，在 HTTP 环境自动降级。
     const progressId = uid()
     const startedAt = new Date().toISOString()
+    let preparationTaskId = ''
+    if (isInvestmentPpt) {
+      const createdTaskId = await onCreatePreparationTask({
+        projectId: project.id,
+        projectName: project.name,
+        conversationId,
+        fileName: file.name,
+        progressId,
+        startedAt,
+        sourceCutoffDate,
+        outputFormat: 'PPTX',
+        language: '中文',
+        structureMode: 'strict-template',
+      })
+      if (!createdTaskId) return
+      preparationTaskId = createdTaskId
+    }
     if (isInvestmentPpt) setAnalyzingInvestmentPpt(true)
     else setAnalyzingCustomTemplate(true)
     setTemplateError('')
@@ -320,6 +353,7 @@ export function AiQuickActions({
         try {
           onPreparationProgress?.({
             id: latestProgress.id,
+            taskId: preparationTaskId,
             actionId: 'investment_ppt',
             actionLabel: action?.label ?? '投资建议书（PPT）',
             projectId: project.id,
@@ -416,6 +450,7 @@ export function AiQuickActions({
         purpose: isInvestmentPpt
           ? 'investment_recommendation_ppt'
           : 'custom_template_document',
+        ...(isInvestmentPpt ? { taskId: preparationTaskId } : {}),
       }, {
         signal: AbortSignal.timeout(5 * 60_000),
       })
@@ -437,19 +472,8 @@ export function AiQuickActions({
         ),
       }))
       if (!isInvestmentPpt) setAnalyzedTemplate(result)
-      if (isInvestmentPpt) {
-        const taskCreated = await submit(result, action, project, progressId, startedAt)
-        if (!taskCreated) {
-          const message = '模板分析已经完成，但生成任务暂未创建，请重新点击快捷任务。'
-          publishProgress((current) => ({
-            ...current,
-            status: 'failed',
-            stage: '生成任务暂未创建',
-            errorMessage: message,
-            updatedAt: new Date().toISOString(),
-          }))
-        }
-      }
+      // 投资建议书在上传开始时已经创建正式任务；服务端完成模板分析后会启动同一任务，
+      // 不再在这里创建第二条任务。
     } catch (error) {
       const originalMessage = (error as Error).message || '模板分析失败'
       const message = error instanceof ApiError
@@ -464,6 +488,13 @@ export function AiQuickActions({
         errorMessage: message,
         updatedAt: new Date().toISOString(),
       }))
+      if (isInvestmentPpt && preparationTaskId) {
+        await apiPost(`/ai/tasks/${preparationTaskId}/preparation/fail`, {
+          errorMessage: message,
+        }).catch((persistError) => {
+          console.warn('模板分析失败状态未能写入正式任务', persistError)
+        })
+      }
       if (!isInvestmentPpt) setTemplateError(message)
     } finally {
       if (isInvestmentPpt) setAnalyzingInvestmentPpt(false)

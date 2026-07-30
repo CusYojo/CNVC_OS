@@ -105,7 +105,7 @@ Presentations 技能不在默认插件缓存时同时设置 `PRESENTATIONS_SKILL
 使用本技能自带的 Python Open XML 模板分析脚本：
 
 ```bash
-python3 "$SKILL_DIR/scripts/analyze_template.py" \
+python3 "$SKILL_DIR/scripts/analyze_template_openxml.py" \
   --input "/absolute/editable-template.pptx" \
   --output "/absolute/build/template-map.json"
 ```
@@ -220,7 +220,7 @@ python3 "$SKILL_DIR/scripts/generate_apply_plan.py" \
 使用本技能自带的 Python Open XML 原位应用脚本：
 
 ```bash
-python3 "$SKILL_DIR/scripts/apply_template_plan.py" \
+python3 "$SKILL_DIR/scripts/apply_template_plan_openxml.py" \
   --template "/absolute/editable-template.pptx" \
   --plan "/absolute/build/content-plan.json" \
   --output "/absolute/build/content-replaced.pptx" \
@@ -297,7 +297,7 @@ python3 "$SKILL_DIR/scripts/apply_structural_plan.py" \
 在执行完整槽位删除前，使用同一份 `content-plan.json` 验证普通替换阶段：
 
 ```bash
-python3 "$SKILL_DIR/scripts/validate_template_result.py" \
+python3 "$SKILL_DIR/scripts/validate_template_result_openxml.py" \
   --template "/absolute/editable-template.pptx" \
   --result "/absolute/final.pptx" \
   --plan "/absolute/build/content-plan.json" \

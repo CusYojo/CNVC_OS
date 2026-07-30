@@ -31,12 +31,7 @@ def resolve_skill(
 def required_files(root: Path, names: tuple[str, ...]) -> dict[str, bool]:
     result: dict[str, bool] = {}
     for name in names:
-        exists = (root / name).exists()
-        # Fall back to .mjs if .py version doesn't exist yet
-        if not exists and name.endswith(".py"):
-            mjs_name = name[:-3] + ".mjs"
-            exists = (root / mjs_name).exists()
-        result[name] = exists
+        result[name] = (root / name).exists()
     return result
 
 
@@ -100,9 +95,9 @@ def build_report(
         (
             "scripts/validate_replacement_manifest.py",
             "scripts/generate_apply_plan.py",
-            "scripts/analyze_template.py",
-            "scripts/apply_template_plan.py",
-            "scripts/validate_template_result.py",
+            "scripts/analyze_template_openxml.py",
+            "scripts/apply_template_plan_openxml.py",
+            "scripts/validate_template_result_openxml.py",
             "scripts/apply_structural_plan.py",
             "scripts/validate_final_content.py",
         ),
