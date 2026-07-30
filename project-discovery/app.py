@@ -940,9 +940,9 @@ GENERIC_PROJECT_SUBJECTS = {
 VAGUE_PROJECT_START_RE = re.compile(
     r"^(他|她|其|该|这|此|其中|上述|相关|目前|同时|此外|另|据|对于|关于|要求|需要|应当|必须|"
     r"支持|推动|加强|开展|主动|引导|持续|继续|曾|曾经|担任|联创|联合创始人?|成立|创始人|科研人员|参赛|"
-    r"本次|全体|让更多|并|基于|后两年|共享|未来|"
+    r"本次|全体|让|让更多|让我|使我|并使|并|基于|后两年|共享|未来|"
     r"作为|为|以|从|在|将|把|被|由|于|联合|面对|通过|围绕|聚焦|落地|年初|年末|年底|月初|月末|算|"
-    r"了解|开拓|真实|价值|推荐阅读|背靠|赠礼环节|学员们|"
+    r"了解|开拓|真实|价值|推荐阅读|背靠|赠礼环节|学员们|深刻|深刻认识|深刻体会|深刻理解|"
     r"购票观众|课题被|科创报国|促进|紧跟|也|过去|活动在|锤炼|需要|更多|不再|只有|至今|随后|共同|双方|各自|截止|"
     r"一是|二是|三是|四是)"
 )
@@ -960,7 +960,7 @@ VAGUE_PROJECT_END_RE = re.compile(r"(材料|记录|信息|情况|内容|要求|�
 PROJECT_PREDICATE_RE = re.compile(
     r"(要求|适应|指出|表示|强调|认为|提出|推动|支持|引导|开展|打造|落地|实现|完成|获得|发布|宣布|提供|形成|"
     r"建立|构建|促进|提升|加强|记录|证明|担任|任职|毕业|来自|师从|进入|共享|梳理|发表|结合|"
-    r"参与|经历|合作者|申请|接受|走出|走访|到访|举办|发言|带队|来到)"
+    r"参与|经历|合作者|申请|接受|走出|走访|到访|举办|发言|带队|来到|体会|体会到了?|感受到|意识到|认识到|学到|了解到)"
 )
 NUMBERED_TECH_FRAGMENT_RE = re.compile(r"^[\u4e00-\u9fffA-Za-z]{1,8}[-—–][\u4e00-\u9fffA-Za-z]{1,8}\d{1,2}$")
 GENERIC_INSTITUTION_TECH_RE = re.compile(
@@ -1051,7 +1051,7 @@ def is_specific_project_subject_name(value: Any) -> bool:
         flags=re.IGNORECASE,
     ):
         return False
-    if not subject_marker and re.search(r"(的|了|是|以|在|为|将|把|被|对于|关于|正在)", name):
+    if not subject_marker and re.search(r"(的|了|是|以|在|为|将|把|被|对于|关于|正在|让|到|体会|感受|觉得|知道|认识|深刻|意识|理解|了解|学到|得到)", name):
         return False
     return True
 
@@ -1236,6 +1236,8 @@ def extract_company_name(item: dict, text: str) -> str:
 def infer_project_name(item: dict, text: str) -> str:
     title = clean_text(item.get("title", ""))
     explicit_project = normalize_project_candidate(item.get("project_name", ""))
+    is_academic = item.get("source_group") == "高校公众号" or bool(re.search(r"(?:学术成果|科研成果|课题组|实验室)", title))
+
     verified_source_subject = extract_verified_source_subject(title)
     if verified_source_subject:
         return verified_source_subject
@@ -1265,9 +1267,36 @@ def infer_project_name(item: dict, text: str) -> str:
     quoted = re.search(r"[“\"]([^”\"]{2,40})[”\"]", title)
     if quoted and is_specific_project_subject_name(quoted.group(1)):
         return quoted.group(1)
+
+    # 高校 / 学术文章：全文 extract_primary_news_subject 容易把
+    # “让我深刻体会到科技成果转化是连接实验室…”这类文章内句子误提取为主体名称。
+    # 优先提取实验室/课题组/机构+团队，再回退到公司名称，不再用 news_subject 兜底。
+    if is_academic:
+        subject_patterns = (
+            r"((?:[\u4e00-\u9fff]{2,20}(?:大学|学院|研究所|医院))[\u4e00-\u9fff·]{0,16}(?:教授|研究员|博士)?团队)",
+            r"([\u4e00-\u9fffA-Za-z0-9·]{2,30}(?:重点实验室|实验室|研究中心|工程中心|研究院|课题组))",
+            r"([\u4e00-\u9fff·]{2,6}(?:教授|研究员|博士)?团队)",
+        )
+        for pattern in subject_patterns:
+            candidates = [clean_text(match.group(1)) for match in re.finditer(pattern, title + "\n" + text)]
+            candidates = [candidate for candidate in candidates if is_specific_project_subject_name(candidate)]
+            if candidates:
+                return sorted(set(candidates), key=len, reverse=True)[0]
+
+        for company in re.finditer(r"([\u4e00-\u9fffA-Za-z0-9]{2,30}(?:科技|智能|机器人|医药|生物|材料|能源|半导体|电子|医疗|信息|数据|软件|网络|光电|先导院|研究院))(?:有限公司|公司|完成|获|宣布|近日)?", title + " " + text):
+            candidate = clean_text(company.group(1))
+            if is_specific_project_subject_name(candidate):
+                return candidate
+
+        if is_specific_project_subject_name(title):
+            return title[:60]
+        return "未命名项目"
+
+    # 非学术 / 投资新闻来源：全文 news_subject 用于最后兜底
     news_subject = extract_primary_news_subject(text)
     if news_subject:
         return news_subject
+
 
     # 高校成果文章容易把“超脑网络”“快速消亡”等论文概念误当成公司名。
     # 文章明确写出实验室/课题组/负责人团队时，先使用可核验的研究主体。
@@ -1298,7 +1327,6 @@ def infer_project_name(item: dict, text: str) -> str:
     if is_specific_project_subject_name(title):
         return title[:60]
     return "未命名项目"
-
 
 def project_profile_text(item: dict) -> str:
     title = clean_text(item.get("title", ""))
