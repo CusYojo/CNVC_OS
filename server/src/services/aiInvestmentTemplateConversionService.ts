@@ -302,6 +302,7 @@ export async function convertUploadedInvestmentPdfTemplate(input: {
     ...process.env,
     XDG_CACHE_HOME: runtimeCacheDir,
     ...(fontconfigFile ? { FONTCONFIG_FILE: fontconfigFile } : {}),
+    NODE_PATH: path.resolve(process.cwd(), 'node_modules'),
   }
   const rasterReviewScript = path.resolve(
     process.cwd(),
