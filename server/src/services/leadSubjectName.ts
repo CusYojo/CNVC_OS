@@ -24,6 +24,10 @@ const GENERIC_SUBJECTS = new Set([
   '项目',
   '团队',
   '研究团队',
+  '企业销售团队',
+  '专家团队',
+  '技术团队',
+  '印度团队',
   '实验室',
   '课题组',
   '相关项目',
@@ -63,17 +67,90 @@ const GENERIC_SUBJECTS = new Set([
   '卡脖子',
   '近期',
   '36氪首发',
-  '技术团队',
   '二季度普华汇',
   'AI下半场',
   '外部危机和人工智能',
   '核聚变装置',
+  'AI头条',
+  '交易',
+  '生物医药',
+  '金融科技',
+  '法律科技',
+  '硬科技',
+  '具身智能',
+  '数字哨兵',
+  '对等关税',
+  '创客中国',
+  '两优一先',
+  '新石油',
+  'AI团队',
+  'AI智能',
+  '人人创作',
+  '全球首次',
+  '值得尊敬',
+  '公开数据',
+  '国家信息',
+  '国家医疗',
+  '国际科技',
+  '围绕智能',
+  '建设科技',
+  '助力科技',
+  '打通医疗',
+  '投硬科技',
+  '致远榜样',
+  '欧盟数据',
+  '蔬菜自由',
+  '韧性革命',
+  '学术数据',
+  '引领盛世',
+  '机器人每',
+  '能否稳定',
+  '公毅计划',
+          '多数科技',
+  '整个科技',
+  '黄山样本',
+        '研究院',
+  'C+轮',
+  '一〇七',
+  '不一样',
+  '公司刚',
+  '内卷式',
+  '创变者',
+  '反脆弱',
+  '夯实率',
+  '成果需',
+  '深庭纪',
+  '短期内',
+  '自项目',
+  '若顺利',
+  '金鱼脑',
+  '韬定律',
+  '冕开物',
+  '鲍德温曾',
+            '用户',
+  '记者',
+  '扫码',
+  '真货',
+  '豪赌',
+  '本轮',
+  '中国',
+  '优异',
+  '例外',
+  '公司',
+  '冷钱',
+  '如何',
+  '扩面',
+  '汇智',
+  '重塑',
+  '最土',
+  '帷幄',
+  '梅花创投',
 ])
 
-const VAGUE_START_RE = /^(?:他|她|其|该|这|此|其中|上述|相关|目前|未来|同时|此外|另|据|对于|关于|要求|需要|应当|必须|支持|推动|加强|开展|引导|主动|持续|继续|曾|曾经|担任|联创|联合创始人?|成立|投资|创始人|科研人员|参赛|本次|全体|让更多|并|基于|后两年|共享|作为|为|以|从|在|将|把|被|由|于|联合|面对|通过|围绕|聚焦|了解|开拓|真实|价值|推荐阅读|背靠|赠礼环节|学员们|购票观众|课题被|科创报国|促进|紧跟|对标|正是|也|过去|活动在|锤炼|更多|不再|只有|至今|随后|共同|双方|各自|截止|落地|年初|年末|年底|月初|月末|算|一是|二是|三是|四是)/
+const VAGUE_START_RE = /^(?:他|她|其|该|这|此|其中|上述|相关|目前|未来|同时|此外|另|据|对于|关于|要求|需要|应当|必须|支持|推动|加强|开展|引导|主动|持续|继续|曾|曾经|担任|联创|联合创始人?|成立|投资|创始人|科研人员|参赛|本次|全体|让|让更多|让我|使我|并使|并|基于|后两年|共享|作为|为|以|从|在|将|把|被|由|于|联合|面对|通过|围绕|聚焦|了解|开拓|真实|价值|推荐阅读|背靠|赠礼环节|学员们|购票观众|课题被|科创报国|促进|紧跟|对标|正是|也|过去|活动在|锤炼|需要|更多|不再|只有|至今|随后|共同|双方|各自|截止|落地|年初|年末|年底|月初|月末|算|深刻|深刻认识|深刻体会|深刻理解|与|代表|对|一是|二是|三是|四是)/
 const VAGUE_BODY_RE = /(?:岗位记录|关键证明|证明材料|要求主动|主动适应|走出实验室|为核心业务|核心业务的|系统梳理|以及团队|进入导师课题组|共享两个学院|获颁|获评|荣获|获奖|荣誉|Award|文章来源|论文合作者|合作者为|受试者|研究参与者|筛选期|完全开放|依托高校|顺利通过|一行到访|成功举办|先后发言|按姓氏拼音排序|首先来到|带队|不是在实验室|老师.*介绍|分别介绍了|介绍了其|第一城|早些时候|一批|多家|数个|能够替代|能够|key observation|by the paper|等信息|等材料|等证明|等方面|等工作|带来的变化)/i
 const VAGUE_END_RE = /(?:材料|记录|信息|情况|内容|要求|工作|方面|变化|问题|任务|路径|策略|证明|累计|责编|来源|目前|近期|斩|再|消息|报道)$/
-const PREDICATE_RE = /(?:要求|适应|指出|表示|强调|认为|提出|推动|支持|开展|引导|走出|打造|落地|实现|完成|获得|发布|宣布|提供|形成|建立|构建|促进|提升|加强|记录|证明|担任|任职|毕业|来自|师从|进入|共享|梳理|发表|结合|参与|经历|合作者|申请|接受|走访|到访|举办|发言|带队|来到)/
+const PREDICATE_RE = /(?:要求|适应|指出|表示|强调|认为|提出|推动|支持|开展|引导|走出|打造|落地|实现|完成|获得|发布|宣布|提供|形成|建立|构建|促进|提升|加强|记录|证明|担任|任职|毕业|来自|师从|进入|共享|梳理|发表|结合|参与|经历|合作者|申请|接受|走访|到访|举办|发言|带队|来到|体会|体会到了?|感受到|意识到|认识到|学到|了解到)/
 const NUMBERED_TECH_FRAGMENT_RE = /^[\u4e00-\u9fffA-Za-z]{1,8}[-—–][\u4e00-\u9fffA-Za-z]{1,8}\d{1,2}$/
 const GENERIC_INSTITUTION_TECH_RE = /^(?:清华|北大|北航|上交大|复旦|浙大|中科大|哈工大)(?:系)?(?:机器人|芯片|人工智能|大模型)(?:团队|项目)?$/
 const DESCRIPTIVE_COMPANY_SUBJECT_RE = /^(?:(?:清华|北大|北航|上交大|复旦|浙大|中科大|哈工大)(?:系)?.{1,28}(?:企业|公司)|.{1,30}(?:装备商|制造商|研发商|提供商|服务商))$/
@@ -102,6 +179,9 @@ export function isSpecificLeadSubjectName(value: unknown, allowPaperTitle = fals
   if (!name || SUBJECT_PLACEHOLDERS.has(name)) return false
   if (allowPaperTitle) return name.length >= 2 && name.length <= 180
   if (name.length < 2 || name.length > 60) return false
+  // 短中文名（2-3字）无主体标记的几乎不可能是实体名，拒绝。
+  // 英文名（如 DeepSeek、Meshy）保留最小2字限制。
+  if (name.length < 4 && !SUBJECT_MARKER_RE.test(name) && !/[A-Za-z]/.test(name)) return false
   if (GENERIC_SUBJECTS.has(name)) return false
   if (NUMBERED_TECH_FRAGMENT_RE.test(name)) return false
   if (GENERIC_INSTITUTION_TECH_RE.test(name)) return false
@@ -113,7 +193,28 @@ export function isSpecificLeadSubjectName(value: unknown, allowPaperTitle = fals
   if (PREDICATE_RE.test(name) && !/(?:公司|企业|项目|团队|实验室|研究院|研究中心|工程中心|课题组)$/.test(name)) return false
   const englishWords = name.match(/[A-Za-z][A-Za-z0-9-]*/g) ?? []
   if (englishWords.length >= 2 && !SUBJECT_MARKER_RE.test(name) && !ENGLISH_ENTITY_MARKER_RE.test(name)) return false
-  if (!SUBJECT_MARKER_RE.test(name) && /(?:的|了|是|以|在|为|将|把|被|对于|关于|正在)/.test(name)) return false
+  if (!SUBJECT_MARKER_RE.test(name) && /(?:的|了|是|以|在|为|将|把|被|对于|关于|正在|让|到|体会|感受|觉得|知道|认识|深刻|意识|理解|了解|学到|得到)/.test(name)) return false
+  // 拒绝明显是完整句子的名称（含问号、感叹号、句号）
+  if (/[？！。！]/.test(name)) return false
+  // 拒绝长英文标题（>40字符且纯英文，通常是论文标题）
+  if (/^[A-Za-z0-9\s:,\-()\[\]&;+]+$/.test(name) && name.length > 40) return false
+  // 拒绝问句（包含"如何/为什么/是否/怎么/什么/怎样"等疑问词，且无主体标记）
+  if (/(?:如何|为什么|是否|怎么|怎样|什么)/.test(name) && !SUBJECT_MARKER_RE.test(name)) return false
+  // 拒绝明显的多公司融资综述标题（"N家企业获得融资"模式）
+  if (/\d+\s*[家个]/.test(name) && /(?:企业|公司|融资|上市)/.test(name)) return false
+  // 拒绝以年份/日期开头的泛化描述（如"2026年全球市场..."、"2025年全国医疗"）
+  if (/^(?:19|20)\d{2}[年\s]/.test(name) && !SUBJECT_MARKER_RE.test(name)) return false
+  // 拒绝以纯数字、日期、序号开头（如"7月13日-7月22日 第三期"、"1999年"）
+  if (/^(?:\d+[月日年个只家项位次]|第\s*\d+\s*期)/.test(name)) return false
+  // 拒绝新闻标题被当作主体名（含融资/估值/亿元/上市+逗号，或含"融资.*亿"等标题句式）
+  if (/(?:融资余额|融资.*亿|完成.*融资|获得.*融资|(?:万亿|亿元)|估值|亿美元|万美元|上市|IPO|登陆|完成.{0,8}轮|获得.{0,8}投|.{0,4}融资.*亿|突破.{0,4}[万亿])/.test(name) &&
+      (name.length > 8 || /[，,、]/.test(name))) return false
+  // 纯英文片段 >25 字且以非大写字母开头（多为截断的英文句子片段）
+  if (/^[a-z]/.test(name) && /^[A-Za-z0-9\s:,\-()]+$/.test(name) && name.length > 25) return false
+  // 纯英文 >25 字无实体标记（论文标题/期刊名）
+  if (/^[A-Za-z0-9\s:,\-()&;]+$/.test(name) && name.length > 25 && !ENGLISH_ENTITY_MARKER_RE.test(name)) return false
+  // 带主体标记但 >12 字且含"代表/对/将/到/被"等句法虚词的长名，实际上是句子片段
+  if (name.length > 12 && SUBJECT_MARKER_RE.test(name) && /(?:代表|对|将|到|被)/.test(name)) return false
   return true
 }
 
@@ -197,9 +298,9 @@ function extractNamedFragments(value: unknown): string[] {
   const fragments: string[] = []
   const patterns = [
     /([A-Z][A-Za-z0-9+&.-]*(?:\s+[A-Za-z][A-Za-z0-9+&.-]*){1,5}联合实验室)/g,
-    /([\u4e00-\u9fffA-Za-z0-9（）()·&＋+\-]{2,80}(?:股份有限公司|有限责任公司|有限公司))/g,
+    /([\u4e00-\u9fffA-Za-z0-9（）()·&＋+\-]{2,60}(?:股份有限公司|有限责任公司|有限公司))/g,
     /((?:[\u4e00-\u9fff]{2,20}(?:大学|学院|研究所|医院))[\u4e00-\u9fff·]{0,16}(?:教授|研究员|博士)?团队)/g,
-    /([\u4e00-\u9fffA-Za-z0-9·]{2,50}(?:重点实验室|实验室|研究中心|工程中心|研究院|课题组|创新群体|创新联合体|中试基地|产业基地|创新平台|技术平台|研发平台|试验平台))/g,
+    /([\u4e00-\u9fffA-Za-z0-9·]{2,30}(?:重点实验室|实验室|研究中心|工程中心|研究院|课题组|创新群体|创新联合体|中试基地|产业基地|创新平台|技术平台|研发平台|试验平台))/g,
     /([\u4e00-\u9fff·]{2,6}(?:教授|研究员|博士)?团队)/g,
   ]
   for (const pattern of patterns) {
@@ -318,6 +419,7 @@ export interface RadarSubjectNameInput {
   title?: unknown
   articleText?: unknown
   excludedNames?: unknown[]
+  channel?: unknown
 }
 
 export function deriveRadarSubjectName(input: RadarSubjectNameInput): string {
@@ -328,6 +430,14 @@ export function deriveRadarSubjectName(input: RadarSubjectNameInput): string {
       .filter((value, index, all) => all.indexOf(value) === index)
       .filter((value) => !respectExcluded || !excluded.has(value))
       .filter((value) => isSpecificLeadSubjectName(value, allowPaperTitle))
+      // 即使通过了 isSpecificLeadSubjectName，过长的名称也可能是句子片段。
+      // 有主体标记（实验室/研究院/公司）但长度>30 且含虚词的，往往是文章内嵌的长句。
+      .filter((value) => {
+        if (value.length <= 30) return true
+        // 长名称如果含"和/与/均/都/的/了/是/在/正在/到"等虚词，大概率是句子片段
+        if (/(?:的|了|是|在|正在|到|和|与|均|都)/.test(value)) return false
+        return true
+      })
       .sort((left, right) => right.length - left.length)
     return candidates[0] ?? ''
   }
@@ -364,6 +474,31 @@ export function deriveRadarSubjectName(input: RadarSubjectNameInput): string {
   // 这可避免工商补全把投资方、来源机构覆盖成融资主体。
   if (existingSubject) return existingSubject
   if (legalCompany) return legalCompany
+
+  // 高校 / 学术文章：全文 extractPrimaryNewsSubjects 容易把
+  // "让我深刻体会到科技成果转化是连接实验室…" 这类文章内句子误提取为主体名称。
+  // 优先提取实验室/课题组/机构+团队，再回退到公司名称，不再用 news_subject 兜底。
+  const channel = String(input.channel ?? '')
+  const titleStr = String(input.title ?? '')
+  const isAcademic = channel === '高校公众号' || /(?:学术成果|科研成果|课题组|实验室)/.test(titleStr)
+
+  if (!input.isPaper && isAcademic) {
+    // 优先从标题和正文提取命名的研究主体（实验室/团队/课题组）
+    const academicNamedSubject = pick([
+      extractNamedFragments(input.title),
+      extractNamedFragments(input.articleText),
+    ])
+    if (academicNamedSubject) return academicNamedSubject
+
+    // 回退到公司名称
+    const company = pick(reliableCompanies, false, false)
+    if (company) return company
+
+    // 最后用标题
+    const titleSubject = cleanSubjectName(input.title)
+    if (isSpecificLeadSubjectName(titleSubject)) return titleSubject.slice(0, 60)
+    return '未命名项目'
+  }
 
   if (!input.isPaper) {
     const quotedTitleSubject = extractQuotedFinancingSubjects(input.title)[0]

@@ -8,6 +8,8 @@ import {
   isSpecificLeadSubjectName,
 } from '../services/leadSubjectName.js'
 
+const SUBJECT_MARKER_RE = /(?:股份有限公司|有限责任公司|有限公司|公司|企业|项目|团队|实验室|研究院|研究所|研究中心|工程中心|课题组|创新群体|创新联合体|中试基地|产业基地|创新平台|技术平台|研发平台|试验平台|装置|系统|产品|计划)$/
+
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -22,6 +24,26 @@ function firstSourceTitle(value: unknown): string {
 
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function isClearlyBadName(name: string): boolean {
+  // 名称未通过当前 isSpecificLeadSubjectName 检查（新的 GENERIC_SUBJECTS/长度规则等）
+  if (!isSpecificLeadSubjectName(name)) return true
+  return (
+    /[？！。！]/.test(name) ||
+    /^(?:19|20)\d{2}[年\s]/.test(name) ||
+    /^\d+[月日年个只家项位次]/.test(name) ||
+    (/^[A-Za-z0-9\s:,\-()]+$/.test(name) && name.length > 25) ||
+    (/(?:如何|为什么|是否|怎么|怎样|什么)/.test(name) && !SUBJECT_MARKER_RE.test(name)) ||
+    (/\d+\s*[家个]/.test(name) && /(?:企业|公司|融资|上市)/.test(name)) ||
+    // 短中文名（2-3字）无主体标记
+    (name.length < 4 && !SUBJECT_MARKER_RE.test(name) && !/[A-Za-z]/.test(name)) ||
+    // 新闻标题：含融资/估值/亿元+长句或逗号
+    (/(?:融资|估值|(?:万亿|亿元)|万美元|上市|IPO|登陆|完成.{0,8}轮|获得.{0,8}投)/.test(name) &&
+     (name.length > 10 || /[，,、]/.test(name))) ||
+    // 纯英文小写开头长片段
+    (/^[a-z]/.test(name) && /^[A-Za-z0-9\s:,\-()]+$/.test(name) && name.length > 25)
+  )
 }
 
 async function main() {
@@ -42,8 +64,9 @@ async function main() {
     const scoring = asRecord(row.scoring)
     const registry = asRecord(scoring.registry)
     const sourceTitle = String(radarProfile.sourceTitle || firstSourceTitle(row.sources)).trim()
+    const channel = String(radarProfile.channel ?? '')
     const next = deriveRadarSubjectName({
-      isPaper: String(radarProfile.channel ?? '') === '论文',
+      isPaper: channel === '论文',
       companyNames: [registry.companyName, row.companyName, profile.companyName],
       projectName: profile.projectName,
       lab: profile.lab,
@@ -51,10 +74,32 @@ async function main() {
       title: sourceTitle || row.name,
       articleText: radarProfile.articleText || row.summary,
       excludedNames: [radarProfile.sourceName, radarProfile.accountName],
+      channel,
     })
-    if (!next || next === row.name || !isSpecificLeadSubjectName(next)) continue
 
     const currentIsLegalCompany = /(?:股份有限公司|有限责任公司|有限公司)$/.test(row.name)
+    const currentIsClearlyBad = isClearlyBadName(row.name)
+
+    // 对明显不合理的名称，直接设为"未命名项目"。
+    // 这些文章的 deriveRadarSubjectName 输出也多是碎片，不再尝试重新推导。
+    if (currentIsClearlyBad && !currentIsLegalCompany) {
+      const clearCompanyName = String(row.companyName ?? '').trim() === row.name
+        && !/(?:股份有限公司|有限责任公司|有限公司)$/.test(String(row.companyName ?? ''))
+      const nextRadarProfile = {
+        ...radarProfile,
+        profile: { ...profile, projectName: '未命名项目' },
+      }
+      changes.push({
+        id: row.id,
+        current: row.name,
+        next: '未命名项目',
+        radarProfile: nextRadarProfile,
+        clearCompanyName,
+      })
+      continue
+    }
+    // 非明显不合理的名称：deriveRadarSubjectName 返回相同或无效时跳过
+    if (!next || next === row.name || !isSpecificLeadSubjectName(next)) continue
     const currentIsImportedInference = (
       !isSpecificLeadSubjectName(row.name)
       || String(profile.projectName ?? '').trim() === row.name
