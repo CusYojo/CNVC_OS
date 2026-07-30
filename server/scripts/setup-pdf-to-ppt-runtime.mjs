@@ -46,14 +46,14 @@ if (!existsSync(venvPython)) {
 console.log('安装 PDF 转 PPT Python 依赖…')
 run(venvPython, ['-m', 'pip', 'install', '-r', requirements])
 
-console.log('检查 PyMuPDF、Pillow、OpenCV、Poppler、OCR 与 Artifact Tool…')
+console.log('检查 PyMuPDF、Pillow、OpenCV、Poppler、OCR 与 LibreOffice 渲染管线…')
 try {
   run(venvPython, [environmentCheck, '--json'])
 } catch (error) {
   console.error(
     process.platform === 'darwin'
       ? '\n若报告显示缺少 Poppler 或严格 OCR，请运行：brew install poppler tesseract tesseract-lang'
-      : '\n请根据环境报告安装 Poppler、Tesseract（含 chi_sim/eng）及 Presentations/Artifact Tool 运行时。',
+      : '\n请根据环境报告安装 Poppler、Tesseract（含 chi_sim/eng）、LibreOffice 及 fonts-noto-cjk。',
   )
   throw error
 }

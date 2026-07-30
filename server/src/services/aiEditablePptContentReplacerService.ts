@@ -132,6 +132,11 @@ function artifactToolCandidates() {
 function resolveArtifactToolDir() {
   const result = artifactToolCandidates().find((candidate) =>
     existsSync(path.join(candidate, 'dist', 'artifact_tool.mjs')))
+  // Linux-OpenXML 路线不强制要求 @oai/artifact-tool
+  // 若不可用，脚本使用 Python zipfile + Open XML 直接操作 PPTX
+  if (!result && process.env.ARTIFACT_TOOL_REQUIRED !== '1') {
+    return ''
+  }
   if (!result) {
     throw Object.assign(
       new Error('内容替换环境缺少 @oai/artifact-tool'),
@@ -638,11 +643,11 @@ export async function generateInvestmentRecommendationPptFromTemplate(input: {
   const skillRoot = path.join(getAiSkillRoot(), 'editable-ppt-content-replacer')
   const pdfSkillRoot = path.join(getAiSkillRoot(), 'pdf-to-editable-ppt')
   const scripts = {
-    analyze: path.join(skillRoot, 'scripts', 'analyze_template.mjs'),
+    analyze: path.join(skillRoot, 'scripts', 'analyze_template.py'),
     validateManifest: path.join(skillRoot, 'scripts', 'validate_replacement_manifest.py'),
     generatePlan: path.join(skillRoot, 'scripts', 'generate_apply_plan.py'),
-    apply: path.join(skillRoot, 'scripts', 'apply_template_plan.mjs'),
-    validateResult: path.join(skillRoot, 'scripts', 'validate_template_result.mjs'),
+    apply: path.join(skillRoot, 'scripts', 'apply_template_plan.py'),
+    validateResult: path.join(skillRoot, 'scripts', 'validate_template_result.py'),
     finalContent: path.join(skillRoot, 'scripts', 'validate_final_content.py'),
     watermark: path.join(pdfSkillRoot, 'scripts', 'validate_watermark_handoff.py'),
   }
@@ -652,7 +657,11 @@ export async function generateInvestmentRecommendationPptFromTemplate(input: {
     }
   }
 
-  const artifactToolDir = resolveArtifactToolDir()
+  // Linux-OpenXML 路线不强制要求 Artifact Tool；若可用仍会传递给兼容脚本
+  const _artifactToolDir = resolveArtifactToolDir()
+  if (_artifactToolDir) {
+    env.ARTIFACT_TOOL_DIR = _artifactToolDir
+  }
   const python = resolvePython()
   const timeoutMs = Math.max(
     120_000,
@@ -675,21 +684,19 @@ export async function generateInvestmentRecommendationPptFromTemplate(input: {
   const finalMapPath = path.join(workDir, 'final-template-map.json')
   const finalWatermarkPath = path.join(workDir, 'final-watermark-qa.json')
   const finalCoveragePath = path.join(workDir, 'final-content-coverage-report.json')
-  const env = { ...process.env, ARTIFACT_TOOL_DIR: artifactToolDir }
+  const env = { ...process.env }
 
   await reportProgress(
     input.onProgress,
     '校验 PDF 转换交接完成，正在建立原模板对象地图',
     70,
   )
-  await runCommand(process.execPath, [
+  await runCommand(python, [
     scripts.analyze,
     '--input',
     input.template.referencePath,
     '--output',
     templateMapPath,
-    '--artifact-tool-dir',
-    artifactToolDir,
   ], { timeoutMs, env })
   const templateMap = JSON.parse(await readFile(templateMapPath, 'utf8')) as TemplateMap
   if (templateMap.sha256 !== workflow.templateSha256) {
@@ -747,7 +754,7 @@ export async function generateInvestmentRecommendationPptFromTemplate(input: {
     '正在原模板对象中逐项替换内容并保留图片、版式和母版',
     76,
   )
-  await runCommand(process.execPath, [
+  await runCommand(python, [
     scripts.apply,
     '--template',
     input.template.referencePath,
@@ -759,8 +766,6 @@ export async function generateInvestmentRecommendationPptFromTemplate(input: {
     renderDir,
     '--report',
     applyReportPath,
-    '--artifact-tool-dir',
-    artifactToolDir,
   ], { timeoutMs, env })
 
   await reportProgress(
@@ -768,7 +773,7 @@ export async function generateInvestmentRecommendationPptFromTemplate(input: {
     '内容替换完成，正在执行页面、对象、样式与媒体保真校验',
     80,
   )
-  await runCommand(process.execPath, [
+  await runCommand(python, [
     scripts.validateResult,
     '--template',
     input.template.referencePath,
@@ -778,17 +783,13 @@ export async function generateInvestmentRecommendationPptFromTemplate(input: {
     contentPlanPath,
     '--output',
     fidelityPath,
-    '--artifact-tool-dir',
-    artifactToolDir,
   ], { timeoutMs, env })
-  await runCommand(process.execPath, [
+  await runCommand(python, [
     scripts.analyze,
     '--input',
     input.outputPath,
     '--output',
     finalMapPath,
-    '--artifact-tool-dir',
-    artifactToolDir,
   ], { timeoutMs, env })
 
   await reportProgress(

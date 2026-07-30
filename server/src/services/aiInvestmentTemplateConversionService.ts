@@ -66,7 +66,7 @@ function conversionFailureMessage(error: unknown) {
     return 'PDF 模板转换环境缺少 Poppler，请配置 pdftoppm 后重试'
   }
   if (/artifact-tool|Presentations 技能|Presentation/i.test(detail)) {
-    return 'PDF 模板转换环境缺少 Presentations 或 Artifact Tool 运行时'
+    return 'PDF 模板转换环境缺少 Presentations 技能或 LibreOffice 渲染管线'
   }
   if (
     /水印交接验收失败|最终渲染图中仍识别到目标水印|PPTX 包内仍包含目标水印/i.test(detail)

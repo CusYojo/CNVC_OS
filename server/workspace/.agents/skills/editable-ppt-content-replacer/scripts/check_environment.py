@@ -29,13 +29,21 @@ def resolve_skill(
 
 
 def required_files(root: Path, names: tuple[str, ...]) -> dict[str, bool]:
-    return {name: (root / name).exists() for name in names}
+    result: dict[str, bool] = {}
+    for name in names:
+        exists = (root / name).exists()
+        # Fall back to .mjs if .py version doesn't exist yet
+        if not exists and name.endswith(".py"):
+            mjs_name = name[:-3] + ".mjs"
+            exists = (root / mjs_name).exists()
+        result[name] = exists
+    return result
 
 
 def run_pdf_environment_check(
     pdf_skill_dir: Path,
-    artifact_tool_dir: Path | None,
-    node: str | None,
+    libreoffice: str | None,
+    pdftoppm: str | None,
     timeout_seconds: int,
 ) -> dict:
     checker = pdf_skill_dir / "scripts" / "check_environment.py"
@@ -51,10 +59,10 @@ def run_pdf_environment_check(
         "--smoke-timeout-seconds",
         str(timeout_seconds),
     ]
-    if artifact_tool_dir:
-        command.extend(["--artifact-tool-dir", str(artifact_tool_dir.resolve())])
-    if node:
-        command.extend(["--node", node])
+    if libreoffice:
+        command.extend(["--libreoffice", libreoffice])
+    if pdftoppm:
+        command.extend(["--pdftoppm", pdftoppm])
     try:
         result = subprocess.run(
             command,
@@ -83,8 +91,8 @@ def run_pdf_environment_check(
 
 def build_report(
     pdf_skill_dir: Path,
-    artifact_tool_dir: Path | None,
-    node: str | None,
+    libreoffice: str | None,
+    pdftoppm: str | None,
     timeout_seconds: int,
 ) -> dict:
     local = required_files(
@@ -92,9 +100,9 @@ def build_report(
         (
             "scripts/validate_replacement_manifest.py",
             "scripts/generate_apply_plan.py",
-            "scripts/analyze_template.mjs",
-            "scripts/apply_template_plan.mjs",
-            "scripts/validate_template_result.mjs",
+            "scripts/analyze_template.py",
+            "scripts/apply_template_plan.py",
+            "scripts/validate_template_result.py",
             "scripts/apply_structural_plan.py",
             "scripts/validate_final_content.py",
         ),
@@ -108,8 +116,8 @@ def build_report(
     )
     pdf_environment = run_pdf_environment_check(
         pdf_skill_dir,
-        artifact_tool_dir,
-        node,
+        libreoffice,
+        pdftoppm,
         timeout_seconds,
     )
     missing = [
@@ -183,8 +191,8 @@ def main() -> None:
     )
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--pdf-skill-dir", type=Path)
-    parser.add_argument("--artifact-tool-dir", type=Path)
-    parser.add_argument("--node")
+    parser.add_argument("--libreoffice")
+    parser.add_argument("--pdftoppm")
     parser.add_argument("--smoke-timeout-seconds", type=int, default=120)
     args = parser.parse_args()
     if args.smoke_timeout_seconds <= 0:
@@ -196,8 +204,8 @@ def main() -> None:
     )
     report = build_report(
         pdf_skill_dir,
-        args.artifact_tool_dir,
-        args.node,
+        args.libreoffice,
+        args.pdftoppm,
         args.smoke_timeout_seconds,
     )
     if args.json:

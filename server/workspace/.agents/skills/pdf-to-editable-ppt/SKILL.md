@@ -12,7 +12,8 @@ description: 在 macOS、Windows 或 Linux 上将演示型 PDF 高还原转换�
 
 - 使用当前会话中的 PDF 与 Presentations 技能；执行前完整阅读它们的说明。
 - 优先使用工作区内置依赖。
-- 使用 `@oai/artifact-tool` 构建 PPTX，禁止使用 `python-pptx`。
+- 使用 Python `zipfile` + Open XML 直接操作 PPTX 包结构，不依赖外部
+  Node.js 运行时或 `@oai/artifact-tool`。
 - 将源 PDF 视为视觉标准，不得擅自改版、摘要或改写；用户明确要求去除的
   水印是允许且必须执行的例外。
 - 用户要求去水印时，转换成功不等于任务完成。必须通过最终 PPTX 包内扫描
@@ -26,14 +27,14 @@ description: 在 macOS、Windows 或 Linux 上将演示型 PDF 高还原转换�
 python3 "$SKILL_DIR/scripts/check_environment.py" --json
 ```
 
-环境检查必须实际通过 Artifact Tool 的无显示生成与渲染冒烟测试；
+环境检查必须实际通过 LibreOffice 无头 PDF 导出和 pdftoppm 渲染冒烟测试；
 仅检查到 `node` 命令不算可用。Linux 严格水印验收还必须同时存在
-Tesseract 的 `chi_sim` 和 `eng` 语言包。若 Artifact Tool 不位于 Codex
-默认运行时目录，设置 `ARTIFACT_TOOL_DIR` 或传入 `--artifact-tool-dir`；
-Presentations 技能不在默认插件缓存时设置 `PRESENTATIONS_SKILL_DIR`。
+Tesseract 的 `chi_sim` 和 `eng` 语言包。Presentations 技能不在默认插件缓存时设置
+`PRESENTATIONS_SKILL_DIR`。
 
 核心富对象与图片路线支持 macOS、Windows 和 Linux。需要安装 Python 3、
-PyMuPDF、Pillow、Node.js 和 Poppler。扁平化 OCR 模式还需要
+PyMuPDF、Pillow 和 Poppler。Linux 还需要 LibreOffice、pdftoppm、
+fonts-noto-cjk 和 Tesseract。扁平化 OCR 模式还需要
 `opencv-python-headless`，并通过 `--ocr-engine auto` 自动选择：
 
 - macOS 且存在 `swiftc`：Apple Vision；
@@ -79,11 +80,9 @@ python3 "$SKILL_DIR/scripts/convert_pdf.py" \
   --watermark-qa-mode strict
 ```
 
-将 `SKILL_DIR` 设置为本技能的绝对路径。仅当 `node` 或 `pdftoppm`
-不在 `PATH` 中时，才传入 `--node` 或 `--pdftoppm`。Artifact Tool 位于
-自定义 Linux 运行时目录时传入 `--artifact-tool-dir`。服务器任务默认限制
-300 页、单个外部命令 1800 秒；需要扩大时有意识地使用 `--max-pages` 和
-`--command-timeout-seconds`，不得无限制处理不可信文件。
+将 `SKILL_DIR` 设置为本技能的绝对路径。仅当 `pdftoppm` 不在 `PATH` 中时，才传入
+`--pdftoppm`。服务器任务默认限制 300 页、单个外部命令 1800 秒；需要扩大时
+有意识地使用 `--max-pages` 和 `--command-timeout-seconds`，不得无限制处理不可信文件。
 
 转换器会自动识别源文件结构。扁平化文件默认使用 `image` 模式，
 能够精确保留外观，但只能把整页图片作为一个对象编辑。
@@ -223,10 +222,11 @@ OCR 只是起点，不是成品。必须逐页检查并修正识别错误；如�
 当图表或表格需要可编辑时：
 
 1. 用外观匹配的原生形状覆盖扁平化图表或表格区域。
-2. 通过 `--overrides` 添加 Artifact Tool 原生图表或表格。
+2. 通过 `--overrides` 添加原生图表或表格（使用 Python zipfile + Open XML 直接操作）。
 3. 跳过重建区域内的 OCR 文字，避免内容重复。
 4. 在 Microsoft PowerPoint 中复查；表格行高和图表标记的渲染结果
-   可能与 Artifact Tool 预览不同。
+   可能与 LibreOffice 预览不同。Linux 上无法进行 PowerPoint 原生验证，
+   在交付时披露替代验证。
 
 ## 图标独立编辑流程
 

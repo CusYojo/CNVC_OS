@@ -192,5 +192,5 @@ PaddleOCR、RapidOCR、云 OCR 或人工修订的统一 JSON。文字移除功�
 - 确认目标水印已清除，且背景修补没有覆盖正文、图表或照片细节。
 - 确认相邻的长文本框之间没有重叠。
 - 如果可以使用 Microsoft PowerPoint，在其中打开最终文件。
-- 在 PowerPoint 导出结果中复查独立图标、原生图表和表格；Artifact Tool
-  与 PowerPoint 对 SVG、标记、行高和字体的尺寸计算可能不同。
+- 在 PowerPoint 导出结果中复查独立图标、原生图表和表格；LibreOffice
+  与 Microsoft PowerPoint 对 SVG、标记、行高和字体的尺寸计算可能不同。

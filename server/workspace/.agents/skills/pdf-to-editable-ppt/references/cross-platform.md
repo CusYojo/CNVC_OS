@@ -11,25 +11,26 @@
 
 ## 通用依赖
 
-核心转换在 macOS、Windows 和 Linux 上使用相同的 Python 与 Node.js
+核心转换在 macOS、Windows 和 Linux 上使用相同的 Python
 脚本。运行前执行：
 
 ```bash
 python3 "$SKILL_DIR/scripts/check_environment.py" --json
 ```
 
-检查器会在移除 `DISPLAY` 和 `WAYLAND_DISPLAY` 后真实生成 PNG 与 PPTX，
-用于发现错误架构的 `skia.node`、缺失的 Artifact Tool 或不能工作的无头
-渲染器。`core_ready=true`、`strict_watermark_qa_ready=true` 和
-`linux_visual_qa_ready=true` 必须同时成立。不要把 macOS 或 Windows 的
-`node_modules` 复制到 Linux。
+检查器会在移除 `DISPLAY` 和 `WAYLAND_DISPLAY` 后，通过
+LibreOffice `--headless` + pdftoppm 真实渲染一张冒烟幻灯片，验证
+Linux OpenXML 渲染管线可用。`core_ready=true`、
+`strict_watermark_qa_ready=true` 和 `linux_visual_qa_ready=true`
+必须同时成立。不要把 macOS 或 Windows 的 `node_modules` 复制到 Linux。
 
 必需依赖：
 
 - Python 3、PyMuPDF、Pillow；
-- Node.js；
 - Poppler 的 `pdftoppm`；
-- 当前 Codex 环境中的 Presentations 技能和 `@oai/artifact-tool`。
+- LibreOffice（Linux 无头渲染与冒烟验证）；
+- 内置 Python `zipfile` + Open XML（直接操作 PPTX 包结构，不依赖外部
+  Node.js 运行时）。
 
 OCR 模式还需要 `opencv-python-headless`，并需要 Apple Vision、
 Tesseract 或预先生成的 OCR JSON 中的一种。
@@ -82,22 +83,30 @@ $app.Quit()
 Debian/Ubuntu 可安装：
 
 ```bash
-sudo apt-get install poppler-utils tesseract-ocr tesseract-ocr-chi-sim \
-  libreoffice fonts-noto-cjk
-python3 -m pip install pymupdf pillow opencv-python-headless
+sudo apt-get update
+sudo apt-get install -y \
+  python3 python3-pip \
+  libreoffice \
+  poppler-utils \
+  tesseract-ocr \
+  tesseract-ocr-eng \
+  tesseract-ocr-chi-sim \
+  fonts-noto-cjk
+
+python3 -m pip install \
+  pymupdf pillow opencv-python-headless
 ```
 
-Alpine Linux 使用 musl，Debian/Ubuntu/RHEL 通常使用 glibc；Artifact Tool
-中的 `skia-canvas` 原生模块必须同时匹配操作系统、CPU 架构和 libc。
-若使用独立安装的 Artifact Tool：
+Alpine Linux 使用 musl，Debian/Ubuntu/RHEL 通常使用 glibc。
+PPTX 操作使用 Python `zipfile` + Open XML，不依赖外部 Node.js 原生模块，
+因此跨 libc 兼容性更好。若 Presentations 技能脚本位于自定义目录：
 
 ```bash
-export ARTIFACT_TOOL_DIR="/opt/codex-runtime/node_modules/@oai/artifact-tool"
 export PRESENTATIONS_SKILL_DIR="/opt/codex-skills/presentations"
 python3 "$SKILL_DIR/scripts/check_environment.py" --json
 ```
 
-不得仅凭包目录存在就继续；无头冒烟测试未通过时必须停止。
+不得仅凭命令存在就继续；LibreOffice 无头冒烟测试未通过时必须停止。
 
 最终水印严格验收需要中文 Tesseract 语言包。只有英文语言包时不得把中文
 水印 OCR 标记为已完成；严格模式实际要求 `chi_sim` 与 `eng` 同时存在。

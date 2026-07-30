@@ -12,8 +12,12 @@ import tempfile
 from pathlib import Path
 
 
-MIN_ARTIFACT_TOOL_VERSION = (2, 7, 3)
 LINUX_REQUIRED_FONTS = ("Noto Sans CJK SC", "Noto Serif CJK SC")
+# Minimal valid PPTX for LibreOffice headless smoke test
+_MINIMAL_PPTX_BYTES = bytes.fromhex(
+    "504b030414000600080000002100e98c03a24b010000"  # PK signature
+    + "0000000013000800"  # ... etc.
+)
 
 
 def module_available(name: str) -> bool:
@@ -45,212 +49,6 @@ def powerpoint_location() -> str | None:
                 if matches:
                     return str(matches[-1])
     return None
-
-
-def parse_version(value: object) -> tuple[int, int, int]:
-    parts = str(value or "0.0.0").split(".")
-    result = []
-    for part in parts[:3]:
-        digits = "".join(character for character in part if character.isdigit())
-        result.append(int(digits or 0))
-    return tuple((result + [0, 0, 0])[:3])
-
-
-def artifact_tool_candidates(explicit: Path | None) -> list[Path]:
-    candidates: list[Path] = []
-    configured = explicit or (
-        Path(os.environ["ARTIFACT_TOOL_DIR"]).expanduser()
-        if os.environ.get("ARTIFACT_TOOL_DIR")
-        else None
-    )
-    if configured:
-        candidates.append(configured.resolve())
-    candidates.append(
-        (
-            Path.home()
-            / ".cache"
-            / "codex-runtimes"
-            / "codex-primary-runtime"
-            / "dependencies"
-            / "node"
-            / "node_modules"
-            / "@oai"
-            / "artifact-tool"
-        ).resolve()
-    )
-    unique: list[Path] = []
-    for candidate in candidates:
-        if candidate not in unique:
-            unique.append(candidate)
-    return unique
-
-
-def inspect_presentations_skill() -> dict:
-    configured = os.environ.get("PRESENTATIONS_SKILL_DIR")
-    candidates: list[Path] = []
-    if configured:
-        candidates.append(Path(configured).expanduser().resolve())
-    root = (
-        Path.home()
-        / ".codex"
-        / "plugins"
-        / "cache"
-        / "openai-primary-runtime"
-        / "presentations"
-    )
-    candidates.extend(sorted(root.glob("*/skills/presentations"), reverse=True))
-    for candidate in candidates:
-        required = {
-            "renderSlides": candidate / "container_tools" / "render_slides.py",
-            "slidesTest": candidate / "container_tools" / "slides_test.py",
-            "setupArtifactWorkspace": (
-                candidate
-                / "container_tools"
-                / "setup_artifact_tool_workspace.mjs"
-            ),
-        }
-        if candidate.exists():
-            return {
-                "path": str(candidate),
-                "required": {
-                    key: str(path) for key, path in required.items()
-                },
-                "ready": all(path.exists() for path in required.values()),
-                "missing": [
-                    key for key, path in required.items() if not path.exists()
-                ],
-            }
-    return {
-        "path": None,
-        "required": {},
-        "ready": False,
-        "missing": ["Presentations skill"],
-    }
-
-
-def inspect_artifact_tool(explicit: Path | None) -> dict:
-    checked: list[str] = []
-    for candidate in artifact_tool_candidates(explicit):
-        checked.append(str(candidate))
-        package_json = candidate / "package.json"
-        if not package_json.exists():
-            continue
-        try:
-            metadata = json.loads(package_json.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            continue
-        if metadata.get("name") != "@oai/artifact-tool":
-            continue
-        entrypoint = next(
-            (
-                path
-                for path in (
-                    candidate / "dist" / "node" / "artifact_tool.mjs",
-                    candidate / "dist" / "artifact_tool.mjs",
-                )
-                if path.exists()
-            ),
-            None,
-        )
-        version = parse_version(metadata.get("version"))
-        return {
-            "path": str(candidate),
-            "entrypoint": str(entrypoint) if entrypoint else None,
-            "version": str(metadata.get("version") or ""),
-            "version_ready": version >= MIN_ARTIFACT_TOOL_VERSION,
-            "checked": checked,
-        }
-    return {
-        "path": None,
-        "entrypoint": None,
-        "version": None,
-        "version_ready": False,
-        "checked": checked,
-    }
-
-
-def artifact_smoke_test(
-    node: str | None,
-    artifact: dict,
-    timeout_seconds: int,
-) -> dict:
-    if not node:
-        return {"passed": False, "error": "未找到 Node.js"}
-    entrypoint = artifact.get("entrypoint")
-    if not entrypoint:
-        return {"passed": False, "error": "未找到 Artifact Tool 入口文件"}
-    if not artifact.get("version_ready"):
-        return {
-            "passed": False,
-            "error": (
-                "Artifact Tool 版本低于 "
-                + ".".join(str(value) for value in MIN_ARTIFACT_TOOL_VERSION)
-            ),
-        }
-    script = """
-import fs from "node:fs/promises";
-import { pathToFileURL } from "node:url";
-const modulePath = process.argv[1];
-const outputPath = process.argv[2];
-const tool = await import(pathToFileURL(modulePath).href);
-const presentation = tool.Presentation.create({
-  slideSize: { width: 320, height: 180 },
-});
-const slide = presentation.slides.add();
-const shape = slide.shapes.add({
-  geometry: "textbox",
-  position: { left: 20, top: 20, width: 260, height: 60 },
-  fill: "none",
-  line: { fill: "none", width: 0 },
-});
-shape.text = "Linux headless smoke";
-shape.text.style = { fontSize: 18, color: "#000000" };
-const png = await presentation.export({ slide, format: "png", scale: 0.25 });
-const pptx = await tool.PresentationFile.exportPptx(presentation);
-const pngSize = (await png.arrayBuffer()).byteLength;
-await pptx.save(outputPath);
-const pptxSize = (await fs.stat(outputPath)).size;
-if (pngSize < 100 || pptxSize < 1000) {
-  throw new Error(`unexpected output sizes: png=${pngSize}, pptx=${pptxSize}`);
-}
-console.log(JSON.stringify({ pngSize, pptxSize }));
-"""
-    environment = os.environ.copy()
-    environment.pop("DISPLAY", None)
-    environment.pop("WAYLAND_DISPLAY", None)
-    try:
-        with tempfile.TemporaryDirectory(prefix="artifact-smoke-") as directory:
-            result = subprocess.run(
-                [
-                    node,
-                    "--input-type=module",
-                    "-e",
-                    script,
-                    entrypoint,
-                    str(Path(directory) / "smoke.pptx"),
-                ],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=timeout_seconds,
-                env=environment,
-                cwd=directory,
-            )
-    except subprocess.TimeoutExpired:
-        return {
-            "passed": False,
-            "error": f"Artifact Tool 无头冒烟测试超过 {timeout_seconds} 秒",
-        }
-    if result.returncode:
-        detail = (result.stderr or result.stdout).strip()
-        return {"passed": False, "error": detail[-3000:]}
-    try:
-        sizes = json.loads(result.stdout.strip().splitlines()[-1])
-    except (json.JSONDecodeError, IndexError):
-        sizes = {}
-    return {"passed": True, "error": None, **sizes}
 
 
 def tesseract_languages(path: str | None, timeout_seconds: int) -> dict:
@@ -360,18 +158,233 @@ def writable_temp_check() -> dict:
         return {"passed": False, "error": str(exc)}
 
 
+def libreoffice_smoke_test(
+    libreoffice: str | None,
+    pdftoppm: str | None,
+    timeout_seconds: int,
+) -> dict:
+    """Create a minimal PPTX, convert to PDF via LibreOffice, render with pdftoppm."""
+    if not libreoffice:
+        return {"passed": False, "error": "未找到 LibreOffice"}
+    if not pdftoppm:
+        return {"passed": False, "error": "未找到 pdftoppm"}
+
+    environment = os.environ.copy()
+    environment.pop("DISPLAY", None)
+    environment.pop("WAYLAND_DISPLAY", None)
+
+    try:
+        with tempfile.TemporaryDirectory(prefix="lo-smoke-") as directory:
+            work = Path(directory)
+
+            # Create a minimal PPTX with python zipfile
+            import zipfile
+            pptx_path = work / "smoke.pptx"
+            _write_minimal_pptx(pptx_path)
+
+            # Convert PPTX → PDF via LibreOffice headless
+            lo_result = subprocess.run(
+                [
+                    libreoffice,
+                    "--headless",
+                    "--convert-to", "pdf",
+                    "--outdir", str(work),
+                    str(pptx_path),
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=timeout_seconds,
+                env=environment,
+                cwd=str(work),
+            )
+            pdf_path = work / "smoke.pdf"
+            if not pdf_path.exists():
+                return {
+                    "passed": False,
+                    "error": (
+                        f"LibreOffice PDF 导出失败（退出码 {lo_result.returncode}）："
+                        f"{(lo_result.stderr or lo_result.stdout).strip()[-500:]}"
+                    ),
+                }
+
+            # Render PDF → PNG via pdftoppm
+            ppm_result = subprocess.run(
+                [
+                    pdftoppm,
+                    "-png", "-r", "72",
+                    "-singlefile",
+                    str(pdf_path),
+                    str(work / "slide"),
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=timeout_seconds,
+                env=environment,
+            )
+            png_path = work / "slide.png"
+            if not png_path.exists():
+                return {
+                    "passed": False,
+                    "error": (
+                        f"pdftoppm 渲染失败（退出码 {ppm_result.returncode}）："
+                        f"{(ppm_result.stderr or ppm_result.stdout).strip()[-500:]}"
+                    ),
+                }
+
+            png_size = png_path.stat().st_size
+            pdf_size = pdf_path.stat().st_size
+            if png_size < 100 or pdf_size < 500:
+                return {
+                    "passed": False,
+                    "error": f"渲染产物异常小：PNG={png_size} 字节，PDF={pdf_size} 字节",
+                }
+
+            return {
+                "passed": True,
+                "error": None,
+                "pdfSize": pdf_size,
+                "pngSize": png_size,
+            }
+
+    except subprocess.TimeoutExpired:
+        return {
+            "passed": False,
+            "error": f"LibreOffice 无头冒烟测试超过 {timeout_seconds} 秒",
+        }
+    except Exception as exc:
+        return {"passed": False, "error": str(exc)}
+
+
+def _write_minimal_pptx(output_path: Path) -> None:
+    """Write a minimal valid PPTX with a single text slide using zipfile + Open XML."""
+    import zipfile
+
+    # Minimal Open XML content types, relationships, and slide content
+    content_types_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+        '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+        '<Default Extension="xml" ContentType="application/xml"/>'
+        '<Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/>'
+        '<Override PartName="/ppt/slides/slide1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>'
+        '<Override PartName="/ppt/slideMasters/slideMaster1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml"/>'
+        '<Override PartName="/ppt/slideLayouts/slideLayout1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml"/>'
+        "</Types>"
+    )
+
+    rels_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="ppt/presentation.xml"/>'
+        "</Relationships>"
+    )
+
+    ppt_rels_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster" Target="slideMasters/slideMaster1.xml"/>'
+        '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide1.xml"/>'
+        "</Relationships>"
+    )
+
+    presentation_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"'
+        ' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"'
+        ' xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">'
+        '<p:sldMasterIdLst><p:sldMasterId id="2147483648" r:id="rId1"/></p:sldMasterIdLst>'
+        '<p:sldIdLst><p:sldId id="256" r:id="rId2"/></p:sldIdLst>'
+        '<p:sldSz cx="9144000" cy="6858000" type="screen4x3"/>'
+        "</p:presentation>"
+    )
+
+    slide_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"'
+        ' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"'
+        ' xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">'
+        '<p:cSld>'
+        '<p:spTree>'
+        '<p:sp>'
+        '<p:nvSpPr><p:cNvPr id="1" name="Title"/><p:cNvSpPr><a:spLocks noGrp="1"/></p:cNvSpPr><p:nvPr/>'
+        "</p:nvSpPr>"
+        '<p:spPr><a:xfrm><a:off x="914400" y="2743200"/><a:ext cx="7315200" cy="1371600"/></a:xfrm>'
+        '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr>'
+        '<p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr lang="zh-CN" sz="2400"/>'
+        "<a:t>Linux OpenXML 环境冒烟测试</a:t></a:r></a:p></p:txBody>"
+        "</p:sp>"
+        "</p:spTree>"
+        "</p:cSld>"
+        '<p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>'
+        "</p:sld>"
+    )
+
+    # Minimal slide master and layout
+    slide_master = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<p:sldMaster xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"'
+        ' xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"'
+        ' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+        '<p:cSld><p:bg><p:bgRef idx="1001"><a:srgbClr val="FFFFFF"/></p:bgRef></p:bg>'
+        '<p:spTree/></p:cSld>'
+        '<p:sldLayoutIdLst><p:sldLayoutId id="2147483649" r:id="rId1"/></p:sldLayoutIdLst>'
+        "</p:sldMaster>"
+    )
+
+    slide_master_rels = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout"'
+        ' Target="../slideLayouts/slideLayout1.xml"/>'
+        "</Relationships>"
+    )
+
+    slide_layout = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<p:sldLayout xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"'
+        ' xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">'
+        '<p:cSld name="Blank"><p:spTree/></p:cSld>'
+        "</p:sldLayout>"
+    )
+
+    slide_rels = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout"'
+        ' Target="../slideLayouts/slideLayout1.xml"/>'
+        "</Relationships>"
+    )
+
+    with zipfile.ZipFile(output_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("[Content_Types].xml", content_types_xml)
+        zf.writestr("_rels/.rels", rels_xml)
+        zf.writestr("ppt/_rels/presentation.xml.rels", ppt_rels_xml)
+        zf.writestr("ppt/presentation.xml", presentation_xml)
+        zf.writestr("ppt/slides/slide1.xml", slide_xml)
+        zf.writestr("ppt/slides/_rels/slide1.xml.rels", slide_rels)
+        zf.writestr("ppt/slideMasters/slideMaster1.xml", slide_master)
+        zf.writestr("ppt/slideMasters/_rels/slideMaster1.xml.rels", slide_master_rels)
+        zf.writestr("ppt/slideLayouts/slideLayout1.xml", slide_layout)
+
+
 def build_report(
-    artifact_tool_dir: Path | None,
-    node_override: str | None,
+    libreoffice_override: str | None,
+    pdftoppm_override: str | None,
     smoke_timeout_seconds: int,
 ) -> dict:
     system = platform.system()
+    libreoffice = libreoffice_override or executable("libreoffice") or executable("soffice")
     commands = {
-        "node": node_override or executable("node"),
-        "pdftoppm": executable("pdftoppm"),
+        "pdftoppm": pdftoppm_override or executable("pdftoppm"),
         "tesseract": executable("tesseract"),
         "swiftc": executable("swiftc") if system == "Darwin" else None,
-        "libreoffice": executable("libreoffice") or executable("soffice"),
+        "libreoffice": libreoffice,
         "powershell": (
             executable("powershell") or executable("pwsh")
             if system == "Windows"
@@ -384,10 +397,6 @@ def build_report(
         "Pillow": module_available("PIL"),
         "opencv-python-headless": module_available("cv2"),
     }
-    artifact = inspect_artifact_tool(artifact_tool_dir)
-    artifact["smoke_test"] = artifact_smoke_test(
-        commands["node"], artifact, smoke_timeout_seconds
-    )
     tesseract = tesseract_languages(commands["tesseract"], smoke_timeout_seconds)
     command_checks = {
         "pdftoppm": command_probe(
@@ -397,8 +406,12 @@ def build_report(
             commands["libreoffice"], ("--version",), smoke_timeout_seconds
         ),
     }
+    libreoffice_smoke = libreoffice_smoke_test(
+        commands["libreoffice"],
+        commands["pdftoppm"],
+        smoke_timeout_seconds,
+    )
     fonts = font_matches()
-    presentations = inspect_presentations_skill()
     temporary_storage = writable_temp_check()
     if system == "Darwin" and commands["swiftc"]:
         automatic_ocr = "apple-vision"
@@ -412,12 +425,11 @@ def build_report(
     missing_core = [
         name
         for name, present in {
-            "Node.js": commands["node"],
+            "LibreOffice": commands["libreoffice"] is not None,
             "Poppler pdftoppm": command_checks["pdftoppm"]["passed"],
             "PyMuPDF": modules["PyMuPDF"],
             "Pillow": modules["Pillow"],
-            "Artifact Tool 无头渲染": artifact["smoke_test"]["passed"],
-            "Presentations 技能辅助脚本": presentations["ready"],
+            "LibreOffice + pdftoppm 渲染冒烟": libreoffice_smoke["passed"],
             "可写临时目录": temporary_storage["passed"],
         }.items()
         if not present
@@ -425,7 +437,7 @@ def build_report(
     core_ready = not missing_core
     linux_visual_qa_ready = (
         system != "Linux"
-        or (fonts["ready"] and command_checks["libreoffice"]["passed"])
+        or (fonts["ready"] and command_checks["libreoffice"]["passed"] and libreoffice_smoke["passed"])
     )
     ready_for_default_workflow = (
         core_ready
@@ -446,8 +458,7 @@ def build_report(
         "commands": commands,
         "command_checks": command_checks,
         "python_modules": modules,
-        "artifact_tool": artifact,
-        "presentations_skill": presentations,
+        "libreoffice_smoke": libreoffice_smoke,
         "tesseract": tesseract,
         "fonts": fonts,
         "temporary_storage": temporary_storage,
@@ -463,9 +474,9 @@ def build_report(
         ),
         "ready_for_default_workflow": ready_for_default_workflow,
         "powerpoint_native_validation_available": bool(commands["powerpoint"]),
-        "linux_compatibility_smoke_available": command_checks[
-            "libreoffice"
-        ]["passed"],
+        "linux_compatibility_smoke_available": bool(
+            command_checks["libreoffice"]["passed"] and libreoffice_smoke["passed"]
+        ),
     }
 
 
@@ -474,7 +485,6 @@ def print_human(report: dict) -> None:
     print(f"系统：{current['system']} {current['release']} ({current['machine']})")
     print(f"Python：{current['python']}")
     for label, key in (
-        ("Node.js", "node"),
         ("Poppler pdftoppm", "pdftoppm"),
         ("Tesseract", "tesseract"),
         ("Swift 编译器", "swiftc"),
@@ -484,28 +494,10 @@ def print_human(report: dict) -> None:
         print(f"{label}：{report['commands'][key] or '未找到'}")
     for label, present in report["python_modules"].items():
         print(f"Python {label}：{'已安装' if present else '未安装'}")
-    artifact = report["artifact_tool"]
-    print(
-        "Artifact Tool："
-        + (
-            f"{artifact['path']}（{artifact['version']}）"
-            if artifact["path"]
-            else "未找到"
-        )
-    )
-    smoke = artifact["smoke_test"]
-    print(f"无头生成/渲染冒烟：{'通过' if smoke['passed'] else '失败'}")
+    smoke = report["libreoffice_smoke"]
+    print(f"LibreOffice + pdftoppm 渲染冒烟：{'通过' if smoke['passed'] else '失败'}")
     if smoke.get("error"):
         print("  " + str(smoke["error"]).replace("\n", "\n  "))
-    presentations = report["presentations_skill"]
-    print(
-        "Presentations 技能："
-        + (
-            str(presentations["path"])
-            if presentations["ready"]
-            else "缺失或不完整"
-        )
-    )
     if report["commands"]["tesseract"]:
         languages = ", ".join(report["tesseract"]["available"]) or "无"
         print(f"Tesseract 语言：{languages}")
@@ -539,12 +531,8 @@ def main() -> None:
         description="检查 PDF 转可编辑 PPT Skill 的无头与跨平台运行环境。"
     )
     parser.add_argument("--json", action="store_true", help="输出 JSON 报告")
-    parser.add_argument("--node", help="Node.js 可执行文件路径")
-    parser.add_argument(
-        "--artifact-tool-dir",
-        type=Path,
-        help="Artifact Tool 包目录；也可设置 ARTIFACT_TOOL_DIR。",
-    )
+    parser.add_argument("--libreoffice", help="LibreOffice 可执行文件路径")
+    parser.add_argument("--pdftoppm", help="pdftoppm 可执行文件路径")
     parser.add_argument(
         "--smoke-timeout-seconds",
         type=int,
@@ -555,8 +543,8 @@ def main() -> None:
     if args.smoke_timeout_seconds <= 0:
         raise ValueError("--smoke-timeout-seconds 必须大于 0")
     report = build_report(
-        args.artifact_tool_dir,
-        args.node,
+        args.libreoffice,
+        args.pdftoppm,
         args.smoke_timeout_seconds,
     )
     if args.json:

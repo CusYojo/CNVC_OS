@@ -174,7 +174,7 @@ python scripts/prepare_embedded_image_ocr.py \
 
 这样连接线位于修补背景之上、节点之下。若连接线仍与节点文字相交，调整
 `fromSide`、`toSide` 或连接线 `kind`，不要通过把整张流程图重新栅格化解决。
-连接线两端的箭头方向必须以最终渲染为准；在当前 Artifact Tool 导出中，
+连接线两端的箭头方向必须以最终渲染为准；在 LibreOffice + pdftoppm 渲染中，
 指向 `to` 节点的箭头通常使用 `tail`。若方向相反，交换 `head` 与 `tail`
 后重新渲染确认。
 
