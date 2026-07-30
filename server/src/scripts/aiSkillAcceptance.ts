@@ -859,6 +859,19 @@ async function main() {
     ),
     'utf8',
   )
+  const pptOpenXmlRuntimeSource = await readFile(
+    path.resolve(
+      process.cwd(),
+      'server',
+      'workspace',
+      '.agents',
+      'skills',
+      'editable-ppt-content-replacer',
+      'scripts',
+      'openxml_runtime.py',
+    ),
+    'utf8',
+  )
   assert(
     'PPT Skill 明确单一可编辑 PPTX 链路',
     /原生可编辑对象/.test(pptContract)
@@ -891,8 +904,10 @@ async function main() {
       && pptReplacerSource.includes('replacement-manifest.json')
       && pptReplacerSource.includes('apply_template_plan_openxml.py')
       && pptReplacerSource.includes('validate_template_result_openxml.py')
-      && pptReplacerSource.includes('final-watermark-qa.json'),
-    'KEEP / semanticKey / evidenceIds / [Sources] / OpenXML 原位替换与水印检查',
+      && pptReplacerSource.includes('final-watermark-qa.json')
+      && pptOpenXmlRuntimeSource.includes('run_properties.set("lang", "zh-CN")')
+      && pptOpenXmlRuntimeSource.includes('语言标记属于校对和字体回退元数据'),
+    'KEEP / semanticKey / evidenceIds / [Sources] / OpenXML 原位替换、中文语言规范化与水印检查',
   )
 
   const quickActionsSource = await readFile(
@@ -925,15 +940,16 @@ async function main() {
     'PDF/PPTX 上传 → 模板分析 → customTemplateId → strict-template 任务',
   )
   assert(
-    '投资建议书模板分析完成后自动创建任务并切换到统一进度条',
-    quickActionsSource.includes('const taskCreated = await submit(result)')
+    '投资建议书上传开始即创建持久任务并切换到统一进度条',
+    quickActionsSource.includes('onCreatePreparationTask')
+      && quickActionsSource.includes('taskId: preparationTaskId')
+      && !quickActionsSource.includes('const taskCreated = await submit(result)')
       && quickActionsSource.includes("stage: isInvestmentPpt")
-      && quickActionsSource.includes('模板分析完成，正在创建生成任务')
-      && quickActionsSource.includes("if (ok) setActiveAction(null)")
       && quickActionsSource.includes('上传、分析并开始生成')
-      && assistantPageSource.includes('setAiTasks((items) => [task, ...items.filter')
-      && assistantPageSource.includes('scrollRef.current?.scrollTo'),
-    '分析成功 → 自动创建任务 → 关闭上传弹窗 → 滚动到任务卡进度条',
+      && assistantPageSource.includes("'/ai/tasks/preparations/investment-ppt'")
+      && assistantPageSource.includes('onCreatePreparationTask={createQuickTaskPreparation}')
+      && aiTasksRouteSource.includes('startInvestmentPptTaskAfterPreparation'),
+    '上传开始 → 持久任务 → 模板分析 → 同一任务启动生成；切换会话后仍可恢复',
   )
   assert(
     '会话消息、文档任务和项目 Q&A 按创建时间统一排列',

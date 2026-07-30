@@ -192,6 +192,12 @@ def text_style(text_body: ET.Element | None) -> dict:
     style_copy = copy.deepcopy(text_body)
     for text_node in style_copy.iter(qn(A_NS, "t")):
         text_node.text = ""
+    # 语言标记属于校对和字体回退元数据，不是模板可见排版指纹。
+    # 中文内容替换会把目标运行从模板遗留的 en-US 规范化为 zh-CN；
+    # 保真校验仍需严格比较字体、字号、颜色、段落和几何属性。
+    for style_node in style_copy.iter():
+        if local_name(style_node.tag) in {"rPr", "defRPr", "endParaRPr"}:
+            style_node.attrib.pop("lang", None)
     signature = sha256_bytes(ET.tostring(style_copy, encoding="utf-8"))
     return {
         "body": dict(body_pr.attrib) if body_pr is not None else {},
@@ -365,6 +371,18 @@ def find_object(root: ET.Element, shape_id: int) -> ET.Element | None:
     return None
 
 
+def _text_run_for_node(
+    text_body: ET.Element,
+    text_node: ET.Element,
+) -> ET.Element | None:
+    for element in text_body.iter():
+        if local_name(element.tag) not in {"r", "fld"}:
+            continue
+        if text_node in element.iter(qn(A_NS, "t")):
+            return element
+    return None
+
+
 def replace_text(text_body: ET.Element, value: str) -> None:
     nodes = list(text_body.iter(qn(A_NS, "t")))
     if not nodes:
@@ -379,6 +397,17 @@ def replace_text(text_body: ET.Element, value: str) -> None:
     nodes[0].text = value
     if value[:1].isspace() or value[-1:].isspace():
         nodes[0].set(qn(XML_NS, "space"), "preserve")
+    if re.search(r"[\u3400-\u9fff]", value):
+        run = _text_run_for_node(text_body, nodes[0])
+        if run is None:
+            raise ValueError("中文替换目标缺少可编辑文字运行")
+        run_properties = run.find("./a:rPr", NS)
+        if run_properties is None:
+            run_properties = ET.Element(qn(A_NS, "rPr"))
+            run.insert(0, run_properties)
+        # 语言标记不改变字体、字号、颜色、坐标或段落样式，但可避免
+        # PowerPoint/WPS 将中文替换内容按英文校对和字体回退处理。
+        run_properties.set("lang", "zh-CN")
 
 
 def add_text_box(

@@ -12,6 +12,10 @@ export function safeAiTaskFailureStage(error: unknown) {
   if (code === 'DUE_DILIGENCE_CONTENT_QUALITY_REJECTED') return '正文质量检查未通过'
   if (code === 'DUE_DILIGENCE_MODEL_UNAVAILABLE') return '大模型正文生成未完成'
   if (code === 'DUE_DILIGENCE_NETWORK_UNAVAILABLE') return '联网资料补全未完成'
+  if (code === 'INVESTMENT_RECOMMENDATION_CONTENT_REJECTED') {
+    return '模板内容替换检查未通过'
+  }
+  if (code.startsWith('PPTX_')) return 'PPTX 文件质量检查未通过'
   return '文档尚未完成'
 }
 
@@ -41,6 +45,27 @@ export function safeAiTaskFailureMessage(error: unknown) {
   }
   if (code === 'DUE_DILIGENCE_NETWORK_UNAVAILABLE') {
     return '公开资料补全服务暂不可用，因此未生成文件。请确认联网检索服务恢复后点击“继续生成”。'
+  }
+  if (code === 'INVESTMENT_RECOMMENDATION_CONTENT_REJECTED') {
+    return '投资建议书未通过模板结构、内容槽位或样式保真检查。系统已保留参数，请点击“继续生成”重新替换并复核。'
+  }
+  if (code === 'PPTX_OPENXML_INVALID') {
+    return '生成的 PPTX 包结构不完整，系统未交付损坏文件。请点击“继续生成”。'
+  }
+  if (code === 'PPTX_UNICODE_INVALID') {
+    return '生成的 PPTX 包含损坏字符，系统未交付异常文件。请点击“继续生成”。'
+  }
+  if (code === 'PPTX_CJK_LANGUAGE_INVALID') {
+    return '生成的 PPTX 中文文本语言标记不正确，可能引起字体回退。系统已保留参数，请点击“继续生成”。'
+  }
+  if (code === 'PPTX_REFERENCES_MISSING') {
+    return '生成的 PPTX 缺少“引用资料与责任声明”末页，未通过交付检查。请点击“继续生成”。'
+  }
+  if (code === 'PPTX_CJK_THEME_MISSING') {
+    return '生成的 PPTX 缺少有效中文主题字体，可能导致跨平台版式变化。请点击“继续生成”。'
+  }
+  if (code === 'PPTX_EDITABLE_CONTENT_INSUFFICIENT') {
+    return '生成的 PPTX 可编辑文本对象不足，未达到可编辑交付要求。请点击“继续生成”。'
   }
   return '文档尚未完成，系统已保留本次生成参数，可继续生成。'
 }

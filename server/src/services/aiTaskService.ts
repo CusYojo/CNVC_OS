@@ -577,7 +577,10 @@ async function cancelIfRequested(taskId: string) {
 async function inspectGeneratedArtifact(
   filePath: string,
   format: 'docx' | 'pptx',
-  options: { requireEndReferences?: boolean } = {},
+  options: {
+    requireEndReferences?: boolean
+    allowInheritedCjkLanguageMetadata?: boolean
+  } = {},
 ) {
   const fileStat = await stat(filePath)
   if (!fileStat.isFile() || fileStat.size < 1000) throw new Error('生成文件为空或不完整')
@@ -603,22 +606,61 @@ async function inspectGeneratedArtifact(
       },
     }
   }
-  if (!zip.file('ppt/presentation.xml')) throw new Error('PPTX 缺少 presentation.xml')
+  const pptxQualityError = (message: string, code: string) =>
+    Object.assign(new Error(message), { code })
+  if (!zip.file('ppt/presentation.xml')) {
+    throw pptxQualityError('PPTX 缺少 presentation.xml', 'PPTX_OPENXML_INVALID')
+  }
   const slides = Object.keys(zip.files).filter((name) => /^ppt\/slides\/slide\d+\.xml$/.test(name))
   let editableTextElements = 0
   for (const name of slides) {
     const xml = await zip.file(name)!.async('string')
-    if (xml.includes('\uFFFD')) throw new Error(`PPTX ${name} 包含损坏的 Unicode 字符`)
-    if (/[\u3400-\u9FFF]/.test(xml) && xml.includes('lang="en-US"')) {
-      throw new Error(`PPTX ${name} 的中文文本语言标记错误`)
+    if (xml.includes('\uFFFD')) {
+      throw pptxQualityError(
+        `PPTX ${name} 包含损坏的 Unicode 字符`,
+        'PPTX_UNICODE_INVALID',
+      )
+    }
+    const textRuns = [
+      ...xml.matchAll(/<a:r\b[\s\S]*?<\/a:r>/g),
+      ...xml.matchAll(/<a:fld\b[\s\S]*?<\/a:fld>/g),
+    ].map((match) => match[0])
+    if (
+      !options.allowInheritedCjkLanguageMetadata
+      && textRuns.some((run) =>
+        /lang="en-US"/.test(run)
+        && /<a:t\b[^>]*>[^<]*[\u3400-\u9FFF]/.test(run))
+    ) {
+      throw pptxQualityError(
+        `PPTX ${name} 的中文文本语言标记错误`,
+        'PPTX_CJK_LANGUAGE_INVALID',
+      )
     }
     editableTextElements += (xml.match(/<a:t>/g) || []).length
   }
   const finalSlideXml = await zip.file(`ppt/slides/slide${slides.length}.xml`)?.async('string') || ''
-  if (!finalSlideXml.includes('引用资料与责任声明')) throw new Error('PPTX 最后一页缺少引用资料与责任声明')
+  if (!finalSlideXml.includes('引用资料与责任声明')) {
+    throw pptxQualityError(
+      'PPTX 最后一页缺少引用资料与责任声明',
+      'PPTX_REFERENCES_MISSING',
+    )
+  }
   const themeXml = await zip.file('ppt/theme/theme1.xml')?.async('string')
-  if (!themeXml || !/<a:ea[^>]+typeface="[^"]+"/.test(themeXml)) throw new Error('PPTX 缺少东亚主题字体')
-  if (slides.length < 3 || editableTextElements < slides.length * 2) throw new Error('PPTX 可编辑文本元素不足')
+  const themeFontTags = themeXml?.match(/<a:font\b[^>]*>/g) ?? []
+  const hasEastAsiaThemeFont = !!themeXml && (
+    /<a:ea[^>]+typeface="[^"]+"/.test(themeXml)
+    || themeFontTags.some((tag) =>
+      /script="Hans"/.test(tag) && /typeface="[^"]+"/.test(tag))
+  )
+  if (!hasEastAsiaThemeFont) {
+    throw pptxQualityError('PPTX 缺少东亚主题字体', 'PPTX_CJK_THEME_MISSING')
+  }
+  if (slides.length < 3 || editableTextElements < slides.length * 2) {
+    throw pptxQualityError(
+      'PPTX 可编辑文本元素不足',
+      'PPTX_EDITABLE_CONTENT_INSUFFICIENT',
+    )
+  }
   return {
     qualityStatus: 'passed',
     metadata: {
@@ -1620,6 +1662,10 @@ async function executeTask(taskId: string) {
       requireEndReferences: task.type !== 'compliance_statement'
         && task.type !== 'due_diligence_report'
         && task.type !== 'investment_proposal',
+      // 严格模板替换只改白名单内容对象；模板中受保护对象可能保留原有语言
+      // 元数据。editable-ppt-content-replacer 已在每个中文替换目标上强制 zh-CN。
+      allowInheritedCjkLanguageMetadata:
+        task.type === 'investment_recommendation_ppt',
     }
     let quality
     try {

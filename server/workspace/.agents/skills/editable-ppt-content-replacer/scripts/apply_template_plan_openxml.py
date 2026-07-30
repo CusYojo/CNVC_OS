@@ -10,6 +10,7 @@ from pathlib import Path
 from xml.etree import ElementTree as ET
 
 from openxml_runtime import (
+    A_NS,
     CT_NS,
     P_NS,
     PKG_REL_NS,
@@ -229,13 +230,40 @@ def main() -> None:
                     f"第 {page} 页 shapeId={shape_id}"
                 )
             replace_text(body, str(operation.get("text", "")))
+            replacement = str(operation.get("text", ""))
+            if re.search(r"[\u3400-\u9fff]", replacement):
+                matching_runs = [
+                    run
+                    for run in body.iter()
+                    if local_name(run.tag) in {"r", "fld"}
+                    and re.search(
+                        r"[\u3400-\u9fff]",
+                        "".join(
+                            node.text or ""
+                            for node in run.iter(qn(A_NS, "t"))
+                        ),
+                    )
+                ]
+                if not matching_runs or any(
+                    (run.find("./a:rPr", {"a": A_NS}) is None)
+                    or run.find("./a:rPr", {"a": A_NS}).get("lang") != "zh-CN"
+                    for run in matching_runs
+                ):
+                    raise ValueError(
+                        f"第 {index} 项中文替换未写入 zh-CN 语言标记："
+                        f"第 {page} 页 shapeId={shape_id}"
+                    )
             applied.append(
                 {
                     "operationIndex": index,
                     "slide": page,
                     "shapeId": shape_id,
                     "action": action,
-                    "status": "applied-in-place-openxml",
+                    "status": (
+                        "applied-in-place-openxml-cjk-language-normalized"
+                        if re.search(r"[\u3400-\u9fff]", replacement)
+                        else "applied-in-place-openxml"
+                    ),
                 }
             )
     for page, root in slide_roots.items():
