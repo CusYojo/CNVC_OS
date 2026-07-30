@@ -1,0 +1,1523 @@
+{
+  "schema": "openai.presentation.layout/v4",
+  "unit": "px",
+  "slide": {
+    "aid": "sl/v8m0rb",
+    "id": "v8m0rb",
+    "slide": 7,
+    "layoutId": "155a2937-4929-49cf-b778-9e4f529f0e17",
+    "layoutName": "Title Slide",
+    "layoutType": "title",
+    "masterLayoutId": "1a7a3226-3884-4085-ab85-2ca027e9ce9d",
+    "masterLayoutName": "Master",
+    "backgroundColor": "#FFFFFF",
+    "frame": {
+      "left": 0,
+      "top": 0,
+      "width": 1280,
+      "height": 720
+    }
+  },
+  "theme": {
+    "colorSchemeName": "ChatGPT",
+    "colors": {
+      "accent1": "#156082",
+      "accent2": "#E97132",
+      "accent3": "#196B24",
+      "accent4": "#0F9ED5",
+      "accent5": "#A02B93",
+      "accent6": "#4EA72E",
+      "bg1": "#FFFFFF",
+      "bg2": "#000000",
+      "tx1": "#1F1F1F",
+      "tx2": "#FFFFFF",
+      "dk1": "#000000",
+      "lt1": "#FFFFFF",
+      "dk2": "#0E2841",
+      "lt2": "#E8E8E8",
+      "hlink": "#467886",
+      "folHlink": "#96607D"
+    },
+    "typefaces": [
+      "KaiTi"
+    ]
+  },
+  "inheritedLayers": [
+    {
+      "scope": "layout",
+      "id": "155a2937-4929-49cf-b778-9e4f529f0e17",
+      "name": "Title Slide",
+      "type": "title",
+      "parentLayoutId": "1a7a3226-3884-4085-ab85-2ca027e9ce9d",
+      "elements": []
+    },
+    {
+      "scope": "master",
+      "id": "1a7a3226-3884-4085-ab85-2ca027e9ce9d",
+      "name": "Master",
+      "type": "master",
+      "elements": []
+    }
+  ],
+  "elements": [
+    {
+      "order": 1,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/ne5wrqhs",
+      "id": "1",
+      "name": "pdf-vector-0001",
+      "bbox": [
+        0,
+        0,
+        1280,
+        720
+      ],
+      "geometry": "rect",
+      "fillColor": "#FFFFFF",
+      "lineWidth": 0
+    },
+    {
+      "order": 2,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/lg7ap8z2",
+      "id": "2",
+      "bbox": [
+        670.67,
+        134.67,
+        189.33,
+        4
+      ],
+      "alt": "PDF 图片 2",
+      "contentType": "image/png",
+      "imageFit": "cover",
+      "asset": {
+        "assetId": "d37b3f6b-1fce-419c-9fa0-81fb4d33e3ba",
+        "contentType": "image/png",
+        "byteLength": 730
+      }
+    },
+    {
+      "order": 3,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/kfytw3yh",
+      "id": "3",
+      "bbox": [
+        1040,
+        136,
+        190.67,
+        4
+      ],
+      "alt": "PDF 图片 3",
+      "contentType": "image/png",
+      "imageFit": "cover",
+      "asset": {
+        "assetId": "806a9baa-cc22-466f-8233-0cefb51bebf7",
+        "contentType": "image/png",
+        "byteLength": 799
+      }
+    },
+    {
+      "order": 4,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/72psrih8",
+      "id": "4",
+      "bbox": [
+        409.15,
+        444.93,
+        245.33,
+        203.6
+      ],
+      "alt": "PDF 图片 4",
+      "contentType": "image/png",
+      "imageFit": "cover",
+      "asset": {
+        "assetId": "7b847407-c156-4cb2-b60e-f8d004bd94ba",
+        "contentType": "image/png",
+        "byteLength": 78729
+      }
+    },
+    {
+      "order": 5,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/falwnqhw",
+      "id": "5",
+      "name": "pdf-text-0005",
+      "bbox": [
+        67.13,
+        37.01,
+        132.48,
+        40
+      ],
+      "geometry": "rect",
+      "text": "轻蜓光电",
+      "textPreview": "轻蜓光电",
+      "resolvedFontSize": 32,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 32,
+        "typeface": "KaiTi",
+        "color": "#212121",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "轻蜓光电"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "轻蜓光电",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 32,
+            "typeface": "KaiTi",
+            "color": "#212121",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "轻蜓光电",
+              "fontSize": 32,
+              "typeface": "KaiTi",
+              "color": "#212121",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 6,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/0buxwbyh",
+      "id": "6",
+      "name": "pdf-text-0006",
+      "bbox": [
+        195.77,
+        39.25,
+        859.52,
+        36.6
+      ],
+      "geometry": "rect",
+      "text": "：致力于成为国际一流，国内跨越式领先的半导体量检测设备公司",
+      "textPreview": "：致力于成为国际一流，国内跨越式领先的半导体量检测设备公司",
+      "resolvedFontSize": 29.28,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 29.28,
+        "typeface": "KaiTi",
+        "color": "#212121",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "：致力于成为国际一流，国内跨越式领先的半导体量检测设备公司"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "：致力于成为国际一流，国内跨越式领先的半导体量检测设备公司",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 29.28,
+            "typeface": "KaiTi",
+            "color": "#212121",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "：致力于成为国际一流，国内跨越式领先的半导体量检测设备公司",
+              "fontSize": 29.28,
+              "typeface": "KaiTi",
+              "color": "#212121",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 7,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/1c3epgzm",
+      "id": "7",
+      "name": "pdf-vector-0007",
+      "bbox": [
+        29.6,
+        15.93,
+        15.21,
+        30.27
+      ],
+      "geometry": "rect",
+      "fillColor": "#1382BA",
+      "lineWidth": 0
+    },
+    {
+      "order": 8,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/y5wf65gf",
+      "id": "8",
+      "name": "pdf-vector-0008",
+      "bbox": [
+        29.6,
+        48.53,
+        15.21,
+        30.27
+      ],
+      "geometry": "rect",
+      "fillColor": "rgba(29, 175, 213, 0.7)",
+      "lineWidth": 0
+    },
+    {
+      "order": 9,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/u50b2dgz",
+      "id": "9",
+      "bbox": [
+        13.76,
+        103.84,
+        642.4,
+        325.6
+      ],
+      "alt": "PDF 图片 9",
+      "contentType": "image/png",
+      "imageFit": "cover",
+      "asset": {
+        "assetId": "d0fd9eff-2150-41f4-a4af-50972d18da49",
+        "contentType": "image/png",
+        "byteLength": 4755
+      }
+    },
+    {
+      "order": 10,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/jytg7at4",
+      "id": "10",
+      "name": "pdf-text-0010",
+      "bbox": [
+        96.99,
+        161.14,
+        500.94,
+        23.4
+      ],
+      "geometry": "rect",
+      "text": "嘉兴轻蜓光电科技有限公司成立于2022年10月，办公地点在",
+      "textPreview": "嘉兴轻蜓光电科技有限公司成立于2022年10月，办公地点在",
+      "resolvedFontSize": 18.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.72,
+        "typeface": "KaiTi",
+        "color": "#FFFFFF",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "嘉兴轻蜓光电科技有限公司成立于2022年10月，办公地点在"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "嘉兴轻蜓光电科技有限公司成立于2022年10月，办公地点在",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 18.72,
+            "typeface": "KaiTi",
+            "color": "#FFFFFF",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "嘉兴轻蜓光电科技有限公司成立于2022年10月，办公地点在",
+              "fontSize": 18.72,
+              "typeface": "KaiTi",
+              "color": "#FFFFFF",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 11,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/ixkze5cj",
+      "id": "11",
+      "name": "pdf-text-0011",
+      "bbox": [
+        64.51,
+        188.02,
+        533.48,
+        23.4
+      ],
+      "geometry": "rect",
+      "text": "苏州。核心团队由计算光学成像、半导体量检测设备、机器视觉",
+      "textPreview": "苏州。核心团队由计算光学成像、半导体量检测设备、机器视觉",
+      "resolvedFontSize": 18.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.72,
+        "typeface": "KaiTi",
+        "color": "#FFFFFF",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "苏州。核心团队由计算光学成像、半导体量检测设备、机器视觉"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "苏州。核心团队由计算光学成像、半导体量检测设备、机器视觉",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 18.72,
+            "typeface": "KaiTi",
+            "color": "#FFFFFF",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "苏州。核心团队由计算光学成像、半导体量检测设备、机器视觉",
+              "fontSize": 18.72,
+              "typeface": "KaiTi",
+              "color": "#FFFFFF",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 12,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/50vy9kba",
+      "id": "12",
+      "name": "pdf-text-0012",
+      "bbox": [
+        64.55,
+        214.9,
+        172.48,
+        23.4
+      ],
+      "geometry": "rect",
+      "text": "领域资深专家组成。",
+      "textPreview": "领域资深专家组成。",
+      "resolvedFontSize": 18.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.72,
+        "typeface": "KaiTi",
+        "color": "#FFFFFF",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "领域资深专家组成。"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "领域资深专家组成。",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 18.72,
+            "typeface": "KaiTi",
+            "color": "#FFFFFF",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "领域资深专家组成。",
+              "fontSize": 18.72,
+              "typeface": "KaiTi",
+              "color": "#FFFFFF",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 13,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/4z2hgfup",
+      "id": "13",
+      "name": "pdf-text-0013",
+      "bbox": [
+        64.55,
+        241.79,
+        8.68,
+        23.4
+      ],
+      "geometry": "rect",
+      "resolvedFontSize": 18.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.72,
+        "typeface": "KaiTi",
+        "color": "#FFFFFF",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": " "
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 18.72,
+            "typeface": "KaiTi",
+            "color": "#FFFFFF",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": " ",
+              "fontSize": 18.72,
+              "typeface": "KaiTi",
+              "color": "#FFFFFF",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 14,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/r2dgbutg",
+      "id": "14",
+      "name": "pdf-text-0014",
+      "bbox": [
+        101.67,
+        241.79,
+        496.32,
+        23.4
+      ],
+      "geometry": "rect",
+      "text": "公司聚焦电子半导体超高精度2D+3D量检测设备，集研发、",
+      "textPreview": "公司聚焦电子半导体超高精度2D+3D量检测设备，集研发、",
+      "resolvedFontSize": 18.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.72,
+        "typeface": "KaiTi",
+        "color": "#FFFFFF",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "公司聚焦电子半导体超高精度2D+3D量检测设备，集研发、"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "公司聚焦电子半导体超高精度2D+3D量检测设备，集研发、",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 18.72,
+            "typeface": "KaiTi",
+            "color": "#FFFFFF",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "公司聚焦电子半导体超高精度2D+3D量检测设备，集研发、",
+              "fontSize": 18.72,
+              "typeface": "KaiTi",
+              "color": "#FFFFFF",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 15,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/614zipsv",
+      "id": "15",
+      "name": "pdf-text-0015",
+      "bbox": [
+        64.55,
+        268.67,
+        533.45,
+        23.4
+      ],
+      "geometry": "rect",
+      "text": "生产、销售为一体，为半导体客户各类复杂量检测需求提供完整",
+      "textPreview": "生产、销售为一体，为半导体客户各类复杂量检测需求提供完整",
+      "resolvedFontSize": 18.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.72,
+        "typeface": "KaiTi",
+        "color": "#FFFFFF",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "生产、销售为一体，为半导体客户各类复杂量检测需求提供完整"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "生产、销售为一体，为半导体客户各类复杂量检测需求提供完整",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 18.72,
+            "typeface": "KaiTi",
+            "color": "#FFFFFF",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "生产、销售为一体，为半导体客户各类复杂量检测需求提供完整",
+              "fontSize": 18.72,
+              "typeface": "KaiTi",
+              "color": "#FFFFFF",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 16,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/tovydkb6",
+      "id": "16",
+      "name": "pdf-text-0016",
+      "bbox": [
+        64.55,
+        295.55,
+        533.28,
+        23.4
+      ],
+      "geometry": "rect",
+      "text": "解决方案，聚焦光模块/CPO、先进封装、IGBT功率器件、SMT",
+      "textPreview": "解决方案，聚焦光模块/CPO、先进封装、IGBT功率器件、SMT",
+      "resolvedFontSize": 18.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.72,
+        "typeface": "KaiTi",
+        "color": "#FFFFFF",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "解决方案，聚焦光模块/CPO、先进封装、IGBT功率器件、SMT"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "解决方案，聚焦光模块/CPO、先进封装、IGBT功率器件、SMT",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 18.72,
+            "typeface": "KaiTi",
+            "color": "#FFFFFF",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "解决方案，聚焦光模块/CPO、先进封装、IGBT功率器件、SMT",
+              "fontSize": 18.72,
+              "typeface": "KaiTi",
+              "color": "#FFFFFF",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 17,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/s3mhkzal",
+      "id": "17",
+      "name": "pdf-text-0017",
+      "bbox": [
+        64.57,
+        322.43,
+        533.64,
+        23.4
+      ],
+      "geometry": "rect",
+      "text": "电子制造等行业布局，目前已出货安世半导体、华天、长电、士",
+      "textPreview": "电子制造等行业布局，目前已出货安世半导体、华天、长电、士",
+      "resolvedFontSize": 18.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.72,
+        "typeface": "KaiTi",
+        "color": "#FFFFFF",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "电子制造等行业布局，目前已出货安世半导体、华天、长电、士"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "电子制造等行业布局，目前已出货安世半导体、华天、长电、士",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 18.72,
+            "typeface": "KaiTi",
+            "color": "#FFFFFF",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "电子制造等行业布局，目前已出货安世半导体、华天、长电、士",
+              "fontSize": 18.72,
+              "typeface": "KaiTi",
+              "color": "#FFFFFF",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 18,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/fqdgfutc",
+      "id": "18",
+      "name": "pdf-text-0018",
+      "bbox": [
+        64.6,
+        349.31,
+        340.47,
+        23.4
+      ],
+      "geometry": "rect",
+      "text": "兰微、汇川、中际旭创等众多头部客户。",
+      "textPreview": "兰微、汇川、中际旭创等众多头部客户。",
+      "resolvedFontSize": 18.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.72,
+        "typeface": "KaiTi",
+        "color": "#FFFFFF",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "兰微、汇川、中际旭创等众多头部客户。"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "兰微、汇川、中际旭创等众多头部客户。",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 18.72,
+            "typeface": "KaiTi",
+            "color": "#FFFFFF",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "兰微、汇川、中际旭创等众多头部客户。",
+              "fontSize": 18.72,
+              "typeface": "KaiTi",
+              "color": "#FFFFFF",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 19,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/ep4zmpsr",
+      "id": "19",
+      "name": "pdf-vector-0019",
+      "bbox": [
+        891.67,
+        116.83,
+        127.93,
+        38.67
+      ],
+      "geometry": "rect",
+      "fillColor": "#FFFFFF",
+      "lineWidth": 0
+    },
+    {
+      "order": 20,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/ql8jetcz",
+      "id": "20",
+      "name": "pdf-text-0020",
+      "bbox": [
+        901.94,
+        123.76,
+        111.36,
+        33.4
+      ],
+      "geometry": "rect",
+      "text": "合作客户",
+      "textPreview": "合作客户",
+      "resolvedFontSize": 26.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 26.72,
+        "typeface": "KaiTi",
+        "color": "#117CB4",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "合作客户"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "合作客户",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 26.72,
+            "typeface": "KaiTi",
+            "color": "#117CB4",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "合作客户",
+              "fontSize": 26.72,
+              "typeface": "KaiTi",
+              "color": "#117CB4",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 21,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/oral8fap",
+      "id": "21",
+      "bbox": [
+        1154.33,
+        0.93,
+        120.8,
+        46.8
+      ],
+      "alt": "PDF 图片 21",
+      "contentType": "image/png",
+      "imageFit": "cover",
+      "asset": {
+        "assetId": "5645c884-3137-450e-8bcb-dba2610ae8ad",
+        "contentType": "image/png",
+        "byteLength": 11164
+      }
+    },
+    {
+      "order": 22,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/nq14zut4",
+      "id": "22",
+      "bbox": [
+        687.6,
+        578.7,
+        180.07,
+        53.47
+      ],
+      "alt": "PDF 图片 22",
+      "contentType": "image/png",
+      "imageFit": "cover",
+      "asset": {
+        "assetId": "26eaf59f-917d-4635-9f16-d503ab70f212",
+        "contentType": "image/png",
+        "byteLength": 16029
+      }
+    },
+    {
+      "order": 23,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/2ps36psj",
+      "id": "23",
+      "bbox": [
+        877.57,
+        195.23,
+        184.8,
+        29.27
+      ],
+      "alt": "PDF 图片 23",
+      "contentType": "image/png",
+      "imageFit": "cover",
+      "asset": {
+        "assetId": "75f87eb3-0707-431e-a67b-ab1938007231",
+        "contentType": "image/png",
+        "byteLength": 24380
+      }
+    },
+    {
+      "order": 24,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/xg3m54bm",
+      "id": "24",
+      "bbox": [
+        687.6,
+        401.83,
+        153.53,
+        48.8
+      ],
+      "alt": "PDF 图片 24",
+      "contentType": "image/png",
+      "imageFit": "cover",
+      "asset": {
+        "assetId": "b932fc0a-371e-492f-8437-861d31bd2707",
+        "contentType": "image/png",
+        "byteLength": 28435
+      }
+    },
+    {
+      "order": 25,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/wvulcza1",
+      "id": "25",
+      "bbox": [
+        1078.6,
+        193.3,
+        148.47,
+        45.73
+      ],
+      "alt": "PDF 图片 25",
+      "contentType": "image/png",
+      "imageFit": "cover",
+      "asset": {
+        "assetId": "f9c70321-71e1-40de-83cd-eea6778fdd8f",
+        "contentType": "image/png",
+        "byteLength": 12587
+      }
+    },
+    {
+      "order": 26,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/bul43utg",
+      "id": "26",
+      "bbox": [
+        1098.4,
+        565.43,
+        149.27,
+        108.8
+      ],
+      "alt": "PDF 图片 26",
+      "contentType": "image/png",
+      "imageFit": "cover",
+      "asset": {
+        "assetId": "432d3922-f5e8-491d-b30f-856748ea8b83",
+        "contentType": "image/png",
+        "byteLength": 20109
+      }
+    },
+    {
+      "order": 27,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/atc3apsv",
+      "id": "27",
+      "bbox": [
+        914.93,
+        594.43,
+        123.2,
+        50.72
+      ],
+      "alt": "PDF 图片 27",
+      "contentType": "image/png",
+      "imageFit": "cover",
+      "asset": {
+        "assetId": "1e5e2d02-f28b-43c4-a575-92062e688510",
+        "contentType": "image/png",
+        "byteLength": 21170
+      }
+    },
+    {
+      "order": 28,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/dkz2t0b2",
+      "id": "28",
+      "bbox": [
+        894.33,
+        394.5,
+        164.53,
+        49.53
+      ],
+      "alt": "PDF 图片 28",
+      "contentType": "image/png",
+      "imageFit": "cover",
+      "asset": {
+        "assetId": "711c0024-66f3-4dfe-9ef4-ae31966bbbce",
+        "contentType": "image/png",
+        "byteLength": 22219
+      }
+    },
+    {
+      "order": 29,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/szql0vah",
+      "id": "29",
+      "bbox": [
+        1093.53,
+        501.77,
+        154.07,
+        41.77
+      ],
+      "alt": "PDF 图片 29",
+      "contentType": "image/png",
+      "imageFit": "cover",
+      "asset": {
+        "assetId": "7c590a56-d688-41d6-8fee-bff7e94f288a",
+        "contentType": "image/png",
+        "byteLength": 25720
+      }
+    },
+    {
+      "order": 30,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/i5oja18f",
+      "id": "30",
+      "bbox": [
+        1106.6,
+        394.63,
+        113.2,
+        49.98
+      ],
+      "alt": "PDF 图片 30",
+      "contentType": "image/png",
+      "imageFit": "cover",
+      "asset": {
+        "assetId": "15488f94-1faa-48b8-83f2-a4882ac77321",
+        "contentType": "image/png",
+        "byteLength": 9552
+      }
+    },
+    {
+      "order": 31,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/3qx03690",
+      "id": "31",
+      "bbox": [
+        686.53,
+        195.23,
+        151.17,
+        44.23
+      ],
+      "alt": "PDF 图片 31",
+      "contentType": "image/png",
+      "imageFit": "cover",
+      "asset": {
+        "assetId": "d075e8d0-624a-4824-8d7e-03e1594e057c",
+        "contentType": "image/png",
+        "byteLength": 20120
+      }
+    },
+    {
+      "order": 32,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/4r61cbql",
+      "id": "32",
+      "bbox": [
+        692.33,
+        505.03,
+        155.67,
+        30.87
+      ],
+      "alt": "PDF 图片 32",
+      "contentType": "image/png",
+      "imageFit": "cover",
+      "asset": {
+        "assetId": "9bab7595-09be-42ec-839e-753b4cfa1913",
+        "contentType": "image/png",
+        "byteLength": 25226
+      }
+    },
+    {
+      "order": 33,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/5sfi5gr6",
+      "id": "33",
+      "bbox": [
+        899.2,
+        492.77,
+        164.88,
+        58.98
+      ],
+      "alt": "PDF 图片 33",
+      "contentType": "image/png",
+      "imageFit": "cover",
+      "asset": {
+        "assetId": "17ff9d56-a3aa-4a15-b9c5-b7e6970afb89",
+        "contentType": "image/png",
+        "byteLength": 44804
+      }
+    },
+    {
+      "order": 34,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/qtojel8b",
+      "id": "34",
+      "bbox": [
+        677.93,
+        280.03,
+        179.67,
+        60.87
+      ],
+      "alt": "PDF 图片 34",
+      "contentType": "image/png",
+      "imageFit": "cover",
+      "asset": {
+        "assetId": "71b82d2e-eb74-44f4-8c39-59c3b32712f1",
+        "contentType": "image/png",
+        "byteLength": 37875
+      }
+    },
+    {
+      "order": 35,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/ruh07q9w",
+      "id": "35",
+      "bbox": [
+        1053.53,
+        264.03,
+        219.33,
+        75.73
+      ],
+      "alt": "PDF 图片 35",
+      "contentType": "image/png",
+      "imageFit": "cover",
+      "asset": {
+        "assetId": "7f778fea-194b-4490-bffc-49daf229d5ce",
+        "contentType": "image/png",
+        "byteLength": 22404
+      }
+    },
+    {
+      "order": 36,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/svq1gvqh",
+      "id": "36",
+      "bbox": [
+        895.27,
+        275.1,
+        174.21,
+        64.54
+      ],
+      "alt": "PDF 图片 36",
+      "contentType": "image/png",
+      "imageFit": "cover",
+      "asset": {
+        "assetId": "d4af10bf-c86a-4639-a17e-9bbcc0d3df01",
+        "contentType": "image/png",
+        "byteLength": 7549
+      }
+    },
+    {
+      "order": 37,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/dwzi9gr2",
+      "id": "37",
+      "bbox": [
+        657,
+        160.7,
+        600.93,
+        509.6
+      ],
+      "alt": "PDF 矢量元素 37",
+      "contentType": "image/svg+xml",
+      "imageFit": "contain",
+      "asset": {
+        "assetId": "f295dcb0-d999-49a2-8f24-2758652e5bff",
+        "contentType": "image/svg+xml",
+        "byteLength": 612
+      }
+    },
+    {
+      "order": 38,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/ds7e90je",
+      "id": "38",
+      "name": "pdf-text-0038",
+      "bbox": [
+        745.41,
+        236,
+        41.44,
+        23.4
+      ],
+      "geometry": "rect",
+      "text": "安世",
+      "textPreview": "安世",
+      "resolvedFontSize": 18.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.72,
+        "typeface": "KaiTi",
+        "color": "#117CB4",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "安世"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "安世",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 18.72,
+            "typeface": "KaiTi",
+            "color": "#117CB4",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "安世",
+              "fontSize": 18.72,
+              "typeface": "KaiTi",
+              "color": "#117CB4",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 39,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/7yd0vm9s",
+      "id": "39",
+      "bbox": [
+        27.12,
+        449.92,
+        180.01,
+        198.62
+      ],
+      "alt": "PDF 图片 39",
+      "contentType": "image/png",
+      "imageFit": "cover",
+      "asset": {
+        "assetId": "49466b70-00fe-4ce2-8f5c-ea4933ad282d",
+        "contentType": "image/png",
+        "byteLength": 58976
+      }
+    },
+    {
+      "order": 40,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/nil8jexk",
+      "id": "40",
+      "bbox": [
+        201.84,
+        442.98,
+        224.01,
+        198.62
+      ],
+      "alt": "PDF 图片 40",
+      "contentType": "image/png",
+      "imageFit": "cover",
+      "asset": {
+        "assetId": "00ed60ee-c528-4f6b-ab89-e28f9002835b",
+        "contentType": "image/png",
+        "byteLength": 55781
+      }
+    }
+  ],
+  "composeRuns": []
+}

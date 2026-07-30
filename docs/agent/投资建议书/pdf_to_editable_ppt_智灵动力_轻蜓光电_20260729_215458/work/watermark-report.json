@@ -1,0 +1,70 @@
+{
+  "mode": "auto",
+  "opacity_threshold": 0.45,
+  "page_count": 37,
+  "removed_span_count": 37,
+  "removed_unique_text_count": 1,
+  "custom_terms": [],
+  "entries": [
+    {
+      "text": "保密资料，仅供投资人参考",
+      "normalized": "保密资料仅供投资人参考",
+      "pages": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36,
+        37
+      ],
+      "page_count": 37,
+      "span_count": 37,
+      "reasons": [
+        "common-watermark-term",
+        "large-overlay",
+        "low-opacity",
+        "repeated-across-pages",
+        "rotated"
+      ],
+      "sample_opacity": 0.25,
+      "sample_angle": -32.0,
+      "sample_bbox": [
+        107.57259,
+        21.43021,
+        857.03168,
+        525.92883
+      ]
+    }
+  ]
+}

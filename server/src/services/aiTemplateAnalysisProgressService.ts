@@ -10,6 +10,7 @@ export type AiTemplateAnalysisProgress = {
   startedAt: string
   updatedAt: string
   errorMessage?: string
+  result?: unknown
 }
 
 const progressById = new Map<string, AiTemplateAnalysisProgress>()
@@ -64,7 +65,7 @@ export function updateAiTemplateAnalysisProgress(
   })
 }
 
-export function completeAiTemplateAnalysisProgress(id: string) {
+export function completeAiTemplateAnalysisProgress(id: string, result: unknown) {
   const current = progressById.get(id)
   if (!current) return
   progressById.set(id, {
@@ -73,6 +74,7 @@ export function completeAiTemplateAnalysisProgress(id: string) {
     stage: '模板分析完成',
     progress: 100,
     updatedAt: new Date().toISOString(),
+    result,
   })
 }
 
@@ -105,5 +107,6 @@ export function getAiTemplateAnalysisProgress(userId: string, id: string) {
       Math.floor((Date.now() - Date.parse(item.startedAt)) / 1000),
     ),
     ...(item.errorMessage ? { errorMessage: item.errorMessage } : {}),
+    ...(item.status === 'succeeded' ? { result: item.result } : {}),
   }
 }

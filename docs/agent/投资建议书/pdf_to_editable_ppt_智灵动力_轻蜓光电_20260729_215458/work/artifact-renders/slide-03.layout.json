@@ -1,0 +1,3766 @@
+{
+  "schema": "openai.presentation.layout/v4",
+  "unit": "px",
+  "slide": {
+    "aid": "sl/r70cht",
+    "id": "r70cht",
+    "slide": 3,
+    "layoutId": "155a2937-4929-49cf-b778-9e4f529f0e17",
+    "layoutName": "Title Slide",
+    "layoutType": "title",
+    "masterLayoutId": "1a7a3226-3884-4085-ab85-2ca027e9ce9d",
+    "masterLayoutName": "Master",
+    "backgroundColor": "#FFFFFF",
+    "frame": {
+      "left": 0,
+      "top": 0,
+      "width": 1280,
+      "height": 720
+    }
+  },
+  "theme": {
+    "colorSchemeName": "ChatGPT",
+    "colors": {
+      "accent1": "#156082",
+      "accent2": "#E97132",
+      "accent3": "#196B24",
+      "accent4": "#0F9ED5",
+      "accent5": "#A02B93",
+      "accent6": "#4EA72E",
+      "bg1": "#FFFFFF",
+      "bg2": "#000000",
+      "tx1": "#1F1F1F",
+      "tx2": "#FFFFFF",
+      "dk1": "#000000",
+      "lt1": "#FFFFFF",
+      "dk2": "#0E2841",
+      "lt2": "#E8E8E8",
+      "hlink": "#467886",
+      "folHlink": "#96607D"
+    },
+    "typefaces": [
+      "Arial",
+      "Calibri",
+      "KaiTi",
+      "TimesNewRomanPSMT"
+    ]
+  },
+  "inheritedLayers": [
+    {
+      "scope": "layout",
+      "id": "155a2937-4929-49cf-b778-9e4f529f0e17",
+      "name": "Title Slide",
+      "type": "title",
+      "parentLayoutId": "1a7a3226-3884-4085-ab85-2ca027e9ce9d",
+      "elements": []
+    },
+    {
+      "scope": "master",
+      "id": "1a7a3226-3884-4085-ab85-2ca027e9ce9d",
+      "name": "Master",
+      "type": "master",
+      "elements": []
+    }
+  ],
+  "elements": [
+    {
+      "order": 1,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/1k7ihcre",
+      "id": "1",
+      "bbox": [
+        30,
+        350.34,
+        653.69,
+        307.82
+      ],
+      "alt": "PDF 图片 1",
+      "contentType": "image/png",
+      "imageFit": "cover",
+      "asset": {
+        "assetId": "413abad5-12b0-4b60-b38a-30c7835de1a9",
+        "contentType": "image/png",
+        "byteLength": 86916
+      }
+    },
+    {
+      "order": 2,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/ehwzmx8n",
+      "id": "2",
+      "bbox": [
+        204,
+        21.33,
+        5.33,
+        53.33
+      ],
+      "alt": "PDF 图片 2",
+      "contentType": "image/png",
+      "imageFit": "cover",
+      "asset": {
+        "assetId": "c2cde9ea-d1d5-489e-a625-df1c8098d7f8",
+        "contentType": "image/png",
+        "byteLength": 464
+      }
+    },
+    {
+      "order": 3,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/zi50f298",
+      "id": "3",
+      "bbox": [
+        806.67,
+        338.67,
+        364,
+        64
+      ],
+      "alt": "PDF 图片 3",
+      "contentType": "image/png",
+      "imageFit": "cover",
+      "asset": {
+        "assetId": "ef18aaf5-a577-4d3d-8b39-95c5d8d71d67",
+        "contentType": "image/png",
+        "byteLength": 1531
+      }
+    },
+    {
+      "order": 4,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/lk3uxg3e",
+      "id": "4",
+      "name": "pdf-text-0004",
+      "bbox": [
+        27.35,
+        395.02,
+        228.16,
+        23.4
+      ],
+      "geometry": "rect",
+      "text": "覆盖半导体制造全流程应用",
+      "textPreview": "覆盖半导体制造全流程应用",
+      "resolvedFontSize": 18.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.72,
+        "typeface": "KaiTi",
+        "color": "#000000",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "覆盖半导体制造全流程应用"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "覆盖半导体制造全流程应用",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 18.72,
+            "typeface": "KaiTi",
+            "color": "#000000",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "覆盖半导体制造全流程应用",
+              "fontSize": 18.72,
+              "typeface": "KaiTi",
+              "color": "#000000",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 5,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/0jutobmt",
+      "id": "5",
+      "name": "pdf-text-0005",
+      "bbox": [
+        42.94,
+        108.88,
+        624.99,
+        23.4
+      ],
+      "geometry": "rect",
+      "text": "半导体量检测设备是保证芯片制造良率的基石，广泛应用于集成电路前道及",
+      "textPreview": "半导体量检测设备是保证芯片制造良率的基石，广泛应用于集成电路前道及",
+      "resolvedFontSize": 18.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.72,
+        "typeface": "KaiTi",
+        "color": "#000000",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "半导体量检测设备是保证芯片制造良率的基石，广泛应用于集成电路前道及"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "半导体量检测设备是保证芯片制造良率的基石，广泛应用于集成电路前道及",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 18.72,
+            "typeface": "KaiTi",
+            "color": "#000000",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "半导体量检测设备是保证芯片制造良率的基石，广泛应用于集成电路前道及",
+              "fontSize": 18.72,
+              "typeface": "KaiTi",
+              "color": "#000000",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 6,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/zilsv6lo",
+      "id": "6",
+      "name": "pdf-text-0006",
+      "bbox": [
+        42.94,
+        138,
+        564,
+        23.4
+      ],
+      "geometry": "rect",
+      "text": "后道生产中，对保障产品良率、产品一致性、降低成本等至关重要。",
+      "textPreview": "后道生产中，对保障产品良率、产品一致性、降低成本等至关重要。",
+      "resolvedFontSize": 18.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.72,
+        "typeface": "KaiTi",
+        "color": "#000000",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "后道生产中，对保障产品良率、产品一致性、降低成本等至关重要。"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "后道生产中，对保障产品良率、产品一致性、降低成本等至关重要。",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 18.72,
+            "typeface": "KaiTi",
+            "color": "#000000",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "后道生产中，对保障产品良率、产品一致性、降低成本等至关重要。",
+              "fontSize": 18.72,
+              "typeface": "KaiTi",
+              "color": "#000000",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 7,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/yhcbm143",
+      "id": "7",
+      "name": "pdf-text-0007",
+      "bbox": [
+        42.94,
+        168.27,
+        10.55,
+        23.4
+      ],
+      "geometry": "rect",
+      "text": "•",
+      "textPreview": "•",
+      "resolvedFontSize": 18.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.72,
+        "typeface": "Arial",
+        "color": "#0168B7",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "•"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "•",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 18.72,
+            "typeface": "Arial",
+            "color": "#0168B7",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "•",
+              "fontSize": 18.72,
+              "typeface": "Arial",
+              "color": "#0168B7",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 8,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/dg3atg3i",
+      "id": "8",
+      "name": "pdf-text-0008",
+      "bbox": [
+        73.02,
+        167.12,
+        194.24,
+        23.4
+      ],
+      "geometry": "rect",
+      "text": "检测设备“造得好”：",
+      "textPreview": "检测设备“造得好”：",
+      "resolvedFontSize": 18.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.72,
+        "typeface": "KaiTi",
+        "color": "#0168B7",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "检测设备“造得好”："
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "检测设备“造得好”：",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 18.72,
+            "typeface": "KaiTi",
+            "color": "#0168B7",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "检测设备“造得好”：",
+              "fontSize": 18.72,
+              "typeface": "KaiTi",
+              "color": "#0168B7",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 9,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/cfutkbmx",
+      "id": "9",
+      "name": "pdf-text-0009",
+      "bbox": [
+        263.74,
+        167.12,
+        422.87,
+        23.4
+      ],
+      "geometry": "rect",
+      "text": "检测晶圆结构中是否出现异质情况，如颗粒污染、",
+      "textPreview": "检测晶圆结构中是否出现异质情况，如颗粒污染、",
+      "resolvedFontSize": 18.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.72,
+        "typeface": "KaiTi",
+        "color": "#000000",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "检测晶圆结构中是否出现异质情况，如颗粒污染、"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "检测晶圆结构中是否出现异质情况，如颗粒污染、",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 18.72,
+            "typeface": "KaiTi",
+            "color": "#000000",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "检测晶圆结构中是否出现异质情况，如颗粒污染、",
+              "fontSize": 18.72,
+              "typeface": "KaiTi",
+              "color": "#000000",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 10,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/mtkzutwf",
+      "id": "10",
+      "name": "pdf-text-0010",
+      "bbox": [
+        73.02,
+        196.24,
+        321.27,
+        23.4
+      ],
+      "geometry": "rect",
+      "text": "表面划伤、开短路等特征性结构缺陷（",
+      "textPreview": "表面划伤、开短路等特征性结构缺陷（",
+      "resolvedFontSize": 18.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.72,
+        "typeface": "KaiTi",
+        "color": "#000000",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "表面划伤、开短路等特征性结构缺陷（"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "表面划伤、开短路等特征性结构缺陷（",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 18.72,
+            "typeface": "KaiTi",
+            "color": "#000000",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "表面划伤、开短路等特征性结构缺陷（",
+              "fontSize": 18.72,
+              "typeface": "KaiTi",
+              "color": "#000000",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 11,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/nut03yd0",
+      "id": "11",
+      "name": "pdf-text-0011",
+      "bbox": [
+        390.14,
+        196.24,
+        116.32,
+        23.4
+      ],
+      "geometry": "rect",
+      "text": "“有没有？”",
+      "textPreview": "“有没有？”",
+      "resolvedFontSize": 18.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.72,
+        "typeface": "KaiTi",
+        "color": "#0168B7",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "“有没有？”"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "“有没有？”",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 18.72,
+            "typeface": "KaiTi",
+            "color": "#0168B7",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "“有没有？”",
+              "fontSize": 18.72,
+              "typeface": "KaiTi",
+              "color": "#0168B7",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 12,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/ov2hw3el",
+      "id": "12",
+      "name": "pdf-text-0012",
+      "bbox": [
+        502.46,
+        196.24,
+        41.12,
+        23.4
+      ],
+      "geometry": "rect",
+      "text": "）；",
+      "textPreview": "）；",
+      "resolvedFontSize": 18.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.72,
+        "typeface": "KaiTi",
+        "color": "#000000",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "）；"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "）；",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 18.72,
+            "typeface": "KaiTi",
+            "color": "#000000",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "）；",
+              "fontSize": 18.72,
+              "typeface": "KaiTi",
+              "color": "#000000",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 13,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/9wbi58v6",
+      "id": "13",
+      "name": "pdf-text-0013",
+      "bbox": [
+        42.94,
+        226.51,
+        10.55,
+        23.4
+      ],
+      "geometry": "rect",
+      "text": "•",
+      "textPreview": "•",
+      "resolvedFontSize": 18.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.72,
+        "typeface": "Arial",
+        "color": "#0168B7",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "•"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "•",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 18.72,
+            "typeface": "Arial",
+            "color": "#0168B7",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "•",
+              "fontSize": 18.72,
+              "typeface": "Arial",
+              "color": "#0168B7",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 14,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/ep0zqtwj",
+      "id": "14",
+      "name": "pdf-text-0014",
+      "bbox": [
+        73.02,
+        225.36,
+        194.4,
+        23.4
+      ],
+      "geometry": "rect",
+      "text": "量测设备“造得对”：",
+      "textPreview": "量测设备“造得对”：",
+      "resolvedFontSize": 18.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.72,
+        "typeface": "KaiTi",
+        "color": "#0168B7",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "量测设备“造得对”："
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "量测设备“造得对”：",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 18.72,
+            "typeface": "KaiTi",
+            "color": "#0168B7",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "量测设备“造得对”：",
+              "fontSize": 18.72,
+              "typeface": "KaiTi",
+              "color": "#0168B7",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 15,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/zq90zydo",
+      "id": "15",
+      "name": "pdf-text-0015",
+      "bbox": [
+        263.9,
+        225.36,
+        404.13,
+        23.4
+      ],
+      "geometry": "rect",
+      "text": "对被观测的晶圆电路上的结构尺寸和材料特性做",
+      "textPreview": "对被观测的晶圆电路上的结构尺寸和材料特性做",
+      "resolvedFontSize": 18.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.72,
+        "typeface": "KaiTi",
+        "color": "#000000",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "对被观测的晶圆电路上的结构尺寸和材料特性做"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "对被观测的晶圆电路上的结构尺寸和材料特性做",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 18.72,
+            "typeface": "KaiTi",
+            "color": "#000000",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "对被观测的晶圆电路上的结构尺寸和材料特性做",
+              "fontSize": 18.72,
+              "typeface": "KaiTi",
+              "color": "#000000",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 16,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/0rihs3e9",
+      "id": "16",
+      "name": "pdf-text-0016",
+      "bbox": [
+        73.02,
+        254.48,
+        595.03,
+        23.4
+      ],
+      "geometry": "rect",
+      "text": "出量化描述，如薄膜厚度、关键尺寸、刻蚀深度、表面形貌等物理参数",
+      "textPreview": "出量化描述，如薄膜厚度、关键尺寸、刻蚀深度、表面形貌等物理参数",
+      "resolvedFontSize": 18.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.72,
+        "typeface": "KaiTi",
+        "color": "#000000",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "出量化描述，如薄膜厚度、关键尺寸、刻蚀深度、表面形貌等物理参数"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "出量化描述，如薄膜厚度、关键尺寸、刻蚀深度、表面形貌等物理参数",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 18.72,
+            "typeface": "KaiTi",
+            "color": "#000000",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "出量化描述，如薄膜厚度、关键尺寸、刻蚀深度、表面形貌等物理参数",
+              "fontSize": 18.72,
+              "typeface": "KaiTi",
+              "color": "#000000",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 17,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/1sri1ovu",
+      "id": "17",
+      "name": "pdf-text-0017",
+      "bbox": [
+        73.02,
+        283.61,
+        78.88,
+        23.4
+      ],
+      "geometry": "rect",
+      "text": "的测量（",
+      "textPreview": "的测量（",
+      "resolvedFontSize": 18.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.72,
+        "typeface": "KaiTi",
+        "color": "#000000",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "的测量（"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "的测量（",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 18.72,
+            "typeface": "KaiTi",
+            "color": "#000000",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "的测量（",
+              "fontSize": 18.72,
+              "typeface": "KaiTi",
+              "color": "#000000",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 18,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/qlgzm9w7",
+      "id": "18",
+      "name": "pdf-text-0018",
+      "bbox": [
+        147.74,
+        283.6,
+        116,
+        23.4
+      ],
+      "geometry": "rect",
+      "text": "“是多少？”",
+      "textPreview": "“是多少？”",
+      "resolvedFontSize": 18.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.72,
+        "typeface": "KaiTi",
+        "color": "#0168B7",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "“是多少？”"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "“是多少？”",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 18.72,
+            "typeface": "KaiTi",
+            "color": "#0168B7",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "“是多少？”",
+              "fontSize": 18.72,
+              "typeface": "KaiTi",
+              "color": "#0168B7",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 19,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/rm90vexs",
+      "id": "19",
+      "name": "pdf-text-0019",
+      "bbox": [
+        259.74,
+        283.6,
+        41.44,
+        23.4
+      ],
+      "geometry": "rect",
+      "text": "）。",
+      "textPreview": "）。",
+      "resolvedFontSize": 18.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.72,
+        "typeface": "KaiTi",
+        "color": "#000000",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "）。"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "）。",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 18.72,
+            "typeface": "KaiTi",
+            "color": "#000000",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "）。",
+              "fontSize": 18.72,
+              "typeface": "KaiTi",
+              "color": "#000000",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 20,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/vulo7qp8",
+      "id": "20",
+      "name": "pdf-vector-0020",
+      "bbox": [
+        380.96,
+        342.83,
+        294.15,
+        52.25
+      ],
+      "geometry": "rect",
+      "lineColor": "#FF0000",
+      "lineWidth": 2.67
+    },
+    {
+      "order": 21,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/utcnel8n",
+      "id": "21",
+      "name": "pdf-vector-0021",
+      "bbox": [
+        380.96,
+        501.32,
+        294.15,
+        65.7
+      ],
+      "geometry": "rect",
+      "lineColor": "#FF0000",
+      "lineWidth": 2.67
+    },
+    {
+      "order": 22,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/hg36907e",
+      "id": "22",
+      "name": "pdf-text-0022",
+      "bbox": [
+        39.6,
+        674.26,
+        116.16,
+        23.4
+      ],
+      "geometry": "rect",
+      "text": "光学检测技术",
+      "textPreview": "光学检测技术",
+      "resolvedFontSize": 18.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.72,
+        "typeface": "KaiTi",
+        "color": "#0168B7",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "光学检测技术"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "光学检测技术",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 18.72,
+            "typeface": "KaiTi",
+            "color": "#0168B7",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "光学检测技术",
+              "fontSize": 18.72,
+              "typeface": "KaiTi",
+              "color": "#0168B7",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 23,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/gvu5gvqt",
+      "id": "23",
+      "name": "pdf-text-0023",
+      "bbox": [
+        151.76,
+        674.26,
+        517.22,
+        23.4
+      ],
+      "geometry": "rect",
+      "text": "能实现高精度、高速度均衡，且能实现3D检测，市场占比75.2%",
+      "textPreview": "能实现高精度、高速度均衡，且能实现3D检测，市场占比75.2%",
+      "resolvedFontSize": 18.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.72,
+        "typeface": "KaiTi",
+        "color": "#000000",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "能实现高精度、高速度均衡，且能实现3D检测，市场占比75.2%"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "能实现高精度、高速度均衡，且能实现3D检测，市场占比75.2%",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 18.72,
+            "typeface": "KaiTi",
+            "color": "#000000",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "能实现高精度、高速度均衡，且能实现3D检测，市场占比75.2%",
+              "fontSize": 18.72,
+              "typeface": "KaiTi",
+              "color": "#000000",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 24,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/3i5obqpk",
+      "id": "24",
+      "name": "pdf-vector-0024",
+      "bbox": [
+        762.39,
+        102.69,
+        164.72,
+        41.72
+      ],
+      "geometry": "rect",
+      "fillColor": "#0168B7",
+      "lineWidth": 0
+    },
+    {
+      "order": 25,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/ihwnil8z",
+      "id": "25",
+      "name": "pdf-text-0025",
+      "bbox": [
+        796.64,
+        114.18,
+        100,
+        30
+      ],
+      "geometry": "rect",
+      "text": "单步良率",
+      "textPreview": "单步良率",
+      "resolvedFontSize": 24,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 24,
+        "typeface": "KaiTi",
+        "color": "#FFFFFF",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "单步良率"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "单步良率",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 24,
+            "typeface": "KaiTi",
+            "color": "#FFFFFF",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "单步良率",
+              "fontSize": 24,
+              "typeface": "KaiTi",
+              "color": "#FFFFFF",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 26,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/5kn6d07a",
+      "id": "26",
+      "name": "pdf-vector-0026",
+      "bbox": [
+        1050.99,
+        102.69,
+        164.72,
+        41.72
+      ],
+      "geometry": "rect",
+      "fillColor": "#0168B7",
+      "lineWidth": 0
+    },
+    {
+      "order": 27,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/4jepkvqp",
+      "id": "27",
+      "name": "pdf-text-0027",
+      "bbox": [
+        1085.24,
+        114.18,
+        100,
+        30
+      ],
+      "geometry": "rect",
+      "text": "最终良率",
+      "textPreview": "最终良率",
+      "resolvedFontSize": 24,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 24,
+        "typeface": "KaiTi",
+        "color": "#FFFFFF",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "最终良率"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "最终良率",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 24,
+            "typeface": "KaiTi",
+            "color": "#FFFFFF",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "最终良率",
+              "fontSize": 24,
+              "typeface": "KaiTi",
+              "color": "#FFFFFF",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 28,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/jm1oz690",
+      "id": "28",
+      "name": "pdf-text-0028",
+      "bbox": [
+        778.78,
+        180.73,
+        136,
+        30
+      ],
+      "geometry": "rect",
+      "text": "(99%) ^1000",
+      "textPreview": "(99%) ^1000",
+      "resolvedFontSize": 24,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 24,
+        "typeface": "KaiTi",
+        "color": "#000000",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "(99%) ^1000"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "(99%) ^1000",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 24,
+            "typeface": "KaiTi",
+            "color": "#000000",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "(99%) ^1000",
+              "fontSize": 24,
+              "typeface": "KaiTi",
+              "color": "#000000",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 29,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/ylsn618f",
+      "id": "29",
+      "name": "pdf-text-0029",
+      "bbox": [
+        1127.31,
+        175.57,
+        16,
+        30
+      ],
+      "geometry": "rect",
+      "text": "0",
+      "textPreview": "0",
+      "resolvedFontSize": 24,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 24,
+        "typeface": "KaiTi",
+        "color": "#000000",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "0"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "0",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 24,
+            "typeface": "KaiTi",
+            "color": "#000000",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "0",
+              "fontSize": 24,
+              "typeface": "KaiTi",
+              "color": "#000000",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 30,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/orql076d",
+      "id": "30",
+      "name": "pdf-text-0030",
+      "bbox": [
+        760.71,
+        237.18,
+        172,
+        30
+      ],
+      "geometry": "rect",
+      "text": "(99.99%) ^1000",
+      "textPreview": "(99.99%) ^1000",
+      "resolvedFontSize": 24,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 24,
+        "typeface": "KaiTi",
+        "color": "#000000",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "(99.99%) ^1000"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "(99.99%) ^1000",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 24,
+            "typeface": "KaiTi",
+            "color": "#000000",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "(99.99%) ^1000",
+              "fontSize": 24,
+              "typeface": "KaiTi",
+              "color": "#000000",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 31,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/psz29c7y",
+      "id": "31",
+      "name": "pdf-text-0031",
+      "bbox": [
+        1115.38,
+        235.67,
+        40,
+        30
+      ],
+      "geometry": "rect",
+      "text": "90%",
+      "textPreview": "90%",
+      "resolvedFontSize": 24,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 24,
+        "typeface": "KaiTi",
+        "color": "#000000",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "90%"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "90%",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 24,
+            "typeface": "KaiTi",
+            "color": "#000000",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "90%",
+              "fontSize": 24,
+              "typeface": "KaiTi",
+              "color": "#000000",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 32,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/25o3yxo7",
+      "id": "32",
+      "name": "pdf-vector-0032",
+      "bbox": [
+        970.15,
+        182.65,
+        60.75,
+        42.22
+      ],
+      "geometry": "custom",
+      "fillColor": "#0168B7",
+      "lineWidth": 0
+    },
+    {
+      "order": 33,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/nqhk72ps",
+      "id": "33",
+      "name": "pdf-text-0033",
+      "bbox": [
+        828.49,
+        285.62,
+        340,
+        23.4
+      ],
+      "geometry": "rect",
+      "text": "缺陷发现得越晚，修复成本呈指数级增长",
+      "textPreview": "缺陷发现得越晚，修复成本呈指数级增长",
+      "resolvedFontSize": 18.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.72,
+        "typeface": "KaiTi",
+        "color": "#0168B7",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "缺陷发现得越晚，修复成本呈指数级增长"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "缺陷发现得越晚，修复成本呈指数级增长",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 18.72,
+            "typeface": "KaiTi",
+            "color": "#0168B7",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "缺陷发现得越晚，修复成本呈指数级增长",
+              "fontSize": 18.72,
+              "typeface": "KaiTi",
+              "color": "#0168B7",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 34,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/036lwn6h",
+      "id": "34",
+      "name": "pdf-vector-0034",
+      "bbox": [
+        29.6,
+        15.93,
+        15.21,
+        30.27
+      ],
+      "geometry": "rect",
+      "fillColor": "#1382BA",
+      "lineWidth": 0
+    },
+    {
+      "order": 35,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/14f25s72",
+      "id": "35",
+      "name": "pdf-vector-0035",
+      "bbox": [
+        29.6,
+        48.53,
+        15.21,
+        30.27
+      ],
+      "geometry": "rect",
+      "fillColor": "rgba(29, 175, 213, 0.7)",
+      "lineWidth": 0
+    },
+    {
+      "order": 36,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/e1o3udob",
+      "id": "36",
+      "name": "pdf-text-0036",
+      "bbox": [
+        221.73,
+        37.53,
+        549.76,
+        36.6
+      ],
+      "geometry": "rect",
+      "text": "半导体制造全流程的 “眼睛”与“尺子”",
+      "textPreview": "半导体制造全流程的 “眼睛”与“尺子”",
+      "resolvedFontSize": 29.28,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 29.28,
+        "typeface": "KaiTi",
+        "color": "#212121",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "半导体制造全流程的 “眼睛”与“尺子”"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "半导体制造全流程的 “眼睛”与“尺子”",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 29.28,
+            "typeface": "KaiTi",
+            "color": "#212121",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "半导体制造全流程的 “眼睛”与“尺子”",
+              "fontSize": 29.28,
+              "typeface": "KaiTi",
+              "color": "#212121",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 37,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/obmtsz2p",
+      "id": "37",
+      "bbox": [
+        1154.33,
+        0.93,
+        120.8,
+        46.8
+      ],
+      "alt": "PDF 图片 37",
+      "contentType": "image/png",
+      "imageFit": "cover",
+      "asset": {
+        "assetId": "f6ea3f15-ee96-4984-8155-ce42ad3a2064",
+        "contentType": "image/png",
+        "byteLength": 11164
+      }
+    },
+    {
+      "order": 38,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/kzal8r6l",
+      "id": "38",
+      "name": "pdf-text-0038",
+      "bbox": [
+        77.22,
+        34.68,
+        100.32,
+        40
+      ],
+      "geometry": "rect",
+      "text": "量检测",
+      "textPreview": "量检测",
+      "resolvedFontSize": 32,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 32,
+        "typeface": "KaiTi",
+        "color": "#000000",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "量检测"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "量检测",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 32,
+            "typeface": "KaiTi",
+            "color": "#000000",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "量检测",
+              "fontSize": 32,
+              "typeface": "KaiTi",
+              "color": "#000000",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 39,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/e5kbmpkn",
+      "id": "39",
+      "bbox": [
+        805.55,
+        338.3,
+        365.93,
+        65.2
+      ],
+      "alt": "PDF 矢量元素 39",
+      "contentType": "image/svg+xml",
+      "imageFit": "contain",
+      "asset": {
+        "assetId": "54985b01-52af-4491-8ae1-78626c0c948b",
+        "contentType": "image/svg+xml",
+        "byteLength": 617
+      }
+    },
+    {
+      "order": 40,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/h4bi9oni",
+      "id": "40",
+      "name": "pdf-text-0040",
+      "bbox": [
+        823.01,
+        361.11,
+        240.02,
+        26.6
+      ],
+      "geometry": "rect",
+      "text": "半导体光学量检测亟需由",
+      "textPreview": "半导体光学量检测亟需由",
+      "resolvedFontSize": 21.28,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 21.28,
+        "typeface": "KaiTi",
+        "color": "#FFFFFF",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "半导体光学量检测亟需由"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "半导体光学量检测亟需由",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 21.28,
+            "typeface": "KaiTi",
+            "color": "#FFFFFF",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "半导体光学量检测亟需由",
+              "fontSize": 21.28,
+              "typeface": "KaiTi",
+              "color": "#FFFFFF",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 41,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/g32h0jmx",
+      "id": "41",
+      "name": "pdf-text-0041",
+      "bbox": [
+        1059.17,
+        362.4,
+        29.92,
+        26.6
+      ],
+      "geometry": "rect",
+      "text": "2D",
+      "textPreview": "2D",
+      "resolvedFontSize": 21.28,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 21.28,
+        "typeface": "TimesNewRomanPSMT",
+        "color": "#FFFFFF",
+        "bold": true,
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "2D"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "2D",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 21.28,
+            "typeface": "TimesNewRomanPSMT",
+            "color": "#FFFFFF",
+            "bold": true,
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "2D",
+              "fontSize": 21.28,
+              "typeface": "TimesNewRomanPSMT",
+              "color": "#FFFFFF",
+              "bold": true,
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 42,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/v2t07e5c",
+      "id": "42",
+      "name": "pdf-text-0042",
+      "bbox": [
+        1085.09,
+        361.11,
+        46.72,
+        26.6
+      ],
+      "geometry": "rect",
+      "text": "升维",
+      "textPreview": "升维",
+      "resolvedFontSize": 21.28,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 21.28,
+        "typeface": "KaiTi",
+        "color": "#FFFFFF",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "升维"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "升维",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 21.28,
+            "typeface": "KaiTi",
+            "color": "#FFFFFF",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "升维",
+              "fontSize": 21.28,
+              "typeface": "KaiTi",
+              "color": "#FFFFFF",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 43,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/u1kzy947",
+      "id": "43",
+      "name": "pdf-text-0043",
+      "bbox": [
+        1127.97,
+        362.4,
+        30.09,
+        26.6
+      ],
+      "geometry": "rect",
+      "text": "3D",
+      "textPreview": "3D",
+      "resolvedFontSize": 21.28,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 21.28,
+        "typeface": "TimesNewRomanPSMT",
+        "color": "#FFFFFF",
+        "bold": true,
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "3D"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "3D",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 21.28,
+            "typeface": "TimesNewRomanPSMT",
+            "color": "#FFFFFF",
+            "bold": true,
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "3D",
+              "fontSize": 21.28,
+              "typeface": "TimesNewRomanPSMT",
+              "color": "#FFFFFF",
+              "bold": true,
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 44,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/58vidonu",
+      "id": "44",
+      "name": "pdf-vector-0044",
+      "bbox": [
+        911.63,
+        613.55,
+        27.8,
+        16.67
+      ],
+      "geometry": "custom",
+      "fillColor": "#4F81BD",
+      "lineWidth": 0
+    },
+    {
+      "order": 45,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/47m14jm9",
+      "id": "45",
+      "name": "pdf-text-0045",
+      "bbox": [
+        804.05,
+        683.33,
+        24.95,
+        23.4
+      ],
+      "geometry": "rect",
+      "text": "2D",
+      "textPreview": "2D",
+      "resolvedFontSize": 18.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.72,
+        "typeface": "Calibri",
+        "color": "#000000",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "2D"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "2D",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 18.72,
+            "typeface": "Calibri",
+            "color": "#000000",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "2D",
+              "fontSize": 18.72,
+              "typeface": "Calibri",
+              "color": "#000000",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 46,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/36t0be5o",
+      "id": "46",
+      "name": "pdf-text-0046",
+      "bbox": [
+        1097.6,
+        683.33,
+        24.95,
+        23.4
+      ],
+      "geometry": "rect",
+      "text": "3D",
+      "textPreview": "3D",
+      "resolvedFontSize": 18.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.72,
+        "typeface": "Calibri",
+        "color": "#000000",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "3D"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "3D",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 18.72,
+            "typeface": "Calibri",
+            "color": "#000000",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "3D",
+              "fontSize": 18.72,
+              "typeface": "Calibri",
+              "color": "#000000",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 47,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/tcfyh8z2",
+      "id": "47",
+      "bbox": [
+        746.43,
+        561.05,
+        135.91,
+        114.23
+      ],
+      "alt": "PDF 图片 47",
+      "contentType": "image/png",
+      "imageFit": "cover",
+      "asset": {
+        "assetId": "9f91163a-293b-4975-a037-88d7869ed61a",
+        "contentType": "image/png",
+        "byteLength": 196117
+      }
+    },
+    {
+      "order": 48,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/yl4fitgf",
+      "id": "48",
+      "bbox": [
+        954.77,
+        566.95,
+        279.26,
+        112.56
+      ],
+      "alt": "PDF 图片 48",
+      "contentType": "image/png",
+      "imageFit": "cover",
+      "asset": {
+        "assetId": "f73f5e57-28bc-4510-bf9f-a030129ffd6d",
+        "contentType": "image/png",
+        "byteLength": 100023
+      }
+    },
+    {
+      "order": 49,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/jmdwbyhk",
+      "id": "49",
+      "bbox": [
+        777.28,
+        418.52,
+        139.33,
+        129.86
+      ],
+      "alt": "PDF 矢量元素 49",
+      "contentType": "image/svg+xml",
+      "imageFit": "contain",
+      "asset": {
+        "assetId": "b32e7111-5135-4bf5-a35e-acb5ea064521",
+        "contentType": "image/svg+xml",
+        "byteLength": 700
+      }
+    },
+    {
+      "order": 50,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/lc3ad0ne",
+      "id": "50",
+      "bbox": [
+        920.88,
+        418.52,
+        136.73,
+        129.86
+      ],
+      "alt": "PDF 矢量元素 50",
+      "contentType": "image/svg+xml",
+      "imageFit": "contain",
+      "asset": {
+        "assetId": "b3469975-51c2-46a7-87cb-38decce4189f",
+        "contentType": "image/svg+xml",
+        "byteLength": 776
+      }
+    },
+    {
+      "order": 51,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/bipwbql8",
+      "id": "51",
+      "name": "pdf-text-0051",
+      "bbox": [
+        800.9,
+        476.68,
+        26.95,
+        23.4
+      ],
+      "geometry": "rect",
+      "text": "3D",
+      "textPreview": "3D",
+      "resolvedFontSize": 18.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.72,
+        "typeface": "TimesNewRomanPSMT",
+        "color": "#212121",
+        "bold": true,
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "3D"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "3D",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 18.72,
+            "typeface": "TimesNewRomanPSMT",
+            "color": "#212121",
+            "bold": true,
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "3D",
+              "fontSize": 18.72,
+              "typeface": "TimesNewRomanPSMT",
+              "color": "#212121",
+              "bold": true,
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 52,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/wjyx4v2t",
+      "id": "52",
+      "name": "pdf-text-0052",
+      "bbox": [
+        823.78,
+        475.54,
+        79.21,
+        23.4
+      ],
+      "geometry": "rect",
+      "text": "量检测大",
+      "textPreview": "量检测大",
+      "resolvedFontSize": 18.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.72,
+        "typeface": "KaiTi",
+        "color": "#212121",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "量检测大"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "量检测大",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 18.72,
+            "typeface": "KaiTi",
+            "color": "#212121",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "量检测大",
+              "fontSize": 18.72,
+              "typeface": "KaiTi",
+              "color": "#212121",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 53,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/xk7yd03e",
+      "id": "53",
+      "name": "pdf-text-0053",
+      "bbox": [
+        803.14,
+        498.9,
+        97.44,
+        23.4
+      ],
+      "geometry": "rect",
+      "text": "幅提升缺陷",
+      "textPreview": "幅提升缺陷",
+      "resolvedFontSize": 18.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.72,
+        "typeface": "KaiTi",
+        "color": "#212121",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "幅提升缺陷"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "幅提升缺陷",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 18.72,
+            "typeface": "KaiTi",
+            "color": "#212121",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "幅提升缺陷",
+              "fontSize": 18.72,
+              "typeface": "KaiTi",
+              "color": "#212121",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 54,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/ylgf65kz",
+      "id": "54",
+      "name": "pdf-text-0054",
+      "bbox": [
+        821.86,
+        520.34,
+        60.16,
+        23.4
+      ],
+      "geometry": "rect",
+      "text": "检出率",
+      "textPreview": "检出率",
+      "resolvedFontSize": 18.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.72,
+        "typeface": "KaiTi",
+        "color": "#212121",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "检出率"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "检出率",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 18.72,
+            "typeface": "KaiTi",
+            "color": "#212121",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "检出率",
+              "fontSize": 18.72,
+              "typeface": "KaiTi",
+              "color": "#212121",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 55,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/cna90vmx",
+      "id": "55",
+      "bbox": [
+        1060.22,
+        418.52,
+        139.53,
+        129.86
+      ],
+      "alt": "PDF 矢量元素 55",
+      "contentType": "image/svg+xml",
+      "imageFit": "contain",
+      "asset": {
+        "assetId": "dd7b6160-a514-484b-8f92-4d5f6a02e06a",
+        "contentType": "image/svg+xml",
+        "byteLength": 778
+      }
+    },
+    {
+      "order": 56,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/k7yx8f2p",
+      "id": "56",
+      "name": "pdf-text-0056",
+      "bbox": [
+        1071.71,
+        476.65,
+        26.95,
+        23.4
+      ],
+      "geometry": "rect",
+      "text": "3D",
+      "textPreview": "3D",
+      "resolvedFontSize": 18.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.72,
+        "typeface": "TimesNewRomanPSMT",
+        "color": "#212121",
+        "bold": true,
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "3D"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "3D",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 18.72,
+            "typeface": "TimesNewRomanPSMT",
+            "color": "#212121",
+            "bold": true,
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "3D",
+              "fontSize": 18.72,
+              "typeface": "TimesNewRomanPSMT",
+              "color": "#212121",
+              "bold": true,
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 57,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/l8ryhk3a",
+      "id": "57",
+      "name": "pdf-text-0057",
+      "bbox": [
+        1094.59,
+        475.51,
+        97.76,
+        23.4
+      ],
+      "geometry": "rect",
+      "text": "量检测反馈",
+      "textPreview": "量检测反馈",
+      "resolvedFontSize": 18.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.72,
+        "typeface": "KaiTi",
+        "color": "#212121",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "量检测反馈"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "量检测反馈",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 18.72,
+            "typeface": "KaiTi",
+            "color": "#212121",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "量检测反馈",
+              "fontSize": 18.72,
+              "typeface": "KaiTi",
+              "color": "#212121",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 58,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/690fapkv",
+      "id": "58",
+      "name": "pdf-text-0058",
+      "bbox": [
+        1073.95,
+        498.87,
+        116.16,
+        23.4
+      ],
+      "geometry": "rect",
+      "text": "多维缺陷信息",
+      "textPreview": "多维缺陷信息",
+      "resolvedFontSize": 18.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.72,
+        "typeface": "KaiTi",
+        "color": "#212121",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "多维缺陷信息"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "多维缺陷信息",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 18.72,
+            "typeface": "KaiTi",
+            "color": "#212121",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "多维缺陷信息",
+              "fontSize": 18.72,
+              "typeface": "KaiTi",
+              "color": "#212121",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 59,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/7a9gjulg",
+      "id": "59",
+      "name": "pdf-text-0059",
+      "bbox": [
+        1092.67,
+        520.31,
+        78.88,
+        23.4
+      ],
+      "geometry": "rect",
+      "text": "优化工艺",
+      "textPreview": "优化工艺",
+      "resolvedFontSize": 18.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.72,
+        "typeface": "KaiTi",
+        "color": "#212121",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "优化工艺"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "优化工艺",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 18.72,
+            "typeface": "KaiTi",
+            "color": "#212121",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "优化工艺",
+              "fontSize": 18.72,
+              "typeface": "KaiTi",
+              "color": "#212121",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 60,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/g3e9cbuh",
+      "id": "60",
+      "bbox": [
+        1071.62,
+        425.2,
+        39.23,
+        39.22
+      ],
+      "alt": "PDF 矢量元素 60",
+      "contentType": "image/svg+xml",
+      "imageFit": "contain",
+      "asset": {
+        "assetId": "63e14972-6eed-4c22-9b8a-da8b656926c2",
+        "contentType": "image/svg+xml",
+        "byteLength": 11750
+      }
+    },
+    {
+      "order": 61,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/id0fyp03",
+      "id": "61",
+      "name": "pdf-text-0061",
+      "bbox": [
+        943.35,
+        476.65,
+        26.95,
+        23.4
+      ],
+      "geometry": "rect",
+      "text": "3D",
+      "textPreview": "3D",
+      "resolvedFontSize": 18.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.72,
+        "typeface": "TimesNewRomanPSMT",
+        "color": "#212121",
+        "bold": true,
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "3D"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "3D",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 18.72,
+            "typeface": "TimesNewRomanPSMT",
+            "color": "#212121",
+            "bold": true,
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "3D",
+              "fontSize": 18.72,
+              "typeface": "TimesNewRomanPSMT",
+              "color": "#212121",
+              "bold": true,
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 62,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/5gbetkze",
+      "id": "62",
+      "name": "pdf-text-0062",
+      "bbox": [
+        966.23,
+        475.51,
+        79.2,
+        23.4
+      ],
+      "geometry": "rect",
+      "text": "量检测大",
+      "textPreview": "量检测大",
+      "resolvedFontSize": 18.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.72,
+        "typeface": "KaiTi",
+        "color": "#212121",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "量检测大"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "量检测大",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 18.72,
+            "typeface": "KaiTi",
+            "color": "#212121",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "量检测大",
+              "fontSize": 18.72,
+              "typeface": "KaiTi",
+              "color": "#212121",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 63,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/4f2x0zit",
+      "id": "63",
+      "name": "pdf-text-0063",
+      "bbox": [
+        945.75,
+        498.87,
+        97.44,
+        23.4
+      ],
+      "geometry": "rect",
+      "text": "幅降低缺陷",
+      "textPreview": "幅降低缺陷",
+      "resolvedFontSize": 18.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.72,
+        "typeface": "KaiTi",
+        "color": "#212121",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "幅降低缺陷"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "幅降低缺陷",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 18.72,
+            "typeface": "KaiTi",
+            "color": "#212121",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "幅降低缺陷",
+              "fontSize": 18.72,
+              "typeface": "KaiTi",
+              "color": "#212121",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 64,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/va9wnahc",
+      "id": "64",
+      "name": "pdf-text-0064",
+      "bbox": [
+        964.31,
+        520.31,
+        60.16,
+        23.4
+      ],
+      "geometry": "rect",
+      "text": "误报率",
+      "textPreview": "误报率",
+      "resolvedFontSize": 18.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.72,
+        "typeface": "KaiTi",
+        "color": "#212121",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "误报率"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "误报率",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 18.72,
+            "typeface": "KaiTi",
+            "color": "#212121",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "误报率",
+              "fontSize": 18.72,
+              "typeface": "KaiTi",
+              "color": "#212121",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 65,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/t03ahgv6",
+      "id": "65",
+      "bbox": [
+        935.43,
+        442.54,
+        31.68,
+        20.54
+      ],
+      "alt": "PDF 矢量元素 65",
+      "contentType": "image/svg+xml",
+      "imageFit": "contain",
+      "asset": {
+        "assetId": "3d07cac7-be62-44e7-83d0-f607e75ee778",
+        "contentType": "image/svg+xml",
+        "byteLength": 598
+      }
+    },
+    {
+      "order": 66,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/hcrepkzi",
+      "id": "66",
+      "name": "pdf-vector-0066",
+      "bbox": [
+        961.51,
+        439.14,
+        3.34,
+        2.93
+      ],
+      "geometry": "custom",
+      "lineColor": "#000000",
+      "lineWidth": 1.33
+    },
+    {
+      "order": 67,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/7ylsf6d0",
+      "id": "67",
+      "bbox": [
+        930.42,
+        425,
+        19.08,
+        29.81
+      ],
+      "alt": "PDF 矢量元素 67",
+      "contentType": "image/svg+xml",
+      "imageFit": "contain",
+      "asset": {
+        "assetId": "b35560e1-b427-4911-86e6-0b1cbc75dc1d",
+        "contentType": "image/svg+xml",
+        "byteLength": 557
+      }
+    },
+    {
+      "order": 68,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/7mpwjahg",
+      "id": "68",
+      "name": "pdf-vector-0068",
+      "bbox": [
+        949.77,
+        427.53,
+        5.47,
+        4.4
+      ],
+      "geometry": "custom",
+      "lineColor": "#000000",
+      "lineWidth": 1.33
+    },
+    {
+      "order": 69,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/6lgvq50v",
+      "id": "69",
+      "name": "pdf-vector-0069",
+      "bbox": [
+        955.84,
+        435.54,
+        8,
+        6.87
+      ],
+      "geometry": "custom",
+      "lineColor": "#000000",
+      "lineWidth": 1.33
+    },
+    {
+      "order": 70,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/cful47uh",
+      "id": "70",
+      "name": "pdf-vector-0070",
+      "bbox": [
+        949.77,
+        429.6,
+        9.2,
+        7.94
+      ],
+      "geometry": "custom",
+      "lineColor": "#000000",
+      "lineWidth": 1.33
+    },
+    {
+      "order": 71,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/xg32dcb2",
+      "id": "71",
+      "name": "pdf-vector-0071",
+      "bbox": [
+        949.83,
+        432.27,
+        12.01,
+        10.07
+      ],
+      "geometry": "custom",
+      "lineColor": "#000000",
+      "lineWidth": 1.33
+    },
+    {
+      "order": 72,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/qdcj2xcb",
+      "id": "72",
+      "name": "pdf-vector-0072",
+      "bbox": [
+        949.7,
+        426.53,
+        2,
+        1.6
+      ],
+      "geometry": "custom",
+      "lineColor": "#000000",
+      "lineWidth": 1.33
+    },
+    {
+      "order": 73,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/oridszex",
+      "id": "73",
+      "bbox": [
+        781.42,
+        422.79,
+        41.6,
+        41.6
+      ],
+      "rotation": -180,
+      "alt": "PDF 图片 73",
+      "contentType": "image/png",
+      "imageFit": "cover",
+      "asset": {
+        "assetId": "bb6bfc4f-b656-4478-ab34-09ccd03ca785",
+        "contentType": "image/png",
+        "byteLength": 4444
+      }
+    }
+  ],
+  "composeRuns": []
+}

@@ -75,6 +75,14 @@ type TemplateAnalysisProgress = {
   updatedAt: string
   elapsedSeconds: number
   errorMessage?: string
+  result?: AnalyzedCustomTemplate
+}
+
+type TemplateAnalysisAccepted = {
+  progressId: string
+  status: 'running'
+  stage: string
+  progress: number
 }
 
 export type AiQuickTaskPreparationProgress = {
@@ -338,27 +346,45 @@ export function AiQuickActions({
     publishProgress(latestProgress)
     // 投资建议书会自动衔接生成任务；点击开始后立即回到会话，由任务卡统一承载进度。
     if (isInvestmentPpt) setActiveAction(null)
-    let polling = false
-    let handoffStarted = false
-    let progressTimer: number | undefined
-    const pollProgress = async () => {
-      if (polling || handoffStarted) return
-      polling = true
-      try {
-        const progress = await apiGet<TemplateAnalysisProgress>(
-          `/ai/templates/analyze-progress/${progressId}`,
-        )
+    const waitForTemplateAnalysis = async () => {
+      const deadline = Date.now() + 40 * 60_000
+      const progressRegistrationDeadline = Date.now() + 10_000
+      let transientFailures = 0
+      while (Date.now() < deadline) {
+        let progress: TemplateAnalysisProgress
+        try {
+          progress = await apiGet<TemplateAnalysisProgress>(
+            `/ai/templates/analyze-progress/${progressId}`,
+          )
+          transientFailures = 0
+        } catch (error) {
+          const isRegistering = error instanceof ApiError
+            && error.status === 404
+            && Date.now() < progressRegistrationDeadline
+          if (!isRegistering) {
+            transientFailures += 1
+            if (transientFailures >= 5) throw error
+            console.warn('模板分析进度暂时不可用，将自动重试', error)
+          }
+          await new Promise((resolve) => window.setTimeout(resolve, 1_200))
+          continue
+        }
         publishProgress((current) => ({
           ...progress,
           progress: Math.max(current.progress, progress.progress),
         }))
-      } catch (error) {
-        if (!(error instanceof ApiError && error.status === 404)) {
-          console.warn('模板分析进度暂时不可用', error)
+        if (progress.status === 'failed') {
+          throw new Error(progress.errorMessage || '模板分析失败')
         }
-      } finally {
-        polling = false
+        if (progress.status === 'succeeded') {
+          if (!progress.result) {
+            throw new Error('模板分析已完成，但服务端未返回分析结果')
+          }
+          return progress.result
+        }
+        await new Promise((resolve) => window.setTimeout(resolve, 1_200))
       }
+      throw new Error('模板分析超过 40 分钟仍未完成，请稍后重试')
     }
     try {
       const dataBase64 = await readFileAsDataUrl(file, (progress) => {
@@ -379,11 +405,9 @@ export function AiQuickActions({
         progress: Math.max(current.progress, 9),
         updatedAt: new Date().toISOString(),
       }))
-      progressTimer = window.setInterval(() => {
-        void pollProgress()
-      }, 1_200)
-      void pollProgress()
-      const result = await apiPost<AnalyzedCustomTemplate>('/ai/templates/analyze', {
+      const accepted = await apiPost<
+        TemplateAnalysisAccepted | AnalyzedCustomTemplate
+      >('/ai/templates/analyze', {
         projectId: project.id,
         conversationId,
         name: file.name,
@@ -393,9 +417,12 @@ export function AiQuickActions({
           ? 'investment_recommendation_ppt'
           : 'custom_template_document',
       }, {
-        signal: AbortSignal.timeout(extension === 'pdf' ? 30 * 60_000 : 5 * 60_000),
+        signal: AbortSignal.timeout(5 * 60_000),
       })
-      handoffStarted = true
+      // 旧版服务端仍可能直接返回模板；新版在 202 后通过进度接口交付结果。
+      const result = 'analysis' in accepted
+        ? accepted
+        : await waitForTemplateAnalysis()
       publishProgress((current) => ({
         ...current,
         status: 'succeeded',
@@ -424,7 +451,6 @@ export function AiQuickActions({
         }
       }
     } catch (error) {
-      handoffStarted = true
       const originalMessage = (error as Error).message || '模板分析失败'
       const message = error instanceof ApiError
         && error.status === 500
@@ -440,7 +466,6 @@ export function AiQuickActions({
       }))
       if (!isInvestmentPpt) setTemplateError(message)
     } finally {
-      if (progressTimer !== undefined) window.clearInterval(progressTimer)
       if (isInvestmentPpt) setAnalyzingInvestmentPpt(false)
       else setAnalyzingCustomTemplate(false)
     }

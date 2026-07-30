@@ -22,6 +22,9 @@ import type { AiTemplateDefinition } from './aiTemplateCatalog.js'
 import { convertUploadedInvestmentPdfTemplate } from './aiInvestmentTemplateConversionService.js'
 
 const MAX_TEMPLATE_BYTES = 25 * 1024 * 1024
+// 用户上传文件继续限制为 25MB；PDF 可编辑化会嵌入页面图片、OCR 文本和形状，
+// 中间 PPTX 通常明显大于源 PDF，因此使用独立的内部产物上限。
+const MAX_CONVERTED_TEMPLATE_BYTES = 100 * 1024 * 1024
 const CUSTOM_TEMPLATE_DATA_ROOT = path.resolve(
   process.env.AI_CUSTOM_TEMPLATE_DATA_ROOT
     || process.env.AI_CUSTOM_TEMPLATE_ROOT
@@ -494,9 +497,19 @@ async function analyzePptx(zip: JSZip, fileName: string): Promise<ParsedAiCustom
 export async function analyzeAiCustomTemplateBuffer(
   buffer: Buffer,
   fileName: string,
+  options: {
+    maxBytes?: number
+    tooLargeMessage?: string
+    tooLargeCode?: string
+  } = {},
 ): Promise<ParsedAiCustomTemplate> {
-  if (buffer.length > MAX_TEMPLATE_BYTES) {
-    throw typedError('模板文件不能超过 25MB', 413, 'TEMPLATE_TOO_LARGE')
+  const maxBytes = options.maxBytes ?? MAX_TEMPLATE_BYTES
+  if (buffer.length > maxBytes) {
+    throw typedError(
+      options.tooLargeMessage ?? '模板文件不能超过 25MB',
+      413,
+      options.tooLargeCode ?? 'TEMPLATE_TOO_LARGE',
+    )
   }
   if (!buffer.subarray(0, 2).equals(Buffer.from('PK'))) {
     throw typedError('模板必须是有效的 DOCX 或 PPTX 文件', 400, 'INVALID_TEMPLATE')
@@ -636,7 +649,15 @@ export async function createAiCustomTemplate(user: TemplateUser, input: {
       })
       assetBuffer = conversion.outputBuffer
       await reportTemplateProgress(options, '转换交接检查通过，正在识别 PPTX 结构', 95)
-      const converted = await analyzeAiCustomTemplateBuffer(assetBuffer, assetFileName)
+      const converted = await analyzeAiCustomTemplateBuffer(
+        assetBuffer,
+        assetFileName,
+        {
+          maxBytes: MAX_CONVERTED_TEMPLATE_BYTES,
+          tooLargeMessage: 'PDF 转换后的可编辑 PPTX 不能超过 100MB，请压缩模板图片后重试',
+          tooLargeCode: 'CONVERTED_TEMPLATE_TOO_LARGE',
+        },
+      )
       parsed = {
         ...converted,
         analysis: versionAnalysis({

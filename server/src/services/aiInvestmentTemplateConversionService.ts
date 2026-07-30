@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process'
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { existsSync, readdirSync } from 'node:fs'
-import { mkdir, readFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { promisify } from 'node:util'
 import { getAiSkillRoot } from './aiSkillService.js'
@@ -42,6 +42,105 @@ function typedError(message: string, status: number, code: string) {
   return Object.assign(new Error(message), { status, code })
 }
 
+type CommandFailure = Error & {
+  stdout?: string | Buffer
+  stderr?: string | Buffer
+  killed?: boolean
+  code?: string | number
+  signal?: string
+  cmd?: string
+}
+
+function commandFailureDetail(error: unknown) {
+  const failure = error as CommandFailure
+  return `${String(failure.stderr || '')}\n${String(failure.stdout || '')}\n${failure.message || ''}`
+}
+
+function truncated(value: unknown, maxLength = 40_000) {
+  const text = String(value || '')
+  return text.length > maxLength
+    ? `${text.slice(0, maxLength)}\n…[内容已截断]`
+    : text
+}
+
+async function readDiagnosticJson(filePath: string) {
+  try {
+    return JSON.parse(await readFile(filePath, 'utf8')) as unknown
+  } catch {
+    return undefined
+  }
+}
+
+async function persistConversionFailure(
+  input: {
+    sourcePdfPath: string
+    workDir: string
+  },
+  stage: 'raster-review' | 'convert-and-validate',
+  error: unknown,
+) {
+  const failure = error as CommandFailure
+  const diagnosticId = randomUUID()
+  const diagnosticRoot = path.resolve(
+    process.cwd(),
+    '.runtime',
+    'pdf-to-ppt-diagnostics',
+  )
+  const diagnosticPath = path.join(diagnosticRoot, `${diagnosticId}.json`)
+  const artifacts = {
+    routeReport: await readDiagnosticJson(
+      path.join(input.workDir, 'route-report.json'),
+    ),
+    editabilityReport: await readDiagnosticJson(
+      path.join(input.workDir, 'editability-report.json'),
+    ),
+    watermarkReport: await readDiagnosticJson(
+      path.join(input.workDir, 'watermark-report.json'),
+    ),
+    watermarkHandoffReport: await readDiagnosticJson(
+      path.join(input.workDir, 'watermark-handoff-report.json'),
+    ),
+  }
+  try {
+    await mkdir(diagnosticRoot, { recursive: true })
+    await writeFile(
+      diagnosticPath,
+      `${JSON.stringify({
+        diagnosticId,
+        createdAt: new Date().toISOString(),
+        stage,
+        sourceFileName: path.basename(input.sourcePdfPath),
+        failure: {
+          name: failure.name,
+          message: failure.message,
+          code: failure.code,
+          signal: failure.signal,
+          killed: failure.killed,
+          command: truncated(failure.cmd, 8_000),
+          stdout: truncated(failure.stdout),
+          stderr: truncated(failure.stderr),
+        },
+        artifacts,
+      }, null, 2)}\n`,
+      'utf8',
+    )
+  } catch (persistError) {
+    console.error(
+      `[pdf-to-ppt] 无法保存转换诊断 diagnosticId=${diagnosticId}`,
+      persistError,
+    )
+  }
+  console.error(
+    `[pdf-to-ppt] ${stage} 失败 diagnosticId=${diagnosticId} diagnosticPath=${diagnosticPath}`,
+    error,
+  )
+  return diagnosticId
+}
+
+function withDiagnosticId(message: string, diagnosticId: string) {
+  return `${message}（诊断编号：${diagnosticId}）`
+}
+
 function declaredPptxSha256(handoff: ConversionHandoff) {
   return [
     handoff.templateSha256,
@@ -54,8 +153,8 @@ function declaredPptxSha256(handoff: ConversionHandoff) {
 }
 
 function conversionFailureMessage(error: unknown) {
-  const failure = error as Error & { stdout?: string; stderr?: string; killed?: boolean }
-  const detail = `${failure.stderr || ''}\n${failure.stdout || ''}\n${failure.message || ''}`
+  const failure = error as CommandFailure
+  const detail = commandFailureDetail(error)
   if (/PyMuPDF|No module named ['"]?fitz|No module named ['"]?PIL/i.test(detail)) {
     return 'PDF 模板转换环境缺少 PyMuPDF 或 Pillow，请配置转换运行时后重试'
   }
@@ -65,19 +164,36 @@ function conversionFailureMessage(error: unknown) {
   if (/(?:pdftoppm|Poppler).*(?:not found|No such file|不存在|缺少)/i.test(detail)) {
     return 'PDF 模板转换环境缺少 Poppler，请配置 pdftoppm 后重试'
   }
-  if (/artifact-tool|Presentations 技能|Presentation/i.test(detail)) {
+  if (
+    /artifact-tool|缺少 Presentations 技能|Cannot find (?:package|module)[^\n]*pptxgenjs|ERR_MODULE_NOT_FOUND[^\n]*pptxgenjs|LibreOffice[^\n]*(?:not found|No such file|不存在|缺少)/i.test(detail)
+  ) {
     return 'PDF 模板转换环境缺少 Presentations 技能或 LibreOffice 渲染管线'
+  }
+  if (failure.killed || /timed?\s*out|timeout/i.test(detail)) {
+    return 'PDF 模板转换超时，请精简模板或改为上传原生 PPTX'
+  }
+  if (
+    /FileNotFoundError:[^\n]*(?:artifact-renders|slide-\d+\.(?:png|jpe?g))|ENOENT[^\n]*(?:artifact-renders|slide-\d+\.(?:png|jpe?g))/i.test(detail)
+  ) {
+    return 'PDF 模板逐页验收的渲染文件不完整，请重新转换'
   }
   if (
     /水印交接验收失败|最终渲染图中仍识别到目标水印|PPTX 包内仍包含目标水印/i.test(detail)
   ) {
     return 'PDF 模板转换后仍检测到目标水印，未通过严格交接验收'
   }
-  if (/OCR|Tesseract|Vision/i.test(detail)) {
-    return 'PDF 模板需要 OCR 元素化，但当前 OCR 环境未通过检查'
+  if (/混合型 PDF 的选择性 OCR 尚不能|扁平化页面为 [^\n]+转换器已停止/i.test(detail)) {
+    return '该 PDF 同时包含对象页和扁平图片页，当前严格可编辑流程无法安全合并这些页面'
   }
-  if (failure.killed || /timed?\s*out|timeout/i.test(detail)) {
-    return 'PDF 模板转换超时，请精简模板或改为上传原生 PPTX'
+  if (
+    /Tesseract 缺少 OCR 语言包|无法读取 Tesseract 语言列表|严格水印验收缺少 Apple Vision 或 Tesseract OCR|(?:tesseract|swiftc).*(?:not found|No such file|不存在|缺少)/i.test(detail)
+  ) {
+    return 'PDF 模板转换环境缺少可用的 OCR 引擎或中英文语言包'
+  }
+  if (
+    /OCR 命令执行失败|Tesseract OCR 运行失败|Apple Vision OCR 只能|Vision OCR/i.test(detail)
+  ) {
+    return 'PDF 模板的 OCR 元素化或水印验收执行失败'
   }
   return 'PDF 模板未能转换为可编辑 PPTX，请检查文件后重试'
 }
@@ -243,8 +359,13 @@ export async function convertUploadedInvestmentPdfTemplate(input: {
       env: conversionEnv,
     })
   } catch (error) {
+    const diagnosticId = await persistConversionFailure(
+      input,
+      'raster-review',
+      error,
+    )
     throw typedError(
-      rasterReviewFailureMessage(error),
+      withDiagnosticId(rasterReviewFailureMessage(error), diagnosticId),
       422,
       'PDF_RASTER_SLOT_REVIEW_FAILED',
     )
@@ -357,8 +478,13 @@ export async function convertUploadedInvestmentPdfTemplate(input: {
       env: conversionEnv,
     })
   } catch (error) {
+    const diagnosticId = await persistConversionFailure(
+      input,
+      'convert-and-validate',
+      error,
+    )
     throw typedError(
-      conversionFailureMessage(error),
+      withDiagnosticId(conversionFailureMessage(error), diagnosticId),
       422,
       'PDF_TEMPLATE_CONVERSION_FAILED',
     )

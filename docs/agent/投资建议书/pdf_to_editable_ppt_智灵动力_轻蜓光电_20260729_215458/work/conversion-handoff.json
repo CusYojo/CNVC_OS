@@ -1,0 +1,492 @@
+{
+  "version": "1.1",
+  "outputPptx": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_轻蜓光电_20260729_215458/轻蜓光电投资建议书_可编辑还原版.pptx",
+  "outputSha256": "ae997efd31a547ffccc5f49c94339fdd50316e6f019aaa0edadd3b55da2f7ff8",
+  "pathBinding": "sha256",
+  "reports": [
+    {
+      "path": "work/route-report.json",
+      "sha256": "b78a144535f480c2dc964ca69e7c6ab8b1b5d5ac8785558c0a9ea3f31e333fa5"
+    },
+    {
+      "path": "work/editability-report.json",
+      "sha256": "822e0b5f4eb08cb64d7d2f2b786933e5f713b084cf9b143d87b7e607727a9991"
+    },
+    {
+      "path": "work/watermark-report.json",
+      "sha256": "837bd9f4877b4c2c31293c6f2fe5e399452bd2a48a977f74b666c850ec068253"
+    },
+    {
+      "path": "work/watermark-handoff-report.json",
+      "sha256": "9737ce0da46b2459331c777d7c76c6931006a3472e0d81b6f5ebdf910b431cf4"
+    }
+  ],
+  "watermark": {
+    "mode": "auto",
+    "qaMode": "strict",
+    "watermarkQaPassed": true
+  },
+  "editability": {
+    "route": "object-rich",
+    "largeEmbeddedImagesReview": {
+      "candidate_page_count": 16,
+      "candidate_image_count": 25,
+      "review_required_pages": [
+        2,
+        3,
+        4,
+        6,
+        7,
+        9,
+        10,
+        11,
+        12,
+        14,
+        15,
+        16,
+        19,
+        20,
+        25,
+        31
+      ],
+      "pages": [
+        {
+          "page": 2,
+          "candidate_count": 1,
+          "candidates": [
+            {
+              "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_轻蜓光电_20260729_215458/work/assets/page-02-image-002.png",
+              "bbox": [
+                523.99988,
+                6e-05,
+                959.99982,
+                540.0
+              ],
+              "coverage": 0.4542,
+              "width_ratio": 0.4542,
+              "height_ratio": 1.0
+            }
+          ],
+          "semantic_override_count": 0,
+          "status": "review-required"
+        },
+        {
+          "page": 3,
+          "candidate_count": 1,
+          "candidates": [
+            {
+              "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_轻蜓光电_20260729_215458/work/assets/page-03-image-000.png",
+              "bbox": [
+                22.50346,
+                262.75543,
+                512.7699,
+                493.62164
+              ],
+              "coverage": 0.2183,
+              "width_ratio": 0.5107,
+              "height_ratio": 0.4275
+            }
+          ],
+          "semantic_override_count": 0,
+          "status": "review-required"
+        },
+        {
+          "page": 4,
+          "candidate_count": 2,
+          "candidates": [
+            {
+              "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_轻蜓光电_20260729_215458/work/assets/page-04-image-000.png",
+              "bbox": [
+                401.88,
+                81.83997,
+                932.76001,
+                527.39996
+              ],
+              "coverage": 0.4563,
+              "width_ratio": 0.553,
+              "height_ratio": 0.8251
+            },
+            {
+              "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_轻蜓光电_20260729_215458/work/assets/page-04-image-015.png",
+              "bbox": [
+                26.32693,
+                260.43332,
+                381.72308,
+                515.86542
+              ],
+              "coverage": 0.1751,
+              "width_ratio": 0.3702,
+              "height_ratio": 0.473
+            }
+          ],
+          "semantic_override_count": 0,
+          "status": "review-required"
+        },
+        {
+          "page": 6,
+          "candidate_count": 1,
+          "candidates": [
+            {
+              "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_轻蜓光电_20260729_215458/work/assets/page-06-image-002.png",
+              "bbox": [
+                523.99988,
+                6e-05,
+                959.99982,
+                540.0
+              ],
+              "coverage": 0.4542,
+              "width_ratio": 0.4542,
+              "height_ratio": 1.0
+            }
+          ],
+          "semantic_override_count": 0,
+          "status": "review-required"
+        },
+        {
+          "page": 7,
+          "candidate_count": 1,
+          "candidates": [
+            {
+              "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_轻蜓光电_20260729_215458/work/assets/page-07-image-002.png",
+              "bbox": [
+                10.32,
+                77.88,
+                492.11996,
+                322.08002
+              ],
+              "coverage": 0.227,
+              "width_ratio": 0.5019,
+              "height_ratio": 0.4522
+            }
+          ],
+          "semantic_override_count": 0,
+          "status": "review-required"
+        },
+        {
+          "page": 9,
+          "candidate_count": 1,
+          "candidates": [
+            {
+              "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_轻蜓光电_20260729_215458/work/assets/page-09-image-002.png",
+              "bbox": [
+                523.99988,
+                6e-05,
+                959.99982,
+                540.0
+              ],
+              "coverage": 0.4542,
+              "width_ratio": 0.4542,
+              "height_ratio": 1.0
+            }
+          ],
+          "semantic_override_count": 0,
+          "status": "review-required"
+        },
+        {
+          "page": 10,
+          "candidate_count": 1,
+          "candidates": [
+            {
+              "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_轻蜓光电_20260729_215458/work/assets/page-10-image-004.png",
+              "bbox": [
+                28.2,
+                137.84998,
+                912.39984,
+                462.89685
+              ],
+              "coverage": 0.5544,
+              "width_ratio": 0.921,
+              "height_ratio": 0.6019
+            }
+          ],
+          "semantic_override_count": 0,
+          "status": "review-required"
+        },
+        {
+          "page": 11,
+          "candidate_count": 3,
+          "candidates": [
+            {
+              "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_轻蜓光电_20260729_215458/work/assets/page-11-image-002.png",
+              "bbox": [
+                515.12524,
+                79.03204,
+                872.52808,
+                320.05069
+              ],
+              "coverage": 0.1662,
+              "width_ratio": 0.3723,
+              "height_ratio": 0.4463
+            },
+            {
+              "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_轻蜓光电_20260729_215458/work/assets/page-11-image-029.png",
+              "bbox": [
+                24.26661,
+                68.46858,
+                577.31097,
+                227.30814
+              ],
+              "coverage": 0.1695,
+              "width_ratio": 0.5761,
+              "height_ratio": 0.2941
+            },
+            {
+              "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_轻蜓光电_20260729_215458/work/assets/page-11-image-034.png",
+              "bbox": [
+                31.24999,
+                370.6087,
+                306.51761,
+                525.68604
+              ],
+              "coverage": 0.0823,
+              "width_ratio": 0.2867,
+              "height_ratio": 0.2872
+            }
+          ],
+          "semantic_override_count": 0,
+          "status": "review-required"
+        },
+        {
+          "page": 12,
+          "candidate_count": 1,
+          "candidates": [
+            {
+              "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_轻蜓光电_20260729_215458/work/assets/page-12-image-028.png",
+              "bbox": [
+                14.24874,
+                73.30392,
+                592.39465,
+                162.67865
+              ],
+              "coverage": 0.0997,
+              "width_ratio": 0.6022,
+              "height_ratio": 0.1655
+            }
+          ],
+          "semantic_override_count": 0,
+          "status": "review-required"
+        },
+        {
+          "page": 14,
+          "candidate_count": 2,
+          "candidates": [
+            {
+              "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_轻蜓光电_20260729_215458/work/assets/page-14-image-025.png",
+              "bbox": [
+                18.06882,
+                77.31667,
+                573.14026,
+                215.36176
+              ],
+              "coverage": 0.1478,
+              "width_ratio": 0.5782,
+              "height_ratio": 0.2556
+            },
+            {
+              "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_轻蜓光电_20260729_215458/work/assets/page-14-image-027.png",
+              "bbox": [
+                96.05614,
+                363.99542,
+                470.65259,
+                530.90863
+              ],
+              "coverage": 0.1206,
+              "width_ratio": 0.3902,
+              "height_ratio": 0.3091
+            }
+          ],
+          "semantic_override_count": 0,
+          "status": "review-required"
+        },
+        {
+          "page": 15,
+          "candidate_count": 2,
+          "candidates": [
+            {
+              "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_轻蜓光电_20260729_215458/work/assets/page-15-image-004.png",
+              "bbox": [
+                0.0,
+                420.54999,
+                305.0,
+                511.34998
+              ],
+              "coverage": 0.0534,
+              "width_ratio": 0.3177,
+              "height_ratio": 0.1681
+            },
+            {
+              "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_轻蜓光电_20260729_215458/work/assets/page-15-image-005.png",
+              "bbox": [
+                308.24997,
+                85.54999,
+                663.34998,
+                509.84995
+              ],
+              "coverage": 0.2906,
+              "width_ratio": 0.3699,
+              "height_ratio": 0.7857
+            }
+          ],
+          "semantic_override_count": 0,
+          "status": "review-required"
+        },
+        {
+          "page": 16,
+          "candidate_count": 2,
+          "candidates": [
+            {
+              "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_轻蜓光电_20260729_215458/work/assets/page-16-image-022.png",
+              "bbox": [
+                546.0,
+                146.0,
+                910.0,
+                240.0
+              ],
+              "coverage": 0.066,
+              "width_ratio": 0.3792,
+              "height_ratio": 0.1741
+            },
+            {
+              "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_轻蜓光电_20260729_215458/work/assets/page-16-image-023.png",
+              "bbox": [
+                546.0,
+                146.0,
+                910.0,
+                240.0
+              ],
+              "coverage": 0.066,
+              "width_ratio": 0.3792,
+              "height_ratio": 0.1741
+            }
+          ],
+          "semantic_override_count": 0,
+          "status": "review-required"
+        },
+        {
+          "page": 19,
+          "candidate_count": 1,
+          "candidates": [
+            {
+              "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_轻蜓光电_20260729_215458/work/assets/page-19-image-004.png",
+              "bbox": [
+                285.9299,
+                299.17993,
+                949.1698,
+                520.21985
+              ],
+              "coverage": 0.2828,
+              "width_ratio": 0.6909,
+              "height_ratio": 0.4093
+            }
+          ],
+          "semantic_override_count": 0,
+          "status": "review-required"
+        },
+        {
+          "page": 20,
+          "candidate_count": 4,
+          "candidates": [
+            {
+              "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_轻蜓光电_20260729_215458/work/assets/page-20-image-000.png",
+              "bbox": [
+                46.43999,
+                90.96001,
+                471.35992,
+                289.32001
+              ],
+              "coverage": 0.1626,
+              "width_ratio": 0.4426,
+              "height_ratio": 0.3673
+            },
+            {
+              "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_轻蜓光电_20260729_215458/work/assets/page-20-image-002.png",
+              "bbox": [
+                505.31995,
+                90.96001,
+                930.23987,
+                289.32001
+              ],
+              "coverage": 0.1626,
+              "width_ratio": 0.4426,
+              "height_ratio": 0.3673
+            },
+            {
+              "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_轻蜓光电_20260729_215458/work/assets/page-20-image-004.png",
+              "bbox": [
+                46.44,
+                321.95999,
+                471.35995,
+                531.12
+              ],
+              "coverage": 0.1714,
+              "width_ratio": 0.4426,
+              "height_ratio": 0.3873
+            },
+            {
+              "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_轻蜓光电_20260729_215458/work/assets/page-20-image-006.png",
+              "bbox": [
+                505.31998,
+                321.95999,
+                930.23993,
+                531.12
+              ],
+              "coverage": 0.1714,
+              "width_ratio": 0.4426,
+              "height_ratio": 0.3873
+            }
+          ],
+          "semantic_override_count": 0,
+          "status": "review-required"
+        },
+        {
+          "page": 25,
+          "candidate_count": 1,
+          "candidates": [
+            {
+              "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_轻蜓光电_20260729_215458/work/assets/page-25-image-002.png",
+              "bbox": [
+                523.99988,
+                6e-05,
+                959.99982,
+                540.0
+              ],
+              "coverage": 0.4542,
+              "width_ratio": 0.4542,
+              "height_ratio": 1.0
+            }
+          ],
+          "semantic_override_count": 0,
+          "status": "review-required"
+        },
+        {
+          "page": 31,
+          "candidate_count": 1,
+          "candidates": [
+            {
+              "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_轻蜓光电_20260729_215458/work/assets/page-31-image-002.png",
+              "bbox": [
+                523.99988,
+                6e-05,
+                959.99982,
+                540.0
+              ],
+              "coverage": 0.4542,
+              "width_ratio": 0.4542,
+              "height_ratio": 1.0
+            }
+          ],
+          "semantic_override_count": 0,
+          "status": "review-required"
+        }
+      ]
+    }
+  },
+  "nonElementizedPages": [],
+  "readyForContentReplacement": true,
+  "notes": "PDF 为 object-rich 路线；文字、矢量、独立图片按 PDF 对象重建。大面积内嵌图片内部如含流程图/表格/图例，未做人工语义重建时可能仍为图片对象。",
+  "qa": {
+    "slidesTest": "passed",
+    "overflow": "none",
+    "pageCount": 37
+  }
+}

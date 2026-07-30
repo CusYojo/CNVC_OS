@@ -1,0 +1,1065 @@
+{
+  "schema": "openai.presentation.layout/v4",
+  "unit": "px",
+  "slide": {
+    "aid": "sl/s8pls7",
+    "id": "s8pls7",
+    "slide": 37,
+    "layoutId": "155a2937-4929-49cf-b778-9e4f529f0e17",
+    "layoutName": "Title Slide",
+    "layoutType": "title",
+    "masterLayoutId": "1a7a3226-3884-4085-ab85-2ca027e9ce9d",
+    "masterLayoutName": "Master",
+    "backgroundColor": "#FFFFFF",
+    "frame": {
+      "left": 0,
+      "top": 0,
+      "width": 1280,
+      "height": 720
+    }
+  },
+  "theme": {
+    "colorSchemeName": "ChatGPT",
+    "colors": {
+      "accent1": "#156082",
+      "accent2": "#E97132",
+      "accent3": "#196B24",
+      "accent4": "#0F9ED5",
+      "accent5": "#A02B93",
+      "accent6": "#4EA72E",
+      "bg1": "#FFFFFF",
+      "bg2": "#000000",
+      "tx1": "#1F1F1F",
+      "tx2": "#FFFFFF",
+      "dk1": "#000000",
+      "lt1": "#FFFFFF",
+      "dk2": "#0E2841",
+      "lt2": "#E8E8E8",
+      "hlink": "#467886",
+      "folHlink": "#96607D"
+    },
+    "typefaces": [
+      "Microsoft YaHei"
+    ]
+  },
+  "inheritedLayers": [
+    {
+      "scope": "layout",
+      "id": "155a2937-4929-49cf-b778-9e4f529f0e17",
+      "name": "Title Slide",
+      "type": "title",
+      "parentLayoutId": "1a7a3226-3884-4085-ab85-2ca027e9ce9d",
+      "elements": []
+    },
+    {
+      "scope": "master",
+      "id": "1a7a3226-3884-4085-ab85-2ca027e9ce9d",
+      "name": "Master",
+      "type": "master",
+      "elements": []
+    }
+  ],
+  "elements": [
+    {
+      "order": 1,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/xcf2xcz2",
+      "id": "1",
+      "name": "pdf-vector-0001",
+      "bbox": [
+        0,
+        0,
+        1280,
+        720
+      ],
+      "geometry": "rect",
+      "fillColor": "#FFFFFF",
+      "lineWidth": 0
+    },
+    {
+      "order": 2,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/ap4j2hgr",
+      "id": "2",
+      "name": "pdf-text-0002",
+      "bbox": [
+        124.67,
+        175.17,
+        1060.48,
+        18.4
+      ],
+      "geometry": "rect",
+      "text": "服务承诺免责：本演示文稿仅供一般参考之用，并不构成要约及其组成部分，亦不构成后续提供服务及业务合作的前提或基础。公司不代表任何可能涉及的其他机构",
+      "textPreview": "服务承诺免责：本演示文稿仅供一般参考之用，并不构成要约及其组成部分，亦不构成后续提供服务及业务合作的前提或基础。公司不代表任何可能涉及的其他机构",
+      "resolvedFontSize": 14.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 14.72,
+        "typeface": "Microsoft YaHei",
+        "color": "#000000",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "服务承诺免责：本演示文稿仅供一般参考之用，并不构成要约及其组成部分，亦不构成后续提供服务及业务合作的前提或基础。公司不代表任何可能涉及的其他机构"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "服务承诺免责：本演示文稿仅供一般参考之用，并不构成要约及其组成部分，亦不构成后续提供服务及业务合作的前提或基础。公司不代表任何可能涉及的其他机构",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 14.72,
+            "typeface": "Microsoft YaHei",
+            "color": "#000000",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "服务承诺免责：本演示文稿仅供一般参考之用，并不构成要约及其组成部分，亦不构成后续提供服务及业务合作的前提或基础。公司不代表任何可能涉及的其他机构",
+              "fontSize": 14.72,
+              "typeface": "Microsoft YaHei",
+              "color": "#000000",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 3,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/bqd0v2hc",
+      "id": "3",
+      "name": "pdf-text-0003",
+      "bbox": [
+        124.67,
+        192.77,
+        561.92,
+        18.4
+      ],
+      "geometry": "rect",
+      "text": "做出服务承诺，亦不对该等可能涉及的其他机构的资质、服务内容与质量等提供保证。",
+      "textPreview": "做出服务承诺，亦不对该等可能涉及的其他机构的资质、服务内容与质量等提供保证。",
+      "resolvedFontSize": 14.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 14.72,
+        "typeface": "Microsoft YaHei",
+        "color": "#000000",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "做出服务承诺，亦不对该等可能涉及的其他机构的资质、服务内容与质量等提供保证。"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "做出服务承诺，亦不对该等可能涉及的其他机构的资质、服务内容与质量等提供保证。",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 14.72,
+            "typeface": "Microsoft YaHei",
+            "color": "#000000",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "做出服务承诺，亦不对该等可能涉及的其他机构的资质、服务内容与质量等提供保证。",
+              "fontSize": 14.72,
+              "typeface": "Microsoft YaHei",
+              "color": "#000000",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 4,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/onm107yl",
+      "id": "4",
+      "name": "pdf-text-0004",
+      "bbox": [
+        124.67,
+        237.09,
+        1060.48,
+        18.4
+      ],
+      "geometry": "rect",
+      "text": "数据引用免责：本演示文稿中所载资料系由公司根据其认为可靠的来源而编写，其见解、分析、预测和推断都是基于该等来源所作的观点陈述。公司或任何个人不对",
+      "textPreview": "数据引用免责：本演示文稿中所载资料系由公司根据其认为可靠的来源而编写，其见解、分析、预测和推断都是基于该等来源所作的观点陈述。公司或任何个人不对",
+      "resolvedFontSize": 14.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 14.72,
+        "typeface": "Microsoft YaHei",
+        "color": "#000000",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "数据引用免责：本演示文稿中所载资料系由公司根据其认为可靠的来源而编写，其见解、分析、预测和推断都是基于该等来源所作的观点陈述。公司或任何个人不对"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "数据引用免责：本演示文稿中所载资料系由公司根据其认为可靠的来源而编写，其见解、分析、预测和推断都是基于该等来源所作的观点陈述。公司或任何个人不对",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 14.72,
+            "typeface": "Microsoft YaHei",
+            "color": "#000000",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "数据引用免责：本演示文稿中所载资料系由公司根据其认为可靠的来源而编写，其见解、分析、预测和推断都是基于该等来源所作的观点陈述。公司或任何个人不对",
+              "fontSize": 14.72,
+              "typeface": "Microsoft YaHei",
+              "color": "#000000",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 5,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/povitcz6",
+      "id": "5",
+      "name": "pdf-text-0005",
+      "bbox": [
+        124.67,
+        254.7,
+        195.2,
+        18.4
+      ],
+      "geometry": "rect",
+      "text": "其准确性和完整性做出保证。",
+      "textPreview": "其准确性和完整性做出保证。",
+      "resolvedFontSize": 14.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 14.72,
+        "typeface": "Microsoft YaHei",
+        "color": "#000000",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "其准确性和完整性做出保证。"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "其准确性和完整性做出保证。",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 14.72,
+            "typeface": "Microsoft YaHei",
+            "color": "#000000",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "其准确性和完整性做出保证。",
+              "fontSize": 14.72,
+              "typeface": "Microsoft YaHei",
+              "color": "#000000",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 6,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/2l4jyxgf",
+      "id": "6",
+      "name": "pdf-text-0006",
+      "bbox": [
+        124.67,
+        299.02,
+        928.48,
+        18.4
+      ],
+      "geometry": "rect",
+      "text": "时效性免责：本演示文稿中的观点为公司目前的判断，如有变更，不另行通知。公司不承担因使用本演示文稿而引致的直接或间接损失的责任。",
+      "textPreview": "时效性免责：本演示文稿中的观点为公司目前的判断，如有变更，不另行通知。公司不承担因使用本演示文稿而引致的直接或间接损失的责任。",
+      "resolvedFontSize": 14.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 14.72,
+        "typeface": "Microsoft YaHei",
+        "color": "#000000",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "时效性免责：本演示文稿中的观点为公司目前的判断，如有变更，不另行通知。公司不承担因使用本演示文稿而引致的直接或间接损失的责任。"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "时效性免责：本演示文稿中的观点为公司目前的判断，如有变更，不另行通知。公司不承担因使用本演示文稿而引致的直接或间接损失的责任。",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 14.72,
+            "typeface": "Microsoft YaHei",
+            "color": "#000000",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "时效性免责：本演示文稿中的观点为公司目前的判断，如有变更，不另行通知。公司不承担因使用本演示文稿而引致的直接或间接损失的责任。",
+              "fontSize": 14.72,
+              "typeface": "Microsoft YaHei",
+              "color": "#000000",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 7,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/nmd0r2h0",
+      "id": "7",
+      "name": "pdf-text-0007",
+      "bbox": [
+        124.67,
+        343.18,
+        987.2,
+        18.4
+      ],
+      "geometry": "rect",
+      "text": "利益冲突免责：公司及其关联机构可能会与本演示文稿中所提及的公司发生其他业务往来，使用者应当考虑到公司可能存在影响本演示文稿的利益冲突。",
+      "textPreview": "利益冲突免责：公司及其关联机构可能会与本演示文稿中所提及的公司发生其他业务往来，使用者应当考虑到公司可能存在影响本演示文稿的利益冲突。",
+      "resolvedFontSize": 14.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 14.72,
+        "typeface": "Microsoft YaHei",
+        "color": "#000000",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "利益冲突免责：公司及其关联机构可能会与本演示文稿中所提及的公司发生其他业务往来，使用者应当考虑到公司可能存在影响本演示文稿的利益冲突。"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "利益冲突免责：公司及其关联机构可能会与本演示文稿中所提及的公司发生其他业务往来，使用者应当考虑到公司可能存在影响本演示文稿的利益冲突。",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 14.72,
+            "typeface": "Microsoft YaHei",
+            "color": "#000000",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "利益冲突免责：公司及其关联机构可能会与本演示文稿中所提及的公司发生其他业务往来，使用者应当考虑到公司可能存在影响本演示文稿的利益冲突。",
+              "fontSize": 14.72,
+              "typeface": "Microsoft YaHei",
+              "color": "#000000",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 8,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/0jm1wnyp",
+      "id": "8",
+      "name": "pdf-text-0008",
+      "bbox": [
+        124.67,
+        387.5,
+        1060.48,
+        18.4
+      ],
+      "geometry": "rect",
+      "text": "投资风险免责：本演示文稿没有考虑任何个别主体的风险偏好、财务状况或特殊需求。在进行有关本演示文稿所指的任何交易前，接收方应考虑自身的风险偏好和财",
+      "textPreview": "投资风险免责：本演示文稿没有考虑任何个别主体的风险偏好、财务状况或特殊需求。在进行有关本演示文稿所指的任何交易前，接收方应考虑自身的风险偏好和财",
+      "resolvedFontSize": 14.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 14.72,
+        "typeface": "Microsoft YaHei",
+        "color": "#000000",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "投资风险免责：本演示文稿没有考虑任何个别主体的风险偏好、财务状况或特殊需求。在进行有关本演示文稿所指的任何交易前，接收方应考虑自身的风险偏好和财"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "投资风险免责：本演示文稿没有考虑任何个别主体的风险偏好、财务状况或特殊需求。在进行有关本演示文稿所指的任何交易前，接收方应考虑自身的风险偏好和财",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 14.72,
+            "typeface": "Microsoft YaHei",
+            "color": "#000000",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "投资风险免责：本演示文稿没有考虑任何个别主体的风险偏好、财务状况或特殊需求。在进行有关本演示文稿所指的任何交易前，接收方应考虑自身的风险偏好和财",
+              "fontSize": 14.72,
+              "typeface": "Microsoft YaHei",
+              "color": "#000000",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 9,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/1kvipszu",
+      "id": "9",
+      "name": "pdf-text-0009",
+      "bbox": [
+        124.67,
+        405.11,
+        796.48,
+        18.4
+      ],
+      "geometry": "rect",
+      "text": "务状况，自行审慎决定是否开展相关业务及投资，并自行承担投资风险，如有必要，应寻求专业的财务、税务或法律意见。",
+      "textPreview": "务状况，自行审慎决定是否开展相关业务及投资，并自行承担投资风险，如有必要，应寻求专业的财务、税务或法律意见。",
+      "resolvedFontSize": 14.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 14.72,
+        "typeface": "Microsoft YaHei",
+        "color": "#000000",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "务状况，自行审慎决定是否开展相关业务及投资，并自行承担投资风险，如有必要，应寻求专业的财务、税务或法律意见。"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "务状况，自行审慎决定是否开展相关业务及投资，并自行承担投资风险，如有必要，应寻求专业的财务、税务或法律意见。",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 14.72,
+            "typeface": "Microsoft YaHei",
+            "color": "#000000",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "务状况，自行审慎决定是否开展相关业务及投资，并自行承担投资风险，如有必要，应寻求专业的财务、税务或法律意见。",
+              "fontSize": 14.72,
+              "typeface": "Microsoft YaHei",
+              "color": "#000000",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 10,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/9cvid4j2",
+      "id": "10",
+      "name": "pdf-text-0010",
+      "bbox": [
+        124.67,
+        449.43,
+        811.2,
+        18.4
+      ],
+      "geometry": "rect",
+      "text": "损失免责：除法律法规规定必须承担的责任外，公司或任何个人不对本演示文稿及其内容所引发的直接或间接损失承担责任。",
+      "textPreview": "损失免责：除法律法规规定必须承担的责任外，公司或任何个人不对本演示文稿及其内容所引发的直接或间接损失承担责任。",
+      "resolvedFontSize": 14.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 14.72,
+        "typeface": "Microsoft YaHei",
+        "color": "#000000",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "损失免责：除法律法规规定必须承担的责任外，公司或任何个人不对本演示文稿及其内容所引发的直接或间接损失承担责任。"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "损失免责：除法律法规规定必须承担的责任外，公司或任何个人不对本演示文稿及其内容所引发的直接或间接损失承担责任。",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 14.72,
+            "typeface": "Microsoft YaHei",
+            "color": "#000000",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "损失免责：除法律法规规定必须承担的责任外，公司或任何个人不对本演示文稿及其内容所引发的直接或间接损失承担责任。",
+              "fontSize": 14.72,
+              "typeface": "Microsoft YaHei",
+              "color": "#000000",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 11,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/8bm14zih",
+      "id": "11",
+      "name": "pdf-text-0011",
+      "bbox": [
+        124.67,
+        493.59,
+        1074.56,
+        18.4
+      ],
+      "geometry": "rect",
+      "text": "投资风险揭示：本演示文稿所指的投资存在风险，可能不适合所有投资者。本演示文稿所指的任何投资价值或接收方可从中获得的收入可能会受市场因素、政策变化、",
+      "textPreview": "投资风险揭示：本演示文稿所指的投资存在风险，可能不适合所有投资者。本演示文稿所指的任何投资价值或接收方可从中获得的收入可能会受市场因素、政策变化、",
+      "resolvedFontSize": 14.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 14.72,
+        "typeface": "Microsoft YaHei",
+        "color": "#000000",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "投资风险揭示：本演示文稿所指的投资存在风险，可能不适合所有投资者。本演示文稿所指的任何投资价值或接收方可从中获得的收入可能会受市场因素、政策变化、"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "投资风险揭示：本演示文稿所指的投资存在风险，可能不适合所有投资者。本演示文稿所指的任何投资价值或接收方可从中获得的收入可能会受市场因素、政策变化、",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 14.72,
+            "typeface": "Microsoft YaHei",
+            "color": "#000000",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "投资风险揭示：本演示文稿所指的投资存在风险，可能不适合所有投资者。本演示文稿所指的任何投资价值或接收方可从中获得的收入可能会受市场因素、政策变化、",
+              "fontSize": 14.72,
+              "typeface": "Microsoft YaHei",
+              "color": "#000000",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 12,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/7at0bu1w",
+      "id": "12",
+      "name": "pdf-text-0012",
+      "bbox": [
+        124.67,
+        511.2,
+        356.48,
+        18.4
+      ],
+      "geometry": "rect",
+      "text": "汇率等影响而波动。过去的表现不能代表未来的业绩。",
+      "textPreview": "汇率等影响而波动。过去的表现不能代表未来的业绩。",
+      "resolvedFontSize": 14.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 14.72,
+        "typeface": "Microsoft YaHei",
+        "color": "#000000",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "汇率等影响而波动。过去的表现不能代表未来的业绩。"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "汇率等影响而波动。过去的表现不能代表未来的业绩。",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 14.72,
+            "typeface": "Microsoft YaHei",
+            "color": "#000000",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "汇率等影响而波动。过去的表现不能代表未来的业绩。",
+              "fontSize": 14.72,
+              "typeface": "Microsoft YaHei",
+              "color": "#000000",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 13,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/m9kj2p0b",
+      "id": "13",
+      "name": "pdf-text-0013",
+      "bbox": [
+        124.67,
+        555.52,
+        1060.48,
+        18.4
+      ],
+      "geometry": "rect",
+      "text": "商业秘密声明：本演示文稿属于公司商业秘密，接收方应对其内容予以保密，未经公司允许，本演示文稿不应被用于本次阅读以外之用途及复制、发出或发表及传播",
+      "textPreview": "商业秘密声明：本演示文稿属于公司商业秘密，接收方应对其内容予以保密，未经公司允许，本演示文稿不应被用于本次阅读以外之用途及复制、发出或发表及传播",
+      "resolvedFontSize": 14.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 14.72,
+        "typeface": "Microsoft YaHei",
+        "color": "#000000",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "商业秘密声明：本演示文稿属于公司商业秘密，接收方应对其内容予以保密，未经公司允许，本演示文稿不应被用于本次阅读以外之用途及复制、发出或发表及传播"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "商业秘密声明：本演示文稿属于公司商业秘密，接收方应对其内容予以保密，未经公司允许，本演示文稿不应被用于本次阅读以外之用途及复制、发出或发表及传播",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 14.72,
+            "typeface": "Microsoft YaHei",
+            "color": "#000000",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "商业秘密声明：本演示文稿属于公司商业秘密，接收方应对其内容予以保密，未经公司允许，本演示文稿不应被用于本次阅读以外之用途及复制、发出或发表及传播",
+              "fontSize": 14.72,
+              "typeface": "Microsoft YaHei",
+              "color": "#000000",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 14,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/l8bi9kjq",
+      "id": "14",
+      "name": "pdf-text-0014",
+      "bbox": [
+        124.67,
+        573.12,
+        268.48,
+        18.4
+      ],
+      "geometry": "rect",
+      "text": "等。公司保留对本演示文稿的一切权利。",
+      "textPreview": "等。公司保留对本演示文稿的一切权利。",
+      "resolvedFontSize": 14.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 14.72,
+        "typeface": "Microsoft YaHei",
+        "color": "#000000",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "等。公司保留对本演示文稿的一切权利。"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "等。公司保留对本演示文稿的一切权利。",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 14.72,
+            "typeface": "Microsoft YaHei",
+            "color": "#000000",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "等。公司保留对本演示文稿的一切权利。",
+              "fontSize": 14.72,
+              "typeface": "Microsoft YaHei",
+              "color": "#000000",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 15,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/k7210fi5",
+      "id": "15",
+      "name": "pdf-text-0015",
+      "bbox": [
+        86.81,
+        106.83,
+        110.88,
+        33.4
+      ],
+      "geometry": "rect",
+      "text": "免责声明",
+      "textPreview": "免责声明",
+      "resolvedFontSize": 26.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 26.72,
+        "typeface": "Microsoft YaHei",
+        "color": "#3A3838",
+        "bold": true,
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "免责声明"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "免责声明",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 26.72,
+            "typeface": "Microsoft YaHei",
+            "color": "#3A3838",
+            "bold": true,
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "免责声明",
+              "fontSize": 26.72,
+              "typeface": "Microsoft YaHei",
+              "color": "#3A3838",
+              "bold": true,
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    }
+  ],
+  "composeRuns": []
+}

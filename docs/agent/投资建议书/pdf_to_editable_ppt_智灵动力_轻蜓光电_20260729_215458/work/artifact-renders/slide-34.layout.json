@@ -1,0 +1,4728 @@
+{
+  "schema": "openai.presentation.layout/v4",
+  "unit": "px",
+  "slide": {
+    "aid": "sl/ul3wrg",
+    "id": "ul3wrg",
+    "slide": 34,
+    "layoutId": "155a2937-4929-49cf-b778-9e4f529f0e17",
+    "layoutName": "Title Slide",
+    "layoutType": "title",
+    "masterLayoutId": "1a7a3226-3884-4085-ab85-2ca027e9ce9d",
+    "masterLayoutName": "Master",
+    "backgroundColor": "#FFFFFF",
+    "frame": {
+      "left": 0,
+      "top": 0,
+      "width": 1280,
+      "height": 720
+    }
+  },
+  "theme": {
+    "colorSchemeName": "ChatGPT",
+    "colors": {
+      "accent1": "#156082",
+      "accent2": "#E97132",
+      "accent3": "#196B24",
+      "accent4": "#0F9ED5",
+      "accent5": "#A02B93",
+      "accent6": "#4EA72E",
+      "bg1": "#FFFFFF",
+      "bg2": "#000000",
+      "tx1": "#1F1F1F",
+      "tx2": "#FFFFFF",
+      "dk1": "#000000",
+      "lt1": "#FFFFFF",
+      "dk2": "#0E2841",
+      "lt2": "#E8E8E8",
+      "hlink": "#467886",
+      "folHlink": "#96607D"
+    },
+    "typefaces": [
+      "Arial",
+      "KaiTi"
+    ]
+  },
+  "inheritedLayers": [
+    {
+      "scope": "layout",
+      "id": "155a2937-4929-49cf-b778-9e4f529f0e17",
+      "name": "Title Slide",
+      "type": "title",
+      "parentLayoutId": "1a7a3226-3884-4085-ab85-2ca027e9ce9d",
+      "elements": []
+    },
+    {
+      "scope": "master",
+      "id": "1a7a3226-3884-4085-ab85-2ca027e9ce9d",
+      "name": "Master",
+      "type": "master",
+      "elements": []
+    }
+  ],
+  "elements": [
+    {
+      "order": 1,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/i1wji547",
+      "id": "1",
+      "name": "pdf-vector-0001",
+      "bbox": [
+        0,
+        0,
+        1280,
+        720
+      ],
+      "geometry": "rect",
+      "fillColor": "#FFFFFF",
+      "lineWidth": 0
+    },
+    {
+      "order": 2,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/knm9ofu1",
+      "id": "2",
+      "bbox": [
+        110.67,
+        128,
+        186.67,
+        36
+      ],
+      "alt": "PDF 图片 2",
+      "contentType": "image/png",
+      "imageFit": "cover",
+      "asset": {
+        "assetId": "5a892280-63ce-4438-b299-a55797c4ad08",
+        "contentType": "image/png",
+        "byteLength": 795
+      }
+    },
+    {
+      "order": 3,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/lofaxkb6",
+      "id": "3",
+      "bbox": [
+        406.67,
+        129.33,
+        186.67,
+        34.67
+      ],
+      "alt": "PDF 图片 3",
+      "contentType": "image/png",
+      "imageFit": "cover",
+      "asset": {
+        "assetId": "3118b053-f7ef-4a9e-887d-9dbafb96b978",
+        "contentType": "image/png",
+        "byteLength": 831
+      }
+    },
+    {
+      "order": 4,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/ax4ri5cj",
+      "id": "4",
+      "bbox": [
+        700,
+        129.33,
+        186.67,
+        34.67
+      ],
+      "alt": "PDF 图片 4",
+      "contentType": "image/png",
+      "imageFit": "cover",
+      "asset": {
+        "assetId": "97bb8fc4-f39f-47f3-80d5-777f5fab427f",
+        "contentType": "image/png",
+        "byteLength": 782
+      }
+    },
+    {
+      "order": 5,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/byd8rat4",
+      "id": "5",
+      "bbox": [
+        981.33,
+        129.33,
+        200,
+        34.67
+      ],
+      "alt": "PDF 图片 5",
+      "contentType": "image/png",
+      "imageFit": "cover",
+      "asset": {
+        "assetId": "93c75680-fdd9-4a24-b001-4aa6ee708fa9",
+        "contentType": "image/png",
+        "byteLength": 816
+      }
+    },
+    {
+      "order": 6,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/h0n2p03m",
+      "id": "6",
+      "name": "pdf-vector-0006",
+      "bbox": [
+        29.6,
+        15.93,
+        15.21,
+        30.27
+      ],
+      "geometry": "rect",
+      "fillColor": "#1382BA",
+      "lineWidth": 0
+    },
+    {
+      "order": 7,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/wze1gvm1",
+      "id": "7",
+      "name": "pdf-vector-0007",
+      "bbox": [
+        29.6,
+        48.53,
+        15.21,
+        30.27
+      ],
+      "geometry": "rect",
+      "fillColor": "rgba(29, 175, 213, 0.7)",
+      "lineWidth": 0
+    },
+    {
+      "order": 8,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/fupkzulk",
+      "id": "8",
+      "name": "pdf-text-0008",
+      "bbox": [
+        67.13,
+        37.01,
+        647.2,
+        40
+      ],
+      "geometry": "rect",
+      "text": "项目亮点：收入基本盘稳固，AI算力市场爆发",
+      "textPreview": "项目亮点：收入基本盘稳固，AI算力市场爆发",
+      "resolvedFontSize": 32,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 32,
+        "typeface": "KaiTi",
+        "color": "#212121",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "项目亮点：收入基本盘稳固，AI算力市场爆发"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "项目亮点：收入基本盘稳固，AI算力市场爆发",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 32,
+            "typeface": "KaiTi",
+            "color": "#212121",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "项目亮点：收入基本盘稳固，AI算力市场爆发",
+              "fontSize": 32,
+              "typeface": "KaiTi",
+              "color": "#212121",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 9,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/nut8nqt8",
+      "id": "9",
+      "bbox": [
+        1154.33,
+        0.93,
+        120.8,
+        46.8
+      ],
+      "alt": "PDF 图片 9",
+      "contentType": "image/png",
+      "imageFit": "cover",
+      "asset": {
+        "assetId": "a776fe3b-c06c-49df-9fbd-0fad1d15dd63",
+        "contentType": "image/png",
+        "byteLength": 11164
+      }
+    },
+    {
+      "order": 10,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/vix0nyx4",
+      "id": "10",
+      "bbox": [
+        54.72,
+        135.2,
+        299.04,
+        545.28
+      ],
+      "alt": "PDF 图片 10",
+      "contentType": "image/png",
+      "imageFit": "cover",
+      "asset": {
+        "assetId": "d3a473c7-6d0e-4eeb-ab0e-f4ae6f9cfabe",
+        "contentType": "image/png",
+        "byteLength": 11275
+      }
+    },
+    {
+      "order": 11,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/ahozetwj",
+      "id": "11",
+      "bbox": [
+        64.67,
+        145.07,
+        279.13,
+        525.6
+      ],
+      "alt": "PDF 矢量元素 11",
+      "contentType": "image/svg+xml",
+      "imageFit": "contain",
+      "asset": {
+        "assetId": "67134f16-37be-4247-9492-5ee9166f13bf",
+        "contentType": "image/svg+xml",
+        "byteLength": 564
+      }
+    },
+    {
+      "order": 12,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/2pwnuxsn",
+      "id": "12",
+      "name": "pdf-text-0012",
+      "bbox": [
+        146.64,
+        184.58,
+        116.16,
+        23.4
+      ],
+      "geometry": "rect",
+      "text": "市场卡位精准",
+      "textPreview": "市场卡位精准",
+      "resolvedFontSize": 18.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.72,
+        "typeface": "KaiTi",
+        "color": "#0D64A6",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "市场卡位精准"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "市场卡位精准",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 18.72,
+            "typeface": "KaiTi",
+            "color": "#0D64A6",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "市场卡位精准",
+              "fontSize": 18.72,
+              "typeface": "KaiTi",
+              "color": "#0D64A6",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 13,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/nq543298",
+      "id": "13",
+      "name": "pdf-text-0013",
+      "bbox": [
+        137.2,
+        214.98,
+        134.88,
+        23.4
+      ],
+      "geometry": "rect",
+      "text": "乘多重行业东风",
+      "textPreview": "乘多重行业东风",
+      "resolvedFontSize": 18.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.72,
+        "typeface": "KaiTi",
+        "color": "#0D64A6",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "乘多重行业东风"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "乘多重行业东风",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 18.72,
+            "typeface": "KaiTi",
+            "color": "#0D64A6",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "乘多重行业东风",
+              "fontSize": 18.72,
+              "typeface": "KaiTi",
+              "color": "#0D64A6",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 14,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/0ne5snah",
+      "id": "14",
+      "name": "pdf-vector-0014",
+      "bbox": [
+        98.42,
+        241.77,
+        211.65,
+        3.02
+      ],
+      "geometry": "rect",
+      "fillColor": "#2E75B6",
+      "lineWidth": 0
+    },
+    {
+      "order": 15,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/1onm1sr2",
+      "id": "15",
+      "name": "pdf-text-0015",
+      "bbox": [
+        92.1,
+        269.31,
+        10.05,
+        21.6
+      ],
+      "geometry": "rect",
+      "text": "•",
+      "textPreview": "•",
+      "resolvedFontSize": 17.28,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 17.28,
+        "typeface": "Arial",
+        "color": "#3E3E3E",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "•"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "•",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 17.28,
+            "typeface": "Arial",
+            "color": "#3E3E3E",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "•",
+              "fontSize": 17.28,
+              "typeface": "Arial",
+              "color": "#3E3E3E",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 16,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/e1wnqxsb",
+      "id": "16",
+      "name": "pdf-text-0016",
+      "bbox": [
+        122.18,
+        268.25,
+        194.85,
+        21.6
+      ],
+      "geometry": "rect",
+      "text": "国内量检测设备市场超",
+      "textPreview": "国内量检测设备市场超",
+      "resolvedFontSize": 17.28,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 17.28,
+        "typeface": "KaiTi",
+        "color": "#3E3E3E",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "国内量检测设备市场超"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "国内量检测设备市场超",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 17.28,
+            "typeface": "KaiTi",
+            "color": "#3E3E3E",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "国内量检测设备市场超",
+              "fontSize": 17.28,
+              "typeface": "KaiTi",
+              "color": "#3E3E3E",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 17,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/fm54zi9w",
+      "id": "17",
+      "name": "pdf-text-0017",
+      "bbox": [
+        122.18,
+        295.29,
+        194.87,
+        21.6
+      ],
+      "geometry": "rect",
+      "text": "400亿元，年增超15%，但",
+      "textPreview": "400亿元，年增超15%，但",
+      "resolvedFontSize": 17.28,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 17.28,
+        "typeface": "KaiTi",
+        "color": "#3E3E3E",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "400亿元，年增超15%，但"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "400亿元，年增超15%，但",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 17.28,
+            "typeface": "KaiTi",
+            "color": "#3E3E3E",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "400亿元，年增超15%，但",
+              "fontSize": 17.28,
+              "typeface": "KaiTi",
+              "color": "#3E3E3E",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 18,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/szu5onal",
+      "id": "18",
+      "name": "pdf-text-0018",
+      "bbox": [
+        122.18,
+        322.33,
+        194.89,
+        21.6
+      ],
+      "geometry": "rect",
+      "text": "国产化率不足10%，替代",
+      "textPreview": "国产化率不足10%，替代",
+      "resolvedFontSize": 17.28,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 17.28,
+        "typeface": "KaiTi",
+        "color": "#3E3E3E",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "国产化率不足10%，替代"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "国产化率不足10%，替代",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 17.28,
+            "typeface": "KaiTi",
+            "color": "#3E3E3E",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "国产化率不足10%，替代",
+              "fontSize": 17.28,
+              "typeface": "KaiTi",
+              "color": "#3E3E3E",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 19,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/d03mxsrq",
+      "id": "19",
+      "name": "pdf-text-0019",
+      "bbox": [
+        122.18,
+        349.38,
+        90.56,
+        21.6
+      ],
+      "geometry": "rect",
+      "text": "空间巨大。",
+      "textPreview": "空间巨大。",
+      "resolvedFontSize": 17.28,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 17.28,
+        "typeface": "KaiTi",
+        "color": "#3E3E3E",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "空间巨大。"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "空间巨大。",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 17.28,
+            "typeface": "KaiTi",
+            "color": "#3E3E3E",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "空间巨大。",
+              "fontSize": 17.28,
+              "typeface": "KaiTi",
+              "color": "#3E3E3E",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 20,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/t4vu5kzi",
+      "id": "20",
+      "name": "pdf-text-0020",
+      "bbox": [
+        92.09,
+        382.76,
+        10.05,
+        21.6
+      ],
+      "geometry": "rect",
+      "text": "•",
+      "textPreview": "•",
+      "resolvedFontSize": 17.28,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 17.28,
+        "typeface": "Arial",
+        "color": "#3E3E3E",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "•"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "•",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 17.28,
+            "typeface": "Arial",
+            "color": "#3E3E3E",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "•",
+              "fontSize": 17.28,
+              "typeface": "Arial",
+              "color": "#3E3E3E",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 21,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/8jmtcfyx",
+      "id": "21",
+      "name": "pdf-text-0021",
+      "bbox": [
+        122.18,
+        381.69,
+        194.86,
+        21.6
+      ],
+      "geometry": "rect",
+      "text": "AI芯片驱动先进封装和光",
+      "textPreview": "AI芯片驱动先进封装和光",
+      "resolvedFontSize": 17.28,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 17.28,
+        "typeface": "KaiTi",
+        "color": "#3E3E3E",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "AI芯片驱动先进封装和光"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "AI芯片驱动先进封装和光",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 17.28,
+            "typeface": "KaiTi",
+            "color": "#3E3E3E",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "AI芯片驱动先进封装和光",
+              "fontSize": 17.28,
+              "typeface": "KaiTi",
+              "color": "#3E3E3E",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 22,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/7itc3ahc",
+      "id": "22",
+      "name": "pdf-text-0022",
+      "bbox": [
+        122.18,
+        408.73,
+        194.87,
+        21.6
+      ],
+      "geometry": "rect",
+      "text": "模块产能急剧扩张，带来",
+      "textPreview": "模块产能急剧扩张，带来",
+      "resolvedFontSize": 17.28,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 17.28,
+        "typeface": "KaiTi",
+        "color": "#3E3E3E",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "模块产能急剧扩张，带来"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "模块产能急剧扩张，带来",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 17.28,
+            "typeface": "KaiTi",
+            "color": "#3E3E3E",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "模块产能急剧扩张，带来",
+              "fontSize": 17.28,
+              "typeface": "KaiTi",
+              "color": "#3E3E3E",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 23,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/6hkba5gr",
+      "id": "23",
+      "name": "pdf-text-0023",
+      "bbox": [
+        122.18,
+        435.77,
+        159.84,
+        21.6
+      ],
+      "geometry": "rect",
+      "text": "量检测需求的增速。",
+      "textPreview": "量检测需求的增速。",
+      "resolvedFontSize": 17.28,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 17.28,
+        "typeface": "KaiTi",
+        "color": "#3E3E3E",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "量检测需求的增速。"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "量检测需求的增速。",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 17.28,
+            "typeface": "KaiTi",
+            "color": "#3E3E3E",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "量检测需求的增速。",
+              "fontSize": 17.28,
+              "typeface": "KaiTi",
+              "color": "#3E3E3E",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 24,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/lgbu10zm",
+      "id": "24",
+      "name": "pdf-text-0024",
+      "bbox": [
+        92.09,
+        469.15,
+        10.05,
+        21.6
+      ],
+      "geometry": "rect",
+      "text": "•",
+      "textPreview": "•",
+      "resolvedFontSize": 17.28,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 17.28,
+        "typeface": "Arial",
+        "color": "#3E3E3E",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "•"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "•",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 17.28,
+            "typeface": "Arial",
+            "color": "#3E3E3E",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "•",
+              "fontSize": 17.28,
+              "typeface": "Arial",
+              "color": "#3E3E3E",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 25,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/kf2t8fy1",
+      "id": "25",
+      "name": "pdf-text-0025",
+      "bbox": [
+        122.18,
+        468.09,
+        194.88,
+        21.6
+      ],
+      "geometry": "rect",
+      "text": "光模块行业量检测皆为人",
+      "textPreview": "光模块行业量检测皆为人",
+      "resolvedFontSize": 17.28,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 17.28,
+        "typeface": "KaiTi",
+        "color": "#3E3E3E",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "光模块行业量检测皆为人"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "光模块行业量检测皆为人",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 17.28,
+            "typeface": "KaiTi",
+            "color": "#3E3E3E",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "光模块行业量检测皆为人",
+              "fontSize": 17.28,
+              "typeface": "KaiTi",
+              "color": "#3E3E3E",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 26,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/jetczahg",
+      "id": "26",
+      "name": "pdf-text-0026",
+      "bbox": [
+        122.18,
+        495.13,
+        194.89,
+        21.6
+      ],
+      "geometry": "rect",
+      "text": "工目检，市场空白带来大",
+      "textPreview": "工目检，市场空白带来大",
+      "resolvedFontSize": 17.28,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 17.28,
+        "typeface": "KaiTi",
+        "color": "#3E3E3E",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "工目检，市场空白带来大"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "工目检，市场空白带来大",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 17.28,
+            "typeface": "KaiTi",
+            "color": "#3E3E3E",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "工目检，市场空白带来大",
+              "fontSize": 17.28,
+              "typeface": "KaiTi",
+              "color": "#3E3E3E",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 27,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/ydkb65gv",
+      "id": "27",
+      "name": "pdf-text-0027",
+      "bbox": [
+        122.18,
+        522.17,
+        194.88,
+        21.6
+      ],
+      "geometry": "rect",
+      "text": "量设备导入机会；国内先",
+      "textPreview": "量设备导入机会；国内先",
+      "resolvedFontSize": 17.28,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 17.28,
+        "typeface": "KaiTi",
+        "color": "#3E3E3E",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "量设备导入机会；国内先"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "量设备导入机会；国内先",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 17.28,
+            "typeface": "KaiTi",
+            "color": "#3E3E3E",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "量设备导入机会；国内先",
+              "fontSize": 17.28,
+              "typeface": "KaiTi",
+              "color": "#3E3E3E",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 28,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/5cfud4fq",
+      "id": "28",
+      "name": "pdf-text-0028",
+      "bbox": [
+        122.18,
+        549.22,
+        194.88,
+        21.6
+      ],
+      "geometry": "rect",
+      "text": "进封装产线正积极建线拉",
+      "textPreview": "进封装产线正积极建线拉",
+      "resolvedFontSize": 17.28,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 17.28,
+        "typeface": "KaiTi",
+        "color": "#3E3E3E",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "进封装产线正积极建线拉"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "进封装产线正积极建线拉",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 17.28,
+            "typeface": "KaiTi",
+            "color": "#3E3E3E",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "进封装产线正积极建线拉",
+              "fontSize": 17.28,
+              "typeface": "KaiTi",
+              "color": "#3E3E3E",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 29,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/4b6tkzy5",
+      "id": "29",
+      "name": "pdf-text-0029",
+      "bbox": [
+        122.18,
+        576.26,
+        194.87,
+        21.6
+      ],
+      "geometry": "rect",
+      "text": "通，公司产品已进入客户",
+      "textPreview": "通，公司产品已进入客户",
+      "resolvedFontSize": 17.28,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 17.28,
+        "typeface": "KaiTi",
+        "color": "#3E3E3E",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "通，公司产品已进入客户"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "通，公司产品已进入客户",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 17.28,
+            "typeface": "KaiTi",
+            "color": "#3E3E3E",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "通，公司产品已进入客户",
+              "fontSize": 17.28,
+              "typeface": "KaiTi",
+              "color": "#3E3E3E",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 30,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/2hgry1wn",
+      "id": "30",
+      "name": "pdf-text-0030",
+      "bbox": [
+        122.18,
+        603.3,
+        55.84,
+        21.6
+      ],
+      "geometry": "rect",
+      "text": "验证。",
+      "textPreview": "验证。",
+      "resolvedFontSize": 17.28,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 17.28,
+        "typeface": "KaiTi",
+        "color": "#3E3E3E",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "验证。"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "验证。",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 17.28,
+            "typeface": "KaiTi",
+            "color": "#3E3E3E",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "验证。",
+              "fontSize": 17.28,
+              "typeface": "KaiTi",
+              "color": "#3E3E3E",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 31,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/o7y5svi9",
+      "id": "31",
+      "bbox": [
+        350.4,
+        135.2,
+        298.88,
+        545.28
+      ],
+      "alt": "PDF 图片 31",
+      "contentType": "image/png",
+      "imageFit": "cover",
+      "asset": {
+        "assetId": "11da8b92-574c-4eab-a69a-3e082e72909c",
+        "contentType": "image/png",
+        "byteLength": 11282
+      }
+    },
+    {
+      "order": 32,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/n6pojq14",
+      "id": "32",
+      "bbox": [
+        360.33,
+        145.07,
+        279.13,
+        525.6
+      ],
+      "alt": "PDF 矢量元素 32",
+      "contentType": "image/svg+xml",
+      "imageFit": "contain",
+      "asset": {
+        "assetId": "db0a8153-48cb-4794-94c2-4f7fd2243efa",
+        "contentType": "image/svg+xml",
+        "byteLength": 580
+      }
+    },
+    {
+      "order": 33,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/9krq9wfe",
+      "id": "33",
+      "name": "pdf-text-0033",
+      "bbox": [
+        442.51,
+        184.58,
+        116.16,
+        23.4
+      ],
+      "geometry": "rect",
+      "text": "技术壁垒深厚",
+      "textPreview": "技术壁垒深厚",
+      "resolvedFontSize": 18.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.72,
+        "typeface": "KaiTi",
+        "color": "#0D64A6",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "技术壁垒深厚"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "技术壁垒深厚",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 18.72,
+            "typeface": "KaiTi",
+            "color": "#0D64A6",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "技术壁垒深厚",
+              "fontSize": 18.72,
+              "typeface": "KaiTi",
+              "color": "#0D64A6",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 34,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/etgruhwb",
+      "id": "34",
+      "name": "pdf-text-0034",
+      "bbox": [
+        442.51,
+        214.98,
+        116.16,
+        23.4
+      ],
+      "geometry": "rect",
+      "text": "性能国际领先",
+      "textPreview": "性能国际领先",
+      "resolvedFontSize": 18.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.72,
+        "typeface": "KaiTi",
+        "color": "#0D64A6",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "性能国际领先"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "性能国际领先",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 18.72,
+            "typeface": "KaiTi",
+            "color": "#0D64A6",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "性能国际领先",
+              "fontSize": 18.72,
+              "typeface": "KaiTi",
+              "color": "#0D64A6",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 35,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/fep83mxw",
+      "id": "35",
+      "name": "pdf-vector-0035",
+      "bbox": [
+        394.08,
+        241.77,
+        211.65,
+        3.02
+      ],
+      "geometry": "rect",
+      "fillColor": "#2E75B6",
+      "lineWidth": 0
+    },
+    {
+      "order": 36,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/0fy9wreh",
+      "id": "36",
+      "name": "pdf-text-0036",
+      "bbox": [
+        389.06,
+        268.5,
+        10.05,
+        21.6
+      ],
+      "geometry": "rect",
+      "text": "•",
+      "textPreview": "•",
+      "resolvedFontSize": 17.28,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 17.28,
+        "typeface": "Arial",
+        "color": "#3E3E3E",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "•"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "•",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 17.28,
+            "typeface": "Arial",
+            "color": "#3E3E3E",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "•",
+              "fontSize": 17.28,
+              "typeface": "Arial",
+              "color": "#3E3E3E",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 37,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/1g7q5wf2",
+      "id": "37",
+      "name": "pdf-text-0037",
+      "bbox": [
+        419.14,
+        267.44,
+        192.82,
+        21.6
+      ],
+      "geometry": "rect",
+      "text": "半导体工艺进步驱动检",
+      "textPreview": "半导体工艺进步驱动检",
+      "resolvedFontSize": 17.28,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 17.28,
+        "typeface": "KaiTi",
+        "color": "#3E3E3E",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "半导体工艺进步驱动检"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "半导体工艺进步驱动检",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 17.28,
+            "typeface": "KaiTi",
+            "color": "#3E3E3E",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "半导体工艺进步驱动检",
+              "fontSize": 17.28,
+              "typeface": "KaiTi",
+              "color": "#3E3E3E",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 38,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/yp0r6lwv",
+      "id": "38",
+      "name": "pdf-text-0038",
+      "bbox": [
+        419.14,
+        294.48,
+        192.81,
+        21.6
+      ],
+      "geometry": "rect",
+      "text": "测从2D向3D升级，公司",
+      "textPreview": "测从2D向3D升级，公司",
+      "resolvedFontSize": 17.28,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 17.28,
+        "typeface": "KaiTi",
+        "color": "#3E3E3E",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "测从2D向3D升级，公司"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "测从2D向3D升级，公司",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 17.28,
+            "typeface": "KaiTi",
+            "color": "#3E3E3E",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "测从2D向3D升级，公司",
+              "fontSize": 17.28,
+              "typeface": "KaiTi",
+              "color": "#3E3E3E",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 39,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/ja9sfqdg",
+      "id": "39",
+      "name": "pdf-text-0039",
+      "bbox": [
+        419.16,
+        321.53,
+        192.8,
+        21.6
+      ],
+      "geometry": "rect",
+      "text": "全自研3D成像体系，技",
+      "textPreview": "全自研3D成像体系，技",
+      "resolvedFontSize": 17.28,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 17.28,
+        "typeface": "KaiTi",
+        "color": "#3E3E3E",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "全自研3D成像体系，技"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "全自研3D成像体系，技",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 17.28,
+            "typeface": "KaiTi",
+            "color": "#3E3E3E",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "全自研3D成像体系，技",
+              "fontSize": 17.28,
+              "typeface": "KaiTi",
+              "color": "#3E3E3E",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 40,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/j2p4bihw",
+      "id": "40",
+      "name": "pdf-text-0040",
+      "bbox": [
+        419.16,
+        348.57,
+        107.84,
+        21.6
+      ],
+      "geometry": "rect",
+      "text": "术护城河深。",
+      "textPreview": "术护城河深。",
+      "resolvedFontSize": 17.28,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 17.28,
+        "typeface": "KaiTi",
+        "color": "#3E3E3E",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "术护城河深。"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "术护城河深。",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 17.28,
+            "typeface": "KaiTi",
+            "color": "#3E3E3E",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "术护城河深。",
+              "fontSize": 17.28,
+              "typeface": "KaiTi",
+              "color": "#3E3E3E",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 41,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/i1gn2d0b",
+      "id": "41",
+      "name": "pdf-text-0041",
+      "bbox": [
+        389.05,
+        381.95,
+        10.05,
+        21.6
+      ],
+      "geometry": "rect",
+      "text": "•",
+      "textPreview": "•",
+      "resolvedFontSize": 17.28,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 17.28,
+        "typeface": "Arial",
+        "color": "#3E3E3E",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "•"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "•",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 17.28,
+            "typeface": "Arial",
+            "color": "#3E3E3E",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "•",
+              "fontSize": 17.28,
+              "typeface": "Arial",
+              "color": "#3E3E3E",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 42,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/547mdszm",
+      "id": "42",
+      "name": "pdf-text-0042",
+      "bbox": [
+        419.14,
+        380.88,
+        192.8,
+        21.6
+      ],
+      "geometry": "rect",
+      "text": "独创的非监督（零负样",
+      "textPreview": "独创的非监督（零负样",
+      "resolvedFontSize": 17.28,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 17.28,
+        "typeface": "KaiTi",
+        "color": "#3E3E3E",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "独创的非监督（零负样"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "独创的非监督（零负样",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 17.28,
+            "typeface": "KaiTi",
+            "color": "#3E3E3E",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "独创的非监督（零负样",
+              "fontSize": 17.28,
+              "typeface": "KaiTi",
+              "color": "#3E3E3E",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 43,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/43y54ni1",
+      "id": "43",
+      "name": "pdf-text-0043",
+      "bbox": [
+        419.14,
+        407.92,
+        192.82,
+        21.6
+      ],
+      "geometry": "rect",
+      "text": "本）AI算法，大幅降低",
+      "textPreview": "本）AI算法，大幅降低",
+      "resolvedFontSize": 17.28,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 17.28,
+        "typeface": "KaiTi",
+        "color": "#3E3E3E",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "本）AI算法，大幅降低"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "本）AI算法，大幅降低",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 17.28,
+            "typeface": "KaiTi",
+            "color": "#3E3E3E",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "本）AI算法，大幅降低",
+              "fontSize": 17.28,
+              "typeface": "KaiTi",
+              "color": "#3E3E3E",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 44,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/vep47ihk",
+      "id": "44",
+      "name": "pdf-text-0044",
+      "bbox": [
+        419.16,
+        434.97,
+        210.14,
+        21.6
+      ],
+      "geometry": "rect",
+      "text": "部署周期和提升检出率。",
+      "textPreview": "部署周期和提升检出率。",
+      "resolvedFontSize": 17.28,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 17.28,
+        "typeface": "KaiTi",
+        "color": "#3E3E3E",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "部署周期和提升检出率。"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "部署周期和提升检出率。",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 17.28,
+            "typeface": "KaiTi",
+            "color": "#3E3E3E",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "部署周期和提升检出率。",
+              "fontSize": 17.28,
+              "typeface": "KaiTi",
+              "color": "#3E3E3E",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 45,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/udwnyd0z",
+      "id": "45",
+      "name": "pdf-text-0045",
+      "bbox": [
+        185.6,
+        138.64,
+        41.44,
+        23.4
+      ],
+      "geometry": "rect",
+      "text": "行业",
+      "textPreview": "行业",
+      "resolvedFontSize": 18.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.72,
+        "typeface": "KaiTi",
+        "color": "#FFFFFF",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "行业"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "行业",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 18.72,
+            "typeface": "KaiTi",
+            "color": "#FFFFFF",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "行业",
+              "fontSize": 18.72,
+              "typeface": "KaiTi",
+              "color": "#FFFFFF",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 46,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/hg7m98zq",
+      "id": "46",
+      "name": "pdf-text-0046",
+      "bbox": [
+        481.26,
+        139.01,
+        41.44,
+        23.4
+      ],
+      "geometry": "rect",
+      "text": "技术",
+      "textPreview": "技术",
+      "resolvedFontSize": 18.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.72,
+        "typeface": "KaiTi",
+        "color": "#FFFFFF",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "技术"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "技术",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 18.72,
+            "typeface": "KaiTi",
+            "color": "#FFFFFF",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "技术",
+              "fontSize": 18.72,
+              "typeface": "KaiTi",
+              "color": "#FFFFFF",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 47,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/f6xwvu1o",
+      "id": "47",
+      "bbox": [
+        644.16,
+        135.2,
+        298.88,
+        545.28
+      ],
+      "alt": "PDF 图片 47",
+      "contentType": "image/png",
+      "imageFit": "cover",
+      "asset": {
+        "assetId": "27a2708b-9436-4bd6-a231-2b5ce15ddda8",
+        "contentType": "image/png",
+        "byteLength": 11262
+      }
+    },
+    {
+      "order": 48,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/gbmdcvi5",
+      "id": "48",
+      "bbox": [
+        654.07,
+        145.07,
+        279.13,
+        525.6
+      ],
+      "alt": "PDF 矢量元素 48",
+      "contentType": "image/svg+xml",
+      "imageFit": "contain",
+      "asset": {
+        "assetId": "d07bfa88-724f-4564-954e-d0a584bc2c3e",
+        "contentType": "image/svg+xml",
+        "byteLength": 656
+      }
+    },
+    {
+      "order": 49,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/e90nax0j",
+      "id": "49",
+      "name": "pdf-text-0049",
+      "bbox": [
+        765.56,
+        139.01,
+        60.16,
+        23.4
+      ],
+      "geometry": "rect",
+      "text": "商业化",
+      "textPreview": "商业化",
+      "resolvedFontSize": 18.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.72,
+        "typeface": "KaiTi",
+        "color": "#FFFFFF",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "商业化"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "商业化",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 18.72,
+            "typeface": "KaiTi",
+            "color": "#FFFFFF",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "商业化",
+              "fontSize": 18.72,
+              "typeface": "KaiTi",
+              "color": "#FFFFFF",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 50,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/j61gryl8",
+      "id": "50",
+      "bbox": [
+        939.04,
+        135.2,
+        298.88,
+        545.28
+      ],
+      "alt": "PDF 图片 50",
+      "contentType": "image/png",
+      "imageFit": "cover",
+      "asset": {
+        "assetId": "057f252d-4498-49d5-a986-cb0de3101149",
+        "contentType": "image/png",
+        "byteLength": 11219
+      }
+    },
+    {
+      "order": 51,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/y5szitkn",
+      "id": "51",
+      "bbox": [
+        948.87,
+        145.07,
+        279.13,
+        525.6
+      ],
+      "alt": "PDF 矢量元素 51",
+      "contentType": "image/svg+xml",
+      "imageFit": "contain",
+      "asset": {
+        "assetId": "6e6518c2-f876-4bd1-ac46-93c856e6a4dd",
+        "contentType": "image/svg+xml",
+        "byteLength": 664
+      }
+    },
+    {
+      "order": 52,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/adsj2pgv",
+      "id": "52",
+      "name": "pdf-text-0052",
+      "bbox": [
+        1063.18,
+        139.02,
+        41.44,
+        23.4
+      ],
+      "geometry": "rect",
+      "text": "团队",
+      "textPreview": "团队",
+      "resolvedFontSize": 18.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.72,
+        "typeface": "KaiTi",
+        "color": "#FFFFFF",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "团队"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "团队",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 18.72,
+            "typeface": "KaiTi",
+            "color": "#FFFFFF",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "团队",
+              "fontSize": 18.72,
+              "typeface": "KaiTi",
+              "color": "#FFFFFF",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 53,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/be1kbuhg",
+      "id": "53",
+      "name": "pdf-vector-0053",
+      "bbox": [
+        687.43,
+        241.77,
+        211.65,
+        3.02
+      ],
+      "geometry": "rect",
+      "fillColor": "#2E75B6",
+      "lineWidth": 0
+    },
+    {
+      "order": 54,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/kjul8jyx",
+      "id": "54",
+      "name": "pdf-text-0054",
+      "bbox": [
+        727.91,
+        182.44,
+        134.88,
+        23.4
+      ],
+      "geometry": "rect",
+      "text": "商业化路径清晰",
+      "textPreview": "商业化路径清晰",
+      "resolvedFontSize": 18.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.72,
+        "typeface": "KaiTi",
+        "color": "#0D64A6",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "商业化路径清晰"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "商业化路径清晰",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 18.72,
+            "typeface": "KaiTi",
+            "color": "#0D64A6",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "商业化路径清晰",
+              "fontSize": 18.72,
+              "typeface": "KaiTi",
+              "color": "#0D64A6",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 55,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/lk32h4fi",
+      "id": "55",
+      "name": "pdf-text-0055",
+      "bbox": [
+        718.63,
+        212.84,
+        153.44,
+        23.4
+      ],
+      "geometry": "rect",
+      "text": "已获头部客户认证",
+      "textPreview": "已获头部客户认证",
+      "resolvedFontSize": 18.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.72,
+        "typeface": "KaiTi",
+        "color": "#0D64A6",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "已获头部客户认证"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "已获头部客户认证",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 18.72,
+            "typeface": "KaiTi",
+            "color": "#0D64A6",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "已获头部客户认证",
+              "fontSize": 18.72,
+              "typeface": "KaiTi",
+              "color": "#0D64A6",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 56,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/yhcj69gr",
+      "id": "56",
+      "name": "pdf-text-0056",
+      "bbox": [
+        666.93,
+        269.77,
+        10.05,
+        21.6
+      ],
+      "geometry": "rect",
+      "text": "•",
+      "textPreview": "•",
+      "resolvedFontSize": 17.28,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 17.28,
+        "typeface": "Arial",
+        "color": "#3E3E3E",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "•"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "•",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 17.28,
+            "typeface": "Arial",
+            "color": "#3E3E3E",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "•",
+              "fontSize": 17.28,
+              "typeface": "Arial",
+              "color": "#3E3E3E",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 57,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/zilkfexc",
+      "id": "57",
+      "name": "pdf-text-0057",
+      "bbox": [
+        697.02,
+        268.71,
+        213.59,
+        21.6
+      ],
+      "geometry": "rect",
+      "text": "以 SMT/IGBT业务提供稳定",
+      "textPreview": "以 SMT/IGBT业务提供稳定",
+      "resolvedFontSize": 17.28,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 17.28,
+        "typeface": "KaiTi",
+        "color": "#3E3E3E",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "以 SMT/IGBT业务提供稳定"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "以 SMT/IGBT业务提供稳定",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 17.28,
+            "typeface": "KaiTi",
+            "color": "#3E3E3E",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "以 SMT/IGBT业务提供稳定",
+              "fontSize": 17.28,
+              "typeface": "KaiTi",
+              "color": "#3E3E3E",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 58,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/87elcjyt",
+      "id": "58",
+      "name": "pdf-text-0058",
+      "bbox": [
+        697.01,
+        295.75,
+        213.56,
+        21.6
+      ],
+      "geometry": "rect",
+      "text": "现金流和验证基础；抓住AI",
+      "textPreview": "现金流和验证基础；抓住AI",
+      "resolvedFontSize": 17.28,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 17.28,
+        "typeface": "KaiTi",
+        "color": "#3E3E3E",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "现金流和验证基础；抓住AI"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "现金流和验证基础；抓住AI",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 17.28,
+            "typeface": "KaiTi",
+            "color": "#3E3E3E",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "现金流和验证基础；抓住AI",
+              "fontSize": 17.28,
+              "typeface": "KaiTi",
+              "color": "#3E3E3E",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 59,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/98n2lofe",
+      "id": "59",
+      "name": "pdf-text-0059",
+      "bbox": [
+        697.01,
+        322.8,
+        213.57,
+        21.6
+      ],
+      "geometry": "rect",
+      "text": "算力风口，快速切入高增长",
+      "textPreview": "算力风口，快速切入高增长",
+      "resolvedFontSize": 17.28,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 17.28,
+        "typeface": "KaiTi",
+        "color": "#3E3E3E",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "算力风口，快速切入高增长"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "算力风口，快速切入高增长",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 17.28,
+            "typeface": "KaiTi",
+            "color": "#3E3E3E",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "算力风口，快速切入高增长",
+              "fontSize": 17.28,
+              "typeface": "KaiTi",
+              "color": "#3E3E3E",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 60,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/h4j2po7i",
+      "id": "60",
+      "name": "pdf-text-0060",
+      "bbox": [
+        697,
+        349.84,
+        231,
+        21.6
+      ],
+      "geometry": "rect",
+      "text": "的光模块市场实现规模跃升；",
+      "textPreview": "的光模块市场实现规模跃升；",
+      "resolvedFontSize": 17.28,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 17.28,
+        "typeface": "KaiTi",
+        "color": "#3E3E3E",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "的光模块市场实现规模跃升；"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "的光模块市场实现规模跃升；",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 17.28,
+            "typeface": "KaiTi",
+            "color": "#3E3E3E",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "的光模块市场实现规模跃升；",
+              "fontSize": 17.28,
+              "typeface": "KaiTi",
+              "color": "#3E3E3E",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 61,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/g3a1wjqd",
+      "id": "61",
+      "name": "pdf-text-0061",
+      "bbox": [
+        697,
+        376.88,
+        213.6,
+        21.6
+      ],
+      "geometry": "rect",
+      "text": "攻克价值量最高、由国际巨",
+      "textPreview": "攻克价值量最高、由国际巨",
+      "resolvedFontSize": 17.28,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 17.28,
+        "typeface": "KaiTi",
+        "color": "#3E3E3E",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "攻克价值量最高、由国际巨"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "攻克价值量最高、由国际巨",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 17.28,
+            "typeface": "KaiTi",
+            "color": "#3E3E3E",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "攻克价值量最高、由国际巨",
+              "fontSize": 17.28,
+              "typeface": "KaiTi",
+              "color": "#3E3E3E",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 62,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/v21kneps",
+      "id": "62",
+      "name": "pdf-text-0062",
+      "bbox": [
+        697,
+        403.93,
+        213.61,
+        21.6
+      ],
+      "geometry": "rect",
+      "text": "头垄断的先进封装市场，打",
+      "textPreview": "头垄断的先进封装市场，打",
+      "resolvedFontSize": 17.28,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 17.28,
+        "typeface": "KaiTi",
+        "color": "#3E3E3E",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "头垄断的先进封装市场，打"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "头垄断的先进封装市场，打",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 17.28,
+            "typeface": "KaiTi",
+            "color": "#3E3E3E",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "头垄断的先进封装市场，打",
+              "fontSize": 17.28,
+              "typeface": "KaiTi",
+              "color": "#3E3E3E",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 63,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/u1sju987",
+      "id": "63",
+      "name": "pdf-text-0063",
+      "bbox": [
+        697,
+        430.97,
+        142.57,
+        21.6
+      ],
+      "geometry": "rect",
+      "text": "开长期成长空间。",
+      "textPreview": "开长期成长空间。",
+      "resolvedFontSize": 17.28,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 17.28,
+        "typeface": "KaiTi",
+        "color": "#3E3E3E",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "开长期成长空间。"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "开长期成长空间。",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 17.28,
+            "typeface": "KaiTi",
+            "color": "#3E3E3E",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "开长期成长空间。",
+              "fontSize": 17.28,
+              "typeface": "KaiTi",
+              "color": "#3E3E3E",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 64,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/5sj2to7u",
+      "id": "64",
+      "name": "pdf-text-0064",
+      "bbox": [
+        666.93,
+        464.35,
+        10.05,
+        21.6
+      ],
+      "geometry": "rect",
+      "text": "•",
+      "textPreview": "•",
+      "resolvedFontSize": 17.28,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 17.28,
+        "typeface": "Arial",
+        "color": "#3E3E3E",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "•"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "•",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 17.28,
+            "typeface": "Arial",
+            "color": "#3E3E3E",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "•",
+              "fontSize": 17.28,
+              "typeface": "Arial",
+              "color": "#3E3E3E",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 65,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/47a10jq9",
+      "id": "65",
+      "name": "pdf-text-0065",
+      "bbox": [
+        697.01,
+        463.28,
+        213.56,
+        21.6
+      ],
+      "geometry": "rect",
+      "text": "在功率半导体领域已实现国",
+      "textPreview": "在功率半导体领域已实现国",
+      "resolvedFontSize": 17.28,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 17.28,
+        "typeface": "KaiTi",
+        "color": "#3E3E3E",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "在功率半导体领域已实现国"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "在功率半导体领域已实现国",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 17.28,
+            "typeface": "KaiTi",
+            "color": "#3E3E3E",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "在功率半导体领域已实现国",
+              "fontSize": 17.28,
+              "typeface": "KaiTi",
+              "color": "#3E3E3E",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 66,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/361krypo",
+      "id": "66",
+      "name": "pdf-text-0066",
+      "bbox": [
+        697.01,
+        490.32,
+        213.56,
+        21.6
+      ],
+      "geometry": "rect",
+      "text": "内出货量领先；在光模块和",
+      "textPreview": "内出货量领先；在光模块和",
+      "resolvedFontSize": 17.28,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 17.28,
+        "typeface": "KaiTi",
+        "color": "#3E3E3E",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "内出货量领先；在光模块和"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "内出货量领先；在光模块和",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 17.28,
+            "typeface": "KaiTi",
+            "color": "#3E3E3E",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "内出货量领先；在光模块和",
+              "fontSize": 17.28,
+              "typeface": "KaiTi",
+              "color": "#3E3E3E",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 67,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/i5sjyt83",
+      "id": "67",
+      "name": "pdf-text-0067",
+      "bbox": [
+        697.01,
+        517.37,
+        213.58,
+        21.6
+      ],
+      "geometry": "rect",
+      "text": "先进封装领域，已成功打入",
+      "textPreview": "先进封装领域，已成功打入",
+      "resolvedFontSize": 17.28,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 17.28,
+        "typeface": "KaiTi",
+        "color": "#3E3E3E",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "先进封装领域，已成功打入"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "先进封装领域，已成功打入",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 17.28,
+            "typeface": "KaiTi",
+            "color": "#3E3E3E",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "先进封装领域，已成功打入",
+              "fontSize": 17.28,
+              "typeface": "KaiTi",
+              "color": "#3E3E3E",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 68,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/lwz2h47q",
+      "id": "68",
+      "name": "pdf-text-0068",
+      "bbox": [
+        697.01,
+        544.41,
+        213.75,
+        21.6
+      ],
+      "geometry": "rect",
+      "text": "中际旭创、Lumentum、长电",
+      "textPreview": "中际旭创、Lumentum、长电",
+      "resolvedFontSize": 17.28,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 17.28,
+        "typeface": "KaiTi",
+        "color": "#3E3E3E",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "中际旭创、Lumentum、长电"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "中际旭创、Lumentum、长电",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 17.28,
+            "typeface": "KaiTi",
+            "color": "#3E3E3E",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "中际旭创、Lumentum、长电",
+              "fontSize": 17.28,
+              "typeface": "KaiTi",
+              "color": "#3E3E3E",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 69,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/kbq1ozq5",
+      "id": "69",
+      "name": "pdf-text-0069",
+      "bbox": [
+        697.01,
+        571.45,
+        231.02,
+        21.6
+      ],
+      "geometry": "rect",
+      "text": "科技、华天科技等龙头客户，",
+      "textPreview": "科技、华天科技等龙头客户，",
+      "resolvedFontSize": 17.28,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 17.28,
+        "typeface": "KaiTi",
+        "color": "#3E3E3E",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "科技、华天科技等龙头客户，"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "科技、华天科技等龙头客户，",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 17.28,
+            "typeface": "KaiTi",
+            "color": "#3E3E3E",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "科技、华天科技等龙头客户，",
+              "fontSize": 17.28,
+              "typeface": "KaiTi",
+              "color": "#3E3E3E",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 70,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/a54721kr",
+      "id": "70",
+      "name": "pdf-text-0070",
+      "bbox": [
+        697.01,
+        598.5,
+        142.57,
+        21.6
+      ],
+      "geometry": "rect",
+      "text": "验证产品竞争力。",
+      "textPreview": "验证产品竞争力。",
+      "resolvedFontSize": 17.28,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 17.28,
+        "typeface": "KaiTi",
+        "color": "#3E3E3E",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "验证产品竞争力。"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "验证产品竞争力。",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 17.28,
+            "typeface": "KaiTi",
+            "color": "#3E3E3E",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "验证产品竞争力。",
+              "fontSize": 17.28,
+              "typeface": "KaiTi",
+              "color": "#3E3E3E",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 71,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/b6d8b61w",
+      "id": "71",
+      "name": "pdf-text-0071",
+      "bbox": [
+        1032.41,
+        183.25,
+        116.16,
+        23.4
+      ],
+      "geometry": "rect",
+      "text": "团队背景卓越",
+      "textPreview": "团队背景卓越",
+      "resolvedFontSize": 18.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.72,
+        "typeface": "KaiTi",
+        "color": "#0D64A6",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "团队背景卓越"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "团队背景卓越",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 18.72,
+            "typeface": "KaiTi",
+            "color": "#0D64A6",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "团队背景卓越",
+              "fontSize": 18.72,
+              "typeface": "KaiTi",
+              "color": "#0D64A6",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 72,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/crmp4b2h",
+      "id": "72",
+      "name": "pdf-text-0072",
+      "bbox": [
+        1032.41,
+        213.65,
+        116.16,
+        23.4
+      ],
+      "geometry": "rect",
+      "text": "产研结合紧密",
+      "textPreview": "产研结合紧密",
+      "resolvedFontSize": 18.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.72,
+        "typeface": "KaiTi",
+        "color": "#0D64A6",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "产研结合紧密"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "产研结合紧密",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 18.72,
+            "typeface": "KaiTi",
+            "color": "#0D64A6",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "产研结合紧密",
+              "fontSize": 18.72,
+              "typeface": "KaiTi",
+              "color": "#0D64A6",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 73,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/xsvqdgj2",
+      "id": "73",
+      "name": "pdf-vector-0073",
+      "bbox": [
+        977.22,
+        238.74,
+        211.65,
+        3.02
+      ],
+      "geometry": "rect",
+      "fillColor": "#2E75B6",
+      "lineWidth": 0
+    },
+    {
+      "order": 74,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/yt4r6lkn",
+      "id": "74",
+      "name": "pdf-text-0074",
+      "bbox": [
+        967.37,
+        269.31,
+        10.05,
+        21.6
+      ],
+      "geometry": "rect",
+      "text": "•",
+      "textPreview": "•",
+      "resolvedFontSize": 17.28,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 17.28,
+        "typeface": "Arial",
+        "color": "#3E3E3E",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "•"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "•",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 17.28,
+            "typeface": "Arial",
+            "color": "#3E3E3E",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "•",
+              "fontSize": 17.28,
+              "typeface": "Arial",
+              "color": "#3E3E3E",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 75,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/zud8fq18",
+      "id": "75",
+      "name": "pdf-text-0075",
+      "bbox": [
+        997.45,
+        268.25,
+        178.2,
+        21.6
+      ],
+      "geometry": "rect",
+      "text": "创始人为前谷歌智能视",
+      "textPreview": "创始人为前谷歌智能视",
+      "resolvedFontSize": 17.28,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 17.28,
+        "typeface": "KaiTi",
+        "color": "#3E3E3E",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "创始人为前谷歌智能视"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "创始人为前谷歌智能视",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 17.28,
+            "typeface": "KaiTi",
+            "color": "#3E3E3E",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "创始人为前谷歌智能视",
+              "fontSize": 17.28,
+              "typeface": "KaiTi",
+              "color": "#3E3E3E",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 76,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/kvm98b2t",
+      "id": "76",
+      "name": "pdf-text-0076",
+      "bbox": [
+        997.45,
+        295.29,
+        178.23,
+        21.6
+      ],
+      "geometry": "rect",
+      "text": "觉团队主管，兼具顶尖",
+      "textPreview": "觉团队主管，兼具顶尖",
+      "resolvedFontSize": 17.28,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 17.28,
+        "typeface": "KaiTi",
+        "color": "#3E3E3E",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "觉团队主管，兼具顶尖"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "觉团队主管，兼具顶尖",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 17.28,
+            "typeface": "KaiTi",
+            "color": "#3E3E3E",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "觉团队主管，兼具顶尖",
+              "fontSize": 17.28,
+              "typeface": "KaiTi",
+              "color": "#3E3E3E",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 77,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/lwfqhgje",
+      "id": "77",
+      "name": "pdf-text-0077",
+      "bbox": [
+        997.45,
+        322.33,
+        177.27,
+        21.6
+      ],
+      "geometry": "rect",
+      "text": "学术背景与产业视野。",
+      "textPreview": "学术背景与产业视野。",
+      "resolvedFontSize": 17.28,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 17.28,
+        "typeface": "KaiTi",
+        "color": "#3E3E3E",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "学术背景与产业视野。"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "学术背景与产业视野。",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 17.28,
+            "typeface": "KaiTi",
+            "color": "#3E3E3E",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "学术背景与产业视野。",
+              "fontSize": 17.28,
+              "typeface": "KaiTi",
+              "color": "#3E3E3E",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 78,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/exk7uhkj",
+      "id": "78",
+      "name": "pdf-text-0078",
+      "bbox": [
+        967.36,
+        355.71,
+        10.05,
+        21.6
+      ],
+      "geometry": "rect",
+      "text": "•",
+      "textPreview": "•",
+      "resolvedFontSize": 17.28,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 17.28,
+        "typeface": "Arial",
+        "color": "#3E3E3E",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "•"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "•",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 17.28,
+            "typeface": "Arial",
+            "color": "#3E3E3E",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "•",
+              "fontSize": 17.28,
+              "typeface": "Arial",
+              "color": "#3E3E3E",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 79,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/fyt83m14",
+      "id": "79",
+      "name": "pdf-text-0079",
+      "bbox": [
+        997.45,
+        354.65,
+        178.2,
+        21.6
+      ],
+      "geometry": "rect",
+      "text": "核心研发团队来自天准",
+      "textPreview": "核心研发团队来自天准",
+      "resolvedFontSize": 17.28,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 17.28,
+        "typeface": "KaiTi",
+        "color": "#3E3E3E",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "核心研发团队来自天准"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "核心研发团队来自天准",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 17.28,
+            "typeface": "KaiTi",
+            "color": "#3E3E3E",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "核心研发团队来自天准",
+              "fontSize": 17.28,
+              "typeface": "KaiTi",
+              "color": "#3E3E3E",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 80,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/ji1sv61g",
+      "id": "80",
+      "name": "pdf-text-0080",
+      "bbox": [
+        997.45,
+        381.69,
+        178.25,
+        21.6
+      ],
+      "geometry": "rect",
+      "text": "科技、博众精工等，平",
+      "textPreview": "科技、博众精工等，平",
+      "resolvedFontSize": 17.28,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 17.28,
+        "typeface": "KaiTi",
+        "color": "#3E3E3E",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "科技、博众精工等，平"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "科技、博众精工等，平",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 17.28,
+            "typeface": "KaiTi",
+            "color": "#3E3E3E",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "科技、博众精工等，平",
+              "fontSize": 17.28,
+              "typeface": "KaiTi",
+              "color": "#3E3E3E",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 81,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/ihsrm10v",
+      "id": "81",
+      "name": "pdf-text-0081",
+      "bbox": [
+        997.46,
+        408.73,
+        195.65,
+        21.6
+      ],
+      "geometry": "rect",
+      "text": "均拥有超10年产业经验。",
+      "textPreview": "均拥有超10年产业经验。",
+      "resolvedFontSize": 17.28,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 17.28,
+        "typeface": "KaiTi",
+        "color": "#3E3E3E",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "均拥有超10年产业经验。"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "均拥有超10年产业经验。",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 17.28,
+            "typeface": "KaiTi",
+            "color": "#3E3E3E",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "均拥有超10年产业经验。",
+              "fontSize": 17.28,
+              "typeface": "KaiTi",
+              "color": "#3E3E3E",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    }
+  ],
+  "composeRuns": []
+}

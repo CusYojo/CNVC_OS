@@ -185,30 +185,46 @@ aiTasksRouter.post('/templates/analyze', async (req: AuthedRequest, res, next) =
       ]).optional(),
       progressId: z.string().uuid().optional(),
     }).parse(req.body ?? {})
-    if (body.progressId) {
-      startAiTemplateAnalysisProgress({
-        id: body.progressId,
-        userId: req.user!.uid,
-        fileName: body.name,
-      })
+
+    // 兼容没有 progressId 的旧调用方；新版前端使用 progressId 后，上传请求
+    // 只负责受理任务，耗时的 PDF 转换在请求结束后继续执行，避免被反向代理超时切断。
+    if (!body.progressId) {
+      const template = await createAiCustomTemplate(userFrom(req), body)
+      res.status(201).json(template)
+      return
     }
-    const template = await createAiCustomTemplate(userFrom(req), body, {
-      onProgress: body.progressId
-        ? (update) => updateAiTemplateAnalysisProgress(body.progressId!, update)
-        : undefined,
+
+    const progressId = body.progressId
+    const user = userFrom(req)
+    startAiTemplateAnalysisProgress({
+      id: progressId,
+      userId: req.user!.uid,
+      fileName: body.name,
     })
-    if (body.progressId) completeAiTemplateAnalysisProgress(body.progressId)
-    res.status(201).json(template)
+    setImmediate(() => {
+      void createAiCustomTemplate(user, body, {
+        onProgress: (update) => updateAiTemplateAnalysisProgress(
+          progressId,
+          update,
+        ),
+      }).then((template) => {
+        completeAiTemplateAnalysisProgress(progressId, template)
+      }).catch((error) => {
+        const message = (error as Error).message || '模板分析失败'
+        failAiTemplateAnalysisProgress(progressId, message)
+        console.error(
+          `[ai-template-analysis] 后台模板分析失败 progressId=${progressId}`,
+          error,
+        )
+      })
+    })
+    res.status(202).json({
+      progressId,
+      status: 'running',
+      stage: '已接收模板，正在准备分析',
+      progress: 5,
+    })
   } catch (error) {
-    const progressId = typeof req.body?.progressId === 'string'
-      ? req.body.progressId
-      : undefined
-    if (progressId) {
-      failAiTemplateAnalysisProgress(
-        progressId,
-        (error as Error).message || '模板分析失败',
-      )
-    }
     next(error)
   }
 })

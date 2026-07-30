@@ -1,0 +1,3725 @@
+{
+  "schema": "openai.presentation.layout/v4",
+  "unit": "px",
+  "slide": {
+    "aid": "sl/n0bz1v",
+    "id": "n0bz1v",
+    "slide": 19,
+    "layoutId": "155a2937-4929-49cf-b778-9e4f529f0e17",
+    "layoutName": "Title Slide",
+    "layoutType": "title",
+    "masterLayoutId": "1a7a3226-3884-4085-ab85-2ca027e9ce9d",
+    "masterLayoutName": "Master",
+    "backgroundColor": "#FFFFFF",
+    "frame": {
+      "left": 0,
+      "top": 0,
+      "width": 1280,
+      "height": 720
+    }
+  },
+  "theme": {
+    "colorSchemeName": "ChatGPT",
+    "colors": {
+      "accent1": "#156082",
+      "accent2": "#E97132",
+      "accent3": "#196B24",
+      "accent4": "#0F9ED5",
+      "accent5": "#A02B93",
+      "accent6": "#4EA72E",
+      "bg1": "#FFFFFF",
+      "bg2": "#000000",
+      "tx1": "#1F1F1F",
+      "tx2": "#FFFFFF",
+      "dk1": "#000000",
+      "lt1": "#FFFFFF",
+      "dk2": "#0E2841",
+      "lt2": "#E8E8E8",
+      "hlink": "#467886",
+      "folHlink": "#96607D"
+    },
+    "typefaces": [
+      "Arial",
+      "CenturyGothic",
+      "KaiTi",
+      "Microsoft YaHei",
+      "SimSun",
+      "TimesNewRomanPSMT"
+    ]
+  },
+  "inheritedLayers": [
+    {
+      "scope": "layout",
+      "id": "155a2937-4929-49cf-b778-9e4f529f0e17",
+      "name": "Title Slide",
+      "type": "title",
+      "parentLayoutId": "1a7a3226-3884-4085-ab85-2ca027e9ce9d",
+      "elements": []
+    },
+    {
+      "scope": "master",
+      "id": "1a7a3226-3884-4085-ab85-2ca027e9ce9d",
+      "name": "Master",
+      "type": "master",
+      "elements": []
+    }
+  ],
+  "elements": [
+    {
+      "order": 1,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/l0nix0v6",
+      "id": "1",
+      "name": "pdf-vector-0001",
+      "bbox": [
+        0,
+        0,
+        1280,
+        720
+      ],
+      "geometry": "rect",
+      "fillColor": "#FFFFFF",
+      "lineWidth": 0
+    },
+    {
+      "order": 2,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/bexkjid8",
+      "id": "2",
+      "bbox": [
+        88,
+        110.67,
+        304,
+        4
+      ],
+      "alt": "PDF 图片 2",
+      "contentType": "image/png",
+      "imageFit": "cover",
+      "asset": {
+        "assetId": "cd03e3b5-8467-4abc-99e2-3780aeabd1f6",
+        "contentType": "image/png",
+        "byteLength": 906
+      }
+    },
+    {
+      "order": 3,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/ad43adcn",
+      "id": "3",
+      "bbox": [
+        898.67,
+        109.33,
+        304,
+        4
+      ],
+      "alt": "PDF 图片 3",
+      "contentType": "image/png",
+      "imageFit": "cover",
+      "asset": {
+        "assetId": "2def26da-7267-42c5-aae2-fa238f16916b",
+        "contentType": "image/png",
+        "byteLength": 923
+      }
+    },
+    {
+      "order": 4,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/83e1svuh",
+      "id": "4",
+      "name": "pdf-vector-0004",
+      "bbox": [
+        29.6,
+        15.93,
+        15.21,
+        30.27
+      ],
+      "geometry": "rect",
+      "fillColor": "#1382BA",
+      "lineWidth": 0
+    },
+    {
+      "order": 5,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/9oni10v2",
+      "id": "5",
+      "name": "pdf-vector-0005",
+      "bbox": [
+        29.6,
+        48.53,
+        15.21,
+        30.27
+      ],
+      "geometry": "rect",
+      "fillColor": "rgba(29, 175, 213, 0.7)",
+      "lineWidth": 0
+    },
+    {
+      "order": 6,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/m1wjqlcr",
+      "id": "6",
+      "name": "pdf-text-0006",
+      "bbox": [
+        427.79,
+        105.98,
+        68.17,
+        26.6
+      ],
+      "geometry": "rect",
+      "text": "非监督",
+      "textPreview": "非监督",
+      "resolvedFontSize": 21.28,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 21.28,
+        "typeface": "KaiTi",
+        "color": "#212121",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "非监督"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "非监督",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 21.28,
+            "typeface": "KaiTi",
+            "color": "#212121",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "非监督",
+              "fontSize": 21.28,
+              "typeface": "KaiTi",
+              "color": "#212121",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 7,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/n250zqdc",
+      "id": "7",
+      "name": "pdf-text-0007",
+      "bbox": [
+        492.11,
+        105.87,
+        27.64,
+        26.6
+      ],
+      "geometry": "rect",
+      "text": "AI",
+      "textPreview": "AI",
+      "resolvedFontSize": 21.28,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 21.28,
+        "typeface": "TimesNewRomanPSMT",
+        "color": "#212121",
+        "bold": true,
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "AI"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "AI",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 21.28,
+            "typeface": "TimesNewRomanPSMT",
+            "color": "#212121",
+            "bold": true,
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "AI",
+              "fontSize": 21.28,
+              "typeface": "TimesNewRomanPSMT",
+              "color": "#212121",
+              "bold": true,
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 8,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/wry1wfut",
+      "id": "8",
+      "name": "pdf-text-0008",
+      "bbox": [
+        515.79,
+        105.98,
+        345.44,
+        26.6
+      ],
+      "geometry": "rect",
+      "text": "算法可检测复杂半导体器件外观缺陷",
+      "textPreview": "算法可检测复杂半导体器件外观缺陷",
+      "resolvedFontSize": 21.28,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 21.28,
+        "typeface": "KaiTi",
+        "color": "#212121",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "算法可检测复杂半导体器件外观缺陷"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "算法可检测复杂半导体器件外观缺陷",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 21.28,
+            "typeface": "KaiTi",
+            "color": "#212121",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "算法可检测复杂半导体器件外观缺陷",
+              "fontSize": 21.28,
+              "typeface": "KaiTi",
+              "color": "#212121",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 9,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/87qlk7u1",
+      "id": "9",
+      "bbox": [
+        1154.33,
+        0.93,
+        120.8,
+        46.8
+      ],
+      "alt": "PDF 图片 9",
+      "contentType": "image/png",
+      "imageFit": "cover",
+      "asset": {
+        "assetId": "6ff35977-cd9c-4bf5-aab8-3ada1d4ec89e",
+        "contentType": "image/png",
+        "byteLength": 11164
+      }
+    },
+    {
+      "order": 10,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/yt07yt47",
+      "id": "10",
+      "bbox": [
+        381.24,
+        398.91,
+        884.32,
+        294.72
+      ],
+      "alt": "PDF 图片 10",
+      "contentType": "image/png",
+      "imageFit": "cover",
+      "asset": {
+        "assetId": "3cc174b0-6a9c-4e97-baab-0027b7d631c3",
+        "contentType": "image/png",
+        "byteLength": 8860
+      }
+    },
+    {
+      "order": 11,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/wnm5w3at",
+      "id": "11",
+      "name": "pdf-text-0011",
+      "bbox": [
+        968.69,
+        415.85,
+        67.04,
+        20
+      ],
+      "geometry": "rect",
+      "text": "人工复判",
+      "textPreview": "人工复判",
+      "resolvedFontSize": 16,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 16,
+        "typeface": "Microsoft YaHei",
+        "color": "#000000",
+        "bold": true,
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "人工复判"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "人工复判",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 16,
+            "typeface": "Microsoft YaHei",
+            "color": "#000000",
+            "bold": true,
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "人工复判",
+              "fontSize": 16,
+              "typeface": "Microsoft YaHei",
+              "color": "#000000",
+              "bold": true,
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 12,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/bmdony98",
+      "id": "12",
+      "name": "pdf-text-0012",
+      "bbox": [
+        971.09,
+        434.57,
+        79.41,
+        20
+      ],
+      "geometry": "rect",
+      "text": "RepairPC",
+      "textPreview": "RepairPC",
+      "resolvedFontSize": 16,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 16,
+        "typeface": "Microsoft YaHei",
+        "color": "#000000",
+        "bold": true,
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "RepairPC"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "RepairPC",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 16,
+            "typeface": "Microsoft YaHei",
+            "color": "#000000",
+            "bold": true,
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "RepairPC",
+              "fontSize": 16,
+              "typeface": "Microsoft YaHei",
+              "color": "#000000",
+              "bold": true,
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 13,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/a1knutsn",
+      "id": "13",
+      "name": "pdf-text-0013",
+      "bbox": [
+        1190.93,
+        483.74,
+        32.8,
+        18.4
+      ],
+      "geometry": "rect",
+      "text": "修复",
+      "textPreview": "修复",
+      "resolvedFontSize": 14.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 14.72,
+        "typeface": "Microsoft YaHei",
+        "color": "#121212",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "修复"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "修复",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 14.72,
+            "typeface": "Microsoft YaHei",
+            "color": "#121212",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "修复",
+              "fontSize": 14.72,
+              "typeface": "Microsoft YaHei",
+              "color": "#121212",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 14,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/lsv6t8ra",
+      "id": "14",
+      "name": "pdf-text-0014",
+      "bbox": [
+        1022.28,
+        575.58,
+        209.26,
+        18.4
+      ],
+      "geometry": "rect",
+      "text": "过滤人工疏漏，确保训练集质量",
+      "textPreview": "过滤人工疏漏，确保训练集质量",
+      "resolvedFontSize": 14.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 14.72,
+        "typeface": "Microsoft YaHei",
+        "color": "#121212",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "过滤人工疏漏，确保训练集质量"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "过滤人工疏漏，确保训练集质量",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 14.72,
+            "typeface": "Microsoft YaHei",
+            "color": "#121212",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "过滤人工疏漏，确保训练集质量",
+              "fontSize": 14.72,
+              "typeface": "Microsoft YaHei",
+              "color": "#121212",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 15,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/krm50na5",
+      "id": "15",
+      "name": "pdf-text-0015",
+      "bbox": [
+        917.47,
+        645.51,
+        106.07,
+        18.4
+      ],
+      "geometry": "rect",
+      "text": "正确的训练数据",
+      "textPreview": "正确的训练数据",
+      "resolvedFontSize": 14.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 14.72,
+        "typeface": "Microsoft YaHei",
+        "color": "#00B050",
+        "bold": true,
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "正确的训练数据"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "正确的训练数据",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 14.72,
+            "typeface": "Microsoft YaHei",
+            "color": "#00B050",
+            "bold": true,
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "正确的训练数据",
+              "fontSize": 14.72,
+              "typeface": "Microsoft YaHei",
+              "color": "#00B050",
+              "bold": true,
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 16,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/cripwjm1",
+      "id": "16",
+      "bbox": [
+        976.64,
+        553.76,
+        44.48,
+        44.48
+      ],
+      "alt": "PDF 图片 16",
+      "contentType": "image/png",
+      "imageFit": "cover",
+      "asset": {
+        "assetId": "a1b25dd3-9ed6-4fdc-b6ff-d36fc35c7b09",
+        "contentType": "image/png",
+        "byteLength": 4017
+      }
+    },
+    {
+      "order": 17,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/yp4nydsz",
+      "id": "17",
+      "name": "pdf-vector-0017",
+      "bbox": [
+        418.73,
+        360.07,
+        246.87,
+        40.07
+      ],
+      "geometry": "rect",
+      "fillColor": "#229AC4",
+      "lineWidth": 0
+    },
+    {
+      "order": 18,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/1wb6hor6",
+      "id": "18",
+      "name": "pdf-text-0018",
+      "bbox": [
+        466.53,
+        370.23,
+        44.16,
+        25
+      ],
+      "geometry": "rect",
+      "text": "轻蜓",
+      "textPreview": "轻蜓",
+      "resolvedFontSize": 20,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 20,
+        "typeface": "SimSun",
+        "color": "#FFFFFF",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "轻蜓"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "轻蜓",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 20,
+            "typeface": "SimSun",
+            "color": "#FFFFFF",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "轻蜓",
+              "fontSize": 20,
+              "typeface": "SimSun",
+              "color": "#FFFFFF",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 19,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/0v25ojal",
+      "id": "19",
+      "name": "pdf-text-0019",
+      "bbox": [
+        506.85,
+        371.71,
+        24.32,
+        25
+      ],
+      "geometry": "rect",
+      "text": "AI",
+      "textPreview": "AI",
+      "resolvedFontSize": 20,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 20,
+        "typeface": "CenturyGothic",
+        "color": "#FFFFFF",
+        "bold": true,
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "AI"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "AI",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 20,
+            "typeface": "CenturyGothic",
+            "color": "#FFFFFF",
+            "bold": true,
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "AI",
+              "fontSize": 20,
+              "typeface": "CenturyGothic",
+              "color": "#FFFFFF",
+              "bold": true,
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 20,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/sfm54jih",
+      "id": "20",
+      "name": "pdf-text-0020",
+      "bbox": [
+        527.17,
+        370.23,
+        84.32,
+        25
+      ],
+      "geometry": "rect",
+      "text": "复判流程",
+      "textPreview": "复判流程",
+      "resolvedFontSize": 20,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 20,
+        "typeface": "SimSun",
+        "color": "#FFFFFF",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "复判流程"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "复判流程",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 20,
+            "typeface": "SimSun",
+            "color": "#FFFFFF",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "复判流程",
+              "fontSize": 20,
+              "typeface": "SimSun",
+              "color": "#FFFFFF",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 21,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/dgf6xoz2",
+      "id": "21",
+      "name": "pdf-vector-0021",
+      "bbox": [
+        327.21,
+        297.44,
+        155.59,
+        219.92
+      ],
+      "geometry": "custom",
+      "fillColor": "#229AC4",
+      "lineColor": "#229AC4",
+      "lineWidth": 0.12
+    },
+    {
+      "order": 22,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/tw3udgf6",
+      "id": "22",
+      "bbox": [
+        1062.24,
+        251.22,
+        196.22,
+        31.2
+      ],
+      "alt": "PDF 图片 22",
+      "contentType": "image/png",
+      "imageFit": "cover",
+      "asset": {
+        "assetId": "51cd24c4-5762-4b0b-8d68-0cd7c864379c",
+        "contentType": "image/png",
+        "byteLength": 4257
+      }
+    },
+    {
+      "order": 23,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/redovehw",
+      "id": "23",
+      "name": "pdf-vector-0023",
+      "bbox": [
+        348.72,
+        223.96,
+        609.43,
+        51.43
+      ],
+      "geometry": "custom",
+      "fillColor": "rgba(246, 171, 0, 0.5)",
+      "lineWidth": 0
+    },
+    {
+      "order": 24,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/036583it",
+      "id": "24",
+      "name": "pdf-vector-0024",
+      "bbox": [
+        380.93,
+        169.59,
+        0.1,
+        145.03
+      ],
+      "geometry": "custom",
+      "lineColor": "#FFC000",
+      "lineWidth": 2.67
+    },
+    {
+      "order": 25,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/14f618zy",
+      "id": "25",
+      "name": "pdf-vector-0025",
+      "bbox": [
+        1266.47,
+        169.59,
+        0.1,
+        145.03
+      ],
+      "geometry": "custom",
+      "lineColor": "#FFC000",
+      "lineWidth": 2.67
+    },
+    {
+      "order": 26,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/ehon6t0n",
+      "id": "26",
+      "name": "pdf-vector-0026",
+      "bbox": [
+        379.6,
+        170.42,
+        888.2,
+        0.1
+      ],
+      "geometry": "custom",
+      "lineColor": "#FFC000",
+      "lineWidth": 1.67
+    },
+    {
+      "order": 27,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/f2xozyh8",
+      "id": "27",
+      "name": "pdf-vector-0027",
+      "bbox": [
+        379.6,
+        313.29,
+        888.2,
+        0.1
+      ],
+      "geometry": "custom",
+      "lineColor": "#FFC000",
+      "lineWidth": 2.67
+    },
+    {
+      "order": 28,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/o7qpc3ip",
+      "id": "28",
+      "name": "pdf-text-0028",
+      "bbox": [
+        605.25,
+        200,
+        273.76,
+        20
+      ],
+      "geometry": "rect",
+      "text": "AOI设备误判板耗费大量人工复判工作",
+      "textPreview": "AOI设备误判板耗费大量人工复判工作",
+      "resolvedFontSize": 16,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 16,
+        "typeface": "Microsoft YaHei",
+        "color": "#121212",
+        "bold": true,
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "AOI设备误判板耗费大量人工复判工作"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "AOI设备误判板耗费大量人工复判工作",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 16,
+            "typeface": "Microsoft YaHei",
+            "color": "#121212",
+            "bold": true,
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "AOI设备误判板耗费大量人工复判工作",
+              "fontSize": 16,
+              "typeface": "Microsoft YaHei",
+              "color": "#121212",
+              "bold": true,
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 29,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/p8z658za",
+      "id": "29",
+      "name": "pdf-text-0029",
+      "bbox": [
+        384.93,
+        241.42,
+        56.52,
+        20
+      ],
+      "geometry": "rect",
+      "text": "Output",
+      "textPreview": "Output",
+      "resolvedFontSize": 16,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 16,
+        "typeface": "Microsoft YaHei",
+        "color": "#000000",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "Output"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "Output",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 16,
+            "typeface": "Microsoft YaHei",
+            "color": "#000000",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "Output",
+              "fontSize": 16,
+              "typeface": "Microsoft YaHei",
+              "color": "#000000",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 30,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/jel0r65o",
+      "id": "30",
+      "name": "pdf-text-0030",
+      "bbox": [
+        956.44,
+        181.12,
+        67.04,
+        20
+      ],
+      "geometry": "rect",
+      "text": "人工复判",
+      "textPreview": "人工复判",
+      "resolvedFontSize": 16,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 16,
+        "typeface": "Microsoft YaHei",
+        "color": "#000000",
+        "bold": true,
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "人工复判"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "人工复判",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 16,
+            "typeface": "Microsoft YaHei",
+            "color": "#000000",
+            "bold": true,
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "人工复判",
+              "fontSize": 16,
+              "typeface": "Microsoft YaHei",
+              "color": "#000000",
+              "bold": true,
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 31,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/lsnut0v6",
+      "id": "31",
+      "bbox": [
+        19.93,
+        441.51,
+        312.64,
+        172
+      ],
+      "alt": "PDF 图片 31",
+      "contentType": "image/png",
+      "imageFit": "cover",
+      "asset": {
+        "assetId": "cccc51c4-a38c-4e24-8c04-775faa2e2749",
+        "contentType": "image/png",
+        "byteLength": 81659
+      }
+    },
+    {
+      "order": 32,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/lg3itgnu",
+      "id": "32",
+      "name": "pdf-text-0032",
+      "bbox": [
+        44.95,
+        382.72,
+        278.4,
+        18.4
+      ],
+      "geometry": "rect",
+      "text": "传统设备输出检测结果（2D图片与3D点云",
+      "textPreview": "传统设备输出检测结果（2D图片与3D点云",
+      "resolvedFontSize": 14.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 14.72,
+        "typeface": "Microsoft YaHei",
+        "color": "#000000",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "传统设备输出检测结果（2D图片与3D点云"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "传统设备输出检测结果（2D图片与3D点云",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 14.72,
+            "typeface": "Microsoft YaHei",
+            "color": "#000000",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "传统设备输出检测结果（2D图片与3D点云",
+              "fontSize": 14.72,
+              "typeface": "Microsoft YaHei",
+              "color": "#000000",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 33,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/kfuhkb69",
+      "id": "33",
+      "name": "pdf-text-0033",
+      "bbox": [
+        44.95,
+        401.28,
+        237.9,
+        18.4
+      ],
+      "geometry": "rect",
+      "text": "信息），其中包含误判与真实不良。",
+      "textPreview": "信息），其中包含误判与真实不良。",
+      "resolvedFontSize": 14.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 14.72,
+        "typeface": "Microsoft YaHei",
+        "color": "#000000",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "信息），其中包含误判与真实不良。"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "信息），其中包含误判与真实不良。",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 14.72,
+            "typeface": "Microsoft YaHei",
+            "color": "#000000",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "信息），其中包含误判与真实不良。",
+              "fontSize": 14.72,
+              "typeface": "Microsoft YaHei",
+              "color": "#000000",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 34,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/ba10nm5c",
+      "id": "34",
+      "name": "pdf-text-0034",
+      "bbox": [
+        617.2,
+        461.84,
+        237.43,
+        18.4
+      ],
+      "geometry": "rect",
+      "text": "纠正AOI误判，降低人工复判工作量",
+      "textPreview": "纠正AOI误判，降低人工复判工作量",
+      "resolvedFontSize": 14.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 14.72,
+        "typeface": "Microsoft YaHei",
+        "color": "#121212",
+        "bold": true,
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "纠正AOI误判，降低人工复判工作量"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "纠正AOI误判，降低人工复判工作量",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 14.72,
+            "typeface": "Microsoft YaHei",
+            "color": "#121212",
+            "bold": true,
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "纠正AOI误判，降低人工复判工作量",
+              "fontSize": 14.72,
+              "typeface": "Microsoft YaHei",
+              "color": "#121212",
+              "bold": true,
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 35,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/a9szeho7",
+      "id": "35",
+      "name": "pdf-text-0035",
+      "bbox": [
+        1006.85,
+        513.2,
+        143.29,
+        18.4
+      ],
+      "geometry": "rect",
+      "text": "Raw trainingImages",
+      "textPreview": "Raw trainingImages",
+      "resolvedFontSize": 14.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 14.72,
+        "typeface": "Microsoft YaHei",
+        "color": "#121212",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "Raw trainingImages"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "Raw trainingImages",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 14.72,
+            "typeface": "Microsoft YaHei",
+            "color": "#121212",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "Raw trainingImages",
+              "fontSize": 14.72,
+              "typeface": "Microsoft YaHei",
+              "color": "#121212",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 36,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/xc3ipwni",
+      "id": "36",
+      "name": "pdf-text-0036",
+      "bbox": [
+        1018.38,
+        543.14,
+        49.44,
+        18.4
+      ],
+      "geometry": "rect",
+      "text": "AI数据",
+      "textPreview": "AI数据",
+      "resolvedFontSize": 14.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 14.72,
+        "typeface": "Microsoft YaHei",
+        "color": "#121212",
+        "bold": true,
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "AI数据"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "AI数据",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 14.72,
+            "typeface": "Microsoft YaHei",
+            "color": "#121212",
+            "bold": true,
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "AI数据",
+              "fontSize": 14.72,
+              "typeface": "Microsoft YaHei",
+              "color": "#121212",
+              "bold": true,
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 37,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/wbahgr6x",
+      "id": "37",
+      "name": "pdf-text-0037",
+      "bbox": [
+        1063.81,
+        542.11,
+        43.42,
+        20
+      ],
+      "geometry": "rect",
+      "text": "Filter",
+      "textPreview": "Filter",
+      "resolvedFontSize": 16,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 16,
+        "typeface": "Microsoft YaHei",
+        "color": "#121212",
+        "bold": true,
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "Filter"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "Filter",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 16,
+            "typeface": "Microsoft YaHei",
+            "color": "#121212",
+            "bold": true,
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "Filter",
+              "fontSize": 16,
+              "typeface": "Microsoft YaHei",
+              "color": "#121212",
+              "bold": true,
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 38,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/v650zq5w",
+      "id": "38",
+      "name": "pdf-text-0038",
+      "bbox": [
+        707.69,
+        545.1,
+        254.39,
+        18.4
+      ],
+      "geometry": "rect",
+      "text": "基于AI算法形成闭环优化，实现模型快",
+      "textPreview": "基于AI算法形成闭环优化，实现模型快",
+      "resolvedFontSize": 14.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 14.72,
+        "typeface": "Microsoft YaHei",
+        "color": "#000000",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "基于AI算法形成闭环优化，实现模型快"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "基于AI算法形成闭环优化，实现模型快",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 14.72,
+            "typeface": "Microsoft YaHei",
+            "color": "#000000",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "基于AI算法形成闭环优化，实现模型快",
+              "fontSize": 14.72,
+              "typeface": "Microsoft YaHei",
+              "color": "#000000",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 39,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/u5wjqlob",
+      "id": "39",
+      "name": "pdf-text-0039",
+      "bbox": [
+        707.69,
+        560.45,
+        47.51,
+        18.4
+      ],
+      "geometry": "rect",
+      "text": "速生效",
+      "textPreview": "速生效",
+      "resolvedFontSize": 14.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 14.72,
+        "typeface": "Microsoft YaHei",
+        "color": "#000000",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "速生效"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "速生效",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 14.72,
+            "typeface": "Microsoft YaHei",
+            "color": "#000000",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "速生效",
+              "fontSize": 14.72,
+              "typeface": "Microsoft YaHei",
+              "color": "#000000",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 40,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/2tc3epkf",
+      "id": "40",
+      "name": "pdf-vector-0040",
+      "bbox": [
+        405.93,
+        137,
+        247.73,
+        35.2
+      ],
+      "geometry": "rect",
+      "fillColor": "#FAD57F",
+      "lineWidth": 0
+    },
+    {
+      "order": 41,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/3ul4na10",
+      "id": "41",
+      "name": "pdf-text-0041",
+      "bbox": [
+        457.81,
+        141.68,
+        22.72,
+        23.4
+      ],
+      "geometry": "rect",
+      "text": "无",
+      "textPreview": "无",
+      "resolvedFontSize": 18.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.72,
+        "typeface": "Microsoft YaHei",
+        "color": "#000000",
+        "bold": true,
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "无"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "无",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 18.72,
+            "typeface": "Microsoft YaHei",
+            "color": "#000000",
+            "bold": true,
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "无",
+              "fontSize": 18.72,
+              "typeface": "Microsoft YaHei",
+              "color": "#000000",
+              "bold": true,
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 42,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/4fulgf2l",
+      "id": "42",
+      "name": "pdf-text-0042",
+      "bbox": [
+        476.36,
+        141.98,
+        23,
+        23.4
+      ],
+      "geometry": "rect",
+      "text": "AI",
+      "textPreview": "AI",
+      "resolvedFontSize": 18.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.72,
+        "typeface": "CenturyGothic",
+        "color": "#000000",
+        "bold": true,
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "AI"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "AI",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 18.72,
+            "typeface": "CenturyGothic",
+            "color": "#000000",
+            "bold": true,
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "AI",
+              "fontSize": 18.72,
+              "typeface": "CenturyGothic",
+              "color": "#000000",
+              "bold": true,
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 43,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/pg3mpkj6",
+      "id": "43",
+      "name": "pdf-text-0043",
+      "bbox": [
+        495.25,
+        141.68,
+        41.28,
+        23.4
+      ],
+      "geometry": "rect",
+      "text": "复判",
+      "textPreview": "复判",
+      "resolvedFontSize": 18.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.72,
+        "typeface": "Microsoft YaHei",
+        "color": "#000000",
+        "bold": true,
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "复判"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "复判",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 18.72,
+            "typeface": "Microsoft YaHei",
+            "color": "#000000",
+            "bold": true,
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "复判",
+              "fontSize": 18.72,
+              "typeface": "Microsoft YaHei",
+              "color": "#000000",
+              "bold": true,
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 44,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/ups3a5kj",
+      "id": "44",
+      "name": "pdf-text-0044",
+      "bbox": [
+        532.37,
+        141.98,
+        11.11,
+        23.4
+      ],
+      "geometry": "rect",
+      "text": "(",
+      "textPreview": "(",
+      "resolvedFontSize": 18.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.72,
+        "typeface": "CenturyGothic",
+        "color": "#000000",
+        "bold": true,
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "("
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "(",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 18.72,
+            "typeface": "CenturyGothic",
+            "color": "#000000",
+            "bold": true,
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "(",
+              "fontSize": 18.72,
+              "typeface": "CenturyGothic",
+              "color": "#000000",
+              "bold": true,
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 45,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/fq14jal4",
+      "id": "45",
+      "name": "pdf-text-0045",
+      "bbox": [
+        539.26,
+        141.68,
+        59.84,
+        23.4
+      ],
+      "geometry": "rect",
+      "text": "原流程",
+      "textPreview": "原流程",
+      "resolvedFontSize": 18.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.72,
+        "typeface": "Microsoft YaHei",
+        "color": "#000000",
+        "bold": true,
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "原流程"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "原流程",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 18.72,
+            "typeface": "Microsoft YaHei",
+            "color": "#000000",
+            "bold": true,
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "原流程",
+              "fontSize": 18.72,
+              "typeface": "Microsoft YaHei",
+              "color": "#000000",
+              "bold": true,
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 46,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/grulcf2p",
+      "id": "46",
+      "name": "pdf-text-0046",
+      "bbox": [
+        594.93,
+        141.98,
+        11.11,
+        23.4
+      ],
+      "geometry": "rect",
+      "text": ")",
+      "textPreview": ")",
+      "resolvedFontSize": 18.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 18.72,
+        "typeface": "CenturyGothic",
+        "color": "#000000",
+        "bold": true,
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": ")"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": ")",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 18.72,
+            "typeface": "CenturyGothic",
+            "color": "#000000",
+            "bold": true,
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": ")",
+              "fontSize": 18.72,
+              "typeface": "CenturyGothic",
+              "color": "#000000",
+              "bold": true,
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 47,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/hs3mlkju",
+      "id": "47",
+      "name": "pdf-text-0047",
+      "bbox": [
+        415.75,
+        536.8,
+        90.7,
+        18.4
+      ],
+      "geometry": "rect",
+      "text": "实时更新模型",
+      "textPreview": "实时更新模型",
+      "resolvedFontSize": 14.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 14.72,
+        "typeface": "Microsoft YaHei",
+        "color": "#121212",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "实时更新模型"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "实时更新模型",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 14.72,
+            "typeface": "Microsoft YaHei",
+            "color": "#121212",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "实时更新模型",
+              "fontSize": 14.72,
+              "typeface": "Microsoft YaHei",
+              "color": "#121212",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 48,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/ylw3m9kn",
+      "id": "48",
+      "name": "pdf-text-0048",
+      "bbox": [
+        420.02,
+        620.1,
+        61.42,
+        18.4
+      ],
+      "geometry": "rect",
+      "text": "自主训练",
+      "textPreview": "自主训练",
+      "resolvedFontSize": 14.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 14.72,
+        "typeface": "Microsoft YaHei",
+        "color": "#121212",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "自主训练"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "自主训练",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 14.72,
+            "typeface": "Microsoft YaHei",
+            "color": "#121212",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "自主训练",
+              "fontSize": 14.72,
+              "typeface": "Microsoft YaHei",
+              "color": "#121212",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 49,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/zm54vu18",
+      "id": "49",
+      "name": "pdf-text-0049",
+      "bbox": [
+        114.39,
+        617.96,
+        112.15,
+        20
+      ],
+      "geometry": "rect",
+      "text": "AOI(2D+3D)",
+      "textPreview": "AOI(2D+3D)",
+      "resolvedFontSize": 16,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 16,
+        "typeface": "Microsoft YaHei",
+        "color": "#121212",
+        "bold": true,
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "AOI(2D+3D)"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "AOI(2D+3D)",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 16,
+            "typeface": "Microsoft YaHei",
+            "color": "#121212",
+            "bold": true,
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "AOI(2D+3D)",
+              "fontSize": 16,
+              "typeface": "Microsoft YaHei",
+              "color": "#121212",
+              "bold": true,
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 50,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/9g76l83a",
+      "id": "50",
+      "name": "pdf-text-0050",
+      "bbox": [
+        418.59,
+        426.07,
+        52.41,
+        20
+      ],
+      "geometry": "rect",
+      "text": "轻蜓AI",
+      "textPreview": "轻蜓AI",
+      "resolvedFontSize": 16,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 16,
+        "typeface": "Microsoft YaHei",
+        "color": "#121212",
+        "bold": true,
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "轻蜓AI"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "轻蜓AI",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 16,
+            "typeface": "Microsoft YaHei",
+            "color": "#121212",
+            "bold": true,
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "轻蜓AI",
+              "fontSize": 16,
+              "typeface": "Microsoft YaHei",
+              "color": "#121212",
+              "bold": true,
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 51,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/8fyps3mp",
+      "id": "51",
+      "name": "pdf-text-0051",
+      "bbox": [
+        403.71,
+        444.63,
+        75.87,
+        20
+      ],
+      "geometry": "rect",
+      "text": "Inference",
+      "textPreview": "Inference",
+      "resolvedFontSize": 16,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 16,
+        "typeface": "Microsoft YaHei",
+        "color": "#121212",
+        "bold": true,
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "Inference"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "Inference",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 16,
+            "typeface": "Microsoft YaHei",
+            "color": "#121212",
+            "bold": true,
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "Inference",
+              "fontSize": 16,
+              "typeface": "Microsoft YaHei",
+              "color": "#121212",
+              "bold": true,
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 52,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/nepojylk",
+      "id": "52",
+      "name": "pdf-text-0052",
+      "bbox": [
+        348.79,
+        316.69,
+        20,
+        90.2
+      ],
+      "rotation": 90,
+      "geometry": "rect",
+      "text": "AOIOutput",
+      "textPreview": "AOIOutput",
+      "resolvedFontSize": 16,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 16,
+        "typeface": "Microsoft YaHei",
+        "color": "#000000",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "AOIOutput"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "AOIOutput",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 16,
+            "typeface": "Microsoft YaHei",
+            "color": "#000000",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "AOIOutput",
+              "fontSize": 16,
+              "typeface": "Microsoft YaHei",
+              "color": "#000000",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 53,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/mdg7qt4z",
+      "id": "53",
+      "name": "pdf-text-0053",
+      "bbox": [
+        1194.88,
+        259.74,
+        32.8,
+        18.4
+      ],
+      "geometry": "rect",
+      "text": "修复",
+      "textPreview": "修复",
+      "resolvedFontSize": 14.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 14.72,
+        "typeface": "Microsoft YaHei",
+        "color": "#121212",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "修复"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "修复",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 14.72,
+            "typeface": "Microsoft YaHei",
+            "color": "#121212",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "修复",
+              "fontSize": 14.72,
+              "typeface": "Microsoft YaHei",
+              "color": "#121212",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 54,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/lc76ho3e",
+      "id": "54",
+      "name": "pdf-text-0054",
+      "bbox": [
+        349.93,
+        242.83,
+        32.22,
+        20
+      ],
+      "geometry": "rect",
+      "text": "AOI",
+      "textPreview": "AOI",
+      "resolvedFontSize": 16,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 16,
+        "typeface": "Microsoft YaHei",
+        "color": "#000000",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "AOI"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "AOI",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 16,
+            "typeface": "Microsoft YaHei",
+            "color": "#000000",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "AOI",
+              "fontSize": 16,
+              "typeface": "Microsoft YaHei",
+              "color": "#000000",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 55,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/0by5ojmt",
+      "id": "55",
+      "name": "pdf-text-0055",
+      "bbox": [
+        31.7,
+        382.82,
+        9.15,
+        18.4
+      ],
+      "geometry": "rect",
+      "text": "•",
+      "textPreview": "•",
+      "resolvedFontSize": 14.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 14.72,
+        "typeface": "Arial",
+        "color": "#000000",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "•"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "•",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 14.72,
+            "typeface": "Arial",
+            "color": "#000000",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "•",
+              "fontSize": 14.72,
+              "typeface": "Arial",
+              "color": "#000000",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 56,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/w76p8nqd",
+      "id": "56",
+      "bbox": [
+        488.73,
+        449.4,
+        85.4,
+        81.67
+      ],
+      "alt": "PDF 图片 56",
+      "contentType": "image/png",
+      "imageFit": "cover",
+      "asset": {
+        "assetId": "86e62275-6fc9-419b-af48-662898293c9b",
+        "contentType": "image/png",
+        "byteLength": 56184
+      }
+    },
+    {
+      "order": 57,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/h8f61sry",
+      "id": "57",
+      "bbox": [
+        623.2,
+        517.33,
+        76,
+        76
+      ],
+      "alt": "PDF 图片 57",
+      "contentType": "image/png",
+      "imageFit": "cover",
+      "asset": {
+        "assetId": "9f7dfb29-7040-4f31-ad5e-89e089250fc9",
+        "contentType": "image/png",
+        "byteLength": 15800
+      }
+    },
+    {
+      "order": 58,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/q9knu9s3",
+      "id": "58",
+      "bbox": [
+        488.73,
+        588,
+        85.4,
+        81.67
+      ],
+      "alt": "PDF 图片 58",
+      "contentType": "image/png",
+      "imageFit": "cover",
+      "asset": {
+        "assetId": "6f4992dc-0894-44a0-985f-cf2a2fbcacdb",
+        "contentType": "image/png",
+        "byteLength": 56184
+      }
+    },
+    {
+      "order": 59,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/k7ip0nmx",
+      "id": "59",
+      "name": "pdf-vector-0059",
+      "bbox": [
+        797.67,
+        329.33,
+        22.67,
+        50
+      ],
+      "geometry": "custom",
+      "fillColor": "#229AC4",
+      "lineColor": "#376092",
+      "lineWidth": 2.67
+    },
+    {
+      "order": 60,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/4rq9wru9",
+      "id": "60",
+      "name": "pdf-vector-0060",
+      "bbox": [
+        583.67,
+        488.67,
+        380,
+        18
+      ],
+      "geometry": "custom",
+      "fillColor": "#229AC4",
+      "lineColor": "#229AC4",
+      "lineWidth": 2.67
+    },
+    {
+      "order": 61,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/5czqpwbu",
+      "id": "61",
+      "name": "pdf-vector-0061",
+      "bbox": [
+        583.9,
+        604.3,
+        416.93,
+        33
+      ],
+      "geometry": "custom",
+      "fillColor": "#229AC4",
+      "lineWidth": 0
+    },
+    {
+      "order": 62,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/ip8ruhc3",
+      "id": "62",
+      "name": "pdf-vector-0062",
+      "bbox": [
+        583.9,
+        604.3,
+        416.93,
+        33
+      ],
+      "geometry": "custom",
+      "lineColor": "#376092",
+      "lineWidth": 2.67
+    },
+    {
+      "order": 63,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/3qh8nmto",
+      "id": "63",
+      "name": "pdf-vector-0063",
+      "bbox": [
+        989.73,
+        511.33,
+        17.13,
+        36.4
+      ],
+      "geometry": "custom",
+      "fillColor": "#229AC4",
+      "lineColor": "#376092",
+      "lineWidth": 2.67
+    },
+    {
+      "order": 64,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/gnq9srud",
+      "id": "64",
+      "name": "pdf-vector-0064",
+      "bbox": [
+        523.4,
+        538.93,
+        16.73,
+        39.6
+      ],
+      "geometry": "custom",
+      "fillColor": "#229AC4",
+      "lineColor": "#376092",
+      "lineWidth": 2.67
+    },
+    {
+      "order": 65,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/69g3i58j",
+      "id": "65",
+      "bbox": [
+        973.13,
+        452.67,
+        57.93,
+        57.93
+      ],
+      "alt": "PDF 图片 65",
+      "contentType": "image/png",
+      "imageFit": "cover",
+      "asset": {
+        "assetId": "50e038d2-78dc-4f04-891e-fe69d13c4bf0",
+        "contentType": "image/png",
+        "byteLength": 5897
+      }
+    },
+    {
+      "order": 66,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/tc72tk7a",
+      "id": "66",
+      "bbox": [
+        948.93,
+        217.47,
+        50.6,
+        50.6
+      ],
+      "alt": "PDF 图片 66",
+      "contentType": "image/png",
+      "imageFit": "cover",
+      "asset": {
+        "assetId": "3d233702-020d-4c72-84ee-ab353a0ed3d7",
+        "contentType": "image/png",
+        "byteLength": 5625
+      }
+    },
+    {
+      "order": 67,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/sbylkfqp",
+      "id": "67",
+      "bbox": [
+        999.53,
+        217.47,
+        50.6,
+        50.6
+      ],
+      "alt": "PDF 图片 67",
+      "contentType": "image/png",
+      "imageFit": "cover",
+      "asset": {
+        "assetId": "bf8e02a4-5b7b-45dd-b15d-513f2ee836d5",
+        "contentType": "image/png",
+        "byteLength": 5625
+      }
+    },
+    {
+      "order": 68,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/b6t43up8",
+      "id": "68",
+      "bbox": [
+        999.53,
+        262.67,
+        50.6,
+        50.6
+      ],
+      "alt": "PDF 图片 68",
+      "contentType": "image/png",
+      "imageFit": "cover",
+      "asset": {
+        "assetId": "f808535c-8328-499e-8151-c54eb2446028",
+        "contentType": "image/png",
+        "byteLength": 5625
+      }
+    },
+    {
+      "order": 69,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/q5k3u9on",
+      "id": "69",
+      "bbox": [
+        950.27,
+        262.67,
+        50.6,
+        50.6
+      ],
+      "alt": "PDF 图片 69",
+      "contentType": "image/png",
+      "imageFit": "cover",
+      "asset": {
+        "assetId": "a22189b8-ad95-401d-add1-234ac9ff8434",
+        "contentType": "image/png",
+        "byteLength": 5625
+      }
+    },
+    {
+      "order": 70,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/8fa98729",
+      "id": "70",
+      "bbox": [
+        14.33,
+        262.67,
+        327.9,
+        115.2
+      ],
+      "alt": "PDF 图片 70",
+      "contentType": "image/png",
+      "imageFit": "cover",
+      "asset": {
+        "assetId": "eab25c7c-3846-4bea-891c-230934c7fae8",
+        "contentType": "image/png",
+        "byteLength": 128098
+      }
+    },
+    {
+      "order": 71,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/9g3a1cju",
+      "id": "71",
+      "bbox": [
+        14.33,
+        120.2,
+        327.8,
+        132.87
+      ],
+      "alt": "PDF 图片 71",
+      "contentType": "image/png",
+      "imageFit": "cover",
+      "asset": {
+        "assetId": "6739f69e-1918-4966-a67b-468096eeac71",
+        "contentType": "image/png",
+        "byteLength": 182305
+      }
+    },
+    {
+      "order": 72,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/xgfatcve",
+      "id": "72",
+      "name": "pdf-text-0072",
+      "bbox": [
+        62.42,
+        33.65,
+        164.48,
+        40
+      ],
+      "geometry": "rect",
+      "text": "技术优势（",
+      "textPreview": "技术优势（",
+      "resolvedFontSize": 32,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 32,
+        "typeface": "KaiTi",
+        "color": "#212121",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "技术优势（"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "技术优势（",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 32,
+            "typeface": "KaiTi",
+            "color": "#212121",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "技术优势（",
+              "fontSize": 32,
+              "typeface": "KaiTi",
+              "color": "#212121",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 73,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/wf6907et",
+      "id": "73",
+      "name": "pdf-text-0073",
+      "bbox": [
+        222.9,
+        33.49,
+        20,
+        40
+      ],
+      "geometry": "rect",
+      "text": "2",
+      "textPreview": "2",
+      "resolvedFontSize": 32,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 32,
+        "typeface": "TimesNewRomanPSMT",
+        "color": "#212121",
+        "bold": true,
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "2"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "2",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 32,
+            "typeface": "TimesNewRomanPSMT",
+            "color": "#212121",
+            "bold": true,
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "2",
+              "fontSize": 32,
+              "typeface": "TimesNewRomanPSMT",
+              "color": "#212121",
+              "bold": true,
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 74,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/jixsv2dk",
+      "id": "74",
+      "name": "pdf-text-0074",
+      "bbox": [
+        238.9,
+        33.65,
+        164,
+        40
+      ],
+      "geometry": "rect",
+      "text": "）：非监督",
+      "textPreview": "）：非监督",
+      "resolvedFontSize": 32,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 32,
+        "typeface": "KaiTi",
+        "color": "#212121",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "）：非监督"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "）：非监督",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 32,
+            "typeface": "KaiTi",
+            "color": "#212121",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "）：非监督",
+              "fontSize": 32,
+              "typeface": "KaiTi",
+              "color": "#212121",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 75,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/yhor2hwz",
+      "id": "75",
+      "name": "pdf-text-0075",
+      "bbox": [
+        398.9,
+        33.49,
+        39.49,
+        40
+      ],
+      "geometry": "rect",
+      "text": "AI",
+      "textPreview": "AI",
+      "resolvedFontSize": 32,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 32,
+        "typeface": "TimesNewRomanPSMT",
+        "color": "#212121",
+        "bold": true,
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "AI"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "AI",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 32,
+            "typeface": "TimesNewRomanPSMT",
+            "color": "#212121",
+            "bold": true,
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "AI",
+              "fontSize": 32,
+              "typeface": "TimesNewRomanPSMT",
+              "color": "#212121",
+              "bold": true,
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 76,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/lkfaxcvq",
+      "id": "76",
+      "name": "pdf-text-0076",
+      "bbox": [
+        434.42,
+        33.65,
+        612.16,
+        40
+      ],
+      "geometry": "rect",
+      "text": "算法大幅提升复杂半导体器件缺陷检测能力",
+      "textPreview": "算法大幅提升复杂半导体器件缺陷检测能力",
+      "resolvedFontSize": 32,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 32,
+        "typeface": "KaiTi",
+        "color": "#212121",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "算法大幅提升复杂半导体器件缺陷检测能力"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "算法大幅提升复杂半导体器件缺陷检测能力",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 32,
+            "typeface": "KaiTi",
+            "color": "#212121",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "算法大幅提升复杂半导体器件缺陷检测能力",
+              "fontSize": 32,
+              "typeface": "KaiTi",
+              "color": "#212121",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    }
+  ],
+  "composeRuns": []
+}

@@ -1,0 +1,295 @@
+{
+  "schema": "openai.presentation.layout/v4",
+  "unit": "px",
+  "slide": {
+    "aid": "sl/7b0qpe",
+    "id": "7b0qpe",
+    "slide": 1,
+    "layoutId": "155a2937-4929-49cf-b778-9e4f529f0e17",
+    "layoutName": "Title Slide",
+    "layoutType": "title",
+    "masterLayoutId": "1a7a3226-3884-4085-ab85-2ca027e9ce9d",
+    "masterLayoutName": "Master",
+    "backgroundColor": "#FFFFFF",
+    "frame": {
+      "left": 0,
+      "top": 0,
+      "width": 1280,
+      "height": 720
+    }
+  },
+  "theme": {
+    "colorSchemeName": "ChatGPT",
+    "colors": {
+      "accent1": "#156082",
+      "accent2": "#E97132",
+      "accent3": "#196B24",
+      "accent4": "#0F9ED5",
+      "accent5": "#A02B93",
+      "accent6": "#4EA72E",
+      "bg1": "#FFFFFF",
+      "bg2": "#000000",
+      "tx1": "#1F1F1F",
+      "tx2": "#FFFFFF",
+      "dk1": "#000000",
+      "lt1": "#FFFFFF",
+      "dk2": "#0E2841",
+      "lt2": "#E8E8E8",
+      "hlink": "#467886",
+      "folHlink": "#96607D"
+    },
+    "typefaces": [
+      "KaiTi"
+    ]
+  },
+  "inheritedLayers": [
+    {
+      "scope": "layout",
+      "id": "155a2937-4929-49cf-b778-9e4f529f0e17",
+      "name": "Title Slide",
+      "type": "title",
+      "parentLayoutId": "1a7a3226-3884-4085-ab85-2ca027e9ce9d",
+      "elements": []
+    },
+    {
+      "scope": "master",
+      "id": "1a7a3226-3884-4085-ab85-2ca027e9ce9d",
+      "name": "Master",
+      "type": "master",
+      "elements": []
+    }
+  ],
+  "elements": [
+    {
+      "order": 1,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/w36l8j2t",
+      "id": "1",
+      "bbox": [
+        0,
+        0,
+        1280,
+        720
+      ],
+      "alt": "PDF 图片 1",
+      "contentType": "image/png",
+      "imageFit": "cover",
+      "asset": {
+        "assetId": "12c13c3b-ed1c-443c-8b03-c961625c784f",
+        "contentType": "image/png",
+        "byteLength": 226386
+      }
+    },
+    {
+      "order": 2,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/v2xkzylo",
+      "id": "2",
+      "bbox": [
+        -584.91,
+        -9.67,
+        1702.43,
+        739.67
+      ],
+      "alt": "PDF 矢量元素 2",
+      "contentType": "image/svg+xml",
+      "imageFit": "contain",
+      "asset": {
+        "assetId": "973602c0-094d-46e5-bc05-b52560c1f95e",
+        "contentType": "image/svg+xml",
+        "byteLength": 435
+      }
+    },
+    {
+      "order": 3,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/a1o36tk3",
+      "id": "3",
+      "bbox": [
+        206.47,
+        303.22,
+        229.25,
+        52.51
+      ],
+      "alt": "PDF 矢量元素 3",
+      "contentType": "image/svg+xml",
+      "imageFit": "contain",
+      "asset": {
+        "assetId": "01887fc8-5359-4c3b-ba73-fc4a73437518",
+        "contentType": "image/svg+xml",
+        "byteLength": 31996
+      }
+    },
+    {
+      "order": 4,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/4f6xgr6h",
+      "id": "4",
+      "name": "pdf-vector-0004",
+      "bbox": [
+        64.74,
+        329.15,
+        117.54,
+        0.1
+      ],
+      "geometry": "custom",
+      "lineColor": "#3E3E3E",
+      "lineWidth": 3
+    },
+    {
+      "order": 5,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/5gfy9wn2",
+      "id": "5",
+      "name": "pdf-vector-0005",
+      "bbox": [
+        462.74,
+        329.15,
+        117.54,
+        0.1
+      ],
+      "geometry": "custom",
+      "lineColor": "#3E3E3E",
+      "lineWidth": 3
+    },
+    {
+      "order": 6,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/nyxkvelc",
+      "id": "6",
+      "bbox": [
+        1.73,
+        391.33,
+        652.67,
+        49.06
+      ],
+      "alt": "PDF 矢量元素 6",
+      "contentType": "image/svg+xml",
+      "imageFit": "contain",
+      "asset": {
+        "assetId": "524839ad-aa67-440f-aecf-c9ee1c39b28f",
+        "contentType": "image/svg+xml",
+        "byteLength": 674
+      }
+    },
+    {
+      "order": 7,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/3exg7m5w",
+      "id": "7",
+      "name": "pdf-text-0007",
+      "bbox": [
+        79.62,
+        405.25,
+        500.64,
+        33.4
+      ],
+      "geometry": "rect",
+      "text": "高精度电子半导体AI+3D智能光学检测系统",
+      "textPreview": "高精度电子半导体AI+3D智能光学检测系统",
+      "resolvedFontSize": 26.72,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 26.72,
+        "typeface": "KaiTi",
+        "color": "#FFFFFF",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "wrap": "none",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "高精度电子半导体AI+3D智能光学检测系统"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "高精度电子半导体AI+3D智能光学检测系统",
+          "lineSpacingPercent": 100000,
+          "resolvedTextStyle": {
+            "fontSize": 26.72,
+            "typeface": "KaiTi",
+            "color": "#FFFFFF",
+            "alignment": "left",
+            "lineSpacing": 1
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "高精度电子半导体AI+3D智能光学检测系统",
+              "fontSize": 26.72,
+              "typeface": "KaiTi",
+              "color": "#FFFFFF",
+              "alignment": "left",
+              "lineSpacing": 1
+            }
+          ],
+          "marginLeft": 0
+        }
+      ],
+      "lineWidth": 0
+    },
+    {
+      "order": 8,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/twj298jm",
+      "id": "8",
+      "bbox": [
+        56.47,
+        23.93,
+        125.67,
+        48.67
+      ],
+      "alt": "PDF 图片 8",
+      "contentType": "image/png",
+      "imageFit": "cover",
+      "asset": {
+        "assetId": "2d9bdc1d-fb1c-4d0d-a856-1b010cc0cdc8",
+        "contentType": "image/png",
+        "byteLength": 11164
+      }
+    },
+    {
+      "order": 9,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/svql0321",
+      "id": "9",
+      "bbox": [
+        228.53,
+        465.74,
+        195.61,
+        39.59
+      ],
+      "alt": "PDF 矢量元素 9",
+      "contentType": "image/svg+xml",
+      "imageFit": "contain",
+      "asset": {
+        "assetId": "62f951f4-ecfb-4117-bcec-79fe343db997",
+        "contentType": "image/svg+xml",
+        "byteLength": 38742
+      }
+    }
+  ],
+  "composeRuns": []
+}
