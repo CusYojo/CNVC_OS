@@ -346,8 +346,11 @@ metaRouter.post('/leads/sync-radar', async (req: AuthedRequest, res, next) => {
       const publisherNames = [it.source_name, it.school, it.account_name, it.wx_name]
         .map((value: unknown) => meaningfulRadarText(value))
         .filter(Boolean)
-      // 主体名称按“公司 > 项目 > 实验室/团队 > 标题明确实体”降级。
+      // 主体名称按”公司 > 项目 > 实验室/团队 > 标题明确实体”降级。
       // 描述性短语、谓语句和材料名称不再直接作为 lead.name。
+      const sg = String(it.source_group || '')
+      const channel = /arxiv/i.test(String(it.source || '')) ? '论文'
+        : (sg || '其他')
       const name = deriveRadarSubjectName({
         isPaper: isArxiv,
         companyNames: [explicitCompanyName],
@@ -357,6 +360,7 @@ metaRouter.post('/leads/sync-radar', async (req: AuthedRequest, res, next) => {
         title: it.title,
         articleText: it.article_text || it.summary,
         excludedNames: publisherNames,
+        channel,
       }).slice(0, 120)
       const useProjName = isSpecificLeadSubjectName(projName, isArxiv)
       if (!name) { invalid += 1; continue }
@@ -420,11 +424,6 @@ metaRouter.post('/leads/sync-radar', async (req: AuthedRequest, res, next) => {
       // 先通过现有质量/噪音过滤，再进入增量合并；同批同名仍参与合并，以免丢失后续来源。
       if (seenBatchNames.has(name)) batchDuplicates += 1
       else seenBatchNames.add(name)
-      // 渠道：直接用雷达 source_group 原值（机构公众号/高校公众号/创投新闻/微信群聊/arxiv→论文），
-      // 与前端筛选项一一对应，公众号可单独召回。
-      const sg = String(it.source_group || '')
-      const channel = /arxiv/i.test(String(it.source || '')) ? '论文'
-        : (sg || '其他')
       const highlights = splitList(prof.core_highlights, 5)
       const nextActions: string[] = Array.isArray(it.next_actions) ? it.next_actions.map((x: unknown) => String(x)) : []
       const risks = splitList(prof.risk_notes, 5)

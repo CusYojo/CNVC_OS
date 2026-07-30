@@ -943,7 +943,7 @@ VAGUE_PROJECT_START_RE = re.compile(
     r"本次|全体|让|让更多|让我|使我|并使|并|基于|后两年|共享|未来|"
     r"作为|为|以|从|在|将|把|被|由|于|联合|面对|通过|围绕|聚焦|落地|年初|年末|年底|月初|月末|算|"
     r"了解|开拓|真实|价值|推荐阅读|背靠|赠礼环节|学员们|深刻|深刻认识|深刻体会|深刻理解|"
-    r"购票观众|课题被|科创报国|促进|紧跟|也|过去|活动在|锤炼|需要|更多|不再|只有|至今|随后|共同|双方|各自|截止|"
+    r"购票观众|课题被|科创报国|促进|紧跟|对标|正是|也|过去|活动在|锤炼|需要|更多|不再|只有|至今|随后|共同|双方|各自|截止|"
     r"一是|二是|三是|四是)"
 )
 VAGUE_PROJECT_BODY_RE = re.compile(
@@ -1052,6 +1052,24 @@ def is_specific_project_subject_name(value: Any) -> bool:
     ):
         return False
     if not subject_marker and re.search(r"(的|了|是|以|在|为|将|把|被|对于|关于|正在|让|到|体会|感受|觉得|知道|认识|深刻|意识|理解|了解|学到|得到)", name):
+        return False
+    # 拒绝明显是完整句子的名称
+    if re.search(r"[？！。！]", name):
+        return False
+    # 拒绝长英文标题（>40字符且纯英文，通常是论文标题）
+    if re.fullmatch(r"[A-Za-z0-9\s:,\-()\[\]&;+]+", name) and len(name) > 40:
+        return False
+    # 拒绝问句
+    if re.search(r"如何|为什么|是否|怎么|怎样|什么", name) and not subject_marker:
+        return False
+    # 拒绝明显的多公司融资综述标题
+    if re.search(r"\d+\s*[家个]", name) and re.search(r"(?:企业|公司|融资|上市)", name):
+        return False
+    # 拒绝以年份/日期开头的泛化描述
+    if re.match(r"^(?:19|20)\d{2}[年\s]", name) and not subject_marker:
+        return False
+    # 拒绝以纯数字、日期、序号开头
+    if re.match(r"^(?:\d+[月日年个只家项位次]|第\s*\d+\s*期)", name):
         return False
     return True
 
@@ -1238,6 +1256,12 @@ def infer_project_name(item: dict, text: str) -> str:
     explicit_project = normalize_project_candidate(item.get("project_name", ""))
     is_academic = item.get("source_group") == "高校公众号" or bool(re.search(r"(?:学术成果|科研成果|课题组|实验室)", title))
 
+    # 新闻综述/榜单标题 → 不提取单一项目名
+    if re.search(r"\d+\s*[家个].{0,30}(?:企业|公司).{0,30}(?:融资|投资|上市)", title):
+        return "未命名项目"
+    if re.search(r"(?:盘点|榜单|汇总|综述|周报|月报|季报|年报|早报|晚报)", title):
+        return "未命名项目"
+
     verified_source_subject = extract_verified_source_subject(title)
     if verified_source_subject:
         return verified_source_subject
@@ -1296,21 +1320,6 @@ def infer_project_name(item: dict, text: str) -> str:
     news_subject = extract_primary_news_subject(text)
     if news_subject:
         return news_subject
-
-
-    # 高校成果文章容易把“超脑网络”“快速消亡”等论文概念误当成公司名。
-    # 文章明确写出实验室/课题组/负责人团队时，先使用可核验的研究主体。
-    subject_patterns = (
-        r"((?:[\u4e00-\u9fff]{2,20}(?:大学|学院|研究所|医院))[\u4e00-\u9fff·]{0,16}(?:教授|研究员|博士)?团队)",
-        r"([\u4e00-\u9fffA-Za-z0-9·]{2,30}(?:重点实验室|实验室|研究中心|工程中心|研究院|课题组))",
-        r"([\u4e00-\u9fff·]{2,6}(?:教授|研究员|博士)?团队)",
-    )
-    if item.get("source_group") == "高校公众号" or re.search(r"(?:学术成果|科研成果|课题组|实验室)", title):
-        for pattern in subject_patterns:
-            candidates = [clean_text(match.group(1)) for match in re.finditer(pattern, title + "\n" + text)]
-            candidates = [candidate for candidate in candidates if is_specific_project_subject_name(candidate)]
-            if candidates:
-                return sorted(set(candidates), key=len, reverse=True)[0]
 
     for company in re.finditer(r"([\u4e00-\u9fffA-Za-z0-9]{2,30}(?:科技|智能|机器人|医药|生物|材料|能源|半导体|电子|医疗|信息|数据|软件|网络|光电|先导院|研究院))(?:有限公司|公司|完成|获|宣布|近日)?", title + " " + text):
         candidate = clean_text(company.group(1))
