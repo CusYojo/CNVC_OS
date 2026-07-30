@@ -384,8 +384,8 @@ PDF 转换模板必须使用 `sourceMode: "pdf-converted"` 并提供
 ```
 
 图表和表格操作不会进入普通 `content-plan.json`，而会写入
-`native-operations.json`，后续使用经过白名单校验的 OpenXML 原位适配器
-对原生对象定向修改；没有安全适配器的操作必须拒绝执行。
+`native-operations.json`，后续使用 Python `zipfile` + Open XML 对
+原生对象定向修改。
 
 ## 禁止行为
 

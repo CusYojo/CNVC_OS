@@ -19,7 +19,7 @@ description: 基于已经完成1:1复原的可编辑PPTX模板生成当前项目
 
 ## 必须遵循
 
-- 遵循演示文稿模板跟随和原位编辑规范。
+- 使用当前会话中的 Presentations 技能。
 - 正式投资建议书任务同时遵循
   [references/output-contract.md](references/output-contract.md)。
 - 输入模板必须是已经可编辑的 `.pptx`；若只有 PDF，先使用
@@ -27,9 +27,8 @@ description: 基于已经完成1:1复原的可编辑PPTX模板生成当前项目
 - PDF 转换模板必须提供 `conversion-handoff.json`，且其中
   `watermarkQaPassed`、`editabilityReviewPassed` 和
   `readyForContentReplacement` 均为 `true`。不得跳过交接门槛。
-- 生产运行时使用 Python 标准库读取和原位修改 PPTX OpenXML，只重写白名单
-  文字所在的 slide XML 与来源备注；禁止依赖 Codex Desktop 私有包或使用
-  `python-pptx` 重建模板。
+- 使用 Python `zipfile` + Open XML 直接操作 PPTX 包结构，不依赖外部
+  Node.js 运行时或 `@oai/artifact-tool`。
 - 默认所有对象均为 `KEEP`。只有清单明确授权的对象才能修改。
 - 共享语义图标（例如使命、愿景、价值观图标）必须登记为保护对象并复用，
   不因文字内容变化而替换。
@@ -69,8 +68,9 @@ python3 "$SKILL_DIR/scripts/check_environment.py" --json
 ```
 
 检查器会验证本技能和 `pdf-to-editable-ppt` 的必要脚本，并复用 PDF 技能的
-PptxGenJS 生成、LibreOffice/Poppler 无头渲染、Tesseract 语言和字体检查。
-技能不在同一父目录时设置 `PDF_TO_EDITABLE_PPT_SKILL_DIR`。
+LibreOffice 无头 PDF 导出、pdftoppm 渲染、Tesseract 语言包和字体检查。
+技能不在同一父目录时，设置 `PDF_TO_EDITABLE_PPT_SKILL_DIR`。
+Presentations 技能不在默认插件缓存时同时设置 `PRESENTATIONS_SKILL_DIR`。
 `readyForDefaultWorkflow` 不为 `true` 时不得进入严格全流程。
 
 ## 工作流程
@@ -102,16 +102,17 @@ PptxGenJS 生成、LibreOffice/Poppler 无头渲染、Tesseract 语言和字体�
 
 ### 2. 建立对象地图
 
-使用本技能自带的 OpenXML 模板分析脚本：
+使用本技能自带的 Python Open XML 模板分析脚本：
 
 ```bash
-python3 "$SKILL_DIR/scripts/analyze_template_openxml.py" \
+python3 "$SKILL_DIR/scripts/analyze_template.py" \
   --input "/absolute/editable-template.pptx" \
   --output "/absolute/build/template-map.json"
 ```
 
-分析器必须读取原 PPTX 的稳定对象 ID、文字、坐标、样式、媒体引用和版式关系；
-不得只从字体、颜色或截图推断模板。
+分析器通过 Python `zipfile` 解包 PPTX，读取幻灯片 XML、版式关系、
+稳定对象 ID、文字、坐标、样式、媒体引用和版式关系；不得只从字体、颜色或
+截图推断模板。
 
 逐页检查渲染图与对象地图。按
 [references/object-classification.md](references/object-classification.md)
@@ -216,16 +217,14 @@ python3 "$SKILL_DIR/scripts/generate_apply_plan.py" \
 
 ### 6. 原位替换文字和图片
 
-使用本技能自带的 OpenXML 原位应用脚本：
+使用本技能自带的 Python Open XML 原位应用脚本：
 
 ```bash
-python3 "$SKILL_DIR/scripts/apply_template_plan_openxml.py" \
+python3 "$SKILL_DIR/scripts/apply_template_plan.py" \
   --template "/absolute/editable-template.pptx" \
   --plan "/absolute/build/content-plan.json" \
   --output "/absolute/build/content-replaced.pptx" \
-  --render-dir "/absolute/build/final-renders" \
-  --libreoffice "/usr/bin/libreoffice" \
-  --pdftoppm "/usr/bin/pdftoppm"
+  --render-dir "/absolute/build/final-renders"
 ```
 
 如果生成脚本提示普通应用计划为空，则跳过本步骤，直接从锁定模板执行原生
@@ -257,13 +256,13 @@ python3 "$SKILL_DIR/scripts/apply_structural_plan.py" \
 
 ### 8. 更新原生图表和表格
 
-仅当 `native-operations.json` 非空时执行，并使用经过专项验证的公开运行时
+仅当 `native-operations.json` 非空时执行。使用 Python `zipfile` + Open XML，
 按稳定对象 ID 修改现有图表系列或表格单元格。
 
 本技能当前没有可安全通用化的原生图表/表格批量执行器。终端任务必须为这些
-操作生成逐项执行报告并重新 inspect 目标对象；如果没有对应执行代码或无法
-按稳定对象 ID 定位，必须停止并报告限制，不得把非空
-`native-operations.json` 当作已经应用。
+操作生成逐项执行报告并重新检查目标对象；如果没有对应执行代码或无法按稳定
+对象 ID 定位，必须停止并报告限制，不得把非空 `native-operations.json`
+当作已经应用。
 
 - 保留图表类型、坐标轴、配色、字体和位置；
 - 保留表格列宽、行高、边框、填充和字体；
@@ -298,7 +297,7 @@ python3 "$SKILL_DIR/scripts/apply_structural_plan.py" \
 在执行完整槽位删除前，使用同一份 `content-plan.json` 验证普通替换阶段：
 
 ```bash
-python3 "$SKILL_DIR/scripts/validate_template_result_openxml.py" \
+python3 "$SKILL_DIR/scripts/validate_template_result.py" \
   --template "/absolute/editable-template.pptx" \
   --result "/absolute/final.pptx" \
   --plan "/absolute/build/content-plan.json" \
@@ -307,7 +306,7 @@ python3 "$SKILL_DIR/scripts/validate_template_result_openxml.py" \
 
 最终文件随后必须：
 
-1. 渲染模板和结果的全部页面；
+1. 使用 LibreOffice `--headless` + pdftoppm 渲染模板和结果的全部页面为 PNG；
 2. 对授权替换区域之外进行视觉差异检查；
    纯终端服务器必须实际审阅逐页 PNG；只生成渲染图但未读取，不算完成。
 3. 将最终删除对象与 `structural-apply-report.json` 逐项核对；
@@ -333,9 +332,9 @@ python3 "/absolute/pdf-to-editable-ppt/scripts/validate_watermark_handoff.py" \
 ```
 
 Tesseract 不在 `PATH` 时必须同时传入 `--tesseract`；Linux 需要
-`chi_sim` 与 `eng` 两个语言包。服务器没有 Microsoft PowerPoint 时，执行
-LibreOffice `--headless` 与 Poppler 逐页渲染检查，并在交付中
-明确披露替代验证。
+`chi_sim` 与 `eng` 两个语言包。服务器没有 Microsoft PowerPoint 时，使用
+LibreOffice `--headless` PDF 导出 + pdftoppm 逐页渲染，然后对渲染结果
+执行 OCR 验收；在交付中明确披露"未经过 Microsoft PowerPoint 原生验证"。
 
 再分析最终 PPTX，生成 `final-template-map.json`，并运行：
 

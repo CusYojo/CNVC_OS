@@ -65,11 +65,8 @@ function conversionFailureMessage(error: unknown) {
   if (/(?:pdftoppm|Poppler).*(?:not found|No such file|不存在|缺少)/i.test(detail)) {
     return 'PDF 模板转换环境缺少 Poppler，请配置 pdftoppm 后重试'
   }
-  if (/pptxgenjs|Cannot find package ['"]?pptxgenjs/i.test(detail)) {
-    return 'PDF 模板转换环境缺少 PptxGenJS 运行时，请重新安装项目依赖'
-  }
-  if (/LibreOffice|soffice/i.test(detail)) {
-    return 'PDF 模板转换环境缺少 LibreOffice 无头渲染运行时'
+  if (/artifact-tool|Presentations 技能|Presentation/i.test(detail)) {
+    return 'PDF 模板转换环境缺少 Presentations 技能或 LibreOffice 渲染管线'
   }
   if (
     /水印交接验收失败|最终渲染图中仍识别到目标水印|PPTX 包内仍包含目标水印/i.test(detail)
@@ -173,9 +170,6 @@ export async function convertUploadedInvestmentPdfTemplate(input: {
   const ocrEngine = tesseract ? 'tesseract' : 'auto'
   const pdftoppm = process.env.AI_PDF_TO_PPT_PDFTOPPM
     || findExecutable(process.platform === 'win32' ? 'pdftoppm.exe' : 'pdftoppm')
-  const libreoffice = process.env.AI_PDF_TO_PPT_LIBREOFFICE
-    || findExecutable(process.platform === 'win32' ? 'soffice.exe' : 'libreoffice')
-    || findExecutable(process.platform === 'win32' ? 'soffice.exe' : 'soffice')
   const runtimeCacheDir = path.resolve(
     process.cwd(),
     '.runtime',
@@ -207,13 +201,6 @@ export async function convertUploadedInvestmentPdfTemplate(input: {
       'PDF 模板转换环境缺少 Poppler，请配置 pdftoppm 后重试',
       503,
       'PDF_TO_PPT_POPPLER_UNAVAILABLE',
-    )
-  }
-  if (!libreoffice) {
-    throw typedError(
-      'PDF 模板转换环境缺少 LibreOffice，请配置无头渲染运行时后重试',
-      503,
-      'PDF_TO_PPT_LIBREOFFICE_UNAVAILABLE',
     )
   }
   if (!existsSync(rasterReviewScript)) {
@@ -298,7 +285,9 @@ export async function convertUploadedInvestmentPdfTemplate(input: {
   ]
   if (tesseract) args.push('--tesseract', tesseract)
   args.push('--pdftoppm', pdftoppm)
-  args.push('--libreoffice', libreoffice)
+  if (process.env.ARTIFACT_TOOL_DIR) {
+    args.push('--artifact-tool-dir', process.env.ARTIFACT_TOOL_DIR)
+  }
 
   const conversionStartedAt = Date.now()
   let observedProgress = 36

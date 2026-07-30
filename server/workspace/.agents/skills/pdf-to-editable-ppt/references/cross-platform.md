@@ -11,27 +11,26 @@
 
 ## 通用依赖
 
-核心转换在 macOS、Windows 和 Linux 上使用相同的 Python 与 Node.js
+核心转换在 macOS、Windows 和 Linux 上使用相同的 Python
 脚本。运行前执行：
 
 ```bash
 python3 "$SKILL_DIR/scripts/check_environment.py" --json
 ```
 
-检查器会在移除 `DISPLAY` 和 `WAYLAND_DISPLAY` 后使用 PptxGenJS 真实生成
-PPTX，再通过 LibreOffice 和 Poppler 生成 PNG，用于发现缺失依赖、字体
-回退或不能工作的无头渲染器。`core_ready=true`、
-`strict_watermark_qa_ready=true` 和
-`linux_visual_qa_ready=true` 必须同时成立。不要把 macOS 或 Windows 的
-`node_modules` 复制到 Linux。
+检查器会在移除 `DISPLAY` 和 `WAYLAND_DISPLAY` 后，通过
+LibreOffice `--headless` + pdftoppm 真实渲染一张冒烟幻灯片，验证
+Linux OpenXML 渲染管线可用。`core_ready=true`、
+`strict_watermark_qa_ready=true` 和 `linux_visual_qa_ready=true`
+必须同时成立。不要把 macOS 或 Windows 的 `node_modules` 复制到 Linux。
 
 必需依赖：
 
 - Python 3、PyMuPDF、Pillow；
-- Node.js 与项目依赖中的 `pptxgenjs`；
 - Poppler 的 `pdftoppm`；
-- LibreOffice/soffice；
-- Noto CJK 字体。
+- LibreOffice（Linux 无头渲染与冒烟验证）；
+- 内置 Python `zipfile` + Open XML（直接操作 PPTX 包结构，不依赖外部
+  Node.js 运行时）。
 
 OCR 模式还需要 `opencv-python-headless`，并需要 Apple Vision、
 Tesseract 或预先生成的 OCR JSON 中的一种。
@@ -84,15 +83,30 @@ $app.Quit()
 Debian/Ubuntu 可安装：
 
 ```bash
-sudo apt-get install poppler-utils tesseract-ocr tesseract-ocr-chi-sim \
-  libreoffice fonts-noto-cjk
-python3 -m pip install pymupdf pillow opencv-python-headless
+sudo apt-get update
+sudo apt-get install -y \
+  python3 python3-pip \
+  libreoffice \
+  poppler-utils \
+  tesseract-ocr \
+  tesseract-ocr-eng \
+  tesseract-ocr-chi-sim \
+  fonts-noto-cjk
+
+python3 -m pip install \
+  pymupdf pillow opencv-python-headless
 ```
 
-生产运行时不需要 Codex Desktop、Presentations 插件或
-`@oai/artifact-tool`，也不得把这些私有目录复制到服务器。项目执行
-`npm ci` 后直接运行环境检查；无头生成、LibreOffice 转 PDF 或 Poppler
-渲染任一步未通过时必须停止。
+Alpine Linux 使用 musl，Debian/Ubuntu/RHEL 通常使用 glibc。
+PPTX 操作使用 Python `zipfile` + Open XML，不依赖外部 Node.js 原生模块，
+因此跨 libc 兼容性更好。若 Presentations 技能脚本位于自定义目录：
+
+```bash
+export PRESENTATIONS_SKILL_DIR="/opt/codex-skills/presentations"
+python3 "$SKILL_DIR/scripts/check_environment.py" --json
+```
+
+不得仅凭命令存在就继续；LibreOffice 无头冒烟测试未通过时必须停止。
 
 最终水印严格验收需要中文 Tesseract 语言包。只有英文语言包时不得把中文
 水印 OCR 标记为已完成；严格模式实际要求 `chi_sim` 与 `eng` 同时存在。
@@ -111,8 +125,8 @@ python3 "$SKILL_DIR/scripts/convert_pdf.py" \
   --ocr-title-font "Microsoft YaHei"
 ```
 
-Linux 没有 Microsoft PowerPoint。使用 LibreOffice 和 Poppler 完成逐页
-PNG 检查：
+Linux 没有 Microsoft PowerPoint。使用 Presentations 技能的渲染器完成
+逐页检查，并可用 LibreOffice 做兼容性冒烟测试：
 
 ```bash
 libreoffice --headless --convert-to pdf --outdir /data/verify \
@@ -165,13 +179,13 @@ LibreOffice 对字体、SVG、表格行高和图表标记的计算可能不同�
 - 生成系统与最终打开系统的字体不同会改变换行和基线。
 - 优先安装源 PDF 使用的字体；无法安装时，明确指定 OCR 字体并逐页复查。
 - Windows PowerPoint 是最终兼容性验证的首选；macOS PowerPoint 次之。
-- Linux 使用 LibreOffice 与 Poppler 双重检查，但交付时说明没有经过
+- Linux 使用内置渲染器与 LibreOffice 双重检查，但交付时说明没有经过
   Microsoft PowerPoint 原生验证。
 
 ## 服务器安全与资源限制
 
 - 使用非 root 服务账号并在运行前设置 `umask 077`；
-- 为每个任务使用独立工作目录，Node 依赖只从项目锁文件安装；
+- 为每个任务使用独立工作目录，不复用已有 `node_modules`；
 - 默认保留 `--max-pages 300`、`--command-timeout-seconds 1800` 和
   `--watermark-qa-ocr-timeout-seconds 120` 的保护限制；
 - 对不可信 PDF/PPTX 使用容器、CPU/内存/磁盘配额和禁网策略；
