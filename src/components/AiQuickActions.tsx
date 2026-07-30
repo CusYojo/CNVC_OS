@@ -11,6 +11,7 @@ import {
   Upload,
 } from 'lucide-react'
 import { apiGet, apiPost, ApiError } from '../lib/api'
+import { uid } from '../lib/uid'
 import type { Project } from '../types'
 import { Button, Modal, ProgressBar } from './ui'
 
@@ -285,12 +286,14 @@ export function AiQuickActions({
       setTemplateError('模板文件不能超过 25MB。')
       return
     }
+    // 公网 HTTP 不是安全上下文，不能直接调用 crypto.randomUUID()。
+    // uid() 在 HTTPS/localhost 使用原生 UUID，在 HTTP 环境自动降级。
+    const progressId = uid()
+    const startedAt = new Date().toISOString()
     if (isInvestmentPpt) setAnalyzingInvestmentPpt(true)
     else setAnalyzingCustomTemplate(true)
     setTemplateError('')
     setAnalyzedTemplate(null)
-    const progressId = crypto.randomUUID()
-    const startedAt = new Date().toISOString()
     let latestProgress: TemplateAnalysisProgress = {
       id: progressId,
       fileName: file.name,
@@ -306,23 +309,28 @@ export function AiQuickActions({
     ) => {
       latestProgress = typeof next === 'function' ? next(latestProgress) : next
       if (isInvestmentPpt) {
-        onPreparationProgress?.({
-          id: latestProgress.id,
-          actionId: 'investment_ppt',
-          actionLabel: action?.label ?? '投资建议书（PPT）',
-          projectId: project.id,
-          projectName: project.name,
-          conversationId,
-          fileName: latestProgress.fileName,
-          status: latestProgress.status === 'failed' ? 'failed' : 'running',
-          stage: latestProgress.stage,
-          // 模板读取与预检是整个 PPT 生成流程的前置阶段，占总进度前 10%。
-          progress: Math.max(1, Math.min(10, Math.ceil(latestProgress.progress / 10))),
-          startedAt: latestProgress.startedAt,
-          updatedAt: latestProgress.updatedAt,
-          elapsedSeconds: latestProgress.elapsedSeconds,
-          errorMessage: latestProgress.errorMessage,
-        })
+        try {
+          onPreparationProgress?.({
+            id: latestProgress.id,
+            actionId: 'investment_ppt',
+            actionLabel: action?.label ?? '投资建议书（PPT）',
+            projectId: project.id,
+            projectName: project.name,
+            conversationId,
+            fileName: latestProgress.fileName,
+            status: latestProgress.status === 'failed' ? 'failed' : 'running',
+            stage: latestProgress.stage,
+            // 模板读取与预检是整个 PPT 生成流程的前置阶段，占总进度前 10%。
+            progress: Math.max(1, Math.min(10, Math.ceil(latestProgress.progress / 10))),
+            startedAt: latestProgress.startedAt,
+            updatedAt: latestProgress.updatedAt,
+            elapsedSeconds: latestProgress.elapsedSeconds,
+            errorMessage: latestProgress.errorMessage,
+          })
+        } catch (progressError) {
+          // 会话任务卡渲染异常不能阻塞模板上传，也不能让按钮永久保持加载状态。
+          console.warn('模板分析进度未能同步到会话任务卡', progressError)
+        }
       } else {
         setTemplateProgress(latestProgress)
       }
