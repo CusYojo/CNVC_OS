@@ -40,6 +40,7 @@ import {
   COMPLIANCE_INVESTMENT_REASON_TOPICS,
 } from './aiComplianceWorkflowService.js'
 import { generateInvestmentProposalDocx } from './aiInvestmentProposalDocumentService.js'
+import { generateInvestmentRecommendationPptFromTemplate } from './aiEditablePptContentReplacerService.js'
 
 type ProjectLike = {
   name: string
@@ -758,7 +759,7 @@ export async function generateBusinessDocx(input: {
           line: 360,
         },
         keepNext: options.keepNext,
-        keepLines: true,
+        keepLines: false,
         indent: options.numberingInstance === undefined ? { firstLine: 480 } : undefined,
         alignment: AlignmentType.JUSTIFIED,
         children: [
@@ -792,14 +793,21 @@ export async function generateBusinessDocx(input: {
         reference: level === 1 ? 'compliance-level-1' : 'compliance-level-2',
         level: 0,
       },
+      alignment: AlignmentType.LEFT,
       keepNext: true,
       keepLines: true,
       spacing: { before: level === 1 ? 240 : 0, after: 0, line: 360 },
+      // 模板的 List Paragraph 样式自带字符首行缩进。标题段必须在段落级
+      // 显式覆盖，否则 Word/WPS 会在编号缩进之外再次叠加样式缩进，
+      // 导致“一、”和“（1）”整体右移。
+      indent: level === 1
+        ? { firstLine: 0 }
+        : { left: 0, firstLine: 482 },
       children: [new TextRun({
         text: value,
         font: runFont(profile.bodyFont),
         size: 24,
-        bold: level === 1,
+        bold: true,
         color: '000000',
       })],
     })
@@ -813,9 +821,7 @@ export async function generateBusinessDocx(input: {
             status: '资料缺口' as const,
             sourceIndexes: [],
           }]
-      findings.forEach((finding, index) => contentChildren.push(findingParagraph(finding, {
-        keepNext: index < findings.length - 1,
-      })))
+      findings.forEach((finding) => contentChildren.push(findingParagraph(finding)))
     }
 
     contentChildren.push(complianceHeading('公司情况介绍', 1))
@@ -831,10 +837,9 @@ export async function generateBusinessDocx(input: {
           status: '资料缺口' as const,
           sourceIndexes: [],
         })
-    renderedReasons.forEach((finding, index) => contentChildren.push(findingParagraph(finding, {
+    renderedReasons.forEach((finding) => contentChildren.push(findingParagraph(finding, {
       boldLead: true,
       numberingInstance: 0,
-      keepNext: index < renderedReasons.length - 1,
     })))
 
     contentChildren.push(complianceHeading('投资计划', 1))
@@ -846,9 +851,7 @@ export async function generateBusinessDocx(input: {
           status: '资料缺口' as const,
           sourceIndexes: [],
         }]
-    renderedPlan.forEach((finding, index) => contentChildren.push(findingParagraph(finding, {
-      keepNext: index < renderedPlan.length - 1,
-    })))
+    renderedPlan.forEach((finding) => contentChildren.push(findingParagraph(finding)))
 
     contentChildren.push(complianceHeading('投资情形分析', 1))
     const analyses = section('投资情形分析')?.findings ?? []
@@ -858,10 +861,9 @@ export async function generateBusinessDocx(input: {
           status: '资料缺口' as const,
           sourceIndexes: [],
         })
-    renderedAnalyses.forEach((finding, index) => contentChildren.push(findingParagraph(finding, {
+    renderedAnalyses.forEach((finding) => contentChildren.push(findingParagraph(finding, {
       boldLead: true,
       numberingInstance: 1,
-      keepNext: index < renderedAnalyses.length - 1,
     })))
 
     const conclusion = section('结论')?.findings[0]
@@ -1365,7 +1367,6 @@ export async function generateBusinessDocx(input: {
       new Paragraph({
         alignment: AlignmentType.CENTER,
         spacing: { before: 0, after: 0, line: 360 },
-        keepNext: true,
         children: [new TextRun({
           text: title,
           font: runFont(profile.headingFont),
@@ -1539,7 +1540,7 @@ export async function generateBusinessDocx(input: {
                 alignment: AlignmentType.LEFT,
                 suffix: LevelSuffix.NOTHING,
                 style: {
-                  run: { font: runFont(profile.bodyFont), size: 24, bold: false },
+                  run: { font: runFont(profile.bodyFont), size: 24, bold: true },
                   paragraph: { indent: { left: 1140, hanging: 720 } },
                 },
               }],
@@ -1773,6 +1774,23 @@ async function generateCustomTemplatePptx(input: {
   pptx.title = input.content.title
   pptx.theme = { headFontFace: headingFont, bodyFontFace: font }
   const references = usedSourceGroups(input.content, input.sources)
+  const addSourceNotes = (slide: PptxGenJS.Slide, indexes: number[]) => {
+    const validIndexes = [...new Set(indexes)]
+      .filter((index) => Number.isInteger(index) && Boolean(input.sources[index]))
+    if (!validIndexes.length) return
+    slide.addNotes([
+      '[Sources]',
+      ...validIndexes.map((index) => {
+        const source = input.sources[index]
+        const locator = source.locator
+          || (Number.isInteger(source.chunkIndex)
+            ? `知识片段 ${source.chunkIndex}`
+            : '文件级定位')
+        const version = source.versionOrDate ? `；版本/日期 ${source.versionOrDate}` : ''
+        return `- S${index + 1}；${source.sourceName}；${locator}${version}`
+      }),
+    ].join('\n'))
+  }
   const marginX = width * 0.06
   const contentWidth = width - marginX * 2
   const footerY = height - 0.36
@@ -1796,6 +1814,7 @@ async function generateCustomTemplatePptx(input: {
       color: '777777',
       margin: 0,
       fit: 'shrink',
+      objectName: `slot.slide.${page}.footer_source`,
     })
     slide.addText(String(page), {
       x: width - marginX - 0.45,
@@ -1808,6 +1827,7 @@ async function generateCustomTemplatePptx(input: {
       color: '777777',
       align: 'right',
       margin: 0,
+      objectName: `slot.slide.${page}.page_number`,
     })
   }
   const addHeader = (slide: PptxGenJS.Slide, title: string, page: number, source = '') => {
@@ -1832,6 +1852,7 @@ async function generateCustomTemplatePptx(input: {
       color: primary,
       margin: 0,
       fit: 'shrink',
+      objectName: `slot.slide.${page}.title`,
     })
     addFooter(slide, page, source)
   }
@@ -1868,6 +1889,7 @@ async function generateCustomTemplatePptx(input: {
     valign: 'middle',
     margin: 0,
     fit: 'shrink',
+    objectName: 'cover.project_name',
   })
   cover.addText(input.content.title, {
     x: marginX,
@@ -1883,6 +1905,7 @@ async function generateCustomTemplatePptx(input: {
     valign: 'middle',
     margin: 0,
     fit: 'shrink',
+    objectName: 'cover.document_title',
   })
   cover.addText(input.content.executiveSummary, {
     x: width * 0.16,
@@ -1897,6 +1920,7 @@ async function generateCustomTemplatePptx(input: {
     valign: 'middle',
     margin: 0,
     fit: 'shrink',
+    objectName: 'cover.executive_summary',
   })
   cover.addText(`资料截止：${input.sourceCutoffDate}\n项目投资分析`, {
     x: width * 0.25,
@@ -1910,10 +1934,21 @@ async function generateCustomTemplatePptx(input: {
     align: 'center',
     margin: 0,
     fit: 'shrink',
+    objectName: 'cover.date',
   })
+  addSourceNotes(
+    cover,
+    input.content.executiveSummarySourceIndexes
+      ?? input.content.sections.flatMap((section) =>
+        section.findings.flatMap((finding) => finding.sourceIndexes)).slice(0, 8),
+  )
 
   const requestedMax = Number.parseInt(String(input.pageCount || '20'), 10)
-  const maxSlides = Number.isFinite(requestedMax) ? Math.max(5, Math.min(requestedMax, 30)) : 20
+  const maxSlides = input.template.type === 'investment_recommendation_ppt'
+    ? input.content.sections.length + 2
+    : Number.isFinite(requestedMax)
+      ? Math.max(5, Math.min(requestedMax, 30))
+      : 20
   const selectedSections = input.content.sections.slice(0, Math.max(1, maxSlides - 2))
   selectedSections.forEach((section, index) => {
     const slide = pptx.addSlide()
@@ -1931,6 +1966,7 @@ async function generateCustomTemplatePptx(input: {
       color: primary,
       margin: 0.02,
       fit: 'shrink',
+      objectName: `section.${index + 1}.summary`,
     })
     const firstTable = section.tables?.[0]
     if (firstTable?.rows.length && firstTable.columns.length >= 2) {
@@ -1953,7 +1989,12 @@ async function generateCustomTemplatePptx(input: {
         margin: 0.08,
         valign: 'middle',
         breakLine: false,
+        objectName: `section.${index + 1}.table.1`,
       })
+      addSourceNotes(slide, [
+        ...(section.summarySourceIndexes ?? []),
+        ...firstTable.sourceIndexes,
+      ])
       return
     }
     const findings = section.findings.slice(0, 5)
@@ -1984,6 +2025,7 @@ async function generateCustomTemplatePptx(input: {
         align: 'center',
         margin: 0,
         fit: 'shrink',
+        objectName: `section.${index + 1}.finding.${findingIndex + 1}.status`,
       })
       slide.addText(finding.text, {
         x: marginX + Math.max(1.3, width * 0.105),
@@ -1997,8 +2039,13 @@ async function generateCustomTemplatePptx(input: {
         margin: 0.02,
         fit: 'shrink',
         valign: 'top',
+        objectName: `section.${index + 1}.finding.${findingIndex + 1}.text`,
       })
     })
+    addSourceNotes(slide, [
+      ...(section.summarySourceIndexes ?? []),
+      ...findings.flatMap((finding) => finding.sourceIndexes),
+    ])
   })
 
   const referencesSlide = pptx.addSlide()
@@ -2022,6 +2069,7 @@ async function generateCustomTemplatePptx(input: {
     fit: 'shrink',
     breakLine: false,
     paraSpaceAfter: 7,
+    objectName: 'references.entries',
   })
   referencesSlide.addShape(pptx.ShapeType.rect, {
     x: marginX,
@@ -2043,7 +2091,12 @@ async function generateCustomTemplatePptx(input: {
     align: 'center',
     margin: 0,
     fit: 'shrink',
+    objectName: 'references.disclaimer',
   })
+  addSourceNotes(
+    referencesSlide,
+    usedBusinessSourceIndexes(input.content, input.sources.length),
+  )
   await pptx.writeFile({ fileName: input.outputPath })
   const templateBuffer = await readFile(input.template.referencePath)
   const outputZip = await JSZip.loadAsync(await readFile(input.outputPath))
@@ -2100,9 +2153,18 @@ export async function generateBusinessPptx(input: {
   sources: EvidenceSource[]
   sourceCutoffDate: string
   pageCount?: string
+  onProgress?: (
+    update: { stage: string; progress: number },
+  ) => void | Promise<void>
 }) {
   await mkdir(path.dirname(input.outputPath), { recursive: true })
-  if (input.template.type === 'custom_template_document') {
+  if (
+    input.template.type === 'investment_recommendation_ppt'
+    && input.template.customAnalysis?.format === 'pptx'
+  ) {
+    return generateInvestmentRecommendationPptFromTemplate(input)
+  }
+  if (input.template.customAnalysis?.format === 'pptx') {
     return generateCustomTemplatePptx(input)
   }
   const templateBuffer = await readFile(input.template.referencePath)
@@ -2130,14 +2192,37 @@ export async function generateBusinessPptx(input: {
   const defaultSourceLabel = references.length
     ? references.slice(0, 3).map((source) => source.sourceName).join('、')
     : '无可引用项目资料'
+  const addSourceNotes = (slide: PptxGenJS.Slide, indexes: number[]) => {
+    const validIndexes = [...new Set(indexes)]
+      .filter((index) => Number.isInteger(index) && Boolean(input.sources[index]))
+    if (!validIndexes.length) return
+    slide.addNotes([
+      '[Sources]',
+      ...validIndexes.map((index) => {
+        const source = input.sources[index]
+        const locator = source.locator
+          || (Number.isInteger(source.chunkIndex)
+            ? `知识片段 ${source.chunkIndex}`
+            : '文件级定位')
+        const version = source.versionOrDate ? `；版本/日期 ${source.versionOrDate}` : ''
+        return `- S${index + 1}；${source.sourceName}；${locator}${version}`
+      }),
+    ].join('\n'))
+  }
 
   const addFooter = (slide: PptxGenJS.Slide, page: number, source = defaultSourceLabel) => {
-    slide.addShape(pptx.ShapeType.line, { x: 0.55, y: 7.02, w: 12.25, h: 0, line: { color: 'B8B8C7', width: 0.6 } })
+    slide.addShape(pptx.ShapeType.line, {
+      x: 0.55, y: 7.02, w: 12.25, h: 0,
+      line: { color: 'B8B8C7', width: 0.6 },
+      objectName: `slot.slide.${page}.footer_rule`,
+    })
     slide.addText(`来源：${source}　|　资料截止：${input.sourceCutoffDate}`, {
       x: 0.62, y: 7.1, w: 10.9, h: 0.18, fontFace: PPT_FONT, lang: 'zh-CN', fontSize: 7.2, color: '77778B', margin: 0, fit: 'shrink',
+      objectName: `slot.slide.${page}.footer_source`,
     })
     slide.addText(String(page), {
       x: 12, y: 7.08, w: 0.45, h: 0.2, fontFace: PPT_FONT, lang: 'zh-CN', fontSize: 8, color: '77778B', align: 'right', margin: 0,
+      objectName: `slot.slide.${page}.page_number`,
     })
   }
   const addLogo = (slide: PptxGenJS.Slide) => {
@@ -2158,10 +2243,12 @@ export async function generateBusinessPptx(input: {
     slide.addText(sectionLabel, {
       x: 0.22, y: 0.13, w: 1.38, h: 0.18,
       fontFace: PPT_FONT, lang: 'zh-CN', fontSize: 10, bold: true, color: 'FFFFFF', margin: 0, fit: 'shrink',
+      objectName: `slot.slide.${page}.section_label`,
     })
     slide.addText(title, {
       x: 0.72, y: 0.72, w: 11.2, h: 0.42,
       fontFace: PPT_FONT, lang: 'zh-CN', fontSize: 20, bold: true, color: TEMPLATE_PURPLE_DARK, margin: 0, fit: 'shrink',
+      objectName: `slot.slide.${page}.title`,
     })
     slide.addShape(pptx.ShapeType.line, {
       x: 0.72, y: 1.22, w: 11.65, h: 0,
@@ -2181,18 +2268,22 @@ export async function generateBusinessPptx(input: {
   cover.addText(input.project.name, {
     x: 2.1, y: 1.55, w: 9.1, h: 0.66,
     fontFace: PPT_FONT, lang: 'zh-CN', fontSize: 30, bold: true, color: TEMPLATE_PURPLE_DARK, margin: 0, fit: 'shrink', align: 'center',
+    objectName: 'cover.project_name',
   })
   cover.addText('投资建议书', {
     x: 3.7, y: 2.48, w: 6, h: 0.44,
     fontFace: PPT_FONT, lang: 'zh-CN', fontSize: 22, bold: true, color: '20202A', margin: 0, align: 'center',
+    objectName: 'cover.document_title',
   })
   cover.addText('AI 辅助初稿', {
     x: 4.7, y: 3.08, w: 4, h: 0.3,
     fontFace: PPT_FONT, lang: 'zh-CN', fontSize: 13, color: '666675', margin: 0, align: 'center',
+    objectName: 'cover.draft_label',
   })
   cover.addText(`${generatedDateLabel(input.sourceCutoffDate)}\n仅限内部讨论，不构成最终投资决策`, {
     x: 4.25, y: 4.15, w: 4.8, h: 0.64,
     fontFace: PPT_FONT, lang: 'zh-CN', fontSize: 10.5, color: '555566', margin: 0, align: 'center', breakLine: false,
+    objectName: 'cover.date_and_disclaimer',
   })
 
   const requestedMax = Number.parseInt(String(input.pageCount ?? '15'), 10)
@@ -2235,6 +2326,7 @@ export async function generateBusinessPptx(input: {
     margin: 0.12,
     valign: 'middle',
     breakLine: false,
+    objectName: 'section.project_overview.core_facts',
   })
   overview.addShape(pptx.ShapeType.rect, {
     x: 0.72, y: 4.6, w: 11.85, h: 1.22,
@@ -2245,7 +2337,14 @@ export async function generateBusinessPptx(input: {
   })
   overview.addText(input.content.executiveSummary, {
     x: 2.25, y: 4.83, w: 9.75, h: 0.56, fontFace: PPT_FONT, lang: 'zh-CN', fontSize: 11.2, color: '20202A', margin: 0.02, fit: 'shrink',
+    objectName: 'section.project_overview.investment_judgment',
   })
+  addSourceNotes(
+    overview,
+    input.content.executiveSummarySourceIndexes
+      ?? input.content.sections.flatMap((section) =>
+        section.findings.flatMap((finding) => finding.sourceIndexes)).slice(0, 8),
+  )
 
   const agenda = pptx.addSlide()
   addChrome(agenda, '目录', '投资建议书内容框架', 3)
@@ -2260,6 +2359,7 @@ export async function generateBusinessPptx(input: {
     })
     agenda.addText(section.title, {
       x: x + 0.65, y: y - 0.02, w: 4.65, h: 0.3, fontFace: PPT_FONT, lang: 'zh-CN', fontSize: 12.5, color: '252532', margin: 0, fit: 'shrink',
+      objectName: `slot.agenda.section_${index + 1}`,
     })
   })
 
@@ -2274,6 +2374,7 @@ export async function generateBusinessPptx(input: {
     slide.addText(section.summary, {
       x: 0.75, y: 1.48, w: 11.75, h: 0.55,
       fontFace: PPT_FONT, lang: 'zh-CN', fontSize: 14.5, bold: true, color: TEMPLATE_PURPLE_DARK, margin: 0.02, fit: 'shrink', valign: 'middle',
+      objectName: `section.${index + 1}.summary`,
     })
     const findings = section.findings.slice(0, 4)
     findings.forEach((finding, findingIndex) => {
@@ -2283,22 +2384,30 @@ export async function generateBusinessPptx(input: {
         x: 0.8, y, w: 1.12, h: 0.32,
         fill: { color: finding.status === '资料记载' ? 'EBEBFF' : style.fill },
         line: { color: finding.status === '资料记载' ? TEMPLATE_PURPLE : style.color, width: 0.6 },
+        objectName: `section.${index + 1}.finding.${findingIndex + 1}.status_background`,
       })
       slide.addText(finding.status, {
         x: 0.84, y: y + 0.065, w: 1.03, h: 0.16,
         fontFace: PPT_FONT, lang: 'zh-CN', fontSize: 8.5, bold: true,
         color: finding.status === '资料记载' ? TEMPLATE_PURPLE_DARK : style.color, align: 'center', margin: 0,
+        objectName: `section.${index + 1}.finding.${findingIndex + 1}.status`,
       })
       slide.addText(finding.text, {
         x: 2.18, y: y - 0.04, w: 9.75, h: 0.48,
         fontFace: PPT_FONT, lang: 'zh-CN', fontSize: 11.5, color: '20202A', margin: 0.02, fit: 'shrink', breakLine: false,
+        objectName: `section.${index + 1}.finding.${findingIndex + 1}.text`,
       })
       const refs = sourceText(finding.sourceIndexes, input.sources)
       if (refs) slide.addText(refs, {
         x: 2.18, y: y + 0.52, w: 9.75, h: 0.16,
         fontFace: PPT_FONT, lang: 'zh-CN', fontSize: 7.4, color: '77778B', margin: 0, fit: 'shrink',
+        objectName: `section.${index + 1}.finding.${findingIndex + 1}.citation`,
       })
     })
+    addSourceNotes(slide, [
+      ...(section.summarySourceIndexes ?? []),
+      ...findings.flatMap((finding) => finding.sourceIndexes),
+    ])
   })
 
   const closing = pptx.addSlide()
@@ -2314,12 +2423,19 @@ export async function generateBusinessPptx(input: {
     closing.addText(column.title, {
       x: x + 0.25, y: 2.02, w: 3.15, h: 0.3,
       fontFace: PPT_FONT, lang: 'zh-CN', fontSize: 14, bold: true, color: column.color, margin: 0,
+      objectName: `closing.column.${index + 1}.title`,
     })
     closing.addText(column.values.slice(0, 5).map((value) => ({ text: value, options: { bullet: { indent: 14 }, breakLine: true } })), {
       x: x + 0.27, y: 2.55, w: 3.05, h: 3.1,
       fontFace: PPT_FONT, lang: 'zh-CN', fontSize: 10.8, color: '20202A', margin: 0.02, breakLine: false, fit: 'shrink', paraSpaceAfter: 8,
+      objectName: `closing.column.${index + 1}.content`,
     })
   })
+  addSourceNotes(
+    closing,
+    input.content.sections.flatMap((section) =>
+      section.findings.flatMap((finding) => finding.sourceIndexes)),
+  )
 
   const referencesSlide = pptx.addSlide()
   addChrome(referencesSlide, '附录', '引用资料与责任声明', selectedSections.length + 5, '正文实际引用来源见本页')
@@ -2342,6 +2458,7 @@ export async function generateBusinessPptx(input: {
       margin: 0,
       breakLine: false,
       fit: 'shrink',
+      objectName: `references.entry.${index + 1}`,
     })
   })
   referencesSlide.addShape(pptx.ShapeType.rect, {
@@ -2352,7 +2469,12 @@ export async function generateBusinessPptx(input: {
   referencesSlide.addText(input.template.disclaimer, {
     x: 1.05, y: 5.9, w: 11.2, h: 0.28,
     fontFace: PPT_FONT, lang: 'zh-CN', fontSize: 9.5, color: '555566', margin: 0, align: 'center', fit: 'shrink',
+    objectName: 'references.disclaimer',
   })
+  addSourceNotes(
+    referencesSlide,
+    usedBusinessSourceIndexes(input.content, input.sources.length),
+  )
   await pptx.writeFile({ fileName: input.outputPath })
   const outputZip = await JSZip.loadAsync(await readFile(input.outputPath))
   const slideParts = Object.keys(outputZip.files).filter((name) => /^ppt\/slides\/slide\d+\.xml$/.test(name))
@@ -2397,7 +2519,7 @@ export async function generateBusinessPptxPreview(input: {
   sourceCutoffDate: string
 }) {
   await mkdir(path.dirname(input.outputPath), { recursive: true })
-  const customCanvas = input.template.type === 'custom_template_document'
+  const customCanvas = input.template.customAnalysis?.format === 'pptx'
     ? customPptSize(input.template)
     : undefined
   const width = 1600
@@ -2409,7 +2531,7 @@ export async function generateBusinessPptxPreview(input: {
   const customProfile = input.template.customAnalysis?.formatProfile
   const previewFont = customProfile?.primaryFont || PPT_FALLBACK_FONT
   const fontStack = `"${previewFont}", "Hiragino Sans GB", sans-serif`
-  if (input.template.type === 'custom_template_document') {
+  if (input.template.customAnalysis?.format === 'pptx') {
     const primary = validHex(customProfile?.colors[0], '3E3AAE')
     const pale = validHex(customProfile?.colors.find((color) => /^F/i.test(color)), 'F3F3FA')
     context.fillStyle = '#FFFFFF'
@@ -2555,7 +2677,7 @@ export function renderBusinessMarkdown(input: {
     `- 项目：${input.project.name}`,
     `- 公司主体：${text(input.project.companyName)}`,
     `- 资料截止日：${input.sourceCutoffDate}`,
-    '- 版式：公司标准模板',
+    `- 版式：${input.template.customAnalysis ? '用户上传模板' : input.template.label}`,
     '',
     '## 摘要',
     '',

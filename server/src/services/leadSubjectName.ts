@@ -61,17 +61,25 @@ const GENERIC_SUBJECTS = new Set([
   '信息系统',
   'AI软件',
   '卡脖子',
+  '近期',
+  '36氪首发',
+  '技术团队',
+  '二季度普华汇',
+  'AI下半场',
+  '外部危机和人工智能',
+  '核聚变装置',
 ])
 
-const VAGUE_START_RE = /^(?:他|她|其|该|这|此|其中|上述|相关|目前|未来|同时|此外|另|据|对于|关于|要求|需要|应当|必须|支持|推动|加强|开展|引导|主动|持续|继续|曾|曾经|担任|联创|联合创始人?|成立|投资|创始人|科研人员|参赛|本次|全体|让更多|并|基于|后两年|共享|作为|为|以|从|在|将|把|被|由|于|联合|面对|通过|围绕|聚焦|了解|开拓|真实|价值|推荐阅读|背靠|赠礼环节|学员们|购票观众|课题被|科创报国|促进|紧跟|也|过去|活动在|锤炼|需要|更多|不再|只有|至今|随后|共同|双方|各自|截止|落地|年初|年末|年底|月初|月末|算|二是|一是|三是|四是)/
+const VAGUE_START_RE = /^(?:他|她|其|该|这|此|其中|上述|相关|目前|未来|同时|此外|另|据|对于|关于|要求|需要|应当|必须|支持|推动|加强|开展|引导|主动|持续|继续|曾|曾经|担任|联创|联合创始人?|成立|投资|创始人|科研人员|参赛|本次|全体|让更多|并|基于|后两年|共享|作为|为|以|从|在|将|把|被|由|于|联合|面对|通过|围绕|聚焦|了解|开拓|真实|价值|推荐阅读|背靠|赠礼环节|学员们|购票观众|课题被|科创报国|促进|紧跟|对标|正是|也|过去|活动在|锤炼|更多|不再|只有|至今|随后|共同|双方|各自|截止|落地|年初|年末|年底|月初|月末|算|一是|二是|三是|四是)/
 const VAGUE_BODY_RE = /(?:岗位记录|关键证明|证明材料|要求主动|主动适应|走出实验室|为核心业务|核心业务的|系统梳理|以及团队|进入导师课题组|共享两个学院|获颁|获评|荣获|获奖|荣誉|Award|文章来源|论文合作者|合作者为|受试者|研究参与者|筛选期|完全开放|依托高校|顺利通过|一行到访|成功举办|先后发言|按姓氏拼音排序|首先来到|带队|不是在实验室|老师.*介绍|分别介绍了|介绍了其|第一城|早些时候|一批|多家|数个|能够替代|能够|key observation|by the paper|等信息|等材料|等证明|等方面|等工作|带来的变化)/i
-const VAGUE_END_RE = /(?:材料|记录|信息|情况|内容|要求|工作|方面|变化|问题|任务|路径|策略|证明|累计|责编|来源|再|消息|报道)$/
+const VAGUE_END_RE = /(?:材料|记录|信息|情况|内容|要求|工作|方面|变化|问题|任务|路径|策略|证明|累计|责编|来源|目前|近期|斩|再|消息|报道)$/
 const PREDICATE_RE = /(?:要求|适应|指出|表示|强调|认为|提出|推动|支持|开展|引导|走出|打造|落地|实现|完成|获得|发布|宣布|提供|形成|建立|构建|促进|提升|加强|记录|证明|担任|任职|毕业|来自|师从|进入|共享|梳理|发表|结合|参与|经历|合作者|申请|接受|走访|到访|举办|发言|带队|来到)/
 const NUMBERED_TECH_FRAGMENT_RE = /^[\u4e00-\u9fffA-Za-z]{1,8}[-—–][\u4e00-\u9fffA-Za-z]{1,8}\d{1,2}$/
 const GENERIC_INSTITUTION_TECH_RE = /^(?:清华|北大|北航|上交大|复旦|浙大|中科大|哈工大)(?:系)?(?:机器人|芯片|人工智能|大模型)(?:团队|项目)?$/
+const DESCRIPTIVE_COMPANY_SUBJECT_RE = /^(?:(?:清华|北大|北航|上交大|复旦|浙大|中科大|哈工大)(?:系)?.{1,28}(?:企业|公司)|.{1,30}(?:装备商|制造商|研发商|提供商|服务商))$/
 const SUBJECT_MARKER_RE = /(?:股份有限公司|有限责任公司|有限公司|公司|企业|项目|团队|实验室|研究院|研究所|研究中心|工程中心|课题组|创新群体|创新联合体|中试基地|产业基地|创新平台|技术平台|研发平台|试验平台|装置|系统|产品|计划)$/
 const ENGLISH_ENTITY_MARKER_RE = /(?:AI|Labs?|Laboratory|Institute|Center|Centre|Technologies|Technology|Robotics|Bio|Systems?|Platform|Project)$/i
-const LOW_VALUE_RADAR_RE = /(?:院系之声.{0,30}(?:荣誉|获奖|Award)|(?:教授|研究员|学者).{0,30}(?:获颁|获评|荣获|获奖|Award|荣誉|发文|发表文章)|(?:获得|获评|入选|荣获|获).{0,24}(?:奖|荣誉|称号|教学团队|表彰|标兵|勋章)|(?:科学技术奖|科技奖|自然科学奖|技术发明奖|科技进步奖).{0,40}(?:揭晓|获奖|表彰)|\d+\s*项.{0,12}(?:获奖|获表彰)|(?:国家级|省级|全国高校).{0,16}(?:教学团队|教学成果|荣誉|奖|标兵)|奖学金|受试者招募|招募(?:研究参与者|受试者)|参与本研究|临床试验.{0,50}(?:招募|受试者|研究参与者)|实践成果.{0,24}(?:申请|硕士学位)|学位答辩|专业学位培养改革|论文.{0,40}(?:期刊|发表|刊发|接受|接收|accepted)|学术成果|研究论文|文章来源|转载全文|毕业(?:季|典礼|致辞|生|倒计时|设计)|毕业生去哪儿|校友招聘|社会招聘|诚聘|实习生|招聘|党支部|党员|党务|党建|革命先辈|校史|悼念|缅怀|研修班|训练营|课程|移动课堂|工作坊|讲座(?:预告)?|活动(?:预告|抢先知)|Information Session|参访|探访|走访|到访|企业走访交流活动|师生校友|院友沙龙|创新大赛|参赛队伍|\d+\s*家.{0,24}(?:企业|公司).{0,30}(?:融资|投资)|专场(?:科创)?路演|路演举办|加速计划.{0,20}(?:招募|启动)|最前线|解码硬科技|罚单|行业进入强监管|(?:\d+点\d*氪|氪星|创投|财经)(?:晚报|早报)?|为什么资本|什么样的.{0,20}(?:能|会)|行业观察|赛道观察|赴港上市|登陆资本市场|IPO认购|上市获|要报.{0,12}专业吗|招生(?:简章|宣传|咨询|专业|对象)?|培养方案|课程介绍|实验班介绍|培训班|结业证书|能力提升计划|名家面对面|学员企业|发表致辞|兼任|受聘|履新|任命|(?:记者|人物)?专访|人物访谈|观点访谈|深度解读|系统剖析)/i
+const LOW_VALUE_RADAR_RE = /(?:院系之声.{0,30}(?:荣誉|获奖|Award)|(?:教授|研究员|学者).{0,30}(?:获颁|获评|荣获|获奖|Award|荣誉|发文|发表文章)|(?:获得|获评|入选|荣获|获).{0,24}(?:奖|荣誉|称号|教学团队|表彰|标兵|勋章)|(?:科学技术奖|科技奖|自然科学奖|技术发明奖|科技进步奖).{0,40}(?:揭晓|获奖|表彰)|\d+\s*项.{0,12}(?:获奖|获表彰)|(?:国家级|省级|全国高校).{0,16}(?:教学团队|教学成果|荣誉|奖|标兵)|奖学金|受试者招募|招募(?:研究参与者|受试者)|参与本研究|临床试验.{0,50}(?:招募|受试者|研究参与者)|实践成果.{0,24}(?:申请|硕士学位)|学位答辩|专业学位培养改革|论文.{0,40}(?:期刊|发表|刊发|接受|接收|accepted)|学术成果|研究论文|文章来源|转载全文|毕业(?:季|典礼|致辞|生|倒计时|设计)|毕业生去哪儿|校友招聘|社会招聘|诚聘|实习生|招聘|党支部|党员|党务|党建|革命先辈|校史|悼念|缅怀|研修班|训练营|课程|移动课堂|工作坊|讲座(?:预告)?|活动(?:预告|抢先知)|Information Session|参访|探访|参观|调研|走访|到访|企业走访交流活动|师生校友|院友沙龙|创新大赛|参赛队伍|\d+\s*家.{0,24}(?:企业|公司).{0,30}(?:融资|投资)|专场(?:科创)?路演|路演举办|加速计划.{0,20}(?:招募|启动)|最前线|解码硬科技|罚单|行业进入强监管|(?:\d+点\d*氪|氪星|创投|财经)(?:晚报|早报)?|为什么资本|什么样的.{0,20}(?:能|会)|行业观察|赛道观察|赴港上市|登陆资本市场|IPO认购|上市获|融资净买入|股息率|榜单|合作会议|专题会议|世界顶尖科学家论坛|院士云集|共议|要报.{0,12}专业吗|招生(?:简章|宣传|咨询|专业|对象)?|培养方案|课程介绍|实验班介绍|培训班|结业证书|能力提升计划|名家面对面|学员企业|发表致辞|兼任|受聘|履新|任命|(?:记者|人物)?专访|人物访谈|观点访谈|深度解读|系统剖析)/i
 const PURE_ACADEMIC_RADAR_RE = /(?:(?:课题组|团队|实验室).{0,100}(?:发表|论文|研究|揭示|破解|开发|发现|成果)|(?:学术成果|科研成果|研究进展|研究论文|最新研究|多项研究|两项研究|研究成果|合作论文).{0,100}(?:课题组|团队|教授|研究员|实验室|突破|发现|揭示|开发|发表|刊发|接收)?|(?:论文|研究成果).{0,80}(?:发表|刊发|接收|accepted|publication)|(?:发表于|在线发表于|accepted by).{0,60}(?:期刊|journal|nature|science|IEEE)|Science Publication|论文摘要|(?:团队|课题组).{0,60}(?:算法|模型|数据|机制|通路|架构))/i
 const COMMERCIAL_RADAR_RE = /(?:成果转化|技术转移|转化落地|产业化|中试|技术平台|工程化|技术许可|专利转让|孵化(?:成立|企业|公司)|创办公司|成立公司|产品获批|注册证|临床应用|应用新场景|示范应用|产业应用|客户验证|客户订单|采购|中标|签约|量产|营收|商业化)/i
 const VERIFIED_SOURCE_SUBJECT_RULES: Array<{ pattern: RegExp; subject: string }> = [
@@ -84,7 +92,7 @@ function cleanSubjectName(value: unknown): string {
   return String(value ?? '')
     .replace(/^(?:群聊线索|项目线索|项目名称|主体名称)\s*[|｜:：]\s*/i, '')
     .trim()
-    .replace(/^[“”"'「」『』\s]+|[“”"'「」『』\s]+$/g, '')
+    .replace(/^[“”"'「」『』）)\]】\s]+|[“”"'「」『』\s]+$/g, '')
     .replace(/[，。！？；;：:,.\s]+$/g, '')
     .trim()
 }
@@ -97,6 +105,7 @@ export function isSpecificLeadSubjectName(value: unknown, allowPaperTitle = fals
   if (GENERIC_SUBJECTS.has(name)) return false
   if (NUMBERED_TECH_FRAGMENT_RE.test(name)) return false
   if (GENERIC_INSTITUTION_TECH_RE.test(name)) return false
+  if (DESCRIPTIVE_COMPANY_SUBJECT_RE.test(name)) return false
   if ((name.includes('（') && !name.includes('）')) || (name.includes('(') && !name.includes(')'))) return false
   if (/[，。！？；;：:、|｜丨\n]/.test(name)) return false
   if (VAGUE_START_RE.test(name) || VAGUE_BODY_RE.test(name) || VAGUE_END_RE.test(name)) return false
@@ -121,6 +130,7 @@ export function isNonInvestableRadarContent(input: {
   if (input.hasInvestmentEvidence) return false
   const text = input.values.map((value) => String(value ?? '').slice(0, 2400)).join('\n')
   if (LOW_VALUE_RADAR_RE.test(text)) return true
+  if (PURE_ACADEMIC_RADAR_RE.test(text) && !COMMERCIAL_RADAR_RE.test(text)) return true
   if (input.hasCompanySubject) return false
   // 高校新闻中的“成果转化、签约、产业化”等词经常只是大会主题或倡议，
   // 不能单独构成投资线索。没有公司和融资事实时，必须先能识别出一个
@@ -137,6 +147,7 @@ function normalizeProjectCandidate(value: unknown): string {
   candidate = candidate.replace(/^(?:超声脑机接口公司|端侧大模型独角兽|清华系端侧大模型独角兽|消费级智能硬件品牌)/, '')
   candidate = candidate.replace(/^(?:推出的|研发的|打造的|研制的)/, '')
   candidate = candidate.replace(/^投资(?=[\u4e00-\u9fffA-Za-z0-9])/, '')
+  candidate = candidate.replace(/(?:目前|近期|斩)$/, '')
   if (/^[A-Za-z0-9·&＋+\-]{2,24}团队$/i.test(candidate)) candidate = candidate.replace(/团队$/, '项目')
   if (/(?:系)?初创$/.test(candidate)) candidate += '项目'
   if (candidate && !SUBJECT_MARKER_RE.test(candidate) && /(?:智能体|外骨骼|机器人|模型|芯片|装置|平台|系统|产品)$/.test(candidate)) {
@@ -185,6 +196,7 @@ function extractNamedFragments(value: unknown): string[] {
   const text = String(value ?? '')
   const fragments: string[] = []
   const patterns = [
+    /([A-Z][A-Za-z0-9+&.-]*(?:\s+[A-Za-z][A-Za-z0-9+&.-]*){1,5}联合实验室)/g,
     /([\u4e00-\u9fffA-Za-z0-9（）()·&＋+\-]{2,80}(?:股份有限公司|有限责任公司|有限公司))/g,
     /((?:[\u4e00-\u9fff]{2,20}(?:大学|学院|研究所|医院))[\u4e00-\u9fff·]{0,16}(?:教授|研究员|博士)?团队)/g,
     /([\u4e00-\u9fffA-Za-z0-9·]{2,50}(?:重点实验室|实验室|研究中心|工程中心|研究院|课题组|创新群体|创新联合体|中试基地|产业基地|创新平台|技术平台|研发平台|试验平台))/g,
@@ -226,8 +238,9 @@ function extractTitleProjectSubjects(value: unknown): string[] {
 
 function extractFinancingTitleSubjects(value: unknown): string[] {
   const text = String(value ?? '').trim()
-    .replace(/^(?:(?:36氪|硬氪)?(?:前线|首发)|独家|首发|喜报|快讯|重磅)\s*[|｜:：]\s*/i, '')
-  const match = text.match(/^([\u4e00-\u9fffA-Za-z0-9（）()·&＋+\-\s]{2,30}?)(?=(?:完成|获得|获).{0,24}(?:融资|投资))/i)
+    .replace(/^(?:(?:36氪|硬氪)?(?:前线|首发)|码刻|独家|首发|喜报|快讯|重磅)\s*[|｜:：]\s*/i, '')
+  const explicitBrand = text.match(/(?:应用|企业|公司|品牌|平台|装备商)\s*([A-Za-z][A-Za-z0-9&+.-]*(?:\s+[A-Za-z][A-Za-z0-9&+.-]*){0,3}|[\u4e00-\u9fff·]{2,16})(?=(?:目前|近期)?(?:斩获|完成|获得|获).{0,24}(?:融资|投资))/i)
+  const match = explicitBrand ?? text.match(/^([\u4e00-\u9fffA-Za-z0-9（）()·&＋+\-\s]{2,30}?)(?=(?:目前|近期)?(?:斩获|完成|获得|获).{0,24}(?:融资|投资))/i)
   if (!match) return []
   const candidate = normalizeProjectCandidate(match[1])
   return isSpecificLeadSubjectName(candidate) ? [candidate] : []
@@ -235,17 +248,18 @@ function extractFinancingTitleSubjects(value: unknown): string[] {
 
 function extractPrimaryNewsSubjects(value: unknown): string[] {
   const text = String(value ?? '')
-    .replace(/^(?:(?:36氪|硬氪)?(?:前线|首发)|独家|首发|喜报|快讯|重磅)\s*[|｜:：]\s*/i, '')
+    .replace(/^(?:(?:36氪|硬氪)?(?:前线|首发)|码刻|独家|首发|喜报|快讯|重磅)\s*[|｜:：]\s*/i, '')
     .slice(0, 1800)
   if (!text) return []
   const nameChars = String.raw`[\u4e00-\u9fffA-Za-z0-9（）()·&＋+\-]`
   const descriptor = String.raw`(?:${nameChars}{0,28}(?:企业|公司|品牌|提供商|研发商|制造商|独角兽))?`
   const wrapperOpen = String.raw`[「『“"]?`
   const wrapperClose = String.raw`[」』”"]?`
-  const event = String.raw`(?=(?:(?:近日|日前|近期|今日)\s*)?(?:\d+\s*个?月(?:内)?\s*)?(?:(?:连续|已|正式)\s*)*(?:(?:官宣|宣布)\s*)?(?:完成|获得|获|成立于|是一家))`
+  const event = String.raw`(?=(?:(?:近日|日前|近期|今日)\s*)?(?:\d+\s*个?月(?:内)?\s*)*(?:(?:官宣|宣布)\s*)?(?:(?:连续|已|正式)\s*)*(?:完成|获得|获|成立于|是一家))`
   const patterns = [
     new RegExp(String.raw`(?:获悉|消息显示|公开信息显示)[，,\s]*(?:(?:近日|日前|近期)[，,\s]*)?${descriptor}\s*${wrapperOpen}(${nameChars}{2,40}?)${wrapperClose}(?:[（(][^）)]{1,30}[）)])?\s*${event}`, 'g'),
-    new RegExp(String.raw`(?:^|[。；;\n])\s*(?:(?:近日|日前|近期|今日)[，,\s]*)?(?:\d{1,4}年)?\d{0,2}月?\d{0,2}日?[，,\s]*${descriptor}\s*${wrapperOpen}(${nameChars}{2,40}?)${wrapperClose}\s*${event}`, 'g'),
+    new RegExp(String.raw`(?:^|[。；;\n])\s*(?:(?:近日|日前|近期|今日)[，,\s]*)?(?:\d{1,4}年)?\d{0,2}月?\d{0,2}日?[，,\s]*${descriptor}\s*${wrapperOpen}(${nameChars}{2,40}?)${wrapperClose}(?:[（(][^）)]{1,30}[）)])?\s*${event}`, 'g'),
+    new RegExp(String.raw`(?:孵化创立|孵化成立|创办|创立)(?:的)?\s*${wrapperOpen}(${nameChars}{2,30}?)${wrapperClose}(?:[（(][^）)]{1,30}[）)])?\s*(?=(?:官宣|宣布)?(?:连续)?完成.{0,30}(?:融资|投资))`, 'g'),
     new RegExp(String.raw`(?:^|[。；;\n])\s*(${nameChars}{2,30})(?=成立于|是一家|专注于|致力于)`, 'g'),
     new RegExp(String.raw`(?:^|[。；;\n])\s*(${nameChars}{2,30}?)(?=(?:完成|获得|获).{0,24}(?:融资|投资))`, 'g'),
     /(?:制造商|研发商|公司|企业)\s*([A-Z][A-Za-z0-9&+.-]*(?:\s+[A-Z][A-Za-z0-9&+.-]*){0,3})(?=\s*(?:获得|完成|宣布|获))/g,
@@ -264,7 +278,7 @@ function extractPrimaryNewsSubjects(value: unknown): string[] {
 
 function extractQuotedFinancingSubjects(value: unknown): string[] {
   const text = String(value ?? '').trim()
-    .replace(/^(?:(?:36氪|硬氪)?(?:前线|首发)|独家|首发|喜报|快讯|重磅)\s*[|｜:：]\s*/i, '')
+    .replace(/^(?:(?:36氪|硬氪)?(?:前线|首发)|码刻|独家|首发|喜报|快讯|重磅)\s*[|｜:：]\s*/i, '')
   const subjects: string[] = []
   const pattern = /[「『“"]([\u4e00-\u9fffA-Za-z0-9·&＋+\-\s]{2,30})[」』”"](?=[^「『“"]{0,36}(?:完成|获得|获|融资|投资))/gi
   for (const match of text.matchAll(pattern)) {
@@ -296,6 +310,7 @@ function extractExplicitTargetSubject(...values: unknown[]): string {
 
 export interface RadarSubjectNameInput {
   isPaper?: boolean
+  existingName?: unknown
   companyNames?: unknown[]
   projectName?: unknown
   lab?: unknown
@@ -319,6 +334,22 @@ export function deriveRadarSubjectName(input: RadarSubjectNameInput): string {
 
   const reliableCompanies = (input.companyNames ?? []).filter(isReliableCompanySubjectName)
   const legalCompany = pick(reliableCompanies.filter((value) => /(?:股份有限公司|有限责任公司|有限公司)$/.test(cleanSubjectName(value))), false, false)
+  const existingCandidate = cleanSubjectName(input.existingName)
+  const existingEvidence = [
+    input.title,
+    input.articleText,
+  ].map((value) => String(value ?? '').replace(/\s+/g, '').toLowerCase()).join('\n')
+  const existingNeedle = existingCandidate
+    .replace(/(?:股份有限公司|有限责任公司|有限公司)$/, '')
+    .replace(/\s+/g, '')
+    .toLowerCase()
+  const existingSubject = isReliableCompanySubjectName(existingCandidate)
+    && (
+      /(?:股份有限公司|有限责任公司|有限公司)$/.test(existingCandidate)
+      || (existingNeedle.length >= 2 && existingEvidence.includes(existingNeedle))
+    )
+    ? existingCandidate
+    : ''
 
   if (!input.isPaper) {
     const verifiedSourceSubject = extractVerifiedSourceSubject(input.title)
@@ -329,14 +360,20 @@ export function deriveRadarSubjectName(input: RadarSubjectNameInput): string {
     if (explicitTargetSubject) return explicitTargetSubject
   }
 
+  // 存量主体只有在正文/标题中有直接证据（或本身是完整法定名称）时才优先；
+  // 这可避免工商补全把投资方、来源机构覆盖成融资主体。
+  if (existingSubject) return existingSubject
   if (legalCompany) return legalCompany
 
   if (!input.isPaper) {
     const quotedTitleSubject = extractQuotedFinancingSubjects(input.title)[0]
     if (quotedTitleSubject) return quotedTitleSubject
+    const financingTitleSubject = extractFinancingTitleSubjects(input.title)[0]
+    // 标题里的明确品牌/公司优先于正文，避免把 Meshy 等融资主体抽成正文短语；
+    // “某高校团队/某项目完成投资”仍先看正文，正文通常会给出真实公司名。
+    if (financingTitleSubject && !/(?:团队|项目|产品|平台)$/.test(financingTitleSubject)) return financingTitleSubject
     const articleSubject = extractPrimaryNewsSubjects(input.articleText)[0]
     if (articleSubject) return articleSubject
-    const financingTitleSubject = extractFinancingTitleSubjects(input.title)[0]
     if (financingTitleSubject) return financingTitleSubject
     const titleNewsSubject = extractPrimaryNewsSubjects(input.title)[0]
     if (titleNewsSubject) return titleNewsSubject

@@ -18,6 +18,10 @@ import {
   buildInvestmentProposalEvidencePlan,
 } from '../services/aiInvestmentProposalEvidenceService.js'
 import {
+  sanitizeInvestmentProposalClientText,
+  sanitizeInvestmentProposalEvidenceContent,
+} from '../services/aiInvestmentProposalTextService.js'
+import {
   compactInvestmentProposalSkillPrompt,
   composeInvestmentProposalContent,
   requestInvestmentProposalChapterJson,
@@ -39,6 +43,7 @@ import { curateEvidenceSources } from '../services/aiEvidenceQualityService.js'
 import { loadAiSkill } from '../services/aiSkillService.js'
 import { AI_TEMPLATE_CATALOG } from '../services/aiTemplateCatalog.js'
 import { safeAiTaskFailureMessage } from '../services/aiTaskErrorService.js'
+import { extractProjectQaPublicPageText } from '../services/aiQaModelResearchService.js'
 
 const template = AI_TEMPLATE_CATALOG.investment_proposal
 const blueprint = await loadInvestmentProposalBlueprint(template)
@@ -53,6 +58,45 @@ assert.equal(publicCompanyPage.usable.length, 1)
 assert.equal(publicCompanyPage.usable[0].content.includes('主营机器人产品'), true)
 assert.equal(publicCompanyPage.usable[0].content.includes('联系我们'), false)
 assert.equal(publicCompanyPage.usable[0].content.includes('英诺嘿呀邮箱'), false)
+const extractedCompanyPage = extractProjectQaPublicPageText(`
+  <main>
+    <p>简介：星河机器人有限公司成立于2025年1月，注册地址为北京市海淀区测试路1号4FL3A-2... 展开</p>
+    <p>公司全称：星河机器人有限公司</p>
+    <p>注册时间：2025-01-01</p>
+    <p>注册地址：北京市海淀区测试路1号4FL3A-2</p>
+    <p>一般项目：机器人技术服务；人工智能软件开发；智能机器人销售；依法自主开展经营活动。</p>
+    <p>原文链接：https://example.com/source</p>
+  </main>
+`)
+assert.match(extractedCompanyPage, /注册地址：北京市海淀区测试路1号4FL3A-2/)
+assert.match(extractedCompanyPage, /智能机器人销售/)
+assert.doesNotMatch(extractedCompanyPage, /(?:\.{3}|…)\s*展开|原文链接/)
+const sanitizedCompanyEvidence = sanitizeInvestmentProposalEvidenceContent([
+  '证据属性：系统联网发现并直接读取页面。',
+  '页面标题：星河机器人有限公司工商信息',
+  '页面正文摘录：公司全称：星河机器人有限公司',
+  '简介：星河机器人有限公司注册地址为北京市海淀区测试路1号4FL3A-2... 展开',
+  '注册时间：2025-01-01',
+  '注册地址：北京市海淀区测试路1号4FL3A-2',
+  '一般项目：机器人技术服务；人工智能软件开发；智能机器人销售；依法自主开展经营活动。',
+  '原文链接：https://example.com/source',
+  '来源网址：https://example.com/cache',
+].join('\n'))
+assert.match(sanitizedCompanyEvidence, /公司全称：星河机器人有限公司/)
+assert.match(sanitizedCompanyEvidence, /注册地址：北京市海淀区测试路1号4FL3A-2/)
+assert.match(sanitizedCompanyEvidence, /智能机器人销售/)
+assert.doesNotMatch(
+  sanitizedCompanyEvidence,
+  /证据属性|页面标题|(?:\.{3}|…)\s*展开|原文链接|来源网址/,
+)
+const clientFinding = sanitizeInvestmentProposalClientText(
+  '判断：公司具备机器人业务基础。 依据：项目资料记载公司已形成产品。 影响/约束：仍需核验客户。 待办：取得合同。项目资料显示：原文链接：https://example.com/source',
+)
+assert.equal(
+  clientFinding,
+  '公司具备机器人业务基础。 项目资料记载公司已形成产品。 仍需核验客户。 取得合同。',
+)
+assert.doesNotMatch(clientFinding, /判断：|依据：|影响\/约束：|待办：|项目资料显示：|原文链接/)
 const headlineOnlyEvidence = buildInvestmentProposalEvidencePlan([{
   sourceType: 'public_web_cache',
   sourceId: 'headline-only',
@@ -258,6 +302,17 @@ const sources: EvidenceSource[] = leafDefinitions.map((definition, index) => {
             : definition.tableKind === 'comparable_valuation'
               ? '可比公司：测试科技；数据时点：2025年；估值：1000万元；PS：2倍。'
               : ''
+  const completeCompanyProfileEvidence = definition.analysisKind === 'company_profile'
+    ? [
+        '公司全称：星河机器人有限公司。',
+        '简介：星河机器人有限公司注册地址为北京市海淀区测试路1号4FL3A-2... 展开',
+        '注册时间：2025-01-01。',
+        '注册资本：2000万元。',
+        '注册地址：北京市海淀区测试路1号4FL3A-2。',
+        '一般项目：机器人技术服务；人工智能软件开发；智能机器人销售；依法自主开展经营活动。',
+        '原文链接：https://example.com/source',
+      ].join('\n')
+    : ''
   return {
     sourceType: 'project_document',
     sourceId: `acceptance-${definition.id}`,
@@ -268,6 +323,7 @@ const sources: EvidenceSource[] = leafDefinitions.map((definition, index) => {
       `当前项目：星河机器人项目。公司主体：星河机器人有限公司。`,
       `章节关键词：${definition.evidenceKeywords.join('、')}。`,
       claim,
+      completeCompanyProfileEvidence,
       tableEvidence,
     ].filter(Boolean).join('\n'),
   }
@@ -432,6 +488,34 @@ const boilerplateLeakReview = reviewInvestmentProposalContent({
 assert.equal(boilerplateLeakReview.passed, false)
 assert.ok(boilerplateLeakReview.issues.some((issue) =>
   issue.code === 'EVIDENCE_PROCESS_TEXT_LEAK'))
+const proseLabelLeakContent = structuredClone(content)
+proseLabelLeakContent.sections.find((section) => section.title === '（一）公司简介')!
+  .findings[0].text = '判断：星河机器人有限公司主营机器人产品。依据：当前项目资料已形成产品记录。'
+const proseLabelLeakReview = reviewInvestmentProposalContent({
+  content: proseLabelLeakContent,
+  blueprint,
+  evidencePlan,
+  sources,
+  projectName: '星河机器人项目',
+  companyName: '星河机器人有限公司',
+})
+assert.equal(proseLabelLeakReview.passed, false)
+assert.ok(proseLabelLeakReview.issues.some((issue) =>
+  issue.code === 'CLIENT_PROSE_LABEL_LEAK'))
+const webArtifactLeakContent = structuredClone(content)
+webArtifactLeakContent.sections.find((section) => section.title === '（一）公司简介')!
+  .findings[0].text = '简介：星河机器人有限公司注册地址为测试路1号4FL3A-2... 展开'
+const webArtifactLeakReview = reviewInvestmentProposalContent({
+  content: webArtifactLeakContent,
+  blueprint,
+  evidencePlan,
+  sources,
+  projectName: '星河机器人项目',
+  companyName: '星河机器人有限公司',
+})
+assert.equal(webArtifactLeakReview.passed, false)
+assert.ok(webArtifactLeakReview.issues.some((issue) =>
+  issue.code === 'WEB_ARTIFACT_TEXT_LEAK'))
 const wrongEquityTableContent = structuredClone(content)
 wrongEquityTableContent.sections.find((section) => section.title === '（三）公司股权结构')!
   .tables = [{
@@ -514,6 +598,15 @@ assert.equal(
     .flatMap((section) => section.findings)
     .some((finding) => finding.status === '资料缺口'),
   false,
+)
+const deterministicCompanyProfile = incompatibleParameterFallback.sections
+  .find((section) => section.title === '（一）公司简介')
+  ?.findings.map((finding) => finding.text).join('\n') ?? ''
+assert.match(deterministicCompanyProfile, /注册地址：北京市海淀区测试路1号4FL3A-2/)
+assert.match(deterministicCompanyProfile, /智能机器人销售/)
+assert.doesNotMatch(
+  deterministicCompanyProfile,
+  /(?:\.{3}|…)\s*展开|原文链接|来源网址|项目资料显示：|判断：/,
 )
 
 let noEvidenceFetchCalled = false
@@ -955,6 +1048,10 @@ assert.equal(documentXml.includes('〔资料记载〕'), false)
 assert.equal(documentXml.includes('〔分析判断〕'), false)
 assert.equal(documentXml.includes('〔待核验〕'), false)
 assert.equal(documentXml.includes('〔资料缺口〕'), false)
+assert.doesNotMatch(
+  documentXml,
+  /判断：|依据：|影响\/约束：|待办：|项目资料显示：|(?:\.{3}|…)\s*展开|原文链接|来源网址/,
+)
 
 const pdfReview = await exportAndReviewInvestmentProposalPdf({
   docxPath,

@@ -1,0 +1,4 @@
+interface:
+  display_name: "PDF 转元素级可编辑 PPT"
+  short_description: "跨平台高还原去水印，并通过渲染OCR交接验收"
+  default_prompt: "使用 $pdf-to-editable-ppt 将这个 PDF 去除水印并高还原转换为元素级可编辑 PowerPoint；必须完成PPTX包内扫描和逐页渲染OCR水印复检，并在交给内容替换技能前生成通过验收的 conversion-handoff.json。"

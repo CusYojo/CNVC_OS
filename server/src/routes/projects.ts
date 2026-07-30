@@ -3,6 +3,7 @@ import { z } from 'zod'
 import type { AuthedRequest } from '../middleware/requireAuth.js'
 import { FLUE_BASE_URL } from '../config/agentRuntime.js'
 import { ingestFile } from '../services/ragService.js'
+import { ProjectCreateSchema } from '../schemas/project.js'
 import {
   addFile, createProject, finishFileParse, getProject, listFiles, listProjects, moveProjectStage, updateProject, deleteProject, pinProject, listAllFiles } from '../services/projectService.js'
 
@@ -33,29 +34,9 @@ projectsRouter.get('/:id', async (req, res, next) => {
   } catch (err) { next(err) }
 })
 
-const CreateSchema = z.object({
-  name: z.string().min(1),
-  companyName: z.string().optional(),
-  industry: z.string().optional(),
-  round: z.string().optional(),
-  stage: z.string().default('线索'),
-  owner: z.string().min(1),
-  collaborators: z.array(z.string()).default([]),
-  source: z.string().optional(),
-  financing: z.string().optional(),
-  valuation: z.string().optional(),
-  riskLevel: z.enum(['高', '中', '低']).default('低'),
-  summary: z.string().optional(),
-  businessModel: z.string().optional(),
-  market: z.string().optional(),
-  team: z.string().optional(),
-  tags: z.array(z.string()).default([]),
-  stageSource: z.string().optional(),
-})
-
 projectsRouter.post('/', async (req: AuthedRequest, res, next) => {
   try {
-    const body = CreateSchema.parse(req.body)
+    const body = ProjectCreateSchema.parse(req.body)
     const row = await createProject(body as never, req.user!.uid)
     res.status(201).json(row)
   } catch (err) { next(err) }

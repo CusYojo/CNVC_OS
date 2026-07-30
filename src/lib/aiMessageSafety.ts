@@ -17,6 +17,7 @@ export type SafeFlueMessage = {
   id: string
   role: 'user' | 'assistant'
   parts: SafeFluePart[]
+  timestamp?: string
   malformed: boolean
 }
 
@@ -136,6 +137,10 @@ export function normalizeFlueMessage(value: unknown, index = 0): SafeFlueMessage
   const rawId = safeProperty(value, 'id')
   const rawRole = safeProperty(value, 'role')
   const rawParts = safeProperty(value, 'parts')
+  const rawMetadata = safeProperty(value, 'metadata')
+  const rawTimestamp = isRecord(rawMetadata)
+    ? safeProperty(rawMetadata, 'timestamp')
+    : undefined
   let parts: SafeFluePart[]
   let malformed = false
 
@@ -156,6 +161,9 @@ export function normalizeFlueMessage(value: unknown, index = 0): SafeFlueMessage
     id: typeof rawId === 'string' && rawId ? rawId : `message-${index}`,
     role: rawRole === 'user' ? 'user' : 'assistant',
     parts,
+    timestamp: typeof rawTimestamp === 'string' && rawTimestamp.trim()
+      ? rawTimestamp
+      : undefined,
     malformed: malformed || (rawRole !== 'user' && rawRole !== 'assistant'),
   }
 }

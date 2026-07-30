@@ -625,6 +625,110 @@ export function finalizeCustomTemplateContent(
   }
 }
 
+function uploadedTemplateSampleSubject(template: AiTemplateDefinition) {
+  const fileName = path.basename(
+    template.customAnalysis?.fileName || template.referencePath,
+    path.extname(template.customAnalysis?.fileName || template.referencePath),
+  )
+  const beforeDocumentType = fileName.match(
+    /(?:^|[\s._-])([^._\s-][^._-]{1,30}?)(?:项目)?投资建议书/i,
+  )?.[1] ?? ''
+  return beforeDocumentType
+    .replace(/^\d+\s*[.、_-]?\s*/, '')
+    .replace(/[_\s]+$/g, '')
+    .trim()
+}
+
+function investmentRecommendationSectionTitle(
+  section: BusinessSection,
+  template: AiTemplateDefinition,
+  index: number,
+) {
+  const originalTitle = template.sections[index] ?? section.title
+  const structure = customSectionStructure(template, originalTitle, index)
+  const semanticText = [
+    structure?.contentPurpose,
+    structure?.contentSummary,
+    originalTitle,
+    section.summary,
+    ...section.findings.slice(0, 3).map((finding) => finding.text),
+  ].filter(Boolean).join(' ')
+  if (/投资结论|推进建议|阶段建议|上会|投决/.test(semanticText)) return '投资判断与推进建议'
+  if (/项目亮点|投资亮点|核心价值/.test(semanticText)) return '项目亮点与成立条件'
+  if (/风险|合规|诉讼|处罚|资质/.test(semanticText)) return '关键风险与核验重点'
+  if (/估值|融资|投资方|交易|资金用途|退出/.test(semanticText)) return '融资、估值与交易安排'
+  if (/财务|收入|毛利|利润|现金流|回款/.test(semanticText)) return '财务表现与经营质量'
+  if (/竞品|竞争|对标|替代方案|市场份额/.test(semanticText)) return '竞争格局与差异化'
+  if (/行业|市场|政策|渗透率|增长率|市场空间/.test(semanticText)) return '行业趋势与市场空间'
+  if (/客户|订单|合同|商业化|交付|验收/.test(semanticText)) return '客户验证与商业化进展'
+  if (/商业模式|定价|收费|渠道|经营/.test(semanticText)) return '商业模式与规模化路径'
+  if (/产品|技术|研发|专利|知识产权|工程化/.test(semanticText)) return '产品、技术与工程化进展'
+  if (/团队|创始人|管理层|治理|股权/.test(semanticText)) return '核心团队与治理结构'
+  if (/公司|主体|项目概况|发展阶段|基本情况/.test(semanticText)) return '项目概览与发展阶段'
+  return `项目专题分析 ${index + 1}`
+}
+
+/**
+ * 投资建议书的上传模板只定义槽位。模型即使返回了样本标题，这里也会
+ * 以当前项目语义重建标题，并清理模板文件名中的样本主体。
+ */
+export function finalizeInvestmentRecommendationPptContent(
+  content: BusinessContent,
+  template: AiTemplateDefinition,
+  project: ProjectLike,
+): BusinessContent {
+  const subject = meaningfulValue(project.companyName) || meaningfulValue(project.name) || '当前项目'
+  const sampleSubject = uploadedTemplateSampleSubject(template)
+  const replaceSampleSubject = (value: string) =>
+    sampleSubject && comparisonKey(sampleSubject) !== comparisonKey(subject)
+      ? value.split(sampleSubject).join(subject)
+      : value
+  const finalized = finalizeCustomTemplateContent(content, template, project)
+  const usedTitles = new Set<string>()
+  const sections = finalized.sections.map((section, index): BusinessSection => {
+    const baseTitle = investmentRecommendationSectionTitle(
+      content.sections[index] ?? section,
+      template,
+      index,
+    )
+    let title = replaceSampleSubject(baseTitle)
+    let suffix = 2
+    while (usedTitles.has(comparisonKey(title))) {
+      title = `${replaceSampleSubject(baseTitle)}（${suffix}）`
+      suffix += 1
+    }
+    usedTitles.add(comparisonKey(title))
+    const previousTitle = section.title
+    const clean = (value: string) =>
+      replaceSampleSubject(value.split(previousTitle).join(title))
+    return {
+      ...section,
+      title,
+      summary: clean(section.summary),
+      findings: section.findings.map((finding) => ({
+        ...finding,
+        text: clean(finding.text),
+      })),
+      tables: (section.tables ?? []).map((table) => ({
+        ...table,
+        title: clean(table.title),
+        unit: clean(table.unit),
+        columns: table.columns.map(clean),
+        rows: table.rows.map((row) => row.map(clean)),
+      })),
+    }
+  })
+  return {
+    ...finalized,
+    title: `${subject}投资建议书`,
+    executiveSummary: replaceSampleSubject(finalized.executiveSummary),
+    sections,
+    highlights: finalized.highlights.map(replaceSampleSubject),
+    risks: finalized.risks.map(replaceSampleSubject),
+    missing: finalized.missing.map(replaceSampleSubject),
+  }
+}
+
 function sanitizeDueDiligenceText(value: string) {
   return value
     .replace(/【(?:资料记载|AI推断|待核验|资料缺口)】/g, '')
@@ -923,6 +1027,36 @@ export function dueDiligencePendingResearchTopics(
     }
   }
   return topics
+}
+
+export function investmentRecommendationPendingResearchTopics(
+  content: BusinessContent,
+  maxTopics = 12,
+) {
+  const topics: string[] = []
+  const seen = new Set<string>()
+  const add = (value: string) => {
+    const topic = value
+      .replace(/【(?:资料记载|AI推断|待核验|资料缺口)】/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 260)
+    const key = comparisonKey(topic)
+    if (!key || seen.has(key)) return
+    seen.add(key)
+    topics.push(topic)
+  }
+  for (const section of content.sections) {
+    for (const finding of section.findings) {
+      if (finding.status !== '待核验' && finding.status !== '资料缺口') continue
+      add(`${section.title}：${finding.text || '补充可核验公开信息'}`)
+      if (topics.length >= maxTopics) return topics
+    }
+  }
+  content.missing.forEach((item) => {
+    if (topics.length < maxTopics) add(`投资建议书待补证事项：${item}`)
+  })
+  return topics.slice(0, maxTopics)
 }
 
 export function annotateDueDiligencePendingAfterResearch(
@@ -1632,8 +1766,13 @@ export async function composeBusinessContent(input: {
   // 尽调已在上方路由到分章生成器；保留布尔分支仅用于兼容其余通用提示结构。
   const isDueDiligence = String(input.type) === 'due_diligence_report'
   const isCustomTemplate = input.type === 'custom_template_document'
+  const isUploadedInvestmentTemplate = input.type === 'investment_recommendation_ppt'
+    && input.template.customAnalysis?.format === 'pptx'
+  const usesUploadedTemplate = isCustomTemplate || isUploadedInvestmentTemplate
   const indexedSources = input.sources.map((source, sourceIndex) => ({ source, sourceIndex }))
-  const usesExpandedProjectEvidence = isDueDiligence || isCustomTemplate
+  const usesExpandedProjectEvidence = isDueDiligence
+    || usesUploadedTemplate
+    || input.type === 'investment_recommendation_ppt'
   const promptSources = isDueDiligence
     ? [
         ...indexedSources
@@ -1661,7 +1800,7 @@ export async function composeBusinessContent(input: {
   const allowsTables = input.type === 'investment_proposal'
     || isDueDiligence
     || (
-      input.type === 'custom_template_document'
+      usesUploadedTemplate
       && (input.template.customAnalysis?.formatProfile.tableCount ?? 0) > 0
     )
   const requestedLength = String(input.parameters.length || '')
@@ -1673,7 +1812,7 @@ export async function composeBusinessContent(input: {
         : 9000
     : isDueDiligence
       ? 8000
-      : isCustomTemplate
+      : usesUploadedTemplate
         ? 9000
       : 7000
   const evidenceStatusRule = isDueDiligence
@@ -1681,9 +1820,9 @@ export async function composeBusinessContent(input: {
     : isCustomTemplate
       ? '默认按“本地项目资料库 → 当前项目公开证据缓存 → 关键缺口定向网络补全 → 缓存写回”的顺序取证；按可追溯性标为“资料记载”或“待核验”，不得输出“资料缺口”状态。'
     : input.type === 'investment_recommendation_ppt'
-      ? '只使用当前项目资料库、项目档案和用户补充输入；只有证据支持的内容才能标“资料记载”，综合判断标“AI推断”，需人工核实标“待核验”，证据缺失标“资料缺口”。'
+      ? '默认按“本地项目资料库 → 当前项目公开证据缓存 → 关键缺口定向网络补全 → 缓存写回”的顺序取证；只有证据支持的内容才能标“资料记载”，综合判断标“AI推断”，需人工核实标“待核验”，证据缺失标“资料缺口”。'
     : '只有证据支持的内容才能标“资料记载”；综合判断标“AI推断”；需人工核实标“待核验”；证据缺失标“资料缺口”。'
-  const repetitionRule = isDueDiligence || isCustomTemplate
+  const repetitionRule = isDueDiligence || usesUploadedTemplate
     ? '同一事实、数字、风险或后续核验事项只能在最相关章节完整表述一次；摘要和列表只做不重复的结论性归纳。'
     : '同一事实、数字、风险或资料缺口只能在最相关章节完整表述一次；摘要和列表只做不重复的结论性归纳。'
   const sourceDisplayRule = isDueDiligence
@@ -1719,10 +1858,20 @@ export async function composeBusinessContent(input: {
 14. 输出必须是由投资中台资深投资经理起草、供内部审阅的项目投资材料。单项目报告结合当前阶段给出“进入初筛 / 继续跟踪 / 申请立项 / 启动尽调 / 提请上会 / 提交投决 / 暂缓推进 / 归档”之一；批量报告逐个主体给出建议、可核验依据、关键风险、前置条件和下一步动作。
 15. 报告必须围绕当前项目的主体、股权与治理、团队、产品与技术、市场与客户、商业模式、财务、融资与估值、交易方案、风险和可核验来源展开。禁止生成脱离具体主体的泛行业研究；行业、政策和市场背景只能解释当前项目。`
     : ''
+  const uploadedInvestmentTemplateRule = isUploadedInvestmentTemplate
+    ? `\n10. 本次上传的 PPTX 是结构与视觉唯一权威。必须按模板识别出的页面职责、章节数量和顺序生成当前项目内容，不得回退到固定十二章、固定页数或公司标准模板。
+11. 上传模板的全部可见标题都只能作为内部槽位提示。每个 section.title 必须根据当前项目和本页职责重新拟定；不得复用模板样本项目名称、样本行业结论、样本人物、客户、竞品、数字或投资判断。
+12. 每个章节的信息密度应适配对应模板槽位。优先精炼内容，不得通过擅自缩小字体、改变行距或增加未授权页面解决溢出。
+13. 输出章节必须与模板中的业务内容页一一对应；封面、目录、章节过渡页、来源页和责任声明页不作为业务章节重复生成。
+14. 投资结论必须结合当前项目阶段，给出“进入初筛 / 继续跟踪 / 申请立项 / 启动尽调 / 提请上会 / 提交投决 / 暂缓推进 / 归档”之一及其前置条件。
+15. 市场规模、增长率、政策和具名竞品可以使用已核验的行业上下文来源，但必须明确是行业或可比对象信息，不得写成当前公司自身收入、客户、份额、融资或技术事实。`
+    : ''
   const structureOrderRule = isCustomTemplate
     ? `必须按内部结构槽顺序输出 ${input.template.sections.length} 个 section，但不得复用原模板可见标题。`
-    : `必须保留章节顺序：${input.template.sections.join('、')}。`
-  const generationParameters = isCustomTemplate
+    : isUploadedInvestmentTemplate
+      ? `必须按上传模板内部槽位顺序输出 ${input.template.sections.length} 个业务 section；槽位标题只用于理解页面职责，输出时全部改写为当前项目语义标题。`
+      : `必须保留章节顺序：${input.template.sections.join('、')}。`
+  const generationParameters = usesUploadedTemplate
     ? Object.fromEntries(Object.entries(input.parameters).filter(([key]) =>
         !['customTemplateId', 'customTemplateName'].includes(key)))
     : input.parameters
@@ -1730,8 +1879,10 @@ export async function composeBusinessContent(input: {
     ? '你是投资中台的资深投资经理，负责仅针对当前会话绑定的线索池或项目库项目生成内部尽调报告，并结合当前项目阶段形成推进、暂缓或归档建议。'
     : isCustomTemplate
       ? '你是投资中台的资深投资经理，负责仅针对当前会话绑定的线索池或项目库项目，按上传模板生成内部投资材料，并结合当前项目阶段形成推进、暂缓或归档建议。'
-      : input.type === 'investment_recommendation_ppt'
-        ? '你是股权投资机构内部文档撰写助手。'
+      : isUploadedInvestmentTemplate
+        ? '你是投资中台的资深投资经理，负责仅针对当前会话绑定的项目，严格按本次上传模板生成内部投资建议书，并结合当前阶段形成推进、暂缓或归档建议。'
+        : input.type === 'investment_recommendation_ppt'
+        ? '你是投资中台的资深投资经理，负责仅针对当前会话绑定的线索池或项目库项目生成内部投资建议书，并结合当前阶段形成推进、暂缓或归档建议。'
         : '你是投资中台的资深投资经理，负责仅针对当前会话绑定的项目生成内部投资材料。'
   const systemPrompt = `${assistantRole}
 当前任务的业务角色、分析范围、章节职责和写作口径以已激活业务 Skill 及其 references 为唯一权威。以下仅为不可覆盖的安全、证据与 JSON 接口约束：
@@ -1743,11 +1894,11 @@ export async function composeBusinessContent(input: {
 6. Skill 版本、模板版本、模板文件名属于内部审计信息，不得写入标题、摘要、章节或结论。
 7. ${repetitionRule}
 8. 禁止复制整段证据、页眉页脚、目录、测试文字或占位语；每项 finding 只保留一个对决策有用的结论。
-9. ${sourceDisplayRule}${dueDiligenceRule}${customTemplateRule}
+9. ${sourceDisplayRule}${dueDiligenceRule}${customTemplateRule}${uploadedInvestmentTemplateRule}
 已激活业务 Skill：${input.skill.name}
 Skill 版本：${input.skill.version}
 业务模板版本：${input.template.templateVersion}
-业务模板文件：${isCustomTemplate ? '用户上传文件（仅供内部版式分析，文件名不得用于标题）' : `${input.type === 'investment_proposal' ? 'docs/投资提案' : 'docs'} 中的 ${templateFiles}`}
+业务模板文件：${usesUploadedTemplate ? '用户本次上传模板（作为结构与视觉唯一权威，文件名不得作为项目事实）' : `${input.type === 'investment_proposal' ? 'docs/投资提案' : 'docs'} 中的 ${templateFiles}`}
 模板只规定章节、版式和表达结构；模板内示例项目正文不是当前项目证据，严禁复制或改写为当前项目事实。
 
 ${input.skill.instructions}
@@ -1758,6 +1909,8 @@ ${input.skill.referenceInstructions || '无额外 references。'}`
 
   const userPrompt = `${isCustomTemplate
     ? '请按本地项目资料优先、缓存公开证据复用、定向网络补全为辅的顺序，严格依据以下项目字段和证据，为当前项目生成标题、章节标题和正文均为全新内容的内部结构化中文投资材料。'
+    : isUploadedInvestmentTemplate
+      ? '请严格依据以下项目字段和证据，按本次上传模板识别出的页面职责、业务章节数量和顺序，为当前项目生成结构化中文投资建议书内容。'
     : isDueDiligence
       ? `请严格依据以下项目字段和证据，为“${input.template.label}”生成内部结构化中文尽调报告。`
     : `请严格依据以下项目字段和证据，为“${input.template.label}”生成结构化中文初稿。`}
@@ -1883,6 +2036,9 @@ ${JSON.stringify(previousDraft ?? {}).slice(0, 60_000)}`
     )
     if (isDueDiligence) return finalizeDueDiligenceContent(normalized)
     if (isCustomTemplate) return finalizeCustomTemplateContent(normalized, input.template, input.project)
+    if (input.type === 'investment_recommendation_ppt') {
+      return finalizeInvestmentRecommendationPptContent(normalized, input.template, input.project)
+    }
     return normalized
   }
 
@@ -1950,6 +2106,9 @@ ${JSON.stringify(previousDraft ?? {}).slice(0, 60_000)}`
       input.sources.length,
     )
     if (isCustomTemplate) return finalizeCustomTemplateContent(normalized, input.template, input.project)
+    if (input.type === 'investment_recommendation_ppt') {
+      return finalizeInvestmentRecommendationPptContent(normalized, input.template, input.project)
+    }
     return normalized
   }
 }

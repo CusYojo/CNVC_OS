@@ -236,20 +236,38 @@ export async function reviewGeneratedComplianceDocx(input: {
   })
   const titleParagraph = paragraphs.find((paragraphXml) =>
     compactText(xmlText(paragraphXml)) === compactText(input.content.title))
+  const level1Paragraphs = ['公司情况介绍', '投资理由', '投资计划', '投资情形分析']
+    .map((title) => paragraphs.find((paragraphXml) =>
+      compactText(xmlText(paragraphXml)) === compactText(title)))
   const level2Paragraphs = ['公司简介', '核心团队', '产品及技术']
     .map((title) => paragraphs.find((paragraphXml) =>
       compactText(xmlText(paragraphXml)) === compactText(title)))
+  const level1IndentValid = level1Paragraphs.every((paragraphXml) => {
+    if (!paragraphXml) return false
+    const indent = firstTag(paragraphXml, 'w:ind')
+    return integerAttribute(indent, 'w:firstLine') === 0
+      || integerAttribute(indent, 'w:firstLineChars') === 0
+  })
+  const level2IndentValid = level2Paragraphs.every((paragraphXml) => {
+    if (!paragraphXml) return false
+    const indent = firstTag(paragraphXml, 'w:ind')
+    return integerAttribute(indent, 'w:left') === 0
+      && integerAttribute(indent, 'w:firstLine') === 482
+  })
   if (
     !runFontTags.length
     || unexpectedRunFont
     || !titleParagraph?.includes('w:eastAsia="STHeiti"')
     || !titleParagraph.includes('<w:sz w:val="28"/>')
     || hasActiveBold(titleParagraph)
-    || level2Paragraphs.some((paragraphXml) => !paragraphXml || hasActiveBold(paragraphXml))
+    || level1Paragraphs.some((paragraphXml) => !paragraphXml || !hasActiveBold(paragraphXml))
+    || level2Paragraphs.some((paragraphXml) => !paragraphXml || !hasActiveBold(paragraphXml))
+    || !level1IndentValid
+    || !level2IndentValid
   ) {
     addIssue(issues, {
       code: 'DOCX_FORMAT_MISMATCH',
-      message: 'DOCX标题、二级标题或中西文字体未满足黑体/宋体核心规范',
+      message: 'DOCX标题、一级/二级标题字形或编号缩进未满足核心规范',
     })
   }
   const pageSize = firstTag(documentXml, 'w:pgSz')

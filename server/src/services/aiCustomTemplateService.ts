@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
-import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { and, desc, eq } from 'drizzle-orm'
 import JSZip from 'jszip'
@@ -19,6 +19,7 @@ import {
   type LoadedAiSkill,
 } from './aiSkillService.js'
 import type { AiTemplateDefinition } from './aiTemplateCatalog.js'
+import { convertUploadedInvestmentPdfTemplate } from './aiInvestmentTemplateConversionService.js'
 
 const MAX_TEMPLATE_BYTES = 25 * 1024 * 1024
 const CUSTOM_TEMPLATE_DATA_ROOT = path.resolve(
@@ -48,6 +49,29 @@ type ParagraphProfile = {
 export type ParsedAiCustomTemplate = {
   analysis: AiCustomTemplateAnalysis
   outputFormat: 'docx' | 'pptx'
+}
+
+export type AiCustomTemplateProgressUpdate = {
+  stage: string
+  progress: number
+}
+
+type AiCustomTemplateCreateOptions = {
+  onProgress?: (
+    update: AiCustomTemplateProgressUpdate,
+  ) => void | Promise<void>
+}
+
+async function reportTemplateProgress(
+  options: AiCustomTemplateCreateOptions,
+  stage: string,
+  progress: number,
+) {
+  try {
+    await options.onProgress?.({ stage, progress })
+  } catch (error) {
+    console.warn('[template-analysis] 进度更新失败:', (error as Error).message)
+  }
 }
 
 function typedError(message: string, status: number, code: string) {
@@ -545,12 +569,14 @@ export async function createAiCustomTemplate(user: TemplateUser, input: {
   conversationId?: string
   name: string
   dataBase64: string
-}) {
+  purpose?: 'custom_template_document' | 'investment_recommendation_ppt'
+}, options: AiCustomTemplateCreateOptions = {}) {
   const project = await assertProjectAndConversationAccess(
     user,
     input.projectId,
     input.conversationId,
   )
+  await reportTemplateProgress(options, '项目权限校验完成，正在读取模板', 8)
   const fileName = safeFileName(input.name)
   const base64 = input.dataBase64.includes(',')
     ? input.dataBase64.slice(input.dataBase64.indexOf(',') + 1)
@@ -560,7 +586,20 @@ export async function createAiCustomTemplate(user: TemplateUser, input: {
   }
   const buffer = Buffer.from(base64, 'base64')
   if (!buffer.length) throw typedError('模板内容为空或 Base64 非法', 400, 'INVALID_TEMPLATE')
-  const parsed = await analyzeAiCustomTemplateBuffer(buffer, fileName)
+  await reportTemplateProgress(options, '模板上传完成，正在检查文件格式', 12)
+  const purpose = input.purpose ?? 'custom_template_document'
+  const extension = path.extname(fileName).toLowerCase()
+  if (
+    purpose === 'investment_recommendation_ppt'
+    && extension !== '.pdf'
+    && extension !== '.pptx'
+  ) {
+    throw typedError(
+      '投资建议书模板仅支持 PDF 或 PPTX',
+      400,
+      'UNSUPPORTED_INVESTMENT_TEMPLATE',
+    )
+  }
   const templateId = randomUUID()
   const templateRoot = path.join(
     CUSTOM_TEMPLATE_DATA_ROOT,
@@ -570,46 +609,112 @@ export async function createAiCustomTemplate(user: TemplateUser, input: {
     templateId,
   )
   await mkdir(templateRoot, { recursive: true })
-  const assetPath = path.join(templateRoot, fileName)
-  const analysisPath = path.join(templateRoot, 'template-analysis.json')
-  await Promise.all([
-    writeFile(assetPath, buffer),
-    writeFile(
-      analysisPath,
-      `${JSON.stringify(parsed.analysis, null, 2)}\n`,
-      'utf8',
-    ),
-  ])
-  const skill = await loadAiSkill(AI_TEMPLATE_DRIVEN_SKILL_NAME)
-  const sha256 = createHash('sha256').update(buffer).digest('hex')
-  const mimeType = parsed.outputFormat === 'pptx'
-    ? 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
-    : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-  const [row] = await db.insert(aiCustomTemplates).values({
-    id: templateId,
-    userId: user.uid,
-    projectId: input.projectId,
-    conversationId: input.conversationId,
-    originalFileName: fileName,
-    format: parsed.outputFormat,
-    mimeType,
-    fileSize: buffer.length,
-    sha256,
-    storagePath: assetPath,
-    analysis: parsed.analysis,
-    skillName: AI_TEMPLATE_DRIVEN_SKILL_NAME,
-    skillPath: path.join(getAiSkillRoot(), AI_TEMPLATE_DRIVEN_SKILL_NAME),
-    skillVersion: skill.version,
-    status: 'succeeded',
-  }).returning()
-  await db.insert(auditLogs).values({
-    userId: user.uid,
-    userName: user.name,
-    module: 'AI 智能助手',
-    action: '上传并分析文档模板',
-    target: `${project.name}：${fileName}`,
-  })
-  return publicTemplate(row)
+  await reportTemplateProgress(options, '已创建安全工作区，正在准备解析', 15)
+  try {
+    let assetBuffer = buffer
+    let assetFileName = fileName
+    let parsed: ParsedAiCustomTemplate
+    if (extension === '.pdf') {
+      if (purpose !== 'investment_recommendation_ppt') {
+        throw typedError(
+          'PDF 模板仅用于投资建议书 PPT；通用上传模板仍只支持 DOCX 或 PPTX',
+          400,
+          'UNSUPPORTED_TEMPLATE',
+        )
+      }
+      const sourcePdfPath = path.join(templateRoot, fileName)
+      assetFileName = `${path.basename(fileName, extension)}-editable.pptx`
+      const outputPptxPath = path.join(templateRoot, assetFileName)
+      const conversionWorkDir = path.join(templateRoot, 'conversion')
+      await writeFile(sourcePdfPath, buffer)
+      await reportTemplateProgress(options, 'PDF 已保存，正在分析页面与图片对象', 18)
+      const conversion = await convertUploadedInvestmentPdfTemplate({
+        sourcePdfPath,
+        outputPptxPath,
+        workDir: conversionWorkDir,
+        onProgress: options.onProgress,
+      })
+      assetBuffer = conversion.outputBuffer
+      await reportTemplateProgress(options, '转换交接检查通过，正在识别 PPTX 结构', 95)
+      const converted = await analyzeAiCustomTemplateBuffer(assetBuffer, assetFileName)
+      parsed = {
+        ...converted,
+        analysis: versionAnalysis({
+          ...converted.analysis,
+          fileName,
+          summary: `源 PDF 已通过 pdf-to-editable-ppt 转为可编辑 PPTX。${converted.analysis.summary}`,
+        }),
+      }
+    } else {
+      await reportTemplateProgress(
+        options,
+        extension === '.pptx'
+          ? '正在识别幻灯片结构、字体和内容槽位'
+          : '正在识别文档结构、字体和段落样式',
+        35,
+      )
+      parsed = await analyzeAiCustomTemplateBuffer(buffer, fileName)
+      await reportTemplateProgress(options, '模板结构识别完成，正在整理分析结果', 88)
+    }
+
+    if (purpose === 'investment_recommendation_ppt' && parsed.outputFormat !== 'pptx') {
+      throw typedError(
+        '投资建议书模板必须能解析为 PPTX',
+        400,
+        'INVESTMENT_TEMPLATE_FORMAT_MISMATCH',
+      )
+    }
+    const assetPath = path.join(templateRoot, assetFileName)
+    const analysisPath = path.join(templateRoot, 'template-analysis.json')
+    await reportTemplateProgress(options, '正在保存模板与结构分析结果', 97)
+    await Promise.all([
+      extension === '.pdf' ? Promise.resolve() : writeFile(assetPath, assetBuffer),
+      writeFile(
+        analysisPath,
+        `${JSON.stringify(parsed.analysis, null, 2)}\n`,
+        'utf8',
+      ),
+    ])
+    const skillName = purpose === 'investment_recommendation_ppt'
+      ? 'editable-ppt-content-replacer'
+      : AI_TEMPLATE_DRIVEN_SKILL_NAME
+    const skill = await loadAiSkill(skillName)
+    await reportTemplateProgress(options, '正在登记模板并完成审计记录', 99)
+    const sha256 = createHash('sha256').update(assetBuffer).digest('hex')
+    const mimeType = parsed.outputFormat === 'pptx'
+      ? 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+      : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    const [row] = await db.insert(aiCustomTemplates).values({
+      id: templateId,
+      userId: user.uid,
+      projectId: input.projectId,
+      conversationId: input.conversationId,
+      originalFileName: fileName,
+      format: parsed.outputFormat,
+      mimeType,
+      fileSize: assetBuffer.length,
+      sha256,
+      storagePath: assetPath,
+      analysis: parsed.analysis,
+      skillName,
+      skillPath: path.join(getAiSkillRoot(), skillName),
+      skillVersion: skill.version,
+      status: 'succeeded',
+    }).returning()
+    await db.insert(auditLogs).values({
+      userId: user.uid,
+      userName: user.name,
+      module: 'AI 智能助手',
+      action: purpose === 'investment_recommendation_ppt'
+        ? '上传并分析投资建议书模板'
+        : '上传并分析文档模板',
+      target: `${project.name}：${fileName}`,
+    })
+    return publicTemplate(row)
+  } catch (error) {
+    await rm(templateRoot, { recursive: true, force: true }).catch(() => undefined)
+    throw error
+  }
 }
 
 export async function listAiCustomTemplates(
@@ -641,6 +746,7 @@ export async function resolveAiCustomTemplateForTask(input: {
   projectId: string
   conversationId?: string
   templateId: string
+  taskType?: 'custom_template_document' | 'investment_recommendation_ppt'
 }): Promise<{
   row: typeof aiCustomTemplates.$inferSelect
   template: AiTemplateDefinition
@@ -661,14 +767,25 @@ export async function resolveAiCustomTemplateForTask(input: {
   if (!isManagedTemplatePath(resolvedAsset)) {
     throw typedError('上传模板存储路径无效', 500, 'CUSTOM_TEMPLATE_PATH_INVALID')
   }
+  const taskType = input.taskType ?? 'custom_template_document'
+  const skillName = taskType === 'investment_recommendation_ppt'
+    ? 'editable-ppt-content-replacer'
+    : AI_TEMPLATE_DRIVEN_SKILL_NAME
   const [assetStat, skill] = await Promise.all([
     stat(resolvedAsset).catch(() => null),
-    loadAiSkill(AI_TEMPLATE_DRIVEN_SKILL_NAME),
+    loadAiSkill(skillName),
   ])
   if (!assetStat?.isFile() || !existsSync(resolvedAsset)) {
     throw typedError('上传模板文件已丢失', 503, 'CUSTOM_TEMPLATE_FILE_MISSING')
   }
   const analysis = versionAnalysis(row.analysis as AiCustomTemplateAnalysis)
+  if (taskType === 'investment_recommendation_ppt' && row.format !== 'pptx') {
+    throw typedError(
+      '投资建议书任务只能使用 PDF 转换产物或原生 PPTX 模板',
+      409,
+      'INVESTMENT_TEMPLATE_FORMAT_MISMATCH',
+    )
+  }
   const sectionTitles = [...new Set(analysis.structures
     .filter((item, index) =>
       !(analysis.format === 'pptx' && index === 0)
@@ -677,27 +794,58 @@ export async function resolveAiCustomTemplateForTask(input: {
     .filter(Boolean))]
     .slice(0, 40)
   const outputFormat = row.format === 'pptx' ? 'pptx' : 'docx'
+  const sourceWasPdf = path.extname(row.originalFileName).toLowerCase() === '.pdf'
+  const conversionHandoffPath = sourceWasPdf
+    ? path.join(path.dirname(resolvedAsset), 'conversion', 'conversion-handoff.json')
+    : undefined
+  if (
+    conversionHandoffPath
+    && (!isManagedTemplatePath(conversionHandoffPath) || !existsSync(conversionHandoffPath))
+  ) {
+    throw typedError(
+      'PDF 模板转换交接证书已丢失',
+      503,
+      'PDF_TEMPLATE_HANDOFF_MISSING',
+    )
+  }
+  const isInvestmentPpt = taskType === 'investment_recommendation_ppt'
   return {
     row: {
       ...row,
       analysis,
-      skillName: AI_TEMPLATE_DRIVEN_SKILL_NAME,
-      skillPath: path.join(getAiSkillRoot(), AI_TEMPLATE_DRIVEN_SKILL_NAME),
+      skillName,
+      skillPath: path.join(getAiSkillRoot(), skillName),
       skillVersion: skill.version,
     },
     skill,
     template: {
-      type: 'custom_template_document',
-      skillName: AI_TEMPLATE_DRIVEN_SKILL_NAME,
+      type: taskType,
+      skillName,
       label: path.basename(row.originalFileName, path.extname(row.originalFileName)).slice(0, 80),
-      description: '复用用户上传模板的版式与结构，为当前项目生成内部投资分析材料',
+      description: isInvestmentPpt
+        ? '严格依据用户上传模板的版式、结构和页面职责生成投资建议书'
+        : '复用用户上传模板的版式与结构，为当前项目生成内部投资分析材料',
       outputFormat,
       templateVersion: `${skill.version}+${analysis.analysisVersion}`,
       referencePath: resolvedAsset,
       editableLevel: outputFormat === 'pptx' ? 'core-elements' : 'text-and-structure',
       sections: sectionTitles.length ? sectionTitles : ['正文'],
-      requiredParameters: ['projectId', 'sourceCutoffDate', 'customTemplateId'],
-      disclaimer: '本报告以当前项目资料库为主要依据，并按关键缺口采用可核验的定向公开补全；结论以文内所列来源和资料截止日为边界。',
+      requiredParameters: isInvestmentPpt
+        ? ['projectId', 'sourceCutoffDate', 'customTemplateId', 'language', 'structureMode']
+        : ['projectId', 'sourceCutoffDate', 'customTemplateId'],
+      disclaimer: isInvestmentPpt
+        ? '本演示文稿由 AI 基于已授权资料生成，仅供内部讨论，不构成最终投资决策。'
+        : '本报告以当前项目资料库为主要依据，并按关键缺口采用可核验的定向公开补全；结论以文内所列来源和资料截止日为边界。',
+      ...(isInvestmentPpt
+        ? {
+            workflowSkillNames: [
+              'pdf-to-editable-ppt',
+              'editable-ppt-content-replacer',
+            ] as const,
+            templateSourceMode: sourceWasPdf ? 'pdf-converted' as const : 'native-pptx' as const,
+            ...(conversionHandoffPath ? { conversionHandoffPath } : {}),
+          }
+        : {}),
       customAnalysis: analysis,
     },
   }

@@ -12,7 +12,7 @@
 |---|---|---|
 | 合规性说明 | `generate-compliance-statement` | AI-007 持久任务创建及内容生成时强制加载 |
 | 投资提案 | `draft-investment-proposal` | AI-008 持久任务创建及内容生成时强制加载 |
-| 投资建议书（PPT） | `build-investment-recommendation-ppt` | AI-009 持久任务创建及内容生成时强制加载 |
+| 投资建议书（PPT） | `editable-ppt-content-replacer` | AI-009 持久任务创建及内容生成时强制加载 |
 | 尽调报告 | `write-due-diligence-report` | AI-010 持久任务创建及内容生成时强制加载 |
 | Q&A | `answer-project-qa` | AI-011 用户确认问题后由 `POST /api/ai/qa` 确定性加载，回答保存到会话并可恢复 |
 

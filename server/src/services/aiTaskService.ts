@@ -20,6 +20,7 @@ import {
   annotateDueDiligencePendingAfterResearch,
   composeBusinessContent,
   dueDiligencePendingResearchTopics,
+  investmentRecommendationPendingResearchTopics,
   usedBusinessSourceIndexes,
   type BusinessContent,
   type EvidenceSource,
@@ -86,6 +87,7 @@ import {
   projectQaResearchTopicsForSources,
   projectWebResearchTopicsForSources,
   type ProjectQaModelResearchAudit,
+  type ProjectQaResearchTopic,
   type ProjectWebResearchAudit,
 } from './aiQaModelResearchService.js'
 import {
@@ -104,6 +106,12 @@ import {
   safeAiTaskFailureMessage,
   safeAiTaskFailureStage,
 } from './aiTaskErrorService.js'
+import {
+  buildInvestmentRecommendationReplacementAudit,
+  prepareInvestmentRecommendationPptWorkflow,
+  reviewInvestmentRecommendationPpt,
+  type InvestmentRecommendationPptWorkflow,
+} from './aiInvestmentRecommendationPptWorkflowService.js'
 
 export type AiTaskStatus = 'pending' | 'running' | 'succeeded' | 'failed' | 'cancelled'
 
@@ -127,6 +135,7 @@ const running = new Set<string>()
 const AUTO_RECOVERY_TASK_TYPES = new Set<AiExecutableTaskType>([
   'compliance_statement',
   'investment_proposal',
+  'investment_recommendation_ppt',
   'due_diligence_report',
   'project_qa',
   'custom_template_document',
@@ -416,6 +425,7 @@ function sharedInvestmentResearchTopics(
   project: {
     name: string
     companyName?: string | null
+    industry?: string | null
   },
   parameters: Record<string, unknown>,
 ) {
@@ -433,7 +443,11 @@ function sharedInvestmentResearchTopics(
   const typeSpecific = type === 'investment_proposal'
     ? [`${subject} 商业模式、财务表现、投资亮点、交易条件和退出路径`]
     : type === 'investment_recommendation_ppt'
-      ? [`${subject} 市场定位、具名竞品、差异化、经营数据和投资判断`]
+      ? [
+          `${project.industry || subject} 市场规模、增长率、渗透率、产业政策、采购需求和公开预测`,
+          `${project.industry || subject} 具名竞品、替代方案、产品参数、客户场景、融资和商业化进展`,
+          `${subject} 市场定位、差异化、经营数据、投资亮点和投资判断`,
+        ]
       : type === 'due_diligence_report'
         ? [`${subject} 财务报表、现金流、关联交易、劳动用工和合规事项`]
         : type === 'project_qa'
@@ -443,7 +457,52 @@ function sharedInvestmentResearchTopics(
     ...(intent ? [`${subject} ${intent}`] : []),
     ...common,
     ...typeSpecific,
-  ])].slice(0, 7)
+  ])].slice(0, type === 'investment_recommendation_ppt' ? 9 : 7)
+}
+
+function investmentRecommendationWebTopicsForSources(
+  sources: readonly EvidenceSource[],
+  maxTopics = 9,
+): ProjectQaResearchTopic[] {
+  return [...new Set<ProjectQaResearchTopic>([
+    '行业、市场空间与政策',
+    '竞品、替代方案与项目级对标',
+    ...projectWebResearchTopicsForSources(sources, maxTopics),
+  ])].slice(0, maxTopics)
+}
+
+function compactEvidenceName(value: unknown) {
+  return String(value ?? '')
+    .replace(/(?:有限责任公司|股份有限公司|有限公司|项目)$/g, '')
+    .replace(/[“”"'《》\s]+/g, '')
+}
+
+/**
+ * 历史公开网页缓存可能由同项目下的其他任务产生。只有命中当前主体，
+ * 或明确标记为当前项目行业上下文的页面，才允许进入本次生成。
+ */
+export function evidenceSourceMatchesProject(
+  source: EvidenceSource,
+  project: {
+    name: string
+    companyName?: string | null
+    industry?: string | null
+  },
+) {
+  if (!source.sourceType.startsWith('public_web')) return true
+  const text = `${source.sourceName}\n${source.content}`.replace(/\s+/g, '')
+  const entityNames = [...new Set([
+    compactEvidenceName(project.companyName),
+    compactEvidenceName(project.name),
+  ].filter((value) => value.length >= 2))]
+  if (entityNames.some((name) => text.includes(name))) return true
+  if (!/项目匹配：行业上下文一致/.test(source.content)) return false
+  const generic = new Set(['科技', '技术', '智能', '人工智能', '软件', '硬件', '制造业', '服务业'])
+  const industryTerms = String(project.industry ?? '')
+    .split(/[、，,；;\/|·\s]+/)
+    .map(compactEvidenceName)
+    .filter((value) => value.length >= 3 && !generic.has(value))
+  return industryTerms.some((term) => text.includes(term))
 }
 
 export function screenEvidenceSources(sources: EvidenceSource[], type?: AiExecutableTaskType) {
@@ -453,8 +512,10 @@ export function screenEvidenceSources(sources: EvidenceSource[], type?: AiExecut
       ? { maxTotal: 96, maxPerDocument: 12 }
       : type === 'due_diligence_report' || type === 'custom_template_document'
         ? { maxTotal: 96, maxPerDocument: 4 }
-        : type === 'project_qa'
+    : type === 'project_qa'
           ? { maxTotal: 72, maxPerDocument: 8 }
+          : type === 'investment_recommendation_ppt'
+            ? { maxTotal: 72, maxPerDocument: 6 }
           : { maxTotal: 18, maxPerDocument: 3 }
   const result = curateEvidenceSources(sources, options)
   // 本地项目资料优先，项目档案和用户补充输入其次，缓存公开证据最后。
@@ -563,12 +624,16 @@ async function executeTask(taskId: string) {
     const [task] = await db.select().from(aiTasks).where(eq(aiTasks.id, taskId)).limit(1)
     if (!task || !isAiExecutableTaskType(task.type) || ['succeeded', 'cancelled'].includes(task.status)) return
     const parameters = (task.parameters ?? {}) as Record<string, unknown>
-    const resolvedCustomTemplate = task.type === 'custom_template_document'
+    const resolvedCustomTemplate = (
+      task.type === 'custom_template_document'
+      || task.type === 'investment_recommendation_ppt'
+    )
       ? await resolveAiCustomTemplateForTask({
           userId: task.userId,
           projectId: task.projectId,
           conversationId: task.conversationId ?? undefined,
           templateId: String(parameters.customTemplateId || ''),
+          taskType: task.type,
         })
       : undefined
     const template = resolvedCustomTemplate?.template ?? AI_TEMPLATE_CATALOG[task.type as AiBusinessTaskType]
@@ -587,6 +652,10 @@ async function executeTask(taskId: string) {
     const skill = resolvedCustomTemplate?.skill ?? await loadAiSkill(
       AI_TEMPLATE_CATALOG[task.type as AiBusinessTaskType].skillName,
     )
+    const pptWorkflow: InvestmentRecommendationPptWorkflow | undefined
+      = task.type === 'investment_recommendation_ppt'
+        ? await prepareInvestmentRecommendationPptWorkflow(template)
+        : undefined
     let complianceBlueprint: ComplianceDocumentBlueprint | undefined
     if (task.type === 'compliance_statement') {
       await updateStage(taskId, '解析合规模板并建立 Blueprint', 6)
@@ -629,8 +698,10 @@ async function executeTask(taskId: string) {
             ? 240
           : task.type === 'due_diligence_report'
             ? 500
-            : task.type === 'custom_template_document'
+          : task.type === 'custom_template_document'
               ? 80
+          : task.type === 'investment_recommendation_ppt'
+            ? 160
           : 40,
     )
     await updateStage(taskId, '整理当前项目资料库证据', 18)
@@ -641,7 +712,7 @@ async function executeTask(taskId: string) {
       ? parameters.researchIntent.trim()
       : ''
     const rawSources: EvidenceSource[] = [
-      ...knowledgeSources,
+      ...knowledgeSources.filter((source) => evidenceSourceMatchesProject(source, project)),
       ...(project.updatedAt.toISOString().slice(0, 10) <= sourceCutoffDate ? [{
         sourceType: 'project_record',
         sourceId: project.id,
@@ -672,6 +743,8 @@ async function executeTask(taskId: string) {
     let dueDiligencePageResearch: ProjectWebResearchAudit | undefined
     let sharedNetworkResearch: DueDiligenceNetworkResearchAudit | undefined
     let sharedModelResearch: ProjectWebResearchAudit | undefined
+    let investmentRecommendationGapAgentResearch: DueDiligenceNetworkResearchAudit | undefined
+    let investmentRecommendationGapPageResearch: ProjectWebResearchAudit | undefined
     let qaAgentResearch: DueDiligenceNetworkResearchAudit | undefined
     let qaModelResearch: ProjectQaModelResearchAudit | undefined
     if (task.type === 'compliance_statement') {
@@ -732,6 +805,7 @@ async function executeTask(taskId: string) {
     }
     if ([
       'investment_proposal',
+      'investment_recommendation_ppt',
       'due_diligence_report',
       'custom_template_document',
     ].includes(task.type)) {
@@ -743,7 +817,11 @@ async function executeTask(taskId: string) {
           sourceCutoffDate,
           pendingTopics: sharedInvestmentResearchTopics(task.type, project, parameters),
           parameters,
-          maxSources: task.type === 'due_diligence_report' ? 24 : 18,
+          maxSources: task.type === 'due_diligence_report'
+            ? 24
+            : task.type === 'investment_recommendation_ppt'
+              ? 20
+              : 18,
         })
         sharedNetworkResearch = research.audit
         agentCandidates = research.sources
@@ -762,11 +840,18 @@ async function executeTask(taskId: string) {
             ...parameters,
             nativeModelSearch: true,
           },
-          requestedTopics: projectWebResearchTopicsForSources(
-            sources,
-            task.type === 'due_diligence_report' ? 8 : 6,
-          ),
-          maxSources: task.type === 'due_diligence_report' ? 20 : 14,
+          requestedTopics: task.type === 'investment_recommendation_ppt'
+            ? investmentRecommendationWebTopicsForSources(sources, 9)
+            : projectWebResearchTopicsForSources(
+                sources,
+                task.type === 'due_diligence_report' ? 8 : 6,
+              ),
+          allowIndustryContext: task.type === 'investment_recommendation_ppt',
+          maxSources: task.type === 'due_diligence_report'
+            ? 20
+            : task.type === 'investment_recommendation_ppt'
+              ? 16
+              : 14,
         })
         sharedModelResearch = research.audit
         if (research.sources.length > 0) {
@@ -1166,6 +1251,13 @@ async function executeTask(taskId: string) {
             stage: (elapsedSeconds) =>
               `大模型正在分章生成尽调正文（已等待 ${elapsedSeconds} 秒）`,
           })
+        : task.type === 'investment_recommendation_ppt'
+          ? await withTaskHeartbeat(taskId, composeInitialContent, {
+              startProgress: 35,
+              endProgress: 48,
+              stage: (elapsedSeconds) =>
+                `大模型正在生成投资建议书初稿（已等待 ${elapsedSeconds} 秒）`,
+            })
         : await composeInitialContent()
       if (task.type === 'due_diligence_report') {
         const pendingTopics = dueDiligencePendingResearchTopics(content)
@@ -1242,6 +1334,83 @@ async function executeTask(taskId: string) {
           )
         }
       }
+      if (task.type === 'investment_recommendation_ppt') {
+        const pendingTopics = investmentRecommendationPendingResearchTopics(content)
+        if (pendingTopics.length > 0) {
+          let agentCandidates: EvidenceSource[] = []
+          await updateStage(taskId, '识别内容缺口并定向联网检索', 50)
+          try {
+            const research = await fetchDueDiligenceNetworkEvidence({
+              project,
+              sourceCutoffDate,
+              pendingTopics,
+              parameters,
+              maxSources: 24,
+            })
+            investmentRecommendationGapAgentResearch = research.audit
+            agentCandidates = research.sources
+          } catch (error) {
+            console.warn(
+              '[aiTask] 投资建议书缺口来源发现失败，继续使用已核验证据:',
+              (error as Error).message,
+            )
+          }
+
+          await updateStage(taskId, '核验市场、竞品及项目缺口网页', 54)
+          try {
+            const research = await fetchVerifiedProjectWebEvidence({
+              project,
+              currentSources: sources,
+              candidateSources: agentCandidates,
+              sourceCutoffDate,
+              parameters: {
+                ...parameters,
+                nativeModelSearch: true,
+              },
+              requestedTopics: investmentRecommendationWebTopicsForSources(sources, 10),
+              maxSources: 20,
+              allowIndustryContext: true,
+            })
+            investmentRecommendationGapPageResearch = research.audit
+            if (research.sources.length > 0) {
+              await cacheProjectNetworkEvidence(project.id, research.sources).catch((error) => {
+                console.warn(
+                  '[aiTask] 投资建议书缺口证据缓存失败，跳过缓存继续生成:',
+                  (error as Error).message,
+                )
+              })
+              rawSources.push(...research.sources)
+              evidenceScreening = screenEvidenceSources(rawSources, task.type)
+              sources = evidenceScreening.usable
+
+              await updateStage(taskId, '整合联网证据并重新生成投资建议书', 58)
+              content = await withTaskHeartbeat(
+                taskId,
+                () => composeBusinessContent({
+                  type: task.type as AiExecutableTaskType,
+                  template,
+                  skill,
+                  project,
+                  sources,
+                  sourceCutoffDate,
+                  parameters,
+                }),
+                {
+                  startProgress: 58,
+                  endProgress: 66,
+                  stage: (elapsedSeconds) =>
+                    `大模型正在整合联网证据（已等待 ${elapsedSeconds} 秒）`,
+                },
+              )
+            }
+          } catch (error) {
+            console.warn(
+              '[aiTask] 投资建议书缺口页面核验失败，使用首轮已核验证据继续生成:',
+              (error as Error).message,
+            )
+          }
+        }
+      }
     }
     if (evidenceScreening.rejected.length && task.type !== 'custom_template_document') {
       const affectedFiles = [...new Set(evidenceScreening.rejected.map((item) => item.sourceName))]
@@ -1274,6 +1443,14 @@ async function executeTask(taskId: string) {
     let previewMetadata: Record<string, unknown> | undefined
     let complianceDocxReview: ComplianceOutputReview | undefined
     let proposalDocxReview: InvestmentProposalOutputReview | undefined
+    let pptWorkflowReview: Awaited<ReturnType<typeof reviewInvestmentRecommendationPpt>> | undefined
+    const pptReplacementAudit = pptWorkflow
+      ? buildInvestmentRecommendationReplacementAudit({
+          workflow: pptWorkflow,
+          content,
+          sources,
+        })
+      : undefined
     let generationMetadata = template.outputFormat === 'pptx'
       ? await (async () => {
         const result = await generateBusinessPptx({
@@ -1284,6 +1461,8 @@ async function executeTask(taskId: string) {
           sources,
           sourceCutoffDate,
           pageCount: String(parameters.pageCount || '15'),
+          onProgress: ({ stage, progress }) =>
+            updateStage(taskId, stage, progress),
         })
         previewPath = outputPath.replace(/\.pptx$/i, '.preview.png')
         try {
@@ -1297,6 +1476,36 @@ async function executeTask(taskId: string) {
         } catch (error) {
           previewPath = undefined
           console.warn('[aiTask] PPT 预览生成失败，继续交付 PPTX:', (error as Error).message)
+        }
+        if (pptWorkflow) {
+          try {
+            pptWorkflowReview = await reviewInvestmentRecommendationPpt({
+              outputPath,
+              projectName: project.name,
+              disclaimer: template.disclaimer,
+              workflow: pptWorkflow,
+              template,
+            })
+            if (!pptWorkflowReview.passed) {
+              throw Object.assign(
+                new Error(
+                  `投资建议书未通过模板内容替换 Reviewer：${pptWorkflowReview.issueCodes.join('、')}`,
+                ),
+                { code: 'INVESTMENT_RECOMMENDATION_CONTENT_REJECTED' },
+              )
+            }
+          } catch (error) {
+            if (
+              (error as Error & { code?: string }).code
+              === 'INVESTMENT_RECOMMENDATION_CONTENT_REJECTED'
+            ) {
+              throw error
+            }
+            console.warn(
+              '[aiTask] 投资建议书 PPT 内容替换 Reviewer 执行失败，保留可编辑 PPTX:',
+              (error as Error).message,
+            )
+          }
         }
         return result
       })()
@@ -1439,7 +1648,12 @@ async function executeTask(taskId: string) {
         ...generationMetadata,
         evidencePolicy: task.type === 'compliance_statement'
           ? 'project_knowledge_primary_model_network_supplement'
-          : ['investment_proposal', 'due_diligence_report', 'custom_template_document'].includes(task.type)
+          : [
+              'investment_proposal',
+              'investment_recommendation_ppt',
+              'due_diligence_report',
+              'custom_template_document',
+            ].includes(task.type)
             ? 'project_knowledge_primary_flue_discovery_llm_page_verification'
             : 'project_knowledge_primary_flue_network_supplement',
         ...(complianceModelResearch
@@ -1447,6 +1661,8 @@ async function executeTask(taskId: string) {
           || dueDiligencePageResearch
           || sharedNetworkResearch
           || sharedModelResearch
+          || investmentRecommendationGapAgentResearch
+          || investmentRecommendationGapPageResearch
           ? {
               projectModelNetworkSupplement:
                 complianceModelResearch
@@ -1456,8 +1672,10 @@ async function executeTask(taskId: string) {
                     pageVerification: sharedModelResearch,
                   },
                   gapCompletion: {
-                    agentDiscovery: dueDiligenceModelResearch,
-                    pageVerification: dueDiligencePageResearch,
+                    agentDiscovery: dueDiligenceModelResearch
+                      ?? investmentRecommendationGapAgentResearch,
+                    pageVerification: dueDiligencePageResearch
+                      ?? investmentRecommendationGapPageResearch,
                   },
                 },
             }
@@ -1508,6 +1726,22 @@ async function executeTask(taskId: string) {
               wordReview: proposalDocxReview.metadata,
             }
           : {}),
+        ...(pptWorkflow
+          ? {
+              pptWorkflow: {
+                sourceMode: pptWorkflow.sourceMode,
+                templateFileName: pptWorkflow.templateFileName,
+                templateSha256: pptWorkflow.templateSha256,
+                skills: pptWorkflow.skills,
+              },
+              replacementManifest: pptReplacementAudit,
+              pptContentReplacementReviewerPassed: pptWorkflowReview?.passed ?? false,
+              pptContentReplacementReview: pptWorkflowReview?.metadata,
+              pptContentReplacementIssueCodes: pptWorkflowReview?.issueCodes ?? [
+                'reviewer-unavailable',
+              ],
+            }
+          : {}),
         referenceTemplate: path.basename(template.referencePath),
         referenceTemplates: (template.referencePaths?.length
           ? template.referencePaths
@@ -1518,6 +1752,7 @@ async function executeTask(taskId: string) {
         ...(resolvedCustomTemplate
           ? {
               customTemplateId: resolvedCustomTemplate.row.id,
+              customTemplateName: resolvedCustomTemplate.row.originalFileName,
               customTemplateSha256: resolvedCustomTemplate.row.sha256,
               customTemplateAnalysis: resolvedCustomTemplate.row.analysis,
             }
@@ -1552,6 +1787,16 @@ async function executeTask(taskId: string) {
           skillName: skill.name,
           skillVersion: skill.version,
           skillSha256: skill.sha256,
+          ...(pptWorkflow
+            ? {
+                pptWorkflow: {
+                  sourceMode: pptWorkflow.sourceMode,
+                  templateFileName: pptWorkflow.templateFileName,
+                  templateSha256: pptWorkflow.templateSha256,
+                  skills: pptWorkflow.skills,
+                },
+              }
+            : {}),
         },
       })
     }
@@ -1744,12 +1989,16 @@ export async function createAiTask(user: AiTaskUser, input: CreateAiTaskInput) {
       throw Object.assign(new Error('会话所属项目与任务项目不一致'), { status: 409, code: 'CONVERSATION_PROJECT_MISMATCH' })
     }
   }
-  const resolvedCustomTemplate = input.type === 'custom_template_document'
+  const resolvedCustomTemplate = (
+    input.type === 'custom_template_document'
+    || input.type === 'investment_recommendation_ppt'
+  )
     ? await resolveAiCustomTemplateForTask({
         userId: user.uid,
         projectId: input.projectId,
         conversationId: input.conversationId,
         templateId: String(input.parameters.customTemplateId || ''),
+        taskType: input.type,
       })
     : undefined
   const template = resolvedCustomTemplate?.template ?? AI_TEMPLATE_CATALOG[input.type as AiBusinessTaskType]
@@ -1765,6 +2014,9 @@ export async function createAiTask(user: AiTaskUser, input: CreateAiTaskInput) {
   } else {
     assertAiTemplateReferences(template)
     await loadAiSkill(AI_TEMPLATE_CATALOG[input.type as AiBusinessTaskType].skillName)
+  }
+  if (input.type === 'investment_recommendation_ppt') {
+    await prepareInvestmentRecommendationPptWorkflow(template)
   }
   const hash = createRequestHash(input)
   const [existing] = await db.select().from(aiTasks)

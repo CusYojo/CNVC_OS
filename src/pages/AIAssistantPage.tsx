@@ -10,6 +10,7 @@ import { useAuthStore, authedFetch } from '../store/useAuthStore'
 import { Button, Modal } from '../components/ui'
 import {
   AiQuickActions,
+  type AiQuickTaskPreparationProgress,
   type AiQuickTaskRequest,
 } from '../components/AiQuickActions'
 import { AiArtifactCenter, AiTaskCards, type AiTask } from '../components/AiTaskCards'
@@ -275,6 +276,115 @@ function MessageRow({ message }: { message: SafeFlueMessage }) {
       </div>
     </div>
   )
+}
+
+type ConversationTimelineItem =
+  | {
+      kind: 'message'
+      key: string
+      timestampMs: number
+      stableOrder: number
+      message: SafeFlueMessage
+    }
+  | {
+      kind: 'task'
+      key: string
+      timestampMs: number
+      stableOrder: number
+      task: AiTask
+    }
+  | {
+      kind: 'qa'
+      key: string
+      timestampMs: number
+      stableOrder: number
+      answer: ProjectQaAnswer
+    }
+
+function validTimelineTimestamp(value: string | undefined) {
+  if (!value) return undefined
+  const timestamp = Date.parse(value)
+  return Number.isFinite(timestamp) ? timestamp : undefined
+}
+
+function messageTimelineTimestamp(messages: SafeFlueMessage[], index: number) {
+  const direct = validTimelineTimestamp(messages[index]?.timestamp)
+  if (direct !== undefined) return direct
+
+  let previousIndex = index - 1
+  let previousTimestamp: number | undefined
+  while (previousIndex >= 0 && previousTimestamp === undefined) {
+    previousTimestamp = validTimelineTimestamp(messages[previousIndex]?.timestamp)
+    if (previousTimestamp === undefined) previousIndex -= 1
+  }
+  let nextIndex = index + 1
+  let nextTimestamp: number | undefined
+  while (nextIndex < messages.length && nextTimestamp === undefined) {
+    nextTimestamp = validTimelineTimestamp(messages[nextIndex]?.timestamp)
+    if (nextTimestamp === undefined) nextIndex += 1
+  }
+
+  if (previousTimestamp !== undefined && nextTimestamp !== undefined) {
+    const position = (index - previousIndex) / (nextIndex - previousIndex)
+    return previousTimestamp + (nextTimestamp - previousTimestamp) * position
+  }
+  if (previousTimestamp !== undefined) return previousTimestamp + (index - previousIndex)
+  if (nextTimestamp !== undefined) return nextTimestamp - (nextIndex - index)
+  // 仅历史异常消息可能没有时间；保持其原始顺序并放在有服务端时间的事件之前。
+  return index
+}
+
+function buildConversationTimeline(
+  messages: SafeFlueMessage[],
+  tasks: AiTask[],
+  answers: ProjectQaAnswer[],
+): ConversationTimelineItem[] {
+  const messageItems: ConversationTimelineItem[] = messages.map((message, index) => ({
+    kind: 'message',
+    key: `message:${message.id}:${index}`,
+    timestampMs: messageTimelineTimestamp(messages, index),
+    stableOrder: index,
+    message,
+  }))
+  const taskItems: ConversationTimelineItem[] = tasks.map((task, index) => ({
+    kind: 'task',
+    key: `task:${task.id}`,
+    timestampMs: validTimelineTimestamp(
+      typeof task.parameters.clientTimelineStartedAt === 'string'
+        ? task.parameters.clientTimelineStartedAt
+        : task.createdAt,
+    ) ?? Number.MAX_SAFE_INTEGER,
+    stableOrder: messages.length + index,
+    task,
+  }))
+  const qaItems: ConversationTimelineItem[] = answers.map((answer, index) => ({
+    kind: 'qa',
+    key: `qa:${answer.id}`,
+    timestampMs: validTimelineTimestamp(answer.createdAt) ?? Number.MAX_SAFE_INTEGER,
+    stableOrder: messages.length + tasks.length + index,
+    answer,
+  }))
+  return [...messageItems, ...taskItems, ...qaItems].sort((left, right) =>
+    left.timestampMs - right.timestampMs || left.stableOrder - right.stableOrder)
+}
+
+function mergeAiTaskSnapshot(
+  currentTasks: AiTask[],
+  serverTasks: AiTask[],
+  conversationId: string,
+) {
+  const claimedPreparationIds = new Set(
+    serverTasks.flatMap((task) => {
+      const preparationId = task.parameters.clientPreparationId
+      return typeof preparationId === 'string' && preparationId ? [preparationId] : []
+    }),
+  )
+  const clientTasks = currentTasks.filter((task) => {
+    if (!task.clientOnly || task.conversationId !== conversationId) return false
+    const preparationId = task.parameters.clientPreparationId
+    return typeof preparationId !== 'string' || !claimedPreparationIds.has(preparationId)
+  })
+  return [...serverTasks, ...clientTasks]
 }
 
 // ———————————— PPT 生成任务看板（长任务的阶段 + 计时 + 预期）————————————
@@ -571,7 +681,7 @@ function Chat() {
   const [qaAnswers, setQaAnswers] = useState<ProjectQaAnswer[]>([])
   const [qaAnswersLoading, setQaAnswersLoading] = useState(false)
   const [taskMutationId, setTaskMutationId] = useState<string | null>(null)
-  const quickTaskLockRef = useRef(false)
+  const quickTaskLocksRef = useRef(new Set<string>())
   const [newSessionOpen, setNewSessionOpen] = useState(false)
   const [newSessionProjectId, setNewSessionProjectId] = useState(initialProject)
   const [creatingSession, setCreatingSession] = useState(false)
@@ -581,7 +691,11 @@ function Chat() {
   const projectFiles = files.filter((file) => file.projectId === currentProject?.id)
   const currentSession = sessions.find((session) => session.agentId === convId)
   const currentConversationRowId = currentSession?.rowId ?? ''
-  const hasActiveAiTask = aiTasks.some((task) => task.status === 'pending' || task.status === 'running')
+  const currentConversationRowIdRef = useRef(currentConversationRowId)
+  currentConversationRowIdRef.current = currentConversationRowId
+  const hasActiveAiTask = aiTasks.some(
+    (task) => !task.clientOnly && (task.status === 'pending' || task.status === 'running'),
+  )
   const artifactRefreshKey = aiTasks
     .filter((task) => task.status === 'succeeded')
     .map((task) => `${task.id}:${task.updatedAt}:${task.artifacts?.length ?? 0}`)
@@ -610,11 +724,19 @@ function Chat() {
       setAiTasksLoading(false)
       return () => { active = false }
     }
-    setAiTasks([])
+    setAiTasks((items) => items.filter(
+      (task) => task.clientOnly && task.conversationId === currentConversationRowId,
+    ))
     setAiTasksLoading(true)
     apiGet<{ list: AiTask[] }>(`/ai/tasks?conversationId=${encodeURIComponent(currentConversationRowId)}`)
       .then((result) => {
-        if (active) setAiTasks(result.list ?? [])
+        if (active) {
+          setAiTasks((items) => mergeAiTaskSnapshot(
+            items,
+            result.list ?? [],
+            currentConversationRowId,
+          ))
+        }
       })
       .catch((error) => {
         console.warn('AI task recovery is temporarily unavailable', error)
@@ -660,7 +782,13 @@ function Chat() {
     const poll = async () => {
       try {
         const result = await apiGet<{ list: AiTask[] }>(`/ai/tasks?conversationId=${encodeURIComponent(currentConversationRowId)}`)
-        if (active) setAiTasks(result.list ?? [])
+        if (active) {
+          setAiTasks((items) => mergeAiTaskSnapshot(
+            items,
+            result.list ?? [],
+            currentConversationRowId,
+          ))
+        }
       } catch (error) {
         // 轮询失败不清空已有任务卡，避免短暂网络波动造成结果消失。
         console.warn('AI task polling failed:', (error as Error).message)
@@ -678,6 +806,10 @@ function Chat() {
   // Flue 是独立运行时，消息不能假设始终符合 SDK 静态类型。先归一化，后续渲染和
   // “生成结束”副作用都只读取安全结构，单条畸形消息不会再拖垮整个 AI 页面。
   const messages = useMemo(() => normalizeFlueMessages(agent.messages), [agent.messages])
+  const conversationTimeline = useMemo(
+    () => buildConversationTimeline(messages, aiTasks, qaAnswers),
+    [messages, aiTasks, qaAnswers],
+  )
   const agentErrorMessage = safeAgentErrorMessage(agent.error)
   const agentErrorRef = useRef({ message: '', errorId: '' })
   if (agentErrorMessage && agentErrorRef.current.message !== agentErrorMessage) {
@@ -1132,13 +1264,46 @@ function Chat() {
     catch (err) { showToast(`停止失败：${(err as Error).message}`, 'error') }
   }
 
+  const updateQuickTaskPreparation = (progress: AiQuickTaskPreparationProgress) => {
+    if (progress.conversationId !== currentConversationRowIdRef.current) return
+    const clientTaskId = `template-preparation:${progress.id}`
+    const task: AiTask = {
+      id: clientTaskId,
+      clientOnly: true,
+      projectId: progress.projectId,
+      conversationId: progress.conversationId,
+      type: AI_TASK_TYPE_BY_ACTION[progress.actionId],
+      parameters: {
+        customTemplateName: progress.fileName,
+        clientPreparationId: progress.id,
+        clientTimelineStartedAt: progress.startedAt,
+      },
+      templateVersion: '模板上传与预检',
+      status: progress.status,
+      stage: progress.stage,
+      progress: progress.progress,
+      errorMessage: progress.errorMessage,
+      createdAt: progress.startedAt,
+      updatedAt: progress.updatedAt,
+      completedAt: progress.status === 'failed' ? progress.updatedAt : null,
+      artifacts: [],
+      sources: [],
+    }
+    setAiTasks((items) => {
+      const existingIndex = items.findIndex((item) => item.id === clientTaskId)
+      if (existingIndex < 0) return [task, ...items]
+      return items.map((item) => item.id === clientTaskId ? task : item)
+    })
+  }
+
   const runQuickTask = async (request: AiQuickTaskRequest): Promise<boolean> => {
-    if (sending || quickTaskLockRef.current) return false
+    const taskLockKey = `${request.conversationId}:${request.actionId}`
+    if (sending || quickTaskLocksRef.current.has(taskLockKey)) return false
     if (!UUID_PATTERN.test(request.projectId)) {
       showToast(`“${request.projectName}”是未入库的演示项目，不能提交正式 AI 任务。请先创建或选择已入库项目。`, 'error')
       return false
     }
-    quickTaskLockRef.current = true
+    quickTaskLocksRef.current.add(taskLockKey)
     const parameters: Record<string, unknown> = {
       sourceCutoffDate: request.sourceCutoffDate,
       outputFormat: request.outputFormat,
@@ -1161,9 +1326,16 @@ function Chat() {
         parameters.userInstructions = request.userInstructions.trim()
       }
     } else if (request.actionId === 'investment_ppt') {
-      parameters.template = request.template || '公司标准模板'
-      parameters.pageCount = request.pageCount || '12-15页'
+      parameters.customTemplateId = request.customTemplateId
+      parameters.customTemplateName = request.customTemplateName
       parameters.language = request.language || '中文'
+      parameters.structureMode = request.structureMode || 'strict-template'
+      if (request.preparationStartedAt) {
+        parameters.clientTimelineStartedAt = request.preparationStartedAt
+      }
+      if (request.preparationId) {
+        parameters.clientPreparationId = request.preparationId
+      }
     } else if (request.actionId === 'due_diligence') {
       parameters.diligenceScope = request.diligenceScope || '商业尽调'
     } else if (request.actionId === 'qa') {
@@ -1177,7 +1349,8 @@ function Chat() {
       parameters.customTemplateName = request.customTemplateName
     }
     try {
-      if (!currentSession?.projectId || currentSession.projectId !== request.projectId) {
+      const taskSession = sessions.find((session) => session.rowId === request.conversationId)
+      if (!taskSession?.projectId || taskSession.projectId !== request.projectId) {
         showToast('当前项目随会话固定，请重新打开快捷任务后再试', 'error')
         return false
       }
@@ -1185,11 +1358,19 @@ function Chat() {
         type: AI_TASK_TYPE_BY_ACTION[request.actionId],
         projectId: request.projectId,
         // 任务关联 chat_conversations 的 UUID 主键，而不是 Flue agentId。
-        conversationId: currentSession.rowId,
+        conversationId: request.conversationId,
         parameters,
         idempotencyKey: `quick-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`,
       })
-      setAiTasks((items) => [task, ...items.filter((item) => item.id !== task.id)])
+      const clientTaskId = request.preparationId
+        ? `template-preparation:${request.preparationId}`
+        : ''
+      if (currentConversationRowIdRef.current === request.conversationId) {
+        setAiTasks((items) => [
+          task,
+          ...items.filter((item) => item.id !== task.id && item.id !== clientTaskId),
+        ])
+      }
       showToast(`${request.actionLabel}任务已创建，可在消息区查看进度`, 'success')
       return true
     } catch (error) {
@@ -1197,7 +1378,7 @@ function Chat() {
       showToast(`${request.actionLabel}任务暂未创建，请稍后再试`, 'info')
       return false
     } finally {
-      quickTaskLockRef.current = false
+      quickTaskLocksRef.current.delete(taskLockKey)
     }
   }
 
@@ -1277,40 +1458,79 @@ function Chat() {
 
         <AiErrorBoundary level="section" title="消息区域显示异常" resetKey={convId}>
           <div ref={scrollRef} className="flex-1 space-y-6 overflow-y-auto px-6 py-6">
-            {messages.length === 0 && qaAnswers.length === 0 && !qaAnswersLoading && (
+            {conversationTimeline.length === 0
+              && !qaAnswersLoading
+              && !aiTasksLoading
+              && (
               <div className="flex gap-3"><span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-brand-50 text-brand-600"><Bot className="h-4 w-4" /></span><div className="min-w-0 max-w-[88%] text-sm leading-7 text-slate-600">你好，我是赛智伯乐投资中台 AI 投研助手。我能检索项目资料、分析风险与亮点、处理文件/数据、采集公开情报、生成投委会 PPT。选好项目后直接提问即可。</div></div>
             )}
-            {messages.map((message, messageIndex) => (
+            {conversationTimeline.map((item) => {
+              if (item.kind === 'message') {
+                return (
+                  <AiErrorBoundary
+                    key={item.key}
+                    level="message"
+                    title="该条消息显示异常"
+                    resetKey={item.message.id}
+                  >
+                    <MessageRow message={item.message} />
+                  </AiErrorBoundary>
+                )
+              }
+              if (item.kind === 'qa') {
+                return (
+                  <AiErrorBoundary
+                    key={item.key}
+                    level="section"
+                    title="项目 Q&A 显示异常"
+                    resetKey={item.answer.id}
+                  >
+                    <AiQaCards answers={[item.answer]} />
+                  </AiErrorBoundary>
+                )
+              }
+              return (
+                <AiErrorBoundary
+                  key={item.key}
+                  level="section"
+                  title="AI 业务任务卡显示异常"
+                  resetKey={`${item.task.id}:${item.task.updatedAt}`}
+                >
+                  <AiTaskCards
+                    tasks={[item.task]}
+                    mutatingTaskId={taskMutationId}
+                    onCancel={cancelAiTask}
+                    onRetry={retryAiTask}
+                    onNotify={showToast}
+                  />
+                </AiErrorBoundary>
+              )
+            })}
+            {qaAnswersLoading && (
               <AiErrorBoundary
-                key={`${message.id}-${messageIndex}`}
-                level="message"
-                title="该条消息显示异常"
-                resetKey={message.id}
+                level="section"
+                title="项目 Q&A 显示异常"
+                resetKey={`${currentConversationRowId}:qa-loading`}
               >
-                <MessageRow message={message} />
+                <AiQaCards answers={[]} loading />
               </AiErrorBoundary>
-            ))}
-            <AiErrorBoundary
-              level="section"
-              title="项目 Q&A 显示异常"
-              resetKey={`${currentConversationRowId}:${qaAnswers.length}`}
-            >
-              <AiQaCards answers={qaAnswers} loading={qaAnswersLoading} />
-            </AiErrorBoundary>
-            <AiErrorBoundary
-              level="section"
-              title="AI 业务任务卡显示异常"
-              resetKey={`${currentConversationRowId}:${aiTasks.length}`}
-            >
-              <AiTaskCards
-                tasks={aiTasks}
-                loading={aiTasksLoading}
-                mutatingTaskId={taskMutationId}
-                onCancel={cancelAiTask}
-                onRetry={retryAiTask}
-                onNotify={showToast}
-              />
-            </AiErrorBoundary>
+            )}
+            {aiTasksLoading && (
+              <AiErrorBoundary
+                level="section"
+                title="AI 业务任务卡显示异常"
+                resetKey={`${currentConversationRowId}:task-loading`}
+              >
+                <AiTaskCards
+                  tasks={[]}
+                  loading
+                  mutatingTaskId={taskMutationId}
+                  onCancel={cancelAiTask}
+                  onRetry={retryAiTask}
+                  onNotify={showToast}
+                />
+              </AiErrorBoundary>
+            )}
             {busy && (() => {
               // 只读取归一化后的最后一条消息；parts 缺失或非数组时已经降级为安全数组。
               const last = messages[messages.length - 1]
@@ -1331,6 +1551,7 @@ function Chat() {
               currentProjectId={scope === 'project' ? currentSession?.projectId ?? '' : ''}
               conversationId={currentConversationRowId}
               onRunTask={runQuickTask}
+              onPreparationProgress={updateQuickTaskPreparation}
             />
           </AiErrorBoundary>
           <div

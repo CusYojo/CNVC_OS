@@ -12,6 +12,8 @@ import {
   listLeads,
   listLeadScoresForRanking,
   listRecoverableLeadScoreIds,
+  clearLeadScoreJob,
+  isLeadEligibleForScoring,
   readLeadScoreJob,
   saveLeadScoreJob,
   syncRadarLeadByName,
@@ -655,6 +657,16 @@ async function scheduleLeadScoring(leadId: string, options: { recovering?: boole
   const lead = await getLeadById(leadId)
   if (!lead) return false
   const radarProfile = (lead as { radarProfile?: Record<string, unknown> }).radarProfile ?? {}
+  if (
+    radarProfile.qualityRejected === true
+    || String(radarProfile.qualityRejected ?? '') === 'true'
+    || !(await isLeadEligibleForScoring(leadId))
+  ) {
+    await clearLeadScoreJob(leadId)
+    scoreStatus.delete(leadId)
+    console.warn(`[lead-score] skip ineligible lead=${leadId} name=${lead.name}`)
+    return false
+  }
   const isPaper = String(radarProfile.channel ?? '') === '论文'
   if (!isSpecificLeadSubjectName(lead.name, isPaper)) {
     console.warn(`[lead-score] skip invalid subject lead=${leadId} name=${lead.name}`)
@@ -816,6 +828,20 @@ async function doScore(leadId: string): Promise<void> {
     if (!lead) throw new Error('线索不存在')
     // 只使用线索池和雷达已经入库的资料，不再在评分阶段发起外部检索。
     const rp = (lead as { radarProfile?: Record<string, unknown> }).radarProfile || {}
+    const isPaper = String((rp as { channel?: string }).channel || '') === '论文'
+    if (
+      rp.qualityRejected === true
+      || String(rp.qualityRejected ?? '') === 'true'
+      || !isSpecificLeadSubjectName(lead.name, isPaper)
+      || !(await isLeadEligibleForScoring(leadId))
+    ) {
+      // 记录可能在入队后被质量回填标记为无效；执行前必须再次拦截，
+      // 并清除持久化队列状态，避免重启恢复时反复入队。
+      await clearLeadScoreJob(leadId)
+      scoreStatus.delete(leadId)
+      console.warn(`[lead-score] discard invalid queued lead=${leadId} name=${lead.name}`)
+      return
+    }
     const facts: string[] = []
     const reg = rp.registry as Record<string, string> | undefined
     if (reg) facts.push(`工商信息：公司=${reg.companyName || ''}，成立=${reg.foundedAt || ''}，注册资本=${reg.registeredCapital || ''}，法人=${reg.legalRepresentative || ''}，地址=${reg.regLocation || ''}`)
@@ -835,7 +861,6 @@ async function doScore(leadId: string): Promise<void> {
     // 【论文专属分析流程路由】radar_profile.channel==='论文' 的线索走 score-paper workflow
     // (5维:技术实力/落地可能/市场空间/学术背景/商业化经验,放宽对团队/估值/融资的要求),
     // 其余线索仍走通用 score-project(7维)。把 paperMeta 的作者/分类/摘要喂进论文评分输入。
-    const isPaper = String((rp as { channel?: string }).channel || '') === '论文'
     const paperMeta = (rp as { paperMeta?: Record<string, unknown> }).paperMeta || {}
     const scoreWorkflow = isPaper ? 'score-paper' : 'score-project'
     // 【review P0 修复】论文走 score-paper 时,必须传它 input schema 认的 typed 字段

@@ -93,9 +93,9 @@ const publicLeadHasCompanyExpr = sql<boolean>`(
 
 const PUBLIC_LEAD_INVESTMENT_PATTERN = '(完成|获得|获|宣布|官宣).{0,40}(融资|投资)|(融资|投资).{0,28}(完成|领投|跟投|亿元|万元|美元|天使轮|种子轮|pre-?a|a轮|b轮|c轮|d轮)|估值.{0,20}(亿元|万美元|亿美元|万元)'
 const PUBLIC_LEAD_COMMERCIAL_PATTERN = '(成果转化|技术转移|转化落地|产业化|中试|技术平台|工程化|技术许可|专利转让|孵化(成立|企业|公司)|创办公司|成立公司|产品获批|注册证|临床应用|应用新场景|示范应用|产业应用|客户验证|客户订单|采购|中标|签约|量产|营收|商业化)'
-const PUBLIC_LEAD_LOW_VALUE_PATTERN = '(院系之声.{0,30}(荣誉|获奖|award)|(教授|研究员|学者).{0,30}(获颁|获评|荣获|获奖|award|荣誉|发文|发表文章)|(获得|获评|入选|荣获|获).{0,24}(奖|荣誉|称号|教学团队|表彰|标兵|勋章)|(科学技术奖|科技奖|自然科学奖|技术发明奖|科技进步奖).{0,40}(揭晓|获奖|表彰)|[0-9]+[[:space:]]*项.{0,12}(获奖|获表彰)|(国家级|省级|全国高校).{0,16}(教学团队|教学成果|荣誉|奖|标兵)|奖学金|受试者招募|招募(研究参与者|受试者)|参与本研究|临床试验.{0,50}(招募|受试者|研究参与者)|实践成果.{0,24}(申请|硕士学位)|学位答辩|专业学位培养改革|论文.{0,40}(期刊|发表|刊发|接受|接收|accepted)|学术成果|研究论文|文章来源|转载全文|毕业(季|典礼|致辞|生|倒计时|设计)|毕业生去哪儿|校友招聘|社会招聘|诚聘|实习生|招聘|党支部|党员|党务|党建|革命先辈|校史|悼念|缅怀|研修班|训练营|课程|移动课堂|工作坊|讲座(预告)?|活动(预告|抢先知)|information session|参访|探访|走访|到访|企业走访交流活动|师生校友|院友沙龙|创新大赛|参赛队伍|[0-9]+[[:space:]]*家.{0,24}(企业|公司).{0,30}(融资|投资)|专场(科创)?路演|路演举办|加速计划.{0,20}(招募|启动)|最前线|解码硬科技|罚单|行业进入强监管|([0-9]+点[0-9]*氪|氪星|创投|财经)(晚报|早报)?|为什么资本|什么样的.{0,20}(能|会)|行业观察|赛道观察|赴港上市|登陆资本市场|ipo认购|上市获|要报.{0,12}专业吗|招生(简章|宣传|咨询|专业|对象)?|培养方案|课程介绍|实验班介绍|培训班|结业证书|能力提升计划|名家面对面|学员企业|发表致辞|兼任|受聘|履新|任命|(记者|人物)?专访|人物访谈|观点访谈|深度解读|系统剖析)'
+const PUBLIC_LEAD_LOW_VALUE_PATTERN = '(院系之声.{0,30}(荣誉|获奖|award)|(教授|研究员|学者).{0,30}(获颁|获评|荣获|获奖|award|荣誉|发文|发表文章)|(获得|获评|入选|荣获|获).{0,24}(奖|荣誉|称号|教学团队|表彰|标兵|勋章)|(科学技术奖|科技奖|自然科学奖|技术发明奖|科技进步奖).{0,40}(揭晓|获奖|表彰)|[0-9]+[[:space:]]*项.{0,12}(获奖|获表彰)|(国家级|省级|全国高校).{0,16}(教学团队|教学成果|荣誉|奖|标兵)|奖学金|受试者招募|招募(研究参与者|受试者)|参与本研究|临床试验.{0,50}(招募|受试者|研究参与者)|实践成果.{0,24}(申请|硕士学位)|学位答辩|专业学位培养改革|论文.{0,40}(期刊|发表|刊发|接受|接收|accepted)|学术成果|研究论文|文章来源|转载全文|毕业(季|典礼|致辞|生|倒计时|设计)|毕业生去哪儿|校友招聘|社会招聘|诚聘|实习生|招聘|党支部|党员|党务|党建|革命先辈|校史|悼念|缅怀|研修班|训练营|课程|移动课堂|工作坊|讲座(预告)?|活动(预告|抢先知)|information session|参访|探访|参观|调研|走访|到访|企业走访交流活动|师生校友|院友沙龙|创新大赛|参赛队伍|[0-9]+[[:space:]]*家.{0,24}(企业|公司).{0,30}(融资|投资)|专场(科创)?路演|路演举办|加速计划.{0,20}(招募|启动)|最前线|解码硬科技|罚单|行业进入强监管|([0-9]+点[0-9]*氪|氪星|创投|财经)(晚报|早报)?|为什么资本|什么样的.{0,20}(能|会)|行业观察|赛道观察|赴港上市|登陆资本市场|ipo认购|上市获|融资净买入|股息率|榜单|合作会议|专题会议|世界顶尖科学家论坛|院士云集|共议|要报.{0,12}专业吗|招生(简章|宣传|咨询|专业|对象)?|培养方案|课程介绍|实验班介绍|培训班|结业证书|能力提升计划|名家面对面|学员企业|发表致辞|兼任|受聘|履新|任命|(记者|人物)?专访|人物访谈|观点访谈|深度解读|系统剖析)'
 const PUBLIC_LEAD_CONCRETE_SUBJECT_PATTERN = '(股份有限公司|有限责任公司|有限公司|公司|企业|项目|团队|实验室|研究院|研究所|研究中心|工程中心|课题组|创新群体|创新联合体|中试基地|产业基地|创新平台|技术平台|研发平台|试验平台|装置|系统|产品|计划)$'
-const PUBLIC_LEAD_INVALID_SUBJECT_PATTERN = '^(数据|小时|主持|学员们|购票观众即|6氪|新股王|信息系统|文章来源|全新突破)$'
+const PUBLIC_LEAD_INVALID_SUBJECT_PATTERN = '^(数据|小时|主持|学员们|购票观众即|6氪|新股王|信息系统|文章来源|全新突破|近期|36氪首发|技术团队|二季度普华汇|AI下半场|外部危机和人工智能|核聚变装置)$'
 
 // 存量 Radar 噪音不做物理删除，但从公共池列表和统计中排除。
 // 无明确公司、融资或估值时，获奖/教学/任职资讯直接隐藏；
@@ -104,10 +104,7 @@ const visiblePublicLeadExpr = sql<boolean>`NOT (
   COALESCE(${leads.source}, '') ~ '^项目发现雷达'
   AND (
     COALESCE(${leads.radarProfile}->>'qualityRejected', '') = 'true'
-    OR (
-      NOT ${publicLeadHasCompanyExpr}
-      AND COALESCE(${leads.name}, '') ~* ${PUBLIC_LEAD_INVALID_SUBJECT_PATTERN}
-    )
+    OR COALESCE(${leads.name}, '') ~* ${PUBLIC_LEAD_INVALID_SUBJECT_PATTERN}
     OR ${publicLeadTitleExpr} ~* ${PUBLIC_LEAD_LOW_VALUE_PATTERN}
     OR (
       ${publicLeadPrimaryTextExpr} !~* ${PUBLIC_LEAD_INVESTMENT_PATTERN}
@@ -172,6 +169,23 @@ export async function saveLeadScoreJob(leadId: string, job: LeadScoreJob) {
     scoring: sql`jsonb_set(COALESCE(${leads.scoring}, '{}'::jsonb), '{scoreJob}', ${payload}::jsonb, true)` as never,
   }).where(eq(leads.id, leadId)).returning({ id: leads.id })
   return row ?? null
+}
+
+export async function clearLeadScoreJob(leadId: string) {
+  const [row] = await db.update(leads).set({
+    scoring: sql`CASE
+      WHEN ${leads.scoring} IS NULL THEN NULL
+      ELSE ${leads.scoring} - 'scoreJob'
+    END` as never,
+  }).where(eq(leads.id, leadId)).returning({ id: leads.id })
+  return row ?? null
+}
+
+export async function isLeadEligibleForScoring(leadId: string) {
+  const [row] = await db.select({ id: leads.id }).from(leads)
+    .where(sql`${leads.id} = ${leadId} AND ${visiblePublicLeadExpr}`)
+    .limit(1)
+  return Boolean(row)
 }
 
 export async function listRecoverableLeadScoreIds(limit = 500) {
@@ -372,6 +386,7 @@ function enrichLead(row: typeof leads.$inferSelect) {
   const sourceTitle = String(rp.sourceTitle || ((arr(row.sources)[0] as Record<string, unknown> | undefined)?.title ?? '')).trim()
   const derivedSubjectName = deriveRadarSubjectName({
     isPaper,
+    existingName: row.name,
     companyNames: [
       (sc.registry as Record<string, unknown> | undefined)?.companyName,
       row.companyName,

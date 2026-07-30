@@ -14,6 +14,10 @@ import {
 } from './aiInvestmentProposalBlueprintService.js'
 import type { InvestmentProposalEvidencePlan } from './aiInvestmentProposalEvidenceService.js'
 import { comparisonKey, isNearDuplicate } from './aiEvidenceQualityService.js'
+import {
+  containsInvestmentProposalProseLabel,
+  containsInvestmentProposalWebArtifact,
+} from './aiInvestmentProposalTextService.js'
 
 export type InvestmentProposalReviewIssue = {
   severity: 'error' | 'warning'
@@ -62,7 +66,7 @@ const MISSING_ACTION = /(?:需补充|尚待提供|未提供|无法判断|待取�
 const INTERNAL_ERROR_TEXT =
   /(?:HTTP\s*\d{3}|LLM\s*(?:请求|响应|返回|错误|异常|失败|超时|中断)|网关(?:错误|异常|失败)|错误编号|错误码|invalid_request_error|unsupported_value|请求重试\d*失败|模型请求(?:失败|中断|异常))/i
 const EVIDENCE_PROCESS_OR_BOILERPLATE =
-  /(?:证据属性|Q&A\s*分类|页面标题|发布主体|访问日期|页面正文摘录|内容指纹|项目大模型|来源网址|京ICP备|京公网安备|Copyright\s*©|All Rights Reserved|免责声明|使用条款|隐私政策|财经\s+焦点\s+股票)/i
+  /(?:证据属性|Q&A\s*分类|页面标题|发布主体|访问日期|页面正文摘录|内容指纹|项目大模型|来源网址|原文链接|京ICP备|京公网安备|Copyright\s*©|All Rights Reserved|免责声明|使用条款|隐私政策|财经\s+焦点\s+股票)/i
 const RISK_REQUIRED_PARTS = [
   { label: '触发条件', pattern: /(?:触发|若|如|一旦|当|条件)/ },
   { label: '潜在影响', pattern: /(?:影响|导致|造成|可能|风险)/ },
@@ -164,6 +168,20 @@ function reviewFinding(input: {
       ...location,
       code: 'EVIDENCE_PROCESS_TEXT_LEAK',
       message: `${section.title}包含网页导航、站点页脚或内部取证过程文字`,
+    })
+  }
+  if (containsInvestmentProposalWebArtifact(finding.text)) {
+    issue(issues, {
+      ...location,
+      code: 'WEB_ARTIFACT_TEXT_LEAK',
+      message: `${section.title}包含网页折叠态或原文链接元数据`,
+    })
+  }
+  if (containsInvestmentProposalProseLabel(finding.text)) {
+    issue(issues, {
+      ...location,
+      code: 'CLIENT_PROSE_LABEL_LEAK',
+      message: `${section.title}使用了重复的“判断/依据/影响/待办”底稿标签`,
     })
   }
   if (!STATUS_VALUES.has(finding.status)) {

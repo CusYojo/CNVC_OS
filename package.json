@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "concurrently -k -n API,WEB,AGENT,RADAR -c green,blue,magenta,yellow \"npm:dev:server\" \"npm:dev:web\" \"npm:dev:agent\" \"npm:dev:radar\"",
     "dev:web": "vite",
-    "dev:server": "node --env-file-if-exists=.env --import tsx --watch server/src/index.ts",
+    "dev:server": "tsx watch --env-file-if-exists=.env --exclude \"server/ai-template-data/**\" --exclude \"server/ai-artifacts/**\" --exclude \"server/.venv/**\" --exclude \".runtime/**\" server/src/index.ts",
     "dev:agent": "npm --prefix cybernaut-assistant run dev:local",
     "dev:radar": "project-discovery/start.sh",
     "build": "npm run build:platform && npm run build:agent",
@@ -16,6 +16,7 @@
     "check:platform": "tsc -b && tsc -p server/tsconfig.json --noEmit",
     "check:agent": "npm --prefix cybernaut-assistant run check",
     "check:agent-runtime": "node --env-file-if-exists=.env cybernaut-assistant/scripts/healthcheck.mjs",
+    "setup:pdf-to-ppt": "node server/scripts/setup-pdf-to-ppt-runtime.mjs",
     "accept:ai-business": "node --import tsx server/src/scripts/aiBusinessAcceptance.ts",
     "accept:ai-api": "node --import tsx server/src/scripts/aiTaskApiAcceptance.ts",
     "accept:ai-compliance": "node --import tsx server/src/scripts/aiComplianceAcceptance.ts",

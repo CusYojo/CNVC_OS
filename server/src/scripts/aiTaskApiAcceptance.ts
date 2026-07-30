@@ -1,7 +1,9 @@
 import pg from 'pg'
 import { randomUUID } from 'node:crypto'
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import path from 'node:path'
+import PptxGenJS from 'pptxgenjs'
 
 type Check = { name: string; passed: boolean; detail: string }
 type AcceptanceCleanupState = {
@@ -119,6 +121,55 @@ async function request<T>(
   return { data, response }
 }
 
+async function createInvestmentTemplateUpload(suffix: string) {
+  const fileName = `AI-009-上传模板-${suffix}.pptx`
+  const filePath = path.join(tmpdir(), fileName)
+  const pptx = new PptxGenJS()
+  pptx.layout = 'LAYOUT_WIDE'
+  pptx.theme = {
+    headFontFace: 'Microsoft YaHei',
+    bodyFontFace: 'Microsoft YaHei',
+  }
+  const pages = [
+    ['投资建议书模板', '封面：项目名称、截止日期和内部使用说明'],
+    ['项目概览', '公司定位、发展阶段和融资安排'],
+    ['投资判断', '投资逻辑、亮点和推进建议'],
+    ['风险与核验', '风险触发条件、资料缺口和后续动作'],
+  ]
+  pages.forEach(([title, body], index) => {
+    const slide = pptx.addSlide()
+    slide.background = { color: index === 0 ? '16233A' : 'F3F3FA' }
+    slide.addText(title, {
+      x: 0.7,
+      y: 0.7,
+      w: 11.8,
+      h: 0.7,
+      fontFace: 'Microsoft YaHei',
+      fontSize: index === 0 ? 30 : 24,
+      bold: true,
+      color: index === 0 ? 'FFFFFF' : '3E3AAE',
+      margin: 0,
+    })
+    slide.addText(body, {
+      x: 0.72,
+      y: 1.65,
+      w: 11.2,
+      h: 0.7,
+      fontFace: 'Microsoft YaHei',
+      fontSize: 15,
+      color: index === 0 ? 'DDE6F1' : '252532',
+      margin: 0,
+    })
+  })
+  await pptx.writeFile({ fileName: filePath })
+  return {
+    fileName,
+    dataBase64: `data:application/vnd.openxmlformats-officedocument.presentationml.presentation;base64,${
+      (await readFile(filePath)).toString('base64')
+    }`,
+  }
+}
+
 async function login(email: string) {
   const { data } = await request<{ token: string }>('/auth/login', {
     method: 'POST',
@@ -211,7 +262,7 @@ async function main(cleanupState: AcceptanceCleanupState) {
   const requiredBusinessSkills = [
     'generate-compliance-statement',
     'draft-investment-proposal',
-    'build-investment-recommendation-ppt',
+    'editable-ppt-content-replacer',
     'write-due-diligence-report',
     'answer-project-qa',
     'generate-document-from-template',
@@ -537,6 +588,29 @@ async function main(cleanupState: AcceptanceCleanupState) {
     return
   }
 
+  const investmentTemplateUpload = await createInvestmentTemplateUpload(suffix)
+  const { data: investmentTemplate } = await request<{
+    id: string
+    originalFileName: string
+    format: string
+    analysis: { structures: Array<{ title: string }> }
+  }>('/ai/templates/analyze', {
+    method: 'POST',
+    body: JSON.stringify({
+      projectId: project.id,
+      conversationId: conversation.id,
+      name: investmentTemplateUpload.fileName,
+      dataBase64: investmentTemplateUpload.dataBase64,
+      purpose: 'investment_recommendation_ppt',
+    }),
+  }, adminToken, 201)
+  assert(
+    'AI-009 接受用户上传 PPTX 模板并完成结构分析',
+    investmentTemplate.format === 'pptx'
+      && investmentTemplate.analysis.structures.length === 4,
+    `${investmentTemplate.originalFileName} / ${investmentTemplate.analysis.structures.length} 页`,
+  )
+
   const taskInputs = [
     {
       type: 'investment_proposal',
@@ -555,12 +629,13 @@ async function main(cleanupState: AcceptanceCleanupState) {
       parameters: {
         sourceCutoffDate: cutoff,
         outputFormat: 'PPTX',
-        template: '公司标准模板',
-        pageCount: '12-15页',
+        customTemplateId: investmentTemplate.id,
+        customTemplateName: investmentTemplate.originalFileName,
         language: '中文',
+        structureMode: 'strict-template',
       },
       formats: ['pptx', 'png'],
-      skillName: 'build-investment-recommendation-ppt',
+      skillName: 'editable-ppt-content-replacer',
     },
     {
       type: 'due_diligence_report',
@@ -617,9 +692,10 @@ async function main(cleanupState: AcceptanceCleanupState) {
       parameters: {
         sourceCutoffDate: cutoff,
         outputFormat: 'PPTX',
-        template: '公司标准模板',
-        pageCount: '12-15页',
+        customTemplateId: investmentTemplate.id,
+        customTemplateName: investmentTemplate.originalFileName,
         language: '英文',
+        structureMode: 'strict-template',
       },
       idempotencyKey: `accept-invalid-ppt-${suffix}`,
     }),

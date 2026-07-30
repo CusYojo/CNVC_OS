@@ -23,6 +23,13 @@ import {
   getAiCustomTemplate,
   listAiCustomTemplates,
 } from '../services/aiCustomTemplateService.js'
+import {
+  completeAiTemplateAnalysisProgress,
+  failAiTemplateAnalysisProgress,
+  getAiTemplateAnalysisProgress,
+  startAiTemplateAnalysisProgress,
+  updateAiTemplateAnalysisProgress,
+} from '../services/aiTemplateAnalysisProgressService.js'
 
 export const aiTasksRouter = Router()
 
@@ -79,9 +86,12 @@ const createSchema = z.object({
     }
   }
   if (body.type === 'investment_recommendation_ppt') {
-    requireAllowed('template', ['公司标准模板'], '公司模板无效')
-    requireAllowed('pageCount', ['8-10页', '12-15页', '18-20页'], '建议页数无效')
+    const customTemplateId = body.parameters.customTemplateId
+    if (typeof customTemplateId !== 'string' || !z.string().uuid().safeParse(customTemplateId).success) {
+      ctx.addIssue({ code: 'custom', path: ['parameters', 'customTemplateId'], message: '请先上传并分析 PDF 或 PPTX 模板' })
+    }
     requireAllowed('language', ['中文'], '首期仅支持中文')
+    requireAllowed('structureMode', ['strict-template'], '投资建议书必须严格沿用上传模板结构')
   }
   if (body.type === 'due_diligence_report') {
     requireAllowed('diligenceScope', ['商业尽调'], '首期仅支持商业尽调')
@@ -169,9 +179,55 @@ aiTasksRouter.post('/templates/analyze', async (req: AuthedRequest, res, next) =
       conversationId: z.string().uuid().optional(),
       name: z.string().trim().min(1).max(255),
       dataBase64: z.string().min(16),
+      purpose: z.enum([
+        'custom_template_document',
+        'investment_recommendation_ppt',
+      ]).optional(),
+      progressId: z.string().uuid().optional(),
     }).parse(req.body ?? {})
-    const template = await createAiCustomTemplate(userFrom(req), body)
+    if (body.progressId) {
+      startAiTemplateAnalysisProgress({
+        id: body.progressId,
+        userId: req.user!.uid,
+        fileName: body.name,
+      })
+    }
+    const template = await createAiCustomTemplate(userFrom(req), body, {
+      onProgress: body.progressId
+        ? (update) => updateAiTemplateAnalysisProgress(body.progressId!, update)
+        : undefined,
+    })
+    if (body.progressId) completeAiTemplateAnalysisProgress(body.progressId)
     res.status(201).json(template)
+  } catch (error) {
+    const progressId = typeof req.body?.progressId === 'string'
+      ? req.body.progressId
+      : undefined
+    if (progressId) {
+      failAiTemplateAnalysisProgress(
+        progressId,
+        (error as Error).message || '模板分析失败',
+      )
+    }
+    next(error)
+  }
+})
+
+aiTasksRouter.get('/templates/analyze-progress/:id', (req: AuthedRequest, res, next) => {
+  try {
+    const progress = getAiTemplateAnalysisProgress(
+      req.user!.uid,
+      idSchema.parse(req.params.id),
+    )
+    if (!progress) {
+      res.status(404).json({
+        code: 'NOT_FOUND',
+        message: '模板分析进度不存在或已过期',
+        details: null,
+      })
+      return
+    }
+    res.json(progress)
   } catch (error) {
     next(error)
   }

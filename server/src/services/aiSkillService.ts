@@ -19,7 +19,7 @@ export const AI_BUSINESS_SKILLS = [
     taskType: 'investment_proposal',
   },
   {
-    name: 'build-investment-recommendation-ppt',
+    name: 'editable-ppt-content-replacer',
     label: '投资建议书（PPT）',
     mode: 'document-task',
     taskType: 'investment_recommendation_ppt',
@@ -45,6 +45,21 @@ export const AI_BUSINESS_SKILLS = [
 ] as const
 
 export type AiBusinessSkillName = typeof AI_BUSINESS_SKILLS[number]['name']
+
+export const AI_PPT_WORKFLOW_SKILLS = [
+  {
+    name: 'pdf-to-editable-ppt',
+    label: 'PDF 模板转可编辑 PPT',
+    role: 'template-preparation',
+  },
+  {
+    name: 'editable-ppt-content-replacer',
+    label: '可编辑 PPT 内容替换',
+    role: 'content-replacement',
+  },
+] as const
+
+export type AiPptWorkflowSkillName = typeof AI_PPT_WORKFLOW_SKILLS[number]['name']
 
 export type LoadedAiSkill = {
   name: string
@@ -179,7 +194,9 @@ export async function loadAiSkillFromDirectory(input: {
 }
 
 export async function loadAiSkill(name: string): Promise<LoadedAiSkill> {
-  if (!AI_BUSINESS_SKILLS.some((item) => item.name === name)) {
+  const isBusinessSkill = AI_BUSINESS_SKILLS.some((item) => item.name === name)
+  const isPptWorkflowSkill = AI_PPT_WORKFLOW_SKILLS.some((item) => item.name === name)
+  if (!isBusinessSkill && !isPptWorkflowSkill) {
     throw new Error(`未注册的 AI Skill：${name}`)
   }
   return loadAiSkillFromDirectory({
@@ -187,6 +204,13 @@ export async function loadAiSkill(name: string): Promise<LoadedAiSkill> {
     directory: path.resolve(skillRoot, name),
     allowedRoot: skillRoot,
   })
+}
+
+export async function loadAiPptWorkflowSkills() {
+  return Promise.all(AI_PPT_WORKFLOW_SKILLS.map(async (item) => ({
+    ...item,
+    skill: await loadAiSkill(item.name),
+  })))
 }
 
 export async function listAiBusinessSkills() {

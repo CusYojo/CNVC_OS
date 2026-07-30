@@ -3,6 +3,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import JSZip from 'jszip'
+import PptxGenJS from 'pptxgenjs'
 import {
   annotateDueDiligencePendingAfterResearch,
   composeBusinessContent,
@@ -26,10 +27,17 @@ import {
   AI_TASK_TYPES,
   AI_TEMPLATE_CATALOG,
   type AiBusinessTaskType,
+  type AiTemplateDefinition,
 } from '../services/aiTemplateCatalog.js'
+import { analyzeAiCustomTemplateBuffer } from '../services/aiCustomTemplateService.js'
 import { cleanCorruptedText, decodeTextBuffer } from '../services/textQualityService.js'
 import { curateEvidenceSources } from '../services/aiEvidenceQualityService.js'
 import { fetchDueDiligenceNetworkEvidence } from '../services/aiDueDiligenceNetworkResearchService.js'
+import {
+  buildInvestmentRecommendationReplacementAudit,
+  prepareInvestmentRecommendationPptWorkflow,
+  reviewInvestmentRecommendationPpt,
+} from '../services/aiInvestmentRecommendationPptWorkflowService.js'
 
 type Check = { name: string; passed: boolean; detail: string }
 
@@ -115,8 +123,10 @@ function findings(sectionIndex: number): BusinessFinding[] {
   ]
 }
 
-function contentFor(type: AiBusinessTaskType): BusinessContent {
-  const template = AI_TEMPLATE_CATALOG[type]
+function contentFor(
+  type: AiBusinessTaskType,
+  template: AiTemplateDefinition = AI_TEMPLATE_CATALOG[type],
+): BusinessContent {
   const dueFocus: Record<string, string> = {
     投资概要: '客户验证、收入质量与核心权属安排',
     公司概况: '公司主体、主营业务和发展阶段',
@@ -179,12 +189,16 @@ function contentFor(type: AiBusinessTaskType): BusinessContent {
     title: `${project.name}${template.label}`,
     executiveSummary: type === 'due_diligence_report'
       ? `阶段与推进建议：继续跟踪。杭州示例科技已形成企业知识管理软件产品和订阅加实施服务的商业路径，但客户合同、收入确认、续费回款及核心权属安排尚不足以支持进入下一审批环节。建议优先核对重点客户从试用到合同、交付、验收和回款的完整链条，同时确认核心团队任职、知识产权归属及本轮融资文件；上述事项完成后再评估是否申请进入下一阶段。`
-      : `本初稿采用公司标准模板，依据截至 ${sourceCutoffDate} 的脱敏证据形成。资料记载、AI 推断、待核验事项及资料缺口已分开标识，所有结论仍须业务审核。`,
+      : type === 'investment_recommendation_ppt'
+        ? `本初稿严格采用本次上传模板，依据截至 ${sourceCutoffDate} 的脱敏证据形成。资料记载、AI 推断、待核验事项及资料缺口已分开标识，所有结论仍须业务审核。`
+        : `本初稿采用经批准的业务模板，依据截至 ${sourceCutoffDate} 的脱敏证据形成。资料记载、AI 推断、待核验事项及资料缺口已分开标识，所有结论仍须业务审核。`,
     sections: template.sections.map((title, index) => {
       if (type !== 'due_diligence_report') {
         return {
           title,
-          summary: `${title}按照 docs 中可编辑主样本提炼的章节结构生成。`,
+          summary: type === 'investment_recommendation_ppt'
+            ? `${title}严格按照本次上传模板对应页面的内容职责生成。`
+            : `${title}按照经批准的业务模板章节结构生成。`,
           findings: findings(index),
           tables: tablesFor(title),
         }
@@ -236,6 +250,67 @@ function contentFor(type: AiBusinessTaskType): BusinessContent {
     : normalized
 }
 
+async function createUploadedInvestmentTemplate(): Promise<AiTemplateDefinition> {
+  const fixturePath = path.join(outputDir, 'AI-009_上传模板验收.pptx')
+  const pptx = new PptxGenJS()
+  pptx.layout = 'LAYOUT_WIDE'
+  pptx.theme = {
+    headFontFace: 'Microsoft YaHei',
+    bodyFontFace: 'Microsoft YaHei',
+  }
+  const slides = [
+    ['投资建议书模板', '封面：项目名称、资料截止日与内部使用提示'],
+    ['项目概览', '公司定位、阶段、融资安排与核心事实'],
+    ['核心判断', '投资逻辑、关键亮点与推进建议'],
+    ['风险与核验', '风险触发条件、资料缺口与后续核验动作'],
+  ]
+  slides.forEach(([title, body], index) => {
+    const slide = pptx.addSlide()
+    slide.background = { color: index === 0 ? '16233A' : 'F3F3FA' }
+    slide.addText(title, {
+      x: 0.75,
+      y: 0.75,
+      w: 11.8,
+      h: 0.7,
+      fontFace: 'Microsoft YaHei',
+      fontSize: index === 0 ? 30 : 24,
+      bold: true,
+      color: index === 0 ? 'FFFFFF' : '3E3AAE',
+      margin: 0,
+    })
+    slide.addText(body, {
+      x: 0.78,
+      y: 1.7,
+      w: 11.2,
+      h: 0.8,
+      fontFace: 'Microsoft YaHei',
+      fontSize: 15,
+      color: index === 0 ? 'DDE6F1' : '252532',
+      margin: 0,
+    })
+  })
+  await pptx.writeFile({ fileName: fixturePath })
+  const parsed = await analyzeAiCustomTemplateBuffer(
+    await readFile(fixturePath),
+    path.basename(fixturePath),
+  )
+  const sections = parsed.analysis.structures
+    .filter((item, index) =>
+      index !== 0
+      && !/(?:封面|目录|议程|引用资料|责任声明)/i.test(item.title.trim()))
+    .map((item) => item.title.trim())
+    .filter(Boolean)
+  return {
+    ...AI_TEMPLATE_CATALOG.investment_recommendation_ppt,
+    label: '上传模板验收',
+    referencePath: fixturePath,
+    templateVersion: `acceptance-uploaded-template+${parsed.analysis.analysisVersion}`,
+    sections,
+    customAnalysis: parsed.analysis,
+    templateSourceMode: 'native-pptx',
+  }
+}
+
 async function openXmlText(filePath: string, prefix: RegExp) {
   const zip = await JSZip.loadAsync(await readFile(filePath))
   const names = Object.keys(zip.files).filter((name) => prefix.test(name))
@@ -252,6 +327,10 @@ async function main() {
   await mkdir(outputDir, { recursive: true })
   const checks: Check[] = []
   const artifacts: string[] = []
+  const uploadedInvestmentTemplate = requestedTypes.size === 0
+    || requestedTypes.has('investment_recommendation_ppt')
+    ? await createUploadedInvestmentTemplate()
+    : AI_TEMPLATE_CATALOG.investment_recommendation_ppt
   const dueDiligenceGroupedSections = DUE_DILIGENCE_GENERATION_GROUPS
     .flatMap((group) => [...group.sections])
   assert(
@@ -472,7 +551,9 @@ async function main() {
   )
   for (const type of AI_TASK_TYPES.filter((type) =>
     requestedTypes.size === 0 || requestedTypes.has(type))) {
-    const template = AI_TEMPLATE_CATALOG[type]
+    const template = type === 'investment_recommendation_ppt'
+      ? uploadedInvestmentTemplate
+      : AI_TEMPLATE_CATALOG[type]
     assert(checks, `${type} 主样本存在`, existsSync(template.referencePath), template.referencePath)
     if (type === 'project_qa') {
       assert(
@@ -483,7 +564,7 @@ async function main() {
       )
       continue
     }
-    const content = contentFor(type)
+    const content = contentFor(type, template)
     if (type === 'compliance_statement') {
       const analysis = content.sections.find((section) => section.title === '投资情形分析')
       const container = content.sections.find((section) => section.title === '公司情况介绍')
@@ -513,7 +594,6 @@ async function main() {
         content,
         sources,
         sourceCutoffDate,
-        pageCount: '12-15页',
       })
       const previewPath = path.join(outputDir, 'AI-009_业务验收_投资建议书.preview.png')
       const preview = await generateBusinessPptxPreview({
@@ -523,18 +603,44 @@ async function main() {
         content,
         sourceCutoffDate,
       })
+      const workflow = await prepareInvestmentRecommendationPptWorkflow(template)
+      const replacementAudit = buildInvestmentRecommendationReplacementAudit({
+        workflow,
+        content,
+        sources,
+      })
+      const workflowReview = await reviewInvestmentRecommendationPpt({
+        outputPath,
+        projectName: project.name,
+        disclaimer: template.disclaimer,
+        workflow,
+        template,
+      })
       artifacts.push(outputPath, previewPath)
       const { zip, names, xml } = await openXmlText(outputPath, /^ppt\/slides\/slide\d+\.xml$/)
+      const { names: templateSlideNames } = await openXmlText(
+        template.referencePath,
+        /^ppt\/slides\/slide\d+\.xml$/,
+      )
+      const { xml: notesXml } = await openXmlText(
+        outputPath,
+        /^ppt\/notesSlides\/notesSlide\d+\.xml$/,
+      )
       const previewBuffer = await readFile(previewPath)
       assert(checks, 'AI-009 PPTX 为有效 OpenXML', Boolean(zip.file('ppt/presentation.xml')), outputPath)
-      assert(checks, 'AI-009 页数符合 12-15 页参数', names.length >= 12 && names.length <= 15, `实际 ${names.length} 页`)
-      const editableTexts = (xml.match(/<a:t>/g) || []).length
-      assert(checks, 'AI-009 核心文本为可编辑对象', editableTexts >= names.length * 3, `文本对象 ${editableTexts}`)
       assert(
         checks,
-        'AI-009 含原生可编辑表格与形状',
-        xml.includes('<a:tbl>') && xml.includes('<p:sp>'),
-        '项目核心信息表格及状态标识形状',
+        'AI-009 页面数量严格继承上传模板',
+        names.length === templateSlideNames.length,
+        `上传模板 ${templateSlideNames.length} 页，实际 ${names.length} 页`,
+      )
+      const editableTexts = (xml.match(/<a:t>/g) || []).length
+      assert(checks, 'AI-009 核心文本为可编辑对象', editableTexts >= names.length * 2, `文本对象 ${editableTexts}`)
+      assert(
+        checks,
+        'AI-009 含原生可编辑文本与形状',
+        xml.includes('<a:t>') && xml.includes('<p:sp>'),
+        '项目核心信息文本框及状态标识形状',
       )
       assert(
         checks,
@@ -546,29 +652,72 @@ async function main() {
         `${preview.width}×${preview.height}，${previewBuffer.length} bytes`,
       )
       assert(checks, 'AI-009 含免责声明', xml.includes(template.disclaimer), template.disclaimer)
-      assert(checks, 'AI-009 含来源与截止日', xml.includes('来源：') && xml.includes(sourceCutoffDate), sourceCutoffDate)
+      assert(
+        checks,
+        'AI-009 页面备注含来源与截止日',
+        notesXml.includes('[Sources]') && notesXml.includes(sourceCutoffDate),
+        sourceCutoffDate,
+      )
       const finalSlideXml = await zip.file(`ppt/slides/slide${names.length}.xml`)?.async('string') || ''
       assert(
         checks,
-        'AI-009 文尾包含去重后的引用资料',
+        'AI-009 文尾与备注包含去重后的引用资料',
         finalSlideXml.includes('引用资料与责任声明')
-          && finalSlideXml.includes('示例项目商业计划书（脱敏）')
-          && !finalSlideXml.includes('未使用来源（不得进入文尾）')
-          && (finalSlideXml.match(/示例项目商业计划书（脱敏）/g) || []).length === 1,
-        '最后一页只列正文实际使用来源，同一文件合并片段',
+          && notesXml.includes('示例项目商业计划书（脱敏）')
+          && !notesXml.includes('未使用来源（不得进入文尾）'),
+        '最后一页保持模板结构，实际来源写入对应页面备注',
       )
       assert(checks, 'AI-009 生成元数据页数一致', result.slideCount === names.length, `${result.slideCount}/${names.length}`)
       const themeXml = await zip.file('ppt/theme/theme1.xml')?.async('string') || ''
       const forbiddenSampleTerms = ['佳量', '德塔', 'Epilcure', '曹鹏', 'recommendation-jialiang']
-      assert(checks, 'AI-009 中文文本语言标记正确', !xml.includes('lang="en-US"') && xml.includes('lang="zh-CN"'), '全部中文文本使用 zh-CN')
-      assert(checks, 'AI-009 设置东亚主题字体', /<a:ea[^>]+typeface="微软雅黑"/.test(themeXml), '微软雅黑')
+      assert(checks, 'AI-009 未引入损坏语言标记', !xml.includes('lang="und"'), '保留上传模板语言属性')
+      assert(
+        checks,
+        'AI-009 设置上传模板东亚主题字体',
+        themeXml.includes(`typeface="${result.cjkFont}"`),
+        result.cjkFont,
+      )
       assert(checks, 'AI-009 不含损坏字符', !xml.includes('\uFFFD'), '未发现 U+FFFD')
       assert(checks, 'AI-009 不泄露示例项目与内部模板编号', forbiddenSampleTerms.every((term) => !xml.includes(term)), forbiddenSampleTerms.join('、'))
       assert(
         checks,
-        'AI-009 已应用公司模板资产',
-        result.templateApplied && result.inheritedCompanyAssets >= 3 && Boolean(result.templateSha256),
-        `资产 ${result.inheritedCompanyAssets}，模板摘要 ${result.templateSha256.slice(0, 12)}`,
+        'AI-009 已按白名单原位应用上传模板',
+        result.templateApplied
+          && result.inheritedCompanyAssets === 0
+          && 'replacementSkill' in result
+          && result.replacementSkill === 'editable-ppt-content-replacer'
+          && 'replacementOperationCount' in result
+          && result.replacementOperationCount > 0
+          && Boolean(result.templateSha256),
+        `替换 ${
+          'replacementOperationCount' in result ? result.replacementOperationCount : 0
+        } 个白名单对象，模板摘要 ${result.templateSha256.slice(0, 12)}`,
+      )
+      assert(
+        checks,
+        'AI-009 工作流只包含 PDF 转换与可编辑内容替换 Skill',
+        workflow.sourceMode === 'native-pptx'
+          && workflow.skills.length === 2
+          && workflow.skills[0]?.name === 'pdf-to-editable-ppt'
+          && workflow.skills[0]?.status === 'not-required'
+          && workflow.skills[1]?.name === 'editable-ppt-content-replacer'
+          && workflow.skills[1]?.status === 'applied',
+        workflow.skills.map((item) => `${item.name}:${item.status}`).join('、'),
+      )
+      assert(
+        checks,
+        'AI-009 替换对象绑定语义键与证据编号',
+        replacementAudit.schemaVersion === '1.3'
+          && replacementAudit.operationCount > 0
+          && replacementAudit.evidenceBoundOperationCount > 0,
+        `${replacementAudit.operationCount} 个操作，${
+          replacementAudit.evidenceBoundOperationCount} 个绑定证据`,
+      )
+      assert(
+        checks,
+        'AI-009 内容替换 Reviewer 通过',
+        workflowReview.passed,
+        workflowReview.issueCodes.join('、') || '通过',
       )
       continue
     }

@@ -5,6 +5,7 @@ import {
   type InvestmentProposalBlueprintSection,
 } from './aiInvestmentProposalBlueprintService.js'
 import { comparisonKey } from './aiEvidenceQualityService.js'
+import { sanitizeInvestmentProposalEvidenceContent } from './aiInvestmentProposalTextService.js'
 
 export type InvestmentProposalEvidenceItem = {
   sourceIndex: number
@@ -191,10 +192,11 @@ function selectSectionEvidence(
       chunkIndex: source.chunkIndex,
       versionOrDate: source.versionOrDate,
       score,
-      // 章节提示词只保留最相关的证据摘要。完整原文仍保留在 sources 中，
-      // Reviewer 会基于完整原文核验数字与引用，不因提示词减载而放宽质量门槛。
-      content: source.content.slice(0, 1200),
+      // 删除网页折叠态、来源元数据和转载页脚，并只在完整语义边界减载。
+      // 完整原文仍保留在 sources 中，Reviewer 继续据此核验数字与引用。
+      content: sanitizeInvestmentProposalEvidenceContent(source.content),
     }))
+    .filter((item) => item.content)
 }
 
 export function buildInvestmentProposalEvidencePlan(

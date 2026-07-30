@@ -32,6 +32,11 @@ import {
   type InvestmentProposalDocumentBlueprint,
 } from './aiInvestmentProposalBlueprintService.js'
 import { containsInvestmentProposalInternalErrorText } from './aiInvestmentProposalReviewerService.js'
+import {
+  containsInvestmentProposalProseLabel,
+  containsInvestmentProposalWebArtifact,
+  sanitizeInvestmentProposalClientText,
+} from './aiInvestmentProposalTextService.js'
 import type { AiTemplateDefinition } from './aiTemplateCatalog.js'
 
 type ProjectLike = {
@@ -77,6 +82,7 @@ function xmlText(value: string) {
 }
 
 function findingParagraph(finding: BusinessFinding) {
+  const text = sanitizeInvestmentProposalClientText(finding.text)
   return new Paragraph({
     spacing: { before: 0, after: 0, line: 480, lineRule: LineRuleType.EXACT },
     indent: { firstLine: 480 },
@@ -84,7 +90,7 @@ function findingParagraph(finding: BusinessFinding) {
     keepLines: true,
     children: [
       new TextRun({
-        text: finding.text,
+        text,
         size: 24,
         color: '000000',
         font: font(FANGSONG_FONT),
@@ -296,7 +302,8 @@ export async function generateInvestmentProposalDocx(input: {
       false,
     ))
     if (definition.container) return
-    const findings = current?.findings ?? []
+    const findings = (current?.findings ?? [])
+      .filter((finding) => sanitizeInvestmentProposalClientText(finding.text))
     findings.forEach((finding) => body.push(findingParagraph(finding)))
     ;(current?.tables ?? []).forEach((table) => body.push(...proposalTable(table)))
   })
@@ -524,6 +531,18 @@ export async function reviewInvestmentProposalDocx(input: {
       message: 'Word 正文包含仅供系统内部记录的技术错误信息',
     })
   }
+  if (containsInvestmentProposalWebArtifact(allText)) {
+    issues.push({
+      code: 'WEB_ARTIFACT_TEXT_LEAK',
+      message: 'Word 正文包含网页折叠态、原文链接或来源网址元数据',
+    })
+  }
+  if (containsInvestmentProposalProseLabel(allText)) {
+    issues.push({
+      code: 'CLIENT_PROSE_LABEL_LEAK',
+      message: 'Word 正文包含重复的“判断/依据/影响/待办”底稿标签',
+    })
+  }
   const expectedTitles = input.blueprint.sections.map((item) => item.title)
   const foundTitles = paragraphs
     .filter((item) => expectedTitles.includes(item.text))
@@ -571,7 +590,9 @@ export async function reviewInvestmentProposalDocx(input: {
     issues.push({ code: 'TEMPLATE_SAMPLE_LEAK', message: `发现模板项目事实泄露：${leakedSamples.join('、')}` })
   }
   const expectedClaims = input.content.sections.flatMap((section) =>
-    section.findings.map((finding) => finding.text))
+    section.findings
+      .map((finding) => sanitizeInvestmentProposalClientText(finding.text))
+      .filter(Boolean))
   if (expectedClaims.some((claim) => !allText.includes(claim))) {
     issues.push({ code: 'BODY_CLAIM_MISSING', message: 'Word 正文遗漏已通过内容 Reviewer 的事实项' })
   }

@@ -41,6 +41,7 @@ export type AiTaskSource = {
 
 export type AiTask = {
   id: string
+  clientOnly?: boolean
   projectId: string
   conversationId?: string | null
   type: string
@@ -101,44 +102,6 @@ function triggerDownload(blob: Blob, filename: string) {
   setTimeout(() => URL.revokeObjectURL(url), 2000)
 }
 
-function ProtectedImagePreview({
-  artifact,
-}: {
-  artifact: AiTaskArtifact
-}) {
-  const [imageUrl, setImageUrl] = useState('')
-  const [failed, setFailed] = useState(false)
-
-  useEffect(() => {
-    let active = true
-    let objectUrl = ''
-    authedFetch(artifact.downloadUrl || `/api/ai/artifacts/${artifact.id}/download`)
-      .then(async (response) => {
-        if (!response.ok) throw new Error(`HTTP ${response.status}`)
-        objectUrl = URL.createObjectURL(await response.blob())
-        if (active) setImageUrl(objectUrl)
-      })
-      .catch((previewError) => {
-        if (!active) return
-        console.warn('PPT preview failed', previewError)
-        setFailed(true)
-      })
-    return () => {
-      active = false
-      if (objectUrl) URL.revokeObjectURL(objectUrl)
-    }
-  }, [artifact.downloadUrl, artifact.id])
-
-  if (failed) return <p className="mt-3 text-xs text-slate-400">预览暂不可用，可直接下载 PPTX。</p>
-  return (
-    <div className="mt-3 overflow-hidden rounded-lg border border-slate-200 bg-slate-50">
-      {imageUrl
-        ? <img src={imageUrl} alt="投资建议书封面预览" className="aspect-video w-full object-contain" />
-        : <div className="flex aspect-video items-center justify-center text-xs text-slate-400"><LoaderCircle className="mr-2 h-4 w-4 animate-spin" />加载 PPT 预览…</div>}
-    </div>
-  )
-}
-
 function TaskCard({
   task,
   mutating,
@@ -157,10 +120,15 @@ function TaskCard({
   const StatusIcon = meta.icon
   const isActive = task.status === 'pending' || task.status === 'running'
   const sourceCount = task.sources?.length ?? 0
-  const imageArtifact = task.artifacts?.find((artifact) => artifact.format.toLowerCase() === 'png')
+  const uploadedTemplateName = typeof task.parameters.customTemplateName === 'string'
+    ? task.parameters.customTemplateName
+    : ''
   const templateLabel = task.type === 'custom_template_document'
-    ? '已分析上传模板'
-    : '公司标准模板'
+    || task.type === 'investment_recommendation_ppt'
+    ? uploadedTemplateName
+      ? `上传模板：${uploadedTemplateName}`
+      : '已分析上传模板'
+    : '业务标准模板'
   const sourceLabel = sourceCount > 0
     ? `引用来源：${sourceCount} 条`
     : task.status === 'failed'
@@ -263,11 +231,7 @@ function TaskCard({
         </div>
       )}
 
-      {task.status === 'succeeded' && imageArtifact && (
-        <ProtectedImagePreview artifact={imageArtifact} />
-      )}
-
-      {(isActive || task.status === 'failed') && (
+      {!task.clientOnly && (isActive || task.status === 'failed') && (
         <div className="mt-3 flex justify-end">
           {isActive && (
             <Button size="sm" variant="danger" loading={mutating} onClick={() => { void onCancel(task) }}>
@@ -411,7 +375,13 @@ export function AiArtifactCenter({
             <span className="min-w-0 flex-1">
               <span className="block truncate text-xs font-medium text-slate-700" title={artifact.fileName}>{artifact.fileName}</span>
               <span className="mt-0.5 block truncate text-[10px] text-slate-400">
-                {artifact.format.toUpperCase()} · V{artifact.version} · {artifactQualityLabel(artifact)} · 公司标准模板
+                {artifact.format.toUpperCase()} · V{artifact.version} · {artifactQualityLabel(artifact)} · {
+                  typeof artifact.metadata?.customTemplateName === 'string'
+                    ? `上传模板：${artifact.metadata.customTemplateName}`
+                    : typeof artifact.metadata?.referenceTemplate === 'string'
+                      ? `模板：${artifact.metadata.referenceTemplate}`
+                    : '业务模板'
+                }
               </span>
             </span>
             <button

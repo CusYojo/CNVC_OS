@@ -742,30 +742,38 @@ export const useAppStore = create<AppState>()(
           } catch { /* 后端同步失败不阻断前端 */ }
           return get().projects.find((project) => project.id === existing.id)
         }
+        // Radar/数据库里的可选字段可能以 null 返回；项目创建接口只接收字符串。
+        // 转入前统一归一，避免缺少工商主体、团队或融资信息的线索触发参数校验错误。
+        const projectText = (value: unknown) => typeof value === 'string' ? value : ''
+        const projectIndustry = projectText(lead.industry)
+        const projectSource = projectText(lead.source)
+        const projectSummary = projectText(lead.summary)
+        const projectTags = [projectIndustry, ...lead.riskTags]
+          .filter((tag): tag is string => typeof tag === 'string' && tag.trim().length > 0)
         const project = await get().addProject({
           name: lead.name,
-          companyName: lead.companyName,
-          industry: lead.industry,
-          round: lead.round,
+          companyName: projectText(lead.companyName),
+          industry: projectIndustry,
+          round: projectText(lead.round),
           stage: '线索',
           owner: get().currentUser.name,
           collaborators: [],
-          source: lead.source,
-          financing: lead.financing,
+          source: projectSource,
+          financing: projectText(lead.financing),
           valuation: (lead.fundingRounds ?? [])[0]?.valuation ?? '未公开，待核验',
           riskLevel: lead.riskTags.length > 1 ? '中' : '低',
-          summary: lead.summary,
-          tags: [lead.industry, ...lead.riskTags],
+          summary: projectSummary,
+          tags: projectTags,
           businessModel: '待尽调补充',
           market: '待行业研究补充',
-          team: lead.team,
+          team: projectText(lead.team),
           stageSource: '线索转入',
           scoring: lead.scoring,
         })
         if (!project) return undefined
         get().saveSummary({
           projectId: project.id,
-          positioning: lead.summary,
+          positioning: projectSummary,
           highlights: lead.highlights,
           risks: lead.risks,
           questions: ['核心客户的付费与续费情况如何？', '未来 18 个月的核心里程碑与资金用途是什么？'],
@@ -776,10 +784,10 @@ export const useAppStore = create<AppState>()(
         })
         get().addFile({
           projectId: project.id,
-          name: lead.source.includes('BP') ? `${lead.name}_BP及公开信息.pdf` : `${lead.name}_公开信息快照.html`,
-          type: lead.source.includes('BP') ? 'PDF' : 'HTML',
-          category: lead.source.includes('BP') ? '项目资料' : '公开情报',
-          size: lead.source.includes('BP') ? '8.6 MB' : '256 KB',
+          name: projectSource.includes('BP') ? `${lead.name}_BP及公开信息.pdf` : `${lead.name}_公开信息快照.html`,
+          type: projectSource.includes('BP') ? 'PDF' : 'HTML',
+          category: projectSource.includes('BP') ? '项目资料' : '公开情报',
+          size: projectSource.includes('BP') ? '8.6 MB' : '256 KB',
           uploader: get().currentUser.name,
           parseStatus: '成功',
           visibility: '项目成员',

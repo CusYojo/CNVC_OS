@@ -4,6 +4,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import {
   AI_BUSINESS_SKILLS,
+  AI_PPT_WORKFLOW_SKILLS,
   getAiSkillRoot,
   listAiBusinessSkills,
   loadAiSkill,
@@ -229,6 +230,30 @@ async function main() {
     new Set(AI_TASK_TYPES.map((type) => AI_TEMPLATE_CATALOG[type].skillName)).size === 5,
     AI_TASK_TYPES.map((type) => `${type}:${AI_TEMPLATE_CATALOG[type].skillName}`).join(', '),
   )
+  const pptWorkflowSkills = await Promise.all(
+    AI_PPT_WORKFLOW_SKILLS.map((definition) => loadAiSkill(definition.name)),
+  )
+  assert(
+    'PPT 模板准备与内容替换基础能力均可审计',
+    pptWorkflowSkills.length === 2
+      && pptWorkflowSkills.every((skill) =>
+        containsChinese(skill.instructions)
+        && /^sha256-[a-f0-9]{12}$/.test(skill.version)
+        && /^[a-f0-9]{64}$/.test(skill.sha256)),
+    pptWorkflowSkills.map((skill) => `${skill.name}:${skill.version}`).join('、'),
+  )
+  assert(
+    '投资建议书要求上传模板且工作流只绑定两个顺序 Skill',
+    AI_TEMPLATE_CATALOG.investment_recommendation_ppt.requiredParameters.includes('customTemplateId')
+      && AI_TEMPLATE_CATALOG.investment_recommendation_ppt.requiredParameters.includes('structureMode')
+      && !AI_TEMPLATE_CATALOG.investment_recommendation_ppt.requiredParameters.includes('pageCount')
+      && AI_TEMPLATE_CATALOG.investment_recommendation_ppt.workflowSkillNames?.join(',')
+        === 'pdf-to-editable-ppt,editable-ppt-content-replacer'
+      && AI_TEMPLATE_CATALOG.investment_recommendation_ppt.skillName
+        === 'editable-ppt-content-replacer',
+    `${AI_TEMPLATE_CATALOG.investment_recommendation_ppt.requiredParameters.join('、')} / ${
+      AI_TEMPLATE_CATALOG.investment_recommendation_ppt.workflowSkillNames?.join('、')}`,
+  )
   const proposalTemplate = AI_TEMPLATE_CATALOG.investment_proposal
   const proposalSkill = await loadAiSkill('draft-investment-proposal')
   const proposalProfile = await readFile(
@@ -349,6 +374,10 @@ async function main() {
       'D9D9D9',
       '只生成、登记并交付一份 DOCX',
       '不生成或登记 PDF',
+      '不得逐段套用',
+      '...展开',
+      '原文链接',
+      '完整法律主体',
     ].every((term) => proposalSkill.referenceInstructions.includes(term)),
     '结构、章节目的、文风、版式、表格与 QA',
   )
@@ -791,19 +820,118 @@ async function main() {
   )
 
   const pptContract = await readFile(
-    path.join(root, 'build-investment-recommendation-ppt', 'references', 'output-contract.md'),
+    path.join(root, 'editable-ppt-content-replacer', 'SKILL.md'),
+    'utf8',
+  )
+  const pptWorkflowSource = await readFile(
+    path.resolve(
+      process.cwd(),
+      'server',
+      'src',
+      'services',
+      'aiInvestmentRecommendationPptWorkflowService.ts',
+    ),
+    'utf8',
+  )
+  const pptDocumentSource = await readFile(
+    path.resolve(process.cwd(), 'server', 'src', 'services', 'aiBusinessDocumentService.ts'),
+    'utf8',
+  )
+  const pptReplacerSource = await readFile(
+    path.resolve(
+      process.cwd(),
+      'server',
+      'src',
+      'services',
+      'aiEditablePptContentReplacerService.ts',
+    ),
     'utf8',
   )
   assert(
     'PPT Skill 明确单一可编辑 PPTX 链路',
     /原生可编辑对象/.test(pptContract)
-      && /不得再生成第二份纯图片 PPTX/.test(pptContract),
+      && /不得再生成第二份\s*纯图片 PPTX/.test(pptContract)
+      && /pdf-to-editable-ppt/.test(pptContract)
+      && /editable-ppt-content-replacer/.test(pptContract)
+      && /sourceMode:\s*"native-pptx"/.test(pptContract),
     '核心内容原生可编辑 / 仅一份正式 PPTX',
+  )
+  assert(
+    'PDF 转换交接门槛和原生 PPTX 跳过逻辑已接入',
+    [
+      'watermarkQaPassed',
+      'editabilityReviewPassed',
+      'readyForContentReplacement',
+      'pdf-converted',
+      'native-pptx',
+      '用户上传模板为原生可编辑 PPTX，无需执行 PDF 转换',
+    ].every((term) => pptWorkflowSource.includes(term)),
+    'PDF 模板必须通过交接证书；上传的原生 PPTX 记录 converter not-required',
+  )
+  assert(
+    '可编辑内容替换使用语义键、证据备注和生成后 Reviewer',
+    pptWorkflowSource.includes("schemaVersion: '1.3'")
+      && pptWorkflowSource.includes("defaultOperation: 'KEEP'")
+      && pptWorkflowSource.includes('semanticKey')
+      && pptWorkflowSource.includes('evidenceIds')
+      && pptWorkflowSource.includes('sourceNotesPresent')
+      && pptDocumentSource.includes('generateInvestmentRecommendationPptFromTemplate')
+      && pptReplacerSource.includes('replacement-manifest.json')
+      && pptReplacerSource.includes('apply_template_plan.mjs')
+      && pptReplacerSource.includes('validate_template_result.mjs')
+      && pptReplacerSource.includes('final-watermark-qa.json'),
+    'KEEP / semanticKey / evidenceIds / [Sources] / 样本内容与水印检查',
   )
 
   const quickActionsSource = await readFile(
     path.resolve(process.cwd(), 'src', 'components', 'AiQuickActions.tsx'),
     'utf8',
+  )
+  const aiTasksRouteSource = await readFile(
+    path.resolve(process.cwd(), 'server', 'src', 'routes', 'aiTasks.ts'),
+    'utf8',
+  )
+  const assistantPageSource = await readFile(
+    path.resolve(process.cwd(), 'src', 'pages', 'AIAssistantPage.tsx'),
+    'utf8',
+  )
+  const aiMessageSafetySource = await readFile(
+    path.resolve(process.cwd(), 'src', 'lib', 'aiMessageSafety.ts'),
+    'utf8',
+  )
+  assert(
+    '投资建议书前端和任务 API 强制使用上传模板',
+    quickActionsSource.includes("accept={isInvestmentTemplateAction ? '.pdf,.pptx'")
+      && quickActionsSource.includes("purpose: isInvestmentPpt")
+      && quickActionsSource.includes("'investment_recommendation_ppt'")
+      && quickActionsSource.includes('严格沿用上传模板')
+      && assistantPageSource.includes('parameters.customTemplateId = request.customTemplateId')
+      && assistantPageSource.includes("parameters.structureMode = request.structureMode || 'strict-template'")
+      && aiTasksRouteSource.includes("path: ['parameters', 'customTemplateId']")
+      && aiTasksRouteSource.includes("requireAllowed('structureMode', ['strict-template']")
+      && !aiTasksRouteSource.includes("requireAllowed('template', ['公司标准模板']"),
+    'PDF/PPTX 上传 → 模板分析 → customTemplateId → strict-template 任务',
+  )
+  assert(
+    '投资建议书模板分析完成后自动创建任务并切换到统一进度条',
+    quickActionsSource.includes('const taskCreated = await submit(result)')
+      && quickActionsSource.includes("stage: isInvestmentPpt")
+      && quickActionsSource.includes('模板分析完成，正在创建生成任务')
+      && quickActionsSource.includes("if (ok) setActiveAction(null)")
+      && quickActionsSource.includes('上传、分析并开始生成')
+      && assistantPageSource.includes('setAiTasks((items) => [task, ...items.filter')
+      && assistantPageSource.includes('scrollRef.current?.scrollTo'),
+    '分析成功 → 自动创建任务 → 关闭上传弹窗 → 滚动到任务卡进度条',
+  )
+  assert(
+    '会话消息、文档任务和项目 Q&A 按创建时间统一排列',
+    aiMessageSafetySource.includes("safeProperty(rawMetadata, 'timestamp')")
+      && assistantPageSource.includes('function buildConversationTimeline(')
+      && assistantPageSource.includes('left.timestampMs - right.timestampMs')
+      && assistantPageSource.includes('conversationTimeline.map((item)')
+      && assistantPageSource.includes('tasks={[item.task]}')
+      && assistantPageSource.includes('answers={[item.answer]}'),
+    'Flue 消息时间、任务 createdAt 和 Q&A createdAt 合并升序；最新内容位于最下方',
   )
   assert(
     'Q&A 前端创建正式项目文档任务',
@@ -823,6 +951,13 @@ async function main() {
     'Q&A 前端只展示 DOCX 下载',
     taskCardsSource.includes("if (task.type === 'project_qa') return format === 'docx'"),
     '历史或新任务均不展示 Q&A PDF 下载按钮',
+  )
+  assert(
+    '投资建议书任务卡只展示 PPTX 下载、不展示封面预览',
+    !taskCardsSource.includes('ProtectedImagePreview')
+      && !taskCardsSource.includes('投资建议书封面预览')
+      && !taskCardsSource.includes('加载 PPT 预览'),
+    'PNG 预览可保留用于服务端质量检查，但不在 PPTX 下载按钮下方展示',
   )
   assert(
     '非 PPT 文档任务以主文档交付为优先并自动恢复一次',
@@ -848,10 +983,6 @@ async function main() {
     '只展示服务端清洗后的业务原因、停止阶段和错误编号，不展示模型原文或堆栈',
   )
 
-  const assistantPageSource = await readFile(
-    path.resolve(process.cwd(), 'src', 'pages', 'AIAssistantPage.tsx'),
-    'utf8',
-  )
   assert(
     'Q&A 通过统一任务 API 生成可下载产物',
     assistantPageSource.includes("qa: 'project_qa'")

@@ -25,6 +25,18 @@ test('rejects article fragments and editorial labels as lead subjects', () => {
     '数据',
     '学员们',
     '浙江大学药学院杭州校友分会走访海昶生物',
+    '）近期',
+    '36氪首发',
+    '技术团队',
+    '二季度普华汇',
+    'AI下半场',
+    '外部危机和人工智能',
+    '核聚变装置',
+    '清华系量子计算企业',
+    '离子束装备商',
+    '对标比利时微电子研究中心',
+    '密友社交应用Yope斩',
+    '深庭纪目前',
   ]) {
     assert.equal(isSpecificLeadSubjectName(value), false, value)
   }
@@ -38,6 +50,7 @@ test('extracts an explicit visited or invested target before unrelated legal ent
   }), '海昶生物')
   assert.equal(deriveRadarSubjectName({
     title: '交研资本投资标的灵巧智能完成新一轮融资',
+    existingName: '灵巧智能',
     companyNames: ['四川交研私募基金管理有限公司'],
   }), '灵巧智能')
 })
@@ -47,6 +60,33 @@ test('extracts the financed company after a news-column prefix', () => {
     title: '硬氪前线 | 东昇聚变获数亿元融资，国内唯一布局“氘-氦3”路线核聚变企业',
     projectName: '硬氪前线',
   }), '东昇聚变')
+  assert.equal(deriveRadarSubjectName({
+    title: '码刻｜Meshy完成近4亿美元B轮融资 老股东源码持续加码',
+    articleText: '过去需要专业美术团队开拓全新产品市场和全球商业化推广能力。',
+  }), 'Meshy')
+  assert.equal(deriveRadarSubjectName({
+    title: '90后清华博士田天创办瑞莱智慧，完成数亿元B轮融资',
+    articleText: '7月21日，AI安全技术公司瑞莱智慧（RealAI）宣布连续完成合计数亿元规模的B1轮和B2轮融资。',
+  }), '瑞莱智慧')
+  assert.equal(deriveRadarSubjectName({
+    title: '教授团队推进3D世界模型技术落地',
+    articleText: '由该团队孵化创立的影溯科技（InSpatio）宣布完成了数千万美元Pre-A轮融资。',
+  }), '影溯科技')
+  assert.equal(deriveRadarSubjectName({
+    title: '密友社交应用Yope斩获新一轮融资',
+  }), 'Yope')
+  assert.equal(deriveRadarSubjectName({
+    title: '深庭纪目前完成数千万元融资',
+  }), '深庭纪')
+  assert.equal(deriveRadarSubjectName({
+    title: '上海交大与聚塔时代共建AI for Materials联合实验室',
+    projectName: 'Materials联合实验室',
+  }), 'AI for Materials联合实验室')
+  assert.equal(deriveRadarSubjectName({
+    existingName: 'TabTin',
+    title: '“词元无限”完成天使++轮融资，累计融资金额达数亿元',
+    projectName: 'TabTin',
+  }), '词元无限')
 })
 
 test('prefers a concrete named project over a shorter institution name', () => {
@@ -148,6 +188,15 @@ test('filters non-investable academic and participant recruitment content', () =
     values: ['研究成果发表于 Nature Communications'],
   }), true)
   assert.equal(isNonInvestableRadarContent({
+    hasCompanySubject: true,
+    subjectName: '冰川网络',
+    values: ['冰川网络融资净买入，股息率位居行业前列'],
+  }), true)
+  assert.equal(isNonInvestableRadarContent({
+    subjectName: '某大学研究中心',
+    values: ['院士云集，共议人工智能前沿发展'],
+  }), true)
+  assert.equal(isNonInvestableRadarContent({
     subjectName: '复旦大学光电研究院产业技术中试基地',
     values: ['复旦大学光电研究院产业技术中试基地落地签约'],
   }), false)
@@ -158,6 +207,11 @@ test('filters non-investable academic and participant recruitment content', () =
     hasCompanySubject: true,
     subjectName: '海昶生物',
     values: ['浙江大学药学院杭州校友分会企业走访交流活动在海昶生物举办'],
+  }), true)
+  assert.equal(isNonInvestableRadarContent({
+    hasCompanySubject: true,
+    subjectName: '杭州一知智能科技有限公司',
+    values: ['实践团赴杭州一知智能参观学习'],
   }), true)
   assert.equal(isNonInvestableRadarContent({
     values: ['2026年，为什么资本更青睐“会赚钱”的AI应用？'],

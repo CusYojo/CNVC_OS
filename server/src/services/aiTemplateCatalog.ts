@@ -1,7 +1,10 @@
 import { existsSync } from 'node:fs'
 import path from 'node:path'
 import type { AiCustomTemplateAnalysis } from '../db/schema.js'
-import { AI_TEMPLATE_DRIVEN_SKILL_NAME } from './aiSkillService.js'
+import {
+  AI_TEMPLATE_DRIVEN_SKILL_NAME,
+  type AiPptWorkflowSkillName,
+} from './aiSkillService.js'
 import { INVESTMENT_PROPOSAL_SECTION_TITLES } from './aiInvestmentProposalBlueprintService.js'
 
 export const AI_TASK_TYPES = [
@@ -27,6 +30,9 @@ export type AiTemplateDefinition = {
   referencePath: string
   referencePaths?: string[]
   coreRulesPath?: string
+  workflowSkillNames?: AiPptWorkflowSkillName[]
+  templateSourceMode?: 'native-pptx' | 'pdf-converted'
+  conversionHandoffPath?: string
   editableLevel: 'text-and-structure' | 'core-elements'
   sections: string[]
   requiredParameters: string[]
@@ -94,15 +100,20 @@ export const AI_TEMPLATE_CATALOG: Record<AiBusinessTaskType, AiTemplateDefinitio
   },
   investment_recommendation_ppt: {
     type: 'investment_recommendation_ppt',
-    skillName: 'build-investment-recommendation-ppt',
+    skillName: 'editable-ppt-content-replacer',
     label: '投资建议书（PPT）',
-    description: '生成核心文本、表格、基础图表和形状可编辑的投资建议书',
+    description: '按用户上传的 PDF 或 PPTX 模板生成可编辑投资建议书',
     outputFormat: 'pptx',
-    templateVersion: 'recommendation-jialiang-37slides-v2',
+    templateVersion: 'recommendation-uploaded-template-v4',
     referencePath: docsPath('agent', '投资建议书', '佳量脑科学_投资建议书6月.pptx'),
+    workflowSkillNames: [
+      'pdf-to-editable-ppt',
+      'editable-ppt-content-replacer',
+    ],
+    templateSourceMode: 'native-pptx',
     editableLevel: 'core-elements',
-    sections: ['投资结论', '项目概览', '行业与市场', '产品与技术', '商业模式与客户', '团队', '竞争分析', '财务与估值', '投资方案', '核心风险', '尽调缺口', '下一步建议'],
-    requiredParameters: ['projectId', 'sourceCutoffDate', 'template', 'pageCount', 'language'],
+    sections: [],
+    requiredParameters: ['projectId', 'sourceCutoffDate', 'customTemplateId', 'language', 'structureMode'],
     disclaimer: '本演示文稿由 AI 基于已授权资料生成，仅供内部讨论，不构成最终投资决策。',
   },
   due_diligence_report: {
@@ -220,6 +231,8 @@ export function listAiTaskTypes() {
       outputFormat: item.outputFormat,
       companionFormats: item.companionFormats ?? [],
       skillName: item.skillName,
+      workflowSkillNames: item.workflowSkillNames ?? [],
+      templateSourceMode: item.templateSourceMode,
       templateVersion: item.templateVersion,
       requiredParameters: item.requiredParameters,
       outputFormats: [...new Set([

@@ -57,6 +57,7 @@ export const PROJECT_QA_RESEARCH_TOPICS = [
   '财务与现金流',
   '融资、估值与投资方',
   '交易方案与关键条款',
+  '行业、市场空间与政策',
   '竞品、替代方案与项目级对标',
   '监管、诉讼与重大风险',
 ] as const
@@ -104,6 +105,7 @@ const TOPIC_SIGNALS: Record<ProjectQaResearchTopic, string[]> = {
   '财务与现金流': ['营业收入', '成本', '毛利率', '净利润', '现金流', '应收账款', '回款', '财务报表'],
   '融资、估值与投资方': ['完成融资', '投资方', '融资轮次', '融资金额', '本轮融资', '估值', '增资', '股权转让'],
   '交易方案与关键条款': ['投资方案', '交易方案', '投资金额', '持股比例', '交割条件', '回购', '保护性条款'],
+  '行业、市场空间与政策': ['市场规模', '市场空间', '增长率', '复合增长率', '渗透率', '行业政策', '产业政策', '市场份额'],
   '竞品、替代方案与项目级对标': ['竞争对手', '主要竞品', '对标项目', '替代方案', '差异化', '竞争壁垒'],
   '监管、诉讼与重大风险': ['行政处罚', '监管', '诉讼', '执行信息', '失信', '重大风险', '业务资质'],
 }
@@ -118,6 +120,7 @@ const TOPIC_QUERY_TERMS: Record<ProjectQaResearchTopic, string> = {
   '财务与现金流': '收入 毛利 财务 现金流',
   '融资、估值与投资方': '融资 投资方 估值 轮次',
   '交易方案与关键条款': '投资 交易 增资 股权转让',
+  '行业、市场空间与政策': '市场规模 增长率 渗透率 行业政策',
   '竞品、替代方案与项目级对标': '竞品 对标 替代方案',
   '监管、诉讼与重大风险': '监管 诉讼 行政处罚 风险',
 }
@@ -181,7 +184,8 @@ async function isSafePublicUrl(url: URL, resolveHost: ResolveHost) {
 }
 
 const WEB_CHROME_PATTERN =
-  /(?:联系我们|联系邮箱|联系电话|客服热线|微信号|微信公众号|京ICP备|公网安备|Copyright|All Rights Reserved|隐私政策|用户协议|网站地图|返回顶部|上一篇|下一篇|相关推荐|热门推荐)/i
+  /(?:联系我们|联系邮箱|联系电话|客服热线|微信号|微信公众号|京ICP备|公网安备|Copyright|All Rights Reserved|隐私政策|用户协议|网站地图|返回顶部|上一篇|下一篇|相关推荐|热门推荐|原文链接|来源网址)/i
+const WEB_COLLAPSED_SNIPPET = /(?:\.{3}|…{1,3})\s*(?:展开|查看更多)\s*$/i
 
 const WEB_NAVIGATION_TERMS = [
   '首页',
@@ -245,9 +249,17 @@ function textLinesFromHtml(html: string) {
       const prefix = line.slice(0, noise.index).replace(/[，,；;、\s]+$/, '').trim()
       return prefix.length >= 20 ? prefix : ''
     })
-    .map((line) => line.length > 420 ? `${line.slice(0, 420).trim()}…` : line)
+    .flatMap((line) => {
+      if (line.length <= 420) return [line]
+      const chunks = line.match(/.{1,420}(?:[。！？!?；;\s]|$)/g)
+      return chunks?.map((chunk) => chunk.trim()).filter(Boolean) ?? [line]
+    })
     .filter((line) => {
-      if (line.length < 12 || WEB_CHROME_PATTERN.test(line)) return false
+      if (
+        line.length < 12
+        || WEB_CHROME_PATTERN.test(line)
+        || WEB_COLLAPSED_SNIPPET.test(line)
+      ) return false
       const navigationHits = WEB_NAVIGATION_TERMS
         .filter((term) => line.includes(term))
         .length
@@ -361,6 +373,37 @@ function pageMatchesProject(
   return projectPageMatch(text, project, sources) !== 'none'
 }
 
+function industryContextTerms(project: ProjectLike, sources: readonly EvidenceSource[]) {
+  const values = [meaningful(project.industry)]
+  const sourceText = sources.slice(0, 30).map((source) => source.content).join('\n')
+  const matches = sourceText.match(/(?:所属行业|行业|细分领域)[：:]\s*([^\n。；;]{2,60})/g) ?? []
+  matches.forEach((entry) => values.push(
+    meaningful(entry.split(/[：:]/).slice(1).join(':')),
+  ))
+  const generic = new Set(['科技', '技术', '智能', '人工智能', '软件', '硬件', '制造业', '服务业'])
+  return [...new Set(values.flatMap((value) => [
+    value,
+    ...value.split(/[、，,；;\/|·\s]+/),
+  ])
+    .map((value) => value.replace(/[“”"'《》\s]+/g, ''))
+    .filter((value) => value.length >= 3 && !generic.has(value)))]
+    .slice(0, 12)
+}
+
+function pageMatchesIndustryContext(
+  text: string,
+  project: ProjectLike,
+  sources: readonly EvidenceSource[],
+) {
+  const compact = text.replace(/\s+/g, '')
+  return industryContextTerms(project, sources).some((term) => compact.includes(term))
+}
+
+const INDUSTRY_CONTEXT_TOPICS = new Set<ProjectQaResearchTopic>([
+  '行业、市场空间与政策',
+  '竞品、替代方案与项目级对标',
+])
+
 const EXACT_ENTITY_REQUIRED_TOPICS = new Set<ProjectQaResearchTopic>([
   '项目主体与工商',
   '股权、治理与关联关系',
@@ -447,9 +490,11 @@ function publicSearchName(project: ProjectLike) {
 
 async function discoverViaDirectSearch(input: {
   project: ProjectLike
+  currentSources: readonly EvidenceSource[]
   topics: readonly ProjectQaResearchTopic[]
   fetchImpl: FetchLike
   resolveHost: ResolveHost
+  allowIndustryContext?: boolean
 }) {
   const projectName = publicSearchName(input.project)
   if (!projectName) return { hits: [] as ModelResearchHit[], error: '项目名称不可用于公开检索' }
@@ -468,7 +513,11 @@ async function discoverViaDirectSearch(input: {
     for (const endpoint of safeEndpoints) {
       try {
         const searchUrl = new URL(endpoint)
-        searchUrl.searchParams.set('q', `${projectName} ${TOPIC_QUERY_TERMS[topic]}`)
+        const contextSearchName = input.allowIndustryContext
+          && INDUSTRY_CONTEXT_TOPICS.has(topic)
+          ? industryContextTerms(input.project, input.currentSources)[0] || projectName
+          : projectName
+        searchUrl.searchParams.set('q', `${contextSearchName} ${TOPIC_QUERY_TERMS[topic]}`)
         if (searchUrl.hostname === 'search.brave.com') searchUrl.searchParams.set('source', 'web')
         const response = await input.fetchImpl(searchUrl, {
           headers: {
@@ -579,6 +628,7 @@ export async function fetchProjectQaModelEvidence(input: {
   resolveHost?: ResolveHost
   now?: Date
   maxSources?: number
+  allowIndustryContext?: boolean
 }): Promise<ProjectQaModelResearchResult> {
   const enabled = researchEnabled(input.parameters)
   const now = input.now ?? new Date()
@@ -627,16 +677,16 @@ export async function fetchProjectQaModelEvidence(input: {
         messages: [
           {
             role: 'system',
-            content: `你是投资中台资深投资经理的联网证据检索执行器。必须使用当前模型真实可用的联网或搜索能力，围绕当前会话绑定项目查找公开网页；不得使用训练记忆编造事实、网址、人物、融资或客户。只返回JSON：{"results":[{"topic":"","title":"","url":"","publisher":"","publishedAt":"YYYY-MM-DD或空字符串"}]}。topic只能来自用户给出的检索主题。每条必须是可直接访问的http/https原始页面，不得返回搜索结果页、聚合摘要页或无来源转载。没有可靠结果时返回空数组。`,
+            content: `你是投资中台资深投资经理的联网证据检索执行器。必须使用当前模型真实可用的联网或搜索能力，围绕当前会话绑定项目查找公开网页；不得使用训练记忆编造事实、网址、人物、融资或客户。只返回JSON：{"results":[{"topic":"","title":"","url":"","publisher":"","publishedAt":"YYYY-MM-DD或空字符串"}]}。topic只能来自用户给出的检索主题。每条必须是可直接访问的http/https原始页面，不得返回搜索结果页、聚合摘要页或无来源转载。没有可靠结果时返回空数组。${input.allowIndustryContext ? '“行业、市场空间与政策”和“竞品、替代方案与项目级对标”允许返回与项目细分行业直接匹配的权威上下文页面，但不得把行业数据写成公司事实。' : ''}`,
           },
           {
             role: 'user',
-            content: `围绕同一具体项目补全可改变当前阶段判断或下一步建议的证据，不写泛行业研究。
+            content: `围绕同一具体项目补全可改变当前阶段判断或下一步建议的证据。${input.allowIndustryContext ? '仅“行业、市场空间与政策”和“竞品、替代方案与项目级对标”可以补充与项目细分行业直接相关的权威上下文。' : '不写泛行业研究。'}
 项目公开名称：${publicSearchName(input.project)}
 检索主题：${requestedTopics.join('、')}
 资料截止日：${input.sourceCutoffDate}
 
-不得把项目资料库内容写进搜索词。优先级：政府/监管/司法/登记机关、专利与论文原始页面、公司或研发合作机构官网、投资机构公告、客户或合作方公告、可信专业媒体。重点寻找具体主体、股权与治理、人物及履历、产品和技术指标、知识产权、样机/中试/量产、客户试点/订单/验收/回款、连续财务数据、融资轮次/金额/投资方/估值、交易事项及重大风险。必须区分公司自述、媒体转述和已经完成的可核验事件；融资意向、股东借款、资产出售和正式股权融资不得混写。竞品只返回明确提及当前项目并能形成项目级比较的页面。不得返回资料截止日之后发布或更新的页面。最多返回16条。`,
+不得把项目资料库内容写进搜索词。优先级：政府/监管/司法/登记机关、专利与论文原始页面、公司或研发合作机构官网、投资机构公告、客户或合作方公告、可信专业媒体。重点寻找具体主体、股权与治理、人物及履历、产品和技术指标、知识产权、样机/中试/量产、客户试点/订单/验收/回款、连续财务数据、融资轮次/金额/投资方/估值、交易事项及重大风险。必须区分公司自述、媒体转述和已经完成的可核验事件；融资意向、股东借款、资产出售和正式股权融资不得混写。${input.allowIndustryContext ? '市场与竞品上下文必须命中项目所属细分行业，优先政府、行业协会、上市公司公告和可信研究机构原始页面；不得反推为当前项目事实。' : '竞品只返回明确提及当前项目并能形成项目级比较的页面。'}不得返回资料截止日之后发布或更新的页面。最多返回16条。`,
           },
         ],
         max_tokens: 4500,
@@ -656,9 +706,11 @@ export async function fetchProjectQaModelEvidence(input: {
   }
   const directSearch = await discoverViaDirectSearch({
     project: input.project,
+    currentSources: input.currentSources,
     topics: requestedTopics,
     fetchImpl,
     resolveHost,
+    allowIndustryContext: input.allowIndustryContext,
   })
   const hits = [...agentHits, ...modelHits, ...directSearch.hits].filter((hit, index, values) => {
     const url = meaningful(hit.url)
@@ -706,9 +758,12 @@ export async function fetchProjectQaModelEvidence(input: {
       const html = await response.text()
       const text = extractProjectQaPublicPageText(html)
       const matchLevel = projectPageMatch(text, input.project, input.currentSources)
+      const industryContextMatch = input.allowIndustryContext === true
+        && INDUSTRY_CONTEXT_TOPICS.has(topic)
+        && pageMatchesIndustryContext(text, input.project, input.currentSources)
       if (
         text.length < 160
-        || !pageMatchesProject(text, input.project, input.currentSources)
+        || (!pageMatchesProject(text, input.project, input.currentSources) && !industryContextMatch)
         || (matchLevel !== 'exact' && EXACT_ENTITY_REQUIRED_TOPICS.has(topic))
       ) {
         continue
@@ -727,10 +782,14 @@ export async function fetchProjectQaModelEvidence(input: {
         versionOrDate: publishedAt || `发布日期待核验；访问${accessedAt.slice(0, 10)}`,
         locator: canonicalUrl,
         content: [
-          '证据属性：系统联网发现并直接读取页面，已核验页面与当前项目名称匹配；公开披露由项目大模型总结归纳，仍需与项目原件交叉核验。',
+          industryContextMatch && matchLevel === 'none'
+            ? '证据属性：系统联网发现并直接读取页面，已核验页面与当前项目所属细分行业匹配；仅可用于市场、政策或竞品上下文，不得据此确认当前项目事实。'
+            : '证据属性：系统联网发现并直接读取页面，已核验页面与当前项目名称匹配；公开披露由项目大模型总结归纳，仍需与项目原件交叉核验。',
           matchLevel === 'exact'
             ? '项目匹配：项目法律名称或完整主体名称一致。'
-            : '项目匹配：仅项目简称或近名一致；不得据此确认当前项目的工商、股权、财务或融资事实。',
+            : matchLevel === 'alias'
+              ? '项目匹配：仅项目简称或近名一致；不得据此确认当前项目的工商、股权、财务或融资事实。'
+              : `项目匹配：行业上下文一致（${industryContextTerms(input.project, input.currentSources).join('、')}）；不得写成当前项目自身事实。`,
           `Q&A 分类：${topic}`,
           `页面标题：${title}`,
           `发布主体：${publisher}`,
