@@ -37,6 +37,14 @@ test('rejects article fragments and editorial labels as lead subjects', () => {
     '对标比利时微电子研究中心',
     '密友社交应用Yope斩',
     '深庭纪目前',
+    '小马智行已经组建运营团队',
+    '用于消费机器人项目',
+    '人创业团队',
+    '4人创业团队',
+    '柔性触觉感知企业',
+    '东方纹样文化创意品牌',
+    '根据投中嘉川CVSource数据',
+    '我要招一个电子',
   ]) {
     assert.equal(isSpecificLeadSubjectName(value), false, value)
   }
@@ -180,6 +188,67 @@ test('prefers the financed company over article columns, investors, and descript
   }
 })
 
+test('repairs the recent radar subject-name failure cases', () => {
+  const cases = [
+    {
+      expected: 'MobAI',
+      title: '36氪获悉｜赤子城科技投资：4人创业团队「MobAI」，推出AI互动叙事应用',
+      projectName: '人创业团队',
+      articleText: '36氪获悉， AI 创业公司「MobAI」已完成数百万元天使轮融资。',
+    },
+    {
+      expected: '月之暗面Kimi',
+      title: '月之暗面Kimi已完成F轮融资，估值达百亿美元',
+      projectName: '月之暗面Kimi已',
+    },
+    {
+      expected: '本末动力（北京）科技股份有限公司',
+      title: '秋声 | 31岁学霸冲港股IPO，消费机器人赛道再升温',
+      projectName: '用于消费机器人项目',
+      articleText: '本末动力（北京）科技股份有限公司通过港交所聆讯，公司专注于消费级机器人核心部件。',
+    },
+  ]
+  for (const input of cases) {
+    assert.equal(deriveRadarSubjectName(input), input.expected, input.title)
+  }
+})
+
+test('extracts named brands from current radar article formats', () => {
+  const cases = [
+    {
+      expected: 'OceanBase',
+      title: 'OceanBase回应融资报道：全力投入AI数据创新，与资本市场保持开放沟通',
+      articleText: 'OceanBase正在与投资者洽谈A轮融资，目标融资规模约20亿至30亿元。',
+    },
+    {
+      expected: 'Mind Lab',
+      title: '在大模型的下一阶段议题上，我们找到了一家做持续学习的中国Neo Lab',
+      articleText: '2025年10月，Mind Lab成立，团队约30余人。',
+    },
+    {
+      expected: '智谷天厨',
+      title: '硬氪首发 | 率先跑通盈利，智谷天厨获招商局创投领投近亿元融资',
+    },
+    {
+      expected: 'MORROR ART',
+      title: '36氪首发｜家居音频品牌「MORROR ART」完成亿元级B+轮融资',
+    },
+    {
+      expected: '易氢动力',
+      title: '清华博士团队创业，这家公司要给飞机做氢能「心脏」｜36氪首发',
+      articleText: '36氪获悉，航空新能源动力系统解决方案供应商「易氢动力」已完成数千万元天使+轮融资。',
+    },
+    {
+      expected: '良配科技',
+      title: '从月之暗面出走，他用AI技术帮人找对象，徐新投资 | 涌现新项目',
+      articleText: '2025年8月，他离职创办“良配科技”，核心产品“良配”。',
+    },
+  ]
+  for (const input of cases) {
+    assert.equal(deriveRadarSubjectName(input), input.expected, input.title)
+  }
+})
+
 test('filters non-investable academic and participant recruitment content', () => {
   assert.equal(isNonInvestableRadarContent({
     values: ['受试者招募 | 北京清华长庚医院正在开展临床试验'],
@@ -227,4 +296,24 @@ test('filters non-investable academic and participant recruitment content', () =
     subjectName: '上海交通大学智能材料中试基地',
     values: ['上海交通大学智能材料中试基地完成中试并与产业客户签约。'],
   }), false)
+  assert.equal(isNonInvestableRadarContent({
+    hasInvestmentEvidence: true,
+    subjectName: '某融资主体',
+    values: ['氪星晚报｜今日多家公司完成融资，行业热点汇总'],
+  }), true)
+  assert.equal(isNonInvestableRadarContent({
+    hasInvestmentEvidence: true,
+    subjectName: 'Helion',
+    values: ['AI尽头的终极能源之战：全球核聚变投资狂潮'],
+  }), true)
+  assert.equal(isNonInvestableRadarContent({
+    hasInvestmentEvidence: true,
+    subjectName: '本源量子',
+    values: ['2026，量子计算迟到的狂欢：能拿订单、奔赴IPO、市值破百亿'],
+  }), true)
+  assert.equal(isNonInvestableRadarContent({
+    hasInvestmentEvidence: true,
+    subjectName: '蚂蚁国际',
+    values: ['蚂蚁国际完成约12亿美元A轮融资 / 智象未来完成15亿元C轮融资'],
+  }), true)
 })

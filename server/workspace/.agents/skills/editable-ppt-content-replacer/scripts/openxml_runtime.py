@@ -381,6 +381,111 @@ def replace_text(text_body: ET.Element, value: str) -> None:
         nodes[0].set(qn(XML_NS, "space"), "preserve")
 
 
+def add_text_box(
+    root: ET.Element,
+    shape_id: int,
+    name: str,
+    value: str,
+    bbox: list[float],
+    font_size: float = 12,
+    font_face: str = "微软雅黑",
+    font_color: str = "4B5563",
+) -> ET.Element:
+    if find_object(root, shape_id) is not None:
+        raise ValueError(f"新增文本框 shapeId={shape_id} 已存在")
+    if len(bbox) != 4 or any(float(item) < 0 for item in bbox):
+        raise ValueError("新增文本框 bbox 必须包含四个非负像素值")
+    if float(bbox[2]) <= 0 or float(bbox[3]) <= 0:
+        raise ValueError("新增文本框宽度和高度必须大于零")
+    if not re.fullmatch(r"[0-9A-Fa-f]{6}", font_color):
+        raise ValueError("新增文本框 fontColor 必须是六位十六进制颜色")
+    tree = root.find("./p:cSld/p:spTree", NS)
+    if tree is None:
+        raise ValueError("幻灯片缺少 p:spTree，无法新增责任声明文本框")
+
+    shape = ET.Element(qn(P_NS, "sp"))
+    nv_shape = ET.SubElement(shape, qn(P_NS, "nvSpPr"))
+    ET.SubElement(
+        nv_shape,
+        qn(P_NS, "cNvPr"),
+        {"id": str(shape_id), "name": name},
+    )
+    ET.SubElement(nv_shape, qn(P_NS, "cNvSpPr"), {"txBox": "1"})
+    ET.SubElement(nv_shape, qn(P_NS, "nvPr"))
+
+    shape_properties = ET.SubElement(shape, qn(P_NS, "spPr"))
+    transform = ET.SubElement(shape_properties, qn(A_NS, "xfrm"))
+    ET.SubElement(
+        transform,
+        qn(A_NS, "off"),
+        {
+            "x": str(round(float(bbox[0]) * EMU_PER_PIXEL)),
+            "y": str(round(float(bbox[1]) * EMU_PER_PIXEL)),
+        },
+    )
+    ET.SubElement(
+        transform,
+        qn(A_NS, "ext"),
+        {
+            "cx": str(round(float(bbox[2]) * EMU_PER_PIXEL)),
+            "cy": str(round(float(bbox[3]) * EMU_PER_PIXEL)),
+        },
+    )
+    geometry = ET.SubElement(
+        shape_properties,
+        qn(A_NS, "prstGeom"),
+        {"prst": "rect"},
+    )
+    ET.SubElement(geometry, qn(A_NS, "avLst"))
+    ET.SubElement(shape_properties, qn(A_NS, "noFill"))
+    line = ET.SubElement(shape_properties, qn(A_NS, "ln"))
+    ET.SubElement(line, qn(A_NS, "noFill"))
+
+    text_body = ET.SubElement(shape, qn(P_NS, "txBody"))
+    ET.SubElement(
+        text_body,
+        qn(A_NS, "bodyPr"),
+        {
+            "wrap": "square",
+            "rtlCol": "0",
+            "anchor": "t",
+            "lIns": "0",
+            "rIns": "0",
+            "tIns": "0",
+            "bIns": "0",
+        },
+    )
+    ET.SubElement(text_body, qn(A_NS, "lstStyle"))
+    size = str(max(800, round(float(font_size) * 100)))
+    for line_text in value.splitlines() or [""]:
+        paragraph = ET.SubElement(text_body, qn(A_NS, "p"))
+        ET.SubElement(paragraph, qn(A_NS, "pPr"), {"algn": "l"})
+        run = ET.SubElement(paragraph, qn(A_NS, "r"))
+        run_properties = ET.SubElement(
+            run,
+            qn(A_NS, "rPr"),
+            {"lang": "zh-CN", "sz": size, "dirty": "0"},
+        )
+        solid_fill = ET.SubElement(run_properties, qn(A_NS, "solidFill"))
+        ET.SubElement(
+            solid_fill,
+            qn(A_NS, "srgbClr"),
+            {"val": font_color.upper()},
+        )
+        ET.SubElement(run_properties, qn(A_NS, "latin"), {"typeface": font_face})
+        ET.SubElement(run_properties, qn(A_NS, "ea"), {"typeface": font_face})
+        ET.SubElement(run_properties, qn(A_NS, "cs"), {"typeface": font_face})
+        text_node = ET.SubElement(run, qn(A_NS, "t"))
+        text_node.text = line_text
+        ET.SubElement(
+            paragraph,
+            qn(A_NS, "endParaRPr"),
+            {"lang": "zh-CN", "sz": size, "dirty": "0"},
+        )
+    tree.append(shape)
+    return shape
+
+
 def replace_notes_text(root: ET.Element, value: str) -> None:
     body_shape = None
     for shape in root.findall(".//p:sp", NS):

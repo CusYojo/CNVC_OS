@@ -54,6 +54,16 @@ class SourceConfigurationTests(unittest.TestCase):
 
 
 class ProjectSubjectNameTests(unittest.TestCase):
+    def test_non_academic_arxiv_candidate_reaches_fallback_without_error(self):
+        item = {
+            "source": "arxiv",
+            "title": "FaceMoE: Mixture of Experts for Low-Resolution Face Recognition",
+        }
+        self.assertEqual(
+            app.infer_project_name(item, item["title"]),
+            "未命名项目",
+        )
+
     def test_rejects_article_fragments(self):
         for value in (
             "作为完全开放",
@@ -64,6 +74,14 @@ class ProjectSubjectNameTests(unittest.TestCase):
             "key observation made in 2021 by the paper",
             "全新突破",
             "硬氪前线",
+            "小马智行已经组建运营团队",
+            "用于消费机器人项目",
+            "人创业团队",
+            "4人创业团队",
+            "柔性触觉感知企业",
+            "东方纹样文化创意品牌",
+            "根据投中嘉川CVSource数据",
+            "我要招一个电子",
         ):
             with self.subTest(value=value):
                 self.assertFalse(app.is_specific_project_subject_name(value))
@@ -135,6 +153,95 @@ class ProjectSubjectNameTests(unittest.TestCase):
         for item, expected in cases:
             with self.subTest(expected=expected):
                 self.assertEqual(app.infer_project_name(item, item.get("summary", "")), expected)
+
+    def test_extracts_quoted_investment_target(self):
+        item = {
+            "title": "36氪获悉｜赤子城科技投资：4人创业团队「MobAI」，推出AI互动叙事应用",
+            "project_name": "人创业团队",
+            "summary": "36氪获悉， AI 创业公司「MobAI」已完成数百万元天使轮融资。",
+        }
+        self.assertEqual(app.infer_project_name(item, item["summary"]), "MobAI")
+
+    def test_strips_financing_auxiliary_from_subject(self):
+        item = {
+            "title": "月之暗面Kimi已完成F轮融资，估值达百亿美元",
+            "project_name": "月之暗面Kimi已",
+        }
+        self.assertEqual(app.infer_project_name(item, ""), "月之暗面Kimi")
+
+    def test_prefers_explicit_legal_company_in_ipo_article(self):
+        item = {
+            "title": "秋声 | 31岁学霸冲港股IPO，消费机器人赛道再升温",
+            "project_name": "用于消费机器人项目",
+            "article_text": (
+                "本末动力（北京）科技股份有限公司通过港交所聆讯，"
+                "公司专注于消费级机器人核心部件。"
+            ),
+        }
+        self.assertEqual(
+            app.infer_project_name(item, item["article_text"]),
+            "本末动力（北京）科技股份有限公司",
+        )
+
+    def test_extracts_named_brands_from_real_radar_articles(self):
+        cases = (
+            (
+                {
+                    "title": "OceanBase回应融资报道：全力投入AI数据创新，与资本市场保持开放沟通",
+                    "summary": "OceanBase正在与投资者洽谈A轮融资，目标融资规模约20亿至30亿元。",
+                },
+                "OceanBase",
+            ),
+            (
+                {
+                    "title": "在大模型的下一阶段议题上，我们找到了一家做持续学习的中国Neo Lab",
+                    "summary": "2025年10月，Mind Lab成立，团队约30余人。",
+                },
+                "Mind Lab",
+            ),
+            (
+                {
+                    "title": "硬氪首发 | 率先跑通盈利，智谷天厨获招商局创投领投近亿元融资",
+                },
+                "智谷天厨",
+            ),
+            (
+                {
+                    "title": "36氪首发｜家居音频品牌「MORROR ART」完成亿元级B+轮融资",
+                },
+                "MORROR ART",
+            ),
+            (
+                {
+                    "title": "清华博士团队创业，这家公司要给飞机做氢能「心脏」｜36氪首发",
+                    "summary": "36氪获悉，航空新能源动力系统解决方案供应商「易氢动力」已完成数千万元天使+轮融资。",
+                },
+                "易氢动力",
+            ),
+            (
+                {
+                    "title": "从月之暗面出走，他用AI技术帮人找对象，徐新投资 | 涌现新项目",
+                    "summary": "2025年8月，他离职创办“良配科技”，核心产品“良配”。",
+                },
+                "良配科技",
+            ),
+        )
+        for item, expected in cases:
+            with self.subTest(expected=expected):
+                self.assertEqual(app.infer_project_name(item, item.get("summary", "")), expected)
+
+    def test_prefers_named_title_project_over_venue_company(self):
+        item = {
+            "title": "科氪 | 定义AI睡眠健康新赛道 东莞数字人体与智慧睡眠创新联合体落地慕思",
+            "summary": (
+                "东莞市数字人体与智慧睡眠创新联合体揭牌暨工作推进会"
+                "在慕思健康睡眠股份有限公司总部举行。"
+            ),
+        }
+        self.assertEqual(
+            app.infer_project_name(item, item["summary"]),
+            "东莞数字人体与智慧睡眠创新联合体",
+        )
 
 
 class BusinessRegionTests(unittest.TestCase):

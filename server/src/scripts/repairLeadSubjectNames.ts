@@ -1,10 +1,11 @@
-import { eq, sql } from 'drizzle-orm'
+import { and, eq, gte, sql } from 'drizzle-orm'
 import { db, pool } from '../db/client.js'
 import { leads } from '../db/schema.js'
 import {
   deriveRadarSubjectName,
   isBetterLeadSubjectName,
   isLowValueRadarContent,
+  isNonInvestableRadarContent,
   isSpecificLeadSubjectName,
 } from '../services/leadSubjectName.js'
 
@@ -48,14 +49,28 @@ function isClearlyBadName(name: string): boolean {
 
 async function main() {
   const apply = process.argv.includes('--apply')
+  const sinceArg = process.argv.find((value) => value.startsWith('--since='))
+  const sinceValue = sinceArg?.slice('--since='.length)
+  const since = sinceValue ? new Date(sinceValue) : null
+  if (sinceValue && Number.isNaN(since?.getTime())) {
+    throw new Error(`invalid --since timestamp: ${sinceValue}`)
+  }
+  if (apply && !since) {
+    throw new Error('--apply requires --since=<ISO timestamp> to prevent an unbounded repair')
+  }
+  const radarSourceCondition = sql`COALESCE(${leads.source}, '') ~ '^项目发现雷达'`
   const rows = await db.select().from(leads)
-    .where(sql`COALESCE(${leads.source}, '') ~ '^项目发现雷达'`)
+    .where(since
+      ? and(radarSourceCondition, gte(leads.createdAt, since))
+      : radarSourceCondition)
   const changes: Array<{
     id: string
     current: string
     next: string
     radarProfile: Record<string, unknown>
     clearCompanyName: boolean
+    reject: boolean
+    reason: string
   }> = []
 
   for (const row of rows) {
@@ -77,37 +92,57 @@ async function main() {
       channel,
     })
 
-    const currentIsLegalCompany = /(?:股份有限公司|有限责任公司|有限公司)$/.test(row.name)
     const currentIsClearlyBad = isClearlyBadName(row.name)
+    const evidenceText = `${sourceTitle}\n${String(row.summary ?? '').slice(0, 2400)}`
+    const hasInvestmentEvidence = /(?:(?:完成|宣布|获得|获|拿到).{0,20}(?:融资|投资)|(?:融资|投资).{0,20}(?:领投|跟投|交割)|估值.{0,12}(?:亿元|万美元|亿美元|万元))/i.test(evidenceText)
+      || /(?:天使|种子|Pre-?A|A\+?轮|A1|B\+?轮|C\+?轮|D轮|E轮|Pre-?IPO|战略投资|战略融资|新一轮融资)/i.test(String(profile.projectRound ?? ''))
+    const nonInvestable = isNonInvestableRadarContent({
+      hasCompanySubject: isSpecificLeadSubjectName(registry.companyName)
+        || isSpecificLeadSubjectName(row.companyName)
+        || isSpecificLeadSubjectName(profile.companyName),
+      hasInvestmentEvidence,
+      subjectName: next || row.name,
+      values: [
+        sourceTitle,
+        row.summary,
+        profile.projectName,
+        profile.coreHighlights,
+        profile.teamComposition,
+      ],
+    })
+    const clearCompanyName = String(row.companyName ?? '').trim() === row.name
+      && !/(?:股份有限公司|有限责任公司|有限公司)$/.test(String(row.companyName ?? ''))
 
-    // 对明显不合理的名称，直接设为"未命名项目"。
-    // 这些文章的 deriveRadarSubjectName 输出也多是碎片，不再尝试重新推导。
-    if (currentIsClearlyBad && !currentIsLegalCompany) {
-      const clearCompanyName = String(row.companyName ?? '').trim() === row.name
-        && !/(?:股份有限公司|有限责任公司|有限公司)$/.test(String(row.companyName ?? ''))
+    if (nonInvestable || !next || !isSpecificLeadSubjectName(next)) {
       const nextRadarProfile = {
         ...radarProfile,
-        profile: { ...profile, projectName: '未命名项目' },
+        qualityRejected: true,
+        qualityRejectReason: nonInvestable ? '非单一可投资线索' : '无法确认明确主体名称',
       }
-      changes.push({
-        id: row.id,
-        current: row.name,
-        next: '未命名项目',
-        radarProfile: nextRadarProfile,
-        clearCompanyName,
-      })
+      const alreadyRejected = radarProfile.qualityRejected === true
+      if (!alreadyRejected) {
+        changes.push({
+          id: row.id,
+          current: row.name,
+          next: row.name,
+          radarProfile: nextRadarProfile,
+          clearCompanyName: false,
+          reject: true,
+          reason: String(nextRadarProfile.qualityRejectReason),
+        })
+      }
       continue
     }
-    // 非明显不合理的名称：deriveRadarSubjectName 返回相同或无效时跳过
-    if (!next || next === row.name || !isSpecificLeadSubjectName(next)) continue
+
+    if (next === row.name) continue
+    const currentIsLegalCompany = /(?:股份有限公司|有限责任公司|有限公司)$/.test(row.name)
     const currentIsImportedInference = (
-      !isSpecificLeadSubjectName(row.name)
+      currentIsClearlyBad
       || String(profile.projectName ?? '').trim() === row.name
       || String(row.companyName ?? '').trim() === row.name
     )
     if (currentIsLegalCompany || !currentIsImportedInference) continue
 
-    const evidenceText = `${sourceTitle}\n${String(row.summary ?? '').slice(0, 2400)}`
     const escapedNext = escapeRegex(next)
     const verifiedTitle = (
       /北航机器人所团队创业.{0,24}智能变刚度关节/.test(sourceTitle)
@@ -118,6 +153,9 @@ async function main() {
       `${escapedNext}.{0,48}(?:完成|获得|获|宣布|官宣|融资|投资)|(?:投资|融资).{0,24}${escapedNext}`,
       'i',
     ).test(evidenceText)
+    const explicitSubjectEvidence = evidenceText.replace(/\s+/g, '').toLowerCase()
+      .includes(next.replace(/\s+/g, '').toLowerCase())
+      && hasInvestmentEvidence
     const primaryFinancingTitle = /(?:(?:完成|获得|获|宣布|官宣).{0,40}(?:融资|投资)|(?:融资|投资).{0,28}(?:完成|领投|跟投|亿元|万元|美元|天使轮|种子轮|pre-?a|a轮|b轮|c轮|d轮)|估值.{0,20}(?:亿元|万美元|亿美元|万元))/i.test(sourceTitle)
       && !/(?:\d+\s*家|多家).{0,30}(?:企业|公司).{0,30}(?:融资|投资)|上市|港交所|IPO|获奖|荣誉|表彰|党组织/i.test(sourceTitle)
     const quotedTitleEvidence = new RegExp(
@@ -131,6 +169,7 @@ async function main() {
       lowValueSource
       || (
         !verifiedTitle
+        && !explicitSubjectEvidence
         && !(primaryFinancingTitle && directFinancingEvidence)
         && !quotedTitleEvidence
         && !containedProjectUpgrade
@@ -139,10 +178,10 @@ async function main() {
       continue
     }
 
-    const clearCompanyName = String(row.companyName ?? '').trim() === row.name
-      && !/(?:股份有限公司|有限责任公司|有限公司)$/.test(String(row.companyName ?? ''))
     const nextRadarProfile = {
       ...radarProfile,
+      qualityRejected: false,
+      qualityRejectReason: '',
       profile: { ...profile, projectName: next },
     }
     changes.push({
@@ -151,14 +190,16 @@ async function main() {
       next,
       radarProfile: nextRadarProfile,
       clearCompanyName,
+      reject: false,
+      reason: '使用当前标题/正文中的明确主体',
     })
   }
 
   for (const change of changes) {
-    console.log(`${change.current} -> ${change.next}`)
+    console.log(`${change.reject ? '[reject]' : '[rename]'} ${change.current} -> ${change.next} (${change.reason})`)
     if (!apply) continue
     await db.update(leads).set({
-      name: change.next,
+      ...(change.reject ? {} : { name: change.next }),
       radarProfile: change.radarProfile,
       ...(change.clearCompanyName ? { companyName: null } : {}),
     }).where(eq(leads.id, change.id))

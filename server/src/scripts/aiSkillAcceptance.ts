@@ -813,8 +813,10 @@ async function main() {
       && qaPipelineSource.includes('function cleanAnswerText')
       && qaPipelineSource.includes('五个连续自然段')
       && qaDocumentSource.includes('answerParagraphFormValid')
+      && qaDocumentSource.includes('visibleAnswerLabelsAbsent')
       && qaDocumentSource.includes('visibleSubheadingsAbsent')
       && !qaDocumentSource.includes('function dimensionParagraph')
+      && !qaDocumentSource.includes('bodyParagraph(`答复：${line}`')
       && !qaDocumentSource.includes('index === 6')
       && qaDocumentSource.includes('globalIndex === 0'),
     '宋体 / 18pt 标题 / 14pt 问题 / 无小标题自然段 / 1.5 倍行距 / 25.4×31.7mm 页边距',

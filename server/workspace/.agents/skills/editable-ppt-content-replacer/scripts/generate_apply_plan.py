@@ -34,6 +34,17 @@ def compact_operation(operation: dict) -> dict:
         result["shapeId"] = shape_id
         if action == "replace_text":
             result["text"] = operation["text"]
+        elif action == "add_disclaimer_textbox":
+            result.update(
+                {
+                    "text": operation["text"],
+                    "name": operation["name"],
+                    "bbox": operation["bbox"],
+                    "fontSize": operation.get("fontSize", 12),
+                    "fontFace": operation.get("fontFace", "微软雅黑"),
+                    "fontColor": operation.get("fontColor", "4B5563"),
+                }
+            )
         elif action == "replace_image":
             result["asset"] = str(
                 Path(operation["asset"]).expanduser().resolve()
@@ -123,6 +134,7 @@ def main() -> None:
     ordinary_actions = {
         "replace_text",
         "replace_text_group",
+        "add_disclaimer_textbox",
         "replace_image",
     }
     groups = {

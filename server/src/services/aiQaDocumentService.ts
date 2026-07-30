@@ -75,7 +75,6 @@ function mixedTextRuns(value: string, options: {
 }
 
 function bodyParagraph(value: string, options: {
-  boldLead?: string
   keepNext?: boolean
   firstLine?: boolean
   color?: string
@@ -83,19 +82,10 @@ function bodyParagraph(value: string, options: {
   before?: number
   after?: number
 } = {}) {
-  const runs: TextRun[] = []
-  const lead = options.boldLead && value.startsWith(options.boldLead) ? options.boldLead : ''
-  if (lead) {
-    runs.push(...mixedTextRuns(lead, {
-      bold: true,
-      size: options.size ?? 22,
-      color: options.color ?? '000000',
-    }))
-  }
-  runs.push(...mixedTextRuns(lead ? value.slice(lead.length) : value, {
+  const runs = mixedTextRuns(value, {
     size: options.size ?? 22,
     color: options.color ?? '000000',
-  }))
+  })
   return new Paragraph({
     alignment: AlignmentType.JUSTIFIED,
     keepNext: options.keepNext,
@@ -204,6 +194,7 @@ function convertAnswerLinesToParagraphs(lines: string[]) {
 
 function answerParagraphLines(value: string) {
   const withoutMarkdown = stripAnswerMarkdown(value)
+    .replace(/^\s*(?:答复|回答)\s*[：:]\s*/i, '')
     .replace(
       new RegExp(`\\s+(?=(?:[（(]?\\s*[1-4]\\s*[）)）]?\\s*[、.．]?)?\\s*${ANSWER_HEADING_PATTERN}\\s*[：:])`, 'gi'),
       '\n',
@@ -219,21 +210,13 @@ function answerParagraphs(answer: ProjectQaDraftAnswer) {
   if (!paragraphs.length) {
     paragraphs.push('现有证据不足以形成确定结论，需取得对应原件、明细数据或相关责任人访谈后判断。')
   }
-  const result = paragraphs.map((line, index) => {
-    if (index > 0) {
-      return bodyParagraph(line, {
-        firstLine: true,
-        before: 80,
-        after: 80,
-      })
-    }
-    return bodyParagraph(`答复：${line}`, {
-      boldLead: '答复：',
-      keepNext: paragraphs.length > 1,
-      firstLine: false,
+  const result = paragraphs.map((line, index) =>
+    bodyParagraph(line, {
+      firstLine: true,
+      before: index === 0 ? 0 : 80,
+      after: 80,
       color: '000000',
-    })
-  })
+    }))
   return result
 }
 
@@ -441,11 +424,7 @@ export async function inspectProjectQaDocx(
         `Q&A DOCX 正文 Q${index + 1} 不得显示编号或小标题：${visibleSubheading[0].trim()}`,
       )
     }
-    const answerBodyStart = answerText.indexOf('答复：')
-    const visibleAnswerBody = answerBodyStart >= 0
-      ? answerText.slice(answerBodyStart + '答复：'.length)
-      : answerText
-    const sourceOutlineMarker = visibleAnswerBody.match(
+    const sourceOutlineMarker = answerText.match(
       /(?:[（(][一二三四五六七八九十\d]+[）)]|\d+[、.．])\s*(?=[\u3400-\u9fffA-Za-z])/,
     )
     if (sourceOutlineMarker) {
@@ -469,13 +448,16 @@ export async function inspectProjectQaDocx(
     const answerParagraphs = visibleParagraphs
       .slice(paragraphIndex + 1, nextQuestionIndex)
       .filter(Boolean)
+    const answerLabel = answerParagraphs.find((paragraph) =>
+      /^(?:答复|回答)\s*[：:]/.test(paragraph))
     if (
       answerParagraphs.length !== 5
-      || !answerParagraphs[0].startsWith('答复：')
-      || answerParagraphs.slice(1).some((paragraph) => paragraph.startsWith('答复：'))
+      || answerLabel
     ) {
       throw new Error(
-        `Q&A DOCX 正文 Q${index + 1} 应为“答复”加四个连续自然段，实际为 ${answerParagraphs.length} 段`,
+        answerLabel
+          ? `Q&A DOCX 正文 Q${index + 1} 不得显示“答复：”或“回答：”标签`
+          : `Q&A DOCX 正文 Q${index + 1} 应为五个连续自然段，实际为 ${answerParagraphs.length} 段`,
       )
     }
   })
@@ -514,6 +496,7 @@ export async function inspectProjectQaDocx(
       questionCount: expected.questionCount,
       directoryCompleteBeforeBody: true,
       answerParagraphFormValid: true,
+      visibleAnswerLabelsAbsent: true,
       visibleSubheadingsAbsent: true,
       sourceOutlineNumberingAbsent: true,
       visibleAuditAppendixAbsent: true,

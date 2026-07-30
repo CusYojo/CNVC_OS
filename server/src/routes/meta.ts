@@ -389,8 +389,12 @@ metaRouter.post('/leads/sync-radar', async (req: AuthedRequest, res, next) => {
       const isPlaceholder = (v: unknown) => {
         return !meaningfulRadarText(v)
       }
-      const hasSubstance = !isPlaceholder(prof.project_name) || !isPlaceholder(prof.institutions)
-        || !isPlaceholder(prof.affiliated_institutions) || !isPlaceholder(prof.core_highlights)
+      const hasNamedProject = isSpecificLeadSubjectName(prof.project_name, isArxiv)
+      const hasSubstance = hasNamedProject && (
+        !isPlaceholder(prof.institutions)
+        || !isPlaceholder(prof.affiliated_institutions)
+        || !isPlaceholder(prof.core_highlights)
+      )
       const keep = isArxiv || hasRealRound || attnScore >= ATTN_KEEP || hasDecision || hasSubstance
       if (!keep) { filteredOut += 1; continue }
       // 没有明确公司或投资事实时，过滤获奖/教学/任职等非投资资讯；
@@ -419,6 +423,10 @@ metaRouter.post('/leads/sync-radar', async (req: AuthedRequest, res, next) => {
       // 仅当出现在【标题】里才当噪音,不作用于 project_name(结构化抽取的项目名相对干净) →
       const TITLE_NOISE_RE = /(负责人|战略(规划|布局|路径)|发展路径|以.{0,20}为(核心|例)|——以)/
       const titleStr = String(it.title || '')
+      // 多事件晚报、人物访谈、行业盘点即使正文提及某轮融资，也不是
+      // 单一、可核验的新增投资标的，不能因 hasRealRound 而绕过噪音闸。
+      const HARD_EDITORIAL_RE = /(?:氪星晚报|\d+点\d*氪|(?:^|[|｜:：\s])(?:早报|晚报)(?:[|｜:：\s]|$)|^(?:对谈|访谈|专访|秋声)\s*[|｜:：]|投资狂潮|终极能源之战|行业综述|迟到的狂欢)/
+      if (!isArxiv && HARD_EDITORIAL_RE.test(titleStr)) { filteredOut += 1; continue }
       const hitNoise = NOISE_RE.test(`${titleStr} ${projName}`) || TITLE_NOISE_RE.test(titleStr)
       if (!isArxiv && !hasRealRound && hitNoise) { filteredOut += 1; continue }
       // 先通过现有质量/噪音过滤，再进入增量合并；同批同名仍参与合并，以免丢失后续来源。

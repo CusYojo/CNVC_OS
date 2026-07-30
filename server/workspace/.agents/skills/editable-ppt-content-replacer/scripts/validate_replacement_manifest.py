@@ -6,16 +6,24 @@ from datetime import date
 import hashlib
 import json
 from pathlib import Path
+import re
 from typing import Any
 from urllib.parse import urlparse
 
 
 TEXT_ACTIONS = {"replace_text", "replace_text_group"}
+CONTROLLED_ADDITIVE_ACTIONS = {"add_disclaimer_textbox"}
 NATIVE_ACTIONS = {"replace_chart_data", "replace_table_data"}
 STRUCTURAL_ACTIONS = {"delete_slot_group"}
-ALLOWED_ACTIONS = TEXT_ACTIONS | NATIVE_ACTIONS | STRUCTURAL_ACTIONS | {
+ALLOWED_ACTIONS = (
+    TEXT_ACTIONS
+    | CONTROLLED_ADDITIVE_ACTIONS
+    | NATIVE_ACTIONS
+    | STRUCTURAL_ACTIONS
+    | {
     "replace_image"
-}
+    }
+)
 ALLOWED_ASSET_CLASSES = {
     "company_logo",
     "person_photo",
@@ -321,6 +329,17 @@ def validate_research_evidence(
         if not isinstance(operation, dict):
             continue
         prefix = f"第 {index} 项"
+        if operation.get("action") == "add_disclaimer_textbox":
+            audit["operationMappings"].append(
+                {
+                    "operationIndex": index,
+                    "slide": operation.get("slide"),
+                    "role": operation.get("role"),
+                    "evidenceIds": operation.get("evidenceIds", []),
+                    "status": "system-responsibility-statement",
+                }
+            )
+            continue
         evidence_ids = operation.get("evidenceIds")
         if not isinstance(evidence_ids, list) or not evidence_ids:
             errors.append(f"{prefix}1.3 版操作必须包含非空 evidenceIds")
@@ -1226,6 +1245,7 @@ def validate_manifest(
 
     seen: set[tuple[int, int]] = set()
     replaced_text = 0
+    added_disclaimer_textboxes = 0
     replaced_images = 0
     deleted_targets = 0
     text_object_count = sum(1 for item in objects.values() if item.get("text"))
@@ -1286,6 +1306,76 @@ def validate_manifest(
                 deleted_targets += len(target_ids)
         elif len(target_ids) != 1:
             errors.append(f"{prefix}缺少有效 shapeId")
+
+        if action in CONTROLLED_ADDITIVE_ACTIONS:
+            shape_id = target_ids[0] if len(target_ids) == 1 else 0
+            key = (slide, shape_id)
+            if slide != int(template_map.get("slideCount", 0)):
+                errors.append(f"{prefix}责任声明文本框只能添加到最后一页")
+            if operation.get("role") != "责任声明":
+                errors.append(f"{prefix}受控新增文本框 role 必须为责任声明")
+            if operation.get("name") != "references.disclaimer.generated":
+                errors.append(
+                    f"{prefix}受控新增文本框 name 必须为 "
+                    "references.disclaimer.generated"
+                )
+            if not str(operation.get("semanticKey", "")).endswith(
+                ".generated.disclaimer"
+            ):
+                errors.append(f"{prefix}责任声明 semanticKey 不符合约定")
+            if not str(operation.get("text", "")).strip():
+                errors.append(f"{prefix}责任声明 text 不能为空")
+            if operation.get("styleLock") != "controlled-disclaimer":
+                errors.append(
+                    f"{prefix}责任声明 styleLock 必须为 controlled-disclaimer"
+                )
+            if shape_id <= 0:
+                errors.append(f"{prefix}责任声明 shapeId 必须为正整数")
+            elif key in objects:
+                errors.append(f"{prefix}责任声明 shapeId={shape_id} 已被模板占用")
+            elif key in seen:
+                errors.append(f"{prefix}重复新增第 {slide} 页 shapeId={shape_id}")
+            seen.add(key)
+            bbox = operation.get("bbox")
+            valid_bbox = (
+                isinstance(bbox, list)
+                and len(bbox) == 4
+                and all(isinstance(value, (int, float)) for value in bbox)
+                and all(float(value) >= 0 for value in bbox)
+                and float(bbox[2]) > 0
+                and float(bbox[3]) > 0
+            )
+            if not valid_bbox:
+                errors.append(f"{prefix}责任声明 bbox 必须是有效的四项像素数组")
+            else:
+                slide_map = next(
+                    (
+                        item
+                        for item in template_map.get("slides", [])
+                        if int(item.get("number", 0)) == slide
+                    ),
+                    {},
+                )
+                width_px = float(slide_map.get("widthEmu", 0)) / 9525
+                height_px = float(slide_map.get("heightEmu", 0)) / 9525
+                if width_px and float(bbox[0]) + float(bbox[2]) > width_px + 1:
+                    errors.append(f"{prefix}责任声明文本框超出页面宽度")
+                if height_px and float(bbox[1]) + float(bbox[3]) > height_px + 1:
+                    errors.append(f"{prefix}责任声明文本框超出页面高度")
+            font_size = operation.get("fontSize")
+            if not isinstance(font_size, (int, float)) or not 8 <= float(
+                font_size
+            ) <= 18:
+                errors.append(f"{prefix}责任声明字号必须在 8–18 pt")
+            if not str(operation.get("fontFace", "")).strip():
+                errors.append(f"{prefix}责任声明 fontFace 不能为空")
+            if not re.fullmatch(
+                r"[0-9A-Fa-f]{6}",
+                str(operation.get("fontColor", "")),
+            ):
+                errors.append(f"{prefix}责任声明 fontColor 必须为六位十六进制颜色")
+            added_disclaimer_textboxes += 1
+            continue
 
         target_objects: list[dict[str, Any]] = []
         for shape_id in target_ids:
@@ -1488,6 +1578,8 @@ def validate_manifest(
         errors,
     )
 
+    if added_disclaimer_textboxes > 1:
+        errors.append("每份 PPTX 最多允许新增一个受控责任声明文本框")
     if text_object_count and replaced_text / text_object_count > 0.8:
         warnings.append("文字替换超过模板文字对象的80%，请确认不是无差别清空或改写")
     if image_object_count and replaced_images / image_object_count > 0.35:
@@ -1504,6 +1596,7 @@ def validate_manifest(
             "authorizedOperationCount": len(operations),
             "authorizedTargetCount": len(seen),
             "authorizedTextTargetCount": replaced_text,
+            "authorizedAddedDisclaimerTextBoxCount": added_disclaimer_textboxes,
             "authorizedImageTargetCount": replaced_images,
             "authorizedDeletedTargetCount": deleted_targets,
             "protectedObjectCount": len(protected),
@@ -1512,7 +1605,10 @@ def validate_manifest(
             "entityBindingCount": len(binding_audit),
             "sourceCount": len(research_audit.get("sources", [])),
             "evidenceCount": len(research_audit.get("evidence", [])),
-            "defaultKeptObjectCount": max(0, len(objects) - len(seen)),
+            "defaultKeptObjectCount": max(
+                0,
+                len(objects) - sum(key in objects for key in seen),
+            ),
         },
         "slotAudit": {
             "groups": slot_audit,

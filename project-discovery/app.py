@@ -935,13 +935,14 @@ GENERIC_PROJECT_SUBJECTS = {
     "文章来源", "文章转载", "全新突破", "硬氪前线", "硬氪首发", "独家", "首发", "喜报",
     "来源", "清心新闻", "硬氪", "36氪", "十五五", "融资", "会赚钱", "保险科技",
     "消费级智能", "中国半导体", "入局物理智能", "X教授", "前瞻理论研究与创新平台",
-    "AI软件", "卡脖子",
+    "AI软件", "卡脖子", "6氪", "定价权", "财务数据", "涌现新项目",
 }
 VAGUE_PROJECT_START_RE = re.compile(
     r"^(他|她|其|该|这|此|其中|上述|相关|目前|同时|此外|另|据|对于|关于|要求|需要|应当|必须|"
     r"支持|推动|加强|开展|主动|引导|持续|继续|曾|曾经|担任|联创|联合创始人?|成立|创始人|科研人员|参赛|"
     r"本次|全体|让|让更多|让我|使我|并使|并|基于|后两年|共享|未来|"
-    r"作为|为|以|从|在|将|把|被|由|于|联合|面对|通过|围绕|聚焦|落地|年初|年末|年底|月初|月末|算|"
+    r"作为|为|用于|以|从|在|将|把|被|由|于|联合|面对|通过|围绕|聚焦|落地|年初|年末|年底|月初|月末|算|"
+    r"根据|我要|我们要|"
     r"了解|开拓|真实|价值|推荐阅读|背靠|赠礼环节|学员们|深刻|深刻认识|深刻体会|深刻理解|"
     r"购票观众|课题被|科创报国|促进|紧跟|对标|正是|也|过去|活动在|锤炼|需要|更多|不再|只有|至今|随后|共同|双方|各自|截止|"
     r"一是|二是|三是|四是)"
@@ -952,7 +953,7 @@ VAGUE_PROJECT_BODY_RE = re.compile(
     r"文章来源|论文合作者|合作者为|受试者|研究参与者|筛选期|完全开放|依托高校|顺利通过|"
     r"一行到访|成功举办|先后发言|按姓氏拼音排序|首先来到|带队|不是在实验室|"
     r"老师.*介绍|分别介绍了|介绍了其|第一城|早些时候|一批|多家|数个|能够替代|能够|"
-    r"key observation|by the paper|"
+    r"key observation|by the paper|(?:已经|已|正在)组建|已打通|过往所投公司的创业团队|"
     r"等信息|等材料|等证明|等方面|等工作|带来的变化)",
     flags=re.IGNORECASE,
 )
@@ -960,7 +961,7 @@ VAGUE_PROJECT_END_RE = re.compile(r"(材料|记录|信息|情况|内容|要求|�
 PROJECT_PREDICATE_RE = re.compile(
     r"(要求|适应|指出|表示|强调|认为|提出|推动|支持|引导|开展|打造|落地|实现|完成|获得|发布|宣布|提供|形成|"
     r"建立|构建|促进|提升|加强|记录|证明|担任|任职|毕业|来自|师从|进入|共享|梳理|发表|结合|"
-    r"参与|经历|合作者|申请|接受|走出|走访|到访|举办|发言|带队|来到|体会|体会到了?|感受到|意识到|认识到|学到|了解到)"
+    r"参与|经历|合作者|申请|接受|走出|走访|到访|举办|发言|带队|来到|组建|体会|体会到了?|感受到|意识到|认识到|学到|了解到)"
 )
 NUMBERED_TECH_FRAGMENT_RE = re.compile(r"^[\u4e00-\u9fffA-Za-z]{1,8}[-—–][\u4e00-\u9fffA-Za-z]{1,8}\d{1,2}$")
 GENERIC_INSTITUTION_TECH_RE = re.compile(
@@ -1035,6 +1036,12 @@ def is_specific_project_subject_name(value: Any) -> bool:
         return False
     if VAGUE_PROJECT_START_RE.search(name) or VAGUE_PROJECT_BODY_RE.search(name) or VAGUE_PROJECT_END_RE.search(name):
         return False
+    if re.fullmatch(r"(?:(?:\d+|数|多)?人|个人|创始人?)创业团队", name):
+        return False
+    if re.fullmatch(r"[\u4e00-\u9fff]{2,18}(?:触觉|感知|技术|科技|机器人|硬件|软件|设备|材料|能源|半导体)企业", name):
+        return False
+    if re.fullmatch(r"[\u4e00-\u9fff]{2,24}(?:文化创意|消费|家居|生活方式|文创)品牌", name):
+        return False
     if "等" in name:
         return False
     if PROJECT_PREDICATE_RE.search(name) and not re.search(r"(公司|企业|项目|团队|实验室|研究院|研究中心|工程中心|课题组)$", name):
@@ -1045,7 +1052,8 @@ def is_specific_project_subject_name(value: Any) -> bool:
         name,
     )
     english_words = re.findall(r"[A-Za-z][A-Za-z0-9-]*", name)
-    if len(english_words) >= 2 and not subject_marker and not re.search(
+    verified_english_brand = bool(re.fullmatch(r"[A-Z][A-Z0-9.-]*(?:\s+[A-Z][A-Z0-9.-]*){1,3}", name))
+    if len(english_words) >= 2 and not verified_english_brand and not subject_marker and not re.search(
         r"(AI|Labs?|Laboratory|Institute|Center|Centre|Technologies|Technology|Robotics|Bio|Systems?|Platform|Project)$",
         name,
         flags=re.IGNORECASE,
@@ -1082,6 +1090,7 @@ def normalize_project_candidate(value: Any) -> str:
     candidate = re.sub(r"^(?:超声脑机接口公司|端侧大模型独角兽|清华系端侧大模型独角兽|消费级智能硬件品牌)", "", candidate)
     candidate = re.sub(r"^(?:推出的|研发的|打造的|研制的)", "", candidate)
     candidate = re.sub(r"^投资(?=[\u4e00-\u9fffA-Za-z0-9])", "", candidate)
+    candidate = re.sub(r"(?:目前|近期|已经|已|正式|斩)$", "", candidate)
     if re.fullmatch(r"[A-Za-z0-9·&＋+\-]{2,24}团队", candidate, flags=re.IGNORECASE):
         candidate = re.sub(r"团队$", "项目", candidate)
     if re.search(r"(?:系)?初创$", candidate):
@@ -1104,17 +1113,19 @@ def extract_primary_news_subject(text: str) -> str:
         flags=re.IGNORECASE,
     )[:1800]
     name_chars = r"[\u4e00-\u9fffA-Za-z0-9（）()·&＋+\-]"
-    descriptor = rf"(?:{name_chars}{{0,28}}(?:企业|公司|品牌|提供商|研发商|制造商|独角兽))?"
+    descriptor = rf"(?:{name_chars}{{0,28}}(?:企业|公司|品牌|提供商|供应商|研发商|制造商|独角兽))?"
     event = (
         r"(?=(?:(?:近日|日前|近期|今日)\s*)?(?:\d+\s*个?月(?:内)?\s*)?"
-        r"(?:(?:连续|已|正式)\s*)*(?:(?:官宣|宣布)\s*)?(?:完成|获得|获|成立于|是一家))"
+        r"(?:(?:连续|已|正式)\s*)*(?:(?:官宣|宣布)\s*)?(?:完成|获得|获|成立(?:于)?|是一家))"
     )
     patterns = (
         rf"(?:获悉|消息显示|公开信息显示)[，,\s]*(?:(?:近日|日前|近期)[，,\s]*)?{descriptor}\s*[「『“\"]?({name_chars}{{2,40}}?)[」』”\"]?\s*{event}",
         rf"(?:^|[。；;\n])\s*(?:(?:近日|日前|近期|今日)[，,\s]*)?(?:\d{{1,4}}年)?\d{{0,2}}月?\d{{0,2}}日?[，,\s]*{descriptor}\s*[「『“\"]?({name_chars}{{2,40}}?)[」』”\"]?\s*{event}",
-        rf"(?:^|[。；;\n])\s*({name_chars}{{2,30}})(?=成立于|是一家|专注于|致力于)",
+        rf"(?:^|[。；;\n])\s*({name_chars}{{2,30}})(?=成立(?:于)?|是一家|专注于|致力于)",
         rf"(?:^|[。；;\n])\s*({name_chars}{{2,30}}?)(?=(?:完成|获得|获).{{0,24}}(?:融资|投资))",
+        rf"(?:离职|创业者)?创办\s*[「『“\"]({name_chars}{{2,30}})[」』”\"](?=[，,。；;\s])",
         r"(?:制造商|研发商|公司|企业)\s*([A-Z][A-Za-z0-9&+.-]*(?:\s+[A-Z][A-Za-z0-9&+.-]*){0,3})(?=\s*(?:获得|完成|宣布|获))",
+        r"(?:^|[，。；;\n])\s*(?:\d{4}年\d{1,2}月[，,\s]*)?([A-Z][A-Za-z0-9&+.-]*(?:\s+[A-Z][A-Za-z0-9&+.-]*){1,3})(?=\s*成立(?:于)?[，,。\s])",
         r"中文名\s*[“「『\"]?([\u4e00-\u9fffA-Za-z0-9·&＋+\-\s]{2,30}?)[”」』\"]?(?=[，,。；;])",
         r"(?:公司(?:名|叫做?)|品牌(?:名|叫做?))\s*[“「『\"]?([\u4e00-\u9fffA-Za-z0-9·&＋+\-\s]{2,30}?)[”」』\"]?(?=[，,。；;])",
     )
@@ -1140,7 +1151,10 @@ def extract_quoted_financing_subject(title: str) -> str:
     )
     for match in pattern.finditer(normalized):
         candidate = normalize_project_candidate(match.group(1))
-        if is_specific_project_subject_name(candidate):
+        if is_specific_project_subject_name(candidate) or re.fullmatch(
+            r"[A-Z][A-Z0-9.-]*(?:\s+[A-Z][A-Z0-9.-]*){1,3}",
+            candidate,
+        ):
             return candidate
     return ""
 
@@ -1164,7 +1178,7 @@ def extract_title_project_subject(title: str) -> str:
         r"(?:产业技术中试基地|创新联合体|中试基地|产业基地|创新平台|技术平台|研发平台|试验平台|"
         r"示范基地|转化基地|项目|计划|装置|系统)"
     )
-    pattern = rf"(?:^|[|｜！!。；;，,\n])\s*([\u4e00-\u9fffA-Za-z0-9（）()·&＋+\-]{{2,60}}?{marker})(?=在|落地|签约|揭牌|启用|发布|完成|获|，|。|$)"
+    pattern = rf"(?:^|[\s|｜！!。；;，,\n])\s*([\u4e00-\u9fffA-Za-z0-9（）()·&＋+\-]{{2,60}}?{marker})(?=在|落地|签约|揭牌|启用|发布|完成|获|，|。|$)"
     candidates = [
         clean_text(match.group(1)).strip("“”\"'「」『』 ,，。！？；;：:")
         for match in re.finditer(pattern, normalized)
@@ -1180,8 +1194,14 @@ def extract_financing_title_subject(title: str) -> str:
         clean_text(title),
         flags=re.IGNORECASE,
     )
-    match = re.match(
-        r"^([\u4e00-\u9fffA-Za-z0-9（）()·&＋+\-\s]{2,30}?)(?=(?:完成|获得|获).{0,24}(?:融资|投资))",
+    response_subject = re.match(
+        r"^([A-Za-z][A-Za-z0-9&+.-]{1,30})(?=回应(?:融资|投资)报道)",
+        normalized,
+        flags=re.IGNORECASE,
+    )
+    match = response_subject or re.search(
+        r"(?:^|[，,；;！!])\s*([\u4e00-\u9fffA-Za-z0-9（）()·&＋+\-\s]{2,30}?)"
+        r"(?=(?:(?:目前|近期|已经|已|正式)\s*)?(?:斩获|完成|获得|获).{0,24}(?:融资|投资))",
         normalized,
         flags=re.IGNORECASE,
     )
@@ -1200,7 +1220,13 @@ def extract_company_name(item: dict, text: str) -> str:
     """
     for field in ("company_name", "legal_entity", "company_full_name"):
         explicit = clean_text(str(item.get(field, ""))).strip("“”\"' ")
-        if is_meaningful_company_name(explicit):
+        if is_meaningful_company_name(explicit) and not re.search(
+            rf"(?:揭牌|推进会|在|于|由).{{2,}}{LEGAL_COMPANY_SUFFIX_RE}$",
+            explicit,
+        ) and (
+            re.search(rf"{LEGAL_COMPANY_SUFFIX_RE}$", explicit)
+            or is_specific_project_subject_name(explicit)
+        ):
             return explicit[:128]
 
     aliases = []
@@ -1222,7 +1248,9 @@ def extract_company_name(item: dict, text: str) -> str:
         # Source explicitly introduces the target company.
         rf"(?:获悉|消息显示|公开信息显示|项目主体(?:为|是)|项目公司(?:为|是)|公司主体(?:为|是))[\s，,:：]*[“\"]?{company_group}",
         # A legal entity is the grammatical subject of a financing/company event.
-        rf"(?:^|[，。；;：:\n])\s*[“\"]?{company_group}[”\"]?\s*(?=近日|日前|宣布|完成|获得|获|成立于|总部)",
+        rf"(?:^|[，。；;：:\n])\s*[“\"]?{company_group}[”\"]?\s*"
+        rf"(?=近日|日前|宣布|完成|获得|获|成立于|总部|"
+        rf"通过(?:港交所|上市聆讯)|提交(?:上市|IPO)|冲刺(?:港股|上市|IPO)|拟(?:上市|IPO))",
     )
     for pattern in patterns:
         match = re.search(pattern, text)
@@ -1255,11 +1283,21 @@ def infer_project_name(item: dict, text: str) -> str:
     title = clean_text(item.get("title", ""))
     explicit_project = normalize_project_candidate(item.get("project_name", ""))
     is_academic = item.get("source_group") == "高校公众号" or bool(re.search(r"(?:学术成果|科研成果|课题组|实验室)", title))
+    # 学术来源和普通来源的末级兜底都会使用这些主体模式。
+    # 必须在分支外定义，避免普通新闻/arXiv 在走到兜底逻辑时触发
+    # UnboundLocalError，进而让整个 /api/candidates 接口返回 500。
+    subject_patterns = (
+        r"((?:[\u4e00-\u9fff]{2,20}(?:大学|学院|研究所|医院))[\u4e00-\u9fff·]{0,16}(?:教授|研究员|博士)?团队)",
+        r"([\u4e00-\u9fffA-Za-z0-9·]{2,30}(?:重点实验室|实验室|研究中心|工程中心|研究院|课题组))",
+        r"([\u4e00-\u9fff·]{2,6}(?:教授|研究员|博士)?团队)",
+    )
 
     # 新闻综述/榜单标题 → 不提取单一项目名
     if re.search(r"\d+\s*[家个].{0,30}(?:企业|公司).{0,30}(?:融资|投资|上市)", title):
         return "未命名项目"
-    if re.search(r"(?:盘点|榜单|汇总|综述|周报|月报|季报|年报|早报|晚报)", title):
+    if re.search(r"(?:盘点|榜单|汇总|综述|周报|月报|季报|年报|早报|晚报|\d+点\d*氪|氪星|迟到的狂欢|投资狂潮|终极能源之战)", title):
+        return "未命名项目"
+    if len(re.findall(r"(?:完成|获得|获).{0,24}(?:融资|投资)", title)) >= 2:
         return "未命名项目"
 
     verified_source_subject = extract_verified_source_subject(title)
@@ -1268,24 +1306,34 @@ def infer_project_name(item: dict, text: str) -> str:
     quoted_financing_subject = extract_quoted_financing_subject(title)
     if quoted_financing_subject:
         return quoted_financing_subject
-    article_news_subject = extract_primary_news_subject("\n".join([
+    financing_title_subject = extract_financing_title_subject(title)
+    if financing_title_subject and not re.search(r"(?:团队|项目|产品|平台)$", financing_title_subject):
+        return financing_title_subject
+    combined_article_text = "\n".join([
         clean_text(item.get("summary", "")),
         clean_text(item.get("article_text", "")),
-    ]))
-    if article_news_subject:
-        return article_news_subject
-    financing_title_subject = extract_financing_title_subject(title)
-    if financing_title_subject:
-        return financing_title_subject
-    title_news_subject = extract_primary_news_subject(title)
-    if title_news_subject:
-        return title_news_subject
+        clean_text(text),
+    ])
+    quoted_article_subject = extract_quoted_financing_subject(combined_article_text)
+    if quoted_article_subject:
+        return quoted_article_subject
     title_project = extract_title_project_subject(title)
     if title_project and (
         not is_specific_project_subject_name(explicit_project)
         or (explicit_project in title_project and len(title_project) > len(explicit_project) + 2)
     ):
         return title_project
+    legal_company_subject = extract_company_name(item, combined_article_text)
+    if legal_company_subject:
+        return legal_company_subject
+    article_news_subject = extract_primary_news_subject(combined_article_text)
+    if article_news_subject:
+        return article_news_subject
+    if financing_title_subject:
+        return financing_title_subject
+    title_news_subject = extract_primary_news_subject(title)
+    if title_news_subject:
+        return title_news_subject
     if is_specific_project_subject_name(explicit_project):
         return explicit_project
     quoted = re.search(r"[“\"]([^”\"]{2,40})[”\"]", title)
@@ -1296,11 +1344,6 @@ def infer_project_name(item: dict, text: str) -> str:
     # “让我深刻体会到科技成果转化是连接实验室…”这类文章内句子误提取为主体名称。
     # 优先提取实验室/课题组/机构+团队，再回退到公司名称，不再用 news_subject 兜底。
     if is_academic:
-        subject_patterns = (
-            r"((?:[\u4e00-\u9fff]{2,20}(?:大学|学院|研究所|医院))[\u4e00-\u9fff·]{0,16}(?:教授|研究员|博士)?团队)",
-            r"([\u4e00-\u9fffA-Za-z0-9·]{2,30}(?:重点实验室|实验室|研究中心|工程中心|研究院|课题组))",
-            r"([\u4e00-\u9fff·]{2,6}(?:教授|研究员|博士)?团队)",
-        )
         for pattern in subject_patterns:
             candidates = [clean_text(match.group(1)) for match in re.finditer(pattern, title + "\n" + text)]
             candidates = [candidate for candidate in candidates if is_specific_project_subject_name(candidate)]
@@ -1551,12 +1594,37 @@ def build_project_profile(item: dict) -> dict:
 def attach_project_profile(item: dict) -> dict:
     if not isinstance(item.get("project_profile"), dict):
         item["project_profile"] = build_project_profile(item)
-    elif not is_meaningful_company_name(item["project_profile"].get("company_name")):
-        # Historical JSONL rows already have project_profile.  Only backfill the
-        # newly introduced legal entity field; never recalculate project_name,
-        # otherwise name-based downstream deduplication could create duplicates.
-        company_name = "不适用" if item.get("source") == "arxiv" else extract_company_name(item, project_profile_text(item))
-        item["project_profile"]["company_name"] = company_name or "未披露/待核实"
+    else:
+        profile = item["project_profile"]
+        current_project_name = normalize_project_candidate(profile.get("project_name"))
+        evidence_text = project_profile_text(item)
+        refreshed_project_name = infer_project_name(item, evidence_text)
+        compact_evidence = re.sub(r"\s+", "", f"{item.get('title', '')}\n{evidence_text}").lower()
+        compact_current = re.sub(r"\s+", "", current_project_name).lower()
+        compact_refreshed = re.sub(r"\s+", "", refreshed_project_name).lower()
+        current_is_evidenced = bool(compact_current) and compact_current in compact_evidence
+        refreshed_is_evidenced = (
+            refreshed_project_name == "未命名项目"
+            or (bool(compact_refreshed) and compact_refreshed in compact_evidence)
+        )
+        should_refresh_name = (
+            not is_specific_project_subject_name(current_project_name)
+            or not current_is_evidenced
+            or (
+                refreshed_project_name != current_project_name
+                and is_specific_project_subject_name(refreshed_project_name)
+                and refreshed_is_evidenced
+                and (
+                    compact_current in compact_refreshed
+                    or compact_refreshed in re.sub(r"\s+", "", str(item.get("title", ""))).lower()
+                )
+            )
+        )
+        if should_refresh_name:
+            profile["project_name"] = refreshed_project_name
+        if not is_meaningful_company_name(profile.get("company_name")):
+            company_name = "不适用" if item.get("source") == "arxiv" else extract_company_name(item, project_profile_text(item))
+            profile["company_name"] = company_name or "未披露/待核实"
     if not normalize_business_region(item["project_profile"].get("region")):
         item["project_profile"].update(infer_business_region(
             item,

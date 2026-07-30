@@ -178,6 +178,37 @@ PDF 转换模板必须使用 `sourceMode: "pdf-converted"` 并提供
 
 如果该文字属于可选卡片、荣誉或产品槽位，不要只清空文字，应删除完整槽位。
 
+## 末页责任声明受控例外
+
+最后一页只有标题槽位、没有第二个可编辑正文槽位时，允许新增一次责任声明
+文本框。不得把该动作应用到其他页面或其他正文内容：
+
+```json
+{
+  "slide": 34,
+  "shapeId": 12,
+  "semanticKey": "slide.34.generated.disclaimer",
+  "evidenceIds": ["ev-slide-34"],
+  "role": "责任声明",
+  "action": "add_disclaimer_textbox",
+  "text": "本演示文稿仅供内部讨论，不构成最终投资决策。",
+  "name": "references.disclaimer.generated",
+  "bbox": [102, 446, 1075, 158],
+  "fontSize": 12,
+  "fontFace": "Noto Sans CJK SC",
+  "fontColor": "4B5563",
+  "styleLock": "controlled-disclaimer",
+  "reason": "末页没有责任声明正文槽位",
+  "sourceNote": "系统固定责任声明",
+  "fitPolicy": "preserve"
+}
+```
+
+`shapeId` 必须是该页未占用的新编号，`bbox` 使用页面像素坐标且不得超出
+画布。对象名必须固定为 `references.disclaimer.generated`，透明背景、无
+边框、字号限制在 8–18 pt；每份 PPTX 最多新增一个。若末页已有正文槽位，
+必须继续使用 `replace_text` 原位写入，不得新增。
+
 ## 可选槽位与整组删除
 
 先声明完整槽位。下面的例子包含荣誉文字和左右月桂：

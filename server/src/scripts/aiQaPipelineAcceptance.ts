@@ -607,6 +607,7 @@ async function main() {
       && docxReview.metadata.categoryCount === 15
       && docxReview.metadata.directoryCompleteBeforeBody
       && docxReview.metadata.answerParagraphFormValid
+      && docxReview.metadata.visibleAnswerLabelsAbsent
       && docxReview.metadata.visibleSubheadingsAbsent
       && docxReview.metadata.sourceOutlineNumberingAbsent
       && docxReview.metadata.markdownDecorationAbsent

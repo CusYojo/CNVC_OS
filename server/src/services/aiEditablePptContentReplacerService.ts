@@ -46,6 +46,8 @@ type TemplateMapObject = {
 type TemplateMapSlide = {
   number: number
   title?: string
+  widthEmu?: number
+  heightEmu?: number
   objects: TemplateMapObject[]
 }
 
@@ -84,6 +86,8 @@ type ReplacementCandidate = {
 type ReplacementProgress = (
   update: { stage: string; progress: number },
 ) => void | Promise<void>
+
+const EMU_PER_PIXEL = 9525
 
 function sha256(buffer: Buffer) {
   return createHash('sha256').update(buffer).digest('hex')
@@ -563,6 +567,59 @@ function buildReplacementManifest(input: {
       })
     }
 
+    if (
+      slide.number === input.templateMap.slideCount
+      && input.template.disclaimer.trim()
+      && !firstLastSlideBodyTarget
+    ) {
+      const slideWidthPx = Number(slide.widthEmu || 0) / EMU_PER_PIXEL
+      const slideHeightPx = Number(slide.heightEmu || 0) / EMU_PER_PIXEL
+      const fallbackWidth = Math.max(
+        960,
+        ...slide.objects.map((object) =>
+          Number(object.bbox?.[0] || 0) + Number(object.bbox?.[2] || 0)),
+      )
+      const fallbackHeight = Math.max(
+        540,
+        ...slide.objects.map((object) =>
+          Number(object.bbox?.[1] || 0) + Number(object.bbox?.[3] || 0)),
+      )
+      const width = slideWidthPx > 0 ? slideWidthPx : fallbackWidth
+      const height = slideHeightPx > 0 ? slideHeightPx : fallbackHeight
+      const generatedShapeId = Math.max(
+        1,
+        ...slide.objects.map((object) => object.shapeId),
+      ) + 1
+      const controlledDisclaimerFont =
+        process.env.AI_EDITABLE_PPT_DISCLAIMER_FONT?.trim()
+        || (process.platform === 'darwin' ? 'Heiti SC' : 'Noto Sans CJK SC')
+      const semanticKey = `slide.${slide.number}.generated.disclaimer`
+      semanticKeys.push(semanticKey)
+      pendingOperations.push({
+        slide: slide.number,
+        shapeId: generatedShapeId,
+        semanticKey,
+        role: '责任声明',
+        action: 'add_disclaimer_textbox',
+        text: input.template.disclaimer,
+        name: 'references.disclaimer.generated',
+        bbox: [
+          Math.round(width * 0.08),
+          Math.round(height * 0.62),
+          Math.round(width * 0.84),
+          Math.round(height * 0.22),
+        ],
+        fontSize: 12,
+        fontFace: controlledDisclaimerFont,
+        fontColor: '4B5563',
+        reason: '末页没有可用的责任声明正文槽位，新增唯一受控可编辑文本框',
+        sourceNote: '系统固定责任声明',
+        fitPolicy: 'preserve',
+        styleLock: 'controlled-disclaimer',
+        allowLineCountChange: true,
+      })
+    }
+
     const evidence = evidenceForIndexes(evidenceIndexes, manifestSources)
     const evidenceId = `ev-slide-${slide.number}`
     if (semanticKeys.length) {
@@ -583,6 +640,7 @@ function buildReplacementManifest(input: {
         ...operation,
         evidenceIds: [evidenceId],
         ...(evidence.valueType === 'unavailable'
+          && operation.action !== 'add_disclaimer_textbox'
           ? { text: '待核实' }
           : {}),
       })))

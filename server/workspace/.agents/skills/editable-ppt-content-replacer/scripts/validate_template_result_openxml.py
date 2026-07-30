@@ -21,7 +21,13 @@ def main() -> None:
     plan = read_json(args.plan.expanduser().resolve())
     errors: list[str] = []
     authorized: dict[tuple[int, int], str] = {}
+    authorized_additions: dict[tuple[int, int], dict] = {}
     for operation in plan.get("operations") or []:
+        if operation.get("action") == "add_disclaimer_textbox":
+            authorized_additions[
+                (int(operation["slide"]), int(operation["shapeId"]))
+            ] = operation
+            continue
         identifiers = (
             operation.get("shapeIds") or []
             if operation.get("action") == "replace_text_group"
@@ -54,10 +60,14 @@ def main() -> None:
         ):
             if source_slide[key] != result_slide[key]:
                 errors.append(f"第 {page} 页{label}发生变化")
-        if len(source_slide["objects"]) != len(result_slide["objects"]):
+        additions_on_slide = sum(
+            page == key[0] for key in authorized_additions
+        )
+        expected_object_count = len(source_slide["objects"]) + additions_on_slide
+        if expected_object_count != len(result_slide["objects"]):
             errors.append(
                 f"第 {page} 页对象数量变化："
-                f"{len(source_slide['objects'])} -> {len(result_slide['objects'])}"
+                f"期望 {expected_object_count}，实际 {len(result_slide['objects'])}"
             )
         targets = {
             item["shapeId"]: item for item in result_slide["objects"]
@@ -88,6 +98,33 @@ def main() -> None:
                 errors.append(
                     f"第 {page} 页 shapeId={shape_id} 发生未授权文字修改"
                 )
+        for key, operation in authorized_additions.items():
+            if key[0] != page:
+                continue
+            target = targets.get(key[1])
+            if target is None:
+                errors.append(
+                    f"第 {page} 页受控责任声明 shapeId={key[1]} 未生成"
+                )
+                continue
+            if target.get("name") != operation.get("name"):
+                errors.append(
+                    f"第 {page} 页受控责任声明 shapeId={key[1]} 名称不符"
+                )
+            if target.get("kind") != "shape:textbox":
+                errors.append(
+                    f"第 {page} 页受控责任声明 shapeId={key[1]} 不是可编辑文本框"
+                )
+            if target.get("text") != operation.get("text"):
+                errors.append(
+                    f"第 {page} 页受控责任声明 shapeId={key[1]} 文字不符"
+                )
+            if target.get("bbox") != [
+                round(float(value), 2) for value in operation.get("bbox", [])
+            ]:
+                errors.append(
+                    f"第 {page} 页受控责任声明 shapeId={key[1]} 坐标尺寸不符"
+                )
 
     object_count_before = sum(
         len(slide["objects"]) for slide in before["slides"]
@@ -101,6 +138,7 @@ def main() -> None:
         "template": str(args.template.expanduser().resolve()),
         "result": str(args.result.expanduser().resolve()),
         "authorizedTargetCount": len(authorized),
+        "authorizedAddedDisclaimerTextBoxCount": len(authorized_additions),
         "slideCountPreserved": before["slideCount"] == after["slideCount"],
         "layoutCountPreserved": before["layoutCount"] == after["layoutCount"],
         "masterCountPreserved": before["masterCount"] == after["masterCount"],
@@ -128,7 +166,8 @@ def main() -> None:
         raise SystemExit(f"模板保真校验失败，共 {len(errors)} 项差异")
     print(
         "模板保真校验通过："
-        f"{before['slideCount']} 页、{object_count_before} 个对象、"
+        f"{before['slideCount']} 页、{object_count_before} 个模板对象、"
+        f"{len(authorized_additions)} 个受控责任声明文本框、"
         f"{len(before['mediaIds'])} 份唯一媒体保持一致"
     )
 

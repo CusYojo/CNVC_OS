@@ -85,6 +85,39 @@ def validate_final_content(
                 "status": "passed" if not failures else "failed",
             }
         )
+    controlled_additions: list[dict[str, Any]] = []
+    for operation in manifest.get("operations", []):
+        if (
+            not isinstance(operation, dict)
+            or operation.get("action") != "add_disclaimer_textbox"
+        ):
+            continue
+        slide = int(operation.get("slide", 0))
+        shape_id = int(operation.get("shapeId", 0))
+        target = after.get((slide, shape_id))
+        failures: list[str] = []
+        if target is None:
+            failures.append("受控责任声明文本框未生成")
+        else:
+            if target.get("name") != "references.disclaimer.generated":
+                failures.append("受控责任声明文本框名称不符")
+            if target.get("kind") != "shape:textbox":
+                failures.append("受控责任声明不是可编辑文本框")
+            if target.get("text") != operation.get("text"):
+                failures.append("受控责任声明文字不完整")
+        if failures:
+            errors.append(
+                f"第 {slide} 页责任声明最终覆盖失败：{'；'.join(failures)}"
+            )
+        controlled_additions.append(
+            {
+                "slide": slide,
+                "shapeId": shape_id,
+                "semanticKey": operation.get("semanticKey"),
+                "failures": failures,
+                "status": "passed" if not failures else "failed",
+            }
+        )
     if watermark_qa_report.get("passed") is not True:
         errors.append("最终 PPTX 未通过渲染后水印复检")
     research_audit = preflight.get("researchEvidenceAudit", {})
@@ -100,6 +133,10 @@ def validate_final_content(
             "failedSlotAssignmentCount": sum(
                 item["status"] == "failed" for item in coverage
             ),
+            "controlledDisclaimerTextBoxCount": len(controlled_additions),
+            "passedControlledDisclaimerTextBoxCount": sum(
+                item["status"] == "passed" for item in controlled_additions
+            ),
             "watermarkQaPassed": watermark_qa_report.get("passed") is True,
             "researchEvidenceAuditPassed": (
                 research_audit.get("status") in {"passed", "not-required"}
@@ -108,6 +145,7 @@ def validate_final_content(
             "evidenceCount": len(research_audit.get("evidence", [])),
         },
         "coverage": coverage,
+        "controlledAdditions": controlled_additions,
         "researchEvidenceAudit": research_audit,
     }
 

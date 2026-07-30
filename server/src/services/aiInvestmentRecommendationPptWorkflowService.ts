@@ -233,6 +233,10 @@ export async function reviewInvestmentRecommendationPpt(input: {
         .digest('hex'),
       objectCount: slideBodies.reduce((sum, xml) =>
         sum + [...xml.matchAll(/<p:(?:sp|pic|grpSp|graphicFrame|cxnSp)\b/g)].length, 0),
+      controlledDisclaimerTextBoxCount: slideBodies.reduce((sum, xml) =>
+        sum + [...xml.matchAll(
+          /\bname="references\.disclaimer\.generated"/g,
+        )].length, 0),
       pictureCount: slideBodies.reduce((sum, xml) =>
         sum + [...xml.matchAll(/<p:pic\b/g)].length, 0),
     }
@@ -264,6 +268,11 @@ export async function reviewInvestmentRecommendationPpt(input: {
   const unrelatedCachedWebTerms = ['腾讯视频', '哔哩哔哩', '豆瓣', '百度百科']
   const leakedUnrelatedWebTerms = unrelatedCachedWebTerms
     .filter((term) => slideXml.includes(term))
+  const controlledDisclaimerDelta =
+    outputMetrics.controlledDisclaimerTextBoxCount
+    - templateMetrics.controlledDisclaimerTextBoxCount
+  const authorizedControlledDisclaimerDelta =
+    controlledDisclaimerDelta === 0 || controlledDisclaimerDelta === 1
   const checks = {
     openXmlValid: Boolean(zip.file('ppt/presentation.xml')) && slideParts.length > 0,
     targetProjectPresent: slideXml.includes(input.projectName),
@@ -280,7 +289,9 @@ export async function reviewInvestmentRecommendationPpt(input: {
     templateLayoutCountPreserved:
       outputMetrics.layoutCount === templateMetrics.layoutCount,
     templateObjectCountPreserved:
-      outputMetrics.objectCount === templateMetrics.objectCount,
+      authorizedControlledDisclaimerDelta
+      && outputMetrics.objectCount
+        === templateMetrics.objectCount + controlledDisclaimerDelta,
     templatePictureCountPreserved:
       outputMetrics.pictureCount === templateMetrics.pictureCount,
     templateMediaContentPreserved:
@@ -303,6 +314,9 @@ export async function reviewInvestmentRecommendationPpt(input: {
       sourceNotesPresent: checks.sourceNotesPresent,
       leakedSampleTerms,
       leakedUnrelatedWebTerms,
+      controlledDisclaimerTextBoxCount:
+        outputMetrics.controlledDisclaimerTextBoxCount,
+      controlledDisclaimerDelta,
       checks,
       workflowSkills: input.workflow.skills,
       templateSourceMode: input.workflow.sourceMode,

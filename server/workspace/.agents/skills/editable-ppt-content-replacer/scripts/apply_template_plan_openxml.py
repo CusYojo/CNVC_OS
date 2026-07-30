@@ -14,6 +14,7 @@ from openxml_runtime import (
     P_NS,
     PKG_REL_NS,
     R_NS,
+    add_text_box,
     add_relationship,
     ensure_content_type,
     find_object,
@@ -177,12 +178,38 @@ def main() -> None:
     applied: list[dict] = []
     for index, operation in enumerate(operations, 1):
         action = operation.get("action")
-        if action not in {"replace_text", "replace_text_group"}:
+        if action not in {
+            "replace_text",
+            "replace_text_group",
+            "add_disclaimer_textbox",
+        }:
             raise ValueError(f"第 {index} 项 {action} 没有安全的原位执行器")
         page = int(operation.get("slide", 0))
         if page < 1 or page > len(slides):
             raise ValueError(f"第 {index} 项页码超出范围：{page}")
         root = slide_roots.setdefault(page, ET.fromstring(files[slides[page - 1]]))
+        if action == "add_disclaimer_textbox":
+            shape_id = int(operation.get("shapeId", 0))
+            add_text_box(
+                root,
+                shape_id,
+                str(operation.get("name", "")),
+                str(operation.get("text", "")),
+                list(operation.get("bbox", [])),
+                float(operation.get("fontSize", 12)),
+                str(operation.get("fontFace", "微软雅黑")),
+                str(operation.get("fontColor", "4B5563")),
+            )
+            applied.append(
+                {
+                    "operationIndex": index,
+                    "slide": page,
+                    "shapeId": shape_id,
+                    "action": action,
+                    "status": "added-controlled-disclaimer-openxml",
+                }
+            )
+            continue
         targets = (
             operation.get("shapeIds", [])
             if action == "replace_text_group"
