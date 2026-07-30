@@ -6,8 +6,6 @@ import {
   Document,
   Footer,
   Header,
-  LevelFormat,
-  LevelSuffix,
   PageNumber,
   Packer,
   Paragraph,
@@ -29,21 +27,21 @@ const LATIN_FONT = 'Times New Roman'
 const MUTED = '595959'
 const ANSWER_HEADING_PATTERN =
   '(?:已确认事实|判断依据|分析判断|证据边界|下一步核验|升级与失效条件|下一步动作|OA\\s*流转边界)'
-const STANDARD_ANSWER_HEADINGS = [
-  '已确认事实',
-  '分析判断',
-  '证据边界',
-  '下一步核验',
-] as const
-const STAGE_ANSWER_HEADINGS = [
+const STAGE_ANSWER_SECTION_ORDER = [
   '判断依据',
   '升级与失效条件',
   '下一步动作',
   'OA 流转边界',
 ] as const
-const ANSWER_HEADING_SCHEMES = [
-  STAGE_ANSWER_HEADINGS,
-  STANDARD_ANSWER_HEADINGS,
+const STANDARD_ANSWER_SECTION_ORDER = [
+  '已确认事实',
+  '分析判断',
+  '证据边界',
+  '下一步核验',
+] as const
+const ANSWER_SECTION_ORDERS = [
+  STAGE_ANSWER_SECTION_ORDER,
+  STANDARD_ANSWER_SECTION_ORDER,
 ] as const
 
 type ProjectLike = {
@@ -135,28 +133,6 @@ function questionParagraph(index: number, question: string, pageBreakBefore = fa
   })
 }
 
-function dimensionParagraph(value: string) {
-  const match = value.match(/^([（(]\d+[）)]\s*[^：:\n]{1,36}[：:])\s*(.*)$/)
-  if (!match) return bodyParagraph(value)
-  return new Paragraph({
-    alignment: AlignmentType.JUSTIFIED,
-    keepLines: false,
-    spacing: { before: 120, after: 80, line: 360 },
-    children: [
-      ...mixedTextRuns(match[1], {
-        bold: true,
-        size: 24,
-        color: '000000',
-        cjkFont: HEADING_FONT,
-      }),
-      ...mixedTextRuns(match[2], {
-        size: 22,
-        color: '000000',
-      }),
-    ],
-  })
-}
-
 function stripAnswerMarkdown(value: string) {
   return value
     .replace(/```(?:json|markdown|md)?/gi, '')
@@ -173,47 +149,42 @@ function stripSourceOutlineMarkers(value: string) {
     .trim()
 }
 
-function normalizeAnswerHeading(value: string) {
+function parseLegacyAnswerSection(value: string) {
   const heading = new RegExp(
     `^\\s*(?:[（(]?\\s*([1-4])\\s*[）)）]?\\s*[、.．]?)?\\s*(${ANSWER_HEADING_PATTERN})\\s*[：:]\\s*`,
     'i',
   )
   const match = value.match(heading)
-  if (!match) return stripSourceOutlineMarkers(value)
+  if (!match) return null
   const title = match[2].replace(/\s+/g, ' ').replace(/^oa /i, 'OA ')
-  const expectedIndex: Record<string, number> = {
-    已确认事实: 1,
-    判断依据: 1,
-    分析判断: 2,
-    升级与失效条件: 2,
-    证据边界: 3,
-    下一步动作: 3,
-    下一步核验: 4,
-    'OA 流转边界': 4,
+  return {
+    title,
+    body: stripSourceOutlineMarkers(value.slice(match[0].length)),
   }
-  const index = expectedIndex[title] ?? Number(match[1])
-  return `（${index}）${title}：${stripSourceOutlineMarkers(value.slice(match[0].length))}`
 }
 
-function canonicalizeAnswerLineOrder(lines: string[]) {
-  const heading = new RegExp(`^（[1-4]）(${ANSWER_HEADING_PATTERN})：`, 'i')
-  const titles = lines.flatMap((line) => {
-    const match = line.match(heading)
-    return match ? [match[1].replace(/\s+/g, ' ').replace(/^oa /i, 'OA ')] : []
-  })
-  const scheme = ANSWER_HEADING_SCHEMES.find((candidate) =>
+function convertAnswerLinesToParagraphs(lines: string[]) {
+  const parsed = lines.map((line) => ({
+    line,
+    section: parseLegacyAnswerSection(line),
+  }))
+  const titles = parsed.flatMap((item) => item.section ? [item.section.title] : [])
+  const scheme = ANSWER_SECTION_ORDERS.find((candidate) =>
     candidate.length === titles.length
     && candidate.every((title) => titles.filter((item) => item === title).length === 1))
-  if (!scheme) return lines
+  if (!scheme) {
+    return parsed
+      .map((item) => stripSourceOutlineMarkers(item.section?.body ?? item.line))
+      .filter(Boolean)
+  }
 
   const leading: string[] = []
   const sections = new Map<string, string>()
   let currentTitle = ''
-  lines.forEach((line) => {
-    const match = line.match(heading)
-    if (match) {
-      currentTitle = match[1].replace(/\s+/g, ' ').replace(/^oa /i, 'OA ')
-      sections.set(currentTitle, line)
+  parsed.forEach(({ line, section }) => {
+    if (section) {
+      currentTitle = section.title
+      sections.set(currentTitle, section.body)
       return
     }
     if (currentTitle) {
@@ -231,25 +202,31 @@ function canonicalizeAnswerLineOrder(lines: string[]) {
     .filter(Boolean)
 }
 
-function structuredAnswerLines(value: string) {
+function answerParagraphLines(value: string) {
   const withoutMarkdown = stripAnswerMarkdown(value)
     .replace(
       new RegExp(`\\s+(?=(?:[（(]?\\s*[1-4]\\s*[）)）]?\\s*[、.．]?)?\\s*${ANSWER_HEADING_PATTERN}\\s*[：:])`, 'gi'),
       '\n',
     )
-  return canonicalizeAnswerLineOrder(withoutMarkdown
+  return convertAnswerLinesToParagraphs(withoutMarkdown
     .split(/\n+/)
-    .map((line) => normalizeAnswerHeading(line.trim()))
+    .map((line) => line.trim())
     .filter(Boolean))
 }
 
 function answerParagraphs(answer: ProjectQaDraftAnswer) {
-  const paragraphs = structuredAnswerLines(answer.answer)
+  const paragraphs = answerParagraphLines(answer.answer)
   if (!paragraphs.length) {
     paragraphs.push('现有证据不足以形成确定结论，需取得对应原件、明细数据或相关责任人访谈后判断。')
   }
   const result = paragraphs.map((line, index) => {
-    if (index > 0) return dimensionParagraph(line)
+    if (index > 0) {
+      return bodyParagraph(line, {
+        firstLine: true,
+        before: 80,
+        after: 80,
+      })
+    }
     return bodyParagraph(`答复：${line}`, {
       boldLead: '答复：',
       keepNext: paragraphs.length > 1,
@@ -365,22 +342,6 @@ export async function generateProjectQaDocx(input: {
     creator: 'Cybernaut Early-stage Lead Q&A Skill',
     title: input.content.title,
     description: `${input.content.mode}内部项目投资问答，基于当前会话绑定项目的资料库生成`,
-    numbering: {
-      config: [{
-        reference: 'qa-real-numbering',
-        levels: [{
-          level: 0,
-          format: LevelFormat.DECIMAL,
-          text: '%1.',
-          suffix: LevelSuffix.TAB,
-          alignment: AlignmentType.LEFT,
-          style: {
-            paragraph: { indent: { left: 480, hanging: 280 } },
-            run: { font: font(LATIN_FONT), size: 20 },
-          },
-        }],
-      }],
-    },
     styles: {
       default: {
         document: {
@@ -423,6 +384,20 @@ export async function inspectProjectQaDocx(
   if (!documentXml) throw new Error('Q&A DOCX 缺少 document.xml')
   if (documentXml.includes('\uFFFD')) throw new Error('Q&A DOCX 含损坏字符')
   const visibleText = documentXml.replace(/<[^>]+>/g, '')
+  const decodeXmlText = (value: string) => value
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, '&')
+  const visibleParagraphs = [...documentXml.matchAll(/<w:p(?:\s[^>]*)?>([\s\S]*?)<\/w:p>/g)]
+    .map((paragraphMatch) =>
+      decodeXmlText(
+        [...paragraphMatch[1].matchAll(/<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>/g)]
+          .map((textMatch) => textMatch[1])
+          .join(''),
+      ).trim())
+    .filter(Boolean)
   const questionLabels = visibleText.match(/Q\d+[：:]/g) ?? []
   if (new Set(questionLabels).size < expected.questionCount) {
     throw new Error(`Q&A DOCX 问题数量不足：${new Set(questionLabels).size}/${expected.questionCount}`)
@@ -455,40 +430,52 @@ export async function inspectProjectQaDocx(
     const start = match.index ?? 0
     const end = bodyMatches[index + 1]?.index ?? visibleText.length
     const answerText = visibleText.slice(start, end)
-    const heading = new RegExp(
-      `（([1-4])）(${ANSWER_HEADING_PATTERN})：`,
-      'gi',
+    const visibleSubheading = answerText.match(
+      new RegExp(
+        `(?:[（(]?\\s*[1-4]\\s*[）)）]?\\s*[、.．]?)?\\s*(${ANSWER_HEADING_PATTERN})\\s*[：:]`,
+        'i',
+      ),
     )
-    const actual = [...answerText.matchAll(heading)].map((headingMatch) => ({
-      index: Number(headingMatch[1]),
-      title: headingMatch[2].replace(/\s+/g, ' ').replace(/^oa /i, 'OA '),
-    }))
-    const scheme = ANSWER_HEADING_SCHEMES.find((candidate) =>
-      candidate.some((title) => actual.some((item) => item.title === title)))
-    const valid = Boolean(
-      scheme
-      && actual.length === scheme.length
-      && actual.every((item, headingIndex) =>
-        item.index === headingIndex + 1 && item.title === scheme[headingIndex]),
-    )
-    if (!valid) {
-      const actualText = actual.map((item) => `（${item.index}）${item.title}`).join('→') || '无小标题'
-      throw new Error(`Q&A DOCX 正文 Q${index + 1} 小标题编号或顺序错误：${actualText}`)
+    if (visibleSubheading) {
+      throw new Error(
+        `Q&A DOCX 正文 Q${index + 1} 不得显示编号或小标题：${visibleSubheading[0].trim()}`,
+      )
     }
     const answerBodyStart = answerText.indexOf('答复：')
     const visibleAnswerBody = answerBodyStart >= 0
       ? answerText.slice(answerBodyStart + '答复：'.length)
       : answerText
-    const answerWithoutSystemHeadings = visibleAnswerBody.replace(
-      new RegExp(`（[1-4]）${ANSWER_HEADING_PATTERN}：`, 'gi'),
-      '',
-    )
-    const sourceOutlineMarker = answerWithoutSystemHeadings.match(
+    const sourceOutlineMarker = visibleAnswerBody.match(
       /(?:[（(][一二三四五六七八九十\d]+[）)]|\d+[、.．])\s*(?=[\u3400-\u9fffA-Za-z])/,
     )
     if (sourceOutlineMarker) {
       throw new Error(
         `Q&A DOCX 正文 Q${index + 1} 含来源材料章节编号：${sourceOutlineMarker[0].trim()}`,
+      )
+    }
+  })
+  const questionParagraphIndexes = visibleParagraphs.flatMap((paragraph, index) =>
+    /^Q\d+[：:]/.test(paragraph) ? [index] : [])
+  const bodyQ1ParagraphIndexPosition = questionParagraphIndexes.findIndex((paragraphIndex, index) =>
+    index > 0 && /^Q1[：:]/.test(visibleParagraphs[paragraphIndex]))
+  const bodyQuestionParagraphIndexes = bodyQ1ParagraphIndexPosition >= 0
+    ? questionParagraphIndexes.slice(
+        bodyQ1ParagraphIndexPosition,
+        bodyQ1ParagraphIndexPosition + expected.questionCount,
+      )
+    : []
+  bodyQuestionParagraphIndexes.forEach((paragraphIndex, index) => {
+    const nextQuestionIndex = bodyQuestionParagraphIndexes[index + 1] ?? visibleParagraphs.length
+    const answerParagraphs = visibleParagraphs
+      .slice(paragraphIndex + 1, nextQuestionIndex)
+      .filter(Boolean)
+    if (
+      answerParagraphs.length !== 5
+      || !answerParagraphs[0].startsWith('答复：')
+      || answerParagraphs.slice(1).some((paragraph) => paragraph.startsWith('答复：'))
+    ) {
+      throw new Error(
+        `Q&A DOCX 正文 Q${index + 1} 应为“答复”加四个连续自然段，实际为 ${answerParagraphs.length} 段`,
       )
     }
   })
@@ -526,7 +513,8 @@ export async function inspectProjectQaDocx(
       categoryCount: expected.categoryCount,
       questionCount: expected.questionCount,
       directoryCompleteBeforeBody: true,
-      subheadingOrderValid: true,
+      answerParagraphFormValid: true,
+      visibleSubheadingsAbsent: true,
       sourceOutlineNumberingAbsent: true,
       visibleAuditAppendixAbsent: true,
       placeholderAnswerAbsent: true,

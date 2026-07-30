@@ -54,9 +54,9 @@ PyMuPDF 可能把一张图片及其 `/SMask` 辅助位图识别为两个独立�
 
 ### 字体替换
 
-即使 Microsoft PowerPoint 内部已经包含源字体，Artifact Tool 预览仍可能
+即使 Microsoft PowerPoint 内部已经包含源字体，LibreOffice 预览仍可能
 使用替代字体。PPTX 中应保留正确的源字体；如果可以使用 PowerPoint，
-应先在其中验证，再决定是否为了预览器中的字体替换而调整字号或位置。
+应先在其中验证，再决定是否为了跨平台预览中的字体替换而调整字号或位置。
 
 ### 整页图片
 
@@ -185,8 +185,8 @@ on run argv
 end run
 ```
 
-使用 Poppler 渲染验证 PDF，并与原始 PDF 对比。这样可以发现 Artifact Tool
-渲染器中没有暴露、但会在 PowerPoint 中出现的问题。
+使用 LibreOffice 导出 PDF，再由 Poppler 渲染验证并与原始 PDF 对比。
+这样可以发现不同渲染器之间的排版、字体和图形兼容问题。
 
 macOS PowerPoint 首次写入新目录时可能弹出文件夹访问授权。不得绕过系统
 权限提示；改为写入已授权目录，或由用户确认授权。

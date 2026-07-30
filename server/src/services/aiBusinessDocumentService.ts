@@ -739,53 +739,27 @@ export async function generateBusinessDocx(input: {
     const findingParagraph = (
       finding: BusinessContent['sections'][number]['findings'][number],
       options: {
-        boldLead?: boolean
-        numberingInstance?: number
         keepNext?: boolean
         before?: number
       } = {},
     ) => {
       const normalizedText = cleanComplianceBodyText(finding.text)
-      const leadMatch = options.boldLead
-        ? normalizedText.match(/^(.{1,60}?[：。])([\s\S]*)$/)
-        : null
       return new Paragraph({
-        numbering: options.numberingInstance === undefined
-          ? undefined
-          : { reference: 'compliance-item', level: 0, instance: options.numberingInstance },
         spacing: {
-          before: options.before ?? (options.numberingInstance === undefined ? 0 : 240),
+          before: options.before ?? 0,
           after: 0,
           line: 360,
         },
         keepNext: options.keepNext,
         keepLines: false,
-        indent: options.numberingInstance === undefined ? { firstLine: 480 } : undefined,
+        indent: { firstLine: 480 },
         alignment: AlignmentType.JUSTIFIED,
-        children: [
-          ...(leadMatch
-            ? [
-                new TextRun({
-                  text: leadMatch[1],
-                  bold: true,
-                  color: '000000',
-                  size: 24,
-                  font: runFont(profile.bodyFont),
-                }),
-                new TextRun({
-                  text: leadMatch[2],
-                  color: '000000',
-                  size: 24,
-                  font: runFont(profile.bodyFont),
-                }),
-              ]
-            : [new TextRun({
-                text: normalizedText,
-                color: '000000',
-                size: 24,
-                font: runFont(profile.bodyFont),
-              })]),
-        ],
+        children: [new TextRun({
+          text: normalizedText,
+          color: '000000',
+          size: 24,
+          font: runFont(profile.bodyFont),
+        })],
       })
     }
     const complianceHeading = (value: string, level: 1 | 2) => new Paragraph({
@@ -833,14 +807,11 @@ export async function generateBusinessDocx(input: {
     const reasons = section('投资理由')?.findings ?? []
     const renderedReasons = COMPLIANCE_INVESTMENT_REASON_TOPICS.map((topic, index) =>
       reasons[index] ?? {
-          text: `${topic}：现阶段应按本项建立投资判断框架。${COMPLIANCE_MISSING_DATA_SENTENCE}需取得能够支持本项价值判断的一手项目材料后完成专项分析。`,
+          text: `${topic}方面，现阶段应按本项建立投资判断框架。${COMPLIANCE_MISSING_DATA_SENTENCE}需取得能够支持本项价值判断的一手项目材料后完成专项分析。`,
           status: '资料缺口' as const,
           sourceIndexes: [],
         })
-    renderedReasons.forEach((finding) => contentChildren.push(findingParagraph(finding, {
-      boldLead: true,
-      numberingInstance: 0,
-    })))
+    renderedReasons.forEach((finding) => contentChildren.push(findingParagraph(finding)))
 
     contentChildren.push(complianceHeading('投资计划', 1))
     const plan = section('投资计划')?.findings ?? []
@@ -857,14 +828,11 @@ export async function generateBusinessDocx(input: {
     const analyses = section('投资情形分析')?.findings ?? []
     const renderedAnalyses = COMPLIANCE_CHECKLIST_TOPICS.map((topic, index) =>
       analyses[index] ?? {
-          text: `${topic}：现阶段应按本项核查标准建立比对底稿。${COMPLIANCE_MISSING_DATA_SENTENCE}需取得对应基金条款、项目事实和交易材料后形成单项结论。`,
+          text: `${topic}方面，现阶段应按本项核查标准建立比对底稿。${COMPLIANCE_MISSING_DATA_SENTENCE}需取得对应基金条款、项目事实和交易材料后形成单项结论。`,
           status: '资料缺口' as const,
           sourceIndexes: [],
         })
-    renderedAnalyses.forEach((finding) => contentChildren.push(findingParagraph(finding, {
-      boldLead: true,
-      numberingInstance: 1,
-    })))
+    renderedAnalyses.forEach((finding) => contentChildren.push(findingParagraph(finding)))
 
     const conclusion = section('结论')?.findings[0]
     contentChildren.push(findingParagraph(conclusion ?? {
@@ -1542,20 +1510,6 @@ export async function generateBusinessDocx(input: {
                 style: {
                   run: { font: runFont(profile.bodyFont), size: 24, bold: true },
                   paragraph: { indent: { left: 1140, hanging: 720 } },
-                },
-              }],
-            },
-            {
-              reference: 'compliance-item',
-              levels: [{
-                level: 0,
-                format: LevelFormat.DECIMAL,
-                text: '%1、',
-                alignment: AlignmentType.LEFT,
-                suffix: LevelSuffix.NOTHING,
-                style: {
-                  run: { font: runFont(profile.bodyFont), size: 24, bold: true },
-                  paragraph: { indent: { left: 0, hanging: 0 } },
                 },
               }],
             },

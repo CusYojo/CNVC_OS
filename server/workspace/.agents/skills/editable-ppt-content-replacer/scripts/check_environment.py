@@ -34,7 +34,6 @@ def required_files(root: Path, names: tuple[str, ...]) -> dict[str, bool]:
 
 def run_pdf_environment_check(
     pdf_skill_dir: Path,
-    artifact_tool_dir: Path | None,
     node: str | None,
     timeout_seconds: int,
 ) -> dict:
@@ -51,8 +50,6 @@ def run_pdf_environment_check(
         "--smoke-timeout-seconds",
         str(timeout_seconds),
     ]
-    if artifact_tool_dir:
-        command.extend(["--artifact-tool-dir", str(artifact_tool_dir.resolve())])
     if node:
         command.extend(["--node", node])
     try:
@@ -83,7 +80,6 @@ def run_pdf_environment_check(
 
 def build_report(
     pdf_skill_dir: Path,
-    artifact_tool_dir: Path | None,
     node: str | None,
     timeout_seconds: int,
 ) -> dict:
@@ -92,9 +88,10 @@ def build_report(
         (
             "scripts/validate_replacement_manifest.py",
             "scripts/generate_apply_plan.py",
-            "scripts/analyze_template.mjs",
-            "scripts/apply_template_plan.mjs",
-            "scripts/validate_template_result.mjs",
+            "scripts/analyze_template_openxml.py",
+            "scripts/apply_template_plan_openxml.py",
+            "scripts/validate_template_result_openxml.py",
+            "scripts/openxml_runtime.py",
             "scripts/apply_structural_plan.py",
             "scripts/validate_final_content.py",
         ),
@@ -108,7 +105,6 @@ def build_report(
     )
     pdf_environment = run_pdf_environment_check(
         pdf_skill_dir,
-        artifact_tool_dir,
         node,
         timeout_seconds,
     )
@@ -144,7 +140,9 @@ def build_report(
         "scriptsReady": scripts_ready,
         "missing": missing,
         "pdfEnvironment": pdf_environment,
-        "readyForHeadlessTextImageReplacement": scripts_ready,
+        "replacementRuntime": "openxml-stdlib+libreoffice",
+        "privatePackageRequired": False,
+        "readyForHeadlessTextImageReplacement": scripts_ready and pdf_ready,
         "readyForDefaultWorkflow": scripts_ready and pdf_ready,
         "powerpointNativeValidationAvailable": bool(
             pdf_environment.get("powerpoint_native_validation_available")
@@ -183,7 +181,6 @@ def main() -> None:
     )
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--pdf-skill-dir", type=Path)
-    parser.add_argument("--artifact-tool-dir", type=Path)
     parser.add_argument("--node")
     parser.add_argument("--smoke-timeout-seconds", type=int, default=120)
     args = parser.parse_args()
@@ -196,7 +193,6 @@ def main() -> None:
     )
     report = build_report(
         pdf_skill_dir,
-        args.artifact_tool_dir,
         args.node,
         args.smoke_timeout_seconds,
     )

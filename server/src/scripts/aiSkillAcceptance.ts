@@ -375,6 +375,9 @@ async function main() {
       '只生成、登记并交付一份 DOCX',
       '不生成或登记 PDF',
       '不得逐段套用',
+      '订单节奏：',
+      '数字小标题',
+      '连续的正文段落',
       '...展开',
       '原文链接',
       '完整法律主体',
@@ -605,6 +608,13 @@ async function main() {
     '四章 / 五项理由 / 七项核查',
   )
   assert(
+    'AI-007 正文不使用数字小标题或冒号标签',
+    /不显示数字小标题|不使用阿拉伯数字小标题/.test(complianceCorpus)
+      && /学术团队：/.test(complianceCorpus)
+      && /连续正文/.test(complianceCorpus),
+    '仅一级、二级正式章节保留编号，其余 finding 为自然段落',
+  )
+  assert(
     'AI-007 审计元数据不漂移为模板外正文板块',
     /不得渲染为正文|不渲染为正文/.test(complianceCorpus)
       && /不增加封面、执行摘要、责任声明、风险提示、资料缺口或引用资料/.test(
@@ -801,13 +811,13 @@ async function main() {
       && !qaDocumentSource.includes("mixedTextRuns('引用资料'")
       && !qaDocumentSource.includes("mixedTextRuns('Reviewer 审阅结果'")
       && qaPipelineSource.includes('function cleanAnswerText')
-      && qaPipelineSource.includes('（1）已确认事实：')
-      && qaPipelineSource.includes('（2）分析判断：')
-      && qaPipelineSource.includes('（3）证据边界：')
-      && qaPipelineSource.includes('（4）下一步核验：')
+      && qaPipelineSource.includes('五个连续自然段')
+      && qaDocumentSource.includes('answerParagraphFormValid')
+      && qaDocumentSource.includes('visibleSubheadingsAbsent')
+      && !qaDocumentSource.includes('function dimensionParagraph')
       && !qaDocumentSource.includes('index === 6')
       && qaDocumentSource.includes('globalIndex === 0'),
-    '宋体 / 18pt 标题 / 14pt 问题 / 12pt 分维度 / 1.5 倍行距 / 25.4×31.7mm 页边距',
+    '宋体 / 18pt 标题 / 14pt 问题 / 无小标题自然段 / 1.5 倍行距 / 25.4×31.7mm 页边距',
   )
   assert(
     'Q&A 双模式边界明确且正式任务只交付 DOCX',
@@ -877,10 +887,10 @@ async function main() {
       && pptWorkflowSource.includes('sourceNotesPresent')
       && pptDocumentSource.includes('generateInvestmentRecommendationPptFromTemplate')
       && pptReplacerSource.includes('replacement-manifest.json')
-      && pptReplacerSource.includes('apply_template_plan.mjs')
-      && pptReplacerSource.includes('validate_template_result.mjs')
+      && pptReplacerSource.includes('apply_template_plan_openxml.py')
+      && pptReplacerSource.includes('validate_template_result_openxml.py')
       && pptReplacerSource.includes('final-watermark-qa.json'),
-    'KEEP / semanticKey / evidenceIds / [Sources] / 样本内容与水印检查',
+    'KEEP / semanticKey / evidenceIds / [Sources] / OpenXML 原位替换与水印检查',
   )
 
   const quickActionsSource = await readFile(

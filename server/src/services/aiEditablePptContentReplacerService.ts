@@ -6,7 +6,6 @@ import {
   readFile,
   writeFile,
 } from 'node:fs/promises'
-import os from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
 import type {
@@ -102,43 +101,6 @@ function resolvePython() {
     process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python3',
   )
   return existsSync(projectPython) ? projectPython : 'python3'
-}
-
-function artifactToolCandidates() {
-  return [
-    process.env.ARTIFACT_TOOL_DIR,
-    path.resolve(process.cwd(), 'node_modules', '@oai', 'artifact-tool'),
-    path.resolve(
-      path.dirname(process.execPath),
-      '..',
-      'node_modules',
-      '@oai',
-      'artifact-tool',
-    ),
-    path.resolve(
-      os.homedir(),
-      '.cache',
-      'codex-runtimes',
-      'codex-primary-runtime',
-      'dependencies',
-      'node',
-      'node_modules',
-      '@oai',
-      'artifact-tool',
-    ),
-  ].filter((value): value is string => Boolean(value))
-}
-
-function resolveArtifactToolDir() {
-  const result = artifactToolCandidates().find((candidate) =>
-    existsSync(path.join(candidate, 'dist', 'artifact_tool.mjs')))
-  if (!result) {
-    throw Object.assign(
-      new Error('内容替换环境缺少 @oai/artifact-tool'),
-      { code: 'EDITABLE_PPT_ARTIFACT_TOOL_UNAVAILABLE' },
-    )
-  }
-  return result
 }
 
 function findExecutable(name: string) {
@@ -638,11 +600,11 @@ export async function generateInvestmentRecommendationPptFromTemplate(input: {
   const skillRoot = path.join(getAiSkillRoot(), 'editable-ppt-content-replacer')
   const pdfSkillRoot = path.join(getAiSkillRoot(), 'pdf-to-editable-ppt')
   const scripts = {
-    analyze: path.join(skillRoot, 'scripts', 'analyze_template.mjs'),
+    analyze: path.join(skillRoot, 'scripts', 'analyze_template_openxml.py'),
     validateManifest: path.join(skillRoot, 'scripts', 'validate_replacement_manifest.py'),
     generatePlan: path.join(skillRoot, 'scripts', 'generate_apply_plan.py'),
-    apply: path.join(skillRoot, 'scripts', 'apply_template_plan.mjs'),
-    validateResult: path.join(skillRoot, 'scripts', 'validate_template_result.mjs'),
+    apply: path.join(skillRoot, 'scripts', 'apply_template_plan_openxml.py'),
+    validateResult: path.join(skillRoot, 'scripts', 'validate_template_result_openxml.py'),
     finalContent: path.join(skillRoot, 'scripts', 'validate_final_content.py'),
     watermark: path.join(pdfSkillRoot, 'scripts', 'validate_watermark_handoff.py'),
   }
@@ -652,8 +614,18 @@ export async function generateInvestmentRecommendationPptFromTemplate(input: {
     }
   }
 
-  const artifactToolDir = resolveArtifactToolDir()
   const python = resolvePython()
+  const pdftoppm = process.env.AI_PDF_TO_PPT_PDFTOPPM
+    || findExecutable(process.platform === 'win32' ? 'pdftoppm.exe' : 'pdftoppm')
+  const libreoffice = process.env.AI_PDF_TO_PPT_LIBREOFFICE
+    || findExecutable(process.platform === 'win32' ? 'soffice.exe' : 'libreoffice')
+    || findExecutable(process.platform === 'win32' ? 'soffice.exe' : 'soffice')
+  if (!pdftoppm || !libreoffice) {
+    throw Object.assign(
+      new Error('内容替换环境缺少 LibreOffice 或 Poppler 无头渲染运行时'),
+      { code: 'EDITABLE_PPT_PUBLIC_RUNTIME_UNAVAILABLE' },
+    )
+  }
   const timeoutMs = Math.max(
     120_000,
     Number(process.env.AI_EDITABLE_PPT_REPLACER_TIMEOUT_MS || 30 * 60_000),
@@ -675,21 +647,19 @@ export async function generateInvestmentRecommendationPptFromTemplate(input: {
   const finalMapPath = path.join(workDir, 'final-template-map.json')
   const finalWatermarkPath = path.join(workDir, 'final-watermark-qa.json')
   const finalCoveragePath = path.join(workDir, 'final-content-coverage-report.json')
-  const env = { ...process.env, ARTIFACT_TOOL_DIR: artifactToolDir }
+  const env = { ...process.env }
 
   await reportProgress(
     input.onProgress,
     '校验 PDF 转换交接完成，正在建立原模板对象地图',
     70,
   )
-  await runCommand(process.execPath, [
+  await runCommand(python, [
     scripts.analyze,
     '--input',
     input.template.referencePath,
     '--output',
     templateMapPath,
-    '--artifact-tool-dir',
-    artifactToolDir,
   ], { timeoutMs, env })
   const templateMap = JSON.parse(await readFile(templateMapPath, 'utf8')) as TemplateMap
   if (templateMap.sha256 !== workflow.templateSha256) {
@@ -747,7 +717,7 @@ export async function generateInvestmentRecommendationPptFromTemplate(input: {
     '正在原模板对象中逐项替换内容并保留图片、版式和母版',
     76,
   )
-  await runCommand(process.execPath, [
+  await runCommand(python, [
     scripts.apply,
     '--template',
     input.template.referencePath,
@@ -759,8 +729,12 @@ export async function generateInvestmentRecommendationPptFromTemplate(input: {
     renderDir,
     '--report',
     applyReportPath,
-    '--artifact-tool-dir',
-    artifactToolDir,
+    '--libreoffice',
+    libreoffice,
+    '--pdftoppm',
+    pdftoppm,
+    '--timeout-seconds',
+    String(Math.ceil(timeoutMs / 1000)),
   ], { timeoutMs, env })
 
   await reportProgress(
@@ -768,7 +742,7 @@ export async function generateInvestmentRecommendationPptFromTemplate(input: {
     '内容替换完成，正在执行页面、对象、样式与媒体保真校验',
     80,
   )
-  await runCommand(process.execPath, [
+  await runCommand(python, [
     scripts.validateResult,
     '--template',
     input.template.referencePath,
@@ -778,17 +752,13 @@ export async function generateInvestmentRecommendationPptFromTemplate(input: {
     contentPlanPath,
     '--output',
     fidelityPath,
-    '--artifact-tool-dir',
-    artifactToolDir,
   ], { timeoutMs, env })
-  await runCommand(process.execPath, [
+  await runCommand(python, [
     scripts.analyze,
     '--input',
     input.outputPath,
     '--output',
     finalMapPath,
-    '--artifact-tool-dir',
-    artifactToolDir,
   ], { timeoutMs, env })
 
   await reportProgress(
@@ -871,6 +841,7 @@ export async function generateInvestmentRecommendationPptFromTemplate(input: {
     cjkFont: input.template.customAnalysis?.formatProfile.primaryFont || '微软雅黑',
     cjkLanguage: 'zh-CN',
     replacementSkill: 'editable-ppt-content-replacer',
+    replacementRuntime: 'openxml-stdlib+libreoffice',
     replacementSchemaVersion: '1.3',
     replacementOperationCount: manifest.operations.length,
     protectedObjectCount: manifest.protectedObjects.length,

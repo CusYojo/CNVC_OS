@@ -15,6 +15,8 @@ import {
 import type { InvestmentProposalEvidencePlan } from './aiInvestmentProposalEvidenceService.js'
 import { comparisonKey, isNearDuplicate } from './aiEvidenceQualityService.js'
 import {
+  containsInvestmentProposalColonLabel,
+  containsInvestmentProposalInlineSubheading,
   containsInvestmentProposalProseLabel,
   containsInvestmentProposalWebArtifact,
 } from './aiInvestmentProposalTextService.js'
@@ -182,6 +184,27 @@ function reviewFinding(input: {
       ...location,
       code: 'CLIENT_PROSE_LABEL_LEAK',
       message: `${section.title}使用了重复的“判断/依据/影响/待办”底稿标签`,
+    })
+  }
+  if (containsInvestmentProposalColonLabel(finding.text)) {
+    issue(issues, {
+      ...location,
+      code: 'CLIENT_COLON_LABEL_LEAK',
+      message: `${section.title}使用了“订单节奏：”一类冒号引导标签，需改写为完整自然段`,
+    })
+  }
+  if (containsInvestmentProposalInlineSubheading(finding.text)) {
+    issue(issues, {
+      ...location,
+      code: 'INLINE_NUMBERED_SUBHEADING_LEAK',
+      message: `${section.title}在正文中使用了数字小标题，需合并为连续自然段`,
+    })
+  }
+  if (/[\r\n]/.test(finding.text)) {
+    issue(issues, {
+      ...location,
+      code: 'CLIENT_MANUAL_BREAK_LEAK',
+      message: `${section.title}在单个正文 finding 内使用了手动换行，需合并为一个连续自然段`,
     })
   }
   if (!STATUS_VALUES.has(finding.status)) {

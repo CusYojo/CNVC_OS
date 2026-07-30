@@ -18,6 +18,8 @@ import {
   buildInvestmentProposalEvidencePlan,
 } from '../services/aiInvestmentProposalEvidenceService.js'
 import {
+  containsInvestmentProposalColonLabel,
+  containsInvestmentProposalInlineSubheading,
   sanitizeInvestmentProposalClientText,
   sanitizeInvestmentProposalEvidenceContent,
 } from '../services/aiInvestmentProposalTextService.js'
@@ -94,9 +96,41 @@ const clientFinding = sanitizeInvestmentProposalClientText(
 )
 assert.equal(
   clientFinding,
-  '公司具备机器人业务基础。 项目资料记载公司已形成产品。 仍需核验客户。 取得合同。',
+  '公司具备机器人业务基础。项目资料记载公司已形成产品。仍需核验客户。取得合同。',
 )
 assert.doesNotMatch(clientFinding, /判断：|依据：|影响\/约束：|待办：|项目资料显示：|原文链接/)
+const orderParagraph = sanitizeInvestmentProposalClientText(
+  '订单节奏：2026年5月正式启动新合作，当前每20天交付5000分钟内容。',
+)
+assert.equal(
+  orderParagraph,
+  '公司订单交付方面，2026年5月正式启动新合作，当前每20天交付5000分钟内容。',
+)
+assert.equal(containsInvestmentProposalColonLabel(orderParagraph), false)
+const continuousParagraph = sanitizeInvestmentProposalClientText(
+  '三）现金流与估值规划 1、现金流保障：老股东拟提供1000万元借款，可保障半年现金流安全。',
+)
+assert.equal(
+  continuousParagraph,
+  '老股东拟提供1000万元借款，可保障半年现金流安全。',
+)
+assert.equal(containsInvestmentProposalInlineSubheading(continuousParagraph), false)
+const nestedContinuousParagraph = sanitizeInvestmentProposalClientText(
+  '四、融资进展相关 （一）存量资产处置 1、传统业务板块计划整体出售，已对接4家公司。',
+)
+assert.equal(
+  nestedContinuousParagraph,
+  '传统业务板块计划整体出售，已对接4家公司。',
+)
+assert.equal(containsInvestmentProposalInlineSubheading(nestedContinuousParagraph), false)
+const multiFactParagraph = sanitizeInvestmentProposalClientText(
+  '公司地址：北京市海淀区测试路1号。成立时间：2025-01-01。企业发展阶段：已获天使轮。创始人：测试创始人。管理团队：测试创始人、测试经理。',
+)
+assert.equal(
+  multiFactParagraph,
+  '公司注册地址为北京市海淀区测试路1号。公司成立于2025-01-01。公司目前已获天使轮。公司创始人为测试创始人。公司管理团队包括测试创始人、测试经理。',
+)
+assert.equal(containsInvestmentProposalColonLabel(multiFactParagraph), false)
 const headlineOnlyEvidence = buildInvestmentProposalEvidencePlan([{
   sourceType: 'public_web_cache',
   sourceId: 'headline-only',
@@ -502,6 +536,34 @@ const proseLabelLeakReview = reviewInvestmentProposalContent({
 assert.equal(proseLabelLeakReview.passed, false)
 assert.ok(proseLabelLeakReview.issues.some((issue) =>
   issue.code === 'CLIENT_PROSE_LABEL_LEAK'))
+const colonLabelLeakContent = structuredClone(content)
+colonLabelLeakContent.sections.find((section) => section.title === '（五）运营摘要')!
+  .findings[0].text = '订单节奏：2026年5月正式启动新合作，当前每20天交付5000分钟内容。'
+const colonLabelLeakReview = reviewInvestmentProposalContent({
+  content: colonLabelLeakContent,
+  blueprint,
+  evidencePlan,
+  sources,
+  projectName: '星河机器人项目',
+  companyName: '星河机器人有限公司',
+})
+assert.equal(colonLabelLeakReview.passed, false)
+assert.ok(colonLabelLeakReview.issues.some((issue) =>
+  issue.code === 'CLIENT_COLON_LABEL_LEAK'))
+const inlineSubheadingLeakContent = structuredClone(content)
+inlineSubheadingLeakContent.sections.find((section) => section.title === '（五）运营摘要')!
+  .findings[0].text = '1、公司于2026年5月正式启动新合作，当前每20天交付5000分钟内容。'
+const inlineSubheadingLeakReview = reviewInvestmentProposalContent({
+  content: inlineSubheadingLeakContent,
+  blueprint,
+  evidencePlan,
+  sources,
+  projectName: '星河机器人项目',
+  companyName: '星河机器人有限公司',
+})
+assert.equal(inlineSubheadingLeakReview.passed, false)
+assert.ok(inlineSubheadingLeakReview.issues.some((issue) =>
+  issue.code === 'INLINE_NUMBERED_SUBHEADING_LEAK'))
 const webArtifactLeakContent = structuredClone(content)
 webArtifactLeakContent.sections.find((section) => section.title === '（一）公司简介')!
   .findings[0].text = '简介：星河机器人有限公司注册地址为测试路1号4FL3A-2... 展开'
@@ -602,11 +664,12 @@ assert.equal(
 const deterministicCompanyProfile = incompatibleParameterFallback.sections
   .find((section) => section.title === '（一）公司简介')
   ?.findings.map((finding) => finding.text).join('\n') ?? ''
-assert.match(deterministicCompanyProfile, /注册地址：北京市海淀区测试路1号4FL3A-2/)
+assert.match(deterministicCompanyProfile, /公司注册地址为北京市海淀区测试路1号4FL3A-2/)
 assert.match(deterministicCompanyProfile, /智能机器人销售/)
+assert.doesNotMatch(deterministicCompanyProfile, /[\r\n]/)
 assert.doesNotMatch(
   deterministicCompanyProfile,
-  /(?:\.{3}|…)\s*展开|原文链接|来源网址|项目资料显示：|判断：/,
+  /(?:\.{3}|…)\s*展开|原文链接|来源网址|项目资料显示：|判断：|一般项目：/,
 )
 
 let noEvidenceFetchCalled = false
@@ -1050,7 +1113,7 @@ assert.equal(documentXml.includes('〔待核验〕'), false)
 assert.equal(documentXml.includes('〔资料缺口〕'), false)
 assert.doesNotMatch(
   documentXml,
-  /判断：|依据：|影响\/约束：|待办：|项目资料显示：|(?:\.{3}|…)\s*展开|原文链接|来源网址/,
+  /判断：|依据：|影响\/约束：|待办：|订单节奏：|客户结构：|财务情况：|项目资料显示：|(?:\.{3}|…)\s*展开|原文链接|来源网址/,
 )
 
 const pdfReview = await exportAndReviewInvestmentProposalPdf({

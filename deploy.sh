@@ -343,6 +343,62 @@ sync_agent_skills() {
 }
 
 #---------------------------------------
+# 安装并验证 PDF → 可编辑 PPTX 的公开生产运行时
+#---------------------------------------
+setup_pdf_ppt_runtime() {
+    step "配置 PDF 转 PPT 公开生产运行时"
+
+    local env_file="${DEPLOY_DIR}/.env"
+    local needs_packages=false
+    local libreoffice_bin=""
+
+    command -v pdftoppm &>/dev/null || needs_packages=true
+    command -v tesseract &>/dev/null || needs_packages=true
+    if command -v tesseract &>/dev/null; then
+        tesseract --list-langs 2>/dev/null | grep -qx "chi_sim" || needs_packages=true
+        tesseract --list-langs 2>/dev/null | grep -qx "eng" || needs_packages=true
+    fi
+    libreoffice_bin=$(command -v libreoffice 2>/dev/null || command -v soffice 2>/dev/null || true)
+    [ -n "$libreoffice_bin" ] || needs_packages=true
+    if ! command -v fc-match &>/dev/null || ! fc-match "Noto Sans CJK SC" 2>/dev/null | grep -qi "Noto.*CJK"; then
+        needs_packages=true
+    fi
+    if ! python3 -m venv --help &>/dev/null; then
+        needs_packages=true
+    fi
+
+    if [ "$needs_packages" = true ]; then
+        if ! command -v apt-get &>/dev/null; then
+            err "当前系统缺少 PDF/PPT 运行依赖，且未找到 apt-get"
+            err "请安装 python3-venv、poppler-utils、tesseract-ocr、tesseract-ocr-chi-sim、libreoffice、fontconfig、fonts-noto-cjk"
+            exit 1
+        fi
+        log "安装 Poppler、Tesseract 中文 OCR、LibreOffice 和 CJK 字体..."
+        apt-get update
+        env DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            python3-venv \
+            poppler-utils \
+            tesseract-ocr \
+            tesseract-ocr-chi-sim \
+            libreoffice \
+            fontconfig \
+            fonts-noto-cjk
+        fc-cache -f
+    fi
+
+    log "创建项目 Python 运行时并执行生成/渲染冒烟测试..."
+    "$NODE_BIN" "${DEPLOY_DIR}/server/scripts/setup-pdf-to-ppt-runtime.mjs"
+
+    libreoffice_bin=$(command -v libreoffice 2>/dev/null || command -v soffice 2>/dev/null || true)
+    set_env_value "$env_file" "AI_PDF_TO_PPT_PYTHON" "${DEPLOY_DIR}/server/.venv/bin/python3"
+    set_env_value "$env_file" "AI_PDF_TO_PPT_PDFTOPPM" "$(command -v pdftoppm)"
+    set_env_value "$env_file" "AI_PDF_TO_PPT_TESSERACT" "$(command -v tesseract)"
+    set_env_value "$env_file" "AI_PDF_TO_PPT_LIBREOFFICE" "$libreoffice_bin"
+    chmod 600 "$env_file"
+    log "PDF 转 PPT 公开生产运行时已通过端到端检查 ✓"
+}
+
+#---------------------------------------
 # 从历史独立部署目录迁移会话数据库和工作区（仅在新状态不存在时复制）
 #---------------------------------------
 migrate_legacy_agent_state() {
@@ -412,6 +468,8 @@ build_project() {
 
     log "按锁文件安装 Agent Runtime 依赖..."
     "$NPM_BIN" ci --include=dev --prefix "$FLUE_DIR"
+
+    setup_pdf_ppt_runtime
 
     log "创建情报雷达 Python 虚拟环境并安装依赖..."
     python3 -m venv "$RADAR_VENV"

@@ -208,6 +208,16 @@ export async function reviewGeneratedComplianceDocx(input: {
       message: '标题、四段式章节、三个子节、综上结论或落款的顺序与Document Blueprint不一致',
     })
   }
+  const visibleHeadingTexts = new Set(visualOutline.slice(0, 8))
+  const bodyLabelParagraphs = paragraphTexts.filter((value) =>
+    !visibleHeadingTexts.has(compactText(value))
+    && /^[^，。；！？\n]{2,24}[：:]\s*\S/.test(value))
+  if (bodyLabelParagraphs.length) {
+    addIssue(issues, {
+      code: 'DOCX_FORMAT_MISMATCH',
+      message: `DOCX正文存在标签式小标题，应改为连续段落：${bodyLabelParagraphs.slice(0, 3).join('；')}`,
+    })
+  }
   const forbiddenParagraphs = new Set([
     '责任声明',
     '责任声明：',
@@ -341,15 +351,16 @@ export async function reviewGeneratedComplianceDocx(input: {
   const numberingCount = (id: number) => numberingIds.filter((value) => value === id).length
   const numberingXml = await zip.file('word/numbering.xml')?.async('string') ?? ''
   if (
-    ![1, 2, 3, 4].every((id) => numberingIds.includes(id))
-    || numberingCount(3) !== 5
-    || numberingCount(4) !== 7
+    ![1, 2].every((id) => numberingIds.includes(id))
+    || numberingCount(1) !== 4
+    || numberingCount(2) !== 3
+    || numberingIds.some((id) => id !== 1 && id !== 2)
     || !numberingXml.includes('<w:numFmt w:val="chineseCounting"/>')
     || numberingXml.includes('<w:numFmt w:val="japaneseCounting"/>')
   ) {
     addIssue(issues, {
       code: 'DOCX_NUMBERING_MISMATCH',
-      message: 'DOCX必须包含四个一级标题、三个二级标题、五项投资理由和独立重启的七项合规核查编号',
+      message: 'DOCX仅允许四个一级标题和三个二级标题使用编号，投资理由与合规核查必须使用连续正文段落',
     })
   }
   if (leakedOutlineParagraphs.length) {

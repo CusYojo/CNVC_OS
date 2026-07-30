@@ -359,16 +359,25 @@ def validate(
     if watermark_report.get("mode") == "keep" and mode != "off":
         errors.append("转换过程使用了 keep 模式，不能作为无水印底稿交接")
 
-    with tempfile.TemporaryDirectory(prefix="watermark-qa-") as temporary:
-        engine, visual_matches, render_count = scan_renders(
-            render_dir,
-            terms,
-            ocr_engine,
-            Path(temporary),
-            tesseract,
-            ocr_timeout_seconds,
-        )
+    engine = None
+    visual_matches: list[dict] = []
+    render_count = len(
+        [
+            path
+            for path in render_dir.glob("*")
+            if path.suffix.lower() in {".png", ".jpg", ".jpeg"}
+        ]
+    )
     if mode == "strict":
+        with tempfile.TemporaryDirectory(prefix="watermark-qa-") as temporary:
+            engine, visual_matches, render_count = scan_renders(
+                render_dir,
+                terms,
+                ocr_engine,
+                Path(temporary),
+                tesseract,
+                ocr_timeout_seconds,
+            )
         if render_count == 0:
             errors.append("严格水印验收未找到任何最终渲染图")
         if not engine:
@@ -378,8 +387,8 @@ def validate(
     elif mode == "xml-only":
         if render_count == 0:
             warnings.append("未提供最终渲染图，只完成 PPTX 包内文字扫描")
-        elif not engine:
-            warnings.append("视觉 OCR 不可用，只完成 PPTX 包内文字扫描")
+        else:
+            warnings.append("xml-only 模式按配置跳过视觉 OCR")
     elif mode == "off":
         warnings.append("水印交接验收已关闭，结果不得标记为无水印底稿")
 

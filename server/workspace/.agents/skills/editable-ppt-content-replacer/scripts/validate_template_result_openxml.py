@@ -1,0 +1,137 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+
+from openxml_runtime import analyze_pptx, read_json, write_json
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="使用公开 OpenXML 运行时验证模板原位替换保真度。"
+    )
+    parser.add_argument("--template", required=True, type=Path)
+    parser.add_argument("--result", required=True, type=Path)
+    parser.add_argument("--plan", required=True, type=Path)
+    parser.add_argument("--output", required=True, type=Path)
+    args = parser.parse_args()
+    before = analyze_pptx(args.template.expanduser().resolve())
+    after = analyze_pptx(args.result.expanduser().resolve())
+    plan = read_json(args.plan.expanduser().resolve())
+    errors: list[str] = []
+    authorized: dict[tuple[int, int], str] = {}
+    for operation in plan.get("operations") or []:
+        identifiers = (
+            operation.get("shapeIds") or []
+            if operation.get("action") == "replace_text_group"
+            else [operation.get("shapeId")]
+        )
+        for shape_id in identifiers:
+            authorized[(int(operation["slide"]), int(shape_id))] = str(
+                operation.get("text", "")
+            )
+
+    for key, label in (
+        ("slideCount", "页面数量"),
+        ("layoutCount", "版式数量"),
+        ("masterCount", "母版数量"),
+    ):
+        if before[key] != after[key]:
+            errors.append(f"{label}变化：{before[key]} -> {after[key]}")
+    if before["mediaIds"] != after["mediaIds"]:
+        errors.append("媒体内容集合发生变化")
+
+    for source_slide in before["slides"]:
+        page = source_slide["number"]
+        if page > len(after["slides"]):
+            continue
+        result_slide = after["slides"][page - 1]
+        for key, label in (
+            ("widthEmu", "画布宽度"),
+            ("heightEmu", "画布高度"),
+            ("layoutId", "版式引用"),
+        ):
+            if source_slide[key] != result_slide[key]:
+                errors.append(f"第 {page} 页{label}发生变化")
+        if len(source_slide["objects"]) != len(result_slide["objects"]):
+            errors.append(
+                f"第 {page} 页对象数量变化："
+                f"{len(source_slide['objects'])} -> {len(result_slide['objects'])}"
+            )
+        targets = {
+            item["shapeId"]: item for item in result_slide["objects"]
+        }
+        for source_object in source_slide["objects"]:
+            shape_id = source_object["shapeId"]
+            target = targets.get(shape_id)
+            if target is None:
+                errors.append(f"第 {page} 页 shapeId={shape_id} 丢失")
+                continue
+            for key, label in (
+                ("kind", "类型"),
+                ("bbox", "坐标尺寸"),
+                ("textStyle", "文字样式"),
+                ("media", "媒体引用"),
+            ):
+                if source_object[key] != target[key]:
+                    errors.append(
+                        f"第 {page} 页 shapeId={shape_id} {label}变化"
+                    )
+            expected = authorized.get((page, shape_id))
+            if expected is not None:
+                if target["text"] != expected:
+                    errors.append(
+                        f"第 {page} 页 shapeId={shape_id} 未写入计划文字"
+                    )
+            elif source_object["text"] != target["text"]:
+                errors.append(
+                    f"第 {page} 页 shapeId={shape_id} 发生未授权文字修改"
+                )
+
+    object_count_before = sum(
+        len(slide["objects"]) for slide in before["slides"]
+    )
+    object_count_after = sum(
+        len(slide["objects"]) for slide in after["slides"]
+    )
+    report = {
+        "passed": not errors,
+        "runtime": "openxml-stdlib",
+        "template": str(args.template.expanduser().resolve()),
+        "result": str(args.result.expanduser().resolve()),
+        "authorizedTargetCount": len(authorized),
+        "slideCountPreserved": before["slideCount"] == after["slideCount"],
+        "layoutCountPreserved": before["layoutCount"] == after["layoutCount"],
+        "masterCountPreserved": before["masterCount"] == after["masterCount"],
+        "mediaCountPreserved": before["mediaIds"] == after["mediaIds"],
+        "errors": errors,
+        "before": {
+            "slideCount": before["slideCount"],
+            "layoutCount": before["layoutCount"],
+            "masterCount": before["masterCount"],
+            "mediaCount": len(before["mediaIds"]),
+            "objectCount": object_count_before,
+        },
+        "after": {
+            "slideCount": after["slideCount"],
+            "layoutCount": after["layoutCount"],
+            "masterCount": after["masterCount"],
+            "mediaCount": len(after["mediaIds"]),
+            "objectCount": object_count_after,
+        },
+    }
+    write_json(args.output.expanduser().resolve(), report)
+    if errors:
+        for error in errors[:50]:
+            print("-", error)
+        raise SystemExit(f"模板保真校验失败，共 {len(errors)} 项差异")
+    print(
+        "模板保真校验通过："
+        f"{before['slideCount']} 页、{object_count_before} 个对象、"
+        f"{len(before['mediaIds'])} 份唯一媒体保持一致"
+    )
+
+
+if __name__ == "__main__":
+    main()

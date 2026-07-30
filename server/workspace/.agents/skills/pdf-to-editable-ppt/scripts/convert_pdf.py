@@ -4,7 +4,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import os
 import re
 import shutil
 import subprocess
@@ -40,73 +39,6 @@ def run(command, *, cwd=None, timeout_seconds=None):
         raise RuntimeError(
             f"命令运行超过 {timeout_seconds} 秒：{command[0]}"
         ) from exc
-
-
-def find_presentations_skill():
-    configured = os.environ.get("PRESENTATIONS_SKILL_DIR")
-    if configured:
-        candidate = Path(configured).expanduser().resolve()
-        if candidate.exists():
-            return candidate
-    root = (
-        Path.home()
-        / ".codex"
-        / "plugins"
-        / "cache"
-        / "openai-primary-runtime"
-        / "presentations"
-    )
-    candidates = sorted(root.glob("*/skills/presentations"))
-    if not candidates:
-        raise FileNotFoundError(
-            "未找到 Presentations 技能。请设置 PRESENTATIONS_SKILL_DIR。"
-        )
-    return candidates[-1]
-
-
-def resolve_artifact_tool_dir(value):
-    configured = value or os.environ.get("ARTIFACT_TOOL_DIR")
-    if not configured:
-        return None
-    candidate = Path(configured).expanduser().resolve()
-    package_json = candidate / "package.json"
-    if not package_json.exists():
-        raise FileNotFoundError(package_json)
-    metadata = json.loads(package_json.read_text(encoding="utf-8"))
-    if metadata.get("name") != "@oai/artifact-tool":
-        raise ValueError(f"{candidate} 不是 @oai/artifact-tool 包目录")
-    entrypoints = (
-        candidate / "dist" / "node" / "artifact_tool.mjs",
-        candidate / "dist" / "artifact_tool.mjs",
-    )
-    if not any(path.exists() for path in entrypoints):
-        raise FileNotFoundError(
-            f"{candidate} 缺少已构建的 Artifact Tool 入口文件"
-        )
-    return candidate
-
-
-def setup_custom_artifact_workspace(work_dir, artifact_tool_dir):
-    package_json = work_dir / "package.json"
-    if package_json.exists():
-        metadata = json.loads(package_json.read_text(encoding="utf-8"))
-        if metadata.get("type") != "module":
-            raise ValueError(f"{package_json} 必须设置 type=module")
-    else:
-        package_json.write_text(
-            json.dumps({"private": True, "type": "module"}, indent=2) + "\n",
-            encoding="utf-8",
-        )
-    scope_dir = work_dir / "node_modules" / "@oai"
-    scope_dir.mkdir(parents=True, exist_ok=True)
-    target = scope_dir / "artifact-tool"
-    if target.exists() or target.is_symlink():
-        if target.is_symlink() and target.resolve() == artifact_tool_dir:
-            return
-        raise FileExistsError(
-            f"{target} 已存在且未指向指定的 Artifact Tool；请使用新的工作目录"
-        )
-    target.symlink_to(artifact_tool_dir, target_is_directory=True)
 
 
 def normalize_source_renders(render_dir):
@@ -264,9 +196,8 @@ def main():
     parser.add_argument("--node", help="Node.js 可执行文件")
     parser.add_argument("--pdftoppm", help="Poppler pdftoppm 可执行文件")
     parser.add_argument(
-        "--artifact-tool-dir",
-        type=Path,
-        help="Artifact Tool 包目录；也可设置 ARTIFACT_TOOL_DIR。",
+        "--libreoffice",
+        help="LibreOffice/soffice 可执行文件，用于最终逐页渲染检查。",
     )
     parser.add_argument(
         "--command-timeout-seconds",
@@ -416,18 +347,15 @@ def main():
     if not pdftoppm:
         raise FileNotFoundError("未找到 pdftoppm；请通过 --pdftoppm 指定")
 
-    artifact_tool_dir = resolve_artifact_tool_dir(args.artifact_tool_dir)
-    presentations_skill = None
-    setup_workspace = None
-    if artifact_tool_dir is None:
-        presentations_skill = find_presentations_skill()
-        setup_workspace = (
-            presentations_skill
-            / "container_tools"
-            / "setup_artifact_tool_workspace.mjs"
+    libreoffice = (
+        args.libreoffice
+        or shutil.which("libreoffice")
+        or shutil.which("soffice")
+    )
+    if not libreoffice:
+        raise FileNotFoundError(
+            "未找到 LibreOffice；请通过 --libreoffice 指定"
         )
-        if not setup_workspace.exists():
-            raise FileNotFoundError(setup_workspace)
 
     work_dir.mkdir(parents=True, exist_ok=True)
     output_pptx.parent.mkdir(parents=True, exist_ok=True)
@@ -449,13 +377,6 @@ def main():
     )
     normalize_source_renders(source_render_dir)
 
-    if artifact_tool_dir is not None:
-        setup_custom_artifact_workspace(work_dir, artifact_tool_dir)
-    else:
-        run(
-            [node, setup_workspace, "--workspace", work_dir],
-            timeout_seconds=args.command_timeout_seconds,
-        )
     model_path = work_dir / "pdf-model.json"
     extract_command = [
         sys.executable,
@@ -572,11 +493,7 @@ def main():
             )
         run(command, timeout_seconds=args.command_timeout_seconds)
 
-        local_builder = work_dir / "build_flattened_ocr_ppt.mjs"
-        shutil.copy2(
-            SKILL_DIR / "scripts" / "build_flattened_ocr_ppt.mjs",
-            local_builder,
-        )
+        local_builder = SKILL_DIR / "scripts" / "build_flattened_ocr_ppt.mjs"
         command = [
             node,
             local_builder,
@@ -584,8 +501,6 @@ def main():
             flattened_model,
             "--output",
             output_pptx,
-            "--render-dir",
-            work_dir / "artifact-renders",
         ]
         if args.overrides:
             command.extend(["--overrides", args.overrides.expanduser().resolve()])
@@ -595,8 +510,7 @@ def main():
             timeout_seconds=args.command_timeout_seconds,
         )
     else:
-        local_builder = work_dir / "build_editable_ppt.mjs"
-        shutil.copy2(SKILL_DIR / "scripts" / "build_editable_ppt.mjs", local_builder)
+        local_builder = SKILL_DIR / "scripts" / "build_editable_ppt.mjs"
         command = [
             node,
             local_builder,
@@ -604,8 +518,6 @@ def main():
             model_path,
             "--output",
             output_pptx,
-            "--render-dir",
-            work_dir / "artifact-renders",
         ]
         if args.overrides:
             command.extend(["--overrides", args.overrides.expanduser().resolve()])
@@ -614,6 +526,25 @@ def main():
             cwd=work_dir,
             timeout_seconds=args.command_timeout_seconds,
         )
+
+    render_dir = work_dir / "artifact-renders"
+    run(
+        [
+            sys.executable,
+            SKILL_DIR / "scripts" / "render_pptx.py",
+            "--input",
+            output_pptx,
+            "--render-dir",
+            render_dir,
+            "--libreoffice",
+            libreoffice,
+            "--pdftoppm",
+            pdftoppm,
+            "--timeout-seconds",
+            str(args.command_timeout_seconds),
+        ],
+        timeout_seconds=args.command_timeout_seconds,
+    )
 
     watermark_qa_path = work_dir / "watermark-handoff-report.json"
     watermark_qa_mode = (
@@ -626,7 +557,7 @@ def main():
             "--pptx",
             output_pptx,
             "--render-dir",
-            work_dir / "artifact-renders",
+            render_dir,
             "--watermark-report",
             work_dir / "watermark-report.json",
             "--output",

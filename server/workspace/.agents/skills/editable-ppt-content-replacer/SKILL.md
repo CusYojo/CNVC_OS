@@ -19,7 +19,7 @@ description: 基于已经完成1:1复原的可编辑PPTX模板生成当前项目
 
 ## 必须遵循
 
-- 使用当前会话中的 Presentations 技能。
+- 遵循演示文稿模板跟随和原位编辑规范。
 - 正式投资建议书任务同时遵循
   [references/output-contract.md](references/output-contract.md)。
 - 输入模板必须是已经可编辑的 `.pptx`；若只有 PDF，先使用
@@ -27,7 +27,9 @@ description: 基于已经完成1:1复原的可编辑PPTX模板生成当前项目
 - PDF 转换模板必须提供 `conversion-handoff.json`，且其中
   `watermarkQaPassed`、`editabilityReviewPassed` 和
   `readyForContentReplacement` 均为 `true`。不得跳过交接门槛。
-- 使用 `@oai/artifact-tool` 导入和导出 PPTX，禁止使用 `python-pptx`。
+- 生产运行时使用 Python 标准库读取和原位修改 PPTX OpenXML，只重写白名单
+  文字所在的 slide XML 与来源备注；禁止依赖 Codex Desktop 私有包或使用
+  `python-pptx` 重建模板。
 - 默认所有对象均为 `KEEP`。只有清单明确授权的对象才能修改。
 - 共享语义图标（例如使命、愿景、价值观图标）必须登记为保护对象并复用，
   不因文字内容变化而替换。
@@ -66,10 +68,9 @@ Linux 或纯终端环境先运行：
 python3 "$SKILL_DIR/scripts/check_environment.py" --json
 ```
 
-检查器会验证本技能和 `pdf-to-editable-ppt` 的必要脚本，并复用 PDF 技能的 Artifact
-Tool 无显示生成/渲染、Tesseract 语言和字体检查。技能不在同一父目录时，
-设置 `PDF_TO_EDITABLE_PPT_SKILL_DIR` 和 `ARTIFACT_TOOL_DIR`。
-Presentations 技能不在默认插件缓存时同时设置 `PRESENTATIONS_SKILL_DIR`。
+检查器会验证本技能和 `pdf-to-editable-ppt` 的必要脚本，并复用 PDF 技能的
+PptxGenJS 生成、LibreOffice/Poppler 无头渲染、Tesseract 语言和字体检查。
+技能不在同一父目录时设置 `PDF_TO_EDITABLE_PPT_SKILL_DIR`。
 `readyForDefaultWorkflow` 不为 `true` 时不得进入严格全流程。
 
 ## 工作流程
@@ -101,16 +102,15 @@ Presentations 技能不在默认插件缓存时同时设置 `PRESENTATIONS_SKILL
 
 ### 2. 建立对象地图
 
-使用本技能自带的 Artifact Tool 模板分析脚本：
+使用本技能自带的 OpenXML 模板分析脚本：
 
 ```bash
-node "$SKILL_DIR/scripts/analyze_template.mjs" \
+python3 "$SKILL_DIR/scripts/analyze_template_openxml.py" \
   --input "/absolute/editable-template.pptx" \
   --output "/absolute/build/template-map.json"
 ```
 
-Artifact Tool 不在默认运行时时传入 `--artifact-tool-dir`。分析器必须
-导入原 PPTX，读取稳定对象 ID、文字、坐标、样式、媒体引用和版式关系；
+分析器必须读取原 PPTX 的稳定对象 ID、文字、坐标、样式、媒体引用和版式关系；
 不得只从字体、颜色或截图推断模板。
 
 逐页检查渲染图与对象地图。按
@@ -216,14 +216,16 @@ python3 "$SKILL_DIR/scripts/generate_apply_plan.py" \
 
 ### 6. 原位替换文字和图片
 
-使用本技能自带的 Artifact Tool 原位应用脚本：
+使用本技能自带的 OpenXML 原位应用脚本：
 
 ```bash
-node "$SKILL_DIR/scripts/apply_template_plan.mjs" \
+python3 "$SKILL_DIR/scripts/apply_template_plan_openxml.py" \
   --template "/absolute/editable-template.pptx" \
   --plan "/absolute/build/content-plan.json" \
   --output "/absolute/build/content-replaced.pptx" \
-  --render-dir "/absolute/build/final-renders"
+  --render-dir "/absolute/build/final-renders" \
+  --libreoffice "/usr/bin/libreoffice" \
+  --pdftoppm "/usr/bin/pdftoppm"
 ```
 
 如果生成脚本提示普通应用计划为空，则跳过本步骤，直接从锁定模板执行原生
@@ -255,8 +257,8 @@ python3 "$SKILL_DIR/scripts/apply_structural_plan.py" \
 
 ### 8. 更新原生图表和表格
 
-仅当 `native-operations.json` 非空时执行。使用 Presentations 技能和
-`@oai/artifact-tool`，按稳定对象 ID 修改现有图表系列或表格单元格。
+仅当 `native-operations.json` 非空时执行，并使用经过专项验证的公开运行时
+按稳定对象 ID 修改现有图表系列或表格单元格。
 
 本技能当前没有可安全通用化的原生图表/表格批量执行器。终端任务必须为这些
 操作生成逐项执行报告并重新 inspect 目标对象；如果没有对应执行代码或无法
@@ -296,7 +298,7 @@ python3 "$SKILL_DIR/scripts/apply_structural_plan.py" \
 在执行完整槽位删除前，使用同一份 `content-plan.json` 验证普通替换阶段：
 
 ```bash
-node "$SKILL_DIR/scripts/validate_template_result.mjs" \
+python3 "$SKILL_DIR/scripts/validate_template_result_openxml.py" \
   --template "/absolute/editable-template.pptx" \
   --result "/absolute/final.pptx" \
   --plan "/absolute/build/content-plan.json" \
@@ -332,7 +334,7 @@ python3 "/absolute/pdf-to-editable-ppt/scripts/validate_watermark_handoff.py" \
 
 Tesseract 不在 `PATH` 时必须同时传入 `--tesseract`；Linux 需要
 `chi_sim` 与 `eng` 两个语言包。服务器没有 Microsoft PowerPoint 时，执行
-Artifact Tool 逐页渲染和 LibreOffice `--headless` 冒烟测试，并在交付中
+LibreOffice `--headless` 与 Poppler 逐页渲染检查，并在交付中
 明确披露替代验证。
 
 再分析最终 PPTX，生成 `final-template-map.json`，并运行：

@@ -33,6 +33,8 @@ import {
 } from './aiInvestmentProposalBlueprintService.js'
 import { containsInvestmentProposalInternalErrorText } from './aiInvestmentProposalReviewerService.js'
 import {
+  containsInvestmentProposalColonLabel,
+  containsInvestmentProposalInlineSubheading,
   containsInvestmentProposalProseLabel,
   containsInvestmentProposalWebArtifact,
   sanitizeInvestmentProposalClientText,
@@ -524,6 +526,11 @@ export async function reviewInvestmentProposalDocx(input: {
       text: xmlText(match[0]),
       styleId: match[0].match(/<w:pStyle\b[^>]*w:val="([^"]+)"/)?.[1] ?? '',
     }))
+  const expectedTitles = input.blueprint.sections.map((item) => item.title)
+  const bodyText = paragraphs
+    .filter((item) => !expectedTitles.includes(item.text))
+    .map((item) => item.text)
+    .join('\n')
   const allText = paragraphs.map((item) => item.text).join('\n')
   if (containsInvestmentProposalInternalErrorText(allText)) {
     issues.push({
@@ -543,7 +550,18 @@ export async function reviewInvestmentProposalDocx(input: {
       message: 'Word 正文包含重复的“判断/依据/影响/待办”底稿标签',
     })
   }
-  const expectedTitles = input.blueprint.sections.map((item) => item.title)
+  if (containsInvestmentProposalColonLabel(bodyText)) {
+    issues.push({
+      code: 'CLIENT_COLON_LABEL_LEAK',
+      message: 'Word 正文包含“订单节奏：”一类冒号引导标签',
+    })
+  }
+  if (containsInvestmentProposalInlineSubheading(bodyText)) {
+    issues.push({
+      code: 'INLINE_NUMBERED_SUBHEADING_LEAK',
+      message: 'Word 正文包含数字小标题，未按连续自然段输出',
+    })
+  }
   const foundTitles = paragraphs
     .filter((item) => expectedTitles.includes(item.text))
     .map((item) => item.text)

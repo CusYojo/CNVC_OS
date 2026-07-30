@@ -1,0 +1,631 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import copy
+import hashlib
+import json
+import os
+import posixpath
+import re
+import shutil
+import subprocess
+import tempfile
+import zipfile
+from pathlib import Path
+from xml.etree import ElementTree as ET
+
+
+P_NS = "http://schemas.openxmlformats.org/presentationml/2006/main"
+A_NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
+R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+PKG_REL_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
+CT_NS = "http://schemas.openxmlformats.org/package/2006/content-types"
+XML_NS = "http://www.w3.org/XML/1998/namespace"
+EMU_PER_PIXEL = 9525
+
+NS = {"p": P_NS, "a": A_NS, "r": R_NS}
+OBJECT_TAGS = {"sp", "pic", "graphicFrame", "grpSp", "cxnSp"}
+
+for prefix, namespace in (
+    ("p", P_NS),
+    ("a", A_NS),
+    ("r", R_NS),
+    ("", PKG_REL_NS),
+):
+    ET.register_namespace(prefix, namespace)
+
+
+def qn(namespace: str, name: str) -> str:
+    return f"{{{namespace}}}{name}"
+
+
+def local_name(tag: str) -> str:
+    return tag.rsplit("}", 1)[-1]
+
+
+def sha256_bytes(value: bytes) -> str:
+    return hashlib.sha256(value).hexdigest()
+
+
+def read_json(path: Path) -> dict:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def write_json(path: Path, value: object) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(value, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
+def slide_number(name: str) -> int:
+    match = re.search(r"slide(\d+)\.xml$", name)
+    return int(match.group(1)) if match else 0
+
+
+def slide_names(archive: zipfile.ZipFile) -> list[str]:
+    return sorted(
+        (
+            name
+            for name in archive.namelist()
+            if re.fullmatch(r"ppt/slides/slide\d+\.xml", name)
+        ),
+        key=slide_number,
+    )
+
+
+def relationship_part(part_name: str) -> str:
+    directory = posixpath.dirname(part_name)
+    return posixpath.join(
+        directory,
+        "_rels",
+        posixpath.basename(part_name) + ".rels",
+    )
+
+
+def resolve_relationship_target(source_part: str, target: str) -> str:
+    if target.startswith("/"):
+        return target.lstrip("/")
+    return posixpath.normpath(
+        posixpath.join(posixpath.dirname(source_part), target)
+    )
+
+
+def relationships(
+    archive: zipfile.ZipFile,
+    source_part: str,
+) -> dict[str, dict[str, str]]:
+    rel_part = relationship_part(source_part)
+    if rel_part not in archive.namelist():
+        return {}
+    root = ET.fromstring(archive.read(rel_part))
+    result: dict[str, dict[str, str]] = {}
+    for relation in root.findall(qn(PKG_REL_NS, "Relationship")):
+        relation_id = relation.get("Id")
+        if not relation_id:
+            continue
+        target = relation.get("Target", "")
+        result[relation_id] = {
+            "type": relation.get("Type", ""),
+            "target": resolve_relationship_target(source_part, target),
+        }
+    return result
+
+
+def direct_nonvisual(element: ET.Element) -> ET.Element | None:
+    paths = {
+        "sp": "./p:nvSpPr/p:cNvPr",
+        "pic": "./p:nvPicPr/p:cNvPr",
+        "graphicFrame": "./p:nvGraphicFramePr/p:cNvPr",
+        "grpSp": "./p:nvGrpSpPr/p:cNvPr",
+        "cxnSp": "./p:nvCxnSpPr/p:cNvPr",
+    }
+    path = paths.get(local_name(element.tag))
+    return element.find(path, NS) if path else None
+
+
+def direct_text_body(element: ET.Element) -> ET.Element | None:
+    if local_name(element.tag) != "sp":
+        return None
+    return element.find("./p:txBody", NS)
+
+
+def object_elements(root: ET.Element) -> list[ET.Element]:
+    return [
+        element
+        for element in root.iter()
+        if local_name(element.tag) in OBJECT_TAGS
+        and direct_nonvisual(element) is not None
+    ]
+
+
+def object_id(element: ET.Element) -> int | None:
+    nonvisual = direct_nonvisual(element)
+    if nonvisual is None:
+        return None
+    try:
+        return int(nonvisual.get("id", ""))
+    except ValueError:
+        return None
+
+
+def text_body_text(text_body: ET.Element | None) -> str:
+    if text_body is None:
+        return ""
+    paragraphs: list[str] = []
+    for paragraph in text_body.findall("./a:p", NS):
+        pieces = [
+            node.text or ""
+            for node in paragraph.iter(qn(A_NS, "t"))
+        ]
+        paragraphs.append("".join(pieces))
+    while paragraphs and not paragraphs[-1]:
+        paragraphs.pop()
+    return "\n".join(paragraphs)
+
+
+def text_style(text_body: ET.Element | None) -> dict:
+    if text_body is None:
+        return {
+            "body": {},
+            "paragraph": {},
+            "paragraphText": {},
+            "run": {"fontSize": 0, "signature": ""},
+        }
+    body_pr = text_body.find("./a:bodyPr", NS)
+    paragraph = text_body.find("./a:p", NS)
+    paragraph_pr = (
+        paragraph.find("./a:pPr", NS) if paragraph is not None else None
+    )
+    run_pr = text_body.find(".//a:rPr", NS)
+    if run_pr is None:
+        run_pr = text_body.find(".//a:defRPr", NS)
+    latin = run_pr.find("./a:latin", NS) if run_pr is not None else None
+    east_asian = run_pr.find("./a:ea", NS) if run_pr is not None else None
+    font_size = 0.0
+    if run_pr is not None:
+        try:
+            font_size = float(run_pr.get("sz", "0")) / 100
+        except ValueError:
+            font_size = 0.0
+    style_copy = copy.deepcopy(text_body)
+    for text_node in style_copy.iter(qn(A_NS, "t")):
+        text_node.text = ""
+    signature = sha256_bytes(ET.tostring(style_copy, encoding="utf-8"))
+    return {
+        "body": dict(body_pr.attrib) if body_pr is not None else {},
+        "paragraph": (
+            dict(paragraph_pr.attrib) if paragraph_pr is not None else {}
+        ),
+        "paragraphText": {},
+        "run": {
+            "fontSize": font_size,
+            "bold": run_pr.get("b") if run_pr is not None else None,
+            "italic": run_pr.get("i") if run_pr is not None else None,
+            "typeface": (
+                (east_asian or latin).get("typeface")
+                if (east_asian is not None or latin is not None)
+                else None
+            ),
+            "signature": signature,
+        },
+    }
+
+
+def object_bbox(element: ET.Element) -> list[float]:
+    tag = local_name(element.tag)
+    paths = {
+        "sp": "./p:spPr/a:xfrm",
+        "pic": "./p:spPr/a:xfrm",
+        "graphicFrame": "./p:xfrm",
+        "grpSp": "./p:grpSpPr/a:xfrm",
+        "cxnSp": "./p:spPr/a:xfrm",
+    }
+    transform = element.find(paths.get(tag, ""), NS)
+    if transform is None:
+        return [0.0, 0.0, 0.0, 0.0]
+    offset = transform.find("./a:off", NS)
+    extent = transform.find("./a:ext", NS)
+    if offset is None or extent is None:
+        return [0.0, 0.0, 0.0, 0.0]
+    values = [
+        float(offset.get("x", "0")) / EMU_PER_PIXEL,
+        float(offset.get("y", "0")) / EMU_PER_PIXEL,
+        float(extent.get("cx", "0")) / EMU_PER_PIXEL,
+        float(extent.get("cy", "0")) / EMU_PER_PIXEL,
+    ]
+    return [round(value, 2) for value in values]
+
+
+def object_kind(element: ET.Element) -> str:
+    tag = local_name(element.tag)
+    if tag == "pic":
+        return "picture"
+    if tag == "graphicFrame":
+        data = element.find(".//a:graphicData", NS)
+        uri = data.get("uri", "") if data is not None else ""
+        if "table" in uri.lower():
+            return "table"
+        if "chart" in uri.lower() or element.find(".//c:chart", {
+            "c": "http://schemas.openxmlformats.org/drawingml/2006/chart"
+        }) is not None:
+            return "chart"
+        return "shape:graphic-frame"
+    if tag == "grpSp":
+        return "shape:group"
+    if tag == "cxnSp":
+        return "shape:connector"
+    if direct_text_body(element) is not None:
+        return "shape:textbox"
+    return "shape:vector"
+
+
+def object_media(
+    archive: zipfile.ZipFile,
+    element: ET.Element,
+    slide_relationships: dict[str, dict[str, str]],
+) -> str | None:
+    if local_name(element.tag) != "pic":
+        return None
+    blip = element.find(".//a:blip", NS)
+    if blip is None:
+        return None
+    relation_id = blip.get(qn(R_NS, "embed")) or blip.get(qn(R_NS, "link"))
+    relation = slide_relationships.get(relation_id or "")
+    target = relation.get("target") if relation else None
+    if not target or target not in archive.namelist():
+        return None
+    return sha256_bytes(archive.read(target))
+
+
+def analyze_pptx(path: Path) -> dict:
+    source_bytes = path.read_bytes()
+    with zipfile.ZipFile(path) as archive:
+        names = archive.namelist()
+        presentation_root = ET.fromstring(archive.read("ppt/presentation.xml"))
+        slide_size = presentation_root.find("./p:sldSz", NS)
+        width_emu = int(slide_size.get("cx", "0")) if slide_size is not None else 0
+        height_emu = int(slide_size.get("cy", "0")) if slide_size is not None else 0
+        media_ids = sorted(
+            {
+                sha256_bytes(archive.read(name))
+                for name in names
+                if re.fullmatch(r"ppt/media/[^/]+", name)
+            }
+        )
+        slides: list[dict] = []
+        for index, part_name in enumerate(slide_names(archive), 1):
+            root = ET.fromstring(archive.read(part_name))
+            rels = relationships(archive, part_name)
+            layout = next(
+                (
+                    relation["target"]
+                    for relation in rels.values()
+                    if relation["type"].endswith("/slideLayout")
+                ),
+                "",
+            )
+            objects: list[dict] = []
+            for element in object_elements(root):
+                shape_id = object_id(element)
+                if shape_id is None or shape_id <= 0:
+                    continue
+                nonvisual = direct_nonvisual(element)
+                body = direct_text_body(element)
+                objects.append(
+                    {
+                        "shapeId": shape_id,
+                        "name": nonvisual.get("name", "") if nonvisual is not None else "",
+                        "kind": object_kind(element),
+                        "bbox": object_bbox(element),
+                        "text": text_body_text(body),
+                        "textStyle": text_style(body),
+                        "media": object_media(archive, element, rels),
+                    }
+                )
+            title = next(
+                (
+                    str(item["text"]).strip()
+                    for item in objects
+                    if str(item["text"]).strip()
+                ),
+                f"Slide {index}",
+            )
+            slides.append(
+                {
+                    "number": index,
+                    "title": title,
+                    "layoutId": layout,
+                    "widthEmu": width_emu,
+                    "heightEmu": height_emu,
+                    "objects": objects,
+                }
+            )
+        return {
+            "sha256": sha256_bytes(source_bytes),
+            "slideCount": len(slides),
+            "layoutCount": sum(
+                bool(re.fullmatch(r"ppt/slideLayouts/slideLayout\d+\.xml", name))
+                for name in names
+            ),
+            "masterCount": sum(
+                bool(re.fullmatch(r"ppt/slideMasters/slideMaster\d+\.xml", name))
+                for name in names
+            ),
+            "mediaIds": media_ids,
+            "slides": slides,
+        }
+
+
+def find_object(root: ET.Element, shape_id: int) -> ET.Element | None:
+    for element in object_elements(root):
+        if object_id(element) == shape_id:
+            return element
+    return None
+
+
+def replace_text(text_body: ET.Element, value: str) -> None:
+    nodes = list(text_body.iter(qn(A_NS, "t")))
+    if not nodes:
+        paragraph = text_body.find("./a:p", NS)
+        if paragraph is None:
+            paragraph = ET.SubElement(text_body, qn(A_NS, "p"))
+        run = ET.SubElement(paragraph, qn(A_NS, "r"))
+        nodes = [ET.SubElement(run, qn(A_NS, "t"))]
+    for node in nodes:
+        node.text = ""
+        node.attrib.pop(qn(XML_NS, "space"), None)
+    nodes[0].text = value
+    if value[:1].isspace() or value[-1:].isspace():
+        nodes[0].set(qn(XML_NS, "space"), "preserve")
+
+
+def replace_notes_text(root: ET.Element, value: str) -> None:
+    body_shape = None
+    for shape in root.findall(".//p:sp", NS):
+        placeholder = shape.find("./p:nvSpPr/p:nvPr/p:ph", NS)
+        if placeholder is not None and placeholder.get("type") == "body":
+            body_shape = shape
+            break
+    if body_shape is None:
+        raise RuntimeError("备注页缺少 body 占位符")
+    body = body_shape.find("./p:txBody", NS)
+    if body is None:
+        body = ET.SubElement(body_shape, qn(P_NS, "txBody"))
+        ET.SubElement(body, qn(A_NS, "bodyPr"))
+        ET.SubElement(body, qn(A_NS, "lstStyle"))
+    paragraphs = body.findall("./a:p", NS)
+    paragraph_template = copy.deepcopy(paragraphs[0]) if paragraphs else None
+    for paragraph in paragraphs:
+        body.remove(paragraph)
+    for line in value.splitlines() or [""]:
+        paragraph = (
+            copy.deepcopy(paragraph_template)
+            if paragraph_template is not None
+            else ET.Element(qn(A_NS, "p"))
+        )
+        text_nodes = list(paragraph.iter(qn(A_NS, "t")))
+        if not text_nodes:
+            run = ET.SubElement(paragraph, qn(A_NS, "r"))
+            text_nodes = [ET.SubElement(run, qn(A_NS, "t"))]
+        for node in text_nodes:
+            node.text = ""
+        text_nodes[0].text = line
+        body.append(paragraph)
+
+
+def next_relationship_id(root: ET.Element, prefix: str = "rId") -> str:
+    existing = {
+        relation.get("Id", "")
+        for relation in root.findall(qn(PKG_REL_NS, "Relationship"))
+    }
+    index = 1
+    while f"{prefix}{index}" in existing:
+        index += 1
+    return f"{prefix}{index}"
+
+
+def add_relationship(
+    root: ET.Element,
+    relation_type: str,
+    target: str,
+) -> str:
+    relation_id = next_relationship_id(root)
+    ET.SubElement(
+        root,
+        qn(PKG_REL_NS, "Relationship"),
+        {"Id": relation_id, "Type": relation_type, "Target": target},
+    )
+    return relation_id
+
+
+def notes_slide_xml(notes_text: str) -> bytes:
+    root = ET.Element(qn(P_NS, "notes"))
+    common = ET.SubElement(root, qn(P_NS, "cSld"))
+    tree = ET.SubElement(common, qn(P_NS, "spTree"))
+    nv_group = ET.SubElement(tree, qn(P_NS, "nvGrpSpPr"))
+    ET.SubElement(nv_group, qn(P_NS, "cNvPr"), {"id": "1", "name": ""})
+    ET.SubElement(nv_group, qn(P_NS, "cNvGrpSpPr"))
+    ET.SubElement(nv_group, qn(P_NS, "nvPr"))
+    group_properties = ET.SubElement(tree, qn(P_NS, "grpSpPr"))
+    ET.SubElement(group_properties, qn(A_NS, "xfrm"))
+    for shape_id, name, placeholder_type, index in (
+        ("2", "Slide Image Placeholder", "sldImg", "0"),
+        ("3", "Notes Placeholder", "body", "1"),
+        ("4", "Slide Number Placeholder", "sldNum", "5"),
+    ):
+        shape = ET.SubElement(tree, qn(P_NS, "sp"))
+        nv_shape = ET.SubElement(shape, qn(P_NS, "nvSpPr"))
+        ET.SubElement(
+            nv_shape,
+            qn(P_NS, "cNvPr"),
+            {"id": shape_id, "name": name},
+        )
+        ET.SubElement(nv_shape, qn(P_NS, "cNvSpPr"))
+        nv_props = ET.SubElement(nv_shape, qn(P_NS, "nvPr"))
+        ET.SubElement(
+            nv_props,
+            qn(P_NS, "ph"),
+            {"type": placeholder_type, "idx": index},
+        )
+        ET.SubElement(shape, qn(P_NS, "spPr"))
+        if placeholder_type in {"body", "sldNum"}:
+            body = ET.SubElement(shape, qn(P_NS, "txBody"))
+            ET.SubElement(body, qn(A_NS, "bodyPr"))
+            ET.SubElement(body, qn(A_NS, "lstStyle"))
+            if placeholder_type == "body":
+                for line in notes_text.splitlines() or [""]:
+                    paragraph = ET.SubElement(body, qn(A_NS, "p"))
+                    run = ET.SubElement(paragraph, qn(A_NS, "r"))
+                    ET.SubElement(run, qn(A_NS, "t")).text = line
+            else:
+                ET.SubElement(body, qn(A_NS, "p"))
+    color_map = ET.SubElement(root, qn(P_NS, "clrMapOvr"))
+    ET.SubElement(color_map, qn(A_NS, "masterClrMapping"))
+    return ET.tostring(root, encoding="utf-8", xml_declaration=True)
+
+
+def notes_master_xml() -> bytes:
+    root = ET.Element(qn(P_NS, "notesMaster"))
+    common = ET.SubElement(root, qn(P_NS, "cSld"))
+    tree = ET.SubElement(common, qn(P_NS, "spTree"))
+    nv_group = ET.SubElement(tree, qn(P_NS, "nvGrpSpPr"))
+    ET.SubElement(nv_group, qn(P_NS, "cNvPr"), {"id": "1", "name": ""})
+    ET.SubElement(nv_group, qn(P_NS, "cNvGrpSpPr"))
+    ET.SubElement(nv_group, qn(P_NS, "nvPr"))
+    group_properties = ET.SubElement(tree, qn(P_NS, "grpSpPr"))
+    ET.SubElement(group_properties, qn(A_NS, "xfrm"))
+    for shape_id, placeholder_type, index in (
+        ("2", "sldImg", "2"),
+        ("3", "body", "3"),
+        ("4", "sldNum", "5"),
+    ):
+        shape = ET.SubElement(tree, qn(P_NS, "sp"))
+        nv_shape = ET.SubElement(shape, qn(P_NS, "nvSpPr"))
+        ET.SubElement(
+            nv_shape,
+            qn(P_NS, "cNvPr"),
+            {"id": shape_id, "name": f"{placeholder_type} Placeholder"},
+        )
+        ET.SubElement(nv_shape, qn(P_NS, "cNvSpPr"))
+        nv_props = ET.SubElement(nv_shape, qn(P_NS, "nvPr"))
+        ET.SubElement(
+            nv_props,
+            qn(P_NS, "ph"),
+            {"type": placeholder_type, "idx": index},
+        )
+        ET.SubElement(shape, qn(P_NS, "spPr"))
+        body = ET.SubElement(shape, qn(P_NS, "txBody"))
+        ET.SubElement(body, qn(A_NS, "bodyPr"))
+        ET.SubElement(body, qn(A_NS, "lstStyle"))
+        ET.SubElement(body, qn(A_NS, "p"))
+    ET.SubElement(
+        root,
+        qn(P_NS, "clrMap"),
+        {
+            "bg1": "lt1",
+            "tx1": "dk1",
+            "bg2": "lt2",
+            "tx2": "dk2",
+            "accent1": "accent1",
+            "accent2": "accent2",
+            "accent3": "accent3",
+            "accent4": "accent4",
+            "accent5": "accent5",
+            "accent6": "accent6",
+            "hlink": "hlink",
+            "folHlink": "folHlink",
+        },
+    )
+    notes_style = ET.SubElement(root, qn(P_NS, "notesStyle"))
+    level = ET.SubElement(notes_style, qn(A_NS, "lvl1pPr"), {"marL": "0"})
+    ET.SubElement(level, qn(A_NS, "defRPr"), {"sz": "1200"})
+    return ET.tostring(root, encoding="utf-8", xml_declaration=True)
+
+
+def ensure_content_type(
+    root: ET.Element,
+    part_name: str,
+    content_type: str,
+) -> None:
+    normalized = "/" + part_name.lstrip("/")
+    for override in root.findall(qn(CT_NS, "Override")):
+        if override.get("PartName") == normalized:
+            return
+    ET.SubElement(
+        root,
+        qn(CT_NS, "Override"),
+        {"PartName": normalized, "ContentType": content_type},
+    )
+
+
+def render_pptx(
+    pptx_path: Path,
+    render_dir: Path,
+    libreoffice: str,
+    pdftoppm: str,
+    timeout_seconds: int = 1800,
+) -> int:
+    render_dir.mkdir(parents=True, exist_ok=True)
+    for old in render_dir.glob("slide-*.png"):
+        old.unlink()
+    with tempfile.TemporaryDirectory(prefix="pptx-render-") as directory:
+        temporary = Path(directory)
+        profile = temporary / "lo-profile"
+        profile.mkdir()
+        command = [
+            libreoffice,
+            "--headless",
+            f"-env:UserInstallation={profile.as_uri()}",
+            "--convert-to",
+            "pdf",
+            "--outdir",
+            str(temporary),
+            str(pptx_path),
+        ]
+        result = subprocess.run(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout_seconds,
+        )
+        if result.returncode:
+            raise RuntimeError(
+                "LibreOffice 渲染失败："
+                + (result.stderr or result.stdout)[-4000:]
+            )
+        pdf_candidates = list(temporary.glob("*.pdf"))
+        if not pdf_candidates:
+            raise RuntimeError("LibreOffice 未生成用于视觉 QA 的 PDF")
+        result = subprocess.run(
+            [
+                pdftoppm,
+                "-png",
+                "-r",
+                "120",
+                str(pdf_candidates[0]),
+                str(render_dir / "slide"),
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout_seconds,
+        )
+        if result.returncode:
+            raise RuntimeError(
+                "Poppler 渲染失败："
+                + (result.stderr or result.stdout)[-4000:]
+            )
+    renders = sorted(
+        render_dir.glob("slide-*.png"),
+        key=lambda item: int(re.search(r"(\d+)$", item.stem).group(1)),
+    )
+    if not renders:
+        raise RuntimeError("PPTX 视觉 QA 未生成任何页面图片")
+    return len(renders)

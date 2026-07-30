@@ -48,7 +48,7 @@ async function main() {
     `${profile.files.length} 份 / ${profile.files.map((file) => file.pageCount).join('、')} 页`,
   )
   assert(
-    '阶段1 Template Parser：A4、问题目录、回答结构与分维度结构通过',
+    '阶段1 Template Parser：A4、问题目录与回答段落结构通过',
     profile.files.every((file) =>
       Math.abs(file.pageWidth - 595.3) < 2
       && Math.abs(file.pageHeight - 841.9) < 2
@@ -400,10 +400,10 @@ async function main() {
     '阶段4 Answer Generator：如选择阶段问题则形成与当前阶段匹配的推进建议',
     !dispositionAnswer || Boolean(
       dispositionAnswer.answer.includes('主建议为“继续跟踪”')
-      && dispositionAnswer.answer.includes('（1）判断依据：')
-      && dispositionAnswer.answer.includes('（2）升级与失效条件：')
-      && dispositionAnswer.answer.includes('（3）下一步动作：')
-      && dispositionAnswer.answer.includes('（4）OA 流转边界：')
+      && dispositionAnswer.answer.split(/\n+/).length === 5
+      && !/（[1-4]）(?:判断依据|升级与失效条件|下一步动作|OA 流转边界)：/.test(
+        dispositionAnswer.answer,
+      )
     ),
     dispositionAnswer?.answer ?? '本次按证据价值未选择阶段问题',
   )
@@ -418,16 +418,12 @@ async function main() {
     productAnswer?.answer ?? '未生成产品与技术回答',
   )
   assert(
-    '阶段4 Answer Generator：普通问题使用固定逻辑小标题顺序',
+    '阶段4 Answer Generator：普通问题使用固定逻辑自然段顺序',
     reviewed.answers
       .filter((answer) => answer.category !== '阶段与推进建议' && answer.confidenceStatus !== '证据不足')
-      .every((answer) => {
-        const facts = answer.answer.indexOf('（1）已确认事实：')
-        const analysis = answer.answer.indexOf('（2）分析判断：')
-        const boundary = answer.answer.indexOf('（3）证据边界：')
-        const verification = answer.answer.indexOf('（4）下一步核验：')
-        return facts >= 0 && facts < analysis && analysis < boundary && boundary < verification
-      }),
+      .every((answer) =>
+        answer.answer.split(/\n+/).length === 5
+        && !/（[1-4]）(?:已确认事实|分析判断|证据边界|下一步核验)：/.test(answer.answer)),
     reviewed.answers.map((answer) => answer.category).join('、'),
   )
   const markdownAndChromeFixture = composeProjectQaStructuredAnswer({
@@ -447,10 +443,11 @@ async function main() {
     priority: '高',
   })
   assert(
-    '阶段4 Answer Generator：清除 Markdown、重复标题与网页导航拼接',
-    markdownAndChromeFixture.includes('（1）判断依据：项目材料显示')
-      && markdownAndChromeFixture.includes('（4）OA 流转边界：阶段调整以 OA 审批结果为准')
-      && !/\*\*|(?:^|\n)1）判断依据|权威榜|产业图谱|企业入驻|小程序/.test(
+    '阶段4 Answer Generator：清除 Markdown、小标题与网页导航拼接',
+    markdownAndChromeFixture.includes('项目材料显示，核心产品为人机共生智能引擎')
+      && markdownAndChromeFixture.includes('阶段调整以 OA 审批结果为准')
+      && markdownAndChromeFixture.split(/\n+/).length === 5
+      && !/\*\*|(?:^|\n)(?:[（(]?[1-4][）)]?)?(?:判断依据|升级与失效条件|下一步动作|OA 流转边界)[：:]|权威榜|产业图谱|企业入驻|小程序/.test(
         markdownAndChromeFixture,
       ),
     markdownAndChromeFixture,
@@ -580,15 +577,12 @@ async function main() {
         }
       }
       if (index !== 0) return answer
-      const [lead, ...dimensions] = answer.answer.split('\n')
       return {
         ...answer,
-        answer: [
-          `**${lead}**`,
-          ...dimensions.map((dimension) => `**${dimension.match(/^[^：:]+[：:]/)?.[0] ?? ''}**${
-            dimension.replace(/^[^：:]+[：:]/, '')
-          }`),
-        ].join('\n'),
+        answer: answer.answer
+          .split('\n')
+          .map((paragraph) => `**${paragraph}**`)
+          .join('\n'),
       }
     }),
   }
@@ -612,7 +606,8 @@ async function main() {
       && docxReview.metadata.questionCount === PROJECT_QA_QUESTION_COUNTS.标准版
       && docxReview.metadata.categoryCount === 15
       && docxReview.metadata.directoryCompleteBeforeBody
-      && docxReview.metadata.subheadingOrderValid
+      && docxReview.metadata.answerParagraphFormValid
+      && docxReview.metadata.visibleSubheadingsAbsent
       && docxReview.metadata.sourceOutlineNumberingAbsent
       && docxReview.metadata.markdownDecorationAbsent
       && docxReview.metadata.webPageChromeAbsent,

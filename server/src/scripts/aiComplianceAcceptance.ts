@@ -280,7 +280,7 @@ async function main() {
   else process.env.AI_COMPLIANCE_DISABLE_LLM = previousAgentDisableLlm
   const returnInvestmentFinding = agentFallbackWorkflow.content.sections
     .find((section) => section.title === '投资情形分析')
-    ?.findings.find((finding) => finding.text.startsWith('返投要求：'))
+    ?.findings.find((finding) => finding.text.startsWith('返投要求方面，'))
   check(
     '返投公开依据生成待核验内容而非整项空缺',
     returnInvestmentFinding?.status === '待核验'
@@ -345,15 +345,17 @@ async function main() {
     [
       cleanComplianceBodyText('（二）短剧相关业务'),
       cleanComplianceBodyText('3 、 学术团队：沈教授负责前沿技术研究'),
+      cleanComplianceBodyText('1、业务主体：由合肥全资子公司运营'),
       cleanComplianceBodyText('二、智灵财务尽调相关'),
       cleanComplianceBodyText('1 沈阳与智灵FDE团队交流纪要'),
     ].join('、') === [
       '短剧相关业务',
-      '学术团队：沈教授负责前沿技术研究',
+      '沈教授负责前沿技术研究',
+      '业务主体方面，由合肥全资子公司运营',
       '智灵财务尽调相关',
       '沈阳与智灵FDE团队交流纪要',
     ].join('、'),
-    '清除一、（二）、3、和页码式前缀',
+    '清除来源编号，并把标签式小标题改写为自然段落',
   )
   const outlineRichSources = [{
     sourceType: 'file',
@@ -439,13 +441,23 @@ async function main() {
     '投资理由固定五项',
     workflow.content.sections.find((section) =>
       section.title === '投资理由')?.findings.length === 5,
-    '五项编号条目由核心规范约束',
+    '五段连续正文由核心规范约束',
   )
   check(
     '投资情形分析固定七项',
     workflow.content.sections.find((section) =>
       section.title === '投资情形分析')?.findings.length === 7,
     '七项顺序由Blueprint约束',
+  )
+  const proseFindings = workflow.content.sections
+    .filter((section) => ['投资理由', '投资计划', '投资情形分析'].includes(section.title))
+    .flatMap((section) => section.findings)
+  check(
+    '投资理由、投资计划和合规核查均为无标签连续正文',
+    proseFindings.every((finding) =>
+      !/^\s*\d+[、.．]\s*/.test(finding.text)
+      && !/^[^，。；！？\n]{2,24}[：:]\s*\S/.test(finding.text)),
+    proseFindings.map((finding) => finding.text.slice(0, 30)).join('；'),
   )
 
   const leakedContent = structuredClone(workflow.content)
@@ -543,7 +555,7 @@ async function main() {
     wordReview.passed,
     wordReview.issues.length
       ? wordReview.issues.map((issue) => `${issue.code}:${issue.message}`).join('；')
-      : 'OpenXML、章节、固定内容、页面、模板部件及编号全部通过',
+      : 'OpenXML、章节、固定内容、页面、模板部件、正式章节编号及正文段落全部通过',
   )
   check(
     'Word OpenXML 内部关系闭包完整',

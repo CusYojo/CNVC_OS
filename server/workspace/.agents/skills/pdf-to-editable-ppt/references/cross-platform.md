@@ -18,18 +18,20 @@
 python3 "$SKILL_DIR/scripts/check_environment.py" --json
 ```
 
-检查器会在移除 `DISPLAY` 和 `WAYLAND_DISPLAY` 后真实生成 PNG 与 PPTX，
-用于发现错误架构的 `skia.node`、缺失的 Artifact Tool 或不能工作的无头
-渲染器。`core_ready=true`、`strict_watermark_qa_ready=true` 和
+检查器会在移除 `DISPLAY` 和 `WAYLAND_DISPLAY` 后使用 PptxGenJS 真实生成
+PPTX，再通过 LibreOffice 和 Poppler 生成 PNG，用于发现缺失依赖、字体
+回退或不能工作的无头渲染器。`core_ready=true`、
+`strict_watermark_qa_ready=true` 和
 `linux_visual_qa_ready=true` 必须同时成立。不要把 macOS 或 Windows 的
 `node_modules` 复制到 Linux。
 
 必需依赖：
 
 - Python 3、PyMuPDF、Pillow；
-- Node.js；
+- Node.js 与项目依赖中的 `pptxgenjs`；
 - Poppler 的 `pdftoppm`；
-- 当前 Codex 环境中的 Presentations 技能和 `@oai/artifact-tool`。
+- LibreOffice/soffice；
+- Noto CJK 字体。
 
 OCR 模式还需要 `opencv-python-headless`，并需要 Apple Vision、
 Tesseract 或预先生成的 OCR JSON 中的一种。
@@ -87,17 +89,10 @@ sudo apt-get install poppler-utils tesseract-ocr tesseract-ocr-chi-sim \
 python3 -m pip install pymupdf pillow opencv-python-headless
 ```
 
-Alpine Linux 使用 musl，Debian/Ubuntu/RHEL 通常使用 glibc；Artifact Tool
-中的 `skia-canvas` 原生模块必须同时匹配操作系统、CPU 架构和 libc。
-若使用独立安装的 Artifact Tool：
-
-```bash
-export ARTIFACT_TOOL_DIR="/opt/codex-runtime/node_modules/@oai/artifact-tool"
-export PRESENTATIONS_SKILL_DIR="/opt/codex-skills/presentations"
-python3 "$SKILL_DIR/scripts/check_environment.py" --json
-```
-
-不得仅凭包目录存在就继续；无头冒烟测试未通过时必须停止。
+生产运行时不需要 Codex Desktop、Presentations 插件或
+`@oai/artifact-tool`，也不得把这些私有目录复制到服务器。项目执行
+`npm ci` 后直接运行环境检查；无头生成、LibreOffice 转 PDF 或 Poppler
+渲染任一步未通过时必须停止。
 
 最终水印严格验收需要中文 Tesseract 语言包。只有英文语言包时不得把中文
 水印 OCR 标记为已完成；严格模式实际要求 `chi_sim` 与 `eng` 同时存在。
@@ -116,8 +111,8 @@ python3 "$SKILL_DIR/scripts/convert_pdf.py" \
   --ocr-title-font "Microsoft YaHei"
 ```
 
-Linux 没有 Microsoft PowerPoint。使用 Presentations 技能的渲染器完成
-逐页检查，并可用 LibreOffice 做兼容性冒烟测试：
+Linux 没有 Microsoft PowerPoint。使用 LibreOffice 和 Poppler 完成逐页
+PNG 检查：
 
 ```bash
 libreoffice --headless --convert-to pdf --outdir /data/verify \
@@ -170,13 +165,13 @@ LibreOffice 对字体、SVG、表格行高和图表标记的计算可能不同�
 - 生成系统与最终打开系统的字体不同会改变换行和基线。
 - 优先安装源 PDF 使用的字体；无法安装时，明确指定 OCR 字体并逐页复查。
 - Windows PowerPoint 是最终兼容性验证的首选；macOS PowerPoint 次之。
-- Linux 使用内置渲染器与 LibreOffice 双重检查，但交付时说明没有经过
+- Linux 使用 LibreOffice 与 Poppler 双重检查，但交付时说明没有经过
   Microsoft PowerPoint 原生验证。
 
 ## 服务器安全与资源限制
 
 - 使用非 root 服务账号并在运行前设置 `umask 077`；
-- 为每个任务使用独立工作目录，不复用已有 `node_modules`；
+- 为每个任务使用独立工作目录，Node 依赖只从项目锁文件安装；
 - 默认保留 `--max-pages 300`、`--command-timeout-seconds 1800` 和
   `--watermark-qa-ocr-timeout-seconds 120` 的保护限制；
 - 对不可信 PDF/PPTX 使用容器、CPU/内存/磁盘配额和禁网策略；
