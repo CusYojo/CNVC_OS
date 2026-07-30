@@ -643,11 +643,11 @@ export async function generateInvestmentRecommendationPptFromTemplate(input: {
   const skillRoot = path.join(getAiSkillRoot(), 'editable-ppt-content-replacer')
   const pdfSkillRoot = path.join(getAiSkillRoot(), 'pdf-to-editable-ppt')
   const scripts = {
-    analyze: path.join(skillRoot, 'scripts', 'analyze_template.py'),
+    analyze: path.join(skillRoot, 'scripts', 'analyze_template.mjs'),
     validateManifest: path.join(skillRoot, 'scripts', 'validate_replacement_manifest.py'),
     generatePlan: path.join(skillRoot, 'scripts', 'generate_apply_plan.py'),
-    apply: path.join(skillRoot, 'scripts', 'apply_template_plan.py'),
-    validateResult: path.join(skillRoot, 'scripts', 'validate_template_result.py'),
+    apply: path.join(skillRoot, 'scripts', 'apply_template_plan.mjs'),
+    validateResult: path.join(skillRoot, 'scripts', 'validate_template_result.mjs'),
     finalContent: path.join(skillRoot, 'scripts', 'validate_final_content.py'),
     watermark: path.join(pdfSkillRoot, 'scripts', 'validate_watermark_handoff.py'),
   }
@@ -691,7 +691,7 @@ export async function generateInvestmentRecommendationPptFromTemplate(input: {
     '校验 PDF 转换交接完成，正在建立原模板对象地图',
     70,
   )
-  await runCommand(python, [
+  await runCommand(process.execPath, [
     scripts.analyze,
     '--input',
     input.template.referencePath,
@@ -754,7 +754,7 @@ export async function generateInvestmentRecommendationPptFromTemplate(input: {
     '正在原模板对象中逐项替换内容并保留图片、版式和母版',
     76,
   )
-  await runCommand(python, [
+  await runCommand(process.execPath, [
     scripts.apply,
     '--template',
     input.template.referencePath,
@@ -773,7 +773,7 @@ export async function generateInvestmentRecommendationPptFromTemplate(input: {
     '内容替换完成，正在执行页面、对象、样式与媒体保真校验',
     80,
   )
-  await runCommand(python, [
+  await runCommand(process.execPath, [
     scripts.validateResult,
     '--template',
     input.template.referencePath,
@@ -784,7 +784,7 @@ export async function generateInvestmentRecommendationPptFromTemplate(input: {
     '--output',
     fidelityPath,
   ], { timeoutMs, env })
-  await runCommand(python, [
+  await runCommand(process.execPath, [
     scripts.analyze,
     '--input',
     input.outputPath,
