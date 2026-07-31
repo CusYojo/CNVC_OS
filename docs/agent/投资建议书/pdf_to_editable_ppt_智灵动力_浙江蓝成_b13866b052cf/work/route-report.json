@@ -1,0 +1,620 @@
+{
+  "route": "object-rich",
+  "flattened_pages": 0,
+  "page_count": 34,
+  "watermark_removal": {
+    "mode": "auto",
+    "removed_span_count": 0,
+    "removed_unique_text_count": 0,
+    "report": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_浙江蓝成_b13866b052cf/work/watermark-report.json"
+  },
+  "embedded_image_candidate_count": 25,
+  "pages_with_embedded_image_candidates": [
+    1,
+    4,
+    5,
+    6,
+    8,
+    9,
+    14,
+    17,
+    19,
+    20,
+    21,
+    22,
+    27,
+    28,
+    29,
+    31
+  ],
+  "pages": [
+    {
+      "page": 1,
+      "text": 8,
+      "drawings": 4,
+      "images": 9,
+      "flattened": false,
+      "embedded_image_candidates": [
+        {
+          "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_浙江蓝成_b13866b052cf/work/assets/page-01-image-006.png",
+          "bbox": [
+            0.0,
+            309.60001,
+            960.0,
+            462.0
+          ],
+          "coverage": 0.2822,
+          "width_ratio": 1.0,
+          "height_ratio": 0.2822
+        }
+      ]
+    },
+    {
+      "page": 2,
+      "text": 28,
+      "drawings": 7,
+      "images": 10,
+      "flattened": false,
+      "embedded_image_candidates": []
+    },
+    {
+      "page": 3,
+      "text": 3,
+      "drawings": 3,
+      "images": 3,
+      "flattened": false,
+      "embedded_image_candidates": []
+    },
+    {
+      "page": 4,
+      "text": 36,
+      "drawings": 15,
+      "images": 6,
+      "flattened": false,
+      "embedded_image_candidates": [
+        {
+          "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_浙江蓝成_b13866b052cf/work/assets/page-04-image-021.png",
+          "bbox": [
+            486.60001,
+            105.23999,
+            881.28003,
+            540.0
+          ],
+          "coverage": 0.331,
+          "width_ratio": 0.4111,
+          "height_ratio": 0.8051
+        }
+      ]
+    },
+    {
+      "page": 5,
+      "text": 27,
+      "drawings": 7,
+      "images": 5,
+      "flattened": false,
+      "embedded_image_candidates": [
+        {
+          "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_浙江蓝成_b13866b052cf/work/assets/page-05-image-003.png",
+          "bbox": [
+            17.978,
+            117.028,
+            283.72198,
+            233.172
+          ],
+          "coverage": 0.0595,
+          "width_ratio": 0.2768,
+          "height_ratio": 0.2151
+        },
+        {
+          "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_浙江蓝成_b13866b052cf/work/assets/page-05-image-005.png",
+          "bbox": [
+            343.578,
+            117.028,
+            609.32202,
+            233.172
+          ],
+          "coverage": 0.0595,
+          "width_ratio": 0.2768,
+          "height_ratio": 0.2151
+        },
+        {
+          "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_浙江蓝成_b13866b052cf/work/assets/page-05-image-006.png",
+          "bbox": [
+            669.17798,
+            117.028,
+            934.922,
+            233.172
+          ],
+          "coverage": 0.0595,
+          "width_ratio": 0.2768,
+          "height_ratio": 0.2151
+        }
+      ]
+    },
+    {
+      "page": 6,
+      "text": 29,
+      "drawings": 11,
+      "images": 6,
+      "flattened": false,
+      "embedded_image_candidates": [
+        {
+          "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_浙江蓝成_b13866b052cf/work/assets/page-06-image-006.png",
+          "bbox": [
+            66.7,
+            98.14999,
+            476.65002,
+            274.14999
+          ],
+          "coverage": 0.1392,
+          "width_ratio": 0.427,
+          "height_ratio": 0.3259
+        },
+        {
+          "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_浙江蓝成_b13866b052cf/work/assets/page-06-image-007.png",
+          "bbox": [
+            473.64999,
+            76.10001,
+            906.0,
+            323.75
+          ],
+          "coverage": 0.2065,
+          "width_ratio": 0.4504,
+          "height_ratio": 0.4586
+        }
+      ]
+    },
+    {
+      "page": 7,
+      "text": 3,
+      "drawings": 3,
+      "images": 3,
+      "flattened": false,
+      "embedded_image_candidates": []
+    },
+    {
+      "page": 8,
+      "text": 38,
+      "drawings": 35,
+      "images": 3,
+      "flattened": false,
+      "embedded_image_candidates": [
+        {
+          "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_浙江蓝成_b13866b052cf/work/assets/page-08-image-001.png",
+          "bbox": [
+            0.0,
+            103.20001,
+            960.0,
+            414.0
+          ],
+          "coverage": 0.5756,
+          "width_ratio": 1.0,
+          "height_ratio": 0.5756
+        }
+      ]
+    },
+    {
+      "page": 9,
+      "text": 39,
+      "drawings": 33,
+      "images": 7,
+      "flattened": false,
+      "embedded_image_candidates": [
+        {
+          "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_浙江蓝成_b13866b052cf/work/assets/page-09-image-001.png",
+          "bbox": [
+            176.03999,
+            314.64001,
+            735.83997,
+            462.0
+          ],
+          "coverage": 0.1591,
+          "width_ratio": 0.5831,
+          "height_ratio": 0.2729
+        }
+      ]
+    },
+    {
+      "page": 10,
+      "text": 19,
+      "drawings": 15,
+      "images": 2,
+      "flattened": false,
+      "embedded_image_candidates": []
+    },
+    {
+      "page": 11,
+      "text": 21,
+      "drawings": 27,
+      "images": 5,
+      "flattened": false,
+      "embedded_image_candidates": []
+    },
+    {
+      "page": 12,
+      "text": 33,
+      "drawings": 23,
+      "images": 4,
+      "flattened": false,
+      "embedded_image_candidates": []
+    },
+    {
+      "page": 13,
+      "text": 32,
+      "drawings": 42,
+      "images": 2,
+      "flattened": false,
+      "embedded_image_candidates": []
+    },
+    {
+      "page": 14,
+      "text": 57,
+      "drawings": 9,
+      "images": 11,
+      "flattened": false,
+      "embedded_image_candidates": [
+        {
+          "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_浙江蓝成_b13866b052cf/work/assets/page-14-image-002.png",
+          "bbox": [
+            62.104,
+            90.50403,
+            328.36801,
+            470.15302
+          ],
+          "coverage": 0.195,
+          "width_ratio": 0.2774,
+          "height_ratio": 0.7031
+        },
+        {
+          "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_浙江蓝成_b13866b052cf/work/assets/page-14-image-011.png",
+          "bbox": [
+            340.104,
+            90.50403,
+            606.36804,
+            470.15302
+          ],
+          "coverage": 0.195,
+          "width_ratio": 0.2774,
+          "height_ratio": 0.7031
+        },
+        {
+          "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_浙江蓝成_b13866b052cf/work/assets/page-14-image-016.png",
+          "bbox": [
+            619.104,
+            90.50403,
+            885.36804,
+            470.15302
+          ],
+          "coverage": 0.195,
+          "width_ratio": 0.2774,
+          "height_ratio": 0.7031
+        }
+      ]
+    },
+    {
+      "page": 15,
+      "text": 3,
+      "drawings": 3,
+      "images": 3,
+      "flattened": false,
+      "embedded_image_candidates": []
+    },
+    {
+      "page": 16,
+      "text": 43,
+      "drawings": 5,
+      "images": 14,
+      "flattened": false,
+      "embedded_image_candidates": []
+    },
+    {
+      "page": 17,
+      "text": 25,
+      "drawings": 11,
+      "images": 4,
+      "flattened": false,
+      "embedded_image_candidates": [
+        {
+          "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_浙江蓝成_b13866b052cf/work/assets/page-17-image-012.png",
+          "bbox": [
+            597.12,
+            79.08002,
+            933.71997,
+            503.04001
+          ],
+          "coverage": 0.2753,
+          "width_ratio": 0.3506,
+          "height_ratio": 0.7851
+        }
+      ]
+    },
+    {
+      "page": 18,
+      "text": 39,
+      "drawings": 16,
+      "images": 2,
+      "flattened": false,
+      "embedded_image_candidates": []
+    },
+    {
+      "page": 19,
+      "text": 23,
+      "drawings": 17,
+      "images": 9,
+      "flattened": false,
+      "embedded_image_candidates": [
+        {
+          "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_浙江蓝成_b13866b052cf/work/assets/page-19-image-015.png",
+          "bbox": [
+            408.95999,
+            105.72,
+            753.71997,
+            283.32001
+          ],
+          "coverage": 0.1181,
+          "width_ratio": 0.3591,
+          "height_ratio": 0.3289
+        }
+      ]
+    },
+    {
+      "page": 20,
+      "text": 23,
+      "drawings": 8,
+      "images": 7,
+      "flattened": false,
+      "embedded_image_candidates": [
+        {
+          "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_浙江蓝成_b13866b052cf/work/assets/page-20-image-003.png",
+          "bbox": [
+            60.0,
+            161.75999,
+            440.04001,
+            351.72
+          ],
+          "coverage": 0.1393,
+          "width_ratio": 0.3959,
+          "height_ratio": 0.3518
+        }
+      ]
+    },
+    {
+      "page": 21,
+      "text": 28,
+      "drawings": 8,
+      "images": 3,
+      "flattened": false,
+      "embedded_image_candidates": [
+        {
+          "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_浙江蓝成_b13866b052cf/work/assets/page-21-image-004.png",
+          "bbox": [
+            65.185,
+            163.38498,
+            899.96503,
+            478.86499
+          ],
+          "coverage": 0.508,
+          "width_ratio": 0.8696,
+          "height_ratio": 0.5842
+        }
+      ]
+    },
+    {
+      "page": 22,
+      "text": 22,
+      "drawings": 8,
+      "images": 3,
+      "flattened": false,
+      "embedded_image_candidates": [
+        {
+          "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_浙江蓝成_b13866b052cf/work/assets/page-22-image-005.png",
+          "bbox": [
+            61.385,
+            167.48502,
+            896.16504,
+            511.01501
+          ],
+          "coverage": 0.5532,
+          "width_ratio": 0.8696,
+          "height_ratio": 0.6362
+        }
+      ]
+    },
+    {
+      "page": 23,
+      "text": 40,
+      "drawings": 33,
+      "images": 6,
+      "flattened": false,
+      "embedded_image_candidates": []
+    },
+    {
+      "page": 24,
+      "text": 63,
+      "drawings": 17,
+      "images": 6,
+      "flattened": false,
+      "embedded_image_candidates": []
+    },
+    {
+      "page": 25,
+      "text": 34,
+      "drawings": 21,
+      "images": 5,
+      "flattened": false,
+      "embedded_image_candidates": []
+    },
+    {
+      "page": 26,
+      "text": 3,
+      "drawings": 3,
+      "images": 3,
+      "flattened": false,
+      "embedded_image_candidates": []
+    },
+    {
+      "page": 27,
+      "text": 37,
+      "drawings": 38,
+      "images": 2,
+      "flattened": false,
+      "embedded_image_candidates": [
+        {
+          "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_浙江蓝成_b13866b052cf/work/assets/page-27-image-001.png",
+          "bbox": [
+            0.0,
+            115.44,
+            960.0,
+            498.95999
+          ],
+          "coverage": 0.7102,
+          "width_ratio": 1.0,
+          "height_ratio": 0.7102
+        }
+      ]
+    },
+    {
+      "page": 28,
+      "text": 53,
+      "drawings": 42,
+      "images": 5,
+      "flattened": false,
+      "embedded_image_candidates": [
+        {
+          "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_浙江蓝成_b13866b052cf/work/assets/page-28-image-003.png",
+          "bbox": [
+            9.49,
+            77.845,
+            478.69901,
+            199.022
+          ],
+          "coverage": 0.1097,
+          "width_ratio": 0.4888,
+          "height_ratio": 0.2244
+        },
+        {
+          "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_浙江蓝成_b13866b052cf/work/assets/page-28-image-013.png",
+          "bbox": [
+            481.14401,
+            77.845,
+            950.35303,
+            199.022
+          ],
+          "coverage": 0.1097,
+          "width_ratio": 0.4888,
+          "height_ratio": 0.2244
+        }
+      ]
+    },
+    {
+      "page": 29,
+      "text": 34,
+      "drawings": 50,
+      "images": 13,
+      "flattened": false,
+      "embedded_image_candidates": [
+        {
+          "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_浙江蓝成_b13866b052cf/work/assets/page-29-image-013.png",
+          "bbox": [
+            307.742,
+            229.892,
+            585.05798,
+            474.108
+          ],
+          "coverage": 0.1306,
+          "width_ratio": 0.2889,
+          "height_ratio": 0.4523
+        },
+        {
+          "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_浙江蓝成_b13866b052cf/work/assets/page-29-image-017.png",
+          "bbox": [
+            23.142,
+            229.892,
+            300.45801,
+            474.108
+          ],
+          "coverage": 0.1306,
+          "width_ratio": 0.2889,
+          "height_ratio": 0.4523
+        },
+        {
+          "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_浙江蓝成_b13866b052cf/work/assets/page-29-image-028.png",
+          "bbox": [
+            598.91998,
+            367.56,
+            913.91998,
+            500.52002
+          ],
+          "coverage": 0.0808,
+          "width_ratio": 0.3281,
+          "height_ratio": 0.2462
+        },
+        {
+          "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_浙江蓝成_b13866b052cf/work/assets/page-29-image-029.png",
+          "bbox": [
+            598.91998,
+            183.0,
+            913.91998,
+            362.28
+          ],
+          "coverage": 0.1089,
+          "width_ratio": 0.3281,
+          "height_ratio": 0.332
+        }
+      ]
+    },
+    {
+      "page": 30,
+      "text": 91,
+      "drawings": 28,
+      "images": 2,
+      "flattened": false,
+      "embedded_image_candidates": []
+    },
+    {
+      "page": 31,
+      "text": 22,
+      "drawings": 5,
+      "images": 3,
+      "flattened": false,
+      "embedded_image_candidates": [
+        {
+          "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_浙江蓝成_b13866b052cf/work/assets/page-31-image-002.png",
+          "bbox": [
+            16.92,
+            58.32001,
+            941.63995,
+            505.92001
+          ],
+          "coverage": 0.7984,
+          "width_ratio": 0.9632,
+          "height_ratio": 0.8289
+        }
+      ]
+    },
+    {
+      "page": 32,
+      "text": 29,
+      "drawings": 21,
+      "images": 5,
+      "flattened": false,
+      "embedded_image_candidates": []
+    },
+    {
+      "page": 33,
+      "text": 30,
+      "drawings": 21,
+      "images": 2,
+      "flattened": false,
+      "embedded_image_candidates": []
+    },
+    {
+      "page": 34,
+      "text": 2,
+      "drawings": 4,
+      "images": 3,
+      "flattened": false,
+      "embedded_image_candidates": []
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "passed": true,
+  "mode": "strict",
+  "pptx": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_浙江蓝成_b13866b052cf/浙江蓝成应急信息科技有限公司投资建议书_1比1可编辑版.pptx",
+  "renderDir": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_浙江蓝成_b13866b052cf/work/artifact-renders",
+  "watermarkReport": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_浙江蓝成_b13866b052cf/work/watermark-report.json",
+  "terms": [
+    "保密资料",
+    "请勿外传",
+    "仅供参考",
+    "仅供项目评审使用",
+    "仅供投资人参考",
+    "仅供基金投资人参考",
+    "内部资料",
+    "未经授权",
+    "未经许可",
+    "机密",
+    "样稿",
+    "水印",
+    "confidential",
+    "draft",
+    "watermark"
+  ],
+  "packageMatches": [],
+  "visualOcrEngine": "tesseract",
+  "tesseract": "/opt/homebrew/Cellar/tesseract/5.5.3/bin/tesseract",
+  "ocrTimeoutSeconds": 120,
+  "visualMatches": [],
+  "renderCount": 34,
+  "errors": [],
+  "warnings": []
+}

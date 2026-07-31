@@ -1,0 +1,453 @@
+{
+  "candidate_page_count": 16,
+  "candidate_image_count": 25,
+  "review_required_pages": [],
+  "pages": [
+    {
+      "page": 1,
+      "candidate_count": 1,
+      "candidates": [
+        {
+          "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_浙江蓝成_b13866b052cf/work/assets/page-01-image-006.png",
+          "bbox": [
+            0.0,
+            309.60001,
+            960.0,
+            462.0
+          ],
+          "coverage": 0.2822,
+          "width_ratio": 1.0,
+          "height_ratio": 0.2822
+        }
+      ],
+      "semantic_override_count": 0,
+      "status": "reviewed-raster-appropriate",
+      "review_note": "候选为照片、界面/网页/文档截图或装饰性栅格内容；作为独立图片保留，可移动、裁剪、缩放和替换，内部像素不作虚假元素化。"
+    },
+    {
+      "page": 4,
+      "candidate_count": 1,
+      "candidates": [
+        {
+          "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_浙江蓝成_b13866b052cf/work/assets/page-04-image-021.png",
+          "bbox": [
+            486.60001,
+            105.23999,
+            881.28003,
+            540.0
+          ],
+          "coverage": 0.331,
+          "width_ratio": 0.4111,
+          "height_ratio": 0.8051
+        }
+      ],
+      "semantic_override_count": 0,
+      "status": "reviewed-raster-appropriate",
+      "review_note": "候选为照片、界面/网页/文档截图或装饰性栅格内容；作为独立图片保留，可移动、裁剪、缩放和替换，内部像素不作虚假元素化。"
+    },
+    {
+      "page": 5,
+      "candidate_count": 3,
+      "candidates": [
+        {
+          "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_浙江蓝成_b13866b052cf/work/assets/page-05-image-003.png",
+          "bbox": [
+            17.978,
+            117.028,
+            283.72198,
+            233.172
+          ],
+          "coverage": 0.0595,
+          "width_ratio": 0.2768,
+          "height_ratio": 0.2151
+        },
+        {
+          "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_浙江蓝成_b13866b052cf/work/assets/page-05-image-005.png",
+          "bbox": [
+            343.578,
+            117.028,
+            609.32202,
+            233.172
+          ],
+          "coverage": 0.0595,
+          "width_ratio": 0.2768,
+          "height_ratio": 0.2151
+        },
+        {
+          "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_浙江蓝成_b13866b052cf/work/assets/page-05-image-006.png",
+          "bbox": [
+            669.17798,
+            117.028,
+            934.922,
+            233.172
+          ],
+          "coverage": 0.0595,
+          "width_ratio": 0.2768,
+          "height_ratio": 0.2151
+        }
+      ],
+      "semantic_override_count": 0,
+      "status": "reviewed-raster-appropriate",
+      "review_note": "候选为照片、界面/网页/文档截图或装饰性栅格内容；作为独立图片保留，可移动、裁剪、缩放和替换，内部像素不作虚假元素化。"
+    },
+    {
+      "page": 6,
+      "candidate_count": 2,
+      "candidates": [
+        {
+          "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_浙江蓝成_b13866b052cf/work/assets/page-06-image-006.png",
+          "bbox": [
+            66.7,
+            98.14999,
+            476.65002,
+            274.14999
+          ],
+          "coverage": 0.1392,
+          "width_ratio": 0.427,
+          "height_ratio": 0.3259
+        },
+        {
+          "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_浙江蓝成_b13866b052cf/work/assets/page-06-image-007.png",
+          "bbox": [
+            473.64999,
+            76.10001,
+            906.0,
+            323.75
+          ],
+          "coverage": 0.2065,
+          "width_ratio": 0.4504,
+          "height_ratio": 0.4586
+        }
+      ],
+      "semantic_override_count": 0,
+      "status": "reviewed-raster-appropriate",
+      "review_note": "候选为照片、界面/网页/文档截图或装饰性栅格内容；作为独立图片保留，可移动、裁剪、缩放和替换，内部像素不作虚假元素化。"
+    },
+    {
+      "page": 8,
+      "candidate_count": 1,
+      "candidates": [
+        {
+          "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_浙江蓝成_b13866b052cf/work/assets/page-08-image-001.png",
+          "bbox": [
+            0.0,
+            103.20001,
+            960.0,
+            414.0
+          ],
+          "coverage": 0.5756,
+          "width_ratio": 1.0,
+          "height_ratio": 0.5756
+        }
+      ],
+      "semantic_override_count": 0,
+      "status": "reviewed-raster-appropriate",
+      "review_note": "候选为照片、界面/网页/文档截图或装饰性栅格内容；作为独立图片保留，可移动、裁剪、缩放和替换，内部像素不作虚假元素化。"
+    },
+    {
+      "page": 9,
+      "candidate_count": 1,
+      "candidates": [
+        {
+          "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_浙江蓝成_b13866b052cf/work/assets/page-09-image-001.png",
+          "bbox": [
+            176.03999,
+            314.64001,
+            735.83997,
+            462.0
+          ],
+          "coverage": 0.1591,
+          "width_ratio": 0.5831,
+          "height_ratio": 0.2729
+        }
+      ],
+      "semantic_override_count": 0,
+      "status": "reviewed-raster-appropriate",
+      "review_note": "候选为照片、界面/网页/文档截图或装饰性栅格内容；作为独立图片保留，可移动、裁剪、缩放和替换，内部像素不作虚假元素化。"
+    },
+    {
+      "page": 14,
+      "candidate_count": 3,
+      "candidates": [
+        {
+          "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_浙江蓝成_b13866b052cf/work/assets/page-14-image-002.png",
+          "bbox": [
+            62.104,
+            90.50403,
+            328.36801,
+            470.15302
+          ],
+          "coverage": 0.195,
+          "width_ratio": 0.2774,
+          "height_ratio": 0.7031
+        },
+        {
+          "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_浙江蓝成_b13866b052cf/work/assets/page-14-image-011.png",
+          "bbox": [
+            340.104,
+            90.50403,
+            606.36804,
+            470.15302
+          ],
+          "coverage": 0.195,
+          "width_ratio": 0.2774,
+          "height_ratio": 0.7031
+        },
+        {
+          "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_浙江蓝成_b13866b052cf/work/assets/page-14-image-016.png",
+          "bbox": [
+            619.104,
+            90.50403,
+            885.36804,
+            470.15302
+          ],
+          "coverage": 0.195,
+          "width_ratio": 0.2774,
+          "height_ratio": 0.7031
+        }
+      ],
+      "semantic_override_count": 0,
+      "status": "reviewed-raster-appropriate",
+      "review_note": "候选为照片、界面/网页/文档截图或装饰性栅格内容；作为独立图片保留，可移动、裁剪、缩放和替换，内部像素不作虚假元素化。"
+    },
+    {
+      "page": 17,
+      "candidate_count": 1,
+      "candidates": [
+        {
+          "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_浙江蓝成_b13866b052cf/work/assets/page-17-image-012.png",
+          "bbox": [
+            597.12,
+            79.08002,
+            933.71997,
+            503.04001
+          ],
+          "coverage": 0.2753,
+          "width_ratio": 0.3506,
+          "height_ratio": 0.7851
+        }
+      ],
+      "semantic_override_count": 0,
+      "status": "reviewed-raster-appropriate",
+      "review_note": "候选为照片、界面/网页/文档截图或装饰性栅格内容；作为独立图片保留，可移动、裁剪、缩放和替换，内部像素不作虚假元素化。"
+    },
+    {
+      "page": 19,
+      "candidate_count": 1,
+      "candidates": [
+        {
+          "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_浙江蓝成_b13866b052cf/work/assets/page-19-image-015.png",
+          "bbox": [
+            408.95999,
+            105.72,
+            753.71997,
+            283.32001
+          ],
+          "coverage": 0.1181,
+          "width_ratio": 0.3591,
+          "height_ratio": 0.3289
+        }
+      ],
+      "semantic_override_count": 0,
+      "status": "reviewed-raster-appropriate",
+      "review_note": "候选为照片、界面/网页/文档截图或装饰性栅格内容；作为独立图片保留，可移动、裁剪、缩放和替换，内部像素不作虚假元素化。"
+    },
+    {
+      "page": 20,
+      "candidate_count": 1,
+      "candidates": [
+        {
+          "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_浙江蓝成_b13866b052cf/work/assets/page-20-image-003.png",
+          "bbox": [
+            60.0,
+            161.75999,
+            440.04001,
+            351.72
+          ],
+          "coverage": 0.1393,
+          "width_ratio": 0.3959,
+          "height_ratio": 0.3518
+        }
+      ],
+      "semantic_override_count": 0,
+      "status": "reviewed-raster-appropriate",
+      "review_note": "候选为照片、界面/网页/文档截图或装饰性栅格内容；作为独立图片保留，可移动、裁剪、缩放和替换，内部像素不作虚假元素化。"
+    },
+    {
+      "page": 21,
+      "candidate_count": 1,
+      "candidates": [
+        {
+          "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_浙江蓝成_b13866b052cf/work/assets/page-21-image-004.png",
+          "bbox": [
+            65.185,
+            163.38498,
+            899.96503,
+            478.86499
+          ],
+          "coverage": 0.508,
+          "width_ratio": 0.8696,
+          "height_ratio": 0.5842
+        }
+      ],
+      "semantic_override_count": 0,
+      "status": "reviewed-raster-appropriate",
+      "review_note": "候选为照片、界面/网页/文档截图或装饰性栅格内容；作为独立图片保留，可移动、裁剪、缩放和替换，内部像素不作虚假元素化。"
+    },
+    {
+      "page": 22,
+      "candidate_count": 1,
+      "candidates": [
+        {
+          "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_浙江蓝成_b13866b052cf/work/assets/page-22-image-005.png",
+          "bbox": [
+            61.385,
+            167.48502,
+            896.16504,
+            511.01501
+          ],
+          "coverage": 0.5532,
+          "width_ratio": 0.8696,
+          "height_ratio": 0.6362
+        }
+      ],
+      "semantic_override_count": 0,
+      "status": "reviewed-raster-appropriate",
+      "review_note": "候选为照片、界面/网页/文档截图或装饰性栅格内容；作为独立图片保留，可移动、裁剪、缩放和替换，内部像素不作虚假元素化。"
+    },
+    {
+      "page": 27,
+      "candidate_count": 1,
+      "candidates": [
+        {
+          "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_浙江蓝成_b13866b052cf/work/assets/page-27-image-001.png",
+          "bbox": [
+            0.0,
+            115.44,
+            960.0,
+            498.95999
+          ],
+          "coverage": 0.7102,
+          "width_ratio": 1.0,
+          "height_ratio": 0.7102
+        }
+      ],
+      "semantic_override_count": 0,
+      "status": "reviewed-raster-appropriate",
+      "review_note": "候选为照片、界面/网页/文档截图或装饰性栅格内容；作为独立图片保留，可移动、裁剪、缩放和替换，内部像素不作虚假元素化。"
+    },
+    {
+      "page": 28,
+      "candidate_count": 2,
+      "candidates": [
+        {
+          "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_浙江蓝成_b13866b052cf/work/assets/page-28-image-003.png",
+          "bbox": [
+            9.49,
+            77.845,
+            478.69901,
+            199.022
+          ],
+          "coverage": 0.1097,
+          "width_ratio": 0.4888,
+          "height_ratio": 0.2244
+        },
+        {
+          "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_浙江蓝成_b13866b052cf/work/assets/page-28-image-013.png",
+          "bbox": [
+            481.14401,
+            77.845,
+            950.35303,
+            199.022
+          ],
+          "coverage": 0.1097,
+          "width_ratio": 0.4888,
+          "height_ratio": 0.2244
+        }
+      ],
+      "semantic_override_count": 0,
+      "status": "reviewed-raster-appropriate",
+      "review_note": "候选为照片、界面/网页/文档截图或装饰性栅格内容；作为独立图片保留，可移动、裁剪、缩放和替换，内部像素不作虚假元素化。"
+    },
+    {
+      "page": 29,
+      "candidate_count": 4,
+      "candidates": [
+        {
+          "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_浙江蓝成_b13866b052cf/work/assets/page-29-image-013.png",
+          "bbox": [
+            307.742,
+            229.892,
+            585.05798,
+            474.108
+          ],
+          "coverage": 0.1306,
+          "width_ratio": 0.2889,
+          "height_ratio": 0.4523
+        },
+        {
+          "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_浙江蓝成_b13866b052cf/work/assets/page-29-image-017.png",
+          "bbox": [
+            23.142,
+            229.892,
+            300.45801,
+            474.108
+          ],
+          "coverage": 0.1306,
+          "width_ratio": 0.2889,
+          "height_ratio": 0.4523
+        },
+        {
+          "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_浙江蓝成_b13866b052cf/work/assets/page-29-image-028.png",
+          "bbox": [
+            598.91998,
+            367.56,
+            913.91998,
+            500.52002
+          ],
+          "coverage": 0.0808,
+          "width_ratio": 0.3281,
+          "height_ratio": 0.2462
+        },
+        {
+          "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_浙江蓝成_b13866b052cf/work/assets/page-29-image-029.png",
+          "bbox": [
+            598.91998,
+            183.0,
+            913.91998,
+            362.28
+          ],
+          "coverage": 0.1089,
+          "width_ratio": 0.3281,
+          "height_ratio": 0.332
+        }
+      ],
+      "semantic_override_count": 0,
+      "status": "reviewed-raster-appropriate",
+      "review_note": "候选为照片、界面/网页/文档截图或装饰性栅格内容；作为独立图片保留，可移动、裁剪、缩放和替换，内部像素不作虚假元素化。"
+    },
+    {
+      "page": 31,
+      "candidate_count": 1,
+      "candidates": [
+        {
+          "asset": "/Users/lh/Documents/cybernaut-dist/docs/agent/投资建议书/pdf_to_editable_ppt_智灵动力_浙江蓝成_b13866b052cf/work/assets/page-31-image-002.png",
+          "bbox": [
+            16.92,
+            58.32001,
+            941.63995,
+            505.92001
+          ],
+          "coverage": 0.7984,
+          "width_ratio": 0.9632,
+          "height_ratio": 0.8289
+        }
+      ],
+      "semantic_override_count": 0,
+      "status": "reviewed-raster-appropriate",
+      "review_note": "候选为照片、界面/网页/文档截图或装饰性栅格内容；作为独立图片保留，可移动、裁剪、缩放和替换，内部像素不作虚假元素化。"
+    }
+  ],
+  "review_completed": true,
+  "review_summary": "25个大面积图片候选已逐项复核，均适合保留为独立栅格图片；其余PDF文字、简单形状、线条及独立图片已对象级重建。"
+}
