@@ -481,8 +481,10 @@ const VISIBLE_ANSWER_SUBHEADING_PATTERN = [
 
 const WEB_PAGE_NOISE_PATTERN =
   /(?:联系我们|联系邮箱|联系电话|客服热线|微信号|微信公众号|京ICP备|公网安备|Copyright|All Rights Reserved|隐私政策|用户协议|网站地图)/i
+const MEETING_SOURCE_METADATA_PATTERN =
+  /(?:(?:交流|会议|访谈)(?:时间|地点|人员|对象)|(?:参会|与会)人员)\s*[：:]|(?:大会议室|会议室)/
 const CLIENT_VISIBLE_SOURCE_PROCESS_PATTERN =
-  /(?:项目资料(?:库)?|项目材料|(?:当前|现有)资料|(?:当前|现有)证据|资料截止日|经系统核验|经页面核验|公开页面(?:显示|披露)?|(?:公司|团队|项目方)?(?:资料|材料)(?:中)?(?:显示|表明|说明|披露|介绍|称)|回填(?:当前)?项目资料库|更新本题|本回答|结论置信度|支持原文|来源索引)/i
+  /(?:项目资料(?:库)?|项目材料|(?:当前|现有)资料|(?:当前|现有)证据|资料截止日|经系统核验|经页面核验|公开页面(?:显示|披露)?|(?:公司|团队|项目方)?(?:资料|材料)(?:中)?(?:显示|表明|说明|披露|介绍|称)|(?:会议|交流|访谈)纪要|(?:交流|会议|访谈)(?:时间|地点|人员|对象)|回填(?:当前)?项目资料库|更新本题|本回答|结论置信度|支持原文|来源索引)/i
 const CLIENT_VISIBLE_CANNED_NARRATIVE_PATTERN =
   /(?:现阶段只能形成初步判断|不能把单一材料或公开披露直接视为完成核验|未形成能够相互印证的完整证据链|该判断仅表示项目证据不足|不代表相关事项不存在|核对主体、时间、口径和相互关系后)/i
 const WEB_NAVIGATION_TERMS = [
@@ -527,6 +529,9 @@ function rewriteQaClientNarrative(value: string) {
     .replace(/^融资计划[：:]\s*/g, '公司')
     .replace(/^股权结构[：:]\s*创始团队拟控股/g, '公司拟由创始团队控股')
     .replace(/^股权结构[：:]\s*/g, '公司股权安排为')
+    .replace(/^收费模式\s*模式[一二三四五六七八九十\d]+[：:]\s*按/g, '公司按')
+    .replace(/^收费模式\s*模式[一二三四五六七八九十\d]+[：:]\s*/g, '公司采用')
+    .replace(/(?:会议|交流|访谈)纪要(?:中)?(?:称|显示|表明|说明|提及|记载|披露)[，,:：]?/g, '项目方称')
     .replace(/公司(?:提供的)?(?:资料|材料)(?:中)?(?:显示|表明|说明|披露|介绍|称)[，,:：]?/g, '公司称')
     .replace(/(?:项目方|团队)(?:提供的)?(?:资料|材料)(?:中)?(?:显示|表明|说明|披露|介绍|称)[，,:：]?/g, '$1称')
     .replace(
@@ -966,6 +971,7 @@ function sourceSentences(source: EvidenceSource) {
       sentence.length >= 10
       && sentence.length <= 420
       && !/^(?:Q&A 分类|检索主题|检索式|网页标题|页面标题|发布主体|发布日期|访问日期|公开日期|证据属性|项目匹配|内容指纹|项目大模型)[：:]/.test(sentence)
+      && !MEETING_SOURCE_METADATA_PATTERN.test(sentence)
       && (source.sourceType !== 'public_web_llm' || !WEB_PAGE_NOISE_PATTERN.test(sentence))
       && !/暂无相关资料|未提供|资料不足|信息不足/.test(sentence))
 }

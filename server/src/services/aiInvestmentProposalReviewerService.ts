@@ -15,6 +15,7 @@ import {
 import type { InvestmentProposalEvidencePlan } from './aiInvestmentProposalEvidenceService.js'
 import { comparisonKey, isNearDuplicate } from './aiEvidenceQualityService.js'
 import {
+  containsInvestmentProposalAbnormalSpacing,
   containsInvestmentProposalAiStyleBoilerplate,
   containsInvestmentProposalColonLabel,
   containsInvestmentProposalInlineSubheading,
@@ -186,6 +187,13 @@ function reviewFinding(input: {
       ...location,
       code: 'AI_STYLE_BOILERPLATE',
       message: `${section.title}包含模板化的 AI 套话，应改为以公司、产品、人员、交易或经营事实为主语的直接陈述`,
+    })
+  }
+  if (containsInvestmentProposalAbnormalSpacing(finding.text)) {
+    issue(issues, {
+      ...location,
+      code: 'ABNORMAL_TYPOGRAPHY_SPACING',
+      message: `${section.title}包含中文字符、数字单位或标点附近的异常空格`,
     })
   }
   if (EVIDENCE_PROCESS_OR_BOILERPLATE.test(finding.text)) {
@@ -398,6 +406,14 @@ function reviewTable(input: {
       message: `${section.title}表格包含模板化的 AI 套话`,
     })
   }
+  if ([table.title, ...table.columns, ...table.rows.flat()]
+    .some((value) => containsInvestmentProposalAbnormalSpacing(value))) {
+    issue(issues, {
+      ...location,
+      code: 'TABLE_ABNORMAL_TYPOGRAPHY_SPACING',
+      message: `${section.title}表格包含异常中文排版空格`,
+    })
+  }
   if (EVIDENCE_PROCESS_OR_BOILERPLATE.test(clientTableText)) {
     issue(issues, {
       ...location,
@@ -521,6 +537,12 @@ export function reviewInvestmentProposalContent(input: {
       message: '执行摘要包含模板化的 AI 套话，应改为直接的提案说明',
     })
   }
+  if (containsInvestmentProposalAbnormalSpacing(content.executiveSummary)) {
+    issue(issues, {
+      code: 'ABNORMAL_TYPOGRAPHY_SPACING',
+      message: '执行摘要包含异常中文排版空格',
+    })
+  }
   const projectIdentity = `${projectName} ${companyName ?? ''}`
   const evidenceBySection = new Map(evidencePlan.sections.map((section) => [
     section.sectionId,
@@ -572,6 +594,13 @@ export function reviewInvestmentProposalContent(input: {
         sectionId: definition.id,
         code: 'AI_STYLE_BOILERPLATE',
         message: `章节“${definition.title}”摘要包含模板化的 AI 套话`,
+      })
+    }
+    if (containsInvestmentProposalAbnormalSpacing(sectionValue.summary)) {
+      issue(issues, {
+        sectionId: definition.id,
+        code: 'ABNORMAL_TYPOGRAPHY_SPACING',
+        message: `章节“${definition.title}”摘要包含异常中文排版空格`,
       })
     }
     if (!sectionValue.findings.length) {

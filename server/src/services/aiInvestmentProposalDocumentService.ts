@@ -33,6 +33,7 @@ import {
 } from './aiInvestmentProposalBlueprintService.js'
 import { containsInvestmentProposalInternalErrorText } from './aiInvestmentProposalReviewerService.js'
 import {
+  containsInvestmentProposalAbnormalSpacing,
   containsInvestmentProposalAiStyleBoilerplate,
   containsInvestmentProposalColonLabel,
   containsInvestmentProposalInlineSubheading,
@@ -554,6 +555,12 @@ export async function reviewInvestmentProposalDocx(input: {
     issues.push({
       code: 'AI_STYLE_BOILERPLATE',
       message: 'Word 正文包含明显的 AI 模板化套话',
+    })
+  }
+  if (containsInvestmentProposalAbnormalSpacing(allText)) {
+    issues.push({
+      code: 'ABNORMAL_TYPOGRAPHY_SPACING',
+      message: 'Word正文包含中文字符、数字单位或标点附近的异常空格',
     })
   }
   if (allText.includes('待核验')) {

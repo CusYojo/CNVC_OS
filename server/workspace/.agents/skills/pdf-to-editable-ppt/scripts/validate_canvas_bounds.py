@@ -36,10 +36,9 @@ def object_name(node: ET.Element) -> str:
 
 
 def transform(node: ET.Element) -> tuple[int, int, int, int] | None:
-    xfrm = (
-        node.find("./p:spPr/a:xfrm", NS)
-        or node.find("./p:xfrm", NS)
-    )
+    xfrm = node.find("./p:spPr/a:xfrm", NS)
+    if xfrm is None:
+        xfrm = node.find("./p:xfrm", NS)
     if xfrm is None:
         return None
     offset = xfrm.find("./a:off", NS)
@@ -105,11 +104,29 @@ def main() -> None:
                     "right": max(0, x + width - slide_width),
                     "bottom": max(0, y + height - slide_height),
                 }
+                # PDF 页面背景和整页矢量图在坐标换算时常带有极小的裁切出血，
+                # 例如对象覆盖 99% 以上画布、仅向外延伸约 1%。这种出血用于
+                # 消除边缘白线，不属于内容丢失。只对近整页对象放宽到 2%；
+                # 普通文本、图标、表格等仍严格使用默认 1% 容差。
+                near_full_slide = (
+                    width >= slide_width * 0.98
+                    and height >= slide_height * 0.98
+                )
+                allowed_x = (
+                    max(tolerance_x, slide_width * 0.02)
+                    if near_full_slide
+                    else tolerance_x
+                )
+                allowed_y = (
+                    max(tolerance_y, slide_height * 0.02)
+                    if near_full_slide
+                    else tolerance_y
+                )
                 if (
-                    overflow["left"] > tolerance_x
-                    or overflow["right"] > tolerance_x
-                    or overflow["top"] > tolerance_y
-                    or overflow["bottom"] > tolerance_y
+                    overflow["left"] > allowed_x
+                    or overflow["right"] > allowed_x
+                    or overflow["top"] > allowed_y
+                    or overflow["bottom"] > allowed_y
                 ):
                     issues.append(
                         {

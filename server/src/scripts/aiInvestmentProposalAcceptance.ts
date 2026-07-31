@@ -18,6 +18,7 @@ import {
   buildInvestmentProposalEvidencePlan,
 } from '../services/aiInvestmentProposalEvidenceService.js'
 import {
+  containsInvestmentProposalAbnormalSpacing,
   containsInvestmentProposalAiStyleBoilerplate,
   containsInvestmentProposalColonLabel,
   containsInvestmentProposalInlineSubheading,
@@ -120,7 +121,7 @@ const detailedProductParagraphs = summarizeInvestmentProposalProductEvidence(
 assert.ok(detailedProductParagraphs.length >= 2)
 assert.match(detailedProductParagraphs.join('\n'), /三层技术架构/)
 assert.match(detailedProductParagraphs.join('\n'), /自进化大模型/)
-assert.match(detailedProductParagraphs.join('\n'), /AI 科学家平台/)
+assert.match(detailedProductParagraphs.join('\n'), /AI科学家平台/)
 assert.match(detailedProductParagraphs.join('\n'), /事件推演系统/)
 assert.doesNotMatch(detailedProductParagraphs.join('\n'), /[（(]\s*\d+\s*[）)]|顶层\s*[:：]|中层\s*[:：]|底层\s*[:：]/)
 const clientFinding = sanitizeInvestmentProposalClientText(
@@ -143,6 +144,22 @@ assert.equal(
 )
 assert.equal(containsInvestmentProposalSourceProcessWording(summarizedSourceProse), false)
 assert.equal(containsInvestmentProposalAiStyleBoilerplate('总体来看，公司发展情况较好。'), true)
+const normalizedTypography = sanitizeInvestmentProposalClientText(
+  '宁波政府项目： 在宁波注册主体，申报 800 万元政府补贴，申报方向为一人公司智 能体服务矩阵 。',
+)
+assert.equal(
+  normalizedTypography,
+  '宁波政府项目：在宁波注册主体，申报800万元政府补贴，申报方向为一人公司智能体服务矩阵。',
+)
+const normalizedMixedTypography = sanitizeInvestmentProposalClientText(
+  '公司采用 Open AI Skill 框架，基础制作费 500 元 / 分钟，后台 AI 自动处理。',
+)
+assert.equal(
+  normalizedMixedTypography,
+  '公司采用Open AI Skill框架，基础制作费500元/分钟，后台AI自动处理。',
+)
+assert.equal(containsInvestmentProposalAbnormalSpacing(normalizedTypography), false)
+assert.equal(containsInvestmentProposalAbnormalSpacing(normalizedMixedTypography), false)
 const orderParagraph = sanitizeInvestmentProposalClientText(
   '订单节奏：2026年5月正式启动新合作，当前每20天交付5000分钟内容。',
 )
@@ -362,7 +379,7 @@ function claimFor(definition: typeof leafDefinitions[number]) {
     return '若公司未能在投决前完成风险事项核验，可能影响交易判断；项目组应在投决前完成专项审查并持续跟踪，责任主体为项目组。'
   }
   if (definition.analysisKind === 'conclusion') {
-    return '阶段与推进建议为申请立项；建议在项目组完成关键事实核验并落实立项前提后，通过 OA 发起立项申请；如重大风险未消除，应暂缓推进并重新评估。'
+    return '阶段与推进建议为申请立项；建议在项目组完成关键事实核验并落实立项前提后，通过OA发起立项申请；如重大风险未消除，应暂缓推进并重新评估。'
   }
   return `星河机器人有限公司已确认${topic}相关安排，具体执行情况仍需在下一阶段核验。`
 }
@@ -632,6 +649,20 @@ const aiStyleLeakReview = reviewInvestmentProposalContent({
 assert.equal(aiStyleLeakReview.passed, false)
 assert.ok(aiStyleLeakReview.issues.some((issue) =>
   issue.code === 'AI_STYLE_BOILERPLATE'))
+const abnormalSpacingContent = structuredClone(content)
+abnormalSpacingContent.sections.find((section) => section.title === '（一）公司简介')!
+  .findings[0].text = '星河机器人有限公司已形成智 能体产品，2026 年启动商业化交付 。'
+const abnormalSpacingReview = reviewInvestmentProposalContent({
+  content: abnormalSpacingContent,
+  blueprint,
+  evidencePlan,
+  sources,
+  projectName: '星河机器人项目',
+  companyName: '星河机器人有限公司',
+})
+assert.equal(abnormalSpacingReview.passed, false)
+assert.ok(abnormalSpacingReview.issues.some((issue) =>
+  issue.code === 'ABNORMAL_TYPOGRAPHY_SPACING'))
 const colonLabelLeakContent = structuredClone(content)
 colonLabelLeakContent.sections.find((section) => section.title === '（五）运营摘要')!
   .findings[0].text = '订单节奏：2026年5月正式启动新合作，当前每20天交付5000分钟内容。'

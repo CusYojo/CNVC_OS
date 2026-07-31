@@ -152,7 +152,7 @@ function declaredPptxSha256(handoff: ConversionHandoff) {
     typeof value === 'string' && /^[a-f0-9]{64}$/i.test(value))
 }
 
-function conversionFailureMessage(error: unknown) {
+export function conversionFailureMessage(error: unknown) {
   const failure = error as CommandFailure
   const detail = commandFailureDetail(error)
   if (/PyMuPDF|No module named ['"]?fitz|No module named ['"]?PIL/i.test(detail)) {
@@ -174,7 +174,13 @@ function conversionFailureMessage(error: unknown) {
   ) {
     return 'PDF 模板转换环境缺少 Presentations 技能或 LibreOffice 渲染管线'
   }
-  if (failure.killed || /timed?\s*out|timeout/i.test(detail)) {
+  if (/检测到 \d+ 个对象越出画布|canvas-overflow-report\.json/i.test(detail)) {
+    return 'PDF 模板转换后的对象越出幻灯片画布，未通过版式边界检查'
+  }
+  if (
+    failure.killed
+    || /(?:subprocess\.)?TimeoutExpired|timed?\s+out(?:\s+after)?|ETIMEDOUT|ERR_[A-Z_]*TIMEOUT|Command execution timed out/i.test(detail)
+  ) {
     return 'PDF 模板转换超时，请精简模板或改为上传原生 PPTX'
   }
   if (

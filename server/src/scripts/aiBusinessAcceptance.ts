@@ -188,7 +188,7 @@ function contentFor(
   const raw: BusinessContent = {
     title: `${project.name}${template.label}`,
     executiveSummary: type === 'due_diligence_report'
-      ? `阶段与推进建议：继续跟踪。杭州示例科技已形成企业知识管理软件产品和订阅加实施服务的商业路径，但客户合同、收入确认、续费回款及核心权属安排尚不足以支持进入下一审批环节。建议优先核对重点客户从试用到合同、交付、验收和回款的完整链条，同时确认核心团队任职、知识产权归属及本轮融资文件；上述事项完成后再评估是否申请进入下一阶段。`
+      ? `建议继续跟踪杭州示例科技。公司已形成企业知识管理软件产品和订阅加实施服务的商业路径，但客户合同、收入确认、续费回款及核心权属安排尚不足以支持进入下一审批环节。下一步应优先核对重点客户从试用到合同、交付、验收和回款的完整链条，同时确认核心团队任职、知识产权归属及本轮融资文件；上述事项完成后再评估是否申请进入下一阶段。`
       : type === 'investment_recommendation_ppt'
         ? `本初稿严格采用本次上传模板，依据截至 ${sourceCutoffDate} 的脱敏证据形成。资料记载、AI 推断、待核验事项及资料缺口已分开标识，所有结论仍须业务审核。`
         : `本初稿采用经批准的业务模板，依据截至 ${sourceCutoffDate} 的脱敏证据形成。资料记载、AI 推断、待核验事项及资料缺口已分开标识，所有结论仍须业务审核。`,
@@ -373,7 +373,7 @@ async function main() {
               message: {
                 content: JSON.stringify({
                   title: '杭州示例科技有限公司尽调报告',
-                  executiveSummary: '阶段与推进建议：继续跟踪。项目已形成企业知识管理软件与订阅加实施服务的业务方向，产品能力和团队分工仍需以原始记录交叉确认；客户合同、交付验收、收入确认、续费回款、知识产权权属及本轮融资文件可能改变阶段判断。建议依次核对工商与权属、重点客户完整交易链条、历史财务和资金用途，在关键事项闭环后再决定是否申请立项。',
+                  executiveSummary: '建议继续跟踪杭州示例科技。公司已形成企业知识管理软件与订阅加实施服务的业务方向，产品能力和团队分工仍需以原始记录交叉确认；客户合同、交付验收、收入确认、续费回款、知识产权权属及本轮融资文件可能改变阶段判断。下一步应依次核对工商与权属、重点客户完整交易链条、历史财务和资金用途，在关键事项闭环后再决定是否申请立项。',
                   executiveSummarySourceIndexes: [0, 1],
                   highlights: ['企业知识管理软件已形成明确应用方向'],
                   risks: ['客户交易链条和权属边界仍需核验'],
@@ -453,7 +453,9 @@ async function main() {
         prompt.includes('内部事实卡')
           && prompt.includes('统一主体、时间、关系、事件阶段和数字口径')
           && prompt.includes('不得输出事实卡或分析步骤')
-          && prompt.includes('值得注意的是'))
+          && prompt.includes('值得注意的是')
+          && prompt.includes('不得出现“阶段与推进建议：”“主建议：”')
+          && prompt.includes('不使用“该信息、该信号、该口径、该能力、该模式、该表述”'))
       && chapterUserPrompts.every((prompt) =>
         prompt.includes('内部事实卡（只作写作依据')
           && prompt.includes('不得复制卡片标题、来源名、片段号或处理说明到正文')),
@@ -820,9 +822,24 @@ async function main() {
           && badQualityIssues.some((issue) => issue.includes('模型化套话')),
         badQualityIssues.join('；'),
       )
+      const formulaicQualityIssues = dueDiligenceContentQualityIssues({
+        ...content,
+        sections: content.sections.map((section, index) => index === 1
+          ? {
+              ...section,
+              summary: '公司已完成工商登记并形成软件产品方向，该信息可以支撑主体判断，该信号也为后续商业验证提供基础。',
+            }
+          : section),
+      }, template.sections)
+      assert(
+        checks,
+        'AI-010 拦截重复使用“该信息/该信号”的模板化叙述',
+        formulaicQualityIssues.some((issue) => issue.includes('模型化套话')),
+        formulaicQualityIssues.join('；'),
+      )
       const sanitizedProcessWording = finalizeDueDiligenceContent({
         ...content,
-        executiveSummary: '阶段与推进建议：继续跟踪。根据项目资料库显示，值得注意的是，杭州示例科技已经形成软件产品。',
+        executiveSummary: '阶段与推进建议：继续跟踪。主建议：继续跟踪。根据项目资料库显示，值得注意的是，杭州示例科技已经形成软件产品。',
         highlights: ['结合现有资料分析，值得注意的是，公司具备客户验证信号。'],
         risks: ['项目材料显示，知识产权权属尚需取得原始文件确认。'],
         sections: content.sections.map((section, index) => index === 1
@@ -865,6 +882,14 @@ async function main() {
           '资料显示',
           '值得注意的是',
         ].every((phrase) => !sanitizedVisibleText.includes(phrase)),
+        sanitizedVisibleText,
+      )
+      assert(
+        checks,
+        'AI-010 导出前合并重复建议并清除报告式标签',
+        !sanitizedVisibleText.includes('阶段与推进建议')
+          && !sanitizedVisibleText.includes('主建议')
+          && (sanitizedVisibleText.match(/建议继续跟踪/g) || []).length === 1,
         sanitizedVisibleText,
       )
       const misplacedContentIssues = dueDiligenceContentQualityIssues({
@@ -916,9 +941,12 @@ async function main() {
       )
       assert(
         checks,
-        'AI-010 输出供投资决策使用的项目推进结论',
-        (documentXml.match(/阶段与推进建议：继续跟踪/g) || []).length >= 2,
-        '执行摘要与投资概要均使用同一个项目推进结论',
+        'AI-010 自然表达一次项目推进建议',
+        !documentXml.includes('阶段与推进建议')
+          && !documentXml.includes('主建议')
+          && (documentXml.match(/建议继续跟踪/g) || []).length === 1
+          && documentXml.includes('下一审批环节'),
+        '执行摘要自然表达一次建议；投资概要只说明阶段与推进条件',
       )
       assert(
         checks,
@@ -956,6 +984,11 @@ async function main() {
           '不难发现',
           '由此可见',
           '综上所述',
+          '阶段与推进建议',
+          '主建议',
+          '最强依据是',
+          '反向证据是',
+          '前置条件为',
         ].every((phrase) => !documentXml.includes(phrase)),
         '正文只写项目事实、投资含义、限制和动作',
       )

@@ -32,6 +32,8 @@ const CLIENT_SOURCE_PROCESS_WORDING =
   /(?:项目资料(?:库)?|(?:当前|现有)资料|会议纪要(?:显示|列示|记载|提及)?|已取得材料|原始(?:文件|资料)(?:核验|复核)?|资料(?:显示|列示|记载|提及))/i
 const CLIENT_AI_STYLE_BOILERPLATE =
   /(?:值得注意的是|需要指出的是|不难看出|由此可见|综上所述|总体来看|在此背景下|从长远来看|多维度赋能|全方位赋能|打造[^。；]{0,24}新范式|构建[^。；]{0,24}生态闭环|实现[^。；]{0,18}从[^。；]{1,18}到[^。；]{1,18}的跃升)/
+const INVESTMENT_PROPOSAL_ABNORMAL_SPACING =
+  /(?:[\u3400-\u9fff][ \t\u00a0\u3000]+[\u3400-\u9fffA-Za-z0-9%％℃°]|[A-Za-z0-9%％℃°][ \t\u00a0\u3000]+[\u3400-\u9fff]|[（【《“‘][ \t\u00a0\u3000]+|[ \t\u00a0\u3000]+[，。！？；：、）】》”’]|[ \t\u00a0\u3000]+[\/+\uff0b][ \t\u00a0\u3000]*)/u
 const CLIENT_COLON_LABEL_NAMES = [
   '订单节奏',
   '订单情况',
@@ -140,14 +142,37 @@ const COLON_LABEL_REWRITES: Record<string, string> = {
   下一步动作: '下一步建议',
 }
 
+function normalizeInvestmentProposalTypography(value: string) {
+  let text = value
+    .replace(/[ \t\u00a0\u3000]+/g, ' ')
+    .replace(/[ \t\u00a0\u3000]*([\/+＋])[ \t\u00a0\u3000]*/g, '$1')
+    .replace(/([（【《“‘])[ \t\u00a0\u3000]+/g, '$1')
+    .replace(/[ \t\u00a0\u3000]+([，。！？；：、）】》”’])/g, '$1')
+    .replace(/([，。！？；：、])[ \t\u00a0\u3000]+/g, '$1')
+    .replace(/([\u3400-\u9fff])[ \t\u00a0\u3000]+([A-Za-z0-9%％℃°])/g, '$1$2')
+    .replace(/([A-Za-z0-9%％℃°])[ \t\u00a0\u3000]+([\u3400-\u9fff])/g, '$1$2')
+    .replace(/(\d)[ \t\u00a0\u3000]+([%％℃°])/g, '$1$2')
+    .replace(/(\d(?:\.\d+)?)[ \t\u00a0\u3000]+([KMBGT](?:B)?)\b/g, '$1$2')
+  for (let pass = 0; pass < 4; pass += 1) {
+    const next = text
+      .replace(/([\u3400-\u9fff])[ \t\u00a0\u3000]+([\u3400-\u9fff])/g, '$1$2')
+      .replace(/([\u3400-\u9fff])[ \t\u00a0\u3000]+([（【《“‘])/g, '$1$2')
+      .replace(/([）】》”’])[ \t\u00a0\u3000]+([\u3400-\u9fff])/g, '$1$2')
+    if (next === text) break
+    text = next
+  }
+  return text
+}
+
 function normalizeWhitespace(value: string) {
-  return value
+  const text = value
     .replace(/\r\n?/g, '\n')
     .replace(/[ \t]+/g, ' ')
     .replace(/ *\n */g, '\n')
     .replace(/[；;]\s*[；;]/g, '；')
     .replace(/^[；;，,\s]+|[；;，,\s]+$/g, '')
     .trim()
+  return normalizeInvestmentProposalTypography(text).trim()
 }
 
 function withoutCollapsedWebFragments(value: string) {
@@ -224,6 +249,10 @@ export function containsInvestmentProposalSourceProcessWording(value: string) {
 
 export function containsInvestmentProposalAiStyleBoilerplate(value: string) {
   return CLIENT_AI_STYLE_BOILERPLATE.test(value)
+}
+
+export function containsInvestmentProposalAbnormalSpacing(value: string) {
+  return INVESTMENT_PROPOSAL_ABNORMAL_SPACING.test(value)
 }
 
 function rewriteClientSourceProcessWording(value: string) {
