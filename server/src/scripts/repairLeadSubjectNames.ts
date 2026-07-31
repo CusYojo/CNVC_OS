@@ -136,8 +136,31 @@ async function main() {
     }))
     if (!apply) continue
 
+    let shouldRename = accepted && nextName !== row.name
+    if (shouldRename) {
+      const conflict = await db.select({ id: leads.id })
+        .from(leads)
+        .where(
+          and(
+            eq(leads.name, nextName),
+            sql`${leads.id} != ${row.id}`,
+          ),
+        )
+        .limit(1)
+      if (conflict.length > 0) {
+        console.log(JSON.stringify({
+          id: row.id,
+          conflict: true,
+          targetName: nextName,
+          conflictId: conflict[0].id,
+          action: 'skip-rename',
+        }))
+        shouldRename = false
+      }
+    }
+
     await db.update(leads).set({
-      ...(accepted ? {
+      ...(shouldRename ? {
         name: nextName,
         companyName: nextCompanyName,
       } : {}),

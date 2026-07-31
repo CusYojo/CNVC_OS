@@ -156,7 +156,9 @@ export const leads = pgTable('leads', {
   claimedBy: varchar('claimed_by', { length: 64 }),
   convertedProjectId: uuid('converted_project_id').references(() => projects.id, { onDelete: 'set null' }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-})
+}, (t) => ({
+  uniqueActiveName: uniqueIndex('uq_leads_name_active').on(t.name).where(sql`${t.poolStatus} != '已转专属项目'`),
+}))
 
 export const radarSyncState = pgTable('radar_sync_state', {
   id: varchar('id', { length: 64 }).primaryKey(),

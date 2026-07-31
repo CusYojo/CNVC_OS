@@ -84,7 +84,7 @@ export function shouldBackfillCompanyName(
   return isRadarRecord && currentName === leadName && isExplicitLegalEntity
 }
 
-function mergeNonEmptyValue(existing: unknown, incoming: unknown): unknown {
+export function mergeNonEmptyValue(existing: unknown, incoming: unknown): unknown {
   if (!isMeaningfulRadarValue(incoming)) return existing
   if (isPlainObject(existing) && isPlainObject(incoming)) {
     const merged: Record<string, unknown> = { ...existing }
@@ -177,7 +177,7 @@ export function mergeRadarFundingRounds(existing: unknown, incoming: unknown): u
   return mergeObjectArray(existing, incoming, 'funding')
 }
 
-function mergeUniqueValues(existing: unknown, incoming: unknown): unknown[] {
+export function mergeUniqueValues(existing: unknown, incoming: unknown): unknown[] {
   const oldItems = Array.isArray(existing) ? existing.filter(isMeaningfulRadarValue) : []
   const newItems = Array.isArray(incoming) ? incoming.filter(isMeaningfulRadarValue) : []
   const merged = [...oldItems]

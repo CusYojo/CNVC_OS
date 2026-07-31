@@ -693,32 +693,51 @@ export async function syncRadarLeadByName(input: RadarLeadSyncFields, userId?: s
   }
   const existing = matches[0]
   if (!existing) {
-    const row = await createLead({
-      ...input,
-      score: 0,
-    } as typeof leads.$inferInsert, userId)
-    if (!row) throw new Error(`新增 Radar 线索失败：${input.name}`)
-    return { status: 'created', row, duplicateMatches: 0 }
+    try {
+      const row = await createLead({
+        ...input,
+        score: 0,
+      } as typeof leads.$inferInsert, userId)
+      if (!row) throw new Error(`新增 Radar 线索失败：${input.name}`)
+      return { status: 'created', row, duplicateMatches: 0 }
+    } catch (createErr) {
+      // 并发竞态：唯一约束冲突 → 另一并发请求已创建同名记录，退化为 merge
+      if ((createErr as Error & { code?: string }).code === '23505') {
+        const [fallback] = await db.select().from(leads)
+          .where(eq(leads.name, input.name))
+          .orderBy(asc(leads.createdAt))
+        if (fallback) {
+          // 复用下面的 merge 逻辑
+          matches = [fallback]
+        } else {
+          throw createErr
+        }
+      } else {
+        throw createErr
+      }
+    }
   }
 
+  // 此时 existing = matches[0] 一定有值（可能是并发的另一条记录）
+  const merged = matches[0]
   const patch: Record<string, unknown> = {
-    ...buildRadarLeadMergePatch(existing, input as RadarLeadSyncFields & Record<string, unknown>),
+    ...buildRadarLeadMergePatch(merged, input as RadarLeadSyncFields & Record<string, unknown>),
   }
-  const canUpgradeSubjectName = /^项目发现雷达(?:\s|·|$)/.test(String(existing.source ?? ''))
-    && isBetterLeadSubjectName(existing.name, input.name)
+  const canUpgradeSubjectName = /^项目发现雷达(?:\s|·|$)/.test(String(merged.source ?? ''))
+    && isBetterLeadSubjectName(merged.name, input.name)
   if (canUpgradeSubjectName) {
     patch.name = input.name
-    if (!isSpecificLeadSubjectName(existing.companyName) && input.companyName) {
+    if (!isSpecificLeadSubjectName(merged.companyName) && input.companyName) {
       patch.companyName = input.companyName
     }
   }
   if (Object.keys(patch).length === 0) {
-    return { status: 'unchanged', row: existing, duplicateMatches: Math.max(0, matches.length - 1) }
+    return { status: 'unchanged', row: merged, duplicateMatches: Math.max(0, matches.length - 1) }
   }
 
   const [row] = await db.update(leads)
     .set(patch as Partial<typeof leads.$inferInsert>)
-    .where(eq(leads.id, existing.id))
+    .where(eq(leads.id, merged.id))
     .returning()
   if (!row) throw new Error(`更新 Radar 线索失败：${input.name}`)
   await db.insert(auditLogs).values({
