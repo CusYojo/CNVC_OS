@@ -10,6 +10,7 @@ from pathlib import Path
 
 import fitz
 from PIL import Image
+from text_grouping import group_text_elements
 
 
 INPUT_PDF = None
@@ -705,6 +706,23 @@ def main():
         type=Path,
         help="水印识别报告路径；默认写入构建目录 watermark-report.json。",
     )
+    parser.add_argument(
+        "--text-grouping",
+        choices=("line", "hybrid", "paragraph"),
+        default="hybrid",
+        help="文字对象粒度：line保持逐行文本框；hybrid保守合并正文段落；paragraph扩大段落合并范围。",
+    )
+    parser.add_argument(
+        "--line-break-mode",
+        choices=("preserve", "smart", "reflow"),
+        default="smart",
+        help="段落内换行：preserve保留视觉换行；smart仅移除高置信度软换行；reflow尽量交给PowerPoint自动换行。",
+    )
+    parser.add_argument(
+        "--text-grouping-report",
+        type=Path,
+        help="文字段落聚类报告路径；默认写入构建目录 text-grouping-report.json。",
+    )
     args = parser.parse_args()
 
     INPUT_PDF = args.input.expanduser().resolve()
@@ -731,6 +749,11 @@ def main():
         args.watermark_report.expanduser().resolve()
         if args.watermark_report
         else BUILD_DIR / "watermark-report.json"
+    )
+    text_grouping_report_path = (
+        args.text_grouping_report.expanduser().resolve()
+        if args.text_grouping_report
+        else BUILD_DIR / "text-grouping-report.json"
     )
 
     ASSET_DIR.mkdir(parents=True, exist_ok=True)
@@ -763,8 +786,14 @@ def main():
             ],
             "report": str(WATERMARK_REPORT),
         },
+        "text_grouping": {
+            "mode": args.text_grouping,
+            "line_break_mode": args.line_break_mode,
+            "report": str(text_grouping_report_path),
+        },
         "pages": [],
     }
+    text_grouping_pages = []
 
     for page_index, page in enumerate(doc):
         page_no = page_index + 1
@@ -842,6 +871,13 @@ def main():
 
         elements.sort(key=lambda element: (element["seqno"], {"drawing": 0, "image": 1, "text": 2}[element["kind"]]))
         elements = merge_adjacent_text_elements(elements)
+        elements, page_text_grouping = group_text_elements(
+            elements,
+            mode=args.text_grouping,
+            line_break_mode=args.line_break_mode,
+            page_number=page_no,
+        )
+        text_grouping_pages.append(page_text_grouping)
         model["pages"].append(
             {
                 "number": page_no,
@@ -856,9 +892,44 @@ def main():
             f"{sum(e['kind'] == 'text' for e in elements)} 个文字对象，"
             f"{sum(e['kind'] == 'drawing' for e in elements)} 个绘图对象，"
             f"{sum(e['kind'] == 'image' for e in elements)} 个图片对象，"
-            f"{fused_shade_count} 个裁剪纯色填充已融合"
+            f"{fused_shade_count} 个裁剪纯色填充已融合，"
+            f"{page_text_grouping['groupedParagraphCount']} 个多行段落文本框"
         )
 
+    text_grouping_report = {
+        "schemaVersion": "1.0",
+        "passed": all(
+            page["contentPreserved"] for page in text_grouping_pages
+        ),
+        "mode": args.text_grouping,
+        "lineBreakMode": args.line_break_mode,
+        "pageCount": len(text_grouping_pages),
+        "inputTextObjectCount": sum(
+            page["inputTextObjectCount"] for page in text_grouping_pages
+        ),
+        "outputTextObjectCount": sum(
+            page["outputTextObjectCount"] for page in text_grouping_pages
+        ),
+        "textObjectReduction": sum(
+            page["textObjectReduction"] for page in text_grouping_pages
+        ),
+        "groupedParagraphCount": sum(
+            page["groupedParagraphCount"] for page in text_grouping_pages
+        ),
+        "groupedSourceLineCount": sum(
+            page["groupedSourceLineCount"] for page in text_grouping_pages
+        ),
+        "pages": text_grouping_pages,
+    }
+    text_grouping_report_path.parent.mkdir(parents=True, exist_ok=True)
+    text_grouping_report_path.write_text(
+        json.dumps(text_grouping_report, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    if not text_grouping_report["passed"]:
+        raise RuntimeError(
+            f"文字段落聚类发生内容丢失，报告：{text_grouping_report_path}"
+        )
     OUTPUT_JSON.write_text(
         json.dumps(model, ensure_ascii=False, separators=(",", ":")),
         encoding="utf-8",

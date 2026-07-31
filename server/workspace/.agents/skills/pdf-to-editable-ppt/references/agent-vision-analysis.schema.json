@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["pageType", "confidence", "regions"],
+  "properties": {
+    "pageType": {"type": "string"},
+    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+    "typography": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sourceFontVerified": {"type": "boolean"},
+        "bodyFontCandidates": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "titleFontCandidates": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "styles": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["styleId", "fontSizePt", "bold"],
+            "properties": {
+              "styleId": {"type": "string"},
+              "role": {"type": "string"},
+              "fontFamily": {"type": "string"},
+              "fontSizePt": {"type": "number", "minimum": 5, "maximum": 96},
+              "bold": {"type": "boolean"},
+              "color": {"type": "string"}
+            }
+          }
+        }
+      }
+    },
+    "regions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "id",
+          "type",
+          "bbox",
+          "recommendedAction",
+          "confidence",
+          "reconstructionComplete",
+          "objects"
+        ],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "type": {
+            "enum": [
+              "flowchart",
+              "table",
+              "chart",
+              "matrix",
+              "icon-group",
+              "photo",
+              "screenshot",
+              "illustration",
+              "decoration",
+              "watermark",
+              "text-block",
+              "unknown"
+            ]
+          },
+          "bbox": {
+            "type": "array",
+            "minItems": 4,
+            "maxItems": 4,
+            "items": {"type": "number", "minimum": 0, "maximum": 1}
+          },
+          "recommendedAction": {
+            "enum": [
+              "semantic-rebuild",
+              "ocr-text",
+              "keep-raster",
+              "review",
+              "ignore"
+            ]
+          },
+          "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+          "reconstructionComplete": {"type": "boolean"},
+          "coverFill": {"type": "string"},
+          "expectedObjectCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "objects": {
+            "type": "array",
+            "items": {"type": "object"}
+          }
+        }
+      }
+    }
+  }
+}

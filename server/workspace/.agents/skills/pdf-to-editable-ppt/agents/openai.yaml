@@ -1,4 +1,4 @@
 interface:
-  display_name: "PDF 转元素级可编辑 PPT"
-  short_description: "校准原模板字体字号，重建文字图标并验证对象真实可编辑"
-  default_prompt: "使用 $pdf-to-editable-ppt 将这个 PDF 1:1 转换为元素级可编辑 PowerPoint；默认 editable-scope=all，文字字体和字号必须与源模板视觉一致，图标、图形、图表和表格需按语义对象重建，并完成水印、语义构建、可编辑前景及 PowerPoint 原生渲染验收。"
+  display_name: "PDF to Editable PPT Vision"
+  short_description: "段落聚类、字号校准与图标覆盖门禁的PDF转PPT"
+  default_prompt: "Use $pdf-to-editable-ppt-vision to convert this PDF into a high-fidelity editable PowerPoint with paragraph-level text boxes, template-aligned typography, editable icon coverage, and strict foreground QA."

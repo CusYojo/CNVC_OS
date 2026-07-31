@@ -12,6 +12,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+from text_grouping import group_text_elements
+from typography import load_typography_profile, normalize_deck_typography
+
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
@@ -103,10 +106,7 @@ def useful_row(row, minimum_confidence):
     confidence = float(row.get("confidence") or 0)
     if confidence < minimum_confidence:
         return False
-    if confidence < max(0.45, minimum_confidence) and len(text) <= 2 and text not in {
-        "AI",
-        "OS",
-    }:
+    if confidence < 0.45 and len(text) <= 2 and text not in {"AI", "OS"}:
         return False
     return True
 
@@ -118,73 +118,158 @@ def rgb_hex(values):
     return f"#{r:02X}{g:02X}{b:02X}"
 
 
-def visual_text_units(text):
-    """Estimate rendered line width in em units without depending on a font engine."""
-    units = 0.0
-    for char in str(text or ""):
-        if char.isspace():
-            units += 0.32
-        elif re.match(r"[\u3400-\u9fff\u3040-\u30ff\uac00-\ud7af]", char):
-            units += 1.0
-        elif char.isalnum():
-            units += 0.56
-        else:
-            units += 0.5
-    return max(1.0, units)
+def grouping_color_bucket(value):
+    match = re.fullmatch(r"#?([0-9A-Fa-f]{6})", str(value or ""))
+    if not match:
+        return "#404040"
+    color = match.group(1)
+    r, g, b = (int(color[index:index + 2], 16) for index in (0, 2, 4))
+    luminance = (r * 299 + g * 587 + b * 114) / 1000
+    spread = max(r, g, b) - min(r, g, b)
+    if spread <= 35:
+        if luminance < 105:
+            return "#404040"
+        if luminance < 180:
+            return "#808080"
+        return "#D0D0D0"
+    dominant = max(range(3), key=lambda index: (r, g, b)[index])
+    return ("#804040", "#408040", "#4060A0")[dominant]
 
 
-def classify_text_role(text, top, slide_height, font_basis):
-    value = str(text or "").strip()
-    numeric_count = sum(char.isdigit() for char in value)
-    numeric_heavy = bool(value) and numeric_count / len(value) >= 0.4
-    if font_basis >= 56 and len(value) <= 24:
-        return "display-number" if numeric_heavy else "display-title"
-    if top < slide_height * 0.16 and font_basis >= 24:
-        return "slide-title"
-    return "body"
-
-
-def calibrated_font_size(
-    *,
-    text,
-    item_width,
-    item_height,
-    font_basis,
-    role,
-    render_dpi,
-    body_scale,
-    title_scale,
-    display_scale,
-    minimum,
-    maximum,
+def group_ocr_text_items(
+    text_items,
+    mode,
+    line_break_mode,
+    page_number,
+    order_mode="spatial",
 ):
-    role_scale = {
-        "display-title": display_scale,
-        "display-number": display_scale,
-        "slide-title": title_scale,
-        "body": body_scale,
-    }[role]
-    role_maximum = {
-        "display-title": maximum,
-        "display-number": maximum,
-        "slide-title": min(maximum, 44.0),
-        "body": min(maximum, 28.0),
-    }[role]
-    dpi_to_points = 72.0 / max(1.0, float(render_dpi))
-    width_cap = (
-        float(item_width)
-        * dpi_to_points
-        * 1.2
-        / visual_text_units(text)
+    elements = []
+    vertical_items = []
+    for index, item in enumerate(text_items):
+        if item.get("vertical"):
+            vertical_items.append((index, item))
+            continue
+        left = float(item["left"])
+        top = float(item["top"])
+        width = float(item["width"])
+        height = float(item["height"])
+        original_run = {
+            "text": str(item.get("text") or ""),
+            "font": item.get("font"),
+            "bold": bool(item.get("bold")),
+            "italic": False,
+            "font_size": float(item.get("font_size") or 10),
+            "font_size_pt": float(
+                item.get("font_size_pt")
+                or item.get("font_size")
+                or 10
+            ),
+            "style_id": item.get("style_id"),
+            "color": item.get("color"),
+            "opacity": 1.0,
+            "direction": [1.0, 0.0],
+        }
+        elements.append(
+            {
+                "kind": "text",
+                "seqno": index,
+                "bbox": [left, top, left + width, top + height],
+                "origin": [left, top + height * 0.82],
+                "text": str(item.get("text") or ""),
+                "font": item.get("font"),
+                "bold": bool(item.get("bold")),
+                "italic": False,
+                # OCR 对同一段落的相邻行常会给出轻微不同的字号和颜色。
+                # 聚类时使用稳定桶，渲染仍保留 runs 中的原始样式。
+                "font_size": round(float(item.get("font_size") or 10) / 2) * 2,
+                "font_size_pt": float(
+                    item.get("font_size_pt")
+                    or item.get("font_size")
+                    or 10
+                ),
+                "color": grouping_color_bucket(item.get("color")),
+                "opacity": 1.0,
+                "direction": [1.0, 0.0],
+                "confidence": float(item.get("confidence") or 0),
+                "style_id": item.get("style_id"),
+                "font_role": item.get("font_role"),
+                "typography_calibrated": bool(
+                    item.get("typography_calibrated")
+                ),
+                "runs": [original_run],
+            }
+        )
+
+    grouped, report = group_text_elements(
+        elements,
+        mode=mode,
+        line_break_mode=line_break_mode,
+        page_number=page_number,
+        order_mode=order_mode,
     )
-    height_cap = float(item_height) * dpi_to_points * 1.08
-    calibrated = min(
-        float(font_basis) * role_scale,
-        width_cap,
-        height_cap,
-        role_maximum,
-    )
-    return max(float(minimum), calibrated)
+    result = []
+    for element in grouped:
+        bbox = element["bbox"]
+        source_lines = element.get("source_lines") or []
+        runs = element.get("runs") or []
+        first_run = runs[0] if runs else {}
+        confidence_values = [
+            float(line.get("confidence") or element.get("confidence") or 0)
+            for line in source_lines
+        ]
+        result.append(
+            {
+                "text": str(element.get("text") or ""),
+                "confidence": (
+                    sum(confidence_values) / len(confidence_values)
+                    if confidence_values
+                    else float(element.get("confidence") or 0)
+                ),
+                "left": float(bbox[0]),
+                "top": float(bbox[1]),
+                "width": max(10.0, float(bbox[2]) - float(bbox[0])),
+                "height": max(10.0, float(bbox[3]) - float(bbox[1])),
+                "font_size": float(
+                    first_run.get("font_size_pt")
+                    or first_run.get("font_size")
+                    or element.get("font_size")
+                    or 10
+                ),
+                "font_size_pt": float(
+                    first_run.get("font_size_pt")
+                    or first_run.get("font_size")
+                    or element.get("font_size")
+                    or 10
+                ),
+                "color": first_run.get("color") or element.get("color"),
+                "bold": bool(
+                    first_run.get("bold", element.get("bold"))
+                ),
+                "font": first_run.get("font") or element.get("font"),
+                "style_id": (
+                    first_run.get("style_id")
+                    or element.get("style_id")
+                ),
+                "font_role": element.get("font_role"),
+                "typography_calibrated": bool(
+                    element.get("typography_calibrated")
+                    or first_run.get("font_size_pt")
+                ),
+                "vertical": False,
+                "runs": runs,
+                "source_lines": source_lines,
+                "source_line_count": int(
+                    element.get("source_line_count") or 1
+                ),
+                "line_breaks": element.get("line_breaks") or [],
+                "text_grouping": element.get("text_grouping") or "line",
+                "seqno": int(element.get("seqno") or 0),
+            }
+        )
+    for index, item in vertical_items:
+        result.append({**item, "seqno": index})
+    result.sort(key=lambda item: int(item.get("seqno") or 0))
+    return result, report
 
 
 def compile_vision_ocr(binary_path):
@@ -377,6 +462,51 @@ def intersection_over_union(a, b, image_width, image_height):
     return intersection / max(1.0, union)
 
 
+def deduplicate_ocr_rows(rows, image_width, image_height):
+    result = []
+    for row in rows:
+        normalized = re.sub(r"\s+", "", str(row.get("text") or ""))
+        duplicate_index = next(
+            (
+                index
+                for index, existing in enumerate(result)
+                if normalized
+                and normalized
+                == re.sub(r"\s+", "", str(existing.get("text") or ""))
+                and intersection_over_union(
+                    row, existing, image_width, image_height
+                )
+                >= 0.45
+            ),
+            None,
+        )
+        if duplicate_index is None:
+            result.append(dict(row))
+            continue
+        existing = result[duplicate_index]
+        x0, y0, x1, y1 = row_pixel_rect(
+            existing, image_width, image_height
+        )
+        rx0, ry0, rx1, ry1 = row_pixel_rect(
+            row, image_width, image_height
+        )
+        x0, y0 = min(x0, rx0), min(y0, ry0)
+        x1, y1 = max(x1, rx1), max(y1, ry1)
+        existing.update(
+            {
+                "x": x0 / image_width,
+                "y": 1 - y1 / image_height,
+                "width": (x1 - x0) / image_width,
+                "height": (y1 - y0) / image_height,
+                "confidence": max(
+                    float(existing.get("confidence") or 0),
+                    float(row.get("confidence") or 0),
+                ),
+            }
+        )
+    return result
+
+
 def merge_vertical_ocr_rows(
     original_rows,
     rotated_rows,
@@ -464,7 +594,7 @@ def resolve_ocr_engine(requested, supplied_ocr_dir, tesseract):
 
 def resolve_ocr_fonts(body_font, title_font):
     defaults = {
-        "Darwin": ("Hiragino Sans GB", "Songti SC"),
+        "Darwin": ("Microsoft YaHei", "Songti SC"),
         "Windows": ("Microsoft YaHei", "Microsoft YaHei"),
         "Linux": ("Noto Sans CJK SC", "Noto Serif CJK SC"),
     }
@@ -663,60 +793,45 @@ def main():
         help="OCR 标题字体；auto 会根据当前系统选择。",
     )
     parser.add_argument(
-        "--render-dpi",
-        type=float,
-        default=96,
-        help="源页面渲染 DPI，用于像素到 PowerPoint 磅值的校准，默认值：96。",
+        "--text-grouping",
+        choices=("line", "hybrid", "paragraph"),
+        default="hybrid",
+        help="OCR 文字框粒度：line 逐行；hybrid 保守段落聚类（默认）；paragraph 扩大段落聚类。",
     )
     parser.add_argument(
-        "--body-font-scale",
-        type=float,
-        default=0.75,
-        help="正文 OCR 字号比例，默认值：0.75。",
+        "--line-break-mode",
+        choices=("preserve", "smart", "reflow"),
+        default="preserve",
+        help="合并段落内部的换行策略：preserve 保留模板换行（默认）；smart 识别软换行；reflow 尽量重排。",
     )
     parser.add_argument(
-        "--title-font-scale",
-        type=float,
-        default=0.78,
-        help="页标题 OCR 字号比例，默认值：0.78。",
-    )
-    parser.add_argument(
-        "--display-font-scale",
-        type=float,
-        default=0.98,
-        help="封面大标题和展示数字 OCR 字号比例，默认值：0.98。",
-    )
-    parser.add_argument(
-        "--minimum-font-size",
-        type=float,
-        default=5,
-        help="允许的最小 PowerPoint 字号，默认值：5 磅。",
-    )
-    parser.add_argument(
-        "--maximum-font-size",
-        type=float,
-        default=96,
-        help="允许的最大 PowerPoint 字号，默认值：96 磅。",
-    )
-    parser.add_argument(
-        "--layout-report",
+        "--text-grouping-report",
         type=Path,
-        help="可选的字号、字体和 OCR 覆盖率校准报告输出路径。",
+        help="可选的 OCR 段落聚类报告输出路径。",
+    )
+    parser.add_argument(
+        "--paragraph-order",
+        choices=("source", "spatial"),
+        default="spatial",
+        help="段落阅读顺序；spatial 先按局部空间链聚类，避免双栏 OCR 顺序打断段落。",
+    )
+    parser.add_argument(
+        "--typography-profile",
+        type=Path,
+        help="字体、字号角色和候选字号表 JSON；扁平化 PDF 要求精确字体时应显式提供。",
+    )
+    parser.add_argument(
+        "--font-size-mode",
+        choices=("raw", "normalized", "strict"),
+        default="normalized",
+        help="字号策略；normalized/strict 会将相同样式归一到同一字号，禁止逐 OCR 行漂移。",
+    )
+    parser.add_argument(
+        "--typography-report",
+        type=Path,
+        help="可选的字体与字号归一化报告输出路径。",
     )
     args = parser.parse_args()
-    if args.render_dpi <= 0:
-        parser.error("--render-dpi 必须大于 0")
-    for argument_name in (
-        "body_font_scale",
-        "title_font_scale",
-        "display_font_scale",
-    ):
-        if getattr(args, argument_name) <= 0:
-            parser.error(f"--{argument_name.replace('_', '-')} 必须大于 0")
-    if args.minimum_font_size <= 0:
-        parser.error("--minimum-font-size 必须大于 0")
-    if args.maximum_font_size < args.minimum_font_size:
-        parser.error("--maximum-font-size 不能小于 --minimum-font-size")
 
     import numpy as np
 
@@ -737,6 +852,14 @@ def main():
             tesseract_language_string(args.languages),
         )
     body_font, title_font = resolve_ocr_fonts(args.body_font, args.title_font)
+    typography_profile = load_typography_profile(
+        args.typography_profile.expanduser().resolve()
+        if args.typography_profile
+        else None
+    )
+    typography_profile.setdefault("fonts", {})
+    typography_profile["fonts"].setdefault("body", body_font)
+    typography_profile["fonts"].setdefault("title", title_font)
     print(
         f"OCR 后端：{engine}；正文字体：{body_font}；标题字体：{title_font}"
     )
@@ -762,15 +885,7 @@ def main():
     )
 
     pages = []
-    page_reports = []
-    totals = {
-        "ocrRows": 0,
-        "editableTextItems": 0,
-        "discardedLowConfidence": 0,
-        "excludedByRegion": 0,
-        "excludedByText": 0,
-        "invalidGeometry": 0,
-    }
+    grouping_reports = []
     for page_number, image_path in enumerate(images, 1):
         image = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
         if image is None:
@@ -779,57 +894,31 @@ def main():
         slide_width = float(args.slide_width)
         slide_height = slide_width * height / width
         rows = json.loads((ocr_dir / f"{image_path.stem}.json").read_text())
+        rows = deduplicate_ocr_rows(rows, width, height)
         mask = np.zeros((height, width), dtype=np.uint8)
         text_items = []
         exclusions = rules["exclude_regions"].get(str(page_number), [])
-        excluded_text_values = rules["exclude_texts"].get(str(page_number), [])
-        excluded_texts = (
-            {excluded_text_values}
-            if isinstance(excluded_text_values, str)
-            else set(excluded_text_values)
+        excluded_texts = set(
+            rules["exclude_texts"].get(str(page_number), [])
         )
-        page_report = {
-            "page": page_number,
-            "ocrRows": len(rows),
-            "editableTextItems": 0,
-            "discardedLowConfidence": 0,
-            "excludedByRegion": 0,
-            "excludedByText": 0,
-            "invalidGeometry": 0,
-            "roles": {
-                "body": 0,
-                "slide-title": 0,
-                "display-title": 0,
-                "display-number": 0,
-            },
-        }
-        totals["ocrRows"] += len(rows)
 
         for row in rows:
             if not useful_row(row, args.minimum_confidence):
-                page_report["discardedLowConfidence"] += 1
-                totals["discardedLowConfidence"] += 1
                 continue
             top_norm = 1 - float(row["y"]) - float(row["height"])
             center_x = float(row["x"]) + float(row["width"]) / 2
             center_y = top_norm + float(row["height"]) / 2
             if any(point_in_region(center_x, center_y, region) for region in exclusions):
-                page_report["excludedByRegion"] += 1
-                totals["excludedByRegion"] += 1
                 continue
 
             text = correct_text(row["text"], rules["replacements"])
             if text in excluded_texts:
-                page_report["excludedByText"] += 1
-                totals["excludedByText"] += 1
                 continue
             x0 = max(0, int(round(float(row["x"]) * width)))
             y0 = max(0, int(round(top_norm * height)))
             x1 = min(width, int(round((float(row["x"]) + float(row["width"])) * width)))
             y1 = min(height, int(round((1 - float(row["y"])) * height)))
             if x1 <= x0 or y1 <= y0:
-                page_report["invalidGeometry"] += 1
-                totals["invalidGeometry"] += 1
                 continue
 
             pad_x = max(2, int((x1 - x0) * 0.015))
@@ -857,23 +946,10 @@ def main():
             if vertical:
                 text = "\n".join(char for char in text if not char.isspace())
             font_basis = item_width if vertical else item_height
-            source_font_size = font_basis * 0.82
-            role = classify_text_role(text, top, slide_height, font_basis)
-            font_size = calibrated_font_size(
-                text=text,
-                item_width=item_width,
-                item_height=item_height,
-                font_basis=source_font_size,
-                role=role,
-                render_dpi=args.render_dpi,
-                body_scale=args.body_font_scale,
-                title_scale=args.title_font_scale,
-                display_scale=args.display_font_scale,
-                minimum=args.minimum_font_size,
-                maximum=args.maximum_font_size,
-            )
-            is_title = role in {"slide-title", "display-title"}
-            page_report["roles"][role] += 1
+            # 96 px/in 坐标下，OCR 行高不能直接当作 PowerPoint point。
+            # 先生成保守估计，再由 deck 级 typography 校准统一相同样式。
+            font_size = max(7.0, min(72, font_basis * 0.74))
+            is_title = top < slide_height * 0.14 and font_size >= 24
             text_items.append(
                 {
                     "text": text,
@@ -883,18 +959,10 @@ def main():
                     "width": max(10, item_width),
                     "height": max(10, item_height),
                     "font_size": font_size,
-                    "source_font_size": source_font_size,
-                    "ppt_font_size": font_size,
-                    "text_role": role,
-                    "text_box_width_factor": 1.2,
-                    "render_dpi": args.render_dpi,
+                    "raw_font_size": font_size,
                     "color": color,
                     "bold": bool(is_title or (font_size >= 18 and len(text) <= 18)),
                     "font": title_font if is_title else body_font,
-                    "font_source": "user" if (
-                        (is_title and args.title_font != "auto")
-                        or (not is_title and args.body_font != "auto")
-                    ) else "system-calibrated",
                     "vertical": vertical,
                 }
             )
@@ -912,10 +980,33 @@ def main():
                 "text": text_items,
             }
         )
-        page_report["editableTextItems"] = len(text_items)
-        totals["editableTextItems"] += len(text_items)
-        page_reports.append(page_report)
-        print(f"{image_path.stem}：{len(text_items)} 行可编辑 OCR 文字")
+        print(
+            f"{image_path.stem}：提取 {len(text_items)} 行 OCR，等待 deck 级字号校准与段落聚类"
+        )
+
+    typography_report = normalize_deck_typography(
+        pages,
+        profile=typography_profile,
+        mode=args.font_size_mode,
+    )
+    if not typography_report.get("passed"):
+        raise RuntimeError("字体与字号归一化失败")
+    for page in pages:
+        grouped_items, grouping_report = group_ocr_text_items(
+            page["text"],
+            args.text_grouping,
+            args.line_break_mode,
+            page["number"],
+            order_mode=args.paragraph_order,
+        )
+        page["text"] = grouped_items
+        grouping_reports.append(grouping_report)
+        print(
+            f"slide-{page['number']:02d}："
+            f"{grouping_report['inputTextObjectCount']} 行 OCR 聚合为 "
+            f"{len(grouped_items)} 个可编辑文字对象；"
+            f"{grouping_report['groupedParagraphCount']} 个多行段落"
+        )
 
     output_model.parent.mkdir(parents=True, exist_ok=True)
     output_model.write_text(
@@ -931,42 +1022,69 @@ def main():
         ),
         encoding="utf-8",
     )
-    print(f"已写入 {output_model}")
-    if args.layout_report:
-        layout_report = args.layout_report.expanduser().resolve()
-        layout_report.parent.mkdir(parents=True, exist_ok=True)
-        expected_rows = (
-            totals["ocrRows"]
-            - totals["discardedLowConfidence"]
-            - totals["excludedByRegion"]
-            - totals["excludedByText"]
-            - totals["invalidGeometry"]
-        )
-        report = {
-            "schemaVersion": 1,
-            "passed": totals["editableTextItems"] == expected_rows,
-            "renderDpi": args.render_dpi,
-            "fonts": {
-                "body": body_font,
-                "title": title_font,
-            },
-            "fontScales": {
-                "body": args.body_font_scale,
-                "title": args.title_font_scale,
-                "display": args.display_font_scale,
-            },
-            "fontSizeRange": {
-                "minimum": args.minimum_font_size,
-                "maximum": args.maximum_font_size,
-            },
-            "totals": totals,
-            "pages": page_reports,
-        }
-        layout_report.write_text(
-            json.dumps(report, ensure_ascii=False, indent=2),
+    if args.text_grouping_report:
+        report_path = args.text_grouping_report.expanduser().resolve()
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text(
+            json.dumps(
+                {
+                    "schemaVersion": "1.0",
+                    "passed": all(
+                        report.get("contentPreserved")
+                        for report in grouping_reports
+                    ),
+                    "mode": args.text_grouping,
+                    "lineBreakMode": args.line_break_mode,
+                    "paragraphOrder": args.paragraph_order,
+                    "inputTextObjectCount": sum(
+                        report["inputTextObjectCount"]
+                        for report in grouping_reports
+                    ),
+                    "outputTextObjectCount": sum(
+                        report["outputTextObjectCount"]
+                        for report in grouping_reports
+                    ),
+                    "textObjectReduction": sum(
+                        report["textObjectReduction"]
+                        for report in grouping_reports
+                    ),
+                    "groupedParagraphCount": sum(
+                        report["groupedParagraphCount"]
+                        for report in grouping_reports
+                    ),
+                    "groupedSourceLineCount": sum(
+                        report["groupedSourceLineCount"]
+                        for report in grouping_reports
+                    ),
+                    "paragraphCandidateCount": sum(
+                        report.get("paragraphCandidateCount", 0)
+                        for report in grouping_reports
+                    ),
+                    "unmergedParagraphCandidateCount": sum(
+                        report.get("unmergedParagraphCandidateCount", 0)
+                        for report in grouping_reports
+                    ),
+                    "pages": grouping_reports,
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
             encoding="utf-8",
         )
-        print(f"已写入字号与 OCR 布局报告 {layout_report}")
+    if args.typography_report:
+        typography_report_path = (
+            args.typography_report.expanduser().resolve()
+        )
+        typography_report_path.parent.mkdir(parents=True, exist_ok=True)
+        typography_report_path.write_text(
+            json.dumps(
+                typography_report,
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+    print(f"已写入 {output_model}")
 
 
 if __name__ == "__main__":

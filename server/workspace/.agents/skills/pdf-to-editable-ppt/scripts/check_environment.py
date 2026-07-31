@@ -440,6 +440,18 @@ def build_report(
         "Pillow": module_available("PIL"),
         "opencv-python-headless": module_available("cv2"),
     }
+    vision_pipeline_scripts = {
+        name: (SCRIPT_DIR / name).exists()
+        for name in (
+            "prepare_agent_vision.py",
+            "analyze_pages_with_vision.py",
+            "fuse_vision_evidence.py",
+            "review_renders_with_vision.py",
+            "validate_semantic_build.py",
+            "finalize_agent_handoff.py",
+            "semantic_overrides.mjs",
+        )
+    }
     tesseract = tesseract_languages(commands["tesseract"], smoke_timeout_seconds)
     command_checks = {
         "pptx_builder": pptx_builder_runtime_probe(
@@ -519,6 +531,8 @@ def build_report(
             and modules["opencv-python-headless"]
             and strict_watermark_qa_ready
         ),
+        "vision_pipeline_scripts": vision_pipeline_scripts,
+        "vision_pipeline_ready": all(vision_pipeline_scripts.values()),
         "ready_for_default_workflow": ready_for_default_workflow,
         "powerpoint_native_validation_available": bool(commands["powerpoint"]),
         "linux_compatibility_smoke_available": bool(
@@ -573,6 +587,10 @@ def print_human(report: dict) -> None:
     print(
         "默认严格流程："
         + ("可用" if report["ready_for_default_workflow"] else "不可用")
+    )
+    print(
+        "视觉融合脚本："
+        + ("可用" if report["vision_pipeline_ready"] else "缺失")
     )
     if not report["powerpoint_native_validation_available"]:
         print("原生 PowerPoint 验证：不可用，交付时必须披露替代验证")

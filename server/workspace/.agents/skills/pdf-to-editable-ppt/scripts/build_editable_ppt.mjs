@@ -6,6 +6,7 @@ import {
   hexColor,
   imageReplacementFor,
   optionalArg,
+  PptxGenJS,
   requiredArg,
   svgData,
   transparency,
@@ -130,7 +131,28 @@ function addText(slide, element, unit, index) {
     Number(element.direction?.[1] || 0),
     Number(element.direction?.[0] || 1),
   ) * 180 / Math.PI;
-  slide.addText(String(element.text || ""), {
+  const richRuns = Array.isArray(element.runs) && element.runs.length
+    ? element.runs
+      .filter((run) => String(run.text || "").length)
+      .map((run) => ({
+        text: String(run.text || ""),
+        options: {
+          fontFace: run.font || element.font || "Noto Sans CJK SC",
+          fontSize: Math.max(
+            1,
+            Number(run.font_size || element.font_size || 10),
+          ),
+          bold: Boolean(run.bold),
+          italic: Boolean(run.italic),
+          color: hexColor(run.color || element.color),
+          transparency: transparency(
+            run.opacity ?? element.opacity,
+          ),
+          breakLine: false,
+        },
+      }))
+    : null;
+  slide.addText(richRuns || String(element.text || ""), {
     x: x0 * unit,
     y: y0 * unit,
     w: Math.max(0.04, (x1 - x0) * unit + 0.04),
@@ -146,7 +168,11 @@ function addText(slide, element, unit, index) {
     fit: "shrink",
     valign: "top",
     rotate: Math.abs(rotation) > 0.05 ? rotation : 0,
-    objectName: `pdf-text-${String(index + 1).padStart(4, "0")}`,
+    objectName: `${
+      Number(element.source_line_count || 1) > 1
+        ? "pdf-paragraph"
+        : "pdf-text"
+    }-${String(index + 1).padStart(4, "0")}`,
   });
 }
 
@@ -162,7 +188,7 @@ async function main() {
     model.page_height,
   );
   const buildManifest = {
-    schemaVersion: "1.1",
+    schemaVersion: "1.0",
     output: FINAL_PPTX,
     objects: [],
   };
@@ -173,50 +199,16 @@ async function main() {
     for (const [index, element] of page.elements.entries()) {
       if (element.kind === "drawing") {
         addDrawing(slide, element, unit, index);
-        buildManifest.objects.push({
-          page: page.number,
-          semanticId: `pdf-vector-${String(index + 1).padStart(4, "0")}`,
-          type: "pdf-vector",
-          emitted: true,
-        });
       } else if (element.kind === "image") {
-        const replacement = imageReplacementFor(
-          element,
-          index,
-          pageOverride,
-        );
         addImage(
           slide,
           element,
           unit,
           index,
-          replacement,
+          imageReplacementFor(element, index, pageOverride),
         );
-        buildManifest.objects.push({
-          page: page.number,
-          semanticId: `pdf-image-${String(index + 1).padStart(4, "0")}`,
-          type: "pdf-image",
-          emitted: true,
-        });
-        if (replacement) {
-          buildManifest.objects.push({
-            page: page.number,
-            semanticId: replacement.name || null,
-            type: "image-replacement",
-            emitted: Boolean(replacement.name),
-            error: replacement.name ? null : "semantic-object-missing-name",
-          });
-        }
       } else if (element.kind === "text") {
         addText(slide, element, unit, index);
-        buildManifest.objects.push({
-          page: page.number,
-          semanticId: `pdf-text-${String(index + 1).padStart(4, "0")}`,
-          type: "pdf-text",
-          emitted: true,
-          fontFace: element.font || "Noto Sans CJK SC",
-          fontSize: Math.max(1, Number(element.font_size || 10)),
-        });
       }
     }
     buildManifest.objects.push(...applyPageOverrides({
@@ -225,8 +217,7 @@ async function main() {
       pageOverride,
       pageNumber: page.number,
       slideWidth,
-      coordinateWidth: Number(overrides.coordinateWidth || model.page_width),
-      assetRoot: OVERRIDES_PATH ? path.dirname(OVERRIDES_PATH) : process.cwd(),
+      coordinateWidth: Number(overrides.coordinateWidth || 1280),
     }));
     slide.addNotes(
       `[Sources]\n- 用户提供的原始 PDF：${model.source}（第 ${page.number} 页）\n- 页面文字、图片和矢量对象均从该页提取并重建。`,

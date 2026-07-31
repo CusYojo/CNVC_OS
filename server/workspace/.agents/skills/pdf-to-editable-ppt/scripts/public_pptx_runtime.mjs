@@ -80,9 +80,9 @@ export function createPresentation(pageWidth, pageHeight) {
     height: slideHeight,
   });
   pptx.layout = "PDF_TEMPLATE";
-  pptx.author = "Cybernaut";
+  pptx.author = "Codex";
   pptx.subject = "PDF template converted to editable PPTX";
-  pptx.company = "Cybernaut";
+  pptx.company = "";
   pptx.lang = "zh-CN";
   pptx.theme = {
     headFontFace: "Noto Sans CJK SC",
