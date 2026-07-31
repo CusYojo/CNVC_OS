@@ -1231,7 +1231,7 @@ async function executeTask(taskId: string) {
       task.type === 'investment_proposal'
         ? '建立章节级 Evidence 并逐章节生成、执行 Reviewer'
         : task.type === 'custom_template_document'
-          ? '基于当前项目资料库重建标题和正文'
+          ? '基于项目资料与已核验联网证据重建标题和正文'
         : '生成结构化内容',
       35,
     )

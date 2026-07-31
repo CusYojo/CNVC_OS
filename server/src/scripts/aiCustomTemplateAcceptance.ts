@@ -46,14 +46,14 @@ const sources: EvidenceSource[] = [{
 function contentForSections(sectionTitles: string[]): BusinessContent {
   return {
     title: '模板验收项目分析报告',
-    executiveSummary: '本文件依据项目档案形成，用于验证模板分析数据与文档渲染链路。',
+    executiveSummary: '**【AI推断】** 阶段与推进建议：继续跟踪。判断依据：本文件依据项目档案形成，用于验证模板分析数据与文档渲染链路。',
     executiveSummarySourceIndexes: [0],
     sections: sectionTitles.map((title) => ({
       title,
       summary: `${title}按照上传模板的识别规则组织。`,
       summarySourceIndexes: [0],
       findings: [{
-        text: '项目资料显示公司面向企业客户提供数据分析服务，其他事项仍需补充证据。',
+        text: '**【资料记载】** 项目资料显示公司面向企业客户提供数据分析服务，其他事项仍需补充证据。',
         status: '资料记载',
         sourceIndexes: [0],
       }],
@@ -146,6 +146,23 @@ async function main() {
         && /^sha256-[a-f0-9]{12}$/.test(fixedSkill.version),
       fixedSkill.version,
     )
+    const aiTaskServiceSource = await readFile(
+      path.resolve(process.cwd(), 'server', 'src', 'services', 'aiTaskService.ts'),
+      'utf8',
+    )
+    const sharedNetworkBlock = aiTaskServiceSource.match(
+      /if \(\[\s*'investment_proposal',[\s\S]+?if \(await cancelIfRequested\(taskId\)\) return/,
+    )?.[0] ?? ''
+    assert(
+      '上传模板复用其他投资快捷任务的大模型联网检索与页面核验链路',
+      sharedNetworkBlock.includes("'custom_template_document'")
+        && sharedNetworkBlock.includes('fetchDueDiligenceNetworkEvidence')
+        && sharedNetworkBlock.includes('fetchVerifiedProjectWebEvidence')
+        && sharedNetworkBlock.includes('nativeModelSearch: true')
+        && sharedNetworkBlock.includes('cacheProjectNetworkEvidence')
+        && aiTaskServiceSource.includes('基于项目资料与已核验联网证据重建标题和正文'),
+      '联网检索 Agent 发现候选来源 → LLM Gateway 原生模型搜索及页面核验 → 缓存写回 → 生成正文',
+    )
 
     const docxSections = docxAnalysis.analysis.structures
       .filter((item) => !/^(?:封面|目录|议程|文档标题)$/.test(item.title))
@@ -188,7 +205,13 @@ async function main() {
         && generatedDocxXml.includes('项目档案')
         && generatedDocxXml.includes('模板验收科技有限公司')
         && generatedDocxXml.includes('项目投资分析报告')
-        && generatedDocxXml.includes('阶段与推进建议：继续跟踪')
+        && generatedDocxXml.includes('综合当前项目阶段与可核验事实，建议继续跟踪')
+        && !generatedDocxXml.includes('阶段与推进建议：')
+        && !generatedDocxXml.includes('判断依据：')
+        && !generatedDocxXml.includes('【资料记载】')
+        && !generatedDocxXml.includes('【AI推断】')
+        && !generatedDocxXml.includes('【待核验】')
+        && !generatedDocxXml.includes('**')
         && !generatedDocxXml.includes('资料缺口')
         && !generatedDocxXml.includes('德塔智能'),
       `${generatedDocxXml.length} 字节 XML`,
@@ -242,7 +265,13 @@ async function main() {
         && finalSlide.includes('<a:t>')
         && allSlidesXml.includes('模板验收科技有限公司')
         && allSlidesXml.includes('项目投资分析报告')
-        && allSlidesXml.includes('阶段与推进建议：继续跟踪')
+        && allSlidesXml.includes('综合当前项目阶段与可核验事实，建议继续跟踪')
+        && !allSlidesXml.includes('阶段与推进建议：')
+        && !allSlidesXml.includes('判断依据：')
+        && !allSlidesXml.includes('【资料记载】')
+        && !allSlidesXml.includes('【AI推断】')
+        && !allSlidesXml.includes('【待核验】')
+        && !allSlidesXml.includes('**')
         && !allSlidesXml.includes('资料缺口')
         && !allSlidesXml.includes('佳量脑科学'),
       `${slideNames.length} 页`,

@@ -702,6 +702,36 @@ function freshCustomSectionTitle(
 
 function sanitizeCustomTemplateText(value: string) {
   return value
+    .replace(
+      /(?:\*{1,2}\s*)?[【〔\[]\s*(?:资料记载|AI\s*推断|待核验|资料缺口)\s*[】〕\]](?:\s*\*{1,2})?/gi,
+      '',
+    )
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/__([^_]+)__/g, '$1')
+    .replace(
+      /(^|[。！？；\n])\s*(?:阶段与推进建议|推进建议|主建议|投资建议)[：:]\s*(进入初筛|继续跟踪|申请立项|启动尽调|提请上会|提交投决|暂缓推进|归档)(?:[。；])?/g,
+      '$1综合当前项目阶段与可核验事实，建议$2。',
+    )
+    .replace(
+      /(^|[。！？；\n])\s*(?:判断依据|核心依据|主要依据)[：:]\s*/g,
+      '$1作出上述判断的主要依据是',
+    )
+    .replace(
+      /(^|[。！？；\n])\s*(?:关键风险|核心风险|主要风险)[：:]\s*/g,
+      '$1同时需要重点关注',
+    )
+    .replace(
+      /(^|[。！？；\n])\s*(?:前置条件|推进前提|成立条件)[：:]\s*/g,
+      '$1后续推进的前提是',
+    )
+    .replace(
+      /(^|[。！？；\n])\s*(?:下一步动作|下一步建议|后续动作)[：:]\s*/g,
+      '$1下一步建议',
+    )
+    .replace(
+      /(^|[。！？；\n])\s*(?:资料记载|AI\s*推断|待核验|资料缺口)[：:]\s*/gi,
+      '$1',
+    )
     .replace(/资料缺口/g, '待核验事项')
     .replace(
       /尚缺少能够支持“[^”]+”判断的专项资料，需补充原始文件或访谈记录后核验。/g,
@@ -711,6 +741,9 @@ function sanitizeCustomTemplateText(value: string) {
       /“[^”]+”当前证据不足，本节仅列示明确的补证要求。/g,
       '本部分已按当前项目资料库重新组织，相关资料构成当前分析基础。',
     )
+    .replace(/[ \t]+/g, ' ')
+    .replace(/。{2,}/g, '。')
+    .trim()
 }
 
 /**
@@ -787,9 +820,9 @@ export function finalizeCustomTemplateContent(
     ]),
     ...content.highlights,
   ].join('\n').match(/进入初筛|继续跟踪|申请立项|启动尽调|提请上会|提交投决|暂缓推进|归档/)?.[0] ?? '继续跟踪'
-  const executiveSummary = new RegExp(`(?:^|[：:])\\s*${disposition}`).test(sanitizedExecutiveSummary)
+  const executiveSummary = new RegExp(`建议[^。！？；]{0,12}${disposition}`).test(sanitizedExecutiveSummary)
     ? sanitizedExecutiveSummary
-    : `阶段与推进建议：${disposition}。${sanitizedExecutiveSummary
+    : `综合当前项目阶段与可核验事实，建议${disposition}。${sanitizedExecutiveSummary
       || `当前资料已形成${subject}的初步线索判断，关键事实仍须结合可追溯原始资料核验。`}`
   return {
     ...content,
@@ -2043,7 +2076,11 @@ export async function composeBusinessContent(input: {
 12. title 必须包含当前项目或公司主体，并准确概括本次文档用途；sections 数量和顺序保持不变，但每个 section.title 必须重新拟定。
 13. 不得返回“资料缺口”状态、标题、列表或占位文案；经过缓存复用和定向网络补全仍未覆盖的事项只可简洁标为“待核验”，missing 必须为空数组。
 14. 输出必须是由投资中台资深投资经理起草、供内部审阅的项目投资材料。单项目报告结合当前阶段给出“进入初筛 / 继续跟踪 / 申请立项 / 启动尽调 / 提请上会 / 提交投决 / 暂缓推进 / 归档”之一；批量报告逐个主体给出建议、可核验依据、关键风险、前置条件和下一步动作。
-15. 报告必须围绕当前项目的主体、股权与治理、团队、产品与技术、市场与客户、商业模式、财务、融资与估值、交易方案、风险和可核验来源展开。禁止生成脱离具体主体的泛行业研究；行业、政策和市场背景只能解释当前项目。`
+15. 报告必须围绕当前项目的主体、股权与治理、团队、产品与技术、市场与客户、商业模式、财务、融资与估值、交易方案、风险和可核验来源展开。禁止生成脱离具体主体的泛行业研究；行业、政策和市场背景只能解释当前项目。
+16. status 和 sourceIndexes 仅供系统内部审计。finding.text、summary、表格及其他客户可见文字不得出现“【资料记载】”“【AI推断】”“【待核验】”、Markdown 粗体状态词或同类证据状态标签。
+17. 正文使用连贯、完整的自然段，把事实、判断、风险、前提和下一步动作通过正常句子衔接。不得采用“阶段与推进建议：”“判断依据：”“关键风险：”“前置条件：”“下一步动作：”等“标签：内容”的冒号式写法，也不得把正文拆成标签卡片或短语清单。
+18. 阶段建议必须自然写入句子，例如“综合当前项目阶段与可核验事实，建议继续跟踪”，并在同段说明依据、风险、前提和动作；不得以固定字段名或状态徽标展示。
+19. 已核验来源仍须通过 sourceIndexes 保留在内部审计结构，并由渲染器生成引用页或演讲者备注；不得为了自然段文风删除来源追溯。`
     : ''
   const uploadedInvestmentTemplateRule = isUploadedInvestmentTemplate
     ? `\n10. 本次上传的 PPTX 是结构与视觉唯一权威。必须按模板识别出的页面职责、章节数量和顺序生成当前项目内容，不得回退到固定十二章、固定页数或公司标准模板。

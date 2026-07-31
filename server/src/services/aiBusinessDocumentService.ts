@@ -387,20 +387,13 @@ async function generateCustomTemplateDocx(input: {
         alignment: AlignmentType.JUSTIFIED,
         children: [
           new TextRun({
-            text: `【${finding.status}】`,
-            font: runFont(bodyFont),
-            size: bodySize,
-            bold: true,
-            color: statusStyle[finding.status].color,
-          }),
-          new TextRun({
             text: finding.text,
             font: runFont(bodyFont),
             size: bodySize,
             color: '000000',
           }),
           ...(refs ? [new TextRun({
-            text: `\n${refs}`,
+            text: `\n${refs.replace(/^引用[：:]/, '参见')}`,
             font: runFont(bodyFont),
             size: Math.max(16, bodySize - 4),
             color: '666666',
@@ -1956,36 +1949,11 @@ async function generateCustomTemplatePptx(input: {
     const rowHeight = availableHeight / Math.max(1, findings.length)
     findings.forEach((finding, findingIndex) => {
       const y = height * 0.31 + findingIndex * rowHeight
-      const findingStyle = statusStyle[finding.status]
-      slide.addShape(pptx.ShapeType.roundRect, {
-        x: marginX,
-        y,
-        w: Math.max(1.05, width * 0.09),
-        h: Math.min(0.34, rowHeight * 0.4),
-        rectRadius: 0.04,
-        fill: { color: findingStyle.fill },
-        line: { color: findingStyle.color, width: 0.6 },
-      })
-      slide.addText(finding.status, {
-        x: marginX + 0.05,
-        y: y + 0.07,
-        w: Math.max(0.95, width * 0.08),
-        h: 0.16,
-        fontFace: font,
-        lang: 'zh-CN',
-        fontSize: Math.max(7, bodySize - 3),
-        bold: true,
-        color: findingStyle.color,
-        align: 'center',
-        margin: 0,
-        fit: 'shrink',
-        objectName: `section.${index + 1}.finding.${findingIndex + 1}.status`,
-      })
       slide.addText(finding.text, {
-        x: marginX + Math.max(1.3, width * 0.105),
+        x: marginX,
         y: y - 0.01,
-        w: contentWidth - Math.max(1.3, width * 0.105),
-        h: Math.max(0.4, rowHeight * 0.62),
+        w: contentWidth,
+        h: Math.max(0.4, rowHeight * 0.75),
         fontFace: font,
         lang: 'zh-CN',
         fontSize: bodySize,
@@ -2649,7 +2617,12 @@ export function renderBusinessMarkdown(input: {
         .map((index) => input.sources[index] ? `[S${index + 1}]` : '')
         .filter(Boolean)
         .join(' ')
-      lines.push('', `- **${finding.status}** ${finding.text}${refs ? ` ${refs}` : ''}`)
+      lines.push(
+        '',
+        input.template.type === 'custom_template_document'
+          ? `${finding.text}${refs ? ` ${refs}` : ''}`
+          : `- **${finding.status}** ${finding.text}${refs ? ` ${refs}` : ''}`,
+      )
     })
   })
   lines.push('', '## 引用资料', '')
