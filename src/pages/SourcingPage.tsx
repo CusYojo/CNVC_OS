@@ -70,6 +70,20 @@ function meaningfulLeadText(value: unknown): string | undefined {
   return text
 }
 
+function formatPoolEnteredAt(value?: string) {
+  if (!value) return '待确认'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).replace(/\//g, '-')
+}
+
 function getLeadIdentity(lead: Lead) {
   const companySubject = meaningfulLeadText(lead.scoring?.registry?.companyName)
     ?? meaningfulLeadText(lead.companyName)
@@ -804,7 +818,7 @@ export function SourcingPage() {
 
       <div ref={tableRef}>
         <Card className="overflow-hidden">
-        <DataTable headers={['主体名称 / 项目', '行业 / 地区标签', '估值', 'AI 技术评分', '更新时间', '详情']}>
+        <DataTable headers={['主体名称 / 项目', '行业 / 地区标签', '估值', 'AI 技术评分', '入池时间', '详情']}>
           {filtered.map((lead) => {
             const { companySubject } = getLeadIdentity(lead)
             const funding = getLeadFundingDisplay(lead)
@@ -830,7 +844,7 @@ export function SourcingPage() {
                 : technicalScore.status === 'ready' && technicalScore.score != null && technicalScore.maxScore
                 ? <div className="w-28"><div className="mb-1 flex items-baseline justify-between"><strong className="text-base text-brand-700">{technicalScore.score}</strong><span className="text-xs text-slate-400">/ {technicalScore.maxScore}</span></div><ProgressBar value={Math.round((technicalScore.score / technicalScore.maxScore) * 100)} /></div>
                 : <Badge tone="amber">待分析</Badge>}</TableCell>
-              <TableCell><span className="whitespace-nowrap text-xs text-slate-500">{lead.dataUpdatedAt || lead.lastVerifiedAt || '待确认'}</span></TableCell>
+              <TableCell><span className="whitespace-nowrap text-xs text-slate-500">{formatPoolEnteredAt(lead.poolEnteredAt)}</span></TableCell>
               <TableCell><Button size="sm" variant="secondary" onClick={async () => { setSelected(lead); setDetailTab('overview'); const d = await fetchLeadDetail(lead.id); if (d) setSelected(d) }}>详情</Button></TableCell>
             </tr>
           })}

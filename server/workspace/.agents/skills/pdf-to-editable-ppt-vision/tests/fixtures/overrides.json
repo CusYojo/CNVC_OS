@@ -1,0 +1,158 @@
+{
+  "schemaVersion": "1.0",
+  "coordinateSpace": "slide-px",
+  "coordinateWidth": 1280,
+  "slides": {
+    "1": {
+      "covers": [
+        {
+          "name": "test-cover",
+          "position": {
+            "left": 40,
+            "top": 40,
+            "width": 1200,
+            "height": 640
+          },
+          "fill": "#F5F7FA",
+          "line": {
+            "fill": "none",
+            "width": 0
+          }
+        }
+      ],
+      "shapes": [
+        {
+          "name": "source-node",
+          "geometry": "roundRect",
+          "position": {
+            "left": 120,
+            "top": 180,
+            "width": 220,
+            "height": 80
+          },
+          "fill": "#4472C4",
+          "line": {
+            "fill": "#4472C4",
+            "width": 1
+          },
+          "text": "源节点",
+          "textEvidenceId": "fixture",
+          "textStyle": {
+            "fontSize": 18,
+            "color": "#FFFFFF",
+            "bold": true,
+            "alignment": "center",
+            "verticalAlignment": "middle"
+          }
+        },
+        {
+          "name": "target-node",
+          "geometry": "roundRect",
+          "position": {
+            "left": 500,
+            "top": 180,
+            "width": 220,
+            "height": 80
+          },
+          "fill": "#FFE699",
+          "line": {
+            "fill": "#C9A227",
+            "width": 1
+          },
+          "text": "目标节点",
+          "textEvidenceId": "fixture"
+        }
+      ],
+      "connectors": [
+        {
+          "name": "source-to-target",
+          "from": "source-node",
+          "to": "target-node",
+          "kind": "elbow",
+          "fromSide": "right",
+          "toSide": "left",
+          "line": {
+            "fill": "#202020",
+            "width": 1.2
+          },
+          "tail": {
+            "type": "triangle"
+          }
+        }
+      ],
+      "texts": [
+        {
+          "name": "fixture-title",
+          "position": {
+            "left": 100,
+            "top": 60,
+            "width": 600,
+            "height": 60
+          },
+          "text": "视觉融合构建测试",
+          "textEvidenceId": "fixture",
+          "textStyle": {
+            "fontSize": 24,
+            "bold": true
+          }
+        }
+      ],
+      "icons": [
+        {
+          "name": "fixture-icon",
+          "mode": "native",
+          "geometry": "ellipse",
+          "position": {
+            "left": 820,
+            "top": 170,
+            "width": 80,
+            "height": 80
+          },
+          "fill": "#70AD47",
+          "line": {
+            "fill": "#548235",
+            "width": 1
+          }
+        }
+      ],
+      "tables": [
+        {
+          "name": "fixture-table",
+          "position": {
+            "left": 100,
+            "top": 360,
+            "width": 480,
+            "height": 160
+          },
+          "values": [
+            ["类型", "数量"],
+            ["节点", "2"],
+            ["连接线", "1"]
+          ],
+          "fontSize": 13
+        }
+      ],
+      "charts": [
+        {
+          "name": "fixture-chart",
+          "chartType": "bar",
+          "position": {
+            "left": 680,
+            "top": 340,
+            "width": 450,
+            "height": 220
+          },
+          "categories": ["A", "B"],
+          "series": [
+            {
+              "name": "数量",
+              "values": [3, 5]
+            }
+          ],
+          "hasLegend": false,
+          "verifiedData": true
+        }
+      ]
+    }
+  }
+}

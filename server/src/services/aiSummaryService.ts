@@ -344,6 +344,10 @@ export function deriveDataUpdatedAt(scoring: Record<string, unknown>, radarProfi
   return latest ? latest.toISOString().slice(0, 10) : ''
 }
 
+export function derivePoolEnteredAt(createdAt: Date | null) {
+  return createdAt && !Number.isNaN(createdAt.getTime()) ? createdAt.toISOString() : ''
+}
+
 function enrichLead(row: typeof leads.$inferSelect) {
   const arr = (v: unknown) => Array.isArray(v) ? v : []
   const has = (v: unknown) => typeof v === 'string' ? v.trim().length > 0 : !!v
@@ -475,6 +479,9 @@ function enrichLead(row: typeof leads.$inferSelect) {
     valuationDisplay: deriveValuationDisplay(sc, rp, analysisStatus, row.fundingRounds),
     technicalScore: deriveTechnicalScore(sc),
     scoreJob: publicScoreJob,
+    // “最新入池”只认首次进入公共线索池的数据库时间，不受原文发布时间、
+    // AI 评分完成时间或后续资料补全影响。
+    poolEnteredAt: derivePoolEnteredAt(row.createdAt),
     dataUpdatedAt: deriveDataUpdatedAt(sc, rp, row.createdAt),
   }
 }
@@ -589,7 +596,10 @@ export async function listLeads(options: { page?: number; pageSize?: number; cha
       END`,
       completeness: completenessExpr,
       createdAt: leads.createdAt,
-    }).from(leads).where(whereClause).orderBy(options.sort === 'score' ? desc(leads.score) : desc(leads.createdAt)).limit(pageSize).offset(offset),
+    }).from(leads).where(whereClause).orderBy(
+      options.sort === 'score' ? desc(leads.score) : desc(leads.createdAt),
+      desc(leads.id),
+    ).limit(pageSize).offset(offset),
     db.select({ n: sql<number>`count(*)::int` }).from(leads).where(whereClause),
   ])
   const total = totalRow[0]?.n ?? 0

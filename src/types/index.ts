@@ -261,6 +261,8 @@ export interface Lead {
   valuationDisplay?: LeadValuationDisplay
   technicalScore?: LeadTechnicalScore
   scoreJob?: LeadScoreJob | null
+  /** 首次进入公共线索池的时间；“最新入池”排序和列表展示统一使用该字段。 */
+  poolEnteredAt?: string
   dataUpdatedAt?: string
   completeness: number
   verificationStatus: '已核验' | '部分核验' | '待核验'
