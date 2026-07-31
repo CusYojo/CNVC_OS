@@ -160,6 +160,9 @@ def object_to_override(
             "toSide": item.get("toSide", "left"),
             "line": normalize_line(item.get("line")),
         }
+        for key in ("head", "tail", "cap", "join"):
+            if key in item:
+                value[key] = deepcopy(item[key])
         if not value["from"] or not value["to"]:
             return None, None, [f"{name} 缺少 from/to"]
         return "connectors", value, warnings
@@ -234,7 +237,14 @@ def main() -> None:
             unresolved.append({"page": page_number, "reason": "missing-pdf-page"})
             continue
         native_texts = page_native_texts(page)
-        page_plan = {"page": page_number, "regions": [], "operations": [], "warnings": []}
+        page_plan = {
+            "page": page_number,
+            "regions": [],
+            "operations": [],
+            "warnings": [],
+        }
+        if isinstance(analysis.get("typography"), dict):
+            page_plan["typography"] = deepcopy(analysis["typography"])
         page_overrides = overrides["slides"].setdefault(str(page_number), {})
         for key in SUPPORTED_OVERRIDE_KEYS:
             page_overrides.setdefault(key, [])

@@ -871,6 +871,19 @@ def main():
             encoding="utf-8",
         )
 
+    canvas_report_path = work_dir / "canvas-overflow-report.json"
+    run(
+        [
+            sys.executable,
+            SKILL_DIR / "scripts" / "validate_canvas_bounds.py",
+            "--pptx",
+            output_pptx,
+            "--output",
+            canvas_report_path,
+        ],
+        timeout_seconds=args.command_timeout_seconds,
+    )
+
     editable_coverage_path = work_dir / "editable-coverage-report.json"
     if args.editable_targets.strip():
         coverage_model = (
@@ -922,12 +935,9 @@ def main():
     }
     editable_surface_path = work_dir / "editable-surface-audit.json"
     foreground_only_path = work_dir / "foreground-only.pptx"
+    foreground_render_dir = work_dir / "foreground-renders"
     residue_report_path = work_dir / "editability-residue-report.json"
-    if (
-        "text" in editable_target_set
-        and route_report["route"] == "flattened"
-        and args.flattened_mode == "ocr"
-    ):
+    if editable_target_set:
         run(
             [
                 sys.executable,
@@ -938,9 +948,26 @@ def main():
                 editable_surface_path,
                 "--foreground-only-pptx",
                 foreground_only_path,
+                "--semantic-plan",
+                semantic_plan_path,
             ],
             timeout_seconds=args.command_timeout_seconds,
         )
+    else:
+        editable_surface_path.write_text(
+            json.dumps(
+                {"schemaVersion": "1.0", "passed": True, "notRequired": True},
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+
+    if (
+        "text" in editable_target_set
+        and route_report["route"] == "flattened"
+        and args.flattened_mode == "ocr"
+    ):
         residue_ocr_dir = work_dir / "final-background-residue-ocr"
         residue_command = [
             sys.executable,
@@ -1007,14 +1034,6 @@ def main():
                 "已停止交付，详见 editability-residue-report.json"
             )
     else:
-        editable_surface_path.write_text(
-            json.dumps(
-                {"schemaVersion": "1.0", "passed": True, "notRequired": True},
-                ensure_ascii=False,
-                indent=2,
-            ),
-            encoding="utf-8",
-        )
         residue_report_path.write_text(
             json.dumps(
                 {"schemaVersion": "1.0", "passed": True, "notRequired": True},
@@ -1042,6 +1061,24 @@ def main():
         ],
         timeout_seconds=args.command_timeout_seconds,
     )
+    if editable_target_set:
+        run(
+            [
+                sys.executable,
+                SKILL_DIR / "scripts" / "render_pptx.py",
+                "--input",
+                foreground_only_path,
+                "--render-dir",
+                foreground_render_dir,
+                "--libreoffice",
+                libreoffice,
+                "--pdftoppm",
+                pdftoppm,
+                "--timeout-seconds",
+                str(args.command_timeout_seconds),
+            ],
+            timeout_seconds=args.command_timeout_seconds,
+        )
 
     visual_qa_mode = args.vision_qa_mode
     if visual_qa_mode == "auto":
@@ -1073,6 +1110,14 @@ def main():
     if args.vision_json_dir:
         visual_qa_command.extend(
             ["--json-dir", args.vision_json_dir.expanduser().resolve()]
+        )
+    if editable_target_set:
+        visual_qa_command.extend(
+            [
+                "--foreground-render-dir",
+                foreground_render_dir,
+                "--require-foreground",
+            ]
         )
     run(visual_qa_command, timeout_seconds=args.command_timeout_seconds)
 
@@ -1145,6 +1190,9 @@ def main():
     residue_gate = json.loads(
         residue_report_path.read_text(encoding="utf-8")
     )
+    canvas_gate = json.loads(
+        canvas_report_path.read_text(encoding="utf-8")
+    )
     typography_path = work_dir / "typography-calibration-report.json"
     typography = (
         json.loads(typography_path.read_text(encoding="utf-8"))
@@ -1156,6 +1204,20 @@ def main():
         editability_report.get("review_required_pages")
     )
     unresolved_semantic_regions = semantic_plan.get("unresolvedRegions", [])
+    agent_visual_qa_pending = (
+        visual_qa_mode == "off"
+        and (
+            args.vision_mode != "off"
+            or bool(editable_target_set)
+        )
+    )
+    visual_gate_passed = (
+        (
+            visual_qa_mode == "off"
+            and not agent_visual_qa_pending
+        )
+        or bool(visual_qa.get("passed"))
+    )
     handoff = {
         "schemaVersion": "1.1",
         "producerSkill": "pdf-to-editable-ppt-vision",
@@ -1228,8 +1290,18 @@ def main():
         "editabilityResiduePassed": bool(residue_gate.get("passed")),
         "editabilityResidueReport": str(residue_report_path),
         "editableSurfaceAudit": str(editable_surface_path),
+        "foregroundOnlyPptx": (
+            str(foreground_only_path) if editable_target_set else None
+        ),
+        "foregroundRenderDirectory": (
+            str(foreground_render_dir) if editable_target_set else None
+        ),
+        "foregroundQaRequired": bool(editable_target_set),
+        "canvasBoundsPassed": bool(canvas_gate.get("passed")),
+        "canvasBoundsReport": str(canvas_report_path),
         "visualQaMode": visual_qa_mode,
         "visualQaPassed": bool(visual_qa.get("passed")),
+        "agentVisualQaPending": agent_visual_qa_pending,
         "visualQaReport": str(visual_qa_path),
         "visualQaReportRelative": str(
             visual_qa_path.relative_to(work_dir)
@@ -1247,12 +1319,10 @@ def main():
         and bool(editable_coverage.get("passed"))
         and bool(typography.get("passed"))
         and bool(residue_gate.get("passed"))
+        and bool(canvas_gate.get("passed"))
         and editability_review_passed
         and not unresolved_semantic_regions
-        and (
-            visual_qa_mode != "required"
-            or bool(visual_qa.get("passed"))
-        ),
+        and visual_gate_passed,
     }
     if typography_path.exists():
         handoff.update(

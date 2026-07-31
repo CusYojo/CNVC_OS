@@ -10,6 +10,8 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from vision_schema import validate_analysis_payload
+
 
 REGION_TYPES = {
     "flowchart",
@@ -101,7 +103,13 @@ def normalize_region(region: dict, page_number: int, index: int) -> dict | None:
         "reconstructionComplete": bool(region.get("reconstructionComplete")),
         "objects": region.get("objects") if isinstance(region.get("objects"), list) else [],
     }
-    for key in ("summary", "coverFill", "sourceImageElementIndex", "notes"):
+    for key in (
+        "summary",
+        "coverFill",
+        "expectedObjectCount",
+        "sourceImageElementIndex",
+        "notes",
+    ):
         if key in region:
             result[key] = region[key]
     return result
@@ -116,13 +124,16 @@ def normalize_analysis(payload: dict, page_number: int) -> dict:
             normalized = normalize_region(region, page_number, index)
             if normalized:
                 regions.append(normalized)
-    return {
+    result = {
         "page": page_number,
         "pageType": str(payload.get("pageType") or "unknown"),
         "coordinateSpace": "normalized-top-left",
         "confidence": normalize_confidence(payload.get("confidence")),
         "regions": regions,
     }
+    if isinstance(payload.get("typography"), dict):
+        result["typography"] = payload["typography"]
+    return result
 
 
 def page_facts(page: dict) -> dict:
@@ -280,6 +291,7 @@ def main() -> None:
                 )
             else:
                 raw = json_analysis(args.json_dir.expanduser().resolve(), page_number)
+            validate_analysis_payload(raw)
             report["pages"].append(normalize_analysis(raw, page_number))
         except Exception as exc:
             if args.mode == "required":

@@ -8,6 +8,7 @@ import {
   optionalArg,
   PptxGenJS,
   requiredArg,
+  runtimeBackend,
   svgData,
   transparency,
 } from "./public_pptx_runtime.mjs";
@@ -190,6 +191,7 @@ async function main() {
   const buildManifest = {
     schemaVersion: "1.0",
     output: FINAL_PPTX,
+    builderBackend: runtimeBackend,
     objects: [],
   };
   for (const page of model.pages) {

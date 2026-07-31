@@ -188,8 +188,8 @@ export const useAppStore = create<AppState>()(
       },
       leadStats: {
         total: leads.length,
-        verified: leads.filter((lead) => lead.verificationStatus === '已核验').length,
-        highPriority: leads.filter((lead) => lead.score >= 80).length,
+        verified: leads.filter((lead) => lead.verificationStatus !== '待核验').length,
+        highPriority: leads.filter((lead) => lead.score >= 60).length,
         avgCompleteness: leads.length
           ? Math.round(leads.reduce((sum, lead) => sum + lead.completeness, 0) / leads.length)
           : 0,

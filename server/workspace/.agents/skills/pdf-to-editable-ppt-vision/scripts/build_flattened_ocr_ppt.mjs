@@ -5,6 +5,7 @@ import {
   hexColor,
   optionalArg,
   requiredArg,
+  runtimeBackend,
 } from "./public_pptx_runtime.mjs";
 import { applyPageOverrides } from "./semantic_overrides.mjs";
 
@@ -36,6 +37,7 @@ async function main() {
   const buildManifest = {
     schemaVersion: "1.0",
     output: FINAL_PPTX,
+    builderBackend: runtimeBackend,
     objects: [],
   };
   for (const page of model.pages) {

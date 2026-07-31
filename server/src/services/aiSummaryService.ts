@@ -62,6 +62,14 @@ const completenessExpr = sql<number>`(
   ) * 100 / 8
 )`
 
+// 综合 AI 评分以评分产物中的 total 为准。leads.score 是历史冗余列，
+// 个别存量数据可能未随最近一次评分结果同步，不能再作为统计和排序的首选值。
+const overallScoreExpr = sql<number>`CASE
+  WHEN COALESCE(${leads.scoring}->>'total', '') ~ '^[0-9]+([.][0-9]+)?$'
+    THEN ROUND((${leads.scoring}->>'total')::numeric)::int
+  ELSE ${leads.score}
+END`
+
 const publicLeadSignalTextExpr = sql<string>`CONCAT_WS(
   ' ',
   COALESCE(${leads.name}, ''),
@@ -246,6 +254,33 @@ function meaningfulPresentationText(value: unknown): string | undefined {
   return PRESENTATION_PLACEHOLDERS.has(text) ? undefined : text
 }
 
+function comparableSubjectText(value: string) {
+  return value
+    .normalize('NFKC')
+    .toLocaleLowerCase()
+    .replace(/[\p{P}\p{S}\s]+/gu, '')
+}
+
+export function readAcceptedAiSubjectReview(
+  radarProfile: Record<string, unknown>,
+): { subjectName: string; companyName: string | null } | null {
+  const review = radarProfile.aiSubjectReview
+  if (!review || typeof review !== 'object' || Array.isArray(review)) return null
+  const value = review as Record<string, unknown>
+  if (value.decision !== 'accept' || Number(value.confidence) < 0.8) return null
+  const subjectName = meaningfulPresentationText(value.subjectName)
+  const evidence = meaningfulPresentationText(value.evidence)
+  if (!subjectName || !evidence) return null
+  const comparableSubject = comparableSubjectText(subjectName)
+  if (!comparableSubject || !comparableSubjectText(evidence).includes(comparableSubject)) return null
+  const subjectType = String(value.subjectType ?? '')
+  const legalName = meaningfulPresentationText(value.legalName)
+  return {
+    subjectName,
+    companyName: subjectType === 'company' ? (legalName || subjectName) : null,
+  }
+}
+
 export function deriveIndustryTags(industry: unknown): string[] {
   const text = meaningfulPresentationText(industry)
   if (!text) return ['待确认']
@@ -332,6 +367,17 @@ export function deriveTechnicalScore(scoring: Record<string, unknown>) {
     : { status: 'pending' as const }
 }
 
+export function deriveOverallScore(scoring: Record<string, unknown>, fallbackScore: number) {
+  const rawTotal = scoring.total
+  const total = (
+    typeof rawTotal === 'number'
+    || (typeof rawTotal === 'string' && rawTotal.trim().length > 0)
+  ) ? Number(rawTotal) : Number.NaN
+  return Number.isFinite(total) && total >= 0
+    ? Math.round(total)
+    : (Number.isFinite(fallbackScore) ? fallbackScore : 0)
+}
+
 export function deriveDataUpdatedAt(scoring: Record<string, unknown>, radarProfile: Record<string, unknown>, createdAt: Date | null) {
   const candidates = [
     meaningfulPresentationText(scoring.scored_at),
@@ -390,6 +436,7 @@ function enrichLead(row: typeof leads.$inferSelect) {
   const isRadarLead = /^项目发现雷达(?:\s|·|$)/.test(src)
   const isPaper = String(rp.channel ?? '') === '论文'
   const sourceTitle = String(rp.sourceTitle || ((arr(row.sources)[0] as Record<string, unknown> | undefined)?.title ?? '')).trim()
+  const acceptedAiSubject = isRadarLead ? readAcceptedAiSubjectReview(rp) : null
   const derivedSubjectName = deriveRadarSubjectName({
     isPaper,
     existingName: row.name,
@@ -405,17 +452,24 @@ function enrichLead(row: typeof leads.$inferSelect) {
     articleText: rp.articleText || row.summary,
     excludedNames: [rp.sourceName, rp.accountName],
   })
-  // 历史 Radar 数据可能已把正文谓语片段写进 name/companyName。
-  // 接口层即时纠正展示；后续通过质量门槛的同源记录可按原文链接持久化升级。
+  // 新数据优先使用入池前已通过原文证据校验的 AI 主体。只有没有 AI 审查结果的
+  // 历史数据才使用旧推断逻辑兜底，避免英文品牌等有效名称被改成“主体待确认”。
   const subjectName = isRadarLead
-    ? (derivedSubjectName || (isSpecificLeadSubjectName(row.name, isPaper) ? row.name : '主体待确认'))
+    ? (
+        acceptedAiSubject?.subjectName
+        || derivedSubjectName
+        || (isSpecificLeadSubjectName(row.name, isPaper) ? row.name : '主体待确认')
+      )
     : row.name
   const isResearchSubjectFallback = isRadarLead
     && row.companyName === row.name
     && /(?:大学|学院|研究院|研究所|医院|实验室|课题组|教授团队|研究员团队|科研团队|研究团队)$/.test(String(row.companyName ?? ''))
-  const subjectCompanyName = isRadarLead && (!isSpecificLeadSubjectName(row.companyName) || isResearchSubjectFallback)
-    ? null
-    : row.companyName
+  const subjectCompanyName = acceptedAiSubject?.companyName
+    || (
+      isRadarLead && (!isSpecificLeadSubjectName(row.companyName) || isResearchSubjectFallback)
+        ? null
+        : row.companyName
+    )
   // 主体名称与项目名称是两个语义：例如主体“海昶生物”对应
   // “创新多肽偶联药物 PDC 平台项目”。Drawer 标题使用 subjectName，
   // 项目字段保留 Radar 原始结构化项目名，不能为了表面一致而互相覆盖。
@@ -463,6 +517,7 @@ function enrichLead(row: typeof leads.$inferSelect) {
     ...row,
     name: subjectName,
     companyName: subjectCompanyName,
+    score: deriveOverallScore(sc, row.score),
     radarProfile: displayRadarProfile,
     completeness,
     verificationStatus,
@@ -560,7 +615,7 @@ export async function listLeads(options: { page?: number; pageSize?: number; cha
       businessRegionConfidence: leads.businessRegionConfidence,
       source: leads.source,
       poolStatus: leads.poolStatus,
-      score: leads.score,
+      score: overallScoreExpr,
       summary: leads.summary,
       // 轻量 scoring 摘要:只挑 completeness 计算需要的数组长度/存在性(不拉整个 scoring 大 jsonb)
       scoring: sql<unknown>`CASE WHEN ${leads.scoring} IS NULL THEN NULL ELSE jsonb_build_object(
@@ -570,6 +625,7 @@ export async function listLeads(options: { page?: number; pageSize?: number; cha
         'competitors', COALESCE(${leads.scoring}->'competitors','[]'::jsonb),
         'fundingRoundsResearched', COALESCE(${leads.scoring}->'fundingRoundsResearched','[]'::jsonb),
         'researchSources', COALESCE(${leads.scoring}->'researchSources','[]'::jsonb),
+        'total', ${leads.scoring}->'total',
         'overall_comment', ${leads.scoring}->'overall_comment',
         'scored_at', ${leads.scoring}->'scored_at',
         'scoreJob', ${leads.scoring}->'scoreJob',
@@ -584,7 +640,8 @@ export async function listLeads(options: { page?: number; pageSize?: number; cha
         'sourceName', ${leads.radarProfile}->'sourceName',
         'sourceGroup', ${leads.radarProfile}->'sourceGroup',
         'sourceTitle', COALESCE(${leads.radarProfile}->'sourceTitle', ${leads.sources}->0->'title'),
-        'publishedAt', ${leads.radarProfile}->'publishedAt'
+        'publishedAt', ${leads.radarProfile}->'publishedAt',
+        'aiSubjectReview', ${leads.radarProfile}->'aiSubjectReview'
       ) END`,
       // 列表估值兜底：仅保留第一条历史融资的轮次/估值，避免返回完整 funding_rounds。
       fundingRounds: sql<unknown[]>`CASE
@@ -597,7 +654,7 @@ export async function listLeads(options: { page?: number; pageSize?: number; cha
       completeness: completenessExpr,
       createdAt: leads.createdAt,
     }).from(leads).where(whereClause).orderBy(
-      options.sort === 'score' ? desc(leads.score) : desc(leads.createdAt),
+      options.sort === 'score' ? desc(overallScoreExpr) : desc(leads.createdAt),
       desc(leads.id),
     ).limit(pageSize).offset(offset),
     db.select({ n: sql<number>`count(*)::int` }).from(leads).where(whereClause),
@@ -626,7 +683,7 @@ export async function leadPoolStats() {
     risks: leads.risks,
     fundingRounds: leads.fundingRounds,
     sources: leads.sources,
-    score: leads.score,
+    score: overallScoreExpr,
     scoring: sql<unknown>`CASE WHEN ${leads.scoring} IS NULL THEN NULL ELSE jsonb_build_object(
       'dimensions', COALESCE(${leads.scoring}->'dimensions','[]'::jsonb),
       'structuredTeam', COALESCE(${leads.scoring}->'structuredTeam','[]'::jsonb),
@@ -634,6 +691,7 @@ export async function leadPoolStats() {
       'competitors', COALESCE(${leads.scoring}->'competitors','[]'::jsonb),
       'fundingRoundsResearched', COALESCE(${leads.scoring}->'fundingRoundsResearched','[]'::jsonb),
       'researchSources', COALESCE(${leads.scoring}->'researchSources','[]'::jsonb),
+      'total', ${leads.scoring}->'total',
       'overall_comment', ${leads.scoring}->'overall_comment',
       'registry', COALESCE(${leads.scoring}->'registry','{}'::jsonb)
     ) END`,
@@ -644,7 +702,7 @@ export async function leadPoolStats() {
     const e = enrichLead(r as typeof leads.$inferSelect)
     compSum += e.completeness
     if (e.verificationStatus !== '待核验') verified++
-    if ((r.score ?? 0) >= 60) highPriority++
+    if (e.score >= 60) highPriority++
   }
   return {
     total,

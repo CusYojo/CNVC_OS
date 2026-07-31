@@ -139,18 +139,6 @@ function getLeadFundingDisplay(lead: Lead) {
   }
 }
 
-function getLeadTechnicalScore(lead: Lead) {
-  if (lead.technicalScore?.status === 'ready') return lead.technicalScore
-  const dimension = lead.scoring?.dimensions?.find((item) => {
-    const key = item.key.toLocaleLowerCase()
-    return ['technology', 'technical', 'tech', 'differentiation'].some((part) => key.includes(part))
-      || /技术|产品差异化/.test(item.name)
-  })
-  return dimension
-    ? { score: dimension.score, maxScore: dimension.max, status: 'ready' as const }
-    : { status: 'pending' as const }
-}
-
 function getLeadBasicFacts(lead: Lead) {
   const funding = getLeadFundingDisplay(lead)
   const registry = lead.scoring?.registry ?? {}
@@ -332,8 +320,8 @@ function LeadDetailPanel({
         </div>
         {lead.analysisStatus === 'ready' &&
           <div className="shrink-0 text-right">
-            <p className="text-3xl font-semibold text-brand-700">{lead.score}</p>
-            <p className="text-[10px] text-brand-500">AI 初筛分 · 非投决结论</p>
+            <p className="text-3xl font-semibold text-brand-700">{lead.score}<span className="ml-1 text-sm font-normal text-brand-400">/ 100</span></p>
+            <p className="text-[10px] text-brand-500">AI 综合评分 · 非投决结论</p>
           </div>}
       </div>
     </div>
@@ -591,7 +579,7 @@ export function SourcingPage() {
         ? `，重复 ${r.duplicates} 条（本批 ${r.batchDuplicates}，库内历史 ${r.databaseDuplicates}）`
         : ''
       showToast(
-        `雷达同步完成：本轮 AI 审查 ${r.fetched} 条，通过 ${r.aiAccepted} 条，拒绝 ${r.aiRejected} 条，待复核 ${r.aiReview} 条${r.aiFailed ? `，审查失败 ${r.aiFailed} 条（未入池，可重试）` : ''}；新增 ${r.created} 条，更新 ${r.updated} 条，无变化 ${r.unchanged} 条${duplicateDetail}${r.invalid ? `，无效 ${r.invalid} 条` : ''}${scoringIds.length ? `；${scoringIds.length} 条 AI 技术评分正在更新` : ''}；列表与统计已刷新`,
+        `雷达同步完成：本轮 AI 审查 ${r.fetched} 条，通过 ${r.aiAccepted} 条，拒绝 ${r.aiRejected} 条，待复核 ${r.aiReview} 条${r.aiFailed ? `，审查失败 ${r.aiFailed} 条（未入池，可重试）` : ''}；新增 ${r.created} 条，更新 ${r.updated} 条，无变化 ${r.unchanged} 条${duplicateDetail}${r.invalid ? `，无效 ${r.invalid} 条` : ''}${scoringIds.length ? `；${scoringIds.length} 条 AI 综合评分正在更新` : ''}；列表与统计已刷新`,
         'success',
       )
     } catch (err) {
@@ -768,13 +756,13 @@ export function SourcingPage() {
 
   return (
     <div>
-      <PageHeader title="项目获取池 · 公共线索池" description="按渠道及合伙人关注的行业、地区筛选线索，并优先查看估值、AI 技术评分与更新时间。" actions={<><Button variant="secondary" onClick={syncRadar} loading={syncing}><RefreshCw className="h-4 w-4" />从雷达同步</Button><Button variant="secondary" onClick={() => showToast('批量导入模板已准备')}><FileSpreadsheet className="h-4 w-4" />批量导入</Button><Button onClick={() => { setUpload(null); setShowUpload(true) }}><UploadCloud className="h-4 w-4" />上传 BP</Button></>} />
+      <PageHeader title="项目获取池 · 公共线索池" description="按渠道及合伙人关注的行业、地区筛选线索，并优先查看估值、AI 综合评分与更新时间。" actions={<><Button variant="secondary" onClick={syncRadar} loading={syncing}><RefreshCw className="h-4 w-4" />从雷达同步</Button><Button variant="secondary" onClick={() => showToast('批量导入模板已准备')}><FileSpreadsheet className="h-4 w-4" />批量导入</Button><Button onClick={() => { setUpload(null); setShowUpload(true) }}><UploadCloud className="h-4 w-4" />上传 BP</Button></>} />
 
       <div className="mb-5 grid grid-cols-3 gap-4">
         {([
-          ['公共池线索', leadStats.total, '持续同步与核验', Globe2, undefined],
-          ['部分 / 已核验', leadStats.verified, '企业自述不等于已核验', ShieldCheck, undefined],
-          ['高优先项目', leadStats.highPriority, '点击按 AI 评分排序 · ≥60 分优先', Sparkles, () => { setSort('score'); setPage(1) }],
+          ['有效公共池线索', leadStats.total, '已通过入池质量过滤', Globe2, undefined],
+          ['已有多源证据', leadStats.verified, '主体明确且至少有 2 条来源', ShieldCheck, undefined],
+          ['综合 AI 评分 ≥60', leadStats.highPriority, '100 分制 · 点击按最新综合评分排序', Sparkles, () => { setSort('score'); setPage(1) }],
         ] as [string, string | number, string, typeof Globe2, (() => void) | undefined][]).map(([label, value, note, Icon, onClick]) => { const MetricIcon = Icon; const clickable = !!onClick; return <Card key={String(label)} className={`p-4 ${clickable ? 'cursor-pointer transition hover:-translate-y-0.5 hover:border-brand-300 hover:shadow-md' : ''}`}><div onClick={onClick} role={clickable ? 'button' : undefined} tabIndex={clickable ? 0 : undefined}><div className="flex items-center justify-between"><p className="text-sm font-medium text-slate-500">{label}</p><span className="grid h-8 w-8 place-items-center rounded-lg bg-brand-50 text-brand-600"><MetricIcon className="h-4 w-4" /></span></div><p className="mt-2 text-2xl font-semibold text-ink">{value}</p><p className="mt-1 text-xs text-slate-400">{note}</p></div></Card> })}
       </div>
 
@@ -818,13 +806,12 @@ export function SourcingPage() {
 
       <div ref={tableRef}>
         <Card className="overflow-hidden">
-        <DataTable headers={['主体名称 / 项目', '行业 / 地区标签', '估值', 'AI 技术评分', '入池时间', '详情']}>
+        <DataTable headers={['主体名称 / 项目', '行业 / 地区标签', '估值', 'AI 综合评分', '入池时间', '详情']}>
           {filtered.map((lead) => {
             const { companySubject } = getLeadIdentity(lead)
             const funding = getLeadFundingDisplay(lead)
             const valuationValue = lead.valuationDisplay?.value ?? funding.valuation
             const valuationStatus = lead.valuationDisplay?.status ?? (valuationValue ? 'available' : lead.analysisStatus === 'pending' ? 'pending' : 'unavailable')
-            const technicalScore = getLeadTechnicalScore(lead)
             const scoreRefreshing = scoringLeadIds.includes(lead.id) || isScoreJobActive(lead.scoreJob?.status)
             const industryTags = lead.businessTags?.industry?.length ? lead.businessTags.industry : [lead.industry || '待确认']
             const regionTags = lead.businessTags?.region?.length ? lead.businessTags.region : [lead.region || '待确认']
@@ -841,8 +828,8 @@ export function SourcingPage() {
                 ? <Badge tone={lead.scoreJob?.status === 'retrying' ? 'amber' : 'blue'}>{scoreJobLabel(lead.scoreJob?.status)}</Badge>
                 : lead.scoreJob?.status === 'failed'
                 ? <Badge tone="amber">待重新生成</Badge>
-                : technicalScore.status === 'ready' && technicalScore.score != null && technicalScore.maxScore
-                ? <div className="w-28"><div className="mb-1 flex items-baseline justify-between"><strong className="text-base text-brand-700">{technicalScore.score}</strong><span className="text-xs text-slate-400">/ {technicalScore.maxScore}</span></div><ProgressBar value={Math.round((technicalScore.score / technicalScore.maxScore) * 100)} /></div>
+                : lead.analysisStatus === 'ready'
+                ? <div className="w-28"><div className="mb-1 flex items-baseline justify-between"><strong className="text-base text-brand-700">{lead.score}</strong><span className="text-xs text-slate-400">/ 100</span></div><ProgressBar value={Math.max(0, Math.min(100, lead.score))} /></div>
                 : <Badge tone="amber">待分析</Badge>}</TableCell>
               <TableCell><span className="whitespace-nowrap text-xs text-slate-500">{formatPoolEnteredAt(lead.poolEnteredAt)}</span></TableCell>
               <TableCell><Button size="sm" variant="secondary" onClick={async () => { setSelected(lead); setDetailTab('overview'); const d = await fetchLeadDetail(lead.id); if (d) setSelected(d) }}>详情</Button></TableCell>
@@ -912,7 +899,7 @@ export function SourcingPage() {
           scoreRefreshing={scoringLeadIds.includes(selected.id) || isScoreJobActive(selected.scoreJob?.status)}
         />}
         {selected && renderLegacyDetail && <div>
-          <div className="rounded-xl bg-brand-50 p-4"><div className="flex items-start justify-between"><div><div className="flex items-center gap-2"><Badge tone="blue">{selected.industry}</Badge><Badge tone={verificationTone(selected.verificationStatus)}>{selected.verificationStatus}</Badge><StatusBadge status={selected.status} /></div><p className="mt-3 max-w-[600px] truncate text-lg font-semibold text-slate-900" title={getLeadIdentity(selected).companySubject}>{getLeadIdentity(selected).companySubject}</p><p className="mt-1 max-w-[600px] truncate text-sm text-slate-500" title={getLeadIdentity(selected).projectName}>项目：{getLeadIdentity(selected).projectName}</p><p className="mt-1 text-sm text-slate-500">{selected.region} · {selected.round} · 更新于 {selected.lastVerifiedAt}</p></div><div className="text-right"><p className="text-3xl font-semibold text-brand-700">{selected.score}</p><p className="text-[10px] text-brand-500">AI 初筛分 · 非投决结论</p></div></div><p className="mt-4 text-sm leading-6 text-brand-900">{selected.summary}</p><div className="mt-3"><SourceLink url={selected.scoring?.officialSite && selected.scoring.officialSite !== '待核验' ? selected.scoring.officialSite : selected.website}>公司官网</SourceLink></div></div>
+          <div className="rounded-xl bg-brand-50 p-4"><div className="flex items-start justify-between"><div><div className="flex items-center gap-2"><Badge tone="blue">{selected.industry}</Badge><Badge tone={verificationTone(selected.verificationStatus)}>{selected.verificationStatus}</Badge><StatusBadge status={selected.status} /></div><p className="mt-3 max-w-[600px] truncate text-lg font-semibold text-slate-900" title={getLeadIdentity(selected).companySubject}>{getLeadIdentity(selected).companySubject}</p><p className="mt-1 max-w-[600px] truncate text-sm text-slate-500" title={getLeadIdentity(selected).projectName}>项目：{getLeadIdentity(selected).projectName}</p><p className="mt-1 text-sm text-slate-500">{selected.region} · {selected.round} · 更新于 {selected.lastVerifiedAt}</p></div><div className="text-right"><p className="text-3xl font-semibold text-brand-700">{selected.score}<span className="ml-1 text-sm font-normal text-brand-400">/ 100</span></p><p className="text-[10px] text-brand-500">AI 综合评分 · 非投决结论</p></div></div><p className="mt-4 text-sm leading-6 text-brand-900">{selected.summary}</p><div className="mt-3"><SourceLink url={selected.scoring?.officialSite && selected.scoring.officialSite !== '待核验' ? selected.scoring.officialSite : selected.website}>公司官网</SourceLink></div></div>
 
           <div className="mt-5"><Tabs tabs={[
             { id: 'overview', label: '项目概览' },
