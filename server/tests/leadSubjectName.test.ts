@@ -117,6 +117,31 @@ test('keeps the primary research group when an article lists collaborators', () 
   }), '清华大学信息国家研究中心智慧天网交叉创新群体')
 })
 
+test('uses the complete paper title instead of an extracted sentence fragment', () => {
+  const cases = [
+    {
+      existingName: 'keypoints, and overfit to a single keypoint detector',
+      title: 'GeoMix: Descriptor-Free Visual Localization via Global Context and Multi-Detector Training',
+    },
+    {
+      existingName: 'state-of-the-art baselines',
+      title: 'Seek to Segment: Active Perception for Panoramic Referring Segmentation',
+    },
+    {
+      existingName: 'lable at the project page',
+      title: 'Reasoning LLM Improves Speaker Recognition in Long-form TV Dramas',
+    },
+  ]
+  for (const item of cases) {
+    assert.equal(deriveRadarSubjectName({
+      isPaper: true,
+      existingName: item.existingName,
+      projectName: item.title,
+      title: item.title,
+    }), item.title)
+  }
+})
+
 test('prefers the financed company over article columns, investors, and descriptive phrases', () => {
   const cases = [
     {

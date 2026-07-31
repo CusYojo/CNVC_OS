@@ -306,6 +306,19 @@ metaRouter.post('/leads/sync-radar', async (req: AuthedRequest, res, next) => {
       nextCursor = incremental.nextCursor
       hasMore = incremental.hasMore
 
+      // “全部渠道”的最新候选常被高频创投新闻占满。论文单独拉取一个窗口，
+      // 避免即使雷达已采集 arXiv，公共池同步仍永远看不到论文。
+      if (src === 'all') {
+        const papers = await fetchRadarWindow({
+          baseUrl: RADAR_BASE,
+          pageSize: limit,
+          maxPages: 1,
+          group: '论文',
+        })
+        fetchedItems.push(...papers.items)
+        pagesFetched += papers.pages
+      }
+
       const state = await readRadarSyncState(stateId)
       if (!state.backfillComplete && backfillPages > 0 && incremental.hasMore) {
         const backfillCursor = state.backfillCursor || incremental.nextCursor
@@ -371,12 +384,13 @@ metaRouter.post('/leads/sync-radar', async (req: AuthedRequest, res, next) => {
         continue
       }
       const prof = it.project_profile || {}
-      const isArxiv = /arxiv/i.test(String(it.source || ''))
+      const sg = String(it.source_group || '')
+      const paperSourceText = [it.source, it.source_key, it.source_type, it.source_name, sg].join(' ')
+      const isPaper = sg === '论文' || /arxiv/i.test(paperSourceText)
       const publisherNames = [it.source_name, it.school, it.account_name, it.wx_name]
         .map((value: unknown) => meaningfulRadarText(value))
         .filter(Boolean)
-      const sg = String(it.source_group || '')
-      const channel = /arxiv/i.test(String(it.source || '')) ? '论文'
+      const channel = isPaper ? '论文'
         : (sg || '其他')
       const fundingRound = meaningfulRadarText(prof.project_round)
       const financingAmount = meaningfulRadarText(prof.financing_amount)
@@ -465,7 +479,7 @@ metaRouter.post('/leads/sync-radar', async (req: AuthedRequest, res, next) => {
         link: it.link || prof.source_url || '',
         // 【批次3·需求G】论文(arxiv)元数据:作者/分类/pdf/摘要,供后续 AI 中文解读+作者背景+技术落地分析复用。
         // 仅 arxiv 线索有值;其他渠道为空对象。摘要(abstract)取雷达 summary(英文原文)。
-        paperMeta: isArxiv ? {
+        paperMeta: isPaper ? {
           title: it.title || prof.paper_title || name,
           authors: Array.isArray(it.authors) ? it.authors : String(it.authors || prof.paper_authors || '').split(/[,;，；]/).map((x: string) => x.trim()).filter(Boolean),
           firstAuthor: it.first_author || prof.paper_first_author || (Array.isArray(it.authors) ? it.authors[0] : ''),
@@ -493,13 +507,13 @@ metaRouter.post('/leads/sync-radar', async (req: AuthedRequest, res, next) => {
       const syncResult = await syncRadarLeadByName({
         name,
         companyName: companyName || null,
-        industry: (isArxiv
+        industry: (isPaper
           ? (Array.isArray(it.categories) ? it.categories.slice(0, 3).join(', ') : String(it.categories || prof.industry || '待核验').toString().slice(0, 64))
           : (prof.industry || '待核验').toString().slice(0, 64)),
         businessRegion: regionResolution?.region,
         businessRegionSource: regionResolution?.source,
         businessRegionConfidence: regionResolution?.confidence,
-        source: isArxiv
+        source: isPaper
           ? `项目发现雷达 · arxiv`
           : `项目发现雷达 · ${it.source_name || it.source || '公开渠道'}`,
         poolStatus: '成功',

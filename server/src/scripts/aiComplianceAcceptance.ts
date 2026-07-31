@@ -280,7 +280,7 @@ async function main() {
   else process.env.AI_COMPLIANCE_DISABLE_LLM = previousAgentDisableLlm
   const returnInvestmentFinding = agentFallbackWorkflow.content.sections
     .find((section) => section.title === '投资情形分析')
-    ?.findings.find((finding) => finding.text.startsWith('返投要求方面，'))
+    ?.findings[1]
   check(
     '返投公开依据生成待核验内容而非整项空缺',
     returnInvestmentFinding?.status === '待核验'
@@ -356,6 +356,21 @@ async function main() {
       '沈阳与智灵FDE团队交流纪要',
     ].join('、'),
     '清除来源编号，并把标签式小标题改写为自然段落',
+  )
+  check(
+    '取证过程不会进入客户可见正文',
+    [
+      cleanComplianceBodyText('现有项目材料显示，智灵动力正在推进新一轮融资。'),
+      cleanComplianceBodyText('交流纪要记载，公司已形成算法优化交付能力。'),
+      cleanComplianceBodyText('根据当前项目资料，公司拟通过增资方式融资。'),
+      cleanComplianceBodyText('公开资料可提供通用核查线索，适用规则要求完成返投认定。'),
+    ].join('、') === [
+      '智灵动力正在推进新一轮融资。',
+      '公司已形成算法优化交付能力。',
+      '公司拟通过增资方式融资。',
+      '相关公开规则和记录表明，适用规则要求完成返投认定。',
+    ].join('、'),
+    '来源名称与检索过程仅进入审计元数据，正文直接陈述事实和判断',
   )
   const outlineRichSources = [{
     sourceType: 'file',
@@ -474,6 +489,40 @@ async function main() {
     'Reviewer拦截模板主体泄漏',
     leakageReview.issues.some((issue) => issue.code === 'TEMPLATE_FACT_LEAK'),
     leakageReview.issues.map((issue) => issue.code).join('、'),
+  )
+
+  const sourceProcessContent = structuredClone(workflow.content)
+  sourceProcessContent.sections
+    .find((section) => section.title === '公司简介')!.findings[0].text =
+      '现有项目材料显示，智灵动力正在推进新一轮融资。'
+  const sourceProcessReview = reviewComplianceContent({
+    content: sourceProcessContent,
+    template,
+    blueprint,
+    project,
+    sources: [],
+  })
+  check(
+    'Reviewer拦截项目资料和取证过程进入正文',
+    sourceProcessReview.issues.some((issue) => issue.code === 'SOURCE_PROCESS_LEAK'),
+    sourceProcessReview.issues.map((issue) => issue.code).join('、'),
+  )
+
+  const aiStyleContent = structuredClone(workflow.content)
+  aiStyleContent.sections
+    .find((section) => section.title === '投资理由')!.findings[0].text =
+      '赛道选择已有商业化线索，相关安排具备初步判断依据，并可形成后续成长路径。'
+  const aiStyleReview = reviewComplianceContent({
+    content: aiStyleContent,
+    template,
+    blueprint,
+    project,
+    sources: [],
+  })
+  check(
+    'Reviewer拦截模型化套话和抽象概括',
+    aiStyleReview.issues.some((issue) => issue.code === 'AI_STYLE_DRIFT'),
+    aiStyleReview.issues.map((issue) => issue.code).join('、'),
   )
 
   const invalidCitationContent = structuredClone(workflow.content)

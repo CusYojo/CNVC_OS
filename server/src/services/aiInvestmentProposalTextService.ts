@@ -28,6 +28,10 @@ const INVESTMENT_PROPOSAL_WEB_SECTION_ANCHORS = [
 ] as const
 const CLIENT_DRAFT_LABEL =
   /(^|[。！？；\n]\s*)(?:判断|依据|影响[\/／]约束|待办)\s*[:：]\s*/g
+const CLIENT_SOURCE_PROCESS_WORDING =
+  /(?:项目资料(?:库)?|(?:当前|现有)资料|会议纪要(?:显示|列示|记载|提及)?|已取得材料|原始(?:文件|资料)(?:核验|复核)?|资料(?:显示|列示|记载|提及))/i
+const CLIENT_AI_STYLE_BOILERPLATE =
+  /(?:值得注意的是|需要指出的是|不难看出|由此可见|综上所述|总体来看|在此背景下|从长远来看|多维度赋能|全方位赋能|打造[^。；]{0,24}新范式|构建[^。；]{0,24}生态闭环|实现[^。；]{0,18}从[^。；]{1,18}到[^。；]{1,18}的跃升)/
 const CLIENT_COLON_LABEL_NAMES = [
   '订单节奏',
   '订单情况',
@@ -214,6 +218,35 @@ export function containsInvestmentProposalInlineSubheading(value: string) {
   return INLINE_NUMBERED_SUBHEADING.test(value)
 }
 
+export function containsInvestmentProposalSourceProcessWording(value: string) {
+  return CLIENT_SOURCE_PROCESS_WORDING.test(value)
+}
+
+export function containsInvestmentProposalAiStyleBoilerplate(value: string) {
+  return CLIENT_AI_STYLE_BOILERPLATE.test(value)
+}
+
+function rewriteClientSourceProcessWording(value: string) {
+  return value
+    .replace(
+      /本提案依据截至([^，；。]+?)当前项目资料库中已授权、可追溯的资料形成[；;]\s*关键结论须回到原始文件复核[。.]?/g,
+      '本提案反映截至$1已确认的项目情况，供当前阶段审议使用。',
+    )
+    .replace(/(?:现有资料未提供|当前项目资料库未覆盖|项目资料库未覆盖)/g, '尚未明确')
+    .replace(/当前资料不足以形成/g, '现阶段尚不能形成')
+    .replace(/当前项目暂无相关资料[。.]?/g, '现阶段尚不能形成结论。')
+    .replace(/已取得材料仅(?:显示|列示|记载|提及)/g, '现阶段仅能确认')
+    .replace(/完成关键原始(?:文件|资料)核验/g, '完成关键事实核验')
+    .replace(/(?:回到|依据|对照)?原始(?:文件|资料)(?:进行)?(?:核验|复核)/g, '完成专项核验')
+    .replace(/原始(?:文件|资料)/g, '关键文件')
+    .replace(/(?:基于|根据)(?:截至[^，；。]+)?(?:当前)?项目资料(?:库)?[，,]?/g, '')
+    .replace(
+      /(?:当前项目资料(?:库)?|项目资料(?:库)?|现有资料|当前资料|会议纪要)(?:中)?(?:显示|列示|记载|提及|表明|说明)(?:的)?[，,:：]?/g,
+      '',
+    )
+    .replace(/资料(?:显示|列示|记载|提及)(?:的)?[，,:：]?/g, '')
+}
+
 function stripLeadingInlineSubheadings(value: string) {
   let text = value
   for (let pass = 0; pass < 5; pass += 1) {
@@ -256,7 +289,7 @@ function rewriteClientColonLabels(value: string) {
 export function sanitizeInvestmentProposalClientText(value: unknown) {
   let text = stripInlineNumberedSubheadings(
     withoutCollapsedWebFragments(stripInvestmentProposalPageChrome(
-      sanitizeClientVisibleEvidenceWording(value),
+      rewriteClientSourceProcessWording(sanitizeClientVisibleEvidenceWording(value)),
     )),
   )
     .replace(/(^|[。！？；\n]\s*)项目资料显示\s*[:：]\s*/g, '$1')
@@ -267,7 +300,9 @@ export function sanitizeInvestmentProposalClientText(value: unknown) {
     .replace(/\s+(?:依据|影响[\/／]约束|待办)\s*[:：]\s*/g, '；')
     .replace(/\n+(?:依据|影响[\/／]约束|待办)\s*[:：]\s*/g, '；')
   text = rewriteClientColonLabels(stripInlineNumberedSubheadings(text))
-  return sanitizeClientVisibleEvidenceWording(normalizeWhitespace(text))
+  return rewriteClientSourceProcessWording(
+    sanitizeClientVisibleEvidenceWording(normalizeWhitespace(text)),
+  )
     .replace(/([。！？；])\n+/g, '$1')
     .replace(/\n+/g, '；')
 }
@@ -422,7 +457,7 @@ export function summarizeInvestmentProposalProductEvidence(value: unknown) {
     })
   if (products.length) {
     paragraphs.push(sanitizeInvestmentProposalClientText(
-      `现有资料列示的产品矩阵中，${products.slice(0, 5).join('；')}。`,
+      `公司产品包括${products.slice(0, 5).join('；')}。`,
     ))
   }
 

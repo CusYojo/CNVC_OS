@@ -18,8 +18,10 @@ import {
   buildInvestmentProposalEvidencePlan,
 } from '../services/aiInvestmentProposalEvidenceService.js'
 import {
+  containsInvestmentProposalAiStyleBoilerplate,
   containsInvestmentProposalColonLabel,
   containsInvestmentProposalInlineSubheading,
+  containsInvestmentProposalSourceProcessWording,
   sanitizeInvestmentProposalClientText,
   sanitizeInvestmentProposalEvidenceContent,
   summarizeInvestmentProposalProductEvidence,
@@ -126,9 +128,21 @@ const clientFinding = sanitizeInvestmentProposalClientText(
 )
 assert.equal(
   clientFinding,
-  '公司具备机器人业务基础。项目资料记载公司已形成产品。仍需核验客户。取得合同。',
+  '公司具备机器人业务基础。公司已形成产品。仍需核验客户。取得合同。',
 )
-assert.doesNotMatch(clientFinding, /判断：|依据：|影响\/约束：|待办：|项目资料显示：|原文链接/)
+assert.doesNotMatch(
+  clientFinding,
+  /判断：|依据：|影响\/约束：|待办：|项目资料|原文链接/,
+)
+const summarizedSourceProse = sanitizeInvestmentProposalClientText(
+  '会议纪要记载公司已完成首批产品交付；现有资料未提供完整客户名单，项目组应回到原始文件核验。',
+)
+assert.equal(
+  summarizedSourceProse,
+  '公司已完成首批产品交付；尚未明确完整客户名单，项目组应完成专项核验。',
+)
+assert.equal(containsInvestmentProposalSourceProcessWording(summarizedSourceProse), false)
+assert.equal(containsInvestmentProposalAiStyleBoilerplate('总体来看，公司发展情况较好。'), true)
 const orderParagraph = sanitizeInvestmentProposalClientText(
   '订单节奏：2026年5月正式启动新合作，当前每20天交付5000分钟内容。',
 )
@@ -345,12 +359,12 @@ function claimFor(definition: typeof leafDefinitions[number]) {
     return '星河机器人平台采用视觉模型与运动控制算法，已完成原型测试，产品化状态仍以测试报告复核结果为准。'
   }
   if (definition.analysisKind === 'risk_summary') {
-    return '若公司未能在投决前完成风险事项核验，可能影响交易判断；项目组应在投决前完成原始文件审查并持续跟踪，责任主体为项目组。'
+    return '若公司未能在投决前完成风险事项核验，可能影响交易判断；项目组应在投决前完成专项审查并持续跟踪，责任主体为项目组。'
   }
   if (definition.analysisKind === 'conclusion') {
-    return '阶段与推进建议为申请立项；建议在项目组完成关键资料核验并落实立项前提后，通过 OA 发起立项申请；如重大风险未消除，应暂缓推进并重新评估。'
+    return '阶段与推进建议为申请立项；建议在项目组完成关键事实核验并落实立项前提后，通过 OA 发起立项申请；如重大风险未消除，应暂缓推进并重新评估。'
   }
-  return `当前项目资料记载，星河机器人有限公司已就${topic}形成项目记录，相关结论仍以原始文件复核结果为准。`
+  return `星河机器人有限公司已确认${topic}相关安排，具体执行情况仍需在下一阶段核验。`
 }
 
 const sources: EvidenceSource[] = leafDefinitions.map((definition, index) => {
@@ -521,7 +535,7 @@ const sections: BusinessSection[] = blueprint.sections.map((definition) => {
 const content: BusinessContent = {
   title: '关于对星河机器人有限公司实施股权投资的提案',
   executiveSummary:
-    '现就星河机器人有限公司项目提交投资提案，供投资决策委员会审议。本提案仅依据当前项目资料形成，所有结论仍以完成尽调及正式投决为准。',
+    '现就星河机器人有限公司股权投资事项提交本提案，提请各位投资决策委员会成员审议。',
   executiveSummarySourceIndexes: [0],
   sections,
   highlights: sections
@@ -602,6 +616,22 @@ const proseLabelLeakReview = reviewInvestmentProposalContent({
 assert.equal(proseLabelLeakReview.passed, false)
 assert.ok(proseLabelLeakReview.issues.some((issue) =>
   issue.code === 'CLIENT_PROSE_LABEL_LEAK'))
+assert.ok(proseLabelLeakReview.issues.some((issue) =>
+  issue.code === 'SOURCE_PROCESS_WORDING_LEAK'))
+const aiStyleLeakContent = structuredClone(content)
+aiStyleLeakContent.sections.find((section) => section.title === '（一）公司简介')!
+  .findings[0].text = '总体来看，星河机器人有限公司通过多维度赋能构建了业务生态闭环。'
+const aiStyleLeakReview = reviewInvestmentProposalContent({
+  content: aiStyleLeakContent,
+  blueprint,
+  evidencePlan,
+  sources,
+  projectName: '星河机器人项目',
+  companyName: '星河机器人有限公司',
+})
+assert.equal(aiStyleLeakReview.passed, false)
+assert.ok(aiStyleLeakReview.issues.some((issue) =>
+  issue.code === 'AI_STYLE_BOILERPLATE'))
 const colonLabelLeakContent = structuredClone(content)
 colonLabelLeakContent.sections.find((section) => section.title === '（五）运营摘要')!
   .findings[0].text = '订单节奏：2026年5月正式启动新合作，当前每20天交付5000分钟内容。'
@@ -735,7 +765,7 @@ assert.match(deterministicCompanyProfile, /智能机器人销售/)
 assert.doesNotMatch(deterministicCompanyProfile, /[\r\n]/)
 assert.doesNotMatch(
   deterministicCompanyProfile,
-  /(?:\.{3}|…)\s*展开|原文链接|来源网址|项目资料显示：|判断：|一般项目：/,
+  /(?:\.{3}|…)\s*展开|原文链接|来源网址|项目资料|判断：|一般项目：/,
 )
 
 let noEvidenceFetchCalled = false
@@ -1004,7 +1034,7 @@ const companyProfileSection = evidenceAvailableButMissingContent.sections
   .find((section) => section.title === '（一）公司简介')!
 companyProfileSection.summary = CURRENT_PROJECT_NO_DATA
 companyProfileSection.findings = [{
-  text: `${CURRENT_PROJECT_NO_DATA}需补充公司主体相关原始文件或经确认的项目记录后再行分析。`,
+  text: `${CURRENT_PROJECT_NO_DATA}需核验公司主体相关关键事实后再行分析。`,
   status: '资料缺口',
   sourceIndexes: [],
 }]
@@ -1127,7 +1157,7 @@ const missingSections: BusinessSection[] = blueprint.sections.map((definition) =
         title: definition.title,
         summary: CURRENT_PROJECT_NO_DATA,
         findings: [{
-          text: `${CURRENT_PROJECT_NO_DATA}需补充该主题相关原始文件或经确认的项目记录后再行分析。`,
+          text: `${CURRENT_PROJECT_NO_DATA}需核验该主题相关关键事实后再行分析。`,
           status: '资料缺口',
           sourceIndexes: [],
         }],
@@ -1189,7 +1219,7 @@ assert.equal(documentXml.includes('〔资料缺口〕'), false)
 assert.equal(documentXml.includes('待核验'), false)
 assert.doesNotMatch(
   documentXml,
-  /判断：|依据：|影响\/约束：|待办：|订单节奏：|客户结构：|财务情况：|项目资料显示：|(?:\.{3}|…)\s*展开|原文链接|来源网址/,
+  /判断：|依据：|影响\/约束：|待办：|订单节奏：|客户结构：|财务情况：|项目资料|资料库|会议纪要|原始文件|原始资料|现有资料|当前资料|(?:\.{3}|…)\s*展开|原文链接|来源网址|总体来看|值得注意的是|由此可见/,
 )
 
 const pdfReview = await exportAndReviewInvestmentProposalPdf({

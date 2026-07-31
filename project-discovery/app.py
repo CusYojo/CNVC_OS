@@ -65,7 +65,7 @@ WECHAT_ARTICLE_HEADERS = {
 CHAT_CONTEXT_BEFORE = 4
 CHAT_CONTEXT_AFTER = 4
 AUTO_CRAWL_INTERVAL_SECONDS = 30 * 60
-AUTO_CRAWL_GROUPS = ["创投新闻", "海外项目"]
+AUTO_CRAWL_GROUPS = ["创投新闻", "海外项目", "论文"]
 AUTO_CRAWL_ENABLED = env_flag("RADAR_AUTO_CRAWL_ENABLED", True)
 WECHAT_DAILY_ENABLED = env_flag("RADAR_WECHAT_DAILY_ENABLED", True)
 CHINA_TZ = ZoneInfo("Asia/Shanghai")
@@ -3446,6 +3446,12 @@ def enabled_investment_sources(groups: list[str]) -> list[dict]:
     return sources
 
 
+def should_retain_source_candidate(row: dict) -> bool:
+    # 论文不使用公司/融资新闻的 worth_attention 门槛。先保留到雷达候选池，
+    # 再由下游 AI 论文审查核验完整标题和技术贡献，避免纯论文被误判为无投资事件。
+    return bool(row.get("worth_attention")) or row.get("source_group") == "论文"
+
+
 def fetch_investment_sources(req: InvestmentRunRequest) -> dict:
     rows = []
     errors = []
@@ -3497,7 +3503,7 @@ def fetch_investment_sources(req: InvestmentRunRequest) -> dict:
         if key:
             deduped[key] = row
     rows = sorted(deduped.values(), key=lambda item: (item.get("worth_attention", False), item.get("attention_score", 0), item.get("published_at", "")), reverse=True)
-    retained_rows = [row for row in rows if row.get("worth_attention")]
+    retained_rows = [row for row in rows if should_retain_source_candidate(row)]
     written = append_jsonl(INVESTMENT_FILE, retained_rows)
     return {
         "sources": len(sources),
@@ -3505,7 +3511,7 @@ def fetch_investment_sources(req: InvestmentRunRequest) -> dict:
         "retained": len(retained_rows),
         "filtered": len(rows) - len(retained_rows),
         "written": written,
-        "worth_attention": len(retained_rows),
+        "worth_attention": len([row for row in retained_rows if row.get("worth_attention")]),
         "errors": errors,
         "source_results": source_results,
         "items": retained_rows[:100],

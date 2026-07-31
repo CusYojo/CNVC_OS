@@ -52,6 +52,16 @@ class SourceConfigurationTests(unittest.TestCase):
             self.assertFalse(configured[key]["enabled"])
             self.assertTrue(configured[key]["note"])
 
+    def test_papers_are_retained_before_downstream_ai_review(self):
+        self.assertTrue(app.should_retain_source_candidate({
+            "source_group": "论文",
+            "worth_attention": False,
+        }))
+        self.assertFalse(app.should_retain_source_candidate({
+            "source_group": "创投新闻",
+            "worth_attention": False,
+        }))
+
 
 class ProjectSubjectNameTests(unittest.TestCase):
     def test_non_academic_arxiv_candidate_reaches_fallback_without_error(self):

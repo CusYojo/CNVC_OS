@@ -8,6 +8,7 @@ import { pathToFileURL } from 'node:url'
 import JSZip from 'jszip'
 import type { BusinessContent } from './aiBusinessContentService.js'
 import type { ComplianceDocumentBlueprint } from './aiComplianceBlueprintService.js'
+import { COMPLIANCE_AI_STYLE_PATTERN } from './aiComplianceWorkflowService.js'
 import type { AiTemplateDefinition } from './aiTemplateCatalog.js'
 
 const execFileAsync = promisify(execFile)
@@ -18,6 +19,8 @@ export type ComplianceOutputIssue = {
     | 'DOCX_TEXT_INVALID'
     | 'DOCX_STRUCTURE_MISMATCH'
     | 'DOCX_FORBIDDEN_CONTENT'
+    | 'DOCX_SOURCE_PROCESS_LEAK'
+    | 'DOCX_AI_STYLE_DRIFT'
     | 'DOCX_FORMAT_MISMATCH'
     | 'DOCX_PAGE_MISMATCH'
     | 'DOCX_TEMPLATE_PART_MISMATCH'
@@ -234,6 +237,26 @@ export async function reviewGeneratedComplianceDocx(input: {
     addIssue(issues, {
       code: 'DOCX_FORBIDDEN_CONTENT',
       message: 'DOCX正文不得包含状态标签、责任声明、风险提示、资料缺口、引用资料或审计免责声明板块',
+    })
+  }
+  const sourceProcessParagraphs = paragraphTexts.filter((value) =>
+    /(?:现有|当前|本次|已提供的)?(?:项目)?(?:资料|材料)(?:库)?(?:显示|记载|表明|提供|披露|反映|仅为|尚不足)|(?:交流|会议|访谈)纪要(?:显示|记载|披露|表明|同时记载)|根据(?:当前|现有|本次)?项目(?:资料|材料)|项目档案(?:显示|记载|将)|公开资料可提供|本章未取得|检索问题(?:方面)?|页面标题(?:方面)?|搜索摘要(?:方面)?/.test(value))
+  if (sourceProcessParagraphs.length) {
+    addIssue(issues, {
+      code: 'DOCX_SOURCE_PROCESS_LEAK',
+      message: `DOCX正文不得描述项目资料或取证过程，应改为事实摘要：${sourceProcessParagraphs.slice(0, 3).join('；')}`,
+    })
+  }
+  const aiStyleParagraphs = paragraphTexts.filter((value) =>
+    COMPLIANCE_AI_STYLE_PATTERN.test(value))
+  const aspectLeadCount = paragraphTexts.filter((value) =>
+    /^[^，。；！？\n]{2,24}方面，/.test(value)).length
+  const dependentClosingCount = paragraphTexts.filter((value) =>
+    /最终(?:结论|认定)[^。；]{0,24}(?:取决于|仍取决于)/.test(value)).length
+  if (aiStyleParagraphs.length || aspectLeadCount >= 3 || dependentClosingCount >= 2) {
+    addIssue(issues, {
+      code: 'DOCX_AI_STYLE_DRIFT',
+      message: `DOCX正文存在模型化套话或重复句式，应改为事实先行的正式说明文：${aiStyleParagraphs.slice(0, 3).join('；')}`,
     })
   }
   const runFontTags = [...documentXml.matchAll(/<w:rFonts\b[^>]*\/>/g)]

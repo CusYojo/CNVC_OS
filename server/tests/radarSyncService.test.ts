@@ -35,3 +35,27 @@ test('follows Radar cursors until max pages or exhaustion', async () => {
     globalThis.fetch = originalFetch
   }
 })
+
+test('passes a dedicated paper group to Radar candidate queries', async () => {
+  const originalFetch = globalThis.fetch
+  let requestedGroup = ''
+  globalThis.fetch = (async (input: string | URL | Request) => {
+    requestedGroup = new URL(String(input)).searchParams.get('group') ?? ''
+    return new Response(JSON.stringify({ items: [], total: 0, has_more: false, next_cursor: '' }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }) as typeof fetch
+
+  try {
+    await fetchRadarWindow({
+      baseUrl: 'http://radar.test',
+      pageSize: 50,
+      maxPages: 1,
+      group: '论文',
+    })
+    assert.equal(requestedGroup, '论文')
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})

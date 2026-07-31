@@ -5,7 +5,7 @@ import { db } from '../db/client.js'
 import { radarAiReviews } from '../db/schema.js'
 import { isSpecificLeadSubjectName } from './leadSubjectName.js'
 
-const PROMPT_VERSION = 'radar-subject-v2'
+const PROMPT_VERSION = 'radar-subject-v3-paper'
 const DEFAULT_MODEL = process.env.RADAR_AI_REVIEW_MODEL
   || process.env.LLM_MODEL
   || 'claude-sonnet-4-6'
@@ -33,7 +33,7 @@ const CONCURRENCY = Math.max(
 )
 
 export type RadarAiReviewStatus = 'accepted' | 'rejected' | 'review' | 'failed'
-export type RadarSubjectType = 'company' | 'project' | 'team' | 'lab'
+export type RadarSubjectType = 'company' | 'project' | 'team' | 'lab' | 'paper'
 
 export interface RadarAiReviewDecision {
   decision: 'accept' | 'reject' | 'review'
@@ -63,12 +63,13 @@ interface PreparedRadarCandidate {
   contentHash: string
   sourceText: string
   promptText: string
+  isPaper: boolean
 }
 
 const modelReviewSchema = z.object({
   candidateId: z.string().min(1),
   decision: z.enum(['accept', 'reject', 'review']),
-  subjectType: z.enum(['company', 'project', 'team', 'lab']).nullish(),
+  subjectType: z.enum(['company', 'project', 'team', 'lab', 'paper']).nullish(),
   subjectName: z.string().nullish(),
   legalName: z.string().nullish(),
   evidence: z.string().nullish(),
@@ -82,7 +83,12 @@ const modelResponseSchema = z.object({
 
 const SYSTEM_PROMPT = `你是私募股权/创业投资线索池的严格准入审查员。
 
-任务：判断每条公开信息是否包含一个可明确识别、值得进入投资线索池的公司、商业化项目、创业团队或实验室，并给出该标的在原文中的规范名称。
+任务：判断每条公开信息是否包含一个可明确识别、值得进入投资线索池的公司、商业化项目、创业团队、实验室或前沿论文，并给出该标的在原文中的规范名称。
+
+论文候选特别规则：
+- 当候选明确标注“线索类型：论文”时，不要要求融资、公司主体或已商业化；
+- 论文标题完整、研究对象具体且摘要能说明技术贡献时可接受；
+- subjectType 必须为 paper，subjectName 必须是原文中的完整论文标题，evidence 必须连续引用包含该标题的原文。
 
 准入条件（必须同时满足）：
 1. 原文明确出现具体公司、项目、创业团队或实验室名称；
@@ -98,14 +104,14 @@ const SYSTEM_PROMPT = `你是私募股权/创业投资线索池的严格准入�
 
 必须拒绝：
 - 获奖、荣誉、任职、招聘、招生、会议、论坛、政策、采访、综述、榜单、新闻合集；
-- 只有学术论文、科研成果或学校/研究院活动，未出现明确商业化主体及产业化/融资/客户验证；
+- 非“论文”类型的学术资讯，且未出现明确商业化主体及产业化/融资/客户验证；
 - 只有模糊描述，例如“创业团队”“科研团队”“全新突破”“文章来源”“项目成果”；
 - 不能从原文确定唯一标的，或需要猜测、补全、创造公司名称。
 
-subjectType 只能是 company、project、team、lab。
+subjectType 只能是 company、project、team、lab、paper。
 confidence 使用 0 到 1。信息不足时必须 review 或 reject，不得猜测。
 只返回 JSON 对象，格式：
-{"reviews":[{"candidateId":"原样返回","decision":"accept|reject|review","subjectType":"company|project|team|lab|null","subjectName":"原文专名或空字符串","legalName":"原文明示的工商全称或空字符串","evidence":"原文连续引文或空字符串","confidence":0.0,"rejectReason":"拒绝/待复核原因或空字符串"}]}`
+{"reviews":[{"candidateId":"原样返回","decision":"accept|reject|review","subjectType":"company|project|team|lab|paper|null","subjectName":"原文专名或空字符串","legalName":"原文明示的工商全称或空字符串","evidence":"原文连续引文或空字符串","confidence":0.0,"rejectReason":"拒绝/待复核原因或空字符串"}]}`
 
 function cleanText(value: unknown, maxChars = 12_000) {
   return String(value ?? '').replace(/\u0000/g, '').trim().slice(0, maxChars)
@@ -149,7 +155,12 @@ export function prepareRadarAiCandidate(
   model = DEFAULT_MODEL,
 ): PreparedRadarCandidate {
   const profile = meaningfulObject(item.project_profile)
+  const sourceDescriptor = [item.source, item.source_group, item.source_key, item.source_type, item.source_name]
+    .map((value) => cleanText(value, 120))
+    .join(' ')
+  const isPaper = cleanText(item.source_group, 40) === '论文' || /arxiv/i.test(sourceDescriptor)
   const fields: Array<[string, unknown, number?]> = [
+    ['线索类型', isPaper ? '论文' : '投资项目', 20],
     ['标题', item.title, 1_000],
     ['摘要', item.summary, 4_000],
     ['正文', item.article_text, 8_000],
@@ -185,6 +196,7 @@ export function prepareRadarAiCandidate(
     contentHash,
     sourceText,
     promptText,
+    isPaper,
   }
 }
 
@@ -199,6 +211,7 @@ export function validateRadarAiDecision(
   sourceText: string,
   model = DEFAULT_MODEL,
   reviewedAt = new Date().toISOString(),
+  allowPaperTitle = false,
 ): { status: RadarAiReviewStatus; decision: RadarAiReviewDecision } {
   const parsed = modelReviewSchema.parse(raw)
   const confidence = normalizeConfidence(parsed.confidence)
@@ -236,7 +249,7 @@ export function validateRadarAiDecision(
   } else if (confidence >= 0.8) {
     // AI 模型判断接受，但仍需通过规则兜底校验：名称不能是谓语片段/新闻标题/通用词等。
     // 规格与线索池入口一致，由 leadSubjectName.isSpecificLeadSubjectName 统一维护。
-    if (!isSpecificLeadSubjectName(subjectName)) {
+    if (!isSpecificLeadSubjectName(subjectName, allowPaperTitle)) {
       status = 'review'
       decision = 'review'
       rejectReason ||= '模型给出的主体名称未通过名称规范化校验（谓语片段/通用词/描述短语）'
@@ -435,7 +448,7 @@ async function reviewUncachedBatch(
       const results = batch.map((item): RadarAiReviewResult => {
         const raw = byId.get(item.candidateId)
         if (!raw) throw new Error(`模型遗漏候选项 ${item.candidateId}`)
-        const validated = validateRadarAiDecision(raw, item.sourceText, model)
+        const validated = validateRadarAiDecision(raw, item.sourceText, model, new Date().toISOString(), item.isPaper)
         return {
           ...validated.decision,
           cacheKey: item.cacheKey,

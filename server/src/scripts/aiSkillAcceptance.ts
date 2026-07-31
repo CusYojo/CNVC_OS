@@ -410,9 +410,10 @@ async function main() {
     `${diligenceTemplate.referencePaths?.length ?? 0} 份`,
   )
   assert(
-    'AI-010 运行时只加载统一核心规范与输出契约',
-    diligenceSkill.referenceNames.join(',') === 'references/core-spec.md,references/output-contract.md'
+    'AI-010 运行时加载核心规范、叙述风格与输出契约',
+    diligenceSkill.referenceNames.join(',') === 'references/core-spec.md,references/writing-style.md,references/output-contract.md'
       && diligenceSkill.referenceInstructions.includes('尽调报告核心规范')
+      && diligenceSkill.referenceInstructions.includes('尽调报告叙述风格')
       && diligenceSkill.referenceInstructions.includes('商业尽调报告输出契约')
       && !existsSync(path.join(root, 'write-due-diligence-report', 'references', 'template-profile.md'))
       && !existsSync(path.join(root, 'write-due-diligence-report', 'references', 'chapter-playbook.md')),
@@ -467,6 +468,10 @@ async function main() {
     '单次模型响应',
     '最多三个',
     '受影响章组',
+    '先消化、后写作',
+    '内部事实卡',
+    '值得注意的是',
+    '项目资料',
   ]
   assert(
     'AI-010 核心规范与项目唯一规范保持关键规则一致',
@@ -811,15 +816,18 @@ async function main() {
       && !qaDocumentSource.includes("mixedTextRuns('引用资料'")
       && !qaDocumentSource.includes("mixedTextRuns('Reviewer 审阅结果'")
       && qaPipelineSource.includes('function cleanAnswerText')
-      && qaPipelineSource.includes('五个连续自然段')
+      && qaPipelineSource.includes('3-7 个自然段')
       && qaDocumentSource.includes('answerParagraphFormValid')
+      && qaDocumentSource.includes('narrativeParagraphRangeValid')
       && qaDocumentSource.includes('visibleAnswerLabelsAbsent')
       && qaDocumentSource.includes('visibleSubheadingsAbsent')
+      && qaDocumentSource.includes('visibleSourceProcessAbsent')
+      && qaDocumentSource.includes('QA_VISIBLE_SOURCE_PROCESS_TERMS')
       && !qaDocumentSource.includes('function dimensionParagraph')
       && !qaDocumentSource.includes('bodyParagraph(`答复：${line}`')
       && !qaDocumentSource.includes('index === 6')
       && qaDocumentSource.includes('globalIndex === 0'),
-    '宋体 / 18pt 标题 / 14pt 问题 / 无小标题自然段 / 1.5 倍行距 / 25.4×31.7mm 页边距',
+    '宋体 / 18pt 标题 / 14pt 问题 / 3-7 个自然段 / 无加工痕迹 / 1.5 倍行距 / 25.4×31.7mm 页边距',
   )
   assert(
     'Q&A 双模式边界明确且正式任务只交付 DOCX',

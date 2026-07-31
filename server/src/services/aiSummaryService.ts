@@ -106,11 +106,12 @@ const PUBLIC_LEAD_CONCRETE_SUBJECT_PATTERN = '(股份有限公司|有限责任�
 const PUBLIC_LEAD_INVALID_SUBJECT_PATTERN = '^(数据|小时|主持|学员们|购票观众即|6氪|新股王|信息系统|文章来源|全新突破|近期|36氪首发|技术团队|二季度普华汇|AI下半场|外部危机和人工智能|核聚变装置)$'
 
 // 存量 Radar 噪音不做物理删除，但从公共池列表和统计中排除。
-// 无明确公司、融资或估值时，获奖/教学/任职资讯直接隐藏；
-// 纯论文和课题组研究只有具备成果转化、产业化或客户验证信号才保留。
-// qualityRejected 和 poolStatus 检查对所有来源生效，不仅限于雷达。
+// 无明确公司、融资或估值时，获奖/教学/任职资讯直接隐藏。
+// “论文”是独立线索类型，不套用公司线索的融资/商业化门槛；其标题作为项目名称展示，
+// 并继续走论文专属评分。qualityRejected 和 poolStatus 检查仍对所有来源生效。
 const visiblePublicLeadExpr = sql<boolean>`NOT (
   COALESCE(${leads.source}, '') ~ '^项目发现雷达'
+  AND COALESCE(${leads.radarProfile}->>'channel', '') <> '论文'
   AND (
     COALESCE(${leads.name}, '') ~* ${PUBLIC_LEAD_INVALID_SUBJECT_PATTERN}
     OR ${publicLeadTitleExpr} ~* ${PUBLIC_LEAD_LOW_VALUE_PATTERN}

@@ -33,9 +33,11 @@ import {
 } from './aiInvestmentProposalBlueprintService.js'
 import { containsInvestmentProposalInternalErrorText } from './aiInvestmentProposalReviewerService.js'
 import {
+  containsInvestmentProposalAiStyleBoilerplate,
   containsInvestmentProposalColonLabel,
   containsInvestmentProposalInlineSubheading,
   containsInvestmentProposalProseLabel,
+  containsInvestmentProposalSourceProcessWording,
   containsInvestmentProposalWebArtifact,
   sanitizeInvestmentProposalClientText,
 } from './aiInvestmentProposalTextService.js'
@@ -540,6 +542,18 @@ export async function reviewInvestmentProposalDocx(input: {
     issues.push({
       code: 'INTERNAL_ERROR_TEXT_LEAK',
       message: 'Word 正文包含仅供系统内部记录的技术错误信息',
+    })
+  }
+  if (containsInvestmentProposalSourceProcessWording(allText)) {
+    issues.push({
+      code: 'SOURCE_PROCESS_WORDING_LEAK',
+      message: 'Word 正文包含项目资料、会议纪要或原始文件等内部取证过程措辞',
+    })
+  }
+  if (containsInvestmentProposalAiStyleBoilerplate(allText)) {
+    issues.push({
+      code: 'AI_STYLE_BOILERPLATE',
+      message: 'Word 正文包含明显的 AI 模板化套话',
     })
   }
   if (allText.includes('待核验')) {

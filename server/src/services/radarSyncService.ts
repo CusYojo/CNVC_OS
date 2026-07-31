@@ -27,6 +27,7 @@ export async function fetchRadarWindow(options: {
   maxPages: number
   cursor?: string
   source?: string
+  group?: string
 }): Promise<RadarWindow> {
   const items: RadarCandidate[] = []
   let cursor = options.cursor?.trim() ?? ''
@@ -43,6 +44,7 @@ export async function fetchRadarWindow(options: {
     })
     if (cursor) params.set('cursor', cursor)
     if (options.source && options.source !== 'all') params.set('source', options.source)
+    if (options.group) params.set('group', options.group)
     const resp = await fetch(`${options.baseUrl}/api/candidates?${params.toString()}`, {
       signal: AbortSignal.timeout(20_000),
     })

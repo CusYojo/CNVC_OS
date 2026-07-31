@@ -399,8 +399,9 @@ async function main() {
   assert(
     '阶段4 Answer Generator：如选择阶段问题则形成与当前阶段匹配的推进建议',
     !dispositionAnswer || Boolean(
-      dispositionAnswer.answer.includes('主建议为“继续跟踪”')
-      && dispositionAnswer.answer.split(/\n+/).length === 5
+      /现阶段更适合“继续跟踪”|主建议为“继续跟踪”/.test(dispositionAnswer.answer)
+      && dispositionAnswer.answer.split(/\n+/).length >= 3
+      && dispositionAnswer.answer.split(/\n+/).length <= 7
       && !/（[1-4]）(?:判断依据|升级与失效条件|下一步动作|OA 流转边界)：/.test(
         dispositionAnswer.answer,
       )
@@ -418,12 +419,16 @@ async function main() {
     productAnswer?.answer ?? '未生成产品与技术回答',
   )
   assert(
-    '阶段4 Answer Generator：普通问题使用固定逻辑自然段顺序',
+    '阶段4 Answer Generator：普通问题按内容形成自然段',
     reviewed.answers
       .filter((answer) => answer.category !== '阶段与推进建议' && answer.confidenceStatus !== '证据不足')
-      .every((answer) =>
-        answer.answer.split(/\n+/).length === 5
-        && !/（[1-4]）(?:已确认事实|分析判断|证据边界|下一步核验)：/.test(answer.answer)),
+      .every((answer) => {
+        const paragraphCount = answer.answer.split(/\n+/).length
+        return paragraphCount >= 3
+          && paragraphCount <= 7
+          && !/（[1-4]）(?:已确认事实|分析判断|证据边界|下一步核验)：/.test(answer.answer)
+          && !/项目资料|项目材料|资料库|资料截止日|经系统核验|公开页面/.test(answer.answer)
+      }),
     reviewed.answers.map((answer) => answer.category).join('、'),
   )
   const markdownAndChromeFixture = composeProjectQaStructuredAnswer({
@@ -444,10 +449,11 @@ async function main() {
   })
   assert(
     '阶段4 Answer Generator：清除 Markdown、小标题与网页导航拼接',
-    markdownAndChromeFixture.includes('项目材料显示，核心产品为人机共生智能引擎')
+    markdownAndChromeFixture.includes('核心产品为人机共生智能引擎')
       && markdownAndChromeFixture.includes('阶段调整以 OA 审批结果为准')
-      && markdownAndChromeFixture.split(/\n+/).length === 5
-      && !/\*\*|(?:^|\n)(?:[（(]?[1-4][）)]?)?(?:判断依据|升级与失效条件|下一步动作|OA 流转边界)[：:]|权威榜|产业图谱|企业入驻|小程序/.test(
+      && markdownAndChromeFixture.split(/\n+/).length >= 3
+      && markdownAndChromeFixture.split(/\n+/).length <= 7
+      && !/\*\*|(?:^|\n)(?:[（(]?[1-4][）)]?)?(?:判断依据|升级与失效条件|下一步动作|OA 流转边界)[：:]|权威榜|产业图谱|企业入驻|小程序|项目资料|项目材料|资料库|经系统核验|公开页面/.test(
         markdownAndChromeFixture,
       ),
     markdownAndChromeFixture,
@@ -512,7 +518,7 @@ async function main() {
       equityRegression?.answer.includes('第三大股东')
       && !equityRegression.answer.includes('自动解析被投企业')
       && financeRegression?.answer.includes('毛利率')
-      && financeRegression.answer.includes('不能替代连续财务报表')
+      && financeRegression.answer.includes('持续经营能力')
       && financingRegression?.answer.includes('老股东借款')
       && financingRegression.answer.includes('应严格区分已完成融资')
       && dispositionRegression?.confidenceStatus === '证据不足'
@@ -543,8 +549,10 @@ async function main() {
     '阶段4 Answer Generator：无证据时形成具体核验结论',
     noEvidenceAnswers.every((answer) =>
       answer.confidenceStatus === '证据不足'
-      && answer.answer.includes('现阶段')
+      && answer.answer.split(/\n+/).length >= 3
+      && answer.answer.split(/\n+/).length <= 7
       && !/暂无相关资料|暂无资料|无相关资料/.test(answer.answer)
+      && !/项目资料|项目材料|资料库|当前资料|现有证据|资料截止日|经系统核验|公开页面|公司材料称|资料显示|材料显示|更新本题|本回答|结论置信度/.test(answer.answer)
       && (answer.category !== '阶段与推进建议'
         || /进入初筛|继续跟踪|申请立项|启动尽调|提请上会|提交投决|暂缓推进|归档/.test(answer.answer))
       && answer.sourceIndexes.length === 0
@@ -568,11 +576,11 @@ async function main() {
           ...answer,
           confidenceStatus: '证据不足' as const,
           answer: [
-            '截至资料截止日，当前证据尚不足以形成确定结论，只能先明确核验边界。',
-            '（4）下一步核验：取得原件或责任人访谈后更新本题。',
-            '（3）已确认事实：现有证据未形成能够相互印证的完整证据链。',
-            '（2）分析判断：证据不足不代表相关事项不存在。',
-            '（3）证据边界：需要补充对应原件、量化数据和管理层说明。',
+            '目前尚无法形成确定结论，需要先明确关键不确定性。',
+            '（4）下一步核验：后续应取得关键文件或与相关负责人确认。',
+            '（3）已确认事实：关键主体、时间和口径尚未完全统一。',
+            '（2）分析判断：信息尚未明确不等于已经形成负面判断。',
+            '（3）证据边界：在核心事实确认前，不宜作出肯定结论。',
           ].join('\n'),
         }
       }
@@ -607,9 +615,11 @@ async function main() {
       && docxReview.metadata.categoryCount === 15
       && docxReview.metadata.directoryCompleteBeforeBody
       && docxReview.metadata.answerParagraphFormValid
+      && docxReview.metadata.narrativeParagraphRangeValid
       && docxReview.metadata.visibleAnswerLabelsAbsent
       && docxReview.metadata.visibleSubheadingsAbsent
       && docxReview.metadata.sourceOutlineNumberingAbsent
+      && docxReview.metadata.visibleSourceProcessAbsent
       && docxReview.metadata.markdownDecorationAbsent
       && docxReview.metadata.webPageChromeAbsent,
     JSON.stringify(docxReview.metadata),

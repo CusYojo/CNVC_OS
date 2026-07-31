@@ -946,12 +946,32 @@ function sanitizeDueDiligenceText(value: string) {
     .replace(/资料缺口/g, '后续核验事项')
     .replace(
       /尚缺少能够支持“([^”]+)”判断的专项资料，需补充原始文件或访谈记录后核验。/g,
-      '当前项目资料库暂未完整记录“$1”的关键细节，建议在后续核验中确认原始记录。',
+      '“$1”尚未形成可复核结论；推进前需取得原始文件或完成相关访谈。',
     )
     .replace(
       /“([^”]+)”当前证据不足，本节仅列示明确的补证要求。/g,
-      '“$1”已结合现有项目资料库进行分析，尚未入库的细节列入后续核验。',
+      '“$1”的关键事项仍需原始文件或相关主体确认，可能影响当前判断。',
     )
+    .replace(
+      /(?:根据|结合|基于)\s*(?:当前|现有|本地|项目)?\s*(?:项目)?\s*(?:资料库|知识库|资料|材料|证据)(?:显示|记载|表明|梳理|分析|判断|可知)?[，,:：]?\s*/g,
+      '',
+    )
+    .replace(
+      /(?:当前|现有)\s*(?:项目)?\s*(?:资料库|知识库|资料|材料)(?:显示|记载|表明)?[，,:：]?\s*/g,
+      '',
+    )
+    .replace(/项目(?:资料|材料)(?:显示|记载|表明)[，,:：]?\s*/g, '')
+    .replace(/(?:项目资料库|项目知识库|资料库|知识库)/g, '')
+    .replace(/项目(?:资料|材料)/g, '原始文件')
+    .replace(/(?:资料|材料|证据)(?:显示|记载|表明)[，,:：]?\s*/g, '')
+    .replace(/证据不足/g, '尚未形成可复核结论')
+    .replace(
+      /(?:值得注意的是|需要强调的是|不难发现|由此可见|综上所述|显而易见|毋庸置疑)[，,:：]*/g,
+      '',
+    )
+    .replace(/^[，,：:；;]\s*/, '')
+    .replace(/([，。；：])(?:\s*\1)+/g, '$1')
+    .replace(/\s+([，。；：])/g, '$1')
     .replace(/\s+/g, ' ')
     .trim()
 }
@@ -1000,6 +1020,13 @@ export function finalizeDueDiligenceContent(content: BusinessContent): BusinessC
         }
         return [normalizedFinding]
       }),
+      tables: (section.tables ?? []).map((table) => ({
+        ...table,
+        title: sanitizeDueDiligenceText(table.title),
+        unit: sanitizeDueDiligenceText(table.unit),
+        columns: table.columns.map(sanitizeDueDiligenceText),
+        rows: table.rows.map((row) => row.map(sanitizeDueDiligenceText)),
+      })),
     }
   })
   const pendingSeen = new Set<string>()
@@ -1042,7 +1069,7 @@ export function finalizeDueDiligenceContent(content: BusinessContent): BusinessC
   const executiveSummary = new RegExp(`阶段与推进建议[：:]\\s*${disposition}`).test(sanitizedExecutiveSummary)
     ? sanitizedExecutiveSummary
     : `阶段与推进建议：${disposition}。${sanitizedExecutiveSummary
-      || '当前资料已形成初步线索判断，关键事实仍须结合可追溯原始资料核验。'}`
+      || '主体、权属、商业化和财务关键事项完成核验前，不宜进入下一审批环节。'}`
   const normalizedSections = sections.map((section) =>
     section.title === '投资概要'
       && !new RegExp(`阶段与推进建议[：:]\\s*${disposition}`).test(section.summary)
@@ -1053,13 +1080,24 @@ export function finalizeDueDiligenceContent(content: BusinessContent): BusinessC
     title: normalizeDueDiligenceTitle(content.title),
     executiveSummary,
     sections: normalizedSections,
+    highlights: dedupeTextList(content.highlights.map(sanitizeDueDiligenceText), { limit: 8 }),
+    risks: dedupeTextList(content.risks.map(sanitizeDueDiligenceText), { limit: 8 }),
     // 尽调正文不生成独立“资料缺口”清单；未入库事项集中写入“后续核验事项”。
     missing: [],
   }
 }
 
 const DUE_DILIGENCE_PROCESS_LANGUAGE =
-  /本初稿|现有资料|现有材料|当前资料(?:库|已)|项目资料库|证据不足|证据支持|结论强度|所列状态|未获直接证据|已筛选证据|尚未入库|本节|当前结论用于|相关判断以|判断重点|资料缺口|检索问题|联网检索|来源索引|状态和引用|初步梳理/
+  /本初稿|项目资料|项目材料|项目资料库|项目知识库|资料库|知识库|现有资料|现有材料|当前资料|当前材料|根据(?:当前|现有|项目)?(?:资料|材料|证据)|(?:资料|材料|证据)(?:显示|表明|记载)|证据不足|证据支持|证据处理|取证过程|检索过程|结论强度|所列状态|未获直接证据|已筛选证据|尚未入库|本节|当前结论用于|相关判断以|判断重点|资料缺口|检索问题|联网检索|来源索引|状态标签|状态和引用|初步梳理/
+
+const DUE_DILIGENCE_AI_STYLE_LANGUAGE =
+  /值得注意的是|需要强调的是|不难发现|由此可见|综上所述|显而易见|毋庸置疑/
+
+function hasMechanicalDueDiligenceStyle(value: string) {
+  const fixedOpeners = ['整体来看', '综合来看', '这意味着', '有望']
+  if (fixedOpeners.some((opener) => value.split(opener).length - 1 >= 3)) return true
+  return (value.match(/从[^，。；]{1,20}(?:看|来看)/g) ?? []).length >= 3
+}
 
 const DUE_DILIGENCE_WEBPAGE_BOILERPLATE =
   /页面正文摘录|公司详情|首页|权威榜|价值榜|行业数据|产业图谱|企业入驻|小程序|登入|已关注|点击查看|免责声明|网站导航/
@@ -1140,6 +1178,12 @@ export function dueDiligenceContentQualityIssues(
   if (!partial && DUE_DILIGENCE_PROCESS_LANGUAGE.test(content.executiveSummary)) {
     issues.push('执行摘要含资料处理过程或证据状态说明，必须改写为项目事实与投资判断')
   }
+  if (
+    DUE_DILIGENCE_AI_STYLE_LANGUAGE.test(content.executiveSummary)
+    || hasMechanicalDueDiligenceStyle(content.executiveSummary)
+  ) {
+    issues.push('执行摘要含模型化套话或机械重复句式，必须改写为具体事实、判断和动作')
+  }
   for (const section of content.sections) {
     const isPending = section.title === '后续核验事项'
     const visibleSectionText = dueDiligenceSectionVisibleText(section)
@@ -1148,6 +1192,12 @@ export function dueDiligenceContentQualityIssues(
     }
     if (DUE_DILIGENCE_PROCESS_LANGUAGE.test(section.summary)) {
       issues.push(`${section.title}的小结含“现有资料/本节/联网检索”等过程性表述`)
+    }
+    if (
+      DUE_DILIGENCE_AI_STYLE_LANGUAGE.test(visibleSectionText)
+      || hasMechanicalDueDiligenceStyle(visibleSectionText)
+    ) {
+      issues.push(`${section.title}含模型化套话或机械重复句式，必须按具体主体、事实、影响和边界重写`)
     }
     if (
       final
@@ -1186,6 +1236,7 @@ export function dueDiligenceContentQualityIssues(
         table.status === '待核验'
         || /待核验|资料缺口/.test(visibleTableText)
         || DUE_DILIGENCE_PROCESS_LANGUAGE.test(visibleTableText)
+        || DUE_DILIGENCE_AI_STYLE_LANGUAGE.test(visibleTableText)
       ) {
         issues.push(`${section.title}包含未核实或过程性表格；无可靠数据时应删除表格`)
       }
@@ -1211,6 +1262,21 @@ export function dueDiligenceContentQualityIssues(
       ) {
         issues.push('财务分析无有效表格时，必须用完整段落说明收入、成本毛利、现金流或资金续航及其投资影响')
       }
+    }
+  }
+  for (const [label, items] of [
+    ['投资亮点', content.highlights],
+    ['风险摘要', content.risks],
+  ] as const) {
+    const visibleText = items.join(' ')
+    if (DUE_DILIGENCE_PROCESS_LANGUAGE.test(visibleText)) {
+      issues.push(`${label}含资料处理过程或证据状态说明，必须改写为具体项目表述`)
+    }
+    if (
+      DUE_DILIGENCE_AI_STYLE_LANGUAGE.test(visibleText)
+      || hasMechanicalDueDiligenceStyle(visibleText)
+    ) {
+      issues.push(`${label}含模型化套话或机械重复句式`)
     }
   }
   return [...new Set(issues)].slice(0, 24)
@@ -1382,12 +1448,37 @@ function dueDiligenceEvidenceForGroup(
   sectionTitles: readonly string[],
 ) {
   const keywords = [...new Set(sectionTitles.flatMap((title) => keywordsForSection(title)))]
+  const seenFacts = new Set<string>()
   return sources
     .map((source, sourceIndex) => {
       const excerpt = cleanDueDiligenceEvidenceExcerpt(source.content)
-      const searchable = `${source.sourceName} ${excerpt}`
-      const keywordScore = keywords.reduce(
-        (score, keyword) => score + (searchable.includes(keyword) ? 2 : 0),
+      const sentenceCandidates = excerpt
+        .split(/(?<=[。！？；!?;])|\n+/)
+        .map((sentence, sentenceIndex) => ({
+          sentence: sentence.trim(),
+          sentenceIndex,
+        }))
+        .filter(({ sentence }) => sentence.length >= 8)
+        .map((candidate) => ({
+          ...candidate,
+          score: keywords.reduce(
+            (score, keyword) => score + (candidate.sentence.includes(keyword) ? 3 : 0),
+            0,
+          )
+            + (/\d{4}年|\d+(?:\.\d+)?(?:万|亿|%|万元|亿元)/.test(candidate.sentence) ? 1 : 0),
+        }))
+        .sort((left, right) => right.score - left.score || left.sentenceIndex - right.sentenceIndex)
+      const facts = sentenceCandidates
+        .slice(0, sentenceCandidates[0]?.score > 0 ? 3 : 2)
+        .flatMap(({ sentence }) => {
+          const fact = sentence.slice(0, 260).trim()
+          const key = comparisonKey(fact)
+          if (!key || seenFacts.has(key)) return []
+          seenFacts.add(key)
+          return [fact]
+        })
+      const sourceNameScore = keywords.reduce(
+        (score, keyword) => score + (source.sourceName.includes(keyword) ? 2 : 0),
         0,
       )
       const sourceScore = source.sourceType === 'project_record'
@@ -1395,13 +1486,20 @@ function dueDiligenceEvidenceForGroup(
         : source.sourceType.startsWith('public_web')
           ? 2
           : 4
-      return { source, sourceIndex, excerpt, score: keywordScore + sourceScore }
+      return {
+        source,
+        sourceIndex,
+        facts,
+        score: sourceNameScore + sourceScore + (sentenceCandidates[0]?.score ?? 0),
+      }
     })
-    .filter((item) => Boolean(item.excerpt))
+    .filter((item) => item.facts.length > 0)
     .sort((left, right) => right.score - left.score || left.sourceIndex - right.sourceIndex)
     .slice(0, 28)
-    .map(({ source, sourceIndex, excerpt }) =>
-      `[S${sourceIndex}] ${source.sourceName} / 片段${source.chunkIndex ?? sourceIndex}\n${excerpt.slice(0, 760)}`)
+    .map(({ source, sourceIndex, facts }) =>
+      `[S${sourceIndex}] 内部事实卡（来源：${source.sourceName}；片段${source.chunkIndex ?? sourceIndex}）\n${facts
+        .map((fact) => `- ${fact}`)
+        .join('\n')}`)
     .join('\n\n')
 }
 
@@ -1468,6 +1566,22 @@ function compactDueDiligenceSkillRules(skill: LoadedAiSkill) {
       /(?:主建议|章节|模块|资料记载|AI推断|待核验|联网|证据|不得|必须|财务|产品与核心技术|客户|商业化)/.test(line))
     .slice(0, 36)
   return lines.join('\n')
+}
+
+function compactDueDiligenceWritingStyleRules(skill: LoadedAiSkill) {
+  const marker = '## references/writing-style.md'
+  const start = skill.referenceInstructions.indexOf(marker)
+  if (start < 0) return ''
+  const next = skill.referenceInstructions.indexOf('\n## references/', start + marker.length)
+  const block = skill.referenceInstructions.slice(start, next < 0 ? undefined : next)
+  return block
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) =>
+      /^(?:#|-|\d+\.)/.test(line)
+      && /(?:事实卡|主体|时间|关系|事件|数字|正文|句|段|不得|避免|归因|模板|投资经理|项目资料|模型|套话|股权方面|融资方面)/.test(line))
+    .slice(0, 42)
+    .join('\n')
 }
 
 function dueDiligenceGroupFallback(
@@ -1573,6 +1687,7 @@ async function composeDueDiligenceContent(input: {
     Math.min(2, Number(runtime.maxGenerationAttempts) || 2),
   )
   const compactSkillRules = compactDueDiligenceSkillRules(input.skill)
+  const compactWritingStyleRules = compactDueDiligenceWritingStyleRules(input.skill)
   const groupResults = new Map<string, BusinessSection[]>()
   const chapterAttempts: Record<string, number> = {}
   const chapterMetrics: NonNullable<
@@ -1594,18 +1709,24 @@ async function composeDueDiligenceContent(input: {
     const systemPrompt = `你是投资中台的资深投资经理，负责为当前会话绑定的项目撰写可直接交付内部投资经理审阅的中文尽调报告章节。
 只生成本次指定章节，不得生成整篇报告、执行摘要、免责声明或文末引用资料。
 必须遵守：
-1. 只依据项目字段和带 S 编号的证据；不得编造主体、人物、产品、客户、融资、财务、估值、资质或交易条款。
+1. 只依据项目字段和带 S 编号的内部事实卡；不得编造主体、人物、产品、客户、融资、财务、估值、资质或交易条款。
 2. status 只用“资料记载”“AI推断”“待核验”；资料记载和 AI推断必须引用有效 sourceIndexes。
-3. 正文不得显示状态标签，不得解释“现有资料、项目资料库、本节、证据不足、联网检索、来源索引”等处理过程。
-4. 每节摘要 35–90 个汉字；除“后续核验事项”外，每节 1–3 项高密度发现，每项 60–220 个汉字。
-5. 同一事实只进入语义最匹配的章节。优先写具体项目、公司、团队、实验室、产品、融资和商业化信号，不写泛行业研究。
-6. 可公开核验的事实不得直接写成待核验；确需非公开原件或仍有冲突的重大事项集中写入“后续核验事项”。
-7. 表格只用于真实结构化数据，最多 8 行；财务表最多 6 列，并明确指标/科目和期间/年度/口径。
-8. 只返回 JSON 对象：{"sections":[{"title":"","summary":"","findings":[{"text":"","status":"资料记载|AI推断|待核验","sourceIndexes":[0]}],"tables":[{"title":"","unit":"","columns":[""],"rows":[[""]],"status":"资料记载|AI推断|待核验","sourceIndexes":[0]}]}]}。
-9. sections 必须且只能按指定顺序返回：${group.sections.join('、')}。
+3. 写作前先在内部完成事实卡去重，并统一主体、时间、关系、事件阶段和数字口径；只输出改写后的章节 JSON，不得输出事实卡或分析步骤。
+4. 客户可见文字不得出现“项目资料、项目材料、项目资料库、项目知识库、资料库、知识库、现有资料、当前资料、根据资料、资料显示、证据显示、证据不足、本节、本初稿、初步梳理、联网检索、来源索引、状态标签”等取证或生成过程。
+5. 以具体公司、团队成员、实验室、产品、客户、融资事件或日期开句，按“事实—影响—边界”自然展开；仅在披露属性影响事实强度时使用“据公司披露、管理层预计、工商登记显示、监管公告显示”等具体归因。
+6. 禁用“值得注意的是、需要强调的是、不难发现、由此可见、综上所述”等模型套话；不得机械重复“整体来看、综合来看、从……来看、这意味着、有望”等句式。
+7. 每节摘要 35–90 个汉字；除“后续核验事项”外，每节 1–3 项高密度发现，每项 60–220 个汉字。
+8. 同一事实只进入语义最匹配的章节。优先写具体项目、公司、团队、实验室、产品、融资和商业化信号，不写泛行业研究。
+9. 可公开核验的事实不得直接写成待核验；确需非公开原件或仍有冲突的重大事项集中写入“后续核验事项”。
+10. 表格只用于真实结构化数据，最多 8 行；财务表最多 6 列，并明确指标/科目和期间/年度/口径。
+11. 只返回 JSON 对象：{"sections":[{"title":"","summary":"","findings":[{"text":"","status":"资料记载|AI推断|待核验","sourceIndexes":[0]}],"tables":[{"title":"","unit":"","columns":[""],"rows":[[""]],"status":"资料记载|AI推断|待核验","sourceIndexes":[0]}]}]}。
+12. sections 必须且只能按指定顺序返回：${group.sections.join('、')}。
 
 已激活 Skill 的关键规则：
-${compactSkillRules || '以固定章节、证据边界和内部尽调语气生成。'}`
+${compactSkillRules || '以固定章节、证据边界和内部尽调语气生成。'}
+
+模板叙述风格：
+${compactWritingStyleRules || '先消化事实，再以具体主体、日期和事件形成自然、克制的投资经理叙述。'}`
     const repairPrompt = repairIssues.length
       ? `
 上一版仅有以下问题。保留正确内容，只重写受影响的本章 JSON：
@@ -1624,8 +1745,8 @@ ${requestedSections}
 任务参数：${JSON.stringify(input.parameters)}
 用户补充输入：${safeText(input.parameters.userInstructions, '无')}
 ${repairPrompt}
-证据：
-${evidence || '没有可用证据。不得编造事实；只在确有重大影响时形成具体、可执行的后续核验事项。'}`
+内部事实卡（只作写作依据，不得复制卡片标题、来源名、片段号或处理说明到正文）：
+${evidence || '没有可用事实卡。不得编造事实；只在确有重大影响时形成具体、可执行的后续核验事项。'}`
     const startedAt = Date.now()
     const response = await fetchImpl(`${GW_BASE}/chat/completions`, {
       method: 'POST',
@@ -1809,7 +1930,10 @@ ${evidence || '没有可用证据。不得编造事实；只在确有重大影�
             content: `你是投资中台资深投资经理。根据已经生成的尽调章节，形成不重复正文的决策摘要。
 只返回 JSON：{"title":"","executiveSummary":"","executiveSummarySourceIndexes":[0],"highlights":[""],"risks":[""]}。
 执行摘要 250–500 个汉字，必须从“进入初筛、继续跟踪、申请立项、启动尽调、提请上会、提交投决、暂缓推进、归档”中给出且只给出一个主建议，并说明最强依据、反向证据、前置条件和下一步动作。
-不得解释资料处理过程，不得输出状态标签、免责声明或引用清单，不得虚构事实。`,
+先在内部合并重复事实并统一主体、日期、事件阶段和数字口径，再写客户可见内容。
+不得出现“项目资料、项目材料、项目资料库、项目知识库、资料库、知识库、现有资料、当前资料、根据资料、资料显示、证据显示、证据不足、本节、本初稿、初步梳理、联网检索、来源索引、状态标签”等处理过程。
+以具体主体、产品、客户、融资事件或日期组织段落，按“事实—判断—边界—动作”自然展开；禁用“值得注意的是、需要强调的是、不难发现、由此可见、综上所述”等模型套话，不得机械重复固定连接句式。
+不得输出免责声明或引用清单，不得虚构事实。`,
           },
           {
             role: 'user',

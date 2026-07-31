@@ -23,6 +23,25 @@ test('accepts a high-confidence subject only when name and evidence occur in sou
   assert.equal(result.decision.subjectType, 'company')
 })
 
+test('accepts a complete paper title for an explicit paper candidate', () => {
+  const title = 'GeoMix: Descriptor-Free Visual Localization via Global Context and Multi-Detector Training'
+  const source = `${title}\nThis paper presents a descriptor-free visual localization method.`
+  const result = validateRadarAiDecision({
+    candidateId: 'paper-1',
+    decision: 'accept',
+    subjectType: 'paper',
+    subjectName: title,
+    legalName: '',
+    evidence: title,
+    confidence: 0.95,
+    rejectReason: '',
+  }, source, 'test-model', '2026-07-31T00:00:00.000Z', true)
+
+  assert.equal(result.status, 'accepted')
+  assert.equal(result.decision.subjectType, 'paper')
+  assert.equal(result.decision.subjectName, title)
+})
+
 test('holds hallucinated or paraphrased evidence out of the public pool', () => {
   const source = '某创业团队宣布完成天使轮融资，但原文未披露主体名称。'
   const result = validateRadarAiDecision({
@@ -105,3 +124,16 @@ test('cache key changes when candidate content changes', () => {
   assert.equal(first.sourceKey, '36kr:article-1')
 })
 
+test('marks arXiv and paper-group candidates as papers before model review', () => {
+  const direct = prepareRadarAiCandidate({ source: 'arxiv', title: 'Paper A' }, 'test-model')
+  const grouped = prepareRadarAiCandidate({
+    source: 'investment',
+    source_group: '论文',
+    source_key: 'arxiv_cs_ai',
+    title: 'Paper B',
+  }, 'test-model')
+
+  assert.equal(direct.isPaper, true)
+  assert.equal(grouped.isPaper, true)
+  assert.match(grouped.promptText, /线索类型：论文/)
+})

@@ -1,4 +1,4 @@
 interface:
   display_name: "项目 Q&A"
-  short_description: "资深投资经理生成当前项目投资 Q&A"
-  default_prompt: "使用 $answer-project-qa，以投资中台资深投资经理身份，仅针对当前会话绑定项目，先使用项目资料库，再通过普通会话同源的 Flue 联网能力发现并核验公开来源；根据用户关注点和证据动态生成问题、回答、风险及下一步动作，只交付一份可编辑 DOCX。"
+  short_description: "生成自然、具体、可直接交付的项目投资 Q&A"
+  default_prompt: "使用 $answer-project-qa，先在内部汇总当前项目事实与经核验公开信息，再以自然、具体、无资料加工痕迹的投资机构成稿口吻生成 Q&A，只交付一份可编辑 DOCX。"

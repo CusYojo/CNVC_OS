@@ -15,9 +15,11 @@ import {
 import type { InvestmentProposalEvidencePlan } from './aiInvestmentProposalEvidenceService.js'
 import { comparisonKey, isNearDuplicate } from './aiEvidenceQualityService.js'
 import {
+  containsInvestmentProposalAiStyleBoilerplate,
   containsInvestmentProposalColonLabel,
   containsInvestmentProposalInlineSubheading,
   containsInvestmentProposalProseLabel,
+  containsInvestmentProposalSourceProcessWording,
   containsInvestmentProposalWebArtifact,
 } from './aiInvestmentProposalTextService.js'
 
@@ -118,8 +120,11 @@ function issue(
 }
 
 function safeNoDataFinding(topic: string): BusinessFinding {
+  const clientTopic = topic
+    .replace(/^\s*(?:[一二三四五六七八九十]+、|[（(][一二三四五六七八九十]+[）)])\s*/, '')
+    .trim()
   return {
-    text: `${CURRENT_PROJECT_NO_DATA}需补充${topic}相关原始文件或经确认的项目记录后再行分析。`,
+    text: `${CURRENT_PROJECT_NO_DATA}需核验${clientTopic}相关关键事实后再行分析。`,
     status: '资料缺口',
     sourceIndexes: [],
   }
@@ -167,6 +172,20 @@ function reviewFinding(input: {
       ...location,
       code: 'INTERNAL_ERROR_TEXT_LEAK',
       message: `${section.title}包含仅供系统内部记录的技术错误信息`,
+    })
+  }
+  if (containsInvestmentProposalSourceProcessWording(finding.text)) {
+    issue(issues, {
+      ...location,
+      code: 'SOURCE_PROCESS_WORDING_LEAK',
+      message: `${section.title}向客户暴露了项目资料、会议纪要或原始文件等内部取证过程`,
+    })
+  }
+  if (containsInvestmentProposalAiStyleBoilerplate(finding.text)) {
+    issue(issues, {
+      ...location,
+      code: 'AI_STYLE_BOILERPLATE',
+      message: `${section.title}包含模板化的 AI 套话，应改为以公司、产品、人员、交易或经营事实为主语的直接陈述`,
     })
   }
   if (EVIDENCE_PROCESS_OR_BOILERPLATE.test(finding.text)) {
@@ -364,7 +383,22 @@ function reviewTable(input: {
       })
     }
   }
-  if (EVIDENCE_PROCESS_OR_BOILERPLATE.test([table.title, headerText, ...table.rows.flat()].join(' '))) {
+  const clientTableText = [table.title, headerText, ...table.rows.flat()].join(' ')
+  if (containsInvestmentProposalSourceProcessWording(clientTableText)) {
+    issue(issues, {
+      ...location,
+      code: 'TABLE_SOURCE_PROCESS_WORDING_LEAK',
+      message: `${section.title}表格向客户暴露了内部取证过程`,
+    })
+  }
+  if (containsInvestmentProposalAiStyleBoilerplate(clientTableText)) {
+    issue(issues, {
+      ...location,
+      code: 'TABLE_AI_STYLE_BOILERPLATE',
+      message: `${section.title}表格包含模板化的 AI 套话`,
+    })
+  }
+  if (EVIDENCE_PROCESS_OR_BOILERPLATE.test(clientTableText)) {
     issue(issues, {
       ...location,
       code: 'TABLE_EVIDENCE_PROCESS_TEXT_LEAK',
@@ -475,6 +509,18 @@ export function reviewInvestmentProposalContent(input: {
       message: '执行摘要包含仅供系统内部记录的技术错误信息',
     })
   }
+  if (containsInvestmentProposalSourceProcessWording(content.executiveSummary)) {
+    issue(issues, {
+      code: 'SOURCE_PROCESS_WORDING_LEAK',
+      message: '执行摘要向客户暴露了项目资料、会议纪要或原始文件等内部取证过程',
+    })
+  }
+  if (containsInvestmentProposalAiStyleBoilerplate(content.executiveSummary)) {
+    issue(issues, {
+      code: 'AI_STYLE_BOILERPLATE',
+      message: '执行摘要包含模板化的 AI 套话，应改为直接的提案说明',
+    })
+  }
   const projectIdentity = `${projectName} ${companyName ?? ''}`
   const evidenceBySection = new Map(evidencePlan.sections.map((section) => [
     section.sectionId,
@@ -512,6 +558,20 @@ export function reviewInvestmentProposalContent(input: {
         sectionId: definition.id,
         code: 'INTERNAL_ERROR_TEXT_LEAK',
         message: `章节“${definition.title}”摘要包含仅供系统内部记录的技术错误信息`,
+      })
+    }
+    if (containsInvestmentProposalSourceProcessWording(sectionValue.summary)) {
+      issue(issues, {
+        sectionId: definition.id,
+        code: 'SOURCE_PROCESS_WORDING_LEAK',
+        message: `章节“${definition.title}”摘要向客户暴露了内部取证过程`,
+      })
+    }
+    if (containsInvestmentProposalAiStyleBoilerplate(sectionValue.summary)) {
+      issue(issues, {
+        sectionId: definition.id,
+        code: 'AI_STYLE_BOILERPLATE',
+        message: `章节“${definition.title}”摘要包含模板化的 AI 套话`,
       })
     }
     if (!sectionValue.findings.length) {

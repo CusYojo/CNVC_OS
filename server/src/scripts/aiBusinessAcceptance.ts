@@ -346,6 +346,8 @@ async function main() {
   )
   const dueDiligenceSkill = await loadAiSkill('write-due-diligence-report')
   const requestedChapterGroups: string[][] = []
+  const chapterSystemPrompts: string[] = []
+  const chapterUserPrompts: string[] = []
   const progressEvents: Array<{ completedChapters: number; phase: string }> = []
   let productChapterTruncated = false
   const segmentedContent = await composeBusinessContent({
@@ -382,6 +384,10 @@ async function main() {
         }
         const matched = systemPrompt.match(/sections 必须且只能按指定顺序返回：(.+)。/)
         const sectionTitles = matched?.[1].split('、').filter(Boolean) ?? []
+        chapterSystemPrompts.push(systemPrompt)
+        chapterUserPrompts.push(
+          body.messages?.find((message) => message.role === 'user')?.content ?? '',
+        )
         requestedChapterGroups.push(sectionTitles)
         if (sectionTitles.length === 1
           && sectionTitles[0] === '产品与核心技术'
@@ -438,6 +444,20 @@ async function main() {
       && progressEvents.some((event) => event.phase === 'regenerating')
       && progressEvents.some((event) => event.completedChapters === 8),
     '产品与技术首轮截断后仅该章重试；其他章组只请求一次，合并后仍为模板规定的 16 模块',
+  )
+  assert(
+    checks,
+    'AI-010 章组先消化内部事实卡再写客户正文',
+    chapterSystemPrompts.length === 9
+      && chapterSystemPrompts.every((prompt) =>
+        prompt.includes('内部事实卡')
+          && prompt.includes('统一主体、时间、关系、事件阶段和数字口径')
+          && prompt.includes('不得输出事实卡或分析步骤')
+          && prompt.includes('值得注意的是'))
+      && chapterUserPrompts.every((prompt) =>
+        prompt.includes('内部事实卡（只作写作依据')
+          && prompt.includes('不得复制卡片标题、来源名、片段号或处理说明到正文')),
+    '输入先压缩为带来源索引的事实卡；模型仅输出重新组织后的章节 JSON',
   )
   let researchRequestBody = ''
   const researchProbe = await fetchDueDiligenceNetworkEvidence({
@@ -779,7 +799,7 @@ async function main() {
       )
       const badQualityIssues = dueDiligenceContentQualityIssues({
         ...content,
-        executiveSummary: '本初稿依据现有资料形成，结论强度以所列状态和引用为准。',
+        executiveSummary: '本初稿依据现有资料形成。值得注意的是，结论强度以所列状态和引用为准。',
         sections: content.sections.map((section, index) => index === 1
           ? {
               ...section,
@@ -796,8 +816,56 @@ async function main() {
         checks,
         'AI-010 拦截问题样本中的过程性空话和原始资料分片',
         badQualityIssues.some((issue) => issue.includes('资料处理过程'))
-          && badQualityIssues.some((issue) => issue.includes('资料分片')),
+          && badQualityIssues.some((issue) => issue.includes('资料分片'))
+          && badQualityIssues.some((issue) => issue.includes('模型化套话')),
         badQualityIssues.join('；'),
+      )
+      const sanitizedProcessWording = finalizeDueDiligenceContent({
+        ...content,
+        executiveSummary: '阶段与推进建议：继续跟踪。根据项目资料库显示，值得注意的是，杭州示例科技已经形成软件产品。',
+        highlights: ['结合现有资料分析，值得注意的是，公司具备客户验证信号。'],
+        risks: ['项目材料显示，知识产权权属尚需取得原始文件确认。'],
+        sections: content.sections.map((section, index) => index === 1
+          ? {
+              ...section,
+              summary: '根据项目资料显示，公司主体已经设立。',
+              findings: [{
+                text: '现有资料显示，公司于2024年完成工商登记。',
+                status: '资料记载',
+                sourceIndexes: [0],
+              }],
+              tables: [{
+                title: '根据项目资料整理的主体信息',
+                unit: '',
+                columns: ['项目材料', '结论'],
+                rows: [['项目资料库', '公司已设立']],
+                status: '资料记载',
+                sourceIndexes: [0],
+              }],
+            }
+          : section),
+      })
+      const sanitizedVisibleText = JSON.stringify({
+        title: sanitizedProcessWording.title,
+        executiveSummary: sanitizedProcessWording.executiveSummary,
+        sections: sanitizedProcessWording.sections,
+        highlights: sanitizedProcessWording.highlights,
+        risks: sanitizedProcessWording.risks,
+      })
+      assert(
+        checks,
+        'AI-010 导出前清除资料处理表述和高置信模型套话',
+        [
+          '项目资料',
+          '项目材料',
+          '项目资料库',
+          '资料库',
+          '现有资料',
+          '根据资料',
+          '资料显示',
+          '值得注意的是',
+        ].every((phrase) => !sanitizedVisibleText.includes(phrase)),
+        sanitizedVisibleText,
       )
       const misplacedContentIssues = dueDiligenceContentQualityIssues({
         ...content,
@@ -867,13 +935,27 @@ async function main() {
         [
           '现有资料',
           '现有材料',
+          '项目资料',
+          '项目材料',
           '项目资料库',
+          '项目知识库',
+          '资料库',
+          '知识库',
+          '根据资料',
+          '资料显示',
+          '证据显示',
           '本节',
           '证据不足',
           '结论强度',
           '初步梳理',
           '检索问题',
           '联网检索',
+          '来源索引',
+          '值得注意的是',
+          '需要强调的是',
+          '不难发现',
+          '由此可见',
+          '综上所述',
         ].every((phrase) => !documentXml.includes(phrase)),
         '正文只写项目事实、投资含义、限制和动作',
       )

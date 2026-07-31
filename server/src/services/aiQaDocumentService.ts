@@ -44,6 +44,34 @@ const ANSWER_SECTION_ORDERS = [
   STAGE_ANSWER_SECTION_ORDER,
   STANDARD_ANSWER_SECTION_ORDER,
 ] as const
+const QA_VISIBLE_SOURCE_PROCESS_TERMS = [
+  '项目资料',
+  '项目材料',
+  '当前资料',
+  '现有资料',
+  '当前证据',
+  '现有证据',
+  '资料显示',
+  '资料表明',
+  '资料称',
+  '材料显示',
+  '材料表明',
+  '材料称',
+  '资料截止日',
+  '经系统核验',
+  '经页面核验',
+  '公开页面显示',
+  '公开页面披露',
+  '回填项目资料库',
+  '更新本题',
+  '本回答',
+  '结论置信度',
+  '支持原文',
+  '来源索引',
+  '现阶段只能形成初步判断',
+  '不能把单一材料或公开披露直接视为完成核验',
+  '未形成能够相互印证的完整证据链',
+] as const
 
 type ProjectLike = {
   name: string
@@ -102,7 +130,9 @@ function bodyParagraph(value: string, options: {
 }
 
 function questionParagraph(index: number, question: string, pageBreakBefore = false) {
-  const visibleQuestion = sanitizeClientVisibleEvidenceWording(question)
+  const visibleQuestion = sanitizeQaVisibleSourceProcessWording(
+    sanitizeClientVisibleEvidenceWording(question),
+  )
   return new Paragraph({
     pageBreakBefore,
     keepNext: true,
@@ -125,8 +155,46 @@ function questionParagraph(index: number, question: string, pageBreakBefore = fa
   })
 }
 
+function sanitizeQaVisibleSourceProcessWording(value: string) {
+  return value
+    .replace(/截至资料截止日[，,]?/g, '')
+    .replace(/^公司主体[：:]\s*/g, '公司主体为')
+    .replace(/^项目主体[：:]\s*/g, '项目主体为')
+    .replace(/^核心产品[：:]\s*/g, '核心产品为')
+    .replace(/^商业模式[：:]\s*拟/g, '公司拟')
+    .replace(/^商业模式[：:]\s*/g, '公司')
+    .replace(/^融资计划[：:]\s*/g, '公司')
+    .replace(/^股权结构[：:]\s*创始团队拟控股/g, '公司拟由创始团队控股')
+    .replace(/^股权结构[：:]\s*/g, '公司股权安排为')
+    .replace(/公司(?:提供的)?(?:资料|材料)(?:中)?(?:显示|表明|说明|披露|介绍|称)[，,:：]?/g, '公司称')
+    .replace(/(?:项目方|团队)(?:提供的)?(?:资料|材料)(?:中)?(?:显示|表明|说明|披露|介绍|称)[，,:：]?/g, '$1称')
+    .replace(
+      /(?:基于|根据|综合)(?:截至[^，；。]+)?(?:当前)?(?:项目资料(?:库)?|项目材料|现有资料|当前资料)(?:与经系统核验的公开页面)?[，,]?/g,
+      '',
+    )
+    .replace(
+      /(?:当前项目资料(?:库)?|项目资料(?:库)?|项目材料|现有资料|当前资料|会议纪要)(?:中)?(?:显示|列示|记载|提及|表明|说明|披露)(?:的)?[，,:：]?/g,
+      '',
+    )
+    .replace(/经系统核验的公开页面(?:显示|披露)?[，,:：]?/g, '')
+    .replace(/经页面核验的公开披露(?:显示|披露)?[，,:：]?/g, '')
+    .replace(/现有证据尚未完整覆盖/g, '目前尚不能确认')
+    .replace(/当前证据尚不足以/g, '目前尚无法')
+    .replace(/现有证据不足以/g, '目前尚无法')
+    .replace(/(?:基于|根据|综合)(?:当前|现有)证据[，,]?/g, '')
+    .replace(/(?:当前|现有)证据(?:显示|表明|说明)?[，,:：]?/g, '')
+    .replace(/(?:相关)?(?:资料|材料)(?:中)?(?:显示|表明|说明|披露|介绍|称)[，,:：]?/g, '')
+    .replace(/^(?:股东|融资|单位经济性|客户|产品|技术|团队|商业化|财务|主体|风险)线索[：:]\s*/g, '')
+    .replace(/结论置信度为(?:高|中|低|证据不足)/g, '')
+    .replace(/核对主体、时间、口径和相互关系后更新本题/g, '完成主体、时间与口径核实')
+    .replace(/并将结果回填项目资料库后更新本题/g, '并在完成核实后重新判断')
+    .replace(/[，,；;]\s*[。]/g, '。')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim()
+}
+
 function stripAnswerMarkdown(value: string) {
-  return sanitizeClientVisibleEvidenceWording(value)
+  return sanitizeQaVisibleSourceProcessWording(sanitizeClientVisibleEvidenceWording(value))
     .replace(/```(?:json|markdown|md)?/gi, '')
     .replace(/\*\*([^*\n]+)\*\*/g, '$1')
     .replace(/__([^_\n]+)__/g, '$1')
@@ -210,7 +278,7 @@ function answerParagraphLines(value: string) {
 function answerParagraphs(answer: ProjectQaDraftAnswer) {
   const paragraphs = answerParagraphLines(answer.answer)
   if (!paragraphs.length) {
-    paragraphs.push('现有证据不足以形成确定结论，需取得对应原件、明细数据或相关责任人访谈后判断。')
+    paragraphs.push('目前尚无法形成可靠判断，后续应结合关键文件、明细数据和相关负责人情况进一步确认。')
   }
   const result = paragraphs.map((line, index) =>
     bodyParagraph(line, {
@@ -275,7 +343,9 @@ export async function generateProjectQaDocx(input: {
           color: '000000',
           cjkFont: HEADING_FONT,
         }),
-        ...mixedTextRuns(sanitizeClientVisibleEvidenceWording(question.question), {
+        ...mixedTextRuns(sanitizeQaVisibleSourceProcessWording(
+          sanitizeClientVisibleEvidenceWording(question.question),
+        ), {
           size: 24,
           color: '000000',
         }),
@@ -290,7 +360,7 @@ export async function generateProjectQaDocx(input: {
       questionId: question.id,
       category: question.category,
       question: question.question,
-      answer: '本题回答生成异常，现阶段无法形成确定结论；需重新核验项目材料并将结果补充入项目资料库。',
+      answer: '目前尚无法形成可靠判断，后续应重新核实关键事实、明细数据及相关负责人情况。',
       sourceIndexes: [],
       supportingQuotes: [],
       confidenceStatus: '证据不足',
@@ -326,7 +396,7 @@ export async function generateProjectQaDocx(input: {
   const doc = new Document({
     creator: 'Cybernaut Early-stage Lead Q&A Skill',
     title: input.content.title,
-    description: `${input.content.mode}内部项目投资问答，基于当前会话绑定项目的资料库生成`,
+    description: `${input.content.mode}项目投资问答`,
     styles: {
       default: {
         document: {
@@ -453,13 +523,14 @@ export async function inspectProjectQaDocx(
     const answerLabel = answerParagraphs.find((paragraph) =>
       /^(?:答复|回答)\s*[：:]/.test(paragraph))
     if (
-      answerParagraphs.length !== 5
+      answerParagraphs.length < 3
+      || answerParagraphs.length > 7
       || answerLabel
     ) {
       throw new Error(
         answerLabel
           ? `Q&A DOCX 正文 Q${index + 1} 不得显示“答复：”或“回答：”标签`
-          : `Q&A DOCX 正文 Q${index + 1} 应为五个连续自然段，实际为 ${answerParagraphs.length} 段`,
+          : `Q&A DOCX 正文 Q${index + 1} 应为 3-7 个自然段，实际为 ${answerParagraphs.length} 段`,
       )
     }
   })
@@ -477,6 +548,7 @@ export async function inspectProjectQaDocx(
     '公网安备',
     'All Rights Reserved',
     '英诺嘿呀助手微信号',
+    ...QA_VISIBLE_SOURCE_PROCESS_TERMS,
   ]
   const leakedTerm = forbiddenVisibleTerms.find((term) => visibleText.includes(term))
   const leakedSourceIndex = /\[S\d+\]/.test(visibleText)
@@ -499,9 +571,11 @@ export async function inspectProjectQaDocx(
       questionCount: expected.questionCount,
       directoryCompleteBeforeBody: true,
       answerParagraphFormValid: true,
+      narrativeParagraphRangeValid: true,
       visibleAnswerLabelsAbsent: true,
       visibleSubheadingsAbsent: true,
       sourceOutlineNumberingAbsent: true,
+      visibleSourceProcessAbsent: true,
       visibleAuditAppendixAbsent: true,
       placeholderAnswerAbsent: true,
       markdownDecorationAbsent: true,
