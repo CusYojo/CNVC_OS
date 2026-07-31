@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
@@ -11,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 from typing import Any
+import unicodedata
 import zipfile
 
 
@@ -19,7 +21,27 @@ def load_json(path: Path) -> dict[str, Any]:
 
 
 def normalize(value: str) -> str:
-    return re.sub(r"[\W_]+", "", str(value or "").lower(), flags=re.UNICODE)
+    normalized = unicodedata.normalize("NFKC", str(value or "")).lower()
+    normalized = re.sub(r"[\u200b-\u200d\ufeff]", "", normalized)
+    return re.sub(r"[\W_]+", "", normalized, flags=re.UNICODE)
+
+
+def canonical_numeric(value: str) -> str:
+    normalized = unicodedata.normalize("NFKC", str(value or ""))
+    return re.sub(r"[\s\u200b-\u200d\ufeff,，]", "", normalized)
+
+
+def numeric_tokens(value: str) -> set[str]:
+    value = unicodedata.normalize("NFKC", str(value or ""))
+    value = re.sub(r"[\u200b-\u200d\ufeff]", "", value)
+    pattern = re.compile(
+        r"(?<![\w.])(?:[¥￥$€£])?\d[\d,，]*(?:\.\d+)?"
+        r"(?:%|％|万元|亿元|万|亿|元|人|家|项|年|月|日|倍)?"
+    )
+    return {
+        canonical_numeric(match.group(0)).replace("￥", "¥").replace("％", "%")
+        for match in pattern.finditer(str(value or ""))
+    }
 
 
 def slide_texts(result_map: dict[str, Any]) -> dict[int, str]:
@@ -53,6 +75,62 @@ def package_media(pptx: Path) -> dict[str, list[str]]:
                 continue
             digest = hashlib.sha256(archive.read(name)).hexdigest()
             result.setdefault(digest, []).append(name)
+    return result
+
+
+def embedded_data_texts(pptx: Path) -> dict[str, str]:
+    """Extract visible/cache data from charts and embedded XLSX workbooks."""
+    result: dict[str, str] = {}
+    with zipfile.ZipFile(pptx) as archive:
+        for name in archive.namelist():
+            if name.startswith("ppt/charts/") and name.endswith(".xml"):
+                raw = archive.read(name).decode("utf-8", errors="ignore")
+                result[name] = " ".join(
+                    re.findall(
+                        r"<(?:\w+:)?v[^>]*>(.*?)</(?:\w+:)?v>",
+                        raw,
+                    )
+                )
+            elif name.startswith("ppt/embeddings/") and name.lower().endswith(".xlsx"):
+                try:
+                    with zipfile.ZipFile(
+                        io.BytesIO(archive.read(name))
+                    ) as workbook:
+                        texts: list[str] = []
+                        for part in workbook.namelist():
+                            if (
+                                part == "xl/sharedStrings.xml"
+                                or part.startswith("xl/worksheets/sheet")
+                            ) and part.endswith(".xml"):
+                                raw = workbook.read(part).decode(
+                                    "utf-8", errors="ignore"
+                                )
+                                texts.extend(
+                                    re.findall(
+                                        r"<(?:\w+:)?(?:t|v)[^>]*>"
+                                        r"(.*?)</(?:\w+:)?(?:t|v)>",
+                                        raw,
+                                    )
+                                )
+                        result[name] = " ".join(texts)
+                except zipfile.BadZipFile:
+                    result[name] = ""
+    return result
+
+
+def note_texts(pptx: Path) -> dict[str, str]:
+    result: dict[str, str] = {}
+    with zipfile.ZipFile(pptx) as archive:
+        for name in archive.namelist():
+            if not name.startswith("ppt/notesSlides/") or not name.endswith(".xml"):
+                continue
+            raw = archive.read(name).decode("utf-8", errors="ignore")
+            result[name] = " ".join(
+                re.findall(
+                    r"<(?:\w+:)?t[^>]*>(.*?)</(?:\w+:)?t>",
+                    raw,
+                )
+            )
     return result
 
 
@@ -160,6 +238,11 @@ def validate(
     forbidden_media = {
         str(value) for value in policy.get("forbiddenMediaSha256", [])
     }
+    forbidden_numbers = {
+        canonical_numeric(str(value)).replace("￥", "¥").replace("％", "%")
+        for value in policy.get("forbiddenNumericTokens", [])
+        if str(value).strip()
+    }
     texts = slide_texts(result_map)
     normalized_texts = {page: normalize(text) for page, text in texts.items()}
     text_matches: list[dict[str, Any]] = []
@@ -169,6 +252,27 @@ def validate(
                 text_matches.append({"slide": page, "term": term})
     if text_matches:
         errors.append("可编辑文字中仍包含禁止残留词")
+    editable_numeric_matches: list[dict[str, Any]] = []
+    for page, text in texts.items():
+        stream = canonical_numeric(text)
+        for token in sorted(forbidden_numbers):
+            if token and token in stream:
+                editable_numeric_matches.append({"slide": page, "token": token})
+    if editable_numeric_matches:
+        errors.append("可编辑文字中仍包含禁止的旧项目数字")
+    note_text_matches: list[dict[str, Any]] = []
+    note_numeric_matches: list[dict[str, Any]] = []
+    for part, text in note_texts(pptx).items():
+        normalized_note = normalize(text)
+        for term in forbidden_terms:
+            if normalize(term) in normalized_note:
+                note_text_matches.append({"part": part, "term": term})
+        stream = canonical_numeric(text)
+        for token in sorted(forbidden_numbers):
+            if token and token in stream:
+                note_numeric_matches.append({"part": part, "token": token})
+    if note_text_matches or note_numeric_matches:
+        errors.append("演讲者备注中仍包含旧项目文字或数字")
     all_text = normalize("\n".join(texts.values()))
     missing_required = [
         term for term in required_terms if normalize(term) not in all_text
@@ -200,6 +304,20 @@ def validate(
         errors.append("最终 PPTX 仍引用禁止的旧项目媒体")
     if forbidden_package_media_matches:
         errors.append("最终 PPTX 包内仍包含禁止的旧项目媒体文件")
+    embedded_numeric_matches: list[dict[str, Any]] = []
+    embedded_text_matches: list[dict[str, Any]] = []
+    if policy.get("scanEmbeddedData") is True:
+        for part, value in embedded_data_texts(pptx).items():
+            normalized_value = normalize(value)
+            for term in forbidden_terms:
+                if normalize(term) in normalized_value:
+                    embedded_text_matches.append({"part": part, "term": term})
+            stream = canonical_numeric(value)
+            for token in sorted(forbidden_numbers):
+                if token and token in stream:
+                    embedded_numeric_matches.append({"part": part, "token": token})
+        if embedded_numeric_matches or embedded_text_matches:
+            errors.append("图表缓存或嵌入工作簿仍包含旧项目文字或数字")
     expected_image_failures: list[dict[str, Any]] = []
     for operation in manifest.get("operations", []):
         if not isinstance(operation, dict) or operation.get("action") != "replace_image":
@@ -227,7 +345,7 @@ def validate(
         validator,
         pptx,
         render_dir,
-        forbidden_terms,
+        forbidden_terms + sorted(forbidden_numbers),
         ocr_engine,
         tesseract,
         timeout_seconds,
@@ -240,6 +358,11 @@ def validate(
         "errors": errors,
         "policy": policy,
         "editableTextMatches": text_matches,
+        "editableNumericMatches": editable_numeric_matches,
+        "noteTextMatches": note_text_matches,
+        "noteNumericMatches": note_numeric_matches,
+        "embeddedNumericMatches": embedded_numeric_matches,
+        "embeddedTextMatches": embedded_text_matches,
         "missingRequiredTextTerms": missing_required,
         "gapOnlyTextViolations": gap_violations,
         "forbiddenMediaMatches": forbidden_media_matches,

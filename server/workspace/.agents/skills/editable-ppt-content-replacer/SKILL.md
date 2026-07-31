@@ -1,6 +1,6 @@
 ---
 name: editable-ppt-content-replacer
-description: 基于已经完成1:1复原的可编辑PPTX模板生成当前项目投资建议书或同模板新报告；先验证 PDF 转换交接，再按语义槽位白名单最小化替换文字、数据、Logo、人物和产品素材。用户资料不足时只针对内容缺口联网检索，并通过来源登记、重大数据交叉验证、估算披露和操作级证据绑定阻止凭空捏造。通过完整槽位覆盖、semanticKey、排版指纹和实体绑定阻止空白内容框、错填数据、人物产品错配、模板样本残留与水印残留，同时锁定共享图标和版式。适用于投资建议书 PPT、PDF 模板元素化后的内容替换，以及用户强调“只换内容、不重新设计、不批量替换全部元素”的 PowerPoint 任务。
+description: 基于已经完成1:1复原的可编辑PPTX模板生成当前项目投资建议书或同模板新报告；先锁定项目身份、清除模板样本指纹并建立唯一事实库和逐页内容方案，再按语义槽位替换文字、数据、Logo、人物和产品素材。对每张正文页建立独立检索问题、证据包和最低有效内容密度，联网补充行业、政策、基准、竞争、公开案例及可验证项目事实；通过来源、事实键、单位期间、重大数据交叉验证、实体绑定、文字容量预算和全页视觉门禁阻止错填、编造、旧项目残留及排版失控。适用于投资建议书 PPT、PDF 模板元素化后的内容替换，以及用户强调“只换内容、不重新设计”的 PowerPoint 任务。
 ---
 
 # 可编辑模板 PPT 内容定向替换
@@ -13,9 +13,13 @@ description: 基于已经完成1:1复原的可编辑PPTX模板生成当前项目
 只交付一个最终 PPTX，核心内容必须保持为原生可编辑对象；不得再生成第二份
 纯图片 PPTX，也不得用整页背景图覆盖模板后冒充可编辑结果。
 
-新任务使用 1.4 版替换清单。1.4 版继承 PDF 转换交接、完整槽位覆盖和
-操作级证据约束，并新增页面闭环、内容处置、旧项目文字/媒体黑名单与最终
-渲染 OCR 门禁。用户资料不完整时，非必要字段直接省略，重大缺口只允许
+新任务使用 1.6 版替换清单。1.6 版继承 1.5 的身份、证据、内容安全与
+全页闭环约束，并新增模板背景锁、背景候选逐项复核、Logo 透明底检测和
+Logo 相邻底板审计。详细模型见
+[references/content-safety-model.md](references/content-safety-model.md)。
+背景与 Logo 的专用规则见
+[references/background-and-logo-safety.md](references/background-and-logo-safety.md)。
+用户资料不完整时，非必要字段直接省略，重大缺口只允许
 集中进入专用“待核实事项”页，不得把“未提供公司官网”“缺少原始文件”
 等制作过程提示散落到成稿中。
 
@@ -31,7 +35,14 @@ description: 基于已经完成1:1复原的可编辑PPTX模板生成当前项目
   `readyForContentReplacement` 均为 `true`。不得跳过交接门槛。
 - 使用 Python `zipfile` + Open XML 直接操作 PPTX 包结构，不依赖外部
   Node.js 运行时或 `@oai/artifact-tool`。
-- 默认所有对象均为 `KEEP`。只有清单明确授权的对象才能修改。
+- 1.6 版设置 `defaultAction: "FAIL_UNCLASSIFIED_CONTENT"`。固定视觉逐项
+  登记后保留；项目相关内容必须替换或删除；未知对象必须阻止交付。
+- 模板母版、版式背景以及幻灯片中的全页、跨边或大面积早期图层默认视为
+  背景候选。必须建立 `backgroundPolicy`；确认的模板背景必须登记为
+  `protectedObjects/template_background`，禁止进入替换或删除操作。
+- 公司 Logo 默认使用透明底 RGBA PNG、`imageFitMode: "contain"`。与 Logo
+  高重叠的相邻对象必须逐项识别：模板底板保留，旧公司专属底板随旧 Logo
+  完整删除；不得把旧底板误当模板背景，也不得让透明 Logo 叠在旧底色上。
 - 共享语义图标（例如使命、愿景、价值观图标）必须登记为保护对象并复用，
   不因文字内容变化而替换。
 - 人物和产品图片必须先建立实体绑定，再与姓名、职务、产品名或型号一起
@@ -40,6 +51,9 @@ description: 基于已经完成1:1复原的可编辑PPTX模板生成当前项目
   重建已经可编辑的图标，或重新设计页面。
 - 用户资料不足时允许联网补全公开事实，但每项外部事实必须进入
   `sources` 和 `evidenceRegistry`，并由操作的 `evidenceIds` 引用。
+- 每张正文页必须建立逐页检索问题和证据包。默认至少包含 6 个有效内容项、
+  2 条不同证据陈述和 1 个页面检索问题；行业、市场、政策、竞争与公开案例
+  页至少绑定 1 个网络原文来源。封面、章节页和结束页豁免。
 - 搜索结果页和搜索摘要只用于发现来源，不能作为证据。优先使用公司官网、
   监管披露、政府、学术或标准机构的一手材料。
 - 不得发明客户、合同、订单、认证、财务、融资、估值、市场份额、专利、
@@ -60,8 +74,7 @@ description: 基于已经完成1:1复原的可编辑PPTX模板生成当前项目
 4. 用户明确要求替换的范围。
 5. PDF 转换任务生成的 `conversion-handoff.json`；原生 PPTX 模板除外。
 
-模板 PPTX 是后续结构与视觉的唯一基准。不要再次读取原 PDF 来重建页面，
-除非仅用于最终视觉对照。
+模板 PPTX 是后续结构与视觉的唯一基准；原 PDF 只用于最终视觉对照。
 
 ## 无头与跨平台准备
 
@@ -75,7 +88,7 @@ python3 "$SKILL_DIR/scripts/check_environment.py" --json
 LibreOffice 无头 PDF 导出、pdftoppm 渲染、Tesseract 语言包和字体检查。
 技能不在同一父目录时，设置 `PDF_TO_EDITABLE_PPT_SKILL_DIR`。
 Presentations 技能不在默认插件缓存时同时设置 `PRESENTATIONS_SKILL_DIR`。
-`readyForDefaultWorkflow` 不为 `true` 时不得进入严格全流程。
+原生 PPTX 要求 `readyForNativePptxWorkflow=true`；PDF 转换模板另要求 `readyForPdfConvertedWorkflow=true`，否则停止。
 
 ## 工作流程
 
@@ -92,11 +105,11 @@ Presentations 技能不在默认插件缓存时同时设置 `PRESENTATIONS_SKILL
 - 没有未复核的大面积内嵌图片或尚未元素化页面；
 - `readyForContentReplacement=true`。
 
-1.4 版清单设置：
+1.6 版清单设置：
 
 ```json
 {
-  "schemaVersion": "1.4",
+  "schemaVersion": "1.6",
   "sourceMode": "pdf-converted",
   "conversionHandoff": "/absolute/work/conversion-handoff.json"
 }
@@ -104,7 +117,11 @@ Presentations 技能不在默认插件缓存时同时设置 `PRESENTATIONS_SKILL
 
 原生可编辑 PPTX 设置 `sourceMode: "native-pptx"`，不需要转换证书。
 
-### 2. 建立对象地图
+### 2. 锁定项目身份并建立对象地图
+
+先用用户材料核实正式名称、地区和至少一个官方标识，创建
+`projectIdentity`。身份置信度未达到 `high` 时停止；不得搜索或写入同名
+公司的内容。
 
 使用本技能自带的 Python Open XML 模板分析脚本：
 
@@ -115,8 +132,32 @@ python3 "$SKILL_DIR/scripts/analyze_template_openxml.py" \
 ```
 
 分析器通过 Python `zipfile` 解包 PPTX，读取幻灯片 XML、版式关系、
-稳定对象 ID、文字、坐标、样式、媒体引用和版式关系；不得只从字体、颜色或
-截图推断模板。
+稳定对象 ID、文字、坐标、层级、背景候选、样式、媒体引用、表格值、图表
+缓存与嵌入工作簿签名；不得只从字体、颜色或截图推断模板。自动背景候选
+只是复核入口，不可直接批量标记为删除。
+
+生成背景候选复核草稿：
+
+```bash
+python3 "$SKILL_DIR/scripts/generate_background_policy_draft.py" \
+  --template-map "/absolute/build/template-map.json" \
+  --output "/absolute/build/background-policy-draft.json"
+```
+
+逐页查看渲染图，将每个 `unreviewed` 候选改为模板背景、项目内容视觉、
+Logo 底板或非背景，并填写具体理由。草稿不可直接作为正式清单。
+
+生成模板污染指纹草稿：
+
+```bash
+python3 "$SKILL_DIR/scripts/generate_template_fingerprint.py" \
+  --template-map "/absolute/build/template-map.json" \
+  --pptx "/absolute/editable-template.pptx" \
+  --output "/absolute/build/template-fingerprint-draft.json"
+```
+
+逐页复核草稿，将旧公司、产品、人物、客户、案例、数字和媒体写入
+`templateFingerprint`。草稿 `reviewed=false` 时不得继续。
 
 逐页检查渲染图与对象地图。按
 [references/object-classification.md](references/object-classification.md)
@@ -129,7 +170,7 @@ python3 "$SKILL_DIR/scripts/analyze_template_openxml.py" \
 3. `entityBindings`：人物/产品图片与姓名、职务、产品名、型号的对应关系。
 4. `slotAssignments`：每个内容区域的语义、必填性和最终处置。
 
-对修改页生成页面闭环草稿：
+对全部页面生成页面闭环草稿：
 
 ```bash
 python3 "$SKILL_DIR/scripts/generate_page_closure_draft.py" \
@@ -138,16 +179,21 @@ python3 "$SKILL_DIR/scripts/generate_page_closure_draft.py" \
   --output "/absolute/build/page-closure-draft.json"
 ```
 
-草稿会把未被操作覆盖的对象全部放入 `unknownShapeIds`。必须逐页检查渲染图，
+草稿会把未被操作覆盖的对象放入 `unknownShapeIds`。必须逐页检查渲染图，
 确认对象属于固定模板、投资机构品牌或有证据的上下文后，才能移入
-`allowedKeepShapeIds`；不得直接把全部未知对象批量标成保留。每个修改页的
-`unknownShapeIds` 必须为空。
+`allowedKeepShapeIds`，并在 `keepDecisions` 中写明分类和理由。不得直接
+批量标成保留。每一页的 `unknownShapeIds` 必须为空。
 
-### 3. 识别资料缺口并联网补全
+### 3. 建立唯一事实库并按页面证据密度联网补全
 
-先比较 `slotAssignments` 与用户材料，只对缺少内容的槽位建立检索任务。
-不得用网络内容覆盖用户已经提供且没有冲突的资料。联网补全时必须读取
+先比较 `slotAssignments`、用户材料和逐页结论，为每张正文页建立 1–3 个
+具体检索问题。既补足缺失槽位，也补充能解释该页结论的行业基准、政策、
+竞争、标准、公开案例和可验证项目事实；不得用网络内容覆盖用户已经提供且
+没有冲突的资料。不得用无关数据、同名公司资料或模板旧数据凑数。联网补全
+时必须读取
 [references/evidence-and-web-research.md](references/evidence-and-web-research.md)，
+并读取
+[references/page-research-and-density.md](references/page-research-and-density.md)，
 并执行以下顺序：
 
 1. 登记用户材料的文件、页码或对话位置；
@@ -162,27 +208,60 @@ python3 "$SKILL_DIR/scripts/generate_page_closure_draft.py" \
 
 每条网络来源记录标题、发布方、发布日期、访问日期和直接 URL。网页搜索
 结果、聚合摘要、无发布方截图和无法定位原文的二手转述均不得作为证据。
+将全部可写入内容汇总为唯一 `facts`；数值同时记录单位、币种、期间、口径
+和证据。页面操作只能通过 `factKeys` 引用事实，不得直接从原始材料或搜索
+结果临时生成数值。
 
-### 4. 建立替换白名单
+### 4. 建立逐页研究包与内容方案
+
+为每页创建 `slideBrief`，先声明页面目标、唯一结论、允许的
+`semanticKeys`、`factKeys` 和每个文字框的字符/行数预算，再建立形状操作。
+同一事实只在最相关页面完整出现一次；摘要只保留必要结论。
+
+将全部页面划分为 `substantive` 正文页与封面、章节、结束豁免页，并创建
+`contentDensityPolicy`。每张正文页同时登记：
+
+- `researchQueries`：1–3 个带主体、地区、期间或指标的具体检索问题；
+- `pageResearchSummary`：采用资料、补充范围和仍不可得信息；
+- `evidenceIds`：该页实际使用且陈述不同的证据；
+- `contentItemSemanticKeys`：至少 6 个真正写入页面的有效内容项；
+- `densityStatus: "ready"`；豁免页使用 `"exempt"`；
+- 行业、市场、政策、竞争和公开案例页设置
+  `externalContextRequired: true`。
+
+标题、页码、装饰短语、同义重复和把一句话拆成多个文本框不计入有效内容项。
+模板承载不足时先精简和重构，不得缩小字号或把文字框容量使用率推高到 85%
+以上。
+
+### 5. 建立替换白名单
 
 创建 `replacement-manifest.json`。格式和示例见
 [references/replacement-manifest.md](references/replacement-manifest.md)。
 
 硬性要求：
 
-- `defaultAction` 必须为 `KEEP`；
+- `defaultAction` 必须为 `FAIL_UNCLASSIFIED_CONTENT`；
 - `operations` 只列真正需要修改的对象；
 - 每项必须包含页码、角色、动作、原因和来源；对象替换使用 `shapeId`，
   完整槽位删除使用 `slotGroupId`；
 - 共享图标、背景、页眉、页脚和机构标识必须登记为保护对象，不得进入
   替换白名单；
+- `backgroundPolicy.preserveTemplateBackground=true` 且
+  `allowBackgroundDeletion=false`；自动识别的每个背景候选都必须在
+  `candidateDecisions` 中逐项分类。只有经过显式视觉复核并确认
+  `not_background` 的候选才允许删除。
 - 可选内容必须按完整槽位组声明，空内容只能用 `delete_slot_group` 删除
   整组，不能单独删除装饰或清空一个文字框后留下空图标；
 - `replace_image` 只允许替换公司专属素材，或记录用户对该对象的明确授权。
-- 1.4 版 `replace_image` 必须声明素材 `assetSha256`。公司 Logo 必须通过
+- `replace_image` 必须声明 `assetSha256`、`imageFitMode` 和
+  `aspectRatioValidated=true`。公司 Logo 必须通过
   `bindingId` 绑定 `entityType=company|institution` 和明确的
   `entityRole`；没有目标公司 Logo 时改用规范公司名称文字，不得沿用旧
   Logo 或虚构 Logo。
+- `company_logo` 必须设置 `logoTransparencyValidated=true` 与
+  `logoSlotPolicy`。透明底模式必须通过实际 PNG Alpha 检查；所有与 Logo
+  高重叠的相邻图层都要登记在 `companionObjects`。旧公司底板必须进入
+  明确的完整槽位删除操作，模板底板或遮罩必须登记为保护对象。
 - `person_photo` 和 `product_screenshot` 必须引用有效 `bindingId`；
 - 1.1 及以上文字操作必须设置 `styleLock: "exact"`。
 - 1.2 及以上所有操作必须设置 `semanticKey`，并与目标槽位分配完全一致。
@@ -191,12 +270,16 @@ python3 "$SKILL_DIR/scripts/generate_page_closure_draft.py" \
   声明的 `semanticKeys` 中。
 - 重大事实必须有一手来源，或至少两个独立可信发布方；估算值必须在页面
   可见文字或 `displayQualifier` 中标注“估算/测算”。
-- 1.4 版 `replace_text_group` 必须设置 `primaryShapeId`。完整新文字只写入
-  主对象，其他碎片对象清空；不得把整段文字复制到每一个 PDF 文字碎片。
-- 1.4 版必须声明 `contentPolicy`、`residualPolicy` 和 `pageClosures`。
+- `replace_text_group` 必须选择 `fragment-map`、`line-reflow` 或
+  `composite-box`；前两者逐形状提供 `fragmentTexts`，后者仅在主形状是
+  完整文本槽且容量足够时使用。所有文字操作必须提供 `capacityCheck`。
+- 新建 1.6 版任务必须声明 `contentDensityPolicy`、`contentPolicy`、
+  `residualPolicy`、`pageClosures`、`objectPolicy` 和 `visualQaPolicy`。
   `forbiddenTextTerms` 至少包含旧公司名、旧产品名、旧项目占位语及
   “未提供公司官网”“缺少原始文件”“现有材料没有BP”“未提供公司资料”；
   `forbiddenMediaSha256` 登记旧 Logo、旧人物和旧产品素材哈希；
+  `forbiddenNumericTokens` 登记旧财务、融资、估值、订单、人员和图表数字，
+  并设置 `scanEmbeddedData=true`；
   `requiredTextTerms` 至少包含目标项目名。
 
 每个被修改页面都必须先盘点可见内容槽，不得只列“准备替换”的对象。槽位
@@ -210,7 +293,7 @@ python3 "$SKILL_DIR/scripts/generate_page_closure_draft.py" \
 `expectedContentShapeIds` 中的每个对象都必须得到内容。不得留下截图红框所示
 的空白矩形、空标签、空卡片或只有图标没有文字的区域。
 
-### 5. 校验并生成应用计划
+### 6. 校验并生成应用计划
 
 先运行：
 
@@ -240,14 +323,17 @@ python3 "$SKILL_DIR/scripts/generate_apply_plan.py" \
 - `protected-object-report.json`：共享图标与固定对象锁定清单。
 - `conversion-handoff-audit.json`：PDF 去水印与元素化交接核验。
 - `research-evidence-report.json`：来源、证据、重大数据交叉验证和操作映射。
-- `page-closure-report.json`：修改页全部对象的保留、替换、删除和未知状态。
+- `page-closure-report.json`：全部页面对象的保留、替换、删除和未知状态。
 - `residual-policy-report.json`：禁止文字、禁止媒体、目标项目必要文字和
   专用缺口页规则。
+- `content-safety-report.json`：项目身份、污染指纹、事实库和逐页内容方案。
+- `content-density-report.json`：逐页检索问题、有效内容项、证据、网络来源
+  和文字容量使用率。
 
 校验失败时不得继续。人物/产品关系未解析、保护对象被修改或槽位组不完整
 时属于硬错误。
 
-### 6. 原位替换文字和图片
+### 7. 原位替换文字和图片
 
 使用本技能自带的 Python Open XML 原位应用脚本：
 
@@ -258,9 +344,6 @@ python3 "$SKILL_DIR/scripts/apply_template_plan_openxml.py" \
   --output "/absolute/build/content-replaced.pptx" \
   --render-dir "/absolute/build/final-renders"
 ```
-
-如果生成脚本提示普通应用计划为空，则跳过本步骤，直接从锁定模板执行原生
-图表或表格数据更新。
 
 该阶段只允许：
 
@@ -280,7 +363,7 @@ python3 "$SKILL_DIR/scripts/apply_template_plan_openxml.py" \
 不得在此阶段修改共享语义图标、装饰对象或页面结构。上述责任声明文本框是
 唯一受控例外，必须同时进入应用计划、保真报告和最终内容覆盖报告。
 
-### 7. 删除没有内容的完整可选槽位
+### 8. 删除没有内容的完整可选槽位
 
 仅当 `structural-operations.json` 非空时执行，并使用普通替换后的文件作为
 输入：
@@ -296,15 +379,23 @@ python3 "$SKILL_DIR/scripts/apply_structural_plan.py" \
 该步骤只能删除 `optional=true` 的完整槽位组，并同时删除其内容对象和
 专属装饰对象。不得压缩剩余网格、移动相邻卡片或删除共享图标。
 
-### 8. 更新原生图表和表格
+### 9. 更新原生图表和表格
 
 仅当 `native-operations.json` 非空时执行。使用 Python `zipfile` + Open XML，
 按稳定对象 ID 修改现有图表系列或表格单元格。
 
-本技能当前没有可安全通用化的原生图表/表格批量执行器。终端任务必须为这些
-操作生成逐项执行报告并重新检查目标对象；如果没有对应执行代码或无法按稳定
-对象 ID 定位，必须停止并报告限制，不得把非空 `native-operations.json`
-当作已经应用。
+尺寸不变的原生表格可使用：
+
+```bash
+python3 "$SKILL_DIR/scripts/apply_native_table_plan_openxml.py" \
+  --input "/absolute/current-stage.pptx" --input-sha256 "当前输入文件的64位sha256" \
+  --plan "/absolute/build/native-operations.json" --output "/absolute/build/table-replaced.pptx" \
+  --report "/absolute/build/native-table-apply-report.json"
+```
+
+该执行器发现图表操作、行列数变化或对象不匹配时必须停止。原生图表仍没有
+可安全通用化的执行器；`native-operations.json` 含图表时必须报告限制，
+不得把非空计划当作已经应用。
 
 - 保留图表类型、坐标轴、配色、字体和位置；
 - 保留表格列宽、行高、边框、填充和字体；
@@ -314,7 +405,7 @@ python3 "$SKILL_DIR/scripts/apply_structural_plan.py" \
 - 饼图、扇形图和其他数据图形必须有来源明确的数据映射；不得保留无标签
   扇区、示例数据、悬空说明或“能力组合示意”与实际数据混用。
 
-### 9. 写入来源备注
+### 10. 写入来源备注
 
 将外部来源和重要用户材料写入对应页面的演讲者备注，使用 `[Sources]`
 区块，至少包含来源标题、发布方、直接 URL（用户材料写文件与页码）及访问
@@ -323,7 +414,7 @@ python3 "$SKILL_DIR/scripts/apply_structural_plan.py" \
 同时保留 `research-evidence-report.json` 作为机器可读审计记录。备注与
 证据登记表中的来源必须一致，不得在交付阶段临时添加未登记来源。
 
-### 10. 处理文本适配
+### 11. 处理文本适配
 
 文字放不下时依次：
 
@@ -334,7 +425,7 @@ python3 "$SKILL_DIR/scripts/apply_structural_plan.py" \
 
 严格模式不得移动文本框、改变固定元素、自动扩页或重新排版。
 
-### 11. 最终验收
+### 12. 最终验收
 
 在执行完整槽位删除前，使用同一份 `content-plan.json` 验证普通替换阶段：
 
@@ -359,9 +450,16 @@ python3 "$SKILL_DIR/scripts/validate_template_result_openxml.py" \
 8. 在 Microsoft PowerPoint 中打开并导出验证 PDF；不可用时说明替代验证。
 9. 抽查所有联网补全内容与 `research-evidence-report.json`、页面来源备注
    一致；重大数据满足一手来源或双来源要求。
-10. 检查估算、冲突和无法证实内容是否使用了可见限定词，且没有把推断写成
+10. 检查 `content-density-report.json`，确认全部正文页达到有效内容、
+    证据、逐页检索和外部来源门槛，且没有用同义重复或无关数据凑数。
+11. 检查估算、冲突和无法证实内容是否使用了可见限定词，且没有把推断写成
     已验证事实。
-11. 核对修改页 `pageClosures`，确保全部模板对象均已复核且未知对象为零。
+12. 核对全部页面 `pageClosures`，确保全部模板对象均已复核且未知对象为零。
+13. 检查 `background-lock-report.json`，确认模板背景候选均为保留且未进入
+    删除操作；对比模板与成品逐页渲染，确认非授权区域的底色、纹理、边栏、
+    页眉页脚和品牌框架未变化。
+14. 检查 `logo-transparency-report.json` 和每个 Logo 的全尺寸裁剪图，确认
+    PNG 透明边界通过、旧公司底板已处理、模板底板未误删，且没有矩形色块。
 
 必须再次渲染最终 PPTX，并使用 PDF 转换技能的水印验收脚本：
 
@@ -390,9 +488,18 @@ python3 "$SKILL_DIR/scripts/validate_residual_content.py" \
   --output "/absolute/build/final-residual-qa-report.json"
 ```
 
-该步骤同时扫描可编辑文字、PPTX 包内及对象引用的媒体哈希和逐页渲染 OCR。
-发现旧项目名称、旧 Logo/人物/产品媒体、后台缺口提示、非专用页上的
-“待核实/未披露”文字，或目标项目名缺失时必须失败。
+该步骤同时扫描可编辑文字、演讲者备注、旧数字、图表缓存、嵌入工作簿、
+媒体哈希和逐页渲染 OCR。任何旧项目内容仍存在时必须失败。
+
+逐页审阅渲染图后运行：
+
+```bash
+python3 "$SKILL_DIR/scripts/validate_visual_qa_report.py" \
+  --template-map "/absolute/build/final-template-map.json" --pptx "/absolute/final.pptx" \
+  --render-dir "/absolute/build/final-renders" \
+  --review "/absolute/build/visual-review.json" \
+  --output "/absolute/build/final-visual-qa-report.json"
+```
 
 再运行：
 
@@ -403,15 +510,15 @@ python3 "$SKILL_DIR/scripts/validate_final_content.py" \
   --result-map "/absolute/build/final-template-map.json" \
   --watermark-qa-report "/absolute/build/final-watermark-qa.json" \
   --residual-qa-report "/absolute/build/final-residual-qa-report.json" \
+  --visual-qa-report "/absolute/build/final-visual-qa-report.json" \
   --output "/absolute/build/final-content-coverage-report.json"
 ```
 
 任一必填槽位为空、可选槽位没有完整删除、共享槽位被修改、水印复检失败或
-语义键错配、页面闭环未完成、最终残留扫描失败，都不得交付。
+语义键错配、页面闭环未完成、模板背景丢失、Logo 出现未授权底色、最终残留
+扫描失败，都不得交付。
 
-服务器处理包含商业秘密的模板时使用非 root 账号、`umask 077`、独立工作
-目录和 CPU/内存/磁盘/超时限制。任务目录包含图片、OCR、证据登记和来源备注，
-不得留在公共临时目录；完成后按数据保留策略清理。
+商业秘密任务使用受限账号、`umask 077` 和独立目录，并按保留策略清理。
 
 ## 成功标准
 
@@ -419,21 +526,30 @@ python3 "$SKILL_DIR/scripts/validate_final_content.py" \
 - PDF 转换交接证书和最终水印复检均通过；
 - 所有未授权对象的类型、位置、尺寸、内容和媒体保持不变；
 - 共享语义图标继续保留，不因内容替换而被重建；
+- 母版、版式背景及确认的幻灯片背景对象保持原样，背景候选没有被通用旧内容
+  清理逻辑删除；
 - 资料不足的可选槽位按完整组删除，没有空月桂、空边框或孤立图标；
 - 字体、字号、文字框坐标、尺寸、颜色和层级与模板保持一致；仅当末页缺少
   责任声明正文槽位时，允许新增一个经过白名单授权的可编辑责任声明文本框；
 - 白名单中文替换目标使用 `zh-CN` 运行语言标记，模板受保护对象的原始语言
   元数据保持不变；
-- 文字和明确数据与用户资料对应；
+- 项目身份已锁定；全部文字和数据只引用唯一事实库，数值的单位、期间与口径
+  在各页一致；
 - 所有联网补全内容都有可访问的原始来源、访问日期和操作级证据绑定；
+- 每张正文页都有独立检索问题、逐页研究摘要、至少 6 个有效内容项和至少
+  2 条不同证据；外部环境页至少有 1 个网络原文来源；
 - 重大数据有一手来源或至少两个独立可信发布方，计算值有公式，估算值有
   可见限定；
 - 人物照片与姓名、职务一致，产品图片与产品名、型号一致；
 - 公司专属素材只在已绑定的原槽位中替换；
+- 公司 Logo 使用透明底素材且无旧 Logo 底板残留；保留底板时有明确的模板
+  视觉理由；
 - 不包含旧项目专属文字、Logo、人物、产品、案例和数据，也不包含编造内容；
 - 非必要字段缺失时不显示后台占位语；重大资料缺口只出现在专用缺口页；
-- 修改页的全部对象均已完成页面闭环复核，`unknownShapeIds` 为零；
-- 最终可编辑文字、媒体哈希和逐页渲染 OCR 残留扫描全部通过；
+- 全部页面对象均已完成页面闭环复核，`unknownShapeIds` 为零；
+- 最终文字、旧数字、图表/工作簿数据、媒体哈希和渲染 OCR 残留扫描全部通过；
+- 每页容量预算和逐页视觉 QA 通过，单框容量使用率不超过 85%，无溢出、
+  重叠、错误裁切、空槽或重复套话；
 - 所有必填内容槽均非空，所有可选空槽均完整删除；
 - PPTX 可正常打开、编辑和导出。
 

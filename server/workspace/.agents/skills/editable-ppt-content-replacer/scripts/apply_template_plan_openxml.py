@@ -451,11 +451,31 @@ def main() -> None:
             if action == "replace_text_group" and targets
             else int(targets[0])
         )
-        if action == "replace_text_group" and primary_shape_id not in {
+        group_mode = operation.get("groupMode", "composite-box")
+        fragment_texts = {
+            int(item["shapeId"]): str(item["text"])
+            for item in operation.get("fragmentTexts", [])
+            if isinstance(item, dict)
+            and isinstance(item.get("shapeId"), int)
+            and isinstance(item.get("text"), str)
+        }
+        if (
+            action == "replace_text_group"
+            and group_mode == "composite-box"
+            and primary_shape_id not in {
             int(value) for value in targets
-        }:
+            }
+        ):
             raise ValueError(
                 f"第 {index} 项 primaryShapeId 不属于 shapeIds"
+            )
+        if (
+            action == "replace_text_group"
+            and group_mode in {"fragment-map", "line-reflow"}
+            and set(fragment_texts) != {int(value) for value in targets}
+        ):
+            raise ValueError(
+                f"第 {index} 项 fragmentTexts 未逐一覆盖 shapeIds"
             )
         for raw_shape_id in targets:
             shape_id = int(raw_shape_id)
@@ -470,11 +490,17 @@ def main() -> None:
                     f"第 {index} 项目标不是可编辑文字对象："
                     f"第 {page} 页 shapeId={shape_id}"
                 )
-            replacement = (
-                str(operation.get("text", ""))
-                if shape_id == primary_shape_id
-                else ""
-            )
+            if (
+                action == "replace_text_group"
+                and group_mode in {"fragment-map", "line-reflow"}
+            ):
+                replacement = fragment_texts[shape_id]
+            else:
+                replacement = (
+                    str(operation.get("text", ""))
+                    if shape_id == primary_shape_id
+                    else ""
+                )
             replace_text(body, replacement)
             if re.search(r"[\u3400-\u9fff]", replacement):
                 matching_runs = [
@@ -505,7 +531,10 @@ def main() -> None:
                     "shapeId": shape_id,
                     "action": action,
                     "status": (
-                        "cleared-secondary-text-fragment"
+                        "applied-fragment-text"
+                        if action == "replace_text_group"
+                        and group_mode in {"fragment-map", "line-reflow"}
+                        else "cleared-secondary-text-fragment"
                         if action == "replace_text_group"
                         and shape_id != primary_shape_id
                         else "applied-in-place-openxml-cjk-language-normalized"

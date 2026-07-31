@@ -23,21 +23,30 @@ def compact_operation(operation: dict) -> dict:
         "fitPolicy": "preserve",
         "sourceNote": operation["sourceNote"],
         "evidenceIds": operation.get("evidenceIds", []),
+        "factKeys": operation.get("factKeys", []),
     }
     if operation.get("displayQualifier"):
         result["displayQualifier"] = operation["displayQualifier"]
     if action == "replace_text_group":
         shape_ids = [int(value) for value in operation["shapeIds"]]
         result["shapeIds"] = shape_ids
-        result["primaryShapeId"] = int(
-            operation.get("primaryShapeId", shape_ids[0])
-        )
-        result["text"] = operation["text"]
+        result["groupMode"] = operation.get("groupMode", "composite-box")
+        if result["groupMode"] in {"fragment-map", "line-reflow"}:
+            result["fragmentTexts"] = operation.get("fragmentTexts", [])
+        else:
+            result["primaryShapeId"] = int(
+                operation.get("primaryShapeId", shape_ids[0])
+            )
+            result["text"] = operation["text"]
+        if operation.get("capacityCheck"):
+            result["capacityCheck"] = operation["capacityCheck"]
     else:
         shape_id = int(operation["shapeId"])
         result["shapeId"] = shape_id
         if action == "replace_text":
             result["text"] = operation["text"]
+            if operation.get("capacityCheck"):
+                result["capacityCheck"] = operation["capacityCheck"]
         elif action == "add_disclaimer_textbox":
             result.update(
                 {
@@ -53,6 +62,7 @@ def compact_operation(operation: dict) -> dict:
             asset = Path(operation["asset"]).expanduser().resolve()
             result["asset"] = str(asset)
             result["assetSha256"] = hashlib.sha256(asset.read_bytes()).hexdigest()
+            result["imageFitMode"] = operation.get("imageFitMode", "preserve-crop")
     return result
 
 

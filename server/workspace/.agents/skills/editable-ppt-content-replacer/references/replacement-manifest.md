@@ -2,30 +2,97 @@
 
 ## 顶层结构
 
-新任务使用 1.4 版。旧版清单仍可校验，但 1.4 版才同时具备操作级证据、
-页面闭环、缺失内容处置和最终旧项目文字/媒体/OCR 残留门禁。
+新任务使用 1.6 版。旧版清单仍可校验；1.6 版在 1.5 的项目身份锁、模板
+污染指纹、唯一事实库、逐页内容方案、数字与嵌入数据残留门禁和排版容量检查
+基础上，增加背景锁和 Logo 透明底/底板门禁。
+字段语义与工作顺序见 [content-safety-model.md](content-safety-model.md)。
 
 ```json
 {
-  "schemaVersion": "1.4",
+  "schemaVersion": "1.6",
   "sourceMode": "pdf-converted",
   "conversionHandoff": "/absolute/work/conversion-handoff.json",
   "templatePptx": "/absolute/editable-template.pptx",
   "templateSha256": "64位sha256",
   "projectName": "目标公司或项目",
-  "defaultAction": "KEEP",
+  "defaultAction": "FAIL_UNCLASSIFIED_CONTENT",
+  "projectIdentity": {
+    "legalName": "目标公司正式名称",
+    "aliases": ["目标公司简称"],
+    "region": "中国",
+    "officialDomains": [],
+    "identifiers": ["用户材料中的统一登记标识"],
+    "sourceIds": ["src-user-company-profile"],
+    "identityEvidenceIds": ["ev-company-name"],
+    "confidence": "high",
+    "identityStatus": "verified"
+  },
+  "templateFingerprint": {
+    "reviewed": true,
+    "oldProjectTerms": ["旧项目公司名"],
+    "oldProjectNumericTokens": ["600万元", "35%"],
+    "oldProjectMediaSha256": [],
+    "oldEntityNames": ["旧项目公司名"],
+    "numericDecisions": [
+      {"token": "600万元", "disposition": "old_project", "reason": "旧项目订单金额"},
+      {"token": "35%", "disposition": "old_project", "reason": "旧项目增长率"}
+    ],
+    "mediaDecisions": []
+  },
   "researchPolicy": {
     "enabled": true,
     "asOfDate": "2026-07-29",
     "minimumIndependentSources": 2,
     "unresolvedPolicy": "mark-not-disclosed-or-delete-optional"
   },
+  "contentDensityPolicy": {
+    "enabled": true,
+    "substantiveSlideNumbers": [2, 4, 5],
+    "excludedSlideNumbers": [1, 3, 6],
+    "externalContextSlideNumbers": [4, 5],
+    "minimumContentItemsPerSubstantiveSlide": 6,
+    "minimumEvidenceItemsPerSubstantiveSlide": 2,
+    "minimumResearchQueriesPerSubstantiveSlide": 1,
+    "minimumWebSourcesPerExternalContextSlide": 1,
+    "maxTextCapacityUtilization": 0.85,
+    "thinSlideAction": "research-or-restructure",
+    "requireClaimDiversity": true
+  },
   "sources": [],
   "evidenceRegistry": [],
+  "facts": [],
   "protectedObjects": [],
   "slotGroups": [],
   "entityBindings": [],
   "slotAssignments": [],
+  "slideBriefs": [
+    {
+      "slide": 1,
+      "slideType": "cover",
+      "objective": "建立报告与项目身份",
+      "conclusion": "目标项目投资建议书",
+      "researchQueries": [],
+      "evidenceIds": ["ev-company-name"],
+      "contentItemSemanticKeys": [],
+      "densityStatus": "exempt",
+      "externalContextRequired": false,
+      "pageResearchSummary": "封面页，仅使用已核实项目身份",
+      "allowedSemanticKeys": ["cover.project_name"],
+      "allowedFactKeys": ["fact-company-name"],
+      "shapeBudgets": []
+    }
+  ],
+  "objectPolicy": {
+    "fixedVisualAction": "keep",
+    "projectSpecificAction": "replace-or-delete",
+    "unknownObjectAction": "fail",
+    "fullDeckClosureRequired": true
+  },
+  "backgroundPolicy": {
+    "preserveTemplateBackground": true,
+    "allowBackgroundDeletion": false,
+    "candidateDecisions": []
+  },
   "contentPolicy": {
     "optionalMissingAction": "delete-slot-group",
     "requiredMissingAction": "dedicated-gap-slide-only",
@@ -41,17 +108,30 @@
       "未提供公司资料"
     ],
     "forbiddenMediaSha256": [],
+    "forbiddenNumericTokens": ["600万元", "35%"],
+    "scanEmbeddedData": true,
     "requiredTextTerms": ["目标公司或项目"],
     "gapOnlyTextTerms": ["未披露", "待核实", "公开信息未检索到", "口径不一致"],
     "gapSlideNumbers": [27],
     "ocrRequired": true
+  },
+  "visualQaPolicy": {
+    "renderAllSlides": true,
+    "checkOverflow": true,
+    "checkOverlap": true,
+    "checkImageCrop": true,
+    "checkEmptySlots": true,
+    "checkRepeatedBoilerplate": true,
+    "checkTemplateBackgroundFidelity": true,
+    "checkLogoBackgroundArtifacts": true
   },
   "pageClosures": [],
   "operations": []
 }
 ```
 
-未出现在 `operations` 中的对象全部保持不变。
+未出现在 `operations` 中的对象只有在全页 `keepDecisions` 中逐项说明后才能
+保持不变；未知对象必须失败。
 
 PDF 转换模板必须使用 `sourceMode: "pdf-converted"` 并提供
 `conversionHandoff`。原生 PPTX 使用 `sourceMode: "native-pptx"`。
@@ -112,6 +192,14 @@ PDF 转换模板必须使用 `sourceMode: "pdf-converted"` 并提供
 交叉验证、估算和冲突处理见
 [evidence-and-web-research.md](evidence-and-web-research.md)。
 
+## 逐页研究与密度
+
+新建 1.6 版任务必须提供 `contentDensityPolicy`。正文页默认至少登记 6 个
+有效内容项、2 条不同证据陈述和 1 个逐页检索问题；行业、市场、政策、
+竞争和公开案例页至少绑定 1 个网络原文来源。封面、章节页与结束页设置
+`densityStatus: "exempt"`。详细规则见
+[page-research-and-density.md](page-research-and-density.md)。
+
 ## 槽位分配与语义键
 
 每个被修改页面的内容区域都必须进入 `slotAssignments`。例如：
@@ -148,9 +236,9 @@ PDF 转换模板必须使用 `sourceMode: "pdf-converted"` 并提供
 
 最终验收必须同时扫描可编辑文字、PPTX 媒体哈希和逐页渲染 OCR。
 
-## 修改页闭环
+## 全页闭环
 
-每个修改页都要完整列出模板对象：
+1.6 版每一页都要完整列出模板对象：
 
 ```json
 {
@@ -158,14 +246,27 @@ PDF 转换模板必须使用 `sourceMode: "pdf-converted"` 并提供
   "reviewedShapeIds": [2, 3, 4, 5, 6],
   "allowedKeepShapeIds": [2, 3],
   "targetShapeIds": [4, 5, 6],
-  "unknownShapeIds": []
+  "unknownShapeIds": [],
+  "keepDecisions": [
+    {
+      "shapeId": 2,
+      "classification": "fixed_visual",
+      "reason": "页面背景，不表达项目事实"
+    },
+    {
+      "shapeId": 3,
+      "classification": "template_brand",
+      "reason": "投资机构固定品牌"
+    }
+  ]
 }
 ```
 
 `reviewedShapeIds` 必须与对象地图中的整页对象完全一致；
 `targetShapeIds` 必须与该页实际操作目标完全一致；其余对象只有在逐页确认
 属于固定模板、投资机构品牌或有证据的上下文后，才可进入
-`allowedKeepShapeIds`。`unknownShapeIds` 非空时必须失败。
+`allowedKeepShapeIds`，并逐项写入 `keepDecisions`。1.6 版必须覆盖全部
+页面；`unknownShapeIds` 非空时必须失败。
 
 ## 保护共享图标
 
@@ -191,12 +292,14 @@ PDF 转换模板必须使用 `sourceMode: "pdf-converted"` 并提供
   "shapeId": 3,
   "semanticKey": "cover.project_name",
   "evidenceIds": ["ev-company-name"],
+  "factKeys": ["fact-company-name"],
   "role": "封面项目名称",
   "action": "replace_text",
   "text": "目标公司投资建议书",
   "reason": "替换模板项目名称",
   "sourceNote": "用户提供的公司名称",
   "fitPolicy": "preserve",
+  "capacityCheck": {"maxChars": 18, "maxLines": 1, "reviewed": true},
   "styleLock": "exact"
 }
 ```
@@ -216,21 +319,29 @@ PDF 元素化后一句话被拆成多个文字对象时，使用：
 {
   "slide": 4,
   "shapeIds": [18, 19, 20],
-  "primaryShapeId": 18,
+  "groupMode": "fragment-map",
+  "fragmentTexts": [
+    {"shapeId": 18, "text": "目标公司"},
+    {"shapeId": 19, "text": "围绕核心产品"},
+    {"shapeId": 20, "text": "形成可验证的商业闭环。"}
+  ],
   "semanticKey": "company.summary",
   "evidenceIds": ["ev-company-summary"],
+  "factKeys": ["fact-company-summary"],
   "role": "公司简介碎片组",
   "action": "replace_text_group",
-  "text": "目标公司的完整简介。",
   "styleLock": "exact",
   "reason": "合并替换 PDF 文字碎片",
   "sourceNote": "公司正式介绍材料",
-  "fitPolicy": "preserve"
+  "fitPolicy": "preserve",
+  "capacityCheck": {"maxChars": 18, "maxLines": 1, "reviewed": true}
 }
 ```
 
-执行器只把完整文字写入 `primaryShapeId`，并清空其余碎片对象。不得将完整
-文字复制到组内每一个对象。
+优先逐形状明确写入。只有确认存在完整大文本槽时才能改用
+`groupMode: "composite-box"`、设置 `primaryShapeId` 并清空其余碎片；主框必须在
+坐标上完整覆盖碎片组包围框，不能只凭宽高相近通过；
+不得默认把完整段落塞入第一个碎片对象。
 
 清空普通旧文字时，必须显式设置：
 
@@ -240,6 +351,7 @@ PDF 元素化后一句话被拆成多个文字对象时，使用：
   "shapeId": 18,
   "semanticKey": "project.legacy_note",
   "evidenceIds": ["ev-legacy-note-unavailable"],
+  "factKeys": ["fact-legacy-note-unavailable"],
   "role": "旧项目专属说明",
   "action": "replace_text",
   "text": "",
@@ -247,7 +359,8 @@ PDF 元素化后一句话被拆成多个文字对象时，使用：
   "styleLock": "exact",
   "reason": "目标资料没有对应内容，清除旧项目专属信息",
   "sourceNote": "用户材料未披露",
-  "fitPolicy": "preserve"
+  "fitPolicy": "preserve",
+  "capacityCheck": {"maxChars": 0, "maxLines": 1, "reviewed": true}
 }
 ```
 
@@ -311,6 +424,9 @@ PDF 元素化后一句话被拆成多个文字对象时，使用：
   "slotGroupId": "award-slot-07",
   "role": "第七项荣誉完整槽位",
   "action": "delete_slot_group",
+  "semanticKey": "company.award.07",
+  "evidenceIds": ["ev-award-07-unavailable"],
+  "factKeys": ["fact-award-07-unavailable"],
   "missingContent": true,
   "reason": "目标公司只提供六项荣誉，删除多余空槽位",
   "sourceNote": "用户荣誉清单",
@@ -360,6 +476,7 @@ PDF 元素化后一句话被拆成多个文字对象时，使用：
   "bindingId": "team-card-zhang-san",
   "semanticKey": "team.zhang-san",
   "evidenceIds": ["ev-team-zhang-san"],
+  "factKeys": ["fact-team-zhang-san-photo"],
   "role": "张三人物照片",
   "action": "replace_image",
   "asset": "/absolute/team/zhang-san.jpg",
@@ -368,7 +485,10 @@ PDF 元素化后一句话被拆成多个文字对象时，使用：
   "companySpecific": true,
   "reason": "替换旧项目管理层照片",
   "sourceNote": "管理层提供的团队资料",
-  "fitPolicy": "preserve"
+  "fitPolicy": "preserve",
+  "imageFitMode": "cover",
+  "aspectRatioValidated": true,
+  "fitPreparedAsset": true
 }
 ```
 
@@ -378,13 +498,15 @@ PDF 元素化后一句话被拆成多个文字对象时，使用：
   "shapeId": 43,
   "semanticKey": "team.zhang-san",
   "evidenceIds": ["ev-team-zhang-san"],
+  "factKeys": ["fact-team-zhang-san-name"],
   "role": "人物姓名",
   "action": "replace_text",
   "text": "张三",
   "styleLock": "exact",
   "reason": "与人物照片绑定",
   "sourceNote": "管理层提供的团队资料",
-  "fitPolicy": "preserve"
+  "fitPolicy": "preserve",
+  "capacityCheck": {"maxChars": 8, "maxLines": 1, "reviewed": true}
 }
 ```
 
@@ -394,13 +516,15 @@ PDF 元素化后一句话被拆成多个文字对象时，使用：
   "shapeId": 44,
   "semanticKey": "team.zhang-san",
   "evidenceIds": ["ev-team-zhang-san-title"],
+  "factKeys": ["fact-team-zhang-san-title"],
   "role": "人物职务",
   "action": "replace_text",
   "text": "创始人兼首席执行官",
   "styleLock": "exact",
   "reason": "与人物照片绑定",
   "sourceNote": "管理层提供的团队资料",
-  "fitPolicy": "preserve"
+  "fitPolicy": "preserve",
+  "capacityCheck": {"maxChars": 16, "maxLines": 1, "reviewed": true}
 }
 ```
 
@@ -427,6 +551,31 @@ Logo 应登记为 `protectedObjects/template_brand`，不要创建替换操作�
 如果目标公司没有提供 Logo，且官方来源也无法取得，不得沿用旧 Logo 或生成
 虚构 Logo；删除可选 Logo 槽位，或在原文字槽写入规范公司名称。
 
+1.6 版公司 Logo 默认透明底，必须额外声明：
+
+```json
+{
+  "imageFitMode": "contain",
+  "logoTransparencyValidated": true,
+  "logoSlotPolicy": {
+    "backgroundMode": "transparent",
+    "companionObjects": [
+      {
+        "shapeId": 17,
+        "role": "old_company_backplate",
+        "disposition": "delete",
+        "reason": "与旧 Logo 同尺寸且仅承载旧公司品牌底色"
+      }
+    ]
+  }
+}
+```
+
+校验器会实际读取 PNG Alpha，并寻找与 Logo 高重叠、层级相邻的图片或矢量
+对象。检测出的相邻对象必须全部出现在 `companionObjects`。模板底板使用
+`template_backplate + preserve` 并登记为保护对象；旧公司底板使用
+`old_company_backplate + delete`，并进入明确的完整槽位删除操作。
+
 ## 其他图片替换
 
 ```json
@@ -435,6 +584,7 @@ Logo 应登记为 `protectedObjects/template_brand`，不要创建替换操作�
   "shapeId": 42,
   "semanticKey": "company.visual.primary",
   "evidenceIds": ["ev-company-visual-primary"],
+  "factKeys": ["fact-company-visual-primary"],
   "role": "旧公司产品以外的公司专属视觉",
   "action": "replace_image",
   "asset": "/absolute/target-visual.png",
@@ -443,7 +593,10 @@ Logo 应登记为 `protectedObjects/template_brand`，不要创建替换操作�
   "companySpecific": true,
   "reason": "替换旧公司专属素材",
   "sourceNote": "目标公司正式材料",
-  "fitPolicy": "preserve"
+  "fitPolicy": "preserve",
+  "imageFitMode": "cover",
+  "aspectRatioValidated": true,
+  "fitPreparedAsset": true
 }
 ```
 
@@ -470,11 +623,24 @@ Logo 应登记为 `protectedObjects/template_brand`，不要创建替换操作�
   "shapeId": 8,
   "semanticKey": "experiment.result_chart",
   "evidenceIds": ["ev-experiment-result"],
+  "factKeys": [
+    "fact-cat-task", "fact-cat-positive", "fact-cat-pending",
+    "fact-series-task", "fact-task-count", "fact-positive-count", "fact-pending-count"
+  ],
   "role": "实验结果图表",
   "action": "replace_chart_data",
   "categories": ["任务组合", "正向信号", "待突破"],
   "series": [
     {"name": "任务数", "values": [40, 28, 12]}
+  ],
+  "dataBindings": [
+    {"path": "categories[0]", "factKey": "fact-cat-task"},
+    {"path": "categories[1]", "factKey": "fact-cat-positive"},
+    {"path": "categories[2]", "factKey": "fact-cat-pending"},
+    {"path": "series[0].name", "factKey": "fact-series-task"},
+    {"path": "series[0].values[0]", "factKey": "fact-task-count"},
+    {"path": "series[0].values[1]", "factKey": "fact-positive-count"},
+    {"path": "series[0].values[2]", "factKey": "fact-pending-count"}
   ],
   "reason": "更新为目标项目实验数据",
   "sourceNote": "内部材料第12页",
@@ -490,11 +656,23 @@ Logo 应登记为 `protectedObjects/template_brand`，不要创建替换操作�
   "shapeId": 10,
   "semanticKey": "commercial.pipeline_table",
   "evidenceIds": ["ev-commercial-pipeline"],
+  "factKeys": [
+    "fact-table-project-label", "fact-table-amount-label", "fact-table-stage-label",
+    "fact-customer-a", "fact-customer-a-amount", "fact-customer-a-stage"
+  ],
   "role": "商业线索表",
   "action": "replace_table_data",
   "values": [
     ["项目", "金额", "阶段"],
     ["客户A", "600万元", "在谈"]
+  ],
+  "dataBindings": [
+    {"path": "values[0][0]", "factKey": "fact-table-project-label"},
+    {"path": "values[0][1]", "factKey": "fact-table-amount-label"},
+    {"path": "values[0][2]", "factKey": "fact-table-stage-label"},
+    {"path": "values[1][0]", "factKey": "fact-customer-a"},
+    {"path": "values[1][1]", "factKey": "fact-customer-a-amount"},
+    {"path": "values[1][2]", "factKey": "fact-customer-a-stage"}
   ],
   "reason": "更新目标项目商业线索",
   "sourceNote": "管理层材料，需尽调核验",
@@ -503,8 +681,12 @@ Logo 应登记为 `protectedObjects/template_brand`，不要创建替换操作�
 ```
 
 图表和表格操作不会进入普通 `content-plan.json`，而会写入
-`native-operations.json`，后续使用 Python `zipfile` + Open XML 对
-原生对象定向修改。
+`native-operations.json`。尺寸不变的表格使用
+`apply_native_table_plan_openxml.py`；图表只有在能够同时安全更新图表缓存
+和嵌入工作簿时才能执行，否则停止并报告限制。
+`dataBindings` 必须逐一覆盖全部标量路径并与事实值精确相等；图表底层值与
+展示值不同时，在事实中同时记录 `rawValue`（如 `0.35`）和
+`renderedValue`（如 `35%`），绑定优先校验 `rawValue`。
 
 ## 禁止行为
 

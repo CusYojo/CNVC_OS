@@ -11,7 +11,7 @@ from validate_replacement_manifest import load_json, shape_ids_for
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="为修改页生成页面闭环复核草稿；未复核对象默认进入 unknownShapeIds。"
+        description="生成页面闭环复核草稿；1.5/1.6 版覆盖全部页面，未复核对象进入 unknownShapeIds。"
     )
     parser.add_argument("--manifest", required=True, type=Path)
     parser.add_argument("--template-map", required=True, type=Path)
@@ -45,9 +45,14 @@ def main() -> None:
         )
 
     closures: list[dict[str, Any]] = []
-    for page in sorted(targets_by_slide):
+    pages = (
+        sorted(objects_by_slide)
+        if str(manifest.get("schemaVersion", "")) in {"1.5", "1.6"}
+        else sorted(targets_by_slide)
+    )
+    for page in pages:
         reviewed = objects_by_slide.get(page, set())
-        targets = targets_by_slide[page]
+        targets = targets_by_slide.get(page, set())
         closures.append(
             {
                 "slide": page,
@@ -55,6 +60,7 @@ def main() -> None:
                 "allowedKeepShapeIds": [],
                 "targetShapeIds": sorted(targets),
                 "unknownShapeIds": sorted(reviewed - targets),
+                "keepDecisions": [],
             }
         )
 

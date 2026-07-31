@@ -96,12 +96,16 @@ def build_report(
             "scripts/validate_replacement_manifest.py",
             "scripts/generate_apply_plan.py",
             "scripts/analyze_template_openxml.py",
+            "scripts/generate_background_policy_draft.py",
             "scripts/apply_template_plan_openxml.py",
             "scripts/validate_template_result_openxml.py",
             "scripts/apply_structural_plan.py",
+            "scripts/apply_native_table_plan_openxml.py",
             "scripts/validate_final_content.py",
             "scripts/generate_page_closure_draft.py",
+            "scripts/generate_template_fingerprint.py",
             "scripts/validate_residual_content.py",
+            "scripts/validate_visual_qa_report.py",
         ),
     )
     pdf = required_files(
@@ -129,6 +133,14 @@ def build_report(
     )
     scripts_ready = not missing
     pdf_ready = bool(pdf_environment.get("ready_for_default_workflow"))
+    native_render_ready = bool(
+        pdf_environment.get("libreoffice_smoke", {}).get("passed")
+    )
+    native_visual_ready = bool(
+        pdf_environment.get("powerpoint_native_validation_available")
+        or pdf_environment.get("strict_watermark_qa_ready")
+    )
+    native_ready = scripts_ready and native_render_ready and native_visual_ready
     return {
         "platform": {
             "system": platform.system(),
@@ -150,7 +162,9 @@ def build_report(
         "missing": missing,
         "pdfEnvironment": pdf_environment,
         "readyForHeadlessTextImageReplacement": scripts_ready,
-        "readyForDefaultWorkflow": scripts_ready and pdf_ready,
+        "readyForNativePptxWorkflow": native_ready,
+        "readyForPdfConvertedWorkflow": scripts_ready and pdf_ready,
+        "readyForDefaultWorkflow": native_ready,
         "powerpointNativeValidationAvailable": bool(
             pdf_environment.get("powerpoint_native_validation_available")
         ),
@@ -170,8 +184,12 @@ def print_human(report: dict) -> None:
         + ("可用" if report["readyForHeadlessTextImageReplacement"] else "不可用")
     )
     print(
-        "默认严格全流程："
+        "原生 PPTX 严格全流程："
         + ("可用" if report["readyForDefaultWorkflow"] else "不可用")
+    )
+    print(
+        "PDF 转换交接严格全流程："
+        + ("可用" if report["readyForPdfConvertedWorkflow"] else "不可用")
     )
     if report["missing"]:
         print("缺少文件：" + "、".join(report["missing"]))

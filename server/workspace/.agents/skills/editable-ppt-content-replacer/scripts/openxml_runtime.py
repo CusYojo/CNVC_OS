@@ -20,16 +20,18 @@ A_NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
 R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 PKG_REL_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
 CT_NS = "http://schemas.openxmlformats.org/package/2006/content-types"
+C_NS = "http://schemas.openxmlformats.org/drawingml/2006/chart"
 XML_NS = "http://www.w3.org/XML/1998/namespace"
 EMU_PER_PIXEL = 9525
 
-NS = {"p": P_NS, "a": A_NS, "r": R_NS}
+NS = {"p": P_NS, "a": A_NS, "r": R_NS, "c": C_NS}
 OBJECT_TAGS = {"sp", "pic", "graphicFrame", "grpSp", "cxnSp"}
 
 for prefix, namespace in (
     ("p", P_NS),
     ("a", A_NS),
     ("r", R_NS),
+    ("c", C_NS),
     ("", PKG_REL_NS),
 ):
     ET.register_namespace(prefix, namespace)
@@ -267,6 +269,79 @@ def object_bbox(element: ET.Element) -> list[float]:
     return [round(value, 2) for value in values]
 
 
+def background_candidate(
+    kind: str,
+    bbox: list[float],
+    slide_width_emu: int,
+    slide_height_emu: int,
+    z_index: int,
+) -> dict:
+    """Conservatively flag slide-local objects that may carry template styling.
+
+    This is a review hint, not an instruction to keep or delete an object.
+    Background decisions remain explicit in the replacement manifest.
+    """
+    slide_width = float(slide_width_emu) / EMU_PER_PIXEL
+    slide_height = float(slide_height_emu) / EMU_PER_PIXEL
+    if (
+        not kind.startswith("shape:")
+        and kind != "picture"
+        or slide_width <= 0
+        or slide_height <= 0
+        or len(bbox) != 4
+    ):
+        return {"isCandidate": False}
+    x, y, width, height = (float(value) for value in bbox)
+    if width <= 0 or height <= 0:
+        return {"isCandidate": False}
+    coverage = min(1.0, (width * height) / (slide_width * slide_height))
+    tolerance_x = slide_width * 0.025
+    tolerance_y = slide_height * 0.025
+    touches_left = x <= tolerance_x
+    touches_right = x + width >= slide_width - tolerance_x
+    touches_top = y <= tolerance_y
+    touches_bottom = y + height >= slide_height - tolerance_y
+    early_layer = z_index <= 8
+    full_bleed = (
+        width >= slide_width * 0.94
+        and height >= slide_height * 0.94
+        and touches_left
+        and touches_right
+        and touches_top
+        and touches_bottom
+    )
+    horizontal_band = (
+        width >= slide_width * 0.94
+        and height >= slide_height * 0.08
+        and touches_left
+        and touches_right
+        and (touches_top or touches_bottom)
+    )
+    vertical_band = (
+        height >= slide_height * 0.94
+        and width >= slide_width * 0.08
+        and touches_top
+        and touches_bottom
+        and (touches_left or touches_right)
+    )
+    large_early_layer = early_layer and coverage >= 0.62
+    reasons = []
+    if full_bleed:
+        reasons.append("full-bleed")
+    if horizontal_band:
+        reasons.append("edge-horizontal-band")
+    if vertical_band:
+        reasons.append("edge-vertical-band")
+    if large_early_layer:
+        reasons.append("large-early-layer")
+    return {
+        "isCandidate": bool(reasons),
+        "reasons": reasons,
+        "coverage": round(coverage, 4),
+        "zIndex": z_index,
+    }
+
+
 def object_kind(element: ET.Element) -> str:
     tag = local_name(element.tag)
     if tag == "pic":
@@ -308,6 +383,80 @@ def object_media(
     return sha256_bytes(archive.read(target))
 
 
+def object_data(
+    archive: zipfile.ZipFile,
+    element: ET.Element,
+    slide_relationships: dict[str, dict[str, str]],
+) -> dict | None:
+    kind = object_kind(element)
+    if kind == "table":
+        rows: list[list[str]] = []
+        for row in element.findall(".//a:tbl/a:tr", NS):
+            values: list[str] = []
+            for cell in row.findall("./a:tc", NS):
+                paragraphs: list[str] = []
+                for paragraph in cell.findall(".//a:p", NS):
+                    paragraphs.append(
+                        "".join(
+                            node.text or ""
+                            for node in paragraph.iter(qn(A_NS, "t"))
+                        )
+                    )
+                values.append("\n".join(paragraphs))
+            rows.append(values)
+        encoded = json.dumps(rows, ensure_ascii=False, separators=(",", ":")).encode(
+            "utf-8"
+        )
+        return {
+            "kind": "table",
+            "values": rows,
+            "signature": sha256_bytes(encoded),
+        }
+    if kind != "chart":
+        return None
+    chart = element.find(".//c:chart", NS)
+    relation_id = chart.get(qn(R_NS, "id")) if chart is not None else None
+    relation = slide_relationships.get(relation_id or "")
+    target = relation.get("target") if relation else None
+    if not target or target not in archive.namelist():
+        return {"kind": "chart", "values": [], "formulas": [], "signature": ""}
+    root = ET.fromstring(archive.read(target))
+    values = [node.text or "" for node in root.findall(".//c:v", NS)]
+    formulas = [node.text or "" for node in root.findall(".//c:f", NS)]
+    embedded_hashes: list[str] = []
+    for chart_relation in relationships(archive, target).values():
+        embedded = chart_relation.get("target")
+        if (
+            chart_relation.get("type", "").endswith("/package")
+            and embedded in archive.namelist()
+        ):
+            embedded_hashes.append(sha256_bytes(archive.read(embedded)))
+    payload = {
+        "values": values,
+        "formulas": formulas,
+        "embeddedWorkbookSha256": sorted(embedded_hashes),
+    }
+    return {
+        "kind": "chart",
+        **payload,
+        "signature": sha256_bytes(
+            json.dumps(
+                payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+            ).encode("utf-8")
+        ),
+        "part": target,
+    }
+
+
+def background_signature(root: ET.Element | None) -> str:
+    if root is None:
+        return ""
+    background = root.find("./p:cSld/p:bg", NS)
+    if background is None:
+        return ""
+    return sha256_bytes(ET.tostring(background, encoding="utf-8"))
+
+
 def analyze_pptx(path: Path) -> dict:
     source_bytes = path.read_bytes()
     with zipfile.ZipFile(path) as archive:
@@ -323,6 +472,21 @@ def analyze_pptx(path: Path) -> dict:
                 if re.fullmatch(r"ppt/media/[^/]+", name)
             }
         )
+        note_texts: list[dict[str, str]] = []
+        for name in names:
+            if not name.startswith("ppt/notesSlides/") or not name.endswith(".xml"):
+                continue
+            try:
+                note_root = ET.fromstring(archive.read(name))
+            except ET.ParseError:
+                continue
+            text = "\n".join(
+                node.text or ""
+                for node in note_root.iter(qn(A_NS, "t"))
+                if (node.text or "").strip()
+            )
+            if text:
+                note_texts.append({"part": name, "text": text})
         slides: list[dict] = []
         for index, part_name in enumerate(slide_names(archive), 1):
             root = ET.fromstring(archive.read(part_name))
@@ -335,22 +499,54 @@ def analyze_pptx(path: Path) -> dict:
                 ),
                 "",
             )
+            layout_root = (
+                ET.fromstring(archive.read(layout))
+                if layout and layout in archive.namelist()
+                else None
+            )
+            layout_relationships = (
+                relationships(archive, layout) if layout_root is not None else {}
+            )
+            master = next(
+                (
+                    relation["target"]
+                    for relation in layout_relationships.values()
+                    if relation["type"].endswith("/slideMaster")
+                ),
+                "",
+            )
+            master_root = (
+                ET.fromstring(archive.read(master))
+                if master and master in archive.namelist()
+                else None
+            )
             objects: list[dict] = []
-            for element in object_elements(root):
+            for z_index, element in enumerate(object_elements(root), 1):
                 shape_id = object_id(element)
                 if shape_id is None or shape_id <= 0:
                     continue
                 nonvisual = direct_nonvisual(element)
                 body = direct_text_body(element)
+                kind = object_kind(element)
+                bbox = object_bbox(element)
                 objects.append(
                     {
                         "shapeId": shape_id,
                         "name": nonvisual.get("name", "") if nonvisual is not None else "",
-                        "kind": object_kind(element),
-                        "bbox": object_bbox(element),
+                        "kind": kind,
+                        "bbox": bbox,
+                        "zIndex": z_index,
+                        "backgroundCandidate": background_candidate(
+                            kind,
+                            bbox,
+                            width_emu,
+                            height_emu,
+                            z_index,
+                        ),
                         "text": text_body_text(body),
                         "textStyle": text_style(body),
                         "media": object_media(archive, element, rels),
+                        "data": object_data(archive, element, rels),
                     }
                 )
             title = next(
@@ -366,6 +562,12 @@ def analyze_pptx(path: Path) -> dict:
                     "number": index,
                     "title": title,
                     "layoutId": layout,
+                    "masterId": master,
+                    "backgroundSignatures": {
+                        "slide": background_signature(root),
+                        "layout": background_signature(layout_root),
+                        "master": background_signature(master_root),
+                    },
                     "widthEmu": width_emu,
                     "heightEmu": height_emu,
                     "objects": objects,
@@ -383,6 +585,7 @@ def analyze_pptx(path: Path) -> dict:
                 for name in names
             ),
             "mediaIds": media_ids,
+            "noteTexts": note_texts,
             "slides": slides,
         }
 

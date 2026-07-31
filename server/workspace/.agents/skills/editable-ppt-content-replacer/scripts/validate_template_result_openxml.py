@@ -34,13 +34,22 @@ def main() -> None:
         slide = int(operation["slide"])
         if action == "replace_text_group":
             identifiers = [int(value) for value in operation.get("shapeIds") or []]
-            primary = int(operation.get("primaryShapeId", identifiers[0]))
-            for shape_id in identifiers:
-                authorized_text[(slide, shape_id)] = (
-                    str(operation.get("text", ""))
-                    if shape_id == primary
-                    else ""
-                )
+            if operation.get("groupMode") in {"fragment-map", "line-reflow"}:
+                fragments = {
+                    int(item["shapeId"]): str(item["text"])
+                    for item in operation.get("fragmentTexts", [])
+                    if isinstance(item, dict)
+                }
+                for shape_id in identifiers:
+                    authorized_text[(slide, shape_id)] = fragments.get(shape_id, "")
+            else:
+                primary = int(operation.get("primaryShapeId", identifiers[0]))
+                for shape_id in identifiers:
+                    authorized_text[(slide, shape_id)] = (
+                        str(operation.get("text", ""))
+                        if shape_id == primary
+                        else ""
+                    )
         elif action == "replace_text":
             authorized_text[(slide, int(operation["shapeId"]))] = str(
                 operation.get("text", "")
@@ -72,6 +81,8 @@ def main() -> None:
             ("widthEmu", "画布宽度"),
             ("heightEmu", "画布高度"),
             ("layoutId", "版式引用"),
+            ("masterId", "母版引用"),
+            ("backgroundSignatures", "母版/版式/幻灯片背景"),
         ):
             if source_slide[key] != result_slide[key]:
                 errors.append(f"第 {page} 页{label}发生变化")
@@ -97,6 +108,7 @@ def main() -> None:
                 ("kind", "类型"),
                 ("bbox", "坐标尺寸"),
                 ("textStyle", "文字样式"),
+                ("data", "原生数据"),
             ):
                 if source_object[key] != target[key]:
                     errors.append(

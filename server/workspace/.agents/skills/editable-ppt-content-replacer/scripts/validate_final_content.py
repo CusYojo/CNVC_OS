@@ -16,6 +16,7 @@ def validate_final_content(
     result_map: dict[str, Any],
     watermark_qa_report: dict[str, Any],
     residual_qa_report: dict[str, Any] | None = None,
+    visual_qa_report: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     errors: list[str] = []
     warnings: list[str] = []
@@ -25,6 +26,58 @@ def validate_final_content(
         errors.extend(preflight["errors"])
     before = object_index(template_map)
     after = object_index(result_map)
+    background_fidelity: list[dict[str, Any]] = []
+    if str(manifest.get("schemaVersion", "")) == "1.6":
+        result_slides = {
+            int(slide.get("number", 0)): slide
+            for slide in result_map.get("slides", [])
+            if isinstance(slide, dict)
+        }
+        for source_slide in template_map.get("slides", []):
+            if not isinstance(source_slide, dict):
+                continue
+            slide = int(source_slide.get("number", 0))
+            target_slide = result_slides.get(slide, {})
+            failures: list[str] = []
+            if source_slide.get("layoutId") != target_slide.get("layoutId"):
+                failures.append("版式引用变化")
+            if source_slide.get("masterId") != target_slide.get("masterId"):
+                failures.append("母版引用变化")
+            if source_slide.get("backgroundSignatures") != target_slide.get(
+                "backgroundSignatures"
+            ):
+                failures.append("母版/版式/幻灯片背景签名变化")
+            if failures:
+                errors.append(
+                    f"第 {slide} 页模板背景保真失败：{'；'.join(failures)}"
+                )
+            background_fidelity.append(
+                {
+                    "slide": slide,
+                    "failures": failures,
+                    "status": "passed" if not failures else "failed",
+                }
+            )
+        for item in manifest.get("protectedObjects", []):
+            if (
+                not isinstance(item, dict)
+                or item.get("classification") != "template_background"
+            ):
+                continue
+            key = (int(item.get("slide", 0)), int(item.get("shapeId", 0)))
+            source = before.get(key)
+            target = after.get(key)
+            if target is None:
+                errors.append(
+                    f"第 {key[0]} 页受保护模板背景 shapeId={key[1]} 丢失"
+                )
+                continue
+            for field in ("name", "kind", "bbox", "media", "data"):
+                if (source or {}).get(field) != target.get(field):
+                    errors.append(
+                        f"第 {key[0]} 页受保护模板背景 shapeId={key[1]} "
+                        f"{field} 发生变化"
+                    )
     assignments = manifest.get("slotAssignments", [])
     coverage: list[dict[str, Any]] = []
     for assignment in assignments:
@@ -125,7 +178,13 @@ def validate_final_content(
         if not isinstance(operation, dict):
             continue
         action = operation.get("action")
-        if action not in {"replace_text", "replace_text_group", "replace_image"}:
+        if action not in {
+            "replace_text",
+            "replace_text_group",
+            "replace_image",
+            "replace_chart_data",
+            "replace_table_data",
+        }:
             continue
         slide = int(operation.get("slide", 0))
         failures: list[str] = []
@@ -149,16 +208,28 @@ def validate_final_content(
                 )
                 errors.append(f"第 {slide} 页 replace_text_group 最终结果失败：shapeIds 为空")
                 continue
-            primary = int(operation.get("primaryShapeId", shape_ids[0]))
-            for shape_id in shape_ids:
-                targets.append(
-                    (
-                        shape_id,
-                        str(operation.get("text", "")) if shape_id == primary else "",
-                        None,
+            group_mode = operation.get("groupMode", "composite-box")
+            if group_mode in {"fragment-map", "line-reflow"}:
+                fragment_texts = {
+                    int(item["shapeId"]): str(item["text"])
+                    for item in operation.get("fragmentTexts", [])
+                    if isinstance(item, dict)
+                    and isinstance(item.get("shapeId"), int)
+                    and isinstance(item.get("text"), str)
+                }
+                for shape_id in shape_ids:
+                    targets.append((shape_id, fragment_texts.get(shape_id), None))
+            else:
+                primary = int(operation.get("primaryShapeId", shape_ids[0]))
+                for shape_id in shape_ids:
+                    targets.append(
+                        (
+                            shape_id,
+                            str(operation.get("text", "")) if shape_id == primary else "",
+                            None,
+                        )
                     )
-                )
-        else:
+        elif action == "replace_image":
             asset = Path(str(operation.get("asset", ""))).expanduser().resolve()
             expected_media = (
                 hashlib.sha256(asset.read_bytes()).hexdigest()
@@ -166,6 +237,40 @@ def validate_final_content(
                 else str(operation.get("assetSha256", ""))
             )
             targets.append((int(operation.get("shapeId", 0)), None, expected_media))
+        elif action == "replace_table_data":
+            shape_id = int(operation.get("shapeId", 0))
+            target = after.get((slide, shape_id))
+            expected_values = operation.get("values")
+            actual_values = (target or {}).get("data", {}).get("values")
+            if target is None:
+                failures.append(f"shapeId={shape_id} 不存在")
+            elif actual_values != expected_values:
+                failures.append(f"shapeId={shape_id} 表格数据与清单不一致")
+        elif action == "replace_chart_data":
+            shape_id = int(operation.get("shapeId", 0))
+            target = after.get((slide, shape_id))
+            before_target = before.get((slide, shape_id), {})
+            actual_data = (target or {}).get("data", {})
+            expected_tokens = {
+                str(value)
+                for value in operation.get("categories", [])
+            }
+            for series in operation.get("series", []):
+                if isinstance(series, dict):
+                    expected_tokens.add(str(series.get("name", "")))
+                    expected_tokens.update(str(value) for value in series.get("values", []))
+            actual_tokens = {str(value) for value in actual_data.get("values", [])}
+            if target is None:
+                failures.append(f"shapeId={shape_id} 不存在")
+            elif actual_data.get("signature") == before_target.get("data", {}).get(
+                "signature"
+            ):
+                failures.append(f"shapeId={shape_id} 图表数据签名未变化")
+            elif expected_tokens - actual_tokens:
+                failures.append(
+                    f"shapeId={shape_id} 图表缓存缺少目标值："
+                    f"{sorted(expected_tokens - actual_tokens)}"
+                )
         for shape_id, expected_text, expected_media in targets:
             target = after.get((slide, shape_id))
             if target is None:
@@ -189,13 +294,23 @@ def validate_final_content(
         )
     if watermark_qa_report.get("passed") is not True:
         errors.append("最终 PPTX 未通过渲染后水印复检")
-    residual_required = str(manifest.get("schemaVersion", "")) == "1.4"
+    residual_required = str(manifest.get("schemaVersion", "")) in {
+        "1.4",
+        "1.5",
+        "1.6",
+    }
     if residual_required:
         if not isinstance(residual_qa_report, dict):
-            errors.append("1.4 版缺少 final-residual-qa-report.json")
+            errors.append("1.4/1.5/1.6 版缺少 final-residual-qa-report.json")
             residual_qa_report = {}
         elif residual_qa_report.get("passed") is not True:
             errors.append("最终 PPTX 未通过旧项目文字、Logo/媒体和 OCR 残留扫描")
+    if str(manifest.get("schemaVersion", "")) in {"1.5", "1.6"}:
+        if not isinstance(visual_qa_report, dict):
+            errors.append("1.5/1.6 版缺少 final-visual-qa-report.json")
+            visual_qa_report = {}
+        elif visual_qa_report.get("passed") is not True:
+            errors.append("最终 PPTX 未通过逐页排版、裁切和空槽视觉验收")
     research_audit = preflight.get("researchEvidenceAudit", {})
     return {
         "passed": not errors,
@@ -219,6 +334,11 @@ def validate_final_content(
                 if isinstance(residual_qa_report, dict)
                 else False
             ),
+            "visualQaPassed": (
+                visual_qa_report.get("passed") is True
+                if isinstance(visual_qa_report, dict)
+                else False
+            ),
             "operationCheckCount": len(operation_checks),
             "passedOperationCheckCount": sum(
                 item["status"] == "passed" for item in operation_checks
@@ -230,10 +350,12 @@ def validate_final_content(
             "evidenceCount": len(research_audit.get("evidence", [])),
         },
         "coverage": coverage,
+        "backgroundFidelity": background_fidelity,
         "controlledAdditions": controlled_additions,
         "operationChecks": operation_checks,
         "researchEvidenceAudit": research_audit,
         "residualQaReport": residual_qa_report,
+        "visualQaReport": visual_qa_report,
     }
 
 
@@ -246,6 +368,7 @@ def main() -> None:
     parser.add_argument("--result-map", required=True, type=Path)
     parser.add_argument("--watermark-qa-report", required=True, type=Path)
     parser.add_argument("--residual-qa-report", type=Path)
+    parser.add_argument("--visual-qa-report", type=Path)
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
     report = validate_final_content(
@@ -254,6 +377,7 @@ def main() -> None:
         load_json(args.result_map),
         load_json(args.watermark_qa_report),
         load_json(args.residual_qa_report) if args.residual_qa_report else None,
+        load_json(args.visual_qa_report) if args.visual_qa_report else None,
     )
     output = args.output.expanduser().resolve()
     output.parent.mkdir(parents=True, exist_ok=True)

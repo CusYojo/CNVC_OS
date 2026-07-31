@@ -3,12 +3,16 @@ from __future__ import annotations
 
 import argparse
 from datetime import date
+from decimal import Decimal, InvalidOperation
 import hashlib
 import json
 from pathlib import Path
 import re
+import struct
 from typing import Any
+import unicodedata
 from urllib.parse import urlparse
+import zlib
 
 
 TEXT_ACTIONS = {"replace_text", "replace_text_group"}
@@ -35,14 +39,48 @@ ALLOWED_ASSET_CLASSES = {
 PROTECTED_CLASSES = {
     "shared_semantic_icon",
     "fixed_visual",
+    "template_background",
     "template_brand",
+    "template_label",
     "generic_decoration",
 }
-SUPPORTED_SCHEMA_VERSIONS = {"1.0", "1.1", "1.2", "1.3", "1.4"}
-RESEARCH_SCHEMA_VERSIONS = {"1.3", "1.4"}
-STRICT_SLOT_SCHEMA_VERSIONS = {"1.2", "1.3", "1.4"}
-RELATIONSHIP_SCHEMA_VERSIONS = {"1.1", "1.2", "1.3", "1.4"}
-PAGE_CLOSURE_SCHEMA_VERSIONS = {"1.4"}
+GENERIC_TEMPLATE_LABELS = {
+    "目录",
+    "contents",
+    "项目概览",
+    "公司概况",
+    "核心亮点",
+    "行业分析",
+    "市场分析",
+    "产品与技术",
+    "核心团队",
+    "商业模式",
+    "竞争格局",
+    "财务分析",
+    "财务预测",
+    "融资情况",
+    "估值分析",
+    "投资建议",
+    "风险提示",
+    "退出路径",
+    "免责声明",
+    "数据来源",
+    "investment proposal",
+    "investment recommendation",
+    "company overview",
+    "market analysis",
+    "industry analysis",
+    "investment highlights",
+    "risk factors",
+    "disclaimer",
+}
+SUPPORTED_SCHEMA_VERSIONS = {"1.0", "1.1", "1.2", "1.3", "1.4", "1.5", "1.6"}
+RESEARCH_SCHEMA_VERSIONS = {"1.3", "1.4", "1.5", "1.6"}
+STRICT_SLOT_SCHEMA_VERSIONS = {"1.2", "1.3", "1.4", "1.5", "1.6"}
+RELATIONSHIP_SCHEMA_VERSIONS = {"1.1", "1.2", "1.3", "1.4", "1.5", "1.6"}
+PAGE_CLOSURE_SCHEMA_VERSIONS = {"1.4", "1.5", "1.6"}
+CONTENT_SAFE_SCHEMA_VERSIONS = {"1.5", "1.6"}
+BACKGROUND_LOCK_SCHEMA_VERSIONS = {"1.6"}
 SOURCE_TYPES = {
     "user_material",
     "company_official",
@@ -83,6 +121,739 @@ DEFAULT_FORBIDDEN_OPERATIONAL_TERMS = (
     "现有材料没有BP",
     "未提供公司资料",
 )
+GENERIC_KEEP_REASONS = {
+    "固定视觉",
+    "模板元素",
+    "保持不变",
+    "无需替换",
+    "通用元素",
+    "测试",
+}
+
+
+def slide_object_order(
+    template_map: dict[str, Any],
+) -> dict[tuple[int, int], int]:
+    return {
+        (int(slide.get("number", 0)), int(item.get("shapeId", 0))): index
+        for slide in template_map.get("slides", [])
+        if isinstance(slide, dict)
+        for index, item in enumerate(slide.get("objects", []), 1)
+        if isinstance(item, dict)
+    }
+
+
+def inferred_background_candidates(
+    template_map: dict[str, Any],
+) -> dict[tuple[int, int], dict[str, Any]]:
+    candidates: dict[tuple[int, int], dict[str, Any]] = {}
+    for slide in template_map.get("slides", []):
+        if not isinstance(slide, dict):
+            continue
+        page = int(slide.get("number", 0))
+        slide_width = float(slide.get("widthEmu", 0)) / 9525
+        slide_height = float(slide.get("heightEmu", 0)) / 9525
+        if page <= 0 or slide_width <= 0 or slide_height <= 0:
+            continue
+        for z_index, item in enumerate(slide.get("objects", []), 1):
+            if not isinstance(item, dict):
+                continue
+            kind = str(item.get("kind", ""))
+            if kind != "picture" and not kind.startswith("shape:"):
+                continue
+            try:
+                x, y, width, height = [
+                    float(value) for value in item.get("bbox", [])
+                ]
+            except (TypeError, ValueError):
+                continue
+            if width <= 0 or height <= 0:
+                continue
+            coverage = min(
+                1.0, (width * height) / (slide_width * slide_height)
+            )
+            tolerance_x = slide_width * 0.025
+            tolerance_y = slide_height * 0.025
+            touches_left = x <= tolerance_x
+            touches_right = x + width >= slide_width - tolerance_x
+            touches_top = y <= tolerance_y
+            touches_bottom = y + height >= slide_height - tolerance_y
+            full_bleed = (
+                width >= slide_width * 0.94
+                and height >= slide_height * 0.94
+                and touches_left
+                and touches_right
+                and touches_top
+                and touches_bottom
+            )
+            horizontal_band = (
+                width >= slide_width * 0.94
+                and height >= slide_height * 0.08
+                and touches_left
+                and touches_right
+                and (touches_top or touches_bottom)
+            )
+            vertical_band = (
+                height >= slide_height * 0.94
+                and width >= slide_width * 0.08
+                and touches_top
+                and touches_bottom
+                and (touches_left or touches_right)
+            )
+            large_early_layer = z_index <= 8 and coverage >= 0.62
+            reasons = []
+            if full_bleed:
+                reasons.append("full-bleed")
+            if horizontal_band:
+                reasons.append("edge-horizontal-band")
+            if vertical_band:
+                reasons.append("edge-vertical-band")
+            if large_early_layer:
+                reasons.append("large-early-layer")
+            if not reasons:
+                continue
+            shape_id = int(item.get("shapeId", 0))
+            if shape_id > 0:
+                candidates[(page, shape_id)] = {
+                    "slide": page,
+                    "shapeId": shape_id,
+                    "name": item.get("name", ""),
+                    "kind": kind,
+                    "bbox": item.get("bbox", []),
+                    "coverage": round(coverage, 4),
+                    "zIndex": z_index,
+                    "reasons": reasons,
+                }
+    return candidates
+
+
+def validate_background_policy(
+    manifest: dict[str, Any],
+    template_map: dict[str, Any],
+    protected: dict[tuple[int, int], dict[str, Any]],
+    groups: dict[str, dict[str, Any]],
+    operations: list[dict[str, Any]],
+    errors: list[str],
+) -> dict[str, Any]:
+    if str(manifest.get("schemaVersion", "")) not in BACKGROUND_LOCK_SCHEMA_VERSIONS:
+        return {"required": False, "status": "not-required"}
+    initial_error_count = len(errors)
+    policy = manifest.get("backgroundPolicy")
+    candidates = inferred_background_candidates(template_map)
+    slides_without_signatures = [
+        int(slide.get("number", 0))
+        for slide in template_map.get("slides", [])
+        if isinstance(slide, dict)
+        and not isinstance(slide.get("backgroundSignatures"), dict)
+    ]
+    if slides_without_signatures:
+        errors.append(
+            "1.6 版 template-map 缺少母版/版式/幻灯片背景签名；"
+            "请使用升级后的 analyze_template_openxml.py 重新分析："
+            f"{slides_without_signatures}"
+        )
+    if not isinstance(policy, dict):
+        errors.append("1.6 版必须提供 backgroundPolicy")
+        return {
+            "required": True,
+            "status": "missing",
+            "detectedCandidates": list(candidates.values()),
+        }
+    if policy.get("preserveTemplateBackground") is not True:
+        errors.append(
+            "backgroundPolicy.preserveTemplateBackground 必须为 true"
+        )
+    if policy.get("allowBackgroundDeletion") is not False:
+        errors.append(
+            "backgroundPolicy.allowBackgroundDeletion 必须为 false"
+        )
+    raw_decisions = policy.get("candidateDecisions")
+    if not isinstance(raw_decisions, list):
+        errors.append("backgroundPolicy.candidateDecisions 必须是数组")
+        raw_decisions = []
+    decisions: dict[tuple[int, int], dict[str, Any]] = {}
+    supported_classes = {
+        "template_background",
+        "project_content_visual",
+        "logo_backplate",
+        "not_background",
+    }
+    supported_dispositions = {"preserve", "replace", "delete"}
+    for index, decision in enumerate(raw_decisions, 1):
+        prefix = f"第 {index} 个背景候选决定"
+        if not isinstance(decision, dict):
+            errors.append(f"{prefix}必须是对象")
+            continue
+        try:
+            key = (
+                int(decision.get("slide", 0)),
+                int(decision.get("shapeId", 0)),
+            )
+        except (TypeError, ValueError):
+            key = (0, 0)
+        if key not in candidates:
+            errors.append(
+                f"{prefix}未对应自动识别的背景候选："
+                f"slide={key[0]}, shapeId={key[1]}"
+            )
+        if key in decisions:
+            errors.append(f"{prefix}重复登记背景候选")
+        decisions[key] = decision
+        classification = decision.get("classification")
+        disposition = decision.get("disposition")
+        reason = str(decision.get("reason", "")).strip()
+        if classification not in supported_classes:
+            errors.append(f"{prefix} classification 不受支持：{classification}")
+        if disposition not in supported_dispositions:
+            errors.append(f"{prefix} disposition 不受支持：{disposition}")
+        if len(reason) < 8 or reason in GENERIC_KEEP_REASONS:
+            errors.append(f"{prefix}必须提供具体、可复核的视觉判断理由")
+        if classification == "template_background":
+            if disposition != "preserve":
+                errors.append(f"{prefix}模板背景只能 preserve")
+            protected_item = protected.get(key)
+            if (
+                not protected_item
+                or protected_item.get("classification") != "template_background"
+            ):
+                errors.append(
+                    f"{prefix}模板背景必须同时登记为 "
+                    "protectedObjects/template_background"
+                )
+        if classification == "not_background" and decision.get(
+            "explicitVisualReview"
+        ) is not True:
+            errors.append(f"{prefix}标记为 not_background 必须完成显式视觉复核")
+
+    missing = set(candidates) - set(decisions)
+    extra = set(decisions) - set(candidates)
+    if missing:
+        errors.append(
+            "backgroundPolicy 未逐一覆盖背景候选："
+            + ", ".join(f"{page}:{shape_id}" for page, shape_id in sorted(missing))
+        )
+    if extra:
+        errors.append(
+            "backgroundPolicy 包含非候选对象："
+            + ", ".join(f"{page}:{shape_id}" for page, shape_id in sorted(extra))
+        )
+
+    deleted_targets: set[tuple[int, int]] = set()
+    replaced_targets: set[tuple[int, int]] = set()
+    for operation in operations:
+        if not isinstance(operation, dict):
+            continue
+        try:
+            slide = int(operation.get("slide", 0))
+        except (TypeError, ValueError):
+            continue
+        targets = {(slide, value) for value in shape_ids_for(operation, groups)}
+        if operation.get("action") == "delete_slot_group":
+            deleted_targets.update(targets)
+        elif operation.get("action") == "replace_image":
+            replaced_targets.update(targets)
+    for key, candidate in candidates.items():
+        decision = decisions.get(key, {})
+        classification = decision.get("classification")
+        disposition = decision.get("disposition")
+        if key in deleted_targets and not (
+            classification == "not_background"
+            and disposition == "delete"
+            and decision.get("explicitVisualReview") is True
+        ):
+            errors.append(
+                f"第 {key[0]} 页 shapeId={key[1]} 是背景候选，"
+                "不得通过通用槽位清理删除"
+            )
+        if disposition == "replace" and key not in replaced_targets:
+            errors.append(
+                f"第 {key[0]} 页 shapeId={key[1]} 声明替换但没有 replace_image 操作"
+            )
+        if disposition == "delete" and key not in deleted_targets:
+            errors.append(
+                f"第 {key[0]} 页 shapeId={key[1]} 声明删除但没有删除操作"
+            )
+        if disposition == "preserve" and (
+            key in deleted_targets or key in replaced_targets
+        ):
+            errors.append(
+                f"第 {key[0]} 页 shapeId={key[1]} 声明 preserve 却进入修改操作"
+            )
+        candidate["decision"] = decision
+    return {
+        "required": True,
+        "status": "passed" if len(errors) == initial_error_count else "failed",
+        "preserveTemplateBackground": policy.get(
+            "preserveTemplateBackground"
+        )
+        is True,
+        "allowBackgroundDeletion": policy.get("allowBackgroundDeletion"),
+        "detectedCandidates": list(candidates.values()),
+    }
+
+
+def _paeth(a: int, b: int, c: int) -> int:
+    estimate = a + b - c
+    pa = abs(estimate - a)
+    pb = abs(estimate - b)
+    pc = abs(estimate - c)
+    if pa <= pb and pa <= pc:
+        return a
+    if pb <= pc:
+        return b
+    return c
+
+
+def _png_transparency_audit_uncached(path: Path) -> dict[str, Any]:
+    try:
+        from PIL import Image
+
+        with Image.open(path) as image:
+            if image.format != "PNG" or image.mode not in {"RGBA", "LA"}:
+                return {
+                    "passed": False,
+                    "reason": "logo PNG 必须标准化为 RGBA 或灰度+Alpha",
+                    "width": image.width,
+                    "height": image.height,
+                    "mode": image.mode,
+                }
+            alpha = image.getchannel("A")
+            histogram = alpha.histogram()
+            total = image.width * image.height
+            transparent = sum(histogram[:250])
+            border_width = max(1, round(min(image.width, image.height) * 0.02))
+            border_crops = (
+                alpha.crop((0, 0, image.width, border_width)),
+                alpha.crop(
+                    (0, image.height - border_width, image.width, image.height)
+                ),
+                alpha.crop((0, border_width, border_width, image.height - border_width)),
+                alpha.crop(
+                    (
+                        image.width - border_width,
+                        border_width,
+                        image.width,
+                        image.height - border_width,
+                    )
+                ),
+            )
+            border_histogram = [0] * 256
+            border_total = 0
+            for crop in border_crops:
+                border_total += crop.width * crop.height
+                for index, count in enumerate(crop.histogram()):
+                    border_histogram[index] += count
+            transparent_ratio = transparent / total if total else 0
+            border_ratio = (
+                sum(border_histogram[:250]) / border_total
+                if border_total
+                else 0
+            )
+            return {
+                "passed": transparent_ratio >= 0.01 and border_ratio >= 0.25,
+                "reason": (
+                    "transparent-background"
+                    if transparent_ratio >= 0.01 and border_ratio >= 0.25
+                    else "检测到不透明矩形画布或透明边界不足"
+                ),
+                "width": image.width,
+                "height": image.height,
+                "transparentPixelRatio": round(transparent_ratio, 5),
+                "transparentBorderRatio": round(border_ratio, 5),
+                "decoder": "Pillow",
+            }
+    except (ImportError, OSError):
+        pass
+
+    data = path.read_bytes()
+    if not data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return {"passed": False, "reason": "not-png"}
+    offset = 8
+    width = height = bit_depth = color_type = interlace = 0
+    compressed = bytearray()
+    while offset + 12 <= len(data):
+        length = struct.unpack(">I", data[offset : offset + 4])[0]
+        chunk_type = data[offset + 4 : offset + 8]
+        chunk = data[offset + 8 : offset + 8 + length]
+        offset += 12 + length
+        if chunk_type == b"IHDR":
+            (
+                width,
+                height,
+                bit_depth,
+                color_type,
+                _compression,
+                _filter,
+                interlace,
+            ) = struct.unpack(">IIBBBBB", chunk)
+        elif chunk_type == b"IDAT":
+            compressed.extend(chunk)
+        elif chunk_type == b"IEND":
+            break
+    if bit_depth != 8 or color_type not in {4, 6}:
+        return {
+            "passed": False,
+            "reason": "logo PNG 必须标准化为 8-bit 灰度+Alpha或RGBA",
+            "width": width,
+            "height": height,
+            "bitDepth": bit_depth,
+            "colorType": color_type,
+        }
+    channels = 2 if color_type == 4 else 4
+    try:
+        raw = zlib.decompress(bytes(compressed))
+    except zlib.error as exc:
+        return {"passed": False, "reason": f"PNG IDAT 解压失败：{exc}"}
+    transparent = 0
+    border_transparent = 0
+    border_total = 0
+    total = width * height
+    pointer = 0
+    border_width = max(1, round(min(width, height) * 0.02))
+
+    def consume_pass(x0: int, y0: int, dx: int, dy: int) -> None:
+        nonlocal pointer, transparent, border_transparent, border_total
+        pass_width = max(0, (width - x0 + dx - 1) // dx)
+        pass_height = max(0, (height - y0 + dy - 1) // dy)
+        if pass_width == 0 or pass_height == 0:
+            return
+        row_bytes = pass_width * channels
+        previous = bytearray(row_bytes)
+        for row_index in range(pass_height):
+            filter_type = raw[pointer]
+            pointer += 1
+            encoded = raw[pointer : pointer + row_bytes]
+            pointer += row_bytes
+            decoded = bytearray(row_bytes)
+            for index, value in enumerate(encoded):
+                left = decoded[index - channels] if index >= channels else 0
+                up = previous[index]
+                up_left = previous[index - channels] if index >= channels else 0
+                if filter_type == 0:
+                    predictor = 0
+                elif filter_type == 1:
+                    predictor = left
+                elif filter_type == 2:
+                    predictor = up
+                elif filter_type == 3:
+                    predictor = (left + up) // 2
+                elif filter_type == 4:
+                    predictor = _paeth(left, up, up_left)
+                else:
+                    raise ValueError(f"unsupported PNG filter {filter_type}")
+                decoded[index] = (value + predictor) & 0xFF
+            y = y0 + row_index * dy
+            alpha_index = 1 if color_type == 4 else 3
+            for pixel_index in range(pass_width):
+                x = x0 + pixel_index * dx
+                alpha = decoded[pixel_index * channels + alpha_index]
+                is_transparent = alpha < 250
+                transparent += int(is_transparent)
+                if (
+                    x < border_width
+                    or y < border_width
+                    or x >= width - border_width
+                    or y >= height - border_width
+                ):
+                    border_total += 1
+                    border_transparent += int(is_transparent)
+            previous = decoded
+
+    passes = (
+        [(0, 0, 1, 1)]
+        if interlace == 0
+        else [
+            (0, 0, 8, 8),
+            (4, 0, 8, 8),
+            (0, 4, 4, 8),
+            (2, 0, 4, 4),
+            (0, 2, 2, 4),
+            (1, 0, 2, 2),
+            (0, 1, 1, 2),
+        ]
+    )
+    try:
+        for args in passes:
+            consume_pass(*args)
+    except (IndexError, ValueError, zlib.error) as exc:
+        return {"passed": False, "reason": f"PNG Alpha 解析失败：{exc}"}
+    transparent_ratio = transparent / total if total else 0
+    border_ratio = border_transparent / border_total if border_total else 0
+    return {
+        "passed": transparent_ratio >= 0.01 and border_ratio >= 0.25,
+        "reason": (
+            "transparent-background"
+            if transparent_ratio >= 0.01 and border_ratio >= 0.25
+            else "检测到不透明矩形画布或透明边界不足"
+        ),
+        "width": width,
+        "height": height,
+        "transparentPixelRatio": round(transparent_ratio, 5),
+        "transparentBorderRatio": round(border_ratio, 5),
+    }
+
+
+PNG_TRANSPARENCY_CACHE: dict[
+    tuple[str, int, int], dict[str, Any]
+] = {}
+
+
+def png_transparency_audit(path: Path) -> dict[str, Any]:
+    resolved = path.expanduser().resolve()
+    try:
+        stat = resolved.stat()
+    except OSError:
+        return {"passed": False, "reason": "asset-missing"}
+    key = (str(resolved), stat.st_size, stat.st_mtime_ns)
+    if key not in PNG_TRANSPARENCY_CACHE:
+        PNG_TRANSPARENCY_CACHE[key] = _png_transparency_audit_uncached(resolved)
+    return dict(PNG_TRANSPARENCY_CACHE[key])
+
+
+def overlapping_logo_companions(
+    template_map: dict[str, Any],
+    slide: int,
+    shape_id: int,
+) -> list[int]:
+    order = slide_object_order(template_map)
+    objects = object_index(template_map)
+    target = objects.get((slide, shape_id))
+    if not target:
+        return []
+    try:
+        tx, ty, tw, th = [float(value) for value in target.get("bbox", [])]
+    except (TypeError, ValueError):
+        return []
+    if tw <= 0 or th <= 0:
+        return []
+    target_area = tw * th
+    target_z = order.get((slide, shape_id), 0)
+    companions: list[int] = []
+    for (page, candidate_id), candidate in objects.items():
+        if page != slide or candidate_id == shape_id:
+            continue
+        if str(candidate.get("text", "")).strip():
+            continue
+        if candidate.get("kind") != "picture" and not str(
+            candidate.get("kind", "")
+        ).startswith("shape:"):
+            continue
+        try:
+            x, y, width, height = [
+                float(value) for value in candidate.get("bbox", [])
+            ]
+        except (TypeError, ValueError):
+            continue
+        area = width * height
+        if area <= 0 or not 0.4 <= area / target_area <= 2.5:
+            continue
+        intersection_width = max(0.0, min(tx + tw, x + width) - max(tx, x))
+        intersection_height = max(0.0, min(ty + th, y + height) - max(ty, y))
+        overlap = intersection_width * intersection_height / min(target_area, area)
+        z_distance = abs(order.get((page, candidate_id), 0) - target_z)
+        if overlap >= 0.8 and z_distance <= 3:
+            companions.append(candidate_id)
+    return sorted(companions)
+
+
+def validate_logo_operation(
+    operation: dict[str, Any],
+    operation_index: int,
+    template_map: dict[str, Any],
+    protected: dict[tuple[int, int], dict[str, Any]],
+    deleted_targets: set[tuple[int, int]],
+    asset: Path,
+    errors: list[str],
+) -> dict[str, Any]:
+    prefix = f"第 {operation_index} 项公司 Logo"
+    slide = int(operation.get("slide", 0))
+    shape_id = int(operation.get("shapeId", 0))
+    if operation.get("imageFitMode") != "contain":
+        errors.append(f"{prefix} imageFitMode 必须为 contain")
+    if operation.get("logoTransparencyValidated") is not True:
+        errors.append(f"{prefix}必须设置 logoTransparencyValidated=true")
+    transparency = png_transparency_audit(asset) if asset.exists() else {
+        "passed": False,
+        "reason": "asset-missing",
+    }
+    if not transparency.get("passed"):
+        errors.append(
+            f"{prefix}素材未通过透明底检查：{transparency.get('reason')}"
+        )
+    slot_policy = operation.get("logoSlotPolicy")
+    if not isinstance(slot_policy, dict):
+        errors.append(f"{prefix}必须提供 logoSlotPolicy")
+        slot_policy = {}
+    if slot_policy.get("backgroundMode") not in {
+        "transparent",
+        "preserve_template_backplate",
+    }:
+        errors.append(
+            f"{prefix} backgroundMode 必须为 transparent 或 "
+            "preserve_template_backplate"
+        )
+    raw_companions = slot_policy.get("companionObjects")
+    if not isinstance(raw_companions, list):
+        errors.append(f"{prefix} companionObjects 必须是数组")
+        raw_companions = []
+    declared: dict[int, dict[str, Any]] = {}
+    for companion in raw_companions:
+        if not isinstance(companion, dict):
+            errors.append(f"{prefix} companionObjects 包含非对象")
+            continue
+        try:
+            companion_id = int(companion.get("shapeId", 0))
+        except (TypeError, ValueError):
+            companion_id = 0
+        if companion_id <= 0 or companion_id == shape_id:
+            errors.append(f"{prefix} companionObjects 包含无效 shapeId")
+            continue
+        if companion_id in declared:
+            errors.append(f"{prefix}重复登记 companion shapeId={companion_id}")
+        declared[companion_id] = companion
+        role = companion.get("role")
+        disposition = companion.get("disposition")
+        reason = str(companion.get("reason", "")).strip()
+        if role not in {
+            "old_company_backplate",
+            "template_backplate",
+            "mask_or_frame",
+            "not_backplate",
+        }:
+            errors.append(f"{prefix} companion role 不受支持：{role}")
+        if disposition not in {"delete", "preserve"}:
+            errors.append(
+                f"{prefix} companion disposition 只能为 delete 或 preserve"
+            )
+        if len(reason) < 8:
+            errors.append(f"{prefix} companion 必须提供具体复核理由")
+        key = (slide, companion_id)
+        if role == "old_company_backplate":
+            if disposition != "delete" or key not in deleted_targets:
+                errors.append(
+                    f"{prefix}旧公司 Logo 底板必须进入明确的完整槽位删除操作"
+                )
+        elif role in {"template_backplate", "mask_or_frame"}:
+            if disposition != "preserve" or key not in protected:
+                errors.append(
+                    f"{prefix}{role} 必须 preserve 并登记为 protectedObjects"
+                )
+    detected = set(overlapping_logo_companions(template_map, slide, shape_id))
+    missing = detected - set(declared)
+    extra = set(declared) - detected
+    if missing:
+        errors.append(
+            f"{prefix}未审查与 Logo 高重叠的相邻对象：{sorted(missing)}"
+        )
+    if extra:
+        errors.append(
+            f"{prefix}登记了不满足高重叠条件的 companion：{sorted(extra)}"
+        )
+    if slot_policy.get("backgroundMode") == "transparent":
+        preserved_backplates = [
+            item
+            for item in declared.values()
+            if item.get("role") in {"old_company_backplate", "template_backplate"}
+            and item.get("disposition") == "preserve"
+        ]
+        if preserved_backplates:
+            errors.append(
+                f"{prefix}透明底模式不得保留独立 Logo 底板；"
+                "如底板属于模板视觉，请改用 preserve_template_backplate"
+            )
+    return {
+        "operationIndex": operation_index,
+        "slide": slide,
+        "shapeId": shape_id,
+        "transparency": transparency,
+        "detectedCompanionShapeIds": sorted(detected),
+        "declaredCompanionShapeIds": sorted(declared),
+        "backgroundMode": slot_policy.get("backgroundMode"),
+    }
+
+
+def normalized_visible_text(value: Any) -> str:
+    return re.sub(
+        r"\s+",
+        " ",
+        unicodedata.normalize("NFKC", str(value or "")).strip(),
+    ).casefold()
+
+
+def is_generic_template_label(value: Any) -> bool:
+    text = normalized_visible_text(value)
+    if not text:
+        return False
+    if text in GENERIC_TEMPLATE_LABELS:
+        return True
+    return bool(re.fullmatch(r"(?:p(?:age)?\.?\s*)?\d{1,3}", text))
+
+
+def scalar_for_exact_comparison(value: Any, unit: Any = "") -> tuple[str, Any]:
+    if isinstance(value, bool):
+        return ("boolean", value)
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        try:
+            return ("number", Decimal(str(value)))
+        except InvalidOperation:
+            pass
+    text = normalized_visible_text(value).replace(",", "").replace("，", "")
+    unit_text = normalized_visible_text(unit)
+    if unit_text and text.endswith(unit_text):
+        text = text[: -len(unit_text)].strip()
+    text = re.sub(r"^[￥¥$€£]\s*", "", text)
+    text = re.sub(r"\s*(?:%|％)$", "", text)
+    if re.fullmatch(r"[-+]?(?:\d+(?:\.\d+)?|\.\d+)", text):
+        try:
+            return ("number", Decimal(text))
+        except InvalidOperation:
+            pass
+    return ("text", text)
+
+
+def fact_value_matches_bound_value(fact: dict[str, Any], bound_value: Any) -> bool:
+    fact_type = str(fact.get("factType", ""))
+    expected = (
+        fact.get("rawValue")
+        if fact.get("rawValue") is not None
+        else fact.get("renderedValue")
+    )
+    if fact_type in {"number", "currency", "percentage"}:
+        rendered_value = scalar_for_exact_comparison(expected, fact.get("unit", ""))
+        bound = scalar_for_exact_comparison(bound_value, fact.get("unit", ""))
+        if rendered_value == bound:
+            return True
+        if (
+            fact_type == "percentage"
+            and fact.get("rawValue") is None
+            and rendered_value[0] == "number"
+            and bound[0] == "number"
+            and (
+                "%" in str(fact.get("renderedValue", ""))
+                or "％" in str(fact.get("renderedValue", ""))
+                or str(fact.get("unit", "")).strip() in {"%", "％"}
+            )
+        ):
+            return rendered_value[1] / Decimal("100") == bound[1]
+        return False
+    return scalar_for_exact_comparison(expected) == scalar_for_exact_comparison(
+        bound_value
+    )
+
+
+def canonical_text(value: Any) -> str:
+    normalized = unicodedata.normalize("NFKC", str(value or ""))
+    return re.sub(r"[\s\u200b-\u200d\ufeff,，]", "", normalized)
+
+
+def numeric_tokens(value: Any) -> set[str]:
+    normalized = unicodedata.normalize("NFKC", str(value or ""))
+    normalized = re.sub(r"[\u200b-\u200d\ufeff]", "", normalized)
+    pattern = re.compile(
+        r"(?<![\w.])(?:[¥￥$€£])?\d[\d,，]*(?:\.\d+)?"
+        r"(?:%|％|万元|亿元|万|亿|元|人|家|项|年|月|日|倍)?"
+    )
+    return {canonical_text(match.group(0)) for match in pattern.finditer(normalized)}
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -143,10 +914,10 @@ def validate_research_evidence(
     initial_error_count = len(errors)
     policy = manifest.get("researchPolicy")
     if not isinstance(policy, dict):
-        errors.append("1.3/1.4 版必须提供 researchPolicy")
+        errors.append("1.3 及以上版本必须提供 researchPolicy")
         policy = {}
     if policy.get("enabled") is not True:
-        errors.append("1.3/1.4 版 researchPolicy.enabled 必须为 true")
+        errors.append("1.3 及以上版本 researchPolicy.enabled 必须为 true")
     if not valid_iso_date(policy.get("asOfDate")):
         errors.append("researchPolicy.asOfDate 必须是 YYYY-MM-DD")
     minimum_sources = policy.get("minimumIndependentSources", 2)
@@ -161,7 +932,7 @@ def validate_research_evidence(
 
     raw_sources = manifest.get("sources")
     if not isinstance(raw_sources, list):
-        errors.append("1.3/1.4 版 sources 必须是数组")
+        errors.append("1.3 及以上版本 sources 必须是数组")
         raw_sources = []
     sources: dict[str, dict[str, Any]] = {}
     for index, source in enumerate(raw_sources, 1):
@@ -210,7 +981,7 @@ def validate_research_evidence(
 
     raw_evidence = manifest.get("evidenceRegistry")
     if not isinstance(raw_evidence, list):
-        errors.append("1.3/1.4 版 evidenceRegistry 必须是数组")
+        errors.append("1.3 及以上版本 evidenceRegistry 必须是数组")
         raw_evidence = []
     evidence: dict[str, dict[str, Any]] = {}
     for index, item in enumerate(raw_evidence, 1):
@@ -349,7 +1120,7 @@ def validate_research_evidence(
             continue
         evidence_ids = operation.get("evidenceIds")
         if not isinstance(evidence_ids, list) or not evidence_ids:
-            errors.append(f"{prefix}1.3/1.4 版操作必须包含非空 evidenceIds")
+            errors.append(f"{prefix}1.3 及以上版本操作必须包含非空 evidenceIds")
             evidence_ids = []
         elif len(set(evidence_ids)) != len(evidence_ids):
             errors.append(f"{prefix} evidenceIds 不得重复")
@@ -415,7 +1186,7 @@ def validate_research_evidence(
                     }
                     if int(operation.get("slide", 0)) not in gap_slides:
                         errors.append(
-                            f"{prefix}1.4 版未披露/待核实内容只能写入专用缺口页"
+                            f"{prefix}1.4/1.5 版未披露/待核实内容只能写入专用缺口页"
                         )
             else:
                 errors.append(
@@ -448,6 +1219,24 @@ def style_snapshot(target: dict[str, Any]) -> dict[str, Any]:
         json.dumps(snapshot, ensure_ascii=False, sort_keys=True).encode("utf-8")
     ).hexdigest()
     return {"fingerprint": digest, **snapshot}
+
+
+def derived_text_capacity(target: dict[str, Any]) -> tuple[int, int]:
+    bbox = target.get("bbox") or [0, 0, 0, 0]
+    width = float(bbox[2]) if len(bbox) >= 4 else 0
+    height = float(bbox[3]) if len(bbox) >= 4 else 0
+    font_size = float(
+        target.get("textStyle", {}).get("run", {}).get("fontSize", 0) or 0
+    )
+    original = str(target.get("text", ""))
+    original_lines = max(1, original.count("\n") + 1)
+    if width <= 0 or height <= 0 or font_size <= 0:
+        original_chars = len(original.replace("\n", ""))
+        return max(1, max(original_chars + 4, int(original_chars * 1.2))), original_lines
+    font_px = font_size * 96 / 72
+    max_lines = max(1, int(height / max(1.0, font_px * 1.15)))
+    chars_per_line = max(1, int(width / max(1.0, font_px * 0.9)))
+    return max_lines * chars_per_line, max_lines
 
 
 def validate_conversion_handoff(
@@ -762,8 +1551,35 @@ def protected_object_index(
             errors.append(f"{prefix}重复保护第 {slide} 页 shapeId={shape_id}")
         if classification not in PROTECTED_CLASSES:
             errors.append(f"{prefix} classification 不受支持：{classification}")
-        if not str(item.get("reason", "")).strip():
+        reason = str(item.get("reason", "")).strip()
+        if not reason:
             errors.append(f"{prefix}缺少 reason")
+        if str(manifest.get("schemaVersion", "")) in CONTENT_SAFE_SCHEMA_VERSIONS:
+            if len(reason) < 8 or reason in GENERIC_KEEP_REASONS:
+                errors.append(f"{prefix}必须写明具体、可复核的保护理由")
+            target = objects.get(key, {})
+            if (
+                str(target.get("text", "")).strip()
+                and classification in {"fixed_visual", "generic_decoration"}
+            ):
+                errors.append(
+                    f"{prefix}包含可见文字，不能分类为 {classification}；"
+                    "请使用 template_label、template_brand 或内容槽"
+                )
+            if str(target.get("text", "")).strip() and classification == "template_brand":
+                errors.append(
+                    f"{prefix}可见文字不能作为 template_brand 原样保留；"
+                    "新项目品牌文字必须通过内容槽替换"
+                )
+            if (
+                str(target.get("text", "")).strip()
+                and classification == "template_label"
+                and not is_generic_template_label(target.get("text"))
+            ):
+                errors.append(
+                    f"{prefix}文字不是封闭词表中的通用模板标签；"
+                    "项目相关或中性正文必须替换、删除或绑定证据"
+                )
         protected[key] = item
         audit.append(
             {
@@ -934,9 +1750,12 @@ def validate_slot_coverage(
                     missing.append(shape_id)
                     continue
                 for operation in target_ops:
-                    if operation.get("action") in TEXT_ACTIONS and not str(
-                        operation.get("text", "")
-                    ).strip():
+                    if (
+                        operation.get("action") in TEXT_ACTIONS
+                        and not str(
+                            operation_text_for_shape(operation, shape_id) or ""
+                        ).strip()
+                    ):
                         blank.append(shape_id)
         elif disposition == "delete":
             for shape_id in shape_ids:
@@ -1009,6 +1828,15 @@ def operation_text_for_shape(
         return operation.get("text") if isinstance(operation.get("text"), str) else None
     if operation.get("action") == "replace_text_group":
         if shape_id in operation.get("shapeIds", []):
+            if operation.get("groupMode") in {"fragment-map", "line-reflow"}:
+                for fragment in operation.get("fragmentTexts", []):
+                    if (
+                        isinstance(fragment, dict)
+                        and fragment.get("shapeId") == shape_id
+                        and isinstance(fragment.get("text"), str)
+                    ):
+                        return fragment["text"]
+                return None
             primary = operation.get("primaryShapeId")
             if primary is None:
                 shape_ids = operation.get("shapeIds", [])
@@ -1017,6 +1845,26 @@ def operation_text_for_shape(
                 return ""
             return operation.get("text") if isinstance(operation.get("text"), str) else None
     return None
+
+
+def resolve_operation_path(operation: dict[str, Any], path: str) -> Any:
+    if not re.fullmatch(
+        r"[A-Za-z_][A-Za-z0-9_]*(?:\[\d+\]|\.[A-Za-z_][A-Za-z0-9_]*)*",
+        path,
+    ):
+        raise ValueError("unsupported path")
+    tokens = re.findall(r"([A-Za-z_][A-Za-z0-9_]*)|\[(\d+)\]", path)
+    current: Any = operation
+    for name, index in tokens:
+        if name:
+            if not isinstance(current, dict) or name not in current:
+                raise ValueError("missing key")
+            current = current[name]
+        else:
+            if not isinstance(current, list):
+                raise ValueError("not a list")
+            current = current[int(index)]
+    return current
 
 
 def validate_entity_bindings(
@@ -1262,6 +2110,958 @@ def validate_entity_bindings(
     return audit
 
 
+def validate_content_safety_model(
+    manifest: dict[str, Any],
+    template_map: dict[str, Any],
+    operations: list[dict[str, Any]],
+    errors: list[str],
+) -> dict[str, Any]:
+    """Validate the 1.5/1.6 identity, fact, slide-brief, and safety contract."""
+    if str(manifest.get("schemaVersion", "")) not in CONTENT_SAFE_SCHEMA_VERSIONS:
+        return {"required": False, "status": "not-required"}
+    initial_error_count = len(errors)
+    objects = object_index(template_map)
+    sources = {
+        str(item.get("sourceId")): item
+        for item in manifest.get("sources", [])
+        if isinstance(item, dict) and item.get("sourceId")
+    }
+    evidence = {
+        str(item.get("evidenceId")): item
+        for item in manifest.get("evidenceRegistry", [])
+        if isinstance(item, dict) and item.get("evidenceId")
+    }
+
+    identity = manifest.get("projectIdentity")
+    if not isinstance(identity, dict):
+        errors.append("1.5/1.6 版必须提供 projectIdentity")
+        identity = {}
+    for field in ("legalName", "region"):
+        if not str(identity.get(field, "")).strip():
+            errors.append(f"projectIdentity.{field} 不能为空")
+    if identity.get("identityStatus") != "verified":
+        errors.append("projectIdentity.identityStatus 必须为 verified")
+    if identity.get("confidence") != "high":
+        errors.append("项目实体锁定必须达到 confidence=high 后才能编辑")
+    identity_source_ids = identity.get("sourceIds")
+    if not isinstance(identity_source_ids, list) or not identity_source_ids:
+        errors.append("projectIdentity.sourceIds 必须是非空数组")
+        identity_source_ids = []
+    for source_id in identity_source_ids:
+        if str(source_id) not in sources:
+            errors.append(f"projectIdentity 引用不存在的 sourceId={source_id}")
+    project_name = str(manifest.get("projectName", "")).strip()
+    legal_name = str(identity.get("legalName", "")).strip()
+    aliases = {
+        str(value).strip()
+        for value in identity.get("aliases", [])
+        if str(value).strip()
+    }
+    if project_name and project_name not in ({legal_name} | aliases):
+        errors.append("projectName 必须等于 projectIdentity.legalName 或其 aliases")
+    identity_evidence_ids = identity.get("identityEvidenceIds")
+    if not isinstance(identity_evidence_ids, list) or not identity_evidence_ids:
+        errors.append("projectIdentity.identityEvidenceIds 必须是非空数组")
+        identity_evidence_ids = []
+    identity_names = {legal_name, *aliases} - {""}
+    for evidence_id in identity_evidence_ids:
+        item = evidence.get(str(evidence_id))
+        if not item:
+            errors.append(
+                f"projectIdentity 引用不存在的 identityEvidenceId={evidence_id}"
+            )
+            continue
+        claim = canonical_text(item.get("claim", ""))
+        if not any(canonical_text(name) in claim for name in identity_names):
+            errors.append(
+                f"身份事实 {evidence_id} 的 claim 未明确包含目标公司名称"
+            )
+        if item.get("status") != "verified":
+            errors.append(f"身份事实 {evidence_id} 必须为 verified")
+        if not set(map(str, item.get("sourceIds", []))) & set(
+            map(str, identity_source_ids)
+        ):
+            errors.append(
+                f"身份事实 {evidence_id} 未引用 projectIdentity.sourceIds"
+            )
+    domains = {
+        str(value).strip().lower().removeprefix("www.")
+        for value in identity.get("officialDomains", [])
+        if str(value).strip()
+    }
+    linked_identity_sources = [
+        sources.get(str(source_id), {}) for source_id in identity_source_ids
+    ]
+    if domains:
+        matched_domain = False
+        for source in linked_identity_sources:
+            if source.get("sourceType") != "company_official":
+                continue
+            host = urlparse(str(source.get("url", ""))).hostname or ""
+            host = host.lower().removeprefix("www.")
+            if any(host == domain or host.endswith("." + domain) for domain in domains):
+                matched_domain = True
+        if not matched_domain:
+            errors.append(
+                "projectIdentity.officialDomains 必须匹配一个已登记的 company_official 来源"
+            )
+    elif not identity.get("identifiers") or not any(
+        source.get("sourceType") == "user_material"
+        for source in linked_identity_sources
+    ):
+        errors.append(
+            "没有官网时必须提供 identifiers，并引用用户原始身份材料"
+        )
+
+    fingerprint = manifest.get("templateFingerprint")
+    if not isinstance(fingerprint, dict):
+        errors.append("1.5/1.6 版必须提供 templateFingerprint")
+        fingerprint = {}
+    if fingerprint.get("reviewed") is not True:
+        errors.append("templateFingerprint.reviewed 必须为 true")
+    old_terms = [
+        str(value).strip()
+        for value in fingerprint.get("oldProjectTerms", [])
+        if str(value).strip()
+    ]
+    if not old_terms:
+        errors.append("templateFingerprint.oldProjectTerms 不能为空")
+    old_numbers = [
+        str(value).strip()
+        for value in fingerprint.get("oldProjectNumericTokens", [])
+        if str(value).strip()
+    ]
+    old_media = [
+        str(value).strip()
+        for value in fingerprint.get("oldProjectMediaSha256", [])
+        if str(value).strip()
+    ]
+    template_numeric_candidates: set[str] = set()
+    for slide in template_map.get("slides", []):
+        for item in slide.get("objects", []):
+            template_numeric_candidates.update(numeric_tokens(item.get("text", "")))
+            data = item.get("data")
+            if isinstance(data, dict):
+                template_numeric_candidates.update(
+                    numeric_tokens(
+                        json.dumps(data.get("values", []), ensure_ascii=False)
+                    )
+                )
+    for note in template_map.get("noteTexts", []):
+        if isinstance(note, dict):
+            template_numeric_candidates.update(numeric_tokens(note.get("text", "")))
+    numeric_decisions = fingerprint.get("numericDecisions")
+    if not isinstance(numeric_decisions, list):
+        errors.append("templateFingerprint.numericDecisions 必须是数组")
+        numeric_decisions = []
+    decided_numbers: dict[str, dict[str, Any]] = {}
+    for index, decision in enumerate(numeric_decisions, 1):
+        if not isinstance(decision, dict):
+            errors.append(f"第 {index} 个 numericDecision 必须是对象")
+            continue
+        token = canonical_text(decision.get("token", ""))
+        if not token or token in decided_numbers:
+            errors.append(f"第 {index} 个 numericDecision token 为空或重复")
+            continue
+        decided_numbers[token] = decision
+        if decision.get("disposition") not in {
+            "old_project",
+            "template_neutral",
+            "template_index",
+        }:
+            errors.append(f"第 {index} 个 numericDecision 尚未完成处置")
+        if len(str(decision.get("reason", "")).strip()) < 4:
+            errors.append(f"第 {index} 个 numericDecision 缺少具体理由")
+    if set(decided_numbers) != template_numeric_candidates:
+        errors.append(
+            "numericDecisions 必须覆盖模板全部数字候选；"
+            f"缺少 {sorted(template_numeric_candidates - set(decided_numbers))}，"
+            f"多出 {sorted(set(decided_numbers) - template_numeric_candidates)}"
+        )
+    decided_old_numbers = {
+        token
+        for token, decision in decided_numbers.items()
+        if decision.get("disposition") == "old_project"
+    }
+    if {canonical_text(value) for value in old_numbers} != decided_old_numbers:
+        errors.append(
+            "oldProjectNumericTokens 必须与 numericDecisions 中的 old_project 完全一致"
+        )
+
+    media_decisions = fingerprint.get("mediaDecisions")
+    if not isinstance(media_decisions, list):
+        errors.append("templateFingerprint.mediaDecisions 必须是数组")
+        media_decisions = []
+    decided_media: dict[str, dict[str, Any]] = {}
+    for index, decision in enumerate(media_decisions, 1):
+        if not isinstance(decision, dict):
+            errors.append(f"第 {index} 个 mediaDecision 必须是对象")
+            continue
+        digest = str(decision.get("sha256", "")).strip()
+        if not re.fullmatch(r"[0-9a-f]{64}", digest) or digest in decided_media:
+            errors.append(f"第 {index} 个 mediaDecision 哈希无效或重复")
+            continue
+        decided_media[digest] = decision
+        if decision.get("disposition") not in {"old_project", "template_neutral"}:
+            errors.append(f"第 {index} 个 mediaDecision 尚未完成处置")
+        if len(str(decision.get("reason", "")).strip()) < 6:
+            errors.append(f"第 {index} 个 mediaDecision 缺少具体理由")
+    template_media = {
+        str(value) for value in template_map.get("mediaIds", []) if str(value)
+    }
+    if set(decided_media) != template_media:
+        errors.append(
+            "mediaDecisions 必须覆盖模板全部媒体哈希；"
+            f"缺少 {len(template_media - set(decided_media))} 个，"
+            f"多出 {len(set(decided_media) - template_media)} 个"
+        )
+    decided_old_media = {
+        digest
+        for digest, decision in decided_media.items()
+        if decision.get("disposition") == "old_project"
+    }
+    if set(old_media) != decided_old_media:
+        errors.append(
+            "oldProjectMediaSha256 必须与 mediaDecisions 中的 old_project 完全一致"
+        )
+    residual = manifest.get("residualPolicy", {})
+    if isinstance(residual, dict):
+        missing_terms = set(old_terms) - {
+            str(value).strip()
+            for value in residual.get("forbiddenTextTerms", [])
+        }
+        missing_numbers = {canonical_text(value) for value in old_numbers} - {
+            canonical_text(value)
+            for value in residual.get("forbiddenNumericTokens", [])
+        }
+        missing_media = set(old_media) - {
+            str(value).strip()
+            for value in residual.get("forbiddenMediaSha256", [])
+        }
+        if missing_terms:
+            errors.append(
+                f"旧项目文字指纹未全部进入 residualPolicy：{sorted(missing_terms)}"
+            )
+        if missing_numbers:
+            errors.append(
+                f"旧项目数字指纹未全部进入 residualPolicy：{sorted(missing_numbers)}"
+            )
+        if missing_media:
+            errors.append(
+                f"旧项目媒体指纹未全部进入 residualPolicy：{sorted(missing_media)}"
+            )
+
+    raw_facts = manifest.get("facts")
+    if not isinstance(raw_facts, list) or not raw_facts:
+        errors.append("1.5/1.6 版 facts 必须是非空数组")
+        raw_facts = []
+    facts: dict[str, dict[str, Any]] = {}
+    for index, fact in enumerate(raw_facts, 1):
+        prefix = f"第 {index} 个项目事实"
+        if not isinstance(fact, dict):
+            errors.append(f"{prefix}必须是对象")
+            continue
+        fact_key = str(fact.get("factKey", "")).strip()
+        semantic_key = str(fact.get("semanticKey", "")).strip()
+        if not fact_key:
+            errors.append(f"{prefix}缺少 factKey")
+            continue
+        if fact_key in facts:
+            errors.append(f"{prefix} factKey 重复：{fact_key}")
+            continue
+        facts[fact_key] = fact
+        if not semantic_key:
+            errors.append(f"{prefix}缺少 semanticKey")
+        if fact.get("renderedValue") is None:
+            errors.append(f"{prefix}缺少 renderedValue")
+        fact_type = fact.get("factType")
+        if fact_type in {"number", "currency", "percentage"}:
+            if not str(fact.get("unit", "")).strip():
+                errors.append(f"{prefix}数值事实必须提供 unit")
+            if not str(fact.get("period", "")).strip() and not str(
+                fact.get("asOfDate", "")
+            ).strip():
+                errors.append(f"{prefix}数值事实必须提供 period 或 asOfDate")
+        fact_evidence = fact.get("evidenceIds")
+        if not isinstance(fact_evidence, list) or not fact_evidence:
+            errors.append(f"{prefix} evidenceIds 必须是非空数组")
+            fact_evidence = []
+        for evidence_id in fact_evidence:
+            item = evidence.get(str(evidence_id))
+            if not item:
+                errors.append(f"{prefix}引用不存在的 evidenceId={evidence_id}")
+            elif semantic_key not in {
+                str(value).strip() for value in item.get("semanticKeys", [])
+            }:
+                errors.append(
+                    f"{prefix}证据 {evidence_id} 不支持 semanticKey={semantic_key}"
+                )
+        if fact.get("status") == "unavailable" and fact.get("materiality") != "material":
+            errors.append(f"{prefix}非重大缺失事实不应进入成稿事实库，应删除可选槽位")
+
+    raw_briefs = manifest.get("slideBriefs")
+    if not isinstance(raw_briefs, list):
+        errors.append("1.5/1.6 版必须提供 slideBriefs 数组")
+        raw_briefs = []
+    briefs: dict[int, dict[str, Any]] = {}
+    budget_by_shape: dict[tuple[int, int], dict[str, Any]] = {}
+    for index, brief in enumerate(raw_briefs, 1):
+        prefix = f"第 {index} 个页面内容方案"
+        if not isinstance(brief, dict):
+            errors.append(f"{prefix}必须是对象")
+            continue
+        try:
+            slide = int(brief.get("slide", 0))
+        except (TypeError, ValueError):
+            slide = 0
+        if slide <= 0:
+            errors.append(f"{prefix} slide 必须是正整数")
+            continue
+        if slide in briefs:
+            errors.append(f"{prefix}页码重复：{slide}")
+        briefs[slide] = brief
+        for field in ("objective", "conclusion"):
+            if not str(brief.get(field, "")).strip():
+                errors.append(f"{prefix}缺少 {field}")
+        allowed_facts = {
+            str(value).strip()
+            for value in brief.get("allowedFactKeys", [])
+            if str(value).strip()
+        }
+        unknown_facts = allowed_facts - set(facts)
+        if unknown_facts:
+            errors.append(f"{prefix}引用不存在的 factKey：{sorted(unknown_facts)}")
+        for budget in brief.get("shapeBudgets", []):
+            if not isinstance(budget, dict):
+                errors.append(f"{prefix} shapeBudgets 包含非对象")
+                continue
+            try:
+                shape_id = int(budget.get("shapeId", 0))
+                max_chars = int(budget.get("maxChars", -1))
+                max_lines = int(budget.get("maxLines", 0))
+            except (TypeError, ValueError):
+                errors.append(f"{prefix} shapeBudget 数值无效")
+                continue
+            if shape_id <= 0 or max_chars < 0 or max_lines <= 0:
+                errors.append(f"{prefix} shapeBudget 必须给出有效容量")
+            target = objects.get((slide, shape_id))
+            if target is None:
+                errors.append(f"{prefix} shapeBudget 引用不存在的 shapeId={shape_id}")
+            elif not str(target.get("kind", "")).startswith("shape:"):
+                errors.append(f"{prefix} shapeBudget 只能用于文字形状")
+            else:
+                derived_chars, derived_lines = derived_text_capacity(target)
+                if max_chars > derived_chars or max_lines > derived_lines:
+                    errors.append(
+                        f"{prefix} shapeId={shape_id} 容量预算超过模板推导上限 "
+                        f"({derived_chars} 字/{derived_lines} 行)"
+                    )
+            budget_by_shape[(slide, shape_id)] = budget
+    expected_slides = set(range(1, int(template_map.get("slideCount", 0)) + 1))
+    if set(briefs) != expected_slides:
+        errors.append(
+            "1.5/1.6 版 slideBriefs 必须覆盖全部页面；"
+            f"缺少 {sorted(expected_slides - set(briefs))}，"
+            f"多出 {sorted(set(briefs) - expected_slides)}"
+        )
+
+    for index, operation in enumerate(operations, 1):
+        if not isinstance(operation, dict):
+            continue
+        prefix = f"第 {index} 项"
+        action = operation.get("action")
+        if action == "add_disclaimer_textbox":
+            continue
+        slide = int(operation.get("slide", 0))
+        brief = briefs.get(slide, {})
+        semantic_key = str(operation.get("semanticKey", "")).strip()
+        allowed_semantics = {
+            str(value).strip()
+            for value in brief.get("allowedSemanticKeys", [])
+            if str(value).strip()
+        }
+        if semantic_key not in allowed_semantics:
+            errors.append(
+                f"{prefix} semanticKey={semantic_key} 未获第 {slide} 页内容方案授权"
+            )
+        fact_keys = operation.get("factKeys")
+        if not isinstance(fact_keys, list) or not fact_keys:
+            errors.append(f"{prefix}1.5 版操作必须包含非空 factKeys")
+            fact_keys = []
+        allowed_fact_keys = {
+            str(value).strip()
+            for value in brief.get("allowedFactKeys", [])
+            if str(value).strip()
+        }
+        for fact_key in fact_keys:
+            fact = facts.get(str(fact_key))
+            if not fact:
+                errors.append(f"{prefix}引用不存在的 factKey={fact_key}")
+                continue
+            if str(fact_key) not in allowed_fact_keys:
+                errors.append(
+                    f"{prefix} factKey={fact_key} 未获第 {slide} 页内容方案授权"
+                )
+            if fact.get("semanticKey") != semantic_key:
+                errors.append(
+                    f"{prefix} factKey={fact_key} 的 semanticKey 与操作不一致"
+                )
+            if fact.get("status") == "unavailable" and action != "delete_slot_group":
+                gap_slides = {
+                    int(value)
+                    for value in residual.get("gapSlideNumbers", [])
+                }
+                if slide not in gap_slides:
+                    errors.append(f"{prefix}缺失事实只能删除槽位或写入专用缺口页")
+        if action in TEXT_ACTIONS:
+            if operation.get("groupMode") in {"fragment-map", "line-reflow"}:
+                visible_payload = "\n".join(
+                    str(item.get("text", ""))
+                    for item in operation.get("fragmentTexts", [])
+                    if isinstance(item, dict)
+                )
+            else:
+                visible_payload = str(operation.get("text", ""))
+            normalized_payload = re.sub(r"[\s,，]", "", visible_payload)
+            for fact_key in fact_keys:
+                fact = facts.get(str(fact_key), {})
+                if fact.get("status") == "unavailable":
+                    continue
+                rendered = re.sub(
+                    r"[\s,，]", "", str(fact.get("renderedValue", ""))
+                )
+                if rendered and rendered not in normalized_payload:
+                    errors.append(
+                        f"{prefix}最终文字未包含 factKey={fact_key} 的 renderedValue"
+                    )
+        if action in TEXT_ACTIONS:
+            capacity = operation.get("capacityCheck")
+            if not isinstance(capacity, dict) or capacity.get("reviewed") is not True:
+                errors.append(f"{prefix}1.5 版文字操作必须完成 capacityCheck")
+            else:
+                text_values = [operation_text_for_shape(operation, shape_id) or ""
+                               for shape_id in shape_ids_for(operation, {})]
+                max_chars = int(capacity.get("maxChars", -1))
+                max_lines = int(capacity.get("maxLines", 0))
+                if max((len(value.replace("\n", "")) for value in text_values), default=0) > max_chars:
+                    errors.append(f"{prefix}替换文字超过 capacityCheck.maxChars")
+                if max((value.count("\n") + 1 for value in text_values), default=1) > max_lines:
+                    errors.append(f"{prefix}替换文字超过 capacityCheck.maxLines")
+            operation_shape_ids = shape_ids_for(operation, {})
+            for shape_id in operation_shape_ids:
+                budget = budget_by_shape.get((slide, shape_id))
+                if budget is None:
+                    errors.append(
+                        f"{prefix}第 {slide} 页 shapeId={shape_id} 缺少页面容量预算"
+                    )
+                    continue
+                replacement = operation_text_for_shape(operation, shape_id) or ""
+                if len(replacement.replace("\n", "")) > int(
+                    budget.get("maxChars", -1)
+                ):
+                    errors.append(
+                        f"{prefix}shapeId={shape_id} 超过 slideBrief.maxChars"
+                    )
+                if replacement.count("\n") + 1 > int(budget.get("maxLines", 0)):
+                    errors.append(
+                        f"{prefix}shapeId={shape_id} 超过 slideBrief.maxLines"
+                    )
+            if isinstance(capacity, dict) and operation_shape_ids:
+                budgets = [
+                    budget_by_shape.get((slide, shape_id), {})
+                    for shape_id in operation_shape_ids
+                ]
+                allowed_chars = min(
+                    (int(item.get("maxChars", -1)) for item in budgets),
+                    default=-1,
+                )
+                allowed_lines = min(
+                    (int(item.get("maxLines", 0)) for item in budgets),
+                    default=0,
+                )
+                if int(capacity.get("maxChars", -1)) > allowed_chars:
+                    errors.append(f"{prefix}capacityCheck.maxChars 超过页面预算")
+                if int(capacity.get("maxLines", 0)) > allowed_lines:
+                    errors.append(f"{prefix}capacityCheck.maxLines 超过页面预算")
+            if (
+                action == "replace_text_group"
+                and operation.get("groupMode") == "composite-box"
+                and operation_shape_ids
+            ):
+                primary_id = int(operation.get("primaryShapeId", 0))
+                boxes = [
+                    objects.get((slide, shape_id), {}).get("bbox", [0, 0, 0, 0])
+                    for shape_id in operation_shape_ids
+                ]
+                left = min(float(box[0]) for box in boxes)
+                top = min(float(box[1]) for box in boxes)
+                right = max(float(box[0]) + float(box[2]) for box in boxes)
+                bottom = max(float(box[1]) + float(box[3]) for box in boxes)
+                primary_box = objects.get((slide, primary_id), {}).get(
+                    "bbox", [0, 0, 0, 0]
+                )
+                primary_left = float(primary_box[0])
+                primary_top = float(primary_box[1])
+                primary_right = primary_left + float(primary_box[2])
+                primary_bottom = primary_top + float(primary_box[3])
+                tolerance = max(1.0, 0.02 * max(right - left, bottom - top))
+                if (
+                    primary_left > left + tolerance
+                    or primary_top > top + tolerance
+                    or primary_right < right - tolerance
+                    or primary_bottom < bottom - tolerance
+                ):
+                    errors.append(
+                        f"{prefix}composite-box 主形状不是覆盖碎片组的完整文本槽"
+                    )
+        if action in NATIVE_ACTIONS:
+            bindings = operation.get("dataBindings")
+            if not isinstance(bindings, list) or not bindings:
+                errors.append(f"{prefix}原生图表/表格操作必须提供 dataBindings")
+            else:
+                bound = {
+                    str(item.get("factKey"))
+                    for item in bindings
+                    if isinstance(item, dict)
+                }
+                if bound != set(map(str, fact_keys)):
+                    errors.append(
+                        f"{prefix} dataBindings 与 factKeys 必须完全一致"
+                    )
+                bound_paths = {
+                    str(item.get("path"))
+                    for item in bindings
+                    if isinstance(item, dict)
+                }
+                if len(bound_paths) != len(bindings):
+                    errors.append(f"{prefix} dataBindings.path 不得重复")
+                expected_paths: set[str] = set()
+                if action == "replace_table_data":
+                    for row_index, row in enumerate(operation.get("values", [])):
+                        if isinstance(row, list):
+                            expected_paths.update(
+                                f"values[{row_index}][{column_index}]"
+                                for column_index in range(len(row))
+                            )
+                else:
+                    expected_paths.update(
+                        f"categories[{index}]"
+                        for index, _ in enumerate(operation.get("categories", []))
+                    )
+                    for series_index, series in enumerate(
+                        operation.get("series", [])
+                    ):
+                        if not isinstance(series, dict):
+                            continue
+                        expected_paths.add(f"series[{series_index}].name")
+                        expected_paths.update(
+                            f"series[{series_index}].values[{value_index}]"
+                            for value_index, _ in enumerate(
+                                series.get("values", [])
+                            )
+                        )
+                if bound_paths != expected_paths:
+                    errors.append(
+                        f"{prefix} dataBindings 必须覆盖全部数据路径；"
+                        f"缺少 {sorted(expected_paths - bound_paths)}，"
+                        f"多出 {sorted(bound_paths - expected_paths)}"
+                    )
+                for binding_index, binding in enumerate(bindings, 1):
+                    if not isinstance(binding, dict):
+                        errors.append(
+                            f"{prefix}第 {binding_index} 个 dataBinding 必须是对象"
+                        )
+                        continue
+                    fact_key = str(binding.get("factKey", ""))
+                    path = str(binding.get("path", ""))
+                    if fact_key not in facts:
+                        continue
+                    try:
+                        bound_value = resolve_operation_path(operation, path)
+                    except (ValueError, IndexError):
+                        errors.append(
+                            f"{prefix} dataBinding 路径无法解析：{path}"
+                        )
+                        continue
+                    if not fact_value_matches_bound_value(
+                        facts[fact_key], bound_value
+                    ):
+                        errors.append(
+                            f"{prefix} dataBinding {path} 与 "
+                            f"factKey={fact_key} 的 renderedValue 不精确相等"
+                        )
+
+    object_policy = manifest.get("objectPolicy")
+    expected_object_policy = {
+        "fixedVisualAction": "keep",
+        "projectSpecificAction": "replace-or-delete",
+        "unknownObjectAction": "fail",
+        "fullDeckClosureRequired": True,
+    }
+    if not isinstance(object_policy, dict):
+        errors.append("1.5/1.6 版必须提供 objectPolicy")
+    else:
+        for key, value in expected_object_policy.items():
+            if object_policy.get(key) != value:
+                errors.append(f"objectPolicy.{key} 必须为 {value!r}")
+    visual_policy = manifest.get("visualQaPolicy")
+    required_visual_flags = (
+        "renderAllSlides",
+        "checkOverflow",
+        "checkOverlap",
+        "checkImageCrop",
+        "checkEmptySlots",
+        "checkRepeatedBoilerplate",
+    )
+    if str(manifest.get("schemaVersion", "")) in BACKGROUND_LOCK_SCHEMA_VERSIONS:
+        required_visual_flags += (
+            "checkTemplateBackgroundFidelity",
+            "checkLogoBackgroundArtifacts",
+        )
+    if not isinstance(visual_policy, dict):
+        errors.append("1.5/1.6 版必须提供 visualQaPolicy")
+    else:
+        for field in required_visual_flags:
+            if visual_policy.get(field) is not True:
+                errors.append(f"visualQaPolicy.{field} 必须为 true")
+
+    return {
+        "required": True,
+        "status": "passed" if len(errors) == initial_error_count else "failed",
+        "projectIdentity": identity,
+        "templateFingerprint": fingerprint,
+        "factCount": len(facts),
+        "slideBriefCount": len(briefs),
+    }
+
+
+def validate_content_density(
+    manifest: dict[str, Any],
+    template_map: dict[str, Any],
+    operations: list[dict[str, Any]],
+    errors: list[str],
+) -> dict[str, Any]:
+    """Validate per-slide research coverage without rewarding unsupported filler."""
+    policy = manifest.get("contentDensityPolicy")
+    if policy is None:
+        return {
+            "required": False,
+            "status": "not-enabled",
+            "policy": None,
+            "pages": [],
+        }
+    initial_error_count = len(errors)
+    if not isinstance(policy, dict):
+        errors.append("contentDensityPolicy 必须是对象")
+        return {
+            "required": True,
+            "status": "failed",
+            "policy": policy,
+            "pages": [],
+        }
+    if policy.get("enabled") is not True:
+        errors.append("contentDensityPolicy.enabled 必须为 true")
+
+    slide_count = int(template_map.get("slideCount", 0))
+    expected_slides = set(range(1, slide_count + 1))
+
+    def slide_set(field: str) -> set[int]:
+        raw = policy.get(field)
+        if not isinstance(raw, list):
+            errors.append(f"contentDensityPolicy.{field} 必须是数组")
+            return set()
+        try:
+            result = {int(value) for value in raw}
+        except (TypeError, ValueError):
+            errors.append(f"contentDensityPolicy.{field} 只能包含整数页码")
+            return set()
+        if len(result) != len(raw):
+            errors.append(f"contentDensityPolicy.{field} 页码不得重复")
+        invalid = result - expected_slides
+        if invalid:
+            errors.append(
+                f"contentDensityPolicy.{field} 包含无效页码：{sorted(invalid)}"
+            )
+        return result
+
+    substantive = slide_set("substantiveSlideNumbers")
+    excluded = slide_set("excludedSlideNumbers")
+    external = slide_set("externalContextSlideNumbers")
+    overlap = substantive & excluded
+    if overlap:
+        errors.append(f"正文页与豁免页不得重叠：{sorted(overlap)}")
+    if substantive | excluded != expected_slides:
+        errors.append(
+            "contentDensityPolicy 必须将全部页面划分为正文页或豁免页；"
+            f"缺少 {sorted(expected_slides - (substantive | excluded))}"
+        )
+    if not external.issubset(substantive):
+        errors.append(
+            "externalContextSlideNumbers 必须是 substantiveSlideNumbers 的子集"
+        )
+
+    numeric_defaults = {
+        "minimumContentItemsPerSubstantiveSlide": (6, 4, 12),
+        "minimumEvidenceItemsPerSubstantiveSlide": (2, 2, 8),
+        "minimumResearchQueriesPerSubstantiveSlide": (1, 1, 5),
+        "minimumWebSourcesPerExternalContextSlide": (1, 1, 4),
+    }
+    limits: dict[str, int] = {}
+    for field, (default, minimum, maximum) in numeric_defaults.items():
+        value = policy.get(field, default)
+        if (
+            not isinstance(value, int)
+            or value < minimum
+            or value > maximum
+        ):
+            errors.append(
+                f"contentDensityPolicy.{field} 必须是 "
+                f"{minimum}–{maximum} 的整数"
+            )
+            value = default
+        limits[field] = value
+    max_utilization = policy.get("maxTextCapacityUtilization", 0.85)
+    if (
+        not isinstance(max_utilization, (int, float))
+        or not 0.5 <= float(max_utilization) <= 0.9
+    ):
+        errors.append(
+            "contentDensityPolicy.maxTextCapacityUtilization 必须在 0.5–0.9"
+        )
+        max_utilization = 0.85
+    if policy.get("thinSlideAction") != "research-or-restructure":
+        errors.append(
+            "contentDensityPolicy.thinSlideAction 必须为 research-or-restructure"
+        )
+    if policy.get("requireClaimDiversity") is not True:
+        errors.append("contentDensityPolicy.requireClaimDiversity 必须为 true")
+
+    briefs = {
+        int(item.get("slide", 0)): item
+        for item in manifest.get("slideBriefs", [])
+        if isinstance(item, dict) and isinstance(item.get("slide"), int)
+    }
+    budget_by_shape: dict[tuple[int, int], int] = {}
+    for slide, brief in briefs.items():
+        for budget in brief.get("shapeBudgets", []):
+            if not isinstance(budget, dict):
+                continue
+            try:
+                shape_id = int(budget.get("shapeId", 0))
+                max_chars = int(budget.get("maxChars", 0))
+            except (TypeError, ValueError):
+                continue
+            if shape_id > 0 and max_chars > 0:
+                budget_by_shape[(slide, shape_id)] = max_chars
+    evidence = {
+        str(item.get("evidenceId")): item
+        for item in manifest.get("evidenceRegistry", [])
+        if isinstance(item, dict) and item.get("evidenceId")
+    }
+    sources = {
+        str(item.get("sourceId")): item
+        for item in manifest.get("sources", [])
+        if isinstance(item, dict) and item.get("sourceId")
+    }
+    operation_semantics: dict[int, set[str]] = {}
+    text_utilization: dict[int, list[dict[str, Any]]] = {}
+    for operation in operations:
+        if not isinstance(operation, dict):
+            continue
+        action = operation.get("action")
+        if action in {"delete_slot_group", "add_disclaimer_textbox"}:
+            continue
+        try:
+            slide = int(operation.get("slide", 0))
+        except (TypeError, ValueError):
+            continue
+        semantic_key = str(operation.get("semanticKey", "")).strip()
+        if semantic_key:
+            operation_semantics.setdefault(slide, set()).add(semantic_key)
+        density_semantics = {
+            str(value).strip()
+            for value in briefs.get(slide, {}).get(
+                "contentItemSemanticKeys",
+                [],
+            )
+            if str(value).strip()
+        }
+        if (
+            action in TEXT_ACTIONS
+            and slide in substantive
+            and semantic_key in density_semantics
+        ):
+            capacity = operation.get("capacityCheck")
+            if not isinstance(capacity, dict):
+                continue
+            for shape_id in shape_ids_for(operation, {}):
+                try:
+                    max_chars = budget_by_shape.get(
+                        (slide, shape_id),
+                        int(capacity.get("maxChars", 0)),
+                    )
+                except (TypeError, ValueError):
+                    max_chars = 0
+                text_value = operation_text_for_shape(operation, shape_id) or ""
+                used_chars = len(text_value.replace("\n", ""))
+                utilization = used_chars / max_chars if max_chars > 0 else 1.0
+                text_utilization.setdefault(slide, []).append(
+                    {
+                        "shapeId": shape_id,
+                        "usedChars": used_chars,
+                        "maxChars": max_chars,
+                        "utilization": round(utilization, 4),
+                    }
+                )
+                if utilization > float(max_utilization):
+                    errors.append(
+                        f"第 {slide} 页 shapeId={shape_id} 文字容量使用率 "
+                        f"{utilization:.0%} 超过 {float(max_utilization):.0%}；"
+                        "请精简、拆分或重构页面"
+                    )
+
+    page_audit: list[dict[str, Any]] = []
+    for slide in sorted(expected_slides):
+        brief = briefs.get(slide, {})
+        expected_type = "substantive" if slide in substantive else None
+        slide_type = brief.get("slideType")
+        research_queries = [
+            str(value).strip()
+            for value in brief.get("researchQueries", [])
+            if str(value).strip()
+        ]
+        evidence_ids = [
+            str(value).strip()
+            for value in brief.get("evidenceIds", [])
+            if str(value).strip()
+        ]
+        content_keys = [
+            str(value).strip()
+            for value in brief.get("contentItemSemanticKeys", [])
+            if str(value).strip()
+        ]
+        allowed_semantics = {
+            str(value).strip()
+            for value in brief.get("allowedSemanticKeys", [])
+            if str(value).strip()
+        }
+        page_errors_before = len(errors)
+
+        if slide in substantive:
+            if slide_type != expected_type:
+                errors.append(f"第 {slide} 页 slideType 必须为 substantive")
+            if brief.get("densityStatus") != "ready":
+                errors.append(f"第 {slide} 页 densityStatus 必须为 ready")
+            if len(research_queries) < limits[
+                "minimumResearchQueriesPerSubstantiveSlide"
+            ]:
+                errors.append(
+                    f"第 {slide} 页检索问题不足，至少需要 "
+                    f"{limits['minimumResearchQueriesPerSubstantiveSlide']} 个"
+                )
+            if len(evidence_ids) < limits[
+                "minimumEvidenceItemsPerSubstantiveSlide"
+            ]:
+                errors.append(
+                    f"第 {slide} 页证据项不足，至少需要 "
+                    f"{limits['minimumEvidenceItemsPerSubstantiveSlide']} 个"
+                )
+            if len(content_keys) < limits[
+                "minimumContentItemsPerSubstantiveSlide"
+            ]:
+                errors.append(
+                    f"第 {slide} 页有效内容项不足，至少需要 "
+                    f"{limits['minimumContentItemsPerSubstantiveSlide']} 个"
+                )
+            if not str(brief.get("pageResearchSummary", "")).strip():
+                errors.append(f"第 {slide} 页缺少 pageResearchSummary")
+            if len(set(evidence_ids)) != len(evidence_ids):
+                errors.append(f"第 {slide} 页 evidenceIds 不得重复")
+            if len(set(content_keys)) != len(content_keys):
+                errors.append(f"第 {slide} 页 contentItemSemanticKeys 不得重复")
+            for evidence_id in evidence_ids:
+                if evidence_id not in evidence:
+                    errors.append(
+                        f"第 {slide} 页引用不存在的 evidenceId={evidence_id}"
+                    )
+            undeclared = set(content_keys) - allowed_semantics
+            if undeclared:
+                errors.append(
+                    f"第 {slide} 页内容项未进入 allowedSemanticKeys："
+                    f"{sorted(undeclared)}"
+                )
+            unused = set(content_keys) - operation_semantics.get(slide, set())
+            if unused:
+                errors.append(
+                    f"第 {slide} 页内容项没有对应替换操作：{sorted(unused)}"
+                )
+            if policy.get("requireClaimDiversity") is True:
+                distinct_claims = {
+                    str(evidence.get(evidence_id, {}).get("claim", "")).strip()
+                    for evidence_id in evidence_ids
+                    if str(evidence.get(evidence_id, {}).get("claim", "")).strip()
+                }
+                if len(distinct_claims) < limits[
+                    "minimumEvidenceItemsPerSubstantiveSlide"
+                ]:
+                    errors.append(
+                        f"第 {slide} 页证据陈述缺乏多样性，不能用同一陈述重复凑数"
+                    )
+        else:
+            if slide_type not in {"cover", "section", "closing"}:
+                errors.append(
+                    f"第 {slide} 页是密度豁免页，slideType 必须为 "
+                    "cover、section 或 closing"
+                )
+            if brief.get("densityStatus") != "exempt":
+                errors.append(f"第 {slide} 页 densityStatus 必须为 exempt")
+
+        linked_source_ids = {
+            str(source_id)
+            for evidence_id in evidence_ids
+            for source_id in evidence.get(evidence_id, {}).get("sourceIds", [])
+        }
+        web_source_ids = {
+            source_id
+            for source_id in linked_source_ids
+            if sources.get(source_id, {}).get("sourceType") in WEB_SOURCE_TYPES
+        }
+        if slide in external:
+            if brief.get("externalContextRequired") is not True:
+                errors.append(f"第 {slide} 页 externalContextRequired 必须为 true")
+            if len(web_source_ids) < limits[
+                "minimumWebSourcesPerExternalContextSlide"
+            ]:
+                errors.append(
+                    f"第 {slide} 页外部环境内容至少需要 "
+                    f"{limits['minimumWebSourcesPerExternalContextSlide']} 个网络来源"
+                )
+
+        page_audit.append(
+            {
+                "slide": slide,
+                "slideType": slide_type,
+                "densityStatus": brief.get("densityStatus"),
+                "contentItemCount": len(content_keys),
+                "evidenceItemCount": len(evidence_ids),
+                "researchQueryCount": len(research_queries),
+                "webSourceCount": len(web_source_ids),
+                "externalContextRequired": slide in external,
+                "textCapacity": text_utilization.get(slide, []),
+                "status": (
+                    "passed" if len(errors) == page_errors_before else "failed"
+                ),
+            }
+        )
+
+    return {
+        "required": True,
+        "status": "passed" if len(errors) == initial_error_count else "failed",
+        "policy": policy,
+        "pages": page_audit,
+    }
+
+
 def validate_content_policy(
     manifest: dict[str, Any],
     errors: list[str],
@@ -1272,7 +3072,7 @@ def validate_content_policy(
     if not required:
         return {"required": False, "status": "not-required"}
     if not isinstance(policy, dict):
-        errors.append("1.4 版必须提供 contentPolicy")
+        errors.append("1.4/1.5/1.6 版必须提供 contentPolicy")
         return {"required": True, "status": "missing"}
     expected = {
         "optionalMissingAction": "delete-slot-group",
@@ -1300,13 +3100,14 @@ def validate_residual_policy(
     if not required:
         return {"required": False, "status": "not-required"}
     if not isinstance(policy, dict):
-        errors.append("1.4 版必须提供 residualPolicy")
+        errors.append("1.4/1.5/1.6 版必须提供 residualPolicy")
         return {"required": True, "status": "missing"}
     forbidden_terms = policy.get("forbiddenTextTerms")
     required_terms = policy.get("requiredTextTerms")
     forbidden_media = policy.get("forbiddenMediaSha256")
     gap_only_terms = policy.get("gapOnlyTextTerms")
     gap_slides = policy.get("gapSlideNumbers")
+    forbidden_numbers = policy.get("forbiddenNumericTokens", [])
     if not isinstance(forbidden_terms, list) or not all(
         isinstance(value, str) and value.strip() for value in forbidden_terms or []
     ):
@@ -1316,7 +3117,7 @@ def validate_residual_policy(
     for term in DEFAULT_FORBIDDEN_OPERATIONAL_TERMS:
         if term not in normalized_forbidden:
             errors.append(
-                f"1.4 版 forbiddenTextTerms 必须包含后台缺口提示：{term}"
+                f"1.4/1.5 版 forbiddenTextTerms 必须包含后台缺口提示：{term}"
             )
     if not isinstance(required_terms, list) or not all(
         isinstance(value, str) and value.strip() for value in required_terms or []
@@ -1345,7 +3146,16 @@ def validate_residual_policy(
         errors.append("residualPolicy.gapSlideNumbers 必须是正整数数组")
         gap_slides = []
     if policy.get("ocrRequired") is not True:
-        errors.append("1.4 版 residualPolicy.ocrRequired 必须为 true")
+        errors.append("1.4/1.5 版 residualPolicy.ocrRequired 必须为 true")
+    if str(manifest.get("schemaVersion", "")) in CONTENT_SAFE_SCHEMA_VERSIONS:
+        if not isinstance(forbidden_numbers, list) or not all(
+            isinstance(value, str) and value.strip()
+            for value in forbidden_numbers
+        ):
+            errors.append("1.5 版 forbiddenNumericTokens 必须是字符串数组")
+            forbidden_numbers = []
+        if policy.get("scanEmbeddedData") is not True:
+            errors.append("1.5 版 residualPolicy.scanEmbeddedData 必须为 true")
     return {
         "required": True,
         "status": "passed" if len(errors) == initial_error_count else "failed",
@@ -1354,6 +3164,8 @@ def validate_residual_policy(
         "forbiddenMediaSha256": forbidden_media,
         "gapOnlyTextTerms": gap_only_terms,
         "gapSlideNumbers": gap_slides,
+        "forbiddenNumericTokens": forbidden_numbers,
+        "scanEmbeddedData": policy.get("scanEmbeddedData") is True,
         "ocrRequired": policy.get("ocrRequired") is True,
     }
 
@@ -1363,15 +3175,26 @@ def validate_page_closures(
     objects: dict[tuple[int, int], dict[str, Any]],
     operations: list[dict[str, Any]],
     groups: dict[str, dict[str, Any]],
+    slide_count: int,
     errors: list[str],
 ) -> list[dict[str, Any]]:
     if str(manifest.get("schemaVersion", "")) not in PAGE_CLOSURE_SCHEMA_VERSIONS:
         return []
     raw_closures = manifest.get("pageClosures")
     if not isinstance(raw_closures, list):
-        errors.append("1.4 版必须提供 pageClosures 数组")
+        errors.append("1.4/1.5/1.6 版必须提供 pageClosures 数组")
         return []
     operations_by_slide: dict[int, set[int]] = {}
+    registered_evidence_ids = {
+        str(item.get("evidenceId"))
+        for item in manifest.get("evidenceRegistry", [])
+        if isinstance(item, dict) and item.get("evidenceId")
+    }
+    protected_decisions = {
+        (int(item.get("slide", 0)), int(item.get("shapeId", 0))): item
+        for item in manifest.get("protectedObjects", [])
+        if isinstance(item, dict)
+    }
     for operation in operations:
         if operation.get("action") in CONTROLLED_ADDITIVE_ACTIONS:
             continue
@@ -1428,6 +3251,107 @@ def validate_page_closures(
             )
         if allowed_keep | targets | unknown != reviewed:
             failures.append("保留、目标和未分类对象的并集必须等于 reviewedShapeIds")
+        if str(manifest.get("schemaVersion", "")) in CONTENT_SAFE_SCHEMA_VERSIONS:
+            decisions = closure.get("keepDecisions")
+            if not isinstance(decisions, list):
+                failures.append("1.5 版必须提供 keepDecisions")
+                decisions = []
+            decision_ids: set[int] = set()
+            for decision in decisions:
+                if not isinstance(decision, dict):
+                    failures.append("keepDecisions 包含非对象")
+                    continue
+                try:
+                    decision_id = int(decision.get("shapeId", 0))
+                except (TypeError, ValueError):
+                    decision_id = 0
+                if decision_id <= 0:
+                    failures.append("keepDecisions 包含无效 shapeId")
+                    continue
+                if decision_id in decision_ids:
+                    failures.append(f"keepDecisions 重复 shapeId={decision_id}")
+                decision_ids.add(decision_id)
+                decision_reason = str(decision.get("reason", "")).strip()
+                if not decision_reason:
+                    failures.append(f"shapeId={decision_id} 缺少具体 keep reason")
+                elif (
+                    len(decision_reason) < 8
+                    or decision_reason in GENERIC_KEEP_REASONS
+                ):
+                    failures.append(
+                        f"shapeId={decision_id} 的 keep reason 过于笼统"
+                    )
+                classification = decision.get("classification")
+                target_object = objects.get((slide, decision_id), {})
+                if (
+                    target_object.get("kind") in {"chart", "table"}
+                    and classification != "evidence_backed_context"
+                ):
+                    failures.append(
+                        f"shapeId={decision_id} 是原生数据对象，"
+                        "只能作为 evidence_backed_context 保留"
+                    )
+                if (
+                    str(target_object.get("text", "")).strip()
+                    and classification in {"fixed_visual", "generic_decoration"}
+                ):
+                    failures.append(
+                        f"shapeId={decision_id} 包含可见文字，"
+                        f"不能分类为 {classification}"
+                    )
+                if (
+                    str(target_object.get("text", "")).strip()
+                    and classification == "template_brand"
+                ):
+                    failures.append(
+                        f"shapeId={decision_id} 的可见文字不能作为 template_brand 保留"
+                    )
+                if (
+                    str(target_object.get("text", "")).strip()
+                    and classification == "template_label"
+                    and not is_generic_template_label(target_object.get("text"))
+                ):
+                    failures.append(
+                        f"shapeId={decision_id} 不是封闭词表中的通用模板标签"
+                    )
+                if classification == "evidence_backed_context":
+                    decision_evidence_ids = decision.get("evidenceIds")
+                    if (
+                        not isinstance(decision_evidence_ids, list)
+                        or not decision_evidence_ids
+                    ):
+                        failures.append(
+                            f"shapeId={decision_id} 的证据上下文缺少 evidenceIds"
+                        )
+                    else:
+                        missing_evidence = {
+                            str(value) for value in decision_evidence_ids
+                        } - registered_evidence_ids
+                        if missing_evidence:
+                            failures.append(
+                                f"shapeId={decision_id} 引用不存在的 evidenceIds："
+                                f"{sorted(missing_evidence)}"
+                            )
+                elif classification not in PROTECTED_CLASSES:
+                    failures.append(
+                        f"shapeId={decision_id} 的 keep classification 不受支持"
+                    )
+                else:
+                    protected_item = protected_decisions.get((slide, decision_id))
+                    if (
+                        not protected_item
+                        or protected_item.get("classification") != classification
+                    ):
+                        failures.append(
+                            f"shapeId={decision_id} 的保留决定未与 protectedObjects "
+                            "同分类登记"
+                        )
+            if decision_ids != allowed_keep:
+                failures.append(
+                    "keepDecisions 必须逐一覆盖 allowedKeepShapeIds；"
+                    f"缺少 {sorted(allowed_keep - decision_ids)}，"
+                    f"多出 {sorted(decision_ids - allowed_keep)}"
+                )
         for failure in failures:
             errors.append(f"{prefix}{failure}")
         audit.append(
@@ -1441,12 +3365,23 @@ def validate_page_closures(
             }
         )
     modified_slides = set(operations_by_slide)
-    missing_closures = modified_slides - set(closures)
-    extra_closures = set(closures) - modified_slides
-    if missing_closures:
-        errors.append(f"修改页缺少页面闭环：{sorted(missing_closures)}")
-    if extra_closures:
-        errors.append(f"pageClosures 包含未修改页面：{sorted(extra_closures)}")
+    if str(manifest.get("schemaVersion", "")) in CONTENT_SAFE_SCHEMA_VERSIONS:
+        expected_slides = set(range(1, slide_count + 1))
+        missing_closures = expected_slides - set(closures)
+        extra_closures = set(closures) - expected_slides
+        if missing_closures:
+            errors.append(
+                f"1.5/1.6 版全部页面都必须闭环：缺少 {sorted(missing_closures)}"
+            )
+        if extra_closures:
+            errors.append(f"pageClosures 包含不存在页面：{sorted(extra_closures)}")
+    else:
+        missing_closures = modified_slides - set(closures)
+        extra_closures = set(closures) - modified_slides
+        if missing_closures:
+            errors.append(f"修改页缺少页面闭环：{sorted(missing_closures)}")
+        if extra_closures:
+            errors.append(f"pageClosures 包含未修改页面：{sorted(extra_closures)}")
     return audit
 
 
@@ -1459,9 +3394,18 @@ def validate_manifest(
     schema_version = str(manifest.get("schemaVersion", ""))
 
     if schema_version not in SUPPORTED_SCHEMA_VERSIONS:
-        errors.append("schemaVersion 必须为 1.0、1.1、1.2、1.3 或 1.4")
-    if manifest.get("defaultAction") != "KEEP":
-        errors.append("defaultAction 必须为 KEEP")
+        errors.append(
+            "schemaVersion 必须为 1.0、1.1、1.2、1.3、1.4、1.5 或 1.6"
+        )
+    expected_default = (
+        "FAIL_UNCLASSIFIED_CONTENT"
+        if schema_version in CONTENT_SAFE_SCHEMA_VERSIONS
+        else "KEEP"
+    )
+    if manifest.get("defaultAction") != expected_default:
+        errors.append(
+            f"{schema_version or '当前'} 版 defaultAction 必须为 {expected_default}"
+        )
     if not str(manifest.get("projectName", "")).strip():
         errors.append("projectName 不能为空")
     template_pptx = Path(str(manifest.get("templatePptx", ""))).expanduser()
@@ -1499,6 +3443,21 @@ def validate_manifest(
     if not isinstance(operations, list):
         errors.append("operations 必须是数组")
         operations = []
+    declared_deleted_shape_keys: set[tuple[int, int]] = set()
+    for operation in operations:
+        if (
+            not isinstance(operation, dict)
+            or operation.get("action") != "delete_slot_group"
+        ):
+            continue
+        try:
+            operation_slide = int(operation.get("slide", 0))
+        except (TypeError, ValueError):
+            continue
+        declared_deleted_shape_keys.update(
+            (operation_slide, shape_id)
+            for shape_id in shape_ids_for(operation, groups)
+        )
 
     seen: set[tuple[int, int]] = set()
     replaced_text = 0
@@ -1511,6 +3470,7 @@ def validate_manifest(
     )
     typography_audit: list[dict[str, Any]] = []
     deletion_audit: list[dict[str, Any]] = []
+    logo_audit: list[dict[str, Any]] = []
 
     for index, operation in enumerate(operations, 1):
         prefix = f"第 {index} 项"
@@ -1540,13 +3500,50 @@ def validate_manifest(
             errors.append(f"{prefix} replace_text_group 至少需要两个 shapeIds")
         if action == "replace_text_group":
             primary_shape_id = operation.get("primaryShapeId")
-            if schema_version in PAGE_CLOSURE_SCHEMA_VERSIONS:
+            if schema_version == "1.4":
                 if not isinstance(primary_shape_id, int):
                     errors.append(
                         f"{prefix}1.4 版 replace_text_group 必须包含 primaryShapeId"
                     )
                 elif primary_shape_id not in target_ids:
                     errors.append(f"{prefix} primaryShapeId 必须属于 shapeIds")
+            elif schema_version in CONTENT_SAFE_SCHEMA_VERSIONS:
+                group_mode = operation.get("groupMode")
+                if group_mode not in {
+                    "fragment-map",
+                    "line-reflow",
+                    "composite-box",
+                }:
+                    errors.append(f"{prefix}1.5 版必须声明有效 groupMode")
+                if group_mode == "composite-box":
+                    if not isinstance(primary_shape_id, int):
+                        errors.append(
+                            f"{prefix}composite-box 必须包含 primaryShapeId"
+                        )
+                    elif primary_shape_id not in target_ids:
+                        errors.append(f"{prefix} primaryShapeId 必须属于 shapeIds")
+                else:
+                    fragments = operation.get("fragmentTexts")
+                    if not isinstance(fragments, list):
+                        errors.append(f"{prefix}{group_mode} 必须提供 fragmentTexts")
+                        fragments = []
+                    fragment_ids = [
+                        item.get("shapeId")
+                        for item in fragments
+                        if isinstance(item, dict)
+                    ]
+                    if len(fragment_ids) != len(set(fragment_ids)):
+                        errors.append(f"{prefix} fragmentTexts 的 shapeId 不得重复")
+                    if set(fragment_ids) != set(target_ids):
+                        errors.append(
+                            f"{prefix} fragmentTexts 必须逐一覆盖 shapeIds"
+                        )
+                    if any(
+                        not isinstance(item.get("text"), str)
+                        for item in fragments
+                        if isinstance(item, dict)
+                    ):
+                        errors.append(f"{prefix} fragmentTexts.text 必须是字符串")
         elif action == "delete_slot_group":
             group_id = str(operation.get("slotGroupId", "")).strip()
             group = groups.get(group_id)
@@ -1688,10 +3685,19 @@ def validate_manifest(
                 "styleLock"
             ) != "exact":
                 errors.append(f"{prefix}1.1 及以上文字操作必须设置 styleLock=exact")
-            if not isinstance(operation.get("text"), str):
-                errors.append(f"{prefix}文字替换必须包含字符串 text")
-            elif operation.get("text") == "" and operation.get("allowEmpty") is not True:
-                errors.append(f"{prefix}清空文字必须显式设置 allowEmpty=true")
+            group_mode = operation.get("groupMode")
+            uses_fragment_text = (
+                action == "replace_text_group"
+                and group_mode in {"fragment-map", "line-reflow"}
+            )
+            if not uses_fragment_text:
+                if not isinstance(operation.get("text"), str):
+                    errors.append(f"{prefix}文字替换必须包含字符串 text")
+                elif (
+                    operation.get("text") == ""
+                    and operation.get("allowEmpty") is not True
+                ):
+                    errors.append(f"{prefix}清空文字必须显式设置 allowEmpty=true")
             for shape_id in target_ids:
                 target = objects.get((slide, shape_id))
                 if target is None:
@@ -1760,13 +3766,35 @@ def validate_manifest(
                 ).strip()
                 if not re.fullmatch(r"[0-9a-f]{64}", declared_asset_sha256):
                     errors.append(
-                        f"{prefix}1.4 版图片替换必须声明 assetSha256"
+                        f"{prefix}1.4/1.5 版图片替换必须声明 assetSha256"
                     )
                 elif declared_asset_sha256 != actual_asset_sha256:
                     errors.append(f"{prefix} assetSha256 与图片文件不一致")
             asset_class = operation.get("assetClass")
             if asset_class not in ALLOWED_ASSET_CLASSES:
                 errors.append(f"{prefix} assetClass 不受支持：{asset_class}")
+            logo_like_operation = bool(
+                re.search(
+                    r"(?:^|[._\-\s])logo(?:$|[._\-\s])|标志|标识",
+                    " ".join(
+                        [
+                            str(operation.get("semanticKey", "")),
+                            str(operation.get("role", "")),
+                            str(operation.get("reason", "")),
+                        ]
+                    ),
+                    flags=re.IGNORECASE,
+                )
+            )
+            if (
+                schema_version in BACKGROUND_LOCK_SCHEMA_VERSIONS
+                and logo_like_operation
+                and asset_class != "company_logo"
+            ):
+                errors.append(
+                    f"{prefix}语义上属于 Logo，assetClass 必须为 company_logo，"
+                    "不得用 company_specific_visual 绕过透明底与底板门禁"
+                )
             if not (
                 operation.get("companySpecific") is True
                 or operation.get("explicitUserApproval") is True
@@ -1790,6 +3818,39 @@ def validate_manifest(
                         warnings.append(
                             f"{prefix}将替换候选图标，请核对该对象不是共享语义图标"
                         )
+            if schema_version in CONTENT_SAFE_SCHEMA_VERSIONS:
+                if operation.get("imageFitMode") not in {
+                    "contain",
+                    "cover",
+                    "preserve-crop",
+                }:
+                    errors.append(f"{prefix}1.5 版图片替换必须声明 imageFitMode")
+                if operation.get("aspectRatioValidated") is not True:
+                    errors.append(f"{prefix}1.5 版图片替换必须完成宽高比核对")
+                if (
+                    operation.get("imageFitMode") in {"contain", "cover"}
+                    and operation.get("fitPreparedAsset") is not True
+                ):
+                    errors.append(
+                        f"{prefix}contain/cover 素材必须先按原图片框比例预处理，"
+                        "并设置 fitPreparedAsset=true"
+                    )
+            if (
+                schema_version in BACKGROUND_LOCK_SCHEMA_VERSIONS
+                and (asset_class == "company_logo" or logo_like_operation)
+                and asset.exists()
+            ):
+                logo_audit.append(
+                    validate_logo_operation(
+                        operation,
+                        index,
+                        template_map,
+                        protected,
+                        declared_deleted_shape_keys,
+                        asset,
+                        errors,
+                    )
+                )
 
         elif action == "replace_chart_data":
             for target in target_objects:
@@ -1849,6 +3910,18 @@ def validate_manifest(
         [op for op in operations if isinstance(op, dict)],
         errors,
     )
+    content_safety_audit = validate_content_safety_model(
+        manifest,
+        template_map,
+        [op for op in operations if isinstance(op, dict)],
+        errors,
+    )
+    content_density_audit = validate_content_density(
+        manifest,
+        template_map,
+        [op for op in operations if isinstance(op, dict)],
+        errors,
+    )
     coverage_audit = validate_slot_coverage(
         assignments,
         shape_assignments,
@@ -1856,11 +3929,20 @@ def validate_manifest(
         groups,
         errors,
     )
+    background_audit = validate_background_policy(
+        manifest,
+        template_map,
+        protected,
+        groups,
+        [op for op in operations if isinstance(op, dict)],
+        errors,
+    )
     page_closure_audit = validate_page_closures(
         manifest,
         objects,
         [op for op in operations if isinstance(op, dict)],
         groups,
+        int(template_map.get("slideCount", 0)),
         errors,
     )
 
@@ -1911,6 +3993,14 @@ def validate_manifest(
             "bindings": binding_audit,
             "policy": "人物/产品图片必须与姓名、职务、产品名或型号槽位显式绑定",
         },
+        "logoAudit": {
+            "operations": logo_audit,
+            "policy": (
+                "公司 Logo 使用可验证透明底素材；"
+                "高重叠相邻对象必须逐项识别为模板底板、旧公司底板或遮罩"
+            ),
+        },
+        "backgroundAudit": background_audit,
         "protectedObjectAudit": {
             "objects": protected_audit,
             "policy": "共享语义图标与固定视觉对象不进入替换操作",
@@ -1919,9 +4009,14 @@ def validate_manifest(
         "researchEvidenceAudit": research_audit,
         "contentPolicyAudit": content_policy_audit,
         "residualPolicyAudit": residual_policy_audit,
+        "contentSafetyAudit": content_safety_audit,
+        "contentDensityAudit": content_density_audit,
         "pageClosureAudit": {
             "pages": page_closure_audit,
-            "policy": "每个修改页的全部模板对象必须归入允许保留、授权目标或未分类；未分类必须为零",
+            "policy": (
+                "1.5 版全部页面对象必须闭环；旧版修改页对象必须闭环；"
+                "未分类必须为零"
+            ),
         },
     }
 
@@ -1961,6 +4056,14 @@ def main() -> None:
         report_dir / "protected-object-report.json",
         report["protectedObjectAudit"],
     )
+    background_report = write_json(
+        report_dir / "background-lock-report.json",
+        report["backgroundAudit"],
+    )
+    logo_report = write_json(
+        report_dir / "logo-transparency-report.json",
+        report["logoAudit"],
+    )
     handoff_report = write_json(
         report_dir / "conversion-handoff-audit.json",
         report["conversionHandoffAudit"],
@@ -1977,13 +4080,26 @@ def main() -> None:
         report_dir / "residual-policy-report.json",
         report["residualPolicyAudit"],
     )
+    content_safety_report = write_json(
+        report_dir / "content-safety-report.json",
+        report["contentSafetyAudit"],
+    )
+    content_density_report = write_json(
+        report_dir / "content-density-report.json",
+        report["contentDensityAudit"],
+    )
 
     if report["passed"]:
         metrics = report["metrics"]
+        keep_label = (
+            "个对象经全页闭环允许保留"
+            if str(manifest.get("schemaVersion", "")) in {"1.5", "1.6"}
+            else "个对象默认保持不变"
+        )
         print(
             "白名单校验通过："
             f"{metrics['authorizedTargetCount']} 个对象获授权，"
-            f"{metrics['defaultKeptObjectCount']} 个对象默认保持不变，"
+            f"{metrics['defaultKeptObjectCount']} {keep_label}，"
             f"{metrics['entityBindingCount']} 个实体关系已核对"
         )
         for warning in report["warnings"]:
@@ -1992,9 +4108,11 @@ def main() -> None:
         print(
             "审计报告："
             f"{slot_report}；{typography_report}；"
-            f"{binding_report}；{protected_report}；{handoff_report}；"
+            f"{binding_report}；{protected_report}；{background_report}；"
+            f"{logo_report}；{handoff_report}；"
             f"{research_report}；{page_closure_report}；"
-            f"{residual_policy_report}"
+            f"{residual_policy_report}；{content_safety_report}；"
+            f"{content_density_report}"
         )
     else:
         print("白名单校验失败：")
