@@ -23,6 +23,20 @@ def page_number(path: Path) -> int:
     return int(match.group(1))
 
 
+def classify_detection(
+    number: int,
+    item: dict,
+    allowed: dict[int, str],
+    noise_confidence_max: float,
+) -> tuple[str, str]:
+    confidence = float(item.get("confidence", 0))
+    if number in allowed:
+        return "allowedRaster", allowed[number]
+    if confidence <= noise_confidence_max:
+        return "noise", "low-confidence icon/decorative OCR false positive"
+    return "validResidual", "unapproved high-confidence OCR residue"
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--ocr-dir", required=True, type=Path)
@@ -42,20 +56,12 @@ def main() -> None:
         items = json.loads(path.read_text(encoding="utf-8"))
         classified = []
         for item in items:
-            confidence = float(item.get("confidence", 0))
-            text = str(item.get("text", "")).strip()
-            if number in allowed:
-                category = "allowedRaster"
-                reason = allowed[number]
-            elif confidence <= args.noise_confidence_max:
-                category = "noise"
-                reason = "low-confidence icon/decorative OCR false positive"
-            elif len(text) == 1 and not text.isascii():
-                category = "noise"
-                reason = "manually reviewed single-glyph icon/decorative OCR false positive"
-            else:
-                category = "validResidual"
-                reason = "unapproved high-confidence OCR residue"
+            category, reason = classify_detection(
+                number,
+                item,
+                allowed,
+                args.noise_confidence_max,
+            )
             totals[category] += 1
             classified.append({**item, "category": category, "reason": reason})
         pages.append(

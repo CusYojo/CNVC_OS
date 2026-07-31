@@ -6,6 +6,8 @@ import hashlib
 import json
 from pathlib import Path
 
+from vision_schema import validate_qa_payload
+
 
 def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -27,6 +29,11 @@ def main() -> None:
     work_dir = args.work_dir.expanduser().resolve()
     handoff_path = work_dir / "conversion-handoff.json"
     handoff = load(handoff_path)
+    template_path = Path(handoff["templatePptx"]).expanduser().resolve()
+    template_hash_verified = (
+        template_path.is_file()
+        and sha256(template_path) == handoff.get("templateSha256")
+    )
     watermark = load(work_dir / "watermark-handoff-report.json")
     semantic = load(work_dir / "semantic-build-report.json")
     text_grouping_path = work_dir / "text-grouping-qa-report.json"
@@ -40,6 +47,20 @@ def main() -> None:
     )
     visual_path = work_dir / "visual-qa-report.json"
     visual = load(visual_path)
+    for index, page in enumerate(visual.get("pages") or []):
+        validate_qa_payload(
+            {
+                key: page[key]
+                for key in (
+                    "passed",
+                    "foregroundPassed",
+                    "confidence",
+                    "issues",
+                    "summary",
+                )
+                if key in page
+            }
+        )
     coverage_path = work_dir / "editable-coverage-report.json"
     coverage = (
         load(coverage_path)
@@ -52,11 +73,27 @@ def main() -> None:
         if residue_path.exists()
         else {"passed": False}
     )
+    canvas_path = work_dir / "canvas-overflow-report.json"
+    canvas = load(canvas_path)
     editability = load(work_dir / "editability-report.json")
     semantic_plan = load(work_dir / "semantic-plan.json")
     request_path = work_dir / "agent-vision-request.json"
     request = load(request_path) if request_path.exists() else {}
     executor = request.get("visionExecutor") or {}
+    foreground_required = bool(
+        handoff.get("foregroundQaRequired")
+        or coverage.get("targets")
+    )
+    foreground_passed = (
+        not foreground_required
+        or (
+            bool(visual.get("pages"))
+            and all(
+                page.get("foregroundPassed") is True
+                for page in visual.get("pages") or []
+            )
+        )
+    )
 
     editability_passed = not bool(editability.get("review_required_pages"))
     unresolved = semantic_plan.get("unresolvedRegions") or []
@@ -67,6 +104,10 @@ def main() -> None:
         and bool(visual.get("passed"))
         and bool(coverage.get("passed"))
         and bool(residue.get("passed"))
+        and bool(canvas.get("passed"))
+        and bool(handoff.get("typographyCalibrationPassed"))
+        and template_hash_verified
+        and foreground_passed
         and editability_passed
         and not unresolved
     )
@@ -75,6 +116,14 @@ def main() -> None:
         "visionModel": executor.get("model"),
         "visualQaMode": "required",
         "visualQaPassed": bool(visual.get("passed")),
+        "agentVisualQaPending": False,
+        "foregroundQaRequired": foreground_required,
+        "foregroundQaPassed": foreground_passed,
+        "canvasBoundsPassed": bool(canvas.get("passed")),
+        "canvasBoundsReport": str(canvas_path),
+        "canvasBoundsReportRelative": str(canvas_path.relative_to(work_dir)),
+        "canvasBoundsReportSha256": sha256(canvas_path),
+        "templateHashVerified": template_hash_verified,
         "visualQaReport": str(visual_path),
         "visualQaReportRelative": str(visual_path.relative_to(work_dir)),
         "visualQaReportSha256": sha256(visual_path),

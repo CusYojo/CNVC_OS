@@ -4,7 +4,9 @@ import {
   ensureOutput,
   hexColor,
   optionalArg,
+  portableTypeface,
   requiredArg,
+  runtimeBackend,
 } from "./public_pptx_runtime.mjs";
 import { applyPageOverrides } from "./semantic_overrides.mjs";
 
@@ -36,6 +38,7 @@ async function main() {
   const buildManifest = {
     schemaVersion: "1.0",
     output: FINAL_PPTX,
+    builderBackend: runtimeBackend,
     objects: [],
   };
   for (const page of model.pages) {
@@ -85,7 +88,9 @@ async function main() {
         ? item.runs.map((run) => ({
           text: String(run.text || ""),
           options: {
-            fontFace: run.font || item.font || "Noto Sans CJK SC",
+            fontFace: portableTypeface(
+              run.font || item.font || "Noto Sans CJK SC",
+            ),
             fontSize: pptFontSize(
               run.font_size_pt || run.font_size || item.font_size_pt
                 || item.font_size || 10,
@@ -114,7 +119,7 @@ async function main() {
         y: textY,
         w: textWidth,
         h: textHeight,
-        fontFace: item.font || "Noto Sans CJK SC",
+        fontFace: portableTypeface(item.font || "Noto Sans CJK SC"),
         fontSize: pptFontSize(
           item.font_size_pt || item.font_size || 10,
           Boolean(item.font_size_pt || item.typography_calibrated),
@@ -137,7 +142,7 @@ async function main() {
         text: verticalText,
         sourceLineCount: groupedLineCount,
         styleId: item.style_id || null,
-        fontFace: item.font || "Noto Sans CJK SC",
+        fontFace: portableTypeface(item.font || "Noto Sans CJK SC"),
         fontSizePt: Number(item.font_size_pt || item.font_size || 10),
         typographyCalibrated: Boolean(
           item.font_size_pt || item.typography_calibrated

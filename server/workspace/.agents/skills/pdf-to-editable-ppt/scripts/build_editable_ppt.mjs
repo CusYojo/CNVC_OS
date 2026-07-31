@@ -6,8 +6,10 @@ import {
   hexColor,
   imageReplacementFor,
   optionalArg,
+  portableTypeface,
   PptxGenJS,
   requiredArg,
+  runtimeBackend,
   svgData,
   transparency,
 } from "./public_pptx_runtime.mjs";
@@ -137,7 +139,9 @@ function addText(slide, element, unit, index) {
       .map((run) => ({
         text: String(run.text || ""),
         options: {
-          fontFace: run.font || element.font || "Noto Sans CJK SC",
+          fontFace: portableTypeface(
+            run.font || element.font || "Noto Sans CJK SC",
+          ),
           fontSize: Math.max(
             1,
             Number(run.font_size || element.font_size || 10),
@@ -157,7 +161,7 @@ function addText(slide, element, unit, index) {
     y: y0 * unit,
     w: Math.max(0.04, (x1 - x0) * unit + 0.04),
     h: Math.max(fontSize / 72 * 1.25, (y1 - y0) * unit + 0.02),
-    fontFace: element.font || "Noto Sans CJK SC",
+    fontFace: portableTypeface(element.font || "Noto Sans CJK SC"),
     fontSize,
     bold: Boolean(element.bold),
     italic: Boolean(element.italic),
@@ -190,6 +194,7 @@ async function main() {
   const buildManifest = {
     schemaVersion: "1.0",
     output: FINAL_PPTX,
+    builderBackend: runtimeBackend,
     objects: [],
   };
   for (const page of model.pages) {

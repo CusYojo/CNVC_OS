@@ -1,4 +1,0 @@
-interface:
-  display_name: "PDF to Editable PPT Vision"
-  short_description: "段落聚类、字号校准与图标覆盖门禁的PDF转PPT"
-  default_prompt: "Use $pdf-to-editable-ppt-vision to convert this PDF into a high-fidelity editable PowerPoint with paragraph-level text boxes, template-aligned typography, editable icon coverage, and strict foreground QA."

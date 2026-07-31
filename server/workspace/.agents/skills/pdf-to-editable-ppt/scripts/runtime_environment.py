@@ -11,8 +11,7 @@ def bundled_fontconfig_file(executable: str | Path | None) -> Path | None:
     if not executable:
         return None
     path = Path(executable).expanduser().resolve()
-    roots = (path.parent, *path.parents)
-    for root in roots:
+    for root in (path.parent, *path.parents):
         for candidate in (
             root / "Resources" / "fontconfig" / "fonts.conf",
             root

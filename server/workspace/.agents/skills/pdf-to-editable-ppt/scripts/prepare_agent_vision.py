@@ -172,7 +172,10 @@ def main() -> None:
                 (source_render_dir / f"slide-{page_number:02d}.png").resolve()
             ),
             "artifactImage": str(
-                (work_dir / "artifact-renders" / f"slide-{page_number:02d}.png").resolve()
+                (work_dir / "artifact-renders" / f"slide-{page_number}.png").resolve()
+            ),
+            "foregroundImage": str(
+                (work_dir / "foreground-renders" / f"slide-{page_number}.png").resolve()
             ),
             "qaOutput": str(
                 (json_dir / f"qa-page-{page_number:02d}.json").resolve()
@@ -210,6 +213,11 @@ def main() -> None:
                         "逐个建立 icon-group 内的图标清单和稳定 ID。要求 icons 可编辑时，"
                         "每个图标必须有 type=icon 的重建对象；keep-raster、空 objects 或"
                         " reconstructionComplete=false 均视为未完成。"
+                    ),
+                    "foregroundQaPolicy": (
+                        "当 foregroundImage 存在时，必须检查可编辑前景没有重复的"
+                        "源文字/扁平栅格内容，且必需语义对象没有缺失；在 QA JSON 中"
+                        "显式返回 foregroundPassed。"
                     ),
                 },
                 "analysisSchema": str(

@@ -75,7 +75,7 @@
             "fill": "#202020",
             "width": 1.2
           },
-          "tail": {
+          "head": {
             "type": "triangle"
           }
         }

@@ -1,5 +1,5 @@
 ---
-name: pdf-to-editable-ppt-vision
+name: pdf-to-editable-ppt
 description: 在 Linux、macOS 或 Windows 上，将演示型、扫描型或混合型 PDF 高还原转换为可编辑 PowerPoint；通过段落级文字聚类避免多行正文被拆成逐行文本框，并可融合视觉大模型、专业 OCR、OpenCV 与 PyMuPDF 原生对象证据，识别内嵌流程图、表格、矩阵、图表和图标。用于 PDF 转 PPTX、全文字可编辑、正文多行整体编辑、扁平化文字元素化、图片内部结构识别、视觉辅助重建、严格去水印验收或后续内容替换模板交接。
 ---
 
@@ -53,10 +53,25 @@ Linux 必须具备：
 - LibreOffice Headless；
 - Tesseract，以及 `chi_sim`、`eng`；
 - Noto CJK 字体；
-- Node.js 和 `pptxgenjs`。
+- Node.js；
+- Codex/Presentations 运行时中的 `@oai/artifact-tool`，或兼容部署使用的
+  `pptxgenjs`。
 
-将 `AI_PDF_TO_PPT_NODE_PROJECT_ROOT` 指向包含 `node_modules/pptxgenjs` 的项目
-根目录。完整 Linux 部署要求见
+在 Codex 中先调用 `load_workspace_dependencies`，将返回的 Node 依赖目录配置为：
+
+```bash
+export PDF_TO_PPT_ARTIFACT_TOOL_ROOT="/absolute/dependencies/node"
+export AI_PDF_TO_PPT_BUILDER_BACKEND="artifact-tool"
+```
+
+独立服务暂未提供 `@oai/artifact-tool` 时，才使用兼容后端：
+
+```bash
+export AI_PDF_TO_PPT_BUILDER_BACKEND="pptxgenjs"
+export AI_PDF_TO_PPT_NODE_PROJECT_ROOT="/absolute/project-with-node_modules"
+```
+
+完整 Linux 部署要求见
 [references/cross-platform.md](references/cross-platform.md)。
 
 ## 视觉运行模式
@@ -155,13 +170,16 @@ python3 "$SKILL_DIR/scripts/convert_pdf.py" \
 ```
 
 构建完成后，当前 Agent 按 `qaPages[]` 逐页对比 `sourceImage` 与
-`artifactImage`，将复核结果写到对应 `qaOutput`，且必须满足
+`artifactImage`，并检查 `foregroundImage` 中不存在重复源文字、源栅格或
+缺失的必需语义对象。将复核结果写到对应 `qaOutput`，且必须满足
 `references/agent-visual-qa.schema.json`。再运行：
 
 ```bash
 python3 "$SKILL_DIR/scripts/review_renders_with_vision.py" \
   --source-render-dir "/absolute/build/source-renders" \
   --artifact-render-dir "/absolute/build/artifact-renders" \
+  --foreground-render-dir "/absolute/build/foreground-renders" \
+  --require-foreground \
   --output "/absolute/build/visual-qa-report.json" \
   --mode required \
   --provider json \
@@ -232,12 +250,15 @@ python3 "$SKILL_DIR/scripts/convert_pdf.py" \
    - `semantic-overrides.json`
 7. 构建 PPTX，并同步生成 `build-manifest.json`。
 8. 使用 `validate_semantic_build.py` 验证计划中的对象确实写入构建清单。
-9. 使用 LibreOffice 渲染全部页面。
-10. 执行规则检查与当前 Agent 视觉复核，生成 `visual-qa-report.json`。
-11. 执行水印包扫描和多角度 OCR。
-12. 对最终去字背景执行二次 OCR，并生成前景独立性审计。
-13. 生成 `conversion-handoff.json`。
-14. 用户指定对象类别时，执行 `validate_editable_coverage.py`；任何未清点或未
+9. 使用 `validate_canvas_bounds.py` 检查所有对象未越出幻灯片画布。
+10. 生成移除源背景、源图片、源矢量和已被重建源文字的前景版 QA PPTX。
+11. 使用 LibreOffice 渲染成品与前景版的全部页面。
+12. 执行规则检查与当前 Agent 视觉复核，生成 `visual-qa-report.json`。
+13. 执行水印包扫描和多角度 OCR。
+14. 对最终去字背景执行二次 OCR，并生成前景独立性审计。
+15. 生成 `conversion-handoff.json`；当 Agent 复核尚未完成时必须保留
+    `agentVisualQaPending=true`，不得提前签发可替换证书。
+16. 用户指定对象类别时，执行 `validate_editable_coverage.py`；任何未清点或未
     发射的文字、图标、表格、图表、形状或连接线都会阻断交付。
 
 ## 证据裁决
@@ -280,8 +301,9 @@ PDF 边界 > OpenCV 几何 > OCR 框 > 视觉模型近似框
 - `tables`：PowerPoint 表格；
 - `charts`：数据已验证的原生图表。
 
-连接线通过节点名称计算端点，但当前 PptxGenJS 输出不保证具有 PowerPoint
-“随节点移动”的附着关系；交付时不得声称为附着式连接线。
+连接线使用 `head=目标端`、`tail=来源端` 的统一契约。`artifact-tool` 后端
+使用节点附着连接线；PptxGenJS 兼容后端只按节点位置计算端点，不保证随节点
+移动，交付时不得把兼容后端结果声称为附着式连接线。
 
 PDF 原生 drawing 默认仍以 SVG 保存；只有语义计划明确创建的简单形状才是
 PowerPoint 原生形状。
@@ -322,6 +344,8 @@ PowerPoint 原生形状。
 - `editability-residue-report.json`
 - `editable-surface-audit.json`
 - `foreground-only.pptx`（仅 QA，不交付）
+- `foreground-renders/`（仅 QA，不交付）
+- `canvas-overflow-report.json`
 
 只有以下条件同时成立时，才能令 `readyForContentReplacement=true`：
 
@@ -333,12 +357,16 @@ PowerPoint 原生形状。
 - 没有待解决的视觉语义区域；
 - 没有未复核的大面积内嵌图片。
 - 二次 OCR 没有未豁免的有效文字残留；
-- 前景版 QA 中要求可编辑的业务信息仍然完整。
+- 画布边界检查通过；
+- 前景版 QA 中要求可编辑的业务信息仍然完整；
+- 当前 Agent 最终视觉复核已完成，`agentVisualQaPending=false`；
+- 成品文件 SHA-256 与交接证书记录一致。
 
 ## 质检
 
 - 渲染最终 PPTX 的每一页。
-- 运行 Presentations 技能的 `slides_test.py`。
+- 必须运行本 Skill 的 `validate_canvas_bounds.py`；若当前 Presentations
+  运行时提供 `slides_test.py`，再追加运行该检查器。
 - 检查文字换行、字体回退、遮挡、画布溢出和连接线方向。
 - 检查 `text-grouping-qa-report.json`，确认文字完整、富文本 runs 一致，
   并记录多行正文合并数量与文本框减少量。
@@ -360,6 +388,8 @@ PowerPoint 原生形状。
   “全元素可编辑”，容器、节点、圆环和全部关系线也必须计入。
 - 对重要数字执行 PDF/OCR 双重核对。
 - 视觉模型 QA 只能用于发现差异，不能代替结构、水印和文字检查。
+- 所有 Agent 分页 JSON 都必须通过 `vision_schema.py` 的严格运行时校验；
+  未声明字段、不完整 JSON 和缺少 `foregroundPassed` 的必需复核均为失败。
 - Linux 使用 LibreOffice 与内置渲染器验证，并披露未经过 PowerPoint 原生验证。
 
 扁平化、内嵌流程图和保真细节分别见：

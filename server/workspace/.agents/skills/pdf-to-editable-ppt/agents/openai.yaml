@@ -1,4 +1,4 @@
 interface:
-  display_name: "PDF to Editable PPT Vision"
-  short_description: "段落聚类、字号校准与图标覆盖门禁的PDF转PPT"
-  default_prompt: "Use $pdf-to-editable-ppt-vision to convert this PDF into a high-fidelity editable PowerPoint with paragraph-level text boxes, template-aligned typography, editable icon coverage, and strict foreground QA."
+  display_name: "PDF 转可编辑 PPT（视觉增强）"
+  short_description: "将演示型或扫描型 PDF 高还原转换为可编辑 PPTX"
+  default_prompt: "Use $pdf-to-editable-ppt to convert this PDF into a high-fidelity editable PowerPoint with paragraph-level text, verified semantic objects, attached connectors when supported, and strict foreground QA."

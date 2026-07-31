@@ -1,6 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
-import { hexColor, svgData } from "./public_pptx_runtime.mjs";
+import {
+  hexColor,
+  portableTypeface,
+  svgData,
+} from "./public_pptx_runtime.mjs";
 
 
 function positionOf(value, scale) {
@@ -40,7 +44,9 @@ function fillOptions(value, fallback = "FFFFFF") {
 function textOptions(style = {}) {
   const insets = style.insets || {};
   return {
-    fontFace: style.typeface || style.fontFace || "Noto Sans CJK SC",
+    fontFace: portableTypeface(
+      style.typeface || style.fontFace || "Noto Sans CJK SC",
+    ),
     fontSize: Math.max(1, Number(style.fontSize || 14)),
     color: hexColor(style.color, "202020"),
     bold: Boolean(style.bold),
@@ -127,14 +133,41 @@ function addConnector(slide, pptx, item, nodes, pageNumber, manifest) {
     });
     return;
   }
-  const [x1, y1] = nodeAnchor(from, item.fromSide || "right");
-  const [x2, y2] = nodeAnchor(to, item.toSide || "left");
-  const line = lineOptions(item.line);
-  const tailType = item.tail?.type || item.endArrowType;
-  const headType = item.head?.type || item.beginArrowType;
-  if (tailType && tailType !== "none") line.endArrowType = tailType;
-  if (headType && headType !== "none") line.beginArrowType = headType;
+  const legacyTailTargetsTo = !item.head && item.tail;
+  const head = item.head || (legacyTailTargetsTo ? item.tail : undefined);
+  const tail = item.head ? item.tail : undefined;
   const objectName = item.name || `connector-${item.from}-${item.to}`;
+  if (
+    pptx.supportsAttachedConnectors
+    && typeof slide.connectShapes === "function"
+    && from.element
+    && to.element
+  ) {
+    slide.connectShapes(from.element, to.element, {
+      name: objectName,
+      kind: item.kind || "straight",
+      fromSide: item.fromSide || "right",
+      toSide: item.toSide || "left",
+      line: item.line,
+      head,
+      tail,
+      cap: item.cap,
+      join: item.join,
+    });
+    addManifest(manifest, pageNumber, "connector", item, {
+      segmentCount: 1,
+      attached: true,
+    });
+    return;
+  }
+
+  const [x1, y1] = nodeAnchor(from.position, item.fromSide || "right");
+  const [x2, y2] = nodeAnchor(to.position, item.toSide || "left");
+  const line = lineOptions(item.line);
+  const targetType = head?.type || item.endArrowType;
+  const sourceType = tail?.type || item.beginArrowType;
+  if (targetType && targetType !== "none") line.endArrowType = targetType;
+  if (sourceType && sourceType !== "none") line.beginArrowType = sourceType;
   if (item.kind === "elbow") {
     const middleX = (x1 + x2) / 2;
     const first = { ...line, endArrowType: undefined };
@@ -147,10 +180,16 @@ function addConnector(slide, pptx, item, nodes, pageNumber, manifest) {
     addLine(slide, pptx, x1, y1, middleX, y1, first, `${objectName}-1`);
     addLine(slide, pptx, middleX, y1, middleX, y2, middle, `${objectName}-2`);
     addLine(slide, pptx, middleX, y2, x2, y2, last, `${objectName}-3`);
-    addManifest(manifest, pageNumber, "connector", item, { segmentCount: 3 });
+    addManifest(manifest, pageNumber, "connector", item, {
+      segmentCount: 3,
+      attached: false,
+    });
   } else {
     addLine(slide, pptx, x1, y1, x2, y2, line, objectName);
-    addManifest(manifest, pageNumber, "connector", item, { segmentCount: 1 });
+    addManifest(manifest, pageNumber, "connector", item, {
+      segmentCount: 1,
+      attached: false,
+    });
   }
 }
 
@@ -177,7 +216,7 @@ function addCover(slide, pptx, item, scale, pageNumber, manifest) {
 
 function addShape(slide, pptx, item, scale, pageNumber, manifest, nodes) {
   const pos = positionOf(item, scale);
-  slide.addShape(shapeType(pptx, item.geometry), {
+  const element = slide.addShape(shapeType(pptx, item.geometry), {
     ...pos,
     fill: fillOptions(item.fill),
     line: lineOptions(item.line),
@@ -186,7 +225,7 @@ function addShape(slide, pptx, item, scale, pageNumber, manifest, nodes) {
     radius: Number(item.radius || 0),
     objectName: item.name || "semantic-shape",
   });
-  nodes.set(item.name, pos);
+  nodes.set(item.name, { position: pos, element });
   if (item.text) {
     slide.addText(String(item.text), {
       ...pos,
@@ -271,7 +310,7 @@ function addTable(slide, item, scale, pageNumber, manifest) {
     },
     fill: hexColor(item.fill, "FFFFFF"),
     color: hexColor(item.color, "202020"),
-    fontFace: item.fontFace || "Noto Sans CJK SC",
+    fontFace: portableTypeface(item.fontFace || "Noto Sans CJK SC"),
     fontSize: Math.max(1, Number(item.fontSize || 12)),
     margin: Number(item.margin || 2),
     autoFit: false,
@@ -322,16 +361,30 @@ export function applyPageOverrides({
   const nodes = new Map();
 
   for (const item of pageOverride.shapes || []) {
-    if (item.name) nodes.set(item.name, positionOf(item, scale));
+    if (item.name) {
+      nodes.set(item.name, {
+        position: positionOf(item, scale),
+        element: null,
+      });
+    }
   }
   for (const item of pageOverride.covers || []) {
     addCover(slide, pptx, item, scale, pageNumber, manifest);
   }
-  for (const item of pageOverride.connectors || []) {
-    addConnector(slide, pptx, item, nodes, pageNumber, manifest);
-  }
-  for (const item of pageOverride.shapes || []) {
-    addShape(slide, pptx, item, scale, pageNumber, manifest, nodes);
+  if (pptx.supportsAttachedConnectors) {
+    for (const item of pageOverride.shapes || []) {
+      addShape(slide, pptx, item, scale, pageNumber, manifest, nodes);
+    }
+    for (const item of pageOverride.connectors || []) {
+      addConnector(slide, pptx, item, nodes, pageNumber, manifest);
+    }
+  } else {
+    for (const item of pageOverride.connectors || []) {
+      addConnector(slide, pptx, item, nodes, pageNumber, manifest);
+    }
+    for (const item of pageOverride.shapes || []) {
+      addShape(slide, pptx, item, scale, pageNumber, manifest, nodes);
+    }
   }
   for (const item of pageOverride.texts || []) {
     addText(slide, item, scale, pageNumber, manifest);

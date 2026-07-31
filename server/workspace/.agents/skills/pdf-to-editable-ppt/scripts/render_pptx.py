@@ -7,6 +7,8 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from runtime_environment import fontconfig_environment
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(
@@ -27,6 +29,10 @@ def main() -> None:
         temporary = Path(directory)
         profile = temporary / "lo-profile"
         profile.mkdir()
+        environment = fontconfig_environment(
+            args.libreoffice,
+            temporary / "fontconfig-cache",
+        )
         result = subprocess.run(
             [
                 args.libreoffice,
@@ -44,6 +50,7 @@ def main() -> None:
             encoding="utf-8",
             errors="replace",
             timeout=args.timeout_seconds,
+            env=environment,
         )
         if result.returncode:
             raise RuntimeError(
@@ -68,6 +75,7 @@ def main() -> None:
             encoding="utf-8",
             errors="replace",
             timeout=args.timeout_seconds,
+            env=environment,
         )
         if result.returncode:
             raise RuntimeError(

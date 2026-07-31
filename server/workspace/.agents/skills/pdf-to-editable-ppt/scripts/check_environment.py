@@ -11,6 +11,8 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from runtime_environment import fontconfig_environment
+
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 LINUX_REQUIRED_FONTS = ("Noto Sans CJK SC", "Noto Serif CJK SC")
@@ -126,7 +128,7 @@ def pptx_builder_runtime_probe(
         f"const runtime = await import({json.dumps(runtime_uri)});"
         "const built = runtime.createPresentation(960, 540);"
         "if (!built?.pptx || built.slideWidth <= 0) process.exit(2);"
-        "console.log(built.pptx.constructor.name);"
+        "console.log(runtime.runtimeBackend);"
     )
     try:
         result = subprocess.run(
@@ -143,7 +145,7 @@ def pptx_builder_runtime_probe(
     except subprocess.TimeoutExpired:
         return {
             "passed": False,
-            "error": f"PptxGenJS 运行时检查超过 {timeout_seconds} 秒",
+            "error": f"PPTX 构建运行时检查超过 {timeout_seconds} 秒",
         }
     output = (result.stdout or result.stderr).strip()
     return {
@@ -211,23 +213,28 @@ def libreoffice_smoke_test(
     if not pdftoppm:
         return {"passed": False, "error": "未找到 pdftoppm"}
 
-    environment = os.environ.copy()
-    environment.pop("DISPLAY", None)
-    environment.pop("WAYLAND_DISPLAY", None)
-
     try:
         with tempfile.TemporaryDirectory(prefix="lo-smoke-") as directory:
             work = Path(directory)
+            environment = fontconfig_environment(
+                libreoffice,
+                work / "fontconfig-cache",
+            )
+            environment.pop("DISPLAY", None)
+            environment.pop("WAYLAND_DISPLAY", None)
 
             # Create a minimal PPTX with python zipfile
             import zipfile
             pptx_path = work / "smoke.pptx"
             _write_minimal_pptx(pptx_path)
+            profile = work / "libreoffice-profile"
+            profile.mkdir()
 
             # Convert PPTX → PDF via LibreOffice headless
             lo_result = subprocess.run(
                 [
                     libreoffice,
+                    f"-env:UserInstallation={profile.as_uri()}",
                     "--headless",
                     "--convert-to", "pdf",
                     "--outdir", str(work),
@@ -485,7 +492,7 @@ def build_report(
         for name, present in {
             "LibreOffice": commands["libreoffice"] is not None,
             "Poppler pdftoppm": command_checks["pdftoppm"]["passed"],
-            "PptxGenJS 构建运行时": command_checks["pptx_builder"]["passed"],
+            "PPTX 构建运行时": command_checks["pptx_builder"]["passed"],
             "PyMuPDF": modules["PyMuPDF"],
             "Pillow": modules["Pillow"],
             "LibreOffice + pdftoppm 渲染冒烟": libreoffice_smoke["passed"],
@@ -555,7 +562,7 @@ def print_human(report: dict) -> None:
     ):
         print(f"{label}：{report['commands'][key] or '未找到'}")
     builder = report["command_checks"]["pptx_builder"]
-    print(f"PptxGenJS 构建运行时：{'通过' if builder['passed'] else '失败'}")
+    print(f"PPTX 构建运行时：{'通过' if builder['passed'] else '失败'}")
     if builder.get("error"):
         print("  " + str(builder["error"]).replace("\n", "\n  "))
     for label, present in report["python_modules"].items():

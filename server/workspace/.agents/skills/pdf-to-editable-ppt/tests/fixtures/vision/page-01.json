@@ -1,6 +1,17 @@
 {
   "pageType": "hybrid",
   "confidence": 0.96,
+  "typography": {
+    "sourceFontVerified": false,
+    "styles": [
+      {
+        "styleId": "diagram-label",
+        "fontFamily": "Noto Sans CJK SC",
+        "fontSizePt": 14,
+        "bold": false
+      }
+    ]
+  },
   "regions": [
     {
       "id": "fixture-flow",
@@ -9,6 +20,7 @@
       "recommendedAction": "semantic-rebuild",
       "confidence": 0.95,
       "reconstructionComplete": true,
+      "expectedObjectCount": 3,
       "coverFill": "#F5F7FA",
       "objects": [
         {
@@ -48,7 +60,7 @@
             "fill": "#202020",
             "width": 1
           },
-          "tail": {
+          "head": {
             "type": "triangle"
           }
         }
