@@ -134,7 +134,12 @@ def classify_pdf_model(model_path):
     }
 
 
-def build_editability_report(route_report, overrides_path):
+def build_editability_report(
+    route_report,
+    overrides_path,
+    editable_scope,
+    flattened_mode,
+):
     overrides = {"slides": {}}
     if overrides_path:
         overrides = json.loads(
@@ -150,35 +155,89 @@ def build_editability_report(route_report, overrides_path):
         "tables",
         "imageReplacements",
     )
+    required_expected_keys = {
+        "text": (),
+        "text-and-icons": ("icons",),
+        "all": (
+            "covers",
+            "shapes",
+            "connectors",
+            "texts",
+            "icons",
+            "charts",
+            "tables",
+            "imageReplacements",
+        ),
+    }[editable_scope]
     pages = []
     for page in route_report["pages"]:
         candidates = page.get("embedded_image_candidates") or []
-        if not candidates:
+        requires_semantic_review = bool(page.get("flattened") or candidates)
+        if not requires_semantic_review:
             continue
         page_override = overrides.get("slides", {}).get(str(page["page"]), {})
-        override_count = sum(
-            len(page_override.get(key) or []) for key in semantic_keys
-        )
+        actual_counts = {
+            key: len(page_override.get(key) or []) for key in semantic_keys
+        }
+        override_count = sum(actual_counts.values())
+        review = page_override.get("review") or {}
+        unresolved = review.get("unresolvedRegions") or []
+        expected_counts = review.get("expectedCounts") or {}
+        missing_expected_keys = [
+            key for key in required_expected_keys if key not in expected_counts
+        ]
+        underfilled = {
+            key: {
+                "expected": int(expected_counts.get(key, 0)),
+                "actual": actual_counts.get(key, 0),
+            }
+            for key in required_expected_keys
+            if (
+                key in expected_counts
+                and actual_counts.get(key, 0) < int(expected_counts.get(key, 0))
+            )
+        }
+        if editable_scope == "text":
+            passed = not page.get("flattened") or flattened_mode == "ocr"
+            status = "ocr-text-ready" if passed else "ocr-text-required"
+        else:
+            passed = (
+                bool(review.get("completed"))
+                and not unresolved
+                and not missing_expected_keys
+                and not underfilled
+                and (not page.get("flattened") or flattened_mode == "ocr")
+            )
+            status = (
+                "semantic-review-complete" if passed else "review-required"
+            )
         pages.append(
             {
                 "page": page["page"],
+                "flattened": bool(page.get("flattened")),
                 "candidate_count": len(candidates),
                 "candidates": candidates,
                 "semantic_override_count": override_count,
-                "status": (
-                    "semantic-overrides-present"
-                    if override_count
-                    else "review-required"
-                ),
+                "actual_counts": actual_counts,
+                "expected_counts": expected_counts,
+                "missing_expected_keys": missing_expected_keys,
+                "underfilled_counts": underfilled,
+                "unresolved_regions": unresolved,
+                "allowed_raster_regions": review.get("allowedRasterRegions") or [],
+                "review_completed": bool(review.get("completed")),
+                "status": status,
             }
         )
     return {
+        "editable_scope": editable_scope,
         "candidate_page_count": len(pages),
         "candidate_image_count": sum(
             page["candidate_count"] for page in pages
         ),
         "review_required_pages": [
-            page["page"] for page in pages if page["status"] == "review-required"
+            page["page"]
+            for page in pages
+            if page["status"] in {"review-required", "ocr-text-required"}
         ],
         "pages": pages,
     }
@@ -216,6 +275,14 @@ def main():
         choices=("image", "ocr"),
         default="image",
         help="用于完全扁平化 PDF：选择整页图片高保真模式或 OCR 文字可编辑模式。",
+    )
+    parser.add_argument(
+        "--editable-scope",
+        choices=("text", "text-and-icons", "all"),
+        default="all",
+        help=(
+            "交付可编辑范围；默认 all，要求逐页确认文字、图标、图形、图表和表格。"
+        ),
     )
     parser.add_argument(
         "--ocr-json-dir",
@@ -263,6 +330,36 @@ def main():
         type=float,
         default=0.45,
         help="可编辑文字的最低 OCR 置信度，默认值：0.45。",
+    )
+    parser.add_argument(
+        "--ocr-body-font-scale",
+        type=float,
+        default=0.75,
+        help="OCR 正文字号比例，默认值：0.75。",
+    )
+    parser.add_argument(
+        "--ocr-title-font-scale",
+        type=float,
+        default=0.78,
+        help="OCR 页标题字号比例，默认值：0.78。",
+    )
+    parser.add_argument(
+        "--ocr-display-font-scale",
+        type=float,
+        default=0.98,
+        help="OCR 封面标题和展示数字字号比例，默认值：0.98。",
+    )
+    parser.add_argument(
+        "--ocr-minimum-font-size",
+        type=float,
+        default=5,
+        help="OCR 可编辑文字最小字号，默认值：5 磅。",
+    )
+    parser.add_argument(
+        "--ocr-maximum-font-size",
+        type=float,
+        default=96,
+        help="OCR 可编辑文字最大字号，默认值：96 磅。",
     )
     parser.add_argument(
         "--overrides",
@@ -317,6 +414,19 @@ def main():
         raise ValueError("--max-pages 不能小于 0")
     if args.watermark_qa_ocr_timeout_seconds <= 0:
         raise ValueError("--watermark-qa-ocr-timeout-seconds 必须大于 0")
+    for name in (
+        "ocr_body_font_scale",
+        "ocr_title_font_scale",
+        "ocr_display_font_scale",
+        "ocr_minimum_font_size",
+        "ocr_maximum_font_size",
+    ):
+        if getattr(args, name) <= 0:
+            raise ValueError(f"--{name.replace('_', '-')} 必须大于 0")
+    if args.ocr_maximum_font_size < args.ocr_minimum_font_size:
+        raise ValueError(
+            "--ocr-maximum-font-size 不能小于 --ocr-minimum-font-size"
+        )
 
     input_pdf = args.input.expanduser().resolve()
     output_pptx = args.output.expanduser().resolve()
@@ -407,7 +517,10 @@ def main():
         encoding="utf-8",
     )
     editability_report = build_editability_report(
-        route_report, args.overrides
+        route_report,
+        args.overrides,
+        args.editable_scope,
+        args.flattened_mode,
     )
     editability_report_path = work_dir / "editability-report.json"
     editability_report_path.write_text(
@@ -455,6 +568,8 @@ def main():
             "覆盖清单重建指定区域。转换器已停止，避免静默输出不可编辑页面。"
         )
 
+    build_manifest_path = work_dir / "build-manifest.json"
+    layout_report_path = work_dir / "ocr-layout-report.json"
     if route_report["route"] == "flattened" and args.flattened_mode == "ocr":
         flattened_model = work_dir / "flattened-editable-model.json"
         command = [
@@ -480,6 +595,20 @@ def main():
             args.ocr_body_font,
             "--title-font",
             args.ocr_title_font,
+            "--render-dpi",
+            "96",
+            "--body-font-scale",
+            str(args.ocr_body_font_scale),
+            "--title-font-scale",
+            str(args.ocr_title_font_scale),
+            "--display-font-scale",
+            str(args.ocr_display_font_scale),
+            "--minimum-font-size",
+            str(args.ocr_minimum_font_size),
+            "--maximum-font-size",
+            str(args.ocr_maximum_font_size),
+            "--layout-report",
+            layout_report_path,
         ]
         if args.tesseract:
             command.extend(["--tesseract", args.tesseract])
@@ -501,6 +630,8 @@ def main():
             flattened_model,
             "--output",
             output_pptx,
+            "--build-manifest",
+            build_manifest_path,
         ]
         if args.overrides:
             command.extend(["--overrides", args.overrides.expanduser().resolve()])
@@ -518,6 +649,8 @@ def main():
             model_path,
             "--output",
             output_pptx,
+            "--build-manifest",
+            build_manifest_path,
         ]
         if args.overrides:
             command.extend(["--overrides", args.overrides.expanduser().resolve()])
@@ -526,6 +659,71 @@ def main():
             cwd=work_dir,
             timeout_seconds=args.command_timeout_seconds,
         )
+        layout_report_path.write_text(
+            json.dumps(
+                {
+                    "schemaVersion": 1,
+                    "passed": True,
+                    "status": "not-applicable",
+                    "reason": "PDF 包含原生文字对象，沿用 PDF 字体与字号元数据。",
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+
+    semantic_qa_path = work_dir / "semantic-build-report.json"
+    if args.overrides:
+        run(
+            [
+                sys.executable,
+                SKILL_DIR / "scripts" / "validate_semantic_build.py",
+                "--overrides",
+                args.overrides.expanduser().resolve(),
+                "--build-manifest",
+                build_manifest_path,
+                "--output",
+                semantic_qa_path,
+            ],
+            timeout_seconds=args.command_timeout_seconds,
+        )
+    else:
+        semantic_qa_path.write_text(
+            json.dumps(
+                {
+                    "passed": True,
+                    "expectedObjectCount": 0,
+                    "emittedSemanticObjectCount": 0,
+                    "missingObjects": [],
+                    "failedObjects": [],
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+
+    editable_surface_path = work_dir / "editable-surface-report.json"
+    editable_surface_command = [
+        sys.executable,
+        SKILL_DIR / "scripts" / "audit_editable_surface.py",
+        "--pptx",
+        output_pptx,
+        "--output",
+        editable_surface_path,
+    ]
+    if route_report["route"] == "flattened" and args.flattened_mode == "ocr":
+        editable_surface_command.extend(
+            [
+                "--foreground-only-pptx",
+                work_dir / "editable-foreground-only.pptx",
+            ]
+        )
+    run(
+        editable_surface_command,
+        timeout_seconds=args.command_timeout_seconds,
+    )
 
     render_dir = work_dir / "artifact-renders"
     run(
@@ -597,18 +795,29 @@ def main():
     watermark_qa = json.loads(
         watermark_qa_path.read_text(encoding="utf-8")
     )
+    semantic_qa = json.loads(
+        semantic_qa_path.read_text(encoding="utf-8")
+    )
+    editable_surface = json.loads(
+        editable_surface_path.read_text(encoding="utf-8")
+    )
+    layout_qa = json.loads(
+        layout_report_path.read_text(encoding="utf-8")
+    )
     output_sha256 = hashlib.sha256(output_pptx.read_bytes()).hexdigest()
     editability_review_passed = not bool(
         editability_report.get("review_required_pages")
-    )
+    ) and bool(semantic_qa.get("passed")) and bool(editable_surface.get("passed"))
+    layout_qa_passed = bool(layout_qa.get("passed"))
     handoff = {
-        "schemaVersion": "1.1",
+        "schemaVersion": "1.2",
         "producerSkill": "pdf-to-editable-ppt",
         "templatePptx": str(output_pptx),
         "templateSha256": output_sha256,
         "pathBinding": "sha256",
         "sourcePdf": str(input_pdf),
         "route": route_report["route"],
+        "editableScope": args.editable_scope,
         "watermarkPolicy": (
             "keep" if args.keep_watermarks else args.watermark_mode
         ),
@@ -628,11 +837,27 @@ def main():
         "editabilityReportSha256": hashlib.sha256(
             editability_report_path.read_bytes()
         ).hexdigest(),
+        "semanticBuildPassed": bool(semantic_qa.get("passed")),
+        "semanticBuildReport": str(semantic_qa_path),
+        "semanticBuildReportSha256": hashlib.sha256(
+            semantic_qa_path.read_bytes()
+        ).hexdigest(),
+        "editableSurfacePassed": bool(editable_surface.get("passed")),
+        "editableSurfaceReport": str(editable_surface_path),
+        "editableSurfaceReportSha256": hashlib.sha256(
+            editable_surface_path.read_bytes()
+        ).hexdigest(),
+        "layoutCalibrationPassed": layout_qa_passed,
+        "layoutCalibrationReport": str(layout_report_path),
+        "layoutCalibrationReportSha256": hashlib.sha256(
+            layout_report_path.read_bytes()
+        ).hexdigest(),
         "unresolvedEditablePages": editability_report.get(
             "review_required_pages", []
         ),
         "readyForContentReplacement": bool(watermark_qa.get("passed"))
-        and editability_review_passed,
+        and editability_review_passed
+        and layout_qa_passed,
     }
     handoff_path = work_dir / "conversion-handoff.json"
     handoff_path.write_text(

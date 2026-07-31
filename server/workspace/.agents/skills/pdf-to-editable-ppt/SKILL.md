@@ -1,6 +1,6 @@
 ---
 name: pdf-to-editable-ppt
-description: 在 macOS、Windows 或 Linux 上将演示型 PDF 高还原转换为 PowerPoint，默认移除跨页、斜向、低透明度水印，并通过PPTX包内扫描和逐页渲染OCR生成无水印交接证书；支持富对象重建、扁平化OCR元素化、内嵌流程图、产品矩阵、文字密集型栅格图、竖排文字、扇形、曲线路径、图标、连接线、图表和表格的可编辑语义重建。适用于将PDF、WPS/PowerPoint导出稿、投资建议书、商业计划书或报告转换为1:1可编辑PPTX，尤其适用于后续串联 editable-ppt-content-replacer 的模板制作流程。
+description: 在 macOS、Windows 或 Linux 上将演示型 PDF 高还原转换为 PowerPoint，校准 OCR 文字的字体、字号与文本框尺寸，默认移除跨页、斜向、低透明度水印，并通过 PPTX 包扫描、逐页渲染 OCR、语义构建清单及可编辑前景审计生成交接证书；支持富对象重建、扁平化 OCR 元素化、内嵌流程图、产品矩阵、文字密集型栅格图、竖排文字、扇形、曲线路径、图标、连接线、图表和表格的可编辑语义重建。适用于将 PDF、WPS/PowerPoint 导出稿、投资建议书、商业计划书或报告转换为 1:1 可编辑 PPTX，尤其适用于后续串联 editable-ppt-content-replacer 的模板制作流程。
 ---
 
 # PDF 转元素级可编辑 PowerPoint
@@ -12,10 +12,17 @@ description: 在 macOS、Windows 或 Linux 上将演示型 PDF 高还原转换�
 
 - 使用当前会话中的 PDF 与 Presentations 技能；执行前完整阅读它们的说明。
 - 优先使用工作区内置依赖。
-- 使用 Python `zipfile` + Open XML 直接操作 PPTX 包结构，不依赖外部
-  Node.js 运行时或 `@oai/artifact-tool`。
+- 使用工作区内置 Node.js + `pptxgenjs` 生成可编辑对象，使用 Python
+  `zipfile` + Open XML 做包内审计；不依赖系统全局 npm 安装或旧版
+  `@oai/artifact-tool`。
 - 将源 PDF 视为视觉标准，不得擅自改版、摘要或改写；用户明确要求去除的
   水印是允许且必须执行的例外。
+- 用户只说“可编辑 PPT”“1:1 可编辑”或“所有元素可编辑”而没有缩小范围时，
+  必须按 `--editable-scope all` 处理。不得把只完成 OCR 文字元素化的结果
+  当成完全可编辑版本。
+- 扁平化 PDF 中无法从像素可靠恢复原字体元数据。必须先按视觉证据校准字体
+  家族、字号和文本框，再在 Microsoft PowerPoint 原生渲染中复核；不得把
+  OCR 像素高度直接当成 PowerPoint 磅值。
 - 用户要求去水印时，转换成功不等于任务完成。必须通过最终 PPTX 包内扫描
   和逐页渲染 OCR 双重验收，生成可供内容替换技能读取的交接证书。
 
@@ -59,8 +66,10 @@ PPTX 构建脚本需要项目依赖 `pptxgenjs`。当技能目录与项目目录
   每一个可见元素都已经独立。
 - **扁平化型（flattened）**：每页只有一张整页图片，没有可用对象。此时选择：
   - 以 1:1 还原为最高优先级时使用 `image`；
-  - 用户明确要求文字可编辑时使用 `ocr`；
-  - 图标、图表或表格也必须可编辑时，使用 `ocr` 并提供覆盖清单。
+  - 用户明确把范围限制为文字可编辑时，使用 `ocr --editable-scope text`；
+  - 用户要求“可编辑 PPT”而未缩小范围时，使用
+    `ocr --editable-scope all`，逐页建立语义覆盖清单和复核元数据；
+  - 图标、图表或表格也必须可编辑时，不得只运行 OCR，必须提供覆盖清单。
 - **混合型（mixed）**：富对象页面按对象重建，扁平化页面使用栅格回退。
   如果扁平化页面也要求文字可编辑，应只对这些页面运行 OCR 准备流程，
   再有意识地合并结果。当前单一转换命令不会自动合并混合型 OCR；
@@ -81,6 +90,7 @@ python3 "$SKILL_DIR/scripts/convert_pdf.py" \
   --input "/absolute/source.pdf" \
   --output "/absolute/final.pptx" \
   --work-dir "/absolute/work-dir" \
+  --editable-scope all \
   --watermark-qa-mode strict
 ```
 
@@ -169,12 +179,15 @@ python3 "$SKILL_DIR/scripts/convert_pdf.py" \
 ## 与内容替换技能的强制交接
 
 当下一步使用 `editable-ppt-content-replacer` 时，转换目录必须包含
-`conversion-handoff.json`。1.1 版证书记录：
+`conversion-handoff.json`。1.2 版证书记录：
 
 - 输出 PPTX 的绝对路径和 SHA-256；
 - `pathBinding: "sha256"`、构建目录内报告的相对路径和报告 SHA-256；
 - 水印处理策略及 `watermarkQaPassed`；
 - 大面积内嵌图片可编辑性复核结果；
+- OCR 字体、字号和覆盖率校准结果；
+- 覆盖清单中每个语义对象是否真实写入 PPTX；
+- 移除整页背景后的独立前景对象审计结果；
 - 尚未元素化的页面；
 - `readyForContentReplacement`。
 
@@ -205,6 +218,7 @@ python3 "$SKILL_DIR/scripts/convert_pdf.py" \
   --output "/absolute/editable-text.pptx" \
   --work-dir "/absolute/work-dir" \
   --flattened-mode ocr \
+  --editable-scope all \
   --ocr-engine auto \
   --ocr-min-confidence 0.45
 ```
@@ -217,16 +231,34 @@ python3 "$SKILL_DIR/scripts/convert_pdf.py" \
   用于扁平化 OCR 和最终严格水印验收；
 - `--ocr-languages`：使用 BCP-47 语言列表，如 `zh-Hans,en-US`；
 - `--ocr-body-font`、`--ocr-title-font`：覆盖系统默认 OCR 字体；
+- `--ocr-body-font-scale 0.75`：正文默认字号比例；96 DPI 渲染不得使用
+  `1.0` 直接映射；
+- `--ocr-title-font-scale 0.78`：页标题默认字号比例；
+- `--ocr-display-font-scale 0.98`：封面大标题和大数字的保留比例；
+- `--ocr-minimum-font-size 5`：密集页允许的最小字号；不得无条件抬高到
+  `7.5pt`；
+- `--editable-scope`：`text`、`text-and-icons` 或 `all`。自然语言中的
+  “可编辑 PPT”默认使用 `all`；
 - `--ocr-corrections`：传入精确替换规则和归一化排除区域；
 - `--overrides`：传入独立图标、原生图表、表格和形状的重建清单。
 
 OCR 只是起点，不是成品。必须逐页检查并修正识别错误；如果对密集截图
 执行 OCR 后的效果比源文件更差，应保留为栅格图片。
 
+字号校准必须遵循以下规则：
+
+1. 以源页面渲染 DPI 作为像素到磅值的换算上限，96 DPI 对应 `72/96`；
+2. 将文字分为正文、页标题、展示标题/数字，分别使用独立比例，不能全局
+   同比放大；
+3. 同时受文字框高度和按中英文字符宽度估算的宽度上限约束；
+4. 生成 `ocr-layout-report.json`，记录每页文字数量、角色、字体和比例；
+5. 在 PowerPoint 原生渲染中与源 PDF 对比。若字体替换导致尺寸变化，
+   优先指定模板实际字体，其次微调角色比例，不得逐页盲目放大。
+
 当图表或表格需要可编辑时：
 
 1. 用外观匹配的原生形状覆盖扁平化图表或表格区域。
-2. 通过 `--overrides` 添加原生图表或表格（使用 Python zipfile + Open XML 直接操作）。
+2. 通过 `--overrides` 添加原生图表或表格，并在构建清单中验证对象已写入。
 3. 跳过重建区域内的 OCR 文字，避免内容重复。
 4. 在 Microsoft PowerPoint 中复查；表格行高和图表标记的渲染结果
    可能与 LibreOffice 预览不同。Linux 上无法进行 PowerPoint 原生验证，
@@ -318,6 +350,9 @@ PDF 可能使用 `fill-shade` 绘制扇形或曲线区域。PyMuPDF 有时会同
 - 根据 PDF 的实际页面宽度计算缩放比例。不得假设页面一定是
   `960 × 540 pt`；扁平化导出稿可能是 `1920 × 1080 pt` 或其他尺寸。
 - 按字体家族名称保留原字体；即使构建预览发生字体替换，也优先保留源字体。
+- 扁平化像素源没有字体元数据时，记录 `font_source=system-calibrated`；
+  如果用户或模板提供了字体证据，显式传入正文和标题字体并记录为 `user`。
+- OCR 文字必须写入已校准的 `ppt_font_size`；构建器不得再次全局放大。
 - 将文字、图标、图片和简单矢量形状保留为独立可编辑对象。
 - 对用户指定的图片内部流程图、节点框、连接线和标签执行语义重建；不得把
   包含多个逻辑元素的一整张图片描述成“元素级可编辑”。
@@ -356,9 +391,12 @@ PDF 可能使用 `fill-shade` 绘制扇形或曲线区域。PyMuPDF 有时会同
    并逐页确认没有目标水印残留或误删正常正文。
 7. 确认 `watermark-handoff-report.json` 的 `passed=true`，并且
    `conversion-handoff.json` 的 `readyForContentReplacement=true`；
-8. 审计大面积图片：若图片内部存在流程图、表格、图例或明显文字，确认用户
+8. 确认 `ocr-layout-report.json`、`semantic-build-report.json` 和
+   `editable-surface-report.json` 均通过；对扁平化页面打开
+   `editable-foreground-only.pptx`，确认需要编辑的前景对象确实独立存在。
+9. 审计大面积图片：若图片内部存在流程图、表格、图例或明显文字，确认用户
    要求的节点、连接线和标签均出现在 inspect 结果中，并可分别选择。
-9. 只交付最终 PPTX，并简要说明图标采用原生形状、SVG 还是栅格图片，
+10. 只交付最终 PPTX，并简要说明图标采用原生形状、SVG 还是栅格图片，
    以及哪些其他元素仍是 SVG 或栅格图片。
 
 使用准确的交付表述：

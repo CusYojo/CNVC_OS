@@ -6,16 +6,17 @@ import {
   hexColor,
   imageReplacementFor,
   optionalArg,
-  PptxGenJS,
   requiredArg,
   svgData,
   transparency,
 } from "./public_pptx_runtime.mjs";
+import { applyPageOverrides } from "./semantic_overrides.mjs";
 
 
 const MODEL_PATH = requiredArg("--model");
 const FINAL_PPTX = requiredArg("--output");
 const OVERRIDES_PATH = optionalArg("--overrides");
+const BUILD_MANIFEST_PATH = optionalArg("--build-manifest");
 
 
 function drawingSvg(drawing) {
@@ -156,10 +157,15 @@ async function main() {
   const overrides = OVERRIDES_PATH
     ? JSON.parse(await fs.readFile(OVERRIDES_PATH, "utf8"))
     : { slides: {} };
-  const { pptx, unit } = createPresentation(
+  const { pptx, unit, slideWidth } = createPresentation(
     model.page_width,
     model.page_height,
   );
+  const buildManifest = {
+    schemaVersion: "1.1",
+    output: FINAL_PPTX,
+    objects: [],
+  };
   for (const page of model.pages) {
     const slide = pptx.addSlide();
     slide.background = { color: "FFFFFF" };
@@ -167,18 +173,61 @@ async function main() {
     for (const [index, element] of page.elements.entries()) {
       if (element.kind === "drawing") {
         addDrawing(slide, element, unit, index);
+        buildManifest.objects.push({
+          page: page.number,
+          semanticId: `pdf-vector-${String(index + 1).padStart(4, "0")}`,
+          type: "pdf-vector",
+          emitted: true,
+        });
       } else if (element.kind === "image") {
+        const replacement = imageReplacementFor(
+          element,
+          index,
+          pageOverride,
+        );
         addImage(
           slide,
           element,
           unit,
           index,
-          imageReplacementFor(element, index, pageOverride),
+          replacement,
         );
+        buildManifest.objects.push({
+          page: page.number,
+          semanticId: `pdf-image-${String(index + 1).padStart(4, "0")}`,
+          type: "pdf-image",
+          emitted: true,
+        });
+        if (replacement) {
+          buildManifest.objects.push({
+            page: page.number,
+            semanticId: replacement.name || null,
+            type: "image-replacement",
+            emitted: Boolean(replacement.name),
+            error: replacement.name ? null : "semantic-object-missing-name",
+          });
+        }
       } else if (element.kind === "text") {
         addText(slide, element, unit, index);
+        buildManifest.objects.push({
+          page: page.number,
+          semanticId: `pdf-text-${String(index + 1).padStart(4, "0")}`,
+          type: "pdf-text",
+          emitted: true,
+          fontFace: element.font || "Noto Sans CJK SC",
+          fontSize: Math.max(1, Number(element.font_size || 10)),
+        });
       }
     }
+    buildManifest.objects.push(...applyPageOverrides({
+      slide,
+      pptx,
+      pageOverride,
+      pageNumber: page.number,
+      slideWidth,
+      coordinateWidth: Number(overrides.coordinateWidth || model.page_width),
+      assetRoot: OVERRIDES_PATH ? path.dirname(OVERRIDES_PATH) : process.cwd(),
+    }));
     slide.addNotes(
       `[Sources]\n- 用户提供的原始 PDF：${model.source}（第 ${page.number} 页）\n- 页面文字、图片和矢量对象均从该页提取并重建。`,
     );
@@ -187,6 +236,14 @@ async function main() {
     );
   }
   await pptx.writeFile({ fileName: FINAL_PPTX, compression: true });
+  if (BUILD_MANIFEST_PATH) {
+    await ensureOutput(BUILD_MANIFEST_PATH);
+    await fs.writeFile(
+      BUILD_MANIFEST_PATH,
+      JSON.stringify(buildManifest, null, 2),
+      "utf8",
+    );
+  }
   console.log(`已保存 ${FINAL_PPTX}`);
 }
 

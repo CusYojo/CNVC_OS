@@ -76,11 +76,16 @@ def point_in_region(x, y, region):
 
 def load_rules(path):
     if not path:
-        return {"replacements": {}, "exclude_regions": {}}
+        return {
+            "replacements": {},
+            "exclude_regions": {},
+            "exclude_texts": {},
+        }
     data = json.loads(path.read_text(encoding="utf-8"))
     return {
         "replacements": data.get("replacements", {}),
         "exclude_regions": data.get("exclude_regions", {}),
+        "exclude_texts": data.get("exclude_texts", {}),
     }
 
 
@@ -98,7 +103,10 @@ def useful_row(row, minimum_confidence):
     confidence = float(row.get("confidence") or 0)
     if confidence < minimum_confidence:
         return False
-    if confidence < 0.9 and len(text) <= 2 and text not in {"AI", "OS"}:
+    if confidence < max(0.45, minimum_confidence) and len(text) <= 2 and text not in {
+        "AI",
+        "OS",
+    }:
         return False
     return True
 
@@ -108,6 +116,75 @@ def rgb_hex(values):
     if max(r, g, b) > 205:
         return "#17345E"
     return f"#{r:02X}{g:02X}{b:02X}"
+
+
+def visual_text_units(text):
+    """Estimate rendered line width in em units without depending on a font engine."""
+    units = 0.0
+    for char in str(text or ""):
+        if char.isspace():
+            units += 0.32
+        elif re.match(r"[\u3400-\u9fff\u3040-\u30ff\uac00-\ud7af]", char):
+            units += 1.0
+        elif char.isalnum():
+            units += 0.56
+        else:
+            units += 0.5
+    return max(1.0, units)
+
+
+def classify_text_role(text, top, slide_height, font_basis):
+    value = str(text or "").strip()
+    numeric_count = sum(char.isdigit() for char in value)
+    numeric_heavy = bool(value) and numeric_count / len(value) >= 0.4
+    if font_basis >= 56 and len(value) <= 24:
+        return "display-number" if numeric_heavy else "display-title"
+    if top < slide_height * 0.16 and font_basis >= 24:
+        return "slide-title"
+    return "body"
+
+
+def calibrated_font_size(
+    *,
+    text,
+    item_width,
+    item_height,
+    font_basis,
+    role,
+    render_dpi,
+    body_scale,
+    title_scale,
+    display_scale,
+    minimum,
+    maximum,
+):
+    role_scale = {
+        "display-title": display_scale,
+        "display-number": display_scale,
+        "slide-title": title_scale,
+        "body": body_scale,
+    }[role]
+    role_maximum = {
+        "display-title": maximum,
+        "display-number": maximum,
+        "slide-title": min(maximum, 44.0),
+        "body": min(maximum, 28.0),
+    }[role]
+    dpi_to_points = 72.0 / max(1.0, float(render_dpi))
+    width_cap = (
+        float(item_width)
+        * dpi_to_points
+        * 1.2
+        / visual_text_units(text)
+    )
+    height_cap = float(item_height) * dpi_to_points * 1.08
+    calibrated = min(
+        float(font_basis) * role_scale,
+        width_cap,
+        height_cap,
+        role_maximum,
+    )
+    return max(float(minimum), calibrated)
 
 
 def compile_vision_ocr(binary_path):
@@ -387,7 +464,7 @@ def resolve_ocr_engine(requested, supplied_ocr_dir, tesseract):
 
 def resolve_ocr_fonts(body_font, title_font):
     defaults = {
-        "Darwin": ("Microsoft YaHei", "Songti SC"),
+        "Darwin": ("Hiragino Sans GB", "Songti SC"),
         "Windows": ("Microsoft YaHei", "Microsoft YaHei"),
         "Linux": ("Noto Sans CJK SC", "Noto Serif CJK SC"),
     }
@@ -585,7 +662,61 @@ def main():
         default="auto",
         help="OCR 标题字体；auto 会根据当前系统选择。",
     )
+    parser.add_argument(
+        "--render-dpi",
+        type=float,
+        default=96,
+        help="源页面渲染 DPI，用于像素到 PowerPoint 磅值的校准，默认值：96。",
+    )
+    parser.add_argument(
+        "--body-font-scale",
+        type=float,
+        default=0.75,
+        help="正文 OCR 字号比例，默认值：0.75。",
+    )
+    parser.add_argument(
+        "--title-font-scale",
+        type=float,
+        default=0.78,
+        help="页标题 OCR 字号比例，默认值：0.78。",
+    )
+    parser.add_argument(
+        "--display-font-scale",
+        type=float,
+        default=0.98,
+        help="封面大标题和展示数字 OCR 字号比例，默认值：0.98。",
+    )
+    parser.add_argument(
+        "--minimum-font-size",
+        type=float,
+        default=5,
+        help="允许的最小 PowerPoint 字号，默认值：5 磅。",
+    )
+    parser.add_argument(
+        "--maximum-font-size",
+        type=float,
+        default=96,
+        help="允许的最大 PowerPoint 字号，默认值：96 磅。",
+    )
+    parser.add_argument(
+        "--layout-report",
+        type=Path,
+        help="可选的字号、字体和 OCR 覆盖率校准报告输出路径。",
+    )
     args = parser.parse_args()
+    if args.render_dpi <= 0:
+        parser.error("--render-dpi 必须大于 0")
+    for argument_name in (
+        "body_font_scale",
+        "title_font_scale",
+        "display_font_scale",
+    ):
+        if getattr(args, argument_name) <= 0:
+            parser.error(f"--{argument_name.replace('_', '-')} 必须大于 0")
+    if args.minimum_font_size <= 0:
+        parser.error("--minimum-font-size 必须大于 0")
+    if args.maximum_font_size < args.minimum_font_size:
+        parser.error("--maximum-font-size 不能小于 --minimum-font-size")
 
     import numpy as np
 
@@ -631,6 +762,15 @@ def main():
     )
 
     pages = []
+    page_reports = []
+    totals = {
+        "ocrRows": 0,
+        "editableTextItems": 0,
+        "discardedLowConfidence": 0,
+        "excludedByRegion": 0,
+        "excludedByText": 0,
+        "invalidGeometry": 0,
+    }
     for page_number, image_path in enumerate(images, 1):
         image = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
         if image is None:
@@ -642,22 +782,54 @@ def main():
         mask = np.zeros((height, width), dtype=np.uint8)
         text_items = []
         exclusions = rules["exclude_regions"].get(str(page_number), [])
+        excluded_text_values = rules["exclude_texts"].get(str(page_number), [])
+        excluded_texts = (
+            {excluded_text_values}
+            if isinstance(excluded_text_values, str)
+            else set(excluded_text_values)
+        )
+        page_report = {
+            "page": page_number,
+            "ocrRows": len(rows),
+            "editableTextItems": 0,
+            "discardedLowConfidence": 0,
+            "excludedByRegion": 0,
+            "excludedByText": 0,
+            "invalidGeometry": 0,
+            "roles": {
+                "body": 0,
+                "slide-title": 0,
+                "display-title": 0,
+                "display-number": 0,
+            },
+        }
+        totals["ocrRows"] += len(rows)
 
         for row in rows:
             if not useful_row(row, args.minimum_confidence):
+                page_report["discardedLowConfidence"] += 1
+                totals["discardedLowConfidence"] += 1
                 continue
             top_norm = 1 - float(row["y"]) - float(row["height"])
             center_x = float(row["x"]) + float(row["width"]) / 2
             center_y = top_norm + float(row["height"]) / 2
             if any(point_in_region(center_x, center_y, region) for region in exclusions):
+                page_report["excludedByRegion"] += 1
+                totals["excludedByRegion"] += 1
                 continue
 
             text = correct_text(row["text"], rules["replacements"])
+            if text in excluded_texts:
+                page_report["excludedByText"] += 1
+                totals["excludedByText"] += 1
+                continue
             x0 = max(0, int(round(float(row["x"]) * width)))
             y0 = max(0, int(round(top_norm * height)))
             x1 = min(width, int(round((float(row["x"]) + float(row["width"])) * width)))
             y1 = min(height, int(round((1 - float(row["y"])) * height)))
             if x1 <= x0 or y1 <= y0:
+                page_report["invalidGeometry"] += 1
+                totals["invalidGeometry"] += 1
                 continue
 
             pad_x = max(2, int((x1 - x0) * 0.015))
@@ -685,8 +857,23 @@ def main():
             if vertical:
                 text = "\n".join(char for char in text if not char.isspace())
             font_basis = item_width if vertical else item_height
-            font_size = max(7.5, min(96, font_basis * 0.82))
-            is_title = top < slide_height * 0.14 and font_size >= 24
+            source_font_size = font_basis * 0.82
+            role = classify_text_role(text, top, slide_height, font_basis)
+            font_size = calibrated_font_size(
+                text=text,
+                item_width=item_width,
+                item_height=item_height,
+                font_basis=source_font_size,
+                role=role,
+                render_dpi=args.render_dpi,
+                body_scale=args.body_font_scale,
+                title_scale=args.title_font_scale,
+                display_scale=args.display_font_scale,
+                minimum=args.minimum_font_size,
+                maximum=args.maximum_font_size,
+            )
+            is_title = role in {"slide-title", "display-title"}
+            page_report["roles"][role] += 1
             text_items.append(
                 {
                     "text": text,
@@ -696,9 +883,18 @@ def main():
                     "width": max(10, item_width),
                     "height": max(10, item_height),
                     "font_size": font_size,
+                    "source_font_size": source_font_size,
+                    "ppt_font_size": font_size,
+                    "text_role": role,
+                    "text_box_width_factor": 1.2,
+                    "render_dpi": args.render_dpi,
                     "color": color,
                     "bold": bool(is_title or (font_size >= 18 and len(text) <= 18)),
                     "font": title_font if is_title else body_font,
+                    "font_source": "user" if (
+                        (is_title and args.title_font != "auto")
+                        or (not is_title and args.body_font != "auto")
+                    ) else "system-calibrated",
                     "vertical": vertical,
                 }
             )
@@ -716,6 +912,9 @@ def main():
                 "text": text_items,
             }
         )
+        page_report["editableTextItems"] = len(text_items)
+        totals["editableTextItems"] += len(text_items)
+        page_reports.append(page_report)
         print(f"{image_path.stem}：{len(text_items)} 行可编辑 OCR 文字")
 
     output_model.parent.mkdir(parents=True, exist_ok=True)
@@ -733,6 +932,41 @@ def main():
         encoding="utf-8",
     )
     print(f"已写入 {output_model}")
+    if args.layout_report:
+        layout_report = args.layout_report.expanduser().resolve()
+        layout_report.parent.mkdir(parents=True, exist_ok=True)
+        expected_rows = (
+            totals["ocrRows"]
+            - totals["discardedLowConfidence"]
+            - totals["excludedByRegion"]
+            - totals["excludedByText"]
+            - totals["invalidGeometry"]
+        )
+        report = {
+            "schemaVersion": 1,
+            "passed": totals["editableTextItems"] == expected_rows,
+            "renderDpi": args.render_dpi,
+            "fonts": {
+                "body": body_font,
+                "title": title_font,
+            },
+            "fontScales": {
+                "body": args.body_font_scale,
+                "title": args.title_font_scale,
+                "display": args.display_font_scale,
+            },
+            "fontSizeRange": {
+                "minimum": args.minimum_font_size,
+                "maximum": args.maximum_font_size,
+            },
+            "totals": totals,
+            "pages": page_reports,
+        }
+        layout_report.write_text(
+            json.dumps(report, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        print(f"已写入字号与 OCR 布局报告 {layout_report}")
 
 
 if __name__ == "__main__":
