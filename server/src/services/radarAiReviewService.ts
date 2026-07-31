@@ -6,6 +6,7 @@ import { radarAiReviews } from '../db/schema.js'
 import { isSpecificLeadSubjectName } from './leadSubjectName.js'
 
 const PROMPT_VERSION = 'radar-subject-v3-paper'
+const EVIDENCE_VALIDATION_REASON = '模型给出的主体名称或来源证据无法在原文中核验'
 const DEFAULT_MODEL = process.env.RADAR_AI_REVIEW_MODEL
   || process.env.LLM_MODEL
   || 'claude-sonnet-4-6'
@@ -228,6 +229,13 @@ export function validateRadarAiDecision(
     normalizeEvidence(evidence)
     && sourceEvidence.includes(normalizeEvidence(evidence)),
   )
+  // 论文审查时，模型常会把我们提示中的“标题：/摘要：”标签一并复制到 evidence。
+  // 标签不属于论文原文，但完整标题本身已在原文中逐字可核验。
+  const paperTitleEvidenceValid = Boolean(
+    allowPaperTitle
+    && subjectAppearsInSource
+    && normalizeComparable(evidence).includes(normalizeComparable(subjectName)),
+  )
   if (legalName && !comparableSource.includes(normalizeComparable(legalName))) legalName = ''
 
   let status: RadarAiReviewStatus
@@ -241,11 +249,11 @@ export function validateRadarAiDecision(
     !parsed.subjectType
     || subjectName.length < 2
     || !subjectAppearsInSource
-    || !evidenceAppearsInSource
+    || (!evidenceAppearsInSource && !paperTitleEvidenceValid)
   ) {
     status = 'review'
     decision = 'review'
-    rejectReason = '模型给出的主体名称或来源证据无法在原文中核验'
+    rejectReason = EVIDENCE_VALIDATION_REASON
   } else if (confidence >= 0.8) {
     // AI 模型判断接受，但仍需通过规则兜底校验：名称不能是谓语片段/新闻标题/通用词等。
     // 规格与线索池入口一致，由 leadSubjectName.isSpecificLeadSubjectName 统一维护。
@@ -280,6 +288,29 @@ export function validateRadarAiDecision(
       reviewedAt,
     },
   }
+}
+
+export function revalidateEvidenceOnlyPaperReview(
+  decision: RadarAiReviewDecision,
+  sourceText: string,
+  model = decision.model,
+) {
+  if (
+    decision.decision !== 'review'
+    || decision.subjectType !== 'paper'
+    || decision.confidence < 0.8
+    || decision.rejectReason !== EVIDENCE_VALIDATION_REASON
+  ) return null
+  return validateRadarAiDecision({
+    candidateId: 'cached-paper',
+    decision: 'accept',
+    subjectType: 'paper',
+    subjectName: decision.subjectName,
+    legalName: decision.legalName,
+    evidence: decision.evidence,
+    confidence: decision.confidence,
+    rejectReason: '',
+  }, sourceText, model, decision.reviewedAt, true)
 }
 
 function parseFirstJsonObject(value: string) {
@@ -365,23 +396,37 @@ function retryDelay(ms: number) {
 async function loadCachedReviews(prepared: PreparedRadarCandidate[]) {
   const cacheKeys = prepared.map((item) => item.cacheKey)
   if (!cacheKeys.length) return new Map<string, RadarAiReviewResult>()
+  const preparedByKey = new Map(prepared.map((item) => [item.cacheKey, item]))
   const rows = await db.select().from(radarAiReviews)
     .where(inArray(radarAiReviews.cacheKey, cacheKeys))
   const cached = new Map<string, RadarAiReviewResult>()
+  const promoted: RadarAiReviewResult[] = []
   for (const row of rows) {
     if (row.status === 'failed') continue
-    const decision = row.decision as unknown as RadarAiReviewDecision
+    let decision = row.decision as unknown as RadarAiReviewDecision
     if (!decision || typeof decision.subjectName !== 'string') continue
-    cached.set(row.cacheKey, {
+    let status = row.status as RadarAiReviewStatus
+    const preparedItem = preparedByKey.get(row.cacheKey)
+    const revalidated = preparedItem?.isPaper
+      ? revalidateEvidenceOnlyPaperReview(decision, preparedItem.sourceText, row.model)
+      : null
+    if (revalidated) {
+      decision = revalidated.decision
+      status = revalidated.status
+    }
+    const result: RadarAiReviewResult = {
       ...decision,
       cacheKey: row.cacheKey,
       sourceKey: row.sourceKey,
       contentHash: row.contentHash,
-      status: row.status as RadarAiReviewStatus,
+      status,
       attempts: row.attempts,
       cacheHit: true,
-    })
+    }
+    cached.set(row.cacheKey, result)
+    if (status !== row.status) promoted.push(result)
   }
+  await Promise.all(promoted.map((result) => persistReview(result)))
   return cached
 }
 

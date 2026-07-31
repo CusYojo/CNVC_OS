@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   prepareRadarAiCandidate,
+  revalidateEvidenceOnlyPaperReview,
   validateRadarAiDecision,
 } from '../src/services/radarAiReviewService.js'
 
@@ -32,7 +33,7 @@ test('accepts a complete paper title for an explicit paper candidate', () => {
     subjectType: 'paper',
     subjectName: title,
     legalName: '',
-    evidence: title,
+    evidence: `标题：${title} 摘要：This paper presents a descriptor-free visual localization method.`,
     confidence: 0.95,
     rejectReason: '',
   }, source, 'test-model', '2026-07-31T00:00:00.000Z', true)
@@ -40,6 +41,24 @@ test('accepts a complete paper title for an explicit paper candidate', () => {
   assert.equal(result.status, 'accepted')
   assert.equal(result.decision.subjectType, 'paper')
   assert.equal(result.decision.subjectName, title)
+})
+
+test('promotes a cached paper review that only failed because prompt labels wrapped its evidence', () => {
+  const title = 'GeoMix: Descriptor-Free Visual Localization via Global Context and Multi-Detector Training'
+  const result = revalidateEvidenceOnlyPaperReview({
+    decision: 'review',
+    subjectType: 'paper',
+    subjectName: title,
+    legalName: '',
+    evidence: `标题：${title} 摘要：A descriptor-free localization method.`,
+    confidence: 0.99,
+    rejectReason: '模型给出的主体名称或来源证据无法在原文中核验',
+    model: 'test-model',
+    reviewedAt: '2026-07-31T00:00:00.000Z',
+  }, `${title}\nA descriptor-free localization method.`)
+
+  assert.equal(result?.status, 'accepted')
+  assert.equal(result?.decision.decision, 'accept')
 })
 
 test('holds hallucinated or paraphrased evidence out of the public pool', () => {
