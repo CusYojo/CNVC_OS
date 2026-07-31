@@ -13,9 +13,11 @@ description: 基于已经完成1:1复原的可编辑PPTX模板生成当前项目
 只交付一个最终 PPTX，核心内容必须保持为原生可编辑对象；不得再生成第二份
 纯图片 PPTX，也不得用整页背景图覆盖模板后冒充可编辑结果。
 
-新任务使用 1.3 版替换清单。1.3 版继承 PDF 转换交接和完整槽位覆盖约束，
-并要求每项替换绑定证据。用户资料不完整时，先生成资料缺口清单，再按来源
-优先级联网检索；无法证实的内容必须明确标注或删除完整可选槽位。
+新任务使用 1.4 版替换清单。1.4 版继承 PDF 转换交接、完整槽位覆盖和
+操作级证据约束，并新增页面闭环、内容处置、旧项目文字/媒体黑名单与最终
+渲染 OCR 门禁。用户资料不完整时，非必要字段直接省略，重大缺口只允许
+集中进入专用“待核实事项”页，不得把“未提供公司官网”“缺少原始文件”
+等制作过程提示散落到成稿中。
 
 ## 必须遵循
 
@@ -42,9 +44,11 @@ description: 基于已经完成1:1复原的可编辑PPTX模板生成当前项目
   监管披露、政府、学术或标准机构的一手材料。
 - 不得发明客户、合同、订单、认证、财务、融资、估值、市场份额、专利、
   员工数或其他未被证据支持的信息，也不得把推断写成已验证事实。
-- 缺少对应内容且网络检索仍无法证实时，必填槽位使用“未披露”“待核实”
-  或“公开信息未检索到”；可选槽位删除 `optional=true` 的完整槽位组。
-  不得沿用模板项目的专属数据。
+- 缺少对应内容且网络检索仍无法证实时，非必要槽位删除
+  `optional=true` 的完整槽位组；重大必填缺口只能在专用缺口页以
+  “未披露”“待核实”或“口径不一致”集中呈现。官网、地址等非必要字段
+  缺失时直接省略，不得显示“未提供……”类占位语。不得沿用模板项目的
+  专属数据或素材。
 
 ## 输入契约
 
@@ -88,11 +92,11 @@ Presentations 技能不在默认插件缓存时同时设置 `PRESENTATIONS_SKILL
 - 没有未复核的大面积内嵌图片或尚未元素化页面；
 - `readyForContentReplacement=true`。
 
-1.3 版清单设置：
+1.4 版清单设置：
 
 ```json
 {
-  "schemaVersion": "1.3",
+  "schemaVersion": "1.4",
   "sourceMode": "pdf-converted",
   "conversionHandoff": "/absolute/work/conversion-handoff.json"
 }
@@ -124,6 +128,20 @@ python3 "$SKILL_DIR/scripts/analyze_template_openxml.py" \
 2. `slotGroups`：内容对象与其配套图标、月桂、边框、标签等完整槽位；
 3. `entityBindings`：人物/产品图片与姓名、职务、产品名、型号的对应关系。
 4. `slotAssignments`：每个内容区域的语义、必填性和最终处置。
+
+对修改页生成页面闭环草稿：
+
+```bash
+python3 "$SKILL_DIR/scripts/generate_page_closure_draft.py" \
+  --manifest "/absolute/build/replacement-manifest.json" \
+  --template-map "/absolute/build/template-map.json" \
+  --output "/absolute/build/page-closure-draft.json"
+```
+
+草稿会把未被操作覆盖的对象全部放入 `unknownShapeIds`。必须逐页检查渲染图，
+确认对象属于固定模板、投资机构品牌或有证据的上下文后，才能移入
+`allowedKeepShapeIds`；不得直接把全部未知对象批量标成保留。每个修改页的
+`unknownShapeIds` 必须为空。
 
 ### 3. 识别资料缺口并联网补全
 
@@ -161,14 +179,25 @@ python3 "$SKILL_DIR/scripts/analyze_template_openxml.py" \
 - 可选内容必须按完整槽位组声明，空内容只能用 `delete_slot_group` 删除
   整组，不能单独删除装饰或清空一个文字框后留下空图标；
 - `replace_image` 只允许替换公司专属素材，或记录用户对该对象的明确授权。
+- 1.4 版 `replace_image` 必须声明素材 `assetSha256`。公司 Logo 必须通过
+  `bindingId` 绑定 `entityType=company|institution` 和明确的
+  `entityRole`；没有目标公司 Logo 时改用规范公司名称文字，不得沿用旧
+  Logo 或虚构 Logo。
 - `person_photo` 和 `product_screenshot` 必须引用有效 `bindingId`；
 - 1.1 及以上文字操作必须设置 `styleLock: "exact"`。
 - 1.2 及以上所有操作必须设置 `semanticKey`，并与目标槽位分配完全一致。
-- 1.3 版所有操作必须设置非空 `evidenceIds`；证据必须支持该槽位实际写入
+- 1.3 及以上版本所有操作必须设置非空 `evidenceIds`；证据必须支持该槽位实际写入
   的事实、数字、图片或删除理由，且操作的 `semanticKey` 必须出现在证据
   声明的 `semanticKeys` 中。
 - 重大事实必须有一手来源，或至少两个独立可信发布方；估算值必须在页面
   可见文字或 `displayQualifier` 中标注“估算/测算”。
+- 1.4 版 `replace_text_group` 必须设置 `primaryShapeId`。完整新文字只写入
+  主对象，其他碎片对象清空；不得把整段文字复制到每一个 PDF 文字碎片。
+- 1.4 版必须声明 `contentPolicy`、`residualPolicy` 和 `pageClosures`。
+  `forbiddenTextTerms` 至少包含旧公司名、旧产品名、旧项目占位语及
+  “未提供公司官网”“缺少原始文件”“现有材料没有BP”“未提供公司资料”；
+  `forbiddenMediaSha256` 登记旧 Logo、旧人物和旧产品素材哈希；
+  `requiredTextTerms` 至少包含目标项目名。
 
 每个被修改页面都必须先盘点可见内容槽，不得只列“准备替换”的对象。槽位
 分为：
@@ -211,6 +240,9 @@ python3 "$SKILL_DIR/scripts/generate_apply_plan.py" \
 - `protected-object-report.json`：共享图标与固定对象锁定清单。
 - `conversion-handoff-audit.json`：PDF 去水印与元素化交接核验。
 - `research-evidence-report.json`：来源、证据、重大数据交叉验证和操作映射。
+- `page-closure-report.json`：修改页全部对象的保留、替换、删除和未知状态。
+- `residual-policy-report.json`：禁止文字、禁止媒体、目标项目必要文字和
+  专用缺口页规则。
 
 校验失败时不得继续。人物/产品关系未解析、保护对象被修改或槽位组不完整
 时属于硬错误。
@@ -236,6 +268,9 @@ python3 "$SKILL_DIR/scripts/apply_template_plan_openxml.py" \
 - 中文替换内容的运行语言标记规范化为 `zh-CN`；该操作不得改变字体、字号、
   颜色、段落、坐标、尺寸或层级；
 - 原位替换公司专属图片；
+- 图片替换必须为目标图片对象创建独立媒体关系，只允许授权图片槽的媒体
+  哈希变化；不得覆盖被其他页面或对象共享的原媒体文件。仅当旧媒体在整个
+  PPTX 包中已无任何关系引用时，才删除该孤立媒体文件；
 - 保持文本框和图片框的坐标、尺寸、裁切、样式和层级。
 - 仅当最后一页没有第二个可编辑正文槽位、无法承载强制责任声明时，执行
   一次 `add_disclaimer_textbox`：对象名固定为
@@ -326,6 +361,7 @@ python3 "$SKILL_DIR/scripts/validate_template_result_openxml.py" \
    一致；重大数据满足一手来源或双来源要求。
 10. 检查估算、冲突和无法证实内容是否使用了可见限定词，且没有把推断写成
     已验证事实。
+11. 核对修改页 `pageClosures`，确保全部模板对象均已复核且未知对象为零。
 
 必须再次渲染最终 PPTX，并使用 PDF 转换技能的水印验收脚本：
 
@@ -346,16 +382,32 @@ LibreOffice `--headless` PDF 导出 + pdftoppm 逐页渲染，然后对渲染结
 再分析最终 PPTX，生成 `final-template-map.json`，并运行：
 
 ```bash
+python3 "$SKILL_DIR/scripts/validate_residual_content.py" \
+  --manifest "/absolute/build/replacement-manifest.json" \
+  --pptx "/absolute/final.pptx" \
+  --result-map "/absolute/build/final-template-map.json" \
+  --render-dir "/absolute/build/final-renders" \
+  --output "/absolute/build/final-residual-qa-report.json"
+```
+
+该步骤同时扫描可编辑文字、PPTX 包内及对象引用的媒体哈希和逐页渲染 OCR。
+发现旧项目名称、旧 Logo/人物/产品媒体、后台缺口提示、非专用页上的
+“待核实/未披露”文字，或目标项目名缺失时必须失败。
+
+再运行：
+
+```bash
 python3 "$SKILL_DIR/scripts/validate_final_content.py" \
   --manifest "/absolute/build/replacement-manifest.json" \
   --template-map "/absolute/build/template-map.json" \
   --result-map "/absolute/build/final-template-map.json" \
   --watermark-qa-report "/absolute/build/final-watermark-qa.json" \
+  --residual-qa-report "/absolute/build/final-residual-qa-report.json" \
   --output "/absolute/build/final-content-coverage-report.json"
 ```
 
 任一必填槽位为空、可选槽位没有完整删除、共享槽位被修改、水印复检失败或
-语义键错配，都不得交付。
+语义键错配、页面闭环未完成、最终残留扫描失败，都不得交付。
 
 服务器处理包含商业秘密的模板时使用非 root 账号、`umask 077`、独立工作
 目录和 CPU/内存/磁盘/超时限制。任务目录包含图片、OCR、证据登记和来源备注，
@@ -378,7 +430,10 @@ python3 "$SKILL_DIR/scripts/validate_final_content.py" \
   可见限定；
 - 人物照片与姓名、职务一致，产品图片与产品名、型号一致；
 - 公司专属素材只在已绑定的原槽位中替换；
-- 不包含旧项目专属数据，也不包含编造内容；
+- 不包含旧项目专属文字、Logo、人物、产品、案例和数据，也不包含编造内容；
+- 非必要字段缺失时不显示后台占位语；重大资料缺口只出现在专用缺口页；
+- 修改页的全部对象均已完成页面闭环复核，`unknownShapeIds` 为零；
+- 最终可编辑文字、媒体哈希和逐页渲染 OCR 残留扫描全部通过；
 - 所有必填内容槽均非空，所有可选空槽均完整删除；
 - PPTX 可正常打开、编辑和导出。
 

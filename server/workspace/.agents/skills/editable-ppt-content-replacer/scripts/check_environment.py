@@ -100,6 +100,8 @@ def build_report(
             "scripts/validate_template_result_openxml.py",
             "scripts/apply_structural_plan.py",
             "scripts/validate_final_content.py",
+            "scripts/generate_page_closure_draft.py",
+            "scripts/validate_residual_content.py",
         ),
     )
     pdf = required_files(

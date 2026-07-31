@@ -2577,9 +2577,11 @@ export function makeArtifactFileName(
   timestamp = Date.now(),
   generatedTitle?: string,
 ) {
-  const documentName = template.type === 'custom_template_document' && generatedTitle
-    ? generatedTitle
-    : template.label
+  const documentName = template.type === 'investment_recommendation_ppt'
+    ? '投资建议书'
+    : template.type === 'custom_template_document' && generatedTitle
+      ? generatedTitle
+      : template.label
   return `${safeName(projectName)}_${safeName(documentName)}_${timestamp}.${template.outputFormat}`
 }
 

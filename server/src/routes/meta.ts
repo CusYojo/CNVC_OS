@@ -21,7 +21,7 @@ import {
   type LeadScoreJobStatus,
 } from '../services/aiSummaryService.js'
 import { FLUE_BASE_URL } from '../config/agentRuntime.js'
-import { deriveRadarSubjectName, isNonInvestableRadarContent, isSpecificLeadSubjectName } from '../services/leadSubjectName.js'
+import { isSpecificLeadSubjectName } from '../services/leadSubjectName.js'
 import {
   meaningfulPublicIntelText,
   mergeLeadPublicIntel,
@@ -33,6 +33,7 @@ import {
   saveRadarSyncState,
 } from '../services/radarSyncService.js'
 import { resolveLeadBusinessRegion } from '../services/leadRegion.js'
+import { reviewRadarCandidatesWithAi } from '../services/radarAiReviewService.js'
 
 export const metaRouter = Router()
 
@@ -248,11 +249,11 @@ metaRouter.post('/leads/sync-radar', async (req: AuthedRequest, res, next) => {
   radarSyncRunning = true
   try {
     const limit = Math.max(1, Math.min(Number(req.body?.limit) || 50, 200))
-    const incrementalPages = Math.max(1, Math.min(Number(req.body?.incrementalPages) || 4, 10))
+    const incrementalPages = Math.max(1, Math.min(Number(req.body?.incrementalPages) || 1, 10))
     const requestedBackfillPages = Number(req.body?.backfillPages)
     const backfillPages = Number.isFinite(requestedBackfillPages)
       ? Math.max(0, Math.min(requestedBackfillPages, 10))
-      : 1
+      : 0
     const src = (req.body?.source ?? 'all').toString()  // 默认全部渠道
     const explicitCursor = String(req.body?.cursor || '').trim()
     const stateId = src === 'all' ? 'main' : `source:${src}`
@@ -327,118 +328,53 @@ metaRouter.post('/leads/sync-radar', async (req: AuthedRequest, res, next) => {
     let databaseDuplicates = 0
     let filteredOut = 0
     let invalid = 0
+    let aiAccepted = 0
+    let aiRejected = 0
+    let aiReview = 0
+    let aiFailed = 0
     const createdIds: string[] = []
     const scoringLeadIds = new Set<string>()
     const actorUserId = req.user?.uid
     const splitList = (s: unknown, n = 6) => (s ? String(s).split(/；|;|\n/).map((x) => x.trim()).filter(Boolean).slice(0, n) : [])
-    for (const it of items) {
-      const prof = it.project_profile || {}
-      const isArxiv = /arxiv/i.test(String(it.source || ''))
-      const projName = String(prof.project_name || '').trim()
-      const explicitCompanyName = firstMeaningfulRadarText(
-        prof.company_name,
-        prof.legal_entity,
-        prof.company_full_name,
-        it.company_name,
-        it.legal_entity,
-        it.company_full_name,
-      )
-      const publisherNames = [it.source_name, it.school, it.account_name, it.wx_name]
-        .map((value: unknown) => meaningfulRadarText(value))
-        .filter(Boolean)
-      // 主体名称按”公司 > 项目 > 实验室/团队 > 标题明确实体”降级。
-      // 描述性短语、谓语句和材料名称不再直接作为 lead.name。
-      const sg = String(it.source_group || '')
-      const channel = /arxiv/i.test(String(it.source || '')) ? '论文'
-        : (sg || '其他')
-      const name = deriveRadarSubjectName({
-        isPaper: isArxiv,
-        companyNames: [explicitCompanyName],
-        projectName: projName,
-        lab: prof.lab,
-        team: prof.team_composition,
-        title: it.title,
-        articleText: it.article_text || it.summary,
-        excludedNames: publisherNames,
-        channel,
-      }).slice(0, 120)
-      const useProjName = isSpecificLeadSubjectName(projName, isArxiv)
-      if (!name) { invalid += 1; continue }
-      // 【批次2·需求A 放宽过滤】此前"无融资轮次即丢弃"太严,把大量无轮次的优质线索(如高校/机构公众号项目)全扔了,
-      // 导致甲方"点从雷达同步没新项目"。新规则:显著提高留存,只挡明显噪音——
-      //   1) arxiv 论文:全留(技术/团队线索,无轮次不适用);
-      //   2) 有真实融资轮次(REAL_ROUND):留;
-      //   3) 无轮次(badRound)但达标者也留: attention_score>=阈值(ATTN_KEEP) 或 有 decision_label 或 有实质项目画像
-      //      (project_name/institutions/core_highlights 至少一项非空且非占位);
-      //   4) 明显噪音(纯党建/招生/无项目实体:无轮次 且 无 attention 达标 且 无 decision_label 且 画像空)才丢弃。
-      const roundStr = String(prof.project_round || '')
-      const REAL_ROUND = /(天使|种子|Pre-?A|A\+?轮|A1|B\+?轮|C\+?轮|D轮|E轮|Pre-?IPO|战略投资|战略融资|新一轮融资|数亿|千万|亿元|万元融资)/i
-      const REAL_INVESTMENT_EVENT = /(?:(?:完成|宣布|获得|获).{0,16}(?:融资|投资)|(?:融资|投资).{0,16}(?:领投|跟投|交割)|估值.{0,12}(?:亿元|万美元|亿美元|万元))/i
-      const badRound = ['未披露/待核实', '未披露', '待核实', '融资轮次待核实', ''].includes(roundStr)
-      const hasRealRound = !badRound && REAL_ROUND.test(roundStr)
-      const fundingRound = meaningfulRadarText(prof.project_round)
-      const financingAmount = meaningfulRadarText(prof.financing_amount)
-      const latestValuation = meaningfulRadarText(prof.latest_valuation)
-      const hasExplicitCompany = isSpecificLeadSubjectName(explicitCompanyName)
-      const hasInvestmentEvidence = hasRealRound
-        || Boolean(financingAmount || latestValuation)
-        || REAL_INVESTMENT_EVENT.test(`${it.title || ''}\n${it.summary || ''}`)
-      const attnScore = typeof it.attention_score === 'number' ? it.attention_score : 0
-      const ATTN_KEEP = 55  // 雷达 attention_score 达标阈值(0-100),达标即视为优质线索保留
-      const hasDecision = Boolean(it.decision_label && String(it.decision_label).trim())
-      const isPlaceholder = (v: unknown) => {
-        return !meaningfulRadarText(v)
-      }
-      const hasNamedProject = isSpecificLeadSubjectName(prof.project_name, isArxiv)
-      const hasSubstance = hasNamedProject && (
-        !isPlaceholder(prof.institutions)
-        || !isPlaceholder(prof.affiliated_institutions)
-        || !isPlaceholder(prof.core_highlights)
-      )
-      const keep = isArxiv || hasRealRound || attnScore >= ATTN_KEEP || hasDecision || hasSubstance
-      if (!keep) { filteredOut += 1; continue }
-      // 没有明确公司或投资事实时，过滤获奖/教学/任职等非投资资讯；
-      // 纯论文、课题组研究也必须出现成果转化、产业化或客户验证信号才可入池。
-      if (!isArxiv && isNonInvestableRadarContent({
-        hasCompanySubject: hasExplicitCompany,
-        hasInvestmentEvidence,
-        subjectName: name,
-        values: [
-          it.title,
-          it.summary,
-          prof.project_name,
-          prof.core_highlights,
-          prof.team_composition,
-        ],
-      })) {
+    const subjectReviews = await reviewRadarCandidatesWithAi(items)
+    for (let itemIndex = 0; itemIndex < items.length; itemIndex += 1) {
+      const it = items[itemIndex]
+      const subjectReview = subjectReviews[itemIndex]
+      if (subjectReview?.status === 'accepted') aiAccepted += 1
+      else if (subjectReview?.status === 'rejected') aiRejected += 1
+      else if (subjectReview?.status === 'review') aiReview += 1
+      else aiFailed += 1
+      if (subjectReview?.status !== 'accepted') {
         filteredOut += 1
         continue
       }
-      // 【批次3·需求E】噪音闸:批次2放宽后引入大量非项目文章(政策/评论/周报/论坛综述/党建招生等)被雷达打高分放进来。
-      // 若无真实融资轮次(!hasRealRound)且(标题或项目名命中噪音特征 或 D 判定为低质量句子片段),则丢弃。
-      // 保留有真实融资轮次的(即使命中噪音词,只要是真实投资事件就留);arxiv 论文亦豁免(走论文渠道)。
-      // 强噪音词:资讯/评论/政策/活动类,出现在标题或项目名里都基本是非投资线索 → 作用于 title+project_name
-      const NOISE_RE = /(政策(解读|导向|环境|风向)?|战略框架|管理评论|资本市场动态|(周|月|季|年)报|第\s*\d+\s*期|热点(尽知|汇总|速览)|好文|达沃斯|学科交叉|劳动保护|(?<![A-Za-z0-9])召开(?![A-Za-z0-9])|论坛|(峰会|大会)(综述|回顾|观察|纪实)|观察$|解读$|盘点|回顾$|展望$|综述$|党建|招生|校友会(通知|活动)?|通知$|倡议书?|本土化战略|开局之年|借力)/
-      // 弱噪音词:易误伤真项目名(如"某公司技术负责人专访"、"以合成生物学为核心的…"、"战略布局"),
-      // 仅当出现在【标题】里才当噪音,不作用于 project_name(结构化抽取的项目名相对干净) →
-      const TITLE_NOISE_RE = /(负责人|战略(规划|布局|路径)|发展路径|以.{0,20}为(核心|例)|——以)/
-      const titleStr = String(it.title || '')
-      // 多事件晚报、人物访谈、行业盘点即使正文提及某轮融资，也不是
-      // 单一、可核验的新增投资标的，不能因 hasRealRound 而绕过噪音闸。
-      const HARD_EDITORIAL_RE = /(?:氪星晚报|\d+点\d*氪|(?:^|[|｜:：\s])(?:早报|晚报)(?:[|｜:：\s]|$)|^(?:对谈|访谈|专访|秋声)\s*[|｜:：]|投资狂潮|终极能源之战|行业综述|迟到的狂欢)/
-      if (!isArxiv && HARD_EDITORIAL_RE.test(titleStr)) { filteredOut += 1; continue }
-      const hitNoise = NOISE_RE.test(`${titleStr} ${projName}`) || TITLE_NOISE_RE.test(titleStr)
-      if (!isArxiv && !hasRealRound && hitNoise) { filteredOut += 1; continue }
-      // 先通过现有质量/噪音过滤，再进入增量合并；同批同名仍参与合并，以免丢失后续来源。
+
+      const name = subjectReview.subjectName.trim().slice(0, 120)
+      if (!name) {
+        invalid += 1
+        continue
+      }
+      const prof = it.project_profile || {}
+      const isArxiv = /arxiv/i.test(String(it.source || ''))
+      const publisherNames = [it.source_name, it.school, it.account_name, it.wx_name]
+        .map((value: unknown) => meaningfulRadarText(value))
+        .filter(Boolean)
+      const sg = String(it.source_group || '')
+      const channel = /arxiv/i.test(String(it.source || '')) ? '论文'
+        : (sg || '其他')
+      const fundingRound = meaningfulRadarText(prof.project_round)
+      const financingAmount = meaningfulRadarText(prof.financing_amount)
+      const latestValuation = meaningfulRadarText(prof.latest_valuation)
       if (seenBatchNames.has(name)) batchDuplicates += 1
       else seenBatchNames.add(name)
       const highlights = splitList(prof.core_highlights, 5)
       const nextActions: string[] = Array.isArray(it.next_actions) ? it.next_actions.map((x: unknown) => String(x)) : []
       const risks = splitList(prof.risk_notes, 5)
       const dims: any[] = Array.isArray(it.score_dimensions) ? it.score_dimensions : []
-      // 项目名用于稳定匹配；公司主体只接受 Radar 明确字段，缺失时才退回
-      // 一个非句子型项目名。不得凭空补“有限公司”等法定后缀。
-      const companyName = explicitCompanyName.slice(0, 120)
+      const companyName = (
+        subjectReview.legalName
+        || (subjectReview.subjectType === 'company' ? name : '')
+      ).slice(0, 120)
 
       const rawFundingInstitutions = meaningfulRadarText(prof.institutions)
       // 历史高校/公众号画像曾把来源账号写入 institutions；来源方不是投资方。
@@ -464,8 +400,19 @@ metaRouter.post('/leads/sync-radar', async (req: AuthedRequest, res, next) => {
         channel,
         accountName: it.account_name || it.wx_name || '',
         publishedAt: it.published_at || '',
+        aiSubjectReview: {
+          decision: subjectReview.decision,
+          subjectType: subjectReview.subjectType,
+          subjectName: subjectReview.subjectName,
+          legalName: subjectReview.legalName,
+          evidence: subjectReview.evidence,
+          confidence: subjectReview.confidence,
+          model: subjectReview.model,
+          reviewedAt: subjectReview.reviewedAt,
+          cacheHit: subjectReview.cacheHit,
+        },
         profile: {
-          projectName: useProjName ? projName : name,
+          projectName: name,
           companyName,
           projectRound: prof.project_round || '',
           financingAmount: prof.financing_amount || '',
@@ -602,6 +549,10 @@ metaRouter.post('/leads/sync-radar', async (req: AuthedRequest, res, next) => {
       databaseDuplicates,
       filtered: filteredOut,
       invalid,
+      aiAccepted,
+      aiRejected,
+      aiReview,
+      aiFailed,
       createdIds,
       scoringIds,
       scoringQueued,

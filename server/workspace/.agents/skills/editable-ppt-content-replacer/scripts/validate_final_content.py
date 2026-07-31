@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,7 @@ def validate_final_content(
     template_map: dict[str, Any],
     result_map: dict[str, Any],
     watermark_qa_report: dict[str, Any],
+    residual_qa_report: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     errors: list[str] = []
     warnings: list[str] = []
@@ -118,8 +120,82 @@ def validate_final_content(
                 "status": "passed" if not failures else "failed",
             }
         )
+    operation_checks: list[dict[str, Any]] = []
+    for operation in manifest.get("operations", []):
+        if not isinstance(operation, dict):
+            continue
+        action = operation.get("action")
+        if action not in {"replace_text", "replace_text_group", "replace_image"}:
+            continue
+        slide = int(operation.get("slide", 0))
+        failures: list[str] = []
+        targets: list[tuple[int, str | None, str | None]] = []
+        if action == "replace_text":
+            targets.append(
+                (int(operation.get("shapeId", 0)), str(operation.get("text", "")), None)
+            )
+        elif action == "replace_text_group":
+            shape_ids = [int(value) for value in operation.get("shapeIds", [])]
+            if not shape_ids:
+                failures.append("shapeIds 为空")
+                operation_checks.append(
+                    {
+                        "slide": slide,
+                        "action": action,
+                        "semanticKey": operation.get("semanticKey"),
+                        "failures": failures,
+                        "status": "failed",
+                    }
+                )
+                errors.append(f"第 {slide} 页 replace_text_group 最终结果失败：shapeIds 为空")
+                continue
+            primary = int(operation.get("primaryShapeId", shape_ids[0]))
+            for shape_id in shape_ids:
+                targets.append(
+                    (
+                        shape_id,
+                        str(operation.get("text", "")) if shape_id == primary else "",
+                        None,
+                    )
+                )
+        else:
+            asset = Path(str(operation.get("asset", ""))).expanduser().resolve()
+            expected_media = (
+                hashlib.sha256(asset.read_bytes()).hexdigest()
+                if asset.is_file()
+                else str(operation.get("assetSha256", ""))
+            )
+            targets.append((int(operation.get("shapeId", 0)), None, expected_media))
+        for shape_id, expected_text, expected_media in targets:
+            target = after.get((slide, shape_id))
+            if target is None:
+                failures.append(f"shapeId={shape_id} 不存在")
+            elif expected_text is not None and target.get("text") != expected_text:
+                failures.append(f"shapeId={shape_id} 最终文字不精确")
+            elif expected_media is not None and target.get("media") != expected_media:
+                failures.append(f"shapeId={shape_id} 最终媒体不精确")
+        if failures:
+            errors.append(
+                f"第 {slide} 页 {action} 最终结果失败：{'；'.join(failures)}"
+            )
+        operation_checks.append(
+            {
+                "slide": slide,
+                "action": action,
+                "semanticKey": operation.get("semanticKey"),
+                "failures": failures,
+                "status": "passed" if not failures else "failed",
+            }
+        )
     if watermark_qa_report.get("passed") is not True:
         errors.append("最终 PPTX 未通过渲染后水印复检")
+    residual_required = str(manifest.get("schemaVersion", "")) == "1.4"
+    if residual_required:
+        if not isinstance(residual_qa_report, dict):
+            errors.append("1.4 版缺少 final-residual-qa-report.json")
+            residual_qa_report = {}
+        elif residual_qa_report.get("passed") is not True:
+            errors.append("最终 PPTX 未通过旧项目文字、Logo/媒体和 OCR 残留扫描")
     research_audit = preflight.get("researchEvidenceAudit", {})
     return {
         "passed": not errors,
@@ -138,6 +214,15 @@ def validate_final_content(
                 item["status"] == "passed" for item in controlled_additions
             ),
             "watermarkQaPassed": watermark_qa_report.get("passed") is True,
+            "residualQaPassed": (
+                residual_qa_report.get("passed") is True
+                if isinstance(residual_qa_report, dict)
+                else False
+            ),
+            "operationCheckCount": len(operation_checks),
+            "passedOperationCheckCount": sum(
+                item["status"] == "passed" for item in operation_checks
+            ),
             "researchEvidenceAuditPassed": (
                 research_audit.get("status") in {"passed", "not-required"}
             ),
@@ -146,7 +231,9 @@ def validate_final_content(
         },
         "coverage": coverage,
         "controlledAdditions": controlled_additions,
+        "operationChecks": operation_checks,
         "researchEvidenceAudit": research_audit,
+        "residualQaReport": residual_qa_report,
     }
 
 
@@ -158,6 +245,7 @@ def main() -> None:
     parser.add_argument("--template-map", required=True, type=Path)
     parser.add_argument("--result-map", required=True, type=Path)
     parser.add_argument("--watermark-qa-report", required=True, type=Path)
+    parser.add_argument("--residual-qa-report", type=Path)
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
     report = validate_final_content(
@@ -165,6 +253,7 @@ def main() -> None:
         load_json(args.template_map),
         load_json(args.result_map),
         load_json(args.watermark_qa_report),
+        load_json(args.residual_qa_report) if args.residual_qa_report else None,
     )
     output = args.output.expanduser().resolve()
     output.parent.mkdir(parents=True, exist_ok=True)

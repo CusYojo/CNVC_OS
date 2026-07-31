@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 
@@ -28,6 +29,9 @@ def compact_operation(operation: dict) -> dict:
     if action == "replace_text_group":
         shape_ids = [int(value) for value in operation["shapeIds"]]
         result["shapeIds"] = shape_ids
+        result["primaryShapeId"] = int(
+            operation.get("primaryShapeId", shape_ids[0])
+        )
         result["text"] = operation["text"]
     else:
         shape_id = int(operation["shapeId"])
@@ -46,9 +50,9 @@ def compact_operation(operation: dict) -> dict:
                 }
             )
         elif action == "replace_image":
-            result["asset"] = str(
-                Path(operation["asset"]).expanduser().resolve()
-            )
+            asset = Path(operation["asset"]).expanduser().resolve()
+            result["asset"] = str(asset)
+            result["assetSha256"] = hashlib.sha256(asset.read_bytes()).hexdigest()
     return result
 
 

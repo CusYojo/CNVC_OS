@@ -165,6 +165,23 @@ export const radarSyncState = pgTable('radar_sync_state', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })
 
+export const radarAiReviews = pgTable('radar_ai_reviews', {
+  cacheKey: varchar('cache_key', { length: 64 }).primaryKey(),
+  sourceKey: text('source_key').notNull(),
+  contentHash: varchar('content_hash', { length: 64 }).notNull(),
+  promptVersion: varchar('prompt_version', { length: 32 }).notNull(),
+  model: varchar('model', { length: 128 }).notNull(),
+  status: varchar('status', { length: 16 }).notNull(),
+  decision: jsonb('decision').$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
+  attempts: integer('attempts').notNull().default(0),
+  lastError: text('last_error'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  bySource: index('idx_radar_ai_reviews_source').on(t.sourceKey),
+  byStatus: index('idx_radar_ai_reviews_status').on(t.status),
+}))
+
 export const auditLogs = pgTable('audit_logs', {
   id: uuid('id').primaryKey().defaultRandom(),
   userId: uuid('user_id').references(() => users.id),

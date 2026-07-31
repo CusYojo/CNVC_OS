@@ -140,13 +140,20 @@ type ProjectLike = {
   name: string
   companyName?: string | null
   industry?: string | null
+  round?: string | null
   stage?: string | null
+  owner?: string | null
+  source?: string | null
   financing?: string | null
   valuation?: string | null
+  riskLevel?: string | null
+  score?: number | null
+  progress?: number | null
   summary?: string | null
   businessModel?: string | null
   market?: string | null
   team?: string | null
+  tags?: string[] | null
 }
 
 const GW_BASE = (process.env.LLM_BASE_URL || process.env.OPENAI_BASE_URL || 'http://127.0.0.1:18081/v1').replace(/\/$/, '')
@@ -170,6 +177,176 @@ function meaningfulValue(value: unknown) {
   if (/项目已创建.{0,40}(?:等待上传|生成)/.test(cleaned)) return ''
   if (/(?:上传测试|测试文本资料|解析验证|卡住排查|异步上传测试|大文件测试)/.test(cleaned)) return ''
   return cleaned
+}
+
+type InvestmentRecommendationDetailCategory = {
+  label: string
+  keywords: string[]
+  projectDetails: (
+    project: ProjectLike,
+    parameters: Record<string, unknown>,
+  ) => Array<[string, unknown]>
+}
+
+const INVESTMENT_RECOMMENDATION_DETAIL_CATEGORIES: InvestmentRecommendationDetailCategory[] = [
+  {
+    label: '公司简介与主体',
+    keywords: [
+      '公司简介', '公司概况', '公司主体', '项目概况', '成立', '工商', '注册资本',
+      '统一社会信用代码', '注册地址', '主营业务', '发展阶段', '历史沿革', '商业模式',
+    ],
+    projectDetails: (project) => [
+      ['项目名称', project.name],
+      ['公司主体', project.companyName],
+      ['所属行业', project.industry],
+      ['当前轮次', project.round],
+      ['项目阶段', project.stage],
+      ['项目来源', project.source],
+      ['项目负责人', project.owner],
+      ['项目概述', project.summary],
+      ['商业模式', project.businessModel],
+      ['目标市场', project.market],
+      ['项目标签', project.tags?.join('、')],
+    ],
+  },
+  {
+    label: '核心团队与治理',
+    keywords: [
+      '核心团队', '创始人', '联合创始人', '管理团队', '高管', 'CEO', 'CTO', '董事',
+      '监事', '履历', '任职', '全职', '持股', '员工持股', '治理', '关键人',
+    ],
+    projectDetails: (project) => [
+      ['团队介绍', project.team],
+    ],
+  },
+  {
+    label: '财务与经营数据',
+    keywords: [
+      '财务', '营业收入', '销售收入', '收入确认', '成本', '毛利', '毛利率', '利润',
+      '净利润', '现金流', '现金余额', '应收账款', '费用', '回款', '预算', '业绩预测',
+      '财务报表', '资金续航',
+    ],
+    projectDetails: () => [],
+  },
+  {
+    label: '融资情况',
+    keywords: [
+      '融资计划', '历史融资', '本轮融资', '融资轮次', '融资金额', '投资方', '增资',
+      '股权转让', '老股', '股东借款', '资金用途', '交割', '付款凭证',
+    ],
+    projectDetails: (project) => [
+      ['当前轮次', project.round],
+      ['融资安排', project.financing],
+    ],
+  },
+  {
+    label: '估值依据',
+    keywords: [
+      '估值', '投前估值', '投后估值', '估值口径', '估值依据', '可比公司', '可比交易',
+      '市销率', '市盈率', 'PS', 'PE', 'EV', '估值倍数', '敏感性分析', '稀释',
+    ],
+    projectDetails: (project) => [
+      ['估值口径', project.valuation],
+    ],
+  },
+  {
+    label: '交易方案与关键条款',
+    keywords: [
+      '交易方案', '投资方案', '投资金额', '投资方式', '增资', '老股', '股权受让',
+      '持股比例', '股比', 'SPV', '资金用途', '交割条件', '保护性条款', '董事席位',
+      '否决权', '反稀释', '回购', '对赌', '清算优先', '退出安排',
+    ],
+    projectDetails: (project, parameters) => [
+      ['融资安排', project.financing],
+      ['估值口径', project.valuation],
+      ['交易方案', parameters.transactionPlan],
+      ['投资方案', parameters.investmentPlan],
+      ['交易条款', parameters.transactionTerms],
+      ['拟投资金额', parameters.investmentAmount],
+    ],
+  },
+]
+
+function detailKeywordScore(text: string, keywords: readonly string[]) {
+  const normalized = text.toLocaleLowerCase('zh-CN')
+  return keywords.reduce((score, keyword) => {
+    const term = keyword.toLocaleLowerCase('zh-CN')
+    let offset = 0
+    let hits = 0
+    while ((offset = normalized.indexOf(term, offset)) >= 0 && hits < 12) {
+      hits += 1
+      offset += term.length
+    }
+    return score + hits
+  }, 0)
+}
+
+function investmentRecommendationDetailExcerpt(
+  content: string,
+  keywords: readonly string[],
+) {
+  const cleaned = collapseRepeatedText(content)
+  const segments = cleaned
+    .split(/(?<=[。！？!?；;])|\n+/)
+    .map((text, order) => ({
+      text: text.trim(),
+      order,
+      score: detailKeywordScore(text, keywords),
+    }))
+    .filter((item) => item.text && item.score > 0)
+    .sort((left, right) => right.score - left.score || left.order - right.order)
+    .slice(0, 10)
+    .sort((left, right) => left.order - right.order)
+    .map((item) => item.text)
+    .join('\n')
+  return segments.slice(0, 1800)
+}
+
+/**
+ * 投资建议书需要把项目结构化字段和长文档中的关键业务片段按主题送入模型。
+ * 这里保留原始 S 索引，模型生成的 sourceIndexes 仍可回溯到真实项目资料。
+ */
+export function buildInvestmentRecommendationDetailContext(
+  project: ProjectLike,
+  sources: EvidenceSource[],
+  parameters: Record<string, unknown> = {},
+) {
+  return INVESTMENT_RECOMMENDATION_DETAIL_CATEGORIES.map((category) => {
+    const projectDetails = category.projectDetails(project, parameters)
+      .flatMap(([label, value]) => {
+        const detail = meaningfulValue(value)
+        return detail ? [`- ${label}：${detail.slice(0, 4000)}`] : []
+      })
+    const evidenceDetails = sources
+      .map((source, sourceIndex) => {
+        const searchable = `${source.sourceName}\n${source.content}`
+        const excerpt = investmentRecommendationDetailExcerpt(
+          source.content,
+          category.keywords,
+        )
+        const score = detailKeywordScore(searchable, category.keywords)
+          + (source.sourceType === 'project_record'
+            ? 10
+            : source.sourceType.startsWith('public_web')
+              ? 0
+              : 5)
+        return { source, sourceIndex, excerpt, score }
+      })
+      .filter((item) => item.excerpt && item.score > 0)
+      .sort((left, right) => right.score - left.score || left.sourceIndex - right.sourceIndex)
+      .slice(0, 8)
+      .map(({ source, sourceIndex, excerpt }) =>
+        `[S${sourceIndex}] ${source.sourceName} / 片段${source.chunkIndex ?? sourceIndex}\n${excerpt}`)
+    return [
+      `### ${category.label}`,
+      projectDetails.length
+        ? `结构化项目字段：\n${projectDetails.join('\n')}`
+        : '结构化项目字段：未单独录入，以项目资料证据为准。',
+      evidenceDetails.length
+        ? `相关项目证据：\n${evidenceDetails.join('\n\n')}`
+        : '相关项目证据：未找到可安全引用的详细信息，不得编造。',
+    ].join('\n')
+  }).join('\n\n')
 }
 
 const SECTION_KEYWORDS: Array<[RegExp, string[]]> = [
@@ -1812,9 +1989,19 @@ export async function composeBusinessContent(input: {
         : 9000
     : isDueDiligence
       ? 8000
+      : isUploadedInvestmentTemplate
+        ? 12000
       : usesUploadedTemplate
         ? 9000
       : 7000
+  const investmentRecommendationDetailContext =
+    input.type === 'investment_recommendation_ppt'
+      ? buildInvestmentRecommendationDetailContext(
+          input.project,
+          input.sources,
+          input.parameters,
+        )
+      : ''
   const evidenceStatusRule = isDueDiligence
     ? '默认按“本地项目资料库 → 当前项目网络缓存 → 定向网络补全 → 缓存写回”的顺序取证；按可追溯性标为“资料记载”或“待核验”，不得输出“资料缺口”状态。'
     : isCustomTemplate
@@ -1864,7 +2051,9 @@ export async function composeBusinessContent(input: {
 12. 每个章节的信息密度应适配对应模板槽位。优先精炼内容，不得通过擅自缩小字体、改变行距或增加未授权页面解决溢出。
 13. 输出章节必须与模板中的业务内容页一一对应；封面、目录、章节过渡页、来源页和责任声明页不作为业务章节重复生成。
 14. 投资结论必须结合当前项目阶段，给出“进入初筛 / 继续跟踪 / 申请立项 / 启动尽调 / 提请上会 / 提交投决 / 暂缓推进 / 归档”之一及其前置条件。
-15. 市场规模、增长率、政策和具名竞品可以使用已核验的行业上下文来源，但必须明确是行业或可比对象信息，不得写成当前公司自身收入、客户、份额、融资或技术事实。`
+15. 市场规模、增长率、政策和具名竞品可以使用已核验的行业上下文来源，但必须明确是行业或可比对象信息，不得写成当前公司自身收入、客户、份额、融资或技术事实。
+16. 必须逐项消费“投资建议书重点信息包”中的公司简介、团队、财务、融资、估值和交易方案。存在详细字段或证据时，应写入模板中语义最匹配的页面，不得只在执行摘要中笼统一笔带过；确无资料时才可标记待核验。
+17. 财务、融资、估值和交易方案是四类不同信息：财务需保留期间、单位和历史/预测口径；融资需保留轮次、金额、投资方、时间和资金用途；估值需保留投前/投后及依据；交易方案需保留投资金额、方式、持股、交割和保护性条款。不得用其中一类替代另一类。`
     : ''
   const structureOrderRule = isCustomTemplate
     ? `必须按内部结构槽顺序输出 ${input.template.sections.length} 个 section，但不得复用原模板可见标题。`
@@ -1933,6 +2122,13 @@ ${JSON.stringify(input.project)}
 
 用户输入参数优先用于受众、篇幅和展示侧重，不得覆盖项目证据。项目字段与证据冲突时标记为待核验。
 
+${investmentRecommendationDetailContext
+    ? `投资建议书重点信息包：
+以下信息已按主题从项目档案、用户上传资料和已核验来源中整理。必须逐项检查并写入语义匹配的模板页面；每项事实继续使用对应的 S 索引。
+
+${investmentRecommendationDetailContext}
+`
+    : ''}
 证据：
 ${evidence || (isDueDiligence || isCustomTemplate
     ? isDueDiligence

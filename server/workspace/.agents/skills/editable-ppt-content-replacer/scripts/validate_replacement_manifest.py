@@ -38,10 +38,11 @@ PROTECTED_CLASSES = {
     "template_brand",
     "generic_decoration",
 }
-SUPPORTED_SCHEMA_VERSIONS = {"1.0", "1.1", "1.2", "1.3"}
-RESEARCH_SCHEMA_VERSIONS = {"1.3"}
-STRICT_SLOT_SCHEMA_VERSIONS = {"1.2", "1.3"}
-RELATIONSHIP_SCHEMA_VERSIONS = {"1.1", "1.2", "1.3"}
+SUPPORTED_SCHEMA_VERSIONS = {"1.0", "1.1", "1.2", "1.3", "1.4"}
+RESEARCH_SCHEMA_VERSIONS = {"1.3", "1.4"}
+STRICT_SLOT_SCHEMA_VERSIONS = {"1.2", "1.3", "1.4"}
+RELATIONSHIP_SCHEMA_VERSIONS = {"1.1", "1.2", "1.3", "1.4"}
+PAGE_CLOSURE_SCHEMA_VERSIONS = {"1.4"}
 SOURCE_TYPES = {
     "user_material",
     "company_official",
@@ -76,6 +77,12 @@ EVIDENCE_STATUSES = {
 }
 UNAVAILABLE_LABELS = ("未披露", "待核实", "公开信息未检索到")
 CAUTIOUS_LABELS = UNAVAILABLE_LABELS + ("存在差异", "口径不一致")
+DEFAULT_FORBIDDEN_OPERATIONAL_TERMS = (
+    "未提供公司官网",
+    "缺少原始文件",
+    "现有材料没有BP",
+    "未提供公司资料",
+)
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -136,10 +143,10 @@ def validate_research_evidence(
     initial_error_count = len(errors)
     policy = manifest.get("researchPolicy")
     if not isinstance(policy, dict):
-        errors.append("1.3 版必须提供 researchPolicy")
+        errors.append("1.3/1.4 版必须提供 researchPolicy")
         policy = {}
     if policy.get("enabled") is not True:
-        errors.append("1.3 版 researchPolicy.enabled 必须为 true")
+        errors.append("1.3/1.4 版 researchPolicy.enabled 必须为 true")
     if not valid_iso_date(policy.get("asOfDate")):
         errors.append("researchPolicy.asOfDate 必须是 YYYY-MM-DD")
     minimum_sources = policy.get("minimumIndependentSources", 2)
@@ -154,7 +161,7 @@ def validate_research_evidence(
 
     raw_sources = manifest.get("sources")
     if not isinstance(raw_sources, list):
-        errors.append("1.3 版 sources 必须是数组")
+        errors.append("1.3/1.4 版 sources 必须是数组")
         raw_sources = []
     sources: dict[str, dict[str, Any]] = {}
     for index, source in enumerate(raw_sources, 1):
@@ -203,7 +210,7 @@ def validate_research_evidence(
 
     raw_evidence = manifest.get("evidenceRegistry")
     if not isinstance(raw_evidence, list):
-        errors.append("1.3 版 evidenceRegistry 必须是数组")
+        errors.append("1.3/1.4 版 evidenceRegistry 必须是数组")
         raw_evidence = []
     evidence: dict[str, dict[str, Any]] = {}
     for index, item in enumerate(raw_evidence, 1):
@@ -342,7 +349,7 @@ def validate_research_evidence(
             continue
         evidence_ids = operation.get("evidenceIds")
         if not isinstance(evidence_ids, list) or not evidence_ids:
-            errors.append(f"{prefix}1.3 版操作必须包含非空 evidenceIds")
+            errors.append(f"{prefix}1.3/1.4 版操作必须包含非空 evidenceIds")
             evidence_ids = []
         elif len(set(evidence_ids)) != len(evidence_ids):
             errors.append(f"{prefix} evidenceIds 不得重复")
@@ -394,6 +401,22 @@ def validate_research_evidence(
                         f"{prefix}未检索到证据时只能显示未披露/待核实/"
                         "公开信息未检索到，或删除完整可选槽位"
                     )
+                if schema_version in PAGE_CLOSURE_SCHEMA_VERSIONS:
+                    gap_slides = {
+                        int(value)
+                        for value in (
+                            manifest.get("residualPolicy", {}).get(
+                                "gapSlideNumbers",
+                                [],
+                            )
+                            if isinstance(manifest.get("residualPolicy"), dict)
+                            else []
+                        )
+                    }
+                    if int(operation.get("slide", 0)) not in gap_slides:
+                        errors.append(
+                            f"{prefix}1.4 版未披露/待核实内容只能写入专用缺口页"
+                        )
             else:
                 errors.append(
                     f"{prefix}未检索到证据不能支持图片、图表或表格替换"
@@ -446,7 +469,7 @@ def validate_conversion_handoff(
     if schema_version not in STRICT_SLOT_SCHEMA_VERSIONS:
         return audit
     if source_mode not in {"pdf-converted", "native-pptx"}:
-        errors.append("1.2/1.3 版必须设置 sourceMode=pdf-converted 或 native-pptx")
+        errors.append("1.2 及以上版本必须设置 sourceMode=pdf-converted 或 native-pptx")
         audit["status"] = "invalid-source-mode"
         return audit
     if source_mode == "native-pptx":
@@ -986,6 +1009,12 @@ def operation_text_for_shape(
         return operation.get("text") if isinstance(operation.get("text"), str) else None
     if operation.get("action") == "replace_text_group":
         if shape_id in operation.get("shapeIds", []):
+            primary = operation.get("primaryShapeId")
+            if primary is None:
+                shape_ids = operation.get("shapeIds", [])
+                primary = shape_ids[0] if shape_ids else None
+            if shape_id != primary:
+                return ""
             return operation.get("text") if isinstance(operation.get("text"), str) else None
     return None
 
@@ -998,6 +1027,9 @@ def validate_entity_bindings(
     errors: list[str],
     require_relationships: bool,
 ) -> list[dict[str, Any]]:
+    strict_identity = (
+        str(manifest.get("schemaVersion", "")) in PAGE_CLOSURE_SCHEMA_VERSIONS
+    )
     raw_bindings = manifest.get("entityBindings", [])
     if not isinstance(raw_bindings, list):
         errors.append("entityBindings 必须是数组")
@@ -1035,8 +1067,26 @@ def validate_entity_bindings(
         bindings[binding_id] = binding
         if not entity_id or not display_name:
             errors.append(f"{prefix} entityId 和 displayName 不能为空")
-        if entity_type not in {"person", "product", "customer", "case"}:
+        if entity_type not in {
+            "person",
+            "product",
+            "customer",
+            "case",
+            "company",
+            "institution",
+        }:
             errors.append(f"{prefix} entityType 不受支持：{entity_type}")
+        entity_role = str(binding.get("entityRole", "")).strip()
+        if strict_identity and entity_type in {"company", "institution"}:
+            expected_roles = (
+                {"target_company", "competitor", "customer"}
+                if entity_type == "company"
+                else {"investment_institution"}
+            )
+            if entity_role not in expected_roles:
+                errors.append(
+                    f"{prefix} entityRole 与 {entity_type} 不匹配：{entity_role}"
+                )
         try:
             slide = int(binding.get("slide", 0))
             image_shape_id = int(binding.get("imageShapeId", 0))
@@ -1112,7 +1162,7 @@ def validate_entity_bindings(
                 errors.append(f"{label_prefix}目标不是可编辑文字形状")
             if group_shape_ids is not None and shape_id not in group_shape_ids:
                 errors.append(f"{label_prefix}不属于 slotGroupId={group_id}")
-            if label_type in {"name", "product_name"}:
+            if label_type in {"name", "product_name", "company_name"}:
                 has_identity_name = True
                 if expected_text.strip() != display_name:
                     errors.append(
@@ -1138,8 +1188,13 @@ def validate_entity_bindings(
                     "matched": expected_text in matching_texts,
                 }
             )
-        required_name_type = "name" if entity_type == "person" else "product_name"
-        if entity_type in {"person", "product"} and not has_identity_name:
+        required_name_type = {
+            "person": "name",
+            "product": "product_name",
+            "company": "company_name",
+            "institution": "company_name",
+        }.get(str(entity_type), "")
+        if entity_type in {"person", "product", "company", "institution"} and not has_identity_name:
             errors.append(f"{prefix}必须包含 {required_name_type} 标签绑定")
 
         image_operation = image_operations.get(image_key)
@@ -1152,9 +1207,13 @@ def validate_entity_bindings(
             if operation_asset != asset:
                 errors.append(f"{prefix}图片操作与实体绑定使用了不同素材")
             expected_class = (
-                "person_photo" if entity_type == "person" else "product_screenshot"
+                "person_photo"
+                if entity_type == "person"
+                else "product_screenshot"
+                if entity_type == "product"
+                else "company_logo"
             )
-            if entity_type in {"person", "product"} and image_operation.get(
+            if entity_type in {"person", "product", "company", "institution"} and image_operation.get(
                 "assetClass"
             ) != expected_class:
                 errors.append(
@@ -1165,6 +1224,7 @@ def validate_entity_bindings(
                 "bindingId": binding_id,
                 "entityId": entity_id,
                 "entityType": entity_type,
+                "entityRole": entity_role or None,
                 "displayName": display_name,
                 "slide": slide,
                 "slotGroupId": group_id or None,
@@ -1192,6 +1252,201 @@ def validate_entity_bindings(
                 errors.append(f"第 {index} 项引用了不存在的 bindingId={binding_id}")
         elif binding_id and binding_id not in bindings:
             errors.append(f"第 {index} 项引用了不存在的 bindingId={binding_id}")
+        if strict_identity and asset_class == "company_logo":
+            if not binding_id:
+                errors.append(
+                    f"第 {index} 项公司 Logo 替换必须包含 bindingId"
+                )
+            elif binding_id not in bindings:
+                errors.append(f"第 {index} 项引用了不存在的 bindingId={binding_id}")
+    return audit
+
+
+def validate_content_policy(
+    manifest: dict[str, Any],
+    errors: list[str],
+) -> dict[str, Any]:
+    initial_error_count = len(errors)
+    required = str(manifest.get("schemaVersion", "")) in PAGE_CLOSURE_SCHEMA_VERSIONS
+    policy = manifest.get("contentPolicy")
+    if not required:
+        return {"required": False, "status": "not-required"}
+    if not isinstance(policy, dict):
+        errors.append("1.4 版必须提供 contentPolicy")
+        return {"required": True, "status": "missing"}
+    expected = {
+        "optionalMissingAction": "delete-slot-group",
+        "requiredMissingAction": "dedicated-gap-slide-only",
+        "unavailableWebsiteAction": "omit-slot",
+        "forbidOperationalPlaceholders": True,
+    }
+    for field, value in expected.items():
+        if policy.get(field) != value:
+            errors.append(f"contentPolicy.{field} 必须为 {value!r}")
+    return {
+        "required": True,
+        "status": "passed" if len(errors) == initial_error_count else "failed",
+        "policy": policy,
+    }
+
+
+def validate_residual_policy(
+    manifest: dict[str, Any],
+    errors: list[str],
+) -> dict[str, Any]:
+    initial_error_count = len(errors)
+    required = str(manifest.get("schemaVersion", "")) in PAGE_CLOSURE_SCHEMA_VERSIONS
+    policy = manifest.get("residualPolicy")
+    if not required:
+        return {"required": False, "status": "not-required"}
+    if not isinstance(policy, dict):
+        errors.append("1.4 版必须提供 residualPolicy")
+        return {"required": True, "status": "missing"}
+    forbidden_terms = policy.get("forbiddenTextTerms")
+    required_terms = policy.get("requiredTextTerms")
+    forbidden_media = policy.get("forbiddenMediaSha256")
+    gap_only_terms = policy.get("gapOnlyTextTerms")
+    gap_slides = policy.get("gapSlideNumbers")
+    if not isinstance(forbidden_terms, list) or not all(
+        isinstance(value, str) and value.strip() for value in forbidden_terms or []
+    ):
+        errors.append("residualPolicy.forbiddenTextTerms 必须是非空字符串数组")
+        forbidden_terms = []
+    normalized_forbidden = {str(value).strip() for value in forbidden_terms}
+    for term in DEFAULT_FORBIDDEN_OPERATIONAL_TERMS:
+        if term not in normalized_forbidden:
+            errors.append(
+                f"1.4 版 forbiddenTextTerms 必须包含后台缺口提示：{term}"
+            )
+    if not isinstance(required_terms, list) or not all(
+        isinstance(value, str) and value.strip() for value in required_terms or []
+    ):
+        errors.append("residualPolicy.requiredTextTerms 必须是非空字符串数组")
+        required_terms = []
+    project_name = str(manifest.get("projectName", "")).strip()
+    if project_name and project_name not in {str(v).strip() for v in required_terms}:
+        errors.append("residualPolicy.requiredTextTerms 必须包含 projectName")
+    if not isinstance(forbidden_media, list) or not all(
+        isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value)
+        for value in forbidden_media or []
+    ):
+        errors.append(
+            "residualPolicy.forbiddenMediaSha256 必须是 SHA-256 字符串数组"
+        )
+        forbidden_media = []
+    if not isinstance(gap_only_terms, list) or not all(
+        isinstance(value, str) and value.strip() for value in gap_only_terms or []
+    ):
+        errors.append("residualPolicy.gapOnlyTextTerms 必须是字符串数组")
+        gap_only_terms = []
+    if not isinstance(gap_slides, list) or not all(
+        isinstance(value, int) and value > 0 for value in gap_slides or []
+    ):
+        errors.append("residualPolicy.gapSlideNumbers 必须是正整数数组")
+        gap_slides = []
+    if policy.get("ocrRequired") is not True:
+        errors.append("1.4 版 residualPolicy.ocrRequired 必须为 true")
+    return {
+        "required": True,
+        "status": "passed" if len(errors) == initial_error_count else "failed",
+        "forbiddenTextTerms": forbidden_terms,
+        "requiredTextTerms": required_terms,
+        "forbiddenMediaSha256": forbidden_media,
+        "gapOnlyTextTerms": gap_only_terms,
+        "gapSlideNumbers": gap_slides,
+        "ocrRequired": policy.get("ocrRequired") is True,
+    }
+
+
+def validate_page_closures(
+    manifest: dict[str, Any],
+    objects: dict[tuple[int, int], dict[str, Any]],
+    operations: list[dict[str, Any]],
+    groups: dict[str, dict[str, Any]],
+    errors: list[str],
+) -> list[dict[str, Any]]:
+    if str(manifest.get("schemaVersion", "")) not in PAGE_CLOSURE_SCHEMA_VERSIONS:
+        return []
+    raw_closures = manifest.get("pageClosures")
+    if not isinstance(raw_closures, list):
+        errors.append("1.4 版必须提供 pageClosures 数组")
+        return []
+    operations_by_slide: dict[int, set[int]] = {}
+    for operation in operations:
+        if operation.get("action") in CONTROLLED_ADDITIVE_ACTIONS:
+            continue
+        try:
+            slide = int(operation.get("slide", 0))
+        except (TypeError, ValueError):
+            continue
+        operations_by_slide.setdefault(slide, set()).update(
+            shape_ids_for(operation, groups)
+        )
+    closures: dict[int, dict[str, Any]] = {}
+    audit: list[dict[str, Any]] = []
+    for index, closure in enumerate(raw_closures, 1):
+        prefix = f"第 {index} 个页面闭环"
+        if not isinstance(closure, dict):
+            errors.append(f"{prefix}必须是对象")
+            continue
+        try:
+            slide = int(closure.get("slide", 0))
+            reviewed = {int(value) for value in closure.get("reviewedShapeIds", [])}
+            allowed_keep = {
+                int(value) for value in closure.get("allowedKeepShapeIds", [])
+            }
+            targets = {int(value) for value in closure.get("targetShapeIds", [])}
+            unknown = {int(value) for value in closure.get("unknownShapeIds", [])}
+        except (TypeError, ValueError):
+            errors.append(f"{prefix}包含无效 shapeId")
+            continue
+        if slide <= 0:
+            errors.append(f"{prefix} slide 必须是正整数")
+            continue
+        if slide in closures:
+            errors.append(f"{prefix}页码重复：{slide}")
+        closures[slide] = closure
+        actual = {shape_id for page, shape_id in objects if page == slide}
+        expected_targets = operations_by_slide.get(slide, set())
+        failures: list[str] = []
+        if reviewed != actual:
+            failures.append(
+                f"reviewedShapeIds 未覆盖整页；缺少 {sorted(actual - reviewed)}，"
+                f"多出 {sorted(reviewed - actual)}"
+            )
+        if targets != expected_targets:
+            failures.append(
+                f"targetShapeIds 与操作不一致；缺少 {sorted(expected_targets - targets)}，"
+                f"多出 {sorted(targets - expected_targets)}"
+            )
+        if unknown:
+            failures.append(f"仍有未分类对象：{sorted(unknown)}")
+        if allowed_keep & targets:
+            failures.append(
+                f"allowedKeepShapeIds 与 targetShapeIds 重叠："
+                f"{sorted(allowed_keep & targets)}"
+            )
+        if allowed_keep | targets | unknown != reviewed:
+            failures.append("保留、目标和未分类对象的并集必须等于 reviewedShapeIds")
+        for failure in failures:
+            errors.append(f"{prefix}{failure}")
+        audit.append(
+            {
+                "slide": slide,
+                "reviewedShapeCount": len(reviewed),
+                "allowedKeepShapeCount": len(allowed_keep),
+                "targetShapeCount": len(targets),
+                "unknownShapeIds": sorted(unknown),
+                "status": "passed" if not failures else "failed",
+            }
+        )
+    modified_slides = set(operations_by_slide)
+    missing_closures = modified_slides - set(closures)
+    extra_closures = set(closures) - modified_slides
+    if missing_closures:
+        errors.append(f"修改页缺少页面闭环：{sorted(missing_closures)}")
+    if extra_closures:
+        errors.append(f"pageClosures 包含未修改页面：{sorted(extra_closures)}")
     return audit
 
 
@@ -1204,7 +1459,7 @@ def validate_manifest(
     schema_version = str(manifest.get("schemaVersion", ""))
 
     if schema_version not in SUPPORTED_SCHEMA_VERSIONS:
-        errors.append("schemaVersion 必须为 1.0、1.1、1.2 或 1.3")
+        errors.append("schemaVersion 必须为 1.0、1.1、1.2、1.3 或 1.4")
     if manifest.get("defaultAction") != "KEEP":
         errors.append("defaultAction 必须为 KEEP")
     if not str(manifest.get("projectName", "")).strip():
@@ -1237,6 +1492,8 @@ def validate_manifest(
     assignments, shape_assignments, assignment_audit = slot_assignment_index(
         manifest, objects, groups, protected, errors
     )
+    content_policy_audit = validate_content_policy(manifest, errors)
+    residual_policy_audit = validate_residual_policy(manifest, errors)
 
     operations = manifest.get("operations")
     if not isinstance(operations, list):
@@ -1281,6 +1538,15 @@ def validate_manifest(
         target_ids = shape_ids_for(operation, groups)
         if action == "replace_text_group" and len(target_ids) < 2:
             errors.append(f"{prefix} replace_text_group 至少需要两个 shapeIds")
+        if action == "replace_text_group":
+            primary_shape_id = operation.get("primaryShapeId")
+            if schema_version in PAGE_CLOSURE_SCHEMA_VERSIONS:
+                if not isinstance(primary_shape_id, int):
+                    errors.append(
+                        f"{prefix}1.4 版 replace_text_group 必须包含 primaryShapeId"
+                    )
+                elif primary_shape_id not in target_ids:
+                    errors.append(f"{prefix} primaryShapeId 必须属于 shapeIds")
         elif action == "delete_slot_group":
             group_id = str(operation.get("slotGroupId", "")).strip()
             group = groups.get(group_id)
@@ -1395,7 +1661,7 @@ def validate_manifest(
                         operation.get("semanticKey", "")
                     ).strip()
                     if not actual_semantic:
-                        errors.append(f"{prefix}1.2/1.3 版操作必须包含 semanticKey")
+                        errors.append(f"{prefix}1.2 及以上版本操作必须包含 semanticKey")
                     elif actual_semantic != expected_semantic:
                         errors.append(
                             f"{prefix} semanticKey={actual_semantic} 与槽位 "
@@ -1434,7 +1700,9 @@ def validate_manifest(
                     errors.append(f"{prefix}文字目标不是普通可编辑形状")
                     continue
                 original_text = str(target.get("text", ""))
-                replacement_text = str(operation.get("text", ""))
+                replacement_text = (
+                    operation_text_for_shape(operation, shape_id) or ""
+                )
                 original_lines = max(1, original_text.count("\n") + 1)
                 replacement_lines = max(1, replacement_text.count("\n") + 1)
                 if (
@@ -1485,6 +1753,17 @@ def validate_manifest(
                 errors.append(f"{prefix}图片 asset 必须是绝对路径")
             elif not asset.exists():
                 errors.append(f"{prefix}图片 asset 不存在：{asset}")
+            elif schema_version in PAGE_CLOSURE_SCHEMA_VERSIONS:
+                actual_asset_sha256 = hashlib.sha256(asset.read_bytes()).hexdigest()
+                declared_asset_sha256 = str(
+                    operation.get("assetSha256", "")
+                ).strip()
+                if not re.fullmatch(r"[0-9a-f]{64}", declared_asset_sha256):
+                    errors.append(
+                        f"{prefix}1.4 版图片替换必须声明 assetSha256"
+                    )
+                elif declared_asset_sha256 != actual_asset_sha256:
+                    errors.append(f"{prefix} assetSha256 与图片文件不一致")
             asset_class = operation.get("assetClass")
             if asset_class not in ALLOWED_ASSET_CLASSES:
                 errors.append(f"{prefix} assetClass 不受支持：{asset_class}")
@@ -1577,6 +1856,13 @@ def validate_manifest(
         groups,
         errors,
     )
+    page_closure_audit = validate_page_closures(
+        manifest,
+        objects,
+        [op for op in operations if isinstance(op, dict)],
+        groups,
+        errors,
+    )
 
     if added_disclaimer_textboxes > 1:
         errors.append("每份 PPTX 最多允许新增一个受控责任声明文本框")
@@ -1605,6 +1891,7 @@ def validate_manifest(
             "entityBindingCount": len(binding_audit),
             "sourceCount": len(research_audit.get("sources", [])),
             "evidenceCount": len(research_audit.get("evidence", [])),
+            "pageClosureCount": len(page_closure_audit),
             "defaultKeptObjectCount": max(
                 0,
                 len(objects) - sum(key in objects for key in seen),
@@ -1630,6 +1917,12 @@ def validate_manifest(
         },
         "conversionHandoffAudit": handoff_audit,
         "researchEvidenceAudit": research_audit,
+        "contentPolicyAudit": content_policy_audit,
+        "residualPolicyAudit": residual_policy_audit,
+        "pageClosureAudit": {
+            "pages": page_closure_audit,
+            "policy": "每个修改页的全部模板对象必须归入允许保留、授权目标或未分类；未分类必须为零",
+        },
     }
 
 
@@ -1676,6 +1969,14 @@ def main() -> None:
         report_dir / "research-evidence-report.json",
         report["researchEvidenceAudit"],
     )
+    page_closure_report = write_json(
+        report_dir / "page-closure-report.json",
+        report["pageClosureAudit"],
+    )
+    residual_policy_report = write_json(
+        report_dir / "residual-policy-report.json",
+        report["residualPolicyAudit"],
+    )
 
     if report["passed"]:
         metrics = report["metrics"]
@@ -1692,7 +1993,8 @@ def main() -> None:
             "审计报告："
             f"{slot_report}；{typography_report}；"
             f"{binding_report}；{protected_report}；{handoff_report}；"
-            f"{research_report}"
+            f"{research_report}；{page_closure_report}；"
+            f"{residual_policy_report}"
         )
     else:
         print("白名单校验失败：")

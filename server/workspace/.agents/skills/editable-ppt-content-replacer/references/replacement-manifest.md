@@ -2,12 +2,12 @@
 
 ## 顶层结构
 
-新任务使用 1.3 版。1.0/1.1/1.2 版清单仍可校验，但 1.3 版才具备
-操作级证据绑定、重大数据来源门槛和估算披露约束。
+新任务使用 1.4 版。旧版清单仍可校验，但 1.4 版才同时具备操作级证据、
+页面闭环、缺失内容处置和最终旧项目文字/媒体/OCR 残留门禁。
 
 ```json
 {
-  "schemaVersion": "1.3",
+  "schemaVersion": "1.4",
   "sourceMode": "pdf-converted",
   "conversionHandoff": "/absolute/work/conversion-handoff.json",
   "templatePptx": "/absolute/editable-template.pptx",
@@ -26,6 +26,27 @@
   "slotGroups": [],
   "entityBindings": [],
   "slotAssignments": [],
+  "contentPolicy": {
+    "optionalMissingAction": "delete-slot-group",
+    "requiredMissingAction": "dedicated-gap-slide-only",
+    "unavailableWebsiteAction": "omit-slot",
+    "forbidOperationalPlaceholders": true
+  },
+  "residualPolicy": {
+    "forbiddenTextTerms": [
+      "旧项目公司名",
+      "未提供公司官网",
+      "缺少原始文件",
+      "现有材料没有BP",
+      "未提供公司资料"
+    ],
+    "forbiddenMediaSha256": [],
+    "requiredTextTerms": ["目标公司或项目"],
+    "gapOnlyTextTerms": ["未披露", "待核实", "公开信息未检索到", "口径不一致"],
+    "gapSlideNumbers": [27],
+    "ocrRequired": true
+  },
+  "pageClosures": [],
   "operations": []
 }
 ```
@@ -114,6 +135,38 @@ PDF 转换模板必须使用 `sourceMode: "pdf-converted"` 并提供
 槽位没有内容时必须使用 `disposition: "delete"` 并删除完整槽位组；共享
 图标和固定模板使用 `keep`。
 
+## 缺失内容与最终残留策略
+
+- 官网、地址、社交账号等非必要信息缺失时，删除或省略整个字段，不显示
+  “未提供公司官网”。
+- 财务、客户、订单、资质等重大缺口只允许出现在
+  `gapSlideNumbers` 指定的专用缺口页。
+- `forbiddenTextTerms` 同时登记固定后台提示和本次模板的旧公司名、旧产品名、
+  旧案例名。
+- `forbiddenMediaSha256` 登记旧 Logo、旧人物、旧产品及旧项目宣传素材哈希。
+- `requiredTextTerms` 至少包含 `projectName`。
+
+最终验收必须同时扫描可编辑文字、PPTX 媒体哈希和逐页渲染 OCR。
+
+## 修改页闭环
+
+每个修改页都要完整列出模板对象：
+
+```json
+{
+  "slide": 5,
+  "reviewedShapeIds": [2, 3, 4, 5, 6],
+  "allowedKeepShapeIds": [2, 3],
+  "targetShapeIds": [4, 5, 6],
+  "unknownShapeIds": []
+}
+```
+
+`reviewedShapeIds` 必须与对象地图中的整页对象完全一致；
+`targetShapeIds` 必须与该页实际操作目标完全一致；其余对象只有在逐页确认
+属于固定模板、投资机构品牌或有证据的上下文后，才可进入
+`allowedKeepShapeIds`。`unknownShapeIds` 非空时必须失败。
+
 ## 保护共享图标
 
 使命、愿景、价值观等通用语义图标可直接复用，不需要替换。先将它们登记
@@ -156,6 +209,28 @@ PDF 转换模板必须使用 `sourceMode: "pdf-converted"` 并提供
 ```
 
 该字段只记录已人工确认换行变化，不授权修改字体、字号或文字框。
+
+PDF 元素化后一句话被拆成多个文字对象时，使用：
+
+```json
+{
+  "slide": 4,
+  "shapeIds": [18, 19, 20],
+  "primaryShapeId": 18,
+  "semanticKey": "company.summary",
+  "evidenceIds": ["ev-company-summary"],
+  "role": "公司简介碎片组",
+  "action": "replace_text_group",
+  "text": "目标公司的完整简介。",
+  "styleLock": "exact",
+  "reason": "合并替换 PDF 文字碎片",
+  "sourceNote": "公司正式介绍材料",
+  "fitPolicy": "preserve"
+}
+```
+
+执行器只把完整文字写入 `primaryShapeId`，并清空其余碎片对象。不得将完整
+文字复制到组内每一个对象。
 
 清空普通旧文字时，必须显式设置：
 
@@ -288,6 +363,7 @@ PDF 转换模板必须使用 `sourceMode: "pdf-converted"` 并提供
   "role": "张三人物照片",
   "action": "replace_image",
   "asset": "/absolute/team/zhang-san.jpg",
+  "assetSha256": "图片文件的64位sha256",
   "assetClass": "person_photo",
   "companySpecific": true,
   "reason": "替换旧项目管理层照片",
@@ -340,6 +416,17 @@ PDF 转换模板必须使用 `sourceMode: "pdf-converted"` 并提供
 `assetClass` 为 `product_screenshot`，并至少绑定
 `product_name`；有型号时增加 `product_model`。
 
+## 公司与机构 Logo 绑定
+
+目标公司 Logo 使用 `entityType: "company"` 和
+`entityRole: "target_company"`；投资机构 Logo 使用
+`entityType: "institution"` 和 `entityRole: "investment_institution"`。
+Logo 绑定至少包含一个 `company_name` 标签。被确认属于投资机构固定品牌的
+Logo 应登记为 `protectedObjects/template_brand`，不要创建替换操作。
+
+如果目标公司没有提供 Logo，且官方来源也无法取得，不得沿用旧 Logo 或生成
+虚构 Logo；删除可选 Logo 槽位，或在原文字槽写入规范公司名称。
+
 ## 其他图片替换
 
 ```json
@@ -351,6 +438,7 @@ PDF 转换模板必须使用 `sourceMode: "pdf-converted"` 并提供
   "role": "旧公司产品以外的公司专属视觉",
   "action": "replace_image",
   "asset": "/absolute/target-visual.png",
+  "assetSha256": "图片文件的64位sha256",
   "assetClass": "company_specific_visual",
   "companySpecific": true,
   "reason": "替换旧公司专属素材",

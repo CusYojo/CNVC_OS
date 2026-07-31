@@ -194,6 +194,21 @@ const STATEMENTS = [
     backfill_complete BOOLEAN NOT NULL DEFAULT FALSE,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   )`,
+  `CREATE TABLE IF NOT EXISTS radar_ai_reviews (
+    cache_key VARCHAR(64) PRIMARY KEY,
+    source_key TEXT NOT NULL,
+    content_hash VARCHAR(64) NOT NULL,
+    prompt_version VARCHAR(32) NOT NULL,
+    model VARCHAR(128) NOT NULL,
+    status VARCHAR(16) NOT NULL,
+    decision JSONB NOT NULL DEFAULT '{}'::jsonb,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_radar_ai_reviews_source ON radar_ai_reviews(source_key)`,
+  `CREATE INDEX IF NOT EXISTS idx_radar_ai_reviews_status ON radar_ai_reviews(status)`,
 
   `CREATE TABLE IF NOT EXISTS knowledge_chunks (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

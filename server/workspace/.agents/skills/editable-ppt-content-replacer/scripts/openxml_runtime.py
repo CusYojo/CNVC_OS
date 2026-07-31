@@ -65,7 +65,7 @@ def slide_number(name: str) -> int:
 
 
 def slide_names(archive: zipfile.ZipFile) -> list[str]:
-    return sorted(
+    fallback = sorted(
         (
             name
             for name in archive.namelist()
@@ -73,6 +73,21 @@ def slide_names(archive: zipfile.ZipFile) -> list[str]:
         ),
         key=slide_number,
     )
+    try:
+        presentation = ET.fromstring(archive.read("ppt/presentation.xml"))
+        rels = relationships(archive, "ppt/presentation.xml")
+        ordered: list[str] = []
+        for slide_id in presentation.findall("./p:sldIdLst/p:sldId", NS):
+            relation_id = slide_id.get(qn(R_NS, "id"), "")
+            relation = rels.get(relation_id)
+            target = relation.get("target") if relation else None
+            if target and target in archive.namelist():
+                ordered.append(target)
+        if len(ordered) == len(fallback) and set(ordered) == set(fallback):
+            return ordered
+    except (KeyError, ET.ParseError):
+        pass
+    return fallback
 
 
 def relationship_part(part_name: str) -> str:
@@ -198,6 +213,14 @@ def text_style(text_body: ET.Element | None) -> dict:
     for style_node in style_copy.iter():
         if local_name(style_node.tag) in {"rPr", "defRPr", "endParaRPr"}:
             style_node.attrib.pop("lang", None)
+    for parent in style_copy.iter():
+        for child in list(parent):
+            if (
+                local_name(child.tag) == "rPr"
+                and not child.attrib
+                and len(child) == 0
+            ):
+                parent.remove(child)
     signature = sha256_bytes(ET.tostring(style_copy, encoding="utf-8"))
     return {
         "body": dict(body_pr.attrib) if body_pr is not None else {},
@@ -529,11 +552,24 @@ def replace_notes_text(root: ET.Element, value: str) -> None:
         body = ET.SubElement(body_shape, qn(P_NS, "txBody"))
         ET.SubElement(body, qn(A_NS, "bodyPr"))
         ET.SubElement(body, qn(A_NS, "lstStyle"))
+    existing_text = text_body_text(body).strip()
+    source_block = str(value).strip()
+    if re.search(r"\[Sources\].*?\[/Sources\]", existing_text, flags=re.DOTALL):
+        combined_text = re.sub(
+            r"\[Sources\].*?\[/Sources\]",
+            source_block,
+            existing_text,
+            flags=re.DOTALL,
+        )
+    elif existing_text:
+        combined_text = f"{existing_text}\n{source_block}"
+    else:
+        combined_text = source_block
     paragraphs = body.findall("./a:p", NS)
     paragraph_template = copy.deepcopy(paragraphs[0]) if paragraphs else None
     for paragraph in paragraphs:
         body.remove(paragraph)
-    for line in value.splitlines() or [""]:
+    for line in combined_text.splitlines() or [""]:
         paragraph = (
             copy.deepcopy(paragraph_template)
             if paragraph_template is not None
@@ -684,6 +720,13 @@ def ensure_content_type(
     content_type: str,
 ) -> None:
     normalized = "/" + part_name.lstrip("/")
+    extension = posixpath.splitext(part_name)[1].lstrip(".").lower()
+    for default in root.findall(qn(CT_NS, "Default")):
+        if (
+            str(default.get("Extension", "")).lower() == extension
+            and default.get("ContentType") == content_type
+        ):
+            return
     for override in root.findall(qn(CT_NS, "Override")):
         if override.get("PartName") == normalized:
             return

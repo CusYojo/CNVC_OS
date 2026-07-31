@@ -528,7 +528,7 @@ export function screenEvidenceSources(sources: EvidenceSource[], type?: AiExecut
     : type === 'project_qa'
           ? { maxTotal: 72, maxPerDocument: 8 }
           : type === 'investment_recommendation_ppt'
-            ? { maxTotal: 72, maxPerDocument: 6 }
+            ? { maxTotal: 120, maxPerDocument: 14 }
           : { maxTotal: 18, maxPerDocument: 3 }
   const result = curateEvidenceSources(sources, options)
   // 本地项目资料优先，项目档案和用户补充输入其次，缓存公开证据最后。

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 from pathlib import Path
 
 from openxml_runtime import analyze_pptx, read_json, write_json
@@ -20,7 +21,8 @@ def main() -> None:
     after = analyze_pptx(args.result.expanduser().resolve())
     plan = read_json(args.plan.expanduser().resolve())
     errors: list[str] = []
-    authorized: dict[tuple[int, int], str] = {}
+    authorized_text: dict[tuple[int, int], str] = {}
+    authorized_media: dict[tuple[int, int], str] = {}
     authorized_additions: dict[tuple[int, int], dict] = {}
     for operation in plan.get("operations") or []:
         if operation.get("action") == "add_disclaimer_textbox":
@@ -28,15 +30,31 @@ def main() -> None:
                 (int(operation["slide"]), int(operation["shapeId"]))
             ] = operation
             continue
-        identifiers = (
-            operation.get("shapeIds") or []
-            if operation.get("action") == "replace_text_group"
-            else [operation.get("shapeId")]
-        )
-        for shape_id in identifiers:
-            authorized[(int(operation["slide"]), int(shape_id))] = str(
+        action = operation.get("action")
+        slide = int(operation["slide"])
+        if action == "replace_text_group":
+            identifiers = [int(value) for value in operation.get("shapeIds") or []]
+            primary = int(operation.get("primaryShapeId", identifiers[0]))
+            for shape_id in identifiers:
+                authorized_text[(slide, shape_id)] = (
+                    str(operation.get("text", ""))
+                    if shape_id == primary
+                    else ""
+                )
+        elif action == "replace_text":
+            authorized_text[(slide, int(operation["shapeId"]))] = str(
                 operation.get("text", "")
             )
+        elif action == "replace_image":
+            asset = Path(str(operation.get("asset", ""))).expanduser().resolve()
+            if not asset.is_file():
+                errors.append(f"授权图片素材不存在：{asset}")
+                continue
+            actual_sha256 = hashlib.sha256(asset.read_bytes()).hexdigest()
+            expected_sha256 = str(operation.get("assetSha256", ""))
+            if expected_sha256 and actual_sha256 != expected_sha256:
+                errors.append(f"授权图片素材 SHA-256 不一致：{asset}")
+            authorized_media[(slide, int(operation["shapeId"]))] = actual_sha256
 
     for key, label in (
         ("slideCount", "页面数量"),
@@ -45,9 +63,6 @@ def main() -> None:
     ):
         if before[key] != after[key]:
             errors.append(f"{label}变化：{before[key]} -> {after[key]}")
-    if before["mediaIds"] != after["mediaIds"]:
-        errors.append("媒体内容集合发生变化")
-
     for source_slide in before["slides"]:
         page = source_slide["number"]
         if page > len(after["slides"]):
@@ -82,13 +97,23 @@ def main() -> None:
                 ("kind", "类型"),
                 ("bbox", "坐标尺寸"),
                 ("textStyle", "文字样式"),
-                ("media", "媒体引用"),
             ):
                 if source_object[key] != target[key]:
                     errors.append(
                         f"第 {page} 页 shapeId={shape_id} {label}变化"
                     )
-            expected = authorized.get((page, shape_id))
+            media_key = (page, shape_id)
+            expected_media = authorized_media.get(media_key)
+            if expected_media is not None:
+                if target.get("media") != expected_media:
+                    errors.append(
+                        f"第 {page} 页 shapeId={shape_id} 未写入授权图片"
+                    )
+            elif source_object["media"] != target["media"]:
+                errors.append(
+                    f"第 {page} 页 shapeId={shape_id} 发生未授权媒体修改"
+                )
+            expected = authorized_text.get((page, shape_id))
             if expected is not None:
                 if target["text"] != expected:
                     errors.append(
@@ -137,12 +162,16 @@ def main() -> None:
         "runtime": "openxml-stdlib",
         "template": str(args.template.expanduser().resolve()),
         "result": str(args.result.expanduser().resolve()),
-        "authorizedTargetCount": len(authorized),
+        "authorizedTargetCount": len(authorized_text) + len(authorized_media),
+        "authorizedTextTargetCount": len(authorized_text),
+        "authorizedImageTargetCount": len(authorized_media),
         "authorizedAddedDisclaimerTextBoxCount": len(authorized_additions),
         "slideCountPreserved": before["slideCount"] == after["slideCount"],
         "layoutCountPreserved": before["layoutCount"] == after["layoutCount"],
         "masterCountPreserved": before["masterCount"] == after["masterCount"],
-        "mediaCountPreserved": before["mediaIds"] == after["mediaIds"],
+        "mediaChangesLimitedToAuthorizedTargets": not any(
+            "未授权媒体修改" in error for error in errors
+        ),
         "errors": errors,
         "before": {
             "slideCount": before["slideCount"],
@@ -168,7 +197,7 @@ def main() -> None:
         "模板保真校验通过："
         f"{before['slideCount']} 页、{object_count_before} 个模板对象、"
         f"{len(authorized_additions)} 个受控责任声明文本框、"
-        f"{len(before['mediaIds'])} 份唯一媒体保持一致"
+        f"{len(authorized_media)} 个授权图片槽完成替换"
     )
 
 

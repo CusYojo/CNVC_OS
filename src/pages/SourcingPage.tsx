@@ -548,9 +548,19 @@ export function SourcingPage() {
         databaseDuplicates: number
         filtered: number
         invalid: number
+        aiAccepted: number
+        aiRejected: number
+        aiReview: number
+        aiFailed: number
         scoringIds: string[]
         scoringQueued: number
-      }>('/leads/sync-radar', { limit: 50 })
+      }>('/leads/sync-radar', {
+        limit: 50,
+        incrementalPages: 1,
+        backfillPages: 0,
+      }, {
+        signal: AbortSignal.timeout(10 * 60_000),
+      })
       const scoringIds = Array.isArray(r.scoringIds) ? r.scoringIds : []
       if (scoringIds.length) {
         void Promise.all(scoringIds.map((leadId) => startScoring(leadId)))
@@ -567,7 +577,7 @@ export function SourcingPage() {
         ? `，重复 ${r.duplicates} 条（本批 ${r.batchDuplicates}，库内历史 ${r.databaseDuplicates}）`
         : ''
       showToast(
-        `雷达同步完成：共 ${r.candidateTotal} 条，本轮读取 ${r.pagesFetched} 页/${r.fetched} 条，新增 ${r.created} 条，更新 ${r.updated} 条，无变化 ${r.unchanged} 条${duplicateDetail}，过滤 ${r.filtered} 条${r.invalid ? `，无效 ${r.invalid} 条` : ''}${r.backfillComplete === false ? '；历史数据将在后续轮次继续回填' : ''}${scoringIds.length ? `；${scoringIds.length} 条 AI 技术评分正在更新` : ''}；列表与统计已刷新`,
+        `雷达同步完成：本轮 AI 审查 ${r.fetched} 条，通过 ${r.aiAccepted} 条，拒绝 ${r.aiRejected} 条，待复核 ${r.aiReview} 条${r.aiFailed ? `，审查失败 ${r.aiFailed} 条（未入池，可重试）` : ''}；新增 ${r.created} 条，更新 ${r.updated} 条，无变化 ${r.unchanged} 条${duplicateDetail}${r.invalid ? `，无效 ${r.invalid} 条` : ''}${scoringIds.length ? `；${scoringIds.length} 条 AI 技术评分正在更新` : ''}；列表与统计已刷新`,
         'success',
       )
     } catch (err) {
