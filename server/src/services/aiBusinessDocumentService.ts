@@ -30,7 +30,6 @@ import {
 import { dedupeTextList } from './aiEvidenceQualityService.js'
 import type { AiTemplateDefinition } from './aiTemplateCatalog.js'
 import {
-  COMPLIANCE_MISSING_DATA_SENTENCE,
   parseComplianceDocumentBlueprint,
   type ComplianceDocumentBlueprint,
 } from './aiComplianceBlueprintService.js'
@@ -787,7 +786,11 @@ export async function generateBusinessDocx(input: {
       const findings = current?.findings.length
         ? current.findings
         : [{
-            text: `${COMPLIANCE_MISSING_DATA_SENTENCE}需取得能够支持“${title}”撰写的专项原始文件，完成主体、日期和口径核验后再形成结论。`,
+            text: title === '公司简介'
+              ? '公司的登记主体、设立时间和主要业务尚待确认，后续应核对营业执照、工商档案、公司介绍及主要业务合同。'
+              : title === '核心团队'
+                ? '核心人员的姓名、职务、任职关系和职责分工尚待确认，后续应核对人员简历、任职文件及访谈记录。'
+                : '核心产品、技术权属和客户验证情况尚待确认，后续应核对产品说明、技术文档、知识产权及客户合同。',
             status: '资料缺口' as const,
             sourceIndexes: [],
           }]
@@ -803,7 +806,15 @@ export async function generateBusinessDocx(input: {
     const reasons = section('投资理由')?.findings ?? []
     const renderedReasons = COMPLIANCE_INVESTMENT_REASON_TOPICS.map((topic, index) =>
       reasons[index] ?? {
-          text: `${topic}方面，现阶段应按本项建立投资判断框架。${COMPLIANCE_MISSING_DATA_SENTENCE}需取得能够支持本项价值判断的一手项目材料后完成专项分析。`,
+          text: topic === '政策和行业趋势'
+            ? '项目所处细分行业和适用政策尚待确认，暂不能判断其与基金投资方向及行业趋势的匹配程度。后续应核对公司主营业务、行业分类和适用政策。'
+            : topic === '核心团队能力'
+              ? '核心人员的履历、任职关系和职责分工尚待确认，暂不能判断团队是否能够支持后续研发、交付和经营。后续应核对人员简历和任职文件。'
+              : topic === '产品或技术差异化'
+                ? '产品形态、核心技术和知识产权归属尚待确认，暂不能判断公司与同类项目的差异。后续应核对产品说明、技术文档和知识产权材料。'
+                : topic === '客户验证或产业生态'
+                  ? '客户合作、交付验收和回款情况尚待确认，暂不能判断项目的商业化进展。后续应核对客户合同、验收文件和回款记录。'
+                  : '收费方式、收入构成和订单转化情况尚待确认，暂不能判断公司的持续经营和扩张能力。后续应核对经营数据、订单管线和融资安排。',
           status: '资料缺口' as const,
           sourceIndexes: [],
         })
@@ -824,7 +835,19 @@ export async function generateBusinessDocx(input: {
     const analyses = section('投资情形分析')?.findings ?? []
     const renderedAnalyses = COMPLIANCE_CHECKLIST_TOPICS.map((topic, index) =>
       analyses[index] ?? {
-          text: `${topic}方面，现阶段应按本项核查标准建立比对底稿。${COMPLIANCE_MISSING_DATA_SENTENCE}需取得对应基金条款、项目事实和交易材料后形成单项结论。`,
+          text: topic === '投资方式及投资限制'
+            ? '本次投资采用增资、股权受让还是其他方式尚未确定。交易方案明确后，应按基金合伙协议逐项核对禁止性和限制性条款。'
+            : topic === '返投要求'
+              ? '项目是否计入返投以及投资后能否完成返投目标，需结合注册地、人员和业务落地安排判断，并以基金返投条款、认定口径和最新台账为准。'
+              : topic === '关联交易'
+                ? '标的公司、主要股东、核心人员和交易参与方与基金相关主体的关系尚未完成核对。是否构成关联交易，应以关联关系核查表和利益冲突声明为准。'
+                : topic === '投资方向'
+                  ? '项目主营业务与基金约定投资范围尚未完成逐项比对。后续应核对基金投资范围、公司主营业务及收入构成。'
+                  : topic === '投资配置'
+                    ? '本次投资采用基金直接持股还是通过专项载体实施尚未确定。交易架构明确后，应按基金配置条款核对资产类型和持股路径。'
+                    : topic === '投资集中度'
+                      ? '本次投资金额及对同一项目的累计风险敞口尚未确定。集中度应按基金协议约定的计算口径，以基金规模和本次投资金额测算。'
+                      : '公司主体资质、知识产权、数据合规、劳动用工、许可备案和诉讼处罚情况仍需核对，并在交割前完成必要审批。',
           status: '资料缺口' as const,
           sourceIndexes: [],
         })

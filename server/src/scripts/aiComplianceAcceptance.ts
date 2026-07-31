@@ -106,10 +106,11 @@ async function main() {
     'Skill仅引用核心规范，不登记样本DOCX',
   )
   check(
-    '缺失资料采用专属核验边界并禁用旧占位语',
+    '缺失资料采用自然句式并禁用旧占位语',
     blueprint.fixedContent.missingDataSentence === COMPLIANCE_MISSING_DATA_SENTENCE
       && skill.referenceInstructions.includes('正文禁止使用')
-      && skill.referenceInstructions.includes('当前项目暂无相关资料'),
+      && skill.referenceInstructions.includes('当前项目暂无相关资料')
+      && skill.referenceInstructions.includes('关键核验对象'),
     COMPLIANCE_MISSING_DATA_SENTENCE,
   )
   check(
@@ -442,15 +443,15 @@ async function main() {
   const missingFindings = workflow.content.sections.flatMap((section) =>
     section.findings.filter((finding) => finding.status === '资料缺口'))
   check(
-    '零证据不调用模型且逐项给出专属核验边界',
+    '零证据不调用模型且逐项使用自然的待确认表述',
     workflow.reviewerRegenerationRounds === 0
       && missingFindings.length >= 16
       && missingFindings.every((finding) =>
-        finding.text.includes(COMPLIANCE_MISSING_DATA_SENTENCE)
-        && !finding.text.includes('当前项目暂无相关资料')
-        && /(?:需取得|需核验|需补充|完成条件|核验边界)/.test(finding.text)
+        !finding.text.includes('当前项目暂无相关资料')
+        && !/(?:关键核验对象|关键核验条件|尚未闭环|条件性分析|条件化判断|取证边界|核验边界|形成单项结论|完成专项分析|本节需取得)/.test(finding.text)
+        && /(?:应核对|需核对|尚待确认|尚未确定|仍需核对|以.+为准|暂不能判断)/.test(finding.text)
         && finding.sourceIndexes.length === 0),
-    `${missingFindings.length}项资料缺口均提供具体核验边界`,
+    `${missingFindings.length}项资料缺口均直接说明待确认事实及所需文件`,
   )
   check(
     '投资理由固定五项',
@@ -511,7 +512,7 @@ async function main() {
   const aiStyleContent = structuredClone(workflow.content)
   aiStyleContent.sections
     .find((section) => section.title === '投资理由')!.findings[0].text =
-      '赛道选择已有商业化线索，相关安排具备初步判断依据，并可形成后续成长路径。'
+      '创始人或主要商务负责人是本章关键核验对象，相关核验条件尚未闭环。'
   const aiStyleReview = reviewComplianceContent({
     content: aiStyleContent,
     template,
