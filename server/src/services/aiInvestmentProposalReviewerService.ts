@@ -68,7 +68,11 @@ const MISSING_ACTION = /(?:需补充|尚待提供|未提供|无法判断|待取�
 const INTERNAL_ERROR_TEXT =
   /(?:HTTP\s*\d{3}|LLM\s*(?:请求|响应|返回|错误|异常|失败|超时|中断)|网关(?:错误|异常|失败)|错误编号|错误码|invalid_request_error|unsupported_value|请求重试\d*失败|模型请求(?:失败|中断|异常))/i
 const EVIDENCE_PROCESS_OR_BOILERPLATE =
-  /(?:证据属性|Q&A\s*分类|页面标题|发布主体|访问日期|页面正文摘录|内容指纹|项目大模型|来源网址|原文链接|京ICP备|京公网安备|Copyright\s*©|All Rights Reserved|免责声明|使用条款|隐私政策|财经\s+焦点\s+股票)/i
+  /(?:证据属性|Q&A\s*分类|页面标题|发布主体|访问日期|页面正文摘录|内容指纹|项目大模型|来源网址|原文链接|京ICP备|京公网安备|Copyright\s*©|All Rights Reserved|免责声明|使用条款|隐私政策|财经\s+焦点\s+股票|innoHere英诺嘿呀\s+首页|首页\s+权威榜\s+价值榜|行业数据\s+产业图谱\s+行业研究|企业入驻\s+小程序\s+(?:登录|登入))/i
+const PRODUCT_OR_TECHNOLOGY_NAME =
+  /(?:[A-Za-z][A-Za-z0-9.+/_ -]{1,30}|[\u3400-\u9fffA-Za-z0-9.+/_ -]{2,32})(?:平台|系统|引擎|模型|算法|框架|软件|硬件|机器人|芯片|设备)/
+const PRODUCT_TECHNOLOGY_DETAIL =
+  /(?:模型|算法|框架|架构|模块|多模态|视觉|推理|训练|蒸馏|参数|数据集|API|SDK|传感|控制|编译|上线|发布|内测|商业化|部署|知识产权|专利|软件著作权)/i
 const RISK_REQUIRED_PARTS = [
   { label: '触发条件', pattern: /(?:触发|若|如|一旦|当|条件)/ },
   { label: '潜在影响', pattern: /(?:影响|导致|造成|可能|风险)/ },
@@ -534,6 +538,49 @@ export function reviewInvestmentProposalContent(input: {
         code: 'EVIDENCE_AVAILABLE_BUT_MISSING',
         message: `章节“${definition.title}”已有项目资料，但未形成可安全引用的结论；受限初稿中保留资料缺口`,
       })
+    }
+    if (
+      definition.analysisKind === 'product_technology'
+      && sectionValue.findings.some((finding) => finding.status !== '资料缺口')
+    ) {
+      const productText = sectionValue.findings
+        .filter((finding) => finding.status !== '资料缺口')
+        .map((finding) => finding.text)
+        .join(' ')
+      if (!PRODUCT_OR_TECHNOLOGY_NAME.test(productText)) {
+        issue(issues, {
+          sectionId: definition.id,
+          code: 'PRODUCT_NAME_OR_FORM_REQUIRED',
+          message: '产品及技术必须写出当前项目可识别的具体产品、平台、系统、模型、算法或技术架构名称',
+        })
+      }
+      if (!PRODUCT_TECHNOLOGY_DETAIL.test(productText)) {
+        issue(issues, {
+          sectionId: definition.id,
+          code: 'PRODUCT_TECHNOLOGY_DETAIL_REQUIRED',
+          message: '产品及技术必须包含功能、关键模块、技术路径或成熟度中的至少一项具体信息',
+        })
+      }
+      const packet = evidencePlan.sections.find((item) => item.sectionId === definition.id)
+      const localSourceIndexes = new Set(
+        (packet?.sourceIndexes ?? []).filter((index) =>
+          !sources[index]?.sourceType.startsWith('public_web')),
+      )
+      const citedIndexes = new Set(
+        sectionValue.findings
+          .filter((finding) => finding.status !== '资料缺口')
+          .flatMap((finding) => finding.sourceIndexes),
+      )
+      if (
+        localSourceIndexes.size > 0
+        && ![...citedIndexes].some((index) => localSourceIndexes.has(index))
+      ) {
+        issue(issues, {
+          sectionId: definition.id,
+          code: 'PRODUCT_LOCAL_EVIDENCE_BYPASSED',
+          message: '产品及技术已有本地项目资料，不得仅使用公开网页的泛化介绍代替具体产品和技术内容',
+        })
+      }
     }
     const primaryConclusionFindingIndex = definition.analysisKind === 'conclusion'
       ? sectionValue.findings.findIndex((finding) => finding.status !== '资料缺口')

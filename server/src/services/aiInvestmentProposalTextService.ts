@@ -6,6 +6,26 @@ const SOURCE_REFERENCE_FRAGMENT =
   /(?:项目资料显示\s*[:：]\s*)?(?:原文链接|来源网址)\s*[:：]\s*https?:\/\/[^\s。；]+[。；]?/gi
 const EVIDENCE_METADATA_LINE =
   /^(?:(?:证据属性|项目匹配|Q&A\s*分类|页面标题|发布主体|发布日期|访问日期|更新时间|内容指纹|项目大模型|来源网址|原文链接)\s*[:：]|发布日期待核验)/i
+const INVESTMENT_PROPOSAL_WEB_NAVIGATION_TERMS = [
+  '首页',
+  '权威榜',
+  '价值榜',
+  '行业数据',
+  '产业图谱',
+  '行业研究',
+  '企业入驻',
+  '小程序',
+  '登录',
+  '登入',
+  '关注',
+  '已关注',
+] as const
+const INVESTMENT_PROPOSAL_WEB_SECTION_ANCHORS = [
+  '融资历史',
+  '公司简介',
+  '产品介绍',
+  '业务介绍',
+] as const
 const CLIENT_DRAFT_LABEL =
   /(^|[。！？；\n]\s*)(?:判断|依据|影响[\/／]约束|待办)\s*[:：]\s*/g
 const CLIENT_COLON_LABEL_NAMES = [
@@ -134,12 +154,49 @@ function withoutCollapsedWebFragments(value: string) {
     .replace(SOURCE_REFERENCE_FRAGMENT, ' ')
 }
 
+function navigationTermHits(value: string) {
+  return INVESTMENT_PROPOSAL_WEB_NAVIGATION_TERMS
+    .filter((term) => value.includes(term))
+    .length
+}
+
+export function containsInvestmentProposalPageChrome(value: string) {
+  return /(?:innoHere|英诺嘿呀)/i.test(value) && navigationTermHits(value) >= 2
+    || navigationTermHits(value) >= 5
+}
+
+export function stripInvestmentProposalPageChrome(value: unknown) {
+  return String(value ?? '')
+    .split(/\r?\n/)
+    .map((rawLine) => {
+      let line = rawLine.replace(/\s+/g, ' ').trim()
+      if (!containsInvestmentProposalPageChrome(line)) return line
+      const anchors = INVESTMENT_PROPOSAL_WEB_SECTION_ANCHORS
+        .map((anchor) => ({ anchor, index: line.lastIndexOf(anchor) }))
+        .filter((item) => item.index >= 0)
+        .sort((left, right) => right.index - left.index)
+      const lastAnchor = anchors[0]
+      if (lastAnchor) {
+        line = line.slice(lastAnchor.index + lastAnchor.anchor.length).trim()
+      } else {
+        const loginBoundary = Math.max(line.lastIndexOf('登录'), line.lastIndexOf('登入'))
+        if (loginBoundary >= 0) line = line.slice(loginBoundary + 2).trim()
+      }
+      return line
+        .replace(/^(?:关注|已关注|融资历史|公司简介|产品介绍|业务介绍)\s*/g, '')
+        .trim()
+    })
+    .filter(Boolean)
+    .join('\n')
+}
+
 export function containsInvestmentProposalWebArtifact(value: string) {
   COLLAPSED_WEB_FRAGMENT.lastIndex = 0
   SOURCE_REFERENCE_FRAGMENT.lastIndex = 0
   return COLLAPSED_WEB_FRAGMENT.test(value)
     || SOURCE_REFERENCE_FRAGMENT.test(value)
     || /(?:原文链接|来源网址)\s*[:：]/i.test(value)
+    || containsInvestmentProposalPageChrome(value)
 }
 
 export function containsInvestmentProposalProseLabel(value: string) {
@@ -198,7 +255,9 @@ function rewriteClientColonLabels(value: string) {
 
 export function sanitizeInvestmentProposalClientText(value: unknown) {
   let text = stripInlineNumberedSubheadings(
-    withoutCollapsedWebFragments(sanitizeClientVisibleEvidenceWording(value)),
+    withoutCollapsedWebFragments(stripInvestmentProposalPageChrome(
+      sanitizeClientVisibleEvidenceWording(value),
+    )),
   )
     .replace(/(^|[。！？；\n]\s*)项目资料显示\s*[:：]\s*/g, '$1')
   CLIENT_DRAFT_LABEL.lastIndex = 0
@@ -240,7 +299,9 @@ export function sanitizeInvestmentProposalEvidenceContent(
     .flatMap((rawLine) => {
       const line = rawLine.replace(/\s+/g, ' ').trim()
       if (!line) return []
-      const bodyLine = line.replace(/^页面正文摘录\s*[:：]\s*/i, '').trim()
+      const bodyLine = stripInvestmentProposalPageChrome(
+        line.replace(/^页面正文摘录\s*[:：]\s*/i, '').trim(),
+      )
       if (
         EVIDENCE_METADATA_LINE.test(line)
         || containsInvestmentProposalWebArtifact(bodyLine)
@@ -252,4 +313,128 @@ export function sanitizeInvestmentProposalEvidenceContent(
     normalizeWhitespace([...new Set(lines)].join('\n')),
     maxCharacters,
   )
+}
+
+const PRODUCT_FORM =
+  /(?:[A-Za-z][A-Za-z0-9.+/_ -]{1,30}|[\u3400-\u9fffA-Za-z0-9.+/_ -]{2,32})(?:平台|系统|引擎|模型|算法|框架|软件|硬件|机器人|芯片|设备)/
+const PRODUCT_TECHNOLOGY =
+  /(?:模型|算法|框架|架构|多模态|视觉|推理|训练|蒸馏|参数|数据集|API|SDK|传感|控制|编译|知识产权|专利|软件著作权)/i
+const PRODUCT_MATURITY =
+  /(?:上线|发布|内测|研发中|迭代|训练完成|商业化|落地|交付|部署|用户|客户|认证|测试)/
+const PRODUCT_SECTION_BOUNDARY =
+  /(?:^|\s)(?:\d+\s*)?(?:四、|五、|六、|（\s*[五六七八九十]\s*）)\s*(?:智灵)?(?:融资|交易|风险|其他|财务|运营)/
+
+function normalizeProductEvidenceSpacing(value: string) {
+  let text = value
+    .replace(/(\d)\s*\.\s*(\d)/g, '$1.$2')
+    .replace(/\s*\/\s*/g, '/')
+    .replace(/(\d)\s+([万亿%])/g, '$1$2')
+    .replace(/\s+([，。！？；：])/g, '$1')
+    .replace(/([，。！？；：])\s+/g, '$1')
+  for (let pass = 0; pass < 3; pass += 1) {
+    text = text.replace(/([\u3400-\u9fff])\s+([\u3400-\u9fff])/g, '$1$2')
+  }
+  return text.trim()
+}
+
+function cleanProductEvidenceSentence(value: string) {
+  let text = value
+    .replace(/^.*?技术体系与产品矩阵\s*/i, '')
+    .replace(/^.*?其他成熟产品\s*/i, '')
+    .replace(/^\s*(?:[（(]\s*[0-9一二三四五六七八九十]+\s*[）)]|[0-9一二三四五六七八九十]+\s*[、.．)）])\s*/, '')
+    .replace(/^(?:顶层|中层|底层)\s*[:：]\s*/, '')
+    .replace(
+      /^((?:[A-Za-z][A-Za-z0-9.+/_ -]{1,30}|[\u3400-\u9fffA-Za-z0-9.+/_ -]{2,32})(?:平台|系统|引擎|模型|算法|框架|软件|硬件|机器人|芯片|设备))\s*[:：]\s*/,
+      '$1',
+    )
+    .replace(/\s+作为/g, '作为')
+    .replace(/\s+该(平台|系统|引擎|模型|算法|框架)/g, '，该$1')
+    .replace(/(?:先进的|强大的)/g, '')
+    .replace(/[，,]\s*综合性能超越[^；。]+/g, '')
+    .trim()
+  text = sanitizeInvestmentProposalClientText(text)
+  return normalizeProductEvidenceSpacing(text
+    .replace(/^[；，,\s]+|[；，,\s]+$/g, '')
+    .replace(/[。！？；;]+$/, '')
+    .trim())
+}
+
+function productEvidenceEntries(value: unknown) {
+  let content = sanitizeInvestmentProposalEvidenceContent(value, 8000)
+    .replace(/\s+/g, ' ')
+  const productSectionStart = content.search(/(?:技术体系与产品矩阵|产品与技术矩阵|产品技术矩阵)/)
+  if (productSectionStart >= 0) content = content.slice(productSectionStart)
+  content = content.replace(PRODUCT_SECTION_BOUNDARY, '。')
+  return content
+    .split(/(?<=[。！？；;])|(?=[（(]\s*[0-9一二三四五六七八九十]+\s*[）)])/)
+    .map((raw, order) => {
+      const text = cleanProductEvidenceSentence(raw)
+      const product = text.match(PRODUCT_FORM)?.[0] ?? ''
+      const layer = /顶层\s*[:：]/.test(raw)
+        ? 'top'
+        : /中层\s*[:：]/.test(raw)
+          ? 'middle'
+          : /底层\s*[:：]/.test(raw)
+            ? 'bottom'
+            : ''
+      const score = (product ? 5 : 0)
+        + (PRODUCT_TECHNOLOGY.test(text) ? 3 : 0)
+        + (PRODUCT_MATURITY.test(text) ? 2 : 0)
+      return { raw, text, product, layer, score, order }
+    })
+    .filter((item) =>
+      item.text.length >= 12
+      && item.text.length <= 420
+      && item.score >= 3
+      && !containsInvestmentProposalPageChrome(item.text))
+}
+
+export function summarizeInvestmentProposalProductEvidence(value: unknown) {
+  const entries = productEvidenceEntries(value)
+  const paragraphs: string[] = []
+  const layerEntries = ['top', 'middle', 'bottom']
+    .flatMap((layer) => {
+      const entry = entries.find((item) => item.layer === layer)
+      return entry ? [entry] : []
+    })
+  if (layerEntries.length >= 2) {
+    const layerNames: Record<string, string> = {
+      top: '顶层采用',
+      middle: '中层采用',
+      bottom: '底层为',
+    }
+    paragraphs.push(sanitizeInvestmentProposalClientText(
+      `公司的三层技术架构中，${layerEntries
+        .map((item) => `${layerNames[item.layer]}${item.text}`)
+        .join('；')}。`,
+    ))
+  }
+
+  const products: string[] = []
+  entries
+    .filter((item) => !item.layer && item.product)
+    .sort((left, right) => left.order - right.order)
+    .forEach((item) => {
+      const key = item.product.replace(/\s+/g, '').toLowerCase()
+      if (products.some((existing) =>
+        existing.replace(/\s+/g, '').toLowerCase().includes(key))) return
+      products.push(item.text)
+    })
+  if (products.length) {
+    paragraphs.push(sanitizeInvestmentProposalClientText(
+      `现有资料列示的产品矩阵中，${products.slice(0, 5).join('；')}。`,
+    ))
+  }
+
+  if (!paragraphs.length) {
+    entries
+      .sort((left, right) => right.score - left.score || left.order - right.order)
+      .slice(0, 2)
+      .forEach((item) => paragraphs.push(sanitizeInvestmentProposalClientText(item.text)))
+  }
+  return [...new Set(paragraphs)]
+    .map((paragraph) =>
+      normalizeProductEvidenceSpacing(paragraph.replace(/。{2,}/g, '。').trim()))
+    .filter((paragraph) => paragraph.length >= 12)
+    .slice(0, 3)
 }

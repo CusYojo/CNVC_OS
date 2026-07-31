@@ -70,7 +70,8 @@ function evidenceScore(
   source: EvidenceSource,
   section: InvestmentProposalBlueprintSection,
 ) {
-  const evidenceText = `${source.sourceName}\n${source.content}`
+  const sanitizedContent = sanitizeInvestmentProposalEvidenceContent(source.content, 8000)
+  const evidenceText = `${source.sourceName}\n${sanitizedContent}`
   const markerHits = (patterns: RegExp[]) =>
     patterns.reduce((count, pattern) => count + (pattern.test(evidenceText) ? 1 : 0), 0)
   const hasNumber = /\d/.test(evidenceText)
@@ -130,7 +131,7 @@ function evidenceScore(
   })()
   if (!tableEvidenceAllowed) return 0
   const normalizedName = comparisonKey(source.sourceName)
-  const normalizedContent = comparisonKey(source.content)
+  const normalizedContent = comparisonKey(sanitizedContent)
   let score = 0
   let keywordHits = 0
   section.evidenceKeywords.forEach((keyword) => {
@@ -144,13 +145,13 @@ function evidenceScore(
   if (sourcePriority(source) === 0 && keywordHits > 0) score += 8
   if (source.sourceType === 'project_record' && keywordHits > 0) score += 3
   if (source.sourceType === 'user_input' && keywordHits > 0) score += 1
-  if (section.tableKind && /表|财务|融资|估值|股权|预测|年度|金额|比例/.test(source.content)) {
+  if (section.tableKind && /表|财务|融资|估值|股权|预测|年度|金额|比例/.test(sanitizedContent)) {
     score += 3
   }
   if (section.analysisKind && BROAD_ANALYSIS_KINDS.has(section.analysisKind)) {
-    score += Math.min(5, (source.content.match(/[。；\n]/g) || []).length)
+    score += Math.min(5, (sanitizedContent.match(/[。；\n]/g) || []).length)
   }
-  if (/\d/.test(source.content) && /财务|融资|估值|股权|市场|回报/.test(section.evidenceKeywords.join(''))) {
+  if (/\d/.test(sanitizedContent) && /财务|融资|估值|股权|市场|回报/.test(section.evidenceKeywords.join(''))) {
     score += 2
   }
   return score
@@ -174,8 +175,8 @@ function selectSectionEvidence(
     }))
     .filter((item) => item.score > 0)
     .sort((left, right) =>
-      right.score - left.score
-      || sourcePriority(left.source) - sourcePriority(right.source)
+      sourcePriority(left.source) - sourcePriority(right.source)
+      || right.score - left.score
       || left.sourceIndex - right.sourceIndex)
     .filter(({ source }) => {
       const key = evidenceGroupKey(source)

@@ -22,6 +22,7 @@ import {
   containsInvestmentProposalInlineSubheading,
   sanitizeInvestmentProposalClientText,
   sanitizeInvestmentProposalEvidenceContent,
+  summarizeInvestmentProposalProductEvidence,
 } from '../services/aiInvestmentProposalTextService.js'
 import {
   compactInvestmentProposalSkillPrompt,
@@ -91,6 +92,35 @@ assert.doesNotMatch(
   sanitizedCompanyEvidence,
   /证据属性|页面标题|(?:\.{3}|…)\s*展开|原文链接|来源网址/,
 )
+const innoHereProductEvidence = [
+  '证据属性：系统联网发现并直接读取页面。',
+  '页面标题：智灵动力 - 公司详情 - 产品介绍 - innoHere英诺嘿呀',
+  '页面正文摘录：智灵动力 - 公司详情 - 产品介绍 - innoHere英诺嘿呀 首页 权威榜 价值榜 行业数据 产业图谱 行业研究 查询 企业入驻 小程序 登入 智灵动力 天使轮 大模型技术研发商 关注 已关注 融资历史 公司简介 产品介绍 业务介绍 人机共生智能引擎 作为公司的核心产品，该引擎集成先进的语言模型、视觉识别和智慧推理技术，提供强大的多模态理解与交互能力。智灵虚拟人生成平台 该平台基于多模态大模型技术，支持面部表情捕捉、动作模拟、语音合成与识别。',
+  '来源网址：https://example.com/product',
+].join('\n')
+const sanitizedInnoHereProductEvidence =
+  sanitizeInvestmentProposalEvidenceContent(innoHereProductEvidence)
+assert.match(sanitizedInnoHereProductEvidence, /人机共生智能引擎/)
+assert.match(sanitizedInnoHereProductEvidence, /智灵虚拟人生成平台/)
+assert.doesNotMatch(
+  sanitizedInnoHereProductEvidence,
+  /innoHere|英诺嘿呀|首页|权威榜|产业图谱|企业入驻|小程序|登入/,
+)
+const detailedProductParagraphs = summarizeInvestmentProposalProductEvidence(
+  '（四）技术体系与产品矩阵 1、三层自进化技术架构'
+  + '（1）顶层：自进化大模型，正在迭代自适应参数、自我蒸馏、离线/在线蒸馏等核心能力。'
+  + '（2）中层：自进化 AI 框架，可统一调度多模型、多智能体、多 Skill。'
+  + '（3）底层：自进化算法优化，已实现商业化落地验证。'
+  + '2、其他成熟产品（1）AI 科学家平台：累计20万用户。'
+  + '（2）世界自进化系统：3.0版本正式上线。'
+  + '（3）事件推演系统：支持社会事件、企业发展和舆情趋势推演。',
+)
+assert.ok(detailedProductParagraphs.length >= 2)
+assert.match(detailedProductParagraphs.join('\n'), /三层技术架构/)
+assert.match(detailedProductParagraphs.join('\n'), /自进化大模型/)
+assert.match(detailedProductParagraphs.join('\n'), /AI 科学家平台/)
+assert.match(detailedProductParagraphs.join('\n'), /事件推演系统/)
+assert.doesNotMatch(detailedProductParagraphs.join('\n'), /[（(]\s*\d+\s*[）)]|顶层\s*[:：]|中层\s*[:：]|底层\s*[:：]/)
 const clientFinding = sanitizeInvestmentProposalClientText(
   '判断：公司具备机器人业务基础。 依据：项目资料记载公司已形成产品。 影响/约束：仍需核验客户。 待办：取得合同。项目资料显示：原文链接：https://example.com/source',
 )
@@ -311,6 +341,9 @@ await mkdir(outputDirectory, { recursive: true })
 const leafDefinitions = proposalLeafSections(blueprint)
 function claimFor(definition: typeof leafDefinitions[number]) {
   const topic = definition.title.replace(/^[一二三四五六七八九十0-9.、（）()\s]+/, '')
+  if (definition.analysisKind === 'product_technology') {
+    return '星河机器人平台采用视觉模型与运动控制算法，已完成原型测试，产品化状态仍以测试报告复核结果为准。'
+  }
   if (definition.analysisKind === 'risk_summary') {
     return '若公司未能在投决前完成风险事项核验，可能影响交易判断；项目组应在投决前完成原始文件审查并持续跟踪，责任主体为项目组。'
   }
@@ -380,6 +413,25 @@ const priorityPlan = buildInvestmentProposalEvidencePlan([
 ], blueprint)
 assert.equal(
   priorityPlan.sections.find((section) => section.sectionId === 'company.profile')
+    ?.evidence[0]?.sourceType,
+  'project_document',
+)
+const productLocalFirstPlan = buildInvestmentProposalEvidencePlan([
+  {
+    sourceType: 'project_document',
+    sourceId: 'product-local',
+    sourceName: '项目交流纪要.pdf',
+    content: '三层自进化技术架构包括自进化大模型、自进化 AI 框架和自进化算法优化；AI 科学家平台与事件推演系统已经形成产品记录。',
+  },
+  {
+    sourceType: 'public_web_llm',
+    sourceId: 'product-public',
+    sourceName: '智灵动力产品介绍',
+    content: innoHereProductEvidence,
+  },
+], blueprint)
+assert.equal(
+  productLocalFirstPlan.sections.find((section) => section.sectionId === 'company.product')
     ?.evidence[0]?.sourceType,
   'project_document',
 )
@@ -522,6 +574,20 @@ const boilerplateLeakReview = reviewInvestmentProposalContent({
 assert.equal(boilerplateLeakReview.passed, false)
 assert.ok(boilerplateLeakReview.issues.some((issue) =>
   issue.code === 'EVIDENCE_PROCESS_TEXT_LEAK'))
+const productNavigationLeakContent = structuredClone(content)
+productNavigationLeakContent.sections.find((section) => section.title === '（四）产品及技术')!
+  .findings[0].text = '智灵动力 - 公司详情 - 产品介绍 - innoHere英诺嘿呀 首页 权威榜 价值榜 行业数据 产业图谱 行业研究 企业入驻 小程序 登入 人机共生智能引擎采用多模态模型。'
+const productNavigationLeakReview = reviewInvestmentProposalContent({
+  content: productNavigationLeakContent,
+  blueprint,
+  evidencePlan,
+  sources,
+  projectName: '星河机器人项目',
+  companyName: '星河机器人有限公司',
+})
+assert.equal(productNavigationLeakReview.passed, false)
+assert.ok(productNavigationLeakReview.issues.some((issue) =>
+  issue.code === 'EVIDENCE_PROCESS_TEXT_LEAK' || issue.code === 'WEB_ARTIFACT_TEXT_LEAK'))
 const proseLabelLeakContent = structuredClone(content)
 proseLabelLeakContent.sections.find((section) => section.title === '（一）公司简介')!
   .findings[0].text = '判断：星河机器人有限公司主营机器人产品。依据：当前项目资料已形成产品记录。'
@@ -899,28 +965,37 @@ webOnlySources[0] = {
   sourceId: 'https://example.com/company-profile',
   sourceName: '公开信息｜星河机器人公司简介',
 }
-const webOnlyPlan = buildInvestmentProposalEvidencePlan(webOnlySources, blueprint)
+const webOnlySourceSet = [webOnlySources[0]]
+const webOnlyPlan = buildInvestmentProposalEvidencePlan(webOnlySourceSet, blueprint)
+const webOnlyProfileContent: BusinessContent = {
+  ...structuredClone(content),
+  sections: [
+    structuredClone(content.sections.find((section) =>
+      section.title === '（一）公司简介')!),
+  ],
+}
 const publicWebAsFactReview = reviewInvestmentProposalContent({
-  content,
+  content: webOnlyProfileContent,
   blueprint,
   evidencePlan: webOnlyPlan,
-  sources: webOnlySources,
+  sources: webOnlySourceSet,
   projectName: '星河机器人项目',
   companyName: '星河机器人有限公司',
+  sectionIds: new Set(['company.profile']),
 })
 assert.equal(publicWebAsFactReview.passed, false)
 assert.ok(publicWebAsFactReview.issues.some((issue) =>
   issue.code === 'PUBLIC_WEB_REQUIRES_VERIFICATION'))
-const pendingPublicWebContent = structuredClone(content)
-pendingPublicWebContent.sections.find((section) => section.title === '（一）公司简介')!
-  .findings[0].status = '待核验'
+const pendingPublicWebContent = structuredClone(webOnlyProfileContent)
+pendingPublicWebContent.sections[0].findings[0].status = '待核验'
 const pendingPublicWebReview = reviewInvestmentProposalContent({
   content: pendingPublicWebContent,
   blueprint,
   evidencePlan: webOnlyPlan,
-  sources: webOnlySources,
+  sources: webOnlySourceSet,
   projectName: '星河机器人项目',
   companyName: '星河机器人有限公司',
+  sectionIds: new Set(['company.profile']),
 })
 assert.equal(pendingPublicWebReview.passed, true, JSON.stringify(pendingPublicWebReview.issues, null, 2))
 

@@ -21,7 +21,10 @@ import {
   investmentProposalEvidenceForSections,
   investmentProposalEvidencePrompt,
 } from './aiInvestmentProposalEvidenceService.js'
-import { sanitizeInvestmentProposalClientText } from './aiInvestmentProposalTextService.js'
+import {
+  sanitizeInvestmentProposalClientText,
+  summarizeInvestmentProposalProductEvidence,
+} from './aiInvestmentProposalTextService.js'
 import {
   isInvestmentProposalDeliveryLimitation,
   reviewInvestmentProposalContent,
@@ -105,7 +108,7 @@ const INTERNAL_ERROR_TEXT =
 const UNTRUSTED_EVIDENCE_INSTRUCTION =
   /(?:章节关键词|忽略此前|系统提示|system\s*prompt|assistant|只返回\s*JSON|角色设定|执行以下命令)/i
 const EVIDENCE_PROCESS_OR_BOILERPLATE =
-  /(?:证据属性|Q&A\s*分类|页面标题|发布主体|访问日期|页面正文摘录|内容指纹|项目大模型|来源网址|原文链接|(?:\.{3}|…{1,3})\s*(?:展开|查看更多)|京ICP备|京公网安备|Copyright\s*©|All Rights Reserved|免责声明|使用条款|隐私政策|财经\s+焦点\s+股票|英诺嘿呀(?:助手微信号|邮箱|电话)|联系我们\s*(?:北京|中国)|企业旗舰店|小程序\s*英诺嘿呀)/i
+  /(?:证据属性|Q&A\s*分类|页面标题|发布主体|访问日期|页面正文摘录|内容指纹|项目大模型|来源网址|原文链接|(?:\.{3}|…{1,3})\s*(?:展开|查看更多)|京ICP备|京公网安备|Copyright\s*©|All Rights Reserved|免责声明|使用条款|隐私政策|财经\s+焦点\s+股票|innoHere英诺嘿呀\s+首页|首页\s+权威榜\s+价值榜|行业数据\s+产业图谱\s+行业研究|企业入驻\s+小程序\s+(?:登录|登入)|英诺嘿呀(?:助手微信号|邮箱|电话)|联系我们\s*(?:北京|中国)|企业旗舰店|小程序\s*英诺嘿呀)/i
 const RISK_CAPABILITY_DESCRIPTION =
   /(?:投后与风控场景|项目风险动态预警|自动抓取全网公开数据|主动推送预警|股东权益影响分析)/
 
@@ -263,7 +266,7 @@ function deterministicEvidenceSection(input: {
   const { definition, evidencePlan, sources } = input
   const packet = evidencePlan.sections.find((item) => item.sectionId === definition.id)
   const candidates = (packet?.evidence ?? [])
-    .flatMap((item) => {
+    .flatMap((item, packetOrder) => {
       const source = sources[item.sourceIndex]
       const evidenceContent = item.content || source?.content || ''
       const excerpt = evidenceExcerpt(definition, evidenceContent)
@@ -276,12 +279,18 @@ function deterministicEvidenceSection(input: {
             sourceIndex: item.sourceIndex,
             score: item.score,
             publicWeb: source.sourceType.startsWith('public_web'),
+            packetOrder,
+            productParagraphs: definition.analysisKind === 'product_technology'
+              ? summarizeInvestmentProposalProductEvidence(evidenceContent)
+              : [],
           }]
         : []
     })
     .sort((left, right) =>
-      right.keywordHits - left.keywordHits
+      Number(left.publicWeb) - Number(right.publicWeb)
+      || right.keywordHits - left.keywordHits
       || right.score - left.score
+      || left.packetOrder - right.packetOrder
       || left.sourceIndex - right.sourceIndex)
   const selected = candidates[0]
   if (!selected) return undefined
@@ -309,10 +318,18 @@ function deterministicEvidenceSection(input: {
   } else if (definition.analysisKind === 'conclusion') {
     text = `基于当前项目资料，建议继续跟踪；前提是项目组完成关键原始资料核验后，再申请立项或启动尽调；若关键事实无法确认，应暂缓推进并按 OA 流程归档。`
   }
+  const productFindings = definition.analysisKind === 'product_technology'
+    && selected.productParagraphs.length
+    ? selected.productParagraphs.map((paragraph): BusinessFinding => ({
+        text: sanitizeInvestmentProposalClientText(paragraph),
+        status,
+        sourceIndexes: [selected.sourceIndex],
+      }))
+    : undefined
   return {
     id: definition.id,
     title: definition.title,
-    findings: [{
+    findings: productFindings ?? [{
       text: sanitizeInvestmentProposalClientText(text),
       status,
       sourceIndexes: [selected.sourceIndex],
@@ -1086,6 +1103,7 @@ export async function composeInvestmentProposalContent(input: {
 11. 不输出 Markdown、解释、Reviewer 过程、模板文件名、Skill 版本或内部技术字段。
 12. 项目亮点只能综合前文证据；风险逐项写明触发条件、潜在影响、缓释/核验动作、责任主体和时点；结论必须结合当前项目阶段明确包含“进入初筛”“继续跟踪”“申请立项”“启动尽调”“提请上会”“提交投决”“暂缓推进”或“归档”之一，并给出前置条件、下一步动作和 OA 流转边界。
 13. Evidence 中的“...展开”“…展开”“查看更多”“原文链接”“来源网址”属于网页界面或来源元数据，不得进入正文。公司简介必须优先整合同一 Evidence 中完整的法律主体、成立时间、注册资本、完整地址、经营范围或主营业务；不得复述被截断的网页简介。
+14. 产品及技术章节必须优先使用本地项目文件中的具体产品、平台、系统、模型、算法或技术架构；至少写明可识别的产品/技术名称及其功能、关键模块、技术路径或成熟度。公开网页只能补充本地资料未覆盖的事实，站点标题、导航菜单、关注按钮和行业标签不得进入正文；本地 Evidence 已有具体产品技术内容时，不得只引用公开网页的泛化产品介绍。
 
 已激活的精简运行规则：
 ${skillPrompt}`

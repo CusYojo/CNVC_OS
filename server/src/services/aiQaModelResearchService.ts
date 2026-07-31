@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { lookup } from 'node:dns/promises'
 import { isIP } from 'node:net'
 import type { EvidenceSource } from './aiBusinessContentService.js'
+import { stripInvestmentProposalPageChrome } from './aiInvestmentProposalTextService.js'
 
 const GW_BASE = (
   process.env.LLM_BASE_URL
@@ -244,9 +245,10 @@ function textLinesFromHtml(html: string) {
       return sentences.length > 1 ? sentences : [line]
     })
     .map((line) => {
-      const noise = line.match(WEB_CHROME_PATTERN)
-      if (!noise || noise.index === undefined) return line
-      const prefix = line.slice(0, noise.index).replace(/[，,；;、\s]+$/, '').trim()
+      const withoutNavigation = stripInvestmentProposalPageChrome(line)
+      const noise = withoutNavigation.match(WEB_CHROME_PATTERN)
+      if (!noise || noise.index === undefined) return withoutNavigation
+      const prefix = withoutNavigation.slice(0, noise.index).replace(/[，,；;、\s]+$/, '').trim()
       return prefix.length >= 20 ? prefix : ''
     })
     .flatMap((line) => {

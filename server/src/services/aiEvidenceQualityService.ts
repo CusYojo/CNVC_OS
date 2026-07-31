@@ -1,4 +1,5 @@
 import { cleanCorruptedText } from './textQualityService.js'
+import { stripInvestmentProposalPageChrome } from './aiInvestmentProposalTextService.js'
 
 export type EvidenceLike = {
   sourceType: string
@@ -147,16 +148,19 @@ function informationScore(value: string) {
 
 function sanitizePublicWebContent(sourceType: string, value: string) {
   if (!sourceType.startsWith('public_web')) return { content: value, navigationHeavy: false }
-  const navigationHits = PUBLIC_WEB_NAVIGATION_TERMS
-    .filter((term) => value.includes(term))
-    .length
   const footerIndexes = [
     value.search(PUBLIC_WEB_FOOTER),
     value.search(PUBLIC_WEB_CONTACT_FOOTER),
   ].filter((index) => index >= 0)
   const footerIndex = footerIndexes.length ? Math.min(...footerIndexes) : -1
+  const content = stripInvestmentProposalPageChrome(
+    footerIndex >= 0 ? value.slice(0, footerIndex) : value,
+  ).trim()
+  const navigationHits = PUBLIC_WEB_NAVIGATION_TERMS
+    .filter((term) => content.includes(term))
+    .length
   return {
-    content: (footerIndex >= 0 ? value.slice(0, footerIndex) : value).trim(),
+    content,
     navigationHeavy: navigationHits >= 6,
   }
 }

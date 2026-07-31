@@ -746,8 +746,8 @@ export function AiQuickActions({
                   value={proposalInstructions}
                   maxLength={2000}
                   placeholder={activeAction.id === 'qa'
-                    ? '例如：需要重点回答的争议、用户已确认的数据、指定比较对象或需核验的关键假设。'
-                    : '例如：本轮拟投资金额、投资主体、基金名称及需重点说明的交易安排；与项目资料冲突时系统会标记为待核验。'}
+                    ? '例如：需要重点回答的争议、用户已确认的数据、指定比较对象或希望重点分析的关键假设。'
+                    : '例如：本轮拟投资金额、投资主体、基金名称、需重点说明的交易安排，以及希望采用的结构和表达重点。'}
                   onChange={(event) => setProposalInstructions(event.target.value)}
                 />
                 <span className="mt-1 block text-right text-[10px] text-slate-400">{proposalInstructions.length}/2000</span>
