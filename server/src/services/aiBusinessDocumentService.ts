@@ -39,6 +39,7 @@ import {
   COMPLIANCE_CHECKLIST_TOPICS,
   COMPLIANCE_INVESTMENT_REASON_TOPICS,
 } from './aiComplianceWorkflowService.js'
+import { sanitizeClientVisibleEvidenceWording } from './aiClientVisibleTextService.js'
 import { generateInvestmentProposalDocx } from './aiInvestmentProposalDocumentService.js'
 import { generateInvestmentRecommendationPptFromTemplate } from './aiEditablePptContentReplacerService.js'
 
@@ -736,7 +737,9 @@ export async function generateBusinessDocx(input: {
         before?: number
       } = {},
     ) => {
-      const normalizedText = cleanComplianceBodyText(finding.text)
+      const normalizedText = sanitizeClientVisibleEvidenceWording(
+        cleanComplianceBodyText(finding.text),
+      )
       return new Paragraph({
         spacing: {
           before: options.before ?? 0,
@@ -2563,7 +2566,9 @@ export function renderBusinessMarkdown(input: {
   if (input.template.type === 'compliance_statement') {
     const sectionByTitle = new Map(input.content.sections.map((section) => [section.title, section]))
     const findingTexts = (title: string) => (sectionByTitle.get(title)?.findings ?? [])
-      .map((finding) => finding.text.replace(/^\s*\d+[、.．]\s*/, '').trim())
+      .map((finding) => sanitizeClientVisibleEvidenceWording(
+        finding.text.replace(/^\s*\d+[、.．]\s*/, ''),
+      ))
       .filter(Boolean)
     const lines = [
       `# ${input.content.title}`,
@@ -2620,8 +2625,8 @@ export function renderBusinessMarkdown(input: {
       lines.push(
         '',
         input.template.type === 'custom_template_document'
-          ? `${finding.text}${refs ? ` ${refs}` : ''}`
-          : `- **${finding.status}** ${finding.text}${refs ? ` ${refs}` : ''}`,
+          ? `${sanitizeClientVisibleEvidenceWording(finding.text)}${refs ? ` ${refs}` : ''}`
+          : `- ${sanitizeClientVisibleEvidenceWording(finding.text)}${refs ? ` ${refs}` : ''}`,
       )
     })
   })

@@ -391,7 +391,14 @@ function complianceNetworkResearchTopics(
     companyName?: string | null
     industry?: string | null
   },
+  parameters: Record<string, unknown>,
 ) {
+  const subject = project.companyName || project.name
+  const userIntent = [
+    typeof parameters.researchIntent === 'string' ? parameters.researchIntent : '',
+    typeof parameters.userInstructions === 'string' ? parameters.userInstructions : '',
+  ].map((value) => value.trim()).find(Boolean)
+  const compactUserIntent = userIntent?.replace(/\s+/g, ' ').slice(0, 300) ?? ''
   const packets = buildComplianceEvidencePackets(sources)
   const emptySections = new Set(
     packets.filter((packet) => packet.items.length === 0).map((packet) => packet.sectionTitle),
@@ -409,10 +416,12 @@ function complianceNetworkResearchTopics(
       .filter((name) => name.length <= 40),
   )].slice(0, 2)
   const fundScope = fundEntities.length ? `${fundEntities.join('、')} ` : ''
-  const topics: string[] = []
+  const topics: string[] = compactUserIntent
+    ? [`${subject} ${compactUserIntent}`]
+    : []
 
   if (['公司简介', '核心团队', '产品及技术'].some((title) => emptySections.has(title))) {
-    topics.push(`${project.companyName || project.name} 公司简介、主体工商、核心团队、创始人、产品技术、知识产权、客户和商业化公开信息`)
+    topics.push(`${subject} 公司简介、主体工商、核心团队、创始人、产品技术、知识产权、客户和商业化公开信息`)
   }
   if (emptySections.has('投资理由') || !/行业政策|市场趋势|产业政策/.test(cachedPublicText)) {
     topics.push(`${project.industry || '项目所属细分领域'} 行业政策、市场趋势和产业政策公开依据`)
@@ -809,7 +818,7 @@ async function executeTask(taskId: string) {
     let qaAgentResearch: DueDiligenceNetworkResearchAudit | undefined
     let qaModelResearch: ProjectQaModelResearchAudit | undefined
     if (task.type === 'compliance_statement') {
-      const pendingTopics = complianceNetworkResearchTopics(sources, project)
+      const pendingTopics = complianceNetworkResearchTopics(sources, project, parameters)
       if (pendingTopics.length > 0) {
         await updateStage(taskId, '联网检索 Agent 补全公开证据', 22)
       }
@@ -836,7 +845,7 @@ async function executeTask(taskId: string) {
       } catch (error) {
         console.warn('[aiTask] 合规联网补充失败，使用项目资料继续生成:', (error as Error).message)
       }
-      const remainingTopics = complianceNetworkResearchTopics(sources, project)
+      const remainingTopics = complianceNetworkResearchTopics(sources, project, parameters)
       if (remainingTopics.length > 0) {
         await updateStage(taskId, '项目大模型补全剩余公开证据', 24)
         try {

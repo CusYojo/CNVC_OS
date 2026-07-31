@@ -8,6 +8,7 @@ import {
   dedupeTextList,
   isNearDuplicate,
 } from './aiEvidenceQualityService.js'
+import { sanitizeClientVisibleEvidenceWording } from './aiClientVisibleTextService.js'
 import { cleanCorruptedText } from './textQualityService.js'
 import {
   composeInvestmentProposalContent,
@@ -701,7 +702,7 @@ function freshCustomSectionTitle(
 }
 
 function sanitizeCustomTemplateText(value: string) {
-  return value
+  return sanitizeClientVisibleEvidenceWording(value)
     .replace(
       /(?:\*{1,2}\s*)?[【〔\[]\s*(?:资料记载|AI\s*推断|待核验|资料缺口)\s*[】〕\]](?:\s*\*{1,2})?/gi,
       '',
@@ -732,7 +733,7 @@ function sanitizeCustomTemplateText(value: string) {
       /(^|[。！？；\n])\s*(?:资料记载|AI\s*推断|待核验|资料缺口)[：:]\s*/gi,
       '$1',
     )
-    .replace(/资料缺口/g, '待核验事项')
+    .replace(/资料缺口/g, '后续确认事项')
     .replace(
       /尚缺少能够支持“[^”]+”判断的专项资料，需补充原始文件或访谈记录后核验。/g,
       '本部分已按当前项目资料库形成初步分析，关键事实仍须结合原始文件核验。',
@@ -940,7 +941,7 @@ export function finalizeInvestmentRecommendationPptContent(
 }
 
 function sanitizeDueDiligenceText(value: string) {
-  return value
+  return sanitizeClientVisibleEvidenceWording(value)
     .replace(/【(?:资料记载|AI推断|待核验|资料缺口)】/g, '')
     .replace(/资料缺口/g, '后续核验事项')
     .replace(

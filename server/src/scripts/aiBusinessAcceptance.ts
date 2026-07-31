@@ -915,12 +915,13 @@ async function main() {
       )
       assert(
         checks,
-        `${type} 保留正文核验状态但不展开来源附录`,
-        documentXml.includes('资料记载')
-          && documentXml.includes('待核验')
+        `${type} 正文不展示内部证据状态或来源附录`,
+        !documentXml.includes('【资料记载】')
+          && !documentXml.includes('【AI推断】')
+          && !documentXml.includes('待核验')
           && !documentXml.includes('示例项目商业计划书（脱敏）')
           && !documentXml.includes('未使用来源（不得进入文尾）'),
-        '资料记载 / 待核验 / 无来源附录',
+        '证据状态仅保存在任务审计数据',
       )
     }
     assert(

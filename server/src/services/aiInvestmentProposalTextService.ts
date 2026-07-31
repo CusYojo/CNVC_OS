@@ -1,3 +1,5 @@
+import { sanitizeClientVisibleEvidenceWording } from './aiClientVisibleTextService.js'
+
 const COLLAPSED_WEB_FRAGMENT =
   /[^。！？；\n]*(?:\.{3}|…{1,3})\s*(?:展开|查看更多)[^。！？；\n]*[。！？；]?/gi
 const SOURCE_REFERENCE_FRAGMENT =
@@ -196,7 +198,7 @@ function rewriteClientColonLabels(value: string) {
 
 export function sanitizeInvestmentProposalClientText(value: unknown) {
   let text = stripInlineNumberedSubheadings(
-    withoutCollapsedWebFragments(String(value ?? '')),
+    withoutCollapsedWebFragments(sanitizeClientVisibleEvidenceWording(value)),
   )
     .replace(/(^|[。！？；\n]\s*)项目资料显示\s*[:：]\s*/g, '$1')
   CLIENT_DRAFT_LABEL.lastIndex = 0
@@ -206,7 +208,7 @@ export function sanitizeInvestmentProposalClientText(value: unknown) {
     .replace(/\s+(?:依据|影响[\/／]约束|待办)\s*[:：]\s*/g, '；')
     .replace(/\n+(?:依据|影响[\/／]约束|待办)\s*[:：]\s*/g, '；')
   text = rewriteClientColonLabels(stripInlineNumberedSubheadings(text))
-  return normalizeWhitespace(text)
+  return sanitizeClientVisibleEvidenceWording(normalizeWhitespace(text))
     .replace(/([。！？；])\n+/g, '$1')
     .replace(/\n+/g, '；')
 }

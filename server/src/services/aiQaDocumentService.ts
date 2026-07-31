@@ -19,6 +19,7 @@ import {
   type ProjectQaDraftAnswer,
 } from './aiQaPipelineService.js'
 import type { QaTemplateProfile } from './aiQaTemplateParser.js'
+import { sanitizeClientVisibleEvidenceWording } from './aiClientVisibleTextService.js'
 
 // 核心规范统一使用宋体；生产环境可通过环境变量切换到已批准的宋体实现。
 const BODY_FONT = process.env.AI_QA_BODY_FONT || process.env.AI_DOCUMENT_SONG_FONT || 'Songti SC'
@@ -101,6 +102,7 @@ function bodyParagraph(value: string, options: {
 }
 
 function questionParagraph(index: number, question: string, pageBreakBefore = false) {
+  const visibleQuestion = sanitizeClientVisibleEvidenceWording(question)
   return new Paragraph({
     pageBreakBefore,
     keepNext: true,
@@ -113,7 +115,7 @@ function questionParagraph(index: number, question: string, pageBreakBefore = fa
         color: '000000',
         cjkFont: HEADING_FONT,
       }),
-      ...mixedTextRuns(question, {
+      ...mixedTextRuns(visibleQuestion, {
         bold: true,
         size: 28,
         color: '000000',
@@ -124,7 +126,7 @@ function questionParagraph(index: number, question: string, pageBreakBefore = fa
 }
 
 function stripAnswerMarkdown(value: string) {
-  return value
+  return sanitizeClientVisibleEvidenceWording(value)
     .replace(/```(?:json|markdown|md)?/gi, '')
     .replace(/\*\*([^*\n]+)\*\*/g, '$1')
     .replace(/__([^_\n]+)__/g, '$1')
@@ -273,7 +275,7 @@ export async function generateProjectQaDocx(input: {
           color: '000000',
           cjkFont: HEADING_FONT,
         }),
-        ...mixedTextRuns(question.question, {
+        ...mixedTextRuns(sanitizeClientVisibleEvidenceWording(question.question), {
           size: 24,
           color: '000000',
         }),
@@ -462,6 +464,7 @@ export async function inspectProjectQaDocx(
     }
   })
   const forbiddenVisibleTerms = [
+    '待核验',
     '暂无相关资料',
     '引用资料',
     'Reviewer 审阅结果',

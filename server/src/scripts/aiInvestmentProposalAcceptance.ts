@@ -1111,6 +1111,7 @@ assert.equal(documentXml.includes('〔资料记载〕'), false)
 assert.equal(documentXml.includes('〔分析判断〕'), false)
 assert.equal(documentXml.includes('〔待核验〕'), false)
 assert.equal(documentXml.includes('〔资料缺口〕'), false)
+assert.equal(documentXml.includes('待核验'), false)
 assert.doesNotMatch(
   documentXml,
   /判断：|依据：|影响\/约束：|待办：|订单节奏：|客户结构：|财务情况：|项目资料显示：|(?:\.{3}|…)\s*展开|原文链接|来源网址/,

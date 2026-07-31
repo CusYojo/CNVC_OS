@@ -151,7 +151,7 @@ function proposalTable(table: BusinessTable) {
       spacing: { before: 0, after: 0, line: 300, lineRule: LineRuleType.AT_LEAST },
       keepLines: true,
       children: [new TextRun({
-        text: value,
+        text: sanitizeInvestmentProposalClientText(value),
         bold: header,
         size: 21,
         color: '000000',
@@ -165,7 +165,9 @@ function proposalTable(table: BusinessTable) {
       spacing: { before: 80, after: 60, line: 480, lineRule: LineRuleType.EXACT },
       alignment: AlignmentType.CENTER,
       children: [new TextRun({
-        text: `${table.title}${table.unit && table.unit !== '无' ? `（单位：${table.unit}）` : ''}`,
+        text: sanitizeInvestmentProposalClientText(
+          `${table.title}${table.unit && table.unit !== '无' ? `（单位：${table.unit}）` : ''}`,
+        ),
         bold: true,
         size: 24,
         color: '000000',
@@ -255,7 +257,9 @@ export async function generateInvestmentProposalDocx(input: {
       spacing: { before: 0, after: 0, line: 480, lineRule: LineRuleType.EXACT },
       keepNext: true,
       children: [new TextRun({
-        text: input.content.title || `关于对${company}实施股权投资的提案`,
+        text: sanitizeInvestmentProposalClientText(
+          input.content.title || `关于对${company}实施股权投资的提案`,
+        ),
         size: 32,
         bold: true,
         color: '000000',
@@ -277,7 +281,7 @@ export async function generateInvestmentProposalDocx(input: {
       indent: { firstLine: 480 },
       alignment: AlignmentType.JUSTIFIED,
       children: [new TextRun({
-        text: input.content.executiveSummary,
+        text: sanitizeInvestmentProposalClientText(input.content.executiveSummary),
         size: 24,
         color: '000000',
         font: font(FANGSONG_FONT),
@@ -536,6 +540,12 @@ export async function reviewInvestmentProposalDocx(input: {
     issues.push({
       code: 'INTERNAL_ERROR_TEXT_LEAK',
       message: 'Word 正文包含仅供系统内部记录的技术错误信息',
+    })
+  }
+  if (allText.includes('待核验')) {
+    issues.push({
+      code: 'INTERNAL_EVIDENCE_STATUS_TEXT_LEAK',
+      message: 'Word 正文包含仅供系统内部审计的“待核验”状态文字',
     })
   }
   if (containsInvestmentProposalWebArtifact(allText)) {

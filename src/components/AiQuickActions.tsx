@@ -222,6 +222,9 @@ export function AiQuickActions({
       || submitLocksRef.current.has(action.id)
       || (action.id === 'investment_ppt' && analyzingInvestmentPpt)
     ) return
+    // 补充要求只属于本次快捷任务。每次重新打开弹窗均从空值开始，
+    // 避免上一个合规、提案或 Q&A 任务的要求串入下一份文档。
+    setProposalInstructions('')
     if (action.id === 'custom_template' || action.id === 'investment_ppt') {
       setTemplateFile(null)
       setAnalyzedTemplate(null)

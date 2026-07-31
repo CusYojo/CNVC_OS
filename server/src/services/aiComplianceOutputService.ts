@@ -225,7 +225,7 @@ export async function reviewGeneratedComplianceDocx(input: {
     '资料缺口',
     '引用资料',
   ].map(compactText))
-  const forbiddenStatusLabel = /【(?:资料记载|AI推断|待核验|资料缺口)】/
+  const forbiddenStatusLabel = /【(?:资料记载|AI推断|待核验|资料缺口)】|待核验/
   if (
     forbiddenStatusLabel.test(visibleText)
     || paragraphTexts.some((value) => forbiddenParagraphs.has(compactText(value)))
