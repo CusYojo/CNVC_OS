@@ -459,6 +459,41 @@ async function main() {
     markdownAndChromeFixture,
   )
 
+  const meetingMinutesAnswer = (await generateProjectQaAnswers({
+    project,
+    mode: '投资委员会 Q&A',
+    questions: [{
+      id: 'Q-MEETING',
+      category: '商业模式',
+      question: '公司的收入模式和项目实施方式是什么？',
+      rationale: '验证会议纪要只作为内部证据，不显示纪要元数据。',
+      priority: '高',
+    }],
+    sources: [{
+      sourceType: 'material',
+      sourceId: 'meeting-minutes-regression',
+      sourceName: 'FDE 交流纪要',
+      chunkIndex: 0,
+      versionOrDate: '2026-06-30',
+      content: [
+        '收费模式 模式一：按投入人力与规模的传统软件项目制收费。',
+        '1 沈阳与智灵 FDE 团队交流纪要交流时间：2026 年 6 月 30 日 10:00-13:30 交流地点：赛智伯乐大会议室交流人员：黄昕、任丽平、沈阳、朱旭琪。',
+      ].join('\n'),
+    }],
+    skill,
+  }))[0]
+  assert(
+    '阶段4 Answer Generator：会议纪要只提炼业务事实，不复制纪要元数据',
+    Boolean(
+      meetingMinutesAnswer
+      && meetingMinutesAnswer.answer.includes('公司按投入人力与规模')
+      && !/会议纪要|交流纪要|访谈纪要|交流时间|交流地点|交流人员|大会议室|黄昕|任丽平/.test(
+        meetingMinutesAnswer.answer,
+      )
+    ),
+    meetingMinutesAnswer?.answer ?? '未生成会议纪要回归回答',
+  )
+
   const mismatchRegressionAnswers = await generateProjectQaAnswers({
     project,
     mode: '投资委员会 Q&A',
@@ -552,7 +587,7 @@ async function main() {
       && answer.answer.split(/\n+/).length >= 3
       && answer.answer.split(/\n+/).length <= 7
       && !/暂无相关资料|暂无资料|无相关资料/.test(answer.answer)
-      && !/项目资料|项目材料|资料库|当前资料|现有证据|资料截止日|经系统核验|公开页面|公司材料称|资料显示|材料显示|更新本题|本回答|结论置信度/.test(answer.answer)
+      && !/项目资料|项目材料|资料库|当前资料|现有证据|资料截止日|经系统核验|公开页面|公司材料称|资料显示|材料显示|会议纪要|交流纪要|访谈纪要|交流时间|交流地点|交流人员|更新本题|本回答|结论置信度/.test(answer.answer)
       && (answer.category !== '阶段与推进建议'
         || /进入初筛|继续跟踪|申请立项|启动尽调|提请上会|提交投决|暂缓推进|归档/.test(answer.answer))
       && answer.sourceIndexes.length === 0
