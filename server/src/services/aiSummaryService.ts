@@ -100,11 +100,11 @@ const PUBLIC_LEAD_INVALID_SUBJECT_PATTERN = '^(数据|小时|主持|学员们|�
 // 存量 Radar 噪音不做物理删除，但从公共池列表和统计中排除。
 // 无明确公司、融资或估值时，获奖/教学/任职资讯直接隐藏；
 // 纯论文和课题组研究只有具备成果转化、产业化或客户验证信号才保留。
+// qualityRejected 和 poolStatus 检查对所有来源生效，不仅限于雷达。
 const visiblePublicLeadExpr = sql<boolean>`NOT (
   COALESCE(${leads.source}, '') ~ '^项目发现雷达'
   AND (
-    COALESCE(${leads.radarProfile}->>'qualityRejected', '') = 'true'
-    OR COALESCE(${leads.name}, '') ~* ${PUBLIC_LEAD_INVALID_SUBJECT_PATTERN}
+    COALESCE(${leads.name}, '') ~* ${PUBLIC_LEAD_INVALID_SUBJECT_PATTERN}
     OR ${publicLeadTitleExpr} ~* ${PUBLIC_LEAD_LOW_VALUE_PATTERN}
     OR (
       ${publicLeadPrimaryTextExpr} !~* ${PUBLIC_LEAD_INVESTMENT_PATTERN}
@@ -120,6 +120,8 @@ const visiblePublicLeadExpr = sql<boolean>`NOT (
       )
     )
   )
+  OR COALESCE(${leads.radarProfile}->>'qualityRejected', '') = 'true'
+  OR ${leads.poolStatus} = '解析失败'
 )`
 
 export type LeadScoreJobStatus = 'queued' | 'running' | 'retrying' | 'done' | 'failed'

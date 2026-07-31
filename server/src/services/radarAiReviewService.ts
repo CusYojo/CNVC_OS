@@ -3,6 +3,7 @@ import { inArray } from 'drizzle-orm'
 import { z } from 'zod'
 import { db } from '../db/client.js'
 import { radarAiReviews } from '../db/schema.js'
+import { isSpecificLeadSubjectName } from './leadSubjectName.js'
 
 const PROMPT_VERSION = 'radar-subject-v2'
 const DEFAULT_MODEL = process.env.RADAR_AI_REVIEW_MODEL
@@ -233,7 +234,15 @@ export function validateRadarAiDecision(
     decision = 'review'
     rejectReason = '模型给出的主体名称或来源证据无法在原文中核验'
   } else if (confidence >= 0.8) {
-    status = 'accepted'
+    // AI 模型判断接受，但仍需通过规则兜底校验：名称不能是谓语片段/新闻标题/通用词等。
+    // 规格与线索池入口一致，由 leadSubjectName.isSpecificLeadSubjectName 统一维护。
+    if (!isSpecificLeadSubjectName(subjectName)) {
+      status = 'review'
+      decision = 'review'
+      rejectReason ||= '模型给出的主体名称未通过名称规范化校验（谓语片段/通用词/描述短语）'
+    } else {
+      status = 'accepted'
+    }
   } else if (confidence >= 0.6) {
     status = 'review'
     decision = 'review'

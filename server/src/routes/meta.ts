@@ -149,7 +149,16 @@ metaRouter.post('/leads/:id/enrich-public-info', async (req: AuthedRequest, res,
 metaRouter.post('/leads', async (req: AuthedRequest, res, next) => {
   try {
     const body = LeadCreateSchema.parse(req.body)
-    const row = await createLead(body as never, req.user!.uid)
+    if (!isSpecificLeadSubjectName(body.name)) {
+      return res.status(400).json({
+        code: 'INVALID_SUBJECT_NAME',
+        message: '主体名称不符合规范，请提供明确的项目、公司或团队名称',
+      })
+    }
+    const row = await createLead({
+      ...body,
+      radarProfile: { qualityRejected: false },
+    } as never, req.user!.uid)
     res.status(201).json(row)
   } catch (err) { next(err) }
 })
@@ -158,6 +167,12 @@ metaRouter.post('/leads', async (req: AuthedRequest, res, next) => {
 metaRouter.post('/leads/collect', async (req: AuthedRequest, res, next) => {
   try {
     const { company } = z.object({ company: z.string().min(2) }).parse(req.body)
+    if (!isSpecificLeadSubjectName(company)) {
+      return res.status(400).json({
+        code: 'INVALID_COMPANY_NAME',
+        message: '公司名称不符合规范，请提供明确的公司全称',
+      })
+    }
     const result = await collectPublicIntel(company)
 
     const score = Math.round((result.confidence ?? 0) * 100)
@@ -178,6 +193,7 @@ metaRouter.post('/leads/collect', async (req: AuthedRequest, res, next) => {
       businessRegionConfidence: regionResolution?.confidence,
       source: 'AI 情报采集（必应公开信息）',
       poolStatus: score > 0 ? '成功' : '待处理',
+      radarProfile: { qualityRejected: false },
       score,
       summary: result.positioning,
       highlights: [
@@ -411,6 +427,8 @@ metaRouter.post('/leads/sync-radar', async (req: AuthedRequest, res, next) => {
           reviewedAt: subjectReview.reviewedAt,
           cacheHit: subjectReview.cacheHit,
         },
+        qualityRejected: false,
+        qualityRejectReason: '',
         profile: {
           projectName: name,
           companyName,
