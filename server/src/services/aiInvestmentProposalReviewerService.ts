@@ -6,7 +6,6 @@ import type {
   EvidenceSource,
 } from './aiBusinessContentService.js'
 import {
-  CURRENT_PROJECT_NO_DATA,
   proposalLeafSections,
   proposalSectionByTitle,
   type InvestmentProposalBlueprintSection,
@@ -18,7 +17,11 @@ import {
   containsInvestmentProposalAbnormalSpacing,
   containsInvestmentProposalAiStyleBoilerplate,
   containsInvestmentProposalColonLabel,
+  containsInvestmentProposalConversationalWording,
+  containsInvestmentProposalFormulaicAnalysisWrapper,
+  containsInvestmentProposalGenericNoDataPreface,
   containsInvestmentProposalInlineSubheading,
+  containsInvestmentProposalLongQuotedExcerpt,
   containsInvestmentProposalProseLabel,
   containsInvestmentProposalSourceProcessWording,
   containsInvestmentProposalWebArtifact,
@@ -77,12 +80,10 @@ const PRODUCT_OR_TECHNOLOGY_NAME =
 const PRODUCT_TECHNOLOGY_DETAIL =
   /(?:模型|算法|框架|架构|模块|多模态|视觉|推理|训练|蒸馏|参数|数据集|API|SDK|传感|控制|编译|上线|发布|内测|商业化|部署|知识产权|专利|软件著作权)/i
 const RISK_REQUIRED_PARTS = [
-  { label: '触发条件', pattern: /(?:触发|若|如|一旦|当|条件)/ },
-  { label: '潜在影响', pattern: /(?:影响|导致|造成|可能|风险)/ },
-  { label: '缓释或核验动作', pattern: /(?:缓释|核验|补充|取得|审查|跟踪|设置|落实|完成)/ },
-  { label: '责任主体', pattern: /(?:责任|投资团队|项目组|法务|财务|管理层|公司|董事会)/ },
-  { label: '执行时点', pattern: /(?:时点|交割前|投决前|签约前|持续|定期|截至|阶段|完成后)/ },
+  { label: '具体风险或触发情形', pattern: /(?:风险|触发|若|如|一旦|当|条件|尚未|不足|依赖|波动|不确定|受限|缺乏)/ },
+  { label: '潜在影响', pattern: /(?:影响|导致|造成|可能使|可能导致|不利于|制约|削弱|增加|降低|延迟|受阻|损失)/ },
 ]
+const RISK_SECTION_ACTION = /(?:缓释|核验|补充|取得|审查|跟踪|设置|落实|完成|确认|复核|约定|查验)/
 
 const DELIVERY_LIMITATION_CODES = new Set([
   'MISSING_EVIDENCE_RESEARCH_REQUIRED',
@@ -124,8 +125,25 @@ function safeNoDataFinding(topic: string): BusinessFinding {
   const clientTopic = topic
     .replace(/^\s*(?:[一二三四五六七八九十]+、|[（(][一二三四五六七八九十]+[）)])\s*/, '')
     .trim()
+  const fallbacks: Record<string, string> = {
+    公司简介: '公司的法律主体、成立时间、注册地和主营业务尚未明确，申请立项前应取得工商档案、公司章程和业务说明并完成核对。',
+    核心团队: '核心团队成员、任职履历、职责分工和全职状态尚未明确，申请立项前应取得管理层简历、任职证明和组织架构并完成访谈。',
+    公司股权结构: '公司完整股东名单、持股比例、实际控制人及特别权利安排尚未明确，申请立项前应取得最新公司章程、股东名册和工商档案并完成核对。',
+    产品及技术: '公司的具体产品、技术架构、知识产权和产品化进度尚未明确，申请立项前应取得产品说明、技术文档和知识产权清单并完成技术访谈。',
+    运营摘要: '公司的客户构成、订单、交付、回款和渠道情况尚未明确，申请立项前应取得客户清单、合同台账、交付记录和回款凭证并完成核对。',
+    财务摘要: '公司的收入、成本、利润、现金流和资产负债情况尚未明确，申请立项前应取得财务报表、审计报告和主要科目明细并完成核对。',
+    历史融资情况: '公司的历次融资轮次、金额、估值、投资方和股权变动尚未明确，申请立项前应取得增资协议、股权转让文件和融资后股权表并完成核对。',
+    本轮公司估值和投资方案: '本轮融资金额、估值、投资工具、拟出让股比和资金用途尚未明确，进入交易谈判前应取得公司正式融资方案并核对核心条款。',
+    风险控制及保护性条款: '本轮交易的治理权、信息权、优先权、反稀释和退出安排尚未明确，签署交易文件前应形成完整条款清单并由法务审核。',
+    经营预测与回报测算: '公司的经营预测、关键假设、退出口径和回报测算尚未明确，提请投决前应取得管理层预测模型并完成敏感性复核。',
+    可比公司估值比较: '可比公司的筛选口径、估值时点和核心倍数尚未明确，提请投决前应统一数据口径并完成可比估值复核。',
+    项目亮点总结: '尚无足以支撑投资亮点的可核验事实，项目负责人应先补齐团队、技术、客户和经营数据，再据此提炼项目的核心优势及成立条件。',
+    风险提示与对策: '项目在经营、技术、合规和交易层面的关键风险及触发条件尚未明确，申请立项前应形成风险清单并明确核验责任人与完成时点。',
+    结论: '交易方案、核心风险和前置条件尚未明确，暂不进入下一决策环节；项目负责人应补齐关键事实并完成复核后重新提交。',
+  }
   return {
-    text: `${CURRENT_PROJECT_NO_DATA}需核验${clientTopic}相关关键事实后再行分析。`,
+    text: fallbacks[clientTopic]
+      ?? `${clientTopic}涉及的关键事实尚未明确，进入下一阶段前应补充相关文件并完成核对。`,
     status: '资料缺口',
     sourceIndexes: [],
   }
@@ -137,7 +155,7 @@ export function safeInvestmentProposalSection(
 ): BusinessSection {
   return {
     title,
-    summary: CURRENT_PROJECT_NO_DATA,
+    summary: '',
     findings: [safeNoDataFinding(topic)],
     tables: [],
   }
@@ -187,6 +205,34 @@ function reviewFinding(input: {
       ...location,
       code: 'AI_STYLE_BOILERPLATE',
       message: `${section.title}包含模板化的 AI 套话，应改为以公司、产品、人员、交易或经营事实为主语的直接陈述`,
+    })
+  }
+  if (containsInvestmentProposalConversationalWording(finding.text)) {
+    issue(issues, {
+      ...location,
+      code: 'CONVERSATIONAL_TRANSCRIPT_LEAK',
+      message: `${section.title}直接保留了交流口语或转录语气，应提炼为正式、克制的书面陈述`,
+    })
+  }
+  if (containsInvestmentProposalLongQuotedExcerpt(finding.text)) {
+    issue(issues, {
+      ...location,
+      code: 'LONG_QUOTED_EVIDENCE_LEAK',
+      message: `${section.title}包含长段引号摘录，应先概括事实再写入正文`,
+    })
+  }
+  if (containsInvestmentProposalFormulaicAnalysisWrapper(finding.text)) {
+    issue(issues, {
+      ...location,
+      code: 'FORMULAIC_ANALYSIS_WRAPPER',
+      message: `${section.title}使用了机械的判断或核验套句，应结合本节具体事实自然表述`,
+    })
+  }
+  if (containsInvestmentProposalGenericNoDataPreface(finding.text)) {
+    issue(issues, {
+      ...location,
+      code: 'GENERIC_NO_DATA_PREFACE',
+      message: `${section.title}使用了统一的无资料判定前缀，应直接写明尚未明确的具体事项`,
     })
   }
   if (containsInvestmentProposalAbnormalSpacing(finding.text)) {
@@ -270,7 +316,6 @@ function reviewFinding(input: {
   if (
     validIndexes.length === 0
     && finding.status !== '资料缺口'
-    && !finding.text.startsWith(CURRENT_PROJECT_NO_DATA)
     && !MISSING_ACTION.test(finding.text)
   ) {
     issue(issues, {
@@ -280,13 +325,6 @@ function reviewFinding(input: {
     })
   }
   if (finding.status === '资料缺口') {
-    if (!finding.text.startsWith(CURRENT_PROJECT_NO_DATA)) {
-      issue(issues, {
-        ...location,
-        code: 'NO_DATA_TEXT_REQUIRED',
-        message: `资料缺口必须以“${CURRENT_PROJECT_NO_DATA}”开头`,
-      })
-    }
     if (validIndexes.length > 0) {
       issue(issues, {
         ...location,
@@ -537,6 +575,24 @@ export function reviewInvestmentProposalContent(input: {
       message: '执行摘要包含模板化的 AI 套话，应改为直接的提案说明',
     })
   }
+  if (containsInvestmentProposalConversationalWording(content.executiveSummary)) {
+    issue(issues, {
+      code: 'CONVERSATIONAL_TRANSCRIPT_LEAK',
+      message: '执行摘要包含交流口语或转录语气，应改为正式书面陈述',
+    })
+  }
+  if (containsInvestmentProposalLongQuotedExcerpt(content.executiveSummary)) {
+    issue(issues, {
+      code: 'LONG_QUOTED_EVIDENCE_LEAK',
+      message: '执行摘要包含长段引号摘录，应先概括事实再写入正文',
+    })
+  }
+  if (containsInvestmentProposalFormulaicAnalysisWrapper(content.executiveSummary)) {
+    issue(issues, {
+      code: 'FORMULAIC_ANALYSIS_WRAPPER',
+      message: '执行摘要使用机械判断套句，应按具体投资事项自然表述',
+    })
+  }
   if (containsInvestmentProposalAbnormalSpacing(content.executiveSummary)) {
     issue(issues, {
       code: 'ABNORMAL_TYPOGRAPHY_SPACING',
@@ -594,6 +650,27 @@ export function reviewInvestmentProposalContent(input: {
         sectionId: definition.id,
         code: 'AI_STYLE_BOILERPLATE',
         message: `章节“${definition.title}”摘要包含模板化的 AI 套话`,
+      })
+    }
+    if (containsInvestmentProposalConversationalWording(sectionValue.summary)) {
+      issue(issues, {
+        sectionId: definition.id,
+        code: 'CONVERSATIONAL_TRANSCRIPT_LEAK',
+        message: `章节“${definition.title}”摘要包含交流口语或转录语气`,
+      })
+    }
+    if (containsInvestmentProposalLongQuotedExcerpt(sectionValue.summary)) {
+      issue(issues, {
+        sectionId: definition.id,
+        code: 'LONG_QUOTED_EVIDENCE_LEAK',
+        message: `章节“${definition.title}”摘要包含长段引号摘录`,
+      })
+    }
+    if (containsInvestmentProposalFormulaicAnalysisWrapper(sectionValue.summary)) {
+      issue(issues, {
+        sectionId: definition.id,
+        code: 'FORMULAIC_ANALYSIS_WRAPPER',
+        message: `章节“${definition.title}”摘要使用了机械判断套句`,
       })
     }
     if (containsInvestmentProposalAbnormalSpacing(sectionValue.summary)) {
@@ -674,6 +751,10 @@ export function reviewInvestmentProposalContent(input: {
     const primaryConclusionFindingIndex = definition.analysisKind === 'conclusion'
       ? sectionValue.findings.findIndex((finding) => finding.status !== '资料缺口')
       : -1
+    const sectionNarrative = sectionValue.findings
+      .filter((finding) => finding.status !== '资料缺口')
+      .map((finding) => finding.text)
+      .join(' ')
     sectionValue.findings.forEach((finding, findingIndex) => {
       reviewFinding({
         finding,
@@ -698,23 +779,6 @@ export function reviewInvestmentProposalContent(input: {
           })
         }
       }
-      if (
-        definition.analysisKind === 'conclusion'
-        && findingIndex === primaryConclusionFindingIndex
-        && finding.status !== '资料缺口'
-        && (
-          !/(?:进入初筛|继续跟踪|申请立项|启动尽调|提请上会|提交投决|暂缓推进|归档)/.test(finding.text)
-          || !/(?:建议|推进|暂停|重新评估|初筛|跟踪|立项|尽调|上会|投决|归档)/.test(finding.text)
-          || !/(?:在.+后|完成|落实|经.+确认|若|如|前提|条件)/.test(finding.text)
-        )
-      ) {
-        issue(issues, {
-          sectionId: definition.id,
-          findingIndex,
-          code: 'CONDITIONAL_CONCLUSION_REQUIRED',
-          message: '结论必须结合当前项目阶段给出一个推进、暂缓或归档主建议，并包含明确的前置条件、下一步动作和 OA 流转边界',
-        })
-      }
       if (isNearDuplicate(finding.text, priorFindings, 0.86)) {
         issue(issues, {
           severity: 'warning',
@@ -727,6 +791,33 @@ export function reviewInvestmentProposalContent(input: {
         priorFindings.push(finding.text)
       }
     })
+    if (
+      definition.analysisKind === 'risk_summary'
+      && sectionNarrative
+      && !RISK_SECTION_ACTION.test(sectionNarrative)
+    ) {
+      issue(issues, {
+        sectionId: definition.id,
+        code: 'RISK_ACTION_MISSING',
+        message: '风险章节必须至少给出一项与主要风险对应的缓释或核验安排，但不要求每条风险重复责任人和时点',
+      })
+    }
+    if (
+      definition.analysisKind === 'conclusion'
+      && primaryConclusionFindingIndex >= 0
+      && (
+        !/(?:进入|推进|继续|跟踪|观察|接触|立项|尽调|上会|投决|暂缓|暂停|归档|终止|重新评估)/.test(sectionNarrative)
+        || !/(?:完成|落实|确认|若|如|前提|条件|取决于|待.+(?:确认|完成|落实)|(?:交割|投决|签约|审批|立项|尽调|上会)前|(?:完成|确认|落实)后)/.test(sectionNarrative)
+        || !/(?:OA|审批|授权|投委会|投决|流程)/.test(sectionNarrative)
+      )
+    ) {
+      issue(issues, {
+        sectionId: definition.id,
+        findingIndex: primaryConclusionFindingIndex,
+        code: 'CONDITIONAL_CONCLUSION_REQUIRED',
+        message: '结论须用自然语言给出与当前阶段匹配的方向，并说明成立条件、下一步动作和审批边界；不要求命中固定句式',
+      })
+    }
     ;(sectionValue.tables ?? []).forEach((table, tableIndex) => reviewTable({
       table,
       section: sectionValue,

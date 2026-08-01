@@ -127,23 +127,71 @@ function contentFor(
   type: AiBusinessTaskType,
   template: AiTemplateDefinition = AI_TEMPLATE_CATALOG[type],
 ): BusinessContent {
-  const dueFocus: Record<string, string> = {
-    投资概要: '客户验证、收入质量与核心权属安排',
-    公司概况: '公司主体、主营业务和发展阶段',
-    股权结构及融资历程: '股东结构、历史融资和资金到位情况',
-    公司治理与管理团队: '核心人员分工、任职稳定性和治理机制',
-    产品与核心技术: '产品能力、技术实现和知识产权边界',
-    商业模式与经营情况: '收费方式、交付流程和收入确认条件',
-    客户与商业化进展: '客户阶段、合同交付和续费回款',
-    行业概况与市场空间: '目标客户范围、采购约束和可服务空间',
-    产业链与竞争格局: '上下游依赖、替代方案和具名竞品差异',
-    财务分析: '历史收入、成本费用和现金消耗',
-    估值合理性分析: '融资口径、可比交易和估值前提',
-    投资方案: '推进前提、责任分工和下一审批动作',
-    投资亮点: '产品差异、客户验证和资本关注信号',
-    法律合规与资质: '主体登记、业务资质和争议风险',
-    风险分析: '可能改变推进结论的触发条件和缓释动作',
-    后续核验事项: '需要原件或相关主体确认的重大未决事项',
+  const dueNarrative: Record<string, { summary: string; findings: string[] }> = {
+    投资概要: {
+      summary: '杭州示例科技仍处于商业验证早期，已形成企业知识管理软件和订阅加实施服务路径，进入下一审批环节取决于客户回款与核心权属确认。',
+      findings: ['公司当前的主要进展是产品完成首轮交付，并将重点客户由试用推进至合同谈判；正式立项前需要形成合同、验收、收入确认和回款相互勾稽的交易链条。'],
+    },
+    公司概况: {
+      summary: '杭州示例科技成立于2024年，主营企业知识管理软件，现阶段以产品迭代和重点客户交付为主要经营活动。',
+      findings: ['公司登记主体与软件产品运营主体一致，研发、销售和实施团队均由杭州示例科技直接管理，主营收入计划来自软件订阅及配套实施服务。'],
+    },
+    股权结构及融资历程: {
+      summary: '公司股权目前由创始团队和两家早期投资机构持有，历史融资均用于产品研发、团队建设和客户交付。',
+      findings: ['2024年9月，公司完成天使轮融资并引入两家机构股东；本轮增资后的持股比例、资金到账时间和员工持股安排需要与章程及工商变更记录逐项一致。'],
+    },
+    公司治理与管理团队: {
+      summary: '创始团队覆盖产品、算法和企业软件交付，管理分工已经形成，关键岗位的全职状态和长期激励安排仍是治理重点。',
+      findings: ['创始人负责产品方向和重点客户，技术负责人管理算法与平台研发，交付负责人统筹项目实施；三名核心成员均参与公司日常经营，岗位职责与当前业务阶段基本匹配。'],
+    },
+    法律合规与资质: {
+      summary: '公司经营范围覆盖软件开发和技术服务，现有业务不涉及前置行政许可，合规重点集中在知识产权、数据授权和劳动用工。',
+      findings: ['软件著作权应由杭州示例科技持有，客户数据仅在授权范围内用于部署和调试；正式交付前需在合同中明确数据使用、保密义务和成果归属。'],
+    },
+    产品与核心技术: {
+      summary: '核心产品由知识库管理、文档检索、问答生成和权限控制四个模块组成，面向企业内部知识检索与流程协同。',
+      findings: ['产品采用私有化部署和标准接口接入客户现有系统，已经完成文档解析、权限继承及引用定位功能；下一轮迭代重点是降低实施配置工作量并提高复杂文档召回率。'],
+    },
+    商业模式与经营情况: {
+      summary: '公司采用软件订阅费加实施服务费的收费方式，标准产品按年度续费，定制接口和知识治理按项目结算。',
+      findings: ['订阅收入对应账号规模和功能模块，实施收入对应部署、接口和数据治理工作；毛利改善依赖标准模块复用率提升，而不是持续增加驻场人员。'],
+    },
+    客户与商业化进展: {
+      summary: '公司已在制造和专业服务行业开展六个试用项目，其中两个进入合同谈判，商业化仍处于从验证向规模复制过渡的阶段。',
+      findings: ['重点客户已经完成产品试用和首轮验收讨论，采购范围包括知识库部署、文档检索和权限管理；当前最需要确认的是正式合同金额、验收口径、回款节点和续费安排。'],
+    },
+    行业概况与市场空间: {
+      summary: '目标客户主要是知识文档分散、权限要求较高且已有信息化预算的中型企业，采购决策通常由业务、信息化和安全部门共同完成。',
+      findings: ['企业知识管理需求来自文档检索效率、人员经验沉淀和内部问答准确性，市场空间应按可触达客户数量、平均客单价和实施能力测算，不采用泛化的生成式AI市场规模。'],
+    },
+    产业链与竞争格局: {
+      summary: '上游依赖基础模型、向量数据库和云资源，下游竞争集中在传统知识管理软件、通用智能问答产品及客户自研方案。',
+      findings: ['杭州示例科技的差异点在于私有化部署、权限继承和项目实施经验；与通用问答产品相比，竞争优势需要通过部署周期、检索准确率和续费率持续验证。'],
+    },
+    财务分析: {
+      summary: '2025年公司营业收入2,000万元、净利润120万元，收入增长主要来自新增实施项目，经营现金流仍受客户回款节奏影响。',
+      findings: ['历史财务应区分软件订阅、实施服务和一次性定制收入，并结合应收账款账龄观察收入质量；费用端重点核对研发人员成本、销售费用和项目交付成本。'],
+    },
+    估值合理性分析: {
+      summary: '本轮估值需要同时参考软件订阅收入、客户续费情况和实施业务的人效，单纯使用收入倍数容易高估定制项目的可复制性。',
+      findings: ['可比口径应区分标准软件公司与项目制服务公司，并根据经常性收入占比、毛利率和增长质量调整倍数；客户合同和回款确认后再形成估值区间。'],
+    },
+    投资方案: {
+      summary: '下一步工作以客户交易链条、核心权属和本轮融资文件为主，完成三项核查后再决定是否提交下一审批环节。',
+      findings: ['项目负责人应取得重点客户合同、验收及回款凭证，核对软件著作权和核心人员劳动关系，并将投资金额、估值口径、资金用途和交割条件写入正式融资文件。'],
+    },
+    投资亮点: {
+      summary: '产品切入企业知识检索的明确场景，已形成私有化部署和客户系统接入能力，早期客户验证具备继续观察价值。',
+      findings: ['核心团队兼具产品研发和企业软件实施经验，现有产品能够在客户原有系统上部署；如果试用客户顺利转为付费并形成续费，标准模块的复用价值将进一步显现。'],
+    },
+    风险分析: {
+      summary: '主要风险是客户转化周期偏长、实施工作占比过高以及知识产权和核心人员关系不够清晰，这些事项可能压低收入质量和复制效率。',
+      findings: ['若重点客户长期停留在试用阶段，收入增长将继续依赖新增项目；如果实施配置无法标准化，公司需要同步增加交付人员，毛利率和现金周转都会承压。'],
+    },
+    后续核验事项: {
+      summary: '可能改变当前阶段判断的事项集中在客户回款、核心权属和融资文件，均需通过一手材料完成确认。',
+      findings: ['重点客户的合同、验收单、发票和银行流水尚未完成穿行核对；核心软件权属、团队劳动关系及本轮融资的投前投后估值也需要取得正式文件。'],
+    },
   }
   const tablesFor = (title: string): BusinessTable[] => {
     if (type === 'due_diligence_report' && title === '财务分析') {
@@ -203,19 +251,12 @@ function contentFor(
           tables: tablesFor(title),
         }
       }
-      const focus = dueFocus[title]
-      const sectionFindings: BusinessFinding[] = [
-        {
-          text: `杭州示例科技围绕企业知识管理软件推进${focus}，相关事项已纳入本轮尽调核查范围。`,
-          status: '资料记载',
-          sourceIndexes: [index % 4],
-        },
-        {
-          text: `${focus}将直接影响项目由尽调阶段进入下一审批环节的条件设置，投资团队应据此安排核验优先级和责任分工。`,
-          status: 'AI推断',
-          sourceIndexes: [0, 1],
-        },
-      ]
+      const narrative = dueNarrative[title]
+      const sectionFindings: BusinessFinding[] = narrative.findings.map((text) => ({
+        text,
+        status: '资料记载' as const,
+        sourceIndexes: [index % 4],
+      }))
       if (title === '公司治理与管理团队') {
         sectionFindings.push({
           text: '核心团队成员的完整任职经历及知识产权贡献关系仍需取得劳动合同、履历证明和权属文件确认。',
@@ -225,7 +266,7 @@ function contentFor(
       }
       return {
         title,
-        summary: `${focus}直接关系到杭州示例科技能否由尽调阶段进入下一审批环节。`,
+        summary: narrative.summary,
         findings: sectionFindings,
         tables: tablesFor(title),
       }
@@ -837,6 +878,58 @@ async function main() {
         formulaicQualityIssues.some((issue) => issue.includes('模型化套话')),
         formulaicQualityIssues.join('；'),
       )
+      const crossSectionScaffoldIssues = dueDiligenceContentQualityIssues({
+        ...content,
+        sections: content.sections.map((section, index) => index < 7
+          ? {
+              ...section,
+              findings: section.findings.map((finding) => ({
+                ...finding,
+                text: `${finding.text}相关事项已纳入本轮尽调核查，将直接影响项目推进，投资团队应据此安排后续工作。`,
+              })),
+            }
+          : section),
+      }, template.sections)
+      assert(
+        checks,
+        'AI-010 拦截跨章节复用“将直接影响/投资团队应据此”的决策套句',
+        crossSectionScaffoldIssues.some((issue) => issue.includes('决策套句')),
+        crossSectionScaffoldIssues.join('；'),
+      )
+      const documentDensityIssues = dueDiligenceContentQualityIssues({
+        ...content,
+        sections: content.sections.map((section, index) => index < 7
+          ? {
+              ...section,
+              findings: section.findings.map((finding) => ({
+                ...finding,
+                text: `${finding.text}但该信息尚未闭环，仍需确认，若条件变化再调整。`,
+              })),
+            }
+          : section),
+      }, template.sections)
+      assert(
+        checks,
+        'AI-010 按全文密度拦截抽象代词和限制词重复',
+        documentDensityIssues.some((issue) => issue.includes('抽象代词'))
+          && documentDensityIssues.some((issue) => issue.includes('限制词密度过高')),
+        documentDensityIssues.join('；'),
+      )
+      const repeatedRecommendationIssues = dueDiligenceContentQualityIssues({
+        ...content,
+        sections: content.sections.map((section) => section.title === '投资方案'
+          ? {
+              ...section,
+              summary: `${section.summary}杭州示例科技现阶段建议继续跟踪。`,
+            }
+          : section),
+      }, template.sections)
+      assert(
+        checks,
+        'AI-010 拦截正文再次复述处置建议',
+        repeatedRecommendationIssues.some((issue) => issue.includes('只能在执行摘要中')),
+        repeatedRecommendationIssues.join('；'),
+      )
       const sanitizedProcessWording = finalizeDueDiligenceContent({
         ...content,
         executiveSummary: '阶段与推进建议：继续跟踪。主建议：继续跟踪。根据项目资料库显示，值得注意的是，杭州示例科技已经形成软件产品。',
@@ -1248,9 +1341,8 @@ async function main() {
           && ['公司情况介绍', '公司简介', '核心团队', '产品及技术', '投资理由', '投资计划', '投资情形分析']
             .every((title) => documentXml.includes(title))
           && documentXml.includes('<w:numId w:val="1"/>')
-          && documentXml.includes('<w:numId w:val="2"/>')
-          && documentXml.includes('<w:numId w:val="4"/>'),
-        '四个一级部分、三个公司子节、独立重启的七项检查编号',
+          && documentXml.includes('<w:numId w:val="2"/>'),
+        '四个一级部分、三个公司子节，正文采用自然段而非额外固定检查编号',
       )
       assert(
         checks,

@@ -442,6 +442,7 @@ async function main() {
     '线索池',
     '进入初筛',
     '继续跟踪',
+    '处置结论',
     '申请立项',
     '启动尽调',
     '提请上会',
@@ -471,6 +472,8 @@ async function main() {
     '先消化、后写作',
     '内部事实卡',
     '值得注意的是',
+    '直接关系到进入下一阶段',
+    '投资团队应据此',
     '项目资料',
   ]
   assert(
@@ -816,7 +819,7 @@ async function main() {
       && !qaDocumentSource.includes("mixedTextRuns('引用资料'")
       && !qaDocumentSource.includes("mixedTextRuns('Reviewer 审阅结果'")
       && qaPipelineSource.includes('function cleanAnswerText')
-      && qaPipelineSource.includes('3-7 个自然段')
+      && qaPipelineSource.includes('2-6 个自然段')
       && qaDocumentSource.includes('answerParagraphFormValid')
       && qaDocumentSource.includes('narrativeParagraphRangeValid')
       && qaDocumentSource.includes('visibleAnswerLabelsAbsent')
@@ -827,7 +830,7 @@ async function main() {
       && !qaDocumentSource.includes('bodyParagraph(`答复：${line}`')
       && !qaDocumentSource.includes('index === 6')
       && qaDocumentSource.includes('globalIndex === 0'),
-    '宋体 / 18pt 标题 / 14pt 问题 / 3-7 个自然段 / 无加工痕迹 / 1.5 倍行距 / 25.4×31.7mm 页边距',
+    '宋体 / 18pt 标题 / 14pt 问题 / 2-6 个自然段 / 无加工痕迹 / 1.5 倍行距 / 25.4×31.7mm 页边距',
   )
   assert(
     'Q&A 双模式边界明确且正式任务只交付 DOCX',

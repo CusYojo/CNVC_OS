@@ -21,7 +21,11 @@ import {
   containsInvestmentProposalAbnormalSpacing,
   containsInvestmentProposalAiStyleBoilerplate,
   containsInvestmentProposalColonLabel,
+  containsInvestmentProposalConversationalWording,
+  containsInvestmentProposalFormulaicAnalysisWrapper,
+  containsInvestmentProposalGenericNoDataPreface,
   containsInvestmentProposalInlineSubheading,
+  containsInvestmentProposalLongQuotedExcerpt,
   containsInvestmentProposalSourceProcessWording,
   sanitizeInvestmentProposalClientText,
   sanitizeInvestmentProposalEvidenceContent,
@@ -144,12 +148,30 @@ assert.equal(
 )
 assert.equal(containsInvestmentProposalSourceProcessWording(summarizedSourceProse), false)
 assert.equal(containsInvestmentProposalAiStyleBoilerplate('总体来看，公司发展情况较好。'), true)
+assert.equal(
+  containsInvestmentProposalConversationalWording(
+    '但是其实各种初期的尝试验证已经差不多结束了，接下来是人效提升时期。',
+  ),
+  true,
+)
+assert.equal(
+  containsInvestmentProposalLongQuotedExcerpt(
+    '若“公司将在后续阶段继续推进多项业务验证，并结合客户反馈调整产品方向与交付计划”未完成核验。',
+  ),
+  true,
+)
+assert.equal(
+  containsInvestmentProposalFormulaicAnalysisWrapper(
+    '建议继续跟踪，并在接触或立项前完成专项核验。',
+  ),
+  true,
+)
 const normalizedTypography = sanitizeInvestmentProposalClientText(
   '宁波政府项目： 在宁波注册主体，申报 800 万元政府补贴，申报方向为一人公司智 能体服务矩阵 。',
 )
 assert.equal(
   normalizedTypography,
-  '宁波政府项目：在宁波注册主体，申报800万元政府补贴，申报方向为一人公司智能体服务矩阵。',
+  '宁波政府项目方面，在宁波注册主体，申报800万元政府补贴，申报方向为一人公司智能体服务矩阵。',
 )
 const normalizedMixedTypography = sanitizeInvestmentProposalClientText(
   '公司采用 Open AI Skill 框架，基础制作费 500 元 / 分钟，后台 AI 自动处理。',
@@ -168,6 +190,14 @@ assert.equal(
   '公司订单交付方面，2026年5月正式启动新合作，当前每20天交付5000分钟内容。',
 )
 assert.equal(containsInvestmentProposalColonLabel(orderParagraph), false)
+const genericColonParagraph = sanitizeInvestmentProposalClientText(
+  '快速输出：当天完成场景选型、技术难度评估和落地排期。',
+)
+assert.equal(
+  genericColonParagraph,
+  '快速输出方面，当天完成场景选型、技术难度评估和落地排期。',
+)
+assert.equal(containsInvestmentProposalColonLabel(genericColonParagraph), false)
 const continuousParagraph = sanitizeInvestmentProposalClientText(
   '三）现金流与估值规划 1、现金流保障：老股东拟提供1000万元借款，可保障半年现金流安全。',
 )
@@ -335,6 +365,8 @@ assert.ok(compactSkillPrompt.length < skill.instructions.length + skill.referenc
 assert.ok(compactSkillPrompt.length <= 7000)
 assert.equal(compactSkillPrompt.includes('## references/formatter-contract.md'), false)
 assert.equal(compactSkillPrompt.includes('## references/template-profile.md'), false)
+assert.match(compactSkillPrompt, /访谈、聊天记录和会议转录必须先提炼为正式事实/)
+assert.match(compactSkillPrompt, /不使用任何`短标签：正文`式引导语/)
 assert.match(
   safeAiTaskFailureMessage(Object.assign(
     new Error('包含内部模型原文的错误'),
@@ -649,6 +681,34 @@ const aiStyleLeakReview = reviewInvestmentProposalContent({
 assert.equal(aiStyleLeakReview.passed, false)
 assert.ok(aiStyleLeakReview.issues.some((issue) =>
   issue.code === 'AI_STYLE_BOILERPLATE'))
+const conversationalLeakContent = structuredClone(content)
+conversationalLeakContent.sections.find((section) => section.title === '四、项目亮点总结')!
+  .findings[0].text = '但是其实各种初期的尝试验证已经差不多结束了，接下来是人效提升时期。'
+const conversationalLeakReview = reviewInvestmentProposalContent({
+  content: conversationalLeakContent,
+  blueprint,
+  evidencePlan,
+  sources,
+  projectName: '星河机器人项目',
+  companyName: '星河机器人有限公司',
+})
+assert.equal(conversationalLeakReview.passed, false)
+assert.ok(conversationalLeakReview.issues.some((issue) =>
+  issue.code === 'CONVERSATIONAL_TRANSCRIPT_LEAK'))
+const formulaicLeakContent = structuredClone(content)
+formulaicLeakContent.sections.find((section) => section.title === '四、项目亮点总结')!
+  .findings[0].text = '建议继续跟踪，并在接触或立项前完成专项核验。'
+const formulaicLeakReview = reviewInvestmentProposalContent({
+  content: formulaicLeakContent,
+  blueprint,
+  evidencePlan,
+  sources,
+  projectName: '星河机器人项目',
+  companyName: '星河机器人有限公司',
+})
+assert.equal(formulaicLeakReview.passed, false)
+assert.ok(formulaicLeakReview.issues.some((issue) =>
+  issue.code === 'FORMULAIC_ANALYSIS_WRAPPER'))
 const abnormalSpacingContent = structuredClone(content)
 abnormalSpacingContent.sections.find((section) => section.title === '（一）公司简介')!
   .findings[0].text = '星河机器人有限公司已形成智 能体产品，2026 年启动商业化交付 。'
@@ -769,7 +829,10 @@ const incompatibleParameterFallbackReview = reviewInvestmentProposalContent({
 assert.equal(
   incompatibleParameterFallbackReview.passed,
   true,
-  JSON.stringify(incompatibleParameterFallbackReview.issues, null, 2),
+  JSON.stringify({
+    issues: incompatibleParameterFallbackReview.issues,
+    conclusion: incompatibleParameterFallback.sections.find((section) => section.title === '六、结论'),
+  }, null, 2),
 )
 const incompatibleParameterFallbackText = [
   incompatibleParameterFallback.executiveSummary,
@@ -782,6 +845,26 @@ assert.doesNotMatch(
   incompatibleParameterFallbackText,
   /(?:HTTP\s*\d{3}|LLM\s*(?:请求|响应|返回|错误|异常|失败|超时|中断)|网关(?:错误|异常|失败)|错误编号|错误码|invalid_request_error|unsupported_value|模型请求(?:失败|中断|异常))/i,
 )
+assert.equal(
+  containsInvestmentProposalConversationalWording(incompatibleParameterFallbackText),
+  false,
+)
+assert.equal(
+  containsInvestmentProposalLongQuotedExcerpt(incompatibleParameterFallbackText),
+  false,
+)
+assert.equal(
+  containsInvestmentProposalFormulaicAnalysisWrapper(incompatibleParameterFallbackText),
+  false,
+)
+const humanNoDataText = sanitizeInvestmentProposalClientText(
+  '现阶段尚不能形成结论。公司完整股东名单、持股比例及实际控制人尚未明确，申请立项前应取得最新公司章程、股东名册和工商档案并完成核对。',
+)
+assert.equal(
+  humanNoDataText,
+  '公司完整股东名单、持股比例及实际控制人尚未明确，申请立项前应取得最新公司章程、股东名册和工商档案并完成核对。',
+)
+assert.equal(containsInvestmentProposalGenericNoDataPreface(humanNoDataText), false)
 assert.equal(
   incompatibleParameterFallback.sections
     .flatMap((section) => section.findings)
@@ -823,6 +906,14 @@ const noEvidenceContent = await composeInvestmentProposalContent({
 assert.equal(noEvidenceFetchCalled, false)
 assert.equal(noEvidenceContent.generationAudit?.limitedDraft, true)
 assert.equal(noEvidenceContent.generationAudit?.evidenceCoverage.missingLeafSections, leafDefinitions.length)
+const noEvidenceText = noEvidenceContent.sections
+  .flatMap((section) => section.findings.map((finding) => finding.text))
+  .join('\n')
+assert.equal(containsInvestmentProposalGenericNoDataPreface(noEvidenceText), false)
+assert.doesNotMatch(noEvidenceText, /(?:资料不足|暂无相关资料|需核验该主题|相关关键事实后再行分析)/)
+assert.match(noEvidenceText, /核心团队成员、任职履历、职责分工和全职状态尚未明确/)
+assert.match(noEvidenceText, /本轮融资金额、估值、投资工具、拟出让股比和资金用途尚未明确/)
+assert.match(noEvidenceText, /项目在经营、技术、合规和交易层面的关键风险及触发条件尚未明确/)
 
 let activeChapterRequests = 0
 let maxActiveChapterRequests = 0
@@ -1065,7 +1156,7 @@ const companyProfileSection = evidenceAvailableButMissingContent.sections
   .find((section) => section.title === '（一）公司简介')!
 companyProfileSection.summary = CURRENT_PROJECT_NO_DATA
 companyProfileSection.findings = [{
-  text: `${CURRENT_PROJECT_NO_DATA}需核验公司主体相关关键事实后再行分析。`,
+  text: '公司的法律主体、成立时间、注册地和主营业务尚未明确，申请立项前应取得工商档案、公司章程和业务说明并完成核对。',
   status: '资料缺口',
   sourceIndexes: [],
 }]
@@ -1188,7 +1279,7 @@ const missingSections: BusinessSection[] = blueprint.sections.map((definition) =
         title: definition.title,
         summary: CURRENT_PROJECT_NO_DATA,
         findings: [{
-          text: `${CURRENT_PROJECT_NO_DATA}需核验该主题相关关键事实后再行分析。`,
+          text: '该事项涉及的关键事实尚未明确，进入下一阶段前应补充相关文件并完成核对。',
           status: '资料缺口',
           sourceIndexes: [],
         }],
@@ -1207,7 +1298,7 @@ const missingReview = reviewInvestmentProposalContent({
   projectName: '星河机器人项目',
   companyName: '星河机器人有限公司',
 })
-assert.ok(missingSection.findings[0].text.startsWith(CURRENT_PROJECT_NO_DATA))
+assert.equal(containsInvestmentProposalGenericNoDataPreface(missingSection.findings[0].text), false)
 assert.equal(missingReview.passed, true)
 assert.ok(missingReview.issues.some((issue) =>
   issue.code === 'MISSING_EVIDENCE_RESEARCH_REQUIRED'
@@ -1248,6 +1339,7 @@ assert.equal(documentXml.includes('〔分析判断〕'), false)
 assert.equal(documentXml.includes('〔待核验〕'), false)
 assert.equal(documentXml.includes('〔资料缺口〕'), false)
 assert.equal(documentXml.includes('待核验'), false)
+assert.equal(documentXml.includes('现阶段尚不能形成结论'), false)
 assert.doesNotMatch(
   documentXml,
   /判断：|依据：|影响\/约束：|待办：|订单节奏：|客户结构：|财务情况：|项目资料|资料库|会议纪要|原始文件|原始资料|现有资料|当前资料|(?:\.{3}|…)\s*展开|原文链接|来源网址|总体来看|值得注意的是|由此可见/,

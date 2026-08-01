@@ -36,7 +36,11 @@ import {
   containsInvestmentProposalAbnormalSpacing,
   containsInvestmentProposalAiStyleBoilerplate,
   containsInvestmentProposalColonLabel,
+  containsInvestmentProposalConversationalWording,
+  containsInvestmentProposalFormulaicAnalysisWrapper,
+  containsInvestmentProposalGenericNoDataPreface,
   containsInvestmentProposalInlineSubheading,
+  containsInvestmentProposalLongQuotedExcerpt,
   containsInvestmentProposalProseLabel,
   containsInvestmentProposalSourceProcessWording,
   containsInvestmentProposalWebArtifact,
@@ -555,6 +559,30 @@ export async function reviewInvestmentProposalDocx(input: {
     issues.push({
       code: 'AI_STYLE_BOILERPLATE',
       message: 'Word 正文包含明显的 AI 模板化套话',
+    })
+  }
+  if (containsInvestmentProposalConversationalWording(allText)) {
+    issues.push({
+      code: 'CONVERSATIONAL_TRANSCRIPT_LEAK',
+      message: 'Word正文包含交流口语或转录语气，未改写为正式书面表述',
+    })
+  }
+  if (containsInvestmentProposalLongQuotedExcerpt(bodyText)) {
+    issues.push({
+      code: 'LONG_QUOTED_EVIDENCE_LEAK',
+      message: 'Word正文包含长段引号摘录，未先完成事实概括',
+    })
+  }
+  if (containsInvestmentProposalFormulaicAnalysisWrapper(bodyText)) {
+    issues.push({
+      code: 'FORMULAIC_ANALYSIS_WRAPPER',
+      message: 'Word正文包含机械判断或核验套句',
+    })
+  }
+  if (containsInvestmentProposalGenericNoDataPreface(bodyText)) {
+    issues.push({
+      code: 'GENERIC_NO_DATA_PREFACE',
+      message: 'Word正文包含统一的无资料判定前缀，未直接说明具体缺失事项',
     })
   }
   if (containsInvestmentProposalAbnormalSpacing(allText)) {

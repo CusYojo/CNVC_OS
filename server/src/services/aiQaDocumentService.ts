@@ -80,6 +80,12 @@ const QA_VISIBLE_SOURCE_PROCESS_TERMS = [
   '现阶段只能形成初步判断',
   '不能把单一材料或公开披露直接视为完成核验',
   '未形成能够相互印证的完整证据链',
+  '已经形成可识别的产品与技术方向',
+  '收费方式只是商业模式的起点',
+  '商业模式是否成立最终取决于',
+  '客户接触或项目推进迹象',
+  '不能混为一谈',
+  '当前需要优先处理的是',
 ] as const
 
 type ProjectLike = {
@@ -177,6 +183,11 @@ function sanitizeQaVisibleSourceProcessWording(value: string) {
     .replace(/^股权结构[：:]\s*/g, '公司股权安排为')
     .replace(/^收费模式\s*模式[一二三四五六七八九十\d]+[：:]\s*按/g, '公司按')
     .replace(/^收费模式\s*模式[一二三四五六七八九十\d]+[：:]\s*/g, '公司采用')
+    .replace(/^收费模式[：:]\s*按/g, '公司按')
+    .replace(/^收费模式[：:]\s*/g, '公司采用')
+    .replace(/^需求调研[：:]\s*/g, '项目实施前，')
+    .replace(/^项目实施流程[：:]\s*需求调研后/g, '项目实施通常先')
+    .replace(/^项目实施流程[：:]\s*/g, '项目实施通常')
     .replace(/(?:会议|交流|访谈)纪要(?:中)?(?:称|显示|表明|说明|提及|记载|披露)[，,:：]?/g, '项目方称')
     .replace(/公司(?:提供的)?(?:资料|材料)(?:中)?(?:显示|表明|说明|披露|介绍|称)[，,:：]?/g, '公司称')
     .replace(/(?:项目方|团队)(?:提供的)?(?:资料|材料)(?:中)?(?:显示|表明|说明|披露|介绍|称)[，,:：]?/g, '$1称')
@@ -535,14 +546,14 @@ export async function inspectProjectQaDocx(
     const answerLabel = answerParagraphs.find((paragraph) =>
       /^(?:答复|回答)\s*[：:]/.test(paragraph))
     if (
-      answerParagraphs.length < 3
-      || answerParagraphs.length > 7
+      answerParagraphs.length < 2
+      || answerParagraphs.length > 6
       || answerLabel
     ) {
       throw new Error(
         answerLabel
           ? `Q&A DOCX 正文 Q${index + 1} 不得显示“答复：”或“回答：”标签`
-          : `Q&A DOCX 正文 Q${index + 1} 应为 3-7 个自然段，实际为 ${answerParagraphs.length} 段`,
+          : `Q&A DOCX 正文 Q${index + 1} 应为 2-6 个自然段，实际为 ${answerParagraphs.length} 段`,
       )
     }
   })

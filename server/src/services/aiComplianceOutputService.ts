@@ -193,6 +193,10 @@ export async function reviewGeneratedComplianceDocx(input: {
       message: 'DOCX无可编辑正文或包含损坏字符U+FFFD',
     })
   }
+  const conclusionText = input.content.sections
+    .find((section) => section.title === '结论')
+    ?.findings.find((finding) => finding.status !== '资料缺口')
+    ?.text ?? ''
   const visualOutline = [
     input.content.title,
     '公司情况介绍',
@@ -202,13 +206,13 @@ export async function reviewGeneratedComplianceDocx(input: {
     '投资理由',
     '投资计划',
     '投资情形分析',
-    '综上',
+    conclusionText,
     input.blueprint.fixedContent.issuer,
   ].map(compactText)
   if (!orderedTextPresent(compact, visualOutline)) {
     addIssue(issues, {
       code: 'DOCX_STRUCTURE_MISMATCH',
-      message: '标题、四段式章节、三个子节、综上结论或落款的顺序与Document Blueprint不一致',
+      message: '标题、四段式章节、三个子节、条件性结论或落款的顺序与Document Blueprint不一致',
     })
   }
   const visibleHeadingTexts = new Set(visualOutline.slice(0, 8))

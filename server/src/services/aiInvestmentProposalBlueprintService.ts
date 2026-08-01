@@ -5,9 +5,10 @@ import JSZip from 'jszip'
 import { PDFParse } from 'pdf-parse'
 import type { AiTemplateDefinition } from './aiTemplateCatalog.js'
 
-export const INVESTMENT_PROPOSAL_BLUEPRINT_VERSION = 'proposal-blueprint-20260731-v11-client-fact-prose'
-export const CURRENT_PROJECT_NO_DATA = '现阶段尚不能形成结论。'
-const CORE_STANDARD_SHA256 = 'fed1147e287ef8242bf4b6e50ab298f6e5f8f4ba2fbea40e2372de1c2f5e5621'
+export const INVESTMENT_PROPOSAL_BLUEPRINT_VERSION = 'proposal-blueprint-20260731-v13-human-data-boundary'
+// 资料缺口只作为内部状态，不向客户正文注入统一占位前缀。
+export const CURRENT_PROJECT_NO_DATA = ''
+const CORE_STANDARD_SHA256 = 'ec77a6632da28eed6eabbd96306446776ea4f2669d6373da9a939b7d1c5ae991'
 
 export type InvestmentProposalAnalysisKind =
   | 'company_profile'
@@ -110,7 +111,7 @@ export type InvestmentProposalDocumentBlueprint = {
     authorization: string
     managementCompany: '浙江赛智伯乐股权投资管理有限公司'
     headerCompany: '浙江赛智伯乐投资管理有限公司'
-    noDataText: typeof CURRENT_PROJECT_NO_DATA
+    noDataText: string
   }
   sections: InvestmentProposalBlueprintSection[]
   requiredAnalysisKinds: InvestmentProposalAnalysisKind[]
@@ -470,6 +471,8 @@ export async function loadInvestmentProposalBlueprint(
     '暂缓推进',
     '归档',
     '正文末尾不增加“免责声明”或“引用资料”板块',
+    '访谈、聊天记录和会议转录必须先转写为正式事实',
+    '短标签：正文',
   ]
   const missingCoreRules = coreRequiredRules.filter((rule) => !coreStandard.includes(rule))
   if (coreStandardSha256 !== CORE_STANDARD_SHA256 || missingCoreRules.length) {

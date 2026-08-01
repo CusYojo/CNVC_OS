@@ -45,6 +45,12 @@ function isPlaceholderLine(value: string) {
   const withoutLabel = value.replace(/^[^：:\n]{1,12}[：:]\s*/, '')
     .replace(/[。.!！?？；;]+$/, '')
     .trim()
+  // “待……完成后再……”属于有效的条件与行动安排，不是待补充占位符。
+  // 若在这里误删，结论会只剩方向而丢失下一步动作和审批边界。
+  if (
+    /^待/.test(withoutLabel)
+    && /(?:完成后|确认后|落实后|再决定|履行|发起|提交|申请|启动)/.test(withoutLabel)
+  ) return false
   return PLACEHOLDER_TEXT.test(withoutLabel)
 }
 

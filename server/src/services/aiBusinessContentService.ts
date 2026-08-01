@@ -598,13 +598,7 @@ export function normalizeBusinessContent(
       })
     }
     if (template.type === 'compliance_statement' && title === '结论') {
-      const conclusion = normalizedFindings[0]
-      normalizedFindings = [{
-        ...conclusion,
-        text: conclusion.text.startsWith('综上')
-          ? conclusion.text
-          : `综上，${conclusion.text}`,
-      }]
+      normalizedFindings = normalizedFindings.slice(0, 1)
     }
     const tablesRaw = (
       template.type === 'investment_proposal'
@@ -1002,6 +996,19 @@ function ensureDueDiligenceRecommendation(
   subject = '该项目',
 ) {
   const cleaned = sanitizeDueDiligenceText(value)
+  const leadingRecommendation = new RegExp(`^建议(?:将)?(?:本项目|该项目)?${disposition}[。！？；]\s*`)
+  if (leadingRecommendation.test(cleaned)) {
+    const remainder = cleaned.replace(leadingRecommendation, '').trim()
+    if (remainder) {
+      const firstSentenceEnd = remainder.search(/[。！？；]/)
+      if (firstSentenceEnd >= 0) {
+        const firstSentence = remainder.slice(0, firstSentenceEnd).trim()
+        const trailingText = remainder.slice(firstSentenceEnd + 1).trim()
+        return `${firstSentence}，现阶段建议${disposition}。${trailingText}`.trim()
+      }
+      return `${remainder.replace(/[。！？；]$/, '')}，现阶段建议${disposition}。`
+    }
+  }
   const bareRecommendation = new RegExp(`(^|[。！？；])建议(?:将)?(?:本项目|该项目)?${disposition}(?=[。！？；]|$)`)
   if (bareRecommendation.test(cleaned)) {
     return cleaned.replace(
@@ -1160,6 +1167,20 @@ function hasFormulaicDueDiligencePronouns(value: string) {
   return (value.match(/该(?:信息|信号|口径|能力|模式|结构|指标|表述|安排|调整|部署|定位|链条)/g) ?? []).length >= 2
 }
 
+function dueDiligenceFormulaicPronounCount(value: string) {
+  return (value.match(/该(?:信息|信号|口径|能力|模式|结构|指标|表述|安排|调整|部署|定位|链条)/g) ?? []).length
+}
+
+function dueDiligenceBoundaryWordCount(value: string) {
+  return (value.match(/但|若|尚未|仍需|后续需/g) ?? []).length
+}
+
+function dueDiligenceDecisionScaffoldCount(value: string) {
+  return (value.match(
+    /直接关系到[^。；]{0,80}(?:进入下一|审批环节|项目推进)|将直接影响[^。；]{0,80}(?:投资判断|项目推进|条件设置|审批环节)|投资团队应据此|相关事项已纳入[^。；]{0,40}(?:核查|尽调)/g,
+  ) ?? []).length
+}
+
 function dueDiligenceRecommendationCount(value: string) {
   return (value.match(new RegExp(`建议(?:将)?(?:本项目|该项目)?(?:${DUE_DILIGENCE_DISPOSITION_SOURCE})`, 'g')) ?? []).length
 }
@@ -1237,7 +1258,7 @@ export function dueDiligenceContentQualityIssues(
   // gap-analysis 是供定向联网补全使用的内部中间稿。此阶段只验证结构，
   // 最终稿仍执行下方全部语义、完整性、可读性和财务表格门禁。
   if (!final) return [...new Set(issues)]
-  if (final && !partial && content.executiveSummary.length < 120) {
+  if (final && !partial && content.executiveSummary.length < 80) {
     issues.push('执行摘要过短，必须形成可供投资经理直接阅读的项目判断、依据、风险和下一步动作')
   }
   if (!partial && DUE_DILIGENCE_PROCESS_LANGUAGE.test(content.executiveSummary)) {
@@ -1250,13 +1271,39 @@ export function dueDiligenceContentQualityIssues(
   ) {
     issues.push('执行摘要含模型化套话或机械重复句式，必须改写为具体事实、判断和动作')
   }
-  if (!partial && dueDiligenceRecommendationCount(content.executiveSummary) !== 1) {
-    issues.push('执行摘要必须用自然句表达且只表达一次处置建议，不得显示“主建议”等标签')
+  if (!partial && dueDiligenceRecommendationCount(content.executiveSummary) > 1) {
+    issues.push('执行摘要只能自然表达一个处置方向；证据不足以形成建议时可以暂不下结论，不得为了过门禁硬套阶段词')
+  }
+  const bodyVisibleText = content.sections.map(dueDiligenceSectionVisibleText).join(' ')
+  const fullVisibleText = [
+    content.executiveSummary,
+    bodyVisibleText,
+    ...content.highlights,
+    ...content.risks,
+  ].join(' ')
+  const compactVisibleLength = fullVisibleText.replace(/\s+/g, '').length
+  const formulaicPronounCount = dueDiligenceFormulaicPronounCount(fullVisibleText)
+  if (formulaicPronounCount >= 7) {
+    issues.push(`全文重复使用“该信息/该信号/该口径”等抽象代词 ${formulaicPronounCount} 次，应改为具体公司、产品、客户、人员或事件`)
+  }
+  const boundaryWordCount = dueDiligenceBoundaryWordCount(fullVisibleText)
+  if (
+    boundaryWordCount >= 18
+    && boundaryWordCount * 1000 / Math.max(compactVisibleLength, 1) > 2.8
+  ) {
+    issues.push(`全文“但/若/尚未/仍需”等限制词密度过高（${boundaryWordCount} 次），应保留事实叙述并集中表达未决事项`)
+  }
+  const decisionScaffoldCount = dueDiligenceDecisionScaffoldCount(fullVisibleText)
+  if (decisionScaffoldCount >= 5) {
+    issues.push(`全文重复使用“直接关系到/将直接影响/投资团队应据此”等决策套句 ${decisionScaffoldCount} 次，应按模板改写为事实型段落`)
+  }
+  if (dueDiligenceRecommendationCount(bodyVisibleText) > 0) {
+    issues.push('处置建议只能在执行摘要中自然出现一次，正文各模块不得再次复述')
   }
   for (const section of content.sections) {
     const isPending = section.title === '后续核验事项'
     const visibleSectionText = dueDiligenceSectionVisibleText(section)
-    if (final && !isPending && section.summary.length < 32) {
+    if (final && !isPending && section.summary.length < 20) {
       issues.push(`${section.title}的小结过短，未形成明确判断`)
     }
     if (DUE_DILIGENCE_PROCESS_LANGUAGE.test(section.summary)) {
@@ -1274,7 +1321,7 @@ export function dueDiligenceContentQualityIssues(
     }
     if (
       !['风险分析', '后续核验事项'].includes(section.title)
-      && (visibleSectionText.match(/但|若|尚未|仍需|后续需/g) ?? []).length >= 5
+      && (visibleSectionText.match(/但|若|尚未|仍需|后续需/g) ?? []).length >= 8
     ) {
       issues.push(`${section.title}过度重复“但/若/尚未/仍需”等边界句，应保留事实叙述并集中表达核验要求`)
     }
@@ -1283,6 +1330,7 @@ export function dueDiligenceContentQualityIssues(
       && !isPending
       && section.findings.length < 1
       && (section.tables?.length ?? 0) === 0
+      && visibleSectionText.replace(/\s+/g, '').length < 80
     ) {
       issues.push(`${section.title}至少需要一项高密度实质发现，或一张有效数据表`)
     }
@@ -1337,7 +1385,7 @@ export function dueDiligenceContentQualityIssues(
       if (
         final
         && tables.length === 0
-        && visibleSectionText.length < 140
+        && visibleSectionText.length < 100
       ) {
         issues.push('财务分析无有效表格时，必须用完整段落说明收入、成本毛利、现金流或资金续航及其投资影响')
       }
@@ -1359,6 +1407,54 @@ export function dueDiligenceContentQualityIssues(
     }
   }
   return [...new Set(issues)].slice(0, 24)
+}
+
+function customTemplateContentQualityIssues(
+  content: BusinessContent,
+  expectedSectionCount: number,
+) {
+  const issues: string[] = []
+  if (content.sections.length !== expectedSectionCount) {
+    issues.push(`章节数量必须与模板结构槽一致：应为 ${expectedSectionCount} 个，实际为 ${content.sections.length} 个`)
+  }
+  const visibleParts = [
+    content.title,
+    content.executiveSummary,
+    ...content.sections.flatMap((section) => [
+      section.title,
+      section.summary,
+      ...section.findings.map((finding) => finding.text),
+      ...(section.tables ?? []).flatMap((table) => [
+        table.title,
+        table.unit,
+        ...table.columns,
+        ...table.rows.flat(),
+      ]),
+    ]),
+    ...content.highlights,
+    ...content.risks,
+  ].filter(Boolean)
+  const visibleText = visibleParts.join(' ')
+  if (
+    DUE_DILIGENCE_PROCESS_LANGUAGE.test(visibleText)
+    || /(?:【(?:资料记载|AI推断|待核验|资料缺口)】|阶段与推进建议[：:]|判断依据[：:]|关键风险[：:]|前置条件[：:]|下一步动作[：:])/.test(visibleText)
+  ) {
+    issues.push('客户可见内容含内部处理状态或固定字段标签，必须改写为自然段')
+  }
+  if (/(?:Failed to fetch|HTTP\s*\d{3}|LLM\s*(?:错误|异常|失败)|网关(?:错误|异常|失败)|错误编号|invalid_request_error)/i.test(visibleText)) {
+    issues.push('客户可见内容含技术报错，必须删除无依据内容并保留模板结构')
+  }
+  const priorFindings: string[] = []
+  for (const section of content.sections) {
+    for (const finding of section.findings) {
+      if (finding.text.length >= 24 && isNearDuplicate(finding.text, priorFindings, 0.88)) {
+        issues.push(`章节“${section.title}”存在跨章节近似重复内容`)
+      } else if (finding.text) {
+        priorFindings.push(finding.text)
+      }
+    }
+  }
+  return [...new Set(issues)].slice(0, 12)
 }
 
 export function dueDiligencePendingResearchTopics(
@@ -1792,10 +1888,10 @@ async function composeDueDiligenceContent(input: {
 2. status 只用“资料记载”“AI推断”“待核验”；资料记载和 AI推断必须引用有效 sourceIndexes。
 3. 写作前先在内部完成事实卡去重，并统一主体、时间、关系、事件阶段和数字口径；只输出改写后的章节 JSON，不得输出事实卡或分析步骤。
 4. 客户可见文字不得出现“项目资料、项目材料、项目资料库、项目知识库、资料库、知识库、现有资料、当前资料、根据资料、资料显示、证据显示、证据不足、本节、本初稿、初步梳理、联网检索、来源索引、状态标签”等取证或生成过程。
-5. 以具体公司、团队成员、实验室、产品、客户、融资事件或日期开句。整个模块覆盖事实、影响和边界，但不得让每个段落都复制同一三段式；事实可以直接陈述，分析和核验动作只在影响判断时补充。
+5. 以具体公司、团队成员、实验室、产品、客户、融资事件或日期开句。参照模板的人工写法，多数段落直接陈述主体、时间、事件、数字和口径；整个模块覆盖事实、影响和边界，但不得让每个段落都复制同一三段式，分析和核验动作只在确实改变判断时补充。
 6. 不得出现“阶段与推进建议：”“主建议：”“最强依据是”“反向证据是”“前置条件为”等标签化串联；禁用“值得注意的是、需要强调的是、不难发现、由此可见、综上所述”等模型套话。
-7. 不使用“该信息、该信号、该口径、该能力、该模式、该表述”机械承接上句；不得在每段末尾重复“但/若/尚未/仍需”和相同核验要求。
-8. 每节摘要 35–90 个汉字；除“后续核验事项”外，每节 1–3 项高密度发现，每项 50–180 个汉字。
+7. 不使用“该信息、该信号、该口径、该能力、该模式、该表述”机械承接上句；不得在每段末尾重复“但/若/尚未/仍需”和相同核验要求。禁止把“直接关系到进入下一阶段”“将直接影响项目推进”“投资团队应据此”“相关事项已纳入本轮尽调”当作通用收尾。
+8. 每节摘要用一句或两句给出中心判断，长度随信息密度变化；除“后续核验事项”外，每节可用 0–4 项实质发现或有效数据表展开。能够形成完整论证的事实应合并表达，不为满足数量或字数机械拆分，也不设置统一的单项长度。
 9. 同一事实只进入语义最匹配的章节。优先写具体项目、公司、团队、实验室、产品、融资和商业化信号，不写泛行业研究。
 10. 可公开核验的事实不得直接写成待核验；确需非公开原件或仍有冲突的重大事项集中写入“后续核验事项”。
 11. 表格只用于真实结构化数据，最多 8 行；财务表最多 6 列，并明确指标/科目和期间/年度/口径。
@@ -2009,10 +2105,10 @@ ${evidence || '没有可用事实卡。不得编造事实；只在确有重大�
             role: 'system',
             content: `你是投资中台资深投资经理。根据已经生成的尽调章节，形成不重复正文的决策摘要。
 只返回 JSON：{"title":"","executiveSummary":"","executiveSummarySourceIndexes":[0],"highlights":[""],"risks":[""]}。
-执行摘要用 3–5 个完整句子、180–360 个汉字。从“进入初筛、继续跟踪、申请立项、启动尽调、提请上会、提交投决、暂缓推进、归档”中选择一个处置建议，在前三句中结合具体项目事实自然表达一次。不要把所有报告固定写成“建议……该项目”的开头；可先写最能支撑判断的项目进展，再写“公司现阶段建议继续跟踪”一类句子。随后用连贯叙述交代主要制约和下一步行动。
+执行摘要通常用 2–6 个完整句子、160–420 个汉字，篇幅随证据密度变化。证据能够支持时，从“进入初筛、继续跟踪、申请立项、启动尽调、提请上会、提交投决、暂缓推进、归档”中自然表达一个处置方向；证据不足时可以明确说明暂不形成阶段建议，不得为了命中固定词硬造结论。不要把所有报告固定写成“建议……该项目”的开头，也不要单独写一句没有事实支撑的阶段判断；先写最能支撑判断的项目进展，再自然交代主要制约与下一步行动。句子长短应有变化，以主体、时间、事件和数字推进，不设置统一字数。
 先在内部合并重复事实并统一主体、日期、事件阶段和数字口径，再写客户可见内容。
 不得出现“项目资料、项目材料、项目资料库、项目知识库、资料库、知识库、现有资料、当前资料、根据资料、资料显示、证据显示、证据不足、本节、本初稿、初步梳理、联网检索、来源索引、状态标签”等处理过程。
-不得使用“阶段与推进建议：”“主建议：”“最强依据是”“反向证据是”“前置条件为”等标签化串联，也不得把执行摘要写成五项报幕。以具体主体、产品、客户、融资事件或日期组织段落，禁用“值得注意的是、需要强调的是、不难发现、由此可见、综上所述”等模型套话。
+不得使用“阶段与推进建议：”“主建议：”“最强依据是”“反向证据是”“前置条件为”等标签化串联，也不得把执行摘要写成五项报幕。以具体主体、产品、客户、融资事件或日期组织段落，禁用“值得注意的是、需要强调的是、不难发现、由此可见、综上所述”等模型套话，也不得使用“直接关系到进入下一阶段”“将直接影响项目推进”“投资团队应据此”等通用决策套句。
 不得输出免责声明或引用清单，不得虚构事实。`,
           },
           {
@@ -2257,7 +2353,7 @@ export async function composeBusinessContent(input: {
       : 'sourceIndexes 只引用真正支持当前 finding 的证据，文尾引用资料由渲染器根据实际使用索引生成。'
   const dueDiligenceRule = isDueDiligence
     ? `\n10. 你是投资中台的资深投资经理，输出是供投资团队、风控法务、投资总监和投委会内部审阅的尽调报告，只处理当前会话绑定的项目。
-11. 结合项目当前阶段，从“进入初筛 / 继续跟踪 / 申请立项 / 启动尽调 / 提请上会 / 提交投决 / 暂缓推进 / 归档”中选择一个处置结论。只在执行摘要中结合具体项目事实自然表达一次，不使用“阶段与推进建议”“主建议”“最强依据”“反向证据”“前置条件”等报幕标签，也不采用固定的五项排列；“投资概要”只写当前阶段和进入下一阶段的条件，不复述处置句。不得声称已经改变项目阶段，阶段流转以 OA 审批结果为准。
+11. 结合项目当前阶段，在证据能够支持时，用自然语言给出一个推进、继续观察、暂缓或归档方向；标准阶段词可用于保持系统一致性，但不得为了命中词表硬造结论。证据确实不足时可在执行摘要中说明暂不形成阶段建议。处置方向只在执行摘要中表达一次，不使用“阶段与推进建议”“主建议”“最强依据”“反向证据”“前置条件”等报幕标签，也不采用固定的五项排列；“投资概要”只写当前阶段和进入下一阶段的条件，不复述处置句。不得声称已经改变项目阶段，阶段流转以 OA 审批结果为准。
 12. 报告必须围绕当前项目的主体、股权与治理、团队、产品与技术、市场与客户、商业模式、财务、融资与估值、交易方案、风险和可核验来源展开。禁止生成脱离当前项目的泛行业研究；行业、政策和市场背景只能解释当前项目或具名可比对象。
 13. 人员、研发合作、知识产权许可或转让等关系必须说明具体关系类型、相关主体、时间和来源，不得仅凭名称、宣传口径或履历关键词推断。线索池摘要、标签、评分和融资线索只能作为待核验线索。
 14. 融资事件必须写明主体、时间、轮次、金额、投资方和披露边界；商业化信号必须区分线索、测试、试用、合同、交付、验收、收入、开票、回款和续约。
@@ -2269,8 +2365,8 @@ export async function composeBusinessContent(input: {
 20. status 和 sourceIndexes 仅供系统内部审计。finding.text、summary、表格及其他客户可见文字不得出现“【资料记载】”“【AI推断】”“【待核验】”或同类状态标签。
 21. “后续核验事项”最多保留 8 项可能改变投资判断的重大事项；公开渠道通常可查的信息必须先联网补全，不得把每个章节都写成待核验清单。
 22. 优先用连贯的尽调段落表达事实与判断；股权、融资、财务、客户、产品指标和同口径竞品比较应使用原生可编辑表格。不得把证据原文切片直接当作正文。
-23. 客户可见文字禁止出现“现有资料”“现有材料”“项目资料库”“本节”“证据不足”“结论强度”“初步梳理”“检索问题”“联网检索”等资料处理过程；直接写当前项目事实、投资含义、限制和动作。
-24. 执行摘要控制在 250–500 个汉字。除“后续核验事项”外，每个模块写 1–3 项高密度、可复核的实质发现，每项控制在 60–220 个汉字；能够合并表达的事实不得拆成多个短条目。表格原则上不超过 8 行。不得输出孤立数字、会议纪要标题、人员名单、原始编号或少于 24 个字符的资料分片。
+23. 客户可见文字禁止出现“现有资料”“现有材料”“项目资料库”“本节”“证据不足”“结论强度”“初步梳理”“检索问题”“联网检索”等资料处理过程；直接写当前项目事实、投资含义、限制和动作。正文不得重复使用“该信息/该信号/该口径”等抽象代词，不得把“直接关系到进入下一阶段”“将直接影响项目推进”“投资团队应据此”等句子作为跨模块通用结尾。
+24. 执行摘要通常控制在 160–420 个汉字，并根据证据密度自然调整。除“后续核验事项”外，每个模块可用 0–4 项高密度发现或有效数据表展开；事实能够形成完整论证时合并表达，不为满足条目数量或单项字数机械拆分。表格只在有助于比较时使用，原则上不超过 8 行。不得输出孤立数字、会议纪要标题、人员名单、原始编号或过短资料分片。
 25. 严格按模块职责归类事实：公司登记信息不得放入投资方案；客户、订单和交付不得放入公司概况；收费和定价不得放入竞争格局；融资与估值不得代替财务分析；系统适配原则不得放入法律合规。每项事实只进入语义最匹配的模块。
 26. “产品与核心技术”只写具名产品或技术、目标用户与场景、交付形态、技术原理、关键模块、性能或测试、成熟度、知识产权及下一里程碑；网页导航、榜单入口、聚合页标签和公司详情页原文必须删除后再提炼。
 27. “财务分析”区分历史财务、经营指标与管理层预测。可用数字优先放入不超过六列的原生表格，表格必须包含指标或科目以及期间、年度或口径；正文解释收入质量、成本毛利、现金流或资金续航及其投资影响。不得用孤立估值、融资问答分类或收费比例代替财务分析。`
@@ -2280,11 +2376,11 @@ export async function composeBusinessContent(input: {
 11. 上传模板只提供版式参数、结构槽数量和阅读顺序。必须为当前项目重新生成文档标题、全部可见章节标题和全部正文；不得复用上传文件名、原文档标题、原章节标题、原项目名称或任何模板示例正文。
 12. title 必须包含当前项目或公司主体，并准确概括本次文档用途；sections 数量和顺序保持不变，但每个 section.title 必须重新拟定。
 13. 不得返回“资料缺口”状态、标题、列表或占位文案；经过缓存复用和定向网络补全仍未覆盖的事项只可简洁标为“待核验”，missing 必须为空数组。
-14. 输出必须是由投资中台资深投资经理起草、供内部审阅的项目投资材料。单项目报告结合当前阶段给出“进入初筛 / 继续跟踪 / 申请立项 / 启动尽调 / 提请上会 / 提交投决 / 暂缓推进 / 归档”之一；批量报告逐个主体给出建议、可核验依据、关键风险、前置条件和下一步动作。
+14. 输出必须是由投资中台资深投资经理起草、供内部审阅的项目投资材料。单项目报告在证据能够支持时用自然语言给出与当前阶段匹配的推进、继续观察、暂缓或归档方向；批量报告逐个主体给出方向、可核验依据、关键风险和下一步动作。不得为了命中固定阶段词或固定五要素而牺牲真实、连贯的表达。
 15. 报告必须围绕当前项目的主体、股权与治理、团队、产品与技术、市场与客户、商业模式、财务、融资与估值、交易方案、风险和可核验来源展开。禁止生成脱离具体主体的泛行业研究；行业、政策和市场背景只能解释当前项目。
 16. status 和 sourceIndexes 仅供系统内部审计。finding.text、summary、表格及其他客户可见文字不得出现“【资料记载】”“【AI推断】”“【待核验】”、Markdown 粗体状态词或同类证据状态标签。
 17. 正文使用连贯、完整的自然段，把事实、判断、风险、前提和下一步动作通过正常句子衔接。不得采用“阶段与推进建议：”“判断依据：”“关键风险：”“前置条件：”“下一步动作：”等“标签：内容”的冒号式写法，也不得把正文拆成标签卡片或短语清单。
-18. 阶段建议必须自然写入句子，例如“综合当前项目阶段与可核验事实，建议继续跟踪”，并在同段说明依据、风险、前提和动作；不得以固定字段名或状态徽标展示。
+18. 阶段建议应与具体项目事实写在同一条论证链中，依据、主要风险、成立条件和动作可以按阅读逻辑分布在相邻段落，不要求全部塞入同一句或同一段；不得以固定字段名或状态徽标展示。
 19. 已核验来源仍须通过 sourceIndexes 保留在内部审计结构，并由渲染器生成引用页或演讲者备注；不得为了自然段文风删除来源追溯。`
     : ''
   const uploadedInvestmentTemplateRule = isUploadedInvestmentTemplate
@@ -2505,6 +2601,27 @@ ${JSON.stringify(previousDraft ?? {}).slice(0, 60_000)}`
         throw Object.assign(
           new Error(`尽调报告正文未通过投资经理可读性门禁：${issues.slice(0, 6).join('；')}`),
           { code: 'DUE_DILIGENCE_CONTENT_QUALITY_REJECTED' },
+        )
+      }
+    } else if (isCustomTemplate) {
+      let issues = customTemplateContentQualityIssues(
+        generated,
+        input.template.sections.length,
+      )
+      if (issues.length > 0) {
+        generated = await requestContent(
+          issues.map((issue, index) => `${index + 1}. ${issue}`).join('\n'),
+          generated,
+        )
+        issues = customTemplateContentQualityIssues(
+          generated,
+          input.template.sections.length,
+        )
+      }
+      if (issues.length > 0) {
+        throw Object.assign(
+          new Error(`上传模板正文未通过安全与可读性门禁：${issues.join('；')}`),
+          { code: 'CUSTOM_TEMPLATE_CONTENT_QUALITY_REJECTED' },
         )
       }
     }

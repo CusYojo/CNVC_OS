@@ -32,6 +32,15 @@ const CLIENT_SOURCE_PROCESS_WORDING =
   /(?:项目资料(?:库)?|(?:当前|现有)资料|会议纪要(?:显示|列示|记载|提及)?|已取得材料|原始(?:文件|资料)(?:核验|复核)?|资料(?:显示|列示|记载|提及))/i
 const CLIENT_AI_STYLE_BOILERPLATE =
   /(?:值得注意的是|需要指出的是|不难看出|由此可见|综上所述|总体来看|在此背景下|从长远来看|多维度赋能|全方位赋能|打造[^。；]{0,24}新范式|构建[^。；]{0,24}生态闭环|实现[^。；]{0,18}从[^。；]{1,18}到[^。；]{1,18}的跃升)/
+const CLIENT_CONVERSATIONAL_WORDING =
+  /(?:但是其实|其实吧|然后(?:呢|就是)|差不多(?:已经)?(?:结束|完成)?了?|各种(?:初期|前期)?(?:尝试|试验|验证)?|接下来(?:就是|是)|我(?:们)?(?:觉得|认为|这边)|你(?:们)?(?:看|知道)|说白了|就是说|怎么说呢|先把[^。；]{0,24}(?:搞定|做起来)|挺(?:好|多|快)的?|蛮(?:好|多|快)的?)/
+const CLIENT_LONG_QUOTED_EXCERPT = /[“"][^”"\n]{36,}[”"]/
+const CLIENT_FORMULAIC_ANALYSIS_WRAPPER =
+  /(?:建议继续跟踪[，,]并在(?:接触或立项前|关键事实完成核验后)完成专项核验|若[“"][^”"]+[”"]相关事项未在投决前完成事实核验[，,]可能影响项目判断)/
+const CLIENT_GENERIC_NO_DATA_PREFACE =
+  /(?:^|[。！？；\n]\s*)(?:现阶段|目前|当前)(?:尚|还)?(?:不能|无法)形成(?:明确)?结论[。；，,]?/
+const CLIENT_GENERIC_NO_DATA_PREFACE_GLOBAL =
+  /(^|[。！？；\n]\s*)(?:现阶段|目前|当前)(?:尚|还)?(?:不能|无法)形成(?:明确)?结论[。；，,]?\s*/g
 const INVESTMENT_PROPOSAL_ABNORMAL_SPACING =
   /(?:[\u3400-\u9fff][ \t\u00a0\u3000]+[\u3400-\u9fffA-Za-z0-9%％℃°]|[A-Za-z0-9%％℃°][ \t\u00a0\u3000]+[\u3400-\u9fff]|[（【《“‘][ \t\u00a0\u3000]+|[ \t\u00a0\u3000]+[，。！？；：、）】》”’]|[ \t\u00a0\u3000]+[\/+\uff0b][ \t\u00a0\u3000]*)/u
 const CLIENT_COLON_LABEL_NAMES = [
@@ -86,6 +95,8 @@ const CLIENT_COLON_LABEL = new RegExp(
   `(?:${CLIENT_COLON_LABEL_NAMES.join('|')})\\s*[:：]\\s*`,
   'g',
 )
+const CLIENT_GENERIC_LEADING_COLON_LABEL =
+  /(^|[。！？；\n][ \t\u00a0\u3000]*)([\u3400-\u9fffA-Za-z0-9·（）()\/]{2,18})[ \t\u00a0\u3000]*[:：][ \t\u00a0\u3000]*(?=[^：:\n]{6,})/g
 const INLINE_NUMBERED_SUBHEADING =
   /(^|[。！？；\n]\s*)(?:[（(]\s*[0-9a-zA-Z一二三四五六七八九十]+\s*[）)]|[0-9a-zA-Z一二三四五六七八九十]+\s*[、.．)）])\s*(?=[^。！？；\n])/g
 const LEADING_ENUMERATOR =
@@ -235,7 +246,9 @@ export function containsInvestmentProposalProseLabel(value: string) {
 
 export function containsInvestmentProposalColonLabel(value: string) {
   CLIENT_COLON_LABEL.lastIndex = 0
-  return CLIENT_COLON_LABEL.test(value)
+  const containsKnownLabel = CLIENT_COLON_LABEL.test(value)
+  CLIENT_GENERIC_LEADING_COLON_LABEL.lastIndex = 0
+  return containsKnownLabel || CLIENT_GENERIC_LEADING_COLON_LABEL.test(value)
 }
 
 export function containsInvestmentProposalInlineSubheading(value: string) {
@@ -251,6 +264,27 @@ export function containsInvestmentProposalAiStyleBoilerplate(value: string) {
   return CLIENT_AI_STYLE_BOILERPLATE.test(value)
 }
 
+export function containsInvestmentProposalConversationalWording(value: string) {
+  return CLIENT_CONVERSATIONAL_WORDING.test(value)
+}
+
+export function containsInvestmentProposalLongQuotedExcerpt(value: string) {
+  return CLIENT_LONG_QUOTED_EXCERPT.test(value)
+}
+
+export function containsInvestmentProposalFormulaicAnalysisWrapper(value: string) {
+  return CLIENT_FORMULAIC_ANALYSIS_WRAPPER.test(value)
+}
+
+export function containsInvestmentProposalGenericNoDataPreface(value: string) {
+  return CLIENT_GENERIC_NO_DATA_PREFACE.test(value)
+}
+
+export function containsInvestmentProposalGenericColonLabel(value: string) {
+  CLIENT_GENERIC_LEADING_COLON_LABEL.lastIndex = 0
+  return CLIENT_GENERIC_LEADING_COLON_LABEL.test(value)
+}
+
 export function containsInvestmentProposalAbnormalSpacing(value: string) {
   return INVESTMENT_PROPOSAL_ABNORMAL_SPACING.test(value)
 }
@@ -262,8 +296,8 @@ function rewriteClientSourceProcessWording(value: string) {
       '本提案反映截至$1已确认的项目情况，供当前阶段审议使用。',
     )
     .replace(/(?:现有资料未提供|当前项目资料库未覆盖|项目资料库未覆盖)/g, '尚未明确')
-    .replace(/当前资料不足以形成/g, '现阶段尚不能形成')
-    .replace(/当前项目暂无相关资料[。.]?/g, '现阶段尚不能形成结论。')
+    .replace(/当前资料不足以形成结论[。.]?/g, '')
+    .replace(/当前项目暂无相关资料[。.]?/g, '')
     .replace(/已取得材料仅(?:显示|列示|记载|提及)/g, '现阶段仅能确认')
     .replace(/完成关键原始(?:文件|资料)核验/g, '完成关键事实核验')
     .replace(/(?:回到|依据|对照)?原始(?:文件|资料)(?:进行)?(?:核验|复核)/g, '完成专项核验')
@@ -312,6 +346,16 @@ function rewriteClientColonLabels(value: string) {
       return `${separator}${COLON_LABEL_REWRITES[label] ?? `${label}方面，`}`
     },
   )
+  CLIENT_GENERIC_LEADING_COLON_LABEL.lastIndex = 0
+  text = text.replace(
+    CLIENT_GENERIC_LEADING_COLON_LABEL,
+    (_match, prefix: string, label: string) => {
+      const subject = label
+        .replace(/(?:情况|进展|节奏|安排|规划|介绍|说明)$/g, '')
+        .trim()
+      return `${prefix}${subject || label}方面，`
+    },
+  )
   return text
 }
 
@@ -329,9 +373,12 @@ export function sanitizeInvestmentProposalClientText(value: unknown) {
     .replace(/\s+(?:依据|影响[\/／]约束|待办)\s*[:：]\s*/g, '；')
     .replace(/\n+(?:依据|影响[\/／]约束|待办)\s*[:：]\s*/g, '；')
   text = rewriteClientColonLabels(stripInlineNumberedSubheadings(text))
-  return rewriteClientSourceProcessWording(
+  const rewritten = rewriteClientSourceProcessWording(
     sanitizeClientVisibleEvidenceWording(normalizeWhitespace(text)),
   )
+  CLIENT_GENERIC_NO_DATA_PREFACE_GLOBAL.lastIndex = 0
+  return rewritten
+    .replace(CLIENT_GENERIC_NO_DATA_PREFACE_GLOBAL, '$1')
     .replace(/([。！？；])\n+/g, '$1')
     .replace(/\n+/g, '；')
 }

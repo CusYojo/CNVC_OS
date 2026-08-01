@@ -69,6 +69,13 @@ async function main() {
     ].every((name) => skill.referenceNames.includes(name)),
     skill.referenceNames.join('、'),
   )
+  assert(
+    '阶段2 Skill：人工文风规则已加载',
+    skill.instructions.includes('学习的是论证节奏')
+      && skill.referenceInstructions.includes('事实和分析处于同一条论证链')
+      && skill.referenceInstructions.includes('不把内部字段逐项翻译成固定五段'),
+    '首段判断、事实归纳、自然论证与反模板句规则',
+  )
 
   const project = {
     name: '工业巡检机器人 Q&A 自动验收项目',
@@ -392,6 +399,9 @@ async function main() {
         answer.answer.length > 20
         && !/暂无相关资料|暂无资料|无相关资料/.test(answer.answer)
         && !/检索式|Q&A 分类|公开检索记录/.test(answer.answer)
+        && !/已经形成可识别的.{0,16}方向|收费方式只是商业模式的起点|商业模式是否成立最终取决于|需要从.{0,24}综合判断|不能混为一谈|当前需要优先处理的是/.test(
+          answer.answer,
+        )
         && (answer.sourceIndexes.length > 0 || answer.confidenceStatus === '证据不足')),
     `${reviewed.answers.length} 个回答 / ${reviewed.review.dataGapCount} 个资料缺口`,
   )
@@ -400,8 +410,8 @@ async function main() {
     '阶段4 Answer Generator：如选择阶段问题则形成与当前阶段匹配的推进建议',
     !dispositionAnswer || Boolean(
       /现阶段更适合“继续跟踪”|主建议为“继续跟踪”/.test(dispositionAnswer.answer)
-      && dispositionAnswer.answer.split(/\n+/).length >= 3
-      && dispositionAnswer.answer.split(/\n+/).length <= 7
+      && dispositionAnswer.answer.split(/\n+/).length >= 2
+      && dispositionAnswer.answer.split(/\n+/).length <= 6
       && !/（[1-4]）(?:判断依据|升级与失效条件|下一步动作|OA 流转边界)：/.test(
         dispositionAnswer.answer,
       )
@@ -424,8 +434,8 @@ async function main() {
       .filter((answer) => answer.category !== '阶段与推进建议' && answer.confidenceStatus !== '证据不足')
       .every((answer) => {
         const paragraphCount = answer.answer.split(/\n+/).length
-        return paragraphCount >= 3
-          && paragraphCount <= 7
+        return paragraphCount >= 2
+          && paragraphCount <= 6
           && !/（[1-4]）(?:已确认事实|分析判断|证据边界|下一步核验)：/.test(answer.answer)
           && !/项目资料|项目材料|资料库|资料截止日|经系统核验|公开页面/.test(answer.answer)
       }),
@@ -451,8 +461,8 @@ async function main() {
     '阶段4 Answer Generator：清除 Markdown、小标题与网页导航拼接',
     markdownAndChromeFixture.includes('核心产品为人机共生智能引擎')
       && markdownAndChromeFixture.includes('阶段调整以 OA 审批结果为准')
-      && markdownAndChromeFixture.split(/\n+/).length >= 3
-      && markdownAndChromeFixture.split(/\n+/).length <= 7
+      && markdownAndChromeFixture.split(/\n+/).length >= 2
+      && markdownAndChromeFixture.split(/\n+/).length <= 6
       && !/\*\*|(?:^|\n)(?:[（(]?[1-4][）)]?)?(?:判断依据|升级与失效条件|下一步动作|OA 流转边界)[：:]|权威榜|产业图谱|企业入驻|小程序|项目资料|项目材料|资料库|经系统核验|公开页面/.test(
         markdownAndChromeFixture,
       ),
@@ -476,8 +486,8 @@ async function main() {
       chunkIndex: 0,
       versionOrDate: '2026-06-30',
       content: [
-        '收费模式 模式一：按投入人力与规模的传统软件项目制收费。',
-        '1 沈阳与智灵 FDE 团队交流纪要交流时间：2026 年 6 月 30 日 10:00-13:30 交流地点：赛智伯乐大会议室交流人员：黄昕、任丽平、沈阳、朱旭琪。',
+        '1 沈阳与智灵 FDE 团队交流纪要交流时间：2026 年 6 月 30 日 10:00-13:30 交流地点：赛智伯乐大会议室交流人员：黄昕、任丽平、沈阳、朱旭琪 收费模式 模式一：按投入人力与规模的传统软件项目制收费。',
+        '项目实施流程：需求调研后梳理客户业务流程，再按业务节点配置人员并推进交付。',
       ].join('\n'),
     }],
     skill,
@@ -487,6 +497,11 @@ async function main() {
     Boolean(
       meetingMinutesAnswer
       && meetingMinutesAnswer.answer.includes('公司按投入人力与规模')
+      && meetingMinutesAnswer.answer.includes('项目实施通常先梳理客户业务流程')
+      && meetingMinutesAnswer.answer.split(/\n+/)[0]?.startsWith('公司按投入人力与规模')
+      && !/已经提出相应的收费与交付方式|最终取决于|只是商业模式的起点/.test(
+        meetingMinutesAnswer.answer,
+      )
       && !/会议纪要|交流纪要|访谈纪要|交流时间|交流地点|交流人员|大会议室|黄昕|任丽平/.test(
         meetingMinutesAnswer.answer,
       )
@@ -553,9 +568,9 @@ async function main() {
       equityRegression?.answer.includes('第三大股东')
       && !equityRegression.answer.includes('自动解析被投企业')
       && financeRegression?.answer.includes('毛利率')
-      && financeRegression.answer.includes('持续经营能力')
+      && financeRegression.answer.includes('完整经营判断')
       && financingRegression?.answer.includes('老股东借款')
-      && financingRegression.answer.includes('应严格区分已完成融资')
+      && financingRegression.answer.includes('不应计入已完成股权融资')
       && dispositionRegression?.confidenceStatus === '证据不足'
       && !/搭建多维度项目库|自动解析被投企业|股东权益影响分析/.test(
         dispositionRegression.answer,
@@ -584,8 +599,8 @@ async function main() {
     '阶段4 Answer Generator：无证据时形成具体核验结论',
     noEvidenceAnswers.every((answer) =>
       answer.confidenceStatus === '证据不足'
-      && answer.answer.split(/\n+/).length >= 3
-      && answer.answer.split(/\n+/).length <= 7
+      && answer.answer.split(/\n+/).length >= 2
+      && answer.answer.split(/\n+/).length <= 6
       && !/暂无相关资料|暂无资料|无相关资料/.test(answer.answer)
       && !/项目资料|项目材料|资料库|当前资料|现有证据|资料截止日|经系统核验|公开页面|公司材料称|资料显示|材料显示|会议纪要|交流纪要|访谈纪要|交流时间|交流地点|交流人员|更新本题|本回答|结论置信度/.test(answer.answer)
       && (answer.category !== '阶段与推进建议'
