@@ -32,7 +32,7 @@ mkdirSync(AGENT_WORKSPACE, { recursive: true });
 // PPT 由 agent 自己在沙箱里用 Gorden 技能完成：技能已装在 cwd/.agents/skills/ 下，
 // flue 启动时自动发现并注入「Available Skills」，agent 读 SKILL.md 后用 bash 亲自跑脚本。
 export default defineAgent(() => ({
-  model: process.env.FLUE_MODEL ?? 'zeelin-oai/gpt-5.5',
+  model: process.env.FLUE_MODEL ?? 'zeelin-oai/gpt-5.6-sol',
   sandbox: local({ env: SANDBOX_ENV }),
   cwd: AGENT_WORKSPACE,
   tools: [searchProjectDocs, collectIntel, publishFile, readPptx],

@@ -316,6 +316,11 @@ sync_agent_skills() {
 
     local skills_root="${FLUE_STATE_DIR}/workspace/.agents/skills"
     local source_root source_dir target_dir
+
+    # 清空旧的 skills，避免 git 中已删除的 skill 残留
+    if [ -d "$skills_root" ]; then
+        rm -rf "${skills_root:?}"/*
+    fi
     install -d -m 0750 "$skills_root"
 
     for source_root in \

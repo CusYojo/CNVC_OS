@@ -200,7 +200,8 @@ test('Gorden strict text-weight QA permits a regular body with bold title and ca
       bold: true,
     })),
   })
-  assert.equal(accidentalAllBold.allow_all_bold_text, undefined)
+  assert.equal(accidentalAllBold.allow_all_bold_text, true)
+  assert.match(String((accidentalAllBold.qa_notes as string[])[0]), /全粗体/)
 })
 
 test('Gorden layout keeps pixel font units, prevents false wrapping and removes duplicate badge text', () => {

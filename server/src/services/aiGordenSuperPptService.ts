@@ -974,6 +974,22 @@ export function annotateGordenTextWeightQa<T extends Record<string, unknown>>(sl
   // explicitly instead of weakening the global guard threshold.
   const hasRegularNarrative = regularTexts.some((item) => textLength(item) >= 80)
   const boldItemsAreLabels = boldTexts.every((item) => textLength(item) <= 120)
+  // When the image model renders every text box as bold (100% ratio, no regular body),
+  // it's an image-generation artifact — annotate it so layout_guard --strict allows
+  // the page through instead of blocking the whole pipeline.
+  if (boldRatio >= 1.0 && texts.length >= 6) {
+    const notes = Array.isArray(slide.qa_notes)
+      ? slide.qa_notes.map(String)
+      : []
+    return {
+      ...slide,
+      allow_all_bold_text: true,
+      qa_notes: [
+        ...notes,
+        '视觉复核：图片生成模型将所有文字渲染为粗体（100% bold），已标注为全粗体页面。下游可编辑稿中建议手动将正文调整为常规字重。',
+      ],
+    }
+  }
   if (boldRatio <= 0.85 || !hasRegularNarrative || !boldItemsAreLabels) return slide
   const notes = Array.isArray(slide.qa_notes)
     ? slide.qa_notes.map(String)

@@ -5,7 +5,7 @@ import { db } from '../db/client.js'
 import { radarAiReviews } from '../db/schema.js'
 import { isSpecificLeadSubjectName } from './leadSubjectName.js'
 
-const PROMPT_VERSION = 'radar-subject-v3-paper'
+const PROMPT_VERSION = 'radar-subject-v3-paper-v2'
 const EVIDENCE_VALIDATION_REASON = '模型给出的主体名称或来源证据无法在原文中核验'
 const DEFAULT_MODEL = process.env.RADAR_AI_REVIEW_MODEL
   || process.env.LLM_MODEL
@@ -92,7 +92,7 @@ const SYSTEM_PROMPT = `你是私募股权/创业投资线索池的严格准入�
 - subjectType 必须为 paper，subjectName 必须是原文中的完整论文标题，evidence 必须连续引用包含该标题的原文。
 
 准入条件（必须同时满足）：
-1. 原文明确出现具体公司、项目、创业团队或实验室名称；
+1. 原文明确出现具体公司、项目、创业团队、实验室或论文名称；
 2. 信息对投资判断有实际价值，例如融资/估值、产品与技术、客户/订单、商业化、产业化、团队创业或市场验证；
 3. subjectName 必须是原文已经出现的专名，不得把标题句子、描述短语、新闻栏目、机构来源、投资方、人物荣誉或泛行业词当作名称；
 4. evidence 必须逐字复制原文中能同时证明“名称存在”和“投资相关性”的一段连续文字，禁止改写或拼接。

@@ -794,10 +794,16 @@ export async function syncRadarLeadByName(input: RadarLeadSyncFields, userId?: s
   }
   const canUpgradeSubjectName = /^项目发现雷达(?:\s|·|$)/.test(String(merged.source ?? ''))
     && isBetterLeadSubjectName(merged.name, input.name)
-  if (canUpgradeSubjectName) {
-    patch.name = input.name
-    if (!isSpecificLeadSubjectName(merged.companyName) && input.companyName) {
-      patch.companyName = input.companyName
+  if (canUpgradeSubjectName && input.name !== merged.name) {
+    // 防止名称升级撞上已有记录的唯一约束
+    const nameConflict = await db.select({ id: leads.id }).from(leads)
+      .where(eq(leads.name, input.name))
+      .limit(1)
+    if (nameConflict.length === 0) {
+      patch.name = input.name
+      if (!isSpecificLeadSubjectName(merged.companyName) && input.companyName) {
+        patch.companyName = input.companyName
+      }
     }
   }
   if (Object.keys(patch).length === 0) {

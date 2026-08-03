@@ -244,10 +244,20 @@ const firstMeaningfulRadarText = (...values: unknown[]): string => {
 }
 
 const radarCandidateSourceKey = (item: Record<string, unknown>): string => {
-  const source = String(item.source || 'unknown').trim() || 'unknown'
+  let source = String(item.source || 'unknown').trim() || 'unknown'
   for (const field of ['source_id', 'fingerprint', 'link', 'title']) {
-    const value = String(item[field] || '').trim()
-    if (value) return `${source}:${value}`
+    let value = String(item[field] || '').trim()
+    if (!value) continue
+    // 同一篇 arxiv 论文可能在 arxiv 文件和 investment 文件中各出现一次，
+    // 用统一的 arxiv:ID 作为去重键，避免被审查两次。
+    if (source === 'investment') {
+      const arxivId = value.match(/arxiv\.org\/abs\/([0-9]{4}\.[0-9]{4,5}(?:v[0-9]+)?)/)?.[1]
+      if (arxivId) {
+        source = 'arxiv'
+        value = arxivId
+      }
+    }
+    return `${source}:${value}`
   }
   return ''
 }
@@ -395,7 +405,7 @@ metaRouter.post('/leads/sync-radar', async (req: AuthedRequest, res, next) => {
       const fundingRound = meaningfulRadarText(prof.project_round)
       const financingAmount = meaningfulRadarText(prof.financing_amount)
       const latestValuation = meaningfulRadarText(prof.latest_valuation)
-      if (seenBatchNames.has(name)) batchDuplicates += 1
+      if (seenBatchNames.has(name)) { batchDuplicates += 1; continue }
       else seenBatchNames.add(name)
       const highlights = splitList(prof.core_highlights, 5)
       const nextActions: string[] = Array.isArray(it.next_actions) ? it.next_actions.map((x: unknown) => String(x)) : []
@@ -504,7 +514,9 @@ metaRouter.post('/leads/sync-radar', async (req: AuthedRequest, res, next) => {
         summary: it.summary,
         articleText: radarProfile.articleText,
       })
-      const syncResult = await syncRadarLeadByName({
+      let syncResult: Awaited<ReturnType<typeof syncRadarLeadByName>> | null = null
+      try {
+        syncResult = await syncRadarLeadByName({
         name,
         companyName: companyName || null,
         industry: (isPaper
@@ -527,23 +539,28 @@ metaRouter.post('/leads/sync-radar', async (req: AuthedRequest, res, next) => {
         radarProfile,
         sources: [{ title: it.title || name, url: it.link || prof.source_url || '', reliability: '中', category: it.source_group || '公开渠道', excerpt: (it.summary || '').toString().slice(0, 200) }],
       }, actorUserId)
-
-      if (syncResult.duplicateMatches > 0 && !countedDatabaseDuplicateNames.has(name)) {
-        countedDatabaseDuplicateNames.add(name)
-        databaseDuplicates += syncResult.duplicateMatches
+      } catch (syncErr) {
+        console.error('[radar-sync] 跳过同步失败的候选项（不影响其他项）：', (syncErr as Error).message.slice(0, 200))
+        invalid += 1
+        continue
       }
-      if (syncResult.status === 'created') {
+
+      if (syncResult!.duplicateMatches > 0 && !countedDatabaseDuplicateNames.has(name)) {
+        countedDatabaseDuplicateNames.add(name)
+        databaseDuplicates += syncResult!.duplicateMatches
+      }
+      if (syncResult!.status === 'created') {
         createdNames.add(name)
         updatedNames.delete(name)
         unchangedNames.delete(name)
-        if (syncResult.row?.id) {
-          createdIds.push(syncResult.row.id)
-          scoringLeadIds.add(syncResult.row.id)
+        if (syncResult!.row?.id) {
+          createdIds.push(syncResult!.row.id)
+          scoringLeadIds.add(syncResult!.row.id)
         }
-      } else if (syncResult.status === 'updated') {
+      } else if (syncResult!.status === 'updated') {
         if (!createdNames.has(name)) updatedNames.add(name)
         unchangedNames.delete(name)
-        if (syncResult.row?.id) scoringLeadIds.add(syncResult.row.id)
+        if (syncResult!.row?.id) scoringLeadIds.add(syncResult!.row.id)
       } else if (!createdNames.has(name) && !updatedNames.has(name)) {
         unchangedNames.add(name)
       }

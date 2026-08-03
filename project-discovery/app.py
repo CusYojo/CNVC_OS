@@ -3007,6 +3007,16 @@ def fetch_arxiv_rss_fallback(req: ArxivRunRequest) -> list[dict]:
     return rows
 
 
+def _fetch_arxiv_safe(req: ArxivRunRequest) -> list[dict]:
+    """Safe arxiv fetcher for auto crawler: tries API first, falls back to RSS."""
+    try:
+        return fetch_arxiv(req)
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 429:
+            return fetch_arxiv_rss_fallback(req)
+        raise
+
+
 def parse_arxiv_entries(entries: list[dict], watch_authors: list[str], limit: int) -> list[dict]:
     rows = []
     for entry in entries[:limit]:
@@ -3027,6 +3037,7 @@ def parse_arxiv_entries(entries: list[dict], watch_authors: list[str], limit: in
             "authors": authors,
             "first_author": score["first_author"],
             "second_author": score["second_author"],
+            "source_group": "论文",
             "categories": [tag.get("term", "") for tag in entry.get("tags", []) if tag.get("term")],
             "published_at": entry_datetime(entry, "published"),
             "updated_at": entry_datetime(entry, "updated"),
@@ -3538,6 +3549,22 @@ async def run_auto_crawl_once() -> dict:
     try:
         req = InvestmentRunRequest(groups=AUTO_CRAWL_GROUPS, max_entries_per_source=20, keyword="人工智能")
         result = await asyncio.to_thread(fetch_investment_sources, req)
+
+        # 论文：通过 arxiv API 获取更丰富的元数据（作者/分类/pdf_url），存入 arxiv_candidates.jsonl
+        arxiv_result = None
+        try:
+            arxiv_req = ArxivRunRequest(categories=["cs.AI", "cs.CL", "cs.CV", "cs.LG"], days=1, max_results=50)
+            arxiv_rows = await asyncio.to_thread(_fetch_arxiv_safe, arxiv_req)
+            arxiv_written = append_jsonl(ARXIV_FILE, arxiv_rows)
+            arxiv_result = {
+                "fetched": len(arxiv_rows),
+                "written": arxiv_written,
+                "filtered": len(arxiv_rows) - arxiv_written,
+                "worth_attention": len([row for row in arxiv_rows if row.get("worth_attention")]),
+            }
+        except Exception as exc:
+            arxiv_result = {"error": str(exc)}
+
         status = read_auto_status()
         status["last_result"] = {
             "sources": result.get("sources", 0),
@@ -3550,6 +3577,8 @@ async def run_auto_crawl_once() -> dict:
             "error_samples": result.get("errors", [])[:20],
             "source_results": result.get("source_results", []),
         }
+        if arxiv_result:
+            status["last_result"]["arxiv"] = arxiv_result
         status["run_count"] = int(status.get("run_count", 0)) + 1
         error_count = len(result.get("errors", []))
         status["consecutive_error_runs"] = (
@@ -3976,7 +4005,7 @@ async def arxiv_run(req: ArxivRunRequest):
             raise HTTPException(status_code=502, detail=f"arXiv API 请求失败: HTTP {exc.response.status_code}")
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"arXiv 抓取失败: {exc}")
-    retained_rows = [row for row in rows if row.get("worth_attention")]
+    retained_rows = [row for row in rows if should_retain_source_candidate(row)]
     written = append_jsonl(ARXIV_FILE, retained_rows)
     return {
         "fetched": len(rows),
