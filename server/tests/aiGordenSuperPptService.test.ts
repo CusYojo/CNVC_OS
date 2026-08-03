@@ -346,48 +346,47 @@ test('investment PPT resume checkpoint remaps duplicate source identities in ord
   assert.deepEqual(remapped.sections[0].findings[0].sourceIndexes, [1, 2, 0])
 })
 
-test('investment recommendation artifact metadata must prove the full three-skill chain', () => {
+test('investment recommendation artifact metadata must prove the OpenXML skill chain', () => {
   assert.doesNotThrow(() => assertInvestmentRecommendationSkillChain({
-    generationSkill: 'create-reference-driven-editable-ppt',
-    generationRuntime: 'GordenSuperPPTSkills+pdf-bridge+pdf-to-editable-ppt',
+    replacementSkill: 'editable-ppt-content-replacer',
+    replacementSchemaVersion: '1.3',
     workflowAudit: {
-      strictSequence: [
-        'create-reference-driven-editable-ppt',
-        'GordenSuperPPTSkill',
-        'pdf-to-editable-ppt',
-      ],
+      sourceMode: 'native-pptx',
+      strictSequence: ['editable-ppt-content-replacer'],
+    },
+  }))
+  assert.doesNotThrow(() => assertInvestmentRecommendationSkillChain({
+    replacementSkill: 'editable-ppt-content-replacer',
+    replacementSchemaVersion: '1.3',
+    workflowAudit: {
+      sourceMode: 'pdf-converted',
+      strictSequence: ['pdf-to-editable-ppt', 'editable-ppt-content-replacer'],
     },
   }))
   assert.throws(
     () => assertInvestmentRecommendationSkillChain({
-      generationSkill: 'create-reference-driven-editable-ppt',
+      replacementSkill: 'editable-ppt-content-replacer',
     }),
-    /Gorden、PDF 桥接/,
+    /OpenXML 内容替换/,
   )
 })
 
-test('investment recommendation PPT workflow contains only the three approved skills', async () => {
+test('investment recommendation PPT workflow contains only converter and replacer skills', async () => {
   assert.deepEqual(
     AI_PPT_WORKFLOW_SKILLS.map((item) => item.name),
-    [
-      'create-reference-driven-editable-ppt',
-      'GordenSuperPPTSkill',
-      'pdf-to-editable-ppt',
-    ],
+    ['pdf-to-editable-ppt', 'editable-ppt-content-replacer'],
   )
-  const orchestrator = await loadAiSkill('create-reference-driven-editable-ppt')
+  const orchestrator = await loadAiSkill('build-investment-recommendation-ppt')
   const converter = await loadAiSkill('pdf-to-editable-ppt')
-  const gorden = await loadAiSkill('GordenSuperPPTSkill')
-  assert.equal(orchestrator.name, 'create-reference-driven-editable-ppt')
+  const replacer = await loadAiSkill('editable-ppt-content-replacer')
+  assert.equal(orchestrator.name, 'build-investment-recommendation-ppt')
   assert.equal(converter.name, 'pdf-to-editable-ppt')
-  assert.equal(gorden.name, 'GordenSuperPPTSkill')
-  assert.match(gorden.description, /一键全流程 PPT/)
-  assert.match(gorden.instructions, /GordenImagePPTGen/)
-  assert.match(gorden.instructions, /GordenImage2PPTX/)
+  assert.equal(replacer.name, 'editable-ppt-content-replacer')
+  assert.match(orchestrator.instructions, /editable-ppt-content-replacer/)
+  assert.match(replacer.instructions, /Open XML/)
 
   const paths = gordenSkillPaths()
   for (const file of [
-    paths.ingest,
     paths.generateImage,
     paths.composeImageDeck,
     paths.chromaKey,
@@ -397,31 +396,18 @@ test('investment recommendation PPT workflow contains only the three approved sk
     paths.visualCompareQa,
     paths.composeEditable,
   ]) {
-    assert.equal(existsSync(file), true, `missing Gorden runtime: ${file}`)
-  }
-  const referencePaths = referenceDrivenSkillPaths()
-  for (const file of [
-    referencePaths.resolveDependencies,
-    referencePaths.packageSlidesAsPdf,
-    referencePaths.validatePipelineHandoff,
-    referencePaths.convertPdf,
-  ]) {
-    assert.equal(existsSync(file), true, `missing reference-driven runtime: ${file}`)
+    assert.equal(existsSync(file), true, `missing isolated Gorden runtime: ${file}`)
   }
 })
 
-test('the built-in investment recommendation template is forced through the reference-driven workflow', async () => {
+test('the built-in investment recommendation template uses the OpenXML workflow', async () => {
   const template = AI_TEMPLATE_CATALOG.investment_recommendation_ppt
   assert.equal(mustUseReferenceDrivenPptPipeline(template), true)
   const workflow = await prepareInvestmentRecommendationPptWorkflow(template)
   assert.equal(workflow.sourceMode, 'native-pptx')
   assert.deepEqual(
-    workflow.skills.map((item) => item.name),
-    [
-      'create-reference-driven-editable-ppt',
-      'GordenSuperPPTSkill',
-      'pdf-to-editable-ppt',
-    ],
+    workflow.skills.map((item) => `${item.name}:${item.status}`),
+    ['pdf-to-editable-ppt:not-required', 'editable-ppt-content-replacer:applied'],
   )
 })
 

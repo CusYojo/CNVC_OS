@@ -3,6 +3,7 @@ import { z } from 'zod'
 import type { AuthedRequest } from '../middleware/requireAuth.js'
 import {
   listConversations, getConversation, createConversation, appendMessages, deleteConversation, renameConversation,
+  continueConversationInCurrentRuntime,
 } from '../services/conversationService.js'
 
 export const conversationsRouter = Router()
@@ -30,7 +31,6 @@ conversationsRouter.post('/', async (req: AuthedRequest, res, next) => {
       scope: z.enum(['project', 'global']).optional(),
       projectId: z.string().nullable().optional(),
       projectName: z.string().nullable().optional(),
-      agentId: z.string().optional(),
     }).parse(req.body ?? {})
     res.status(201).json(await createConversation(req.user!.uid, body))
   } catch (err) { next(err) }
@@ -98,6 +98,18 @@ conversationsRouter.post('/:id/messages', async (req: AuthedRequest, res, next) 
     const row = await appendMessages(req.user!.uid, routeId(req.params.id), body.messages, body.title)
     if (!row) return res.status(404).json({ code: 'NOT_FOUND', message: '会话不存在' })
     res.json(row)
+  } catch (err) { next(err) }
+})
+
+// 旧会话只读；在当前 runtime 创建同项目的新会话，不复制旧 Flue transcript。
+conversationsRouter.post('/:id/continue-current-runtime', async (req: AuthedRequest, res, next) => {
+  try {
+    const row = await continueConversationInCurrentRuntime(
+      req.user!.uid,
+      routeId(req.params.id),
+    )
+    if (!row) return res.status(404).json({ code: 'NOT_FOUND', message: '会话不存在' })
+    res.status(201).json(row)
   } catch (err) { next(err) }
 })
 

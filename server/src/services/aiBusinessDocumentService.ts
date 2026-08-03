@@ -40,7 +40,7 @@ import {
 } from './aiComplianceWorkflowService.js'
 import { sanitizeClientVisibleEvidenceWording } from './aiClientVisibleTextService.js'
 import { generateInvestmentProposalDocx } from './aiInvestmentProposalDocumentService.js'
-import { generateInvestmentRecommendationPptWithGorden } from './aiGordenSuperPptService.js'
+import { generateInvestmentRecommendationPptFromTemplate } from './aiEditablePptContentReplacerService.js'
 
 type ProjectLike = {
   name: string
@@ -2115,7 +2115,7 @@ export async function generateBusinessPptx(input: {
 }) {
   await mkdir(path.dirname(input.outputPath), { recursive: true })
   if (mustUseReferenceDrivenPptPipeline(input.template)) {
-    const result = await generateInvestmentRecommendationPptWithGorden(input)
+    const result = await generateInvestmentRecommendationPptFromTemplate(input)
     assertInvestmentRecommendationSkillChain(result)
     return result
   }
@@ -2475,21 +2475,20 @@ export function mustUseReferenceDrivenPptPipeline(
 export function assertInvestmentRecommendationSkillChain(
   metadata: Record<string, unknown>,
 ) {
-  const expectedSequence = [
-    'create-reference-driven-editable-ppt',
-    'GordenSuperPPTSkill',
-    'pdf-to-editable-ppt',
-  ]
   const workflowAudit = metadata.workflowAudit as Record<string, unknown> | undefined
+  const sourceMode = String(workflowAudit?.sourceMode ?? '')
   const strictSequence = Array.isArray(workflowAudit?.strictSequence)
     ? workflowAudit.strictSequence.map(String)
     : []
-  const valid = metadata.generationSkill === expectedSequence[0]
-    && metadata.generationRuntime === 'GordenSuperPPTSkills+pdf-bridge+pdf-to-editable-ppt'
+  const expectedSequence = sourceMode === 'pdf-converted'
+    ? ['pdf-to-editable-ppt', 'editable-ppt-content-replacer']
+    : ['editable-ppt-content-replacer']
+  const valid = metadata.replacementSkill === 'editable-ppt-content-replacer'
+    && metadata.replacementSchemaVersion === '1.3'
     && strictSequence.join('\u0000') === expectedSequence.join('\u0000')
   if (!valid) {
     throw Object.assign(
-      new Error('投资建议书未完整执行 Gorden、PDF 桥接与可编辑化技能链'),
+      new Error('投资建议书未完整执行 PDF 模板转换与 OpenXML 内容替换技能链'),
       { code: 'INVESTMENT_PPT_SKILL_CHAIN_NOT_EXECUTED' },
     )
   }

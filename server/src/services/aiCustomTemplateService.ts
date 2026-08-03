@@ -697,7 +697,7 @@ export async function createAiCustomTemplate(user: TemplateUser, input: {
       ),
     ])
     const skillName = purpose === 'investment_recommendation_ppt'
-      ? 'create-reference-driven-editable-ppt'
+      ? 'build-investment-recommendation-ppt'
       : AI_TEMPLATE_DRIVEN_SKILL_NAME
     const skill = await loadAiSkill(skillName)
     await reportTemplateProgress(options, '正在登记模板并完成审计记录', 99)
@@ -775,7 +775,7 @@ export async function findLatestInvestmentPptTemplate(input: {
     .where(and(
       eq(aiCustomTemplates.userId, input.userId),
       eq(aiCustomTemplates.projectId, input.projectId),
-      eq(aiCustomTemplates.skillName, 'create-reference-driven-editable-ppt'),
+      eq(aiCustomTemplates.skillName, 'build-investment-recommendation-ppt'),
       eq(aiCustomTemplates.format, 'pptx'),
       eq(aiCustomTemplates.status, 'succeeded'),
       or(
@@ -816,7 +816,7 @@ export async function resolveAiCustomTemplateForTask(input: {
   }
   const taskType = input.taskType ?? 'custom_template_document'
   const skillName = taskType === 'investment_recommendation_ppt'
-    ? 'create-reference-driven-editable-ppt'
+    ? 'build-investment-recommendation-ppt'
     : AI_TEMPLATE_DRIVEN_SKILL_NAME
   const [assetStat, skill] = await Promise.all([
     stat(resolvedAsset).catch(() => null),
@@ -886,9 +886,8 @@ export async function resolveAiCustomTemplateForTask(input: {
       ...(isInvestmentPpt
         ? {
             workflowSkillNames: [
-              'create-reference-driven-editable-ppt',
-              'GordenSuperPPTSkill',
               'pdf-to-editable-ppt',
+              'editable-ppt-content-replacer',
             ] as const,
             templateSourceMode: sourceWasPdf ? 'pdf-converted' as const : 'native-pptx' as const,
             ...(conversionHandoffPath ? { conversionHandoffPath } : {}),

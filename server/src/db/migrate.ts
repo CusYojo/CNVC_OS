@@ -166,6 +166,13 @@ const STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS idx_chat_conv_user ON chat_conversations(user_id)`,
   `CREATE INDEX IF NOT EXISTS idx_chat_conv_updated ON chat_conversations(updated_at)`,
   `ALTER TABLE chat_conversations ADD COLUMN IF NOT EXISTS agent_id VARCHAR(64)`,
+  `ALTER TABLE chat_conversations ADD COLUMN IF NOT EXISTS assistant_runtime_version VARCHAR(32)`,
+  `ALTER TABLE chat_conversations ADD COLUMN IF NOT EXISTS legacy_read_only BOOLEAN NOT NULL DEFAULT FALSE`,
+  `UPDATE chat_conversations
+    SET assistant_runtime_version = 'gorden-v1', legacy_read_only = TRUE
+    WHERE assistant_runtime_version IS NULL`,
+  `ALTER TABLE chat_conversations ALTER COLUMN assistant_runtime_version SET DEFAULT 'linux-openxml-v1'`,
+  `ALTER TABLE chat_conversations ALTER COLUMN assistant_runtime_version SET NOT NULL`,
   `CREATE INDEX IF NOT EXISTS idx_chat_conv_agent ON chat_conversations(agent_id)`,
   `ALTER TABLE project_files ADD COLUMN IF NOT EXISTS content_text TEXT`,
   `ALTER TABLE project_files ADD COLUMN IF NOT EXISTS parse_error TEXT`,

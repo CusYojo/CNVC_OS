@@ -1,0 +1,4 @@
+interface:
+  display_name: "生成投资建议书 PPT"
+  short_description: "按上传模板生成可编辑、可追溯的投资建议书 PPT"
+  default_prompt: "使用 $build-investment-recommendation-ppt，仅针对当前会话绑定且我有权访问的项目，以我本次上传的 PDF 或 PPTX 模板为唯一结构与视觉基准：PDF 先通过 $pdf-to-editable-ppt 转为可编辑 PPTX，再由 $editable-ppt-content-replacer 按模板的母版、版式、字体、字号、行距、页面顺序和业务槽位替换为当前项目内容。使用当前项目资料作为主要证据，生成一份中文、核心对象原生可编辑、来源可追溯的投资建议书 PPTX，并结合项目阶段给出推进、暂缓或归档建议。"

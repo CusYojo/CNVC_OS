@@ -1,0 +1,4 @@
+interface:
+  display_name: "生成投资建议书 PPT"
+  short_description: "按上传模板替换当前项目内容并生成可编辑投资建议书"
+  default_prompt: "使用 $editable-ppt-content-replacer，以本次上传的 PDF 或 PPTX 为唯一模板，为当前项目生成可编辑投资建议书；只替换白名单内容槽，资料不足时定向联网核验并绑定来源，保留模板排版且不得残留样本项目内容。"

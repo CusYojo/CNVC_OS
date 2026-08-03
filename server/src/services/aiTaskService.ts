@@ -1816,7 +1816,7 @@ async function executeTask(taskId: string) {
             if (!pptWorkflowReview.passed) {
               throw Object.assign(
                 new Error(
-                  `投资建议书未通过 Gorden 可编辑分层 Reviewer：${pptWorkflowReview.issueCodes.join('、')}`,
+                  `投资建议书未通过 OpenXML 模板保真 Reviewer：${pptWorkflowReview.issueCodes.join('、')}`,
                 ),
                 { code: 'INVESTMENT_RECOMMENDATION_CONTENT_REJECTED' },
               )
@@ -1829,7 +1829,7 @@ async function executeTask(taskId: string) {
               throw error
             }
             console.warn(
-              '[aiTask] 投资建议书 PPT Gorden Reviewer 执行失败，保留可编辑 PPTX:',
+              '[aiTask] 投资建议书 PPT OpenXML Reviewer 执行失败，保留可编辑 PPTX:',
               (error as Error).message,
             )
           }
@@ -2383,7 +2383,8 @@ export async function createInvestmentPptPreparationTask(
           userInstructions: input.userInstructions.trim().slice(0, 2_000),
           researchIntent: input.userInstructions.trim().slice(0, 2_000),
           conversationTriggered: input.userInstructions.includes('本次会话生成要求：'),
-          requestedSkill: 'create-reference-driven-editable-ppt',
+          requestedSkill: 'build-investment-recommendation-ppt',
+          pipelineVersion: 'linux-openxml-v1',
         }
       : {}),
   }
@@ -2604,10 +2605,18 @@ export async function createAiTask(user: AiTaskUser, input: CreateAiTaskInput) {
     assertAiTemplateReferences(template)
     await loadAiSkill(AI_TEMPLATE_CATALOG[input.type as AiBusinessTaskType].skillName)
   }
+  const taskParameters = input.type === 'investment_recommendation_ppt'
+    ? {
+        ...input.parameters,
+        requestedSkill: 'build-investment-recommendation-ppt',
+        pipelineVersion: 'linux-openxml-v1',
+      }
+    : input.parameters
   if (input.type === 'investment_recommendation_ppt') {
     await prepareInvestmentRecommendationPptWorkflow(template)
   }
-  const hash = createRequestHash(input)
+  const normalizedInput = { ...input, parameters: taskParameters }
+  const hash = createRequestHash(normalizedInput)
   const [existing] = await db.select().from(aiTasks)
     .where(and(eq(aiTasks.userId, user.uid), eq(aiTasks.idempotencyKey, input.idempotencyKey)))
     .limit(1)
@@ -2627,7 +2636,7 @@ export async function createAiTask(user: AiTaskUser, input: CreateAiTaskInput) {
       projectId: input.projectId,
       conversationId: input.conversationId,
       type: input.type,
-      parameters: input.parameters,
+      parameters: taskParameters,
       templateVersion: template.templateVersion,
       idempotencyKey: input.idempotencyKey,
       requestHash: hash,
@@ -2776,7 +2785,21 @@ export async function recoverAiTasks() {
     .orderBy(asc(aiTasks.createdAt))
     .limit(100)
   for (const task of recoverable) {
-    if (isTemplatePreparationPending(task.parameters)) {
+    const parameters = task.parameters as Record<string, unknown>
+    if (
+      String(parameters.requestedSkill ?? '') === 'create-reference-driven-editable-ppt'
+      || String(parameters.pipelineVersion ?? '') === 'gorden-v1'
+    ) {
+      await db.update(aiTasks).set({
+        status: 'failed',
+        stage: '旧版 PPT 任务已隔离',
+        errorMessage: '该任务使用旧版 Gorden 流程，不能由新版 OpenXML 执行器继续。请在新版会话重新创建投资建议书任务。',
+        completedAt: new Date(),
+        updatedAt: new Date(),
+      }).where(eq(aiTasks.id, task.id))
+      continue
+    }
+    if (isTemplatePreparationPending(parameters)) {
       await db.update(aiTasks).set({
         status: 'failed',
         stage: '模板分析中断',

@@ -1,4 +1,0 @@
-interface:
-  display_name: "生成可编辑投资建议书 PPT"
-  short_description: "按上传模板先逐页出图，再还原为背景、框架、图标和文字可编辑分层"
-  default_prompt: "使用 $GordenSuperPPTSkill，先建立当前项目事实库并只复用上传模板的结构与视觉风格；逐页调用图片网关生成成品图，再严格执行 GordenImage2PPTX，将每页还原为背景图、框架图、图标和原生可编辑文字，完成样本残留、布局、可读性和可编辑性验收后交付 PPTX。"

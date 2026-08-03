@@ -1,0 +1,403 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Preserve-first editable PPT replacement manifest",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "templatePptx",
+    "templateSha256",
+    "projectName",
+    "defaultAction",
+    "operations"
+  ],
+  "properties": {
+    "schemaVersion": {"enum": ["1.0", "1.1", "1.2", "1.3"]},
+    "sourceMode": {"enum": ["pdf-converted", "native-pptx"]},
+    "conversionHandoff": {"type": "string", "minLength": 1},
+    "templatePptx": {"type": "string"},
+    "templateSha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "projectName": {"type": "string", "minLength": 1},
+    "defaultAction": {"const": "KEEP"},
+    "protectedObjects": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/protectedObject"}
+    },
+    "slotGroups": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/slotGroup"}
+    },
+    "entityBindings": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/entityBinding"}
+    },
+    "slotAssignments": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/slotAssignment"}
+    },
+    "researchPolicy": {"$ref": "#/$defs/researchPolicy"},
+    "sources": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/source"}
+    },
+    "evidenceRegistry": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/evidence"}
+    },
+    "operations": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/operation"}
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {"schemaVersion": {"const": "1.3"}},
+        "required": ["schemaVersion"]
+      },
+      "then": {
+        "required": [
+          "sourceMode",
+          "researchPolicy",
+          "sources",
+          "evidenceRegistry",
+          "protectedObjects",
+          "slotGroups",
+          "entityBindings",
+          "slotAssignments"
+        ]
+      }
+    }
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "researchPolicy": {
+      "type": "object",
+      "required": [
+        "enabled",
+        "asOfDate",
+        "minimumIndependentSources",
+        "unresolvedPolicy"
+      ],
+      "properties": {
+        "enabled": {"const": true},
+        "asOfDate": {"type": "string", "format": "date"},
+        "minimumIndependentSources": {"type": "integer", "minimum": 2},
+        "unresolvedPolicy": {
+          "enum": [
+            "mark-not-disclosed-or-delete-optional",
+            "mark-pending-verification-or-delete-optional"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "source": {
+      "type": "object",
+      "required": [
+        "sourceId",
+        "sourceType",
+        "title",
+        "publisher",
+        "accessedDate"
+      ],
+      "properties": {
+        "sourceId": {"type": "string", "minLength": 1},
+        "sourceType": {
+          "enum": [
+            "user_material",
+            "company_official",
+            "regulatory_filing",
+            "government",
+            "academic",
+            "industry_report",
+            "reputable_media",
+            "other"
+          ]
+        },
+        "title": {"type": "string", "minLength": 1},
+        "publisher": {"type": "string", "minLength": 1},
+        "url": {"type": "string"},
+        "publishedDate": {"type": "string", "format": "date"},
+        "accessedDate": {"type": "string", "format": "date"},
+        "locator": {"type": "string"},
+        "notes": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+    "evidence": {
+      "type": "object",
+      "required": [
+        "evidenceId",
+        "claim",
+        "valueType",
+        "materiality",
+        "status",
+        "semanticKeys",
+        "sourceIds",
+        "confidence",
+        "asOfDate"
+      ],
+      "properties": {
+        "evidenceId": {"type": "string", "minLength": 1},
+        "claim": {"type": "string", "minLength": 1},
+        "valueType": {
+          "enum": [
+            "user-provided",
+            "official-fact",
+            "corroborated-fact",
+            "derived",
+            "estimate",
+            "unavailable"
+          ]
+        },
+        "materiality": {"enum": ["basic", "material"]},
+        "status": {
+          "enum": [
+            "verified",
+            "single-source",
+            "conflicting",
+            "not-found"
+          ]
+        },
+        "semanticKeys": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "sourceIds": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "formula": {"type": "string"},
+        "assumptions": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1}
+        },
+        "confidence": {"enum": ["high", "medium", "low"]},
+        "asOfDate": {"type": "string", "format": "date"},
+        "notes": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+    "protectedObject": {
+      "type": "object",
+      "required": ["slide", "shapeId", "classification", "reason"],
+      "properties": {
+        "slide": {"type": "integer", "minimum": 1},
+        "shapeId": {"type": "integer", "minimum": 1},
+        "classification": {
+          "enum": [
+            "shared_semantic_icon",
+            "fixed_visual",
+            "template_brand",
+            "generic_decoration"
+          ]
+        },
+        "reason": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    },
+    "slotGroup": {
+      "type": "object",
+      "required": [
+        "slotGroupId",
+        "slide",
+        "groupType",
+        "optional",
+        "shapeIds",
+        "contentShapeIds",
+        "decorationShapeIds",
+        "layoutPolicy"
+      ],
+      "properties": {
+        "slotGroupId": {"type": "string", "minLength": 1},
+        "slide": {"type": "integer", "minimum": 1},
+        "groupType": {
+          "enum": [
+            "optional_content",
+            "award_slot",
+            "person_card",
+            "product_card",
+            "case_card",
+            "company_attribute"
+          ]
+        },
+        "optional": {"type": "boolean"},
+        "shapeIds": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "integer", "minimum": 1}
+        },
+        "contentShapeIds": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "integer", "minimum": 1}
+        },
+        "decorationShapeIds": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "integer", "minimum": 1}
+        },
+        "layoutPolicy": {"const": "preserve-grid"}
+      },
+      "additionalProperties": false
+    },
+    "labelBinding": {
+      "type": "object",
+      "required": ["shapeId", "labelType", "expectedText"],
+      "properties": {
+        "shapeId": {"type": "integer", "minimum": 1},
+        "labelType": {
+          "enum": [
+            "name",
+            "title",
+            "product_name",
+            "product_model",
+            "caption",
+            "company_name"
+          ]
+        },
+        "expectedText": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    },
+    "entityBinding": {
+      "type": "object",
+      "required": [
+        "bindingId",
+        "entityId",
+        "entityType",
+        "displayName",
+        "asset",
+        "sourceNote",
+        "slide",
+        "imageShapeId",
+        "labelBindings"
+      ],
+      "properties": {
+        "bindingId": {"type": "string", "minLength": 1},
+        "entityId": {"type": "string", "minLength": 1},
+        "entityType": {
+          "enum": ["person", "product", "customer", "case"]
+        },
+        "displayName": {"type": "string", "minLength": 1},
+        "asset": {"type": "string", "minLength": 1},
+        "sourceNote": {"type": "string", "minLength": 1},
+        "slide": {"type": "integer", "minimum": 1},
+        "slotGroupId": {"type": "string", "minLength": 1},
+        "imageShapeId": {"type": "integer", "minimum": 1},
+        "labelBindings": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/labelBinding"}
+        }
+      },
+      "additionalProperties": false
+    },
+    "slotAssignment": {
+      "type": "object",
+      "required": [
+        "assignmentId",
+        "slide",
+        "semanticKey",
+        "semanticRole",
+        "requirement",
+        "disposition",
+        "shapeIds",
+        "expectedContentShapeIds",
+        "sourceNote"
+      ],
+      "properties": {
+        "assignmentId": {"type": "string", "minLength": 1},
+        "slide": {"type": "integer", "minimum": 1},
+        "slotGroupId": {"type": "string", "minLength": 1},
+        "semanticKey": {"type": "string", "minLength": 1},
+        "semanticRole": {"type": "string", "minLength": 1},
+        "requirement": {
+          "enum": ["required", "optional", "shared", "template"]
+        },
+        "disposition": {"enum": ["replace", "delete", "keep"]},
+        "shapeIds": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "integer", "minimum": 1}
+        },
+        "expectedContentShapeIds": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "integer", "minimum": 1}
+        },
+        "sourceNote": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    },
+    "operation": {
+      "type": "object",
+      "required": ["slide", "role", "action", "reason", "sourceNote"],
+      "properties": {
+        "slide": {"type": "integer", "minimum": 1},
+        "shapeId": {"type": "integer", "minimum": 1},
+        "shapeIds": {
+          "type": "array",
+          "minItems": 2,
+          "items": {"type": "integer", "minimum": 1}
+        },
+        "slotGroupId": {"type": "string", "minLength": 1},
+        "bindingId": {"type": "string", "minLength": 1},
+        "semanticKey": {"type": "string", "minLength": 1},
+        "evidenceIds": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "displayQualifier": {"type": "string"},
+        "role": {"type": "string", "minLength": 1},
+        "action": {
+          "enum": [
+            "replace_text",
+            "replace_text_group",
+            "replace_image",
+            "replace_chart_data",
+            "replace_table_data",
+            "delete_slot_group"
+          ]
+        },
+        "text": {"type": "string"},
+        "allowEmpty": {"type": "boolean"},
+        "allowLineCountChange": {"type": "boolean"},
+        "styleLock": {"const": "exact"},
+        "asset": {"type": "string"},
+        "assetClass": {
+          "enum": [
+            "company_logo",
+            "person_photo",
+            "product_screenshot",
+            "customer_evidence",
+            "company_specific_visual",
+            "user_approved_visual"
+          ]
+        },
+        "companySpecific": {"type": "boolean"},
+        "explicitUserApproval": {"type": "boolean"},
+        "allowIconSlotReplacement": {"type": "boolean"},
+        "missingContent": {"type": "boolean"},
+        "categories": {"type": "array"},
+        "series": {"type": "array"},
+        "values": {"type": "array"},
+        "reason": {"type": "string", "minLength": 1},
+        "sourceNote": {"type": "string", "minLength": 1},
+        "fitPolicy": {"const": "preserve"}
+      },
+      "additionalProperties": false
+    }
+  }
+}

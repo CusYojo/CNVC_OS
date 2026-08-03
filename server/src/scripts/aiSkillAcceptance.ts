@@ -235,8 +235,8 @@ async function main() {
     AI_PPT_WORKFLOW_SKILLS.map((definition) => loadAiSkill(definition.name)),
   )
   assert(
-    'PPT 总编排、Gorden 两阶段生成与 PDF 可编辑化能力均可审计',
-    pptWorkflowSkills.length === 3
+    'PDF 模板转换与 OpenXML 内容替换能力均可审计',
+    pptWorkflowSkills.length === 2
       && pptWorkflowSkills.every((skill) =>
         containsChinese(skill.instructions)
         && /^sha256-[a-f0-9]{12}$/.test(skill.version)
@@ -250,9 +250,9 @@ async function main() {
       && !AI_TEMPLATE_CATALOG.investment_recommendation_ppt.requiredParameters.includes('pageCount')
       && AI_TEMPLATE_CATALOG.investment_recommendation_ppt.sections.length === 12
       && AI_TEMPLATE_CATALOG.investment_recommendation_ppt.workflowSkillNames?.join(',')
-        === 'create-reference-driven-editable-ppt,GordenSuperPPTSkill,pdf-to-editable-ppt'
+        === 'pdf-to-editable-ppt,editable-ppt-content-replacer'
       && AI_TEMPLATE_CATALOG.investment_recommendation_ppt.skillName
-        === 'create-reference-driven-editable-ppt',
+        === 'build-investment-recommendation-ppt',
     `${AI_TEMPLATE_CATALOG.investment_recommendation_ppt.requiredParameters.join('、')} / ${
       AI_TEMPLATE_CATALOG.investment_recommendation_ppt.workflowSkillNames?.join('、')}`,
   )
@@ -845,7 +845,7 @@ async function main() {
   )
 
   const pptContract = await readFile(
-    path.join(root, 'GordenSuperPPTSkills', 'GordenSuperPPTSkill', 'SKILL.md'),
+    path.join(root, 'build-investment-recommendation-ppt', 'SKILL.md'),
     'utf8',
   )
   const pptWorkflowSource = await readFile(
@@ -862,52 +862,46 @@ async function main() {
     path.resolve(process.cwd(), 'server', 'src', 'services', 'aiBusinessDocumentService.ts'),
     'utf8',
   )
-  const pptGeneratorSource = await readFile(
+  const pptReplacerSource = await readFile(
     path.resolve(
       process.cwd(),
       'server',
       'src',
       'services',
-      'aiGordenSuperPptService.ts',
+      'aiEditablePptContentReplacerService.ts',
     ),
     'utf8',
   )
   assert(
-    'PPT Skill 明确图片生成与四层可编辑还原链路',
-    /阶段 1：GordenImagePPTGen/.test(pptContract)
-      && /阶段 2：GordenImage2PPTX/.test(pptContract)
-      && /强制四层/.test(pptContract)
-      && /imagegen-manifest\.json/.test(pptContract)
-      && /imagegen-assets-manifest\.json/.test(pptContract),
-    '网关成品图 / 背景、框架、图标、文本四层 / 生成证据',
+    'PPT Skill 明确 PDF 模板转换与 OpenXML 原位替换链路',
+    /pdf-to-editable-ppt/.test(pptContract)
+      && /editable-ppt-content-replacer/.test(pptContract)
+      && /原生 PPTX 模板/.test(pptContract)
+      && /conversion-handoff\.json/.test(pptContract),
+    'PDF 转换交接 / 原生 PPTX 直达 / OpenXML 内容替换',
   )
   assert(
-    'PDF 转换交接门槛和最终桥接 PDF 可编辑化已接入',
+    'PDF 转换交接门槛和原生 PPTX 跳过转换已接入',
     [
       'watermarkQaPassed',
       'editabilityReviewPassed',
       'readyForContentReplacement',
       'pdf-converted',
       'native-pptx',
-      '桥接 PDF 元素级可编辑化',
+      'not-required',
     ].every((term) => pptWorkflowSource.includes(term)),
-    'PDF 模板必须通过交接证书；原生 PPTX 仍执行最终桥接 PDF 可编辑化',
+    'PDF 模板必须通过交接证书；原生 PPTX 不重复转换',
   )
   assert(
-    '三个技能顺序执行模板摄取、网关出图、四层还原、PDF 桥接与最终验收',
-    pptWorkflowSource.includes("item.name === 'GordenSuperPPTSkill'")
-      && pptDocumentSource.includes('generateInvestmentRecommendationPptWithGorden')
-      && pptGeneratorSource.includes('project-facts.json')
-      && pptGeneratorSource.includes('imagegen-manifest.json')
-      && pptGeneratorSource.includes('imagegen-assets-manifest.json')
-      && pptGeneratorSource.includes('chromaKey')
-      && pptGeneratorSource.includes('sliceGrid')
-      && pptGeneratorSource.includes('layoutGuard')
-      && pptGeneratorSource.includes('visualCompareQa')
-      && pptGeneratorSource.includes('packageSlidesAsPdf')
-      && pptGeneratorSource.includes('validatePipelineHandoff')
-      && pptGeneratorSource.includes('convertPdf'),
-    '模板 DNA / 网关图片证据 / 四层还原 / PDF 桥接 / 元素级可编辑验收',
+    '正式投资建议书执行 OpenXML 白名单替换与保真验收',
+    pptWorkflowSource.includes("item.name === 'editable-ppt-content-replacer'")
+      && pptDocumentSource.includes('generateInvestmentRecommendationPptFromTemplate')
+      && pptReplacerSource.includes('analyze_template_openxml.py')
+      && pptReplacerSource.includes('validate_replacement_manifest.py')
+      && pptReplacerSource.includes('apply_template_plan_openxml.py')
+      && pptReplacerSource.includes('validate_template_result_openxml.py')
+      && pptReplacerSource.includes('validate_final_content.py'),
+    '对象地图 / manifest 1.3 / OpenXML 原位替换 / 模板保真验收',
   )
 
   const quickActionsSource = await readFile(

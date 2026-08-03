@@ -13,10 +13,10 @@ export function safeAiTaskFailureStage(error: unknown) {
   if (code === 'DUE_DILIGENCE_MODEL_UNAVAILABLE') return '大模型正文生成未完成'
   if (code === 'DUE_DILIGENCE_NETWORK_UNAVAILABLE') return '联网资料补全未完成'
   if (code === 'INVESTMENT_RECOMMENDATION_CONTENT_REJECTED') {
-    return 'Gorden 可编辑分层检查未通过'
+    return 'OpenXML 内容替换检查未通过'
   }
   if (code === 'INVESTMENT_PPT_SKILL_CHAIN_NOT_EXECUTED') {
-    return '三技能生成链未完整执行'
+    return '投资建议书技能链未完整执行'
   }
   if (code === 'GORDEN_VISIBLE_TEXT_CONTRACT_REJECTED') return 'Gorden 页面文字检查未通过'
   if (code === 'GORDEN_VISUAL_QA_REJECTED') return 'Gorden 最终视觉复核未通过'
@@ -54,10 +54,10 @@ export function safeAiTaskFailureMessage(error: unknown) {
     return '公开资料补全服务暂不可用，因此未生成文件。请确认联网检索服务恢复后点击“继续生成”。'
   }
   if (code === 'INVESTMENT_RECOMMENDATION_CONTENT_REJECTED') {
-    return '投资建议书未通过 Gorden 页面生成、四层可编辑还原或样本残留检查。系统已保留参数，请点击“继续生成”重新生成并复核。'
+    return '投资建议书未通过 OpenXML 内容替换、模板保真或样本残留检查。系统已保留参数，请点击“继续生成”重新生成并复核。'
   }
   if (code === 'INVESTMENT_PPT_SKILL_CHAIN_NOT_EXECUTED') {
-    return '投资建议书未完整执行 create-reference-driven-editable-ppt、GordenSuperPPTSkill 和 pdf-to-editable-ppt，系统已拒绝交付降级产物。请检查技能运行时后继续生成。'
+    return '投资建议书未完整执行 PDF 模板转换（如需要）和 editable-ppt-content-replacer，系统已拒绝交付降级产物。请检查技能运行时后继续生成。'
   }
   if (code === 'GORDEN_IMAGE_GATEWAY_UNCONFIGURED') {
     return 'GordenSuperPPTSkill 缺少图片生成网关密钥，无法执行逐页出图。请配置 GATEWAY_IMAGE_API_KEY 后继续生成。'

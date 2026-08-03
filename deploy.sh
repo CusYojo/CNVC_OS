@@ -314,18 +314,18 @@ EOF
 sync_agent_skills() {
     step "同步 Agent Skills"
 
-    local skills_root="${FLUE_STATE_DIR}/workspace/.agents/skills"
-    local source_root source_dir target_dir
+    local workspace_root="${FLUE_STATE_DIR}/workspace/.agents"
+    local skills_root="${workspace_root}/skills"
+    local staging_root="${workspace_root}/.skills-staging-$$"
+    local backup_root="${workspace_root}/.skills-previous-$$"
+    local source_root source_dir target_dir skill_name
+    local -A copied_skills=()
 
-    # 清空旧的 skills，避免 git 中已删除的 skill 残留
-    if [ -d "$skills_root" ]; then
-        rm -rf "${skills_root:?}"/*
-    fi
-    install -d -m 0750 "$skills_root"
+    install -d -m 0750 "$workspace_root" "$staging_root"
+    trap 'rm -rf "${staging_root:-}" "${backup_root:-}"' RETURN
 
     for source_root in \
         "${DEPLOY_DIR}/server/workspace/.agents/skills" \
-        "${DEPLOY_DIR}/project-discovery/GordenSuperPPTSkills" \
         "${DEPLOY_DIR}/project-discovery/skills-financial-research-analyst-main"
     do
         if [ ! -d "$source_root" ]; then
@@ -333,7 +333,13 @@ sync_agent_skills() {
             continue
         fi
         while IFS= read -r -d '' source_dir; do
-            target_dir="${skills_root}/$(basename "$source_dir")"
+            skill_name=$(basename "$source_dir")
+            if [ -n "${copied_skills[$skill_name]:-}" ]; then
+                err "Skill 来源重复: ${skill_name} (${copied_skills[$skill_name]} / ${source_dir})"
+                exit 1
+            fi
+            copied_skills[$skill_name]="$source_dir"
+            target_dir="${staging_root}/${skill_name}"
             install -d -m 0750 "$target_dir"
             cp -a "${source_dir}/." "${target_dir}/"
         done < <(
@@ -342,11 +348,19 @@ sync_agent_skills() {
         )
     done
 
-    if [ ! -f "${skills_root}/answer-project-qa/SKILL.md" ]; then
-        err "核心业务 Skill 同步失败: answer-project-qa"
+    "$NODE_BIN" "${DEPLOY_DIR}/server/scripts/validate-agent-skills.mjs" "$staging_root"
+
+    if [ -e "$skills_root" ]; then
+        mv "$skills_root" "$backup_root"
+    fi
+    if ! mv "$staging_root" "$skills_root"; then
+        [ ! -e "$backup_root" ] || mv "$backup_root" "$skills_root"
+        err "Agent Skills 原子发布失败，已恢复上一版"
         exit 1
     fi
-    log "Agent Skills 已同步到 ${skills_root} ✓"
+    rm -rf "$backup_root"
+    trap - RETURN
+    log "Agent Skills 已校验并原子同步到 ${skills_root} ✓"
 }
 
 #---------------------------------------
@@ -849,6 +863,8 @@ start_services() {
         err "Agent Runtime 构建产物不存在，请先执行部署构建"
         exit 1
     fi
+    "$NODE_BIN" "${DEPLOY_DIR}/server/scripts/validate-agent-skills.mjs" \
+        "${FLUE_STATE_DIR}/workspace/.agents/skills"
     if [ ! -x "${RADAR_VENV}/bin/python" ]; then
         err "情报雷达虚拟环境不存在，请先执行部署构建"
         exit 1
@@ -872,11 +888,19 @@ start_services() {
     systemctl restart "$RADAR_SYNC_TIMER"
 
     log "重启 Agent Runtime..."
+    local flue_started_at
+    flue_started_at=$(date --iso-8601=seconds)
     systemctl restart "$FLUE_SERVICE"
     wait_for_http "Agent Runtime" "http://127.0.0.1:${FLUE_PORT}/health" 30 || {
         journalctl -u "$FLUE_SERVICE" -n 50 --no-pager || true
         exit 1
     }
+    if journalctl -u "$FLUE_SERVICE" --since "$flue_started_at" --no-pager \
+        | grep -q "Skipping invalid workspace skill"; then
+        journalctl -u "$FLUE_SERVICE" --since "$flue_started_at" --no-pager || true
+        err "Agent Runtime 跳过了非法 Skill，停止部署"
+        exit 1
+    fi
 }
 
 #---------------------------------------

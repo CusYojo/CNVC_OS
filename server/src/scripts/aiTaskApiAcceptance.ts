@@ -262,7 +262,7 @@ async function main(cleanupState: AcceptanceCleanupState) {
   const requiredBusinessSkills = [
     'generate-compliance-statement',
     'draft-investment-proposal',
-    'create-reference-driven-editable-ppt',
+    'build-investment-recommendation-ppt',
     'write-due-diligence-report',
     'answer-project-qa',
     'generate-document-from-template',
@@ -635,7 +635,7 @@ async function main(cleanupState: AcceptanceCleanupState) {
         structureMode: 'strict-template',
       },
       formats: ['pptx', 'png'],
-      skillName: 'create-reference-driven-editable-ppt',
+      skillName: 'build-investment-recommendation-ppt',
     },
     {
       type: 'due_diligence_report',

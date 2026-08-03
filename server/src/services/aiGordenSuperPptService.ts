@@ -739,8 +739,11 @@ export function buildGordenEditableLayerPrompts(keyColor = '#00ff00') {
   }
 }
 
-export function gordenSkillPaths(skillRoot = getAiSkillRoot()) {
-  const bundle = path.join(skillRoot, 'GordenSuperPPTSkills')
+export function gordenSkillPaths(skillRoot = path.resolve(
+  process.env.AI_GORDEN_SKILL_ROOT
+    ?? path.join(process.cwd(), 'project-discovery', 'GordenSuperPPTSkills'),
+)) {
+  const bundle = skillRoot
   const superRoot = path.join(bundle, 'GordenSuperPPTSkill')
   const imageGenRoot = path.join(bundle, 'GordenImagePPTGen')
   const image2Root = path.join(bundle, 'GordenImage2PPTX')
