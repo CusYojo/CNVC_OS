@@ -40,7 +40,7 @@ import {
 } from './aiComplianceWorkflowService.js'
 import { sanitizeClientVisibleEvidenceWording } from './aiClientVisibleTextService.js'
 import { generateInvestmentProposalDocx } from './aiInvestmentProposalDocumentService.js'
-import { generateInvestmentRecommendationPptFromTemplate } from './aiEditablePptContentReplacerService.js'
+import { generateInvestmentRecommendationPptWithGorden } from './aiGordenSuperPptService.js'
 
 type ProjectLike = {
   name: string
@@ -1047,9 +1047,6 @@ export async function generateBusinessDocx(input: {
       }))
     }
   } else if (input.template.type === 'due_diligence_report') {
-    const dueText = (value: unknown) => String(value ?? '')
-      .replace(/([\u3400-\u9FFF\uF900-\uFAFF])\s+([A-Za-z])/g, '$1$2')
-      .replace(/([A-Za-z])\s+([\u3400-\u9FFF\uF900-\uFAFF])/g, '$1$2')
     const sectionByTitle = new Map(input.content.sections.map((section) => [section.title, section]))
     const dueHeading = (
       value: string,
@@ -1068,7 +1065,7 @@ export async function generateBusinessDocx(input: {
       outlineLevel: numbered ? level - 1 : undefined,
       spacing: numbered ? undefined : { before: 0, after: 0, line: 360 },
       children: [new TextRun({
-        text: dueText(value),
+        text: value,
         font: runFont(level === 1 ? profile.headingFont : '楷体'),
         size: 28,
         bold: true,
@@ -1085,7 +1082,7 @@ export async function generateBusinessDocx(input: {
       alignment: AlignmentType.JUSTIFIED,
       indent: options.firstLine === false ? { firstLine: 0 } : undefined,
       children: [new TextRun({
-        text: dueText(value),
+        text: value,
         font: runFont(profile.bodyFont),
         size: 28,
         bold: options.bold,
@@ -1109,7 +1106,7 @@ export async function generateBusinessDocx(input: {
         alignment: label ? AlignmentType.CENTER : AlignmentType.LEFT,
         spacing: { before: 0, after: 0, line: 280 },
         children: [new TextRun({
-          text: dueText(value),
+          text: value,
           font: runFont(profile.bodyFont),
           size: 21,
           bold: label,
@@ -1132,9 +1129,9 @@ export async function generateBusinessDocx(input: {
       columnWidths: overviewWidths,
       borders: tableBorders,
       rows: [
-        overviewRow('公司主体', dueText(text(input.project.companyName)), '所属行业', dueText(text(input.project.industry))),
-        overviewRow('项目阶段', dueText(text(input.project.stage)), '资料截止日', input.sourceCutoffDate),
-        overviewRow('融资安排', dueText(text(input.project.financing)), '估值口径', dueText(text(input.project.valuation))),
+        overviewRow('公司主体', text(input.project.companyName), '所属行业', text(input.project.industry)),
+        overviewRow('项目阶段', text(input.project.stage), '资料截止日', input.sourceCutoffDate),
+        overviewRow('融资安排', text(input.project.financing), '估值口径', text(input.project.valuation)),
       ],
     })
     const dueTable = (
@@ -1182,7 +1179,7 @@ export async function generateBusinessDocx(input: {
                   : AlignmentType.LEFT,
             spacing: { before: 0, after: 0, line: 280 },
             children: [new TextRun({
-              text: dueText(value),
+              text: value,
               font: runFont(profile.bodyFont),
               size: 21,
               bold: header,
@@ -1199,7 +1196,7 @@ export async function generateBusinessDocx(input: {
           indent: { firstLine: 0 },
           spacing: { before: 160, after: 40, line: 320 },
           children: [new TextRun({
-            text: dueText(table.title),
+            text: table.title,
             font: runFont(profile.bodyFont),
             size: 28,
             bold: true,
@@ -1212,7 +1209,7 @@ export async function generateBusinessDocx(input: {
           keepNext: true,
           spacing: { before: 0, after: 60, line: 260 },
           children: [new TextRun({
-            text: `单位：${dueText(table.unit)}`,
+            text: `单位：${table.unit}`,
             font: runFont(profile.bodyFont),
             size: 21,
             color: '000000',
@@ -1263,7 +1260,7 @@ export async function generateBusinessDocx(input: {
             alignment: AlignmentType.JUSTIFIED,
             children: [
               new TextRun({
-                text: dueText(`${prefix}${finding.text}`),
+                text: `${prefix}${finding.text}`,
                 color: '000000',
                 size: 28,
                 font: runFont(profile.bodyFont),
@@ -1350,11 +1347,7 @@ export async function generateBusinessDocx(input: {
     ? `关于${complianceProjectName(input.project.name)}项目投资合规性的说明`
     : input.template.type === 'investment_proposal'
       ? proposalTitle
-      : input.template.type === 'due_diligence_report'
-        ? `${input.project.name}${input.template.label}`
-          .replace(/([\u3400-\u9FFF\uF900-\uFAFF])\s+([A-Za-z])/g, '$1$2')
-          .replace(/([A-Za-z])\s+([\u3400-\u9FFF\uF900-\uFAFF])/g, '$1$2')
-        : `${input.project.name}${input.template.label}`
+      : `${input.project.name}${input.template.label}`
   let coverChildren: Array<Paragraph | Table>
   if (input.template.type === 'compliance_statement') {
     coverChildren = [
@@ -2115,7 +2108,7 @@ export async function generateBusinessPptx(input: {
 }) {
   await mkdir(path.dirname(input.outputPath), { recursive: true })
   if (mustUseReferenceDrivenPptPipeline(input.template)) {
-    const result = await generateInvestmentRecommendationPptFromTemplate(input)
+    const result = await generateInvestmentRecommendationPptWithGorden(input)
     assertInvestmentRecommendationSkillChain(result)
     return result
   }
@@ -2475,20 +2468,21 @@ export function mustUseReferenceDrivenPptPipeline(
 export function assertInvestmentRecommendationSkillChain(
   metadata: Record<string, unknown>,
 ) {
+  const expectedSequence = [
+    'create-reference-driven-editable-ppt',
+    'GordenSuperPPTSkill',
+    'pdf-to-editable-ppt',
+  ]
   const workflowAudit = metadata.workflowAudit as Record<string, unknown> | undefined
-  const sourceMode = String(workflowAudit?.sourceMode ?? '')
   const strictSequence = Array.isArray(workflowAudit?.strictSequence)
     ? workflowAudit.strictSequence.map(String)
     : []
-  const expectedSequence = sourceMode === 'pdf-converted'
-    ? ['pdf-to-editable-ppt', 'editable-ppt-content-replacer']
-    : ['editable-ppt-content-replacer']
-  const valid = metadata.replacementSkill === 'editable-ppt-content-replacer'
-    && metadata.replacementSchemaVersion === '1.3'
+  const valid = metadata.generationSkill === expectedSequence[0]
+    && metadata.generationRuntime === 'GordenSuperPPTSkills+pdf-bridge+pdf-to-editable-ppt'
     && strictSequence.join('\u0000') === expectedSequence.join('\u0000')
   if (!valid) {
     throw Object.assign(
-      new Error('投资建议书未完整执行 PDF 模板转换与 OpenXML 内容替换技能链'),
+      new Error('投资建议书未完整执行 Gorden、PDF 桥接与可编辑化技能链'),
       { code: 'INVESTMENT_PPT_SKILL_CHAIN_NOT_EXECUTED' },
     )
   }

@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "templates": [
+    {
+      "id": "deta-ic",
+      "title": "德塔智能 IC 技术论证型",
+      "source": "deta-ic/source.pdf",
+      "pages": 38,
+      "aspect_ratio": "16:9",
+      "sha256": "078043cf4eba427d9faa4bb85f0ee716bcdc139615418722fce1e0a4bab249a1",
+      "contact_sheet": "deta-ic/contact-sheet.png",
+      "selected_pages": [1, 2, 4, 7, 11, 15, 19, 21, 23, 26, 30, 31, 34, 35, 36, 37]
+    },
+    {
+      "id": "lancheng-investment",
+      "title": "蓝成应急场景商业化型",
+      "source": "lancheng-investment/source.pdf",
+      "pages": 34,
+      "aspect_ratio": "16:9",
+      "sha256": "b13866b052cfd45464d3feadf49cedb3f99f80e0ee3ffc3b25f57523b6ca2dad",
+      "contact_sheet": "lancheng-investment/contact-sheet.png",
+      "selected_pages": [1, 2, 4, 6, 8, 9, 10, 11, 12, 13, 14, 17, 21, 24, 27, 29, 30, 31, 32, 33]
+    }
+  ]
+}

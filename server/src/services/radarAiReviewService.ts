@@ -6,7 +6,6 @@ import { radarAiReviews } from '../db/schema.js'
 import { isSpecificLeadSubjectName } from './leadSubjectName.js'
 
 const PROMPT_VERSION = 'radar-subject-v3-paper-v2'
-const PAPER_PROMPT_VERSION = 'radar-subject-v4-paper-zh'
 const EVIDENCE_VALIDATION_REASON = '模型给出的主体名称或来源证据无法在原文中核验'
 const DEFAULT_MODEL = process.env.RADAR_AI_REVIEW_MODEL
   || process.env.LLM_MODEL
@@ -43,8 +42,6 @@ export interface RadarAiReviewDecision {
   subjectName: string
   legalName: string
   evidence: string
-  translatedTitle?: string
-  translatedSummary?: string
   confidence: number
   rejectReason: string
   model: string
@@ -58,7 +55,6 @@ export interface RadarAiReviewResult extends RadarAiReviewDecision {
   status: RadarAiReviewStatus
   attempts: number
   cacheHit: boolean
-  promptVersion: string
 }
 
 interface PreparedRadarCandidate {
@@ -69,7 +65,6 @@ interface PreparedRadarCandidate {
   sourceText: string
   promptText: string
   isPaper: boolean
-  promptVersion: string
 }
 
 const modelReviewSchema = z.object({
@@ -79,8 +74,6 @@ const modelReviewSchema = z.object({
   subjectName: z.string().nullish(),
   legalName: z.string().nullish(),
   evidence: z.string().nullish(),
-  translatedTitle: z.string().nullish(),
-  translatedSummary: z.string().nullish(),
   confidence: z.coerce.number(),
   rejectReason: z.string().nullish(),
 })
@@ -97,8 +90,6 @@ const SYSTEM_PROMPT = `你是私募股权/创业投资线索池的严格准入�
 - 当候选明确标注“线索类型：论文”时，不要要求融资、公司主体或已商业化；
 - 论文标题完整、研究对象具体且摘要能说明技术贡献时可接受；
 - subjectType 必须为 paper，subjectName 必须是原文中的完整论文标题，evidence 必须连续引用包含该标题的原文。
-- 英文论文必须同时给出准确、简洁的中文标题 translatedTitle，以及不超过 300 个汉字、忠实概括原摘要的中文摘要 translatedSummary；不得增加原文没有的实验结果、机构、融资或商业化判断；
-- 中文论文的 translatedTitle 可直接使用原标题，translatedSummary 使用中文概括。非论文候选的这两个字段返回空字符串。
 
 准入条件（必须同时满足）：
 1. 原文明确出现具体公司、项目、创业团队、实验室或论文名称；
@@ -121,7 +112,7 @@ const SYSTEM_PROMPT = `你是私募股权/创业投资线索池的严格准入�
 subjectType 只能是 company、project、team、lab、paper。
 confidence 使用 0 到 1。信息不足时必须 review 或 reject，不得猜测。
 只返回 JSON 对象，格式：
-{"reviews":[{"candidateId":"原样返回","decision":"accept|reject|review","subjectType":"company|project|team|lab|paper|null","subjectName":"原文专名或空字符串","legalName":"原文明示的工商全称或空字符串","evidence":"原文连续引文或空字符串","translatedTitle":"论文中文标题或空字符串","translatedSummary":"论文中文摘要或空字符串","confidence":0.0,"rejectReason":"拒绝/待复核原因或空字符串"}]}`
+{"reviews":[{"candidateId":"原样返回","decision":"accept|reject|review","subjectType":"company|project|team|lab|paper|null","subjectName":"原文专名或空字符串","legalName":"原文明示的工商全称或空字符串","evidence":"原文连续引文或空字符串","confidence":0.0,"rejectReason":"拒绝/待复核原因或空字符串"}]}`
 
 function cleanText(value: unknown, maxChars = 12_000) {
   return String(value ?? '').replace(/\u0000/g, '').trim().slice(0, maxChars)
@@ -149,11 +140,6 @@ function normalizeEvidence(value: string) {
 
 function normalizeComparable(value: string) {
   return normalizeEvidence(value).replace(/[\p{P}\p{S}\s]+/gu, '')
-}
-
-function cleanChineseTranslation(value: unknown, maxChars: number) {
-  const text = cleanText(value, maxChars).replace(/\s+/g, ' ')
-  return /[\u3400-\u9fff]/.test(text) ? text : ''
 }
 
 function sourceKeyOf(item: Record<string, unknown>) {
@@ -203,8 +189,7 @@ export function prepareRadarAiCandidate(
     .join('\n')
   const sourceKey = sourceKeyOf(item)
   const contentHash = sha256(sourceText)
-  const promptVersion = isPaper ? PAPER_PROMPT_VERSION : PROMPT_VERSION
-  const cacheKey = sha256(`${promptVersion}\n${model}\n${sourceKey}\n${contentHash}`)
+  const cacheKey = sha256(`${PROMPT_VERSION}\n${model}\n${sourceKey}\n${contentHash}`)
   return {
     candidateId: cacheKey.slice(0, 16),
     cacheKey,
@@ -213,7 +198,6 @@ export function prepareRadarAiCandidate(
     sourceText,
     promptText,
     isPaper,
-    promptVersion,
   }
 }
 
@@ -235,13 +219,6 @@ export function validateRadarAiDecision(
   const subjectName = cleanText(parsed.subjectName, 120).replace(/\s+/g, ' ')
   let legalName = cleanText(parsed.legalName, 120).replace(/\s+/g, ' ')
   const evidence = cleanText(parsed.evidence, 1_200).replace(/\s+/g, ' ')
-  const isPaperDecision = allowPaperTitle && parsed.subjectType === 'paper'
-  const translatedTitle = isPaperDecision
-    ? cleanChineseTranslation(parsed.translatedTitle, 180)
-    : ''
-  const translatedSummary = isPaperDecision
-    ? cleanChineseTranslation(parsed.translatedSummary, 600)
-    : ''
   const sourceEvidence = normalizeEvidence(sourceText)
   const comparableSource = normalizeComparable(sourceText)
   const subjectAppearsInSource = Boolean(
@@ -305,8 +282,6 @@ export function validateRadarAiDecision(
       subjectName,
       legalName,
       evidence,
-      translatedTitle,
-      translatedSummary,
       confidence,
       rejectReason,
       model,
@@ -333,8 +308,6 @@ export function revalidateEvidenceOnlyPaperReview(
     subjectName: decision.subjectName,
     legalName: decision.legalName,
     evidence: decision.evidence,
-    translatedTitle: decision.translatedTitle,
-    translatedSummary: decision.translatedSummary,
     confidence: decision.confidence,
     rejectReason: '',
   }, sourceText, model, decision.reviewedAt, true)
@@ -449,7 +422,6 @@ async function loadCachedReviews(prepared: PreparedRadarCandidate[]) {
       status,
       attempts: row.attempts,
       cacheHit: true,
-      promptVersion: preparedItem?.promptVersion || row.promptVersion,
     }
     cached.set(row.cacheKey, result)
     if (status !== row.status) promoted.push(result)
@@ -458,7 +430,7 @@ async function loadCachedReviews(prepared: PreparedRadarCandidate[]) {
   return cached
 }
 
-async function persistReview(result: RadarAiReviewResult, promptVersion = result.promptVersion) {
+async function persistReview(result: RadarAiReviewResult, promptVersion = PROMPT_VERSION) {
   const storedDecision = { ...result } as Record<string, unknown>
   await db.insert(radarAiReviews).values({
     cacheKey: result.cacheKey,
@@ -499,15 +471,12 @@ function failedReview(
     subjectName: '',
     legalName: '',
     evidence: '',
-    translatedTitle: '',
-    translatedSummary: '',
     confidence: 0,
     rejectReason: `AI 主体审查暂不可用：${cleanText(error.message, 240)}`,
     model,
     reviewedAt: new Date().toISOString(),
     attempts,
     cacheHit: false,
-    promptVersion: item.promptVersion,
   }
 }
 
@@ -533,7 +502,6 @@ async function reviewUncachedBatch(
           status: validated.status,
           attempts: attempt,
           cacheHit: false,
-          promptVersion: item.promptVersion,
         }
       })
       await Promise.all(results.map((result) => persistReview(result)))

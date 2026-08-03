@@ -60,7 +60,7 @@ type ConversationPptTaskResult = {
   matched: boolean
   needsTemplate: boolean
   reused?: boolean
-  skillName: 'build-investment-recommendation-ppt'
+  skillName: 'create-reference-driven-editable-ppt'
   message?: string
   task?: AiTask
 }
@@ -683,8 +683,6 @@ function Chat() {
     scope: 'project' | 'global'
     projectId?: string | null
     projectName?: string | null
-    assistantRuntimeVersion?: string
-    legacyReadOnly?: boolean
   }
   const LS_KEY = 'cybernaut-ai-sessions' // 仅用于一次性迁移旧的浏览器本地会话
   const [sessions, setSessions] = useState<ChatSession[]>([])
@@ -1037,10 +1035,6 @@ function Chat() {
   ): Promise<boolean> => {
     const clean = question.trim()
     if (!clean && uploads.length === 0) return false
-    if (currentSession?.legacyReadOnly) {
-      showToast('该会话使用旧版助手运行时，请点击“在新版继续”后发送消息', 'info')
-      return false
-    }
     if (busy || uploading || submitLockRef.current) return false
     submitLockRef.current = true
     setSubmitting(true)
@@ -1155,37 +1149,6 @@ function Chat() {
     setQaAnswers([])
   }
 
-  const continueLegacySession = async () => {
-    if (!currentSession?.legacyReadOnly) return
-    try {
-      const row = await apiPost<{
-        id: string
-        agentId?: string
-        title: string
-        scope?: string
-        projectId?: string | null
-        projectName?: string | null
-        assistantRuntimeVersion?: string
-        legacyReadOnly?: boolean
-      }>(`/conversations/${currentSession.rowId}/continue-current-runtime`, {})
-      const next: ChatSession = {
-        rowId: row.id,
-        agentId: row.agentId || row.id,
-        title: row.title,
-        scope: row.scope === 'global' || !row.projectId ? 'global' : 'project',
-        projectId: row.projectId ?? null,
-        projectName: row.projectName ?? null,
-        assistantRuntimeVersion: row.assistantRuntimeVersion,
-        legacyReadOnly: row.legacyReadOnly,
-      }
-      setSessions((items) => [next, ...items])
-      activateSession(next)
-      showToast('已创建新版会话，旧会话内容保持只读', 'success')
-    } catch (error) {
-      showToast(`创建新版会话失败：${(error as Error).message}`, 'error')
-    }
-  }
-
   // 新建一个服务端会话并选中
   const createSession = async (
     title = '新会话',
@@ -1216,8 +1179,6 @@ function Chat() {
         scope?: string
         projectId?: string | null
         projectName?: string | null
-        assistantRuntimeVersion?: string
-        legacyReadOnly?: boolean
       }>('/conversations', {
         title,
         scope: context.scope,
@@ -1231,8 +1192,6 @@ function Chat() {
         scope: row.scope === 'global' ? 'global' : context.scope,
         projectId: row.projectId ?? context.projectId ?? null,
         projectName: row.projectName ?? context.projectName ?? null,
-        assistantRuntimeVersion: row.assistantRuntimeVersion,
-        legacyReadOnly: row.legacyReadOnly,
       }
       setSessions((prev) => [s, ...prev])
       activateSession(s)
@@ -1257,8 +1216,6 @@ function Chat() {
             scope?: string
             projectId?: string | null
             projectName?: string | null
-            assistantRuntimeVersion?: string
-            legacyReadOnly?: boolean
           }[]
         }>('/conversations')
         let mapped: ChatSession[] = (list ?? []).map((r) => ({
@@ -1268,12 +1225,31 @@ function Chat() {
           scope: r.scope === 'global' || !r.projectId ? 'global' : 'project',
           projectId: r.projectId ?? null,
           projectName: r.projectName ?? null,
-          assistantRuntimeVersion: r.assistantRuntimeVersion,
-          legacyReadOnly: r.legacyReadOnly,
         }))
-        // 旧 localStorage 中只有 Flue stream ID，无法证明账号归属，也可能携带旧
-        // Skill tool outcomes。新 runtime 不再迁移这些 ID；历史内容仍保留在旧存储中。
-        localStorage.removeItem(LS_KEY)
+        try {
+          const legacy: { id: string; title?: string }[] = JSON.parse(localStorage.getItem(LS_KEY) || '[]')
+          const have = new Set(mapped.map((m) => m.agentId))
+          for (const s of legacy) {
+            if (!s?.id || have.has(s.id)) continue
+            const row = await apiPost<{
+              id: string
+              agentId?: string
+              title: string
+              scope?: string
+              projectId?: string | null
+              projectName?: string | null
+            }>('/conversations', { title: s.title || '新会话', agentId: s.id })
+            mapped = [{
+              rowId: row.id,
+              agentId: row.agentId || s.id,
+              title: row.title,
+              scope: row.scope === 'global' || !row.projectId ? 'global' : 'project',
+              projectId: row.projectId ?? null,
+              projectName: row.projectName ?? null,
+            }, ...mapped]
+          }
+          localStorage.removeItem(LS_KEY)
+        } catch { /* ignore legacy migration errors */ }
         setSessions(mapped)
         if (mapped.length) {
           // 恢复上次选中的会话(若仍存在),否则用最近的一条
@@ -1599,12 +1575,6 @@ function Chat() {
             </div>
           )}
         </div>
-        {currentSession?.legacyReadOnly && (
-          <div className="mx-6 mt-3 flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-800">
-            <span>该会话使用旧版助手运行时，历史内容和任务产物仅供查看。</span>
-            <Button size="sm" onClick={() => { void continueLegacySession() }}>在新版继续</Button>
-          </div>
-        )}
 
         <AiErrorBoundary level="section" title="消息区域显示异常" resetKey={convId}>
           <div ref={scrollRef} className="flex-1 space-y-6 overflow-y-auto px-6 py-6">

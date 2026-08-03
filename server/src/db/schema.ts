@@ -208,10 +208,6 @@ export const chatConversations = pgTable('chat_conversations', {
   projectName: varchar('project_name', { length: 128 }),
   // flue agent 实例 id（会话内容真身存在 flue canonical stream；本表仅做账号级会话索引）
   agentId: varchar('agent_id', { length: 64 }),
-  assistantRuntimeVersion: varchar('assistant_runtime_version', { length: 32 })
-    .notNull()
-    .default('linux-openxml-v1'),
-  legacyReadOnly: boolean('legacy_read_only').notNull().default(false),
   messages: jsonb('messages').$type<unknown[]>().notNull().default(sql`'[]'::jsonb`),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),

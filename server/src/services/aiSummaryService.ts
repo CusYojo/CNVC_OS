@@ -436,9 +436,6 @@ function enrichLead(row: typeof leads.$inferSelect) {
   const profile = (rp.profile && typeof rp.profile === 'object' ? rp.profile : {}) as Record<string, unknown>
   const isRadarLead = /^项目发现雷达(?:\s|·|$)/.test(src)
   const isPaper = String(rp.channel ?? '') === '论文'
-  const paperMeta = (rp.paperMeta && typeof rp.paperMeta === 'object' ? rp.paperMeta : {}) as Record<string, unknown>
-  const paperTitleZh = isPaper ? meaningfulPresentationText(paperMeta.titleZh) : undefined
-  const paperAbstractZh = isPaper ? meaningfulPresentationText(paperMeta.abstractZh) : undefined
   const sourceTitle = String(rp.sourceTitle || ((arr(row.sources)[0] as Record<string, unknown> | undefined)?.title ?? '')).trim()
   const acceptedAiSubject = isRadarLead ? readAcceptedAiSubjectReview(rp) : null
   const derivedSubjectName = deriveRadarSubjectName({
@@ -519,8 +516,7 @@ function enrichLead(row: typeof leads.$inferSelect) {
     : null
   return {
     ...row,
-    name: paperTitleZh || subjectName,
-    summary: paperAbstractZh || row.summary,
+    name: subjectName,
     companyName: subjectCompanyName,
     score: deriveOverallScore(sc, row.score),
     radarProfile: displayRadarProfile,
@@ -646,11 +642,7 @@ export async function listLeads(options: { page?: number; pageSize?: number; cha
         'sourceGroup', ${leads.radarProfile}->'sourceGroup',
         'sourceTitle', COALESCE(${leads.radarProfile}->'sourceTitle', ${leads.sources}->0->'title'),
         'publishedAt', ${leads.radarProfile}->'publishedAt',
-        'aiSubjectReview', ${leads.radarProfile}->'aiSubjectReview',
-        'paperMeta', CASE
-          WHEN ${leads.radarProfile}->'paperMeta' IS NULL THEN NULL
-          ELSE jsonb_build_object('titleZh', ${leads.radarProfile}->'paperMeta'->'titleZh')
-        END
+        'aiSubjectReview', ${leads.radarProfile}->'aiSubjectReview'
       ) END`,
       // 列表估值兜底：仅保留第一条历史融资的轮次/估值，避免返回完整 funding_rounds。
       fundingRounds: sql<unknown[]>`CASE

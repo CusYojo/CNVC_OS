@@ -496,8 +496,7 @@ async function main() {
           && prompt.includes('不得输出事实卡或分析步骤')
           && prompt.includes('值得注意的是')
           && prompt.includes('不得出现“阶段与推进建议：”“主建议：”')
-          && prompt.includes('不使用“该信息、该信号、该口径、该能力、该模式、该表述”')
-          && prompt.includes('中文与相邻英文单词或英文缩写之间不留空格'))
+          && prompt.includes('不使用“该信息、该信号、该口径、该能力、该模式、该表述”'))
       && chapterUserPrompts.every((prompt) =>
         prompt.includes('内部事实卡（只作写作依据')
           && prompt.includes('不得复制卡片标题、来源名、片段号或处理说明到正文')),
@@ -738,36 +737,40 @@ async function main() {
       assert(checks, 'AI-009 不泄露示例项目与内部模板编号', forbiddenSampleTerms.every((term) => !xml.includes(term)), forbiddenSampleTerms.join('、'))
       assert(
         checks,
-        'AI-009 已使用 OpenXML 内容替换技能生成投资建议书',
+        'AI-009 已使用三个指定技能生成并还原上传模板',
         result.templateApplied
-          && 'replacementSkill' in result
-          && result.replacementSkill === 'editable-ppt-content-replacer'
+          && 'generationSkill' in result
+          && result.generationSkill === 'create-reference-driven-editable-ppt'
+          && 'generationRuntime' in result
+          && result.generationRuntime === 'GordenSuperPPTSkills+pdf-bridge+pdf-to-editable-ppt'
           && Boolean(result.templateSha256),
-        `OpenXML 原位替换完成，模板摘要 ${result.templateSha256.slice(0, 12)}`,
+        `三个技能顺序生成，模板摘要 ${result.templateSha256.slice(0, 12)}`,
       )
       assert(
         checks,
-        'AI-009 原生 PPTX 工作流只执行内容替换 Skill',
+        'AI-009 工作流只包含三个指定 PPT Skill',
         workflow.sourceMode === 'native-pptx'
-          && workflow.skills.length === 2
-          && workflow.skills[0]?.name === 'pdf-to-editable-ppt'
-          && workflow.skills[0]?.status === 'not-required'
-          && workflow.skills[1]?.name === 'editable-ppt-content-replacer'
-          && workflow.skills[1]?.status === 'applied',
+          && workflow.skills.length === 3
+          && workflow.skills[0]?.name === 'create-reference-driven-editable-ppt'
+          && workflow.skills[0]?.status === 'applied'
+          && workflow.skills[1]?.name === 'GordenSuperPPTSkill'
+          && workflow.skills[1]?.status === 'applied'
+          && workflow.skills[2]?.name === 'pdf-to-editable-ppt'
+          && workflow.skills[2]?.status === 'applied',
         workflow.skills.map((item) => `${item.name}:${item.status}`).join('、'),
       )
       assert(
         checks,
-        'AI-009 OpenXML 替换操作绑定项目事实与证据编号',
-        generationAudit.schemaVersion === '1.3'
-          && generationAudit.operationCount > 0
-          && generationAudit.evidenceBoundOperationCount > 0,
-        `${generationAudit.operationCount} 个替换操作，${
-          generationAudit.evidenceBoundOperationCount} 个绑定证据`,
+        'AI-009 Gorden 页面内容绑定项目事实与证据编号',
+        generationAudit.schemaVersion === '1.0'
+          && generationAudit.contentBindingCount > 0
+          && generationAudit.evidenceBoundContentCount > 0,
+        `${generationAudit.contentBindingCount} 个内容绑定，${
+          generationAudit.evidenceBoundContentCount} 个绑定证据`,
       )
       assert(
         checks,
-        'AI-009 OpenXML 模板保真 Reviewer 通过',
+        'AI-009 Gorden 可编辑分层 Reviewer 通过',
         workflowReview.passed,
         workflowReview.issueCodes.join('、') || '通过',
       )
@@ -921,8 +924,8 @@ async function main() {
       )
       const sanitizedProcessWording = finalizeDueDiligenceContent({
         ...content,
-        executiveSummary: '阶段与推进建议：继续跟踪。主建议：继续跟踪。根据项目资料库显示，值得注意的是，杭州示例科技已经形成 AI 软件产品。',
-        highlights: ['结合现有资料分析，值得注意的是，公司 FDE 团队采用 Active Trial Solver 方案并具备客户验证信号。'],
+        executiveSummary: '阶段与推进建议：继续跟踪。主建议：继续跟踪。根据项目资料库显示，值得注意的是，杭州示例科技已经形成软件产品。',
+        highlights: ['结合现有资料分析，值得注意的是，公司具备客户验证信号。'],
         risks: ['项目材料显示，知识产权权属尚需取得原始文件确认。'],
         sections: content.sections.map((section, index) => index === 1
           ? {
@@ -972,15 +975,6 @@ async function main() {
         !sanitizedVisibleText.includes('阶段与推进建议')
           && !sanitizedVisibleText.includes('主建议')
           && (sanitizedVisibleText.match(/建议继续跟踪/g) || []).length === 1,
-        sanitizedVisibleText,
-      )
-      assert(
-        checks,
-        'AI-010 导出前清除中文与英文之间的空格',
-        sanitizedVisibleText.includes('形成AI软件产品')
-          && sanitizedVisibleText.includes('公司FDE团队')
-          && sanitizedVisibleText.includes('Active Trial Solver方案')
-          && !/[\u3400-\u9FFF\uF900-\uFAFF]\s+[A-Za-z]|[A-Za-z]\s+[\u3400-\u9FFF\uF900-\uFAFF]/.test(sanitizedVisibleText),
         sanitizedVisibleText,
       )
       const misplacedContentIssues = dueDiligenceContentQualityIssues({
@@ -1082,14 +1076,6 @@ async function main() {
           '前置条件为',
         ].every((phrase) => !documentXml.includes(phrase)),
         '正文只写项目事实、投资含义、限制和动作',
-      )
-      assert(
-        checks,
-        'AI-010 正文不保留中文与英文之间的空格',
-        !/[\u3400-\u9FFF\uF900-\uFAFF]\s+[A-Za-z]|[A-Za-z]\s+[\u3400-\u9FFF\uF900-\uFAFF]/.test(
-          documentXml.replace(/<[^>]+>/g, ''),
-        ),
-        '中文与英文单词或缩写直接相邻；英文短语内部空格保留',
       )
       assert(
         checks,

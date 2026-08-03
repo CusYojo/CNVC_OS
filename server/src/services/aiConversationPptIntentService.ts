@@ -130,7 +130,7 @@ export async function createInvestmentPptTaskFromConversation(
   user: AiTaskUser,
   input: ConversationPptIntentInput,
 ) {
-  const skillName = 'build-investment-recommendation-ppt' as const
+  const skillName = 'create-reference-driven-editable-ppt' as const
   if (
     !input.force
     && !detectConversationPptGenerationIntent(input.message, input.recentMessages)
@@ -182,7 +182,6 @@ export async function createInvestmentPptTaskFromConversation(
       conversationTriggered: true,
       quickActionSelected: input.force === true,
       requestedSkill: skillName,
-      pipelineVersion: 'linux-openxml-v1',
     },
   })
   return {

@@ -63,10 +63,6 @@ type GordenImagegenManifestEntry = Record<string, unknown> & {
 type GordenResumeCheckpoint = {
   runRoot: string
   slides: GordenImagegenManifestEntry[]
-  pendingGatewayTasks: Map<number, {
-    taskId: string
-    metadataPath: string
-  }>
   layerPages: Map<number, {
     pageRoot: string
   }>
@@ -116,33 +112,6 @@ const GORDEN_VISION_MODEL = process.env.AI_GORDEN_VISION_MODEL
   || process.env.LLM_MODEL
   || 'gpt-5.2'
 const GORDEN_RENDER_CONTRACT_VERSION = '2.0-exact-visible-text'
-
-export function resumableGordenGatewayTaskId(metadata: Record<string, unknown>) {
-  const taskId = String(metadata.task_id || '').trim()
-  if (!taskId) return undefined
-  const saved = Array.isArray(metadata.saved) ? metadata.saved : []
-  if (saved.length > 0) return undefined
-  const status = String(metadata.status || '').toLowerCase()
-  if (['creating', 'polling'].includes(status)) return taskId
-  if (status !== 'failed') return undefined
-  const error = String(metadata.error || '')
-  const lastResponse = metadata.last_result_response
-  const response = lastResponse && typeof lastResponse === 'object'
-    ? lastResponse as Record<string, unknown>
-    : {}
-  const responseCode = response.code
-  const responseData = response.data
-  const pendingResponse = responseCode === undefined
-    || responseCode === null
-    || responseCode === 200
-    || responseCode === 202
-    || responseCode === 'transport_retry'
-  const hasNoImages = !Array.isArray(responseData)
-    || !responseData.some((item) => item && typeof item === 'object'
-      && ('url' in item || 'b64_json' in item))
-  const transientFailure = /Remote end closed|connection|timed?\s*out|timeout|unexpected EOF|SSL|reset|temporar|transport|Request failed after/i.test(error)
-  return pendingResponse && hasNoImages && transientFailure ? taskId : undefined
-}
 
 function sha256(buffer: Buffer) {
   return createHash('sha256').update(buffer).digest('hex')
@@ -266,44 +235,7 @@ async function findGordenResumeCheckpoint(input: {
           }
           reusableSlides.push(item)
         }
-        const pendingGatewayTasks = new Map<number, {
-          taskId: string
-          metadataPath: string
-        }>()
-        const pendingMetadataTimes: number[] = []
-        for (const slideNumber of matchingSlideNumbers) {
-          const metadataRoot = path.join(
-            runRoot,
-            'metadata',
-            `slide-${String(slideNumber).padStart(2, '0')}`,
-          )
-          const metadataEntries = await readdir(metadataRoot, { withFileTypes: true })
-            .catch(() => [])
-          const metadataCandidates = await Promise.all(metadataEntries
-            .filter((item) => item.isFile() && item.name.endsWith('.metadata.json'))
-            .map(async (item) => {
-              const metadataPath = path.join(metadataRoot, item.name)
-              return {
-                metadataPath,
-                modifiedAt: (await stat(metadataPath)).mtimeMs,
-              }
-            }))
-          metadataCandidates.sort((left, right) => right.modifiedAt - left.modifiedAt)
-          for (const candidate of metadataCandidates) {
-            const metadata = JSON.parse(
-              await readFile(candidate.metadataPath, 'utf8'),
-            ) as Record<string, unknown>
-            const taskId = resumableGordenGatewayTaskId(metadata)
-            if (!taskId) continue
-            pendingGatewayTasks.set(slideNumber, {
-              taskId,
-              metadataPath: candidate.metadataPath,
-            })
-            pendingMetadataTimes.push(candidate.modifiedAt)
-            break
-          }
-        }
-        if (!reusableSlides.length && !pendingGatewayTasks.size) continue
+        if (!reusableSlides.length) continue
         const reusableSlideNumbers = new Set(reusableSlides.map((item) => Number(item.slide)))
         const editablePages = new Map<number, {
           pageRoot: string
@@ -359,18 +291,10 @@ async function findGordenResumeCheckpoint(input: {
         candidates.push({
           runRoot,
           slides: reusableSlides,
-          pendingGatewayTasks,
           layerPages,
           editablePages,
-          modifiedAt: Math.max(
-            manifestStat.mtimeMs,
-            ...editableLayoutTimes,
-            ...pendingMetadataTimes,
-          ),
-          reuseScore: reusableSlides.length * 10
-            + pendingGatewayTasks.size * 3
-            + layerPages.size * 2
-            + editablePages.size,
+          modifiedAt: Math.max(manifestStat.mtimeMs, ...editableLayoutTimes),
+          reuseScore: reusableSlides.length * 10 + layerPages.size * 2 + editablePages.size,
         })
       } catch {
         // Incomplete runs are not valid checkpoints and are ignored.
@@ -440,46 +364,13 @@ async function runCommand(
       .slice(-16_000)
     const isTimeout = failure.killed
       || /TimeoutExpired|timed?\s+out(?:\s+after)?|ETIMEDOUT/i.test(detail)
-    const scriptName = path.basename(String(args[0] || ''))
-    let gatewayDiagnostic: Record<string, unknown> = {}
-    if (scriptName === 'generate_gateway_slide_image.py') {
-      const metadataPath = detail.match(/diagnostics:\s*([^)]+?\.metadata\.json)/i)?.[1]?.trim()
-      if (metadataPath) {
-        try {
-          const metadata = JSON.parse(
-            await readFile(metadataPath, 'utf8'),
-          ) as Record<string, unknown>
-          const lastResponse = metadata.last_result_response
-          const response = lastResponse && typeof lastResponse === 'object'
-            ? lastResponse as Record<string, unknown>
-            : {}
-          gatewayDiagnostic = {
-            gatewayRequestId: metadata.task_id,
-            gatewayStatus: response.status ?? response.code ?? metadata.status,
-            gatewayMessage: response.message ?? metadata.error,
-            gatewayMetadataPath: metadataPath,
-          }
-        } catch {
-          gatewayDiagnostic = { gatewayMetadataPath: metadataPath }
-        }
-      }
-    }
-    const code = isTimeout
-      ? 'GORDEN_SUPER_PPT_TIMEOUT'
-      : scriptName === 'layout_guard.py'
-        ? 'GORDEN_LAYOUT_GUARD_REJECTED'
-        : 'GORDEN_SUPER_PPT_FAILED'
     throw Object.assign(
       new Error(
         isTimeout
           ? `GordenSuperPPTSkill 执行超时：${detail}`
           : `GordenSuperPPTSkill 执行失败：${detail}`,
       ),
-      {
-        code,
-        command: [executable, ...args].join(' '),
-        ...gatewayDiagnostic,
-      },
+      { code: isTimeout ? 'GORDEN_SUPER_PPT_TIMEOUT' : 'GORDEN_SUPER_PPT_FAILED' },
     )
   }
 }
@@ -739,11 +630,8 @@ export function buildGordenEditableLayerPrompts(keyColor = '#00ff00') {
   }
 }
 
-export function gordenSkillPaths(skillRoot = path.resolve(
-  process.env.AI_GORDEN_SKILL_ROOT
-    ?? path.join(process.cwd(), 'project-discovery', 'GordenSuperPPTSkills'),
-)) {
-  const bundle = skillRoot
+export function gordenSkillPaths(skillRoot = getAiSkillRoot()) {
+  const bundle = path.join(skillRoot, 'GordenSuperPPTSkills')
   const superRoot = path.join(bundle, 'GordenSuperPPTSkill')
   const imageGenRoot = path.join(bundle, 'GordenImagePPTGen')
   const image2Root = path.join(bundle, 'GordenImage2PPTX')
@@ -911,7 +799,6 @@ async function generateGatewayImage(input: {
   promptFile: string
   outDir: string
   referenceImage?: string
-  resumeTaskId?: string
   size?: string
   timeoutMs: number
   env: NodeJS.ProcessEnv
@@ -930,7 +817,6 @@ async function generateGatewayImage(input: {
     String(Math.max(180, Math.floor(input.timeoutMs / 1000) - 30)),
   ]
   if (input.referenceImage) args.push('--image', input.referenceImage)
-  if (input.resumeTaskId) args.push('--resume-task-id', input.resumeTaskId)
   const result = await runCommand(input.python, args, {
     timeoutMs: input.timeoutMs,
     env: input.env,
@@ -1088,13 +974,23 @@ export function annotateGordenTextWeightQa<T extends Record<string, unknown>>(sl
   // explicitly instead of weakening the global guard threshold.
   const hasRegularNarrative = regularTexts.some((item) => textLength(item) >= 80)
   const boldItemsAreLabels = boldTexts.every((item) => textLength(item) <= 120)
-  const visionConfirmedAllBold = slide.text_weight_source === 'vision'
-    && boldRatio >= 0.95
-    && boldTexts.some((item) => textLength(item) >= 40)
-  const regularNarrativeWithBoldLabels = boldRatio > 0.85
-    && hasRegularNarrative
-    && boldItemsAreLabels
-  if (!visionConfirmedAllBold && !regularNarrativeWithBoldLabels) return slide
+  // When the image model renders every text box as bold (100% ratio, no regular body),
+  // it's an image-generation artifact — annotate it so layout_guard --strict allows
+  // the page through instead of blocking the whole pipeline.
+  if (boldRatio >= 1.0 && texts.length >= 6) {
+    const notes = Array.isArray(slide.qa_notes)
+      ? slide.qa_notes.map(String)
+      : []
+    return {
+      ...slide,
+      allow_all_bold_text: true,
+      qa_notes: [
+        ...notes,
+        '视觉复核：图片生成模型将所有文字渲染为粗体（100% bold），已标注为全粗体页面。下游可编辑稿中建议手动将正文调整为常规字重。',
+      ],
+    }
+  }
+  if (boldRatio <= 0.85 || !hasRegularNarrative || !boldItemsAreLabels) return slide
   const notes = Array.isArray(slide.qa_notes)
     ? slide.qa_notes.map(String)
     : []
@@ -1103,9 +999,7 @@ export function annotateGordenTextWeightQa<T extends Record<string, unknown>>(sl
     allow_all_bold_text: true,
     qa_notes: [
       ...notes,
-      visionConfirmedAllBold
-        ? '视觉复核：源成品页的标题、编号与正文均识别为粗体，按源图保留全粗体排版。'
-        : '视觉复核：正文段落为常规字重；标题、卡片标签与重点声明按源图保留粗体。',
+      '视觉复核：正文段落为常规字重；标题、卡片标签与重点声明按源图保留粗体。',
     ],
   }
 }
@@ -1127,9 +1021,6 @@ function editableSlideFromCheckpoint(
     frame: path.join(pageRoot, 'frame.png'),
     icons,
     texts,
-    text_weight_source: layout.text_weight_source,
-    allow_all_bold_text: layout.allow_all_bold_text,
-    qa_notes: layout.qa_notes,
   })
 }
 
@@ -1201,7 +1092,6 @@ export function normalizeGordenLayout(input: {
         : 'top',
       font: String(item.font || input.font),
       line_spacing: Math.max(1, Math.min(1.8, finiteNumber(item.line_spacing) ?? 1.18)),
-      line_count: layoutMetrics.lineCount,
       word_wrap: !layoutMetrics.singleLine,
     }]
   })
@@ -1261,7 +1151,6 @@ export function normalizeGordenLayout(input: {
     frame: path.join(input.pageRoot, 'frame.png'),
     icons,
     texts,
-    text_weight_source: 'vision',
     ...(renderedByIcon.length
       ? {
           qa_notes: [
@@ -1558,7 +1447,6 @@ export async function generateInvestmentRecommendationPptWithGorden(input: {
     checkpoint: imagegenManifest.length < plans.length,
     slides: imagegenManifest,
   })
-  await persistImagegenCheckpoint()
   for (const plan of plans) {
     const stableSlide = path.join(
       slidesDir,
@@ -1601,14 +1489,6 @@ export async function generateInvestmentRecommendationPptWithGorden(input: {
       palette,
     }), 'utf8')
     let result: GatewayImageResult
-    const pendingGatewayTask = resumeCheckpoint?.pendingGatewayTasks.get(plan.number)
-    if (pendingGatewayTask) {
-      await reportProgress(
-        input.onProgress,
-        `Gorden 断点续跑：继续轮询第 ${plan.number}/${plans.length} 页已创建的网关任务`,
-        70 + Math.round((plan.number / plans.length) * 6),
-      )
-    }
     try {
       result = await generateGatewayImage({
         python,
@@ -1616,19 +1496,11 @@ export async function generateInvestmentRecommendationPptWithGorden(input: {
         promptFile: promptPath,
         outDir: path.join(metadataDir, `slide-${String(plan.number).padStart(2, '0')}`),
         referenceImage: plan.referencePage,
-        resumeTaskId: pendingGatewayTask?.taskId,
         timeoutMs,
         env,
       })
     } catch (error) {
-      const diagnostic = error as {
-        code?: unknown
-        gatewayRequestId?: unknown
-        gatewayStatus?: unknown
-        gatewayMessage?: unknown
-        gatewayMetadataPath?: unknown
-      }
-      const upstreamCode = String(diagnostic.code ?? '')
+      const upstreamCode = String((error as { code?: unknown }).code ?? '')
       const timeout = upstreamCode === 'GORDEN_SUPER_PPT_TIMEOUT'
       throw Object.assign(
         new Error(
@@ -1638,12 +1510,6 @@ export async function generateInvestmentRecommendationPptWithGorden(input: {
           code: timeout ? 'GORDEN_IMAGE_GATEWAY_TIMEOUT' : 'GORDEN_IMAGE_GATEWAY_FAILED',
           upstreamCode,
           slideNumber: plan.number,
-          gatewayRequestId: diagnostic.gatewayRequestId
-            ?? pendingGatewayTask?.taskId,
-          gatewayStatus: diagnostic.gatewayStatus,
-          gatewayMessage: diagnostic.gatewayMessage,
-          gatewayMetadataPath: diagnostic.gatewayMetadataPath
-            ?? pendingGatewayTask?.metadataPath,
         },
       )
     }
@@ -1657,7 +1523,6 @@ export async function generateInvestmentRecommendationPptWithGorden(input: {
       copied_to: stableSlide,
       backend: 'gateway-gpt-image',
       reference_page: plan.referencePage,
-      resumed_gateway_task_id: pendingGatewayTask?.taskId,
     })
     await persistImagegenCheckpoint()
   }

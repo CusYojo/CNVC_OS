@@ -19,7 +19,7 @@ export const AI_BUSINESS_SKILLS = [
     taskType: 'investment_proposal',
   },
   {
-    name: 'build-investment-recommendation-ppt',
+    name: 'create-reference-driven-editable-ppt',
     label: '投资建议书（PPT）',
     mode: 'document-task',
     taskType: 'investment_recommendation_ppt',
@@ -48,14 +48,19 @@ export type AiBusinessSkillName = typeof AI_BUSINESS_SKILLS[number]['name']
 
 export const AI_PPT_WORKFLOW_SKILLS = [
   {
-    name: 'pdf-to-editable-ppt',
-    label: 'PDF 模板转元素级可编辑 PPT',
-    role: 'pdf-template-conversion-and-handoff',
+    name: 'create-reference-driven-editable-ppt',
+    label: '参考模板可编辑 PPT 总编排',
+    role: 'ppt-orchestration-and-handoff',
   },
   {
-    name: 'editable-ppt-content-replacer',
-    label: '可编辑 PPT 模板内容原位替换',
-    role: 'openxml-content-replacement-and-qa',
+    name: 'GordenSuperPPTSkill',
+    label: 'Gorden 图片生成与可编辑 PPTX 还原',
+    role: 'ppt-generation-and-editable-reconstruction',
+  },
+  {
+    name: 'pdf-to-editable-ppt',
+    label: 'PDF 桥接稿转元素级可编辑 PPT',
+    role: 'final-editable-conversion-and-qa',
   },
 ] as const
 
@@ -94,8 +99,15 @@ const skillRoot = path.resolve(
     ),
 )
 
+const AI_SKILL_DIRECTORY_BY_NAME: Readonly<Record<string, string>> = {
+  GordenSuperPPTSkill: path.join(
+    'GordenSuperPPTSkills',
+    'GordenSuperPPTSkill',
+  ),
+}
+
 export function getAiSkillDirectory(name: string) {
-  return path.resolve(skillRoot, name)
+  return path.resolve(skillRoot, AI_SKILL_DIRECTORY_BY_NAME[name] ?? name)
 }
 
 function parseScalar(value: string) {

@@ -35,7 +35,7 @@ export async function getConversation(userId: string, id: string) {
 }
 
 export async function createConversation(userId: string, input: {
-  title?: string; scope?: string; projectId?: string | null; projectName?: string | null
+  title?: string; scope?: string; projectId?: string | null; projectName?: string | null; agentId?: string
 }) {
   const [row] = await db.insert(chatConversations).values({
     userId,
@@ -43,10 +43,8 @@ export async function createConversation(userId: string, input: {
     scope: input.scope || 'project',
     projectId: input.projectId || null,
     projectName: input.projectName || null,
-    // agentId 必须由服务端生成，防止客户端复用旧 canonical stream 或访问其他会话。
-    agentId: `conv-openxml-${randomUUID()}`,
-    assistantRuntimeVersion: 'linux-openxml-v1',
-    legacyReadOnly: false,
+    // flue agent 实例 id：可由前端指定（迁移旧 localStorage 会话时保留其 conv-xxx），否则服务端生成
+    agentId: input.agentId || `conv-${randomUUID()}`,
     messages: [],
   }).returning()
   return row
@@ -65,12 +63,6 @@ export async function renameConversation(userId: string, id: string, title: stri
 export async function appendMessages(userId: string, id: string, newMessages: ChatMessageRow[], title?: string) {
   const conv = await getConversation(userId, id)
   if (!conv) return undefined
-  if (conv.legacyReadOnly) {
-    throw Object.assign(new Error('该会话使用旧版助手运行时，请在新版会话继续'), {
-      status: 409,
-      code: 'LEGACY_CONVERSATION_READ_ONLY',
-    })
-  }
   const merged = [...(conv.messages as ChatMessageRow[]), ...newMessages]
   const patch: Record<string, unknown> = { messages: merged, updatedAt: new Date() }
   // 首条用户消息自动作为标题（会话仍是默认名时）
@@ -83,17 +75,6 @@ export async function appendMessages(userId: string, id: string, newMessages: Ch
     .where(and(eq(chatConversations.id, id), eq(chatConversations.userId, userId)))
     .returning()
   return row
-}
-
-export async function continueConversationInCurrentRuntime(userId: string, id: string) {
-  const conv = await getConversation(userId, id)
-  if (!conv) return undefined
-  return createConversation(userId, {
-    title: conv.title === '新会话' ? conv.title : `${conv.title}（新版）`.slice(0, 40),
-    scope: conv.scope,
-    projectId: conv.projectId,
-    projectName: conv.projectName,
-  })
 }
 
 export async function deleteConversation(userId: string, id: string) {

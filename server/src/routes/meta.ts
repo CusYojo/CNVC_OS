@@ -397,8 +397,6 @@ metaRouter.post('/leads/sync-radar', async (req: AuthedRequest, res, next) => {
       const sg = String(it.source_group || '')
       const paperSourceText = [it.source, it.source_key, it.source_type, it.source_name, sg].join(' ')
       const isPaper = sg === '论文' || /arxiv/i.test(paperSourceText)
-      const paperTitleZh = isPaper ? meaningfulRadarText(subjectReview.translatedTitle) : ''
-      const paperSummaryZh = isPaper ? meaningfulRadarText(subjectReview.translatedSummary) : ''
       const publisherNames = [it.source_name, it.school, it.account_name, it.wx_name]
         .map((value: unknown) => meaningfulRadarText(value))
         .filter(Boolean)
@@ -448,8 +446,6 @@ metaRouter.post('/leads/sync-radar', async (req: AuthedRequest, res, next) => {
           subjectName: subjectReview.subjectName,
           legalName: subjectReview.legalName,
           evidence: subjectReview.evidence,
-          translatedTitle: paperTitleZh,
-          translatedSummary: paperSummaryZh,
           confidence: subjectReview.confidence,
           model: subjectReview.model,
           reviewedAt: subjectReview.reviewedAt,
@@ -458,7 +454,7 @@ metaRouter.post('/leads/sync-radar', async (req: AuthedRequest, res, next) => {
         qualityRejected: false,
         qualityRejectReason: '',
         profile: {
-          projectName: paperTitleZh || name,
+          projectName: name,
           companyName,
           projectRound: prof.project_round || '',
           financingAmount: prof.financing_amount || '',
@@ -491,11 +487,10 @@ metaRouter.post('/leads/sync-radar', async (req: AuthedRequest, res, next) => {
         articleText: (it.article_text || '').toString().slice(0, 20000),
         articleTextLength: it.article_text_length || 0,
         link: it.link || prof.source_url || '',
-        // 论文原文用于来源核验和评分，中文译文仅用于产品展示；两者不能互相覆盖。
+        // 【批次3·需求G】论文(arxiv)元数据:作者/分类/pdf/摘要,供后续 AI 中文解读+作者背景+技术落地分析复用。
+        // 仅 arxiv 线索有值;其他渠道为空对象。摘要(abstract)取雷达 summary(英文原文)。
         paperMeta: isPaper ? {
           title: it.title || prof.paper_title || name,
-          titleOriginal: it.title || prof.paper_title || name,
-          titleZh: paperTitleZh,
           authors: Array.isArray(it.authors) ? it.authors : String(it.authors || prof.paper_authors || '').split(/[,;，；]/).map((x: string) => x.trim()).filter(Boolean),
           firstAuthor: it.first_author || prof.paper_first_author || (Array.isArray(it.authors) ? it.authors[0] : ''),
           secondAuthor: it.second_author || prof.paper_second_author || (Array.isArray(it.authors) ? it.authors[1] : ''),
@@ -504,8 +499,6 @@ metaRouter.post('/leads/sync-radar', async (req: AuthedRequest, res, next) => {
           comment: it.comment || prof.paper_comment || '',
           pdfUrl: it.pdf_url || prof.paper_pdf_url || '',
           abstract: (it.summary || '').toString().slice(0, 4000),
-          abstractOriginal: (it.summary || '').toString().slice(0, 4000),
-          abstractZh: paperSummaryZh,
           publishedAt: it.published_at || '',
         } : {},
       }
@@ -536,9 +529,7 @@ metaRouter.post('/leads/sync-radar', async (req: AuthedRequest, res, next) => {
           ? `项目发现雷达 · arxiv`
           : `项目发现雷达 · ${it.source_name || it.source || '公开渠道'}`,
         poolStatus: '成功',
-        summary: (isPaper
-          ? (paperSummaryZh || it.summary || prof.core_highlights || '')
-          : (it.summary || prof.core_highlights || '')).toString().slice(0, 1000),
+        summary: (it.summary || prof.core_highlights || '').toString().slice(0, 1000),
         highlights,
         risks,
         team: [prof.team_composition, prof.lab && `实验室：${prof.lab}`].filter(Boolean).join('\n').slice(0, 800) || '待核验',

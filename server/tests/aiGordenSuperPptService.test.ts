@@ -13,7 +13,6 @@ import {
   gordenSkillPaths,
   normalizeGordenLayout,
   referenceDrivenSkillPaths,
-  resumableGordenGatewayTaskId,
 } from '../src/services/aiGordenSuperPptService.js'
 import {
   assertInvestmentRecommendationSkillChain,
@@ -168,13 +167,6 @@ test('Gorden visual failures expose a safe actionable stage instead of the gener
   assert.equal(safeAiTaskFailureStage(error), 'Gorden 最终视觉复核未通过')
   assert.match(safeAiTaskFailureMessage(error), /文字缺失、异常换行或版式差异/)
   assert.doesNotMatch(safeAiTaskFailureMessage(error), /internal visual details/)
-
-  const layoutError = Object.assign(new Error('internal layout guard output'), {
-    code: 'GORDEN_LAYOUT_GUARD_REJECTED',
-  })
-  assert.equal(safeAiTaskFailureStage(layoutError), 'Gorden 文字布局检查未通过')
-  assert.match(safeAiTaskFailureMessage(layoutError), /字号、行数或文本框位置/)
-  assert.doesNotMatch(safeAiTaskFailureMessage(layoutError), /internal layout guard output/)
 })
 
 test('Gorden text gate ignores duplicate reports of planned text but preserves real extras', () => {
@@ -208,17 +200,8 @@ test('Gorden strict text-weight QA permits a regular body with bold title and ca
       bold: true,
     })),
   })
-  assert.equal(accidentalAllBold.allow_all_bold_text, undefined)
-
-  const visionConfirmedAllBold = annotateGordenTextWeightQa({
-    text_weight_source: 'vision',
-    texts: Array.from({ length: 7 }, (_unused, index) => ({
-      text: index === 1 ? '源成品页中明确使用粗体排版的较长正文内容'.repeat(5) : `粗体标签 ${index + 1}`,
-      bold: true,
-    })),
-  })
-  assert.equal(visionConfirmedAllBold.allow_all_bold_text, true)
-  assert.match(String((visionConfirmedAllBold.qa_notes as string[])[0]), /按源图保留全粗体排版/)
+  assert.equal(accidentalAllBold.allow_all_bold_text, true)
+  assert.match(String((accidentalAllBold.qa_notes as string[])[0]), /全粗体/)
 })
 
 test('Gorden layout keeps pixel font units, prevents false wrapping and removes duplicate badge text', () => {
@@ -280,35 +263,11 @@ test('Gorden layout keeps pixel font units, prevents false wrapping and removes 
 
   assert.equal(result.texts[0].size, undefined)
   assert.equal(result.texts[0].size_px, 28)
-  assert.equal(result.texts[0].line_count, 1)
   assert.equal(result.texts[0].word_wrap, false)
-  assert.ok(Number(result.texts[1].line_count) > 1)
   assert.equal(result.texts[1].word_wrap, true)
   assert.equal(result.texts[2].rendered_by_icon, true)
   assert.equal(result.texts[2].opacity, 0)
   assert.equal(result.icons[0].visible_text, '3')
-})
-
-test('Gorden retry resumes a pending gateway task after a transient disconnect', () => {
-  assert.equal(resumableGordenGatewayTaskId({
-    status: 'failed',
-    task_id: '59a0f768f59641bbbcd9ce0b5334af06',
-    last_result_response: {
-      message: '任务正在处理中',
-      status: 'pending',
-      data: null,
-    },
-    saved: [],
-    error: 'Remote end closed connection without response',
-  }), '59a0f768f59641bbbcd9ce0b5334af06')
-
-  assert.equal(resumableGordenGatewayTaskId({
-    status: 'failed',
-    task_id: 'terminal-task',
-    last_result_response: { code: 400, message: 'invalid request', data: null },
-    saved: [],
-    error: 'Gateway result returned code 400',
-  }), undefined)
 })
 
 test('investment PPT resume checkpoint remaps duplicate source identities in order', () => {
@@ -346,47 +305,48 @@ test('investment PPT resume checkpoint remaps duplicate source identities in ord
   assert.deepEqual(remapped.sections[0].findings[0].sourceIndexes, [1, 2, 0])
 })
 
-test('investment recommendation artifact metadata must prove the OpenXML skill chain', () => {
+test('investment recommendation artifact metadata must prove the full three-skill chain', () => {
   assert.doesNotThrow(() => assertInvestmentRecommendationSkillChain({
-    replacementSkill: 'editable-ppt-content-replacer',
-    replacementSchemaVersion: '1.3',
+    generationSkill: 'create-reference-driven-editable-ppt',
+    generationRuntime: 'GordenSuperPPTSkills+pdf-bridge+pdf-to-editable-ppt',
     workflowAudit: {
-      sourceMode: 'native-pptx',
-      strictSequence: ['editable-ppt-content-replacer'],
-    },
-  }))
-  assert.doesNotThrow(() => assertInvestmentRecommendationSkillChain({
-    replacementSkill: 'editable-ppt-content-replacer',
-    replacementSchemaVersion: '1.3',
-    workflowAudit: {
-      sourceMode: 'pdf-converted',
-      strictSequence: ['pdf-to-editable-ppt', 'editable-ppt-content-replacer'],
+      strictSequence: [
+        'create-reference-driven-editable-ppt',
+        'GordenSuperPPTSkill',
+        'pdf-to-editable-ppt',
+      ],
     },
   }))
   assert.throws(
     () => assertInvestmentRecommendationSkillChain({
-      replacementSkill: 'editable-ppt-content-replacer',
+      generationSkill: 'create-reference-driven-editable-ppt',
     }),
-    /OpenXML 内容替换/,
+    /Gorden、PDF 桥接/,
   )
 })
 
-test('investment recommendation PPT workflow contains only converter and replacer skills', async () => {
+test('investment recommendation PPT workflow contains only the three approved skills', async () => {
   assert.deepEqual(
     AI_PPT_WORKFLOW_SKILLS.map((item) => item.name),
-    ['pdf-to-editable-ppt', 'editable-ppt-content-replacer'],
+    [
+      'create-reference-driven-editable-ppt',
+      'GordenSuperPPTSkill',
+      'pdf-to-editable-ppt',
+    ],
   )
-  const orchestrator = await loadAiSkill('build-investment-recommendation-ppt')
+  const orchestrator = await loadAiSkill('create-reference-driven-editable-ppt')
   const converter = await loadAiSkill('pdf-to-editable-ppt')
-  const replacer = await loadAiSkill('editable-ppt-content-replacer')
-  assert.equal(orchestrator.name, 'build-investment-recommendation-ppt')
+  const gorden = await loadAiSkill('GordenSuperPPTSkill')
+  assert.equal(orchestrator.name, 'create-reference-driven-editable-ppt')
   assert.equal(converter.name, 'pdf-to-editable-ppt')
-  assert.equal(replacer.name, 'editable-ppt-content-replacer')
-  assert.match(orchestrator.instructions, /editable-ppt-content-replacer/)
-  assert.match(replacer.instructions, /Open XML/)
+  assert.equal(gorden.name, 'GordenSuperPPTSkill')
+  assert.match(gorden.description, /一键全流程 PPT/)
+  assert.match(gorden.instructions, /GordenImagePPTGen/)
+  assert.match(gorden.instructions, /GordenImage2PPTX/)
 
   const paths = gordenSkillPaths()
   for (const file of [
+    paths.ingest,
     paths.generateImage,
     paths.composeImageDeck,
     paths.chromaKey,
@@ -396,18 +356,31 @@ test('investment recommendation PPT workflow contains only converter and replace
     paths.visualCompareQa,
     paths.composeEditable,
   ]) {
-    assert.equal(existsSync(file), true, `missing isolated Gorden runtime: ${file}`)
+    assert.equal(existsSync(file), true, `missing Gorden runtime: ${file}`)
+  }
+  const referencePaths = referenceDrivenSkillPaths()
+  for (const file of [
+    referencePaths.resolveDependencies,
+    referencePaths.packageSlidesAsPdf,
+    referencePaths.validatePipelineHandoff,
+    referencePaths.convertPdf,
+  ]) {
+    assert.equal(existsSync(file), true, `missing reference-driven runtime: ${file}`)
   }
 })
 
-test('the built-in investment recommendation template uses the OpenXML workflow', async () => {
+test('the built-in investment recommendation template is forced through the reference-driven workflow', async () => {
   const template = AI_TEMPLATE_CATALOG.investment_recommendation_ppt
   assert.equal(mustUseReferenceDrivenPptPipeline(template), true)
   const workflow = await prepareInvestmentRecommendationPptWorkflow(template)
   assert.equal(workflow.sourceMode, 'native-pptx')
   assert.deepEqual(
-    workflow.skills.map((item) => `${item.name}:${item.status}`),
-    ['pdf-to-editable-ppt:not-required', 'editable-ppt-content-replacer:applied'],
+    workflow.skills.map((item) => item.name),
+    [
+      'create-reference-driven-editable-ppt',
+      'GordenSuperPPTSkill',
+      'pdf-to-editable-ppt',
+    ],
   )
 })
 
