@@ -282,7 +282,7 @@ export interface Lead {
   companyNews: { date: string; type: string; title: string; summary: string; sourceName: string; sourceUrl: string }[]
   sources: SourceEvidence[]
   scoring?: LeadScoring
-  radarProfile?: { decisionLabel?: string; thesis?: string; sourceName?: string; sourceGroup?: string; sourceTitle?: string; channel?: string; accountName?: string; publishedAt?: string; profile?: Record<string,string>; team?: { name: string }[]; radarDimensions?: { code: string; label: string; score: number; maxScore: number; detail: string }[]; radarScore?: number; disclosure?: Record<string,string>; nextActions?: string[]; signals?: { code: string; score: number; detail: string }[]; articleText?: string; articleTextLength?: number; link?: string }
+  radarProfile?: { decisionLabel?: string; thesis?: string; sourceName?: string; sourceGroup?: string; sourceTitle?: string; channel?: string; accountName?: string; publishedAt?: string; profile?: Record<string,string>; team?: { name: string }[]; radarDimensions?: { code: string; label: string; score: number; maxScore: number; detail: string }[]; radarScore?: number; disclosure?: Record<string,string>; nextActions?: string[]; signals?: { code: string; score: number; detail: string }[]; articleText?: string; articleTextLength?: number; link?: string; paperMeta?: { title?: string; titleOriginal?: string; titleZh?: string; abstract?: string; abstractOriginal?: string; abstractZh?: string; authors?: string[]; firstAuthor?: string; secondAuthor?: string; categories?: string[]; venue?: string; comment?: string; pdfUrl?: string; publishedAt?: string } }
 }
 
 export interface SourceEvidence {

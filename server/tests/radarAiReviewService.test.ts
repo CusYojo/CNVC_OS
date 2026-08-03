@@ -34,6 +34,8 @@ test('accepts a complete paper title for an explicit paper candidate', () => {
     subjectName: title,
     legalName: '',
     evidence: `标题：${title} 摘要：This paper presents a descriptor-free visual localization method.`,
+    translatedTitle: 'GeoMix：基于全局上下文与多检测器训练的无描述符视觉定位',
+    translatedSummary: '本文提出一种无需局部描述符的视觉定位方法。',
     confidence: 0.95,
     rejectReason: '',
   }, source, 'test-model', '2026-07-31T00:00:00.000Z', true)
@@ -41,6 +43,28 @@ test('accepts a complete paper title for an explicit paper candidate', () => {
   assert.equal(result.status, 'accepted')
   assert.equal(result.decision.subjectType, 'paper')
   assert.equal(result.decision.subjectName, title)
+  assert.equal(result.decision.translatedTitle, 'GeoMix：基于全局上下文与多检测器训练的无描述符视觉定位')
+  assert.equal(result.decision.translatedSummary, '本文提出一种无需局部描述符的视觉定位方法。')
+})
+
+test('does not expose an English-only string as a Chinese paper translation', () => {
+  const title = 'Paper Translation Validation'
+  const result = validateRadarAiDecision({
+    candidateId: 'paper-translation',
+    decision: 'accept',
+    subjectType: 'paper',
+    subjectName: title,
+    legalName: '',
+    evidence: title,
+    translatedTitle: 'Paper Translation Validation',
+    translatedSummary: 'English summary only.',
+    confidence: 0.95,
+    rejectReason: '',
+  }, title, 'test-model', '2026-08-03T00:00:00.000Z', true)
+
+  assert.equal(result.status, 'accepted')
+  assert.equal(result.decision.translatedTitle, '')
+  assert.equal(result.decision.translatedSummary, '')
 })
 
 test('promotes a cached paper review that only failed because prompt labels wrapped its evidence', () => {
@@ -144,6 +168,7 @@ test('cache key changes when candidate content changes', () => {
 })
 
 test('marks arXiv and paper-group candidates as papers before model review', () => {
+  const investment = prepareRadarAiCandidate({ source: '36kr', title: 'Company A raises funding' }, 'test-model')
   const direct = prepareRadarAiCandidate({ source: 'arxiv', title: 'Paper A' }, 'test-model')
   const grouped = prepareRadarAiCandidate({
     source: 'investment',
@@ -154,5 +179,7 @@ test('marks arXiv and paper-group candidates as papers before model review', () 
 
   assert.equal(direct.isPaper, true)
   assert.equal(grouped.isPaper, true)
+  assert.equal(investment.promptVersion, 'radar-subject-v3-paper-v2')
+  assert.equal(direct.promptVersion, 'radar-subject-v4-paper-zh-v2')
   assert.match(grouped.promptText, /线索类型：论文/)
 })
