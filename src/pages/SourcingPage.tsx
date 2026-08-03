@@ -85,11 +85,15 @@ function formatPoolEnteredAt(value?: string) {
 }
 
 function getLeadIdentity(lead: Lead) {
-  const companySubject = meaningfulLeadText(lead.scoring?.registry?.companyName)
+  const isPaper = lead.radarProfile?.channel === '论文'
+  const translatedPaperTitle = isPaper ? meaningfulLeadText(lead.radarProfile?.paperMeta?.titleZh) : undefined
+  const companySubject = translatedPaperTitle
+    ?? meaningfulLeadText(lead.scoring?.registry?.companyName)
     ?? meaningfulLeadText(lead.companyName)
     ?? meaningfulLeadText(lead.name)
-    ?? '公司主体'
-  const projectName = meaningfulLeadText(lead.radarProfile?.profile?.projectName)
+    ?? (isPaper ? '论文标题待翻译' : '公司主体')
+  const projectName = translatedPaperTitle
+    ?? meaningfulLeadText(lead.radarProfile?.profile?.projectName)
     ?? meaningfulLeadText(lead.scoring?.projectName)
     ?? meaningfulLeadText(lead.name)
     ?? companySubject
@@ -294,6 +298,8 @@ function LeadDetailPanel({
   const sources = getUsefulSources(lead)
   const summary = meaningfulLeadText(lead.summary)
   const website = meaningfulLeadText(lead.scoring?.officialSite) ?? meaningfulLeadText(lead.website)
+  const paperMeta = lead.radarProfile?.channel === '论文' ? lead.radarProfile.paperMeta : undefined
+  const originalPaperTitle = meaningfulLeadText(paperMeta?.titleOriginal) ?? meaningfulLeadText(paperMeta?.title)
   const tabs = [
     { id: 'overview', label: '项目概览' },
     ...(shareholders.length || fundingRounds.length ? [{ id: 'funding', label: '股权融资', count: shareholders.length + fundingRounds.length }] : []),
@@ -329,6 +335,17 @@ function LeadDetailPanel({
     <div className="mt-5"><Tabs tabs={tabs} value={visibleTab} onChange={onTabChange} /></div>
 
     {visibleTab === 'overview' && <div className="mt-5 space-y-5">
+      {paperMeta && <section className="rounded-xl border border-slate-200 p-4">
+        <div className="flex items-center justify-between gap-4">
+          <h3 className="text-sm font-semibold text-slate-800">论文信息</h3>
+          {paperMeta.pdfUrl && <SourceLink url={paperMeta.pdfUrl}>查看 PDF 原文</SourceLink>}
+        </div>
+        {originalPaperTitle && <div className="mt-3"><p className="text-xs text-slate-400">英文原题</p><p className="mt-1 text-sm leading-6 text-slate-700">{originalPaperTitle}</p></div>}
+        <div className="mt-3 grid grid-cols-2 gap-4 text-sm">
+          {paperMeta.authors?.length ? <div><p className="text-xs text-slate-400">作者</p><p className="mt-1 leading-6 text-slate-700">{paperMeta.authors.join('、')}</p></div> : null}
+          {paperMeta.categories?.length ? <div><p className="text-xs text-slate-400">分类</p><p className="mt-1 leading-6 text-slate-700">{paperMeta.categories.join('、')}</p></div> : null}
+        </div>
+      </section>}
       {facts.length > 0 && <section className="rounded-xl border border-slate-200 p-4">
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-semibold text-slate-800">基本情况</h3>
