@@ -13,6 +13,7 @@ import {
   gordenSkillPaths,
   normalizeGordenLayout,
   referenceDrivenSkillPaths,
+  resumableGordenGatewayTaskId,
 } from '../src/services/aiGordenSuperPptService.js'
 import {
   assertInvestmentRecommendationSkillChain,
@@ -167,6 +168,13 @@ test('Gorden visual failures expose a safe actionable stage instead of the gener
   assert.equal(safeAiTaskFailureStage(error), 'Gorden 最终视觉复核未通过')
   assert.match(safeAiTaskFailureMessage(error), /文字缺失、异常换行或版式差异/)
   assert.doesNotMatch(safeAiTaskFailureMessage(error), /internal visual details/)
+
+  const layoutError = Object.assign(new Error('internal layout guard output'), {
+    code: 'GORDEN_LAYOUT_GUARD_REJECTED',
+  })
+  assert.equal(safeAiTaskFailureStage(layoutError), 'Gorden 文字布局检查未通过')
+  assert.match(safeAiTaskFailureMessage(layoutError), /字号、行数或文本框位置/)
+  assert.doesNotMatch(safeAiTaskFailureMessage(layoutError), /internal layout guard output/)
 })
 
 test('Gorden text gate ignores duplicate reports of planned text but preserves real extras', () => {
@@ -200,8 +208,17 @@ test('Gorden strict text-weight QA permits a regular body with bold title and ca
       bold: true,
     })),
   })
-  assert.equal(accidentalAllBold.allow_all_bold_text, true)
-  assert.match(String((accidentalAllBold.qa_notes as string[])[0]), /全粗体/)
+  assert.equal(accidentalAllBold.allow_all_bold_text, undefined)
+
+  const visionConfirmedAllBold = annotateGordenTextWeightQa({
+    text_weight_source: 'vision',
+    texts: Array.from({ length: 7 }, (_unused, index) => ({
+      text: index === 1 ? '源成品页中明确使用粗体排版的较长正文内容'.repeat(5) : `粗体标签 ${index + 1}`,
+      bold: true,
+    })),
+  })
+  assert.equal(visionConfirmedAllBold.allow_all_bold_text, true)
+  assert.match(String((visionConfirmedAllBold.qa_notes as string[])[0]), /按源图保留全粗体排版/)
 })
 
 test('Gorden layout keeps pixel font units, prevents false wrapping and removes duplicate badge text', () => {
@@ -263,11 +280,35 @@ test('Gorden layout keeps pixel font units, prevents false wrapping and removes 
 
   assert.equal(result.texts[0].size, undefined)
   assert.equal(result.texts[0].size_px, 28)
+  assert.equal(result.texts[0].line_count, 1)
   assert.equal(result.texts[0].word_wrap, false)
+  assert.ok(Number(result.texts[1].line_count) > 1)
   assert.equal(result.texts[1].word_wrap, true)
   assert.equal(result.texts[2].rendered_by_icon, true)
   assert.equal(result.texts[2].opacity, 0)
   assert.equal(result.icons[0].visible_text, '3')
+})
+
+test('Gorden retry resumes a pending gateway task after a transient disconnect', () => {
+  assert.equal(resumableGordenGatewayTaskId({
+    status: 'failed',
+    task_id: '59a0f768f59641bbbcd9ce0b5334af06',
+    last_result_response: {
+      message: '任务正在处理中',
+      status: 'pending',
+      data: null,
+    },
+    saved: [],
+    error: 'Remote end closed connection without response',
+  }), '59a0f768f59641bbbcd9ce0b5334af06')
+
+  assert.equal(resumableGordenGatewayTaskId({
+    status: 'failed',
+    task_id: 'terminal-task',
+    last_result_response: { code: 400, message: 'invalid request', data: null },
+    saved: [],
+    error: 'Gateway result returned code 400',
+  }), undefined)
 })
 
 test('investment PPT resume checkpoint remaps duplicate source identities in order', () => {

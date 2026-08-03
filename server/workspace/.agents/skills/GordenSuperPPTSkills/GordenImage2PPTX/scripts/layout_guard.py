@@ -111,6 +111,12 @@ def _text_content(item: dict) -> str:
 
 
 def _line_count(item: dict) -> int:
+    explicit_count = item.get("line_count")
+    if explicit_count is not None:
+        try:
+            return max(1, int(explicit_count))
+        except (TypeError, ValueError):
+            pass
     text = _text_content(item)
     return max(1, text.count("\n") + 1)
 
@@ -164,7 +170,11 @@ def _check_text_styles(slide_idx: int, slide: dict, ref_h: float, sh_pt: float,
             size_px = float(item["size_px"])
             if size_px > 0:
                 avg_line_box_px = bbox[3] / _line_count(item)
-                if avg_line_box_px / size_px >= 1.7 and not item.get("small_text_ok"):
+                marker = _text_content(item).strip()
+                numeric_badge = marker.isdigit() and len(marker) <= 2
+                if (avg_line_box_px / size_px >= 1.7
+                        and not item.get("small_text_ok")
+                        and not numeric_badge):
                     warnings.append(
                         f"{label}: source_bbox line height ({avg_line_box_px:.1f}px) is much larger than size_px "
                         f"({size_px:.1f}px); this often means size_px came from a half-resolution preview."

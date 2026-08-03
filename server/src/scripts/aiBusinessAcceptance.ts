@@ -496,7 +496,8 @@ async function main() {
           && prompt.includes('不得输出事实卡或分析步骤')
           && prompt.includes('值得注意的是')
           && prompt.includes('不得出现“阶段与推进建议：”“主建议：”')
-          && prompt.includes('不使用“该信息、该信号、该口径、该能力、该模式、该表述”'))
+          && prompt.includes('不使用“该信息、该信号、该口径、该能力、该模式、该表述”')
+          && prompt.includes('中文与相邻英文单词或英文缩写之间不留空格'))
       && chapterUserPrompts.every((prompt) =>
         prompt.includes('内部事实卡（只作写作依据')
           && prompt.includes('不得复制卡片标题、来源名、片段号或处理说明到正文')),
@@ -924,8 +925,8 @@ async function main() {
       )
       const sanitizedProcessWording = finalizeDueDiligenceContent({
         ...content,
-        executiveSummary: '阶段与推进建议：继续跟踪。主建议：继续跟踪。根据项目资料库显示，值得注意的是，杭州示例科技已经形成软件产品。',
-        highlights: ['结合现有资料分析，值得注意的是，公司具备客户验证信号。'],
+        executiveSummary: '阶段与推进建议：继续跟踪。主建议：继续跟踪。根据项目资料库显示，值得注意的是，杭州示例科技已经形成 AI 软件产品。',
+        highlights: ['结合现有资料分析，值得注意的是，公司 FDE 团队采用 Active Trial Solver 方案并具备客户验证信号。'],
         risks: ['项目材料显示，知识产权权属尚需取得原始文件确认。'],
         sections: content.sections.map((section, index) => index === 1
           ? {
@@ -975,6 +976,15 @@ async function main() {
         !sanitizedVisibleText.includes('阶段与推进建议')
           && !sanitizedVisibleText.includes('主建议')
           && (sanitizedVisibleText.match(/建议继续跟踪/g) || []).length === 1,
+        sanitizedVisibleText,
+      )
+      assert(
+        checks,
+        'AI-010 导出前清除中文与英文之间的空格',
+        sanitizedVisibleText.includes('形成AI软件产品')
+          && sanitizedVisibleText.includes('公司FDE团队')
+          && sanitizedVisibleText.includes('Active Trial Solver方案')
+          && !/[\u3400-\u9FFF\uF900-\uFAFF]\s+[A-Za-z]|[A-Za-z]\s+[\u3400-\u9FFF\uF900-\uFAFF]/.test(sanitizedVisibleText),
         sanitizedVisibleText,
       )
       const misplacedContentIssues = dueDiligenceContentQualityIssues({
@@ -1076,6 +1086,14 @@ async function main() {
           '前置条件为',
         ].every((phrase) => !documentXml.includes(phrase)),
         '正文只写项目事实、投资含义、限制和动作',
+      )
+      assert(
+        checks,
+        'AI-010 正文不保留中文与英文之间的空格',
+        !/[\u3400-\u9FFF\uF900-\uFAFF]\s+[A-Za-z]|[A-Za-z]\s+[\u3400-\u9FFF\uF900-\uFAFF]/.test(
+          documentXml.replace(/<[^>]+>/g, ''),
+        ),
+        '中文与英文单词或缩写直接相邻；英文短语内部空格保留',
       )
       assert(
         checks,

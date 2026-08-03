@@ -179,7 +179,7 @@ test('marks arXiv and paper-group candidates as papers before model review', () 
 
   assert.equal(direct.isPaper, true)
   assert.equal(grouped.isPaper, true)
-  assert.equal(investment.promptVersion, 'radar-subject-v3-paper')
+  assert.equal(investment.promptVersion, 'radar-subject-v3-paper-v2')
   assert.equal(direct.promptVersion, 'radar-subject-v4-paper-zh')
   assert.match(grouped.promptText, /线索类型：论文/)
 })

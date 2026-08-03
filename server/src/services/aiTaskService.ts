@@ -2198,6 +2198,9 @@ async function executeTask(taskId: string) {
       upstreamCode?: unknown
       status?: unknown
       gatewayRequestId?: unknown
+      gatewayStatus?: unknown
+      gatewayMessage?: unknown
+      gatewayMetadataPath?: unknown
       responseBytes?: unknown
       requestAttempt?: unknown
       requestDurationMs?: unknown
@@ -2219,6 +2222,9 @@ async function executeTask(taskId: string) {
         upstreamCode: diagnosticError.upstreamCode,
         status: diagnosticError.status,
         gatewayRequestId: diagnosticError.gatewayRequestId,
+        gatewayStatus: diagnosticError.gatewayStatus,
+        gatewayMessage: diagnosticError.gatewayMessage,
+        gatewayMetadataPath: diagnosticError.gatewayMetadataPath,
         responseBytes: diagnosticError.responseBytes,
         requestAttempt: diagnosticError.requestAttempt,
         requestDurationMs: diagnosticError.requestDurationMs,

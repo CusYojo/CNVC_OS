@@ -1,4 +1,5 @@
 import importlib.util
+import http.client
 import json
 import sys
 import urllib.error
@@ -110,6 +111,95 @@ def test_poll_result_tolerates_transient_gateway_codes():
 
     assert result["code"] == 200
     assert [item["code"] for item in snapshots] == [503, 200]
+
+
+def test_request_json_retries_remote_disconnect():
+    client = load_client()
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return b'{"code": 200, "data": []}'
+
+    responses = iter([
+        http.client.RemoteDisconnected("Remote end closed connection without response"),
+        FakeResponse(),
+    ])
+
+    def fake_urlopen(*_args, **_kwargs):
+        response = next(responses)
+        if isinstance(response, Exception):
+            raise response
+        return response
+
+    with patch.object(client.urllib.request, "urlopen", side_effect=fake_urlopen), patch.object(
+        client.time,
+        "sleep",
+        return_value=None,
+    ):
+        result = client.request_json("https://example.com/result", "test-key", {"task_id": "task-1"}, 1)
+
+    assert result == {"code": 200, "data": []}
+
+
+def test_poll_result_keeps_existing_task_after_transport_retry():
+    client = load_client()
+    responses = iter([
+        client.TransientGatewayError("Remote end closed connection without response"),
+        {"code": 200, "data": [{"b64_json": "cG5n"}]},
+    ])
+    snapshots = []
+
+    def request(*_args):
+        response = next(responses)
+        if isinstance(response, Exception):
+            raise response
+        return response
+
+    result = client.poll_result(
+        "https://getways-jumu.zeelin.cn/v1/images/result",
+        "test-key",
+        "gpt-image-2-reverse-2",
+        "task-existing",
+        poll_interval=0,
+        max_wait=1,
+        request_json_func=request,
+        on_poll=snapshots.append,
+    )
+
+    assert result["code"] == 200
+    assert snapshots[0]["code"] == "transport_retry"
+    assert snapshots[0]["task_id"] == "task-existing"
+
+
+def test_generate_image_resumes_existing_task_without_duplicate_create(tmp_path):
+    client = load_client()
+    gateway = FakeGateway()
+
+    result = client.generate_image(
+        prompt="继续生成 PPT 页面",
+        api_key="test-key",
+        base_url="https://getways-jumu.zeelin.cn/v1",
+        out_dir=tmp_path,
+        resume_task_id="task-existing",
+        poll_interval=0,
+        max_wait=1,
+        request_json_func=gateway.request_json,
+        download_url_func=gateway.download_url,
+    )
+
+    assert len(gateway.requests) == 1
+    assert gateway.requests[0][0].endswith("/v1/images/result")
+    assert gateway.requests[0][2]["task_id"] == "task-existing"
+    assert result["task_id"] == "task-existing"
+    metadata = json.loads(Path(result["metadata_json"]).read_text(encoding="utf-8"))
+    assert metadata["resumed_task_id"] == "task-existing"
+    assert metadata["create_response"]["resumed"] is True
 
 
 def test_unicode_local_image_path_is_encoded_as_data_url(tmp_path):

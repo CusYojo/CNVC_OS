@@ -20,6 +20,7 @@ export function safeAiTaskFailureStage(error: unknown) {
   }
   if (code === 'GORDEN_VISIBLE_TEXT_CONTRACT_REJECTED') return 'Gorden 页面文字检查未通过'
   if (code === 'GORDEN_VISUAL_QA_REJECTED') return 'Gorden 最终视觉复核未通过'
+  if (code === 'GORDEN_LAYOUT_GUARD_REJECTED') return 'Gorden 文字布局检查未通过'
   if (code.startsWith('GORDEN_')) return 'Gorden PPT 生成未完成'
   if (code.startsWith('PPTX_')) return 'PPTX 文件质量检查未通过'
   return '文档尚未完成'
@@ -81,6 +82,9 @@ export function safeAiTaskFailureMessage(error: unknown) {
   }
   if (code === 'GORDEN_VISUAL_QA_REJECTED') {
     return 'Gorden 可编辑稿与成品图存在文字缺失、异常换行或版式差异，未通过最终视觉复核。系统已保留检查点，请继续生成有问题的页面。'
+  }
+  if (code === 'GORDEN_LAYOUT_GUARD_REJECTED') {
+    return 'Gorden 文字字号、行数或文本框位置未通过严格布局检查。系统已保留页面分层结果，请继续生成该页面。'
   }
   if (code === 'GORDEN_SUPER_PPT_FAILED') {
     return 'Gorden 页面生成、图片分层或可编辑 PPTX 合成失败。系统已保留参数，请检查图片网关和 Python 运行环境后继续生成。'

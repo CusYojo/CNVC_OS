@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import base64
 import binascii
+import http.client
 import json
 import mimetypes
 import os
@@ -30,6 +31,10 @@ API_KEY_ENV_NAMES = ("GATEWAY_IMAGE_API_KEY", "MODEL_GATEWAY_API_KEY", "OPENAI_A
 BASE_URL_ENV_NAMES = ("GATEWAY_IMAGE_BASE_URL", "MODEL_GATEWAY_BASE_URL", "OPENAI_BASE_URL")
 RETRYABLE_HTTP_STATUS = {408, 425, 429, 500, 502, 503, 504}
 MAX_REQUEST_ATTEMPTS = 4
+
+
+class TransientGatewayError(RuntimeError):
+    """A transport or retryable HTTP failure that may recover while polling."""
 
 
 def load_dotenv(path: Path) -> None:
@@ -84,27 +89,43 @@ def request_json(url: str, api_key: str, payload: Dict[str, Any], timeout: int =
             "Accept": "application/json",
         },
     )
-    response_body = ""
     for attempt in range(1, MAX_REQUEST_ATTEMPTS + 1):
         try:
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 response_body = resp.read().decode("utf-8", errors="replace")
-            break
+            try:
+                return json.loads(response_body)
+            except json.JSONDecodeError as exc:
+                if attempt < MAX_REQUEST_ATTEMPTS:
+                    time.sleep(min(8.0, 2.0 ** (attempt - 1)))
+                    continue
+                raise TransientGatewayError(
+                    f"Response was not JSON after {attempt} attempts: {response_body[:2000]}"
+                ) from exc
         except urllib.error.HTTPError as exc:
             error_body = exc.read().decode("utf-8", errors="replace")
-            if exc.code in RETRYABLE_HTTP_STATUS and attempt < MAX_REQUEST_ATTEMPTS:
-                time.sleep(min(8.0, 2.0 ** (attempt - 1)))
-                continue
+            if exc.code in RETRYABLE_HTTP_STATUS:
+                if attempt < MAX_REQUEST_ATTEMPTS:
+                    time.sleep(min(8.0, 2.0 ** (attempt - 1)))
+                    continue
+                raise TransientGatewayError(
+                    f"HTTP {exc.code} after {attempt} attempts: {sanitize_error(error_body)[:2000]}"
+                ) from exc
             raise RuntimeError(f"HTTP {exc.code}: {sanitize_error(error_body)[:2000]}") from exc
-        except urllib.error.URLError as exc:
+        except (
+            urllib.error.URLError,
+            http.client.HTTPException,
+            TimeoutError,
+            ConnectionError,
+            OSError,
+        ) as exc:
             if attempt < MAX_REQUEST_ATTEMPTS:
                 time.sleep(min(8.0, 2.0 ** (attempt - 1)))
                 continue
-            raise RuntimeError(f"Request failed after {attempt} attempts: {exc}") from exc
-    try:
-        return json.loads(response_body)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(f"Response was not JSON: {response_body[:2000]}") from exc
+            raise TransientGatewayError(
+                f"Request failed after {attempt} attempts: {sanitize_error(str(exc))}"
+            ) from exc
+    raise TransientGatewayError("Request failed without a gateway response")
 
 
 def data_url_from_file(path_text: str) -> str:
@@ -312,7 +333,29 @@ def poll_result(
     started = time.monotonic()
     last_response: Dict[str, Any] = {}
     while True:
-        last_response = request_json_func(result_url, api_key, {"model": model, "task_id": task_id}, 300)
+        try:
+            last_response = request_json_func(
+                result_url,
+                api_key,
+                {"model": model, "task_id": task_id},
+                300,
+            )
+        except TransientGatewayError as exc:
+            transport_snapshot = {
+                "code": "transport_retry",
+                "message": sanitize_error(str(exc))[:2000],
+                "task_id": task_id,
+            }
+            if on_poll is not None:
+                on_poll(transport_snapshot)
+            if time.monotonic() - started >= max_wait:
+                raise TimeoutError(
+                    f"Timed out waiting for image task {task_id} after transient transport errors. "
+                    f"Last error: {transport_snapshot['message']}"
+                ) from exc
+            if poll_interval > 0:
+                time.sleep(poll_interval)
+            continue
         if on_poll is not None:
             on_poll(last_response)
         code = last_response.get("code")
@@ -347,6 +390,7 @@ def generate_image(
     images: Optional[List[str]] = None,
     bypass: Optional[Dict[str, Any]] = None,
     watermark: bool = False,
+    resume_task_id: Optional[str] = None,
     poll_interval: float = 5.0,
     max_wait: float = 180.0,
     request_json_func: Callable[[str, str, Dict[str, Any], int], Dict[str, Any]] = request_json,
@@ -366,6 +410,7 @@ def generate_image(
         "create_payload": None,
         "create_response": None,
         "last_result_response": None,
+        "resumed_task_id": resume_task_id,
         "saved": [],
         "usage": None,
     }
@@ -393,13 +438,17 @@ def generate_image(
         metadata["create_payload"] = metadata_payload
         metadata["status"] = "creating"
         persist_metadata()
-        create_response = request_json_func(create_url, api_key, payload, 300)
+        if resume_task_id:
+            task_id = resume_task_id
+            create_response = {"resumed": True, "task_id": task_id}
+        else:
+            create_response = request_json_func(create_url, api_key, payload, 300)
+            if create_response.get("code") not in (None, 200):
+                raise RuntimeError(f"Gateway create returned code {create_response.get('code')}: {sanitize_error(json.dumps(create_response, ensure_ascii=False))[:2000]}")
+            task_id = extract_task_id(create_response)
+            if not task_id:
+                raise RuntimeError(f"Gateway create response did not include task_id: {sanitize_error(json.dumps(create_response, ensure_ascii=False))[:2000]}")
         metadata["create_response"] = create_response
-        if create_response.get("code") not in (None, 200):
-            raise RuntimeError(f"Gateway create returned code {create_response.get('code')}: {sanitize_error(json.dumps(create_response, ensure_ascii=False))[:2000]}")
-        task_id = extract_task_id(create_response)
-        if not task_id:
-            raise RuntimeError(f"Gateway create response did not include task_id: {sanitize_error(json.dumps(create_response, ensure_ascii=False))[:2000]}")
         metadata["task_id"] = task_id
         metadata["status"] = "polling"
         persist_metadata()
@@ -473,6 +522,7 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
     parser.add_argument("--dotenv", default=".env")
     parser.add_argument("--poll-interval", type=float, default=5.0)
     parser.add_argument("--max-wait", type=float, default=180.0)
+    parser.add_argument("--resume-task-id", help="Poll an existing gateway task instead of creating a duplicate task.")
     parser.add_argument("--dry-run", action="store_true", help="Print create/result endpoints and payload without calling the gateway.")
     args = parser.parse_args(argv)
     if not 1 <= args.n <= 10:
@@ -530,6 +580,7 @@ def main(argv: List[str]) -> int:
         images=args.image,
         bypass=args.bypass,
         watermark=args.watermark,
+        resume_task_id=args.resume_task_id,
         poll_interval=args.poll_interval,
         max_wait=args.max_wait,
     )
