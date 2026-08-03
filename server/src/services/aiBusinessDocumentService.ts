@@ -40,7 +40,7 @@ import {
 } from './aiComplianceWorkflowService.js'
 import { sanitizeClientVisibleEvidenceWording } from './aiClientVisibleTextService.js'
 import { generateInvestmentProposalDocx } from './aiInvestmentProposalDocumentService.js'
-import { generateInvestmentRecommendationPptFromTemplate } from './aiEditablePptContentReplacerService.js'
+import { generateInvestmentRecommendationPptWithGorden } from './aiGordenSuperPptService.js'
 
 type ProjectLike = {
   name: string
@@ -2101,16 +2101,16 @@ export async function generateBusinessPptx(input: {
   sources: EvidenceSource[]
   sourceCutoffDate: string
   pageCount?: string
+  resumeFromDirectory?: string
   onProgress?: (
     update: { stage: string; progress: number },
   ) => void | Promise<void>
 }) {
   await mkdir(path.dirname(input.outputPath), { recursive: true })
-  if (
-    input.template.type === 'investment_recommendation_ppt'
-    && input.template.customAnalysis?.format === 'pptx'
-  ) {
-    return generateInvestmentRecommendationPptFromTemplate(input)
+  if (mustUseReferenceDrivenPptPipeline(input.template)) {
+    const result = await generateInvestmentRecommendationPptWithGorden(input)
+    assertInvestmentRecommendationSkillChain(result)
+    return result
   }
   if (input.template.customAnalysis?.format === 'pptx') {
     return generateCustomTemplatePptx(input)
@@ -2456,6 +2456,35 @@ export async function generateBusinessPptx(input: {
     inheritedCompanyAssets: Object.values(templateAssets).filter(Boolean).length,
     cjkFont: PPT_FONT,
     cjkLanguage: 'zh-CN',
+  }
+}
+
+export function mustUseReferenceDrivenPptPipeline(
+  template: AiTemplateDefinition,
+) {
+  return template.type === 'investment_recommendation_ppt'
+}
+
+export function assertInvestmentRecommendationSkillChain(
+  metadata: Record<string, unknown>,
+) {
+  const expectedSequence = [
+    'create-reference-driven-editable-ppt',
+    'GordenSuperPPTSkill',
+    'pdf-to-editable-ppt',
+  ]
+  const workflowAudit = metadata.workflowAudit as Record<string, unknown> | undefined
+  const strictSequence = Array.isArray(workflowAudit?.strictSequence)
+    ? workflowAudit.strictSequence.map(String)
+    : []
+  const valid = metadata.generationSkill === expectedSequence[0]
+    && metadata.generationRuntime === 'GordenSuperPPTSkills+pdf-bridge+pdf-to-editable-ppt'
+    && strictSequence.join('\u0000') === expectedSequence.join('\u0000')
+  if (!valid) {
+    throw Object.assign(
+      new Error('投资建议书未完整执行 Gorden、PDF 桥接与可编辑化技能链'),
+      { code: 'INVESTMENT_PPT_SKILL_CHAIN_NOT_EXECUTED' },
+    )
   }
 }
 

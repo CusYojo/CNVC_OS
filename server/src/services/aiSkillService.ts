@@ -19,7 +19,7 @@ export const AI_BUSINESS_SKILLS = [
     taskType: 'investment_proposal',
   },
   {
-    name: 'editable-ppt-content-replacer',
+    name: 'create-reference-driven-editable-ppt',
     label: '投资建议书（PPT）',
     mode: 'document-task',
     taskType: 'investment_recommendation_ppt',
@@ -48,14 +48,19 @@ export type AiBusinessSkillName = typeof AI_BUSINESS_SKILLS[number]['name']
 
 export const AI_PPT_WORKFLOW_SKILLS = [
   {
-    name: 'pdf-to-editable-ppt',
-    label: 'PDF 模板转可编辑 PPT',
-    role: 'template-preparation',
+    name: 'create-reference-driven-editable-ppt',
+    label: '参考模板可编辑 PPT 总编排',
+    role: 'ppt-orchestration-and-handoff',
   },
   {
-    name: 'editable-ppt-content-replacer',
-    label: '可编辑 PPT 内容替换',
-    role: 'content-replacement',
+    name: 'GordenSuperPPTSkill',
+    label: 'Gorden 图片生成与可编辑 PPTX 还原',
+    role: 'ppt-generation-and-editable-reconstruction',
+  },
+  {
+    name: 'pdf-to-editable-ppt',
+    label: 'PDF 桥接稿转元素级可编辑 PPT',
+    role: 'final-editable-conversion-and-qa',
   },
 ] as const
 
@@ -94,6 +99,17 @@ const skillRoot = path.resolve(
     ),
 )
 
+const AI_SKILL_DIRECTORY_BY_NAME: Readonly<Record<string, string>> = {
+  GordenSuperPPTSkill: path.join(
+    'GordenSuperPPTSkills',
+    'GordenSuperPPTSkill',
+  ),
+}
+
+export function getAiSkillDirectory(name: string) {
+  return path.resolve(skillRoot, AI_SKILL_DIRECTORY_BY_NAME[name] ?? name)
+}
+
 function parseScalar(value: string) {
   const trimmed = value.trim()
   if (
@@ -109,9 +125,23 @@ function parseSkillFile(source: string) {
   const frontmatter = source.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/)
   if (!frontmatter) throw new Error('SKILL.md 缺少 YAML frontmatter')
   const fields = new Map<string, string>()
-  for (const line of frontmatter[1].split(/\r?\n/)) {
-    const match = line.match(/^([a-z][a-z0-9-]*):\s*(.+)$/)
-    if (match) fields.set(match[1], parseScalar(match[2]))
+  const lines = frontmatter[1].split(/\r?\n/)
+  for (let index = 0; index < lines.length; index += 1) {
+    const match = lines[index].match(/^([a-z][a-z0-9-]*):\s*(.*)$/)
+    if (!match) continue
+    const [, key, rawValue] = match
+    if (/^[>|][+-]?$/.test(rawValue.trim())) {
+      const block: string[] = []
+      while (index + 1 < lines.length && /^\s+/.test(lines[index + 1])) {
+        block.push(lines[index + 1].trim())
+        index += 1
+      }
+      fields.set(key, rawValue.trim().startsWith('>')
+        ? block.join(' ').trim()
+        : block.join('\n').trim())
+      continue
+    }
+    if (rawValue.trim()) fields.set(key, parseScalar(rawValue))
   }
   const name = fields.get('name') ?? ''
   const description = fields.get('description') ?? ''
@@ -201,7 +231,7 @@ export async function loadAiSkill(name: string): Promise<LoadedAiSkill> {
   }
   return loadAiSkillFromDirectory({
     name,
-    directory: path.resolve(skillRoot, name),
+    directory: getAiSkillDirectory(name),
     allowedRoot: skillRoot,
   })
 }

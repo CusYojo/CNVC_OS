@@ -4,14 +4,11 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import os
 import re
 import shutil
 import subprocess
 import sys
 from pathlib import Path
-
-from runtime_environment import fontconfig_environment
 
 
 SKILL_DIR = Path(__file__).resolve().parent.parent
@@ -56,14 +53,6 @@ def normalize_source_renders(render_dir):
     for page_number, source in enumerate(raw_pages, 1):
         target = render_dir / f"slide-{page_number:02d}.png"
         source.replace(target)
-
-
-def visual_qa_gate(mode: str, pending: bool, report_passed: bool) -> bool:
-    """Do not let an off-mode placeholder report mask pending Agent QA."""
-    return (
-        (mode == "off" and not pending)
-        or (mode != "off" and report_passed)
-    )
 
 
 def classify_pdf_model(model_path):
@@ -148,8 +137,8 @@ def classify_pdf_model(model_path):
 def build_editability_report(
     route_report,
     overrides_path,
-    vision_analysis_path=None,
-    minimum_confidence=0.85,
+    editable_scope,
+    flattened_mode,
 ):
     overrides = {"slides": {}}
     if overrides_path:
@@ -157,66 +146,98 @@ def build_editability_report(
             overrides_path.expanduser().resolve().read_text(encoding="utf-8")
         )
     semantic_keys = (
+        "covers",
         "shapes",
         "connectors",
         "texts",
         "icons",
         "charts",
         "tables",
+        "imageReplacements",
     )
-    analyses = {}
-    if vision_analysis_path and vision_analysis_path.exists():
-        vision_analysis = json.loads(
-            vision_analysis_path.read_text(encoding="utf-8")
-        )
-        analyses = {
-            int(page["page"]): page
-            for page in vision_analysis.get("pages") or []
-        }
+    required_expected_keys = {
+        "text": (),
+        "text-and-icons": ("icons",),
+        "all": (
+            "covers",
+            "shapes",
+            "connectors",
+            "texts",
+            "icons",
+            "charts",
+            "tables",
+            "imageReplacements",
+        ),
+    }[editable_scope]
     pages = []
     for page in route_report["pages"]:
         candidates = page.get("embedded_image_candidates") or []
-        if not candidates:
+        requires_semantic_review = bool(page.get("flattened") or candidates)
+        if not requires_semantic_review:
             continue
         page_override = overrides.get("slides", {}).get(str(page["page"]), {})
-        override_count = sum(
-            len(page_override.get(key) or []) for key in semantic_keys
-        )
-        raster_review_count = sum(
-            1
-            for region in (
-                analyses.get(int(page["page"]), {}).get("regions") or []
-            )
+        actual_counts = {
+            key: len(page_override.get(key) or []) for key in semantic_keys
+        }
+        override_count = sum(actual_counts.values())
+        review = page_override.get("review") or {}
+        unresolved = review.get("unresolvedRegions") or []
+        expected_counts = review.get("expectedCounts") or {}
+        missing_expected_keys = [
+            key for key in required_expected_keys if key not in expected_counts
+        ]
+        underfilled = {
+            key: {
+                "expected": int(expected_counts.get(key, 0)),
+                "actual": actual_counts.get(key, 0),
+            }
+            for key in required_expected_keys
             if (
-                region.get("recommendedAction") in {"keep-raster", "ignore"}
-                and bool(region.get("reconstructionComplete"))
-                and float(region.get("confidence") or 0)
-                >= minimum_confidence
+                key in expected_counts
+                and actual_counts.get(key, 0) < int(expected_counts.get(key, 0))
             )
-        )
-        if override_count:
-            status = "semantic-overrides-present"
-        elif raster_review_count >= len(candidates):
-            status = "agent-reviewed-raster-accepted"
+        }
+        if editable_scope == "text":
+            passed = not page.get("flattened") or flattened_mode == "ocr"
+            status = "ocr-text-ready" if passed else "ocr-text-required"
         else:
-            status = "review-required"
+            passed = (
+                bool(review.get("completed"))
+                and not unresolved
+                and not missing_expected_keys
+                and not underfilled
+                and (not page.get("flattened") or flattened_mode == "ocr")
+            )
+            status = (
+                "semantic-review-complete" if passed else "review-required"
+            )
         pages.append(
             {
                 "page": page["page"],
+                "flattened": bool(page.get("flattened")),
                 "candidate_count": len(candidates),
                 "candidates": candidates,
                 "semantic_override_count": override_count,
-                "raster_review_count": raster_review_count,
+                "actual_counts": actual_counts,
+                "expected_counts": expected_counts,
+                "missing_expected_keys": missing_expected_keys,
+                "underfilled_counts": underfilled,
+                "unresolved_regions": unresolved,
+                "allowed_raster_regions": review.get("allowedRasterRegions") or [],
+                "review_completed": bool(review.get("completed")),
                 "status": status,
             }
         )
     return {
+        "editable_scope": editable_scope,
         "candidate_page_count": len(pages),
         "candidate_image_count": sum(
             page["candidate_count"] for page in pages
         ),
         "review_required_pages": [
-            page["page"] for page in pages if page["status"] == "review-required"
+            page["page"]
+            for page in pages
+            if page["status"] in {"review-required", "ocr-text-required"}
         ],
         "pages": pages,
     }
@@ -256,27 +277,12 @@ def main():
         help="用于完全扁平化 PDF：选择整页图片高保真模式或 OCR 文字可编辑模式。",
     )
     parser.add_argument(
-        "--text-grouping",
-        choices=("line", "hybrid", "paragraph"),
-        default="hybrid",
-        help="原生PDF文字框粒度：line逐行；hybrid保守段落聚类（默认）；paragraph扩大段落聚类。",
-    )
-    parser.add_argument(
-        "--line-break-mode",
-        choices=("preserve", "smart", "reflow"),
-        default="preserve",
-        help="合并段落内部的换行策略：preserve保留模板换行（默认）；smart识别软换行；reflow尽量自动重排。",
-    )
-    parser.add_argument(
-        "--paragraph-order",
-        choices=("source", "spatial"),
-        default="spatial",
-        help="OCR 段落阅读顺序；spatial 可避免多栏页面的检测顺序把同一段落拆散。",
-    )
-    parser.add_argument(
-        "--require-paragraph-coverage",
-        action="store_true",
-        help="将未合并的多行段落候选设为阻断错误；用户明确要求整段一起编辑时启用。",
+        "--editable-scope",
+        choices=("text", "text-and-icons", "all"),
+        default="all",
+        help=(
+            "交付可编辑范围；默认 all，要求逐页确认文字、图标、图形、图表和表格。"
+        ),
     )
     parser.add_argument(
         "--ocr-json-dir",
@@ -315,17 +321,6 @@ def main():
         help="OCR 标题字体；auto 会根据当前系统选择。",
     )
     parser.add_argument(
-        "--typography-profile",
-        type=Path,
-        help="扁平化页面字体与字号规范 JSON；要求贴合模板字体时建议显式提供。",
-    )
-    parser.add_argument(
-        "--font-size-mode",
-        choices=("raw", "normalized", "strict"),
-        default="normalized",
-        help="OCR 字号策略；normalized/strict 会统一相同样式的字体与字号。",
-    )
-    parser.add_argument(
         "--ocr-corrections",
         type=Path,
         help="包含精确文字替换和归一化排除区域的 JSON 文件。",
@@ -337,71 +332,39 @@ def main():
         help="可编辑文字的最低 OCR 置信度，默认值：0.45。",
     )
     parser.add_argument(
+        "--ocr-body-font-scale",
+        type=float,
+        default=0.75,
+        help="OCR 正文字号比例，默认值：0.75。",
+    )
+    parser.add_argument(
+        "--ocr-title-font-scale",
+        type=float,
+        default=0.78,
+        help="OCR 页标题字号比例，默认值：0.78。",
+    )
+    parser.add_argument(
+        "--ocr-display-font-scale",
+        type=float,
+        default=0.98,
+        help="OCR 封面标题和展示数字字号比例，默认值：0.98。",
+    )
+    parser.add_argument(
+        "--ocr-minimum-font-size",
+        type=float,
+        default=5,
+        help="OCR 可编辑文字最小字号，默认值：5 磅。",
+    )
+    parser.add_argument(
+        "--ocr-maximum-font-size",
+        type=float,
+        default=96,
+        help="OCR 可编辑文字最大字号，默认值：96 磅。",
+    )
+    parser.add_argument(
         "--overrides",
         type=Path,
         help="可选的独立图标、原生图表、表格和形状重建清单。",
-    )
-    parser.add_argument(
-        "--editable-targets",
-        default="",
-        help="必须元素化的对象类别，逗号分隔：text,icons,shapes,connectors,tables,charts。",
-    )
-    parser.add_argument(
-        "--residue-ocr-engine",
-        choices=("auto", "apple-vision", "tesseract"),
-        default="auto",
-        help="最终去字背景二次 OCR 后端；与首次 OCR 独立运行。",
-    )
-    parser.add_argument(
-        "--vision-mode",
-        choices=("off", "audit", "assist", "required"),
-        default="off",
-        help="视觉语义增强：off关闭；audit只分析；assist应用高置信度重建；required存在未解决区域时失败。",
-    )
-    parser.add_argument(
-        "--vision-provider",
-        choices=("http", "json"),
-        default="http",
-        help="视觉分析提供方：Linux 内网 HTTP 服务或离线 JSON。",
-    )
-    parser.add_argument("--vision-endpoint", help="HTTP 视觉服务端点。")
-    parser.add_argument(
-        "--vision-json-dir",
-        type=Path,
-        help="离线视觉分析 JSON 目录，文件名为 page-XX.json 或 slide-XX.json。",
-    )
-    parser.add_argument(
-        "--vision-pages",
-        help="显式指定视觉分析页码，例如 1,3-5；默认分析扁平化页和大图候选页。",
-    )
-    parser.add_argument(
-        "--vision-min-confidence",
-        type=float,
-        default=0.85,
-        help="自动应用视觉重建的最低置信度，默认 0.85。",
-    )
-    parser.add_argument(
-        "--vision-timeout-seconds",
-        type=int,
-        default=180,
-        help="单页视觉服务调用超时，默认 180 秒。",
-    )
-    parser.add_argument(
-        "--vision-render-dpi",
-        type=int,
-        default=200,
-        help="视觉模型输入页面的渲染 DPI，默认 200。",
-    )
-    parser.add_argument(
-        "--vision-qa-mode",
-        choices=("auto", "off", "audit", "required"),
-        default="auto",
-        help="最终视觉复核；auto 在视觉关闭时关闭、required 模式下强制，其余只审计。",
-    )
-    parser.add_argument(
-        "--allow-unverified-vision-text",
-        action="store_true",
-        help="允许将只有视觉模型证据的文字写入 PPT；默认关闭，生产环境不建议启用。",
     )
     parser.add_argument(
         "--watermark-mode",
@@ -451,12 +414,19 @@ def main():
         raise ValueError("--max-pages 不能小于 0")
     if args.watermark_qa_ocr_timeout_seconds <= 0:
         raise ValueError("--watermark-qa-ocr-timeout-seconds 必须大于 0")
-    if args.vision_timeout_seconds <= 0:
-        raise ValueError("--vision-timeout-seconds 必须大于 0")
-    if args.vision_render_dpi < 96:
-        raise ValueError("--vision-render-dpi 不能小于 96")
-    if not 0 <= args.vision_min_confidence <= 1:
-        raise ValueError("--vision-min-confidence 必须位于 0 到 1")
+    for name in (
+        "ocr_body_font_scale",
+        "ocr_title_font_scale",
+        "ocr_display_font_scale",
+        "ocr_minimum_font_size",
+        "ocr_maximum_font_size",
+    ):
+        if getattr(args, name) <= 0:
+            raise ValueError(f"--{name.replace('_', '-')} 必须大于 0")
+    if args.ocr_maximum_font_size < args.ocr_minimum_font_size:
+        raise ValueError(
+            "--ocr-maximum-font-size 不能小于 --ocr-minimum-font-size"
+        )
 
     input_pdf = args.input.expanduser().resolve()
     output_pptx = args.output.expanduser().resolve()
@@ -498,12 +468,6 @@ def main():
         )
 
     work_dir.mkdir(parents=True, exist_ok=True)
-    os.environ.update(
-        fontconfig_environment(
-            libreoffice,
-            work_dir / "fontconfig-cache",
-        )
-    )
     output_pptx.parent.mkdir(parents=True, exist_ok=True)
     source_render_dir = work_dir / "pdf-renders"
     source_render_dir.mkdir(parents=True, exist_ok=True)
@@ -523,27 +487,7 @@ def main():
     )
     normalize_source_renders(source_render_dir)
 
-    vision_render_dir = source_render_dir
-    if args.vision_mode != "off":
-        vision_render_dir = work_dir / "vision-renders"
-        vision_render_dir.mkdir(parents=True, exist_ok=True)
-        for old in vision_render_dir.glob("raw-*.png"):
-            old.unlink()
-        run(
-            [
-                pdftoppm,
-                "-png",
-                "-r",
-                str(args.vision_render_dpi),
-                input_pdf,
-                vision_render_dir / "raw",
-            ],
-            timeout_seconds=args.command_timeout_seconds,
-        )
-        normalize_source_renders(vision_render_dir)
-
     model_path = work_dir / "pdf-model.json"
-    text_grouping_report_path = work_dir / "text-grouping-report.json"
     extract_command = [
         sys.executable,
         SKILL_DIR / "scripts" / "extract_pdf_model.py",
@@ -561,33 +505,10 @@ def main():
         str(args.watermark_opacity_threshold),
         "--watermark-report",
         work_dir / "watermark-report.json",
-        "--text-grouping",
-        args.text_grouping,
-        "--line-break-mode",
-        args.line_break_mode,
-        "--text-grouping-report",
-        text_grouping_report_path,
     ]
     for watermark_text in args.watermark_text:
         extract_command.extend(["--watermark-text", watermark_text])
     run(extract_command, timeout_seconds=args.command_timeout_seconds)
-    text_grouping_qa_path = work_dir / "text-grouping-qa-report.json"
-    text_grouping_qa_command = [
-            sys.executable,
-            SKILL_DIR / "scripts" / "validate_text_grouping.py",
-            "--model",
-            model_path,
-            "--grouping-report",
-            text_grouping_report_path,
-            "--output",
-            text_grouping_qa_path,
-        ]
-    if args.require_paragraph_coverage:
-        text_grouping_qa_command.append("--require-paragraph-coverage")
-    run(
-        text_grouping_qa_command,
-        timeout_seconds=args.command_timeout_seconds,
-    )
 
     route_report = classify_pdf_model(model_path)
     route_report_path = work_dir / "route-report.json"
@@ -595,114 +516,17 @@ def main():
         json.dumps(route_report, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
-    vision_analysis_path = work_dir / "vision-analysis.json"
-    semantic_plan_path = work_dir / "semantic-plan.json"
-    semantic_overrides_path = work_dir / "semantic-overrides.json"
-    effective_overrides = (
-        args.overrides.expanduser().resolve() if args.overrides else None
-    )
-    if args.vision_mode != "off":
-        vision_command = [
-            sys.executable,
-            SKILL_DIR / "scripts" / "analyze_pages_with_vision.py",
-            "--model",
-            model_path,
-            "--route-report",
-            route_report_path,
-            "--render-dir",
-            vision_render_dir,
-            "--output",
-            vision_analysis_path,
-            "--mode",
-            args.vision_mode,
-            "--provider",
-            args.vision_provider,
-            "--timeout-seconds",
-            str(args.vision_timeout_seconds),
-        ]
-        if args.vision_endpoint:
-            vision_command.extend(["--endpoint", args.vision_endpoint])
-        if args.vision_json_dir:
-            vision_command.extend(
-                ["--json-dir", args.vision_json_dir.expanduser().resolve()]
-            )
-        if args.vision_pages:
-            vision_command.extend(["--pages", args.vision_pages])
-        run(vision_command, timeout_seconds=args.command_timeout_seconds)
-
-        fusion_command = [
-            sys.executable,
-            SKILL_DIR / "scripts" / "fuse_vision_evidence.py",
-            "--model",
-            model_path,
-            "--vision-analysis",
-            vision_analysis_path,
-            "--output-plan",
-            semantic_plan_path,
-            "--output-overrides",
-            semantic_overrides_path,
-            "--minimum-confidence",
-            str(args.vision_min_confidence),
-            "--mode",
-            args.vision_mode,
-            "--editable-targets",
-            args.editable_targets,
-        ]
-        if effective_overrides:
-            fusion_command.extend(["--base-overrides", effective_overrides])
-        if args.allow_unverified_vision_text:
-            fusion_command.append("--allow-unverified-vision-text")
-        run(fusion_command, timeout_seconds=args.command_timeout_seconds)
-        effective_overrides = semantic_overrides_path
-    else:
-        vision_analysis_path.write_text(
-            json.dumps(
-                {
-                    "schemaVersion": "1.0",
-                    "mode": "off",
-                    "provider": None,
-                    "selectedPages": [],
-                    "pages": [],
-                    "errors": [],
-                },
-                ensure_ascii=False,
-                indent=2,
-            ),
-            encoding="utf-8",
-        )
-        semantic_plan_path.write_text(
-            json.dumps(
-                {
-                    "schemaVersion": "1.0",
-                    "visionMode": "off",
-                    "appliedOperationCount": 0,
-                    "unresolvedRegions": [],
-                    "pages": [],
-                },
-                ensure_ascii=False,
-                indent=2,
-            ),
-            encoding="utf-8",
-        )
-
     editability_report = build_editability_report(
         route_report,
-        effective_overrides,
-        vision_analysis_path,
-        args.vision_min_confidence,
+        args.overrides,
+        args.editable_scope,
+        args.flattened_mode,
     )
     editability_report_path = work_dir / "editability-report.json"
     editability_report_path.write_text(
         json.dumps(editability_report, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
-    if args.vision_mode == "required" and editability_report["review_required_pages"]:
-        pages = "、".join(
-            str(page) for page in editability_report["review_required_pages"]
-        )
-        raise RuntimeError(
-            f"视觉 required 模式下第 {pages} 页仍有未完成语义重建的大面积图片"
-        )
     print(
         f"检测到 {route_report['route']} 类型 PDF："
         f"{route_report['flattened_pages']}/{route_report['page_count']} 页为扁平化页面"
@@ -744,6 +568,8 @@ def main():
             "覆盖清单重建指定区域。转换器已停止，避免静默输出不可编辑页面。"
         )
 
+    build_manifest_path = work_dir / "build-manifest.json"
+    layout_report_path = work_dir / "ocr-layout-report.json"
     if route_report["route"] == "flattened" and args.flattened_mode == "ocr":
         flattened_model = work_dir / "flattened-editable-model.json"
         command = [
@@ -769,18 +595,20 @@ def main():
             args.ocr_body_font,
             "--title-font",
             args.ocr_title_font,
-            "--text-grouping",
-            args.text_grouping,
-            "--line-break-mode",
-            args.line_break_mode,
-            "--paragraph-order",
-            args.paragraph_order,
-            "--font-size-mode",
-            args.font_size_mode,
-            "--text-grouping-report",
-            work_dir / "flattened-text-grouping-report.json",
-            "--typography-report",
-            work_dir / "typography-calibration-report.json",
+            "--render-dpi",
+            "96",
+            "--body-font-scale",
+            str(args.ocr_body_font_scale),
+            "--title-font-scale",
+            str(args.ocr_title_font_scale),
+            "--display-font-scale",
+            str(args.ocr_display_font_scale),
+            "--minimum-font-size",
+            str(args.ocr_minimum_font_size),
+            "--maximum-font-size",
+            str(args.ocr_maximum_font_size),
+            "--layout-report",
+            layout_report_path,
         ]
         if args.tesseract:
             command.extend(["--tesseract", args.tesseract])
@@ -792,32 +620,7 @@ def main():
             command.extend(
                 ["--corrections", args.ocr_corrections.expanduser().resolve()]
             )
-        if args.typography_profile:
-            command.extend(
-                [
-                    "--typography-profile",
-                    args.typography_profile.expanduser().resolve(),
-                ]
-            )
         run(command, timeout_seconds=args.command_timeout_seconds)
-        flattened_grouping_qa_command = [
-                sys.executable,
-                SKILL_DIR / "scripts" / "validate_text_grouping.py",
-                "--model",
-                flattened_model,
-                "--grouping-report",
-                work_dir / "flattened-text-grouping-report.json",
-                "--output",
-                text_grouping_qa_path,
-            ]
-        if args.require_paragraph_coverage:
-            flattened_grouping_qa_command.append(
-                "--require-paragraph-coverage"
-            )
-        run(
-            flattened_grouping_qa_command,
-            timeout_seconds=args.command_timeout_seconds,
-        )
 
         local_builder = SKILL_DIR / "scripts" / "build_flattened_ocr_ppt.mjs"
         command = [
@@ -827,11 +630,11 @@ def main():
             flattened_model,
             "--output",
             output_pptx,
+            "--build-manifest",
+            build_manifest_path,
         ]
-        if effective_overrides:
-            command.extend(["--overrides", effective_overrides])
-        build_manifest_path = work_dir / "build-manifest.json"
-        command.extend(["--build-manifest", build_manifest_path])
+        if args.overrides:
+            command.extend(["--overrides", args.overrides.expanduser().resolve()])
         run(
             command,
             cwd=work_dir,
@@ -846,25 +649,38 @@ def main():
             model_path,
             "--output",
             output_pptx,
+            "--build-manifest",
+            build_manifest_path,
         ]
-        if effective_overrides:
-            command.extend(["--overrides", effective_overrides])
-        build_manifest_path = work_dir / "build-manifest.json"
-        command.extend(["--build-manifest", build_manifest_path])
+        if args.overrides:
+            command.extend(["--overrides", args.overrides.expanduser().resolve()])
         run(
             command,
             cwd=work_dir,
             timeout_seconds=args.command_timeout_seconds,
         )
+        layout_report_path.write_text(
+            json.dumps(
+                {
+                    "schemaVersion": 1,
+                    "passed": True,
+                    "status": "not-applicable",
+                    "reason": "PDF 包含原生文字对象，沿用 PDF 字体与字号元数据。",
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
 
     semantic_qa_path = work_dir / "semantic-build-report.json"
-    if effective_overrides:
+    if args.overrides:
         run(
             [
                 sys.executable,
                 SKILL_DIR / "scripts" / "validate_semantic_build.py",
                 "--overrides",
-                effective_overrides,
+                args.overrides.expanduser().resolve(),
                 "--build-manifest",
                 build_manifest_path,
                 "--output",
@@ -878,7 +694,7 @@ def main():
                 {
                     "passed": True,
                     "expectedObjectCount": 0,
-                    "emittedObjectCount": 0,
+                    "emittedSemanticObjectCount": 0,
                     "missingObjects": [],
                     "failedObjects": [],
                 },
@@ -888,177 +704,26 @@ def main():
             encoding="utf-8",
         )
 
-    canvas_report_path = work_dir / "canvas-overflow-report.json"
+    editable_surface_path = work_dir / "editable-surface-report.json"
+    editable_surface_command = [
+        sys.executable,
+        SKILL_DIR / "scripts" / "audit_editable_surface.py",
+        "--pptx",
+        output_pptx,
+        "--output",
+        editable_surface_path,
+    ]
+    if route_report["route"] == "flattened" and args.flattened_mode == "ocr":
+        editable_surface_command.extend(
+            [
+                "--foreground-only-pptx",
+                work_dir / "editable-foreground-only.pptx",
+            ]
+        )
     run(
-        [
-            sys.executable,
-            SKILL_DIR / "scripts" / "validate_canvas_bounds.py",
-            "--pptx",
-            output_pptx,
-            "--output",
-            canvas_report_path,
-        ],
+        editable_surface_command,
         timeout_seconds=args.command_timeout_seconds,
     )
-
-    editable_coverage_path = work_dir / "editable-coverage-report.json"
-    if args.editable_targets.strip():
-        coverage_model = (
-            flattened_model
-            if (
-                route_report["route"] == "flattened"
-                and args.flattened_mode == "ocr"
-            )
-            else model_path
-        )
-        run(
-            [
-                sys.executable,
-                SKILL_DIR / "scripts" / "validate_editable_coverage.py",
-                "--build-manifest",
-                build_manifest_path,
-                "--model",
-                coverage_model,
-                "--vision-analysis",
-                vision_analysis_path,
-                "--semantic-plan",
-                semantic_plan_path,
-                "--targets",
-                args.editable_targets,
-                "--output",
-                editable_coverage_path,
-            ],
-            timeout_seconds=args.command_timeout_seconds,
-        )
-    else:
-        editable_coverage_path.write_text(
-            json.dumps(
-                {
-                    "schemaVersion": "1.0",
-                    "targets": [],
-                    "passed": True,
-                    "notRequired": True,
-                },
-                ensure_ascii=False,
-                indent=2,
-            ),
-            encoding="utf-8",
-        )
-
-    editable_target_set = {
-        item.strip().lower()
-        for item in args.editable_targets.split(",")
-        if item.strip()
-    }
-    editable_surface_path = work_dir / "editable-surface-audit.json"
-    foreground_only_path = work_dir / "foreground-only.pptx"
-    foreground_render_dir = work_dir / "foreground-renders"
-    residue_report_path = work_dir / "editability-residue-report.json"
-    if editable_target_set:
-        run(
-            [
-                sys.executable,
-                SKILL_DIR / "scripts" / "audit_editable_surface.py",
-                "--pptx",
-                output_pptx,
-                "--output",
-                editable_surface_path,
-                "--foreground-only-pptx",
-                foreground_only_path,
-                "--semantic-plan",
-                semantic_plan_path,
-            ],
-            timeout_seconds=args.command_timeout_seconds,
-        )
-    else:
-        editable_surface_path.write_text(
-            json.dumps(
-                {"schemaVersion": "1.0", "passed": True, "notRequired": True},
-                ensure_ascii=False,
-                indent=2,
-            ),
-            encoding="utf-8",
-        )
-
-    if (
-        "text" in editable_target_set
-        and route_report["route"] == "flattened"
-        and args.flattened_mode == "ocr"
-    ):
-        residue_ocr_dir = work_dir / "final-background-residue-ocr"
-        residue_command = [
-            sys.executable,
-            SKILL_DIR / "scripts" / "ocr_background_residue.py",
-            "--input-dir",
-            work_dir / "flattened-editable" / "clean-backgrounds",
-            "--output-dir",
-            residue_ocr_dir,
-            "--ocr-engine",
-            args.residue_ocr_engine,
-            "--languages",
-            args.ocr_languages,
-            "--tesseract-psm",
-            str(args.tesseract_psm),
-        ]
-        if args.tesseract:
-            residue_command.extend(["--tesseract", args.tesseract])
-        run(
-            residue_command,
-            timeout_seconds=args.command_timeout_seconds,
-        )
-        surface_audit = json.loads(
-            editable_surface_path.read_text(encoding="utf-8")
-        )
-        coverage_result = json.loads(
-            editable_coverage_path.read_text(encoding="utf-8")
-        )
-        required_object_count = sum(
-            int(value)
-            for value in (coverage_result.get("expected") or {}).values()
-        )
-        unresolved_graphics = len(
-            coverage_result.get("unresolved") or []
-        )
-        run(
-            [
-                sys.executable,
-                SKILL_DIR
-                / "scripts"
-                / "build_editability_residue_report.py",
-                "--ocr-dir",
-                residue_ocr_dir,
-                "--output",
-                residue_report_path,
-                "--required-object-count",
-                str(required_object_count),
-                "--foreground-object-count",
-                str(
-                    surface_audit.get("totals", {}).get(
-                        "foregroundObjectCount", 0
-                    )
-                ),
-                "--unresolved-graphic-regions",
-                str(unresolved_graphics),
-            ],
-            timeout_seconds=args.command_timeout_seconds,
-        )
-        residue_result = json.loads(
-            residue_report_path.read_text(encoding="utf-8")
-        )
-        if not residue_result.get("passed"):
-            raise RuntimeError(
-                "最终去字背景仍有有效文字残留，或前景对象覆盖不足；"
-                "已停止交付，详见 editability-residue-report.json"
-            )
-    else:
-        residue_report_path.write_text(
-            json.dumps(
-                {"schemaVersion": "1.0", "passed": True, "notRequired": True},
-                ensure_ascii=False,
-                indent=2,
-            ),
-            encoding="utf-8",
-        )
 
     render_dir = work_dir / "artifact-renders"
     run(
@@ -1078,65 +743,6 @@ def main():
         ],
         timeout_seconds=args.command_timeout_seconds,
     )
-    if editable_target_set:
-        run(
-            [
-                sys.executable,
-                SKILL_DIR / "scripts" / "render_pptx.py",
-                "--input",
-                foreground_only_path,
-                "--render-dir",
-                foreground_render_dir,
-                "--libreoffice",
-                libreoffice,
-                "--pdftoppm",
-                pdftoppm,
-                "--timeout-seconds",
-                str(args.command_timeout_seconds),
-            ],
-            timeout_seconds=args.command_timeout_seconds,
-        )
-
-    visual_qa_mode = args.vision_qa_mode
-    if visual_qa_mode == "auto":
-        if args.vision_mode == "off":
-            visual_qa_mode = "off"
-        elif args.vision_mode == "required":
-            visual_qa_mode = "required"
-        else:
-            visual_qa_mode = "audit"
-    visual_qa_path = work_dir / "visual-qa-report.json"
-    visual_qa_command = [
-        sys.executable,
-        SKILL_DIR / "scripts" / "review_renders_with_vision.py",
-        "--source-render-dir",
-        vision_render_dir,
-        "--artifact-render-dir",
-        render_dir,
-        "--output",
-        visual_qa_path,
-        "--mode",
-        visual_qa_mode,
-        "--provider",
-        args.vision_provider,
-        "--timeout-seconds",
-        str(args.vision_timeout_seconds),
-    ]
-    if args.vision_endpoint:
-        visual_qa_command.extend(["--endpoint", args.vision_endpoint])
-    if args.vision_json_dir:
-        visual_qa_command.extend(
-            ["--json-dir", args.vision_json_dir.expanduser().resolve()]
-        )
-    if editable_target_set:
-        visual_qa_command.extend(
-            [
-                "--foreground-render-dir",
-                foreground_render_dir,
-                "--require-foreground",
-            ]
-        )
-    run(visual_qa_command, timeout_seconds=args.command_timeout_seconds)
 
     watermark_qa_path = work_dir / "watermark-handoff-report.json"
     watermark_qa_mode = (
@@ -1192,55 +798,26 @@ def main():
     semantic_qa = json.loads(
         semantic_qa_path.read_text(encoding="utf-8")
     )
-    text_grouping_qa = json.loads(
-        text_grouping_qa_path.read_text(encoding="utf-8")
+    editable_surface = json.loads(
+        editable_surface_path.read_text(encoding="utf-8")
     )
-    semantic_plan = json.loads(
-        semantic_plan_path.read_text(encoding="utf-8")
-    )
-    visual_qa = json.loads(
-        visual_qa_path.read_text(encoding="utf-8")
-    )
-    editable_coverage = json.loads(
-        editable_coverage_path.read_text(encoding="utf-8")
-    )
-    residue_gate = json.loads(
-        residue_report_path.read_text(encoding="utf-8")
-    )
-    canvas_gate = json.loads(
-        canvas_report_path.read_text(encoding="utf-8")
-    )
-    typography_path = work_dir / "typography-calibration-report.json"
-    typography = (
-        json.loads(typography_path.read_text(encoding="utf-8"))
-        if typography_path.exists()
-        else {"passed": True, "mode": "native-pdf"}
+    layout_qa = json.loads(
+        layout_report_path.read_text(encoding="utf-8")
     )
     output_sha256 = hashlib.sha256(output_pptx.read_bytes()).hexdigest()
     editability_review_passed = not bool(
         editability_report.get("review_required_pages")
-    )
-    unresolved_semantic_regions = semantic_plan.get("unresolvedRegions", [])
-    agent_visual_qa_pending = (
-        visual_qa_mode == "off"
-        and (
-            args.vision_mode != "off"
-            or bool(editable_target_set)
-        )
-    )
-    visual_gate_passed = visual_qa_gate(
-        visual_qa_mode,
-        agent_visual_qa_pending,
-        bool(visual_qa.get("passed")),
-    )
+    ) and bool(semantic_qa.get("passed")) and bool(editable_surface.get("passed"))
+    layout_qa_passed = bool(layout_qa.get("passed"))
     handoff = {
-        "schemaVersion": "1.1",
+        "schemaVersion": "1.2",
         "producerSkill": "pdf-to-editable-ppt",
         "templatePptx": str(output_pptx),
         "templateSha256": output_sha256,
         "pathBinding": "sha256",
         "sourcePdf": str(input_pdf),
         "route": route_report["route"],
+        "editableScope": args.editable_scope,
         "watermarkPolicy": (
             "keep" if args.keep_watermarks else args.watermark_mode
         ),
@@ -1260,106 +837,28 @@ def main():
         "editabilityReportSha256": hashlib.sha256(
             editability_report_path.read_bytes()
         ).hexdigest(),
-        "textGroupingMode": args.text_grouping,
-        "lineBreakMode": args.line_break_mode,
-        "textGroupingQaPassed": bool(text_grouping_qa.get("passed")),
-        "textGroupingQaReport": str(text_grouping_qa_path),
-        "textGroupingQaReportRelative": str(
-            text_grouping_qa_path.relative_to(work_dir)
-        ),
-        "textGroupingQaReportSha256": hashlib.sha256(
-            text_grouping_qa_path.read_bytes()
-        ).hexdigest(),
-        "visionMode": args.vision_mode,
-        "visionAnalysisReport": str(vision_analysis_path),
-        "visionAnalysisReportRelative": str(
-            vision_analysis_path.relative_to(work_dir)
-        ),
-        "visionAnalysisReportSha256": hashlib.sha256(
-            vision_analysis_path.read_bytes()
-        ).hexdigest(),
-        "semanticPlan": str(semantic_plan_path),
-        "semanticPlanRelative": str(semantic_plan_path.relative_to(work_dir)),
-        "semanticPlanSha256": hashlib.sha256(
-            semantic_plan_path.read_bytes()
-        ).hexdigest(),
-        "semanticQaPassed": bool(semantic_qa.get("passed")),
-        "semanticQaReport": str(semantic_qa_path),
-        "semanticQaReportRelative": str(
-            semantic_qa_path.relative_to(work_dir)
-        ),
-        "semanticQaReportSha256": hashlib.sha256(
+        "semanticBuildPassed": bool(semantic_qa.get("passed")),
+        "semanticBuildReport": str(semantic_qa_path),
+        "semanticBuildReportSha256": hashlib.sha256(
             semantic_qa_path.read_bytes()
         ).hexdigest(),
-        "editableTargets": editable_coverage.get("targets", []),
-        "editableCoveragePassed": bool(editable_coverage.get("passed")),
-        "editableCoverageReport": str(editable_coverage_path),
-        "editableCoverageReportRelative": str(
-            editable_coverage_path.relative_to(work_dir)
-        ),
-        "editableCoverageReportSha256": hashlib.sha256(
-            editable_coverage_path.read_bytes()
-        ).hexdigest(),
-        "typographyCalibrationPassed": bool(typography.get("passed")),
-        "typographyMode": typography.get("mode"),
-        "editabilityResiduePassed": bool(residue_gate.get("passed")),
-        "editabilityResidueReport": str(residue_report_path),
-        "editableSurfaceAudit": str(editable_surface_path),
-        "editableSurfaceAuditSha256": hashlib.sha256(
+        "editableSurfacePassed": bool(editable_surface.get("passed")),
+        "editableSurfaceReport": str(editable_surface_path),
+        "editableSurfaceReportSha256": hashlib.sha256(
             editable_surface_path.read_bytes()
         ).hexdigest(),
-        "foregroundOnlyPptx": (
-            str(foreground_only_path) if editable_target_set else None
-        ),
-        "foregroundRenderDirectory": (
-            str(foreground_render_dir) if editable_target_set else None
-        ),
-        "foregroundQaRequired": bool(editable_target_set),
-        "canvasBoundsPassed": bool(canvas_gate.get("passed")),
-        "canvasBoundsReport": str(canvas_report_path),
-        "canvasBoundsReportRelative": str(
-            canvas_report_path.relative_to(work_dir)
-        ),
-        "canvasBoundsReportSha256": hashlib.sha256(
-            canvas_report_path.read_bytes()
+        "layoutCalibrationPassed": layout_qa_passed,
+        "layoutCalibrationReport": str(layout_report_path),
+        "layoutCalibrationReportSha256": hashlib.sha256(
+            layout_report_path.read_bytes()
         ).hexdigest(),
-        "visualQaMode": visual_qa_mode,
-        "visualQaPassed": bool(visual_qa.get("passed")),
-        "agentVisualQaPending": agent_visual_qa_pending,
-        "visualQaReport": str(visual_qa_path),
-        "visualQaReportRelative": str(
-            visual_qa_path.relative_to(work_dir)
-        ),
-        "visualQaReportSha256": hashlib.sha256(
-            visual_qa_path.read_bytes()
-        ).hexdigest(),
-        "unresolvedSemanticRegions": unresolved_semantic_regions,
         "unresolvedEditablePages": editability_report.get(
             "review_required_pages", []
         ),
         "readyForContentReplacement": bool(watermark_qa.get("passed"))
-        and bool(semantic_qa.get("passed"))
-        and bool(text_grouping_qa.get("passed"))
-        and bool(editable_coverage.get("passed"))
-        and bool(typography.get("passed"))
-        and bool(residue_gate.get("passed"))
-        and bool(canvas_gate.get("passed"))
         and editability_review_passed
-        and not unresolved_semantic_regions
-        and visual_gate_passed,
+        and layout_qa_passed,
     }
-    if typography_path.exists():
-        handoff.update(
-            {
-                "typographyCalibrationReport": str(typography_path),
-                "typographyCalibrationReportRelative": str(
-                    typography_path.relative_to(work_dir)
-                ),
-                "typographyCalibrationReportSha256": hashlib.sha256(
-                    typography_path.read_bytes()
-                ).hexdigest(),
-            }
-        )
     handoff_path = work_dir / "conversion-handoff.json"
     handoff_path.write_text(
         json.dumps(handoff, ensure_ascii=False, indent=2),

@@ -5,6 +5,7 @@ import path from 'node:path'
 import {
   AI_BUSINESS_SKILLS,
   AI_PPT_WORKFLOW_SKILLS,
+  getAiSkillDirectory,
   getAiSkillRoot,
   listAiBusinessSkills,
   loadAiSkill,
@@ -57,7 +58,7 @@ async function main() {
 
   for (const definition of AI_BUSINESS_SKILLS) {
     const loaded = await loadAiSkill(definition.name)
-    const directory = path.join(root, definition.name)
+    const directory = getAiSkillDirectory(definition.name)
     const skillSource = await readFile(path.join(directory, 'SKILL.md'), 'utf8')
     const uiSource = await readFile(path.join(directory, 'agents', 'openai.yaml'), 'utf8')
     const referenceName = definition.name === 'answer-project-qa'
@@ -234,8 +235,8 @@ async function main() {
     AI_PPT_WORKFLOW_SKILLS.map((definition) => loadAiSkill(definition.name)),
   )
   assert(
-    'PPT 模板准备与内容替换基础能力均可审计',
-    pptWorkflowSkills.length === 2
+    'PPT 总编排、Gorden 两阶段生成与 PDF 可编辑化能力均可审计',
+    pptWorkflowSkills.length === 3
       && pptWorkflowSkills.every((skill) =>
         containsChinese(skill.instructions)
         && /^sha256-[a-f0-9]{12}$/.test(skill.version)
@@ -243,14 +244,15 @@ async function main() {
     pptWorkflowSkills.map((skill) => `${skill.name}:${skill.version}`).join('、'),
   )
   assert(
-    '投资建议书要求上传模板且工作流只绑定两个顺序 Skill',
-    AI_TEMPLATE_CATALOG.investment_recommendation_ppt.requiredParameters.includes('customTemplateId')
+    '投资建议书默认无需上传模板并保留可审计 PPT Skill',
+    !AI_TEMPLATE_CATALOG.investment_recommendation_ppt.requiredParameters.includes('customTemplateId')
       && AI_TEMPLATE_CATALOG.investment_recommendation_ppt.requiredParameters.includes('structureMode')
       && !AI_TEMPLATE_CATALOG.investment_recommendation_ppt.requiredParameters.includes('pageCount')
+      && AI_TEMPLATE_CATALOG.investment_recommendation_ppt.sections.length === 12
       && AI_TEMPLATE_CATALOG.investment_recommendation_ppt.workflowSkillNames?.join(',')
-        === 'pdf-to-editable-ppt,editable-ppt-content-replacer'
+        === 'create-reference-driven-editable-ppt,GordenSuperPPTSkill,pdf-to-editable-ppt'
       && AI_TEMPLATE_CATALOG.investment_recommendation_ppt.skillName
-        === 'editable-ppt-content-replacer',
+        === 'create-reference-driven-editable-ppt',
     `${AI_TEMPLATE_CATALOG.investment_recommendation_ppt.requiredParameters.join('、')} / ${
       AI_TEMPLATE_CATALOG.investment_recommendation_ppt.workflowSkillNames?.join('、')}`,
   )
@@ -843,7 +845,7 @@ async function main() {
   )
 
   const pptContract = await readFile(
-    path.join(root, 'editable-ppt-content-replacer', 'SKILL.md'),
+    path.join(root, 'GordenSuperPPTSkills', 'GordenSuperPPTSkill', 'SKILL.md'),
     'utf8',
   )
   const pptWorkflowSource = await readFile(
@@ -860,65 +862,52 @@ async function main() {
     path.resolve(process.cwd(), 'server', 'src', 'services', 'aiBusinessDocumentService.ts'),
     'utf8',
   )
-  const pptReplacerSource = await readFile(
+  const pptGeneratorSource = await readFile(
     path.resolve(
       process.cwd(),
       'server',
       'src',
       'services',
-      'aiEditablePptContentReplacerService.ts',
-    ),
-    'utf8',
-  )
-  const pptOpenXmlRuntimeSource = await readFile(
-    path.resolve(
-      process.cwd(),
-      'server',
-      'workspace',
-      '.agents',
-      'skills',
-      'editable-ppt-content-replacer',
-      'scripts',
-      'openxml_runtime.py',
+      'aiGordenSuperPptService.ts',
     ),
     'utf8',
   )
   assert(
-    'PPT Skill 明确单一可编辑 PPTX 链路',
-    /原生可编辑对象/.test(pptContract)
-      && /不得再生成第二份\s*纯图片 PPTX/.test(pptContract)
-      && /pdf-to-editable-ppt/.test(pptContract)
-      && /editable-ppt-content-replacer/.test(pptContract)
-      && /sourceMode:\s*"native-pptx"/.test(pptContract),
-    '核心内容原生可编辑 / 仅一份正式 PPTX',
+    'PPT Skill 明确图片生成与四层可编辑还原链路',
+    /阶段 1：GordenImagePPTGen/.test(pptContract)
+      && /阶段 2：GordenImage2PPTX/.test(pptContract)
+      && /强制四层/.test(pptContract)
+      && /imagegen-manifest\.json/.test(pptContract)
+      && /imagegen-assets-manifest\.json/.test(pptContract),
+    '网关成品图 / 背景、框架、图标、文本四层 / 生成证据',
   )
   assert(
-    'PDF 转换交接门槛和原生 PPTX 跳过逻辑已接入',
+    'PDF 转换交接门槛和最终桥接 PDF 可编辑化已接入',
     [
       'watermarkQaPassed',
       'editabilityReviewPassed',
       'readyForContentReplacement',
       'pdf-converted',
       'native-pptx',
-      '用户上传模板为原生可编辑 PPTX，无需执行 PDF 转换',
+      '桥接 PDF 元素级可编辑化',
     ].every((term) => pptWorkflowSource.includes(term)),
-    'PDF 模板必须通过交接证书；上传的原生 PPTX 记录 converter not-required',
+    'PDF 模板必须通过交接证书；原生 PPTX 仍执行最终桥接 PDF 可编辑化',
   )
   assert(
-    '可编辑内容替换使用语义键、证据备注和生成后 Reviewer',
-    pptWorkflowSource.includes("schemaVersion: '1.3'")
-      && pptWorkflowSource.includes("defaultOperation: 'KEEP'")
-      && pptWorkflowSource.includes('semanticKey')
-      && pptWorkflowSource.includes('evidenceIds')
-      && pptWorkflowSource.includes('sourceNotesPresent')
-      && pptDocumentSource.includes('generateInvestmentRecommendationPptFromTemplate')
-      && pptReplacerSource.includes('replacement-manifest.json')
-      && pptReplacerSource.includes('apply_template_plan_openxml.py')
-      && pptReplacerSource.includes('validate_template_result_openxml.py')
-      && pptReplacerSource.includes('final-watermark-qa.json')
-      && pptOpenXmlRuntimeSource.includes('run_properties.set("lang", "zh-CN")')
-      && pptOpenXmlRuntimeSource.includes('语言标记属于校对和字体回退元数据'),
-    'KEEP / semanticKey / evidenceIds / [Sources] / OpenXML 原位替换、中文语言规范化与水印检查',
+    '三个技能顺序执行模板摄取、网关出图、四层还原、PDF 桥接与最终验收',
+    pptWorkflowSource.includes("item.name === 'GordenSuperPPTSkill'")
+      && pptDocumentSource.includes('generateInvestmentRecommendationPptWithGorden')
+      && pptGeneratorSource.includes('project-facts.json')
+      && pptGeneratorSource.includes('imagegen-manifest.json')
+      && pptGeneratorSource.includes('imagegen-assets-manifest.json')
+      && pptGeneratorSource.includes('chromaKey')
+      && pptGeneratorSource.includes('sliceGrid')
+      && pptGeneratorSource.includes('layoutGuard')
+      && pptGeneratorSource.includes('visualCompareQa')
+      && pptGeneratorSource.includes('packageSlidesAsPdf')
+      && pptGeneratorSource.includes('validatePipelineHandoff')
+      && pptGeneratorSource.includes('convertPdf'),
+    '模板 DNA / 网关图片证据 / 四层还原 / PDF 桥接 / 元素级可编辑验收',
   )
 
   const quickActionsSource = await readFile(
@@ -938,20 +927,21 @@ async function main() {
     'utf8',
   )
   assert(
-    '投资建议书前端和任务 API 强制使用上传模板',
-    quickActionsSource.includes("accept={isInvestmentTemplateAction ? '.pdf,.pptx'")
-      && quickActionsSource.includes("purpose: isInvestmentPpt")
-      && quickActionsSource.includes("'investment_recommendation_ppt'")
-      && quickActionsSource.includes('严格沿用上传模板')
-      && assistantPageSource.includes('parameters.customTemplateId = request.customTemplateId')
-      && assistantPageSource.includes("parameters.structureMode = request.structureMode || 'strict-template'")
-      && aiTasksRouteSource.includes("path: ['parameters', 'customTemplateId']")
-      && aiTasksRouteSource.includes("requireAllowed('structureMode', ['strict-template']")
-      && !aiTasksRouteSource.includes("requireAllowed('template', ['公司标准模板']"),
-    'PDF/PPTX 上传 → 模板分析 → customTemplateId → strict-template 任务',
+    '投资建议书快捷任务以高亮会话模式读取项目、附件和对话',
+    quickActionsSource.includes("mode: 'chat'")
+      && quickActionsSource.includes('selectedActionId')
+      && quickActionsSource.includes('aria-pressed')
+      && quickActionsSource.includes('已选中，请输入要求或添加文件')
+      && assistantPageSource.includes("selectedQuickAction === 'investment_ppt'")
+      && assistantPageSource.includes('attachmentFileIds: uploads')
+      && assistantPageSource.includes('attachmentFileNames: uploads.map')
+      && assistantPageSource.includes('force: forceInvestmentPpt')
+      && aiTasksRouteSource.includes("['standard', 'strict-template']")
+      && !AI_TEMPLATE_CATALOG.investment_recommendation_ppt.requiredParameters.includes('customTemplateId'),
+    '点击高亮 → 输入文字/添加文件 → 当前项目与最近对话 → 系统标准 PPTX',
   )
   assert(
-    '投资建议书上传开始即创建持久任务并切换到统一进度条',
+    '历史投资建议书模板准备任务仍可恢复',
     quickActionsSource.includes('onCreatePreparationTask')
       && quickActionsSource.includes('taskId: preparationTaskId')
       && !quickActionsSource.includes('const taskCreated = await submit(result)')
@@ -960,7 +950,7 @@ async function main() {
       && assistantPageSource.includes("'/ai/tasks/preparations/investment-ppt'")
       && assistantPageSource.includes('onCreatePreparationTask={createQuickTaskPreparation}')
       && aiTasksRouteSource.includes('startInvestmentPptTaskAfterPreparation'),
-    '上传开始 → 持久任务 → 模板分析 → 同一任务启动生成；切换会话后仍可恢复',
+    '旧任务上传开始 → 持久任务 → 模板分析 → 同一任务启动生成；切换会话后仍可恢复',
   )
   assert(
     '会话消息、文档任务和项目 Q&A 按创建时间统一排列',

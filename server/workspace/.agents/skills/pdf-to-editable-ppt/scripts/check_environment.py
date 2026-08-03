@@ -11,8 +11,6 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from runtime_environment import fontconfig_environment
-
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 LINUX_REQUIRED_FONTS = ("Noto Sans CJK SC", "Noto Serif CJK SC")
@@ -128,7 +126,7 @@ def pptx_builder_runtime_probe(
         f"const runtime = await import({json.dumps(runtime_uri)});"
         "const built = runtime.createPresentation(960, 540);"
         "if (!built?.pptx || built.slideWidth <= 0) process.exit(2);"
-        "console.log(runtime.runtimeBackend);"
+        "console.log(built.pptx.constructor.name);"
     )
     try:
         result = subprocess.run(
@@ -145,7 +143,7 @@ def pptx_builder_runtime_probe(
     except subprocess.TimeoutExpired:
         return {
             "passed": False,
-            "error": f"PPTX 构建运行时检查超过 {timeout_seconds} 秒",
+            "error": f"PptxGenJS 运行时检查超过 {timeout_seconds} 秒",
         }
     output = (result.stdout or result.stderr).strip()
     return {
@@ -213,29 +211,27 @@ def libreoffice_smoke_test(
     if not pdftoppm:
         return {"passed": False, "error": "未找到 pdftoppm"}
 
+    environment = os.environ.copy()
+    environment.pop("DISPLAY", None)
+    environment.pop("WAYLAND_DISPLAY", None)
+
     try:
         with tempfile.TemporaryDirectory(prefix="lo-smoke-") as directory:
             work = Path(directory)
-            environment = fontconfig_environment(
-                libreoffice,
-                work / "fontconfig-cache",
-            )
-            environment.pop("DISPLAY", None)
-            environment.pop("WAYLAND_DISPLAY", None)
+            profile = work / "lo-profile"
+            profile.mkdir()
 
             # Create a minimal PPTX with python zipfile
             import zipfile
             pptx_path = work / "smoke.pptx"
             _write_minimal_pptx(pptx_path)
-            profile = work / "libreoffice-profile"
-            profile.mkdir()
 
             # Convert PPTX → PDF via LibreOffice headless
             lo_result = subprocess.run(
                 [
                     libreoffice,
-                    f"-env:UserInstallation={profile.as_uri()}",
                     "--headless",
+                    f"-env:UserInstallation={profile.as_uri()}",
                     "--convert-to", "pdf",
                     "--outdir", str(work),
                     str(pptx_path),
@@ -446,18 +442,10 @@ def build_report(
         "PyMuPDF": module_available("fitz"),
         "Pillow": module_available("PIL"),
         "opencv-python-headless": module_available("cv2"),
-    }
-    vision_pipeline_scripts = {
-        name: (SCRIPT_DIR / name).exists()
-        for name in (
-            "prepare_agent_vision.py",
-            "analyze_pages_with_vision.py",
-            "fuse_vision_evidence.py",
-            "review_renders_with_vision.py",
-            "validate_semantic_build.py",
-            "finalize_agent_handoff.py",
-            "semantic_overrides.mjs",
-        )
+        "NumPy": module_available("numpy"),
+        "pypdf": module_available("pypdf"),
+        "reportlab": module_available("reportlab"),
+        "python-pptx": module_available("pptx"),
     }
     tesseract = tesseract_languages(commands["tesseract"], smoke_timeout_seconds)
     command_checks = {
@@ -492,9 +480,13 @@ def build_report(
         for name, present in {
             "LibreOffice": commands["libreoffice"] is not None,
             "Poppler pdftoppm": command_checks["pdftoppm"]["passed"],
-            "PPTX 构建运行时": command_checks["pptx_builder"]["passed"],
+            "PptxGenJS 构建运行时": command_checks["pptx_builder"]["passed"],
             "PyMuPDF": modules["PyMuPDF"],
             "Pillow": modules["Pillow"],
+            "NumPy": modules["NumPy"],
+            "pypdf": modules["pypdf"],
+            "reportlab": modules["reportlab"],
+            "python-pptx": modules["python-pptx"],
             "LibreOffice + pdftoppm 渲染冒烟": libreoffice_smoke["passed"],
             "可写临时目录": temporary_storage["passed"],
         }.items()
@@ -538,8 +530,6 @@ def build_report(
             and modules["opencv-python-headless"]
             and strict_watermark_qa_ready
         ),
-        "vision_pipeline_scripts": vision_pipeline_scripts,
-        "vision_pipeline_ready": all(vision_pipeline_scripts.values()),
         "ready_for_default_workflow": ready_for_default_workflow,
         "powerpoint_native_validation_available": bool(commands["powerpoint"]),
         "linux_compatibility_smoke_available": bool(
@@ -562,7 +552,7 @@ def print_human(report: dict) -> None:
     ):
         print(f"{label}：{report['commands'][key] or '未找到'}")
     builder = report["command_checks"]["pptx_builder"]
-    print(f"PPTX 构建运行时：{'通过' if builder['passed'] else '失败'}")
+    print(f"PptxGenJS 构建运行时：{'通过' if builder['passed'] else '失败'}")
     if builder.get("error"):
         print("  " + str(builder["error"]).replace("\n", "\n  "))
     for label, present in report["python_modules"].items():
@@ -594,10 +584,6 @@ def print_human(report: dict) -> None:
     print(
         "默认严格流程："
         + ("可用" if report["ready_for_default_workflow"] else "不可用")
-    )
-    print(
-        "视觉融合脚本："
-        + ("可用" if report["vision_pipeline_ready"] else "缺失")
     )
     if not report["powerpoint_native_validation_available"]:
         print("原生 PowerPoint 验证：不可用，交付时必须披露替代验证")

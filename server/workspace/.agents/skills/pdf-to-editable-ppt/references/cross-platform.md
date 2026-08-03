@@ -29,10 +29,8 @@ Linux OpenXML 渲染管线可用。`core_ready=true`、
 - Python 3、PyMuPDF、Pillow；
 - Poppler 的 `pdftoppm`；
 - LibreOffice（Linux 无头渲染与冒烟验证）；
-- Node.js；
-- Codex/Presentations 运行时使用 `@oai/artifact-tool`；兼容部署可使用
-  `pptxgenjs`；
-- 内置 Python `zipfile`（PPTX 包扫描与验证）。
+- 内置 Python `zipfile` + Open XML（直接操作 PPTX 包结构，不依赖外部
+  Node.js 运行时）。
 
 OCR 模式还需要 `opencv-python-headless`，并需要 Apple Vision、
 Tesseract 或预先生成的 OCR JSON 中的一种。
@@ -58,7 +56,7 @@ python3 "$SKILL_DIR/scripts/convert_pdf.py" \
 反斜杠续行写法：
 
 ```powershell
-$skillDir = "$env:USERPROFILE\.codex\skills\pdf-to-editable-ppt-vision"
+$skillDir = "$env:USERPROFILE\.codex\skills\pdf-to-editable-ppt"
 py "$skillDir\scripts\convert_pdf.py" `
   --input "D:\data\source.pdf" `
   --output "D:\data\editable.pptx" `
@@ -99,23 +97,9 @@ python3 -m pip install \
   pymupdf pillow opencv-python-headless
 ```
 
-Alpine Linux 使用 musl，Debian/Ubuntu/RHEL 通常使用 glibc。生产环境优先
-使用 Debian/Ubuntu/RHEL 系 glibc 镜像，并在镜像内安装固定版本 Node.js。
-Codex 中先通过 `load_workspace_dependencies` 获取依赖目录，然后设置：
-
-```bash
-export PDF_TO_PPT_ARTIFACT_TOOL_ROOT="/absolute/dependencies/node"
-export AI_PDF_TO_PPT_BUILDER_BACKEND="artifact-tool"
-```
-
-独立服务没有 artifact-tool 时，才设置：
-
-```bash
-export AI_PDF_TO_PPT_BUILDER_BACKEND="pptxgenjs"
-export AI_PDF_TO_PPT_NODE_PROJECT_ROOT="/absolute/project-with-node_modules"
-```
-
-若 Presentations 技能脚本位于自定义目录：
+Alpine Linux 使用 musl，Debian/Ubuntu/RHEL 通常使用 glibc。
+PPTX 操作使用 Python `zipfile` + Open XML，不依赖外部 Node.js 原生模块，
+因此跨 libc 兼容性更好。若 Presentations 技能脚本位于自定义目录：
 
 ```bash
 export PRESENTATIONS_SKILL_DIR="/opt/codex-skills/presentations"

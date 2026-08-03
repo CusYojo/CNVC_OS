@@ -34,6 +34,7 @@ import {
   startAiTemplateAnalysisProgress,
   updateAiTemplateAnalysisProgress,
 } from '../services/aiTemplateAnalysisProgressService.js'
+import { createInvestmentPptTaskFromConversation } from '../services/aiConversationPptIntentService.js'
 
 export const aiTasksRouter = Router()
 
@@ -78,6 +79,7 @@ const createSchema = z.object({
   if (
     body.type === 'investment_proposal'
     || body.type === 'compliance_statement'
+    || body.type === 'investment_recommendation_ppt'
     || body.type === 'project_qa'
   ) {
     const userInstructions = body.parameters.userInstructions
@@ -90,12 +92,12 @@ const createSchema = z.object({
     }
   }
   if (body.type === 'investment_recommendation_ppt') {
-    const customTemplateId = body.parameters.customTemplateId
-    if (typeof customTemplateId !== 'string' || !z.string().uuid().safeParse(customTemplateId).success) {
-      ctx.addIssue({ code: 'custom', path: ['parameters', 'customTemplateId'], message: '请先上传并分析 PDF 或 PPTX 模板' })
-    }
     requireAllowed('language', ['中文'], '首期仅支持中文')
-    requireAllowed('structureMode', ['strict-template'], '投资建议书必须严格沿用上传模板结构')
+    requireAllowed(
+      'structureMode',
+      ['standard', 'strict-template'],
+      '投资建议书结构模式无效',
+    )
   }
   if (body.type === 'due_diligence_report') {
     requireAllowed('diligenceScope', ['商业尽调'], '首期仅支持商业尽调')
@@ -149,6 +151,29 @@ const investmentPptPreparationSchema = z.object({
   outputFormat: z.literal('PPTX'),
   language: z.literal('中文'),
   structureMode: z.literal('strict-template'),
+  userInstructions: z.string().trim().max(2_000).optional(),
+  idempotencyKey: z.string().trim().min(8).max(128),
+}).superRefine((body, ctx) => {
+  if (body.sourceCutoffDate > new Date().toISOString().slice(0, 10)) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['sourceCutoffDate'],
+      message: '资料截止日不能晚于今天',
+    })
+  }
+})
+const conversationPptIntentSchema = z.object({
+  projectId: z.string().uuid(),
+  conversationId: z.string().uuid(),
+  message: z.string().trim().min(1).max(4_000),
+  recentMessages: z.array(z.object({
+    role: z.enum(['user', 'assistant']),
+    content: z.string().max(4_000),
+  })).max(12).default([]),
+  force: z.boolean().optional().default(false),
+  attachmentFileIds: z.array(z.string().uuid()).max(10).default([]),
+  attachmentFileNames: z.array(z.string().trim().min(1).max(255)).max(10).default([]),
+  sourceCutoffDate: dateSchema,
   idempotencyKey: z.string().trim().min(8).max(128),
 }).superRefine((body, ctx) => {
   if (body.sourceCutoffDate > new Date().toISOString().slice(0, 10)) {
@@ -375,6 +400,14 @@ aiTasksRouter.post('/tasks', async (req: AuthedRequest, res, next) => {
     const body = createSchema.parse(req.body ?? {})
     const task = await createAiTask(userFrom(req), body)
     res.status(202).json(task)
+  } catch (error) { next(error) }
+})
+
+aiTasksRouter.post('/tasks/from-conversation', async (req: AuthedRequest, res, next) => {
+  try {
+    const body = conversationPptIntentSchema.parse(req.body ?? {})
+    const result = await createInvestmentPptTaskFromConversation(userFrom(req), body)
+    res.status('task' in result && result.task ? 202 : 200).json(result)
   } catch (error) { next(error) }
 })
 

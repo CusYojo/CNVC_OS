@@ -100,6 +100,18 @@ async function persistConversionFailure(
     watermarkHandoffReport: await readDiagnosticJson(
       path.join(input.workDir, 'watermark-handoff-report.json'),
     ),
+    semanticBuildReport: await readDiagnosticJson(
+      path.join(input.workDir, 'semantic-build-report.json'),
+    ),
+    buildManifest: await readDiagnosticJson(
+      path.join(input.workDir, 'build-manifest.json'),
+    ),
+    rasterSlotOverrides: await readDiagnosticJson(
+      path.join(input.workDir, 'raster-slot-overrides.json'),
+    ),
+    rasterSlotReview: await readDiagnosticJson(
+      path.join(input.workDir, 'raster-slot-review.json'),
+    ),
   }
   try {
     await mkdir(diagnosticRoot, { recursive: true })
@@ -176,6 +188,11 @@ export function conversionFailureMessage(error: unknown) {
   }
   if (/检测到 \d+ 个对象越出画布|canvas-overflow-report\.json/i.test(detail)) {
     return 'PDF 模板转换后的对象越出幻灯片画布，未通过版式边界检查'
+  }
+  if (
+    /语义构建验证失败|semantic-object-missing-name|semantic-build-report\.json/i.test(detail)
+  ) {
+    return 'PDF 模板已完成页面转换，但可编辑对象语义校验未通过'
   }
   if (
     failure.killed

@@ -34,7 +34,7 @@ import { cleanCorruptedText, decodeTextBuffer } from '../services/textQualitySer
 import { curateEvidenceSources } from '../services/aiEvidenceQualityService.js'
 import { fetchDueDiligenceNetworkEvidence } from '../services/aiDueDiligenceNetworkResearchService.js'
 import {
-  buildInvestmentRecommendationReplacementAudit,
+  buildInvestmentRecommendationGenerationAudit,
   prepareInvestmentRecommendationPptWorkflow,
   reviewInvestmentRecommendationPpt,
 } from '../services/aiInvestmentRecommendationPptWorkflowService.js'
@@ -667,7 +667,7 @@ async function main() {
         sourceCutoffDate,
       })
       const workflow = await prepareInvestmentRecommendationPptWorkflow(template)
-      const replacementAudit = buildInvestmentRecommendationReplacementAudit({
+      const generationAudit = buildInvestmentRecommendationGenerationAudit({
         workflow,
         content,
         sources,
@@ -681,29 +681,24 @@ async function main() {
       })
       artifacts.push(outputPath, previewPath)
       const { zip, names, xml } = await openXmlText(outputPath, /^ppt\/slides\/slide\d+\.xml$/)
-      const { names: templateSlideNames } = await openXmlText(
-        template.referencePath,
-        /^ppt\/slides\/slide\d+\.xml$/,
-      )
-      const { xml: notesXml } = await openXmlText(
-        outputPath,
-        /^ppt\/notesSlides\/notesSlide\d+\.xml$/,
-      )
       const previewBuffer = await readFile(previewPath)
       assert(checks, 'AI-009 PPTX 为有效 OpenXML', Boolean(zip.file('ppt/presentation.xml')), outputPath)
       assert(
         checks,
-        'AI-009 页面数量严格继承上传模板',
-        names.length === templateSlideNames.length,
-        `上传模板 ${templateSlideNames.length} 页，实际 ${names.length} 页`,
+        'AI-009 页面数量由项目内容计划确定',
+        names.length === content.sections.length + 2,
+        `内容章节 ${content.sections.length}，封面与结尾各 1 页，实际 ${names.length} 页`,
       )
       const editableTexts = (xml.match(/<a:t>/g) || []).length
       assert(checks, 'AI-009 核心文本为可编辑对象', editableTexts >= names.length * 2, `文本对象 ${editableTexts}`)
+      const pictures = (xml.match(/<p:pic\b/g) || []).length
       assert(
         checks,
-        'AI-009 含原生可编辑文本与形状',
-        xml.includes('<a:t>') && xml.includes('<p:sp>'),
-        '项目核心信息文本框及状态标识形状',
+        'AI-009 含背景、框架与原生可编辑文本分层',
+        xml.includes('<a:t>')
+          && xml.includes('<p:sp>')
+          && pictures >= names.length * 2,
+        `图片层 ${pictures}，文本对象 ${editableTexts}`,
       )
       assert(
         checks,
@@ -717,68 +712,65 @@ async function main() {
       assert(checks, 'AI-009 含免责声明', xml.includes(template.disclaimer), template.disclaimer)
       assert(
         checks,
-        'AI-009 页面备注含来源与截止日',
-        notesXml.includes('[Sources]') && notesXml.includes(sourceCutoffDate),
-        sourceCutoffDate,
+        'AI-009 公司、团队、财务、融资、估值与交易信息进入可编辑正文',
+        content.sections.every((section) => xml.includes(section.title)),
+        content.sections.map((section) => section.title).join('、'),
       )
       const finalSlideXml = await zip.file(`ppt/slides/slide${names.length}.xml`)?.async('string') || ''
       assert(
         checks,
-        'AI-009 文尾与备注包含去重后的引用资料',
-        finalSlideXml.includes('引用资料与责任声明')
-          && notesXml.includes('示例项目商业计划书（脱敏）')
-          && !notesXml.includes('未使用来源（不得进入文尾）'),
-        '最后一页保持模板结构，实际来源写入对应页面备注',
+        'AI-009 结尾页包含投资结论与责任声明',
+        finalSlideXml.includes('投资结论与后续事项')
+          && finalSlideXml.includes(template.disclaimer),
+        '投资结论与后续事项 + 免责声明',
       )
       assert(checks, 'AI-009 生成元数据页数一致', result.slideCount === names.length, `${result.slideCount}/${names.length}`)
-      const themeXml = await zip.file('ppt/theme/theme1.xml')?.async('string') || ''
       const forbiddenSampleTerms = ['佳量', '德塔', 'Epilcure', '曹鹏', 'recommendation-jialiang']
       assert(checks, 'AI-009 未引入损坏语言标记', !xml.includes('lang="und"'), '保留上传模板语言属性')
       assert(
         checks,
-        'AI-009 设置上传模板东亚主题字体',
-        themeXml.includes(`typeface="${result.cjkFont}"`),
+        'AI-009 可编辑文字对象设置中文字体',
+        xml.includes(`typeface="${result.cjkFont}"`),
         result.cjkFont,
       )
       assert(checks, 'AI-009 不含损坏字符', !xml.includes('\uFFFD'), '未发现 U+FFFD')
       assert(checks, 'AI-009 不泄露示例项目与内部模板编号', forbiddenSampleTerms.every((term) => !xml.includes(term)), forbiddenSampleTerms.join('、'))
       assert(
         checks,
-        'AI-009 已按白名单原位应用上传模板',
+        'AI-009 已使用三个指定技能生成并还原上传模板',
         result.templateApplied
-          && result.inheritedCompanyAssets === 0
-          && 'replacementSkill' in result
-          && result.replacementSkill === 'editable-ppt-content-replacer'
-          && 'replacementOperationCount' in result
-          && result.replacementOperationCount > 0
+          && 'generationSkill' in result
+          && result.generationSkill === 'create-reference-driven-editable-ppt'
+          && 'generationRuntime' in result
+          && result.generationRuntime === 'GordenSuperPPTSkills+pdf-bridge+pdf-to-editable-ppt'
           && Boolean(result.templateSha256),
-        `替换 ${
-          'replacementOperationCount' in result ? result.replacementOperationCount : 0
-        } 个白名单对象，模板摘要 ${result.templateSha256.slice(0, 12)}`,
+        `三个技能顺序生成，模板摘要 ${result.templateSha256.slice(0, 12)}`,
       )
       assert(
         checks,
-        'AI-009 工作流只包含 PDF 转换与可编辑内容替换 Skill',
+        'AI-009 工作流只包含三个指定 PPT Skill',
         workflow.sourceMode === 'native-pptx'
-          && workflow.skills.length === 2
-          && workflow.skills[0]?.name === 'pdf-to-editable-ppt'
-          && workflow.skills[0]?.status === 'not-required'
-          && workflow.skills[1]?.name === 'editable-ppt-content-replacer'
-          && workflow.skills[1]?.status === 'applied',
+          && workflow.skills.length === 3
+          && workflow.skills[0]?.name === 'create-reference-driven-editable-ppt'
+          && workflow.skills[0]?.status === 'applied'
+          && workflow.skills[1]?.name === 'GordenSuperPPTSkill'
+          && workflow.skills[1]?.status === 'applied'
+          && workflow.skills[2]?.name === 'pdf-to-editable-ppt'
+          && workflow.skills[2]?.status === 'applied',
         workflow.skills.map((item) => `${item.name}:${item.status}`).join('、'),
       )
       assert(
         checks,
-        'AI-009 替换对象绑定语义键与证据编号',
-        replacementAudit.schemaVersion === '1.3'
-          && replacementAudit.operationCount > 0
-          && replacementAudit.evidenceBoundOperationCount > 0,
-        `${replacementAudit.operationCount} 个操作，${
-          replacementAudit.evidenceBoundOperationCount} 个绑定证据`,
+        'AI-009 Gorden 页面内容绑定项目事实与证据编号',
+        generationAudit.schemaVersion === '1.0'
+          && generationAudit.contentBindingCount > 0
+          && generationAudit.evidenceBoundContentCount > 0,
+        `${generationAudit.contentBindingCount} 个内容绑定，${
+          generationAudit.evidenceBoundContentCount} 个绑定证据`,
       )
       assert(
         checks,
-        'AI-009 内容替换 Reviewer 通过',
+        'AI-009 Gorden 可编辑分层 Reviewer 通过',
         workflowReview.passed,
         workflowReview.issueCodes.join('、') || '通过',
       )

@@ -43,10 +43,10 @@ if (!existsSync(venvPython)) {
   run(bootstrapPython, ['-m', 'venv', venvRoot])
 }
 
-console.log('安装 PDF 转 PPT Python 依赖…')
+console.log('安装 PDF 转 PPT 与 Gorden 可编辑分层重建 Python 依赖…')
 run(venvPython, ['-m', 'pip', 'install', '-r', requirements])
 
-console.log('检查 PyMuPDF、Pillow、OpenCV、Poppler、OCR 与 LibreOffice 渲染管线…')
+console.log('检查 PyMuPDF、Pillow、OpenCV、NumPy、pypdf、reportlab、python-pptx、Poppler、OCR 与 LibreOffice 渲染管线…')
 try {
   run(venvPython, [environmentCheck, '--json'])
 } catch (error) {
@@ -58,4 +58,4 @@ try {
   throw error
 }
 
-console.log('PDF 转 PPT 运行时已就绪。服务端会自动优先使用 server/.venv。')
+console.log('PDF 转换与 Gorden PPT 生成运行时已就绪。服务端会自动优先使用 server/.venv。')

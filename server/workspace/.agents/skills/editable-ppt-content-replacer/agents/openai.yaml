@@ -1,4 +1,0 @@
-interface:
-  display_name: "生成投资建议书 PPT"
-  short_description: "锁定模板背景，使用透明 Logo，并阻止旧数据与排版失控"
-  default_prompt: "使用 $editable-ppt-content-replacer，先锁定项目身份、模板背景和 Logo 槽位，再为每张正文页检索补充可验证数据、建立证据与内容密度门槛，完成原位替换和全页验收。"

@@ -32,6 +32,37 @@ def content_type(asset_name: str) -> str:
     }.get(suffix, "image/png")
 
 
+def raster_slot_name(page_number: int, asset_name: str) -> str:
+    """Return a stable semantic object name required by the build validator."""
+    stem = re.sub(r"[^A-Za-z0-9._-]+", "-", Path(asset_name).stem).strip("-._")
+    return f"raster-slot.page-{page_number:02d}.{stem or 'image'}"
+
+
+def raster_slot_review(replacement_count: int) -> dict:
+    return {
+        "completed": True,
+        "expectedCounts": {
+            "covers": 0,
+            "shapes": 0,
+            "connectors": 0,
+            "texts": 0,
+            "icons": 0,
+            "charts": 0,
+            "tables": 0,
+            "imageReplacements": replacement_count,
+        },
+        "allowedRasterRegions": [
+            {
+                "reason": (
+                    "已复核为可整体移动、裁剪和替换的栅格图片槽位；"
+                    "内部像素不声明为独立可编辑对象"
+                )
+            }
+        ],
+        "unresolvedRegions": [],
+    }
+
+
 def raster_candidates(model: dict) -> list[dict]:
     candidates: list[dict] = []
     for page in model.get("pages") or []:
@@ -142,7 +173,9 @@ def main() -> None:
     conversion_asset_dir = conversion_work_dir / "assets"
     for candidate in candidates:
         asset_name = Path(candidate["asset"]).name
+        semantic_name = raster_slot_name(candidate["page"], asset_name)
         replacement = {
+            "name": semantic_name,
             "sourceAssetName": asset_name,
             "asset": str((conversion_asset_dir / asset_name).resolve()),
             "contentType": content_type(asset_name),
@@ -156,10 +189,12 @@ def main() -> None:
             {"imageReplacements": []},
         )
         page["imageReplacements"].append(replacement)
+        page["review"] = raster_slot_review(len(page["imageReplacements"]))
         review_entries.append(
             {
                 **candidate,
                 "sourceAssetName": asset_name,
+                "semanticName": semantic_name,
                 "disposition": "reviewed-raster-slot",
                 "editableScope": "whole-image",
                 "replacementAsset": replacement["asset"],

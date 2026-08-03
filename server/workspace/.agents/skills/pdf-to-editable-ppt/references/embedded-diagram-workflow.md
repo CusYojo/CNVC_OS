@@ -43,7 +43,7 @@
 - `covers`：纯色覆盖形状或背景修补图片；
 - `imageReplacements`：在原图片的显示列表顺序中替换为清理后的完整图片；
 - `shapes`：原生矩形、圆角矩形、椭圆、自定义路径等，可直接携带文字；
-- `connectors`：通过命名节点计算端点的可编辑直线或折线；
+- `connectors`：绑定到命名节点的直线、折线或曲线；
 - `texts`：独立文本框；
 - `icons`：原生复合形状、SVG 或独立栅格图标；
 - `charts`：PowerPoint 原生图表；
@@ -184,7 +184,6 @@ python scripts/prepare_embedded_image_ocr.py \
 - 在 inspect 结果中搜索每个语义名称，确认节点文字、连接线和标签均为对象；
 - 分别移动一个节点、一个标签和一条连接线，确认旧像素不会露出；
 - 修改一个节点文字，确认文字没有与背景图片重复；
-- 在 Microsoft PowerPoint 中检查连接线端点；当前 PptxGenJS 输出不保证
-  连接线随节点移动，不得声称具有原生附着关系；
+- 在 Microsoft PowerPoint 中检查连接线会随节点移动；
 - 运行 `slides_test.py`，修复任何非预期重叠、裁切或画布溢出；
 - 交付时列明仍保留为栅格图片的照片、复杂插画或未授权重建区域。

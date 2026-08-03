@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   BriefcaseBusiness,
   CheckCircle2,
@@ -114,6 +114,7 @@ export type AiQuickTaskPreparationRequest = {
   outputFormat: 'PPTX'
   language: '中文'
   structureMode: 'strict-template'
+  userInstructions?: string
 }
 
 export type AiQuickTaskRequest = {
@@ -142,14 +143,14 @@ type ActionConfig = {
   id: AiQuickActionId
   label: string
   description: string
-  mode: 'task' | 'template'
+  mode: 'task' | 'template' | 'chat'
   icon: typeof ShieldCheck
 }
 
 const ACTIONS: ActionConfig[] = [
   { id: 'compliance', label: '合规性说明', description: '基于当前项目资料库生成合规初稿', mode: 'task', icon: ShieldCheck },
   { id: 'proposal', label: '投资提案', description: '按核心规范生成内部立项或投委会材料', mode: 'task', icon: BriefcaseBusiness },
-  { id: 'investment_ppt', label: '投资建议书（PPT）', description: '按上传的 PDF 或 PPTX 模板生成投资建议书', mode: 'template', icon: Presentation },
+  { id: 'investment_ppt', label: '投资建议书（PPT）', description: '选中后，结合当前项目、上传文件和会话信息生成', mode: 'chat', icon: Presentation },
   { id: 'due_diligence', label: '尽调报告', description: '资深投资经理生成当前项目内部尽调报告', mode: 'task', icon: ClipboardCheck },
   { id: 'qa', label: 'Q&A', description: '资深投资经理生成当前项目投资问答 DOCX', mode: 'task', icon: HelpCircle },
   { id: 'custom_template', label: '上传模板', description: '识别模板结构和内容要求', mode: 'template', icon: Upload },
@@ -183,6 +184,9 @@ export function AiQuickActions({
   onRunTask,
   onCreatePreparationTask,
   onPreparationProgress,
+  selectedActionId,
+  onSelectAction,
+  requestedAction,
 }: {
   disabled: boolean
   projects: Project[]
@@ -191,6 +195,13 @@ export function AiQuickActions({
   onRunTask: (request: AiQuickTaskRequest) => Promise<boolean>
   onCreatePreparationTask: (request: AiQuickTaskPreparationRequest) => Promise<string | null>
   onPreparationProgress?: (progress: AiQuickTaskPreparationProgress) => void
+  selectedActionId?: 'investment_ppt' | null
+  onSelectAction?: (actionId: 'investment_ppt' | null) => void
+  requestedAction?: {
+    id: 'investment_ppt'
+    nonce: number
+    userInstructions?: string
+  } | null
 }) {
   const [activeAction, setActiveAction] = useState<ActionConfig | null>(null)
   const [sourceCutoffDate, setSourceCutoffDate] = useState(today)
@@ -215,17 +226,23 @@ export function AiQuickActions({
     [currentProjectId, projects],
   )
 
-  const openAction = (action: ActionConfig) => {
+  const openAction = (action: ActionConfig, initialInstructions = '') => {
     if (
       disabled
       || !selectedProject
       || submitLocksRef.current.has(action.id)
       || (action.id === 'investment_ppt' && analyzingInvestmentPpt)
     ) return
+    if (action.id === 'investment_ppt') {
+      setActiveAction(null)
+      onSelectAction?.(selectedActionId === action.id ? null : action.id)
+      return
+    }
+    onSelectAction?.(null)
     // 补充要求只属于本次快捷任务。每次重新打开弹窗均从空值开始，
     // 避免上一个合规、提案或 Q&A 任务的要求串入下一份文档。
-    setProposalInstructions('')
-    if (action.id === 'custom_template' || action.id === 'investment_ppt') {
+    setProposalInstructions(initialInstructions.slice(0, 2_000))
+    if (action.id === 'custom_template') {
       setTemplateFile(null)
       setAnalyzedTemplate(null)
       setTemplateError('')
@@ -233,6 +250,15 @@ export function AiQuickActions({
     }
     setActiveAction(action)
   }
+
+  // 兼容旧的聊天分发信号：投资建议书不再打开模板弹窗，而是进入会话生成模式。
+  useEffect(() => {
+    if (!requestedAction || !selectedProject || analyzingInvestmentPpt) return
+    const action = ACTIONS.find((item) => item.id === requestedAction.id)
+    if (!action) return
+    setActiveAction(null)
+    onSelectAction?.('investment_ppt')
+  }, [requestedAction?.nonce, selectedProject?.id, analyzingInvestmentPpt])
 
   const submit = async (
     templateOverride?: AnalyzedCustomTemplate,
@@ -330,6 +356,7 @@ export function AiQuickActions({
         outputFormat: 'PPTX',
         language: '中文',
         structureMode: 'strict-template',
+        userInstructions: proposalInstructions.trim() || undefined,
       })
       if (!createdTaskId) return
       preparationTaskId = createdTaskId
@@ -526,6 +553,7 @@ export function AiQuickActions({
         <div className="flex gap-2 overflow-x-auto pb-1">
           {ACTIONS.map((action) => {
             const Icon = action.icon
+            const selected = action.id === selectedActionId
             const actionDisabled = disabled
               || !selectedProject
               || submittingActionIds.includes(action.id)
@@ -543,15 +571,24 @@ export function AiQuickActions({
                       : action.description
                 }
                 onClick={() => openAction(action)}
-                className="group flex min-w-[142px] items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-left transition hover:border-brand-200 hover:bg-brand-50/50 disabled:cursor-not-allowed disabled:opacity-45"
+                aria-pressed={action.id === 'investment_ppt' ? selected : undefined}
+                className={`group flex min-w-[142px] items-center gap-2 rounded-lg border px-3 py-2 text-left transition disabled:cursor-not-allowed disabled:opacity-45 ${selected
+                  ? 'border-brand-500 bg-brand-50 ring-2 ring-brand-100'
+                  : 'border-slate-200 bg-white hover:border-brand-200 hover:bg-brand-50/50'}`}
               >
-                <span className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-brand-50 text-brand-600 group-hover:bg-white">
+                <span className={`grid h-7 w-7 shrink-0 place-items-center rounded-md text-brand-600 ${selected ? 'bg-white' : 'bg-brand-50 group-hover:bg-white'}`}>
                   <Icon className="h-3.5 w-3.5" />
                 </span>
                 <span className="min-w-0">
                   <span className="block whitespace-nowrap text-[11px] font-medium text-slate-700">{action.label}</span>
                   <span className="block truncate text-[9px] text-slate-400">
-                    {action.mode === 'template' ? '识别结构与内容' : '确认参数后执行'}
+                    {selected
+                      ? '已选中，请输入要求或添加文件'
+                      : action.mode === 'template'
+                        ? '识别结构与内容'
+                        : action.mode === 'chat'
+                          ? '结合项目、文件与对话生成'
+                          : '确认参数后执行'}
                   </span>
                 </span>
               </button>

@@ -17,10 +17,10 @@
 - **图片高保真版**：每页放置一张清晰的整页图片。适用于 1:1 外观优先，
   且用户未明确要求对象级可编辑的情况。
 - **OCR 可编辑版**：从页面图片中移除已识别文字，再添加独立文本框。
-  适用于用户明确要求文字可编辑的情况。
+  仅适用于用户明确把可编辑范围限制为文字的情况。
 - **语义重建版**：以 OCR 可编辑版为基础，再通过覆盖清单将重要图表、
   表格、图标和示意图替换为 PowerPoint 原生对象或独立 SVG。
-  适用于用户明确要求编辑图标、图表或表格的情况。
+  用户只说“1:1 可编辑 PPT”而未缩小范围时，默认采用此路线。
 
 不得把图片高保真版称为“完全可编辑”。整页图片可以移动、裁剪或替换，
 但图片内部的文字和图表不能单独编辑。
@@ -39,6 +39,27 @@ PaddleOCR、RapidOCR、云 OCR 或人工修订的统一 JSON。文字移除功�
 建议将 `--minimum-confidence 0.45` 作为安全默认值。只有在以原始尺寸
 检查页面后，才可以进一步降低。低置信度的界面截图、论文页面和密集技术
 表格通常应保留为栅格图片。
+
+### 字体与字号校准
+
+OCR 坐标来自页面像素，PowerPoint 字号使用磅。96 DPI 下不得把 OCR 文字框
+高度或旧模型中的 `font_size` 直接作为磅值使用。准备脚本必须输出
+`source_font_size`、`ppt_font_size`、`text_role`、`font` 和
+`font_source`，构建器只使用已校准的 `ppt_font_size`。
+
+安全默认值：
+
+- 正文 `--body-font-scale 0.75`；
+- 页标题 `--title-font-scale 0.78`；
+- 封面展示标题和大数字 `--display-font-scale 0.98`；
+- 最小字号 `--minimum-font-size 5`，不得无条件抬高到 `7.5pt`；
+- 文本框宽度默认保留 1.2 倍容差，并受画布边界约束。
+
+字号还必须同时受 OCR 框高度、渲染 DPI 和按中英文字符宽度估算的文本框
+宽度限制。封面大标题不能沿用正文比例；正文也不能沿用封面比例。
+`ocr-layout-report.json` 必须通过后才能进入交付阶段。扁平化源没有字体
+元数据时，先根据模板视觉选择系统安全字体；如果模板字体可确定，则显式
+传入 `--ocr-body-font` 和 `--ocr-title-font`。
 
 ## 扁平化水印处理
 
@@ -86,8 +107,26 @@ PaddleOCR、RapidOCR、云 OCR 或人工修订的统一 JSON。文字移除功�
 
 ```json
 {
+  "coordinateWidth": 1280,
   "slides": {
     "11": {
+      "review": {
+        "completed": true,
+        "expectedCounts": {
+          "covers": 0,
+          "shapes": 1,
+          "connectors": 0,
+          "texts": 0,
+          "icons": 2,
+          "charts": 1,
+          "tables": 1,
+          "imageReplacements": 0
+        },
+        "allowedRasterRegions": [
+          { "reason": "产品照片保留为独立栅格素材" }
+        ],
+        "unresolvedRegions": []
+      },
       "icons": [
         {
           "mode": "native",
@@ -135,6 +174,7 @@ PaddleOCR、RapidOCR、云 OCR 或人工修订的统一 JSON。文字移除功�
       ],
       "charts": [
         {
+          "name": "editable-result-chart",
           "type": "doughnut",
           "config": {
             "position": { "left": 228, "top": 332, "width": 238, "height": 185 },
@@ -181,9 +221,27 @@ PaddleOCR、RapidOCR、云 OCR 或人工修订的统一 JSON。文字移除功�
 数据驱动的图形优先使用原生图表。如果原生表格的自动尺寸计算造成换行或
 垂直溢出，应改用手工布局表格。
 
+当使用 `--editable-scope all` 时，每一个扁平化页或含大面积内嵌图片的页面
+都必须带 `review`：
+
+- `completed=true` 表示已经逐页检查，不代表只要存在覆盖对象就自动通过；
+- `expectedCounts` 必须显式列出全部八类对象，允许为 0；
+- 实际覆盖对象数不得小于预期数；
+- `unresolvedRegions` 必须为空；
+- 有意保留的照片或复杂插画写入 `allowedRasterRegions` 并说明原因。
+
+构建后必须运行 `validate_semantic_build.py`，用 `build-manifest.json`
+逐个核对 `name` 和对象类型。覆盖对象缺少稳定 `name`、连接线引用不存在的
+节点、或任何声明对象未实际写入，均应失败。随后运行
+`audit_editable_surface.py` 并检查移除整页背景后的
+`editable-foreground-only.pptx`，避免“看起来有覆盖、实际仍靠底图”的假通过。
+
 ## 质检要求
 
 - 以原始尺寸检查每一页 OCR 可编辑幻灯片。
+- 在 Microsoft PowerPoint 原生渲染中抽查正文、页标题和封面标题，确认字体
+  家族和字号与模板一致；若 LibreOffice 与 PowerPoint 结果不同，以
+  PowerPoint 为最终门禁。
 - 修正被误识别为文字的图标字形。
 - 逐个移动图标做抽查，确认底层没有残留旧图标。
 - 确认原生复合图标的各组成部件可以分别选择和修改。

@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { createReadStream } from 'node:fs'
-import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { and, asc, desc, eq, inArray, lte, sql } from 'drizzle-orm'
 import JSZip from 'jszip'
@@ -13,6 +13,7 @@ import {
   chatConversations,
   fileChunks,
   knowledgeChunks,
+  projectFiles,
   projects,
   users,
 } from '../db/schema.js'
@@ -107,7 +108,7 @@ import {
   safeAiTaskFailureStage,
 } from './aiTaskErrorService.js'
 import {
-  buildInvestmentRecommendationReplacementAudit,
+  buildInvestmentRecommendationGenerationAudit,
   prepareInvestmentRecommendationPptWorkflow,
   reviewInvestmentRecommendationPpt,
   type InvestmentRecommendationPptWorkflow,
@@ -140,6 +141,7 @@ export type CreateInvestmentPptPreparationInput = {
   outputFormat: 'PPTX'
   language: '中文'
   structureMode: 'strict-template'
+  userInstructions?: string
   idempotencyKey: string
 }
 
@@ -565,7 +567,198 @@ async function isCancellationRequested(taskId: string) {
 }
 
 async function updateStage(taskId: string, stage: string, progress: number) {
-  await db.update(aiTasks).set({ stage, progress, updatedAt: new Date() }).where(eq(aiTasks.id, taskId))
+  const boundedProgress = Math.max(0, Math.min(100, Math.round(progress)))
+  await db.update(aiTasks).set({
+    stage,
+    progress: sql<number>`GREATEST(${aiTasks.progress}, ${boundedProgress})`,
+    updatedAt: new Date(),
+  }).where(eq(aiTasks.id, taskId))
+}
+
+type InvestmentRecommendationResumeCheckpoint = {
+  content: BusinessContent
+  sourceSnapshots: Array<Record<string, unknown>>
+  checkpointPath: string
+}
+
+function checkpointSourceIdentity(source: Record<string, unknown>) {
+  return [
+    String(source.sourceType ?? source.type ?? ''),
+    String(source.sourceName ?? source.name ?? source.title ?? ''),
+    String(source.locator ?? ''),
+    String(source.versionOrDate ?? source.version_or_date ?? ''),
+  ].join('\u001f')
+}
+
+function isBusinessContentCheckpoint(value: unknown): value is BusinessContent {
+  if (!value || typeof value !== 'object') return false
+  const record = value as Record<string, unknown>
+  return typeof record.title === 'string'
+    && typeof record.executiveSummary === 'string'
+    && Array.isArray(record.sections)
+    && Array.isArray(record.highlights)
+    && Array.isArray(record.risks)
+    && Array.isArray(record.missing)
+}
+
+export function remapInvestmentRecommendationCheckpointSources(input: {
+  content: BusinessContent
+  checkpointSources: Array<Record<string, unknown>>
+  currentSources: EvidenceSource[]
+}) {
+  const currentQueues = new Map<string, number[]>()
+  input.currentSources.forEach((source, index) => {
+    const key = checkpointSourceIdentity(source as unknown as Record<string, unknown>)
+    currentQueues.set(key, [...(currentQueues.get(key) ?? []), index])
+  })
+  const indexMap = new Map<number, number>()
+  input.checkpointSources.forEach((source, index) => {
+    const exactCurrent = input.currentSources[index]
+    const identity = checkpointSourceIdentity(source)
+    const queue = currentQueues.get(identity) ?? []
+    if (
+      exactCurrent
+      && checkpointSourceIdentity(exactCurrent as unknown as Record<string, unknown>)
+        === identity
+      && queue.includes(index)
+    ) {
+      indexMap.set(index, index)
+      const position = queue.indexOf(index)
+      if (position >= 0) queue.splice(position, 1)
+      return
+    }
+    const next = queue.shift()
+    if (next !== undefined) indexMap.set(index, next)
+  })
+  const remap = (indexes: number[] | undefined) => [...new Set((indexes ?? [])
+    .map((index) => indexMap.get(index))
+    .filter((index): index is number => index !== undefined))]
+  const content = JSON.parse(JSON.stringify(input.content)) as BusinessContent
+  content.executiveSummarySourceIndexes = remap(content.executiveSummarySourceIndexes)
+  for (const section of content.sections) {
+    section.summarySourceIndexes = remap(section.summarySourceIndexes)
+    for (const finding of section.findings) finding.sourceIndexes = remap(finding.sourceIndexes)
+    for (const table of section.tables ?? []) table.sourceIndexes = remap(table.sourceIndexes)
+  }
+  return content
+}
+
+async function loadInvestmentRecommendationResumeCheckpoint(
+  directory: string | undefined,
+  currentSources: EvidenceSource[],
+) {
+  if (!directory) return undefined
+  const candidates: Array<{ path: string; modifiedAt: number }> = []
+  const directPath = path.join(directory, '.investment-recommendation-checkpoint.json')
+  const directStat = await stat(directPath).catch(() => undefined)
+  if (directStat?.isFile()) candidates.push({ path: directPath, modifiedAt: directStat.mtimeMs })
+  const entries = await readdir(directory, { withFileTypes: true }).catch(() => [])
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !entry.name.startsWith('.gorden-super-ppt-')) continue
+    const projectFactsPath = path.join(directory, entry.name, 'project-facts.json')
+    const projectFactsStat = await stat(projectFactsPath).catch(() => undefined)
+    if (projectFactsStat?.isFile()) {
+      candidates.push({ path: projectFactsPath, modifiedAt: projectFactsStat.mtimeMs })
+    }
+  }
+  for (const candidate of candidates.sort((left, right) => right.modifiedAt - left.modifiedAt)) {
+    try {
+      const parsed = JSON.parse(await readFile(candidate.path, 'utf8')) as Record<string, unknown>
+      const content = parsed.content ?? parsed.verifiedContent
+      const sourceSnapshots = Array.isArray(parsed.sources)
+        ? parsed.sources.filter((source): source is Record<string, unknown> => (
+            Boolean(source) && typeof source === 'object'
+          ))
+        : []
+      if (!isBusinessContentCheckpoint(content) || !sourceSnapshots.length) continue
+      return {
+        content: remapInvestmentRecommendationCheckpointSources({
+          content,
+          checkpointSources: sourceSnapshots,
+          currentSources,
+        }),
+        sourceSnapshots,
+        checkpointPath: candidate.path,
+      } satisfies InvestmentRecommendationResumeCheckpoint
+    } catch {
+      // Ignore incomplete or incompatible checkpoints and continue from scratch.
+    }
+  }
+  return undefined
+}
+
+async function saveInvestmentRecommendationCheckpoint(input: {
+  checkpointPath: string
+  content: BusinessContent
+  sources: EvidenceSource[]
+}) {
+  const temporaryPath = `${input.checkpointPath}.${randomUUID()}.tmp`
+  await writeFile(temporaryPath, JSON.stringify({
+    schemaVersion: '1.0',
+    content: input.content,
+    sources: input.sources,
+  }), 'utf8')
+  await rename(temporaryPath, input.checkpointPath)
+}
+
+function requestedAttachmentFileIds(parameters: Record<string, unknown>) {
+  const values = Array.isArray(parameters.attachmentFileIds)
+    ? parameters.attachmentFileIds
+    : []
+  return [...new Set(values.filter((value): value is string =>
+    typeof value === 'string'
+    && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value),
+  ))].slice(0, 10)
+}
+
+async function waitForRequestedAttachments(
+  taskId: string,
+  projectId: string,
+  fileIds: string[],
+) {
+  if (!fileIds.length) return true
+  const timeoutMs = Math.max(
+    10_000,
+    Number(process.env.AI_TASK_ATTACHMENT_WAIT_MS || 5 * 60_000),
+  )
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (await isCancellationRequested(taskId)) return false
+    const rows = await db.select({
+      id: projectFiles.id,
+      name: projectFiles.name,
+      parseStatus: projectFiles.parseStatus,
+      parseError: projectFiles.parseError,
+    }).from(projectFiles).where(and(
+      eq(projectFiles.projectId, projectId),
+      inArray(projectFiles.id, fileIds),
+    ))
+    const missingCount = fileIds.length - rows.length
+    if (missingCount > 0) {
+      throw Object.assign(new Error('本轮上传文件不存在或不属于当前项目'), {
+        code: 'TASK_ATTACHMENT_NOT_FOUND',
+      })
+    }
+    const failed = rows.filter((row) => row.parseStatus === '失败')
+    if (failed.length > 0) {
+      throw Object.assign(
+        new Error(`本轮附件解析失败：${failed.map((row) =>
+          `${row.name}${row.parseError ? `（${row.parseError}）` : ''}`).join('、')}`),
+        { code: 'TASK_ATTACHMENT_PARSE_FAILED' },
+      )
+    }
+    const completed = rows.filter((row) => row.parseStatus === '成功').length
+    if (completed === rows.length) return true
+    await updateStage(
+      taskId,
+      `等待本轮附件解析（${completed}/${rows.length}）`,
+      12,
+    )
+    await new Promise((resolve) => setTimeout(resolve, 1_000))
+  }
+  throw Object.assign(new Error('本轮附件解析超时，请稍后重试生成'), {
+    code: 'TASK_ATTACHMENT_PARSE_TIMEOUT',
+  })
 }
 
 function isTemplatePreparationPending(parameters: Record<string, unknown> | null | undefined) {
@@ -692,11 +885,31 @@ async function executeTask(taskId: string) {
     const [task] = await db.select().from(aiTasks).where(eq(aiTasks.id, taskId)).limit(1)
     if (!task || !isAiExecutableTaskType(task.type) || ['succeeded', 'cancelled'].includes(task.status)) return
     const parameters = (task.parameters ?? {}) as Record<string, unknown>
+    const [retrySourceTask] = task.type === 'investment_recommendation_ppt' && task.retryOfTaskId
+      ? await db.select({ progress: aiTasks.progress })
+          .from(aiTasks)
+          .where(eq(aiTasks.id, task.retryOfTaskId))
+          .limit(1)
+      : []
+    const resumeProgressFloor = Math.max(
+      0,
+      Math.min(
+        99,
+        Math.max(
+          Number(parameters._resumeProgressFloor ?? 0) || 0,
+          task.type === 'investment_recommendation_ppt' && task.retryOfTaskId
+            ? Number(retrySourceTask?.progress ?? 0) || 0
+            : 0,
+        ),
+      ),
+    )
     // 上传模板时会先创建正式任务记录，但模板分析完成前不能进入文档生成流水线。
     if (isTemplatePreparationPending(parameters)) return
+    const hasCustomTemplateId = typeof parameters.customTemplateId === 'string'
+      && parameters.customTemplateId.trim().length > 0
     const resolvedCustomTemplate = (
       task.type === 'custom_template_document'
-      || task.type === 'investment_recommendation_ppt'
+      || (task.type === 'investment_recommendation_ppt' && hasCustomTemplateId)
     )
       ? await resolveAiCustomTemplateForTask({
           userId: task.userId,
@@ -745,8 +958,8 @@ async function executeTask(taskId: string) {
     }
     const [claimed] = await db.update(aiTasks).set({
       status: 'running',
-      stage: '读取项目资料',
-      progress: 10,
+      stage: resumeProgressFloor > 0 ? '读取断点续跑检查点' : '读取项目资料',
+      progress: Math.max(10, resumeProgressFloor),
       startedAt: task.startedAt ?? new Date(),
       errorId: null,
       errorMessage: null,
@@ -756,6 +969,15 @@ async function executeTask(taskId: string) {
 
     const [project] = await db.select().from(projects).where(eq(projects.id, task.projectId)).limit(1)
     if (!project) throw new Error('项目不存在或已删除')
+    const attachmentsReady = await waitForRequestedAttachments(
+      taskId,
+      project.id,
+      requestedAttachmentFileIds(parameters),
+    )
+    if (!attachmentsReady) {
+      await cancelIfRequested(taskId)
+      return
+    }
     const sourceCutoffDate = String(parameters.sourceCutoffDate || new Date().toISOString().slice(0, 10))
     const knowledgeSources = await sourcesForProject(
       project.id,
@@ -801,6 +1023,13 @@ async function executeTask(taskId: string) {
           `市场：${project.market || '待核验'}`,
           `团队：${project.team || '待核验'}`,
         ].join('\n'),
+      }] : []),
+      ...(userInstructions ? [{
+        sourceType: 'user_input',
+        sourceName: '本次会话与用户补充输入',
+        chunkIndex: 0,
+        versionOrDate: sourceCutoffDate,
+        content: userInstructions,
       }] : []),
     ]
     let evidenceScreening = screenEvidenceSources(rawSources, task.type)
@@ -1183,6 +1412,22 @@ async function executeTask(taskId: string) {
           '.investment-proposal-checkpoint.json',
         )
       : undefined
+    const investmentRecommendationResumeDirectory
+      = task.type === 'investment_recommendation_ppt'
+        ? task.retryOfTaskId
+          ? path.join(ARTIFACT_ROOT, task.userId, task.projectId, task.retryOfTaskId)
+          : taskDir
+        : undefined
+    const investmentRecommendationCheckpointPath = path.join(
+      taskDir,
+      '.investment-recommendation-checkpoint.json',
+    )
+    const investmentRecommendationResume = task.type === 'investment_recommendation_ppt'
+      ? await loadInvestmentRecommendationResumeCheckpoint(
+          investmentRecommendationResumeDirectory,
+          sources,
+        )
+      : undefined
     let checkpointWrite = Promise.resolve()
     let progressWrite = Promise.resolve()
     let proposalProgress = 35
@@ -1237,12 +1482,14 @@ async function executeTask(taskId: string) {
     } else {
     await updateStage(
       taskId,
-      task.type === 'investment_proposal'
-        ? '建立章节级 Evidence 并逐章节生成、执行 Reviewer'
-        : task.type === 'custom_template_document'
-          ? '基于项目资料与已核验联网证据重建标题和正文'
-        : '生成结构化内容',
-      35,
+      investmentRecommendationResume
+        ? '断点续跑：恢复已完成的投资建议书内容'
+        : task.type === 'investment_proposal'
+          ? '建立章节级 Evidence 并逐章节生成、执行 Reviewer'
+          : task.type === 'custom_template_document'
+            ? '基于项目资料与已核验联网证据重建标题和正文'
+            : '生成结构化内容',
+      investmentRecommendationResume ? 68 : 35,
     )
       const composeInitialContent = () => composeBusinessContent({
           type: task.type as AiExecutableTaskType,
@@ -1314,21 +1561,23 @@ async function executeTask(taskId: string) {
               }
             : undefined,
         })
-      content = task.type === 'due_diligence_report'
-        ? await withTaskHeartbeat(taskId, composeInitialContent, {
-            startProgress: 35,
-            endProgress: 49,
-            stage: (elapsedSeconds) =>
-              `大模型正在分章生成尽调正文（已等待 ${elapsedSeconds} 秒）`,
-          })
-        : task.type === 'investment_recommendation_ppt'
+      content = investmentRecommendationResume
+        ? investmentRecommendationResume.content
+        : task.type === 'due_diligence_report'
           ? await withTaskHeartbeat(taskId, composeInitialContent, {
               startProgress: 35,
-              endProgress: 48,
+              endProgress: 49,
               stage: (elapsedSeconds) =>
-                `大模型正在生成投资建议书初稿（已等待 ${elapsedSeconds} 秒）`,
+                `大模型正在分章生成尽调正文（已等待 ${elapsedSeconds} 秒）`,
             })
-        : await composeInitialContent()
+          : task.type === 'investment_recommendation_ppt'
+            ? await withTaskHeartbeat(taskId, composeInitialContent, {
+                startProgress: 35,
+                endProgress: 48,
+                stage: (elapsedSeconds) =>
+                  `大模型正在生成投资建议书初稿（已等待 ${elapsedSeconds} 秒）`,
+              })
+            : await composeInitialContent()
       if (task.type === 'due_diligence_report') {
         const pendingTopics = dueDiligencePendingResearchTopics(content)
         if (pendingTopics.length > 0) {
@@ -1404,7 +1653,7 @@ async function executeTask(taskId: string) {
           )
         }
       }
-      if (task.type === 'investment_recommendation_ppt') {
+      if (task.type === 'investment_recommendation_ppt' && !investmentRecommendationResume) {
         const pendingTopics = investmentRecommendationPendingResearchTopics(content)
         if (pendingTopics.length > 0) {
           let agentCandidates: EvidenceSource[] = []
@@ -1489,6 +1738,13 @@ async function executeTask(taskId: string) {
         `有 ${evidenceScreening.rejected.length} 个重复、测试、占位或损坏的知识片段未用于正文；如其中包含有效资料，请重新上传原文件：${affectedFiles.slice(0, 5).join('、')}`,
       ], { limit: 8 })
     }
+    if (task.type === 'investment_recommendation_ppt') {
+      await saveInvestmentRecommendationCheckpoint({
+        checkpointPath: investmentRecommendationCheckpointPath,
+        content,
+        sources,
+      })
+    }
     if (await cancelIfRequested(taskId)) return
 
     await updateStage(
@@ -1514,8 +1770,8 @@ async function executeTask(taskId: string) {
     let complianceDocxReview: ComplianceOutputReview | undefined
     let proposalDocxReview: InvestmentProposalOutputReview | undefined
     let pptWorkflowReview: Awaited<ReturnType<typeof reviewInvestmentRecommendationPpt>> | undefined
-    const pptReplacementAudit = pptWorkflow
-      ? buildInvestmentRecommendationReplacementAudit({
+    const pptGenerationAudit = pptWorkflow
+      ? buildInvestmentRecommendationGenerationAudit({
           workflow: pptWorkflow,
           content,
           sources,
@@ -1531,6 +1787,7 @@ async function executeTask(taskId: string) {
           sources,
           sourceCutoffDate,
           pageCount: String(parameters.pageCount || '15'),
+          resumeFromDirectory: investmentRecommendationResumeDirectory,
           onProgress: ({ stage, progress }) =>
             updateStage(taskId, stage, progress),
         })
@@ -1559,7 +1816,7 @@ async function executeTask(taskId: string) {
             if (!pptWorkflowReview.passed) {
               throw Object.assign(
                 new Error(
-                  `投资建议书未通过模板内容替换 Reviewer：${pptWorkflowReview.issueCodes.join('、')}`,
+                  `投资建议书未通过 Gorden 可编辑分层 Reviewer：${pptWorkflowReview.issueCodes.join('、')}`,
                 ),
                 { code: 'INVESTMENT_RECOMMENDATION_CONTENT_REJECTED' },
               )
@@ -1572,7 +1829,7 @@ async function executeTask(taskId: string) {
               throw error
             }
             console.warn(
-              '[aiTask] 投资建议书 PPT 内容替换 Reviewer 执行失败，保留可编辑 PPTX:',
+              '[aiTask] 投资建议书 PPT Gorden Reviewer 执行失败，保留可编辑 PPTX:',
               (error as Error).message,
             )
           }
@@ -1671,8 +1928,8 @@ async function executeTask(taskId: string) {
       requireEndReferences: task.type !== 'compliance_statement'
         && task.type !== 'due_diligence_report'
         && task.type !== 'investment_proposal',
-      // 严格模板替换只改白名单内容对象；模板中受保护对象可能保留原有语言
-      // 元数据。editable-ppt-content-replacer 已在每个中文替换目标上强制 zh-CN。
+      // Gorden 依据上传模板生成新的四层可编辑 PPTX；模板分析结果中仍可能
+      // 保留原始字体或语言元数据，因此质量检查允许继承的 CJK 元数据。
       allowInheritedCjkLanguageMetadata:
         task.type === 'investment_recommendation_ppt',
     }
@@ -1808,10 +2065,10 @@ async function executeTask(taskId: string) {
                 templateSha256: pptWorkflow.templateSha256,
                 skills: pptWorkflow.skills,
               },
-              replacementManifest: pptReplacementAudit,
-              pptContentReplacementReviewerPassed: pptWorkflowReview?.passed ?? false,
-              pptContentReplacementReview: pptWorkflowReview?.metadata,
-              pptContentReplacementIssueCodes: pptWorkflowReview?.issueCodes ?? [
+              gordenGenerationAudit: pptGenerationAudit,
+              pptGordenReviewerPassed: pptWorkflowReview?.passed ?? false,
+              pptGordenReview: pptWorkflowReview?.metadata,
+              pptGordenIssueCodes: pptWorkflowReview?.issueCodes ?? [
                 'reviewer-unavailable',
               ],
             }
@@ -1944,6 +2201,7 @@ async function executeTask(taskId: string) {
       responseBytes?: unknown
       requestAttempt?: unknown
       requestDurationMs?: unknown
+      slideNumber?: unknown
     }
     const [context] = await db.select({
       userId: aiTasks.userId,
@@ -1964,6 +2222,7 @@ async function executeTask(taskId: string) {
         responseBytes: diagnosticError.responseBytes,
         requestAttempt: diagnosticError.requestAttempt,
         requestDurationMs: diagnosticError.requestDurationMs,
+        slideNumber: diagnosticError.slideNumber,
       },
     )
     const recoveryParameters = (context?.parameters ?? {}) as Record<string, unknown>
@@ -1973,6 +2232,8 @@ async function executeTask(taskId: string) {
     )
     const nonRecoverableCode = [
       'CUSTOM_TEMPLATE_FORMAT_MISMATCH',
+      'GORDEN_VISIBLE_TEXT_CONTRACT_REJECTED',
+      'GORDEN_VISUAL_QA_REJECTED',
       'TASK_NOT_FOUND',
       'PROJECT_NOT_FOUND',
     ].includes(String(diagnosticError.code ?? ''))
@@ -2015,11 +2276,18 @@ async function executeTask(taskId: string) {
     ) {
       const [resetTask] = await db.update(aiTasks).set({
         status: 'pending',
-        stage: '正在继续生成文档',
-        progress: Math.min(Number(context.progress ?? 0), 20),
+        stage: context.type === 'investment_recommendation_ppt'
+          ? '正在从 Gorden 检查点继续生成'
+          : '正在继续生成文档',
+        progress: context.type === 'investment_recommendation_ppt'
+          ? Number(context.progress ?? 0)
+          : Math.min(Number(context.progress ?? 0), 20),
         parameters: {
           ...recoveryParameters,
           _systemDocumentRecoveryAttempt: recoveryAttempt + 1,
+          ...(context.type === 'investment_recommendation_ppt'
+            ? { _resumeProgressFloor: Number(context.progress ?? 0) }
+            : {}),
         },
         errorId: null,
         errorMessage: null,
@@ -2104,6 +2372,14 @@ export async function createInvestmentPptPreparationTask(
     clientPreparationId: input.progressId,
     clientTimelineStartedAt: input.startedAt,
     _templatePreparationPending: true,
+    ...(input.userInstructions?.trim()
+      ? {
+          userInstructions: input.userInstructions.trim().slice(0, 2_000),
+          researchIntent: input.userInstructions.trim().slice(0, 2_000),
+          conversationTriggered: input.userInstructions.includes('本次会话生成要求：'),
+          requestedSkill: 'create-reference-driven-editable-ppt',
+        }
+      : {}),
   }
   const hash = createRequestHash({
     type: 'investment_recommendation_ppt',
@@ -2294,9 +2570,11 @@ export async function createAiTask(user: AiTaskUser, input: CreateAiTaskInput) {
     input.projectId,
     input.conversationId,
   )
+  const hasCustomTemplateId = typeof input.parameters.customTemplateId === 'string'
+    && input.parameters.customTemplateId.trim().length > 0
   const resolvedCustomTemplate = (
     input.type === 'custom_template_document'
-    || input.type === 'investment_recommendation_ppt'
+    || (input.type === 'investment_recommendation_ppt' && hasCustomTemplateId)
   )
     ? await resolveAiCustomTemplateForTask({
         userId: user.uid,
@@ -2334,6 +2612,10 @@ export async function createAiTask(user: AiTaskUser, input: CreateAiTaskInput) {
     return getAiTask(user.uid, existing.id)
   }
   try {
+    const resumeProgressFloor = Math.max(
+      0,
+      Math.min(99, Number(input.parameters._resumeProgressFloor ?? 0) || 0),
+    )
     const [task] = await db.insert(aiTasks).values({
       userId: user.uid,
       projectId: input.projectId,
@@ -2344,6 +2626,12 @@ export async function createAiTask(user: AiTaskUser, input: CreateAiTaskInput) {
       idempotencyKey: input.idempotencyKey,
       requestHash: hash,
       retryOfTaskId: input.retryOfTaskId,
+      ...(resumeProgressFloor > 0
+        ? {
+            stage: '等待断点续跑',
+            progress: resumeProgressFloor,
+          }
+        : {}),
     }).returning()
     await writeTaskAudit(user, '创建 AI 任务', `${template.label}：${project.name}`)
     scheduleTask(task.id)
@@ -2408,8 +2696,9 @@ export async function retryAiTask(user: AiTaskUser, taskId: string, idempotencyK
       code: 'TEMPLATE_REUPLOAD_REQUIRED',
     })
   }
-  const retryParameters = {
+  const retryParameters: Record<string, unknown> = {
     ...(task.parameters as Record<string, unknown>),
+    _resumeProgressFloor: Math.max(0, Math.min(99, Number(task.progress ?? 0))),
   }
   // 手动“继续生成”是一轮新的恢复流程，不能继承上一任务已经耗尽的自动恢复次数。
   delete retryParameters._systemDocumentRecoveryAttempt

@@ -27,13 +27,16 @@ export type InvestmentRecommendationPptWorkflow = {
   templateSha256: string
   templateFileName: string
   skills: WorkflowSkillAudit[]
-  replacerSkill: LoadedAiSkill
-  replacementPolicy: {
-    schemaVersion: '1.3'
-    defaultOperation: 'KEEP'
-    protectedElementPolicy: 'keep-unless-whitelisted'
-    missingOptionalGroupPolicy: 'delete-entire-group'
-    evidencePolicy: 'semantic-key-with-evidence-ids'
+  orchestratorSkill: LoadedAiSkill
+  gordenSkill: LoadedAiSkill
+  converterSkill: LoadedAiSkill
+  generationPolicy: {
+    schemaVersion: '1.0'
+    templateReuse: 'structure-and-style'
+    factPolicy: 'project-facts-only'
+    imageGenerationPolicy: 'gateway-imagegen-evidence-required'
+    editableLayerPolicy: 'background-frame-icons-text'
+    bridgePolicy: 'gorden-images-to-flattened-pdf-to-semantic-pptx'
   }
 }
 
@@ -64,7 +67,7 @@ export async function prepareInvestmentRecommendationPptWorkflow(
   }
   const sourceMode = template.templateSourceMode ?? 'native-pptx'
   if (path.extname(template.referencePath).toLowerCase() !== '.pptx') {
-    throw new Error('投资建议书内容替换阶段必须接收可编辑 PPTX 模板')
+    throw new Error('投资建议书 Gorden 生成阶段必须接收可编辑 PPTX 模板')
   }
   const templateBuffer = await readFile(template.referencePath)
   const templateSha256 = createHash('sha256').update(templateBuffer).digest('hex')
@@ -90,7 +93,7 @@ export async function prepareInvestmentRecommendationPptWorkflow(
       || handoff.editabilityReviewPassed !== true
       || handoff.readyForContentReplacement !== true
     ) {
-      throw new Error('PDF 转换模板未通过水印、可编辑性或内容替换交接门槛')
+      throw new Error('PDF 转换模板未通过水印、可编辑性或 Gorden 交接门槛')
     }
     const declaredSha256 = handoffPptxSha256(handoff)
     if (declaredSha256 && declaredSha256.toLowerCase() !== templateSha256) {
@@ -98,71 +101,80 @@ export async function prepareInvestmentRecommendationPptWorkflow(
     }
   }
 
-  const skills = workflowSkills.map((item): WorkflowSkillAudit => {
-    const isConverter = item.name === 'pdf-to-editable-ppt'
-    const applied = !isConverter || sourceMode === 'pdf-converted'
-    return {
+  const skills = workflowSkills.map((item): WorkflowSkillAudit => ({
       name: item.name,
       role: item.role,
       version: item.skill.version,
       sha256: item.skill.sha256,
-      applied,
-      status: applied ? 'applied' : 'not-required',
-      ...(applied
-        ? {}
-        : { reason: '用户上传模板为原生可编辑 PPTX，无需执行 PDF 转换' }),
-    }
-  })
-  const replacerSkill = workflowSkills.find((item) =>
-    item.name === 'editable-ppt-content-replacer')?.skill
-  if (!replacerSkill) throw new Error('缺少 editable-ppt-content-replacer Skill')
+      applied: true,
+      status: 'applied',
+      ...(item.name === 'pdf-to-editable-ppt'
+        ? {
+            reason: sourceMode === 'pdf-converted'
+              ? '先完成上传 PDF 模板预处理，并在成稿阶段再次执行桥接 PDF 元素级可编辑化'
+              : '上传模板为原生 PPTX；在成稿阶段执行桥接 PDF 元素级可编辑化',
+          }
+        : {}),
+    }))
+  const orchestratorSkill = workflowSkills.find((item) =>
+    item.name === 'create-reference-driven-editable-ppt')?.skill
+  const gordenSkill = workflowSkills.find((item) =>
+    item.name === 'GordenSuperPPTSkill')?.skill
+  const converterSkill = workflowSkills.find((item) =>
+    item.name === 'pdf-to-editable-ppt')?.skill
+  if (!orchestratorSkill) throw new Error('缺少 create-reference-driven-editable-ppt Skill')
+  if (!gordenSkill) throw new Error('缺少 GordenSuperPPTSkill Skill')
+  if (!converterSkill) throw new Error('缺少 pdf-to-editable-ppt Skill')
 
   return {
     sourceMode,
     templateSha256,
     templateFileName: path.basename(template.referencePath),
     skills,
-    replacerSkill,
-    replacementPolicy: {
-      schemaVersion: '1.3',
-      defaultOperation: 'KEEP',
-      protectedElementPolicy: 'keep-unless-whitelisted',
-      missingOptionalGroupPolicy: 'delete-entire-group',
-      evidencePolicy: 'semantic-key-with-evidence-ids',
+    orchestratorSkill,
+    gordenSkill,
+    converterSkill,
+    generationPolicy: {
+      schemaVersion: '1.0',
+      templateReuse: 'structure-and-style',
+      factPolicy: 'project-facts-only',
+      imageGenerationPolicy: 'gateway-imagegen-evidence-required',
+      editableLayerPolicy: 'background-frame-icons-text',
+      bridgePolicy: 'gorden-images-to-flattened-pdf-to-semantic-pptx',
     },
   }
 }
 
-export function buildInvestmentRecommendationReplacementAudit(input: {
+export function buildInvestmentRecommendationGenerationAudit(input: {
   workflow: InvestmentRecommendationPptWorkflow
   content: BusinessContent
   sources: EvidenceSource[]
 }) {
-  const operations = input.content.sections.flatMap((section, sectionIndex) => [
+  const slides = input.content.sections.flatMap((section, sectionIndex) => [
     {
-      semanticKey: `section.${sectionIndex + 1}.summary`,
-      operation: 'REPLACE_TEXT',
+      slideRole: section.title,
+      contentKey: `section.${sectionIndex + 1}.summary`,
       evidenceIds: [...new Set(section.summarySourceIndexes ?? [])]
         .filter((index) => Boolean(input.sources[index]))
         .map((index) => `S${index + 1}`),
     },
     ...section.findings.map((finding, findingIndex) => ({
-      semanticKey: `section.${sectionIndex + 1}.finding.${findingIndex + 1}`,
-      operation: finding.text.trim() ? 'REPLACE_TEXT' : 'DELETE',
+      slideRole: section.title,
+      contentKey: `section.${sectionIndex + 1}.finding.${findingIndex + 1}`,
       evidenceIds: [...new Set(finding.sourceIndexes)]
         .filter((index) => Boolean(input.sources[index]))
         .map((index) => `S${index + 1}`),
     })),
   ])
   return {
-    schemaVersion: input.workflow.replacementPolicy.schemaVersion,
-    defaultOperation: input.workflow.replacementPolicy.defaultOperation,
+    schemaVersion: input.workflow.generationPolicy.schemaVersion,
     sourceMode: input.workflow.sourceMode,
-    protectedElementPolicy: input.workflow.replacementPolicy.protectedElementPolicy,
-    missingOptionalGroupPolicy: input.workflow.replacementPolicy.missingOptionalGroupPolicy,
-    operationCount: operations.length,
-    evidenceBoundOperationCount: operations.filter((item) => item.evidenceIds.length > 0).length,
-    operations,
+    templateReuse: input.workflow.generationPolicy.templateReuse,
+    factPolicy: input.workflow.generationPolicy.factPolicy,
+    editableLayerPolicy: input.workflow.generationPolicy.editableLayerPolicy,
+    contentBindingCount: slides.length,
+    evidenceBoundContentCount: slides.filter((item) => item.evidenceIds.length > 0).length,
+    slides,
   }
 }
 
@@ -204,60 +216,26 @@ export async function reviewInvestmentRecommendationPpt(input: {
   template: AiTemplateDefinition
 }) {
   const fileStat = await stat(input.outputPath)
-  const [zip, templateZip] = await Promise.all([
-    JSZip.loadAsync(await readFile(input.outputPath)),
-    JSZip.loadAsync(await readFile(input.template.referencePath)),
-  ])
-  const packageMetrics = async (archive: JSZip) => {
-    const names = Object.keys(archive.files)
-    const mediaNames = names.filter((name) =>
-      /^ppt\/media\/[^/]+$/.test(name) && !name.endsWith('/'))
-    const slideNames = names.filter((name) =>
-      /^ppt\/slides\/slide\d+\.xml$/.test(name))
-    const slideBodies = await Promise.all(slideNames.map((name) =>
-      archive.file(name)?.async('string') ?? ''))
-    const mediaHashes = [...new Set(await Promise.all(mediaNames.map(async (name) =>
-      createHash('sha256')
-        .update(await archive.file(name)!.async('nodebuffer'))
-        .digest('hex'))))].sort()
-    return {
-      slideCount: slideNames.length,
-      masterCount: names.filter((name) =>
-        /^ppt\/slideMasters\/slideMaster\d+\.xml$/.test(name)).length,
-      layoutCount: names.filter((name) =>
-        /^ppt\/slideLayouts\/slideLayout\d+\.xml$/.test(name)).length,
-      mediaCount: mediaNames.length,
-      uniqueMediaCount: mediaHashes.length,
-      mediaContentSha256: createHash('sha256')
-        .update(mediaHashes.join('\n'))
-        .digest('hex'),
-      objectCount: slideBodies.reduce((sum, xml) =>
-        sum + [...xml.matchAll(/<p:(?:sp|pic|grpSp|graphicFrame|cxnSp)\b/g)].length, 0),
-      controlledDisclaimerTextBoxCount: slideBodies.reduce((sum, xml) =>
-        sum + [...xml.matchAll(
-          /\bname="references\.disclaimer\.generated"/g,
-        )].length, 0),
-      pictureCount: slideBodies.reduce((sum, xml) =>
-        sum + [...xml.matchAll(/<p:pic\b/g)].length, 0),
-    }
-  }
-  const [templateMetrics, outputMetrics] = await Promise.all([
-    packageMetrics(templateZip),
-    packageMetrics(zip),
-  ])
+  const zip = await JSZip.loadAsync(await readFile(input.outputPath))
   const slideParts = Object.keys(zip.files)
     .filter((name) => /^ppt\/slides\/slide\d+\.xml$/.test(name))
     .sort((left, right) =>
       Number(left.match(/(\d+)/)?.[1] ?? 0) - Number(right.match(/(\d+)/)?.[1] ?? 0))
-  const noteParts = Object.keys(zip.files)
-    .filter((name) => /^ppt\/notesSlides\/notesSlide\d+\.xml$/.test(name))
-  const slideXml = (await Promise.all(slideParts.map((name) =>
-    zip.file(name)?.async('string') ?? ''))).join('\n')
-  const notesXml = (await Promise.all(noteParts.map((name) =>
-    zip.file(name)?.async('string') ?? ''))).join('\n')
-  const semanticObjectNames = [...slideXml.matchAll(
-    /\bname="(slot\.[^"]+|section\.[^"]+|cover\.[^"]+|closing\.[^"]+|references\.[^"]+)"/g,
-  )].map((match) => match[1])
+  const slideBodies = await Promise.all(slideParts.map((name) =>
+    zip.file(name)?.async('string') ?? ''))
+  const slideXml = slideBodies.join('\n')
+  const outputMetrics = {
+    slideCount: slideParts.length,
+    objectCount: slideBodies.reduce((sum, xml) =>
+      sum + [...xml.matchAll(/<p:(?:sp|pic|grpSp|graphicFrame|cxnSp)\b/g)].length, 0),
+    pictureCount: slideBodies.reduce((sum, xml) =>
+      sum + [...xml.matchAll(/<p:pic\b/g)].length, 0),
+    editableTextRunCount: slideBodies.reduce((sum, xml) =>
+      sum + [...xml.matchAll(/<a:t(?:\s|>)/g)].length, 0),
+    slidesWithEditableText: slideBodies.filter((xml) => /<a:t(?:\s|>)/.test(xml)).length,
+    slidesWithBackgroundAndFrame: slideBodies.filter((xml) =>
+      [...xml.matchAll(/<p:pic\b/g)].length >= 2).length,
+  }
   const sampleTerms = [
     '佳量脑科学',
     'Epilcure',
@@ -268,34 +246,21 @@ export async function reviewInvestmentRecommendationPpt(input: {
   const unrelatedCachedWebTerms = ['腾讯视频', '哔哩哔哩', '豆瓣', '百度百科']
   const leakedUnrelatedWebTerms = unrelatedCachedWebTerms
     .filter((term) => slideXml.includes(term))
-  const controlledDisclaimerDelta =
-    outputMetrics.controlledDisclaimerTextBoxCount
-    - templateMetrics.controlledDisclaimerTextBoxCount
-  const authorizedControlledDisclaimerDelta =
-    controlledDisclaimerDelta === 0 || controlledDisclaimerDelta === 1
   const checks = {
-    openXmlValid: Boolean(zip.file('ppt/presentation.xml')) && slideParts.length > 0,
+    openXmlValid:
+      fileStat.size > 10_000
+      && Boolean(zip.file('ppt/presentation.xml'))
+      && slideParts.length > 0,
     targetProjectPresent: slideXml.includes(input.projectName),
     disclaimerPresent: slideXml.includes(input.disclaimer),
-    referenceSlidePresent: slideXml.includes('引用资料与责任声明'),
-    semanticObjectsPresent: outputMetrics.objectCount > 0,
-    sourceNotesPresent: notesXml.includes('[Sources]'),
+    everySlideHasEditableText:
+      outputMetrics.slidesWithEditableText === outputMetrics.slideCount,
+    everySlideHasBackgroundAndFrame:
+      outputMetrics.slidesWithBackgroundAndFrame === outputMetrics.slideCount,
+    layeredEditableObjectsPresent:
+      outputMetrics.objectCount >= outputMetrics.slideCount * 3,
     sampleContentRemoved: leakedSampleTerms.length === 0,
     unrelatedCachedWebAbsent: leakedUnrelatedWebTerms.length === 0,
-    templateSlideCountPreserved:
-      outputMetrics.slideCount === templateMetrics.slideCount,
-    templateMasterCountPreserved:
-      outputMetrics.masterCount === templateMetrics.masterCount,
-    templateLayoutCountPreserved:
-      outputMetrics.layoutCount === templateMetrics.layoutCount,
-    templateObjectCountPreserved:
-      authorizedControlledDisclaimerDelta
-      && outputMetrics.objectCount
-        === templateMetrics.objectCount + controlledDisclaimerDelta,
-    templatePictureCountPreserved:
-      outputMetrics.pictureCount === templateMetrics.pictureCount,
-    templateMediaContentPreserved:
-      outputMetrics.mediaContentSha256 === templateMetrics.mediaContentSha256,
     watermarkTextAbsent: !/(仅供项目评审使用|仅限内部分享，严格保密|CONFIDENTIAL\s+DRAFT)/i.test(
       slideXml,
     ),
@@ -309,20 +274,13 @@ export async function reviewInvestmentRecommendationPpt(input: {
     metadata: {
       bytes: fileStat.size,
       slideCount: slideParts.length,
-      notesSlideCount: noteParts.length,
-      semanticObjectCount: semanticObjectNames.length,
-      sourceNotesPresent: checks.sourceNotesPresent,
       leakedSampleTerms,
       leakedUnrelatedWebTerms,
-      controlledDisclaimerTextBoxCount:
-        outputMetrics.controlledDisclaimerTextBoxCount,
-      controlledDisclaimerDelta,
       checks,
       workflowSkills: input.workflow.skills,
       templateSourceMode: input.workflow.sourceMode,
       templateSha256: input.workflow.templateSha256,
-      replacementPolicy: input.workflow.replacementPolicy,
-      templateMetrics,
+      generationPolicy: input.workflow.generationPolicy,
       outputMetrics,
     },
   }

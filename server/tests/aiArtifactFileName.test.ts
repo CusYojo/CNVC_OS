@@ -5,7 +5,7 @@ import type { AiTemplateDefinition } from '../src/services/aiTemplateCatalog.js'
 
 const template = (input: Partial<AiTemplateDefinition>): AiTemplateDefinition => ({
   type: 'investment_recommendation_ppt',
-  skillName: 'editable-ppt-content-replacer',
+  skillName: 'GordenSuperPPTSkill',
   label: '2. 轻蜓光电投资建议书',
   description: '测试模板',
   outputFormat: 'pptx',

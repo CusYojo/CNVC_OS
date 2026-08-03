@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import { and, desc, eq } from 'drizzle-orm'
+import { and, desc, eq, isNull, or } from 'drizzle-orm'
 import JSZip from 'jszip'
 import { db } from '../db/client.js'
 import {
@@ -14,7 +14,7 @@ import {
 } from '../db/schema.js'
 import {
   AI_TEMPLATE_DRIVEN_SKILL_NAME,
-  getAiSkillRoot,
+  getAiSkillDirectory,
   loadAiSkill,
   type LoadedAiSkill,
 } from './aiSkillService.js'
@@ -697,7 +697,7 @@ export async function createAiCustomTemplate(user: TemplateUser, input: {
       ),
     ])
     const skillName = purpose === 'investment_recommendation_ppt'
-      ? 'editable-ppt-content-replacer'
+      ? 'create-reference-driven-editable-ppt'
       : AI_TEMPLATE_DRIVEN_SKILL_NAME
     const skill = await loadAiSkill(skillName)
     await reportTemplateProgress(options, '正在登记模板并完成审计记录', 99)
@@ -718,7 +718,7 @@ export async function createAiCustomTemplate(user: TemplateUser, input: {
       storagePath: assetPath,
       analysis: parsed.analysis,
       skillName,
-      skillPath: path.join(getAiSkillRoot(), skillName),
+      skillPath: getAiSkillDirectory(skillName),
       skillVersion: skill.version,
       status: 'succeeded',
     }).returning()
@@ -762,6 +762,32 @@ export async function getAiCustomTemplate(
   return row ? publicTemplate(row) : undefined
 }
 
+/**
+ * 会话中的“生成 PPT”指令只能复用当前会话或当前项目级模板，绝不跨用
+ * 其他会话上传的模板。返回最近一次分析成功且绑定三技能编排器的 PPTX。
+ */
+export async function findLatestInvestmentPptTemplate(input: {
+  userId: string
+  projectId: string
+  conversationId: string
+}) {
+  const [row] = await db.select().from(aiCustomTemplates)
+    .where(and(
+      eq(aiCustomTemplates.userId, input.userId),
+      eq(aiCustomTemplates.projectId, input.projectId),
+      eq(aiCustomTemplates.skillName, 'create-reference-driven-editable-ppt'),
+      eq(aiCustomTemplates.format, 'pptx'),
+      eq(aiCustomTemplates.status, 'succeeded'),
+      or(
+        eq(aiCustomTemplates.conversationId, input.conversationId),
+        isNull(aiCustomTemplates.conversationId),
+      ),
+    ))
+    .orderBy(desc(aiCustomTemplates.createdAt))
+    .limit(1)
+  return row ? publicTemplate(row) : undefined
+}
+
 export async function resolveAiCustomTemplateForTask(input: {
   userId: string
   projectId: string
@@ -790,7 +816,7 @@ export async function resolveAiCustomTemplateForTask(input: {
   }
   const taskType = input.taskType ?? 'custom_template_document'
   const skillName = taskType === 'investment_recommendation_ppt'
-    ? 'editable-ppt-content-replacer'
+    ? 'create-reference-driven-editable-ppt'
     : AI_TEMPLATE_DRIVEN_SKILL_NAME
   const [assetStat, skill] = await Promise.all([
     stat(resolvedAsset).catch(() => null),
@@ -835,7 +861,7 @@ export async function resolveAiCustomTemplateForTask(input: {
       ...row,
       analysis,
       skillName,
-      skillPath: path.join(getAiSkillRoot(), skillName),
+      skillPath: getAiSkillDirectory(skillName),
       skillVersion: skill.version,
     },
     skill,
@@ -860,8 +886,9 @@ export async function resolveAiCustomTemplateForTask(input: {
       ...(isInvestmentPpt
         ? {
             workflowSkillNames: [
+              'create-reference-driven-editable-ppt',
+              'GordenSuperPPTSkill',
               'pdf-to-editable-ppt',
-              'editable-ppt-content-replacer',
             ] as const,
             templateSourceMode: sourceWasPdf ? 'pdf-converted' as const : 'native-pptx' as const,
             ...(conversionHandoffPath ? { conversionHandoffPath } : {}),

@@ -1,14 +1,20 @@
 import fs from "node:fs";
 import path from "node:path";
-import {
-  hexColor,
-  portableTypeface,
-  svgData,
-} from "./public_pptx_runtime.mjs";
+import { hexColor, svgData } from "./public_pptx_runtime.mjs";
 
 
-function positionOf(value, scale) {
-  const source = value?.position || value || {};
+function resolveAsset(assetRoot, asset) {
+  return path.isAbsolute(asset) ? asset : path.resolve(assetRoot, asset);
+}
+
+
+function sourcePosition(value = {}) {
+  return value.position || value.config?.position || value;
+}
+
+
+function positionOf(value, scale, fallback = {}) {
+  const source = { ...fallback, ...sourcePosition(value) };
   return {
     x: Math.max(0, Number(source.left || 0) * scale),
     y: Math.max(0, Number(source.top || 0) * scale),
@@ -19,12 +25,14 @@ function positionOf(value, scale) {
 
 
 function lineOptions(value = {}) {
-  const hidden = value.fill === "none" || Number(value.width || 0) <= 0;
+  const hidden = value === "none"
+    || value.fill === "none"
+    || Number(value.width ?? 1) <= 0;
   return {
-    color: hexColor(value.fill, "000000"),
+    color: hexColor(value.fill || value.color, "000000"),
     width: hidden ? 0 : Math.max(0.1, Number(value.width || 1)),
-    transparency: hidden ? 100 : 0,
-    dash: value.style === "dash" || value.style === "dashed" ? "dash" : "solid",
+    transparency: hidden ? 100 : Number(value.transparency || 0),
+    dash: ["dash", "dashed"].includes(value.style) ? "dash" : "solid",
   };
 }
 
@@ -44,9 +52,7 @@ function fillOptions(value, fallback = "FFFFFF") {
 function textOptions(style = {}) {
   const insets = style.insets || {};
   return {
-    fontFace: portableTypeface(
-      style.typeface || style.fontFace || "Noto Sans CJK SC",
-    ),
+    fontFace: style.typeface || style.fontFace || "Noto Sans CJK SC",
     fontSize: Math.max(1, Number(style.fontSize || 14)),
     color: hexColor(style.color, "202020"),
     bold: Boolean(style.bold),
@@ -133,72 +139,50 @@ function addConnector(slide, pptx, item, nodes, pageNumber, manifest) {
     });
     return;
   }
-  const legacyTailTargetsTo = !item.head && item.tail;
-  const head = item.head || (legacyTailTargetsTo ? item.tail : undefined);
-  const tail = item.head ? item.tail : undefined;
-  const objectName = item.name || `connector-${item.from}-${item.to}`;
-  if (
-    pptx.supportsAttachedConnectors
-    && typeof slide.connectShapes === "function"
-    && from.element
-    && to.element
-  ) {
-    slide.connectShapes(from.element, to.element, {
-      name: objectName,
-      kind: item.kind || "straight",
-      fromSide: item.fromSide || "right",
-      toSide: item.toSide || "left",
-      line: item.line,
-      head,
-      tail,
-      cap: item.cap,
-      join: item.join,
-    });
-    addManifest(manifest, pageNumber, "connector", item, {
-      segmentCount: 1,
-      attached: true,
-    });
-    return;
-  }
-
-  const [x1, y1] = nodeAnchor(from.position, item.fromSide || "right");
-  const [x2, y2] = nodeAnchor(to.position, item.toSide || "left");
+  const [x1, y1] = nodeAnchor(from, item.fromSide || "right");
+  const [x2, y2] = nodeAnchor(to, item.toSide || "left");
   const line = lineOptions(item.line);
-  const targetType = head?.type || item.endArrowType;
-  const sourceType = tail?.type || item.beginArrowType;
-  if (targetType && targetType !== "none") line.endArrowType = targetType;
-  if (sourceType && sourceType !== "none") line.beginArrowType = sourceType;
+  const tailType = item.tail?.type || item.endArrowType;
+  const headType = item.head?.type || item.beginArrowType;
+  if (tailType && tailType !== "none") line.endArrowType = tailType;
+  if (headType && headType !== "none") line.beginArrowType = headType;
+  const objectName = item.name || `connector-${item.from}-${item.to}`;
   if (item.kind === "elbow") {
     const middleX = (x1 + x2) / 2;
-    const first = { ...line, endArrowType: undefined };
-    const middle = {
+    addLine(slide, pptx, x1, y1, middleX, y1, {
+      ...line,
+      endArrowType: undefined,
+    }, `${objectName}-1`);
+    addLine(slide, pptx, middleX, y1, middleX, y2, {
       ...line,
       beginArrowType: undefined,
       endArrowType: undefined,
-    };
-    const last = { ...line, beginArrowType: undefined };
-    addLine(slide, pptx, x1, y1, middleX, y1, first, `${objectName}-1`);
-    addLine(slide, pptx, middleX, y1, middleX, y2, middle, `${objectName}-2`);
-    addLine(slide, pptx, middleX, y2, x2, y2, last, `${objectName}-3`);
-    addManifest(manifest, pageNumber, "connector", item, {
-      segmentCount: 3,
-      attached: false,
-    });
+    }, `${objectName}-2`);
+    addLine(slide, pptx, middleX, y2, x2, y2, {
+      ...line,
+      beginArrowType: undefined,
+    }, `${objectName}-3`);
+    addManifest(manifest, pageNumber, "connector", item, { segmentCount: 3 });
   } else {
     addLine(slide, pptx, x1, y1, x2, y2, line, objectName);
-    addManifest(manifest, pageNumber, "connector", item, {
-      segmentCount: 1,
-      attached: false,
-    });
+    addManifest(manifest, pageNumber, "connector", item, { segmentCount: 1 });
   }
 }
 
 
-function addCover(slide, pptx, item, scale, pageNumber, manifest) {
+function addCover(
+  slide,
+  pptx,
+  item,
+  scale,
+  pageNumber,
+  manifest,
+  assetRoot,
+) {
   const pos = positionOf(item, scale);
   if (item.asset) {
     slide.addImage({
-      path: path.resolve(item.asset),
+      path: resolveAsset(assetRoot, item.asset),
       ...pos,
       objectName: item.name || "semantic-cover-image",
     });
@@ -206,7 +190,7 @@ function addCover(slide, pptx, item, scale, pageNumber, manifest) {
     slide.addShape(pptx.ShapeType.rect, {
       ...pos,
       fill: fillOptions(item.fill),
-      line: lineOptions(item.line),
+      line: lineOptions(item.line || "none"),
       objectName: item.name || "semantic-cover",
     });
   }
@@ -216,16 +200,15 @@ function addCover(slide, pptx, item, scale, pageNumber, manifest) {
 
 function addShape(slide, pptx, item, scale, pageNumber, manifest, nodes) {
   const pos = positionOf(item, scale);
-  const element = slide.addShape(shapeType(pptx, item.geometry), {
+  slide.addShape(shapeType(pptx, item.geometry), {
     ...pos,
     fill: fillOptions(item.fill),
     line: lineOptions(item.line),
     beginArrowType: item.beginArrowType,
     endArrowType: item.endArrowType,
-    radius: Number(item.radius || 0),
     objectName: item.name || "semantic-shape",
   });
-  nodes.set(item.name, { position: pos, element });
+  if (item.name) nodes.set(item.name, pos);
   if (item.text) {
     slide.addText(String(item.text), {
       ...pos,
@@ -253,18 +236,38 @@ function addText(slide, item, scale, pageNumber, manifest) {
 }
 
 
-function addIcon(slide, pptx, item, scale, pageNumber, manifest) {
+function addIcon(
+  slide,
+  pptx,
+  item,
+  scale,
+  pageNumber,
+  manifest,
+  assetRoot,
+) {
   const pos = positionOf(item, scale);
+  if (item.cover) {
+    const cover = item.cover === true
+      ? {
+        position: sourcePosition(item),
+        fill: item.backgroundFill || "FFFFFF",
+        line: "none",
+        name: `${item.name || "semantic-icon"}-cover`,
+      }
+      : item.cover;
+    addCover(slide, pptx, cover, scale, pageNumber, manifest, assetRoot);
+  }
   if (item.mode === "svg") {
-    const svg = item.svg || fs.readFileSync(path.resolve(item.asset), "utf8");
+    const svg = item.svg
+      || fs.readFileSync(resolveAsset(assetRoot, item.asset), "utf8");
     slide.addImage({
       data: svgData(svg),
       ...pos,
       objectName: item.name || "semantic-svg-icon",
     });
-  } else if (item.mode === "image" || item.mode === "raster") {
+  } else if (["image", "raster"].includes(item.mode)) {
     slide.addImage({
-      path: path.resolve(item.asset),
+      path: resolveAsset(assetRoot, item.asset),
       ...pos,
       objectName: item.name || "semantic-raster-icon",
     });
@@ -297,8 +300,20 @@ function addIcon(slide, pptx, item, scale, pageNumber, manifest) {
 }
 
 
+function tableDimensions(item) {
+  const source = sourcePosition(item);
+  const width = Number(source.width || (item.columnWidths || []).reduce(
+    (total, value) => total + Number(value || 0), 0,
+  ));
+  const height = Number(source.height || (item.rowHeights || []).reduce(
+    (total, value) => total + Number(value || 0), 0,
+  ));
+  return { ...source, width, height };
+}
+
+
 function addTable(slide, item, scale, pageNumber, manifest) {
-  const pos = positionOf(item, scale);
+  const pos = positionOf(tableDimensions(item), scale);
   const values = Array.isArray(item.values) ? item.values : [];
   const rows = values.map((row) => row.map((value) => String(value ?? "")));
   slide.addTable(rows, {
@@ -310,7 +325,7 @@ function addTable(slide, item, scale, pageNumber, manifest) {
     },
     fill: hexColor(item.fill, "FFFFFF"),
     color: hexColor(item.color, "202020"),
-    fontFace: portableTypeface(item.fontFace || "Noto Sans CJK SC"),
+    fontFace: item.fontFace || "Noto Sans CJK SC",
     fontSize: Math.max(1, Number(item.fontSize || 12)),
     margin: Number(item.margin || 2),
     autoFit: false,
@@ -355,39 +370,23 @@ export function applyPageOverrides({
   pageNumber,
   slideWidth,
   coordinateWidth = 1280,
+  assetRoot = process.cwd(),
 }) {
   const scale = slideWidth / Number(pageOverride.coordinateWidth || coordinateWidth);
   const manifest = [];
   const nodes = new Map();
 
   for (const item of pageOverride.shapes || []) {
-    if (item.name) {
-      nodes.set(item.name, {
-        position: positionOf(item, scale),
-        element: null,
-      });
-    }
+    if (item.name) nodes.set(item.name, positionOf(item, scale));
   }
   for (const item of pageOverride.covers || []) {
-    addCover(slide, pptx, item, scale, pageNumber, manifest);
+    addCover(slide, pptx, item, scale, pageNumber, manifest, assetRoot);
   }
-  if (pptx.supportsAttachedConnectors) {
-    for (const item of pageOverride.shapes || []) {
-      addShape(slide, pptx, item, scale, pageNumber, manifest, nodes);
-    }
-    for (const item of pageOverride.connectors || []) {
-      addConnector(slide, pptx, item, nodes, pageNumber, manifest);
-    }
-  } else {
-    for (const item of pageOverride.connectors || []) {
-      addConnector(slide, pptx, item, nodes, pageNumber, manifest);
-    }
-    for (const item of pageOverride.shapes || []) {
-      addShape(slide, pptx, item, scale, pageNumber, manifest, nodes);
-    }
+  for (const item of pageOverride.connectors || []) {
+    addConnector(slide, pptx, item, nodes, pageNumber, manifest);
   }
-  for (const item of pageOverride.texts || []) {
-    addText(slide, item, scale, pageNumber, manifest);
+  for (const item of pageOverride.shapes || []) {
+    addShape(slide, pptx, item, scale, pageNumber, manifest, nodes);
   }
   for (const item of pageOverride.charts || []) {
     addChart(slide, pptx, item, scale, pageNumber, manifest);
@@ -396,7 +395,12 @@ export function applyPageOverrides({
     addTable(slide, item, scale, pageNumber, manifest);
   }
   for (const item of pageOverride.icons || []) {
-    addIcon(slide, pptx, item, scale, pageNumber, manifest);
+    addIcon(slide, pptx, item, scale, pageNumber, manifest, assetRoot);
+  }
+  // Text is the top semantic layer. This also lets callers use a full-slide
+  // transparent frame image without covering editable labels.
+  for (const item of pageOverride.texts || []) {
+    addText(slide, item, scale, pageNumber, manifest);
   }
   return manifest;
 }

@@ -56,6 +56,15 @@ const AI_UPLOAD_EXTENSIONS = new Set(
   AI_UPLOAD_ACCEPT.split(',').map((extension) => extension.slice(1)),
 )
 
+type ConversationPptTaskResult = {
+  matched: boolean
+  needsTemplate: boolean
+  reused?: boolean
+  skillName: 'create-reference-driven-editable-ppt'
+  message?: string
+  task?: AiTask
+}
+
 // —— 模块级 toast 桥 ——
 // downloadWorkspaceFile / OSS 下载等模块级函数与深层组件（WsNode）都需要弹提示，
 // 但它们拿不到 Chat 组件里的 useToast。Chat 挂载时把 showToast 注册到这里。
@@ -235,6 +244,9 @@ function displayUserMessageText(message: SafeFlueMessage): string {
     .replace(/【当前项目】.*\n【projectId】.*\n【用户问题】/s, '')
     .replace(/【范围】全局知识库\n【用户问题】/s, '')
     .replace(/\n?【已上传文件】[\s\S]*$/, '')
+    // Flue 当前没有独立的隐藏提示字段。任务防重复指令仍需发送给 Agent，
+    // 但它属于内部控制信息，不能出现在面向用户的聊天气泡中。
+    .replace(/\n?【(?:系统已执行|内部任务状态)】[\s\S]*$/, '')
 }
 
 function safeAgentErrorMessage(error: unknown): string {
@@ -686,6 +698,7 @@ function Chat() {
   const [newSessionOpen, setNewSessionOpen] = useState(false)
   const [newSessionProjectId, setNewSessionProjectId] = useState(initialProject)
   const [creatingSession, setCreatingSession] = useState(false)
+  const [selectedQuickAction, setSelectedQuickAction] = useState<'investment_ppt' | null>(null)
 
   const currentProject = projects.find((project) => project.id === projectId) ?? projects[0]
   const newSessionProject = projects.find((project) => project.id === newSessionProjectId)
@@ -832,7 +845,12 @@ function Chat() {
   const [preview, setPreview] = useState<WsFile | null>(null)
   const prevBusyRef = useRef(false)
   // 用户上传的文件（本轮待发）：path=沙箱相对路径(agent 可 read/bash 直读)，rag=是否已入项目知识库
-  const [uploads, setUploads] = useState<{ name: string; path: string; rag: boolean }[]>([])
+  const [uploads, setUploads] = useState<{
+    name: string
+    path: string
+    rag: boolean
+    fileId?: string
+  }[]>([])
   const [uploading, setUploading] = useState(false)
   const [draggingFiles, setDraggingFiles] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -883,12 +901,18 @@ function Chat() {
     setUploadProgress({ done: 0, total: list.length })
 
     try {
-      const uploadOne = async (file: File): Promise<{ name: string; path: string; rag: boolean }> => {
+      const uploadOne = async (file: File): Promise<{
+        name: string
+        path: string
+        rag: boolean
+        fileId?: string
+      }> => {
         const dataUrl = await fileToBase64(file)
         const ws = await apiPost<{ path: string; name: string }>('/workspace/file', {
           name: file.name, dataBase64: dataUrl, subdir: convId || undefined,
         })
         let rag = false
+        let fileId: string | undefined
         if (scope === 'project' && currentProject?.id) {
           try {
             // 上传大文件走公网可能慢，用 5 分钟超时覆盖默认 60s，避免大文件被掐断。
@@ -904,6 +928,7 @@ function Chat() {
               }, { signal: upCtrl.signal })
             } finally { clearTimeout(upTimer) }
             rag = true
+            fileId = resp?.file?.id
             // 【需求:助手上传马上同步到资料库】把入库的文件并入全局 store.files，
             // 资料库页(ProjectDetailPage 读同一 store)立即可见，无需刷新。
             if (resp?.file) {
@@ -918,11 +943,15 @@ function Chat() {
             }
           } catch (err) {
             // 入 RAG 失败不阻断：文件已落沙箱可用；409=已存在视为已入库
-            if (err instanceof ApiError && err.status === 409) rag = true
+            if (err instanceof ApiError && err.status === 409) {
+              rag = true
+              fileId = (files.find((item) =>
+                item.projectId === currentProject.id && item.name === file.name) as { id?: string } | undefined)?.id
+            }
             else showToast(`「${file.name}」入库失败（文件已可用于本轮对话）：${(err as Error).message}`, 'error')
           }
         }
-        return { name: ws.name, path: ws.path, rag }
+        return { name: ws.name, path: ws.path, rag, fileId }
       }
 
       const results = await Promise.allSettled(
@@ -931,7 +960,7 @@ function Chat() {
         ),
       )
 
-      const ok: { name: string; path: string; rag: boolean }[] = []
+      const ok: { name: string; path: string; rag: boolean; fileId?: string }[] = []
       const failed: string[] = []
       results.forEach((result, index) => {
         if (result.status === 'fulfilled') ok.push(result.value)
@@ -1006,7 +1035,7 @@ function Chat() {
   ): Promise<boolean> => {
     const clean = question.trim()
     if (!clean && uploads.length === 0) return false
-    if (busy || submitLockRef.current) return false
+    if (busy || uploading || submitLockRef.current) return false
     submitLockRef.current = true
     setSubmitting(true)
     setInput('')
@@ -1040,7 +1069,59 @@ function Chat() {
       ? `【范围】全局知识库\n【用户问题】${clean}${fileCtx}`
       : `【当前项目】${effectiveProject?.projectName ?? ''}\n【projectId】${effectiveProject?.projectId ?? ''}\n【用户问题】${clean}${fileCtx}`
     try {
-      await agent.sendMessage(ctx)
+      let taskDispatchContext = ''
+      if (
+        effectiveScope === 'project'
+        && effectiveProject?.projectId
+        && UUID_PATTERN.test(effectiveProject.projectId)
+        && UUID_PATTERN.test(currentConversationRowId)
+      ) {
+        try {
+          const forceInvestmentPpt = selectedQuickAction === 'investment_ppt'
+          const generationMessage = clean
+            || (forceInvestmentPpt
+              ? '请根据本轮上传文件与当前项目资料生成投资建议书 PPT。'
+              : '附件已上传，请读取并等待用户后续要求。')
+          const recentMessages = messages.slice(-8).map((message) => ({
+            role: message.role,
+            content: extractTextParts(message).slice(0, 4_000),
+          })).filter((message) => message.content.trim())
+          const dispatch = await apiPost<ConversationPptTaskResult>(
+            '/ai/tasks/from-conversation',
+            {
+              projectId: effectiveProject.projectId,
+              conversationId: currentConversationRowId,
+              message: generationMessage,
+              recentMessages,
+              force: forceInvestmentPpt,
+              attachmentFileIds: uploads
+                .map((upload) => upload.fileId)
+                .filter((fileId): fileId is string => Boolean(fileId)),
+              attachmentFileNames: uploads.map((upload) => upload.name),
+              sourceCutoffDate: new Date().toISOString().slice(0, 10),
+              idempotencyKey: `chat-ppt-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`,
+            },
+          )
+          if (dispatch.task) {
+            setAiTasks((items) => [
+              dispatch.task!,
+              ...items.filter((item) => item.id !== dispatch.task!.id),
+            ])
+            showToast(
+              dispatch.reused
+                ? '当前会话已有投资建议书任务，已定位到进度卡'
+                : '已根据当前对话和项目资料启动投资建议书 PPT 任务',
+              'success',
+            )
+            setSelectedQuickAction(null)
+            taskDispatchContext = `\n【内部任务状态】${dispatch.skillName} 已创建正式投资建议书任务（任务 ID：${dispatch.task.id}）。请仅告知用户查看会话中的进度卡，不要重复调用其他 PPT 生成工具。`
+          }
+        } catch (error) {
+          // 意图分发暂时不可用时仍保留普通对话能力，不吞掉用户消息。
+          console.warn('Conversation PPT intent dispatch failed:', (error as Error).message)
+        }
+      }
+      await agent.sendMessage(`${ctx}${taskDispatchContext}`)
       setUploads([])
       return true
     } catch (err) {
@@ -1063,6 +1144,7 @@ function Chat() {
       setScope('global')
     }
     setInput('')
+    setSelectedQuickAction(null)
     setAiTasks([])
     setQaAnswers([])
   }
@@ -1203,7 +1285,8 @@ function Chat() {
     // 【当前项目】xx\n【projectId】xx\n【用户问题】真实问题  或  【范围】全局知识库\n【用户问题】真实问题
     // 旧正则 /【[^】]*】[^\n]*\n?/g 会把「【用户问题】真实问题」整行一起删掉 → userText 变空 → 标题永不更新。
     // 正确做法：优先取【用户问题】后面的内容；无则剥掉上下文标签行后取剩余。
-    const rawUserText = extractTextParts(firstUser)
+    // 标题只使用用户真正输入的内容，不能把内部任务分发回执带进会话标题。
+    const rawUserText = displayUserMessageText(firstUser)
     const qMatch = rawUserText.match(/【用户问题】([\s\S]*)$/)
     const userText = (qMatch
       ? qMatch[1]
@@ -1314,6 +1397,7 @@ function Chat() {
           outputFormat: request.outputFormat,
           language: request.language,
           structureMode: request.structureMode,
+          userInstructions: request.userInstructions,
           idempotencyKey: `ppt-preparation-${request.progressId}`,
         },
       )
@@ -1344,13 +1428,9 @@ function Chat() {
     const parameters: Record<string, unknown> = {
       sourceCutoffDate: request.sourceCutoffDate,
       outputFormat: request.outputFormat,
-      ...(request.actionId === 'investment_ppt'
-        ? {}
-        : {
-            networkSupplement: true,
-            researchIntent: request.userInstructions?.trim()
-              || `联网检索“${request.projectName}”的具体项目、主体、团队、产品、客户、融资、商业化与风险信息，并结合当前项目资料生成${request.actionLabel}。`,
-          }),
+      networkSupplement: true,
+      researchIntent: request.userInstructions?.trim()
+        || `联网检索“${request.projectName}”的具体项目、主体、团队、产品、客户、融资、商业化与风险信息，并结合当前项目资料生成${request.actionLabel}。`,
     }
     if (request.actionId === 'proposal') {
       parameters.audience = request.audience || '内部立项'
@@ -1363,10 +1443,13 @@ function Chat() {
         parameters.userInstructions = request.userInstructions.trim()
       }
     } else if (request.actionId === 'investment_ppt') {
-      parameters.customTemplateId = request.customTemplateId
-      parameters.customTemplateName = request.customTemplateName
       parameters.language = request.language || '中文'
-      parameters.structureMode = request.structureMode || 'strict-template'
+      parameters.structureMode = 'standard'
+      if (request.userInstructions?.trim()) {
+        parameters.userInstructions = request.userInstructions.trim()
+        parameters.researchIntent = request.userInstructions.trim()
+        parameters.conversationTriggered = request.userInstructions.includes('本次会话生成要求：')
+      }
       if (request.preparationStartedAt) {
         parameters.clientTimelineStartedAt = request.preparationStartedAt
       }
@@ -1590,6 +1673,8 @@ function Chat() {
               onRunTask={runQuickTask}
               onCreatePreparationTask={createQuickTaskPreparation}
               onPreparationProgress={updateQuickTaskPreparation}
+              selectedActionId={selectedQuickAction}
+              onSelectAction={setSelectedQuickAction}
             />
           </AiErrorBoundary>
           <div
@@ -1642,12 +1727,14 @@ function Chat() {
               aria-keyshortcuts="Enter Shift+Enter"
               rows={2}
               className="w-full resize-none border-0 px-2 py-1 text-sm leading-6 outline-none placeholder:text-slate-400"
-              placeholder={`向 AI 询问 ${scope === 'project' ? currentProject?.name : '机构知识库'}…`}
+              placeholder={selectedQuickAction === 'investment_ppt'
+                ? '输入投资建议书的重点、口径或其他要求，也可以直接添加文件后发送…'
+                : `向 AI 询问 ${scope === 'project' ? currentProject?.name : '机构知识库'}…`}
             />
             <input ref={fileInputRef} type="file" multiple className="hidden" onChange={onPickFiles} accept={AI_UPLOAD_ACCEPT} />
             <div className="flex items-center justify-between px-1"><div className="flex min-w-0 items-center gap-2 text-[10px] text-slate-400"><button onClick={() => fileInputRef.current?.click()} disabled={uploading} title="上传文件（PDF/Excel/CSV 等，agent 可直接读）" className="grid h-6 w-6 shrink-0 place-items-center rounded text-slate-400 hover:bg-slate-100 hover:text-brand-600 disabled:opacity-50">{uploading ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Paperclip className="h-3.5 w-3.5" />}</button><CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-500" /><span className="truncate">Enter 发送 · Shift + Enter 换行</span></div>{busy
               ? <button aria-label="停止" title="停止生成" onClick={stop} className="grid h-8 w-8 place-items-center rounded-lg bg-rose-500 text-white hover:bg-rose-600"><Square className="h-3.5 w-3.5" /></button>
-              : <button aria-label="发送" title="发送（Enter）" disabled={sending || (!input.trim() && uploads.length === 0)} onClick={() => { void send() }} className="grid h-8 w-8 place-items-center rounded-lg bg-brand-600 text-white disabled:cursor-not-allowed disabled:bg-slate-200"><Send className="h-4 w-4" /></button>}</div>
+              : <button aria-label="发送" title="发送（Enter）" disabled={sending || uploading || (!input.trim() && uploads.length === 0)} onClick={() => { void send() }} className="grid h-8 w-8 place-items-center rounded-lg bg-brand-600 text-white disabled:cursor-not-allowed disabled:bg-slate-200"><Send className="h-4 w-4" /></button>}</div>
           </div>
           {agentError && (
             <div className="mt-2 flex items-center gap-2 rounded-lg border border-rose-100 bg-rose-50 px-3 py-2 text-[11px] text-rose-600">
