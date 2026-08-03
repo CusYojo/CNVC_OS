@@ -63,6 +63,9 @@ type GordenImagegenManifestEntry = Record<string, unknown> & {
 type GordenResumeCheckpoint = {
   runRoot: string
   slides: GordenImagegenManifestEntry[]
+  layerPages: Map<number, {
+    pageRoot: string
+  }>
   editablePages: Map<number, {
     pageRoot: string
     layout: Record<string, unknown>
@@ -83,6 +86,7 @@ type VisionLayout = {
     textIndex?: unknown
     source_bbox?: unknown
     size?: unknown
+    size_px?: unknown
     color?: unknown
     bold?: unknown
     align?: unknown
@@ -93,6 +97,7 @@ type VisionLayout = {
   icons?: Array<{
     file?: unknown
     source_bbox?: unknown
+    visible_text?: unknown
   }>
   unexpectedText?: unknown
 }
@@ -236,6 +241,9 @@ async function findGordenResumeCheckpoint(input: {
           pageRoot: string
           layout: Record<string, unknown>
         }>()
+        const layerPages = new Map<number, {
+          pageRoot: string
+        }>()
         const editableLayoutTimes: number[] = []
         for (const plan of input.plans) {
           if (!reusableSlideNumbers.has(plan.number)) continue
@@ -261,7 +269,10 @@ async function findGordenResumeCheckpoint(input: {
               path.join(pageRoot, 'background.png'),
               path.join(pageRoot, 'frame.png'),
               path.join(pageRoot, 'imagegen-assets-manifest.json'),
+              path.join(pageRoot, 'icons', 'icons_manifest.json'),
             ]
+            if (requiredAssets.some((asset) => !existsSync(asset))) continue
+            layerPages.set(plan.number, { pageRoot })
             const visualReview = JSON.parse(await readFile(
               path.join(pageRoot, 'qa-visual', 'vision-review.json'),
               'utf8',
@@ -269,7 +280,6 @@ async function findGordenResumeCheckpoint(input: {
             if (
               !completeTextMap
               || visualReview.passed !== true
-              || requiredAssets.some((asset) => !existsSync(asset))
             ) continue
             editablePages.set(plan.number, { pageRoot, layout })
             editableLayoutTimes.push((await stat(layoutPath)).mtimeMs)
@@ -281,9 +291,10 @@ async function findGordenResumeCheckpoint(input: {
         candidates.push({
           runRoot,
           slides: reusableSlides,
+          layerPages,
           editablePages,
           modifiedAt: Math.max(manifestStat.mtimeMs, ...editableLayoutTimes),
-          reuseScore: reusableSlides.length * 10 + editablePages.size,
+          reuseScore: reusableSlides.length * 10 + layerPages.size * 2 + editablePages.size,
         })
       } catch {
         // Incomplete runs are not valid checkpoints and are ignored.
@@ -720,13 +731,19 @@ export function buildReferenceDrivenSemanticOverrides(input: {
         position: fractionPosition(icon, width, height),
       })),
     ]
-    const semanticTexts = texts.map((text, textIndex) => ({
+    const semanticTexts = texts
+      .filter((text) => !Boolean(text.rendered_by_icon))
+      .map((text, textIndex) => ({
       name: `slide-${String(page).padStart(2, '0')}-text-${String(textIndex + 1).padStart(3, '0')}`,
       text: String(text.text || ''),
       position: fractionPosition(text, width, height),
       textStyle: {
         typeface: String(text.font || 'Microsoft YaHei'),
-        fontSize: Math.max(5, Number(text.size || 12)),
+        fontSize: Math.max(5, Number.isFinite(Number(text.size))
+          ? Number(text.size)
+          : Number.isFinite(Number(text.size_px))
+            ? Number(text.size_px) * 540 / Math.max(1, height)
+            : 12),
         color: String(text.color || '#172033'),
         bold: Boolean(text.bold),
         alignment: String(text.align || 'left'),
@@ -878,6 +895,69 @@ function finiteNumber(value: unknown) {
   return Number.isFinite(number) ? number : undefined
 }
 
+function clamp(value: number, minimum: number, maximum: number) {
+  return Math.max(minimum, Math.min(maximum, value))
+}
+
+function visibleTextWidthUnits(value: string) {
+  let units = 0
+  for (const character of value.normalize('NFKC')) {
+    if (/\s/u.test(character)) units += 0.35
+    else if (/[\u0000-\u00ff]/u.test(character)) units += /[A-Za-z0-9]/u.test(character) ? 0.56 : 0.48
+    else units += 1
+  }
+  return Math.max(1, units)
+}
+
+function normalizedVisibleMarker(value: unknown) {
+  return String(value ?? '')
+    .normalize('NFKC')
+    .replace(/[\s，。；：、“”‘’（）()【】\[\].,;:'"_-]+/gu, '')
+}
+
+function textLayoutMetrics(input: {
+  text: string
+  width: number
+  height: number
+  reportedSizePx?: number
+  bold: boolean
+}) {
+  const explicitLines = input.text.split('\n')
+  const reportedSizePx = clamp(
+    input.reportedSizePx ?? Math.max(12, input.height * 0.52),
+    7,
+    96,
+  )
+  const lineCount = explicitLines.reduce((total, line) => {
+    const estimatedWidth = visibleTextWidthUnits(line) * reportedSizePx
+    return total + Math.max(1, Math.ceil(estimatedWidth / Math.max(1, input.width * 0.94)))
+  }, 0)
+  const lineBoxPx = input.height / Math.max(1, lineCount)
+  const numericMarker = /^\d{1,2}$/u.test(input.text.trim())
+  const calibratedSizePx = numericMarker
+    ? Math.max(reportedSizePx, lineBoxPx * 0.45)
+    : input.bold
+      ? Math.max(reportedSizePx, lineBoxPx * 0.68)
+      : Math.max(reportedSizePx, lineBoxPx * 0.5)
+  return {
+    lineCount,
+    singleLine: explicitLines.length === 1 && lineCount === 1,
+    sizePx: clamp(calibratedSizePx, 7, 96),
+  }
+}
+
+function bboxContainsCenter(
+  outer: readonly number[],
+  inner: readonly number[],
+) {
+  const centerX = inner[0] + inner[2] / 2
+  const centerY = inner[1] + inner[3] / 2
+  return centerX >= outer[0]
+    && centerX <= outer[0] + outer[2]
+    && centerY >= outer[1]
+    && centerY <= outer[1] + outer[3]
+}
+
 export function annotateGordenTextWeightQa<T extends Record<string, unknown>>(slide: T): T {
   const texts = (Array.isArray(slide.texts) ? slide.texts : [])
     .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object'))
@@ -951,7 +1031,7 @@ async function imageSize(imagePath: string, python: string, timeoutMs: number) {
   return { width: Number(match[1]), height: Number(match[2]) }
 }
 
-function normalizeLayout(input: {
+export function normalizeGordenLayout(input: {
   vision: VisionLayout
   plan: GordenSlidePlan
   iconManifest: IconManifest
@@ -967,8 +1047,14 @@ function normalizeLayout(input: {
     if (!Number.isInteger(textIndex) || textIndex < 1 || textIndex > expectedCount || !bbox) return []
     const [x, y, w, h] = bbox
     const text = input.plan.expectedTexts[textIndex - 1]
-    const singleLine = !text.includes('\n') && text.length <= 32
-    const safeWidth = singleLine
+    const layoutMetrics = textLayoutMetrics({
+      text,
+      width: w,
+      height: h,
+      reportedSizePx: finiteNumber(item.size_px) ?? finiteNumber(item.size),
+      bold: Boolean(item.bold),
+    })
+    const safeWidth = layoutMetrics.singleLine
       ? Math.min(input.width - x, w + Math.max(12, w * 0.1))
       : w
     return [{
@@ -979,7 +1065,7 @@ function normalizeLayout(input: {
       y: y / input.height,
       w: safeWidth / input.width,
       h: h / input.height,
-      size: Math.max(7, Math.min(54, finiteNumber(item.size) ?? (textIndex === 1 ? 30 : 13))),
+      size_px: layoutMetrics.sizePx,
       color: /^#[0-9a-f]{6}$/i.test(String(item.color || '')) ? String(item.color) : '#172033',
       bold: Boolean(item.bold),
       align: ['left', 'center', 'right', 'justify'].includes(String(item.align))
@@ -990,7 +1076,7 @@ function normalizeLayout(input: {
         : 'top',
       font: String(item.font || input.font),
       line_spacing: Math.max(1, Math.min(1.8, finiteNumber(item.line_spacing) ?? 1.18)),
-      word_wrap: !singleLine,
+      word_wrap: !layoutMetrics.singleLine,
     }]
   })
   const byIndex = new Map(textEntries.map((entry) => [entry.textIndex, entry]))
@@ -1017,6 +1103,7 @@ function normalizeLayout(input: {
     const [x, y, w, h] = bbox
     return [{
       file: path.join(input.pageRoot, 'icons', file),
+      visible_text: String(item.visible_text ?? ''),
       source_bbox: [...bbox],
       x: x / input.width,
       y: y / input.height,
@@ -1025,11 +1112,36 @@ function normalizeLayout(input: {
       role: 'icon',
     }]
   })
+  const renderedByIcon: number[] = []
+  const texts = [...byIndex.values()]
+    .sort((left, right) => left.textIndex - right.textIndex)
+    .map((entry) => {
+      const marker = normalizedVisibleMarker(entry.text)
+      if (!/^\d{1,2}$/u.test(marker)) return entry
+      const matchedIcon = icons.some((icon) => (
+        normalizedVisibleMarker(icon.visible_text) === marker
+        && bboxContainsCenter(icon.source_bbox, entry.source_bbox)
+      ))
+      if (!matchedIcon) return entry
+      renderedByIcon.push(entry.textIndex)
+      return {
+        ...entry,
+        opacity: 0,
+        rendered_by_icon: true,
+      }
+    })
   return annotateGordenTextWeightQa({
     background: path.join(input.pageRoot, 'background.png'),
     frame: path.join(input.pageRoot, 'frame.png'),
     icons,
-    texts: [...byIndex.values()].sort((left, right) => left.textIndex - right.textIndex),
+    texts,
+    ...(renderedByIcon.length
+      ? {
+          qa_notes: [
+            `编号徽标 ${renderedByIcon.join('、')} 已由图标层呈现，隐藏重复文本层以避免重影。`,
+          ],
+        }
+      : {}),
   })
 }
 
@@ -1038,14 +1150,15 @@ function layoutVisionPrompt(plan: GordenSlidePlan, iconFiles: string[], width: n
 请在第一张图的 ${width}×${height} 原始像素坐标系中，精确定位下面每一条普通文本，并把联系表中的每个真实图标映射回第一张图的位置。
 
 必须返回 JSON：
-{"texts":[{"textIndex":1,"source_bbox":[x,y,w,h],"size":30,"color":"#RRGGBB","bold":true,"align":"left|center|right|justify","valign":"top|middle|bottom","font":"Microsoft YaHei","line_spacing":1.2}],"icons":[{"file":"icon_r1c1.png","source_bbox":[x,y,w,h]}],"unexpectedText":["不属于下列文字的可见文本"]}
+{"texts":[{"textIndex":1,"source_bbox":[x,y,w,h],"size_px":30,"color":"#RRGGBB","bold":true,"align":"left|center|right|justify","valign":"top|middle|bottom","font":"Microsoft YaHei","line_spacing":1.2}],"icons":[{"file":"icon_r1c1.png","source_bbox":[x,y,w,h],"visible_text":"图标切片中实际可见的文字或空字符串"}],"unexpectedText":["不属于下列文字的可见文本"]}
 
 规则：
 1. texts 必须覆盖 1-${plan.expectedTexts.length} 的每个 textIndex，不能缺项、不能合并索引。
 2. bbox 是第一张图真实像素坐标 [左,上,宽,高]，必须圈住对应对象。
-3. 文本内容以这里的索引为准，不要 OCR 改写；所有可读文字（包括标题、标签和艺术字）都归 texts，不归 icons。
-4. icons.file 必须使用第二张图标注的精确文件名；空白格不要返回。
-5. unexpectedText 必须列出第一张图中所有不属于文字索引清单的可读内容，包括额外标题、卡片标签、图表标签、来源名称、模板样本公司、Logo 文字、日期、页码、水印、编号或无依据数字；不得因为内容看似合理而省略。
+3. size_px 是文字在第一张源图中的像素字号，不是 PowerPoint pt；必须按源图实际字高估计。
+4. 文本内容以这里的索引为准，不要 OCR 改写；所有可读文字（包括标题、标签和艺术字）都归 texts。
+5. icons.file 必须使用第二张图标注的精确文件名；空白格不要返回。每个图标都必须返回 visible_text：若该图标切片错误包含数字或文字，逐字返回；完全没有文字时返回空字符串。
+6. unexpectedText 必须列出第一张图中所有不属于文字索引清单的可读内容，包括额外标题、卡片标签、图表标签、来源名称、模板样本公司、Logo 文字、日期、页码、水印、编号或无依据数字；不得因为内容看似合理而省略。
 
 文字索引：
 ${plan.expectedTexts.map((text, index) => `${index + 1}. ${text}`).join('\n')}
@@ -1481,64 +1594,97 @@ export async function generateInvestmentRecommendationPptWithGorden(input: {
     }
     const pagePrompts = path.join(pageRoot, 'prompts')
     const iconsDir = path.join(pageRoot, 'icons')
-    await Promise.all([
-      mkdir(pagePrompts, { recursive: true }),
-      mkdir(iconsDir, { recursive: true }),
-    ])
-    await copyFile(sourceImage, path.join(pageRoot, 'source-slide.png'))
-    const keyColor = '#00ff00'
-    const layerPrompts = buildGordenEditableLayerPrompts(keyColor)
-    const layerResults: Record<string, GatewayImageResult> = {}
-    for (const [layer, prompt] of Object.entries(layerPrompts)) {
-      const promptFile = path.join(pagePrompts, `${layer}.md`)
-      await writeFile(promptFile, prompt, 'utf8')
-      layerResults[layer] = await generateGatewayImage({
-        python,
-        script: paths.generateImage,
-        promptFile,
-        outDir: path.join(pageRoot, 'generated', layer),
-        referenceImage: sourceImage,
-        size: layer === 'icons' ? '2048x2048' : '2560x1440',
-        timeoutMs,
-        env,
-      })
-    }
-
     const backgroundPath = path.join(pageRoot, 'background.png')
     const frameRawPath = path.join(pageRoot, 'frame_raw.png')
     const iconsRawPath = path.join(pageRoot, 'icons_raw_1.png')
-    await Promise.all([
-      copyFile(layerResults.background.saved[0], backgroundPath),
-      copyFile(layerResults.frame.saved[0], frameRawPath),
-      copyFile(layerResults.icons.saved[0], iconsRawPath),
-    ])
     const framePath = path.join(pageRoot, 'frame.png')
     const iconsTransparentPath = path.join(pageRoot, 'icons_t_1.png')
-    await runCommand(python, [
-      paths.chromaKey,
-      '--input', frameRawPath,
-      '--out', framePath,
-      '--preset', 'frame-safe',
-      '--scale', '2',
-      '--force',
-    ], { timeoutMs, env })
-    await runCommand(python, [
-      paths.chromaKey,
-      '--input', iconsRawPath,
-      '--out', iconsTransparentPath,
-      '--preset', 'icon-safe',
-      '--scale', '2',
-      '--force',
-    ], { timeoutMs, env })
-    await runCommand(python, [
-      paths.sliceGrid,
-      iconsTransparentPath,
-      iconsDir,
-      '--auto',
-      '--pad', '24',
-      '--contact-sheet',
-      '--prefix', 'icon',
-    ], { timeoutMs, env })
+    const resumedLayerPage = resumeCheckpoint?.layerPages.get(plan.number)
+    if (resumedLayerPage) {
+      await reportProgress(
+        input.onProgress,
+        `Gorden 断点续跑：复用第 ${plan.number}/${plans.length} 页背景、框架和图标层`,
+        76 + Math.round((plan.number / plans.length) * 8),
+      )
+      await cp(resumedLayerPage.pageRoot, pageRoot, {
+        recursive: true,
+        force: true,
+      })
+      await copyFile(sourceImage, path.join(pageRoot, 'source-slide.png'))
+    } else {
+      await Promise.all([
+        mkdir(pagePrompts, { recursive: true }),
+        mkdir(iconsDir, { recursive: true }),
+      ])
+      await copyFile(sourceImage, path.join(pageRoot, 'source-slide.png'))
+      const keyColor = '#00ff00'
+      const layerPrompts = buildGordenEditableLayerPrompts(keyColor)
+      const layerResults: Record<string, GatewayImageResult> = {}
+      for (const [layer, prompt] of Object.entries(layerPrompts)) {
+        const promptFile = path.join(pagePrompts, `${layer}.md`)
+        await writeFile(promptFile, prompt, 'utf8')
+        layerResults[layer] = await generateGatewayImage({
+          python,
+          script: paths.generateImage,
+          promptFile,
+          outDir: path.join(pageRoot, 'generated', layer),
+          referenceImage: sourceImage,
+          size: layer === 'icons' ? '2048x2048' : '2560x1440',
+          timeoutMs,
+          env,
+        })
+      }
+
+      await Promise.all([
+        copyFile(layerResults.background.saved[0], backgroundPath),
+        copyFile(layerResults.frame.saved[0], frameRawPath),
+        copyFile(layerResults.icons.saved[0], iconsRawPath),
+      ])
+      await runCommand(python, [
+        paths.chromaKey,
+        '--input', frameRawPath,
+        '--out', framePath,
+        '--preset', 'frame-safe',
+        '--scale', '2',
+        '--force',
+      ], { timeoutMs, env })
+      await runCommand(python, [
+        paths.chromaKey,
+        '--input', iconsRawPath,
+        '--out', iconsTransparentPath,
+        '--preset', 'icon-safe',
+        '--scale', '2',
+        '--force',
+      ], { timeoutMs, env })
+      await runCommand(python, [
+        paths.sliceGrid,
+        iconsTransparentPath,
+        iconsDir,
+        '--auto',
+        '--pad', '24',
+        '--contact-sheet',
+        '--prefix', 'icon',
+      ], { timeoutMs, env })
+      await writeJson(path.join(pageRoot, 'imagegen-assets-manifest.json'), {
+        schemaVersion: '1.0',
+        slide: plan.number,
+        key_color: keyColor,
+        assets: Object.entries(layerResults).map(([layer, result]) => ({
+          layer,
+          backend: 'gateway-gpt-image',
+          generated_source: result.saved[0],
+          task_id: result.task_id,
+          metadata_json: result.metadata_json,
+          prompt_file: path.join(pagePrompts, `${layer}.md`),
+          copied_to: layer === 'background'
+            ? backgroundPath
+            : layer === 'frame'
+              ? frameRawPath
+              : iconsRawPath,
+          key_color: layer === 'background' ? null : keyColor,
+        })),
+      })
+    }
     const iconManifestPath = path.join(iconsDir, 'icons_manifest.json')
     const iconManifest = JSON.parse(await readFile(iconManifestPath, 'utf8')) as IconManifest
     const unsafeIcons = (iconManifest.icons ?? []).filter((icon) =>
@@ -1591,7 +1737,7 @@ export async function generateInvestmentRecommendationPptWithGorden(input: {
         },
       )
     }
-    const slideLayout = normalizeLayout({
+    const slideLayout = normalizeGordenLayout({
       vision,
       plan,
       iconManifest,
@@ -1611,25 +1757,6 @@ export async function generateInvestmentRecommendationPptWithGorden(input: {
       ...slideLayout,
     }
     await writeJson(layoutPath, pageLayout)
-    await writeJson(path.join(pageRoot, 'imagegen-assets-manifest.json'), {
-      schemaVersion: '1.0',
-      slide: plan.number,
-      key_color: keyColor,
-      assets: Object.entries(layerResults).map(([layer, result]) => ({
-        layer,
-        backend: 'gateway-gpt-image',
-        generated_source: result.saved[0],
-        task_id: result.task_id,
-        metadata_json: result.metadata_json,
-        prompt_file: path.join(pagePrompts, `${layer}.md`),
-        copied_to: layer === 'background'
-          ? backgroundPath
-          : layer === 'frame'
-            ? frameRawPath
-            : iconsRawPath,
-        key_color: layer === 'background' ? null : keyColor,
-      })),
-    })
     await runCommand(python, [
       paths.layoutGuard,
       sourceImage,

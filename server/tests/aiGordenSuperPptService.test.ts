@@ -11,6 +11,7 @@ import {
   gordenSlidePlanFingerprint,
   gordenUnplannedVisibleTexts,
   gordenSkillPaths,
+  normalizeGordenLayout,
   referenceDrivenSkillPaths,
 } from '../src/services/aiGordenSuperPptService.js'
 import {
@@ -202,6 +203,72 @@ test('Gorden strict text-weight QA permits a regular body with bold title and ca
   assert.equal(accidentalAllBold.allow_all_bold_text, undefined)
 })
 
+test('Gorden layout keeps pixel font units, prevents false wrapping and removes duplicate badge text', () => {
+  const result = normalizeGordenLayout({
+    vision: {
+      texts: [
+        {
+          textIndex: 1,
+          source_bbox: [20, 30, 1493, 37],
+          size_px: 28,
+          color: '#172033',
+          bold: false,
+          align: 'left',
+          valign: 'middle',
+        },
+        {
+          textIndex: 2,
+          source_bbox: [100, 200, 680, 118],
+          size_px: 24,
+          color: '#334155',
+          bold: false,
+          align: 'left',
+          valign: 'top',
+        },
+        {
+          textIndex: 3,
+          source_bbox: [1051, 211, 47, 59],
+          size_px: 25,
+          color: '#FFFFFF',
+          bold: true,
+          align: 'center',
+          valign: 'middle',
+        },
+      ],
+      icons: [{
+        file: 'badge.png',
+        source_bbox: [1031, 199, 77, 77],
+        visible_text: '3',
+      }],
+      unexpectedText: [],
+    },
+    plan: {
+      number: 1,
+      role: 'body',
+      title: '测试页',
+      expectedTexts: [
+        '融资、估值与交易安排｜项目概览与发展阶段｜产品、技术与工程化进展｜客户验证与商业化进展',
+        '这是用于验证正文换行判断的较长内容。'.repeat(12),
+        '3',
+      ],
+      sourceIndexes: [],
+    },
+    iconManifest: { icons: [{ file: 'badge.png' }] },
+    pageRoot: '/tmp/gorden-page',
+    width: 2048,
+    height: 1152,
+    font: 'Microsoft YaHei',
+  }) as { texts: Array<Record<string, unknown>>; icons: Array<Record<string, unknown>> }
+
+  assert.equal(result.texts[0].size, undefined)
+  assert.equal(result.texts[0].size_px, 28)
+  assert.equal(result.texts[0].word_wrap, false)
+  assert.equal(result.texts[1].word_wrap, true)
+  assert.equal(result.texts[2].rendered_by_icon, true)
+  assert.equal(result.texts[2].opacity, 0)
+  assert.equal(result.icons[0].visible_text, '3')
+})
+
 test('investment PPT resume checkpoint remaps duplicate source identities in order', () => {
   const checkpointContent: BusinessContent = {
     title: '测试投资建议书',
@@ -349,4 +416,39 @@ test('reference-driven semantic bridge preserves four layers with stable names',
     width: 2560,
     height: 1440,
   })
+})
+
+test('reference-driven bridge converts source pixel font size to points and skips icon-rendered labels', () => {
+  const result = buildReferenceDrivenSemanticOverrides({
+    dimensions: [{ width: 2048, height: 1152 }],
+    slides: [{
+      background: '/tmp/background.png',
+      frame: '/tmp/frame.png',
+      icons: [],
+      texts: [
+        {
+          text: '正常正文',
+          x: 0.1,
+          y: 0.1,
+          w: 0.3,
+          h: 0.08,
+          size_px: 23,
+          color: '#123456',
+        },
+        {
+          text: '3',
+          x: 0.5,
+          y: 0.5,
+          w: 0.05,
+          h: 0.05,
+          size_px: 25,
+          rendered_by_icon: true,
+        },
+      ],
+    }],
+  }) as { slides: Record<string, any> }
+  const slide = result.slides['1']
+  assert.equal(slide.review.expectedCounts.texts, 1)
+  assert.equal(slide.texts.length, 1)
+  assert.ok(Math.abs(slide.texts[0].textStyle.fontSize - 10.78125) < 0.0001)
 })
