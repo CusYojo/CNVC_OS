@@ -7,7 +7,7 @@ import { useAuthStore } from '../store/useAuthStore'
 import { apiPost, apiGet } from '../lib/api'
 import type { Lead, LeadScoreJobStatus, LeadScoring } from '../types'
 
-const CHANNEL_OPTIONS: string[] = ['36氪', '机构公众号', '高校公众号', '创投新闻', '微信群聊', '论文']
+const CHANNEL_OPTIONS: string[] = ['36氪', '机构公众号', '高校公众号', '创投新闻', '论文']
 const INDUSTRY_OPTIONS: string[] = [
   '人工智能', '具身智能/机器人', '半导体/芯片', '前沿技术', '产业升级', '先进制造',
   '企业服务', '医疗健康', '生物医药', '新能源', '新材料', '汽车出行',
