@@ -974,45 +974,85 @@ async function requestVisionJson(input: {
       image_url: { url: `data:${mime};base64,${buffer.toString('base64')}` },
     }
   }))
-  const response = await fetch(`${GORDEN_LLM_BASE}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(GORDEN_LLM_KEY ? { Authorization: `Bearer ${GORDEN_LLM_KEY}` } : {}),
-    },
-    body: JSON.stringify({
-      model: GORDEN_VISION_MODEL,
-      messages: [{
-        role: 'user',
-        content: [
-          { type: 'text', text: input.prompt },
-          ...imageContents,
-        ],
-      }],
-      max_tokens: 8000,
-      reasoning_effort: 'low',
-      response_format: { type: 'json_object' },
-    }),
-    signal: AbortSignal.timeout(input.timeoutMs),
+  const requestBody = JSON.stringify({
+    model: GORDEN_VISION_MODEL,
+    messages: [{
+      role: 'user',
+      content: [
+        { type: 'text', text: input.prompt },
+        ...imageContents,
+      ],
+    }],
+    max_tokens: 8000,
+    reasoning_effort: 'low',
+    response_format: { type: 'json_object' },
   })
-  if (!response.ok) {
-    throw new Error(`Gorden 视觉解析失败：LLM HTTP ${response.status}`)
+  const maxAttempts = 3
+  let lastError: unknown
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      const response = await fetch(`${GORDEN_LLM_BASE}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(GORDEN_LLM_KEY ? { Authorization: `Bearer ${GORDEN_LLM_KEY}` } : {}),
+        },
+        body: requestBody,
+        signal: AbortSignal.timeout(input.timeoutMs),
+      })
+      if (!response.ok) {
+        throw Object.assign(
+          new Error(`Gorden 视觉解析失败：LLM HTTP ${response.status}`),
+          { status: response.status },
+        )
+      }
+      const payload = await response.json() as {
+        choices?: Array<{ message?: { content?: unknown } }>
+      }
+      const content = payload.choices?.[0]?.message?.content
+      const text = typeof content === 'string'
+        ? content
+        : Array.isArray(content)
+          ? content.map((part) => (
+              part && typeof part === 'object' && 'text' in part
+                ? String((part as { text?: unknown }).text ?? '')
+                : ''
+            )).join('')
+          : ''
+      if (!text) throw new Error('Gorden 视觉解析没有返回内容')
+      return jsonFromModelText(text)
+    } catch (error) {
+      lastError = error
+      if (
+        attempt >= maxAttempts
+        || !isRetryableGordenVisionError(error)
+      ) throw error
+      await new Promise((resolve) => setTimeout(resolve, attempt * 1_500))
+    }
   }
-  const payload = await response.json() as {
-    choices?: Array<{ message?: { content?: unknown } }>
-  }
-  const content = payload.choices?.[0]?.message?.content
-  const text = typeof content === 'string'
-    ? content
-    : Array.isArray(content)
-      ? content.map((part) => (
-          part && typeof part === 'object' && 'text' in part
-            ? String((part as { text?: unknown }).text ?? '')
-            : ''
-        )).join('')
-      : ''
-  if (!text) throw new Error('Gorden 视觉解析没有返回内容')
-  return jsonFromModelText(text)
+  throw lastError
+}
+
+export function isGordenVisionRetryableStatus(status: number) {
+  return [408, 409, 425, 429].includes(status) || status >= 500
+}
+
+function isRetryableGordenVisionError(error: unknown) {
+  const status = Number((error as { status?: unknown } | null)?.status)
+  if (Number.isFinite(status)) return isGordenVisionRetryableStatus(status)
+  const name = String((error as { name?: unknown } | null)?.name || '')
+  const message = String((error as { message?: unknown } | null)?.message || '')
+  return error instanceof SyntaxError
+    || error instanceof TypeError
+    || ['AbortError', 'TimeoutError'].includes(name)
+    || /没有返回内容|fetch failed|network|timeout/i.test(message)
+}
+
+export function reusableGordenVisualReview(value: unknown) {
+  if (!value || typeof value !== 'object') return false
+  const review = value as Record<string, unknown>
+  return review.passed === true
+    && (!Array.isArray(review.criticalIssues) || review.criticalIssues.length === 0)
 }
 
 function finiteNumber(value: unknown) {
@@ -1718,6 +1758,7 @@ export async function generateInvestmentRecommendationPptWithGorden(input: {
   })
 
   const editableSlides: Array<Record<string, unknown>> = []
+  const resumedEditableSlideNumbers = new Set<number>()
   const pageDimensions: Array<{ width: number; height: number }> = []
   const sampleTerms = (fingerprint.frequent_terms ?? [])
     .map((item) => String(item.term || '').trim())
@@ -1732,6 +1773,7 @@ export async function generateInvestmentRecommendationPptWithGorden(input: {
     const pageRoot = path.join(editableDir, String(plan.number).padStart(2, '0'))
     const resumedEditablePage = resumeCheckpoint?.editablePages.get(plan.number)
     if (resumedEditablePage) {
+      resumedEditableSlideNumbers.add(plan.number)
       await reportProgress(
         input.onProgress,
         `Gorden 断点续跑：恢复第 ${plan.number}/${plans.length} 页四层可编辑结果`,
@@ -2092,6 +2134,13 @@ export async function generateInvestmentRecommendationPptWithGorden(input: {
       '--out-dir', path.join(pageRoot, 'qa-visual'),
     ], { timeoutMs, env })
     try {
+      if (resumedEditableSlideNumbers.has(plan.number)) {
+        const previousReview = JSON.parse(await readFile(
+          path.join(pageRoot, 'qa-visual', 'vision-review.json'),
+          'utf8',
+        )) as Record<string, unknown>
+        if (reusableGordenVisualReview(previousReview)) continue
+      }
       await assertVisualQa({
         slideNumber: plan.number,
         sourceImage,

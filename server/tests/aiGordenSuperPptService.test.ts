@@ -22,8 +22,10 @@ import {
   gordenLayoutGuardArgs,
   gordenUnplannedVisibleTexts,
   gordenSkillPaths,
+  isGordenVisionRetryableStatus,
   normalizeGordenLayout,
   referenceDrivenSkillPaths,
+  reusableGordenVisualReview,
   unsafeGordenIconFiles,
   upgradeGordenCheckpointTextLayouts,
 } from '../src/services/aiGordenSuperPptService.js'
@@ -153,6 +155,15 @@ test('Gorden final visual QA blocks content failures but permits decorative drif
   assert.match(prompt, /非阻断.*边框粗细或颜色/)
   assert.match(prompt, /意外多生成的重复文字/)
   assert.equal(prompt.match(/未披露，待核验/g)?.length, 2)
+})
+
+test('Gorden vision QA retries transient gateway failures and reuses passed checkpoints', () => {
+  assert.equal(isGordenVisionRetryableStatus(429), true)
+  assert.equal(isGordenVisionRetryableStatus(502), true)
+  assert.equal(isGordenVisionRetryableStatus(400), false)
+  assert.equal(reusableGordenVisualReview({ passed: true, criticalIssues: [] }), true)
+  assert.equal(reusableGordenVisualReview({ passed: true, criticalIssues: ['缺字'] }), false)
+  assert.equal(reusableGordenVisualReview({ passed: false, criticalIssues: [] }), false)
 })
 
 test('Gorden slide plan honors an explicit five-page request', () => {
