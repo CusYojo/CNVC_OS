@@ -1376,7 +1376,7 @@ function Chat() {
     request: AiQuickTaskPreparationRequest,
   ): Promise<string | null> => {
     const taskLockKey = `${request.conversationId}:investment_ppt`
-    if (sending || quickTaskLocksRef.current.has(taskLockKey)) return null
+    if (quickTaskLocksRef.current.has(taskLockKey)) return null
     if (!UUID_PATTERN.test(request.projectId)) {
       showToast(`“${request.projectName}”是未入库的演示项目，不能提交正式 AI 任务。请先创建或选择已入库项目。`, 'error')
       return null
@@ -1424,7 +1424,7 @@ function Chat() {
 
   const runQuickTask = async (request: AiQuickTaskRequest): Promise<boolean> => {
     const taskLockKey = `${request.conversationId}:${request.actionId}`
-    if (sending || quickTaskLocksRef.current.has(taskLockKey)) return false
+    if (quickTaskLocksRef.current.has(taskLockKey)) return false
     if (!UUID_PATTERN.test(request.projectId)) {
       showToast(`“${request.projectName}”是未入库的演示项目，不能提交正式 AI 任务。请先创建或选择已入库项目。`, 'error')
       return false
@@ -1671,7 +1671,7 @@ function Chat() {
         <div className="border-t border-slate-200 px-6 py-4">
           <AiErrorBoundary level="section" title="快捷任务区域显示异常" resetKey={String(sending)}>
             <AiQuickActions
-              disabled={sending || scope !== 'project' || !currentSession?.projectId}
+              disabled={scope !== 'project' || !currentSession?.projectId}
               projects={projects}
               currentProjectId={scope === 'project' ? currentSession?.projectId ?? '' : ''}
               conversationId={currentConversationRowId}
