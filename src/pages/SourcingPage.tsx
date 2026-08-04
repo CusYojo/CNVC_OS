@@ -175,7 +175,21 @@ function getUsefulShareholders(lead: Lead) {
 
 function getUsefulCompetitors(lead: Lead) {
   return (lead.scoring?.competitors ?? [])
-    .filter((item) => !item.is_self && item.verificationStatus === 'evidence-backed')
+    .filter((item) => {
+      if (item.is_self) return false
+      const vstatus = (item as unknown as Record<string, unknown>).verificationStatus as string | undefined
+      // 经过完整证据校验的 → 直接通过
+      if (vstatus === 'evidence-backed') return true
+      // 显式被拒绝的 → 不展示
+      if (vstatus === 'rejected') return false
+      // 历史数据：有实质竞争依据 + 证据的保留，否则视为空壳丢弃
+      const basis = String((item as unknown as Record<string, unknown>).comparisonBasis ?? '').trim()
+      const evidence = String((item as unknown as Record<string, unknown>).evidence ?? '').trim()
+      if (basis.length < 15 || evidence.length < 10) return false
+      // 仅行业层面的弱依据不展示（同属XX行业、均为XX企业等）
+      if (/^(同属|均为|同在|都属于|属于同一).{1,10}(行业|领域|赛道|市场|企业|公司)[，。]?$/.test(basis)) return false
+      return true
+    })
     .map((item) => ({
       ...item,
       name: meaningfulLeadText(item.name),
@@ -296,9 +310,10 @@ function LeadDetailPanel({
   const competitors = getUsefulCompetitors(lead)
   const team = getUsefulTeam(lead)
   const sources = getUsefulSources(lead)
-  const summary = meaningfulLeadText(lead.summary)
-  const website = meaningfulLeadText(lead.scoring?.officialSite) ?? meaningfulLeadText(lead.website)
   const paperMeta = lead.radarProfile?.channel === '论文' ? lead.radarProfile.paperMeta : undefined
+  const paperAbstractZh = meaningfulLeadText(paperMeta?.abstractZh)
+  const summaryText = paperAbstractZh || meaningfulLeadText(lead.summary)
+  const website = meaningfulLeadText(lead.scoring?.officialSite) ?? meaningfulLeadText(lead.website)
   const originalPaperTitle = meaningfulLeadText(paperMeta?.titleOriginal) ?? meaningfulLeadText(paperMeta?.title)
   const tabs = [
     { id: 'overview', label: '项目概览' },
@@ -321,7 +336,8 @@ function LeadDetailPanel({
           <p className="mt-3 truncate text-lg font-semibold text-slate-900" title={identity.companySubject}>{identity.companySubject}</p>
           {identity.projectName !== identity.companySubject && meaningfulLeadText(identity.projectName) &&
             <p className="mt-1 truncate text-sm text-slate-500" title={identity.projectName}>项目：{identity.projectName}</p>}
-          {summary && <p className="mt-4 text-sm leading-6 text-brand-900">{summary}</p>}
+          {summaryText && <p className="mt-4 text-sm leading-6 text-brand-900">{summaryText}</p>}
+          {paperAbstractZh && lead.summary && <p className="mt-2 text-xs leading-5 text-slate-400 line-clamp-2">{lead.summary}</p>}
           {website && <div className="mt-3 text-xs"><SourceLink url={website}>公司官网</SourceLink></div>}
         </div>
         {lead.analysisStatus === 'ready' &&

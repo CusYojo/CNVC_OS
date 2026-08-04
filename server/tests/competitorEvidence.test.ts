@@ -45,12 +45,37 @@ test('rejects a same-industry company without direct competition evidence', () =
   assert.deepEqual(result, [])
 })
 
-test('rejects legacy competitors without an evidence-backed marker from public output', () => {
+test('rejects competitors with only industry-level comparison basis', () => {
   const result = filterEvidenceBackedCompetitors([
-    { name: '泛行业公司', is_self: false, sourceUrl: 'https://example.com' },
+    { name: '泛行业公司', is_self: false, sourceUrl: 'https://example.com',
+      comparisonBasis: '同属AI芯片行业', evidence: '该公司也从事AI芯片相关业务。', sourceRef: '行业报告' },
+    { name: '精密视觉科技', ...directCompetitor, verificationStatus: 'evidence-backed' },
+  ])
+
+  assert.equal(result.length, 1)
+  assert.equal(result[0].name, '精密视觉科技')
+})
+
+test('rejects historical competitors without evidence text', () => {
+  const result = filterEvidenceBackedCompetitors([
+    { name: '空壳竞对', is_self: false, tech: 'AI 视觉',
+      comparisonBasis: '', evidence: '', sourceRef: '' },
     { ...directCompetitor, verificationStatus: 'evidence-backed' },
   ])
 
   assert.equal(result.length, 1)
   assert.equal(result[0].name, '精密视觉科技')
+})
+
+test('keeps historical competitor with substantial comparison basis and evidence', () => {
+  const result = filterEvidenceBackedCompetitors([
+    { name: '有效历史竞对', is_self: false,
+      comparisonBasis: '均服务锂电产线客户，提供在线缺陷检测系统，争夺同类产线订单',
+      evidence: '该公司向锂电池厂商提供在线缺陷检测系统。',
+      sourceRef: '访谈纪要.md',
+      confidence: 0.85 },
+  ])
+
+  assert.equal(result.length, 1)
+  assert.equal(result[0].name, '有效历史竞对')
 })

@@ -388,6 +388,13 @@ metaRouter.post('/leads/sync-radar', async (req: AuthedRequest, res, next) => {
         continue
       }
 
+      // 雷电服务自身的过滤标记（如论文综合分低于阈值、无投资信息等），
+      // 与 AI 主体审查互补——AI 审查只管“名称是否可识别”，雷电过滤只管“是否有投资价值”。
+      if (it.decision_label === '过滤') {
+        filteredOut += 1
+        continue
+      }
+
       const name = subjectReview.subjectName.trim().slice(0, 120)
       if (!name) {
         invalid += 1
