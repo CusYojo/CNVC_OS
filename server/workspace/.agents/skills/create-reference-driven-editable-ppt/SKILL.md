@@ -27,10 +27,10 @@ description: 根据用户需求、业务数据与可选 PDF/PPTX/页面图片参
 先运行：
 
 ```bash
-python3 scripts/resolve_dependencies.py --json --require-template-adapter
+python3 scripts/resolve_dependencies.py --json
 ```
 
-没有用户模板时可省略 `--require-template-adapter`。关键依赖不可用时停止，不得用代码绘制整页图片或把只有整页图片的文件描述为元素级可编辑。
+用户提供了参考模板文件时追加 `--require-template-adapter`。关键依赖不可用时停止，不得用代码绘制整页图片或把只有整页图片的文件描述为元素级可编辑。
 
 ## 默认决策
 
@@ -48,8 +48,9 @@ python3 scripts/resolve_dependencies.py --json --require-template-adapter
 - [ ] 锁定项目法定名称、受众、用途、页数、语言、模板作用域和可编辑范围
 - [ ] 写 project-identity.json 与 input-manifest.json
 
-== P1 模板摄取（按需）==
-- [ ] 运行 GordenSuperPPTSkill/scripts/ingest_reference_template.py
+== P1 模板摄取（仅用户提供模板时）==
+- [ ] 若用户提供了参考模板文件，追加 `--require-template-adapter` 重新执行依赖解析
+- [ ] 运行 GordenSuperPPTSkill/scripts/ingest_reference_template.py（需模板适配器已安装）
 - [ ] 检查总览并补全模板内容 DNA、视觉 DNA 和代表页型
 - [ ] 建立 sample-fingerprint.json；不得继承模板样本事实
 
