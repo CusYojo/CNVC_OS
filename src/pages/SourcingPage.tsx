@@ -175,7 +175,7 @@ function getUsefulShareholders(lead: Lead) {
 
 function getUsefulCompetitors(lead: Lead) {
   return (lead.scoring?.competitors ?? [])
-    .filter((item) => !item.is_self)
+    .filter((item) => !item.is_self && item.verificationStatus === 'evidence-backed')
     .map((item) => ({
       ...item,
       name: meaningfulLeadText(item.name),
@@ -364,14 +364,16 @@ function LeadDetailPanel({
         <div className="mt-3 space-y-3">
           {competitors.map((item, index) => <div key={`${item.name}-${index}`} className="rounded-lg bg-slate-50 p-3">
             <div className="flex items-center justify-between gap-3">
-              <p className="text-sm font-medium text-slate-800">{item.name}</p>
-              {item.sourceUrl && <SourceLink url={item.sourceUrl}>来源</SourceLink>}
+              <div className="flex items-center gap-2"><p className="text-sm font-medium text-slate-800">{item.name}</p><Badge tone="green">{item.matchType === 'substitute' ? '替代方案' : '直接竞对'}</Badge></div>
+              {item.sourceRef && <SourceLink url={item.sourceUrl}>{item.sourceRef}</SourceLink>}
             </div>
             <div className="mt-2 space-y-1 text-xs leading-5 text-slate-600">
+              {item.comparisonBasis && <p><span className="text-slate-400">可比依据：</span>{item.comparisonBasis}</p>}
               {item.tech && <p><span className="text-slate-400">技术：</span>{item.tech}</p>}
               {item.product && <p><span className="text-slate-400">定位：</span>{item.product}</p>}
               {item.funding && <p><span className="text-slate-400">融资：</span>{item.funding}</p>}
               {item.differentiation && <p><span className="text-slate-400">对比：</span>{item.differentiation}</p>}
+              {item.evidence && <p><span className="text-slate-400">证据：</span>{item.evidence}</p>}
             </div>
           </div>)}
         </div>

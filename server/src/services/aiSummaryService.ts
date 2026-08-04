@@ -15,6 +15,7 @@ import {
   BUSINESS_REGIONS,
   resolveLeadBusinessRegion,
 } from './leadRegion.js'
+import { sanitizeScoringCompetitors } from './competitorEvidence.js'
 
 export async function getSummary(projectId: string) {
   const rows = await db.select().from(aiSummaries).where(eq(aiSummaries.projectId, projectId)).orderBy(desc(aiSummaries.updatedAt)).limit(1)
@@ -400,7 +401,7 @@ function enrichLead(row: typeof leads.$inferSelect) {
   const has = (v: unknown) => typeof v === 'string' ? v.trim().length > 0 : !!v
   // 完整度: 优先用 SQL 层算好并随行传入的 completeness(列表/详情一致);
   // 兜底(直接传 $inferSelect 无 completeness 字段时): 用纯资料 8 位在 JS 里重算,口径与 SQL 一致。
-  const sc = (row as { scoring?: Record<string, unknown> }).scoring || {}
+  const sc = sanitizeScoringCompetitors((row as { scoring?: Record<string, unknown> }).scoring)
   const rpForComp = (row as { radarProfile?: Record<string, unknown> }).radarProfile || {}
   const teamText = (row as { team?: string }).team
   const PLACEHOLDERS = ['', '待核验', '待核实', '未披露', '未披露/待核实', '无', '-', 'N/A', 'null']
@@ -519,6 +520,7 @@ function enrichLead(row: typeof leads.$inferSelect) {
     : null
   return {
     ...row,
+    scoring: sc,
     name: paperTitleZh || subjectName,
     summary: paperAbstractZh || row.summary,
     companyName: subjectCompanyName,

@@ -3,6 +3,7 @@ import { readdir, rm } from 'node:fs/promises'
 import path from 'node:path'
 import { db } from '../db/client.js'
 import { projects, projectFiles, auditLogs, knowledgeChunks, fileChunks } from '../db/schema.js'
+import { sanitizeScoringCompetitors } from './competitorEvidence.js'
 
 const STAGES = ['线索', '初筛', '立项', '尽调', '上会', '投决', '投后', '退出'] as const
 const ARTIFACT_ROOT = path.resolve(
@@ -28,6 +29,12 @@ interface ListArgs {
   pageSize: number
 }
 
+function publicProject<T extends { scoring?: unknown }>(row: T): T {
+  return row.scoring
+    ? { ...row, scoring: sanitizeScoringCompetitors(row.scoring) }
+    : row
+}
+
 export async function listProjects(args: ListArgs) {
   const conds = []
   if (args.keyword) {
@@ -43,12 +50,12 @@ export async function listProjects(args: ListArgs) {
   const rows = await db.select().from(projects).where(where as never).orderBy(desc(projects.pinned), desc(projects.updatedAt))
     .limit(args.pageSize).offset((args.page - 1) * args.pageSize)
   const totalRows = await db.select({ c: sql<number>`count(*)::int` }).from(projects).where(where as never)
-  return { list: rows, total: totalRows[0]?.c ?? rows.length, page: args.page, pageSize: args.pageSize }
+  return { list: rows.map(publicProject), total: totalRows[0]?.c ?? rows.length, page: args.page, pageSize: args.pageSize }
 }
 
 export async function getProject(id: string) {
   const rows = await db.select().from(projects).where(eq(projects.id, id)).limit(1)
-  return rows[0]
+  return rows[0] ? publicProject(rows[0]) : undefined
 }
 
 export async function listFiles(projectId: string) {

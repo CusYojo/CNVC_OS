@@ -1,6 +1,7 @@
 import '../zeelin-provider.ts';
 import { defineAgent, defineWorkflow, type WorkflowRouteHandler } from '@flue/runtime';
 import * as v from 'valibot';
+import { verifyCompetitorEvidence } from '../lib/competitor-evidence.js';
 
 const PRIMARY_SCORE_MODEL = process.env.SCORE_MODEL ?? 'zeelin-oai/gpt-5.5';
 const FALLBACK_SCORE_MODEL = process.env.SCORE_FALLBACK_MODEL ?? 'zeelin-oai/gpt-5.5';
@@ -98,7 +99,9 @@ const agent = defineAgent(() => ({
     '4. 每个维度/子项必须给"原因" reason：说明为什么落在这个档位并引用标准档位关键词。基于外推预测的，必须在 reason 开头标注"【预测】基于……推断"，写清推断依据，不得伪装成已核实事实。',
     '5. 总体项目评价 overall_comment：一段结论性文字，点出最强项、最大短板、是否建议推进；并说明本次打分中哪些维度是基于预测的、整体置信度如何（高/中/低）。',
     '6. verdict 依据总分对照 verdict_bands 选择（强烈推荐≥80 / 推荐≥65 / 谨慎观察≥50 / 暂不推荐<50）。',
-    '7. 竞品对标表 competitors：列出本项目(is_self=true)+2~3个该技术方向代表性工作/公司(is_self=false)，每行给技术路线、产品/落地阶段、背书情况、差异化/转化潜力判断。用你所知的真实同方向工作；信息不确定处标注"待核验"，不编造精确数字。',
+    '7. 技术对标 competitors 属于高风险事实，宁缺毋滥，不得用模型记忆补充同方向论文或公司。',
+    '   - 只有本次输入资料明确提到的工作/公司才可列入；必须研究任务相同、应用场景相同，且方法输出或产品可直接对比/替代。仅同一学科或技术关键词相似不构成对标关系。',
+    '   - 每个非本项目行必须逐字引用包含名称的 evidence，并填写资料中真实存在的 sourceRef；有 URL 时填写 sourceUrl。无法证明时只返回本项目或空数组。',
     '',
     '语言：简体中文。务实、克制、不吹捧。',
   ].join('\n'),
@@ -125,6 +128,15 @@ const CompetitorRow = v.object({
   product: v.string(),
   funding: v.string(),
   differentiation: v.string(),
+  matchType: v.picklist(['self', 'direct', 'substitute']),
+  sameTargetUser: v.boolean(),
+  sameUseCase: v.boolean(),
+  sameDeliverable: v.boolean(),
+  comparisonBasis: v.string(),
+  evidence: v.string(),
+  sourceRef: v.string(),
+  sourceUrl: v.string(),
+  confidence: v.number(),
 });
 
 const ScoreResult = v.object({
@@ -224,6 +236,7 @@ export default defineWorkflow({
       return { ...dim, max: dimMax, items, score: dimScore };
     });
     const total = clamp(dimensions.reduce((a, d) => a + d.score, 0), 0, 100);
-    return { ...data, dimensions, total, projectName: input.projectName };
+    const competitors = verifyCompetitorEvidence(data.competitors ?? [], paperInfo, 'paper');
+    return { ...data, dimensions, competitors, total, projectName: input.projectName };
   },
 });

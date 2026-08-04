@@ -888,7 +888,9 @@ async function doScore(leadId: string): Promise<void> {
       summary: lead.summary ?? undefined,
       highlights: Array.isArray(lead.highlights) ? lead.highlights : [],
       risks: Array.isArray(lead.risks) ? lead.risks : [],
-      sources: Array.isArray(lead.sources) ? (lead.sources as Array<{ title?: string }>).map((x) => x.title || '').filter(Boolean) : [],
+      sources: Array.isArray(lead.sources)
+        ? (lead.sources as Array<{ title?: string; url?: string }>).map((item) => [item.title, item.url].filter(Boolean).join('｜')).filter(Boolean)
+        : [],
     }
     const requestBody = isPaper
       ? {

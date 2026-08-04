@@ -3,6 +3,7 @@ import { defineAgent, defineWorkflow, type WorkflowRouteHandler } from '@flue/ru
 import * as v from 'valibot';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { verifyCompetitorEvidence } from '../lib/competitor-evidence.js';
 
 // 一级市场项目评分 —— 对应投资中台「项目获取池」的评分/多维度评分模块。
 // 喂甲方评分标准 + 项目信息 → LLM 按标准逐维严格打分（总分=各维度之和，有原因，有高有低禁满分）。
@@ -33,7 +34,11 @@ const agent = defineAgent(() => ({
     '   - 基于外推预测的，必须在 reason 开头标注"【预测】基于……推断"，写清推断依据(如"基于该赛道头部团队普遍配置"),不得伪装成已核实事实。',
     '5. 总体项目评价 overall_comment：一段结论性文字，点出最强项、最大短板、是否建议推进；并说明本次打分中哪些维度/子项是基于预测的、整体置信度如何(高/中/低)。',
     '6. verdict 依据总分对照 verdict_bands 选择。',
-    '7. 竞品对标表 competitors：列出本项目(is_self=true)+2~3个该赛道代表性竞品(is_self=false)，每行给技术路线、产品阶段、融资背书、差异化/可投资性判断。竞品用你所知的真实同赛道公司；信息不确定处标注"待核验"，不编造精确数字。用于直观体现技术差异化与一级市场可投资性。',
+    '7. 竞品对标 competitors 属于高风险事实，宁缺毋滥，不得为了凑数列出“同赛道代表公司”，也不得使用模型记忆。',
+    '   - 只有本次输入资料明确提到的主体才可作为竞对；同大行业、同技术标签或同融资阶段不构成竞对。',
+    '   - direct 必须同时满足：目标客户相同、解决的具体任务/场景相同、交付产品可直接替代。substitute 必须满足：同一客户为解决同一任务会在两者间做选择。',
+    '   - 每个非本项目行必须逐字引用包含竞对名称的 evidence，并填写资料中真实存在的 sourceRef；有 URL 时填写 sourceUrl。不得改写、拼接或编造证据。',
+    '   - 无法证明上述关系时 competitors 只返回本项目，或返回空数组。不得用“待核验”绕过证据要求。',
     '',
     '语言：简体中文。务实、克制、不吹捧。',
   ].join('\n'),
@@ -60,6 +65,15 @@ const CompetitorRow = v.object({
   product: v.string(),       // 产品与落地阶段
   funding: v.string(),       // 融资/估值/背书
   differentiation: v.string(), // 差异化/可投资性判断
+  matchType: v.picklist(['self', 'direct', 'substitute']),
+  sameTargetUser: v.boolean(),
+  sameUseCase: v.boolean(),
+  sameDeliverable: v.boolean(),
+  comparisonBasis: v.string(),
+  evidence: v.string(),
+  sourceRef: v.string(),
+  sourceUrl: v.string(),
+  confidence: v.number(),
 });
 const ScoreResult = v.object({
   total: v.number(),
@@ -149,6 +163,7 @@ export default defineWorkflow({
       return { ...dim, max: dimMax, items, score: clamp(itemSum, 0, dimMax) };
     });
     const total = clamp(dimensions.reduce((a, d) => a + d.score, 0), 0, 100);
-    return { ...data, dimensions, total, projectName: input.projectName };
+    const competitors = verifyCompetitorEvidence(data.competitors ?? [], projectInfo, 'project');
+    return { ...data, dimensions, competitors, total, projectName: input.projectName };
   },
 });

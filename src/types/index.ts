@@ -180,7 +180,7 @@ export interface MaterialJob {
 
 export interface LeadScoringDimensionItem { name: string; score: number; max: number; reason: string }
 export interface LeadScoringDimension { key: string; name: string; score: number; max: number; items: LeadScoringDimensionItem[] }
-export interface LeadCompetitor { name: string; is_self: boolean; tech: string; product: string; funding: string; differentiation: string; sourceUrl?: string }
+export interface LeadCompetitor { name: string; is_self: boolean; tech: string; product: string; funding: string; differentiation: string; sourceUrl?: string; sourceRef?: string; evidence?: string; matchType?: 'self' | 'direct' | 'substitute'; comparisonBasis?: string; verificationStatus?: 'self' | 'evidence-backed' }
 export type LeadScoreJobStatus = 'queued' | 'running' | 'retrying' | 'done' | 'failed'
 export interface LeadScoreJob {
   status: LeadScoreJobStatus
