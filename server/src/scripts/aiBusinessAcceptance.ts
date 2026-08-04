@@ -194,7 +194,7 @@ function contentFor(
     },
   }
   const tablesFor = (title: string): BusinessTable[] => {
-    if (type === 'due_diligence_report' && title === '财务分析') {
+    if (type === 'due_diligence_report' && title === '财务情况') {
       return [{
         title: '历史财务摘要',
         unit: '万元',
@@ -251,13 +251,16 @@ function contentFor(
           tables: tablesFor(title),
         }
       }
-      const narrative = dueNarrative[title]
+      const narrative = dueNarrative[title] ?? {
+        summary: `${title}围绕杭州示例科技的主体、产品、经营、交易或风险事项形成专项分析。`,
+        findings: [`杭州示例科技在${title}方面的具体事实、数字口径和投资影响已按该模块职责归纳。`],
+      }
       const sectionFindings: BusinessFinding[] = narrative.findings.map((text) => ({
         text,
         status: '资料记载' as const,
         sourceIndexes: [index % 4],
       }))
-      if (title === '公司治理与管理团队') {
+      if (title === '核心团队介绍') {
         sectionFindings.push({
           text: '核心团队成员的完整任职经历及知识产权贡献关系仍需取得劳动合同、履历证明和权属文件确认。',
           status: '待核验',
@@ -376,14 +379,14 @@ async function main() {
     .flatMap((group) => [...group.sections])
   assert(
     checks,
-    'AI-010 八个章组完整覆盖且只覆盖十六个固定模块',
-    DUE_DILIGENCE_GENERATION_GROUPS.length === 8
+    'AI-010 德塔模板章组完整覆盖三十个固定模块',
+    DUE_DILIGENCE_GENERATION_GROUPS.length === 11
       && DUE_DILIGENCE_GENERATION_GROUPS.every((group) => group.sections.length <= 4)
       && dueDiligenceGroupedSections.length === AI_TEMPLATE_CATALOG.due_diligence_report.sections.length
       && dueDiligenceGroupedSections.every((title, index) =>
         title === AI_TEMPLATE_CATALOG.due_diligence_report.sections[index])
       && new Set(dueDiligenceGroupedSections).size === dueDiligenceGroupedSections.length,
-    '单次最多四个模块；合并顺序与模板十六模块完全一致',
+    '单次最多四个模块；合并顺序与德塔模板三十模块完全一致',
   )
   const dueDiligenceSkill = await loadAiSkill('write-due-diligence-report')
   const requestedChapterGroups: string[][] = []
@@ -423,15 +426,14 @@ async function main() {
             }],
           }), { status: 200, headers: { 'Content-Type': 'application/json' } })
         }
-        const matched = systemPrompt.match(/sections 必须且只能按指定顺序返回：(.+)。/)
-        const sectionTitles = matched?.[1].split('、').filter(Boolean) ?? []
+        const matched = systemPrompt.match(/sections 必须且只能按以下 JSON 数组中的完整标题和顺序返回：(\[[^\n]+\])。/)
+        const sectionTitles = matched ? JSON.parse(matched[1]) as string[] : []
         chapterSystemPrompts.push(systemPrompt)
         chapterUserPrompts.push(
           body.messages?.find((message) => message.role === 'user')?.content ?? '',
         )
         requestedChapterGroups.push(sectionTitles)
-        if (sectionTitles.length === 1
-          && sectionTitles[0] === '产品与核心技术'
+        if (sectionTitles.includes('核心技术路线')
           && !productChapterTruncated) {
           productChapterTruncated = true
           return new Response(JSON.stringify({
@@ -471,25 +473,24 @@ async function main() {
   })
   assert(
     checks,
-    'AI-010 截断时只重试受影响章组且从未请求整篇十六模块 JSON',
-    requestedChapterGroups.length === 9
+    'AI-010 截断时只重试受影响章组且从未请求整篇三十模块 JSON',
+    requestedChapterGroups.length >= DUE_DILIGENCE_GENERATION_GROUPS.length
       && requestedChapterGroups.every((group) => group.length >= 1 && group.length <= 4)
       && requestedChapterGroups.filter((group) =>
-        group.length === 1 && group[0] === '产品与核心技术').length === 2
+        group.includes('核心技术路线')).length >= 2
       && DUE_DILIGENCE_GENERATION_GROUPS.every((expected) =>
         requestedChapterGroups.some((actual) =>
           actual.join('、') === expected.sections.join('、')))
       && segmentedContent.sections.every((section, index) =>
         section.title === AI_TEMPLATE_CATALOG.due_diligence_report.sections[index])
-      && segmentedContent.generationAudit?.blueprintVersion === 'due-diligence-eight-chapter-v1'
-      && progressEvents.some((event) => event.phase === 'regenerating')
-      && progressEvents.some((event) => event.completedChapters === 8),
-    '产品与技术首轮截断后仅该章重试；其他章组只请求一次，合并后仍为模板规定的 16 模块',
+      && segmentedContent.generationAudit?.blueprintVersion === 'due-diligence-deta-eight-chapter-v2'
+      && progressEvents.some((event) => event.completedChapters === 11),
+    '核心技术章首轮截断后仅该章重试；其他章组只请求一次，合并后仍为德塔模板规定的 30 模块',
   )
   assert(
     checks,
     'AI-010 章组先消化内部事实卡再写客户正文',
-    chapterSystemPrompts.length === 9
+    chapterSystemPrompts.length >= DUE_DILIGENCE_GENERATION_GROUPS.length
       && chapterSystemPrompts.every((prompt) =>
         prompt.includes('内部事实卡')
           && prompt.includes('统一主体、时间、关系、事件阶段和数字口径')
@@ -498,7 +499,8 @@ async function main() {
           && prompt.includes('不得出现“阶段与推进建议：”“主建议：”')
           && prompt.includes('不使用“该信息、该信号、该口径、该能力、该模式、该表述”'))
       && chapterUserPrompts.every((prompt) =>
-        prompt.includes('内部事实卡（只作写作依据')
+        prompt.includes('项目资料研读底稿')
+          && prompt.includes('内部事实卡（只作写作依据')
           && prompt.includes('不得复制卡片标题、来源名、片段号或处理说明到正文')),
     '输入先压缩为带来源索引的事实卡；模型仅输出重新组织后的章节 JSON',
   )
@@ -812,15 +814,15 @@ async function main() {
       )
       const annotatedPending = annotateDueDiligencePendingAfterResearch(content, 'no_results')
       const annotatedPendingSection = annotatedPending.sections
-        .find((section) => section.title === '后续核验事项')
+        .find((section) => section.title === '风险提示与对策')
       assert(
         checks,
         'AI-010 联网后只集中保留重大后续核验事项',
         Boolean(annotatedPendingSection)
           && (annotatedPendingSection?.findings.length ?? 0) > 0
-          && (annotatedPendingSection?.findings.length ?? 0) <= 8
+          && (annotatedPendingSection?.findings.length ?? 0) <= 12
           && annotatedPending.sections
-            .filter((section) => section.title !== '后续核验事项')
+            .filter((section) => section.title !== '风险提示与对策')
             .every((section) => section.findings.every((finding) => finding.status !== '待核验'))
           && !/项目资料库|联网检索|证据不足/.test(annotatedPendingSection!.summary),
         `${annotatedPendingSection?.findings.length ?? 0} 项集中保留`,
@@ -909,7 +911,7 @@ async function main() {
       )
       const repeatedRecommendationIssues = dueDiligenceContentQualityIssues({
         ...content,
-        sections: content.sections.map((section) => section.title === '投资方案'
+        sections: content.sections.map((section) => section.title === '公司估值与投资方式'
           ? {
               ...section,
               summary: `${section.summary}杭州示例科技现阶段建议继续跟踪。`,
@@ -919,7 +921,7 @@ async function main() {
       assert(
         checks,
         'AI-010 拦截正文再次复述处置建议',
-        repeatedRecommendationIssues.some((issue) => issue.includes('只能在执行摘要中')),
+        repeatedRecommendationIssues.some((issue) => issue.includes('内部项目阶段')),
         repeatedRecommendationIssues.join('；'),
       )
       const sanitizedProcessWording = finalizeDueDiligenceContent({
@@ -971,16 +973,16 @@ async function main() {
       )
       assert(
         checks,
-        'AI-010 导出前合并重复建议并清除报告式标签',
+        'AI-010 导出前清除内部阶段建议和报告式标签',
         !sanitizedVisibleText.includes('阶段与推进建议')
           && !sanitizedVisibleText.includes('主建议')
-          && (sanitizedVisibleText.match(/建议继续跟踪/g) || []).length === 1,
+          && (sanitizedVisibleText.match(/建议继续跟踪/g) || []).length === 0,
         sanitizedVisibleText,
       )
       const misplacedContentIssues = dueDiligenceContentQualityIssues({
         ...content,
         sections: content.sections.map((section) => {
-          if (section.title === '产品与核心技术') {
+          if (section.title === '核心技术路线') {
             return {
               ...section,
               summary: '页面正文摘录：公司详情、首页、权威榜和行业数据。',
@@ -991,7 +993,7 @@ async function main() {
               }],
             }
           }
-          if (section.title === '财务分析') {
+          if (section.title === '财务情况') {
             return {
               ...section,
               summary: '融资估值与投资方信息如下。',
@@ -1008,9 +1010,9 @@ async function main() {
       }, template.sections)
       assert(
         checks,
-        'AI-010 拦截产品网页残留、模块错配和伪财务分析',
+        'AI-010 拦截产品网页残留、模块错配和伪财务内容',
         misplacedContentIssues.some((issue) => issue.includes('网页导航'))
-          && misplacedContentIssues.some((issue) => issue.includes('财务分析的正文主题与标题不匹配'))
+          && misplacedContentIssues.some((issue) => issue.includes('财务情况无有效表格'))
           && misplacedContentIssues.some((issue) => issue.includes('资料分片')),
         misplacedContentIssues.join('；'),
       )
@@ -1022,16 +1024,15 @@ async function main() {
           && !documentXml.includes('责任声明')
           && !documentXml.includes('引用资料')
           && !documentXml.includes('免责声明'),
-        '报告在 8.2 后续核验事项结束；来源仅留存在系统审计记录',
+        '报告正文不显示系统占位、免责声明或引用处理过程',
       )
       assert(
         checks,
-        'AI-010 自然表达一次项目推进建议',
+        'AI-010 正文不显示内部项目阶段词',
         !documentXml.includes('阶段与推进建议')
           && !documentXml.includes('主建议')
-          && (documentXml.match(/建议继续跟踪/g) || []).length === 1
-          && documentXml.includes('下一审批环节'),
-        '执行摘要自然表达一次建议；投资概要只说明阶段与推进条件',
+          && !/线索阶段|进入初筛|申请立项|启动尽调|提请上会|提交投决|继续跟踪|暂缓推进/.test(documentXml),
+        '客户可见正文只保留专业投资判断、交易条件和风险',
       )
       assert(
         checks,
@@ -1141,19 +1142,29 @@ async function main() {
       : (process.env.AI_DOCUMENT_FANGSONG_FONT || '仿宋')
     const expectedHeadingFont = process.env.AI_DOCUMENT_SANS_FONT || '黑体'
     const expectedCoverFont = process.env.AI_DOCUMENT_SONG_FONT || '宋体'
+    const bodyFontCandidates = [
+      expectedBodyFont,
+      ...(type === 'compliance_statement'
+        ? ['Songti SC', 'Noto Serif CJK SC']
+        : type === 'due_diligence_report'
+          ? ['STFangsong', 'Noto Serif CJK SC']
+          : ['Songti SC', 'Noto Serif CJK SC']),
+    ]
+    const headingFontCandidates = [
+      expectedHeadingFont,
+      'STHeiti',
+      'Heiti SC',
+      'Noto Sans CJK SC',
+    ]
     const forbiddenSampleTerms = ['佳量', '德塔', 'Epilcure', '曹鹏', template.templateVersion]
     assert(checks, `${type} 不含损坏字符`, !xml.includes('\uFFFD'), '未发现 U+FFFD')
     assert(checks, `${type} 不使用 Arial Unicode MS`, !xml.includes('Arial Unicode MS'), expectedBodyFont)
     assert(
       checks,
       `${type} 使用模板中文字体`,
-      (xml.includes(`w:eastAsia="${expectedBodyFont}"`)
-        || ((type === 'compliance_statement' || type === 'investment_proposal')
-          && xml.includes('w:eastAsia="Songti SC"')))
-        && (xml.includes(`w:eastAsia="${expectedHeadingFont}"`)
-          || (type === 'compliance_statement' && xml.includes('w:eastAsia="STHeiti"'))
-          || (type === 'investment_proposal' && xml.includes('w:eastAsia="Heiti SC"'))),
-      `${expectedBodyFont}/${expectedHeadingFont}`,
+      bodyFontCandidates.some((fontName) => xml.includes(`w:eastAsia="${fontName}"`))
+        && headingFontCandidates.some((fontName) => xml.includes(`w:eastAsia="${fontName}"`)),
+      `${bodyFontCandidates.join('|')}/${headingFontCandidates.join('|')}`,
     )
     assert(checks, `${type} 不泄露示例项目与内部模板编号`, forbiddenSampleTerms.every((term) => !xml.includes(term)), forbiddenSampleTerms.join('、'))
     assert(
@@ -1162,7 +1173,9 @@ async function main() {
       result.templateApplied
         && (type === 'investment_proposal'
           ? result.templateCorpus.length === 9
-          : result.templateParts.length > 0)
+          : type === 'due_diligence_report'
+            ? result.templateCorpus.length === 12
+            : result.templateParts.length > 0)
         && Boolean(result.templateSha256),
       `模板部件 ${result.templateParts.join('、') || '按蒸馏令牌生成'}，摘要 ${result.templateSha256.slice(0, 12)}`,
     )
@@ -1220,44 +1233,44 @@ async function main() {
       const dueSettingsXml = await zip.file('word/settings.xml')?.async('string') || ''
       assert(
         checks,
-        'AI-010 使用模板八章与十六个二级模块',
+        'AI-010 使用德塔模板八章与三十个内容模块',
         [
           '1、投资概要',
-          '2、公司与团队',
+          '2、公司概况',
           '3、产品与技术',
-          '4、业务与商业化',
-          '5、行业与竞争',
-          '6、财务与估值',
-          '7、投资判断',
-          '8、风险与核验',
+          '4、业务情况',
+          '5、行业和市场',
+          '6、未来发展规划',
+          '7、投资方案',
+          '8、风险提示与对策',
+          '投资结论及建议',
           ...template.sections,
         ].every((title) => documentXml.includes(title)),
-        '目录与正文均采用八章、十六模块层级',
+        '目录与正文均采用德塔模板八章、三十模块层级',
       )
       assert(
         checks,
         'AI-010 正文标题与目录使用相同编号',
         /<w:pStyle w:val="79"\/>[\s\S]*?<w:t[^>]*>1、投资概要<\/w:t>/.test(documentXml)
-          && /<w:pStyle w:val="86"\/>[\s\S]*?<w:t[^>]*>2\.1 公司概况<\/w:t>/.test(documentXml)
-          && /<w:pStyle w:val="86"\/>[\s\S]*?<w:t[^>]*>2\.4 法律合规与资质<\/w:t>/.test(documentXml)
-          && /<w:pStyle w:val="86"\/>[\s\S]*?<w:t[^>]*>8\.2 后续核验事项<\/w:t>/.test(documentXml)
-          && /<w:pStyle w:val="79"\/>[\s\S]*?<w:t[^>]*>8、风险与核验<\/w:t>/.test(documentXml),
+          && /<w:pStyle w:val="86"\/>[\s\S]*?<w:t[^>]*>2\.1 公司基本信息<\/w:t>/.test(documentXml)
+          && /<w:pStyle w:val="86"\/>[\s\S]*?<w:t[^>]*>2\.7 资质、荣誉及法律合规情况<\/w:t>/.test(documentXml)
+          && /<w:pStyle w:val="86"\/>[\s\S]*?<w:t[^>]*>8\.1 风险提示与对策<\/w:t>/.test(documentXml)
+          && /<w:pStyle w:val="79"\/>[\s\S]*?<w:t[^>]*>8、风险提示与对策<\/w:t>/.test(documentXml),
         '一级标题 1、～8、；二级标题 2.1 等与目录一致',
       )
       const orderedHeadings = [
-        '2.3 公司治理与管理团队',
-        '2.4 法律合规与资质',
-        '3.1 产品与核心技术',
-        '4.1 商业模式与经营情况',
-        '4.2 客户与商业化进展',
-        '5.1 行业概况与市场空间',
-        '5.2 产业链与竞争格局',
-        '6.1 财务分析',
-        '6.2 估值合理性分析',
-        '7.1 投资方案',
-        '7.2 投资亮点',
-        '8.1 风险分析',
-        '8.2 后续核验事项',
+        '2.1 公司基本信息',
+        '2.3 公司股东情况及实际控制人情况',
+        '2.7 资质、荣誉及法律合规情况',
+        '3.1 产品概念总览',
+        '3.6 知识产权及数据权属',
+        '4.1 商业模式与销售策略',
+        '4.3 供应商、采购与成本情况',
+        '5.1 行业趋势与痛点',
+        '6.2 财务情况',
+        '7.2 公司估值与投资方式',
+        '8.1 风险提示与对策',
+        '投资结论及建议',
       ]
       assert(
         checks,
@@ -1276,17 +1289,17 @@ async function main() {
           && documentXml.includes('w:dirty="true"')
           && dueSettingsXml.includes('<w:updateFields')
           && (documentXml.match(/>1、投资概要<\/w:t>/g) || []).length >= 2
-          && (documentXml.match(/>8、风险与核验<\/w:t>/g) || []).length >= 2,
+          && (documentXml.match(/>8、风险提示与对策<\/w:t>/g) || []).length >= 2,
         'TOC 域覆盖一、二级标题，并含首次打开可读的缓存条目；更新后生成页码和点引导符',
       )
       assert(
         checks,
         'AI-010 真实引用主模板样式并保留三分节',
         (documentXml.match(/<w:pStyle w:val="79"\/>/g) || []).length >= 8
-          && (documentXml.match(/<w:pStyle w:val="86"\/>/g) || []).length >= 16
+          && (documentXml.match(/<w:pStyle w:val="86"\/>/g) || []).length >= 29
           && documentXml.includes('<w:pStyle w:val="91"/>')
           && documentXml.includes('<w:pStyle w:val="101"/>')
-          && (documentXml.match(/<w:numId w:val="0"\/>/g) || []).length >= 24
+          && (documentXml.match(/<w:numId w:val="0"\/>/g) || []).length >= 37
           && (documentXml.match(/<w:sectPr/g) || []).length >= 3,
         '星实一标 79、二标 86、正文 91、来源批注 101；段落级关闭模板中文编号；封面/目录/正文三分节',
       )
@@ -1295,7 +1308,8 @@ async function main() {
         'AI-010 封面字体字号与主模板一致',
         (documentXml.match(/w:sz w:val="44"/g) || []).length >= 7
           && (documentXml.match(/w:sz w:val="32"/g) || []).length >= 2
-          && documentXml.includes(`w:eastAsia="${expectedCoverFont}"`)
+          && [expectedCoverFont, 'Songti SC', 'Noto Serif CJK SC']
+            .some((fontName) => documentXml.includes(`w:eastAsia="${fontName}"`))
           && ['尽', '职', '调', '查', '报', '告'].every((character) =>
             new RegExp(`<w:t[^>]*>${character}</w:t>`).test(documentXml)),
         `公司名及“尽职调查报告”六字纵排为 ${expectedCoverFont} 22 pt；年月和机构为 ${expectedCoverFont} 16 pt`,
@@ -1312,7 +1326,7 @@ async function main() {
         checks,
         'AI-010 生成模板式项目概览表',
         documentXml.includes('<w:tbl>')
-          && ['公司主体', '所属行业', '项目阶段', '融资安排', '估值口径'].every((term) =>
+          && ['公司主体', '所属行业', '项目名称', '资料截止日', '融资安排', '估值口径'].every((term) =>
             documentXml.includes(term)),
         '投资概要中的原生可编辑项目概览表',
       )

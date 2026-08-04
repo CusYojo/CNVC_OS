@@ -17,6 +17,10 @@ import {
   reviewBusinessDocumentEditorialQuality,
   sanitizeBusinessContentForDelivery,
 } from './aiDocumentEditorialQualityService.js'
+import {
+  projectKnowledgeBriefForPrompt,
+  type ProjectKnowledgeBrief,
+} from './aiProjectKnowledgeBriefService.js'
 
 const GW_BASE = (
   process.env.LLM_BASE_URL
@@ -84,7 +88,7 @@ const SECTION_CONFIGS: SectionConfig[] = [
   {
     title: '公司简介',
     terms: ['公司', '主体', '成立', '定位', '业务', '商业模式', '收入', '阶段', '简介'],
-    instruction: '用1至2段说明主体背景、业务定位、产品或服务、商业模式和当前阶段。',
+    instruction: '用1至2段说明主体背景、业务定位、产品或服务、商业模式和当前经营与产品化情况。',
     maxFindings: 2,
   },
   {
@@ -954,6 +958,7 @@ async function generateChapter(input: {
   reviewerFeedback?: string[]
   previousSection?: BusinessSection
   modelState: { available: boolean; consecutiveFailures: number }
+  projectKnowledgeBrief?: ProjectKnowledgeBrief
 }) {
   const fallback = fallbackChapter(input.config, input.packet)
   if (!input.packet.items.length) return fallback
@@ -1005,6 +1010,9 @@ ${JSON.stringify(input.project)}
 ${JSON.stringify(input.parameters)}
 
 ${input.previousSection ? `上次本章输出（仅用于修复Reviewer指出的问题）：\n${JSON.stringify(input.previousSection)}\n` : ''}
+项目资料研读底稿（已先逐份研读并统一主体、时间、关系和数字口径；只吸收事实，不得在正文提及底稿或研读过程）：
+${projectKnowledgeBriefForPrompt(input.projectKnowledgeBrief)}
+
 本章证据：
 ${chapterEvidencePrompt(input.packet)}
 
@@ -1500,6 +1508,7 @@ export async function composeComplianceStatement(input: {
   sources: EvidenceSource[]
   sourceCutoffDate: string
   parameters: Record<string, unknown>
+  projectKnowledgeBrief?: ProjectKnowledgeBrief
 }): Promise<ComplianceWorkflowResult> {
   const evidencePackets = buildComplianceEvidencePackets(input.sources)
   const packetByTitle = new Map(evidencePackets.map((packet) => [packet.sectionTitle, packet]))

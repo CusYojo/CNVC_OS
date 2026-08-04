@@ -379,6 +379,18 @@ export function sanitizeInvestmentProposalClientText(value: unknown) {
   CLIENT_GENERIC_NO_DATA_PREFACE_GLOBAL.lastIndex = 0
   return rewritten
     .replace(CLIENT_GENERIC_NO_DATA_PREFACE_GLOBAL, '$1')
+    .replace(/[，,]具体执行情况仍需结合合同、清单或业务记录进一步核验/g, '')
+    .replace(/(?:接触或)?(?:申请)?立项前/g, '作出投资判断前')
+    .replace(/投决前/g, '形成投资决策前')
+    .replace(/阶段与推进建议(?:为|是|[:：])\s*(?:进入初筛|继续跟踪|申请立项|启动尽调|提请上会|提交投决|暂缓推进|归档)[；;，,。]?/g, '')
+    .replace(/(?:现阶段)?建议(?:进入初筛|继续跟踪|申请立项|启动尽调|提请上会|提交投决|暂缓推进|归档)[；;，,。]?/g, '')
+    .replace(/(?:进入初筛|继续跟踪|申请立项|启动尽调|提请上会|提交投决|暂缓推进|归档)(?:阶段)?/g, '')
+    .replace(/(?:在)?下一阶段(?:进行|完成)?核验/g, '进一步核验')
+    .replace(/推进下一阶段/g, '开展后续实质工作')
+    .replace(/通过\s*OA\s*发起[^；。]*/gi, '')
+    .replace(/现阶段(?=[尚未不能暂不])/g, '')
+    .replace(/[；;，,]\s*[；;，,]+/g, '；')
+    .replace(/^\s*[；;，,。]+|[；;，,]+\s*$/g, '')
     .replace(/([。！？；])\n+/g, '$1')
     .replace(/\n+/g, '；')
 }

@@ -73,6 +73,8 @@ const UNSUPPORTED_CERTAINTY = /(?:行业第一|绝对领先|唯一|必然|确保
 const MISSING_ACTION = /(?:需补充|尚待提供|未提供|无法判断|待取得|待访谈|待核验|资料缺口)/
 const INTERNAL_ERROR_TEXT =
   /(?:HTTP\s*\d{3}|LLM\s*(?:请求|响应|返回|错误|异常|失败|超时|中断)|网关(?:错误|异常|失败)|错误编号|错误码|invalid_request_error|unsupported_value|请求重试\d*失败|模型请求(?:失败|中断|异常))/i
+const INTERNAL_PROJECT_STAGE_TEXT =
+  /(?:线索阶段|进入初筛|申请立项|启动尽调|提请上会|提交投决|继续跟踪|暂缓推进|归档建议)/
 const EVIDENCE_PROCESS_OR_BOILERPLATE =
   /(?:证据属性|Q&A\s*分类|页面标题|发布主体|访问日期|页面正文摘录|内容指纹|项目大模型|来源网址|原文链接|京ICP备|京公网安备|Copyright\s*©|All Rights Reserved|免责声明|使用条款|隐私政策|财经\s+焦点\s+股票|innoHere英诺嘿呀\s+首页|首页\s+权威榜\s+价值榜|行业数据\s+产业图谱\s+行业研究|企业入驻\s+小程序\s+(?:登录|登入))/i
 const PRODUCT_OR_TECHNOLOGY_NAME =
@@ -126,24 +128,24 @@ function safeNoDataFinding(topic: string): BusinessFinding {
     .replace(/^\s*(?:[一二三四五六七八九十]+、|[（(][一二三四五六七八九十]+[）)])\s*/, '')
     .trim()
   const fallbacks: Record<string, string> = {
-    公司简介: '公司的法律主体、成立时间、注册地和主营业务尚未明确，申请立项前应取得工商档案、公司章程和业务说明并完成核对。',
-    核心团队: '核心团队成员、任职履历、职责分工和全职状态尚未明确，申请立项前应取得管理层简历、任职证明和组织架构并完成访谈。',
-    公司股权结构: '公司完整股东名单、持股比例、实际控制人及特别权利安排尚未明确，申请立项前应取得最新公司章程、股东名册和工商档案并完成核对。',
-    产品及技术: '公司的具体产品、技术架构、知识产权和产品化进度尚未明确，申请立项前应取得产品说明、技术文档和知识产权清单并完成技术访谈。',
-    运营摘要: '公司的客户构成、订单、交付、回款和渠道情况尚未明确，申请立项前应取得客户清单、合同台账、交付记录和回款凭证并完成核对。',
-    财务摘要: '公司的收入、成本、利润、现金流和资产负债情况尚未明确，申请立项前应取得财务报表、审计报告和主要科目明细并完成核对。',
-    历史融资情况: '公司的历次融资轮次、金额、估值、投资方和股权变动尚未明确，申请立项前应取得增资协议、股权转让文件和融资后股权表并完成核对。',
+    公司简介: '公司的法律主体、成立时间、注册地和主营业务尚未明确，应取得工商档案、公司章程和业务说明并完成核对。',
+    核心团队: '核心团队成员、任职履历、职责分工和全职状态尚未明确，应取得管理层简历、任职证明和组织架构并完成访谈。',
+    公司股权结构: '公司完整股东名单、持股比例、实际控制人及特别权利安排尚未明确，应取得最新公司章程、股东名册和工商档案并完成核对。',
+    产品及技术: '公司的具体产品、技术架构、知识产权和产品化进度尚未明确，应取得产品说明、技术文档和知识产权清单并完成技术访谈。',
+    运营摘要: '公司的客户构成、订单、交付、回款和渠道情况尚未明确，应取得客户清单、合同台账、交付记录和回款凭证并完成核对。',
+    财务摘要: '公司的收入、成本、利润、现金流和资产负债情况尚未明确，应取得财务报表、审计报告和主要科目明细并完成核对。',
+    历史融资情况: '公司的历次融资轮次、金额、估值、投资方和股权变动尚未明确，应取得增资协议、股权转让文件和融资后股权表并完成核对。',
     本轮公司估值和投资方案: '本轮融资金额、估值、投资工具、拟出让股比和资金用途尚未明确，进入交易谈判前应取得公司正式融资方案并核对核心条款。',
     风险控制及保护性条款: '本轮交易的治理权、信息权、优先权、反稀释和退出安排尚未明确，签署交易文件前应形成完整条款清单并由法务审核。',
-    经营预测与回报测算: '公司的经营预测、关键假设、退出口径和回报测算尚未明确，提请投决前应取得管理层预测模型并完成敏感性复核。',
-    可比公司估值比较: '可比公司的筛选口径、估值时点和核心倍数尚未明确，提请投决前应统一数据口径并完成可比估值复核。',
+    经营预测与回报测算: '公司的经营预测、关键假设、退出口径和回报测算尚未明确，应取得管理层预测模型并完成敏感性复核。',
+    可比公司估值比较: '可比公司的筛选口径、估值时点和核心倍数尚未明确，应统一数据口径并完成可比估值复核。',
     项目亮点总结: '尚无足以支撑投资亮点的可核验事实，项目负责人应先补齐团队、技术、客户和经营数据，再据此提炼项目的核心优势及成立条件。',
-    风险提示与对策: '项目在经营、技术、合规和交易层面的关键风险及触发条件尚未明确，申请立项前应形成风险清单并明确核验责任人与完成时点。',
-    结论: '交易方案、核心风险和前置条件尚未明确，暂不进入下一决策环节；项目负责人应补齐关键事实并完成复核后重新提交。',
+    风险提示与对策: '项目在经营、技术、合规和交易层面的关键风险及触发条件尚未明确，应形成风险清单并明确核验责任人与完成时点。',
+    结论: '交易方案、核心风险和投资条件尚未明确，在完成关键事实核对前不宜形成肯定的投资结论。',
   }
   return {
     text: fallbacks[clientTopic]
-      ?? `${clientTopic}涉及的关键事实尚未明确，进入下一阶段前应补充相关文件并完成核对。`,
+      ?? `${clientTopic}涉及的关键事实尚未明确，应补充相关文件并完成核对。`,
     status: '资料缺口',
     sourceIndexes: [],
   }
@@ -191,6 +193,14 @@ function reviewFinding(input: {
       ...location,
       code: 'INTERNAL_ERROR_TEXT_LEAK',
       message: `${section.title}包含仅供系统内部记录的技术错误信息`,
+    })
+  }
+  if (INTERNAL_PROJECT_STAGE_TEXT.test(finding.text)) {
+    const leakedStage = finding.text.match(INTERNAL_PROJECT_STAGE_TEXT)?.[0] ?? '内部项目阶段'
+    issue(issues, {
+      ...location,
+      code: 'INTERNAL_PROJECT_STAGE_LEAK',
+      message: `${section.title}包含内部项目阶段“${leakedStage}”，应改为投资价值、交易条件、主要风险和实质工作`,
     })
   }
   if (containsInvestmentProposalSourceProcessWording(finding.text)) {
@@ -430,6 +440,13 @@ function reviewTable(input: {
     }
   }
   const clientTableText = [table.title, headerText, ...table.rows.flat()].join(' ')
+  if (INTERNAL_PROJECT_STAGE_TEXT.test(clientTableText)) {
+    issue(issues, {
+      ...location,
+      code: 'TABLE_INTERNAL_PROJECT_STAGE_LEAK',
+      message: `${section.title}表格包含内部项目阶段`,
+    })
+  }
   if (containsInvestmentProposalSourceProcessWording(clientTableText)) {
     issue(issues, {
       ...location,
@@ -563,6 +580,12 @@ export function reviewInvestmentProposalContent(input: {
       message: '执行摘要包含仅供系统内部记录的技术错误信息',
     })
   }
+  if (INTERNAL_PROJECT_STAGE_TEXT.test(content.executiveSummary)) {
+    issue(issues, {
+      code: 'INTERNAL_PROJECT_STAGE_LEAK',
+      message: '执行摘要包含内部项目阶段，应改为专业投资判断',
+    })
+  }
   if (containsInvestmentProposalSourceProcessWording(content.executiveSummary)) {
     issue(issues, {
       code: 'SOURCE_PROCESS_WORDING_LEAK',
@@ -636,6 +659,13 @@ export function reviewInvestmentProposalContent(input: {
         sectionId: definition.id,
         code: 'INTERNAL_ERROR_TEXT_LEAK',
         message: `章节“${definition.title}”摘要包含仅供系统内部记录的技术错误信息`,
+      })
+    }
+    if (INTERNAL_PROJECT_STAGE_TEXT.test(sectionValue.summary)) {
+      issue(issues, {
+        sectionId: definition.id,
+        code: 'INTERNAL_PROJECT_STAGE_LEAK',
+        message: `章节“${definition.title}”摘要包含内部项目阶段`,
       })
     }
     if (containsInvestmentProposalSourceProcessWording(sectionValue.summary)) {
@@ -806,7 +836,7 @@ export function reviewInvestmentProposalContent(input: {
       definition.analysisKind === 'conclusion'
       && primaryConclusionFindingIndex >= 0
       && (
-        !/(?:进入初筛|继续(?:跟踪|观察)|申请立项|启动尽调|提请上会|提交投决|暂缓(?:推进)?|暂停推进|归档|终止)/.test(sectionNarrative)
+        !/(?:投资逻辑(?:成立|尚未成立|不成立)|具备(?:明确)?投资价值|暂不具备(?:明确)?投资价值|建议(?:投资|不投资)|不建议投资|可考虑投资|不宜投资|尚不足以形成明确投资判断|尚未形成一致口径|再据此评估投资价值)/.test(sectionNarrative)
         || !/(?:完成|落实|确认|若|如|前提|条件|取决于|待.+(?:确认|完成|落实)|(?:交割|投决|签约|审批|立项|尽调|上会)前|(?:完成|确认|落实)后)/.test(sectionNarrative)
         || !/(?:下一步|应|优先|补齐|核实|核对|取得|完成|落实|确认)/.test(sectionNarrative)
       )
@@ -815,7 +845,7 @@ export function reviewInvestmentProposalContent(input: {
         sectionId: definition.id,
         findingIndex: primaryConclusionFindingIndex,
         code: 'CONDITIONAL_CONCLUSION_REQUIRED',
-        message: '结论须用自然语言给出与当前阶段匹配的明确方向，并说明成立条件和下一步动作；不得用“推进下一阶段”等空泛表述替代具体判断',
+        message: '结论须明确投资逻辑是否成立，并说明成立条件、交易约束、主要风险和下一步实质工作；不得用内部项目阶段或“推进下一阶段”等空泛表述替代具体判断',
       })
     }
     ;(sectionValue.tables ?? []).forEach((table, tableIndex) => reviewTable({

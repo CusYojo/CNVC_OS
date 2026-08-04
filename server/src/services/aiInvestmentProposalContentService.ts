@@ -45,6 +45,10 @@ import {
   reviewBusinessDocumentEditorialQuality,
   sanitizeBusinessContentForDelivery,
 } from './aiDocumentEditorialQualityService.js'
+import {
+  projectKnowledgeBriefForPrompt,
+  type ProjectKnowledgeBrief,
+} from './aiProjectKnowledgeBriefService.js'
 
 type ProjectLike = {
   name: string
@@ -319,12 +323,12 @@ function deterministicEvidenceSection(input: {
     && /第三大股东/.test(selected.excerpt)
     && !/\d+(?:\.\d+)?%/.test(selected.excerpt)
   ) {
-    text = '“学术志”被列为第三大股东，但其对应法律主体、持股比例和出资额尚未明确，现阶段不能据此还原公司股权结构；应在立项前取得工商底档、公司章程和完整股东名册并完成交叉核验。'
+    text = '“学术志”被列为第三大股东，但其对应法律主体、持股比例和出资额尚未明确，不能据此还原公司股权结构；应取得工商底档、公司章程和完整股东名册并完成交叉核验。'
   } else if (definition.analysisKind === 'risk_summary') {
     if (!/(?:若|如|一旦|当|风险|影响|导致|可能)/.test(selected.excerpt)) return undefined
   } else if (definition.analysisKind === 'conclusion') {
     const subject = sanitizeInvestmentProposalClientText(projectName).replace(/项目$/, '')
-    text = `${subject || '目标公司'}现阶段可继续跟踪。下一步应优先核实最可能改变判断的主体、权属、产品验证和商业化事实，再结合结果决定是否申请立项或启动尽调；如关键事项仍无法确认，则暂缓推进。`
+    text = `${subject || '目标公司'}的主体、权属、产品验证和商业化事实尚未形成一致口径，应通过工商底档、权属文件、客户合同、验收记录和回款凭证逐项确认，再据此评估投资价值、交易条件和主要风险。`
   }
   const productFindings = definition.analysisKind === 'product_technology'
     && selected.productParagraphs.length
@@ -943,6 +947,7 @@ export async function composeInvestmentProposalContent(input: {
   sourceCutoffDate: string
   parameters: Record<string, unknown>
   runtime?: InvestmentProposalRuntime
+  projectKnowledgeBrief?: ProjectKnowledgeBrief
 }): Promise<BusinessContent> {
   const blueprint = await loadInvestmentProposalBlueprint(input.template)
   const evidencePlan = buildInvestmentProposalEvidencePlan(input.sources, blueprint)
@@ -1097,7 +1102,7 @@ export async function composeInvestmentProposalContent(input: {
       await emitProgress(root, chapterIndex, 'completed', 1)
       return
     }
-    const systemPrompt = `你是投资中台的资深投资经理，负责仅针对当前会话绑定的线索池或项目库项目生成内部“投资提案”章节，供投资团队、投资总监和投委会审阅。必须服从以下硬约束：
+    const systemPrompt = `你是投资中台的资深投资经理，负责针对当前会话绑定的项目生成内部“投资提案”章节，供投资团队、投资总监和投委会审阅。必须服从以下硬约束：
 1. 只生成本章，不得增加、删除、合并、改名或重排 Blueprint 节点。
 2. 每一个事实、数字和判断只能来自本章提供的 Evidence；默认按“当前项目资料库 > 项目档案 > 用户补充输入 > 当前项目网络补全缓存 > 本次定向网络补全 > 审慎分析”处理，模板只提供结构和文风。
 3. “资料记载”和“AI推断”必须填写真正支持该项内容的全局 sourceIndexes；“AI推断”仅是兼容字段，语义为用户可见的“分析判断”；数字必须能在所引证据中逐字找到。
@@ -1111,7 +1116,7 @@ export async function composeInvestmentProposalContent(input: {
 11. 表格只能用于同口径结构化证据；没有来源不得创建空表；所有单元格数字必须出现在 sourceIndexes 对应证据中。
 12. 只返回 JSON：{"sections":[{"id":"","title":"","findings":[{"text":"","status":"资料记载|AI推断|待核验|资料缺口","sourceIndexes":[0]}],"tables":[{"title":"","unit":"","columns":[""],"rows":[[""]],"status":"资料记载|AI推断|待核验","sourceIndexes":[0]}]}]}。
 13. 不输出 Markdown、解释、Reviewer 过程、模板文件名、Skill 版本或内部技术字段。
-14. 项目亮点只能综合前文证据，按最能影响接触或立项判断的事实及成立条件自然分段，不重复前文大段内容。每项风险至少写清具体风险或触发情形及潜在影响；整个风险章节还必须给出可执行的缓释或核验安排，责任主体和完成时点只在证据明确或确有决策价值时写入，不要求每条风险机械凑齐五个字段。结论用自然语言给出与当前阶段匹配的推进、继续观察、暂缓或归档方向，同时写清成立条件和下一步动作；可以使用标准阶段词，但不得写 OA、系统按钮或强制套用“综合考虑……”等固定句式。
+14. 项目亮点只能综合前文证据，按最能影响投资价值判断的事实及成立条件自然分段，不重复前文大段内容。每项风险至少写清具体风险或触发情形及潜在影响；整个风险章节还必须给出可执行的缓释或核验安排，责任主体和完成时点只在证据明确或确有决策价值时写入，不要求每条风险机械凑齐五个字段。结论应形成专业投资判断、成立条件和下一步工作建议；客户可见正文不得出现“线索阶段、进入初筛、申请立项、启动尽调、提请上会、提交投决、继续跟踪、暂缓推进、归档”等内部项目流程词，也不得写 OA、系统按钮或强制套用“综合考虑……”等固定句式。
 15. Evidence 中的“...展开”“…展开”“查看更多”“原文链接”“来源网址”属于网页界面或来源元数据，不得进入正文。公司简介必须优先整合同一 Evidence 中完整的法律主体、成立时间、注册资本、完整地址、经营范围或主营业务；不得复述被截断的网页简介。
 16. 产品及技术章节必须优先使用本地项目文件中的具体产品、平台、系统、模型、算法或技术架构；至少写明可识别的产品/技术名称及其功能、关键模块、技术路径或成熟度。公开网页只能补充本地资料未覆盖的事实，站点标题、导航菜单、关注按钮和行业标签不得进入正文；本地 Evidence 已有具体产品技术内容时，不得只引用公开网页的泛化产品介绍。
 
@@ -1145,6 +1150,9 @@ ${JSON.stringify(input.project)}
 目标受众：${safeText(input.parameters.audience, '内部立项')}
 篇幅：${requestedLength}
 用户补充要求：${safeText(input.parameters.userInstructions, '无')}
+
+项目资料研读底稿（已先逐份研读并统一主体、时间和数字口径；只吸收事实，不得在正文提及底稿或研读过程）：
+${projectKnowledgeBriefForPrompt(input.projectKnowledgeBrief)}
 
 本章 Evidence：
 ${investmentProposalEvidencePrompt(evidence)}
@@ -1485,6 +1493,18 @@ ${[
       console.warn('[aiInvestmentProposalContent] 全篇总编辑未完成，保留确定性清洗后的提案:', (error as Error).message)
     }
   }
+  // 总编辑或确定性清洗可能已经删除旧版阶段词；交付状态必须以最终内容重算，
+  // 不能沿用章组生成阶段的历史 Reviewer 结果。
+  content = sanitizeBusinessContentForDelivery(content)
+  review = reviewInvestmentProposalContent({
+    content,
+    blueprint,
+    evidencePlan,
+    sources: input.sources,
+    projectName: input.project.name,
+    companyName: input.project.companyName,
+  })
+  editorialIssues = reviewBusinessDocumentEditorialQuality(content)
   if (!review.passed) {
     console.warn(
       '[aiInvestmentProposalContent] Reviewer 未完全通过，按受限初稿继续生成:',

@@ -11,6 +11,7 @@ import { PDFParse } from 'pdf-parse'
 import type { BusinessContent } from './aiBusinessContentService.js'
 import type { InvestmentProposalDocumentBlueprint } from './aiInvestmentProposalBlueprintService.js'
 import type { AiTemplateDefinition } from './aiTemplateCatalog.js'
+import { sanitizeInvestmentProposalClientText } from './aiInvestmentProposalTextService.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -273,7 +274,9 @@ export async function exportAndReviewInvestmentProposalPdf(input: {
     issues.push({ code: 'PDF_FORBIDDEN_FOOTER_BLOCK', message: 'PDF 文末不得生成免责声明或引用资料板块' })
   }
   const claims = input.content.sections.flatMap((section) =>
-    section.findings.map((finding) => finding.text))
+    section.findings
+      .map((finding) => sanitizeInvestmentProposalClientText(finding.text))
+      .filter(Boolean))
   const bodyClaimsValidated = claims.every((claim) => compactPdf.includes(compact(claim)))
   if (!bodyClaimsValidated) {
     issues.push({ code: 'PDF_BODY_MISMATCH', message: 'PDF 遗漏 Word 中已通过 Reviewer 的正文事实项' })

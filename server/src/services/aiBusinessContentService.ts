@@ -18,6 +18,12 @@ import {
   reviewBusinessDocumentEditorialQuality,
   sanitizeBusinessContentForDelivery,
 } from './aiDocumentEditorialQualityService.js'
+import {
+  PROJECT_KNOWLEDGE_TOPICS,
+  projectKnowledgeBriefForPrompt,
+  type ProjectKnowledgeBrief,
+  type ProjectKnowledgeTopic,
+} from './aiProjectKnowledgeBriefService.js'
 
 export type EvidenceSource = {
   sourceType: string
@@ -426,7 +432,6 @@ function fallbackContent(
       value: [
         meaningfulValue(project.companyName) && `公司主体为${meaningfulValue(project.companyName)}`,
         meaningfulValue(project.industry) && `所属行业为${meaningfulValue(project.industry)}`,
-        meaningfulValue(project.stage) && `项目当前处于${meaningfulValue(project.stage)}阶段`,
       ].filter(Boolean).join('；'),
     },
     { key: 'summary', patterns: [/公司简介|产品|技术|项目概览/], value: meaningfulValue(project.summary) },
@@ -966,6 +971,11 @@ function sanitizeDueDiligenceText(value: string) {
     .replace(/项目(?:资料|材料)/g, '原始文件')
     .replace(/(?:资料|材料|证据)(?:显示|记载|表明)[，,:：]?\s*/g, '')
     .replace(/证据不足/g, '尚未形成可复核结论')
+    .replace(/(?:当前|现阶段)?(?:项目)?(?:处于)?线索阶段/g, '')
+    .replace(/项目阶段(?:为|是|：|:)?\s*线索/g, '')
+    .replace(/(?:现阶段)?建议(?:进入初筛|申请立项|启动尽调|提请上会|提交投决|继续跟踪|暂缓推进|归档)(?:项目)?[。；;]?/g, '')
+    .replace(/(?:进入初筛|申请立项|启动尽调|提请上会|提交投决|继续跟踪|暂缓推进|归档)(?:阶段|流程)?/g, '')
+    .replace(/(?:阶段与推进建议|推进建议|主建议|投资建议)[：:]\s*[。；;]?/g, '')
     .replace(
       new RegExp(`建议主建议定为[“"]?(${DUE_DILIGENCE_DISPOSITION_SOURCE})[”"]?[，,]\\s*以`, 'g'),
       '下一步应以',
@@ -1062,7 +1072,10 @@ export function finalizeDueDiligenceContent(content: BusinessContent): BusinessC
           text: sanitizeDueDiligenceText(finding.text),
           status: finding.status === '资料缺口' ? '待核验' as const : finding.status,
         }
-        if (normalizedFinding.status === '待核验' || normalizedTitle === '后续核验事项') {
+        if (
+          normalizedFinding.status === '待核验'
+          || normalizedTitle === '后续核验事项'
+        ) {
           if (
             normalizedFinding.text
             && !/^(?:当前项目资料库|现有资料|本节|相关结论|补充可核验公开信息)/.test(
@@ -1099,7 +1112,9 @@ export function finalizeDueDiligenceContent(content: BusinessContent): BusinessC
       return score(`${right.sectionTitle}${right.text}`) - score(`${left.sectionTitle}${left.text}`)
     })
     .flatMap((finding) => {
-      const text = `${finding.sectionTitle === '后续核验事项' ? '' : `${finding.sectionTitle}：`}${finding.text}`
+      const text = `${['后续核验事项', '风险提示与对策'].includes(finding.sectionTitle)
+        ? ''
+        : `${finding.sectionTitle}：`}${finding.text}`
         .replace(/^[：:]\s*/, '')
         .trim()
       const key = comparisonKey(text)
@@ -1109,54 +1124,39 @@ export function finalizeDueDiligenceContent(content: BusinessContent): BusinessC
     })
     .slice(0, 8)
   const pendingSection = sections.find((section) => section.title === '后续核验事项')
+    ?? sections.find((section) => section.title === '风险提示与对策')
   if (pendingSection) {
     pendingSection.summary = consolidatedPending.length
-      ? '以下事项可能改变当前阶段判断，需取得原件、权威记录或相关主体确认后再作结论。'
-      : '未发现足以改变当前阶段判断的重大未决事项。'
-    pendingSection.findings = consolidatedPending
+      ? sanitizeDueDiligenceText(pendingSection.summary)
+      : sanitizeDueDiligenceText(pendingSection.summary)
+    const seenPendingText = new Set<string>()
+    pendingSection.findings = [
+      ...pendingSection.findings,
+      ...consolidatedPending,
+    ].filter((finding) => {
+      const key = comparisonKey(finding.text)
+      if (!key || seenPendingText.has(key)) return false
+      seenPendingText.add(key)
+      return true
+    }).slice(0, 12)
   }
   const sanitizedExecutiveSummary = sanitizeDueDiligenceText(content.executiveSummary).trim()
-  const disposition = [
-    sanitizedExecutiveSummary,
-    ...sections
-      .filter((section) => section.title === '投资概要')
-      .flatMap((section) => [
-        section.summary,
-        ...section.findings.map((finding) => finding.text),
-      ]),
-  ].join('\n').match(/进入初筛|继续跟踪|申请立项|启动尽调|提请上会|提交投决|暂缓推进|归档/)?.[0] ?? '继续跟踪'
-  const executiveSummary = ensureDueDiligenceRecommendation(
-    sanitizedExecutiveSummary
-      || '主体、权属、商业化和财务关键事项完成核验前，不宜进入下一审批环节。',
-    disposition,
-    normalizeDueDiligenceTitle(content.title)
-      .replace(/(?:尽职调查报告|尽调报告)$/, '')
-      .trim() || '该项目',
-  )
-  const normalizedSections = sections.map((section) => section.title === '投资概要'
-    ? {
-        ...section,
-        summary: removeDueDiligenceRecommendation(section.summary, disposition),
-        findings: section.findings.flatMap((finding) => {
-          const text = removeDueDiligenceRecommendation(finding.text, disposition)
-          return text ? [{ ...finding, text }] : []
-        }),
-      }
-    : section)
+  const executiveSummary = sanitizedExecutiveSummary
+    || '本报告围绕公司主体、产品技术、商业化、财务与交易条件形成投资分析，相关判断以正文所列事实和约束为基础。'
   return {
     ...content,
     title: normalizeDueDiligenceTitle(content.title),
     executiveSummary,
-    sections: normalizedSections,
+    sections,
     highlights: dedupeTextList(content.highlights.map(sanitizeDueDiligenceText), { limit: 8 }),
     risks: dedupeTextList(content.risks.map(sanitizeDueDiligenceText), { limit: 8 }),
-    // 尽调正文不生成独立“资料缺口”清单；未入库事项集中写入“后续核验事项”。
+    // 尽调正文不生成独立缺口清单；未明确事项并入“风险提示与对策”。
     missing: [],
   }
 }
 
 const DUE_DILIGENCE_PROCESS_LANGUAGE =
-  /本初稿|项目资料|项目材料|项目资料库|项目知识库|资料库|知识库|现有资料|现有材料|当前资料|当前材料|根据(?:当前|现有|项目)?(?:资料|材料|证据)|(?:资料|材料|证据)(?:显示|表明|记载)|证据不足|证据支持|证据处理|取证过程|检索过程|结论强度|所列状态|未获直接证据|已筛选证据|尚未入库|本节|当前结论用于|相关判断以|判断重点|资料缺口|检索问题|联网检索|来源索引|状态标签|状态和引用|初步梳理/
+  /本初稿|项目资料|项目材料|项目资料库|项目知识库|资料库|知识库|现有资料|现有材料|当前资料|当前材料|根据(?:当前|现有|项目)?(?:资料|材料|证据)|(?:资料|材料|证据)(?:显示|表明|记载)|证据不足|证据支持|证据处理|取证过程|检索过程|结论强度|所列状态|未获直接证据|已筛选证据|尚未入库|本节|当前结论用于|相关判断以|判断重点|资料缺口|检索问题|联网检索|来源索引|状态标签|状态和引用|初步梳理|线索阶段|处于线索|进入初筛|申请立项|启动尽调|提请上会|提交投决|继续跟踪|暂缓推进|归档建议/
 
 const DUE_DILIGENCE_AI_STYLE_LANGUAGE =
   /值得注意的是|需要强调的是|不难发现|由此可见|综上所述|显而易见|毋庸置疑|阶段与推进建议[：:]|主建议[：:]|最强依据(?:是|为)|反向证据(?:是|为)|前置条件(?:是|为)/
@@ -1193,21 +1193,36 @@ const DUE_DILIGENCE_WEBPAGE_BOILERPLATE =
   /页面正文摘录|公司详情|首页|权威榜|价值榜|行业数据|产业图谱|企业入驻|小程序|登入|已关注|点击查看|免责声明|网站导航/
 
 const DUE_DILIGENCE_SECTION_SIGNALS: Record<string, RegExp> = {
-  投资概要: /线索阶段|项目阶段|当前阶段|进入下一阶段|立项条件|推进条件|暂不具备立项|审批环节|触发条件/,
-  公司概况: /公司主体|公司名称|成立|注册资本|注册地址|统一社会信用代码|主营业务|公司定位|企业发展阶段/,
-  股权结构及融资历程: /股东|持股|实际控制人|股权|融资|轮次|投资方|增资|工商变更|员工持股/,
-  公司治理与管理团队: /创始人|联合创始人|核心团队|管理团队|董事|监事|高管|CEO|CTO|全职|治理/,
-  法律合规与资质: /诉讼|处罚|失信|合规|资质|许可|备案|监管|权属|劳动用工|数据安全|行政/,
-  产品与核心技术: /产品|系统|平台|软件|设备|引擎|模型|算法|技术|研发|性能|指标|样机|测试|专利|软著|成熟度/,
-  商业模式与经营情况: /商业模式|收费|定价|服务费|成本|毛利|交付模式|渠道|收入模式|回款周期|经营/,
-  客户与商业化进展: /客户|合同|订单|试用|测试|交付|验收|开票|回款|续约|销售管线|商业化/,
-  行业概况与市场空间: /市场|需求|行业|渗透率|市场规模|采购|监管边界|增长|应用场景/,
-  产业链与竞争格局: /竞品|竞争|替代|对标|差异化|供应商|供应链|产业链|市场份额|进入壁垒/,
-  财务分析: /营业收入|销售收入|成本|毛利率|净利润|经营现金流|现金余额|应收账款|费用|财务报表|现金消耗|资金续航/,
-  估值合理性分析: /估值|投前|投后|可比公司|可比交易|估值倍数|市销率|市盈率|里程碑估值|稀释/,
-  投资方案: /前置条件|推进前提|责任人|责任分工|所需材料|OA|复核时间|触发条件|投资金额|投资方式|交割|保护性条款|下一步动作|审批动作/,
+  公司情况: /公司|主体|成立|产品|业务|团队|客户/,
+  交易要点: /投资|融资|估值|股权|交易|金额|方式/,
+  行业概况: /行业|市场|需求|政策|规模|增长/,
+  商业模式和经营管理: /商业模式|收费|客户|交付|收入|经营|管理/,
+  投资价值与风险: /投资|价值|优势|风险|约束|条件/,
+  公司基本信息: /公司主体|公司名称|成立|注册资本|注册地址|统一社会信用代码|主营业务/,
+  历史沿革: /成立|变更|发展|历史|融资|产品|客户|年份|时间/,
+  公司股东情况及实际控制人情况: /股东|持股|实际控制人|股权|员工持股|控制/,
+  核心团队介绍: /创始人|联合创始人|核心团队|管理团队|高管|CEO|CTO|经历|职责/,
+  组织架构: /组织|部门|岗位|治理|董事|监事|管理/,
+  关联公司及关联交易: /关联公司|关联方|关联交易|子公司|控股|参股/,
+  '资质、荣誉及法律合规情况': /资质|荣誉|许可|备案|诉讼|处罚|合规|监管/,
+  产品概念总览: /产品|系统|平台|设备|软件|服务|场景/,
+  核心技术路线: /技术|算法|架构|原理|研发|性能|指标/,
+  产品矩阵: /产品|型号|版本|功能|客户|价格|形态/,
+  场景应用: /场景|应用|客户|部署|交付|测试|验收/,
+  核心技术沿革: /研发|技术|版本|迭代|年份|时间|里程碑/,
+  知识产权及数据权属: /专利|软著|商标|知识产权|权属|数据|成果转化/,
+  商业模式与销售策略: /商业模式|收费|定价|销售|渠道|交付|收入模式/,
+  客户验证情况: /客户|合同|订单|试用|测试|交付|验收|开票|回款|续约/,
+  '供应商、采购与成本情况': /供应商|采购|成本|原材料|外协|供应链|毛利/,
+  行业趋势与痛点: /行业|趋势|痛点|需求|政策|监管|增长/,
+  市场分析: /市场|规模|客户|竞争|渗透率|份额|对标/,
+  业务拓展规划: /规划|拓展|目标|客户|产品|市场|产能|销售/,
+  财务情况: /营业收入|销售收入|成本|毛利率|净利润|现金流|现金余额|应收账款|费用|预测/,
+  公司估值与投资方式: /估值|投前|投后|投资金额|投资方式|股权|稀释|交易/,
+  退出方案: /退出|回购|上市|并购|转让|收益|期限/,
   投资亮点: /优势|壁垒|验证|稀缺|差异化|成长性|复用能力|窗口期|投资价值/,
-  风险分析: /风险|影响|缓释|应对|失效|下调|受阻|现金断裂|不确定性/,
+  风险提示与对策: /风险|影响|缓释|应对|失效|下调|受阻|现金断裂|不确定性/,
+  投资结论及建议: /投资|判断|条件|风险|交易|价值|建议/,
 }
 
 function looksLikeRawDueDiligenceFragment(value: string) {
@@ -1305,7 +1320,7 @@ export function dueDiligenceContentQualityIssues(
     issues.push('处置建议只能在执行摘要中自然出现一次，正文各模块不得再次复述')
   }
   for (const section of content.sections) {
-    const isPending = section.title === '后续核验事项'
+    const isPending = section.title === '风险提示与对策'
     const visibleSectionText = dueDiligenceSectionVisibleText(section)
     if (final && !isPending && section.summary.length < 20) {
       issues.push(`${section.title}的小结过短，未形成明确判断`)
@@ -1320,11 +1335,11 @@ export function dueDiligenceContentQualityIssues(
     ) {
       issues.push(`${section.title}含模型化套话或机械重复句式，必须按具体主体、事实、影响和边界重写`)
     }
-    if (section.title === '投资概要' && dueDiligenceRecommendationCount(visibleSectionText) > 0) {
-      issues.push('投资概要不得复述执行摘要的处置建议，只写当前阶段和进入下一阶段的条件')
+    if (DUE_DILIGENCE_PROCESS_LANGUAGE.test(visibleSectionText)) {
+      issues.push(`${section.title}含内部项目阶段或生成过程词，必须改为对公司、业务、交易和风险的直接判断`)
     }
     if (
-      !['风险分析', '后续核验事项'].includes(section.title)
+      section.title !== '风险提示与对策'
       && (visibleSectionText.match(/但|若|尚未|仍需|后续需/g) ?? []).length >= 8
     ) {
       issues.push(`${section.title}过度重复“但/若/尚未/仍需”等边界句，应保留事实叙述并集中表达核验要求`)
@@ -1339,7 +1354,12 @@ export function dueDiligenceContentQualityIssues(
       issues.push(`${section.title}至少需要一项高密度实质发现，或一张有效数据表`)
     }
     const sectionSignal = DUE_DILIGENCE_SECTION_SIGNALS[section.title]
-    if (!isPending && sectionSignal && !sectionSignal.test(visibleSectionText)) {
+    if (
+      !isPending
+      && sectionSignal
+      && visibleSectionText.length >= 100
+      && !sectionSignal.test(visibleSectionText)
+    ) {
       issues.push(`${section.title}的正文主题与标题不匹配，必须只保留该模块职责范围内的事实与分析`)
     }
     if (!isPending && DUE_DILIGENCE_WEBPAGE_BOILERPLATE.test(visibleSectionText)) {
@@ -1372,7 +1392,7 @@ export function dueDiligenceContentQualityIssues(
         issues.push(`${section.title}包含未核实或过程性表格；无可靠数据时应删除表格`)
       }
     }
-    if (section.title === '财务分析') {
+    if (section.title === '财务情况') {
       const tables = section.tables ?? []
       for (const table of tables) {
         const columnText = table.columns.join(' ')
@@ -1391,9 +1411,13 @@ export function dueDiligenceContentQualityIssues(
         && tables.length === 0
         && visibleSectionText.length < 100
       ) {
-        issues.push('财务分析无有效表格时，必须用完整段落说明收入、成本毛利、现金流或资金续航及其投资影响')
+        issues.push('财务情况无有效表格时，必须用完整段落说明收入、成本毛利、现金流或资金续航及其投资影响')
       }
     }
+  }
+  const totalTables = content.sections.reduce((sum, section) => sum + (section.tables?.length ?? 0), 0)
+  if (!partial && compactVisibleLength > 3500 && totalTables < 12) {
+    issues.push(`全文只有 ${totalTables} 张数据表；标准模板为表格密集型报告，资料充分时至少应形成 12 张有效表格`)
   }
   for (const [label, items] of [
     ['投资亮点', content.highlights],
@@ -1522,80 +1546,103 @@ export function investmentRecommendationPendingResearchTopics(
 
 export function annotateDueDiligencePendingAfterResearch(
   content: BusinessContent,
-  status: 'disabled' | 'succeeded' | 'partial' | 'no_results' | 'unavailable',
+  _status: 'disabled' | 'succeeded' | 'partial' | 'no_results' | 'unavailable',
 ) {
-  const summary = status === 'succeeded' || status === 'partial'
-    ? '以下事项仍需非公开原件或独立来源确认，可能影响当前阶段判断。'
-    : status === 'no_results'
-      ? '以下事项尚无可靠公开结论，需取得一手材料或相关主体确认。'
-      : status === 'disabled'
-        ? '以下事项需取得权威记录或一手材料确认。'
-        : '以下事项尚不具备形成正式判断的条件。'
-  return {
-    ...content,
-    sections: content.sections.map((section) => ({
-      ...section,
-      summary: section.title === '后续核验事项' && section.findings.length > 0
-        ? summary
-        : section.summary,
-    })),
-  }
+  // 网络补充状态只写入任务审计，不把检索结果或“待核验”过程提示覆盖到正式正文。
+  return content
 }
 
 export const DUE_DILIGENCE_GENERATION_GROUPS = [
-  { id: 'investment_overview', title: '投资概要', sections: ['投资概要'] },
   {
-    id: 'company_and_team',
-    title: '公司与团队',
-    sections: ['公司概况', '股权结构及融资历程', '公司治理与管理团队', '法律合规与资质'],
-  },
-  { id: 'product_and_technology', title: '产品与技术', sections: ['产品与核心技术'] },
-  {
-    id: 'business_and_commercialization',
-    title: '业务与商业化',
-    sections: ['商业模式与经营情况', '客户与商业化进展'],
+    id: 'investment_overview_a',
+    title: '投资概要（项目与交易）',
+    sections: ['公司情况', '交易要点', '行业概况'],
   },
   {
-    id: 'market_and_competition',
-    title: '行业与竞争',
-    sections: ['行业概况与市场空间', '产业链与竞争格局'],
+    id: 'investment_overview_b',
+    title: '投资概要（经营与判断）',
+    sections: ['商业模式和经营管理', '投资价值与风险'],
   },
   {
-    id: 'finance_and_valuation',
-    title: '财务与估值',
-    sections: ['财务分析', '估值合理性分析'],
+    id: 'company_profile_a',
+    title: '公司概况（主体与股权）',
+    sections: ['公司基本信息', '历史沿革', '公司股东情况及实际控制人情况'],
   },
   {
-    id: 'investment_judgement',
-    title: '投资判断',
-    sections: ['投资方案', '投资亮点'],
+    id: 'company_profile_b',
+    title: '公司概况（团队与合规）',
+    sections: ['核心团队介绍', '组织架构', '关联公司及关联交易', '资质、荣誉及法律合规情况'],
   },
   {
-    id: 'risk_and_verification',
-    title: '风险与核验',
-    sections: ['风险分析', '后续核验事项'],
+    id: 'product_and_technology_a',
+    title: '产品与技术（产品与路线）',
+    sections: ['产品概念总览', '核心技术路线', '产品矩阵'],
+  },
+  {
+    id: 'product_and_technology_b',
+    title: '产品与技术（应用与权属）',
+    sections: ['场景应用', '核心技术沿革', '知识产权及数据权属'],
+  },
+  {
+    id: 'business',
+    title: '业务情况',
+    sections: ['商业模式与销售策略', '客户验证情况', '供应商、采购与成本情况'],
+  },
+  {
+    id: 'market',
+    title: '行业和市场',
+    sections: ['行业趋势与痛点', '市场分析'],
+  },
+  {
+    id: 'planning_and_finance',
+    title: '发展规划与财务',
+    sections: ['业务拓展规划', '财务情况'],
+  },
+  {
+    id: 'investment_plan',
+    title: '投资方案',
+    sections: ['投资亮点', '公司估值与投资方式', '退出方案'],
+  },
+  {
+    id: 'risk_and_conclusion',
+    title: '风险与投资结论',
+    sections: ['风险提示与对策', '投资结论及建议'],
   },
 ] as const
 
 type DueDiligenceGenerationGroup = typeof DUE_DILIGENCE_GENERATION_GROUPS[number]
 
 const DUE_DILIGENCE_GROUP_GUIDANCE: Record<string, string> = {
-  投资概要: '只说项目当前阶段、与投资方向的匹配度、最重要的事实和进入下一阶段的条件；不写“阶段与推进建议”或“主建议”标签，不复述执行摘要中的建议句。',
-  公司概况: '只写公司或成果转化主体、成立与登记信息、主营业务、发展阶段、历史沿革和关联主体，不混入客户订单或交易方案。',
-  股权结构及融资历程: '写股东、持股、实控人、员工持股及具名融资事件；融资必须区分公开披露、协议、付款和工商变更边界。',
-  公司治理与管理团队: '写治理机制和具名核心成员的职责、任职状态、关键经历、持股激励及关键人依赖；不得凭名称推断学校、实验室或知识产权关系。',
-  法律合规与资质: '只写主体存续、许可资质、知识产权权属、诉讼处罚、劳动用工、数据监管、重大合同及专业复核要求。',
-  产品与核心技术: '只写具名产品或技术、目标用户与场景、交付形态、原理和关键模块、性能测试、成熟度、知识产权及下一里程碑；删除网页导航和聚合标签。',
-  商业模式与经营情况: '围绕具名产品说明付费方、定价单位、收入构成、获客、签约、交付、验收、回款、续约和规模化瓶颈。',
-  客户与商业化进展: '写具名客户或合作方、产品、时间和阶段，严格区分线索、测试、试用、合同、交付、验收、收入、开票、回款和续约。',
-  行业概况与市场空间: '只围绕目标产品、客户和场景界定市场、采购和监管边界；市场数据必须解释当前项目，不写泛行业综述。',
-  产业链与竞争格局: '写关键上下游、交付伙伴、具名竞品或替代方案，并按产品、技术、阶段、价格、交付、客户验证和融资同口径比较。',
-  财务分析: '区分历史财务、经营指标和管理层预测；数字保留期间、单位和口径。没有可靠数字时完整分析收入质量、成本毛利、现金流或资金续航及投资影响。',
-  估值合理性分析: '仅基于具名融资、交易文件或可靠可比信息分析估值口径、差异和敏感变量；不得用融资传闻或孤立数字拼凑结论。',
-  投资方案: '优先写与阶段匹配的推进条件、责任方向、所需材料、触发条件和复核时间；无文件支持不得虚构金额、估值和条款，也不得写 OA、系统按钮或内部技术流程。',
+  公司情况: '以三至五项关键事实概括公司主体、产品、团队和商业化，形成可直接放在报告首页的项目画像。',
+  交易要点: '以表格优先呈现本轮融资、估值、投资方式、金额、股权比例、资金用途和关键条款；未披露项不虚构。',
+  行业概况: '围绕公司实际产品和客户场景概括行业驱动、市场位置和监管边界，不写泛行业研究。',
+  商业模式和经营管理: '概括付费方、收费方式、交付、客户验证、供应链和经营管理中的关键事实。',
+  投资价值与风险: '并列呈现最重要的投资价值、成立条件和主要风险，不使用内部项目流程词。',
+  公司基本信息: '优先用公司基本信息表呈现主体、成立时间、注册资本、地址、法定代表人、经营范围与主营业务。',
+  历史沿革: '按时间顺序形成发展历程表，覆盖设立、股权或融资、产品、客户和业务里程碑。',
+  公司股东情况及实际控制人情况: '用股权表呈现股东、持股比例、出资和身份，并解释实控关系、员工持股和历次变动。',
+  核心团队介绍: '用团队表呈现姓名、职务、教育与职业经历、职责、全职状态和持股激励。',
+  组织架构: '说明公司治理和部门分工；有明确部门或人员时形成组织架构表。',
+  关联公司及关联交易: '列明关联主体、关系、业务往来与金额口径，并分析潜在利益冲突。',
+  '资质、荣誉及法律合规情况': '用清单表呈现许可、资质、荣誉、诉讼处罚、劳动用工、数据监管及重大合同。',
+  产品概念总览: '说明产品定位、目标用户、核心功能、交付形态和价值主张，避免营销表述。',
+  核心技术路线: '说明技术原理、架构、关键模块、性能指标、测试状态和相对差异。',
+  产品矩阵: '用产品矩阵表呈现产品或型号、功能、客户、形态、成熟度和价格口径。',
+  场景应用: '用场景表呈现应用场景、客户痛点、解决方案、部署或验证状态。',
+  核心技术沿革: '按时间形成技术迭代和产品化里程碑表。',
+  知识产权及数据权属: '用权属清单呈现专利、软著、商标、成果转化、数据来源和归属。',
+  商业模式与销售策略: '说明付费方、定价单位、收入构成、获客、签约、交付、验收、回款和渠道策略。',
+  客户验证情况: '用客户表呈现具名客户、产品、时间、测试、试用、合同、交付、验收、收入、开票、回款或续约状态。',
+  '供应商、采购与成本情况': '用供应链表呈现关键供应商、采购内容、价格或成本、依赖程度和替代性。',
+  行业趋势与痛点: '仅写与公司产品直接相关的需求、政策、采购、技术演进和行业痛点。',
+  市场分析: '说明市场边界、规模与增速口径、竞争格局和具名可比对象；同口径信息优先落表。',
+  业务拓展规划: '区分已经完成、正在执行和管理层规划，呈现产品、客户、区域、产能和组织目标。',
+  财务情况: '区分历史财务、经营指标和管理层预测，优先形成历史财务、预测和现金流表；数字保留期间、单位和口径。',
   投资亮点: '保留三至六项落到具体主体或事件的投资价值，说明已验证事实、相对差异、投资含义及成立条件。',
-  风险分析: '按可能改变阶段建议的程度排序，逐项写触发条件、投资影响和核验或缓释动作，不把可能性写成已发生事实。',
-  后续核验事项: '只集中列出联网补全后仍需非公开原件、权威记录、主体确认或访谈核实的重大事项，最多八项；每项写优先级、动作、对应模块和判断影响。',
+  公司估值与投资方式: '基于交易文件、融资安排或可靠可比信息分析估值口径、投资金额、股权比例、稀释和关键条件。',
+  退出方案: '说明可能的并购、股权转让、回购或上市路径及其前提，不虚构期限或收益。',
+  风险提示与对策: '按重要性用风险表呈现风险事项、触发情形、投资影响和缓释安排；不把可能性写成已发生事实。',
+  投资结论及建议: '综合公司、产品、商业化、财务、交易和风险形成专业投资判断及条件，不出现线索、初筛、立项、启动尽调或上会等内部流程词。',
 }
 
 const DUE_DILIGENCE_DEFAULT_CONCURRENCY = 3
@@ -1783,46 +1830,29 @@ function dueDiligenceGroupFallback(
     }))
 }
 
-function dueDiligenceDisposition(content: BusinessContent) {
-  return [
-    content.executiveSummary,
-    ...content.sections
-      .filter((section) => section.title === '投资概要')
-      .flatMap((section) => [
-        section.summary,
-        ...section.findings.map((finding) => finding.text),
-      ]),
-  ].join('\n').match(
-    /进入初筛|继续跟踪|申请立项|启动尽调|提请上会|提交投决|暂缓推进|归档/,
-  )?.[0] ?? '继续跟踪'
-}
-
 function deterministicDueDiligenceSummary(
   content: BusinessContent,
   project: ProjectLike,
 ) {
-  const disposition = dueDiligenceDisposition(content)
-  const overview = content.sections.find((section) => section.title === '投资概要')
+  const overview = content.sections.find((section) => section.title === '公司情况')
   const strongest = content.sections
-    .filter((section) => ['产品与核心技术', '客户与商业化进展', '股权结构及融资历程'].includes(section.title))
+    .filter((section) => ['核心技术路线', '客户验证情况', '公司股东情况及实际控制人情况'].includes(section.title))
     .flatMap((section) => section.findings.map((finding) => finding.text))
     .slice(0, 2)
   const risks = content.sections
-    .find((section) => section.title === '风险分析')
+    .find((section) => section.title === '风险提示与对策')
     ?.findings.map((finding) => finding.text)
     .slice(0, 2) ?? []
   const actions = content.sections
-    .find((section) => section.title === '投资方案')
+    .find((section) => section.title === '投资结论及建议')
     ?.findings.map((finding) => finding.text)
     .slice(0, 1) ?? []
   return [
     overview?.summary,
-    `${meaningfulValue(project.companyName) || project.name}现阶段建议${disposition}。`,
     overview?.findings[0]?.text,
     ...strongest,
     ...risks,
     ...actions,
-    `${meaningfulValue(project.companyName) || project.name}的后续推进应以主体、权属、商业化和财务关键事项完成交叉核验为前提。`,
   ].filter(Boolean).join('')
 }
 
@@ -1837,6 +1867,24 @@ function dueDiligenceSummaryBrief(content: BusinessContent) {
   }))
 }
 
+function dueDiligenceBriefTopics(sectionTitles: readonly string[]): ProjectKnowledgeTopic[] {
+  const text = sectionTitles.join(' ')
+  const topics: ProjectKnowledgeTopic[] = []
+  const add = (topic: ProjectKnowledgeTopic) => {
+    if (!topics.includes(topic)) topics.push(topic)
+  }
+  if (/公司|历史|基本信息/.test(text)) add('公司主体与历史沿革')
+  if (/股东|控制人|融资|治理|交易|估值|投资方式/.test(text)) add('股权、融资与治理')
+  if (/团队|组织/.test(text)) add('创始人与核心团队')
+  if (/产品|技术|知识产权|场景|数据权属/.test(text)) add('产品、技术与知识产权')
+  if (/商业模式|客户|供应商|采购|成本|销售/.test(text)) add('商业模式、客户与供应链')
+  if (/行业|市场|竞争/.test(text)) add('行业、市场与竞争')
+  if (/财务|现金流|规划/.test(text)) add('财务、现金流与预测')
+  if (/交易|估值|退出|投资方案/.test(text)) add('交易方案、估值与退出')
+  if (/风险|合规|资质|关联/.test(text)) add('合规、风险与待确认事项')
+  return topics.length ? topics : [...PROJECT_KNOWLEDGE_TOPICS]
+}
+
 async function composeDueDiligenceContent(input: {
   template: AiTemplateDefinition
   skill: LoadedAiSkill
@@ -1846,6 +1894,7 @@ async function composeDueDiligenceContent(input: {
   parameters: Record<string, unknown>
   dueDiligencePass?: 'gap-analysis' | 'final'
   dueDiligenceRuntime?: DueDiligenceRuntime
+  projectKnowledgeBrief?: ProjectKnowledgeBrief
 }): Promise<BusinessContent> {
   const fallback = fallbackContent(
     'due_diligence_report',
@@ -1890,6 +1939,8 @@ async function composeDueDiligenceContent(input: {
     const requestedSections = group.sections
       .map((title) => `- ${title}：${DUE_DILIGENCE_GROUP_GUIDANCE[title]}`)
       .join('\n')
+    const briefTopics = dueDiligenceBriefTopics(group.sections)
+    const studiedKnowledge = projectKnowledgeBriefForPrompt(input.projectKnowledgeBrief, briefTopics)
     const systemPrompt = `你是投资中台的资深投资经理，负责为当前会话绑定的项目撰写可直接交付内部投资经理审阅的中文尽调报告章节。
 只生成本次指定章节，不得生成整篇报告、执行摘要、免责声明或文末引用资料。
 必须遵守：
@@ -1902,10 +1953,11 @@ async function composeDueDiligenceContent(input: {
 7. 不使用“该信息、该信号、该口径、该能力、该模式、该表述”机械承接上句；不得在每段末尾重复“但/若/尚未/仍需”和相同核验要求。禁止把“直接关系到进入下一阶段”“将直接影响项目推进”“投资团队应据此”“相关事项已纳入本轮尽调”当作通用收尾。
 8. 每节摘要用一句或两句给出中心判断，长度随信息密度变化；除“后续核验事项”外，每节可用 0–4 项实质发现或有效数据表展开。能够形成完整论证的事实应合并表达，不为满足数量或字数机械拆分，也不设置统一的单项长度。
 9. 同一事实只进入语义最匹配的章节。优先写具体项目、公司、团队、实验室、产品、融资和商业化信号，不写泛行业研究。
-10. 可公开核验的事实不得直接写成待核验；确需非公开原件或仍有冲突的重大事项集中写入“后续核验事项”。
-11. 表格只用于真实结构化数据，最多 8 行；财务表最多 6 列，并明确指标/科目和期间/年度/口径。
-12. 只返回 JSON 对象：{"sections":[{"title":"","summary":"","findings":[{"text":"","status":"资料记载|AI推断|待核验","sourceIndexes":[0]}],"tables":[{"title":"","unit":"","columns":[""],"rows":[[""]],"status":"资料记载|AI推断|待核验","sourceIndexes":[0]}]}]}。
-13. sections 必须且只能按指定顺序返回：${group.sections.join('、')}。
+10. 客户可见内容严禁出现“线索阶段、进入初筛、申请立项、启动尽调、提请上会、提交投决、继续跟踪、暂缓推进、归档”等内部流程词；只能写专业投资判断、交易条件、主要风险和工作建议。
+11. 可公开核验的事实不得直接写成待核验；确需非公开原件或仍有冲突的重大事项集中写入“风险提示与对策”。
+12. 对公司基本信息、历史沿革、股权、团队、资质、产品矩阵、场景、知识产权、客户、供应商、市场、财务、交易方案和风险，凡已有两行以上同口径数据，应优先生成表格。表格只用于真实结构化数据，最多 12 行；财务表最多 6 列，并明确指标/科目和期间/年度/口径。全文目标为表格密集型尽调报告，不得把可落表数据全部改写成长段落。
+13. 只返回 JSON 对象：{"sections":[{"title":"","summary":"","findings":[{"text":"","status":"资料记载|AI推断|待核验","sourceIndexes":[0]}],"tables":[{"title":"","unit":"","columns":[""],"rows":[[""]],"status":"资料记载|AI推断|待核验","sourceIndexes":[0]}]}]}。
+14. sections 必须且只能按以下 JSON 数组中的完整标题和顺序返回：${JSON.stringify(group.sections)}。
 
 已激活 Skill 的关键规则：
 ${compactSkillRules || '以固定章节、证据边界和内部尽调语气生成。'}
@@ -1925,11 +1977,24 @@ ${JSON.stringify(previousSections).slice(0, 18_000)}
 指定章节及职责：
 ${requestedSections}
 
-项目字段：${JSON.stringify(input.project)}
+项目字段：${JSON.stringify({
+  name: input.project.name,
+  companyName: input.project.companyName,
+  industry: input.project.industry,
+  financing: input.project.financing,
+  valuation: input.project.valuation,
+  summary: input.project.summary,
+  businessModel: input.project.businessModel,
+  market: input.project.market,
+  team: input.project.team,
+})}
 资料截止日：${input.sourceCutoffDate}
 任务参数：${JSON.stringify(input.parameters)}
 用户补充输入：${safeText(input.parameters.userInstructions, '无')}
 ${repairPrompt}
+项目资料研读底稿（模型已先逐份研读；只吸收事实、口径和可落表数据，不得在正文提及底稿或研读过程）：
+${studiedKnowledge}
+
 内部事实卡（只作写作依据，不得复制卡片标题、来源名、片段号或处理说明到正文）：
 ${evidence || '没有可用事实卡。不得编造事实；只在确有重大影响时形成具体、可执行的后续核验事项。'}`
     const startedAt = Date.now()
@@ -2114,7 +2179,7 @@ ${evidence || '没有可用事实卡。不得编造事实；只在确有重大�
             role: 'system',
             content: `你是投资中台资深投资经理。根据已经生成的尽调章节，形成不重复正文的决策摘要。
 只返回 JSON：{"title":"","executiveSummary":"","executiveSummarySourceIndexes":[0],"highlights":[""],"risks":[""]}。
-执行摘要通常用 2–6 个完整句子、160–420 个汉字，篇幅随证据密度变化。证据能够支持时，从“进入初筛、继续跟踪、申请立项、启动尽调、提请上会、提交投决、暂缓推进、归档”中自然表达一个处置方向；证据不足时可以明确说明暂不形成阶段建议，不得为了命中固定词硬造结论。不要把所有报告固定写成“建议……该项目”的开头，也不要单独写一句没有事实支撑的阶段判断；先写最能支撑判断的项目进展，再自然交代主要制约与下一步行动。句子长短应有变化，以主体、时间、事件和数字推进，不设置统一字数。
+执行摘要通常用 2–6 个完整句子、160–420 个汉字，篇幅随事实密度变化。先写最能支撑判断的公司、产品、客户、经营、财务或交易事实，再自然交代投资价值、主要制约和关键条件。严禁出现“线索阶段、进入初筛、申请立项、启动尽调、提请上会、提交投决、继续跟踪、暂缓推进、归档”等内部项目流程词；不得单独写没有事实支撑的阶段判断。
 先在内部合并重复事实并统一主体、日期、事件阶段和数字口径，再写客户可见内容。
 不得出现“项目资料、项目材料、项目资料库、项目知识库、资料库、知识库、现有资料、当前资料、根据资料、资料显示、证据显示、证据不足、本节、本初稿、初步梳理、联网检索、来源索引、状态标签”等处理过程。
 不得使用“阶段与推进建议：”“主建议：”“最强依据是”“反向证据是”“前置条件为”等标签化串联，也不得把执行摘要写成五项报幕。以具体主体、产品、客户、融资事件或日期组织段落，禁用“值得注意的是、需要强调的是、不难发现、由此可见、综上所述”等模型套话，也不得使用“直接关系到进入下一阶段”“将直接影响项目推进”“投资团队应据此”等通用决策套句。
@@ -2122,8 +2187,15 @@ ${evidence || '没有可用事实卡。不得编造事实；只在确有重大�
           },
           {
             role: 'user',
-            content: `项目：${JSON.stringify(input.project)}
+            content: `项目：${JSON.stringify({
+              name: input.project.name,
+              companyName: input.project.companyName,
+              industry: input.project.industry,
+              financing: input.project.financing,
+              valuation: input.project.valuation,
+            })}
 资料截止日：${input.sourceCutoffDate}
+项目资料研读底稿：${projectKnowledgeBriefForPrompt(input.projectKnowledgeBrief)}
 章节要点：${JSON.stringify(dueDiligenceSummaryBrief(assembled)).slice(0, 24_000)}`,
           },
         ],
@@ -2165,7 +2237,7 @@ ${evidence || '没有可用事实卡。不得编造事实；只在确有重大�
         .find((section) => section.title === '投资亮点')
         ?.findings.map((finding) => finding.text).slice(0, 6) ?? [],
       risks: assembled.sections
-        .find((section) => section.title === '风险分析')
+        .find((section) => section.title === '风险提示与对策')
         ?.findings.map((finding) => finding.text).slice(0, 6) ?? [],
     }))
   }
@@ -2222,7 +2294,7 @@ ${evidence || '没有可用事实卡。不得编造事实；只在确有重大�
   return {
     ...assembled,
     generationAudit: {
-      blueprintVersion: 'due-diligence-eight-chapter-v1',
+      blueprintVersion: 'due-diligence-deta-eight-chapter-v2',
       corpusSha256: createHash('sha256')
         .update(input.sources.map((source) => [
           source.sourceType,
@@ -2268,6 +2340,7 @@ export async function composeBusinessContent(input: {
   investmentProposalRuntime?: InvestmentProposalRuntime
   dueDiligencePass?: 'gap-analysis' | 'final'
   dueDiligenceRuntime?: DueDiligenceRuntime
+  projectKnowledgeBrief?: ProjectKnowledgeBrief
 }): Promise<BusinessContent> {
   if (String(input.type) === 'investment_proposal') {
     return composeInvestmentProposalContent({
@@ -2278,6 +2351,7 @@ export async function composeBusinessContent(input: {
       sourceCutoffDate: input.sourceCutoffDate,
       parameters: input.parameters,
       runtime: input.investmentProposalRuntime,
+      projectKnowledgeBrief: input.projectKnowledgeBrief,
     })
   }
   if (input.type === 'due_diligence_report') {
@@ -2290,6 +2364,7 @@ export async function composeBusinessContent(input: {
       parameters: input.parameters,
       dueDiligencePass: input.dueDiligencePass,
       dueDiligenceRuntime: input.dueDiligenceRuntime,
+      projectKnowledgeBrief: input.projectKnowledgeBrief,
     })
   }
   const fallback = fallbackContent(input.type, input.template, input.project, input.sources)
@@ -2372,20 +2447,20 @@ export async function composeBusinessContent(input: {
       : 'sourceIndexes 只引用真正支持当前 finding 的证据，文尾引用资料由渲染器根据实际使用索引生成。'
   const dueDiligenceRule = isDueDiligence
     ? `\n10. 你是投资中台的资深投资经理，输出是供投资团队、风控法务、投资总监和投委会内部审阅的尽调报告，只处理当前会话绑定的项目。
-11. 结合项目当前阶段，在证据能够支持时，用自然语言给出一个推进、继续观察、暂缓或归档方向；标准阶段词可用于保持系统一致性，但不得为了命中词表硬造结论。证据确实不足时可在执行摘要中说明暂不形成阶段建议。处置方向只在执行摘要中表达一次，不使用“阶段与推进建议”“主建议”“最强依据”“反向证据”“前置条件”等报幕标签，也不采用固定的五项排列；“投资概要”只写当前阶段和进入下一阶段的条件，不复述处置句。不得声称已经改变项目阶段，客户可见正文不得出现 OA、系统按钮或内部技术流程。
+11. 执行摘要和投资结论必须直接说明投资逻辑是否成立、成立所依赖的事实、交易条件、主要风险和需要完成的实质工作。不得使用“线索阶段、进入初筛、申请立项、启动尽调、提请上会、提交投决、继续跟踪、暂缓推进、归档”等系统状态代替投资判断，也不使用“阶段与推进建议”“主建议”“最强依据”“反向证据”“前置条件”等报幕标签。客户可见正文不得出现 OA、系统按钮或内部技术流程。
 12. 报告必须围绕当前项目的主体、股权与治理、团队、产品与技术、市场与客户、商业模式、财务、融资与估值、交易方案、风险和可核验来源展开。禁止生成脱离当前项目的泛行业研究；行业、政策和市场背景只能解释当前项目或具名可比对象。
-13. 人员、研发合作、知识产权许可或转让等关系必须说明具体关系类型、相关主体、时间和来源，不得仅凭名称、宣传口径或履历关键词推断。线索池摘要、标签、评分和融资线索只能作为待核验线索。
-14. 融资事件必须写明主体、时间、轮次、金额、投资方和披露边界；商业化信号必须区分线索、测试、试用、合同、交付、验收、收入、开票、回款和续约。
+13. 人员、研发合作、知识产权许可或转让等关系必须说明具体关系类型、相关主体、时间和来源，不得仅凭名称、宣传口径或履历关键词推断。项目列表摘要、标签和评分只能用于定位材料，不能直接写入报告正文。
+14. 融资事件必须写明主体、时间、轮次、金额、投资方和披露边界；商业化进展必须区分接洽、测试、试用、合同、交付、验收、收入、开票、回款和续约。
 15. 默认先检索当前项目资料库，再复用当前项目网络缓存，只对仍会影响判断的明确缺口进行定向网络补全并写回缓存；不得一开始就进行宽泛的全网搜索或泛行业研究。
 16. 只有用户明确要求“只联网搜索”或同义指令时，才允许跳过本地检索；仍须限定具体项目与待核验事项、核验来源并写回缓存。
 17. 网络补全优先使用政府、监管、司法、登记机关、公司、研发或合作机构官网及融资机构公告；有效结果保留标题、规范化 URL、发布主体、发布日期或更新时间、访问时间和内容指纹。本地与网络结果冲突时并列保留并标记“待核验”。
 18. 首轮输出中的每项“待核验”必须转成具体检索问题，先查网络缓存，再进行定向网络补全，并使用新增证据重新生成受影响内容；未执行补全不得直接定稿。
-19. 只有完成本地检索、缓存复用和定向网络补全后仍未覆盖的信息，才可在“后续核验事项”中保留“待核验”，并说明无法公开核验的具体原因和下一步一手材料；不得逐节生成缺口占位文案。
+19. 只有完成本地检索、缓存复用和定向网络补全后仍未覆盖、且可能改变投资判断的信息，才可作为具体风险或工作要求并入“风险提示与对策”；不得新增“资料缺口”“后续核验事项”等独立章节，不得逐节生成缺口占位文案。
 20. status 和 sourceIndexes 仅供系统内部审计。finding.text、summary、表格及其他客户可见文字不得出现“【资料记载】”“【AI推断】”“【待核验】”或同类状态标签。
-21. “后续核验事项”最多保留 8 项可能改变投资判断的重大事项；公开渠道通常可查的信息必须先联网补全，不得把每个章节都写成待核验清单。
+21. “风险提示与对策”最多集中保留 8 项可能改变投资判断的重大未决事项；公开渠道通常可查的信息必须先联网补全，不得把每个章节都写成待核验清单。
 22. 优先用连贯的尽调段落表达事实与判断；股权、融资、财务、客户、产品指标和同口径竞品比较应使用原生可编辑表格。不得把证据原文切片直接当作正文。
 23. 客户可见文字禁止出现“现有资料”“现有材料”“项目资料库”“本节”“证据不足”“结论强度”“初步梳理”“检索问题”“联网检索”等资料处理过程；直接写当前项目事实、投资含义、限制和动作。正文不得重复使用“该信息/该信号/该口径”等抽象代词，不得把“直接关系到进入下一阶段”“将直接影响项目推进”“投资团队应据此”等句子作为跨模块通用结尾。
-24. 执行摘要通常控制在 160–420 个汉字，并根据证据密度自然调整。除“后续核验事项”外，每个模块可用 0–4 项高密度发现或有效数据表展开；事实能够形成完整论证时合并表达，不为满足条目数量或单项字数机械拆分。表格只在有助于比较时使用，原则上不超过 8 行。不得输出孤立数字、会议纪要标题、人员名单、原始编号或过短资料分片。
+24. 执行摘要通常控制在 160–420 个汉字，并根据证据密度自然调整。每个模块可用 0–4 项高密度发现或有效数据表展开；事实能够形成完整论证时合并表达，不为满足条目数量或单项字数机械拆分。表格只在有助于比较时使用，原则上不超过 8 行。全篇在证据充足时应形成不少于 12 张有实际数据或关系内容的原生可编辑表格；资料不足时宁可减少表格，也不得虚构。不得输出孤立数字、会议纪要标题、人员名单、原始编号或过短资料分片。
 25. 严格按模块职责归类事实：公司登记信息不得放入投资方案；客户、订单和交付不得放入公司概况；收费和定价不得放入竞争格局；融资与估值不得代替财务分析；系统适配原则不得放入法律合规。每项事实只进入语义最匹配的模块。
 26. “产品与核心技术”只写具名产品或技术、目标用户与场景、交付形态、技术原理、关键模块、性能或测试、成熟度、知识产权及下一里程碑；网页导航、榜单入口、聚合页标签和公司详情页原文必须删除后再提炼。
 27. “财务分析”区分历史财务、经营指标与管理层预测。可用数字优先放入不超过六列的原生表格，表格必须包含指标或科目以及期间、年度或口径；正文解释收入质量、成本毛利、现金流或资金续航及其投资影响。不得用孤立估值、融资问答分类或收费比例代替财务分析。`
@@ -2422,7 +2497,7 @@ export async function composeBusinessContent(input: {
         !['customTemplateId', 'customTemplateName'].includes(key)))
     : input.parameters
   const assistantRole = isDueDiligence
-    ? '你是投资中台的资深投资经理，负责仅针对当前会话绑定的线索池或项目库项目生成内部尽调报告，并结合当前项目阶段形成推进、暂缓或归档建议。'
+    ? '你是投资中台的资深投资经理，负责仅针对当前会话绑定的项目生成内部尽调报告；先完整研读项目文件，再形成基于事实的投资价值判断、交易条件、主要风险和后续实质工作。'
     : isCustomTemplate
       ? '你是投资中台的资深投资经理，负责仅针对当前会话绑定的线索池或项目库项目，按上传模板生成内部投资材料，并结合当前项目阶段形成推进、暂缓或归档建议。'
       : isUploadedInvestmentTemplate

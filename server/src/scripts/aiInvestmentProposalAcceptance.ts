@@ -408,12 +408,12 @@ function claimFor(definition: typeof leafDefinitions[number]) {
     return '星河机器人平台采用视觉模型与运动控制算法，已完成原型测试，产品化状态仍以测试报告复核结果为准。'
   }
   if (definition.analysisKind === 'risk_summary') {
-    return '若公司未能在投决前完成风险事项核验，可能影响交易判断；项目组应在投决前完成专项审查并持续跟踪，责任主体为项目组。'
+    return '若公司未能在形成投资决策前完成风险事项核验，可能影响交易判断；项目组应完成专项审查并持续监测，责任主体为项目组。'
   }
   if (definition.analysisKind === 'conclusion') {
-    return '阶段与推进建议为申请立项；建议在项目组完成关键事实核验并落实立项前提后，通过OA发起立项申请；如重大风险未消除，应暂缓推进并重新评估。'
+    return '星河机器人有限公司的产品验证和客户交付为投资逻辑提供基础，可考虑投资；前提是确认知识产权权属、收入回款和交易估值，并落实交割保护条件。项目组应取得对应原件并完成交叉核验。'
   }
-  return `星河机器人有限公司已确认${topic}相关安排，具体执行情况仍需在下一阶段核验。`
+  return `星河机器人有限公司已确认${topic}相关安排，具体执行情况仍需结合合同、清单或业务记录进一步核验。`
 }
 
 const sources: EvidenceSource[] = leafDefinitions.map((definition, index) => {
@@ -817,7 +817,7 @@ const incompatibleParameterFallback = await composeInvestmentProposalContent({
       maxGenerationAttempts: 1,
     },
   })
-assert.equal(incompatibleParameterCalls, rootDefinitions.length + 1)
+assert.equal(incompatibleParameterCalls, rootDefinitions.length)
 const incompatibleParameterFallbackReview = reviewInvestmentProposalContent({
   content: incompatibleParameterFallback,
   blueprint,
@@ -862,7 +862,7 @@ const humanNoDataText = sanitizeInvestmentProposalClientText(
 )
 assert.equal(
   humanNoDataText,
-  '公司完整股东名单、持股比例及实际控制人尚未明确，申请立项前应取得最新公司章程、股东名册和工商档案并完成核对。',
+  '公司完整股东名单、持股比例及实际控制人尚未明确，作出投资判断前应取得最新公司章程、股东名册和工商档案并完成核对。',
 )
 assert.equal(containsInvestmentProposalGenericNoDataPreface(humanNoDataText), false)
 assert.equal(
@@ -1012,7 +1012,7 @@ const optimizedContent = await composeInvestmentProposalContent({
   },
 })
 assert.equal(optimizedContent.generationAudit?.reviewerPassed, true)
-assert.equal(generatedChapterRequests, rootDefinitions.length + 1)
+assert.equal(generatedChapterRequests, rootDefinitions.length)
 assert.equal(maxActiveChapterRequests, 2)
 assert.equal(savedCheckpoints.length, rootDefinitions.length)
 assert.equal(savedCheckpoints.at(-1)?.version, 'investment-proposal-chapters-v1')
@@ -1143,7 +1143,7 @@ const resumedContent = await composeInvestmentProposalContent({
     },
   },
 })
-assert.equal(resumedEditorCalls, 1)
+assert.equal(resumedEditorCalls, 0)
 assert.equal(resumedContent.generationAudit?.resumedChapters?.length, rootDefinitions.length)
 assert.equal(
   resumedProgressEvents.filter((event) => event.phase === 'resumed').length,
@@ -1196,7 +1196,7 @@ const companyProfileSection = evidenceAvailableButMissingContent.sections
   .find((section) => section.title === '（一）公司简介')!
 companyProfileSection.summary = CURRENT_PROJECT_NO_DATA
 companyProfileSection.findings = [{
-  text: '公司的法律主体、成立时间、注册地和主营业务尚未明确，申请立项前应取得工商档案、公司章程和业务说明并完成核对。',
+  text: '公司的法律主体、成立时间、注册地和主营业务尚未明确，应取得工商档案、公司章程和业务说明并完成核对。',
   status: '资料缺口',
   sourceIndexes: [],
 }]

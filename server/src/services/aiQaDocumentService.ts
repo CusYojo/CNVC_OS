@@ -22,8 +22,8 @@ import type { QaTemplateProfile } from './aiQaTemplateParser.js'
 import { sanitizeClientVisibleEvidenceWording } from './aiClientVisibleTextService.js'
 
 // 核心规范统一使用宋体；生产环境可通过环境变量切换到已批准的宋体实现。
-const BODY_FONT = process.env.AI_QA_BODY_FONT || process.env.AI_DOCUMENT_SONG_FONT || '宋体'
-const HEADING_FONT = process.env.AI_QA_HEADING_FONT || process.env.AI_DOCUMENT_SONG_FONT || '宋体'
+const BODY_FONT = process.env.AI_QA_BODY_FONT || process.env.AI_DOCUMENT_SONG_FONT || 'Songti SC'
+const HEADING_FONT = process.env.AI_QA_HEADING_FONT || process.env.AI_DOCUMENT_SONG_FONT || 'Songti SC'
 const LATIN_FONT = 'Times New Roman'
 const MUTED = '595959'
 const ANSWER_HEADING_PATTERN =
@@ -86,6 +86,16 @@ const QA_VISIBLE_SOURCE_PROCESS_TERMS = [
   '客户接触或项目推进迹象',
   '不能混为一谈',
   '当前需要优先处理的是',
+] as const
+const QA_VISIBLE_INTERNAL_STAGE_TERMS = [
+  '线索',
+  '进入初筛',
+  '申请立项',
+  '提请上会',
+  '提交投决',
+  '继续跟踪',
+  '暂缓推进',
+  '归档',
 ] as const
 
 type ProjectLike = {
@@ -208,6 +218,18 @@ function sanitizeQaVisibleSourceProcessWording(value: string) {
     .replace(/(?:当前|现有)证据(?:显示|表明|说明)?[，,:：]?/g, '')
     .replace(/(?:相关)?(?:资料|材料)(?:中)?(?:显示|表明|说明|披露|介绍|称)[，,:：]?/g, '')
     .replace(/^(?:股东|融资|单位经济性|客户|产品|技术|团队|商业化|财务|主体|风险)线索[：:]\s*/g, '')
+    .replace(/是否足以支持从[“"]?线索[”"]?推进至启动尽调/g, '是否已经具备启动尽调的基础')
+    .replace(/从[“"]?线索[”"]?(?:阶段)?推进至/g, '进一步进入')
+    .replace(/现阶段更适合[“"]?进入初筛[”"]?/g, '现阶段可以继续评估')
+    .replace(/进入初筛/g, '继续评估')
+    .replace(/申请立项/g, '进入正式评估')
+    .replace(/提请上会/g, '提交内部审议')
+    .replace(/提交投决/g, '提交投资决策')
+    .replace(/继续跟踪/g, '继续观察')
+    .replace(/暂缓推进/g, '暂不推进')
+    .replace(/归档/g, '停止评估')
+    .replace(/线索池/g, '项目库')
+    .replace(/线索/g, '信息')
     .replace(/结论置信度为(?:高|中|低|证据不足)/g, '')
     .replace(/核对主体、时间、口径和相互关系后更新本题/g, '完成主体、时间与口径核实')
     .replace(/并将结果回填项目资料库后更新本题/g, '并在完成核实后重新判断')
@@ -227,6 +249,8 @@ function stripAnswerMarkdown(value: string) {
 function stripSourceOutlineMarkers(value: string) {
   return value
     .replace(/[（(][一二三四五六七八九十\d]+[）)]\s*(?=[\u3400-\u9fffA-Za-z])/g, '')
+    .replace(/(^|[\s。；;])[一二三四五六七八九十]+[、.．]\s*(?=[\u3400-\u9fffA-Za-z])/g, '$1')
+    .replace(/(^|[\s。；;])\d+(?:\.\d+){1,4}\s*[、.．]?\s*(?=[\u3400-\u9fffA-Za-z])/g, '$1')
     .replace(/(^|[\s。；;])\d+[、.．]\s*(?=[\u3400-\u9fffA-Za-z])/g, '$1')
     .replace(/\s{2,}/g, ' ')
     .trim()
@@ -572,6 +596,7 @@ export async function inspectProjectQaDocx(
     'All Rights Reserved',
     '英诺嘿呀助手微信号',
     ...QA_VISIBLE_SOURCE_PROCESS_TERMS,
+    ...QA_VISIBLE_INTERNAL_STAGE_TERMS,
   ]
   const leakedTerm = forbiddenVisibleTerms.find((term) => visibleText.includes(term))
   const leakedSourceIndex = /\[S\d+\]/.test(visibleText)

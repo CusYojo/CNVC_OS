@@ -143,18 +143,14 @@ async function main() {
       const documentGeneratorRequirements = [
         '投资中台资深投资经理',
         '当前会话绑定',
-        '线索池',
+        '项目摘要',
         '项目主体',
         '股权与治理',
         '产品与技术',
-        '进入初筛',
-        '继续跟踪',
-        '申请立项',
+        '默认不设置',
+        '内部项目状态',
+        '可以继续评估',
         '启动尽调',
-        '提请上会',
-        '提交投决',
-        '暂缓推进',
-        '归档',
         '泛泛的行业研究报告',
         'Structured Q&A DOCX Generator',
         'Template Parser',
@@ -173,7 +169,10 @@ async function main() {
       ]
       assert(
         `${definition.label} 遵守模板学习与内容重建契约`,
-        documentGeneratorRequirements.every((term) => skillSource.includes(term)),
+        documentGeneratorRequirements.every((term) => skillSource.includes(term))
+          && /不得出现“线索、进入初筛、申请立项、提请上会、提交投决、继续跟踪、暂缓推进、归档”等内部项目状态词/.test(
+            skillSource,
+          ),
         documentGeneratorRequirements.filter((term) => !skillSource.includes(term)).join(', ') || '完整',
       )
       assert(
@@ -397,11 +396,14 @@ async function main() {
     'utf8',
   )
   assert(
-    'AI-010 登记 docs/尽调报告 全部十二份模板',
+    'AI-010 登记 docs/尽调报告 全部模板并以德塔 PDF 为主模板',
     diligenceTemplate.referencePaths?.length === 12
       && diligenceTemplate.referencePaths.every((referencePath) =>
         referencePath.includes(`${path.sep}docs${path.sep}尽调报告${path.sep}`)
-          && existsSync(referencePath)),
+          && existsSync(referencePath))
+      && diligenceTemplate.referencePath.endsWith(
+        `${path.sep}docs${path.sep}尽调报告${path.sep}德塔智能尽职调查报告(1).pdf`,
+      ),
     `${diligenceTemplate.referencePaths?.length ?? 0} 份`,
   )
   assert(
@@ -415,61 +417,26 @@ async function main() {
     diligenceSkill.referenceNames.join('、'),
   )
   const diligenceCoreTerms = [
-    '用户补充',
-    '资料截止日',
-    '八章',
-    '十六',
+    '约 90%',
+    '逐份读取',
+    '事实底稿',
     '1、投资概要',
-    '8、风险与核验',
-    '结论—证据—分析—限制',
-    '星实-一标',
-    '星实-正文',
-    '14 pt',
-    '1.5 倍行距',
-    '两端对齐',
-    'Word / WPS',
-    'TOC 域',
-    '当前项目资料库',
-    '后续核验事项',
-    '系统审计记录',
-    '投资中台的资深投资经理',
-    '当前会话绑定',
-    '线索池',
+    '8、风险提示与对策',
+    '投资结论及建议',
+    '30 个内容模块',
+    '11 个章组',
+    '每组最多 4 个模块',
+    '不少于 12 张有效表格',
+    '线索阶段',
     '进入初筛',
-    '继续跟踪',
-    '处置结论',
-    '申请立项',
     '启动尽调',
-    '提请上会',
-    '提交投决',
-    '暂缓推进',
-    '归档',
-    '股权与治理',
-    '产品与技术',
-    '融资与估值',
-    '交易方案',
-    '可核验来源',
-    '不要写泛泛的行业研究报告',
-    '本地项目资料库优先',
-    '只联网搜索',
-    '不得一开始就',
-    'Project Knowledge Retrieval',
-    'Network Cache Retrieval',
-    'Evidence Gap Analysis',
-    'Network Cache Writeback',
-    '规范化 URL',
-    '内容指纹',
-    '待核验`是检索触发器',
-    '未执行补全不得直接',
-    '单次模型响应',
-    '最多三个',
-    '受影响章组',
-    '先消化、后写作',
-    '内部事实卡',
+    '项目资料',
+    '资料库',
     '值得注意的是',
     '直接关系到进入下一阶段',
-    '投资团队应据此',
-    '项目资料',
+    'Word',
+    'WPS',
+    '技术错误',
   ]
   assert(
     'AI-010 核心规范与项目唯一规范保持关键规则一致',
@@ -478,18 +445,19 @@ async function main() {
     diligenceCoreTerms
       .filter((term) =>
         !diligenceCanonicalSpec.includes(term) || !diligenceCoreSpec.includes(term))
-      .join('、') || '本地资料库 → 网络缓存 → 定向网络补全 → 缓存写回；八章十六模块、证据写法、精确版式与 WPS 门禁',
+      .join('、') || '项目研读 → 30 个模块 → 12 张以上有效表格 → Reviewer → Word/WPS 门禁',
   )
   assert(
-    'AI-010 Skill 使用 Flue 候选发现和 LLM Gateway 页面核验',
+    'AI-010 Skill 强制先研读项目再按主模板生成',
     [
-      'Flue Candidate Discovery',
-      'LLM Gateway Page Verification',
-      'Flue 搜索摘要',
-      '不得因此把主任务标记为失败',
+      '逐份研读项目资料',
+      '建立事实底稿',
+      '德塔智能尽职调查报告(1).pdf',
+      '不少于 12 张有效表格',
+      '不得出现内部项目阶段',
     ].every((term) =>
       `${diligenceSkill.instructions}\n${diligenceSkill.referenceInstructions}`.includes(term)),
-    '只将页面核验通过的当前项目来源写入证据；联网异常继续生成受限 DOCX',
+    '逐份研读、主模板、30 个模块、表格密度和客户可见语言门禁',
   )
   const aiTaskServiceSource = await readFile(
     path.resolve(process.cwd(), 'server', 'src', 'services', 'aiTaskService.ts'),
@@ -510,7 +478,7 @@ async function main() {
     'utf8',
   )
   assert(
-    'AI-010 正文按八章分组生成并仅重试受影响章组',
+    'AI-010 正文按 11 个章组生成 30 个模块并仅重试受影响章组',
     aiBusinessContentSource.includes('DUE_DILIGENCE_GENERATION_GROUPS')
       && aiBusinessContentSource.includes('DUE_DILIGENCE_DEFAULT_CONCURRENCY = 3')
       && aiBusinessContentSource.includes('runDueDiligenceGroupsWithConcurrency')
@@ -519,9 +487,30 @@ async function main() {
       && aiBusinessContentSource.includes('requestSummary')
       && aiBusinessContentSource.includes("if (input.type === 'due_diligence_report')")
       && aiTaskServiceSource.includes('AI_DUE_DILIGENCE_CHAPTER_CONCURRENCY')
-      && diligenceSkill.instructions.includes('严禁要求模型在一次响应中返回全部十六个模块')
-      && diligenceSkill.referenceInstructions.includes('已通过章组不得重新生成'),
-    '八个固定章组，最多三个并行；单章独立 JSON、独立重试，合并后生成执行摘要和执行全篇 Reviewer',
+      && diligenceTemplate.sections.length === 30
+      && diligenceSkill.referenceInstructions.includes('30 个模块拆为 11 个章组生成')
+      && diligenceSkill.referenceInstructions.includes('只重试该章组'),
+    '11 个固定章组，最多三个并行；章组独立 JSON、独立重试，合并后生成执行摘要和执行全篇 Reviewer',
+  )
+  const projectKnowledgeBriefSource = await readFile(
+    path.resolve(
+      process.cwd(),
+      'server',
+      'src',
+      'services',
+      'aiProjectKnowledgeBriefService.ts',
+    ),
+    'utf8',
+  )
+  assert(
+    '四项文档任务在生成前建立项目研读简报',
+    projectKnowledgeBriefSource.includes('PROJECT_KNOWLEDGE_TOPICS')
+      && projectKnowledgeBriefSource.includes('recommendedTables')
+      && projectKnowledgeBriefSource.includes('sourceFilesRepresented')
+      && aiTaskServiceSource.includes('buildProjectKnowledgeBrief')
+      && aiTaskServiceSource.includes('projectKnowledgeStudy')
+      && aiBusinessContentSource.includes('projectKnowledgeBriefForPrompt'),
+    '代表性读取每份文件，输出主题事实、时间线、冲突、缺口与表格候选，并注入四项文档生成流程',
   )
   assert(
     'AI-010 待核验项触发 Flue 候选发现、LLM Gateway 页面核验、缓存写回和二次生成',
@@ -539,7 +528,6 @@ async function main() {
       && aiBusinessContentSource.includes('finding.status !== \'待核验\'')
       && aiBusinessContentSource.includes('DUE_DILIGENCE_CONTENT_QUALITY_REJECTED')
       && aiBusinessContentSource.includes('DUE_DILIGENCE_MODEL_UNAVAILABLE')
-      && aiBusinessContentSource.includes('现有资料')
       && !aiTaskServiceSource.includes('DUE_DILIGENCE_NETWORK_UNAVAILABLE')
       && aiTaskServiceSource.includes('尽调公开页面核验失败，使用现有证据继续生成')
       && dueDiligenceResearchSource.includes('/workflows/${WORKFLOW}?wait=result')
@@ -712,15 +700,11 @@ async function main() {
       && [
         '投资中台资深投资经理',
         '当前会话绑定',
-        '线索池',
-        '进入初筛',
-        '继续跟踪',
-        '申请立项',
+        '项目摘要',
+        '默认不设置阶段建议问题',
+        '可以继续评估',
         '启动尽调',
-        '提请上会',
-        '提交投决',
-        '暂缓推进',
-        '归档',
+        '内部项目状态',
         '股权与治理',
         '产品与技术',
         '融资与估值',
@@ -734,6 +718,7 @@ async function main() {
         '自然段论证',
       ]
         .every((term) => qaCoreRules.includes(term))
+      && /客户可见问题和回答不得出现内部项目状态词/.test(qaCoreRules)
       && qaTemplateStyleGuide.includes(qaCoreRulesSha256)
       && !/(普雷赛斯|轻蜓光电|中数睿智|德塔智能|浙江蓝成)/.test(qaCoreRules),
     AI_QA_TEMPLATE.coreRulesPath,
@@ -799,7 +784,8 @@ async function main() {
   )
   assert(
     'Q&A Formatter 落实统一字号、行距、页边距与问题一级结构',
-    qaDocumentSource.includes("'宋体'")
+    qaDocumentSource.includes("'Songti SC'")
+      && qaDocumentSource.includes('AI_DOCUMENT_SONG_FONT')
       && qaDocumentSource.includes("const LATIN_FONT = 'Times New Roman'")
       && qaDocumentSource.includes('size: 36')
       && qaDocumentSource.includes('size: 28')

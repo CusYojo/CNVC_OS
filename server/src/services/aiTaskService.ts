@@ -83,6 +83,10 @@ import {
   type ProjectQaMode,
 } from './aiQaPipelineService.js'
 import {
+  buildProjectKnowledgeBrief,
+  type ProjectKnowledgeBrief,
+} from './aiProjectKnowledgeBriefService.js'
+import {
   fetchProjectQaModelEvidence,
   fetchVerifiedProjectWebEvidence,
   projectQaResearchTopicsForSources,
@@ -1015,7 +1019,6 @@ async function executeTask(taskId: string) {
           `项目名称：${project.name}`,
           `公司主体：${project.companyName || '待核验'}`,
           `行业：${project.industry || '待核验'}`,
-          `阶段：${project.stage || '待核验'}`,
           `融资计划：${project.financing || '待核验'}`,
           `估值：${project.valuation || '待核验'}`,
           `项目概述：${project.summary || '待核验'}`,
@@ -1046,6 +1049,7 @@ async function executeTask(taskId: string) {
     let investmentRecommendationGapPageResearch: ProjectWebResearchAudit | undefined
     let qaAgentResearch: DueDiligenceNetworkResearchAudit | undefined
     let qaModelResearch: ProjectQaModelResearchAudit | undefined
+    let projectKnowledgeBrief: ProjectKnowledgeBrief | undefined
     if (task.type === 'compliance_statement') {
       const pendingTopics = complianceNetworkResearchTopics(sources, project, parameters)
       if (pendingTopics.length > 0) {
@@ -1167,6 +1171,19 @@ async function executeTask(taskId: string) {
     }
     if (await cancelIfRequested(taskId)) return
 
+    if ([
+      'compliance_statement',
+      'investment_proposal',
+      'due_diligence_report',
+    ].includes(task.type)) {
+      await updateStage(taskId, '深度研读项目资料并建立事实底稿', 26)
+      projectKnowledgeBrief = await buildProjectKnowledgeBrief({
+        project,
+        sources,
+        sourceCutoffDate,
+      })
+    }
+
     if (task.type === 'project_qa') {
       if (!qaTemplateProfile) throw new Error('Q&A 模板画像未生成')
       const qaMode: ProjectQaMode = parameters.qaMode === '尽调 Q&A'
@@ -1220,7 +1237,13 @@ async function executeTask(taskId: string) {
       }
       if (await cancelIfRequested(taskId)) return
 
-      await updateStage(taskId, 'Question Generator 生成线索判断问题', 28)
+      await updateStage(taskId, '深度研读项目资料并建立事实底稿', 26)
+      projectKnowledgeBrief = await buildProjectKnowledgeBrief({
+        project,
+        sources,
+        sourceCutoffDate,
+      })
+      await updateStage(taskId, 'Question Generator 生成项目问题', 28)
       const duplicateCheck = await generateProjectQaQuestions({
         project,
         mode: qaMode,
@@ -1228,6 +1251,7 @@ async function executeTask(taskId: string) {
         sources,
         skill,
         userIntent: userInstructions || researchIntent,
+        projectKnowledgeBrief,
       })
       if (duplicateCheck.questions.length === 0) {
         throw new Error('Question Generator 未生成有效问题')
@@ -1243,6 +1267,7 @@ async function executeTask(taskId: string) {
         sources,
         skill,
         userIntent: userInstructions || researchIntent,
+        projectKnowledgeBrief,
       })
       if (await cancelIfRequested(taskId)) return
 
@@ -1334,6 +1359,8 @@ async function executeTask(taskId: string) {
         visibleReferencesIncluded: false,
         visibleReviewerIncluded: false,
         downloadableFormats: ['docx'],
+        projectKnowledgeStudy: projectKnowledgeBrief?.audit,
+        templateFidelityTarget: 0.9,
       }
       const [qaArtifact] = await db.insert(aiArtifacts).values({
         taskId: task.id,
@@ -1477,6 +1504,7 @@ async function executeTask(taskId: string) {
         sources,
         sourceCutoffDate,
         parameters,
+        projectKnowledgeBrief,
       })
       content = complianceWorkflow.content
     } else {
@@ -1499,7 +1527,9 @@ async function executeTask(taskId: string) {
           sources,
           sourceCutoffDate,
           parameters,
-          dueDiligencePass: task.type === 'due_diligence_report' ? 'gap-analysis' : undefined,
+          projectKnowledgeBrief,
+          // 首轮也执行完整质量门禁；如后续识别出重大缺口，再基于新增证据定向重生。
+          dueDiligencePass: task.type === 'due_diligence_report' ? 'final' : undefined,
           dueDiligenceRuntime: task.type === 'due_diligence_report'
             ? dueDiligenceRuntime(35, 49)
             : undefined,
@@ -1625,6 +1655,11 @@ async function executeTask(taskId: string) {
           }
 
           await updateStage(taskId, '使用本地与联网证据重新生成尽调内容', 58)
+          projectKnowledgeBrief = await buildProjectKnowledgeBrief({
+            project,
+            sources,
+            sourceCutoffDate,
+          })
           content = await withTaskHeartbeat(
             taskId,
             () => composeBusinessContent({
@@ -1635,6 +1670,7 @@ async function executeTask(taskId: string) {
               sources,
               sourceCutoffDate,
               parameters,
+              projectKnowledgeBrief,
               dueDiligencePass: 'final',
               dueDiligenceRuntime: dueDiligenceRuntime(58, 66),
             }),
@@ -1977,6 +2013,8 @@ async function executeTask(taskId: string) {
       metadata: {
         ...quality.metadata,
         ...generationMetadata,
+        projectKnowledgeStudy: projectKnowledgeBrief?.audit,
+        templateFidelityTarget: 0.9,
         evidencePolicy: task.type === 'compliance_statement'
           ? 'project_knowledge_primary_model_network_supplement'
           : [

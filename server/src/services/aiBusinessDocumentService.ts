@@ -99,15 +99,51 @@ function ensureDocxFontAltName(xml: string, fontName: string, altName: string) {
   if (new RegExp(`<w:font w:name="${fontName}">`).test(xml)) {
     return setDocxFontAltName(xml, fontName, altName)
   }
-  return xml.replace(
-    '</w:fonts>',
-    `<w:font w:name="${fontName}"><w:altName w:val="${altName}"/><w:charset w:val="86"/><w:family w:val="auto"/><w:pitch w:val="default"/></w:font></w:fonts>`,
+  const fontEntry = `<w:font w:name="${fontName}"><w:altName w:val="${altName}"/><w:charset w:val="86"/><w:family w:val="auto"/><w:pitch w:val="default"/></w:font>`
+  if (xml.includes('</w:fonts>')) {
+    return xml.replace('</w:fonts>', `${fontEntry}</w:fonts>`)
+  }
+  // docx 在没有显式字体登记时会生成自闭合 fontTable。若不展开，
+  // macOS/Linux 的 LibreOffice 无法从“宋体/黑体/仿宋/楷体”找到 CJK 字形。
+  return xml.replace(/<w:fonts([^>]*)\/>/, `<w:fonts$1>${fontEntry}</w:fonts>`)
+}
+
+function ensureCrossPlatformChineseFontTable(xml: string) {
+  return [
+    ['宋体', 'Songti SC'],
+    ['Songti SC', '宋体'],
+    ['Noto Serif CJK SC', '宋体'],
+    ['黑体', 'STHeiti'],
+    ['STHeiti', '黑体'],
+    ['Noto Sans CJK SC', '黑体'],
+    ['仿宋', 'STFangsong'],
+    ['STFangsong', '仿宋'],
+    ['楷体', 'Kaiti SC'],
+    ['Kaiti SC', '楷体'],
+  ].reduce(
+    (fontTableXml, [fontName, altName]) =>
+      ensureDocxFontAltName(fontTableXml, fontName, altName),
+    xml,
   )
 }
 
 function complianceCompatibleFont(font: string) {
-  if (font === DOCX_SONG_FONT) return 'Songti SC'
-  if (font === DOCX_SANS_FONT) return 'STHeiti'
+  if (font === DOCX_SONG_FONT) {
+    if (process.platform === 'darwin') return 'Songti SC'
+    if (process.platform === 'linux') return 'Noto Serif CJK SC'
+  }
+  if (font === DOCX_SANS_FONT) {
+    if (process.platform === 'darwin') return 'STHeiti'
+    if (process.platform === 'linux') return 'Noto Sans CJK SC'
+  }
+  if (font === DOCX_FANGSONG_FONT) {
+    if (process.platform === 'darwin') return 'STFangsong'
+    if (process.platform === 'linux') return 'Noto Serif CJK SC'
+  }
+  if (font === DOCX_KAITI_FONT) {
+    if (process.platform === 'darwin') return 'Kaiti SC'
+    if (process.platform === 'linux') return 'Noto Serif CJK SC'
+  }
   return font
 }
 
@@ -138,17 +174,26 @@ const statusStyle = {
 } as const
 
 const DUE_DILIGENCE_OUTLINE = [
-  { title: '投资概要', modules: ['投资概要'] },
   {
-    title: '公司与团队',
-    modules: ['公司概况', '股权结构及融资历程', '公司治理与管理团队', '法律合规与资质'],
+    title: '投资概要',
+    modules: ['公司情况', '交易要点', '行业概况', '商业模式和经营管理', '投资价值与风险'],
   },
-  { title: '产品与技术', modules: ['产品与核心技术'] },
-  { title: '业务与商业化', modules: ['商业模式与经营情况', '客户与商业化进展'] },
-  { title: '行业与竞争', modules: ['行业概况与市场空间', '产业链与竞争格局'] },
-  { title: '财务与估值', modules: ['财务分析', '估值合理性分析'] },
-  { title: '投资判断', modules: ['投资方案', '投资亮点'] },
-  { title: '风险与核验', modules: ['风险分析', '后续核验事项'] },
+  {
+    title: '公司概况',
+    modules: [
+      '公司基本信息', '历史沿革', '公司股东情况及实际控制人情况', '核心团队介绍',
+      '组织架构', '关联公司及关联交易', '资质、荣誉及法律合规情况',
+    ],
+  },
+  {
+    title: '产品与技术',
+    modules: ['产品概念总览', '核心技术路线', '产品矩阵', '场景应用', '核心技术沿革', '知识产权及数据权属'],
+  },
+  { title: '业务情况', modules: ['商业模式与销售策略', '客户验证情况', '供应商、采购与成本情况'] },
+  { title: '行业和市场', modules: ['行业趋势与痛点', '市场分析'] },
+  { title: '未来发展规划', modules: ['业务拓展规划', '财务情况'] },
+  { title: '投资方案', modules: ['投资亮点', '公司估值与投资方式', '退出方案'] },
+  { title: '风险提示与对策', modules: ['风险提示与对策'] },
 ] as const
 
 const DUE_DILIGENCE_STYLES = {
@@ -632,14 +677,18 @@ export async function generateBusinessDocx(input: {
   const complianceBlueprint = input.template.type === 'compliance_statement'
     ? input.blueprint ?? await parseComplianceDocumentBlueprint(input.template)
     : undefined
-  const runFont = (font = profile.bodyFont) => input.template.type === 'compliance_statement'
-    ? {
-        ascii: complianceCompatibleFont(font),
-        hAnsi: complianceCompatibleFont(font),
-        cs: complianceCompatibleFont(font),
-        eastAsia: complianceCompatibleFont(font),
-      }
-    : docxFont(font)
+  const runFont = (font = profile.bodyFont) => {
+    const compatibleFont = complianceCompatibleFont(font)
+    // LibreOffice 会在缺少 w:hint 时优先采用 hAnsi；若只给 eastAsia 指定
+    // 中文字体，中文仍可能落到 Arial 并显示方框。四个字体槽保持一致，
+    // 再通过 fontTable 的 altName 兼容 Windows 中文字体名称。
+    return {
+      ascii: compatibleFont,
+      hAnsi: compatibleFont,
+      cs: compatibleFont,
+      eastAsia: compatibleFont,
+    }
+  }
   const isProposal = input.template.type === 'investment_proposal'
   const heading = (value: string, level: 1 | 2 = 1, pageBreakBefore = false) => new Paragraph({
     style: level === 1 ? 'Heading1' : 'Heading2',
@@ -1130,7 +1179,7 @@ export async function generateBusinessDocx(input: {
       borders: tableBorders,
       rows: [
         overviewRow('公司主体', text(input.project.companyName), '所属行业', text(input.project.industry)),
-        overviewRow('项目阶段', text(input.project.stage), '资料截止日', input.sourceCutoffDate),
+        overviewRow('项目名称', text(input.project.name), '资料截止日', input.sourceCutoffDate),
         overviewRow('融资安排', text(input.project.financing), '估值口径', text(input.project.valuation)),
       ],
     })
@@ -1139,7 +1188,7 @@ export async function generateBusinessDocx(input: {
       sectionTitle: string,
     ): Array<Paragraph | Table> => {
       const width = 8300
-      const isFinancial = sectionTitle === '财务分析'
+      const isFinancial = sectionTitle === '财务情况'
       const weights = table.columns.map((column, columnIndex) => {
         if (isFinancial) {
           if (/序号/.test(column)) return 0.7
@@ -1239,7 +1288,7 @@ export async function generateBusinessDocx(input: {
         const currentSection = sectionByTitle.get(moduleTitle)
         if (!currentSection) return
         contentChildren.push(dueHeading(`${groupIndex + 1}.${moduleIndex + 1} ${moduleTitle}`, 2))
-        if (group.title === '投资概要' && moduleTitle === '投资概要') {
+        if (group.title === '投资概要' && moduleTitle === '公司情况') {
           contentChildren.push(dueBody(currentSection.summary, {
             keepNext: true,
           }))
@@ -1273,6 +1322,17 @@ export async function generateBusinessDocx(input: {
         })
       })
     })
+    const investmentConclusion = sectionByTitle.get('投资结论及建议')
+    if (investmentConclusion) {
+      contentChildren.push(dueHeading('投资结论及建议', 1, true, false))
+      contentChildren.push(dueBody(investmentConclusion.summary, {
+        keepNext: Boolean(investmentConclusion.findings.length || investmentConclusion.tables?.length),
+      }))
+      investmentConclusion.findings.forEach((finding) => contentChildren.push(dueBody(finding.text)))
+      investmentConclusion.tables?.forEach((table) => {
+        contentChildren.push(...dueTable(table, investmentConclusion.title))
+      })
+    }
   } else {
     input.content.sections.forEach((currentSection, sectionIndex) => {
       const shouldBreak = input.template.type === 'investment_proposal'
@@ -1554,9 +1614,10 @@ export async function generateBusinessDocx(input: {
     sections,
   })
   await writeFile(input.outputPath, await Packer.toBuffer(doc))
-  const templateBuffer = await readFile(input.template.referencePath)
   const outputZip = await JSZip.loadAsync(await readFile(input.outputPath))
-  const templateZip = await JSZip.loadAsync(templateBuffer)
+  const templateZip = path.extname(input.template.referencePath).toLowerCase() === '.docx'
+    ? await JSZip.loadAsync(await readFile(input.template.referencePath))
+    : undefined
   // 投资提案按已蒸馏的精确令牌创建样式。不要在生成后覆盖 styles.xml 或
   // numbering.xml/fontTable.xml，否则新文档中的样式、编号或字体引用可能
   // 指向模板中不同的 ID，或删除运行时使用的中文字体声明。
@@ -1571,7 +1632,7 @@ export async function generateBusinessDocx(input: {
       ]
   const appliedParts: string[] = []
   for (const part of templateParts) {
-    const sourcePart = templateZip.file(part)
+    const sourcePart = templateZip?.file(part)
     if (!sourcePart || !outputZip.file(part)) continue
     outputZip.file(part, await sourcePart.async('nodebuffer'))
     appliedParts.push(part)
@@ -1588,6 +1649,13 @@ export async function generateBusinessDocx(input: {
         '$1<w:numPr><w:ilvl w:val="0"/><w:numId w:val="0"/></w:numPr>',
       )
       outputZip.file('word/document.xml', unnumberedHeadingXml)
+    }
+    const fontTablePart = outputZip.file('word/fontTable.xml')
+    if (fontTablePart) {
+      outputZip.file(
+        'word/fontTable.xml',
+        ensureCrossPlatformChineseFontTable(await fontTablePart.async('string')),
+      )
     }
   }
   if (input.template.type === 'compliance_statement') {
@@ -1615,7 +1683,7 @@ export async function generateBusinessDocx(input: {
         ),
       )
     }
-    const templateTheme = templateZip.file('word/theme/theme1.xml')
+    const templateTheme = templateZip?.file('word/theme/theme1.xml')
     if (templateTheme && !outputZip.file('word/theme/theme1.xml')) {
       outputZip.file('word/theme/theme1.xml', await templateTheme.async('nodebuffer'))
       const relationshipsPart = outputZip.file('word/_rels/document.xml.rels')
@@ -1690,7 +1758,10 @@ export async function generateBusinessDocx(input: {
   return {
     pageIntent: input.template.type === 'due_diligence_report' ? 'long-form' : 'brief',
     templateApplied: true,
-    templateSha256: createHash('sha256').update(templateBuffer).digest('hex'),
+    templateSha256: templateCorpus.find((item) =>
+      item.fileName === path.basename(input.template.referencePath))?.sha256
+      ?? templateCorpus[0]?.sha256
+      ?? '',
     templateCorpus,
     templateParts: appliedParts,
     typography: { body: profile.bodyFont, heading: profile.headingFont },

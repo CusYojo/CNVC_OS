@@ -368,6 +368,15 @@ async function main() {
       .join('\n'),
   )
   assert(
+    '阶段3 Question Generator：默认不生成内部阶段问题或状态词',
+    duplicateCheck.questions.every((question) =>
+      question.category !== '阶段与推进建议'
+      && !/线索|进入初筛|申请立项|提请上会|提交投决|继续跟踪|暂缓推进|归档/.test(
+        question.question,
+      )),
+    duplicateCheck.questions.map((question) => question.question).join('\n'),
+  )
+  assert(
     '阶段3 Duplicate Checker：最终问题无重复且编号连续',
     checkDuplicateQuestions(duplicateCheck.questions).removed.length === 0
       && duplicateCheck.questions.every((question, index) =>
@@ -392,6 +401,26 @@ async function main() {
       && deepDuplicateCheck.questions.every((question) =>
         isHighValueProjectQaQuestion(question.question)),
     `${deepDuplicateCheck.questions.length} 题`,
+  )
+  const explicitStageCheck = await generateProjectQaQuestions({
+    project,
+    mode: '投资委员会 Q&A',
+    depth: '标准版',
+    sources: enrichedSources,
+    skill,
+    userIntent: '请判断该项目是否已经具备启动尽调条件，并说明下一步如何推进',
+  })
+  const explicitStageQuestion = explicitStageCheck.questions.find((question) =>
+    question.category === '阶段与推进建议')
+  assert(
+    '阶段3 Question Generator：仅在用户明确要求时生成自然的阶段判断问题',
+    Boolean(
+      explicitStageQuestion
+      && !/线索|进入初筛|申请立项|提请上会|提交投决|继续跟踪|暂缓推进|归档/.test(
+        explicitStageQuestion.question,
+      )
+    ),
+    explicitStageQuestion?.question ?? '未生成阶段判断问题',
   )
 
   const draftAnswers = await generateProjectQaAnswers({
@@ -424,16 +453,31 @@ async function main() {
   )
   const dispositionAnswer = reviewed.answers.find((answer) => answer.category === '阶段与推进建议')
   assert(
-    '阶段4 Answer Generator：如选择阶段问题则形成与当前阶段匹配的推进建议',
-    !dispositionAnswer || Boolean(
-      /现阶段更适合“继续跟踪”|主建议为“继续跟踪”/.test(dispositionAnswer.answer)
-      && dispositionAnswer.answer.split(/\n+/).length >= 1
-      && dispositionAnswer.answer.split(/\n+/).length <= 6
-      && !/（[1-4]）(?:判断依据|升级与失效条件|下一步动作|OA 流转边界)：/.test(
-        dispositionAnswer.answer,
+    '阶段4 Answer Generator：默认回答不包含内部阶段建议',
+    !dispositionAnswer,
+    dispositionAnswer?.answer ?? '默认未选择阶段问题',
+  )
+  const explicitStageAnswers = await generateProjectQaAnswers({
+    project,
+    mode: '投资委员会 Q&A',
+    questions: explicitStageQuestion ? [explicitStageQuestion] : [],
+    sources: enrichedSources,
+    skill,
+    userIntent: '请判断该项目是否已经具备启动尽调条件，并说明下一步如何推进',
+  })
+  const explicitStageAnswer = explicitStageAnswers[0]
+  assert(
+    '阶段4 Answer Generator：明确要求阶段判断时使用客户语言',
+    Boolean(
+      explicitStageAnswer
+      && /可以继续评估|具备启动尽调的基础|提交内部投资决策审议|暂不建议继续推进|建议停止评估/.test(
+        explicitStageAnswer.answer,
+      )
+      && !/线索|进入初筛|申请立项|提请上会|提交投决|继续跟踪|暂缓推进|归档/.test(
+        explicitStageAnswer.answer,
       )
     ),
-    dispositionAnswer?.answer ?? '本次按证据价值未选择阶段问题',
+    explicitStageAnswer?.answer ?? '未生成阶段判断回答',
   )
   const productAnswer = reviewed.answers.find((answer) => answer.category === '产品与技术')
   assert(
@@ -525,6 +569,40 @@ async function main() {
       )
     ),
     meetingMinutesAnswer?.answer ?? '未生成会议纪要回归回答',
+  )
+  const fragmentAnswer = (await generateProjectQaAnswers({
+    project,
+    mode: '投资委员会 Q&A',
+    questions: [{
+      id: 'Q-FRAGMENT',
+      category: '客户与商业化',
+      question: '现有客户订单能否证明需求可复制；若不能，最关键的反证是什么？',
+      rationale: '验证章节标题、孤立短语和重复事实清理。',
+      priority: '高',
+    }],
+    sources: [{
+      sourceType: 'material',
+      sourceId: 'fragment-regression',
+      sourceName: '客户进展说明',
+      chunkIndex: 0,
+      versionOrDate: '2026-07-25',
+      content: [
+        '三、核心产品与技术体系。',
+        '客户合同、回款、验收与复购。',
+        '公司已与甲客户签订 100 万元正式合同。',
+        '公司与甲客户签订的正式合同金额为 100 万元。',
+      ].join('\n'),
+    }],
+    skill,
+  }))[0]
+  assert(
+    '阶段4 Answer Generator：清除章节残片、孤立短语和重复事实',
+    Boolean(
+      fragmentAnswer
+      && !/核心产品与技术体系|客户合同、回款、验收与复购/.test(fragmentAnswer.answer)
+      && (fragmentAnswer.answer.match(/100\s*万元/g) ?? []).length <= 1
+    ),
+    fragmentAnswer?.answer ?? '未生成片段清理回归回答',
   )
 
   const mismatchRegressionAnswers = await generateProjectQaAnswers({
@@ -621,8 +699,7 @@ async function main() {
       && answer.answer.split(/\n+/).length <= 6
       && !/暂无相关资料|暂无资料|无相关资料/.test(answer.answer)
       && !/项目资料|项目材料|资料库|当前资料|现有证据|资料截止日|经系统核验|公开页面|公司材料称|资料显示|材料显示|会议纪要|交流纪要|访谈纪要|交流时间|交流地点|交流人员|更新本题|本回答|结论置信度/.test(answer.answer)
-      && (answer.category !== '阶段与推进建议'
-        || /进入初筛|继续跟踪|申请立项|启动尽调|提请上会|提交投决|暂缓推进|归档/.test(answer.answer))
+      && !/线索|进入初筛|申请立项|提请上会|提交投决|继续跟踪|暂缓推进|归档/.test(answer.answer)
       && answer.sourceIndexes.length === 0
       && answer.supportingQuotes.length === 0),
     `${noEvidenceAnswers.filter((answer) => answer.confidenceStatus === '证据不足').length}/${noEvidenceAnswers.length}`,
