@@ -1,5 +1,5 @@
 ---
-name: gorden-super-ppt-skill
+name: GordenSuperPPTSkill
 description: >-
   一键全流程 PPT：先用 GordenImagePPTGen 生成「图片格式的 PPT」，再用 GordenImage2PPTX 把它逆向还原成「可编辑 .pptx」。
   打包并依次编排这两个子技能，最终同时交付 图片型 PPT + 可编辑 pptx + 全部中间产物。Orchestrates image-PPT
