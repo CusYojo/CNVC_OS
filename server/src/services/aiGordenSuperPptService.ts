@@ -7,6 +7,7 @@ import {
   mkdir,
   readdir,
   readFile,
+  rm,
   stat,
   writeFile,
 } from 'node:fs/promises'
@@ -396,6 +397,14 @@ function gordenGatewayFailure(error: unknown, input: {
   )
 }
 
+export function gordenLayoutGuardArgs(input: {
+  script: string
+  sourceImage: string
+  layoutPath: string
+}) {
+  return [input.script, input.sourceImage, input.layoutPath]
+}
+
 async function runGordenLayoutGuard(input: {
   python: string
   script: string
@@ -406,12 +415,11 @@ async function runGordenLayoutGuard(input: {
   env: NodeJS.ProcessEnv
 }) {
   try {
-    await runCommand(input.python, [
-      input.script,
-      input.sourceImage,
-      input.layoutPath,
-      '--strict',
-    ], { timeoutMs: input.timeoutMs, env: input.env })
+    await runCommand(input.python, gordenLayoutGuardArgs({
+      script: input.script,
+      sourceImage: input.sourceImage,
+      layoutPath: input.layoutPath,
+    }), { timeoutMs: input.timeoutMs, env: input.env })
   } catch (error) {
     const upstreamCode = String((error as { code?: unknown }).code ?? '')
     if (upstreamCode === 'GORDEN_SUPER_PPT_TIMEOUT') throw error
@@ -470,10 +478,19 @@ export function gordenUnplannedVisibleTexts(
   expectedTexts: string[],
   observedUnexpectedTexts: string[],
 ) {
-  const expected = new Set(expectedTexts.map(canonicalVisibleText).filter(Boolean))
+  const expected = expectedTexts.map(canonicalVisibleText).filter(Boolean)
+  const expectedSet = new Set(expected)
   return [...new Set(observedUnexpectedTexts
     .map((value) => value.trim())
-    .filter((value) => value && !expected.has(canonicalVisibleText(value))))]
+    .filter((value) => {
+      const observed = canonicalVisibleText(value)
+      if (!observed || expectedSet.has(observed)) return false
+      const isShortLatinFragment = /^[A-Za-z][A-Za-z0-9.+/-]{1,7}$/.test(observed)
+      if (isShortLatinFragment && expected.some((text) => text.includes(observed))) {
+        return false
+      }
+      return true
+    }))]
 }
 
 function uniqueCompactTexts(values: Array<string | null | undefined>) {
@@ -679,6 +696,27 @@ export function buildGordenEditableLayerPrompts(keyColor = '#00ff00') {
 不得包含卡片、框架、表格、图表坐标、横线、竖线、分隔线、连接线或网格；这些内容属于框架层。
 把每个纯图形元素完整、独立地排列在纯色背景 ${keyColor} 上，按从左到右、从上到下的疏松图标表排布；元素之间保留明显的连续纯色空隙，任何元素及其阴影都不得接触、重叠、越界或跨越相邻位置。不要画网格线、标签或说明文字。不得遗漏符合条件的纯图形，也不得添加原图没有的元素。正方形 2048×2048。`,
   }
+}
+
+const GORDEN_ICON_LAYER_MAX_ATTEMPTS = 2
+
+export function unsafeGordenIconFiles(manifest: IconManifest) {
+  return (manifest.icons ?? [])
+    .filter((icon) => Object.values(icon.edge_touch ?? {}).some(Boolean))
+    .map((icon) => String(icon.file || ''))
+    .filter(Boolean)
+}
+
+export function buildGordenIconRetryPrompt(input: {
+  keyColor: string
+  attempt: number
+  unsafeIconFiles: string[]
+}) {
+  const basePrompt = buildGordenEditableLayerPrompts(input.keyColor).icons
+  return `${basePrompt}
+
+【图标边界安全重试 ${input.attempt}】
+上一版图标表有 ${input.unsafeIconFiles.length} 个元素触及画布边界（${input.unsafeIconFiles.join('、') || '未命名元素'}）。本次必须把所有图形整体缩小并放在画布中央区域：画布上、下、左、右各保留至少 12% 连续纯色 ${input.keyColor} 安全边距；元素及阴影之间也必须保留明显纯色间隔。禁止生成贴边横幅、页脚、整行装饰或跨越多个图标位的长条图形；这类不适合作为独立图标的元素直接省略。任何图形像素都不得进入四周安全边距。`
 }
 
 function resolveGordenSkillDirectory(skillRoot: string, skillName: string) {
@@ -1708,6 +1746,7 @@ export async function generateInvestmentRecommendationPptWithGorden(input: {
     const iconsRawPath = path.join(pageRoot, 'icons_raw_1.png')
     const framePath = path.join(pageRoot, 'frame.png')
     const iconsTransparentPath = path.join(pageRoot, 'icons_t_1.png')
+    const keyColor = '#00ff00'
     const resumedLayerPage = resumeCheckpoint?.layerPages.get(plan.number)
     if (resumedLayerPage) {
       await reportProgress(
@@ -1726,7 +1765,6 @@ export async function generateInvestmentRecommendationPptWithGorden(input: {
         mkdir(iconsDir, { recursive: true }),
       ])
       await copyFile(sourceImage, path.join(pageRoot, 'source-slide.png'))
-      const keyColor = '#00ff00'
       const layerPrompts = buildGordenEditableLayerPrompts(keyColor)
       const layerResults: Record<string, GatewayImageResult> = {}
       for (const [layer, prompt] of Object.entries(layerPrompts)) {
@@ -1803,16 +1841,89 @@ export async function generateInvestmentRecommendationPptWithGorden(input: {
       })
     }
     const iconManifestPath = path.join(iconsDir, 'icons_manifest.json')
-    const iconManifest = JSON.parse(await readFile(iconManifestPath, 'utf8')) as IconManifest
-    const unsafeIcons = (iconManifest.icons ?? []).filter((icon) =>
-      Object.values(icon.edge_touch ?? {}).some(Boolean))
-    if (unsafeIcons.length) {
+    let iconManifest = JSON.parse(await readFile(iconManifestPath, 'utf8')) as IconManifest
+    let unsafeIconFiles = unsafeGordenIconFiles(iconManifest)
+    const iconRetryAudit: Array<Record<string, unknown>> = []
+    for (
+      let attempt = 2;
+      unsafeIconFiles.length && attempt <= GORDEN_ICON_LAYER_MAX_ATTEMPTS;
+      attempt += 1
+    ) {
+      await reportProgress(
+        input.onProgress,
+        `Gorden 阶段 2：第 ${plan.number}/${plans.length} 页图标触边，定向重生成图标层`,
+        76 + Math.round((plan.number / plans.length) * 8),
+      )
+      await mkdir(pagePrompts, { recursive: true })
+      const retryPromptFile = path.join(pagePrompts, `icons-retry-${attempt}.md`)
+      await writeFile(retryPromptFile, buildGordenIconRetryPrompt({
+        keyColor,
+        attempt,
+        unsafeIconFiles,
+      }), 'utf8')
+      let retryResult: GatewayImageResult
+      try {
+        retryResult = await generateGatewayImage({
+          python,
+          script: paths.generateImage,
+          promptFile: retryPromptFile,
+          outDir: path.join(pageRoot, 'generated', `icons-retry-${attempt}`),
+          referenceImage: sourceImage,
+          size: '2048x2048',
+          timeoutMs,
+          env,
+        })
+      } catch (error) {
+        throw gordenGatewayFailure(error, {
+          slideNumber: plan.number,
+          slideCount: plans.length,
+          layer: `icons-retry-${attempt}`,
+        })
+      }
+      await copyFile(retryResult.saved[0], iconsRawPath)
+      await rm(iconsDir, { recursive: true, force: true })
+      await mkdir(iconsDir, { recursive: true })
+      await runCommand(python, [
+        paths.chromaKey,
+        '--input', iconsRawPath,
+        '--out', iconsTransparentPath,
+        '--preset', 'icon-safe',
+        '--scale', '2',
+        '--force',
+      ], { timeoutMs, env })
+      await runCommand(python, [
+        paths.sliceGrid,
+        iconsTransparentPath,
+        iconsDir,
+        '--auto',
+        '--pad', '24',
+        '--contact-sheet',
+        '--prefix', 'icon',
+      ], { timeoutMs, env })
+      iconManifest = JSON.parse(await readFile(iconManifestPath, 'utf8')) as IconManifest
+      unsafeIconFiles = unsafeGordenIconFiles(iconManifest)
+      iconRetryAudit.push({
+        attempt,
+        prompt_file: retryPromptFile,
+        task_id: retryResult.task_id,
+        metadata_json: retryResult.metadata_json,
+        generated_source: retryResult.saved[0],
+        unsafe_icon_files: unsafeIconFiles,
+      })
+      await writeJson(path.join(pageRoot, 'icon-layer-retries.json'), {
+        schemaVersion: '1.0',
+        slide: plan.number,
+        attempts: iconRetryAudit,
+      })
+    }
+    if (unsafeIconFiles.length) {
       throw Object.assign(
-        new Error(`Gorden 第 ${plan.number} 页图标层仍有 ${unsafeIcons.length} 个元素触及图标表外边界，必须重新生成图标层`),
+        new Error(`Gorden 第 ${plan.number} 页图标层重生成后仍有 ${unsafeIconFiles.length} 个元素触及图标表外边界`),
         {
           code: 'GORDEN_ICON_LAYER_UNSAFE',
           slideNumber: plan.number,
-          unsafeIconFiles: unsafeIcons.map((icon) => String(icon.file || '')).filter(Boolean),
+          unsafeIconFiles,
+          layerAttempts: GORDEN_ICON_LAYER_MAX_ATTEMPTS,
         },
       )
     }

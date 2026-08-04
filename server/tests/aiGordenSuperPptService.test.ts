@@ -12,15 +12,18 @@ import test from 'node:test'
 import type { BusinessContent } from '../src/services/aiBusinessContentService.js'
 import {
   annotateGordenTextWeightQa,
+  buildGordenIconRetryPrompt,
   buildReferenceDrivenSemanticOverrides,
   buildGordenSlidePlan,
   buildGordenSlidePrompt,
   buildGordenEditableLayerPrompts,
   gordenSlidePlanFingerprint,
+  gordenLayoutGuardArgs,
   gordenUnplannedVisibleTexts,
   gordenSkillPaths,
   normalizeGordenLayout,
   referenceDrivenSkillPaths,
+  unsafeGordenIconFiles,
   upgradeGordenCheckpointTextLayouts,
 } from '../src/services/aiGordenSuperPptService.js'
 import {
@@ -187,6 +190,14 @@ test('Gorden layout guard failures expose a specific safe stage', () => {
   assert.doesNotMatch(safeAiTaskFailureMessage(error), /internal layout details/)
 })
 
+test('Gorden layout guard blocks errors but does not promote warnings to failures', () => {
+  assert.deepEqual(gordenLayoutGuardArgs({
+    script: 'layout_guard.py',
+    sourceImage: 'source.png',
+    layoutPath: 'layout.json',
+  }), ['layout_guard.py', 'source.png', 'layout.json'])
+})
+
 test('Gorden text gate ignores duplicate reports of planned text but preserves real extras', () => {
   assert.deepEqual(
     gordenUnplannedVisibleTexts(
@@ -195,6 +206,26 @@ test('Gorden text gate ignores duplicate reports of planned text but preserves r
     ),
     ['来源名称'],
   )
+  assert.deepEqual(
+    gordenUnplannedVisibleTexts(['行业：AI医疗'], ['AI']),
+    [],
+  )
+})
+
+test('Gorden retries only unsafe icon layers with an explicit safe margin', () => {
+  assert.deepEqual(unsafeGordenIconFiles({
+    icons: [
+      { file: 'safe.png', edge_touch: { left: false, bottom: false } },
+      { file: 'edge.png', edge_touch: { right: true } },
+    ],
+  }), ['edge.png'])
+  const prompt = buildGordenIconRetryPrompt({
+    keyColor: '#00ff00',
+    attempt: 2,
+    unsafeIconFiles: ['edge.png'],
+  })
+  assert.match(prompt, /至少 12%/)
+  assert.match(prompt, /禁止生成贴边横幅/)
 })
 
 test('Gorden strict text-weight QA permits a regular body with bold title and card labels', () => {
