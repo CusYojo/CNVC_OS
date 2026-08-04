@@ -1076,8 +1076,8 @@ function Chat() {
         && UUID_PATTERN.test(effectiveProject.projectId)
         && UUID_PATTERN.test(currentConversationRowId)
       ) {
+        const forceInvestmentPpt = selectedQuickAction === 'investment_ppt'
         try {
-          const forceInvestmentPpt = selectedQuickAction === 'investment_ppt'
           const generationMessage = clean
             || (forceInvestmentPpt
               ? '请根据本轮上传文件与当前项目资料生成投资建议书 PPT。'
@@ -1117,8 +1117,13 @@ function Chat() {
             taskDispatchContext = `\n【内部任务状态】${dispatch.skillName} 已创建正式投资建议书任务（任务 ID：${dispatch.task.id}）。请仅告知用户查看会话中的进度卡，不要重复调用其他 PPT 生成工具。`
           }
         } catch (error) {
-          // 意图分发暂时不可用时仍保留普通对话能力，不吞掉用户消息。
           console.warn('Conversation PPT intent dispatch failed:', (error as Error).message)
+          // 快捷任务必须创建正式任务卡。失败时停止发送通用 Agent，
+          // 否则 Agent 会直接执行 Skill，用户只能看到工具气泡而没有进度条。
+          if (forceInvestmentPpt) {
+            throw new Error(`投资建议书任务创建失败：${(error as Error).message}`)
+          }
+          // 普通对话中的非强制意图识别失败时，仍保留通用问答能力。
         }
       }
       await agent.sendMessage(`${ctx}${taskDispatchContext}`)

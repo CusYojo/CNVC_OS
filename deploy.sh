@@ -315,7 +315,7 @@ sync_agent_skills() {
     step "同步 Agent Skills"
 
     local skills_root="${FLUE_STATE_DIR}/workspace/.agents/skills"
-    local source_root source_dir target_dir
+    local source_root source_dir target_dir required_skill
 
     # 清空旧的 skills，避免 git 中已删除的 skill 残留
     if [ -d "$skills_root" ]; then
@@ -346,6 +346,16 @@ sync_agent_skills() {
         err "核心业务 Skill 同步失败: answer-project-qa"
         exit 1
     fi
+    for required_skill in \
+        create-reference-driven-editable-ppt \
+        GordenSuperPPTSkill \
+        pdf-to-editable-ppt
+    do
+        if [ ! -f "${skills_root}/${required_skill}/SKILL.md" ]; then
+            err "投资建议书 PPT Skill 同步失败: ${required_skill}"
+            exit 1
+        fi
+    done
     log "Agent Skills 已同步到 ${skills_root} ✓"
 }
 

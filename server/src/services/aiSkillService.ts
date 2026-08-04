@@ -99,15 +99,22 @@ const skillRoot = path.resolve(
     ),
 )
 
-const AI_SKILL_DIRECTORY_BY_NAME: Readonly<Record<string, string>> = {
-  GordenSuperPPTSkill: path.join(
-    'GordenSuperPPTSkills',
+const AI_SKILL_DIRECTORY_CANDIDATES_BY_NAME: Readonly<Record<string, string[]>> = {
+  GordenSuperPPTSkill: [
+    path.join('GordenSuperPPTSkills', 'GordenSuperPPTSkill'),
     'GordenSuperPPTSkill',
-  ),
+  ],
+}
+
+export function resolveAiSkillDirectory(name: string, root: string) {
+  const candidates = AI_SKILL_DIRECTORY_CANDIDATES_BY_NAME[name] ?? [name]
+  const resolved = candidates.map((candidate) => path.resolve(root, candidate))
+  return resolved.find((candidate) => existsSync(path.join(candidate, 'SKILL.md')))
+    ?? resolved[0]
 }
 
 export function getAiSkillDirectory(name: string) {
-  return path.resolve(skillRoot, AI_SKILL_DIRECTORY_BY_NAME[name] ?? name)
+  return resolveAiSkillDirectory(name, skillRoot)
 }
 
 function parseScalar(value: string) {
