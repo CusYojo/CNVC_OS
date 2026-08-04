@@ -111,6 +111,13 @@ def _text_content(item: dict) -> str:
 
 
 def _line_count(item: dict) -> int:
+    estimated = item.get("estimated_line_count")
+    try:
+        estimated_lines = int(estimated)
+    except (TypeError, ValueError):
+        estimated_lines = 0
+    if estimated_lines > 0:
+        return estimated_lines
     text = _text_content(item)
     return max(1, text.count("\n") + 1)
 

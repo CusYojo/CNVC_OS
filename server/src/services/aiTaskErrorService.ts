@@ -20,6 +20,7 @@ export function safeAiTaskFailureStage(error: unknown) {
   }
   if (code === 'GORDEN_VISIBLE_TEXT_CONTRACT_REJECTED') return 'Gorden 页面文字检查未通过'
   if (code === 'GORDEN_VISUAL_QA_REJECTED') return 'Gorden 最终视觉复核未通过'
+  if (code === 'GORDEN_LAYOUT_GUARD_REJECTED') return 'Gorden 页面布局检查未通过'
   if (code.startsWith('GORDEN_')) return 'Gorden PPT 生成未完成'
   if (code.startsWith('PPTX_')) return 'PPTX 文件质量检查未通过'
   return '文档尚未完成'
@@ -71,7 +72,7 @@ export function safeAiTaskFailureMessage(error: unknown) {
     return 'Gorden 图片网关已接受页面生成请求，但结果轮询超过等待时间。任务诊断已保留，可稍后继续生成。'
   }
   if (code === 'GORDEN_IMAGE_GATEWAY_FAILED') {
-    return 'Gorden 图片网关在页面生成阶段返回异常。系统已保留具体页码、任务编号和最后网关响应，请确认网关恢复后继续生成。'
+    return 'Gorden 图片网关在页面或可编辑图层生成阶段返回异常。系统已保留具体页码、图层和最后网关响应，请确认网关恢复后继续生成。'
   }
   if (code === 'GORDEN_ICON_LAYER_UNSAFE') {
     return 'Gorden 图标层中的元素接触图片外边界，无法安全切分为可编辑对象。系统未交付被截断的 PPTX，请点击“继续生成”重新生成该图标层。'
@@ -81,6 +82,9 @@ export function safeAiTaskFailureMessage(error: unknown) {
   }
   if (code === 'GORDEN_VISUAL_QA_REJECTED') {
     return 'Gorden 可编辑稿与成品图存在文字缺失、异常换行或版式差异，未通过最终视觉复核。系统已保留检查点，请继续生成有问题的页面。'
+  }
+  if (code === 'GORDEN_LAYOUT_GUARD_REJECTED') {
+    return 'Gorden 已完成页面和图层生成，但可编辑文本的字号、换行或字重未通过布局检查。系统已保留检查点，请继续生成有问题的页面。'
   }
   if (code === 'GORDEN_SUPER_PPT_FAILED') {
     return 'Gorden 页面生成、图片分层或可编辑 PPTX 合成失败。系统已保留参数，请检查图片网关和 Python 运行环境后继续生成。'

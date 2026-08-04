@@ -375,6 +375,57 @@ async function runCommand(
   }
 }
 
+function gordenGatewayFailure(error: unknown, input: {
+  slideNumber: number
+  slideCount: number
+  layer?: string
+}) {
+  const upstreamCode = String((error as { code?: unknown }).code ?? '')
+  const timeout = upstreamCode === 'GORDEN_SUPER_PPT_TIMEOUT'
+  const layerLabel = input.layer ? `的${input.layer}层` : ''
+  return Object.assign(
+    new Error(
+      `Gorden 第 ${input.slideNumber}/${input.slideCount} 页${layerLabel}图片网关${timeout ? '等待超时' : '调用失败'}：${(error as Error).message}`,
+    ),
+    {
+      code: timeout ? 'GORDEN_IMAGE_GATEWAY_TIMEOUT' : 'GORDEN_IMAGE_GATEWAY_FAILED',
+      upstreamCode,
+      slideNumber: input.slideNumber,
+      layer: input.layer,
+    },
+  )
+}
+
+async function runGordenLayoutGuard(input: {
+  python: string
+  script: string
+  sourceImage: string
+  layoutPath: string
+  slideNumber: number
+  timeoutMs: number
+  env: NodeJS.ProcessEnv
+}) {
+  try {
+    await runCommand(input.python, [
+      input.script,
+      input.sourceImage,
+      input.layoutPath,
+      '--strict',
+    ], { timeoutMs: input.timeoutMs, env: input.env })
+  } catch (error) {
+    const upstreamCode = String((error as { code?: unknown }).code ?? '')
+    if (upstreamCode === 'GORDEN_SUPER_PPT_TIMEOUT') throw error
+    throw Object.assign(
+      new Error(`Gorden 第 ${input.slideNumber} 页布局检查未通过：${(error as Error).message}`),
+      {
+        code: 'GORDEN_LAYOUT_GUARD_REJECTED',
+        upstreamCode,
+        slideNumber: input.slideNumber,
+      },
+    )
+  }
+}
+
 function parseGatewayResult(stdout: string): GatewayImageResult {
   let parsed: unknown
   try {
@@ -986,7 +1037,12 @@ export function annotateGordenTextWeightQa<T extends Record<string, unknown>>(sl
   // A page made of one regular narrative paragraph plus bold title/card labels is
   // a legitimate emphasis-heavy composition, so record the visual justification
   // explicitly instead of weakening the global guard threshold.
-  const hasRegularNarrative = regularTexts.some((item) => textLength(item) >= 80)
+  const hasRegularNarrative = regularTexts.some((item) => {
+    const estimatedLineCount = Number(item.estimated_line_count ?? 0)
+    return textLength(item) >= 20
+      || (Boolean(item.word_wrap) && textLength(item) >= 12)
+      || estimatedLineCount >= 2
+  })
   const boldItemsAreLabels = boldTexts.every((item) => textLength(item) <= 120)
   // When the image model renders every text box as bold (100% ratio, no regular body),
   // it's an image-generation artifact — annotate it so layout_guard --strict allows
@@ -1028,13 +1084,40 @@ function editableSlideFromCheckpoint(
       ...item,
       file: path.join(pageRoot, 'icons', path.basename(String(item.file || ''))),
     }))
-  const texts = (Array.isArray(layout.texts) ? layout.texts : [])
-    .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object'))
+  const texts = upgradeGordenCheckpointTextLayouts(
+    (Array.isArray(layout.texts) ? layout.texts : [])
+      .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object')),
+  )
   return annotateGordenTextWeightQa({
     background: path.join(pageRoot, 'background.png'),
     frame: path.join(pageRoot, 'frame.png'),
     icons,
     texts,
+  })
+}
+
+export function upgradeGordenCheckpointTextLayouts(
+  texts: Array<Record<string, unknown>>,
+) {
+  return texts.map((item) => {
+    if (Number(item.estimated_line_count) > 0) return item
+    const bbox = Array.isArray(item.source_bbox) && item.source_bbox.length === 4
+      ? item.source_bbox.map(finiteNumber)
+      : []
+    if (bbox.length !== 4 || bbox.some((value) => value === undefined)) return item
+    const [, , width, height] = bbox as number[]
+    const metrics = textLayoutMetrics({
+      text: String(item.text || ''),
+      width,
+      height,
+      reportedSizePx: finiteNumber(item.size_px) ?? finiteNumber(item.size),
+      bold: Boolean(item.bold),
+    })
+    return {
+      ...item,
+      estimated_line_count: metrics.lineCount,
+      word_wrap: item.word_wrap ?? !metrics.singleLine,
+    }
   })
 }
 
@@ -1096,6 +1179,7 @@ export function normalizeGordenLayout(input: {
       w: safeWidth / input.width,
       h: h / input.height,
       size_px: layoutMetrics.sizePx,
+      estimated_line_count: layoutMetrics.lineCount,
       color: /^#[0-9a-f]{6}$/i.test(String(item.color || '')) ? String(item.color) : '#172033',
       bold: Boolean(item.bold),
       align: ['left', 'center', 'right', 'justify'].includes(String(item.align))
@@ -1514,18 +1598,10 @@ export async function generateInvestmentRecommendationPptWithGorden(input: {
         env,
       })
     } catch (error) {
-      const upstreamCode = String((error as { code?: unknown }).code ?? '')
-      const timeout = upstreamCode === 'GORDEN_SUPER_PPT_TIMEOUT'
-      throw Object.assign(
-        new Error(
-          `Gorden 第 ${plan.number}/${plans.length} 页图片网关${timeout ? '等待超时' : '调用失败'}：${(error as Error).message}`,
-        ),
-        {
-          code: timeout ? 'GORDEN_IMAGE_GATEWAY_TIMEOUT' : 'GORDEN_IMAGE_GATEWAY_FAILED',
-          upstreamCode,
-          slideNumber: plan.number,
-        },
-      )
+      throw gordenGatewayFailure(error, {
+        slideNumber: plan.number,
+        slideCount: plans.length,
+      })
     }
     await copyFile(result.saved[0], stableSlide)
     generatedSlides.push(stableSlide)
@@ -1606,12 +1682,15 @@ export async function generateInvestmentRecommendationPptWithGorden(input: {
         assets_dir: pageRoot,
         ...resumedLayout,
       })
-      await runCommand(python, [
-        paths.layoutGuard,
+      await runGordenLayoutGuard({
+        python,
+        script: paths.layoutGuard,
         sourceImage,
         layoutPath,
-        '--strict',
-      ], { timeoutMs, env })
+        slideNumber: plan.number,
+        timeoutMs,
+        env,
+      })
       await runCommand(python, [
         paths.placementQa,
         sourceImage,
@@ -1653,16 +1732,24 @@ export async function generateInvestmentRecommendationPptWithGorden(input: {
       for (const [layer, prompt] of Object.entries(layerPrompts)) {
         const promptFile = path.join(pagePrompts, `${layer}.md`)
         await writeFile(promptFile, prompt, 'utf8')
-        layerResults[layer] = await generateGatewayImage({
-          python,
-          script: paths.generateImage,
-          promptFile,
-          outDir: path.join(pageRoot, 'generated', layer),
-          referenceImage: sourceImage,
-          size: layer === 'icons' ? '2048x2048' : '2560x1440',
-          timeoutMs,
-          env,
-        })
+        try {
+          layerResults[layer] = await generateGatewayImage({
+            python,
+            script: paths.generateImage,
+            promptFile,
+            outDir: path.join(pageRoot, 'generated', layer),
+            referenceImage: sourceImage,
+            size: layer === 'icons' ? '2048x2048' : '2560x1440',
+            timeoutMs,
+            env,
+          })
+        } catch (error) {
+          throw gordenGatewayFailure(error, {
+            slideNumber: plan.number,
+            slideCount: plans.length,
+            layer,
+          })
+        }
       }
 
       await Promise.all([
@@ -1787,12 +1874,15 @@ export async function generateInvestmentRecommendationPptWithGorden(input: {
       ...slideLayout,
     }
     await writeJson(layoutPath, pageLayout)
-    await runCommand(python, [
-      paths.layoutGuard,
+    await runGordenLayoutGuard({
+      python,
+      script: paths.layoutGuard,
       sourceImage,
       layoutPath,
-      '--strict',
-    ], { timeoutMs, env })
+      slideNumber: plan.number,
+      timeoutMs,
+      env,
+    })
     await runCommand(python, [
       paths.placementQa,
       sourceImage,

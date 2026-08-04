@@ -21,6 +21,7 @@ import {
   gordenSkillPaths,
   normalizeGordenLayout,
   referenceDrivenSkillPaths,
+  upgradeGordenCheckpointTextLayouts,
 } from '../src/services/aiGordenSuperPptService.js'
 import {
   assertInvestmentRecommendationSkillChain,
@@ -177,6 +178,15 @@ test('Gorden visual failures expose a safe actionable stage instead of the gener
   assert.doesNotMatch(safeAiTaskFailureMessage(error), /internal visual details/)
 })
 
+test('Gorden layout guard failures expose a specific safe stage', () => {
+  const error = Object.assign(new Error('internal layout details'), {
+    code: 'GORDEN_LAYOUT_GUARD_REJECTED',
+  })
+  assert.equal(safeAiTaskFailureStage(error), 'Gorden 页面布局检查未通过')
+  assert.match(safeAiTaskFailureMessage(error), /字号、换行或字重/)
+  assert.doesNotMatch(safeAiTaskFailureMessage(error), /internal layout details/)
+})
+
 test('Gorden text gate ignores duplicate reports of planned text but preserves real extras', () => {
   assert.deepEqual(
     gordenUnplannedVisibleTexts(
@@ -201,6 +211,23 @@ test('Gorden strict text-weight QA permits a regular body with bold title and ca
   })
   assert.equal(slide.allow_all_bold_text, true)
   assert.match(String((slide.qa_notes as string[])[0]), /正文段落为常规字重/)
+
+  const compactNarrative = annotateGordenTextWeightQa({
+    texts: [
+      ...Array.from({ length: 17 }, (_unused, index) => ({
+        text: `标题或卡片标签 ${index + 1}`,
+        bold: true,
+      })),
+      {
+        text: '项目位于 AI 医疗领域，具体竞争力仍需结合市场和客户证据进一步核验。',
+        bold: false,
+        word_wrap: true,
+        estimated_line_count: 4,
+      },
+    ],
+  })
+  assert.equal(compactNarrative.allow_all_bold_text, true)
+  assert.match(String((compactNarrative.qa_notes as string[])[0]), /正文段落为常规字重/)
 
   const accidentalAllBold = annotateGordenTextWeightQa({
     texts: Array.from({ length: 7 }, (_unused, index) => ({
@@ -273,9 +300,22 @@ test('Gorden layout keeps pixel font units, prevents false wrapping and removes 
   assert.equal(result.texts[0].size_px, 28)
   assert.equal(result.texts[0].word_wrap, false)
   assert.equal(result.texts[1].word_wrap, true)
+  assert.ok(Number(result.texts[1].estimated_line_count) > 1)
   assert.equal(result.texts[2].rendered_by_icon, true)
   assert.equal(result.texts[2].opacity, 0)
   assert.equal(result.icons[0].visible_text, '3')
+})
+
+test('Gorden resume upgrades legacy text layouts with estimated line counts', () => {
+  const [text] = upgradeGordenCheckpointTextLayouts([{
+    text: '项目位于 AI 医疗领域，具体竞争力仍需结合市场和客户证据进一步核验。',
+    source_bbox: [101, 682, 265, 114],
+    size_px: 27,
+    bold: false,
+    word_wrap: true,
+  }])
+  assert.equal(text.estimated_line_count, 4)
+  assert.equal(text.word_wrap, true)
 })
 
 test('investment PPT resume checkpoint remaps duplicate source identities in order', () => {

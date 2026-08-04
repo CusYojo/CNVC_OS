@@ -710,7 +710,8 @@ function Chat() {
   const LS_LAST_PROJECT = 'cybernaut-ai-last-project'
   const LS_LAST_CONV = 'cybernaut-ai-last-conv'
   // 项目优先级: URL ?project= > 上次选的(localStorage) > 空（等待 store 加载）
-  const initialProject = searchParams.get('project') ?? localStorage.getItem(LS_LAST_PROJECT) ?? ''
+  const requestedProjectId = searchParams.get('project') ?? ''
+  const initialProject = requestedProjectId || localStorage.getItem(LS_LAST_PROJECT) || ''
   const [scope, setScope] = useState<'project' | 'global'>('project')
   const [projectId, setProjectId] = useState(initialProject)
   const [input, setInput] = useState('')
@@ -740,10 +741,17 @@ function Chat() {
   const [creatingSession, setCreatingSession] = useState(false)
   const [selectedQuickAction, setSelectedQuickAction] = useState<'investment_ppt' | null>(null)
 
-  const currentProject = projects.find((project) => project.id === projectId) ?? projects[0]
+  const selectedProject = projects.find((project) => project.id === projectId) ?? projects[0]
+  const currentSession = sessions.find((session) => session.agentId === convId)
+  // 正式任务以会话绑定项目为准。会话加载完成后，头部、文件、快捷任务和
+  // 产物区域必须使用同一个项目，不能继续展示 localStorage 中的旧选择。
+  const currentProject = currentSession?.projectId
+    ? projects.find((project) => project.id === currentSession.projectId)
+    : currentSession
+      ? undefined
+      : selectedProject
   const newSessionProject = projects.find((project) => project.id === newSessionProjectId)
   const projectFiles = files.filter((file) => file.projectId === currentProject?.id)
-  const currentSession = sessions.find((session) => session.agentId === convId)
   const currentConversationRowId = currentSession?.rowId ?? ''
   const currentConversationRowIdRef = useRef(currentConversationRowId)
   currentConversationRowIdRef.current = currentConversationRowId
@@ -760,6 +768,18 @@ function Chat() {
   useEffect(() => { if (projectId) localStorage.setItem(LS_LAST_PROJECT, projectId) }, [projectId])
   // 记住当前会话(下次进来恢复)
   useEffect(() => { if (convId) localStorage.setItem(LS_LAST_CONV, convId) }, [convId])
+  useEffect(() => {
+    if (!currentSession) return
+    const sessionProjectId = currentSession.projectId
+    if (sessionProjectId) {
+      setScope('project')
+      setProjectId((current) => current === sessionProjectId
+        ? current
+        : sessionProjectId)
+      return
+    }
+    setScope('global')
+  }, [currentSession?.rowId, currentSession?.projectId])
   useEffect(() => {
     if (
       newSessionOpen
@@ -1309,10 +1329,25 @@ function Chat() {
         } catch { /* ignore legacy migration errors */ }
         setSessions(mapped)
         if (mapped.length) {
-          // 恢复上次选中的会话(若仍存在),否则用最近的一条
+          // 从项目页进入 AI 时，必须优先进入同项目会话，不能恢复其他项目的
+          // 上次会话后仍把头部显示成 URL 项目。若该项目还没有会话，则要求
+          // 用户创建项目会话，避免第一条快捷任务落到旧项目。
+          const requestedSession = requestedProjectId
+            ? mapped.find((session) => session.projectId === requestedProjectId)
+            : undefined
+          if (requestedProjectId && !requestedSession) {
+            setNewSessionProjectId(requestedProjectId)
+            setNewSessionOpen(true)
+            return
+          }
+          // 恢复目标项目会话；无显式项目时恢复上次会话，若不存在则用最近一条。
           const lastConv = localStorage.getItem(LS_LAST_CONV)
-          const restored = lastConv && mapped.some((m) => m.agentId === lastConv) ? lastConv : mapped[0].agentId
-          const restoredSession = mapped.find((session) => session.agentId === restored) ?? mapped[0]
+          const restored = requestedSession?.agentId
+            ?? (lastConv && mapped.some((m) => m.agentId === lastConv)
+              ? lastConv
+              : mapped[0].agentId)
+          const restoredSession = mapped.find((session) => session.agentId === restored)
+            ?? mapped[0]
           activateSession(restoredSession)
         } else {
           const preferredProject = projects.find((project) => project.id === initialProject) ?? projects[0]
@@ -1627,7 +1662,7 @@ function Chat() {
               aria-label="当前项目"
             >
               <span className="whitespace-normal break-words leading-5">
-                {currentProject?.name ?? currentSession?.projectName ?? '未绑定项目'}
+                {currentSession?.projectName ?? currentProject?.name ?? '未绑定项目'}
               </span>
             </div>
           )}

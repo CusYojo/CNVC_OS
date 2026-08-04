@@ -2202,6 +2202,7 @@ async function executeTask(taskId: string) {
       requestAttempt?: unknown
       requestDurationMs?: unknown
       slideNumber?: unknown
+      layer?: unknown
     }
     const [context] = await db.select({
       userId: aiTasks.userId,
@@ -2223,6 +2224,7 @@ async function executeTask(taskId: string) {
         requestAttempt: diagnosticError.requestAttempt,
         requestDurationMs: diagnosticError.requestDurationMs,
         slideNumber: diagnosticError.slideNumber,
+        layer: diagnosticError.layer,
       },
     )
     const recoveryParameters = (context?.parameters ?? {}) as Record<string, unknown>
