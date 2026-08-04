@@ -687,12 +687,32 @@ ${input.sourceNames.join('、') || '用户已授权项目资料'}
 export function buildGordenEditableLayerPrompts(keyColor = '#00ff00') {
   return {
     background: `以输入图片作为唯一编辑目标，生成一张与原图 1:1 对齐的干净背景图。只保留底色、渐变、纹理、照片氛围和纯背景装饰；移除全部文字、数字、Logo、图标、人物、产品主体、卡片、框架、图表和线条。16:9，2560×1440，不得新增内容。`,
-    frame: `生成一张图片，提取输入图片中的框架图，纯色背景，背景色值为 ${keyColor}。“框架图”是原图里除背景、图标、装饰、艺术字、普通文本外的一切，包括容器轮廓与底色填充、标题条、辉光、分隔线、连接线、全部图表图形、坐标网格、趋势线、缎带和装饰线条。形状、大小、位置与原图 1:1 一致，保留原色与填充；不要出现文字、图标或额外占位框。16:9，2560×1440。`,
+    frame: `生成一张图片，提取输入图片中的框架图，纯色背景，背景色值为 ${keyColor}。“框架图”是原图里除背景、图标、装饰、艺术字、普通文本外的一切，包括容器轮廓与底色填充、标题条、辉光、分隔线、连接线、全部图表图形、坐标网格、趋势线、缎带和装饰线条。形状、大小、位置与原图 1:1 一致，保留原色与填充；不要出现文字、图标或额外占位框。与纯色背景接触的容器边缘不得混入 ${keyColor} 的反光、辉光、渐变或投影；描边和阴影只能使用原图中的颜色。16:9，2560×1440。`,
     icons: `以输入图片作为唯一编辑目标，只提取可独立移动的纯图形元素，例如图标、Logo、人物、产品小图和不含文字的装饰图形。
 不得包含任何中文、英文、数字、标点或其他可读文字；标题、副标题、正文、标签、艺术字和带文字的徽章全部不要提取，文字将由后续流程生成为原生可编辑文本。
 不得包含卡片、框架、表格、图表坐标、横线、竖线、分隔线、连接线或网格；这些内容属于框架层。
 把每个纯图形元素完整、独立地排列在纯色背景 ${keyColor} 上，按从左到右、从上到下的疏松图标表排布；元素之间保留明显的连续纯色空隙，任何元素及其阴影都不得接触、重叠、越界或跨越相邻位置。不要画网格线、标签或说明文字。不得遗漏符合条件的纯图形，也不得添加原图没有的元素。正方形 2048×2048。`,
   }
+}
+
+export function buildGordenVisualQaPrompt(expectedTexts: string[]) {
+  const indexedTexts = expectedTexts
+    .map((text, index) => `${index + 1}. ${text}`)
+    .join('\n')
+  return `第一张图是图片模型生成的参考成品图，第二张图是四层可编辑 PPTX 的最终预览。这是交付安全门，不是像素级临摹评分。
+
+第二张图必须完整、清晰、可读地呈现下列文字契约：
+${indexedTexts}
+
+只有以下情形才是阻断交付的 criticalIssues：
+1. 上述某条契约文字在第二张图中完全缺失或被改写。如果契约中同一文字出现多次，第二张图中至少要有相同次数的可读实例。
+2. 文字被严重遮挡、裁切、重叠或小到不可读。
+3. 第二张图出现契约之外的有意义文字、模板样例事实或无依据数字。
+4. 元素大面积互相覆盖，导致页面内容无法使用。
+
+下列都是非阻断的 cosmeticIssues：边框粗细或颜色、阴影、卡片填充、图标造型或尺寸、圆点和装饰线缺失、字体或字号的轻微差异、正常换行、间距和对齐的小幅差异。第二张图不需要复制第一张图意外多生成的重复文字、空卡片或占位模块。如果只有 cosmeticIssues，passed 必须为 true。
+
+返回 JSON：{"passed":true,"criticalIssues":[],"cosmeticIssues":[],"summary":""}。只返回 JSON。`
 }
 
 const GORDEN_ICON_LAYER_MAX_ATTEMPTS = 2
@@ -1318,23 +1338,43 @@ async function assertVisualQa(input: {
   slideNumber: number
   sourceImage: string
   previewImage: string
+  expectedTexts: string[]
   timeoutMs: number
   reportPath: string
 }) {
   const result = await requestVisionJson({
-    prompt: `比较第一张源幻灯片与第二张最终 PPTX 预览。只检查布局和可读性：背景、框架、图标、文字是否对应，是否有明显重影、缺失、错位、裁切或不可读。返回 JSON：{"passed":true,"issues":[],"summary":""}。只返回 JSON。`,
+    prompt: buildGordenVisualQaPrompt(input.expectedTexts),
     images: [input.sourceImage, input.previewImage],
     timeoutMs: input.timeoutMs,
   })
   await writeJson(input.reportPath, result)
-  if (result.passed !== true) {
-    const issues = Array.isArray(result.issues) ? result.issues.join('；') : String(result.summary || '')
+  const criticalIssueValues = Array.isArray(result.criticalIssues)
+    ? result.criticalIssues as unknown[]
+    : undefined
+  const hasCriticalIssueContract = Boolean(criticalIssueValues)
+  const criticalIssues = criticalIssueValues
+    ? criticalIssueValues.map(String).filter(Boolean)
+    : []
+  // New reviewers separate content/readability failures from harmless visual
+  // drift. If they explicitly provide an empty criticalIssues array, cosmetic
+  // differences must not fail the job even if their summary wording is stern.
+  const rejected = hasCriticalIssueContract
+    ? criticalIssues.length > 0
+    : result.passed !== true
+  if (rejected) {
+    const issues = criticalIssues.length
+      ? criticalIssues.join('；')
+      : Array.isArray(result.issues)
+        ? result.issues.join('；')
+        : String(result.summary || '')
     throw Object.assign(
       new Error(`Gorden 第 ${input.slideNumber} 页最终视觉 QA 未通过：${issues || '页面与源图不一致'}`),
       {
         code: 'GORDEN_VISUAL_QA_REJECTED',
         slideNumber: input.slideNumber,
-        visualQaIssues: Array.isArray(result.issues) ? result.issues : [],
+        visualQaIssues: criticalIssues.length
+          ? criticalIssues
+          : Array.isArray(result.issues) ? result.issues : [],
       },
     )
   }
@@ -2050,6 +2090,7 @@ export async function generateInvestmentRecommendationPptWithGorden(input: {
         slideNumber: plan.number,
         sourceImage,
         previewImage,
+        expectedTexts: plan.expectedTexts,
         timeoutMs,
         reportPath: path.join(pageRoot, 'qa-visual', 'vision-review.json'),
       })

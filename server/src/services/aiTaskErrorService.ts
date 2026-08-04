@@ -81,7 +81,7 @@ export function safeAiTaskFailureMessage(error: unknown) {
     return 'Gorden 页面包含文字清单之外的额外标题、标签、编号或来源文字，无法保证分层后内容完整。系统已停止交付，请继续生成该页面。'
   }
   if (code === 'GORDEN_VISUAL_QA_REJECTED') {
-    return 'Gorden 可编辑稿与成品图存在文字缺失、异常换行或版式差异，未通过最终视觉复核。系统已保留检查点，请继续生成有问题的页面。'
+    return 'Gorden 可编辑稿存在契约文字缺失、严重遮挡、裁切或不可读问题，未通过最终交付复核。系统已保留检查点，请继续生成有问题的页面。'
   }
   if (code === 'GORDEN_LAYOUT_GUARD_REJECTED') {
     return 'Gorden 已完成页面和图层生成，但可编辑文本的字号、换行或字重未通过布局检查。系统已保留检查点，请继续生成有问题的页面。'

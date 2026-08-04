@@ -13,6 +13,7 @@ import type { BusinessContent } from '../src/services/aiBusinessContentService.j
 import {
   annotateGordenTextWeightQa,
   buildGordenIconRetryPrompt,
+  buildGordenVisualQaPrompt,
   buildReferenceDrivenSemanticOverrides,
   buildGordenSlidePlan,
   buildGordenSlidePrompt,
@@ -137,6 +138,16 @@ test('Gorden editable icon layer excludes text and fixed-grid slicing assumption
   assert.match(prompts.icons, /不得包含.*横线、竖线、分隔线/)
   assert.doesNotMatch(prompts.icons, /4×4 等分网格/)
   assert.match(prompts.icons, /连续纯色空隙/)
+  assert.match(prompts.frame, /不得混入 #00ff00/)
+})
+
+test('Gorden final visual QA blocks content failures but permits decorative drift', () => {
+  const prompt = buildGordenVisualQaPrompt(['项目阶段', '未披露，待核验', '未披露，待核验'])
+  assert.match(prompt, /交付安全门，不是像素级临摹评分/)
+  assert.match(prompt, /文字被严重遮挡、裁切、重叠或小到不可读/)
+  assert.match(prompt, /非阻断.*边框粗细或颜色/)
+  assert.match(prompt, /意外多生成的重复文字/)
+  assert.equal(prompt.match(/未披露，待核验/g)?.length, 2)
 })
 
 test('Gorden slide plan honors an explicit five-page request', () => {
@@ -201,7 +212,7 @@ test('Gorden visual failures expose a safe actionable stage instead of the gener
     code: 'GORDEN_VISUAL_QA_REJECTED',
   })
   assert.equal(safeAiTaskFailureStage(error), 'Gorden 最终视觉复核未通过')
-  assert.match(safeAiTaskFailureMessage(error), /文字缺失、异常换行或版式差异/)
+  assert.match(safeAiTaskFailureMessage(error), /文字缺失、严重遮挡、裁切或不可读/)
   assert.doesNotMatch(safeAiTaskFailureMessage(error), /internal visual details/)
 })
 
