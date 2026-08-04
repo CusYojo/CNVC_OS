@@ -23,6 +23,12 @@ def _unique(paths: list[Path]) -> list[Path]:
 
 def _workspace_candidates(skill_name: str) -> list[Path]:
     candidates: list[Path] = []
+    # Agent 工作区技能根目录,与 deploy.sh sync_agent_skills 同步目标一致
+    skill_root = os.getenv("AI_SKILL_ROOT", "")
+    if skill_root:
+        candidates.append(Path(skill_root) / skill_name)
+        parent = Path(skill_root).parent
+        candidates.append(parent / "GordenSuperPPTSkills" / skill_name)
     for root in [Path.cwd(), *Path.cwd().parents]:
         candidates.extend(
             [
