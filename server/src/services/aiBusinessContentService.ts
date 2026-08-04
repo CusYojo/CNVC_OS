@@ -14,6 +14,10 @@ import {
   composeInvestmentProposalContent,
   type InvestmentProposalRuntime,
 } from './aiInvestmentProposalContentService.js'
+import {
+  reviewBusinessDocumentEditorialQuality,
+  sanitizeBusinessContentForDelivery,
+} from './aiDocumentEditorialQualityService.js'
 
 export type EvidenceSource = {
   sourceType: string
@@ -1409,6 +1413,11 @@ export function dueDiligenceContentQualityIssues(
   return [...new Set(issues)].slice(0, 24)
 }
 
+function dueDiligenceEditorialIssues(content: BusinessContent) {
+  return reviewBusinessDocumentEditorialQuality(content).map((issue) =>
+    `${issue.sectionTitle ? `${issue.sectionTitle}：` : '全篇：'}${issue.message}`)
+}
+
 function customTemplateContentQualityIssues(
   content: BusinessContent,
   expectedSectionCount: number,
@@ -1583,7 +1592,7 @@ const DUE_DILIGENCE_GROUP_GUIDANCE: Record<string, string> = {
   产业链与竞争格局: '写关键上下游、交付伙伴、具名竞品或替代方案，并按产品、技术、阶段、价格、交付、客户验证和融资同口径比较。',
   财务分析: '区分历史财务、经营指标和管理层预测；数字保留期间、单位和口径。没有可靠数字时完整分析收入质量、成本毛利、现金流或资金续航及投资影响。',
   估值合理性分析: '仅基于具名融资、交易文件或可靠可比信息分析估值口径、差异和敏感变量；不得用融资传闻或孤立数字拼凑结论。',
-  投资方案: '优先写与阶段匹配的推进条件、责任方向、所需材料、OA 动作、触发条件和复核时间；无文件支持不得虚构金额、估值和条款。',
+  投资方案: '优先写与阶段匹配的推进条件、责任方向、所需材料、触发条件和复核时间；无文件支持不得虚构金额、估值和条款，也不得写 OA、系统按钮或内部技术流程。',
   投资亮点: '保留三至六项落到具体主体或事件的投资价值，说明已验证事实、相对差异、投资含义及成立条件。',
   风险分析: '按可能改变阶段建议的程度排序，逐项写触发条件、投资影响和核验或缓释动作，不把可能性写成已发生事实。',
   后续核验事项: '只集中列出联网补全后仍需非公开原件、权威记录、主体确认或访谈核实的重大事项，最多八项；每项写优先级、动作、对应模块和判断影响。',
@@ -2081,7 +2090,7 @@ ${evidence || '没有可用事实卡。不得编造事实；只在确有重大�
       })
   }
 
-  let assembled: BusinessContent = finalizeDueDiligenceContent({
+  let assembled: BusinessContent = sanitizeBusinessContentForDelivery(finalizeDueDiligenceContent({
     ...fallback,
     title: `${meaningfulValue(input.project.companyName) || input.project.name}尽调报告`,
     executiveSummary: '',
@@ -2089,7 +2098,7 @@ ${evidence || '没有可用事实卡。不得编造事实；只在确有重大�
     highlights: [],
     risks: [],
     missing: [],
-  })
+  }))
 
   const requestSummary = async () => {
     const response = await fetchImpl(`${GW_BASE}/chat/completions`, {
@@ -2145,9 +2154,11 @@ ${evidence || '没有可用事实卡。不得编造事实；只在确有重大�
 
   try {
     const summary = await requestSummary()
-    assembled = finalizeDueDiligenceContent({ ...assembled, ...summary })
+    assembled = sanitizeBusinessContentForDelivery(
+      finalizeDueDiligenceContent({ ...assembled, ...summary }),
+    )
   } catch {
-    assembled = finalizeDueDiligenceContent({
+    assembled = sanitizeBusinessContentForDelivery(finalizeDueDiligenceContent({
       ...assembled,
       executiveSummary: deterministicDueDiligenceSummary(assembled, input.project),
       highlights: assembled.sections
@@ -2156,16 +2167,19 @@ ${evidence || '没有可用事实卡。不得编造事实；只在确有重大�
       risks: assembled.sections
         .find((section) => section.title === '风险分析')
         ?.findings.map((finding) => finding.text).slice(0, 6) ?? [],
-    })
+    }))
   }
 
   const finalPass = input.dueDiligencePass !== 'gap-analysis'
     || dueDiligencePendingResearchTopics(assembled).length === 0
-  let issues = dueDiligenceContentQualityIssues(
-    assembled,
-    input.template.sections,
-    { final: finalPass },
-  )
+  let issues = [
+    ...dueDiligenceContentQualityIssues(
+      assembled,
+      input.template.sections,
+      { final: finalPass },
+    ),
+    ...dueDiligenceEditorialIssues(assembled),
+  ]
   if (issues.length > 0) {
     const affectedGroups = DUE_DILIGENCE_GENERATION_GROUPS.flatMap((group, chapterIndex) => {
       const groupIssues = issues.filter((issue) =>
@@ -2181,22 +2195,27 @@ ${evidence || '没有可用事实卡。不得编造事实；只在确有重大�
           await generateGroup(group, chapterIndex, groupIssues)
         },
       )
-      assembled = finalizeDueDiligenceContent({
+      assembled = sanitizeBusinessContentForDelivery(finalizeDueDiligenceContent({
         ...assembled,
         sections: assembleSections(),
         executiveSummary: deterministicDueDiligenceSummary(assembled, input.project),
-      })
+      }))
       try {
         const summary = await requestSummary()
-        assembled = finalizeDueDiligenceContent({ ...assembled, ...summary })
+        assembled = sanitizeBusinessContentForDelivery(
+          finalizeDueDiligenceContent({ ...assembled, ...summary }),
+        )
       } catch {
         // 确保摘要失败不会使已完成章节丢失。
       }
-      issues = dueDiligenceContentQualityIssues(
-        assembled,
-        input.template.sections,
-        { final: finalPass },
-      )
+      issues = [
+        ...dueDiligenceContentQualityIssues(
+          assembled,
+          input.template.sections,
+          { final: finalPass },
+        ),
+        ...dueDiligenceEditorialIssues(assembled),
+      ]
     }
   }
 
@@ -2353,7 +2372,7 @@ export async function composeBusinessContent(input: {
       : 'sourceIndexes 只引用真正支持当前 finding 的证据，文尾引用资料由渲染器根据实际使用索引生成。'
   const dueDiligenceRule = isDueDiligence
     ? `\n10. 你是投资中台的资深投资经理，输出是供投资团队、风控法务、投资总监和投委会内部审阅的尽调报告，只处理当前会话绑定的项目。
-11. 结合项目当前阶段，在证据能够支持时，用自然语言给出一个推进、继续观察、暂缓或归档方向；标准阶段词可用于保持系统一致性，但不得为了命中词表硬造结论。证据确实不足时可在执行摘要中说明暂不形成阶段建议。处置方向只在执行摘要中表达一次，不使用“阶段与推进建议”“主建议”“最强依据”“反向证据”“前置条件”等报幕标签，也不采用固定的五项排列；“投资概要”只写当前阶段和进入下一阶段的条件，不复述处置句。不得声称已经改变项目阶段，阶段流转以 OA 审批结果为准。
+11. 结合项目当前阶段，在证据能够支持时，用自然语言给出一个推进、继续观察、暂缓或归档方向；标准阶段词可用于保持系统一致性，但不得为了命中词表硬造结论。证据确实不足时可在执行摘要中说明暂不形成阶段建议。处置方向只在执行摘要中表达一次，不使用“阶段与推进建议”“主建议”“最强依据”“反向证据”“前置条件”等报幕标签，也不采用固定的五项排列；“投资概要”只写当前阶段和进入下一阶段的条件，不复述处置句。不得声称已经改变项目阶段，客户可见正文不得出现 OA、系统按钮或内部技术流程。
 12. 报告必须围绕当前项目的主体、股权与治理、团队、产品与技术、市场与客户、商业模式、财务、融资与估值、交易方案、风险和可核验来源展开。禁止生成脱离当前项目的泛行业研究；行业、政策和市场背景只能解释当前项目或具名可比对象。
 13. 人员、研发合作、知识产权许可或转让等关系必须说明具体关系类型、相关主体、时间和来源，不得仅凭名称、宣传口径或履历关键词推断。线索池摘要、标签、评分和融资线索只能作为待核验线索。
 14. 融资事件必须写明主体、时间、轮次、金额、投资方和披露边界；商业化信号必须区分线索、测试、试用、合同、交付、验收、收入、开票、回款和续约。

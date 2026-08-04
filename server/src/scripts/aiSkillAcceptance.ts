@@ -193,14 +193,7 @@ async function main() {
         '线索池',
         '股权与治理',
         '产品与技术',
-        '进入初筛',
-        '继续跟踪',
-        '申请立项',
-        '启动尽调',
-        '提请上会',
-        '提交投决',
-        '暂缓推进',
-        '归档',
+        '推进、继续观察、暂缓或归档',
         '泛泛的行业研究报告',
         '当前项目',
         '融资与估值',
@@ -301,8 +294,8 @@ async function main() {
   assert(
     'AI-008 核心规范来源指纹和关键规则已固化',
     createHash('sha256').update(proposalCanonicalSpec).digest('hex')
-        === 'fed1147e287ef8242bf4b6e50ab298f6e5f8f4ba2fbea40e2372de1c2f5e5621'
-      && proposalCoreSpec.includes('fed1147e287ef8242bf4b6e50ab298f6e5f8f4ba2fbea40e2372de1c2f5e5621')
+        === 'ee3fdb2ebb9b2f67f254334be4e9d85a2d66141e3786b4e56df53602d0a47ee5'
+      && proposalCoreSpec.includes('ee3fdb2ebb9b2f67f254334be4e9d85a2d66141e3786b4e56df53602d0a47ee5')
       && [
         '你是投资中台的资深投资经理',
         '当前会话绑定',
@@ -691,14 +684,13 @@ async function main() {
   const qaStyleRequired = [
     '模板共识',
     '各内容单元的表达目的',
-    '分维度论证',
+    '一至六段',
     'DOCX',
     'A4',
     '宋体',
     'Times New Roman',
     '18 pt',
     '14 pt',
-    '12 pt',
     '10.5-11 pt',
     '1.5 倍行距',
     '两端对齐',
@@ -739,7 +731,7 @@ async function main() {
         '1.5 倍',
         '问题目录',
         '直接答复',
-        '分维度论证',
+        '自然段论证',
       ]
         .every((term) => qaCoreRules.includes(term))
       && qaTemplateStyleGuide.includes(qaCoreRulesSha256)
@@ -807,7 +799,7 @@ async function main() {
   )
   assert(
     'Q&A Formatter 落实统一字号、行距、页边距与问题一级结构',
-    qaDocumentSource.includes("'Songti SC'")
+    qaDocumentSource.includes("'宋体'")
       && qaDocumentSource.includes("const LATIN_FONT = 'Times New Roman'")
       && qaDocumentSource.includes('size: 36')
       && qaDocumentSource.includes('size: 28')
@@ -821,7 +813,7 @@ async function main() {
       && !qaDocumentSource.includes("mixedTextRuns('引用资料'")
       && !qaDocumentSource.includes("mixedTextRuns('Reviewer 审阅结果'")
       && qaPipelineSource.includes('function cleanAnswerText')
-      && qaPipelineSource.includes('2-6 个自然段')
+      && qaPipelineSource.includes('一至六个自然段')
       && qaDocumentSource.includes('answerParagraphFormValid')
       && qaDocumentSource.includes('narrativeParagraphRangeValid')
       && qaDocumentSource.includes('visibleAnswerLabelsAbsent')
@@ -832,7 +824,7 @@ async function main() {
       && !qaDocumentSource.includes('bodyParagraph(`答复：${line}`')
       && !qaDocumentSource.includes('index === 6')
       && qaDocumentSource.includes('globalIndex === 0'),
-    '宋体 / 18pt 标题 / 14pt 问题 / 2-6 个自然段 / 无加工痕迹 / 1.5 倍行距 / 25.4×31.7mm 页边距',
+    '宋体 / 18pt 标题 / 14pt 问题 / 1-6 个自然段 / 无加工痕迹 / 1.5 倍行距 / 25.4×31.7mm 页边距',
   )
   assert(
     'Q&A 双模式边界明确且正式任务只交付 DOCX',
@@ -1018,7 +1010,7 @@ async function main() {
       && assistantPageSource.includes("apiPost<AiTask>('/ai/tasks'")
       && assistantPageSource.includes('parameters.qaMode')
       && assistantPageSource.includes('parameters.questionDepth')
-      && !assistantPageSource.includes('任务创建失败：${(error as Error).message}'),
+      && !assistantPageSource.includes('Q&A任务创建失败：${(error as Error).message}'),
     'POST /api/ai/tasks type=project_qa',
   )
   assert(

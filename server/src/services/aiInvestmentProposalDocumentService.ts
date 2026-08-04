@@ -53,11 +53,12 @@ type ProjectLike = {
   companyName?: string | null
 }
 
-const MACOS = process.platform === 'darwin'
-const SANS_FONT = process.env.AI_DOCUMENT_SANS_FONT || (MACOS ? 'Heiti SC' : '黑体')
-const SONG_FONT = process.env.AI_DOCUMENT_SONG_FONT || (MACOS ? 'Songti SC' : '宋体')
-const FANGSONG_FONT = process.env.AI_DOCUMENT_FANGSONG_FONT || (MACOS ? 'Songti SC' : '仿宋')
-const KAITI_FONT = process.env.AI_DOCUMENT_KAITI_FONT || (MACOS ? 'Kaiti SC' : '楷体')
+// DOCX 写入 Office/WPS 通用中文字体名，避免同一份文件因生成服务器平台不同
+// 而混入 Songti SC、STHeiti 等平台字体元数据。
+const SANS_FONT = process.env.AI_DOCUMENT_SANS_FONT || '黑体'
+const SONG_FONT = process.env.AI_DOCUMENT_SONG_FONT || '宋体'
+const FANGSONG_FONT = process.env.AI_DOCUMENT_FANGSONG_FONT || '仿宋'
+const KAITI_FONT = process.env.AI_DOCUMENT_KAITI_FONT || '楷体'
 const NUMBER_FONT = 'Times New Roman'
 
 const font = (eastAsia: string) => ({

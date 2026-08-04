@@ -13,6 +13,10 @@ import type {
 import type { LoadedAiSkill } from './aiSkillService.js'
 import type { AiTemplateDefinition } from './aiTemplateCatalog.js'
 import { cleanCorruptedText } from './textQualityService.js'
+import {
+  reviewBusinessDocumentEditorialQuality,
+  sanitizeBusinessContentForDelivery,
+} from './aiDocumentEditorialQualityService.js'
 
 const GW_BASE = (
   process.env.LLM_BASE_URL
@@ -1339,6 +1343,23 @@ export function reviewComplianceContent(input: {
       message: '存在待核验或资料缺口时不得使用无保留肯定结论',
     })
   }
+  reviewBusinessDocumentEditorialQuality(input.content, {
+    includeSummaries: false,
+    // 模板固定包含五项投资理由和七项合规核查；零证据场景允许每项各保留
+    // 一次具体核验边界，但仍由章节级反套话规则禁止复制同一句占位文案。
+    maxFormulaicCaveats: 20,
+  }).forEach((issue) => {
+    const code: ComplianceReviewIssue['code'] = issue.code === 'DUPLICATED_SENTENCE'
+      ? 'DUPLICATED_FACT'
+      : issue.code === 'INTERNAL_WORKFLOW_LEAK'
+        ? 'SOURCE_PROCESS_LEAK'
+        : 'AI_STYLE_DRIFT'
+    addIssue(issues, {
+      code,
+      sectionTitle: issue.sectionTitle,
+      message: issue.message,
+    })
+  })
   return {
     passed: issues.length === 0,
     attempt: input.attempt ?? 1,
@@ -1426,7 +1447,7 @@ function assembleContent(input: {
   )
   return {
     title: expectedComplianceTitle(input.project.name),
-    executiveSummary: `${input.template.disclaimer} 本初稿仅依据截至${input.sourceCutoffDate}的当前项目资料及可定位公开证据逐章节生成；格式规范未被作为事实来源。${unresolvedSections.length ? `当前仍有${unresolvedSections.length}个逻辑章节包含待核验事项或资料缺口。` : '各章节仍须由法务或风控人员完成终审。'}`,
+    executiveSummary: input.template.disclaimer,
     sections,
     highlights: highlights.length ? highlights : ['现阶段仅形成条件性初步分析，尚需结合专项尽调完成投资判断。'],
     risks: unresolvedSections.length
@@ -1440,6 +1461,35 @@ function sectionIssues(report: ComplianceReviewReport, title: string) {
   return report.issues
     .filter((issue) => issue.sectionTitle === title)
     .map((issue) => `[${issue.code}] ${issue.message}`)
+}
+
+function sanitizeComplianceContent(content: BusinessContent, sources: EvidenceSource[]) {
+  const sanitized = sanitizeBusinessContentForDelivery(content, {
+    sectionPriority: [
+      '公司简介',
+      '核心团队',
+      '产品及技术',
+      '投资计划',
+      '投资理由',
+      '投资情形分析',
+      '结论',
+    ],
+  })
+  sanitized.sections = sanitized.sections.map((section) => {
+    if (section.title !== '投资理由') return section
+    return {
+      ...section,
+      findings: section.findings.map((finding, index) =>
+        finding.status === '资料缺口' || citationRelevant(finding, sources)
+          ? finding
+          : investmentReasonMissingFinding(
+              COMPLIANCE_INVESTMENT_REASON_TOPICS[
+                Math.min(index, COMPLIANCE_INVESTMENT_REASON_TOPICS.length - 1)
+              ],
+            )),
+    }
+  })
+  return sanitized
 }
 
 export async function composeComplianceStatement(input: {
@@ -1464,12 +1514,13 @@ export async function composeComplianceStatement(input: {
       modelState,
     }))
   }
-  let content = assembleContent({
+  replaceRemainingCrossSectionDuplicates(generatedSections)
+  let content = sanitizeComplianceContent(assembleContent({
     generatedSections,
     template: input.template,
     project: input.project,
     sourceCutoffDate: input.sourceCutoffDate,
-  })
+  }), input.sources)
   const reviewReports: ComplianceReviewReport[] = []
   let regenerationRounds = 0
   for (let attempt = 1; attempt <= MAX_REVIEW_REGENERATION_ROUNDS + 1; attempt += 1) {
@@ -1519,12 +1570,13 @@ export async function composeComplianceStatement(input: {
         modelState,
       }))
     }
-    content = assembleContent({
+    replaceRemainingCrossSectionDuplicates(generatedSections)
+    content = sanitizeComplianceContent(assembleContent({
       generatedSections,
       template: input.template,
       project: input.project,
       sourceCutoffDate: input.sourceCutoffDate,
-    })
+    }), input.sources)
   }
 
   const lastReport = reviewReports[reviewReports.length - 1]
@@ -1537,12 +1589,12 @@ export async function composeComplianceStatement(input: {
     if (config && packet) generatedSections.set(title, fallbackChapter(config, packet))
   }
   replaceRemainingCrossSectionDuplicates(generatedSections)
-  content = assembleContent({
+  content = sanitizeComplianceContent(assembleContent({
     generatedSections,
     template: input.template,
     project: input.project,
     sourceCutoffDate: input.sourceCutoffDate,
-  })
+  }), input.sources)
   const finalReport = reviewComplianceContent({
     content,
     template: input.template,

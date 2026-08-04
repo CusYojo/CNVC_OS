@@ -32,6 +32,22 @@ def env_flag(name: str, default: bool) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def env_int(name: str, default: int, minimum: int, maximum: int) -> int:
+    try:
+        value = int(os.getenv(name, str(default)))
+    except ValueError:
+        value = default
+    return max(minimum, min(maximum, value))
+
+
+def env_float(name: str, default: float, minimum: float, maximum: float) -> float:
+    try:
+        value = float(os.getenv(name, str(default)))
+    except ValueError:
+        value = default
+    return max(minimum, min(maximum, value))
+
+
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = Path(os.getenv("RADAR_DATA_DIR", str(BASE_DIR / "data"))).expanduser().resolve()
 STATIC_DIR = BASE_DIR / "static"
@@ -45,6 +61,7 @@ INVESTMENT_FILE = DATA_DIR / "investment_candidates.jsonl"
 WECHAT_SOURCES_FILE = DATA_DIR / "wechat_985_sources.json"
 AUTO_STATUS_FILE = DATA_DIR / "auto_crawler_status.json"
 WECHAT_DAILY_STATUS_FILE = DATA_DIR / "wechat_daily_status.json"
+WECHAT_SOURCE_STATUS_FILE = DATA_DIR / "wechat_source_status.json"
 WECHAT_ACCOUNTS_XLSX = Path(
     os.getenv("RADAR_WECHAT_ACCOUNTS_XLSX", str(BASE_DIR / "公众号来源.xlsx"))
 ).expanduser().resolve()
@@ -71,7 +88,12 @@ WECHAT_DAILY_ENABLED = env_flag("RADAR_WECHAT_DAILY_ENABLED", True)
 CHINA_TZ = ZoneInfo("Asia/Shanghai")
 WECHAT_DAILY_RUN_HOUR = 8
 WECHAT_DAILY_RUN_MINUTE = 30
-WECHAT_API_MAX_WORKERS = 2
+WECHAT_API_MAX_WORKERS = env_int("RADAR_WECHAT_MAX_WORKERS", 4, 1, 8)
+WECHAT_API_REQUEST_ATTEMPTS = env_int("RADAR_WECHAT_REQUEST_ATTEMPTS", 3, 1, 6)
+WECHAT_API_RETRY_BASE_SECONDS = env_float("RADAR_WECHAT_RETRY_BASE_SECONDS", 1, 0.1, 10)
+WECHAT_RETRY_INTERVAL_SECONDS = env_int("RADAR_WECHAT_RETRY_INTERVAL_SECONDS", 1800, 300, 86_400)
+WECHAT_RETRY_BATCH_SIZE = env_int("RADAR_WECHAT_RETRY_BATCH_SIZE", 100, 1, 300)
+WECHAT_INSTITUTION_INTERVAL_SECONDS = env_int("RADAR_WECHAT_INSTITUTION_INTERVAL_SECONDS", 7200, 1800, 86_400)
 
 
 TOP_VENUES = (
@@ -626,6 +648,8 @@ class WechatChatPushRequest(BaseModel):
 
 auto_crawler_task: asyncio.Task | None = None
 wechat_daily_task: asyncio.Task | None = None
+wechat_retry_task: asyncio.Task | None = None
+wechat_institution_task: asyncio.Task | None = None
 auto_crawler_running = False
 wechat_daily_running = False
 
@@ -2499,6 +2523,9 @@ def default_wechat_daily_status() -> dict:
         "last_error": "",
         "consecutive_error_runs": 0,
         "run_count": 0,
+        "pending_retry_accounts": [],
+        "last_retry_result": None,
+        "last_institution_result": None,
     }
 
 
@@ -2517,6 +2544,77 @@ def read_wechat_daily_status() -> dict:
 def write_wechat_daily_status(status: dict) -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     WECHAT_DAILY_STATUS_FILE.write_text(json.dumps(status, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def read_wechat_source_status() -> dict:
+    if not WECHAT_SOURCE_STATUS_FILE.exists():
+        return {"updated_at": "", "sources": {}}
+    try:
+        data = json.loads(WECHAT_SOURCE_STATUS_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {"updated_at": "", "sources": {}}
+    if not isinstance(data, dict) or not isinstance(data.get("sources"), dict):
+        return {"updated_at": "", "sources": {}}
+    return data
+
+
+def write_wechat_source_status(status: dict) -> None:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    WECHAT_SOURCE_STATUS_FILE.write_text(json.dumps(status, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def update_wechat_source_status(account_results: list[dict], rows: list[dict], retained_rows: list[dict]) -> None:
+    checked_at = utc_now_iso()
+    status = read_wechat_source_status()
+    sources = status.setdefault("sources", {})
+    rows_by_source: dict[str, list[dict]] = {}
+    retained_by_source: dict[str, list[dict]] = {}
+    for row in rows:
+        rows_by_source.setdefault(clean_text(row.get("source_key", "")), []).append(row)
+    for row in retained_rows:
+        retained_by_source.setdefault(clean_text(row.get("source_key", "")), []).append(row)
+
+    for result in account_results:
+        wx_name = clean_text(result.get("wx_name", ""))
+        if not wx_name:
+            continue
+        previous = sources.get(wx_name, {}) if isinstance(sources.get(wx_name), dict) else {}
+        fetched_rows = rows_by_source.get(wx_name, [])
+        effective_rows = retained_by_source.get(wx_name, [])
+        latest_published = max((clean_text(row.get("published_at", "")) for row in fetched_rows), default="")
+        latest_effective = max((clean_text(row.get("published_at", "")) for row in effective_rows), default="")
+        error = clean_text(result.get("error", ""))[:500]
+        sources[wx_name] = {
+            **previous,
+            "group": clean_text(result.get("group", "")),
+            "account_name": clean_text(result.get("account_name", "")),
+            "wx_name": wx_name,
+            "last_checked_at": checked_at,
+            "last_success_at": previous.get("last_success_at", "") if error else checked_at,
+            "last_error_at": checked_at if error else previous.get("last_error_at", ""),
+            "last_error": error,
+            "last_fetch_count": int(result.get("fetched", 0) or 0),
+            "last_article_published_at": latest_published or previous.get("last_article_published_at", ""),
+            "last_effective_lead_at": latest_effective or previous.get("last_effective_lead_at", ""),
+        }
+    status["updated_at"] = checked_at
+    write_wechat_source_status(status)
+
+
+def summarize_wechat_source_status(group: str = "") -> dict:
+    status = read_wechat_source_status()
+    rows = list(status.get("sources", {}).values())
+    if group:
+        rows = [row for row in rows if clean_text(row.get("group", "")) == group]
+    return {
+        "updated_at": status.get("updated_at", ""),
+        "total": len(rows),
+        "healthy": len([row for row in rows if not row.get("last_error")]),
+        "failed": len([row for row in rows if row.get("last_error")]),
+        "last_checked_at": max((clean_text(row.get("last_checked_at", "")) for row in rows), default=""),
+        "last_article_published_at": max((clean_text(row.get("last_article_published_at", "")) for row in rows), default=""),
+        "last_effective_lead_at": max((clean_text(row.get("last_effective_lead_at", "")) for row in rows), default=""),
+    }
 
 
 def today_china() -> datetime:
@@ -2591,15 +2689,15 @@ def probe_gsdata_health(force: bool = False) -> dict[str, Any]:
                 "page": "1",
                 "limit": "1",
             }
-            token = gsdata_access_token(params, GSDATA_WECHAT_ROUTER)
             try:
-                response = httpx.get(
-                    GSDATA_API_URL,
-                    params=params,
-                    headers={"access-token": token},
-                    timeout=8,
-                )
-                response.raise_for_status()
+                with httpx.Client(follow_redirects=True) as client:
+                    response = gsdata_get_with_retry(
+                        client,
+                        params,
+                        GSDATA_WECHAT_ROUTER,
+                        timeout=8,
+                        attempts=2,
+                    )
                 payload = response.json()
                 if payload.get("success"):
                     result = {"ok": True, "status": "authenticated", "error": ""}
@@ -2623,6 +2721,49 @@ def gsdata_access_token(params: dict[str, str], router: str) -> str:
     string_a = f"_{joined}_"
     sign = hashlib.md5(f"{app_secret}{string_a}{app_secret}".encode("utf-8")).hexdigest()
     return base64.b64encode(f"{app_key}:{sign}:{router}".encode("utf-8")).decode("ascii")
+
+
+def gsdata_get_with_retry(
+    client: httpx.Client,
+    params: dict[str, str],
+    router: str,
+    timeout: float = 20,
+    attempts: int | None = None,
+) -> httpx.Response:
+    attempts = attempts or WECHAT_API_REQUEST_ATTEMPTS
+    token = gsdata_access_token(params, router)
+    last_error: Exception | None = None
+    retryable_statuses = {429, 500, 502, 503, 504}
+    for attempt in range(attempts):
+        try:
+            response = client.get(
+                GSDATA_API_URL,
+                params=params,
+                headers={"access-token": token},
+                timeout=timeout,
+            )
+            if response.status_code not in retryable_statuses:
+                response.raise_for_status()
+                return response
+            response.raise_for_status()
+        except (httpx.TransportError, httpx.HTTPStatusError) as exc:
+            last_error = exc
+            status_code = exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else 0
+            if isinstance(exc, httpx.HTTPStatusError) and status_code not in retryable_statuses:
+                raise
+            if attempt + 1 >= attempts:
+                raise
+            retry_after = ""
+            if isinstance(exc, httpx.HTTPStatusError):
+                retry_after = exc.response.headers.get("retry-after", "")
+            try:
+                delay = max(float(retry_after), WECHAT_API_RETRY_BASE_SECONDS * (2 ** attempt))
+            except ValueError:
+                delay = WECHAT_API_RETRY_BASE_SECONDS * (2 ** attempt)
+            time.sleep(min(delay, 30))
+    if last_error:
+        raise last_error
+    raise RuntimeError("GSData 请求失败")
 
 
 def load_wechat_api_accounts() -> list[dict]:
@@ -2657,6 +2798,8 @@ def filter_wechat_api_accounts(req: WechatApiRunRequest) -> list[dict]:
         accounts = [account for account in accounts if account["group"] in groups]
     if wx_names:
         accounts = [account for account in accounts if account["wx_name"].casefold() in wx_names]
+    # 机构公众号数量少且对投资判断更直接，优先进入线程池，避免排在上千个高校账号之后。
+    accounts.sort(key=lambda account: (0 if account["group"] == "机构" else 1, account["account_name"]))
     if req.max_accounts:
         accounts = accounts[: req.max_accounts]
     return accounts
@@ -2763,11 +2906,12 @@ def fetch_gsdata_wechat_content(news_local_url: str, client: httpx.Client | None
     if not news_local_url:
         return "", "missing_news_local_url"
     params = {"news_local_url": news_local_url}
-    token = gsdata_access_token(params, GSDATA_WECHAT_CONTENT_ROUTER)
     try:
-        requester = client or httpx
-        response = requester.get(GSDATA_API_URL, params=params, headers={"access-token": token}, timeout=20)
-        response.raise_for_status()
+        if client is None:
+            with httpx.Client(follow_redirects=True) as owned_client:
+                response = gsdata_get_with_retry(owned_client, params, GSDATA_WECHAT_CONTENT_ROUTER)
+        else:
+            response = gsdata_get_with_retry(client, params, GSDATA_WECHAT_CONTENT_ROUTER)
         payload = response.json()
     except Exception as exc:
         return "", f"gsdata_content_error: {exc}"
@@ -2779,12 +2923,15 @@ def fetch_gsdata_wechat_content(news_local_url: str, client: httpx.Client | None
     return text, "gsdata_content_ok" if text else "gsdata_content_empty"
 
 
-def fetch_wechat_mp_article_text(link: str) -> tuple[str, str]:
+def fetch_wechat_mp_article_text(link: str, client: httpx.Client | None = None) -> tuple[str, str]:
     link = clean_text(link)
     if not link or "mp.weixin.qq.com" not in link:
         return "", "missing_mp_link"
     try:
-        response = httpx.get(link, headers=WECHAT_ARTICLE_HEADERS, follow_redirects=True, timeout=15)
+        if client is None:
+            response = httpx.get(link, headers=WECHAT_ARTICLE_HEADERS, follow_redirects=True, timeout=15)
+        else:
+            response = client.get(link, headers=WECHAT_ARTICLE_HEADERS, follow_redirects=True, timeout=15)
         response.raise_for_status()
     except Exception as exc:
         return "", f"mp_article_error: {exc}"
@@ -2799,7 +2946,7 @@ def fetch_wechat_article_text(article: dict, client: httpx.Client | None = None)
     text, status = fetch_gsdata_wechat_content(article.get("news_local_url", ""), client)
     if text:
         return text, status
-    fallback_text, fallback_status = fetch_wechat_mp_article_text(article.get("news_url", ""))
+    fallback_text, fallback_status = fetch_wechat_mp_article_text(article.get("news_url", ""), client)
     if fallback_text:
         return fallback_text, fallback_status
     return "", f"{status}; {fallback_status}"
@@ -2857,53 +3004,64 @@ def wechat_api_item(account: dict, article: dict, content_client: httpx.Client |
     return attach_project_profile(item)
 
 
-def fetch_wechat_api_account(account: dict, date_value: str, days: int, limit: int) -> tuple[list[dict], dict | None]:
+def fetch_wechat_api_account(
+    account: dict,
+    date_value: str,
+    days: int,
+    limit: int,
+    client: httpx.Client | None = None,
+) -> tuple[list[dict], dict | None]:
+    if client is None:
+        with httpx.Client(timeout=20, follow_redirects=True) as owned_client:
+            return fetch_wechat_api_account(account, date_value, days, limit, owned_client)
     start, end = date_range_for_wechat_api(date_value, days)
     rows = []
     seen = set()
     page_size = min(50, max(1, limit))
     max_pages = max(1, min(10, (limit + page_size - 1) // page_size))
-    with httpx.Client(timeout=20, follow_redirects=True) as content_client:
-        for page in range(1, max_pages + 1):
-            params = {
+    for page in range(1, max_pages + 1):
+        params = {
+            "wx_name": account["wx_name"],
+            "posttime_start": start,
+            "posttime_end": end,
+            "order": "desc",
+            "sort": "posttime",
+            "page": str(page),
+            "limit": str(page_size),
+        }
+        try:
+            response = gsdata_get_with_retry(client, params, GSDATA_WECHAT_ROUTER)
+            payload = response.json()
+        except Exception as exc:
+            return rows, {
+                "group": account["group"],
+                "account_name": account["account_name"],
                 "wx_name": account["wx_name"],
-                "posttime_start": start,
-                "posttime_end": end,
-                "order": "desc",
-                "sort": "posttime",
-                "page": str(page),
-                "limit": str(page_size),
+                "error": str(exc),
             }
-            token = gsdata_access_token(params, GSDATA_WECHAT_ROUTER)
-            try:
-                response = None
-                for attempt in range(3):
-                    response = httpx.get(GSDATA_API_URL, params=params, headers={"access-token": token}, timeout=20)
-                    if response.status_code != 429:
-                        break
-                    time.sleep(1.5 * (attempt + 1))
-                response.raise_for_status()
-                payload = response.json()
-            except Exception as exc:
-                return rows, {"account_name": account["account_name"], "wx_name": account["wx_name"], "error": str(exc)}
-            if not payload.get("success"):
-                return rows, {"account_name": account["account_name"], "wx_name": account["wx_name"], "error": json.dumps(payload, ensure_ascii=False)[:500]}
-            data = payload.get("data") or {}
-            articles = data.get("newsList") or []
-            if not articles:
+        if not payload.get("success"):
+            return rows, {
+                "group": account["group"],
+                "account_name": account["account_name"],
+                "wx_name": account["wx_name"],
+                "error": json.dumps(payload, ensure_ascii=False)[:500],
+            }
+        data = payload.get("data") or {}
+        articles = data.get("newsList") or []
+        if not articles:
+            break
+        for article in articles:
+            if not article.get("news_title"):
+                continue
+            item = wechat_api_item(account, article, client)
+            key = source_key(item)
+            if key and key not in seen:
+                rows.append(item)
+                seen.add(key)
+            if len(rows) >= limit:
                 break
-            for article in articles:
-                if not article.get("news_title"):
-                    continue
-                item = wechat_api_item(account, article, content_client)
-                key = source_key(item)
-                if key and key not in seen:
-                    rows.append(item)
-                    seen.add(key)
-                if len(rows) >= limit:
-                    break
-            if len(rows) >= limit or len(articles) < page_size:
-                break
+        if len(rows) >= limit or len(articles) < page_size:
+            break
     return rows, None
 
 
@@ -2914,30 +3072,58 @@ def fetch_wechat_api_batch(req: WechatApiRunRequest) -> dict:
     errors = []
     account_results = []
     worker_count = min(WECHAT_API_MAX_WORKERS, max(1, len(accounts)))
-    with ThreadPoolExecutor(max_workers=worker_count) as executor:
-        futures = {
-            executor.submit(fetch_wechat_api_account, account, date_value, req.days, req.limit_per_account): account
-            for account in accounts
-        }
-        for future in as_completed(futures):
-            account = futures[future]
-            try:
-                account_rows, error = future.result()
-            except Exception as exc:
-                account_rows = []
-                error = {"account_name": account["account_name"], "wx_name": account["wx_name"], "error": str(exc)}
-            if error:
-                errors.append(error)
-            rows.extend(account_rows)
-            account_results.append({
-                "group": account["group"],
-                "account_name": account["account_name"],
-                "wx_name": account["wx_name"],
-                "fetched": len(account_rows),
-                "error": error["error"] if error else "",
-            })
+    with httpx.Client(timeout=20, follow_redirects=True) as shared_client:
+        with ThreadPoolExecutor(max_workers=worker_count) as executor:
+            futures = {
+                executor.submit(
+                    fetch_wechat_api_account,
+                    account,
+                    date_value,
+                    req.days,
+                    req.limit_per_account,
+                    shared_client,
+                ): account
+                for account in accounts
+            }
+            for future in as_completed(futures):
+                account = futures[future]
+                try:
+                    account_rows, error = future.result()
+                except Exception as exc:
+                    account_rows = []
+                    error = {
+                        "group": account["group"],
+                        "account_name": account["account_name"],
+                        "wx_name": account["wx_name"],
+                        "error": str(exc),
+                    }
+                if error:
+                    errors.append(error)
+                rows.extend(account_rows)
+                account_results.append({
+                    "group": account["group"],
+                    "account_name": account["account_name"],
+                    "wx_name": account["wx_name"],
+                    "fetched": len(account_rows),
+                    "error": error["error"] if error else "",
+                })
     retained_rows = [row for row in rows if row.get("worth_attention")]
     written = append_jsonl(WECHAT_API_FILE, retained_rows)
+    update_wechat_source_status(account_results, rows, retained_rows)
+    group_stats = {}
+    for group in sorted({account["group"] for account in accounts}):
+        group_accounts = [result for result in account_results if result["group"] == group]
+        group_rows = [row for row in rows if row.get("source_group") == f"{group}公众号"]
+        group_retained = [row for row in retained_rows if row.get("source_group") == f"{group}公众号"]
+        group_stats[group] = {
+            "accounts": len(group_accounts),
+            "failed": len([result for result in group_accounts if result["error"]]),
+            "fetched": len(group_rows),
+            "retained": len(group_retained),
+            "latest_published_at": max((clean_text(row.get("published_at", "")) for row in group_rows), default=""),
+            "latest_effective_lead_at": max((clean_text(row.get("published_at", "")) for row in group_retained), default=""),
+        }
+    errors.sort(key=lambda error: (0 if error.get("group") == "机构" else 1, error.get("account_name", "")))
     return {
         "date": date_value,
         "days": req.days,
@@ -2950,6 +3136,16 @@ def fetch_wechat_api_batch(req: WechatApiRunRequest) -> dict:
         "worth_attention": len(retained_rows),
         "errors": errors,
         "account_results": account_results,
+        "group_stats": group_stats,
+        "failed_accounts": [
+            {
+                "group": error.get("group", ""),
+                "account_name": error.get("account_name", ""),
+                "wx_name": error.get("wx_name", ""),
+            }
+            for error in errors
+            if error.get("wx_name")
+        ],
         "items": retained_rows[:100],
     }
 
@@ -3606,6 +3802,45 @@ async def auto_crawler_loop() -> None:
         await asyncio.sleep(AUTO_CRAWL_INTERVAL_SECONDS)
 
 
+def compact_wechat_result(result: dict) -> dict:
+    return {
+        "date": result.get("date", ""),
+        "date_end": result.get("date_end", ""),
+        "days": result.get("days", 1),
+        "accounts": result.get("accounts", 0),
+        "fetched": result.get("fetched", 0),
+        "retained": result.get("retained", 0),
+        "filtered": result.get("filtered", 0),
+        "written": result.get("written", 0),
+        "worth_attention": result.get("worth_attention", 0),
+        "errors": len(result.get("errors", [])),
+        "error_samples": result.get("errors", [])[:20],
+        "group_stats": result.get("group_stats", {}),
+        "finished_at": utc_now_iso(),
+    }
+
+
+def reconcile_pending_wechat_accounts(existing: list[dict], result: dict) -> list[dict]:
+    attempted = {
+        clean_text(item.get("wx_name", "")).casefold()
+        for item in result.get("account_results", [])
+        if clean_text(item.get("wx_name", ""))
+    }
+    merged = {
+        clean_text(item.get("wx_name", "")).casefold(): item
+        for item in existing
+        if clean_text(item.get("wx_name", "")) and clean_text(item.get("wx_name", "")).casefold() not in attempted
+    }
+    for item in result.get("failed_accounts", []):
+        wx_name = clean_text(item.get("wx_name", ""))
+        if wx_name:
+            merged[wx_name.casefold()] = item
+    return sorted(
+        merged.values(),
+        key=lambda item: (0 if item.get("group") == "机构" else 1, item.get("account_name", "")),
+    )
+
+
 async def run_wechat_daily_once(req: WechatApiRunRequest | None = None) -> dict:
     global wechat_daily_running
     if wechat_daily_running:
@@ -3629,19 +3864,11 @@ async def run_wechat_daily_once(req: WechatApiRunRequest | None = None) -> dict:
     try:
         result = await asyncio.to_thread(fetch_wechat_api_batch, req)
         status = read_wechat_daily_status()
-        status["last_result"] = {
-            "date": result.get("date", ""),
-            "date_end": result.get("date_end", ""),
-            "days": result.get("days", 1),
-            "accounts": result.get("accounts", 0),
-            "fetched": result.get("fetched", 0),
-            "retained": result.get("retained", 0),
-            "filtered": result.get("filtered", 0),
-            "written": result.get("written", 0),
-            "worth_attention": result.get("worth_attention", 0),
-            "errors": len(result.get("errors", [])),
-            "error_samples": result.get("errors", [])[:20],
-        }
+        status["last_result"] = compact_wechat_result(result)
+        status["pending_retry_accounts"] = reconcile_pending_wechat_accounts(
+            status.get("pending_retry_accounts", []),
+            result,
+        )
         status["run_count"] = int(status.get("run_count", 0)) + 1
         error_count = len(result.get("errors", []))
         status["consecutive_error_runs"] = (
@@ -3657,6 +3884,73 @@ async def run_wechat_daily_once(req: WechatApiRunRequest | None = None) -> dict:
         status["running"] = False
         status["last_finished_at"] = utc_now_iso()
         status["next_run_at"] = next_wechat_daily_run_at().isoformat()
+        write_wechat_daily_status(status)
+    return status
+
+
+async def run_wechat_retry_once() -> dict:
+    global wechat_daily_running
+    status = read_wechat_daily_status()
+    pending = status.get("pending_retry_accounts", [])
+    if wechat_daily_running or not pending:
+        return status
+    targets = pending[:WECHAT_RETRY_BATCH_SIZE]
+    wx_names = [clean_text(item.get("wx_name", "")) for item in targets if clean_text(item.get("wx_name", ""))]
+    if not wx_names:
+        return status
+    wechat_daily_running = True
+    try:
+        result = await asyncio.to_thread(
+            fetch_wechat_api_batch,
+            WechatApiRunRequest(
+                date=wechat_default_start_date(7),
+                days=7,
+                wx_names=wx_names,
+                limit_per_account=100,
+            ),
+        )
+        status = read_wechat_daily_status()
+        status["pending_retry_accounts"] = reconcile_pending_wechat_accounts(
+            status.get("pending_retry_accounts", []),
+            result,
+        )
+        status["last_retry_result"] = compact_wechat_result(result)
+    except Exception as exc:
+        status = read_wechat_daily_status()
+        status["last_retry_result"] = {"finished_at": utc_now_iso(), "error": clean_text(str(exc))[:500]}
+    finally:
+        wechat_daily_running = False
+        write_wechat_daily_status(status)
+    return status
+
+
+async def run_wechat_institution_once() -> dict:
+    global wechat_daily_running
+    status = read_wechat_daily_status()
+    if wechat_daily_running:
+        return status
+    wechat_daily_running = True
+    try:
+        result = await asyncio.to_thread(
+            fetch_wechat_api_batch,
+            WechatApiRunRequest(
+                date=wechat_default_start_date(7),
+                days=7,
+                groups=["机构"],
+                limit_per_account=100,
+            ),
+        )
+        status = read_wechat_daily_status()
+        status["pending_retry_accounts"] = reconcile_pending_wechat_accounts(
+            status.get("pending_retry_accounts", []),
+            result,
+        )
+        status["last_institution_result"] = compact_wechat_result(result)
+    except Exception as exc:
+        status = read_wechat_daily_status()
+        status["last_institution_result"] = {"finished_at": utc_now_iso(), "error": clean_text(str(exc))[:500]}
+    finally:
+        wechat_daily_running = False
         write_wechat_daily_status(status)
     return status
 
@@ -3677,9 +3971,23 @@ async def wechat_daily_loop() -> None:
         await run_wechat_daily_once(WechatApiRunRequest(date=wechat_default_start_date(7), days=7, groups=["高校", "机构"], limit_per_account=100))
 
 
+async def wechat_retry_loop() -> None:
+    while True:
+        await asyncio.sleep(WECHAT_RETRY_INTERVAL_SECONDS)
+        await run_wechat_retry_once()
+
+
+async def wechat_institution_loop() -> None:
+    # 服务启动后先快速刷新一次机构源，随后按较短周期独立更新。
+    await asyncio.sleep(30)
+    while True:
+        await run_wechat_institution_once()
+        await asyncio.sleep(WECHAT_INSTITUTION_INTERVAL_SECONDS)
+
+
 @app.on_event("startup")
 async def start_auto_crawler():
-    global auto_crawler_task, wechat_daily_task
+    global auto_crawler_task, wechat_daily_task, wechat_retry_task, wechat_institution_task
     status = read_auto_status()
     status["enabled"] = AUTO_CRAWL_ENABLED
     status["running"] = False
@@ -3705,6 +4013,8 @@ async def start_auto_crawler():
     write_wechat_daily_status(daily_status)
     if daily_enabled:
         wechat_daily_task = asyncio.create_task(wechat_daily_loop())
+        wechat_retry_task = asyncio.create_task(wechat_retry_loop())
+        wechat_institution_task = asyncio.create_task(wechat_institution_loop())
 
 
 @app.on_event("shutdown")
@@ -3719,6 +4029,18 @@ async def stop_auto_crawler():
         wechat_daily_task.cancel()
         try:
             await wechat_daily_task
+        except asyncio.CancelledError:
+            pass
+    if wechat_retry_task:
+        wechat_retry_task.cancel()
+        try:
+            await wechat_retry_task
+        except asyncio.CancelledError:
+            pass
+    if wechat_institution_task:
+        wechat_institution_task.cancel()
+        try:
+            await wechat_institution_task
         except asyncio.CancelledError:
             pass
 
@@ -3747,6 +4069,10 @@ async def health(deep: bool = True):
         "accounts_file": str(WECHAT_ACCOUNTS_XLSX),
         "gsdata_configured": configured,
         "gsdata_health": gsdata_health,
+        "wechat_source_freshness": {
+            "all": summarize_wechat_source_status(),
+            "institution": summarize_wechat_source_status("机构"),
+        },
         "auto_crawl_enabled": AUTO_CRAWL_ENABLED,
         "wechat_daily_enabled": WECHAT_DAILY_ENABLED and configured,
     }
@@ -3949,7 +4275,35 @@ async def wechat_api_accounts():
 async def wechat_api_daily_status():
     status = read_wechat_daily_status()
     status["running"] = wechat_daily_running
+    pending = status.pop("pending_retry_accounts", [])
+    status["pending_retry_count"] = len(pending)
+    status["pending_retry_samples"] = pending[:20]
+    status["source_freshness"] = {
+        "all": summarize_wechat_source_status(),
+        "institution": summarize_wechat_source_status("机构"),
+        "university": summarize_wechat_source_status("高校"),
+    }
     return status
+
+
+@app.get("/api/wechat-api/source-status")
+async def wechat_api_source_status(
+    group: str = "",
+    failures_only: bool = False,
+    limit: int = Query(default=200, ge=1, le=2000),
+):
+    status = read_wechat_source_status()
+    rows = list(status.get("sources", {}).values())
+    if group:
+        rows = [row for row in rows if clean_text(row.get("group", "")) == group]
+    if failures_only:
+        rows = [row for row in rows if row.get("last_error")]
+    rows.sort(key=lambda row: (row.get("last_success_at", ""), row.get("account_name", "")))
+    return {
+        "summary": summarize_wechat_source_status(group),
+        "total": len(rows),
+        "items": rows[:limit],
+    }
 
 
 @app.post("/api/wechat-api/run")

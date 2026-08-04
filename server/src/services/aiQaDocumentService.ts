@@ -22,8 +22,8 @@ import type { QaTemplateProfile } from './aiQaTemplateParser.js'
 import { sanitizeClientVisibleEvidenceWording } from './aiClientVisibleTextService.js'
 
 // 核心规范统一使用宋体；生产环境可通过环境变量切换到已批准的宋体实现。
-const BODY_FONT = process.env.AI_QA_BODY_FONT || process.env.AI_DOCUMENT_SONG_FONT || 'Songti SC'
-const HEADING_FONT = process.env.AI_QA_HEADING_FONT || process.env.AI_DOCUMENT_SONG_FONT || 'Songti SC'
+const BODY_FONT = process.env.AI_QA_BODY_FONT || process.env.AI_DOCUMENT_SONG_FONT || '宋体'
+const HEADING_FONT = process.env.AI_QA_HEADING_FONT || process.env.AI_DOCUMENT_SONG_FONT || '宋体'
 const LATIN_FONT = 'Times New Roman'
 const MUTED = '595959'
 const ANSWER_HEADING_PATTERN =
@@ -546,14 +546,14 @@ export async function inspectProjectQaDocx(
     const answerLabel = answerParagraphs.find((paragraph) =>
       /^(?:答复|回答)\s*[：:]/.test(paragraph))
     if (
-      answerParagraphs.length < 2
+      answerParagraphs.length < 1
       || answerParagraphs.length > 6
       || answerLabel
     ) {
       throw new Error(
         answerLabel
           ? `Q&A DOCX 正文 Q${index + 1} 不得显示“答复：”或“回答：”标签`
-          : `Q&A DOCX 正文 Q${index + 1} 应为 2-6 个自然段，实际为 ${answerParagraphs.length} 段`,
+          : `Q&A DOCX 正文 Q${index + 1} 应为 1-6 个自然段，实际为 ${answerParagraphs.length} 段`,
       )
     }
   })

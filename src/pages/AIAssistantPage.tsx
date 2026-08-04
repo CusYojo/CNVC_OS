@@ -359,6 +359,31 @@ function buildConversationTimeline(
     stableOrder: index,
     message,
   }))
+  const visibleUserPrompts = new Set(
+    messages
+      .filter((message) => message.role === 'user')
+      .map((message) => displayUserMessageText(message).replace(/\s+/g, ' ').trim())
+      .filter(Boolean),
+  )
+  const taskPromptItems: ConversationTimelineItem[] = tasks.flatMap((task, index) => {
+    const prompt = typeof task.parameters.conversationPrompt === 'string'
+      ? task.parameters.conversationPrompt.replace(/\s+/g, ' ').trim()
+      : ''
+    if (!prompt || visibleUserPrompts.has(prompt)) return []
+    return [{
+      kind: 'message' as const,
+      key: `task-prompt:${task.id}`,
+      timestampMs: (validTimelineTimestamp(task.createdAt) ?? Number.MAX_SAFE_INTEGER) - 1,
+      stableOrder: messages.length + index * 2,
+      message: {
+        id: `task-prompt:${task.id}`,
+        role: 'user' as const,
+        parts: [{ type: 'text', text: prompt }],
+        timestamp: task.createdAt,
+        malformed: false,
+      },
+    }]
+  })
   const taskItems: ConversationTimelineItem[] = tasks.map((task, index) => ({
     kind: 'task',
     key: `task:${task.id}`,
@@ -367,17 +392,17 @@ function buildConversationTimeline(
         ? task.parameters.clientTimelineStartedAt
         : task.createdAt,
     ) ?? Number.MAX_SAFE_INTEGER,
-    stableOrder: messages.length + index,
+    stableOrder: messages.length + index * 2 + 1,
     task,
   }))
   const qaItems: ConversationTimelineItem[] = answers.map((answer, index) => ({
     kind: 'qa',
     key: `qa:${answer.id}`,
     timestampMs: validTimelineTimestamp(answer.createdAt) ?? Number.MAX_SAFE_INTEGER,
-    stableOrder: messages.length + tasks.length + index,
+    stableOrder: messages.length + tasks.length * 2 + index,
     answer,
   }))
-  return [...messageItems, ...taskItems, ...qaItems].sort((left, right) =>
+  return [...messageItems, ...taskPromptItems, ...taskItems, ...qaItems].sort((left, right) =>
     left.timestampMs - right.timestampMs || left.stableOrder - right.stableOrder)
 }
 
@@ -397,7 +422,22 @@ function mergeAiTaskSnapshot(
     const preparationId = task.parameters.clientPreparationId
     return typeof preparationId !== 'string' || !claimedPreparationIds.has(preparationId)
   })
-  return [...serverTasks, ...clientTasks]
+  const mergedServerTasks = serverTasks.map((task) => {
+    const currentTask = currentTasks.find((item) => item.id === task.id)
+    const currentPrompt = currentTask?.parameters.conversationPrompt
+    if (
+      typeof task.parameters.conversationPrompt !== 'string'
+      && typeof currentPrompt === 'string'
+      && currentPrompt.trim()
+    ) {
+      return {
+        ...task,
+        parameters: { ...task.parameters, conversationPrompt: currentPrompt },
+      }
+    }
+    return task
+  })
+  return [...mergedServerTasks, ...clientTasks]
 }
 
 // ———————————— PPT 生成任务看板（长任务的阶段 + 计时 + 预期）————————————
@@ -1069,7 +1109,7 @@ function Chat() {
       ? `【范围】全局知识库\n【用户问题】${clean}${fileCtx}`
       : `【当前项目】${effectiveProject?.projectName ?? ''}\n【projectId】${effectiveProject?.projectId ?? ''}\n【用户问题】${clean}${fileCtx}`
     try {
-      let taskDispatchContext = ''
+      let formalPptTaskDispatched = false
       if (
         effectiveScope === 'project'
         && effectiveProject?.projectId
@@ -1103,9 +1143,19 @@ function Chat() {
             },
           )
           if (dispatch.task) {
+            // 老任务可能创建于 conversationPrompt 上线前；复用任务时也先把
+            // 本轮要求挂到当前快照，避免跳过通用 Agent 后用户刚发送的内容
+            // 在页面上无声消失。新任务会由服务端参数持久化，刷新后仍可恢复。
+            const taskWithConversationPrompt: AiTask = {
+              ...dispatch.task,
+              parameters: {
+                ...dispatch.task.parameters,
+                conversationPrompt: generationMessage.replace(/\s+/g, ' ').trim().slice(0, 1_000),
+              },
+            }
             setAiTasks((items) => [
-              dispatch.task!,
-              ...items.filter((item) => item.id !== dispatch.task!.id),
+              taskWithConversationPrompt,
+              ...items.filter((item) => item.id !== taskWithConversationPrompt.id),
             ])
             showToast(
               dispatch.reused
@@ -1114,7 +1164,7 @@ function Chat() {
               'success',
             )
             setSelectedQuickAction(null)
-            taskDispatchContext = `\n【内部任务状态】${dispatch.skillName} 已创建正式投资建议书任务（任务 ID：${dispatch.task.id}）。请仅告知用户查看会话中的进度卡，不要重复调用其他 PPT 生成工具。`
+            formalPptTaskDispatched = true
           }
         } catch (error) {
           console.warn('Conversation PPT intent dispatch failed:', (error as Error).message)
@@ -1126,7 +1176,9 @@ function Chat() {
           // 普通对话中的非强制意图识别失败时，仍保留通用问答能力。
         }
       }
-      await agent.sendMessage(`${ctx}${taskDispatchContext}`)
+      if (!formalPptTaskDispatched) {
+        await agent.sendMessage(ctx)
+      }
       setUploads([])
       return true
     } catch (err) {

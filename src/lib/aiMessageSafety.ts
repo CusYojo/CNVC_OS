@@ -170,7 +170,22 @@ export function normalizeFlueMessage(value: unknown, index = 0): SafeFlueMessage
 
 export function normalizeFlueMessages(value: unknown): SafeFlueMessage[] {
   if (!Array.isArray(value)) return []
-  return value.map((message, index) => normalizeFlueMessage(message, index))
+  return value
+    .map((message, index) => normalizeFlueMessage(message, index))
+    // Flue 会为一次失败/重试的模型调用留下 assistant 消息边界；当模型在
+    // 输出任何内容前超时时，这类消息没有可见 part。渲染它们只会产生一排
+    // 不断增加的空机器人头像。用户消息仍保留，畸形 assistant 消息也会由
+    // unsupported part 显示诊断提示，只有真正空白的 assistant 消息被隐藏。
+    .filter((message) => message.role === 'user' || message.parts.some(isRenderableFluePart))
+}
+
+export function isRenderableFluePart(part: SafeFluePart): boolean {
+  if (part.type === 'text' || part.type === 'reasoning') {
+    return Boolean(part.text?.trim())
+  }
+  // 文件、工具和 unsupported 片段均有对应的可见 UI；即使附件 URL 缺失，
+  // MessagePart 也会显示附件说明，不能误判为空消息。
+  return part.type === 'file' || part.type === 'dynamic-tool' || part.type === 'unsupported'
 }
 
 export function extractTextParts(message: SafeFlueMessage | undefined): string {

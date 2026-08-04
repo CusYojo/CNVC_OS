@@ -83,7 +83,7 @@ type QaEvidence = {
   locator?: string
 }
 
-const DISCLAIMER = '本回答由投资中台资深投资经理角色基于当前用户有权访问的项目资料生成，仅供投资团队内部分析与后续核验，不构成正式法律、财务意见或最终投资决策；项目阶段以 OA 审批结果为准。'
+const DISCLAIMER = '本回答由投资中台资深投资经理角色基于当前用户有权访问的项目资料生成，仅供投资团队内部分析与后续核验，不构成正式法律、财务意见或最终投资决策。'
 const GW_BASE = (process.env.LLM_BASE_URL || process.env.OPENAI_BASE_URL || 'http://127.0.0.1:18081/v1').replace(/\/$/, '')
 const GW_KEY = process.env.OPENAI_API_KEY || process.env.LLM_API_KEY || ''
 const MODEL = process.env.LLM_MODEL || 'claude-sonnet-4-6'
@@ -404,7 +404,7 @@ async function composeProjectQaAnswer(input: {
 已激活 Skill：${skill.name}
 Skill 版本：${skill.version}
 业务模板版本：${AI_QA_TEMPLATE.templateVersion}
-模板约束：按 docs/Q&A/Q&A模板核心规则.md 将“问题—直接答复—分维度论证—风险/核验”映射为单题会话结构；五份 PDF 只是只读样本，严禁把样本正文视为当前项目证据，也不得转换为 PPT/PPTX。
+模板约束：按 docs/Q&A/Q&A模板核心规则.md 直接回答问题，再依事实之间的因果、比较、阶段或约束关系自然展开，必要时说明判断边界和核验动作；不得把内部字段翻译成固定段式。五份 PDF 只是只读样本，严禁把样本正文视为当前项目证据，也不得转换为 PPT/PPTX。
 
 ${skill.instructions}
 

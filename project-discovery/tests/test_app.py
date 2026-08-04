@@ -1,6 +1,8 @@
 import sys
+import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import app
@@ -61,6 +63,78 @@ class SourceConfigurationTests(unittest.TestCase):
             "source_group": "创投新闻",
             "worth_attention": False,
         }))
+
+
+class WechatFreshnessTests(unittest.TestCase):
+    def test_institution_accounts_are_prioritized(self):
+        accounts = [
+            {"group": "高校", "account_name": "高校A", "wx_name": "university-a"},
+            {"group": "机构", "account_name": "机构A", "wx_name": "institution-a"},
+        ]
+        with patch.object(app, "load_wechat_api_accounts", return_value=accounts):
+            result = app.filter_wechat_api_accounts(app.WechatApiRunRequest(groups=["高校", "机构"]))
+        self.assertEqual([item["wx_name"] for item in result], ["institution-a", "university-a"])
+
+    def test_transport_error_is_retried_with_same_client(self):
+        request = app.httpx.Request("GET", app.GSDATA_API_URL)
+
+        class FakeClient:
+            def __init__(self):
+                self.calls = 0
+
+            def get(self, *args, **kwargs):
+                self.calls += 1
+                if self.calls == 1:
+                    raise app.httpx.ConnectError("temporary dns failure", request=request)
+                return app.httpx.Response(200, json={"success": True}, request=request)
+
+        client = FakeClient()
+        with patch.object(app, "gsdata_access_token", return_value="token"), patch.object(app.time, "sleep"):
+            response = app.gsdata_get_with_retry(
+                client,
+                {"wx_name": "institution-a"},
+                app.GSDATA_WECHAT_ROUTER,
+                attempts=2,
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(client.calls, 2)
+
+    def test_retry_queue_removes_successes_and_keeps_failures_first(self):
+        existing = [
+            {"group": "高校", "account_name": "高校A", "wx_name": "university-a"},
+            {"group": "机构", "account_name": "机构A", "wx_name": "institution-a"},
+        ]
+        result = {
+            "account_results": [
+                {"group": "高校", "account_name": "高校A", "wx_name": "university-a", "error": ""},
+                {"group": "机构", "account_name": "机构A", "wx_name": "institution-a", "error": "timeout"},
+            ],
+            "failed_accounts": [existing[1]],
+        }
+        pending = app.reconcile_pending_wechat_accounts(existing, result)
+        self.assertEqual([item["wx_name"] for item in pending], ["institution-a"])
+
+    def test_source_status_separates_check_article_and_effective_times(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            status_file = Path(tmpdir) / "wechat_source_status.json"
+            with patch.object(app, "WECHAT_SOURCE_STATUS_FILE", status_file):
+                app.update_wechat_source_status(
+                    [{
+                        "group": "机构",
+                        "account_name": "机构A",
+                        "wx_name": "institution-a",
+                        "fetched": 2,
+                        "error": "",
+                    }],
+                    [{"source_key": "institution-a", "published_at": "2026-08-04 09:00:00"}],
+                    [{"source_key": "institution-a", "published_at": "2026-08-03 09:00:00"}],
+                )
+                source = app.read_wechat_source_status()["sources"]["institution-a"]
+                summary = app.summarize_wechat_source_status("机构")
+        self.assertTrue(source["last_checked_at"])
+        self.assertEqual(source["last_article_published_at"], "2026-08-04 09:00:00")
+        self.assertEqual(source["last_effective_lead_at"], "2026-08-03 09:00:00")
+        self.assertEqual(summary["healthy"], 1)
 
 
 class ProjectSubjectNameTests(unittest.TestCase):

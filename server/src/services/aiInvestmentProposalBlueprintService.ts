@@ -5,10 +5,10 @@ import JSZip from 'jszip'
 import { PDFParse } from 'pdf-parse'
 import type { AiTemplateDefinition } from './aiTemplateCatalog.js'
 
-export const INVESTMENT_PROPOSAL_BLUEPRINT_VERSION = 'proposal-blueprint-20260731-v13-human-data-boundary'
+export const INVESTMENT_PROPOSAL_BLUEPRINT_VERSION = 'proposal-blueprint-20260804-v14-editorial-quality'
 // 资料缺口只作为内部状态，不向客户正文注入统一占位前缀。
 export const CURRENT_PROJECT_NO_DATA = ''
-const CORE_STANDARD_SHA256 = 'ec77a6632da28eed6eabbd96306446776ea4f2669d6373da9a939b7d1c5ae991'
+const CORE_STANDARD_SHA256 = 'ee3fdb2ebb9b2f67f254334be4e9d85a2d66141e3786b4e56df53602d0a47ee5'
 
 export type InvestmentProposalAnalysisKind =
   | 'company_profile'

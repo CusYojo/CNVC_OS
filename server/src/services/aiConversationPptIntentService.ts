@@ -180,6 +180,10 @@ export async function createInvestmentPptTaskFromConversation(
       attachmentFileIds: input.attachmentFileIds ?? [],
       attachmentFileNames: input.attachmentFileNames ?? [],
       conversationTriggered: true,
+      // 前端用正式任务自身恢复用户的原始请求。任务创建成功后不再为了显示
+      // 一条聊天气泡而重复调用通用 Agent，因此刷新/切换会话后仍需由任务
+      // 参数重建这条用户消息。
+      conversationPrompt: input.message.replace(/\s+/g, ' ').trim().slice(0, 1_000),
       quickActionSelected: input.force === true,
       requestedSkill: skillName,
     },

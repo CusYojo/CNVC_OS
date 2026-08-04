@@ -41,6 +41,10 @@ import {
   isNearDuplicate,
 } from './aiEvidenceQualityService.js'
 import { cleanCorruptedText } from './textQualityService.js'
+import {
+  reviewBusinessDocumentEditorialQuality,
+  sanitizeBusinessContentForDelivery,
+} from './aiDocumentEditorialQualityService.js'
 
 type ProjectLike = {
   name: string
@@ -320,7 +324,7 @@ function deterministicEvidenceSection(input: {
     if (!/(?:若|如|一旦|当|风险|影响|导致|可能)/.test(selected.excerpt)) return undefined
   } else if (definition.analysisKind === 'conclusion') {
     const subject = sanitizeInvestmentProposalClientText(projectName).replace(/项目$/, '')
-    text = `${subject || '目标公司'}现阶段可继续跟踪。项目负责人下一步应补齐核心事实，完成后通过OA履行相应审批，再决定是否申请立项或启动尽调；如关键事项仍无法确认，则暂缓推进。`
+    text = `${subject || '目标公司'}现阶段可继续跟踪。下一步应优先核实最可能改变判断的主体、权属、产品验证和商业化事实，再结合结果决定是否申请立项或启动尽调；如关键事项仍无法确认，则暂缓推进。`
   }
   const productFindings = definition.analysisKind === 'product_technology'
     && selected.productParagraphs.length
@@ -1107,7 +1111,7 @@ export async function composeInvestmentProposalContent(input: {
 11. 表格只能用于同口径结构化证据；没有来源不得创建空表；所有单元格数字必须出现在 sourceIndexes 对应证据中。
 12. 只返回 JSON：{"sections":[{"id":"","title":"","findings":[{"text":"","status":"资料记载|AI推断|待核验|资料缺口","sourceIndexes":[0]}],"tables":[{"title":"","unit":"","columns":[""],"rows":[[""]],"status":"资料记载|AI推断|待核验","sourceIndexes":[0]}]}]}。
 13. 不输出 Markdown、解释、Reviewer 过程、模板文件名、Skill 版本或内部技术字段。
-14. 项目亮点只能综合前文证据，按最能影响接触或立项判断的事实及成立条件自然分段，不重复前文大段内容。每项风险至少写清具体风险或触发情形及潜在影响；整个风险章节还必须给出可执行的缓释或核验安排，责任主体和完成时点只在证据明确或确有决策价值时写入，不要求每条风险机械凑齐五个字段。结论用自然语言给出与当前阶段匹配的推进、继续观察、暂缓或归档方向，同时写清成立条件、下一步动作和 OA 或相应审批边界；可以使用标准阶段词，但不得强制套用“综合考虑……”等固定句式。
+14. 项目亮点只能综合前文证据，按最能影响接触或立项判断的事实及成立条件自然分段，不重复前文大段内容。每项风险至少写清具体风险或触发情形及潜在影响；整个风险章节还必须给出可执行的缓释或核验安排，责任主体和完成时点只在证据明确或确有决策价值时写入，不要求每条风险机械凑齐五个字段。结论用自然语言给出与当前阶段匹配的推进、继续观察、暂缓或归档方向，同时写清成立条件和下一步动作；可以使用标准阶段词，但不得写 OA、系统按钮或强制套用“综合考虑……”等固定句式。
 15. Evidence 中的“...展开”“…展开”“查看更多”“原文链接”“来源网址”属于网页界面或来源元数据，不得进入正文。公司简介必须优先整合同一 Evidence 中完整的法律主体、成立时间、注册资本、完整地址、经营范围或主营业务；不得复述被截断的网页简介。
 16. 产品及技术章节必须优先使用本地项目文件中的具体产品、平台、系统、模型、算法或技术架构；至少写明可识别的产品/技术名称及其功能、关键模块、技术路径或成熟度。公开网页只能补充本地资料未覆盖的事实，站点标题、导航菜单、关注按钮和行业标签不得进入正文；本地 Evidence 已有具体产品技术内容时，不得只引用公开网页的泛化产品介绍。
 
@@ -1410,7 +1414,9 @@ ${investmentProposalEvidencePrompt(leafEvidence)}
         ? { title: definition.title, summary: '', summarySourceIndexes: [], findings: [], tables: [] }
         : noDataSection(definition)))
 
-  let content = chapterContent(title, executiveSummary, executiveSourceIndexes, assembled)
+  let content = sanitizeBusinessContentForDelivery(
+    chapterContent(title, executiveSummary, executiveSourceIndexes, assembled),
+  )
   let review = reviewInvestmentProposalContent({
     content,
     blueprint,
@@ -1419,6 +1425,66 @@ ${investmentProposalEvidencePrompt(leafEvidence)}
     projectName: input.project.name,
     companyName: input.project.companyName,
   })
+  let editorialIssues = reviewBusinessDocumentEditorialQuality(content)
+  if (input.sources.length > 0 && (!review.passed || editorialIssues.length > 0)) {
+    try {
+      const definitions = blueprint.sections
+      const raw = await requestInvestmentProposalChapterJson({
+        systemPrompt: `你是投资提案的全篇总编辑。当前输入已经完成逐章生成，你只能在现有事实、数字、证据状态和 sourceIndexes 范围内修订，不得新增项目事实。
+工作目标是让全文像资深投资经理一次性写成，而不是多个章节的拼接稿：
+1. 统一公司主体、时间线、融资金额、估值和交易口径；存在多个真实口径时，在同一段写明各自日期、投前/投后、报价/成交或尚未统一的关系，不得擅自选一个。
+2. 删除跨章节重复事实、残缺编号、空洞过渡句、机械谨慎套句和 OA、Reviewer、网关等内部流程词。
+3. 技术术语必须转化为产品功能、验证状态、交付影响、商业化意义或投资风险；无投资含义的技术原文应删除。
+4. 保留 Blueprint 的 id、title、顺序和容器节点；不得改变 finding 或 table 的 status 与 sourceIndexes 事实边界，不得删除有有效数据的表格。一个 finding 写一个自然段，不使用标签式小标题。
+5. 只返回 JSON：{"executiveSummary":"","sections":[{"id":"","title":"","findings":[{"text":"","status":"资料记载|AI推断|待核验|资料缺口","sourceIndexes":[0]}],"tables":[{"title":"","unit":"","columns":[""],"rows":[[""]],"status":"资料记载|AI推断|待核验","sourceIndexes":[0]}]}]}。`,
+        userPrompt: `当前提案：
+${JSON.stringify(content).slice(0, 80_000)}
+
+Reviewer 问题：
+${[
+          reviewIssuesForPrompt(review),
+          ...editorialIssues.map((issue) => `[${issue.code}] ${issue.sectionTitle ? `${issue.sectionTitle}：` : ''}${issue.message}`),
+        ].filter(Boolean).join('\n').slice(0, 12_000)}`,
+        maxTokens: requestedLength === '详细版' ? 18_000 : 14_000,
+      }, {
+        fetchImpl: runtime.fetchImpl,
+        maxAttempts: 2,
+        timeoutMs: Math.max(timeoutMs, 120_000),
+      })
+      const editedSections = normalizeChapterSections({
+        raw,
+        definitions,
+        evidencePlan,
+        sources: input.sources,
+        maxFindings,
+      })
+      const rawRecord = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {}
+      const candidate = sanitizeBusinessContentForDelivery(chapterContent(
+        title,
+        safeText(rawRecord.executiveSummary, executiveSummary),
+        executiveSourceIndexes,
+        editedSections,
+      ))
+      const candidateReview = reviewInvestmentProposalContent({
+        content: candidate,
+        blueprint,
+        evidencePlan,
+        sources: input.sources,
+        projectName: input.project.name,
+        companyName: input.project.companyName,
+      })
+      const candidateEditorialIssues = reviewBusinessDocumentEditorialQuality(candidate)
+      const currentScore = review.issues.length + editorialIssues.length
+      const candidateScore = candidateReview.issues.length + candidateEditorialIssues.length
+      if (candidateScore < currentScore) {
+        content = candidate
+        review = candidateReview
+        editorialIssues = candidateEditorialIssues
+      }
+    } catch (error) {
+      console.warn('[aiInvestmentProposalContent] 全篇总编辑未完成，保留确定性清洗后的提案:', (error as Error).message)
+    }
+  }
   if (!review.passed) {
     console.warn(
       '[aiInvestmentProposalContent] Reviewer 未完全通过，按受限初稿继续生成:',
@@ -1438,11 +1504,17 @@ ${investmentProposalEvidencePrompt(leafEvidence)}
     maxParallelChapters: concurrency,
     chapterTimeoutMs: timeoutMs,
     chapterMetrics,
-    reviewerPassed: review.passed,
-    reviewerIssueCodes: review.issues.map((item) => item.code),
-    limitedDraft: limitationIssues.length > 0 || !review.passed,
-    limitationCount: limitationIssues.length,
-    limitationIssueCodes: [...new Set(limitationIssues.map((item) => item.code))],
+    reviewerPassed: review.passed && editorialIssues.length === 0,
+    reviewerIssueCodes: [
+      ...review.issues.map((item) => item.code),
+      ...editorialIssues.map((item) => item.code),
+    ],
+    limitedDraft: limitationIssues.length > 0 || !review.passed || editorialIssues.length > 0,
+    limitationCount: limitationIssues.length + editorialIssues.length,
+    limitationIssueCodes: [...new Set([
+      ...limitationIssues.map((item) => item.code),
+      ...editorialIssues.map((item) => item.code),
+    ])],
   }
   return content
 }

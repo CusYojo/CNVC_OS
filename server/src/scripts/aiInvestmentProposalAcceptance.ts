@@ -817,7 +817,7 @@ const incompatibleParameterFallback = await composeInvestmentProposalContent({
       maxGenerationAttempts: 1,
     },
   })
-assert.equal(incompatibleParameterCalls, rootDefinitions.length)
+assert.equal(incompatibleParameterCalls, rootDefinitions.length + 1)
 const incompatibleParameterFallbackReview = reviewInvestmentProposalContent({
   content: incompatibleParameterFallback,
   blueprint,
@@ -920,6 +920,35 @@ let maxActiveChapterRequests = 0
 let generatedChapterRequests = 0
 const progressEvents: InvestmentProposalChapterProgress[] = []
 const savedCheckpoints: InvestmentProposalChapterCheckpoint[] = []
+function mockedEditorResponse() {
+  return new Response(JSON.stringify({
+    choices: [{
+      finish_reason: 'stop',
+      message: {
+        content: JSON.stringify({
+          executiveSummary: content.executiveSummary,
+          sections: blueprint.sections.map((definition) => {
+            const section = sections.find((item) => item.title === definition.title)!
+            return {
+              id: definition.id,
+              title: definition.title,
+              findings: section.findings.map((finding) => ({
+                ...finding,
+                text: finding.text
+                  .replace('具体执行情况仍需在下一阶段核验。', '该项安排构成当前分析基础。')
+                  .replace(
+                    '阶段与推进建议为申请立项；建议在项目组完成关键事实核验并落实立项前提后，通过OA发起立项申请；如重大风险未消除，应暂缓推进并重新评估。',
+                    '建议申请立项；项目组应先完成关键事实核验并落实立项条件，再提交内部审批；如重大风险未消除，则暂缓推进并重新评估。',
+                  ),
+              })),
+              tables: section.tables ?? [],
+            }
+          }),
+        }),
+      },
+    }],
+  }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+}
 const mockedChapterFetch: typeof fetch = async (_input, init) => {
   activeChapterRequests += 1
   generatedChapterRequests += 1
@@ -930,6 +959,9 @@ const mockedChapterFetch: typeof fetch = async (_input, init) => {
       messages?: Array<{ role?: string; content?: string }>
     }
     const userPrompt = request.messages?.find((message) => message.role === 'user')?.content ?? ''
+    if (userPrompt.includes('当前提案：')) {
+      return mockedEditorResponse()
+    }
     const root = rootDefinitions.find((definition) =>
       userPrompt.includes(`生成章节：${definition.title}`))
     assert.ok(root, `无法从测试请求识别章节：${userPrompt.slice(0, 120)}`)
@@ -980,7 +1012,7 @@ const optimizedContent = await composeInvestmentProposalContent({
   },
 })
 assert.equal(optimizedContent.generationAudit?.reviewerPassed, true)
-assert.equal(generatedChapterRequests, rootDefinitions.length)
+assert.equal(generatedChapterRequests, rootDefinitions.length + 1)
 assert.equal(maxActiveChapterRequests, 2)
 assert.equal(savedCheckpoints.length, rootDefinitions.length)
 assert.equal(savedCheckpoints.at(-1)?.version, 'investment-proposal-chapters-v1')
@@ -1019,6 +1051,9 @@ const splitFallbackContent = await composeInvestmentProposalContent({
         messages?: Array<{ role?: string; content?: string }>
       }
       const userPrompt = request.messages?.find((message) => message.role === 'user')?.content ?? ''
+      if (userPrompt.includes('当前提案：')) {
+        return mockedEditorResponse()
+      }
       const leaf = splitRootLeafDefinitions.find((definition) =>
         userPrompt.includes(`id 为“${definition.id}”`))
       if (leaf) {
@@ -1076,7 +1111,7 @@ assert.equal(splitFallbackContent.generationAudit?.reviewerPassed, true)
 assert.equal(splitRootAttempts, 2)
 assert.equal(leafFallbackRequests, splitRootLeafDefinitions.length)
 
-let resumedFetchCalled = false
+let resumedEditorCalls = 0
 const resumedProgressEvents: InvestmentProposalChapterProgress[] = []
 const resumedContent = await composeInvestmentProposalContent({
   template,
@@ -1093,9 +1128,14 @@ const resumedContent = await composeInvestmentProposalContent({
     audience: '内部立项',
   },
   runtime: {
-    fetchImpl: async () => {
-      resumedFetchCalled = true
-      throw new Error('断点恢复不应再次调用模型')
+    fetchImpl: async (_input, init) => {
+      const request = JSON.parse(String(init?.body || '{}')) as {
+        messages?: Array<{ role?: string; content?: string }>
+      }
+      const userPrompt = request.messages?.find((message) => message.role === 'user')?.content ?? ''
+      assert.ok(userPrompt.includes('当前提案：'), '断点恢复只能调用全篇总编辑，不应重新生成章节')
+      resumedEditorCalls += 1
+      return mockedEditorResponse()
     },
     loadCheckpoint: async () => savedCheckpoints.at(-1),
     onProgress: (event) => {
@@ -1103,7 +1143,7 @@ const resumedContent = await composeInvestmentProposalContent({
     },
   },
 })
-assert.equal(resumedFetchCalled, false)
+assert.equal(resumedEditorCalls, 1)
 assert.equal(resumedContent.generationAudit?.resumedChapters?.length, rootDefinitions.length)
 assert.equal(
   resumedProgressEvents.filter((event) => event.phase === 'resumed').length,

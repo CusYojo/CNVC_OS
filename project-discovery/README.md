@@ -81,6 +81,11 @@ bash deploy.sh radar-configure
 | `RADAR_WECHAT_ACCOUNTS_XLSX` | `project-discovery/公众号来源.xlsx` | 公众号账号清单 |
 | `RADAR_AUTO_CRAWL_ENABLED` | `true` | 创投等自动采集 |
 | `RADAR_WECHAT_DAILY_ENABLED` | `true` | GSData 公众号每日采集 |
+| `RADAR_WECHAT_MAX_WORKERS` | `4` | 公众号共享连接并发数 |
+| `RADAR_WECHAT_REQUEST_ATTEMPTS` | `3` | DNS、超时、429/5xx 单请求最大尝试次数 |
+| `RADAR_WECHAT_RETRY_INTERVAL_SECONDS` | `1800` | 失败账号补采间隔 |
+| `RADAR_WECHAT_RETRY_BATCH_SIZE` | `100` | 每轮失败账号补采上限 |
+| `RADAR_WECHAT_INSTITUTION_INTERVAL_SECONDS` | `7200` | 机构公众号独立刷新间隔 |
 | `RADAR_SYNC_PAGE_SIZE` | `50` | 每页同步候选数 |
 | `RADAR_SYNC_INCREMENTAL_PAGES` | `4` | 每轮优先扫描的最新数据页数 |
 | `RADAR_SYNC_BACKFILL_PAGES` | `1` | 每轮继续回填的历史数据页数 |
@@ -89,3 +94,12 @@ bash deploy.sh radar-configure
 
 生产部署会安装 `cybernaut-radar-sync.timer`，每 30 分钟把 Radar JSONL
 中的最新候选同步到主数据库，同时通过数据库游标逐轮完成历史数据回填。
+
+公众号采集每天 08:30 执行全量窗口扫描；机构公众号会优先处理并独立定时
+刷新。网络失败的账号进入补采队列，每 30 分钟重试。以下接口用于区分
+“最后检查时间”“最后发文时间”和“最后有效线索时间”：
+
+```bash
+curl 'http://127.0.0.1:8121/api/wechat-api/daily-status'
+curl 'http://127.0.0.1:8121/api/wechat-api/source-status?group=机构'
+```

@@ -1,4 +1,4 @@
 interface:
   display_name: "生成合规性说明"
-  short_description: "早期项目线索分析师生成可交付合规性说明"
-  default_prompt: "使用 $generate-compliance-statement，以早期投资项目线索分析师身份，仅针对当前会话绑定的线索池或项目库项目，先检索当前项目资料库，再按需由项目大模型定向补全公开证据；将来源与取证过程仅保留在审计元数据中，以事实先行、判断克制的正式说明文风写作，并交付一份通过 Word/WPS 结构与编码检查的 DOCX。"
+  short_description: "资深投资经理生成可交付合规性说明"
+  default_prompt: "使用 $generate-compliance-statement，以投资中台资深投资经理身份，仅针对当前会话绑定的线索池或项目库项目，先检索当前项目资料库，再按需由项目大模型定向补全公开证据；将来源与取证过程仅保留在审计元数据中，以事实先行、判断克制的正式说明文风写作，并交付一份通过 Word/WPS 结构与编码检查的 DOCX。"

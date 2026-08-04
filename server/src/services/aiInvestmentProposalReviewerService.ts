@@ -806,16 +806,16 @@ export function reviewInvestmentProposalContent(input: {
       definition.analysisKind === 'conclusion'
       && primaryConclusionFindingIndex >= 0
       && (
-        !/(?:进入|推进|继续|跟踪|观察|接触|立项|尽调|上会|投决|暂缓|暂停|归档|终止|重新评估)/.test(sectionNarrative)
+        !/(?:进入初筛|继续(?:跟踪|观察)|申请立项|启动尽调|提请上会|提交投决|暂缓(?:推进)?|暂停推进|归档|终止)/.test(sectionNarrative)
         || !/(?:完成|落实|确认|若|如|前提|条件|取决于|待.+(?:确认|完成|落实)|(?:交割|投决|签约|审批|立项|尽调|上会)前|(?:完成|确认|落实)后)/.test(sectionNarrative)
-        || !/(?:OA|审批|授权|投委会|投决|流程)/.test(sectionNarrative)
+        || !/(?:下一步|应|优先|补齐|核实|核对|取得|完成|落实|确认)/.test(sectionNarrative)
       )
     ) {
       issue(issues, {
         sectionId: definition.id,
         findingIndex: primaryConclusionFindingIndex,
         code: 'CONDITIONAL_CONCLUSION_REQUIRED',
-        message: '结论须用自然语言给出与当前阶段匹配的方向，并说明成立条件、下一步动作和审批边界；不要求命中固定句式',
+        message: '结论须用自然语言给出与当前阶段匹配的明确方向，并说明成立条件和下一步动作；不得用“推进下一阶段”等空泛表述替代具体判断',
       })
     }
     ;(sectionValue.tables ?? []).forEach((table, tableIndex) => reviewTable({

@@ -14,6 +14,8 @@ import {
   composeProjectQaStructuredAnswer,
   generateProjectQaAnswers,
   generateProjectQaQuestions,
+  isHighValueProjectQaQuestion,
+  projectQaQuestionDepthScore,
   reviewProjectQaAnswers,
 } from '../services/aiQaPipelineService.js'
 import {
@@ -72,8 +74,8 @@ async function main() {
   assert(
     '阶段2 Skill：人工文风规则已加载',
     skill.instructions.includes('学习的是论证节奏')
-      && skill.referenceInstructions.includes('事实和分析处于同一条论证链')
-      && skill.referenceInstructions.includes('不把内部字段逐项翻译成固定五段'),
+      && skill.referenceInstructions.includes('直接写成 answer')
+      && skill.referenceInstructions.includes('一个自然段'),
     '首段判断、事实归纳、自然论证与反模板句规则',
   )
 
@@ -337,6 +339,15 @@ async function main() {
     duplicateFixtureResult.removed.length === 1 && duplicateFixtureResult.questions.length === 1,
     JSON.stringify(duplicateFixtureResult.removed),
   )
+  assert(
+    '阶段3 Question Generator：拦截信息盘点题并保留投资决策型问题',
+    !isHighValueProjectQaQuestion('公司目前有哪些客户？')
+      && !isHighValueProjectQaQuestion('项目面临哪些风险？')
+      && isHighValueProjectQaQuestion(
+        '现有客户中哪些已经跨过预算、采购、验收和回款门槛；这些订单能否证明可复制需求，还是主要依赖一次性项目？',
+      ),
+    '问题必须包含因果、比较、阈值、反事实或决策后果，而非仅盘点信息',
+  )
 
   const duplicateCheck = await generateProjectQaQuestions({
     project,
@@ -349,8 +360,12 @@ async function main() {
     '阶段3 Question Generator：标准版动态选取七个高价值问题',
     duplicateCheck.questions.length === PROJECT_QA_QUESTION_COUNTS.标准版
       && new Set(duplicateCheck.questions.map((question) => question.category)).size
-        === duplicateCheck.questions.length,
-    `${duplicateCheck.questions.length} 题`,
+        === duplicateCheck.questions.length
+      && duplicateCheck.questions.every((question) => isHighValueProjectQaQuestion(question.question)),
+    duplicateCheck.questions
+      .map((question) =>
+        `${question.category}[depth=${projectQaQuestionDepthScore(question.question)}]:${question.question}`)
+      .join('\n'),
   )
   assert(
     '阶段3 Duplicate Checker：最终问题无重复且编号连续',
@@ -373,7 +388,9 @@ async function main() {
   assert(
     '阶段3 Question Generator：深度版动态选取十题且无重复',
     deepDuplicateCheck.questions.length === PROJECT_QA_QUESTION_COUNTS.深度版
-      && checkDuplicateQuestions(deepDuplicateCheck.questions).removed.length === 0,
+      && checkDuplicateQuestions(deepDuplicateCheck.questions).removed.length === 0
+      && deepDuplicateCheck.questions.every((question) =>
+        isHighValueProjectQaQuestion(question.question)),
     `${deepDuplicateCheck.questions.length} 题`,
   )
 
@@ -410,7 +427,7 @@ async function main() {
     '阶段4 Answer Generator：如选择阶段问题则形成与当前阶段匹配的推进建议',
     !dispositionAnswer || Boolean(
       /现阶段更适合“继续跟踪”|主建议为“继续跟踪”/.test(dispositionAnswer.answer)
-      && dispositionAnswer.answer.split(/\n+/).length >= 2
+      && dispositionAnswer.answer.split(/\n+/).length >= 1
       && dispositionAnswer.answer.split(/\n+/).length <= 6
       && !/（[1-4]）(?:判断依据|升级与失效条件|下一步动作|OA 流转边界)：/.test(
         dispositionAnswer.answer,
@@ -423,7 +440,7 @@ async function main() {
     '阶段4 Answer Generator：引用与问题分类直接相关',
     Boolean(
       productAnswer
-      && productAnswer.answer.includes('核心产品')
+      && /产品|技术|原型|样机|成熟度/.test(productAnswer.answer)
       && !productAnswer.answer.includes('计划融资'),
     ),
     productAnswer?.answer ?? '未生成产品与技术回答',
@@ -434,7 +451,7 @@ async function main() {
       .filter((answer) => answer.category !== '阶段与推进建议' && answer.confidenceStatus !== '证据不足')
       .every((answer) => {
         const paragraphCount = answer.answer.split(/\n+/).length
-        return paragraphCount >= 2
+        return paragraphCount >= 1
           && paragraphCount <= 6
           && !/（[1-4]）(?:已确认事实|分析判断|证据边界|下一步核验)：/.test(answer.answer)
           && !/项目资料|项目材料|资料库|资料截止日|经系统核验|公开页面/.test(answer.answer)
@@ -460,8 +477,9 @@ async function main() {
   assert(
     '阶段4 Answer Generator：清除 Markdown、小标题与网页导航拼接',
     markdownAndChromeFixture.includes('核心产品为人机共生智能引擎')
-      && markdownAndChromeFixture.includes('阶段调整以 OA 审批结果为准')
-      && markdownAndChromeFixture.split(/\n+/).length >= 2
+      && markdownAndChromeFixture.includes('核验产品版本、测试报告和客户验收材料')
+      && !/OA|内部审批程序/.test(markdownAndChromeFixture)
+      && markdownAndChromeFixture.split(/\n+/).length >= 1
       && markdownAndChromeFixture.split(/\n+/).length <= 6
       && !/\*\*|(?:^|\n)(?:[（(]?[1-4][）)]?)?(?:判断依据|升级与失效条件|下一步动作|OA 流转边界)[：:]|权威榜|产业图谱|企业入驻|小程序|项目资料|项目材料|资料库|经系统核验|公开页面/.test(
         markdownAndChromeFixture,
