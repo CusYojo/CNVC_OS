@@ -325,6 +325,7 @@ sync_agent_skills() {
 
     for source_root in \
         "${DEPLOY_DIR}/server/workspace/.agents/skills" \
+        "${DEPLOY_DIR}/server/workspace/.agents/skills/GordenSuperPPTSkills" \
         "${DEPLOY_DIR}/project-discovery/GordenSuperPPTSkills" \
         "${DEPLOY_DIR}/project-discovery/skills-financial-research-analyst-main"
     do
@@ -335,7 +336,9 @@ sync_agent_skills() {
         while IFS= read -r -d '' source_dir; do
             target_dir="${skills_root}/$(basename "$source_dir")"
             install -d -m 0750 "$target_dir"
-            cp -a "${source_dir}/." "${target_dir}/"
+            # 用 -n 禁止覆盖：先复制的源（server/workspace 的完整版）优先保留，
+            # 避免 project-discovery 中同一 Skill 的残缺副本把完整版覆盖掉。
+            cp -an "${source_dir}/." "${target_dir}/"
         done < <(
             find "$source_root" -mindepth 1 -maxdepth 1 -type d \
                 -exec test -f '{}/SKILL.md' ';' -print0
