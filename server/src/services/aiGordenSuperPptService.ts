@@ -112,7 +112,7 @@ const GORDEN_LLM_KEY = process.env.OPENAI_API_KEY || process.env.LLM_API_KEY || 
 const GORDEN_VISION_MODEL = process.env.AI_GORDEN_VISION_MODEL
   || process.env.LLM_MODEL
   || 'gpt-5.2'
-const GORDEN_RENDER_CONTRACT_VERSION = '2.0-exact-visible-text'
+const GORDEN_RENDER_CONTRACT_VERSION = '3.0-contiguous-visible-text'
 
 function sha256(buffer: Buffer) {
   return createHash('sha256').update(buffer).digest('hex')
@@ -136,10 +136,6 @@ export function gordenSlidePlanFingerprint(plans: Array<Partial<GordenSlidePlan>
       ? plan.expectedTexts.map(String)
       : [],
   })))))
-}
-
-function sequentialTextMarkers(count: number) {
-  return Array.from({ length: Math.max(0, count) }, (_unused, index) => String(index + 1))
 }
 
 function plansCompatibleForImageReuse(
@@ -507,7 +503,10 @@ function coverExpectedTexts(input: {
     ...input.content.highlights.map((value) => compactText(value, 28)),
     ...input.content.sections.map((section) => compactText(section.title, 28)),
   ]).slice(0, 4)
-  const semanticTexts = uniqueCompactTexts([
+  // Keep structurally distinct cover fields even when their fallback values are
+  // identical. De-duplicating them makes Vision map only one occurrence and
+  // leaves the other card blank in the editable reconstruction.
+  const semanticTexts = [
     input.content.title || `${input.project.name}投资建议书`,
     input.project.companyName || input.project.name,
     input.project.industry ? `行业：${input.project.industry}` : '行业信息待核验',
@@ -527,15 +526,8 @@ function coverExpectedTexts(input: {
     compactText(input.project.valuation || '估值信息待核验', 36),
     '项目重点',
     ...developmentPoints,
-  ])
-  const highlightMarkers = sequentialTextMarkers(
-    Math.min(4, input.content.highlights.length),
-  )
-  return [
-    ...semanticTexts,
-    '1',
-    ...highlightMarkers,
-  ]
+  ].map((value) => String(value || '').replace(/\s+/g, ' ').trim()).filter(Boolean)
+  return semanticTexts
 }
 
 function sectionTexts(section: BusinessSection) {
@@ -598,26 +590,30 @@ export function buildGordenSlidePlan(input: {
     sectionGroups.push(...input.content.sections.map((section) => [section]))
   }
   const contentSlides = sectionGroups.map((sections, index) => {
-    const sectionTitle = sections.length === 1
-      ? sections[0].title
-      : sections.map((section) => section.title).join('｜')
-    const title = compactText(sectionTitle, 42)
-    const semanticTexts = [...new Set([
-      title,
-      ...sections.flatMap((section) => [
-        section.title,
-        compactText(section.summary, 180),
-        ...section.findings.slice(0, 2).map((finding) => compactText(finding.text, 130)),
-      ]),
-    ].map((value) => value.trim()).filter(Boolean))]
-    const detailCount = sections.reduce(
-      (count, section) => count + 1 + Math.min(2, section.findings.length),
-      0,
-    )
-    const expectedTexts = [
-      ...semanticTexts,
-      ...sequentialTextMarkers(detailCount),
-    ]
+    const title = sections.length === 1
+      ? compactText(sections[0].title, 42)
+      : compactText(`${sections[0].title}等${sections.length}项专题`, 32)
+    // A five-page deck can group four or more business sections on one slide.
+    // Preserve one evidence-rich paragraph per section instead of asking the
+    // image model to place ~30 independent text objects on a single page. The
+    // latter produces duplicate badges, missing copy, and overlapping bboxes.
+    const semanticTexts = sections.length === 1
+      ? [...new Set([
+          title,
+          compactText(sections[0].summary, 180),
+          ...sections[0].findings.slice(0, 2).map((finding) => compactText(finding.text, 130)),
+        ].map((value) => value.trim()).filter(Boolean))]
+      : [
+          title,
+          ...sections.flatMap((section) => [
+            section.title,
+            compactText([
+              section.summary,
+              ...section.findings.slice(0, 2).map((finding) => finding.text),
+            ].filter(Boolean).join('； '), 240),
+          ]),
+        ].map((value) => value.trim()).filter(Boolean)
+    const expectedTexts = semanticTexts
     return {
       number: index + 2,
       role: roleForTitle(sections.map((section) => section.title).join('、')),
@@ -646,7 +642,7 @@ export function buildGordenSlidePlan(input: {
     number: slides.length + 1,
     role: 'closing',
     title: '投资结论与后续事项',
-    expectedTexts: [...closingTexts, ...sequentialTextMarkers(closingTexts.length)],
+    expectedTexts: closingTexts,
     sourceIndexes: input.content.executiveSummarySourceIndexes ?? [],
   })
   return slides.map((slide, index) => ({ ...slide, number: index + 1 }))
@@ -683,7 +679,7 @@ ${pageTexts}
 【来源名称，仅用于事实边界，不得出现在页面上，也不得自行扩写】
 ${input.sourceNames.join('、') || '用户已授权项目资料'}
 
-严格文字契约：页面中可读文字总数必须恰好为 ${input.slide.expectedTexts.length} 条，只能使用上述编号后的正文，并且每一条只能出现一次；清单最左侧的序号只是控制标记，不得显示。若某条正文自身是连续纯数字 1、2、3……，它是页面中必须显示的结构性编号，应放入对应内容的圆形编号徽标，并保持为普通可读文字。模板中多余的文字模块应删除或改为纯图形，不得用“愿景、使命、价值、团队、来源名称”、日期、页码或其他自拟标签补位。每个有文字的卡片、图表、轴标签和页脚都必须使用清单中的原文；清单没有对应文字时，删除该模块，不得留下带空标题的卡片或图表。
+严格文字契约：页面中可读文字总数必须恰好为 ${input.slide.expectedTexts.length} 条，只能使用上述编号后的正文，并且每一条只能出现一次；清单最左侧的序号只是控制标记，不得显示。每一条正文必须完整放在一个连续文本区域内，不得按“｜”、标点或语义拆成多个导航标签、卡片、段落或文本框，也不得把多条正文合并到同一个文本框。不得重复任何标题、正文或数字；不得自行生成 1、2、3……编号、编号徽标、空白编号卡片、图例或目录。需要项目符号时只能使用不含文字的纯图形圆点。模板中多余的文字模块应删除或改为纯图形，不得用“愿景、使命、价值、团队、来源名称”、日期、页码或其他自拟标签补位。每个有文字的卡片、图表、轴标签和页脚都必须使用清单中的原文；清单没有对应文字时，删除该模块，不得留下带空标题的卡片或图表。
 所有数字、主体、人物、客户、融资、估值和交易条款只能来自上述可见文字。中文使用清晰的现代无衬线字体。`
 }
 
@@ -1035,17 +1031,13 @@ function textLayoutMetrics(input: {
     const estimatedWidth = visibleTextWidthUnits(line) * reportedSizePx
     return total + Math.max(1, Math.ceil(estimatedWidth / Math.max(1, input.width * 0.94)))
   }, 0)
-  const lineBoxPx = input.height / Math.max(1, lineCount)
-  const numericMarker = /^\d{1,2}$/u.test(input.text.trim())
-  const calibratedSizePx = numericMarker
-    ? Math.max(reportedSizePx, lineBoxPx * 0.45)
-    : input.bold
-      ? Math.max(reportedSizePx, lineBoxPx * 0.68)
-      : Math.max(reportedSizePx, lineBoxPx * 0.5)
   return {
     lineCount,
     singleLine: explicitLines.length === 1 && lineCount === 1,
-    sizePx: clamp(calibratedSizePx, 7, 96),
+    // Vision's measured source-pixel size is authoritative. Earlier code grew
+    // body copy from the bbox line height, which made dense paragraphs much
+    // larger than the source and caused overlap during PPT composition.
+    sizePx: reportedSizePx,
   }
 }
 
@@ -1206,7 +1198,7 @@ export function normalizeGordenLayout(input: {
       bold: Boolean(item.bold),
     })
     const safeWidth = layoutMetrics.singleLine
-      ? Math.min(input.width - x, w + Math.max(12, w * 0.1))
+      ? Math.min(input.width - x, w + Math.min(16, Math.max(4, w * 0.03)))
       : w
     return [{
       text,
@@ -1248,7 +1240,7 @@ export function normalizeGordenLayout(input: {
   const availableIcons = new Set((input.iconManifest.icons ?? [])
     .map((item) => String(item.file || ''))
     .filter(Boolean))
-  const icons = (input.vision.icons ?? []).flatMap((item) => {
+  const detectedIcons = (input.vision.icons ?? []).flatMap((item) => {
     const file = String(item.file || '')
     const bbox = normalizedBbox(item.source_bbox, input.width, input.height)
     if (!availableIcons.has(file) || !bbox) return []
@@ -1264,33 +1256,34 @@ export function normalizeGordenLayout(input: {
       role: 'icon',
     }]
   })
-  const renderedByIcon: number[] = []
+  const numericEntries = [...byIndex.values()].filter((entry) => (
+    /^\d{1,2}$/u.test(normalizedVisibleMarker(entry.text))
+  ))
+  // The frame layer already preserves badge circles and other fixed shapes.
+  // Image models sometimes also put those badges in the icon sheet, often with
+  // the number erased to a white placeholder. Overlaying that crop duplicates
+  // or hides the native editable number, so discard only icons whose center
+  // overlaps a planned numeric text box and always keep the native text.
+  const suppressedBadgeIcons: string[] = []
+  const icons = detectedIcons.filter((icon) => {
+    const overlapsNumericText = numericEntries.some((entry) => (
+      bboxContainsCenter(icon.source_bbox, entry.source_bbox)
+      || bboxContainsCenter(entry.source_bbox, icon.source_bbox)
+    ))
+    if (overlapsNumericText) suppressedBadgeIcons.push(path.basename(icon.file))
+    return !overlapsNumericText
+  })
   const texts = [...byIndex.values()]
     .sort((left, right) => left.textIndex - right.textIndex)
-    .map((entry) => {
-      const marker = normalizedVisibleMarker(entry.text)
-      if (!/^\d{1,2}$/u.test(marker)) return entry
-      const matchedIcon = icons.some((icon) => (
-        normalizedVisibleMarker(icon.visible_text) === marker
-        && bboxContainsCenter(icon.source_bbox, entry.source_bbox)
-      ))
-      if (!matchedIcon) return entry
-      renderedByIcon.push(entry.textIndex)
-      return {
-        ...entry,
-        opacity: 0,
-        rendered_by_icon: true,
-      }
-    })
   return annotateGordenTextWeightQa({
     background: path.join(input.pageRoot, 'background.png'),
     frame: path.join(input.pageRoot, 'frame.png'),
     icons,
     texts,
-    ...(renderedByIcon.length
+    ...(suppressedBadgeIcons.length
       ? {
           qa_notes: [
-            `编号徽标 ${renderedByIcon.join('、')} 已由图标层呈现，隐藏重复文本层以避免重影。`,
+            `编号徽标底图已由框架层呈现，移除 ${suppressedBadgeIcons.length} 个重复图标切片并保留原生数字文本。`,
           ],
         }
       : {}),
@@ -1306,11 +1299,13 @@ function layoutVisionPrompt(plan: GordenSlidePlan, iconFiles: string[], width: n
 
 规则：
 1. texts 必须覆盖 1-${plan.expectedTexts.length} 的每个 textIndex，不能缺项、不能合并索引。
+   若两个索引的文字相同，它们代表页面上两个不同的可见位置，必须分别返回不同 bbox，不得复用同一 bbox。
 2. bbox 是第一张图真实像素坐标 [左,上,宽,高]，必须圈住对应对象。
 3. size_px 是文字在第一张源图中的像素字号，不是 PowerPoint pt；必须按源图实际字高估计。
 4. 文本内容以这里的索引为准，不要 OCR 改写；所有可读文字（包括标题、标签和艺术字）都归 texts。
 5. icons.file 必须使用第二张图标注的精确文件名；空白格不要返回。每个图标都必须返回 visible_text：若该图标切片错误包含数字或文字，逐字返回；完全没有文字时返回空字符串。
 6. unexpectedText 必须列出第一张图中所有不属于文字索引清单的可读内容，包括额外标题、卡片标签、图表标签、来源名称、模板样本公司、Logo 文字、日期、页码、水印、编号或无依据数字；不得因为内容看似合理而省略。
+7. 每个 textIndex 只能对应一个连续文本区域；若第一张图把某条文字拆散、重复，或把多条文字重叠在同一位置，把相应原文写入 unexpectedText，不得编造 bbox 通过检查。
 
 文字索引：
 ${plan.expectedTexts.map((text, index) => `${index + 1}. ${text}`).join('\n')}

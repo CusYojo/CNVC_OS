@@ -94,7 +94,7 @@ test('Gorden slide plan carries detailed company, team, finance, funding, valuat
   assert.ok(plan[0].expectedTexts.includes('融资概况'))
   assert.ok(plan[0].expectedTexts.includes('估值口径'))
   assert.ok(plan[0].expectedTexts.includes('项目重点'))
-  assert.deepEqual(plan[0].expectedTexts.slice(-2), ['1', '1'])
+  assert.equal(plan[0].expectedTexts.some((text) => /^\d+$/u.test(text)), false)
   assert.equal(plan.at(-1)?.role, 'closing')
   for (const [title, detail] of topics) {
     const slide = plan.find((item) => item.title === title)
@@ -123,7 +123,8 @@ test('Gorden image prompt enforces template-style-only reuse and exact project t
   assert.match(prompt, new RegExp(`可读文字总数必须恰好为 ${slide.expectedTexts.length} 条`))
   assert.match(prompt, /来源名称，仅用于事实边界，不得出现在页面上/)
   assert.match(prompt, /清单没有对应文字时，删除该模块/)
-  assert.match(prompt, /连续纯数字 1、2、3/)
+  assert.match(prompt, /必须完整放在一个连续文本区域内/)
+  assert.match(prompt, /不得自行生成 1、2、3/)
   assert.ok(slide.expectedTexts.every((value) => prompt.includes(value)))
 })
 
@@ -149,8 +150,26 @@ test('Gorden slide plan honors an explicit five-page request', () => {
   for (const [title] of topics) {
     assert.ok(plan.some((slide) => slide.expectedTexts.includes(title)), `missing grouped topic: ${title}`)
   }
-  assert.deepEqual(plan[1].expectedTexts.slice(-4), ['1', '2', '3', '4'])
-  assert.deepEqual(plan.at(-1)?.expectedTexts.slice(-5), ['1', '2', '3', '4', '5'])
+  assert.equal(plan.flatMap((slide) => slide.expectedTexts).some((text) => /^\d+$/u.test(text)), false)
+  assert.doesNotMatch(plan[1].title, /｜/)
+  assert.ok(plan[1].expectedTexts.length <= 9)
+})
+
+test('Gorden cover preserves duplicate fallback values for distinct cards', () => {
+  const plan = buildGordenSlidePlan({
+    project: {
+      name: '智灵动力',
+      businessModel: '待资料解析后补充',
+      valuation: '待资料解析后补充',
+    },
+    content,
+    disclaimer: '内部使用。',
+    pageCount: '5',
+  })
+  assert.equal(
+    plan[0].expectedTexts.filter((text) => text === '待资料解析后补充').length,
+    2,
+  )
 })
 
 test('Gorden checkpoint fingerprint ignores old file paths but rejects changed page content', () => {
@@ -270,7 +289,7 @@ test('Gorden strict text-weight QA permits a regular body with bold title and ca
   assert.match(String((accidentalAllBold.qa_notes as string[])[0]), /全粗体/)
 })
 
-test('Gorden layout keeps pixel font units, prevents false wrapping and removes duplicate badge text', () => {
+test('Gorden layout keeps pixel font units, prevents false wrapping and removes duplicate badge icons', () => {
   const result = normalizeGordenLayout({
     vision: {
       texts: [
@@ -332,9 +351,10 @@ test('Gorden layout keeps pixel font units, prevents false wrapping and removes 
   assert.equal(result.texts[0].word_wrap, false)
   assert.equal(result.texts[1].word_wrap, true)
   assert.ok(Number(result.texts[1].estimated_line_count) > 1)
-  assert.equal(result.texts[2].rendered_by_icon, true)
-  assert.equal(result.texts[2].opacity, 0)
-  assert.equal(result.icons[0].visible_text, '3')
+  assert.equal(result.texts[2].rendered_by_icon, undefined)
+  assert.equal(result.texts[2].opacity, undefined)
+  assert.equal(result.icons.length, 0)
+  assert.match(String((result as unknown as { qa_notes: string[] }).qa_notes[0]), /重复图标切片/)
 })
 
 test('Gorden resume upgrades legacy text layouts with estimated line counts', () => {
