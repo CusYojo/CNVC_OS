@@ -359,6 +359,22 @@ sync_agent_skills() {
             exit 1
         fi
     done
+    for required_gorden_runtime in \
+        GordenSuperPPTSkill/scripts/ingest_reference_template.py \
+        GordenImagePPTGen/scripts/generate_gateway_slide_image.py \
+        GordenImagePPTGen/scripts/compose_pptx.py \
+        GordenImage2PPTX/scripts/chroma_key.py \
+        GordenImage2PPTX/scripts/slice_grid.py \
+        GordenImage2PPTX/scripts/layout_guard.py \
+        GordenImage2PPTX/scripts/placement_qa.py \
+        GordenImage2PPTX/scripts/visual_compare_qa.py \
+        GordenImage2PPTX/scripts/compose_pptx.py
+    do
+        if [ ! -f "${skills_root}/${required_gorden_runtime}" ]; then
+            err "Gorden PPT 运行文件同步失败: ${required_gorden_runtime}"
+            exit 1
+        fi
+    done
     log "Agent Skills 已同步到 ${skills_root} ✓"
 }
 

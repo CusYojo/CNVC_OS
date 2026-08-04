@@ -630,11 +630,25 @@ export function buildGordenEditableLayerPrompts(keyColor = '#00ff00') {
   }
 }
 
+function resolveGordenSkillDirectory(skillRoot: string, skillName: string) {
+  const candidates = [
+    path.join(skillRoot, 'GordenSuperPPTSkills', skillName),
+    path.join(skillRoot, skillName),
+  ]
+  return candidates.find((candidate) => existsSync(path.join(candidate, 'SKILL.md')))
+    ?? candidates[0]
+}
+
 export function gordenSkillPaths(skillRoot = getAiSkillRoot()) {
-  const bundle = path.join(skillRoot, 'GordenSuperPPTSkills')
-  const superRoot = path.join(bundle, 'GordenSuperPPTSkill')
-  const imageGenRoot = path.join(bundle, 'GordenImagePPTGen')
-  const image2Root = path.join(bundle, 'GordenImage2PPTX')
+  const nestedBundle = path.join(skillRoot, 'GordenSuperPPTSkills')
+  const superRoot = resolveGordenSkillDirectory(skillRoot, 'GordenSuperPPTSkill')
+  const imageGenRoot = resolveGordenSkillDirectory(skillRoot, 'GordenImagePPTGen')
+  const image2Root = resolveGordenSkillDirectory(skillRoot, 'GordenImage2PPTX')
+  const bundle = [superRoot, imageGenRoot, image2Root].every(
+    (directory) => path.dirname(directory) === nestedBundle,
+  )
+    ? nestedBundle
+    : skillRoot
   return {
     bundle,
     superRoot,

@@ -1,5 +1,13 @@
 import assert from 'node:assert/strict'
-import { existsSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
 import test from 'node:test'
 import type { BusinessContent } from '../src/services/aiBusinessContentService.js'
 import {
@@ -366,6 +374,69 @@ test('investment recommendation PPT workflow contains only the three approved sk
     referencePaths.convertPdf,
   ]) {
     assert.equal(existsSync(file), true, `missing reference-driven runtime: ${file}`)
+  }
+})
+
+test('Gorden runtime paths support the flat production skill layout', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'gorden-flat-skills-'))
+  try {
+    for (const skillName of [
+      'GordenSuperPPTSkill',
+      'GordenImagePPTGen',
+      'GordenImage2PPTX',
+    ]) {
+      const directory = path.join(root, skillName)
+      mkdirSync(directory, { recursive: true })
+      writeFileSync(path.join(directory, 'SKILL.md'), '---\nname: test\n---\n')
+    }
+
+    const paths = gordenSkillPaths(root)
+    assert.equal(paths.bundle, root)
+    assert.equal(paths.superRoot, path.join(root, 'GordenSuperPPTSkill'))
+    assert.equal(paths.imageGenRoot, path.join(root, 'GordenImagePPTGen'))
+    assert.equal(paths.image2Root, path.join(root, 'GordenImage2PPTX'))
+    assert.equal(
+      paths.generateImage,
+      path.join(root, 'GordenImagePPTGen', 'scripts', 'generate_gateway_slide_image.py'),
+    )
+    assert.equal(
+      paths.composeEditable,
+      path.join(root, 'GordenImage2PPTX', 'scripts', 'compose_pptx.py'),
+    )
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('Gorden runtime paths prefer the nested local skill layout', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'gorden-nested-skills-'))
+  const bundle = path.join(root, 'GordenSuperPPTSkills')
+  try {
+    for (const skillName of [
+      'GordenSuperPPTSkill',
+      'GordenImagePPTGen',
+      'GordenImage2PPTX',
+    ]) {
+      const directory = path.join(bundle, skillName)
+      mkdirSync(directory, { recursive: true })
+      writeFileSync(path.join(directory, 'SKILL.md'), '---\nname: test\n---\n')
+    }
+
+    const paths = gordenSkillPaths(root)
+    assert.equal(paths.bundle, bundle)
+    assert.equal(paths.superRoot, path.join(bundle, 'GordenSuperPPTSkill'))
+    assert.equal(paths.imageGenRoot, path.join(bundle, 'GordenImagePPTGen'))
+    assert.equal(paths.image2Root, path.join(bundle, 'GordenImage2PPTX'))
+    assert.equal(
+      paths.generateImage,
+      path.join(bundle, 'GordenImagePPTGen', 'scripts', 'generate_gateway_slide_image.py'),
+    )
+    assert.equal(
+      paths.composeEditable,
+      path.join(bundle, 'GordenImage2PPTX', 'scripts', 'compose_pptx.py'),
+    )
+  } finally {
+    rmSync(root, { recursive: true, force: true })
   }
 })
 
