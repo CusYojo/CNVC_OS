@@ -125,6 +125,8 @@ test('Gorden image prompt enforces template-style-only reuse and exact project t
   assert.match(prompt, /清单没有对应文字时，删除该模块/)
   assert.match(prompt, /必须完整放在一个连续文本区域内/)
   assert.match(prompt, /不得自行生成 1、2、3/)
+  assert.match(prompt, /禁止生成任何带文字的流程图/)
+  assert.match(prompt, /大脑、信号采集、解码、外部设备/)
   assert.ok(slide.expectedTexts.every((value) => prompt.includes(value)))
 })
 
