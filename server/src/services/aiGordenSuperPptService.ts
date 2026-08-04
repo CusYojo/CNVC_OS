@@ -567,6 +567,7 @@ export function buildGordenSlidePlan(input: {
   project: ProjectLike
   content: BusinessContent
   disclaimer: string
+  references?: string[]
   pageCount?: string | number
 }): GordenSlidePlan[] {
   const parsedPageCount = Number.parseInt(String(input.pageCount ?? ''), 10)
@@ -632,16 +633,19 @@ export function buildGordenSlidePlan(input: {
     },
     ...contentSlides,
   ]
+  const referenceNames = uniqueCompactTexts(input.references ?? []).slice(0, 6)
   const closingTexts = [
+    '引用资料与责任声明',
     '投资结论与后续事项',
     compactText(input.content.executiveSummary, 260),
     ...input.content.risks.slice(0, 4).map((risk) => compactText(risk, 120)),
+    `引用资料：${referenceNames.join('；') || '当前项目档案与本轮授权资料'}`,
     input.disclaimer,
   ].filter(Boolean)
   slides.push({
     number: slides.length + 1,
     role: 'closing',
-    title: '投资结论与后续事项',
+    title: '引用资料与责任声明',
     expectedTexts: closingTexts,
     sourceIndexes: input.content.executiveSummarySourceIndexes ?? [],
   })
@@ -676,8 +680,9 @@ export function buildGordenSlidePrompt(input: {
 【页面可见文字，必须逐字照排，不得改写、遗漏或新增】
 ${pageTexts}
 
-【来源名称，仅用于事实边界，不得出现在页面上，也不得自行扩写】
+【来源名称，仅用于事实边界】
 ${input.sourceNames.join('、') || '用户已授权项目资料'}
+不得在页面上额外新增来源名称；若某个来源名称已明确列入上方“页面可见文字”清单，则必须按清单逐字照排。不得自行扩写来源内容。
 
 严格文字契约：页面中可读文字总数必须恰好为 ${input.slide.expectedTexts.length} 条，只能使用上述编号后的正文，并且每一条只能出现一次；清单最左侧的序号只是控制标记，不得显示。每一条正文必须完整放在一个连续文本区域内，不得按“｜”、标点或语义拆成多个导航标签、卡片、段落或文本框，也不得把多条正文合并到同一个文本框。不得重复任何标题、正文或数字；不得自行生成 1、2、3……编号、编号徽标、空白编号卡片、图例或目录。需要项目符号时只能使用不含文字的纯图形圆点。模板中多余的文字模块应删除或改为纯图形，不得用“愿景、使命、价值、团队、来源名称”、日期、页码或其他自拟标签补位。每个有文字的卡片、图表、轴标签和页脚都必须使用清单中的原文；清单没有对应文字时，删除该模块，不得留下带空标题的卡片或图表。
 若文字清单没有流程节点或图表标签，禁止生成任何带文字的流程图、路径图、思维导图、坐标轴或数据图标签；这类装饰只能使用完全不含文字的纯图形。尤其不得沿用模板示例中的“大脑、信号采集、解码、外部设备”等流程词。
@@ -1490,6 +1495,7 @@ export async function generateInvestmentRecommendationPptWithGorden(input: {
     project: input.project,
     content: input.content,
     disclaimer: input.template.disclaimer,
+    references: input.sources.map((source) => source.sourceName),
     pageCount: input.pageCount,
   }).map((plan) => {
     const matchingPage = pages.find((page) => page.role_hint === plan.role)

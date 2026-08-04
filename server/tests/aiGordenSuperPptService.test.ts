@@ -84,6 +84,7 @@ test('Gorden slide plan carries detailed company, team, finance, funding, valuat
     },
     content,
     disclaimer: '本材料仅供内部投资决策使用。',
+    references: ['项目档案', '公司官网'],
   })
 
   assert.equal(plan.length, topics.length + 2)
@@ -97,6 +98,9 @@ test('Gorden slide plan carries detailed company, team, finance, funding, valuat
   assert.ok(plan[0].expectedTexts.includes('项目重点'))
   assert.equal(plan[0].expectedTexts.some((text) => /^\d+$/u.test(text)), false)
   assert.equal(plan.at(-1)?.role, 'closing')
+  assert.equal(plan.at(-1)?.title, '引用资料与责任声明')
+  assert.ok(plan.at(-1)?.expectedTexts.includes('投资结论与后续事项'))
+  assert.ok(plan.at(-1)?.expectedTexts.includes('引用资料：项目档案；公司官网'))
   for (const [title, detail] of topics) {
     const slide = plan.find((item) => item.title === title)
     assert.ok(slide, `missing slide: ${title}`)
@@ -122,7 +126,8 @@ test('Gorden image prompt enforces template-style-only reuse and exact project t
   assert.match(prompt, /不得残留任何模板样本事实/)
   assert.match(prompt, /必须逐字照排，不得改写、遗漏或新增/)
   assert.match(prompt, new RegExp(`可读文字总数必须恰好为 ${slide.expectedTexts.length} 条`))
-  assert.match(prompt, /来源名称，仅用于事实边界，不得出现在页面上/)
+  assert.match(prompt, /不得在页面上额外新增来源名称/)
+  assert.match(prompt, /已明确列入上方“页面可见文字”清单/)
   assert.match(prompt, /清单没有对应文字时，删除该模块/)
   assert.match(prompt, /必须完整放在一个连续文本区域内/)
   assert.match(prompt, /不得自行生成 1、2、3/)
