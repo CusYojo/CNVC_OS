@@ -112,7 +112,7 @@ const GORDEN_LLM_KEY = process.env.OPENAI_API_KEY || process.env.LLM_API_KEY || 
 const GORDEN_VISION_MODEL = process.env.AI_GORDEN_VISION_MODEL
   || process.env.LLM_MODEL
   || 'gpt-5.2'
-const GORDEN_RENDER_CONTRACT_VERSION = '3.0-contiguous-visible-text'
+const GORDEN_RENDER_CONTRACT_VERSION = '3.1-single-summary-cards'
 
 function sha256(buffer: Buffer) {
   return createHash('sha256').update(buffer).digest('hex')
@@ -594,9 +594,9 @@ export function buildGordenSlidePlan(input: {
       ? compactText(sections[0].title, 42)
       : compactText(`${sections[0].title}等${sections.length}项专题`, 32)
     // A five-page deck can group four or more business sections on one slide.
-    // Preserve one evidence-rich paragraph per section instead of asking the
-    // image model to place ~30 independent text objects on a single page. The
-    // latter produces duplicate badges, missing copy, and overlapping bboxes.
+    // Keep one concise summary per card. Combining the summary and findings in
+    // one expected string still makes image models split it into several bullet
+    // regions, which cannot be reconstructed as one native editable textbox.
     const semanticTexts = sections.length === 1
       ? [...new Set([
           title,
@@ -607,10 +607,10 @@ export function buildGordenSlidePlan(input: {
           title,
           ...sections.flatMap((section) => [
             section.title,
-            compactText([
-              section.summary,
-              ...section.findings.slice(0, 2).map((finding) => finding.text),
-            ].filter(Boolean).join('； '), 240),
+            compactText(
+              section.summary || section.findings[0]?.text || '本专题资料仍需进一步核验。',
+              160,
+            ),
           ]),
         ].map((value) => value.trim()).filter(Boolean)
     const expectedTexts = semanticTexts

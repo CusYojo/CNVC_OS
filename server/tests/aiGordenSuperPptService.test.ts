@@ -152,7 +152,10 @@ test('Gorden slide plan honors an explicit five-page request', () => {
   }
   assert.equal(plan.flatMap((slide) => slide.expectedTexts).some((text) => /^\d+$/u.test(text)), false)
   assert.doesNotMatch(plan[1].title, /｜/)
-  assert.ok(plan[1].expectedTexts.length <= 9)
+  assert.equal(plan[1].expectedTexts.length, 5)
+  assert.ok(plan[1].expectedTexts.includes(topics[0][1]))
+  assert.ok(plan[1].expectedTexts.includes(topics[1][1]))
+  assert.equal(plan[1].expectedTexts.some((text) => text.includes('详细事实、判断')), false)
 })
 
 test('Gorden cover preserves duplicate fallback values for distinct cards', () => {
