@@ -9,6 +9,10 @@ import JSZip from 'jszip'
 import type { BusinessContent } from './aiBusinessContentService.js'
 import type { ComplianceDocumentBlueprint } from './aiComplianceBlueprintService.js'
 import { COMPLIANCE_AI_STYLE_PATTERN } from './aiComplianceWorkflowService.js'
+import {
+  containsBrokenLatinTokenSpacing,
+  containsParsedSourceLayoutArtifact,
+} from './aiDocumentEditorialQualityService.js'
 import type { AiTemplateDefinition } from './aiTemplateCatalog.js'
 
 const execFileAsync = promisify(execFile)
@@ -249,6 +253,39 @@ export async function reviewGeneratedComplianceDocx(input: {
     addIssue(issues, {
       code: 'DOCX_SOURCE_PROCESS_LEAK',
       message: `DOCX正文不得描述项目资料或取证过程，应改为事实摘要：${sourceProcessParagraphs.slice(0, 3).join('；')}`,
+    })
+  }
+  const sourceLayoutParagraphs = paragraphTexts.filter((value) =>
+    containsParsedSourceLayoutArtifact(value))
+  if (sourceLayoutParagraphs.length) {
+    addIssue(issues, {
+      code: 'DOCX_TEXT_INVALID',
+      message: `DOCX正文残留PPT/PDF页眉、目录、预测表或团队/技术页粘连文本：${sourceLayoutParagraphs.slice(0, 2).join('；')}`,
+    })
+  }
+  const splitTokenParagraphs = paragraphTexts.filter((value) =>
+    containsBrokenLatinTokenSpacing(value))
+  if (splitTokenParagraphs.length) {
+    addIssue(issues, {
+      code: 'DOCX_TEXT_INVALID',
+      message: `DOCX正文存在拆分的英文术语或数字：${splitTokenParagraphs.slice(0, 2).join('；')}`,
+    })
+  }
+  const nonBodyParagraphs = new Set([
+    input.content.title,
+    '公司情况介绍', '公司简介', '核心团队', '产品及技术',
+    '投资理由', '投资计划', '投资情形分析',
+    input.blueprint.fixedContent.issuer,
+  ].map(compactText))
+  const unfinishedParagraphs = paragraphTexts.filter((value) =>
+    value.length >= 12
+    && !nonBodyParagraphs.has(compactText(value))
+    && !/^\d{4}年\s*\d{1,2}\s*月\s*\d{1,2}\s*日$/.test(value)
+    && !/[。！？][”’）】]?$/.test(value))
+  if (unfinishedParagraphs.length) {
+    addIssue(issues, {
+      code: 'DOCX_TEXT_INVALID',
+      message: `DOCX正文存在未完整收句的段落：${unfinishedParagraphs.slice(0, 3).join('；')}`,
     })
   }
   const aiStyleParagraphs = paragraphTexts.filter((value) =>

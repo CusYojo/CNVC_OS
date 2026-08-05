@@ -181,6 +181,7 @@ export type ComplianceReviewIssue = {
     | 'TITLE_MISMATCH'
     | 'DISCLAIMER_MISSING'
     | 'SECTION_MISSING'
+    | 'SECTION_CONTENT_MISSING'
     | 'SECTION_ORDER'
     | 'SECTION_COUNT'
     | 'CONTAINER_CONTENT'
@@ -198,6 +199,9 @@ export type ComplianceReviewIssue = {
     | 'MARKDOWN_LEAK'
     | 'SOURCE_OUTLINE_LEAK'
     | 'SOURCE_LAYOUT_FRAGMENT'
+    | 'TEAM_STRUCTURE_INVALID'
+    | 'PRODUCT_STRUCTURE_INVALID'
+    | 'MISSING_TERMINAL_PUNCTUATION'
     | 'BODY_LABEL_HEADING'
     | 'SOURCE_PROCESS_LEAK'
     | 'AI_STYLE_DRIFT'
@@ -248,6 +252,7 @@ function normalizeComplianceWhitespace(value: string) {
   return value
     .replace(/[\u00a0\u3000]/g, ' ')
     .replace(/\s+/g, ' ')
+    .replace(/(?<!\d)(\d{1,3})\s+(\d{1,3})(?=\s*(?:%|％|万|亿|元|人|项|件|倍|个))/g, '$1$2')
     .replace(/\s*([，。；：！？、（）])\s*/g, '$1')
     .replace(/(?<=[\u3400-\u9fff])\s+(?=[\u3400-\u9fff])/g, '')
     .replace(/(?<=\d)\s+(?=[年月日时分秒万亿元人次家项个%％])/g, '')
@@ -258,14 +263,16 @@ function normalizeComplianceWhitespace(value: string) {
 function rewriteComplianceBodyLabels(value: string) {
   return value
     .replace(/(^|[，。；])\s*学术团队[：:]\s*/g, '$1')
-    .replace(/(^|[，。；])\s*([^，。；！？\n]{2,24})[：:]\s*/g, '$1$2方面，')
+    .replace(/(^|[，。；])\s*业务主体[：:]\s*由/g, '$1业务主体由')
+    .replace(/(^|[，。；])\s*估值目标[：:]\s*/g, '$1估值目标为')
+    .replace(/(^|[，。；])\s*([^，。；！？\n]{2,24})[：:]\s*/g, '$1$2，')
 }
 
 export const COMPLIANCE_VISIBLE_SOURCE_PROCESS_PATTERN =
   /(?:现有|当前|本次|已提供的)?(?:项目)?(?:资料|材料)(?:库)?(?:显示|记载|表明|提供|披露|反映|仅为|尚不足)|(?:交流|会议|访谈)纪要(?:显示|记载|披露|表明|同时记载)|根据(?:当前|现有|本次)?项目(?:资料|材料)|项目档案(?:显示|记载|将)|公开资料可提供|本章未取得|检索问题(?:方面)?|页面标题(?:方面)?|搜索摘要(?:方面)?/
 
 export const COMPLIANCE_AI_STYLE_PATTERN =
-  /(?:关键核验对象|关键核验条件|核验条件[^。；]{0,16}(?:未|尚未)闭环|条件性分析|条件化判断|取证边界|核验边界|专项核验边界|建立(?:比对|核查)底稿|形成单项结论|完成专项分析|本项最终判断|本节需取得|本章未命中可引用证据|具备初步判断依据|可形成初步投资判断|已有商业化线索|具备一定交付组织基础|技术差异化已有业务验证线索|客户验证已出现多场景线索|组织收缩和商业化验证并行|支撑强度|成长路径|利润留存能力|平台化[^。；]{0,24}(?:加|与)[^。；]{0,24}场景化)/
+  /(?:关键核验对象|关键核验条件|核验条件[^。；]{0,16}(?:未|尚未)闭环|条件性分析|条件化判断|取证边界|核验边界|专项核验边界|建立(?:比对|核查)底稿|形成单项结论|完成专项分析|本项最终判断|本节需取得|本章未命中可引用证据|具备初步判断依据|可形成初步投资判断|已有商业化线索|具备一定交付组织基础|技术差异化已有业务验证线索|客户验证已出现多场景线索|组织收缩和商业化验证并行|支撑强度|成长路径|利润留存能力|平台化[^。；]{0,24}(?:加|与)[^。；]{0,24}场景化|(?:增强备选方案|公司估值口径|公司营收|研发投入|团队组建|发明专利)方面)/
 
 /**
  * 证据来源、文件名和检索过程只属于内部审计元数据。客户可见 finding
@@ -273,9 +280,9 @@ export const COMPLIANCE_AI_STYLE_PATTERN =
  */
 function rewriteComplianceEvidenceFraming(value: string) {
   return value
-    .replace(/检索问题方面，.*?(?=页面标题方面，|搜索摘要方面，|$)/g, '')
-    .replace(/页面标题方面，.*?(?=搜索摘要方面，|$)/g, '')
-    .replace(/搜索摘要方面，/g, '')
+    .replace(/检索问题(?:方面)?[，,:：].*?(?=页面标题(?:方面)?[，,:：]|搜索摘要(?:方面)?[，,:：]|$)/g, '')
+    .replace(/页面标题(?:方面)?[，,:：].*?(?=搜索摘要(?:方面)?[，,:：]|$)/g, '')
+    .replace(/搜索摘要(?:方面)?[，,:：]/g, '')
     .replace(/(^|[。；！？])\s*(?:现有|当前|本次|已提供的)?(?:项目)?(?:资料|材料)(?:库)?(?:显示|记载|表明|提供的线索表明|披露|反映)[，,:：]?\s*/g, '$1')
     .replace(/(^|[。；！？])\s*(?:根据|依据)(?:当前|现有|本次)?项目(?:资料|材料)[，,:：]?\s*/g, '$1')
     .replace(/(^|[。；！？])\s*(?:交流|会议|访谈)纪要(?:同时)?(?:显示|记载|披露|表明)[，,:：]?\s*/g, '$1')
@@ -302,6 +309,43 @@ export function cleanComplianceBodyText(value: string) {
   return normalizeComplianceWhitespace(
     rewriteComplianceEvidenceFraming(rewriteComplianceBodyLabels(text)),
   )
+}
+
+export function ensureComplianceSentenceEnding(value: string) {
+  const text = cleanComplianceBodyText(value).trim()
+  if (!text) return ''
+  if (/[。！？][”’）】]?$/.test(text)) return text
+  if (/[，,；;：:]$/.test(text)) return `${text.slice(0, -1)}。`
+  return `${text}。`
+}
+
+const COMPLIANCE_ROLE_PATTERN =
+  /(?:联合创始人|创始人|首席科学家|总经理|董事长|战略负责人|市场负责人|产业负责人|运营负责人|CEO|COO|CTO|CMO)/i
+const COMPLIANCE_MEMBER_LEAD_PATTERN =
+  /^[\u3400-\u9fff·]{2,8}(?:（[^）]{2,40}）|(?:为|现任|担任|系)[^。；]{0,35}(?:联合创始人|创始人|首席科学家|总经理|董事长|负责人|CEO|COO|CTO|CMO))/i
+const COMPLIANCE_VAGUE_ASPECT_PATTERN =
+  /(?:增强备选方案|估值口径|公司营收|营业收入|研发投入|团队组建|团队规模|发明专利)方面[，,:：]/
+
+export function isReadableComplianceTeamFinding(value: string) {
+  const text = cleanComplianceBodyText(value)
+  return text.length >= 32
+    && text.length <= 320
+    && !containsParsedSourceLayoutArtifact(text)
+    && COMPLIANCE_MEMBER_LEAD_PATTERN.test(text)
+    && COMPLIANCE_ROLE_PATTERN.test(text)
+    && /[。！？；]/.test(text)
+}
+
+export function isReadableComplianceProductFinding(value: string) {
+  const text = cleanComplianceBodyText(value)
+  const forecastFieldHits = (text.match(
+    /(?:公司)?(?:营收|营业收入|研发投入|团队组建|团队规模|发明专利)(?:方面|[：:])/g,
+  ) ?? []).length
+  return text.length >= 32
+    && text.length <= 360
+    && !containsParsedSourceLayoutArtifact(text)
+    && forecastFieldHits < 3
+    && /[。！？；]/.test(text)
 }
 
 function complianceEvidenceFragments(value: string) {
@@ -451,6 +495,7 @@ function conciseEvidence(
 }
 
 function fallbackSentenceSupportsSection(title: string, text: string) {
+  if (!text || containsParsedSourceLayoutArtifact(text)) return false
   if (
     /(?:本任务|生成器|项目资料库|知识库|检索问题|联网检索|来源索引|模板版本|Reviewer|Formatter)/i
       .test(text)
@@ -462,10 +507,11 @@ function fallbackSentenceSupportsSection(title: string, text: string) {
       .test(text)
   if (platformWorkflow && title !== '产品及技术') return false
   if (title === '核心团队') {
-    return /创始人|联合创始人|CEO|CTO|董事长|总经理|教授|负责人|团队.*(?:组成|履历|经历|背景|职责)/i.test(text)
+    return isReadableComplianceTeamFinding(text)
   }
   if (title === '产品及技术') {
-    return /产品以|产品为|产品包括|平台|算法|模型|系统|专利|知识产权|技术(?:架构|能力|路线|方案)/.test(text)
+    return isReadableComplianceProductFinding(text)
+      && /产品以|产品为|产品包括|平台|算法|模型|系统|专利|知识产权|技术(?:架构|能力|路线|方案)/.test(text)
   }
   return true
 }
@@ -794,7 +840,9 @@ function fallbackChapter(
     if (selectedSentences.length >= config.maxFindings) break
   }
   const findings = selectedSentences.map(({ item, text }): BusinessFinding => ({
-    text: cleanComplianceBodyText(text).replace(/[；;。.\s]+$/, '').slice(0, 280),
+    text: ensureComplianceSentenceEnding(
+      cleanComplianceBodyText(text).replace(/[；;。.\s]+$/, '').slice(0, 280),
+    ),
     status: item.sourceType.startsWith('public_web') ? '待核验' : '资料记载',
     sourceIndexes: [item.sourceIndex],
   }))
@@ -869,7 +917,8 @@ function normalizeFinding(
     ? [...new Set(value.sourceIndexes.filter((index): index is number =>
       Number.isInteger(index) && allowedIndexes.has(Number(index))))].slice(0, 6)
     : []
-  let text = cleanComplianceBodyText(safeText(value.text, fallback.text))
+  let text = ensureComplianceSentenceEnding(safeText(value.text, fallback.text))
+  if (!text) return fallback
   if (status !== '资料缺口' && !sourceIndexes.length) {
     return fallback
   }
@@ -926,7 +975,7 @@ function normalizeChapter(
       if (!existing) return checklistMissingFinding(topic, packet)
       return {
         ...existing,
-        text: cleanComplianceBodyText(existing.text),
+        text: ensureComplianceSentenceEnding(existing.text),
       }
     })
   } else if (config.title === '投资理由') {
@@ -987,6 +1036,9 @@ async function generateChapter(input: {
 12. 不使用“关键核验对象”“关键核验条件”“核验条件尚未闭环”“条件性分析”“条件化判断”“取证边界”“核验边界”“形成单项结论”“完成专项分析”“本节需取得”，也不使用“具备初步判断依据”“可形成初步投资判断”“已有商业化线索”“具备一定交付组织基础”“成长路径”“支撑强度”“利润留存能力”等模型化套话；不自行命名“平台化……加场景化……”等概念。
 13. 段落长短和句数按证据密度自然变化，通常用1至4句讲清一个逻辑中心，不设置统一句数。相邻段落不得连续使用相同开头或收尾；三段以上连续以“……方面，……”开头，或两段以上连续以“最终结论取决于……”收尾，必须改写。
 14. 只输出JSON对象：{"summary":"","findings":[{"text":"","status":"资料记载|AI推断|待核验|资料缺口","sourceIndexes":[0]}]}。
+15. “核心团队”必须一名成员对应一个finding，正文以“姓名（职务）”或“姓名为/现任/担任……职务”开头，再分别说明教育、任职经历、项目职责和与项目相关的能力；一个finding不得混写两名以上成员，不得输出团队页页眉、公司名、专利清单或多页成员信息拼接串。人员与职务的对应关系在证据中不明确时不得猜测。
+16. “产品及技术”必须一项产品或技术能力对应一个finding，依次写清产品/技术名称、核心机制、明确指标或验证情况及应用价值；知识产权只按明确的“名称—类别—关联技术”关系概括。PPT表格的行列关系无法可靠还原时删除该残片，不得输出“名称类别关联度”、连续“公司营收方面/研发投入方面/团队组建方面/发明专利方面”或页眉与技术说明混排长串。
+17. 每个finding必须以“。/！/？”之一结束。不得使用“增强备选方案方面”“公司估值口径方面”一类机械的“……方面”表达；交易方案和估值口径应写成完整句子。
 
 Document Blueprint：
 - 标题模式：${input.blueprint.fixedContent.titlePattern}
@@ -1171,6 +1223,16 @@ export function reviewComplianceContent(input: {
       message: '“公司情况介绍”只能作为一级容器，不得重复三个子节事实',
     })
   }
+  for (const title of ['公司简介', '核心团队', '产品及技术', '投资计划']) {
+    const current = input.content.sections.find((section) => section.title === title)
+    if (!current?.findings.length) {
+      addIssue(issues, {
+        code: 'SECTION_CONTENT_MISSING',
+        sectionTitle: title,
+        message: `“${title}”没有可交付正文；应重新提炼本章证据，无法可靠还原时写明具体需核对的材料`,
+      })
+    }
+  }
   const reasons = input.content.sections.find((section) => section.title === '投资理由')
   if (!reasons || reasons.findings.length !== COMPLIANCE_INVESTMENT_REASON_TOPICS.length) {
     addIssue(issues, {
@@ -1279,6 +1341,46 @@ export function reviewComplianceContent(input: {
           sectionTitle: section.title,
           findingIndex,
           message: '正文残留 PDF/PPT 页码、目录或章节导航，必须删除并重新提炼项目事实',
+        })
+      }
+      if (
+        section.title === '核心团队'
+        && finding.status !== '资料缺口'
+        && !isReadableComplianceTeamFinding(finding.text)
+      ) {
+        addIssue(issues, {
+          code: 'TEAM_STRUCTURE_INVALID',
+          sectionTitle: section.title,
+          findingIndex,
+          message: '核心团队必须一名成员一段，并以“姓名（职务）”或明确的姓名—职务句开头，再写教育、经历和职责；不得混入多页团队文本',
+        })
+      }
+      if (
+        section.title === '产品及技术'
+        && finding.status !== '资料缺口'
+        && !isReadableComplianceProductFinding(finding.text)
+      ) {
+        addIssue(issues, {
+          code: 'PRODUCT_STRUCTURE_INVALID',
+          sectionTitle: section.title,
+          findingIndex,
+          message: '产品及技术必须一项能力一段，写清名称、机制、指标或验证及应用价值；不得混入预测表、专利表头、页眉或残缺行列',
+        })
+      }
+      if (!/[。！？][”’）】]?$/.test(finding.text.trim())) {
+        addIssue(issues, {
+          code: 'MISSING_TERMINAL_PUNCTUATION',
+          sectionTitle: section.title,
+          findingIndex,
+          message: '正文段落必须以完整中文句号、问号或感叹号结束',
+        })
+      }
+      if (COMPLIANCE_VAGUE_ASPECT_PATTERN.test(finding.text)) {
+        addIssue(issues, {
+          code: 'AI_STYLE_DRIFT',
+          sectionTitle: section.title,
+          findingIndex,
+          message: '正文包含“方案方面/估值口径方面/营收方面”等机械标签，应改写为主体、口径和动作明确的完整句子',
         })
       }
       if (containsBrokenLatinTokenSpacing(finding.text)) {
@@ -1513,6 +1615,13 @@ function sanitizeComplianceContent(content: BusinessContent, sources: EvidenceSo
       '结论',
     ],
   })
+  sanitized.sections = sanitized.sections.map((section) => ({
+    ...section,
+    findings: section.findings.flatMap((finding) => {
+      const text = ensureComplianceSentenceEnding(finding.text)
+      return text ? [{ ...finding, text }] : []
+    }),
+  }))
   sanitized.sections = sanitized.sections.map((section) => {
     if (section.title !== '投资理由') return section
     return {

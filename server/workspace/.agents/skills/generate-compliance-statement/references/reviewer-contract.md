@@ -62,6 +62,10 @@
 - 不出现 Markdown 星号、井号、代码围栏或 HTML 标签。
 - 不出现 PDF/PPT 页码、目录、页眉页脚、孤立章节编号或多个目录项粘成一行的文本；`39 06丨机会与风险总结`、`目录……公司介绍……融资发展 02 03 04` 等内容必须删除，不得当作业务事实。
 - 标准英文/数字词保持连续：`AI-Core-Tech`、`COO`、`CEO`、`4D` 等不得出现 `AI- Core- Tech`、`C OO`、`4 D` 一类断词。
+- 核心团队必须一名成员一段，并以清楚的姓名—职务关系开头；成员段少于必要履历信息、混写多名成员，或混入页眉、公司名、专利数量和下一页内容时返回 `TEAM_STRUCTURE_INVALID`。
+- 产品及技术必须一项产品或技术能力一段，写清名称、机制、明确指标或验证及应用价值；出现“名称类别关联度”、连续预测表字段、残缺专利行或多个页面粘连时返回 `PRODUCT_STRUCTURE_INVALID` 或 `SOURCE_LAYOUT_FRAGMENT`。
+- 每个 finding 必须以完整中文句号、问号或感叹号结束；缺少句末标点时返回 `MISSING_TERMINAL_PUNCTUATION`。
+- `1 0%`、`4 000万`、`3 0人` 等同一数字被拆开时必须在单位明确的前提下还原；“方案方面”“估值口径方面”“营收方面”等机械标签返回 `AI_STYLE_DRIFT`。
 
 ## 2. 问题代码
 
@@ -95,6 +99,10 @@
 - `BROKEN_LATIN_TOKEN`
 - `MARKDOWN_LEAK`
 - `SOURCE_LAYOUT_FRAGMENT`
+- `SECTION_CONTENT_MISSING`
+- `TEAM_STRUCTURE_INVALID`
+- `PRODUCT_STRUCTURE_INVALID`
+- `MISSING_TERMINAL_PUNCTUATION`
 
 问题必须包含代码、章节、finding 索引和可执行修复要求。
 
@@ -112,6 +120,7 @@ Formatter 只消费审核通过的 JSON 和 Blueprint，不重新创作业务内
 - 一级标题必须显式清除字符首行缩进；二级标题必须显式设置左缩进 0 DXA、首行缩进 482 DXA，禁止由 `List Paragraph` 默认样式叠加缩进。
 - 正文两端对齐，首行缩进约 482 DXA。
 - 理由、投资计划和核查内容均使用连续正文段落、首行缩进约 482 DXA，全段常规字形。
+- 核心团队与产品技术按成员/能力分段；可仅将段首“姓名（职务）”或产品/技术名称加粗，其余正文保持宋体 12 pt 常规字形，不使用表格或卡片替代公文正文。
 - 正文不得出现数字小标题或“学术团队：”“业务主体：”“投资方式及投资限制：”等标签式开头。
 - 落款和日期右对齐。
 

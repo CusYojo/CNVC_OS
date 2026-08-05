@@ -10,6 +10,9 @@ import {
   buildComplianceEvidencePackets,
   cleanComplianceBodyText,
   composeComplianceStatement,
+  ensureComplianceSentenceEnding,
+  isReadableComplianceProductFinding,
+  isReadableComplianceTeamFinding,
   reviewComplianceContent,
 } from '../services/aiComplianceWorkflowService.js'
 import {
@@ -352,11 +355,21 @@ async function main() {
     ].join('、') === [
       '短剧相关业务',
       '沈教授负责前沿技术研究',
-      '业务主体方面，由合肥全资子公司运营',
+      '业务主体由合肥全资子公司运营',
       '智灵财务尽调相关',
       '沈阳与智灵FDE团队交流纪要',
     ].join('、'),
     '清除来源编号，并把标签式小标题改写为自然段落',
+  )
+  check(
+    '团队、产品、拆分数字和句末标点门禁生效',
+    isReadableComplianceTeamFinding('杨林（创始人、CEO）具有自动驾驶算法研发经历，现负责公司技术路线和核心产品研发。')
+      && isReadableComplianceProductFinding('R2S2R端到端数据闭环方案。该方案联动真实数据与合成数据，用于智能体训练场景的数据生产与验证。')
+      && cleanComplianceBodyText('以 1 0% 真实数据联动 90% 合成数据，规划营收 4 000万元、团队 3 0人。')
+        === '以 10% 真实数据联动 90% 合成数据，规划营收 4000万元、团队 30人。'
+      && ensureComplianceSentenceEnding('公司本轮拟融资人民币5,000万元')
+        === '公司本轮拟融资人民币5,000万元。',
+    '一人一段、一能力一段、数字连续且正文完整收句',
   )
   check(
     '取证过程不会进入客户可见正文',

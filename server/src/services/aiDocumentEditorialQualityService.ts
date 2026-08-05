@@ -31,14 +31,23 @@ const BROKEN_ENUMERATION = new RegExp(EMPTY_ENUMERATION_TOKEN.source)
 const MARKDOWN_DECORATION = /(?:```|\*\*|__|^\s{0,3}#{1,6}\s+)/m
 const SOURCE_PAGE_HEADING_PREFIX =
   /^\s*\d{1,3}\s+\d{1,3}\s*[丨|｜]\s*[^。！？；\n]{2,30}\s+(?=\d+(?:\.\d+){1,4}\s*)/
+const SOURCE_PAGE_HEADING_INLINE =
+  /(^|[。！？；]\s*)\d{1,3}\s+\d{1,3}\s*[丨|｜]\s*[^。！？；\n]{2,30}\s+(?=\d+(?:\.\d+){1,4}\s*)/g
+const SOURCE_PAGE_HEADING_INLINE_TEST =
+  /(?:^|[。！？；]\s*)\d{1,3}\s+\d{1,3}\s*[丨|｜]\s*[^。！？；\n]{2,30}\s+(?=\d+(?:\.\d+){1,4}\s*)/
 const SOURCE_OUTLINE_PREFIX =
   /(^|[\n。！？；]\s*)\d+(?:\.\d+){1,4}\s*[、.．]?\s*(?=[\u3400-\u9fffA-Za-z])/g
 const SOURCE_LAYOUT_TERMS = [
   '目录', '公司介绍', '公司概况', '核心团队', '产品及技术', '产品介绍',
   '市场预期', '融资发展', '机会与风险', '风险总结',
 ] as const
+const SOURCE_SLIDE_DUMP_MARKERS = [
+  '项目团队', 'AI-Core-Tech', 'Reality Simulation', '名称类别关联度',
+  '专利 / 软著 / 算法备案', '专利/软著/算法备案', '首席科学家',
+  'Chief Scientist', '创始人 CEO', '战略负责人', '市场负责人 CMO',
+] as const
 const SPLIT_LATIN_TOKEN =
-  /(?:\b(?:A\s+I|C\s+EO|C\s+OO|C\s+TO|C\s+FO|C\s+IO|C\s+MO|G\s+PT|L\s+LM|R\s+AG|A\s+PI|S\s+DK)\b|\b\d+\s+D\b|[A-Za-z0-9]\s+[-‐‑–—]|[-‐‑–—]\s+[A-Za-z0-9])/i
+  /(?:\b(?:A\s+I|C\s+EO|C\s+OO|C\s+TO|C\s+FO|C\s+IO|C\s+MO|G\s+PT|L\s+LM|R\s+AG|A\s+PI|S\s+DK)\b|\b\d+\s+D\b|(?<!\d)\d{1,3}\s+\d{1,3}(?=\s*(?:%|％|万|亿|元|人|项|件|倍|个))|[A-Za-z0-9]\s+[-‐‑–—]|[-‐‑–—]\s+[A-Za-z0-9])/i
 const INTERNAL_WORKFLOW = /(?:OA\s*(?:流程|审批|流转)|错误编号|Reviewer|Generator|Formatter|LLM\s*Gateway)/i
 const FORMULAIC_CAVEAT =
   /(?:尚未|尚不能|目前(?:仍)?(?:不能|无法)|仍需|需进一步|应进一步|后续应|后续需|有待进一步|最终取决于)/g
@@ -56,6 +65,33 @@ function looksLikeConcatenatedSourceNavigation(value: string) {
     && (directoryHits >= 2 || (directoryHits >= 1 && termHits >= 4 && compactNumberHits >= 2))
 }
 
+/**
+ * PPT/PDF 的文本层经常按绘制顺序返回：页眉、姓名、职位、履历、图表字段和
+ * 下一页标题会被压成一行。此类文本即使没有“目录”二字，也不能作为正式
+ * 段落。这里仅识别高置信的低标点、高标签密度串，避免误删正常技术长句。
+ */
+export function looksLikeDenseSourceLayoutDump(value: unknown) {
+  const text = String(value ?? '').replace(/\s+/g, ' ').trim()
+  if (text.length < 80) return false
+  const sentencePunctuation = (text.match(/[。！？；]/g) ?? []).length
+  const markerHits = SOURCE_SLIDE_DUMP_MARKERS.reduce(
+    (sum, marker) => sum + (text.includes(marker) ? 1 : 0),
+    0,
+  )
+  const repeatedPageFurniture = (text.match(/(?:项目团队|AI\s*-\s*Core\s*-\s*Tech)/gi) ?? []).length
+  const forecastFieldHits = (text.match(
+    /(?:公司)?(?:营收|营业收入|研发投入|团队组建|团队规模|发明专利)(?:方面|\s*[：:])/g,
+  ) ?? []).length
+  const roleHits = (text.match(
+    /(?:联合创始人|创始人|首席科学家|总经理|战略负责人|市场负责人|产业负责人|运营负责人|CEO|COO|CTO|CMO)/gi,
+  ) ?? []).length
+  return (text.length >= 80 && forecastFieldHits >= 4)
+    || (text.length >= 100 && /名称\s*类别\s*关联度/.test(text))
+    || (text.length >= 120 && repeatedPageFurniture >= 2 && sentencePunctuation <= 3)
+    || (text.length >= 120 && markerHits >= 3 && sentencePunctuation <= 2)
+    || (text.length >= 120 && roleHits >= 5 && sentencePunctuation <= 2)
+}
+
 export function containsParsedSourceLayoutArtifact(value: unknown) {
   const text = String(value ?? '')
   const normalized = text
@@ -64,6 +100,8 @@ export function containsParsedSourceLayoutArtifact(value: unknown) {
     .replace(/^\s{0,3}#{1,6}\s*/gm, '')
     .trim()
   return SOURCE_PAGE_HEADING_PREFIX.test(normalized)
+    || SOURCE_PAGE_HEADING_INLINE_TEST.test(normalized)
+    || looksLikeDenseSourceLayoutDump(normalized)
     || looksLikeConcatenatedSourceNavigation(normalized.replace(/\s+/g, ' '))
 }
 
@@ -86,6 +124,8 @@ function normalizeLatinTokenSpacing(value: string) {
     .replace(/\bA\s+PI\b/gi, 'API')
     .replace(/\bS\s+DK\b/gi, 'SDK')
     .replace(/\b(\d+)\s+D\b/g, '$1D')
+    .replace(/(?<!\d)(\d{1,3})\s+(\d{1,3})(?=\s*(?:%|％|万|亿|元|人|项|件|倍|个))/g, '$1$2')
+    .replace(/(?<=\d)\s+(?=[%％])/g, '')
     .replace(/([A-Za-z0-9])\s*[-‐‑–—]\s*(?=[A-Za-z0-9])/g, '$1-')
 }
 
@@ -97,10 +137,13 @@ function stripParsedSourceLayout(value: string) {
     .replace(/^\s{0,3}#{1,6}\s*/gm, '')
     .split(/\r?\n/)
     .map((line) => line.trim())
-    .filter((line) => line && !looksLikeConcatenatedSourceNavigation(line))
+    .filter((line) => line
+      && !looksLikeConcatenatedSourceNavigation(line)
+      && !looksLikeDenseSourceLayoutDump(line))
   return lines
     .join('\n')
     .replace(SOURCE_PAGE_HEADING_PREFIX, '')
+    .replace(SOURCE_PAGE_HEADING_INLINE, '$1')
     .replace(SOURCE_OUTLINE_PREFIX, '$1')
 }
 

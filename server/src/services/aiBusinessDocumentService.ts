@@ -37,6 +37,7 @@ import {
   cleanComplianceBodyText,
   COMPLIANCE_CHECKLIST_TOPICS,
   COMPLIANCE_INVESTMENT_REASON_TOPICS,
+  ensureComplianceSentenceEnding,
 } from './aiComplianceWorkflowService.js'
 import { sanitizeClientVisibleEvidenceWording } from './aiClientVisibleTextService.js'
 import { generateInvestmentProposalDocx } from './aiInvestmentProposalDocumentService.js'
@@ -778,32 +779,64 @@ export async function generateBusinessDocx(input: {
   if (input.template.type === 'compliance_statement') {
     const sectionByTitle = new Map(input.content.sections.map((section) => [section.title, section]))
     const section = (title: string) => sectionByTitle.get(title)
+    const complianceFindingRuns = (sectionTitle: string, value: string) => {
+      const font = runFont(profile.bodyFont)
+      const run = (text: string, bold = false) => new TextRun({
+        text,
+        color: '000000',
+        size: 24,
+        bold,
+        font,
+      })
+      if (sectionTitle === '核心团队') {
+        const parentheticalLead = value.match(
+          /^([\u3400-\u9fff·]{2,8}（[^）]{2,40}）)([，。]?)([\s\S]*)$/,
+        )
+        if (parentheticalLead) {
+          const [, lead, punctuation, body] = parentheticalLead
+          return [run(lead, true), run(`${punctuation}${body}`)]
+        }
+        const roleLead = value.match(
+          /^([^，。；]{2,52}(?:联合创始人|创始人|首席科学家|总经理|董事长|负责人|CEO|COO|CTO|CMO))([，。])([\s\S]+)$/i,
+        )
+        if (roleLead) {
+          const [, lead, punctuation, body] = roleLead
+          return [run(lead, true), run(`${punctuation}${body}`)]
+        }
+      }
+      if (sectionTitle === '产品及技术') {
+        const productLead = value.match(
+          /^([^。]{2,48}(?:模型|平台|系统|方案|技术|产品))。([\s\S]+)$/,
+        )
+        if (productLead) {
+          const [, lead, body] = productLead
+          return [run(`${lead}。`, true), run(body)]
+        }
+      }
+      return [run(value)]
+    }
     const findingParagraph = (
       finding: BusinessContent['sections'][number]['findings'][number],
+      sectionTitle = '',
       options: {
         keepNext?: boolean
         before?: number
       } = {},
     ) => {
       const normalizedText = sanitizeClientVisibleEvidenceWording(
-        cleanComplianceBodyText(finding.text),
+        ensureComplianceSentenceEnding(finding.text),
       )
       return new Paragraph({
         spacing: {
-          before: options.before ?? 0,
-          after: 0,
+          before: options.before ?? (['核心团队', '产品及技术'].includes(sectionTitle) ? 80 : 0),
+          after: ['核心团队', '产品及技术'].includes(sectionTitle) ? 80 : 0,
           line: 360,
         },
         keepNext: options.keepNext,
         keepLines: false,
-        indent: { firstLine: 480 },
+        indent: { firstLine: ['核心团队', '产品及技术'].includes(sectionTitle) ? 0 : 480 },
         alignment: AlignmentType.JUSTIFIED,
-        children: [new TextRun({
-          text: normalizedText,
-          color: '000000',
-          size: 24,
-          font: runFont(profile.bodyFont),
-        })],
+        children: complianceFindingRuns(sectionTitle, normalizedText),
       })
     }
     const complianceHeading = (value: string, level: 1 | 2) => new Paragraph({
@@ -843,7 +876,7 @@ export async function generateBusinessDocx(input: {
             status: '资料缺口' as const,
             sourceIndexes: [],
           }]
-      findings.forEach((finding) => contentChildren.push(findingParagraph(finding)))
+      findings.forEach((finding) => contentChildren.push(findingParagraph(finding, title)))
     }
 
     contentChildren.push(complianceHeading('公司情况介绍', 1))
@@ -867,7 +900,7 @@ export async function generateBusinessDocx(input: {
           status: '资料缺口' as const,
           sourceIndexes: [],
         })
-    renderedReasons.forEach((finding) => contentChildren.push(findingParagraph(finding)))
+    renderedReasons.forEach((finding) => contentChildren.push(findingParagraph(finding, '投资理由')))
 
     contentChildren.push(complianceHeading('投资计划', 1))
     const plan = section('投资计划')?.findings ?? []
@@ -878,7 +911,7 @@ export async function generateBusinessDocx(input: {
           status: '资料缺口' as const,
           sourceIndexes: [],
         }]
-    renderedPlan.forEach((finding) => contentChildren.push(findingParagraph(finding)))
+    renderedPlan.forEach((finding) => contentChildren.push(findingParagraph(finding, '投资计划')))
 
     contentChildren.push(complianceHeading('投资情形分析', 1))
     const analyses = section('投资情形分析')?.findings ?? []
@@ -900,14 +933,14 @@ export async function generateBusinessDocx(input: {
           status: '资料缺口' as const,
           sourceIndexes: [],
         })
-    renderedAnalyses.forEach((finding) => contentChildren.push(findingParagraph(finding)))
+    renderedAnalyses.forEach((finding) => contentChildren.push(findingParagraph(finding, '投资情形分析')))
 
     const conclusion = section('结论')?.findings[0]
     contentChildren.push(findingParagraph(conclusion ?? {
       text: input.content.executiveSummary,
       status: '待核验',
       sourceIndexes: [],
-    }, { before: 240 }))
+    }, '结论', { before: 240 }))
     contentChildren.push(
       new Paragraph({
         alignment: AlignmentType.RIGHT,
@@ -1641,7 +1674,7 @@ export async function generateBusinessDocx(input: {
     const documentPart = outputZip.file('word/document.xml')
     if (documentPart) {
       const documentXml = await documentPart.async('string')
-      // 主模板的星实一标/二标样式自带中文编号。生成器已经把统一的
+      // 统一模板样式中的星实一标/二标自带中文编号。生成器已经把统一的
       // 1、/1.1 编号写入标题文本，因此必须在段落级关闭样式编号，
       // 否则 Word/WPS 会显示“一、1、…”或“（一）1.1 …”的双重编号。
       const unnumberedHeadingXml = documentXml.replace(
@@ -1755,13 +1788,21 @@ export async function generateBusinessDocx(input: {
         sha256: createHash('sha256').update(await readFile(referencePath)).digest('hex'),
       })),
   )
+  const templateCorpusSha256 = createHash('sha256')
+    .update(templateCorpus
+      .map((item) => `${item.fileName}:${item.sha256}`)
+      .sort()
+      .join('\n'))
+    .digest('hex')
   return {
     pageIntent: input.template.type === 'due_diligence_report' ? 'long-form' : 'brief',
     templateApplied: true,
-    templateSha256: templateCorpus.find((item) =>
-      item.fileName === path.basename(input.template.referencePath))?.sha256
-      ?? templateCorpus[0]?.sha256
-      ?? '',
+    templateSha256: input.template.type === 'due_diligence_report'
+      ? templateCorpusSha256
+      : templateCorpus.find((item) =>
+        item.fileName === path.basename(input.template.referencePath))?.sha256
+        ?? templateCorpus[0]?.sha256
+        ?? '',
     templateCorpus,
     templateParts: appliedParts,
     typography: { body: profile.bodyFont, heading: profile.headingFont },

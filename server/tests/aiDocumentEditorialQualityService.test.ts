@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { BusinessContent } from '../src/services/aiBusinessContentService.js'
 import {
+  looksLikeDenseSourceLayoutDump,
   professionalizeDocumentText,
   reviewBusinessDocumentEditorialQuality,
   sanitizeBusinessContentForDelivery,
@@ -115,6 +116,31 @@ test('正文专业化清除 PDF 页眉、目录和多级章节编号残片', () 
   assert.equal(
     professionalizeDocumentText('目录 AI-Core-Tech 公司介绍 市场预期 融资发展 目录 02 03 04 公司概况 核心团队'),
     '',
+  )
+  assert.equal(
+    professionalizeDocumentText(
+      '项目业务与相关政策和行业发展方向较为一致。39 06 丨机会与风险总结 6.2.5 行业生态与标准缺失的风险。6.2.6 商业化进程不及预期的风险。',
+    ),
+    '项目业务与相关政策和行业发展方向较为一致。行业生态与标准缺失的风险。商业化进程不及预期的风险。',
+  )
+})
+
+test('交付前清洗识别团队页、技术专利页和发展预测表粘连文本', () => {
+  const teamDump = '项目团队 AI- Core- Tech 大衍科技（桐乡）有限公司王剑雄创始人 CEO 新加坡国立大学计算机博士杨林 7年深度强化学习经验刘岩鑫战略负责人 C OO 9年项目管理经验张孙培首席科学家 Chief Scientist 王剑雄市场负责人 CMO 10年人工智能市场经验'
+  const productDump = 'Reality Simulation 触觉大模型 29个手部微单元分割 + 29个视触觉感知单元 AI-Core-Tech 大衍科技（桐乡）有限公司专利 / 软著 / 算法备案名称类别关联度基于 3D 点云引导的视角可控连续图像生成系统和方法发明专利扩散模型技术'
+  const forecastDump = '发展预期公司营收方面，2000万研发投入方面，600万团队组建方面，15人发明专利方面，8件公司营收方面，4 000万研发投入方面，2400万团队组建方面，3 0人发明专利方面，20件'
+  assert.equal(looksLikeDenseSourceLayoutDump(teamDump), true)
+  assert.equal(looksLikeDenseSourceLayoutDump(productDump), true)
+  assert.equal(looksLikeDenseSourceLayoutDump(forecastDump), true)
+  assert.equal(professionalizeDocumentText(teamDump), '')
+  assert.equal(professionalizeDocumentText(productDump), '')
+  assert.equal(professionalizeDocumentText(forecastDump), '')
+})
+
+test('正文专业化修复带单位的拆分数字', () => {
+  assert.equal(
+    professionalizeDocumentText('方案以 1 0% 真实数据联动 90% 合成数据，规划营收 4 000万元、团队 3 0人。'),
+    '方案以 10% 真实数据联动 90% 合成数据，规划营收 4000万元、团队 30人。',
   )
 })
 
