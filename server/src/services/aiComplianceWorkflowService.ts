@@ -14,6 +14,9 @@ import type { LoadedAiSkill } from './aiSkillService.js'
 import type { AiTemplateDefinition } from './aiTemplateCatalog.js'
 import { cleanCorruptedText } from './textQualityService.js'
 import {
+  containsBrokenLatinTokenSpacing,
+  containsParsedSourceLayoutArtifact,
+  professionalizeDocumentText,
   reviewBusinessDocumentEditorialQuality,
   sanitizeBusinessContentForDelivery,
 } from './aiDocumentEditorialQualityService.js'
@@ -191,7 +194,10 @@ export type ComplianceReviewIssue = {
     | 'TEMPLATE_FACT_LEAK'
     | 'TEMPLATE_COPY'
     | 'DUPLICATED_FACT'
+    | 'BROKEN_LATIN_TOKEN'
+    | 'MARKDOWN_LEAK'
     | 'SOURCE_OUTLINE_LEAK'
+    | 'SOURCE_LAYOUT_FRAGMENT'
     | 'BODY_LABEL_HEADING'
     | 'SOURCE_PROCESS_LEAK'
     | 'AI_STYLE_DRIFT'
@@ -286,7 +292,7 @@ function rewriteComplianceEvidenceFraming(value: string) {
  * “一、”“（二）”“3、”不得成为 finding 正文的一部分。
  */
 export function cleanComplianceBodyText(value: string) {
-  let text = normalizeComplianceWhitespace(safeText(value))
+  let text = normalizeComplianceWhitespace(professionalizeDocumentText(safeText(value)))
   for (let index = 0; index < 6 && COMPLIANCE_OUTLINE_MARKER_AT_START.test(text); index += 1) {
     text = text.replace(COMPLIANCE_OUTLINE_MARKER_AT_START, '')
   }
@@ -1265,6 +1271,30 @@ export function reviewComplianceContent(input: {
           sectionTitle: section.title,
           findingIndex,
           message: '正文残留来源材料的章节号或条目号；应删除原编号，仅保留一级、二级正式章节编号',
+        })
+      }
+      if (containsParsedSourceLayoutArtifact(finding.text)) {
+        addIssue(issues, {
+          code: 'SOURCE_LAYOUT_FRAGMENT',
+          sectionTitle: section.title,
+          findingIndex,
+          message: '正文残留 PDF/PPT 页码、目录或章节导航，必须删除并重新提炼项目事实',
+        })
+      }
+      if (containsBrokenLatinTokenSpacing(finding.text)) {
+        addIssue(issues, {
+          code: 'BROKEN_LATIN_TOKEN',
+          sectionTitle: section.title,
+          findingIndex,
+          message: '英文缩写、连字符技术名或数字技术名称存在异常空格',
+        })
+      }
+      if (/(?:```|\*\*|__|^\s{0,3}#{1,6}\s+)/m.test(finding.text)) {
+        addIssue(issues, {
+          code: 'MARKDOWN_LEAK',
+          sectionTitle: section.title,
+          findingIndex,
+          message: '正文残留 Markdown 标记，必须在生成 Word 前清除',
         })
       }
       if (/^[^，。；！？\n]{2,24}[：:]\s*\S/.test(finding.text)) {

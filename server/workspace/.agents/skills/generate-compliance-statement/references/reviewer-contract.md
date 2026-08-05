@@ -59,6 +59,9 @@
 - 不显示状态标签、`[S#]`、模板路径、Skill 名称或生成引擎。
 - 审计元数据不混入正文。
 - 项目资料、会议或访谈纪要、项目档案、网络检索等来源过程不进入正文。
+- 不出现 Markdown 星号、井号、代码围栏或 HTML 标签。
+- 不出现 PDF/PPT 页码、目录、页眉页脚、孤立章节编号或多个目录项粘成一行的文本；`39 06丨机会与风险总结`、`目录……公司介绍……融资发展 02 03 04` 等内容必须删除，不得当作业务事实。
+- 标准英文/数字词保持连续：`AI-Core-Tech`、`COO`、`CEO`、`4D` 等不得出现 `AI- Core- Tech`、`C OO`、`4 D` 一类断词。
 
 ## 2. 问题代码
 
@@ -89,6 +92,9 @@
 - `NETWORK_CACHE_WRITEBACK`
 - `PROJECT_LLM_GROUNDING_UNAVAILABLE`
 - `UNVERIFIABLE_MODEL_SOURCE`
+- `BROKEN_LATIN_TOKEN`
+- `MARKDOWN_LEAK`
+- `SOURCE_LAYOUT_FRAGMENT`
 
 问题必须包含代码、章节、finding 索引和可执行修复要求。
 
@@ -135,6 +141,7 @@ Formatter 只消费审核通过的 JSON 和 Blueprint，不重新创作业务内
 - 页面、边距、字体、字号、行距、缩进和编号符合 Blueprint。
 - 无多余正文板块和非本项目事实泄漏。
 - 无模型化套话、相同句式连用或机械重复的核验尾句。
+- 无 Markdown、来源页码/目录残片或被空格拆开的英文缩写和数字词。
 
 失败时修复 Formatter 并重新生成一次；仍无法生成可由 Word/WPS 正常打开且无乱码的 DOCX 时，才按基础设施异常停止，不得交付损坏文件。
 

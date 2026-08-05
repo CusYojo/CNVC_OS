@@ -22,8 +22,8 @@ import type { QaTemplateProfile } from './aiQaTemplateParser.js'
 import { sanitizeClientVisibleEvidenceWording } from './aiClientVisibleTextService.js'
 
 // 核心规范统一使用宋体；生产环境可通过环境变量切换到已批准的宋体实现。
-const BODY_FONT = process.env.AI_QA_BODY_FONT || process.env.AI_DOCUMENT_SONG_FONT || 'Songti SC'
-const HEADING_FONT = process.env.AI_QA_HEADING_FONT || process.env.AI_DOCUMENT_SONG_FONT || 'Songti SC'
+const BODY_FONT = process.env.AI_QA_BODY_FONT || process.env.AI_DOCUMENT_SONG_FONT || '宋体'
+const HEADING_FONT = process.env.AI_QA_HEADING_FONT || process.env.AI_DOCUMENT_SONG_FONT || '宋体'
 const LATIN_FONT = 'Times New Roman'
 const MUTED = '595959'
 const ANSWER_HEADING_PATTERN =
@@ -485,6 +485,23 @@ export async function inspectProjectQaDocx(
   const documentXml = await zip.file('word/document.xml')?.async('string')
   if (!documentXml) throw new Error('Q&A DOCX 缺少 document.xml')
   if (documentXml.includes('\uFFFD')) throw new Error('Q&A DOCX 含损坏字符')
+  const cjkFonts = [...documentXml.matchAll(/w:eastAsia="([^"]+)"/g)]
+    .map((match) => match[1])
+  const cjkFontValidated = cjkFonts.length > 0
+    && !cjkFonts.some((name) => /Arial Unicode MS/i.test(name))
+  const lineSpacingValidated = /<w:spacing\b[^>]*w:line="360"/.test(documentXml)
+  const finalSection = [...documentXml.matchAll(/<w:sectPr\b[\s\S]*?<\/w:sectPr>/g)].at(-1)?.[0] ?? ''
+  const pageSize = finalSection.match(/<w:pgSz\b[^>]*\/?>/)?.[0] ?? ''
+  const pageMargin = finalSection.match(/<w:pgMar\b[^>]*\/?>/)?.[0] ?? ''
+  const integerAttribute = (xml: string, name: string) =>
+    Number.parseInt(xml.match(new RegExp(`\\b${name}="(\\d+)"`))?.[1] ?? '-1', 10)
+  const pageGeometryValidated =
+    integerAttribute(pageSize, 'w:w') === 11906
+    && integerAttribute(pageSize, 'w:h') === 16838
+    && integerAttribute(pageMargin, 'w:top') === 1440
+    && integerAttribute(pageMargin, 'w:right') === 1800
+    && integerAttribute(pageMargin, 'w:bottom') === 1440
+    && integerAttribute(pageMargin, 'w:left') === 1800
   const visibleText = documentXml.replace(/<[^>]+>/g, '')
   const decodeXmlText = (value: string) => value
     .replace(/&lt;/g, '<')
@@ -562,11 +579,17 @@ export async function inspectProjectQaDocx(
         bodyQ1ParagraphIndexPosition + expected.questionCount,
       )
     : []
+  const bodyQuestionLengths: number[] = []
+  const bodyAnswerLengths: number[] = []
   bodyQuestionParagraphIndexes.forEach((paragraphIndex, index) => {
     const nextQuestionIndex = bodyQuestionParagraphIndexes[index + 1] ?? visibleParagraphs.length
     const answerParagraphs = visibleParagraphs
       .slice(paragraphIndex + 1, nextQuestionIndex)
       .filter(Boolean)
+    bodyQuestionLengths.push(
+      visibleParagraphs[paragraphIndex].replace(/^Q\d+[：:]/, '').replace(/\s+/g, '').length,
+    )
+    bodyAnswerLengths.push(answerParagraphs.join('').replace(/\s+/g, '').length)
     const answerLabel = answerParagraphs.find((paragraph) =>
       /^(?:答复|回答)\s*[：:]/.test(paragraph))
     if (
@@ -615,8 +638,28 @@ export async function inspectProjectQaDocx(
       openXmlValid: true,
       editableText: true,
       encodingClean: true,
+      cjkFontValidated,
+      lineSpacingValidated,
+      pageGeometryValidated,
+      tableCount: (documentXml.match(/<w:tbl\b/g) || []).length,
       categoryCount: expected.categoryCount,
       questionCount: expected.questionCount,
+      averageQuestionLength: bodyQuestionLengths.length
+        ? Math.round(bodyQuestionLengths.reduce((sum, value) => sum + value, 0) / bodyQuestionLengths.length)
+        : 0,
+      maximumQuestionLength: bodyQuestionLengths.length
+        ? Math.max(...bodyQuestionLengths)
+        : 0,
+      averageAnswerLength: bodyAnswerLengths.length
+        ? Math.round(bodyAnswerLengths.reduce((sum, value) => sum + value, 0) / bodyAnswerLengths.length)
+        : 0,
+      averageAnswerQuestionRatio: bodyQuestionLengths.length
+        ? Math.round(
+            bodyAnswerLengths.reduce((sum, value) => sum + value, 0)
+            / Math.max(bodyQuestionLengths.reduce((sum, value) => sum + value, 0), 1)
+            * 100,
+          ) / 100
+        : 0,
       directoryCompleteBeforeBody: true,
       answerParagraphFormValid: true,
       narrativeParagraphRangeValid: true,

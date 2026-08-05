@@ -1116,7 +1116,7 @@ export async function generateBusinessDocx(input: {
       children: [new TextRun({
         text: value,
         font: runFont(level === 1 ? profile.headingFont : '楷体'),
-        size: 28,
+        size: level === 1 ? 30 : 24,
         bold: true,
         color: '000000',
       })],
@@ -1127,13 +1127,13 @@ export async function generateBusinessDocx(input: {
     ) => new Paragraph({
       style: DUE_DILIGENCE_STYLES.body,
       keepNext: options.keepNext,
-      keepLines: true,
+      keepLines: false,
       alignment: AlignmentType.JUSTIFIED,
       indent: options.firstLine === false ? { firstLine: 0 } : undefined,
       children: [new TextRun({
         text: value,
         font: runFont(profile.bodyFont),
-        size: 28,
+        size: 24,
         bold: options.bold,
         color: '000000',
       })],
@@ -1230,7 +1230,7 @@ export async function generateBusinessDocx(input: {
             children: [new TextRun({
               text: value,
               font: runFont(profile.bodyFont),
-              size: 21,
+              size: 18,
               bold: header,
               color: '000000',
             })],
@@ -1247,7 +1247,7 @@ export async function generateBusinessDocx(input: {
           children: [new TextRun({
             text: table.title,
             font: runFont(profile.bodyFont),
-            size: 28,
+            size: 24,
             bold: true,
             color: '000000',
           })],
@@ -1260,7 +1260,7 @@ export async function generateBusinessDocx(input: {
           children: [new TextRun({
             text: `单位：${table.unit}`,
             font: runFont(profile.bodyFont),
-            size: 21,
+            size: 18,
             color: '000000',
           })],
         })] : []),
@@ -1304,14 +1304,14 @@ export async function generateBusinessDocx(input: {
             : ''
           contentChildren.push(new Paragraph({
             style: DUE_DILIGENCE_STYLES.body,
-            keepNext: findingIndex < currentSection.findings.length - 1,
-            keepLines: true,
+            keepNext: false,
+            keepLines: false,
             alignment: AlignmentType.JUSTIFIED,
             children: [
               new TextRun({
                 text: `${prefix}${finding.text}`,
                 color: '000000',
-                size: 28,
+                size: 24,
                 font: runFont(profile.bodyFont),
               }),
             ],

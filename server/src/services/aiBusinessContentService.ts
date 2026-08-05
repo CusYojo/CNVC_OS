@@ -15,6 +15,7 @@ import {
   type InvestmentProposalRuntime,
 } from './aiInvestmentProposalContentService.js'
 import {
+  professionalizeDocumentText,
   reviewBusinessDocumentEditorialQuality,
   sanitizeBusinessContentForDelivery,
 } from './aiDocumentEditorialQualityService.js'
@@ -947,7 +948,7 @@ const DUE_DILIGENCE_DISPOSITION_SOURCE =
   '进入初筛|继续跟踪|申请立项|启动尽调|提请上会|提交投决|暂缓推进|归档'
 
 function sanitizeDueDiligenceText(value: string) {
-  return sanitizeClientVisibleEvidenceWording(value)
+  const sanitized = sanitizeClientVisibleEvidenceWording(value)
     .replace(/【(?:资料记载|AI推断|待核验|资料缺口)】/g, '')
     .replace(/资料缺口/g, '后续核验事项')
     .replace(
@@ -1002,6 +1003,7 @@ function sanitizeDueDiligenceText(value: string) {
     .replace(/([，。；：！？])\s+/g, '$1')
     .replace(/\s+/g, ' ')
     .trim()
+  return professionalizeDocumentText(sanitized)
 }
 
 function ensureDueDiligenceRecommendation(

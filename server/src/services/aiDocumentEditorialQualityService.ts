@@ -9,12 +9,15 @@ import { cleanCorruptedText } from './textQualityService.js'
 export type DocumentEditorialIssue = {
   code:
     | 'BROKEN_ENUMERATION'
+    | 'BROKEN_LATIN_TOKEN'
     | 'DUPLICATED_SENTENCE'
     | 'FORMULAIC_CAVEAT_DENSITY'
     | 'FINANCIAL_FACT_CONFLICT'
     | 'FINANCIAL_UNIT_MISSING'
     | 'INTERNAL_WORKFLOW_LEAK'
+    | 'MARKDOWN_LEAK'
     | 'RAW_TECHNICAL_DUMP'
+    | 'SOURCE_LAYOUT_FRAGMENT'
   message: string
   sectionTitle?: string
 }
@@ -25,6 +28,17 @@ const EMPTY_ENUMERATION_TOKEN = new RegExp(
   'g',
 )
 const BROKEN_ENUMERATION = new RegExp(EMPTY_ENUMERATION_TOKEN.source)
+const MARKDOWN_DECORATION = /(?:```|\*\*|__|^\s{0,3}#{1,6}\s+)/m
+const SOURCE_PAGE_HEADING_PREFIX =
+  /^\s*\d{1,3}\s+\d{1,3}\s*[丨|｜]\s*[^。！？；\n]{2,30}\s+(?=\d+(?:\.\d+){1,4}\s*)/
+const SOURCE_OUTLINE_PREFIX =
+  /(^|[\n。！？；]\s*)\d+(?:\.\d+){1,4}\s*[、.．]?\s*(?=[\u3400-\u9fffA-Za-z])/g
+const SOURCE_LAYOUT_TERMS = [
+  '目录', '公司介绍', '公司概况', '核心团队', '产品及技术', '产品介绍',
+  '市场预期', '融资发展', '机会与风险', '风险总结',
+] as const
+const SPLIT_LATIN_TOKEN =
+  /(?:\b(?:A\s+I|C\s+EO|C\s+OO|C\s+TO|C\s+FO|C\s+IO|C\s+MO|G\s+PT|L\s+LM|R\s+AG|A\s+PI|S\s+DK)\b|\b\d+\s+D\b|[A-Za-z0-9]\s+[-‐‑–—]|[-‐‑–—]\s+[A-Za-z0-9])/i
 const INTERNAL_WORKFLOW = /(?:OA\s*(?:流程|审批|流转)|错误编号|Reviewer|Generator|Formatter|LLM\s*Gateway)/i
 const FORMULAIC_CAVEAT =
   /(?:尚未|尚不能|目前(?:仍)?(?:不能|无法)|仍需|需进一步|应进一步|后续应|后续需|有待进一步|最终取决于)/g
@@ -34,8 +48,64 @@ const MONEY_TOKEN = /(\d+(?:\.\d+)?)\s*(万|亿)?\s*元/g
 const FINANCIAL_CONTEXT = /(?:估值|融资(?:计划|金额|规模|安排)?|投前|投后)/
 const FINANCIAL_RECONCILIATION = /(?:不同口径|口径不一|存在差异|尚未统一|分别为|投前与投后|历史与本轮)/
 
+function looksLikeConcatenatedSourceNavigation(value: string) {
+  const termHits = SOURCE_LAYOUT_TERMS.filter((term) => value.includes(term)).length
+  const directoryHits = (value.match(/目录/g) ?? []).length
+  const compactNumberHits = (value.match(/(?:^|\s)0?\d{1,2}(?=\s|$)/g) ?? []).length
+  return value.length >= 40
+    && (directoryHits >= 2 || (directoryHits >= 1 && termHits >= 4 && compactNumberHits >= 2))
+}
+
+export function containsParsedSourceLayoutArtifact(value: unknown) {
+  const text = String(value ?? '')
+  const normalized = text
+    .replace(/```(?:json|markdown|md)?/gi, '')
+    .replace(/\*\*|__/g, '')
+    .replace(/^\s{0,3}#{1,6}\s*/gm, '')
+    .trim()
+  return SOURCE_PAGE_HEADING_PREFIX.test(normalized)
+    || looksLikeConcatenatedSourceNavigation(normalized.replace(/\s+/g, ' '))
+}
+
+export function containsBrokenLatinTokenSpacing(value: unknown) {
+  return SPLIT_LATIN_TOKEN.test(String(value ?? ''))
+}
+
+function normalizeLatinTokenSpacing(value: string) {
+  return value
+    .replace(/\bA\s+I\b/gi, 'AI')
+    .replace(/\bC\s+EO\b/gi, 'CEO')
+    .replace(/\bC\s+OO\b/gi, 'COO')
+    .replace(/\bC\s+TO\b/gi, 'CTO')
+    .replace(/\bC\s+FO\b/gi, 'CFO')
+    .replace(/\bC\s+IO\b/gi, 'CIO')
+    .replace(/\bC\s+MO\b/gi, 'CMO')
+    .replace(/\bG\s+PT\b/gi, 'GPT')
+    .replace(/\bL\s+LM\b/gi, 'LLM')
+    .replace(/\bR\s+AG\b/gi, 'RAG')
+    .replace(/\bA\s+PI\b/gi, 'API')
+    .replace(/\bS\s+DK\b/gi, 'SDK')
+    .replace(/\b(\d+)\s+D\b/g, '$1D')
+    .replace(/([A-Za-z0-9])\s*[-‐‑–—]\s*(?=[A-Za-z0-9])/g, '$1-')
+}
+
+function stripParsedSourceLayout(value: string) {
+  const lines = value
+    .replace(/```(?:json|markdown|md)?/gi, '')
+    .replace(/\*\*([^*\n]+)\*\*/g, '$1')
+    .replace(/__([^_\n]+)__/g, '$1')
+    .replace(/^\s{0,3}#{1,6}\s*/gm, '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !looksLikeConcatenatedSourceNavigation(line))
+  return lines
+    .join('\n')
+    .replace(SOURCE_PAGE_HEADING_PREFIX, '')
+    .replace(SOURCE_OUTLINE_PREFIX, '$1')
+}
+
 function cleanText(value: unknown) {
-  return collapseRepeatedText(cleanCorruptedText(value).cleaned)
+  return collapseRepeatedText(cleanCorruptedText(stripParsedSourceLayout(String(value ?? ''))).cleaned)
     .replace(/\u00a0/g, ' ')
     .replace(/\s+/g, ' ')
     .replace(/\s+([，。；：！？、])/g, '$1')
@@ -161,7 +231,7 @@ function technicalDump(value: string) {
 }
 
 export function professionalizeDocumentText(value: string) {
-  const cleaned = repairEmptyEnumeration(cleanText(value))
+  const cleaned = normalizeLatinTokenSpacing(repairEmptyEnumeration(cleanText(value)))
     .replace(FORMULAIC_OPENING, '')
     .replace(/通过\s*OA\s*(?:流程|审批|流转)\s*(?:提交|申请)?/gi, '提交审批')
     .replace(/\s*OA\s*(?:流程|审批|流转)/gi, '审批程序')
@@ -243,7 +313,8 @@ export function reviewBusinessDocumentEditorialQuality(
   const caveatsBySection = new Map<string, number>()
 
   for (const block of blocks) {
-    const text = cleanText(block.text)
+    const rawText = String(block.text ?? '')
+    const text = cleanText(rawText)
     visibleCharacters += text.length
     const blockCaveats = (text.match(FORMULAIC_CAVEAT) ?? []).length
     caveatCount += blockCaveats
@@ -256,6 +327,27 @@ export function reviewBusinessDocumentEditorialQuality(
         code: 'BROKEN_ENUMERATION',
         sectionTitle: block.sectionTitle,
         message: '正文包含“1、；”一类未完成的编号或残缺条目',
+      })
+    }
+    if (MARKDOWN_DECORATION.test(rawText)) {
+      issues.push({
+        code: 'MARKDOWN_LEAK',
+        sectionTitle: block.sectionTitle,
+        message: '正文包含 Markdown 星号、井号或代码围栏，必须在排版前清除',
+      })
+    }
+    if (containsParsedSourceLayoutArtifact(rawText)) {
+      issues.push({
+        code: 'SOURCE_LAYOUT_FRAGMENT',
+        sectionTitle: block.sectionTitle,
+        message: '正文包含来源页码、目录或章节导航残片，不能作为项目事实交付',
+      })
+    }
+    if (containsBrokenLatinTokenSpacing(rawText)) {
+      issues.push({
+        code: 'BROKEN_LATIN_TOKEN',
+        sectionTitle: block.sectionTitle,
+        message: '英文缩写、连字符术语或数字技术名存在异常拆分空格',
       })
     }
     if (INTERNAL_WORKFLOW.test(text)) {

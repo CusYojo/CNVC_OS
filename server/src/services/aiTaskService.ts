@@ -77,6 +77,8 @@ import {
   buildProjectQaDocumentContent,
   generateProjectQaAnswers,
   generateProjectQaQuestions,
+  PROJECT_QA_ANSWER_TARGET_MIN_CHARACTERS,
+  PROJECT_QA_QUESTION_MAX_CHARACTERS,
   reviewProjectQaAnswers,
   usedProjectQaSourceIndexes,
   type ProjectQaDepth,
@@ -111,6 +113,12 @@ import {
   safeAiTaskFailureMessage,
   safeAiTaskFailureStage,
 } from './aiTaskErrorService.js'
+import {
+  assessTemplateFidelity,
+  TEMPLATE_FIDELITY_MINIMUM,
+  type TemplateFidelityAssessment,
+  type TemplateFidelityCheck,
+} from './aiTemplateFidelityService.js'
 import {
   buildInvestmentRecommendationGenerationAudit,
   prepareInvestmentRecommendationPptWorkflow,
@@ -786,6 +794,8 @@ async function inspectGeneratedArtifact(
   options: {
     requireEndReferences?: boolean
     allowInheritedCjkLanguageMetadata?: boolean
+    expectedSectionTitles?: string[]
+    expectedTableCount?: number
   } = {},
 ) {
   const fileStat = await stat(filePath)
@@ -801,6 +811,23 @@ async function inspectGeneratedArtifact(
     if (requireEndReferences && !documentXml.includes('引用资料')) {
       throw new Error('DOCX 文尾缺少引用资料')
     }
+    const visibleText = documentXml.replace(/<[^>]+>/g, '')
+    const expectedSectionTitles = options.expectedSectionTitles ?? []
+    let sectionOffset = 0
+    const sectionTreeValidated = expectedSectionTitles.every((title) => {
+      const index = visibleText.indexOf(title, sectionOffset)
+      if (index < 0) return false
+      sectionOffset = index + title.length
+      return true
+    })
+    const tableCount = (documentXml.match(/<w:tbl\b/g) || []).length
+    const expectedTableCountValidated = options.expectedTableCount === undefined
+      || tableCount === options.expectedTableCount
+    const finalSection = [...documentXml.matchAll(/<w:sectPr\b[\s\S]*?<\/w:sectPr>/g)].at(-1)?.[0] ?? ''
+    const pageSize = finalSection.match(/<w:pgSz\b[^>]*\/?>/)?.[0] ?? ''
+    const pageWidth = Number.parseInt(pageSize.match(/\bw:w="(\d+)"/)?.[1] ?? '-1', 10)
+    const pageHeight = Number.parseInt(pageSize.match(/\bw:h="(\d+)"/)?.[1] ?? '-1', 10)
+    const a4PageValidated = pageWidth === 11906 && pageHeight === 16838
     return {
       qualityStatus: 'passed',
       metadata: {
@@ -809,6 +836,14 @@ async function inspectGeneratedArtifact(
         encodingClean: true,
         cjkFontValidated: true,
         endReferencesValidated: requireEndReferences,
+        stylesPartValidated: Boolean(zip.file('word/styles.xml')),
+        fontTablePartValidated: Boolean(zip.file('word/fontTable.xml')),
+        sectionTreeValidated,
+        expectedSectionCount: expectedSectionTitles.length,
+        tableCount,
+        expectedTableCount: options.expectedTableCount,
+        expectedTableCountValidated,
+        a4PageValidated,
       },
     }
   }
@@ -879,6 +914,246 @@ async function inspectGeneratedArtifact(
       endReferencesValidated: true,
     },
   }
+}
+
+type DocumentQualityResult = {
+  qualityStatus: string
+  metadata: Record<string, unknown>
+}
+
+function metadataFlag(metadata: Record<string, unknown>, key: string) {
+  return metadata[key] === true
+}
+
+function fidelityCheck(code: string, passed: boolean, critical = false): TemplateFidelityCheck {
+  return { code, passed, critical }
+}
+
+function exactSectionOrder(content: BusinessContent, expectedTitles: string[]) {
+  return content.sections.length === expectedTitles.length
+    && content.sections.every((section, index) => section.title === expectedTitles[index])
+}
+
+function reviewHasNone(
+  review: { issues: Array<{ code: string }> } | undefined,
+  codes: string[],
+) {
+  if (!review) return false
+  const issueCodes = new Set(review.issues.map((issue) => issue.code))
+  return codes.every((code) => !issueCodes.has(code))
+}
+
+function dueDiligenceMinimumPlannedTables(content: BusinessContent) {
+  const tableFriendlySections = new Set([
+    '公司基本信息', '历史沿革', '公司股东情况及实际控制人情况', '核心团队介绍',
+    '组织架构', '关联公司及关联交易', '资质、荣誉及法律合规情况', '产品矩阵',
+    '场景应用', '知识产权及数据权属', '客户验证情况', '供应商、采购与成本情况',
+    '市场分析', '财务情况', '公司估值与投资方式', '退出方案', '风险提示与对策',
+  ])
+  const eligibleSections = content.sections.filter((section) => {
+    if (!tableFriendlySections.has(section.title)) return false
+    if ((section.tables?.length ?? 0) > 0) return true
+    return section.findings.filter((finding) =>
+      finding.sourceIndexes.length > 0 && finding.status === '资料记载').length >= 3
+  }).length
+  return Math.min(12, eligibleSections)
+}
+
+function assessBusinessDocumentTemplateFidelity(input: {
+  type: AiBusinessTaskType
+  templateSections: string[]
+  content: BusinessContent
+  quality: DocumentQualityResult
+  generationMetadata: Record<string, unknown>
+  complianceReview?: ComplianceOutputReview
+  complianceContentReviewPassed?: boolean
+  proposalReview?: InvestmentProposalOutputReview
+}): TemplateFidelityAssessment {
+  const quality = input.quality.metadata
+  const exactSections = exactSectionOrder(input.content, input.templateSections)
+  const contentAuditPassed = input.content.generationAudit?.reviewerPassed === true
+  const expectedTableCount = input.content.sections.reduce(
+    (count, section) => count + (section.tables?.length ?? 0),
+    0,
+  )
+
+  if (input.type === 'compliance_statement') {
+    const review = input.complianceReview
+    const metadata = review?.metadata ?? {}
+    return assessTemplateFidelity({ dimensions: {
+      structure: [
+        fidelityCheck('section-order', exactSections, true),
+        fidelityCheck('outline', metadataFlag(metadata, 'outlineValidated'), true),
+        fidelityCheck('numbering', metadataFlag(metadata, 'numberingValidated')),
+      ],
+      typography: [
+        fidelityCheck('typography', metadataFlag(metadata, 'typographyValidated'), true),
+        fidelityCheck('font-fallback', metadataFlag(metadata, 'fontFallbackAliasesValidated')),
+        fidelityCheck('font-relationships', metadataFlag(metadata, 'fontEmbedRelationshipsValidated')),
+        fidelityCheck('cjk-font', metadataFlag(quality, 'cjkFontValidated')),
+      ],
+      layout: [
+        fidelityCheck('page-system', metadataFlag(metadata, 'pageSystemValidated'), true),
+        fidelityCheck('template-parts', metadataFlag(metadata, 'templatePartsValidated')),
+        fidelityCheck('relationship-closure', metadataFlag(metadata, 'relationshipClosureValidated')),
+        fidelityCheck('a4-page', metadataFlag(quality, 'a4PageValidated')),
+      ],
+      tables: [
+        fidelityCheck('template-table-count', Number(quality.tableCount ?? 0) === 0, true),
+        fidelityCheck('no-unexpected-features', reviewHasNone(review, ['DOCX_UNEXPECTED_FEATURE'])),
+      ],
+      contentOrganization: [
+        fidelityCheck('content-review', input.complianceContentReviewPassed === true, true),
+        fidelityCheck('forbidden-content', metadataFlag(metadata, 'forbiddenContentValidated'), true),
+        fidelityCheck('no-source-process-or-ai-style', reviewHasNone(review, [
+          'DOCX_SOURCE_PROCESS_LEAK', 'DOCX_AI_STYLE_DRIFT', 'DOCX_TEXT_INVALID',
+        ])),
+      ],
+    } })
+  }
+
+  if (input.type === 'investment_proposal') {
+    const review = input.proposalReview
+    const metadata = review?.metadata
+    return assessTemplateFidelity({ dimensions: {
+      structure: [
+        fidelityCheck('section-order', exactSections, true),
+        fidelityCheck(
+          'section-tree',
+          metadata !== undefined
+            && metadata.foundSectionCount === metadata.expectedSectionCount,
+          true,
+        ),
+        fidelityCheck('heading-levels', reviewHasNone(review, [
+          'SECTION_TREE_MISMATCH', 'HEADING_STYLE_MISMATCH', 'HEADING3_FORBIDDEN',
+        ])),
+      ],
+      typography: [
+        fidelityCheck('title-and-heading-styles', reviewHasNone(review, ['TYPOGRAPHY_MISMATCH']), true),
+        fidelityCheck('body-style', reviewHasNone(review, ['BODY_STYLE_MISMATCH']), true),
+        fidelityCheck('spacing', reviewHasNone(review, ['ABNORMAL_TYPOGRAPHY_SPACING'])),
+        fidelityCheck('cjk-font', metadataFlag(quality, 'cjkFontValidated')),
+      ],
+      layout: [
+        fidelityCheck('page-geometry', metadata?.pageGeometryValidated === true, true),
+        fidelityCheck('fixed-blocks', metadata?.fixedBlocksValidated === true, true),
+        fidelityCheck('field-update', metadata?.updateFields === true),
+        fidelityCheck('odd-even-header', metadata?.evenAndOddHeaders === true),
+      ],
+      tables: [
+        fidelityCheck('table-count', reviewHasNone(review, ['TABLE_COUNT_MISMATCH']), true),
+        fidelityCheck('table-format', reviewHasNone(review, ['TABLE_FORMAT_MISMATCH'])),
+        fidelityCheck('table-geometry', reviewHasNone(review, ['TABLE_GEOMETRY_MISMATCH'])),
+      ],
+      contentOrganization: [
+        fidelityCheck('content-review', contentAuditPassed, true),
+        fidelityCheck('body-claims', metadata?.bodyClaimsValidated === true, true),
+        fidelityCheck('no-client-or-ai-process-leak', reviewHasNone(review, [
+          'INTERNAL_ERROR_TEXT_LEAK', 'SOURCE_PROCESS_WORDING_LEAK', 'AI_STYLE_BOILERPLATE',
+          'CONVERSATIONAL_TRANSCRIPT_LEAK', 'FORMULAIC_ANALYSIS_WRAPPER',
+          'GENERIC_NO_DATA_PREFACE', 'CLIENT_PROSE_LABEL_LEAK', 'CLIENT_COLON_LABEL_LEAK',
+          'INLINE_NUMBERED_SUBHEADING_LEAK', 'INTERNAL_EVIDENCE_STATUS_TEXT_LEAK',
+        ])),
+      ],
+    } })
+  }
+
+  if (input.type !== 'due_diligence_report') {
+    throw new Error(`不支持的 DOCX 模板还原度任务：${input.type}`)
+  }
+  const coverage = input.content.generationAudit?.evidenceCoverage
+  const coverageRatio = coverage?.totalLeafSections
+    ? coverage.coveredLeafSections / coverage.totalLeafSections
+    : 0
+  const minimumPlannedTables = dueDiligenceMinimumPlannedTables(input.content)
+  return assessTemplateFidelity({ dimensions: {
+    structure: [
+      fidelityCheck('section-order', exactSections, true),
+      fidelityCheck('rendered-section-tree', metadataFlag(quality, 'sectionTreeValidated'), true),
+      fidelityCheck('section-coverage', coverageRatio >= TEMPLATE_FIDELITY_MINIMUM),
+    ],
+    typography: [
+      fidelityCheck('cjk-font', metadataFlag(quality, 'cjkFontValidated'), true),
+      fidelityCheck('styles-part', metadataFlag(quality, 'stylesPartValidated'), true),
+      fidelityCheck('font-table', metadataFlag(quality, 'fontTablePartValidated')),
+      fidelityCheck(
+        'template-typography-profile',
+        Boolean(input.generationMetadata.typography),
+      ),
+    ],
+    layout: [
+      fidelityCheck('template-applied', input.generationMetadata.templateApplied === true, true),
+      fidelityCheck('a4-page', metadataFlag(quality, 'a4PageValidated'), true),
+      fidelityCheck('long-form-layout', input.generationMetadata.pageIntent === 'long-form'),
+    ],
+    tables: [
+      fidelityCheck('rendered-table-count', metadataFlag(quality, 'expectedTableCountValidated'), true),
+      fidelityCheck('planned-table-density', expectedTableCount >= minimumPlannedTables),
+      fidelityCheck('editable-native-tables', Number(quality.tableCount ?? -1) === expectedTableCount),
+    ],
+    contentOrganization: [
+      fidelityCheck('content-review', contentAuditPassed, true),
+      fidelityCheck('no-reviewer-issues', (input.content.generationAudit?.reviewerIssueCodes.length ?? 1) === 0),
+      fidelityCheck(
+        'no-empty-sections',
+        input.content.sections.every((section) =>
+          section.findings.length > 0 || (section.tables?.length ?? 0) > 0),
+      ),
+    ],
+  } })
+}
+
+function assessQaTemplateFidelity(input: {
+  quality: DocumentQualityResult
+  questionCount: number
+  expectedQuestionCount: number
+  categoryCount: number
+  expectedCategoryCount: number
+  reviewerStatus: string
+}): TemplateFidelityAssessment {
+  const metadata = input.quality.metadata
+  return assessTemplateFidelity({ dimensions: {
+    structure: [
+      fidelityCheck('question-count', input.questionCount === input.expectedQuestionCount, true),
+      fidelityCheck('category-count', input.categoryCount === input.expectedCategoryCount, true),
+      fidelityCheck('directory-before-body', metadataFlag(metadata, 'directoryCompleteBeforeBody'), true),
+    ],
+    typography: [
+      fidelityCheck('cjk-font', metadataFlag(metadata, 'cjkFontValidated'), true),
+      fidelityCheck('line-spacing', metadataFlag(metadata, 'lineSpacingValidated')),
+      fidelityCheck('encoding', metadataFlag(metadata, 'encodingClean')),
+    ],
+    layout: [
+      fidelityCheck('a4-and-margins', metadataFlag(metadata, 'pageGeometryValidated'), true),
+      fidelityCheck('paragraph-range', metadataFlag(metadata, 'narrativeParagraphRangeValid')),
+      fidelityCheck('openxml', metadataFlag(metadata, 'openXmlValid'), true),
+    ],
+    tables: [
+      fidelityCheck('no-template-external-tables', Number(metadata.tableCount ?? -1) === 0, true),
+      fidelityCheck('editable-text', metadataFlag(metadata, 'editableText')),
+    ],
+    contentOrganization: [
+      fidelityCheck('reviewer', input.reviewerStatus.startsWith('passed'), true),
+      fidelityCheck('natural-answer-form', metadataFlag(metadata, 'answerParagraphFormValid'), true),
+      fidelityCheck(
+        'concise-questions',
+        Number(metadata.averageQuestionLength ?? Number.POSITIVE_INFINITY)
+          <= PROJECT_QA_QUESTION_MAX_CHARACTERS,
+        true,
+      ),
+      fidelityCheck(
+        'substantive-answers',
+        Number(metadata.averageAnswerLength ?? 0)
+          >= PROJECT_QA_ANSWER_TARGET_MIN_CHARACTERS,
+      ),
+      fidelityCheck(
+        'answer-question-ratio',
+        Number(metadata.averageAnswerQuestionRatio ?? 0) >= 4,
+      ),
+      fidelityCheck('no-visible-process', metadataFlag(metadata, 'visibleSourceProcessAbsent'), true),
+      fidelityCheck('no-placeholder', metadataFlag(metadata, 'placeholderAnswerAbsent')),
+    ],
+  } })
 }
 
 async function executeTask(taskId: string) {
@@ -1309,10 +1584,25 @@ async function executeTask(taskId: string) {
           questionCount: qaContent.questions.length,
           categoryCount: template.sections.length,
         })
-        return { generation, quality }
+        const templateFidelity = assessQaTemplateFidelity({
+          quality,
+          questionCount: Number(quality.metadata.questionCount ?? 0),
+          expectedQuestionCount: qaContent.questions.length,
+          categoryCount: Number(quality.metadata.categoryCount ?? 0),
+          expectedCategoryCount: template.sections.length,
+          reviewerStatus: reviewed.review.status,
+        })
+        if (!templateFidelity.passed) {
+          console.warn(
+            '[aiTask] Q&A 模板还原度未达到目标，保留完整 DOCX 并记录质量限制:',
+            JSON.stringify(templateFidelity.failedChecks),
+          )
+        }
+        return { generation, quality, templateFidelity }
       })
       const docxGeneration = qaDocument.generation
       const docxQuality = qaDocument.quality
+      const templateFidelity = qaDocument.templateFidelity
       if (await cancelIfRequested(taskId)) return
 
       await updateStage(taskId, '执行 DOCX 内容与版式质量检查', 92)
@@ -1360,7 +1650,8 @@ async function executeTask(taskId: string) {
         visibleReviewerIncluded: false,
         downloadableFormats: ['docx'],
         projectKnowledgeStudy: projectKnowledgeBrief?.audit,
-        templateFidelityTarget: 0.9,
+        templateFidelityTarget: TEMPLATE_FIDELITY_MINIMUM,
+        templateFidelity,
       }
       const [qaArtifact] = await db.insert(aiArtifacts).values({
         taskId: task.id,
@@ -1968,8 +2259,17 @@ async function executeTask(taskId: string) {
       // 保留原始字体或语言元数据，因此质量检查允许继承的 CJK 元数据。
       allowInheritedCjkLanguageMetadata:
         task.type === 'investment_recommendation_ppt',
+      expectedSectionTitles: task.type === 'due_diligence_report'
+        ? template.sections
+        : undefined,
+      expectedTableCount: task.type === 'due_diligence_report'
+        ? content.sections.reduce(
+            (count, section) => count + (section.tables?.length ?? 0),
+            0,
+          )
+        : undefined,
     }
-    let quality
+    let quality: Awaited<ReturnType<typeof inspectGeneratedArtifact>>
     try {
       quality = await inspectGeneratedArtifact(
         outputPath,
@@ -1990,6 +2290,63 @@ async function executeTask(taskId: string) {
           blueprint: complianceBlueprint,
         }))
       quality = await inspectGeneratedArtifact(outputPath, 'docx', qualityOptions)
+    }
+    const calculateTemplateFidelity = () => [
+        'compliance_statement',
+        'investment_proposal',
+        'due_diligence_report',
+      ].includes(task.type)
+        ? assessBusinessDocumentTemplateFidelity({
+          type: task.type as AiBusinessTaskType,
+          templateSections: template.sections,
+          content,
+          quality,
+          generationMetadata: generationMetadata as Record<string, unknown>,
+          complianceReview: complianceDocxReview,
+          complianceContentReviewPassed:
+            complianceWorkflow?.reviewReports.at(-1)?.passed,
+          proposalReview: proposalDocxReview,
+        })
+        : undefined
+    let templateFidelity = calculateTemplateFidelity()
+    if (templateFidelity && !templateFidelity.passed) {
+      await updateStage(taskId, '按模板差异自动修订文档', 94)
+      generationMetadata = await retryDocumentStep('模板还原度恢复生成', () =>
+        generateBusinessDocx({
+          outputPath,
+          template,
+          project,
+          content,
+          sourceCutoffDate,
+          sources,
+          blueprint: complianceBlueprint,
+        }))
+      quality = await inspectGeneratedArtifact(outputPath, 'docx', qualityOptions)
+      if (task.type === 'compliance_statement' && complianceBlueprint) {
+        complianceDocxReview = await reviewGeneratedComplianceDocx({
+          filePath: outputPath,
+          template,
+          blueprint: complianceBlueprint,
+          content,
+          projectName: project.name,
+        })
+      }
+      if (task.type === 'investment_proposal' && proposalBlueprint) {
+        proposalDocxReview = await reviewInvestmentProposalDocx({
+          filePath: outputPath,
+          template,
+          blueprint: proposalBlueprint,
+          content,
+          projectName: project.name,
+        })
+      }
+      templateFidelity = calculateTemplateFidelity()
+    }
+    if (templateFidelity && !templateFidelity.passed) {
+      console.warn(
+        '[aiTask] 文档模板还原度未达到目标，保留已通过 OpenXML 检查的 DOCX 并记录质量限制:',
+        JSON.stringify(templateFidelity.failedChecks),
+      )
     }
     const [{ count }] = await db.select({ count: sql<number>`count(*)::int` }).from(aiArtifacts)
       .where(and(eq(aiArtifacts.userId, task.userId), eq(aiArtifacts.projectId, task.projectId), eq(aiArtifacts.format, template.outputFormat)))
@@ -2014,7 +2371,8 @@ async function executeTask(taskId: string) {
         ...quality.metadata,
         ...generationMetadata,
         projectKnowledgeStudy: projectKnowledgeBrief?.audit,
-        templateFidelityTarget: 0.9,
+        templateFidelityTarget: templateFidelity?.target ?? TEMPLATE_FIDELITY_MINIMUM,
+        ...(templateFidelity ? { templateFidelity } : {}),
         evidencePolicy: task.type === 'compliance_statement'
           ? 'project_knowledge_primary_model_network_supplement'
           : [

@@ -344,9 +344,9 @@ async function main() {
     !isHighValueProjectQaQuestion('公司目前有哪些客户？')
       && !isHighValueProjectQaQuestion('项目面临哪些风险？')
       && isHighValueProjectQaQuestion(
-        '现有客户中哪些已经跨过预算、采购、验收和回款门槛；这些订单能否证明可复制需求，还是主要依赖一次性项目？',
+        '客户验证能否支撑可复制需求和现金流安全边际？',
       ),
-    '问题必须包含因果、比较、阈值、反事实或决策后果，而非仅盘点信息',
+    '问题应以短句检验一个决策假设，分析关系在回答中展开，而非仅盘点信息',
   )
 
   const duplicateCheck = await generateProjectQaQuestions({
@@ -758,6 +758,10 @@ async function main() {
     docxReview.qualityStatus === 'passed'
       && docxReview.metadata.questionCount === PROJECT_QA_QUESTION_COUNTS.标准版
       && docxReview.metadata.categoryCount === 15
+      && Number(docxReview.metadata.averageQuestionLength ?? Infinity) <= 32
+      && Number(docxReview.metadata.maximumQuestionLength ?? Infinity) <= 88
+      && Number(docxReview.metadata.averageAnswerLength ?? 0) >= 120
+      && Number(docxReview.metadata.averageAnswerQuestionRatio ?? 0) >= 4
       && docxReview.metadata.directoryCompleteBeforeBody
       && docxReview.metadata.answerParagraphFormValid
       && docxReview.metadata.narrativeParagraphRangeValid

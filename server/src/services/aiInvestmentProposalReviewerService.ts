@@ -24,6 +24,7 @@ import {
   containsInvestmentProposalLongQuotedExcerpt,
   containsInvestmentProposalProseLabel,
   containsInvestmentProposalSourceProcessWording,
+  containsInvestmentProposalSourceLayoutArtifact,
   containsInvestmentProposalWebArtifact,
 } from './aiInvestmentProposalTextService.js'
 
@@ -264,6 +265,13 @@ function reviewFinding(input: {
       ...location,
       code: 'WEB_ARTIFACT_TEXT_LEAK',
       message: `${section.title}包含网页折叠态或原文链接元数据`,
+    })
+  }
+  if (containsInvestmentProposalSourceLayoutArtifact(finding.text)) {
+    issue(issues, {
+      ...location,
+      code: 'SOURCE_LAYOUT_FRAGMENT',
+      message: `${section.title}包含 PPT/PDF 页码、目录、章节导航或连续页签残片，必须删除并仅保留项目事实`,
     })
   }
   if (containsInvestmentProposalProseLabel(finding.text)) {

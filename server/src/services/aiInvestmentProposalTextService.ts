@@ -1,4 +1,9 @@
 import { sanitizeClientVisibleEvidenceWording } from './aiClientVisibleTextService.js'
+import {
+  containsBrokenLatinTokenSpacing,
+  containsParsedSourceLayoutArtifact,
+  professionalizeDocumentText,
+} from './aiDocumentEditorialQualityService.js'
 
 const COLLAPSED_WEB_FRAGMENT =
   /[^。！？；\n]*(?:\.{3}|…{1,3})\s*(?:展开|查看更多)[^。！？；\n]*[。！？；]?/gi
@@ -287,6 +292,11 @@ export function containsInvestmentProposalGenericColonLabel(value: string) {
 
 export function containsInvestmentProposalAbnormalSpacing(value: string) {
   return INVESTMENT_PROPOSAL_ABNORMAL_SPACING.test(value)
+    || containsBrokenLatinTokenSpacing(value)
+}
+
+export function containsInvestmentProposalSourceLayoutArtifact(value: string) {
+  return containsParsedSourceLayoutArtifact(value)
 }
 
 function rewriteClientSourceProcessWording(value: string) {
@@ -377,7 +387,7 @@ export function sanitizeInvestmentProposalClientText(value: unknown) {
     sanitizeClientVisibleEvidenceWording(normalizeWhitespace(text)),
   )
   CLIENT_GENERIC_NO_DATA_PREFACE_GLOBAL.lastIndex = 0
-  return rewritten
+  return professionalizeDocumentText(rewritten
     .replace(CLIENT_GENERIC_NO_DATA_PREFACE_GLOBAL, '$1')
     .replace(/[，,]具体执行情况仍需结合合同、清单或业务记录进一步核验/g, '')
     .replace(/(?:接触或)?(?:申请)?立项前/g, '作出投资判断前')
@@ -392,7 +402,7 @@ export function sanitizeInvestmentProposalClientText(value: unknown) {
     .replace(/[；;，,]\s*[；;，,]+/g, '；')
     .replace(/^\s*[；;，,。]+|[；;，,]+\s*$/g, '')
     .replace(/([。！？；])\n+/g, '$1')
-    .replace(/\n+/g, '；')
+    .replace(/\n+/g, '；'))
 }
 
 function boundedAtCompleteBoundary(value: string, maxCharacters: number) {

@@ -417,7 +417,7 @@ async function main() {
     diligenceSkill.referenceNames.join('、'),
   )
   const diligenceCoreTerms = [
-    '约 90%',
+    '不得低于 90%',
     '逐份读取',
     '事实底稿',
     '1、投资概要',
@@ -672,7 +672,7 @@ async function main() {
   const qaStyleRequired = [
     '模板共识',
     '各内容单元的表达目的',
-    '一至六段',
+    '三至六个自然段',
     'DOCX',
     'A4',
     '宋体',
@@ -784,7 +784,7 @@ async function main() {
   )
   assert(
     'Q&A Formatter 落实统一字号、行距、页边距与问题一级结构',
-    qaDocumentSource.includes("'Songti SC'")
+    qaDocumentSource.includes("'宋体'")
       && qaDocumentSource.includes('AI_DOCUMENT_SONG_FONT')
       && qaDocumentSource.includes("const LATIN_FONT = 'Times New Roman'")
       && qaDocumentSource.includes('size: 36')
