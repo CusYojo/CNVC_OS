@@ -880,9 +880,9 @@ async function inspectGeneratedArtifact(
     editableTextElements += (xml.match(/<a:t>/g) || []).length
   }
   const finalSlideXml = await zip.file(`ppt/slides/slide${slides.length}.xml`)?.async('string') || ''
-  if (!finalSlideXml.includes('引用资料与责任声明')) {
+  if (!/(?:资料来源与声明|引用资料与责任声明)/.test(finalSlideXml)) {
     throw pptxQualityError(
-      'PPTX 最后一页缺少引用资料与责任声明',
+      'PPTX 最后一页缺少资料来源与声明',
       'PPTX_REFERENCES_MISSING',
     )
   }

@@ -19,6 +19,7 @@ import {
   reviewBusinessDocumentEditorialQuality,
   sanitizeBusinessContentForDelivery,
 } from './aiDocumentEditorialQualityService.js'
+import { sanitizeInvestmentProposalClientText } from './aiInvestmentProposalTextService.js'
 import {
   PROJECT_KNOWLEDGE_TOPICS,
   projectKnowledgeBriefForPrompt,
@@ -212,9 +213,6 @@ const INVESTMENT_RECOMMENDATION_DETAIL_CATEGORIES: InvestmentRecommendationDetai
       ['公司主体', project.companyName],
       ['所属行业', project.industry],
       ['当前轮次', project.round],
-      ['项目阶段', project.stage],
-      ['项目来源', project.source],
-      ['项目负责人', project.owner],
       ['项目概述', project.summary],
       ['商业模式', project.businessModel],
       ['目标市场', project.market],
@@ -521,6 +519,8 @@ function fallbackContent(
       findings.push({
         text: type === 'due_diligence_report'
           ? dueDiligenceUnresolvedCopy(title)
+          : type === 'investment_recommendation_ppt'
+            ? `${title}涉及的关键事实尚未明确，应取得相应文件并核对主体、时间、金额及实际进展。`
           : `“${title}”尚未形成可供判断的可靠结论，后续应以原始文件、权威记录或相关主体确认为准。`,
         status: '资料缺口',
         sourceIndexes: [],
@@ -533,8 +533,12 @@ function fallbackContent(
           ? ''
           : dueDiligenceUnresolvedCopy(title)
         : findings.some((finding) => finding.status === '资料记载')
-          ? `“${title}”的核心事实、投资含义与主要约束如下。`
-          : `“${title}”尚无可靠结论，需取得关键原件或权威记录后判断。`,
+          ? type === 'investment_recommendation_ppt'
+            ? findings[0]?.text || ''
+            : `“${title}”的核心事实、投资含义与主要约束如下。`
+          : type === 'investment_recommendation_ppt'
+            ? findings[0]?.text || ''
+            : `“${title}”尚无可靠结论，需取得关键原件或权威记录后判断。`,
       findings,
       tables: [],
     }
@@ -548,13 +552,17 @@ function fallbackContent(
     title: type === 'investment_proposal'
       ? `关于对${meaningfulValue(project.companyName) || project.name}实施股权投资的提案`
       : `${project.name}${template.label}`,
-    executiveSummary: `项目的核心产品、团队能力、商业化进展、财务表现与交易条件需要结合可核验事实综合判断；影响投资决策的关键不确定事项应在接触、跟踪或立项前完成核实。`,
+    executiveSummary: type === 'investment_recommendation_ppt'
+      ? '公司主体、核心产品、客户合同、历史财务及本轮交易条款尚待核实，当前不宜形成确定性投资结论。'
+      : '项目的核心产品、团队能力、商业化进展、财务表现与交易条件需要结合可核验事实综合判断；影响投资决策的关键不确定事项应在接触、跟踪或立项前完成核实。',
     sections,
     highlights: highlights.length ? highlights : ['项目定位、产品价值和商业验证仍需在补充资料后评估。'],
     risks: [
       '关键经营、客户和财务数据需以原始文件及访谈交叉验证',
       '企业自述与第三方证据需分开呈现',
-      type === 'compliance_statement' ? '合规结论须由法务或风控人员复核' : 'AI 初稿不得替代正式投资决策',
+      type === 'compliance_statement'
+        ? '合规结论须由法务或风控人员复核'
+        : '本材料仅供内部审议，不构成最终投资决策',
     ],
     missing: sources.length
       ? ['审计口径财务数据及回款凭证', '核心客户合同与访谈记录', '工商、知识产权及合规原件']
@@ -795,6 +803,50 @@ function sanitizeCustomTemplateText(value: string) {
     .trim()
 }
 
+const INVESTMENT_RECOMMENDATION_INTERNAL_LANGUAGE =
+  /项目阶段|线索阶段|处于线索|进入初筛|申请立项|启动尽调|提请上会|提交投决|继续跟踪|暂缓推进|归档建议|阶段与推进建议|投资判断与推进建议|项目档案|项目资料|当前资料|现有资料|可核验事实|资料记载|证据显示|资料显示|基于已提供材料|根据已提供材料|AI\s*(?:辅助|生成|初稿)/i
+
+const INVESTMENT_RECOMMENDATION_AI_STYLE_LANGUAGE =
+  /值得注意的是|需要强调的是|需要指出的是|不难发现|不难看出|由此可见|综上所述|显而易见|毋庸置疑|总体来看|综合来看|在此背景下|多维度赋能|全方位赋能|生态闭环|形成闭环产品组合|赛道窗口|早期窗口|具备继续推进价值|亮点成立依赖|核心事实、投资含义与主要约束如下|尚无可靠结论/
+
+/**
+ * 投资建议书面向投资团队和投委会。系统阶段、取证过程和模型身份只保留在
+ * 审计元数据中；客户可见文字必须直接陈述公司、产品、客户、财务和交易事实。
+ */
+export function sanitizeInvestmentRecommendationText(value: unknown) {
+  const cleaned = String(value ?? '')
+    .replace(
+      /(?:^|[。！？；]\s*)综合当前项目阶段与可核验事实[，,]?建议(?:进入初筛|继续跟踪|申请立项|启动尽调|提请上会|提交投决|暂缓推进|归档)[。！？；]?/g,
+      '',
+    )
+    .replace(/(?:当前|现阶段)?(?:本项目|该项目|[\u3400-\u9fffA-Za-z0-9（）()·]+项目)?(?:当前)?处于线索阶段[，,。；]?/g, '')
+    .replace(/(?:项目)?仍处线索阶段[，,。；]?/g, '')
+    .replace(/建议本项目由[“"]?线索[”"]?推进至[“"]?立项(?:\/专项尽调)?[”"]?阶段[，,]?暂不直接进入投资决策[。；]?/g, '')
+    .replace(/项目档案登记主体为/g, '当前项目名称为')
+    .replace(/项目资料多处指向/g, '相关文件使用')
+    .replace(/项目档案与(?:投资文件|项目资料)(?:之间)?(?:的)?口径不完全一致/g, '不同文件的主体或交易口径不一致')
+    .replace(/(?:基于|根据)(?:当前|现有|已提供|本轮)?(?:项目)?(?:资料|材料|证据)[，,]?/g, '')
+    .replace(/(?:公司|行业)(?:资料|材料|证据)(?:显示|表明|记载)(?:其)?/g, '')
+    .replace(/交流纪要记载[，,]?/g, '公司披露，')
+    .replace(/资料记载[，,]?/g, '')
+    .replace(/形成闭环产品组合/g, '形成产品组合')
+    .replace(/赛道具备(?:早期)?窗口/g, '相关需求正在形成')
+    .replace(/具备(?:赛道|早期)窗口/g, '相关需求正在形成')
+    .replace(/赛道窗口/g, '市场需求')
+    .replace(/产品闭环/g, '产品组合')
+    .replace(/项目具备继续推进价值[，,；;。]?/g, '')
+    .replace(/项目亮点集中在/g, '公司的主要投资逻辑包括')
+    .replace(/亮点成立依赖(?:后续)?核验/g, '相关判断仍取决于关键事实核实结果')
+    .replace(/仍是尽调重点/g, '需要重点核对')
+    .replace(/“([^”]+)”的核心事实、投资含义与主要约束如下[。；]?/g, '')
+    .replace(/“([^”]+)”尚无可靠结论，需取得关键原件或权威记录后判断[。；]?/g, '$1相关事实尚未明确，应取得相应文件后判断。')
+    .replace(/[ 	]+/g, ' ')
+    .replace(/。{2,}/g, '。')
+    .replace(/^(?:但|不过)[，,]?\s*/g, '')
+    .trim()
+  return sanitizeInvestmentProposalClientText(cleaned)
+}
+
 /**
  * 上传模板只提供内部结构槽和视觉参数。这里统一重建所有可见标题，
  * 清除“资料缺口”占位，并确保原模板章节名不会泄漏到交付物。
@@ -904,6 +956,22 @@ function investmentRecommendationSectionTitle(
   index: number,
 ) {
   const originalTitle = template.sections[index] ?? section.title
+  const canonicalTitle = [
+    [/投资摘要|投资概要|执行摘要/, '投资摘要'],
+    [/公司概况|公司简介|发展历程|历史沿革/, '公司概况与发展历程'],
+    [/股权|核心团队|创始人|治理/, '股权结构与核心团队'],
+    [/产品|核心技术|研发|知识产权/, '产品与核心技术'],
+    [/商业模式|客户验证|商业化|订单|交付/, '商业模式与客户验证'],
+    [/行业|市场空间|应用场景/, '行业与市场空间'],
+    [/竞争|竞品|差异化|壁垒/, '竞争格局与差异化'],
+    [/财务|收入|利润|现金流|经营质量/, '财务分析'],
+    [/融资|估值|投资机构/, '融资与估值'],
+    [/投资方案|交易方案|交易安排|资金用途/, '投资方案'],
+    [/投资亮点|项目亮点|核心价值/, '核心投资逻辑'],
+    [/风险|合规|核验|待落实事项/, '主要风险与待落实事项'],
+    [/投资结论|投资判断/, '投资结论'],
+  ].find(([pattern]) => (pattern as RegExp).test(originalTitle))?.[1]
+  if (canonicalTitle) return canonicalTitle as string
   const structure = customSectionStructure(template, originalTitle, index)
   const semanticText = [
     structure?.contentPurpose,
@@ -912,9 +980,9 @@ function investmentRecommendationSectionTitle(
     section.summary,
     ...section.findings.slice(0, 3).map((finding) => finding.text),
   ].filter(Boolean).join(' ')
-  if (/投资结论|推进建议|阶段建议|上会|投决/.test(semanticText)) return '投资判断与推进建议'
-  if (/项目亮点|投资亮点|核心价值/.test(semanticText)) return '项目亮点与成立条件'
-  if (/风险|合规|诉讼|处罚|资质/.test(semanticText)) return '关键风险与核验重点'
+  if (/投资结论|推进建议|阶段建议|上会|投决/.test(semanticText)) return '投资结论'
+  if (/项目亮点|投资亮点|核心价值/.test(semanticText)) return '核心投资逻辑'
+  if (/风险|合规|诉讼|处罚|资质/.test(semanticText)) return '主要风险与待落实事项'
   if (/估值|融资|投资方|交易|资金用途|退出/.test(semanticText)) return '融资、估值与交易安排'
   if (/财务|收入|毛利|利润|现金流|回款/.test(semanticText)) return '财务表现与经营质量'
   if (/竞品|竞争|对标|替代方案|市场份额/.test(semanticText)) return '竞争格局与差异化'
@@ -923,8 +991,8 @@ function investmentRecommendationSectionTitle(
   if (/商业模式|定价|收费|渠道|经营/.test(semanticText)) return '商业模式与规模化路径'
   if (/产品|技术|研发|专利|知识产权|工程化/.test(semanticText)) return '产品、技术与工程化进展'
   if (/团队|创始人|管理层|治理|股权/.test(semanticText)) return '核心团队与治理结构'
-  if (/公司|主体|项目概况|发展阶段|基本情况/.test(semanticText)) return '项目概览与发展阶段'
-  return `项目专题分析 ${index + 1}`
+  if (/公司|主体|项目概况|发展阶段|基本情况/.test(semanticText)) return '公司概况与发展历程'
+  return `专题分析 ${index + 1}`
 }
 
 /**
@@ -958,8 +1026,9 @@ export function finalizeInvestmentRecommendationPptContent(
     }
     usedTitles.add(comparisonKey(title))
     const previousTitle = section.title
-    const clean = (value: string) =>
-      replaceSampleSubject(value.split(previousTitle).join(title))
+    const clean = (value: string) => sanitizeInvestmentRecommendationText(
+      replaceSampleSubject(value.split(previousTitle).join(title)),
+    )
     return {
       ...section,
       title,
@@ -980,11 +1049,16 @@ export function finalizeInvestmentRecommendationPptContent(
   return {
     ...finalized,
     title: `${subject}投资建议书`,
-    executiveSummary: replaceSampleSubject(finalized.executiveSummary),
+    executiveSummary: sanitizeInvestmentRecommendationText(
+      replaceSampleSubject(finalized.executiveSummary),
+    ) || '公司主体、核心产品、客户合同、历史财务及本轮交易条款尚待核实，当前不宜形成确定性投资结论。',
     sections,
-    highlights: finalized.highlights.map(replaceSampleSubject),
-    risks: finalized.risks.map(replaceSampleSubject),
-    missing: finalized.missing.map(replaceSampleSubject),
+    highlights: finalized.highlights.map((value) =>
+      sanitizeInvestmentRecommendationText(replaceSampleSubject(value))).filter(Boolean),
+    risks: finalized.risks.map((value) =>
+      sanitizeInvestmentRecommendationText(replaceSampleSubject(value))).filter(Boolean),
+    missing: finalized.missing.map((value) =>
+      sanitizeInvestmentRecommendationText(replaceSampleSubject(value))).filter(Boolean),
   }
 }
 
@@ -1541,6 +1615,43 @@ function customTemplateContentQualityIssues(
         priorFindings.push(finding.text)
       }
     }
+  }
+  return [...new Set(issues)].slice(0, 12)
+}
+
+export function investmentRecommendationContentQualityIssues(
+  content: BusinessContent,
+  expectedSectionCount: number,
+) {
+  const issues = customTemplateContentQualityIssues(content, expectedSectionCount)
+  const visibleText = [
+    content.title,
+    content.executiveSummary,
+    ...content.sections.flatMap((section) => [
+      section.title,
+      section.summary,
+      ...section.findings.map((finding) => finding.text),
+      ...(section.tables ?? []).flatMap((table) => [
+        table.title,
+        table.unit,
+        ...table.columns,
+        ...table.rows.flat(),
+      ]),
+    ]),
+    ...content.highlights,
+    ...content.risks,
+  ].filter(Boolean).join(' ')
+  if (INVESTMENT_RECOMMENDATION_INTERNAL_LANGUAGE.test(visibleText)) {
+    issues.push('投资建议书含项目阶段、系统流转、取证过程或模型身份，必须改为公司与交易事实的直接表述')
+  }
+  if (INVESTMENT_RECOMMENDATION_AI_STYLE_LANGUAGE.test(visibleText)) {
+    issues.push('投资建议书含模型化套话，必须按公司、产品、客户、财务、交易和风险事实重写')
+  }
+  if (/(?:项目|公司)具备[^。；]{0,50}(?:价值|潜力|亮点)|亮点集中在/.test(visibleText)) {
+    issues.push('投资建议书使用空泛的价值判断，应直接写支撑或削弱投资逻辑的具体事实')
+  }
+  if (content.executiveSummary.replace(/\s+/g, '').length < 60) {
+    issues.push('投资摘要过短，应说明投资逻辑、关键事实、主要反证和交易约束')
   }
   return [...new Set(issues)].slice(0, 12)
 }
@@ -2533,14 +2644,13 @@ export async function composeBusinessContent(input: {
 19. 已核验来源仍须通过 sourceIndexes 保留在内部审计结构，并由渲染器生成引用页或演讲者备注；不得为了自然段文风删除来源追溯。`
     : ''
   const uploadedInvestmentTemplateRule = isUploadedInvestmentTemplate
-    ? `\n10. 本次上传的 PPTX 是结构与视觉唯一权威。必须按模板识别出的页面职责、章节数量和顺序生成当前项目内容，不得回退到固定十二章、固定页数或公司标准模板。
-11. 上传模板的全部可见标题都只能作为内部槽位提示。每个 section.title 必须根据当前项目和本页职责重新拟定；不得复用模板样本项目名称、样本行业结论、样本人物、客户、竞品、数字或投资判断。
-12. 每个章节的信息密度应适配对应模板槽位。优先精炼内容，不得通过擅自缩小字体、改变行距或增加未授权页面解决溢出。
-13. 输出章节必须与模板中的业务内容页一一对应；封面、目录、章节过渡页、来源页和责任声明页不作为业务章节重复生成。
-14. 投资结论必须结合当前项目阶段，给出“进入初筛 / 继续跟踪 / 申请立项 / 启动尽调 / 提请上会 / 提交投决 / 暂缓推进 / 归档”之一及其前置条件。
-15. 市场规模、增长率、政策和具名竞品可以使用已核验的行业上下文来源，但必须明确是行业或可比对象信息，不得写成当前公司自身收入、客户、份额、融资或技术事实。
-16. 必须逐项消费“投资建议书重点信息包”中的公司简介、团队、财务、融资、估值和交易方案。存在详细字段或证据时，应写入模板中语义最匹配的页面，不得只在执行摘要中笼统一笔带过；确无资料时才可标记待核验。
-17. 财务、融资、估值和交易方案是四类不同信息：财务需保留期间、单位和历史/预测口径；融资需保留轮次、金额、投资方、时间和资金用途；估值需保留投前/投后及依据；交易方案需保留投资金额、方式、持股、交割和保护性条款。不得用其中一类替代另一类。`
+    ? `\n20. 本次上传的 PPTX 是结构与视觉唯一权威。必须按模板识别出的页面职责、章节数量和顺序生成当前项目内容，不得回退到固定十二章、固定页数或公司标准模板。
+21. 上传模板的全部可见标题都只能作为内部槽位提示。每个 section.title 必须根据当前项目和本页职责重新拟定；不得复用模板样本项目名称、样本行业结论、样本人物、客户、竞品、数字或投资判断。
+22. 每个章节的信息密度应适配对应模板槽位。优先精炼内容，不得通过擅自缩小字体、改变行距或增加未授权页面解决溢出。
+23. 输出章节必须与模板中的业务内容页一一对应；封面、目录、章节过渡页、来源页和责任声明页不作为业务章节重复生成。
+24. 市场规模、增长率、政策和具名竞品可以使用已核验的行业上下文来源，但必须明确是行业或可比对象信息，不得写成当前公司自身收入、客户、份额、融资或技术事实。
+25. 必须逐项消费“投资建议书重点信息包”中的公司简介、团队、财务、融资、估值和交易方案。存在详细字段或证据时，应写入模板中语义最匹配的页面，不得只在执行摘要中笼统一笔带过；确无资料时才可标记待核验。
+26. 财务、融资、估值和交易方案是四类不同信息：财务需保留期间、单位和历史/预测口径；融资需保留轮次、金额、投资方、时间和资金用途；估值需保留投前/投后及依据；交易方案需保留投资金额、方式、持股、交割和保护性条款。不得用其中一类替代另一类。`
     : ''
   const structureOrderRule = isCustomTemplate
     ? `必须按内部结构槽顺序输出 ${input.template.sections.length} 个 section，但不得复用原模板可见标题。`
@@ -2551,14 +2661,27 @@ export async function composeBusinessContent(input: {
     ? Object.fromEntries(Object.entries(input.parameters).filter(([key]) =>
         !['customTemplateId', 'customTemplateName'].includes(key)))
     : input.parameters
+  const projectFieldsForPrompt = input.type === 'investment_recommendation_ppt'
+    ? Object.fromEntries(Object.entries(input.project).filter(([key]) =>
+        !['stage', 'source', 'owner', 'score', 'progress', 'riskLevel'].includes(key)))
+    : input.project
+  const investmentRecommendationRule = input.type === 'investment_recommendation_ppt'
+    ? `\n10. 输出面向投资团队、投资总监和投委会。正文先写公司、产品、客户、财务和交易事实，再说明这些事实对投资价值、估值、交易条件或风险的具体影响；不得写成系统项目卡片、工作流汇报或模型分析过程。
+11. 客户可见文字不得出现“项目阶段”“线索阶段”“进入初筛”“申请立项”“启动尽调”“提请上会”“提交投决”“继续跟踪”“暂缓推进”“归档”等内部状态，也不得出现 OA、系统字段、项目负责人、项目来源、评分或进度。
+12. 禁止“综合当前项目阶段与可核验事实”“基于已提供材料”“项目档案显示”“资料显示”“证据显示”“核心事实、投资含义与主要约束如下”“具备继续推进价值”“赛道窗口”“早期窗口”“亮点成立依赖后续核验”等模型化套话。不得使用“值得注意的是、需要强调的是、不难发现、由此可见、综上所述、总体来看、在此背景下、赋能、抓手、生态闭环、新范式、从……到……的跃升”。
+13. 每段优先以公司、具名产品、客户、合同、财务科目、股东、交易条款或风险事项为主语，使用自然、克制、可在投委会上直接朗读的书面表达。不得连续使用“项目具备……但仍需……”或“亮点集中在……但依赖……”等固定句式。
+14. 投资摘要直接说明投资逻辑是否成立、支撑判断的关键事实、主要反证、交易约束和待完成的实质工作。证据不足时写“暂不形成确定性投资结论”，不得用内部阶段词替代判断。
+15. 公司披露、管理层预测、公开信息和已核实事实必须区分。意向、测试、客户名单、合同、交付、验收、收入、开票、回款和复购不得混写；涉及公司单方口径时使用“公司披露”或“管理层预计”，不写“资料记载”“AI推断”“可核验事实”。
+16. 标题采用机构投资材料的业务标题，如“投资摘要、公司概况与发展历程、产品与核心技术、财务分析、融资与估值、投资方案、核心投资逻辑、主要风险与待落实事项”；不得使用“投资判断与推进建议、项目亮点与成立条件、项目阶段、线索专题”等系统化或模型化标题。`
+    : ''
   const assistantRole = isDueDiligence
     ? '你是投资中台的资深投资经理，负责仅针对当前会话绑定的项目生成内部尽调报告；先完整研读项目文件，再形成基于事实的投资价值判断、交易条件、主要风险和后续实质工作。'
     : isCustomTemplate
       ? '你是投资中台的资深投资经理，负责仅针对当前会话绑定的线索池或项目库项目，按上传模板生成内部投资材料，并结合当前项目阶段形成推进、暂缓或归档建议。'
       : isUploadedInvestmentTemplate
-        ? '你是投资中台的资深投资经理，负责仅针对当前会话绑定的项目，严格按本次上传模板生成内部投资建议书，并结合当前阶段形成推进、暂缓或归档建议。'
+        ? '你是投资中台的资深股权投资经理，负责仅针对当前会话绑定的公司，严格按本次上传模板生成可供投委会审阅的内部投资建议书。'
         : input.type === 'investment_recommendation_ppt'
-        ? '你是投资中台的资深投资经理，负责仅针对当前会话绑定的线索池或项目库项目生成内部投资建议书，并结合当前阶段形成推进、暂缓或归档建议。'
+        ? '你是投资中台的资深股权投资经理，负责仅针对当前会话绑定的公司生成可供投委会审阅的内部投资建议书。'
         : '你是投资中台的资深投资经理，负责仅针对当前会话绑定的项目生成内部投资材料。'
   const systemPrompt = `${assistantRole}
 当前任务的业务角色、分析范围、章节职责和写作口径以已激活业务 Skill 及其 references 为唯一权威。以下仅为不可覆盖的安全、证据与 JSON 接口约束：
@@ -2570,7 +2693,7 @@ export async function composeBusinessContent(input: {
 6. Skill 版本、模板版本、模板文件名属于内部审计信息，不得写入标题、摘要、章节或结论。
 7. ${repetitionRule}
 8. 禁止复制整段证据、页眉页脚、目录、测试文字或占位语；每项 finding 只保留一个对决策有用的结论。
-9. ${sourceDisplayRule}${dueDiligenceRule}${customTemplateRule}${uploadedInvestmentTemplateRule}
+9. ${sourceDisplayRule}${dueDiligenceRule}${customTemplateRule}${investmentRecommendationRule}${uploadedInvestmentTemplateRule}
 已激活业务 Skill：${input.skill.name}
 Skill 版本：${input.skill.version}
 业务模板版本：${input.template.templateVersion}
@@ -2602,7 +2725,7 @@ ${allowsTables
       : '{"title":"", "executiveSummary":"", "sections":[{"title":"","summary":"","findings":[{"text":"","status":"资料记载|AI推断|待核验|资料缺口","sourceIndexes":[0]}]}],"highlights":[""],"risks":[""],"missing":[""]}'}
 
 项目字段：
-${JSON.stringify(input.project)}
+${JSON.stringify(projectFieldsForPrompt)}
 资料截止日：${input.sourceCutoffDate}
 任务参数：${JSON.stringify(generationParameters)}
 用户补充输入：${safeText(input.parameters.userInstructions, '无')}
@@ -2773,6 +2896,27 @@ ${JSON.stringify(previousDraft ?? {}).slice(0, 60_000)}`
           { code: 'CUSTOM_TEMPLATE_CONTENT_QUALITY_REJECTED' },
         )
       }
+    } else if (input.type === 'investment_recommendation_ppt') {
+      let issues = investmentRecommendationContentQualityIssues(
+        generated,
+        input.template.sections.length,
+      )
+      if (issues.length > 0) {
+        generated = await requestContent(
+          issues.map((issue, index) => `${index + 1}. ${issue}`).join('\n'),
+          generated,
+        )
+        issues = investmentRecommendationContentQualityIssues(
+          generated,
+          input.template.sections.length,
+        )
+      }
+      if (issues.length > 0) {
+        throw Object.assign(
+          new Error(`投资建议书正文未通过投资经理文风门禁：${issues.join('；')}`),
+          { code: 'INVESTMENT_RECOMMENDATION_CONTENT_QUALITY_REJECTED' },
+        )
+      }
     }
     return generated
   } catch (error) {
@@ -2798,6 +2942,9 @@ ${JSON.stringify(previousDraft ?? {}).slice(0, 60_000)}`
           responseCharacters: failure.responseCharacters,
         },
       )
+    }
+    if ((error as Error & { code?: string }).code === 'INVESTMENT_RECOMMENDATION_CONTENT_QUALITY_REJECTED') {
+      throw error
     }
     console.warn(
       '[aiBusinessContent] 业务文档使用可追溯兜底内容:',

@@ -881,7 +881,7 @@ export async function resolveAiCustomTemplateForTask(input: {
         ? ['projectId', 'sourceCutoffDate', 'customTemplateId', 'language', 'structureMode']
         : ['projectId', 'sourceCutoffDate', 'customTemplateId'],
       disclaimer: isInvestmentPpt
-        ? '本演示文稿由 AI 基于已授权资料生成，仅供内部讨论，不构成最终投资决策。'
+        ? '本演示文稿仅供内部审议，不构成最终投资决策。'
         : '本报告以当前项目资料库为主要依据，并按关键缺口采用可核验的定向公开补全；结论以文内所列来源和资料截止日为边界。',
       ...(isInvestmentPpt
         ? {

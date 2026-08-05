@@ -60,7 +60,7 @@ const topics = [
 
 const content: BusinessContent = {
   title: '智灵动力投资建议书',
-  executiveSummary: '项目具备产业协同潜力，建议在核心数据核验完成后推进。',
+  executiveSummary: '公司面向工业场景提供智能软件，投资判断取决于客户续约、收入质量及本轮交易条款的核实结果。',
   executiveSummarySourceIndexes: [0],
   sections: topics.map(([title, summary], index) => ({
     title,
@@ -72,7 +72,7 @@ const content: BusinessContent = {
       sourceIndexes: [index],
     }],
   })),
-  highlights: ['产业协同潜力'],
+  highlights: ['产品已进入工业客户验证，收入质量仍需结合合同与回款核对。'],
   risks: ['财务数据仍需审计', '交易条款仍需法务确认'],
   missing: [],
 }
@@ -102,11 +102,11 @@ test('Gorden slide plan carries detailed company, team, finance, funding, valuat
   ])
   assert.equal(plan[0].expectedTexts.some((text) => /^\d+$/u.test(text)), false)
   assert.equal(plan.at(-1)?.role, 'risk')
-  assert.equal(plan.at(-1)?.title, '投资结论、风险与后续事项')
+  assert.equal(plan.at(-1)?.title, '投资结论与关键风险')
   assert.ok(plan.at(-1)?.expectedTexts.includes('投资结论'))
-  assert.ok(plan.at(-1)?.expectedTexts.includes('风险与核验重点'))
-  assert.ok(plan.at(-1)?.expectedTexts.includes('引用资料与责任声明'))
-  assert.ok(plan.at(-1)?.expectedTexts.includes('引用资料：项目档案；公司官网'))
+  assert.ok(plan.at(-1)?.expectedTexts.includes('主要风险与待落实事项'))
+  assert.ok(plan.at(-1)?.expectedTexts.includes('资料来源与声明'))
+  assert.ok(plan.at(-1)?.expectedTexts.includes('引用资料：公司官网'))
   for (const [title, detail] of topics) {
     const slide = plan.find((item) => item.title === title)
     assert.ok(slide, `missing slide: ${title}`)
@@ -156,7 +156,7 @@ test('Gorden editable icon layer excludes text and fixed-grid slicing assumption
 })
 
 test('Gorden final visual QA blocks content failures but permits decorative drift', () => {
-  const prompt = buildGordenVisualQaPrompt(['项目阶段', '未披露，待核验', '未披露，待核验'])
+  const prompt = buildGordenVisualQaPrompt(['公司主体', '未披露，待核验', '未披露，待核验'])
   assert.match(prompt, /交付安全门，不是像素级临摹评分/)
   assert.match(prompt, /文字被严重遮挡、裁切、重叠或小到不可读/)
   assert.match(prompt, /非阻断.*边框粗细或颜色/)
@@ -194,7 +194,7 @@ test('Gorden slide plan honors an explicit five-page request', () => {
     'risk',
   ])
   assert.deepEqual(plan.slice(1, 4).map((slide) => slide.title), [
-    '项目概况与投资判断',
+    '公司概况与投资摘要',
     '产品技术与商业验证',
     '财务表现、估值与交易方案',
   ])
@@ -359,6 +359,27 @@ test('Gorden cover stays restrained even when project fields are incomplete', ()
   })
   assert.deepEqual(plan[0].expectedTexts, ['智灵动力投资建议书', '智灵动力'])
   assert.equal(plan[0].expectedTexts.includes('待资料解析后补充'), false)
+  assert.equal(plan.flatMap((slide) => slide.expectedTexts).some((text) => /项目阶段|线索阶段|待资料解析后补充/.test(text)), false)
+})
+
+test('five-page planning never exposes internal project stage metadata', () => {
+  const plan = buildGordenSlidePlan({
+    project: {
+      name: '大衍科技',
+      companyName: '大衍科技（桐乡）有限公司',
+      industry: '具身智能',
+      stage: '线索',
+      businessModel: '待资料解析后补充',
+      financing: '未披露，待核验',
+      valuation: '未披露，待核验',
+    },
+    content,
+    disclaimer: '本演示文稿仅供内部审议，不构成最终投资决策。',
+    pageCount: '5',
+  })
+  const visibleText = plan.flatMap((slide) => slide.expectedTexts).join(' ')
+  assert.doesNotMatch(visibleText, /项目阶段|线索阶段|待资料解析后补充|AI\s*(?:辅助|生成|初稿)/i)
+  assert.doesNotMatch(visibleText, /融资概况：未披露|估值口径：未披露/)
 })
 
 test('built-in investment PPT selects the closest visual master from docs/投资建议书', () => {

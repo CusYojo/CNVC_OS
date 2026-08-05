@@ -2433,7 +2433,7 @@ export async function generateBusinessPptx(input: {
     fontFace: PPT_FONT, lang: 'zh-CN', fontSize: 22, bold: true, color: '20202A', margin: 0, align: 'center',
     objectName: 'cover.document_title',
   })
-  cover.addText('AI 辅助初稿', {
+  cover.addText('内部讨论稿', {
     x: 4.7, y: 3.08, w: 4, h: 0.3,
     fontFace: PPT_FONT, lang: 'zh-CN', fontSize: 13, color: '666675', margin: 0, align: 'center',
     objectName: 'cover.draft_label',
@@ -2459,16 +2459,16 @@ export async function generateBusinessPptx(input: {
       { text: text(input.project.industry), options: { color: '20202A' } },
     ],
     [
-      { text: '项目阶段', options: { bold: true, color: 'FFFFFF', fill: { color: TEMPLATE_PURPLE } } },
-      { text: text(input.project.stage), options: { color: '20202A' } },
-      { text: '融资安排', options: { bold: true, color: 'FFFFFF', fill: { color: TEMPLATE_PURPLE } } },
-      { text: text(input.project.financing), options: { color: '20202A' } },
+      { text: '业务模式', options: { bold: true, color: 'FFFFFF', fill: { color: TEMPLATE_PURPLE } } },
+      { text: text(input.project.businessModel), options: { color: '20202A' } },
+      { text: '目标市场', options: { bold: true, color: 'FFFFFF', fill: { color: TEMPLATE_PURPLE } } },
+      { text: text(input.project.market), options: { color: '20202A' } },
     ],
     [
+      { text: '融资安排', options: { bold: true, color: 'FFFFFF', fill: { color: TEMPLATE_PURPLE } } },
+      { text: text(input.project.financing), options: { color: '20202A' } },
       { text: '估值口径', options: { bold: true, color: 'FFFFFF', fill: { color: TEMPLATE_PURPLE } } },
       { text: text(input.project.valuation), options: { color: '20202A' } },
-      { text: '资料截止日', options: { bold: true, color: 'FFFFFF', fill: { color: TEMPLATE_PURPLE } } },
-      { text: input.sourceCutoffDate, options: { color: '20202A' } },
     ],
   ], {
     x: 0.72,
@@ -2787,7 +2787,7 @@ export async function generateBusinessPptxPreview(input: {
   context.fillText('投资建议书', 800, 430)
   context.fillStyle = '#666675'
   context.font = `400 24px ${fontStack}`
-  context.fillText('AI 辅助初稿', 800, 490)
+  context.fillText('内部讨论稿', 800, 490)
   context.font = `400 18px ${fontStack}`
   context.fillText(`资料截止：${input.sourceCutoffDate}`, 800, 590)
   context.fillText('仅限内部讨论，不构成最终投资决策', 800, 625)

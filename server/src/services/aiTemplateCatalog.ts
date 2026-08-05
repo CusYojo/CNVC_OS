@@ -146,7 +146,7 @@ export const AI_TEMPLATE_CATALOG: Record<AiBusinessTaskType, AiTemplateDefinitio
       '风险与后续核验',
     ],
     requiredParameters: ['projectId', 'sourceCutoffDate', 'language', 'structureMode'],
-    disclaimer: '本演示文稿由 AI 基于已授权资料生成，仅供内部讨论，不构成最终投资决策。',
+    disclaimer: '本演示文稿仅供内部审议，不构成最终投资决策。',
   },
   due_diligence_report: {
     type: 'due_diligence_report',

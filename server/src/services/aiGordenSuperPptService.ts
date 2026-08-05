@@ -507,6 +507,12 @@ function uniqueCompactTexts(values: Array<string | null | undefined>) {
     .filter(Boolean))]
 }
 
+function clientVisibleReferenceNames(values: string[]) {
+  return uniqueCompactTexts(values)
+    .filter((value) => !/^(?:项目档案|项目资料|项目资料库|项目知识库|当前项目资料|本轮授权资料)$/u.test(value))
+    .slice(0, 6)
+}
+
 function coverExpectedTexts(input: {
   project: ProjectLike
   content: BusinessContent
@@ -703,13 +709,22 @@ function projectSnapshotTexts(input: {
   project: ProjectLike
   content: BusinessContent
 }) {
+  const visibleField = (value: unknown) => {
+    const text = String(value ?? '').replace(/\s+/g, ' ').trim()
+    if (!text || /^(?:待|暂无|未披露|未提供|尚未).{0,30}(?:补充|解析|核验|确认|披露|提供)?$/u.test(text)) return ''
+    if (/(?:待资料解析后补充|项目已创建|等待上传|上传测试|解析测试)/u.test(text)) return ''
+    return text
+  }
+  const businessModel = visibleField(input.project.businessModel)
+  const summary = visibleField(input.project.summary)
+  const financing = visibleField(input.project.financing)
+  const valuation = visibleField(input.project.valuation)
   return uniqueCompactTexts([
-    input.project.stage ? `项目阶段：${compactText(input.project.stage, 36)}` : undefined,
-    input.project.businessModel
-      ? `业务定位：${compactText(input.project.businessModel, 80)}`
-      : input.project.summary ? `项目定位：${compactText(input.project.summary, 80)}` : undefined,
-    input.project.financing ? `融资概况：${compactText(input.project.financing, 60)}` : undefined,
-    input.project.valuation ? `估值口径：${compactText(input.project.valuation, 60)}` : undefined,
+    businessModel
+      ? `业务定位：${compactText(businessModel, 80)}`
+      : summary ? `公司定位：${compactText(summary, 80)}` : undefined,
+    financing ? `融资概况：${compactText(financing, 60)}` : undefined,
+    valuation ? `估值口径：${compactText(valuation, 60)}` : undefined,
     compactText(input.content.executiveSummary, 110),
     ...input.content.highlights.slice(0, 2).map((value) => compactText(value, 60)),
   ])
@@ -758,12 +773,12 @@ export function buildGordenSlidePlan(input: {
       {
         number: 2,
         role: 'summary',
-        title: '项目概况与投资判断',
+        title: '公司概况与投资摘要',
         expectedTexts: [...new Set([
-          '项目概况与投资判断',
+          '公司概况与投资摘要',
           ...projectSnapshotTexts(input),
           ...groupedDecisionTexts({
-            title: '项目概况与投资判断',
+            title: '公司概况与投资摘要',
             sections: groups.overview,
           }).slice(1),
         ])],
@@ -791,15 +806,15 @@ export function buildGordenSlidePlan(input: {
         sourceIndexes: [...new Set(groups.decision.flatMap(sectionSourceIndexes))],
       },
     ]
-    const referenceNames = uniqueCompactTexts(input.references ?? []).slice(0, 6)
+    const referenceNames = clientVisibleReferenceNames(input.references ?? [])
     const closingTexts = [
-      '投资结论、风险与后续事项',
+      '投资结论与关键风险',
       '投资结论',
       compactText(input.content.executiveSummary, 240),
-      '风险与核验重点',
+      '主要风险与待落实事项',
       ...input.content.risks.slice(0, 4).map((risk) => compactText(risk, 120)),
-      '引用资料与责任声明',
-      `引用资料：${referenceNames.join('；') || '当前项目档案与本轮授权资料'}`,
+      '资料来源与声明',
+      `引用资料：${referenceNames.join('；') || '公司及交易相关文件'}`,
       input.disclaimer,
     ].filter(Boolean)
     return [
@@ -814,7 +829,7 @@ export function buildGordenSlidePlan(input: {
       {
         number: 5,
         role: 'risk',
-        title: '投资结论、风险与后续事项',
+        title: '投资结论与关键风险',
         expectedTexts: closingTexts,
         sourceIndexes: input.content.executiveSummarySourceIndexes ?? [],
       },
@@ -872,21 +887,21 @@ export function buildGordenSlidePlan(input: {
     },
     ...contentSlides,
   ]
-  const referenceNames = uniqueCompactTexts(input.references ?? []).slice(0, 6)
+  const referenceNames = clientVisibleReferenceNames(input.references ?? [])
   const closingTexts = [
-    '投资结论、风险与后续事项',
+    '投资结论与关键风险',
     '投资结论',
     compactText(input.content.executiveSummary, 260),
-    '风险与核验重点',
+    '主要风险与待落实事项',
     ...input.content.risks.slice(0, 4).map((risk) => compactText(risk, 120)),
-    '引用资料与责任声明',
-    `引用资料：${referenceNames.join('；') || '当前项目档案与本轮授权资料'}`,
+    '资料来源与声明',
+    `引用资料：${referenceNames.join('；') || '公司及交易相关文件'}`,
     input.disclaimer,
   ].filter(Boolean)
   slides.push({
     number: slides.length + 1,
     role: 'risk',
-    title: '投资结论、风险与后续事项',
+    title: '投资结论与关键风险',
     expectedTexts: closingTexts,
     sourceIndexes: input.content.executiveSummarySourceIndexes ?? [],
   })
