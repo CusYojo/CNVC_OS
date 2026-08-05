@@ -803,14 +803,21 @@ export async function generateBusinessDocx(input: {
           const [, lead, punctuation, body] = roleLead
           return [run(lead, true), run(`${punctuation}${body}`)]
         }
+        const roleFirstLead = value.match(
+          /^((?:公司)?(?:联合创始人|创始人|首席科学家|总经理|董事长|战略负责人|市场负责人|产业负责人|运营负责人|CEO|COO|CTO|CMO)(?:[、/，\s]*(?:联合创始人|创始人|首席科学家|总经理|董事长|战略负责人|市场负责人|产业负责人|运营负责人|CEO|COO|CTO|CMO))*[\u3400-\u9fff·]{2,4}?)([，。]?)(?=(?:具有|拥有|本科|硕士|博士|毕业|获|曾|现|长期|主要|负责|系|为))([\s\S]+)$/i,
+        )
+        if (roleFirstLead) {
+          const [, lead, punctuation, body] = roleFirstLead
+          return [run(lead, true), run(`${punctuation}${body}`)]
+        }
       }
       if (sectionTitle === '产品及技术') {
         const productLead = value.match(
-          /^([^。]{2,48}(?:模型|平台|系统|方案|技术|产品))。([\s\S]+)$/,
+          /^([^，。]{2,88}?(?:模型|平台|系统|方案|技术|产品|数据体系|技术架构))([，。]?)([\s\S]+)$/,
         )
         if (productLead) {
-          const [, lead, body] = productLead
-          return [run(`${lead}。`, true), run(body)]
+          const [, lead, punctuation, body] = productLead
+          return [run(lead, true), run(`${punctuation}${body}`)]
         }
       }
       return [run(value)]

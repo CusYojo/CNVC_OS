@@ -22,6 +22,7 @@ import { fetchComplianceModelEvidence } from '../services/aiComplianceModelResea
 import { fetchDueDiligenceNetworkEvidence } from '../services/aiDueDiligenceNetworkResearchService.js'
 import { generateBusinessDocx } from '../services/aiBusinessDocumentService.js'
 import { isDiagnosticEvidenceSourceName } from '../services/aiEvidenceQualityService.js'
+import type { ProjectKnowledgeBrief } from '../services/aiProjectKnowledgeBriefService.js'
 import { loadAiSkill } from '../services/aiSkillService.js'
 import { AI_TEMPLATE_CATALOG } from '../services/aiTemplateCatalog.js'
 
@@ -344,6 +345,125 @@ async function main() {
       (localProjectPackets.find((packet) => packet.sectionTitle === sectionTitle)?.items.length ?? 0) > 0),
     localProjectPackets.map((packet) => `${packet.sectionTitle}:${packet.items.length}`).join('、'),
   )
+  const denseLayoutSources = [{
+    sourceType: 'file',
+    sourceId: 'dayan-dense-layout',
+    sourceName: '大衍科技BP.pptx',
+    chunkIndex: 0,
+    versionOrDate: '2026-07-30',
+    content: [
+      '项目团队 AI-Core-Tech 大衍科技（桐乡）有限公司 公司创始人、CEO杨林具有7年深度强化学习与大模型算法研发经验，现负责端到端大模型技术。',
+      '公司战略负责人、COO刘岩鑫具有9年自动驾驶项目管理经验，现负责公司运营管理与战略规划。',
+      '产品及技术 R2S2R端到端数据闭环方案联动真实数据、仿真合成与落地应用，用于机器人和自动驾驶训练数据生产。',
+      'Reality Simulation触觉仿真平台通过视触觉感知与力反馈完成仿真训练，用于机器人操作任务验证。',
+    ].join(' '),
+  }]
+  const structuredKnowledgeBrief: ProjectKnowledgeBrief = {
+    version: 'project-knowledge-study-v1',
+    projectName: '大衍科技项目',
+    companyName: '大衍科技（桐乡）有限公司',
+    sourceCutoffDate: '2026-07-30',
+    facts: [
+      {
+        topic: '创始人与核心团队',
+        text: '公司创始人、CEO杨林具有7年深度强化学习与大模型算法研发经验，现负责端到端大模型技术。',
+        sourceIndexes: [0],
+        nature: '公司陈述',
+      },
+      {
+        topic: '创始人与核心团队',
+        text: '公司战略负责人、COO刘岩鑫具有9年自动驾驶项目管理经验，现负责公司运营管理与战略规划。',
+        sourceIndexes: [0],
+        nature: '公司陈述',
+      },
+      {
+        topic: '产品、技术与知识产权',
+        text: 'R2S2R端到端数据闭环方案联动真实数据、仿真合成与落地应用，用于机器人和自动驾驶训练数据生产。',
+        sourceIndexes: [0],
+        nature: '公司陈述',
+      },
+      {
+        topic: '产品、技术与知识产权',
+        text: 'Reality Simulation触觉仿真平台通过视触觉感知与力反馈完成仿真训练，用于机器人操作任务验证。',
+        sourceIndexes: [0],
+        nature: '公司陈述',
+      },
+    ],
+    chronology: [],
+    conflicts: [],
+    gaps: [],
+    recommendedTables: [],
+    audit: {
+      mode: 'model-study',
+      model: 'acceptance-fixture',
+      sourceDocumentCount: 1,
+      sourceFilesRepresented: ['大衍科技BP.pptx'],
+      selectedSourceFiles: ['大衍科技BP.pptx'],
+      sourceFileCoverageRatio: 1,
+      sourceChunkCount: 1,
+      includedChunkCount: 1,
+      includedCharacterCount: denseLayoutSources[0].content.length,
+      corpusSha256: sha256(Buffer.from(denseLayoutSources[0].content)),
+    },
+  }
+  const previousStructuredDisableLlm = process.env.AI_COMPLIANCE_DISABLE_LLM
+  process.env.AI_COMPLIANCE_DISABLE_LLM = '1'
+  const structuredFallbackWorkflow = await composeComplianceStatement({
+    template,
+    skill,
+    blueprint,
+    project: {
+      name: '大衍科技项目',
+      companyName: '大衍科技（桐乡）有限公司',
+    },
+    sources: denseLayoutSources,
+    sourceCutoffDate: '2026-07-30',
+    parameters: {},
+    projectKnowledgeBrief: structuredKnowledgeBrief,
+  })
+  if (previousStructuredDisableLlm === undefined) delete process.env.AI_COMPLIANCE_DISABLE_LLM
+  else process.env.AI_COMPLIANCE_DISABLE_LLM = previousStructuredDisableLlm
+  const structuredTeam = structuredFallbackWorkflow.content.sections
+    .find((section) => section.title === '核心团队')?.findings ?? []
+  const structuredProducts = structuredFallbackWorkflow.content.sections
+    .find((section) => section.title === '产品及技术')?.findings ?? []
+  check(
+    'PPT密集抽取串通过研读底稿恢复为团队逐人、产品逐项段落',
+    structuredTeam.length === 2
+      && structuredProducts.length === 2
+      && structuredTeam.every((finding) => isReadableComplianceTeamFinding(finding.text))
+      && structuredProducts.every((finding) => isReadableComplianceProductFinding(finding.text))
+      && structuredProducts.every((finding) => !/(?:创始人|CEO|COO)/i.test(finding.text)),
+    `团队${structuredTeam.length}段，产品${structuredProducts.length}段`,
+  )
+  const structuredDocxPath = path.join(outputDirectory, '大衍科技_团队产品结构自测.docx')
+  await generateBusinessDocx({
+    outputPath: structuredDocxPath,
+    template,
+    project: {
+      name: '大衍科技项目',
+      companyName: '大衍科技（桐乡）有限公司',
+    },
+    content: structuredFallbackWorkflow.content,
+    sources: denseLayoutSources,
+    sourceCutoffDate: '2026-07-30',
+    generatedAt: new Date('2026-08-05T00:00:00+08:00'),
+    blueprint,
+  })
+  const structuredDocxReview = await reviewGeneratedComplianceDocx({
+    filePath: structuredDocxPath,
+    template,
+    blueprint,
+    content: structuredFallbackWorkflow.content,
+    projectName: '大衍科技项目',
+  })
+  check(
+    '团队逐人、产品逐项DOCX通过Word结构与字体验收',
+    structuredDocxReview.passed,
+    structuredDocxReview.issues.length
+      ? structuredDocxReview.issues.map((issue) => `${issue.code}:${issue.message}`).join('；')
+      : structuredDocxPath,
+  )
   check(
     '来源材料编号不会进入报告正文',
     [
@@ -364,9 +484,14 @@ async function main() {
   check(
     '团队、产品、拆分数字和句末标点门禁生效',
     isReadableComplianceTeamFinding('杨林（创始人、CEO）具有自动驾驶算法研发经历，现负责公司技术路线和核心产品研发。')
+      && isReadableComplianceTeamFinding('公司创始人、CEO杨林具有自动驾驶算法研发经历，现负责公司技术路线和核心产品研发。')
+      && !isReadableComplianceTeamFinding('创始与核心管理成员均来自自动驾驶与AI行业一线，团队技术研发与商业化落地能力兼备。')
       && isReadableComplianceProductFinding('R2S2R端到端数据闭环方案。该方案联动真实数据与合成数据，用于智能体训练场景的数据生产与验证。')
+      && !isReadableComplianceProductFinding('创始与核心管理成员均来自自动驾驶与AI行业一线，创始人杨林负责公司产品研发。')
+      && !isReadableComplianceProductFinding('高精地图将实时理解环境问题转变为在已知地图定位的问题，可降低对实时感知算法的依赖。')
       && cleanComplianceBodyText('以 1 0% 真实数据联动 90% 合成数据，规划营收 4 000万元、团队 3 0人。')
-        === '以 10% 真实数据联动 90% 合成数据，规划营收 4000万元、团队 30人。'
+        .replace(/\s+/g, '')
+        === '以10%真实数据联动90%合成数据，规划营收4000万元、团队30人。'
       && ensureComplianceSentenceEnding('公司本轮拟融资人民币5,000万元')
         === '公司本轮拟融资人民币5,000万元。',
     '一人一段、一能力一段、数字连续且正文完整收句',

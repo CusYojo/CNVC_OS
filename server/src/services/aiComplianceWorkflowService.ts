@@ -23,6 +23,7 @@ import {
 import {
   projectKnowledgeBriefForPrompt,
   type ProjectKnowledgeBrief,
+  type ProjectKnowledgeTopic,
 } from './aiProjectKnowledgeBriefService.js'
 
 const GW_BASE = (
@@ -102,7 +103,7 @@ const SECTION_CONFIGS: SectionConfig[] = [
   },
   {
     title: '产品及技术',
-    terms: ['产品', '技术', '研发', '算法', '系统', '平台', '专利', '客户验证', 'PoC', '交付'],
+    terms: ['产品', '技术', '研发', '算法', '模型', '系统', '平台', '方案', '数据', '仿真', '重建', '训练', '触觉', '专利', '客户验证', 'PoC', '交付'],
     instruction: '按产品形态、关键技术、差异化、客户或场景验证、成熟度边界组织自然段，段数由证据密度决定，最多4段。',
     maxFindings: 4,
   },
@@ -154,8 +155,32 @@ const SECTION_CONFIGS: SectionConfig[] = [
 const FALLBACK_SECTION_TERMS: Record<string, string[]> = {
   公司简介: ['主体', '成立', '定位', '业务', '商业模式', '收入', '阶段', '客户类型'],
   核心团队: ['团队', '创始人', '联合创始人', 'CEO', 'CTO', '教授', '履历', '任职', '负责'],
-  产品及技术: ['产品', '技术', '研发', '算法', '模型', '系统', '平台', '专利', 'PoC', '交付'],
+  产品及技术: ['产品', '技术', '研发', '算法', '模型', '系统', '平台', '方案', '数据', '仿真', '重建', '训练', '触觉', '专利', 'PoC', '交付'],
   投资计划: ['估值', '融资', '投资额', '增资', '股权', '持股', 'SPV', '资金用途', '交割', '条款'],
+}
+
+const COMPLIANCE_KNOWLEDGE_TOPICS: Record<string, readonly ProjectKnowledgeTopic[]> = {
+  公司简介: [
+    '公司主体与历史沿革',
+    '股权、融资与治理',
+    '商业模式、客户与供应链',
+  ],
+  核心团队: ['创始人与核心团队'],
+  产品及技术: ['产品、技术与知识产权', '商业模式、客户与供应链'],
+  投资理由: [
+    '创始人与核心团队',
+    '产品、技术与知识产权',
+    '商业模式、客户与供应链',
+    '行业、市场与竞争',
+    '财务、现金流与预测',
+  ],
+  投资计划: ['股权、融资与治理', '交易方案、估值与退出'],
+  投资情形分析: [
+    '公司主体与历史沿革',
+    '股权、融资与治理',
+    '交易方案、估值与退出',
+    '合规、风险与待确认事项',
+  ],
 }
 
 export type ComplianceEvidenceItem = {
@@ -305,6 +330,9 @@ export function cleanComplianceBodyText(value: string) {
   }
   text = text
     .replace(/^\d{1,3}\s+(?=[\u3400-\u9fffA-Za-z])/, '')
+    .replace(/^\d{1,3}(?=(?![年月日时分秒万亿元人次家项个%％])[\u3400-\u9fff])/, '')
+    .replace(/^(?:项目团队|核心团队)(?:\s+|(?=[A-Z0-9“]))(?=\S)/, '')
+    .replace(/^产品及技术(?:\s+|(?=[A-Z0-9“]))(?=\S)/, '')
     .replace(/\s+\d{1,3}$/, '')
   return normalizeComplianceWhitespace(
     rewriteComplianceEvidenceFraming(rewriteComplianceBodyLabels(text)),
@@ -323,6 +351,10 @@ const COMPLIANCE_ROLE_PATTERN =
   /(?:联合创始人|创始人|首席科学家|总经理|董事长|战略负责人|市场负责人|产业负责人|运营负责人|CEO|COO|CTO|CMO)/i
 const COMPLIANCE_MEMBER_LEAD_PATTERN =
   /^[\u3400-\u9fff·]{2,8}(?:（[^）]{2,40}）|(?:为|现任|担任|系)[^。；]{0,35}(?:联合创始人|创始人|首席科学家|总经理|董事长|负责人|CEO|COO|CTO|CMO))/i
+const COMPLIANCE_ROLE_FIRST_MEMBER_LEAD_PATTERN =
+  /^(?:公司)?(?:联合创始人|创始人|首席科学家|总经理|董事长|战略负责人|市场负责人|产业负责人|运营负责人|CEO|COO|CTO|CMO)(?:[、/，\s]*(?:联合创始人|创始人|首席科学家|总经理|董事长|战略负责人|市场负责人|产业负责人|运营负责人|CEO|COO|CTO|CMO))*[\u3400-\u9fff·]{2,8}/i
+const COMPLIANCE_PRODUCT_LEAD_PATTERN =
+  /^(?:公司(?:核心)?(?:产品|技术|数据体系|技术路线)|公司(?:打造|形成|研发|推出|构建|拟构建)|(?:技术路线|数据体系|产品路线|现阶段(?:产品|技术|验证))|[A-Za-z0-9\u3400-\u9fff][A-Za-z0-9\u3400-\u9fff+\-（）()\s]{1,48}(?:模型|平台|系统|方案|技术|产品|数据体系|技术架构))/i
 const COMPLIANCE_VAGUE_ASPECT_PATTERN =
   /(?:增强备选方案|估值口径|公司营收|营业收入|研发投入|团队组建|团队规模|发明专利)方面[，,:：]/
 
@@ -331,7 +363,8 @@ export function isReadableComplianceTeamFinding(value: string) {
   return text.length >= 32
     && text.length <= 320
     && !containsParsedSourceLayoutArtifact(text)
-    && COMPLIANCE_MEMBER_LEAD_PATTERN.test(text)
+    && (COMPLIANCE_MEMBER_LEAD_PATTERN.test(text)
+      || COMPLIANCE_ROLE_FIRST_MEMBER_LEAD_PATTERN.test(text))
     && COMPLIANCE_ROLE_PATTERN.test(text)
     && /[。！？；]/.test(text)
 }
@@ -344,6 +377,9 @@ export function isReadableComplianceProductFinding(value: string) {
   return text.length >= 32
     && text.length <= 360
     && !containsParsedSourceLayoutArtifact(text)
+    && !/(?:创始人|联合创始人|核心管理成员|市场负责人|战略负责人|运营负责人|CEO|COO|CTO|CMO)/i.test(text)
+    && COMPLIANCE_PRODUCT_LEAD_PATTERN.test(text)
+    && /(?:产品|技术|研发|算法|模型|系统|平台|方案|数据体系|专利|知识产权|仿真|重建)/.test(text)
     && forecastFieldHits < 3
     && /[。！？；]/.test(text)
 }
@@ -511,7 +547,7 @@ function fallbackSentenceSupportsSection(title: string, text: string) {
   }
   if (title === '产品及技术') {
     return isReadableComplianceProductFinding(text)
-      && /产品以|产品为|产品包括|平台|算法|模型|系统|专利|知识产权|技术(?:架构|能力|路线|方案)/.test(text)
+      && /产品以|产品为|产品包括|产品|平台|算法|模型|系统|方案|数据体系|仿真|重建|专利|知识产权|技术(?:架构|能力|路线|方案)/.test(text)
   }
   return true
 }
@@ -579,6 +615,68 @@ export function buildComplianceEvidencePackets(
       items,
     }
   })
+}
+
+function enrichComplianceEvidencePackets(
+  packets: ComplianceChapterEvidence[],
+  brief: ProjectKnowledgeBrief | undefined,
+  sources: EvidenceSource[],
+) {
+  if (!brief) return packets
+  return packets.map((packet) => {
+    const topics = new Set(COMPLIANCE_KNOWLEDGE_TOPICS[packet.sectionTitle] ?? [])
+    if (!topics.size) return packet
+    const items = [...packet.items]
+    for (const fact of brief.facts) {
+      if (!topics.has(fact.topic)) continue
+      const excerpt = ensureComplianceSentenceEnding(fact.text)
+      if (!excerpt || containsParsedSourceLayoutArtifact(excerpt)) continue
+      const sourceIndex = fact.sourceIndexes.find((index) => Boolean(sources[index]))
+      if (sourceIndex === undefined) continue
+      if (isNearDuplicate(excerpt, items.map((item) => item.excerpt), 0.9)) continue
+      const source = sources[sourceIndex]
+      items.push({
+        sourceIndex,
+        sourceType: source.sourceType,
+        sourceName: source.sourceName,
+        topic: fact.topic,
+        chunkIndex: source.chunkIndex ?? sourceIndex,
+        versionOrDate: source.versionOrDate ?? '日期待核验',
+        excerpt,
+        // 已完成跨文件研读和来源索引校验的事实，优先于原始 PDF/PPT 抽取串。
+        score: 100,
+      })
+    }
+    const rankedItems = items
+      .sort((left, right) => right.score - left.score || left.sourceIndex - right.sourceIndex)
+      .slice(0, packet.sectionTitle === '投资情形分析' ? 12 : 8)
+    return {
+      ...packet,
+      items: rankedItems,
+      sourceIndexes: [...new Set(rankedItems.map((item) => item.sourceIndex))],
+    }
+  })
+}
+
+function projectKnowledgeBriefForComplianceChapter(
+  brief: ProjectKnowledgeBrief | undefined,
+  config: SectionConfig,
+  packet: ComplianceChapterEvidence,
+) {
+  if (!brief) return projectKnowledgeBriefForPrompt(undefined)
+  const topics = COMPLIANCE_KNOWLEDGE_TOPICS[config.title] ?? []
+  const topicSet = new Set(topics)
+  const sourceIndexSet = new Set(packet.sourceIndexes)
+  const filteredBrief: ProjectKnowledgeBrief = {
+    ...brief,
+    facts: brief.facts.filter((fact) =>
+      topicSet.has(fact.topic)
+      && fact.sourceIndexes.some((index) => sourceIndexSet.has(index))),
+    recommendedTables: brief.recommendedTables.filter((table) =>
+      topicSet.has(table.topic)
+      && table.sourceIndexes.some((index) => sourceIndexSet.has(index))),
+  }
+  return projectKnowledgeBriefForPrompt(filteredBrief, topics)
 }
 
 function missingFinding(title: string, requestedMaterial: string): BusinessFinding {
@@ -857,6 +955,33 @@ function fallbackChapter(
   }
 }
 
+function repairStructuredChapterAfterReviewFailure(
+  config: SectionConfig,
+  previous: BusinessSection | undefined,
+  fallback: BusinessSection,
+) {
+  if (!['核心团队', '产品及技术'].includes(config.title)) return fallback
+  const isValid = (finding: BusinessFinding) => {
+    if (finding.status === '资料缺口') return true
+    return config.title === '核心团队'
+      ? isReadableComplianceTeamFinding(finding.text)
+      : isReadableComplianceProductFinding(finding.text)
+  }
+  const findings: BusinessFinding[] = []
+  for (const finding of [...(previous?.findings ?? []), ...fallback.findings]) {
+    if (!isValid(finding)) continue
+    if (isNearDuplicate(finding.text, findings.map((item) => item.text), 0.82)) continue
+    findings.push(finding)
+    if (findings.length >= config.maxFindings) break
+  }
+  return {
+    ...fallback,
+    findings: findings.length
+      ? findings
+      : [missingFinding(config.title, missingMaterialForSection(config.title))],
+  }
+}
+
 function replaceRemainingCrossSectionDuplicates(
   generatedSections: Map<string, BusinessSection>,
 ) {
@@ -1036,8 +1161,8 @@ async function generateChapter(input: {
 12. 不使用“关键核验对象”“关键核验条件”“核验条件尚未闭环”“条件性分析”“条件化判断”“取证边界”“核验边界”“形成单项结论”“完成专项分析”“本节需取得”，也不使用“具备初步判断依据”“可形成初步投资判断”“已有商业化线索”“具备一定交付组织基础”“成长路径”“支撑强度”“利润留存能力”等模型化套话；不自行命名“平台化……加场景化……”等概念。
 13. 段落长短和句数按证据密度自然变化，通常用1至4句讲清一个逻辑中心，不设置统一句数。相邻段落不得连续使用相同开头或收尾；三段以上连续以“……方面，……”开头，或两段以上连续以“最终结论取决于……”收尾，必须改写。
 14. 只输出JSON对象：{"summary":"","findings":[{"text":"","status":"资料记载|AI推断|待核验|资料缺口","sourceIndexes":[0]}]}。
-15. “核心团队”必须一名成员对应一个finding，正文以“姓名（职务）”或“姓名为/现任/担任……职务”开头，再分别说明教育、任职经历、项目职责和与项目相关的能力；一个finding不得混写两名以上成员，不得输出团队页页眉、公司名、专利清单或多页成员信息拼接串。人员与职务的对应关系在证据中不明确时不得猜测。
-16. “产品及技术”必须一项产品或技术能力对应一个finding，依次写清产品/技术名称、核心机制、明确指标或验证情况及应用价值；知识产权只按明确的“名称—类别—关联技术”关系概括。PPT表格的行列关系无法可靠还原时删除该残片，不得输出“名称类别关联度”、连续“公司营收方面/研发投入方面/团队组建方面/发明专利方面”或页眉与技术说明混排长串。
+15. “核心团队”必须一名成员对应一个finding，正文以“姓名（职务）”“姓名为/现任/担任……职务”或模板常用的“公司创始人、CEO姓名”开头，再分别说明教育、任职经历、项目职责和与项目相关的能力；一个finding不得混写两名以上成员，不得使用“核心管理成员均来自……”替代逐人介绍，不得输出团队页页眉、公司名、专利清单或多页成员信息拼接串。人员与职务的对应关系在证据中不明确时不得猜测。
+16. “产品及技术”必须一项产品或技术能力对应一个finding，并以明确的产品、平台、模型、系统、方案或技术名称开头，依次写清核心机制、明确指标或验证情况及应用价值；本章不得写团队履历或泛泛行业原理。知识产权只按明确的“名称—类别—关联技术”关系概括。PPT表格的行列关系无法可靠还原时删除该残片，不得输出“名称类别关联度”、连续“公司营收方面/研发投入方面/团队组建方面/发明专利方面”或页眉与技术说明混排长串。
 17. 每个finding必须以“。/！/？”之一结束。不得使用“增强备选方案方面”“公司估值口径方面”一类机械的“……方面”表达；交易方案和估值口径应写成完整句子。
 
 Document Blueprint：
@@ -1068,8 +1193,8 @@ ${JSON.stringify(input.project)}
 ${JSON.stringify(input.parameters)}
 
 ${input.previousSection ? `上次本章输出（仅用于修复Reviewer指出的问题）：\n${JSON.stringify(input.previousSection)}\n` : ''}
-项目资料研读底稿（已先逐份研读并统一主体、时间、关系和数字口径；只吸收事实，不得在正文提及底稿或研读过程）：
-${projectKnowledgeBriefForPrompt(input.projectKnowledgeBrief)}
+项目资料研读底稿（仅提供与本章相关且来源索引属于本章证据包的事实；只吸收事实，不得在正文提及底稿或研读过程）：
+${projectKnowledgeBriefForComplianceChapter(input.projectKnowledgeBrief, input.config, input.packet)}
 
 本章证据：
 ${chapterEvidencePrompt(input.packet)}
@@ -1615,6 +1740,8 @@ function sanitizeComplianceContent(content: BusinessContent, sources: EvidenceSo
       '结论',
     ],
   })
+  // 免责声明是模板固定文案，不能被通用文字清洗改写空格或标点。
+  sanitized.executiveSummary = content.executiveSummary
   sanitized.sections = sanitized.sections.map((section) => ({
     ...section,
     findings: section.findings.flatMap((finding) => {
@@ -1649,7 +1776,11 @@ export async function composeComplianceStatement(input: {
   parameters: Record<string, unknown>
   projectKnowledgeBrief?: ProjectKnowledgeBrief
 }): Promise<ComplianceWorkflowResult> {
-  const evidencePackets = buildComplianceEvidencePackets(input.sources)
+  const evidencePackets = enrichComplianceEvidencePackets(
+    buildComplianceEvidencePackets(input.sources),
+    input.projectKnowledgeBrief,
+    input.sources,
+  )
   const packetByTitle = new Map(evidencePackets.map((packet) => [packet.sectionTitle, packet]))
   const generatedSections = new Map<string, BusinessSection>()
   const modelState = { available: true, consecutiveFailures: 0 }
@@ -1734,7 +1865,14 @@ export async function composeComplianceStatement(input: {
   for (const title of failedTitles) {
     const config = SECTION_CONFIGS.find((item) => item.title === title)
     const packet = packetByTitle.get(title)
-    if (config && packet) generatedSections.set(title, fallbackChapter(config, packet))
+    if (config && packet) {
+      const previous = generatedSections.get(title)
+      const fallback = fallbackChapter(config, packet)
+      generatedSections.set(
+        title,
+        repairStructuredChapterAfterReviewFailure(config, previous, fallback),
+      )
+    }
   }
   replaceRemainingCrossSectionDuplicates(generatedSections)
   content = sanitizeComplianceContent(assembleContent({
