@@ -17,6 +17,7 @@ import {
   buildReferenceDrivenSemanticOverrides,
   buildGordenSlidePlan,
   buildGordenSlidePrompt,
+  buildGordenTextContractRetryPrompt,
   buildGordenEditableLayerPrompts,
   gordenSlidePlanFingerprint,
   gordenLayoutGuardArgs,
@@ -199,6 +200,87 @@ test('Gorden slide plan honors an explicit five-page request', () => {
   assert.ok(plan[1].expectedTexts.includes(topics[0][1]))
   assert.ok(plan[1].expectedTexts.includes(topics[1][1]))
   assert.ok(plan[3].expectedTexts.some((text) => /1200 万元|5000 万元|4 亿元|3000 万元/.test(text)))
+})
+
+test('five-page planning keeps financial operating quality on the decision page', () => {
+  const focusedContent: BusinessContent = {
+    ...content,
+    sections: [
+      content.sections[0],
+      {
+        title: '产品、技术与工程化进展',
+        summary: '公司围绕数据采集、仿真训练和工具链形成产品体系。',
+        findings: [],
+      },
+      {
+        title: '行业趋势与市场空间',
+        summary: '行业仍处早期阶段，高质量数据供给是关键瓶颈。',
+        findings: [],
+      },
+      {
+        title: '财务表现与经营质量',
+        summary: '收入、合同、验收、回款和复购需要统一核验。',
+        findings: [],
+      },
+      {
+        title: '融资、估值与交易安排',
+        summary: '融资金额、估值和交割条件以正式协议为准。',
+        findings: [],
+      },
+      {
+        title: '融资、估值与交易安排（2）',
+        summary: '历史融资和本轮交易口径需要统一。',
+        findings: [],
+      },
+      {
+        title: '关键风险与核验重点',
+        summary: '主体、财务和客户真实性仍需重点核验。',
+        findings: [],
+      },
+      {
+        title: '关键风险与核验重点（2）',
+        summary: '交割条件和回款证据尚需补强。',
+        findings: [],
+      },
+    ],
+  }
+  const plan = buildGordenSlidePlan({
+    project: { name: '大衍科技', industry: '具身智能' },
+    content: focusedContent,
+    disclaimer: '内部使用。',
+    pageCount: '5',
+  })
+  assert.ok(plan[2].expectedTexts.includes('产品、技术与工程化进展'))
+  assert.ok(plan[2].expectedTexts.includes('行业趋势与市场空间'))
+  assert.equal(plan[2].expectedTexts.includes('财务表现与经营质量'), false)
+  assert.ok(plan[3].expectedTexts.includes('财务表现与经营质量'))
+  assert.ok(plan[3].expectedTexts.includes('融资、估值与交易安排'))
+  assert.equal(plan[3].expectedTexts.filter((text) => text === '融资、估值与交易安排').length, 1)
+  assert.equal(plan[3].expectedTexts.filter((text) => text === '关键风险与核验重点').length, 1)
+  assert.equal(plan[3].expectedTexts.some((text) => /（2）/.test(text)), false)
+  assert.ok(plan.slice(1, 4).every((slide) =>
+    slide.expectedTexts.every((text) => text.length <= 110)))
+})
+
+test('Gorden text-contract retry removes invented architecture labels without relaxing facts', () => {
+  const slide = buildGordenSlidePlan({
+    project: { name: '大衍科技', industry: '具身智能' },
+    content,
+    disclaimer: '内部使用。',
+    pageCount: '5',
+  })[2]
+  const prompt = buildGordenTextContractRetryPrompt({
+    slide,
+    unexpectedText: ['应用层', '平台层', '技术与商业验证路径'],
+    missingTextIndexes: [2],
+    attempt: 1,
+  })
+  assert.match(prompt, /先清除页面中的全部可读文字/)
+  assert.match(prompt, /应用层；平台层；技术与商业验证路径/)
+  assert.match(prompt, /必须恢复的缺失文字索引：\s*2/)
+  assert.match(prompt, /禁止拆成层级标签、流程节点、图例、导航、编号卡片或自拟短语/)
+  assert.match(prompt, /不得新增公司名、Logo 文字、来源名、日期、页码、年份、金额、比例/)
+  assert.ok(slide.expectedTexts.every((text) => prompt.includes(text)))
 })
 
 test('Gorden cover stays restrained even when project fields are incomplete', () => {

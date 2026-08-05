@@ -534,6 +534,10 @@ function sectionTexts(section: BusinessSection) {
 
 function roleForTitle(title: string) {
   const rules: Array<[RegExp, string]> = [
+    [/风险|核验|关注事项/, 'risk'],
+    [/财务|盈利|收入预测|现金流|经营质量/, 'financials'],
+    [/估值|融资|投资方案|交易方案|交易安排/, 'investment-plan'],
+    [/商业模式|收入结构|复制路径/, 'business-model'],
     [/摘要|概要|亮点|结论/, 'summary'],
     [/公司|项目|主体|概况|介绍|历程|股权/, 'company'],
     [/团队|创始人|管理层|治理/, 'team'],
@@ -542,18 +546,52 @@ function roleForTitle(title: string) {
     [/行业|市场|空间|政策|产业链/, 'market'],
     [/竞争|竞品|对标|格局/, 'competition'],
     [/客户|订单|合同|商业化|经营|案例|验证/, 'validation'],
-    [/商业模式|收入结构|复制路径/, 'business-model'],
-    [/财务|盈利|收入预测|现金流/, 'financials'],
-    [/估值|融资|投资方案|交易方案|投资建议/, 'investment-plan'],
     [/退出|回报/, 'exit'],
-    [/风险|核验|关注事项/, 'risk'],
   ]
   return rules.find(([pattern]) => pattern.test(title))?.[1] ?? 'content'
 }
 
 type FivePageBucket = 'overview' | 'business' | 'decision'
 
+function fivePageSectionTitle(title: string) {
+  return title.replace(/[（(]\d+[）)]\s*$/u, '').trim()
+}
+
+function consolidateFivePageSections(sections: BusinessSection[]) {
+  const consolidated = new Map<string, BusinessSection>()
+  for (const section of sections) {
+    const title = fivePageSectionTitle(section.title)
+    const existing = consolidated.get(title)
+    if (!existing) {
+      consolidated.set(title, { ...section, title })
+      continue
+    }
+    const summaries = uniqueCompactTexts([existing.summary, section.summary])
+    consolidated.set(title, {
+      ...existing,
+      summary: summaries.join('；'),
+      summarySourceIndexes: [...new Set([
+        ...(existing.summarySourceIndexes ?? []),
+        ...(section.summarySourceIndexes ?? []),
+      ])],
+      findings: [...existing.findings, ...section.findings]
+        .filter((finding, index, values) =>
+          values.findIndex((candidate) => candidate.text === finding.text) === index),
+      tables: [...(existing.tables ?? []), ...(section.tables ?? [])]
+        .filter((table, index, values) =>
+          values.findIndex((candidate) => candidate.title === table.title) === index),
+    })
+  }
+  return [...consolidated.values()]
+}
+
 function fivePageBucketForSection(section: BusinessSection): FivePageBucket {
+  if (/财务|盈利|收入|现金流|融资|估值|交易方案|交易安排|投资方案|退出|回报|风险|核验/.test(section.title)) {
+    return 'decision'
+  }
+  if (/产品|技术|研发|专利|知识产权|行业|市场|竞争|竞品|客户|订单|商业化|案例|验证|商业模式/.test(section.title)) {
+    return 'business'
+  }
   const role = roleForTitle(section.title)
   if (['financials', 'investment-plan', 'exit', 'risk'].includes(role)) return 'decision'
   if (['product', 'technology', 'market', 'competition', 'validation', 'business-model'].includes(role)) {
@@ -568,7 +606,9 @@ function fivePageSectionGroups(sections: BusinessSection[]) {
     business: [],
     decision: [],
   }
-  for (const section of sections) groups[fivePageBucketForSection(section)].push(section)
+  for (const section of consolidateFivePageSections(sections)) {
+    groups[fivePageBucketForSection(section)].push(section)
+  }
 
   // Sparse projects may not yet contain all three evidence chains. Preserve
   // every section, but split the largest chain so the requested five-page deck
@@ -595,8 +635,8 @@ function projectSnapshotTexts(input: {
       : input.project.summary ? `项目定位：${compactText(input.project.summary, 80)}` : undefined,
     input.project.financing ? `融资概况：${compactText(input.project.financing, 60)}` : undefined,
     input.project.valuation ? `估值口径：${compactText(input.project.valuation, 60)}` : undefined,
-    compactText(input.content.executiveSummary, 180),
-    ...input.content.highlights.slice(0, 2).map((value) => compactText(value, 80)),
+    compactText(input.content.executiveSummary, 110),
+    ...input.content.highlights.slice(0, 2).map((value) => compactText(value, 60)),
   ])
 }
 
@@ -610,22 +650,14 @@ function groupedDecisionTexts(input: {
         const numericalFinding = section.findings.find((finding) =>
           /\d|%|％|万元|亿元|收入|订单|估值|融资|占股/.test(finding.text))
           ?? section.findings[0]
-        const table = section.tables?.[0]
-        return [
-          numericalFinding ? compactText(numericalFinding.text, 130) : '',
-          ...(table ? [
-            compactText(table.title, 70),
-            compactText(table.columns.join('｜'), 100),
-            ...table.rows.slice(0, 2).map((row) => compactText(row.join('｜'), 120)),
-          ] : []),
-        ]
-      })
+        return numericalFinding ? [compactText(numericalFinding.text, 80)] : []
+      }).slice(0, 2)
     : []
   return [...new Set([
     input.title,
     ...input.sections.flatMap((section) => [
       section.title,
-      compactText(section.summary || section.findings[0]?.text || '相关事实仍需进一步核验。', 150),
+      compactText(section.summary || section.findings[0]?.text || '相关事实仍需进一步核验。', 96),
     ]),
     ...evidence,
   ].map((value) => value.trim()).filter(Boolean))]
@@ -670,7 +702,6 @@ export function buildGordenSlidePlan(input: {
         expectedTexts: groupedDecisionTexts({
           title: '产品技术与商业验证',
           sections: groups.business,
-          includeEvidence: true,
         }),
         sourceIndexes: [...new Set(groups.business.flatMap(sectionSourceIndexes))],
       },
@@ -849,6 +880,29 @@ ${input.sourceNames.join('、') || '用户已授权项目资料'}
 严格文字契约：页面中可读文字总数必须恰好为 ${input.slide.expectedTexts.length} 条，只能使用上述编号后的正文，并且每一条只能出现一次；清单最左侧的序号只是控制标记，不得显示。每一条正文必须完整放在一个连续文本区域内，不得按“｜”、标点或语义拆成多个导航标签、卡片、段落或文本框，也不得把多条正文合并到同一个文本框。不得重复任何标题、正文或数字；不得自行生成 1、2、3……编号、编号徽标、空白编号卡片、图例或目录。需要项目符号时只能使用不含文字的纯图形圆点。模板中多余的文字模块应删除或改为纯图形，不得用“愿景、使命、价值、团队、来源名称”、日期、页码或其他自拟标签补位。每个有文字的卡片、图表、轴标签和页脚都必须使用清单中的原文；清单没有对应文字时，删除该模块，不得留下带空标题的卡片或图表。
 若文字清单没有流程节点或图表标签，禁止生成任何带文字的流程图、路径图、思维导图、坐标轴或数据图标签；这类装饰只能使用完全不含文字的纯图形。尤其不得沿用模板示例中的“大脑、信号采集、解码、外部设备”等流程词。
 所有数字、主体、人物、客户、融资、估值和交易条款只能来自上述可见文字。中文使用清晰的现代无衬线字体。`
+}
+
+export function buildGordenTextContractRetryPrompt(input: {
+  slide: GordenSlidePlan
+  unexpectedText: string[]
+  missingTextIndexes: number[]
+  attempt: number
+}) {
+  const allowedTexts = input.slide.expectedTexts
+    .map((text, index) => `${index + 1}. ${text}`)
+    .join('\n')
+  return `编辑输入的幻灯片图片，保持现有机构投资建议书的配色、栅格、背景、边框和整体构图，只修复可见文字。输出仍为 16:9、2560×1440。
+
+这是第 ${input.attempt} 次文字契约修复。先清除页面中的全部可读文字，再把下列允许文字逐条重新排版；页面最终只能出现这些文字，每条完整出现一次：
+${allowedTexts}
+
+必须删除的清单外文字：
+${input.unexpectedText.join('；') || '无'}
+
+必须恢复的缺失文字索引：
+${input.missingTextIndexes.join('、') || '无'}
+
+长句必须作为一个连续文本区域完整呈现，禁止拆成层级标签、流程节点、图例、导航、编号卡片或自拟短语。不得概括、改写、缩写或从长句中提炼“应用层、平台层、能力层、路径、步骤”等新标签。若现有架构图依赖额外文字才能成立，就删除该架构图的文字节点并改成纯图形、表格线或留白。不得新增公司名、Logo 文字、来源名、日期、页码、年份、金额、比例或模板样本事实。中文使用清晰的现代无衬线字体。`
 }
 
 export function buildGordenEditableLayerPrompts(keyColor = '#00ff00') {
@@ -1364,6 +1418,148 @@ async function requestVisionJson(input: {
     }
   }
   throw lastError
+}
+
+function gordenTextContractIssues(plan: GordenSlidePlan, vision: VisionLayout) {
+  const observedUnexpectedText = Array.isArray(vision.unexpectedText)
+    ? vision.unexpectedText.map(String).filter(Boolean)
+    : []
+  const unexpectedText = gordenUnplannedVisibleTexts(
+    plan.expectedTexts,
+    observedUnexpectedText,
+  )
+  const presentIndexes = new Set((vision.texts ?? [])
+    .map((item) => Number(item.textIndex))
+    .filter((index) => Number.isInteger(index) && index >= 1 && index <= plan.expectedTexts.length))
+  const missingTextIndexes = Array.from(
+    { length: plan.expectedTexts.length },
+    (_unused, index) => index + 1,
+  ).filter((index) => !presentIndexes.has(index))
+  return { unexpectedText, missingTextIndexes }
+}
+
+async function ensureGordenStageOneTextContract(input: {
+  plan: GordenSlidePlan
+  stableSlide: string
+  promptsDir: string
+  metadataDir: string
+  python: string
+  imageScript: string
+  timeoutMs: number
+  env: NodeJS.ProcessEnv
+  onProgress?: GordenProgress
+  slideCount: number
+}) {
+  const { width, height } = await imageSize(input.stableSlide, input.python, input.timeoutMs)
+  const auditDir = path.join(
+    input.metadataDir,
+    `slide-${String(input.plan.number).padStart(2, '0')}`,
+  )
+  await mkdir(auditDir, { recursive: true })
+  const attempts: Array<Record<string, unknown>> = []
+  const maxRepairAttempts = 2
+  for (let attempt = 0; attempt <= maxRepairAttempts; attempt += 1) {
+    const vision = await requestVisionJson({
+      prompt: layoutVisionPrompt(input.plan, [], width, height),
+      images: [input.stableSlide],
+      timeoutMs: input.timeoutMs,
+    }) as VisionLayout
+    const issues = gordenTextContractIssues(input.plan, vision)
+    attempts.push({
+      attempt,
+      unexpectedText: issues.unexpectedText,
+      missingTextIndexes: issues.missingTextIndexes,
+    })
+    if (!issues.unexpectedText.length && !issues.missingTextIndexes.length) {
+      const audit = {
+        schemaVersion: '1.0',
+        slide: input.plan.number,
+        passed: true,
+        repaired: attempt > 0,
+        attempts,
+      }
+      await writeJson(path.join(
+        auditDir,
+        'text-contract-preflight.json',
+      ), audit)
+      return audit
+    }
+    if (attempt >= maxRepairAttempts) {
+      const auditPath = path.join(
+        auditDir,
+        'text-contract-preflight.json',
+      )
+      await writeJson(auditPath, {
+        schemaVersion: '1.0',
+        slide: input.plan.number,
+        passed: false,
+        repaired: false,
+        attempts,
+      })
+      const detail = [
+        issues.unexpectedText.length
+          ? `清单外文字：${issues.unexpectedText.join('、')}`
+          : '',
+        issues.missingTextIndexes.length
+          ? `缺少文字索引：${issues.missingTextIndexes.join('、')}`
+          : '',
+      ].filter(Boolean).join('；')
+      throw Object.assign(
+        new Error(`Gorden 第 ${input.plan.number} 页文字定向修复后仍未通过：${detail}`),
+        {
+          code: 'GORDEN_VISIBLE_TEXT_CONTRACT_REJECTED',
+          slideNumber: input.plan.number,
+          unexpectedText: issues.unexpectedText,
+          missingTextIndexes: issues.missingTextIndexes,
+        },
+      )
+    }
+
+    await reportProgress(
+      input.onProgress,
+      `Gorden 阶段 1：第 ${input.plan.number}/${input.slideCount} 页清理清单外文字（${attempt + 1}/${maxRepairAttempts}）`,
+      70 + Math.round((input.plan.number / input.slideCount) * 6),
+    )
+    const retryPromptPath = path.join(
+      input.promptsDir,
+      `${String(input.plan.number).padStart(2, '0')}-text-contract-retry-${attempt + 1}.md`,
+    )
+    await writeFile(retryPromptPath, buildGordenTextContractRetryPrompt({
+      slide: input.plan,
+      unexpectedText: issues.unexpectedText,
+      missingTextIndexes: issues.missingTextIndexes,
+      attempt: attempt + 1,
+    }), 'utf8')
+    let result: GatewayImageResult
+    try {
+      result = await generateGatewayImage({
+        python: input.python,
+        script: input.imageScript,
+        promptFile: retryPromptPath,
+        outDir: path.join(
+          auditDir,
+          `text-contract-retry-${attempt + 1}`,
+        ),
+        referenceImage: input.stableSlide,
+        timeoutMs: input.timeoutMs,
+        env: input.env,
+      })
+    } catch (error) {
+      throw gordenGatewayFailure(error, {
+        slideNumber: input.plan.number,
+        slideCount: input.slideCount,
+        layer: `text-contract-retry-${attempt + 1}`,
+      })
+    }
+    await copyFile(result.saved[0], input.stableSlide)
+    attempts[attempt] = {
+      ...attempts[attempt],
+      prompt_file: retryPromptPath,
+      task_id: result.task_id,
+      metadata_json: result.metadata_json,
+    }
+  }
+  throw new Error('Gorden 文字契约修复流程异常结束')
 }
 
 export function isGordenVisionRetryableStatus(status: number) {
@@ -2087,6 +2283,25 @@ export async function generateInvestmentRecommendationPptWithGorden(input: {
       backend: 'gateway-gpt-image',
       reference_page: plan.referencePage,
     })
+    await persistImagegenCheckpoint()
+  }
+  for (const plan of plans) {
+    const textContractPreflight = await ensureGordenStageOneTextContract({
+      plan,
+      stableSlide: generatedSlides[plan.number - 1],
+      promptsDir,
+      metadataDir,
+      python,
+      imageScript: paths.generateImage,
+      timeoutMs,
+      env,
+      onProgress: input.onProgress,
+      slideCount: plans.length,
+    })
+    imagegenManifest[plan.number - 1] = {
+      ...imagegenManifest[plan.number - 1],
+      text_contract_preflight: textContractPreflight,
+    }
     await persistImagegenCheckpoint()
   }
   await writeJson(imagegenManifestPath, {
