@@ -453,6 +453,9 @@ async function main() {
     'Word',
     'WPS',
     '技术错误',
+    '正文不显示执行摘要',
+    '两字符首行缩进',
+    '不得引用未定义的数字样式 ID',
   ]
   assert(
     'AI-010 核心规范与项目统一规范保持关键规则一致',
@@ -507,7 +510,7 @@ async function main() {
       && diligenceTemplate.sections.length === 30
       && diligenceSkill.referenceInstructions.includes('30 个模块拆为 11 个章组生成')
       && diligenceSkill.referenceInstructions.includes('只重试该章组'),
-    '11 个固定章组，最多三个并行；章组独立 JSON、独立重试，合并后生成执行摘要和执行全篇 Reviewer',
+    '11 个固定章组，最多三个并行；章组独立 JSON、独立重试，合并后形成内部综合判断并执行全篇 Reviewer',
   )
   const projectKnowledgeBriefSource = await readFile(
     path.resolve(

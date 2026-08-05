@@ -791,6 +791,7 @@ async function main() {
     assert(checks, `${type} DOCX 为有效 OpenXML`, Boolean(zip.file('word/document.xml')), outputPath)
     assert(checks, `${type} 含可编辑文本`, (xml.match(/<w:t/g) || []).length > template.sections.length * 2, `章节 ${template.sections.length}`)
     const documentXml = await zip.file('word/document.xml')?.async('string') || ''
+    const stylesXml = await zip.file('word/styles.xml')?.async('string') || ''
     if (type === 'compliance_statement') {
       assert(
         checks,
@@ -1028,6 +1029,12 @@ async function main() {
       )
       assert(
         checks,
+        'AI-010 客户可见文档不设置执行摘要',
+        !documentXml.includes('执行摘要'),
+        '综合判断分写入投资概要和投资结论，不生成独立摘要标题或段落',
+      )
+      assert(
+        checks,
         'AI-010 正文不显示内部项目阶段词',
         !documentXml.includes('阶段与推进建议')
           && !documentXml.includes('主建议')
@@ -1089,7 +1096,7 @@ async function main() {
       assert(
         checks,
         'AI-010 财务表使用模板式灰表头、左对齐表题和数字右对齐',
-        /<w:pStyle w:val="91"\/>[\s\S]*?<w:t[^>]*>历史财务摘要<\/w:t>/.test(documentXml)
+        /<w:pStyle w:val="DueDiligenceTableTitle"\/>[\s\S]*?<w:t[^>]*>历史财务摘要<\/w:t>/.test(documentXml)
           && documentXml.includes('w:fill="E7E6E6"')
           && documentXml.includes('<w:jc w:val="right"/>'),
         '财务表题沿用正文样式，单位独立，浅灰表头，数值列右对齐',
@@ -1251,11 +1258,11 @@ async function main() {
       assert(
         checks,
         'AI-010 正文标题与目录使用相同编号',
-        /<w:pStyle w:val="79"\/>[\s\S]*?<w:t[^>]*>1、投资概要<\/w:t>/.test(documentXml)
-          && /<w:pStyle w:val="86"\/>[\s\S]*?<w:t[^>]*>2\.1 公司基本信息<\/w:t>/.test(documentXml)
-          && /<w:pStyle w:val="86"\/>[\s\S]*?<w:t[^>]*>2\.7 资质、荣誉及法律合规情况<\/w:t>/.test(documentXml)
-          && /<w:pStyle w:val="86"\/>[\s\S]*?<w:t[^>]*>8\.1 风险提示与对策<\/w:t>/.test(documentXml)
-          && /<w:pStyle w:val="79"\/>[\s\S]*?<w:t[^>]*>8、风险提示与对策<\/w:t>/.test(documentXml),
+        /<w:pStyle w:val="DueDiligenceHeading1"\/>[\s\S]*?<w:t[^>]*>1、投资概要<\/w:t>/.test(documentXml)
+          && /<w:pStyle w:val="DueDiligenceHeading2"\/>[\s\S]*?<w:t[^>]*>2\.1 公司基本信息<\/w:t>/.test(documentXml)
+          && /<w:pStyle w:val="DueDiligenceHeading2"\/>[\s\S]*?<w:t[^>]*>2\.7 资质、荣誉及法律合规情况<\/w:t>/.test(documentXml)
+          && /<w:pStyle w:val="DueDiligenceHeading2"\/>[\s\S]*?<w:t[^>]*>8\.1 风险提示与对策<\/w:t>/.test(documentXml)
+          && /<w:pStyle w:val="DueDiligenceHeading1"\/>[\s\S]*?<w:t[^>]*>8、风险提示与对策<\/w:t>/.test(documentXml),
         '一级标题 1、～8、；二级标题 2.1 等与目录一致',
       )
       const orderedHeadings = [
@@ -1294,14 +1301,26 @@ async function main() {
       )
       assert(
         checks,
-        'AI-010 使用模板语料库统一样式并保留三分节',
-        (documentXml.match(/<w:pStyle w:val="79"\/>/g) || []).length >= 8
-          && (documentXml.match(/<w:pStyle w:val="86"\/>/g) || []).length >= 29
-          && documentXml.includes('<w:pStyle w:val="91"/>')
-          && documentXml.includes('<w:pStyle w:val="101"/>')
-          && (documentXml.match(/<w:numId w:val="0"\/>/g) || []).length >= 37
+        'AI-010 使用真实定义的统一段落样式并保留三分节',
+        (documentXml.match(/<w:pStyle w:val="DueDiligenceHeading1"\/>/g) || []).length >= 9
+          && (documentXml.match(/<w:pStyle w:val="DueDiligenceHeading2"\/>/g) || []).length >= 29
+          && documentXml.includes('<w:pStyle w:val="DueDiligenceBody"/>')
+          && documentXml.includes('<w:pStyle w:val="DueDiligenceTableTitle"/>')
+          && documentXml.includes('<w:pStyle w:val="DueDiligenceSourceNote"/>')
+          && [
+            'DueDiligenceHeading1',
+            'DueDiligenceHeading2',
+            'DueDiligenceBody',
+            'DueDiligenceTableTitle',
+            'DueDiligenceSourceNote',
+          ].every((styleId) => stylesXml.includes(
+            `<w:style w:type="paragraph" w:styleId="${styleId}">`,
+          ))
+          && stylesXml.includes('<w:ind w:firstLine="480"/>')
+          && /<w:spacing(?=[^>]*w:after="0")(?=[^>]*w:before="0")(?=[^>]*w:line="360")[^>]*\/>/.test(stylesXml)
+          && !/<w:pStyle w:val="(?:79|86|91|101)"\/>/.test(documentXml)
           && (documentXml.match(/<w:sectPr/g) || []).length >= 3,
-        '星实一标 79、二标 86、正文 91、来源批注 101；段落级关闭模板中文编号；封面/目录/正文三分节',
+        '一级标题、二级标题、正文、表题和单位说明均为 Word/WPS 可识别的已定义样式；正文两字符首行缩进、1.5 倍行距；封面/目录/正文三分节',
       )
       assert(
         checks,

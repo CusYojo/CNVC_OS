@@ -20,7 +20,7 @@
 ```json
 {
   "title": "项目名称尽职调查报告",
-  "executiveSummary": "对公司、产品、商业化、财务、交易和风险的事实性综合判断。",
+  "executiveSummary": "仅供全篇 Reviewer 使用的内部综合判断，不进入客户可见 DOCX。",
   "sections": [
     {
       "title": "公司基本信息",
@@ -50,7 +50,7 @@
 }
 ```
 
-不得增加目录、页眉页脚、来源对象、免责声明、技术日志或 Reviewer 字段。目录和版式由 Formatter 生成。
+`executiveSummary` 仅为内部 Reviewer 字段。Formatter 不得输出“执行摘要”标题或独立摘要段落，相关判断必须拆入投资概要和投资结论。不得增加目录、页眉页脚、来源对象、免责声明、技术日志或 Reviewer 字段。目录和版式由 Formatter 生成。
 
 ## 统一章节顺序
 
@@ -94,7 +94,7 @@
 - 30 个模块拆成 11 个章组，每组最多 4 个模块，最多 3 个章组并行。
 - 每次请求只返回当前章组的 `sections`；不得一次返回整篇报告。
 - 各章组独立解析、校验和保存；失败只重试当前章组。
-- 全部章组合并后单独生成 `title`、`executiveSummary`、`highlights` 和 `risks`，再执行全篇 Reviewer。
+- 全部章组合并后单独生成 `title`、仅供 Reviewer 使用的 `executiveSummary`、`highlights` 和 `risks`，再执行全篇 Reviewer；客户可见 DOCX 不渲染 `executiveSummary`。
 - 组内标题必须与请求中的标题逐字一致；不得按顿号、逗号或斜线拆分标题。
 
 ## 内容和表格

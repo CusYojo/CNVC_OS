@@ -198,10 +198,11 @@ const DUE_DILIGENCE_OUTLINE = [
 ] as const
 
 const DUE_DILIGENCE_STYLES = {
-  level1: '79',
-  level2: '86',
-  body: '91',
-  sourceNote: '101',
+  level1: 'DueDiligenceHeading1',
+  level2: 'DueDiligenceHeading2',
+  body: 'DueDiligenceBody',
+  tableTitle: 'DueDiligenceTableTitle',
+  sourceNote: 'DueDiligenceSourceNote',
 } as const
 
 const safeName = (value: string) => value.replace(/[\\/:*?"<>|]/g, '-').slice(0, 60)
@@ -690,6 +691,26 @@ export async function generateBusinessDocx(input: {
       eastAsia: compatibleFont,
     }
   }
+  const dueRuntimeFonts = process.platform === 'darwin'
+    ? {
+        song: 'Songti SC',
+        heading: 'STHeiti',
+        body: 'STFangsong',
+        level2: 'Kaiti SC',
+      }
+    : process.platform === 'linux'
+      ? {
+          song: 'Noto Serif CJK SC',
+          heading: 'Noto Sans CJK SC',
+          body: 'Noto Serif CJK SC',
+          level2: 'Noto Serif CJK SC',
+        }
+      : {
+          song: DOCX_SONG_FONT,
+          heading: DOCX_SANS_FONT,
+          body: DOCX_FANGSONG_FONT,
+          level2: DOCX_KAITI_FONT,
+        }
   const isProposal = input.template.type === 'investment_proposal'
   const heading = (value: string, level: 1 | 2 = 1, pageBreakBefore = false) => new Paragraph({
     style: level === 1 ? 'Heading1' : 'Heading2',
@@ -1141,25 +1162,15 @@ export async function generateBusinessDocx(input: {
       value: string,
       level: 1 | 2,
       pageBreakBefore = false,
-      numbered = true,
     ) => new Paragraph({
-      style: numbered
-        ? level === 1
-          ? DUE_DILIGENCE_STYLES.level1
-          : DUE_DILIGENCE_STYLES.level2
-        : undefined,
+      style: level === 1
+        ? DUE_DILIGENCE_STYLES.level1
+        : DUE_DILIGENCE_STYLES.level2,
       pageBreakBefore,
       keepNext: true,
       keepLines: true,
-      outlineLevel: numbered ? level - 1 : undefined,
-      spacing: numbered ? undefined : { before: 0, after: 0, line: 360 },
-      children: [new TextRun({
-        text: value,
-        font: runFont(level === 1 ? profile.headingFont : '楷体'),
-        size: level === 1 ? 30 : 24,
-        bold: true,
-        color: '000000',
-      })],
+      outlineLevel: level - 1,
+      children: [new TextRun({ text: value })],
     })
     const dueBody = (
       value: string,
@@ -1172,10 +1183,7 @@ export async function generateBusinessDocx(input: {
       indent: options.firstLine === false ? { firstLine: 0 } : undefined,
       children: [new TextRun({
         text: value,
-        font: runFont(profile.bodyFont),
-        size: 24,
         bold: options.bold,
-        color: '000000',
       })],
     })
     const tableBorders = {
@@ -1196,7 +1204,7 @@ export async function generateBusinessDocx(input: {
         spacing: { before: 0, after: 0, line: 280 },
         children: [new TextRun({
           text: value,
-          font: runFont(profile.bodyFont),
+          font: runFont(dueRuntimeFonts.body),
           size: 21,
           bold: label,
           color: '000000',
@@ -1269,7 +1277,7 @@ export async function generateBusinessDocx(input: {
             spacing: { before: 0, after: 0, line: 280 },
             children: [new TextRun({
               text: value,
-              font: runFont(profile.bodyFont),
+              font: runFont(dueRuntimeFonts.body),
               size: 18,
               bold: header,
               color: '000000',
@@ -1279,30 +1287,14 @@ export async function generateBusinessDocx(input: {
       })
       return [
         new Paragraph({
-          style: DUE_DILIGENCE_STYLES.body,
-          alignment: AlignmentType.LEFT,
+          style: DUE_DILIGENCE_STYLES.tableTitle,
           keepNext: true,
-          indent: { firstLine: 0 },
-          spacing: { before: 160, after: 40, line: 320 },
-          children: [new TextRun({
-            text: table.title,
-            font: runFont(profile.bodyFont),
-            size: 24,
-            bold: true,
-            color: '000000',
-          })],
+          children: [new TextRun({ text: table.title })],
         }),
         ...(table.unit ? [new Paragraph({
           style: DUE_DILIGENCE_STYLES.sourceNote,
-          alignment: AlignmentType.RIGHT,
           keepNext: true,
-          spacing: { before: 0, after: 60, line: 260 },
-          children: [new TextRun({
-            text: `单位：${table.unit}`,
-            font: runFont(profile.bodyFont),
-            size: 18,
-            color: '000000',
-          })],
+          children: [new TextRun({ text: `单位：${table.unit}` })],
         })] : []),
         new Table({
           width: { size: width, type: WidthType.DXA },
@@ -1313,14 +1305,8 @@ export async function generateBusinessDocx(input: {
             ...table.rows.map((values) => row(values)),
           ],
         }),
-        new Paragraph({ spacing: { before: 0, after: 80 } }),
       ]
     }
-
-    contentChildren.push(
-      dueHeading('执行摘要', 1, false, false),
-      dueBody(input.content.executiveSummary),
-    )
 
     DUE_DILIGENCE_OUTLINE.forEach((group, groupIndex) => {
       contentChildren.push(dueHeading(`${groupIndex + 1}、${group.title}`, 1, groupIndex > 0))
@@ -1350,9 +1336,6 @@ export async function generateBusinessDocx(input: {
             children: [
               new TextRun({
                 text: `${prefix}${finding.text}`,
-                color: '000000',
-                size: 24,
-                font: runFont(profile.bodyFont),
               }),
             ],
           }))
@@ -1364,7 +1347,7 @@ export async function generateBusinessDocx(input: {
     })
     const investmentConclusion = sectionByTitle.get('投资结论及建议')
     if (investmentConclusion) {
-      contentChildren.push(dueHeading('投资结论及建议', 1, true, false))
+      contentChildren.push(dueHeading('投资结论及建议', 1, true))
       contentChildren.push(dueBody(investmentConclusion.summary, {
         keepNext: Boolean(investmentConclusion.findings.length || investmentConclusion.tables?.length),
       }))
@@ -1488,7 +1471,9 @@ export async function generateBusinessDocx(input: {
         spacing: { before: 1150, after: 480 },
         children: [new TextRun({
           text: text(input.project.companyName, input.project.name),
-          font: runFont(DOCX_SONG_FONT),
+          font: runFont(input.template.type === 'due_diligence_report'
+            ? dueRuntimeFonts.song
+            : DOCX_SONG_FONT),
           size: 44,
           bold: true,
           color: '000000',
@@ -1500,7 +1485,9 @@ export async function generateBusinessDocx(input: {
         keepNext: index < 5,
         children: [new TextRun({
           text: character,
-          font: runFont(DOCX_SONG_FONT),
+          font: runFont(input.template.type === 'due_diligence_report'
+            ? dueRuntimeFonts.song
+            : DOCX_SONG_FONT),
           size: 44,
           bold: true,
           color: '000000',
@@ -1511,7 +1498,9 @@ export async function generateBusinessDocx(input: {
         spacing: { before: 0, after: 180 },
         children: [new TextRun({
           text: generatedAt.toLocaleDateString('zh-CN', { year: 'numeric', month: 'long' }),
-          font: runFont(DOCX_SONG_FONT),
+          font: runFont(input.template.type === 'due_diligence_report'
+            ? dueRuntimeFonts.song
+            : DOCX_SONG_FONT),
           size: 32,
           bold: true,
           color: '000000',
@@ -1522,7 +1511,9 @@ export async function generateBusinessDocx(input: {
         spacing: { before: 300 },
         children: [new TextRun({
           text: '浙江赛智伯乐股权投资管理有限公司',
-          font: runFont(DOCX_SONG_FONT),
+          font: runFont(input.template.type === 'due_diligence_report'
+            ? dueRuntimeFonts.song
+            : DOCX_SONG_FONT),
           size: 32,
           bold: true,
           color: '000000',
@@ -1546,7 +1537,7 @@ export async function generateBusinessDocx(input: {
             spacing: { after: 160, line: 360 },
             children: [new TextRun({
               text: '目录',
-              font: runFont(profile.headingFont),
+              font: runFont(dueRuntimeFonts.heading),
               size: 28,
               bold: true,
               color: '000000',
@@ -1557,29 +1548,41 @@ export async function generateBusinessDocx(input: {
             headingStyleRange: '1-2',
             useAppliedParagraphOutlineLevel: true,
             beginDirty: true,
-            contentChildren: DUE_DILIGENCE_OUTLINE.flatMap((group, groupIndex) => [
+            contentChildren: [
+              ...DUE_DILIGENCE_OUTLINE.flatMap((group, groupIndex) => [
+                new Paragraph({
+                  keepNext: group.modules.length > 1,
+                  spacing: { after: 80, line: 360 },
+                  children: [new TextRun({
+                    text: `${groupIndex + 1}、${group.title}`,
+                    font: runFont(dueRuntimeFonts.heading),
+                    size: 28,
+                    bold: true,
+                    color: '000000',
+                  })],
+                }),
+                ...group.modules.map((moduleTitle, moduleIndex) => new Paragraph({
+                  spacing: { after: 60, line: 330 },
+                  indent: { left: 560 },
+                  children: [new TextRun({
+                    text: `${groupIndex + 1}.${moduleIndex + 1} ${moduleTitle}`,
+                    font: runFont(dueRuntimeFonts.body),
+                    size: 24,
+                    color: '000000',
+                  })],
+                })),
+              ]),
               new Paragraph({
-                keepNext: group.modules.length > 1,
                 spacing: { after: 80, line: 360 },
                 children: [new TextRun({
-                  text: `${groupIndex + 1}、${group.title}`,
-                  font: runFont(profile.headingFont),
+                  text: '投资结论及建议',
+                  font: runFont(dueRuntimeFonts.heading),
                   size: 28,
                   bold: true,
                   color: '000000',
                 })],
               }),
-              ...group.modules.map((moduleTitle, moduleIndex) => new Paragraph({
-                spacing: { after: 60, line: 330 },
-                indent: { left: 560 },
-                children: [new TextRun({
-                  text: `${groupIndex + 1}.${moduleIndex + 1} ${moduleTitle}`,
-                  font: runFont(profile.bodyFont),
-                  size: 24,
-                  color: '000000',
-                })],
-              })),
-            ]),
+            ],
           }),
         ],
       },
@@ -1636,6 +1639,102 @@ export async function generateBusinessDocx(input: {
         }
       : undefined,
     styles: {
+      ...(input.template.type === 'due_diligence_report'
+        ? {
+            paragraphStyles: [
+              {
+                id: DUE_DILIGENCE_STYLES.level1,
+                name: '尽调一级标题',
+                basedOn: 'Normal',
+                next: DUE_DILIGENCE_STYLES.body,
+                quickFormat: true,
+                run: {
+                  font: runFont(dueRuntimeFonts.heading),
+                  size: 30,
+                  bold: true,
+                  color: '000000',
+                },
+                paragraph: {
+                  keepNext: true,
+                  keepLines: true,
+                  outlineLevel: 0,
+                  spacing: { before: 240, after: 120, line: 360 },
+                },
+              },
+              {
+                id: DUE_DILIGENCE_STYLES.level2,
+                name: '尽调二级标题',
+                basedOn: 'Normal',
+                next: DUE_DILIGENCE_STYLES.body,
+                quickFormat: true,
+                run: {
+                  font: runFont(dueRuntimeFonts.level2),
+                  size: 24,
+                  bold: true,
+                  color: '000000',
+                },
+                paragraph: {
+                  keepNext: true,
+                  keepLines: true,
+                  outlineLevel: 1,
+                  spacing: { before: 160, after: 60, line: 360 },
+                },
+              },
+              {
+                id: DUE_DILIGENCE_STYLES.body,
+                name: '尽调正文',
+                basedOn: 'Normal',
+                next: DUE_DILIGENCE_STYLES.body,
+                quickFormat: true,
+                run: {
+                  font: runFont(dueRuntimeFonts.body),
+                  size: 24,
+                  color: '000000',
+                },
+                paragraph: {
+                  alignment: AlignmentType.JUSTIFIED,
+                  indent: { firstLine: 480 },
+                  spacing: { before: 0, after: 0, line: 360 },
+                },
+              },
+              {
+                id: DUE_DILIGENCE_STYLES.tableTitle,
+                name: '尽调表题',
+                basedOn: DUE_DILIGENCE_STYLES.body,
+                next: DUE_DILIGENCE_STYLES.sourceNote,
+                run: {
+                  font: runFont(dueRuntimeFonts.body),
+                  size: 24,
+                  bold: true,
+                  color: '000000',
+                },
+                paragraph: {
+                  alignment: AlignmentType.LEFT,
+                  keepNext: true,
+                  indent: { firstLine: 0 },
+                  spacing: { before: 160, after: 40, line: 320 },
+                },
+              },
+              {
+                id: DUE_DILIGENCE_STYLES.sourceNote,
+                name: '尽调单位说明',
+                basedOn: DUE_DILIGENCE_STYLES.body,
+                next: DUE_DILIGENCE_STYLES.body,
+                run: {
+                  font: runFont(dueRuntimeFonts.body),
+                  size: 18,
+                  color: '000000',
+                },
+                paragraph: {
+                  alignment: AlignmentType.RIGHT,
+                  keepNext: true,
+                  indent: { firstLine: 0 },
+                  spacing: { before: 0, after: 60, line: 260 },
+                },
+              },
+            ],
+          }
+        : {}),
       default: {
         document: {
           run: { font: runFont(profile.bodyFont), size: isProposal ? 28 : 24, color: '000000' },
@@ -1678,18 +1777,6 @@ export async function generateBusinessDocx(input: {
     appliedParts.push(part)
   }
   if (input.template.type === 'due_diligence_report') {
-    const documentPart = outputZip.file('word/document.xml')
-    if (documentPart) {
-      const documentXml = await documentPart.async('string')
-      // 统一模板样式中的星实一标/二标自带中文编号。生成器已经把统一的
-      // 1、/1.1 编号写入标题文本，因此必须在段落级关闭样式编号，
-      // 否则 Word/WPS 会显示“一、1、…”或“（一）1.1 …”的双重编号。
-      const unnumberedHeadingXml = documentXml.replace(
-        /(<w:pStyle w:val="(?:79|86)"\/>)(?!<w:numPr>)/g,
-        '$1<w:numPr><w:ilvl w:val="0"/><w:numId w:val="0"/></w:numPr>',
-      )
-      outputZip.file('word/document.xml', unnumberedHeadingXml)
-    }
     const fontTablePart = outputZip.file('word/fontTable.xml')
     if (fontTablePart) {
       outputZip.file(
