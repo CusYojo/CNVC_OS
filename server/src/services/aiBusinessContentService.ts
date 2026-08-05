@@ -1419,7 +1419,7 @@ export function dueDiligenceContentQualityIssues(
   }
   const totalTables = content.sections.reduce((sum, section) => sum + (section.tables?.length ?? 0), 0)
   if (!partial && compactVisibleLength > 3500 && totalTables < 12) {
-    issues.push(`全文只有 ${totalTables} 张数据表；标准模板为表格密集型报告，资料充分时至少应形成 12 张有效表格`)
+    issues.push(`全文只有 ${totalTables} 张数据表；模板语料库的统一规范为表格密集型报告，资料充分时至少应形成 12 张有效表格`)
   }
   for (const [label, items] of [
     ['投资亮点', content.highlights],
@@ -2296,7 +2296,7 @@ ${evidence || '没有可用事实卡。不得编造事实；只在确有重大�
   return {
     ...assembled,
     generationAudit: {
-      blueprintVersion: 'due-diligence-deta-eight-chapter-v2',
+      blueprintVersion: 'due-diligence-corpus-eight-chapter-v3',
       corpusSha256: createHash('sha256')
         .update(input.sources.map((source) => [
           source.sourceType,

@@ -2469,10 +2469,13 @@ async function executeTask(taskId: string) {
               ],
             }
           : {}),
-        referenceTemplate: path.basename(template.referencePath),
+        referenceTemplate: task.type === 'due_diligence_report'
+          ? '尽调报告模板语料库'
+          : path.basename(template.referencePath),
         referenceTemplates: (template.referencePaths?.length
           ? template.referencePaths
           : [template.referencePath]).map((referencePath) => path.basename(referencePath)),
+        templateReferenceMode: task.type === 'due_diligence_report' ? 'corpus' : 'single',
         skillName: skill.name,
         skillVersion: skill.version,
         skillSha256: skill.sha256,

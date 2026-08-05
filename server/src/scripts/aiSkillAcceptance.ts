@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import {
   AI_BUSINESS_SKILLS,
@@ -395,15 +395,29 @@ async function main() {
     path.join(root, 'write-due-diligence-report', 'references', 'core-spec.md'),
     'utf8',
   )
+  const diligenceTemplateDirectory = path.resolve(process.cwd(), 'docs', '尽调报告')
+  const diligenceTemplateFileNames = (await readdir(diligenceTemplateDirectory, {
+    withFileTypes: true,
+  }))
+    .filter((entry) => entry.isFile() && /\.(?:docx|pdf)$/i.test(entry.name))
+    .map((entry) => entry.name)
+    .sort((left, right) => left.localeCompare(right, 'zh-CN'))
+  const diligenceReferencePaths = diligenceTemplate.referencePaths ?? []
+  const registeredDiligenceTemplateFileNames = diligenceReferencePaths
+    .map((referencePath) => path.basename(referencePath))
+    .sort((left, right) => left.localeCompare(right, 'zh-CN'))
   assert(
-    'AI-010 登记 docs/尽调报告 全部模板并以德塔 PDF 为主模板',
-    diligenceTemplate.referencePaths?.length === 12
-      && diligenceTemplate.referencePaths.every((referencePath) =>
+    'AI-010 登记 docs/尽调报告 全部模板且不设置单一主模板',
+    diligenceTemplateFileNames.length > 0
+      && JSON.stringify(registeredDiligenceTemplateFileNames)
+        === JSON.stringify(diligenceTemplateFileNames)
+      && diligenceReferencePaths.every((referencePath) =>
         referencePath.includes(`${path.sep}docs${path.sep}尽调报告${path.sep}`)
           && existsSync(referencePath))
       && diligenceTemplate.referencePath.endsWith(
-        `${path.sep}docs${path.sep}尽调报告${path.sep}德塔智能尽职调查报告(1).pdf`,
-      ),
+        `${path.sep}docs${path.sep}尽调报告${path.sep}尽调报告统一生成规范.md`,
+      )
+      && diligenceTemplate.templateVersion.includes('corpus'),
     `${diligenceTemplate.referencePaths?.length ?? 0} 份`,
   )
   assert(
@@ -418,6 +432,8 @@ async function main() {
   )
   const diligenceCoreTerms = [
     '不得低于 90%',
+    '模板语料库',
+    '无单一主模板',
     '逐份读取',
     '事实底稿',
     '1、投资概要',
@@ -439,25 +455,26 @@ async function main() {
     '技术错误',
   ]
   assert(
-    'AI-010 核心规范与项目唯一规范保持关键规则一致',
+    'AI-010 核心规范与项目统一规范保持关键规则一致',
     diligenceCoreTerms.every((term) =>
       diligenceCanonicalSpec.includes(term) && diligenceCoreSpec.includes(term)),
     diligenceCoreTerms
       .filter((term) =>
         !diligenceCanonicalSpec.includes(term) || !diligenceCoreSpec.includes(term))
-      .join('、') || '项目研读 → 30 个模块 → 12 张以上有效表格 → Reviewer → Word/WPS 门禁',
+      .join('、') || '项目研读 → 模板语料库 → 30 个模块 → 12 张以上有效表格 → Reviewer → Word/WPS 门禁',
   )
   assert(
-    'AI-010 Skill 强制先研读项目再按主模板生成',
+    'AI-010 Skill 强制先研读项目再综合模板语料库生成',
     [
       '逐份研读项目资料',
       '建立事实底稿',
-      '德塔智能尽职调查报告(1).pdf',
+      'docs/尽调报告/',
+      '无单一主模板',
       '不少于 12 张有效表格',
       '不得出现内部项目阶段',
     ].every((term) =>
       `${diligenceSkill.instructions}\n${diligenceSkill.referenceInstructions}`.includes(term)),
-    '逐份研读、主模板、30 个模块、表格密度和客户可见语言门禁',
+    '逐份研读、模板语料库、30 个模块、表格密度和客户可见语言门禁',
   )
   const aiTaskServiceSource = await readFile(
     path.resolve(process.cwd(), 'server', 'src', 'services', 'aiTaskService.ts'),

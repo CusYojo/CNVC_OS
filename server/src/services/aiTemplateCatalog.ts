@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs'
+import { existsSync, readdirSync } from 'node:fs'
 import path from 'node:path'
 import type { AiCustomTemplateAnalysis } from '../db/schema.js'
 import {
@@ -41,6 +41,15 @@ export type AiTemplateDefinition = {
 }
 
 const docsPath = (...segments: string[]) => path.resolve(process.cwd(), 'docs', ...segments)
+
+function docsTemplatePaths(directoryName: string) {
+  const directoryPath = docsPath(directoryName)
+  if (!existsSync(directoryPath)) return []
+  return readdirSync(directoryPath, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && /\.(?:docx|pdf)$/i.test(entry.name))
+    .map((entry) => path.join(directoryPath, entry.name))
+    .sort((left, right) => path.basename(left).localeCompare(path.basename(right), 'zh-CN'))
+}
 
 export type AiQaTemplateDefinition = {
   type: 'project_qa'
@@ -143,24 +152,12 @@ export const AI_TEMPLATE_CATALOG: Record<AiBusinessTaskType, AiTemplateDefinitio
     type: 'due_diligence_report',
     skillName: 'write-due-diligence-report',
     label: '尽调报告',
-    description: '由资深投资经理先研读项目资料，再按公司标准模板生成内部尽调报告',
+    description: '由资深投资经理先研读项目资料，再综合公司尽调模板语料库生成内部尽调报告',
     outputFormat: 'docx',
-    templateVersion: 'dd-deta-202608-v12-project-study-template-fidelity',
-    referencePath: docsPath('尽调报告', '德塔智能尽职调查报告(1).pdf'),
-    referencePaths: [
-      docsPath('尽调报告', '3. 普雷赛斯尽调报告.pdf'),
-      docsPath('尽调报告', '3. 轻蜓光电尽调报告(1).pdf'),
-      docsPath('尽调报告', '5. 普雷赛斯财务内部调研报告.pdf'),
-      docsPath('尽调报告', '上海宇核聚能一体化小型模块化压水堆（SMR）项目尽职调查报告(1).docx'),
-      docsPath('尽调报告', '中数睿智项目业务尽调报告(1).pdf'),
-      docsPath('尽调报告', '佳量脑科学业务尽调报告6月.docx'),
-      docsPath('尽调报告', '微纳核芯业务尽调报告.pdf'),
-      docsPath('尽调报告', '微纳核芯尽调报告(1).pdf'),
-      docsPath('尽调报告', '微纳核芯项目 - 法律尽职调查报告.pdf'),
-      docsPath('尽调报告', '德塔智能IC报告.pdf'),
-      docsPath('尽调报告', '德塔智能尽职调查报告(1).pdf'),
-      docsPath('尽调报告', '蓝成应急尽调报告.pdf'),
-    ],
+    templateVersion: 'dd-corpus-202608-v13-project-study-template-fidelity',
+    referencePath: docsPath('尽调报告', '尽调报告统一生成规范.md'),
+    referencePaths: docsTemplatePaths('尽调报告'),
+    coreRulesPath: docsPath('尽调报告', '尽调报告统一生成规范.md'),
     editableLevel: 'text-and-structure',
     sections: [
       '公司情况', '交易要点', '行业概况', '商业模式和经营管理', '投资价值与风险',

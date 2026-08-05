@@ -379,14 +379,14 @@ async function main() {
     .flatMap((group) => [...group.sections])
   assert(
     checks,
-    'AI-010 德塔模板章组完整覆盖三十个固定模块',
+    'AI-010 模板语料库统一章组完整覆盖三十个固定模块',
     DUE_DILIGENCE_GENERATION_GROUPS.length === 11
       && DUE_DILIGENCE_GENERATION_GROUPS.every((group) => group.sections.length <= 4)
       && dueDiligenceGroupedSections.length === AI_TEMPLATE_CATALOG.due_diligence_report.sections.length
       && dueDiligenceGroupedSections.every((title, index) =>
         title === AI_TEMPLATE_CATALOG.due_diligence_report.sections[index])
       && new Set(dueDiligenceGroupedSections).size === dueDiligenceGroupedSections.length,
-    '单次最多四个模块；合并顺序与德塔模板三十模块完全一致',
+    '单次最多四个模块；合并顺序与统一规范三十模块完全一致',
   )
   const dueDiligenceSkill = await loadAiSkill('write-due-diligence-report')
   const requestedChapterGroups: string[][] = []
@@ -483,9 +483,9 @@ async function main() {
           actual.join('、') === expected.sections.join('、')))
       && segmentedContent.sections.every((section, index) =>
         section.title === AI_TEMPLATE_CATALOG.due_diligence_report.sections[index])
-      && segmentedContent.generationAudit?.blueprintVersion === 'due-diligence-deta-eight-chapter-v2'
+      && segmentedContent.generationAudit?.blueprintVersion === 'due-diligence-corpus-eight-chapter-v3'
       && progressEvents.some((event) => event.completedChapters === 11),
-    '核心技术章首轮截断后仅该章重试；其他章组只请求一次，合并后仍为德塔模板规定的 30 模块',
+    '核心技术章首轮截断后仅该章重试；其他章组只请求一次，合并后仍为统一规范规定的 30 模块',
   )
   assert(
     checks,
@@ -619,7 +619,7 @@ async function main() {
     const template = type === 'investment_recommendation_ppt'
       ? uploadedInvestmentTemplate
       : AI_TEMPLATE_CATALOG[type]
-    assert(checks, `${type} 主样本存在`, existsSync(template.referencePath), template.referencePath)
+    assert(checks, `${type} 模板基线存在`, existsSync(template.referencePath), template.referencePath)
     if (type === 'project_qa') {
       assert(
         checks,
@@ -1174,7 +1174,7 @@ async function main() {
         && (type === 'investment_proposal'
           ? result.templateCorpus.length === 9
           : type === 'due_diligence_report'
-            ? result.templateCorpus.length === 12
+            ? result.templateCorpus.length === (template.referencePaths?.length ?? 0)
             : result.templateParts.length > 0)
         && Boolean(result.templateSha256),
       `模板部件 ${result.templateParts.join('、') || '按蒸馏令牌生成'}，摘要 ${result.templateSha256.slice(0, 12)}`,
@@ -1233,7 +1233,7 @@ async function main() {
       const dueSettingsXml = await zip.file('word/settings.xml')?.async('string') || ''
       assert(
         checks,
-        'AI-010 使用德塔模板八章与三十个内容模块',
+        'AI-010 使用模板语料库统一规范的八章与三十个内容模块',
         [
           '1、投资概要',
           '2、公司概况',
@@ -1246,7 +1246,7 @@ async function main() {
           '投资结论及建议',
           ...template.sections,
         ].every((title) => documentXml.includes(title)),
-        '目录与正文均采用德塔模板八章、三十模块层级',
+        '目录与正文均采用模板语料库统一规范的八章、三十模块层级',
       )
       assert(
         checks,
@@ -1294,7 +1294,7 @@ async function main() {
       )
       assert(
         checks,
-        'AI-010 真实引用主模板样式并保留三分节',
+        'AI-010 使用模板语料库统一样式并保留三分节',
         (documentXml.match(/<w:pStyle w:val="79"\/>/g) || []).length >= 8
           && (documentXml.match(/<w:pStyle w:val="86"\/>/g) || []).length >= 29
           && documentXml.includes('<w:pStyle w:val="91"/>')
@@ -1305,7 +1305,7 @@ async function main() {
       )
       assert(
         checks,
-        'AI-010 封面字体字号与主模板一致',
+        'AI-010 封面字体字号符合模板语料库统一规范',
         (documentXml.match(/w:sz w:val="44"/g) || []).length >= 7
           && (documentXml.match(/w:sz w:val="32"/g) || []).length >= 2
           && [expectedCoverFont, 'Songti SC', 'Noto Serif CJK SC']
@@ -1316,7 +1316,7 @@ async function main() {
       )
       assert(
         checks,
-        'AI-010 页眉沿用主模板细线且不写死机构名称',
+        'AI-010 页眉采用模板语料库共性细线且不写死机构名称',
         dueHeaderXml.includes('<w:pBdr>')
           && dueHeaderXml.includes('<w:bottom')
           && !dueHeaderXml.includes('浙江赛智伯乐'),
@@ -1332,8 +1332,8 @@ async function main() {
       )
       assert(
         checks,
-        'AI-010 全部十二份模板进入生成元数据',
-        result.templateCorpus.length === 12,
+        'AI-010 目录内全部模板进入生成元数据',
+        result.templateCorpus.length === (template.referencePaths?.length ?? 0),
         `${result.templateCorpus.length} 份`,
       )
     }
