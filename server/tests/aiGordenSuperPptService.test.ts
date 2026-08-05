@@ -22,6 +22,7 @@ import {
   gordenSlidePlanFingerprint,
   gordenLayoutGuardArgs,
   gordenUnplannedVisibleTexts,
+  gordenVisionRetryDelayMs,
   gordenSkillPaths,
   investmentHouseReferencePageNumber,
   isGordenVisionRetryableStatus,
@@ -167,6 +168,10 @@ test('Gorden vision QA retries transient gateway failures and reuses passed chec
   assert.equal(isGordenVisionRetryableStatus(429), true)
   assert.equal(isGordenVisionRetryableStatus(502), true)
   assert.equal(isGordenVisionRetryableStatus(400), false)
+  assert.deepEqual(
+    [1, 2, 3, 4, 5].map(gordenVisionRetryDelayMs),
+    [3_000, 8_000, 20_000, 45_000, 45_000],
+  )
   assert.equal(reusableGordenVisualReview({ passed: true, criticalIssues: [] }), true)
   assert.equal(reusableGordenVisualReview({ passed: true, criticalIssues: ['缺字'] }), false)
   assert.equal(reusableGordenVisualReview({ passed: false, criticalIssues: [] }), false)
@@ -410,6 +415,17 @@ test('Gorden visual failures expose a safe actionable stage instead of the gener
   assert.equal(safeAiTaskFailureStage(error), 'Gorden 最终视觉复核未通过')
   assert.match(safeAiTaskFailureMessage(error), /文字缺失、严重遮挡、裁切或不可读/)
   assert.doesNotMatch(safeAiTaskFailureMessage(error), /internal visual details/)
+})
+
+test('Gorden vision gateway failures expose the retained-page recovery path', () => {
+  const error = Object.assign(new Error('internal gateway response'), {
+    code: 'GORDEN_VISION_GATEWAY_FAILED',
+    status: 502,
+  })
+  assert.equal(safeAiTaskFailureStage(error), 'Gorden 页面视觉定位未完成')
+  assert.match(safeAiTaskFailureMessage(error), /保留成品页和已完成图层/)
+  assert.match(safeAiTaskFailureMessage(error), /当前页面检查点恢复/)
+  assert.doesNotMatch(safeAiTaskFailureMessage(error), /internal gateway response/)
 })
 
 test('Gorden layout guard failures expose a specific safe stage', () => {

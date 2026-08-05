@@ -112,6 +112,10 @@ const GORDEN_LLM_KEY = process.env.OPENAI_API_KEY || process.env.LLM_API_KEY || 
 const GORDEN_VISION_MODEL = process.env.AI_GORDEN_VISION_MODEL
   || process.env.LLM_MODEL
   || 'gpt-5.2'
+const GORDEN_VISION_MAX_ATTEMPTS = Math.max(
+  3,
+  Math.min(8, Number(process.env.AI_GORDEN_VISION_MAX_ATTEMPTS) || 5),
+)
 const GORDEN_RENDER_CONTRACT_VERSION = '4.0-investment-house-corpus'
 
 function sha256(buffer: Buffer) {
@@ -1444,9 +1448,8 @@ async function requestVisionJson(input: {
     reasoning_effort: 'low',
     response_format: { type: 'json_object' },
   })
-  const maxAttempts = 3
   let lastError: unknown
-  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+  for (let attempt = 1; attempt <= GORDEN_VISION_MAX_ATTEMPTS; attempt += 1) {
     try {
       const response = await fetch(`${GORDEN_LLM_BASE}/chat/completions`, {
         method: 'POST',
@@ -1481,10 +1484,24 @@ async function requestVisionJson(input: {
     } catch (error) {
       lastError = error
       if (
-        attempt >= maxAttempts
+        attempt >= GORDEN_VISION_MAX_ATTEMPTS
         || !isRetryableGordenVisionError(error)
-      ) throw error
-      await new Promise((resolve) => setTimeout(resolve, attempt * 1_500))
+      ) {
+        const status = Number((error as { status?: unknown } | null)?.status)
+        throw Object.assign(
+          new Error(`Gorden 视觉定位网关在 ${attempt} 次请求后仍未完成：${(error as Error).message}`),
+          {
+            code: 'GORDEN_VISION_GATEWAY_FAILED',
+            upstreamCode: Number.isFinite(status) ? `HTTP_${status}` : undefined,
+            status: Number.isFinite(status) ? status : undefined,
+            requestAttempt: attempt,
+          },
+        )
+      }
+      await new Promise((resolve) => setTimeout(
+        resolve,
+        gordenVisionRetryDelayMs(attempt),
+      ))
     }
   }
   throw lastError
@@ -1634,6 +1651,12 @@ async function ensureGordenStageOneTextContract(input: {
 
 export function isGordenVisionRetryableStatus(status: number) {
   return [408, 409, 425, 429].includes(status) || status >= 500
+}
+
+export function gordenVisionRetryDelayMs(completedAttempt: number) {
+  const delays = [3_000, 8_000, 20_000, 45_000]
+  const index = Math.max(0, Math.min(delays.length - 1, completedAttempt - 1))
+  return delays[index]
 }
 
 function isRetryableGordenVisionError(error: unknown) {

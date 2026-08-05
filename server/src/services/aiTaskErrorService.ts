@@ -19,6 +19,7 @@ export function safeAiTaskFailureStage(error: unknown) {
     return '三技能生成链未完整执行'
   }
   if (code === 'GORDEN_VISIBLE_TEXT_CONTRACT_REJECTED') return 'Gorden 页面文字检查未通过'
+  if (code === 'GORDEN_VISION_GATEWAY_FAILED') return 'Gorden 页面视觉定位未完成'
   if (code === 'GORDEN_VISUAL_QA_REJECTED') return 'Gorden 最终视觉复核未通过'
   if (code === 'GORDEN_LAYOUT_GUARD_REJECTED') return 'Gorden 页面布局检查未通过'
   if (code.startsWith('GORDEN_')) return 'Gorden PPT 生成未完成'
@@ -79,6 +80,9 @@ export function safeAiTaskFailureMessage(error: unknown) {
   }
   if (code === 'GORDEN_VISIBLE_TEXT_CONTRACT_REJECTED') {
     return 'Gorden 页面包含文字清单之外的额外标题、标签、编号或来源文字，无法保证分层后内容完整。系统已停止交付，请继续生成该页面。'
+  }
+  if (code === 'GORDEN_VISION_GATEWAY_FAILED') {
+    return 'Gorden 页面视觉定位网关连续返回临时错误。系统已保留成品页和已完成图层，请稍后继续生成，任务将从当前页面检查点恢复。'
   }
   if (code === 'GORDEN_VISUAL_QA_REJECTED') {
     return 'Gorden 可编辑稿存在契约文字缺失、严重遮挡、裁切或不可读问题，未通过最终交付复核。系统已保留检查点，请继续生成有问题的页面。'

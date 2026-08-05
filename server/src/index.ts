@@ -16,6 +16,7 @@ const app = express()
 const port = Number(process.env.API_PORT ?? 3100)
 const generatedDir = path.resolve(process.cwd(), 'server/generated')
 const distDir = path.resolve(process.cwd(), 'dist')
+let serviceReady = false
 
 app.use(cors())
 app.use(express.json({ limit: '150mb' }))
@@ -37,9 +38,27 @@ app.use((err: unknown, _req: import('express').Request, res: import('express').R
 })
 
 // 公共探针与登录（无鉴权）
-app.get('/api/health', (_req, res) => res.json({
-  ok: true, service: 'intelligent-investment-platform-api', timestamp: new Date().toISOString(),
+app.get('/api/health', (_req, res) => res.status(serviceReady ? 200 : 503).json({
+  ok: serviceReady,
+  service: 'intelligent-investment-platform-api',
+  status: serviceReady ? 'ready' : 'starting',
+  timestamp: new Date().toISOString(),
 }))
+
+// Bind the API socket before running any startup recovery. A second process
+// must fail fast on EADDRINUSE instead of recovering and executing the same AI
+// tasks in the background without owning the HTTP listener.
+app.use('/api', (req, res, next) => {
+  if (serviceReady || req.path === '/health') {
+    next()
+    return
+  }
+  res.status(503).json({
+    code: 'SERVICE_STARTING',
+    message: '服务正在完成启动恢复，请稍后重试。',
+    details: null,
+  })
+})
 
 // 内部端点（供 flue assistant agent 的 tools 回调）：x-internal-secret 校验，挂在用户鉴权之前
 app.use('/api/internal', internalRouter)
@@ -79,6 +98,11 @@ app.use(errorHandler)
 // 启动时先确保 schema，再 seed 用户
 async function start() {
   try {
+    await new Promise<void>((resolve, reject) => {
+      const server = app.listen(port, '127.0.0.1')
+      server.once('listening', resolve)
+      server.once('error', reject)
+    })
     await ensureSchema()
     await seedUsers()
     const regionBackfill = await backfillLeadBusinessRegions()
@@ -87,13 +111,12 @@ async function start() {
     const scoreRecovery = await recoverLeadScoringQueue()
     console.log(`[lead-score] startup recovery found=${scoreRecovery.found} queued=${scoreRecovery.recovered}`)
     console.log('[db] schema ready & demo users seeded')
+    serviceReady = true
+    console.log(`Mock API listening on http://127.0.0.1:${port}`)
   } catch (err) {
     console.error('[db] startup failed:', (err as Error).message)
     process.exit(1)
   }
-  app.listen(port, '127.0.0.1', () => {
-    console.log(`Mock API listening on http://127.0.0.1:${port}`)
-  })
 }
 start()
 
