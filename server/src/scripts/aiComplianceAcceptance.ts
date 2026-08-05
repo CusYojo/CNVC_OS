@@ -757,10 +757,11 @@ async function main() {
     '状态标签、责任声明、风险、缺口汇总、引用清单和免责声明不进入正文',
   )
   check(
-    'Word中文字体和标题字形符合核心规范',
+    'Word中文字体、标题字形和正文缩进符合核心规范',
     wordReview.metadata.typographyValidated === true
+      && wordReview.metadata.bodyIndentValidated === true
       && wordReview.metadata.fontFallbackAliasesValidated === true,
-    '标题黑体14pt常规，一级/二级标题宋体12pt加粗且编号缩进不受列表样式污染',
+    '标题黑体14pt常规，一级/二级标题宋体12pt加粗；所有正文首行缩进480 DXA且左右缩进为0',
   )
 
   const docxBuffer = await readFile(docxPath)

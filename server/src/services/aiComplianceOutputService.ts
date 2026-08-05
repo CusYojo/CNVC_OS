@@ -328,6 +328,20 @@ export async function reviewGeneratedComplianceDocx(input: {
     return integerAttribute(indent, 'w:left') === 0
       && integerAttribute(indent, 'w:firstLine') === 482
   })
+  const bodyParagraphs = paragraphs.filter((paragraphXml) => {
+    const value = xmlText(paragraphXml).trim()
+    if (!value) return false
+    if (nonBodyParagraphs.has(compactText(value))) return false
+    return !/^\d{4}年\s*\d{1,2}\s*月\s*\d{1,2}\s*日$/.test(value)
+  })
+  const bodyIndentValid = bodyParagraphs.every((paragraphXml) => {
+    const indent = firstTag(paragraphXml, 'w:ind')
+    const left = integerAttribute(indent, 'w:left')
+    const right = integerAttribute(indent, 'w:right')
+    return integerAttribute(indent, 'w:firstLine') === 480
+      && (left === null || left === 0)
+      && (right === null || right === 0)
+  })
   if (
     !runFontTags.length
     || unexpectedRunFont
@@ -338,10 +352,11 @@ export async function reviewGeneratedComplianceDocx(input: {
     || level2Paragraphs.some((paragraphXml) => !paragraphXml || !hasActiveBold(paragraphXml))
     || !level1IndentValid
     || !level2IndentValid
+    || !bodyIndentValid
   ) {
     addIssue(issues, {
       code: 'DOCX_FORMAT_MISMATCH',
-      message: 'DOCX标题、一级/二级标题字形或编号缩进未满足核心规范',
+      message: 'DOCX标题、一级/二级标题字形、编号缩进或正文首行缩进未满足核心规范',
     })
   }
   const pageSize = firstTag(documentXml, 'w:pgSz')
@@ -467,6 +482,7 @@ export async function reviewGeneratedComplianceDocx(input: {
       outlineValidated: !issues.some((issue) => issue.code === 'DOCX_STRUCTURE_MISMATCH'),
       forbiddenContentValidated: !issues.some((issue) => issue.code === 'DOCX_FORBIDDEN_CONTENT'),
       typographyValidated: !issues.some((issue) => issue.code === 'DOCX_FORMAT_MISMATCH'),
+      bodyIndentValidated: bodyIndentValid,
       fontFallbackAliasesValidated,
       fontEmbedRelationshipsValidated: missingFontEmbedRelationships.length === 0,
       pageSystemValidated: !issues.some((issue) => issue.code === 'DOCX_PAGE_MISMATCH'),

@@ -856,13 +856,13 @@ export async function generateBusinessDocx(input: {
       )
       return new Paragraph({
         spacing: {
-          before: options.before ?? (['核心团队', '产品及技术'].includes(sectionTitle) ? 80 : 0),
-          after: ['核心团队', '产品及技术'].includes(sectionTitle) ? 80 : 0,
+          before: options.before ?? 0,
+          after: 0,
           line: 360,
         },
         keepNext: options.keepNext,
         keepLines: false,
-        indent: { firstLine: ['核心团队', '产品及技术'].includes(sectionTitle) ? 0 : 480 },
+        indent: { firstLine: 480 },
         alignment: AlignmentType.JUSTIFIED,
         children: complianceFindingRuns(sectionTitle, normalizedText),
       })
