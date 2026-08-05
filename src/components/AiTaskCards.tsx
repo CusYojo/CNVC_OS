@@ -124,7 +124,7 @@ function TaskCard({
     ? task.parameters.customTemplateName
     : ''
   const templateLabel = task.type === 'investment_recommendation_ppt'
-    ? 'GordenSkills 原生设计（不使用模板）'
+    ? ''
     : task.type === 'custom_template_document'
       ? uploadedTemplateName
       ? `上传模板：${uploadedTemplateName}`
@@ -181,7 +181,9 @@ function TaskCard({
               <StatusIcon className={`h-3 w-3 ${task.status === 'running' ? 'animate-spin' : ''}`} />
               {meta.label}
             </span>
-            <span className="max-w-48 truncate text-[10px] text-slate-400" title={templateLabel}>{templateLabel}</span>
+            {templateLabel && (
+              <span className="max-w-48 truncate text-[10px] text-slate-400" title={templateLabel}>{templateLabel}</span>
+            )}
           </div>
           <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-500">
             <span>{sourceLabel}</span>
