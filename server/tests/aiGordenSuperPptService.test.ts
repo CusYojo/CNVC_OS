@@ -22,10 +22,12 @@ import {
   gordenLayoutGuardArgs,
   gordenUnplannedVisibleTexts,
   gordenSkillPaths,
+  investmentHouseReferencePageNumber,
   isGordenVisionRetryableStatus,
   normalizeGordenLayout,
   referenceDrivenSkillPaths,
   reusableGordenVisualReview,
+  selectInvestmentRecommendationReference,
   unsafeGordenIconFiles,
   upgradeGordenCheckpointTextLayouts,
 } from '../src/services/aiGordenSuperPptService.js'
@@ -91,17 +93,17 @@ test('Gorden slide plan carries detailed company, team, finance, funding, valuat
 
   assert.equal(plan.length, topics.length + 2)
   assert.equal(plan[0].role, 'cover')
-  assert.ok(plan[0].expectedTexts.includes('项目阶段'))
-  assert.ok(plan[0].expectedTexts.includes('成长期'))
-  assert.ok(plan[0].expectedTexts.includes('业务定位'))
-  assert.ok(plan[0].expectedTexts.includes('以工业智能软件订阅与项目交付形成收入'))
-  assert.ok(plan[0].expectedTexts.includes('融资概况'))
-  assert.ok(plan[0].expectedTexts.includes('估值口径'))
-  assert.ok(plan[0].expectedTexts.includes('项目重点'))
+  assert.deepEqual(plan[0].expectedTexts, [
+    '智灵动力投资建议书',
+    '杭州智灵动力科技有限公司',
+    '工业智能项目',
+  ])
   assert.equal(plan[0].expectedTexts.some((text) => /^\d+$/u.test(text)), false)
-  assert.equal(plan.at(-1)?.role, 'closing')
-  assert.equal(plan.at(-1)?.title, '引用资料与责任声明')
-  assert.ok(plan.at(-1)?.expectedTexts.includes('投资结论与后续事项'))
+  assert.equal(plan.at(-1)?.role, 'risk')
+  assert.equal(plan.at(-1)?.title, '投资结论、风险与后续事项')
+  assert.ok(plan.at(-1)?.expectedTexts.includes('投资结论'))
+  assert.ok(plan.at(-1)?.expectedTexts.includes('风险与核验重点'))
+  assert.ok(plan.at(-1)?.expectedTexts.includes('引用资料与责任声明'))
   assert.ok(plan.at(-1)?.expectedTexts.includes('引用资料：项目档案；公司官网'))
   for (const [title, detail] of topics) {
     const slide = plan.find((item) => item.title === title)
@@ -125,6 +127,9 @@ test('Gorden image prompt enforces template-style-only reuse and exact project t
   })
 
   assert.match(prompt, /模板页作为唯一视觉参考/)
+  assert.match(prompt, /不得设计成软件后台、网页仪表盘/)
+  assert.match(prompt, /四宫格\/九宫格卡片墙/)
+  assert.match(prompt, /不得生成写实人物、虚构产品、虚构客户 Logo 或虚构证书/)
   assert.match(prompt, /不得残留任何模板样本事实/)
   assert.match(prompt, /必须逐字照排，不得改写、遗漏或新增/)
   assert.match(prompt, new RegExp(`可读文字总数必须恰好为 ${slide.expectedTexts.length} 条`))
@@ -175,19 +180,28 @@ test('Gorden slide plan honors an explicit five-page request', () => {
   })
   assert.equal(plan.length, 5)
   assert.equal(plan[0].role, 'cover')
-  assert.equal(plan.at(-1)?.role, 'closing')
+  assert.deepEqual(plan.map((slide) => slide.role), [
+    'cover',
+    'summary',
+    'product',
+    'investment-plan',
+    'risk',
+  ])
+  assert.deepEqual(plan.slice(1, 4).map((slide) => slide.title), [
+    '项目概况与投资判断',
+    '产品技术与商业验证',
+    '财务表现、估值与交易方案',
+  ])
   for (const [title] of topics) {
     assert.ok(plan.some((slide) => slide.expectedTexts.includes(title)), `missing grouped topic: ${title}`)
   }
   assert.equal(plan.flatMap((slide) => slide.expectedTexts).some((text) => /^\d+$/u.test(text)), false)
-  assert.doesNotMatch(plan[1].title, /｜/)
-  assert.equal(plan[1].expectedTexts.length, 5)
   assert.ok(plan[1].expectedTexts.includes(topics[0][1]))
   assert.ok(plan[1].expectedTexts.includes(topics[1][1]))
-  assert.equal(plan[1].expectedTexts.some((text) => text.includes('详细事实、判断')), false)
+  assert.ok(plan[3].expectedTexts.some((text) => /1200 万元|5000 万元|4 亿元|3000 万元/.test(text)))
 })
 
-test('Gorden cover preserves duplicate fallback values for distinct cards', () => {
+test('Gorden cover stays restrained even when project fields are incomplete', () => {
   const plan = buildGordenSlidePlan({
     project: {
       name: '智灵动力',
@@ -198,10 +212,36 @@ test('Gorden cover preserves duplicate fallback values for distinct cards', () =
     disclaimer: '内部使用。',
     pageCount: '5',
   })
-  assert.equal(
-    plan[0].expectedTexts.filter((text) => text === '待资料解析后补充').length,
-    2,
+  assert.deepEqual(plan[0].expectedTexts, ['智灵动力投资建议书', '智灵动力'])
+  assert.equal(plan[0].expectedTexts.includes('待资料解析后补充'), false)
+})
+
+test('built-in investment PPT selects the closest visual master from docs/投资建议书', () => {
+  const robotics = selectInvestmentRecommendationReference({
+    template: AI_TEMPLATE_CATALOG.investment_recommendation_ppt,
+    project: { name: '大衍科技', industry: '具身智能' },
+    content,
+  })
+  assert.equal(robotics.mode, 'house-corpus')
+  assert.equal(robotics.id, 'robotics-investment')
+  assert.match(path.basename(robotics.path), /飞阔科技投资建议书-终稿/)
+  assert.equal(robotics.sourceTemplates.length, 7)
+  assert.deepEqual(
+    ['cover', 'summary', 'product', 'investment-plan', 'risk']
+      .map((role) => investmentHouseReferencePageNumber(robotics.path, role)),
+    [1, 2, 8, 26, 27],
   )
+
+  const custom = selectInvestmentRecommendationReference({
+    template: {
+      referencePath: '/tmp/user-template.pptx',
+      customAnalysis: {} as never,
+    },
+    project: { name: '自定义项目' },
+    content,
+  })
+  assert.equal(custom.mode, 'user-reference')
+  assert.equal(custom.path, '/tmp/user-template.pptx')
 })
 
 test('Gorden checkpoint fingerprint ignores old file paths but rejects changed page content', () => {

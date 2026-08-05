@@ -112,7 +112,7 @@ const GORDEN_LLM_KEY = process.env.OPENAI_API_KEY || process.env.LLM_API_KEY || 
 const GORDEN_VISION_MODEL = process.env.AI_GORDEN_VISION_MODEL
   || process.env.LLM_MODEL
   || 'gpt-5.2'
-const GORDEN_RENDER_CONTRACT_VERSION = '3.1-single-summary-cards'
+const GORDEN_RENDER_CONTRACT_VERSION = '4.0-investment-house-corpus'
 
 function sha256(buffer: Buffer) {
   return createHash('sha256').update(buffer).digest('hex')
@@ -507,47 +507,27 @@ function coverExpectedTexts(input: {
   project: ProjectLike
   content: BusinessContent
 }) {
-  const developmentPoints = uniqueCompactTexts([
-    ...input.content.highlights.map((value) => compactText(value, 28)),
-    ...input.content.sections.map((section) => compactText(section.title, 28)),
-  ]).slice(0, 4)
-  // Keep structurally distinct cover fields even when their fallback values are
-  // identical. De-duplicating them makes Vision map only one occurrence and
-  // leaves the other card blank in the editable reconstruction.
-  const semanticTexts = [
+  // Every approved house template uses a restrained cover. Project facts,
+  // financing and valuation belong on the investment-summary pages rather
+  // than in a dashboard-like grid on page one.
+  return uniqueCompactTexts([
     input.content.title || `${input.project.name}投资建议书`,
     input.project.companyName || input.project.name,
-    input.project.industry ? `行业：${input.project.industry}` : '行业信息待核验',
-    '项目阶段',
-    compactText(input.project.stage || '阶段信息待核验', 32),
-    '业务定位',
-    compactText(
-      input.project.businessModel
-      || input.project.summary
-      || input.content.sections[0]?.summary
-      || '业务定位待核验',
-      46,
-    ),
-    '融资概况',
-    compactText(input.project.financing || '融资信息待核验', 36),
-    '估值口径',
-    compactText(input.project.valuation || '估值信息待核验', 36),
-    '项目重点',
-    ...developmentPoints,
-  ].map((value) => String(value || '').replace(/\s+/g, ' ').trim()).filter(Boolean)
-  return semanticTexts
+    input.project.industry ? `${input.project.industry}项目` : undefined,
+  ])
 }
 
 function sectionTexts(section: BusinessSection) {
+  const table = section.tables?.[0]
   const texts = [
     section.title,
     compactText(section.summary, 220),
-    ...section.findings.slice(0, 8).map((finding) => compactText(finding.text, 160)),
-    ...(section.tables ?? []).slice(0, 2).flatMap((table) => [
-      table.title,
-      table.columns.join('｜'),
-      ...table.rows.slice(0, 5).map((row) => row.join('｜')),
-    ]),
+    ...section.findings.slice(0, 2).map((finding) => compactText(finding.text, 150)),
+    ...(table ? [
+      compactText(table.title, 80),
+      compactText(table.columns.join('｜'), 120),
+      ...table.rows.slice(0, 3).map((row) => compactText(row.join('｜'), 140)),
+    ] : []),
   ]
   return [...new Set(texts.map((value) => value.trim()).filter(Boolean))]
 }
@@ -571,6 +551,86 @@ function roleForTitle(title: string) {
   return rules.find(([pattern]) => pattern.test(title))?.[1] ?? 'content'
 }
 
+type FivePageBucket = 'overview' | 'business' | 'decision'
+
+function fivePageBucketForSection(section: BusinessSection): FivePageBucket {
+  const role = roleForTitle(section.title)
+  if (['financials', 'investment-plan', 'exit', 'risk'].includes(role)) return 'decision'
+  if (['product', 'technology', 'market', 'competition', 'validation', 'business-model'].includes(role)) {
+    return 'business'
+  }
+  return 'overview'
+}
+
+function fivePageSectionGroups(sections: BusinessSection[]) {
+  const groups: Record<FivePageBucket, BusinessSection[]> = {
+    overview: [],
+    business: [],
+    decision: [],
+  }
+  for (const section of sections) groups[fivePageBucketForSection(section)].push(section)
+
+  // Sparse projects may not yet contain all three evidence chains. Preserve
+  // every section, but split the largest chain so the requested five-page deck
+  // still has three purposeful content pages instead of an empty placeholder.
+  for (const target of Object.keys(groups) as FivePageBucket[]) {
+    if (groups[target].length) continue
+    const donor = (Object.keys(groups) as FivePageBucket[])
+      .filter((key) => key !== target)
+      .sort((left, right) => groups[right].length - groups[left].length)
+      .find((key) => groups[key].length > 1)
+    if (donor) groups[target].push(groups[donor].pop()!)
+  }
+  return groups
+}
+
+function projectSnapshotTexts(input: {
+  project: ProjectLike
+  content: BusinessContent
+}) {
+  return uniqueCompactTexts([
+    input.project.stage ? `项目阶段：${compactText(input.project.stage, 36)}` : undefined,
+    input.project.businessModel
+      ? `业务定位：${compactText(input.project.businessModel, 80)}`
+      : input.project.summary ? `项目定位：${compactText(input.project.summary, 80)}` : undefined,
+    input.project.financing ? `融资概况：${compactText(input.project.financing, 60)}` : undefined,
+    input.project.valuation ? `估值口径：${compactText(input.project.valuation, 60)}` : undefined,
+    compactText(input.content.executiveSummary, 180),
+    ...input.content.highlights.slice(0, 2).map((value) => compactText(value, 80)),
+  ])
+}
+
+function groupedDecisionTexts(input: {
+  title: string
+  sections: BusinessSection[]
+  includeEvidence?: boolean
+}) {
+  const evidence = input.includeEvidence
+    ? input.sections.flatMap((section) => {
+        const numericalFinding = section.findings.find((finding) =>
+          /\d|%|％|万元|亿元|收入|订单|估值|融资|占股/.test(finding.text))
+          ?? section.findings[0]
+        const table = section.tables?.[0]
+        return [
+          numericalFinding ? compactText(numericalFinding.text, 130) : '',
+          ...(table ? [
+            compactText(table.title, 70),
+            compactText(table.columns.join('｜'), 100),
+            ...table.rows.slice(0, 2).map((row) => compactText(row.join('｜'), 120)),
+          ] : []),
+        ]
+      })
+    : []
+  return [...new Set([
+    input.title,
+    ...input.sections.flatMap((section) => [
+      section.title,
+      compactText(section.summary || section.findings[0]?.text || '相关事实仍需进一步核验。', 150),
+    ]),
+    ...evidence,
+  ].map((value) => value.trim()).filter(Boolean))]
+}
+
 export function buildGordenSlidePlan(input: {
   project: ProjectLike
   content: BusinessContent
@@ -585,6 +645,76 @@ export function buildGordenSlidePlan(input: {
   const contentSlideCount = requestedPageCount
     ? Math.max(1, requestedPageCount - 2)
     : input.content.sections.length
+
+  if (requestedPageCount === 5) {
+    const groups = fivePageSectionGroups(input.content.sections)
+    const contentSlides: GordenSlidePlan[] = [
+      {
+        number: 2,
+        role: 'summary',
+        title: '项目概况与投资判断',
+        expectedTexts: [...new Set([
+          '项目概况与投资判断',
+          ...projectSnapshotTexts(input),
+          ...groupedDecisionTexts({
+            title: '项目概况与投资判断',
+            sections: groups.overview,
+          }).slice(1),
+        ])],
+        sourceIndexes: [...new Set(groups.overview.flatMap(sectionSourceIndexes))],
+      },
+      {
+        number: 3,
+        role: 'product',
+        title: '产品技术与商业验证',
+        expectedTexts: groupedDecisionTexts({
+          title: '产品技术与商业验证',
+          sections: groups.business,
+          includeEvidence: true,
+        }),
+        sourceIndexes: [...new Set(groups.business.flatMap(sectionSourceIndexes))],
+      },
+      {
+        number: 4,
+        role: 'investment-plan',
+        title: '财务表现、估值与交易方案',
+        expectedTexts: groupedDecisionTexts({
+          title: '财务表现、估值与交易方案',
+          sections: groups.decision,
+          includeEvidence: true,
+        }),
+        sourceIndexes: [...new Set(groups.decision.flatMap(sectionSourceIndexes))],
+      },
+    ]
+    const referenceNames = uniqueCompactTexts(input.references ?? []).slice(0, 6)
+    const closingTexts = [
+      '投资结论、风险与后续事项',
+      '投资结论',
+      compactText(input.content.executiveSummary, 240),
+      '风险与核验重点',
+      ...input.content.risks.slice(0, 4).map((risk) => compactText(risk, 120)),
+      '引用资料与责任声明',
+      `引用资料：${referenceNames.join('；') || '当前项目档案与本轮授权资料'}`,
+      input.disclaimer,
+    ].filter(Boolean)
+    return [
+      {
+        number: 1,
+        role: 'cover',
+        title: input.content.title || `${input.project.name}投资建议书`,
+        expectedTexts: coverExpectedTexts(input),
+        sourceIndexes: input.content.executiveSummarySourceIndexes ?? [],
+      },
+      ...contentSlides,
+      {
+        number: 5,
+        role: 'risk',
+        title: '投资结论、风险与后续事项',
+        expectedTexts: closingTexts,
+        sourceIndexes: input.content.executiveSummarySourceIndexes ?? [],
+      },
+    ]
+  }
   const sectionGroups: BusinessSection[][] = []
   if (
     requestedPageCount
@@ -607,11 +737,7 @@ export function buildGordenSlidePlan(input: {
     // one expected string still makes image models split it into several bullet
     // regions, which cannot be reconstructed as one native editable textbox.
     const semanticTexts = sections.length === 1
-      ? [...new Set([
-          title,
-          compactText(sections[0].summary, 180),
-          ...sections[0].findings.slice(0, 2).map((finding) => compactText(finding.text, 130)),
-        ].map((value) => value.trim()).filter(Boolean))]
+      ? sectionTexts(sections[0])
       : [
           title,
           ...sections.flatMap((section) => [
@@ -643,17 +769,19 @@ export function buildGordenSlidePlan(input: {
   ]
   const referenceNames = uniqueCompactTexts(input.references ?? []).slice(0, 6)
   const closingTexts = [
-    '引用资料与责任声明',
-    '投资结论与后续事项',
+    '投资结论、风险与后续事项',
+    '投资结论',
     compactText(input.content.executiveSummary, 260),
+    '风险与核验重点',
     ...input.content.risks.slice(0, 4).map((risk) => compactText(risk, 120)),
+    '引用资料与责任声明',
     `引用资料：${referenceNames.join('；') || '当前项目档案与本轮授权资料'}`,
     input.disclaimer,
   ].filter(Boolean)
   slides.push({
     number: slides.length + 1,
-    role: 'closing',
-    title: '引用资料与责任声明',
+    role: 'risk',
+    title: '投资结论、风险与后续事项',
     expectedTexts: closingTexts,
     sourceIndexes: input.content.executiveSummarySourceIndexes ?? [],
   })
@@ -665,6 +793,25 @@ function sourceLabels(indexes: number[], sources: EvidenceSource[]) {
     .filter((index) => Boolean(sources[index]))
     .map((index) => sources[index].sourceName))]
     .slice(0, 4)
+}
+
+function investmentCompositionBrief(slide: GordenSlidePlan) {
+  if (slide.role === 'cover') {
+    return '封面采用模板的机构报告式留白与视觉重心：大标题、公司/行业副题和一处克制的主题视觉即可。禁止任何项目阶段、融资、估值、亮点卡片或仪表盘。'
+  }
+  if (slide.role === 'summary') {
+    return '项目摘要页应形成“一个核心投资判断 + 一组关键事实”的主次关系，可使用事实条、时间线或结论栏；不得把全部文字做成四宫格、九宫格或等权卡片。'
+  }
+  if (['product', 'technology', 'validation', 'business-model'].includes(slide.role)) {
+    return '产品/技术/验证页应有一个占主要面积的内容骨架，例如产品全景、技术分层、证据链或场景流程，辅以少量说明；不要用一排通用图标代替产品、技术和客户证据。'
+  }
+  if (['financials', 'investment-plan', 'exit'].includes(slide.role)) {
+    return '财务与交易页优先使用机构投资材料常见的表格、主图、条款区或风险对照结构。只有文字清单提供了数字时才能绘制数值图表；不得生成虚构坐标、年份、比例或金额。'
+  }
+  if (['risk', 'closing'].includes(slide.role)) {
+    return '决策收束页采用投资结论、风险/核验事项、来源与责任声明的清晰分区，可使用对照表或纵向决策结构；不要做成“谢谢观看”海报或图标卡片墙。'
+  }
+  return '一页只表达一个投资判断主题，以证据表、时间线、对比、流程或结论区组织内容；禁止用重复等宽卡片填满页面。'
 }
 
 export function buildGordenSlidePrompt(input: {
@@ -682,8 +829,15 @@ export function buildGordenSlidePrompt(input: {
 页面标题：${input.slide.title}
 主配色：${input.palette.join('、') || '#0B2D5C、#2F6BFF、#F4B740、#F5F8FC'}
 
-以输入的模板页作为唯一视觉参考，只借鉴其栅格、留白、字体层级、色彩比例、卡片与图表组织；必须替换模板中的全部公司名、Logo、人物、产品图、日期、页码和数字。不得残留任何模板样本事实。
-页面要高信息密度但清晰可读，使用复杂且专业的模块化布局。不得添加水印、页码、二维码、占位符、Lorem ipsum 或未提供的数据。
+以输入的模板页作为唯一视觉参考，只借鉴其机构报告式栅格、留白、字体层级、色彩比例、标题线、表格和图表组织；必须替换模板中的全部公司名、Logo、人物、产品图、日期、页码和数字。不得残留任何模板样本事实。
+
+【本页构图要求】
+${investmentCompositionBrief(input.slide)}
+
+整份材料必须呈现专业股权投资机构的 IC/投资建议书气质，不得设计成软件后台、网页仪表盘、移动端界面、运营数据大屏、四宫格/九宫格卡片墙或通用图标清单。避免大面积薰衣草紫渐变、玻璃拟态、悬浮圆角面板和无事实含义的 3D 图标。页面要高信息密度但主次清楚，每页只能有一个占主导的内容结构；优先复用参考页的扁平版式、紧凑标题、细分隔线、真实表格/图表密度和机构页眉页脚节奏。
+
+输入模板中的人物、产品、客户 Logo、证书和现场照片只是样本事实，不得复制、变形复用或替换成虚构的当前项目照片。若没有提供当前项目真实视觉素材，使用不带事实暗示的几何结构、表格、时间线和色块留白，不得生成写实人物、虚构产品、虚构客户 Logo 或虚构证书。
+不得添加水印、页码、二维码、占位符、Lorem ipsum 或未提供的数据。
 
 【页面可见文字，必须逐字照排，不得改写、遗漏或新增】
 ${pageTexts}
@@ -783,6 +937,177 @@ export function gordenSkillPaths(skillRoot = getAiSkillRoot()) {
     visualCompareQa: path.join(image2Root, 'scripts', 'visual_compare_qa.py'),
     composeEditable: path.join(image2Root, 'scripts', 'compose_pptx.py'),
   }
+}
+
+export function selectInvestmentRecommendationReference(input: {
+  template: Pick<AiTemplateDefinition, 'referencePath' | 'referencePaths' | 'customAnalysis'>
+  project: ProjectLike
+  content: BusinessContent
+}) {
+  if (input.template.customAnalysis) {
+    return {
+      mode: 'user-reference' as const,
+      id: 'user-reference',
+      path: input.template.referencePath,
+      sourceTemplates: [input.template.referencePath],
+    }
+  }
+  const corpus = (input.template.referencePaths ?? [])
+    .filter((referencePath) =>
+      path.extname(referencePath).toLowerCase() === '.pdf'
+      && referencePath.includes(`${path.sep}docs${path.sep}投资建议书${path.sep}`)
+      && existsSync(referencePath))
+  if (!corpus.length) {
+    return {
+      mode: 'user-reference' as const,
+      id: 'user-reference',
+      path: input.template.referencePath,
+      sourceTemplates: [input.template.referencePath],
+    }
+  }
+
+  const projectText = [
+    input.project.name,
+    input.project.companyName,
+    input.project.industry,
+    input.project.summary,
+    input.project.businessModel,
+    input.project.market,
+    input.project.team,
+    ...input.content.sections.flatMap((section) => [section.title, section.summary]),
+  ].filter(Boolean).join('\n')
+  const rules: Array<[RegExp, RegExp, string]> = [
+    [/具身|机器人|人形|机械臂|自动驾驶|空间智能/i, /飞阔科技.*终稿/i, 'robotics-investment'],
+    [/存储|芯片|半导体|DRAM|SRAM|CIM|RISC/i, /微纳核芯/i, 'semiconductor-investment'],
+    [/光电|光学|成像|传感器|激光/i, /轻蜓光电/i, 'optoelectronics-investment'],
+    [/精密|测量|测试|仪器|设备|校准/i, /普雷赛斯/i, 'industrial-equipment-investment'],
+    [/应急|消防|安全生产|政府|国资|产业园/i, /蓝成应急/i, 'scenario-commercialization-investment'],
+    [/人工智能|\bAI\b|大模型|Agent|数据|软件|SaaS/i, /中数睿智/i, 'ai-software-investment'],
+  ]
+  for (const [projectPattern, filePattern, id] of rules) {
+    if (!projectPattern.test(projectText)) continue
+    const matched = corpus.find((referencePath) => filePattern.test(path.basename(referencePath)))
+    if (matched) {
+      return {
+        mode: 'house-corpus' as const,
+        id,
+        path: matched,
+        sourceTemplates: corpus,
+      }
+    }
+  }
+  const fallback = corpus.find((referencePath) => /蓝成应急/.test(path.basename(referencePath)))
+    ?? corpus.find((referencePath) => /中数睿智/.test(path.basename(referencePath)))
+    ?? corpus[0]
+  return {
+    mode: 'house-corpus' as const,
+    id: 'hybrid-investment-house-style',
+    path: fallback,
+    sourceTemplates: corpus,
+  }
+}
+
+function referenceRoleCandidates(role: string) {
+  const aliases: Record<string, string[]> = {
+    cover: ['cover'],
+    summary: ['summary', 'investment-highlights', 'company'],
+    company: ['company', 'summary'],
+    team: ['team', 'company'],
+    product: ['product', 'technology', 'validation'],
+    technology: ['technology', 'product', 'validation', 'moat'],
+    market: ['market', 'problem', 'competition'],
+    competition: ['competition', 'market'],
+    validation: ['validation', 'business-model', 'ecosystem'],
+    'business-model': ['business-model', 'validation', 'ecosystem'],
+    financials: ['financials', 'investment-plan'],
+    'investment-plan': ['investment-plan', 'financials', 'exit'],
+    exit: ['exit', 'investment-plan', 'risk'],
+    risk: ['risk', 'closing', 'investment-plan'],
+    closing: ['closing', 'risk'],
+  }
+  return aliases[role] ?? [role, 'content']
+}
+
+const HOUSE_REFERENCE_PAGE_MAPS: Array<{
+  fileName: RegExp
+  pages: Record<string, number>
+}> = [
+  {
+    fileName: /普雷赛斯/,
+    pages: {
+      cover: 1, summary: 31, company: 7, team: 8, product: 10, technology: 16,
+      market: 3, competition: 25, validation: 19, 'business-model': 23,
+      financials: 24, 'investment-plan': 29, exit: 30, risk: 31, closing: 32,
+    },
+  },
+  {
+    fileName: /轻蜓光电/,
+    pages: {
+      cover: 1, summary: 34, company: 7, team: 8, product: 10, technology: 17,
+      market: 3, competition: 28, validation: 21, 'business-model': 26,
+      financials: 27, 'investment-plan': 32, exit: 33, risk: 35, closing: 36,
+    },
+  },
+  {
+    fileName: /飞阔科技/,
+    pages: {
+      cover: 1, summary: 2, company: 7, team: 21, product: 8, technology: 14,
+      market: 4, competition: 24, validation: 23, 'business-model': 24,
+      financials: 19, 'investment-plan': 26, exit: 25, risk: 27, closing: 27,
+    },
+  },
+  {
+    fileName: /微纳核芯/,
+    pages: {
+      cover: 1, summary: 36, company: 7, team: 8, product: 16, technology: 17,
+      market: 3, competition: 25, validation: 24, 'business-model': 31,
+      financials: 30, 'investment-plan': 34, exit: 35, risk: 36, closing: 37,
+    },
+  },
+  {
+    fileName: /中数睿智/,
+    pages: {
+      cover: 1, summary: 2, company: 9, team: 13, product: 12, technology: 16,
+      market: 4, competition: 24, validation: 21, 'business-model': 20,
+      financials: 27, 'investment-plan': 32, exit: 34, risk: 36, closing: 37,
+    },
+  },
+  {
+    fileName: /蓝成应急/,
+    pages: {
+      cover: 1, summary: 2, company: 8, team: 14, product: 9, technology: 10,
+      market: 4, competition: 24, validation: 17, 'business-model': 27,
+      financials: 29, 'investment-plan': 31, exit: 33, risk: 32, closing: 34,
+    },
+  },
+]
+
+export function investmentHouseReferencePageNumber(sourcePath: string, role: string) {
+  const profile = HOUSE_REFERENCE_PAGE_MAPS.find((item) =>
+    item.fileName.test(path.basename(sourcePath)))
+  if (!profile) return undefined
+  for (const candidate of referenceRoleCandidates(role)) {
+    const page = profile.pages[candidate]
+    if (page) return page
+  }
+  return undefined
+}
+
+function referencePageForPlan(
+  pages: Array<{ page?: number; role_hint?: string; image?: string }>,
+  plan: GordenSlidePlan,
+  sourcePath: string,
+) {
+  const manualPage = investmentHouseReferencePageNumber(sourcePath, plan.role)
+  const manualMatch = manualPage
+    ? pages.find((page) => Number(page.page) === manualPage)
+    : undefined
+  if (manualMatch) return manualMatch
+  for (const role of referenceRoleCandidates(plan.role)) {
+    const match = pages.find((page) => page.role_hint === role)
+    if (match) return match
+  }
+  return pages[Math.min(plan.number - 1, Math.max(0, pages.length - 1))] ?? pages[0]
 }
 
 export function referenceDrivenSkillPaths(skillRoot = getAiSkillRoot()) {
@@ -1487,6 +1812,16 @@ export async function generateInvestmentRecommendationPptWithGorden(input: {
   const env = { ...process.env }
   const outputDir = path.dirname(input.outputPath)
   const slug = safeSlug(input.project.name)
+  const referenceSelection = selectInvestmentRecommendationReference({
+    template: input.template,
+    project: input.project,
+    content: input.content,
+  })
+  const selectedReferenceBuffer = await readFile(referenceSelection.path)
+  const referenceFingerprint = sha256(Buffer.concat([
+    Buffer.from(workflow.templateSha256, 'hex'),
+    selectedReferenceBuffer,
+  ]))
   const runRoot = path.join(
     outputDir,
     `.gorden-super-ppt-${slug}-${randomUUID()}`,
@@ -1516,10 +1851,16 @@ export async function generateInvestmentRecommendationPptWithGorden(input: {
     '--pdf-skill-dir', referencePaths.pdfRoot,
   ], { timeoutMs, env })
 
-  await reportProgress(input.onProgress, 'Gorden：摄取上传模板并分析结构与视觉 DNA', 68)
+  await reportProgress(
+    input.onProgress,
+    referenceSelection.mode === 'house-corpus'
+      ? `Gorden：从投资建议书模板库选择 ${path.basename(referenceSelection.path)} 并分析视觉 DNA`
+      : 'Gorden：摄取上传模板并分析结构与视觉 DNA',
+    68,
+  )
   await runCommand(python, [
     paths.ingest,
-    input.template.referencePath,
+    referenceSelection.path,
     '--out-dir', referenceDir,
     '--scope', 'task-only',
     '--reuse-level', 'structure-and-style',
@@ -1546,9 +1887,7 @@ export async function generateInvestmentRecommendationPptWithGorden(input: {
     references: input.sources.map((source) => source.sourceName),
     pageCount: input.pageCount,
   }).map((plan) => {
-    const matchingPage = pages.find((page) => page.role_hint === plan.role)
-      ?? pages[Math.min(plan.number - 1, Math.max(0, pages.length - 1))]
-      ?? pages[0]
+    const matchingPage = referencePageForPlan(pages, plan, referenceSelection.path)
     return {
       ...plan,
       referencePage: matchingPage?.image
@@ -1606,7 +1945,9 @@ export async function generateInvestmentRecommendationPptWithGorden(input: {
       editable_scope: 'all',
     }),
     writeJson(path.join(runRoot, 'input-manifest.json'), {
-      template: input.template.referencePath,
+      template: referenceSelection.path,
+      template_mode: referenceSelection.mode,
+      template_id: referenceSelection.id,
       source_cutoff_date: input.sourceCutoffDate,
       source_count: input.sources.length,
       template_scope: 'task-only',
@@ -1636,11 +1977,15 @@ export async function generateInvestmentRecommendationPptWithGorden(input: {
       slides: slideSemantics,
     }),
     writeJson(path.join(runRoot, 'template-selection.json'), {
-      mode: 'user-reference',
+      mode: referenceSelection.mode,
+      templateId: referenceSelection.id,
       scope: 'task-only',
       reuseLevel: 'structure-and-style',
       sourceMode: workflow.sourceMode,
-      templateSha256: workflow.templateSha256,
+      workflowTemplateSha256: workflow.templateSha256,
+      templateSha256: referenceFingerprint,
+      visualMaster: referenceSelection.path,
+      sourceTemplates: referenceSelection.sourceTemplates,
       slideReferenceMap: plans.map((plan) => ({
         slide: plan.number,
         role: plan.role,
@@ -1652,7 +1997,7 @@ export async function generateInvestmentRecommendationPptWithGorden(input: {
   const resumeCheckpoint = await findGordenResumeCheckpoint({
     directories: [input.resumeFromDirectory, outputDir],
     slug,
-    templateSha256: workflow.templateSha256,
+    templateSha256: referenceFingerprint,
     plans,
     excludeRunRoot: runRoot,
   })
@@ -2279,7 +2624,7 @@ export async function generateInvestmentRecommendationPptWithGorden(input: {
     ],
     sourceMode: workflow.sourceMode,
     skills: workflow.skills,
-    templateSha256: workflow.templateSha256,
+    templateSha256: referenceFingerprint,
     projectFacts: path.join(runRoot, 'project-facts.json'),
     imagegenManifest: imagegenManifestPath,
     editableRunRoot: editableDir,
