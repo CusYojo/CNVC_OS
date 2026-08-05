@@ -239,6 +239,12 @@ function MessagePart({ part }: { part: SafeFluePart }) {
   )
 }
 
+function isUserVisibleMessagePart(part: SafeFluePart) {
+  // Shell commands are implementation details. Keep them in the conversation
+  // state for task/progress inference, but never expose command text to users.
+  return !(part.type === 'dynamic-tool' && part.toolName === 'bash')
+}
+
 function displayUserMessageText(message: SafeFlueMessage): string {
   return extractTextParts(message)
     .replace(/【当前项目】.*\n【projectId】.*\n【用户问题】/s, '')
@@ -272,11 +278,14 @@ function MessageRow({ message }: { message: SafeFlueMessage }) {
     )
   }
 
+  const visibleParts = message.parts.filter(isUserVisibleMessagePart)
+  if (visibleParts.length === 0) return null
+
   return (
     <div className="flex gap-3">
       <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-brand-50 text-brand-600"><Bot className="h-4 w-4" /></span>
       <div className="min-w-0 max-w-[88%] space-y-1">
-        {message.parts.map((part, index) => (
+        {visibleParts.map((part, index) => (
           <AiErrorBoundary
             key={`${message.id}-part-${index}`}
             level="part"
