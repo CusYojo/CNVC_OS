@@ -60,7 +60,7 @@ type ConversationPptTaskResult = {
   matched: boolean
   needsTemplate: boolean
   reused?: boolean
-  skillName: 'create-reference-driven-editable-ppt'
+  skillName: 'GordenSuperPPTSkill'
   message?: string
   task?: AiTask
 }

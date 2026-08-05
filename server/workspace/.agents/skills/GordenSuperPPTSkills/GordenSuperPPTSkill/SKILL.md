@@ -25,6 +25,18 @@ description: >-
 端到端运行手册见 **[`references/pipeline.md`](references/pipeline.md)**。
 投资建议书的结构化内容、证据、产物与验收边界见 **[`references/output-contract.md`](references/output-contract.md)**。
 
+## 投资建议书快捷任务：Gorden 原生无模板模式
+
+平台“投资建议书（PPT）”快捷任务必须只执行本技能的 A→B 链路。此模式下：
+
+- `docs/投资建议书` 及其他模板文档只供人工参考，运行时不得读取、解析、OCR、提取、映射或作为图片网关参考图。
+- 忽略上传的任务模板、模板分析结果和历史模板断点；用户上传文件只能作为当前项目事实来源。
+- 阶段 1 仅使用 `GordenImagePPTGen` 原生设计规范，不向网关传 `--image <模板页>`。
+- 阶段 2 由 `GordenImage2PPTX` 完成四层可编辑还原后直接交付；不得追加 PDF 桥接、OCR 二次转换或其他 PPT 技能。
+- 工作流审计必须记录 `sourceMode=gorden-native`、`templateUsage=disabled`、`strictSequence=[GordenSuperPPTSkill]`。
+
+本节是平台投资建议书快捷任务的最高优先级约束；下方动态模板能力只适用于用户在其他任务中明确要求参考某个模板的场景。
+
 ## 用户动态模板
 
 用户提供 PDF、PPTX 或页面图片并要求参考结构、风格、排版或故事线时，先完整读取 **[`references/user-template-adaptation.md`](references/user-template-adaptation.md)**，运行 `scripts/ingest_reference_template.py`，再进入阶段 1。
@@ -78,14 +90,14 @@ description: >-
 ## 编排流程（逐项打勾）
 
 ```
-== 阶段 T：用户模板摄取（用户提供模板时）==
+== 阶段 T：用户模板摄取（投资建议书快捷任务禁止；其他任务明确要求时才执行）==
 - [ ] 读取 user-template-adaptation.md，运行 ingest_reference_template.py
 - [ ] 视觉检查 contact-sheet.png 和全部代表页，修正 template-profile.json / page-archetypes.json
 - [ ] 建立独立 project-facts.json、template-selection.json 和 slide-plan.json
 - [ ] 默认 scope=task-only；没有明确授权不得注册为长期模板
 
 == 阶段 1：GordenImagePPTGen（完整跑功能 A）==
-- [ ] 投资类材料：读取 investment-template-catalog.md，写 template-selection.json，并逐页指定主参考页
+- [ ] 投资建议书快捷任务：使用 Gorden 原生设计规范，templateUsage=disabled，不读取模板或指定参考页
 - [ ] 读 ../GordenImagePPTGen/SKILL.md，按 A1–A5 执行
 - [ ] 每页实际调用用户网关生成成品图
 - [ ] 产出：outline.json、template-selection.json（使用参考模板时）、prompts/NN-*.md、imagegen-manifest.json、slides/NN-*.png、图片型 .pptx

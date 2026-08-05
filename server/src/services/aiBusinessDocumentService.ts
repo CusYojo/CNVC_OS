@@ -2678,21 +2678,18 @@ export function mustUseReferenceDrivenPptPipeline(
 export function assertInvestmentRecommendationSkillChain(
   metadata: Record<string, unknown>,
 ) {
-  const expectedSequence = [
-    'create-reference-driven-editable-ppt',
-    'GordenSuperPPTSkill',
-    'pdf-to-editable-ppt',
-  ]
+  const expectedSequence = ['GordenSuperPPTSkill']
   const workflowAudit = metadata.workflowAudit as Record<string, unknown> | undefined
   const strictSequence = Array.isArray(workflowAudit?.strictSequence)
     ? workflowAudit.strictSequence.map(String)
     : []
   const valid = metadata.generationSkill === expectedSequence[0]
-    && metadata.generationRuntime === 'GordenSuperPPTSkills+pdf-bridge+pdf-to-editable-ppt'
+    && metadata.generationRuntime === 'GordenSuperPPTSkills'
+    && metadata.templateApplied === false
     && strictSequence.join('\u0000') === expectedSequence.join('\u0000')
   if (!valid) {
     throw Object.assign(
-      new Error('投资建议书未完整执行 Gorden、PDF 桥接与可编辑化技能链'),
+      new Error('投资建议书未按要求仅执行 GordenSkills 原生可编辑 PPTX 链路'),
       { code: 'INVESTMENT_PPT_SKILL_CHAIN_NOT_EXECUTED' },
     )
   }

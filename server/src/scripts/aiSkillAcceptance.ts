@@ -236,15 +236,16 @@ async function main() {
     pptWorkflowSkills.map((skill) => `${skill.name}:${skill.version}`).join('、'),
   )
   assert(
-    '投资建议书默认无需上传模板并保留可审计 PPT Skill',
+    '投资建议书固定使用 GordenSkills 原生无模板链路',
     !AI_TEMPLATE_CATALOG.investment_recommendation_ppt.requiredParameters.includes('customTemplateId')
       && AI_TEMPLATE_CATALOG.investment_recommendation_ppt.requiredParameters.includes('structureMode')
       && !AI_TEMPLATE_CATALOG.investment_recommendation_ppt.requiredParameters.includes('pageCount')
       && AI_TEMPLATE_CATALOG.investment_recommendation_ppt.sections.length === 12
       && AI_TEMPLATE_CATALOG.investment_recommendation_ppt.workflowSkillNames?.join(',')
-        === 'create-reference-driven-editable-ppt,GordenSuperPPTSkill,pdf-to-editable-ppt'
+        === 'GordenSuperPPTSkill'
       && AI_TEMPLATE_CATALOG.investment_recommendation_ppt.skillName
-        === 'create-reference-driven-editable-ppt',
+        === 'GordenSuperPPTSkill'
+      && AI_TEMPLATE_CATALOG.investment_recommendation_ppt.referencePaths?.length === 0,
     `${AI_TEMPLATE_CATALOG.investment_recommendation_ppt.requiredParameters.join('、')} / ${
       AI_TEMPLATE_CATALOG.investment_recommendation_ppt.workflowSkillNames?.join('、')}`,
   )
@@ -555,9 +556,15 @@ async function main() {
     '首轮生成 → 待核验问题提取 → Flue 候选发现 → LLM Gateway 页面核验 → 缓存写回 → 带补全证据二次生成；联网异常继续生成受限 DOCX',
   )
   assert(
-    'AI-007～AI-011 均绑定 docs 业务模板',
-    AI_TASK_TYPES.every((type) =>
-      AI_TEMPLATE_CATALOG[type].referencePath.includes(`${path.sep}docs${path.sep}`))
+    '除 Gorden 原生投资建议书外，其余业务任务绑定 docs 模板',
+    AI_TASK_TYPES
+      .filter((type) => type !== 'investment_recommendation_ppt')
+      .every((type) =>
+        AI_TEMPLATE_CATALOG[type].referencePath.includes(`${path.sep}docs${path.sep}`))
+      && AI_TEMPLATE_CATALOG.investment_recommendation_ppt.referencePath.includes(
+        `${path.sep}GordenSuperPPTSkills${path.sep}GordenSuperPPTSkill${path.sep}SKILL.md`,
+      )
+      && AI_TEMPLATE_CATALOG.investment_recommendation_ppt.referencePaths?.length === 0
       && AI_QA_TEMPLATE.referencePaths.length >= 1
       && AI_QA_TEMPLATE.referencePaths.every((item) =>
         item.includes(`${path.sep}docs${path.sep}Q&A${path.sep}`)),
@@ -880,20 +887,17 @@ async function main() {
     '网关成品图 / 背景、框架、图标、文本四层 / 生成证据',
   )
   assert(
-    'PDF 转换交接门槛和最终桥接 PDF 可编辑化已接入',
+    '投资建议书工作流明确禁用模板并直接交付 Gorden 四层 PPTX',
     [
-      'watermarkQaPassed',
-      'editabilityReviewPassed',
-      'readyForContentReplacement',
-      'pdf-converted',
-      'native-pptx',
-      '桥接 PDF 元素级可编辑化',
+      "sourceMode: 'gorden-native'",
+      "templateReuse: 'none'",
+      "bridgePolicy: 'gorden-image-to-four-layer-pptx'",
     ].every((term) => pptWorkflowSource.includes(term)),
-    'PDF 模板必须通过交接证书；原生 PPTX 仍执行最终桥接 PDF 可编辑化',
+    'Gorden 原生无模板 / 无 PDF 桥接',
   )
   assert(
-    '三个技能顺序执行模板摄取、网关出图、四层还原、PDF 桥接与最终验收',
-    pptWorkflowSource.includes("item.name === 'GordenSuperPPTSkill'")
+    'Gorden 单技能顺序执行网关出图、四层还原与直接交付',
+    pptWorkflowSource.includes("loadAiSkill('GordenSuperPPTSkill')")
       && pptDocumentSource.includes('generateInvestmentRecommendationPptWithGorden')
       && pptGeneratorSource.includes('project-facts.json')
       && pptGeneratorSource.includes('imagegen-manifest.json')
@@ -902,10 +906,10 @@ async function main() {
       && pptGeneratorSource.includes('sliceGrid')
       && pptGeneratorSource.includes('layoutGuard')
       && pptGeneratorSource.includes('visualCompareQa')
-      && pptGeneratorSource.includes('packageSlidesAsPdf')
-      && pptGeneratorSource.includes('validatePipelineHandoff')
-      && pptGeneratorSource.includes('convertPdf'),
-    '模板 DNA / 网关图片证据 / 四层还原 / PDF 桥接 / 元素级可编辑验收',
+      && pptGeneratorSource.includes('copyFile(gordenEditablePath, input.outputPath)')
+      && !pptGeneratorSource.includes('referenceImage: plan.referencePage')
+      && !pptGeneratorSource.includes('referencePaths.packageSlidesAsPdf'),
+    '项目事实 / 网关图片证据 / 四层还原 / Gorden 成稿直接交付',
   )
 
   const quickActionsSource = await readFile(

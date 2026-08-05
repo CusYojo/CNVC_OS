@@ -2,6 +2,8 @@
 
 本技能 = 依次完整执行两个子技能。本文件是落地细节；每阶段的**完整**规范以子技能的 SKILL.md / references 为准。
 
+平台“投资建议书（PPT）”快捷任务固定为 `gorden-native`：跳过阶段 T，不读取任何模板或模板目录，不向阶段 1 传模板参考图，阶段 2 四层还原通过后直接交付可编辑 PPTX。
+
 ## 阶段 T · 用户动态模板摄取（按需）
 
 当用户提供 PDF、PPTX 或页面图片并要求参考结构或风格时，在阶段 1 前执行：
@@ -17,13 +19,13 @@
 
 ## 阶段 1 · 生成图片型 PPT（GordenImagePPTGen）
 
-1. **A0 模板选择**：用户动态模板沿用阶段 T 的 `user-reference` 映射；没有用户模板的投资类材料读取 `investment-template-catalog.md`，从 `deta-ic`、`lancheng-investment`、`hybrid-investment-ic` 中选择。混合模式也只能选一套全局视觉系统。
+1. **A0 设计模式**：平台投资建议书快捷任务固定使用 `gorden-native` 原生设计规范，记录 `templateUsage=disabled`，不得读取 `investment-template-catalog.md`、`docs/投资建议书` 或用户上传模板，也不得设置 `reference_template`。
 2. **A1 确认**：风格 / 受众 / 页数 / 语言（用户说"直接生成"则跳过，并声明所用设定）。比例跟随用户（默认 16:9；用户要 3:2 就全套 3:2）。
-3. **A2 大纲 `outline.json`**：解构内容；为**每页指派不重复的复杂框架**；**统一一套配色**；写厚每页 `detailed_content`（真实数据，禁编造）。使用参考模板时为每页增加 `reference_template` 与 `reference_role`。
-4. **A3 提示词**：把 outline 落地成每页 self-contained 提示词，**【页面文字】写满全部真实文字(verbatim)**。写明只参考模板布局与风格，不复用样本内容。
-5. **A4 出图**：必须逐页调用 `../GordenImagePPTGen/scripts/generate_gateway_slide_image.py` 走用户网关出图；使用直接参考策略时用 `--image <主参考页.png>` 传入单页模板；**每页必须是含全部真实文字的成品图，绝不占位符/空模板**；错字/失败只重出该页；把网关返回 URL 下载到 `slides/NN-*.png`；写 `imagegen-manifest.json`。
+3. **A2 大纲 `outline.json`**：解构内容；为**每页指派不重复的复杂框架**；**统一一套配色**；写厚每页 `detailed_content`（真实数据，禁编造）。
+4. **A3 提示词**：把 outline 落地成每页 self-contained 提示词，**【页面文字】写满全部真实文字(verbatim)**，并明确只使用 Gorden 原生设计规范。
+5. **A4 出图**：必须逐页调用 `../GordenImagePPTGen/scripts/generate_gateway_slide_image.py` 走用户网关出图；投资建议书快捷任务不得传 `--image` 模板参考图；**每页必须是含全部真实文字的成品图，绝不占位符/空模板**；错字/失败只重出该页；把网关返回 URL 下载到 `slides/NN-*.png`；写 `imagegen-manifest.json`。
 6. **A5 合成**：`compose_pptx.py deck.json out/<topic>-image-deck.pptx`（每页只一个 `background`）。
-7. **A6 样本残留审计（所有参考模板）**：将页面 OCR/视觉结果与 `sample-fingerprint.json` 对照，排查模板公司名、Logo、人物、报告人、日期、页码、数字和绝对化结论；发现残留必须重生成该页。
+7. **A6 文字与事实审计**：按页面可见文字清单和当前项目事实库校验，排查新增标题、标签、编号、来源文字、虚构人物、客户、日期和数字；发现问题只重生成受影响页面。
 
 ### A4 阻塞门禁
 

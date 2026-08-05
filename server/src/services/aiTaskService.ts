@@ -1184,11 +1184,8 @@ async function executeTask(taskId: string) {
     )
     // 上传模板时会先创建正式任务记录，但模板分析完成前不能进入文档生成流水线。
     if (isTemplatePreparationPending(parameters)) return
-    const hasCustomTemplateId = typeof parameters.customTemplateId === 'string'
-      && parameters.customTemplateId.trim().length > 0
     const resolvedCustomTemplate = (
       task.type === 'custom_template_document'
-      || (task.type === 'investment_recommendation_ppt' && hasCustomTemplateId)
     )
       ? await resolveAiCustomTemplateForTask({
           userId: task.userId,
@@ -1209,7 +1206,9 @@ async function executeTask(taskId: string) {
         })
       }
     } else {
-      assertAiTemplateReferences(template)
+      if (task.type !== 'investment_recommendation_ppt') {
+        assertAiTemplateReferences(template)
+      }
     }
     const skill = resolvedCustomTemplate?.skill ?? await loadAiSkill(
       AI_TEMPLATE_CATALOG[task.type as AiBusinessTaskType].skillName,
@@ -2457,8 +2456,7 @@ async function executeTask(taskId: string) {
           ? {
               pptWorkflow: {
                 sourceMode: pptWorkflow.sourceMode,
-                templateFileName: pptWorkflow.templateFileName,
-                templateSha256: pptWorkflow.templateSha256,
+                templateUsage: 'disabled',
                 skills: pptWorkflow.skills,
               },
               gordenGenerationAudit: pptGenerationAudit,
@@ -2469,13 +2467,19 @@ async function executeTask(taskId: string) {
               ],
             }
           : {}),
-        referenceTemplate: task.type === 'due_diligence_report'
-          ? '尽调报告模板语料库'
-          : path.basename(template.referencePath),
-        referenceTemplates: (template.referencePaths?.length
-          ? template.referencePaths
-          : [template.referencePath]).map((referencePath) => path.basename(referencePath)),
-        templateReferenceMode: task.type === 'due_diligence_report' ? 'corpus' : 'single',
+        referenceTemplate: task.type === 'investment_recommendation_ppt'
+          ? 'GordenSkills 原生设计规范（不使用模板）'
+          : task.type === 'due_diligence_report'
+            ? '尽调报告模板语料库'
+            : path.basename(template.referencePath),
+        referenceTemplates: task.type === 'investment_recommendation_ppt'
+          ? []
+          : (template.referencePaths?.length
+              ? template.referencePaths
+              : [template.referencePath]).map((referencePath) => path.basename(referencePath)),
+        templateReferenceMode: task.type === 'investment_recommendation_ppt'
+          ? 'gorden-native-no-template'
+          : task.type === 'due_diligence_report' ? 'corpus' : 'single',
         skillName: skill.name,
         skillVersion: skill.version,
         skillSha256: skill.sha256,
@@ -2510,10 +2514,14 @@ async function executeTask(taskId: string) {
         metadata: {
           bytes: previewStat.size,
           ...previewMetadata,
-          referenceTemplate: path.basename(template.referencePath),
-          referenceTemplates: (template.referencePaths?.length
-            ? template.referencePaths
-            : [template.referencePath]).map((referencePath) => path.basename(referencePath)),
+          referenceTemplate: task.type === 'investment_recommendation_ppt'
+            ? 'GordenSkills 原生设计规范（不使用模板）'
+            : path.basename(template.referencePath),
+          referenceTemplates: task.type === 'investment_recommendation_ppt'
+            ? []
+            : (template.referencePaths?.length
+                ? template.referencePaths
+                : [template.referencePath]).map((referencePath) => path.basename(referencePath)),
           skillName: skill.name,
           skillVersion: skill.version,
           skillSha256: skill.sha256,
@@ -2521,8 +2529,7 @@ async function executeTask(taskId: string) {
             ? {
                 pptWorkflow: {
                   sourceMode: pptWorkflow.sourceMode,
-                  templateFileName: pptWorkflow.templateFileName,
-                  templateSha256: pptWorkflow.templateSha256,
+                  templateUsage: 'disabled',
                   skills: pptWorkflow.skills,
                 },
               }
@@ -2778,7 +2785,7 @@ export async function createInvestmentPptPreparationTask(
           userInstructions: input.userInstructions.trim().slice(0, 2_000),
           researchIntent: input.userInstructions.trim().slice(0, 2_000),
           conversationTriggered: input.userInstructions.includes('本次会话生成要求：'),
-          requestedSkill: 'create-reference-driven-editable-ppt',
+          requestedSkill: 'GordenSuperPPTSkill',
         }
       : {}),
   }
@@ -2971,11 +2978,8 @@ export async function createAiTask(user: AiTaskUser, input: CreateAiTaskInput) {
     input.projectId,
     input.conversationId,
   )
-  const hasCustomTemplateId = typeof input.parameters.customTemplateId === 'string'
-    && input.parameters.customTemplateId.trim().length > 0
   const resolvedCustomTemplate = (
     input.type === 'custom_template_document'
-    || (input.type === 'investment_recommendation_ppt' && hasCustomTemplateId)
   )
     ? await resolveAiCustomTemplateForTask({
         userId: user.uid,
@@ -2996,7 +3000,9 @@ export async function createAiTask(user: AiTaskUser, input: CreateAiTaskInput) {
       })
     }
   } else {
-    assertAiTemplateReferences(template)
+    if (input.type !== 'investment_recommendation_ppt') {
+      assertAiTemplateReferences(template)
+    }
     await loadAiSkill(AI_TEMPLATE_CATALOG[input.type as AiBusinessTaskType].skillName)
   }
   if (input.type === 'investment_recommendation_ppt') {

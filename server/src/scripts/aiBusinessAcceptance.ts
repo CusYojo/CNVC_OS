@@ -775,26 +775,24 @@ async function main() {
       assert(checks, 'AI-009 不泄露示例项目与内部模板编号', forbiddenSampleTerms.every((term) => !xml.includes(term)), forbiddenSampleTerms.join('、'))
       assert(
         checks,
-        'AI-009 已使用三个指定技能生成并还原上传模板',
-        result.templateApplied
+        'AI-009 已仅使用 GordenSkills 原生链路生成四层可编辑 PPTX',
+        !result.templateApplied
           && 'generationSkill' in result
-          && result.generationSkill === 'create-reference-driven-editable-ppt'
+          && result.generationSkill === 'GordenSuperPPTSkill'
           && 'generationRuntime' in result
-          && result.generationRuntime === 'GordenSuperPPTSkills+pdf-bridge+pdf-to-editable-ppt'
-          && Boolean(result.templateSha256),
-        `三个技能顺序生成，模板摘要 ${result.templateSha256.slice(0, 12)}`,
+          && result.generationRuntime === 'GordenSuperPPTSkills'
+          && !result.templateSha256,
+        'Gorden A→B，无模板摄取、无 PDF 桥接',
       )
       assert(
         checks,
-        'AI-009 工作流只包含三个指定 PPT Skill',
-        workflow.sourceMode === 'native-pptx'
-          && workflow.skills.length === 3
-          && workflow.skills[0]?.name === 'create-reference-driven-editable-ppt'
+        'AI-009 工作流只包含 GordenSuperPPTSkill',
+        workflow.sourceMode === 'gorden-native'
+          && workflow.skills.length === 1
+          && workflow.skills[0]?.name === 'GordenSuperPPTSkill'
           && workflow.skills[0]?.status === 'applied'
-          && workflow.skills[1]?.name === 'GordenSuperPPTSkill'
-          && workflow.skills[1]?.status === 'applied'
-          && workflow.skills[2]?.name === 'pdf-to-editable-ppt'
-          && workflow.skills[2]?.status === 'applied',
+          && workflow.generationPolicy.templateReuse === 'none'
+          && workflow.generationPolicy.bridgePolicy === 'gorden-image-to-four-layer-pptx',
         workflow.skills.map((item) => `${item.name}:${item.status}`).join('、'),
       )
       assert(

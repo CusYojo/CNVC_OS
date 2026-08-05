@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto'
 import { readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
 import JSZip from 'jszip'
@@ -8,7 +7,7 @@ import type {
 } from './aiBusinessContentService.js'
 import type { AiTemplateDefinition } from './aiTemplateCatalog.js'
 import {
-  loadAiPptWorkflowSkills,
+  loadAiSkill,
   type LoadedAiSkill,
 } from './aiSkillService.js'
 
@@ -23,40 +22,17 @@ type WorkflowSkillAudit = {
 }
 
 export type InvestmentRecommendationPptWorkflow = {
-  sourceMode: 'native-pptx' | 'pdf-converted'
-  templateSha256: string
-  templateFileName: string
+  sourceMode: 'gorden-native'
   skills: WorkflowSkillAudit[]
-  orchestratorSkill: LoadedAiSkill
   gordenSkill: LoadedAiSkill
-  converterSkill: LoadedAiSkill
   generationPolicy: {
     schemaVersion: '1.0'
-    templateReuse: 'structure-and-style'
+    templateReuse: 'none'
     factPolicy: 'project-facts-only'
     imageGenerationPolicy: 'gateway-imagegen-evidence-required'
     editableLayerPolicy: 'background-frame-icons-text'
-    bridgePolicy: 'gorden-images-to-flattened-pdf-to-semantic-pptx'
+    bridgePolicy: 'gorden-image-to-four-layer-pptx'
   }
-}
-
-type ConversionHandoff = {
-  watermarkQaPassed?: unknown
-  editabilityReviewPassed?: unknown
-  readyForContentReplacement?: unknown
-  outputSha256?: unknown
-  pptxSha256?: unknown
-  editablePptxSha256?: unknown
-  artifactSha256?: unknown
-}
-
-function handoffPptxSha256(handoff: ConversionHandoff) {
-  return [
-    handoff.outputSha256,
-    handoff.pptxSha256,
-    handoff.editablePptxSha256,
-    handoff.artifactSha256,
-  ].find((value): value is string => typeof value === 'string' && /^[a-f0-9]{64}$/i.test(value))
 }
 
 export async function prepareInvestmentRecommendationPptWorkflow(
@@ -65,82 +41,28 @@ export async function prepareInvestmentRecommendationPptWorkflow(
   if (template.type !== 'investment_recommendation_ppt') {
     throw new Error('投资建议书 PPT 工作流只能用于 investment_recommendation_ppt')
   }
-  const sourceMode = template.templateSourceMode ?? 'native-pptx'
-  if (path.extname(template.referencePath).toLowerCase() !== '.pptx') {
-    throw new Error('投资建议书 Gorden 生成阶段必须接收可编辑 PPTX 模板')
-  }
-  const templateBuffer = await readFile(template.referencePath)
-  const templateSha256 = createHash('sha256').update(templateBuffer).digest('hex')
-  const configuredNames = template.workflowSkillNames ?? []
-  const registeredWorkflowSkills = await loadAiPptWorkflowSkills()
-  for (const configuredName of configuredNames) {
-    if (!registeredWorkflowSkills.some((item) => item.name === configuredName)) {
-      throw new Error(`投资建议书工作流 Skill 未注册：${configuredName}`)
-    }
-  }
-  const workflowSkills = registeredWorkflowSkills.filter((item) =>
-    configuredNames.includes(item.name))
-
-  if (sourceMode === 'pdf-converted') {
-    if (!template.conversionHandoffPath) {
-      throw new Error('PDF 转换模板缺少 conversion-handoff.json')
-    }
-    const handoff = JSON.parse(
-      await readFile(template.conversionHandoffPath, 'utf8'),
-    ) as ConversionHandoff
-    if (
-      handoff.watermarkQaPassed !== true
-      || handoff.editabilityReviewPassed !== true
-      || handoff.readyForContentReplacement !== true
-    ) {
-      throw new Error('PDF 转换模板未通过水印、可编辑性或 Gorden 交接门槛')
-    }
-    const declaredSha256 = handoffPptxSha256(handoff)
-    if (declaredSha256 && declaredSha256.toLowerCase() !== templateSha256) {
-      throw new Error('PDF 转换交接证书与当前 PPTX 模板摘要不一致')
-    }
-  }
-
-  const skills = workflowSkills.map((item): WorkflowSkillAudit => ({
-      name: item.name,
-      role: item.role,
-      version: item.skill.version,
-      sha256: item.skill.sha256,
-      applied: true,
-      status: 'applied',
-      ...(item.name === 'pdf-to-editable-ppt'
-        ? {
-            reason: sourceMode === 'pdf-converted'
-              ? '先完成上传 PDF 模板预处理，并在成稿阶段再次执行桥接 PDF 元素级可编辑化'
-              : '上传模板为原生 PPTX；在成稿阶段执行桥接 PDF 元素级可编辑化',
-          }
-        : {}),
-    }))
-  const orchestratorSkill = workflowSkills.find((item) =>
-    item.name === 'create-reference-driven-editable-ppt')?.skill
-  const gordenSkill = workflowSkills.find((item) =>
-    item.name === 'GordenSuperPPTSkill')?.skill
-  const converterSkill = workflowSkills.find((item) =>
-    item.name === 'pdf-to-editable-ppt')?.skill
-  if (!orchestratorSkill) throw new Error('缺少 create-reference-driven-editable-ppt Skill')
-  if (!gordenSkill) throw new Error('缺少 GordenSuperPPTSkill Skill')
-  if (!converterSkill) throw new Error('缺少 pdf-to-editable-ppt Skill')
+  const gordenSkill = await loadAiSkill('GordenSuperPPTSkill')
+  const skills: WorkflowSkillAudit[] = [{
+    name: gordenSkill.name,
+    role: 'generation',
+    version: gordenSkill.version,
+    sha256: gordenSkill.sha256,
+    applied: true,
+    status: 'applied',
+    reason: 'GordenSkills 原生图片生成与四层可编辑还原；外部模板读取已禁用',
+  }]
 
   return {
-    sourceMode,
-    templateSha256,
-    templateFileName: path.basename(template.referencePath),
+    sourceMode: 'gorden-native',
     skills,
-    orchestratorSkill,
     gordenSkill,
-    converterSkill,
     generationPolicy: {
       schemaVersion: '1.0',
-      templateReuse: 'structure-and-style',
+      templateReuse: 'none',
       factPolicy: 'project-facts-only',
       imageGenerationPolicy: 'gateway-imagegen-evidence-required',
       editableLayerPolicy: 'background-frame-icons-text',
-      bridgePolicy: 'gorden-images-to-flattened-pdf-to-semantic-pptx',
+      bridgePolicy: 'gorden-image-to-four-layer-pptx',
     },
   }
 }
@@ -279,7 +201,8 @@ export async function reviewInvestmentRecommendationPpt(input: {
       checks,
       workflowSkills: input.workflow.skills,
       templateSourceMode: input.workflow.sourceMode,
-      templateSha256: input.workflow.templateSha256,
+      templateUsage: 'disabled',
+      gordenSkillSha256: input.workflow.gordenSkill.sha256,
       generationPolicy: input.workflow.generationPolicy,
       outputMetrics,
     },

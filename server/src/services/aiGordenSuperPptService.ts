@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
-import { existsSync, symlinkSync } from 'node:fs'
+import { existsSync } from 'node:fs'
 import {
   cp,
   copyFile,
@@ -116,7 +116,14 @@ const GORDEN_VISION_MAX_ATTEMPTS = Math.max(
   3,
   Math.min(8, Number(process.env.AI_GORDEN_VISION_MAX_ATTEMPTS) || 5),
 )
-const GORDEN_RENDER_CONTRACT_VERSION = '4.0-investment-house-corpus'
+const GORDEN_RENDER_CONTRACT_VERSION = '5.0-gorden-native-no-template'
+const GORDEN_NATIVE_PALETTE = [
+  '#0B2D5C',
+  '#2F6BFF',
+  '#F4B740',
+  '#F5F8FC',
+  '#FFFFFF',
+]
 
 function sha256(buffer: Buffer) {
   return createHash('sha256').update(buffer).digest('hex')
@@ -949,14 +956,14 @@ export function buildGordenSlidePrompt(input: {
 页面标题：${input.slide.title}
 主配色：${input.palette.join('、') || '#0B2D5C、#2F6BFF、#F4B740、#F5F8FC'}
 
-以输入的模板页作为唯一视觉参考，只借鉴其机构报告式栅格、留白、字体层级、色彩比例、标题线、表格和图表组织；必须替换模板中的全部公司名、Logo、人物、产品图、日期、页码和数字。不得残留任何模板样本事实。
+只使用 GordenImagePPTGen 的原生机构投资材料设计规范。不得读取、模仿或复用外部模板、历史投资建议书、上传文件中的版式和视觉元素；用户文件与聊天信息只作为当前项目事实来源。
 
 【本页构图要求】
 ${investmentCompositionBrief(input.slide)}
 
-整份材料必须呈现专业股权投资机构的 IC/投资建议书气质，不得设计成软件后台、网页仪表盘、移动端界面、运营数据大屏、四宫格/九宫格卡片墙或通用图标清单。避免大面积薰衣草紫渐变、玻璃拟态、悬浮圆角面板和无事实含义的 3D 图标。页面要高信息密度但主次清楚，每页只能有一个占主导的内容结构；优先复用参考页的扁平版式、紧凑标题、细分隔线、真实表格/图表密度和机构页眉页脚节奏。
+整份材料必须呈现专业股权投资机构的 IC/投资建议书气质，不得设计成软件后台、网页仪表盘、移动端界面、运营数据大屏、四宫格/九宫格卡片墙或通用图标清单。避免大面积薰衣草紫渐变、玻璃拟态、悬浮圆角面板和无事实含义的 3D 图标。页面要高信息密度但主次清楚，每页只能有一个占主导的内容结构；采用 GordenSkills 原生的扁平版式、紧凑标题、细分隔线、真实表格/图表密度和机构页眉页脚节奏。
 
-输入模板中的人物、产品、客户 Logo、证书和现场照片只是样本事实，不得复制、变形复用或替换成虚构的当前项目照片。若没有提供当前项目真实视觉素材，使用不带事实暗示的几何结构、表格、时间线和色块留白，不得生成写实人物、虚构产品、虚构客户 Logo 或虚构证书。
+若没有提供当前项目真实视觉素材，使用不带事实暗示的几何结构、表格、时间线和色块留白，不得生成写实人物、虚构产品、虚构客户 Logo 或虚构证书。
 不得添加水印、页码、二维码、占位符、Lorem ipsum 或未提供的数据。
 
 【页面可见文字，必须逐字照排，不得改写、遗漏或新增】
@@ -966,7 +973,7 @@ ${pageTexts}
 ${input.sourceNames.join('、') || '用户已授权项目资料'}
 不得在页面上额外新增来源名称；若某个来源名称已明确列入上方“页面可见文字”清单，则必须按清单逐字照排。不得自行扩写来源内容。
 
-严格文字契约：页面中可读文字总数必须恰好为 ${input.slide.expectedTexts.length} 条，只能使用上述编号后的正文，并且每一条只能出现一次；清单最左侧的序号只是控制标记，不得显示。每一条正文必须完整放在一个连续文本区域内，不得按“｜”、标点或语义拆成多个导航标签、卡片、段落或文本框，也不得把多条正文合并到同一个文本框。不得重复任何标题、正文或数字；不得自行生成 1、2、3……编号、编号徽标、空白编号卡片、图例或目录。需要项目符号时只能使用不含文字的纯图形圆点。模板中多余的文字模块应删除或改为纯图形，不得用“愿景、使命、价值、团队、来源名称”、日期、页码或其他自拟标签补位。每个有文字的卡片、图表、轴标签和页脚都必须使用清单中的原文；清单没有对应文字时，删除该模块，不得留下带空标题的卡片或图表。
+严格文字契约：页面中可读文字总数必须恰好为 ${input.slide.expectedTexts.length} 条，只能使用上述编号后的正文，并且每一条只能出现一次；清单最左侧的序号只是控制标记，不得显示。每一条正文必须完整放在一个连续文本区域内，不得按“｜”、标点或语义拆成多个导航标签、卡片、段落或文本框，也不得把多条正文合并到同一个文本框。不得重复任何标题、正文或数字；不得自行生成 1、2、3……编号、编号徽标、空白编号卡片、图例或目录。需要项目符号时只能使用不含文字的纯图形圆点。不得用“愿景、使命、价值、团队、来源名称”、日期、页码或其他自拟标签补位。每个有文字的卡片、图表、轴标签和页脚都必须使用清单中的原文；清单没有对应文字时，删除该模块，不得留下带空标题的卡片或图表。
 若文字清单没有流程节点或图表标签，禁止生成任何带文字的流程图、路径图、思维导图、坐标轴或数据图标签；这类装饰只能使用完全不含文字的纯图形。尤其不得沿用模板示例中的“大脑、信号采集、解码、外部设备”等流程词。
 所有数字、主体、人物、客户、融资、估值和交易条款只能来自上述可见文字。中文使用清晰的现代无衬线字体。`
 }
@@ -1087,66 +1094,14 @@ export function selectInvestmentRecommendationReference(input: {
   project: ProjectLike
   content: BusinessContent
 }) {
-  if (input.template.customAnalysis) {
-    return {
-      mode: 'user-reference' as const,
-      id: 'user-reference',
-      path: input.template.referencePath,
-      sourceTemplates: [input.template.referencePath],
-    }
-  }
-  const corpus = (input.template.referencePaths ?? [])
-    .filter((referencePath) =>
-      path.extname(referencePath).toLowerCase() === '.pdf'
-      && referencePath.includes(`${path.sep}docs${path.sep}投资建议书${path.sep}`)
-      && existsSync(referencePath))
-  if (!corpus.length) {
-    return {
-      mode: 'user-reference' as const,
-      id: 'user-reference',
-      path: input.template.referencePath,
-      sourceTemplates: [input.template.referencePath],
-    }
-  }
-
-  const projectText = [
-    input.project.name,
-    input.project.companyName,
-    input.project.industry,
-    input.project.summary,
-    input.project.businessModel,
-    input.project.market,
-    input.project.team,
-    ...input.content.sections.flatMap((section) => [section.title, section.summary]),
-  ].filter(Boolean).join('\n')
-  const rules: Array<[RegExp, RegExp, string]> = [
-    [/具身|机器人|人形|机械臂|自动驾驶|空间智能/i, /飞阔科技.*终稿/i, 'robotics-investment'],
-    [/存储|芯片|半导体|DRAM|SRAM|CIM|RISC/i, /微纳核芯/i, 'semiconductor-investment'],
-    [/光电|光学|成像|传感器|激光/i, /轻蜓光电/i, 'optoelectronics-investment'],
-    [/精密|测量|测试|仪器|设备|校准/i, /普雷赛斯/i, 'industrial-equipment-investment'],
-    [/应急|消防|安全生产|政府|国资|产业园/i, /蓝成应急/i, 'scenario-commercialization-investment'],
-    [/人工智能|\bAI\b|大模型|Agent|数据|软件|SaaS/i, /中数睿智/i, 'ai-software-investment'],
-  ]
-  for (const [projectPattern, filePattern, id] of rules) {
-    if (!projectPattern.test(projectText)) continue
-    const matched = corpus.find((referencePath) => filePattern.test(path.basename(referencePath)))
-    if (matched) {
-      return {
-        mode: 'house-corpus' as const,
-        id,
-        path: matched,
-        sourceTemplates: corpus,
-      }
-    }
-  }
-  const fallback = corpus.find((referencePath) => /蓝成应急/.test(path.basename(referencePath)))
-    ?? corpus.find((referencePath) => /中数睿智/.test(path.basename(referencePath)))
-    ?? corpus[0]
+  // Keep this compatibility entry point, but intentionally ignore every
+  // external template path and every parsed custom-template structure.
+  void input
   return {
-    mode: 'house-corpus' as const,
-    id: 'hybrid-investment-house-style',
-    path: fallback,
-    sourceTemplates: corpus,
+    mode: 'gorden-native' as const,
+    id: 'gorden-skills-native',
+    path: undefined,
+    sourceTemplates: [] as string[],
   }
 }
 
@@ -2084,9 +2039,7 @@ export async function generateInvestmentRecommendationPptWithGorden(input: {
     )
   }
   const paths = gordenSkillPaths()
-  const referencePaths = referenceDrivenSkillPaths()
   const requiredScripts = [
-    paths.ingest,
     paths.generateImage,
     paths.composeImageDeck,
     paths.chromaKey,
@@ -2095,10 +2048,6 @@ export async function generateInvestmentRecommendationPptWithGorden(input: {
     paths.placementQa,
     paths.visualCompareQa,
     paths.composeEditable,
-    referencePaths.resolveDependencies,
-    referencePaths.packageSlidesAsPdf,
-    referencePaths.validatePipelineHandoff,
-    referencePaths.convertPdf,
   ]
   const missingScripts = requiredScripts.filter((script) => !existsSync(script))
   if (missingScripts.length) {
@@ -2121,16 +2070,15 @@ export async function generateInvestmentRecommendationPptWithGorden(input: {
     project: input.project,
     content: input.content,
   })
-  const selectedReferenceBuffer = await readFile(referenceSelection.path)
-  const referenceFingerprint = sha256(Buffer.concat([
-    Buffer.from(workflow.templateSha256, 'hex'),
-    selectedReferenceBuffer,
-  ]))
+  const nativeRenderFingerprint = sha256(Buffer.from(JSON.stringify({
+    renderContractVersion: GORDEN_RENDER_CONTRACT_VERSION,
+    skillSha256: workflow.gordenSkill.sha256,
+    palette: GORDEN_NATIVE_PALETTE,
+  })))
   const runRoot = path.join(
     outputDir,
     `.gorden-super-ppt-${slug}-${randomUUID()}`,
   )
-  const referenceDir = path.join(runRoot, 'reference-template')
   const promptsDir = path.join(runRoot, 'prompts')
   const slidesDir = path.join(runRoot, 'slides')
   const metadataDir = path.join(runRoot, 'metadata')
@@ -2146,58 +2094,18 @@ export async function generateInvestmentRecommendationPptWithGorden(input: {
     mkdir(previewDir, { recursive: true }),
   ])
 
-  await runCommand(python, [
-    referencePaths.resolveDependencies,
-    '--json',
-    '--require-template-adapter',
-    '--gorden-image-dir', paths.imageGenRoot,
-    '--gorden-super-dir', paths.superRoot,
-    '--pdf-skill-dir', referencePaths.pdfRoot,
-  ], { timeoutMs, env })
-
   await reportProgress(
     input.onProgress,
-    referenceSelection.mode === 'house-corpus'
-      ? `Gorden：从投资建议书模板库选择 ${path.basename(referenceSelection.path)} 并分析视觉 DNA`
-      : 'Gorden：摄取上传模板并分析结构与视觉 DNA',
+    'Gorden：使用 GordenSkills 原生设计规范生成，不读取任何模板',
     68,
   )
-  await runCommand(python, [
-    paths.ingest,
-    referenceSelection.path,
-    '--out-dir', referenceDir,
-    '--scope', 'task-only',
-    '--reuse-level', 'structure-and-style',
-  ], { timeoutMs, env })
-
-  const [profile, pageIndex, fingerprint] = await Promise.all([
-    readFile(path.join(referenceDir, 'template-profile.json'), 'utf8').then(JSON.parse),
-    readFile(path.join(referenceDir, 'page-index.json'), 'utf8').then(JSON.parse),
-    readFile(path.join(referenceDir, 'sample-fingerprint.json'), 'utf8').then(JSON.parse),
-  ]) as [
-    { visual_dna?: { palette_candidates?: Array<{ hex?: string }> } },
-    { pages?: Array<{ page?: number; role_hint?: string; image?: string }> },
-    { frequent_terms?: Array<{ term?: string }> },
-  ]
-  const palette = (profile.visual_dna?.palette_candidates ?? [])
-    .map((item) => String(item.hex || ''))
-    .filter((value) => /^#[0-9a-f]{6}$/i.test(value))
-    .slice(0, 5)
-  const pages = pageIndex.pages ?? []
+  const palette = [...GORDEN_NATIVE_PALETTE]
   const plans = buildGordenSlidePlan({
     project: input.project,
     content: input.content,
     disclaimer: input.template.disclaimer,
     references: input.sources.map((source) => source.sourceName),
     pageCount: input.pageCount,
-  }).map((plan) => {
-    const matchingPage = referencePageForPlan(pages, plan, referenceSelection.path)
-    return {
-      ...plan,
-      referencePage: matchingPage?.image
-        ? path.resolve(referenceDir, matchingPage.image)
-        : undefined,
-    }
   })
 
   const facts = {
@@ -2212,7 +2120,7 @@ export async function generateInvestmentRecommendationPptWithGorden(input: {
       versionOrDate: source.versionOrDate,
     })),
     verifiedContent: input.content,
-    factPolicy: '仅使用项目事实库；模板样本事实不得进入成品',
+    factPolicy: '仅使用当前项目文件、项目事实库与聊天信息；不得读取或提取模板内容',
   }
   const sourceRegistry = input.sources.map((source, index) => ({
     source_id: `S${index + 1}`,
@@ -2249,12 +2157,11 @@ export async function generateInvestmentRecommendationPptWithGorden(input: {
       editable_scope: 'all',
     }),
     writeJson(path.join(runRoot, 'input-manifest.json'), {
-      template: referenceSelection.path,
-      template_mode: referenceSelection.mode,
-      template_id: referenceSelection.id,
+      generation_mode: referenceSelection.mode,
+      skill_id: referenceSelection.id,
       source_cutoff_date: input.sourceCutoffDate,
       source_count: input.sources.length,
-      template_scope: 'task-only',
+      template_usage: 'disabled',
     }),
     writeJson(path.join(runRoot, 'project-facts.json'), facts),
     writeJson(path.join(runRoot, 'source-registry.json'), sourceRegistry),
@@ -2283,25 +2190,21 @@ export async function generateInvestmentRecommendationPptWithGorden(input: {
     writeJson(path.join(runRoot, 'template-selection.json'), {
       mode: referenceSelection.mode,
       templateId: referenceSelection.id,
-      scope: 'task-only',
-      reuseLevel: 'structure-and-style',
+      scope: 'none',
+      reuseLevel: 'none',
       sourceMode: workflow.sourceMode,
-      workflowTemplateSha256: workflow.templateSha256,
-      templateSha256: referenceFingerprint,
-      visualMaster: referenceSelection.path,
+      workflowSkillSha256: workflow.gordenSkill.sha256,
+      templateSha256: nativeRenderFingerprint,
+      visualMaster: null,
       sourceTemplates: referenceSelection.sourceTemplates,
-      slideReferenceMap: plans.map((plan) => ({
-        slide: plan.number,
-        role: plan.role,
-        referencePage: plan.referencePage,
-      })),
+      slideReferenceMap: [],
     }),
   ])
 
   const resumeCheckpoint = await findGordenResumeCheckpoint({
     directories: [input.resumeFromDirectory, outputDir],
     slug,
-    templateSha256: referenceFingerprint,
+    templateSha256: nativeRenderFingerprint,
     plans,
     excludeRunRoot: runRoot,
   })
@@ -2342,7 +2245,6 @@ export async function generateInvestmentRecommendationPptWithGorden(input: {
         ...resumedSlide,
         slide: plan.number,
         copied_to: stableSlide,
-        reference_page: plan.referencePage,
         resumed_from: resumeCheckpoint.runRoot,
       })
       await persistImagegenCheckpoint()
@@ -2370,7 +2272,6 @@ export async function generateInvestmentRecommendationPptWithGorden(input: {
         script: paths.generateImage,
         promptFile: promptPath,
         outDir: path.join(metadataDir, `slide-${String(plan.number).padStart(2, '0')}`),
-        referenceImage: plan.referencePage,
         timeoutMs,
         env,
       })
@@ -2389,7 +2290,7 @@ export async function generateInvestmentRecommendationPptWithGorden(input: {
       metadata_json: result.metadata_json,
       copied_to: stableSlide,
       backend: 'gateway-gpt-image',
-      reference_page: plan.referencePage,
+      design_mode: 'gorden-native',
     })
     await persistImagegenCheckpoint()
   }
@@ -2436,9 +2337,10 @@ export async function generateInvestmentRecommendationPptWithGorden(input: {
   const editableSlides: Array<Record<string, unknown>> = []
   const resumedEditableSlideNumbers = new Set<number>()
   const pageDimensions: Array<{ width: number; height: number }> = []
-  const sampleTerms = (fingerprint.frequent_terms ?? [])
-    .map((item) => String(item.term || '').trim())
-    .filter((term) => term.length >= 3)
+  // No template is ingested in Gorden-native mode, so there are no template
+  // sample terms to compare against. The strict page text contract remains the
+  // authoritative guard against any generated extra wording.
+  const sampleTerms: string[] = []
   for (const plan of plans) {
     await reportProgress(
       input.onProgress,
@@ -2857,141 +2759,42 @@ export async function generateInvestmentRecommendationPptWithGorden(input: {
     )
   }
 
-  await reportProgress(
-    input.onProgress,
-    '参考模板编排：正在将图片稿无损封装为 PDF 桥接稿',
-    86,
-  )
-  const bridgeDir = path.join(runRoot, 'bridge')
-  const bridgePdfPath = path.join(bridgeDir, `${slug}-image-deck.pdf`)
-  const bridgeManifestPath = path.join(bridgeDir, 'pdf-bridge-manifest.json')
-  await mkdir(bridgeDir, { recursive: true })
-  await runCommand(python, [
-    referencePaths.packageSlidesAsPdf,
-    '--slides-dir', slidesDir,
-    '--output', bridgePdfPath,
-    '--manifest', bridgeManifestPath,
-  ], { timeoutMs, env })
-
-  const semanticOverridesPath = path.join(runRoot, 'semantic-overrides.json')
-  await writeJson(
-    semanticOverridesPath,
-    buildReferenceDrivenSemanticOverrides({
-      slides: editableSlides,
-      dimensions: pageDimensions,
-    }),
-  )
-  const finalConversionWorkDir = path.join(runRoot, 'editable', 'pdf-final')
-  await mkdir(finalConversionWorkDir, { recursive: true })
-  try {
-    symlinkSync(
-      path.resolve(process.cwd(), 'node_modules'),
-      path.join(finalConversionWorkDir, 'node_modules'),
-      'dir',
-    )
-  } catch {
-    // The link may already exist in a resumed run.
-  }
-  const runtimeCacheDir = path.join(runRoot, 'runtime-cache')
-  await mkdir(runtimeCacheDir, { recursive: true })
-  const converterEnv = {
-    ...env,
-    XDG_CACHE_HOME: runtimeCacheDir,
-    AI_PDF_TO_PPT_NODE_PROJECT_ROOT:
-      process.env.AI_PDF_TO_PPT_NODE_PROJECT_ROOT || process.cwd(),
-    NODE_PATH: path.resolve(process.cwd(), 'node_modules'),
-  }
-  const pdftoppm = process.env.AI_PDF_TO_PPT_PDFTOPPM
-    || findExecutable(process.platform === 'win32' ? 'pdftoppm.exe' : 'pdftoppm')
-  const tesseract = process.env.AI_PDF_TO_PPT_TESSERACT
-    || findExecutable(process.platform === 'win32' ? 'tesseract.exe' : 'tesseract')
-  const pdfTimeoutMs = Math.max(timeoutMs, 30 * 60_000)
-  const convertArgs = [
-    referencePaths.convertPdf,
-    '--input', bridgePdfPath,
-    '--output', input.outputPath,
-    '--work-dir', finalConversionWorkDir,
-    '--node', process.execPath,
-    '--flattened-mode', 'ocr',
-    '--editable-scope', 'all',
-    '--ocr-engine', tesseract ? 'tesseract' : 'auto',
-    '--overrides', semanticOverridesPath,
-    '--watermark-qa-mode', 'strict',
-    '--watermark-qa-ocr-engine', tesseract ? 'tesseract' : 'auto',
-    '--max-pages', String(Math.max(120, plans.length)),
-    '--command-timeout-seconds', String(Math.ceil(pdfTimeoutMs / 1000)),
-  ]
-  if (pdftoppm) convertArgs.push('--pdftoppm', pdftoppm)
-  if (tesseract) convertArgs.push('--tesseract', tesseract)
-  await reportProgress(
-    input.onProgress,
-    'PDF 桥接稿：正在执行元素级可编辑化与交接验收',
-    87,
-  )
-  await runCommand(python, convertArgs, {
-    timeoutMs: pdfTimeoutMs,
-    env: converterEnv,
-  })
-
-  const conversionHandoffPath = path.join(
-    finalConversionWorkDir,
-    'conversion-handoff.json',
-  )
-  const pipelineHandoffPath = path.join(runRoot, 'pipeline-handoff-report.json')
-  await runCommand(python, [
-    referencePaths.validatePipelineHandoff,
-    '--imagegen-manifest', imagegenManifestPath,
-    '--bridge-manifest', bridgeManifestPath,
-    '--conversion-handoff', conversionHandoffPath,
-    '--output-report', pipelineHandoffPath,
-    '--expected-editable-scope', 'all',
-  ], { timeoutMs, env })
-
+  await reportProgress(input.onProgress, 'Gorden：正在交付四层可编辑 PPTX', 87)
+  await copyFile(gordenEditablePath, input.outputPath)
   const outputBuffer = await readFile(input.outputPath)
   await writeJson(path.join(runRoot, 'workflow-audit.json'), {
     schemaVersion: '1.0',
-    strictSequence: [
-      'create-reference-driven-editable-ppt',
-      'GordenSuperPPTSkill',
-      'pdf-to-editable-ppt',
-    ],
+    strictSequence: ['GordenSuperPPTSkill'],
     sourceMode: workflow.sourceMode,
     skills: workflow.skills,
-    templateSha256: referenceFingerprint,
+    templateUsage: 'disabled',
+    gordenSkillSha256: workflow.gordenSkill.sha256,
+    nativeRenderFingerprint,
     projectFacts: path.join(runRoot, 'project-facts.json'),
     imagegenManifest: imagegenManifestPath,
     editableRunRoot: editableDir,
     imageDeck: imageDeckPath,
-    gordenEditableIntermediate: gordenEditablePath,
-    bridgePdf: bridgePdfPath,
-    bridgeManifest: bridgeManifestPath,
-    semanticOverrides: semanticOverridesPath,
-    conversionHandoff: conversionHandoffPath,
-    pipelineHandoff: pipelineHandoffPath,
+    gordenEditablePptx: gordenEditablePath,
     editablePptx: input.outputPath,
     outputSha256: sha256(outputBuffer),
   })
-  await reportProgress(input.onProgress, '三个 PPT Skill 顺序执行并验收完成', 88)
+  await reportProgress(input.onProgress, 'GordenSkills 图片生成与四层可编辑还原验收完成', 88)
   return {
     slideCount: plans.length,
     editableLevel: 'core-elements',
-    templateApplied: true,
-    templateSha256: workflow.templateSha256,
+    templateApplied: false,
+    templateSha256: undefined,
     outputSha256: sha256(outputBuffer),
-    cjkFont: input.template.customAnalysis?.formatProfile.primaryFont || 'Microsoft YaHei',
+    cjkFont: 'Microsoft YaHei',
     cjkLanguage: 'zh-CN',
-    generationSkill: 'create-reference-driven-editable-ppt',
-    generationRuntime: 'GordenSuperPPTSkills+pdf-bridge+pdf-to-editable-ppt',
+    generationSkill: 'GordenSuperPPTSkill',
+    generationRuntime: 'GordenSuperPPTSkills',
     imageDeckPath,
     runRoot,
     workflowAudit: {
       sourceMode: workflow.sourceMode,
       skills: workflow.skills,
-      strictSequence: [
-        'create-reference-driven-editable-ppt',
-        'GordenSuperPPTSkill',
-        'pdf-to-editable-ppt',
-      ],
+      strictSequence: ['GordenSuperPPTSkill'],
     },
   }
 }

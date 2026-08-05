@@ -2537,8 +2537,10 @@ export async function composeBusinessContent(input: {
   // 尽调已在上方路由到分章生成器；保留布尔分支仅用于兼容其余通用提示结构。
   const isDueDiligence = String(input.type) === 'due_diligence_report'
   const isCustomTemplate = input.type === 'custom_template_document'
-  const isUploadedInvestmentTemplate = input.type === 'investment_recommendation_ppt'
-    && input.template.customAnalysis?.format === 'pptx'
+  // Investment recommendation PPTs always use Gorden-native mode. Uploaded
+  // files remain project evidence and must never become a structure/template
+  // authority for content generation.
+  const isUploadedInvestmentTemplate = false
   const usesUploadedTemplate = isCustomTemplate || isUploadedInvestmentTemplate
   const indexedSources = input.sources.map((source, sourceIndex) => ({ source, sourceIndex }))
   const usesExpandedProjectEvidence = isDueDiligence
@@ -2697,8 +2699,14 @@ export async function composeBusinessContent(input: {
 已激活业务 Skill：${input.skill.name}
 Skill 版本：${input.skill.version}
 业务模板版本：${input.template.templateVersion}
-业务模板文件：${usesUploadedTemplate ? '用户本次上传模板（作为结构与视觉唯一权威，文件名不得作为项目事实）' : `${input.type === 'investment_proposal' ? 'docs/投资提案' : 'docs'} 中的 ${templateFiles}`}
-模板只规定章节、版式和表达结构；模板内示例项目正文不是当前项目证据，严禁复制或改写为当前项目事实。
+业务模板文件：${input.type === 'investment_recommendation_ppt'
+    ? '无；投资建议书快捷任务禁止读取 docs 或上传模板，仅使用 GordenSuperPPTSkill'
+    : usesUploadedTemplate
+      ? '用户本次上传模板（作为结构与视觉唯一权威，文件名不得作为项目事实）'
+      : `${input.type === 'investment_proposal' ? 'docs/投资提案' : 'docs'} 中的 ${templateFiles}`}
+${input.type === 'investment_recommendation_ppt'
+    ? '用户文件和聊天信息只作为当前项目事实来源；不得提取或借鉴其中的模板结构、版式和示例正文。'
+    : '模板只规定章节、版式和表达结构；模板内示例项目正文不是当前项目证据，严禁复制或改写为当前项目事实。'}
 
 ${input.skill.instructions}
 

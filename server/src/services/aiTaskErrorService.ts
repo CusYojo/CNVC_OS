@@ -61,10 +61,10 @@ export function safeAiTaskFailureMessage(error: unknown) {
     return '投资建议书正文仍含内部阶段词、资料处理过程或模型化套话，系统已停止交付并保留参数。请点击“继续生成”重新生成正文。'
   }
   if (code === 'INVESTMENT_RECOMMENDATION_CONTENT_REJECTED') {
-    return '投资建议书未通过 Gorden 页面生成、四层可编辑还原或样本残留检查。系统已保留参数，请点击“继续生成”重新生成并复核。'
+    return '投资建议书未通过 Gorden 页面生成、四层可编辑还原或页面文字与事实检查。系统已保留参数，请点击“继续生成”重新生成并复核。'
   }
   if (code === 'INVESTMENT_PPT_SKILL_CHAIN_NOT_EXECUTED') {
-    return '投资建议书未完整执行 create-reference-driven-editable-ppt、GordenSuperPPTSkill 和 pdf-to-editable-ppt，系统已拒绝交付降级产物。请检查技能运行时后继续生成。'
+    return '投资建议书未按要求仅执行 GordenSkills 原生可编辑 PPTX 链路，系统已拒绝交付其他技能或模板链产生的文件。请检查技能运行时后继续生成。'
   }
   if (code === 'GORDEN_IMAGE_GATEWAY_UNCONFIGURED') {
     return 'GordenSuperPPTSkill 缺少图片生成网关密钥，无法执行逐页出图。请配置 GATEWAY_IMAGE_API_KEY 后继续生成。'

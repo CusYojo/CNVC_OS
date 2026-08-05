@@ -123,9 +123,10 @@ function TaskCard({
   const uploadedTemplateName = typeof task.parameters.customTemplateName === 'string'
     ? task.parameters.customTemplateName
     : ''
-  const templateLabel = task.type === 'custom_template_document'
-    || task.type === 'investment_recommendation_ppt'
-    ? uploadedTemplateName
+  const templateLabel = task.type === 'investment_recommendation_ppt'
+    ? 'GordenSkills 原生设计（不使用模板）'
+    : task.type === 'custom_template_document'
+      ? uploadedTemplateName
       ? `上传模板：${uploadedTemplateName}`
       : '已分析上传模板'
     : '业务标准模板'

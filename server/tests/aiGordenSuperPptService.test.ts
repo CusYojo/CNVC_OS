@@ -24,7 +24,6 @@ import {
   gordenUnplannedVisibleTexts,
   gordenVisionRetryDelayMs,
   gordenSkillPaths,
-  investmentHouseReferencePageNumber,
   isGordenVisionRetryableStatus,
   normalizeGordenLayout,
   referenceDrivenSkillPaths,
@@ -115,7 +114,7 @@ test('Gorden slide plan carries detailed company, team, finance, funding, valuat
   assert.ok(plan.at(-1)?.expectedTexts.includes('本材料仅供内部投资决策使用。'))
 })
 
-test('Gorden image prompt enforces template-style-only reuse and exact project text', () => {
+test('Gorden image prompt enforces native no-template design and exact project text', () => {
   const slide = buildGordenSlidePlan({
     project: { name: '智灵动力' },
     content,
@@ -128,11 +127,12 @@ test('Gorden image prompt enforces template-style-only reuse and exact project t
     palette: ['#123456', '#ABCDEF'],
   })
 
-  assert.match(prompt, /模板页作为唯一视觉参考/)
+  assert.match(prompt, /只使用 GordenImagePPTGen 的原生机构投资材料设计规范/)
+  assert.match(prompt, /不得读取、模仿或复用外部模板/)
   assert.match(prompt, /不得设计成软件后台、网页仪表盘/)
   assert.match(prompt, /四宫格\/九宫格卡片墙/)
   assert.match(prompt, /不得生成写实人物、虚构产品、虚构客户 Logo 或虚构证书/)
-  assert.match(prompt, /不得残留任何模板样本事实/)
+  assert.doesNotMatch(prompt, /模板页作为唯一视觉参考/)
   assert.match(prompt, /必须逐字照排，不得改写、遗漏或新增/)
   assert.match(prompt, new RegExp(`可读文字总数必须恰好为 ${slide.expectedTexts.length} 条`))
   assert.match(prompt, /不得在页面上额外新增来源名称/)
@@ -382,21 +382,16 @@ test('five-page planning never exposes internal project stage metadata', () => {
   assert.doesNotMatch(visibleText, /融资概况：未披露|估值口径：未披露/)
 })
 
-test('built-in investment PPT selects the closest visual master from docs/投资建议书', () => {
+test('investment PPT always disables docs and uploaded template references', () => {
   const robotics = selectInvestmentRecommendationReference({
     template: AI_TEMPLATE_CATALOG.investment_recommendation_ppt,
     project: { name: '大衍科技', industry: '具身智能' },
     content,
   })
-  assert.equal(robotics.mode, 'house-corpus')
-  assert.equal(robotics.id, 'robotics-investment')
-  assert.match(path.basename(robotics.path), /飞阔科技投资建议书-终稿/)
-  assert.equal(robotics.sourceTemplates.length, 7)
-  assert.deepEqual(
-    ['cover', 'summary', 'product', 'investment-plan', 'risk']
-      .map((role) => investmentHouseReferencePageNumber(robotics.path, role)),
-    [1, 2, 8, 26, 27],
-  )
+  assert.equal(robotics.mode, 'gorden-native')
+  assert.equal(robotics.id, 'gorden-skills-native')
+  assert.equal(robotics.path, undefined)
+  assert.deepEqual(robotics.sourceTemplates, [])
 
   const custom = selectInvestmentRecommendationReference({
     template: {
@@ -406,8 +401,9 @@ test('built-in investment PPT selects the closest visual master from docs/投资
     project: { name: '自定义项目' },
     content,
   })
-  assert.equal(custom.mode, 'user-reference')
-  assert.equal(custom.path, '/tmp/user-template.pptx')
+  assert.equal(custom.mode, 'gorden-native')
+  assert.equal(custom.path, undefined)
+  assert.deepEqual(custom.sourceTemplates, [])
 })
 
 test('Gorden checkpoint fingerprint ignores old file paths but rejects changed page content', () => {
@@ -661,40 +657,28 @@ test('investment PPT resume checkpoint remaps duplicate source identities in ord
   assert.deepEqual(remapped.sections[0].findings[0].sourceIndexes, [1, 2, 0])
 })
 
-test('investment recommendation artifact metadata must prove the full three-skill chain', () => {
+test('investment recommendation artifact metadata must prove the Gorden-only chain', () => {
   assert.doesNotThrow(() => assertInvestmentRecommendationSkillChain({
-    generationSkill: 'create-reference-driven-editable-ppt',
-    generationRuntime: 'GordenSuperPPTSkills+pdf-bridge+pdf-to-editable-ppt',
+    generationSkill: 'GordenSuperPPTSkill',
+    generationRuntime: 'GordenSuperPPTSkills',
+    templateApplied: false,
     workflowAudit: {
-      strictSequence: [
-        'create-reference-driven-editable-ppt',
-        'GordenSuperPPTSkill',
-        'pdf-to-editable-ppt',
-      ],
+      strictSequence: ['GordenSuperPPTSkill'],
     },
   }))
   assert.throws(
     () => assertInvestmentRecommendationSkillChain({
-      generationSkill: 'create-reference-driven-editable-ppt',
+      generationSkill: 'GordenSuperPPTSkill',
+      generationRuntime: 'GordenSuperPPTSkills',
+      templateApplied: true,
     }),
-    /Gorden、PDF 桥接/,
+    /仅执行 GordenSkills/,
   )
 })
 
-test('investment recommendation PPT workflow contains only the three approved skills', async () => {
-  assert.deepEqual(
-    AI_PPT_WORKFLOW_SKILLS.map((item) => item.name),
-    [
-      'create-reference-driven-editable-ppt',
-      'GordenSuperPPTSkill',
-      'pdf-to-editable-ppt',
-    ],
-  )
-  const orchestrator = await loadAiSkill('create-reference-driven-editable-ppt')
-  const converter = await loadAiSkill('pdf-to-editable-ppt')
+test('investment recommendation PPT workflow uses the Gorden super skill', async () => {
+  assert.ok(AI_PPT_WORKFLOW_SKILLS.some((item) => item.name === 'GordenSuperPPTSkill'))
   const gorden = await loadAiSkill('GordenSuperPPTSkill')
-  assert.equal(orchestrator.name, 'create-reference-driven-editable-ppt')
-  assert.equal(converter.name, 'pdf-to-editable-ppt')
   assert.equal(gorden.name, 'GordenSuperPPTSkill')
   assert.match(gorden.description, /一键全流程 PPT/)
   assert.match(gorden.instructions, /GordenImagePPTGen/)
@@ -788,19 +772,17 @@ test('Gorden runtime paths prefer the nested local skill layout', () => {
   }
 })
 
-test('the built-in investment recommendation template is forced through the reference-driven workflow', async () => {
+test('the built-in investment recommendation task is forced through Gorden native mode', async () => {
   const template = AI_TEMPLATE_CATALOG.investment_recommendation_ppt
   assert.equal(mustUseReferenceDrivenPptPipeline(template), true)
   const workflow = await prepareInvestmentRecommendationPptWorkflow(template)
-  assert.equal(workflow.sourceMode, 'native-pptx')
+  assert.equal(workflow.sourceMode, 'gorden-native')
   assert.deepEqual(
     workflow.skills.map((item) => item.name),
-    [
-      'create-reference-driven-editable-ppt',
-      'GordenSuperPPTSkill',
-      'pdf-to-editable-ppt',
-    ],
+    ['GordenSuperPPTSkill'],
   )
+  assert.equal(workflow.generationPolicy.templateReuse, 'none')
+  assert.equal(workflow.generationPolicy.bridgePolicy, 'gorden-image-to-four-layer-pptx')
 })
 
 test('reference-driven semantic bridge preserves four layers with stable names', () => {
