@@ -261,6 +261,14 @@ test('Gorden text gate ignores duplicate reports of planned text but preserves r
     gordenUnplannedVisibleTexts(['行业：AI医疗'], ['AI']),
     [],
   )
+  assert.deepEqual(
+    gordenUnplannedVisibleTexts(['项目重点'], ['|', '•', '—', '【】']),
+    [],
+  )
+  assert.deepEqual(
+    gordenUnplannedVisibleTexts(['项目重点'], ['|模板标签']),
+    ['|模板标签'],
+  )
 })
 
 test('Gorden retries only unsafe icon layers with an explicit safe margin', () => {

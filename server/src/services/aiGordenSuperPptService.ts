@@ -481,6 +481,12 @@ export function gordenUnplannedVisibleTexts(
     .filter((value) => {
       const observed = canonicalVisibleText(value)
       if (!observed || expectedSet.has(observed)) return false
+      // Vision occasionally reports a divider, bullet or decorative stroke as
+      // standalone OCR text (for example "|", "•" or "—"). These shapes do
+      // not carry semantic content and must not invalidate an otherwise exact
+      // text contract. Numbers and any CJK/Latin content remain enforceable.
+      const semanticCharacters = observed.replace(/[\p{P}\p{S}]/gu, '')
+      if (!semanticCharacters) return false
       const isShortLatinFragment = /^[A-Za-z][A-Za-z0-9.+/-]{1,7}$/.test(observed)
       if (isShortLatinFragment && expected.some((text) => text.includes(observed))) {
         return false
@@ -1370,7 +1376,7 @@ function layoutVisionPrompt(plan: GordenSlidePlan, iconFiles: string[], width: n
 3. size_px 是文字在第一张源图中的像素字号，不是 PowerPoint pt；必须按源图实际字高估计。
 4. 文本内容以这里的索引为准，不要 OCR 改写；所有可读文字（包括标题、标签和艺术字）都归 texts。
 5. icons.file 必须使用第二张图标注的精确文件名；空白格不要返回。每个图标都必须返回 visible_text：若该图标切片错误包含数字或文字，逐字返回；完全没有文字时返回空字符串。
-6. unexpectedText 必须列出第一张图中所有不属于文字索引清单的可读内容，包括额外标题、卡片标签、图表标签、来源名称、模板样本公司、Logo 文字、日期、页码、水印、编号或无依据数字；不得因为内容看似合理而省略。
+6. unexpectedText 必须列出第一张图中所有不属于文字索引清单的可读内容，包括额外标题、卡片标签、图表标签、来源名称、模板样本公司、Logo 文字、日期、页码、水印、编号或无依据数字；不得因为内容看似合理而省略。但纯图形项目符号、分隔线、装饰竖线或横线不是文字，不得将它们识别为“|”、“•”、“—”等 unexpectedText。
 7. 每个 textIndex 只能对应一个连续文本区域；若第一张图把某条文字拆散、重复，或把多条文字重叠在同一位置，把相应原文写入 unexpectedText，不得编造 bbox 通过检查。
 
 文字索引：
