@@ -154,7 +154,7 @@ export const AI_TEMPLATE_CATALOG: Record<AiBusinessTaskType, AiTemplateDefinitio
     label: '尽调报告',
     description: '由资深投资经理先研读项目资料，再综合公司尽调模板语料库生成内部尽调报告',
     outputFormat: 'docx',
-    templateVersion: 'dd-corpus-202608-v14-no-summary-stable-paragraph-styles',
+    templateVersion: 'dd-corpus-202608-v15-human-prose-no-meta-summaries',
     referencePath: docsPath('尽调报告', '尽调报告统一生成规范.md'),
     referencePaths: docsTemplatePaths('尽调报告'),
     coreRulesPath: docsPath('尽调报告', '尽调报告统一生成规范.md'),

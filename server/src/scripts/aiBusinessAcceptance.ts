@@ -497,12 +497,48 @@ async function main() {
           && prompt.includes('不得输出事实卡或分析步骤')
           && prompt.includes('值得注意的是')
           && prompt.includes('不得出现“阶段与推进建议：”“主建议：”')
+          && prompt.includes('核心事实、投资含义与主要约束如下')
+          && prompt.includes('否则返回空字符串')
           && prompt.includes('不使用“该信息、该信号、该口径、该能力、该模式、该表述”'))
       && chapterUserPrompts.every((prompt) =>
         prompt.includes('项目资料研读底稿')
           && prompt.includes('内部事实卡（只作写作依据')
           && prompt.includes('不得复制卡片标题、来源名、片段号或处理说明到正文')),
     '输入先压缩为带来源索引的事实卡；模型仅输出重新组织后的章节 JSON',
+  )
+  const fallbackOnlyContent = await composeBusinessContent({
+    type: 'due_diligence_report',
+    template: AI_TEMPLATE_CATALOG.due_diligence_report,
+    skill: dueDiligenceSkill,
+    project,
+    sources,
+    sourceCutoffDate,
+    parameters: { diligenceScope: '商业尽调' },
+    dueDiligencePass: 'gap-analysis',
+    dueDiligenceRuntime: {
+      concurrency: 3,
+      maxGenerationAttempts: 1,
+      fetchImpl: async () => new Response('upstream unavailable', { status: 500 }),
+    },
+  })
+  const fallbackOnlyVisibleText = JSON.stringify({
+    sections: fallbackOnlyContent.sections,
+    highlights: fallbackOnlyContent.highlights,
+    risks: fallbackOnlyContent.risks,
+  })
+  assert(
+    checks,
+    'AI-010 模型异常时兜底内容仍采用人工表述且不生成章节报幕',
+    ![
+      '核心事实、投资含义与主要约束如下',
+      '尚无可靠结论',
+      '关键原件',
+      '权威记录',
+      '可供判断的可靠结论',
+    ].some((phrase) => fallbackOnlyVisibleText.includes(phrase))
+      && fallbackOnlyContent.sections.some((section) => section.summary === '')
+      && fallbackOnlyVisibleText.includes('公司现行部门设置、管理层分工和关键岗位人员尚未明确'),
+    fallbackOnlyVisibleText,
   )
   let researchRequestBody = ''
   const researchProbe = await fetchDueDiligenceNetworkEvidence({
@@ -979,6 +1015,34 @@ async function main() {
           && !sanitizedVisibleText.includes('主建议')
           && (sanitizedVisibleText.match(/建议继续跟踪/g) || []).length === 0,
         sanitizedVisibleText,
+      )
+      const sanitizedMetaWording = finalizeDueDiligenceContent({
+        ...content,
+        sections: content.sections.map((section, index) => index === 0
+          ? {
+              ...section,
+              summary: '“公司情况”的核心事实、投资含义与主要约束如下。',
+              findings: [{
+                text: '“公司情况”尚无可靠结论，需取得关键原件或权威记录后判断。',
+                status: '资料记载',
+                sourceIndexes: [0],
+              }],
+            }
+          : section),
+      })
+      const sanitizedMetaVisibleText = JSON.stringify(sanitizedMetaWording.sections[0])
+      assert(
+        checks,
+        'AI-010 小标题后删除报幕句并将统一缺口话术改为具体事项',
+        ![
+          '核心事实、投资含义与主要约束如下',
+          '尚无可靠结论',
+          '关键原件',
+          '权威记录',
+        ].some((phrase) => sanitizedMetaVisibleText.includes(phrase))
+          && sanitizedMetaWording.sections[0].summary === ''
+          && sanitizedMetaVisibleText.includes('公司主体、主营产品、团队分工和商业化进展尚待进一步明确'),
+        sanitizedMetaVisibleText,
       )
       const misplacedContentIssues = dueDiligenceContentQualityIssues({
         ...content,

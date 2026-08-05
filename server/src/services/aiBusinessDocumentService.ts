@@ -1315,11 +1315,13 @@ export async function generateBusinessDocx(input: {
         if (!currentSection) return
         contentChildren.push(dueHeading(`${groupIndex + 1}.${moduleIndex + 1} ${moduleTitle}`, 2))
         if (group.title === '投资概要' && moduleTitle === '公司情况') {
-          contentChildren.push(dueBody(currentSection.summary, {
-            keepNext: true,
-          }))
+          if (currentSection.summary) {
+            contentChildren.push(dueBody(currentSection.summary, {
+              keepNext: true,
+            }))
+          }
           contentChildren.push(overviewTable)
-        } else {
+        } else if (currentSection.summary) {
           contentChildren.push(dueBody(currentSection.summary, {
             keepNext: Boolean(currentSection.findings.length || currentSection.tables?.length),
           }))
@@ -1348,9 +1350,11 @@ export async function generateBusinessDocx(input: {
     const investmentConclusion = sectionByTitle.get('投资结论及建议')
     if (investmentConclusion) {
       contentChildren.push(dueHeading('投资结论及建议', 1, true))
-      contentChildren.push(dueBody(investmentConclusion.summary, {
-        keepNext: Boolean(investmentConclusion.findings.length || investmentConclusion.tables?.length),
-      }))
+      if (investmentConclusion.summary) {
+        contentChildren.push(dueBody(investmentConclusion.summary, {
+          keepNext: Boolean(investmentConclusion.findings.length || investmentConclusion.tables?.length),
+        }))
+      }
       investmentConclusion.findings.forEach((finding) => contentChildren.push(dueBody(finding.text)))
       investmentConclusion.tables?.forEach((table) => {
         contentChildren.push(...dueTable(table, investmentConclusion.title))
