@@ -557,32 +557,103 @@ function fivePageSectionTitle(title: string) {
   return title.replace(/[（(]\d+[）)]\s*$/u, '').trim()
 }
 
+const FIVE_PAGE_SUMMARY_PATTERNS: Record<string, RegExp[]> = {
+  risk: [
+    /风险|核验|差异|真实性|不确定|缺口|不足|依赖|待确认|需确认|尚需/,
+    /主体|股权|客户|合同|回款|技术指标|知识产权|合规/,
+  ],
+  financials: [
+    /财务|收入|成本|利润|毛利|现金流|回款|合同|验收|复购|经营/,
+    /万元|亿元|%|％|20\d{2}/,
+  ],
+  'investment-plan': [
+    /融资|估值|交易|投资|增资|老股|受让|持股|对价/,
+    /交割|条款|治理|信息权|回购|清算|优先|轮次/,
+  ],
+  'business-model': [
+    /商业模式|收入|销售|收费|订阅|硬件|服务|客户|毛利|复购/,
+  ],
+  product: [
+    /产品|平台|工具链|解决方案|应用|场景|客户/,
+  ],
+  technology: [
+    /技术|研发|算法|模型|数据|仿真|专利|知识产权|工程化/,
+  ],
+  market: [
+    /行业|市场|空间|规模|政策|产业链|趋势|渗透率/,
+  ],
+  competition: [
+    /竞争|竞品|对标|差异化|壁垒|优势|格局/,
+  ],
+  validation: [
+    /客户|订单|合同|商业化|案例|验证|交付|验收|回款|复购/,
+  ],
+  team: [
+    /团队|创始人|管理层|专家|履历|治理|CEO|CTO/,
+  ],
+  company: [
+    /公司|项目|主体|成立|注册|股权|历程|定位/,
+  ],
+}
+
+function fivePageSummaryScore(title: string, text: string, summary: boolean) {
+  const role = roleForTitle(title)
+  const titleTerms = title
+    .split(/[、，,与和及/]+/u)
+    .map((term) => term.trim())
+    .filter((term) => term.length >= 2)
+  const roleMatches = (FIVE_PAGE_SUMMARY_PATTERNS[role] ?? [])
+    .reduce((score, pattern) => score + (pattern.test(text) ? 5 : 0), 0)
+  const titleMatches = titleTerms
+    .reduce((score, term) => score + (text.includes(term) ? 4 : 0), 0)
+  // Prefer the authored section summary when it is directionally relevant;
+  // a finding must be materially more on-topic before it replaces that
+  // summary. This avoids selecting generic findings that merely repeat the
+  // section title while still rescuing badly mislabelled duplicate sections.
+  return roleMatches + titleMatches + (summary ? 5 : 0)
+}
+
+function fivePageRepresentativeSummary(title: string, sections: BusinessSection[]) {
+  const candidates = sections.flatMap((section) => [
+    { text: section.summary, summary: true },
+    ...section.findings.map((finding) => ({ text: finding.text, summary: false })),
+  ])
+    .map((candidate, index) => ({
+      ...candidate,
+      index,
+      text: candidate.text.replace(/。；/gu, '。').replace(/；{2,}/gu, '；').trim(),
+    }))
+    .filter((candidate) => Boolean(candidate.text))
+  return candidates.sort((left, right) => (
+    fivePageSummaryScore(title, right.text, right.summary)
+      - fivePageSummaryScore(title, left.text, left.summary)
+    || Number(right.summary) - Number(left.summary)
+    || left.index - right.index
+  ))[0]?.text || '相关事实仍需进一步核验。'
+}
+
 function consolidateFivePageSections(sections: BusinessSection[]) {
-  const consolidated = new Map<string, BusinessSection>()
+  const grouped = new Map<string, BusinessSection[]>()
   for (const section of sections) {
     const title = fivePageSectionTitle(section.title)
-    const existing = consolidated.get(title)
-    if (!existing) {
-      consolidated.set(title, { ...section, title })
-      continue
-    }
-    const summaries = uniqueCompactTexts([existing.summary, section.summary])
-    consolidated.set(title, {
-      ...existing,
-      summary: summaries.join('；'),
-      summarySourceIndexes: [...new Set([
-        ...(existing.summarySourceIndexes ?? []),
-        ...(section.summarySourceIndexes ?? []),
-      ])],
-      findings: [...existing.findings, ...section.findings]
+    grouped.set(title, [...(grouped.get(title) ?? []), section])
+  }
+  return [...grouped.entries()].map(([title, matchingSections]) => {
+    const first = matchingSections[0]
+    return {
+      ...first,
+      title,
+      summary: fivePageRepresentativeSummary(title, matchingSections),
+      summarySourceIndexes: [...new Set(matchingSections.flatMap((section) =>
+        section.summarySourceIndexes ?? []))],
+      findings: matchingSections.flatMap((section) => section.findings)
         .filter((finding, index, values) =>
           values.findIndex((candidate) => candidate.text === finding.text) === index),
-      tables: [...(existing.tables ?? []), ...(section.tables ?? [])]
+      tables: matchingSections.flatMap((section) => section.tables ?? [])
         .filter((table, index, values) =>
           values.findIndex((candidate) => candidate.title === table.title) === index),
-    })
-  }
-  return [...consolidated.values()]
+    }
+  })
 }
 
 function fivePageBucketForSection(section: BusinessSection): FivePageBucket {
@@ -649,15 +720,14 @@ function groupedDecisionTexts(input: {
     ? input.sections.flatMap((section) => {
         const numericalFinding = section.findings.find((finding) =>
           /\d|%|％|万元|亿元|收入|订单|估值|融资|占股/.test(finding.text))
-          ?? section.findings[0]
-        return numericalFinding ? [compactText(numericalFinding.text, 80)] : []
+        return numericalFinding ? [compactText(numericalFinding.text, 72)] : []
       }).slice(0, 2)
     : []
   return [...new Set([
     input.title,
     ...input.sections.flatMap((section) => [
       section.title,
-      compactText(section.summary || section.findings[0]?.text || '相关事实仍需进一步核验。', 96),
+      compactText(section.summary || section.findings[0]?.text || '相关事实仍需进一步核验。', 84),
     ]),
     ...evidence,
   ].map((value) => value.trim()).filter(Boolean))]
@@ -2593,27 +2663,37 @@ export async function generateInvestmentRecommendationPptWithGorden(input: {
     const observedUnexpectedText = Array.isArray(vision.unexpectedText)
       ? vision.unexpectedText.map(String).filter(Boolean)
       : []
-    const unexpectedText = gordenUnplannedVisibleTexts(
-      plan.expectedTexts,
-      observedUnexpectedText,
-    )
+    const textContractIssues = gordenTextContractIssues(plan, vision)
+    const unexpectedText = textContractIssues.unexpectedText
     const residue = unexpectedText.filter((text) => sampleTerms.some((term) =>
       text.toLowerCase().includes(term.toLowerCase())))
     if (residue.length) {
       throw new Error(`Gorden 第 ${plan.number} 页存在模板样本残留：${residue.join('、')}`)
     }
-    if (unexpectedText.length) {
+    if (unexpectedText.length || textContractIssues.missingTextIndexes.length) {
       await writeJson(path.join(pageRoot, 'text-contract-rejected.json'), {
-        schemaVersion: '1.0',
+        schemaVersion: '1.1',
         slide: plan.number,
+        observedUnexpectedText,
         unexpectedText,
+        missingTextIndexes: textContractIssues.missingTextIndexes,
+        detectedTextIndexes: (vision.texts ?? [])
+          .map((item) => Number(item.textIndex))
+          .filter((index) => Number.isInteger(index)),
       })
+      const detail = [
+        unexpectedText.length ? `清单外文字：${unexpectedText.join('、')}` : '',
+        textContractIssues.missingTextIndexes.length
+          ? `缺少文字索引：${textContractIssues.missingTextIndexes.join('、')}`
+          : '',
+      ].filter(Boolean).join('；')
       throw Object.assign(
-        new Error(`Gorden 第 ${plan.number} 页出现文字清单外内容：${unexpectedText.join('、')}`),
+        new Error(`Gorden 第 ${plan.number} 页最终文字定位未通过：${detail}`),
         {
           code: 'GORDEN_VISIBLE_TEXT_CONTRACT_REJECTED',
           slideNumber: plan.number,
           unexpectedText,
+          missingTextIndexes: textContractIssues.missingTextIndexes,
         },
       )
     }

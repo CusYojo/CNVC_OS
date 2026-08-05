@@ -258,8 +258,66 @@ test('five-page planning keeps financial operating quality on the decision page'
   assert.equal(plan[3].expectedTexts.filter((text) => text === '融资、估值与交易安排').length, 1)
   assert.equal(plan[3].expectedTexts.filter((text) => text === '关键风险与核验重点').length, 1)
   assert.equal(plan[3].expectedTexts.some((text) => /（2）/.test(text)), false)
+  assert.equal(plan[3].expectedTexts.some((text) => /；/.test(text)), false)
   assert.ok(plan.slice(1, 4).every((slide) =>
     slide.expectedTexts.every((text) => text.length <= 110)))
+})
+
+test('five-page planning does not join unrelated duplicate summaries into one text box', () => {
+  const plan = buildGordenSlidePlan({
+    project: { name: '大衍科技', industry: '具身智能' },
+    content: {
+      ...content,
+      sections: [
+        content.sections[0],
+        {
+          title: '产品、技术与工程化进展',
+          summary: '公司围绕数据采集、仿真训练和工具链形成产品体系。',
+          findings: [],
+        },
+        {
+          title: '融资、估值与交易安排',
+          summary: '团队材料显示公司具备自动驾驶、AI与数字孪生背景的专家资源。',
+          findings: [{ text: '核心团队由产业专家构成。', status: '资料记载', sourceIndexes: [0] }],
+        },
+        {
+          title: '融资、估值与交易安排（2）',
+          summary: '公司自述采用场景重建与生成式AI融合的技术路线。',
+          findings: [],
+        },
+        {
+          title: '融资、估值与交易安排（3）',
+          summary: '已有交易框架采用增资入股与老股受让，并设置交割条件、治理权利及回购安排。',
+          findings: [],
+        },
+        {
+          title: '财务表现与经营质量',
+          summary: '合同、验收、收入与回款口径仍需核验。',
+          findings: [{ text: '交流纪要记载2025年收入主要来自数据销售。', status: '资料记载', sourceIndexes: [1] }],
+        },
+        {
+          title: '关键风险与核验重点',
+          summary: '已有交易框架倾向于增资入股与老股受让。',
+          findings: [],
+        },
+        {
+          title: '关键风险与核验重点（2）',
+          summary: '核心风险包括主体与股权口径、收入与客户真实性以及技术可复制性。',
+          findings: [],
+        },
+      ],
+    },
+    disclaimer: '内部使用。',
+    pageCount: '5',
+  })
+  const decisionTexts = plan[3].expectedTexts
+  assert.ok(decisionTexts.some((text) => /增资入股.*交割条件.*回购安排/.test(text)))
+  assert.ok(decisionTexts.some((text) => /核心风险包括主体与股权口径/.test(text)))
+  assert.equal(decisionTexts.some((text) => /团队材料显示/.test(text)), false)
+  assert.equal(decisionTexts.some((text) => /场景重建与生成式AI/.test(text)), false)
+  assert.equal(decisionTexts.some((text) => /；/.test(text)), false)
+  assert.equal(decisionTexts.some((text) => /核心团队由产业专家构成/.test(text)), false)
+  assert.ok(decisionTexts.every((text) => text.length <= 84))
 })
 
 test('Gorden text-contract retry removes invented architecture labels without relaxing facts', () => {
