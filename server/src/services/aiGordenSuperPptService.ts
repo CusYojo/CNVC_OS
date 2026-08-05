@@ -222,11 +222,13 @@ async function findGordenResumeCheckpoint(input: {
             const rejection = JSON.parse(await readFile(rejectionPath, 'utf8')) as {
               unexpectedText?: unknown
             }
-            const currentExpectedTexts = new Set(
-              currentPlanByNumber.get(slideNumber)?.expectedTexts ?? [],
-            )
+            const currentExpectedTexts = currentPlanByNumber
+              .get(slideNumber)?.expectedTexts ?? []
             const stillUnexpected = Array.isArray(rejection.unexpectedText)
-              ? rejection.unexpectedText.map(String).some((text) => !currentExpectedTexts.has(text))
+              ? gordenUnplannedVisibleTexts(
+                  currentExpectedTexts,
+                  rejection.unexpectedText.map(String),
+                ).length > 0
               : true
             if (stillUnexpected) continue
           }
