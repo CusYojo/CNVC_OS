@@ -91,6 +91,7 @@ import {
 import {
   fetchProjectQaModelEvidence,
   fetchVerifiedProjectWebEvidence,
+  PROJECT_QA_RESEARCH_TOPICS,
   projectQaResearchTopicsForSources,
   projectWebResearchTopicsForSources,
   type ProjectQaModelResearchAudit,
@@ -469,6 +470,27 @@ function sharedInvestmentResearchTopics(
   const intent = typeof parameters.researchIntent === 'string'
     ? parameters.researchIntent.trim()
     : ''
+  if (type === 'investment_recommendation_ppt') {
+    const chapterResearch: Record<ProjectQaResearchTopic, string> = {
+      '项目主体与工商': '法律主体、成立时间、注册资本、所在地和历史沿革',
+      '股权、治理与关联关系': '股权结构、实际控制人、董事治理和关联关系',
+      '创始人与核心团队': '创始人、核心团队履历、分工和任职关系',
+      '产品、技术指标与工程化里程碑': '具名产品、技术路线、性能指标、工程化和交付进展',
+      '知识产权与研发合作': '专利、软件著作权、论文、研发合作和权属',
+      '客户、订单与商业化信号': '客户、测试、合同、订单、交付、验收、收入、回款和复购',
+      '财务与现金流': '历史收入、成本、毛利、利润、现金流、应收回款和管理层预测',
+      '融资、估值与投资方': '历史融资、本轮融资、投资方、投前投后估值和资金用途',
+      '交易方案与关键条款': '投资金额、增资或老股、持股比例、交割条件、治理和保护性条款',
+      '行业、市场空间与政策': `${project.industry || '所属细分行业'}定义、TAM/SAM/SOM、市场规模、增长率、渗透率、需求和政策`,
+      '竞品、替代方案与项目级对标': '具名竞品、替代方案、产品参数、价格、客户场景、融资和商业化对标',
+      '监管、诉讼与重大风险': '资质、行政处罚、诉讼、失信、监管和其他可能影响交易的风险',
+    }
+    return [...new Set([
+      ...(intent ? [`${subject} ${intent}`] : []),
+      ...PROJECT_QA_RESEARCH_TOPICS.map((topic) =>
+        `${subject} ${chapterResearch[topic]}`),
+    ])]
+  }
   const common = [
     `${subject} 公司主体、股东与治理、创始人和核心团队`,
     `${subject} 产品、技术指标、知识产权、研发合作和工程化进展`,
@@ -478,13 +500,7 @@ function sharedInvestmentResearchTopics(
   ]
   const typeSpecific = type === 'investment_proposal'
     ? [`${subject} 商业模式、财务表现、投资亮点、交易条件和退出路径`]
-    : type === 'investment_recommendation_ppt'
-      ? [
-          `${project.industry || subject} 市场规模、增长率、渗透率、产业政策、采购需求和公开预测`,
-          `${project.industry || subject} 具名竞品、替代方案、产品参数、客户场景、融资和商业化进展`,
-          `${subject} 市场定位、差异化、经营数据、投资亮点和投资判断`,
-        ]
-      : type === 'due_diligence_report'
+    : type === 'due_diligence_report'
         ? [`${subject} 财务报表、现金流、关联交易、劳动用工和合规事项`]
         : type === 'project_qa'
           ? [`${subject} 近期进展、争议事项、公开回应和下一步投资核验重点`]
@@ -493,16 +509,15 @@ function sharedInvestmentResearchTopics(
     ...(intent ? [`${subject} ${intent}`] : []),
     ...common,
     ...typeSpecific,
-  ])].slice(0, type === 'investment_recommendation_ppt' ? 9 : 7)
+  ])].slice(0, 7)
 }
 
 function investmentRecommendationWebTopicsForSources(
   sources: readonly EvidenceSource[],
-  maxTopics = 9,
+  maxTopics = 12,
 ): ProjectQaResearchTopic[] {
   return [...new Set<ProjectQaResearchTopic>([
-    '行业、市场空间与政策',
-    '竞品、替代方案与项目级对标',
+    ...PROJECT_QA_RESEARCH_TOPICS,
     ...projectWebResearchTopicsForSources(sources, maxTopics),
   ])].slice(0, maxTopics)
 }
@@ -1401,7 +1416,7 @@ async function executeTask(taskId: string) {
           maxSources: task.type === 'due_diligence_report'
             ? 24
             : task.type === 'investment_recommendation_ppt'
-              ? 20
+              ? 28
               : 18,
         })
         sharedNetworkResearch = research.audit
@@ -1422,7 +1437,7 @@ async function executeTask(taskId: string) {
             nativeModelSearch: true,
           },
           requestedTopics: task.type === 'investment_recommendation_ppt'
-            ? investmentRecommendationWebTopicsForSources(sources, 9)
+            ? investmentRecommendationWebTopicsForSources(sources, 12)
             : projectWebResearchTopicsForSources(
                 sources,
                 task.type === 'due_diligence_report' ? 8 : 6,
@@ -1431,7 +1446,7 @@ async function executeTask(taskId: string) {
           maxSources: task.type === 'due_diligence_report'
             ? 20
             : task.type === 'investment_recommendation_ppt'
-              ? 16
+              ? 24
               : 14,
         })
         sharedModelResearch = research.audit
@@ -1452,6 +1467,7 @@ async function executeTask(taskId: string) {
     if ([
       'compliance_statement',
       'investment_proposal',
+      'investment_recommendation_ppt',
       'due_diligence_report',
     ].includes(task.type)) {
       await updateStage(taskId, '深度研读项目资料并建立事实底稿', 26)
@@ -1824,7 +1840,10 @@ async function executeTask(taskId: string) {
           sourceCutoffDate,
           parameters,
           projectKnowledgeBrief,
-          // 首轮也执行完整质量门禁；如后续识别出重大缺口，再基于新增证据定向重生。
+          investmentRecommendationPass: task.type === 'investment_recommendation_ppt'
+            ? 'gap-analysis'
+            : undefined,
+          // 投资建议书首轮只识别逐章缺口；联网补全后再执行最终专业性门禁。
           dueDiligencePass: task.type === 'due_diligence_report' ? 'final' : undefined,
           dueDiligenceRuntime: task.type === 'due_diligence_report'
             ? dueDiligenceRuntime(35, 49)
@@ -2018,8 +2037,8 @@ async function executeTask(taskId: string) {
                 ...parameters,
                 nativeModelSearch: true,
               },
-              requestedTopics: investmentRecommendationWebTopicsForSources(sources, 10),
-              maxSources: 20,
+              requestedTopics: investmentRecommendationWebTopicsForSources(sources, 12),
+              maxSources: 24,
               allowIndustryContext: true,
             })
             investmentRecommendationGapPageResearch = research.audit
@@ -2033,26 +2052,6 @@ async function executeTask(taskId: string) {
               rawSources.push(...research.sources)
               evidenceScreening = screenEvidenceSources(rawSources, task.type)
               sources = evidenceScreening.usable
-
-              await updateStage(taskId, '整合联网证据并重新生成投资建议书', 58)
-              content = await withTaskHeartbeat(
-                taskId,
-                () => composeBusinessContent({
-                  type: task.type as AiExecutableTaskType,
-                  template,
-                  skill,
-                  project,
-                  sources,
-                  sourceCutoffDate,
-                  parameters,
-                }),
-                {
-                  startProgress: 58,
-                  endProgress: 66,
-                  stage: (elapsedSeconds) =>
-                    `大模型正在整合联网证据（已等待 ${elapsedSeconds} 秒）`,
-                },
-              )
             }
           } catch (error) {
             console.warn(
@@ -2061,6 +2060,32 @@ async function executeTask(taskId: string) {
             )
           }
         }
+        await updateStage(taskId, '按章节整合证据并执行投资专业性检查', 58)
+        projectKnowledgeBrief = await buildProjectKnowledgeBrief({
+          project,
+          sources,
+          sourceCutoffDate,
+        })
+        content = await withTaskHeartbeat(
+          taskId,
+          () => composeBusinessContent({
+            type: task.type as AiExecutableTaskType,
+            template,
+            skill,
+            project,
+            sources,
+            sourceCutoffDate,
+            parameters,
+            projectKnowledgeBrief,
+            investmentRecommendationPass: 'final',
+          }),
+          {
+            startProgress: 58,
+            endProgress: 66,
+            stage: (elapsedSeconds) =>
+              `大模型正在逐章重写并复核投资建议书（已等待 ${elapsedSeconds} 秒）`,
+          },
+        )
       }
     }
     if (evidenceScreening.rejected.length && task.type !== 'custom_template_document') {
@@ -2734,6 +2759,7 @@ async function executeTask(taskId: string) {
     )
     const nonRecoverableCode = [
       'CUSTOM_TEMPLATE_FORMAT_MISMATCH',
+      'INVESTMENT_RECOMMENDATION_CONTENT_QUALITY_REJECTED',
       'GORDEN_VISIBLE_TEXT_CONTRACT_REJECTED',
       'GORDEN_VISUAL_QA_REJECTED',
       'TASK_NOT_FOUND',

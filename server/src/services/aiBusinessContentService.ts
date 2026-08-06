@@ -553,7 +553,7 @@ function fallbackContent(
       ? `关于对${meaningfulValue(project.companyName) || project.name}实施股权投资的提案`
       : `${project.name}${template.label}`,
     executiveSummary: type === 'investment_recommendation_ppt'
-      ? '公司主体、核心产品、客户合同、历史财务及本轮交易条款尚待核实，当前不宜形成确定性投资结论。'
+      ? '公司主体、核心产品的商业化状态、客户合同履行、历史财务及本轮交易条款尚待核实。上述事项将共同决定收入质量、估值合理性和可执行的投资条件；在关键事实明确前，暂不形成确定性投资结论。'
       : '项目的核心产品、团队能力、商业化进展、财务表现与交易条件需要结合可核验事实综合判断；影响投资决策的关键不确定事项应在接触、跟踪或立项前完成核实。',
     sections,
     highlights: highlights.length ? highlights : ['项目定位、产品价值和商业验证仍需在补充资料后评估。'],
@@ -587,6 +587,11 @@ export function normalizeBusinessContent(
   }))
   const seenFindings: string[] = []
   const sections = template.sections.map((title, index): BusinessSection => {
+    // 投资建议书的章节职责不同，同一底层事实可以分别用于公司、交易与风险判断。
+    // 仅在本章节内去掉机械重复，避免全篇去重把后面的关键页面清空。
+    const sectionSeenFindings = template.type === 'investment_recommendation_ppt'
+      ? []
+      : seenFindings
     const indexedItem = sectionsRaw[index] as Record<string, unknown> | undefined
     const item = template.type === 'due_diligence_report'
       ? sectionsByTitle.get(title)
@@ -611,8 +616,8 @@ export function normalizeBusinessContent(
           Number.isInteger(v) && Number(v) >= 0 && Number(v) < sourceCount))].slice(0, 8)
         : []
       const findingText = safeText(value.text, '')
-      if (!findingText || isNearDuplicate(findingText, seenFindings)) return []
-      seenFindings.push(findingText)
+      if (!findingText || isNearDuplicate(findingText, sectionSeenFindings)) return []
+      sectionSeenFindings.push(findingText)
       return [{
         text: findingText,
         // “资料记载”必须能回指本次证据集合；模型漏引或伪造索引时自动降级。
@@ -624,8 +629,8 @@ export function normalizeBusinessContent(
     const selectedFindings = findings.length
       ? findings.slice(0, 8)
       : fallbackFindings.filter((finding) => {
-        if (isNearDuplicate(finding.text, seenFindings)) return false
-        seenFindings.push(finding.text)
+        if (isNearDuplicate(finding.text, sectionSeenFindings)) return false
+        sectionSeenFindings.push(finding.text)
         return true
       })
     let normalizedFindings = selectedFindings.length
@@ -665,6 +670,7 @@ export function normalizeBusinessContent(
     const tablesRaw = (
       template.type === 'investment_proposal'
       || template.type === 'due_diligence_report'
+      || template.type === 'investment_recommendation_ppt'
     ) && Array.isArray(item?.tables)
       ? item.tables
       : []
@@ -822,13 +828,29 @@ export function sanitizeInvestmentRecommendationText(value: unknown) {
     .replace(/(?:当前|现阶段)?(?:本项目|该项目|[\u3400-\u9fffA-Za-z0-9（）()·]+项目)?(?:当前)?处于线索阶段[，,。；]?/g, '')
     .replace(/(?:项目)?仍处线索阶段[，,。；]?/g, '')
     .replace(/建议本项目由[“"]?线索[”"]?推进至[“"]?立项(?:\/专项尽调)?[”"]?阶段[，,]?暂不直接进入投资决策[。；]?/g, '')
-    .replace(/项目档案登记主体为/g, '当前项目名称为')
+    .replace(/(?:现阶段)?建议(?:本项目|该项目)?(?:进入初筛|申请立项|启动尽调)[。；;]?/g, '建议进一步核实关键经营与交易事项。')
+    .replace(/(?:现阶段)?建议(?:本项目|该项目)?(?:提请上会|提交投决)[。；;]?/g, '建议在交易条件明确后形成正式投资决策。')
+    .replace(/(?:现阶段)?建议(?:本项目|该项目)?继续跟踪[。；;]?/g, '关键事项核实前暂不形成确定性投资结论。')
+    .replace(/(?:现阶段)?建议(?:本项目|该项目)?(?:暂缓推进|归档)(?:建议)?[。；;]?/g, '当前不建议投资。')
+    .replace(/(?:进入初筛|申请立项|启动尽调)(?:阶段|流程)?/g, '进一步核实关键事项')
+    .replace(/(?:提请上会|提交投决)(?:阶段|流程)?/g, '形成正式投资决策')
+    .replace(/继续跟踪(?:阶段|流程)?/g, '暂不形成确定性投资结论')
+    .replace(/(?:暂缓推进|归档建议|归档)(?:阶段|流程)?/g, '当前不建议投资')
+    .replace(/项目档案登记主体为/g, '公司登记名称为')
     .replace(/项目资料多处指向/g, '相关文件使用')
     .replace(/项目档案与(?:投资文件|项目资料)(?:之间)?(?:的)?口径不完全一致/g, '不同文件的主体或交易口径不一致')
+    .replace(/项目档案(?:与|中|内|所载|记载|显示|表明)?/g, '公司相关文件')
     .replace(/(?:基于|根据)(?:当前|现有|已提供|本轮)?(?:项目)?(?:资料|材料|证据)[，,]?/g, '')
+    .replace(/(?:当前|现有)(?:项目)?(?:资料库|资料|材料|证据)(?:未|尚未)(?:显示|披露|提供|覆盖)?/g, '公司尚未披露')
+    .replace(/(?:当前|现有)(?:项目)?(?:资料库|资料|材料|证据)/g, '相关原始文件')
+    .replace(/(?:项目资料库|项目知识库|资料库|知识库)(?:中|内|中的|内的)?/g, '相关原始文件')
+    .replace(/项目(?:资料|材料)(?:中|内|中的|内的)?/g, '相关原始文件')
     .replace(/(?:公司|行业)(?:资料|材料|证据)(?:显示|表明|记载)(?:其)?/g, '')
+    .replace(/(?:资料|材料|证据)(?:显示|表明|记载)[，,]?/g, '')
     .replace(/交流纪要记载[，,]?/g, '公司披露，')
     .replace(/资料记载[，,]?/g, '')
+    .replace(/AI\s*(?:辅助|生成|初稿)/gi, '')
+    .replace(/(?:项目阶段|线索阶段|阶段与推进建议|投资判断与推进建议)[：:]?/g, '')
     .replace(/形成闭环产品组合/g, '形成产品组合')
     .replace(/赛道具备(?:早期)?窗口/g, '相关需求正在形成')
     .replace(/具备(?:赛道|早期)窗口/g, '相关需求正在形成')
@@ -840,6 +862,12 @@ export function sanitizeInvestmentRecommendationText(value: unknown) {
     .replace(/仍是尽调重点/g, '需要重点核对')
     .replace(/“([^”]+)”的核心事实、投资含义与主要约束如下[。；]?/g, '')
     .replace(/“([^”]+)”尚无可靠结论，需取得关键原件或权威记录后判断[。；]?/g, '$1相关事实尚未明确，应取得相应文件后判断。')
+    .replace(/尚无可靠结论/g, '暂不形成确定性投资结论')
+    .replace(/(?:值得注意的是|需要强调的是|需要指出的是|不难发现|不难看出|由此可见|综上所述|显而易见|毋庸置疑|总体来看|综合来看|在此背景下)[，,:：]?/g, '')
+    .replace(/(?:多维度|全方位)赋能/g, '支持')
+    .replace(/生态闭环/g, '业务协同关系')
+    .replace(/(?:项目|公司)具备([^。；]{0,36})(?:投资)?(?:价值|潜力|亮点)/g, '公司的$1投资逻辑仍需由具体经营与交易事实验证')
+    .replace(/亮点集中在/g, '核心投资逻辑包括')
     .replace(/[ 	]+/g, ' ')
     .replace(/。{2,}/g, '。')
     .replace(/^(?:但|不过)[，,]?\s*/g, '')
@@ -1051,7 +1079,7 @@ export function finalizeInvestmentRecommendationPptContent(
     title: `${subject}投资建议书`,
     executiveSummary: sanitizeInvestmentRecommendationText(
       replaceSampleSubject(finalized.executiveSummary),
-    ) || '公司主体、核心产品、客户合同、历史财务及本轮交易条款尚待核实，当前不宜形成确定性投资结论。',
+    ) || '公司主体、核心产品的商业化状态、客户合同履行、历史财务及本轮交易条款尚待核实。上述事项将共同决定收入质量、估值合理性和可执行的投资条件；在关键事实明确前，暂不形成确定性投资结论。',
     sections,
     highlights: finalized.highlights.map((value) =>
       sanitizeInvestmentRecommendationText(replaceSampleSubject(value))).filter(Boolean),
@@ -1619,10 +1647,284 @@ function customTemplateContentQualityIssues(
   return [...new Set(issues)].slice(0, 12)
 }
 
+const INVESTMENT_RECOMMENDATION_SECTION_RULES: Array<{
+  title: RegExp
+  body: RegExp
+  research: string
+  dataOrDisclosure?: boolean
+}> = [
+  {
+    title: /投资摘要/,
+    body: /投资|估值|交易|客户|收入|产品|技术|风险|结论/,
+    research: '补充支撑投资判断的公司、产品、客户、经营、估值与交易事实，以及主要反证',
+  },
+  {
+    title: /公司概况|发展历程/,
+    body: /成立|主体|注册|总部|沿革|股东|公司|历程/,
+    research: '核验法律主体、成立时间、注册资本、所在地、历史沿革与关键里程碑',
+  },
+  {
+    title: /股权|核心团队|治理/,
+    body: /股东|持股|实控|控制人|创始人|团队|董事|治理|任职|履历/,
+    research: '核验股权结构、实际控制人、董事治理、创始人与核心团队履历及关联关系',
+  },
+  {
+    title: /产品|核心技术/,
+    body: /产品|平台|系统|技术|算法|模型|性能|指标|专利|研发|工程化|交付形态/,
+    research: '核验具名产品、目标场景、交付形态、技术路线、性能指标、知识产权与工程化进展',
+  },
+  {
+    title: /商业模式|客户验证/,
+    body: /客户|订单|合同|试点|测试|交付|验收|回款|复购|收费|收入|商业化/,
+    research: '区分客户接洽、测试、合同、交付、验收、收入、回款和复购，并补充收费与获客模式',
+  },
+  {
+    title: /行业|市场空间/,
+    body: /市场|行业|规模|增长|渗透率|政策|需求|TAM|SAM|SOM|亿元|万亿元|%|％/i,
+    research: '补充细分市场定义、TAM/SAM/SOM、市场规模、增长率、渗透率、需求驱动和政策依据',
+    dataOrDisclosure: true,
+  },
+  {
+    title: /竞争|差异化/,
+    body: /竞品|竞争|对标|替代|差异|壁垒|参数|价格|融资|客户/,
+    research: '补充具名竞品与替代方案，并按产品形态、技术参数、客户场景、价格或商业进展进行同口径对标',
+  },
+  {
+    title: /财务分析/,
+    body: /收入|成本|毛利|利润|现金流|应收|回款|费用|烧钱|财务|万元|亿元|%|％/,
+    research: '补充历史财务、经营指标、收入质量、毛利、现金流、应收回款及资金续航，区分历史与预测口径',
+    dataOrDisclosure: true,
+  },
+  {
+    title: /融资与估值/,
+    body: /融资|轮次|金额|投资方|估值|投前|投后|增资|股权|万元|亿元|%|％/,
+    research: '补充历史融资与本轮融资的时间、轮次、金额、投资方、投前投后估值及定价依据',
+    dataOrDisclosure: true,
+  },
+  {
+    title: /投资方案|交易方案/,
+    body: /投资金额|增资|老股|受让|持股|交割|条款|回购|清算|反稀释|董事|退出|万元|亿元|%|％/,
+    research: '补充投资金额、交易方式、持股比例、资金用途、交割条件、治理权利、保护性条款和退出安排',
+    dataOrDisclosure: true,
+  },
+  {
+    title: /投资逻辑|投资亮点/,
+    body: /投资逻辑|产品|技术|客户|商业化|市场|团队|估值|回报|壁垒|风险/,
+    research: '用已核验的产品、技术、客户、市场、团队与交易事实形成可证伪的核心投资逻辑',
+  },
+  {
+    title: /风险|待落实|核验/,
+    body: /风险|不确定|依赖|合规|诉讼|处罚|客户|收入|技术|股权|交割|核验/,
+    research: '补充可能改变投资结论的主体、股权、技术、客户、财务、合规和交易风险及对应核验动作',
+  },
+]
+
+function investmentRecommendationSectionBody(section: BusinessSection) {
+  return [
+    section.summary,
+    ...section.findings.map((finding) => finding.text),
+    ...(section.tables ?? []).flatMap((table) => [
+      table.title,
+      table.unit,
+      ...table.columns,
+      ...table.rows.flat(),
+    ]),
+  ].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim()
+}
+
+function investmentRecommendationSectionRule(title: string) {
+  return INVESTMENT_RECOMMENDATION_SECTION_RULES.find((rule) => rule.title.test(title))
+}
+
+function investmentRecommendationSectionSourceIndexes(section: BusinessSection) {
+  return [...new Set([
+    ...(section.summarySourceIndexes ?? []),
+    ...section.findings.flatMap((finding) => finding.sourceIndexes),
+    ...(section.tables ?? []).flatMap((table) => table.sourceIndexes),
+  ])]
+}
+
+function investmentRecommendationBriefTopics(title: string): ProjectKnowledgeTopic[] {
+  if (/投资摘要/.test(title)) return [...PROJECT_KNOWLEDGE_TOPICS]
+  if (/公司概况|发展历程/.test(title)) return ['公司主体与历史沿革']
+  if (/股权|核心团队|治理/.test(title)) {
+    return ['股权、融资与治理', '创始人与核心团队']
+  }
+  if (/产品|核心技术/.test(title)) return ['产品、技术与知识产权']
+  if (/商业模式|客户验证/.test(title)) return ['商业模式、客户与供应链']
+  if (/行业|市场空间|竞争|差异化/.test(title)) return ['行业、市场与竞争']
+  if (/财务分析/.test(title)) return ['财务、现金流与预测']
+  if (/融资与估值/.test(title)) return ['股权、融资与治理', '交易方案、估值与退出']
+  if (/投资方案/.test(title)) return ['交易方案、估值与退出']
+  if (/投资逻辑/.test(title)) {
+    return [
+      '产品、技术与知识产权',
+      '商业模式、客户与供应链',
+      '行业、市场与竞争',
+      '财务、现金流与预测',
+      '交易方案、估值与退出',
+    ]
+  }
+  if (/风险|待落实/.test(title)) return ['合规、风险与待确认事项']
+  return [...PROJECT_KNOWLEDGE_TOPICS]
+}
+
+function investmentRecommendationFindingStatus(
+  nature: ProjectKnowledgeBrief['facts'][number]['nature'],
+): BusinessFinding['status'] {
+  if (nature === '分析判断') return 'AI推断'
+  if (nature === '冲突或缺口') return '待核验'
+  return '资料记载'
+}
+
+function numericDisclosureTable(section: BusinessSection): BusinessTable | undefined {
+  const statements = [
+    ...(section.summary && section.summarySourceIndexes?.length
+      ? [{ text: section.summary, sourceIndexes: section.summarySourceIndexes }]
+      : []),
+    ...section.findings.map((finding) => ({
+      text: finding.text,
+      sourceIndexes: finding.sourceIndexes,
+    })),
+  ].filter((item) =>
+    item.sourceIndexes.length > 0
+    && /(?:\d[\d,.]*\s*(?:%|％|万元|亿元|万亿元|年|月|家|项|倍)|20\d{2})/.test(item.text))
+  const uniqueStatements = statements.filter((item, index) =>
+    statements.findIndex((candidate) => comparisonKey(candidate.text) === comparisonKey(item.text)) === index)
+  if (uniqueStatements.length < 2) return undefined
+  const metricPattern = /营业收入|收入|毛利率|净利润|利润|现金流|应收账款|回款|融资金额|投前估值|投后估值|估值|持股比例|市场规模|增长率|渗透率|客户数量|订单金额|注册资本/
+  return {
+    title: `${section.title}关键数据口径`,
+    unit: '按来源披露',
+    columns: ['指标', '披露口径'],
+    rows: uniqueStatements.slice(0, 5).map((item, index) => [
+      item.text.match(metricPattern)?.[0] ?? `关键指标${index + 1}`,
+      item.text.slice(0, 140),
+    ]),
+    status: '资料记载',
+    sourceIndexes: [...new Set(uniqueStatements.flatMap((item) => item.sourceIndexes))].slice(0, 8),
+  }
+}
+
+export function enrichInvestmentRecommendationContentFromBrief(
+  content: BusinessContent,
+  brief: ProjectKnowledgeBrief | undefined,
+  options: { pageCount?: string | number } = {},
+) {
+  if (!brief) return content
+  const requestedPageCount = Number.parseInt(String(options.pageCount ?? ''), 10)
+  const compactDeck = Number.isFinite(requestedPageCount) && requestedPageCount <= 5
+  const acceptedFindings: string[] = []
+  const enrichedByIndex = new Map<number, BusinessSection>()
+  // 专题章节先认领最匹配的事实，投资摘要最后处理，避免摘要把产品、财务或
+  // 交易事实先占用，导致对应专题章节只能保留泛化文字。
+  const processingOrder = content.sections
+    .map((section, index) => ({ section, index }))
+    .sort((left, right) =>
+      Number(/投资摘要/.test(left.section.title)) - Number(/投资摘要/.test(right.section.title)))
+  for (const { section, index } of processingOrder) {
+    const rule = investmentRecommendationSectionRule(section.title)
+    const originalBody = investmentRecommendationSectionBody(section)
+    const semanticMismatch = Boolean(rule && !rule.body.test(originalBody))
+    const lowDensity = originalBody.replace(/\s+/g, '').length < (compactDeck ? 60 : 90)
+    const topics = new Set(investmentRecommendationBriefTopics(section.title))
+    const candidateFacts = brief.facts
+      .filter((fact) => topics.has(fact.topic))
+      .map((fact) => ({
+        ...fact,
+        text: sanitizeInvestmentRecommendationText(fact.text),
+      }))
+      .filter((fact) => fact.text.length >= 18 && fact.sourceIndexes.length > 0)
+      .sort((left, right) => Number(Boolean(rule?.body.test(right.text)))
+        - Number(Boolean(rule?.body.test(left.text))))
+    let findings = (semanticMismatch
+      ? section.findings.filter((finding) => Boolean(rule?.body.test(finding.text)))
+      : [...section.findings])
+      .filter((finding) => !isNearDuplicate(finding.text, acceptedFindings, 0.88))
+    const targetFindingCount = /投资摘要/.test(section.title) ? 0 : compactDeck ? 1 : 2
+    if (semanticMismatch || lowDensity || findings.length < targetFindingCount) {
+      for (const fact of candidateFacts) {
+        if (findings.length >= Math.max(targetFindingCount, semanticMismatch ? 2 : targetFindingCount)) break
+        if (isNearDuplicate(fact.text, [...acceptedFindings, ...findings.map((item) => item.text)])) continue
+        findings.push({
+          text: fact.text,
+          status: investmentRecommendationFindingStatus(fact.nature),
+          sourceIndexes: fact.sourceIndexes,
+        })
+      }
+    }
+    const summaryCandidate = candidateFacts.find((fact) =>
+      !rule || rule.body.test(fact.text)) ?? candidateFacts[0]
+    const summary = (semanticMismatch || section.summary.replace(/\s+/g, '').length < 30)
+      && summaryCandidate
+      ? summaryCandidate.text.slice(0, compactDeck ? 150 : 220)
+      : section.summary
+    const summarySourceIndexes = summary === section.summary
+      ? section.summarySourceIndexes
+      : summaryCandidate?.sourceIndexes
+    let tables = semanticMismatch
+      ? (section.tables ?? []).filter((table) => Boolean(rule?.body.test([
+          table.title,
+          ...table.columns,
+          ...table.rows.flat(),
+        ].join(' '))))
+      : [...(section.tables ?? [])]
+    if (!tables.length) {
+      const tableCandidate = brief.recommendedTables
+        .filter((table) => topics.has(table.topic))
+        .sort((left, right) => Number(Boolean(rule?.body.test([
+          right.title,
+          ...right.columns,
+          ...right.rows.flat(),
+        ].join(' ')))) - Number(Boolean(rule?.body.test([
+          left.title,
+          ...left.columns,
+          ...left.rows.flat(),
+        ].join(' ')))))[0]
+      if (tableCandidate) {
+        tables = [{
+          title: sanitizeInvestmentRecommendationText(tableCandidate.title),
+          unit: '按来源披露',
+          columns: tableCandidate.columns.map(sanitizeInvestmentRecommendationText),
+          rows: tableCandidate.rows.map((row) =>
+            row.map(sanitizeInvestmentRecommendationText)),
+          status: '资料记载',
+          sourceIndexes: tableCandidate.sourceIndexes,
+        }]
+      }
+    }
+    const enrichedSection: BusinessSection = {
+      ...section,
+      summary,
+      summarySourceIndexes,
+      findings,
+      tables,
+    }
+    if (
+      !(enrichedSection.tables?.length)
+      && /行业与市场空间|财务分析|融资与估值|投资方案/.test(section.title)
+    ) {
+      const generatedTable = numericDisclosureTable(enrichedSection)
+      if (generatedTable) enrichedSection.tables = [generatedTable]
+    }
+    acceptedFindings.push(...findings.map((finding) => finding.text))
+    enrichedByIndex.set(index, enrichedSection)
+  }
+  const sections = content.sections.map((section, index) => enrichedByIndex.get(index) ?? section)
+  return { ...content, sections }
+}
+
 export function investmentRecommendationContentQualityIssues(
   content: BusinessContent,
   expectedSectionCount: number,
+  options: {
+    pageCount?: string | number
+    sourceCount?: number
+  } = {},
 ) {
+  const requestedPageCount = Number.parseInt(String(options.pageCount ?? ''), 10)
+  const compactDeck = Number.isFinite(requestedPageCount) && requestedPageCount <= 5
+  const hasEvidenceUniverse = options.sourceCount === undefined || options.sourceCount > 0
   const issues = customTemplateContentQualityIssues(content, expectedSectionCount)
   const visibleText = [
     content.title,
@@ -1653,7 +1955,82 @@ export function investmentRecommendationContentQualityIssues(
   if (content.executiveSummary.replace(/\s+/g, '').length < 60) {
     issues.push('投资摘要过短，应说明投资逻辑、关键事实、主要反证和交易约束')
   }
-  return [...new Set(issues)].slice(0, 12)
+  const sectionBodies = content.sections.map((section) => ({
+    section,
+    body: investmentRecommendationSectionBody(section),
+  }))
+  const totalBodyCharacters = sectionBodies.reduce(
+    (sum, entry) => sum + entry.body.replace(/\s+/g, '').length,
+    0,
+  )
+  const minimumBodyCharacters = compactDeck
+    ? Math.max(600, expectedSectionCount * 48)
+    : Math.max(900, expectedSectionCount * 80)
+  if (totalBodyCharacters < minimumBodyCharacters) {
+    issues.push(`正文信息密度不足：${expectedSectionCount} 个章节合计仅 ${totalBodyCharacters} 字，应补充项目、行业、竞品、财务和交易证据`)
+  }
+  let sourcedSectionCount = 0
+  let analyticalItemCount = 0
+  let numericFactCount = 0
+  let tableCount = 0
+  for (const { section, body } of sectionBodies) {
+    const compactBody = body.replace(/\s+/g, '')
+    const tables = section.tables ?? []
+    const substantiveFindings = section.findings.filter((finding) =>
+      finding.text.replace(/\s+/g, '').length >= 24)
+    const contentBlocks = (section.summary.replace(/\s+/g, '').length >= 24 ? 1 : 0)
+      + substantiveFindings.length
+      + tables.length
+    analyticalItemCount += substantiveFindings.length + tables.reduce(
+      (sum, table) => sum + Math.min(table.rows.length, 4),
+      0,
+    )
+    numericFactCount += (body.match(/(?:\d[\d,.]*\s*(?:%|％|万元|亿元|万亿元|年|月|家|项|倍)|20\d{2})/g) ?? []).length
+    tableCount += tables.length
+    const indexes = investmentRecommendationSectionSourceIndexes(section)
+    if (indexes.length > 0) sourcedSectionCount += 1
+    const minimumSectionCharacters = compactDeck ? 46 : 72
+    const minimumContentBlocks = compactDeck ? 1 : 2
+    if (compactBody.length < minimumSectionCharacters || contentBlocks < minimumContentBlocks) {
+      issues.push(compactDeck
+        ? `章节“${section.title}”内容过少，应形成可直接进入五页摘要版的中心判断、事实依据和投资影响`
+        : `章节“${section.title}”内容过少，应至少形成中心判断和两项事实、分析或数据支撑`)
+    }
+    if (
+      /(?:尚缺少能够支持|本页职责|相关事实仍需|详细事实、判断和待核验边界|需补充原始文件或访谈记录)/.test(body)
+      && compactBody.length < 150
+    ) {
+      issues.push(`章节“${section.title}”主要为占位或取证提示，尚未形成可供投委会审阅的正文`)
+    }
+    const rule = investmentRecommendationSectionRule(section.title)
+    if (rule && !rule.body.test(body)) {
+      issues.push(`章节“${section.title}”正文与标题职责不匹配：${rule.research}`)
+    }
+    if (
+      rule?.dataOrDisclosure
+      && tables.length === 0
+      && !/(?:\d|%|％|万元|亿元|未披露|尚未披露|未提供|尚未明确)/.test(body)
+    ) {
+      issues.push(`章节“${section.title}”缺少可比较的数据、交易条款或明确披露边界`)
+    }
+    if (!indexes.length && !/未披露|尚未披露|未提供|尚未明确/.test(body)) {
+      issues.push(`章节“${section.title}”没有任何可追溯来源索引`)
+    }
+  }
+  const minimumAnalyticalItems = compactDeck
+    ? expectedSectionCount
+    : Math.max(16, expectedSectionCount + 4)
+  if (analyticalItemCount < minimumAnalyticalItems) {
+    issues.push(`全篇只有 ${analyticalItemCount} 项有效发现或表格数据，无法支撑投前投资判断`)
+  }
+  const minimumSourcedSections = Math.ceil(expectedSectionCount * (compactDeck ? 0.5 : 0.67))
+  if (hasEvidenceUniverse && sourcedSectionCount < minimumSourcedSections) {
+    issues.push(`仅 ${sourcedSectionCount}/${expectedSectionCount} 个章节关联了来源，证据覆盖不足`)
+  }
+  if (numericFactCount >= 6 && tableCount < (compactDeck ? 1 : 2)) {
+    issues.push('正文包含多项数字但缺少结构化表格，应将市场、财务、融资、估值或交易数据按同口径落表')
+  }
+  return [...new Set(issues)].slice(0, 24)
 }
 
 export function dueDiligencePendingResearchTopics(
@@ -1698,9 +2075,31 @@ export function investmentRecommendationPendingResearchTopics(
     topics.push(topic)
   }
   for (const section of content.sections) {
+    const body = investmentRecommendationSectionBody(section)
+    const compactBody = body.replace(/\s+/g, '')
+    const rule = investmentRecommendationSectionRule(section.title)
+    const sourceIndexes = investmentRecommendationSectionSourceIndexes(section)
+    const substantiveFindings = section.findings.filter((finding) =>
+      finding.text.replace(/\s+/g, '').length >= 24)
+    const tables = section.tables ?? []
+    const lowDensity = compactBody.length < 110
+      || substantiveFindings.length + tables.length < 2
+    const semanticGap = Boolean(rule && !rule.body.test(body))
+    const evidenceGap = sourceIndexes.length === 0
+    const dataGap = Boolean(
+      rule?.dataOrDisclosure
+      && tables.length === 0
+      && !/(?:\d|%|％|万元|亿元)/.test(body),
+    )
+    if (lowDensity || semanticGap || evidenceGap || dataGap) {
+      add(`${section.title}：${rule?.research ?? '补充支撑本章投资判断的项目事实、公开数据与反向证据'}`)
+      if (topics.length >= maxTopics) return topics
+    }
     for (const finding of section.findings) {
       if (finding.status !== '待核验' && finding.status !== '资料缺口') continue
-      add(`${section.title}：${finding.text || '补充可核验公开信息'}`)
+      if (!lowDensity && !semanticGap && !evidenceGap && !dataGap) {
+        add(`${section.title}：${finding.text || rule?.research || '补充可核验公开信息'}`)
+      }
       if (topics.length >= maxTopics) return topics
     }
   }
@@ -1716,6 +2115,35 @@ export function annotateDueDiligencePendingAfterResearch(
 ) {
   // 网络补充状态只写入任务审计，不把检索结果或“待核验”过程提示覆盖到正式正文。
   return content
+}
+
+export function selectBusinessContentPromptSources(
+  type: AiExecutableTaskType,
+  sources: readonly EvidenceSource[],
+  usesUploadedTemplate = false,
+) {
+  const indexedSources = sources.map((source, sourceIndex) => ({ source, sourceIndex }))
+  if (type === 'due_diligence_report') {
+    return [
+      ...indexedSources
+        .filter(({ source }) => !source.sourceType.startsWith('public_web'))
+        .slice(0, 48),
+      ...indexedSources
+        .filter(({ source }) => source.sourceType.startsWith('public_web'))
+        .slice(0, 16),
+    ]
+  }
+  if (type === 'investment_recommendation_ppt') {
+    return [
+      ...indexedSources
+        .filter(({ source }) => !source.sourceType.startsWith('public_web'))
+        .slice(0, 40),
+      ...indexedSources
+        .filter(({ source }) => source.sourceType.startsWith('public_web'))
+        .slice(0, 24),
+    ]
+  }
+  return usesUploadedTemplate ? indexedSources.slice(0, 64) : indexedSources.slice(0, 16)
 }
 
 export const DUE_DILIGENCE_GENERATION_GROUPS = [
@@ -2507,6 +2935,7 @@ export async function composeBusinessContent(input: {
   dueDiligencePass?: 'gap-analysis' | 'final'
   dueDiligenceRuntime?: DueDiligenceRuntime
   projectKnowledgeBrief?: ProjectKnowledgeBrief
+  investmentRecommendationPass?: 'gap-analysis' | 'final'
 }): Promise<BusinessContent> {
   if (String(input.type) === 'investment_proposal') {
     return composeInvestmentProposalContent({
@@ -2542,22 +2971,14 @@ export async function composeBusinessContent(input: {
   // authority for content generation.
   const isUploadedInvestmentTemplate = false
   const usesUploadedTemplate = isCustomTemplate || isUploadedInvestmentTemplate
-  const indexedSources = input.sources.map((source, sourceIndex) => ({ source, sourceIndex }))
   const usesExpandedProjectEvidence = isDueDiligence
     || usesUploadedTemplate
     || input.type === 'investment_recommendation_ppt'
-  const promptSources = isDueDiligence
-    ? [
-        ...indexedSources
-          .filter(({ source }) => !source.sourceType.startsWith('public_web'))
-          .slice(0, 48),
-        ...indexedSources
-          .filter(({ source }) => source.sourceType.startsWith('public_web'))
-          .slice(0, 16),
-      ]
-    : usesExpandedProjectEvidence
-      ? indexedSources.slice(0, 64)
-      : indexedSources.slice(0, 16)
+  const promptSources = selectBusinessContentPromptSources(
+    input.type,
+    input.sources,
+    usesUploadedTemplate,
+  )
   const evidence = promptSources.map(({ source, sourceIndex }) => {
     const sourceText = isDueDiligence
       ? cleanDueDiligenceEvidenceExcerpt(source.content)
@@ -2572,6 +2993,7 @@ export async function composeBusinessContent(input: {
     .join('、')
   const allowsTables = input.type === 'investment_proposal'
     || isDueDiligence
+    || input.type === 'investment_recommendation_ppt'
     || (
       usesUploadedTemplate
       && (input.template.customAnalysis?.formatProfile.tableCount ?? 0) > 0
@@ -2585,6 +3007,10 @@ export async function composeBusinessContent(input: {
         : 9000
     : isDueDiligence
       ? 8000
+      : input.type === 'investment_recommendation_ppt'
+        ? requestedLength === '精简版'
+          ? 8500
+          : 11000
       : isUploadedInvestmentTemplate
         ? 12000
       : usesUploadedTemplate
@@ -2597,6 +3023,12 @@ export async function composeBusinessContent(input: {
           input.sources,
           input.parameters,
         )
+      : ''
+  const investmentRecommendationKnowledgeBrief =
+    input.type === 'investment_recommendation_ppt'
+      ? projectKnowledgeBriefForPrompt(input.projectKnowledgeBrief, [
+          ...PROJECT_KNOWLEDGE_TOPICS,
+        ])
       : ''
   const evidenceStatusRule = isDueDiligence
     ? '默认按“本地项目资料库 → 当前项目网络缓存 → 定向网络补全 → 缓存写回”的顺序取证；按可追溯性标为“资料记载”或“待核验”，不得输出“资料缺口”状态。'
@@ -2611,7 +3043,7 @@ export async function composeBusinessContent(input: {
   const sourceDisplayRule = isDueDiligence
     ? 'sourceIndexes 只用于系统内部审计和事实核验；正式文档不生成文末免责声明或引用资料章节。'
     : isCustomTemplate || input.type === 'investment_recommendation_ppt'
-      ? 'sourceIndexes 只引用真正支持当前 finding 的项目资料库证据；引用页由渲染器根据实际使用索引生成。'
+      ? 'sourceIndexes 只引用真正支持当前 finding、summary 或 table 的项目文件、公司披露或已核验公开来源；渲染器按页面展示实际使用的来源。'
       : 'sourceIndexes 只引用真正支持当前 finding 的证据，文尾引用资料由渲染器根据实际使用索引生成。'
   const dueDiligenceRule = isDueDiligence
     ? `\n10. 你是投资中台的资深投资经理，输出是供投资团队、风控法务、投资总监和投委会内部审阅的尽调报告，只处理当前会话绑定的项目。
@@ -2674,7 +3106,11 @@ export async function composeBusinessContent(input: {
 13. 每段优先以公司、具名产品、客户、合同、财务科目、股东、交易条款或风险事项为主语，使用自然、克制、可在投委会上直接朗读的书面表达。不得连续使用“项目具备……但仍需……”或“亮点集中在……但依赖……”等固定句式。
 14. 投资摘要直接说明投资逻辑是否成立、支撑判断的关键事实、主要反证、交易约束和待完成的实质工作。证据不足时写“暂不形成确定性投资结论”，不得用内部阶段词替代判断。
 15. 公司披露、管理层预测、公开信息和已核实事实必须区分。意向、测试、客户名单、合同、交付、验收、收入、开票、回款和复购不得混写；涉及公司单方口径时使用“公司披露”或“管理层预计”，不写“资料记载”“AI推断”“可核验事实”。
-16. 标题采用机构投资材料的业务标题，如“投资摘要、公司概况与发展历程、产品与核心技术、财务分析、融资与估值、投资方案、核心投资逻辑、主要风险与待落实事项”；不得使用“投资判断与推进建议、项目亮点与成立条件、项目阶段、线索专题”等系统化或模型化标题。`
+16. 标题采用机构投资材料的业务标题，如“投资摘要、公司概况与发展历程、产品与核心技术、财务分析、融资与估值、投资方案、核心投资逻辑、主要风险与待落实事项”；不得使用“投资判断与推进建议、项目亮点与成立条件、项目阶段、线索专题”等系统化或模型化标题。
+17. 十二个章节分别承担独立的投前判断职责。每章至少形成中心判断与两项事实、分析或结构化数据；不得用标题复述、取证提示、资料清单或“尚待核实”单句充当正文。行业、市场、竞品、财务、融资、估值和交易章节必须优先使用联网核验后的公开数据或项目原始文件，并说明口径、时间和对投资判断的影响。
+18. 股权、团队、产品矩阵、客户验证、市场规模、竞品对标、历史财务、融资估值和投资方案只要存在两行以上同口径信息，就必须生成原生表格。表格列名要表达比较维度，行内容不得是长段落；不得为了凑表而编造数字。
+19. “行业与市场空间”必须先界定当前公司的细分市场，再给出 TAM/SAM/SOM 或可替代的规模、增长与需求指标；“竞争格局与差异化”至少包含两个具名可比对象或明确说明尚无可比口径；“财务分析”不得用融资或估值代替经营数据；“融资与估值”必须区分历史融资、本轮交易、投前与投后口径；“投资方案”必须校验投资金额、交易方式和持股比例的算术一致性。
+20. 每项事实只能进入语义最匹配的章节。股权页不得被回购条款替代，产品页不得被团队履历替代，财务页不得只有资料索取清单，过渡页不得只保留标题。核心投资逻辑必须由前文具体事实归纳，风险页只保留足以改变投资结论或交易条件的事项。`
     : ''
   const assistantRole = isDueDiligence
     ? '你是投资中台的资深投资经理，负责仅针对当前会话绑定的项目生成内部尽调报告；先完整研读项目文件，再形成基于事实的投资价值判断、交易条件、主要风险和后续实质工作。'
@@ -2745,6 +3181,13 @@ ${investmentRecommendationDetailContext
 以下信息已按主题从项目档案、用户上传资料和已核验来源中整理。必须逐项检查并写入语义匹配的模板页面；每项事实继续使用对应的 S 索引。
 
 ${investmentRecommendationDetailContext}
+`
+    : ''}
+${investmentRecommendationKnowledgeBrief
+    ? `项目资料深度研读底稿：
+以下底稿只用于统一主体、日期、事件阶段、数字口径与可落表数据；正文不得提及“底稿”或研读过程。
+
+${investmentRecommendationKnowledgeBrief}
 `
     : ''}
 证据：
@@ -2904,25 +3347,54 @@ ${JSON.stringify(previousDraft ?? {}).slice(0, 60_000)}`
           { code: 'CUSTOM_TEMPLATE_CONTENT_QUALITY_REJECTED' },
         )
       }
-    } else if (input.type === 'investment_recommendation_ppt') {
+    } else if (
+      input.type === 'investment_recommendation_ppt'
+      && input.investmentRecommendationPass !== 'gap-analysis'
+    ) {
+      const qualityOptions = {
+        pageCount: input.parameters.pageCount as string | number | undefined,
+        sourceCount: input.sources.length,
+      }
+      generated = enrichInvestmentRecommendationContentFromBrief(
+        generated,
+        input.projectKnowledgeBrief,
+        qualityOptions,
+      )
       let issues = investmentRecommendationContentQualityIssues(
         generated,
         input.template.sections.length,
+        qualityOptions,
       )
-      if (issues.length > 0) {
+      const priorIssueSets = new Set<string>()
+      for (let repairAttempt = 1; issues.length > 0 && repairAttempt <= 2; repairAttempt += 1) {
+        const issueSignature = issues.join('\n')
+        if (priorIssueSets.has(issueSignature)) break
+        priorIssueSets.add(issueSignature)
         generated = await requestContent(
-          issues.map((issue, index) => `${index + 1}. ${issue}`).join('\n'),
+          [
+            `这是第 ${repairAttempt}/2 次定向修复。只修复仍未通过的项目，不得删除已正确的事实、来源索引和表格。`,
+            ...issues.map((issue, index) => `${index + 1}. ${issue}`),
+          ].join('\n'),
           generated,
+        )
+        generated = enrichInvestmentRecommendationContentFromBrief(
+          generated,
+          input.projectKnowledgeBrief,
+          qualityOptions,
         )
         issues = investmentRecommendationContentQualityIssues(
           generated,
           input.template.sections.length,
+          qualityOptions,
         )
       }
       if (issues.length > 0) {
         throw Object.assign(
-          new Error(`投资建议书正文未通过投资经理文风门禁：${issues.join('；')}`),
-          { code: 'INVESTMENT_RECOMMENDATION_CONTENT_QUALITY_REJECTED' },
+          new Error(`投资建议书正文未通过投资专业性门禁：${issues.join('；')}`),
+          {
+            code: 'INVESTMENT_RECOMMENDATION_CONTENT_QUALITY_REJECTED',
+            qualityIssues: issues,
+          },
         )
       }
     }
@@ -2966,7 +3438,35 @@ ${JSON.stringify(previousDraft ?? {}).slice(0, 60_000)}`
     )
     if (isCustomTemplate) return finalizeCustomTemplateContent(normalized, input.template, input.project)
     if (input.type === 'investment_recommendation_ppt') {
-      return finalizeInvestmentRecommendationPptContent(normalized, input.template, input.project)
+      const finalized = enrichInvestmentRecommendationContentFromBrief(
+        finalizeInvestmentRecommendationPptContent(
+          normalized,
+          input.template,
+          input.project,
+        ),
+        input.projectKnowledgeBrief,
+        { pageCount: input.parameters.pageCount as string | number | undefined },
+      )
+      if (input.investmentRecommendationPass !== 'gap-analysis') {
+        const issues = investmentRecommendationContentQualityIssues(
+          finalized,
+          input.template.sections.length,
+          {
+            pageCount: input.parameters.pageCount as string | number | undefined,
+            sourceCount: input.sources.length,
+          },
+        )
+        if (issues.length > 0) {
+          throw Object.assign(
+            new Error(`投资建议书正文未通过投资专业性门禁：${issues.join('；')}`),
+            {
+              code: 'INVESTMENT_RECOMMENDATION_CONTENT_QUALITY_REJECTED',
+              qualityIssues: issues,
+            },
+          )
+        }
+      }
+      return finalized
     }
     return normalized
   }

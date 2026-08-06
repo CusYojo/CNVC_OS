@@ -114,6 +114,56 @@ test('Gorden slide plan carries detailed company, team, finance, funding, valuat
   assert.ok(plan.at(-1)?.expectedTexts.includes('本材料仅供内部投资决策使用。'))
 })
 
+test('Gorden pages carry point-of-use sources and structured table rows', () => {
+  const tableContent: BusinessContent = {
+    ...content,
+    sections: content.sections.map((section, index) => index === 2 ? {
+      ...section,
+      tables: [{
+        title: '历史财务表现',
+        unit: '万元',
+        columns: ['指标', '2024年', '2025年'],
+        rows: [
+          ['营业收入', '800', '1200'],
+          ['净利润', '-300', '-120'],
+          ['经营现金流', '-450', '-500'],
+        ],
+        status: '资料记载',
+        sourceIndexes: [0, 1],
+      }],
+    } : section),
+  }
+  const plan = buildGordenSlidePlan({
+    project: { name: '智灵动力' },
+    content: tableContent,
+    disclaimer: '内部使用。',
+    sources: [
+      { sourceType: 'file', sourceName: '审计报告.pdf', content: '历史财务' },
+      { sourceType: 'public_web', sourceName: '公司官网', content: '公司披露' },
+    ],
+  })
+  const financialSlide = plan.find((slide) => slide.title === '财务分析')
+  assert.ok(financialSlide)
+  assert.ok(financialSlide.expectedTexts.includes('历史财务表现'))
+  assert.ok(financialSlide.expectedTexts.includes('指标｜2024年｜2025年'))
+  assert.ok(financialSlide.expectedTexts.includes('营业收入｜800｜1200'))
+  assert.ok(financialSlide.expectedTexts.includes('资料来源：审计报告.pdf；公司官网'))
+
+  const compactPlan = buildGordenSlidePlan({
+    project: { name: '智灵动力' },
+    content: tableContent,
+    disclaimer: '内部使用。',
+    sources: [
+      { sourceType: 'file', sourceName: '审计报告.pdf', content: '历史财务' },
+      { sourceType: 'public_web', sourceName: '公司官网', content: '公司披露' },
+    ],
+    pageCount: '5',
+  })
+  assert.ok(compactPlan[3].expectedTexts.includes('历史财务表现'))
+  assert.ok(compactPlan[3].expectedTexts.includes('营业收入｜800｜1200'))
+  assert.ok(compactPlan[3].expectedTexts.includes('资料来源：审计报告.pdf；公司官网'))
+})
+
 test('Gorden image prompt uses the loaded package contract and exact project text', async () => {
   const slide = buildGordenSlidePlan({
     project: { name: '智灵动力' },
@@ -435,6 +485,25 @@ test('Gorden visual failures expose a safe actionable stage instead of the gener
   assert.equal(safeAiTaskFailureStage(error), 'Gorden 最终视觉复核未通过')
   assert.match(safeAiTaskFailureMessage(error), /文字缺失、严重遮挡、裁切或不可读/)
   assert.doesNotMatch(safeAiTaskFailureMessage(error), /internal visual details/)
+})
+
+test('investment recommendation quality failures describe the professionality gate', () => {
+  const error = Object.assign(new Error('internal content review details'), {
+    code: 'INVESTMENT_RECOMMENDATION_CONTENT_QUALITY_REJECTED',
+  })
+  assert.equal(safeAiTaskFailureStage(error), '投资建议书正文专业性检查未通过')
+  assert.match(safeAiTaskFailureMessage(error), /章节完整性、证据覆盖、数据表格、标题匹配/)
+  assert.doesNotMatch(safeAiTaskFailureMessage(error), /internal content review details/)
+
+  const categorized = Object.assign(new Error('hidden'), {
+    code: 'INVESTMENT_RECOMMENDATION_CONTENT_QUALITY_REJECTED',
+    qualityIssues: [
+      '章节“财务分析”内容过少',
+      '仅 4/12 个章节关联了来源，证据覆盖不足',
+      '正文包含多项数字但缺少结构化表格',
+    ],
+  })
+  assert.match(safeAiTaskFailureMessage(categorized), /尚需完善：章节内容、来源引用、数据与表格/)
 })
 
 test('Gorden vision gateway failures expose the retained-page recovery path', () => {

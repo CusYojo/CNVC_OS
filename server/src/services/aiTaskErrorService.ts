@@ -1,6 +1,7 @@
 type CodedError = Error & {
   code?: unknown
   upstreamCode?: unknown
+  qualityIssues?: unknown
 }
 
 function errorCode(error: unknown) {
@@ -13,7 +14,7 @@ export function safeAiTaskFailureStage(error: unknown) {
   if (code === 'DUE_DILIGENCE_MODEL_UNAVAILABLE') return '大模型正文生成未完成'
   if (code === 'DUE_DILIGENCE_NETWORK_UNAVAILABLE') return '联网资料补全未完成'
   if (code === 'INVESTMENT_RECOMMENDATION_CONTENT_QUALITY_REJECTED') {
-    return '投资建议书正文文风检查未通过'
+    return '投资建议书正文专业性检查未通过'
   }
   if (code === 'INVESTMENT_RECOMMENDATION_CONTENT_REJECTED') {
     return 'Gorden 可编辑分层检查未通过'
@@ -62,7 +63,21 @@ export function safeAiTaskFailureMessage(error: unknown) {
     return '公开资料补全服务暂不可用，因此未生成文件。请确认联网检索服务恢复后点击“继续生成”。'
   }
   if (code === 'INVESTMENT_RECOMMENDATION_CONTENT_QUALITY_REJECTED') {
-    return '投资建议书正文仍含内部阶段词、资料处理过程或模型化套话，系统已停止交付并保留参数。请点击“继续生成”重新生成正文。'
+    const issues = Array.isArray((error as CodedError | null)?.qualityIssues)
+      ? (error as CodedError).qualityIssues as unknown[]
+      : []
+    const issueText = issues.map(String).join(' ')
+    const categories = [
+      /章节数量|信息密度|内容过少|有效发现|占位/.test(issueText) ? '章节内容' : '',
+      /来源|证据覆盖|追溯/.test(issueText) ? '来源引用' : '',
+      /数据|表格|指标|交易条款/.test(issueText) ? '数据与表格' : '',
+      /标题职责|标题匹配|正文与标题/.test(issueText) ? '章节匹配' : '',
+      /内部|模型化|套话|文风|固定字段/.test(issueText) ? '投资经理文风' : '',
+    ].filter(Boolean)
+    const detail = categories.length
+      ? `尚需完善：${categories.join('、')}。`
+      : '章节完整性、证据覆盖、数据表格、标题匹配或投资经理文风仍需完善。'
+    return `投资建议书正文未达到交付标准，${detail}系统已保留参数，请点击“继续生成”重新检索并生成正文。`
   }
   if (code === 'INVESTMENT_RECOMMENDATION_CONTENT_REJECTED') {
     return '投资建议书未通过 Gorden 页面生成、四层可编辑还原或页面文字与事实检查。系统已保留参数，请点击“继续生成”重新生成并复核。'

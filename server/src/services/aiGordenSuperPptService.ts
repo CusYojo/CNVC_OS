@@ -543,15 +543,24 @@ function sectionTexts(section: BusinessSection) {
   const table = section.tables?.[0]
   const texts = [
     section.title,
-    compactText(section.summary, 220),
-    ...section.findings.slice(0, 2).map((finding) => compactText(finding.text, 150)),
+    compactText(section.summary, 240),
+    ...section.findings.slice(0, 3).map((finding) => compactText(finding.text, 180)),
     ...(table ? [
       compactText(table.title, 80),
       compactText(table.columns.join('｜'), 120),
-      ...table.rows.slice(0, 3).map((row) => compactText(row.join('｜'), 140)),
+      ...table.rows.slice(0, 4).map((row) => compactText(row.join('｜'), 160)),
     ] : []),
   ]
   return [...new Set(texts.map((value) => value.trim()).filter(Boolean))]
+}
+
+function pointOfUseSourceText(
+  sections: BusinessSection[],
+  sources: EvidenceSource[] = [],
+) {
+  const indexes = [...new Set(sections.flatMap(sectionSourceIndexes))]
+  const names = clientVisibleReferenceNames(sourceLabels(indexes, sources))
+  return names.length ? `资料来源：${names.join('；')}` : ''
 }
 
 function roleForTitle(title: string) {
@@ -754,6 +763,17 @@ function groupedDecisionTexts(input: {
         return numericalFinding ? [compactText(numericalFinding.text, 72)] : []
       }).slice(0, 2)
     : []
+  const representativeTable = input.sections
+    .flatMap((section) => section.tables ?? [])
+    .find((table) => table.rows.length > 0)
+  const tableTexts = representativeTable
+    ? [
+        compactText(representativeTable.title, 72),
+        compactText(representativeTable.columns.join('｜'), 84),
+        ...representativeTable.rows.slice(0, 3).map((row) =>
+          compactText(row.join('｜'), 84)),
+      ]
+    : []
   return [...new Set([
     input.title,
     ...input.sections.flatMap((section) => [
@@ -761,6 +781,7 @@ function groupedDecisionTexts(input: {
       compactText(section.summary || section.findings[0]?.text || '相关事实仍需进一步核验。', 84),
     ]),
     ...evidence,
+    ...tableTexts,
   ].map((value) => value.trim()).filter(Boolean))]
 }
 
@@ -769,6 +790,7 @@ export function buildGordenSlidePlan(input: {
   content: BusinessContent
   disclaimer: string
   references?: string[]
+  sources?: EvidenceSource[]
   pageCount?: string | number
 }): GordenSlidePlan[] {
   const parsedPageCount = Number.parseInt(String(input.pageCount ?? ''), 10)
@@ -786,35 +808,42 @@ export function buildGordenSlidePlan(input: {
         number: 2,
         role: 'summary',
         title: '公司概况与投资摘要',
-        expectedTexts: [...new Set([
+        expectedTexts: uniqueCompactTexts([
           '公司概况与投资摘要',
           ...projectSnapshotTexts(input),
           ...groupedDecisionTexts({
             title: '公司概况与投资摘要',
             sections: groups.overview,
           }).slice(1),
-        ])],
+          pointOfUseSourceText(groups.overview, input.sources),
+        ]),
         sourceIndexes: [...new Set(groups.overview.flatMap(sectionSourceIndexes))],
       },
       {
         number: 3,
         role: 'product',
         title: '产品技术与商业验证',
-        expectedTexts: groupedDecisionTexts({
-          title: '产品技术与商业验证',
-          sections: groups.business,
-        }),
+        expectedTexts: uniqueCompactTexts([
+          ...groupedDecisionTexts({
+            title: '产品技术与商业验证',
+            sections: groups.business,
+          }),
+          pointOfUseSourceText(groups.business, input.sources),
+        ]),
         sourceIndexes: [...new Set(groups.business.flatMap(sectionSourceIndexes))],
       },
       {
         number: 4,
         role: 'investment-plan',
         title: '财务表现、估值与交易方案',
-        expectedTexts: groupedDecisionTexts({
-          title: '财务表现、估值与交易方案',
-          sections: groups.decision,
-          includeEvidence: true,
-        }),
+        expectedTexts: uniqueCompactTexts([
+          ...groupedDecisionTexts({
+            title: '财务表现、估值与交易方案',
+            sections: groups.decision,
+            includeEvidence: true,
+          }),
+          pointOfUseSourceText(groups.decision, input.sources),
+        ]),
         sourceIndexes: [...new Set(groups.decision.flatMap(sectionSourceIndexes))],
       },
     ]
@@ -880,7 +909,10 @@ export function buildGordenSlidePlan(input: {
             ),
           ]),
         ].map((value) => value.trim()).filter(Boolean)
-    const expectedTexts = semanticTexts
+    const expectedTexts = uniqueCompactTexts([
+      ...semanticTexts,
+      pointOfUseSourceText(sections, input.sources),
+    ])
     return {
       number: index + 2,
       role: roleForTitle(sections.map((section) => section.title).join('、')),
@@ -927,6 +959,34 @@ function sourceLabels(indexes: number[], sources: EvidenceSource[]) {
     .slice(0, 4)
 }
 
+function semanticDetailsForPlan(plan: GordenSlidePlan, content: BusinessContent) {
+  const sections = content.sections.filter((section) =>
+    plan.expectedTexts.includes(section.title) || plan.title === section.title)
+  const tables = sections.flatMap((section) => (section.tables ?? []).map((table) => ({
+    title: table.title,
+    unit: table.unit,
+    columns: table.columns,
+    rows: table.rows,
+    source_fact_keys: table.sourceIndexes.map((index) => `S${index + 1}`),
+  })))
+  const kpis = plan.expectedTexts.filter((text) =>
+    /(?:\d[\d,.]*\s*(?:%|％|万元|亿元|万亿元|家|项|倍)|20\d{2})/.test(text))
+    .slice(0, 8)
+  return {
+    kpis,
+    charts: tables
+      .filter((table) => table.rows.length >= 2 && table.rows.some((row) =>
+        row.some((cell) => /\d/.test(cell))))
+      .map((table) => ({
+        title: table.title,
+        type: 'table-derived-comparison',
+        categories: table.rows.map((row) => row[0]).filter(Boolean),
+        source_fact_keys: table.source_fact_keys,
+      })),
+    tables,
+  }
+}
+
 export function buildGordenSlidePrompt(input: {
   slide: GordenSlidePlan
   projectName: string
@@ -948,6 +1008,7 @@ ${input.skillContract}
 
 若没有提供当前项目真实视觉素材，使用不带事实暗示的几何结构、表格、时间线和色块留白，不得生成写实人物、虚构产品、虚构客户 Logo 或虚构证书。
 不得添加水印、页码、二维码、占位符、Lorem ipsum 或未提供的数据。
+市场、竞品、财务、融资、估值或交易页面如给出表头和数据行，应优先排成专业表格、对比条带或轻量图表；所有表头、行标签和数字仍须逐字来自下方清单，不得自行补刻度、比例或年份。
 
 【页面可见文字，必须逐字照排，不得改写、遗漏或新增】
 ${pageTexts}
@@ -2148,6 +2209,7 @@ export async function generateInvestmentRecommendationPptWithGorden(input: {
     content: input.content,
     disclaimer: input.template.disclaimer,
     references: input.sources.map((source) => source.sourceName),
+    sources: input.sources,
     pageCount: input.pageCount,
   })
 
@@ -2179,9 +2241,7 @@ export async function generateInvestmentRecommendationPptWithGorden(input: {
     title: plan.title,
     verbatim_text: plan.expectedTexts,
     source_fact_keys: plan.sourceIndexes.map((index) => `S${index + 1}`),
-    kpis: [],
-    charts: [],
-    tables: [],
+    ...semanticDetailsForPlan(plan, input.content),
     flow_nodes: [],
     connectors: [],
     icons: [],
@@ -2843,7 +2903,8 @@ export async function generateInvestmentRecommendationPptWithGorden(input: {
       role: plan.role,
       title: plan.title,
       verbatim_text: plan.expectedTexts,
-      source_fact_keys: plan.sourceIndexes,
+      source_fact_keys: plan.sourceIndexes.map((index) => `S${index + 1}`),
+      ...semanticDetailsForPlan(plan, input.content),
     })),
   })
   await writeJson(

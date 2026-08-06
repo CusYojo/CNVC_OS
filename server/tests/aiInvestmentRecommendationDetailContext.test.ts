@@ -121,8 +121,17 @@ test('investment PPT removes internal stage metadata and AI-style narration befo
     '核心投资逻辑',
     '主要风险与待落实事项',
   ])
-  assert.deepEqual(
-    investmentRecommendationContentQualityIssues(finalized, template.sections.length),
-    [],
+  const qualityIssues = investmentRecommendationContentQualityIssues(
+    finalized,
+    template.sections.length,
+  )
+  assert.equal(
+    qualityIssues.some((issue) => /项目阶段|资料处理|模型化套话/.test(issue)),
+    false,
+    qualityIssues.join('；'),
+  )
+  assert.ok(
+    qualityIssues.some((issue) => /信息密度不足|内容过少|占位/.test(issue)),
+    '样例正文只有通用句，专业性门禁应要求补充章节事实与数据',
   )
 })
