@@ -2112,8 +2112,9 @@ async function executeTask(taskId: string) {
       const existingArtifacts = await db.select().from(aiArtifacts)
         .where(and(
           eq(aiArtifacts.taskId, task.id),
-          eq(aiArtifacts.fileName, imageDeckFileName),
+          sql`(${aiArtifacts.metadata}->>'artifactStage' = 'image-deck' or ${aiArtifacts.editableLevel} = 'image')`,
         ))
+        .orderBy(desc(aiArtifacts.createdAt))
         .limit(1)
       const existingArtifact = existingArtifacts[0]
       if (existingArtifact) {
@@ -2752,6 +2753,9 @@ async function executeTask(taskId: string) {
       }).from(aiArtifacts).where(and(
         eq(aiArtifacts.taskId, taskId),
         inArray(aiArtifacts.format, ['docx', 'pptx']),
+        context.type === 'investment_recommendation_ppt'
+          ? sql`${aiArtifacts.metadata}->>'artifactStage' = 'editable' and ${aiArtifacts.editableLevel} <> 'image'`
+          : undefined,
       )).orderBy(desc(aiArtifacts.createdAt)).limit(1).catch(() => [])
       if (existingMainArtifact) {
         await db.update(aiTasks).set({
@@ -3147,9 +3151,35 @@ export async function createAiTask(user: AiTaskUser, input: CreateAiTaskInput) {
 }
 
 export async function getAiTask(userId: string, taskId: string) {
-  const task = await getTaskRow(userId, taskId)
+  let task = await getTaskRow(userId, taskId)
   if (!task) return undefined
   const artifacts = await db.select().from(aiArtifacts).where(eq(aiArtifacts.taskId, task.id)).orderBy(desc(aiArtifacts.createdAt))
+  if (task.type === 'investment_recommendation_ppt' && task.status === 'succeeded') {
+    const hasImageDeck = artifacts.some((artifact) => (
+      artifact.qualityStatus === 'passed'
+      && (artifact.metadata?.artifactStage === 'image-deck' || artifact.editableLevel === 'image')
+    ))
+    const hasEditableDeck = artifacts.some((artifact) => (
+      artifact.format === 'pptx'
+      && artifact.qualityStatus === 'passed'
+      && artifact.editableLevel !== 'image'
+      && (
+        artifact.metadata?.artifactStage === 'editable'
+        || ['all', 'text-and-structure'].includes(artifact.editableLevel)
+      )
+    ))
+    // 兼容修复旧任务：图片版属于中间交付物，不能单独把整项任务标记为成功。
+    if (hasImageDeck && !hasEditableDeck) {
+      const [reconciled] = await db.update(aiTasks).set({
+        status: 'failed',
+        stage: '元素级可编辑版未完成',
+        progress: 78,
+        errorMessage: '图片高保真版已完成，但元素级可编辑版尚未成功生成。系统已保留检查点，可点击“继续生成”。',
+        updatedAt: new Date(),
+      }).where(eq(aiTasks.id, task.id)).returning()
+      task = reconciled ?? task
+    }
+  }
   const sources = await db.select().from(aiTaskSources).where(eq(aiTaskSources.taskId, task.id)).orderBy(asc(aiTaskSources.createdAt))
   const deliverables = task.type === 'investment_proposal'
     ? artifacts.filter((artifact) => artifact.format === 'docx')

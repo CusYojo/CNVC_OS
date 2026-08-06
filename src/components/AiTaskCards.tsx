@@ -78,6 +78,22 @@ function artifactQualityLabel(artifact: AiTaskArtifact) {
   return artifact.qualityStatus === 'passed' ? '质量检查通过' : artifact.qualityStatus
 }
 
+type InvestmentPptArtifactStage = 'image-deck' | 'editable' | ''
+
+function investmentPptArtifactStage(artifact: AiTaskArtifact): InvestmentPptArtifactStage {
+  const format = artifact.format.toLowerCase()
+  if (format !== 'pptx') return ''
+  const editableLevel = artifact.editableLevel.toLowerCase()
+  const fileName = artifact.fileName.toLowerCase()
+  // editableLevel 和文件名来自实际产物，比历史 metadata 标签更可靠。
+  if (editableLevel === 'all' || editableLevel === 'text-and-structure') return 'editable'
+  if (editableLevel === 'image' || fileName.includes('图片高保真版')) return 'image-deck'
+  const stage = String(artifact.metadata?.artifactStage ?? '')
+  if (stage === 'image-deck' || stage === 'editable') return stage
+  // 历史投资建议书 PPTX 没有阶段字段时，按可编辑成品兼容处理。
+  return 'editable'
+}
+
 function artifactStageLabel(artifact: AiTaskArtifact) {
   const label = artifact.metadata?.artifactLabel
   if (typeof label === 'string' && label.trim()) return label.trim()
@@ -87,7 +103,29 @@ function artifactStageLabel(artifact: AiTaskArtifact) {
   return ''
 }
 
+function newestArtifactForStage(
+  artifacts: AiTaskArtifact[],
+  stage: Exclude<InvestmentPptArtifactStage, ''>,
+) {
+  return artifacts
+    .filter((artifact) => (
+      investmentPptArtifactStage(artifact) === stage
+      && artifact.qualityStatus === 'passed'
+    ))
+    .sort((left, right) => {
+      const createdDelta = Date.parse(right.createdAt ?? '') - Date.parse(left.createdAt ?? '')
+      return Number.isFinite(createdDelta) && createdDelta !== 0
+        ? createdDelta
+        : right.version - left.version
+    })[0]
+}
+
 function artifactDownloadLabel(task: AiTask, artifact: AiTaskArtifact) {
+  if (task.type === 'investment_recommendation_ppt') {
+    const normalizedStage = investmentPptArtifactStage(artifact)
+    if (normalizedStage === 'image-deck') return '下载图片高保真版'
+    if (normalizedStage === 'editable') return '下载元素级可编辑版'
+  }
   const stageLabel = artifactStageLabel(artifact)
   if (task.type === 'investment_recommendation_ppt' && stageLabel) {
     return `下载${stageLabel}`
@@ -167,17 +205,25 @@ function TaskCard({
     : task.type === 'due_diligence_report' && task.progress <= 35
       ? '结构化正文生成或质量检查'
       : ''
-  const downloadableArtifacts = (task.artifacts ?? []).filter((artifact) => {
+  const candidateArtifacts = (task.artifacts ?? []).filter((artifact) => {
     const format = artifact.format.toLowerCase()
     if (task.type === 'project_qa') return format === 'docx'
     if (task.type === 'investment_proposal') return format === 'docx'
     return ['docx', 'pptx', 'pdf'].includes(format)
   })
+  const downloadableArtifacts = task.type === 'investment_recommendation_ppt'
+    ? [
+        newestArtifactForStage(candidateArtifacts, 'image-deck'),
+        task.status === 'succeeded'
+          ? newestArtifactForStage(candidateArtifacts, 'editable')
+          : undefined,
+      ].filter((artifact): artifact is AiTaskArtifact => Boolean(artifact))
+    : candidateArtifacts
   const hasImageDeck = downloadableArtifacts.some(
-    (artifact) => artifact.metadata?.artifactStage === 'image-deck',
+    (artifact) => investmentPptArtifactStage(artifact) === 'image-deck',
   )
   const hasEditableDeck = downloadableArtifacts.some(
-    (artifact) => artifact.metadata?.artifactStage === 'editable',
+    (artifact) => investmentPptArtifactStage(artifact) === 'editable',
   )
 
   const download = async (artifact: AiTaskArtifact) => {
