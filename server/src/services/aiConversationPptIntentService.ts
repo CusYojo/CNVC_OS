@@ -130,7 +130,7 @@ export async function createInvestmentPptTaskFromConversation(
   user: AiTaskUser,
   input: ConversationPptIntentInput,
 ) {
-  const skillName = 'GordenSuperPPTSkill' as const
+  const skillName = 'create-reference-driven-editable-ppt' as const
   if (
     !input.force
     && !detectConversationPptGenerationIntent(input.message, input.recentMessages)

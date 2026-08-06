@@ -284,6 +284,12 @@ export async function convertUploadedInvestmentPdfTemplate(input: {
   sourcePdfPath: string
   outputPptxPath: string
   workDir: string
+  /**
+   * Pre-reviewed semantic overrides supplied by an upstream orchestrator.
+   * When present, the generic raster-slot detector must not replace them.
+   */
+  semanticOverridesPath?: string
+  expectedPageCount?: number
   onProgress?: (
     update: InvestmentTemplateConversionProgress,
   ) => void | Promise<void>
@@ -354,66 +360,88 @@ export async function convertUploadedInvestmentPdfTemplate(input: {
       'PDF_TO_PPT_POPPLER_UNAVAILABLE',
     )
   }
-  if (!existsSync(rasterReviewScript)) {
+  if (!input.semanticOverridesPath && !existsSync(rasterReviewScript)) {
     throw typedError(
       '缺少 PDF 大面积图片槽位复核脚本',
       503,
       'PDF_RASTER_REVIEW_UNAVAILABLE',
     )
   }
-  await reportConversionProgress(
-    input.onProgress,
-    '正在预检 PDF 页面、图片和可编辑对象',
-    24,
-  )
-  try {
-    await execFileAsync(python, [
-      rasterReviewScript,
-      '--input',
-      input.sourcePdfPath,
-      '--work-dir',
-      rasterReviewWorkDir,
-      '--conversion-work-dir',
-      input.workDir,
-      '--skill-root',
-      skillRoot,
-      '--pdftoppm',
-      pdftoppm,
-      '--output-overrides',
-      rasterOverridesPath,
-      '--output-report',
-      rasterReviewReportPath,
-      '--max-pages',
-      String(maxPages),
-      '--timeout-seconds',
-      String(Math.ceil(timeoutMs / 1000)),
-    ], {
-      timeout: timeoutMs,
-      maxBuffer: 20 * 1024 * 1024,
-      windowsHide: true,
-      env: conversionEnv,
-    })
-  } catch (error) {
-    const diagnosticId = await persistConversionFailure(
-      input,
-      'raster-review',
-      error,
+  const semanticOverridesPath = input.semanticOverridesPath
+    ? path.resolve(input.semanticOverridesPath)
+    : rasterOverridesPath
+  if (input.semanticOverridesPath) {
+    if (!existsSync(semanticOverridesPath)) {
+      throw typedError(
+        '上游编排器提供的语义覆盖清单不存在',
+        422,
+        'PDF_SEMANTIC_OVERRIDES_MISSING',
+      )
+    }
+    await reportConversionProgress(
+      input.onProgress,
+      '已接收图片生成阶段的语义清单，正在预检可编辑对象',
+      24,
     )
-    throw typedError(
-      withDiagnosticId(rasterReviewFailureMessage(error), diagnosticId),
-      422,
-      'PDF_RASTER_SLOT_REVIEW_FAILED',
+  } else {
+    await reportConversionProgress(
+      input.onProgress,
+      '正在预检 PDF 页面、图片和可编辑对象',
+      24,
     )
+    try {
+      await execFileAsync(python, [
+        rasterReviewScript,
+        '--input',
+        input.sourcePdfPath,
+        '--work-dir',
+        rasterReviewWorkDir,
+        '--conversion-work-dir',
+        input.workDir,
+        '--skill-root',
+        skillRoot,
+        '--pdftoppm',
+        pdftoppm,
+        '--output-overrides',
+        rasterOverridesPath,
+        '--output-report',
+        rasterReviewReportPath,
+        '--max-pages',
+        String(maxPages),
+        '--timeout-seconds',
+        String(Math.ceil(timeoutMs / 1000)),
+      ], {
+        timeout: timeoutMs,
+        maxBuffer: 20 * 1024 * 1024,
+        windowsHide: true,
+        env: conversionEnv,
+      })
+    } catch (error) {
+      const diagnosticId = await persistConversionFailure(
+        input,
+        'raster-review',
+        error,
+      )
+      throw typedError(
+        withDiagnosticId(rasterReviewFailureMessage(error), diagnosticId),
+        422,
+        'PDF_RASTER_SLOT_REVIEW_FAILED',
+      )
+    }
   }
   await reportConversionProgress(
     input.onProgress,
     '页面预检完成，正在构建可编辑 PPTX',
     35,
   )
-  const rasterReview = JSON.parse(
-    await readFile(rasterReviewReportPath, 'utf8'),
-  ) as { pageCount?: unknown }
-  const pageCount = Number(rasterReview.pageCount) || 0
+  const rasterReview = input.semanticOverridesPath
+    ? undefined
+    : JSON.parse(
+        await readFile(rasterReviewReportPath, 'utf8'),
+      ) as { pageCount?: unknown }
+  const pageCount = input.semanticOverridesPath
+    ? Math.max(0, Number(input.expectedPageCount) || 0)
+    : Number(rasterReview?.pageCount) || 0
   const args = [
     converterPath,
     '--input',
@@ -426,6 +454,8 @@ export async function convertUploadedInvestmentPdfTemplate(input: {
     process.execPath,
     '--flattened-mode',
     'ocr',
+    '--editable-scope',
+    'all',
     '--ocr-engine',
     ocrEngine,
     '--watermark-qa-mode',
@@ -437,7 +467,7 @@ export async function convertUploadedInvestmentPdfTemplate(input: {
     '--command-timeout-seconds',
     String(Math.ceil(timeoutMs / 1000)),
     '--overrides',
-    rasterOverridesPath,
+    semanticOverridesPath,
   ]
   if (tesseract) args.push('--tesseract', tesseract)
   args.push('--pdftoppm', pdftoppm)

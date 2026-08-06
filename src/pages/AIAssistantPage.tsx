@@ -768,8 +768,7 @@ function Chat() {
     (task) => !task.clientOnly && (task.status === 'pending' || task.status === 'running'),
   )
   const artifactRefreshKey = aiTasks
-    .filter((task) => task.status === 'succeeded')
-    .map((task) => `${task.id}:${task.updatedAt}:${task.artifacts?.length ?? 0}`)
+    .map((task) => `${task.id}:${task.status}:${task.artifacts?.length ?? 0}`)
     .join('|')
   // 把 showToast 注册到模块级 toast 桥（供 downloadWorkspaceFile / downloadRemoteUrl 等模块函数弹提示）
   useEffect(() => { registerAiToast(showToast) }, [showToast])

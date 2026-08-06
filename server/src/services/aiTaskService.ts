@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { createReadStream } from 'node:fs'
-import { mkdir, readdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, readdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { and, asc, desc, eq, inArray, lte, sql } from 'drizzle-orm'
 import JSZip from 'jszip'
@@ -2076,7 +2076,9 @@ async function executeTask(taskId: string) {
     await updateStage(
       taskId,
       template.outputFormat === 'pptx'
-        ? '生成可编辑 PPTX'
+        ? task.type === 'investment_recommendation_ppt'
+          ? '先生成图片高保真版，再继续生成可编辑版'
+          : '生成可编辑 PPTX'
         : task.type === 'compliance_statement'
           ? 'Formatter 生成 Word'
           : task.type === 'investment_proposal'
@@ -2091,6 +2093,77 @@ async function executeTask(taskId: string) {
       task.type === 'custom_template_document' ? content.title : undefined,
     )
     const outputPath = path.join(taskDir, fileName)
+    let imageDeckArtifactVersion: number | undefined
+    const publishImageDeck = async (imageDeck: {
+      path: string
+      slideCount: number
+      bytes: number
+      sha256: string
+      metadata: Record<string, unknown>
+    }) => {
+      if (task.type !== 'investment_recommendation_ppt') return
+      const imageDeckFileName = fileName.replace(/\.pptx$/i, '_图片高保真版.pptx')
+      const existingArtifacts = await db.select().from(aiArtifacts)
+        .where(and(
+          eq(aiArtifacts.taskId, task.id),
+          eq(aiArtifacts.fileName, imageDeckFileName),
+        ))
+        .limit(1)
+      const existingArtifact = existingArtifacts[0]
+      if (existingArtifact) {
+        imageDeckArtifactVersion = existingArtifact.version
+        return
+      }
+      const imageDeckPath = path.join(taskDir, imageDeckFileName)
+      await copyFile(imageDeck.path, imageDeckPath)
+      const copiedStat = await stat(imageDeckPath)
+      if (!copiedStat.isFile() || copiedStat.size !== imageDeck.bytes) {
+        throw Object.assign(
+          new Error('图片高保真版复制后文件校验不一致'),
+          { code: 'IMAGE_DECK_ARTIFACT_COPY_MISMATCH' },
+        )
+      }
+      const [{ count }] = await db.select({ count: sql<number>`count(*)::int` })
+        .from(aiArtifacts)
+        .where(and(
+          eq(aiArtifacts.userId, task.userId),
+          eq(aiArtifacts.projectId, task.projectId),
+          eq(aiArtifacts.format, 'pptx'),
+        ))
+      imageDeckArtifactVersion = Number(count ?? 0) + 1
+      await db.insert(aiArtifacts).values({
+        taskId: task.id,
+        userId: task.userId,
+        projectId: task.projectId,
+        conversationId: task.conversationId,
+        fileName: imageDeckFileName,
+        format: 'pptx',
+        mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        version: imageDeckArtifactVersion,
+        storagePath: imageDeckPath,
+        editableLevel: 'image',
+        sourceCutoffDate,
+        templateVersion: template.templateVersion,
+        qualityStatus: 'passed',
+        metadata: {
+          ...imageDeck.metadata,
+          artifactStage: 'image-deck',
+          artifactLabel: '图片高保真版',
+          editableScope: 'image',
+          slideCount: imageDeck.slideCount,
+          bytes: copiedStat.size,
+          sha256: imageDeck.sha256,
+          encodingClean: true,
+          qualityGate: 'image-generation-and-package',
+          availableWhileTaskRunning: true,
+        },
+      })
+      await updateStage(
+        taskId,
+        '图片高保真版已完成，可先下载；可编辑版继续生成中',
+        78,
+      )
+    }
     let previewPath: string | undefined
     let previewMetadata: Record<string, unknown> | undefined
     let complianceDocxReview: ComplianceOutputReview | undefined
@@ -2116,6 +2189,7 @@ async function executeTask(taskId: string) {
           resumeFromDirectory: investmentRecommendationResumeDirectory,
           onProgress: ({ stage, progress }) =>
             updateStage(taskId, stage, progress),
+          onImageDeckReady: publishImageDeck,
         })
         previewPath = outputPath.replace(/\.pptx$/i, '.preview.png')
         try {
@@ -2247,7 +2321,7 @@ async function executeTask(taskId: string) {
         )
       }
     }
-    await updateStage(taskId, '执行文件质量检查', 88)
+    await updateStage(taskId, '执行最终可编辑文件质量检查', 98)
     const qualityOptions = {
       // 合规性说明核心规范禁止“引用资料”等模板外正文板块；来源只保留在
       // ai_task_sources 与产物元数据中。尽调报告也按用户要求不显示文末来源。
@@ -2349,7 +2423,7 @@ async function executeTask(taskId: string) {
     }
     const [{ count }] = await db.select({ count: sql<number>`count(*)::int` }).from(aiArtifacts)
       .where(and(eq(aiArtifacts.userId, task.userId), eq(aiArtifacts.projectId, task.projectId), eq(aiArtifacts.format, template.outputFormat)))
-    const version = Number(count ?? 0) + 1
+    const version = imageDeckArtifactVersion ?? Number(count ?? 0) + 1
     const [artifact] = await db.insert(aiArtifacts).values({
       taskId: task.id,
       userId: task.userId,
@@ -2362,13 +2436,26 @@ async function executeTask(taskId: string) {
         : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       version,
       storagePath: outputPath,
-      editableLevel: template.editableLevel,
+      editableLevel: task.type === 'investment_recommendation_ppt'
+        ? 'all'
+        : template.editableLevel,
       sourceCutoffDate,
       templateVersion: template.templateVersion,
       qualityStatus: quality.qualityStatus,
       metadata: {
         ...quality.metadata,
         ...generationMetadata,
+        ...(task.type === 'investment_recommendation_ppt'
+          ? {
+              artifactStage: 'editable',
+              artifactLabel: '元素级可编辑版',
+              editableScope: 'all',
+              intermediateDeliverable: false,
+              generationContinues: false,
+              generationSkill: 'create-reference-driven-editable-ppt',
+              qualityGate: 'pipeline-handoff-and-final-artifact',
+            }
+          : {}),
         projectKnowledgeStudy: projectKnowledgeBrief?.audit,
         templateFidelityTarget: templateFidelity?.target ?? TEMPLATE_FIDELITY_MINIMUM,
         ...(templateFidelity ? { templateFidelity } : {}),
@@ -2468,7 +2555,7 @@ async function executeTask(taskId: string) {
             }
           : {}),
         referenceTemplate: task.type === 'investment_recommendation_ppt'
-          ? 'GordenSkills 原生设计规范（不使用模板）'
+          ? ''
           : task.type === 'due_diligence_report'
             ? '尽调报告模板语料库'
             : path.basename(template.referencePath),
@@ -2478,7 +2565,7 @@ async function executeTask(taskId: string) {
               ? template.referencePaths
               : [template.referencePath]).map((referencePath) => path.basename(referencePath)),
         templateReferenceMode: task.type === 'investment_recommendation_ppt'
-          ? 'gorden-native-no-template'
+          ? 'create-reference-driven-editable-ppt'
           : task.type === 'due_diligence_report' ? 'corpus' : 'single',
         skillName: skill.name,
         skillVersion: skill.version,
@@ -2515,7 +2602,7 @@ async function executeTask(taskId: string) {
           bytes: previewStat.size,
           ...previewMetadata,
           referenceTemplate: task.type === 'investment_recommendation_ppt'
-            ? 'GordenSkills 原生设计规范（不使用模板）'
+            ? ''
             : path.basename(template.referencePath),
           referenceTemplates: task.type === 'investment_recommendation_ppt'
             ? []

@@ -13,6 +13,7 @@ import {
 } from 'node:fs/promises'
 import path from 'node:path'
 import { promisify } from 'node:util'
+import JSZip from 'jszip'
 import type {
   BusinessContent,
   BusinessSection,
@@ -20,7 +21,11 @@ import type {
 } from './aiBusinessContentService.js'
 import type { AiTemplateDefinition } from './aiTemplateCatalog.js'
 import { getAiSkillRoot } from './aiSkillService.js'
-import { prepareInvestmentRecommendationPptWorkflow } from './aiInvestmentRecommendationPptWorkflowService.js'
+import {
+  gordenPackageSlidePromptContract,
+  prepareInvestmentRecommendationPptWorkflow,
+} from './aiInvestmentRecommendationPptWorkflowService.js'
+import { convertUploadedInvestmentPdfTemplate } from './aiInvestmentTemplateConversionService.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -40,6 +45,14 @@ type ProjectLike = {
 type GordenProgress = (
   update: { stage: string; progress: number },
 ) => void | Promise<void>
+
+export type GordenImageDeckReady = {
+  path: string
+  slideCount: number
+  bytes: number
+  sha256: string
+  metadata: Record<string, unknown>
+}
 
 type GordenSlidePlan = {
   number: number
@@ -116,15 +129,7 @@ const GORDEN_VISION_MAX_ATTEMPTS = Math.max(
   3,
   Math.min(8, Number(process.env.AI_GORDEN_VISION_MAX_ATTEMPTS) || 5),
 )
-const GORDEN_RENDER_CONTRACT_VERSION = '5.0-gorden-native-no-template'
-const GORDEN_NATIVE_PALETTE = [
-  '#0B2D5C',
-  '#2F6BFF',
-  '#F4B740',
-  '#F5F8FC',
-  '#FFFFFF',
-]
-
+const GORDEN_RENDER_CONTRACT_VERSION = '6.0-gorden-super-ppt-package-only'
 function sha256(buffer: Buffer) {
   return createHash('sha256').update(buffer).digest('hex')
 }
@@ -922,30 +927,12 @@ function sourceLabels(indexes: number[], sources: EvidenceSource[]) {
     .slice(0, 4)
 }
 
-function investmentCompositionBrief(slide: GordenSlidePlan) {
-  if (slide.role === 'cover') {
-    return '封面采用模板的机构报告式留白与视觉重心：大标题、公司/行业副题和一处克制的主题视觉即可。禁止任何项目阶段、融资、估值、亮点卡片或仪表盘。'
-  }
-  if (slide.role === 'summary') {
-    return '项目摘要页应形成“一个核心投资判断 + 一组关键事实”的主次关系，可使用事实条、时间线或结论栏；不得把全部文字做成四宫格、九宫格或等权卡片。'
-  }
-  if (['product', 'technology', 'validation', 'business-model'].includes(slide.role)) {
-    return '产品/技术/验证页应有一个占主要面积的内容骨架，例如产品全景、技术分层、证据链或场景流程，辅以少量说明；不要用一排通用图标代替产品、技术和客户证据。'
-  }
-  if (['financials', 'investment-plan', 'exit'].includes(slide.role)) {
-    return '财务与交易页优先使用机构投资材料常见的表格、主图、条款区或风险对照结构。只有文字清单提供了数字时才能绘制数值图表；不得生成虚构坐标、年份、比例或金额。'
-  }
-  if (['risk', 'closing'].includes(slide.role)) {
-    return '决策收束页采用投资结论、风险/核验事项、来源与责任声明的清晰分区，可使用对照表或纵向决策结构；不要做成“谢谢观看”海报或图标卡片墙。'
-  }
-  return '一页只表达一个投资判断主题，以证据表、时间线、对比、流程或结论区组织内容；禁止用重复等宽卡片填满页面。'
-}
-
 export function buildGordenSlidePrompt(input: {
   slide: GordenSlidePlan
   projectName: string
   sourceNames: string[]
   palette: string[]
+  skillContract: string
 }) {
   const pageTexts = input.slide.expectedTexts
     .map((text, index) => `${index + 1}. ${text}`)
@@ -956,12 +943,8 @@ export function buildGordenSlidePrompt(input: {
 页面标题：${input.slide.title}
 主配色：${input.palette.join('、') || '#0B2D5C、#2F6BFF、#F4B740、#F5F8FC'}
 
-只使用 GordenImagePPTGen 的原生机构投资材料设计规范。不得读取、模仿或复用外部模板、历史投资建议书、上传文件中的版式和视觉元素；用户文件与聊天信息只作为当前项目事实来源。
-
-【本页构图要求】
-${investmentCompositionBrief(input.slide)}
-
-整份材料必须呈现专业股权投资机构的 IC/投资建议书气质，不得设计成软件后台、网页仪表盘、移动端界面、运营数据大屏、四宫格/九宫格卡片墙或通用图标清单。避免大面积薰衣草紫渐变、玻璃拟态、悬浮圆角面板和无事实含义的 3D 图标。页面要高信息密度但主次清楚，每页只能有一个占主导的内容结构；采用 GordenSkills 原生的扁平版式、紧凑标题、细分隔线、真实表格/图表密度和机构页眉页脚节奏。
+【唯一设计与执行规范：GordenSuperPPTSkills】
+${input.skillContract}
 
 若没有提供当前项目真实视觉素材，使用不带事实暗示的几何结构、表格、时间线和色块留白，不得生成写实人物、虚构产品、虚构客户 Logo 或虚构证书。
 不得添加水印、页码、二维码、占位符、Lorem ipsum 或未提供的数据。
@@ -1233,6 +1216,36 @@ export function referenceDrivenSkillPaths(skillRoot = getAiSkillRoot()) {
     ),
     pdfRoot,
     convertPdf: path.join(pdfRoot, 'scripts', 'convert_pdf.py'),
+    checkEnvironment: path.join(pdfRoot, 'scripts', 'check_environment.py'),
+  }
+}
+
+async function inspectImageDeck(
+  filePath: string,
+  expectedSlideCount: number,
+) {
+  const fileStat = await stat(filePath)
+  if (!fileStat.isFile() || fileStat.size < 10_000) {
+    throw Object.assign(
+      new Error('图片高保真版 PPTX 文件为空或不完整'),
+      { code: 'REFERENCE_DRIVEN_IMAGE_DECK_INVALID' },
+    )
+  }
+  const buffer = await readFile(filePath)
+  const archive = await JSZip.loadAsync(buffer)
+  const slideCount = Object.keys(archive.files)
+    .filter((name) => /^ppt\/slides\/slide\d+\.xml$/i.test(name))
+    .length
+  if (slideCount !== expectedSlideCount) {
+    throw Object.assign(
+      new Error(`图片高保真版页数异常：预期 ${expectedSlideCount} 页，实际 ${slideCount} 页`),
+      { code: 'REFERENCE_DRIVEN_IMAGE_DECK_PAGE_COUNT_MISMATCH' },
+    )
+  }
+  return {
+    slideCount,
+    bytes: fileStat.size,
+    sha256: sha256(buffer),
   }
 }
 
@@ -2027,6 +2040,9 @@ export async function generateInvestmentRecommendationPptWithGorden(input: {
   pageCount?: string
   resumeFromDirectory?: string
   onProgress?: GordenProgress
+  onImageDeckReady?: (
+    artifact: GordenImageDeckReady,
+  ) => void | Promise<void>
 }) {
   const workflow = await prepareInvestmentRecommendationPptWorkflow(input.template)
   const imageGatewayKey = process.env.GATEWAY_IMAGE_API_KEY
@@ -2039,6 +2055,7 @@ export async function generateInvestmentRecommendationPptWithGorden(input: {
     )
   }
   const paths = gordenSkillPaths()
+  const pipelinePaths = referenceDrivenSkillPaths()
   const requiredScripts = [
     paths.generateImage,
     paths.composeImageDeck,
@@ -2048,6 +2065,11 @@ export async function generateInvestmentRecommendationPptWithGorden(input: {
     paths.placementQa,
     paths.visualCompareQa,
     paths.composeEditable,
+    pipelinePaths.resolveDependencies,
+    pipelinePaths.packageSlidesAsPdf,
+    pipelinePaths.validatePipelineHandoff,
+    pipelinePaths.convertPdf,
+    pipelinePaths.checkEnvironment,
   ]
   const missingScripts = requiredScripts.filter((script) => !existsSync(script))
   if (missingScripts.length) {
@@ -2062,6 +2084,26 @@ export async function generateInvestmentRecommendationPptWithGorden(input: {
     300_000,
     Number(process.env.AI_GORDEN_PPT_STEP_TIMEOUT_MS || 20 * 60_000),
   )
+  await reportProgress(
+    input.onProgress,
+    '正在检查图片生成、PDF 桥接与可编辑转换环境',
+    67,
+  )
+  await runCommand(python, [
+    pipelinePaths.resolveDependencies,
+    '--pdf-skill-dir', pipelinePaths.pdfRoot,
+    '--gorden-image-dir', paths.imageGenRoot,
+    '--gorden-super-dir', paths.superRoot,
+    '--json',
+  ], { timeoutMs, env: process.env })
+  const environmentArgs = [pipelinePaths.checkEnvironment, '--json']
+  const pdftoppm = process.env.AI_PDF_TO_PPT_PDFTOPPM
+    || findExecutable(process.platform === 'win32' ? 'pdftoppm.exe' : 'pdftoppm')
+  const libreoffice = process.env.AI_PDF_TO_PPT_LIBREOFFICE
+    || findExecutable(process.platform === 'win32' ? 'soffice.exe' : 'soffice')
+  if (pdftoppm) environmentArgs.push('--pdftoppm', pdftoppm)
+  if (libreoffice) environmentArgs.push('--libreoffice', libreoffice)
+  await runCommand(python, environmentArgs, { timeoutMs, env: process.env })
   const env = { ...process.env }
   const outputDir = path.dirname(input.outputPath)
   const slug = safeSlug(input.project.name)
@@ -2072,8 +2114,9 @@ export async function generateInvestmentRecommendationPptWithGorden(input: {
   })
   const nativeRenderFingerprint = sha256(Buffer.from(JSON.stringify({
     renderContractVersion: GORDEN_RENDER_CONTRACT_VERSION,
-    skillSha256: workflow.gordenSkill.sha256,
-    palette: GORDEN_NATIVE_PALETTE,
+    packageSha256: workflow.gordenPackage.packageSha256,
+    promptContractSha256: sha256(Buffer.from(workflow.gordenPackage.corePromptContract)),
+    palette: workflow.gordenPackage.palette,
   })))
   const runRoot = path.join(
     outputDir,
@@ -2096,10 +2139,10 @@ export async function generateInvestmentRecommendationPptWithGorden(input: {
 
   await reportProgress(
     input.onProgress,
-    'Gorden：使用 GordenSkills 原生设计规范生成，不读取任何模板',
+    'Gorden：加载技能包并规划图片型与可编辑两阶段生成',
     68,
   )
-  const palette = [...GORDEN_NATIVE_PALETTE]
+  const palette = [...workflow.gordenPackage.palette]
   const plans = buildGordenSlidePlan({
     project: input.project,
     content: input.content,
@@ -2194,6 +2237,7 @@ export async function generateInvestmentRecommendationPptWithGorden(input: {
       reuseLevel: 'none',
       sourceMode: workflow.sourceMode,
       workflowSkillSha256: workflow.gordenSkill.sha256,
+      gordenPackageSha256: workflow.gordenPackage.packageSha256,
       templateSha256: nativeRenderFingerprint,
       visualMaster: null,
       sourceTemplates: referenceSelection.sourceTemplates,
@@ -2264,6 +2308,7 @@ export async function generateInvestmentRecommendationPptWithGorden(input: {
       projectName: input.project.name,
       sourceNames: sourceLabels(plan.sourceIndexes, input.sources),
       palette,
+      skillContract: gordenPackageSlidePromptContract(workflow, plan.role),
     }), 'utf8')
     let result: GatewayImageResult
     try {
@@ -2332,6 +2377,25 @@ export async function generateInvestmentRecommendationPptWithGorden(input: {
   await runCommand(python, [paths.composeImageDeck, imageDeckJson, imageDeckPath], {
     timeoutMs,
     env,
+  })
+  const imageDeckQuality = await inspectImageDeck(imageDeckPath, plans.length)
+  await reportProgress(
+    input.onProgress,
+    '图片高保真版已通过检查，可先下载；正在继续生成可编辑版',
+    78,
+  )
+  await input.onImageDeckReady?.({
+    path: imageDeckPath,
+    ...imageDeckQuality,
+    metadata: {
+      artifactStage: 'image-deck',
+      artifactLabel: '图片高保真版',
+      editableScope: 'image',
+      intermediateDeliverable: true,
+      generationContinues: true,
+      generationSkill: 'create-reference-driven-editable-ppt',
+      generationRuntime: 'GordenImagePPTGen',
+    },
   })
 
   const editableSlides: Array<Record<string, unknown>> = []
@@ -2759,42 +2823,173 @@ export async function generateInvestmentRecommendationPptWithGorden(input: {
     )
   }
 
-  await reportProgress(input.onProgress, 'Gorden：正在交付四层可编辑 PPTX', 87)
-  await copyFile(gordenEditablePath, input.outputPath)
+  const bridgeDir = path.join(runRoot, 'bridge')
+  const conversionDir = path.join(runRoot, 'editable-conversion')
+  const bridgePdfPath = path.join(bridgeDir, `${slug}-image-bridge.pdf`)
+  const bridgeManifestPath = path.join(bridgeDir, 'pdf-bridge-manifest.json')
+  const semanticOverridesPath = path.join(conversionDir, 'semantic-overrides.json')
+  const slideSemanticsPath = path.join(runRoot, 'slide-semantics.json')
+  const conversionHandoffPath = path.join(conversionDir, 'conversion-handoff.json')
+  const pipelineHandoffReportPath = path.join(runRoot, 'pipeline-handoff-report.json')
+  await Promise.all([
+    mkdir(bridgeDir, { recursive: true }),
+    mkdir(conversionDir, { recursive: true }),
+  ])
+  await writeJson(slideSemanticsPath, {
+    schemaVersion: '1.0',
+    producer: 'create-reference-driven-editable-ppt',
+    slides: plans.map((plan) => ({
+      slide: plan.number,
+      role: plan.role,
+      title: plan.title,
+      verbatim_text: plan.expectedTexts,
+      source_fact_keys: plan.sourceIndexes,
+    })),
+  })
+  await writeJson(
+    semanticOverridesPath,
+    buildReferenceDrivenSemanticOverrides({
+      slides: editableSlides,
+      dimensions: pageDimensions,
+    }),
+  )
+
+  await reportProgress(
+    input.onProgress,
+    '可编辑版：正在封装图片桥接 PDF',
+    89,
+  )
+  try {
+    await runCommand(python, [
+      pipelinePaths.packageSlidesAsPdf,
+      '--slides-dir', slidesDir,
+      '--output', bridgePdfPath,
+      '--manifest', bridgeManifestPath,
+    ], { timeoutMs, env })
+  } catch (error) {
+    throw Object.assign(
+      new Error(`图片版 PDF 桥接未完成：${(error as Error).message}`),
+      { code: 'REFERENCE_DRIVEN_PDF_BRIDGE_FAILED' },
+    )
+  }
+
+  await reportProgress(
+    input.onProgress,
+    '可编辑版：正在执行元素级语义还原与逐页校验',
+    90,
+  )
+  const conversion = await convertUploadedInvestmentPdfTemplate({
+    sourcePdfPath: bridgePdfPath,
+    outputPptxPath: input.outputPath,
+    workDir: conversionDir,
+    semanticOverridesPath,
+    expectedPageCount: plans.length,
+    onProgress: ({ stage, progress }) => reportProgress(
+      input.onProgress,
+      `可编辑版：${stage}`,
+      Math.min(96, 89 + Math.max(0, Math.round(progress * 0.07))),
+    ),
+  })
+
+  await reportProgress(
+    input.onProgress,
+    '可编辑版：正在核对三阶段交接证书',
+    96,
+  )
+  try {
+    await runCommand(python, [
+      pipelinePaths.validatePipelineHandoff,
+      '--imagegen-manifest', imagegenManifestPath,
+      '--bridge-manifest', bridgeManifestPath,
+      '--conversion-handoff', conversionHandoffPath,
+      '--output-report', pipelineHandoffReportPath,
+      '--expected-editable-scope', 'all',
+    ], { timeoutMs, env })
+  } catch (error) {
+    throw Object.assign(
+      new Error(`可编辑版交接检查未通过：${(error as Error).message}`),
+      { code: 'REFERENCE_DRIVEN_PIPELINE_HANDOFF_REJECTED' },
+    )
+  }
+  const pipelineHandoff = JSON.parse(
+    await readFile(pipelineHandoffReportPath, 'utf8'),
+  ) as { passed?: unknown }
+  if (pipelineHandoff.passed !== true) {
+    throw Object.assign(
+      new Error('create-reference-driven-editable-ppt 交接校验未通过'),
+      { code: 'REFERENCE_DRIVEN_PIPELINE_HANDOFF_REJECTED' },
+    )
+  }
   const outputBuffer = await readFile(input.outputPath)
   await writeJson(path.join(runRoot, 'workflow-audit.json'), {
     schemaVersion: '1.0',
-    strictSequence: ['GordenSuperPPTSkill'],
+    strictSequence: [
+      'create-reference-driven-editable-ppt',
+      'GordenSuperPPTSkill',
+      'GordenImagePPTGen',
+      'pdf-to-editable-ppt',
+    ],
     sourceMode: workflow.sourceMode,
     skills: workflow.skills,
     templateUsage: 'disabled',
     gordenSkillSha256: workflow.gordenSkill.sha256,
+    gordenPackageSha256: workflow.gordenPackage.packageSha256,
+    gordenPackageComponents: [
+      workflow.gordenSkill.name,
+      workflow.gordenPackage.imageGenerationSkill.name,
+      workflow.gordenPackage.imageToEditableSkill.name,
+    ],
+    skillInstructionsInjected: true,
     nativeRenderFingerprint,
     projectFacts: path.join(runRoot, 'project-facts.json'),
     imagegenManifest: imagegenManifestPath,
     editableRunRoot: editableDir,
     imageDeck: imageDeckPath,
     gordenEditablePptx: gordenEditablePath,
+    bridgePdf: bridgePdfPath,
+    bridgeManifest: bridgeManifestPath,
+    slideSemantics: slideSemanticsPath,
+    semanticOverrides: semanticOverridesPath,
+    conversionHandoff: conversion.handoffPath,
+    pipelineHandoffReport: pipelineHandoffReportPath,
     editablePptx: input.outputPath,
     outputSha256: sha256(outputBuffer),
   })
-  await reportProgress(input.onProgress, 'GordenSkills 图片生成与四层可编辑还原验收完成', 88)
+  await reportProgress(
+    input.onProgress,
+    '图片版与元素级可编辑版均已通过交付检查',
+    97,
+  )
   return {
     slideCount: plans.length,
-    editableLevel: 'core-elements',
+    editableLevel: 'all',
     templateApplied: false,
     templateSha256: undefined,
     outputSha256: sha256(outputBuffer),
     cjkFont: 'Microsoft YaHei',
     cjkLanguage: 'zh-CN',
-    generationSkill: 'GordenSuperPPTSkill',
-    generationRuntime: 'GordenSuperPPTSkills',
-    imageDeckPath,
-    runRoot,
+    generationSkill: 'create-reference-driven-editable-ppt',
+    generationRuntime: 'create-reference-driven-editable-ppt',
+    imageDeckSha256: imageDeckQuality.sha256,
+    pipelineHandoffPassed: true,
     workflowAudit: {
       sourceMode: workflow.sourceMode,
       skills: workflow.skills,
-      strictSequence: ['GordenSuperPPTSkill'],
+      strictSequence: [
+        'create-reference-driven-editable-ppt',
+        'GordenSuperPPTSkill',
+        'GordenImagePPTGen',
+        'pdf-to-editable-ppt',
+      ],
+      packageSha256: workflow.gordenPackage.packageSha256,
+      packageComponents: [
+        workflow.gordenSkill.name,
+        workflow.gordenPackage.imageGenerationSkill.name,
+        workflow.gordenPackage.imageToEditableSkill.name,
+      ],
+      skillInstructionsInjected: true,
+      imageDeckPublishedBeforeEditable: true,
+      pipelineHandoffPassed: true,
     },
   }
 }

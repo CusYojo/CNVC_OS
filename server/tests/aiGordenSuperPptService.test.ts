@@ -114,23 +114,26 @@ test('Gorden slide plan carries detailed company, team, finance, funding, valuat
   assert.ok(plan.at(-1)?.expectedTexts.includes('本材料仅供内部投资决策使用。'))
 })
 
-test('Gorden image prompt enforces native no-template design and exact project text', () => {
+test('Gorden image prompt uses the loaded package contract and exact project text', async () => {
   const slide = buildGordenSlidePlan({
     project: { name: '智灵动力' },
     content,
     disclaimer: '内部使用。',
   })[1]
+  const workflow = await prepareInvestmentRecommendationPptWorkflow(
+    AI_TEMPLATE_CATALOG.investment_recommendation_ppt,
+  )
   const prompt = buildGordenSlidePrompt({
     slide,
     projectName: '智灵动力',
     sourceNames: ['项目档案', '公司官网'],
     palette: ['#123456', '#ABCDEF'],
+    skillContract: `GordenSuperPPTSkills 包版本：${workflow.gordenPackage.packageSha256.slice(0, 16)}\n复杂排版与每页不重样`,
   })
 
-  assert.match(prompt, /只使用 GordenImagePPTGen 的原生机构投资材料设计规范/)
-  assert.match(prompt, /不得读取、模仿或复用外部模板/)
-  assert.match(prompt, /不得设计成软件后台、网页仪表盘/)
-  assert.match(prompt, /四宫格\/九宫格卡片墙/)
+  assert.match(prompt, /唯一设计与执行规范：GordenSuperPPTSkills/)
+  assert.match(prompt, /GordenSuperPPTSkills 包版本/)
+  assert.match(prompt, /复杂排版与每页不重样/)
   assert.match(prompt, /不得生成写实人物、虚构产品、虚构客户 Logo 或虚构证书/)
   assert.doesNotMatch(prompt, /模板页作为唯一视觉参考/)
   assert.match(prompt, /必须逐字照排，不得改写、遗漏或新增/)
@@ -454,6 +457,26 @@ test('Gorden layout guard failures expose a specific safe stage', () => {
   assert.doesNotMatch(safeAiTaskFailureMessage(error), /internal layout details/)
 })
 
+test('reference-driven bridge failures preserve the published image deck', () => {
+  const error = Object.assign(new Error('internal bridge details'), {
+    code: 'REFERENCE_DRIVEN_PDF_BRIDGE_FAILED',
+  })
+  assert.equal(safeAiTaskFailureStage(error), '图片版 PDF 桥接未完成')
+  assert.match(safeAiTaskFailureMessage(error), /图片高保真版已经保留/)
+  assert.match(safeAiTaskFailureMessage(error), /继续生成/)
+  assert.doesNotMatch(safeAiTaskFailureMessage(error), /internal bridge details/)
+})
+
+test('editable conversion failures distinguish the second delivery stage', () => {
+  const error = Object.assign(new Error('internal conversion details'), {
+    code: 'PDF_TEMPLATE_CONVERSION_FAILED',
+  })
+  assert.equal(safeAiTaskFailureStage(error), '元素级可编辑转换未完成')
+  assert.match(safeAiTaskFailureMessage(error), /图片高保真版已经保留/)
+  assert.match(safeAiTaskFailureMessage(error), /元素级可编辑转换/)
+  assert.doesNotMatch(safeAiTaskFailureMessage(error), /internal conversion details/)
+})
+
 test('Gorden layout guard blocks errors but does not promote warnings to failures', () => {
   assert.deepEqual(gordenLayoutGuardArgs({
     script: 'layout_guard.py',
@@ -657,22 +680,37 @@ test('investment PPT resume checkpoint remaps duplicate source identities in ord
   assert.deepEqual(remapped.sections[0].findings[0].sourceIndexes, [1, 2, 0])
 })
 
-test('investment recommendation artifact metadata must prove the Gorden-only chain', () => {
+test('investment recommendation artifact metadata must prove the two-stage editable chain', () => {
   assert.doesNotThrow(() => assertInvestmentRecommendationSkillChain({
-    generationSkill: 'GordenSuperPPTSkill',
-    generationRuntime: 'GordenSuperPPTSkills',
+    generationSkill: 'create-reference-driven-editable-ppt',
+    generationRuntime: 'create-reference-driven-editable-ppt',
     templateApplied: false,
+    editableLevel: 'all',
     workflowAudit: {
-      strictSequence: ['GordenSuperPPTSkill'],
+      strictSequence: [
+        'create-reference-driven-editable-ppt',
+        'GordenSuperPPTSkill',
+        'GordenImagePPTGen',
+        'pdf-to-editable-ppt',
+      ],
+      packageSha256: 'a'.repeat(64),
+      packageComponents: [
+        'GordenSuperPPTSkill',
+        'GordenImagePPTGen',
+        'GordenImage2PPTX',
+      ],
+      skillInstructionsInjected: true,
+      imageDeckPublishedBeforeEditable: true,
+      pipelineHandoffPassed: true,
     },
   }))
   assert.throws(
     () => assertInvestmentRecommendationSkillChain({
-      generationSkill: 'GordenSuperPPTSkill',
-      generationRuntime: 'GordenSuperPPTSkills',
+      generationSkill: 'create-reference-driven-editable-ppt',
+      generationRuntime: 'create-reference-driven-editable-ppt',
       templateApplied: true,
     }),
-    /仅执行 GordenSkills/,
+    /图片版先交付/,
   )
 })
 
@@ -704,6 +742,7 @@ test('investment recommendation PPT workflow uses the Gorden super skill', async
     referencePaths.packageSlidesAsPdf,
     referencePaths.validatePipelineHandoff,
     referencePaths.convertPdf,
+    referencePaths.checkEnvironment,
   ]) {
     assert.equal(existsSync(file), true, `missing reference-driven runtime: ${file}`)
   }
@@ -772,17 +811,34 @@ test('Gorden runtime paths prefer the nested local skill layout', () => {
   }
 })
 
-test('the built-in investment recommendation task is forced through Gorden native mode', async () => {
+test('the built-in investment recommendation task uses the staged reference-driven pipeline', async () => {
   const template = AI_TEMPLATE_CATALOG.investment_recommendation_ppt
   assert.equal(mustUseReferenceDrivenPptPipeline(template), true)
   const workflow = await prepareInvestmentRecommendationPptWorkflow(template)
   assert.equal(workflow.sourceMode, 'gorden-native')
   assert.deepEqual(
     workflow.skills.map((item) => item.name),
-    ['GordenSuperPPTSkill'],
+    [
+      'create-reference-driven-editable-ppt',
+      'GordenSuperPPTSkill',
+      'pdf-to-editable-ppt',
+    ],
   )
   assert.equal(workflow.generationPolicy.templateReuse, 'none')
-  assert.equal(workflow.generationPolicy.bridgePolicy, 'gorden-image-to-four-layer-pptx')
+  assert.equal(workflow.generationPolicy.bridgePolicy, 'image-deck-to-pdf-to-editable-pptx')
+  assert.deepEqual([
+    workflow.gordenSkill.name,
+    workflow.gordenPackage.imageGenerationSkill.name,
+    workflow.gordenPackage.imageToEditableSkill.name,
+  ], [
+    'GordenSuperPPTSkill',
+    'GordenImagePPTGen',
+    'GordenImage2PPTX',
+  ])
+  assert.match(workflow.gordenPackage.corePromptContract, /内容优先/)
+  assert.match(workflow.gordenPackage.corePromptContract, /每页不重样/)
+  assert.match(workflow.gordenPackage.designTemplates, /M15 财务数据页/)
+  assert.match(workflow.gordenPackage.packageSha256, /^[a-f0-9]{64}$/)
 })
 
 test('reference-driven semantic bridge preserves four layers with stable names', () => {

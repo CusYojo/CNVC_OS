@@ -635,7 +635,7 @@ async function main(cleanupState: AcceptanceCleanupState) {
         structureMode: 'strict-template',
       },
       formats: ['pptx', 'png'],
-      skillName: 'GordenSuperPPTSkill',
+      skillName: 'create-reference-driven-editable-ppt',
     },
     {
       type: 'due_diligence_report',

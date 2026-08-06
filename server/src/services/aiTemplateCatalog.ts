@@ -34,7 +34,7 @@ export type AiTemplateDefinition = {
   workflowSkillNames?: AiPptWorkflowSkillName[]
   templateSourceMode?: 'native-pptx' | 'pdf-converted'
   conversionHandoffPath?: string
-  editableLevel: 'text-and-structure' | 'core-elements'
+  editableLevel: 'text-and-structure' | 'core-elements' | 'all'
   sections: string[]
   requiredParameters: string[]
   disclaimer: string
@@ -110,18 +110,22 @@ export const AI_TEMPLATE_CATALOG: Record<AiBusinessTaskType, AiTemplateDefinitio
   },
   investment_recommendation_ppt: {
     type: 'investment_recommendation_ppt',
-    skillName: 'GordenSuperPPTSkill',
+    skillName: 'create-reference-driven-editable-ppt',
     label: '投资建议书（PPT）',
-    description: '仅使用 GordenSkills，基于当前项目资料、用户上传文件和会话要求生成可编辑投资建议书',
+    description: '先生成并交付图片高保真版，再继续生成元素级可编辑投资建议书',
     outputFormat: 'pptx',
-    templateVersion: 'gorden-native-no-template-20260805-v1',
+    templateVersion: 'create-reference-driven-editable-ppt-20260806-v2',
     referencePath: path.resolve(
       process.cwd(),
-      'server/workspace/.agents/skills/GordenSuperPPTSkills/GordenSuperPPTSkill/SKILL.md',
+      'server/workspace/.agents/skills/create-reference-driven-editable-ppt/SKILL.md',
     ),
     referencePaths: [],
-    workflowSkillNames: ['GordenSuperPPTSkill'],
-    editableLevel: 'core-elements',
+    workflowSkillNames: [
+      'create-reference-driven-editable-ppt',
+      'GordenSuperPPTSkill',
+      'pdf-to-editable-ppt',
+    ],
+    editableLevel: 'all',
     sections: [
       '投资摘要',
       '公司概况与发展历程',

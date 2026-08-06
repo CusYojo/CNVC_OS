@@ -243,15 +243,15 @@ async function main() {
     pptWorkflowSkills.map((skill) => `${skill.name}:${skill.version}`).join('、'),
   )
   assert(
-    '投资建议书固定使用 GordenSkills 原生无模板链路',
+    '投资建议书固定使用分阶段图片版与元素级可编辑版链路',
     !AI_TEMPLATE_CATALOG.investment_recommendation_ppt.requiredParameters.includes('customTemplateId')
       && AI_TEMPLATE_CATALOG.investment_recommendation_ppt.requiredParameters.includes('structureMode')
       && !AI_TEMPLATE_CATALOG.investment_recommendation_ppt.requiredParameters.includes('pageCount')
       && AI_TEMPLATE_CATALOG.investment_recommendation_ppt.sections.length === 12
       && AI_TEMPLATE_CATALOG.investment_recommendation_ppt.workflowSkillNames?.join(',')
-        === 'GordenSuperPPTSkill'
+        === 'create-reference-driven-editable-ppt,GordenSuperPPTSkill,pdf-to-editable-ppt'
       && AI_TEMPLATE_CATALOG.investment_recommendation_ppt.skillName
-        === 'GordenSuperPPTSkill'
+        === 'create-reference-driven-editable-ppt'
       && AI_TEMPLATE_CATALOG.investment_recommendation_ppt.referencePaths?.length === 0,
     `${AI_TEMPLATE_CATALOG.investment_recommendation_ppt.requiredParameters.join('、')} / ${
       AI_TEMPLATE_CATALOG.investment_recommendation_ppt.workflowSkillNames?.join('、')}`,

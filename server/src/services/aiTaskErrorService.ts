@@ -21,6 +21,10 @@ export function safeAiTaskFailureStage(error: unknown) {
   if (code === 'INVESTMENT_PPT_SKILL_CHAIN_NOT_EXECUTED') {
     return '三技能生成链未完整执行'
   }
+  if (code === 'REFERENCE_DRIVEN_PDF_BRIDGE_FAILED') return '图片版 PDF 桥接未完成'
+  if (code === 'REFERENCE_DRIVEN_PIPELINE_HANDOFF_REJECTED') return '可编辑版交接检查未通过'
+  if (code.startsWith('REFERENCE_DRIVEN_IMAGE_DECK_')) return '图片高保真版文件检查未通过'
+  if (code.startsWith('PDF_')) return '元素级可编辑转换未完成'
   if (code === 'GORDEN_VISIBLE_TEXT_CONTRACT_REJECTED') return 'Gorden 页面文字检查未通过'
   if (code === 'GORDEN_VISION_GATEWAY_FAILED') return 'Gorden 页面视觉定位未完成'
   if (code === 'GORDEN_VISUAL_QA_REJECTED') return 'Gorden 最终视觉复核未通过'
@@ -64,7 +68,22 @@ export function safeAiTaskFailureMessage(error: unknown) {
     return '投资建议书未通过 Gorden 页面生成、四层可编辑还原或页面文字与事实检查。系统已保留参数，请点击“继续生成”重新生成并复核。'
   }
   if (code === 'INVESTMENT_PPT_SKILL_CHAIN_NOT_EXECUTED') {
-    return '投资建议书未按要求仅执行 GordenSkills 原生可编辑 PPTX 链路，系统已拒绝交付其他技能或模板链产生的文件。请检查技能运行时后继续生成。'
+    return '投资建议书未完整执行图片高保真版、PDF 桥接和元素级可编辑版链路，系统已停止最终交付。请检查技能运行时后继续生成。'
+  }
+  if (code === 'REFERENCE_DRIVEN_PDF_BRIDGE_FAILED') {
+    return '图片高保真版已经保留，但桥接 PDF 未能完成页数、比例或哈希检查。请点击“继续生成”恢复可编辑版。'
+  }
+  if (code === 'REFERENCE_DRIVEN_PIPELINE_HANDOFF_REJECTED') {
+    return '图片高保真版已经保留，但元素级可编辑版未通过页面、哈希、水印或可编辑性综合交接检查。请点击“继续生成”恢复可编辑版。'
+  }
+  if (code.startsWith('REFERENCE_DRIVEN_IMAGE_DECK_')) {
+    return '图片高保真版 PPTX 的文件大小或页数检查未通过，系统未发布不完整文件。请点击“继续生成”。'
+  }
+  if (code === 'PDF_SEMANTIC_OVERRIDES_MISSING') {
+    return '图片版已经保留，但可编辑转换所需的页面语义清单缺失。请点击“继续生成”从检查点恢复。'
+  }
+  if (code.startsWith('PDF_')) {
+    return '图片高保真版已经保留，但元素级可编辑转换或最终页面校验未完成。请检查 PDF 转 PPT 运行环境后点击“继续生成”。'
   }
   if (code === 'GORDEN_IMAGE_GATEWAY_UNCONFIGURED') {
     return 'GordenSuperPPTSkill 缺少图片生成网关密钥，无法执行逐页出图。请配置 GATEWAY_IMAGE_API_KEY 后继续生成。'

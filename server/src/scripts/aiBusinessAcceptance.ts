@@ -775,24 +775,24 @@ async function main() {
       assert(checks, 'AI-009 不泄露示例项目与内部模板编号', forbiddenSampleTerms.every((term) => !xml.includes(term)), forbiddenSampleTerms.join('、'))
       assert(
         checks,
-        'AI-009 已仅使用 GordenSkills 原生链路生成四层可编辑 PPTX',
+        'AI-009 已使用总编排器完成图片版与元素级可编辑版链路',
         !result.templateApplied
           && 'generationSkill' in result
-          && result.generationSkill === 'GordenSuperPPTSkill'
+          && result.generationSkill === 'create-reference-driven-editable-ppt'
           && 'generationRuntime' in result
-          && result.generationRuntime === 'GordenSuperPPTSkills'
+          && result.generationRuntime === 'create-reference-driven-editable-ppt'
           && !result.templateSha256,
-        'Gorden A→B，无模板摄取、无 PDF 桥接',
+        '图片版 → PDF 桥接 → 元素级可编辑版',
       )
       assert(
         checks,
-        'AI-009 工作流只包含 GordenSuperPPTSkill',
+        'AI-009 工作流包含总编排、Gorden 与 PDF 可编辑化技能',
         workflow.sourceMode === 'gorden-native'
-          && workflow.skills.length === 1
-          && workflow.skills[0]?.name === 'GordenSuperPPTSkill'
-          && workflow.skills[0]?.status === 'applied'
+          && workflow.skills.map((item) => item.name).join(',')
+            === 'create-reference-driven-editable-ppt,GordenSuperPPTSkill,pdf-to-editable-ppt'
+          && workflow.skills.every((item) => item.status === 'applied')
           && workflow.generationPolicy.templateReuse === 'none'
-          && workflow.generationPolicy.bridgePolicy === 'gorden-image-to-four-layer-pptx',
+          && workflow.generationPolicy.bridgePolicy === 'image-deck-to-pdf-to-editable-pptx',
         workflow.skills.map((item) => `${item.name}:${item.status}`).join('、'),
       )
       assert(

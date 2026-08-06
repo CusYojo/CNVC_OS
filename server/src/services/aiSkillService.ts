@@ -20,7 +20,7 @@ export const AI_BUSINESS_SKILLS = [
     taskType: 'investment_proposal',
   },
   {
-    name: 'GordenSuperPPTSkill',
+    name: 'create-reference-driven-editable-ppt',
     label: '投资建议书（PPT）',
     mode: 'document-task',
     taskType: 'investment_recommendation_ppt',

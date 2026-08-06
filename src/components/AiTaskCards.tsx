@@ -78,6 +78,23 @@ function artifactQualityLabel(artifact: AiTaskArtifact) {
   return artifact.qualityStatus === 'passed' ? '质量检查通过' : artifact.qualityStatus
 }
 
+function artifactStageLabel(artifact: AiTaskArtifact) {
+  const label = artifact.metadata?.artifactLabel
+  if (typeof label === 'string' && label.trim()) return label.trim()
+  const stage = String(artifact.metadata?.artifactStage ?? '')
+  if (stage === 'image-deck') return '图片高保真版'
+  if (stage === 'editable') return '元素级可编辑版'
+  return ''
+}
+
+function artifactDownloadLabel(task: AiTask, artifact: AiTaskArtifact) {
+  const stageLabel = artifactStageLabel(artifact)
+  if (task.type === 'investment_recommendation_ppt' && stageLabel) {
+    return `下载${stageLabel}`
+  }
+  return `下载 ${artifact.format.toUpperCase()} · V${artifact.version}`
+}
+
 const STATUS_META: Record<AiTaskStatus, {
   label: string
   className: string
@@ -150,6 +167,18 @@ function TaskCard({
     : task.type === 'due_diligence_report' && task.progress <= 35
       ? '结构化正文生成或质量检查'
       : ''
+  const downloadableArtifacts = (task.artifacts ?? []).filter((artifact) => {
+    const format = artifact.format.toLowerCase()
+    if (task.type === 'project_qa') return format === 'docx'
+    if (task.type === 'investment_proposal') return format === 'docx'
+    return ['docx', 'pptx', 'pdf'].includes(format)
+  })
+  const hasImageDeck = downloadableArtifacts.some(
+    (artifact) => artifact.metadata?.artifactStage === 'image-deck',
+  )
+  const hasEditableDeck = downloadableArtifacts.some(
+    (artifact) => artifact.metadata?.artifactStage === 'editable',
+  )
 
   const download = async (artifact: AiTaskArtifact) => {
     if (downloadingId) return
@@ -210,15 +239,17 @@ function TaskCard({
         </div>
       )}
 
-      {task.status === 'succeeded' && task.artifacts?.length > 0 && (
+      {task.type === 'investment_recommendation_ppt' && hasImageDeck && !hasEditableDeck && (
+        <div className="mt-3 rounded-lg border border-brand-100 bg-brand-50 px-3 py-2 text-xs text-brand-700">
+          {task.status === 'failed'
+            ? '图片高保真版已完成，可先下载查看。元素级可编辑版本轮未完成，可点击“继续生成”。'
+            : '图片高保真版已完成，可先下载查看。元素级可编辑版仍在继续生成与校验。'}
+        </div>
+      )}
+
+      {downloadableArtifacts.length > 0 && (
         <div className="mt-3 flex flex-wrap gap-2">
-          {task.artifacts
-            .filter((artifact) => {
-              const format = artifact.format.toLowerCase()
-              if (task.type === 'project_qa') return format === 'docx'
-              if (task.type === 'investment_proposal') return format === 'docx'
-              return ['docx', 'pptx', 'pdf'].includes(format)
-            })
+          {downloadableArtifacts
             .map((artifact) => (
               <Button
                 key={artifact.id}
@@ -229,7 +260,7 @@ function TaskCard({
                 onClick={() => { void download(artifact) }}
               >
                 <Download className="h-3.5 w-3.5" />
-                下载 {artifact.format.toUpperCase()} · V{artifact.version}
+                {artifactDownloadLabel(task, artifact)}
                 {['docx', 'pptx'].includes(artifact.format.toLowerCase())
                   && artifact.metadata?.encodingClean !== true
                   && '（历史未校验）'}
@@ -382,12 +413,19 @@ export function AiArtifactCenter({
             <span className="min-w-0 flex-1">
               <span className="block truncate text-xs font-medium text-slate-700" title={artifact.fileName}>{artifact.fileName}</span>
               <span className="mt-0.5 block truncate text-[10px] text-slate-400">
-                {artifact.format.toUpperCase()} · V{artifact.version} · {artifactQualityLabel(artifact)} · {
+                {artifact.format.toUpperCase()} · V{artifact.version} · {
+                  artifactStageLabel(artifact)
+                    ? `${artifactStageLabel(artifact)} · `
+                    : ''
+                }{artifactQualityLabel(artifact)} · {
                   typeof artifact.metadata?.customTemplateName === 'string'
                     ? `上传模板：${artifact.metadata.customTemplateName}`
                     : typeof artifact.metadata?.referenceTemplate === 'string'
+                      && artifact.metadata.referenceTemplate
                       ? `模板：${artifact.metadata.referenceTemplate}`
-                    : '业务模板'
+                    : artifact.metadata?.generationSkill === 'create-reference-driven-editable-ppt'
+                      ? '分阶段生成'
+                      : '业务模板'
                 }
               </span>
             </span>

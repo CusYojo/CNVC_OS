@@ -2315,6 +2315,13 @@ export async function generateBusinessPptx(input: {
   onProgress?: (
     update: { stage: string; progress: number },
   ) => void | Promise<void>
+  onImageDeckReady?: (artifact: {
+    path: string
+    slideCount: number
+    bytes: number
+    sha256: string
+    metadata: Record<string, unknown>
+  }) => void | Promise<void>
 }) {
   await mkdir(path.dirname(input.outputPath), { recursive: true })
   if (mustUseReferenceDrivenPptPipeline(input.template)) {
@@ -2678,18 +2685,36 @@ export function mustUseReferenceDrivenPptPipeline(
 export function assertInvestmentRecommendationSkillChain(
   metadata: Record<string, unknown>,
 ) {
-  const expectedSequence = ['GordenSuperPPTSkill']
+  const expectedSequence = [
+    'create-reference-driven-editable-ppt',
+    'GordenSuperPPTSkill',
+    'GordenImagePPTGen',
+    'pdf-to-editable-ppt',
+  ]
   const workflowAudit = metadata.workflowAudit as Record<string, unknown> | undefined
   const strictSequence = Array.isArray(workflowAudit?.strictSequence)
     ? workflowAudit.strictSequence.map(String)
     : []
+  const packageComponents = Array.isArray(workflowAudit?.packageComponents)
+    ? workflowAudit.packageComponents.map(String)
+    : []
   const valid = metadata.generationSkill === expectedSequence[0]
-    && metadata.generationRuntime === 'GordenSuperPPTSkills'
+    && metadata.generationRuntime === 'create-reference-driven-editable-ppt'
     && metadata.templateApplied === false
+    && metadata.editableLevel === 'all'
     && strictSequence.join('\u0000') === expectedSequence.join('\u0000')
+    && /^[a-f0-9]{64}$/.test(String(workflowAudit?.packageSha256 || ''))
+    && packageComponents.join('\u0000') === [
+      'GordenSuperPPTSkill',
+      'GordenImagePPTGen',
+      'GordenImage2PPTX',
+    ].join('\u0000')
+    && workflowAudit?.skillInstructionsInjected === true
+    && workflowAudit?.imageDeckPublishedBeforeEditable === true
+    && workflowAudit?.pipelineHandoffPassed === true
   if (!valid) {
     throw Object.assign(
-      new Error('投资建议书未按要求仅执行 GordenSkills 原生可编辑 PPTX 链路'),
+      new Error('投资建议书未完整执行图片版先交付、元素级可编辑版后交付的技能链路'),
       { code: 'INVESTMENT_PPT_SKILL_CHAIN_NOT_EXECUTED' },
     )
   }
