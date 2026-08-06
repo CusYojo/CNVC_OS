@@ -1,90 +1,66 @@
-# Evidence and Quality Rules
+# 证据与质量规则
 
-## Contents
+## 目录
 
-1. Evidence model
-2. Status language
-3. Calculation rules
-4. Risk discipline
-5. Final acceptance
+1. 证据模型
+2. 状态用语
+3. 计算规则
+4. 风险纪律
+5. 最终验收
 
-## Evidence model
+## 证据模型
 
-Grade evidence:
-
-| Grade | Meaning | Examples |
+| 等级 | 含义 | 示例 |
 |---|---|---|
-| A | independently verifiable | signed contract, bank record, acceptance, filing, regulator record, third-party test |
-| B | corroborated | customer/supplier interviews, multiple independent public sources |
-| C | company-provided | management data, internal test, business ledger |
-| D | judgment/forecast | estimate, target, scenario, unverified plan |
+| A | 可独立核验 | 已签合同、银行流水、验收材料、正式申报、监管记录、第三方测试 |
+| B | 已交叉印证 | 客户/供应商访谈、多个彼此独立的高质量来源 |
+| C | 公司单方提供 | 管理层数据、内部测试、业务台账 |
+| D | 判断或预测 | 估算、目标、情景、未经验证的计划 |
 
-Do not support a thesis-critical conclusion only with C/D evidence without explicit disclosure.
+若主线关键判断只由 C/D 级证据支持，必须明确披露，不能写成已确认事实。工作台账中的每项重大陈述都要标为事实、判断、预测或计算。
 
-Label every material statement as fact, judgment, forecast, or calculation in the working ledger.
+## 状态用语
 
-## Status language
-
-Keep these separate:
+严格区分：
 
 ```text
-lead
-→ requirement confirmed
+线索
+→ 需求确认
 → Demo/POC
-→ sample/trial
-→ bidding
-→ signed contract/order
-→ delivered
-→ accepted
-→ revenue recognized
-→ cash collected
-→ repurchase/expansion
+→ 送样/试用
+→ 投标
+→ 签署合同/订单
+→ 交付
+→ 验收
+→ 收入确认
+→ 回款
+→ 复购/扩容
 ```
 
-Use a strong status only when the corresponding evidence exists.
+只有存在对应证据时才能使用更强状态。还要区分：公司目标与外部预测；内部测试、客户验证与独立测试；接触沟通与正式合作；非独占许可与独占权属；指控、立案/调查、判决与最终结果。
 
-Differentiate:
+## 计算规则
 
-- company target vs external forecast;
-- internal test vs customer validation vs independent test;
-- contact/communication vs formal cooperation;
-- non-exclusive license vs exclusive ownership;
-- allegation vs filing/investigation vs judgment vs final outcome.
+每个衍生数值都要给出公式、输入值及来源、单位、币种、区域、期间和假设；不确定性重大时给出基准、上行和下行情景。不得平均口径冲突的数据，必须保留并解释差异。市场规模优先采用自上而下与自下而上交叉验证，严格区分 TAM、SAM、SOM。
 
-## Calculations
+## 风险纪律
 
-For every derived figure, show:
-
-- formula;
-- input values and sources;
-- unit, currency, region, and time period;
-- assumptions;
-- base/upside/downside when uncertainty is material.
-
-Do not average conflicting definitions. Explain and preserve the conflict.
-
-For market size, prefer triangulating top-down and bottom-up. Keep TAM, SAM, and SOM distinct.
-
-## Risk discipline
-
-For each material risk state:
+每项重大风险按以下结构写明：
 
 ```text
-risk
-→ trigger
-→ impact
-→ current evidence
-→ mitigation
-→ next verification
+风险
+→ 触发条件
+→ 经营或财务影响
+→ 当前证据
+→ 投资处理
+→ 判断反转事实
 ```
 
-Cover market, technology, commercialization, customer/order, financial/cash, team/governance, policy/compliance, and valuation/transaction risk when relevant.
+按项目相关性覆盖市场、技术、商业化、客户/订单、财务/现金、团队/治理、政策/合规、估值/交易风险。至少提出一个足以破坏投资主线的反方观点。缓释措施不能当作风险已经解决的证据。
 
-Include at least one thesis-breaking counterargument. Do not present mitigation as proof that the risk is resolved.
+## 未解决标记
 
-## Required unresolved markers
-
-Use:
+工作底稿使用：
 
 ```text
 [待补充]
@@ -93,38 +69,46 @@ Use:
 [尚无可核验证据]
 [多来源口径冲突]
 [数据时点较旧]
+[数据质量待核验]
 [公司预测]
 [项目团队判断]
 ```
 
-Prefer a visible unresolved marker over invented prose.
+宁可显式保留未解决标记，也不得编写无依据内容。读者版优先把标记改写为自然的证据边界句。
 
-## Final acceptance
+## 最终验收
 
-Require:
+必须满足：
 
-- one-sentence project thesis;
-- report title followed immediately by Q1 unless the user explicitly requests front matter;
-- a direct, decision-useful answer for every question without a standalone `结论：` label or conclusion callout;
-- traceable evidence or an unresolved marker for every material claim;
-- distinction among fact, judgment, forecast, and calculation;
-- distinction among order, delivery, acceptance, revenue, and cash;
-- risk/counterargument content in one or more questions;
-- information gaps and next actions integrated into the relevant answer or final decision question;
-- continuous numbering;
-- source dates and data periods recorded in the internal evidence ledger;
-- no unsupported precise material number;
-- no inconsistent company/customer/unit naming.
-- no evidence-acquisition self-reference such as `公开信息`, `公开材料`, `公开资料`, `公开披露`, `公开报道`, `公开检索`, `根据公开…`, or `从公开…`; express the fact and evidentiary boundary directly.
+- 有一句话项目主线；
+- 除非用户要求前置内容，否则标题后立即进入 Q1；
+- 每个问题都有直接、可决策的回答，不出现独立“结论：”标签或结论框；
+- 每项重大主张都有可追溯证据或未解决标记；
+- 事实、判断、预测、计算相互区分；
+- 订单、交付、验收、收入和回款相互区分；
+- 至少一个问题包含风险或反方分析；
+- 信息缺口、证据要求和跟进动作保留在内部台账；读者版以可观察状态、经济后果和投资处理表达边界；
+- 问题连续编号；
+- 来源日期与数据期间记录在内部证据台账；
+- 没有无依据的精确重大数字；
+- 公司、客户、单位等命名一致；
+- 报告以资本配置为主线，核心事实连接到商业、财务、风险或交易后果；
+- 已提取 3—7 个公司专属名词，至少 60% 的问题具有公司锚点；
+- 至少 50% 的问题同时具有公司锚点和影响决策的经济张力；
+- 超过 70% 的答案完成事实、机制、具体变量、投资处理或失效条件中的至少三个层级；
+- 每个关键答案指出至少一个具体经营、财务或估值变量及影响方向；
+- 全文不以产品功能罗列、材料清单、通用风险穷举或背景篇幅替代因果分析；
+- 读者版不出现“建议核验”“需要补充”“进一步验证”“下一步应取得”等未完成式工作语言；
+- 最后一问包含明确的推进、附条件推进、暂缓或否决条件；
+- 正文不出现“作为资深投资经理”“从投资经理角度看”等身份自述；
+- 正文没有“公开信息”“公开材料”“公开资料”“公开披露”“公开报道”“公开检索”“根据公开……”或“从公开……”等取证自述。
 
-When web research is used, also require:
+使用网络研究时还必须满足：
 
-- primary source or two independent quality sources for each material claim;
-- publisher, title, URL, publication date, access date, and supported-claim mapping in the internal evidence ledger;
-- no source list, source note, citation label, Markdown link, raw URL, or clickable external hyperlink in the standard reader-facing report unless the user explicitly requests a cited edition;
-- neutral prose attribution only when needed to preserve the status or boundary of a claim;
-- compatible units and definitions;
-- lawful public or authorized access;
-- no copied long protected text;
-- no irrelevant sensitive personal data;
-- no claim of full verification while material C/D evidence remains.
+- 每项重大主张由一个权威原始来源或两个独立高质量来源支持；
+- 内部证据台账记录发布者、标题、URL、发布日期、访问日期和所支持主张；
+- 除非用户要求带引文版本，标准读者版没有来源清单、来源行、引用标签、Markdown 链接、原始 URL 或可点击外链；
+- 只有为说明主张状态或边界确有必要时才使用中性归因；
+- 单位和定义兼容，访问合法且获得授权；
+- 不复制受保护长文，不包含无关敏感个人数据；
+- 重大证据仍为 C/D 级时，不声称已经完全核验。

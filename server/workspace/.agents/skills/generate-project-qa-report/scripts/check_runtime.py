@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check whether the host can validate, build, and visually verify QA DOCX files."""
+"""检查当前环境能否校验、生成并逐页核验 Q&A DOCX 文档。"""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ def main() -> int:
     parser.add_argument(
         "--strict",
         action="store_true",
-        help="Return a non-zero status unless DOCX generation and a render path are ready.",
+        help="若 DOCX 生成或视觉渲染路径未就绪，则返回非零状态码。",
     )
     args = parser.parse_args()
 

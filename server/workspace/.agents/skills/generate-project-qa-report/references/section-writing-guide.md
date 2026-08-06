@@ -1,344 +1,194 @@
-# Section Writing and Brainstorming Guide
+# 各板块写作与头脑风暴指南
 
-## Contents
+## 目录
 
-1. Answer pattern
-2. Cross-question synthesis
-3. Industry, pain, and timing
-4. Market sizing
-5. Product and technology
-6. Advantage and competition
-7. Business model and productization
-8. Customers and pipeline
-9. Financial quality
-10. Team, governance, IP
-11. Risk and valuation
-12. Growth and action
+1. 回答结构
+2. 投资经理视角校准
+3. 跨问题综合
+4. 行业、痛点与时机
+5. 市场测算
+6. 产品与技术
+7. 优势与竞争
+8. 商业模式与产品化
+9. 客户与管线
+10. 财务质量
+11. 团队、治理与知识产权
+12. 风险与估值
+13. 增长与行动
 
-## Answer pattern
+## 回答结构
 
-Write each answer as:
-
-```text
-conclusion
-→ non-overlapping reasons
-→ evidence
-→ counterargument/boundary
-→ decision implication
-```
-
-Require at least one traceable fact or unresolved marker. Avoid generic promotional language.
-
-## Cross-question synthesis
-
-Do not create a standalone execution summary by default. Instead:
-
-- put one-sentence project positioning and commercial stage in Q1;
-- place the strongest evidence and boundary in the relevant technical, product, customer, or financial question;
-- place the overall recommendation, thesis-breaking risk, unresolved gaps, and next milestone in the last question.
-
-Ask:
-
-- What single fact makes this project more than a concept?
-- What assumption would break the thesis?
-- What should the reader do now?
-
-## Industry, customer pain, and timing
-
-Explain:
-
-- what the category is and where it sits in the value chain;
-- buyer, user, and beneficiary;
-- current workflow and alternative;
-- cost, quality, speed, safety, or compliance pain;
-- why the need is urgent now.
-
-Evidence:
-
-- customer interviews;
-- process and loss data;
-- regulation;
-- procurement budget;
-- performance limits of alternatives.
-
-Ask:
-
-- What happens if the customer does nothing?
-- Is this mandatory, economically compelling, or merely helpful?
-- How does the external driver become a procurement budget?
-
-## Market sizing
-
-Use:
+每个答案按以下逻辑自然展开：
 
 ```text
-top-down: total spend × relevant product share × serviceable geography
-bottom-up: customers × deployment units × unit price + recurring revenue
-budget-based: customer budget × product allocation × attainable share
+直接判断与可观察事实
+→ 客户行为或经营机制
+→ 具体经营/财务变量
+→ 投资主线或估值处理
+→ 优先级最高的失效条件
 ```
 
-Keep TAM, SAM, and SOM distinct. Show base, upside, downside when assumptions are material.
+至少包含一项可追溯事实和一项能够改变投资判断的因果推论，避免泛化宣传语言。不得只写“影响商业化、投资价值或估值”，必须指出具体变量和方向。正文不得设置独立“结论：”标签；直接判断应自然融入首段。
 
-Ask:
+## 投资经理视角校准
 
-- Which variable drives most of the result?
-- Is the company realistically able to access the whole market?
-- Are customer count and site count double-counted?
-- Does price decline with scale?
+每个关键答案都要完成“事实—客户行为/商业机制—财务或风险后果—投资处理—失效条件”的推导。不能只解释行业、技术或公司情况；要说明这些事实为什么会提高或降低可投资性。
 
-Output:
+优先追问：价值由什么驱动？现金如何形成？增长需要多少追加资本？证据能支持多强判断？最强替代解释是什么？什么情况应推进、暂缓或否决？
 
-| Level | Customers/sites | Units/customer | Unit value | Penetration | Size | Definition |
+保持机构化、克制和条件式表达。不得在正文自称资深投资经理，也不得为了显得专业而添加无证据的估值、回报率或精确预测。
+
+证据获取和材料索取放在内部台账。读者版使用完成态语言：把未形成合同闭环的合作排除在订单和收入预测之外，把未证明复用的产品按项目交付处理，把未签约的新产品只视为期权价值。不得以“建议核验”“需要补充”或“下一步应取得”结束答案。
+
+相邻答案应选择不同的主要结构：定义型、发展型、判断型、案例型或比较型。不得让全文重复“原因—证据—风险—意义”的同一模板。
+
+## 跨问题综合
+
+默认不设置独立执行摘要：
+
+- Q1 写一句话项目定位和商业阶段；
+- 最强证据和边界分别放入技术、产品、客户或财务问题；
+- 最后一问综合总体判断、主线破坏风险、未解决缺口和下一里程碑。
+
+始终追问：投资人实际购买的资产是什么？哪个单一事实证明项目不只是概念？该事实改变哪个经营或财务变量？哪个假设一旦失败会破坏主线？读者现在应该采取什么资本配置动作？
+
+## 行业、客户痛点与时机
+
+说明品类定义及产业链位置、购买者/使用者/受益者、现有流程和替代方案、成本/质量/速度/安全/合规痛点，以及需求为什么现在变得紧迫。
+
+证据可包括客户访谈、流程与损失数据、法规、采购预算、替代方案的性能边界。
+
+追问：客户什么都不做会怎样？需求是强制、经济上足够有吸引力，还是仅有帮助？外部驱动如何转化为采购预算？
+
+## 市场测算
+
+```text
+自上而下：总支出 × 相关产品占比 × 可服务地域
+自下而上：客户数 × 单客户部署量 × 单价 + 经常性收入
+预算法：客户预算 × 产品分配比例 × 可获得份额
+```
+
+严格区分 TAM、SAM、SOM。关键假设不确定时给出基准、上行、下行情景。检查最大驱动变量、公司能否触达全部市场、客户数与站点数是否重复计算、规模扩大后价格是否下降。
+
+| 层级 | 客户/站点 | 单客户数量 | 单位价值 | 渗透率 | 规模 | 口径 |
 |---|---:|---:|---:|---:|---:|---|
 |  |  |  |  |  |  |  |
 
-## Product and product matrix
+## 产品与产品矩阵
 
-Classify by scenario, commercial stage, or technology platform:
+按场景、商业阶段或技术平台分类：入口产品、当前现金产品、增长产品、战略选择权。
 
-- entry product;
-- current cash product;
-- growth product;
-- strategic optionality.
-
-Output:
-
-| Product/module | Customer scenario | Function | Differentiation | Maturity | Revenue model |
+| 产品/模块 | 客户场景 | 功能 | 差异化 | 成熟度 | 收入模式 |
 |---|---|---|---|---|---|
-|  |  |  | R&D/test/mass |  |  |
+|  |  |  |  | 研发/测试/量产 |  |
 
-Ask:
+追问：哪个产品贡献当前收入？哪个产品负责进入客户？哪个产品决定未来上限？新产品复用平台还是重新研发？产品线是否超过现有资源承载能力？
 
-- Which product generates current revenue?
-- Which opens the customer account?
-- Which creates future ceiling?
-- Does a new product reuse the platform or restart R&D?
-- Is the product line too broad for current resources?
-
-## Technology
-
-Describe:
+## 技术
 
 ```text
-input/data
-→ core engine
-→ algorithm/control
-→ output
-→ feedback and iteration
+输入/数据
+→ 核心引擎
+→ 算法/控制
+→ 输出
+→ 反馈与迭代
 ```
 
-Answer:
+说明哪些自研、哪些外购；最难技术问题；指标及测试条件；量产表现而非仅 Demo 表现；跨客户复用；知识产权权属与被替代风险。
 
-- what is self-developed and purchased;
-- hardest technical problem;
-- metrics and test conditions;
-- production performance, not only Demo performance;
-- cross-customer reuse;
-- IP ownership and replacement risk.
+追问：优势来自单一参数还是系统集成？复制需要多久和多少成本？性能是否依赖人工配置？开源方案、基础模型或客户自研能否替代？
 
-Ask:
+## 核心优势
 
-- Is advantage one parameter or system integration?
-- How long and how much would replication take?
-- Does performance depend on manual configuration?
-- Can open source, foundation models, or customer self-build substitute?
+逐项检验：优势是否真实存在？是否影响采购？能否量化？复制难度如何？是否随规模或使用量增强？
 
-## Core advantage
-
-Test every claimed moat:
-
-1. Does it exist?
-2. Does it affect purchasing?
-3. Is it measurable?
-4. How difficult is replication?
-5. Does it strengthen with scale or usage?
-
-Output:
-
-| Advantage | Customer value | Evidence | Replication difficulty | Durability |
+| 优势 | 客户价值 | 证据 | 复制难度 | 持续性 |
 |---|---|---|---|---|
-|  |  |  | high/medium/low |  |
+|  |  |  | 高/中/低 |  |
 
-## Competition and alternatives
+## 竞争与替代方案
 
-Compare:
+至少比较国际领先者、国内成熟企业、创业公司、客户自研、人工/传统流程和不采取行动。维度包括覆盖范围、性能、价格、交付、定制、本地支持、供应链和已验证客户。
 
-- global leader;
-- domestic established player;
-- startup;
-- customer self-build;
-- manual/traditional process;
-- doing nothing.
+追问：公司在哪些方面更弱？低价是壁垒还是牺牲毛利？服务能否全国规模化？客户为什么会从现有供应商切换？
 
-Use dimensions including coverage, performance, price, delivery, customization, local support, supply chain, and verified customers.
-
-Ask:
-
-- Where is the company weaker?
-- Is low price a moat or margin sacrifice?
-- Can service scale nationally?
-- Why would the customer switch from the incumbent?
-
-## Business model and productization
-
-Map revenue:
+## 商业模式与产品化
 
 ```text
-hardware
-+ license
-+ implementation
-+ annual maintenance
-+ subscription/invocation
-+ value-added service
+硬件
++ 许可
++ 实施
++ 年度维护
++ 订阅/调用
++ 增值服务
 ```
 
-Measure:
+衡量标准模块占比、定制工时、部署周期、可复用组件占比、续费与扩容、毛利、员工增速与收入增速的关系。
 
-- standard module share;
-- customization hours;
-- deployment time;
-- reusable component share;
-- renewal/expansion;
-- gross margin;
-- employee growth relative to revenue.
+追问：去掉定制项目收入后还剩下什么产品？第十个客户的交付成本是否低于第一个？经常性收入已经签约还是仅为设想？服务是高毛利支持还是低毛利驻场人力？
 
-Ask:
-
-- If custom project revenue disappears, what product remains?
-- Does the tenth customer cost less to deliver than the first?
-- Is recurring revenue contracted or aspirational?
-- Is service high-margin support or low-margin on-site labor?
-
-## Customers, orders, and pipeline
-
-Use:
+## 客户、订单与管线
 
 ```text
-lead
-→ requirement
+线索
+→ 需求确认
 → Demo/POC
-→ trial/sample
-→ bidding
-→ contract/order
-→ delivery
-→ acceptance
-→ revenue
-→ cash
-→ repurchase
+→ 试用/送样
+→ 投标
+→ 合同/订单
+→ 交付
+→ 验收
+→ 收入
+→ 回款
+→ 复购
 ```
 
-Output:
-
-| Customer alias | Product | Current stage | Quantity | Contract/intention value | Expected date | Evidence | Next action |
+| 客户别名 | 产品 | 当前阶段 | 数量 | 合同/意向金额 | 预计日期 | 证据 | 下一动作 |
 |---|---|---|---:|---:|---|---|---|
 |  |  |  |  |  |  |  |  |
 
-Ask:
+追问：金额是已签、意向还是管理层估算？交付、验收和付款是否有证据？Demo 转化率和周期是多少？管线是否过度集中？
 
-- Is the amount signed, intended, or management-estimated?
-- Are delivery, acceptance, and payment evidenced?
-- What is Demo conversion and cycle length?
-- Is pipeline concentrated?
+## 财务质量
 
-## Financial quality
+覆盖收入确认政策、付款节点和账龄、季节性、毛利驱动、研发/算力/外包/销售/交付成本、营运资金和资金用途、未来 12—24 个月现金需求。
 
-Cover:
-
-- revenue-recognition policy;
-- payment milestones and aging;
-- seasonality;
-- gross-margin drivers;
-- R&D, compute, outsourcing, sales, and delivery costs;
-- working capital and funding use;
-- 12-24 month cash need.
-
-Output:
-
-| Metric | Prior | Current | Next-year E | Explanation/source |
+| 指标 | 上期 | 本期 | 下一年 E | 说明/依据 |
 |---|---:|---:|---:|---|
-| Revenue |  |  |  |  |
-| Gross margin |  |  |  |  |
-| Operating cash flow |  |  |  |  |
-| Accounts receivable |  |  |  |  |
-| R&D |  |  |  |  |
+| 收入 |  |  |  |  |
+| 毛利率 |  |  |  |  |
+| 经营现金流 |  |  |  |  |
+| 应收账款 |  |  |  |  |
+| 研发投入 |  |  |  |  |
 
-Ask:
+追问：利润增长是否带来现金？收入是否早于验收或回款确认？规模扩大是否需要库存或垫资？外包减少代表产品化提升还是项目减少？
 
-- Does profit growth produce cash?
-- Is revenue recognized before acceptance or collection?
-- Does scale require inventory or customer financing?
-- Does lower outsourcing indicate productization or fewer projects?
+## 团队、治理与知识产权
 
-## Team, governance, and IP
+围绕战略、技术、产品、销售、交付、财务和运营建立能力矩阵。核验控制权与表决权、关联方与历史代持、创始人全职与竞业、员工激励、院校/研究所/前雇主技术、专利/代码/数据/商标权属、客户数据权利、许可和合规。
 
-Build a capability matrix for strategy, technology, product, sales, delivery, finance, and operations.
+追问：一名创始人离开后公司能否运作？许可是否独占、可转让且长期有效？客户数据能否用于训练？产业股东兼客户时，交易是否公允？
 
-Verify:
+## 风险与反方观点
 
-- control and voting rights;
-- related parties and historical nominee holding;
-- founder full-time status and non-compete;
-- employee incentives;
-- university/institute/former-employer technology;
-- patent, code, data, and trademark ownership;
-- customer data rights;
-- permits and compliance.
-
-Ask:
-
-- Can the company operate if one founder leaves?
-- Is licensing exclusive, transferable, and durable?
-- Can customer data be reused for training?
-- Are industrial shareholders also customers on arm's-length terms?
-
-## Risk and counterarguments
-
-Use:
-
-| Risk | Probability | Impact | Trigger/indicator | Mitigation | Verification |
+| 风险 | 概率 | 影响 | 触发条件/指标 | 缓释措施 | 核验动作 |
 |---|---|---|---|---|---|
-|  | H/M/L | H/M/L |  |  |  |
+|  | 高/中/低 | 高/中/低 |  |  |  |
 
-Ask:
+追问：市场是否被高估？需求是否只停留在试点？产品是否只是集成而非自有技术？量产表现是否等于 Demo 表现？客户会否自研？预算失效前管线能否转化？客户或区域是否过度集中？估值是否透支未来三年基本面？缓释措施不得写成风险已解决的证据。
 
-- Is the market overstated?
-- Is demand only pilot-level?
-- Is the product integration rather than proprietary?
-- Does production performance match Demo?
-- Will customers self-build?
-- Can pipeline convert before budgets expire?
-- Is customer/region concentration excessive?
-- Is valuation ahead of three-year fundamentals?
+## 估值与交易
 
-Do not write a mitigation as proof of resolution.
+相关时应区分投前与投后估值，并分析可比公司的可比性、商业阶段和增长假设、支撑下一轮估值的里程碑、下行保护、清算优先权、回购、反稀释等经济条款。行业热度不能作为估值证据。
 
-## Valuation and transaction
+## 增长、里程碑与行动
 
-When relevant, distinguish pre/post-money and analyze:
+采用 6 个月、12 个月、24—36 个月周期：
 
-- why comparables are comparable;
-- commercial stage and growth assumptions;
-- milestone required for next valuation;
-- downside support;
-- liquidation preference, redemption, anti-dilution, and other economic terms.
-
-Do not use sector enthusiasm as valuation evidence.
-
-## Growth, milestones, and action
-
-Use 6-month, 12-month, and 24-36-month horizons.
-
-| Time | Product | Customer | Revenue/cash | Organization | Funding | Verification |
+| 时间 | 产品 | 客户 | 收入/现金 | 组织 | 融资 | 核验方式 |
 |---|---|---|---|---|---|---|
-| 6 months |  |  |  |  |  |  |
-| 12 months |  |  |  |  |  |  |
-| 24-36 months |  |  |  |  |  |  |
+| 6 个月 |  |  |  |  |  |  |
+| 12 个月 |  |  |  |  |  |  |
+| 24—36 个月 |  |  |  |  |  |  |
 
-Finish the last Q&A with:
-
-- overall judgment;
-- three supporting facts;
-- three unresolved issues;
-- conditions to proceed;
-- evidence/interviews required;
-- owner and deadline.
+最后一问应自然综合总体判断、三项支持事实、三项未解决问题、推进条件、所需材料或访谈，以及责任人和期限；不得另设“结论：”段落。

@@ -14,5 +14,7 @@ export function shouldHideAiTaskFailureDiagnostics(
 ) {
   if (task.type !== 'investment_recommendation_ppt' || task.status !== 'failed') return false
   return task.stage === '投资建议书正文专业性检查未通过'
+    || task.stage === 'Gorden 最终视觉复核未通过'
     || String(task.errorMessage ?? '').startsWith('投资建议书正文未达到交付标准')
+    || String(task.errorMessage ?? '').startsWith('Gorden 可编辑稿存在契约文字缺失')
 }

@@ -124,9 +124,9 @@ async function main() {
         ? /重复/.test(skillSource)
           && /多个转载同一稿件/.test(loaded.referenceInstructions)
         : isProjectQa
-          ? /Do not silently reconcile conflicting sources/.test(skillSource)
-            && /Do not average conflicting definitions/.test(referenceSource)
-            && /multiple independent public sources/.test(referenceSource)
+          ? /来源冲突必须显式记录，不得静默调和/.test(skillSource)
+            && /不得平均口径冲突的数据/.test(referenceSource)
+            && /两个独立高质量来源/.test(referenceSource)
         : /重复|去重/.test(skillSource)
           && /重复|去重|不得复述|只(?:能|列)/.test(referenceSource)
           && /同一(?:事实|文件|数字|来源)/.test(`${skillSource}\n${referenceSource}`),
@@ -136,12 +136,12 @@ async function main() {
       `${definition.label} 明确来源披露位置`,
       definitionName === AI_DUE_DILIGENCE_SKILL_NAME
         ? /内部工作文件保留/.test(`${skillSource}\n${loaded.referenceInstructions}`)
-          && /来源清单.*内部工作文件保留/.test(skillSource)
+          && /证据台账、来源清单.*内部工作文件保留/.test(skillSource)
           && /不写成正文免责声明/.test(skillSource)
         : isProjectQa
-          ? /source-free reader-facing output by default/.test(skillSource)
-            && /internal evidence ledger/.test(`${skillSource}\n${referenceSource}`)
-            && /no source list, source note, citation label/.test(referenceSource)
+          ? /标准读者版不展示来源清单/.test(skillSource)
+            && /内部证据台账/.test(`${skillSource}\n${referenceSource}`)
+            && /标准读者版没有来源清单、来源行、引用标签/.test(referenceSource)
         : definitionName === 'draft-investment-proposal'
           ? /任务来源表|审计元数据/.test(`${skillSource}\n${referenceSource}`)
             && /不得生成.*免责声明.*引用资料|不生成文末.*免责声明.*引用资料/.test(
@@ -159,16 +159,16 @@ async function main() {
     )
     if (isProjectQa) {
       const documentGeneratorRequirements = [
-        '# Generate Project Q&A Report',
-        'standard mode with 8-12 questions',
+        '# 生成项目 Q&A 报告',
+        '使用标准版，设置 8—12 个问题',
         'qa_cn_formal_a4',
-        'Start Q1 immediately after the title',
-        'Do not add a standalone `结论：`',
-        'source-free reader-facing output by default',
-        'internal evidence ledger',
-        'zero external hyperlinks',
+        '标题后立即进入连续编号的 Q&A',
+        '不添加独立的“结论：”段落',
+        '标准读者版不展示来源清单',
+        '内部证据台账',
+        '外部超链接为零',
         'DOCX',
-        'Markdown companion',
+        'Markdown 底稿',
       ]
       assert(
         `${definition.label} 遵守直接式报告与版式契约`,
@@ -177,10 +177,10 @@ async function main() {
       )
       assert(
         `${definition.label} 资料不足时保留可核验边界且禁止编造`,
-        /adaptive public research/.test(skillSource)
-          && /Prefer a visible gap over a polished invention/.test(skillSource)
-          && /Never fabricate market size/.test(skillSource)
-          && /Do not treat placeholder content as evidence/.test(skillSource),
+        /采用自适应研究/.test(skillSource)
+          && /宁可明确保留缺口，也不得用流畅文字掩盖编造/.test(skillSource)
+          && /不得编造市场规模/.test(skillSource)
+          && /不得把占位内容当作证据/.test(skillSource),
         '授权资料优先；关键缺口可定向研究，无法核验时保留边界且不得用模板占位内容补写',
       )
     }
@@ -543,13 +543,13 @@ async function main() {
     '首轮生成 → 待核验问题提取 → Flue 候选发现 → LLM Gateway 页面核验 → 缓存写回 → 带补全证据二次生成；联网异常继续生成受限 DOCX',
   )
   assert(
-    '除 Gorden 原生投资建议书和 Skill 原生 Q&A 外，其余业务任务绑定 docs 模板',
+    '投资建议书与 Q&A 绑定原生 Skill，其余业务任务绑定 docs 模板',
     AI_TASK_TYPES
       .filter((type) => !['investment_recommendation_ppt', 'project_qa'].includes(type))
       .every((type) =>
         AI_TEMPLATE_CATALOG[type].referencePath.includes(`${path.sep}docs${path.sep}`))
       && AI_TEMPLATE_CATALOG.investment_recommendation_ppt.referencePath.includes(
-        `${path.sep}GordenSuperPPTSkills${path.sep}GordenSuperPPTSkill${path.sep}SKILL.md`,
+        `${path.sep}create-reference-driven-editable-ppt${path.sep}SKILL.md`,
       )
       && AI_TEMPLATE_CATALOG.investment_recommendation_ppt.referencePaths?.length === 0
       && AI_TEMPLATE_CATALOG.project_qa.referencePath.includes(
@@ -557,7 +557,7 @@ async function main() {
       )
       && AI_QA_TEMPLATE.referencePaths.length >= 1
       && AI_QA_TEMPLATE.referencePaths.every((item) =>
-        item.includes(`${path.sep}docs${path.sep}Q&A${path.sep}`)),
+        item.includes(`${path.sep}generate-project-qa-report${path.sep}`)),
     [
       ...AI_TASK_TYPES.map((type) => AI_TEMPLATE_CATALOG[type].referencePath),
       ...AI_QA_TEMPLATE.referencePaths,
@@ -672,15 +672,16 @@ async function main() {
     `${AI_QA_SKILL_NAME} / ${AI_TEMPLATE_CATALOG.project_qa.skillName}`,
   )
   const qaRequired = [
-    '# Generate Project Q&A Report',
-    'standard mode with 8-12 questions',
-    'Start Q1 immediately after the title',
-    'Do not add a standalone `结论：`',
-    'source-free reader-facing output by default',
-    'internal evidence ledger',
+    '# 生成项目 Q&A 报告',
+    '使用标准版，设置 8—12 个问题',
+    '标题后立即进入连续编号的 Q&A',
+    '不添加独立的“结论：”段落',
+    '标准读者版不展示来源清单',
+    '内部证据台账',
     'qa_cn_formal_a4',
     'DOCX',
-    'zero external hyperlinks',
+    '外部超链接为零',
+    '投资深度门禁',
   ]
   assert(
     'Q&A 新 Skill 的直接式结构、证据边界和 DOCX 契约完整',
@@ -698,9 +699,9 @@ async function main() {
       'generate-project-qa-report',
       'SKILL.md',
     )
-      && qaCoreRules.includes('# Generate Project Q&A Report')
-      && qaCoreRules.includes('Start Q1 immediately after the title')
-      && qaCoreRules.includes('Do not add a standalone `结论：`')
+      && qaCoreRules.includes('# 生成项目 Q&A 报告')
+      && qaCoreRules.includes('标题后立即进入连续编号的 Q&A')
+      && qaCoreRules.includes('不添加独立的“结论：”段落')
       && !/(普雷赛斯|轻蜓光电|中数睿智|德塔智能|浙江蓝成)/.test(qaCoreRules),
     AI_QA_TEMPLATE.coreRulesPath,
   )
@@ -745,14 +746,20 @@ async function main() {
     'Q&A 运行时注入完整 Prompt、Workflow 与模板规范',
     qaPipelineSource.includes('skill.referenceInstructions')
       && qaPipelineSource.includes('只以已激活的 Q&A Skill 及其 references 为业务权威')
-      && qaSkill.referenceNames.includes('assets/qa-report-template.md')
+      && AI_QA_TEMPLATE.referencePaths.some((item) =>
+        item.endsWith(`${path.sep}assets${path.sep}qa-report-template.md`))
       && qaSkill.referenceNames.includes('references/structure-blueprint.md')
       && qaSkill.referenceNames.includes('references/section-writing-guide.md')
       && qaSkill.referenceNames.includes('references/evidence-and-quality-rules.md')
       && qaSkill.referenceNames.includes('references/format-guidelines.md')
-      && qaSkill.referenceInstructions.includes('# Project Q&A Structure Blueprint')
-      && qaSkill.referenceInstructions.includes('# Q&A Report Format Guidelines'),
-    '新 Skill + 结构蓝图 + 章节写作 + 证据质量 + 版式规范',
+      && qaSkill.referenceNames.includes('references/investment-manager-role.md')
+      && qaSkill.referenceNames.includes('references/investment-depth-gates.md')
+      && qaSkill.instructions.includes('assets/investment-question-scorecard-template.md')
+      && qaSkill.referenceInstructions.includes('# Q&A 报告结构蓝图')
+      && qaSkill.referenceInstructions.includes('# Q&A 报告格式规范')
+      && qaSkill.referenceInstructions.includes('# 投资经理角色与资本配置视角')
+      && qaSkill.referenceInstructions.includes('# 投资分析深度门禁'),
+    '新 Skill + 结构蓝图 + 章节写作 + 投资经理角色 + 深度门禁 + 证据质量 + 版式规范',
   )
   assert(
     'Q&A Pipeline 包含新 Skill 画像、项目 RAG、Generator、Duplicate Checker、Reviewer 与 DOCX 生成',
@@ -792,7 +799,7 @@ async function main() {
   assert(
     'Q&A 快捷任务使用标准 8 题并只登记 DOCX',
     qaPipelineSource.includes('标准版: 8')
-      && /Generate a PDF only when the user explicitly requests one/.test(qaSkill.instructions)
+      && /仅在用户明确要求时生成 PDF/.test(qaSkill.instructions)
       && AI_QA_TEMPLATE.outputFormats.join(',') === 'docx',
     '标准版 8 题 / 快捷任务仅 DOCX / PDF 仅在用户明确要求时生成',
   )
@@ -835,17 +842,19 @@ async function main() {
     '网关成品图 / 背景、框架、图标、文本四层 / 生成证据',
   )
   assert(
-    '投资建议书工作流明确禁用模板并直接交付 Gorden 四层 PPTX',
+    '投资建议书工作流禁用外部模板并通过图片 PDF 桥接生成可编辑 PPTX',
     [
       "sourceMode: 'gorden-native'",
       "templateReuse: 'none'",
-      "bridgePolicy: 'gorden-image-to-four-layer-pptx'",
+      "bridgePolicy: 'image-deck-to-pdf-to-editable-pptx'",
     ].every((term) => pptWorkflowSource.includes(term)),
-    'Gorden 原生无模板 / 无 PDF 桥接',
+    'Gorden 原生出图 / 禁用外部模板 / PDF 桥接可编辑转换',
   )
   assert(
-    'Gorden 单技能顺序执行网关出图、四层还原与直接交付',
-    pptWorkflowSource.includes("loadAiSkill('GordenSuperPPTSkill')")
+    '投资建议书按编排、Gorden 出图和 PDF 可编辑转换顺序交付',
+    pptWorkflowSource.includes("loadAiSkill('create-reference-driven-editable-ppt')")
+      && pptWorkflowSource.includes("loadAiSkill('GordenSuperPPTSkill')")
+      && pptWorkflowSource.includes("loadAiSkill('pdf-to-editable-ppt')")
       && pptDocumentSource.includes('generateInvestmentRecommendationPptWithGorden')
       && pptGeneratorSource.includes('project-facts.json')
       && pptGeneratorSource.includes('imagegen-manifest.json')
@@ -854,10 +863,12 @@ async function main() {
       && pptGeneratorSource.includes('sliceGrid')
       && pptGeneratorSource.includes('layoutGuard')
       && pptGeneratorSource.includes('visualCompareQa')
-      && pptGeneratorSource.includes('copyFile(gordenEditablePath, input.outputPath)')
+      && pptGeneratorSource.includes('pipelinePaths.packageSlidesAsPdf')
+      && pptGeneratorSource.includes('convertUploadedInvestmentPdfTemplate')
+      && pptGeneratorSource.includes('conversionHandoffPath')
       && !pptGeneratorSource.includes('referenceImage: plan.referencePage')
       && !pptGeneratorSource.includes('referencePaths.packageSlidesAsPdf'),
-    '项目事实 / 网关图片证据 / 四层还原 / Gorden 成稿直接交付',
+    '项目事实 / 网关图片证据 / Gorden 四层语义资产 / PDF 桥接 / 可编辑 PPTX',
   )
 
   const quickActionsSource = await readFile(

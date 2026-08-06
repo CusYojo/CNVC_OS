@@ -1,151 +1,130 @@
-# Q&A Report Structure Blueprint
+# Q&A 报告结构蓝图
 
-## Contents
+## 目录
 
-1. Core narrative
-2. Report modes
-3. Module blueprint
-4. Project-type routing
-5. Question selection
+1. 核心叙事
+2. 报告模式
+3. 模块蓝图
+4. 项目类型路径
+5. 问题深度门槛
+6. 问题筛选
 
-## Core narrative
+## 核心叙事
 
-Organize the report around:
+按以下逻辑组织，而不是复刻材料顺序：
 
 ```text
-Why is the opportunity worth attention?
-→ What problem does the company solve?
-→ Why can it win?
-→ Is the evidence credible?
-→ What can break the thesis?
-→ What should happen next?
+为什么值得关注？
+→ 公司解决什么问题？
+→ 为什么可能胜出？
+→ 证据是否可信？
+→ 什么会破坏项目主线？
+→ 下一步应做什么？
 ```
 
-Do not reproduce source-file order.
+## 报告模式
 
-## Report modes
+### 精简版
 
-### Concise
+用于项目初筛，设置 5—7 个问题：项目定位与机会；产品与技术；优势与竞争；商业化与财务证据；风险、判断与下一步。精简版只减少问题数量，不降低公司专属度、因果链和投资争议深度。
 
-Use 5-7 questions for initial screening:
+### 标准版
 
-1. project positioning and opportunity;
-2. product and technology;
-3. advantages and competition;
-4. commercialization and financial evidence;
-5. risk, conclusion, and next step.
+用于项目评审或投委会前置工作，设置 8—12 个问题。以下模块用于检查遗漏，不是固定问题清单：
 
-### Standard
+1. 行业与市场；
+2. 项目定位与商业阶段；
+3. 产品与技术；
+4. 核心优势及证据；
+5. 竞争与替代方案；
+6. 商业模式与产品化；
+7. 客户、订单、交付和回款；
+8. 财务质量与资金；
+9. 团队、治理与知识产权；
+10. 风险、反方观点、核验、里程碑与下一步。
 
-Use 8-12 questions for internal review or pre-committee work:
+报告标题后立即进入 Q1。除非用户明确要求，不添加执行摘要、问题清单、元数据块、独立缺口章节、来源附录或独立结论。
 
-1. industry and market;
-2. project positioning and commercial stage;
-3. product and technology;
-4. core advantages and evidence;
-5. competition and alternatives;
-6. business model and productization;
-7. customers, orders, delivery, and cash;
-8. financial quality and funding;
-9. team, governance, and IP;
-10. risks, counterarguments, verification, milestones, and next steps.
+不得机械地为每个模块分配一个通用问题。应围绕项目最重要的 8—12 个投资争议合并、删除或重排模块。
 
-The report title is followed immediately by Q1. Do not add an execution summary, question list, metadata block, standalone gap section, source appendix, or standalone conclusion unless explicitly requested.
+### 深度尽调版
 
-### Deep diligence
+设置 12—20 个问题，增加客户、技术、法律、财务子问题、情景分析和持久化内部证据索引。除非用户要求，不把内部事实或来源台账追加到报告或作为交付物。
 
-Use 12-20 questions. Add internal evidence indexes, customer/technical/legal/financial subtopics, scenario analysis, and a durable working fact/source register. Do not append or deliver that register unless the user explicitly requests it.
+### 反方压力测试版
 
-### Adversarial
+设置 6—12 个高影响反对问题，重点检验主线破坏因素、证据缺口、状态拔高、客户自研、技术替代、产品化、现金、治理和估值。
 
-Use 6-12 high-impact objections. Focus on thesis-breaking assumptions, evidence gaps, status inflation, customer self-build, technical replacement, productization, cash, governance, and valuation.
+### 修订版
 
-### Revision
+保留用户原有主题，统一编号、删除重复、强化证据、补充边界并披露缺口。
 
-Preserve the user's intended topics but normalize numbering, remove repetition, strengthen evidence, add boundaries, and disclose gaps.
+## 模块蓝图
 
-## Module blueprint
-
-| Module | Purpose | Evidence | Typical output |
+| 模块 | 目的 | 典型证据 | 典型输出 |
 |---|---|---|---|
-| Industry/market | Prove an addressable need | official data, customer pain | market model, driver table |
-| Product/technology | Explain what is sold and why it works | architecture, tests, maturity | product matrix, process |
-| Advantage/competition | Prove differentiated customer value | comparable metrics, references | competitor table |
-| Business model | Prove repeatability and economics | pricing, reuse, margin, renewal | revenue stack, unit economics |
-| Customers/orders | Prove adoption and status | contract, delivery, acceptance, cash | pipeline table |
-| Financial quality | Prove growth and liquidity | statements, aging, cash | trends, cash bridge |
-| Team/governance | Prove execution and control | CVs, agreements, IP | responsibility/control matrix |
-| Risk | Prevent one-sided advocacy | counterevidence, stress cases | risk matrix |
-| Growth/action | Convert thesis into verification | plans, budgets, owners | milestone table |
+| 行业/市场 | 证明需求可触达 | 官方数据、客户痛点 | 市场模型、驱动因素表 |
+| 产品/技术 | 解释卖什么及为何有效 | 架构、测试、成熟度 | 产品矩阵、流程图 |
+| 优势/竞争 | 证明客户价值差异 | 可比指标、客户证明 | 竞品对比表 |
+| 商业模式 | 证明可复制性和经济性 | 定价、复用、毛利、续费 | 收入结构、单位经济模型 |
+| 客户/订单 | 证明采用情况与状态 | 合同、交付、验收、回款 | 客户管线表 |
+| 财务质量 | 证明增长质量和流动性 | 报表、账龄、现金 | 趋势、现金桥 |
+| 团队/治理 | 证明执行能力与控制 | 履历、协议、知识产权 | 职责/控制矩阵 |
+| 风险 | 避免单边论证 | 反证、压力情景 | 风险矩阵 |
+| 增长/行动 | 把主线变成可核验动作 | 计划、预算、责任人 | 里程碑表 |
 
-For the direct-Q&A default, place the project thesis in Q1 and put overall judgment, unresolved gaps, conditions to proceed, and next actions in the last question.
+直接问答模式中，把项目主线放在 Q1；把总体判断、未解决缺口、推进条件和下一步放在最后一问。
 
-## Project-type routing
+## 项目类型路径
 
-### Hardware/equipment
+### 硬件/设备
 
-Prioritize:
+优先分析核心部件与自研比例；精度、速度、稳定性、良率及测试条件；样机、送样、验证、量产；供应链、库存、产能、服务和质保；客户资本开支与认证周期；设备毛利和营运资金。
 
-- core components and self-development;
-- precision, speed, stability, yield, and test conditions;
-- prototype, sample, validation, mass production;
-- supply chain, inventory, capacity, service, and warranty;
-- customer capex and qualification cycles;
-- equipment gross margin and working capital.
+### AI/软件
 
-### AI/software
+优先分析数据来源、权限和反馈闭环；准确率、幻觉、时延、可解释性与安全；基础模型依赖和客户自研；项目交付与可复用平台的区别；实施、外包和算力成本；订阅、调用、续费与扩容。
 
-Prioritize:
+### 场景解决方案
 
-- data source, permission, and feedback loop;
-- accuracy, hallucination, latency, explainability, security;
-- foundation-model dependency and customer self-build;
-- project delivery versus reusable platform;
-- implementation, outsourcing, and compute cost;
-- subscription, invocation, renewal, and expansion.
+优先分析产品、集成、算法和运营边界；底座厂商与合作伙伴依赖；场景数据、监管准入和本地交付；标杆案例复制；定制化和服务规模化；区域与客户集中度。
 
-### Scenario solution
+### 混合型
 
-Prioritize:
+组合多个模块，但必须识别当前收入来自哪一层、壁垒由哪一层形成、哪一层只是未来选择权。
 
-- product, integration, algorithm, and operations boundaries;
-- base-vendor and partner dependency;
-- scenario data, regulatory access, and local delivery;
-- benchmark-case replication;
-- customization and service scalability;
-- regional/customer concentration.
+## 问题深度门槛
 
-### Mixed
+标准版至少达到：
 
-Use multiple modules but identify which layer produces current revenue, which layer creates the moat, and which is only future optionality.
+- 60% 的问题包含产品、技术、案例、客户类型、商业阶段或战略矛盾等公司专属锚点；
+- 50% 的问题同时包含公司锚点和获客、定价、续费、交付、毛利、现金、资本强度、复制、估值或下行等经济张力；
+- 超过两个问题可以原样用于其他公司时，必须重写；
+- 公司名称本身不计入专属锚点；
+- 纯背景介绍、事实索取和材料清单不能独占一个问题；
+- 每个问题都能回答“它会改变哪项投资判断”。
 
-## Question selection
+优先采用“专属名词 + 经济矛盾”的问法，例如：
 
-Generate from:
+> 【标杆案例】证明的是一次性交付，还是可复制产品及账户级复购？
 
-- positive project thesis;
-- strongest counterargument;
-- missing evidence;
-- decision conditions.
+避免：
 
-Score candidates 1-5 on:
+> 公司的客户情况如何？
 
-- decision impact;
-- controversy;
-- evidence availability;
-- project specificity.
+## 问题筛选
 
-Retain high-impact weak-evidence questions and mark them unresolved.
+从正向项目主线、最强反方观点、缺失证据和决策条件生成问题。每题按公司专属度、投资争议度、因果深度、证据可得性和决策影响 1—5 分评分。公司专属度、因果深度或决策影响低于 3 分时删除或重写。证据弱但影响大的问题必须保留，但答案采用保守投资处理，不能退化为材料索取。
 
-Order questions:
+顺序建议：
 
 ```text
-opportunity
-→ company/product
-→ differentiation
-→ proof
-→ risk
-→ milestones and decision
+机会
+→ 公司/产品
+→ 差异化
+→ 证据
+→ 风险
+→ 里程碑与决策
 ```
 
-Avoid starting with valuation before explaining the business, hiding risks in an appendix, or ending with aspiration without measurable milestones.
+不得在业务未讲清前先谈估值，不得把风险藏在附录，不得以没有可衡量里程碑的愿景收尾。

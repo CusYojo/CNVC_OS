@@ -1,55 +1,55 @@
-# Codex and Claude Code Runtime Compatibility
+# Codex 与 Claude Code 运行兼容规则
 
-## Contents
+## 目录
 
-1. Skill discovery
-2. Skill-root resolution
-3. Python runtime
-4. DOCX rendering and visual QA
-5. Font handling
-6. Host-neutral tool behavior
-7. Compatibility acceptance checks
+1. 技能发现
+2. 技能根目录解析
+3. Python 环境
+4. DOCX 渲染与视觉质检
+5. 字体处理
+6. 宿主中立行为
+7. 兼容性验收
 
-## Skill discovery
+## 技能发现
 
-Use the same Skill directory for both hosts.
+两个宿主共用同一技能目录：
 
-- Codex personal location: `~/.codex/skills/generate-project-qa-report/`
-- Claude Code personal location: `~/.claude/skills/generate-project-qa-report/`
+- Codex 个人目录：`~/.codex/skills/generate-project-qa-report/`
+- Claude Code 个人目录：`~/.claude/skills/generate-project-qa-report/`
 
-Claude Code 2.1.203 or later follows a skill-directory symlink. Prefer a symlink from the Claude Code location to the canonical Codex directory so scripts, templates, references, and rules cannot drift. If the installed Claude Code version is older, copy the complete directory and establish a deliberate synchronization process.
+Claude Code 2.1.203 及以上版本可跟随技能目录软链接。优先把 Claude Code 位置软链接到 Codex 主目录，避免脚本、模板和规则漂移。更早版本应复制完整目录并建立明确同步机制。
 
-Claude Code invokes the personal Skill as `/generate-project-qa-report`. Codex invokes it as `$generate-project-qa-report`.
+Claude Code 使用 `/generate-project-qa-report` 调用；Codex 使用 `$generate-project-qa-report` 调用。
 
-## Skill-root resolution
+## 技能根目录解析
 
-Never execute bundled scripts relative to the user's project directory.
+不得相对于用户项目目录执行技能脚本。
 
-In Claude Code:
+Claude Code：
 
 ```bash
 QA_SKILL_DIR="${CLAUDE_SKILL_DIR}"
 ```
 
-In Codex, set `QA_SKILL_DIR` to the absolute directory containing the loaded `SKILL.md`; the default personal location is:
+Codex：把 `QA_SKILL_DIR` 设为当前 `SKILL.md` 所在绝对目录；默认个人位置为：
 
 ```bash
 QA_SKILL_DIR="$HOME/.codex/skills/generate-project-qa-report"
 ```
 
-Keep report inputs and outputs in the user's workspace. Keep Skill scripts, references, and assets inside `QA_SKILL_DIR`.
+报告输入和输出保存在用户工作区；技能脚本、参考规则和模板保存在 `QA_SKILL_DIR`。
 
-## Python runtime
+## Python 环境
 
-Require Python 3.9 or later. The validator uses the standard library. DOCX generation requires `python-docx`.
+要求 Python 3.9 及以上。校验器只使用标准库，DOCX 生成依赖 `python-docx`。
 
-Run the preflight:
+执行预检：
 
 ```bash
 python3 "$QA_SKILL_DIR/scripts/check_runtime.py"
 ```
 
-If `python-docx` is missing, do not install packages globally. When package installation is permitted, create a task-local virtual environment in the workspace and install from the bundled requirements file:
+缺少 `python-docx` 时不得全局安装。获得安装许可后，在工作区创建任务级虚拟环境：
 
 ```bash
 python3 -m venv ./tmp/qa-skill-venv
@@ -57,43 +57,43 @@ python3 -m venv ./tmp/qa-skill-venv
   -r "$QA_SKILL_DIR/requirements.txt"
 ```
 
-Use that interpreter for validation and DOCX generation. On Windows, use the corresponding `Scripts/python.exe` path.
+后续校验和生成均使用该解释器。Windows 使用对应的 `Scripts/python.exe`。
 
-## DOCX rendering and visual QA
+## DOCX 渲染与视觉质检
 
-Prefer the host's dedicated document renderer when it exists. Otherwise use one of these paths:
+优先使用宿主提供的专业文档渲染器；否则依次选择：
 
-1. Microsoft Word export to PDF, then render every PDF page to PNG;
-2. LibreOffice headless export to PDF, then use `pdftoppm` or PyMuPDF to produce PNG pages;
-3. another trustworthy native DOCX renderer that preserves Word layout.
+1. Microsoft Word 导出 PDF，再把每页转为 PNG；
+2. LibreOffice 无界面导出 PDF，再用 `pdftoppm` 或 PyMuPDF 生成 PNG；
+3. 其他能可靠保留 Word 版式的原生 DOCX 渲染器。
 
-Inspect every rendered page. Do not treat XML validation or text extraction as visual QA. Reject missing Chinese glyphs, clipped text, broken tables, orphaned headings, incorrect page furniture, and accidental extra pages.
+必须检查每一页。XML 校验或文本提取不能替代视觉质检。中文缺字、文字截断、表格破损、标题孤行、页眉页脚错误或意外空白页均不合格。
 
-If LibreOffice shows missing Chinese glyphs but Microsoft Word is installed, verify with Word rather than changing the required DOCX fonts. Treat preview PDFs as QA intermediates and never deliver them unless the user requests PDF.
+若 LibreOffice 出现中文缺字而系统安装了 Microsoft Word，应改用 Word 核验，不得因此修改规定字体。预览 PDF 仅是质检中间件，除非用户要求，不得交付。
 
-## Font handling
+## 字体处理
 
-Keep the DOCX style declarations fixed at STFangsong for regular Chinese, STHeiti for bold Chinese, and Times New Roman for Latin text and numbers. Do not silently replace the declared fonts because the local preview host lacks them.
+DOCX 样式固定声明：常规中文使用宋体，粗体中文使用黑体，拉丁文字和数字使用 Times New Roman。不得因本机预览环境缺少字体而静默替换。
 
-Do not bundle or download unlicensed fonts. If required fonts are unavailable, state the limitation and verify on a host with legally installed fonts before claiming that visual QA passed.
+不得捆绑或下载未经许可的字体。缺少必要字体时应说明限制，并在合法安装对应字体的环境中完成核验后，才能声称视觉质检通过。
 
-## Host-neutral tool behavior
+## 宿主中立行为
 
-- Use host-provided web search only for lawful, necessary research; preserve the same anti-fabrication and provenance rules.
-- Use read-only database or connector access and the minimum required fields.
-- Use the host's normal file-editing tool; do not require Codex-only directives or Claude Code-only dynamic shell injection.
-- Keep `agents/openai.yaml` as optional Codex UI metadata. Claude Code ignores it as an ordinary supporting file.
-- Do not add Claude Code-only frontmatter fields when the same Skill must also remain portable to Codex and other Agent Skills hosts.
+- 只在合法且必要时使用宿主提供的网络检索，并保持相同的反编造和出处规则。
+- 数据库或连接器只能只读访问，并且只取必要字段。
+- 使用宿主常规文件编辑工具，不依赖 Codex 专用指令或 Claude Code 专用动态命令注入。
+- `agents/openai.yaml` 仅作为可选 Codex 界面元数据；Claude Code 会把它当作普通辅助文件忽略。
+- 同一技能需兼容多个 Agent Skills 宿主时，不得加入 Claude Code 专属 YAML 头部字段。
 
-## Compatibility acceptance checks
+## 兼容性验收
 
-Require all of the following:
+全部满足才算通过：
 
-1. `SKILL.md` frontmatter contains a valid lowercase hyphenated `name` and a useful `description`.
-2. Every linked reference, asset, and script resolves from the Skill directory.
-3. `check_runtime.py` completes and reports DOCX generation readiness.
-4. `validate_qa_report.py --json` works from a workspace outside the Skill directory.
-5. `render_qa_docx.py` works from a workspace outside the Skill directory.
-6. Claude Code discovers the Skill at `/generate-project-qa-report`.
-7. Codex discovers the Skill as `$generate-project-qa-report`.
-8. The final DOCX passes structural and every-page visual QA.
+1. `SKILL.md` 的 `name` 为合法的小写连字符名称，`description` 清晰有效；
+2. 所有引用的规则、模板和脚本都能从技能目录解析；
+3. `check_runtime.py` 能运行并报告 DOCX 生成准备状态；
+4. 从技能目录之外运行 `validate_qa_report.py --json` 成功；
+5. 从技能目录之外运行 `render_qa_docx.py` 成功；
+6. Claude Code 能以 `/generate-project-qa-report` 发现技能；
+7. Codex 能以 `$generate-project-qa-report` 发现技能；
+8. 最终 DOCX 通过结构校验和逐页视觉质检。

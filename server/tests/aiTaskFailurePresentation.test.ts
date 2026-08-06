@@ -20,6 +20,24 @@ test('investment recommendation quality gate also hides historical cards by mess
   }), true)
 })
 
+test('Gorden final visual review hides internal recovery diagnostics', () => {
+  assert.equal(shouldHideAiTaskFailureDiagnostics({
+    type: 'investment_recommendation_ppt',
+    status: 'failed',
+    stage: 'Gorden 最终视觉复核未通过',
+    errorMessage: 'Gorden 可编辑稿存在契约文字缺失、严重遮挡、裁切或不可读问题，未通过最终交付复核。',
+  }), true)
+})
+
+test('Gorden final visual review also hides historical cards by message', () => {
+  assert.equal(shouldHideAiTaskFailureDiagnostics({
+    type: 'investment_recommendation_ppt',
+    status: 'failed',
+    stage: '文档尚未完成',
+    errorMessage: 'Gorden 可编辑稿存在契约文字缺失、严重遮挡、裁切或不可读问题。',
+  }), true)
+})
+
 test('operational PPT failures keep actionable diagnostics visible', () => {
   assert.equal(shouldHideAiTaskFailureDiagnostics({
     type: 'investment_recommendation_ppt',

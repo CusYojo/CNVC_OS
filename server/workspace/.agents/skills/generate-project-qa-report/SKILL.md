@@ -1,261 +1,211 @@
 ---
 name: generate-project-qa-report
-description: Generate, revise, or stress-test professional project Q&A reports as polished Word documents (DOCX) with a Markdown companion, using sparse or extensive information supplied in the conversation, attachments, authorized databases/connectors, workspace files, or lawful public web sources, with internal evidence tracking, source-free reader-facing output by default, risk analysis, visual Word-page verification, and strict anti-fabrication controls. Use for investment, financing, due-diligence, internal screening, project review, partnership assessment, investor Q&A, or management-response materials.
+description: 以资深投资经理的资本配置与风险判断视角，根据对话输入、附件、授权数据库或连接器、工作区文件及合法网络来源，生成、修订或压力测试公司专属、投资争议充分且具有商业与财务因果深度的项目 Q&A 报告，并交付经过排版和逐页视觉核验的 Word（DOCX）文档及 Markdown 底稿；内置证据台账、投资主线、下行分析、问题深度门禁、读者版默认无来源展示与严格反编造控制。适用于投资、融资、尽职调查、内部初筛、项目评审、合作评估、投资人问答和管理层回复材料。
 ---
 
-# Generate Project Q&A Report
+# 生成项目 Q&A 报告
 
-## Objective
+## 目标
 
-Create a decision-useful project Q&A report rather than a generic FAQ. Convert fragmented materials into a traceable fact base, select the questions that can change a decision, answer them with evidence and boundaries, and surface unresolved gaps.
+生成可支持决策的项目 Q&A 报告，而不是通用问答。把零散材料整理为可追溯事实库，筛选会改变决策的问题，以证据和边界作答，并揭示尚未解决的信息缺口。
 
-Default to a polished Chinese Word document with a Markdown companion. Stabilize and validate the Markdown first, then generate, render, and visually verify the DOCX before delivery.
+默认交付正式中文 Word 文档及 Markdown 底稿。先稳定并校验 Markdown，再生成、渲染和逐页检查 DOCX。
 
-## Host compatibility
+## 角色与立场
 
-Keep this Skill compatible with both Codex and Claude Code. Use only the portable Agent Skills frontmatter fields `name` and `description`; keep host-specific metadata in separate files such as `agents/openai.yaml`.
+始终以资深投资经理的视角工作，站在资本配置者而非项目宣传者或管理顾问的立场，判断项目是否值得继续投入时间和资本、核心价值如何形成、证据能支持多强的判断、什么会破坏投资主线，以及下一决策节点需要满足什么条件。
 
-Resolve the directory containing this `SKILL.md` before running bundled scripts. In Claude Code, use `${CLAUDE_SKILL_DIR}`. In Codex, use the absolute Skill directory supplied by the host. Assign the resolved path to `QA_SKILL_DIR` and never assume that the current working directory is the Skill directory.
+完整读取并执行 [references/investment-manager-role.md](references/investment-manager-role.md)。角色必须通过问题选择、商业机制、证据强度、下行分析和决策条件体现；不得在报告正文写“作为资深投资经理”“从投资经理角度看”等身份自述。
 
-Read [references/runtime-compatibility.md](references/runtime-compatibility.md) when running under Claude Code, when the host has no document Skill, or when Python, Word, LibreOffice, fonts, or render tools are unavailable. Run `scripts/check_runtime.py` before first use in a new host environment.
+专业深度以 [references/investment-depth-gates.md](references/investment-depth-gates.md) 为硬门槛。不得把篇幅长、模块全、风险多或术语密集误认为投资分析深入。
 
-## Required resources
+## 运行环境兼容
 
-Read resources progressively:
+同时兼容 Codex 与 Claude Code。YAML 头部仅使用可移植字段 `name` 和 `description`；宿主专用元数据放在 `agents/openai.yaml` 等独立文件中。
 
-- Read [references/source-acquisition-rules.md](references/source-acquisition-rules.md) whenever inputs arrive through the conversation, attachments, databases, connectors, remote resources, or mixed channels.
-- Read [references/structure-blueprint.md](references/structure-blueprint.md) to choose report length, modules, and question order.
-- Read [references/section-writing-guide.md](references/section-writing-guide.md) when generating questions or drafting a report section.
-- Read [references/research-and-compliance-rules.md](references/research-and-compliance-rules.md) whenever user information is incomplete, web research is used, or current market/company/legal facts matter.
-- Read [references/evidence-and-quality-rules.md](references/evidence-and-quality-rules.md) before drafting and again during final QA.
-- Read [references/format-guidelines.md](references/format-guidelines.md) when creating the final Markdown or converting it to a formatted document.
-- If the host exposes a `documents` or equivalent DOCX Skill, read it completely before generating or validating the final DOCX. Otherwise follow [references/runtime-compatibility.md](references/runtime-compatibility.md) and use the bundled scripts plus an available native Word or LibreOffice rendering path.
+运行脚本前，先解析本 `SKILL.md` 所在目录。在 Claude Code 中使用 `${CLAUDE_SKILL_DIR}`；在 Codex 中使用宿主提供的技能绝对路径。将结果赋给 `QA_SKILL_DIR`，不得假设当前工作目录就是技能目录。
 
-Use templates in `assets/` as output skeletons. Do not treat placeholder content as evidence.
-Use [scripts/render_qa_docx.py](scripts/render_qa_docx.py) for the standard Word layout unless the user supplies a different template or requests a materially different design. Generate a PDF only when the user explicitly requests one.
+首次在新环境运行、宿主没有文档技能，或 Python、Word、LibreOffice、字体、渲染工具不可用时，读取 [references/runtime-compatibility.md](references/runtime-compatibility.md)，并先运行 `scripts/check_runtime.py`。
 
-## Defaults
+## 必读资源
 
-When the user does not specify:
+按需读取，不要一次加载所有文件：
 
-- Use standard mode with 8-12 questions.
-- Treat the audience as an internal investment or project-review team.
-- Use adaptive research: start from user materials and research legal public sources when material gaps block important questions.
-- Use customer and sensitive counterparty aliases.
-- Produce a final DOCX under `output/docx/` in the current workspace and keep the validated Markdown companion in the current workspace.
-- Use the `qa_cn_formal_a4` Word profile from [references/format-guidelines.md](references/format-guidelines.md): A4 portrait, exact formal margins, 20 pt body leading, 10.5 pt body text, 9 pt table text, justified paragraphs, and 9 pt headers/footers. Do not silently substitute Word defaults or a high-density memo profile.
-- Use the exact H1 pattern `项目名称Q&A 报告`. Do not insert `标准版`, `内部`, `内部版`, a version number, a date, an audience label, or a confidentiality qualifier into the title unless the user explicitly requests that wording.
-- Keep page furniture neutral: use `项目名称｜Q&A` in the running header and page numbering only in the footer. Never place `内部`, `内部资料`, `仅供内部使用`, or equivalent confidentiality labels in headers or footers unless the user explicitly requests them.
-- Use a direct-Q&A layout: one report title followed immediately by continuously numbered Q&A sections.
-- Do not add version/date metadata, an execution summary, a question list, a standalone information-gap section, a source appendix, or other front/back matter unless the user explicitly requests it.
-- Do not add a standalone `结论：` paragraph, bold conclusion label, conclusion callout, or conclusion box under any question. Begin each answer directly with analysis, evidence, and boundaries.
-- Keep the standard reader-facing report source-free: do not show source lists, source notes, citation labels, footnotes/endnotes, Markdown links, raw URLs, or clickable external hyperlinks. Preserve all provenance in the internal evidence ledger. Generate a cited edition or separate source register only when the user explicitly requests it.
-- Keep evidence-acquisition language out of the reader-facing report. Do not write `公开信息`, `公开材料`, `公开资料`, `公开披露`, `公开报道`, `公开记录`, `公开检索`, `公开来源`, `根据公开…`, `从公开…`, or equivalent research-process narration. Write the claim or boundary directly, such as `公司已上线…`, `监管记录显示…`, `现有证据不能确认…`, or `尚无可核验材料证明…`. Preserve acquisition channel and provenance only in the internal evidence ledger.
-- Use neutral attribution only when it is necessary to preserve claim status, such as `公司公告称`, `监管记录显示`, or `第三方研究认为`; do not append a publication title or URL.
-- Integrate information gaps, evidence requests, and next actions into the relevant answer or the final decision question.
-- Treat the project directory as an output location or optional source, not as the presumed material location.
+- 输入来自对话、附件、数据库、连接器、远程资源或混合渠道时，读取 [references/source-acquisition-rules.md](references/source-acquisition-rules.md)。
+- 选择报告长度、模块和问题顺序时，读取 [references/structure-blueprint.md](references/structure-blueprint.md)。
+- 生成问题或撰写具体板块时，读取 [references/section-writing-guide.md](references/section-writing-guide.md)。
+- 生成问题池、起草正文和最终验收时，读取 [references/investment-manager-role.md](references/investment-manager-role.md)。
+- 生成问题、起草答案、处理缺失信息和最终验收时，完整读取 [references/investment-depth-gates.md](references/investment-depth-gates.md)。
+- 用户信息不完整、需要网络检索，或公司、市场、法律等事实具有时效性时，读取 [references/research-and-compliance-rules.md](references/research-and-compliance-rules.md)。
+- 起草前和最终质检时，读取 [references/evidence-and-quality-rules.md](references/evidence-and-quality-rules.md)。
+- 生成 Markdown 或排版文档时，读取 [references/format-guidelines.md](references/format-guidelines.md)。
+- 宿主提供 `documents` 或同等 DOCX 技能时，在生成和核验最终 DOCX 前完整读取该技能；否则按运行环境兼容规则使用内置脚本及可用的 Word/LibreOffice 渲染路径。
 
-Respect an explicit request to use only supplied materials or not browse.
+将 `assets/` 中的模板作为输出骨架，不得把占位内容当作证据。标准 Word 版式使用 [scripts/render_qa_docx.py](scripts/render_qa_docx.py)。仅在用户明确要求时生成 PDF。
 
-## Workflow
+## 默认设置
 
-### 1. Establish the assignment
+用户未指定时：
 
-Identify:
+- 使用标准版，设置 8—12 个问题。
+- 角色固定为资深投资经理，读者视为投资或项目评审团队。
+- 标准版默认执行投资深度门禁：至少 60% 的问题绑定公司专属名词，至少 50% 的问题同时包含公司锚点与经济矛盾；精简版只能减少问题数量，不能降低单题分析深度。
+- 采用自适应研究：先使用用户材料，关键问题因信息缺口无法回答时，再检索合法且可核验的来源。
+- 客户及敏感交易对手使用别名。
+- 在当前工作区的 `output/docx/` 下生成 DOCX，并保留已校验的 Markdown 底稿。
+- 使用 [references/format-guidelines.md](references/format-guidelines.md) 中的 `qa_cn_formal_a4`：A4 纵向、规定页边距、正文 10.5 磅、固定值 20 磅行距、表格 9 磅、正文两端对齐、页眉页脚 9 磅。不得静默替换为 Word 默认样式或高密度备忘录样式。
+- 一级标题严格采用 `项目名称Q&A 报告`。除非用户明确要求，不得加入“标准版”“内部”“内部版”、版本号、日期、受众或保密限定词。
+- 页眉使用 `项目名称｜Q&A`，页脚仅保留页码。除非用户明确要求，页眉页脚不得出现“内部”“内部资料”“仅供内部使用”等字样。
+- 采用直接问答结构：报告标题后立即进入连续编号的 Q&A。
+- 除非用户明确要求，不添加版本日期、执行摘要、问题清单、独立信息缺口、来源附录或其他前后置内容。
+- 不添加独立的“结论：”段落、加粗结论标签、结论提示框或结论框。每个答案直接从分析、证据和边界开始。
+- 标准读者版不展示来源清单、来源说明、引用标签、脚注尾注、Markdown 链接、原始 URL 或可点击外部链接。出处全部保留在内部证据台账；仅在用户明确要求时另行生成带引文版本或来源台账。
+- 正文不得出现“公开信息”“公开材料”“公开资料”“公开披露”“公开报道”“公开记录”“公开检索”“公开来源”“根据公开……”或“从公开……”等取证过程自述。直接写事实或证据边界，例如“公司已上线……”“监管记录显示……”“现有证据不能确认……”或“尚无可核验材料证明……”。
+- 只有为保留主张状态确有必要时，才使用“公司公告称”“监管记录显示”“第三方研究认为”等中性归因；不得附出版物标题或 URL。
+- 证据要求、材料清单、访谈动作、责任人和期限保留在内部台账。读者版使用完成态投资语言表达当前状态、财务后果和投资处理，不用“建议核验”“需要补充”“下一步应取得”等工作指令代替分析。
+- 把项目目录视为输出位置或可选来源，不得默认项目材料就在该目录中。
 
-- project name and type;
-- report purpose and target reader;
-- concise, standard, deep-diligence, adversarial, or revision mode;
-- source boundary;
-- confidentiality and anonymization needs;
-- requested output format and location.
+用户明确要求只使用已提供材料或禁止联网时，必须遵守。
 
-Infer non-critical choices. Ask only when a missing choice would materially change the report.
+## 工作流程
 
-### 2. Discover, inventory, and extract source materials
+### 1. 明确任务
 
-Follow [references/source-acquisition-rules.md](references/source-acquisition-rules.md). Discover sources in this order:
+识别项目名称与类型、报告用途与读者、模式、来源边界、保密和匿名要求、输出格式与位置。明确本次决策是继续研究、推进投资、附条件推进、暂缓还是否决，以及估值和交易条款是否在范围内。非关键选项可合理推断；只有缺失选项会实质改变报告时才询问用户。
 
-1. information typed or pasted in the current conversation;
-2. files and links attached or explicitly referenced by the user;
-3. authorized connected apps, databases, warehouses, APIs, or remote resources;
-4. workspace/project-directory files only when the user identifies them or they are clearly in scope;
-5. lawful public-web research for remaining researchable gaps.
+### 2. 发现、盘点并提取材料
 
-Do not scan the current directory and assume every file belongs to the project.
+按以下顺序建立来源清单：
 
-Use the appropriate document, PDF, presentation, spreadsheet, database, or connector workflow when available. Preserve:
+1. 当前对话中输入或粘贴的信息；
+2. 用户上传、附加或明确引用的文件与链接；
+3. 用户授权的应用、数据库、数仓、API、连接器或远程资源；
+4. 仅在用户指明或范围明确时使用工作区文件；
+5. 对其余可研究缺口使用合法网络来源。
 
-- source type and source system;
-- source filename;
-- page, slide, sheet, cell range, section, or URL;
-- database/catalog/schema/table/view and query/filter description when applicable;
-- query or retrieval time, row grain, date coverage, and truncation/completeness status;
-- publication or document date;
-- data period;
-- original unit and currency.
+不得扫描当前目录后假定其中所有文件都属于项目。按文件类型使用相应文档、PDF、演示文稿、电子表格、数据库或连接器流程。
 
-For direct conversation input, record the source as `用户在当前对话中提供` and the conversation date.
+保存来源类型与系统、文件名、页码/幻灯片/工作表/单元格/章节/URL，以及数据库对象、查询目的、筛选条件、数据粒度、查询时间、覆盖期间、完整性、发布日期、数据期间、原始单位和币种。对话输入记为 `用户在当前对话中提供`，并记录对话日期。
 
-Use read-only, bounded database queries. Inspect schemas before querying, select only required fields and periods, and do not retrieve credentials or unnecessary personal data.
+数据库仅执行只读、限界查询；先检查模式，仅选择必要字段和期间，不获取凭据或无关个人数据。按公司与团队、行业与市场、产品与技术、客户与订单、财务与现金、治理与知识产权、风险分类。来源冲突必须显式记录，不得静默调和。
 
-Classify extracted information under company/team, industry/market, product/technology, customers/orders, financials/cash, governance/IP, and risks.
+### 3. 判断信息充分度
 
-Do not silently reconcile conflicting sources. Record the conflict.
+- **充分：** 核心问题已有可用事实和证据，仅做定向核验。
+- **部分充分：** 项目逻辑明确，但市场、竞争、公司或风险证据不足；开展自适应研究。
+- **严重不足：** 无法识别项目主体、产品或待决策事项；只询问最低限度的阻塞信息。
 
-### 3. Assess information sufficiency
+建立“已知、未知、可研究、仅用户可提供”四份内部清单，只检索“可研究”事项。
 
-Classify the input:
+### 4. 建立事实与证据台账
 
-- **Sufficient:** core questions have usable facts and evidence; perform only targeted verification.
-- **Partially sufficient:** project logic is clear but market, competitor, company, or risk evidence is missing; perform adaptive public research.
-- **Severely insufficient:** project identity, product, or requested decision cannot be determined; ask for the minimum blocking facts.
+每项重大主张记录：主题和主张；事实、判断、预测或计算；来源类型和系统；定位信息；网络来源的发布者与链接；数据库对象、查询说明、筛选条件、粒度与时间；发布日期、数据期间和访问日期；原始单位与币种；A—D 证据等级；已核验、冲突、过时或未解决状态。
 
-Create four internal lists: known, unknown, publicly researchable, and user-only. Research only the publicly researchable items.
+需要持久台账时使用 [assets/evidence-ledger-template.md](assets/evidence-ledger-template.md)。没有来源或明确未解决标记时，不得起草精确重大数字。
 
-### 4. Build a fact and evidence ledger
+### 5. 自适应研究
 
-For each material claim record:
+获得允许且确有必要时，遵循 [references/research-and-compliance-rules.md](references/research-and-compliance-rules.md)。优先使用用户授权的内部数据或连接器，再考虑网络检索；内部数据库信息不能当作外部证据，必须记录访问边界。
 
-- topic and claim;
-- fact, judgment, forecast, or calculation;
-- source type and source system;
-- source and locator;
-- publisher and link for web sources;
-- database object, query description, filters, row grain, and retrieval time for database sources;
-- publication date, data period, and access date;
-- original unit/currency;
-- evidence grade A-D;
-- verified, conflicting, stale, or unresolved status.
+重大市场、融资、财务、客户、业绩、知识产权、诉讼、监管和政策主张至少满足以下之一：
 
-Use [assets/evidence-ledger-template.md](assets/evidence-ledger-template.md) when a durable ledger is useful.
+- 一个权威的一手或专业原始来源；
+- 两个口径兼容、彼此独立的高质量来源。
 
-Never draft a precise material number without a source or an explicit unresolved marker.
+搜索摘要、聚合页、转载和多个相同转载不能构成核验。仅使用可合法访问或已获授权的信息，不得绕过登录、付费墙、验证码、访问控制或站点限制，不得使用泄露数据、来源不明数据库、商业秘密或无关敏感个人信息。
 
-### 5. Research adaptively
+若没有可靠证据，在工作底稿中使用 `[尚无可核验证据]`、`[来源待核验]` 或 `[仅有公司单方口径]`；读者版应自然写成“尚无合同、验收或回款材料证明该事项”等，不得描述检索过程或补写看似合理的数值。
 
-When permitted and needed, follow [references/research-and-compliance-rules.md](references/research-and-compliance-rules.md).
+### 6. 定义项目主线
 
-Before searching the public web, use relevant user-authorized internal or connected data sources when available. Do not treat internal database data as public evidence; label its provenance and access boundary.
-
-Prefer primary official sources. Verify material market, financing, financial, customer, performance, IP, litigation, regulatory, and policy claims with either:
-
-- one authoritative primary/professional original source; or
-- two independent high-quality sources with compatible definitions.
-
-Do not treat search snippets, aggregators, copied articles, or multiple reposts as verification.
-
-Use only public or authorized access. Do not bypass login, paywalls, CAPTCHAs, access controls, or site restrictions. Do not use leaked data, unknown-origin databases, trade secrets, or irrelevant personal sensitive information.
-
-If reliable evidence does not exist, state `[尚无可核验证据]`, `[来源待核验]`, or `[仅有公司单方口径]` in the working draft. Prefer natural reader-facing prose such as `尚无合同、验收或回款材料证明该事项`; do not narrate the search process or invent a plausible value.
-
-### 6. Define the project thesis
-
-Write a one-sentence internal thesis:
+内部写出一句话主线：
 
 > 公司为【客户】通过【产品/技术】解决【痛点】，依靠【核心壁垒】实现【商业价值】，当前处于【商业化阶段】。
 
-If this sentence cannot be supported, refine the project definition or flag the gap before drafting.
+若无法获得证据支持，先修正项目定义或标明缺口，再起草正文。
 
-### 7. Generate and rank the question pool
+同时建立内部编辑主线：提取 3—7 个公司专属名词；回答投资人实际购买的核心资产是什么；写出最强正面和最强反方解释；建立 `核心资产 → 商业机制 → 财务后果 → 估值处理` 的中心争议；列出两项强化主线和两项击穿主线的可观察事实。提取不出专属名词时，不得直接生成通用问题。
 
-Generate 15-30 candidates across:
+### 7. 生成并排序问题池
 
-- industry and market;
-- customer pain;
-- product and technology;
-- competitive advantage and alternatives;
-- business model and productization;
-- customers, orders, delivery, revenue, and cash collection;
-- financial quality and funding;
-- team, governance, IP, and compliance;
-- valuation or transaction terms when relevant;
-- risks, milestones, and growth.
+围绕行业与市场、客户痛点、产品与技术、优势与替代方案、商业模式与产品化、客户/订单/交付/收入/回款、财务与资金、团队/治理/知识产权、估值或交易条款、风险/里程碑/增长，生成 15—30 个候选问题。每个候选问题必须尝试同时绑定一个公司专属名词和一个投资争议，不能只索取事实。
 
-Rank each question by decision impact, controversy, evidence availability, and project specificity. Keep high-impact questions even when evidence is weak; answer them as unresolved rather than deleting them.
+使用 [assets/investment-question-scorecard-template.md](assets/investment-question-scorecard-template.md) 在内部按公司专属度、争议度、因果深度和决策影响评分，并检查问题能否连接到获客、客单价、续费、交付人天、毛利、现金、资本强度、估值、交易结构或投资节奏。公司专属度、因果深度或决策影响低于 3 分的问题应删除、合并或重写。证据弱但影响大的问题必须保留，并以保守投资处理作答。按 [references/structure-blueprint.md](references/structure-blueprint.md) 选择最终数量和项目类型路径，不按模块平均分配问题名额。
 
-Choose the final count for the selected report mode. Use the project-type routing in [references/structure-blueprint.md](references/structure-blueprint.md).
+### 8. 起草报告
 
-### 8. Draft the report
-
-Start from [assets/qa-report-template.md](assets/qa-report-template.md), adapting rather than filling mechanically.
-
-Default report shape:
+以 [assets/qa-report-template.md](assets/qa-report-template.md) 为骨架，自适应改写，不得机械填空。
 
 ```text
 # 项目名称Q&A 报告
-## Q1: ...
-## Q2: ...
-...
-## Qn: risks, verification, milestones, and decision
+## Q1：……
+## Q2：……
+……
+## Qn：风险、核验、里程碑与决策
 ```
 
-Start Q1 immediately after the title. Do not insert metadata, an execution summary, a question list, a table of contents, a standalone conclusion, an information-gap appendix, or a source appendix unless explicitly requested.
+标题后立即进入 Q1。每个答案直接形成连续、可决策的分析：
 
-Write each answer as a continuous decision-useful analysis:
+1. 从相关事实、推理或证据开始；
+2. 需要时拆分互不重叠的驱动因素；
+3. 使用可追溯事实、案例或计算；
+4. 写明反方观点、限制和未解决事项；
+5. 在正文或自然收束段中说明决策影响。
 
-1. begin directly with the relevant facts, reasoning, or evidence;
-2. separate non-overlapping drivers where useful;
-3. use traceable facts, cases, or calculations;
-4. state counterarguments, limitations, and unresolved items;
-5. explain the implication for the decision in the body or a natural closing paragraph.
+标准版和投资版的关键答案必须自然完成 `可观察事实 → 客户行为或经营机制 → 具体经营/财务变量 → 投资主线或估值处理 → 优先级最高的失效条件`。不得只在结尾添加“影响投资价值”或“影响估值”，必须指出获客成本、销售周期、客单价、续费、交付人天、毛利、应收、回款、资本强度、集中度折价或期权价值等具体变量及影响方向。
 
-Never emit `结论：`, `**结论：**`, `结论如下`, or an equivalent standalone conclusion paragraph. Do not merely rename the label. If a direct answer is needed, express it naturally inside the opening analysis paragraph rather than as a separate summary block.
+以资深投资经理口径穿透事实：行业信息落到可触达机会，技术信息落到客户采购、定价和复制，案例信息落到可重复销售，客户信息落到收入和现金，增长信息落到经营杠杆与资本效率，风险信息落到下行后果和否决条件。每个核心回答都应说明哪项新事实会使判断升级、降级或反转。
 
-Distinguish:
+答案结构和长度应有自然差异。不得让所有答案重复“原因—证据—风险—意义”模板，不得以产品功能罗列、材料清单或风险穷举代替因果推演。
 
-- intention from signed order;
-- order from delivery;
-- delivery from acceptance;
-- acceptance from revenue recognition;
-- revenue from cash collection;
-- internal test from third-party validation;
-- company target from external forecast;
-- allegation, filing, judgment, and final legal outcome.
+不得输出“结论：”“**结论：**”“结论如下”或同义独立结论段，也不得仅更换标签名称。需要直接回答时，把判断自然融入开头的分析段。
 
-Write external claims without citation labels or links in the reader-facing report. Preserve publisher, title, URL, publication date, access date, and claim mapping in the internal evidence ledger. Include only decision-relevant dates, periods, calculations, and assumptions in the report body.
+严格区分意向与订单、订单与交付、交付与验收、验收与收入确认、收入与回款、内部测试与第三方验证、公司目标与外部预测、指控/立案/判决/最终法律结果。
 
-Do not describe how evidence was found. Remove phrases such as `公开信息显示`, `根据公开材料`, `从公开资料看`, `公开报道显示`, and `未检索到公开信息`. Replace them with claim-first language and a precise boundary: `公司已上线…`, `相关记录显示…`, `现有证据只能确认…`, `尚无合同、验收或流水支持…`.
+读者版的外部主张不显示引用标签或链接；发布者、标题、URL、发布日期、访问日期和主张映射只保留在内部证据台账。正文只保留与决策有关的日期、期间、计算和假设。
 
-### 9. Integrate gaps and source provenance
+### 9. 融合缺口与出处
 
-For each unresolved material issue, include within the relevant answer:
+每个重大未解决事项都要在内部台账写明信息缺口、重要性、所需证据或访谈、责任人、期限及决策影响。读者版不暴露取证任务，而是把主张缩小到当前证据能够支持的范围，并说明其商业、财务或估值处理，例如把未形成合同闭环的合作排除在订单储备和收入预测之外。
 
-- information gap;
-- why it matters;
-- required evidence or interview;
-- owner, if known;
-- deadline, if known;
-- decision impact.
+使用数据库、连接器或网络研究时，只在内部证据台账中保留来源映射；标准报告仅表达已经核验的主张、可观察状态、经济后果和必要的中性归因，不得暴露来源名、定位信息、URL 或可点击链接。除非用户明确要求，证据台账或来源台账不作为读者版附件。
 
-When database/connector retrieval or web research is used, keep the source mapping in the internal evidence ledger and express only the verified claim, its status, and any necessary neutral attribution in the report. Do not expose source names, locators, URLs, or clickable links in the standard report.
+### 10. 校验 Markdown
 
-Create a separate evidence ledger or source register only when the user explicitly requests it. Keep that register as a separate file rather than appending it to the direct-Q&A report. Deep-diligence mode still requires an internal working ledger, but it is not a reader-facing deliverable by default.
-
-### 10. Validate
-
-Review against [references/evidence-and-quality-rules.md](references/evidence-and-quality-rules.md).
-
-Run:
-
-```bash
-python3 "$QA_SKILL_DIR/scripts/validate_qa_report.py" /absolute/path/to/report.md
-```
-
-This validates the default direct-Q&A contract. If the user explicitly requests metadata, summary, list, gap, or source sections, run:
+按照 [references/evidence-and-quality-rules.md](references/evidence-and-quality-rules.md) 复核，并运行：
 
 ```bash
 python3 "$QA_SKILL_DIR/scripts/validate_qa_report.py" \
-  /absolute/path/to/report.md --extended-sections
+  /absolute/path/to/report.md \
+  --profile standard \
+  --strict-investment \
+  --native-term "专属产品名" \
+  --native-term "专属案例名" \
+  --native-term "专属技术名"
 ```
 
-Resolve all errors. Review warnings; retain intentional unresolved markers only when clearly disclosed.
+若用户明确要求元数据、摘要、清单、缺口、来源或结论等扩展章节，运行：
 
-### 11. Generate and verify the Word document
+```bash
+python3 "$QA_SKILL_DIR/scripts/validate_qa_report.py" \
+  /absolute/path/to/report.md \
+  --extended-sections \
+  --profile standard \
+  --strict-investment \
+  --native-term "专属产品名" \
+  --native-term "专属案例名" \
+  --native-term "专属技术名"
+```
 
-After Markdown validation passes:
+解决全部错误；逐项检查警告，仅在明确披露时保留未解决标记。
 
-1. Generate the DOCX:
+`--native-term` 应传入内部编辑主线提取的 3—7 个公司专属名词，不把公司名称当作唯一专属词。严格投资门禁未达到 0 错误、0 警告时，不得生成最终 DOCX。
+
+### 11. 生成并核验 Word 文档
+
+Markdown 校验通过后：
+
+1. 生成 DOCX：
 
 ```bash
 python3 "$QA_SKILL_DIR/scripts/render_qa_docx.py" \
@@ -263,38 +213,40 @@ python3 "$QA_SKILL_DIR/scripts/render_qa_docx.py" \
   /absolute/path/to/workspace/output/docx/report.docx
 ```
 
-2. Reopen the DOCX structurally with `python-docx` and ZIP/XML inspection; confirm it has non-zero paragraphs, all Q headings, valid tables, explicit styles/numbering/table geometry, zero external hyperlinks, and no `结论：` label, Markdown link syntax, raw URL, source line, or placeholder token.
-3. Render every page to PNG under `tmp/docx/`. Use the host's canonical document renderer when available; otherwise use the native Word or LibreOffice path defined in [references/runtime-compatibility.md](references/runtime-compatibility.md). Any temporary PDF created during rendering is a QA intermediate, not a deliverable.
-4. Visually inspect every rendered page at 100% zoom. Use contact sheets only for navigation; inspect every page individually before final delivery.
-5. Fix clipped text, broken tables, orphaned headings, unreadable Chinese glyphs, bad link labels, excess whitespace, or inconsistent page transitions; regenerate and re-render after every material fix.
-6. Do not deliver the DOCX until the latest inspection shows zero visual defects.
+2. 使用 `python-docx` 与 ZIP/XML 重新检查 DOCX：确认存在正文和全部 Q 标题，表格有效，样式、编号和表格几何均已显式设置，外部超链接为零，且没有“结论：”、Markdown 链接、原始 URL、来源行或占位符。
+3. 把每页渲染为 `tmp/docx/` 下的 PNG。优先使用宿主的文档渲染器，否则采用运行兼容规则中的 Word 或 LibreOffice 路径。渲染产生的 PDF 只是质检中间件，不是交付物。
+4. 按 100% 缩放逐页检查；联系表仅用于导航，不能代替逐页检查。
+5. 修复文字截断、破表、孤立标题、中文缺字、链接标签异常、大片空白和跨页不一致；每次实质修改后重新生成和渲染。
+6. 最新一轮检查存在任何视觉缺陷时，不得交付 DOCX。
 
-Use the Markdown as the editable content source. Do not edit rendered page images to correct substantive report content.
+Markdown 是可编辑内容源，不得通过修改页面图片修正实质内容。`qa_cn_formal_a4` 是验收门槛：除页面观感外，还必须逐项核对 DOCX 样式、OOXML 几何与格式参数。
 
-Treat the `qa_cn_formal_a4` profile as a pass/fail requirement. Before delivery, compare the DOCX styles, OOXML geometry, and rendered pages against every row in the format profile; a visually clean DOCX is not sufficient if its margins, font sizes, line spacing, alignment, table typography, or header/footer placement are outside the specified values.
+## 不可违反的规则
 
-## Non-negotiable rules
+- 不得编造市场规模、客户、合同、订单、收入、回款、融资、性能、知识产权、法律或监管数据。
+- 不得把意向、计划、管理层目标、Demo 或内部测试提升为更强状态。
+- 不得隐藏来源冲突或平均口径不兼容的数字。
+- 不得复制受保护的长段落；应概述并在内部证据台账记录出处。
+- 不得纳入无关敏感个人信息或无证据支持的负面指控。
+- 报告生成过程中不得执行数据库写入、更新、删除、DDL 或管理操作。
+- 不得查询未授权数据系统或把查询范围扩大到项目所需之外。
+- 不得假定当前工作区包含项目材料。
+- 标准读者版不得出现取证或网络检索过程自述。
+- 宁可明确保留缺口，也不得用流畅文字掩盖编造。
+- 所有推断和预测必须明确标记。
+- 不得以“作为资深投资经理”等身份自述代替专业判断。
+- 不得把报告写成公司宣传稿、行业科普稿或脱离投资决策的管理咨询方案。
+- 不得用通用问题、产品功能清单、材料索取或篇幅堆叠冒充专业深度。
+- 不得只写“影响商业化、投资价值或估值”；必须指出具体经营或财务变量及作用方向。
 
-- Never fabricate market size, customer, contract, order, revenue, cash, financing, performance, IP, legal, or regulatory data.
-- Never convert intention, plan, management target, Demo, or internal test into a stronger status.
-- Never hide source conflicts or average incompatible figures.
-- Never copy long protected passages; summarize them and record provenance in the internal evidence ledger.
-- Never include irrelevant personal sensitive data or unsupported negative allegations.
-- Never run write, update, delete, DDL, or administrative database operations for report generation.
-- Never query an unapproved data system or broaden a query beyond the project need.
-- Never assume the current workspace contains the source material.
-- Never expose evidence-acquisition or web-research narration in the standard reader-facing report; keep it in the internal evidence ledger.
-- Prefer a visible gap over a polished invention.
-- Mark every inference and forecast as such.
+## 交付
 
-## Delivery
+先提供最终 DOCX 链接，再提供 Markdown 底稿链接，并简要说明：
 
-Lead with the final DOCX link, then provide the Markdown companion link and a short summary of:
+- 报告模式与问题数量；
+- 是否使用外部研究；
+- 重大未解决缺口；
+- Markdown 校验结果；
+- DOCX 页数及逐页视觉核验结果。
 
-- selected report mode and question count;
-- whether external research was used;
-- material unresolved gaps;
-- Markdown validation result;
-- DOCX page count and visual verification result.
-
-Do not claim the report is fully verified when material C/D-grade evidence remains.
+仍存在重大 C/D 级证据时，不得声称报告已经完全核验。

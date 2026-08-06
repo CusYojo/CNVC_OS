@@ -1,158 +1,93 @@
-# Research, Accuracy, and Compliance Rules
+# 研究、准确性与合规规则
 
-## Contents
+## 目录
 
-1. Research modes
-2. Source hierarchy
-3. Material-claim verification
-4. Data definitions and freshness
-5. Conflict handling
-6. Legal, privacy, and copyright boundaries
-7. Provenance requirements
+1. 研究模式
+2. 来源层级
+3. 重大主张核验
+4. 数据口径与时效
+5. 冲突处理
+6. 法律、隐私与版权边界
+7. 出处记录
 
-## Research modes
+## 研究模式
 
-### Supplied-materials-only
+### 仅使用用户材料
 
-Use when the user prohibits browsing. Do not add external facts. Mark missing information and still generate counterquestions and a gap list.
+用户禁止联网时，不补充外部事实。标记缺失信息，但仍可提出反方问题，并在相应回答中写明缺口与所需证据。
 
-### Adaptive research
+### 自适应研究
 
-Use by default when supplied information is insufficient and the user has not prohibited browsing:
+用户信息不足且未禁止联网时默认采用：
 
-1. identify a specific report-blocking gap;
-2. formulate bounded research questions;
-3. search primary sources first;
-4. verify material claims;
-5. record provenance;
-6. map each claim to its evidence in the internal ledger;
-7. stop when the decision need is met.
+1. 识别会阻塞报告的具体缺口；
+2. 把缺口转化为范围清晰的研究问题；
+3. 优先查找一手来源；
+4. 核验重大主张；
+5. 记录出处；
+6. 在内部台账中把主张映射到证据；
+7. 满足决策需要后停止。
 
-Do not broaden research into unrelated personal or company information.
+不得把研究扩大到无关个人或公司信息。
 
-### User-directed research
+### 用户指定研究
 
-Follow requested markets, competitors, policies, dates, or source domains while retaining all accuracy and legality rules.
+按用户指定的市场、竞品、政策、日期或域名检索，同时保持全部准确性与合法性要求。
 
-## Source hierarchy
+## 来源层级
 
-Prefer:
+优先级如下：
 
-1. government, regulator, exchange, court-publication system, statistics agency, standards body, patent/trademark authority, formal company filing, audited report;
-2. industry association, research paper, official technical documentation, tender/award notice, certification, formal customer/supplier material;
-3. accountable major financial/news publisher, professional database, established research institution;
-4. industry articles or research summaries only as leads or secondary support;
-5. social media/forums only as leads, or as clearly attributed first-person public statements that are corroborated.
+1. 政府、监管机构、交易所、法院发布系统、统计机构、标准组织、专利/商标机关、正式公司申报、审计报告；
+2. 行业协会、研究论文、官方技术文档、招投标/中标公告、认证材料、正式客户或供应商材料；
+3. 可问责的主流财经或新闻机构、专业数据库、成熟研究机构；
+4. 行业文章或研究摘要，仅作线索或辅助支持；
+5. 社交媒体或论坛，只作线索；经交叉验证后可作为明确归因的本人陈述。
 
-Open and record the original page in the internal evidence ledger. Do not rely on a search result page, snippet, aggregator, or copied repost when the original is available.
+内部证据台账应记录原始页面。存在原始来源时，不得依赖搜索结果页、摘要、聚合页或转载。
 
-## Material-claim verification
+## 重大主张核验
 
-Treat these as material:
+重大主张包括市场规模或增速；融资、估值、股权；收入、利润、订单、回款；客户、合作、招投标或中标；产品性能、排名、装机量；知识产权、诉讼、执法或处罚；政策、许可、认证或监管状态。
 
-- market size/growth;
-- financing, valuation, ownership;
-- revenue, profit, orders, cash collection;
-- customer, partnership, tender/award;
-- product performance, ranking, installed base;
-- IP, litigation, enforcement, penalties;
-- policy, license, certification, regulatory status.
+核验标准：一个权威的一手/专业原始来源，或两个范围兼容、彼此独立的高质量来源。多个页面转载同一篇文章仍只算一个来源。只有公司单方陈述时标记 `[仅有公司单方口径]`。
 
-Verify with:
+## 数据口径与时效
 
-- one authoritative primary/professional original source; or
-- two independent high-quality sources with compatible scope.
+使用数字前确认：数据年度/季度与发布日期；自然年或财年；地域；币种与汇率日期；含税或不含税；实际、预算、预测、目标或意向；收入、出货、投资额、终端产值或其他分母；名义值或经通胀调整值。
 
-Multiple pages copying one article count as one source.
+公司状态、融资、管理层、客户、产品、政策、法律、监管和标准必须使用当前可得信息，旧数据标为历史。市场预测需记录基准年、预测区间、来源日期和计算口径。
 
-If only the company claims a fact, label it `[仅有公司单方口径]`.
+## 冲突与推断
 
-## Data definitions and freshness
+来源不一致时：不取平均；保留不同定义；比较范围、日期、方法、单位和发布者；优先更一手、更权威、更近期的来源；仍无法解决时标记 `[多来源口径冲突]`。不能因为某个数值更支持项目主线而隐藏冲突。
 
-Before using a number, confirm:
+计算应展示公式、输入、假设、单位和来源。推断必须明确标记：
 
-- data year/quarter and publication date;
-- calendar vs fiscal year;
-- geographic scope;
-- currency and FX date;
-- tax-inclusive vs tax-exclusive;
-- actual, budget, forecast, target, or intention;
-- revenue, shipment, investment, terminal output, or another denominator;
-- nominal vs inflation-adjusted.
+> 基于【事实 1】和【事实 2】，项目团队判断【判断】。
 
-Use current available information for company status, financing, management, customers, products, policies, law, regulation, and standards. Mark older figures as historical.
+不得把计算估值写成来源直接报告的事实。
 
-For market forecasts, state base year, forecast interval, source date, and calculation definition.
+## 法律与访问边界
 
-## Conflict handling
+只能使用：用户有权提供的文件；无需绕过控制即可访问的页面；用户授权的连接器或数据库；合法的政府、公司、学术和专业信息。
 
-When sources disagree:
+严禁绕过登录、付费墙、验证码、访问控制、速率限制或站点限制；获取、推断或暴露非公开商业秘密；使用泄露、违法或来源不明的数据；收集无关敏感个人信息；发布无依据指控；在没有专业审查时暗示法律问题已经排除或给出确定性法律意见。
 
-1. do not average;
-2. retain both definitions;
-3. compare scope, date, methodology, unit, and publisher;
-4. prefer the more primary, authoritative, and current source;
-5. mark unresolved differences `[多来源口径冲突]`.
+涉及个人、诉讼、执法或负面事件时：优先官方记录；使用中性语言；区分指控、调查、立案、判决、上诉和最终结果；注明日期及当前状态；删除无关个人细节。
 
-Do not hide a conflict because one value better supports the thesis.
+## 版权
 
-## Calculations and inference
+- 概述和分析，不复制长篇内容；
+- 只引用支持观点所必需的短句；
+- 图表复用权不明确时，基于合法数据重绘并在内部台账记录出处；
+- 可记录付费研究的存在，但不得复制受保护内容；
+- 没有合法复用依据时，不使用图片。
 
-Show formulas, inputs, assumptions, units, and sources. Mark inference explicitly:
+## 出处记录
 
-> 基于【事实 1】和【事实 2】，项目团队判断【结论】。
+标准读者版不得展示来源清单、引用标签、Markdown 链接、原始 URL 或可点击外链。每项外部事实都要在内部证据台账记录发布者、页面或文档标题、URL、发布日期、数据期间、访问日期、所支持主张和证据等级。大型来源集合使用 [assets/source-register-template.md](../assets/source-register-template.md)。
 
-Do not describe a calculated estimate as a reported fact.
+只有用户明确要求时，才生成带引文读者版或交付来源台账。否则仅在保留主张状态或边界确有必要时使用中性归因。
 
-## Legal and access boundaries
-
-Use only:
-
-- files the user is authorized to provide;
-- public pages available without bypassing controls;
-- connectors/databases the user has authorized;
-- lawful government, company, academic, and professional information.
-
-Never:
-
-- bypass login, paywall, CAPTCHA, access controls, rate limits, or site restrictions;
-- obtain, infer, or expose non-public trade secrets;
-- use leaked, illicit, or unknown-origin data;
-- collect irrelevant personal sensitive information;
-- publish unsupported allegations;
-- imply legal clearance or give a definitive legal opinion without qualified review.
-
-For personal, litigation, enforcement, or negative-news claims:
-
-- prefer official public records;
-- use neutral language;
-- distinguish allegation, investigation, filing, judgment, appeal, and final result;
-- include dates and current status;
-- omit irrelevant personal detail.
-
-## Copyright
-
-- Summarize and analyze; do not copy long passages.
-- Quote only the short text necessary to support a point.
-- Recreate charts from lawful data when reuse rights are unclear and record the data provenance in the internal evidence ledger.
-- Record the existence of paywalled research but do not reproduce protected content.
-- Do not use images without a lawful basis for reuse.
-
-## Provenance requirements
-
-Do not expose source lists, citation labels, Markdown links, raw URLs, or clickable external hyperlinks in the standard reader-facing report. Record every external fact in the internal evidence ledger with:
-
-- publisher;
-- page/document title;
-- URL;
-- publication date;
-- data period;
-- access date;
-- supported claim;
-- source grade.
-
-Use [assets/source-register-template.md](../assets/source-register-template.md) for large source sets.
-
-Create a cited reader-facing edition or deliver the source register only when the user explicitly requests it. Otherwise, use neutral attribution in the report only when needed to preserve a claim's status or boundary.
-
-If a reliable source cannot be found, record `[尚无可核验证据]` or `[来源待核验]` in the working ledger. In the reader-facing report, state the missing proof directly, for example `尚无合同、验收或回款材料支持该判断`; do not write `公开信息未检索到` or narrate the search process. Never fill the gap from memory or plausibility.
+找不到可靠来源时，在工作台账记录 `[尚无可核验证据]` 或 `[来源待核验]`。读者版应直接说明缺少什么证明，例如“尚无合同、验收或回款材料支持该判断”，不得写“未检索到公开信息”，也不得凭记忆或合理性补空白。

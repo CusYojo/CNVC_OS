@@ -1,158 +1,92 @@
-# Multi-Source Acquisition Rules
+# 多来源获取规则
 
-## Contents
+## 目录
 
-1. Source-channel priority
-2. Conversation input
-3. Attachments and user-referenced files
-4. Databases, warehouses, APIs, and connectors
-5. Workspace files
-6. Public web
-7. Provenance and conflict rules
-8. Access failure
+1. 来源渠道优先级
+2. 对话输入
+3. 附件与用户引用文件
+4. 数据库、数仓、API 与连接器
+5. 工作区文件
+6. 网络来源
+7. 出处与冲突规则
+8. 访问失败
 
-## Source-channel priority
+## 来源渠道优先级
 
-Build the source inventory from:
+按以下顺序建立来源清单：
 
-1. current conversation text and pasted tables;
-2. attachments and explicitly referenced files/URLs;
-3. user-authorized databases, warehouses, APIs, connected apps, and remote resources;
-4. workspace files explicitly placed in scope;
-5. lawful public-web sources for remaining gaps.
+1. 当前对话文字和粘贴表格；
+2. 附件及用户明确引用的文件或 URL；
+3. 用户授权的数据库、数仓、API、连接应用和远程资源；
+4. 用户明确纳入范围的工作区文件；
+5. 用于补足剩余缺口的合法网络来源。
 
-Do not presume the source material exists in the project directory. Keep source acquisition separate from output location.
+不得假定项目材料在项目目录中。来源获取与输出位置必须分开处理。不得自动读取无关工作区文件、浏览器历史、连接应用或数据库。
 
-Do not automatically read unrelated workspace files, browser history, connected apps, or databases.
+## 对话输入
 
-## Conversation input
+用户输入或粘贴的信息也属于来源：
 
-Treat information typed or pasted by the user as a source:
+- 记录为 `用户在当前对话中提供`，并记录对话日期；
+- 保留限定条件、不确定性、单位和期间；
+- 区分用户亲述与复制的第三方文字；
+- 不得把用户陈述升级为已经独立核验的证据。
 
-- record `用户在当前对话中提供`;
-- record the conversation date;
-- preserve the user's qualifiers, uncertainty, units, and time period;
-- distinguish first-hand user statements from copied third-party text;
-- do not upgrade a user claim to independently verified evidence.
+表格缺少列定义、单位、期间或状态时，仅在安全情况下推断并明确标记；歧义会改变判断时应询问用户。不得把隐藏推理、凭据、支付标识、直接个人联系方式或无关敏感信息写入报告或证据台账。
 
-If the user provides a table without clear column definitions, units, period, or status, infer only when safe and label the inference. Ask when the ambiguity can change the conclusion.
+## 附件与用户引用文件
 
-Do not place hidden reasoning, credentials, payment identifiers, direct personal contact details, or unrelated sensitive information into the report or evidence ledger.
+使用任务中实际可用的附件或引用资源，并按类型采用 PDF、文档、演示文稿或电子表格流程。记录原文件名或资源标题；页码、章节、幻灯片、工作表、表格或单元格范围；文档日期和版本；数据期间及单位；完整、截断、脱敏或仅图片状态。
 
-## Attachments and user-referenced files
+文件没有本地路径时，使用平台的附件或资源访问方式，不得要求用户把它移动到项目目录。
 
-Use the exact attachments or referenced resources made available in the task. Apply the corresponding PDF, document, presentation, or spreadsheet workflow when available.
+## 数据库、数仓、API 与连接器
 
-Record:
+优先使用专用连接器、数据库工具或授权 API。
 
-- original filename or resource title;
-- page, section, slide, sheet, table, or cell range;
-- document date and version;
-- data period and unit;
-- whether content is complete, truncated, redacted, or image-only.
+### 授权与范围
 
-When a file has no filesystem path, use the platform's attachment/resource access method. Do not require the user to move it into the project directory.
+- 只访问用户为本任务授权的系统和数据集；
+- 只执行只读操作；
+- 不执行插入、更新、删除、合并、DDL、权限、管理或对外公开导出操作；
+- 只查询必要字段、实体和期间；
+- 不获取凭据、令牌、密钥或无关个人数据；
+- 遵守行列级、地域、合同和保密限制。
 
-## Databases, warehouses, APIs, and connectors
+### 查询流程
 
-Use a purpose-built connector, database tool, or authorized API before attempting indirect extraction.
+1. 检查可用模式或资源元数据；
+2. 确认表/视图粒度、主要维度、指标、单位和日期字段；
+3. 明确该查询支持哪项报告主张；
+4. 使用限界筛选和确定性排序；
+5. 检查行数、空值、重复、截断、时间覆盖和新鲜度；
+6. 在使用汇总值前查看返回记录；
+7. 与用户材料及其他来源的口径进行核对。
 
-### Authorization and scope
+优先采用受治理的指标或语义定义；没有定义时，明确写出计算方法。
 
-- Access only systems and datasets the user has authorized for the task.
-- Use read-only operations.
-- Never run insert, update, delete, merge, DDL, permission, administration, or export-to-public operations.
-- Apply data minimization: query only necessary fields, entities, and periods.
-- Do not retrieve credentials, tokens, secrets, or unrelated personal data.
-- Respect row-level, column-level, regional, contractual, and confidentiality restrictions.
+### 数据库出处记录
 
-### Query workflow
+记录连接器或源系统、数据库/目录/模式/表或视图、查询目的、必要时的 SQL 或查询 ID、筛选和排除记录、数据粒度与聚合、查询时间、覆盖期间、单位/币种/时区、行数和截断状态、访问或完整性限制。不得暴露密钥、机密 SQL 注释、个人标识符或与评审无关的基础设施信息。
 
-1. Inspect available schema/resource metadata.
-2. Identify the table/view grain, primary dimensions, measures, units, and date fields.
-3. Define the report claim that the query will support.
-4. Use bounded filters and deterministic ordering.
-5. Check row count, nulls, duplicates, truncation, time coverage, and freshness.
-6. Review returned rows before using aggregates.
-7. Reconcile query results with user-supplied and public claims.
+### 数据质量
 
-Prefer an existing governed metric or semantic definition. If no definition exists, state the calculation explicitly.
+引用结果前检查更新日期、缺失与重复、关联和粒度一致性、分母与排除项、时区和财年/自然年、实际/预测/目标/管线状态、完整或抽样状态。存在重大疑问时标记 `[数据质量待核验]` 并说明限制。
 
-### Database provenance
+## 工作区文件
 
-Record:
+仅在用户指明文件或目录、任务明确说明材料位于工作区，或文件名和上下文使范围没有歧义时使用。不得递归地把工作目录中的所有文件都当作项目证据，必须保留无关用户文件与修改。
 
-- connector or source-system name;
-- database/catalog, schema, and table/view;
-- human-readable query purpose;
-- SQL or query identifier when safe and useful;
-- filters and excluded records;
-- row grain and aggregation;
-- query/retrieval timestamp;
-- data coverage period;
-- units, currency, and timezone;
-- row count and truncation status;
-- known access or completeness limitations.
+## 网络来源
 
-Do not expose secrets, confidential SQL comments, personal identifiers, or infrastructure details that are not needed for review.
+除非用户明确要求优先联网，否则先盘点用户材料和授权来源，再使用网络研究。遵循 [research-and-compliance-rules.md](research-and-compliance-rules.md)。网络来源可核验或补充内部数据，但不能自动覆盖受治理的内部指标；必须比较定义和日期。
 
-### Data quality
+## 出处与冲突规则
 
-Before citing a database result, check:
+来源类型包括对话、附件/文件、数据库/数仓、授权连接器/API、网络、计算/推断。
 
-- freshness and last updated time;
-- missing or duplicate records;
-- joins and grain consistency;
-- denominator and exclusion definitions;
-- timezone and fiscal/calendar periods;
-- actual, forecast, target, and pipeline status;
-- whether the result is complete or sampled.
+来源冲突时：保留双方主张；比较日期、范围、定义、单位和证据等级；不得静默偏向数据库、用户或网络数据；说明采用依据；未解决冲突保留在缺口清单中。内部数据只在其治理的指标和范围内具有权威性；监管或法律记录也只在其正式范围内具有权威性。
 
-If material data quality is uncertain, mark the claim `[数据质量待核验]` and describe the limitation.
+## 访问失败
 
-## Workspace files
-
-Use workspace files only when:
-
-- the user names the file/directory;
-- the task explicitly says the materials are in the workspace; or
-- file names and current context make their scope unambiguous.
-
-Do not recursively treat all files in the working directory as project evidence. Preserve unrelated user files and changes.
-
-## Public web
-
-Use public-web research only after inventorying user-provided and authorized sources, unless the user explicitly requests web-first research.
-
-Follow [research-and-compliance-rules.md](research-and-compliance-rules.md). Public sources may validate or supplement internal information but do not automatically override governed internal data; compare definitions and dates.
-
-## Provenance and conflict rules
-
-Use source types:
-
-- conversation;
-- attachment/file;
-- database/warehouse;
-- authorized connector/API;
-- public web;
-- calculation/inference.
-
-When sources conflict:
-
-1. preserve both claims;
-2. compare date, scope, definition, unit, and evidence grade;
-3. do not silently prefer database, user, or web data;
-4. explain the chosen basis;
-5. retain unresolved conflicts in the gap list.
-
-Treat internal data as authoritative only for the metric and scope it governs. Treat public records as authoritative only within their legal and reporting scope.
-
-## Access failure
-
-If a database, connector, attachment, or remote resource is unavailable:
-
-- do not claim it was reviewed;
-- record the access limitation;
-- use other lawful sources where appropriate;
-- ask the user for an export or authorization only when the missing source materially blocks the report;
-- preserve the unresolved item rather than inventing data.
+数据库、连接器、附件或远程资源不可用时：不得声称已经审阅；记录访问限制；适当使用其他合法来源；只有缺失来源实质阻塞报告时才请求用户导出或授权；保留未解决事项，不得编造。

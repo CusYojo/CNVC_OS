@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render a direct-Q&A Markdown report as a formal Chinese DOCX."""
+"""把直接问答式 Markdown 报告渲染为正式中文 DOCX。"""
 
 from __future__ import annotations
 
@@ -50,10 +50,8 @@ FOOTER_MM = 16
 CONTENT_WIDTH_DXA = round((PAGE_WIDTH_MM - LEFT_MM - RIGHT_MM) / 25.4 * 1440)
 TABLE_INDENT_DXA = 120
 
-# macOS/Word/WPS 兼容名称。项目运行时已经安装 STFangsong；使用 PostScript
-# 名称可避免 LibreOffice 将 Songti SC/Heiti SC 的中文字符渲染为缺字方框。
-SONGTI = "STFangsong"
-HEITI = "STHeiti"
+SONGTI = "Songti SC"
+HEITI = "Heiti SC"
 LATIN = "Times New Roman"
 ACCENT = "3F5870"
 INK = "1F2730"
@@ -621,13 +619,12 @@ def build_docx(markdown_path: Path, output_path: Path) -> None:
     text = markdown_path.read_text(encoding="utf-8")
     if CONCLUSION_LABEL_RE.search(text):
         raise ValueError(
-            "The report contains a standalone conclusion label. "
-            "Remove all '结论：' paragraphs before rendering."
+            "报告包含独立结论标签。请在渲染前删除所有“结论：”段落。"
         )
     lines = text.splitlines()
     title_line = next((line for line in lines if line.startswith("# ")), None)
     if title_line is None:
-        raise ValueError("The Markdown report must contain one H1 title.")
+        raise ValueError("Markdown 报告必须包含一个一级标题。")
     title_text = title_line[2:].strip()
     project_label = re.sub(
         r"(?:(?:标准版)?(?:内部版?|仅供内部使用)?\s*)?Q&A\s*报告$",
@@ -635,7 +632,7 @@ def build_docx(markdown_path: Path, output_path: Path) -> None:
         title_text,
     ).strip()
     if not project_label:
-        raise ValueError("The report title must include a project name before 'Q&A 报告'.")
+        raise ValueError("报告标题必须在“Q&A 报告”前包含项目名称。")
 
     document = Document()
     configure_styles(document)
@@ -754,7 +751,7 @@ def build_docx(markdown_path: Path, output_path: Path) -> None:
         index += 1
 
     if question_count == 0:
-        raise ValueError("No Q headings were found.")
+        raise ValueError("未发现 Q&A 问题标题。")
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     document.save(output_path)
@@ -762,11 +759,11 @@ def build_docx(markdown_path: Path, output_path: Path) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("input", type=Path, help="Input Markdown report")
-    parser.add_argument("output", type=Path, help="Output DOCX path")
+    parser.add_argument("input", type=Path, help="输入 Markdown 报告")
+    parser.add_argument("output", type=Path, help="输出 DOCX 路径")
     args = parser.parse_args()
     build_docx(args.input.resolve(), args.output.resolve())
-    print(f"Created {args.output.resolve()}")
+    print(f"已生成：{args.output.resolve()}")
     return 0
 
 

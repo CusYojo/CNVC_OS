@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render a direct-Q&A Markdown report as a polished Chinese PDF."""
+"""把直接问答式 Markdown 报告渲染为正式中文 PDF。"""
 
 from __future__ import annotations
 
@@ -94,8 +94,8 @@ def register_fonts() -> tuple[str, str, str, str, str]:
         or latin_bold_path is None
     ):
         raise FileNotFoundError(
-            "Required Chinese and Times-compatible fonts were not found. "
-            "Install Noto Serif/Sans CJK and Liberation Serif or provide supported system fonts."
+            "未找到必需的中文字体和 Times 兼容字体。请安装 Noto Serif/Sans CJK、"
+            "Liberation Serif，或提供受支持的系统字体。"
         )
 
     regular_path, regular_index = regular_choice
@@ -614,9 +614,9 @@ def render(markdown_path: Path, output_path: Path) -> None:
     markdown = markdown_path.read_text(encoding="utf-8")
     h1 = re.search(r"^#\s+(.+)$", markdown, re.MULTILINE)
     if not h1:
-        raise ValueError("Markdown must contain an H1 report title.")
+        raise ValueError("Markdown 必须包含报告一级标题。")
     if not re.search(r"^##\s+Q1[：:]", markdown, re.MULTILINE):
-        raise ValueError("Markdown must contain a direct Q1 section.")
+        raise ValueError("Markdown 必须包含直接进入的 Q1 章节。")
 
     regular, bold, title_font, _, _ = register_fonts()
     styles = build_styles(regular, bold, title_font)
@@ -666,8 +666,8 @@ def render(markdown_path: Path, output_path: Path) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("markdown", type=Path, help="Validated direct-Q&A Markdown input.")
-    parser.add_argument("pdf", type=Path, help="Output PDF path.")
+    parser.add_argument("markdown", type=Path, help="已经校验的直接问答式 Markdown 输入。")
+    parser.add_argument("pdf", type=Path, help="输出 PDF 路径。")
     args = parser.parse_args()
     render(args.markdown.resolve(), args.pdf.resolve())
     return 0

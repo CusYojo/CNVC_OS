@@ -5,7 +5,7 @@
 唯一权威文件：
 
 - `docs/合规性说明/合规性说明模板核心规范.md`
-- SHA-256：`c579a5dddaba5b38a8600cedf6c11aeab803c6f71c63e1afe9e689c6ab6e7c23`
+- SHA-256：`444c9204e1b547f8a12dbb1497c190d606d78d34d6ab3ed4ec9386cfca4026cd`
 
 Blueprint、Formatter 和 Reviewer 均以该核心规范为准。其他文件或历史产物不得改变其结构、内容职责和样式令牌。
 

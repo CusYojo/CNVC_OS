@@ -1,62 +1,56 @@
-# Q&A Report Format Guidelines
+# Q&A 报告格式规范
 
-## Contents
+## 目录
 
-1. Page and typography
-2. Paragraph hierarchy
-3. Page types
-4. Tables and figures
-5. Markdown rules
-6. Word generation and verification
-7. Final checks
+1. 页面与字体
+2. 段落层级
+3. 页面类型
+4. 页眉页脚与水印
+5. 表格与图示
+6. Markdown 规则
+7. Word 生成与核验
+8. 最终检查
 
-## Page and typography
+## 页面与字体
 
-### `qa_cn_formal_a4` Word profile
+### `qa_cn_formal_a4` Word 配置
 
-Use the `standard_business_brief` document preset with the named override
-`qa_cn_formal_a4`. The override below is the controlling profile for this Skill.
-Treat every value as required, not approximate, and encode it in Word styles and
-OOXML rather than relying on Word defaults.
+以 `standard_business_brief` 文档预设为基础，应用名为 `qa_cn_formal_a4` 的覆盖配置。下表是本技能的强制标准，数值必须精确写入 Word 样式和 OOXML，不得依赖 Word 默认值或近似设置。
 
-| Setting | Required value |
+| 设置 | 强制值 |
 |---|---:|
-| Page | A4 portrait |
-| Top margin | 27 mm |
-| Bottom margin | 28 mm |
-| Left margin | 31.8 mm |
-| Right margin | 30 mm |
-| Header distance | 14-16 mm |
-| Footer distance | 15-17 mm |
-| Columns | one |
-| Body alignment | justified |
-| Chinese punctuation | full-width |
-| Latin letters and numbers | half-width |
+| 页面 | A4 纵向 |
+| 上边距 | 27 mm |
+| 下边距 | 28 mm |
+| 左边距 | 31.8 mm |
+| 右边距 | 30 mm |
+| 页眉距边界 | 14—16 mm |
+| 页脚距边界 | 15—17 mm |
+| 分栏 | 单栏 |
+| 正文对齐 | 两端对齐 |
+| 中文标点 | 全角 |
+| 拉丁字母和数字 | 半角 |
 
-Recommended formal style:
+正式样式：
 
-| Element | Chinese | Latin/numbers | Size | Style |
+| 元素 | 中文字体 | 拉丁文字/数字 | 字号 | 样式 |
 |---|---|---|---:|---|
-| Main title | 宋体 | Times New Roman | 20 pt | bold, centered |
-| Q heading | 黑体 or 宋体 | Arial/TNR | 14 pt | bold |
-| Subheading | 黑体 or 宋体 | Arial/TNR | 11 pt | bold |
-| Body | 仿宋 or 宋体 | Times New Roman | 10.5-11 pt | justified |
-| Table body | 宋体 | Times New Roman | 9-10 pt | regular |
-| Figure/table title | 宋体 | Times New Roman | 10.5 pt | bold, centered |
-| Source/note | 宋体 | Times New Roman | 8.5-9 pt | gray |
-| Header/footer | 宋体 | Times New Roman | 9 pt | centered |
+| 主标题 | 宋体 | Times New Roman | 20 磅 | 加粗、居中 |
+| Q 标题 | 黑体或宋体 | Arial/TNR | 14 磅 | 加粗 |
+| 小标题 | 黑体或宋体 | Arial/TNR | 11 磅 | 加粗 |
+| 正文 | 仿宋或宋体 | Times New Roman | 10.5—11 磅 | 两端对齐 |
+| 表格正文 | 宋体 | Times New Roman | 9—10 磅 | 常规 |
+| 图表标题 | 宋体 | Times New Roman | 10.5 磅 | 加粗、居中 |
+| 来源/注释 | 宋体 | Times New Roman | 8.5—9 磅 | 灰色 |
+| 页眉页脚 | 宋体 | Times New Roman | 9 磅 | 居中 |
 
-Use no more than two Chinese typefaces. Avoid full-document KaiTi and body text below 10 pt.
+中文字体最多使用两种。不得全文使用楷体，不得把正文设为 10 磅以下。
 
-The bundled Word builder maps `w:eastAsia` to `STFangsong` for regular Chinese
-and `STHeiti` for bold Chinese, while mapping `w:ascii` and `w:hAnsi` to Times
-New Roman. These PostScript names are used so that Word, WPS and the local
-LibreOffice visual-QA renderer resolve the installed Chinese fonts consistently.
-Do not fall back to a single CJK font for all Latin text.
+内置 Word 生成器应把常规中文的 `w:eastAsia` 映射为宋体、粗体中文映射为黑体，把 `w:ascii` 和 `w:hAnsi` 映射为 Times New Roman。不得把所有拉丁文字也回退到同一中文字体。
 
-## Paragraph hierarchy
+## 段落层级
 
-Use one numbering system:
+全文只使用一套编号：
 
 ```text
 Q1：核心问题
@@ -65,119 +59,111 @@ Q1：核心问题
 - 证据或说明
 ```
 
-Recommended spacing:
+强制段落参数：
 
-| Element | Line spacing | Before | After | Indent |
+| 元素 | 行距 | 段前 | 段后 | 缩进 |
 |---|---|---:|---:|---|
-| Main title | fixed 24 pt | 0 | 18 pt | left 0, right 0, first line 0 |
-| Q heading | fixed 21 pt | 12 pt | 6 pt | left 0, right 0, first line 0 |
-| Subheading | fixed 18 pt | 8 pt | 4 pt | left 0, right 0, first line 0 |
-| Body | fixed 20 pt | 0 | 0 | left 0, right 0, first line 2 Chinese characters |
-| Bullet/numbered item | fixed 18 pt | 0 | 0 | left 27 pt, hanging 13.5 pt, right 0 |
-| Table title | fixed 16 pt | 8 pt | 4 pt | left 0, right 0, first line 0 |
-| Table body | fixed 14 pt | 0 | 0 | left 0, right 0, first line 0 |
+| 主标题 | 固定值 24 磅 | 0 | 18 磅 | 左 0、右 0、首行 0 |
+| Q 标题 | 固定值 21 磅 | 12 磅 | 6 磅 | 左 0、右 0、首行 0 |
+| 小标题 | 固定值 18 磅 | 8 磅 | 4 磅 | 左 0、右 0、首行 0 |
+| 正文 | 固定值 20 磅 | 0 | 0 | 左 0、右 0、首行 2 个中文字符 |
+| 项目符号/编号项 | 固定值 18 磅 | 0 | 0 | 左缩进 27 磅、悬挂 13.5 磅、右 0 |
+| 表格标题 | 固定值 16 磅 | 8 磅 | 4 磅 | 左 0、右 0、首行 0 |
+| 表格正文 | 固定值 14 磅 | 0 | 0 | 左 0、右 0、首行 0 |
 
-Use 16-18 pt body line spacing only for an explicitly requested high-density internal memo.
+只有用户明确要求高密度内部备忘录时，正文行距才可改为 16—18 磅。默认渲染器必须采用证据型正式密度：正文 10.5 磅、固定值 20 磅行距；Q 标题 14 磅、固定值 21 磅；小标题 11 磅、固定值 18 磅；列表文字 10.5 磅、固定值 18 磅；表格文字 9 磅、固定值 14 磅。
 
-The default renderer must use the evidence-oriented formal density: 10.5 pt body text with fixed 20 pt leading, 14 pt Q headings with fixed 21 pt leading, 11 pt subheadings with fixed 18 pt leading, 10.5 pt bullets with fixed 18 pt leading, and 9 pt table text with fixed 14 pt leading.
+## 页面类型
 
-## Page types
+### 直接问答开篇
 
-### Direct-Q&A opening
+只使用一个项目 Q&A 标题，严格采用 `项目名称Q&A 报告`，标题后立即开始 Q1。除非用户明确要求，不加入“标准版”“内部”“内部版”、版本号、日期、受众、保密限定词、版本/日期元数据、保密块、执行摘要、问题清单或装饰性主视觉。
 
-Use one project Q&A title in the exact pattern `项目名称Q&A 报告`, then start Q1 immediately. Do not insert `标准版`, `内部`, `内部版`, a version number, a date, an audience label, or a confidentiality qualifier into the title unless the user explicitly requests that wording. Do not add version/date metadata, confidentiality blocks, an execution summary, a question list, or decorative hero images unless the user requests them.
+### 标准 Q&A 页面
 
-### Standard Q&A page
-
-Keep the reading sequence:
+阅读顺序：
 
 ```text
-Question
-→ reasoning
-→ evidence/table
-→ boundary
-→ decision implication
+问题
+→ 推理
+→ 证据/表格
+→ 边界
+→ 决策影响
 ```
 
-Avoid leaving a question heading alone at a page bottom.
-Do not insert a standalone `结论：` paragraph, bold conclusion label, conclusion
-callout, or conclusion box. Begin the answer directly with analysis.
+不得让问题标题孤立在页面底部。不得添加独立“结论：”段落、加粗结论标签、结论提示或结论框，答案直接从分析开始。
 
-### Evidence page
+### 证据页与末页
 
-Use one primary reading task per page: market sizing, product matrix, competitor comparison, customer pipeline, cash collection, or timeline.
+每页设置一个主要阅读任务，例如市场测算、产品矩阵、竞品对比、客户管线、回款或时间线。最后一问综合核心判断、证据、风险、核验条件和下一步，不另设结论页，除非用户明确要求。
 
-### Final Q&A
+## 页眉、页脚与水印
 
-Use the last question to synthesize the core judgment, evidence, risk, verification conditions, and next action. Do not add a separate conclusion page unless requested.
+- 页眉：`项目名称｜Q&A`，9 磅，可加 0.5 磅灰色横线；默认不写版本号。
+- 页脚：只保留页码，右对齐。
+- 除非用户明确要求，页眉页脚不得出现“内部”“内部资料”“仅供内部使用”等保密字样。
+- 页眉距顶部 14—16 mm，页脚距底部 15—17 mm。
+- 水印可省略；影响阅读时必须省略。
+- 首页可隐藏页眉，但页码逻辑保持一致。
 
-## Headers, footers, and watermark
+## 表格
 
-- Header: `项目名称｜Q&A`, 9 pt, optional 0.5 pt gray rule. Do not add a version number by default.
-- Footer: page number only, aligned right.
-- Do not place `内部`, `内部资料`, `仅供内部使用`, or equivalent confidentiality labels in headers or footers unless the user explicitly requests them.
-- Place the header 14-16 mm from the top edge and the footer 15-17 mm from the bottom edge.
-- Internal watermark is optional; omit it when it reduces readability.
-- Hide the header on the opening page if desired, but keep page numbering consistent.
+- 表头使用蓝灰色或 10%—15% 灰色底纹；
+- 边框 0.5 磅；
+- 文字左对齐、短标签居中、数字右对齐；
+- 跨页重复表头；
+- 尽可能避免一条记录跨页；
+- 明确区分实际、预算、预测与意向。
 
-## Tables
+统一格式：
 
-- Use a blue-gray or 10%-15% gray header.
-- Use 0.5 pt borders.
-- Align text left, short labels center, numbers right.
-- Repeat headers across pages.
-- Do not split one record across pages when avoidable.
-- Distinguish actual, budget, forecast, and intention.
-
-Standard formats:
-
-| Type | Format |
+| 类型 | 格式 |
 |---|---|
-| Amount | `1,250 万元`, `2.3 亿元` |
-| Percent | `32.7%` |
-| Date | `2026-07-28` |
-| Quarter | `2026Q3` |
-| Missing | `-` |
-| Forecast | add `E` or `预计` |
+| 金额 | `1,250 万元`、`2.3 亿元` |
+| 百分比 | `32.7%` |
+| 日期 | `2026-07-28` |
+| 季度 | `2026Q3` |
+| 缺失 | `-` |
+| 预测 | 加 `E` 或“预计” |
 
-Use defined pipeline states: lead, requirement confirmed, Demo/POC, sample/test, bidding, signed contract/order, delivered, accepted, revenue recognized, collected, repurchased.
+客户管线状态固定为：线索、需求确认、Demo/POC、送样/测试、投标、已签合同/订单、已交付、已验收、已确认收入、已回款、已复购。
 
-## Figures and images
+## 图示与图片
 
-- Use diagrams only for a relationship, process, comparison, or timeline.
-- Keep flow diagrams under seven nodes and three colors.
-- Build product matrices by product, scenario, and commercial stage.
-- Recreate charts from lawful public data when reuse permission is unclear; record the data provenance in the internal evidence ledger.
-- Do not use screenshots where an editable table is possible.
-- Anonymize customer, contract, dashboard, and personal information.
+- 仅在关系、流程、比较或时间线确有助益时使用图示；
+- 流程图不超过七个节点和三种颜色；
+- 产品矩阵按产品、场景和商业阶段组织；
+- 图表复用权不明确时，以合法数据重绘并在内部证据台账记录出处；
+- 能用可编辑表格时不使用截图；
+- 客户、合同、系统看板和个人信息必须匿名化。
 
-## Markdown rules
+## Markdown 规则
 
-- Use headings, lists, tables, and blockquotes semantically.
-- Do not use spaces for visual indentation or blank lines for pagination.
-- Encode paragraph indentation explicitly: body paragraphs use a two-Chinese-character first-line indent; titles, headings, captions, notes, and table-cell paragraphs use zero first-line, left, and right indents; list wrapping uses real Word numbering with a 27 pt left indent and 13.5 pt hanging indent.
-- Do not include source lists, source notes, citation labels, Markdown links, raw URLs, or clickable external hyperlinks in the standard report.
-- Keep source provenance in the internal evidence ledger; create a separate cited edition or source register only when the user explicitly requests it.
-- Do not embed text-heavy images.
+- 按语义使用标题、列表、表格和引用；
+- 不用空格制造视觉缩进，不用空行控制分页；
+- 正文首行缩进两个中文字符；标题、各级标题、题注、注释和表格单元格均为首行、左侧、右侧零缩进；列表换行使用 Word 真编号，左缩进 27 磅、悬挂 13.5 磅；
+- 标准报告不得包含来源清单、来源说明、引用标签、Markdown 链接、原始 URL 或可点击外链；
+- 出处保留在内部证据台账，只有用户要求时才另建带引文版本或来源台账；
+- 不嵌入文字密集型图片。
 
-## Word generation and verification
+## Word 生成与核验
 
-- Use [../scripts/render_qa_docx.py](../scripts/render_qa_docx.py) for the standard A4 DOCX.
-- Preserve the direct-Q&A structure; do not create a cover page, metadata page, contents page, execution summary, source appendix, or standalone conclusion unless explicitly requested.
-- Ensure the standard DOCX contains no external hyperlink relationships and no visible URL text.
-- Encode Chinese and Latin font mappings explicitly in the DOCX. Never deliver a document containing missing-glyph boxes.
-- Prevent Q headings from being stranded at the bottom of a page.
-- Repeat table headers across pages and keep body text readable at normal zoom.
-- Reopen the DOCX with `python-docx` and ZIP/XML inspection; confirm every `Qn` heading, table, style, numbering definition, and page-number field is present, and confirm there are zero external hyperlinks.
-- Use the canonical `render_docx.py` from the `documents` Skill to render every page to PNG; visually inspect every page at 100% zoom before delivery.
-- Treat any PDF created by the DOCX renderer as a temporary QA intermediate. Do not deliver it unless the user explicitly requests PDF output.
+- 标准 A4 DOCX 使用 [../scripts/render_qa_docx.py](../scripts/render_qa_docx.py)；
+- 保留直接 Q&A 结构，除非用户明确要求，不创建封面、元数据页、目录、执行摘要、来源附录或独立结论；
+- 标准 DOCX 不得存在外部超链接关系或可见 URL；
+- 显式写入中文与拉丁字体映射，不得交付出现方框缺字的文档；
+- 避免 Q 标题孤立在页面底部；
+- 跨页表格重复表头，正常缩放下正文可读；
+- 使用 `python-docx` 与 ZIP/XML 重新打开并确认所有 Q 标题、表格、样式、编号定义和页码域完整，外部超链接为零；
+- 优先使用宿主 `documents` 技能的标准渲染脚本把每页转为 PNG，并按 100% 缩放逐页检查；
+- DOCX 渲染产生的 PDF 只是质检中间件，用户未要求时不得交付。
 
-## Final checks
+## 最终检查
 
-- Ensure fonts and heading levels are consistent.
-- Number questions, figures, tables, and appendices continuously.
-- Give every table and chart a title, unit, and relevant date; keep its source mapping in the internal evidence ledger.
-- Distinguish actual and forecast values visually and verbally.
-- Omit version, date, and front-page confidentiality metadata by default.
-- Include page numbering only in the default DOCX footer; omit internal-use or confidentiality wording.
-- Remove internal comments and verify anonymization.
+- 字体与标题层级一致；
+- 问题、图、表和附录连续编号；
+- 每个表格和图表有标题、单位、相关日期，出处映射留在内部证据台账；
+- 实际值与预测值在视觉和文字上均明确区分；
+- 默认删除版本、日期和首页保密元数据；
+- 默认页脚只保留页码，不写内部使用或保密字样；
+- 删除内部批注，并核验匿名化效果。

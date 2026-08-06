@@ -184,14 +184,22 @@ const STATEMENTS = [
   `ALTER TABLE leads ADD COLUMN IF NOT EXISTS radar_profile JSONB`,
   `ALTER TABLE leads ADD COLUMN IF NOT EXISTS radar_source_keys JSONB NOT NULL DEFAULT '[]'::jsonb`,
   `UPDATE leads
+    SET radar_profile = jsonb_set(
+      radar_profile,
+      '{channel}',
+      to_jsonb(radar_profile->>'sourceGroup'),
+      true
+    )
+    WHERE radar_profile->>'channel' = '36氪'
+      AND radar_profile->>'sourceGroup' IN ('机构公众号', '高校公众号', '创投新闻', '论文')
+      AND COALESCE(radar_profile->>'sourceName', '') NOT ILIKE '%36氪%'
+      AND COALESCE(radar_profile->>'radarSourceKey', '') NOT ILIKE '%36kr%'`,
+  `UPDATE leads
     SET radar_profile = jsonb_set(COALESCE(radar_profile, '{}'::jsonb), '{channel}', to_jsonb('36氪'::text), true)
     WHERE COALESCE(radar_profile->>'channel', '') <> '36氪'
       AND (
         COALESCE(radar_profile->>'sourceName', '') ILIKE '%36氪%'
         OR COALESCE(radar_profile->>'radarSourceKey', '') ILIKE '%36kr%'
-        OR COALESCE(source, '') ILIKE '%36氪%'
-        OR COALESCE(radar_source_keys::text, '') ILIKE '%36kr%'
-        OR COALESCE(sources::text, '') ILIKE '%36kr.com%'
       )`,
   `ALTER TABLE leads ADD COLUMN IF NOT EXISTS business_region VARCHAR(32)`,
   `ALTER TABLE leads ADD COLUMN IF NOT EXISTS business_region_source VARCHAR(64)`,
