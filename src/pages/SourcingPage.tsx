@@ -376,12 +376,12 @@ function LeadDetailPanel({
         </div>
       </section>}
 
-      <section className="rounded-xl border border-slate-200 p-4">
+      {competitors.length > 0 && <section className="rounded-xl border border-slate-200 p-4">
         <div className="flex items-center justify-between gap-3">
           <h3 className="text-sm font-semibold text-slate-800">竞对信息</h3>
           <span className="text-xs text-slate-400">仅展示有公开证据的直接竞对</span>
         </div>
-        {competitors.length > 0 ? <div className="mt-3 space-y-3">
+        <div className="mt-3 space-y-3">
           {competitors.map((item, index) => <div key={`${item.name}-${index}`} className="rounded-lg bg-slate-50 p-3">
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-2"><p className="text-sm font-medium text-slate-800">{item.name}</p><Badge tone="green">{item.matchType === 'substitute' ? '替代方案' : '直接竞对'}</Badge></div>
@@ -396,10 +396,8 @@ function LeadDetailPanel({
               {item.evidence && <p><span className="text-slate-400">证据：</span>{item.evidence}</p>}
             </div>
           </div>)}
-        </div> : <div className="mt-3 rounded-lg bg-slate-50 px-4 py-3 text-xs leading-5 text-slate-500">
-          暂未检索到能同时证明目标客户、使用场景和产品替代关系的可靠竞对。可点击底部“补充公开信息”重新检索；系统不会用同赛道公司凑数。
-        </div>}
-      </section>
+        </div>
+      </section>}
 
       {lead.scoring?.dimensions?.length ? <section className="rounded-xl border border-brand-200 bg-brand-50/40 p-4">
         <div className="flex items-center justify-between">
