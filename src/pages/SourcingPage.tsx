@@ -7,9 +7,8 @@ import { useAuthStore } from '../store/useAuthStore'
 import { apiPost, apiGet } from '../lib/api'
 import type { Lead, LeadScoreJobStatus, LeadScoring } from '../types'
 
-// “创投新闻”是 Radar 的内容大类，“36氪”是其中的具体来源渠道；二者都保留，
-// 便于查看全部创投媒体内容或只查看 36氪。
-const CHANNEL_OPTIONS: string[] = ['创投新闻', '36氪', '机构公众号', '高校公众号', '论文']
+// 当前创投新闻来源只有 36氪，因此仅展示具体有效渠道；其他创投媒体恢复后再加入。
+const CHANNEL_OPTIONS: string[] = ['36氪', '机构公众号', '高校公众号', '论文']
 const INDUSTRY_OPTIONS: string[] = [
   '人工智能', '具身智能/机器人', '半导体/芯片', '前沿技术', '产业升级', '先进制造',
   '企业服务', '医疗健康', '生物医药', '新能源', '新材料', '汽车出行',

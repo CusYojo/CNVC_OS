@@ -577,11 +577,15 @@ export async function listLeads(options: { page?: number; pageSize?: number; cha
   if (channel === '36氪') {
     conds.push(sql`(${leads.radarProfile}->>'channel' = '36氪' OR ${is36KrSource})`)
   } else if (channel === '创投新闻') {
-    // “创投新闻”按 Radar 内容大类查询；36氪仍可通过独立渠道进一步缩小范围。
-    // 兼容历史数据：旧记录可能只写了 channel，没有 sourceGroup。
+    // 前端渠道需要互斥：“创投新闻”只展示非 36氪的其他创投媒体。
+    // 同时检查 channel 和具体来源字段，兼容历史数据中 channel 尚未正确回填的记录。
     conds.push(sql`(
-      ${leads.radarProfile}->>'sourceGroup' = '创投新闻'
-      OR ${leads.radarProfile}->>'channel' = '创投新闻'
+      (
+        ${leads.radarProfile}->>'sourceGroup' = '创投新闻'
+        OR ${leads.radarProfile}->>'channel' = '创投新闻'
+      )
+      AND COALESCE(${leads.radarProfile}->>'channel', '') <> '36氪'
+      AND NOT ${is36KrSource}
     )`)
   } else if (channel) {
     conds.push(sql`${leads.radarProfile}->>'channel' = ${channel}`)
