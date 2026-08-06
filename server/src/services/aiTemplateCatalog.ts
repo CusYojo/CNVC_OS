@@ -2,6 +2,7 @@ import { existsSync, readdirSync } from 'node:fs'
 import path from 'node:path'
 import type { AiCustomTemplateAnalysis } from '../db/schema.js'
 import {
+  AI_DUE_DILIGENCE_SKILL_NAME,
   AI_TEMPLATE_DRIVEN_SKILL_NAME,
   type AiPptWorkflowSkillName,
 } from './aiSkillService.js'
@@ -140,7 +141,7 @@ export const AI_TEMPLATE_CATALOG: Record<AiBusinessTaskType, AiTemplateDefinitio
   },
   due_diligence_report: {
     type: 'due_diligence_report',
-    skillName: 'write-due-diligence-report',
+    skillName: AI_DUE_DILIGENCE_SKILL_NAME,
     label: '尽调报告',
     description: '由资深投资经理先研读项目资料，再综合公司尽调模板语料库生成内部尽调报告',
     outputFormat: 'docx',

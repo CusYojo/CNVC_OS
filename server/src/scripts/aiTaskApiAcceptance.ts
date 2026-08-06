@@ -263,7 +263,7 @@ async function main(cleanupState: AcceptanceCleanupState) {
     'generate-compliance-statement',
     'draft-investment-proposal',
     'GordenSuperPPTSkill',
-    'write-due-diligence-report',
+    'write-investment-dd-report',
     'answer-project-qa',
     'generate-document-from-template',
   ]
@@ -641,7 +641,7 @@ async function main(cleanupState: AcceptanceCleanupState) {
       type: 'due_diligence_report',
       parameters: { sourceCutoffDate: cutoff, outputFormat: 'DOCX', diligenceScope: '商业尽调' },
       formats: ['docx'],
-      skillName: 'write-due-diligence-report',
+      skillName: 'write-investment-dd-report',
     },
   ]
   for (const item of taskInputs) {

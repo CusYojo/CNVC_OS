@@ -4,6 +4,7 @@ import { lstat, readFile } from 'node:fs/promises'
 import path from 'node:path'
 
 export const AI_TEMPLATE_DRIVEN_SKILL_NAME = 'generate-document-from-template'
+export const AI_DUE_DILIGENCE_SKILL_NAME = 'write-investment-dd-report'
 
 export const AI_BUSINESS_SKILLS = [
   {
@@ -25,7 +26,7 @@ export const AI_BUSINESS_SKILLS = [
     taskType: 'investment_recommendation_ppt',
   },
   {
-    name: 'write-due-diligence-report',
+    name: AI_DUE_DILIGENCE_SKILL_NAME,
     label: '尽调报告',
     mode: 'document-task',
     taskType: 'due_diligence_report',

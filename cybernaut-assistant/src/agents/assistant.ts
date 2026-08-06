@@ -7,6 +7,7 @@ import { searchProjectDocs, collectIntel } from '../tools/advisor-tools.ts';
 import { publishFile } from '../tools/publish-file.ts';
 import { readPptx } from '../tools/read-pptx.ts';
 import advisorySkill from '../skills/investment-advisory/SKILL.md' with { type: 'skill' };
+import investmentDdReportSkill from '../../../server/workspace/.agents/skills/write-investment-dd-report/SKILL.md' with { type: 'skill' };
 
 export const route: AgentRouteHandler = async (_c, next) => next();
 
@@ -36,7 +37,7 @@ export default defineAgent(() => ({
   sandbox: local({ env: SANDBOX_ENV }),
   cwd: AGENT_WORKSPACE,
   tools: [searchProjectDocs, collectIntel, publishFile, readPptx],
-  skills: [advisorySkill],
+  skills: [advisorySkill, investmentDdReportSkill],
   instructions: [
     '你是浙江赛智伯乐股权投资管理有限公司投资中台的 AI 投研助手，是一个具备任务链能力的 agent：拿到任务后自己规划、自己调工具/技能/脚本、多步推进直到完成。',
     '',
@@ -46,6 +47,7 @@ export default defineAgent(() => ({
     '- collect_intel：用户想采集/抓取某公司公开情报、最新动态、融资新闻时调用，输入公司名。',
     '- publish_file：你在沙箱里生成的成品文件（PPT/图片/PDF/Word/Excel 等）前端看不到，生成交付物后必须调用本工具上传到 OSS，把返回的公开下载 URL 交给用户。',
     '【技能（Skills）】',
+    '- 用户明确指定 write-investment-dd-report 时，必须先激活同名技能，不能用 investment-advisory 或 write-due-diligence-report 替代。用户未点名技能但要求生成、改写或审计尽调报告时，也优先使用 write-investment-dd-report；investment-advisory 只用于普通投研问答与简要项目分析。',
     '- 你的工作目录 .agents/skills/ 下已装好投研与 Gorden PPT 技能，会以「Available Skills」形式提供给你。需要时先读对应 SKILL.md，再按其步骤执行。',
     '- PPT / 投委会材料 / 上会材料 / 演示文稿类需求，用 Gorden PPT 技能（端到端用 gorden-super-ppt；只出图片版用 gorden-image-ppt-gen；把图片还原成可编辑 pptx 用 gorden-image2pptx）。',
     '- 读用户上传的 PDF 用 pdf 技能、读 Excel/CSV 用 spreadsheet 技能（首次用按 SKILL.md 里的 uv 命令按需装依赖）。',

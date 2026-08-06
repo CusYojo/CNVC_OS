@@ -4,6 +4,7 @@ import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import {
   AI_BUSINESS_SKILLS,
+  AI_DUE_DILIGENCE_SKILL_NAME,
   AI_PPT_WORKFLOW_SKILLS,
   getAiSkillDirectory,
   getAiSkillRoot,
@@ -61,9 +62,11 @@ async function main() {
     const directory = getAiSkillDirectory(definition.name)
     const skillSource = await readFile(path.join(directory, 'SKILL.md'), 'utf8')
     const uiSource = await readFile(path.join(directory, 'agents', 'openai.yaml'), 'utf8')
-    const referenceName = definition.name === 'answer-project-qa'
-      ? 'qa-contract.md'
-      : 'output-contract.md'
+    const referenceName = definition.name === AI_DUE_DILIGENCE_SKILL_NAME
+      ? 'quality-gates.md'
+      : definition.name === 'answer-project-qa'
+        ? 'qa-contract.md'
+        : 'output-contract.md'
     const referenceSource = await readFile(path.join(directory, 'references', referenceName), 'utf8')
 
     assert(
@@ -110,16 +113,20 @@ async function main() {
     )
     assert(
       `${definition.label} 明确证据与内容去重`,
-      /重复|去重/.test(skillSource)
-        && /重复|去重|不得复述|只(?:能|列)/.test(referenceSource)
-        && /同一(?:事实|文件|数字|来源)/.test(`${skillSource}\n${referenceSource}`),
+      definition.name === AI_DUE_DILIGENCE_SKILL_NAME
+        ? /重复/.test(skillSource)
+          && /多个转载同一稿件/.test(loaded.referenceInstructions)
+        : /重复|去重/.test(skillSource)
+          && /重复|去重|不得复述|只(?:能|列)/.test(referenceSource)
+          && /同一(?:事实|文件|数字|来源)/.test(`${skillSource}\n${referenceSource}`),
       '证据分片去重、一个事实只出现一次',
     )
     assert(
       `${definition.label} 明确来源披露位置`,
-      definition.name === 'write-due-diligence-report'
-        ? /系统审计记录/.test(`${skillSource}\n${referenceSource}`)
-          && /不增加文末|不包含免责声明/.test(`${skillSource}\n${referenceSource}`)
+      definition.name === AI_DUE_DILIGENCE_SKILL_NAME
+        ? /内部工作文件保留/.test(`${skillSource}\n${loaded.referenceInstructions}`)
+          && /来源清单.*内部工作文件保留/.test(skillSource)
+          && /不写成正文免责声明/.test(skillSource)
         : definition.name === 'answer-project-qa'
           ? /系统审计/.test(`${skillSource}\n${referenceSource}`)
             && /不显示|不得显示/.test(`${skillSource}\n${referenceSource}`)
@@ -131,7 +138,7 @@ async function main() {
             )
         : /末尾|文尾|最后一页/.test(`${skillSource}\n${referenceSource}`)
           && /来源|引用资料/.test(referenceSource),
-      definition.name === 'write-due-diligence-report'
+      definition.name === AI_DUE_DILIGENCE_SKILL_NAME
         ? '尽调来源保存在系统审计记录，正式正文不显示文末来源'
         : definition.name === 'answer-project-qa'
           ? 'Q&A 来源保存在系统审计记录，正式 DOCX 不显示来源编号或引用资料'
@@ -387,13 +394,9 @@ async function main() {
     `${proposalTemplate.sections.length} 个章节`,
   )
   const diligenceTemplate = AI_TEMPLATE_CATALOG.due_diligence_report
-  const diligenceSkill = await loadAiSkill('write-due-diligence-report')
+  const diligenceSkill = await loadAiSkill(AI_DUE_DILIGENCE_SKILL_NAME)
   const diligenceCanonicalSpec = await readFile(
     path.resolve(process.cwd(), 'docs', '尽调报告', '尽调报告统一生成规范.md'),
-    'utf8',
-  )
-  const diligenceCoreSpec = await readFile(
-    path.join(root, 'write-due-diligence-report', 'references', 'core-spec.md'),
     'utf8',
   )
   const diligenceTemplateDirectory = path.resolve(process.cwd(), 'docs', '尽调报告')
@@ -422,63 +425,55 @@ async function main() {
     `${diligenceTemplate.referencePaths?.length ?? 0} 份`,
   )
   assert(
-    'AI-010 运行时加载核心规范、叙述风格与输出契约',
-    diligenceSkill.referenceNames.join(',') === 'references/core-spec.md,references/writing-style.md,references/output-contract.md'
-      && diligenceSkill.referenceInstructions.includes('尽调报告核心规范')
-      && diligenceSkill.referenceInstructions.includes('尽调报告叙述风格')
-      && diligenceSkill.referenceInstructions.includes('商业尽调报告输出契约')
-      && !existsSync(path.join(root, 'write-due-diligence-report', 'references', 'template-profile.md'))
-      && !existsSync(path.join(root, 'write-due-diligence-report', 'references', 'chapter-playbook.md')),
+    'AI-010 运行时加载字段、证据、文风、版式与质量门禁',
+    [
+      'references/evidence-policy.md',
+      'references/diligence-data-schema.md',
+      'references/public-research-protocol.md',
+      'references/source-sufficiency-routing.md',
+      'references/report-framework.md',
+      'references/human-investment-writing.md',
+      'references/deta-v5-template-contract.md',
+      'references/layout-spec.md',
+      'references/quality-gates.md',
+    ].every((referenceName) => diligenceSkill.referenceNames.includes(referenceName))
+      && diligenceSkill.referenceInstructions.includes('# Evidence Policy')
+      && diligenceSkill.referenceInstructions.includes('# Human Investment Writing Standard')
+      && diligenceSkill.referenceInstructions.includes('# Quality Gates'),
     diligenceSkill.referenceNames.join('、'),
   )
   const diligenceCoreTerms = [
-    '不得低于 90%',
-    '模板语料库',
-    '无单一主模板',
-    '逐份读取',
-    '事实底稿',
-    '1、投资概要',
-    '8、风险提示与对策',
+    '字段完整性门禁',
+    'diligence-data.json',
+    'evidence.json',
+    '字段级公开信息穷尽检索',
+    '投资概要',
+    '风险提示与对策',
     '投资结论及建议',
-    '30 个内容模块',
-    '11 个章组',
-    '每组最多 4 个模块',
-    '不少于 12 张有效表格',
-    '线索阶段',
-    '进入初筛',
-    '启动尽调',
     '项目资料',
-    '资料库',
-    '值得注意的是',
-    '直接关系到进入下一阶段',
     'Word',
-    'WPS',
-    '技术错误',
-    '正文不显示执行摘要',
-    '两字符首行缩进',
-    '不得引用未定义的数字样式 ID',
+    '逐页视觉检查',
   ]
+  const diligenceSkillContract = `${diligenceSkill.instructions}\n${diligenceSkill.referenceInstructions}`
   assert(
-    'AI-010 核心规范与项目统一规范保持关键规则一致',
-    diligenceCoreTerms.every((term) =>
-      diligenceCanonicalSpec.includes(term) && diligenceCoreSpec.includes(term)),
-    diligenceCoreTerms
-      .filter((term) =>
-        !diligenceCanonicalSpec.includes(term) || !diligenceCoreSpec.includes(term))
-      .join('、') || '项目研读 → 模板语料库 → 30 个模块 → 12 张以上有效表格 → Reviewer → Word/WPS 门禁',
+    'AI-010 新尽调 Skill 覆盖字段、证据、联网补全、固定结构和视觉验收',
+    diligenceCoreTerms.every((term) => diligenceSkillContract.includes(term))
+      && diligenceCanonicalSpec.includes('投资结论及建议'),
+    diligenceCoreTerms.filter((term) => !diligenceSkillContract.includes(term)).join('、')
+      || '字段数据层 → 证据台账 → 公开检索 → 投资判断 → DOCX 逐页验收',
   )
   assert(
-    'AI-010 Skill 强制先研读项目再综合模板语料库生成',
+    'AI-010 Skill 强制先锁定项目、建立证据与字段数据层再生成',
     [
-      '逐份研读项目资料',
-      '建立事实底稿',
-      'docs/尽调报告/',
-      '无单一主模板',
-      '不少于 12 张有效表格',
-      '不得出现内部项目阶段',
+      '锁定项目身份与尽调范围',
+      '先建立证据台账',
+      '建立投委会字段数据层',
+      '检索公开信息并解决冲突',
+      '围绕投资决策组织报告',
+      '执行结构审计和逐页视觉检查',
     ].every((term) =>
-      `${diligenceSkill.instructions}\n${diligenceSkill.referenceInstructions}`.includes(term)),
-    '逐份研读、模板语料库、30 个模块、表格密度和客户可见语言门禁',
+      diligenceSkillContract.includes(term)),
+    '项目身份 → 证据台账 → 字段数据层 → 公开补全 → 投资判断 → 逐页验收',
   )
   const aiTaskServiceSource = await readFile(
     path.resolve(process.cwd(), 'server', 'src', 'services', 'aiTaskService.ts'),
@@ -509,9 +504,9 @@ async function main() {
       && aiBusinessContentSource.includes("if (input.type === 'due_diligence_report')")
       && aiTaskServiceSource.includes('AI_DUE_DILIGENCE_CHAPTER_CONCURRENCY')
       && diligenceTemplate.sections.length === 30
-      && diligenceSkill.referenceInstructions.includes('30 个模块拆为 11 个章组生成')
-      && diligenceSkill.referenceInstructions.includes('只重试该章组'),
-    '11 个固定章组，最多三个并行；章组独立 JSON、独立重试，合并后形成内部综合判断并执行全篇 Reviewer',
+      && diligenceSkill.instructions.includes('投资概要')
+      && diligenceSkill.instructions.includes('投资结论及建议'),
+    '快捷任务仍按 11 个固定章组并发生成 30 个模块，新技能负责字段、证据、写作与视觉门禁',
   )
   const projectKnowledgeBriefSource = await readFile(
     path.resolve(
