@@ -31,6 +31,15 @@ test('keeps non-36Kr venture news in the generic news channel', () => {
   }), '创投新闻')
 })
 
+test('does not treat a secondary 36Kr evidence link as the primary channel', () => {
+  assert.equal(deriveRadarChannel({
+    source_group: '机构公众号',
+    source_key: 'meihua-ventures',
+    source_name: '梅花创投',
+    link: 'https://36kr.com/p/secondary-evidence',
+  }), '机构公众号')
+})
+
 test('paper classification takes precedence over source channel classification', () => {
   const candidate = {
     source_group: '论文',

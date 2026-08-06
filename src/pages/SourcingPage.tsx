@@ -7,7 +7,9 @@ import { useAuthStore } from '../store/useAuthStore'
 import { apiPost, apiGet } from '../lib/api'
 import type { Lead, LeadScoreJobStatus, LeadScoring } from '../types'
 
-const CHANNEL_OPTIONS: string[] = ['36氪', '机构公众号', '高校公众号', '创投新闻', '论文']
+// “创投新闻”是 Radar 的内容大类，“36氪”是其中的具体来源渠道；二者都保留，
+// 便于查看全部创投媒体内容或只查看 36氪。
+const CHANNEL_OPTIONS: string[] = ['创投新闻', '36氪', '机构公众号', '高校公众号', '论文']
 const INDUSTRY_OPTIONS: string[] = [
   '人工智能', '具身智能/机器人', '半导体/芯片', '前沿技术', '产业升级', '先进制造',
   '企业服务', '医疗健康', '生物医药', '新能源', '新材料', '汽车出行',
@@ -375,9 +377,12 @@ function LeadDetailPanel({
         </div>
       </section>}
 
-      {competitors.length > 0 && <section className="rounded-xl border border-slate-200 p-4">
-        <h3 className="text-sm font-semibold text-slate-800">竞对信息</h3>
-        <div className="mt-3 space-y-3">
+      <section className="rounded-xl border border-slate-200 p-4">
+        <div className="flex items-center justify-between gap-3">
+          <h3 className="text-sm font-semibold text-slate-800">竞对信息</h3>
+          <span className="text-xs text-slate-400">仅展示有公开证据的直接竞对</span>
+        </div>
+        {competitors.length > 0 ? <div className="mt-3 space-y-3">
           {competitors.map((item, index) => <div key={`${item.name}-${index}`} className="rounded-lg bg-slate-50 p-3">
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-2"><p className="text-sm font-medium text-slate-800">{item.name}</p><Badge tone="green">{item.matchType === 'substitute' ? '替代方案' : '直接竞对'}</Badge></div>
@@ -392,8 +397,10 @@ function LeadDetailPanel({
               {item.evidence && <p><span className="text-slate-400">证据：</span>{item.evidence}</p>}
             </div>
           </div>)}
-        </div>
-      </section>}
+        </div> : <div className="mt-3 rounded-lg bg-slate-50 px-4 py-3 text-xs leading-5 text-slate-500">
+          暂未检索到能同时证明目标客户、使用场景和产品替代关系的可靠竞对。可点击底部“补充公开信息”重新检索；系统不会用同赛道公司凑数。
+        </div>}
+      </section>
 
       {lead.scoring?.dimensions?.length ? <section className="rounded-xl border border-brand-200 bg-brand-50/40 p-4">
         <div className="flex items-center justify-between">
@@ -843,12 +850,17 @@ export function SourcingPage() {
 
       <div ref={tableRef}>
         <Card className="overflow-hidden">
-        <DataTable headers={['主体名称 / 项目', '行业 / 地区标签', '估值', 'AI 综合评分', '入池时间', '详情']}>
+        <DataTable headers={['主体名称 / 项目', '行业 / 地区标签', '融资 / 估值', 'AI 综合评分', '入池时间', '详情']}>
           {filtered.map((lead) => {
             const { companySubject } = getLeadIdentity(lead)
             const funding = getLeadFundingDisplay(lead)
             const valuationValue = lead.valuationDisplay?.value ?? funding.valuation
-            const valuationStatus = lead.valuationDisplay?.status ?? (valuationValue ? 'available' : lead.analysisStatus === 'pending' ? 'pending' : 'unavailable')
+            const financingAmount = funding.amount
+            const fundingValue = valuationValue ?? financingAmount
+            const fundingValueLabel = valuationValue ? '估值' : financingAmount ? '融资金额' : ''
+            const fundingStatus = fundingValue
+              ? 'available'
+              : lead.valuationDisplay?.status ?? (lead.analysisStatus === 'pending' ? 'pending' : 'unavailable')
             const scoreRefreshing = scoringLeadIds.includes(lead.id) || isScoreJobActive(lead.scoreJob?.status)
             const industryTags = lead.businessTags?.industry?.length ? lead.businessTags.industry : [lead.industry || '待确认']
             const regionTags = lead.businessTags?.region?.length ? lead.businessTags.region : [lead.region || '待确认']
@@ -856,10 +868,10 @@ export function SourcingPage() {
               <TableCell><button className="min-w-[240px] text-left" onClick={async () => { setSelected(lead); setDetailTab('overview'); const d = await fetchLeadDetail(lead.id); if (d) setSelected(d) }}><span className="block max-w-[260px] truncate font-medium text-slate-800 hover:text-brand-700" title={companySubject}>{companySubject}</span></button></TableCell>
               <TableCell><div className="flex max-w-[240px] flex-wrap gap-1">{industryTags.slice(0, 2).map((tag) => <Badge key={`industry-${tag}`} tone="blue">{tag}</Badge>)}{regionTags.slice(0, 1).map((tag) => <span key={`region-${tag}`} title={tag === '待确认' ? '暂无可靠地区证据' : [lead.regionSource, lead.regionConfidence && `可信度${lead.regionConfidence}`].filter(Boolean).join(' · ')}><Badge tone={tag === '待确认' ? 'slate' : 'green'}>{tag}</Badge></span>)}</div></TableCell>
               <TableCell><div className="max-w-[200px]">
-                {valuationStatus === 'available' && valuationValue
-                  ? <p className="truncate font-medium text-slate-700" title={valuationValue}>{valuationValue}</p>
-                  : valuationStatus === 'pending' ? <Badge tone="amber">待核验</Badge> : <span className="text-xs text-slate-400">暂无公开估值</span>}
-                {funding.round && <p className="mt-1 truncate text-xs text-slate-400">{funding.round}</p>}
+                {fundingStatus === 'available' && fundingValue
+                  ? <p className="truncate font-medium text-slate-700" title={`${fundingValueLabel}：${fundingValue}`}>{fundingValue}</p>
+                  : fundingStatus === 'pending' ? <Badge tone="amber">待核验</Badge> : <span className="text-xs text-slate-400">暂无公开融资或估值</span>}
+                {(fundingValueLabel || funding.round) && <p className="mt-1 truncate text-xs text-slate-400">{[fundingValueLabel, funding.round].filter(Boolean).join(' · ')}</p>}
               </div></TableCell>
               <TableCell>{scoreRefreshing
                 ? <Badge tone={lead.scoreJob?.status === 'retrying' ? 'amber' : 'blue'}>{scoreJobLabel(lead.scoreJob?.status)}</Badge>

@@ -573,15 +573,16 @@ export async function listLeads(options: { page?: number; pageSize?: number; cha
   const is36KrSource = sql`(
     COALESCE(${leads.radarProfile}->>'sourceName', '') ILIKE '%36氪%'
     OR COALESCE(${leads.radarProfile}->>'radarSourceKey', '') ILIKE '%36kr%'
-    OR COALESCE(${leads.source}, '') ILIKE '%36氪%'
-    OR COALESCE(${leads.radarSourceKeys}::text, '') ILIKE '%36kr%'
-    OR COALESCE(${leads.sources}::text, '') ILIKE '%36kr.com%'
   )`
   if (channel === '36氪') {
     conds.push(sql`(${leads.radarProfile}->>'channel' = '36氪' OR ${is36KrSource})`)
   } else if (channel === '创投新闻') {
-    // 36氪属于独立渠道，不能因 Radar 的内容大类再次出现在“创投新闻”中。
-    conds.push(sql`(${leads.radarProfile}->>'channel' = '创投新闻' AND NOT ${is36KrSource})`)
+    // “创投新闻”按 Radar 内容大类查询；36氪仍可通过独立渠道进一步缩小范围。
+    // 兼容历史数据：旧记录可能只写了 channel，没有 sourceGroup。
+    conds.push(sql`(
+      ${leads.radarProfile}->>'sourceGroup' = '创投新闻'
+      OR ${leads.radarProfile}->>'channel' = '创投新闻'
+    )`)
   } else if (channel) {
     conds.push(sql`${leads.radarProfile}->>'channel' = ${channel}`)
   }

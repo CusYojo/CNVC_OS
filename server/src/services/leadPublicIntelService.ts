@@ -21,9 +21,21 @@ export interface PublicIntelShareholder {
 
 export interface PublicIntelCompetitor {
   name: string
-  positioning: string
-  comparison: string
+  is_self?: boolean
+  tech: string
+  product: string
+  funding: string
+  differentiation: string
+  matchType: 'direct' | 'substitute'
+  sameTargetUser: boolean
+  sameUseCase: boolean
+  sameDeliverable: boolean
+  comparisonBasis: string
+  evidence: string
+  sourceRef: string
   sourceUrl: string
+  confidence: number
+  verificationStatus: 'evidence-backed'
 }
 
 export interface PublicIntelResult {
@@ -65,6 +77,7 @@ export function meaningfulPublicIntelText(value: unknown): string {
   const text = String(value).trim()
   if (!text || PLACEHOLDERS.has(text)) return ''
   if (/^(?:暂?未|尚未|无法|通常不).*(?:披露|公开|获取|识别|核验|确认|查询)/.test(text)) return ''
+  if (/(?:未提及|没有提及|证据不足|无法判断)[。.]?$/.test(text)) return ''
   return text
 }
 
@@ -167,13 +180,36 @@ function mergeCompetitors(existing: unknown, incoming: PublicIntelCompetitor[]) 
     .map((item) => ({
       name: meaningfulPublicIntelText(item.name),
       is_self: false,
-      tech: '',
-      product: meaningfulPublicIntelText(item.positioning),
-      funding: '',
-      differentiation: meaningfulPublicIntelText(item.comparison),
+      tech: meaningfulPublicIntelText(item.tech),
+      product: meaningfulPublicIntelText(item.product),
+      funding: meaningfulPublicIntelText(item.funding),
+      differentiation: meaningfulPublicIntelText(item.differentiation),
+      matchType: item.matchType,
+      sameTargetUser: item.sameTargetUser === true,
+      sameUseCase: item.sameUseCase === true,
+      sameDeliverable: item.sameDeliverable === true,
+      comparisonBasis: meaningfulPublicIntelText(item.comparisonBasis),
+      evidence: meaningfulPublicIntelText(item.evidence),
+      sourceRef: meaningfulPublicIntelText(item.sourceRef),
       sourceUrl: meaningfulPublicIntelText(item.sourceUrl),
+      confidence: Number(item.confidence),
+      verificationStatus: item.verificationStatus,
     }))
-    .filter((item) => Boolean(item.name && item.sourceUrl))
+    // 竞对是高风险事实：即使上游已校验，服务端写库前仍执行一次信任边界检查。
+    .filter((item) => Boolean(
+      item.name
+      && item.verificationStatus === 'evidence-backed'
+      && ['direct', 'substitute'].includes(item.matchType)
+      && item.sameTargetUser
+      && item.sameUseCase
+      && item.sameDeliverable
+      && item.comparisonBasis
+      && item.evidence
+      && item.sourceRef
+      && item.sourceUrl
+      && Number.isFinite(item.confidence)
+      && item.confidence >= 0.8
+    ))
   const current = objectArray(existing)
     .filter((item) => Boolean(meaningfulPublicIntelText(item.name)))
   return dedupeObjects([...researched, ...current], (item) => meaningfulPublicIntelText(item.name).toLocaleLowerCase())

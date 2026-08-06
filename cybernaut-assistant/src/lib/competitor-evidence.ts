@@ -30,9 +30,9 @@ function normalized(value: unknown) {
     .replace(/[\p{P}\p{S}\s]+/gu, '')
 }
 
-function occursInCorpus(corpus: string, value: string) {
+function occursInCorpus(corpus: string, value: string, minLength = 4) {
   const needle = normalized(value)
-  return needle.length >= 4 && normalized(corpus).includes(needle)
+  return needle.length >= minLength && normalized(corpus).includes(needle)
 }
 
 /**
@@ -67,7 +67,7 @@ export function verifyCompetitorEvidence(
     if (!Number.isFinite(row.confidence) || row.confidence < 0.8) return false
     // comparisonBasis 必须包含实质竞争关系，不能仅是行业分类
     if (isWeakComparisonBasis(normalized(row.comparisonBasis))) return false
-    if (!occursInCorpus(corpus, row.evidence) || !occursInCorpus(row.evidence, row.name)) return false
+    if (!occursInCorpus(corpus, row.evidence) || !occursInCorpus(row.evidence, row.name, 2)) return false
     if (!occursInCorpus(corpus, row.sourceRef)) return false
     if (row.sourceUrl && !corpus.includes(row.sourceUrl)) return false
     seen.add(nameKey)

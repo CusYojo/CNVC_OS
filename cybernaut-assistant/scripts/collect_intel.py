@@ -87,6 +87,10 @@ def main():
         f"{exact_company} 注册资本 法定代表人 成立时间 工商",
         f"{exact_company} 融资 轮次 投资方 估值",
         f"{exact_company} 核心团队 产品 客户 合作 最新动态",
+        # 竞对必须从明确提及当前主体的公开页面中提取。这里单独检索“竞品/替代/对标”关系，
+        # 后续仍由模型逐字引用摘要并经过确定性证据校验；同赛道公司不会直接入库。
+        f"{exact_company} \"竞争对手\" 竞品",
+        f"{exact_company} VS 对比 替代产品",
     ]
     general_rule_terms = re.compile(
         r"行业政策|产业政策|市场趋势|投资限制|返投|关联交易|投资方向|投资配置|"

@@ -29,6 +29,19 @@ test('accepts only a project-level competitor backed by exact input evidence', (
   assert.equal(result[0].verificationStatus, 'evidence-backed')
 })
 
+test('accepts a short brand name when the exact name appears in evidence', () => {
+  const shortBrand = {
+    ...directCompetitor,
+    name: '宇树',
+    evidence: '宇树面向机器人客户提供具身智能机器人产品，与本项目争夺同类采购订单。',
+  }
+  const corpus = `信息来源：项目访谈纪要.md｜/knowledge/project-interview\n${shortBrand.evidence}`
+  const result = verifyCompetitorEvidence([shortBrand], corpus, 'project')
+
+  assert.equal(result.length, 1)
+  assert.equal(result[0].name, '宇树')
+})
+
 test('rejects a same-industry company without direct competition evidence', () => {
   const sameIndustry = {
     ...directCompetitor,

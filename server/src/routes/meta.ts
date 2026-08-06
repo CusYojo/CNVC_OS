@@ -38,11 +38,32 @@ import { deriveRadarChannel, isRadarPaperCandidate } from '../services/radarChan
 
 export const metaRouter = Router()
 
-async function collectPublicIntel(company: string): Promise<PublicIntelResult> {
+type PublicIntelContextEvidence = { title: string; snippet: string; url: string }
+
+function publicIntelContextEvidence(value: unknown): PublicIntelContextEvidence[] {
+  if (!Array.isArray(value)) return []
+  return value.flatMap((item) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return []
+    const source = item as Record<string, unknown>
+    const url = meaningfulPublicIntelText(source.url)
+    const snippet = meaningfulPublicIntelText(source.excerpt || source.summary)
+    if (!url || !snippet) return []
+    return [{
+      title: meaningfulPublicIntelText(source.title) || '线索池已有来源',
+      snippet: snippet.slice(0, 1200),
+      url,
+    }]
+  }).slice(0, 20)
+}
+
+async function collectPublicIntel(
+  company: string,
+  contextEvidence: PublicIntelContextEvidence[] = [],
+): Promise<PublicIntelResult> {
   const resp = await fetch(`${FLUE_BASE_URL}/workflows/intel-collect?wait=result`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ company }),
+    body: JSON.stringify({ company, contextEvidence }),
     signal: AbortSignal.timeout(180000),
   })
   if (!resp.ok) throw new Error(`情报采集服务 ${resp.status}: ${(await resp.text()).slice(0, 200)}`)
@@ -140,7 +161,7 @@ metaRouter.post('/leads/:id/enrich-public-info', async (req: AuthedRequest, res,
       || meaningfulPublicIntelText(lead.name)
     if (!company) return res.status(400).json({ code: 'INVALID_SUBJECT', message: '公司主体名称尚未确认，无法检索公开信息' })
 
-    const intel = await collectPublicIntel(company)
+    const intel = await collectPublicIntel(company, publicIntelContextEvidence(lead.sources))
     await mergeLeadPublicIntel(leadId, intel, req.user!.uid)
     const updated = await getLeadById(leadId)
     res.json({ lead: updated, intel })
