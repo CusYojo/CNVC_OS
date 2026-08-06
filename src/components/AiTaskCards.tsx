@@ -11,6 +11,7 @@ import {
   Square,
 } from 'lucide-react'
 import { apiGet } from '../lib/api'
+import { shouldHideAiTaskFailureDiagnostics } from '../lib/aiTaskPresentation'
 import { authedFetch } from '../store/useAuthStore'
 import { Button, ProgressBar } from './ui'
 
@@ -192,6 +193,7 @@ function TaskCard({
       : '资料读取与引用整理中'
   const templatePreparationFailed = task.status === 'failed'
     && task.parameters._templatePreparationPending === true
+  const hideFailureDiagnostics = shouldHideAiTaskFailureDiagnostics(task)
   const genericFailureMessage = '文档尚未完成，系统已保留本次生成参数，可继续生成。'
   const failureMessage = templatePreparationFailed
     ? task.errorMessage || '模板分析未完成，请重新上传模板。'
@@ -277,7 +279,7 @@ function TaskCard({
         </div>
       )}
 
-      {task.status === 'failed' && (
+      {task.status === 'failed' && !hideFailureDiagnostics && (
         <div className="mt-3 rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-xs text-amber-800">
           <p>{failureMessage}</p>
           {failureStage && <p className="mt-1 text-[10px] text-amber-700">停止阶段：{failureStage}</p>}
