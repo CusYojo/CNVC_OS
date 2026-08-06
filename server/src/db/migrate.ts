@@ -183,6 +183,16 @@ const STATEMENTS = [
   `ALTER TABLE leads ADD COLUMN IF NOT EXISTS scoring JSONB`,
   `ALTER TABLE leads ADD COLUMN IF NOT EXISTS radar_profile JSONB`,
   `ALTER TABLE leads ADD COLUMN IF NOT EXISTS radar_source_keys JSONB NOT NULL DEFAULT '[]'::jsonb`,
+  `UPDATE leads
+    SET radar_profile = jsonb_set(COALESCE(radar_profile, '{}'::jsonb), '{channel}', to_jsonb('36氪'::text), true)
+    WHERE COALESCE(radar_profile->>'channel', '') <> '36氪'
+      AND (
+        COALESCE(radar_profile->>'sourceName', '') ILIKE '%36氪%'
+        OR COALESCE(radar_profile->>'radarSourceKey', '') ILIKE '%36kr%'
+        OR COALESCE(source, '') ILIKE '%36氪%'
+        OR COALESCE(radar_source_keys::text, '') ILIKE '%36kr%'
+        OR COALESCE(sources::text, '') ILIKE '%36kr.com%'
+      )`,
   `ALTER TABLE leads ADD COLUMN IF NOT EXISTS business_region VARCHAR(32)`,
   `ALTER TABLE leads ADD COLUMN IF NOT EXISTS business_region_source VARCHAR(64)`,
   `ALTER TABLE leads ADD COLUMN IF NOT EXISTS business_region_confidence VARCHAR(8)`,

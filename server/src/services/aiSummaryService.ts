@@ -557,8 +557,9 @@ export async function listLeads(options: { page?: number; pageSize?: number; cha
   const page = Math.max(1, Math.floor(options.page ?? 1))
   const pageSize = Math.min(100, Math.max(1, Math.floor(options.pageSize ?? 50)))
   const offset = (page - 1) * pageSize
-  // 渠道过滤:服务端按 radar_profile->>'channel' 精确匹配(雷达数据的真实渠道值正好是筛选器那 5 个选项)
-  // 空值 = 不过滤;非雷达数据(36氪/BP)没有 radar channel,选任一渠道时会被排除(符合预期:那些不属于这 5 类)
+  // 渠道过滤:通常按 radar_profile.channel 精确匹配。36氪历史数据曾被 source_group
+  // 错标为“创投新闻”，查询时同时依据具体来源字段识别，避免回填前筛选漏数。
+  // 空值 = 不过滤；没有 radar channel 且也无法从来源识别的非雷达数据会被排除。
   const channel = (options.channel ?? '').trim()
   // 关键词全库跨字段模糊检索(Postgres ILIKE 大小写不敏感);source 二级标签按 sourceName 模糊匹配。
   // channel/keyword/source 可叠加,均进 whereClause 用 and() 合并。
@@ -569,7 +570,21 @@ export async function listLeads(options: { page?: number; pageSize?: number; cha
   const conds: ReturnType<typeof sql>[] = [visiblePublicLeadExpr]
   // 已入库线索全部可见；未完成 AI 分析的记录由 enrichLead 标为 pending。
   // 同步和 AI 评分解耦，避免“已经同步但列表看不到”。
-  if (channel) conds.push(sql`${leads.radarProfile}->>'channel' = ${channel}`)
+  const is36KrSource = sql`(
+    COALESCE(${leads.radarProfile}->>'sourceName', '') ILIKE '%36氪%'
+    OR COALESCE(${leads.radarProfile}->>'radarSourceKey', '') ILIKE '%36kr%'
+    OR COALESCE(${leads.source}, '') ILIKE '%36氪%'
+    OR COALESCE(${leads.radarSourceKeys}::text, '') ILIKE '%36kr%'
+    OR COALESCE(${leads.sources}::text, '') ILIKE '%36kr.com%'
+  )`
+  if (channel === '36氪') {
+    conds.push(sql`(${leads.radarProfile}->>'channel' = '36氪' OR ${is36KrSource})`)
+  } else if (channel === '创投新闻') {
+    // 36氪属于独立渠道，不能因 Radar 的内容大类再次出现在“创投新闻”中。
+    conds.push(sql`(${leads.radarProfile}->>'channel' = '创投新闻' AND NOT ${is36KrSource})`)
+  } else if (channel) {
+    conds.push(sql`${leads.radarProfile}->>'channel' = ${channel}`)
+  }
   if (source) {
     // source 可为逗号分隔的多个关键词(前端二级标签把一个标准机构映射到多个杂乱账号名),任一命中即算该机构
     const srcKws = source.split(',').map((x) => x.trim()).filter(Boolean)

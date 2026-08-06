@@ -34,6 +34,7 @@ import {
 } from '../services/radarSyncService.js'
 import { resolveLeadBusinessRegion } from '../services/leadRegion.js'
 import { reviewRadarCandidatesWithAi } from '../services/radarAiReviewService.js'
+import { deriveRadarChannel, isRadarPaperCandidate } from '../services/radarChannel.js'
 
 export const metaRouter = Router()
 
@@ -371,26 +372,44 @@ metaRouter.post('/leads/sync-radar', async (req: AuthedRequest, res, next) => {
     let aiRejected = 0
     let aiReview = 0
     let aiFailed = 0
+    let aiDeferred = 0
     const createdIds: string[] = []
     const scoringLeadIds = new Set<string>()
     const actorUserId = req.user?.uid
     const splitList = (s: unknown, n = 6) => (s ? String(s).split(/；|;|\n/).map((x) => x.trim()).filter(Boolean).slice(0, n) : [])
-    const subjectReviews = await reviewRadarCandidatesWithAi(items)
+    // 雷达已明确过滤的候选无需再调用大模型；只审查仍有入池可能的数据，
+    // 避免低价值论文等占用网关资源并拖慢最新融资线索。
+    const reviewableEntries = items
+      .map((item, index) => ({ item, index }))
+      .filter(({ item }) => item.decision_label !== '过滤')
+    const reviewedCandidates = await reviewRadarCandidatesWithAi(
+      reviewableEntries.map(({ item }) => item),
+    )
+    const subjectReviews = new Map(
+      reviewableEntries.map(({ index }, reviewIndex) => [index, reviewedCandidates[reviewIndex]]),
+    )
     for (let itemIndex = 0; itemIndex < items.length; itemIndex += 1) {
       const it = items[itemIndex]
-      const subjectReview = subjectReviews[itemIndex]
-      if (subjectReview?.status === 'accepted') aiAccepted += 1
-      else if (subjectReview?.status === 'rejected') aiRejected += 1
-      else if (subjectReview?.status === 'review') aiReview += 1
-      else aiFailed += 1
-      if (subjectReview?.status !== 'accepted') {
+      // 雷达服务自身的过滤标记（如论文综合分低于阈值、无投资信息等），
+      // 与 AI 主体审查互补——AI 审查只管“名称是否可识别”，雷达过滤只管“是否有投资价值”。
+      if (it.decision_label === '过滤') {
         filteredOut += 1
         continue
       }
 
-      // 雷电服务自身的过滤标记（如论文综合分低于阈值、无投资信息等），
-      // 与 AI 主体审查互补——AI 审查只管“名称是否可识别”，雷电过滤只管“是否有投资价值”。
-      if (it.decision_label === '过滤') {
+      const subjectReview = subjectReviews.get(itemIndex)
+      if (subjectReview?.status === 'accepted') aiAccepted += 1
+      else if (subjectReview?.status === 'rejected') aiRejected += 1
+      else if (subjectReview?.status === 'review') aiReview += 1
+      else aiFailed += 1
+
+      // 模型失败或要求人工复核不是业务拒绝。候选仍保留在雷达源中，且 failed
+      // 缓存不会被复用，下一次同步会自动重试。
+      if (!subjectReview || subjectReview.status === 'failed' || subjectReview.status === 'review') {
+        aiDeferred += 1
+        continue
+      }
+      if (subjectReview.status === 'rejected') {
         filteredOut += 1
         continue
       }
@@ -401,16 +420,13 @@ metaRouter.post('/leads/sync-radar', async (req: AuthedRequest, res, next) => {
         continue
       }
       const prof = it.project_profile || {}
-      const sg = String(it.source_group || '')
-      const paperSourceText = [it.source, it.source_key, it.source_type, it.source_name, sg].join(' ')
-      const isPaper = sg === '论文' || /arxiv/i.test(paperSourceText)
+      const isPaper = isRadarPaperCandidate(it)
       const paperTitleZh = isPaper ? meaningfulRadarText(subjectReview.translatedTitle) : ''
       const paperSummaryZh = isPaper ? meaningfulRadarText(subjectReview.translatedSummary) : ''
       const publisherNames = [it.source_name, it.school, it.account_name, it.wx_name]
         .map((value: unknown) => meaningfulRadarText(value))
         .filter(Boolean)
-      const channel = isPaper ? '论文'
-        : (sg || '其他')
+      const channel = deriveRadarChannel(it)
       const fundingRound = meaningfulRadarText(prof.project_round)
       const financingAmount = meaningfulRadarText(prof.financing_amount)
       const latestValuation = meaningfulRadarText(prof.latest_valuation)
@@ -600,6 +616,7 @@ metaRouter.post('/leads/sync-radar', async (req: AuthedRequest, res, next) => {
     res.json({
       ok: true,
       fetched: items.length,
+      reviewed: reviewableEntries.length,
       candidateTotal,
       pagesFetched,
       nextCursor,
@@ -608,11 +625,12 @@ metaRouter.post('/leads/sync-radar', async (req: AuthedRequest, res, next) => {
       created,
       updated,
       unchanged,
-      skipped: unchanged + filteredOut + invalid,
+      skipped: unchanged + filteredOut + aiDeferred + invalid,
       duplicates,
       batchDuplicates,
       databaseDuplicates,
       filtered: filteredOut,
+      deferred: aiDeferred,
       invalid,
       aiAccepted,
       aiRejected,

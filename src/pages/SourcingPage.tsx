@@ -573,6 +573,7 @@ export function SourcingPage() {
       const r = await apiPost<{
         ok: boolean
         fetched: number
+        reviewed: number
         candidateTotal: number
         pagesFetched: number
         backfillComplete: boolean | null
@@ -584,6 +585,7 @@ export function SourcingPage() {
         batchDuplicates: number
         databaseDuplicates: number
         filtered: number
+        deferred: number
         invalid: number
         aiAccepted: number
         aiRejected: number
@@ -614,7 +616,7 @@ export function SourcingPage() {
         ? `，重复 ${r.duplicates} 条（本批 ${r.batchDuplicates}，库内历史 ${r.databaseDuplicates}）`
         : ''
       showToast(
-        `雷达同步完成：本轮 AI 审查 ${r.fetched} 条，通过 ${r.aiAccepted} 条，拒绝 ${r.aiRejected} 条，待复核 ${r.aiReview} 条${r.aiFailed ? `，审查失败 ${r.aiFailed} 条（未入池，可重试）` : ''}；新增 ${r.created} 条，更新 ${r.updated} 条，无变化 ${r.unchanged} 条${duplicateDetail}${r.invalid ? `，无效 ${r.invalid} 条` : ''}${scoringIds.length ? `；${scoringIds.length} 条 AI 综合评分正在更新` : ''}；列表与统计已刷新`,
+        `雷达同步完成：抓取 ${r.fetched} 条，AI 审查 ${r.reviewed} 条，通过 ${r.aiAccepted} 条，拒绝 ${r.aiRejected} 条，待复核 ${r.aiReview} 条${r.aiFailed ? `，审查失败 ${r.aiFailed} 条（保留待重试）` : ''}；新增 ${r.created} 条，更新 ${r.updated} 条，无变化 ${r.unchanged} 条${duplicateDetail}${r.invalid ? `，无效 ${r.invalid} 条` : ''}${scoringIds.length ? `；${scoringIds.length} 条 AI 综合评分正在更新` : ''}；列表与统计已刷新`,
         'success',
       )
     } catch (err) {

@@ -29,12 +29,14 @@ if (!response.ok) {
 const result = await response.json()
 console.log(new Date().toISOString(), JSON.stringify({
   fetched: result.fetched ?? 0,
+  reviewed: result.reviewed ?? 0,
   pagesFetched: result.pagesFetched ?? 0,
   candidateTotal: result.candidateTotal ?? 0,
   created: result.created ?? 0,
   updated: result.updated ?? 0,
   unchanged: result.unchanged ?? 0,
   filtered: result.filtered ?? 0,
+  deferred: result.deferred ?? 0,
   invalid: result.invalid ?? 0,
   backfillComplete: result.backfillComplete ?? null,
 }))
