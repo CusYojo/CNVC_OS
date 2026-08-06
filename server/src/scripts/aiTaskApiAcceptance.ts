@@ -264,7 +264,7 @@ async function main(cleanupState: AcceptanceCleanupState) {
     'draft-investment-proposal',
     'GordenSuperPPTSkill',
     'write-investment-dd-report',
-    'answer-project-qa',
+    'generate-project-qa-report',
     'generate-document-from-template',
   ]
   assert(
@@ -352,16 +352,16 @@ async function main(cleanupState: AcceptanceCleanupState) {
   )
   assert(
     'AI-011 确定性记录 Q&A Skill 版本',
-    qaAnswer.skillName === 'answer-project-qa'
+    qaAnswer.skillName === 'generate-project-qa-report'
       && /^sha256-[a-f0-9]{12}$/.test(qaAnswer.skillVersion)
       && /^[a-f0-9]{64}$/.test(qaAnswer.skillSha256),
     `${qaAnswer.skillName}:${qaAnswer.skillVersion}`,
   )
   assert(
     'AI-011 记录 docs Q&A 模板版本',
-    qaAnswer.templateVersion === 'qa-core-rules-20260728-v9-model-network-research'
+    qaAnswer.templateVersion === 'generate-project-qa-report-20260806-v1'
       && qaAnswer.referenceTemplates.length === 5
-      && qaAnswer.referenceTemplates.every((item) => item.toLowerCase().endsWith('.pdf')),
+      && qaAnswer.referenceTemplates.every((item) => item.toLowerCase().endsWith('.md')),
     `${qaAnswer.templateVersion} / ${qaAnswer.referenceTemplates.join('、')}`,
   )
   assert(
@@ -381,8 +381,8 @@ async function main(cleanupState: AcceptanceCleanupState) {
   )
   assert(
     'AI-011 Q&A 保留责任声明',
-    qaAnswer.disclaimer.includes('仅供内部研究与辅助判断')
-      && qaAnswer.disclaimer.includes('不构成正式法律意见')
+    qaAnswer.disclaimer.includes('仅供投资团队内部分析与后续核验')
+      && qaAnswer.disclaimer.includes('不构成正式法律、财务意见')
       && qaAnswer.disclaimer.includes('最终投资决策'),
     qaAnswer.disclaimer,
   )
@@ -426,8 +426,9 @@ async function main(cleanupState: AcceptanceCleanupState) {
     !('artifacts' in qaAnswerRecord)
       && !('outputFormat' in qaAnswerRecord)
       && !('downloadUrl' in qaAnswerRecord)
-      && qaAnswer.referenceTemplates.every((item) => item.toLowerCase().endsWith('.pdf')),
-    '兼容结构化单题回答 / 5 份 PDF 输入模板 / 无 artifacts',
+      && qaAnswer.referenceTemplates.length === 5
+      && qaAnswer.referenceTemplates.every((item) => item.toLowerCase().endsWith('.md')),
+    '兼容结构化单题回答 / generate-project-qa-report 的 5 份 Markdown 规范 / 无 artifacts',
   )
 
   const qaTaskKey = `accept-project-qa-${suffix}`
@@ -446,7 +447,7 @@ async function main(cleanupState: AcceptanceCleanupState) {
       idempotencyKey: qaTaskKey,
     }),
   }, adminToken, 202)
-  const qaTask = await pollTask(adminToken, qaTaskCreated.id, 180_000)
+  const qaTask = await pollTask(adminToken, qaTaskCreated.id, 360_000)
   assert(
     'AI-011 正式 Q&A 文档任务完成',
     qaTask.status === 'succeeded' && qaTask.progress === 100,
@@ -461,13 +462,16 @@ async function main(cleanupState: AcceptanceCleanupState) {
   assert(
     'AI-011 记录 Generator、Reviewer、模板和 Skill 审计信息',
     qaTask.artifacts.every((artifact) =>
-      artifact.metadata?.skillName === 'answer-project-qa'
-      && artifact.metadata?.questionCount === 7
+      artifact.metadata?.skillName === 'generate-project-qa-report'
+      && artifact.metadata?.questionCount === 8
       && artifact.metadata?.categoryCount === 15
       && Boolean(artifact.metadata?.templateCorpusSha256)
       && Boolean(artifact.metadata?.reviewerChecks)
-      && artifact.metadata?.evidencePolicy === 'project_knowledge_primary'
-      && artifact.metadata?.webResearchAttemptedQueries === undefined
+      && artifact.metadata?.evidencePolicy === 'project_knowledge_primary_model_network_supplement'
+      && artifact.metadata?.skillExecutionMode === 'native-markdown-validated-docx-rendered'
+      && (artifact.metadata?.markdownValidation as { errors?: number } | undefined)?.errors === 0
+      && (artifact.metadata?.visualQa as { renderedEveryPage?: boolean } | undefined)?.renderedEveryPage === true
+      && (artifact.metadata?.templateFidelity as { passed?: boolean } | undefined)?.passed === true
       && artifact.metadata?.visibleReferencesIncluded === false
       && artifact.metadata?.visibleReviewerIncluded === false
       && Array.isArray(artifact.metadata?.downloadableFormats)
@@ -476,7 +480,7 @@ async function main(cleanupState: AcceptanceCleanupState) {
   )
 
   if (acceptanceScope === 'qa') {
-    await outputReport('Q&A 专项验收覆盖兼容单题接口及正式 project_qa 文档任务，验证项目资料库证据、内部审阅与 DOCX 单产物。')
+    await outputReport('Q&A 专项验收覆盖兼容单题接口及正式 project_qa 文档任务，验证 generate-project-qa-report、内部证据审阅与 DOCX 单产物。')
     return
   }
   }

@@ -35,7 +35,7 @@ export type ProjectQaAnswer = {
   evidenceCount: number
   confidenceStatus: ProjectQaConfidence
   disclaimer: string
-  skillName: 'answer-project-qa'
+  skillName: 'answer-project-qa' | 'write-investment-qa' | 'generate-project-qa-report'
   skillVersion: string
   skillSha256: string
   templateVersion: string

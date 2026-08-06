@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { PDFParse } from 'pdf-parse'
+import type { LoadedAiSkill } from './aiSkillService.js'
 
 export type QaTemplateFileProfile = {
   fileName: string
@@ -22,15 +23,15 @@ export type QaTemplateProfile = {
   files: QaTemplateFileProfile[]
   consensus: {
     pageSize: 'A4'
-    colorMode: '黑白公文'
-    titlePattern: '项目名称 + Q&A'
-    openingPattern: '首页问题目录'
-    bodyPattern: '问题—答复—分维度论证'
-    questionNumbering: 'Q1/Q2 或 1、2'
-    answerLead: '回答：或答复：'
-    typography: '黑色中文宋体正文，标题与问题加粗'
-    paragraphStyle: '两端对齐、首行缩进、1.5 倍行距'
-    footer: '页码'
+    colorMode: string
+    titlePattern: string
+    openingPattern: string
+    bodyPattern: string
+    questionNumbering: string
+    answerLead: string
+    typography: string
+    paragraphStyle: string
+    footer: string
   }
 }
 
@@ -144,5 +145,39 @@ export function assertQaTemplateProfile(profile: QaTemplateProfile) {
   }
   if (!profile.files.some((file) => file.answerLabels.length > 0)) {
     throw new Error('Q&A 模板未识别到“回答/答复”标签')
+  }
+}
+
+export function createProjectQaSkillProfile(skill: LoadedAiSkill): QaTemplateProfile {
+  if (skill.name !== 'generate-project-qa-report') {
+    throw new Error(`无法为非标准 Q&A Skill 创建版式画像：${skill.name}`)
+  }
+  return {
+    parserVersion: 'generate-project-qa-report-profile-v1',
+    corpusSha256: skill.sha256,
+    files: [{
+      fileName: 'generate-project-qa-report/SKILL.md',
+      sha256: skill.sha256,
+      pageCount: 1,
+      pageWidth: 595.3,
+      pageHeight: 841.9,
+      questionCount: 8,
+      hasQuestionIndex: false,
+      questionLabel: 'Q',
+      answerLabels: [],
+      usesDimensionBreakdown: false,
+    }],
+    consensus: {
+      pageSize: 'A4',
+      colorMode: '中性正式商务文档',
+      titlePattern: '项目名称Q&A 报告',
+      openingPattern: '标题后直接进入 Q1',
+      bodyPattern: '问题—连续自然段分析—判断边界与决策含义',
+      questionNumbering: 'Q1/Q2 连续编号',
+      answerLead: '直接进入分析，不显示答复或结论标签',
+      typography: 'STFangsong 正文、STHeiti 标题、Times New Roman 西文',
+      paragraphStyle: '两端对齐、首行缩进 2 字符、20pt 固定行距',
+      footer: '右对齐页码',
+    },
   }
 }

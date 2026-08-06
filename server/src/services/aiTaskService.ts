@@ -69,10 +69,10 @@ import {
   type ComplianceModelResearchAudit,
 } from './aiComplianceModelResearchService.js'
 import {
-  generateProjectQaDocx,
   inspectProjectQaDocx,
   makeProjectQaFileNames,
 } from './aiQaDocumentService.js'
+import { generateProjectQaWithSkill } from './aiProjectQaSkillRuntimeService.js'
 import {
   buildProjectQaDocumentContent,
   generateProjectQaAnswers,
@@ -98,7 +98,7 @@ import {
   type ProjectWebResearchAudit,
 } from './aiQaModelResearchService.js'
 import {
-  parseQaTemplateCorpus,
+  createProjectQaSkillProfile,
   type QaTemplateProfile,
 } from './aiQaTemplateParser.js'
 import {
@@ -1112,11 +1112,17 @@ function assessQaTemplateFidelity(input: {
   reviewerStatus: string
 }): TemplateFidelityAssessment {
   const metadata = input.quality.metadata
+  const usesDirectQaLayout = [
+    'lancheng_qa_a4_fixed',
+    'qa_cn_formal_a4',
+  ].includes(String(metadata.layoutProfile ?? ''))
   return assessTemplateFidelity({ dimensions: {
     structure: [
       fidelityCheck('question-count', input.questionCount === input.expectedQuestionCount, true),
       fidelityCheck('category-count', input.categoryCount === input.expectedCategoryCount, true),
-      fidelityCheck('directory-before-body', metadataFlag(metadata, 'directoryCompleteBeforeBody'), true),
+      usesDirectQaLayout
+        ? fidelityCheck('no-front-directory', metadataFlag(metadata, 'frontDirectoryAbsent'), true)
+        : fidelityCheck('directory-before-body', metadataFlag(metadata, 'directoryCompleteBeforeBody'), true),
     ],
     typography: [
       fidelityCheck('cjk-font', metadataFlag(metadata, 'cjkFontValidated'), true),
@@ -1229,10 +1235,8 @@ async function executeTask(taskId: string) {
     }
     let qaTemplateProfile: QaTemplateProfile | undefined
     if (task.type === 'project_qa') {
-      await updateStage(taskId, '解析 Q&A 模板并建立模板画像', 6)
-      qaTemplateProfile = await parseQaTemplateCorpus(
-        template.referencePaths ?? [template.referencePath],
-      )
+      await updateStage(taskId, '加载 generate-project-qa-report 版式规范', 6)
+      qaTemplateProfile = createProjectQaSkillProfile(skill)
     }
     const [claimed] = await db.update(aiTasks).set({
       status: 'running',
@@ -1564,20 +1568,21 @@ async function executeTask(taskId: string) {
       })
       if (await cancelIfRequested(taskId)) return
 
-      await updateStage(taskId, 'Formatter 生成正式 DOCX', 80)
+      await updateStage(taskId, 'generate-project-qa-report 校验 Markdown 并生成 DOCX', 80)
       const taskDir = path.join(ARTIFACT_ROOT, task.userId, task.projectId, task.id)
       await mkdir(taskDir, { recursive: true })
       const names = makeProjectQaFileNames(project.name, qaMode)
       const docxPath = path.join(taskDir, names.docx)
+      const markdownPath = path.join(taskDir, '.generate-project-qa-report.md')
+      const visualDirectory = path.join(taskDir, '.generate-project-qa-report-visual-qa')
       const qaDocument = await retryDocumentStep('Q&A DOCX 生成与质量检查', async () => {
-        const generation = await generateProjectQaDocx({
+        const generation = await generateProjectQaWithSkill({
           outputPath: docxPath,
-          project,
+          markdownPath,
+          visualDirectory,
+          projectName: project.companyName || project.name,
           content: qaContent,
-          sources,
-          sourceCutoffDate,
-          templateProfile: qaTemplateProfile,
-          disclaimer: template.disclaimer,
+          skill,
         })
         const quality = await inspectProjectQaDocx(docxPath, {
           questionCount: qaContent.questions.length,
@@ -1592,9 +1597,10 @@ async function executeTask(taskId: string) {
           reviewerStatus: reviewed.review.status,
         })
         if (!templateFidelity.passed) {
-          console.warn(
-            '[aiTask] Q&A 模板还原度未达到目标，保留完整 DOCX 并记录质量限制:',
-            JSON.stringify(templateFidelity.failedChecks),
+          throw new Error(
+            `generate-project-qa-report 成品未通过模板一致性门禁：${
+              templateFidelity.failedChecks.join('、')
+            }`,
           )
         }
         return { generation, quality, templateFidelity }

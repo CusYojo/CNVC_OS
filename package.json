@@ -17,6 +17,7 @@
     "check:agent": "npm --prefix cybernaut-assistant run check",
     "check:agent-runtime": "node --env-file-if-exists=.env cybernaut-assistant/scripts/healthcheck.mjs",
     "setup:pdf-to-ppt": "node server/scripts/setup-pdf-to-ppt-runtime.mjs",
+    "setup:qa-skill-runtime": "node server/scripts/setup-qa-skill-runtime.mjs",
     "accept:ai-business": "node --import tsx server/src/scripts/aiBusinessAcceptance.ts",
     "accept:ai-api": "node --import tsx server/src/scripts/aiTaskApiAcceptance.ts",
     "accept:ai-compliance": "node --import tsx server/src/scripts/aiComplianceAcceptance.ts",

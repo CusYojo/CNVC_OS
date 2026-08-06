@@ -3,7 +3,9 @@ import path from 'node:path'
 import type { AiCustomTemplateAnalysis } from '../db/schema.js'
 import {
   AI_DUE_DILIGENCE_SKILL_NAME,
+  AI_QA_SKILL_NAME,
   AI_TEMPLATE_DRIVEN_SKILL_NAME,
+  type AiQaSkillName,
   type AiPptWorkflowSkillName,
 } from './aiSkillService.js'
 import { INVESTMENT_PROPOSAL_SECTION_TITLES } from './aiInvestmentProposalBlueprintService.js'
@@ -42,6 +44,15 @@ export type AiTemplateDefinition = {
 }
 
 const docsPath = (...segments: string[]) => path.resolve(process.cwd(), 'docs', ...segments)
+const qaSkillPath = (...segments: string[]) => path.resolve(
+  process.cwd(),
+  'server',
+  'workspace',
+  '.agents',
+  'skills',
+  'generate-project-qa-report',
+  ...segments,
+)
 
 function docsTemplatePaths(directoryName: string) {
   const directoryPath = docsPath(directoryName)
@@ -54,7 +65,7 @@ function docsTemplatePaths(directoryName: string) {
 
 export type AiQaTemplateDefinition = {
   type: 'project_qa'
-  skillName: 'answer-project-qa'
+  skillName: AiQaSkillName
   label: string
   templateVersion: string
   templateDirectory: string
@@ -169,19 +180,19 @@ export const AI_TEMPLATE_CATALOG: Record<AiBusinessTaskType, AiTemplateDefinitio
   },
   project_qa: {
     type: 'project_qa',
-    skillName: 'answer-project-qa',
+    skillName: AI_QA_SKILL_NAME,
     label: '项目 Q&A',
-    description: '由资深投资经理研读当前项目资料并按公司标准模板生成内部投资 Q&A',
+    description: '使用 generate-project-qa-report 生成直接式、可交付的项目 Q&A 报告',
     outputFormat: 'docx',
-    templateVersion: 'qa-core-rules-20260804-v10-project-study-template-fidelity',
-    referencePath: docsPath('Q&A', '中数睿智项目Q&A.pdf'),
-    coreRulesPath: docsPath('Q&A', 'Q&A模板核心规则.md'),
+    templateVersion: 'generate-project-qa-report-20260806-v1',
+    referencePath: qaSkillPath('assets', 'qa-report-template.md'),
+    coreRulesPath: qaSkillPath('SKILL.md'),
     referencePaths: [
-      docsPath('Q&A', '4. 普雷赛斯Q&A.pdf'),
-      docsPath('Q&A', '4. 轻蜓光电Q&A(1).pdf'),
-      docsPath('Q&A', '中数睿智项目Q&A.pdf'),
-      docsPath('Q&A', '德塔智能项目Q&A(1).pdf'),
-      docsPath('Q&A', '浙江蓝成应急信息科技有限公司 Q&A(1).pdf'),
+      qaSkillPath('assets', 'qa-report-template.md'),
+      qaSkillPath('references', 'structure-blueprint.md'),
+      qaSkillPath('references', 'section-writing-guide.md'),
+      qaSkillPath('references', 'evidence-and-quality-rules.md'),
+      qaSkillPath('references', 'format-guidelines.md'),
     ],
     editableLevel: 'text-and-structure',
     sections: [
@@ -202,20 +213,19 @@ export const AI_TEMPLATE_CATALOG: Record<AiBusinessTaskType, AiTemplateDefinitio
       '风险与核验',
     ],
     requiredParameters: ['projectId', 'sourceCutoffDate', 'qaMode', 'questionDepth'],
-    disclaimer: '本文件由投资中台资深投资经理角色基于当前项目资料库及经页面核验的公开资料生成，仅供投资团队、风控法务、投资总监和投委会内部审阅，不构成正式法律、财务意见或最终投资决策；项目阶段以 OA 审批结果为准。',
+    disclaimer: '',
   },
 }
 
-// Q&A 的五份 PDF 只用于 Template Parser 提炼结构、版式和语言风格。
-// 样本正文永远不进入当前项目 RAG，也不能成为问题回答的证据。
+// 快捷任务 Q&A 的结构、写作和版式统一由 generate-project-qa-report 控制。
 export const AI_QA_TEMPLATE: AiQaTemplateDefinition = {
   type: 'project_qa',
-  skillName: 'answer-project-qa',
+  skillName: AI_QA_SKILL_NAME,
   label: '项目 Q&A',
   templateVersion: AI_TEMPLATE_CATALOG.project_qa.templateVersion,
-  templateDirectory: docsPath('Q&A'),
+  templateDirectory: qaSkillPath(),
   coreRulesPath: AI_TEMPLATE_CATALOG.project_qa.coreRulesPath
-    ?? docsPath('Q&A', 'Q&A模板核心规则.md'),
+    ?? qaSkillPath('SKILL.md'),
   referencePaths: AI_TEMPLATE_CATALOG.project_qa.referencePaths ?? [],
   categories: AI_TEMPLATE_CATALOG.project_qa.sections,
   outputMode: 'document-task',

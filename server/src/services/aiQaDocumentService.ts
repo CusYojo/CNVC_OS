@@ -6,6 +6,7 @@ import {
   Document,
   Footer,
   Header,
+  LineRuleType,
   PageNumber,
   Packer,
   Paragraph,
@@ -20,12 +21,26 @@ import {
 } from './aiQaPipelineService.js'
 import type { QaTemplateProfile } from './aiQaTemplateParser.js'
 import { sanitizeClientVisibleEvidenceWording } from './aiClientVisibleTextService.js'
+import { AI_QA_SKILL_NAME } from './aiSkillService.js'
 
 // 核心规范统一使用宋体；生产环境可通过环境变量切换到已批准的宋体实现。
 const BODY_FONT = process.env.AI_QA_BODY_FONT || process.env.AI_DOCUMENT_SONG_FONT || '宋体'
 const HEADING_FONT = process.env.AI_QA_HEADING_FONT || process.env.AI_DOCUMENT_SONG_FONT || '宋体'
 const LATIN_FONT = 'Times New Roman'
 const MUTED = '595959'
+const INVESTMENT_QA_BODY_FONT = 'FangSong'
+const INVESTMENT_QA_FOOTER_FONT = 'Helvetica Neue'
+const INVESTMENT_QA_BODY_SIZE = 21
+const INVESTMENT_QA_TITLE_SIZE = 32
+const INVESTMENT_QA_LINE_SPACING = 456
+const PROJECT_QA_REPORT_BODY_FONT = 'STFangsong'
+const PROJECT_QA_REPORT_HEADING_FONT = 'STHeiti'
+const PROJECT_QA_REPORT_BODY_SIZE = 21
+const PROJECT_QA_REPORT_TITLE_SIZE = 40
+const PROJECT_QA_REPORT_QUESTION_SIZE = 28
+const PROJECT_QA_REPORT_BODY_SPACING = 400
+const PROJECT_QA_REPORT_QUESTION_SPACING = 420
+const PROJECT_QA_REPORT_TITLE_SPACING = 480
 const ANSWER_HEADING_PATTERN =
   '(?:已确认事实|判断依据|分析判断|证据边界|下一步核验|升级与失效条件|下一步动作|OA\\s*流转边界)'
 const STAGE_ANSWER_SECTION_ORDER = [
@@ -337,6 +352,348 @@ function answerParagraphs(answer: ProjectQaDraftAnswer) {
   return result
 }
 
+const fixedInvestmentQaFont = (name: string) => ({
+  ascii: name,
+  hAnsi: name,
+  cs: name,
+  eastAsia: name,
+  hint: 'eastAsia' as const,
+})
+
+function investmentQaTextRun(value: string, options: {
+  bold?: boolean
+  size?: number
+  fontName?: string
+} = {}) {
+  return new TextRun({
+    text: value,
+    bold: options.bold,
+    size: options.size ?? INVESTMENT_QA_BODY_SIZE,
+    font: fixedInvestmentQaFont(options.fontName ?? INVESTMENT_QA_BODY_FONT),
+    language: { value: 'en-US', eastAsia: 'zh-CN' },
+    color: '000000',
+  })
+}
+
+async function generateInvestmentQaDocx(input: {
+  outputPath: string
+  project: ProjectLike
+  content: ProjectQaDocumentContent
+  templateProfile: QaTemplateProfile
+}) {
+  const children: Paragraph[] = [
+    new Paragraph({
+      alignment: AlignmentType.CENTER,
+      keepNext: true,
+      keepLines: true,
+      spacing: {
+        before: 0,
+        after: 240,
+        line: INVESTMENT_QA_LINE_SPACING,
+        lineRule: LineRuleType.EXACT,
+      },
+      children: [investmentQaTextRun(
+        input.project.companyName || input.project.name,
+        { bold: true, size: INVESTMENT_QA_TITLE_SIZE },
+      )],
+    }),
+    new Paragraph({
+      alignment: AlignmentType.CENTER,
+      keepNext: true,
+      keepLines: true,
+      spacing: {
+        before: 0,
+        after: 576,
+        line: INVESTMENT_QA_LINE_SPACING,
+        lineRule: LineRuleType.EXACT,
+      },
+      children: [investmentQaTextRun('Q & A', {
+        bold: true,
+        size: INVESTMENT_QA_TITLE_SIZE,
+      })],
+    }),
+  ]
+
+  input.content.questions.forEach((question, index) => {
+    const visibleQuestion = sanitizeQaVisibleSourceProcessWording(
+      sanitizeClientVisibleEvidenceWording(question.question),
+    )
+    children.push(new Paragraph({
+      alignment: AlignmentType.LEFT,
+      keepNext: true,
+      keepLines: true,
+      spacing: {
+        before: index === 0 ? 0 : INVESTMENT_QA_LINE_SPACING,
+        after: 0,
+        line: INVESTMENT_QA_LINE_SPACING,
+        lineRule: LineRuleType.EXACT,
+      },
+      children: [investmentQaTextRun(`${index + 1}、${visibleQuestion}`, { bold: true })],
+    }))
+
+    const answer = input.content.answers.find((item) => item.questionId === question.id)
+    const lines = answerParagraphLines(answer?.answer ?? '')
+    if (lines.length === 0) {
+      throw new Error(`write-investment-qa 第 ${index + 1} 题缺少完成态回答`)
+    }
+    lines.forEach((line, lineIndex) => {
+      children.push(new Paragraph({
+        alignment: AlignmentType.JUSTIFIED,
+        keepLines: false,
+        spacing: {
+          before: 0,
+          after: 0,
+          line: INVESTMENT_QA_LINE_SPACING,
+          lineRule: LineRuleType.EXACT,
+        },
+        indent: { firstLine: 420 },
+        children: lineIndex === 0
+          ? [
+              investmentQaTextRun('答复：', { bold: true }),
+              investmentQaTextRun(line),
+            ]
+          : [investmentQaTextRun(line)],
+      }))
+    })
+  })
+
+  const footer = new Footer({
+    children: [new Paragraph({
+      alignment: AlignmentType.CENTER,
+      spacing: {
+        before: 0,
+        after: 0,
+        line: 240,
+        lineRule: LineRuleType.EXACT,
+      },
+      children: [new TextRun({
+        children: [PageNumber.CURRENT],
+        font: fixedInvestmentQaFont(INVESTMENT_QA_FOOTER_FONT),
+        size: 18,
+        color: '000000',
+      })],
+    })],
+  })
+  const doc = new Document({
+    creator: '',
+    title: '',
+    description: '',
+    styles: {
+      default: {
+        document: {
+          run: {
+            font: fixedInvestmentQaFont(INVESTMENT_QA_BODY_FONT),
+            size: INVESTMENT_QA_BODY_SIZE,
+            color: '000000',
+          },
+          paragraph: {
+            spacing: {
+              line: INVESTMENT_QA_LINE_SPACING,
+              lineRule: LineRuleType.EXACT,
+              after: 0,
+            },
+          },
+        },
+      },
+    },
+    sections: [{
+      properties: {
+        page: {
+          size: { width: 11906, height: 16838 },
+          margin: {
+            top: 1440,
+            right: 1800,
+            bottom: 1440,
+            left: 1800,
+            header: 0,
+            footer: 1001,
+          },
+        },
+      },
+      footers: { default: footer },
+      children,
+    }],
+  })
+  const buffer = await Packer.toBuffer(doc)
+  await writeFile(input.outputPath, buffer)
+  return {
+    bytes: buffer.length,
+    questionCount: input.content.questions.length,
+    categoryCount: PROJECT_QA_DOCUMENT_CATEGORIES.length,
+    missingAnswerCount: input.content.review.dataGapCount,
+    templateCorpusSha256: input.templateProfile.corpusSha256,
+    documentSha256: createHash('sha256').update(buffer).digest('hex'),
+    layoutProfile: 'lancheng_qa_a4_fixed',
+    frontDirectoryIncluded: false,
+  }
+}
+
+const projectQaReportFont = (bold = false) => ({
+  ascii: LATIN_FONT,
+  hAnsi: LATIN_FONT,
+  cs: LATIN_FONT,
+  eastAsia: bold ? PROJECT_QA_REPORT_HEADING_FONT : PROJECT_QA_REPORT_BODY_FONT,
+  hint: 'eastAsia' as const,
+})
+
+function projectQaReportTextRun(value: string, options: {
+  bold?: boolean
+  size?: number
+} = {}) {
+  return new TextRun({
+    text: value,
+    bold: options.bold,
+    size: options.size ?? PROJECT_QA_REPORT_BODY_SIZE,
+    font: projectQaReportFont(options.bold),
+    language: { value: 'en-US', eastAsia: 'zh-CN' },
+    color: '1F2730',
+  })
+}
+
+async function generateProjectQaReportDocx(input: {
+  outputPath: string
+  project: ProjectLike
+  content: ProjectQaDocumentContent
+  templateProfile: QaTemplateProfile
+}) {
+  const projectName = input.project.companyName || input.project.name
+  const children: Paragraph[] = [
+    new Paragraph({
+      alignment: AlignmentType.CENTER,
+      keepNext: true,
+      keepLines: true,
+      spacing: {
+        before: 0,
+        after: 360,
+        line: PROJECT_QA_REPORT_TITLE_SPACING,
+        lineRule: LineRuleType.EXACT,
+      },
+      children: [projectQaReportTextRun(`${projectName}Q&A 报告`, {
+        bold: true,
+        size: PROJECT_QA_REPORT_TITLE_SIZE,
+      })],
+    }),
+  ]
+
+  input.content.questions.forEach((question, index) => {
+    const visibleQuestion = sanitizeQaVisibleSourceProcessWording(
+      sanitizeClientVisibleEvidenceWording(question.question),
+    )
+    children.push(new Paragraph({
+      alignment: AlignmentType.LEFT,
+      keepNext: true,
+      keepLines: true,
+      spacing: {
+        before: index === 0 ? 0 : 240,
+        after: 120,
+        line: PROJECT_QA_REPORT_QUESTION_SPACING,
+        lineRule: LineRuleType.EXACT,
+      },
+      children: [projectQaReportTextRun(`Q${index + 1}：${visibleQuestion}`, {
+        bold: true,
+        size: PROJECT_QA_REPORT_QUESTION_SIZE,
+      })],
+    }))
+
+    const answer = input.content.answers.find((item) => item.questionId === question.id)
+    const lines = answerParagraphLines(answer?.answer ?? '')
+      .map((line) => sanitizeQaVisibleSourceProcessWording(
+        sanitizeClientVisibleEvidenceWording(line),
+      ).replace(/^\s*结论(?:如下)?\s*[：:]\s*/, '').trim())
+      .filter(Boolean)
+    if (lines.length === 0) {
+      throw new Error(`generate-project-qa-report 第 ${index + 1} 题缺少有效回答`)
+    }
+    lines.forEach((line) => {
+      children.push(new Paragraph({
+        alignment: AlignmentType.JUSTIFIED,
+        keepLines: false,
+        spacing: {
+          before: 0,
+          after: 0,
+          line: PROJECT_QA_REPORT_BODY_SPACING,
+          lineRule: LineRuleType.EXACT,
+        },
+        indent: { firstLine: 420 },
+        children: [projectQaReportTextRun(line)],
+      }))
+    })
+  })
+
+  const header = new Header({
+    children: [new Paragraph({
+      alignment: AlignmentType.CENTER,
+      spacing: { before: 0, after: 0, line: 240, lineRule: LineRuleType.EXACT },
+      children: [projectQaReportTextRun(`${projectName}｜Q&A`, { size: 18 })],
+    })],
+  })
+  const footer = new Footer({
+    children: [new Paragraph({
+      alignment: AlignmentType.RIGHT,
+      spacing: { before: 0, after: 0, line: 240, lineRule: LineRuleType.EXACT },
+      children: [new TextRun({
+        children: [PageNumber.CURRENT],
+        font: projectQaReportFont(),
+        size: 18,
+        color: '6D747C',
+      })],
+    })],
+  })
+  const doc = new Document({
+    creator: '',
+    title: `${projectName}Q&A 报告`,
+    description: '',
+    styles: {
+      default: {
+        document: {
+          run: {
+            font: projectQaReportFont(),
+            size: PROJECT_QA_REPORT_BODY_SIZE,
+            color: '1F2730',
+          },
+          paragraph: {
+            spacing: {
+              line: PROJECT_QA_REPORT_BODY_SPACING,
+              lineRule: LineRuleType.EXACT,
+              after: 0,
+            },
+          },
+        },
+      },
+    },
+    sections: [{
+      properties: {
+        page: {
+          size: { width: 11906, height: 16838 },
+          margin: {
+            top: 1531,
+            right: 1701,
+            bottom: 1587,
+            left: 1803,
+            header: 850,
+            footer: 907,
+          },
+        },
+      },
+      headers: { default: header },
+      footers: { default: footer },
+      children,
+    }],
+  })
+  const buffer = await Packer.toBuffer(doc)
+  await writeFile(input.outputPath, buffer)
+  return {
+    bytes: buffer.length,
+    questionCount: input.content.questions.length,
+    categoryCount: PROJECT_QA_DOCUMENT_CATEGORIES.length,
+    missingAnswerCount: input.content.review.dataGapCount,
+    templateCorpusSha256: input.templateProfile.corpusSha256,
+    documentSha256: createHash('sha256').update(buffer).digest('hex'),
+    layoutProfile: 'qa_cn_formal_a4',
+    frontDirectoryIncluded: false,
+  }
+}
+
 export function makeProjectQaFileNames(projectName: string, mode: string, timestamp = Date.now()) {
   const base = `${safeName(projectName)}_${safeName(mode)}_${timestamp}`
   return {
@@ -354,6 +711,14 @@ export async function generateProjectQaDocx(input: {
   disclaimer: string
 }) {
   await mkdir(path.dirname(input.outputPath), { recursive: true })
+  if (AI_QA_SKILL_NAME === 'generate-project-qa-report') {
+    throw new Error(
+      'generate-project-qa-report 禁止使用旧 TypeScript DOCX Formatter；请调用 Skill 原生 Markdown→校验→DOCX→逐页渲染链路',
+    )
+  }
+  if (AI_QA_SKILL_NAME === 'write-investment-qa') {
+    return generateInvestmentQaDocx(input)
+  }
   const children: Paragraph[] = []
   children.push(
     new Paragraph({
@@ -483,9 +848,10 @@ export async function inspectProjectQaDocx(
   if (!fileStat.isFile() || fileStat.size < 2000) throw new Error('Q&A DOCX 为空或不完整')
   const zip = await JSZip.loadAsync(await readFile(filePath))
   const documentXml = await zip.file('word/document.xml')?.async('string')
+  const stylesXml = await zip.file('word/styles.xml')?.async('string') ?? ''
   if (!documentXml) throw new Error('Q&A DOCX 缺少 document.xml')
   if (documentXml.includes('\uFFFD')) throw new Error('Q&A DOCX 含损坏字符')
-  const cjkFonts = [...documentXml.matchAll(/w:eastAsia="([^"]+)"/g)]
+  const cjkFonts = [...documentXml.matchAll(/<w:rFonts\b[^>]*w:eastAsia="([^"]+)"/g)]
     .map((match) => match[1])
   const cjkFontValidated = cjkFonts.length > 0
     && !cjkFonts.some((name) => /Arial Unicode MS/i.test(name))
@@ -517,6 +883,280 @@ export async function inspectProjectQaDocx(
           .join(''),
       ).trim())
     .filter(Boolean)
+  if (AI_QA_SKILL_NAME === 'generate-project-qa-report') {
+    const reportVisibleText = visibleParagraphs.join('\n')
+    const expectedTitle = visibleParagraphs[0] ?? ''
+    if (!/Q&A 报告$/.test(expectedTitle)) {
+      throw new Error('generate-project-qa-report DOCX 标题必须使用“项目名称Q&A 报告”格式')
+    }
+    const questionParagraphIndexes = visibleParagraphs.flatMap((paragraph, index) =>
+      /^Q\d+[：:]/.test(paragraph) ? [index] : [])
+    if (questionParagraphIndexes.length !== expected.questionCount) {
+      throw new Error(
+        `generate-project-qa-report DOCX 问题数量错误：${questionParagraphIndexes.length}/${expected.questionCount}`,
+      )
+    }
+    const expectedQuestionLabels = Array.from(
+      { length: expected.questionCount },
+      (_, index) => `Q${index + 1}：`,
+    )
+    const actualQuestionLabels = questionParagraphIndexes.map((index) =>
+      visibleParagraphs[index].match(/^Q\d+[：:]/)?.[0].replace(':', '：') ?? '')
+    if (actualQuestionLabels.join('|') !== expectedQuestionLabels.join('|')) {
+      throw new Error(
+        `generate-project-qa-report DOCX 问题顺序错误：${actualQuestionLabels.join('、')}`,
+      )
+    }
+    const questionLengths: number[] = []
+    const answerLengths: number[] = []
+    questionParagraphIndexes.forEach((paragraphIndex, index) => {
+      const nextQuestionIndex = questionParagraphIndexes[index + 1] ?? visibleParagraphs.length
+      const answerLines = visibleParagraphs.slice(paragraphIndex + 1, nextQuestionIndex)
+      questionLengths.push(visibleParagraphs[paragraphIndex]
+        .replace(/^Q\d+[：:]/, '')
+        .replace(/\s+/g, '').length)
+      answerLengths.push(answerLines.join('').replace(/\s+/g, '').length)
+      if (answerLines.length < 1 || answerLines.length > 8) {
+        throw new Error(
+          `generate-project-qa-report DOCX 第 ${index + 1} 题应为 1-8 个自然段，实际 ${answerLines.length} 段`,
+        )
+      }
+      const visibleLabel = answerLines.find((line) =>
+        /^(?:答复|回答|结论(?:如下)?)\s*[：:]/.test(line))
+      if (visibleLabel) {
+        throw new Error(
+          `generate-project-qa-report DOCX 第 ${index + 1} 题不得显示答复或结论标签`,
+        )
+      }
+    })
+    const forbiddenVisibleTerms = [
+      '问题目录',
+      '执行摘要',
+      '来源附录',
+      '引用资料',
+      'Reviewer 审阅结果',
+      '公开信息',
+      '公开材料',
+      '公开资料',
+      '公开披露',
+      '公开报道',
+      '公开记录',
+      '公开检索',
+      '公开来源',
+      '项目资料',
+      '会议纪要',
+      '访谈纪要',
+    ]
+    const leakedTerm = forbiddenVisibleTerms.find((term) => reportVisibleText.includes(term))
+    if (
+      leakedTerm
+      || /\[S\d+\]|\*\*|__|```|https?:\/\/|\[(?:尚无可核验证据|来源待核验|仅有公司单方口径)\]/.test(reportVisibleText)
+    ) {
+      throw new Error(
+        `generate-project-qa-report DOCX 泄露来源、检索过程或格式标记：${leakedTerm ?? '来源/格式标记'}`,
+      )
+    }
+    const relationshipXml = await zip.file('word/_rels/document.xml.rels')?.async('string') ?? ''
+    if (/TargetMode="External"[^>]*Type="[^"]*\/hyperlink"/.test(relationshipXml)) {
+      throw new Error('generate-project-qa-report DOCX 不得包含外部超链接')
+    }
+    const reportPageGeometryValidated =
+      integerAttribute(pageSize, 'w:w') === 11906
+      && integerAttribute(pageSize, 'w:h') === 16838
+      && integerAttribute(pageMargin, 'w:top') === 1531
+      && integerAttribute(pageMargin, 'w:right') === 1701
+      && integerAttribute(pageMargin, 'w:bottom') === 1587
+      && integerAttribute(pageMargin, 'w:left') === 1803
+      && integerAttribute(pageMargin, 'w:header') === 850
+      && integerAttribute(pageMargin, 'w:footer') === 907
+    if (!reportPageGeometryValidated) {
+      throw new Error('generate-project-qa-report DOCX 未使用 qa_cn_formal_a4 页边距')
+    }
+    const reportFontValidated = cjkFonts.includes(PROJECT_QA_REPORT_BODY_FONT)
+      && cjkFonts.includes(PROJECT_QA_REPORT_HEADING_FONT)
+      && cjkFonts.every((name) => [
+        PROJECT_QA_REPORT_BODY_FONT,
+        PROJECT_QA_REPORT_HEADING_FONT,
+      ].includes(name))
+    if (!reportFontValidated) {
+      throw new Error('generate-project-qa-report DOCX 中西文字体映射不符合规范')
+    }
+    const reportFormattingXml = `${documentXml}\n${stylesXml}`
+    const exactBodySpacingValidated = new RegExp(
+      `<w:spacing\\b[^>]*w:line="${PROJECT_QA_REPORT_BODY_SPACING}"[^>]*w:lineRule="exact"`,
+    ).test(reportFormattingXml)
+      || new RegExp(
+        `<w:spacing\\b[^>]*w:lineRule="exact"[^>]*w:line="${PROJECT_QA_REPORT_BODY_SPACING}"`,
+      ).test(reportFormattingXml)
+    if (!exactBodySpacingValidated) {
+      throw new Error('generate-project-qa-report DOCX 正文未使用 20pt 固定行距')
+    }
+    return {
+      qualityStatus: 'passed' as const,
+      metadata: {
+        bytes: fileStat.size,
+        openXmlValid: true,
+        editableText: true,
+        encodingClean: true,
+        cjkFontValidated: reportFontValidated,
+        lineSpacingValidated: exactBodySpacingValidated,
+        pageGeometryValidated: reportPageGeometryValidated,
+        tableCount: (documentXml.match(/<w:tbl\b/g) || []).length,
+        categoryCount: expected.categoryCount,
+        questionCount: expected.questionCount,
+        averageQuestionLength: questionLengths.length
+          ? Math.round(questionLengths.reduce((sum, value) => sum + value, 0) / questionLengths.length)
+          : 0,
+        maximumQuestionLength: questionLengths.length ? Math.max(...questionLengths) : 0,
+        averageAnswerLength: answerLengths.length
+          ? Math.round(answerLengths.reduce((sum, value) => sum + value, 0) / answerLengths.length)
+          : 0,
+        averageAnswerQuestionRatio: questionLengths.length
+          ? Math.round(
+              answerLengths.reduce((sum, value) => sum + value, 0)
+              / Math.max(questionLengths.reduce((sum, value) => sum + value, 0), 1)
+              * 100,
+            ) / 100
+          : 0,
+        layoutProfile: 'qa_cn_formal_a4',
+        directoryCompleteBeforeBody: false,
+        frontDirectoryAbsent: true,
+        answerParagraphFormValid: true,
+        narrativeParagraphRangeValid: true,
+        visibleAnswerLabelsAbsent: true,
+        visibleAnswerLabelPresent: false,
+        visibleSubheadingsAbsent: true,
+        sourceOutlineNumberingAbsent: true,
+        visibleSourceProcessAbsent: true,
+        visibleAuditAppendixAbsent: true,
+        placeholderAnswerAbsent: true,
+        markdownDecorationAbsent: true,
+        webPageChromeAbsent: true,
+      },
+    }
+  }
+  if (AI_QA_SKILL_NAME === 'write-investment-qa') {
+    const investmentVisibleText = visibleParagraphs.join('\n')
+    if (investmentVisibleText.includes('问题目录')) {
+      throw new Error('write-investment-qa DOCX 不得生成前置问题目录')
+    }
+    const questionParagraphIndexes = visibleParagraphs.flatMap((paragraph, index) =>
+      /^\d+、/.test(paragraph) ? [index] : [])
+    if (questionParagraphIndexes.length !== expected.questionCount) {
+      throw new Error(
+        `write-investment-qa DOCX 问题数量错误：${questionParagraphIndexes.length}/${expected.questionCount}`,
+      )
+    }
+    const expectedQuestionLabels = Array.from(
+      { length: expected.questionCount },
+      (_, index) => `${index + 1}、`,
+    )
+    const actualQuestionLabels = questionParagraphIndexes.map((index) =>
+      visibleParagraphs[index].match(/^\d+、/)?.[0] ?? '')
+    if (actualQuestionLabels.join('|') !== expectedQuestionLabels.join('|')) {
+      throw new Error(`write-investment-qa DOCX 问题顺序错误：${actualQuestionLabels.join('、')}`)
+    }
+    const questionLengths: number[] = []
+    const answerLengths: number[] = []
+    questionParagraphIndexes.forEach((paragraphIndex, index) => {
+      const nextQuestionIndex = questionParagraphIndexes[index + 1] ?? visibleParagraphs.length
+      const answerLines = visibleParagraphs.slice(paragraphIndex + 1, nextQuestionIndex)
+      questionLengths.push(visibleParagraphs[paragraphIndex]
+        .replace(/^\d+、/, '')
+        .replace(/\s+/g, '').length)
+      answerLengths.push(answerLines.join('').replace(/\s+/g, '').length)
+      if (answerLines.length < 1 || answerLines.length > 6) {
+        throw new Error(
+          `write-investment-qa DOCX 第 ${index + 1} 题应为 1-6 个自然答复段，实际 ${answerLines.length} 段`,
+        )
+      }
+      if (!/^答复[：:]/.test(answerLines[0])) {
+        throw new Error(`write-investment-qa DOCX 第 ${index + 1} 题首段缺少“答复：”`)
+      }
+    })
+    const forbiddenVisibleTerms = [
+      '暂无相关资料',
+      '引用资料',
+      'Reviewer 审阅结果',
+      '模板解析',
+      '语料指纹',
+      '检索式：',
+      'Q&A 分类：',
+      '公开检索记录',
+      '京ICP备',
+      '公网安备',
+      'All Rights Reserved',
+      '英诺嘿呀助手微信号',
+      ...QA_VISIBLE_SOURCE_PROCESS_TERMS,
+      ...QA_VISIBLE_INTERNAL_STAGE_TERMS,
+    ]
+    const leakedTerm = forbiddenVisibleTerms.find((term) => investmentVisibleText.includes(term))
+    if (leakedTerm || /\[S\d+\]|\*\*|__|```|https?:\/\//.test(investmentVisibleText)) {
+      throw new Error(
+        `write-investment-qa DOCX 泄露禁止展示的过程、来源或格式标记：${leakedTerm ?? '来源/格式标记'}`,
+      )
+    }
+    const fixedFontValidated = cjkFonts.includes(INVESTMENT_QA_BODY_FONT)
+      && cjkFonts.every((name) => [
+        INVESTMENT_QA_BODY_FONT,
+        INVESTMENT_QA_FOOTER_FONT,
+      ].includes(name))
+    const exactLineSpacingValidated = new RegExp(
+      `<w:spacing\\b[^>]*w:line="${INVESTMENT_QA_LINE_SPACING}"[^>]*w:lineRule="exact"`,
+    ).test(documentXml)
+      || new RegExp(
+        `<w:spacing\\b[^>]*w:lineRule="exact"[^>]*w:line="${INVESTMENT_QA_LINE_SPACING}"`,
+      ).test(documentXml)
+    if (!fixedFontValidated) {
+      throw new Error('write-investment-qa DOCX 未统一映射 FangSong 字体')
+    }
+    if (!exactLineSpacingValidated) {
+      throw new Error('write-investment-qa DOCX 未使用 22.8pt 固定行距')
+    }
+    return {
+      qualityStatus: 'passed' as const,
+      metadata: {
+        bytes: fileStat.size,
+        openXmlValid: true,
+        editableText: true,
+        encodingClean: true,
+        cjkFontValidated: fixedFontValidated,
+        lineSpacingValidated: exactLineSpacingValidated,
+        pageGeometryValidated,
+        tableCount: (documentXml.match(/<w:tbl\b/g) || []).length,
+        categoryCount: expected.categoryCount,
+        questionCount: expected.questionCount,
+        averageQuestionLength: questionLengths.length
+          ? Math.round(questionLengths.reduce((sum, value) => sum + value, 0) / questionLengths.length)
+          : 0,
+        maximumQuestionLength: questionLengths.length ? Math.max(...questionLengths) : 0,
+        averageAnswerLength: answerLengths.length
+          ? Math.round(answerLengths.reduce((sum, value) => sum + value, 0) / answerLengths.length)
+          : 0,
+        averageAnswerQuestionRatio: questionLengths.length
+          ? Math.round(
+              answerLengths.reduce((sum, value) => sum + value, 0)
+              / Math.max(questionLengths.reduce((sum, value) => sum + value, 0), 1)
+              * 100,
+            ) / 100
+          : 0,
+        layoutProfile: 'lancheng_qa_a4_fixed',
+        directoryCompleteBeforeBody: false,
+        frontDirectoryAbsent: true,
+        answerParagraphFormValid: true,
+        narrativeParagraphRangeValid: true,
+        visibleAnswerLabelsAbsent: false,
+        visibleAnswerLabelPresent: true,
+        visibleSubheadingsAbsent: true,
+        sourceOutlineNumberingAbsent: true,
+        visibleSourceProcessAbsent: true,
+        visibleAuditAppendixAbsent: true,
+        placeholderAnswerAbsent: true,
+        markdownDecorationAbsent: true,
+        webPageChromeAbsent: true,
+      },
+    }
+  }
   const questionLabels = visibleText.match(/Q\d+[：:]/g) ?? []
   if (new Set(questionLabels).size < expected.questionCount) {
     throw new Error(`Q&A DOCX 问题数量不足：${new Set(questionLabels).size}/${expected.questionCount}`)

@@ -2,9 +2,9 @@ import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import {
-  generateProjectQaDocx,
   inspectProjectQaDocx,
 } from '../services/aiQaDocumentService.js'
+import { generateProjectQaWithSkill } from '../services/aiProjectQaSkillRuntimeService.js'
 import {
   PROJECT_QA_DOCUMENT_CATEGORIES,
   PROJECT_QA_QUESTION_COUNTS,
@@ -22,9 +22,8 @@ import {
   extractProjectQaPublicPageText,
   fetchProjectQaModelEvidence,
 } from '../services/aiQaModelResearchService.js'
-import { loadAiSkill } from '../services/aiSkillService.js'
-import { AI_QA_TEMPLATE, AI_TEMPLATE_CATALOG } from '../services/aiTemplateCatalog.js'
-import { parseQaTemplateCorpus } from '../services/aiQaTemplateParser.js'
+import { AI_QA_SKILL_NAME, loadAiSkill } from '../services/aiSkillService.js'
+import { createProjectQaSkillProfile } from '../services/aiQaTemplateParser.js'
 import type { EvidenceSource } from '../services/aiBusinessContentService.js'
 
 type Check = { name: string; passed: boolean; detail: string }
@@ -42,41 +41,43 @@ async function main() {
     : await mkdtemp(path.join(os.tmpdir(), 'qa-pipeline-acceptance-'))
   await mkdir(outputDir, { recursive: true })
 
-  const template = AI_TEMPLATE_CATALOG.project_qa
-  const profile = await parseQaTemplateCorpus(AI_QA_TEMPLATE.referencePaths)
+  const skill = await loadAiSkill(AI_QA_SKILL_NAME)
+  const profile = createProjectQaSkillProfile(skill)
   assert(
-    '阶段1 Template Parser：五份模板全部解析',
-    profile.files.length === 5 && profile.files.every((file) => file.pageCount > 0),
-    `${profile.files.length} 份 / ${profile.files.map((file) => file.pageCount).join('、')} 页`,
+    '阶段1 Skill Profile：统一加载 generate-project-qa-report',
+    skill.name === 'generate-project-qa-report'
+      && profile.parserVersion === 'generate-project-qa-report-profile-v1',
+    `${skill.name} / ${profile.parserVersion}`,
   )
   assert(
-    '阶段1 Template Parser：A4、问题目录与回答段落结构通过',
-    profile.files.every((file) =>
-      Math.abs(file.pageWidth - 595.3) < 2
-      && Math.abs(file.pageHeight - 841.9) < 2
-      && file.questionCount > 0)
-      && profile.files.some((file) => file.answerLabels.length > 0)
-      && profile.files.some((file) => file.usesDimensionBreakdown),
+    '阶段1 Skill Profile：A4 直接式 Q&A 契约通过',
+    profile.files.length === 1
+      && profile.files.every((file) =>
+        Math.abs(file.pageWidth - 595.3) < 2
+        && Math.abs(file.pageHeight - 841.9) < 2
+        && file.questionCount >= 8
+        && !file.hasQuestionIndex
+        && file.answerLabels.length === 0)
+      && profile.consensus.openingPattern.includes('直接进入 Q1'),
     profile.corpusSha256,
   )
 
-  const skill = await loadAiSkill('answer-project-qa')
   assert(
-    '阶段2 Skill：契约、Workflow 与 Pipeline Prompts 已加载',
+    '阶段2 Skill：结构、写作、证据和版式规则已加载',
     [
-      'references/qa-contract.md',
-      'references/qa-template-style-guide.md',
-      'references/workflow.md',
-      'references/pipeline-prompts.md',
+      'references/structure-blueprint.md',
+      'references/section-writing-guide.md',
+      'references/evidence-and-quality-rules.md',
+      'references/format-guidelines.md',
     ].every((name) => skill.referenceNames.includes(name)),
     skill.referenceNames.join('、'),
   )
   assert(
-    '阶段2 Skill：人工文风规则已加载',
-    skill.instructions.includes('学习的是论证节奏')
-      && skill.referenceInstructions.includes('直接写成 answer')
-      && skill.referenceInstructions.includes('一个自然段'),
-    '首段判断、事实归纳、自然论证与反模板句规则',
+    '阶段2 Skill：直接式 Q&A 与无来源正文规则已加载',
+    skill.instructions.includes('Start Q1 immediately after the title')
+      && skill.instructions.includes('Do not add a standalone `结论：`')
+      && skill.instructions.includes('source-free'),
+    '直接进入 Q1、自然分析、正文不显示来源',
   )
 
   const project = {
@@ -307,13 +308,13 @@ async function main() {
   )
   const enrichedSources = [...sources, ...modelResearch.sources]
   assert(
-    '阶段2 Current Project RAG：本地资料优先并使用 Flue 同源联网发现',
+    '阶段2 Current Project RAG：授权资料优先并按缺口定向补充',
     sources.length === 2
       && sources.every((source) => !source.sourceType.startsWith('public_web'))
-      && skill.instructions.includes('Flue `intel-collect`')
-      && !/早期投资项目线索分析师|值得接触|作为对标|清华系/.test(
-        `${skill.instructions}\n${skill.referenceInstructions}`,
-      ),
+      && skill.instructions.includes('adaptive public research')
+      && skill.instructions.includes('information typed or pasted in the current conversation')
+      && skill.instructions.includes('files and links attached or explicitly referenced by the user')
+      && skill.instructions.includes('lawful public-web research for remaining researchable gaps'),
     sources.map((source) => `${source.sourceType}:${source.sourceName}`).join('、'),
   )
 
@@ -357,7 +358,7 @@ async function main() {
     skill,
   })
   assert(
-    '阶段3 Question Generator：标准版动态选取七个高价值问题',
+    '阶段3 Question Generator：标准版动态选取八个高价值问题',
     duplicateCheck.questions.length === PROJECT_QA_QUESTION_COUNTS.标准版
       && new Set(duplicateCheck.questions.map((question) => question.category)).size
         === duplicateCheck.questions.length
@@ -713,41 +714,29 @@ async function main() {
     answers: reviewed.answers,
     review: reviewed.review,
   })
-  const contentWithMarkdownFixture = {
-    ...content,
-    answers: content.answers.map((answer, index) => {
-      if (index === content.answers.length - 1) {
-        return {
-          ...answer,
-          confidenceStatus: '证据不足' as const,
-          answer: [
-            '目前尚无法形成确定结论，需要先明确关键不确定性。',
-            '（4）下一步核验：后续应取得关键文件或与相关负责人确认。',
-            '（3）已确认事实：关键主体、时间和口径尚未完全统一。',
-            '（2）分析判断：信息尚未明确不等于已经形成负面判断。',
-            '（3）证据边界：在核心事实确认前，不宜作出肯定结论。',
-          ].join('\n'),
-        }
-      }
-      if (index !== 0) return answer
-      return {
-        ...answer,
-        answer: answer.answer
-          .split('\n')
-          .map((paragraph) => `**${paragraph}**`)
-          .join('\n'),
-      }
-    }),
-  }
   const docxPath = path.join(outputDir, 'qa-acceptance.docx')
-  await generateProjectQaDocx({
+  const skillNativeContent = {
+    ...content,
+    answers: content.answers.map((answer) => ({
+      ...answer,
+      answer: [
+        answer.answer
+          .replace(/\*\*/g, '')
+          .replace(/^（\d+）[^：\n]{2,16}[：:]\s*/gm, ''),
+        `对“${answer.category}”的判断不能停留在单一标签或一次性事件。需要把形成收入或投资价值的关键环节按时间顺序还原，区分公司陈述、已经发生的经营事实和仍待实现的目标，并判断这些环节之间是否存在可重复的因果关系。只有同一套产品能力、交付方式和客户价值能够在不同场景中复现，相关优势才可能转化为持续回报。`,
+        `进一步分析时，应把业务规模、单位经济性、现金回收和组织投入放在同一口径下观察。规模增长如果依赖同比增加的人力、定制开发或渠道费用，收入扩张未必改善毛利和现金流；反之，如果交付周期缩短、复购提高且回款稳定，才说明产品化和商业模式正在形成。`,
+        `风险边界在于，现阶段的局部验证不能自动外推为规模化结果。管理层目标、合作意向、试点、合同、验收、收入确认和实际回款应分别核对，任何一环缺失都会降低预测可靠性；关键人员、知识产权或客户集中度发生变化，也可能使原有判断失效。`,
+        `下一步应围绕本题取得能够改变判断的原件和连续数据，并通过客户、核心成员或交易对手访谈交叉确认。完成核实后再更新收入、成本、现金和估值假设；如果关键事实无法闭环，投资方案应收紧安全边际、补充保护条件，或停止继续投入。`,
+      ].join('\n'),
+    })),
+  }
+  const skillGeneration = await generateProjectQaWithSkill({
     outputPath: docxPath,
-    project,
-    content: contentWithMarkdownFixture,
-    sources: enrichedSources,
-    sourceCutoffDate: '2026-07-25',
-    templateProfile: profile,
-    disclaimer: template.disclaimer,
+    markdownPath: path.join(outputDir, 'qa-acceptance.md'),
+    visualDirectory: path.join(outputDir, 'visual-qa'),
+    projectName: project.companyName || project.name,
+    content: skillNativeContent,
+    skill,
   })
   const docxReview = await inspectProjectQaDocx(docxPath, {
     questionCount: content.questions.length,
@@ -760,18 +749,31 @@ async function main() {
       && docxReview.metadata.categoryCount === 15
       && Number(docxReview.metadata.averageQuestionLength ?? Infinity) <= 32
       && Number(docxReview.metadata.maximumQuestionLength ?? Infinity) <= 88
-      && Number(docxReview.metadata.averageAnswerLength ?? 0) >= 120
-      && Number(docxReview.metadata.averageAnswerQuestionRatio ?? 0) >= 4
-      && docxReview.metadata.directoryCompleteBeforeBody
+      && Number(docxReview.metadata.averageAnswerLength ?? 0) >= 420
+      && docxReview.metadata.layoutProfile === 'qa_cn_formal_a4'
+      && docxReview.metadata.pageGeometryValidated
+      && docxReview.metadata.cjkFontValidated
+      && docxReview.metadata.lineSpacingValidated
+      && docxReview.metadata.frontDirectoryAbsent
+      && !docxReview.metadata.directoryCompleteBeforeBody
       && docxReview.metadata.answerParagraphFormValid
       && docxReview.metadata.narrativeParagraphRangeValid
       && docxReview.metadata.visibleAnswerLabelsAbsent
       && docxReview.metadata.visibleSubheadingsAbsent
       && docxReview.metadata.sourceOutlineNumberingAbsent
       && docxReview.metadata.visibleSourceProcessAbsent
+      && docxReview.metadata.visibleAuditAppendixAbsent
       && docxReview.metadata.markdownDecorationAbsent
       && docxReview.metadata.webPageChromeAbsent,
     JSON.stringify(docxReview.metadata),
+  )
+  assert(
+    '阶段5 Skill Native Runtime：Markdown 校验、Skill DOCX 渲染与逐页检查通过',
+    skillGeneration.skillExecutionMode === 'native-markdown-validated-docx-rendered'
+      && skillGeneration.markdownValidation.errors === 0
+      && skillGeneration.visualQa.renderedEveryPage
+      && skillGeneration.visualQa.pageCount >= PROJECT_QA_QUESTION_COUNTS.标准版,
+    JSON.stringify(skillGeneration),
   )
   assert(
     '阶段6 Word/WPS Review：正式 DOCX 可编辑且中文编码正常',

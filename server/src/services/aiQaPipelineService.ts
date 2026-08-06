@@ -55,7 +55,7 @@ export const PROJECT_QA_READING_ORDER = [
 export const PROJECT_QA_MODES = ['投资委员会 Q&A', '尽调 Q&A'] as const
 export const PROJECT_QA_DEPTHS = ['标准版', '深度版'] as const
 export const PROJECT_QA_QUESTION_COUNTS = {
-  标准版: 7,
+  标准版: 8,
   深度版: 10,
 } as const
 
@@ -528,7 +528,7 @@ const VISIBLE_ANSWER_SUBHEADING_PATTERN = [
   .join('|')
 
 const WEB_PAGE_NOISE_PATTERN =
-  /(?:联系我们|联系邮箱|联系电话|客服热线|微信号|微信公众号|京ICP备|公网安备|Copyright|All Rights Reserved|隐私政策|用户协议|网站地图)/i
+  /(?:联系我们|联系邮箱|联系电话|客服热线|微信号|微信公众号|京ICP备|公网安备|Copyright|All Rights Reserved|隐私政策|用户协议|网站地图|(?:^|[。；])简介[：:]|发展历史和介绍[：:]|公司地址[：:]|成立时间[：:]|企业发展阶段[：:]|展开[。.]?|对于广大.{0,20}(?:而言|来说)|推动整个.{0,20}(?:行业|产业).{0,12}(?:发展|创新))/i
 const MEETING_SOURCE_METADATA_PATTERN =
   /(?:(?:交流|会议|访谈)(?:时间|地点|人员|对象)|(?:参会|与会)人员)\s*[：:]|(?:大会议室|会议室)/
 const CLIENT_VISIBLE_SOURCE_PROCESS_PATTERN =
@@ -796,8 +796,8 @@ function fallbackQuestions(
   depth: ProjectQaDepth,
   sources: readonly EvidenceSource[],
   includeStageQuestion = false,
+  targetCount: number = PROJECT_QA_QUESTION_COUNTS[depth],
 ) {
-  const targetCount = PROJECT_QA_QUESTION_COUNTS[depth]
   const categories = rankedCategories(sources)
     .filter((category) => includeStageQuestion || category !== '阶段与推进建议')
   return categories
@@ -862,8 +862,8 @@ function normalizeQuestions(
   depth: ProjectQaDepth,
   sources: readonly EvidenceSource[],
   includeStageQuestion = false,
+  targetCount: number = PROJECT_QA_QUESTION_COUNTS[depth],
 ) {
-  const targetCount = PROJECT_QA_QUESTION_COUNTS[depth]
   const perCategory = depth === '深度版' ? 2 : 1
   const values = raw && typeof raw === 'object' && Array.isArray((raw as { questions?: unknown[] }).questions)
     ? (raw as { questions: unknown[] }).questions
@@ -891,7 +891,7 @@ function normalizeQuestions(
     })
   })
   if (candidates.length > targetCount) candidates.length = targetCount
-  const fallbacks = fallbackQuestions(depth, sources, includeStageQuestion)
+  const fallbacks = fallbackQuestions(depth, sources, includeStageQuestion, targetCount)
   fallbacks.forEach(({ id: _id, ...candidate }) => {
     if (candidates.length >= targetCount) return
     if (candidates.some((existing) => existing.category === candidate.category)) return
@@ -900,6 +900,18 @@ function normalizeQuestions(
       question: compactProjectQaQuestion(candidate.question),
     })
   })
+  // generate-project-qa-report 要求最后一题收束风险、核验条件和决策动作。
+  // 模型或按证据密度排序都不能把这一题挤出标准版题数。
+  if (!candidates.some((candidate) => candidate.category === '风险与核验')) {
+    const riskQuestion: Omit<ProjectQaGeneratedQuestion, 'id'> = {
+      category: '风险与核验',
+      question: QUESTION_LIBRARY.风险与核验[0],
+      rationale: '该问题用于收束核心假设、失效条件和下一步投资判断。',
+      priority: '高',
+    }
+    if (candidates.length >= targetCount) candidates[candidates.length - 1] = riskQuestion
+    else candidates.push(riskQuestion)
+  }
   return checkDuplicateQuestions(orderAndNumberQuestions(candidates.slice(0, targetCount)))
 }
 
@@ -1045,10 +1057,17 @@ ${evidenceForPrompt(input.sources, 900) || '无可用证据。不得假定任何
       input.depth,
       input.sources,
       includeStageQuestion,
+      targetCount,
     )
   } catch (error) {
     console.warn('[aiQaPipeline] Question Generator 使用确定性问题库:', (error as Error).message)
-    return normalizeQuestions({ questions: [] }, input.depth, input.sources, includeStageQuestion)
+    return normalizeQuestions(
+      { questions: [] },
+      input.depth,
+      input.sources,
+      includeStageQuestion,
+      targetCount,
+    )
   }
 }
 
@@ -1217,6 +1236,9 @@ function fallbackAnswerFor(
   sources: readonly EvidenceSource[],
   project?: ProjectLike,
 ): ProjectQaDraftAnswer {
+  const projectNames = [project?.companyName, project?.name]
+    .map((value) => cleanText(value))
+    .filter((value) => value.length >= 2)
   const ranked = sources.flatMap((source, sourceIndex) =>
     sourceSentences(source).map((sentence) => {
       const relevance = categoryEvidenceScore(question.category, sentence)
@@ -1229,6 +1251,11 @@ function fallbackAnswerFor(
       }
       }))
     .filter((item) => item.questionRelevance > 0)
+    .filter((item) => {
+      const source = sources[item.sourceIndex]
+      if (source?.sourceType !== 'public_web_llm') return true
+      return projectNames.some((name) => item.sentence.includes(name))
+    })
     .sort((left, right) =>
       right.questionRelevance - left.questionRelevance
       || right.score - left.score

@@ -6,6 +6,7 @@ import {
   AI_BUSINESS_SKILLS,
   AI_DUE_DILIGENCE_SKILL_NAME,
   AI_PPT_WORKFLOW_SKILLS,
+  AI_QA_SKILL_NAME,
   getAiSkillDirectory,
   getAiSkillRoot,
   listAiBusinessSkills,
@@ -58,14 +59,16 @@ async function main() {
   )
 
   for (const definition of AI_BUSINESS_SKILLS) {
+    const definitionName = String(definition.name)
+    const isProjectQa = definitionName === AI_QA_SKILL_NAME
     const loaded = await loadAiSkill(definition.name)
     const directory = getAiSkillDirectory(definition.name)
     const skillSource = await readFile(path.join(directory, 'SKILL.md'), 'utf8')
     const uiSource = await readFile(path.join(directory, 'agents', 'openai.yaml'), 'utf8')
-    const referenceName = definition.name === AI_DUE_DILIGENCE_SKILL_NAME
+    const referenceName = definitionName === AI_DUE_DILIGENCE_SKILL_NAME
       ? 'quality-gates.md'
-      : definition.name === 'answer-project-qa'
-        ? 'qa-contract.md'
+      : isProjectQa
+        ? 'evidence-and-quality-rules.md'
         : 'output-contract.md'
     const referenceSource = await readFile(path.join(directory, 'references', referenceName), 'utf8')
 
@@ -91,12 +94,16 @@ async function main() {
     ]
     assert(
       `${definition.label} 用户可见内容使用中文`,
-      containsChinese(loaded.description)
-        && containsChinese(skillSource)
-        && containsChinese(referenceSource)
-        && uiValues.every((value) => containsChinese(value))
-        && chineseCharacterCount(skillSource) >= 100
-        && chineseCharacterCount(referenceSource) >= 100,
+      isProjectQa
+        ? uiValues.every((value) => containsChinese(value))
+          && containsChinese(skillSource)
+          && chineseCharacterCount(skillSource) >= 100
+        : containsChinese(loaded.description)
+          && containsChinese(skillSource)
+          && containsChinese(referenceSource)
+          && uiValues.every((value) => containsChinese(value))
+          && chineseCharacterCount(skillSource) >= 100
+          && chineseCharacterCount(referenceSource) >= 100,
       `description/SKILL/reference/UI 中文化；UI=${uiValues.join(' | ')}`,
     )
     assert(
@@ -113,9 +120,13 @@ async function main() {
     )
     assert(
       `${definition.label} 明确证据与内容去重`,
-      definition.name === AI_DUE_DILIGENCE_SKILL_NAME
+      definitionName === AI_DUE_DILIGENCE_SKILL_NAME
         ? /重复/.test(skillSource)
           && /多个转载同一稿件/.test(loaded.referenceInstructions)
+        : isProjectQa
+          ? /Do not silently reconcile conflicting sources/.test(skillSource)
+            && /Do not average conflicting definitions/.test(referenceSource)
+            && /multiple independent public sources/.test(referenceSource)
         : /重复|去重/.test(skillSource)
           && /重复|去重|不得复述|只(?:能|列)/.test(referenceSource)
           && /同一(?:事实|文件|数字|来源)/.test(`${skillSource}\n${referenceSource}`),
@@ -123,76 +134,57 @@ async function main() {
     )
     assert(
       `${definition.label} 明确来源披露位置`,
-      definition.name === AI_DUE_DILIGENCE_SKILL_NAME
+      definitionName === AI_DUE_DILIGENCE_SKILL_NAME
         ? /内部工作文件保留/.test(`${skillSource}\n${loaded.referenceInstructions}`)
           && /来源清单.*内部工作文件保留/.test(skillSource)
           && /不写成正文免责声明/.test(skillSource)
-        : definition.name === 'answer-project-qa'
-          ? /系统审计/.test(`${skillSource}\n${referenceSource}`)
-            && /不显示|不得显示/.test(`${skillSource}\n${referenceSource}`)
-            && /引用资料/.test(referenceSource)
-        : definition.name === 'draft-investment-proposal'
+        : isProjectQa
+          ? /source-free reader-facing output by default/.test(skillSource)
+            && /internal evidence ledger/.test(`${skillSource}\n${referenceSource}`)
+            && /no source list, source note, citation label/.test(referenceSource)
+        : definitionName === 'draft-investment-proposal'
           ? /任务来源表|审计元数据/.test(`${skillSource}\n${referenceSource}`)
             && /不得生成.*免责声明.*引用资料|不生成文末.*免责声明.*引用资料/.test(
               `${skillSource}\n${referenceSource}`,
             )
         : /末尾|文尾|最后一页/.test(`${skillSource}\n${referenceSource}`)
           && /来源|引用资料/.test(referenceSource),
-      definition.name === AI_DUE_DILIGENCE_SKILL_NAME
+      definitionName === AI_DUE_DILIGENCE_SKILL_NAME
         ? '尽调来源保存在系统审计记录，正式正文不显示文末来源'
-        : definition.name === 'answer-project-qa'
+        : isProjectQa
           ? 'Q&A 来源保存在系统审计记录，正式 DOCX 不显示来源编号或引用资料'
-        : definition.name === 'draft-investment-proposal'
+        : definitionName === 'draft-investment-proposal'
           ? '投资提案来源保存在任务来源表和审计元数据，正文不显示免责声明或引用资料'
         : '仅列实际使用来源并置于末尾',
     )
-    if (definition.name === 'answer-project-qa') {
+    if (isProjectQa) {
       const documentGeneratorRequirements = [
-        '投资中台资深投资经理',
-        '当前会话绑定',
-        '项目摘要',
-        '项目主体',
-        '股权与治理',
-        '产品与技术',
-        '默认不设置',
-        '内部项目状态',
-        '可以继续评估',
-        '启动尽调',
-        '泛泛的行业研究报告',
-        'Structured Q&A DOCX Generator',
-        'Template Parser',
-        'Current Project RAG',
-        'Flue Intel Discovery',
-        'Controlled Search Fallback',
-        'Page Verification',
-        'Question Generator',
-        'Duplicate Checker',
-        'Answer Generator',
-        'Reviewer',
-        'Formatter',
+        '# Generate Project Q&A Report',
+        'standard mode with 8-12 questions',
+        'qa_cn_formal_a4',
+        'Start Q1 immediately after the title',
+        'Do not add a standalone `结论：`',
+        'source-free reader-facing output by default',
+        'internal evidence ledger',
+        'zero external hyperlinks',
         'DOCX',
-        '项目资料库',
-        '项目大模型',
+        'Markdown companion',
       ]
       assert(
-        `${definition.label} 遵守模板学习与内容重建契约`,
-        documentGeneratorRequirements.every((term) => skillSource.includes(term))
-          && /不得出现“线索、进入初筛、申请立项、提请上会、提交投决、继续跟踪、暂缓推进、归档”等内部项目状态词/.test(
-            skillSource,
-          ),
+        `${definition.label} 遵守直接式报告与版式契约`,
+        documentGeneratorRequirements.every((term) => skillSource.includes(term)),
         documentGeneratorRequirements.filter((term) => !skillSource.includes(term)).join(', ') || '完整',
       )
       assert(
-        `${definition.label} 资料不足时形成核验边界且不使用样本补写`,
-        /资料不能完整回答时.*核验边界/.test(`${skillSource}\n${referenceSource}`)
-          && /Flue `intel-collect`/.test(`${skillSource}\n${referenceSource}`)
-          && /受控公开搜索兜底/.test(`${skillSource}\n${referenceSource}`)
-          && /范例正文永远不是当前项目证据/.test(`${skillSource}\n${referenceSource}`)
-          && /不得输出“暂无相关资料”/.test(`${skillSource}\n${referenceSource}`),
-        '项目资料库优先；关键缺口先由 Flue 发现候选来源，再受控搜索兜底、页面核验并由项目大模型总结，且不得使用模板项目事实',
+        `${definition.label} 资料不足时保留可核验边界且禁止编造`,
+        /adaptive public research/.test(skillSource)
+          && /Prefer a visible gap over a polished invention/.test(skillSource)
+          && /Never fabricate market size/.test(skillSource)
+          && /Do not treat placeholder content as evidence/.test(skillSource),
+        '授权资料优先；关键缺口可定向研究，无法核验时保留边界且不得用模板占位内容补写',
       )
     }
-    if (definition.name === 'generate-document-from-template') {
+    if (definitionName === 'generate-document-from-template') {
       const leadIntelligenceRequirements = [
         '投资中台的资深投资经理',
         '当前会话绑定',
@@ -551,15 +543,18 @@ async function main() {
     '首轮生成 → 待核验问题提取 → Flue 候选发现 → LLM Gateway 页面核验 → 缓存写回 → 带补全证据二次生成；联网异常继续生成受限 DOCX',
   )
   assert(
-    '除 Gorden 原生投资建议书外，其余业务任务绑定 docs 模板',
+    '除 Gorden 原生投资建议书和 Skill 原生 Q&A 外，其余业务任务绑定 docs 模板',
     AI_TASK_TYPES
-      .filter((type) => type !== 'investment_recommendation_ppt')
+      .filter((type) => !['investment_recommendation_ppt', 'project_qa'].includes(type))
       .every((type) =>
         AI_TEMPLATE_CATALOG[type].referencePath.includes(`${path.sep}docs${path.sep}`))
       && AI_TEMPLATE_CATALOG.investment_recommendation_ppt.referencePath.includes(
         `${path.sep}GordenSuperPPTSkills${path.sep}GordenSuperPPTSkill${path.sep}SKILL.md`,
       )
       && AI_TEMPLATE_CATALOG.investment_recommendation_ppt.referencePaths?.length === 0
+      && AI_TEMPLATE_CATALOG.project_qa.referencePath.includes(
+        `${path.sep}generate-project-qa-report${path.sep}`,
+      )
       && AI_QA_TEMPLATE.referencePaths.length >= 1
       && AI_QA_TEMPLATE.referencePaths.every((item) =>
         item.includes(`${path.sep}docs${path.sep}Q&A${path.sep}`)),
@@ -665,93 +660,64 @@ async function main() {
     '本地资料库 → 网络缓存 → 项目大模型定向网络补全 → 缓存写回；仅交付 DOCX',
   )
 
-  const qaContract = await readFile(
-    path.join(root, 'answer-project-qa', 'references', 'qa-contract.md'),
-    'utf8',
-  )
-  const qaTemplateStyleGuide = await readFile(
-    path.join(root, 'answer-project-qa', 'references', 'qa-template-style-guide.md'),
-    'utf8',
-  )
   const qaCoreRules = await readFile(AI_QA_TEMPLATE.coreRulesPath, 'utf8')
-  const qaCoreRulesSha256 = createHash('sha256').update(qaCoreRules).digest('hex')
-  const qaSkill = await loadAiSkill('answer-project-qa')
+  const qaSkill = await loadAiSkill(AI_QA_SKILL_NAME)
   const qaRuntimeCorpus = `${qaSkill.instructions}\n${qaSkill.referenceInstructions}`
+  assert(
+    'Q&A 快捷任务统一绑定 generate-project-qa-report',
+    AI_QA_SKILL_NAME === 'generate-project-qa-report'
+      && qaSkill.name === AI_QA_SKILL_NAME
+      && AI_QA_TEMPLATE.skillName === AI_QA_SKILL_NAME
+      && AI_TEMPLATE_CATALOG.project_qa.skillName === AI_QA_SKILL_NAME,
+    `${AI_QA_SKILL_NAME} / ${AI_TEMPLATE_CATALOG.project_qa.skillName}`,
+  )
   const qaRequired = [
-    '阶段与推进建议', '项目主体', '股权与治理', '创始人与团队', '产品与技术',
-    '知识产权', '商业模式', '客户与商业化', '市场与应用场景', '竞争格局',
-    '财务与现金流', '融资与估值', '交易方案', '合规与权属', '风险与核验',
-    '投资中台资深投资经理', '进入初筛', '继续跟踪', '申请立项', '启动尽调',
-    '提请上会', '提交投决', '暂缓推进', '归档',
-    '泛行业研究',
-    '项目资料库', 'Reviewer', 'DOCX', '系统审计记录', '不生成或登记 PDF',
+    '# Generate Project Q&A Report',
+    'standard mode with 8-12 questions',
+    'Start Q1 immediately after the title',
+    'Do not add a standalone `结论：`',
+    'source-free reader-facing output by default',
+    'internal evidence ledger',
+    'qa_cn_formal_a4',
+    'DOCX',
+    'zero external hyperlinks',
   ]
   assert(
-    'Q&A 动态选题、项目资料库证据、内部审阅与 DOCX 契约完整',
+    'Q&A 新 Skill 的直接式结构、证据边界和 DOCX 契约完整',
     qaRequired.every((term) => qaRuntimeCorpus.includes(term)),
     qaRequired.filter((term) => !qaRuntimeCorpus.includes(term)).join(', ') || '完整',
   )
-  const qaStyleRequired = [
-    '模板共识',
-    '各内容单元的表达目的',
-    '三至六个自然段',
-    'DOCX',
-    'A4',
-    '宋体',
-    'Times New Roman',
-    '18 pt',
-    '14 pt',
-    '10.5-11 pt',
-    '1.5 倍行距',
-    '两端对齐',
-    '首行缩进 2 个汉字',
-    'Q1：',
-    '（1）',
-    '项目资料库与证据',
-    '可见正文排除项',
-  ]
   assert(
-    'Q&A 模板结构与文风规范完整',
-    qaStyleRequired.every((term) => qaTemplateStyleGuide.includes(term)),
-    qaStyleRequired.filter((term) => !qaTemplateStyleGuide.includes(term)).join(', ') || '完整',
-  )
-  assert(
-    'Q&A Skill 核心规则与 docs/Q&A 统一规范一致',
-    AI_QA_TEMPLATE.coreRulesPath === path.resolve(process.cwd(), 'docs', 'Q&A', 'Q&A模板核心规则.md')
-      && qaCoreRules.includes('# 项目 Q&A 模板核心规则')
-      && [
-        '投资中台资深投资经理',
-        '当前会话绑定',
-        '项目摘要',
-        '默认不设置阶段建议问题',
-        '可以继续评估',
-        '启动尽调',
-        '内部项目状态',
-        '股权与治理',
-        '产品与技术',
-        '融资与估值',
-        '交易方案',
-        'A4',
-        '宋体',
-        'Times New Roman',
-        '1.5 倍',
-        '问题目录',
-        '直接答复',
-        '自然段论证',
-      ]
-        .every((term) => qaCoreRules.includes(term))
-      && /客户可见问题和回答不得出现内部项目状态词/.test(qaCoreRules)
-      && qaTemplateStyleGuide.includes(qaCoreRulesSha256)
+    'Q&A 核心规则直接来自 generate-project-qa-report',
+    AI_QA_TEMPLATE.coreRulesPath === path.resolve(
+      process.cwd(),
+      'server',
+      'workspace',
+      '.agents',
+      'skills',
+      'generate-project-qa-report',
+      'SKILL.md',
+    )
+      && qaCoreRules.includes('# Generate Project Q&A Report')
+      && qaCoreRules.includes('Start Q1 immediately after the title')
+      && qaCoreRules.includes('Do not add a standalone `结论：`')
       && !/(普雷赛斯|轻蜓光电|中数睿智|德塔智能|浙江蓝成)/.test(qaCoreRules),
     AI_QA_TEMPLATE.coreRulesPath,
   )
   assert(
-    'Q&A 登记 docs/Q&A 全部五份业务样本',
-    AI_QA_TEMPLATE.templateDirectory === path.resolve(process.cwd(), 'docs', 'Q&A')
+    'Q&A 登记新 Skill 的模板与四份核心规范',
+    AI_QA_TEMPLATE.templateDirectory === path.resolve(
+      process.cwd(),
+      'server',
+      'workspace',
+      '.agents',
+      'skills',
+      'generate-project-qa-report',
+    )
       && AI_QA_TEMPLATE.referencePaths.length === 5
       && AI_QA_TEMPLATE.referencePaths.every((item) =>
-        path.dirname(item) === AI_QA_TEMPLATE.templateDirectory
-        && item.toLowerCase().endsWith('.pdf')),
+        item.startsWith(`${AI_QA_TEMPLATE.templateDirectory}${path.sep}`)
+        && item.toLowerCase().endsWith('.md')),
     `${AI_QA_TEMPLATE.templateDirectory} / ${AI_QA_TEMPLATE.referencePaths.length} 份`,
   )
   assert(
@@ -760,8 +726,7 @@ async function main() {
       && AI_QA_TEMPLATE.downloadableArtifact === true
       && AI_QA_TEMPLATE.outputFormats.join(',') === 'docx'
       && /DOCX/.test(qaSkill.instructions)
-      && /只提供一份.*正式 DOCX/.test(qaSkill.instructions)
-      && /项目资料库/.test(qaContract),
+      && AI_TEMPLATE_CATALOG.project_qa.outputFormat === 'docx',
     `${AI_QA_TEMPLATE.outputMode} / downloadable=${AI_QA_TEMPLATE.downloadableArtifact}`,
   )
   const qaPipelineSource = await readFile(
@@ -780,68 +745,56 @@ async function main() {
     'Q&A 运行时注入完整 Prompt、Workflow 与模板规范',
     qaPipelineSource.includes('skill.referenceInstructions')
       && qaPipelineSource.includes('只以已激活的 Q&A Skill 及其 references 为业务权威')
-      && qaRuntimeCorpus.includes('投资中台资深投资经理')
-      && !qaPipelineSource.includes('你是早期投资项目线索分析师')
-      && !qaRuntimeCorpus.includes('早期投资项目线索分析师')
-      && qaRuntimeCorpus.includes('泛行业研究')
-      && ['进入初筛', '继续跟踪', '申请立项', '启动尽调', '提请上会', '提交投决', '暂缓推进', '归档']
-        .every((term) => qaRuntimeCorpus.includes(term))
-      && qaSkill.referenceNames.includes('references/qa-contract.md')
-      && qaSkill.referenceNames.includes('references/qa-template-style-guide.md')
-      && qaSkill.referenceNames.includes('references/workflow.md')
-      && qaSkill.referenceNames.includes('references/pipeline-prompts.md')
-      && qaSkill.referenceInstructions.includes('# Q&A 生产契约')
-      && qaSkill.referenceInstructions.includes('# Q&A Pipeline Prompts'),
-    '生产契约 + 模板画像 + Workflow + Pipeline Prompts',
+      && qaSkill.referenceNames.includes('assets/qa-report-template.md')
+      && qaSkill.referenceNames.includes('references/structure-blueprint.md')
+      && qaSkill.referenceNames.includes('references/section-writing-guide.md')
+      && qaSkill.referenceNames.includes('references/evidence-and-quality-rules.md')
+      && qaSkill.referenceNames.includes('references/format-guidelines.md')
+      && qaSkill.referenceInstructions.includes('# Project Q&A Structure Blueprint')
+      && qaSkill.referenceInstructions.includes('# Q&A Report Format Guidelines'),
+    '新 Skill + 结构蓝图 + 章节写作 + 证据质量 + 版式规范',
   )
   assert(
-    'Q&A Pipeline 包含 Parser、项目 RAG、Generator、Duplicate Checker、Reviewer 与 DOCX 生成',
+    'Q&A Pipeline 包含新 Skill 画像、项目 RAG、Generator、Duplicate Checker、Reviewer 与 DOCX 生成',
     qaPipelineSource.includes('generateProjectQaQuestions')
       && qaPipelineSource.includes('checkDuplicateQuestions')
       && qaPipelineSource.includes('reviewProjectQaAnswers')
       && qaDocumentSource.includes('generateProjectQaDocx')
       && !qaDocumentSource.includes('convertProjectQaDocxToPdf')
-      && qaParserSource.includes('parseQaTemplateCorpus'),
-    'Template Parser / Current Project RAG / Question Generator / Duplicate Checker / Reviewer / DOCX',
+      && qaParserSource.includes('createProjectQaSkillProfile')
+      && qaParserSource.includes('generate-project-qa-report-profile-v1'),
+    'Skill Profile / Current Project RAG / Question Generator / Duplicate Checker / Reviewer / DOCX',
   )
   assert(
-    'Q&A Formatter 落实统一字号、行距、页边距与问题一级结构',
-    qaDocumentSource.includes("'宋体'")
-      && qaDocumentSource.includes('AI_DOCUMENT_SONG_FONT')
-      && qaDocumentSource.includes("const LATIN_FONT = 'Times New Roman'")
-      && qaDocumentSource.includes('size: 36')
-      && qaDocumentSource.includes('size: 28')
-      && qaDocumentSource.includes('size: 24')
-      && qaDocumentSource.includes('line: 360')
-      && qaDocumentSource.includes('margin: { top: 1440, right: 1800, bottom: 1440, left: 1800 }')
-      && qaDocumentSource.includes('input.content.questions.forEach((question, globalIndex)')
-      && !qaDocumentSource.includes('function categoryHeading')
-      && !qaDocumentSource.includes('function metadataTable')
-      && !qaDocumentSource.includes('`${question.question}（${question.category}）`')
-      && !qaDocumentSource.includes("mixedTextRuns('引用资料'")
-      && !qaDocumentSource.includes("mixedTextRuns('Reviewer 审阅结果'")
-      && qaPipelineSource.includes('function cleanAnswerText')
-      && qaPipelineSource.includes('一至六个自然段')
-      && qaDocumentSource.includes('answerParagraphFormValid')
-      && qaDocumentSource.includes('narrativeParagraphRangeValid')
+    'Q&A Formatter 落实 qa_cn_formal_a4 字号、固定行距、页边距与直接式结构',
+    qaDocumentSource.includes("const PROJECT_QA_REPORT_BODY_FONT = 'STFangsong'")
+      && qaDocumentSource.includes("const PROJECT_QA_REPORT_HEADING_FONT = 'STHeiti'")
+      && qaDocumentSource.includes('const PROJECT_QA_REPORT_BODY_SIZE = 21')
+      && qaDocumentSource.includes('const PROJECT_QA_REPORT_TITLE_SIZE = 40')
+      && qaDocumentSource.includes('const PROJECT_QA_REPORT_QUESTION_SIZE = 28')
+      && qaDocumentSource.includes('const PROJECT_QA_REPORT_BODY_SPACING = 400')
+      && qaDocumentSource.includes('const PROJECT_QA_REPORT_QUESTION_SPACING = 420')
+      && qaDocumentSource.includes('const PROJECT_QA_REPORT_TITLE_SPACING = 480')
+      && qaDocumentSource.includes('top: 1531')
+      && qaDocumentSource.includes('right: 1701')
+      && qaDocumentSource.includes('bottom: 1587')
+      && qaDocumentSource.includes('left: 1803')
+      && qaDocumentSource.includes('generateProjectQaReportDocx')
+      && qaDocumentSource.includes("layoutProfile: 'qa_cn_formal_a4'")
       && qaDocumentSource.includes('visibleAnswerLabelsAbsent')
       && qaDocumentSource.includes('visibleSubheadingsAbsent')
       && qaDocumentSource.includes('visibleSourceProcessAbsent')
-      && qaDocumentSource.includes('QA_VISIBLE_SOURCE_PROCESS_TERMS')
-      && !qaDocumentSource.includes('function dimensionParagraph')
-      && !qaDocumentSource.includes('bodyParagraph(`答复：${line}`')
-      && !qaDocumentSource.includes('index === 6')
-      && qaDocumentSource.includes('globalIndex === 0'),
-    '宋体 / 18pt 标题 / 14pt 问题 / 1-6 个自然段 / 无加工痕迹 / 1.5 倍行距 / 25.4×31.7mm 页边距',
+      && qaDocumentSource.includes('visibleAuditAppendixAbsent')
+      && qaDocumentSource.includes('不得包含外部超链接')
+      && qaDocumentSource.includes('不得显示答复或结论标签'),
+    'STFangsong / STHeiti / 20pt 标题 / 14pt 问题 / 10.5pt 正文 / 20pt 固定行距 / 正式 A4 页边距',
   )
   assert(
-    'Q&A 双模式边界明确且正式任务只交付 DOCX',
-    /正式文档模式/.test(qaSkill.instructions)
-      && /单题会话模式/.test(qaSkill.instructions)
-      && /DOCX/.test(qaSkill.instructions)
-      && /不生成或登记 PDF、PPT 或 PPTX/.test(qaSkill.instructions)
-      && /不创建文档任务或下载产物/.test(qaSkill.instructions),
-    '正式任务 DOCX / 单题结构化回答 / 禁止 PDF、PPT、PPTX',
+    'Q&A 快捷任务使用标准 8 题并只登记 DOCX',
+    qaPipelineSource.includes('标准版: 8')
+      && /Generate a PDF only when the user explicitly requests one/.test(qaSkill.instructions)
+      && AI_QA_TEMPLATE.outputFormats.join(',') === 'docx',
+    '标准版 8 题 / 快捷任务仅 DOCX / PDF 仅在用户明确要求时生成',
   )
 
   const pptContract = await readFile(
@@ -966,8 +919,10 @@ async function main() {
       && quickActionsSource.includes('投资委员会 Q&A')
       && quickActionsSource.includes('项目投资问答 DOCX')
       && !quickActionsSource.includes("activeAction.id === 'qa' ? 'PDF'")
-      && !quickActionsSource.includes('QA_GROUPS'),
-    'Q&A task / 投资委员会或尽调 / DOCX',
+      && !quickActionsSource.includes('QA_GROUPS')
+      && AI_TEMPLATE_CATALOG.project_qa.skillName === 'generate-project-qa-report'
+      && AI_TEMPLATE_CATALOG.project_qa.templateVersion === 'generate-project-qa-report-20260806-v1',
+    'Q&A task / generate-project-qa-report / DOCX',
   )
   const taskCardsSource = await readFile(
     path.resolve(process.cwd(), 'src', 'components', 'AiTaskCards.tsx'),
