@@ -2186,11 +2186,15 @@ async function executeTask(taskId: string) {
         .orderBy(desc(aiArtifacts.createdAt))
         .limit(1)
       const existingArtifact = existingArtifacts[0]
-      if (existingArtifact) {
-        imageDeckArtifactVersion = existingArtifact.version
-        return
+      const imageDeckPath = existingArtifact
+        ? path.resolve(existingArtifact.storagePath)
+        : path.join(taskDir, imageDeckFileName)
+      if (!imageDeckPath.startsWith(`${path.resolve(taskDir)}${path.sep}`)) {
+        throw Object.assign(
+          new Error('图片高保真版产物路径超出当前任务目录'),
+          { code: 'IMAGE_DECK_ARTIFACT_PATH_INVALID' },
+        )
       }
-      const imageDeckPath = path.join(taskDir, imageDeckFileName)
       await copyFile(imageDeck.path, imageDeckPath)
       const copiedStat = await stat(imageDeckPath)
       if (!copiedStat.isFile() || copiedStat.size !== imageDeck.bytes) {
@@ -2198,6 +2202,36 @@ async function executeTask(taskId: string) {
           new Error('图片高保真版复制后文件校验不一致'),
           { code: 'IMAGE_DECK_ARTIFACT_COPY_MISMATCH' },
         )
+      }
+      const imageDeckMetadata = {
+        ...(existingArtifact?.metadata ?? {}),
+        ...imageDeck.metadata,
+        artifactStage: 'image-deck',
+        artifactLabel: '图片高保真版',
+        editableScope: 'image',
+        slideCount: imageDeck.slideCount,
+        bytes: copiedStat.size,
+        sha256: imageDeck.sha256,
+        encodingClean: true,
+        qualityGate: 'image-generation-and-package',
+        availableWhileTaskRunning: true,
+        refreshedAfterResume: Boolean(existingArtifact),
+      }
+      if (existingArtifact) {
+        imageDeckArtifactVersion = existingArtifact.version
+        await db.update(aiArtifacts).set({
+          storagePath: imageDeckPath,
+          qualityStatus: 'passed',
+          templateVersion: template.templateVersion,
+          metadata: imageDeckMetadata,
+          createdAt: new Date(),
+        }).where(eq(aiArtifacts.id, existingArtifact.id))
+        await updateStage(
+          taskId,
+          '图片高保真版已重新生成，可重新下载；可编辑版继续生成中',
+          78,
+        )
+        return
       }
       const [{ count }] = await db.select({ count: sql<number>`count(*)::int` })
         .from(aiArtifacts)
@@ -2221,18 +2255,7 @@ async function executeTask(taskId: string) {
         sourceCutoffDate,
         templateVersion: template.templateVersion,
         qualityStatus: 'passed',
-        metadata: {
-          ...imageDeck.metadata,
-          artifactStage: 'image-deck',
-          artifactLabel: '图片高保真版',
-          editableScope: 'image',
-          slideCount: imageDeck.slideCount,
-          bytes: copiedStat.size,
-          sha256: imageDeck.sha256,
-          encodingClean: true,
-          qualityGate: 'image-generation-and-package',
-          availableWhileTaskRunning: true,
-        },
+        metadata: imageDeckMetadata,
       })
       await updateStage(
         taskId,
