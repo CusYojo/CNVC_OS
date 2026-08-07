@@ -1284,9 +1284,9 @@ async function main() {
       assert(
         checks,
         'AI-008 生成模板式原生表格',
-        documentXml.includes('<w:tbl>')
+          documentXml.includes('<w:tbl>')
           && documentXml.includes('历史财务摘要')
-          && documentXml.includes('w:fill="D9D9D9"'),
+          && documentXml.includes('w:fill="C0C0C0"'),
         '原生可编辑表格、灰底表头',
       )
       assert(

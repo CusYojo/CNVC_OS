@@ -8,6 +8,7 @@ import importlib.util
 import json
 import platform
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -16,7 +17,25 @@ MIN_PYTHON = (3, 10)
 REQUIRED_MODULES = {
     "docx": "python-docx",
     "fitz": "PyMuPDF",
+    "lxml": "lxml",
 }
+
+
+def installed_font_families() -> str:
+    fc_list = shutil.which("fc-list")
+    if not fc_list:
+        return ""
+    try:
+        result = subprocess.run(
+            [fc_list, ":", "family"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+        return result.stdout
+    except (OSError, subprocess.SubprocessError):
+        return ""
 
 
 def inspect_runtime() -> dict:
@@ -31,12 +50,20 @@ def inspect_runtime() -> dict:
     )
     libreoffice = shutil.which("soffice") or shutil.which("libreoffice")
     renderer = "Microsoft Word" if word else ("LibreOffice" if libreoffice else "")
+    font_families = installed_font_families()
+    fangsong = any(name.casefold() in font_families.casefold() for name in (
+        "STFangsong", "FangSong", "仿宋",
+    ))
+    heiti = any(name.casefold() in font_families.casefold() for name in (
+        "STHeiti", "SimHei", "Heiti SC", "黑体", "Noto Sans CJK SC",
+    ))
     return {
         "python": sys.executable,
         "python_version": platform.python_version(),
         "python_supported": sys.version_info >= MIN_PYTHON,
         "modules": modules,
         "renderer": renderer,
+        "fonts": {"fangsong": fangsong, "heiti": heiti},
         "platform": platform.platform(),
     }
 
@@ -58,6 +85,10 @@ def main() -> int:
         errors.append("missing Python package(s): " + ", ".join(missing))
     if not result["renderer"]:
         errors.append("Microsoft Word export or LibreOffice/soffice is required")
+    if not result["fonts"]["fangsong"]:
+        errors.append("FangSong/STFangsong font is required for body text")
+    if not result["fonts"]["heiti"]:
+        errors.append("Heiti/SimHei font is required for headings")
 
     if args.json:
         result["errors"] = errors
@@ -68,6 +99,8 @@ def main() -> int:
             package = REQUIRED_MODULES[module]
             print(f"Module {module} ({package}): {'ok' if installed else 'missing'}")
         print(f"Renderer: {result['renderer'] or 'missing'}")
+        print(f"Font FangSong: {'ok' if result['fonts']['fangsong'] else 'missing'}")
+        print(f"Font Heiti: {'ok' if result['fonts']['heiti'] else 'missing'}")
         for error in errors:
             print(f"ERROR: {error}")
         if not errors:

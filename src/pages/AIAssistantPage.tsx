@@ -1595,7 +1595,12 @@ function Chat() {
       return true
     } catch (error) {
       console.warn(`${request.actionLabel} task was not created`, error)
-      showToast(`${request.actionLabel}任务暂未创建，请稍后再试`, 'info')
+      const message = error instanceof ApiError
+        ? error.code === 'AI_SKILL_NOT_AVAILABLE'
+          ? `${request.actionLabel}生成技能尚未部署完成，请联系管理员更新并重启服务`
+          : `${request.actionLabel}任务创建失败：${error.message}`
+        : `${request.actionLabel}任务暂未创建，请稍后再试`
+      showToast(message, 'error')
       return false
     } finally {
       quickTaskLocksRef.current.delete(taskLockKey)

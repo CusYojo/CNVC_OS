@@ -111,6 +111,7 @@ import {
   type InvestmentProposalOutputReview,
 } from './aiInvestmentProposalDocumentService.js'
 import { validateInvestmentProposalWithSkill } from './aiInvestmentProposalSkillRuntimeService.js'
+import { generateDueDiligenceReportWithSkill } from './aiDueDiligenceSkillRuntimeService.js'
 import {
   safeAiTaskFailureMessage,
   safeAiTaskFailureStage,
@@ -988,10 +989,12 @@ function assessBusinessDocumentTemplateFidelity(input: {
   const quality = input.quality.metadata
   const exactSections = exactSectionOrder(input.content, input.templateSections)
   const contentAuditPassed = input.content.generationAudit?.reviewerPassed === true
-  const expectedTableCount = input.content.sections.reduce(
-    (count, section) => count + (section.tables?.length ?? 0),
-    0,
-  )
+  const expectedTableCount = input.type === 'due_diligence_report'
+    ? Number(input.generationMetadata.tableCount ?? 0)
+    : input.content.sections.reduce(
+        (count, section) => count + (section.tables?.length ?? 0),
+        0,
+      )
 
   if (input.type === 'compliance_statement') {
     const review = input.complianceReview
@@ -2115,6 +2118,8 @@ async function executeTask(taskId: string) {
           ? 'Formatter 生成 Word'
           : task.type === 'investment_proposal'
             ? 'Formatter 按 Document Blueprint 生成 Word'
+          : task.type === 'due_diligence_report'
+            ? 'write-investment-dd-report 审计字段并生成 Word'
           : '生成 DOCX',
       68,
     )
@@ -2125,6 +2130,26 @@ async function executeTask(taskId: string) {
       task.type === 'custom_template_document' ? content.title : undefined,
     )
     const outputPath = path.join(taskDir, fileName)
+    const generateCurrentDocx = async (): Promise<Record<string, unknown>> => task.type === 'due_diligence_report'
+      ? generateDueDiligenceReportWithSkill({
+          outputPath,
+          taskDirectory: taskDir,
+          project,
+          content,
+          sources,
+          sourceCutoffDate,
+          diligenceScope: parameters.diligenceScope,
+          sectionTitles: template.sections,
+        })
+      : generateBusinessDocx({
+          outputPath,
+          template,
+          project,
+          content,
+          sourceCutoffDate,
+          sources,
+          blueprint: complianceBlueprint,
+        })
     let imageDeckArtifactVersion: number | undefined
     const publishImageDeck = async (imageDeck: {
       path: string
@@ -2212,7 +2237,7 @@ async function executeTask(taskId: string) {
           sources,
         })
       : undefined
-    let generationMetadata = template.outputFormat === 'pptx'
+    let generationMetadata: Record<string, unknown> = template.outputFormat === 'pptx'
       ? await (async () => {
         const result = await generateBusinessPptx({
           outputPath,
@@ -2272,15 +2297,12 @@ async function executeTask(taskId: string) {
         }
         return result
       })()
-      : await retryDocumentStep('DOCX Formatter', () => generateBusinessDocx({
-          outputPath,
-          template,
-          project,
-          content,
-          sourceCutoffDate,
-          sources,
-          blueprint: complianceBlueprint,
-        }))
+      : await retryDocumentStep(
+          task.type === 'due_diligence_report'
+            ? 'write-investment-dd-report 原生 DOCX Pipeline'
+            : 'DOCX Formatter',
+          generateCurrentDocx,
+        )
     if (await cancelIfRequested(taskId)) return
 
     if (task.type === 'investment_proposal') {
@@ -2297,14 +2319,7 @@ async function executeTask(taskId: string) {
           })
           if (proposalDocxReview.passed) break
           if (attempt === 1) {
-            generationMetadata = await generateBusinessDocx({
-              outputPath,
-              template,
-              project,
-              content,
-              sourceCutoffDate,
-              sources,
-            })
+            generationMetadata = await generateCurrentDocx()
           }
         }
       } catch (error) {
@@ -2334,15 +2349,7 @@ async function executeTask(taskId: string) {
           })
           if (complianceDocxReview.passed) break
           if (attempt === 1) {
-            generationMetadata = await generateBusinessDocx({
-              outputPath,
-              template,
-              project,
-              content,
-              sourceCutoffDate,
-              sources,
-              blueprint: complianceBlueprint,
-            })
+            generationMetadata = await generateCurrentDocx()
           }
         }
       } catch (error) {
@@ -2369,13 +2376,12 @@ async function executeTask(taskId: string) {
       allowInheritedCjkLanguageMetadata:
         task.type === 'investment_recommendation_ppt',
       expectedSectionTitles: task.type === 'due_diligence_report'
-        ? template.sections
+        ? Array.isArray(generationMetadata.sectionTitles)
+          ? generationMetadata.sectionTitles.map(String)
+          : undefined
         : undefined,
       expectedTableCount: task.type === 'due_diligence_report'
-        ? content.sections.reduce(
-            (count, section) => count + (section.tables?.length ?? 0),
-            0,
-          )
+        ? Number(generationMetadata.tableCount ?? 0)
         : undefined,
     }
     let quality: Awaited<ReturnType<typeof inspectGeneratedArtifact>>
@@ -2388,16 +2394,7 @@ async function executeTask(taskId: string) {
     } catch (error) {
       if (template.outputFormat !== 'docx') throw error
       console.warn('[aiTask] DOCX 首次质量检查未通过，重新生成主文档:', (error as Error).message)
-      generationMetadata = await retryDocumentStep('DOCX 质量恢复生成', () =>
-        generateBusinessDocx({
-          outputPath,
-          template,
-          project,
-          content,
-          sourceCutoffDate,
-          sources,
-          blueprint: complianceBlueprint,
-        }))
+      generationMetadata = await retryDocumentStep('DOCX 质量恢复生成', generateCurrentDocx)
       quality = await inspectGeneratedArtifact(outputPath, 'docx', qualityOptions)
     }
     const calculateTemplateFidelity = () => [
@@ -2420,16 +2417,7 @@ async function executeTask(taskId: string) {
     let templateFidelity = calculateTemplateFidelity()
     if (templateFidelity && !templateFidelity.passed) {
       await updateStage(taskId, '按模板差异自动修订文档', 94)
-      generationMetadata = await retryDocumentStep('模板还原度恢复生成', () =>
-        generateBusinessDocx({
-          outputPath,
-          template,
-          project,
-          content,
-          sourceCutoffDate,
-          sources,
-          blueprint: complianceBlueprint,
-        }))
+      generationMetadata = await retryDocumentStep('模板还原度恢复生成', generateCurrentDocx)
       quality = await inspectGeneratedArtifact(outputPath, 'docx', qualityOptions)
       if (task.type === 'compliance_statement' && complianceBlueprint) {
         complianceDocxReview = await reviewGeneratedComplianceDocx({
@@ -2458,17 +2446,7 @@ async function executeTask(taskId: string) {
       )
     }
     if (task.type === 'investment_proposal') {
-      try {
-        proposalSkillValidation = await validateInvestmentProposalWithSkill(outputPath)
-      } catch (error) {
-        const code = (error as Error & { code?: string }).code
-          ?? 'INVESTMENT_PROPOSAL_SKILL_VALIDATION_UNAVAILABLE'
-        proposalSkillValidation = { passed: false, code }
-        console.warn(
-          '[aiTask] draft-investment-proposal 原生成品校验未通过，保留已通过 OpenXML Reviewer 的 DOCX:',
-          (error as Error).message,
-        )
-      }
+      proposalSkillValidation = await validateInvestmentProposalWithSkill(outputPath)
     }
     const [{ count }] = await db.select({ count: sql<number>`count(*)::int` }).from(aiArtifacts)
       .where(and(eq(aiArtifacts.userId, task.userId), eq(aiArtifacts.projectId, task.projectId), eq(aiArtifacts.format, template.outputFormat)))
@@ -2676,7 +2654,14 @@ async function executeTask(taskId: string) {
         },
       })
     }
-    const usedSourceIndexes = usedBusinessSourceIndexes(content, sources.length)
+    const nativeDueDiligenceSourceIndexes = Array.isArray(generationMetadata.usedSourceIndexes)
+      ? generationMetadata.usedSourceIndexes
+          .map(Number)
+          .filter((index) => Number.isInteger(index) && index >= 0 && index < sources.length)
+      : []
+    const usedSourceIndexes = task.type === 'due_diligence_report'
+      ? [...new Set(nativeDueDiligenceSourceIndexes)]
+      : usedBusinessSourceIndexes(content, sources.length)
     if (usedSourceIndexes.length) {
       const sourceArtifactIds = [artifact.id]
       await db.insert(aiTaskSources).values(sourceArtifactIds.flatMap((artifactId) =>
@@ -2784,6 +2769,9 @@ async function executeTask(taskId: string) {
       'GORDEN_VISUAL_QA_REJECTED',
       'TASK_NOT_FOUND',
       'PROJECT_NOT_FOUND',
+      'DUE_DILIGENCE_EVIDENCE_EMPTY',
+      'DUE_DILIGENCE_PUBLIC_RESEARCH_AUDIT_REQUIRED',
+      'DUE_DILIGENCE_SKILL_RUNTIME_UNAVAILABLE',
     ].includes(String(diagnosticError.code ?? ''))
     const nonRecoverableMessage = /项目不存在|模板不存在|输出格式应为|缺少 Document Blueprint|缺少Document Blueprint/.test(
       internalMessage,

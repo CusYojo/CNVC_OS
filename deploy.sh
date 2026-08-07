@@ -324,14 +324,17 @@ EOF
 # 同步 Agent / 业务任务使用的 Skills 到持久化工作区
 #---------------------------------------
 sync_agent_skills() {
-    step "同步 Agent Skills"
+    step "暂存 Agent Skills"
 
-    local skills_root="${FLUE_STATE_DIR}/workspace/.agents/skills"
+    local skills_parent="${FLUE_STATE_DIR}/workspace/.agents"
+    local skills_root="${skills_parent}/skills.next"
     local source_root source_dir target_dir required_skill
 
-    # 清空旧的 skills，避免 git 中已删除的 skill 残留
+    # 只清理暂存目录，不触碰运行中服务正在读取的 skills。
+    # 新目录完成复制和校验后，才会在停机窗口内原子切换。
+    install -d -m 0750 "$skills_parent"
     if [ -d "$skills_root" ]; then
-        rm -rf "${skills_root:?}"/*
+        rm -rf "${skills_root:?}"
     fi
     install -d -m 0750 "$skills_root"
 
@@ -359,7 +362,8 @@ sync_agent_skills() {
 
     for required_skill in \
         generate-project-qa-report \
-        draft-investment-proposal
+        draft-investment-proposal \
+        write-investment-dd-report
     do
         if [ ! -f "${skills_root}/${required_skill}/SKILL.md" ]; then
             err "核心业务 Skill 同步失败: ${required_skill}"
@@ -392,7 +396,40 @@ sync_agent_skills() {
             exit 1
         fi
     done
-    log "Agent Skills 已同步到 ${skills_root} ✓"
+    touch "${skills_root}/.deploy-ready"
+    log "Agent Skills 已暂存并校验: ${skills_root} ✓"
+}
+
+#---------------------------------------
+# 在 API/Agent Runtime 停止后原子启用已校验的 Skills
+#---------------------------------------
+activate_agent_skills() {
+    local skills_parent="${FLUE_STATE_DIR}/workspace/.agents"
+    local live_root="${skills_parent}/skills"
+    local staged_root="${skills_parent}/skills.next"
+    local previous_root="${skills_parent}/skills.previous"
+
+    if [ ! -f "${staged_root}/.deploy-ready" ]; then
+        err "Agent Skills 暂存目录不存在或未通过校验: ${staged_root}"
+        exit 1
+    fi
+
+    if [ -d "$previous_root" ]; then
+        rm -rf "${previous_root:?}"
+    fi
+    if [ -d "$live_root" ]; then
+        mv "$live_root" "$previous_root"
+    fi
+    mv "$staged_root" "$live_root"
+    rm -f "${live_root}/.deploy-ready"
+    log "Agent Skills 已原子切换到 ${live_root} ✓"
+}
+
+finalize_agent_skills() {
+    local previous_root="${FLUE_STATE_DIR}/workspace/.agents/skills.previous"
+    if [ -d "$previous_root" ]; then
+        rm -rf "${previous_root:?}"
+    fi
 }
 
 #---------------------------------------
@@ -524,6 +561,12 @@ build_project() {
 
     setup_pdf_ppt_runtime
 
+    log "安装并验证 Q&A 文档生成运行时..."
+    "$NPM_BIN" run setup:qa-skill-runtime
+
+    log "安装并验证尽调报告原生运行时..."
+    "$NPM_BIN" run setup:dd-skill-runtime
+
     log "创建情报雷达 Python 虚拟环境并安装依赖..."
     python3 -m venv "$RADAR_VENV"
     "$RADAR_VENV/bin/python" -m pip install --disable-pip-version-check -r "${RADAR_DIR}/requirements.txt"
@@ -534,9 +577,8 @@ build_project() {
     log "编译主项目、前端和 Agent Runtime..."
     "$NPM_BIN" run build
 
-    # 确保必要目录存在
+    # 确保必要目录存在；Skill 在 start_services 的停机窗口内切换。
     install -d -m 0750 "$LOG_DIR" "$GENERATED_DIR" "${FLUE_STATE_DIR}/workspace" "${RADAR_STATE_DIR}/data"
-    sync_agent_skills
 
     if [ ! -f "${FLUE_DIR}/dist/server/server.mjs" ]; then
         err "Agent Runtime 构建产物不存在: ${FLUE_DIR}/dist/server/server.mjs"
@@ -888,6 +930,33 @@ wait_for_http() {
     return 1
 }
 
+wait_for_document_skill_bindings() {
+    local url="http://127.0.0.1:3100/api/health"
+    local expected="generate-project-qa-report,draft-investment-proposal,write-investment-dd-report"
+    local response_file document_skills i
+    response_file=$(mktemp)
+    for ((i = 1; i <= 30; i++)); do
+        if curl -fsS "$url" -o "$response_file" 2>/dev/null; then
+            document_skills=$("$NODE_BIN" -e '
+              const fs = require("node:fs");
+              try {
+                const body = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+                process.stdout.write(Array.isArray(body.documentSkillNames) ? body.documentSkillNames.join(",") : "");
+              } catch {}
+            ' "$response_file")
+            if [ "$document_skills" = "$expected" ]; then
+                rm -f "$response_file"
+                log "投资文档 Skill 绑定检查通过: ${expected} ✓"
+                return 0
+            fi
+        fi
+        sleep 1
+    done
+    rm -f "$response_file"
+    err "API 未加载完整投资文档 Skill: 期望 ${expected}，实际 ${document_skills:-未返回}"
+    return 1
+}
+
 start_services() {
     step "启动服务"
 
@@ -899,6 +968,14 @@ start_services() {
         err "情报雷达虚拟环境不存在，请先执行部署构建"
         exit 1
     fi
+
+    # restart 也必须从当前发布目录重新暂存 Skill；旧进程停止后再切换，
+    # 避免出现“旧 API + 已删除旧 Skill”的混合版本窗口。
+    sync_agent_skills
+    log "停止 API 与 Agent Runtime，准备切换发布版本..."
+    systemctl stop "$FLUE_SERVICE" 2>/dev/null || true
+    systemctl stop "$API_SERVICE" 2>/dev/null || true
+    activate_agent_skills
 
     log "重启情报雷达..."
     systemctl restart "$RADAR_SERVICE"
@@ -913,6 +990,10 @@ start_services() {
         journalctl -u "$API_SERVICE" -n 50 --no-pager || true
         exit 1
     }
+    wait_for_document_skill_bindings || {
+        journalctl -u "$API_SERVICE" -n 50 --no-pager || true
+        exit 1
+    }
 
     log "启动雷达增量同步定时器..."
     systemctl restart "$RADAR_SYNC_TIMER"
@@ -923,6 +1004,7 @@ start_services() {
         journalctl -u "$FLUE_SERVICE" -n 50 --no-pager || true
         exit 1
     }
+    finalize_agent_skills
 }
 
 #---------------------------------------

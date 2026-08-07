@@ -11,6 +11,11 @@ import { seedUsers } from './services/authService.js'
 import { recoverAiTasks } from './services/aiTaskService.js'
 import { recoverLeadScoringQueue } from './routes/meta.js'
 import { backfillLeadBusinessRegions } from './services/leadRegionBackfill.js'
+import {
+  AI_QA_SKILL_NAME,
+  AI_REQUIRED_DOCUMENT_SKILL_NAMES,
+  loadAiSkill,
+} from './services/aiSkillService.js'
 
 const app = express()
 const port = Number(process.env.API_PORT ?? 3100)
@@ -42,6 +47,8 @@ app.get('/api/health', (_req, res) => res.status(serviceReady ? 200 : 503).json(
   ok: serviceReady,
   service: 'intelligent-investment-platform-api',
   status: serviceReady ? 'ready' : 'starting',
+  qaSkillName: AI_QA_SKILL_NAME,
+  documentSkillNames: AI_REQUIRED_DOCUMENT_SKILL_NAMES,
   timestamp: new Date().toISOString(),
 }))
 
@@ -105,6 +112,12 @@ async function start() {
     })
     await ensureSchema()
     await seedUsers()
+    const requiredDocumentSkills = await Promise.all(
+      AI_REQUIRED_DOCUMENT_SKILL_NAMES.map((name) => loadAiSkill(name)),
+    )
+    console.log(`[ai-skill] document skills ready ${requiredDocumentSkills
+      .map((skill) => `${skill.name}=${skill.version}`)
+      .join(' ')}`)
     const regionBackfill = await backfillLeadBusinessRegions()
     console.log(`[lead-region] startup backfill scanned=${regionBackfill.scanned} updated=${regionBackfill.updated} unresolved=${regionBackfill.unresolved}`)
     await recoverAiTasks()

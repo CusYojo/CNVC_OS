@@ -15,6 +15,12 @@ export type AiQaSkillName = typeof AI_QA_SKILL_NAMES[number]
 // 快捷任务的 Q&A 只绑定公司当前标准技能；历史任务中的旧名称仅作为审计数据保留。
 export const AI_QA_SKILL_NAME: AiQaSkillName = 'generate-project-qa-report'
 
+export const AI_REQUIRED_DOCUMENT_SKILL_NAMES = [
+  AI_QA_SKILL_NAME,
+  'draft-investment-proposal',
+  AI_DUE_DILIGENCE_SKILL_NAME,
+] as const
+
 export const AI_BUSINESS_SKILLS = [
   {
     name: 'generate-compliance-statement',
@@ -193,15 +199,27 @@ export async function loadAiSkillFromDirectory(input: {
   ) {
     throw new Error('AI Skill 路径越界')
   }
-  const [directoryStat, fileStat] = await Promise.all([
-    lstat(skillDir),
-    lstat(skillPath),
-  ])
+  let directoryStat: Awaited<ReturnType<typeof lstat>>
+  let fileStat: Awaited<ReturnType<typeof lstat>>
+  try {
+    [directoryStat, fileStat] = await Promise.all([
+      lstat(skillDir),
+      lstat(skillPath),
+    ])
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      throw Object.assign(new Error(`AI Skill 不可用：${input.name}`), {
+        status: 503,
+        code: 'AI_SKILL_NOT_AVAILABLE',
+      })
+    }
+    throw error
+  }
   if (!directoryStat.isDirectory() || directoryStat.isSymbolicLink()) {
-    throw new Error(`AI Skill 目录无效：${name}`)
+    throw new Error(`AI Skill 目录无效：${input.name}`)
   }
   if (!fileStat.isFile() || fileStat.isSymbolicLink()) {
-    throw new Error(`AI Skill 文件无效：${name}`)
+    throw new Error(`AI Skill 文件无效：${input.name}`)
   }
   const source = await readFile(skillPath, 'utf8')
   const parsed = parseSkillFile(source)

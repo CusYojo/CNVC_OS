@@ -485,6 +485,16 @@ async function main() {
     ),
     'utf8',
   )
+  const dueDiligenceNativeSource = await readFile(
+    path.resolve(
+      process.cwd(),
+      'server',
+      'src',
+      'services',
+      'aiDueDiligenceSkillRuntimeService.ts',
+    ),
+    'utf8',
+  )
   assert(
     'AI-010 正文按 11 个章组生成 30 个模块并仅重试受影响章组',
     aiBusinessContentSource.includes('DUE_DILIGENCE_GENERATION_GROUPS')
@@ -631,6 +641,35 @@ async function main() {
     '摘要、风险、缺口和来源仅保留为审计元数据',
   )
   assert(
+    'AI-010 最终 DOCX 完全经过 write-investment-dd-report 原生硬门禁',
+    aiTaskServiceSource.includes('generateDueDiligenceReportWithSkill')
+      && [
+        'check_runtime.py',
+        'audit_evidence.py',
+        'audit_ic_completeness.py',
+        'audit_report_content.py',
+        'audit_narrative_quality.py',
+        'build_report_docx.py',
+        'audit_docx_style.py',
+        'render_and_verify.py',
+      ].every((term) => dueDiligenceNativeSource.includes(term))
+      && dueDiligenceNativeSource.includes('DUE_DILIGENCE_PUBLIC_RESEARCH_AUDIT_REQUIRED')
+      && dueDiligenceNativeSource.includes('usedSourceIndexes')
+      && dueDiligenceNativeSource.includes('source_index')
+      && dueDiligenceNativeSource.includes("formatter: 'write-investment-dd-report-native-v1'"),
+    '证据台账 → 字段完整性 → 内容/文风 → 原生 DOCX → 样式 → 逐页渲染',
+  )
+  assert(
+    'AI-008 投资提案最终 Skill 校验失败时禁止登记产物',
+    aiTaskServiceSource.includes(
+      'proposalSkillValidation = await validateInvestmentProposalWithSkill(outputPath)',
+    )
+      && !aiTaskServiceSource.includes(
+        '投资提案 Skill 最终校验执行失败，保留已通过内建检查的 DOCX',
+      ),
+    'draft-investment-proposal 成品门禁必须硬失败',
+  )
+  assert(
     'AI-007 强制 Word/WPS 无修复兼容验收',
     ['WORD_REPAIR_REQUIRED', 'WPS_REPAIR_REQUIRED', 'NUMBERING_INVALID', 'EMPTY_TAIL_PAGE']
       .every((term) => complianceReviewerContract.includes(term))
@@ -670,6 +709,31 @@ async function main() {
       && AI_QA_TEMPLATE.skillName === AI_QA_SKILL_NAME
       && AI_TEMPLATE_CATALOG.project_qa.skillName === AI_QA_SKILL_NAME,
     `${AI_QA_SKILL_NAME} / ${AI_TEMPLATE_CATALOG.project_qa.skillName}`,
+  )
+  const deploySource = await readFile(path.resolve(process.cwd(), 'deploy.sh'), 'utf8')
+  const serverIndexSource = await readFile(
+    path.resolve(process.cwd(), 'server', 'src', 'index.ts'),
+    'utf8',
+  )
+  assert(
+    'Q&A 部署先暂存校验 Skill，再在停机窗口原子切换',
+    deploySource.includes('skills.next')
+      && deploySource.includes('activate_agent_skills')
+      && deploySource.indexOf('systemctl stop "$API_SERVICE"')
+        < deploySource.indexOf('activate_agent_skills', deploySource.indexOf('start_services()'))
+      && !deploySource.includes('rm -rf "${skills_root:?}"/*'),
+    '旧 API 运行期间不得清空在线 Skill 目录',
+  )
+  assert(
+    '三项投资文档 Skill 部署安装原生运行时并校验线上绑定',
+    deploySource.includes('run setup:qa-skill-runtime')
+      && deploySource.includes('run setup:dd-skill-runtime')
+      && deploySource.includes('draft-investment-proposal')
+      && deploySource.includes('write-investment-dd-report')
+      && deploySource.includes('wait_for_document_skill_bindings')
+      && serverIndexSource.includes('qaSkillName: AI_QA_SKILL_NAME')
+      && serverIndexSource.includes('AI_REQUIRED_DOCUMENT_SKILL_NAMES.map((name) => loadAiSkill(name))'),
+    'Q&A + 投资提案 + 尽调报告运行时安装 / 启动加载门禁 / health 绑定探针',
   )
   const qaRequired = [
     '# 生成项目 Q&A 报告',
@@ -955,7 +1019,9 @@ async function main() {
     '非 PPT 文档任务以主文档交付为优先并自动恢复一次',
     aiTaskServiceSource.includes('AUTO_RECOVERY_TASK_TYPES')
       && aiTaskServiceSource.includes('_systemDocumentRecoveryAttempt')
-      && aiTaskServiceSource.includes("retryDocumentStep('DOCX Formatter'")
+      && aiTaskServiceSource.includes("'write-investment-dd-report 原生 DOCX Pipeline'")
+      && aiTaskServiceSource.includes(": 'DOCX Formatter'")
+      && aiTaskServiceSource.includes('generateCurrentDocx')
       && aiTaskServiceSource.includes("retryDocumentStep('Q&A DOCX 生成与质量检查'")
       && aiTaskServiceSource.includes('主文档已登记，任务状态恢复为已完成')
       && aiTaskServiceSource.includes('delete retryParameters._systemDocumentRecoveryAttempt')

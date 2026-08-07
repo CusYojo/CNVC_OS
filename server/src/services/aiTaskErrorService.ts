@@ -13,6 +13,10 @@ export function safeAiTaskFailureStage(error: unknown) {
   if (code === 'DUE_DILIGENCE_CONTENT_QUALITY_REJECTED') return '正文质量检查未通过'
   if (code === 'DUE_DILIGENCE_MODEL_UNAVAILABLE') return '大模型正文生成未完成'
   if (code === 'DUE_DILIGENCE_NETWORK_UNAVAILABLE') return '联网资料补全未完成'
+  if (code === 'DUE_DILIGENCE_PUBLIC_RESEARCH_AUDIT_REQUIRED') return '公开研究覆盖审计未通过'
+  if (code === 'DUE_DILIGENCE_SKILL_RUNTIME_UNAVAILABLE') return '尽调技能运行环境未就绪'
+  if (code === 'DUE_DILIGENCE_EVIDENCE_EMPTY') return '尽调证据台账为空'
+  if (code.startsWith('DUE_DILIGENCE_SKILL_')) return '尽调技能交付门禁未通过'
   if (code === 'INVESTMENT_RECOMMENDATION_CONTENT_QUALITY_REJECTED') {
     return '投资建议书正文专业性检查未通过'
   }
@@ -61,6 +65,21 @@ export function safeAiTaskFailureMessage(error: unknown) {
   }
   if (code === 'DUE_DILIGENCE_NETWORK_UNAVAILABLE') {
     return '公开资料补全服务暂不可用，因此未生成文件。请确认联网检索服务恢复后点击“继续生成”。'
+  }
+  if (code === 'DUE_DILIGENCE_PUBLIC_RESEARCH_AUDIT_REQUIRED') {
+    return '当前尽调主要依赖公开信息，但尚未完成公司、产品、团队、市场、竞争、客户、融资及合规八个领域的覆盖审计。请补充项目原始资料，或完成公开研究审计后再继续生成。'
+  }
+  if (code === 'DUE_DILIGENCE_SKILL_RUNTIME_UNAVAILABLE') {
+    return 'write-investment-dd-report 运行环境未就绪，因此未生成文件。请管理员检查 Python 依赖、LibreOffice 及仿宋/黑体中文字体。'
+  }
+  if (code === 'DUE_DILIGENCE_EVIDENCE_EMPTY') {
+    return '现有资料中没有可进入尽调证据台账的有效事实，因此未生成文件。请先补充项目原始资料。'
+  }
+  if (code === 'DUE_DILIGENCE_SKILL_FIELD_GATE_FAILED') {
+    return '关键尽调字段缺少可核验证据，未达到对应报告模式的生成条件，因此未交付空泛或推测性文档。请补充项目资料后继续生成。'
+  }
+  if (code.startsWith('DUE_DILIGENCE_SKILL_')) {
+    return '尽调报告未通过证据、字段、内容、人工文风、DOCX 样式或逐页渲染中的一项交付门禁，因此未发布文件。请根据任务阶段检查资料或技能运行环境后继续生成。'
   }
   if (code === 'INVESTMENT_RECOMMENDATION_CONTENT_QUALITY_REJECTED') {
     const issues = Array.isArray((error as CodedError | null)?.qualityIssues)
