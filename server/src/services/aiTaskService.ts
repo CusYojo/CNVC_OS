@@ -110,6 +110,7 @@ import {
   reviewInvestmentProposalDocx,
   type InvestmentProposalOutputReview,
 } from './aiInvestmentProposalDocumentService.js'
+import { validateInvestmentProposalWithSkill } from './aiInvestmentProposalSkillRuntimeService.js'
 import {
   safeAiTaskFailureMessage,
   safeAiTaskFailureStage,
@@ -2200,6 +2201,9 @@ async function executeTask(taskId: string) {
     let previewMetadata: Record<string, unknown> | undefined
     let complianceDocxReview: ComplianceOutputReview | undefined
     let proposalDocxReview: InvestmentProposalOutputReview | undefined
+    let proposalSkillValidation: Awaited<ReturnType<typeof validateInvestmentProposalWithSkill>>
+      | { passed: false; code: string }
+      | undefined
     let pptWorkflowReview: Awaited<ReturnType<typeof reviewInvestmentRecommendationPpt>> | undefined
     const pptGenerationAudit = pptWorkflow
       ? buildInvestmentRecommendationGenerationAudit({
@@ -2453,6 +2457,19 @@ async function executeTask(taskId: string) {
         JSON.stringify(templateFidelity.failedChecks),
       )
     }
+    if (task.type === 'investment_proposal') {
+      try {
+        proposalSkillValidation = await validateInvestmentProposalWithSkill(outputPath)
+      } catch (error) {
+        const code = (error as Error & { code?: string }).code
+          ?? 'INVESTMENT_PROPOSAL_SKILL_VALIDATION_UNAVAILABLE'
+        proposalSkillValidation = { passed: false, code }
+        console.warn(
+          '[aiTask] draft-investment-proposal 原生成品校验未通过，保留已通过 OpenXML Reviewer 的 DOCX:',
+          (error as Error).message,
+        )
+      }
+    }
     const [{ count }] = await db.select({ count: sql<number>`count(*)::int` }).from(aiArtifacts)
       .where(and(eq(aiArtifacts.userId, task.userId), eq(aiArtifacts.projectId, task.projectId), eq(aiArtifacts.format, template.outputFormat)))
     const version = imageDeckArtifactVersion ?? Number(count ?? 0) + 1
@@ -2570,6 +2587,9 @@ async function executeTask(taskId: string) {
               wordReviewerPassed: proposalDocxReview.passed,
               wordReview: proposalDocxReview.metadata,
             }
+          : {}),
+        ...(proposalSkillValidation
+          ? { proposalSkillValidation }
           : {}),
         ...(pptWorkflow
           ? {

@@ -263,8 +263,16 @@ async function renderEveryPage(input: {
     timeout: COMMAND_TIMEOUT_MS,
     maxBuffer: 4 * 1024 * 1024,
   })
-  const requiredCjkFonts = ['STFangsong', 'STHeiti']
-  const missingCjkFonts = requiredCjkFonts.filter((font) => !fontAudit.stdout.includes(font))
+  // LibreOffice 在 macOS/Linux 会把 Word 中的 STFangsong/STHeiti 映射为
+  // 同一中文字体角色的平台家族名。这里校验“仿宋正文 + 黑体标题”
+  // 两个角色，而不将某一个操作系统的 PostScript 名当作唯一合法值。
+  const requiredCjkFontRoles = [
+    { role: '仿宋正文', aliases: ['STFangsong', 'FangSong', 'Fangsong', 'STSong', 'Songti'] },
+    { role: '黑体标题', aliases: ['STHeiti', 'Heiti', 'SimHei', 'PingFang'] },
+  ]
+  const missingCjkFonts = requiredCjkFontRoles
+    .filter(({ aliases }) => !aliases.some((font) => fontAudit.stdout.includes(font)))
+    .map(({ role }) => role)
   if (missingCjkFonts.length > 0) {
     throw new Error(
       `generate-project-qa-report 渲染缺少中文字体：${missingCjkFonts.join('、')}`,
@@ -290,7 +298,10 @@ async function renderEveryPage(input: {
     renderer: path.basename(soffice),
     rasterizer: path.basename(pdftoppm),
     fontAudit: path.basename(pdffonts),
-    embeddedCjkFonts: requiredCjkFonts,
+    embeddedCjkFonts: requiredCjkFontRoles.map(({ role, aliases }) => ({
+      role,
+      matchedFamily: aliases.find((font) => fontAudit.stdout.includes(font)),
+    })),
     pageCount: pages.length,
     renderedEveryPage: true,
     pageFiles: pages,

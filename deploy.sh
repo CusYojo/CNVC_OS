@@ -357,10 +357,16 @@ sync_agent_skills() {
         )
     done
 
-    if [ ! -f "${skills_root}/answer-project-qa/SKILL.md" ]; then
-        err "核心业务 Skill 同步失败: answer-project-qa"
-        exit 1
-    fi
+    for required_skill in \
+        answer-project-qa \
+        generate-project-qa-report \
+        draft-investment-proposal
+    do
+        if [ ! -f "${skills_root}/${required_skill}/SKILL.md" ]; then
+            err "核心业务 Skill 同步失败: ${required_skill}"
+            exit 1
+        fi
+    done
     for required_skill in \
         create-reference-driven-editable-ppt \
         GordenSuperPPTSkill \

@@ -277,7 +277,11 @@ export async function exportAndReviewInvestmentProposalPdf(input: {
     section.findings
       .map((finding) => sanitizeInvestmentProposalClientText(finding.text))
       .filter(Boolean))
-  const bodyClaimsValidated = claims.every((claim) => compactPdf.includes(compact(claim)))
+  // Word/LibreOffice 对行末中文标点会使用悬挂标点，部分 PDF 文本层
+  // 不返回该字形。正文一致性仍逐字校验内容，仅排除排版标点。
+  const compactClaim = (value: string) => compact(value).replace(/[，。；：！？、“”‘’（）()]/g, '')
+  const compactPdfClaims = compactClaim(pdfText)
+  const bodyClaimsValidated = claims.every((claim) => compactPdfClaims.includes(compactClaim(claim)))
   if (!bodyClaimsValidated) {
     issues.push({ code: 'PDF_BODY_MISMATCH', message: 'PDF 遗漏 Word 中已通过 Reviewer 的正文事实项' })
   }

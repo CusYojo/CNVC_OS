@@ -42,6 +42,7 @@ import {
   generateInvestmentProposalDocx,
   reviewInvestmentProposalDocx,
 } from '../services/aiInvestmentProposalDocumentService.js'
+import { validateInvestmentProposalWithSkill } from '../services/aiInvestmentProposalSkillRuntimeService.js'
 import {
   exportAndReviewInvestmentProposalPdf,
 } from '../services/aiInvestmentProposalPdfService.js'
@@ -362,11 +363,13 @@ await assert.rejects(
 assert.equal(unauthorizedRequestAttempts, 1)
 const compactSkillPrompt = compactInvestmentProposalSkillPrompt(skill)
 assert.ok(compactSkillPrompt.length < skill.instructions.length + skill.referenceInstructions.length)
-assert.ok(compactSkillPrompt.length <= 7000)
+assert.ok(compactSkillPrompt.length <= 12000)
 assert.equal(compactSkillPrompt.includes('## references/formatter-contract.md'), false)
-assert.equal(compactSkillPrompt.includes('## references/template-profile.md'), false)
-assert.match(compactSkillPrompt, /访谈、聊天记录和会议转录必须先提炼为正式事实/)
-assert.match(compactSkillPrompt, /不使用任何`短标签：正文`式引导语/)
+assert.equal(compactSkillPrompt.includes('## references/exact-case-style.md'), false)
+assert.match(compactSkillPrompt, /访谈、聊天记录和会议转录必须先转写为正式事实/)
+assert.match(compactSkillPrompt, /why now、why company、why price/)
+assert.match(compactSkillPrompt, /Calculation Ledger/)
+assert.match(compactSkillPrompt, /table plans/)
 assert.match(
   safeAiTaskFailureMessage(Object.assign(
     new Error('包含内部模型原文的错误'),
@@ -1368,6 +1371,8 @@ const wordReview = await reviewInvestmentProposalDocx({
   projectName: '星河机器人项目',
 })
 assert.equal(wordReview.passed, true, JSON.stringify(wordReview.issues, null, 2))
+const skillRuntimeReview = await validateInvestmentProposalWithSkill(docxPath)
+assert.equal(skillRuntimeReview.passed, true)
 const docxZip = await JSZip.loadAsync(await readFile(docxPath))
 const documentXml = await docxZip.file('word/document.xml')!.async('string')
 assert.equal(documentXml.includes('免责声明'), false)
@@ -1475,6 +1480,7 @@ console.log(JSON.stringify({
     path: docxPath,
     generation,
     review: wordReview,
+    skillRuntimeReview,
   },
   pdf: {
     path: pdfPath,

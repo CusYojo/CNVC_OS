@@ -74,9 +74,9 @@ async function main() {
   )
   assert(
     '阶段2 Skill：直接式 Q&A 与无来源正文规则已加载',
-    skill.instructions.includes('Start Q1 immediately after the title')
-      && skill.instructions.includes('Do not add a standalone `结论：`')
-      && skill.instructions.includes('source-free'),
+    skill.instructions.includes('标题后立即进入 Q1')
+      && skill.instructions.includes('不添加独立的“结论：”段落')
+      && skill.instructions.includes('标准读者版不展示来源清单'),
     '直接进入 Q1、自然分析、正文不显示来源',
   )
 
@@ -311,10 +311,10 @@ async function main() {
     '阶段2 Current Project RAG：授权资料优先并按缺口定向补充',
     sources.length === 2
       && sources.every((source) => !source.sourceType.startsWith('public_web'))
-      && skill.instructions.includes('adaptive public research')
-      && skill.instructions.includes('information typed or pasted in the current conversation')
-      && skill.instructions.includes('files and links attached or explicitly referenced by the user')
-      && skill.instructions.includes('lawful public-web research for remaining researchable gaps'),
+      && skill.instructions.includes('采用自适应研究')
+      && skill.instructions.includes('当前对话中输入或粘贴的信息')
+      && skill.instructions.includes('用户上传、附加或明确引用的文件与链接')
+      && skill.instructions.includes('对其余可研究缺口使用合法网络来源'),
     sources.map((source) => `${source.sourceType}:${source.sourceName}`).join('、'),
   )
 

@@ -4,7 +4,6 @@ import {
   Document,
   Footer,
   Header,
-  HeadingLevel,
   LineRuleType,
   PageNumber,
   Packer,
@@ -47,6 +46,7 @@ import {
   sanitizeInvestmentProposalClientText,
 } from './aiInvestmentProposalTextService.js'
 import type { AiTemplateDefinition } from './aiTemplateCatalog.js'
+import { getAiSkillDirectory } from './aiSkillService.js'
 
 type ProjectLike = {
   name: string
@@ -60,6 +60,15 @@ const SONG_FONT = process.env.AI_DOCUMENT_SONG_FONT || '宋体'
 const FANGSONG_FONT = process.env.AI_DOCUMENT_FANGSONG_FONT || '仿宋'
 const KAITI_FONT = process.env.AI_DOCUMENT_KAITI_FONT || '楷体'
 const NUMBER_FONT = 'Times New Roman'
+const PROPOSAL_SKILL_NAME = 'draft-investment-proposal' as const
+const PROPOSAL_STYLE = {
+  title: '82',
+  heading1: '78',
+  heading2: '85',
+  body: '90',
+  gridTable: '97',
+  threeLineTable: 'ProposalThreeLine',
+} as const
 
 const font = (eastAsia: string) => ({
   ascii: eastAsia,
@@ -94,6 +103,7 @@ function xmlText(value: string) {
 function findingParagraph(finding: BusinessFinding) {
   const text = sanitizeInvestmentProposalClientText(finding.text)
   return new Paragraph({
+    style: PROPOSAL_STYLE.body,
     spacing: { before: 0, after: 0, line: 480, lineRule: LineRuleType.EXACT },
     indent: { firstLine: 480 },
     alignment: AlignmentType.JUSTIFIED,
@@ -140,22 +150,51 @@ function tableColumnWidths(table: BusinessTable) {
   return widths
 }
 
-function proposalTable(table: BusinessTable) {
+function isThreeLineProposalTable(sectionTitle: string, tableTitle: string) {
+  return /财务|经营|收入|利润|现金|预测|回报|退出|可比/.test(
+    `${sectionTitle}${tableTitle}`,
+  )
+}
+
+function proposalTable(table: BusinessTable, sectionTitle: string) {
   const widths = tableColumnWidths(table)
+  const threeLine = isThreeLineProposalTable(sectionTitle, table.title)
   const centeredColumn = (index: number) =>
-    /序号|日期|时间|年度|年份|期间|轮次|比例|股比|金额|估值|倍数|状态|A\/E/i
+    /序号|日期|时间|年度|年份|期间|轮次|状态|A\/E/i
       .test(table.columns[index] ?? '')
-  const cell = (value: string, index: number, header = false) => new TableCell({
+  const numericValue = (value: string, index: number) =>
+    /比例|股比|金额|估值|倍数|收入|利润|成本|现金|MOIC|IRR|PS|PE/i
+      .test(table.columns[index] ?? '')
+    || /(?:\d[\d,.]*\s*(?:%|倍|万元|亿元|元|万|亿))$/i.test(value.trim())
+  const cell = (value: string, index: number, header = false, last = false) => new TableCell({
     width: { size: widths[index], type: WidthType.DXA },
     verticalAlign: VerticalAlign.CENTER,
-    margins: { top: 90, right: 120, bottom: 90, left: 120 },
-    shading: header
-      ? { fill: 'D9D9D9', type: ShadingType.CLEAR, color: 'auto' }
+    margins: { top: 0, right: 108, bottom: 0, left: 108 },
+    shading: header && !threeLine
+      ? { fill: 'C0C0C0', type: ShadingType.CLEAR, color: 'auto' }
+      : undefined,
+    borders: threeLine
+      ? {
+          top: header
+            ? { style: BorderStyle.SINGLE, size: 12, color: '000000' }
+            : { style: BorderStyle.NONE, size: 0, color: '000000' },
+          bottom: header
+            ? { style: BorderStyle.SINGLE, size: 4, color: '000000' }
+            : last
+              ? { style: BorderStyle.SINGLE, size: 12, color: '000000' }
+              : { style: BorderStyle.NONE, size: 0, color: '000000' },
+          left: { style: BorderStyle.NONE, size: 0, color: '000000' },
+          right: { style: BorderStyle.NONE, size: 0, color: '000000' },
+        }
       : undefined,
     children: [new Paragraph({
-      alignment: header || centeredColumn(index)
+      alignment: header
         ? AlignmentType.CENTER
-        : AlignmentType.LEFT,
+        : numericValue(value, index)
+          ? AlignmentType.RIGHT
+          : centeredColumn(index)
+            ? AlignmentType.CENTER
+            : AlignmentType.LEFT,
       spacing: { before: 0, after: 0, line: 300, lineRule: LineRuleType.AT_LEAST },
       keepLines: true,
       children: [new TextRun({
@@ -169,13 +208,14 @@ function proposalTable(table: BusinessTable) {
   })
   return [
     new Paragraph({
+      style: PROPOSAL_STYLE.body,
       keepNext: true,
       spacing: { before: 80, after: 60, line: 480, lineRule: LineRuleType.EXACT },
       alignment: AlignmentType.CENTER,
       children: [new TextRun({
-        text: sanitizeInvestmentProposalClientText(
-          `${table.title}${table.unit && table.unit !== '无' ? `（单位：${table.unit}）` : ''}`,
-        ),
+        text: `${sanitizeInvestmentProposalClientText(table.title)}${
+          table.unit && table.unit !== '无' ? `（单位：${table.unit}）` : ''
+        }`,
         bold: true,
         size: 24,
         color: '000000',
@@ -183,33 +223,45 @@ function proposalTable(table: BusinessTable) {
       })],
     }),
     new Table({
+      style: threeLine ? PROPOSAL_STYLE.threeLineTable : PROPOSAL_STYLE.gridTable,
       width: { size: 8306, type: WidthType.DXA },
       columnWidths: widths,
       alignment: AlignmentType.CENTER,
       indent: { size: 0, type: WidthType.DXA },
-      margins: { top: 90, right: 120, bottom: 90, left: 120 },
+      margins: { top: 0, right: 108, bottom: 0, left: 108 },
       layout: TableLayoutType.FIXED,
-      borders: {
-        top: { style: BorderStyle.SINGLE, size: 4, color: '000000' },
-        bottom: { style: BorderStyle.SINGLE, size: 4, color: '000000' },
-        left: { style: BorderStyle.SINGLE, size: 4, color: '000000' },
-        right: { style: BorderStyle.SINGLE, size: 4, color: '000000' },
-        insideHorizontal: { style: BorderStyle.SINGLE, size: 4, color: '000000' },
-        insideVertical: { style: BorderStyle.SINGLE, size: 4, color: '000000' },
-      },
+      borders: threeLine
+        ? {
+            top: { style: BorderStyle.NONE, size: 0, color: '000000' },
+            bottom: { style: BorderStyle.NONE, size: 0, color: '000000' },
+            left: { style: BorderStyle.NONE, size: 0, color: '000000' },
+            right: { style: BorderStyle.NONE, size: 0, color: '000000' },
+            insideHorizontal: { style: BorderStyle.NONE, size: 0, color: '000000' },
+            insideVertical: { style: BorderStyle.NONE, size: 0, color: '000000' },
+          }
+        : {
+            top: { style: BorderStyle.SINGLE, size: 4, color: '000000' },
+            bottom: { style: BorderStyle.SINGLE, size: 4, color: '000000' },
+            left: { style: BorderStyle.SINGLE, size: 4, color: '000000' },
+            right: { style: BorderStyle.SINGLE, size: 4, color: '000000' },
+            insideHorizontal: { style: BorderStyle.SINGLE, size: 4, color: '000000' },
+            insideVertical: { style: BorderStyle.SINGLE, size: 4, color: '000000' },
+          },
       rows: [
         new TableRow({
           tableHeader: true,
           cantSplit: true,
           children: table.columns.map((value, index) => cell(value, index, true)),
         }),
-        ...table.rows.map((row) => new TableRow({
+        ...table.rows.map((row, rowIndex) => new TableRow({
           cantSplit: true,
-          children: row.map((value, index) => cell(value, index)),
+          children: row.map((value, index) =>
+            cell(value, index, false, rowIndex === table.rows.length - 1)),
         })),
       ],
     }),
     new Paragraph({
+      style: PROPOSAL_STYLE.body,
       spacing: { before: 0, after: 80, line: 120, lineRule: LineRuleType.EXACT },
       children: [],
     }),
@@ -217,14 +269,9 @@ function proposalTable(table: BusinessTable) {
 }
 
 function headingParagraph(title: string, level: 1 | 2 | 3, pageBreakBefore: boolean) {
-  const heading = level === 1
-    ? HeadingLevel.HEADING_1
-    : level === 2
-      ? HeadingLevel.HEADING_2
-      : HeadingLevel.HEADING_3
   const headingFont = level === 1 ? SANS_FONT : level === 2 ? KAITI_FONT : FANGSONG_FONT
   return new Paragraph({
-    heading,
+    style: level === 1 ? PROPOSAL_STYLE.heading1 : PROPOSAL_STYLE.heading2,
     pageBreakBefore,
     keepNext: true,
     keepLines: true,
@@ -244,6 +291,68 @@ function headingParagraph(title: string, level: 1 | 2 | 3, pageBreakBefore: bool
   })
 }
 
+function secondaryThreeLineStyle(stylesXml: string) {
+  const style = stylesXml.match(
+    /<w:style\b(?=[^>]*w:type="table")(?=[^>]*w:styleId="11")[\s\S]*?<\/w:style>/,
+  )?.[0]
+  if (!style) throw new Error('投资提案次版式权威缺少三线表样式')
+  return style
+    .replace(/\s+w:default="1"/, '')
+    .replace('w:styleId="11"', `w:styleId="${PROPOSAL_STYLE.threeLineTable}"`)
+    .replace(/<w:name\b[^>]*\/>/, '<w:name w:val="Proposal Three Line"/>')
+}
+
+async function applyInvestmentProposalLayoutAuthority(buffer: Buffer) {
+  const skillDirectory = getAiSkillDirectory(PROPOSAL_SKILL_NAME)
+  const primaryPath = path.join(skillDirectory, 'assets', 'primary-layout-authority.docx')
+  const secondaryPath = path.join(skillDirectory, 'assets', 'secondary-layout-authority.docx')
+  const [target, primary, secondary] = await Promise.all([
+    JSZip.loadAsync(buffer),
+    JSZip.loadAsync(await readFile(primaryPath)),
+    JSZip.loadAsync(await readFile(secondaryPath)),
+  ])
+  const primaryStyles = await primary.file('word/styles.xml')?.async('string')
+  const secondaryStyles = await secondary.file('word/styles.xml')?.async('string')
+  if (!primaryStyles || !secondaryStyles) {
+    throw new Error('投资提案版式权威缺少 styles.xml')
+  }
+  const mergedStyles = primaryStyles.replace(
+    '</w:styles>',
+    `${secondaryThreeLineStyle(secondaryStyles)}</w:styles>`,
+  )
+  target.file('word/styles.xml', mergedStyles)
+
+  const targetDocumentXml = await target.file('word/document.xml')?.async('string')
+  if (!targetDocumentXml) throw new Error('投资提案成品缺少 document.xml')
+  // 主版式权威的一、二级样式自带自动编号，而 17 节 Blueprint
+  // 标题文本已包含编号。在段落级显式关闭样式编号，避免渲染为
+  // “一、 一、基本情况简介”或“（一） （一）公司简介”。
+  const documentWithoutDuplicateNumbering = targetDocumentXml.replace(
+    /(<w:pPr(?:\s[^>]*)?>\s*<w:pStyle\b(?=[^>]*w:val="(?:78|85)")[^>]*\/>)/g,
+    '$1<w:numPr><w:numId w:val="0"/></w:numPr>',
+  )
+  target.file('word/document.xml', documentWithoutDuplicateNumbering)
+
+  for (const partName of [
+    'word/fontTable.xml',
+    'word/numbering.xml',
+    'word/theme/theme1.xml',
+  ]) {
+    const part = await primary.file(partName)?.async('nodebuffer')
+    if (part) target.file(partName, part)
+  }
+  const primaryHeader = await primary.file('word/header1.xml')?.async('nodebuffer')
+  const primaryFooter = await primary.file('word/footer1.xml')?.async('nodebuffer')
+  if (!primaryHeader || !primaryFooter) {
+    throw new Error('投资提案版式权威缺少页眉或页脚')
+  }
+  for (const name of Object.keys(target.files)) {
+    if (/^word\/header\d+\.xml$/.test(name)) target.file(name, primaryHeader)
+    if (/^word\/footer\d+\.xml$/.test(name)) target.file(name, primaryFooter)
+  }
+  return target.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' })
+}
+
 export async function generateInvestmentProposalDocx(input: {
   outputPath: string
   template: AiTemplateDefinition
@@ -260,7 +369,7 @@ export async function generateInvestmentProposalDocx(input: {
   const byTitle = new Map(input.content.sections.map((section) => [section.title, section]))
   const body: Array<Paragraph | Table> = [
     new Paragraph({
-      style: 'Title',
+      style: PROPOSAL_STYLE.title,
       alignment: AlignmentType.CENTER,
       spacing: { before: 0, after: 0, line: 480, lineRule: LineRuleType.EXACT },
       keepNext: true,
@@ -271,10 +380,11 @@ export async function generateInvestmentProposalDocx(input: {
         size: 32,
         bold: true,
         color: '000000',
-        font: font(SANS_FONT),
+        font: font(SONG_FONT),
       })],
     }),
     new Paragraph({
+      style: PROPOSAL_STYLE.body,
       spacing: { before: 0, after: 0, line: 480, lineRule: LineRuleType.EXACT },
       children: [new TextRun({
         text: blueprint.fixedBlocks.salutation,
@@ -285,6 +395,7 @@ export async function generateInvestmentProposalDocx(input: {
       })],
     }),
     new Paragraph({
+      style: PROPOSAL_STYLE.body,
       spacing: { before: 0, after: 0, line: 480, lineRule: LineRuleType.EXACT },
       indent: { firstLine: 480 },
       alignment: AlignmentType.JUSTIFIED,
@@ -296,6 +407,7 @@ export async function generateInvestmentProposalDocx(input: {
       })],
     }),
     new Paragraph({
+      style: PROPOSAL_STYLE.body,
       spacing: { before: 0, after: 0, line: 480, lineRule: LineRuleType.EXACT },
       indent: { firstLine: 480 },
       alignment: AlignmentType.JUSTIFIED,
@@ -319,11 +431,12 @@ export async function generateInvestmentProposalDocx(input: {
     const findings = (current?.findings ?? [])
       .filter((finding) => sanitizeInvestmentProposalClientText(finding.text))
     findings.forEach((finding) => body.push(findingParagraph(finding)))
-    ;(current?.tables ?? []).forEach((table) => body.push(...proposalTable(table)))
+    ;(current?.tables ?? []).forEach((table) => body.push(...proposalTable(table, definition.title)))
   })
 
   body.push(
     new Paragraph({
+      style: PROPOSAL_STYLE.body,
       alignment: AlignmentType.RIGHT,
       spacing: { before: 0, after: 0, line: 480, lineRule: LineRuleType.EXACT },
       children: [new TextRun({
@@ -334,6 +447,7 @@ export async function generateInvestmentProposalDocx(input: {
       })],
     }),
     new Paragraph({
+      style: PROPOSAL_STYLE.body,
       alignment: AlignmentType.RIGHT,
       spacing: { before: 0, after: 0, line: 480, lineRule: LineRuleType.EXACT },
       children: [new TextRun({
@@ -463,7 +577,8 @@ export async function generateInvestmentProposalDocx(input: {
     }],
   })
   await mkdir(path.dirname(input.outputPath), { recursive: true })
-  const buffer = await Packer.toBuffer(document)
+  const packed = await Packer.toBuffer(document)
+  const buffer = await applyInvestmentProposalLayoutAuthority(packed)
   await writeFile(input.outputPath, buffer)
   return {
     bytes: buffer.length,
@@ -476,7 +591,12 @@ export async function generateInvestmentProposalDocx(input: {
     tocField: false,
     updateFields: true,
     pageGeometry: blueprint.page,
-    formatter: 'investment-proposal-core-standard-formatter-v4-project-knowledge',
+    formatter: 'investment-proposal-layout-authority-formatter-v5',
+    layoutAuthority: path.join(
+      getAiSkillDirectory(PROPOSAL_SKILL_NAME),
+      'assets',
+      'primary-layout-authority.docx',
+    ),
   }
 }
 
@@ -543,6 +663,7 @@ export async function reviewInvestmentProposalDocx(input: {
     .filter((item) => !expectedTitles.includes(item.text))
     .map((item) => item.text)
     .join('\n')
+  const proseBodyText = bodyText.replace(/（单位：[^）]+）/g, '')
   const allText = paragraphs.map((item) => item.text).join('\n')
   if (containsInvestmentProposalInternalErrorText(allText)) {
     issues.push({
@@ -610,7 +731,7 @@ export async function reviewInvestmentProposalDocx(input: {
       message: 'Word 正文包含重复的“判断/依据/影响/待办”底稿标签',
     })
   }
-  if (containsInvestmentProposalColonLabel(bodyText)) {
+  if (containsInvestmentProposalColonLabel(proseBodyText)) {
     issues.push({
       code: 'CLIENT_COLON_LABEL_LEAK',
       message: 'Word 正文包含“订单节奏：”一类冒号引导标签',
@@ -632,7 +753,9 @@ export async function reviewInvestmentProposalDocx(input: {
   input.blueprint.sections.forEach((section) => {
     const paragraph = paragraphs.find((item) => item.text === section.title)
     if (!paragraph) return
-    const expectedStyle = `Heading${section.level}`
+    const expectedStyle = section.level === 1
+      ? PROPOSAL_STYLE.heading1
+      : PROPOSAL_STYLE.heading2
     if (paragraph.styleId !== expectedStyle) {
       issues.push({
         code: 'HEADING_STYLE_MISMATCH',
@@ -690,7 +813,9 @@ export async function reviewInvestmentProposalDocx(input: {
   if (!geometryValidated) {
     issues.push({ code: 'PAGE_GEOMETRY_MISMATCH', message: 'A4 页面或页边距与 Document Blueprint 不一致' })
   }
-  if (!headersXml.includes(input.blueprint.fixedBlocks.headerCompany)) {
+  if (!xmlText(headersXml).replace(/\s+/g, '').includes(
+    input.blueprint.fixedBlocks.headerCompany.replace(/\s+/g, ''),
+  )) {
     issues.push({ code: 'HEADER_MISSING', message: '固定页眉缺失' })
   }
   if (!/PAGE/.test(footersXml)) {
@@ -718,35 +843,29 @@ export async function reviewInvestmentProposalDocx(input: {
     [...stylesXml.matchAll(/<w:style\b[\s\S]*?<\/w:style>/g)]
       .filter((match) => match[0].includes(`w:styleId="${styleId}"`))
       .at(-1)?.[0] ?? ''
-  const styleSize = (styleId: string) => {
-    const style = styleXml(styleId)
-    return Number.parseInt(style.match(/<w:sz\b[^>]*w:val="(\d+)"/)?.[1] ?? '-1', 10)
-  }
-  if (
-    styleSize('Title') !== 32
-    || styleSize('Heading1') !== 28
-    || styleSize('Heading2') !== 28
-    || styleSize('Heading3') !== 24
-  ) {
-    issues.push({ code: 'TYPOGRAPHY_MISMATCH', message: '标题字号层级与 Document Blueprint 不一致' })
+  const roleStyleNames = [
+    [PROPOSAL_STYLE.title, '星实-题目'],
+    [PROPOSAL_STYLE.heading1, '星实-一标'],
+    [PROPOSAL_STYLE.heading2, '星实-二标'],
+    [PROPOSAL_STYLE.body, '星实-正文'],
+  ] as const
+  if (roleStyleNames.some(([styleId, styleName]) =>
+    !styleXml(styleId).includes(`w:val="${styleName}"`))) {
+    issues.push({ code: 'TYPOGRAPHY_MISMATCH', message: '未完整复用主版式权威的四类真实样式' })
   }
   if (paragraphs.some((item) => item.styleId === 'Heading3')) {
     issues.push({ code: 'HEADING3_FORBIDDEN', message: '标准 17 节结构不得新增三级标题' })
   }
-  const defaultStyle = stylesXml.match(/<w:docDefaults>[\s\S]*?<\/w:docDefaults>/)?.[0]
-    ?? styleXml('Normal')
-  const defaultSize = Number.parseInt(
-    defaultStyle.match(/<w:sz\b[^>]*w:val="(\d+)"/)?.[1] ?? '-1',
-    10,
-  )
-  if (
-    defaultSize !== 24
-    || !/<w:spacing\b[^>]*w:line="480"[^>]*w:lineRule="exact"/.test(defaultStyle)
-  ) {
-    issues.push({ code: 'BODY_STYLE_MISMATCH', message: '正文应为 12pt、固定 24pt 行距' })
+  if (paragraphs.filter((item) => item.styleId === PROPOSAL_STYLE.body).length < 10) {
+    issues.push({ code: 'BODY_STYLE_MISMATCH', message: '正文段落必须显式使用主版式权威正文样式' })
   }
   const expectedTableCount = input.content.sections.reduce(
     (count, section) => count + (section.tables?.length ?? 0),
+    0,
+  )
+  const expectedGridTableCount = input.content.sections.reduce(
+    (count, section) => count + (section.tables ?? [])
+      .filter((table) => !isThreeLineProposalTable(section.title, table.title)).length,
     0,
   )
   const tableXml = [...documentXml.matchAll(/<w:tbl\b[\s\S]*?<\/w:tbl>/g)]
@@ -755,7 +874,7 @@ export async function reviewInvestmentProposalDocx(input: {
   if (tableCount !== expectedTableCount) {
     issues.push({ code: 'TABLE_COUNT_MISMATCH', message: `表格应为${expectedTableCount}个，实际为${tableCount}个` })
   }
-  if (expectedTableCount && !documentXml.includes('D9D9D9')) {
+  if (expectedGridTableCount && !documentXml.includes('C0C0C0')) {
     issues.push({ code: 'TABLE_FORMAT_MISMATCH', message: '表格表头底纹缺失' })
   }
   const invalidTableGeometry = tableXml.some((xml) => {
@@ -787,8 +906,8 @@ export async function reviewInvestmentProposalDocx(input: {
       expectedSectionCount: expectedTitles.length,
       foundSectionCount: foundTitles.length,
       headingLevelCounts: {
-        Heading1: paragraphs.filter((item) => item.styleId === 'Heading1').length,
-        Heading2: paragraphs.filter((item) => item.styleId === 'Heading2').length,
+        Heading1: paragraphs.filter((item) => item.styleId === PROPOSAL_STYLE.heading1).length,
+        Heading2: paragraphs.filter((item) => item.styleId === PROPOSAL_STYLE.heading2).length,
         Heading3: paragraphs.filter((item) => item.styleId === 'Heading3').length,
       },
       tableCount,

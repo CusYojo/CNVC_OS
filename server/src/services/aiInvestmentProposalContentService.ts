@@ -807,9 +807,14 @@ export async function requestInvestmentProposalChapterJson(input: {
 
 const RUNTIME_REFERENCE_NAMES = new Set([
   'references/core-standard.md',
+  'references/document-blueprint.md',
   'references/evidence-policy.md',
+  'references/decision-grade-content.md',
+  'references/manifest-schema.md',
   'references/output-contract.md',
   'references/reviewer-contract.md',
+  'references/one-shot-workflow.md',
+  'references/template-profile.md',
 ])
 
 function compactRuleBlock(value: string, maxLength: number) {
@@ -828,7 +833,7 @@ function compactRuleBlock(value: string, maxLength: number) {
 }
 
 export function compactInvestmentProposalSkillPrompt(skill: LoadedAiSkill) {
-  const instructions = compactRuleBlock(skill.instructions, 2600)
+  const instructions = compactRuleBlock(skill.instructions, 3000)
   const referenceBlocks = skill.referenceInstructions
     .split(/^## (?=references\/)/m)
     .map((block) => block.trim())
@@ -838,13 +843,13 @@ export function compactInvestmentProposalSkillPrompt(skill: LoadedAiSkill) {
       const referenceName = newline >= 0 ? block.slice(0, newline).trim() : block
       if (!RUNTIME_REFERENCE_NAMES.has(referenceName)) return []
       const content = newline >= 0 ? block.slice(newline + 1) : ''
-      return [`## ${referenceName}\n${compactRuleBlock(content, 1100)}`]
+      return [`## ${referenceName}\n${compactRuleBlock(content, 1050)}`]
     })
   return [
     `Skill：${skill.name} / ${skill.version}`,
     instructions,
     ...referenceBlocks,
-  ].filter(Boolean).join('\n\n').slice(0, 7000)
+  ].filter(Boolean).join('\n\n').slice(0, 12000)
 }
 
 function checkpointFingerprint(input: {

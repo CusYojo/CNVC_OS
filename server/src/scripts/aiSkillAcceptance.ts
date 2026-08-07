@@ -354,7 +354,7 @@ async function main() {
   assert(
     'AI-008 Skill 覆盖结构、文风、章节任务与视觉门禁',
     [
-      '标准 17 节目录',
+      '固定 17 节',
       '章节任务',
       '正式、克制',
       '责任主体和时点',
@@ -365,13 +365,13 @@ async function main() {
       '16 pt',
       '12 pt',
       '固定值 24 pt',
-      'D9D9D9',
-      '只生成、登记并交付一份 DOCX',
-      '不生成或登记 PDF',
-      '不得逐段套用',
-      '订单节奏：',
-      '数字小标题',
-      '连续的正文段落',
+      'C0C0C0',
+      '只交付一份 DOCX',
+      'PDF 和渲染图均为内部临时产物',
+      '每个 finding 是不含手动换行的完整自然段',
+      '列角色不同但使用等宽列',
+      'Calculation Ledger',
+      'Manifest',
       '...展开',
       '原文链接',
       '完整法律主体',
@@ -774,8 +774,8 @@ async function main() {
   )
   assert(
     'Q&A Formatter 落实 qa_cn_formal_a4 字号、固定行距、页边距与直接式结构',
-    qaDocumentSource.includes("const PROJECT_QA_REPORT_BODY_FONT = 'STFangsong'")
-      && qaDocumentSource.includes("const PROJECT_QA_REPORT_HEADING_FONT = 'STHeiti'")
+    qaDocumentSource.includes("const PROJECT_QA_REPORT_BODY_FONT = 'Songti SC'")
+      && qaDocumentSource.includes("const PROJECT_QA_REPORT_HEADING_FONT = 'Heiti SC'")
       && qaDocumentSource.includes('const PROJECT_QA_REPORT_BODY_SIZE = 21')
       && qaDocumentSource.includes('const PROJECT_QA_REPORT_TITLE_SIZE = 40')
       && qaDocumentSource.includes('const PROJECT_QA_REPORT_QUESTION_SIZE = 28')
@@ -794,7 +794,7 @@ async function main() {
       && qaDocumentSource.includes('visibleAuditAppendixAbsent')
       && qaDocumentSource.includes('不得包含外部超链接')
       && qaDocumentSource.includes('不得显示答复或结论标签'),
-    'STFangsong / STHeiti / 20pt 标题 / 14pt 问题 / 10.5pt 正文 / 20pt 固定行距 / 正式 A4 页边距',
+    'Songti SC / Heiti SC / 20pt 标题 / 14pt 问题 / 10.5pt 正文 / 20pt 固定行距 / 正式 A4 页边距',
   )
   assert(
     'Q&A 快捷任务使用标准 8 题并只登记 DOCX',

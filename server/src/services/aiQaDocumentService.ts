@@ -33,8 +33,10 @@ const INVESTMENT_QA_FOOTER_FONT = 'Helvetica Neue'
 const INVESTMENT_QA_BODY_SIZE = 21
 const INVESTMENT_QA_TITLE_SIZE = 32
 const INVESTMENT_QA_LINE_SPACING = 456
-const PROJECT_QA_REPORT_BODY_FONT = 'STFangsong'
-const PROJECT_QA_REPORT_HEADING_FONT = 'STHeiti'
+// generate-project-qa-report 的原生 Formatter 使用宋体正文和黑体标题；
+// 保持与 Skill 脚本写入 OpenXML 的字体家族名一致。
+const PROJECT_QA_REPORT_BODY_FONT = 'Songti SC'
+const PROJECT_QA_REPORT_HEADING_FONT = 'Heiti SC'
 const PROJECT_QA_REPORT_BODY_SIZE = 21
 const PROJECT_QA_REPORT_TITLE_SIZE = 40
 const PROJECT_QA_REPORT_QUESTION_SIZE = 28

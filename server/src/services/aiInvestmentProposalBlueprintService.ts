@@ -86,11 +86,11 @@ export type InvestmentProposalDocumentBlueprint = {
     widthDxa: 11906
     heightDxa: 16838
     marginTopDxa: 1440
-    marginRightDxa: 1800
-    marginBottomDxa: 1440
-    marginLeftDxa: 1800
-    headerDxa: 720
-    footerDxa: 720
+    marginRightDxa: 1797
+    marginBottomDxa: 1497
+    marginLeftDxa: 1797
+    headerDxa: 851
+    footerDxa: 992
   }
   typography: {
     titlePt: 16
@@ -497,11 +497,11 @@ export async function loadInvestmentProposalBlueprint(
       widthDxa: 11906,
       heightDxa: 16838,
       marginTopDxa: 1440,
-      marginRightDxa: 1800,
-      marginBottomDxa: 1440,
-      marginLeftDxa: 1800,
-      headerDxa: 720,
-      footerDxa: 720,
+      marginRightDxa: 1797,
+      marginBottomDxa: 1497,
+      marginLeftDxa: 1797,
+      headerDxa: 851,
+      footerDxa: 992,
     },
     typography: {
       titlePt: 16,
