@@ -1559,8 +1559,6 @@ function Chat() {
     } else if (request.actionId === 'due_diligence') {
       parameters.diligenceScope = request.diligenceScope || '商业尽调'
     } else if (request.actionId === 'qa') {
-      parameters.qaMode = request.qaMode || '投资委员会 Q&A'
-      parameters.questionDepth = request.questionDepth || '标准版'
       if (request.userInstructions?.trim()) {
         parameters.userInstructions = request.userInstructions.trim()
       }

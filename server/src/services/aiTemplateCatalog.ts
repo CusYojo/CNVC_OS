@@ -212,7 +212,7 @@ export const AI_TEMPLATE_CATALOG: Record<AiBusinessTaskType, AiTemplateDefinitio
       '合规与权属',
       '风险与核验',
     ],
-    requiredParameters: ['projectId', 'sourceCutoffDate', 'qaMode', 'questionDepth'],
+    requiredParameters: ['projectId', 'sourceCutoffDate'],
     disclaimer: '',
   },
 }

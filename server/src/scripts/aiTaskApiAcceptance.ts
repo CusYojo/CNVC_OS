@@ -440,8 +440,6 @@ async function main(cleanupState: AcceptanceCleanupState) {
       type: 'project_qa',
       parameters: {
         sourceCutoffDate: cutoff,
-        qaMode: '投资委员会 Q&A',
-        questionDepth: '标准版',
         outputFormat: 'DOCX',
       },
       idempotencyKey: qaTaskKey,

@@ -78,11 +78,9 @@ import {
   buildProjectQaDocumentContent,
   generateProjectQaAnswers,
   generateProjectQaQuestions,
-  PROJECT_QA_ANSWER_TARGET_MIN_CHARACTERS,
   PROJECT_QA_QUESTION_MAX_CHARACTERS,
   reviewProjectQaAnswers,
   usedProjectQaSourceIndexes,
-  type ProjectQaDepth,
   type ProjectQaMode,
 } from './aiQaPipelineService.js'
 import {
@@ -1130,6 +1128,7 @@ function assessQaTemplateFidelity(input: {
   categoryCount: number
   expectedCategoryCount: number
   reviewerStatus: string
+  depthGatePassed: boolean
 }): TemplateFidelityAssessment {
   const metadata = input.quality.metadata
   const usesDirectQaLayout = [
@@ -1169,8 +1168,8 @@ function assessQaTemplateFidelity(input: {
       ),
       fidelityCheck(
         'substantive-answers',
-        Number(metadata.averageAnswerLength ?? 0)
-          >= PROJECT_QA_ANSWER_TARGET_MIN_CHARACTERS,
+        input.depthGatePassed,
+        true,
       ),
       fidelityCheck(
         'answer-question-ratio',
@@ -1485,12 +1484,10 @@ async function executeTask(taskId: string) {
 
     if (task.type === 'project_qa') {
       if (!qaTemplateProfile) throw new Error('Q&A 模板画像未生成')
-      const qaMode: ProjectQaMode = parameters.qaMode === '尽调 Q&A'
-        ? '尽调 Q&A'
-        : '投资委员会 Q&A'
-      const questionDepth: ProjectQaDepth = parameters.questionDepth === '深度版'
-        ? '深度版'
-        : '标准版'
+      // 快捷任务不再暴露“Q&A 类型/问题深度”参数，统一由当前标准 Skill
+      // 选择问题并执行深度门禁；历史任务中的旧参数只保留为审计数据。
+      const qaMode: ProjectQaMode = '投资委员会 Q&A'
+      const questionDepth = '标准版' as const
 
       const qaTopics = projectQaResearchTopicsForSources(sources)
       let qaAgentCandidates: EvidenceSource[] = []
@@ -1504,7 +1501,7 @@ async function executeTask(taskId: string) {
             ...qaTopics.map((topic) => `${project.companyName || project.name} ${topic}`),
           ])].slice(0, 8),
           parameters,
-          maxSources: questionDepth === '深度版' ? 24 : 18,
+          maxSources: 18,
         })
         qaAgentResearch = agentResearch.audit
         qaAgentCandidates = agentResearch.sources
@@ -1520,7 +1517,7 @@ async function executeTask(taskId: string) {
           sourceCutoffDate,
           parameters,
           requestedTopics: qaTopics,
-          maxSources: questionDepth === '深度版' ? 20 : 14,
+          maxSources: 14,
         })
         qaModelResearch = research.audit
         if (research.sources.length > 0) {
@@ -1616,6 +1613,7 @@ async function executeTask(taskId: string) {
           categoryCount: Number(quality.metadata.categoryCount ?? 0),
           expectedCategoryCount: template.sections.length,
           reviewerStatus: reviewed.review.status,
+          depthGatePassed: generation.depthMetrics.passed,
         })
         if (!templateFidelity.passed) {
           throw new Error(

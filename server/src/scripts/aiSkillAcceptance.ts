@@ -702,6 +702,14 @@ async function main() {
   const qaCoreRules = await readFile(AI_QA_TEMPLATE.coreRulesPath, 'utf8')
   const qaSkill = await loadAiSkill(AI_QA_SKILL_NAME)
   const qaRuntimeCorpus = `${qaSkill.instructions}\n${qaSkill.referenceInstructions}`
+  const aiQaPipelineSource = await readFile(
+    path.resolve(process.cwd(), 'server', 'src', 'services', 'aiQaPipelineService.ts'),
+    'utf8',
+  )
+  const qaRuntimeSource = await readFile(
+    path.resolve(process.cwd(), 'server', 'src', 'services', 'aiProjectQaSkillRuntimeService.ts'),
+    'utf8',
+  )
   assert(
     'Q&A 快捷任务统一绑定 generate-project-qa-report',
     AI_QA_SKILL_NAME === 'generate-project-qa-report'
@@ -709,6 +717,17 @@ async function main() {
       && AI_QA_TEMPLATE.skillName === AI_QA_SKILL_NAME
       && AI_TEMPLATE_CATALOG.project_qa.skillName === AI_QA_SKILL_NAME,
     `${AI_QA_SKILL_NAME} / ${AI_TEMPLATE_CATALOG.project_qa.skillName}`,
+  )
+  assert(
+    'Q&A 深度门禁同时检查正文密度与投资因果层级',
+    aiQaPipelineSource.includes('PROJECT_QA_ANSWER_HARD_FLOOR_CHARACTERS')
+      && aiQaPipelineSource.includes('projectQaAnswerCausalDepthScore')
+      && aiQaPipelineSource.includes('projectQaAnswerInvestmentDimensionScore')
+      && qaRuntimeSource.includes('projectQaContentDepthMetrics')
+      && qaRuntimeSource.includes('causalDepthRatio >= 0.7')
+      && qaRuntimeSource.includes('documentInvestmentDimensionCount >= 4')
+      && qaRuntimeSource.includes("code: 'PROJECT_QA_DEPTH_GATE_FAILED'"),
+    '单题硬底线 + 全文平均密度 + 专题因果层级 + 全文投资维度覆盖',
   )
   const deploySource = await readFile(path.resolve(process.cwd(), 'deploy.sh'), 'utf8')
   const serverIndexSource = await readFile(
@@ -991,8 +1010,11 @@ async function main() {
     'Q&A 前端创建正式项目文档任务',
     quickActionsSource.includes("id: 'qa'")
       && quickActionsSource.includes("mode: 'task'")
-      && quickActionsSource.includes('投资委员会 Q&A')
       && quickActionsSource.includes('项目投资问答 DOCX')
+      && !quickActionsSource.includes('Q&amp;A 类型')
+      && !quickActionsSource.includes('问题深度')
+      && !quickActionsSource.includes('qaMode')
+      && !quickActionsSource.includes('questionDepth')
       && !quickActionsSource.includes("activeAction.id === 'qa' ? 'PDF'")
       && !quickActionsSource.includes('QA_GROUPS')
       && AI_TEMPLATE_CATALOG.project_qa.skillName === 'generate-project-qa-report'
@@ -1045,10 +1067,11 @@ async function main() {
     'Q&A 通过统一任务 API 生成可下载产物',
     assistantPageSource.includes("qa: 'project_qa'")
       && assistantPageSource.includes("apiPost<AiTask>('/ai/tasks'")
-      && assistantPageSource.includes('parameters.qaMode')
-      && assistantPageSource.includes('parameters.questionDepth')
+      && !assistantPageSource.includes('parameters.qaMode')
+      && !assistantPageSource.includes('parameters.questionDepth')
+      && AI_TEMPLATE_CATALOG.project_qa.requiredParameters.join(',') === 'projectId,sourceCutoffDate'
       && !assistantPageSource.includes('Q&A任务创建失败：${(error as Error).message}'),
-    'POST /api/ai/tasks type=project_qa',
+    'POST /api/ai/tasks type=project_qa；类型与深度由标准 Skill 统一决定',
   )
   assert(
     'AI 助手生成界面显示安全的实时阶段和进度心跳',

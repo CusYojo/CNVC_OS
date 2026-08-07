@@ -102,10 +102,6 @@ const createSchema = z.object({
   if (body.type === 'due_diligence_report') {
     requireAllowed('diligenceScope', ['商业尽调'], '首期仅支持商业尽调')
   }
-  if (body.type === 'project_qa') {
-    requireAllowed('qaMode', ['投资委员会 Q&A', '尽调 Q&A'], 'Q&A 类型无效')
-    requireAllowed('questionDepth', ['标准版', '深度版'], '问题深度无效')
-  }
   if (body.type === 'custom_template_document') {
     const customTemplateId = body.parameters.customTemplateId
     if (typeof customTemplateId !== 'string' || !z.string().uuid().safeParse(customTemplateId).success) {

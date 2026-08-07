@@ -4,7 +4,10 @@ import path from 'node:path'
 import {
   inspectProjectQaDocx,
 } from '../services/aiQaDocumentService.js'
-import { generateProjectQaWithSkill } from '../services/aiProjectQaSkillRuntimeService.js'
+import {
+  generateProjectQaWithSkill,
+  projectQaContentDepthMetrics,
+} from '../services/aiProjectQaSkillRuntimeService.js'
 import {
   PROJECT_QA_DOCUMENT_CATEGORIES,
   PROJECT_QA_QUESTION_COUNTS,
@@ -714,6 +717,54 @@ async function main() {
     answers: reviewed.answers,
     review: reviewed.review,
   })
+  const conciseDecisionAnswer = [
+    '公司当前客户采购信号仍要区分合作意向、合同、验收与实际付费，只有复购和销售周期同步改善，需求才能形成稳定收入。',
+    '交付若持续依赖定制实施和新增人天，规模扩大仍会推高成本并压低毛利；标准化复用提高，才可能形成经营杠杆。',
+    '回款、应收和现金消耗决定融资需求与估值安全边际，若客户集中或验收延迟，当前投资主线可能失效并需要收紧交易条件。',
+  ].join('')
+  const combinedDepth = projectQaContentDepthMetrics({
+    ...content,
+    answers: content.answers.map((answer) => ({ ...answer, answer: conciseDecisionAnswer })),
+  })
+  const paddedButShallow = projectQaContentDepthMetrics({
+    ...content,
+    answers: content.answers.map((answer) => ({
+      ...answer,
+      answer: '公司产品功能较为丰富，产品能力仍在持续完善。'.repeat(14),
+    })),
+  })
+  const focusedCausalAnswers = [
+    '核心团队目前覆盖算法、产品和产业化岗位，但核心成员的全职投入和股权绑定尚未完全明确。如果关键研发与销售职责仍集中在少数兼职成员，产品迭代和商业推进会同时受限，因此现阶段投资判断应保留关键人风险，并把持续任职和激励安排作为推进条件。岗位替代梯队、历史协作记录和全职安排能够相互印证后，团队执行能力才可从个人履历升级为组织能力。',
+    '核心产品已完成样机测试，但真实客户环境中的稳定性和可复制交付尚未形成连续记录。若性能优势不能跨场景保持，验证周期和实施成本都会上升，因此技术只能计入期权价值，不能直接按成熟产品估值；客户验收和标准化交付是判断升级的里程碑。测试口径还要覆盖持续运行、故障恢复和不同客户环境，单次演示成功不能外推为稳定量产能力。',
+    '核心技术与专利权属目前尚不能完全对应，成果形成期间的任职关系和授权范围会决定公司能否持续商业化。如果关键权利仍由个人或关联主体控制，后续融资和交易交割都会受到限制，因此投资方案需要以权属闭环作为前置条件，并保留授权失效风险。权利人、发明人、实际使用模块和许可期限逐项对应后，才能判断核心资产是否可独立控制并随交易持续转移。',
+    '客户进展目前仍需区分试点、合同、验收和回款。若交付持续依赖定制实施，新增订单会同步增加人天和成本，收入增长未必改善毛利与现金；只有复购、回款和销售周期同时改善，商业模式才具备复制条件，投资推进才有足够安全边际。不同客户批次的报价、实施周期和验收结果需要保持同口径，避免把一次性项目收入误判为可重复增长。',
+  ]
+  const focusedButComplete = projectQaContentDepthMetrics({
+    ...content,
+    answers: content.answers.map((answer, index) => ({
+      ...answer,
+      answer: focusedCausalAnswers[index % focusedCausalAnswers.length],
+    })),
+  })
+  assert(
+    '阶段5 深度门禁：因果层级完整的精炼回答不被单一字符目标误伤',
+    combinedDepth.passed
+      && combinedDepth.minimumLength >= combinedDepth.hardFloor
+      && combinedDepth.causalDepthRatio === 1,
+    JSON.stringify(combinedDepth),
+  )
+  assert(
+    '阶段5 深度门禁：团队、技术和权属专题按本题因果链判断，投资维度在全文检查',
+    focusedButComplete.passed
+      && focusedButComplete.causalDepthRatio === 1
+      && focusedButComplete.documentInvestmentDimensionCount >= 4,
+    JSON.stringify(focusedButComplete),
+  )
+  assert(
+    '阶段5 深度门禁：篇幅很长但缺少商业、财务和投资因果链仍被拒绝',
+    !paddedButShallow.passed && paddedButShallow.causalDepthRatio === 0,
+    JSON.stringify(paddedButShallow),
+  )
   const docxPath = path.join(outputDir, 'qa-acceptance.docx')
   const skillNativeContent = {
     ...content,

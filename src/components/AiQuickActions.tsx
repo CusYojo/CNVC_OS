@@ -130,8 +130,6 @@ export type AiQuickTaskRequest = {
   language?: string
   structureMode?: string
   diligenceScope?: string
-  qaMode?: string
-  questionDepth?: string
   customTemplateId?: string
   customTemplateName?: string
   preparationId?: string
@@ -210,8 +208,6 @@ export function AiQuickActions({
   const [proposalInstructions, setProposalInstructions] = useState('')
   const [language, setLanguage] = useState('中文')
   const [diligenceScope, setDiligenceScope] = useState('商业尽调')
-  const [qaMode, setQaMode] = useState('投资委员会 Q&A')
-  const [questionDepth, setQuestionDepth] = useState('标准版')
   const submitLocksRef = useRef(new Set<AiQuickActionId>())
   const [submittingActionIds, setSubmittingActionIds] = useState<AiQuickActionId[]>([])
   const [templateFile, setTemplateFile] = useState<File | null>(null)
@@ -293,8 +289,6 @@ export function AiQuickActions({
         language,
         structureMode: action.id === 'investment_ppt' ? 'strict-template' : undefined,
         diligenceScope,
-        qaMode,
-        questionDepth,
         customTemplateId: taskTemplate?.id,
         customTemplateName: taskTemplate?.originalFileName,
         preparationId,
@@ -793,24 +787,6 @@ export function AiQuickActions({
           )}
           {activeAction?.id === 'due_diligence' && (
             <label className="block"><span className="label">分析范围</span><select className="input" value={diligenceScope} onChange={(event) => setDiligenceScope(event.target.value)}><option value="商业尽调">早期项目线索分析</option></select></label>
-          )}
-          {activeAction?.id === 'qa' && (
-            <div className="grid grid-cols-2 gap-4">
-              <label>
-                <span className="label">Q&amp;A 类型</span>
-                <select className="input" value={qaMode} onChange={(event) => setQaMode(event.target.value)}>
-                  <option>投资委员会 Q&amp;A</option>
-                  <option>尽调 Q&amp;A</option>
-                </select>
-              </label>
-              <label>
-                <span className="label">问题深度</span>
-                <select className="input" value={questionDepth} onChange={(event) => setQuestionDepth(event.target.value)}>
-                  <option>标准版</option>
-                  <option>深度版</option>
-                </select>
-              </label>
-            </div>
           )}
           <div className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
             输出格式：<strong className="text-slate-700">{activeAction?.id === 'investment_ppt' ? 'PPTX' : 'DOCX'}</strong>

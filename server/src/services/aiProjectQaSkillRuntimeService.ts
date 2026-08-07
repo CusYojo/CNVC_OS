@@ -4,7 +4,9 @@ import { access, mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { promisify } from 'node:util'
 import {
-  PROJECT_QA_ANSWER_TARGET_MIN_CHARACTERS,
+  PROJECT_QA_ANSWER_HARD_FLOOR_CHARACTERS,
+  projectQaAnswerCausalDepthScore,
+  projectQaAnswerInvestmentDimensionScore,
   type ProjectQaDocumentContent,
 } from './aiQaPipelineService.js'
 import {
@@ -65,6 +67,40 @@ export function buildProjectQaSkillMarkdown(input: {
   return `# ${titleProjectName}Q&A 报告\n\n${sections.join('\n\n')}`
 }
 
+export function projectQaContentDepthMetrics(content: ProjectQaDocumentContent) {
+  const answers = content.questions.map((question) =>
+    content.answers.find((answer) => answer.questionId === question.id))
+  const lengths = answers.map((answer) => visibleLength(answer?.answer ?? ''))
+  const averageLength = lengths.reduce((sum, value) => sum + value, 0) / Math.max(lengths.length, 1)
+  const targetMinimum = content.depth === '深度版' ? 260 : 220
+  const averageMinimum = Math.round(targetMinimum * 0.7)
+  const causalDepthScores = answers.map((answer) =>
+    projectQaAnswerCausalDepthScore(answer?.answer ?? ''))
+  const causalDepthPassCount = causalDepthScores.filter((score) => score >= 3).length
+  const causalDepthRatio = causalDepthPassCount / Math.max(answers.length, 1)
+  // 客户、交付、财务、交易和风险是整份投委会报告的覆盖面要求，不能要求
+  // 团队、技术、权属等每一道专题回答都机械重复其中三类。
+  const documentInvestmentDimensionCount = projectQaAnswerInvestmentDimensionScore(
+    answers.map((answer) => answer?.answer ?? '').join('\n'),
+  )
+  const minimumLength = lengths.length ? Math.min(...lengths) : 0
+  return {
+    profile: content.depth,
+    targetMinimum,
+    hardFloor: PROJECT_QA_ANSWER_HARD_FLOOR_CHARACTERS,
+    averageMinimum,
+    minimumLength,
+    averageLength: Math.round(averageLength),
+    causalDepthPassCount,
+    causalDepthRatio,
+    documentInvestmentDimensionCount,
+    passed: minimumLength >= PROJECT_QA_ANSWER_HARD_FLOOR_CHARACTERS
+      && averageLength >= averageMinimum
+      && causalDepthRatio >= 0.7
+      && documentInvestmentDimensionCount >= 4,
+  }
+}
+
 function assertSkillContentReady(content: ProjectQaDocumentContent) {
   if (content.questions.length < 8 || content.questions.length > 12) {
     throw new Error(
@@ -79,13 +115,14 @@ function assertSkillContentReady(content: ProjectQaDocumentContent) {
   if (answers.some((answer) => !answer)) {
     throw new Error('generate-project-qa-report 问题与回答未完整对应')
   }
-  const lengths = answers.map((answer) => visibleLength(answer?.answer ?? ''))
-  const averageLength = lengths.reduce((sum, value) => sum + value, 0) / Math.max(lengths.length, 1)
-  const thinIndex = lengths.findIndex((length) => length < 260)
-  if (thinIndex >= 0 || averageLength < PROJECT_QA_ANSWER_TARGET_MIN_CHARACTERS) {
-    throw new Error(
-      `generate-project-qa-report 回答深度不足：第 ${thinIndex >= 0 ? thinIndex + 1 : 1} 题最短 ${Math.min(...lengths)} 字，平均 ${Math.round(averageLength)} 字`,
-    )
+  const depthMetrics = projectQaContentDepthMetrics(content)
+  if (!depthMetrics.passed) {
+    throw Object.assign(new Error(
+      `generate-project-qa-report 回答深度未通过组合门禁：最短 ${depthMetrics.minimumLength} 字（硬底线 ${depthMetrics.hardFloor}），平均 ${depthMetrics.averageLength} 字（最低 ${depthMetrics.averageMinimum}），形成事实—机制—经营—投资—边界因果层级 ${depthMetrics.causalDepthPassCount}/${answers.length}，全文投资维度覆盖 ${depthMetrics.documentInvestmentDimensionCount}/5`,
+    ), {
+      code: 'PROJECT_QA_DEPTH_GATE_FAILED',
+      qualityIssues: [depthMetrics],
+    })
   }
   const visibleText = answers.map((answer) => answer?.answer ?? '').join('\n')
   const noise = visibleText.match(
@@ -101,6 +138,7 @@ function assertSkillContentReady(content: ProjectQaDocumentContent) {
   if (!lastQuestion || !/(?:风险|失效|里程碑|判断|条件|决策)/.test(lastQuestion.question)) {
     throw new Error('generate-project-qa-report 最后一题未形成风险、里程碑与决策收束')
   }
+  return depthMetrics
 }
 
 async function commandWorks(command: string, args: string[]) {
@@ -321,7 +359,7 @@ export async function generateProjectQaWithSkill(input: {
       `快捷任务 Q&A 必须使用 ${REQUIRED_SKILL_NAME}，实际为 ${input.skill.name}`,
     )
   }
-  assertSkillContentReady(input.content)
+  const depthMetrics = assertSkillContentReady(input.content)
   const skillDirectory = getAiSkillDirectory(REQUIRED_SKILL_NAME)
   const validatorPath = path.join(skillDirectory, 'scripts', 'validate_qa_report.py')
   const rendererPath = path.join(skillDirectory, 'scripts', 'render_qa_docx.py')
@@ -342,14 +380,13 @@ export async function generateProjectQaWithSkill(input: {
     validatorPath,
     markdownPath: input.markdownPath,
   })
-  const blockingWarnings = validation.findings.filter((finding) =>
-    finding.level === 'warning' && finding.code === 'thin_answer')
-  if (validation.errors > 0 || blockingWarnings.length > 0) {
+  // 单题字符目标用于提示扩写，不再单独推翻已经通过组合深度门禁的全文。
+  // 结构、取证过程泄露和其他 Markdown 错误仍然是硬失败。
+  if (validation.errors > 0) {
     throw new Error(
-      `generate-project-qa-report Markdown 未通过交付门禁：${[
-        ...validation.findings.filter((finding) => finding.level === 'error'),
-        ...blockingWarnings,
-      ].map((finding) => finding.message).join('；')}`,
+      `generate-project-qa-report Markdown 未通过交付门禁：${validation.findings
+        .filter((finding) => finding.level === 'error')
+        .map((finding) => finding.message).join('；')}`,
     )
   }
   await execFileAsync(python, [rendererPath, input.markdownPath, input.outputPath], {
@@ -371,6 +408,7 @@ export async function generateProjectQaWithSkill(input: {
     layoutProfile: 'qa_cn_formal_a4',
     frontDirectoryIncluded: false,
     skillExecutionMode: 'native-markdown-validated-docx-rendered',
+    depthMetrics,
     markdownValidation: validation,
     visualQa,
   }

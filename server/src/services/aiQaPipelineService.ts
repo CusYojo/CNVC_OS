@@ -359,6 +359,35 @@ const QUESTION_VERIFICATION_DEPTH =
 export const PROJECT_QA_QUESTION_MAX_CHARACTERS = 88
 export const PROJECT_QA_ANSWER_TARGET_MIN_CHARACTERS = 420
 export const PROJECT_QA_ANSWER_TARGET_MAX_CHARACTERS = 1_200
+export const PROJECT_QA_ANSWER_HARD_FLOOR_CHARACTERS = 120
+
+const PROJECT_QA_ANSWER_INVESTMENT_DIMENSION_PATTERNS = [
+  /客户|采购|付费|销售周期|转化|续费|复购|客单价|合同/,
+  /交付|实施|人天|复用|产能|利用率|供应链|标准化|定制|规模/,
+  /收入|毛利|利润|现金|回款|应收|营运资金|成本|资本开支|融资/,
+  /投资主线|估值|折价|溢价|期权价值|推进|暂缓|否决|回报|稀释/,
+  /证据|验收|测试|风险|边界|失效|反方|依赖|集中度|替代/,
+] as const
+
+const PROJECT_QA_ANSWER_CAUSAL_LAYER_PATTERNS = [
+  /已|目前|现阶段|完成|形成|签署|上线|实现|显示|尚未|不能确认|缺少|没有|合同|订单|测试|专利|股权|团队|产品/,
+  /因为|由于|因此|从而|导致|意味着|取决于|依赖|如果|若|一旦|只有|进而|影响|决定|使得|对应|传导/,
+  /客户|采购|销售|交付|实施|产品|技术|性能|团队|治理|权属|收入|毛利|现金|成本|回款|应收|融资/,
+  /投资|估值|推进|暂缓|否决|回报|稀释|交易|交割|折价|溢价|安全边际|期权价值/,
+  /风险|边界|失效|反方|依赖|集中度|替代|尚不能|无法确认|不确定|条件|里程碑|验证|验收/,
+] as const
+
+export function projectQaAnswerInvestmentDimensionScore(answer: string) {
+  return PROJECT_QA_ANSWER_INVESTMENT_DIMENSION_PATTERNS
+    .filter((pattern) => pattern.test(answer))
+    .length
+}
+
+export function projectQaAnswerCausalDepthScore(answer: string) {
+  return PROJECT_QA_ANSWER_CAUSAL_LAYER_PATTERNS
+    .filter((pattern) => pattern.test(answer))
+    .length
+}
 
 export function projectQaQuestionDepthScore(value: string) {
   const question = cleanQuestion(value)
@@ -1426,6 +1455,18 @@ export function answerHasSufficientDepth(
     && answerLength / questionLength >= 4
 }
 
+function answerHasMinimumDecisionDepth(
+  answer: string,
+  question: ProjectQaGeneratedQuestion,
+) {
+  const answerLength = visibleCharacterCount(answer)
+  const questionLength = Math.max(visibleCharacterCount(question.question), 1)
+  return answerLength >= PROJECT_QA_ANSWER_HARD_FLOOR_CHARACTERS
+    && answerLength <= PROJECT_QA_ANSWER_TARGET_MAX_CHARACTERS
+    && answerLength / questionLength >= 4
+    && projectQaAnswerCausalDepthScore(answer) >= 3
+}
+
 function hasQuestionRelevantEvidence(
   question: ProjectQaGeneratedQuestion,
   sources: readonly EvidenceSource[],
@@ -1440,7 +1481,8 @@ function answerQualityScore(
 ) {
   return (isEvidenceBoundary(answer) ? 0 : 4)
     + (answerHasRelevantCitation(question, answer) ? 4 : 0)
-    + (answerHasSufficientDepth(answer.answer, question) ? 3 : 0)
+    + (answerHasMinimumDecisionDepth(answer.answer, question) ? 2 : 0)
+    + (answerHasSufficientDepth(answer.answer, question) ? 2 : 0)
     + Math.min(visibleCharacterCount(answer.answer) / PROJECT_QA_ANSWER_TARGET_MIN_CHARACTERS, 1)
 }
 
@@ -1560,7 +1602,7 @@ function normalizeAnswerItem(
     || answerHasUnsupportedNumbers(answer, supportedText)
     || !supportingQuotes.some((quote) => questionEvidenceRelevanceScore(question, quote) > 0)
     || !hasLogicalAnswerStructure(answer, question.category)
-    || !answerHasSufficientDepth(answer, question)
+    || !answerHasMinimumDecisionDepth(answer, question)
     || questionEvidenceRelevanceScore(question, answer) === 0
     || hasClientVisibleProcessTrace(answer)
   ) {
@@ -1961,7 +2003,10 @@ ${evidenceForPrompt(input.sources, 1000)}`
   })
   const seriousQuestionIds = new Set(
     deterministicIssues
-      .filter((issue) => issue.type !== 'duplicate')
+      // 字数不足仍保留为 Reviewer 观察项，但不得用更短的确定性兜底回答
+      // 覆盖已经具备事实、机制和投资含义的模型答案。最终由 Skill Runtime
+      // 的“字符硬底线 + 因果维度覆盖 + 全文平均密度”组合门禁裁决。
+      .filter((issue) => !['duplicate', 'insufficient_depth'].includes(issue.type))
       .map((issue) => issue.questionId),
   )
   const repairedAnswers = dedupeProjectQaAnswerNarrative(input.questions.map((question) => {

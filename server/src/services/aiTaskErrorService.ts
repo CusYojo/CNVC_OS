@@ -17,6 +17,7 @@ export function safeAiTaskFailureStage(error: unknown) {
   if (code === 'DUE_DILIGENCE_SKILL_RUNTIME_UNAVAILABLE') return '尽调技能运行环境未就绪'
   if (code === 'DUE_DILIGENCE_EVIDENCE_EMPTY') return '尽调证据台账为空'
   if (code.startsWith('DUE_DILIGENCE_SKILL_')) return '尽调技能交付门禁未通过'
+  if (code === 'PROJECT_QA_DEPTH_GATE_FAILED') return 'Q&A 投资分析深度检查未通过'
   if (code === 'INVESTMENT_RECOMMENDATION_CONTENT_QUALITY_REJECTED') {
     return '投资建议书正文专业性检查未通过'
   }
@@ -80,6 +81,9 @@ export function safeAiTaskFailureMessage(error: unknown) {
   }
   if (code.startsWith('DUE_DILIGENCE_SKILL_')) {
     return '尽调报告未通过证据、字段、内容、人工文风、DOCX 样式或逐页渲染中的一项交付门禁，因此未发布文件。请根据任务阶段检查资料或技能运行环境后继续生成。'
+  }
+  if (code === 'PROJECT_QA_DEPTH_GATE_FAILED') {
+    return 'Q&A 中部分回答的正文密度、与本题相关的因果层级，或整份报告的投资维度覆盖尚未达到交付要求。系统已保留参数，可继续生成；如重复出现，请补充能够改变相关问题判断的项目事实。'
   }
   if (code === 'INVESTMENT_RECOMMENDATION_CONTENT_QUALITY_REJECTED') {
     const issues = Array.isArray((error as CodedError | null)?.qualityIssues)
