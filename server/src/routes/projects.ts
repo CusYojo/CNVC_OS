@@ -5,10 +5,16 @@ import { FLUE_BASE_URL } from '../config/agentRuntime.js'
 import { ingestFile } from '../services/ragService.js'
 import { ProjectCreateSchema } from '../schemas/project.js'
 import {
-  addFile, createProject, finishFileParse, getProject, listFiles, listProjects, moveProjectStage, updateProject, deleteProject, pinProject, listAllFiles } from '../services/projectService.js'
+  addFile, createProject, finishFileParse, getFile, getProject, listFiles, listProjects, moveProjectStage, replaceFileContent, setFileStoragePath, updateProject, deleteProject, pinProject, listAllFiles } from '../services/projectService.js'
+import { openProjectFile, projectFileContentType, removeProjectFile, saveProjectFile } from '../services/projectFileStorageService.js'
 
 export const projectsRouter = Router()
 const routeId = (value: string | string[]) => z.string().min(1).parse(value)
+
+function contentDisposition(fileName: string) {
+  const fallback = fileName.replace(/[^\x20-\x7E]/g, '_').replace(/["\\]/g, '_')
+  return `attachment; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(fileName)}`
+}
 
 const ListSchema = z.object({
   keyword: z.string().optional(),
@@ -199,14 +205,87 @@ projectsRouter.post('/files/upload', async (req: AuthedRequest, res, next) => {
       projectId: body.projectId, name: body.name, type: safeType, category: body.category,
       size: sizeMb, uploader: body.uploader, parseStatus: '解析中', visibility: body.visibility,
     } as never, req.user!.uid)
+    // 原始字节必须先持久化，资料库下载与后台解析才能共享同一份可信文件。
+    // storagePath 只保存相对路径，真实路径被限制在 PROJECT_FILE_ROOT 下。
+    let storagePath: string | undefined
+    try {
+      storagePath = await saveProjectFile(body.projectId, row.id, buffer)
+      await setFileStoragePath(row.id, storagePath)
+    } catch (error) {
+      const { deleteFile } = await import('../services/projectService.js')
+      await deleteFile(row.id).catch(() => {})
+      await removeProjectFile(storagePath).catch(() => {})
+      throw error
+    }
     // 【上传卡住修复】立即返回(parseStatus='解析中')，正文提取/OCR 放后台异步跑。
     // 原来 await ingestFile 同步等解析完才返回：大 PDF 走 OCR 要几分钟、并行多文件更慢，
     // 前端 fetch 无超时会一直转圈"卡住"。改为不阻塞上传，前端拿到"解析中"即结束上传态，
     // 解析完成后 ingestFile 内部会 UPDATE parse_status→成功/失败，前端刷新/轮询即可看到。
     void ingestFile(row.id, body.projectId, body.name, buffer, body.type)
       .catch((e) => console.error('[ingestFile 后台解析失败]', row.id, body.name, (e as Error).message))
-    res.status(201).json({ file: row, ingest: { ok: true, async: true, status: '解析中' } })
+    const { storagePath: _storagePath, ...publicFile } = row
+    res.status(201).json({ file: { ...publicFile, hasOriginal: true }, ingest: { ok: true, async: true, status: '解析中' } })
   } catch (err) { next(err) }
+})
+
+// 为历史资料补存原始文件：保留原记录、文件 ID、项目归属和已有 RAG 内容，不执行删除。
+projectsRouter.post('/files/:id/content', async (req: AuthedRequest, res, next) => {
+  try {
+    const file = await getFile(routeId(req.params.id))
+    if (!file) {
+      res.status(404).json({ code: 'NOT_FOUND', message: '资料记录不存在', details: null })
+      return
+    }
+    const body = z.object({
+      name: z.string().min(1),
+      type: z.string().optional(),
+      dataBase64: z.string().min(1),
+    }).parse(req.body)
+    if (body.name !== file.name) {
+      res.status(400).json({ code: 'FILE_NAME_MISMATCH', message: `请选择原文件「${file.name}」`, details: null })
+      return
+    }
+    const buffer = Buffer.from(body.dataBase64, 'base64')
+    if (buffer.length > 100 * 1024 * 1024) {
+      res.status(413).json({ code: 'PAYLOAD_TOO_LARGE', message: '文件不能超过 100MB', details: null })
+      return
+    }
+    const storagePath = await saveProjectFile(file.projectId, file.id, buffer)
+    const size = `${(buffer.length / 1024 / 1024).toFixed(2)} MB`
+    const updated = await replaceFileContent(file.id, storagePath, size, req.user!.uid)
+    if (!updated) {
+      res.status(404).json({ code: 'NOT_FOUND', message: '资料记录不存在', details: null })
+      return
+    }
+    void ingestFile(file.id, file.projectId, file.name, buffer, body.type || file.type)
+      .catch((error) => console.error('[补传原文件解析失败]', file.id, file.name, (error as Error).message))
+    res.json({ file: updated, ingest: { ok: true, async: true, status: '解析中' } })
+  } catch (error) { next(error) }
+})
+
+projectsRouter.get('/files/:id/download', async (req: AuthedRequest, res, next) => {
+  try {
+    const file = await getFile(routeId(req.params.id))
+    if (!file) {
+      res.status(404).json({ code: 'NOT_FOUND', message: '文件不存在', details: null })
+      return
+    }
+    if (!file.storagePath) {
+      res.status(404).json({
+        code: 'FILE_CONTENT_NOT_FOUND',
+        message: '该历史资料未留存原始文件，请使用“补传原文件”；现有资料记录不会删除',
+        details: null,
+      })
+      return
+    }
+    const result = await openProjectFile(file.storagePath)
+    res.setHeader('Content-Type', projectFileContentType(file.name))
+    res.setHeader('Content-Length', String(result.size))
+    res.setHeader('Content-Disposition', contentDisposition(file.name))
+    res.setHeader('Cache-Control', 'private, no-store')
+    result.stream.on('error', next)
+    result.stream.pipe(res)
+  } catch (error) { next(error) }
 })
 
 projectsRouter.delete('/files/:id', async (req: AuthedRequest, res, next) => {

@@ -1,0 +1,281 @@
+{
+  "meta": {
+    "project_name": "佳量脑科学",
+    "legal_entity": "杭州佳量脑科学股份有限公司",
+    "report_title": "尽职调查报告",
+    "report_date": "2026年8月",
+    "author": "本地技能测试",
+    "report_type": "technical",
+    "cutoff_date": "2026-06-30",
+    "confidentiality": "内部资料，严禁外传"
+  },
+  "blocks": [
+    {
+      "type": "heading",
+      "level": 1,
+      "title": "投资判断",
+      "numbered": true
+    },
+    {
+      "type": "callout",
+      "label": "结论",
+      "text": "暂缓直接股权报价。佳量脑科学的技术价值来自侵入式信号采集、闭环刺激、算法和植入结构的共享平台，但各产品距离稳定商业收入的距离不同，不能将完整管线一次性计入价格。",
+      "nature": "recommendation",
+      "evidence_ids": ["F003", "F010", "F011", "F012"]
+    },
+    {
+      "type": "paragraph",
+      "text": "公司当前最接近价值兑现的是LaserRO和S-DEEP，两者分别承担设备装机与耗材进入医院的任务；Epilcure决定平台能否形成长期临床数据壁垒。iSBS和EES更适合作为远期选择权，不宜承担本轮定价。",
+      "nature": "analysis",
+      "evidence_ids": ["F004", "F005", "F006", "F010"]
+    },
+    {
+      "type": "key_value_table",
+      "semantic_role": "company_key_facts",
+      "data_field_ids": ["entity.basic_registry"],
+      "title": "公司基本情况",
+      "rows": [
+        ["公司名称", "杭州佳量脑科学股份有限公司"],
+        ["成立时间", "2020年4月8日"],
+        ["法定代表人", "曹鹏"],
+        ["注册资本", "3558.6901万元"],
+        ["业务定位", "侵入式脑机接口、神经调控及神经外科医疗器械"],
+        ["本次建议", "暂缓直接报价，以技术权属、临床数据和注册里程碑启动价格谈判"]
+      ],
+      "column_widths": [0.29, 0.71],
+      "nature": "fact",
+      "evidence_ids": ["F001", "F003", "F012"]
+    },
+    {
+      "type": "heading",
+      "level": 1,
+      "title": "核心团队与技术组织",
+      "numbered": true
+    },
+    {
+      "type": "paragraph",
+      "text": "团队结构覆盖公司经营、质量注册和两条核心研发平台，能够支撑植入器械从研发走向注册。真正影响投资结果的不是履历完整度，而是核心人员能否长期全职投入，以及临床、注册和工程决策是否沉淀在投资主体内。",
+      "nature": "analysis",
+      "evidence_ids": ["F002", "F010", "F011"]
+    },
+    {
+      "type": "table",
+      "semantic_role": "team",
+      "data_field_ids": ["team.core_people"],
+      "title": "核心团队分工",
+      "headers": ["姓名", "职务", "主要经验", "技术转化责任"],
+      "rows": [
+        ["曹鹏", "创始人兼CEO", "医疗器械经营与产业化", "协调产品组合、融资和商业化节奏"],
+        ["曾燕", "质量总监、注册总监", "有源植入器械质量与注册", "建立质量体系并推动产品注册"],
+        ["夏良道", "激光能量平台研发总监", "医用激光与植入器械研发", "负责LaserRO工程化和量产衔接"]
+      ],
+      "column_widths": [0.14, 0.25, 0.28, 0.33],
+      "alignments": ["center", "center", "left", "left"],
+      "nature": "fact",
+      "evidence_ids": ["F002"]
+    },
+    {
+      "type": "paragraph",
+      "text": "注册和质量负责人是本项目的关键岗位。侵入式产品一旦出现设计变更、供应商替换或临床记录不完整，都会直接影响注册节奏。交易文件应锁定核心人员服务期限，并把职务成果、数据和专利归集列为持续义务。",
+      "nature": "recommendation",
+      "evidence_ids": ["F002", "F008", "F009", "F011"]
+    },
+    {
+      "type": "heading",
+      "level": 1,
+      "title": "产品矩阵与成熟度",
+      "numbered": true
+    },
+    {
+      "type": "paragraph",
+      "text": "公司的产品组合不是五条并列收入线，而是一套平台在不同适应症和临床环节上的展开。LaserRO与S-DEEP更接近医院采购，Epilcure承担闭环刺激和长期数据价值，iSBS与EES仍以技术里程碑为主。",
+      "nature": "analysis",
+      "evidence_ids": ["F003", "F004", "F005", "F006", "F010"]
+    },
+    {
+      "type": "table",
+      "semantic_role": "product_matrix",
+      "data_field_ids": ["product.product_matrix"],
+      "title": "产品成熟度与商业承接",
+      "headers": ["产品", "主要购买方", "交付方式", "当前成熟度", "投资判断"],
+      "rows": [
+        ["LaserRO", "具备磁共振能力的三级医院", "设备、光纤和计划软件", "注册后商业导入", "先看装机效率与耗材使用，不按远期峰值销售定价"],
+        ["S-DEEP", "癫痫中心和神经外科", "电极、线缆、螺丝及工具", "注册产品导入", "耗材入口有助于建立科室关系，价值取决于病例量和复购"],
+        ["Epilcure", "癫痫中心", "刺激器、电极、程控及数据平台", "多中心临床随访", "决定闭环平台上限，价格释放绑定临床和注册节点"],
+        ["iSBS", "运动障碍诊疗中心", "植入系统与闭环程控", "研发与临床推进", "作为远期选择权，不进入本轮核心估值"],
+        ["EES", "脊髓损伤康复中心", "植入刺激与康复训练", "早期临床验证", "关注功能恢复可重复性和适用人群边界"]
+      ],
+      "column_widths": [0.14, 0.21, 0.22, 0.17, 0.26],
+      "alignments": ["center", "left", "left", "center", "left"],
+      "nature": "analysis",
+      "evidence_ids": ["F003", "F004", "F005", "F006", "F007", "F010"]
+    },
+    {
+      "type": "heading",
+      "level": 2,
+      "title": "LaserRO与S-DEEP",
+      "numbered": true
+    },
+    {
+      "type": "paragraph",
+      "text": "LaserRO的临床指标已经给出较清晰的疗效信号，下一步价值取决于设备进入医院后的手术量、光纤消耗和维护收入。S-DEEP单价低，但能进入癫痫诊断流程；如果耗材复购稳定，可为LaserRO和Epilcure建立临床入口。",
+      "nature": "analysis",
+      "evidence_ids": ["F005", "F006", "F007"]
+    },
+    {
+      "type": "heading",
+      "level": 2,
+      "title": "Epilcure、iSBS与EES",
+      "numbered": true
+    },
+    {
+      "type": "paragraph",
+      "text": "Epilcure将脑电检测、刺激和程控连成闭环，是平台差异化的主要载体。其投资价值应与临床随访、注册节点、刺激器可靠性和医生使用效率同步释放。iSBS与EES尚处较早阶段，当前只保留技术期权价值。",
+      "nature": "analysis",
+      "evidence_ids": ["F003", "F004", "F010", "F011"]
+    },
+    {
+      "type": "heading",
+      "level": 1,
+      "title": "技术架构与临床转化",
+      "numbered": true
+    },
+    {
+      "type": "paragraph",
+      "text": "BCMod平台的意义在于复用采集、刺激、算法和植入设计，而不是简单增加产品数量。平台价值只有在共同器件、算法、临床数据和质量体系确实降低研发周期与交付成本时成立。",
+      "nature": "analysis",
+      "evidence_ids": ["F003", "F007", "F010"]
+    },
+    {
+      "type": "key_value_table",
+      "semantic_role": "technology_architecture",
+      "data_field_ids": ["product.technology_architecture"],
+      "title": "平台技术构成",
+      "rows": [
+        ["信号链", "侵入式神经信号采集、低噪声记录与长期数据积累"],
+        ["闭环控制", "脑电异常识别、低功耗刺激和术后程控"],
+        ["算法", "时域与时频域检测、个体化参数调整和运动解码"],
+        ["植入与手术", "颅骨植入结构、深部电极、磁共振引导和手术规划"],
+        ["外部依赖", "临床中心、磁共振设备、手术机器人、关键材料和注册检测"],
+        ["成本约束", "硬件和材料占比较高，放量依赖良率、供应链与医院装机效率"]
+      ],
+      "column_widths": [0.29, 0.71],
+      "nature": "analysis",
+      "evidence_ids": ["F003", "F004", "F005", "F006", "F007"]
+    },
+    {
+      "type": "paragraph",
+      "text": "当前性能数据主要证明单点产品可用性，还不能自动证明规模制造、长期植入可靠性和跨中心一致性。投资条件应选择少量可追踪指标，包括关键器件失效率、临床不良事件、设备开机率、手术时长和耗材复购，而不是用产品数量衡量平台进展。",
+      "nature": "recommendation",
+      "evidence_ids": ["F004", "F005", "F006", "F010", "F011"]
+    },
+    {
+      "type": "heading",
+      "level": 1,
+      "title": "知识产权与权属安排",
+      "numbered": true
+    },
+    {
+      "type": "paragraph",
+      "text": "专利组合覆盖激光消融、植入刺激和颅内电极，但申请主体并不完全一致。投资价格只计入投资主体能够排他使用、持续改进并在退出时完整转让的权利；关联主体持有的成果必须通过转让或长期排他许可固定下来。",
+      "nature": "analysis",
+      "evidence_ids": ["F008", "F009", "F012"]
+    },
+    {
+      "type": "table",
+      "semantic_role": "ip_schedule",
+      "data_field_ids": ["product.ip_schedule"],
+      "title": "核心知识产权分布",
+      "headers": ["资产类别", "技术范围", "列示权利主体", "状态", "投资处理"],
+      "rows": [
+        ["发明专利", "实时磁共振温度成像", "杭州佳量医疗科技有限公司", "有效或授权", "并入投资主体控制范围"],
+        ["发明专利", "激光消融评估与闭环控制", "杭州佳量医疗科技有限公司", "有效或授权", "锁定持续改进成果归属"],
+        ["发明及实用新型", "植入刺激、闭环检测和颅内电极", "杭州诺为医疗技术有限公司及关联主体", "有效、授权或审中", "交割前完成转让或排他许可"]
+      ],
+      "column_widths": [0.14, 0.25, 0.25, 0.15, 0.21],
+      "alignments": ["center", "left", "left", "center", "left"],
+      "nature": "fact",
+      "evidence_ids": ["F008", "F009"]
+    },
+    {
+      "type": "paragraph",
+      "text": "权属安排应同时覆盖专利、软件、算法、临床数据和职务成果。未由投资主体控制的成果不进入估值；交割后新增成果按职务成果协议自动归集，并设置违反义务时的价格调整和赔偿责任。",
+      "nature": "recommendation",
+      "evidence_ids": ["F008", "F009", "F011", "F012"]
+    },
+    {
+      "type": "heading",
+      "level": 1,
+      "title": "技术风险与投资条件",
+      "numbered": true
+    },
+    {
+      "type": "paragraph",
+      "text": "本项目的主要风险不是技术概念能否成立，而是植入器械能否以稳定质量完成注册、进入医院并形成可重复手术量。风险控制必须落到交割条件、分期付款和退出触发，不能只依赖投后协调。",
+      "nature": "analysis",
+      "evidence_ids": ["F005", "F006", "F010", "F011", "F012"]
+    },
+    {
+      "type": "table",
+      "semantic_role": "risk_register",
+      "data_field_ids": ["risk.risk_register"],
+      "title": "主要技术风险及交易处理",
+      "headers": ["风险", "触发情形", "影响", "交易处理"],
+      "rows": [
+        ["核心权利分散", "交割前不能完成专利转让或长期排他许可", "投资主体不能完整承接技术价值", "暂停交割、调整价格或终止交易"],
+        ["临床与注册进度偏离", "关键临床终点、随访或注册沟通实质恶化", "商业化时间后移并增加资金需求", "暂停付款并重设估值和里程碑"],
+        ["量产和植入可靠性不足", "失效率、良率、不良事件或医院导入效率偏离约定指标", "毛利、注册持续性和医院采用受损", "限制资金用途、延后付款并启动专项赔偿"]
+      ],
+      "column_widths": [0.18, 0.34, 0.24, 0.24],
+      "alignments": ["center", "left", "left", "left"],
+      "nature": "analysis",
+      "evidence_ids": ["F004", "F005", "F006", "F008", "F009", "F011", "F012"]
+    },
+    {
+      "type": "numbered_item",
+      "text": "核心专利、算法和临床数据由投资主体取得排他控制权，完成文件由公司及相关权利主体共同签署。",
+      "nature": "recommendation",
+      "evidence_ids": ["F008", "F009", "F012"]
+    },
+    {
+      "type": "numbered_item",
+      "text": "主力产品的临床原始记录、统计结果和注册沟通记录达到约定完整性，重大偏离触发暂停付款。",
+      "nature": "recommendation",
+      "evidence_ids": ["F004", "F005", "F006", "F011", "F012"]
+    },
+    {
+      "type": "numbered_item",
+      "text": "建立产品BOM、关键供应商、良率、失效率和医院导入指标，后续资金按注册与商业里程碑分期释放。",
+      "nature": "recommendation",
+      "evidence_ids": ["F007", "F011", "F012"]
+    },
+    {
+      "type": "heading",
+      "level": 1,
+      "title": "结论及建议",
+      "numbered": true
+    },
+    {
+      "type": "paragraph",
+      "text": "建议暂缓直接股权报价。公司拥有可形成产品组合的技术底座，LaserRO和S-DEEP提供近期商业入口，Epilcure决定平台上限；但专利控制、临床数据可追溯性和主力产品放量效率尚未形成同一投资主体下的完整闭环。",
+      "nature": "recommendation",
+      "evidence_ids": ["F003", "F005", "F006", "F008", "F009", "F010", "F011", "F012"]
+    },
+    {
+      "type": "key_value_table",
+      "semantic_role": "decision",
+      "data_field_ids": ["decision.recommendation"],
+      "title": "投资建议",
+      "rows": [
+        ["当前动作", "暂缓直接股权报价"],
+        ["价格基础", "仅计入投资主体可控制的知识产权及已形成注册和临床证据的主力产品"],
+        ["价格启动条件", "核心专利控制、临床数据可追溯、质量体系和主力产品注册里程碑达到约定标准"],
+        ["分期原则", "资金按权属、注册和商业指标分期支付"],
+        ["终止情形", "核心权利无法归集、关键临床或注册路径实质恶化、质量体系出现重大缺陷"]
+      ],
+      "column_widths": [0.29, 0.71],
+      "nature": "recommendation",
+      "evidence_ids": ["F010", "F011", "F012"]
+    }
+  ]
+}

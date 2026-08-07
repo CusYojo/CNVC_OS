@@ -1,0 +1,44 @@
+{
+  "status": "succeeded",
+  "task_id": "e0b5a6369d374f9aacd70a272783668d",
+  "create_endpoint": "https://getways-jumu.zeelin.cn/v1/images/generations",
+  "result_endpoint": "https://getways-jumu.zeelin.cn/v1/images/result",
+  "create_payload": {
+    "model": "gpt-image-2-reverse-2",
+    "prompt": "生成一张 16:9 横版投资机构演示幻灯片图片，2560×1440，高分辨率。\n\n【整体风格】深蓝科技商务，底色 #0A1628，主色 #1E90FF，辅色 #00D4AA，强调色 #FF6B35，面板 #112240，边框 #1E3A5F，高亮文字 #E6F1FF，正文 #B8C4D8。扁平专业、信息密度高、层级清楚。\n【本页角色】商业验证与订单质量。\n【核心信息】商业化信号存在，但必须区分 Demo、流程中、潜在和在谈，不能把它们写成确认收入。\n【版式结构】顶部为小节编号 02、单行结论式标题和短分割线。主体左侧约 64% 采用从“接洽→Demo→合同→交付→验收→回款”的横向漏斗/箭头流程，并把 FDE 与算法优化项目放在对应状态下；右侧约 36% 为视频业务 KPI 竖向看板。底部用橙色横幅陈述投资影响，最底端放来源。只借鉴鱼骨与流程看板的组织方式，不复制任何参考图文字、品牌、数字或配色。\n【页面文字（逐字照排，不得改写或增加）】\n- 小节编号：「02」\n- 主标题：「商业化信号已出现，但合同、验收与回款仍需穿透核实」\n- 流程节点：「接洽」「Demo」「合同」「交付」「验收」「回款」\n- FDE 标题：「FDE｜2026年5月启动商业化」\n  - 「集鑫：60万元，流程推进中，已完成 Demo」\n  - 「广博股份、海程邦达：单客潜在规模约200万元」\n  - 「济南病虫害：沟通规模1000万-2000万元」\n- 算法优化标题：「算法优化｜在谈项目」\n  - 「成泰科技：约180万元」\n  - 「华为超聚变：约180万元」\n  - 「首个商业签单仍待确认」\n- 视频内容标题：「视频内容｜元娲运营」\n  - 大数字：「5000分钟/20天」 说明：「当前交付节奏」\n  - 大数字：「10000分钟」 说明：「下一轮计划」\n  - 大数字：「500元/分钟」 说明：「制作费」\n  - 大数字：「330元/分钟」 说明：「当前成本」\n  - 小标签：「Q3目标150元/分钟」\n- 状态说明：「状态说明：以上订单、单价、成本与目标均为管理层口径」\n- 底部结论：「投资影响：合同、验收、开票、回款与毛利底稿决定商业化质量」\n- 来源：「来源：2026年6月30日项目会议纪要」\n【图标/装饰】合同、Demo 显示器、视频胶片、算法节点、回款四个线性商务图标；用橙色提示未核实状态，禁止绿色成功徽标。\n【字号层级】数字最大，主标题次之，模块标题再次，正文清晰不拥挤。\n【约束】不得把潜在、在谈、流程中写成已签约或收入；不得新增客户、数字、增长率或毛利率；不要 logo、页码、水印、技能名称或生成过程；中文零拼写错误。\n",
+    "size": "2560x1440",
+    "quality": "high",
+    "n": 1,
+    "watermark": false
+  },
+  "create_response": {
+    "created": 1786000826,
+    "message": "任务已创建，正在处理中",
+    "status": "pending",
+    "task_id": "e0b5a6369d374f9aacd70a272783668d"
+  },
+  "last_result_response": {
+    "created": 1786000826,
+    "data": [
+      {
+        "url": "https://getapib.org/f/image/8868546016523083-a23e9b3a-7f42-46e9-ae5e-eb5eb73a912e-image_33BK91A2H62A8T7MS1VF5J24YA_0.png"
+      }
+    ],
+    "task_id": "e0b5a6369d374f9aacd70a272783668d",
+    "message": ""
+  },
+  "saved": [
+    "/Users/lh/Documents/cybernaut-dist/output/create-reference-driven-editable-ppt/zhiling-20260806/generation/slides/20260806-152026-16-9-2560-1440-0A1628-1E90FF-00D4AA-FF6B35-1122-1.png"
+  ],
+  "usage": null,
+  "result_response": {
+    "created": 1786000826,
+    "data": [
+      {
+        "url": "https://getapib.org/f/image/8868546016523083-a23e9b3a-7f42-46e9-ae5e-eb5eb73a912e-image_33BK91A2H62A8T7MS1VF5J24YA_0.png"
+      }
+    ],
+    "task_id": "e0b5a6369d374f9aacd70a272783668d",
+    "message": ""
+  }
+}

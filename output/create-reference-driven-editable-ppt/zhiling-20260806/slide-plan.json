@@ -1,0 +1,12 @@
+{
+  "communication_job": "投委会应在五页内识别智灵动力的可验证产品能力、商业化信号、财务与交易约束，并决定是否具备进入正式投资判断所需的事实基础。",
+  "narrative": "结论先行：主体与能力 → 商业验证 → 财务交易 → 投资判断",
+  "palette": {"background":"#0A1628","primary":"#1E90FF","secondary":"#00D4AA","accent":"#FF6B35","panel":"#112240","text":"#E6F1FF","muted":"#8892B0"},
+  "slides": [
+    {"slide":1,"role":"cover","claim":"智灵动力投资建议书","layout":"minimal-cover"},
+    {"slide":2,"role":"company-product","claim":"三条产品线已形成，技术权属和业务归属待核实","layout":"layered-architecture"},
+    {"slide":3,"role":"commercial-validation","claim":"商业信号存在，订单质量尚未闭环","layout":"funnel-dashboard"},
+    {"slide":4,"role":"financial-transaction","claim":"成本压力与交易口径冲突限制估值判断","layout":"kpi-conflict-dashboard"},
+    {"slide":5,"role":"investment-conclusion","claim":"暂不形成确定性投资结论","layout":"five-gates"}
+  ]
+}

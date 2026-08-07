@@ -30,6 +30,7 @@ server/.venv/
 server/ai-artifacts/
 server/ai-template-data/
 server/ai-template-skills/
+server/project-files/
 .runtime/
 cybernaut-assistant/data/
 cybernaut-assistant/workspace/

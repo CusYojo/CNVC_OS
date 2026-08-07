@@ -1,0 +1,32 @@
+{
+  "passed": true,
+  "mode": "strict",
+  "pptx": "/Users/lh/Documents/cybernaut-dist/output/create-reference-driven-editable-ppt/zhiling-20260806/editable/智灵动力_投资建议书_可编辑版.pptx",
+  "renderDir": "/Users/lh/Documents/cybernaut-dist/output/create-reference-driven-editable-ppt/zhiling-20260806/editable/work-tesseract/artifact-renders",
+  "watermarkReport": "/Users/lh/Documents/cybernaut-dist/output/create-reference-driven-editable-ppt/zhiling-20260806/editable/work-tesseract/watermark-report.json",
+  "terms": [
+    "保密资料",
+    "请勿外传",
+    "仅供参考",
+    "仅供项目评审使用",
+    "仅供投资人参考",
+    "仅供基金投资人参考",
+    "内部资料",
+    "未经授权",
+    "未经许可",
+    "机密",
+    "样稿",
+    "水印",
+    "confidential",
+    "draft",
+    "watermark"
+  ],
+  "packageMatches": [],
+  "visualOcrEngine": "tesseract",
+  "tesseract": "/opt/homebrew/Cellar/tesseract/5.5.3/bin/tesseract",
+  "ocrTimeoutSeconds": 120,
+  "visualMatches": [],
+  "renderCount": 5,
+  "errors": [],
+  "warnings": []
+}

@@ -48,6 +48,7 @@ export interface ProjectFile {
   parseStatus: JobStatus
   version: number
   visibility: string
+  hasOriginal?: boolean
 }
 
 export interface AISummary {

@@ -1,0 +1,575 @@
+{
+  "schemaVersion": "1.0",
+  "pptx": "/Users/lh/Documents/cybernaut-dist/output/create-reference-driven-editable-ppt/zhiling-20260806/editable/智灵动力_投资建议书_可编辑版_vision初稿.pptx",
+  "slides": [
+    {
+      "backgroundPictureCount": 1,
+      "backgroundPictures": [
+        {
+          "name": "ocr-clean-background-1",
+          "relationshipId": "rId1",
+          "target": "../media/image-1-1.png"
+        }
+      ],
+      "textShapeCount": 4,
+      "multiLineTextShapeCount": 0,
+      "foregroundPictureCount": 0,
+      "semanticShapeCount": 0,
+      "foregroundObjectCount": 4,
+      "textShapes": [
+        {
+          "name": "ocr-text-p01-001",
+          "text": "智灵动力投资建议书"
+        },
+        {
+          "name": "ocr-text-p01-002",
+          "text": "智灵动力（北京）科技有限公司"
+        },
+        {
+          "name": "ocr-text-p01-003",
+          "text": "从产品能力、商业验证到交易可行性的五页判断"
+        },
+        {
+          "name": "ocr-text-p01-004",
+          "text": "内部讨论稿｜ 2026年8月"
+        }
+      ],
+      "foregroundPictures": [],
+      "slide": 1
+    },
+    {
+      "backgroundPictureCount": 1,
+      "backgroundPictures": [
+        {
+          "name": "ocr-clean-background-2",
+          "relationshipId": "rId1",
+          "target": "../media/image-2-1.png"
+        }
+      ],
+      "textShapeCount": 21,
+      "multiLineTextShapeCount": 0,
+      "foregroundPictureCount": 0,
+      "semanticShapeCount": 0,
+      "foregroundObjectCount": 21,
+      "textShapes": [
+        {
+          "name": "ocr-text-p02-001",
+          "text": "01"
+        },
+        {
+          "name": "ocr-text-p02-002",
+          "text": "公司已形成三条产品线，但底层技术与业务归属仍需核实"
+        },
+        {
+          "name": "ocr-text-p02-003",
+          "text": "官方定位：科创研究与文创视听智能体"
+        },
+        {
+          "name": "ocr-text-p02-004",
+          "text": "行业智能体"
+        },
+        {
+          "name": "ocr-text-p02-005",
+          "text": "研究报告智能体"
+        },
+        {
+          "name": "ocr-text-p02-006",
+          "text": "企业 FDE"
+        },
+        {
+          "name": "ocr-text-p02-007",
+          "text": "AI-AutoResearch"
+        },
+        {
+          "name": "ocr-text-p02-008",
+          "text": "文创视听"
+        },
+        {
+          "name": "ocr-text-p02-009",
+          "text": "视频智能体"
+        },
+        {
+          "name": "ocr-text-p02-010",
+          "text": "剧幕智能体"
+        },
+        {
+          "name": "ocr-text-p02-011",
+          "text": "数字人智能体"
+        },
+        {
+          "name": "ocr-text-p02-012",
+          "text": "三层技术体系（管理层口径）"
+        },
+        {
+          "name": "ocr-text-p02-013",
+          "text": "自进化大模型"
+        },
+        {
+          "name": "ocr-text-p02-014",
+          "text": "自进化 AI 框架"
+        },
+        {
+          "name": "ocr-text-p02-015",
+          "text": "自进化算法优化"
+        },
+        {
+          "name": "ocr-text-p02-016",
+          "text": "算法优化"
+        },
+        {
+          "name": "ocr-text-p02-017",
+          "text": "算法工厂"
+        },
+        {
+          "name": "ocr-text-p02-018",
+          "text": "自进化算法优化"
+        },
+        {
+          "name": "ocr-text-p02-019",
+          "text": "VEQPy 可选求解扩展"
+        },
+        {
+          "name": "ocr-text-p02-020",
+          "text": "关键判断：产品矩阵可核对，技术权属、测试结果与业务资产归属仍需专项核实"
+        },
+        {
+          "name": "ocr-text-p02-021",
+          "text": "来源：公司官网、华为云、项目会议纪要、算法工厂技术材料"
+        }
+      ],
+      "foregroundPictures": [],
+      "slide": 2
+    },
+    {
+      "backgroundPictureCount": 1,
+      "backgroundPictures": [
+        {
+          "name": "ocr-clean-background-3",
+          "relationshipId": "rId1",
+          "target": "../media/image-3-1.png"
+        }
+      ],
+      "textShapeCount": 29,
+      "multiLineTextShapeCount": 0,
+      "foregroundPictureCount": 0,
+      "semanticShapeCount": 0,
+      "foregroundObjectCount": 29,
+      "textShapes": [
+        {
+          "name": "ocr-text-p03-001",
+          "text": "02"
+        },
+        {
+          "name": "ocr-text-p03-002",
+          "text": "商业化信号已出现，"
+        },
+        {
+          "name": "ocr-text-p03-003",
+          "text": "但合同、验收与回款仍需穿透核实"
+        },
+        {
+          "name": "ocr-text-p03-004",
+          "text": "接洽"
+        },
+        {
+          "name": "ocr-text-p03-005",
+          "text": "Demo"
+        },
+        {
+          "name": "ocr-text-p03-006",
+          "text": "合同"
+        },
+        {
+          "name": "ocr-text-p03-007",
+          "text": "交付"
+        },
+        {
+          "name": "ocr-text-p03-008",
+          "text": "验收"
+        },
+        {
+          "name": "ocr-text-p03-009",
+          "text": "回款"
+        },
+        {
+          "name": "ocr-text-p03-010",
+          "text": "FDE｜ 2026年5月启动商业化"
+        },
+        {
+          "name": "ocr-text-p03-011",
+          "text": "• 集鑫：60万元，流程推进中，已完成Demo"
+        },
+        {
+          "name": "ocr-text-p03-012",
+          "text": "• 广博股份、海程邦达：单客潜在规模约200万元"
+        },
+        {
+          "name": "ocr-text-p03-013",
+          "text": "• 济南病虫害：沟通规模1000万-2000万元"
+        },
+        {
+          "name": "ocr-text-p03-014",
+          "text": "算法优化｜在谈项目"
+        },
+        {
+          "name": "ocr-text-p03-015",
+          "text": "• 成泰科技：约180万元"
+        },
+        {
+          "name": "ocr-text-p03-016",
+          "text": "• 华为超聚变：约180万元"
+        },
+        {
+          "name": "ocr-text-p03-017",
+          "text": "• 首个商业签单仍待确认"
+        },
+        {
+          "name": "ocr-text-p03-018",
+          "text": "5000分钟/20天"
+        },
+        {
+          "name": "ocr-text-p03-019",
+          "text": "当前交付节奏"
+        },
+        {
+          "name": "ocr-text-p03-020",
+          "text": "10000分钟"
+        },
+        {
+          "name": "ocr-text-p03-021",
+          "text": "下一轮计划"
+        },
+        {
+          "name": "ocr-text-p03-022",
+          "text": "500元/分钟"
+        },
+        {
+          "name": "ocr-text-p03-023",
+          "text": "制作费"
+        },
+        {
+          "name": "ocr-text-p03-024",
+          "text": "330元/分钟"
+        },
+        {
+          "name": "ocr-text-p03-025",
+          "text": "当前成本"
+        },
+        {
+          "name": "ocr-text-p03-026",
+          "text": "Q3目标150元/分钟"
+        },
+        {
+          "name": "ocr-text-p03-027",
+          "text": "状态说明：以上订单、单价、成本与目标均为管理层口径"
+        },
+        {
+          "name": "ocr-text-p03-028",
+          "text": "投资影响：合同、验收、开票、回款与毛利底稿决定商业化质量"
+        },
+        {
+          "name": "ocr-text-p03-029",
+          "text": "来源：2026年6月30日项目会议纪要"
+        }
+      ],
+      "foregroundPictures": [],
+      "slide": 3
+    },
+    {
+      "backgroundPictureCount": 1,
+      "backgroundPictures": [
+        {
+          "name": "ocr-clean-background-4",
+          "relationshipId": "rId1",
+          "target": "../media/image-4-1.png"
+        }
+      ],
+      "textShapeCount": 30,
+      "multiLineTextShapeCount": 0,
+      "foregroundPictureCount": 0,
+      "semanticShapeCount": 0,
+      "foregroundObjectCount": 30,
+      "textShapes": [
+        {
+          "name": "ocr-text-p04-001",
+          "text": "03"
+        },
+        {
+          "name": "ocr-text-p04-002",
+          "text": "高人力成本叠加交易口径冲突，现金流安全边界尚不清晰"
+        },
+        {
+          "name": "ocr-text-p04-003",
+          "text": "138人"
+        },
+        {
+          "name": "ocr-text-p04-004",
+          "text": "当前人员规模"
+        },
+        {
+          "name": "ocr-text-p04-005",
+          "text": "现金流安排（管理层口径）"
+        },
+        {
+          "name": "ocr-text-p04-006",
+          "text": "老股东拟提供1000万元借款"
+        },
+        {
+          "name": "ocr-text-p04-007",
+          "text": "管理层称可覆盖约半年现金需求"
+        },
+        {
+          "name": "ocr-text-p04-008",
+          "text": "借款协议、期限、利率与提款条件尚待核实"
+        },
+        {
+          "name": "ocr-text-p04-009",
+          "text": "约200万元/月"
+        },
+        {
+          "name": "ocr-text-p04-010",
+          "text": "基础人力成本"
+        },
+        {
+          "name": "ocr-text-p04-011",
+          "text": "来源"
+        },
+        {
+          "name": "ocr-text-p04-012",
+          "text": "项目记录"
+        },
+        {
+          "name": "ocr-text-p04-013",
+          "text": "会议口径"
+        },
+        {
+          "name": "ocr-text-p04-014",
+          "text": "约2400万元/年"
+        },
+        {
+          "name": "ocr-text-p04-015",
+          "text": "年度人力成本"
+        },
+        {
+          "name": "ocr-text-p04-016",
+          "text": "交易口径冲突"
+        },
+        {
+          "name": "ocr-text-p04-017",
+          "text": "融资金额"
+        },
+        {
+          "name": "ocr-text-p04-018",
+          "text": "1000万元"
+        },
+        {
+          "name": "ocr-text-p04-019",
+          "text": "约1亿元"
+        },
+        {
+          "name": "ocr-text-p04-020",
+          "text": "130人左右"
+        },
+        {
+          "name": "ocr-text-p04-021",
+          "text": "优化后计划"
+        },
+        {
+          "name": "ocr-text-p04-022",
+          "text": "估值口径"
+        },
+        {
+          "name": "ocr-text-p04-023",
+          "text": "1亿元"
+        },
+        {
+          "name": "ocr-text-p04-024",
+          "text": "10亿-15亿元"
+        },
+        {
+          "name": "ocr-text-p04-025",
+          "text": "核实状态"
+        },
+        {
+          "name": "ocr-text-p04-026",
+          "text": "存在冲突"
+        },
+        {
+          "name": "ocr-text-p04-027",
+          "text": "管理层沟通"
+        },
+        {
+          "name": "ocr-text-p04-028",
+          "text": "差异达到数量级，不能直接用于交易定价"
+        },
+        {
+          "name": "ocr-text-p04-029",
+          "text": "来源：项目会议纪要、投资中台项目记录"
+        },
+        {
+          "name": "ocr-text-p04-030",
+          "text": "投资影响：审计财务、现金流水平和正式条款明确前，估值合理性无法判断"
+        }
+      ],
+      "foregroundPictures": [],
+      "slide": 4
+    },
+    {
+      "backgroundPictureCount": 1,
+      "backgroundPictures": [
+        {
+          "name": "ocr-clean-background-5",
+          "relationshipId": "rId1",
+          "target": "../media/image-5-1.png"
+        }
+      ],
+      "textShapeCount": 32,
+      "multiLineTextShapeCount": 0,
+      "foregroundPictureCount": 0,
+      "semanticShapeCount": 0,
+      "foregroundObjectCount": 32,
+      "textShapes": [
+        {
+          "name": "ocr-text-p05-001",
+          "text": "04"
+        },
+        {
+          "name": "ocr-text-p05-002",
+          "text": "暂不形成确定性投资结论，五项事实决定交易是否成立"
+        },
+        {
+          "name": "ocr-text-p05-003",
+          "text": "支持因素"
+        },
+        {
+          "name": "ocr-text-p05-004",
+          "text": "官方产品矩阵已形成"
+        },
+        {
+          "name": "ocr-text-p05-005",
+          "text": "01"
+        },
+        {
+          "name": "ocr-text-p05-006",
+          "text": "01 主体与股权"
+        },
+        {
+          "name": "ocr-text-p05-007",
+          "text": "主要反证"
+        },
+        {
+          "name": "ocr-text-p05-008",
+          "text": "经营数据主要来自"
+        },
+        {
+          "name": "ocr-text-p05-009",
+          "text": "管理层交流"
+        },
+        {
+          "name": "ocr-text-p05-010",
+          "text": "FDE、视频与算法优化"
+        },
+        {
+          "name": "ocr-text-p05-011",
+          "text": "均出现商业化信号"
+        },
+        {
+          "name": "ocr-text-p05-012",
+          "text": "05"
+        },
+        {
+          "name": "ocr-text-p05-013",
+          "text": "正式融资与"
+        },
+        {
+          "name": "ocr-text-p05-014",
+          "text": "交易条款"
+        },
+        {
+          "name": "ocr-text-p05-015",
+          "text": "02"
+        },
+        {
+          "name": "ocr-text-p05-016",
+          "text": "审计财务与现金"
+        },
+        {
+          "name": "ocr-text-p05-017",
+          "text": "交易是否成立"
+        },
+        {
+          "name": "ocr-text-p05-018",
+          "text": "订单、验收、回款与"
+        },
+        {
+          "name": "ocr-text-p05-019",
+          "text": "财务底稿尚未穿透"
+        },
+        {
+          "name": "ocr-text-p05-020",
+          "text": "技术材料显示算法优化"
+        },
+        {
+          "name": "ocr-text-p05-021",
+          "text": "能力具备进一步核实价值"
+        },
+        {
+          "name": "ocr-text-p05-022",
+          "text": "04"
+        },
+        {
+          "name": "ocr-text-p05-023",
+          "text": "04知识产权与"
+        },
+        {
+          "name": "ocr-text-p05-024",
+          "text": "资产归属"
+        },
+        {
+          "name": "ocr-text-p05-025",
+          "text": "IP"
+        },
+        {
+          "name": "ocr-text-p05-026",
+          "text": "03"
+        },
+        {
+          "name": "ocr-text-p05-027",
+          "text": "合同验收与回款"
+        },
+        {
+          "name": "ocr-text-p05-028",
+          "text": "融资和估值口径存在"
+        },
+        {
+          "name": "ocr-text-p05-029",
+          "text": "数量级冲突"
+        },
+        {
+          "name": "ocr-text-p05-030",
+          "text": "结论：五项关键事实明确前，不对估值和投资金额作确定性判断"
+        },
+        {
+          "name": "ocr-text-p05-031",
+          "text": "责任声明：本材料仅供内部审议，不构成最终投资决策"
+        },
+        {
+          "name": "ocr-text-p05-032",
+          "text": "来源：公司官网、项目会议纪要、投资中台项目记录"
+        }
+      ],
+      "foregroundPictures": [],
+      "slide": 5
+    }
+  ],
+  "totals": {
+    "slideCount": 5,
+    "backgroundPictureCount": 5,
+    "textShapeCount": 116,
+    "multiLineTextShapeCount": 0,
+    "foregroundPictureCount": 0,
+    "semanticShapeCount": 0,
+    "foregroundObjectCount": 116
+  },
+  "passed": true
+}

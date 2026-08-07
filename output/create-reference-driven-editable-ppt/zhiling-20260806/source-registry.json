@@ -1,0 +1,72 @@
+[
+  {
+    "source_id": "S001",
+    "tier": "A-internal",
+    "title": "沈阳与智灵 FDE 团队交流纪要",
+    "publisher": "项目团队",
+    "url": "",
+    "published_at": "2026-06-30",
+    "accessed_at": "2026-08-06",
+    "status": "management-claim"
+  },
+  {
+    "source_id": "S002",
+    "tier": "A",
+    "title": "智灵动力官方网站",
+    "publisher": "智灵动力（北京）科技有限公司",
+    "url": "https://www.zeelin.cn/",
+    "published_at": "",
+    "accessed_at": "2026-08-06",
+    "status": "verified"
+  },
+  {
+    "source_id": "S003",
+    "tier": "A",
+    "title": "Zeelin Desearch 深度研究产品介绍",
+    "publisher": "华为云",
+    "url": "https://www.huaweicloud.com/zhishi/marketplace_product_59863b52-cad2-4fdb-b87b-de34f2891328.html",
+    "published_at": "2025-08-11",
+    "accessed_at": "2026-08-06",
+    "status": "verified"
+  },
+  {
+    "source_id": "S004",
+    "tier": "A",
+    "title": "第五届中国影都发展论坛举办",
+    "publisher": "北京市怀柔区人民政府",
+    "url": "https://www.bjhr.gov.cn/ywdt/rdgz/202504/t20250429_4077382.html",
+    "published_at": "2025-04-29",
+    "accessed_at": "2026-08-06",
+    "status": "verified"
+  },
+  {
+    "source_id": "S005",
+    "tier": "A",
+    "title": "拥抱新技术 澎湃新动能",
+    "publisher": "福建省工业和信息化厅",
+    "url": "https://gxt.fujian.gov.cn/zwgk/xw/hydt/snhydt/202505/t20250521_6916597.htm",
+    "published_at": "2025-05-21",
+    "accessed_at": "2026-08-06",
+    "status": "verified"
+  },
+  {
+    "source_id": "S006",
+    "tier": "A-internal",
+    "title": "算法工厂技术材料",
+    "publisher": "项目团队",
+    "url": "",
+    "published_at": "",
+    "accessed_at": "2026-08-06",
+    "status": "project-file"
+  },
+  {
+    "source_id": "S007",
+    "tier": "A-internal",
+    "title": "投资中台项目记录",
+    "publisher": "项目团队",
+    "url": "",
+    "published_at": "2026-07-17",
+    "accessed_at": "2026-08-06",
+    "status": "conflicting-record"
+  }
+]

@@ -1,0 +1,103 @@
+{
+  "schemaVersion": 1,
+  "passed": true,
+  "renderDpi": 96.0,
+  "fonts": {
+    "body": "Hiragino Sans GB",
+    "title": "Songti SC"
+  },
+  "fontScales": {
+    "body": 0.75,
+    "title": 0.78,
+    "display": 0.98
+  },
+  "fontSizeRange": {
+    "minimum": 5.0,
+    "maximum": 96.0
+  },
+  "totals": {
+    "ocrRows": 122,
+    "editableTextItems": 97,
+    "discardedLowConfidence": 25,
+    "excludedByRegion": 0,
+    "excludedByText": 0,
+    "invalidGeometry": 0
+  },
+  "pages": [
+    {
+      "page": 1,
+      "ocrRows": 4,
+      "editableTextItems": 4,
+      "discardedLowConfidence": 0,
+      "excludedByRegion": 0,
+      "excludedByText": 0,
+      "invalidGeometry": 0,
+      "roles": {
+        "body": 2,
+        "slide-title": 0,
+        "display-title": 2,
+        "display-number": 0
+      }
+    },
+    {
+      "page": 2,
+      "ocrRows": 32,
+      "editableTextItems": 24,
+      "discardedLowConfidence": 8,
+      "excludedByRegion": 0,
+      "excludedByText": 0,
+      "invalidGeometry": 0,
+      "roles": {
+        "body": 19,
+        "slide-title": 2,
+        "display-title": 3,
+        "display-number": 0
+      }
+    },
+    {
+      "page": 3,
+      "ocrRows": 13,
+      "editableTextItems": 9,
+      "discardedLowConfidence": 4,
+      "excludedByRegion": 0,
+      "excludedByText": 0,
+      "invalidGeometry": 0,
+      "roles": {
+        "body": 8,
+        "slide-title": 1,
+        "display-title": 0,
+        "display-number": 0
+      }
+    },
+    {
+      "page": 4,
+      "ocrRows": 37,
+      "editableTextItems": 27,
+      "discardedLowConfidence": 10,
+      "excludedByRegion": 0,
+      "excludedByText": 0,
+      "invalidGeometry": 0,
+      "roles": {
+        "body": 26,
+        "slide-title": 1,
+        "display-title": 0,
+        "display-number": 0
+      }
+    },
+    {
+      "page": 5,
+      "ocrRows": 36,
+      "editableTextItems": 33,
+      "discardedLowConfidence": 3,
+      "excludedByRegion": 0,
+      "excludedByText": 0,
+      "invalidGeometry": 0,
+      "roles": {
+        "body": 31,
+        "slide-title": 1,
+        "display-title": 1,
+        "display-number": 0
+      }
+    }
+  ]
+}

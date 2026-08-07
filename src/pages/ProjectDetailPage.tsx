@@ -1,4 +1,4 @@
-import { useAuthStore } from '../store/useAuthStore'
+import { authedFetch, useAuthStore } from '../store/useAuthStore'
 import {
   AlertCircle,
   ArrowLeft,
@@ -72,6 +72,9 @@ export function ProjectDetailPage() {
   const [generating, setGenerating] = useState(false)
   const [editingSummary, setEditingSummary] = useState<AISummary | null>(null)
   const [editingProject, setEditingProject] = useState<Project | null>(null)
+  const [downloadingFileId, setDownloadingFileId] = useState<string | null>(null)
+  const [repairingFileId, setRepairingFileId] = useState<string | null>(null)
+  const [missingOriginalFileIds, setMissingOriginalFileIds] = useState<string[]>([])
 
   const projectFiles = files.filter((item) => item.projectId === id)
   const projectMaterials = materials.filter((item) => item.projectId === id)
@@ -226,6 +229,78 @@ export function ProjectDetailPage() {
     }
   }
 
+  const downloadProjectFile = async (file: ProjectFile) => {
+    if (downloadingFileId) return
+    setDownloadingFileId(file.id)
+    try {
+      const response = await authedFetch(`/api/projects/files/${encodeURIComponent(file.id)}/download`)
+      if (!response.ok) {
+        const body = await response.json().catch(() => null) as { code?: string; message?: string } | null
+        if (body?.code === 'FILE_CONTENT_NOT_FOUND') {
+          setMissingOriginalFileIds((ids) => ids.includes(file.id) ? ids : [...ids, file.id])
+        }
+        throw new Error(body?.message || `服务端返回 HTTP ${response.status}`)
+      }
+      const blobUrl = URL.createObjectURL(await response.blob())
+      const link = document.createElement('a')
+      link.href = blobUrl
+      link.download = file.name
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 1000)
+      showToast(`${file.name} 已开始下载`)
+    } catch (error) {
+      showToast(`下载失败：${(error as Error).message}`, 'error')
+    } finally {
+      setDownloadingFileId(null)
+    }
+  }
+
+  const repairProjectFile = (file: ProjectFile) => {
+    if (repairingFileId) return
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.onchange = () => {
+      const replacement = input.files?.[0]
+      if (!replacement) return
+      if (replacement.name !== file.name) {
+        showToast(`请选择原文件「${file.name}」，资料记录不会被修改`, 'error')
+        return
+      }
+      if (replacement.size > 100 * 1024 * 1024) {
+        showToast('文件不能超过 100MB', 'error')
+        return
+      }
+      setRepairingFileId(file.id)
+      void (async () => {
+        try {
+          const dataBase64 = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader()
+            reader.onload = () => resolve(String(reader.result).split(',')[1] ?? '')
+            reader.onerror = () => reject(new Error('文件读取失败'))
+            reader.readAsDataURL(replacement)
+          })
+          const response = await apiPost<{ file: ProjectFile }>(`/projects/files/${file.id}/content`, {
+            name: replacement.name,
+            type: replacement.type,
+            dataBase64,
+          })
+          useAppStore.setState((state) => ({
+            files: state.files.map((item) => item.id === file.id ? response.file : item),
+          }))
+          setMissingOriginalFileIds((ids) => ids.filter((id) => id !== file.id))
+          showToast(`已补存「${file.name}」原文件，原资料记录和知识内容均已保留`)
+        } catch (error) {
+          showToast(`补传失败：${(error as Error).message}`, 'error')
+        } finally {
+          setRepairingFileId(null)
+        }
+      })()
+    }
+    input.click()
+  }
+
 
   const renderOverview = () => (
     <div className="grid grid-cols-[1fr_300px] gap-5">
@@ -293,7 +368,7 @@ export function ProjectDetailPage() {
   const renderFiles = () => (
     <Card className="overflow-hidden">
       <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4"><div><h2 className="font-semibold text-slate-800">项目资料库</h2><p className="mt-1 text-xs text-slate-400">文件解析完成后可被 AI 摘要、问答和材料生成引用</p></div><Button onClick={() => setShowUpload(true)}><Upload className="h-4 w-4" />上传资料</Button></div>
-      {projectFiles.length ? <DataTable headers={['文件名称', '分类', '大小', '版本', '上传人', '解析状态', '上传时间', '']}>{projectFiles.map((file) => <tr key={file.id} className="hover:bg-slate-50"><TableCell><span className="flex items-center gap-3"><span className="grid h-9 w-9 place-items-center rounded-lg bg-blue-50 text-[10px] font-semibold text-blue-600">{file.type}</span><span className="font-medium text-slate-700">{file.name}</span></span></TableCell><TableCell>{file.category}</TableCell><TableCell>{file.size}</TableCell><TableCell>V{file.version}</TableCell><TableCell>{file.uploader}</TableCell><TableCell><StatusBadge status={file.parseStatus} /></TableCell><TableCell>{file.uploadedAt.slice(5)}</TableCell><TableCell><span className="flex items-center gap-1"><button aria-label={`下载${file.name}`} onClick={() => showToast(`${file.name} 已加入下载队列`)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100"><Download className="h-4 w-4" /></button><button aria-label={`删除${file.name}`} onClick={() => handleDeleteFile(file)} className="rounded-lg px-2 py-1 text-xs text-rose-600 hover:bg-rose-50">删除</button></span></TableCell></tr>)}</DataTable> : <div className="p-12 text-center"><FileText className="mx-auto h-8 w-8 text-slate-300" /><p className="mt-3 text-sm font-medium text-slate-700">还没有项目资料</p><p className="mt-1 text-xs text-slate-400">上传 BP 后即可生成结构化项目卡片与 AI 摘要</p></div>}
+      {projectFiles.length ? <DataTable headers={['文件名称', '分类', '大小', '版本', '上传人', '解析状态', '上传时间', '']}>{projectFiles.map((file) => <tr key={file.id} className="hover:bg-slate-50"><TableCell><span className="flex items-center gap-3"><span className="grid h-9 w-9 place-items-center rounded-lg bg-blue-50 text-[10px] font-semibold text-blue-600">{file.type}</span><span className="font-medium text-slate-700">{file.name}</span></span></TableCell><TableCell>{file.category}</TableCell><TableCell>{file.size}</TableCell><TableCell>V{file.version}</TableCell><TableCell>{file.uploader}</TableCell><TableCell><StatusBadge status={file.parseStatus} /></TableCell><TableCell>{file.uploadedAt.slice(5)}</TableCell><TableCell><span className="flex items-center gap-1"><button aria-label={`下载${file.name}`} disabled={!!downloadingFileId || !!repairingFileId} onClick={() => { void downloadProjectFile(file) }} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"><Download className="h-4 w-4" /></button>{(file.hasOriginal === false || missingOriginalFileIds.includes(file.id)) && <button aria-label={`补传${file.name}`} disabled={!!repairingFileId} onClick={() => repairProjectFile(file)} className="rounded-lg px-2 py-1 text-xs text-brand-600 hover:bg-brand-50 disabled:opacity-50">{repairingFileId === file.id ? '补传中…' : '补传原文件'}</button>}<button aria-label={`删除${file.name}`} onClick={() => handleDeleteFile(file)} className="rounded-lg px-2 py-1 text-xs text-rose-600 hover:bg-rose-50">删除</button></span></TableCell></tr>)}</DataTable> : <div className="p-12 text-center"><FileText className="mx-auto h-8 w-8 text-slate-300" /><p className="mt-3 text-sm font-medium text-slate-700">还没有项目资料</p><p className="mt-1 text-xs text-slate-400">上传 BP 后即可生成结构化项目卡片与 AI 摘要</p></div>}
     </Card>
   )
 

@@ -1,0 +1,47 @@
+[
+  {
+    "slide_number": 1,
+    "title": "智灵动力投资建议书",
+    "sub_title": "从产品能力、商业验证到交易可行性的五页判断",
+    "core_logic": "先给出项目身份和审阅范围，不在封面堆砌未经核实的经营数字。",
+    "visual_framework": "极简科技封面",
+    "main_reference": "GordenImagePPTGen/参考图/red_grey_project/ref1.png",
+    "source_fact_keys": ["company.legal_name", "company.positioning"]
+  },
+  {
+    "slide_number": 2,
+    "title": "公司已形成三条产品线，但底层技术与业务归属仍需核实",
+    "sub_title": "行业智能体、文创视听、算法优化",
+    "core_logic": "官方产品矩阵已可核对，会议口径中的自进化技术体系仍需知识产权和测试材料支持。",
+    "visual_framework": "三层架构与三条业务主线",
+    "main_reference": "GordenImagePPTGen/参考图/tech_prize/ref5.png",
+    "source_fact_keys": ["company.positioning", "product.official_matrix", "technology.stack"]
+  },
+  {
+    "slide_number": 3,
+    "title": "商业化信号已出现，但合同、验收与回款仍需穿透核实",
+    "sub_title": "FDE、视频内容与算法优化的订单状态",
+    "core_logic": "把已完成 Demo、流程中项目、潜在客户和管理层目标严格分开。",
+    "visual_framework": "多业务漏斗与状态看板",
+    "main_reference": "GordenImagePPTGen/参考图/red_grey_project/ref7.png",
+    "source_fact_keys": ["fde.commercial_start", "fde.jixin", "fde.pipeline", "video.tiktok_delivery", "video.unit_economics"]
+  },
+  {
+    "slide_number": 4,
+    "title": "高人力成本叠加交易口径冲突，现金流安全边界尚不清晰",
+    "sub_title": "经营成本、资金续航与融资估值",
+    "core_logic": "以可核对的成本基数和口径冲突说明交易条件尚不能锁定。",
+    "visual_framework": "财务仪表盘与冲突对照",
+    "main_reference": "GordenImagePPTGen/参考图/work_result/ref6.png",
+    "source_fact_keys": ["operations.headcount", "operations.monthly_people_cost", "operations.annual_people_cost", "finance.shareholder_loan", "financing.project_record", "financing.meeting_claim"]
+  },
+  {
+    "slide_number": 5,
+    "title": "暂不形成确定性投资结论，五项事实决定交易是否成立",
+    "sub_title": "投资判断、主要反证与待落实事项",
+    "core_logic": "产品与商业化值得继续核实，但主体、财务、订单、知识产权和交易条款尚不足以支持估值与投资决策。",
+    "visual_framework": "五项决策门与投资结论",
+    "main_reference": "GordenImagePPTGen/参考图/work_result/ref2.png",
+    "source_fact_keys": ["company.legal_name", "technology.stack", "fde.jixin", "operations.monthly_people_cost", "financing.meeting_claim"]
+  }
+]

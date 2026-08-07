@@ -1,0 +1,55 @@
+{
+  "slides": [
+    {
+      "slide": 1,
+      "role": "cover",
+      "title": "智灵动力投资建议书",
+      "verbatim_text": ["智灵动力投资建议书", "智灵动力（北京）科技有限公司", "从产品能力、商业验证到交易可行性的五页判断", "内部讨论稿｜2026年8月"],
+      "kpis": [], "charts": [], "tables": [], "flow_nodes": [], "connectors": [], "icons": [], "photos": [],
+      "source_fact_keys": ["company.legal_name"]
+    },
+    {
+      "slide": 2,
+      "role": "company-product",
+      "title": "公司已形成三条产品线，但底层技术与业务归属仍需核实",
+      "verbatim_text": ["公司已形成三条产品线，但底层技术与业务归属仍需核实", "官方定位：科创研究与文创视听智能体", "行业智能体", "研究报告智能体", "企业 FDE", "AI-AutoResearch", "文创视听", "视频智能体", "剧幕智能体", "数字人智能体", "算法优化", "算法工厂", "自进化算法优化", "VEQPy 可选求解扩展", "三层技术体系（管理层口径）", "自进化大模型", "自进化 AI 框架", "自进化算法优化", "关键判断：产品矩阵可核对，技术权属、测试结果与业务资产归属仍需专项核实", "来源：公司官网、华为云、项目会议纪要、算法工厂技术材料"],
+      "kpis": [], "charts": [], "tables": [],
+      "flow_nodes": ["行业智能体", "文创视听", "算法优化", "自进化大模型", "自进化 AI 框架", "自进化算法优化"],
+      "connectors": [{"from":"自进化算法优化","to":"自进化 AI 框架"},{"from":"自进化 AI 框架","to":"自进化大模型"}],
+      "icons": ["research", "video", "algorithm"], "photos": [],
+      "source_fact_keys": ["company.positioning", "product.official_matrix", "technology.stack"]
+    },
+    {
+      "slide": 3,
+      "role": "commercial-validation",
+      "title": "商业化信号已出现，但合同、验收与回款仍需穿透核实",
+      "verbatim_text": ["商业化信号已出现，但合同、验收与回款仍需穿透核实", "FDE｜2026年5月启动商业化", "集鑫：60万元，流程推进中，已完成 Demo", "广博股份、海程邦达：单客潜在规模约200万元", "济南病虫害：沟通规模1000万-2000万元", "视频内容｜元娲运营", "每20天交付5000分钟", "下一轮计划10000分钟", "制作费500元/分钟", "当前成本330元/分钟", "Q3目标150元/分钟", "算法优化｜在谈项目", "成泰科技：约180万元", "华为超聚变：约180万元", "首个商业签单仍待确认", "状态说明：以上订单、单价、成本与目标均为管理层口径", "投资影响：合同、验收、开票、回款与毛利底稿决定商业化质量", "来源：2026年6月30日项目会议纪要"],
+      "kpis": [{"label":"FDE启动","value":"2026年5月"},{"label":"视频交付","value":"5000分钟/20天"},{"label":"制作费","value":"500元/分钟"},{"label":"当前成本","value":"330元/分钟"}],
+      "charts": [],
+      "tables": [{"name":"项目状态表","columns":["业务","项目/客户","金额或规模","当前状态"],"rows":[["FDE","集鑫","60万元","流程中/Demo完成"],["FDE","广博股份、海程邦达","约200万元/家","潜在"],["算法优化","成泰科技、华为超聚变","约180万元/家","在谈"]]}],
+      "flow_nodes": ["接洽", "Demo", "合同", "交付", "验收", "回款"], "connectors": [], "icons": ["contract", "video", "algorithm"], "photos": [],
+      "source_fact_keys": ["fde.commercial_start", "fde.jixin", "fde.pipeline", "video.tiktok_delivery", "video.unit_economics"]
+    },
+    {
+      "slide": 4,
+      "role": "financial-transaction",
+      "title": "高人力成本叠加交易口径冲突，现金流安全边界尚不清晰",
+      "verbatim_text": ["高人力成本叠加交易口径冲突，现金流安全边界尚不清晰", "138人｜当前人员规模", "约200万元/月｜基础人力成本", "约2400万元/年｜年度人力成本", "130人左右｜优化后计划", "现金流安排（管理层口径）", "老股东拟提供1000万元借款", "管理层称可覆盖约半年现金需求", "借款协议、期限、利率与提款条件尚待核实", "交易口径冲突", "项目记录：融资1000万元、估值1亿元", "会议口径：下一轮融资约1亿元", "会议口径：外部估值沟通10亿-15亿元", "差异达到数量级，不能直接用于交易定价", "投资影响：审计财务、现金流水平和正式条款明确前，估值合理性无法判断", "来源：项目会议纪要、投资中台项目记录"],
+      "kpis": [{"label":"人员规模","value":"138人"},{"label":"月度人力成本","value":"约200万元"},{"label":"年度人力成本","value":"约2400万元"},{"label":"拟借款","value":"1000万元"}],
+      "charts": [],
+      "tables": [{"name":"融资估值口径对照","columns":["来源","融资金额","估值口径","核实状态"],"rows":[["项目记录","1000万元","1亿元","存在冲突"],["会议口径","约1亿元","10亿-15亿元","管理层沟通"]]}],
+      "flow_nodes": [], "connectors": [], "icons": ["people", "cash", "warning"], "photos": [],
+      "source_fact_keys": ["operations.headcount", "operations.monthly_people_cost", "operations.annual_people_cost", "finance.shareholder_loan", "financing.project_record", "financing.meeting_claim"]
+    },
+    {
+      "slide": 5,
+      "role": "investment-conclusion",
+      "title": "暂不形成确定性投资结论，五项事实决定交易是否成立",
+      "verbatim_text": ["暂不形成确定性投资结论，五项事实决定交易是否成立", "支持因素", "官方产品矩阵已形成", "FDE、视频与算法优化均出现商业化信号", "技术材料显示算法优化能力具备进一步核实价值", "主要反证", "经营数据主要来自管理层交流", "订单、验收、回款与财务底稿尚未穿透", "融资和估值口径存在数量级冲突", "五项决策门", "01 主体与股权", "02 审计财务与现金", "03 合同验收与回款", "04 知识产权与资产归属", "05 正式融资与交易条款", "结论：五项关键事实明确前，不对估值和投资金额作确定性判断", "责任声明：本材料仅供内部审议，不构成最终投资决策", "来源：公司官网、项目会议纪要、投资中台项目记录"],
+      "kpis": [], "charts": [], "tables": [],
+      "flow_nodes": ["主体与股权", "审计财务与现金", "合同验收与回款", "知识产权与资产归属", "正式融资与交易条款"],
+      "connectors": [], "icons": ["company", "finance", "contract", "ip", "terms"], "photos": [],
+      "source_fact_keys": ["company.legal_name", "technology.stack", "fde.jixin", "operations.monthly_people_cost", "financing.meeting_claim"]
+    }
+  ]
+}

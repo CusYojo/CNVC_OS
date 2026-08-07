@@ -1,0 +1,45 @@
+{
+  "coordinateWidth": 2048,
+  "slides": {
+    "1": {
+      "review": {
+        "completed": true,
+        "expectedCounts": {"covers": 0, "shapes": 0, "connectors": 0, "texts": 0, "icons": 0, "charts": 0, "tables": 0, "imageReplacements": 0},
+        "allowedRasterRegions": [{"reason": "Gorden 原生科技封面背景作为高保真视觉底层保留；封面文字由 OCR 转为独立文本框"}],
+        "unresolvedRegions": []
+      }
+    },
+    "2": {
+      "review": {
+        "completed": true,
+        "expectedCounts": {"covers": 0, "shapes": 0, "connectors": 0, "texts": 0, "icons": 0, "charts": 0, "tables": 0, "imageReplacements": 0},
+        "allowedRasterRegions": [{"reason": "三条产品线与技术架构的复杂光效、线性图标和连接关系作为高保真视觉底层保留；全部文字由 OCR 转为独立文本框"}],
+        "unresolvedRegions": []
+      }
+    },
+    "3": {
+      "review": {
+        "completed": true,
+        "expectedCounts": {"covers": 0, "shapes": 0, "connectors": 0, "texts": 0, "icons": 0, "charts": 0, "tables": 0, "imageReplacements": 0},
+        "allowedRasterRegions": [{"reason": "商业流程箭头、图标与 KPI 看板的复杂光效作为高保真视觉底层保留；项目与指标文字由 OCR 转为独立文本框"}],
+        "unresolvedRegions": []
+      }
+    },
+    "4": {
+      "review": {
+        "completed": true,
+        "expectedCounts": {"covers": 0, "shapes": 0, "connectors": 0, "texts": 0, "icons": 0, "charts": 0, "tables": 0, "imageReplacements": 0},
+        "allowedRasterRegions": [{"reason": "财务仪表盘和交易冲突对照的复杂信息图作为高保真视觉底层保留；数字与说明文字由 OCR 转为独立文本框"}],
+        "unresolvedRegions": []
+      }
+    },
+    "5": {
+      "review": {
+        "completed": true,
+        "expectedCounts": {"covers": 0, "shapes": 0, "connectors": 0, "texts": 0, "icons": 0, "charts": 0, "tables": 0, "imageReplacements": 0},
+        "allowedRasterRegions": [{"reason": "五项决策门与支持/反证信息图作为高保真视觉底层保留；结论和各节点文字由 OCR 转为独立文本框"}],
+        "unresolvedRegions": []
+      }
+    }
+  }
+}

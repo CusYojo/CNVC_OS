@@ -1,0 +1,44 @@
+{
+  "status": "succeeded",
+  "task_id": "f79f8f9052d945e895e065344b66bf7f",
+  "create_endpoint": "https://getways-jumu.zeelin.cn/v1/images/generations",
+  "result_endpoint": "https://getways-jumu.zeelin.cn/v1/images/result",
+  "create_payload": {
+    "model": "gpt-image-2-reverse-2",
+    "prompt": "生成一张 16:9 横版投资机构演示幻灯片图片，2560×1440，高分辨率。\n\n【整体风格】深蓝科技商务，底色 #0A1628，主色 #1E90FF，辅色 #00D4AA，强调色 #FF6B35，面板 #112240，边框 #1E3A5F，高亮文字 #E6F1FF，正文 #B8C4D8。全套严格统一，扁平清晰，克制投影，不使用大面积绿色。\n【本页角色】公司与产品架构。\n【核心信息】官方产品矩阵已经形成，但会议口径中的底层技术与业务归属仍需核实。\n【版式结构】顶部为小节编号 01、单行结论式标题和短分割线。标题下方放一行官方定位。主体上半部是三列等宽业务主线，分别使用研究、视频、算法的简洁线性图标；主体下半部是三层水平技术架构，层间用向上箭头连接。右下角放橙色风险提示条，底部放来源脚注。只借鉴技术架构页的分层骨架，不复制任何参考图文字、品牌、数字或配色。\n【页面文字（逐字照排，不得改写或增加）】\n- 小节编号：「01」\n- 主标题：「公司已形成三条产品线，但底层技术与业务归属仍需核实」\n- 导语：「官方定位：科创研究与文创视听智能体」\n- 业务主线一标题：「行业智能体」\n  - 「研究报告智能体」\n  - 「企业 FDE」\n  - 「AI-AutoResearch」\n- 业务主线二标题：「文创视听」\n  - 「视频智能体」\n  - 「剧幕智能体」\n  - 「数字人智能体」\n- 业务主线三标题：「算法优化」\n  - 「算法工厂」\n  - 「自进化算法优化」\n  - 「VEQPy 可选求解扩展」\n- 技术架构标题：「三层技术体系（管理层口径）」\n  - 顶层：「自进化大模型」\n  - 中层：「自进化 AI 框架」\n  - 底层：「自进化算法优化」\n- 底部结论：「关键判断：产品矩阵可核对，技术权属、测试结果与业务资产归属仍需专项核实」\n- 来源：「来源：公司官网、华为云、项目会议纪要、算法工厂技术材料」\n【图标/装饰】研究报告、视频画面、算法节点三个线性商务图标；架构层之间使用清晰连接箭头。\n【字号层级】主标题 35pt 视觉等效，模块标题 24pt，正文不低于 16pt 视觉等效；任何标题不得换行到两行以上。\n【约束】不得出现医疗图像、虚构指标、示例项目、占位符、logo、页码、水印、技能名称或生成过程；中文必须清晰、完整、零拼写错误；满而不乱，严格对齐。\n",
+    "size": "2560x1440",
+    "quality": "high",
+    "n": 1,
+    "watermark": false
+  },
+  "create_response": {
+    "created": 1786000821,
+    "message": "任务已创建，正在处理中",
+    "status": "pending",
+    "task_id": "f79f8f9052d945e895e065344b66bf7f"
+  },
+  "last_result_response": {
+    "created": 1786000822,
+    "data": [
+      {
+        "url": "https://getapib.org/f/image/5751220997303647-f029d6ab-1b90-416b-8370-6aa2d6f59fd4-image_6YK416B484X01AQYCGBVRZ58M8_0.png"
+      }
+    ],
+    "task_id": "f79f8f9052d945e895e065344b66bf7f",
+    "message": ""
+  },
+  "saved": [
+    "/Users/lh/Documents/cybernaut-dist/output/create-reference-driven-editable-ppt/zhiling-20260806/generation/slides/20260806-152021-16-9-2560-1440-0A1628-1E90FF-00D4AA-FF6B35-1122-1.png"
+  ],
+  "usage": null,
+  "result_response": {
+    "created": 1786000822,
+    "data": [
+      {
+        "url": "https://getapib.org/f/image/5751220997303647-f029d6ab-1b90-416b-8370-6aa2d6f59fd4-image_6YK416B484X01AQYCGBVRZ58M8_0.png"
+      }
+    ],
+    "task_id": "f79f8f9052d945e895e065344b66bf7f",
+    "message": ""
+  }
+}

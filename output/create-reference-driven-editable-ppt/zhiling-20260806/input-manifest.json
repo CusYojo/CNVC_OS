@@ -1,0 +1,13 @@
+{
+  "project_id": "62e6c2f3-5d0a-4cd9-b49d-2919b8ba1249",
+  "task_context": "本地投资建议书快捷任务",
+  "requested_pages": 5,
+  "aspect_ratio": "16:9",
+  "language": "中文",
+  "editable_scope": "all",
+  "reference_template": null,
+  "template_policy": "none",
+  "docs_template_usage": "forbidden",
+  "generation_skill": "create-reference-driven-editable-ppt",
+  "source_cutoff_date": "2026-08-06"
+}

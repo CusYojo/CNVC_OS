@@ -1,0 +1,753 @@
+{
+  "schemaVersion": "1.1",
+  "output": "/Users/lh/Documents/cybernaut-dist/output/create-reference-driven-editable-ppt/zhiling-20260806/editable/智灵动力_投资建议书_可编辑文字叠加版.pptx",
+  "objects": [
+    {
+      "page": 1,
+      "semanticId": "ocr-text-p01-001",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "display-title",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 78.975
+    },
+    {
+      "page": 1,
+      "semanticId": "ocr-text-p01-002",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "display-title",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 38.16618911174785
+    },
+    {
+      "page": 1,
+      "semanticId": "ocr-text-p01-003",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 22.563859981078522
+    },
+    {
+      "page": 1,
+      "semanticId": "ocr-text-p01-004",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 19.064999999999998
+    },
+    {
+      "page": 2,
+      "semanticId": "ocr-text-p02-001",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "slide-title",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 36.95935582822086
+    },
+    {
+      "page": 2,
+      "semanticId": "ocr-text-p02-002",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "slide-title",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 25.205410821643284
+    },
+    {
+      "page": 2,
+      "semanticId": "ocr-text-p02-003",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 19.67142857142857
+    },
+    {
+      "page": 2,
+      "semanticId": "ocr-text-p02-004",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 19.619999999999997
+    },
+    {
+      "page": 2,
+      "semanticId": "ocr-text-p02-005",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 12.915
+    },
+    {
+      "page": 2,
+      "semanticId": "ocr-text-p02-006",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 20.16
+    },
+    {
+      "page": 2,
+      "semanticId": "ocr-text-p02-007",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 11.684999999999999
+    },
+    {
+      "page": 2,
+      "semanticId": "ocr-text-p02-008",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 12.299999999999999
+    },
+    {
+      "page": 2,
+      "semanticId": "ocr-text-p02-009",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 22.499999999999996
+    },
+    {
+      "page": 2,
+      "semanticId": "ocr-text-p02-010",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 20.032894736842103
+    },
+    {
+      "page": 2,
+      "semanticId": "ocr-text-p02-011",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 10.455
+    },
+    {
+      "page": 2,
+      "semanticId": "ocr-text-p02-012",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 20.79113924050633
+    },
+    {
+      "page": 2,
+      "semanticId": "ocr-text-p02-013",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 20.55
+    },
+    {
+      "page": 2,
+      "semanticId": "ocr-text-p02-014",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 20.76923076923077
+    },
+    {
+      "page": 2,
+      "semanticId": "ocr-text-p02-015",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 22.11428571428571
+    },
+    {
+      "page": 2,
+      "semanticId": "ocr-text-p02-016",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 26.801652892561986
+    },
+    {
+      "page": 2,
+      "semanticId": "ocr-text-p02-017",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 17.715627668659263
+    },
+    {
+      "page": 3,
+      "semanticId": "ocr-text-p03-001",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "slide-title",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 34.25018839487566
+    },
+    {
+      "page": 3,
+      "semanticId": "ocr-text-p03-002",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 28
+    },
+    {
+      "page": 3,
+      "semanticId": "ocr-text-p03-003",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 20.611192930780554
+    },
+    {
+      "page": 3,
+      "semanticId": "ocr-text-p03-004",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 14.76
+    },
+    {
+      "page": 3,
+      "semanticId": "ocr-text-p03-005",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 26.134020618556697
+    },
+    {
+      "page": 3,
+      "semanticId": "ocr-text-p03-006",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 15.39893617021276
+    },
+    {
+      "page": 3,
+      "semanticId": "ocr-text-p03-007",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 16.21323529411765
+    },
+    {
+      "page": 4,
+      "semanticId": "ocr-text-p04-001",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "slide-title",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 31.612903225806452
+    },
+    {
+      "page": 4,
+      "semanticId": "ocr-text-p04-002",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 22.324675324675322
+    },
+    {
+      "page": 4,
+      "semanticId": "ocr-text-p04-003",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 20.91
+    },
+    {
+      "page": 4,
+      "semanticId": "ocr-text-p04-004",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 26.04
+    },
+    {
+      "page": 4,
+      "semanticId": "ocr-text-p04-005",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 19.2
+    },
+    {
+      "page": 4,
+      "semanticId": "ocr-text-p04-006",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 19.2
+    },
+    {
+      "page": 4,
+      "semanticId": "ocr-text-p04-007",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 18.18
+    },
+    {
+      "page": 4,
+      "semanticId": "ocr-text-p04-008",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 26.056701030927833
+    },
+    {
+      "page": 4,
+      "semanticId": "ocr-text-p04-009",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 17.22
+    },
+    {
+      "page": 4,
+      "semanticId": "ocr-text-p04-010",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 18.131386861313864
+    },
+    {
+      "page": 4,
+      "semanticId": "ocr-text-p04-011",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 18.45
+    },
+    {
+      "page": 4,
+      "semanticId": "ocr-text-p04-012",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 18.224999999999998
+    },
+    {
+      "page": 4,
+      "semanticId": "ocr-text-p04-013",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 12.299999999999999
+    },
+    {
+      "page": 4,
+      "semanticId": "ocr-text-p04-014",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 18
+    },
+    {
+      "page": 4,
+      "semanticId": "ocr-text-p04-015",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 12.299999999999999
+    },
+    {
+      "page": 4,
+      "semanticId": "ocr-text-p04-016",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 19.375
+    },
+    {
+      "page": 4,
+      "semanticId": "ocr-text-p04-017",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 11.684999999999999
+    },
+    {
+      "page": 4,
+      "semanticId": "ocr-text-p04-018",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 18.765182186234814
+    },
+    {
+      "page": 4,
+      "semanticId": "ocr-text-p04-019",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 18.36
+    },
+    {
+      "page": 4,
+      "semanticId": "ocr-text-p04-020",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 12.299999999999999
+    },
+    {
+      "page": 4,
+      "semanticId": "ocr-text-p04-021",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 15.642857142857142
+    },
+    {
+      "page": 4,
+      "semanticId": "ocr-text-p04-022",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 16.119402985074625
+    },
+    {
+      "page": 4,
+      "semanticId": "ocr-text-p04-023",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 16.61194029850746
+    },
+    {
+      "page": 4,
+      "semanticId": "ocr-text-p04-024",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 20.192943770672546
+    },
+    {
+      "page": 4,
+      "semanticId": "ocr-text-p04-025",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 27.134551495016606
+    },
+    {
+      "page": 4,
+      "semanticId": "ocr-text-p04-026",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 15.964730290456432
+    },
+    {
+      "page": 5,
+      "semanticId": "ocr-text-p05-001",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "slide-title",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 34.56818181818182
+    },
+    {
+      "page": 5,
+      "semanticId": "ocr-text-p05-002",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 11.684999999999999
+    },
+    {
+      "page": 5,
+      "semanticId": "ocr-text-p05-003",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 15.375
+    },
+    {
+      "page": 5,
+      "semanticId": "ocr-text-p05-004",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 18.307453416149066
+    },
+    {
+      "page": 5,
+      "semanticId": "ocr-text-p05-005",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 16.65
+    },
+    {
+      "page": 5,
+      "semanticId": "ocr-text-p05-006",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 16.799999999999997
+    },
+    {
+      "page": 5,
+      "semanticId": "ocr-text-p05-007",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 16.02
+    },
+    {
+      "page": 5,
+      "semanticId": "ocr-text-p05-008",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 11.684999999999999
+    },
+    {
+      "page": 5,
+      "semanticId": "ocr-text-p05-009",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 11.684999999999999
+    },
+    {
+      "page": 5,
+      "semanticId": "ocr-text-p05-010",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 15.685714285714285
+    },
+    {
+      "page": 5,
+      "semanticId": "ocr-text-p05-011",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 10.455
+    },
+    {
+      "page": 5,
+      "semanticId": "ocr-text-p05-012",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 17.810526315789474
+    },
+    {
+      "page": 5,
+      "semanticId": "ocr-text-p05-013",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 16.48706896551724
+    },
+    {
+      "page": 5,
+      "semanticId": "ocr-text-p05-014",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 17.099999999999998
+    },
+    {
+      "page": 5,
+      "semanticId": "ocr-text-p05-015",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 22.650000000000002
+    },
+    {
+      "page": 5,
+      "semanticId": "ocr-text-p05-016",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 16.9875
+    },
+    {
+      "page": 5,
+      "semanticId": "ocr-text-p05-017",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 11.07
+    },
+    {
+      "page": 5,
+      "semanticId": "ocr-text-p05-018",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 11.684999999999999
+    },
+    {
+      "page": 5,
+      "semanticId": "ocr-text-p05-019",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 11.684999999999999
+    },
+    {
+      "page": 5,
+      "semanticId": "ocr-text-p05-020",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 19.191176470588236
+    },
+    {
+      "page": 5,
+      "semanticId": "ocr-text-p05-021",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 17.6
+    },
+    {
+      "page": 5,
+      "semanticId": "ocr-text-p05-022",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 12.299999999999999
+    },
+    {
+      "page": 5,
+      "semanticId": "ocr-text-p05-023",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 17.357142857142858
+    },
+    {
+      "page": 5,
+      "semanticId": "ocr-text-p05-024",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 15.545454545454545
+    },
+    {
+      "page": 5,
+      "semanticId": "ocr-text-p05-025",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 16.919999999999998
+    },
+    {
+      "page": 5,
+      "semanticId": "ocr-text-p05-026",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 15.975
+    },
+    {
+      "page": 5,
+      "semanticId": "ocr-text-p05-027",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 28
+    },
+    {
+      "page": 5,
+      "semanticId": "ocr-text-p05-028",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 17.88329519450801
+    },
+    {
+      "page": 5,
+      "semanticId": "ocr-text-p05-029",
+      "type": "ocr-text",
+      "emitted": true,
+      "role": "body",
+      "fontFace": "Hiragino Sans GB",
+      "fontSize": 17.964426877470355
+    }
+  ]
+}

@@ -4,6 +4,7 @@ import path from 'node:path'
 import { db } from '../db/client.js'
 import { projects, projectFiles, auditLogs, knowledgeChunks, fileChunks } from '../db/schema.js'
 import { sanitizeScoringCompetitors } from './competitorEvidence.js'
+import { removeProjectFile, removeProjectFileDirectory } from './projectFileStorageService.js'
 
 const STAGES = ['线索', '初筛', '立项', '尽调', '上会', '投决', '投后', '退出'] as const
 const ARTIFACT_ROOT = path.resolve(
@@ -59,11 +60,18 @@ export async function getProject(id: string) {
 }
 
 export async function listFiles(projectId: string) {
-  return db.select().from(projectFiles).where(eq(projectFiles.projectId, projectId)).orderBy(desc(projectFiles.uploadedAt))
+  const rows = await db.select().from(projectFiles).where(eq(projectFiles.projectId, projectId)).orderBy(desc(projectFiles.uploadedAt))
+  return rows.map(publicProjectFile)
 }
 
 export async function listAllFiles() {
-  return db.select().from(projectFiles).orderBy(desc(projectFiles.uploadedAt)).limit(500)
+  const rows = await db.select().from(projectFiles).orderBy(desc(projectFiles.uploadedAt)).limit(500)
+  return rows.map(publicProjectFile)
+}
+
+function publicProjectFile<T extends typeof projectFiles.$inferSelect>(row: T) {
+  const { storagePath, ...file } = row
+  return { ...file, hasOriginal: Boolean(storagePath) }
 }
 
 export async function createProject(input: Partial<typeof projects.$inferInsert>, userId: string) {
@@ -102,6 +110,25 @@ export async function addFile(input: typeof projectFiles.$inferInsert, userId: s
   return row
 }
 
+export async function setFileStoragePath(fileId: string, storagePath: string) {
+  const [row] = await db.update(projectFiles).set({ storagePath }).where(eq(projectFiles.id, fileId)).returning()
+  return row
+}
+
+export async function replaceFileContent(fileId: string, storagePath: string, size: string, userId: string) {
+  const [row] = await db.update(projectFiles).set({ storagePath, size, parseStatus: '解析中', parseError: null })
+    .where(eq(projectFiles.id, fileId)).returning()
+  if (row) {
+    await db.insert(auditLogs).values({ userId, userName: '（系统）', module: '资料库', action: '补传原文件', target: row.name })
+  }
+  return row ? publicProjectFile(row) : undefined
+}
+
+export async function getFile(fileId: string) {
+  const [row] = await db.select().from(projectFiles).where(eq(projectFiles.id, fileId)).limit(1)
+  return row
+}
+
 export async function finishFileParse(fileId: string) {
   const [row] = await db.update(projectFiles).set({ parseStatus: '成功' }).where(eq(projectFiles.id, fileId)).returning()
   return row
@@ -117,6 +144,9 @@ export async function deleteProject(id: string, userId: string) {
   // 删项目(file_chunks/project_files 由 onDelete cascade/set null 处理)
   await db.delete(projects).where(eq(projects.id, id))
   await db.insert(auditLogs).values({ userId, userName: '（系统）', module: '我的专属项目', action: '删除项目(连带知识库)', target: proj.name })
+  await removeProjectFileDirectory(id).catch((error) => {
+    console.warn(`[projects] 清理项目原始文件目录失败：${id}`, error)
+  })
   await deleteProjectArtifactDirectories(id).catch((error) => {
     console.warn(`[projects] 清理项目产物目录失败：${id}`, error)
   })
@@ -145,5 +175,8 @@ export async function deleteFile(fileId: string) {
   await db.delete(fileChunks).where(eq(fileChunks.fileId, fileId))
   await db.delete(knowledgeChunks).where(eq(knowledgeChunks.sourceId, fileId))
   await db.delete(projectFiles).where(eq(projectFiles.id, fileId))
+  await removeProjectFile(f.storagePath).catch((error) => {
+    console.warn(`[project-files] 删除原始文件失败：${fileId}`, error)
+  })
   return true
 }
