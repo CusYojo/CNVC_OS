@@ -224,9 +224,14 @@ export async function listRecoverableLeadScoreIds(limit = 500) {
 
 const BUSINESS_INDUSTRY_RULES: Array<{ label: string; terms: string[] }> = [
   { label: '人工智能', terms: ['人工智能', '大模型', '机器学习'] },
+  { label: '自然语言处理', terms: ['自然语言处理'] },
+  { label: '计算机视觉', terms: ['计算机视觉'] },
   { label: '具身智能/机器人', terms: ['具身智能', '机器人'] },
+  { label: '网络安全', terms: ['网络安全'] },
   { label: '半导体/芯片', terms: ['半导体', '芯片', '集成电路'] },
-  { label: '前沿技术', terms: ['前沿技术', '量子', '航空航天'] },
+  { label: '数据科学', terms: ['数据科学', '信息检索', '社交网络', '信息论', '计算与社会'] },
+  { label: '软件工程', terms: ['软件工程', '计算逻辑', '计算经济', '多智能体系统'] },
+  { label: '前沿技术', terms: ['前沿技术', '量子', '航空航天', '数学与计算'] },
   { label: '产业升级', terms: ['产业升级', '数字化转型'] },
   { label: '先进制造', terms: ['先进制造', '智能制造', '工业自动化'] },
   { label: '企业服务', terms: ['企业服务', 'SaaS', '工业软件'] },
@@ -671,7 +676,11 @@ export async function listLeads(options: { page?: number; pageSize?: number; cha
         'aiSubjectReview', ${leads.radarProfile}->'aiSubjectReview',
         'paperMeta', CASE
           WHEN ${leads.radarProfile}->'paperMeta' IS NULL THEN NULL
-          ELSE jsonb_build_object('titleZh', ${leads.radarProfile}->'paperMeta'->'titleZh')
+          ELSE jsonb_build_object(
+            'titleZh', ${leads.radarProfile}->'paperMeta'->'titleZh',
+            'authors', ${leads.radarProfile}->'paperMeta'->'authors',
+            'categories', ${leads.radarProfile}->'paperMeta'->'categories'
+          )
         END
       ) END`,
       // 列表估值兜底：仅保留第一条历史融资的轮次/估值，避免返回完整 funding_rounds。

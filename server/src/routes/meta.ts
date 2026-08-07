@@ -36,6 +36,40 @@ import { resolveLeadBusinessRegion } from '../services/leadRegion.js'
 import { reviewRadarCandidatesWithAi } from '../services/radarAiReviewService.js'
 import { deriveRadarChannel, isRadarPaperCandidate } from '../services/radarChannel.js'
 
+/** arxiv 学科分类 → 可读行业标签 */
+const ARXIV_INDUSTRY_MAP: Record<string, string> = {
+  'cs.AI': '人工智能',
+  'cs.LG': '机器学习',
+  'cs.CL': '自然语言处理',
+  'cs.CV': '计算机视觉',
+  'cs.IR': '信息检索',
+  'cs.MA': '多智能体系统',
+  'cs.CR': '网络安全',
+  'cs.SE': '软件工程',
+  'cs.CY': '计算与社会',
+  'cs.SI': '社交网络',
+  'cs.DS': '数据科学',
+  'cs.IT': '信息论',
+  'cs.LO': '计算逻辑',
+  'cs.GT': '计算经济',
+  'cs.DL': '信息检索',
+  'stat.ML': '机器学习',
+  'q-bio.QM': '生物医药',
+  'q-bio.NC': '生物医药',
+  'math.NA': '数学与计算',
+}
+
+/** 将 arxiv 分类列表翻译为行业标签 */
+function arxivCategoriesToIndustry(categories: unknown): string {
+  if (!Array.isArray(categories) || categories.length === 0) return '待确认'
+  const labels = [...new Set(
+    categories
+      .map((c) => ARXIV_INDUSTRY_MAP[String(c).trim()])
+      .filter(Boolean),
+  )]
+  return labels.length ? labels.join('、') : '待确认'
+}
+
 export const metaRouter = Router()
 
 type PublicIntelContextEvidence = { title: string; snippet: string; url: string }
@@ -571,7 +605,7 @@ metaRouter.post('/leads/sync-radar', async (req: AuthedRequest, res, next) => {
         name,
         companyName: companyName || null,
         industry: (isPaper
-          ? (Array.isArray(it.categories) ? it.categories.slice(0, 3).join(', ') : String(it.categories || prof.industry || '待核验').toString().slice(0, 64))
+          ? arxivCategoriesToIndustry(it.categories)
           : (prof.industry || '待核验').toString().slice(0, 64)),
         businessRegion: regionResolution?.region,
         businessRegionSource: regionResolution?.source,

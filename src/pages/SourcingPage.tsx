@@ -847,29 +847,40 @@ export function SourcingPage() {
 
       <div ref={tableRef}>
         <Card className="overflow-hidden">
-        <DataTable headers={['主体名称 / 项目', '行业 / 地区标签', '融资 / 估值', 'AI 综合评分', '入池时间', '详情']}>
+        <DataTable headers={channel === '论文'
+          ? ['主体名称 / 项目', '作者', '分类', '行业', 'AI 综合评分', '入池时间', '详情']
+          : ['主体名称 / 项目', '行业 / 地区标签', '融资 / 估值', 'AI 综合评分', '入池时间', '详情']}>
           {filtered.map((lead) => {
             const { companySubject } = getLeadIdentity(lead)
-            const funding = getLeadFundingDisplay(lead)
-            const valuationValue = lead.valuationDisplay?.value ?? funding.valuation
-            const financingAmount = funding.amount
+            const isPaperRow = channel === '论文' && lead.radarProfile?.channel === '论文'
+            const funding = isPaperRow ? ({} as ReturnType<typeof getLeadFundingDisplay>) : getLeadFundingDisplay(lead)
+            const valuationValue = isPaperRow ? undefined : lead.valuationDisplay?.value ?? funding.valuation
+            const financingAmount = isPaperRow ? undefined : funding.amount
             const fundingValue = valuationValue ?? financingAmount
             const fundingValueLabel = valuationValue ? '估值' : financingAmount ? '融资金额' : ''
-            const fundingStatus = fundingValue
+            const fundingStatus = isPaperRow ? 'unavailable' as const : fundingValue
               ? 'available'
               : lead.valuationDisplay?.status ?? (lead.analysisStatus === 'pending' ? 'pending' : 'unavailable')
             const scoreRefreshing = scoringLeadIds.includes(lead.id) || isScoreJobActive(lead.scoreJob?.status)
             const industryTags = lead.businessTags?.industry?.length ? lead.businessTags.industry : [lead.industry || '待确认']
             const regionTags = lead.businessTags?.region?.length ? lead.businessTags.region : [lead.region || '待确认']
+            const paperAuthors = isPaperRow ? (lead.radarProfile?.paperMeta?.authors ?? []) : []
+            const paperCategories = isPaperRow ? (lead.radarProfile?.paperMeta?.categories ?? []) : []
             return <tr key={lead.id} className="hover:bg-slate-50">
               <TableCell><button className="min-w-[240px] text-left" onClick={async () => { setSelected(lead); setDetailTab('overview'); const d = await fetchLeadDetail(lead.id); if (d) setSelected(d) }}><span className="block max-w-[260px] truncate font-medium text-slate-800 hover:text-brand-700" title={companySubject}>{companySubject}</span></button></TableCell>
-              <TableCell><div className="flex max-w-[240px] flex-wrap gap-1">{industryTags.slice(0, 2).map((tag) => <Badge key={`industry-${tag}`} tone="blue">{tag}</Badge>)}{regionTags.slice(0, 1).map((tag) => <span key={`region-${tag}`} title={tag === '待确认' ? '暂无可靠地区证据' : [lead.regionSource, lead.regionConfidence && `可信度${lead.regionConfidence}`].filter(Boolean).join(' · ')}><Badge tone={tag === '待确认' ? 'slate' : 'green'}>{tag}</Badge></span>)}</div></TableCell>
-              <TableCell><div className="max-w-[200px]">
-                {fundingStatus === 'available' && fundingValue
-                  ? <p className="truncate font-medium text-slate-700" title={`${fundingValueLabel}：${fundingValue}`}>{fundingValue}</p>
-                  : fundingStatus === 'pending' ? <Badge tone="amber">待核验</Badge> : <span className="text-xs text-slate-400">暂无公开融资或估值</span>}
-                {(fundingValueLabel || funding.round) && <p className="mt-1 truncate text-xs text-slate-400">{[fundingValueLabel, funding.round].filter(Boolean).join(' · ')}</p>}
-              </div></TableCell>
+              {channel === '论文' ? <>
+                <TableCell><div className="max-w-[180px]"><p className="truncate text-sm text-slate-700" title={paperAuthors.join('、')}>{paperAuthors.length ? paperAuthors.slice(0, 2).join('、') : <span className="text-slate-400">—</span>}{paperAuthors.length > 2 ? ` 等${paperAuthors.length}人` : ''}</p></div></TableCell>
+                <TableCell><div className="flex max-w-[200px] flex-wrap gap-1">{paperCategories.length ? paperCategories.slice(0, 3).map((cat) => <Badge key={cat} tone="purple">{cat}</Badge>) : <span className="text-xs text-slate-400">—</span>}</div></TableCell>
+                <TableCell><div className="flex max-w-[180px] flex-wrap gap-1">{industryTags.slice(0, 2).map((tag) => <Badge key={`industry-${tag}`} tone="blue">{tag}</Badge>)}</div></TableCell>
+              </> : <>
+                <TableCell><div className="flex max-w-[240px] flex-wrap gap-1">{industryTags.slice(0, 2).map((tag) => <Badge key={`industry-${tag}`} tone="blue">{tag}</Badge>)}{regionTags.slice(0, 1).map((tag) => <span key={`region-${tag}`} title={tag === '待确认' ? '暂无可靠地区证据' : [lead.regionSource, lead.regionConfidence && `可信度${lead.regionConfidence}`].filter(Boolean).join(' · ')}><Badge tone={tag === '待确认' ? 'slate' : 'green'}>{tag}</Badge></span>)}</div></TableCell>
+                <TableCell><div className="max-w-[200px]">
+                  {fundingStatus === 'available' && fundingValue
+                    ? <p className="truncate font-medium text-slate-700" title={`${fundingValueLabel}：${fundingValue}`}>{fundingValue}</p>
+                    : fundingStatus === 'pending' ? <Badge tone="amber">待核验</Badge> : <span className="text-xs text-slate-400">暂无公开融资或估值</span>}
+                  {(fundingValueLabel || funding.round) && <p className="mt-1 truncate text-xs text-slate-400">{[fundingValueLabel, funding.round].filter(Boolean).join(' · ')}</p>}
+                </div></TableCell>
+              </>}
               <TableCell>{scoreRefreshing
                 ? <Badge tone={lead.scoreJob?.status === 'retrying' ? 'amber' : 'blue'}>{scoreJobLabel(lead.scoreJob?.status)}</Badge>
                 : lead.scoreJob?.status === 'failed'

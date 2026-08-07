@@ -1,8 +1,14 @@
 import { Router } from 'express'
 import { z } from 'zod'
+import { createReadStream } from 'node:fs'
+import { mkdir, stat, writeFile } from 'node:fs/promises'
+import { resolve as pathResolve, sep as pathSep, extname } from 'node:path'
 import type { AuthedRequest } from '../middleware/requireAuth.js'
 import { FLUE_BASE_URL } from '../config/agentRuntime.js'
 import { ingestFile } from '../services/ragService.js'
+import { db } from '../db/client.js'
+import { projectFiles } from '../db/schema.js'
+import { eq } from 'drizzle-orm'
 import { ProjectCreateSchema } from '../schemas/project.js'
 import {
   addFile, createProject, finishFileParse, getFile, getProject, listFiles, listProjects, moveProjectStage, replaceFileContent, setFileStoragePath, updateProject, deleteProject, pinProject, listAllFiles } from '../services/projectService.js'
@@ -273,7 +279,7 @@ projectsRouter.get('/files/:id/download', async (req: AuthedRequest, res, next) 
     if (!file.storagePath) {
       res.status(404).json({
         code: 'FILE_CONTENT_NOT_FOUND',
-        message: '该历史资料未留存原始文件，请使用“补传原文件”；现有资料记录不会删除',
+        message: '该历史资料未留存原始文件，请使用”补传原文件”；现有资料记录不会删除',
         details: null,
       })
       return
