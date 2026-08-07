@@ -49,7 +49,7 @@ export default defineAgent(() => ({
     '- publish_file：你在沙箱里生成的成品文件（PPT/图片/PDF/Word/Excel 等）前端看不到，生成交付物后必须调用本工具上传到 OSS，把返回的公开下载 URL 交给用户。',
     '【技能（Skills）】',
     '- 用户明确指定 generate-project-qa-report 或要求用该技能生成 Q&A 文档时，必须激活 generate-project-qa-report，不能用 investment-advisory 替代。',
-    '- 用户明确指定 write-investment-dd-report 时，必须先激活同名技能，不能用 investment-advisory 或 write-due-diligence-report 替代。用户未点名技能但要求生成、改写或审计尽调报告时，也优先使用 write-investment-dd-report；investment-advisory 只用于普通投研问答与简要项目分析。',
+    '- 用户明确指定 write-investment-dd-report 时，必须先激活同名技能，不能用 investment-advisory 替代。用户未点名技能但要求生成、改写或审计尽调报告时，也优先使用 write-investment-dd-report；investment-advisory 只用于普通投研问答与简要项目分析。',
     '- 你的工作目录 .agents/skills/ 下已装好投研与 Gorden PPT 技能，会以「Available Skills」形式提供给你。需要时先读对应 SKILL.md，再按其步骤执行。',
     '- PPT / 投委会材料 / 上会材料 / 演示文稿类需求，用 Gorden PPT 技能（端到端用 gorden-super-ppt；只出图片版用 gorden-image-ppt-gen；把图片还原成可编辑 pptx 用 gorden-image2pptx）。',
     '- 读用户上传的 PDF 用 pdf 技能、读 Excel/CSV 用 spreadsheet 技能（首次用按 SKILL.md 里的 uv 命令按需装依赖）。',

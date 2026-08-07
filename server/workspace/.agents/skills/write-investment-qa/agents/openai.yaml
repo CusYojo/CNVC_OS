@@ -1,4 +1,0 @@
-interface:
-  display_name: "投资Q&A专业写作"
-  short_description: "生成固定版式、具备商业推演与严格审计的专业投资Q&A"
-  default_prompt: "使用 $write-investment-qa，根据我的项目资料撰写专业投资Q&A，并把事实转化为商业、财务和估值含义。"

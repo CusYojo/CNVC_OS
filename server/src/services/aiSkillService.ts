@@ -7,15 +7,12 @@ export const AI_TEMPLATE_DRIVEN_SKILL_NAME = 'generate-document-from-template'
 export const AI_DUE_DILIGENCE_SKILL_NAME = 'write-investment-dd-report'
 
 export const AI_QA_SKILL_NAMES = [
-  'answer-project-qa',
-  'write-investment-qa',
   'generate-project-qa-report',
 ] as const
 
 export type AiQaSkillName = typeof AI_QA_SKILL_NAMES[number]
 
-// 快捷任务的 Q&A 统一绑定公司当前标准技能。旧技能仍保留用于历史任务审计，
-// 但环境变量不能再把新任务静默切回旧模板。
+// 快捷任务的 Q&A 只绑定公司当前标准技能；历史任务中的旧名称仅作为审计数据保留。
 export const AI_QA_SKILL_NAME: AiQaSkillName = 'generate-project-qa-report'
 
 export const AI_BUSINESS_SKILLS = [

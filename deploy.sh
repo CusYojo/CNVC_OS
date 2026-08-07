@@ -358,7 +358,6 @@ sync_agent_skills() {
     done
 
     for required_skill in \
-        answer-project-qa \
         generate-project-qa-report \
         draft-investment-proposal
     do
