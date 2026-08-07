@@ -957,6 +957,34 @@ wait_for_document_skill_bindings() {
     return 1
 }
 
+stop_api_service_and_orphans() {
+    local listener_pids="" pid="" cmdline="" remaining=""
+
+    systemctl stop "$API_SERVICE" 2>/dev/null || true
+    listener_pids=$(ss -ltnp 2>/dev/null \
+        | awk '/127\.0\.0\.1:3100/ { while (match($0, /pid=[0-9]+/)) { print substr($0, RSTART + 4, RLENGTH - 4); $0 = substr($0, RSTART + RLENGTH) } }' \
+        | sort -u)
+    for pid in $listener_pids; do
+        [ -r "/proc/${pid}/cmdline" ] || continue
+        cmdline=$(tr '\0' ' ' < "/proc/${pid}/cmdline")
+        if [[ "$cmdline" != *"${DEPLOY_DIR}/server-dist/index.js"* ]]; then
+            err "API 端口 3100 被非发布进程占用，拒绝自动终止: pid=${pid} cmd=${cmdline}"
+            exit 1
+        fi
+        log "终止脱离 systemd 的旧 API 进程: pid=${pid}"
+        kill -TERM "$pid" 2>/dev/null || true
+    done
+
+    for _ in {1..20}; do
+        remaining=$(ss -ltnp 2>/dev/null | grep '127.0.0.1:3100' || true)
+        [ -z "$remaining" ] && return 0
+        sleep 0.5
+    done
+    err "旧 API 进程未在超时内释放端口 3100"
+    echo "$remaining"
+    exit 1
+}
+
 start_services() {
     step "启动服务"
 
@@ -974,7 +1002,7 @@ start_services() {
     sync_agent_skills
     log "停止 API 与 Agent Runtime，准备切换发布版本..."
     systemctl stop "$FLUE_SERVICE" 2>/dev/null || true
-    systemctl stop "$API_SERVICE" 2>/dev/null || true
+    stop_api_service_and_orphans
     activate_agent_skills
 
     log "重启情报雷达..."
@@ -994,6 +1022,15 @@ start_services() {
         journalctl -u "$API_SERVICE" -n 50 --no-pager || true
         exit 1
     }
+    local api_main_pid api_listener_pid
+    api_main_pid=$(systemctl show "$API_SERVICE" -p MainPID --value)
+    api_listener_pid=$(ss -ltnp 2>/dev/null \
+        | awk '/127\.0\.0\.1:3100/ && match($0, /pid=[0-9]+/) { print substr($0, RSTART + 4, RLENGTH - 4); exit }')
+    if [ -z "$api_main_pid" ] || [ "$api_main_pid" = "0" ] || [ "$api_listener_pid" != "$api_main_pid" ]; then
+        err "API 监听进程不属于 systemd 主进程: main=${api_main_pid:-无} listener=${api_listener_pid:-无}"
+        exit 1
+    fi
+    log "API 进程归属检查通过: pid=${api_main_pid} ✓"
 
     log "启动雷达增量同步定时器..."
     systemctl restart "$RADAR_SYNC_TIMER"

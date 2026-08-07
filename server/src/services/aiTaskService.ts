@@ -21,6 +21,7 @@ import {
   annotateDueDiligencePendingAfterResearch,
   composeBusinessContent,
   dueDiligencePendingResearchTopics,
+  investmentRecommendationContentQualityIssues,
   investmentRecommendationPendingResearchTopics,
   usedBusinessSourceIndexes,
   type BusinessContent,
@@ -1765,12 +1766,29 @@ async function executeTask(taskId: string) {
       taskDir,
       '.investment-recommendation-checkpoint.json',
     )
-    const investmentRecommendationResume = task.type === 'investment_recommendation_ppt'
+    let investmentRecommendationResume = task.type === 'investment_recommendation_ppt'
       ? await loadInvestmentRecommendationResumeCheckpoint(
           investmentRecommendationResumeDirectory,
           sources,
         )
       : undefined
+    if (investmentRecommendationResume) {
+      const resumeQualityIssues = investmentRecommendationContentQualityIssues(
+        investmentRecommendationResume.content,
+        template.sections.length,
+        {
+          pageCount: parameters.pageCount as string | number | undefined,
+          sourceCount: investmentRecommendationResume.sourceSnapshots.length,
+        },
+      )
+      if (resumeQualityIssues.length > 0) {
+        console.warn(
+          '[aiTask] 投资建议书恢复检查点未通过当前专业性门禁，忽略旧正文并重新生成:',
+          resumeQualityIssues.slice(0, 6).join('；'),
+        )
+        investmentRecommendationResume = undefined
+      }
+    }
     let checkpointWrite = Promise.resolve()
     let progressWrite = Promise.resolve()
     let proposalProgress = 35
