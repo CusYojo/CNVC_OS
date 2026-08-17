@@ -13,7 +13,7 @@ import { openLeadPipelineReview, recordLeadPipelineDecision } from './leadPipeli
 import { recordLeadPipelineRawEvent, transitionLeadPipelineItem } from './leadPipelineEventService.js'
 import { isSpecificLeadSubjectName } from './leadSubjectName.js'
 import { extractText } from './ragService.js'
-import { readLeadIntakeFile, saveLeadIntakeFile } from './leadIntakeFileStorageService.js'
+import { readLeadIntakeFile, removeLeadIntakeFile, saveLeadIntakeFile } from './leadIntakeFileStorageService.js'
 
 type IntakeActor = { userId: string; userName: string }
 type ScheduleScoring = (leadId: string) => Promise<boolean>
@@ -46,6 +46,7 @@ type IntakeFileRow = RowDataPacket & {
   lead_id: string | null
   review_id: string | null
   uploaded_by: string
+  uploaded_by_name: string
   created_at: Date
   updated_at: Date
   completed_at: Date | null
@@ -228,6 +229,7 @@ async function commitNormalizedLead(input: {
           qualityRejected: false,
           intake: { sourceType: input.sourceType, sourceId: input.sourceId, decisionId: decision.id },
           articleText: input.evidenceQuote.slice(0, 50_000),
+          articleTextLength: input.evidenceQuote.length,
         },
         radarSourceKeys: [`${input.sourceType}:${input.sourceId}`],
       },
@@ -263,12 +265,12 @@ export async function buildLeadImportTemplate() {
   sheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } }
   sheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2563EB' } }
   sheet.autoFilter = 'A1:J1'
-  sheet.addRow({ name: '示例科技', companyName: '示例科技有限公司', industry: '人工智能', region: '北京', source: '合作伙伴推荐', summary: '示例行，请导入前删除。' })
   const guide = workbook.addWorksheet('填写说明')
   guide.addRows([
     ['字段', '说明'], ['项目名称*', '必填，需为明确的公司、项目、团队或实验室名称'],
     ['多值字段', '投资亮点、风险点、融资轮次使用分号或换行分隔'],
     ['数据安全', '不要填写公式；单次最多 2000 行，上传后会先预检，不会立即入池'],
+    ['示例', '示例科技｜示例科技有限公司｜人工智能｜北京｜合作伙伴推荐（请勿把示例当作真实线索导入）'],
   ])
   guide.getRow(1).font = { bold: true }
   return Buffer.from(await workbook.xlsx.writeBuffer())
@@ -308,7 +310,7 @@ async function queryBatch(batchId: string, userId: string) {
   )
   const batch = batches[0]
   if (!batch) throw Object.assign(new Error('导入批次不存在或无权访问'), { status: 404, code: 'IMPORT_BATCH_NOT_FOUND' })
-  const [rows] = await pool.query<ImportRow[]>(`SELECT * FROM ${rowsTable} WHERE batch_id=? ORDER BY row_number`, [batch.id])
+  const [rows] = await pool.query<ImportRow[]>(`SELECT * FROM ${rowsTable} WHERE batch_id=? ORDER BY \`row_number\``, [batch.id])
   return {
     id: batch.id, status: batch.status, totalRows: Number(batch.total_rows), validRows: Number(batch.valid_rows),
     errorRows: Number(batch.error_rows), committedRows: Number(batch.committed_rows), reviewRows: Number(batch.review_rows),
@@ -364,7 +366,7 @@ export async function previewLeadImport(input: {
     for (let index = 0; index < parsed.length; index += 1) {
       const item = parsed[index]
       await connection.query(
-        `INSERT INTO ${rowsTable} (id,batch_id,row_number,raw_data,normalized_data,validation_errors,status,created_at,updated_at)
+        `INSERT INTO ${rowsTable} (id,batch_id,\`row_number\`,raw_data,normalized_data,validation_errors,status,created_at,updated_at)
          VALUES (?, ?, ?, CAST(? AS JSON), CAST(? AS JSON), CAST(? AS JSON), ?, NOW(3), NOW(3))`,
         [randomUUID(), batchId, index + 2, JSON.stringify(item.raw), JSON.stringify(item.normalized), JSON.stringify(item.errors), item.errors.length ? 'invalid' : 'valid'],
       )
@@ -372,6 +374,7 @@ export async function previewLeadImport(input: {
     await connection.commit()
   } catch (error) {
     await connection.rollback()
+    await removeLeadIntakeFile(storagePath).catch(() => undefined)
     throw error
   } finally { connection.release() }
   return await queryBatch(batchId, actor.userId)
@@ -410,9 +413,16 @@ export async function commitLeadImportBatch(batchId: string, actor: IntakeActor,
       await pool.query(`UPDATE ${rowsTable} SET status='failed',result_message=?,updated_at=NOW(3) WHERE id=?`, [safeError(error), row.id])
     }
   }
+  const [totals] = await pool.query<Array<RowDataPacket & { committed_rows: number; review_rows: number; failed_rows: number }>>(
+    `SELECT SUM(status='committed') AS committed_rows,SUM(status='review') AS review_rows,SUM(status='failed') AS failed_rows FROM ${rowsTable} WHERE batch_id=?`, [batchId],
+  )
+  committed = Number(totals[0]?.committed_rows || 0)
+  review = Number(totals[0]?.review_rows || 0)
+  failed = Number(totals[0]?.failed_rows || 0)
+  const finalStatus = failed ? 'partial_failed' : 'completed'
   await pool.query(
     `UPDATE ${batchesTable} SET status=?,committed_rows=?,review_rows=?,failed_rows=?,completed_at=IF(?='completed',NOW(3),NULL),updated_at=NOW(3) WHERE id=?`,
-    [failed ? 'partial_failed' : 'completed', committed, review, failed, failed ? 'partial_failed' : 'completed', batchId],
+    [finalStatus, committed, review, failed, finalStatus, batchId],
   )
   return await queryBatch(batchId, actor.userId)
 }
@@ -439,19 +449,24 @@ export async function uploadLeadBp(input: {
   name: string; declaredType?: string; dataBase64: string; idempotencyKey?: string
 }, actor: IntakeActor) {
   const validated = await decodeAndValidateProjectFile(input)
-  if (!['pdf', 'doc', 'docx', 'ppt', 'pptx', 'txt', 'md', 'markdown'].includes(validated.extension)) {
-    throw Object.assign(new Error('BP 上传仅支持 PDF、Word、PPT 或文本文件'), { status: 415, code: 'BP_FILE_UNSUPPORTED' })
+  if (!['pdf', 'docx', 'pptx', 'xls', 'xlsx', 'xlsm', 'png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp', 'txt', 'md', 'markdown'].includes(validated.extension)) {
+    throw Object.assign(new Error('BP 上传仅支持 PDF、DOCX、PPTX、Excel、图片或文本文件'), { status: 415, code: 'BP_FILE_UNSUPPORTED' })
   }
   const idempotencyKey = sha256(`lead-bp-v1:${actor.userId}:${input.idempotencyKey || validated.sha256}`)
   const [existing] = await pool.query<IntakeFileRow[]>(`SELECT * FROM ${filesTable} WHERE idempotency_key=? LIMIT 1`, [idempotencyKey])
   if (existing[0]) return publicFile(existing[0])
   const fileId = randomUUID()
   const storagePath = await saveLeadIntakeFile(actor.userId, fileId, validated.buffer)
-  await pool.query(
-    `INSERT INTO ${filesTable} (id,kind,idempotency_key,original_name,type_label,content_type,byte_size,sha256,storage_path,status,stage,progress,uploaded_by,uploaded_by_name,created_at,updated_at)
-     VALUES (?, 'bp', ?, ?, ?, ?, ?, ?, ?, 'queued', 'queued', 5, ?, ?, NOW(3), NOW(3))`,
-    [fileId, idempotencyKey, validated.name, validated.typeLabel, validated.contentType, validated.byteSize, validated.sha256, storagePath, actor.userId, actor.userName],
-  )
+  try {
+    await pool.query(
+      `INSERT INTO ${filesTable} (id,kind,idempotency_key,original_name,type_label,content_type,byte_size,sha256,storage_path,status,stage,progress,uploaded_by,uploaded_by_name,created_at,updated_at)
+       VALUES (?, 'bp', ?, ?, ?, ?, ?, ?, ?, 'queued', 'queued', 5, ?, ?, NOW(3), NOW(3))`,
+      [fileId, idempotencyKey, validated.name, validated.typeLabel, validated.contentType, validated.byteSize, validated.sha256, storagePath, actor.userId, actor.userName],
+    )
+  } catch (error) {
+    await removeLeadIntakeFile(storagePath).catch(() => undefined)
+    throw error
+  }
   void pollBpQueue()
   return await getLeadBpUpload(fileId, actor)
 }
@@ -501,7 +516,7 @@ async function processBpJob(row: IntakeFileRow) {
     const lead = candidateFromBp(row.original_name, text.slice(0, MAX_BP_TEXT))
     const result = await commitNormalizedLead({
       lead, sourceType: 'bp-upload', sourceId: row.id,
-      actor: { userId: row.uploaded_by, userName: 'BP 上传用户' }, evidenceQuote: text,
+      actor: { userId: row.uploaded_by, userName: row.uploaded_by_name }, evidenceQuote: text,
     })
     if (result.leadId) await bpScheduleScoring?.(result.leadId).catch(() => false)
     const status = result.status === 'review' ? 'review' : 'ready'
@@ -550,4 +565,20 @@ export async function stopLeadBpWorker() {
   bpTimer = undefined
   for (let index = 0; bpPolling && index < 200; index += 1) await new Promise((resolve) => setTimeout(resolve, 50))
   bpScheduleScoring = undefined
+}
+
+export async function leadBpWorkerHealth() {
+  try {
+    const [rows] = await pool.query<Array<RowDataPacket & { queued: number; processing: number; retrying: number; review: number; dead_letter: number }>>(
+      `SELECT SUM(status='queued') AS queued,SUM(status='processing') AS processing,SUM(status='retrying') AS retrying,SUM(status='review') AS review,SUM(status='dead_letter') AS dead_letter FROM ${filesTable} WHERE kind='bp'`,
+    )
+    return {
+      name: 'mysql-lead-bp-jobs', ok: Boolean(bpTimer) && !bpStopping, inProcess: true, owner,
+      queued: Number(rows[0]?.queued || 0), running: Number(rows[0]?.processing || 0),
+      retrying: Number(rows[0]?.retrying || 0), review: Number(rows[0]?.review || 0),
+      deadLetter: Number(rows[0]?.dead_letter || 0),
+    }
+  } catch (error) {
+    return { name: 'mysql-lead-bp-jobs', ok: false, inProcess: true, owner, error: safeError(error) }
+  }
 }

@@ -6,6 +6,7 @@ import { jwAgentRuntimeHealth } from '../runtime/jwAgentRuntime.js'
 import { supervisedProcessHealth } from '../runtime/supervisedProcessService.js'
 import { aiTaskWorkerHealth } from './aiTaskService.js'
 import { leadScoreJobHealth } from './leadScoreJobService.js'
+import { leadBpWorkerHealth } from './leadIntakeService.js'
 import { operationalTelemetryRepository } from '../repositories/mysql/mysqlOperationalTelemetryRepository.js'
 import { projectScoreJobHealth } from './projectScoreJobService.js'
 import { radarMySqlSourceHealth } from './radarDataMigrationService.js'
@@ -366,6 +367,7 @@ export async function operationalTelemetrySnapshot() {
     Promise.resolve(aiRuntimeTelemetrySnapshot()),
     runtimeJobSchedulerHealth(),
     leadScoreJobHealth(),
+    leadBpWorkerHealth(),
     projectScoreJobHealth(),
     aiTaskWorkerHealth(),
     Promise.resolve(supervisedProcessHealth()),

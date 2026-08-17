@@ -63,7 +63,7 @@ import { beginHttpTelemetry } from './runtime/httpTelemetry.js'
 import { aiRuntimeTelemetrySnapshot } from './runtime/aiRuntimeTelemetry.js'
 import { migrationWriteFreezePolicy } from './config/migrationWriteFreezePolicy.js'
 import { startWeixinMessageBridge, stopWeixinMessageBridge } from './services/weixinMessageBridge.js'
-import { startLeadBpWorker, stopLeadBpWorker } from './services/leadIntakeService.js'
+import { leadBpWorkerHealth, startLeadBpWorker, stopLeadBpWorker } from './services/leadIntakeService.js'
 
 assertRuntimeConfiguration()
 installStructuredLogging()
@@ -177,6 +177,7 @@ app.get('/api/health/components', async (_req, res) => {
         await radarMySqlSourceHealth(),
         intentionallyDisabled('mysql-runtime-jobs'),
         intentionallyDisabled('mysql-lead-score-jobs'),
+        intentionallyDisabled('mysql-lead-bp-jobs'),
         intentionallyDisabled('mysql-project-score-jobs'),
         intentionallyDisabled('mysql-ai-tasks'),
         supervisedProcessHealth(),
@@ -196,6 +197,7 @@ app.get('/api/health/components', async (_req, res) => {
         await radarMySqlSourceHealth(),
         await runtimeJobSchedulerHealth(),
         await leadScoreJobHealth(),
+        await leadBpWorkerHealth(),
         await projectScoreJobHealth(),
         await aiTaskWorkerHealth(),
         supervisedProcessHealth(),

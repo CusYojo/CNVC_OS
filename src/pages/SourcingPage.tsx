@@ -1195,8 +1195,8 @@ export function SourcingPage() {
 
       <Modal open={showBpUpload} title="上传 BP 到公共线索池" onClose={() => !bpBusy && setShowBpUpload(false)}>
         <div className="space-y-4">
-          <p className="text-sm leading-6 text-slate-500">支持 PDF、Word、PPT 和文本文件。服务端会校验真实文件类型、提取正文、识别主体并接入现有去重与人工复核链路；评分由后台真实任务生成。</p>
-          {!bpUpload && <FileUpload accept=".pdf,.doc,.docx,.ppt,.pptx,.txt,.md,.markdown" onFile={(file) => { void uploadBp(file) }} />}
+          <p className="text-sm leading-6 text-slate-500">支持 PDF、DOCX、PPTX、Excel、图片和文本文件。服务端会校验真实文件类型、提取正文或 OCR、识别主体并接入现有去重与人工复核链路；评分由后台真实任务生成。</p>
+          {!bpUpload && <FileUpload accept=".pdf,.docx,.pptx,.xls,.xlsx,.xlsm,.png,.jpg,.jpeg,.gif,.bmp,.webp,.txt,.md,.markdown" onFile={(file) => { void uploadBp(file) }} />}
           {bpBusy && <div className="flex items-center gap-2 rounded-lg bg-slate-50 p-3 text-sm text-slate-600"><RefreshCw className="h-4 w-4 animate-spin" />正在读取并安全上传文件…</div>}
           {bpUpload && <div className="rounded-xl border border-slate-200 p-4">
             <div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="truncate font-medium text-slate-800" title={bpUpload.name}>{bpUpload.name}</p><p className="mt-1 text-xs text-slate-400">任务 {bpUpload.id} · 已尝试 {bpUpload.attempts} 次</p></div><Badge tone={bpUpload.status === 'ready' ? 'green' : bpUpload.status === 'review' ? 'purple' : ['failed', 'dead_letter'].includes(bpUpload.status) ? 'amber' : 'blue'}>{bpUpload.status === 'queued' ? '排队中' : bpUpload.status === 'processing' ? '解析中' : bpUpload.status === 'retrying' ? '自动重试' : bpUpload.status === 'review' ? '待人工复核' : bpUpload.status === 'ready' ? '已入池' : '解析失败'}</Badge></div>

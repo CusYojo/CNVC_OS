@@ -105,6 +105,7 @@
     "accept:lead-duplicate-telemetry": "node --env-file-if-exists=.env --import tsx server/src/scripts/leadDuplicateTelemetryAcceptance.ts",
     "accept:lead-dedup-safety": "node --import tsx server/src/scripts/leadDedupSafetyAcceptance.ts",
     "accept:lead-field-provenance": "node --env-file-if-exists=.env --import tsx server/src/scripts/leadFieldProvenanceAcceptance.ts",
+    "accept:lead-intake": "node --env-file-if-exists=.env --import tsx server/src/scripts/leadIntakeAcceptance.ts",
     "accept:lead-duplicate-dispositions": "node --env-file-if-exists=.env --import tsx server/src/scripts/leadDuplicateDispositionAcceptance.ts",
     "accept:lead-duplicate-apply": "node --env-file-if-exists=.env --import tsx server/src/scripts/leadDuplicateApplyAcceptance.ts",
     "accept:operational-alert-delivery": "node --env-file-if-exists=.env --import tsx server/src/scripts/operationalAlertDeliveryAcceptance.ts",

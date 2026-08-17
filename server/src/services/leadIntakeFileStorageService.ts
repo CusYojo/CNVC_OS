@@ -49,3 +49,14 @@ export async function readLeadIntakeFile(storagePath: string) {
   return await readFile(target)
 }
 
+export async function removeLeadIntakeFile(storagePath: string) {
+  const target = resolvedStoragePath(storagePath)
+  const [rootReal, targetReal, info] = await Promise.all([
+    realpath(LEAD_INTAKE_FILE_ROOT), realpath(target).catch(() => ''), lstat(target).catch(() => null),
+  ])
+  if (!info) return
+  if (!targetReal || !inside(rootReal, targetReal) || !info.isFile() || info.isSymbolicLink()) {
+    throw Object.assign(new Error('拒绝删除越界或符号链接线索文件'), { status: 500, code: 'INVALID_STORAGE_PATH' })
+  }
+  await rm(target, { force: true })
+}
