@@ -9,6 +9,7 @@ import type {
 } from './aiBusinessContentService.js'
 import type { LoadedAiSkill } from './aiSkillService.js'
 import type { AiTemplateDefinition } from './aiTemplateCatalog.js'
+import { fetchAiGatewayChatCompatible } from './aiGatewayService.js'
 import {
   CURRENT_PROJECT_NO_DATA,
   investmentProposalBlueprintPrompt,
@@ -20,6 +21,7 @@ import {
   buildInvestmentProposalEvidencePlan,
   investmentProposalEvidenceForSections,
   investmentProposalEvidencePrompt,
+  investmentProposalSectionEvidenceContract,
 } from './aiInvestmentProposalEvidenceService.js'
 import {
   containsInvestmentProposalConversationalWording,
@@ -747,7 +749,7 @@ export async function requestInvestmentProposalChapterJson(input: {
       : undefined
     heartbeat?.unref()
     try {
-      const response = await fetchImpl(`${GW_BASE}/chat/completions`, {
+      const response = await fetchAiGatewayChatCompatible(GW_BASE, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -769,7 +771,7 @@ export async function requestInvestmentProposalChapterJson(input: {
           stream: true,
         }),
         signal: AbortSignal.timeout(timeoutMs),
-      })
+      }, fetchImpl, timeoutMs)
       if (!response.ok) {
         const responseBody = await response.text().catch(() => '')
         throw Object.assign(new Error(`LLM 请求失败（HTTP ${response.status}）`), {
@@ -1147,6 +1149,9 @@ ${skillPrompt}`
 
 Document Blueprint：
 ${investmentProposalBlueprintPrompt(blueprint, sectionIds)}
+
+逐节来源索引契约（每个节点只能使用本行列出的 sourceIndexes；同章其他节点的来源也不得串用）：
+${investmentProposalSectionEvidenceContract(evidencePlan, sectionIds)}
 
 项目字段（仅能作为当前项目档案口径使用）：
 ${JSON.stringify(input.project)}

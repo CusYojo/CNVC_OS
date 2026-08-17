@@ -1,6 +1,10 @@
 import { Router } from 'express'
 import { promises as fs, createReadStream, existsSync, mkdirSync } from 'node:fs'
-import { resolve, sep, extname, dirname, relative } from 'node:path'
+import { resolve, sep, extname, relative } from 'node:path'
+import type { AuthedRequest } from '../middleware/requireAuth.js'
+import { getConversation, listConversations } from '../services/conversationService.js'
+import { createHash } from 'node:crypto'
+import { writeAudit } from '../services/auditService.js'
 
 // 只读工作区浏览：把 assistant 沙箱工作目录(AGENT_WORKSPACE)以文件树 + 预览暴露给前端，
 // 让 agent 生成的 PPT/图片/PDF/HTML 直接在页面右侧空白区查看，无需经 OSS 中转。
@@ -25,7 +29,7 @@ const IGNORE = new Set([
 // 中间产物(脚本、临时/测试文本、日志、json/yaml 等)不进文件树。目录仍保留以便下钻。
 const RESULT_EXTS = new Set([
   '.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp', '.ico',
-  '.pdf', '.pptx', '.docx', '.xlsx', '.csv', '.html', '.htm', '.md',
+  '.pdf', '.pptx', '.docx', '.xlsx', '.csv', '.html', '.htm', '.md', '.markdown',
   '.mp4', '.mp3', '.wav', '.zip',
 ])
 
@@ -40,7 +44,7 @@ const MIME: Record<string, string> = {
   '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif',
   '.webp': 'image/webp', '.svg': 'image/svg+xml', '.bmp': 'image/bmp', '.ico': 'image/x-icon',
   '.pdf': 'application/pdf', '.html': 'text/html; charset=utf-8', '.htm': 'text/html; charset=utf-8',
-  '.txt': 'text/plain; charset=utf-8', '.md': 'text/markdown; charset=utf-8',
+  '.txt': 'text/plain; charset=utf-8', '.md': 'text/markdown; charset=utf-8', '.markdown': 'text/markdown; charset=utf-8',
   '.json': 'application/json; charset=utf-8', '.csv': 'text/csv; charset=utf-8',
   '.log': 'text/plain; charset=utf-8', '.py': 'text/plain; charset=utf-8',
   '.js': 'text/plain; charset=utf-8', '.ts': 'text/plain; charset=utf-8',
@@ -53,11 +57,36 @@ const MIME: Record<string, string> = {
 }
 
 // 把用户传入的相对路径安全解析到 ROOT 之内；越界返回 null
-function safeResolve(rel: string): string | null {
+function safeResolveFrom(root: string, rel: string): string | null {
   const clean = String(rel ?? '').replace(/^[/\\]+/, '')
-  const abs = resolve(ROOT, clean)
-  if (abs !== ROOT && !abs.startsWith(ROOT + sep)) return null
+  const abs = resolve(root, clean)
+  if (abs !== root && !abs.startsWith(root + sep)) return null
   return abs
+}
+
+function privateRoot(userId: string) {
+  return resolve(ROOT, '_users', userId)
+}
+
+async function resolveAuthorizedPath(userId: string, rel: string): Promise<string | null> {
+  const clean = String(rel ?? '').replace(/^[/\\]+/, '').split(sep).join('/')
+  const [scope, ...rest] = clean.split('/').filter(Boolean)
+  if (!scope) return null
+  let scopeRoot: string
+  if (scope === 'private') scopeRoot = privateRoot(userId)
+  else {
+    if (!(await getConversation(userId, scope))) return null
+    scopeRoot = resolve(ROOT, scope)
+  }
+  const candidate = safeResolveFrom(scopeRoot, rest.join('/'))
+  if (!candidate) return null
+  // 现有文件/目录必须在 realpath 后仍留在授权会话根内，拒绝通过符号链接跳到其他用户或系统目录。
+  const [realScope, realCandidate] = await Promise.all([
+    fs.realpath(scopeRoot).catch(() => scopeRoot),
+    fs.realpath(candidate).catch(() => null),
+  ])
+  if (realCandidate && realCandidate !== realScope && !realCandidate.startsWith(realScope + sep)) return null
+  return candidate
 }
 
 export const workspaceRouter = Router()
@@ -108,11 +137,28 @@ async function collectArtifacts(
 }
 
 // 列目录：GET /api/workspace?path=<相对路径>
-workspaceRouter.get('/', async (req, res, next) => {
+workspaceRouter.get('/', async (req: AuthedRequest, res, next) => {
   try {
     const relPath = String(req.query.path ?? '')
-    const abs = safeResolve(relPath)
-    if (!abs) return res.status(400).json({ code: 'BAD_PATH', message: '非法路径' })
+    if (!relPath) {
+      const conversations = await listConversations(req.user!.uid)
+      const entries = await Promise.all(conversations.map(async (conversation) => {
+        const abs = resolve(ROOT, conversation.id)
+        const st = await fs.stat(abs).catch(() => null)
+        return {
+          name: conversation.title || conversation.id,
+          path: conversation.id,
+          type: 'dir' as const,
+          size: 0,
+          mtime: st?.mtimeMs ?? 0,
+          ext: '',
+        }
+      }))
+      res.json({ path: '', parent: null, entries })
+      return
+    }
+    const abs = await resolveAuthorizedPath(req.user!.uid, relPath)
+    if (!abs) return res.status(404).json({ code: 'NOT_FOUND', message: '目录不存在或无权访问' })
     const st = await fs.stat(abs).catch(() => null)
     if (!st || !st.isDirectory()) return res.status(404).json({ code: 'NOT_FOUND', message: '目录不存在' })
 
@@ -130,7 +176,7 @@ workspaceRouter.get('/', async (req, res, next) => {
           const isDir = d.isDirectory()
           return {
             name: d.name,
-            path: relative(ROOT, childAbs).split(sep).join('/'),
+            path: [relPath.replace(/[/\\]+$/, ''), d.name].filter(Boolean).join('/'),
             type: isDir ? 'dir' : 'file',
             size: cst && !isDir ? cst.size : 0,
             mtime: cst ? cst.mtimeMs : 0,
@@ -142,8 +188,8 @@ workspaceRouter.get('/', async (req, res, next) => {
       a.type !== b.type ? (a.type === 'dir' ? -1 : 1) : b.mtime - a.mtime || a.name.localeCompare(b.name),
     )
 
-    const here = relative(ROOT, abs).split(sep).join('/')
-    const parent = abs === ROOT ? null : relative(ROOT, dirname(abs)).split(sep).join('/')
+    const here = relPath.replace(/^[/\\]+/, '').split(sep).join('/')
+    const parent = here.includes('/') ? here.slice(0, here.lastIndexOf('/')) : ''
     res.json({ path: here, parent, entries })
   } catch (err) {
     next(err)
@@ -152,11 +198,16 @@ workspaceRouter.get('/', async (req, res, next) => {
 
 // 生成产物列表：GET /api/workspace/artifacts
 // 仅返回可预览/下载的文件，过滤上传输入和所有空目录，并按最近生成时间排序。
-workspaceRouter.get('/artifacts', async (_req, res, next) => {
+workspaceRouter.get('/artifacts', async (req: AuthedRequest, res, next) => {
   try {
     const entries: ArtifactEntry[] = []
     const scanned = { count: 0 }
-    await collectArtifacts(ROOT, 0, entries, scanned)
+    const conversations = await listConversations(req.user!.uid)
+    for (const conversation of conversations) {
+      const conversationRoot = resolve(ROOT, conversation.id)
+      const st = await fs.stat(conversationRoot).catch(() => null)
+      if (st?.isDirectory()) await collectArtifacts(conversationRoot, 0, entries, scanned)
+    }
     entries.sort((a, b) => b.mtime - a.mtime || a.name.localeCompare(b.name))
     const limited = entries.slice(0, MAX_ARTIFACT_RESULTS)
     res.json({
@@ -170,10 +221,10 @@ workspaceRouter.get('/artifacts', async (_req, res, next) => {
 })
 
 // 读文件/预览：GET /api/workspace/file?path=<相对路径>[&download=1]
-workspaceRouter.get('/file', async (req, res, next) => {
+workspaceRouter.get('/file', async (req: AuthedRequest, res, next) => {
   try {
-    const abs = safeResolve(String(req.query.path ?? ''))
-    if (!abs) return res.status(400).json({ code: 'BAD_PATH', message: '非法路径' })
+    const abs = await resolveAuthorizedPath(req.user!.uid, String(req.query.path ?? ''))
+    if (!abs) return res.status(404).json({ code: 'NOT_FOUND', message: '文件不存在或无权访问' })
     const st = await fs.stat(abs).catch(() => null)
     if (!st || !st.isFile()) return res.status(404).json({ code: 'NOT_FOUND', message: '文件不存在' })
 
@@ -181,6 +232,13 @@ workspaceRouter.get('/file', async (req, res, next) => {
     const type = MIME[ext] ?? 'application/octet-stream'
     const name = abs.split(sep).pop() ?? 'file'
     const download = String(req.query.download ?? '') === '1'
+    const pathHash = createHash('sha256').update(relative(ROOT, abs)).digest('hex')
+    await writeAudit({
+      userId: req.user!.uid, userName: req.user!.name, module: 'Agent 工作区',
+      action: download ? '下载Agent产物' : '预览Agent产物',
+      target: `workspace-file:${pathHash};bytes:${st.size}`,
+      ip: req.ip,
+    })
     res.setHeader('Content-Type', type)
     res.setHeader('Content-Length', String(st.size))
     res.setHeader('Cache-Control', 'no-store')
@@ -204,7 +262,7 @@ function safeName(raw: string): string {
 // 写入上传：POST /api/workspace/file  { name, dataBase64, subdir? }
 // 把用户在 AI 助手页上传的文件落进 assistant 沙箱工作目录的 uploads/<subdir>/ 下，
 // 使 agent 能用 read/bash 直接读取（配合 pdf / spreadsheet 技能）。返回相对沙箱路径。
-workspaceRouter.post('/file', async (req, res, next) => {
+workspaceRouter.post('/file', async (req: AuthedRequest, res, next) => {
   try {
     const { name, dataBase64, subdir } = (req.body ?? {}) as { name?: string; dataBase64?: string; subdir?: string }
     if (!dataBase64 || typeof dataBase64 !== 'string') return res.status(400).json({ code: 'BAD_REQUEST', message: '缺少 dataBase64' })
@@ -214,9 +272,14 @@ workspaceRouter.post('/file', async (req, res, next) => {
     if (!buffer.length) return res.status(400).json({ code: 'BAD_REQUEST', message: '文件内容为空或非法 base64' })
 
     // 目标目录固定在 uploads/ 之下（subdir 仅取安全单段，如会话id）
+    const userId = req.user!.uid
     const sub = subdir ? safeName(subdir) : ''
-    const relDir = ['uploads', sub].filter(Boolean).join('/')
-    const dirAbs = safeResolve(relDir)
+    if (sub && !(await getConversation(userId, sub))) {
+      return res.status(403).json({ code: 'CONVERSATION_FORBIDDEN', message: '会话不存在或无权访问' })
+    }
+    const dirAbs = sub
+      ? safeResolveFrom(resolve(ROOT, sub), 'uploads')
+      : safeResolveFrom(privateRoot(userId), 'uploads')
     if (!dirAbs) return res.status(400).json({ code: 'BAD_PATH', message: '非法目标目录' })
     await fs.mkdir(dirAbs, { recursive: true })
 
@@ -231,7 +294,9 @@ workspaceRouter.post('/file', async (req, res, next) => {
     if (!absFile.startsWith(ROOT + sep)) return res.status(400).json({ code: 'BAD_PATH', message: '越界路径' })
     await fs.writeFile(absFile, buffer)
 
-    const relPath = relative(ROOT, absFile).split(sep).join('/')
+    const relPath = sub
+      ? relative(ROOT, absFile).split(sep).join('/')
+      : `private/${relative(privateRoot(userId), absFile).split(sep).join('/')}`
     res.status(201).json({ code: 0, message: 'success', path: relPath, name: fname, size: buffer.length })
   } catch (err) {
     next(err)

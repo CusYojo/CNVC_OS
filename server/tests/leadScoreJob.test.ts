@@ -29,3 +29,20 @@ test('restores persisted score retry metadata safely', () => {
 test('rejects unknown persisted score states', () => {
   assert.equal(readLeadScoreJob({ scoreJob: { status: 'unknown' } }), null)
 })
+
+test('restores a persisted lead score dead letter for explicit manual retry', () => {
+  const restored = readLeadScoreJob({
+    scoreJob: {
+      status: 'dead_letter',
+      attempts: 3,
+      maxAttempts: 3,
+      retryCycles: 1,
+      updatedAt: '2026-08-09T04:00:00.000Z',
+      completedAt: '2026-08-09T04:00:00.000Z',
+      error: 'automatic retry limit exhausted',
+    },
+  })
+  assert.equal(restored?.status, 'dead_letter')
+  assert.equal(restored?.attempts, 3)
+  assert.equal(restored?.error, 'automatic retry limit exhausted')
+})

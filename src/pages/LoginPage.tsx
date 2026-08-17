@@ -2,17 +2,15 @@ import { ArrowRight, CheckCircle2, Eye, EyeOff, ShieldCheck, Sparkles } from 'lu
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../store/useAuthStore'
-import { useAppStore } from '../store/useAppStore'
 import { Button } from '../components/ui'
 import { useToast } from '../components/Toast'
 
 export function LoginPage() {
   const navigate = useNavigate()
   const setAuth = useAuthStore((s) => s.setAuth)
-  const addAudit = useAppStore((s) => s.addAudit)
   const { showToast } = useToast()
-  const [email, setEmail] = useState('lin@cybernaut.com')
-  const [password, setPassword] = useState('123456')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [remember, setRemember] = useState(true)
   const [loading, setLoading] = useState(false)
@@ -24,13 +22,13 @@ export function LoginPage() {
     try {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email, password, remember }),
       })
       const body = await res.json()
-      if (!res.ok || !body.token) throw new Error(body.message || '登录失败')
-      setAuth({ token: body.token, user: body.user })
-      addAudit('账号安全', '登录成功', `${body.user.email} 登录系统`)
+      if (!res.ok || !body.user) throw new Error(body.message || '登录失败')
+      setAuth({ user: body.user })
       showToast('登录成功，欢迎回到智投中台')
       navigate('/')
     } catch (err) {
@@ -71,9 +69,8 @@ export function LoginPage() {
           <form onSubmit={submit} className="space-y-5">
             <label><span className="label">工作邮箱</span><input autoFocus type="email" className="input h-11" value={email} onChange={(event) => setEmail(event.target.value)} /></label>
             <label><span className="label">密码</span><div className="relative"><input type={showPassword ? 'text' : 'password'} className="input h-11 pr-11" value={password} onChange={(event) => setPassword(event.target.value)} /><button type="button" aria-label="显示密码" onClick={() => setShowPassword((value) => !value)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">{showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button></div></label>
-            <div className="flex items-center justify-between text-sm"><label className="flex items-center gap-2 text-slate-600"><input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} className="rounded border-slate-300 text-brand-600" />保持登录</label><button type="button" className="text-brand-600 hover:text-brand-700">忘记密码？</button></div>
+            <div className="flex items-center text-sm"><label className="flex items-center gap-2 text-slate-600"><input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} className="rounded border-slate-300 text-brand-600" />保持登录</label></div>
             <Button type="submit" loading={loading} className="h-11 w-full">登录系统 <ArrowRight className="h-4 w-4" /></Button>
-            <p className="text-xs text-slate-400">演示账号：lin@cybernaut.com · 123456 ｜ admin@cybernaut.com · 123456</p>
           </form>
         </div>
       </section>

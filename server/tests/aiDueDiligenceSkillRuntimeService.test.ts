@@ -5,7 +5,11 @@ import os from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
 import test from 'node:test'
-import { normalizeDueDiligencePackage } from '../src/services/aiDueDiligenceSkillRuntimeService.js'
+import {
+  dueDiligenceAtomicStatements,
+  dueDiligencePackageContract,
+  normalizeDueDiligencePackage,
+} from '../src/services/aiDueDiligenceSkillRuntimeService.js'
 
 const execFileAsync = promisify(execFile)
 const evidence = {
@@ -20,6 +24,25 @@ const evidence = {
     intended_use: '尽调字段、正文事实与投资判断',
   }],
 }
+
+test('尽调证据台账不会被四条前言截断后续工商和交易字段', () => {
+  const statements = dueDiligenceAtomicStatements({
+    sourceType: 'project_file',
+    sourceName: '尽调主档',
+    content: [
+      '资料说明一。',
+      '资料说明二。',
+      '资料说明三。',
+      '资料说明四。',
+      '[entity.basic_registry] legal_name：测试科技有限公司；',
+      'unified_social_credit_code：91110000TEST001；',
+      'registered_capital：人民币1000万元；',
+      'legal_representative：张三；',
+    ].join('\n'),
+  })
+  assert.ok(statements.some((statement) => statement.includes('unified_social_credit_code')))
+  assert.ok(statements.some((statement) => statement.includes('legal_representative')))
+})
 
 function field(sourceGrade: string, data: Record<string, unknown>) {
   return {
@@ -86,6 +109,7 @@ test('尽调运行时将模型常见键名归一为原生审计器契约', async
         meta: { report_title: '错误标题', template_profile: 'deta_v5_up_to_ic' },
         blocks: [
           { type: 'heading', level: 1, text: '公司与股权' },
+          { type: 'paragraph', text: '客户续约的完成标准为连续两个季度达到约定比例。', evidenceIds: ['F001'] },
           {
             type: 'table', title: '公司基本情况', semanticRole: 'company-profile',
             dataFieldIds: ['entity.basic_registry'], columns: ['项目', '内容'],
@@ -110,10 +134,11 @@ test('尽调运行时将模型常见键名归一为原生审计器契约', async
   assert.equal(reportMeta.report_type, 'screening')
   assert.equal('template_profile' in reportMeta, false)
   const blocks = normalized.report.blocks as Array<Record<string, unknown>>
-  assert.deepEqual(blocks[1].headers, ['项目', '内容'])
-  assert.equal(blocks[1].nature, 'fact')
-  assert.equal(blocks[1].semantic_role, 'company_key_facts')
-  assert.deepEqual(blocks[1].data_field_ids, ['entity.basic_registry'])
+  assert.equal(blocks[1].text, '客户续约的达成条件为连续两个季度达到约定比例。')
+  assert.deepEqual(blocks[2].headers, ['项目', '内容'])
+  assert.equal(blocks[2].nature, 'fact')
+  assert.equal(blocks[2].semantic_role, 'company_key_facts')
+  assert.deepEqual(blocks[2].data_field_ids, ['entity.basic_registry'])
 
   const temporary = await mkdtemp(path.join(os.tmpdir(), 'dd-runtime-test-'))
   const dataPath = path.join(temporary, 'diligence-data.json')
@@ -134,4 +159,58 @@ test('尽调运行时将模型常见键名归一为原生审计器契约', async
   await execFileAsync('python3', [
     path.join(scripts, 'audit_report_content.py'), reportPath, '--evidence', evidencePath,
   ])
+})
+
+test('尽调字段契约显式列出关键表格列并归一等价别名', () => {
+  const contract = dueDiligencePackageContract('business_dd')
+  assert.match(contract, /customer_closed_loop/)
+  assert.match(contract, /contract/)
+  assert.match(contract, /competitor_matrix/)
+  assert.match(contract, /strength/)
+
+  const normalized = normalizeDueDiligencePackage({
+    generated: {
+      reportMode: 'business_dd',
+      diligenceData: {
+        fields: [{
+          id: 'business.customer_closed_loop',
+          status: 'supported',
+          source_grade: 'primary_document',
+          evidence_ids: ['F001'],
+          data: { rows: [{
+            customer: '客户甲', contract_no: 'C-001', contract_amount: 30,
+            delivery_date: '2026-01-01', acceptance_date: '2026-01-02',
+            recognized_revenue: 30, invoiced_amount: 30, cash_received: 30,
+          }] },
+        }, {
+          id: 'market.competitor_matrix',
+          status: 'supported',
+          source_grade: 'third_party_primary',
+          evidence_ids: ['F001'],
+          data: { rows: [{
+            competitor: '竞品甲', target_customer: '制造企业',
+            relative_strength: '交付快', relative_limitation: '定制弱',
+          }] },
+        }],
+      },
+      report: { blocks: [] },
+    },
+    project: { name: '测试项目', companyName: '测试科技有限公司' },
+    evidence,
+    sourceCutoffDate: '2026-08-07',
+    desiredMode: 'business_dd',
+  })
+  const fields = normalized.diligenceData.fields as Array<Record<string, unknown>>
+  const closedLoop = (fields[0].data as { rows: Array<Record<string, unknown>> }).rows[0]
+  assert.equal(closedLoop.contract, 'C-001')
+  assert.equal(closedLoop.amount, 30)
+  assert.equal(closedLoop.delivery, '2026-01-01')
+  assert.equal(closedLoop.acceptance, '2026-01-02')
+  assert.equal(closedLoop.revenue, 30)
+  assert.equal(closedLoop.invoice, 30)
+  assert.equal(closedLoop.cash, 30)
+  const competitor = (fields[1].data as { rows: Array<Record<string, unknown>> }).rows[0]
+  assert.equal(competitor.customer, '制造企业')
+  assert.equal(competitor.strength, '交付快')
+  assert.equal(competitor.weakness, '定制弱')
 })

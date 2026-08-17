@@ -4,15 +4,20 @@ import { createReadStream } from 'node:fs'
 import { mkdir, stat, writeFile } from 'node:fs/promises'
 import { resolve as pathResolve, sep as pathSep, extname } from 'node:path'
 import type { AuthedRequest } from '../middleware/requireAuth.js'
-import { FLUE_BASE_URL } from '../config/agentRuntime.js'
 import { ingestFile } from '../services/ragService.js'
 import { db } from '../db/client.js'
 import { projectFiles } from '../db/schema.js'
 import { eq } from 'drizzle-orm'
 import { ProjectCreateSchema } from '../schemas/project.js'
+import { requireSystemAdmin } from '../middleware/requireAuth.js'
+import { listProjectMembers, replaceProjectMembers } from '../services/identityAdministrationService.js'
 import {
-  addFile, createProject, finishFileParse, getFile, getProject, listFiles, listProjects, moveProjectStage, replaceFileContent, setFileStoragePath, updateProject, deleteProject, pinProject, listAllFiles } from '../services/projectService.js'
-import { openProjectFile, projectFileContentType, removeProjectFile, saveProjectFile } from '../services/projectFileStorageService.js'
+  addFile, createProject, getFile, getFileVersion, getProject, listFiles, listFileVersions, listProjects, moveProjectStage, replaceFileContent, setFileStoragePath, updateProject, deleteProject, pinProject, listAllFiles } from '../services/projectService.js'
+import { openProjectFile, projectFileContentType, projectFilePreviewContentType, removeProjectFile, saveProjectFileRevision } from '../services/projectFileStorageService.js'
+import { requireAccessibleProject } from '../services/projectAccessService.js'
+import { decodeAndValidateProjectFile } from '../security/projectFileValidation.js'
+import { enqueueProjectScoreJob, getProjectScoreJob } from '../services/projectScoreJobService.js'
+import { writeAudit } from '../services/auditService.js'
 
 export const projectsRouter = Router()
 const routeId = (value: string | string[]) => z.string().min(1).parse(value)
@@ -30,17 +35,23 @@ const ListSchema = z.object({
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
 })
 
-projectsRouter.get('/', async (req, res, next) => {
+const ProjectPatchSchema = ProjectCreateSchema.partial().extend({
+  expectedVersion: z.number().int().positive(),
+}).strict()
+
+projectsRouter.get('/', async (req: AuthedRequest, res, next) => {
   try {
     const args = ListSchema.parse(req.query)
-    const data = await listProjects(args)
+    const data = await listProjects(args, req.user!.uid)
     res.json(data)
   } catch (err) { next(err) }
 })
 
-projectsRouter.get('/:id', async (req, res, next) => {
+projectsRouter.get('/:id', async (req: AuthedRequest, res, next) => {
   try {
-    const row = await getProject(routeId(req.params.id))
+    const projectId = routeId(req.params.id)
+    await requireAccessibleProject(req.user!.uid, projectId)
+    const row = await getProject(projectId)
     if (!row) { res.status(404).json({ code: 'NOT_FOUND', message: '项目不存在', details: null }); return }
     res.json(row)
   } catch (err) { next(err) }
@@ -49,135 +60,137 @@ projectsRouter.get('/:id', async (req, res, next) => {
 projectsRouter.post('/', async (req: AuthedRequest, res, next) => {
   try {
     const body = ProjectCreateSchema.parse(req.body)
-    const row = await createProject(body as never, req.user!.uid)
+    // Every new project starts with the authenticated creator as its sole
+    // stable owner. Later assignment must use the audited admin member route.
+    const row = await createProject({
+      ...body,
+      owner: req.user!.name,
+      collaborators: [],
+    } as never, req.user!.uid)
     res.status(201).json(row)
   } catch (err) { next(err) }
 })
 
 projectsRouter.patch('/:id', async (req: AuthedRequest, res, next) => {
   try {
-    const row = await updateProject(routeId(req.params.id), req.body, req.user!.uid)
+    const projectId = routeId(req.params.id)
+    await requireAccessibleProject(req.user!.uid, projectId)
+    if (
+      req.body
+      && typeof req.body === 'object'
+      && ('owner' in req.body || 'ownerUserId' in req.body || 'collaborators' in req.body)
+    ) {
+      const admin = req.user!.role === '系统管理员'
+      throw Object.assign(new Error(admin
+        ? '请通过项目成员管理接口修改负责人和协作成员'
+        : '项目负责人和协作成员只能由系统管理员修改'), {
+        status: admin ? 409 : 403,
+        code: admin ? 'PROJECT_MEMBERSHIP_ENDPOINT_REQUIRED' : 'PROJECT_MEMBERSHIP_FORBIDDEN',
+      })
+    }
+    const { expectedVersion, ...patch } = ProjectPatchSchema.parse(req.body)
+    const row = await updateProject(projectId, patch, req.user!.uid, expectedVersion)
     if (!row) { res.status(404).json({ code: 'NOT_FOUND', message: '项目不存在', details: null }); return }
     res.json(row)
   } catch (err) { next(err) }
 })
 
+projectsRouter.get('/:id/members', async (req: AuthedRequest, res, next) => {
+  try {
+    const projectId = routeId(req.params.id)
+    await requireAccessibleProject(req.user!.uid, projectId)
+    const list = await listProjectMembers(projectId)
+    res.json({ list, total: list.length })
+  } catch (error) { next(error) }
+})
+
+const ReplaceProjectMembersSchema = z.object({
+  ownerUserId: z.string().uuid(),
+  collaboratorUserIds: z.array(z.string().uuid()).max(100).default([]),
+}).strict()
+
+projectsRouter.put('/:id/members', requireSystemAdmin, async (req: AuthedRequest, res, next) => {
+  try {
+    const projectId = routeId(req.params.id)
+    const body = ReplaceProjectMembersSchema.parse(req.body)
+    const result = await replaceProjectMembers({ projectId, ...body }, {
+      userId: req.user!.uid,
+      userName: req.user!.name,
+    })
+    res.json(result)
+  } catch (error) { next(error) }
+})
+
 projectsRouter.post('/:id/stage', async (req: AuthedRequest, res, next) => {
   try {
-    const { stage, comment } = z.object({ stage: z.string(), comment: z.string().default('') }).parse(req.body)
-    const row = await moveProjectStage(routeId(req.params.id), stage, req.user!.uid)
+    const { stage, comment, expectedVersion } = z.object({
+      stage: z.string(), comment: z.string().default(''), expectedVersion: z.number().int().positive(),
+    }).strict().parse(req.body)
+    const projectId = routeId(req.params.id)
+    await requireAccessibleProject(req.user!.uid, projectId)
+    const row = await moveProjectStage(projectId, stage, req.user!.uid, expectedVersion)
     res.json({ ok: true, project: row })
   } catch (err) { next(err) }
 })
 
-// 项目评分：复用公有线索池同款 score-project workflow（7维+竞品+同赛道分位），异步存 projects.scoring
-const projScoreStatus = new Map<string, { status: 'running' | 'done' | 'failed'; error?: string; startedAt: number }>()
-async function doScoreProject(projectId: string): Promise<void> {
-  try {
-    const { getProject, listProjects, saveProjectScoring } = await import('../services/projectService.js')
-    const proj = await getProject(projectId)
-    if (!proj) throw new Error('项目不存在')
-    // 读取该项目知识库(RAG)全部资料，作为评分证据 —— 上传的文档必须真正参与评分
-    const { db } = await import('../db/client.js')
-    const { knowledgeChunks } = await import('../db/schema.js')
-    const { and, eq } = await import('drizzle-orm')
-    const chunks = await db.select().from(knowledgeChunks).where(and(eq(knowledgeChunks.scope, 'project'), eq(knowledgeChunks.refId, projectId)))
-    const kbText = chunks.map((c) => c.content).join('\n').slice(0, 24000)
-    const kbSources = [...new Set(chunks.map((c) => c.sourceName).filter(Boolean))]
-    const summaryWithKb = [proj.summary ?? '', kbText ? `\n\n=== 知识库资料(项目已上传文档/纪要，评分请以此为准) ===\n${kbText}` : ''].filter(Boolean).join('')
-    const resp = await fetch(`${FLUE_BASE_URL}/workflows/score-project?wait=result`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        projectName: proj.name,
-        industry: proj.industry ?? undefined,
-        round: proj.round ?? undefined,
-        valuation: proj.valuation ?? undefined,
-        financing: proj.financing ?? undefined,
-        summary: summaryWithKb || undefined,
-        team: proj.team ?? undefined,
-        sources: kbSources.length ? kbSources : undefined,
-      }),
-      signal: AbortSignal.timeout(600000),
-    })
-    if (!resp.ok) throw new Error(`评分服务 ${resp.status}`)
-    const { result } = await resp.json() as { result?: { total: number; verdict: string; overall_comment: string; dimensions: unknown[] } }
-    if (!result) throw new Error('评分服务返回空')
-    // 同赛道分位：与同 industry 的已评分项目比
-    const all = await listProjects({ page: 1, pageSize: 500 })
-    const peers = (all.list as Array<{ industry?: string; id: string; scoring?: { total?: number } }>).filter((p) => p.industry === proj.industry && p.id !== projectId && p.scoring?.total != null).map((p) => p.scoring!.total as number)
-    const allScores = [...peers, result.total].sort((a, b) => b - a)
-    const rankIndex = allScores.indexOf(result.total)
-    const percentile = allScores.length > 1 ? Math.round((1 - rankIndex / (allScores.length - 1)) * 100) : 100
-    const scoring = { ...result, rank: { peers_count: allScores.length, position: rankIndex + 1, percentile, industry: proj.industry ?? '未分类' }, scored_at: new Date().toISOString() }
-    await saveProjectScoring(projectId, scoring, result.total)
-    projScoreStatus.set(projectId, { status: 'done', startedAt: projScoreStatus.get(projectId)?.startedAt ?? Date.now() })
-  } catch (err) {
-    projScoreStatus.set(projectId, { status: 'failed', error: (err as Error).message, startedAt: projScoreStatus.get(projectId)?.startedAt ?? Date.now() })
-  }
-}
+// 项目评分复用公有线索池同款 score-project Agent，但执行状态由 MySQL
+// 租约队列持久化；路由进程不再保存易丢失、不可跨实例协调的 Map。
 projectsRouter.post('/:id/score', async (req: AuthedRequest, res, next) => {
   try {
     const projectId = routeId(req.params.id)
-    const cur = projScoreStatus.get(projectId)
-    if (cur?.status === 'running') { res.json({ code: 0, message: 'running', status: 'running' }); return }
-    projScoreStatus.set(projectId, { status: 'running', startedAt: Date.now() })
-    void doScoreProject(projectId)
-    res.json({ code: 0, message: 'started', status: 'running' })
+    await requireAccessibleProject(req.user!.uid, projectId)
+    const enqueued = await enqueueProjectScoreJob(projectId)
+    res.json({ code: 0, message: enqueued ? 'started' : 'running', status: 'running' })
   } catch (err) { next(err) }
 })
-projectsRouter.get('/:id/score', async (req, res, next) => {
+projectsRouter.get('/:id/score', async (req: AuthedRequest, res, next) => {
   try {
-    const { getProject } = await import('../services/projectService.js')
     const projectId = routeId(req.params.id)
+    await requireAccessibleProject(req.user!.uid, projectId)
     const proj = await getProject(projectId)
     if (!proj) { res.status(404).json({ code: 'NOT_FOUND', message: '项目不存在' }); return }
-    const st = projScoreStatus.get(projectId)
+    const job = await getProjectScoreJob(projectId)
     const scoring = (proj as { scoring?: unknown }).scoring
-    res.json({ code: 0, status: scoring ? 'done' : (st?.status ?? 'idle'), error: st?.error, scoring: scoring ?? null })
+    const status = job && ['queued', 'running', 'retrying'].includes(job.status)
+      ? 'running'
+      : job?.status === 'dead_letter'
+        ? 'failed'
+        : scoring || job?.status === 'done'
+          ? 'done'
+          : 'idle'
+    res.json({ code: 0, status, error: job?.last_error ?? undefined, scoring: scoring ?? null })
   } catch (err) { next(err) }
 })
 projectsRouter.delete('/:id', async (req: AuthedRequest, res, next) => {
   try {
-    const row = await deleteProject(routeId(req.params.id), req.user!.uid)
+    const projectId = routeId(req.params.id)
+    await requireAccessibleProject(req.user!.uid, projectId)
+    const row = await deleteProject(projectId, req.user!.uid)
     if (!row) { res.status(404).json({ code: 'NOT_FOUND', message: '项目不存在' }); return }
     res.json({ code: 0, message: 'success', deleted: row.id })
   } catch (err) { next(err) }
 })
 projectsRouter.post('/:id/pin', async (req: AuthedRequest, res, next) => {
   try {
-    const pinned = req.body?.pinned !== false
-    const row = await pinProject(routeId(req.params.id), pinned, req.user!.uid)
+    const { pinned, expectedVersion } = z.object({
+      pinned: z.boolean().default(true), expectedVersion: z.number().int().positive(),
+    }).strict().parse(req.body ?? {})
+    const projectId = routeId(req.params.id)
+    await requireAccessibleProject(req.user!.uid, projectId)
+    const row = await pinProject(projectId, pinned, req.user!.uid, expectedVersion)
     if (!row) { res.status(404).json({ code: 'NOT_FOUND', message: '项目不存在' }); return }
-    res.json({ code: 0, message: 'success', pinned: row.pinned })
+    res.json({ code: 0, message: 'success', pinned: row.pinned, version: row.version })
   } catch (err) { next(err) }
 })
-projectsRouter.get('/files/all', async (_req, res, next) => {
-  try { const list = await listAllFiles(); res.json({ list, total: list.length }) } catch (err) { next(err) }
+projectsRouter.get('/files/all', async (req: AuthedRequest, res, next) => {
+  try { const list = await listAllFiles(req.user!.uid); res.json({ list, total: list.length }) } catch (err) { next(err) }
 })
-projectsRouter.get('/:id/files', async (req, res, next) => {
+projectsRouter.get('/:id/files', async (req: AuthedRequest, res, next) => {
   try {
     const projectId = routeId(req.params.id)
+    await requireAccessibleProject(req.user!.uid, projectId)
     const list = await listFiles(projectId)
     res.json({ list, total: list.length })
-  } catch (err) { next(err) }
-})
-
-const FileSchema = z.object({
-  projectId: z.string(),
-  name: z.string(),
-  type: z.string(),
-  category: z.string(),
-  size: z.string().optional(),
-  uploader: z.string(),
-  parseStatus: z.string().default('解析中'),
-  visibility: z.string().default('项目成员'),
-})
-
-projectsRouter.post('/files', async (req: AuthedRequest, res, next) => {
-  try {
-    const body = FileSchema.parse(req.body)
-    const row = await addFile(body as never, req.user!.uid)
-    res.status(201).json(row)
   } catch (err) { next(err) }
 })
 
@@ -194,29 +207,30 @@ projectsRouter.post('/files/upload', async (req: AuthedRequest, res, next) => {
       dataBase64: z.string().min(1),
       force: z.boolean().optional(),
     }).parse(req.body)
+    await requireAccessibleProject(req.user!.uid, body.projectId)
     // 查重：同项目下同名文件已存在则拦截（除非 force）
     if (!body.force) {
       const existing = (await listFiles(body.projectId)).find((f) => f.name === body.name)
       if (existing) { res.status(409).json({ code: 'DUPLICATE', message: `「${body.name}」已在该项目资料库中（${existing.parseStatus}），请勿重复录入。如需覆盖请确认。`, existingId: existing.id }); return }
     }
-    const buffer = Buffer.from(body.dataBase64, 'base64')
+    const validated = await decodeAndValidateProjectFile({ name: body.name, dataBase64: body.dataBase64, declaredType: body.type })
+    const buffer = validated.buffer
     const sizeMb = (buffer.length / 1024 / 1024).toFixed(2) + ' MB'
     console.log(`[files/upload] project=${body.projectId} name=${body.name} type=${body.type} size=${sizeMb}`)
     // project_files.type 是 varchar(16)：pptx/xlsx/docx 的浏览器 MIME 长达 60+ 字符会触发
     // PG 22001「value too long」。归一为短标签（优先扩展名，回退 MIME 子类型），并硬截断 16。
-    const extLabel = (body.name.split('.').pop() || '').toUpperCase()
-    const rawType = extLabel && extLabel.length <= 8 ? extLabel : (body.type.split('/')[1] || body.type)
-    const safeType = (rawType || 'FILE').slice(0, 16)
+    const safeType = validated.typeLabel
     const row = await addFile({
       projectId: body.projectId, name: body.name, type: safeType, category: body.category,
-      size: sizeMb, uploader: body.uploader, parseStatus: '解析中', visibility: body.visibility,
+      size: sizeMb, byteSize: validated.byteSize, sha256: validated.sha256,
+      uploader: body.uploader, parseStatus: '解析中', visibility: body.visibility,
     } as never, req.user!.uid)
     // 原始字节必须先持久化，资料库下载与后台解析才能共享同一份可信文件。
     // storagePath 只保存相对路径，真实路径被限制在 PROJECT_FILE_ROOT 下。
     let storagePath: string | undefined
     try {
-      storagePath = await saveProjectFile(body.projectId, row.id, buffer)
-      await setFileStoragePath(row.id, storagePath)
+      storagePath = await saveProjectFileRevision(body.projectId, row.id, buffer)
+      await setFileStoragePath(row.id, storagePath, req.user!.uid)
     } catch (error) {
       const { deleteFile } = await import('../services/projectService.js')
       await deleteFile(row.id).catch(() => {})
@@ -227,7 +241,7 @@ projectsRouter.post('/files/upload', async (req: AuthedRequest, res, next) => {
     // 原来 await ingestFile 同步等解析完才返回：大 PDF 走 OCR 要几分钟、并行多文件更慢，
     // 前端 fetch 无超时会一直转圈"卡住"。改为不阻塞上传，前端拿到"解析中"即结束上传态，
     // 解析完成后 ingestFile 内部会 UPDATE parse_status→成功/失败，前端刷新/轮询即可看到。
-    void ingestFile(row.id, body.projectId, body.name, buffer, body.type)
+    void ingestFile(row.id, body.projectId, body.name, buffer, validated.contentType)
       .catch((e) => console.error('[ingestFile 后台解析失败]', row.id, body.name, (e as Error).message))
     const { storagePath: _storagePath, ...publicFile } = row
     res.status(201).json({ file: { ...publicFile, hasOriginal: true }, ingest: { ok: true, async: true, status: '解析中' } })
@@ -242,6 +256,7 @@ projectsRouter.post('/files/:id/content', async (req: AuthedRequest, res, next) 
       res.status(404).json({ code: 'NOT_FOUND', message: '资料记录不存在', details: null })
       return
     }
+    await requireAccessibleProject(req.user!.uid, file.projectId)
     const body = z.object({
       name: z.string().min(1),
       type: z.string().optional(),
@@ -251,19 +266,21 @@ projectsRouter.post('/files/:id/content', async (req: AuthedRequest, res, next) 
       res.status(400).json({ code: 'FILE_NAME_MISMATCH', message: `请选择原文件「${file.name}」`, details: null })
       return
     }
-    const buffer = Buffer.from(body.dataBase64, 'base64')
-    if (buffer.length > 100 * 1024 * 1024) {
-      res.status(413).json({ code: 'PAYLOAD_TOO_LARGE', message: '文件不能超过 100MB', details: null })
-      return
-    }
-    const storagePath = await saveProjectFile(file.projectId, file.id, buffer)
+    const validated = await decodeAndValidateProjectFile({ name: body.name, dataBase64: body.dataBase64, declaredType: body.type || file.type })
+    const buffer = validated.buffer
+    const storagePath = await saveProjectFileRevision(file.projectId, file.id, buffer)
     const size = `${(buffer.length / 1024 / 1024).toFixed(2)} MB`
-    const updated = await replaceFileContent(file.id, storagePath, size, req.user!.uid)
+    const updated = await replaceFileContent(
+      file.id, storagePath, size, validated.byteSize, validated.sha256, req.user!.uid,
+    ).catch(async (error) => {
+      await removeProjectFile(storagePath).catch(() => {})
+      throw error
+    })
     if (!updated) {
       res.status(404).json({ code: 'NOT_FOUND', message: '资料记录不存在', details: null })
       return
     }
-    void ingestFile(file.id, file.projectId, file.name, buffer, body.type || file.type)
+    void ingestFile(file.id, file.projectId, file.name, buffer, validated.contentType)
       .catch((error) => console.error('[补传原文件解析失败]', file.id, file.name, (error as Error).message))
     res.json({ file: updated, ingest: { ok: true, async: true, status: '解析中' } })
   } catch (error) { next(error) }
@@ -276,6 +293,7 @@ projectsRouter.get('/files/:id/download', async (req: AuthedRequest, res, next) 
       res.status(404).json({ code: 'NOT_FOUND', message: '文件不存在', details: null })
       return
     }
+    await requireAccessibleProject(req.user!.uid, file.projectId)
     if (!file.storagePath) {
       res.status(404).json({
         code: 'FILE_CONTENT_NOT_FOUND',
@@ -285,6 +303,11 @@ projectsRouter.get('/files/:id/download', async (req: AuthedRequest, res, next) 
       return
     }
     const result = await openProjectFile(file.storagePath)
+    await writeAudit({
+      userId: req.user!.uid, userName: req.user!.name, module: '项目资料', action: '下载项目资料',
+      target: `project-file:${file.id};project:${file.projectId};version:${file.version};bytes:${result.size}`,
+      ip: req.ip,
+    })
     res.setHeader('Content-Type', projectFileContentType(file.name))
     res.setHeader('Content-Length', String(result.size))
     res.setHeader('Content-Disposition', contentDisposition(file.name))
@@ -294,19 +317,80 @@ projectsRouter.get('/files/:id/download', async (req: AuthedRequest, res, next) 
   } catch (error) { next(error) }
 })
 
+projectsRouter.get('/files/:id/preview', async (req: AuthedRequest, res, next) => {
+  try {
+    const file = await getFile(routeId(req.params.id))
+    if (!file) { res.status(404).json({ code: 'NOT_FOUND', message: '文件不存在', details: null }); return }
+    await requireAccessibleProject(req.user!.uid, file.projectId)
+    if (!file.storagePath) {
+      res.status(404).json({ code: 'FILE_CONTENT_NOT_FOUND', message: '该历史资料未留存原始文件', details: null })
+      return
+    }
+    const contentType = projectFilePreviewContentType(file.name)
+    if (!contentType) {
+      res.status(415).json({ code: 'FILE_PREVIEW_UNSUPPORTED', message: '该格式请下载后使用本地软件查看', details: null })
+      return
+    }
+    const result = await openProjectFile(file.storagePath)
+    await writeAudit({
+      userId: req.user!.uid, userName: req.user!.name, module: '项目资料', action: '预览项目资料',
+      target: `project-file:${file.id};project:${file.projectId};version:${file.version};bytes:${result.size}`,
+      ip: req.ip,
+    })
+    res.setHeader('Content-Type', contentType)
+    res.setHeader('Content-Length', String(result.size))
+    res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(file.name)}`)
+    res.setHeader('Cache-Control', 'private, no-store')
+    res.setHeader('X-Content-Type-Options', 'nosniff')
+    res.setHeader('Content-Security-Policy', "sandbox; default-src 'none'; img-src data:")
+    result.stream.on('error', next)
+    result.stream.pipe(res)
+  } catch (error) { next(error) }
+})
+
+projectsRouter.get('/files/:id/versions', async (req: AuthedRequest, res, next) => {
+  try {
+    const file = await getFile(routeId(req.params.id))
+    if (!file) { res.status(404).json({ code: 'NOT_FOUND', message: '文件不存在', details: null }); return }
+    await requireAccessibleProject(req.user!.uid, file.projectId)
+    res.json({ list: await listFileVersions(file.id), currentVersion: file.version })
+  } catch (error) { next(error) }
+})
+
+projectsRouter.get('/files/:id/versions/:version/download', async (req: AuthedRequest, res, next) => {
+  try {
+    const file = await getFile(routeId(req.params.id))
+    if (!file) { res.status(404).json({ code: 'NOT_FOUND', message: '文件不存在', details: null }); return }
+    await requireAccessibleProject(req.user!.uid, file.projectId)
+    const version = z.coerce.number().int().min(1).parse(req.params.version)
+    const revision = await getFileVersion(file.id, version)
+    if (!revision) { res.status(404).json({ code: 'NOT_FOUND', message: '文件版本不存在', details: null }); return }
+    const result = await openProjectFile(revision.storagePath)
+    await writeAudit({
+      userId: req.user!.uid, userName: req.user!.name, module: '项目资料', action: '下载项目资料历史版本',
+      target: `project-file:${file.id};project:${file.projectId};version:${version};bytes:${result.size}`,
+      ip: req.ip,
+    })
+    res.setHeader('Content-Type', projectFileContentType(file.name))
+    res.setHeader('Content-Length', String(result.size))
+    res.setHeader('Content-Disposition', contentDisposition(file.name))
+    res.setHeader('Cache-Control', 'private, no-store')
+    res.setHeader('X-File-Version', String(version))
+    res.setHeader('X-Content-SHA256', revision.sha256 || '')
+    result.stream.on('error', next)
+    result.stream.pipe(res)
+  } catch (error) { next(error) }
+})
+
 projectsRouter.delete('/files/:id', async (req: AuthedRequest, res, next) => {
   try {
     const { deleteFile } = await import('../services/projectService.js')
     const fileId = routeId(req.params.id)
-    const ok = await deleteFile(fileId)
+    const file = await getFile(fileId)
+    if (!file) { res.status(404).json({ code: 'NOT_FOUND', message: '文件不存在' }); return }
+    await requireAccessibleProject(req.user!.uid, file.projectId)
+    const ok = await deleteFile(fileId, req.user!.uid)
     if (!ok) { res.status(404).json({ code: 'NOT_FOUND', message: '文件不存在' }); return }
     res.json({ code: 0, message: 'success', deleted: fileId })
-  } catch (err) { next(err) }
-})
-
-projectsRouter.post('/files/:id/parse-finish', async (req, res, next) => {
-  try {
-    const row = await finishFileParse(routeId(req.params.id))
-    res.json(row)
   } catch (err) { next(err) }
 })

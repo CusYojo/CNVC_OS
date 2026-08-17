@@ -1,3 +1,4 @@
+import '../security/hardenImageSizeRuntime.js'
 import { Document, HeadingLevel, Packer, Paragraph, Table, TableCell, TableRow, TextRun, WidthType } from 'docx'
 import ExcelJS from 'exceljs'
 import PptxGenJS from 'pptxgenjs'
@@ -5,16 +6,21 @@ import { existsSync } from 'node:fs'
 import { mkdir } from 'node:fs/promises'
 import path from 'node:path'
 import type { MaterialRequest } from '../models/types.js'
+import { formatShanghaiDate } from '../utils/shanghaiTime.js'
 
-const generatedDir = path.resolve(process.cwd(), 'server/generated')
+const generatedRoot = path.resolve(process.cwd(), 'server/generated')
 
-async function ensureDir() {
-  await mkdir(generatedDir, { recursive: true })
+function userGeneratedDir(userId: string) {
+  return path.resolve(generatedRoot, userId)
+}
+
+async function ensureDir(userId: string) {
+  await mkdir(userGeneratedDir(userId), { recursive: true })
 }
 
 const safeName = (value: string) => value.replace(/[\\/:*?"<>|]/g, '-').slice(0, 40)
 
-async function generatePptx(request: MaterialRequest) {
+async function generatePptx(request: MaterialRequest, outputDir: string) {
   const pptx = new PptxGenJS()
   pptx.layout = 'LAYOUT_WIDE'
   pptx.author = '浙江赛智伯乐股权投资管理有限公司投资中台'
@@ -239,7 +245,7 @@ async function generatePptx(request: MaterialRequest) {
   cover.addText(request.project.name, { x: 2.9, y: 2.0, w: 8.9, h: 0.7, color: ink, fontSize: 30, bold: true, margin: 0, fit: 'shrink' })
   cover.addText('投资建议书（内部讨论稿）', { x: 2.92, y: 2.82, w: 5.6, h: 0.42, color: blue, fontSize: 18, bold: true, margin: 0 })
   cover.addText(request.project.summary, { x: 2.92, y: 3.5, w: 8.65, h: 1.0, color: muted, fontSize: 13.5, breakLine: false, margin: 0.02, fit: 'shrink', valign: 'middle' })
-  cover.addText(`${request.project.industry} · 当前阶段 ${request.project.stage} · ${new Date().toLocaleDateString('zh-CN')}`, { x: 2.92, y: 5.3, w: 7.5, h: 0.3, color: '6B7A90', fontSize: 10.5, margin: 0 })
+  cover.addText(`${request.project.industry} · 当前阶段 ${request.project.stage} · ${formatShanghaiDate(new Date())}`, { x: 2.92, y: 5.3, w: 7.5, h: 0.3, color: '6B7A90', fontSize: 10.5, margin: 0 })
   cover.addText('重要口径：企业自述、公开披露与待核验信息分开呈现；本文件不构成最终投资决策。', { x: 2.92, y: 6.38, w: 8.6, h: 0.36, color: '9A6B1B', fontSize: 8.5, margin: 0.02, fit: 'shrink' })
   cover.addText('内部资料 · 严禁外传', { x: 10.5, y: 7.05, w: 1.8, h: 0.2, color: '9AA6B6', fontSize: 7.5, align: 'right', margin: 0 })
 
@@ -273,11 +279,11 @@ async function generatePptx(request: MaterialRequest) {
   })
 
   const fileName = `${safeName(request.project.name)}_投资建议书_${Date.now()}.pptx`
-  await pptx.writeFile({ fileName: path.join(generatedDir, fileName) })
+  await pptx.writeFile({ fileName: path.join(outputDir, fileName) })
   return fileName
 }
 
-async function generateDocx(request: MaterialRequest) {
+async function generateDocx(request: MaterialRequest, outputDir: string) {
   const sections = request.outline.map((title, index) => [
     new Paragraph({ text: `${index + 1}. ${title}`, heading: HeadingLevel.HEADING_1, spacing: { before: 360, after: 180 } }),
     new Paragraph({
@@ -310,11 +316,11 @@ async function generateDocx(request: MaterialRequest) {
   })
   const fileName = `${safeName(request.project.name)}_投资备忘录_${Date.now()}.docx`
   const buffer = await Packer.toBuffer(doc)
-  await import('node:fs/promises').then((fs) => fs.writeFile(path.join(generatedDir, fileName), buffer))
+  await import('node:fs/promises').then((fs) => fs.writeFile(path.join(outputDir, fileName), buffer))
   return fileName
 }
 
-async function generateXlsx(request: MaterialRequest) {
+async function generateXlsx(request: MaterialRequest, outputDir: string) {
   const workbook = new ExcelJS.Workbook()
   workbook.creator = '浙江赛智伯乐股权投资管理有限公司投资中台'
   const summary = workbook.addWorksheet('项目概览')
@@ -350,16 +356,17 @@ async function generateXlsx(request: MaterialRequest) {
   financial.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF3977E8' } }
   financial.views = [{ state: 'frozen', ySplit: 1 }]
   const fileName = `${safeName(request.project.name)}_财务分析_${Date.now()}.xlsx`
-  await workbook.xlsx.writeFile(path.join(generatedDir, fileName))
+  await workbook.xlsx.writeFile(path.join(outputDir, fileName))
   return fileName
 }
 
-export async function generateMaterial(request: MaterialRequest) {
-  await ensureDir()
+export async function generateMaterial(request: MaterialRequest, userId: string) {
+  await ensureDir(userId)
+  const outputDir = userGeneratedDir(userId)
   const fileName = request.type === 'xlsx'
-    ? await generateXlsx(request)
+    ? await generateXlsx(request, outputDir)
     : request.type === 'docx'
-      ? await generateDocx(request)
-      : await generatePptx(request)
-  return { fileName, url: `/generated/${encodeURIComponent(fileName)}` }
+      ? await generateDocx(request, outputDir)
+      : await generatePptx(request, outputDir)
+  return { fileName, url: `/api/generated/${encodeURIComponent(fileName)}` }
 }

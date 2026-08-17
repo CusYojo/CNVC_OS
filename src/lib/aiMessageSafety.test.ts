@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { normalizeFlueMessages } from './aiMessageSafety.js'
+import { normalizeAgentMessages } from './aiMessageSafety.js'
 
 test('filters empty assistant retry messages while retaining visible messages', () => {
-  const messages = normalizeFlueMessages([
+  const messages = normalizeAgentMessages([
     { id: 'user', role: 'user', parts: [{ type: 'text', text: '生成五页 PPT' }] },
     { id: 'empty-parts', role: 'assistant', parts: [] },
     { id: 'empty-text', role: 'assistant', parts: [{ type: 'text', text: '   ' }] },
@@ -15,7 +15,7 @@ test('filters empty assistant retry messages while retaining visible messages', 
 })
 
 test('retains malformed assistant messages so the diagnostic remains visible', () => {
-  const messages = normalizeFlueMessages([
+  const messages = normalizeAgentMessages([
     { id: 'malformed', role: 'assistant' },
   ])
 

@@ -1,4 +1,4 @@
-export type SafeFluePart = {
+export type SafeAgentPart = {
   type: string
   text?: string
   url?: string
@@ -13,10 +13,10 @@ export type SafeFluePart = {
   malformed?: boolean
 }
 
-export type SafeFlueMessage = {
+export type SafeAgentMessage = {
   id: string
   role: 'user' | 'assistant'
-  parts: SafeFluePart[]
+  parts: SafeAgentPart[]
   timestamp?: string
   malformed: boolean
 }
@@ -33,7 +33,7 @@ function primitiveText(value: unknown): string | null {
 
 /**
  * JSON.stringify 会在循环引用、BigInt、异常 getter / Proxy 等输入上抛错。
- * Flue 工具输入和输出来自外部运行时，渲染前必须使用这个无异常版本。
+ * Agent 工具输入和输出来自模型运行时，渲染前必须使用这个无异常版本。
  */
 export function safeStringify(value: unknown, maxLength = 4000, space = 2): string {
   try {
@@ -74,7 +74,7 @@ function safeProperty(record: Record<string, unknown>, key: string): unknown {
   }
 }
 
-export function normalizeFluePart(value: unknown, index = 0): SafeFluePart {
+export function normalizeAgentPart(value: unknown, index = 0): SafeAgentPart {
   if (!isRecord(value)) {
     return {
       type: 'unsupported',
@@ -124,12 +124,12 @@ export function normalizeFluePart(value: unknown, index = 0): SafeFluePart {
   }
 }
 
-export function normalizeFlueMessage(value: unknown, index = 0): SafeFlueMessage {
+export function normalizeAgentMessage(value: unknown, index = 0): SafeAgentMessage {
   if (!isRecord(value)) {
     return {
       id: `invalid-message-${index}`,
       role: 'assistant',
-      parts: [normalizeFluePart(value)],
+      parts: [normalizeAgentPart(value)],
       malformed: true,
     }
   }
@@ -141,11 +141,11 @@ export function normalizeFlueMessage(value: unknown, index = 0): SafeFlueMessage
   const rawTimestamp = isRecord(rawMetadata)
     ? safeProperty(rawMetadata, 'timestamp')
     : undefined
-  let parts: SafeFluePart[]
+  let parts: SafeAgentPart[]
   let malformed = false
 
   if (Array.isArray(rawParts)) {
-    parts = rawParts.map((part, partIndex) => normalizeFluePart(part, partIndex))
+    parts = rawParts.map((part, partIndex) => normalizeAgentPart(part, partIndex))
     malformed = parts.some((part) => part.malformed)
   } else {
     const legacyContent = safeProperty(value, 'content')
@@ -168,18 +168,18 @@ export function normalizeFlueMessage(value: unknown, index = 0): SafeFlueMessage
   }
 }
 
-export function normalizeFlueMessages(value: unknown): SafeFlueMessage[] {
+export function normalizeAgentMessages(value: unknown): SafeAgentMessage[] {
   if (!Array.isArray(value)) return []
   return value
-    .map((message, index) => normalizeFlueMessage(message, index))
-    // Flue 会为一次失败/重试的模型调用留下 assistant 消息边界；当模型在
+    .map((message, index) => normalizeAgentMessage(message, index))
+    // Agent 运行时会为一次失败/重试的模型调用留下 assistant 消息边界；当模型在
     // 输出任何内容前超时时，这类消息没有可见 part。渲染它们只会产生一排
     // 不断增加的空机器人头像。用户消息仍保留，畸形 assistant 消息也会由
     // unsupported part 显示诊断提示，只有真正空白的 assistant 消息被隐藏。
-    .filter((message) => message.role === 'user' || message.parts.some(isRenderableFluePart))
+    .filter((message) => message.role === 'user' || message.parts.some(isRenderableAgentPart))
 }
 
-export function isRenderableFluePart(part: SafeFluePart): boolean {
+export function isRenderableAgentPart(part: SafeAgentPart): boolean {
   if (part.type === 'text' || part.type === 'reasoning') {
     return Boolean(part.text?.trim())
   }
@@ -188,7 +188,7 @@ export function isRenderableFluePart(part: SafeFluePart): boolean {
   return part.type === 'file' || part.type === 'dynamic-tool' || part.type === 'unsupported'
 }
 
-export function extractTextParts(message: SafeFlueMessage | undefined): string {
+export function extractTextParts(message: SafeAgentMessage | undefined): string {
   if (!message) return ''
   return message.parts
     .filter((part) => part.type === 'text')

@@ -25,6 +25,7 @@ import {
   type ProjectKnowledgeBrief,
   type ProjectKnowledgeTopic,
 } from './aiProjectKnowledgeBriefService.js'
+import { fetchAiGatewayChatCompatible } from './aiGatewayService.js'
 
 const GW_BASE = (
   process.env.LLM_BASE_URL
@@ -1201,7 +1202,7 @@ ${chapterEvidencePrompt(input.packet)}
 
 请只生成“${input.config.title}”章节JSON。`
   try {
-    const response = await fetch(`${GW_BASE}/chat/completions`, {
+    const response = await fetchAiGatewayChatCompatible(GW_BASE, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1217,7 +1218,7 @@ ${chapterEvidencePrompt(input.packet)}
         response_format: { type: 'json_object' },
       }),
       signal: AbortSignal.timeout(CHAPTER_MODEL_TIMEOUT_MS),
-    })
+    }, fetch, CHAPTER_MODEL_TIMEOUT_MS)
     if (!response.ok) throw new Error(`LLM ${response.status}`)
     const data = await response.json() as { choices?: Array<{ message?: { content?: string } }> }
     const responseText = data.choices?.[0]?.message?.content?.trim() ?? ''

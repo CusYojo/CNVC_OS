@@ -1,12 +1,9 @@
-import { execFile } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import { existsSync, readdirSync, symlinkSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import { promisify } from 'node:util'
 import { getAiSkillRoot } from './aiSkillService.js'
-
-const execFileAsync = promisify(execFile)
+import { execFileSupervised as execFileAsync } from '../runtime/supervisedProcessService.js'
 
 type ConversionHandoff = {
   watermarkQaPassed?: unknown

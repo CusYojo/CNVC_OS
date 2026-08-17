@@ -1,21 +1,15 @@
 // 后端 API 调用封装（dev 跟 prod 自动适配）
 import { authedFetch } from '../store/useAuthStore'
+import { ApiError, apiErrorFromResponse } from '../../server/src/contracts/apiErrorContract'
+
+export { ApiError, apiErrorFromResponse } from '../../server/src/contracts/apiErrorContract'
 
 /**
  * Vite dev:  走相对路径 (Vite proxy 或直连同源)
  * Vite prod: 同源 /api（由 nginx 反代到 3100）
  */
 const API_PREFIX = '/api'
-
-export class ApiError extends Error {
-  code: string
-  status: number
-  constructor(message: string, code: string, status: number) {
-    super(message)
-    this.code = code
-    this.status = status
-  }
-}
+const DEFAULT_REQUEST_TIMEOUT_MS = 120_000
 
 export interface ApiResult<T = unknown> {
   ok: boolean
@@ -28,20 +22,20 @@ export async function api<T = unknown>(
   init: RequestInit = {},
 ): Promise<T> {
   const url = path.startsWith('/api/') ? path : `${API_PREFIX}${path.startsWith('/') ? path : `/${path}`}`
-  // 超时兜底(默认 60s)：防止后端某个慢接口让前端 fetch 无限挂起、UI 一直转圈"卡住"。
+  // 超时兜底(默认 120s)：兼顾大文件上传和慢接口，避免前端 fetch 无限挂起、UI 一直转圈"卡住"。
   // 调用方可通过 init.signal 传自己的 AbortSignal 覆盖(此时不叠加默认超时)。
   let timer: ReturnType<typeof setTimeout> | undefined
   let finalInit = init
   if (!init.signal) {
     const ctrl = new AbortController()
-    timer = setTimeout(() => ctrl.abort(), 60000)
+    timer = setTimeout(() => ctrl.abort(), DEFAULT_REQUEST_TIMEOUT_MS)
     finalInit = { ...init, signal: ctrl.signal }
   }
   let res: Response
   try {
     res = await authedFetch(url, finalInit)
   } catch (e) {
-    if ((e as Error).name === 'AbortError') throw new ApiError('请求超时（60s），请重试或检查网络', 'TIMEOUT', 0)
+    if ((e as Error).name === 'AbortError') throw new ApiError('请求超时（120s），请重试或检查网络', 'TIMEOUT', 0)
     throw e
   } finally {
     if (timer) clearTimeout(timer)
@@ -74,18 +68,17 @@ export async function api<T = unknown>(
     }
   }
   if (!res.ok) {
-    // 401 = token 过期/无效:自动登出并跳登录页,避免拿着失效 token 卡在空白页反复 401
+    // 401 = 服务端会话过期/已吊销：清理本地用户状态并返回登录页。
     if (res.status === 401) {
       try {
         const { useAuthStore } = await import('../store/useAuthStore')
-        useAuthStore.getState().logout()
+        useAuthStore.getState().clearAuth()
       } catch { /* ignore */ }
       if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
         window.location.href = '/login'
       }
     }
-    const e = (body as { code?: string; message?: string } | null) ?? {}
-    throw new ApiError(e.message ?? `HTTP ${res.status}`, e.code ?? 'HTTP_ERROR', res.status)
+    throw apiErrorFromResponse(res.status, body, res.headers.get('x-request-id'))
   }
   return body as T
 }
@@ -98,5 +91,8 @@ export const apiPost = <T = unknown>(path: string, body?: unknown, init?: Reques
 // PATCH 助手
 export const apiPatch = <T = unknown>(path: string, body?: unknown) =>
   api<T>(path, { method: 'PATCH', body: body !== undefined ? JSON.stringify(body) : undefined })
+// PUT 助手
+export const apiPut = <T = unknown>(path: string, body?: unknown) =>
+  api<T>(path, { method: 'PUT', body: body !== undefined ? JSON.stringify(body) : undefined })
 // DELETE 助手
 export const apiDelete = <T = unknown>(path: string) => api<T>(path, { method: 'DELETE' })

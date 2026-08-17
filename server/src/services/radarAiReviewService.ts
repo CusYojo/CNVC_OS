@@ -4,6 +4,22 @@ import { z } from 'zod'
 import { db } from '../db/client.js'
 import { radarAiReviews } from '../db/schema.js'
 import { isSpecificLeadSubjectName } from './leadSubjectName.js'
+import { redactSensitiveText } from '../security/redactSecrets.js'
+import {
+  finishLeadPipelineRun,
+  openLeadPipelineReview,
+  recordLeadPipelineDecision,
+  registerLeadPipelinePromptVersion,
+  startLeadPipelineRun,
+} from './leadPipelineAuditService.js'
+import {
+  LEAD_SUBJECT_AGENT_PROFILE,
+  LEAD_SUBJECT_AGENT_PROFILE_VERSION,
+  LEAD_SUBJECT_AGENT_SCHEMA_VERSION,
+  LEAD_SUBJECT_AGENT_TOOLSET_VERSION,
+  runLeadSubjectAgentBatch,
+  type LeadSubjectAgentExecution,
+} from './leadSubjectAgentService.js'
 
 const PROMPT_VERSION = 'radar-subject-v3-paper-v2'
 const PAPER_PROMPT_VERSION = 'radar-subject-v4-paper-zh-v2'
@@ -11,16 +27,6 @@ const EVIDENCE_VALIDATION_REASON = '模型给出的主体名称或来源证据�
 const DEFAULT_MODEL = process.env.RADAR_AI_REVIEW_MODEL
   || process.env.LLM_MODEL
   || 'claude-sonnet-4-6'
-const GW_BASE = (
-  process.env.LLM_BASE_URL
-  || process.env.OPENAI_BASE_URL
-  || 'http://127.0.0.1:18081/v1'
-).replace(/\/$/, '')
-const GW_KEY = process.env.OPENAI_API_KEY || process.env.LLM_API_KEY || ''
-const REQUEST_TIMEOUT_MS = Math.max(
-  30_000,
-  Number(process.env.RADAR_AI_REVIEW_TIMEOUT_MS) || 120_000,
-)
 const MAX_ATTEMPTS = Math.max(
   1,
   Math.min(3, Number(process.env.RADAR_AI_REVIEW_MAX_ATTEMPTS) || 3),
@@ -33,6 +39,8 @@ const CONCURRENCY = Math.max(
   1,
   Math.min(4, Number(process.env.RADAR_AI_REVIEW_CONCURRENCY) || 2),
 )
+
+export type LeadSubjectAgentRunner = typeof runLeadSubjectAgentBatch
 
 export type RadarAiReviewStatus = 'accepted' | 'rejected' | 'review' | 'failed'
 export type RadarSubjectType = 'company' | 'project' | 'team' | 'lab' | 'paper'
@@ -89,7 +97,7 @@ const modelResponseSchema = z.object({
   reviews: z.array(modelReviewSchema),
 })
 
-const SYSTEM_PROMPT = `你是私募股权/创业投资线索池的严格准入审查员。
+export const RADAR_SUBJECT_REVIEW_SYSTEM_PROMPT = `你是私募股权/创业投资线索池的严格准入审查员。
 
 任务：判断每条公开信息是否包含一个可明确识别、值得进入投资线索池的公司、商业化项目、创业团队、实验室或前沿论文，并给出该标的在原文中的规范名称。
 
@@ -340,84 +348,36 @@ export function revalidateEvidenceOnlyPaperReview(
   }, sourceText, model, decision.reviewedAt, true)
 }
 
-function parseFirstJsonObject(value: string) {
-  const cleaned = value.trim().replace(/^```json\s*/i, '').replace(/\s*```[\s\S]*$/, '')
-  try {
-    return JSON.parse(cleaned)
-  } catch {
-    // 部分兼容网关会在 JSON 前后附加说明；仅截取完整对象，不修补内部内容。
-  }
-  const start = value.indexOf('{')
-  if (start < 0) throw new Error('模型未返回 JSON 对象')
-  let depth = 0
-  let inString = false
-  let escaped = false
-  for (let index = start; index < value.length; index += 1) {
-    const character = value[index]
-    if (inString) {
-      if (escaped) escaped = false
-      else if (character === '\\') escaped = true
-      else if (character === '"') inString = false
-      continue
-    }
-    if (character === '"') {
-      inString = true
-      continue
-    }
-    if (character === '{') depth += 1
-    if (character === '}') {
-      depth -= 1
-      if (depth === 0) return JSON.parse(value.slice(start, index + 1))
-    }
-  }
-  throw new Error('模型 JSON 对象未闭合')
-}
-
 async function callReviewBatch(
   batch: PreparedRadarCandidate[],
-  fetchImpl: typeof fetch,
+  agentRunner: LeadSubjectAgentRunner,
   model: string,
 ) {
   if (process.env.RADAR_AI_REVIEW_DISABLE === '1') {
     throw new Error('RADAR_AI_REVIEW_DISABLE=1')
   }
-  const userPrompt = batch
-    .map((item) => `【candidateId=${item.candidateId}】\n${item.promptText || '无可用原文'}`)
-    .join('\n\n')
-  const response = await fetchImpl(`${GW_BASE}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(GW_KEY ? { Authorization: `Bearer ${GW_KEY}` } : {}),
-    },
-    body: JSON.stringify({
-      model,
-      messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
-        { role: 'user', content: userPrompt },
-      ],
-      max_tokens: 3_000,
-      response_format: { type: 'json_object' },
-    }),
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  const execution = await agentRunner({
+    systemPrompt: RADAR_SUBJECT_REVIEW_SYSTEM_PROMPT,
+    candidates: batch.map((item) => ({
+      candidateId: item.candidateId,
+      promptText: item.promptText,
+    })),
+    model,
   })
-  if (!response.ok) {
-    const detail = cleanText(await response.text(), 500).replace(/\s+/g, ' ')
-    const error = new Error(`主体审查模型 ${response.status}${detail ? `：${detail}` : ''}`)
-    ;(error as Error & { retryable?: boolean }).retryable = response.status === 408
-      || response.status === 429
-      || response.status >= 500
-    throw error
+  return {
+    reviews: modelResponseSchema.parse(execution.output).reviews,
+    ...execution,
   }
-  const payload = await response.json() as {
-    choices?: Array<{ message?: { content?: string } }>
-  }
-  const content = payload.choices?.[0]?.message?.content?.trim() ?? ''
-  return modelResponseSchema.parse(parseFirstJsonObject(content)).reviews
 }
 
 function retryDelay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function nonRetryableAuditError(error: unknown) {
+  const wrapped = error instanceof Error ? error : new Error(String(error))
+  ;(wrapped as Error & { retryable?: boolean }).retryable = false
+  return wrapped
 }
 
 async function loadCachedReviews(prepared: PreparedRadarCandidate[]) {
@@ -471,8 +431,7 @@ async function persistReview(result: RadarAiReviewResult, promptVersion = result
     attempts: result.attempts,
     lastError: result.status === 'failed' ? result.rejectReason : null,
     updatedAt: new Date(),
-  }).onConflictDoUpdate({
-    target: radarAiReviews.cacheKey,
+  }).onDuplicateKeyUpdate({
     set: {
       status: result.status,
       decision: storedDecision,
@@ -502,7 +461,7 @@ function failedReview(
     translatedTitle: '',
     translatedSummary: '',
     confidence: 0,
-    rejectReason: `AI 主体审查暂不可用：${cleanText(error.message, 240)}`,
+    rejectReason: `AI 主体审查暂不可用：${cleanText(redactSensitiveText(error.message), 240)}`,
     model,
     reviewedAt: new Date().toISOString(),
     attempts,
@@ -513,14 +472,58 @@ function failedReview(
 
 async function reviewUncachedBatch(
   batch: PreparedRadarCandidate[],
-  fetchImpl: typeof fetch,
+  agentRunner: LeadSubjectAgentRunner,
   model: string,
+  auditEventIds: Map<string, string>,
 ) {
   let lastError = new Error('AI 主体审查未返回结果')
+  let lastAuditRunId: string | null = null
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+    const eventIds = batch.map((item) => auditEventIds.get(item.cacheKey)).filter((value): value is string => Boolean(value))
+    const startedAt = new Date()
+    let auditRun: Awaited<ReturnType<typeof startLeadPipelineRun>> | null = null
+    let auditRunFinished = false
     try {
-      const rawReviews = await callReviewBatch(batch, fetchImpl, model)
-      const byId = new Map(rawReviews.map((review) => [review.candidateId, review]))
+      if (eventIds.length) {
+        try {
+          const promptVersion = await registerLeadPipelinePromptVersion({
+            agentProfile: LEAD_SUBJECT_AGENT_PROFILE,
+            promptVersion: batch[0].promptVersion,
+            schemaVersion: LEAD_SUBJECT_AGENT_SCHEMA_VERSION,
+            skillVersion: LEAD_SUBJECT_AGENT_PROFILE_VERSION,
+            toolsetVersion: LEAD_SUBJECT_AGENT_TOOLSET_VERSION,
+            prompt: RADAR_SUBJECT_REVIEW_SYSTEM_PROMPT,
+            configuration: {
+              runtime: 'claude-agent-sdk',
+              maxAttempts: MAX_ATTEMPTS,
+              tools: [],
+              skills: [],
+              permissionMode: 'dontAsk',
+              outputFormat: 'json_schema',
+            },
+          })
+          auditRun = await startLeadPipelineRun({
+            eventIds,
+            runtime: 'claude-agent-sdk',
+            agentProfile: LEAD_SUBJECT_AGENT_PROFILE,
+            promptVersionId: promptVersion.id,
+            model,
+            attempt,
+            startedAt,
+            metadata: {
+              cacheKeys: batch.map((item) => item.cacheKey),
+              transport: 'claude-agent-sdk',
+              toolsetVersion: LEAD_SUBJECT_AGENT_TOOLSET_VERSION,
+              tokenAccounting: 'exact-batch',
+            },
+          })
+        } catch (error) {
+          throw nonRetryableAuditError(error)
+        }
+        lastAuditRunId = auditRun.id
+      }
+      const modelResponse = await callReviewBatch(batch, agentRunner, model)
+      const byId = new Map(modelResponse.reviews.map((review) => [review.candidateId, review]))
       const results = batch.map((item): RadarAiReviewResult => {
         const raw = byId.get(item.candidateId)
         if (!raw) throw new Error(`模型遗漏候选项 ${item.candidateId}`)
@@ -536,16 +539,112 @@ async function reviewUncachedBatch(
           promptVersion: item.promptVersion,
         }
       })
+      if (auditRun) {
+        try {
+          for (let index = 0; index < results.length; index += 1) {
+            const result = results[index]
+            const item = batch[index]
+            const eventId = auditEventIds.get(item.cacheKey)
+            if (!eventId) continue
+            const outcome = result.status === 'accepted'
+              ? 'accept' as const
+              : result.status === 'rejected'
+                ? 'reject' as const
+                : result.status === 'failed'
+                  ? 'failed' as const
+                  : 'review' as const
+            const reason = result.rejectReason || (outcome === 'accept'
+              ? 'radar subject passed model and host evidence validation'
+              : `radar subject decision: ${outcome}`)
+            const decision = await recordLeadPipelineDecision({
+              idempotencyKey: `radar-ai:${result.cacheKey}:${result.status}`,
+              eventId,
+              runId: auditRun.id,
+              decisionType: 'subject_identification',
+              outcome,
+              subjectType: result.subjectType,
+              subjectName: result.subjectName,
+              legalName: result.legalName,
+              confidence: result.confidence * 100,
+              reason,
+              output: result as unknown as Record<string, unknown>,
+              actorType: 'agent',
+              actorId: result.model,
+              evidence: result.evidence ? [{
+                sourceId: item.sourceKey,
+                sourceType: 'radar',
+                locator: 'candidate source text',
+                claim: outcome === 'accept'
+                  ? `原文支持主体 ${result.subjectName} 及其投资相关性`
+                  : reason,
+                quote: result.evidence,
+                verificationStatus: outcome === 'accept' ? 'verified' : 'unverified',
+                metadata: { contentHash: item.contentHash },
+              }] : [],
+            })
+            if (outcome === 'review') {
+              await openLeadPipelineReview({
+                idempotencyKey: `radar-ai:${result.cacheKey}`,
+                eventId,
+                triggerDecisionId: decision.id,
+                reason,
+              })
+            }
+          }
+          await finishLeadPipelineRun(auditRun.id, {
+            status: 'succeeded',
+            ...modelResponse.usage,
+            toolCalls: modelResponse.toolCalls,
+            durationMs: modelResponse.durationMs,
+            costMicrousd: modelResponse.costMicrousd,
+          })
+          auditRunFinished = true
+        } catch (error) {
+          throw nonRetryableAuditError(error)
+        }
+      }
       await Promise.all(results.map((result) => persistReview(result)))
       return results
     } catch (error) {
       lastError = error as Error
+      if (auditRun && !auditRunFinished) {
+        const metrics = (lastError as Error & {
+          leadRunMetrics?: Partial<LeadSubjectAgentExecution>
+        }).leadRunMetrics
+        await finishLeadPipelineRun(auditRun.id, {
+          status: 'failed',
+          ...(metrics?.usage || {}),
+          toolCalls: metrics?.toolCalls,
+          durationMs: metrics?.durationMs ?? Date.now() - startedAt.getTime(),
+          costMicrousd: metrics?.costMicrousd,
+          error: lastError,
+        }).catch(() => undefined)
+      }
       const retryable = (lastError as Error & { retryable?: boolean }).retryable !== false
       if (!retryable || attempt === MAX_ATTEMPTS) break
       await retryDelay(300 * attempt)
     }
   }
   const failed = batch.map((item) => failedReview(item, lastError, MAX_ATTEMPTS, model))
+  if (lastAuditRunId) {
+    for (let index = 0; index < failed.length; index += 1) {
+      const result = failed[index]
+      const eventId = auditEventIds.get(batch[index].cacheKey)
+      if (!eventId) continue
+      await recordLeadPipelineDecision({
+        idempotencyKey: `radar-ai:${result.cacheKey}:failed`,
+        eventId,
+        runId: lastAuditRunId,
+        decisionType: 'subject_identification',
+        outcome: 'failed',
+        confidence: 0,
+        reason: result.rejectReason,
+        output: result as unknown as Record<string, unknown>,
+        actorType: 'agent',
+        actorId: model,
+      })
+    }
+  }
   await Promise.all(failed.map((result) => persistReview(result)))
   return failed
 }
@@ -553,18 +652,32 @@ async function reviewUncachedBatch(
 export async function reviewRadarCandidatesWithAi(
   items: Record<string, unknown>[],
   options: {
-    fetchImpl?: typeof fetch
+    agentRunner?: LeadSubjectAgentRunner
     model?: string
+    eventIds?: string[]
   } = {},
 ): Promise<RadarAiReviewResult[]> {
   const model = options.model || DEFAULT_MODEL
-  const fetchImpl = options.fetchImpl || fetch
+  const agentRunner = options.agentRunner || runLeadSubjectAgentBatch
   const prepared = items.map((item) => prepareRadarAiCandidate(item, model))
+  if (options.eventIds && options.eventIds.length !== prepared.length) {
+    throw new Error('Radar AI review eventIds must align one-to-one with candidates')
+  }
+  const auditEventIds = new Map(prepared.map((item, index) => [item.cacheKey, options.eventIds?.[index]])
+    .filter((entry): entry is [string, string] => Boolean(entry[1])))
   const cached = await loadCachedReviews(prepared)
   const pending = prepared.filter((item) => !cached.has(item.cacheKey))
   const chunks: PreparedRadarCandidate[][] = []
-  for (let index = 0; index < pending.length; index += BATCH_SIZE) {
-    chunks.push(pending.slice(index, index + BATCH_SIZE))
+  const pendingByPromptVersion = new Map<string, PreparedRadarCandidate[]>()
+  for (const item of pending) {
+    const group = pendingByPromptVersion.get(item.promptVersion) ?? []
+    group.push(item)
+    pendingByPromptVersion.set(item.promptVersion, group)
+  }
+  for (const group of pendingByPromptVersion.values()) {
+    for (let index = 0; index < group.length; index += BATCH_SIZE) {
+      chunks.push(group.slice(index, index + BATCH_SIZE))
+    }
   }
 
   const fresh = new Map<string, RadarAiReviewResult>()
@@ -573,7 +686,7 @@ export async function reviewRadarCandidatesWithAi(
     while (nextChunk < chunks.length) {
       const chunk = chunks[nextChunk]
       nextChunk += 1
-      const results = await reviewUncachedBatch(chunk, fetchImpl, model)
+      const results = await reviewUncachedBatch(chunk, agentRunner, model, auditEventIds)
       results.forEach((result) => fresh.set(result.cacheKey, result))
     }
   }

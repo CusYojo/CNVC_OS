@@ -26,6 +26,7 @@ import {
   type ProjectKnowledgeBrief,
   type ProjectKnowledgeTopic,
 } from './aiProjectKnowledgeBriefService.js'
+import { fetchAiGatewayChatCompatible } from './aiGatewayService.js'
 
 export type EvidenceSource = {
   sourceType: string
@@ -2592,7 +2593,7 @@ ${studiedKnowledge}
 内部事实卡（只作写作依据，不得复制卡片标题、来源名、片段号或处理说明到正文）：
 ${evidence || '没有可用事实卡。不得编造事实；只在确有重大影响时形成具体、可执行的后续核验事项。'}`
     const startedAt = Date.now()
-    const response = await fetchImpl(`${GW_BASE}/chat/completions`, {
+    const response = await fetchAiGatewayChatCompatible(GW_BASE, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -2609,7 +2610,7 @@ ${evidence || '没有可用事实卡。不得编造事实；只在确有重大�
         response_format: { type: 'json_object' },
       }),
       signal: AbortSignal.timeout(timeoutMs),
-    })
+    }, fetchImpl, timeoutMs)
     const parsed = await readDueDiligenceJsonResponse(response)
     const partialTemplate: AiTemplateDefinition = {
       ...input.template,
@@ -2760,7 +2761,7 @@ ${evidence || '没有可用事实卡。不得编造事实；只在确有重大�
   }))
 
   const requestSummary = async () => {
-    const response = await fetchImpl(`${GW_BASE}/chat/completions`, {
+    const response = await fetchAiGatewayChatCompatible(GW_BASE, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -2798,7 +2799,7 @@ ${evidence || '没有可用事实卡。不得编造事实；只在确有重大�
         response_format: { type: 'json_object' },
       }),
       signal: AbortSignal.timeout(timeoutMs),
-    })
+    }, fetchImpl, timeoutMs)
     const parsed = await readDueDiligenceJsonResponse(response) as Record<string, unknown>
     const validIndexes = (value: unknown) => Array.isArray(value)
       ? [...new Set(value.filter((entry): entry is number =>
@@ -3201,7 +3202,7 @@ ${evidence || (isDueDiligence || isCustomTemplate
     repairInstruction = '',
     previousDraft?: BusinessContent,
   ) => {
-    const response = await fetch(`${GW_BASE}/chat/completions`, {
+    const response = await fetchAiGatewayChatCompatible(GW_BASE, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...(GW_KEY ? { Authorization: `Bearer ${GW_KEY}` } : {}) },
       body: JSON.stringify({
@@ -3228,7 +3229,7 @@ ${JSON.stringify(previousDraft ?? {}).slice(0, 60_000)}`
       signal: AbortSignal.timeout(
         isDueDiligence ? DUE_DILIGENCE_MODEL_TIMEOUT_MS : 120_000,
       ),
-    })
+    }, fetch, isDueDiligence ? DUE_DILIGENCE_MODEL_TIMEOUT_MS : 120_000)
     if (!response.ok) {
       throw Object.assign(new Error(`LLM ${response.status}`), {
         code: 'DUE_DILIGENCE_MODEL_HTTP_ERROR',

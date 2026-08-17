@@ -1,10 +1,7 @@
-import { execFile } from 'node:child_process'
 import { access } from 'node:fs/promises'
 import path from 'node:path'
-import { promisify } from 'node:util'
 import { getAiSkillDirectory } from './aiSkillService.js'
-
-const execFileAsync = promisify(execFile)
+import { execFileSupervised as execFileAsync } from '../runtime/supervisedProcessService.js'
 const SKILL_NAME = 'draft-investment-proposal' as const
 
 type CaseStyleValidation = {

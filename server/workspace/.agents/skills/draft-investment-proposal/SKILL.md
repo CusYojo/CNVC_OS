@@ -39,7 +39,7 @@ description: "Use when需要根据公司资料、访谈、财务数据、融资�
 - 对同一指标保留口径、期间、币种、单位、审计状态和来源。
 - 仅对会改变投资判断的缺口进行定向公开核验；公开网页不能替代工商、合同、审计、股东名册和交易文件。
 
-运行时默认执行“本地项目资料库优先，网络补全为辅，补全结果缓存复用”：`Local Project Retrieval` → `Network Cache Retrieval` → `Evidence Gap Analysis` → `Flue Candidate Discovery` → `LLM Gateway Page Verification` → `Network Cache Writeback`。Flue 只发现与缺口相关的候选 URL，LLM Gateway 负责页面核验；不得一开始就发起宽泛的全网搜索，不恢复或依赖 SearXNG。只有用户明确要求“只联网搜索”时才跳过本地优先顺序；联网环节不可用时，使用已有项目证据继续形成受限初稿。
+运行时默认执行“本地项目资料库优先，网络补全为辅，补全结果缓存复用”：`Local Project Retrieval` → `Network Cache Retrieval` → `Evidence Gap Analysis` → `In-process Candidate Discovery` → `LLM Gateway Page Verification` → `Network Cache Writeback`。主服务进程内公开检索器只发现与缺口相关的候选 URL，LLM Gateway 负责页面核验；不得一开始就发起宽泛的全网搜索，不恢复或依赖 SearXNG。只有用户明确要求“只联网搜索”时才跳过本地优先顺序；联网环节不可用时，使用已有项目证据继续形成受限初稿。
 
 ### 2. 建立 Decision Manifest
 

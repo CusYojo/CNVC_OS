@@ -10,35 +10,61 @@
 
 ```bash
 npm ci
-npm ci --prefix cybernaut-assistant
 npm run dev
 ```
 
 开发模式默认地址：
 
 - Web：`http://127.0.0.1:5173`（端口被占用时 Vite 会自动顺延）
-- Mock API：`http://127.0.0.1:3100`
+- API：`http://127.0.0.1:3100`
 - 健康检查：`http://127.0.0.1:3100/api/health`
-- Agent Runtime：`http://127.0.0.1:3584`
-- Agent 健康检查：`http://127.0.0.1:3584/health`
+- JW Agent Runtime：已内嵌在 API 进程，通过 `/api/agent/*` 与同端口 `/socket.io` 访问
+- 组件健康检查：`http://127.0.0.1:3100/api/health/components`
 
-`npm run dev` 会同时启动 Web、API 和 `cybernaut-assistant`。如只调试
-Agent Runtime，可运行 `npm run dev:agent`；启动后可运行
-`npm run check:agent-runtime` 验证服务契约。
+`npm run dev` 会启动 Web 和 API（内含 JW Agent Runtime）。Radar 查询由 API
+按需调用单次 Python 任务；定时采集由生产入口统一调度。
 
 生产构建与启动：
 
 ```bash
 npm run build
-npm start
+npm run start:app
 ```
 
-构建后 Express 会同时托管前端、API 与生成文件，访问 `http://127.0.0.1:3100`。
+构建后 `start:app` 是唯一项目启动入口：单个 Node 进程内运行 Express、JW Runtime
+与 MySQL 持久化调度器，并按需启动 Radar 单次 Python 任务。项目只监听 `127.0.0.1:3100`，不再启动 3584 或
+8121 服务。MySQL 与 LLM Gateway 是外部基础设施，需要另行可用。
 
-演示账号（密码均为 `123456`）：
+生产运行时不会自动执行 MySQL DDL，只核对已应用迁移和必需表；`.env` 的
+`DB_USERNAME/DB_PASSWORD` 应使用 DML-only 账号，DDL 迁移账号由部署脚本通过
+root-only 文件临时注入。`npm run audit:mysql-privileges` 可检查运行账号是否越权。
 
-- 投资经理：`lin@cybernaut.com`
-- 系统管理员：`admin@cybernaut.com`
+旧 Radar JSONL/JSON 首次迁移或需要重新核对时可幂等执行：
+
+```bash
+npm run migrate:radar
+```
+
+线上候选读取、原始事件、来源、采集状态、同步游标和 Job 运行记录均以 MySQL
+为准；Python 文件是单次采集器的可重建工作介质。
+
+36氪 `lead_reserve` 摄入也由 `lead-reserve-daily-intake` MySQL Job 管理；开发环境
+默认关闭，生产部署默认每日 09:00 摄入 50 条，并通过持久化映射补偿评分触发。
+线索评分使用 `lead_score_jobs` 持久化领取、续租和延迟重试；AI 文档任务的执行租约
+保存在 `ai_tasks`，因此应用重启或多实例交接不再依赖进程内队列状态。
+
+Web 登录使用 MySQL `auth_sessions` + HttpOnly Cookie，REST 与 Socket.io
+共享同一会话和吊销状态；写请求必须通过 CSRF 与 Origin 校验。
+旧 Bearer JWT 默认禁用。
+
+仓库不提供或展示共享演示密码。迁移账号必须在上线前通过受控的
+`npm run prepare:weak-password-rotation-roster` 生成 0600 私有轮换清单，再用
+`npm run rotate:user-password` 逐一设置强密码并吊销旧会话；生产发布会执行
+`npm run audit:password-hashes`，命中已知弱密码时拒绝继续。
+历史固定演示账号生成器已永久退役；`SEED_DEMO_USERS` 即使被旧环境误设为 `1` 也不会创建账号。
+
+系统用户、部门、角色、权限和字典均由 MySQL 提供唯一权威；系统管理写入只认数据库权限码
+`system.manage`，不按角色显示名称兜底。身份资料与角色/部门绑定在同一事务提交，撤权即时生效。
 
 ## 页面路径
 
@@ -71,7 +97,7 @@ npm start
 9. 回到工作台查看会议待办。
 10. 在 OA 流程中将项目从初筛流转至立项/尽调。
 11. 新增风险事件，检查工作台、风险列表和项目详情同步。
-12. 进入系统管理查看用户、角色权限、模板和审计日志。
+12. 以系统管理员进入系统数据页，查看 MySQL 用户、AI 模板和服务端审计日志。
 
 ## 技术结构
 
@@ -79,20 +105,18 @@ npm start
 src/
   components/     通用 UI、上传、弹窗、抽屉、Toast
   layout/         桌面端主布局和导航
-  mock/           一期演示数据
   pages/          13 个独立业务页面
-  store/          Zustand 业务状态与联动动作
+  store/          Zustand 会话内视图状态；业务数据由服务端 API 水合
   types/          完整 TypeScript 领域类型
 server/src/
   controllers/    HTTP 控制器
   middleware/     统一错误处理
-  mock/           服务端 mock 数据
   models/         接口模型
   routes/         REST API
   services/       AI、审计与文件生成服务
 ```
 
-前端业务状态会持久化到浏览器 Local Storage，刷新后仍可继续演示。清理键 `cybernaut-investment-mvp-v7` 可恢复初始演示数据。
+前端不持久化权威业务数据，也不使用 Mock 初始值。登录后由 MySQL-backed API 水合；读取失败显示空态，退出会清理跨用户视图状态。浏览器 Local Storage 仅可保存 AI 页面最近选择等非权威偏好。
 
 ## 文件生成
 
@@ -103,9 +127,9 @@ server/src/
 - `xlsx`：Excel 财务分析模型
 - `ic`：IC 精简版 PPT
 
-文件保存在 `server/generated/` 并通过 `/generated/:fileName` 下载。生成内容带内部资料声明和资料不足提示，避免将 AI 初稿误当作最终投资结论。
+文件按创建用户隔离保存在 `server/generated/<userId>/`，并通过受登录会话保护的 `/api/generated/:fileName` 下载；旧 `/generated/*` 匿名静态链路已停用。生成内容带内部资料声明和资料不足提示，避免将 AI 初稿误当作最终投资结论。
 
-## Mock API
+## API 契约
 
 分页接口统一返回：
 
@@ -134,15 +158,14 @@ server/src/
 - `GET /api/templates`
 - `GET /api/audit-logs`
 
-## 接入真实服务的位置
+## 后续生产集成
 
-- 登录/SSO：替换 `server/src/routes/index.ts` 中的 `/auth/login`，在前端增加真实 token 刷新。
-- 数据库：将 `src/store/useAppStore.ts` 的动作改为调用 API，再把 `server/src/mock/db.ts` 替换为 ORM Repository。
-- 文件存储与解析：替换 `addFile` 模拟过程，接入对象存储、Office/PDF 文本提取和异步任务队列。
-- LLM/RAG：替换 `server/src/services/aiService.ts`，保留现有 `answer + sources + confidence` 返回契约。
-- 向量库：在资料解析完成后写入向量库，检索结果必须保留项目权限与片段来源。
+- 登录已切到 MySQL 用户 + HttpOnly 服务端会话；正式 SSO、TLS Secure Cookie、密钥轮换和统一 IAM 仍需按迁移门禁完成。
+- 业务数据、会话、任务、Radar 与调度状态已使用 MySQL；对象存储和生产文件归档仍需接入。
+- AI 对话和专业任务使用 JW Runtime/统一 LLM Gateway；目标网关和模型必须在生产单独验收。
+- 当前知识检索使用 MySQL 片段；如接入向量库，必须保留项目权限与片段来源。
 - 外部风险源：在风险服务层接入工商、法院、舆情等数据，人工录入与处置流程保持不变。
 
 ## 一期边界
 
-当前是可交互、可演示、方便后续接真实接口的 MVP。账号密码、文件解析、语音转写、AI/RAG、通知与大部分业务 API 使用本地模拟；不包含实时工商/法院/舆情 API、复杂多基金隔离、在线 Office 编辑、电子签和 LP Portal。
+当前是一期 MVP。核心业务 API 和持久化已迁到 MySQL；仍不包含正式 SSO、实时工商/法院/舆情 API、复杂多基金隔离、在线 Office 编辑、电子签和 LP Portal。生产发布范围以迁移验收清单为准。

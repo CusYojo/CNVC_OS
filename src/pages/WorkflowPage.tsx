@@ -103,33 +103,45 @@ export function WorkflowPage() {
     setShowCreate(true)
   }
 
-  const submit = () => {
+  const submit = async () => {
     if (!selectedProject || !reason.trim()) return showToast('请填写审批事由', 'error')
-    const created = createRequest({ projectId: selectedProject.id, targetStage, reason, priority })
-    if (!created) return showToast('未能发起审批，请检查项目状态', 'error')
-    setSelected(created)
-    setShowCreate(false)
-    setTab('pending')
-    showToast(`${created.requestNo} 已提交；项目阶段将在全部节点通过后自动更新`)
+    try {
+      const created = await createRequest({ projectId: selectedProject.id, targetStage, reason, priority })
+      if (!created) return showToast('未能发起审批，请检查项目状态', 'error')
+      setSelected(created)
+      setShowCreate(false)
+      setTab('pending')
+      showToast(`${created.requestNo} 已提交；项目阶段将在全部节点通过后自动更新`)
+    } catch (error) {
+      showToast((error as Error).message || '审批提交失败', 'error')
+    }
   }
 
-  const act = (action: 'approve' | 'return' | 'reject' | 'withdraw') => {
+  const act = async (action: 'approve' | 'return' | 'reject' | 'withdraw') => {
     if (!selected) return
     if (!comment.trim()) return showToast('请填写审批意见', 'error')
-    if (action === 'approve') approveRequest(selected.id, comment)
-    if (action === 'return') returnRequest(selected.id, comment)
-    if (action === 'reject') rejectRequest(selected.id, comment)
-    if (action === 'withdraw') withdrawRequest(selected.id, comment)
-    setSelected(null)
-    showToast(action === 'approve' ? '当前节点已通过；如为末节点，项目阶段已同步' : action === 'return' ? '申请已退回，项目阶段未变化' : action === 'reject' ? '申请已拒绝，项目阶段未变化' : '申请已撤回，项目阶段未变化')
+    try {
+      if (action === 'approve') await approveRequest(selected.id, comment)
+      if (action === 'return') await returnRequest(selected.id, comment)
+      if (action === 'reject') await rejectRequest(selected.id, comment)
+      if (action === 'withdraw') await withdrawRequest(selected.id, comment)
+      setSelected(null)
+      showToast(action === 'approve' ? '当前节点已通过；如为末节点，项目阶段已同步' : action === 'return' ? '申请已退回，项目阶段未变化' : action === 'reject' ? '申请已拒绝，项目阶段未变化' : '申请已撤回，项目阶段未变化')
+    } catch (error) {
+      showToast((error as Error).message || '审批操作失败', 'error')
+    }
   }
 
-  const resubmit = () => {
+  const resubmit = async () => {
     if (!selected || !comment.trim()) return showToast('请填写补充说明后重新提交', 'error')
-    resubmitApprovalRequest(selected.id, comment)
-    setSelected(null)
-    setTab('mine')
-    showToast(`${selected.requestNo} 已重新提交，项目阶段保持锁定直至全部节点通过`)
+    try {
+      await resubmitApprovalRequest(selected.id, comment)
+      setSelected(null)
+      setTab('mine')
+      showToast(`${selected.requestNo} 已重新提交，项目阶段保持锁定直至全部节点通过`)
+    } catch (error) {
+      showToast((error as Error).message || '重新提交失败', 'error')
+    }
   }
 
   return (

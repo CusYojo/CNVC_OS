@@ -1,11 +1,25 @@
-import { asc, desc, eq, sql, getTableColumns } from 'drizzle-orm'
-import { db } from '../db/client.js'
-import { aiSummaries, leads, auditLogs } from '../db/schema.js'
+import { createHash } from 'node:crypto'
+import { and, asc, desc, eq, inArray, ne, sql, getTableColumns } from 'drizzle-orm'
+import type { SQLWrapper } from 'drizzle-orm'
+import { drizzle } from 'drizzle-orm/mysql2'
+import type { RowDataPacket } from 'mysql2'
+import type { PoolConnection } from 'mysql2/promise'
+import { db, pool, schema } from '../db/client.js'
+import { aiSummaries, leads, auditLogs, migrationEntityMappings, projectMembers, projects } from '../db/schema.js'
+import { createMySqlIdentityRepositoryContext } from '../repositories/index.js'
+import { projectAccessCondition, type ProjectAccessActor } from './projectAccessService.js'
 import {
   buildRadarLeadMergePatch,
+  mergeRadarFundingRounds,
+  mergeRadarSources,
+  mergeUniqueValues,
   shouldBackfillCompanyName,
   type RadarLeadSyncFields,
 } from './leadRadarMerge.js'
+import {
+  applyLeadFieldPolicy,
+  initialLeadFieldProvenance,
+} from './leadFieldProvenance.js'
 import {
   deriveRadarSubjectName,
   isBetterLeadSubjectName,
@@ -16,24 +30,34 @@ import {
   resolveLeadBusinessRegion,
 } from './leadRegion.js'
 import { sanitizeScoringCompetitors } from './competitorEvidence.js'
+import { transitionLeadPipelineItem, type LeadPipelineTransitionInput } from './leadPipelineEventService.js'
+import { openLeadPipelineReview, recordLeadPipelineDecision } from './leadPipelineAuditService.js'
+import { recordLeadPipelineEntityMatch } from './leadPipelineEntityMatchService.js'
+import { formatShanghaiDateKey } from '../utils/shanghaiTime.js'
 
 export async function getSummary(projectId: string) {
   const rows = await db.select().from(aiSummaries).where(eq(aiSummaries.projectId, projectId)).orderBy(desc(aiSummaries.updatedAt)).limit(1)
   return rows[0]
 }
 
-export async function listAllSummaries() {
-  return db.select().from(aiSummaries).orderBy(desc(aiSummaries.updatedAt))
+export async function listAllSummaries(actor?: ProjectAccessActor) {
+  const where = actor
+    ? inArray(
+        aiSummaries.projectId,
+        db.select({ id: projects.id }).from(projects).where(projectAccessCondition(actor)),
+      )
+    : undefined
+  return db.select().from(aiSummaries).where(where).orderBy(desc(aiSummaries.updatedAt))
 }
 
 export async function upsertSummary(projectId: string, payload: Partial<typeof aiSummaries.$inferInsert>, userId: string) {
   const existing = await getSummary(projectId)
-  let row
   if (existing) {
-    ;[row] = await db.update(aiSummaries).set({ ...payload, updatedAt: new Date() }).where(eq(aiSummaries.id, existing.id)).returning()
+    await db.update(aiSummaries).set({ ...payload, updatedAt: new Date() }).where(eq(aiSummaries.id, existing.id))
   } else {
-    ;[row] = await db.insert(aiSummaries).values({ projectId, ...payload } as typeof aiSummaries.$inferInsert).returning()
+    await db.insert(aiSummaries).values({ projectId, ...payload } as typeof aiSummaries.$inferInsert)
   }
+  const row = await getSummary(projectId)
   if (row) await db.insert(auditLogs).values({ userId, userName: '（系统）', module: 'AI 工具箱', action: '保存项目摘要', target: projectId })
   return row
 }
@@ -44,47 +68,68 @@ export async function upsertSummary(projectId: string, payload: Partial<typeof a
 // 每位在 top-level 列 OR radar_profile OR scoring 里的结构化资料(抓取时写入,非AI产物)任一有值即计 1。
 // 用 SQL 直接读原始列,不受列表接口精简字段影响 → 列表和详情完整度必然一致。
 const PLACEHOLDER = "('','待核验','待核实','未披露','未披露/待核实','无','-','N/A','null')"
+
+function jsonValue(column: SQLWrapper, path: string) {
+  return sql`JSON_EXTRACT(${column}, ${path})`
+}
+
+function jsonText(column: SQLWrapper, path: string) {
+  return sql<string>`JSON_UNQUOTE(JSON_EXTRACT(${column}, ${path}))`
+}
+
+function jsonArrayHasDisclosedValue(column: SQLWrapper, path: string, field: string) {
+  if (!/^[A-Za-z0-9_]+$/.test(field)) throw new Error(`unsafe JSON field: ${field}`)
+  return sql`EXISTS (
+    SELECT 1
+    FROM JSON_TABLE(
+      COALESCE(JSON_EXTRACT(${column}, ${path}), JSON_ARRAY()),
+      '$[*]' COLUMNS(value VARCHAR(128) PATH ${sql.raw(`'$.${field}'`)})
+    ) AS jt
+    WHERE COALESCE(jt.value, '') NOT IN ('', '待核验', '待核实', '未披露', '未披露/待核实')
+  )`
+}
+
 const completenessExpr = sql<number>`(
-  ( (${leads.companyName} IS NOT NULL AND ${leads.companyName} <> '')::int
-  + (${leads.industry} IS NOT NULL AND ${leads.industry} <> '')::int
-  + (${leads.summary} IS NOT NULL AND ${leads.summary} <> '')::int
+  ( (${leads.companyName} IS NOT NULL AND ${leads.companyName} <> '')
+  + (${leads.industry} IS NOT NULL AND ${leads.industry} <> '')
+  + (${leads.summary} IS NOT NULL AND ${leads.summary} <> '')
   + ( (${leads.team} IS NOT NULL AND ${leads.team} NOT IN ${sql.raw(PLACEHOLDER)})
-      OR jsonb_array_length(COALESCE(${leads.scoring}->'structuredTeam','[]'::jsonb)) > 0
-      OR jsonb_array_length(COALESCE(${leads.radarProfile}->'team','[]'::jsonb)) > 0 )::int
-  + ( jsonb_path_exists(COALESCE(${leads.fundingRounds},'[]'::jsonb), '$[*] ? (@.round <> "未披露/待核实" && @.round <> "待核验" && @.round <> "未披露" && @.round <> "待核实")')
-      OR jsonb_path_exists(COALESCE(${leads.scoring}->'fundingRoundsResearched','[]'::jsonb), '$[*] ? (@.round <> "待核验" && @.round <> "未披露/待核实" && @.round <> "未披露" && @.round <> "待核实")')
-      OR jsonb_path_exists(COALESCE(${leads.radarProfile}->'fundingRounds','[]'::jsonb), '$[*] ? (@.round <> "待核验" && @.round <> "未披露/待核实" && @.round <> "未披露" && @.round <> "待核实")') )::int
-  + ( jsonb_path_exists(COALESCE(${leads.scoring}->'structuredShareholders','[]'::jsonb), '$[*] ? (@.name <> "待核验" && @.name <> "未披露" && @.name <> "待核实")')
-      OR jsonb_path_exists(COALESCE(${leads.radarProfile}->'shareholders','[]'::jsonb), '$[*] ? (@.name <> "待核验" && @.name <> "未披露" && @.name <> "待核实")') )::int
-  + ( (${leads.scoring}->'registry' IS NOT NULL AND ${leads.scoring}->'registry' <> '{}'::jsonb)
-      OR (${leads.radarProfile}->'registry' IS NOT NULL AND ${leads.radarProfile}->'registry' <> '{}'::jsonb) )::int
-  + ( jsonb_array_length(COALESCE(${leads.sources},'[]'::jsonb)) > 0
-      OR (${leads.radarProfile}->>'link' IS NOT NULL AND ${leads.radarProfile}->>'link' <> '') )::int
+      OR JSON_LENGTH(COALESCE(${jsonValue(leads.scoring, '$.structuredTeam')}, JSON_ARRAY())) > 0
+      OR JSON_LENGTH(COALESCE(${jsonValue(leads.radarProfile, '$.team')}, JSON_ARRAY())) > 0 )
+  + ( ${jsonArrayHasDisclosedValue(leads.fundingRounds, '$', 'round')}
+      OR ${jsonArrayHasDisclosedValue(leads.scoring, '$.fundingRoundsResearched', 'round')}
+      OR ${jsonArrayHasDisclosedValue(leads.radarProfile, '$.fundingRounds', 'round')} )
+  + ( ${jsonArrayHasDisclosedValue(leads.scoring, '$.structuredShareholders', 'name')}
+      OR ${jsonArrayHasDisclosedValue(leads.radarProfile, '$.shareholders', 'name')} )
+  + ( JSON_LENGTH(COALESCE(${jsonValue(leads.scoring, '$.registry')}, JSON_OBJECT())) > 0
+      OR JSON_LENGTH(COALESCE(${jsonValue(leads.radarProfile, '$.registry')}, JSON_OBJECT())) > 0 )
+  + ( JSON_LENGTH(COALESCE(${leads.sources}, JSON_ARRAY())) > 0
+      OR COALESCE(${jsonText(leads.radarProfile, '$.link')}, '') <> '' )
   ) * 100 / 8
 )`
 
 // 综合 AI 评分以评分产物中的 total 为准。leads.score 是历史冗余列，
 // 个别存量数据可能未随最近一次评分结果同步，不能再作为统计和排序的首选值。
 const overallScoreExpr = sql<number>`CASE
-  WHEN COALESCE(${leads.scoring}->>'total', '') ~ '^[0-9]+([.][0-9]+)?$'
-    THEN ROUND((${leads.scoring}->>'total')::numeric)::int
+  WHEN COALESCE(${jsonText(leads.scoring, '$.total')}, '') REGEXP '^[0-9]+([.][0-9]+)?$'
+    THEN ROUND(CAST(${jsonText(leads.scoring, '$.total')} AS DECIMAL(10,2)))
   ELSE ${leads.score}
 END`
 
 const publicLeadSignalTextExpr = sql<string>`CONCAT_WS(
   ' ',
   COALESCE(${leads.name}, ''),
-  COALESCE(${leads.radarProfile}->>'sourceTitle', ''),
-  LEFT(COALESCE(${leads.sources}->0->>'title', ''), 500),
+  COALESCE(${jsonText(leads.radarProfile, '$.sourceTitle')}, ''),
+  LEFT(COALESCE(${jsonText(leads.sources, '$[0].title')}, ''), 500),
   LEFT(COALESCE(${leads.summary}, ''), 1600),
-  LEFT(COALESCE(${leads.radarProfile}->'profile'->>'projectName', ''), 500),
-  LEFT(COALESCE(${leads.radarProfile}->'profile'->>'coreHighlights', ''), 1600),
-  LEFT(COALESCE(${leads.radarProfile}->'profile'->>'teamComposition', ''), 800)
+  LEFT(COALESCE(${jsonText(leads.radarProfile, '$.profile.projectName')}, ''), 500),
+  LEFT(COALESCE(${jsonText(leads.radarProfile, '$.profile.coreHighlights')}, ''), 1600),
+  LEFT(COALESCE(${jsonText(leads.radarProfile, '$.profile.teamComposition')}, ''), 800)
 )`
 
 const publicLeadTitleExpr = sql<string>`COALESCE(
-  NULLIF(${leads.radarProfile}->>'sourceTitle', ''),
-  NULLIF(${leads.sources}->0->>'title', ''),
+  NULLIF(${jsonText(leads.radarProfile, '$.sourceTitle')}, ''),
+  NULLIF(${jsonText(leads.sources, '$[0].title')}, ''),
   COALESCE(${leads.name}, '')
 )`
 
@@ -92,12 +137,12 @@ const publicLeadPrimaryTextExpr = sql<string>`CONCAT_WS(
   ' ',
   ${publicLeadTitleExpr},
   LEFT(COALESCE(${leads.summary}, ''), 1200),
-  LEFT(COALESCE(${leads.radarProfile}->'profile'->>'projectName', ''), 300)
+  LEFT(COALESCE(${jsonText(leads.radarProfile, '$.profile.projectName')}, ''), 300)
 )`
 
 const publicLeadHasCompanyExpr = sql<boolean>`(
-  COALESCE(${leads.companyName}, '') ~ '(股份有限公司|有限责任公司|有限公司)$'
-  OR COALESCE(${leads.scoring}->'registry'->>'companyName', '') ~ '(股份有限公司|有限责任公司|有限公司)$'
+  COALESCE(${leads.companyName}, '') REGEXP '(股份有限公司|有限责任公司|有限公司)$'
+  OR COALESCE(${jsonText(leads.scoring, '$.registry.companyName')}, '') REGEXP '(股份有限公司|有限责任公司|有限公司)$'
 )`
 
 const PUBLIC_LEAD_INVESTMENT_PATTERN = '(完成|获得|获|宣布|官宣).{0,40}(融资|投资)|(融资|投资).{0,28}(完成|领投|跟投|亿元|万元|美元|天使轮|种子轮|pre-?a|a轮|b轮|c轮|d轮)|估值.{0,20}(亿元|万美元|亿美元|万元)'
@@ -111,30 +156,31 @@ const PUBLIC_LEAD_INVALID_SUBJECT_PATTERN = '^(数据|小时|主持|学员们|�
 // “论文”是独立线索类型，不套用公司线索的融资/商业化门槛；其标题作为项目名称展示，
 // 并继续走论文专属评分。qualityRejected 和 poolStatus 检查仍对所有来源生效。
 const visiblePublicLeadExpr = sql<boolean>`NOT (
-  COALESCE(${leads.source}, '') ~ '^项目发现雷达'
-  AND COALESCE(${leads.radarProfile}->>'channel', '') <> '论文'
+  COALESCE(${leads.source}, '') REGEXP '^项目发现雷达'
+  AND COALESCE(${jsonText(leads.radarProfile, '$.channel')}, '') <> '论文'
   AND (
-    COALESCE(${leads.name}, '') ~* ${PUBLIC_LEAD_INVALID_SUBJECT_PATTERN}
-    OR ${publicLeadTitleExpr} ~* ${PUBLIC_LEAD_LOW_VALUE_PATTERN}
+    COALESCE(${leads.name}, '') REGEXP ${PUBLIC_LEAD_INVALID_SUBJECT_PATTERN}
+    OR ${publicLeadTitleExpr} REGEXP ${PUBLIC_LEAD_LOW_VALUE_PATTERN}
     OR (
-      ${publicLeadPrimaryTextExpr} !~* ${PUBLIC_LEAD_INVESTMENT_PATTERN}
-      AND ${publicLeadSignalTextExpr} ~* ${PUBLIC_LEAD_LOW_VALUE_PATTERN}
+      NOT (${publicLeadPrimaryTextExpr} REGEXP ${PUBLIC_LEAD_INVESTMENT_PATTERN})
+      AND ${publicLeadSignalTextExpr} REGEXP ${PUBLIC_LEAD_LOW_VALUE_PATTERN}
     )
     OR (
-      ${publicLeadPrimaryTextExpr} !~* ${PUBLIC_LEAD_INVESTMENT_PATTERN}
+      NOT (${publicLeadPrimaryTextExpr} REGEXP ${PUBLIC_LEAD_INVESTMENT_PATTERN})
       AND
       NOT ${publicLeadHasCompanyExpr}
       AND (
-        ${publicLeadPrimaryTextExpr} !~* ${PUBLIC_LEAD_COMMERCIAL_PATTERN}
-        OR COALESCE(${leads.name}, '') !~* ${PUBLIC_LEAD_CONCRETE_SUBJECT_PATTERN}
+        NOT (${publicLeadPrimaryTextExpr} REGEXP ${PUBLIC_LEAD_COMMERCIAL_PATTERN})
+        OR NOT (COALESCE(${leads.name}, '') REGEXP ${PUBLIC_LEAD_CONCRETE_SUBJECT_PATTERN})
       )
     )
   )
-  OR COALESCE(${leads.radarProfile}->>'qualityRejected', '') = 'true'
+  OR COALESCE(${jsonText(leads.radarProfile, '$.qualityRejected')}, '') = 'true'
   OR ${leads.poolStatus} = '解析失败'
+  OR ${leads.poolStatus} = '已合并'
 )`
 
-export type LeadScoreJobStatus = 'queued' | 'running' | 'retrying' | 'done' | 'failed'
+export type LeadScoreJobStatus = 'queued' | 'running' | 'retrying' | 'done' | 'failed' | 'dead_letter'
 
 export interface LeadScoreJob {
   status: LeadScoreJobStatus
@@ -149,7 +195,7 @@ export interface LeadScoreJob {
   error?: string
 }
 
-const LEAD_SCORE_JOB_STATUSES = new Set<LeadScoreJobStatus>(['queued', 'running', 'retrying', 'done', 'failed'])
+const LEAD_SCORE_JOB_STATUSES = new Set<LeadScoreJobStatus>(['queued', 'running', 'retrying', 'done', 'failed', 'dead_letter'])
 
 export function readLeadScoreJob(scoring: unknown): LeadScoreJob | null {
   if (!scoring || typeof scoring !== 'object' || Array.isArray(scoring)) return null
@@ -177,19 +223,21 @@ export async function saveLeadScoreJob(leadId: string, job: LeadScoreJob) {
     ...job,
     error: job.error?.slice(0, 500),
   })
-  const [row] = await db.update(leads).set({
-    scoring: sql`jsonb_set(COALESCE(${leads.scoring}, '{}'::jsonb), '{scoreJob}', ${payload}::jsonb, true)` as never,
-  }).where(eq(leads.id, leadId)).returning({ id: leads.id })
+  await db.update(leads).set({
+    scoring: sql`JSON_SET(COALESCE(${leads.scoring}, JSON_OBJECT()), '$.scoreJob', CAST(${payload} AS JSON))` as never,
+  }).where(eq(leads.id, leadId))
+  const [row] = await db.select({ id: leads.id }).from(leads).where(eq(leads.id, leadId)).limit(1)
   return row ?? null
 }
 
 export async function clearLeadScoreJob(leadId: string) {
-  const [row] = await db.update(leads).set({
+  await db.update(leads).set({
     scoring: sql`CASE
       WHEN ${leads.scoring} IS NULL THEN NULL
-      ELSE ${leads.scoring} - 'scoreJob'
+      ELSE JSON_REMOVE(${leads.scoring}, '$.scoreJob')
     END` as never,
-  }).where(eq(leads.id, leadId)).returning({ id: leads.id })
+  }).where(eq(leads.id, leadId))
+  const [row] = await db.select({ id: leads.id }).from(leads).where(eq(leads.id, leadId)).limit(1)
   return row ?? null
 }
 
@@ -204,17 +252,13 @@ export async function listRecoverableLeadScoreIds(limit = 500) {
   const rows = await db.select({ id: leads.id }).from(leads)
     .where(sql`
       ${visiblePublicLeadExpr}
-      AND COALESCE(${leads.source}, '') ~ '^项目发现雷达'
       AND NOT (
-        COALESCE(jsonb_typeof(${leads.scoring}->'dimensions') = 'array', false)
-        AND COALESCE(jsonb_array_length(${leads.scoring}->'dimensions'), 0) > 0
+        COALESCE(JSON_TYPE(${jsonValue(leads.scoring, '$.dimensions')}) = 'ARRAY', false)
+        AND COALESCE(JSON_LENGTH(${jsonValue(leads.scoring, '$.dimensions')}), 0) > 0
       )
       AND (
-        COALESCE(${leads.scoring}->'scoreJob'->>'status', '') IN ('queued', 'running', 'retrying')
-        OR (
-          ${leads.scoring}->'scoreJob' IS NULL
-          AND ${leads.createdAt} >= NOW() - INTERVAL '3 days'
-        )
+        COALESCE(${jsonText(leads.scoring, '$.scoreJob.status')}, '') IN ('queued', 'running', 'retrying', 'failed')
+        OR ${jsonValue(leads.scoring, '$.scoreJob')} IS NULL
       )
     `)
     .orderBy(desc(leads.createdAt))
@@ -394,7 +438,7 @@ export function deriveDataUpdatedAt(scoring: Record<string, unknown>, radarProfi
     .map((value) => new Date(value))
     .filter((value) => !Number.isNaN(value.getTime()))
   const latest = candidates.sort((a, b) => b.getTime() - a.getTime())[0]
-  return latest ? latest.toISOString().slice(0, 10) : ''
+  return latest ? formatShanghaiDateKey(latest) : ''
 }
 
 export function derivePoolEnteredAt(createdAt: Date | null) {
@@ -520,11 +564,12 @@ function enrichLead(row: typeof leads.$inferSelect) {
     : scoreJob
     ? {
         ...scoreJob,
-        error: scoreJob.status === 'failed' ? 'AI 评分暂未完成，可重新生成' : undefined,
+        error: ['failed', 'dead_letter'].includes(scoreJob.status) ? 'AI 评分暂未完成，可人工重试' : undefined,
       }
     : null
+  const { fieldProvenance: _fieldProvenance, ...publicRow } = row
   return {
-    ...row,
+    ...publicRow,
     scoring: sc,
     name: paperTitleZh || subjectName,
     summary: paperAbstractZh || row.summary,
@@ -534,7 +579,7 @@ function enrichLead(row: typeof leads.$inferSelect) {
     completeness,
     verificationStatus,
     analysisStatus,
-    lastVerifiedAt: row.createdAt ? new Date(row.createdAt).toISOString().slice(0, 10) : '',
+    lastVerifiedAt: row.createdAt ? formatShanghaiDateKey(row.createdAt) : '',
     channel,
     region,
     regionSource: regionResolution?.source,
@@ -566,7 +611,7 @@ export async function listLeads(options: { page?: number; pageSize?: number; cha
   // 错标为“创投新闻”，查询时同时依据具体来源字段识别，避免回填前筛选漏数。
   // 空值 = 不过滤；没有 radar channel 且也无法从来源识别的非雷达数据会被排除。
   const channel = (options.channel ?? '').trim()
-  // 关键词全库跨字段模糊检索(Postgres ILIKE 大小写不敏感);source 二级标签按 sourceName 模糊匹配。
+  // 关键词全库跨字段模糊检索（依赖 MySQL 当前不区分大小写排序规则）；source 二级标签按 sourceName 模糊匹配。
   // channel/keyword/source 可叠加,均进 whereClause 用 and() 合并。
   const keyword = (options.keyword ?? '').trim()
   const source = (options.source ?? '').trim()
@@ -576,44 +621,44 @@ export async function listLeads(options: { page?: number; pageSize?: number; cha
   // 已入库线索全部可见；未完成 AI 分析的记录由 enrichLead 标为 pending。
   // 同步和 AI 评分解耦，避免“已经同步但列表看不到”。
   const is36KrSource = sql`(
-    COALESCE(${leads.radarProfile}->>'sourceName', '') ILIKE '%36氪%'
-    OR COALESCE(${leads.radarProfile}->>'radarSourceKey', '') ILIKE '%36kr%'
+    COALESCE(${jsonText(leads.radarProfile, '$.sourceName')}, '') LIKE '%36氪%'
+    OR COALESCE(${jsonText(leads.radarProfile, '$.radarSourceKey')}, '') LIKE '%36kr%'
   )`
   if (channel === '36氪') {
-    conds.push(sql`(${leads.radarProfile}->>'channel' = '36氪' OR ${is36KrSource})`)
+    conds.push(sql`(${jsonText(leads.radarProfile, '$.channel')} = '36氪' OR ${is36KrSource})`)
   } else if (channel === '创投新闻') {
     // 前端渠道需要互斥：“创投新闻”只展示非 36氪的其他创投媒体。
     // 同时检查 channel 和具体来源字段，兼容历史数据中 channel 尚未正确回填的记录。
     conds.push(sql`(
       (
-        ${leads.radarProfile}->>'sourceGroup' = '创投新闻'
-        OR ${leads.radarProfile}->>'channel' = '创投新闻'
+        ${jsonText(leads.radarProfile, '$.sourceGroup')} = '创投新闻'
+        OR ${jsonText(leads.radarProfile, '$.channel')} = '创投新闻'
       )
-      AND COALESCE(${leads.radarProfile}->>'channel', '') <> '36氪'
+      AND COALESCE(${jsonText(leads.radarProfile, '$.channel')}, '') <> '36氪'
       AND NOT ${is36KrSource}
     )`)
   } else if (channel) {
-    conds.push(sql`${leads.radarProfile}->>'channel' = ${channel}`)
+    conds.push(sql`${jsonText(leads.radarProfile, '$.channel')} = ${channel}`)
   }
   if (source) {
     // source 可为逗号分隔的多个关键词(前端二级标签把一个标准机构映射到多个杂乱账号名),任一命中即算该机构
     const srcKws = source.split(',').map((x) => x.trim()).filter(Boolean)
     if (srcKws.length === 1) {
-      conds.push(sql`${leads.radarProfile}->>'sourceName' ILIKE ${'%' + srcKws[0] + '%'}`)
+      conds.push(sql`${jsonText(leads.radarProfile, '$.sourceName')} LIKE ${'%' + srcKws[0] + '%'}`)
     } else if (srcKws.length > 1) {
-      const ors = srcKws.map((kw) => sql`${leads.radarProfile}->>'sourceName' ILIKE ${'%' + kw + '%'}`)
+      const ors = srcKws.map((kw) => sql`${jsonText(leads.radarProfile, '$.sourceName')} LIKE ${'%' + kw + '%'}`)
       conds.push(sql`(${sql.join(ors, sql` OR `)})`)
     }
   }
   if (industry) {
-    // 行业检索:ILIKE 模糊匹配 leads.industry(行业值杂乱,多为逗号拼接的多标签如"企业服务、前沿技术"),
+    // 行业检索：LIKE 模糊匹配 leads.industry（行业值杂乱，多为逗号拼接的多标签如“企业服务、前沿技术”），
     // 选"前沿技术"用 %前沿技术% 即可命中所有含该词的多标签行。支持逗号分隔多关键词(任一命中)。
     const selectedTerms = BUSINESS_INDUSTRY_RULES.find((rule) => rule.label === industry)?.terms ?? [industry]
     const indKws = selectedTerms.map((x) => x.trim()).filter(Boolean)
     if (indKws.length === 1) {
-      conds.push(sql`${leads.industry} ILIKE ${'%' + indKws[0] + '%'}`)
+      conds.push(sql`${leads.industry} LIKE ${'%' + indKws[0] + '%'}`)
     } else if (indKws.length > 1) {
-      const ors = indKws.map((kw) => sql`${leads.industry} ILIKE ${'%' + kw + '%'}`)
+      const ors = indKws.map((kw) => sql`${leads.industry} LIKE ${'%' + kw + '%'}`)
       conds.push(sql`(${sql.join(ors, sql` OR `)})`)
     }
   }
@@ -624,13 +669,13 @@ export async function listLeads(options: { page?: number; pageSize?: number; cha
     const kw = '%' + keyword + '%'
     // 跨字段: 主展示列 + radar_profile/scoring 全文(投资方/团队/机构/来源账号等都在里面)
     conds.push(sql`(
-      ${leads.name} ILIKE ${kw}
-      OR ${leads.companyName} ILIKE ${kw}
-      OR ${leads.industry} ILIKE ${kw}
-      OR ${leads.summary} ILIKE ${kw}
-      OR ${leads.source} ILIKE ${kw}
-      OR ${leads.radarProfile}::text ILIKE ${kw}
-      OR ${leads.scoring}::text ILIKE ${kw}
+      ${leads.name} LIKE ${kw}
+      OR ${leads.companyName} LIKE ${kw}
+      OR ${leads.industry} LIKE ${kw}
+      OR ${leads.summary} LIKE ${kw}
+      OR ${leads.source} LIKE ${kw}
+      OR CAST(${leads.radarProfile} AS CHAR) LIKE ${kw}
+      OR CAST(${leads.scoring} AS CHAR) LIKE ${kw}
     )`)
   }
   const whereClause = conds.length === 0 ? undefined
@@ -650,46 +695,46 @@ export async function listLeads(options: { page?: number; pageSize?: number; cha
       score: overallScoreExpr,
       summary: leads.summary,
       // 轻量 scoring 摘要:只挑 completeness 计算需要的数组长度/存在性(不拉整个 scoring 大 jsonb)
-      scoring: sql<unknown>`CASE WHEN ${leads.scoring} IS NULL THEN NULL ELSE jsonb_build_object(
-        'dimensions', COALESCE(${leads.scoring}->'dimensions','[]'::jsonb),
-        'structuredTeam', COALESCE(${leads.scoring}->'structuredTeam','[]'::jsonb),
-        'structuredShareholders', COALESCE(${leads.scoring}->'structuredShareholders','[]'::jsonb),
-        'competitors', COALESCE(${leads.scoring}->'competitors','[]'::jsonb),
-        'fundingRoundsResearched', COALESCE(${leads.scoring}->'fundingRoundsResearched','[]'::jsonb),
-        'researchSources', COALESCE(${leads.scoring}->'researchSources','[]'::jsonb),
-        'total', ${leads.scoring}->'total',
-        'overall_comment', ${leads.scoring}->'overall_comment',
-        'scored_at', ${leads.scoring}->'scored_at',
-        'scoreJob', ${leads.scoring}->'scoreJob',
-        'registry', COALESCE(${leads.scoring}->'registry','{}'::jsonb)
+      scoring: sql<unknown>`CASE WHEN ${leads.scoring} IS NULL THEN NULL ELSE JSON_OBJECT(
+        'dimensions', COALESCE(${jsonValue(leads.scoring, '$.dimensions')}, JSON_ARRAY()),
+        'structuredTeam', COALESCE(${jsonValue(leads.scoring, '$.structuredTeam')}, JSON_ARRAY()),
+        'structuredShareholders', COALESCE(${jsonValue(leads.scoring, '$.structuredShareholders')}, JSON_ARRAY()),
+        'competitors', COALESCE(${jsonValue(leads.scoring, '$.competitors')}, JSON_ARRAY()),
+        'fundingRoundsResearched', COALESCE(${jsonValue(leads.scoring, '$.fundingRoundsResearched')}, JSON_ARRAY()),
+        'researchSources', COALESCE(${jsonValue(leads.scoring, '$.researchSources')}, JSON_ARRAY()),
+        'total', ${jsonValue(leads.scoring, '$.total')},
+        'overall_comment', ${jsonValue(leads.scoring, '$.overall_comment')},
+        'scored_at', ${jsonValue(leads.scoring, '$.scored_at')},
+        'scoreJob', ${jsonValue(leads.scoring, '$.scoreJob')},
+        'registry', COALESCE(${jsonValue(leads.scoring, '$.registry')}, JSON_OBJECT())
       ) END`,
       // 列表只取 radar_profile 里列表渲染需要的字段,保持与详情接口"同构"({profile,channel,sourceName,...})
       // 否则前端 setSelected(列表lead) 后 Drawer 按嵌套结构访问会拿到 undefined,导致弹窗渲染异常
-      // 用 jsonb_build_object 只挑 profile + 几个行内展示字段,大小从 8-37KB 砍到 <1KB
-      radarProfile: sql<unknown>`CASE WHEN ${leads.radarProfile} IS NULL THEN NULL ELSE jsonb_build_object(
-        'profile', ${leads.radarProfile}->'profile',
-        'channel', ${leads.radarProfile}->'channel',
-        'sourceName', ${leads.radarProfile}->'sourceName',
-        'sourceGroup', ${leads.radarProfile}->'sourceGroup',
-        'sourceTitle', COALESCE(${leads.radarProfile}->'sourceTitle', ${leads.sources}->0->'title'),
-        'publishedAt', ${leads.radarProfile}->'publishedAt',
-        'aiSubjectReview', ${leads.radarProfile}->'aiSubjectReview',
+      // 只构造 profile + 几个行内展示字段，避免返回完整 JSON 大字段，大小从 8-37KB 降到 <1KB。
+      radarProfile: sql<unknown>`CASE WHEN ${leads.radarProfile} IS NULL THEN NULL ELSE JSON_OBJECT(
+        'profile', ${jsonValue(leads.radarProfile, '$.profile')},
+        'channel', ${jsonValue(leads.radarProfile, '$.channel')},
+        'sourceName', ${jsonValue(leads.radarProfile, '$.sourceName')},
+        'sourceGroup', ${jsonValue(leads.radarProfile, '$.sourceGroup')},
+        'sourceTitle', COALESCE(${jsonValue(leads.radarProfile, '$.sourceTitle')}, ${jsonValue(leads.sources, '$[0].title')}),
+        'publishedAt', ${jsonValue(leads.radarProfile, '$.publishedAt')},
+        'aiSubjectReview', ${jsonValue(leads.radarProfile, '$.aiSubjectReview')},
         'paperMeta', CASE
-          WHEN ${leads.radarProfile}->'paperMeta' IS NULL THEN NULL
-          ELSE jsonb_build_object(
-            'titleZh', ${leads.radarProfile}->'paperMeta'->'titleZh',
-            'authors', ${leads.radarProfile}->'paperMeta'->'authors',
-            'categories', ${leads.radarProfile}->'paperMeta'->'categories'
+          WHEN ${jsonValue(leads.radarProfile, '$.paperMeta')} IS NULL THEN NULL
+          ELSE JSON_OBJECT(
+            'titleZh', ${jsonValue(leads.radarProfile, '$.paperMeta.titleZh')},
+            'authors', ${jsonValue(leads.radarProfile, '$.paperMeta.authors')},
+            'categories', ${jsonValue(leads.radarProfile, '$.paperMeta.categories')}
           )
         END
       ) END`,
       // 列表估值兜底：仅保留第一条历史融资的轮次/估值，避免返回完整 funding_rounds。
       fundingRounds: sql<unknown[]>`CASE
-        WHEN jsonb_array_length(COALESCE(${leads.fundingRounds}, '[]'::jsonb)) > 0 THEN jsonb_build_array(jsonb_build_object(
-          'round', ${leads.fundingRounds}->0->'round',
-          'valuation', ${leads.fundingRounds}->0->'valuation'
+        WHEN JSON_LENGTH(COALESCE(${leads.fundingRounds}, JSON_ARRAY())) > 0 THEN JSON_ARRAY(JSON_OBJECT(
+          'round', ${jsonValue(leads.fundingRounds, '$[0].round')},
+          'valuation', ${jsonValue(leads.fundingRounds, '$[0].valuation')}
         ))
-        ELSE '[]'::jsonb
+        ELSE JSON_ARRAY()
       END`,
       completeness: completenessExpr,
       createdAt: leads.createdAt,
@@ -697,7 +742,7 @@ export async function listLeads(options: { page?: number; pageSize?: number; cha
       options.sort === 'score' ? desc(overallScoreExpr) : desc(leads.createdAt),
       desc(leads.id),
     ).limit(pageSize).offset(offset),
-    db.select({ n: sql<number>`count(*)::int` }).from(leads).where(whereClause),
+    db.select({ n: sql<number>`count(*)` }).from(leads).where(whereClause),
   ])
   const total = totalRow[0]?.n ?? 0
   return {
@@ -724,16 +769,16 @@ export async function leadPoolStats() {
     fundingRounds: leads.fundingRounds,
     sources: leads.sources,
     score: overallScoreExpr,
-    scoring: sql<unknown>`CASE WHEN ${leads.scoring} IS NULL THEN NULL ELSE jsonb_build_object(
-      'dimensions', COALESCE(${leads.scoring}->'dimensions','[]'::jsonb),
-      'structuredTeam', COALESCE(${leads.scoring}->'structuredTeam','[]'::jsonb),
-      'structuredShareholders', COALESCE(${leads.scoring}->'structuredShareholders','[]'::jsonb),
-      'competitors', COALESCE(${leads.scoring}->'competitors','[]'::jsonb),
-      'fundingRoundsResearched', COALESCE(${leads.scoring}->'fundingRoundsResearched','[]'::jsonb),
-      'researchSources', COALESCE(${leads.scoring}->'researchSources','[]'::jsonb),
-      'total', ${leads.scoring}->'total',
-      'overall_comment', ${leads.scoring}->'overall_comment',
-      'registry', COALESCE(${leads.scoring}->'registry','{}'::jsonb)
+    scoring: sql<unknown>`CASE WHEN ${leads.scoring} IS NULL THEN NULL ELSE JSON_OBJECT(
+      'dimensions', COALESCE(${jsonValue(leads.scoring, '$.dimensions')}, JSON_ARRAY()),
+      'structuredTeam', COALESCE(${jsonValue(leads.scoring, '$.structuredTeam')}, JSON_ARRAY()),
+      'structuredShareholders', COALESCE(${jsonValue(leads.scoring, '$.structuredShareholders')}, JSON_ARRAY()),
+      'competitors', COALESCE(${jsonValue(leads.scoring, '$.competitors')}, JSON_ARRAY()),
+      'fundingRoundsResearched', COALESCE(${jsonValue(leads.scoring, '$.fundingRoundsResearched')}, JSON_ARRAY()),
+      'researchSources', COALESCE(${jsonValue(leads.scoring, '$.researchSources')}, JSON_ARRAY()),
+      'total', ${jsonValue(leads.scoring, '$.total')},
+      'overall_comment', ${jsonValue(leads.scoring, '$.overall_comment')},
+      'registry', COALESCE(${jsonValue(leads.scoring, '$.registry')}, JSON_OBJECT())
     ) END`,
   }).from(leads).where(visiblePublicLeadExpr)
   let total = 0, verified = 0, highPriority = 0, compSum = 0
@@ -753,41 +798,146 @@ export async function leadPoolStats() {
 }
 
 export async function getLeadById(leadId: string) {
-  const [row] = await db.select({ ...getTableColumns(leads), completeness: completenessExpr }).from(leads).where(eq(leads.id, leadId)).limit(1)
+  const [mapping] = await db.select({ targetId: migrationEntityMappings.targetId })
+    .from(migrationEntityMappings)
+    .where(and(
+      eq(migrationEntityMappings.sourceSystem, 'business_decision'),
+      eq(migrationEntityMappings.sourceTable, 'lead_duplicate_merge'),
+      eq(migrationEntityMappings.sourceId, leadId),
+    )).limit(1)
+  const canonicalLeadId = mapping?.targetId || leadId
+  const [row] = await db.select({ ...getTableColumns(leads), completeness: completenessExpr })
+    .from(leads).where(eq(leads.id, canonicalLeadId)).limit(1)
   return row ? enrichLead(row as typeof leads.$inferSelect & { completeness: number }) : null
 }
 
-export async function createLead(input: typeof leads.$inferInsert, userId?: string) {
-  const [row] = await db.insert(leads).values(input).returning()
+type AppDatabase = typeof db
+
+async function createLeadRecord(
+  input: typeof leads.$inferInsert,
+  userId: string | undefined,
+  database: AppDatabase,
+  ingest = true,
+) {
+  const [inserted] = await database.insert(leads).values(input).$returningId()
+  const [row] = await database.select().from(leads).where(eq(leads.id, inserted.id)).limit(1)
   if (row) {
-    await db.insert(auditLogs).values({
+    await database.insert(auditLogs).values({
       userId: userId ?? null,
       userName: '（系统）',
       module: '项目获取池',
       action: '上传并解析 BP',
       target: row.name,
     })
-    void ingestLeadProfile(row)
+    if (ingest) void ingestLeadProfile(row)
   }
   return row
 }
 
-export async function syncRadarLeadByName(input: RadarLeadSyncFields, userId?: string): Promise<{
+export async function createLead(input: typeof leads.$inferInsert, userId?: string) {
+  return await createLeadRecord({
+    ...input,
+    fieldProvenance: initialLeadFieldProvenance(input as Record<string, unknown>, userId ? 'manual' : 'legacy_import'),
+  }, userId, db, true)
+}
+
+type RadarLeadSyncResult = {
   status: 'created' | 'updated' | 'unchanged'
   row: typeof leads.$inferSelect
   duplicateMatches: number
-}> {
+  entityMatchType: 'radar_source_key' | 'exact_name' | 'source_url' | 'no_match'
+}
+
+type RadarLeadAmbiguityError = Error & {
+  code: 'RADAR_LEAD_ENTITY_AMBIGUOUS'
+  duplicateMatches: number
+  reviewStaged?: boolean
+  candidates: Array<typeof leads.$inferSelect>
+  matchType: 'radar_source_key' | 'exact_name' | 'source_url'
+}
+
+function radarLeadAmbiguityError(
+  name: string,
+  candidates: Array<typeof leads.$inferSelect>,
+  matchType: RadarLeadAmbiguityError['matchType'],
+): RadarLeadAmbiguityError {
+  const error = Object.assign(new Error(`Radar 主体匹配到多条正式线索，必须人工指定目标: ${name}`), {
+    code: 'RADAR_LEAD_ENTITY_AMBIGUOUS' as const,
+    duplicateMatches: Math.max(1, candidates.length - 1),
+    reviewStaged: false,
+    matchType,
+  }) as RadarLeadAmbiguityError
+  Object.defineProperty(error, 'candidates', { value: candidates, enumerable: false })
+  return error
+}
+
+function radarLeadLockNames(input: RadarLeadSyncFields) {
+  const normalizedName = input.name.normalize('NFKC').trim().replace(/\s+/g, ' ').toLocaleLowerCase()
+  const identities = [
+    normalizedName ? `name:${normalizedName}` : '',
+    ...(input.radarSourceKeys ?? [])
+      .map((sourceKey) => sourceKey.normalize('NFKC').trim().toLocaleLowerCase())
+      .filter(Boolean)
+      .map((sourceKey) => `source:${sourceKey}`),
+  ].filter(Boolean)
+  return [...new Set(identities)]
+    .map((identity) => `radar-lead:${createHash('sha256').update(identity).digest('hex').slice(0, 48)}`)
+    .sort()
+}
+
+async function withRadarLeadLocks<T>(
+  input: RadarLeadSyncFields,
+  task: (connection: PoolConnection) => Promise<T>,
+  suppliedConnection?: PoolConnection,
+): Promise<T> {
+  const lockNames = radarLeadLockNames(input)
+  const connection = suppliedConnection ?? await pool.getConnection()
+  const acquired: string[] = []
+  try {
+    for (const lockName of lockNames) {
+      const [rows] = await connection.query<Array<RowDataPacket & { acquired: number | null }>>(
+        'SELECT GET_LOCK(?, 15) AS acquired',
+        [lockName],
+      )
+      if (Number(rows[0]?.acquired) !== 1) {
+        throw Object.assign(new Error('Radar 线索同步互斥锁等待超时，请稍后重试'), {
+          code: 'RADAR_SYNC_LOCK_TIMEOUT',
+          retryable: true,
+        })
+      }
+      acquired.push(lockName)
+    }
+    return await task(connection)
+  } finally {
+    for (const lockName of acquired.reverse()) {
+      await connection.query('SELECT RELEASE_LOCK(?)', [lockName]).catch(() => {})
+    }
+    if (!suppliedConnection) connection.release()
+  }
+}
+
+async function syncRadarLeadByNameUnlocked(
+  input: RadarLeadSyncFields,
+  userId?: string,
+  database: AppDatabase = db,
+  ingest = true,
+): Promise<RadarLeadSyncResult> {
   // 主体名称优化后可能与历史错误短语不同：先按明确名称匹配，匹配不到时
   // 再按 Radar 原文链接定位同一条线索，使历史模糊名称可被安全升级而不新建重复记录。
   const radarSourceKey = input.radarSourceKeys?.find((value) => value.trim())?.trim() ?? ''
+  let entityMatchType: RadarLeadSyncResult['entityMatchType'] = radarSourceKey ? 'radar_source_key' : 'exact_name'
   let matches = radarSourceKey
-    ? await db.select().from(leads)
-      .where(sql`${leads.radarSourceKeys} @> ${JSON.stringify([radarSourceKey])}::jsonb`)
+    ? await database.select().from(leads)
+      .where(and(
+        sql`JSON_CONTAINS(${leads.radarSourceKeys}, JSON_ARRAY(${radarSourceKey}))`,
+        ne(leads.poolStatus, '已合并'),
+      ))
       .orderBy(asc(leads.createdAt))
     : []
   if (!matches.length) {
-    matches = await db.select().from(leads)
-      .where(eq(leads.name, input.name))
+    entityMatchType = 'exact_name'
+    matches = await database.select().from(leads)
+      .where(and(eq(leads.name, input.name), ne(leads.poolStatus, '已合并')))
       .orderBy(asc(leads.createdAt))
   }
   const inputRadarProfile = input.radarProfile && typeof input.radarProfile === 'object'
@@ -795,24 +945,29 @@ export async function syncRadarLeadByName(input: RadarLeadSyncFields, userId?: s
     : {}
   const sourceLink = typeof inputRadarProfile.link === 'string' ? inputRadarProfile.link.trim() : ''
   if (!matches.length && sourceLink) {
-    matches = await db.select().from(leads)
-      .where(sql`${leads.radarProfile}->>'link' = ${sourceLink}`)
+    entityMatchType = 'source_url'
+    matches = await database.select().from(leads)
+      .where(and(sql`${jsonText(leads.radarProfile, '$.link')} = ${sourceLink}`, ne(leads.poolStatus, '已合并')))
       .orderBy(asc(leads.createdAt))
+  }
+  if (matches.length > 1) {
+    throw radarLeadAmbiguityError(input.name, matches, entityMatchType)
   }
   const existing = matches[0]
   if (!existing) {
     try {
-      const row = await createLead({
+      const row = await createLeadRecord({
         ...input,
         score: 0,
-      } as typeof leads.$inferInsert, userId)
+        fieldProvenance: initialLeadFieldProvenance(input as unknown as Record<string, unknown>, 'radar'),
+      } as typeof leads.$inferInsert, userId, database, ingest)
       if (!row) throw new Error(`新增 Radar 线索失败：${input.name}`)
-      return { status: 'created', row, duplicateMatches: 0 }
+      return { status: 'created', row, duplicateMatches: 0, entityMatchType: 'no_match' }
     } catch (createErr) {
       // 并发竞态：唯一约束冲突 → 另一并发请求已创建同名记录，退化为 merge
-      if ((createErr as Error & { code?: string }).code === '23505') {
-        const [fallback] = await db.select().from(leads)
-          .where(eq(leads.name, input.name))
+      if ((createErr as Error & { code?: string }).code === 'ER_DUP_ENTRY') {
+        const [fallback] = await database.select().from(leads)
+          .where(and(eq(leads.name, input.name), ne(leads.poolStatus, '已合并')))
           .orderBy(asc(leads.createdAt))
         if (fallback) {
           // 复用下面的 merge 逻辑
@@ -835,8 +990,8 @@ export async function syncRadarLeadByName(input: RadarLeadSyncFields, userId?: s
     && isBetterLeadSubjectName(merged.name, input.name)
   if (canUpgradeSubjectName && input.name !== merged.name) {
     // 防止名称升级撞上已有记录的唯一约束
-    const nameConflict = await db.select({ id: leads.id }).from(leads)
-      .where(eq(leads.name, input.name))
+    const nameConflict = await database.select({ id: leads.id }).from(leads)
+      .where(and(eq(leads.name, input.name), ne(leads.poolStatus, '已合并')))
       .limit(1)
     if (nameConflict.length === 0) {
       patch.name = input.name
@@ -846,90 +1001,316 @@ export async function syncRadarLeadByName(input: RadarLeadSyncFields, userId?: s
     }
   }
   if (Object.keys(patch).length === 0) {
-    return { status: 'unchanged', row: merged, duplicateMatches: Math.max(0, matches.length - 1) }
+    return { status: 'unchanged', row: merged, duplicateMatches: Math.max(0, matches.length - 1), entityMatchType }
   }
 
-  const [row] = await db.update(leads)
-    .set(patch as Partial<typeof leads.$inferInsert>)
+  const protectedPatch = applyLeadFieldPolicy(
+    merged as unknown as Record<string, unknown>,
+    patch,
+    'radar',
+    {
+      additiveFields: ['fundingRounds', 'sources', 'highlights', 'risks', 'riskTags'],
+      alwaysReplaceFields: ['radarProfile', 'radarSourceKeys'],
+      linkedFields: [['businessRegion', 'businessRegionSource', 'businessRegionConfidence']],
+      operation: 'machine_refresh',
+    },
+  )
+  if (Object.keys(protectedPatch).length === 0) {
+    return { status: 'unchanged', row: merged, duplicateMatches: Math.max(0, matches.length - 1), entityMatchType }
+  }
+  await database.update(leads)
+    .set(protectedPatch as Partial<typeof leads.$inferInsert>)
     .where(eq(leads.id, merged.id))
-    .returning()
+  const [row] = await database.select().from(leads).where(eq(leads.id, merged.id)).limit(1)
   if (!row) throw new Error(`更新 Radar 线索失败：${input.name}`)
-  await db.insert(auditLogs).values({
+  await database.insert(auditLogs).values({
     userId: userId ?? null,
     userName: '（系统）',
     module: '项目获取池',
     action: 'Radar 增量更新',
     target: row.name,
   })
-  void ingestLeadProfile(row)
-  return { status: 'updated', row, duplicateMatches: Math.max(0, matches.length - 1) }
+  if (ingest) void ingestLeadProfile(row)
+  return { status: 'updated', row, duplicateMatches: Math.max(0, matches.length - 1), entityMatchType }
 }
 
-export async function convertLead(leadId: string, projectId: string, userId: string) {
-  const [row] = await db.update(leads).set({
-    poolStatus: '已转专属项目',
-    convertedProjectId: projectId,
-    claimedBy: '（系统）',
-  }).where(eq(leads.id, leadId)).returning()
-  if (row) await db.insert(auditLogs).values({ userId, userName: '（系统）', module: '项目获取池', action: '领取为我的专属项目', target: row.name })
-  return row
+export async function syncRadarLeadByName(
+  input: RadarLeadSyncFields,
+  userId?: string,
+): Promise<RadarLeadSyncResult> {
+  return await withRadarLeadLocks(input, async () => await syncRadarLeadByNameUnlocked(input, userId))
 }
 
-export async function saveLeadScoring(leadId: string, scoring: unknown, score: number) {
+export async function commitRadarLeadPipelineReady(input: {
+  lead: RadarLeadSyncFields
+  eventId: string
+  transition: Omit<LeadPipelineTransitionInput, 'status' | 'leadId'>
+  userId?: string
+}): Promise<RadarLeadSyncResult> {
+  const connection = await pool.getConnection()
+  let result: RadarLeadSyncResult | null = null
+  try {
+    return await withRadarLeadLocks(input.lead, async () => {
+      await connection.beginTransaction()
+      try {
+        const transactionDb = drizzle({ client: connection, schema, mode: 'default' }) as unknown as AppDatabase
+        result = await syncRadarLeadByNameUnlocked(input.lead, input.userId, transactionDb, false)
+        const transition = await transitionLeadPipelineItem(input.eventId, {
+          ...input.transition,
+          status: 'ready',
+          leadId: result.row.id,
+        }, connection)
+        if (transition.blocked || transition.item.leadId !== result.row.id) {
+          throw new Error('Radar Pipeline ready transition did not bind the committed lead')
+        }
+        await recordLeadPipelineEntityMatch({
+          idempotencyKey: `${input.eventId}:radar-entity-resolution:${result.row.id}:v1`,
+          eventId: input.eventId,
+          subjectName: input.lead.name,
+          matchType: result.entityMatchType,
+          candidateLeadId: result.row.id,
+          candidateName: result.row.name,
+          candidateCompanyName: result.row.companyName,
+          score: 10_000,
+          status: result.status === 'created' ? 'created' : 'selected',
+          resolutionType: result.status === 'created' ? 'created' : 'automatic',
+          aliases: [input.lead.name, input.lead.companyName ?? ''].filter(Boolean),
+          metadata: { syncStatus: result.status },
+        }, connection)
+        await connection.commit()
+        void ingestLeadProfile(result.row)
+        return result
+      } catch (error) {
+        await connection.rollback()
+        const ambiguity = error as Partial<RadarLeadAmbiguityError>
+        if (ambiguity.code === 'RADAR_LEAD_ENTITY_AMBIGUOUS') {
+          const reason = `Radar 主体“${input.lead.name}”匹配到多条正式线索，必须人工选择合并目标`
+          await connection.beginTransaction()
+          try {
+            const decision = await recordLeadPipelineDecision({
+              idempotencyKey: `${input.eventId}:radar-entity-ambiguity:v1`,
+              eventId: input.eventId,
+              decisionType: 'entity_resolution',
+              outcome: 'review',
+              subjectName: input.lead.name,
+              confidence: input.transition.confidence,
+              reason,
+              output: { duplicateMatches: ambiguity.duplicateMatches ?? 1 },
+              actorType: 'system',
+              actorId: 'radar-entity-resolution',
+              evidence: [{
+                sourceType: 'radar',
+                claim: reason,
+                verificationStatus: 'conflicted',
+              }],
+            }, connection)
+            const review = await openLeadPipelineReview({
+              idempotencyKey: `${input.eventId}:radar-entity-ambiguity:v1`,
+              eventId: input.eventId,
+              triggerDecisionId: decision.id,
+              reason,
+            }, connection)
+            for (const candidate of ambiguity.candidates ?? []) {
+              await recordLeadPipelineEntityMatch({
+                idempotencyKey: `${input.eventId}:radar-entity-ambiguity:${candidate.id}:v1`,
+                eventId: input.eventId,
+                decisionId: decision.id,
+                reviewId: review.id,
+                subjectName: input.lead.name,
+                matchType: ambiguity.matchType ?? 'exact_name',
+                candidateLeadId: candidate.id,
+                candidateName: candidate.name,
+                candidateCompanyName: candidate.companyName,
+                score: 10_000,
+                status: 'ambiguous',
+                metadata: { poolStatus: candidate.poolStatus },
+              }, connection)
+            }
+            const transition = await transitionLeadPipelineItem(input.eventId, {
+              status: 'review',
+              reason,
+              evidence: input.transition.evidence,
+              confidence: input.transition.confidence,
+              actorType: 'system',
+              actorId: 'radar-entity-resolution',
+            }, connection)
+            if (transition.blocked || transition.item.status !== 'review' || transition.item.leadId) {
+              throw new Error('Radar duplicate review transition did not preserve an unbound review item')
+            }
+            await connection.commit()
+            ambiguity.reviewStaged = true
+          } catch (reviewError) {
+            await connection.rollback()
+            throw reviewError
+          }
+        }
+        throw error
+      }
+    }, connection)
+  } finally {
+    connection.release()
+  }
+}
+
+function leadConversionError(status: number, code: string, message: string) {
+  return Object.assign(new Error(message), { status, code })
+}
+
+function objectValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
+}
+
+function textValue(value: unknown): string | undefined {
+  const valueText = typeof value === 'string' ? value.trim() : ''
+  return valueText || undefined
+}
+
+export async function convertLead(leadId: string, userId: string) {
+  const converted = await db.transaction(async (tx) => {
+    const actor = await createMySqlIdentityRepositoryContext(tx).users.findById(userId)
+    if (!actor || actor.status !== '启用') {
+      throw leadConversionError(403, 'LEAD_CONVERT_ACTOR_INVALID', '当前账号不可执行线索转项目')
+    }
+
+    const [mapping] = await tx.select({ targetId: migrationEntityMappings.targetId })
+      .from(migrationEntityMappings)
+      .where(and(
+        eq(migrationEntityMappings.sourceSystem, 'business_decision'),
+        eq(migrationEntityMappings.sourceTable, 'lead_duplicate_merge'),
+        eq(migrationEntityMappings.sourceId, leadId),
+      )).limit(1)
+    const canonicalLeadId = mapping?.targetId || leadId
+    await tx.execute(sql`SELECT ${leads.id} FROM ${leads} WHERE ${leads.id}=${canonicalLeadId} FOR UPDATE`)
+    const [lead] = await tx.select().from(leads).where(eq(leads.id, canonicalLeadId)).limit(1)
+    if (!lead) throw leadConversionError(404, 'LEAD_NOT_FOUND', '线索不存在')
+    if (lead.convertedProjectId) {
+      throw leadConversionError(409, 'LEAD_ALREADY_CONVERTED', '该线索已转为专属项目，请刷新后查看')
+    }
+
+    const radarProfile = objectValue(lead.radarProfile)
+    const profile = objectValue(radarProfile.profile)
+    const firstFunding = objectValue(Array.isArray(lead.fundingRounds) ? lead.fundingRounds[0] : undefined)
+    const riskTags = Array.isArray(lead.riskTags)
+      ? lead.riskTags.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+      : []
+    const tags = [...new Set([textValue(lead.industry), ...riskTags].filter((item): item is string => Boolean(item)))]
+    const [inserted] = await tx.insert(projects).values({
+      name: lead.name,
+      companyName: textValue(lead.companyName),
+      industry: textValue(lead.industry),
+      round: textValue(firstFunding.round) ?? textValue(profile.project_round),
+      stage: '线索',
+      stageSource: '线索转入',
+      owner: actor.name,
+      ownerUserId: actor.id,
+      collaborators: [],
+      source: textValue(lead.source),
+      financing: textValue(firstFunding.amount) ?? textValue(profile.financing_amount),
+      valuation: textValue(firstFunding.valuation) ?? textValue(profile.latest_valuation),
+      riskLevel: riskTags.length > 1 ? '中' : '低',
+      score: lead.score,
+      progress: 12,
+      summary: textValue(lead.summary),
+      businessModel: null,
+      market: null,
+      team: textValue(lead.team),
+      tags,
+      scoring: lead.scoring,
+      createdBy: actor.id,
+    }).$returningId()
+    await tx.insert(projectMembers).values({
+      projectId: inserted.id,
+      userId: actor.id,
+      memberRole: 'owner',
+      sourceName: actor.name,
+    })
+    await tx.update(leads).set({
+      poolStatus: '已转专属项目',
+      convertedProjectId: inserted.id,
+      claimedBy: actor.name,
+    }).where(eq(leads.id, lead.id))
+    await tx.insert(auditLogs).values([
+      { userId: actor.id, userName: actor.name, module: '项目管理', action: '从线索创建项目', target: lead.name },
+      { userId: actor.id, userName: actor.name, module: '项目获取池', action: '领取为我的专属项目', target: lead.name },
+    ])
+    return { projectId: inserted.id, leadId: lead.id }
+  })
+
+  const [[project], [lead]] = await Promise.all([
+    db.select().from(projects).where(eq(projects.id, converted.projectId)).limit(1),
+    db.select().from(leads).where(eq(leads.id, converted.leadId)).limit(1),
+  ])
+  return {
+    project: project.scoring ? { ...project, scoring: sanitizeScoringCompetitors(project.scoring) } : project,
+    lead,
+  }
+}
+
+export async function saveLeadScoring(
+  leadId: string,
+  scoring: unknown,
+  score: number,
+  options: { ingest?: boolean } = {},
+) {
   // AI 分析只使用已入库资料。结构化维度回填到 leads 独立列时，
   // 仅用实质内容更新，不以空值覆盖原始资料。
   const sc = (scoring ?? {}) as Record<string, unknown>
   const arr = (v: unknown) => (Array.isArray(v) ? v : [])
   const nonEmpty = (a: unknown[]) => a.length > 0
-  const patch: Record<string, unknown> = { scoring: scoring as never, score }
+  const row = await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT ${leads.id} FROM ${leads} WHERE ${leads.id}=${leadId} FOR UPDATE`)
+    const [current] = await tx.select().from(leads).where(eq(leads.id, leadId)).limit(1)
+    if (!current) return undefined
+    const proposed: Record<string, unknown> = { scoring: scoring as never, score }
 
-  // 团队: scoring.structuredTeam -> team(text) 拼成可读文本
-  const team = arr(sc.structuredTeam) as Array<{ name?: string; title?: string; background?: string }>
-  if (nonEmpty(team)) {
-    patch.team = team.map((t) => `${t.name ?? ''}${t.title ? `（${t.title}）` : ''}${t.background ? '：' + t.background : ''}`).filter((x) => x.trim()).join('；').slice(0, 2000)
-  }
-  // 融资历史: scoring.fundingRoundsResearched -> funding_rounds(jsonb)
-  const fr = arr(sc.fundingRoundsResearched)
-  if (nonEmpty(fr)) patch.fundingRounds = fr as never
-  // 来源证据: scoring.researchSources -> sources(jsonb)
-  const srcs = arr(sc.researchSources)
-  if (nonEmpty(srcs)) patch.sources = srcs as never
-  // 亮点/风险: 评分 overall_comment 拆不出结构化亮点,但若 scoring 里带了 highlights/risks 就回填
-  const hl = arr(sc.highlights)
-  if (nonEmpty(hl)) patch.highlights = hl as never
-  const rk = arr(sc.risks)
-  if (nonEmpty(rk)) patch.risks = rk as never
-  // 摘要: scoring.whatIsIt(AI 概括的一句话) -> summary(仅当原 summary 为空/占位时补)
-  const whatIsIt = typeof sc.whatIsIt === 'string' ? sc.whatIsIt.trim() : ''
-  const registry = sc.registry && typeof sc.registry === 'object' && !Array.isArray(sc.registry)
-    ? sc.registry as Record<string, unknown>
-    : {}
-  const regionResolution = resolveLeadBusinessRegion({ registry })
-  if (regionResolution) {
-    patch.businessRegion = regionResolution.region
-    patch.businessRegionSource = regionResolution.source
-    patch.businessRegionConfidence = regionResolution.confidence
-  }
-  const registryCompanyName = typeof registry.companyName === 'string' ? registry.companyName.trim() : ''
-  if (registryCompanyName) {
-    const [current] = await db.select({
-      name: leads.name,
-      companyName: leads.companyName,
-      source: leads.source,
-    }).from(leads).where(eq(leads.id, leadId)).limit(1)
-    // 空主体可以补齐；Radar 的 name/companyName 同值兜底可被明确法定全称升级。
-    // 人工/BP 已有主体以及其他 Radar 有效主体一律不覆盖。
-    if (shouldBackfillCompanyName(current, registryCompanyName)) {
-      patch.companyName = registryCompanyName.slice(0, 128)
+    // AI 只能刷新自身拥有的标量；人工/人工复核/旧源字段受来源优先级保护。
+    const team = arr(sc.structuredTeam) as Array<{ name?: string; title?: string; background?: string }>
+    if (nonEmpty(team)) {
+      proposed.team = team.map((t) => `${t.name ?? ''}${t.title ? `（${t.title}）` : ''}${t.background ? '：' + t.background : ''}`).filter((x) => x.trim()).join('；').slice(0, 2000)
     }
-  }
+    const fundingRounds = arr(sc.fundingRoundsResearched)
+    if (nonEmpty(fundingRounds)) proposed.fundingRounds = mergeRadarFundingRounds(current.fundingRounds, fundingRounds)
+    const sources = arr(sc.researchSources)
+    if (nonEmpty(sources)) proposed.sources = mergeRadarSources(current.sources, sources)
+    const highlights = arr(sc.highlights)
+    if (nonEmpty(highlights)) proposed.highlights = mergeUniqueValues(current.highlights, highlights)
+    const risks = arr(sc.risks)
+    if (nonEmpty(risks)) proposed.risks = mergeUniqueValues(current.risks, risks)
 
-  const [row] = await db.update(leads).set(patch as never).where(eq(leads.id, leadId)).returning()
-  // summary 单独处理:只在原来为空/占位时用 AI 的 whatIsIt 补,不覆盖已有摘要
-  if (row && whatIsIt && (!row.summary || ['', '待核验', '待核实', '未披露'].includes(String(row.summary).trim()))) {
-    await db.update(leads).set({ summary: whatIsIt.slice(0, 1000) }).where(eq(leads.id, leadId))
-  }
-  if (row) void ingestLeadProfile(row)
+    const whatIsIt = typeof sc.whatIsIt === 'string' ? sc.whatIsIt.trim() : ''
+    if (whatIsIt) proposed.summary = whatIsIt.slice(0, 1000)
+    const registry = sc.registry && typeof sc.registry === 'object' && !Array.isArray(sc.registry)
+      ? sc.registry as Record<string, unknown>
+      : {}
+    const regionResolution = resolveLeadBusinessRegion({ registry })
+    if (regionResolution) {
+      proposed.businessRegion = regionResolution.region
+      proposed.businessRegionSource = regionResolution.source
+      proposed.businessRegionConfidence = regionResolution.confidence
+    }
+    const registryCompanyName = typeof registry.companyName === 'string' ? registry.companyName.trim() : ''
+    if (registryCompanyName && shouldBackfillCompanyName(current, registryCompanyName)) {
+      proposed.companyName = registryCompanyName.slice(0, 128)
+    }
+
+    const protectedPatch = applyLeadFieldPolicy(
+      current as unknown as Record<string, unknown>,
+      proposed,
+      'ai_scoring',
+      {
+        additiveFields: ['fundingRounds', 'sources', 'highlights', 'risks'],
+        alwaysReplaceFields: ['scoring', 'score'],
+        linkedFields: [['businessRegion', 'businessRegionSource', 'businessRegionConfidence']],
+        operation: 'machine_refresh',
+      },
+    )
+    if (Object.keys(protectedPatch).length) {
+      await tx.update(leads).set(protectedPatch as never).where(eq(leads.id, leadId))
+    }
+    const [updated] = await tx.select().from(leads).where(eq(leads.id, leadId)).limit(1)
+    return updated
+  })
+  if (row && options.ingest !== false) void ingestLeadProfile(row)
   return row
 }
 
@@ -959,7 +1340,7 @@ export async function ingestLeadProfile(lead: typeof leads.$inferSelect) {
 // 极轻量:只 SELECT 2 列,无 jsonb
 export async function listLeadScoresForRanking(): Promise<Array<{ id: string; industry: string | null; total: number | null }>> {
   const rows = await db
-    .select({ id: leads.id, industry: leads.industry, total: sql<number | null>`(${leads.scoring}->>'total')::int` })
+    .select({ id: leads.id, industry: leads.industry, total: sql<number | null>`CAST(${jsonText(leads.scoring, '$.total')} AS SIGNED)` })
     .from(leads)
   return rows as Array<{ id: string; industry: string | null; total: number | null }>
 }

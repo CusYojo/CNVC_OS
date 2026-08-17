@@ -1,0 +1,137 @@
+{
+  "version": "lead-subject-gold-v1",
+  "description": "线索主体识别候选金标 v1；覆盖五类主体、噪声、标题片段和多主体歧义。",
+  "thresholds": {
+    "minOverallAccuracy": 0.9,
+    "minPositiveRecall": 0.8,
+    "minAcceptedPrecision": 0.9,
+    "maxFalseAcceptRate": 0,
+    "maxAverageCostUsd": 0.1,
+    "maxAverageDurationMs": 30000,
+    "maxTurns": 2,
+    "maxToolCalls": 0
+  },
+  "cases": [
+    {
+      "id": "company-financing-001",
+      "category": "company",
+      "candidate": {
+        "source": "gold-company",
+        "source_id": "company-financing-001",
+        "title": "星源智机器人完成A轮融资",
+        "summary": "具身智能公司星源智机器人有限公司宣布完成A轮融资，本轮资金将用于产品量产和客户交付。",
+        "article_text": "具身智能公司星源智机器人有限公司宣布完成A轮融资，本轮资金将用于产品量产和客户交付。"
+      },
+      "expected": { "status": "accepted", "subjectType": "company", "subjectName": "星源智机器人有限公司", "aliases": ["星源智机器人"] }
+    },
+    {
+      "id": "project-commercial-001",
+      "category": "project",
+      "candidate": {
+        "source": "gold-project",
+        "source_id": "project-commercial-001",
+        "title": "玄武工业大模型项目进入工厂验证",
+        "summary": "玄武工业大模型项目已在三家汽车零部件工厂完成付费验证，并签署年度采购合同。",
+        "article_text": "玄武工业大模型项目已在三家汽车零部件工厂完成付费验证，并签署年度采购合同。"
+      },
+      "expected": { "status": "accepted", "subjectType": "project", "subjectName": "玄武工业大模型项目", "aliases": ["玄武工业大模型"] }
+    },
+    {
+      "id": "team-seed-001",
+      "category": "team",
+      "candidate": {
+        "source": "gold-team",
+        "source_id": "team-seed-001",
+        "title": "深蓝智能机器人团队获得种子轮投资",
+        "summary": "深蓝智能机器人团队获得种子轮投资，正在推进仓储机器人中试和首批客户交付。",
+        "article_text": "深蓝智能机器人团队获得种子轮投资，正在推进仓储机器人中试和首批客户交付。"
+      },
+      "expected": { "status": "accepted", "subjectType": "team", "subjectName": "深蓝智能机器人团队" }
+    },
+    {
+      "id": "lab-license-001",
+      "category": "lab",
+      "candidate": {
+        "source": "gold-lab",
+        "source_id": "lab-license-001",
+        "title": "曙光量子芯片实验室完成技术许可",
+        "summary": "曙光量子芯片实验室完成首项量子光源芯片技术许可，许可方将支付里程碑费用并建设中试线。",
+        "article_text": "曙光量子芯片实验室完成首项量子光源芯片技术许可，许可方将支付里程碑费用并建设中试线。"
+      },
+      "expected": { "status": "accepted", "subjectType": "lab", "subjectName": "曙光量子芯片实验室" }
+    },
+    {
+      "id": "paper-frontier-001",
+      "category": "paper",
+      "candidate": {
+        "source": "arxiv",
+        "source_group": "论文",
+        "source_id": "paper-frontier-001",
+        "title": "Efficient Long-Horizon Planning for Generalist Robots",
+        "summary": "We introduce a hierarchical planning method that improves long-horizon manipulation success while reducing inference latency.",
+        "article_text": "Efficient Long-Horizon Planning for Generalist Robots. We introduce a hierarchical planning method that improves long-horizon manipulation success while reducing inference latency."
+      },
+      "expected": { "status": "accepted", "subjectType": "paper", "subjectName": "Efficient Long-Horizon Planning for Generalist Robots" }
+    },
+    {
+      "id": "noise-predicate-001",
+      "category": "noise",
+      "candidate": {
+        "source": "gold-noise",
+        "source_id": "noise-predicate-001",
+        "title": "完成新一轮融资",
+        "summary": "完成新一轮融资，金额超过一亿元，资金将用于扩大市场。",
+        "article_text": "完成新一轮融资，金额超过一亿元，资金将用于扩大市场。"
+      },
+      "expected": { "status": "not_accepted" }
+    },
+    {
+      "id": "noise-generic-001",
+      "category": "noise",
+      "candidate": {
+        "source": "gold-noise",
+        "source_id": "noise-generic-001",
+        "title": "技术团队取得全新突破",
+        "summary": "技术团队取得全新突破，项目成果具有广阔前景。",
+        "article_text": "技术团队取得全新突破，项目成果具有广阔前景。"
+      },
+      "expected": { "status": "not_accepted" }
+    },
+    {
+      "id": "noise-editorial-001",
+      "category": "noise",
+      "candidate": {
+        "source": "gold-noise",
+        "source_id": "noise-editorial-001",
+        "title": "36氪首发｜最前线：AI下半场",
+        "summary": "行业观察认为人工智能市场仍将保持增长。",
+        "article_text": "36氪首发｜最前线：AI下半场。行业观察认为人工智能市场仍将保持增长。"
+      },
+      "expected": { "status": "not_accepted" }
+    },
+    {
+      "id": "noise-honor-001",
+      "category": "noise",
+      "candidate": {
+        "source": "gold-noise",
+        "source_id": "noise-honor-001",
+        "title": "李教授荣获科学技术奖",
+        "summary": "李教授因长期科研贡献荣获年度科学技术奖。",
+        "article_text": "李教授因长期科研贡献荣获年度科学技术奖。"
+      },
+      "expected": { "status": "not_accepted" }
+    },
+    {
+      "id": "ambiguous-multi-001",
+      "category": "ambiguous",
+      "candidate": {
+        "source": "gold-ambiguous",
+        "source_id": "ambiguous-multi-001",
+        "title": "甲云科技与乙海智能共同发布产品",
+        "summary": "甲云科技有限公司与乙海智能有限公司共同发布工业智能产品，双方均未披露融资主体和交易安排。",
+        "article_text": "甲云科技有限公司与乙海智能有限公司共同发布工业智能产品，双方均未披露融资主体和交易安排。"
+      },
+      "expected": { "status": "not_accepted" }
+    }
+  ]
+}

@@ -1,158 +1,89 @@
-import fs from 'node:fs'
-import path from 'node:path'
+import type { AiTemplateAnalysisProgressRecord } from '../repositories/aiTaskRepository.js'
+import { aiTaskRepository } from '../repositories/index.js'
+import { redactSensitiveText } from '../security/redactSecrets.js'
 
-export type AiTemplateAnalysisProgressStatus = 'running' | 'succeeded' | 'failed'
-
-export type AiTemplateAnalysisProgress = {
-  id: string
-  userId: string
-  fileName: string
-  status: AiTemplateAnalysisProgressStatus
-  stage: string
-  progress: number
-  startedAt: string
-  updatedAt: string
-  errorMessage?: string
-  result?: unknown
-}
-
-const progressById = new Map<string, AiTemplateAnalysisProgress>()
-const COMPLETED_TTL_MS = 10 * 60_000
-const RUNNING_TTL_MS = 40 * 60_000
-
-const PERSIST_PATH = path.resolve(process.cwd(), '.runtime', 'ai-template-analysis-progress.json')
-
-function loadPersistedProgress() {
-  try {
-    const raw = fs.readFileSync(PERSIST_PATH, 'utf-8')
-    const entries: Array<[string, AiTemplateAnalysisProgress]> = JSON.parse(raw)
-    for (const [id, item] of entries) {
-      progressById.set(id, item)
-    }
-  } catch {
-    // file missing or corrupted — start fresh
-  }
-}
-
-function savePersistedProgress() {
-  try {
-    const dir = path.dirname(PERSIST_PATH)
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
-    const entries = Array.from(progressById.entries())
-    fs.writeFileSync(PERSIST_PATH, JSON.stringify(entries, null, 2), 'utf-8')
-  } catch {
-    // best-effort persist; ignore write errors
-  }
-}
-
-let loaded = false
-function ensureLoaded() {
-  if (!loaded) {
-    loadPersistedProgress()
-    loaded = true
-    cleanupExpiredProgress()
-  }
-}
+export type AiTemplateAnalysisProgressStatus = AiTemplateAnalysisProgressRecord['status']
+const COMPLETED_TTL_MINUTES = 10
+const RUNNING_TTL_MINUTES = 40
+const interruptedMessage = '服务重启或分析进程中断，模板分析未完成，请重新提交。'
 
 function clampProgress(value: number) {
   return Math.max(0, Math.min(100, Math.round(value)))
 }
 
-function cleanupExpiredProgress() {
-  const now = Date.now()
-  for (const [id, item] of progressById) {
-    const updatedAt = Date.parse(item.updatedAt)
-    const ttl = item.status === 'running' ? RUNNING_TTL_MS : COMPLETED_TTL_MS
-    if (!Number.isFinite(updatedAt) || now - updatedAt > ttl) {
-      progressById.delete(id)
-    }
+function publicProgress(row: AiTemplateAnalysisProgressRecord) {
+  const startedAt = row.startedAt.toISOString()
+  const updatedAt = row.updatedAt.toISOString()
+  return {
+    id: row.id,
+    fileName: row.fileName,
+    status: row.status,
+    stage: row.stage,
+    progress: Number(row.progress),
+    startedAt,
+    updatedAt,
+    elapsedSeconds: Math.max(0, Math.floor((Date.now() - Date.parse(startedAt)) / 1_000)),
+    ...(row.errorMessage ? { errorMessage: row.errorMessage } : {}),
+    ...(row.status === 'succeeded' ? { result: row.result } : {}),
   }
 }
 
-export function startAiTemplateAnalysisProgress(input: {
+export async function recoverInterruptedAiTemplateAnalysisProgress(): Promise<number> {
+  return aiTaskRepository.recoverInterruptedTemplateAnalysisProgress({
+    interruptedMessage,
+    completedTtlMinutes: COMPLETED_TTL_MINUTES,
+  })
+}
+
+export async function startAiTemplateAnalysisProgress(input: {
   id: string
   userId: string
+  projectId: string
+  taskId?: string
   fileName: string
+  purpose: string
 }) {
-  ensureLoaded()
-  cleanupExpiredProgress()
-  const now = new Date().toISOString()
-  const item: AiTemplateAnalysisProgress = {
+  const result = await aiTaskRepository.startTemplateAnalysisProgress({
     ...input,
-    status: 'running',
-    stage: '已接收模板，正在准备分析',
-    progress: 5,
-    startedAt: now,
-    updatedAt: now,
-  }
-  progressById.set(input.id, item)
-  savePersistedProgress()
-  return item
+    runningTtlMinutes: RUNNING_TTL_MINUTES,
+  })
+  return { created: result.created, progress: publicProgress(result.progress) }
 }
 
-export function updateAiTemplateAnalysisProgress(
+export async function updateAiTemplateAnalysisProgress(
   id: string,
   update: { stage: string; progress: number },
 ) {
-  ensureLoaded()
-  const current = progressById.get(id)
-  if (!current || current.status !== 'running') return
-  progressById.set(id, {
-    ...current,
-    stage: update.stage,
-    progress: Math.max(current.progress, clampProgress(update.progress)),
-    updatedAt: new Date().toISOString(),
+  await aiTaskRepository.updateTemplateAnalysisProgress({
+    id,
+    stage: update.stage.slice(0, 255),
+    progress: clampProgress(update.progress),
+    runningTtlMinutes: RUNNING_TTL_MINUTES,
   })
-  savePersistedProgress()
 }
 
-export function completeAiTemplateAnalysisProgress(id: string, result: unknown) {
-  ensureLoaded()
-  const current = progressById.get(id)
-  if (!current) return
-  progressById.set(id, {
-    ...current,
-    status: 'succeeded',
-    stage: '模板分析完成',
-    progress: 100,
-    updatedAt: new Date().toISOString(),
+export async function completeAiTemplateAnalysisProgress(id: string, result: unknown) {
+  await aiTaskRepository.completeTemplateAnalysisProgress({
+    id,
     result,
+    completedTtlMinutes: COMPLETED_TTL_MINUTES,
   })
-  savePersistedProgress()
 }
 
-export function failAiTemplateAnalysisProgress(id: string, message: string) {
-  ensureLoaded()
-  const current = progressById.get(id)
-  if (!current) return
-  progressById.set(id, {
-    ...current,
-    status: 'failed',
-    stage: '模板分析失败',
-    errorMessage: message,
-    updatedAt: new Date().toISOString(),
+export async function failAiTemplateAnalysisProgress(id: string, message: string) {
+  await aiTaskRepository.failTemplateAnalysisProgress({
+    id,
+    message: redactSensitiveText(message).slice(0, 8_000),
+    completedTtlMinutes: COMPLETED_TTL_MINUTES,
   })
-  savePersistedProgress()
 }
 
-export function getAiTemplateAnalysisProgress(userId: string, id: string) {
-  ensureLoaded()
-  cleanupExpiredProgress()
-  const item = progressById.get(id)
-  if (!item || item.userId !== userId) return undefined
-  return {
-    id: item.id,
-    fileName: item.fileName,
-    status: item.status,
-    stage: item.stage,
-    progress: item.progress,
-    startedAt: item.startedAt,
-    updatedAt: item.updatedAt,
-    elapsedSeconds: Math.max(
-      0,
-      Math.floor((Date.now() - Date.parse(item.startedAt)) / 1000),
-    ),
-    ...(item.errorMessage ? { errorMessage: item.errorMessage } : {}),
-    ...(item.status === 'succeeded' ? { result: item.result } : {}),
-  }
+export async function getAiTemplateAnalysisProgress(userId: string, id: string) {
+  const row = await aiTaskRepository.getTemplateAnalysisProgress({
+    userId,
+    id,
+    interruptedMessage,
+    completedTtlMinutes: COMPLETED_TTL_MINUTES,
+  })
+  return row ? publicProgress(row) : undefined
 }

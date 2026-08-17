@@ -11,7 +11,14 @@ const venvPython = path.join(
 const requirements = path.join(
   projectRoot,
   'server',
-  'requirements-pdf-to-ppt.txt',
+  'requirements-pdf-to-ppt.lock.txt',
+)
+const dependencyVerifier = path.join(
+  projectRoot,
+  'server',
+  'src',
+  'scripts',
+  'verifyDocumentRuntimeDependencies.ts',
 )
 const environmentCheck = path.join(
   projectRoot,
@@ -57,5 +64,14 @@ try {
   )
   throw error
 }
+
+console.log('核对精确 Python 锁文件及原生依赖版本契约…')
+run(process.execPath, [
+  '--env-file-if-exists=.env',
+  '--import',
+  'tsx',
+  dependencyVerifier,
+  '--live',
+])
 
 console.log('PDF 转换与 Gorden PPT 生成运行时已就绪。服务端会自动优先使用 server/.venv。')

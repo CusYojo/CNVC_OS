@@ -1,0 +1,2 @@
+{"debug":"Calling MCP tool: get_project_summary","timestamp":"2026-08-11T08:12:46.568Z","sessionId":"97ae0c82-e658-4448-80ed-cfc7b6494f18","cwd":"/Users/hyw/Desktop/sbl_jedi/server/workspace/f6790821-4747-43ae-9870-e2c4658b8b63"}
+{"debug":"Tool 'get_project_summary' completed successfully in 57ms","timestamp":"2026-08-11T08:12:46.625Z","sessionId":"97ae0c82-e658-4448-80ed-cfc7b6494f18","cwd":"/Users/hyw/Desktop/sbl_jedi/server/workspace/f6790821-4747-43ae-9870-e2c4658b8b63"}

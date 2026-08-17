@@ -1,34 +1,13 @@
 import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
 import { useAuthStore } from './useAuthStore'
 import { apiGet, apiPost, apiPatch, apiDelete, ApiError } from '../lib/api'
-import {
-  aiSummaries,
-  approvalRequests,
-  auditLogs,
-  files,
-  leads,
-  materialJobs,
-  meetings,
-  notifications,
-  postUpdates,
-  projects,
-  risks,
-  templates,
-  todos,
-  users,
-  workflowLogs,
-} from '../mock/data'
 import type {
   AISummary,
   ApprovalRequest,
-  ApprovalType,
   AuditLog,
   Lead,
-  MaterialJob,
   Meeting,
   Notification,
-  PostUpdate,
   Project,
   ProjectFile,
   ProjectStage,
@@ -39,56 +18,13 @@ import type {
   WorkflowLog,
 } from '../types'
 
-const now = () => new Date().toLocaleString('zh-CN', { hour12: false }).replace(/\//g, '-')
-import { uid as _uid } from '../lib/uid'
-const id = (prefix: string) => `${prefix}-${_uid().slice(0, 8)}`
-const stageOrder: ProjectStage[] = ['线索', '初筛', '立项', '尽调', '上会', '投决', '投后', '退出']
-const splitApprovers = (value: string) => value.split('/').map((item) => item.trim()).filter(Boolean)
 let latestLeadListRequest = 0
 
-const approvalTypeFor = (fromStage: ProjectStage, targetStage: ProjectStage): ApprovalType => {
-  if (targetStage === '放弃') return '项目终止审批'
-  if (fromStage === '线索' && targetStage === '初筛') return '初筛审批'
-  if (fromStage === '初筛' && targetStage === '立项') return '立项审批'
-  if (fromStage === '立项' && targetStage === '尽调') return '尽调启动审批'
-  if (fromStage === '尽调' && targetStage === '上会') return '上会申请'
-  if (fromStage === '上会' && targetStage === '投决') return '投决审批'
-  if (fromStage === '投决' && targetStage === '投后') return '投后移交审批'
-  return '项目终止审批'
-}
-
-const approvalBlueprint = (type: ApprovalType) => {
-  const blueprints: Record<ApprovalType, { nodes: [string, string, string, '或签' | '会签'][]; checklist: [string, boolean][] }> = {
-    初筛审批: {
-      nodes: [['投资总监初筛', '陈思齐', '投资总监', '或签'], ['平台登记复核', '唐婉', '平台运营', '或签']],
-      checklist: [['公司主体与来源可追溯', true], ['项目简介与推荐理由完整', true], ['重复项目已排查', true]],
-    },
-    立项审批: {
-      nodes: [['投资总监审批', '陈思齐', '投资总监', '或签'], ['风控合规会签', '赵旻 / 孙璐', '风控与法务', '会签'], ['平台主管备案', '唐婉', '平台运营', '或签']],
-      checklist: [['初筛结论已形成', true], ['核心团队与商业模式已访谈', true], ['重大合规风险已初查', true], ['融资方案已核验', false]],
-    },
-    尽调启动审批: {
-      nodes: [['投资总监审批', '陈思齐', '投资总监', '或签'], ['财务与法务排期', '财务组 / 孙璐', '财务与法务', '会签']],
-      checklist: [['立项审批已通过', true], ['尽调清单与分工已确认', true], ['数据室权限已开通', true]],
-    },
-    上会申请: {
-      nodes: [['投资总监预审', '陈思齐', '投资总监', '或签'], ['财务法务风控会签', '财务组 / 孙璐 / 赵旻', '专业职能', '会签'], ['投委会秘书排会', '唐婉', '投委会秘书', '或签']],
-      checklist: [['投资建议书已定稿', true], ['财务尽调结论已上传', true], ['法务尽调结论已上传', true], ['核心风险与对策已闭环', true], ['估值与投资条款已确认', true]],
-    },
-    投决审批: {
-      nodes: [['投委会表决', '投委会委员', '投委会', '会签'], ['董事长终审', '董事长', '决策人', '或签']],
-      checklist: [['投委会会议纪要已归档', true], ['表决票达到通过门槛', true], ['附带条件已明确责任人', true]],
-    },
-    投后移交审批: {
-      nodes: [['投资负责人确认', '陈思齐', '投资总监', '或签'], ['投后负责人接收', '投后管理组', '投后负责人', '或签'], ['财务归档', '财务组', '财务', '或签']],
-      checklist: [['协议与交割文件已归档', true], ['投后指标基线已建立', true], ['董事席位与信息权已登记', true]],
-    },
-    项目终止审批: {
-      nodes: [['投资总监审批', '陈思齐', '投资总监', '或签'], ['平台归档', '唐婉', '平台运营', '或签']],
-      checklist: [['终止原因已说明', true], ['外部沟通已完成', true], ['资料与复盘已归档', true]],
-    },
+function requiredVersion(entity: { version?: number } | undefined, label: string): number {
+  if (!entity || !Number.isInteger(entity.version) || Number(entity.version) < 1) {
+    throw new Error(`${label}版本信息缺失，请刷新页面后重试`)
   }
-  return blueprints[type]
+  return Number(entity.version)
 }
 
 interface AppState {
@@ -102,20 +38,17 @@ interface AppState {
   risks: RiskAlert[]
   workflowLogs: WorkflowLog[]
   approvalRequests: ApprovalRequest[]
-  materialJobs: MaterialJob[]
   leads: Lead[]
   leadPagination: { total: number; page: number; pageSize: number; totalPages: number }
   leadStats: { total: number; verified: number; highPriority: number; avgCompleteness: number }
   scoringLeadIds: string[]
-  postUpdates: PostUpdate[]
   users: User[]
   templates: Template[]
   auditLogs: AuditLog[]
   notifications: Notification[]
-  login: (email: string) => void
   logout: () => void
-  addProject: (project: Omit<Project, 'id' | 'updatedAt' | 'createdAt' | 'score' | 'progress'>) => Promise<Project>
-  updateProject: (projectId: string, patch: Partial<Project>) => void
+  addProject: (project: Omit<Project, 'id' | 'version' | 'updatedAt' | 'createdAt' | 'score' | 'progress'>) => Promise<Project>
+  updateProject: (projectId: string, patch: Partial<Project>) => Promise<Project>
   deleteProject: (projectId: string) => Promise<void>
   pinProject: (projectId: string, pinned: boolean) => Promise<void>
   moveProjectStage: (projectId: string, nextStage: ProjectStage, comment: string) => void
@@ -127,93 +60,92 @@ interface AppState {
     amount?: string
     valuation?: string
     attachments?: string[]
-  }) => ApprovalRequest | undefined
-  approveRequest: (requestId: string, comment: string) => void
-  returnRequest: (requestId: string, comment: string) => void
-  resubmitApprovalRequest: (requestId: string, comment: string) => void
-  rejectRequest: (requestId: string, comment: string) => void
-  withdrawRequest: (requestId: string, comment: string) => void
-  addFile: (file: Omit<ProjectFile, 'id' | 'uploadedAt' | 'version'>) => void
+  }) => Promise<ApprovalRequest | undefined>
+  approveRequest: (requestId: string, comment: string) => Promise<void>
+  returnRequest: (requestId: string, comment: string) => Promise<void>
+  resubmitApprovalRequest: (requestId: string, comment: string) => Promise<void>
+  rejectRequest: (requestId: string, comment: string) => Promise<void>
+  withdrawRequest: (requestId: string, comment: string) => Promise<void>
   deleteFile: (fileId: string) => Promise<void>
-  finishFileParsing: (fileId: string) => void
   addLead: (lead: Omit<Lead, 'id'>) => Promise<Lead>
   fetchLeads: (page?: number, pageSize?: number, channel?: string, sort?: string, keyword?: string, source?: string, industry?: string, region?: string) => Promise<void>
   fetchLeadStats: () => Promise<void>
   startScoring: (leadId: string) => Promise<void>
   fetchLeadDetail: (leadId: string) => Promise<Lead | null>
-  updateLead: (leadId: string, patch: Partial<Lead>) => void
   mergeLeadLocal: (leadId: string, patch: Partial<Lead>) => void
   convertLead: (leadId: string) => Promise<Project | undefined>
   saveSummary: (summary: AISummary) => void
-  addTodo: (todo: Omit<Todo, 'id'>) => void
-  updateTodo: (todoId: string, patch: Partial<Todo>) => void
+  addTodo: (todo: Omit<Todo, 'id' | 'version'>) => void
+  updateTodo: (todoId: string, patch: Partial<Todo>) => Promise<Todo>
   deleteTodo: (todoId: string) => void
-  addMeeting: (meeting: Omit<Meeting, 'id'>, newTodos?: Omit<Todo, 'id'>[]) => Promise<Meeting>
-  updateMeeting: (meetingId: string, patch: Partial<Meeting>) => void
-  addRisk: (risk: Omit<RiskAlert, 'id'>) => Promise<RiskAlert>
-  updateRisk: (riskId: string, patch: Partial<RiskAlert>) => void
-  addMaterialJob: (job: Omit<MaterialJob, 'id'>) => MaterialJob
-  updateMaterialJob: (jobId: string, patch: Partial<MaterialJob>) => void
-  addPostUpdate: (update: Omit<PostUpdate, 'id' | 'updatedAt'>) => void
+  addMeeting: (meeting: Omit<Meeting, 'id' | 'version'>, newTodos?: Omit<Todo, 'id' | 'version'>[]) => Promise<Meeting>
+  updateMeeting: (meetingId: string, patch: Partial<Meeting>) => Promise<Meeting>
+  addRisk: (risk: Omit<RiskAlert, 'id' | 'version'>) => Promise<RiskAlert>
+  updateRisk: (riskId: string, patch: Partial<RiskAlert>) => Promise<RiskAlert>
   addAudit: (module: string, action: string, target: string) => void
   toggleUserStatus: (userId: string) => void
   addUser: (user: Omit<User, 'id' | 'lastLogin'>) => void
   markNotificationsRead: () => void
-  resetDemo: () => void
   hydrateFromServer: () => Promise<void>
 }
 
-const defaultUser = users[0]
+const emptyUser: User = {
+  id: '',
+  name: '',
+  email: '',
+  department: '',
+  role: '',
+  status: '禁用',
+  lastLogin: '',
+}
 
 export const useAppStore = create<AppState>()(
-  persist(
     (set, get) => ({
       isAuthenticated: false,
-      currentUser: defaultUser as User,
-      projects,
-      files,
-      aiSummaries,
-      todos,
-      meetings,
-      risks,
-      workflowLogs,
-      approvalRequests,
-      materialJobs,
-      leads,
+      currentUser: emptyUser,
+      projects: [],
+      files: [],
+      aiSummaries: [],
+      todos: [],
+      meetings: [],
+      risks: [],
+      workflowLogs: [],
+      approvalRequests: [],
+      leads: [],
       leadPagination: {
-        total: leads.length,
+        total: 0,
         page: 1,
-        pageSize: Math.max(leads.length, 1),
+        pageSize: 50,
         totalPages: 1,
       },
       leadStats: {
-        total: leads.length,
-        verified: leads.filter((lead) => lead.verificationStatus !== '待核验').length,
-        highPriority: leads.filter((lead) => lead.score >= 60).length,
-        avgCompleteness: leads.length
-          ? Math.round(leads.reduce((sum, lead) => sum + lead.completeness, 0) / leads.length)
-          : 0,
+        total: 0,
+        verified: 0,
+        highPriority: 0,
+        avgCompleteness: 0,
       },
       scoringLeadIds: [],
-      postUpdates,
-      users,
-      templates,
-      auditLogs,
-      notifications,
-      // 兼容逻辑：老的 login 动作依然调用，但当真成功后询问 authStore
-      login: (email: string) => {
-        const user = users.find((item) => item.email === email) ?? (email.includes('admin') ? users[4] : users[0])
-        set({ isAuthenticated: true, currentUser: user as User })
-        get().addAudit('账号安全', '登录成功', `${user.email} 登录系统`)
-      },
+      users: [],
+      templates: [],
+      auditLogs: [],
+      notifications: [],
       logout: () => {
         try { useAuthStore.getState().logout() } catch {}
-        get().addAudit('账号安全', '退出登录', `${get().currentUser.email} 退出系统`)
-        set({ isAuthenticated: false })
+        set({
+          isAuthenticated: false,
+          currentUser: emptyUser,
+          projects: [], files: [], aiSummaries: [], todos: [], meetings: [], risks: [],
+          workflowLogs: [], approvalRequests: [], leads: [],
+          users: [], templates: [], auditLogs: [], notifications: [], scoringLeadIds: [],
+          leadPagination: { total: 0, page: 1, pageSize: 50, totalPages: 1 },
+          leadStats: { total: 0, verified: 0, highPriority: 0, avgCompleteness: 0 },
+        })
       },
       // 从后端拉取所有实体数据，调用一次
       hydrateFromServer: async () => {
-        if (!useAuthStore.getState().isAuthenticated) return
+        const authUser = useAuthStore.getState().user
+        if (!useAuthStore.getState().isAuthenticated || !authUser) return
+        const isSystemAdmin = authUser.role === '系统管理员'
         // 注意: 故意不发 /leads 请求 — leads 走分页(由 SourcingPage 单独 fetchLeads 拉)
         // 之前 hydrate 拉全量 leads 阻塞首次页面渲染 7s+,改成按需拉
         const results = await Promise.allSettled([
@@ -221,18 +153,40 @@ export const useAppStore = create<AppState>()(
           apiGet<{ list: Meeting[] }>('/meetings'),
           apiGet<{ list: Todo[] }>('/todos'),
           apiGet<{ list: RiskAlert[] }>('/risks'),
-          apiGet<{ list: User[] }>('/users'),
+          isSystemAdmin ? apiGet<{ list: User[] }>('/users') : Promise.resolve({ list: [] as User[] }),
           apiGet<{ list: AISummary[] }>('/ai-summaries'),
           apiGet<{ list: ProjectFile[] }>('/projects/files/all'),
+          apiGet<{ list: Template[] }>('/templates'),
+          isSystemAdmin ? apiGet<{ list: AuditLog[] }>('/audit-logs') : Promise.resolve({ list: [] as AuditLog[] }),
+          apiGet<{ list: ApprovalRequest[] }>('/oa/requests'),
+          apiGet<{ list: WorkflowLog[] }>('/oa/workflow-logs'),
         ])
-        const next: Partial<AppState> = {}
-        if (results[0].status === 'fulfilled') next.projects = results[0].value.list
-        if (results[1].status === 'fulfilled') next.meetings = results[1].value.list
-        if (results[2].status === 'fulfilled') next.todos = results[2].value.list
-        if (results[3].status === 'fulfilled') next.risks = results[3].value.list
-        if (results[4].status === 'fulfilled') next.users = results[4].value.list
-        if (results[5].status === 'fulfilled') next.aiSummaries = results[5].value.list
-        if (results[6]?.status === 'fulfilled') next.files = (results[6].value as { list: ProjectFile[] }).list
+        const listOrEmpty = <T>(result: PromiseSettledResult<{ list: T[] }>): T[] =>
+          result.status === 'fulfilled' ? result.value.list : []
+        const next: Partial<AppState> = {
+          isAuthenticated: true,
+          currentUser: {
+            id: authUser.id,
+            name: authUser.name,
+            email: authUser.email,
+            department: authUser.department,
+            role: authUser.role,
+            status: authUser.status === '禁用' ? '禁用' : '启用',
+            lastLogin: '',
+          },
+          projects: listOrEmpty(results[0]),
+          meetings: listOrEmpty(results[1]),
+          todos: listOrEmpty(results[2]),
+          risks: listOrEmpty(results[3]),
+          users: listOrEmpty(results[4]),
+          aiSummaries: listOrEmpty(results[5]),
+          files: listOrEmpty(results[6]),
+          templates: listOrEmpty(results[7]),
+          auditLogs: listOrEmpty(results[8]),
+          approvalRequests: listOrEmpty(results[9]),
+          workflowLogs: listOrEmpty(results[10]),
+          notifications: [],
+        }
         set(next as AppState)
       },
       addProject: async (project) => {
@@ -249,11 +203,14 @@ export const useAppStore = create<AppState>()(
       },
       updateProject: async (projectId, patch) => {
         try {
-          const updated = await apiPatch<Project>(`/projects/${projectId}`, patch)
+          const expectedVersion = requiredVersion(get().projects.find((project) => project.id === projectId), '项目')
+          const { version: _version, ...safePatch } = patch
+          const updated = await apiPatch<Project>(`/projects/${projectId}`, { ...safePatch, expectedVersion })
           set((state) => ({
             projects: state.projects.map((project) => project.id === projectId ? updated : project),
           }))
           get().addAudit('项目管理', '编辑项目', updated.name)
+          return updated
         } catch (e) {
           const msg = e instanceof ApiError ? e.message : '更新项目失败'
           get().addAudit('项目管理', '编辑项目失败', `${projectId}: ${msg}`)
@@ -274,8 +231,11 @@ export const useAppStore = create<AppState>()(
       },
       pinProject: async (projectId, pinned) => {
         try {
-          await apiPost(`/projects/${projectId}/pin`, { pinned })
-          set((state) => ({ projects: state.projects.map((p) => p.id === projectId ? { ...p, pinned } as Project : p) }))
+          const expectedVersion = requiredVersion(get().projects.find((project) => project.id === projectId), '项目')
+          const result = await apiPost<{ pinned: boolean; version: number }>(`/projects/${projectId}/pin`, { pinned, expectedVersion })
+          set((state) => ({ projects: state.projects.map((p) => p.id === projectId
+            ? { ...p, pinned: result.pinned, version: result.version } as Project
+            : p) }))
           get().addAudit('项目管理', pinned ? '置顶项目' : '取消置顶', projectId)
         } catch (e) {
           const msg = e instanceof ApiError ? e.message : '置顶失败'
@@ -284,294 +244,68 @@ export const useAppStore = create<AppState>()(
         }
       },
       moveProjectStage: (projectId, nextStage, comment) => {
-        get().createApprovalRequest({ projectId, targetStage: nextStage, reason: comment })
+        void get().createApprovalRequest({ projectId, targetStage: nextStage, reason: comment })
       },
-      createApprovalRequest: (input) => {
-        const project = get().projects.find((item) => item.id === input.projectId)
-        const expectedNextStage = stageOrder[stageOrder.indexOf(project?.stage ?? '放弃') + 1]
-        if (!project || project.stage === input.targetStage || ['退出', '放弃'].includes(project.stage)) return undefined
-        if (input.targetStage !== '放弃' && input.targetStage !== expectedNextStage) return undefined
-        const active = get().approvalRequests.find((item) => item.projectId === input.projectId && item.status === '审批中')
-        if (active) return active
-        const type = approvalTypeFor(project.stage, input.targetStage)
-        const blueprint = approvalBlueprint(type)
-        const requestId = id('oa')
-        const requestNo = `OA${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${String(get().approvalRequests.length + 1).padStart(4, '0')}`
-        const submitNodeId = `${requestId}-n1`
-        const nodes = [
-          {
-            id: submitNodeId,
-            name: '发起人提交',
-            approver: get().currentUser.name,
-            approverRole: get().currentUser.role,
-            mode: '或签' as const,
-            sequence: 1,
-            status: '已通过' as const,
-            completedAt: now(),
-            comment: input.reason,
-          },
-          ...blueprint.nodes.map(([name, approver, role, mode], index) => ({
-            id: `${requestId}-n${index + 2}`,
-            name,
-            approver,
-            approverRole: role,
-            mode,
-            sequence: index + 2,
-            status: index === 0 ? '待审批' as const : '未开始' as const,
-          })),
-        ]
-        const created: ApprovalRequest = {
-          id: requestId,
-          requestNo,
-          projectId: project.id,
-          projectName: project.name,
-          title: `${project.name} ${type}`,
-          type,
-          fromStage: project.stage,
-          targetStage: input.targetStage,
-          status: '审批中',
-          applicant: get().currentUser.name,
-          department: get().currentUser.department,
-          priority: input.priority ?? '普通',
-          currentNodeId: nodes[1]?.id,
-          currentNodeName: nodes[1]?.name ?? '流程完成',
-          reason: input.reason,
-          amount: input.amount ?? project.financing,
-          valuation: input.valuation ?? project.valuation,
-          submittedAt: now(),
-          attachments: input.attachments ?? get().files.filter((file) => file.projectId === project.id).map((file) => file.name),
-          checklist: blueprint.checklist.map(([label, required]) => ({ label, required, passed: required })),
-          nodes,
-          records: [{
-            id: id('oar'),
-            nodeId: submitNodeId,
-            nodeName: '发起人提交',
-            operator: get().currentUser.name,
-            action: '提交',
-            comment: input.reason,
-            createdAt: now(),
-          }],
-        }
-        set((state) => ({
-          approvalRequests: [created, ...state.approvalRequests],
-          projects: state.projects.map((item) => item.id === project.id ? { ...item, latestApprovalId: created.id, updatedAt: now() } : item),
-          todos: [{
-            id: id('t'),
-            title: `审批：${created.title}`,
-            projectId: project.id,
-            projectName: project.name,
-            owner: nodes[1]?.approver ?? '平台主管',
-            dueDate: new Date(Date.now() + 2 * 86400000).toISOString().slice(0, 10),
-            priority: created.priority === '紧急' ? '高' : '中',
-            status: '未开始',
-            type: '流程',
-          }, ...state.todos],
-        }))
-        get().addAudit('OA 流程', '发起审批', `${created.requestNo} · ${created.title}`)
-        return created
-      },
-      approveRequest: (requestId, comment) => {
-        const request = get().approvalRequests.find((item) => item.id === requestId)
-        if (!request || request.status !== '审批中' || !request.currentNodeId) return
-        const currentIndex = request.nodes.findIndex((node) => node.id === request.currentNodeId)
-        if (currentIndex < 0) return
-        const currentNode = request.nodes[currentIndex]
-        const approvers = splitApprovers(currentNode.approver)
-        const currentUser = get().currentUser
-        if (!approvers.includes(currentUser.name) && currentUser.role !== '系统管理员') return
-        if (currentNode.mode === '会签' && currentNode.approvedBy?.includes(currentUser.name) && currentUser.role !== '系统管理员') return
-        const approvedBy = Array.from(new Set([
-          ...(currentNode.approvedBy ?? []),
-          ...(currentUser.role === '系统管理员' && !approvers.includes(currentUser.name) ? approvers : [currentUser.name]),
-        ]))
-        const currentNodeCompleted = currentNode.mode === '或签' || approvedBy.length >= approvers.length
-        const nextNode = currentNodeCompleted ? request.nodes[currentIndex + 1] : undefined
-        const completed = currentNodeCompleted && !nextNode
-        const completedAt = now()
-        const updatedRequest: ApprovalRequest = {
-          ...request,
-          status: completed ? '已通过' : '审批中',
-          currentNodeId: currentNodeCompleted ? nextNode?.id : currentNode.id,
-          currentNodeName: completed ? '流程完成' : currentNodeCompleted ? nextNode!.name : `${currentNode.name}（${approvedBy.length}/${approvers.length}）`,
-          completedAt: completed ? completedAt : undefined,
-          nodes: request.nodes.map((node, index) => {
-            if (index === currentIndex) return {
-              ...node,
-              approvedBy,
-              status: currentNodeCompleted ? '已通过' : '会签中',
-              completedAt: currentNodeCompleted ? completedAt : undefined,
-              comment: currentNodeCompleted ? comment : node.comment,
-            }
-            if (index === currentIndex + 1) return { ...node, status: '待审批' }
-            return node
-          }),
-          records: [...request.records, {
-            id: id('oar'),
-            nodeId: request.currentNodeId,
-            nodeName: request.currentNodeName,
-            operator: get().currentUser.name,
-            action: '同意',
-            comment,
-            createdAt: completedAt,
-          }],
-        }
-        const project = get().projects.find((item) => item.id === request.projectId)
-        const log: WorkflowLog | undefined = completed && project ? {
-          id: id('w'),
-          projectId: project.id,
-          fromStage: request.fromStage,
-          toStage: request.targetStage,
-          operator: get().currentUser.name,
-          comment: `${request.requestNo} 全部审批节点通过：${comment}`,
-          createdAt: completedAt,
-          requestId: request.id,
-          requestNo: request.requestNo,
-          source: 'OA审批',
-        } : undefined
-        set((state) => ({
-          approvalRequests: state.approvalRequests.map((item) => item.id === requestId ? updatedRequest : item),
-          projects: state.projects.map((item) => completed && item.id === request.projectId ? {
-            ...item,
-            stage: request.targetStage,
-            stageSource: 'OA审批',
-            latestApprovalId: request.id,
-            progress: request.targetStage === '放弃' ? item.progress : Math.max(item.progress, Math.min(100, (stageOrder.indexOf(request.targetStage) + 1) * 13)),
-            updatedAt: completedAt,
-          } : item),
-          workflowLogs: log ? [log, ...state.workflowLogs] : state.workflowLogs,
-          todos: state.todos.map((todo) => todo.projectId === request.projectId && todo.title.includes(request.title)
-            ? {
-              ...todo,
-              status: completed ? '已完成' : '进行中',
-              owner: currentNodeCompleted
-                ? nextNode?.approver ?? todo.owner
-                : approvers.filter((name) => !approvedBy.includes(name)).join(' / '),
-            }
-            : todo),
-        }))
-        get().addAudit('OA 流程', completed ? '审批通过并同步项目阶段' : currentNodeCompleted ? '审批节点通过' : '会签意见提交', `${request.requestNo} · ${request.currentNodeName}`)
-      },
-      returnRequest: (requestId, comment) => {
-        const request = get().approvalRequests.find((item) => item.id === requestId)
-        if (!request || request.status !== '审批中' || !request.currentNodeId) return
-        const currentNode = request.nodes.find((node) => node.id === request.currentNodeId)
-        if (!currentNode || (!currentNode.approver.includes(get().currentUser.name) && get().currentUser.role !== '系统管理员')) return
-        const stamp = now()
-        set((state) => ({
-          approvalRequests: state.approvalRequests.map((item) => item.id === requestId ? {
-            ...item,
-            status: '已退回',
-            completedAt: stamp,
-            currentNodeId: undefined,
-            currentNodeName: '已退回发起人',
-            nodes: item.nodes.map((node) => node.id === request.currentNodeId ? { ...node, status: '已退回', completedAt: stamp, comment } : node),
-            records: [...item.records, { id: id('oar'), nodeId: request.currentNodeId!, nodeName: request.currentNodeName, operator: get().currentUser.name, action: '退回', comment, createdAt: stamp }],
-          } : item),
-          todos: state.todos.map((todo) => todo.projectId === request.projectId && todo.title.includes(request.title) ? { ...todo, status: '已完成' } : todo),
-        }))
-        get().addAudit('OA 流程', '退回申请', `${request.requestNo} · ${comment}`)
-      },
-      resubmitApprovalRequest: (requestId, comment) => {
-        const request = get().approvalRequests.find((item) => item.id === requestId)
-        const currentUser = get().currentUser
-        if (!request || request.status !== '已退回') return
-        if (request.applicant !== currentUser.name && currentUser.role !== '系统管理员') return
-        const stamp = now()
-        const firstApprovalNode = request.nodes[1]
-        if (!firstApprovalNode) return
-        set((state) => ({
-          approvalRequests: state.approvalRequests.map((item) => item.id === requestId ? {
-            ...item,
-            status: '审批中',
-            currentNodeId: firstApprovalNode.id,
-            currentNodeName: firstApprovalNode.name,
-            completedAt: undefined,
-            reason: comment,
-            submittedAt: stamp,
-            nodes: item.nodes.map((node, index) => index === 0
-              ? { ...node, status: '已通过', completedAt: stamp, comment }
-              : { ...node, status: index === 1 ? '待审批' : '未开始', approvedBy: [], completedAt: undefined, comment: undefined }),
-            records: [...item.records, {
-              id: id('oar'),
-              nodeId: item.nodes[0].id,
-              nodeName: '退回后重新提交',
-              operator: currentUser.name,
-              action: '提交',
-              comment,
-              createdAt: stamp,
-            }],
-          } : item),
-          projects: state.projects.map((item) => item.id === request.projectId ? { ...item, latestApprovalId: request.id, updatedAt: stamp } : item),
-          todos: [{
-            id: id('t'),
-            title: `审批：${request.title}`,
-            projectId: request.projectId,
-            projectName: request.projectName,
-            owner: firstApprovalNode.approver,
-            dueDate: new Date(Date.now() + 2 * 86400000).toISOString().slice(0, 10),
-            priority: request.priority === '紧急' ? '高' : '中',
-            status: '未开始',
-            type: '流程',
-          }, ...state.todos],
-        }))
-        get().addAudit('OA 流程', '退回后重新提交', `${request.requestNo} · ${comment}`)
-      },
-      rejectRequest: (requestId, comment) => {
-        const request = get().approvalRequests.find((item) => item.id === requestId)
-        if (!request || request.status !== '审批中' || !request.currentNodeId) return
-        const currentNode = request.nodes.find((node) => node.id === request.currentNodeId)
-        if (!currentNode || (!currentNode.approver.includes(get().currentUser.name) && get().currentUser.role !== '系统管理员')) return
-        const stamp = now()
-        set((state) => ({
-          approvalRequests: state.approvalRequests.map((item) => item.id === requestId ? {
-            ...item,
-            status: '已拒绝',
-            completedAt: stamp,
-            currentNodeId: undefined,
-            currentNodeName: '流程已拒绝',
-            nodes: item.nodes.map((node) => node.id === request.currentNodeId ? { ...node, status: '已拒绝', completedAt: stamp, comment } : node),
-            records: [...item.records, { id: id('oar'), nodeId: request.currentNodeId!, nodeName: request.currentNodeName, operator: get().currentUser.name, action: '拒绝', comment, createdAt: stamp }],
-          } : item),
-          todos: state.todos.map((todo) => todo.projectId === request.projectId && todo.title.includes(request.title) ? { ...todo, status: '已完成' } : todo),
-        }))
-        get().addAudit('OA 流程', '拒绝申请', `${request.requestNo} · ${comment}`)
-      },
-      withdrawRequest: (requestId, comment) => {
-        const request = get().approvalRequests.find((item) => item.id === requestId)
-        if (!request || request.status !== '审批中') return
-        if (request.applicant !== get().currentUser.name && get().currentUser.role !== '系统管理员') return
-        const stamp = now()
-        set((state) => ({
-          approvalRequests: state.approvalRequests.map((item) => item.id === requestId ? {
-            ...item,
-            status: '已撤回',
-            completedAt: stamp,
-            currentNodeId: undefined,
-            currentNodeName: '发起人已撤回',
-            records: [...item.records, { id: id('oar'), nodeId: item.nodes[0].id, nodeName: '发起人撤回', operator: get().currentUser.name, action: '撤回', comment, createdAt: stamp }],
-          } : item),
-          todos: state.todos.map((todo) => todo.projectId === request.projectId && todo.title.includes(request.title) ? { ...todo, status: '已完成' } : todo),
-        }))
-        get().addAudit('OA 流程', '撤回申请', `${request.requestNo} · ${comment}`)
-      },
-      addFile: async (file) => {
+      createApprovalRequest: async (input) => {
         try {
-          const created = await apiPost<ProjectFile>(`/projects/files`, file)
-          set((state) => ({ files: [created, ...state.files] }))
-          get().addAudit('资料库', '上传文件', created.name)
-        } catch (e) {
-          const msg = e instanceof ApiError ? e.message : '上传文件失败'
-          get().addAudit('资料库', '上传文件失败', `${file.name ?? ''}: ${msg}`)
-          throw e
+          const project = get().projects.find((item) => item.id === input.projectId)
+          const created = await apiPost<ApprovalRequest>('/oa/requests', {
+            ...input,
+            attachments: input.attachments
+              ?? get().files.filter((file) => file.projectId === input.projectId).map((file) => file.name),
+            amount: input.amount ?? project?.financing,
+            valuation: input.valuation ?? project?.valuation,
+          })
+          set((state) => ({
+            approvalRequests: [created, ...state.approvalRequests.filter((item) => item.id !== created.id)],
+            projects: state.projects.map((item) => item.id === created.projectId
+              ? { ...item, latestApprovalId: created.id, updatedAt: created.submittedAt }
+              : item),
+          }))
+          return created
+        } catch (error) {
+          get().addAudit('OA 流程', '发起审批失败', (error as Error).message)
+          throw error
         }
       },
-      finishFileParsing: async (fileId) => {
-        try {
-          const updated = await apiPost<ProjectFile>(`/files/${fileId}/finish-parse`)
-          set((state) => ({ files: state.files.map((file) => file.id === fileId ? updated : file) }))
-        } catch (e) {
-          // 静默失败不影响 UI
+      approveRequest: async (requestId, comment) => {
+        const result = await apiPost<{ request: ApprovalRequest; project?: Project }>(
+          `/oa/requests/${requestId}/actions`, { action: 'approve', comment },
+        )
+        set((state) => ({
+          approvalRequests: state.approvalRequests.map((item) => item.id === requestId ? result.request : item),
+          projects: result.project
+            ? state.projects.map((item) => item.id === result.project!.id ? { ...item, ...result.project } : item)
+            : state.projects,
+        }))
+        if (result.project) {
+          const logs = await apiGet<{ list: WorkflowLog[] }>('/oa/workflow-logs')
+          set({ workflowLogs: logs.list })
         }
+      },
+      returnRequest: async (requestId, comment) => {
+        const result = await apiPost<{ request: ApprovalRequest }>(
+          `/oa/requests/${requestId}/actions`, { action: 'return', comment },
+        )
+        set((state) => ({ approvalRequests: state.approvalRequests.map((item) => item.id === requestId ? result.request : item) }))
+      },
+      resubmitApprovalRequest: async (requestId, comment) => {
+        const result = await apiPost<{ request: ApprovalRequest }>(
+          `/oa/requests/${requestId}/actions`, { action: 'resubmit', comment },
+        )
+        set((state) => ({ approvalRequests: state.approvalRequests.map((item) => item.id === requestId ? result.request : item) }))
+      },
+      rejectRequest: async (requestId, comment) => {
+        const result = await apiPost<{ request: ApprovalRequest }>(
+          `/oa/requests/${requestId}/actions`, { action: 'reject', comment },
+        )
+        set((state) => ({ approvalRequests: state.approvalRequests.map((item) => item.id === requestId ? result.request : item) }))
+      },
+      withdrawRequest: async (requestId, comment) => {
+        const result = await apiPost<{ request: ApprovalRequest }>(
+          `/oa/requests/${requestId}/actions`, { action: 'withdraw', comment },
+        )
+        set((state) => ({ approvalRequests: state.approvalRequests.map((item) => item.id === requestId ? result.request : item) }))
       },
       deleteFile: async (fileId) => {
         const f = get().files.find((x) => x.id === fileId)
@@ -616,15 +350,16 @@ export const useAppStore = create<AppState>()(
       // 不依赖组件生命周期,切换项目/页面再回来评分不中断,完成后自动把结果 merge 进列表。
       startScoring: async (leadId: string) => {
         if (get().scoringLeadIds.includes(leadId)) return  // 已在评分中,避免重复触发
+        const currentStatus = get().leads.find((lead) => lead.id === leadId)?.scoreJob?.status
         set((state) => ({ scoringLeadIds: [...state.scoringLeadIds, leadId] }))
         const finish = () => set((state) => ({ scoringLeadIds: state.scoringLeadIds.filter((x) => x !== leadId) }))
         try {
-          await apiPost(`/leads/${leadId}/score`, {})
+          await apiPost(currentStatus === 'dead_letter' ? `/leads/${leadId}/score/retry` : `/leads/${leadId}/score`, {})
           const deadline = Date.now() + 20 * 60 * 1000
           while (Date.now() < deadline) {
             await new Promise((r) => setTimeout(r, 6000))
             const st = await apiGet<{
-              status: 'queued' | 'running' | 'retrying' | 'done' | 'failed' | 'idle'
+              status: 'queued' | 'running' | 'retrying' | 'done' | 'failed' | 'dead_letter' | 'idle'
               error?: string
               attempts?: number
               maxAttempts?: number
@@ -652,7 +387,7 @@ export const useAppStore = create<AppState>()(
               if (fresh) set((state) => ({ leads: state.leads.map((l) => l.id === leadId ? { ...l, ...fresh } : l) }))
               return
             }
-            if (st.status === 'failed') {
+            if (st.status === 'failed' || st.status === 'dead_letter') {
               const fresh = await apiGet<Lead>(`/leads/${leadId}`).catch(() => null)
               if (fresh) set((state) => ({ leads: state.leads.map((l) => l.id === leadId ? { ...l, ...fresh } : l) }))
               const attemptText = st.attempts && st.maxAttempts ? `（${st.attempts}/${st.maxAttempts} 次）` : ''
@@ -695,14 +430,6 @@ export const useAppStore = create<AppState>()(
           throw e
         }
       },
-      updateLead: async (leadId, patch) => {
-        try {
-          const updated = await apiPatch<Lead>(`/leads/${leadId}`, patch)
-          set((state) => ({ leads: state.leads.map((lead) => lead.id === leadId ? updated : lead) }))
-        } catch (e) {
-          const msg = e instanceof ApiError ? e.message : '编辑线索失败'
-        }
-      },
       // 纯本地合并 store 里的某条 lead(不发后端请求) —— AI 评分完成后用它把新 score/scoring 立即反映到列表
       mergeLeadLocal: (leadId, patch) => {
         set((state) => ({ leads: state.leads.map((lead) => lead.id === leadId ? { ...lead, ...patch } : lead) }))
@@ -710,103 +437,12 @@ export const useAppStore = create<AppState>()(
       convertLead: async (leadId) => {
         const listLead = get().leads.find((item) => item.id === leadId)
         if (!listLead || listLead.poolStatus === '已转专属项目') return undefined
-        // 列表接口精简了 fundingRounds/sources/highlights/risks/scoring 等大字段,
-        // 转专属项目需要这些完整字段 —— 先拉一次详情,拉不到就用列表版兜底(带默认值防崩)
-        const detail = await get().fetchLeadDetail(leadId)
-        const lead = {
-          ...listLead,
-          ...(detail ?? {}),
-          fundingRounds: (detail?.fundingRounds ?? listLead.fundingRounds ?? []),
-          riskTags: (detail?.riskTags ?? listLead.riskTags ?? []),
-          highlights: (detail?.highlights ?? listLead.highlights ?? []),
-          risks: (detail?.risks ?? listLead.risks ?? []),
-          sources: (detail?.sources ?? listLead.sources ?? []),
-        } as typeof listLead
-        const existing = get().projects.find((item) => item.name === lead.name)
-        if (existing) {
-          set((state) => ({
-            projects: state.projects.map((project) => project.id === existing.id ? { ...project, owner: get().currentUser.name, updatedAt: now() } : project),
-            leads: state.leads.map((item) => item.id === leadId ? {
-              ...item,
-              poolStatus: '已转专属项目',
-              claimedBy: get().currentUser.name,
-              convertedProjectId: existing.id,
-            } : item),
-          }))
-          get().addAudit('项目获取池', '领取为我的专属项目', `${lead.name} → ${get().currentUser.name}`)
-          // 同步后端：持久化 poolStatus + 触发领取自动 AI 分析(缺此步刷新会打回原状)
-          try {
-            await apiPost(`/leads/${leadId}/convert`, { projectId: existing.id })
-            // 后端成功后再断言一次本地状态，防止期间 hydrate 竞态把绿色标覆盖回去
-            set((state) => ({ leads: state.leads.map((item) => item.id === leadId ? { ...item, poolStatus: '已转专属项目', claimedBy: get().currentUser.name, convertedProjectId: existing.id } : item) }))
-          } catch { /* 后端同步失败不阻断前端 */ }
-          return get().projects.find((project) => project.id === existing.id)
-        }
-        // Radar/数据库里的可选字段可能以 null 返回；项目创建接口只接收字符串。
-        // 转入前统一归一，避免缺少工商主体、团队或融资信息的线索触发参数校验错误。
-        const projectText = (value: unknown) => typeof value === 'string' ? value : ''
-        const projectIndustry = projectText(lead.industry)
-        const projectSource = projectText(lead.source)
-        const projectSummary = projectText(lead.summary)
-        const projectTags = [projectIndustry, ...lead.riskTags]
-          .filter((tag): tag is string => typeof tag === 'string' && tag.trim().length > 0)
-        const project = await get().addProject({
-          name: lead.name,
-          companyName: projectText(lead.companyName),
-          industry: projectIndustry,
-          round: projectText(lead.round),
-          stage: '线索',
-          owner: get().currentUser.name,
-          collaborators: [],
-          source: projectSource,
-          financing: projectText(lead.financing),
-          valuation: (lead.fundingRounds ?? [])[0]?.valuation ?? '未公开，待核验',
-          riskLevel: lead.riskTags.length > 1 ? '中' : '低',
-          summary: projectSummary,
-          tags: projectTags,
-          businessModel: '待尽调补充',
-          market: '待行业研究补充',
-          team: projectText(lead.team),
-          stageSource: '线索转入',
-          scoring: lead.scoring,
-        })
-        if (!project) return undefined
-        get().saveSummary({
-          projectId: project.id,
-          positioning: projectSummary,
-          highlights: lead.highlights,
-          risks: lead.risks,
-          questions: ['核心客户的付费与续费情况如何？', '未来 18 个月的核心里程碑与资金用途是什么？'],
-          missing: ['审计财务数据', '前十大客户明细'],
-          confidence: lead.score,
-          sources: lead.sources.map((source) => `${source.title} · ${source.url}`).slice(0, 5),
-          updatedAt: now(),
-        })
-        get().addFile({
-          projectId: project.id,
-          name: projectSource.includes('BP') ? `${lead.name}_BP及公开信息.pdf` : `${lead.name}_公开信息快照.html`,
-          type: projectSource.includes('BP') ? 'PDF' : 'HTML',
-          category: projectSource.includes('BP') ? '项目资料' : '公开情报',
-          size: projectSource.includes('BP') ? '8.6 MB' : '256 KB',
-          uploader: get().currentUser.name,
-          parseStatus: '成功',
-          visibility: '项目成员',
-        })
+        const converted = await apiPost<{ project: Project; lead: Lead }>(`/leads/${leadId}/convert`)
         set((state) => ({
-          leads: state.leads.map((item) => item.id === leadId ? {
-            ...item,
-            poolStatus: '已转专属项目',
-            claimedBy: get().currentUser.name,
-            convertedProjectId: project.id,
-          } : item),
+          projects: [converted.project, ...state.projects.filter((project) => project.id !== converted.project.id)],
+          leads: state.leads.map((item) => item.id === leadId ? { ...item, ...converted.lead } : item),
         }))
-        get().addAudit('项目获取池', '领取为我的专属项目', `${lead.name} → ${get().currentUser.name}`)
-        // 同步后端：持久化 poolStatus + 触发领取自动 AI 分析(缺此步刷新会打回原状)
-        try {
-          await apiPost(`/leads/${leadId}/convert`, { projectId: project.id })
-          set((state) => ({ leads: state.leads.map((item) => item.id === leadId ? { ...item, poolStatus: '已转专属项目', claimedBy: get().currentUser.name, convertedProjectId: project.id } : item) }))
-        } catch { /* 后端同步失败不阻断前端 */ }
-        return project
+        return converted.project
       },
       saveSummary: async (summary) => {
         try {
@@ -835,10 +471,15 @@ export const useAppStore = create<AppState>()(
       },
       updateTodo: async (todoId, patch) => {
         try {
-          const updated = await apiPatch<Todo>(`/todos/${todoId}`, patch)
+          const expectedVersion = requiredVersion(get().todos.find((todo) => todo.id === todoId), '待办')
+          const { version: _version, ...safePatch } = patch
+          const updated = await apiPatch<Todo>(`/todos/${todoId}`, { ...safePatch, expectedVersion })
           set((state) => ({ todos: state.todos.map((todo) => todo.id === todoId ? updated : todo) }))
+          return updated
         } catch (e) {
           const msg = e instanceof ApiError ? e.message : '更新待办失败'
+          get().addAudit('待办管理', '更新待办失败', `${todoId}: ${msg}`)
+          throw e
         }
       },
       deleteTodo: async (todoId) => {
@@ -855,17 +496,10 @@ export const useAppStore = create<AppState>()(
       },
       addMeeting: async (meeting, newTodos = []) => {
         try {
-          const created = await apiPost<Meeting>('/meetings', meeting)
-          const createdTodos: Todo[] = []
-          for (const t of newTodos) {
-            try {
-              const todoRow = await apiPost<Todo>('/todos', { ...t, meetingId: created.id })
-              createdTodos.push(todoRow)
-            } catch { /* 单个 todo 失败不挡主流程 */ }
-          }
+          const created = await apiPost<Meeting & { createdTodos: Todo[] }>('/meetings', { ...meeting, newTodos })
           set((state) => ({
             meetings: [created, ...state.meetings],
-            todos: [...createdTodos, ...state.todos],
+            todos: [...created.createdTodos, ...state.todos],
           }))
           get().addAudit('会议纪要', '新建并生成纪要', created.title)
           return created
@@ -877,10 +511,15 @@ export const useAppStore = create<AppState>()(
       },
       updateMeeting: async (meetingId, patch) => {
         try {
-          const updated = await apiPatch<Meeting>(`/meetings/${meetingId}`, patch)
+          const expectedVersion = requiredVersion(get().meetings.find((meeting) => meeting.id === meetingId), '会议')
+          const { version: _version, ...safePatch } = patch
+          const updated = await apiPatch<Meeting>(`/meetings/${meetingId}`, { ...safePatch, expectedVersion })
           set((state) => ({ meetings: state.meetings.map((meeting) => meeting.id === meetingId ? updated : meeting) }))
+          return updated
         } catch (e) {
           const msg = e instanceof ApiError ? e.message : '更新会议失败'
+          get().addAudit('会议纪要', '更新会议失败', `${meetingId}: ${msg}`)
+          throw e
         }
       },
       addRisk: async (risk) => {
@@ -897,30 +536,18 @@ export const useAppStore = create<AppState>()(
       },
       updateRisk: async (riskId, patch) => {
         try {
-          const updated = await apiPatch<RiskAlert>(`/risks/${riskId}`, patch)
+          const expectedVersion = requiredVersion(get().risks.find((risk) => risk.id === riskId), '风险')
+          const { version: _version, ...safePatch } = patch
+          const updated = await apiPatch<RiskAlert>(`/risks/${riskId}`, { ...safePatch, expectedVersion })
           set((state) => ({ risks: state.risks.map((risk) => risk.id === riskId ? updated : risk) }))
-          const risk = get().risks.find((item) => item.id === riskId)
-          get().addAudit('风险预警', '更新风险状态', risk?.projectName ?? riskId)
+          return updated
         } catch (e) {
-          const msg = e instanceof ApiError ? e.message : '更新风险失败'
+          throw e
         }
       },
-      addMaterialJob: (job) => {
-        const created: MaterialJob = { ...job, id: id('mat') }
-        set((state) => ({ materialJobs: [created, ...state.materialJobs] }))
-        get().addAudit('上会材料', '创建生成任务', `${created.projectName}：${created.type}`)
-        return created
-      },
-      updateMaterialJob: (jobId, patch) => set((state) => ({ materialJobs: state.materialJobs.map((job) => job.id === jobId ? { ...job, ...patch } : job) })),
-      addPostUpdate: (update) => {
-        const created: PostUpdate = { ...update, id: id('post'), updatedAt: new Date().toISOString().slice(0, 10) }
-        set((state) => ({ postUpdates: [created, ...state.postUpdates] }))
-        get().addAudit('投后工具', '新增经营更新', created.period)
-      },
-      addAudit: (module, action, target) => {
-        const log: AuditLog = { id: id('a'), user: get().currentUser.name, module, action, target, ip: '10.20.14.35', createdAt: now() }
-        set((state) => ({ auditLogs: [log, ...state.auditLogs].slice(0, 100) }))
-      },
+      // Audit records are written by the authenticated server mutation that owns
+      // the business change. Client code must not manufacture authoritative logs.
+      addAudit: () => undefined,
       toggleUserStatus: async (userId) => {
         try {
           const updated = await apiPost<User>(`/users/${userId}/toggle-status`)
@@ -943,30 +570,5 @@ export const useAppStore = create<AppState>()(
         }
       },
       markNotificationsRead: () => set((state) => ({ notifications: state.notifications.map((notification) => ({ ...notification, isRead: true })) })),
-      resetDemo: () => set({
-        isAuthenticated: false,
-        currentUser: defaultUser,
-        projects,
-        files,
-        aiSummaries,
-        todos,
-        meetings,
-        risks,
-        workflowLogs,
-        approvalRequests,
-        materialJobs,
-        postUpdates,
-        users,
-        templates,
-        auditLogs,
-        notifications,
-      }),
     }),
-    { name: 'cybernaut-investment-mvp-v10', partialize: (state) => ({
-      isAuthenticated: state.isAuthenticated,
-      auditLogs: state.auditLogs,
-      notifications: state.notifications,
-      currentUser: state.currentUser,
-    }) },
-  ),
 )

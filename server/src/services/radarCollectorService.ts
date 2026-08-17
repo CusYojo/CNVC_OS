@@ -1,0 +1,726 @@
+import { createHash } from 'node:crypto'
+import { readFile } from 'node:fs/promises'
+import path from 'node:path'
+import { and, eq } from 'drizzle-orm'
+import { db } from '../db/client.js'
+import { radarCandidates, radarCollectorStates, radarSourceRegistry } from '../db/schema.js'
+import { ingestRadarCandidates, saveRadarCollectorState } from './radarDataMigrationService.js'
+import type { RadarPublicSourceConfig, RadarPublicSourceType } from './radarSourceCatalog.js'
+
+type JsonObject = Record<string, unknown>
+
+interface ManagedPublicSource extends RadarPublicSourceConfig {
+  enabled: boolean
+}
+
+interface WechatAccount {
+  group: string
+  accountName: string
+  wxName: string
+}
+
+const FETCH_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/126 Safari/537.36',
+  Accept: 'text/html,application/rss+xml,application/atom+xml,application/xml;q=0.9,*/*;q=0.8',
+  'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+}
+const GSDATA_API_URL = 'http://databus.gsdata.cn:8888/api/service'
+const GSDATA_WECHAT_ROUTER = '/weixin/article/search1'
+const GSDATA_WECHAT_CONTENT_ROUTER = '/weixin/article/content'
+const PITCHHUB_FLOW_URL = 'https://gateway.36kr.com/api/mis/nav/home/project/bulletin/flow'
+
+const PROJECT_TERMS = [
+  '人工智能', '大模型', 'AI', '机器人', '芯片', '半导体', '医疗', '医药', '材料', '新能源',
+  '算法', '软件', '平台', '产品', '技术', '成果', '专利', '临床', '量产', '客户', '订单',
+]
+const INVESTMENT_TERMS = [
+  '融资', '投资', '天使轮', '种子轮', 'Pre-A', 'A轮', 'B轮', 'C轮', '估值', '并购',
+  '募资', '创始人', '创业', '初创', '商业化', '产业化', '成果转化',
+]
+
+function cleanText(value: unknown): string {
+  return String(value ?? '').replace(/[\u200b-\u200f\ufeff]/g, '').replace(/\s+/g, ' ').trim()
+}
+
+function sha256(value: string): string {
+  return createHash('sha256').update(value).digest('hex')
+}
+
+function md5(value: string): string {
+  return createHash('md5').update(value).digest('hex')
+}
+
+function decodeEntities(value: string): string {
+  const named: Record<string, string> = {
+    amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ',
+  }
+  return value
+    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
+    .replace(/&#(x?[0-9a-f]+);/gi, (_match, code: string) => {
+      const parsed = Number.parseInt(code.startsWith('x') || code.startsWith('X') ? code.slice(1) : code, code.toLowerCase().startsWith('x') ? 16 : 10)
+      return Number.isFinite(parsed) ? String.fromCodePoint(parsed) : ''
+    })
+    .replace(/&([a-z]+);/gi, (match, name: string) => named[name.toLowerCase()] ?? match)
+}
+
+function htmlToText(value: unknown, maxLength = 12_000): string {
+  return cleanText(decodeEntities(String(value ?? '')
+    .replace(/<(script|style|svg|noscript|iframe)\b[^>]*>[\s\S]*?<\/\1>/gi, ' ')
+    .replace(/<br\s*\/?\s*>/gi, '\n')
+    .replace(/<\/\s*(p|li|h[1-6]|blockquote|tr)\s*>/gi, '\n')
+    .replace(/<[^>]+>/g, ' '))).slice(0, maxLength)
+}
+
+function xmlBlocks(xml: string, tag: string): string[] {
+  return [...xml.matchAll(new RegExp(`<(?:[\\w-]+:)?${tag}\\b[^>]*>([\\s\\S]*?)<\\/(?:[\\w-]+:)?${tag}>`, 'gi'))]
+    .map((match) => match[1])
+}
+
+function xmlValue(block: string, ...tags: string[]): string {
+  for (const tag of tags) {
+    const match = block.match(new RegExp(`<(?:[\\w-]+:)?${tag}\\b[^>]*>([\\s\\S]*?)<\\/(?:[\\w-]+:)?${tag}>`, 'i'))
+    if (match) return htmlToText(match[1])
+  }
+  return ''
+}
+
+function xmlValues(block: string, tag: string): string[] {
+  return xmlBlocks(block, tag).map((value) => htmlToText(value)).filter(Boolean)
+}
+
+function xmlLink(block: string): string {
+  const alternate = block.match(/<(?:[\w-]+:)?link\b[^>]*\brel=["']alternate["'][^>]*\bhref=["']([^"']+)["'][^>]*\/?>/i)
+    ?? block.match(/<(?:[\w-]+:)?link\b[^>]*\bhref=["']([^"']+)["'][^>]*\/?>/i)
+  return cleanText(decodeEntities(alternate?.[1] ?? xmlValue(block, 'link')))
+}
+
+function xmlCategories(block: string): string[] {
+  return [...block.matchAll(/<(?:[\w-]+:)?category\b[^>]*(?:term|label)=["']([^"']+)["'][^>]*\/?>/gi)]
+    .map((match) => cleanText(decodeEntities(match[1]))).filter(Boolean)
+}
+
+function parseFeedEntries(xml: string): Array<{ title: string; summary: string; link: string; publishedAt: string; updatedAt: string; authors: string[]; categories: string[]; id: string }> {
+  const blocks = xmlBlocks(xml, 'entry')
+  const entries = blocks.length > 0 ? blocks : xmlBlocks(xml, 'item')
+  return entries.map((block) => ({
+    title: xmlValue(block, 'title'),
+    summary: xmlValue(block, 'summary', 'description', 'content', 'encoded'),
+    link: xmlLink(block),
+    publishedAt: xmlValue(block, 'published', 'pubDate', 'date'),
+    updatedAt: xmlValue(block, 'updated', 'lastBuildDate'),
+    authors: xmlValues(block, 'name').length > 0 ? xmlValues(block, 'name') : xmlValues(block, 'author'),
+    categories: xmlCategories(block),
+    id: xmlValue(block, 'id', 'guid'),
+  })).filter((entry) => entry.title)
+}
+
+function candidateScore(group: string, title: string, summary: string) {
+  const text = `${title}\n${summary}`.toLowerCase()
+  const projectHits = PROJECT_TERMS.filter((term) => text.includes(term.toLowerCase())).slice(0, 8)
+  const investmentHits = INVESTMENT_TERMS.filter((term) => text.includes(term.toLowerCase())).slice(0, 8)
+  const base = group === '论文' ? 50 : group === '专利' ? 45 : group === '高校成果' ? 35 : 20
+  const score = Math.min(100, base + projectHits.length * 4 + investmentHits.length * 7)
+  const worthAttention = group === '论文' || group === '专利' || score >= 35
+  const signals = [
+    ...projectHits.map((term) => ({ code: 'technology_keyword', score: 4, detail: term })),
+    ...investmentHits.map((term) => ({ code: 'investment_keyword', score: 7, detail: term })),
+  ]
+  return {
+    score,
+    worthAttention,
+    signals,
+    decision: worthAttention ? 'watchlist' : 'filter',
+    decision_label: worthAttention ? '保留观察' : '过滤',
+    filter_reasons: worthAttention ? [] : ['缺少明确的项目或投资信号'],
+  }
+}
+
+function sourceCandidate(source: ManagedPublicSource, input: {
+  title: string
+  summary?: string
+  link?: string
+  publishedAt?: string
+  sourceId?: string
+  authors?: string[]
+  categories?: string[]
+  extra?: JsonObject
+}): JsonObject {
+  const title = cleanText(input.title)
+  const summary = htmlToText(input.summary ?? '', 4_000)
+  const link = cleanText(input.link)
+  const sourceId = cleanText(input.sourceId) || link || sha256(`${source.key}:${title}`).slice(0, 24)
+  const score = candidateScore(source.group, title, summary)
+  const isArxiv = source.type === 'arxiv_rss'
+  const arxivMatch = `${sourceId} ${link}`.match(/arxiv\.org\/(?:abs|pdf)\/([0-9]{4}\.[0-9]{4,5}(?:v[0-9]+)?)/i)
+  const arxivId = arxivMatch?.[1] ?? ''
+  return {
+    source: isArxiv ? 'arxiv' : 'investment',
+    source_id: isArxiv && arxivId ? arxivId : sourceId,
+    fingerprint: md5(sourceId || title).slice(0, 16),
+    title,
+    summary,
+    authors: input.authors ?? [],
+    first_author: input.authors?.[0] ?? '',
+    second_author: input.authors?.[1] ?? '',
+    source_name: source.name,
+    source_group: source.group,
+    source_key: source.key,
+    source_type: source.type,
+    categories: input.categories?.length ? input.categories : [source.group, source.name],
+    published_at: cleanText(input.publishedAt),
+    updated_at: '',
+    link: isArxiv && arxivId ? `https://arxiv.org/abs/${arxivId}` : link,
+    pdf_url: isArxiv && arxivId ? `https://arxiv.org/pdf/${arxivId}.pdf` : '',
+    attention_score: score.score,
+    worth_attention: score.worthAttention,
+    signals: score.signals,
+    decision: score.decision,
+    decision_label: score.decision_label,
+    filter_reasons: score.filter_reasons,
+    collected_at: new Date().toISOString(),
+    ...(input.extra ?? {}),
+  }
+}
+
+async function fetchText(url: string, signal: AbortSignal, timeoutMs = 25_000, init: RequestInit = {}): Promise<string> {
+  if (signal.aborted) throw signal.reason instanceof Error ? signal.reason : new Error('request aborted')
+  const controller = new AbortController()
+  const abort = () => controller.abort(signal.reason)
+  signal.addEventListener('abort', abort, { once: true })
+  const timer = setTimeout(() => controller.abort(new Error(`request timeout after ${timeoutMs}ms`)), timeoutMs)
+  try {
+    const response = await fetch(url, {
+      ...init,
+      headers: { ...FETCH_HEADERS, ...(init.headers ?? {}) },
+      signal: controller.signal,
+      redirect: 'follow',
+    })
+    if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}`)
+    return await response.text()
+  } finally {
+    clearTimeout(timer)
+    signal.removeEventListener('abort', abort)
+  }
+}
+
+function parseRssSource(source: ManagedPublicSource, xml: string, limit: number): JsonObject[] {
+  return parseFeedEntries(xml).slice(0, limit).map((entry) => sourceCandidate(source, {
+    title: entry.title,
+    summary: entry.summary,
+    link: entry.link,
+    publishedAt: entry.publishedAt || entry.updatedAt,
+    sourceId: entry.id,
+    authors: entry.authors,
+    categories: entry.categories,
+  }))
+}
+
+function parseHtmlListSource(source: ManagedPublicSource, html: string, limit: number): JsonObject[] {
+  const rows: JsonObject[] = []
+  const seen = new Set<string>()
+  const anchorPattern = /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi
+  for (const match of html.matchAll(anchorPattern)) {
+    const href = cleanText(decodeEntities(match[1]))
+    const title = htmlToText(match[2], 300)
+    if (title.length < 6 || seen.has(title)) continue
+    const combined = `${title} ${href}`.toLowerCase()
+    if (![...PROJECT_TERMS, ...INVESTMENT_TERMS].some((term) => combined.includes(term.toLowerCase()))) continue
+    let link = href
+    try { link = new URL(href, source.url).toString() } catch { /* preserve the source value */ }
+    rows.push(sourceCandidate(source, { title, summary: title, link }))
+    seen.add(title)
+    if (rows.length >= limit) break
+  }
+  return rows
+}
+
+function shanghaiDate(daysOffset = 0): string {
+  const now = new Date(Date.now() + daysOffset * 86_400_000)
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(now)
+}
+
+function pitchhubDate(value: unknown): string {
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric)) return ''
+  return shanghaiDateFrom(new Date(numeric > 10_000_000_000 ? numeric : numeric * 1_000))
+}
+
+function shanghaiDateFrom(date: Date): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(date)
+}
+
+function pitchhubItem(source: ManagedPublicSource, raw: JsonObject): JsonObject | null {
+  const material = raw.templateMaterial && typeof raw.templateMaterial === 'object' ? raw.templateMaterial as JsonObject : {}
+  const title = cleanText(material.widgetTitle)
+  const itemId = cleanText(raw.itemId || material.itemId)
+  if (!title || !itemId) return null
+  const route = cleanText(raw.route)
+  const link = route.startsWith('detail_article') ? `https://36kr.com/p/${itemId}` : `https://36kr.com/newsflashes/${itemId}`
+  const project = raw.projectCard && typeof raw.projectCard === 'object' ? raw.projectCard as JsonObject : {}
+  return sourceCandidate(source, {
+    title,
+    summary: cleanText(material.widgetContent),
+    link,
+    sourceId: itemId,
+    publishedAt: pitchhubDate(material.publishTime),
+    extra: {
+      source_time_label: pitchhubDate(material.publishTime),
+      project_name: cleanText(project.name),
+      project_brief: cleanText(project.briefIntro),
+    },
+  })
+}
+
+function embeddedJsonArray(html: string, property: string): unknown[] {
+  const marker = `"${property}":`
+  const markerIndex = html.indexOf(marker)
+  if (markerIndex < 0) return []
+  const start = html.indexOf('[', markerIndex + marker.length)
+  if (start < 0) return []
+  let depth = 0
+  let quoted = false
+  let escaped = false
+  for (let index = start; index < html.length; index += 1) {
+    const character = html[index]
+    if (quoted) {
+      if (escaped) escaped = false
+      else if (character === '\\') escaped = true
+      else if (character === '"') quoted = false
+      continue
+    }
+    if (character === '"') quoted = true
+    else if (character === '[') depth += 1
+    else if (character === ']' && --depth === 0) {
+      try {
+        const value = JSON.parse(html.slice(start, index + 1))
+        return Array.isArray(value) ? value : []
+      } catch { return [] }
+    }
+  }
+  return []
+}
+
+async function fetchPitchhub(source: ManagedPublicSource, html: string, signal: AbortSignal, limit: number): Promise<JsonObject[]> {
+  const yesterday = shanghaiDate(-1)
+  const rows: JsonObject[] = []
+  const seen = new Set<string>()
+  for (const raw of embeddedJsonArray(html, 'itemList')) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue
+    const item = pitchhubItem(source, raw as JsonObject)
+    if (!item || cleanText(item.published_at) !== yesterday) continue
+    const key = cleanText(item.source_id)
+    if (seen.has(key)) continue
+    rows.push(item)
+    seen.add(key)
+    if (rows.length >= limit) return rows
+  }
+  const callback = cleanText(html.match(/(?:\\?"pageCallback\\?"\s*:\s*\\?")([^"\\]+)/)?.[1])
+  let pageCallback = callback
+  let hasNext = /(?:\\?"hasNextPage\\?"\s*:\s*)1/.test(html)
+  const maxPages = Math.min(12, Math.max(1, Number(source.max_pages) || 8))
+  for (let page = 1; page < maxPages && pageCallback && hasNext && rows.length < limit; page += 1) {
+    const body = {
+      partner_id: 'web', timestamp: Date.now(), partner_version: '1.0.0',
+      param: { pageSize: Math.min(20, Math.max(1, limit)), pageEvent: 1, pageCallback, siteId: 1, platformId: 2 },
+    }
+    const text = await fetchText(PITCHHUB_FLOW_URL, signal, 25_000, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Origin: 'https://pitchhub.36kr.com', Referer: source.url },
+      body: JSON.stringify(body),
+    })
+    const payload = JSON.parse(text) as JsonObject
+    if (Number(payload.code) !== 0) throw new Error(cleanText(payload.message || payload.msg || text).slice(0, 500))
+    const data = payload.data && typeof payload.data === 'object' ? payload.data as JsonObject : {}
+    const itemList = Array.isArray(data.itemList) ? data.itemList : []
+    let sawOlder = false
+    for (const raw of itemList) {
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue
+      const item = pitchhubItem(source, raw as JsonObject)
+      if (!item) continue
+      const date = cleanText(item.published_at)
+      if (date === yesterday && !seen.has(cleanText(item.source_id))) {
+        rows.push(item)
+        seen.add(cleanText(item.source_id))
+      } else if (date && date < yesterday) sawOlder = true
+      if (rows.length >= limit) break
+    }
+    hasNext = Boolean(data.hasNextPage) && !sawOlder
+    pageCallback = cleanText(data.pageCallback)
+  }
+  if (rows.length > 0) return rows
+  // Keep a best-effort HTML fallback for a changed or missing page callback.
+  const anchors = [...html.matchAll(/<a\b[^>]*href=["']([^"']*(?:newsflashes|\/p\/)[^"']*)["'][^>]*>([\s\S]*?)<\/a>/gi)]
+  for (const match of anchors) {
+    const title = htmlToText(match[2], 300)
+    if (!title || seen.has(title)) continue
+    rows.push(sourceCandidate(source, { title, summary: title, link: new URL(match[1], source.url).toString(), publishedAt: yesterday }))
+    seen.add(title)
+    if (rows.length >= limit) break
+  }
+  return rows
+}
+
+async function collectOnePublicSource(source: ManagedPublicSource, signal: AbortSignal): Promise<JsonObject[]> {
+  if (['manual', 'wanfang_search'].includes(source.type)) return []
+  const limit = Math.min(100, Math.max(1, Number(source.max_entries_per_run) || 20))
+  const text = await fetchText(source.url, signal)
+  if (source.type === 'rss' || source.type === 'arxiv_rss') return parseRssSource(source, text, limit)
+  if (source.type === 'html_list') return parseHtmlListSource(source, text, limit)
+  if (source.type === '36kr_financing_flash') return await fetchPitchhub(source, text, signal, limit)
+  throw new Error(`unsupported source type: ${source.type}`)
+}
+
+async function collectDetailedArxiv(enabledSources: ManagedPublicSource[], signal: AbortSignal): Promise<JsonObject[]> {
+  const source = enabledSources.find((item) => item.type === 'arxiv_rss')
+  if (!source) return []
+  const query = encodeURIComponent('(cat:cs.AI OR cat:cs.CL OR cat:cs.CV OR cat:cs.LG)')
+  const xml = await fetchText(`https://export.arxiv.org/api/query?search_query=${query}&start=0&max_results=50&sortBy=submittedDate&sortOrder=descending`, signal, 35_000)
+  const apiSource: ManagedPublicSource = { ...source, key: 'arxiv_api', name: 'arXiv API', url: 'https://export.arxiv.org/api/query' }
+  return parseRssSource(apiSource, xml, 50)
+}
+
+async function managedPublicSources(): Promise<ManagedPublicSource[]> {
+  const rows = await db.select().from(radarSourceRegistry)
+    .where(eq(radarSourceRegistry.sourceKind, 'public-source'))
+  return rows.map((row) => {
+    const config = row.config as JsonObject
+    return {
+      ...config,
+      key: cleanText(row.externalKey || config.key),
+      name: cleanText(row.displayName || config.name),
+      url: cleanText(config.url),
+      group: cleanText(row.sourceGroup || config.group),
+      type: cleanText(config.type) as RadarPublicSourceType,
+      frequency: cleanText(config.frequency),
+      enabled: Boolean(row.enabled),
+    } as ManagedPublicSource
+  }).filter((source) => source.key && source.url && source.name && source.type)
+}
+
+async function collectorState(id: string): Promise<JsonObject> {
+  const [row] = await db.select().from(radarCollectorStates).where(eq(radarCollectorStates.id, id)).limit(1)
+  return row?.state ?? {}
+}
+
+async function runRadarPublicCollectionScope(
+  stateId: 'auto' | 'paper_daily',
+  includeSource: (source: ManagedPublicSource) => boolean,
+  includeDetailedArxiv: boolean,
+  signal: AbortSignal,
+): Promise<JsonObject> {
+  const startedAt = new Date().toISOString()
+  const previous = await collectorState(stateId)
+  const sources = (await managedPublicSources()).filter((source) => source.enabled && includeSource(source))
+  await saveRadarCollectorState(stateId, { ...previous, enabled: true, running: true, last_started_at: startedAt, last_error: '' })
+  try {
+    const rows: JsonObject[] = []
+    const sourceResults: JsonObject[] = []
+    const errors: JsonObject[] = []
+    for (let index = 0; index < sources.length; index += 4) {
+      const batch = sources.slice(index, index + 4)
+      const results = await Promise.all(batch.map(async (source) => {
+        try {
+          const items = await collectOnePublicSource(source, signal)
+          return { source, items, error: '' }
+        } catch (error) {
+          if (signal.aborted) throw signal.reason instanceof Error ? signal.reason : error
+          return { source, items: [] as JsonObject[], error: error instanceof Error ? error.message : String(error) }
+        }
+      }))
+      for (const result of results) {
+        rows.push(...result.items)
+        sourceResults.push({ key: result.source.key, name: result.source.name, fetched: result.items.length, error: result.error })
+        if (result.error) errors.push({ source: result.source.name, key: result.source.key, error: result.error.slice(0, 500) })
+      }
+    }
+    let arxiv: JsonObject = { fetched: 0, error: '', skipped: !includeDetailedArxiv }
+    if (includeDetailedArxiv) {
+      try {
+        if (signal.aborted) throw signal.reason instanceof Error ? signal.reason : new Error('Radar collection aborted')
+        const arxivRows = await collectDetailedArxiv(sources, signal)
+        rows.push(...arxivRows)
+        arxiv = { fetched: arxivRows.length, error: '' }
+      } catch (error) {
+        if (signal.aborted) throw signal.reason instanceof Error ? signal.reason : error
+        arxiv = { fetched: 0, error: error instanceof Error ? error.message : String(error) }
+      }
+    }
+    const unique = [...new Map(rows.map((item) => [`${cleanText(item.source)}:${cleanText(item.source_id || item.link || item.title)}`, item])).values()]
+    const retained = unique.filter((item) => item.worth_attention !== false)
+    const imported = await ingestRadarCandidates(retained)
+    const result = {
+      fetched: unique.length,
+      retained: retained.length,
+      filtered: unique.length - retained.length,
+      written: imported,
+      source_results: sourceResults,
+      error_samples: errors.slice(0, 50),
+      arxiv,
+    }
+    const finishedAt = new Date().toISOString()
+    const allFailed = errors.length === sources.length
+      && sources.length > 0
+      && Number(arxiv.fetched || 0) === 0
+    await saveRadarCollectorState(stateId, {
+      ...previous,
+      enabled: true,
+      running: false,
+      groups: [...new Set(sources.map((source) => source.group))],
+      last_started_at: startedAt,
+      last_finished_at: finishedAt,
+      last_result: result,
+      last_error: allFailed ? '所有外部来源均采集失败' : '',
+      consecutive_error_runs: allFailed ? Number(previous.consecutive_error_runs || 0) + 1 : 0,
+      run_count: Number(previous.run_count || 0) + 1,
+    })
+    if (allFailed) {
+      throw Object.assign(new Error('所有外部来源均采集失败'), { radarStatePersisted: true })
+    }
+    return { ...result, started_at: startedAt, finished_at: finishedAt }
+  } catch (error) {
+    if ((error as { radarStatePersisted?: boolean }).radarStatePersisted) throw error
+    const message = error instanceof Error ? error.message : String(error)
+    await saveRadarCollectorState(stateId, {
+      ...previous,
+      enabled: true,
+      running: false,
+      last_started_at: startedAt,
+      last_finished_at: new Date().toISOString(),
+      last_error: message,
+      consecutive_error_runs: Number(previous.consecutive_error_runs || 0) + 1,
+      run_count: Number(previous.run_count || 0) + 1,
+    })
+    throw error
+  }
+}
+
+export async function runRadarPublicCollection(signal: AbortSignal): Promise<JsonObject> {
+  return await runRadarPublicCollectionScope('auto', (source) => source.group !== '论文', false, signal)
+}
+
+export async function runRadarPaperCollection(signal: AbortSignal): Promise<JsonObject> {
+  return await runRadarPublicCollectionScope('paper_daily', (source) => source.group === '论文', true, signal)
+}
+
+async function loadGsdataCredentials(): Promise<{ appKey: string; appSecret: string }> {
+  let appKey = cleanText(process.env.GSDATA_APP_KEY)
+  let appSecret = cleanText(process.env.GSDATA_APP_SECRET)
+  if (!appKey || !appSecret) {
+    const filePath = path.resolve(process.env.RADAR_DATA_DIR?.trim() || 'project-discovery/data', 'gsdata_credentials.json')
+    try {
+      const file = JSON.parse(await readFile(filePath, 'utf8')) as JsonObject
+      appKey = cleanText(file.app_key)
+      appSecret = cleanText(file.app_secret)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    }
+  }
+  if (!appKey || !appSecret) throw new Error('缺少 GSData app_key/app_secret')
+  return { appKey, appSecret }
+}
+
+async function managedWechatAccounts(groups?: string[], wxNames?: string[]): Promise<WechatAccount[]> {
+  const rows = await db.select().from(radarSourceRegistry)
+    .where(and(eq(radarSourceRegistry.sourceKind, 'wechat-account'), eq(radarSourceRegistry.enabled, true)))
+  const groupSet = new Set(groups?.filter(Boolean) ?? [])
+  const wxSet = new Set((wxNames ?? []).map((value) => value.toLowerCase()))
+  return rows.map((row) => ({
+    group: cleanText(row.sourceGroup),
+    accountName: cleanText(row.displayName),
+    wxName: cleanText(row.externalKey),
+  })).filter((account) => account.accountName && account.wxName)
+    .filter((account) => groupSet.size === 0 || groupSet.has(account.group))
+    .filter((account) => wxSet.size === 0 || wxSet.has(account.wxName.toLowerCase()))
+    .sort((a, b) => (a.group === '机构' ? -1 : 1) - (b.group === '机构' ? -1 : 1) || a.accountName.localeCompare(b.accountName))
+}
+
+function gsdataToken(params: Record<string, string>, router: string, appKey: string, appSecret: string): string {
+  const joined = Object.keys(params).sort().map((key) => `${key}${params[key]}`).join('')
+  const sign = md5(`${appSecret}_${joined}_${appSecret}`)
+  return Buffer.from(`${appKey}:${sign}:${router}`).toString('base64')
+}
+
+async function gsdataGet(router: string, params: Record<string, string>, signal: AbortSignal): Promise<JsonObject> {
+  const { appKey, appSecret } = await loadGsdataCredentials()
+  const url = new URL(GSDATA_API_URL)
+  for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value)
+  let lastError: unknown
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const text = await fetchText(url.toString(), signal, 25_000, {
+        headers: { 'access-token': gsdataToken(params, router, appKey, appSecret) },
+      })
+      return JSON.parse(text) as JsonObject
+    } catch (error) {
+      lastError = error
+      if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 1_000 * (2 ** attempt)))
+    }
+  }
+  throw lastError
+}
+
+async function fetchWechatArticleContent(article: JsonObject, signal: AbortSignal): Promise<{ text: string; status: string }> {
+  const localUrl = cleanText(article.news_local_url)
+  if (localUrl) {
+    try {
+      const payload = await gsdataGet(GSDATA_WECHAT_CONTENT_ROUTER, { news_local_url: localUrl }, signal)
+      const data = payload.data && typeof payload.data === 'object' ? payload.data as JsonObject : {}
+      const text = htmlToText(data.news_content || data.content || data.html)
+      if (text) return { text, status: 'gsdata_content_ok' }
+    } catch { /* fall through to the public article URL */ }
+  }
+  const link = cleanText(article.news_url)
+  if (link.includes('mp.weixin.qq.com')) {
+    try {
+      const html = await fetchText(link, signal, 15_000)
+      const content = html.match(/<(?:div|section)\b[^>]*(?:id=["']js_content["']|class=["'][^"']*rich_media_content[^"']*["'])[^>]*>([\s\S]*?)<\/(?:div|section)>/i)?.[1] ?? ''
+      const text = htmlToText(content)
+      if (text) return { text, status: 'mp_article_ok' }
+    } catch { /* record an empty body below */ }
+  }
+  return { text: '', status: 'content_unavailable' }
+}
+
+async function fetchWechatAccount(account: WechatAccount, date: string, days: number, limit: number, signal: AbortSignal): Promise<{ rows: JsonObject[]; error: string }> {
+  const start = `${date} 00:00:00`
+  const endDate = new Date(`${date}T00:00:00+08:00`)
+  endDate.setUTCDate(endDate.getUTCDate() + days)
+  const end = `${shanghaiDateFrom(endDate)} 00:00:00`
+  const rows: JsonObject[] = []
+  const pageSize = Math.min(50, Math.max(1, limit))
+  const maxPages = Math.min(10, Math.max(1, Math.ceil(limit / pageSize)))
+  try {
+    for (let page = 1; page <= maxPages && rows.length < limit; page += 1) {
+      const payload = await gsdataGet(GSDATA_WECHAT_ROUTER, {
+        wx_name: account.wxName,
+        posttime_start: start,
+        posttime_end: end,
+        order: 'desc', sort: 'posttime', page: String(page), limit: String(pageSize),
+      }, signal)
+      if (!payload.success) throw new Error(cleanText(payload.msg || payload.message || JSON.stringify(payload)).slice(0, 500))
+      const data = payload.data && typeof payload.data === 'object' ? payload.data as JsonObject : {}
+      const articles = Array.isArray(data.newsList) ? data.newsList : []
+      for (const raw of articles) {
+        if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue
+        const article = raw as JsonObject
+        const title = cleanText(article.news_title)
+        if (!title) continue
+        const digest = htmlToText(article.news_digest, 2_000)
+        const preliminary = candidateScore(`${account.group}公众号`, title, digest)
+        if (!preliminary.worthAttention) continue
+        const content = await fetchWechatArticleContent(article, signal)
+        const summary = digest || content.text.slice(0, 300)
+        const score = candidateScore(`${account.group}公众号`, title, `${digest}\n${content.text}`)
+        const link = cleanText(article.news_url)
+        const sourceId = cleanText(article.news_uuid) || link || `${account.wxName}:${title}`
+        rows.push({
+          source: 'wechat_api', source_id: sourceId, fingerprint: md5(sourceId).slice(0, 16),
+          title, summary, article_text: content.text, article_text_length: content.text.length,
+          article_fetch_status: content.status, source_name: account.accountName,
+          source_group: `${account.group}公众号`, source_key: account.wxName, source_type: 'gsdata_wechat',
+          account_name: account.accountName, wx_name: account.wxName, wx_nickname: cleanText(article.wx_nickname),
+          news_author: cleanText(article.news_author), news_local_url: cleanText(article.news_local_url),
+          source_url: cleanText(article.source_url), categories: [`${account.group}公众号`, account.accountName],
+          published_at: cleanText(article.news_posttime), updated_at: cleanText(article.news_entertime), link,
+          cover_url: cleanText(article.cover_url), read_count: article.news_read_count ?? '',
+          like_count: article.news_like_count ?? '', share_num: article.share_num ?? '',
+          attention_score: score.score, worth_attention: score.worthAttention, signals: score.signals,
+          decision: score.decision, decision_label: score.decision_label, filter_reasons: score.filter_reasons,
+          collected_at: new Date().toISOString(),
+        })
+        if (rows.length >= limit) break
+      }
+      if (articles.length < pageSize) break
+    }
+    return { rows, error: '' }
+  } catch (error) {
+    return { rows, error: error instanceof Error ? error.message : String(error) }
+  }
+}
+
+async function runWechatCollection(options: { groups?: string[]; wxNames?: string[]; days?: number; limit?: number }, signal: AbortSignal): Promise<JsonObject> {
+  const days = Math.min(30, Math.max(1, options.days ?? 7))
+  const date = shanghaiDate(-days)
+  const accounts = await managedWechatAccounts(options.groups, options.wxNames)
+  const rows: JsonObject[] = []
+  const accountResults: JsonObject[] = []
+  const errors: JsonObject[] = []
+  for (let index = 0; index < accounts.length; index += 4) {
+    const results = await Promise.all(accounts.slice(index, index + 4).map(async (account) => ({
+      account,
+      result: await fetchWechatAccount(account, date, days, options.limit ?? 100, signal),
+    })))
+    for (const { account, result } of results) {
+      rows.push(...result.rows)
+      accountResults.push({ group: account.group, account_name: account.accountName, wx_name: account.wxName, fetched: result.rows.length, error: result.error })
+      if (result.error) errors.push({ group: account.group, account_name: account.accountName, wx_name: account.wxName, error: result.error.slice(0, 500) })
+    }
+  }
+  const imported = await ingestRadarCandidates(rows)
+  const sourceState = Object.fromEntries(accountResults.map((item) => [cleanText(item.wx_name), item]))
+  await saveRadarCollectorState('wechat_sources', { updated_at: new Date().toISOString(), sources: sourceState })
+  return {
+    date, days, accounts: accounts.length, fetched: rows.length, retained: rows.length,
+    filtered: 0, written: imported, worth_attention: rows.length, errors,
+    account_results: accountResults,
+    failed_accounts: errors.map((error) => ({ group: error.group, account_name: error.account_name, wx_name: error.wx_name })),
+    items: rows.slice(0, 100),
+  }
+}
+
+export async function runRadarWechatDaily(signal: AbortSignal): Promise<JsonObject> {
+  const previous = await collectorState('wechat_daily')
+  const startedAt = new Date().toISOString()
+  await saveRadarCollectorState('wechat_daily', { ...previous, running: true, last_started_at: startedAt, last_error: '' })
+  try {
+    const result = await runWechatCollection({ groups: ['高校', '机构'] }, signal)
+    await saveRadarCollectorState('wechat_daily', {
+      ...previous, running: false, last_started_at: startedAt, last_finished_at: new Date().toISOString(),
+      last_result: result, pending_retry_accounts: result.failed_accounts ?? [], last_error: '',
+    })
+    return result
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    await saveRadarCollectorState('wechat_daily', { ...previous, running: false, last_started_at: startedAt, last_finished_at: new Date().toISOString(), last_error: message })
+    throw error
+  }
+}
+
+export async function runRadarWechatRetry(signal: AbortSignal): Promise<JsonObject> {
+  const previous = await collectorState('wechat_daily')
+  const pending = Array.isArray(previous.pending_retry_accounts) ? previous.pending_retry_accounts : []
+  const wxNames = pending.flatMap((item) => item && typeof item === 'object' && !Array.isArray(item) ? [cleanText((item as JsonObject).wx_name)] : []).filter(Boolean)
+  if (wxNames.length === 0) return { skipped: true, reason: 'no_pending_accounts', accounts: 0 }
+  const result = await runWechatCollection({ wxNames: wxNames.slice(0, 100) }, signal)
+  await saveRadarCollectorState('wechat_daily', { ...previous, last_retry_result: result, pending_retry_accounts: result.failed_accounts ?? [], last_error: '' })
+  return result
+}
+
+export async function runRadarWechatInstitution(signal: AbortSignal): Promise<JsonObject> {
+  const previous = await collectorState('wechat_daily')
+  const result = await runWechatCollection({ groups: ['机构'] }, signal)
+  await saveRadarCollectorState('wechat_daily', { ...previous, last_institution_result: result, pending_retry_accounts: result.failed_accounts ?? [], last_error: '' })
+  return result
+}
+
+export async function radarCollectorHealth() {
+  try {
+    const [sources, candidates, [state]] = await Promise.all([
+      db.select().from(radarSourceRegistry).where(eq(radarSourceRegistry.sourceKind, 'public-source')),
+      db.select({ sourceKeyHash: radarCandidates.sourceKeyHash }).from(radarCandidates),
+      db.select().from(radarCollectorStates).where(eq(radarCollectorStates.id, 'auto')).limit(1),
+    ])
+    return {
+      name: 'radar-typescript-collector', ok: sources.length > 0, inProcess: true,
+      mode: 'node-in-process', publicSources: sources.length,
+      enabledSources: sources.filter((source) => source.enabled).length,
+      candidateTotal: candidates.length, lastFinishedAt: state?.state?.last_finished_at ?? null,
+    }
+  } catch (error) {
+    return { name: 'radar-typescript-collector', ok: false, inProcess: true, mode: 'node-in-process', error: error instanceof Error ? error.message : String(error) }
+  }
+}

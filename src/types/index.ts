@@ -9,6 +9,7 @@ export type ApprovalType = '初筛审批' | '立项审批' | '尽调启动审批
 export type LeadChannel = '微信群' | '论文专利' | '院校' | '重点机构' | '新闻' | '其他'
 
 export interface Project {
+  version: number
   pinned?: boolean
   scoring?: LeadScoring
   id: string
@@ -64,6 +65,7 @@ export interface AISummary {
 }
 
 export interface Todo {
+  version: number
   id: string
   title: string
   projectId: string
@@ -73,9 +75,11 @@ export interface Todo {
   priority: '高' | '中' | '低'
   status: TaskStatus
   type: '流程' | '会议' | '材料' | '风险' | '投后'
+  meetingId?: string | null
 }
 
 export interface Meeting {
+  version: number
   id: string
   projectId: string
   projectName: string
@@ -91,6 +95,7 @@ export interface Meeting {
 }
 
 export interface RiskAlert {
+  version: number
   id: string
   projectId: string
   projectName: string
@@ -100,7 +105,6 @@ export interface RiskAlert {
   status: '待确认' | '处理中' | '已关闭' | '误报'
   owner: string
   occurredAt: string
-  suggestion: string
 }
 
 export interface WorkflowLog {
@@ -125,6 +129,8 @@ export interface ApprovalNode {
   sequence: number
   status: ApprovalNodeStatus
   approvedBy?: string[]
+  approverUserIds?: string[]
+  approvedByUserIds?: string[]
   completedAt?: string
   comment?: string
 }
@@ -134,6 +140,7 @@ export interface ApprovalRecord {
   nodeId: string
   nodeName: string
   operator: string
+  operatorUserId?: string
   action: ApprovalAction
   comment: string
   createdAt: string
@@ -150,6 +157,7 @@ export interface ApprovalRequest {
   targetStage: ProjectStage
   status: ApprovalStatus
   applicant: string
+  applicantUserId?: string
   department: string
   priority: '普通' | '紧急'
   currentNodeId?: string
@@ -163,26 +171,13 @@ export interface ApprovalRequest {
   checklist: { label: string; passed: boolean; required: boolean }[]
   nodes: ApprovalNode[]
   records: ApprovalRecord[]
-}
-
-export interface MaterialJob {
-  id: string
-  projectId: string
-  projectName: string
-  type: string
-  template: string
-  version: string
-  status: JobStatus
-  progress: number
-  createdBy: string
-  createdAt: string
-  outputUrl?: string
+  lockVersion?: number
 }
 
 export interface LeadScoringDimensionItem { name: string; score: number; max: number; reason: string }
 export interface LeadScoringDimension { key: string; name: string; score: number; max: number; items: LeadScoringDimensionItem[] }
 export interface LeadCompetitor { name: string; is_self: boolean; tech: string; product: string; funding: string; differentiation: string; sourceUrl?: string; sourceRef?: string; evidence?: string; matchType?: 'self' | 'direct' | 'substitute'; comparisonBasis?: string; verificationStatus?: 'self' | 'evidence-backed' }
-export type LeadScoreJobStatus = 'queued' | 'running' | 'retrying' | 'done' | 'failed'
+export type LeadScoreJobStatus = 'queued' | 'running' | 'retrying' | 'done' | 'failed' | 'dead_letter'
 export interface LeadScoreJob {
   status: LeadScoreJobStatus
   attempts: number
@@ -296,17 +291,6 @@ export interface SourceEvidence {
   category: '官网' | '监管/政府' | '企业材料' | '权威媒体' | '第三方数据库'
   reliability: '高' | '中' | '待核验'
   excerpt: string
-}
-
-export interface PostUpdate {
-  id: string
-  projectId: string
-  period: string
-  revenue: string
-  grossMargin: string
-  cashFlow: string
-  milestone: string
-  updatedAt: string
 }
 
 export interface User {

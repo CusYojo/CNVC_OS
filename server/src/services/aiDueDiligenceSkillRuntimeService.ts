@@ -1,11 +1,9 @@
-import { execFile } from 'node:child_process'
 import { stat, writeFile, access, mkdir, readdir } from 'node:fs/promises'
 import path from 'node:path'
-import { promisify } from 'node:util'
 import type { BusinessContent, EvidenceSource } from './aiBusinessContentService.js'
 import { getAiSkillDirectory } from './aiSkillService.js'
-
-const execFileAsync = promisify(execFile)
+import { execFileSupervised as execFileAsync } from '../runtime/supervisedProcessService.js'
+import { fetchAiGatewayChatCompatible } from './aiGatewayService.js'
 const SKILL_NAME = 'write-investment-dd-report' as const
 const GW_BASE = (process.env.LLM_BASE_URL || process.env.OPENAI_BASE_URL || 'http://127.0.0.1:18081/v1').replace(/\/$/, '')
 const GW_KEY = process.env.OPENAI_API_KEY || process.env.LLM_API_KEY || ''
@@ -51,7 +49,7 @@ function isPrimaryProjectSource(source: EvidenceSource) {
   return /file|contract|financial|primary_document/i.test(source.sourceType)
 }
 
-function atomicStatements(source: EvidenceSource) {
+export function dueDiligenceAtomicStatements(source: EvidenceSource) {
   const rawLines = source.content.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
   const pageExcerpt = rawLines
     .filter((line) => /^页面正文摘录[：:]/.test(line))
@@ -63,7 +61,12 @@ function atomicStatements(source: EvidenceSource) {
     .flatMap((line) => line.split(/(?<=[。！？；])\s*/))
     .map((line) => compactText(line, 600))
     .filter((line) => line.length >= 6 && !/(?:^|[：:])\s*(?:待核验|暂无|未知|未提取|未明确披露)[。；]?$/.test(line))
-    .slice(0, 4)
+    // A primary-document chunk commonly starts with provenance or scope notes
+    // before a multi-field registry/table record. Four statements silently
+    // dropped later fields such as the unified social credit code, contract
+    // acceptance and cash evidence. Keep a bounded but complete chunk-level
+    // set; the ledger still has the independent global 320-fact ceiling.
+    .slice(0, 16)
 }
 
 function sourceStatus(source: EvidenceSource) {
@@ -93,7 +96,7 @@ function buildEvidenceLedger(input: {
 }) {
   const legalEntity = input.project.companyName || input.project.name
   const facts = input.sources
-    .flatMap((source, sourceIndex) => atomicStatements(source).map((statement) => ({
+    .flatMap((source, sourceIndex) => dueDiligenceAtomicStatements(source).map((statement) => ({
       source,
       sourceIndex,
       statement,
@@ -312,6 +315,64 @@ function normalizeFieldStatus(value: unknown) {
   return FIELD_STATUSES.has(normalized) ? normalized : raw
 }
 
+const FIELD_ROW_CONTRACTS: Readonly<Record<string, readonly string[]>> = {
+  'product.product_matrix': ['product', 'buyer', 'pricing', 'delivery', 'maturity', 'evidence'],
+  'business.customer_closed_loop': [
+    'customer', 'contract', 'amount', 'delivery', 'acceptance', 'revenue', 'invoice', 'cash', 'renewal',
+  ],
+  'business.revenue_breakdown': ['period', 'legal_entity', 'product', 'customer', 'revenue'],
+  'market.competitor_matrix': [
+    'competitor', 'product', 'customer', 'pricing', 'buyer_criteria',
+    'substitute', 'strength', 'weakness', 'company_implication', 'evidence',
+  ],
+}
+
+const FIELD_ROW_ALIASES: Readonly<Record<string, Readonly<Record<string, readonly string[]>>>> = {
+  'product.product_matrix': {
+    buyer: ['target_customer'],
+  },
+  'business.customer_closed_loop': {
+    contract: ['contract_no'],
+    amount: ['contract_amount'],
+    delivery: ['delivery_date'],
+    acceptance: ['acceptance_date'],
+    revenue: ['recognized_revenue'],
+    invoice: ['invoiced_amount'],
+    cash: ['cash_received'],
+  },
+  'business.revenue_breakdown': {
+    legal_entity: ['entity'],
+    product: ['product_name'],
+  },
+  'market.competitor_matrix': {
+    customer: ['target_customer'],
+    strength: ['relative_strength'],
+    weakness: ['relative_limitation'],
+  },
+}
+
+function normalizeFieldDataRows(fieldId: string, value: unknown) {
+  const data = recordValue(value)
+  const rows = Array.isArray(data.rows) ? data.rows : undefined
+  const aliases = FIELD_ROW_ALIASES[fieldId]
+  if (!rows || !aliases) return data
+  return {
+    ...data,
+    rows: rows.map((rawRow) => {
+      const row = recordValue(rawRow)
+      const normalized = { ...row }
+      Object.entries(aliases).forEach(([canonical, candidates]) => {
+        if (normalized[canonical] !== undefined && normalized[canonical] !== '') return
+        const alias = candidates.find((candidate) => (
+          row[candidate] !== undefined && row[candidate] !== ''
+        ))
+        if (alias) normalized[canonical] = row[alias]
+      })
+      return normalized
+    }),
+  }
+}
+
 function normalizeFields(value: unknown, knownEvidenceIds: Set<string>) {
   const source = Array.isArray(value)
     ? value
@@ -330,7 +391,7 @@ function normalizeFields(value: unknown, knownEvidenceIds: Set<string>) {
       status: normalizeFieldStatus(field.status),
       source_grade: normalizeSourceGrade(field.source_grade ?? field.sourceGrade),
       evidence_ids: evidenceIds,
-      data: recordValue(field.data ?? field.value ?? field.payload),
+      data: normalizeFieldDataRows(id, field.data ?? field.value ?? field.payload),
     }
     delete normalized.field_id
     delete normalized.fieldId
@@ -469,6 +530,33 @@ function normalizeBlocks(input: {
   })
 }
 
+const READER_FACING_WORKPAPER_REPLACEMENTS: Readonly<Record<string, string>> = {
+  核查框架: '分析维度',
+  验证框架: '判断维度',
+  核查重点: '关键判断',
+  核查材料: '支撑依据',
+  应取得数据: '关键指标',
+  需要回答的事实: '关键事实',
+  必须完成的勾稽: '关键勾稽',
+  完成标准: '达成条件',
+  底稿要求: '证据要求',
+  优先资料清单: '关键证据',
+  尽调工作流: '分析路径',
+}
+
+function sanitizeDueDiligenceReaderValue(value: unknown): unknown {
+  if (typeof value === 'string') {
+    return Object.entries(READER_FACING_WORKPAPER_REPLACEMENTS)
+      .reduce((text, [workpaperPhrase, readerPhrase]) => (
+        text.replaceAll(workpaperPhrase, readerPhrase)
+      ), value)
+  }
+  if (Array.isArray(value)) return value.map(sanitizeDueDiligenceReaderValue)
+  if (!value || typeof value !== 'object') return value
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+    .map(([key, item]) => [key, sanitizeDueDiligenceReaderValue(item)]))
+}
+
 function requestedReportMode(value: unknown) {
   const scope = String(value ?? '')
   if (/财务/.test(scope)) return 'financial_dd'
@@ -496,13 +584,14 @@ function reportDate(cutoff: string) {
   return match ? `${match[1]}年${Number(match[2])}月` : cutoff
 }
 
-function packageContract(desiredMode: string) {
+export function dueDiligencePackageContract(desiredMode: string) {
   return JSON.stringify({
     report_modes: [...REPORT_MODES],
     target_mode: desiredMode,
     required_fields_by_mode: MODE_REQUIRED_FIELDS,
     required_roles_by_mode: MODE_REQUIRED_ROLES,
     role_required_field: ROLE_REQUIRED_FIELD,
+    field_data_row_contracts: FIELD_ROW_CONTRACTS,
     diligence_data_shape: {
       project: {
         name: 'string', legal_entity: 'string', cutoff_date: 'YYYY-MM-DD',
@@ -582,11 +671,11 @@ export function normalizeDueDiligencePackage(input: {
       confidentiality: '内部资料，严禁外传',
       ...(templateProfile ? { template_profile: templateProfile } : {}),
     },
-    blocks: normalizeBlocks({
+    blocks: sanitizeDueDiligenceReaderValue(normalizeBlocks({
       blocks: generatedReport.blocks,
       knownEvidenceIds,
       supportedFields,
-    }),
+    })),
   }
   if (!templateProfile) delete recordValue(report.meta).template_profile
   return { reportMode, diligenceData, report }
@@ -645,7 +734,7 @@ async function generatePackage(input: {
 8. 不得输出 Markdown。
 
 以下是审计器真实使用的机器契约，字段名、枚举值和数组层级必须逐字匹配：
-${packageContract(desiredMode)}`
+${dueDiligencePackageContract(desiredMode)}`
   const userPrompt = `项目：${JSON.stringify({
     name: input.project.name,
     legalEntity: input.project.companyName || input.project.name,
@@ -660,7 +749,11 @@ ${packageContract(desiredMode)}`
 资料截止日：${input.sourceCutoffDate}
 已生成章节内容：${JSON.stringify(input.content).slice(0, 90_000)}
 证据台账：${JSON.stringify(input.evidence).slice(0, 90_000)}`
-  const response = await fetch(`${GW_BASE}/chat/completions`, {
+  const packageTimeoutMs = Math.min(
+    600_000,
+    Math.max(180_000, Number(process.env.AI_DD_SKILL_PACKAGE_TIMEOUT_MS) || 360_000),
+  )
+  const response = await fetchAiGatewayChatCompatible(GW_BASE, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -676,10 +769,8 @@ ${packageContract(desiredMode)}`
       reasoning_effort: 'low',
       response_format: { type: 'json_object' },
     }),
-    signal: AbortSignal.timeout(
-      Math.min(600_000, Math.max(180_000, Number(process.env.AI_DD_SKILL_PACKAGE_TIMEOUT_MS) || 360_000)),
-    ),
-  })
+    signal: AbortSignal.timeout(packageTimeoutMs),
+  }, fetch, packageTimeoutMs)
   const generated = await readModelJson(response)
   const blockedReasons = (generated.blockedReasons ?? []).map((item) => compactText(item, 300)).filter(Boolean)
   if (blockedReasons.length > 0 || !generated.diligenceData || !generated.report) {
@@ -712,7 +803,7 @@ async function repairPackage(input: {
 {"reportMode":"","blockedReasons":[],"diligenceData":{"project":{},"fields":[]},"report":{"meta":{},"blocks":[]}}
 
 审计器机器契约：
-${packageContract(input.desiredMode)}`
+${dueDiligencePackageContract(input.desiredMode)}`
   const userPrompt = `项目：${JSON.stringify({
     name: input.project.name,
     legalEntity: input.project.companyName || input.project.name,
@@ -721,7 +812,11 @@ ${packageContract(input.desiredMode)}`
 审计错误（必须逐项修复）：${JSON.stringify(input.auditIssues)}
 当前尽调包：${JSON.stringify(input.generated).slice(0, 100_000)}
 证据台账：${JSON.stringify(input.evidence).slice(0, 90_000)}`
-  const response = await fetch(`${GW_BASE}/chat/completions`, {
+  const repairTimeoutMs = Math.min(
+    600_000,
+    Math.max(180_000, Number(process.env.AI_DD_SKILL_REPAIR_TIMEOUT_MS) || 360_000),
+  )
+  const response = await fetchAiGatewayChatCompatible(GW_BASE, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -737,10 +832,8 @@ ${packageContract(input.desiredMode)}`
       reasoning_effort: 'low',
       response_format: { type: 'json_object' },
     }),
-    signal: AbortSignal.timeout(
-      Math.min(600_000, Math.max(180_000, Number(process.env.AI_DD_SKILL_REPAIR_TIMEOUT_MS) || 360_000)),
-    ),
-  })
+    signal: AbortSignal.timeout(repairTimeoutMs),
+  }, fetch, repairTimeoutMs)
   const repaired = await readModelJson(response)
   const blockedReasons = (repaired.blockedReasons ?? []).map((item) => compactText(item, 300)).filter(Boolean)
   if (blockedReasons.length > 0 || !repaired.diligenceData || !repaired.report) {

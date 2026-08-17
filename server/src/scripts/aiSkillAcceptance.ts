@@ -198,11 +198,11 @@ async function main() {
         '交易方案',
         '可核验来源',
         '本地项目资料库优先',
-        'Flue',
+        '进程内公开检索',
         'LLM Gateway',
         '候选 URL',
         '页面核验',
-        '搜索摘要',
+        '检索摘要',
         '核验结果缓存复用',
         '只联网搜索',
       ]
@@ -331,10 +331,10 @@ async function main() {
     '核心规范 SHA-256、资深投资经理角色、阶段建议、17 节结构与版式规则',
   )
   assert(
-    'AI-008 默认本地优先、Flue 发现、LLM Gateway 页面核验并缓存复用',
+    'AI-008 默认本地优先、进程内发现、LLM Gateway 页面核验并缓存复用',
     [
       '本地项目资料库优先',
-      'Flue',
+      '进程内公开检索',
       'LLM Gateway',
       '候选 URL',
       '页面核验',
@@ -343,13 +343,13 @@ async function main() {
       'Local Project Retrieval',
       'Network Cache Retrieval',
       'Evidence Gap Analysis',
-      'Flue Candidate Discovery',
+      'In-process Candidate Discovery',
       'LLM Gateway Page Verification',
       'Network Cache Writeback',
       '不恢复或依赖 SearXNG',
     ].every((term) =>
       `${proposalSkill.instructions}\n${proposalSkill.referenceInstructions}`.includes(term)),
-    '本地资料库 → 网络缓存 → 缺口分析 → Flue 候选发现 → LLM Gateway 页面核验 → 缓存写回',
+    '本地资料库 → 网络缓存 → 缺口分析 → 进程内候选发现 → LLM Gateway 页面核验 → 缓存写回',
   )
   assert(
     'AI-008 Skill 覆盖结构、文风、章节任务与视觉门禁',
@@ -531,7 +531,7 @@ async function main() {
     '代表性读取每份文件，输出主题事实、时间线、冲突、缺口与表格候选，并注入四项文档生成流程',
   )
   assert(
-    'AI-010 待核验项触发 Flue 候选发现、LLM Gateway 页面核验、缓存写回和二次生成',
+    'AI-010 待核验项触发进程内候选发现、LLM Gateway 页面核验、缓存写回和二次生成',
     [
       'dueDiligencePendingResearchTopics',
       '联网检索 Agent 发现待核验事项来源',
@@ -540,7 +540,7 @@ async function main() {
       'fetchVerifiedProjectWebEvidence',
       'cacheProjectNetworkEvidence',
       '使用本地与联网证据重新生成尽调内容',
-      'project_knowledge_primary_flue_discovery_llm_page_verification',
+      'project_knowledge_primary_in_process_discovery_llm_page_verification',
     ].every((term) => aiTaskServiceSource.includes(term))
       && aiBusinessContentSource.includes('source.sourceType.startsWith(\'public_web\')')
       && aiBusinessContentSource.includes('finding.status !== \'待核验\'')
@@ -548,9 +548,10 @@ async function main() {
       && aiBusinessContentSource.includes('DUE_DILIGENCE_MODEL_UNAVAILABLE')
       && !aiTaskServiceSource.includes('DUE_DILIGENCE_NETWORK_UNAVAILABLE')
       && aiTaskServiceSource.includes('尽调公开页面核验失败，使用现有证据继续生成')
-      && dueDiligenceResearchSource.includes('/workflows/${WORKFLOW}?wait=result')
+      && dueDiligenceResearchSource.includes('collectCompanyIntel')
+      && dueDiligenceResearchSource.includes("provider: 'in_process_intel_collect'")
       && dueDiligenceResearchSource.includes('public_web_agent_search'),
-    '首轮生成 → 待核验问题提取 → Flue 候选发现 → LLM Gateway 页面核验 → 缓存写回 → 带补全证据二次生成；联网异常继续生成受限 DOCX',
+    '首轮生成 → 待核验问题提取 → 进程内候选发现 → LLM Gateway 页面核验 → 缓存写回 → 带补全证据二次生成；联网异常继续生成受限 DOCX',
   )
   assert(
     '投资建议书与 Q&A 绑定原生 Skill，其余业务任务绑定 docs 模板',
@@ -1004,7 +1005,7 @@ async function main() {
       && assistantPageSource.includes('conversationTimeline.map((item)')
       && assistantPageSource.includes('tasks={[item.task]}')
       && assistantPageSource.includes('answers={[item.answer]}'),
-    'Flue 消息时间、任务 createdAt 和 Q&A createdAt 合并升序；最新内容位于最下方',
+    'MySQL 消息时间、任务 createdAt 和 Q&A createdAt 合并升序；最新内容位于最下方',
   )
   assert(
     'Q&A 前端创建正式项目文档任务',
@@ -1093,8 +1094,9 @@ async function main() {
       && assistantPageSource.includes('event.dataTransfer.files')
       && assistantPageSource.includes('void uploadFiles(Array.from(event.dataTransfer.files))')
       && assistantPageSource.includes('松开以上传文件')
-      && assistantPageSource.includes('accept={AI_UPLOAD_ACCEPT}'),
-    '拖拽与回形针选择复用同一上传、项目入库、进度和失败隔离流程',
+      && assistantPageSource.includes('accept={AI_UPLOAD_ACCEPT}')
+      && assistantPageSource.includes(".jpeg,.zip'"),
+    '拖拽与回形针选择复用同一上传、项目入库、进度和失败隔离流程，并允许 ZIP 会话附件',
   )
 
   const report = {

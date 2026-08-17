@@ -106,12 +106,23 @@ end run
 
 
 def convert(docx: Path, work: Path) -> tuple[Path, str]:
-    word_pdf = convert_with_word(docx, work)
-    if word_pdf is not None:
-        return word_pdf, "Microsoft Word"
-    soffice = shutil.which("soffice") or shutil.which("libreoffice")
+    # The server-side renderer must remain headless. On macOS, activating Word
+    # through AppleScript can block indefinitely on a desktop prompt or first-run
+    # dialog, which is unsuitable for a supervised background task. Prefer the
+    # configured/bundled LibreOffice binary and keep Word only as a last-resort
+    # compatibility fallback when no headless renderer exists.
+    soffice = (
+        os.environ.get("AI_DD_SOFFICE_BINARY")
+        or os.environ.get("AI_QA_SOFFICE_BINARY")
+        or os.environ.get("AI_PDF_TO_PPT_LIBREOFFICE")
+        or shutil.which("soffice")
+        or shutil.which("libreoffice")
+    )
     if not soffice:
-        raise RuntimeError("neither Microsoft Word export nor LibreOffice/soffice is available")
+        word_pdf = convert_with_word(docx, work)
+        if word_pdf is not None:
+            return word_pdf, "Microsoft Word"
+        raise RuntimeError("neither LibreOffice/soffice nor Microsoft Word export is available")
     profile = work / "lo-profile"
     profile.mkdir(parents=True, exist_ok=True)
     command = [

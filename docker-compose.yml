@@ -1,19 +1,20 @@
 services:
-  postgres:
-    image: postgres:16-alpine
-    container_name: cybernaut-pg
+  mysql:
+    image: mysql:8.0
+    container_name: cybernaut-mysql
     environment:
-      POSTGRES_USER: cybernaut
-      POSTGRES_PASSWORD: cyb_mvp_2026
-      POSTGRES_DB: cybernaut_mvp
+      MYSQL_DATABASE: ${DB_DATABASE:-cybernaut_mvp}
+      MYSQL_USER: ${DB_USERNAME:-cybernaut}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-change-me}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-change-root-me}
     ports:
-      - "5432:5432"
+      - "3306:3306"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - mysql_data:/var/lib/mysql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U cybernaut -d cybernaut_mvp"]
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u$${MYSQL_USER} -p$${MYSQL_PASSWORD}"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 20
 volumes:
-  pgdata:
+  mysql_data:

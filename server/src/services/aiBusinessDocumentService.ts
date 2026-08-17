@@ -1,3 +1,4 @@
+import '../security/hardenImageSizeRuntime.js'
 import {
   AlignmentType,
   BorderStyle,
@@ -42,6 +43,7 @@ import {
 import { sanitizeClientVisibleEvidenceWording } from './aiClientVisibleTextService.js'
 import { generateInvestmentProposalDocx } from './aiInvestmentProposalDocumentService.js'
 import { generateInvestmentRecommendationPptWithGorden } from './aiGordenSuperPptService.js'
+import { formatShanghaiDate } from '../utils/shanghaiTime.js'
 
 type ProjectLike = {
   name: string
@@ -1133,7 +1135,7 @@ export async function generateBusinessDocx(input: {
         alignment: AlignmentType.RIGHT,
         spacing: { before: 0, after: 120, line: 360 },
         children: [new TextRun({
-          text: generatedAt.toLocaleDateString('zh-CN', { year: 'numeric', month: 'long' }),
+          text: formatShanghaiDate(generatedAt, { year: 'numeric', month: 'long' }),
           font: runFont(profile.bodyFont),
           size: 28,
           color: '000000',
@@ -1501,7 +1503,7 @@ export async function generateBusinessDocx(input: {
         alignment: AlignmentType.CENTER,
         spacing: { before: 0, after: 180 },
         children: [new TextRun({
-          text: generatedAt.toLocaleDateString('zh-CN', { year: 'numeric', month: 'long' }),
+          text: formatShanghaiDate(generatedAt, { year: 'numeric', month: 'long' }),
           font: runFont(input.template.type === 'due_diligence_report'
             ? dueRuntimeFonts.song
             : DOCX_SONG_FONT),

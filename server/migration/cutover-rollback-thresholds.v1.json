@@ -1,0 +1,175 @@
+{
+  "version": 1,
+  "phase": "pre-ponr-read-only-rollback-window",
+  "approval": {
+    "status": "pending-production-window-approval",
+    "requiredRoles": [
+      "business-owner",
+      "technical-owner",
+      "data-owner",
+      "security-owner",
+      "operations-owner"
+    ]
+  },
+  "globalRules": {
+    "safeRollbackRequiresAllTargetWriteDeltasEqualZero": true,
+    "anyTargetWriteMakesAutomaticRollbackIneligible": true,
+    "afterPonrAction": "forward-repair-only",
+    "reverseCdcAvailable": false
+  },
+  "domains": [
+    {
+      "id": "login",
+      "scope": "existing MySQL session validation and read-only identity lookup; login creation is intentionally blocked",
+      "triggers": [
+        {
+          "id": "login-valid-session-consecutive-failures",
+          "metric": "valid_session_read_failures_consecutive",
+          "operator": ">=",
+          "threshold": 3,
+          "minimumSample": 3,
+          "windowSeconds": 300,
+          "action": "rollback-if-all-write-deltas-zero"
+        },
+        {
+          "id": "login-target-auth-write-delta",
+          "metric": "target_auth_and_identity_rows_written",
+          "operator": ">",
+          "threshold": 0,
+          "minimumSample": 1,
+          "windowSeconds": 0,
+          "action": "halt-and-adjudicate-no-automatic-rollback"
+        }
+      ]
+    },
+    {
+      "id": "permissions",
+      "scope": "role, project membership and cross-user authorization reads",
+      "triggers": [
+        {
+          "id": "permissions-authorization-breach",
+          "metric": "authorization_breaches",
+          "operator": ">",
+          "threshold": 0,
+          "minimumSample": 1,
+          "windowSeconds": 0,
+          "action": "rollback-if-all-write-deltas-zero"
+        },
+        {
+          "id": "permissions-target-write-delta",
+          "metric": "target_permission_rows_written",
+          "operator": ">",
+          "threshold": 0,
+          "minimumSample": 1,
+          "windowSeconds": 0,
+          "action": "halt-and-adjudicate-no-automatic-rollback"
+        }
+      ]
+    },
+    {
+      "id": "data",
+      "scope": "projects, OA, conversations, files and migrated relational invariants",
+      "triggers": [
+        {
+          "id": "data-reconciliation-or-invariant-mismatch",
+          "metric": "checksum_or_orphan_or_state_mismatches",
+          "operator": ">",
+          "threshold": 0,
+          "minimumSample": 1,
+          "windowSeconds": 0,
+          "action": "rollback-if-all-write-deltas-zero"
+        },
+        {
+          "id": "data-target-write-delta",
+          "metric": "target_project_oa_conversation_file_rows_written",
+          "operator": ">",
+          "threshold": 0,
+          "minimumSample": 1,
+          "windowSeconds": 0,
+          "action": "halt-and-adjudicate-no-automatic-rollback"
+        }
+      ]
+    },
+    {
+      "id": "ai",
+      "scope": "existing AI task, source, artifact and template status reads only; generation is outside this smoke test",
+      "triggers": [
+        {
+          "id": "ai-existing-task-read-consecutive-failures",
+          "metric": "existing_ai_task_status_read_failures_consecutive",
+          "operator": ">=",
+          "threshold": 3,
+          "minimumSample": 3,
+          "windowSeconds": 300,
+          "action": "rollback-if-all-write-deltas-zero"
+        },
+        {
+          "id": "ai-target-write-delta",
+          "metric": "target_ai_task_source_artifact_template_rows_written",
+          "operator": ">",
+          "threshold": 0,
+          "minimumSample": 1,
+          "windowSeconds": 0,
+          "action": "halt-and-adjudicate-no-automatic-rollback"
+        }
+      ]
+    },
+    {
+      "id": "leads",
+      "scope": "lead, Radar, review, scoring and conversion reads",
+      "triggers": [
+        {
+          "id": "leads-read-or-identity-mismatch",
+          "metric": "lead_read_or_identity_mismatches",
+          "operator": ">",
+          "threshold": 0,
+          "minimumSample": 1,
+          "windowSeconds": 0,
+          "action": "rollback-if-all-write-deltas-zero"
+        },
+        {
+          "id": "leads-target-write-delta",
+          "metric": "target_lead_radar_review_score_rows_written",
+          "operator": ">",
+          "threshold": 0,
+          "minimumSample": 1,
+          "windowSeconds": 0,
+          "action": "halt-and-adjudicate-no-automatic-rollback"
+        }
+      ]
+    },
+    {
+      "id": "mysql",
+      "scope": "availability, connection latency and per-session read-only enforcement",
+      "triggers": [
+        {
+          "id": "mysql-health-consecutive-failures",
+          "metric": "mysql_health_failures_consecutive",
+          "operator": ">=",
+          "threshold": 3,
+          "minimumSample": 3,
+          "windowSeconds": 300,
+          "action": "rollback-if-all-write-deltas-zero"
+        },
+        {
+          "id": "mysql-read-only-session-drift",
+          "metric": "mysql_connections_without_read_only_default",
+          "operator": ">",
+          "threshold": 0,
+          "minimumSample": 1,
+          "windowSeconds": 0,
+          "action": "halt-and-adjudicate-no-automatic-rollback"
+        },
+        {
+          "id": "mysql-connection-p95-latency",
+          "metric": "mysql_query_p95_ms",
+          "operator": ">=",
+          "threshold": 2000,
+          "minimumSample": 20,
+          "windowSeconds": 300,
+          "action": "rollback-if-all-write-deltas-zero"
+        }
+      ]
+    }
+  ]
+}

@@ -253,7 +253,7 @@ async function main() {
   check(
     '合规任务使用既有联网Agent补全公司团队产品及返投',
     agentRequestBody.includes('返投认定口径')
-      && agentResearch.audit.provider === 'flue_intel_collect'
+      && agentResearch.audit.provider === 'in_process_intel_collect'
       && agentResearch.sources.length === 4
       && agentResearch.sources.every((source) =>
         source.sourceType === 'public_web_agent_search'

@@ -1,10 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { AlertCircle, Bot, CheckCircle2, ChevronRight, Copy, Download, File as FileIcon, FileText, MessageSquarePlus, Paperclip, RefreshCw, Send, Square, X } from 'lucide-react'
+import { AlertCircle, Bot, Boxes, CheckCircle2, ChevronRight, Copy, Download, File as FileIcon, FileText, MessageSquarePlus, Paperclip, Pencil, RefreshCw, Send, Square, X } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { FlueProvider, useFlueAgent } from '@flue/react'
-import { createFlueClient } from '@flue/sdk'
 import { useAppStore } from '../store/useAppStore'
 import { useAuthStore, authedFetch } from '../store/useAuthStore'
 import { Button, Modal } from '../components/ui'
@@ -18,28 +16,17 @@ import { AiArtifactCenter, AiTaskCards, type AiTask } from '../components/AiTask
 import { AiQaCards, type ProjectQaAnswer } from '../components/AiQaCards'
 import { AiErrorBoundary, copyAiErrorId, createAiErrorId } from '../components/AiErrorBoundary'
 import { useToast } from '../components/Toast'
-import { apiGet, apiPost, apiDelete, ApiError } from '../lib/api'
+import { apiGet, apiPost, apiPut, apiPatch, apiDelete, ApiError } from '../lib/api'
 import {
   extractTextParts,
-  normalizeFlueMessages,
+  normalizeAgentMessages,
   safeStringify,
   toSafeText,
-  type SafeFlueMessage,
-  type SafeFluePart,
+  type SafeAgentMessage,
+  type SafeAgentPart,
 } from '../lib/aiMessageSafety'
-
-// —— Flue 官方 SDK 客户端 ——
-// baseUrl 走同源 /ai/api，由 Vite/nginx 反代到统一配置的 Flue Runtime。
-// 自定义 fetch 每次请求注入当前 JWT（token 过期后跟随重新登录自动更新，避免静态 token 失效）。
-const flueClient = createFlueClient({
-  baseUrl: '/ai/api',
-  fetch: (input: RequestInfo | URL, init: RequestInit = {}) => {
-    const token = useAuthStore.getState().token
-    const headers = new Headers(init.headers)
-    if (token) headers.set('Authorization', `Bearer ${token}`)
-    return fetch(input, { ...init, headers })
-  },
-})
+import { useJwAgent, type JwPendingInteraction } from '../hooks/useJwAgent'
+import { formatShanghaiDateTime, shanghaiDateKey } from '../lib/dateTime'
 
 const AI_TASK_TYPE_BY_ACTION: Record<AiQuickTaskRequest['actionId'], string> = {
   compliance: 'compliance_statement',
@@ -51,7 +38,7 @@ const AI_TASK_TYPE_BY_ACTION: Record<AiQuickTaskRequest['actionId'], string> = {
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
-const AI_UPLOAD_ACCEPT = '.pdf,.xlsx,.xls,.csv,.docx,.txt,.md,.png,.jpg,.jpeg'
+const AI_UPLOAD_ACCEPT = '.pdf,.xlsx,.xls,.csv,.docx,.txt,.md,.markdown,.png,.jpg,.jpeg,.zip'
 const AI_UPLOAD_EXTENSIONS = new Set(
   AI_UPLOAD_ACCEPT.split(',').map((extension) => extension.slice(1)),
 )
@@ -91,7 +78,7 @@ function safeDecodedFileName(url: string): string {
 }
 
 // Markdown 渲染（标题/表格/列表/粗体/代码块）
-function Markdown({ children }: { children: string }) {
+export function Markdown({ children }: { children: string }) {
   return (
     <div className="text-sm leading-7 text-slate-700">
       <ReactMarkdown
@@ -164,13 +151,13 @@ function toolPreview(input: unknown): string {
   }
 }
 
-// 把工具 output 归一成可读文本（flue 的 output 可能是字符串/对象/数组）
+// 把 Agent 工具 output 归一成可读文本（可能是字符串、对象或数组）
 function outputToText(output: unknown): string {
   return toSafeText(output, 4000)
 }
 
 // Pi 式任务链步骤卡片：running（转圈）/ done（绿，可展开看输入输出）/ error（红，就地报错）
-function ToolStep({ part }: { part: SafeFluePart }) {
+function ToolStep({ part }: { part: SafeAgentPart }) {
   const [expanded, setExpanded] = useState(false)
   const toolName = part.toolName || 'unknown'
   const label = TOOL_LABELS[toolName] ?? `🔧 ${toolName}`
@@ -182,10 +169,17 @@ function ToolStep({ part }: { part: SafeFluePart }) {
   const border = isError ? 'border-rose-300' : running ? 'border-brand-200' : 'border-emerald-200'
   const bg = isError ? 'bg-rose-50/60' : running ? 'bg-brand-50/50' : 'bg-emerald-50/40'
   const labelColor = isError ? 'text-rose-700' : running ? 'text-brand-700' : 'text-emerald-700'
+  const statusLabel = isError ? '失败' : running ? '运行中' : '完成'
 
   return (
     <div className={`my-1.5 overflow-hidden rounded-lg border ${border} ${bg} text-xs`}>
-      <button onClick={() => setExpanded((v) => !v)} className="flex w-full items-center gap-2 px-3 py-1.5 text-left">
+      <button
+        type="button"
+        aria-label={`工具步骤 ${label} ${statusLabel}`}
+        aria-expanded={expanded}
+        onClick={() => setExpanded((v) => !v)}
+        className="flex w-full items-center gap-2 px-3 py-1.5 text-left"
+      >
         {running
           ? <span className="inline-block h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-brand-300 border-t-brand-600" />
           : isError
@@ -211,8 +205,8 @@ function ToolStep({ part }: { part: SafeFluePart }) {
   )
 }
 
-// 渲染 flue 会话消息的一个 part（文本 / 推理 / 工具调用 / 文件）
-function MessagePart({ part }: { part: SafeFluePart }) {
+// 渲染 Agent 会话消息的一个 part（文本 / 推理 / 工具调用 / 文件）
+export function MessagePart({ part }: { part: SafeAgentPart }) {
   if (part.type === 'text') return <Markdown>{part.text ?? ''}</Markdown>
   if (part.type === 'reasoning') {
     return (
@@ -239,18 +233,18 @@ function MessagePart({ part }: { part: SafeFluePart }) {
   )
 }
 
-function isUserVisibleMessagePart(part: SafeFluePart) {
+export function isUserVisibleMessagePart(part: SafeAgentPart) {
   // Shell commands are implementation details. Keep them in the conversation
   // state for task/progress inference, but never expose command text to users.
-  return !(part.type === 'dynamic-tool' && part.toolName === 'bash')
+  return !(part.type === 'dynamic-tool' && (part.toolName === 'bash' || part.toolName === 'AskUserQuestion'))
 }
 
-function displayUserMessageText(message: SafeFlueMessage): string {
+function displayUserMessageText(message: SafeAgentMessage): string {
   return extractTextParts(message)
     .replace(/【当前项目】.*\n【projectId】.*\n【用户问题】/s, '')
     .replace(/【范围】全局知识库\n【用户问题】/s, '')
     .replace(/\n?【已上传文件】[\s\S]*$/, '')
-    // Flue 当前没有独立的隐藏提示字段。任务防重复指令仍需发送给 Agent，
+    // Agent 协议当前没有独立的隐藏提示字段。任务防重复指令仍需发送给 Agent，
     // 但它属于内部控制信息，不能出现在面向用户的聊天气泡中。
     .replace(/\n?【(?:系统已执行|内部任务状态)】[\s\S]*$/, '')
 }
@@ -267,7 +261,7 @@ function safeAgentErrorMessage(error: unknown): string {
   }
 }
 
-function MessageRow({ message }: { message: SafeFlueMessage }) {
+function MessageRow({ message }: { message: SafeAgentMessage }) {
   if (message.role === 'user') {
     return (
       <div className="flex justify-end gap-3">
@@ -300,13 +294,117 @@ function MessageRow({ message }: { message: SafeFlueMessage }) {
   )
 }
 
+function AgentInteractionCard({
+  interaction,
+  onAnswer,
+  onCancel,
+}: {
+  interaction: JwPendingInteraction
+  onAnswer: (answers: Record<string, string | string[]>) => Promise<void>
+  onCancel: () => Promise<void>
+}) {
+  const [selected, setSelected] = useState<Record<string, string[]>>({})
+  const [custom, setCustom] = useState<Record<string, string>>({})
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    setSelected({})
+    setCustom({})
+    setSubmitting(false)
+    setError('')
+  }, [interaction.id])
+
+  const complete = interaction.questions.every((question) =>
+    Boolean((custom[question.id] || '').trim() || (selected[question.id] || []).length))
+
+  const resolvedAnswers = () => Object.fromEntries(interaction.questions.map((question) => {
+    const customValue = (custom[question.id] || '').trim()
+    const values = selected[question.id] || []
+    return question.multiSelect
+      ? [question.id, customValue ? [...values, customValue] : values]
+      : [question.id, customValue || values[0] || '']
+  })) as Record<string, string | string[]>
+
+  const run = async (action: 'answer' | 'cancel') => {
+    if (submitting || (action === 'answer' && !complete)) return
+    setSubmitting(true)
+    setError('')
+    try {
+      if (action === 'answer') await onAnswer(resolvedAnswers())
+      else await onCancel()
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : action === 'answer' ? '提交回答失败' : '取消交互失败')
+    } finally { setSubmitting(false) }
+  }
+
+  return (
+    <div className="ml-11 max-w-2xl rounded-xl border border-brand-200 bg-brand-50/50 p-4" aria-label="AI 交互问题">
+      <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-brand-800">
+        <Bot className="h-4 w-4" />AI 需要你的选择
+      </div>
+      <div className="space-y-4">
+        {interaction.questions.map((question) => (
+          <fieldset key={question.id} disabled={submitting}>
+            <legend className="text-sm font-medium text-slate-800">
+              <span className="mr-2 rounded bg-white px-1.5 py-0.5 text-[10px] text-brand-600">{question.header}</span>
+              {question.question}
+            </legend>
+            <div className="mt-2 grid gap-2 sm:grid-cols-2">
+              {question.options.map((option) => {
+                const checked = (selected[question.id] || []).includes(option.label)
+                return (
+                  <label key={option.label} className={`cursor-pointer rounded-lg border p-2.5 ${checked ? 'border-brand-400 bg-white' : 'border-slate-200 bg-white/70'}`}>
+                    <span className="flex items-start gap-2">
+                      <input
+                        type={question.multiSelect ? 'checkbox' : 'radio'}
+                        name={`interaction-${interaction.id}-${question.id}`}
+                        checked={checked}
+                        onChange={() => setSelected((current) => {
+                          const values = current[question.id] || []
+                          return {
+                            ...current,
+                            [question.id]: question.multiSelect
+                              ? checked ? values.filter((value) => value !== option.label) : [...values, option.label]
+                              : [option.label],
+                          }
+                        })}
+                        className="mt-0.5"
+                      />
+                      <span>
+                        <span className="block text-xs font-medium text-slate-700">{option.label}</span>
+                        {option.description && <span className="mt-0.5 block text-[11px] leading-4 text-slate-500">{option.description}</span>}
+                      </span>
+                    </span>
+                  </label>
+                )
+              })}
+            </div>
+            <input
+              value={custom[question.id] || ''}
+              onChange={(event) => setCustom((current) => ({ ...current, [question.id]: event.target.value.slice(0, 500) }))}
+              placeholder="其他回答（填写后优先采用）"
+              className="input mt-2 h-9 bg-white text-xs"
+            />
+          </fieldset>
+        ))}
+      </div>
+      {error && <p className="mt-3 text-xs text-rose-600">{error}</p>}
+      <div className="mt-4 flex justify-end gap-2">
+        <Button variant="secondary" onClick={() => { void run('cancel') }} disabled={submitting}>取消并继续</Button>
+        <Button onClick={() => { void run('answer') }} loading={submitting} disabled={!complete}>提交回答</Button>
+      </div>
+    </div>
+  )
+}
+
 type ConversationTimelineItem =
   | {
       kind: 'message'
       key: string
       timestampMs: number
       stableOrder: number
-      message: SafeFlueMessage
+      message: SafeAgentMessage
     }
   | {
       kind: 'task'
@@ -329,7 +427,7 @@ function validTimelineTimestamp(value: string | undefined) {
   return Number.isFinite(timestamp) ? timestamp : undefined
 }
 
-function messageTimelineTimestamp(messages: SafeFlueMessage[], index: number) {
+function messageTimelineTimestamp(messages: SafeAgentMessage[], index: number) {
   const direct = validTimelineTimestamp(messages[index]?.timestamp)
   if (direct !== undefined) return direct
 
@@ -357,7 +455,7 @@ function messageTimelineTimestamp(messages: SafeFlueMessage[], index: number) {
 }
 
 function buildConversationTimeline(
-  messages: SafeFlueMessage[],
+  messages: SafeAgentMessage[],
   tasks: AiTask[],
   answers: ProjectQaAnswer[],
 ): ConversationTimelineItem[] {
@@ -452,7 +550,7 @@ function mergeAiTaskSnapshot(
 // ———————————— PPT 生成任务看板（长任务的阶段 + 计时 + 预期）————————————
 // PPT 生成耗时数分钟，纯前端根据已发生的工具事件推断阶段并计时，让用户对等待有预期。
 // 数据来源：agent.messages 里的 tool part（dynamic-tool），不接后端进度 API。
-function pptStageFromParts(parts: SafeFluePart[]): { active: boolean; stage: string } {
+function pptStageFromParts(parts: SafeAgentPart[]): { active: boolean; stage: string } {
   let active = false
   let stage = '正在准备'
   for (const p of parts) {
@@ -479,7 +577,7 @@ function pptStageFromParts(parts: SafeFluePart[]): { active: boolean; stage: str
   return { active, stage }
 }
 
-function PptTaskBoard({ parts, busy }: { parts: SafeFluePart[]; busy: boolean }) {
+function PptTaskBoard({ parts, busy }: { parts: SafeAgentPart[]; busy: boolean }) {
   const { active } = pptStageFromParts(parts)
   const show = busy && active
   const [start, setStart] = useState<number | null>(null)
@@ -523,7 +621,7 @@ function fmtSize(n: number): string {
 
 function fmtTime(ms: number): string {
   if (!ms) return ''
-  return new Date(ms).toLocaleString('zh-CN', {
+  return formatShanghaiDateTime(ms, {
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',
@@ -531,8 +629,7 @@ function fmtTime(ms: number): string {
   })
 }
 
-// 工作区下载：/api/workspace/file 在 JWT 网关之后，普通 <a download> 不带 Authorization 头会 401。
-// 统一走 authedFetch 取字节→blob→程序化下载，所有文件类型都可靠下载。
+// 工作区下载：统一走 authedFetch 携带同源会话取字节→blob→程序化下载。
 async function downloadWorkspaceFile(file: WsFile): Promise<void> {
   toast(`正在下载「${file.name}」…`, 'info')
   let res: Response
@@ -661,7 +758,7 @@ function WorkspacePanel({ refreshKey, onRefresh, onOpen }: { refreshKey: number;
   )
 }
 
-// 内联预览（Canvas）：用 authedFetch 带 JWT 取文件字节，按 MIME 渲染图片/PDF/HTML/文本/Markdown，免 OSS。
+// 内联预览（Canvas）：用 authedFetch 带同源会话取文件字节，按 MIME 渲染图片/PDF/HTML/文本/Markdown，免 OSS。
 function FilePreview({ file, onClose }: { file: WsFile; onClose: () => void }) {
   const [kind, setKind] = useState<'image' | 'pdf' | 'html' | 'md' | 'text' | 'other'>('other')
   const [url, setUrl] = useState<string | null>(null)
@@ -724,8 +821,8 @@ function Chat() {
   const [scope, setScope] = useState<'project' | 'global'>('project')
   const [projectId, setProjectId] = useState(initialProject)
   const [input, setInput] = useState('')
-  // 每个"会话"= 一个 flue agent 实例(agentId)。列表存服务端(/api/conversations)，跟账号跨设备同步。
-  // rowId = chat_conversations 主键(改名/删除用)，agentId = flue agent id(加载会话内容用)。
+  // 每个会话由 MySQL 会话主键和统一 Agent 会话标识关联，列表随账号跨设备同步。
+  // rowId 用于改名/删除，agentId 是兼容历史数据的运行时会话标识。
   type ChatSession = {
     rowId: string
     agentId: string
@@ -733,10 +830,21 @@ function Chat() {
     scope: 'project' | 'global'
     projectId?: string | null
     projectName?: string | null
+    modelId?: string | null
+  }
+  type AvailableModel = {
+    id: string; modelKey: string; displayName: string; capabilityTags: string[];
+    contextWindow: number | null; isDefault: boolean
+  }
+  type AvailableCapability = {
+    id: string; kind: 'skill' | 'agent' | 'mcp' | 'plugin'; capabilityKey: string; name: string;
+    description: string | null; packageVersion: string; toolNames: string[]
   }
   const LS_KEY = 'cybernaut-ai-sessions' // 仅用于一次性迁移旧的浏览器本地会话
   const [sessions, setSessions] = useState<ChatSession[]>([])
   const [convId, setConvId] = useState<string>('')
+  const [renamingSessionId, setRenamingSessionId] = useState<string>('')
+  const [renamingTitle, setRenamingTitle] = useState('')
   const initedRef = useRef(false)
   const scrollRef = useRef<HTMLDivElement>(null)
   const [aiTasks, setAiTasks] = useState<AiTask[]>([])
@@ -747,6 +855,13 @@ function Chat() {
   const quickTaskLocksRef = useRef(new Set<string>())
   const [newSessionOpen, setNewSessionOpen] = useState(false)
   const [newSessionProjectId, setNewSessionProjectId] = useState(initialProject)
+  const [availableModels, setAvailableModels] = useState<AvailableModel[]>([])
+  const [availableCapabilities, setAvailableCapabilities] = useState<AvailableCapability[]>([])
+  const [selectedCapabilityIds, setSelectedCapabilityIds] = useState<string[]>([])
+  const [capabilityOpen, setCapabilityOpen] = useState(false)
+  const [capabilitySaving, setCapabilitySaving] = useState(false)
+  const [newSessionModelId, setNewSessionModelId] = useState('')
+  const [switchingModel, setSwitchingModel] = useState(false)
   const [creatingSession, setCreatingSession] = useState(false)
   const [selectedQuickAction, setSelectedQuickAction] = useState<'investment_ppt' | null>(null)
 
@@ -772,6 +887,40 @@ function Chat() {
     .join('|')
   // 把 showToast 注册到模块级 toast 桥（供 downloadWorkspaceFile / downloadRemoteUrl 等模块函数弹提示）
   useEffect(() => { registerAiToast(showToast) }, [showToast])
+  useEffect(() => {
+    let active = true
+    void apiGet<{ list: AvailableModel[] }>('/ai/model-settings/available').then(({ list }) => {
+      if (!active) return
+      setAvailableModels(list)
+      setNewSessionModelId((current) => current || list.find((model) => model.isDefault)?.id || list[0]?.id || '')
+    }).catch(() => { if (active) setAvailableModels([]) })
+    return () => { active = false }
+  }, [])
+  useEffect(() => {
+    let active = true
+    if (!currentConversationRowId) {
+      setAvailableCapabilities([]); setSelectedCapabilityIds([])
+      return () => { active = false }
+    }
+    void apiGet<{ available: AvailableCapability[]; selectedIds: string[] }>(`/ai/capabilities/conversations/${currentConversationRowId}`).then((result) => {
+      if (!active) return
+      setAvailableCapabilities(result.available)
+      // 迁移前会话没有选择记录，界面以“全部已授权能力”呈现并保持兼容。
+      setSelectedCapabilityIds(result.selectedIds.length ? result.selectedIds : result.available.map((item) => item.id))
+    }).catch(() => { if (active) { setAvailableCapabilities([]); setSelectedCapabilityIds([]) } })
+    return () => { active = false }
+  }, [currentConversationRowId])
+
+  async function saveConversationCapabilities() {
+    if (!currentConversationRowId || !selectedCapabilityIds.length) return
+    setCapabilitySaving(true)
+    try {
+      const result = await apiPut<{ available: AvailableCapability[]; selectedIds: string[] }>(`/ai/capabilities/conversations/${currentConversationRowId}`, { capabilityIds: selectedCapabilityIds })
+      setAvailableCapabilities(result.available); setSelectedCapabilityIds(result.selectedIds); setCapabilityOpen(false)
+      showToast('会话能力已更新；下一次启动 Agent 会按当前选择加载。', 'success')
+    } catch (error) { showToast((error as Error).message, 'error') }
+    finally { setCapabilitySaving(false) }
+  }
   // 记住当前项目(下次进来恢复)
   useEffect(() => { if (projectId) localStorage.setItem(LS_LAST_PROJECT, projectId) }, [projectId])
   // 记住当前会话(下次进来恢复)
@@ -798,7 +947,7 @@ function Chat() {
     }
   }, [newSessionOpen, newSessionProjectId, projects])
   // 正式业务任务与 chat_conversations 主键关联。切换或刷新会话时从服务端恢复，
-  // 不依赖 Flue 的瞬时消息状态。
+  // 不依赖旧服务的瞬时消息状态。
   useEffect(() => {
     let active = true
     if (!currentConversationRowId) {
@@ -831,7 +980,7 @@ function Chat() {
   }, [currentConversationRowId, showToast])
 
   // 项目 Q&A 由 Express 持久化在会话中。刷新、重新登录或跨设备打开时直接恢复，
-  // 不依赖 Flue 客户端内存，也不会把业务 Skill 降级成提示词标记。
+  // 不依赖客户端瞬时内存，也不会把业务 Skill 降级成提示词标记。
   useEffect(() => {
     let active = true
     if (!currentConversationRowId) {
@@ -883,11 +1032,11 @@ function Chat() {
     }
   }, [currentConversationRowId, hasActiveAiTask])
 
-  // —— 核心：flue 官方 agent hook，流式/工具可见/记忆全内建 ——
-  const agent = useFlueAgent({ name: 'assistant', id: convId || undefined, live: 'long-poll' })
-  // Flue 是独立运行时，消息不能假设始终符合 SDK 静态类型。先归一化，后续渲染和
+  // JW Runtime 与 API 同进程；消息、工具过程和会话状态统一写入 MySQL。
+  const agent = useJwAgent(convId || undefined)
+  // 运行时消息仍按安全结构归一化，后续渲染和
   // “生成结束”副作用都只读取安全结构，单条畸形消息不会再拖垮整个 AI 页面。
-  const messages = useMemo(() => normalizeFlueMessages(agent.messages), [agent.messages])
+  const messages = useMemo(() => normalizeAgentMessages(agent.messages), [agent.messages])
   const conversationTimeline = useMemo(
     () => buildConversationTimeline(messages, aiTasks, qaAnswers),
     [messages, aiTasks, qaAnswers],
@@ -900,10 +1049,26 @@ function Chat() {
   const agentError = (agentErrorMessage && agent.status === 'error') ? agentErrorRef.current : null
   useEffect(() => {
     if (!agentError) return
-    console.error(`[${agentError.errorId}] Flue Agent 返回错误`, agentError.message)
+    console.error(`[${agentError.errorId}] JW Agent 返回错误`, agentError.message)
   }, [agentError])
   // 正在提交(submitted)或回答(streaming)算"忙"，显示停止按钮；connecting 是初次加载历史/建连，不算忙。
   const busy = agent.status === 'streaming' || agent.status === 'submitted'
+  async function switchCurrentSessionModel(modelId: string | null) {
+    if (!currentSession || switchingModel || busy || agent.interaction) return
+    if ((currentSession.modelId || null) === modelId) return
+    setSwitchingModel(true)
+    try {
+      await apiPatch(`/agent/conversations/${encodeURIComponent(currentSession.agentId)}/model`, { modelId })
+      setSessions((current) => current.map((session) => (
+        session.agentId === currentSession.agentId ? { ...session, modelId } : session
+      )))
+      showToast('当前会话模型已切换，下一轮将使用新模型并保留历史消息', 'success')
+    } catch (error) {
+      showToast(`切换模型失败：${safeAgentErrorMessage(error)}`, 'error')
+    } finally {
+      setSwitchingModel(false)
+    }
+  }
   // React 状态更新前也可能连续触发键盘/点击事件，ref 作为同步锁杜绝重复提交。
   const submitLockRef = useRef(false)
   const [submitting, setSubmitting] = useState(false)
@@ -981,9 +1146,11 @@ function Chat() {
         })
         let rag = false
         let fileId: string | undefined
-        if (scope === 'project' && currentProject?.id) {
+        // ZIP 作为会话附件供 Agent 直接读取；项目知识库暂不对压缩包做自动展开和正文入库。
+        const shouldSyncToProjectKnowledge = !file.name.toLowerCase().endsWith('.zip')
+        if (scope === 'project' && currentProject?.id && shouldSyncToProjectKnowledge) {
           try {
-            // 上传大文件走公网可能慢，用 5 分钟超时覆盖默认 60s，避免大文件被掐断。
+            // 上传大文件走公网可能慢，用 5 分钟超时覆盖默认 120s，避免大文件被掐断。
             const upCtrl = new AbortController()
             const upTimer = setTimeout(() => upCtrl.abort(), 300000)
             let resp: { file?: { id: string; parseStatus: string } }
@@ -1166,7 +1333,7 @@ function Chat() {
                 .map((upload) => upload.fileId)
                 .filter((fileId): fileId is string => Boolean(fileId)),
               attachmentFileNames: uploads.map((upload) => upload.name),
-              sourceCutoffDate: new Date().toISOString().slice(0, 10),
+              sourceCutoffDate: shanghaiDateKey(),
               idempotencyKey: `chat-ppt-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`,
             },
           )
@@ -1253,7 +1420,7 @@ function Chat() {
               projectName: null,
             }
       )
-      // 过滤掉 mock ID（如 p-1001），避免 PostgreSQL UUID 类型错误
+      // 过滤掉旧格式或非法 ID（如 p-1001），避免向 MySQL UUID 字段提交无效值
       const safeProjectId = context.projectId && UUID_PATTERN.test(context.projectId)
         ? context.projectId
         : null
@@ -1266,9 +1433,10 @@ function Chat() {
         projectName?: string | null
       }>('/conversations', {
         title,
-        scope: context.scope,
+        scope: safeProjectId ? context.scope : 'global',
         projectId: safeProjectId,
         projectName: safeProjectId ? context.projectName : null,
+        modelId: newSessionModelId || null,
       })
       const s: ChatSession = {
         rowId: row.id,
@@ -1277,6 +1445,7 @@ function Chat() {
         scope: row.scope === 'global' ? 'global' : context.scope,
         projectId: row.projectId ?? context.projectId ?? null,
         projectName: row.projectName ?? context.projectName ?? null,
+        modelId: newSessionModelId || null,
       }
       setSessions((prev) => [s, ...prev])
       activateSession(s)
@@ -1287,7 +1456,7 @@ function Chat() {
     }
   }
 
-  // 首次加载：从服务端拉会话列表；并把旧的 localStorage 会话一次性迁移到服务端(保留其 flue 会话内容)
+  // 首次加载：从服务端拉会话列表；并把旧的 localStorage 会话一次性迁移到 MySQL。
   useEffect(() => {
     if (initedRef.current) return
     initedRef.current = true
@@ -1301,6 +1470,7 @@ function Chat() {
             scope?: string
             projectId?: string | null
             projectName?: string | null
+            modelId?: string | null
           }[]
         }>('/conversations')
         let mapped: ChatSession[] = (list ?? []).map((r) => ({
@@ -1310,6 +1480,7 @@ function Chat() {
           scope: r.scope === 'global' || !r.projectId ? 'global' : 'project',
           projectId: r.projectId ?? null,
           projectName: r.projectName ?? null,
+          modelId: r.modelId ?? null,
         }))
         try {
           const legacy: { id: string; title?: string }[] = JSON.parse(localStorage.getItem(LS_KEY) || '[]')
@@ -1323,6 +1494,7 @@ function Chat() {
               scope?: string
               projectId?: string | null
               projectName?: string | null
+              modelId?: string | null
             }>('/conversations', { title: s.title || '新会话', agentId: s.id })
             mapped = [{
               rowId: row.id,
@@ -1331,6 +1503,7 @@ function Chat() {
               scope: row.scope === 'global' || !row.projectId ? 'global' : 'project',
               projectId: row.projectId ?? null,
               projectName: row.projectName ?? null,
+              modelId: row.modelId ?? null,
             }, ...mapped]
           }
           localStorage.removeItem(LS_KEY)
@@ -1412,6 +1585,7 @@ function Chat() {
         : currentProject
     ) ?? projects[0]
     setNewSessionProjectId(preferredProject?.id ?? '')
+    setNewSessionModelId((current) => current || availableModels.find((model) => model.isDefault)?.id || availableModels[0]?.id || '')
     setNewSessionOpen(true)
   }
 
@@ -1430,21 +1604,41 @@ function Chat() {
     }
   }
 
-  const deleteSession = async (rowId: string, agentId: string, e: React.MouseEvent) => {
-    e.stopPropagation()
-    apiDelete(`/conversations/${rowId}`).catch(() => {})
-    const next = sessions.filter((s) => s.rowId !== rowId)
-    setSessions(next)
-    if (agentId === convId) {
-      if (next.length) activateSession(next[0])
-      else openNewSessionDialog()
+  const renameSession = async (rowId: string) => {
+    const title = renamingTitle.trim()
+    if (!title) {
+      showToast('会话名称不能为空', 'error')
+      return
+    }
+    try {
+      const updated = await apiPatch<{ title: string }>(`/conversations/${rowId}`, { title })
+      setSessions((items) => items.map((item) => item.rowId === rowId ? { ...item, title: updated.title } : item))
+      setRenamingSessionId('')
+      setRenamingTitle('')
+    } catch (error) {
+      showToast(`会话改名失败：${(error as Error).message}`, 'error')
     }
   }
 
-  // 停止当前会话正在进行的回答（flue 官方 abort 端点；useFlueAgent 自身没有 stop）
+  const deleteSession = async (rowId: string, agentId: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    try {
+      await apiDelete(`/conversations/${rowId}`)
+      const next = sessions.filter((s) => s.rowId !== rowId)
+      setSessions(next)
+      if (agentId === convId) {
+        if (next.length) activateSession(next[0])
+        else openNewSessionDialog()
+      }
+    } catch (error) {
+      showToast(`删除会话失败：${(error as Error).message}`, 'error')
+    }
+  }
+
+  // 停止当前会话正在进行的回答。
   const stop = async () => {
     if (!convId) return
-    try { await flueClient.agents.abort('assistant', convId) }
+    try { await agent.abort() }
     catch (err) { showToast(`停止失败：${(err as Error).message}`, 'error') }
   }
 
@@ -1473,7 +1667,7 @@ function Chat() {
     const taskLockKey = `${request.conversationId}:investment_ppt`
     if (quickTaskLocksRef.current.has(taskLockKey)) return null
     if (!UUID_PATTERN.test(request.projectId)) {
-      showToast(`“${request.projectName}”是未入库的演示项目，不能提交正式 AI 任务。请先创建或选择已入库项目。`, 'error')
+      showToast(`“${request.projectName}”尚未入库，不能提交正式 AI 任务。请先创建或选择已入库项目。`, 'error')
       return null
     }
     quickTaskLocksRef.current.add(taskLockKey)
@@ -1521,7 +1715,7 @@ function Chat() {
     const taskLockKey = `${request.conversationId}:${request.actionId}`
     if (quickTaskLocksRef.current.has(taskLockKey)) return false
     if (!UUID_PATTERN.test(request.projectId)) {
-      showToast(`“${request.projectName}”是未入库的演示项目，不能提交正式 AI 任务。请先创建或选择已入库项目。`, 'error')
+      showToast(`“${request.projectName}”尚未入库，不能提交正式 AI 任务。请先创建或选择已入库项目。`, 'error')
       return false
     }
     quickTaskLocksRef.current.add(taskLockKey)
@@ -1575,7 +1769,7 @@ function Chat() {
       const task = await apiPost<AiTask>('/ai/tasks', {
         type: AI_TASK_TYPE_BY_ACTION[request.actionId],
         projectId: request.projectId,
-        // 任务关联 chat_conversations 的 UUID 主键，而不是 Flue agentId。
+        // 任务关联 chat_conversations 的 UUID 主键，而不是运行时 agentId。
         conversationId: request.conversationId,
         parameters,
         idempotencyKey: `quick-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`,
@@ -1595,7 +1789,7 @@ function Chat() {
       console.warn(`${request.actionLabel} task was not created`, error)
       const message = error instanceof ApiError
         ? error.code === 'AI_SKILL_NOT_AVAILABLE'
-          ? `${request.actionLabel}生成技能尚未部署完成，请联系管理员更新并重启服务`
+          ? error.withContext(`${request.actionLabel}生成技能尚未部署完成，请联系管理员更新并重启服务`)
           : `${request.actionLabel}任务创建失败：${error.message}`
         : `${request.actionLabel}任务暂未创建，请稍后再试`
       showToast(message, 'error')
@@ -1654,8 +1848,39 @@ function Chat() {
               onClick={() => activateSession(s)}
               className={`group mb-1 flex cursor-pointer items-center justify-between rounded-lg px-3 py-2.5 ${s.agentId === convId ? 'bg-white shadow-sm ring-1 ring-brand-200' : 'hover:bg-white/60'}`}
             >
-              <span className="truncate text-xs font-medium text-slate-700">{s.title || '新会话'}</span>
-              <button onClick={(e) => deleteSession(s.rowId, s.agentId, e)} className="ml-2 shrink-0 text-slate-300 opacity-0 group-hover:opacity-100 hover:text-rose-500" aria-label="删除">×</button>
+              {renamingSessionId === s.rowId ? (
+                <input
+                  value={renamingTitle}
+                  onChange={(event) => setRenamingTitle(event.target.value)}
+                  onClick={(event) => event.stopPropagation()}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') { event.preventDefault(); void renameSession(s.rowId) }
+                    if (event.key === 'Escape') { setRenamingSessionId(''); setRenamingTitle('') }
+                  }}
+                  maxLength={40}
+                  autoFocus
+                  aria-label="会话名称"
+                  className="min-w-0 flex-1 rounded border border-brand-300 bg-white px-1.5 py-0.5 text-xs outline-none"
+                />
+              ) : (
+                <span className="min-w-0 flex-1 truncate text-xs font-medium text-slate-700">{s.title || '新会话'}</span>
+              )}
+              <div className="ml-2 flex shrink-0 items-center gap-1 text-slate-300 opacity-0 group-hover:opacity-100 focus-within:opacity-100">
+                {renamingSessionId === s.rowId ? (
+                  <button onClick={(event) => { event.stopPropagation(); void renameSession(s.rowId) }} className="hover:text-brand-600" aria-label="保存会话名称">✓</button>
+                ) : (
+                  <button
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      setRenamingSessionId(s.rowId)
+                      setRenamingTitle(s.title || '新会话')
+                    }}
+                    className="hover:text-brand-600"
+                    aria-label="重命名会话"
+                  ><Pencil className="h-3 w-3" /></button>
+                )}
+                <button onClick={(e) => { void deleteSession(s.rowId, s.agentId, e) }} className="hover:text-rose-500" aria-label="删除会话">×</button>
+              </div>
             </div>
           ))}
           <p className="px-2 pt-3 text-[10px] leading-4 text-slate-400">点"新建会话"开始新对话；同一会话内 AI 记住上下文，刷新不丢。</p>
@@ -1675,6 +1900,42 @@ function Chat() {
               <span className="whitespace-normal break-words leading-5">
                 {currentSession?.projectName ?? currentProject?.name ?? '未绑定项目'}
               </span>
+            </div>
+          )}
+          <select
+            className="input ml-auto h-9 w-44 bg-slate-50 text-xs text-slate-600"
+            aria-label="切换当前会话模型"
+            value={currentSession?.modelId || ''}
+            onChange={(event) => { void switchCurrentSessionModel(event.target.value || null) }}
+            disabled={!currentSession || switchingModel || busy || Boolean(agent.interaction)}
+            title={busy || agent.interaction ? '当前轮完成或停止后才能切换模型' : '切换后从下一轮生效，历史消息保留'}
+          >
+            <option value="">系统默认模型</option>
+            {availableModels.map((model) => (
+              <option key={model.id} value={model.id}>{model.displayName}{model.isDefault ? '（默认）' : ''}</option>
+            ))}
+            {currentSession?.modelId && !availableModels.some((model) => model.id === currentSession.modelId) && (
+              <option value={currentSession.modelId}>已停用模型（切换后不可恢复）</option>
+            )}
+          </select>
+          {agent.runtime && (
+            <div
+              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-[11px] text-slate-500"
+              aria-label="模型用量与上下文压缩状态"
+              title={agent.runtime.contextCompaction.lastError || undefined}
+            >
+              {agent.runtime.usage
+                ? `${agent.runtime.usage.totalTokens.toLocaleString()} Token`
+                : 'Token 待生成'}
+              <span className="px-1 text-slate-300">·</span>
+              {agent.runtime.contextCompaction.state === 'compacting'
+                ? '上下文压缩中'
+                : agent.runtime.contextCompaction.state === 'failed'
+                  ? '上下文压缩失败'
+                  : `已压缩 ${agent.runtime.contextCompaction.count} 次`}
+              {agent.runtime.totalCostUsd !== null && (
+                <><span className="px-1 text-slate-300">·</span>${agent.runtime.totalCostUsd.toFixed(4)}</>
+              )}
             </div>
           )}
         </div>
@@ -1729,6 +1990,13 @@ function Chat() {
                 </AiErrorBoundary>
               )
             })}
+            {agent.interaction && (
+              <AgentInteractionCard
+                interaction={agent.interaction}
+                onAnswer={(answers) => agent.respondInteraction(agent.interaction!.id, 'answer', answers)}
+                onCancel={() => agent.respondInteraction(agent.interaction!.id, 'cancel')}
+              />
+            )}
             {qaAnswersLoading && (
               <AiErrorBoundary
                 level="section"
@@ -1760,7 +2028,7 @@ function Chat() {
               const parts = last?.role === 'assistant' ? last.parts : []
               return <PptTaskBoard parts={parts} busy={busy} />
             })()}
-            {busy && messages[messages.length - 1]?.role === 'user' && (
+            {busy && !agent.interaction && messages[messages.length - 1]?.role === 'user' && (
               <div className="flex gap-3"><span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-brand-50 text-brand-600"><Bot className="h-4 w-4" /></span><span className="inline-block h-4 w-1 animate-pulse bg-brand-500" /></div>
             )}
           </div>
@@ -1832,10 +2100,14 @@ function Chat() {
               className="w-full resize-none border-0 px-2 py-1 text-sm leading-6 outline-none placeholder:text-slate-400"
               placeholder={selectedQuickAction === 'investment_ppt'
                 ? '输入投资建议书的重点、口径或其他要求，也可以直接添加文件后发送…'
-                : `向 AI 询问 ${scope === 'project' ? currentProject?.name : '机构知识库'}…`}
+                : scope === 'project'
+                  ? currentProject
+                    ? `向 AI 询问 ${currentProject.name}…`
+                    : '请先选择项目，再向 AI 提问…'
+                  : '向 AI 询问机构知识库…'}
             />
             <input ref={fileInputRef} type="file" multiple className="hidden" onChange={onPickFiles} accept={AI_UPLOAD_ACCEPT} />
-            <div className="flex items-center justify-between px-1"><div className="flex min-w-0 items-center gap-2 text-[10px] text-slate-400"><button onClick={() => fileInputRef.current?.click()} disabled={uploading} title="上传文件（PDF/Excel/CSV 等，agent 可直接读）" className="grid h-6 w-6 shrink-0 place-items-center rounded text-slate-400 hover:bg-slate-100 hover:text-brand-600 disabled:opacity-50">{uploading ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Paperclip className="h-3.5 w-3.5" />}</button><CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-500" /><span className="truncate">Enter 发送 · Shift + Enter 换行</span></div>{busy
+            <div className="flex items-center justify-between px-1"><div className="flex min-w-0 items-center gap-2 text-[10px] text-slate-400"><button onClick={() => fileInputRef.current?.click()} disabled={uploading} title="上传文件（PDF/Excel/CSV/ZIP 等，agent 可直接读）" className="grid h-6 w-6 shrink-0 place-items-center rounded text-slate-400 hover:bg-slate-100 hover:text-brand-600 disabled:opacity-50">{uploading ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Paperclip className="h-3.5 w-3.5" />}</button><button onClick={() => setCapabilityOpen(true)} disabled={!currentConversationRowId || !availableCapabilities.length || busy} title="选择本会话加载的已授权能力" className="inline-flex h-6 shrink-0 items-center gap-1 rounded px-1.5 text-slate-400 hover:bg-slate-100 hover:text-brand-600 disabled:opacity-40"><Boxes className="h-3.5 w-3.5" /><span>能力 {selectedCapabilityIds.length}</span></button><CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-500" /><span className="truncate">Enter 发送 · Shift + Enter 换行</span></div>{busy
               ? <button aria-label="停止" title="停止生成" onClick={stop} className="grid h-8 w-8 place-items-center rounded-lg bg-rose-500 text-white hover:bg-rose-600"><Square className="h-3.5 w-3.5" /></button>
               : <button aria-label="发送" title="发送（Enter）" disabled={sending || uploading || (!input.trim() && uploads.length === 0)} onClick={() => { void send() }} className="grid h-8 w-8 place-items-center rounded-lg bg-brand-600 text-white disabled:cursor-not-allowed disabled:bg-slate-200"><Send className="h-4 w-4" /></button>}</div>
           </div>
@@ -1886,6 +2158,20 @@ function Chat() {
         </AiErrorBoundary>
       )}
       <Modal
+        open={capabilityOpen}
+        title="会话能力"
+        onClose={() => { if (!capabilitySaving) setCapabilityOpen(false) }}
+        footer={<><Button variant="secondary" onClick={() => setCapabilityOpen(false)} disabled={capabilitySaving}>取消</Button><Button onClick={() => { void saveConversationCapabilities() }} loading={capabilitySaving} disabled={!selectedCapabilityIds.length}>保存选择</Button></>}
+      >
+        <p className="mb-3 text-xs leading-5 text-slate-500">这里只能从管理员已启用、当前角色及项目已授权的能力中选择。选择不会修改全局配置，也不能新增工具。</p>
+        <div className="max-h-[55vh] space-y-2 overflow-y-auto">{availableCapabilities.map((item) => {
+          const checked = selectedCapabilityIds.includes(item.id)
+          return <label key={item.id} className={`flex cursor-pointer items-start gap-3 rounded-xl border p-3 ${checked ? 'border-brand-200 bg-brand-50' : 'border-slate-200 bg-white'}`}><input type="checkbox" className="mt-1" checked={checked} onChange={() => setSelectedCapabilityIds((ids) => checked ? ids.filter((id) => id !== item.id) : [...ids, item.id])} /><span className="min-w-0"><span className="flex items-center gap-2"><span className="text-sm font-medium text-slate-800">{item.name}</span><span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] uppercase text-slate-500">{item.kind}</span></span><span className="mt-1 block text-xs text-slate-500">{item.description || item.capabilityKey}</span></span></label>
+        })}</div>
+        {!availableCapabilities.length && <div className="py-8 text-center text-sm text-slate-400">当前会话没有可用能力，请联系 AI 平台管理员检查授权。</div>}
+        {availableCapabilities.length > 0 && selectedCapabilityIds.length === 0 && <p className="mt-3 text-xs text-amber-600">至少保留一项能力；如需全部停用，请由管理员调整授权。</p>}
+      </Modal>
+      <Modal
         open={newSessionOpen}
         title="新建会话"
         onClose={() => { if (!creatingSession && sessions.length > 0) setNewSessionOpen(false) }}
@@ -1923,6 +2209,21 @@ function Chat() {
               ))}
             </select>
           </label>
+          <label className="block">
+            <span className="label">模型</span>
+            <select
+              className="input"
+              value={newSessionModelId}
+              onChange={(event) => setNewSessionModelId(event.target.value)}
+              disabled={creatingSession}
+            >
+              {!availableModels.length && <option value="">系统默认模型（环境回退）</option>}
+              {availableModels.map((model) => (
+                <option key={model.id} value={model.id}>{model.displayName}{model.isDefault ? '（默认）' : ''}</option>
+              ))}
+            </select>
+            <span className="mt-1 block text-[11px] text-slate-400">仅显示管理员已启用且当前账号有权使用的模型；创建后仍可在会话顶部切换，下一轮生效并保留历史。</span>
+          </label>
         </div>
       </Modal>
     </div>
@@ -1930,9 +2231,5 @@ function Chat() {
 }
 
 export function AIAssistantPage() {
-  return (
-    <FlueProvider client={flueClient}>
-      <Chat />
-    </FlueProvider>
-  )
+  return <Chat />
 }

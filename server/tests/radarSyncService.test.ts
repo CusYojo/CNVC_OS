@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
 import { fetchRadarWindow } from '../src/services/radarSyncService.js'
 
 test('follows Radar cursors until max pages or exhaustion', async () => {
@@ -33,6 +36,28 @@ test('follows Radar cursors until max pages or exhaustion', async () => {
     assert.equal(result.nextCursor, '')
   } finally {
     globalThis.fetch = originalFetch
+  }
+})
+
+test('reads paginated legacy candidates without Python or port 8121', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'radar-job-test-'))
+  const previousDataDir = process.env.RADAR_DATA_DIR
+  process.env.RADAR_DATA_DIR = directory
+  try {
+    const rows = [
+      { source: 'investment', source_id: 'new', title: '新候选', published_at: '2026-08-08T08:00:00+08:00', attention_score: 80 },
+      { source: 'investment', source_id: 'old', title: '旧候选', published_at: '2026-08-07T08:00:00+08:00', attention_score: 70 },
+    ]
+    await writeFile(path.join(directory, 'investment_candidates.jsonl'), `${rows.map((row) => JSON.stringify(row)).join('\n')}\n`)
+    const result = await fetchRadarWindow({ pageSize: 1, maxPages: 2, readMode: 'files' })
+    assert.equal(result.total, 2)
+    assert.equal(result.pages, 2)
+    assert.deepEqual(result.items.map((item) => item.source_id), ['new', 'old'])
+    assert.equal(result.hasMore, false)
+  } finally {
+    if (previousDataDir == null) delete process.env.RADAR_DATA_DIR
+    else process.env.RADAR_DATA_DIR = previousDataDir
+    await rm(directory, { recursive: true, force: true })
   }
 })
 

@@ -1,89 +1,286 @@
-import { Building2, Check, ChevronRight, Database, Download, FileText, KeyRound, LockKeyhole, Plus, RefreshCw, Search, Settings, ShieldCheck, UserCog, Users, Workflow } from 'lucide-react'
-import { useAppStore } from '../store/useAppStore'
-import { useMemo, useState } from 'react'
+import {
+  Building2, Check, Database, FileText, Plus, RefreshCw, Search, UserCog, Users,
+} from 'lucide-react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useToast } from '../components/Toast'
 import { Badge, Button, Card, DataTable, Modal, PageHeader, SearchInput, StatusBadge, TableCell, Tabs } from '../components/ui'
+import { apiGet, apiPatch, apiPost } from '../lib/api'
+import { formatShanghaiDateTime } from '../lib/dateTime'
+import { useAppStore } from '../store/useAppStore'
 import { useAuthStore } from '../store/useAuthStore'
+import type { User } from '../types'
+import { OperationsOverview } from '../components/OperationsOverview'
 
+type Department = {
+  id: string; code: string; name: string; parentId: string | null; managerUserId: string | null;
+  description: string | null; status: '启用' | '禁用'; sortOrder: number; version: number; memberCount: number;
+}
+type Permission = { id: string; code: string; name: string; module: string; action: string; description: string | null }
+type Role = {
+  id: string; code: string; name: string; description: string | null; dataScope: 'self' | 'department' | 'all';
+  builtIn: boolean; status: '启用' | '禁用'; version: number; memberCount: number; permissionIds: string[];
+}
+type DictionaryItem = {
+  id: string; groupId: string; value: string; label: string; sortOrder: number; status: '启用' | '禁用';
+  builtIn: boolean; version: number;
+}
+type DictionaryGroup = {
+  id: string; code: string; name: string; description: string | null; status: '启用' | '禁用';
+  version: number; items: DictionaryItem[];
+}
+type Administration = { departments: Department[]; roles: Role[]; permissions: Permission[]; dictionaries: DictionaryGroup[] }
+
+const emptyAdministration: Administration = { departments: [], roles: [], permissions: [], dictionaries: [] }
+const field = 'input w-full'
 const tabItems = [
-  { id: 'users', label: '用户管理' },
-  { id: 'org', label: '组织管理' },
-  { id: 'roles', label: '角色权限' },
-  { id: 'dicts', label: '数据字典' },
-  { id: 'templates', label: '模板管理' },
-  { id: 'audit', label: '审计日志' },
+  { id: 'users', label: '用户管理' }, { id: 'org', label: '组织管理' },
+  { id: 'roles', label: '角色权限' }, { id: 'dicts', label: '数据字典' },
+  { id: 'templates', label: '模板管理' }, { id: 'audit', label: '审计日志' },
+  { id: 'operations', label: '迁移运维' },
 ]
 
-const dictionaryGroups = [
-  { name: '项目阶段', code: 'PROJECT_STAGE', values: ['线索', '初筛', '立项', '尽调', '上会', '投决', '投后', '退出', '放弃'] },
-  { name: '融资轮次', code: 'FINANCING_ROUND', values: ['天使轮', 'Pre-A', 'A 轮', 'B 轮', 'C 轮', 'Pre-IPO'] },
-  { name: '风险等级', code: 'RISK_LEVEL', values: ['低', '中', '高'] },
-  { name: '项目来源', code: 'PROJECT_SOURCE', values: ['机构推荐', 'FA', 'BP 邮箱', '行业会议', '产业方推荐', '手工录入'] },
-  { name: '会议类型', code: 'MEETING_TYPE', values: ['项目沟通会', '立项会', '尽调会', '投委会', '董事会', '专家访谈'] },
-]
-
-const permissionRows = ['项目查看', '项目新增 / 编辑', '敏感估值字段', 'AI 问答与摘要', '材料生成 / 下载', '风险处置', '系统配置']
-const roleColumns = ['投资经理', '投资总监', '风控法务', '系统管理员']
+function displayTime(value: string | null | undefined) {
+  if (!value) return '尚未登录'
+  try { return formatShanghaiDateTime(value) } catch { return '—' }
+}
 
 export function SystemPage() {
   const users = useAppStore((state) => state.users)
   const templates = useAppStore((state) => state.templates)
   const logs = useAppStore((state) => state.auditLogs)
-  const currentUser = useAuthStore((state) => state.user ?? { id: '', email: '', name: '', role: '', department: '', status: '启用' })
-  const toggleUserStatus = useAppStore((state) => state.toggleUserStatus)
-  const addUser = useAppStore((state) => state.addUser)
-  const addAudit = useAppStore((state) => state.addAudit)
+  const hydrate = useAppStore((state) => state.hydrateFromServer)
+  const currentUser = useAuthStore((state) => state.user)
   const { showToast } = useToast()
+  const [administration, setAdministration] = useState<Administration>(emptyAdministration)
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState(false)
   const [tab, setTab] = useState('users')
   const [query, setQuery] = useState('')
-  const [showUser, setShowUser] = useState(false)
-  const [permissions, setPermissions] = useState<Record<string, boolean>>({})
-  const [userForm, setUserForm] = useState({ name: '', email: '', department: '科技投资组', role: '投资经理' })
-  const filteredUsers = useMemo(() => users.filter((user) => !query || `${user.name}${user.email}${user.department}`.includes(query)), [users, query])
-  const filteredLogs = useMemo(() => logs.filter((log) => !query || `${log.user}${log.module}${log.action}${log.target}`.includes(query)), [logs, query])
+  const [userModal, setUserModal] = useState<{ mode: 'create' | 'edit'; user?: User } | null>(null)
+  const [userForm, setUserForm] = useState({ name: '', email: '', department: '', role: '', password: '', status: '启用' as '启用' | '禁用' })
+  const [passwordUser, setPasswordUser] = useState<User | null>(null)
+  const [newPassword, setNewPassword] = useState('')
+  const [departmentModal, setDepartmentModal] = useState<Department | 'create' | null>(null)
+  const [departmentForm, setDepartmentForm] = useState({ code: '', name: '', parentId: '', description: '', sortOrder: '0', status: '启用' as '启用' | '禁用' })
+  const [roleModal, setRoleModal] = useState<Role | 'create' | null>(null)
+  const [roleForm, setRoleForm] = useState({ code: '', name: '', description: '', dataScope: 'self' as Role['dataScope'], status: '启用' as '启用' | '禁用', permissionIds: [] as string[] })
+  const [dictionaryModal, setDictionaryModal] = useState<DictionaryGroup | 'create' | null>(null)
+  const [dictionaryForm, setDictionaryForm] = useState({ code: '', name: '', description: '', status: '启用' as '启用' | '禁用' })
+  const [itemModal, setItemModal] = useState<{ group: DictionaryGroup; item?: DictionaryItem } | null>(null)
+  const [itemForm, setItemForm] = useState({ value: '', label: '', sortOrder: '0', status: '启用' as '启用' | '禁用' })
 
-  const createUser = () => {
-    if (!userForm.name || !userForm.email) return showToast('请填写姓名和邮箱', 'error')
-    addUser({ ...userForm, status: '启用' })
-    setShowUser(false)
-    setUserForm({ name: '', email: '', department: '科技投资组', role: '投资经理' })
-    showToast('用户已创建并分配默认权限')
+  const refreshAdministration = useCallback(async () => {
+    setLoading(true)
+    try { setAdministration(await apiGet<Administration>('/system-administration')) }
+    catch (error) { showToast((error as Error).message, 'error') }
+    finally { setLoading(false) }
+  }, [showToast])
+  useEffect(() => { void refreshAdministration() }, [refreshAdministration])
+
+  async function mutate(action: () => Promise<unknown>, success: string, refreshUsers = false) {
+    setBusy(true)
+    try {
+      await action()
+      if (refreshUsers) await hydrate()
+      await refreshAdministration()
+      showToast(success)
+      return true
+    } catch (error) {
+      showToast((error as Error).message, 'error')
+      return false
+    } finally { setBusy(false) }
   }
 
-  const renderUsers = () => (
-    <>
-      <div className="mb-4 flex items-center gap-3"><SearchInput className="w-[320px]" placeholder="搜索姓名、邮箱或部门…" value={query} onChange={(event) => setQuery(event.target.value)} /><select className="input w-40"><option>全部部门</option><option>科技投资组</option><option>先进制造组</option><option>医疗投资组</option><option>平台运营部</option></select><select className="input w-36"><option>全部角色</option><option>投资经理</option><option>投资总监</option><option>分析师</option><option>系统管理员</option></select><Button variant="secondary" className="ml-auto"><Download className="h-4 w-4" />批量导入</Button><Button onClick={() => setShowUser(true)}><Plus className="h-4 w-4" />新增用户</Button></div>
-      <Card className="overflow-hidden"><DataTable headers={['用户', '部门', '角色', '账号状态', '最后登录', '操作']}>{filteredUsers.map((user) => <tr key={user.id} className="hover:bg-slate-50"><TableCell><span className="flex items-center gap-3"><span className="grid h-9 w-9 place-items-center rounded-full bg-brand-50 text-xs font-semibold text-brand-700">{user.name.slice(-2)}</span><span><span className="block font-medium text-slate-700">{user.name}{user.id === currentUser.id && <span className="ml-2 text-[10px] text-brand-500">当前用户</span>}</span><span className="mt-1 block text-xs text-slate-400">{user.email}</span></span></span></TableCell><TableCell>{user.department}</TableCell><TableCell><Badge tone={user.role === '系统管理员' ? 'purple' : 'blue'}>{user.role}</Badge></TableCell><TableCell><StatusBadge status={user.status} /></TableCell><TableCell>{user.lastLogin}</TableCell><TableCell><div className="flex items-center gap-2"><button className="text-xs text-brand-600">编辑</button><button disabled={user.id === currentUser.id} onClick={() => { toggleUserStatus(user.id); showToast(`用户已${user.status === '启用' ? '禁用' : '启用'}`) }} className="text-xs text-slate-500 disabled:opacity-30">{user.status === '启用' ? '禁用' : '启用'}</button><button className="text-xs text-slate-500">重置密码</button></div></TableCell></tr>)}</DataTable></Card>
-    </>
-  )
+  const normalizedQuery = query.trim().toLowerCase()
+  const matches = (value: string) => !normalizedQuery || value.toLowerCase().includes(normalizedQuery)
+  const filteredUsers = useMemo(() => users.filter((user) => matches(`${user.name}${user.email}${user.department}${user.role}`)), [users, normalizedQuery])
+  const filteredTemplates = useMemo(() => templates.filter((item) => matches(`${item.name}${item.type}${item.version}`)), [templates, normalizedQuery])
+  const filteredLogs = useMemo(() => logs.filter((item) => matches(`${item.user}${item.module}${item.action}${item.target}`)), [logs, normalizedQuery])
+  const enabledRoles = administration.roles.filter((role) => role.status === '启用')
+  const enabledDepartments = administration.departments.filter((department) => department.status === '启用')
 
-  const renderOrg = () => (
-    <div className="grid grid-cols-[280px_1fr] gap-5">
-      <Card className="p-4"><div className="flex items-center justify-between"><h3 className="text-sm font-semibold text-slate-800">组织架构</h3><Button size="sm" variant="secondary"><Plus className="h-3.5 w-3.5" /></Button></div><div className="mt-4 space-y-1"><div className="rounded-lg bg-brand-50 px-3 py-2 text-sm font-medium text-brand-700"><span className="block">浙江赛智伯乐股权投资管理有限公司</span><span className="mt-1 block text-[9px] font-normal text-brand-500">Zhejiang Saizhi Cybernaut Equity Investment Management Co., Ltd.</span></div>{['投资业务部', '投研中心', '风险控制部', '平台运营部'].map((dept, index) => <div key={dept}><button className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-600 hover:bg-slate-50"><ChevronRight className="h-3.5 w-3.5 text-slate-400" />{dept}<span className="ml-auto text-xs text-slate-400">{[14, 6, 5, 4][index]}</span></button>{index === 0 && <div className="ml-6 space-y-1">{['科技投资组', '先进制造组', '医疗投资组'].map((team) => <button key={team} className="block w-full rounded-lg px-3 py-2 text-left text-xs text-slate-500 hover:bg-slate-50">{team}</button>)}</div>}</div>)}</div></Card>
-      <Card className="p-5"><div className="flex items-center justify-between"><div><h3 className="font-semibold text-slate-800">投资业务部</h3><p className="mt-1 text-xs text-slate-400">负责项目获取、研究、尽调与投资决策执行</p></div><Button variant="secondary" size="sm">编辑部门</Button></div><div className="mt-6 grid grid-cols-3 gap-4">{[['部门负责人', '陈思齐', UserCog], ['团队数量', '3 个', Users], ['在职成员', '14 人', Users]].map(([label, value, Icon]) => { const C = Icon as typeof Users; return <div key={label as string} className="rounded-xl bg-slate-50 p-4"><C className="h-4 w-4 text-brand-600" /><p className="mt-3 text-xs text-slate-400">{label as string}</p><p className="mt-1 font-semibold text-slate-700">{value as string}</p></div> })}</div><div className="mt-6"><h4 className="text-sm font-semibold text-slate-700">部门成员</h4><div className="mt-3 divide-y divide-slate-100">{users.filter((user) => user.department.includes('投资组')).map((user) => <div key={user.id} className="flex items-center py-3"><span className="grid h-8 w-8 place-items-center rounded-full bg-brand-50 text-xs text-brand-700">{user.name.slice(-2)}</span><span className="ml-3 text-sm font-medium text-slate-700">{user.name}</span><Badge tone="blue">{user.department}</Badge><span className="ml-auto text-xs text-slate-400">{user.role}</span></div>)}</div></div></Card>
-    </div>
-  )
+  function openUser(user?: User) {
+    setUserForm(user ? { ...user, password: '' } : {
+      name: '', email: '', department: enabledDepartments[0]?.name || '', role: enabledRoles[0]?.name || '', password: '', status: '启用',
+    })
+    setUserModal({ mode: user ? 'edit' : 'create', user })
+  }
 
-  const renderRoles = () => (
-    <Card className="overflow-hidden"><div className="flex items-center justify-between border-b border-slate-100 px-5 py-4"><div><h3 className="font-semibold text-slate-800">角色权限矩阵</h3><p className="mt-1 text-xs text-slate-400">控制菜单、操作、数据范围和敏感字段权限</p></div><Button onClick={() => { addAudit('系统管理', '权限变更', '保存角色权限矩阵'); showToast('角色权限已保存并写入审计日志') }}>保存权限</Button></div><div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="border-b border-slate-200 bg-slate-50"><th className="px-5 py-3 text-left text-xs text-slate-500">权限项</th>{roleColumns.map((role) => <th key={role} className="px-5 py-3 text-center text-xs text-slate-500">{role}</th>)}</tr></thead><tbody>{permissionRows.map((permission, row) => <tr key={permission} className="border-b border-slate-100 last:border-0"><td className="px-5 py-4 font-medium text-slate-700">{permission}</td>{roleColumns.map((role, col) => { const key = `${row}-${col}`; const defaultChecked = col === 3 || (row < 2 && col < 3) || (row === 3 && col < 2) || (row === 4 && col < 2) || (row === 5 && col > 0); const checked = permissions[key] ?? defaultChecked; return <td key={role} className="px-5 py-4 text-center"><button onClick={() => setPermissions({ ...permissions, [key]: !checked })} className={`mx-auto grid h-5 w-5 place-items-center rounded border ${checked ? 'border-brand-600 bg-brand-600 text-white' : 'border-slate-300 bg-white text-transparent'}`}><Check className="h-3.5 w-3.5" /></button></td> })}</tr>)}</tbody></table></div><div className="border-t border-slate-100 bg-slate-50 px-5 py-4"><div className="grid grid-cols-3 gap-4 text-xs"><div className="flex gap-2"><LockKeyhole className="h-4 w-4 text-slate-400" /><span><strong className="block text-slate-600">数据范围</strong><span className="mt-1 block text-slate-400">本人 / 团队 / 部门 / 全部</span></span></div><div className="flex gap-2"><KeyRound className="h-4 w-4 text-slate-400" /><span><strong className="block text-slate-600">字段权限</strong><span className="mt-1 block text-slate-400">估值和金额按角色脱敏</span></span></div><div className="flex gap-2"><ShieldCheck className="h-4 w-4 text-slate-400" /><span><strong className="block text-slate-600">变更审计</strong><span className="mt-1 block text-slate-400">每次保存记录操作人</span></span></div></div></div></Card>
-  )
+  async function saveUser() {
+    const editing = userModal?.mode === 'edit' && userModal.user
+    const ok = await mutate(
+      () => editing
+        ? apiPatch(`/users/${editing.id}`, { name: userForm.name, role: userForm.role, department: userForm.department, status: userForm.status })
+        : apiPost('/users', { name: userForm.name, email: userForm.email, role: userForm.role, department: userForm.department, password: userForm.password }),
+      editing ? '用户身份已更新，原会话已按需失效。' : '用户已创建并纳入组织与角色关系。', true,
+    )
+    if (ok) setUserModal(null)
+  }
 
-  const renderDicts = () => <div className="grid grid-cols-2 gap-4">{dictionaryGroups.map((group) => <Card key={group.code} className="p-5"><div className="flex items-start justify-between"><div><h3 className="text-sm font-semibold text-slate-800">{group.name}</h3><p className="mt-1 text-[10px] text-slate-400">{group.code}</p></div><button className="text-xs text-brand-600">管理</button></div><div className="mt-4 flex flex-wrap gap-2">{group.values.map((value) => <Badge key={value}>{value}</Badge>)}<button className="rounded-md border border-dashed border-slate-300 px-2 py-1 text-xs text-slate-400">+ 添加</button></div></Card>)}</div>
+  function openDepartment(department?: Department) {
+    setDepartmentForm(department ? {
+      code: department.code, name: department.name, parentId: department.parentId || '', description: department.description || '',
+      sortOrder: String(department.sortOrder), status: department.status,
+    } : { code: '', name: '', parentId: '', description: '', sortOrder: '0', status: '启用' })
+    setDepartmentModal(department || 'create')
+  }
 
-  const renderTemplates = () => <Card className="overflow-hidden"><div className="flex items-center justify-between border-b border-slate-100 px-5 py-4"><div><h3 className="font-semibold text-slate-800">机构模板</h3><p className="mt-1 text-xs text-slate-400">管理上会材料、会议纪要和 AI Prompt 模板</p></div><Button><Plus className="h-4 w-4" />上传模板</Button></div><DataTable headers={['模板名称', '模板类型', '当前版本', '状态', '更新时间', '操作']}>{templates.map((template) => <tr key={template.id}><TableCell><span className="flex items-center gap-3"><span className="grid h-9 w-9 place-items-center rounded-lg bg-brand-50 text-brand-600"><FileText className="h-4 w-4" /></span><span className="font-medium text-slate-700">{template.name}</span></span></TableCell><TableCell><Badge tone="blue">{template.type}</Badge></TableCell><TableCell>{template.version}</TableCell><TableCell><StatusBadge status={template.status} /></TableCell><TableCell>{template.updatedAt}</TableCell><TableCell><div className="flex gap-3"><button className="text-xs text-brand-600">编辑</button><button className="text-xs text-slate-500">版本记录</button><button className="text-xs text-slate-500">停用</button></div></TableCell></tr>)}</DataTable></Card>
+  async function saveDepartment() {
+    const editing = departmentModal !== 'create' ? departmentModal : null
+    const payload = {
+      name: departmentForm.name, parentId: departmentForm.parentId || null, description: departmentForm.description || null,
+      sortOrder: Number(departmentForm.sortOrder), status: departmentForm.status,
+    }
+    const ok = await mutate(
+      () => editing
+        ? apiPatch(`/system-administration/departments/${editing.id}`, { ...payload, expectedVersion: editing.version })
+        : apiPost('/system-administration/departments', { ...payload, code: departmentForm.code }),
+      editing ? '部门已更新。' : '部门已创建。',
+    )
+    if (ok) setDepartmentModal(null)
+  }
 
-  const renderAudit = () => <><div className="mb-4 flex gap-3"><SearchInput className="w-[340px]" placeholder="搜索用户、模块、操作或对象…" value={query} onChange={(event) => setQuery(event.target.value)} /><select className="input w-40"><option>全部模块</option><option>项目管理</option><option>AI 工具箱</option><option>风险预警</option><option>系统管理</option></select><input className="input w-44" value="2026-06-01 至今" readOnly /><Button variant="secondary" className="ml-auto"><Download className="h-4 w-4" />导出日志</Button></div><Card className="overflow-hidden"><DataTable headers={['操作时间', '操作用户', '模块', '操作类型', '对象 / 内容', 'IP 地址']}>{filteredLogs.slice(0, 30).map((log) => <tr key={log.id}><TableCell><span className="whitespace-nowrap text-xs">{log.createdAt}</span></TableCell><TableCell><span className="font-medium text-slate-700">{log.user}</span></TableCell><TableCell><Badge>{log.module}</Badge></TableCell><TableCell>{log.action}</TableCell><TableCell><span className="block max-w-[420px] truncate">{log.target}</span></TableCell><TableCell><span className="font-mono text-xs text-slate-400">{log.ip}</span></TableCell></tr>)}</DataTable></Card></>
+  function openRole(role?: Role) {
+    setRoleForm(role ? {
+      code: role.code, name: role.name, description: role.description || '', dataScope: role.dataScope,
+      status: role.status, permissionIds: role.permissionIds,
+    } : { code: '', name: '', description: '', dataScope: 'self', status: '启用', permissionIds: [] })
+    setRoleModal(role || 'create')
+  }
 
-  const contents: Record<string, () => React.ReactNode> = { users: renderUsers, org: renderOrg, roles: renderRoles, dicts: renderDicts, templates: renderTemplates, audit: renderAudit }
+  async function saveRole() {
+    const editing = roleModal !== 'create' ? roleModal : null
+    const payload = {
+      name: roleForm.name, description: roleForm.description || null, dataScope: roleForm.dataScope,
+      status: roleForm.status, permissionIds: roleForm.permissionIds,
+    }
+    const ok = await mutate(
+      () => editing
+        ? apiPatch(`/system-administration/roles/${editing.id}`, { ...payload, expectedVersion: editing.version })
+        : apiPost('/system-administration/roles', { ...payload, code: roleForm.code }),
+      editing ? '角色权限已保存。' : '角色已创建。',
+    )
+    if (ok) setRoleModal(null)
+  }
 
-  return (
-    <div>
-      <PageHeader title="系统管理" description="维护组织、账号、权限、字典、模板与审计记录，支撑一期安全上线。" actions={<Button variant="secondary"><Database className="h-4 w-4" />数据源状态</Button>} />
-      <Card className="mb-5 px-4"><Tabs tabs={tabItems.map((item) => ({ ...item, count: item.id === 'users' ? users.length : item.id === 'templates' ? templates.length : item.id === 'audit' ? logs.length : undefined }))} value={tab} onChange={(value) => { setTab(value); setQuery('') }} /></Card>
-      {contents[tab]?.()}
-      <Modal open={showUser} title="新增系统用户" onClose={() => setShowUser(false)} footer={<><Button variant="secondary" onClick={() => setShowUser(false)}>取消</Button><Button onClick={createUser}>创建用户</Button></>}>
-        <div className="space-y-4"><label><span className="label">姓名</span><input className="input" value={userForm.name} onChange={(event) => setUserForm({ ...userForm, name: event.target.value })} /></label><label><span className="label">工作邮箱</span><input className="input" type="email" value={userForm.email} onChange={(event) => setUserForm({ ...userForm, email: event.target.value })} /></label><div className="grid grid-cols-2 gap-4"><label><span className="label">所属部门</span><select className="input" value={userForm.department} onChange={(event) => setUserForm({ ...userForm, department: event.target.value })}><option>科技投资组</option><option>先进制造组</option><option>医疗投资组</option><option>风险控制部</option><option>平台运营部</option></select></label><label><span className="label">角色</span><select className="input" value={userForm.role} onChange={(event) => setUserForm({ ...userForm, role: event.target.value })}><option>投资经理</option><option>投资总监</option><option>分析师</option><option>风控法务</option><option>系统管理员</option></select></label></div><p className="rounded-lg bg-slate-50 p-3 text-xs leading-5 text-slate-500">创建后账号默认启用，系统会发送首次登录邀请。此演示版本不会实际发送邮件。</p></div>
-      </Modal>
-    </div>
-  )
+  function openDictionary(group?: DictionaryGroup) {
+    setDictionaryForm(group ? { code: group.code, name: group.name, description: group.description || '', status: group.status }
+      : { code: '', name: '', description: '', status: '启用' })
+    setDictionaryModal(group || 'create')
+  }
+
+  async function saveDictionary() {
+    const editing = dictionaryModal !== 'create' ? dictionaryModal : null
+    const payload = { name: dictionaryForm.name, description: dictionaryForm.description || null, status: dictionaryForm.status }
+    const ok = await mutate(
+      () => editing
+        ? apiPatch(`/system-administration/dictionaries/${editing.id}`, { ...payload, expectedVersion: editing.version })
+        : apiPost('/system-administration/dictionaries', { ...payload, code: dictionaryForm.code }),
+      editing ? '字典分组已更新。' : '字典分组已创建。',
+    )
+    if (ok) setDictionaryModal(null)
+  }
+
+  async function saveDictionaryItem() {
+    if (!itemModal) return
+    const payload = { label: itemForm.label, sortOrder: Number(itemForm.sortOrder), status: itemForm.status }
+    const ok = await mutate(
+      () => itemModal.item
+        ? apiPatch(`/system-administration/dictionary-items/${itemModal.item.id}`, { ...payload, expectedVersion: itemModal.item.version })
+        : apiPost(`/system-administration/dictionaries/${itemModal.group.id}/items`, { ...payload, value: itemForm.value }),
+      itemModal.item ? '字典项已更新。' : '字典项已新增。',
+    )
+    if (ok) setItemModal(null)
+  }
+
+  const toolbar = (placeholder: string, actions?: React.ReactNode) => <div className="mb-4 flex items-center gap-3">
+    <SearchInput className="w-[360px]" placeholder={placeholder} value={query} onChange={(event) => setQuery(event.target.value)} />
+    <span className="ml-auto inline-flex items-center gap-1.5 text-xs text-slate-400"><Database className="h-3.5 w-3.5" />MySQL 权威数据</span>
+    {actions}
+  </div>
+
+  const renderUsers = () => <>
+    {toolbar('搜索姓名、邮箱、部门或角色…', <Button onClick={() => openUser()}><Plus className="h-4 w-4" />新增用户</Button>)}
+    <Card className="overflow-hidden"><DataTable headers={['用户', '部门', '角色', '账号状态', '最后登录', '操作']}>
+      {filteredUsers.map((user) => <tr key={user.id}>
+        <TableCell><span className="font-medium text-slate-700">{user.name}{user.id === currentUser?.id && <span className="ml-2 text-[10px] text-brand-500">当前用户</span>}</span><span className="mt-1 block text-xs text-slate-400">{user.email}</span></TableCell>
+        <TableCell>{user.department}</TableCell><TableCell><Badge tone={user.role === '系统管理员' ? 'purple' : 'blue'}>{user.role}</Badge></TableCell>
+        <TableCell><StatusBadge status={user.status} /></TableCell><TableCell>{displayTime(user.lastLogin)}</TableCell>
+        <TableCell><div className="flex gap-3"><button className="text-xs text-brand-600" onClick={() => openUser(user)}>编辑</button><button className="text-xs text-slate-500" onClick={() => { setPasswordUser(user); setNewPassword('') }}>重置密码</button></div></TableCell>
+      </tr>)}
+    </DataTable></Card>
+  </>
+
+  const renderOrganization = () => <>
+    <div className="mb-4 flex justify-end"><Button onClick={() => openDepartment()}><Plus className="h-4 w-4" />新增部门</Button></div>
+    <Card className="overflow-hidden"><DataTable headers={['部门', '编码', '上级部门', '成员', '状态', '排序', '操作']}>
+      {administration.departments.map((department) => <tr key={department.id}>
+        <TableCell><span className="font-medium text-slate-700">{department.name}</span><span className="mt-1 block text-xs text-slate-400">{department.description || '—'}</span></TableCell>
+        <TableCell><span className="font-mono text-xs">{department.code}</span></TableCell>
+        <TableCell>{administration.departments.find((item) => item.id === department.parentId)?.name || '顶级部门'}</TableCell>
+        <TableCell>{department.memberCount}</TableCell><TableCell><StatusBadge status={department.status} /></TableCell><TableCell>{department.sortOrder}</TableCell>
+        <TableCell><button className="text-xs text-brand-600" onClick={() => openDepartment(department)}>编辑</button></TableCell>
+      </tr>)}
+    </DataTable></Card>
+  </>
+
+  const renderRoles = () => <>
+    <div className="mb-4 flex items-center"><p className="text-xs text-slate-500">权限按资源与操作保存；旧角色字符串在兼容窗口继续供登录会话使用。</p><Button className="ml-auto" onClick={() => openRole()}><Plus className="h-4 w-4" />新增角色</Button></div>
+    <Card className="overflow-hidden"><DataTable headers={['角色', '编码', '数据范围', '成员', '权限数', '状态', '操作']}>
+      {administration.roles.map((role) => <tr key={role.id}>
+        <TableCell><span className="font-medium text-slate-700">{role.name}</span>{role.builtIn && <Badge tone="slate">内置</Badge>}<span className="mt-1 block text-xs text-slate-400">{role.description || '—'}</span></TableCell>
+        <TableCell><span className="font-mono text-xs">{role.code}</span></TableCell><TableCell>{role.dataScope === 'all' ? '全部' : role.dataScope === 'department' ? '本部门' : '本人'}</TableCell>
+        <TableCell>{role.memberCount}</TableCell><TableCell>{role.permissionIds.length}</TableCell><TableCell><StatusBadge status={role.status} /></TableCell>
+        <TableCell><button className="text-xs text-brand-600" onClick={() => openRole(role)}>配置权限</button></TableCell>
+      </tr>)}
+    </DataTable></Card>
+  </>
+
+  const renderDictionaries = () => <>
+    <div className="mb-4 flex justify-end"><Button onClick={() => openDictionary()}><Plus className="h-4 w-4" />新增字典</Button></div>
+    <div className="grid grid-cols-2 gap-4">{administration.dictionaries.map((group) => <Card key={group.id} className="p-5">
+      <div className="flex items-start"><div><h3 className="font-semibold text-slate-800">{group.name}</h3><p className="mt-1 font-mono text-[10px] text-slate-400">{group.code} · v{group.version}</p></div><StatusBadge status={group.status} /><button className="ml-auto text-xs text-brand-600" onClick={() => openDictionary(group)}>编辑</button></div>
+      <div className="mt-4 space-y-2">{group.items.map((item) => <button key={item.id} className="flex w-full items-center rounded-lg bg-slate-50 px-3 py-2 text-left text-xs" onClick={() => { setItemModal({ group, item }); setItemForm({ value: item.value, label: item.label, sortOrder: String(item.sortOrder), status: item.status }) }}><span className="font-medium text-slate-700">{item.label}</span><span className="ml-2 font-mono text-slate-400">{item.value}</span><StatusBadge status={item.status} /><span className="ml-auto text-slate-400">#{item.sortOrder}</span></button>)}</div>
+      <button className="mt-3 text-xs text-brand-600" onClick={() => { setItemModal({ group }); setItemForm({ value: '', label: '', sortOrder: String((group.items.at(-1)?.sortOrder || 0) + 10), status: '启用' }) }}>+ 新增字典项</button>
+    </Card>)}</div>
+  </>
+
+  const renderTemplates = () => <>{toolbar('搜索模板名称、类型或版本…')}<Card className="overflow-hidden"><DataTable headers={['模板名称', '输出类型', '版本', '状态', '更新时间']}>
+    {filteredTemplates.map((template) => <tr key={template.id}><TableCell><span className="flex items-center gap-3"><FileText className="h-4 w-4 text-brand-600" /><span className="font-medium text-slate-700">{template.name}</span></span></TableCell><TableCell><Badge tone="blue">{template.type}</Badge></TableCell><TableCell>{template.version}</TableCell><TableCell><StatusBadge status={template.status} /></TableCell><TableCell>{displayTime(template.updatedAt)}</TableCell></tr>)}
+  </DataTable><div className="border-t border-slate-100 bg-slate-50 px-5 py-3 text-xs text-slate-500">内置模板由版本化任务目录管理；项目自定义模板继续通过 AI 助手上传和分析，避免跨项目越权。</div></Card></>
+
+  const renderAudit = () => <>{toolbar('搜索用户、模块、操作或对象…')}<Card className="overflow-hidden"><DataTable headers={['操作时间', '操作用户', '模块', '操作类型', '对象 / 内容', 'IP 地址']}>
+    {filteredLogs.map((log) => <tr key={log.id}><TableCell><span className="whitespace-nowrap text-xs">{displayTime(log.createdAt)}</span></TableCell><TableCell>{log.user}</TableCell><TableCell><Badge>{log.module}</Badge></TableCell><TableCell>{log.action}</TableCell><TableCell><span className="block max-w-[460px] truncate">{log.target}</span></TableCell><TableCell><span className="font-mono text-xs text-slate-400">{log.ip || '—'}</span></TableCell></tr>)}
+  </DataTable></Card></>
+
+  const contents: Record<string, () => React.ReactNode> = {
+    users: renderUsers, org: renderOrganization, roles: renderRoles, dicts: renderDictionaries,
+    templates: renderTemplates, audit: renderAudit, operations: () => <OperationsOverview />,
+  }
+
+  return <div>
+    <PageHeader title="系统管理" description="维护账号、组织、角色权限、数据字典、模板与审计；所有写操作进入 MySQL 并记录管理员审计。" actions={<Button variant="secondary" loading={loading} onClick={() => void refreshAdministration()}><RefreshCw className="h-4 w-4" />刷新</Button>} />
+    <div className="mb-5 grid grid-cols-4 gap-4">{[
+      ['账号', users.length, Users], ['部门', administration.departments.length, Building2],
+      ['角色', administration.roles.length, UserCog], ['字典', administration.dictionaries.length, Database],
+    ].map(([label, value, Icon]) => { const C = Icon as typeof Search; return <Card key={label as string} className="p-4"><C className="h-4 w-4 text-brand-600" /><p className="mt-3 text-xs text-slate-400">{label as string}</p><p className="mt-1 text-xl font-semibold text-slate-800">{value as number}</p></Card> })}</div>
+    <Card className="mb-5 overflow-x-auto px-4"><Tabs tabs={tabItems.map((item) => ({ ...item, count: item.id === 'users' ? users.length : item.id === 'org' ? administration.departments.length : item.id === 'roles' ? administration.roles.length : item.id === 'dicts' ? administration.dictionaries.length : item.id === 'templates' ? templates.length : item.id === 'audit' ? logs.length : undefined }))} value={tab} onChange={(value) => { setTab(value); setQuery('') }} /></Card>
+    {contents[tab]?.()}
+
+    <Modal open={!!userModal} title={userModal?.mode === 'edit' ? '编辑用户' : '新增用户'} onClose={() => setUserModal(null)} footer={<><Button variant="secondary" onClick={() => setUserModal(null)}>取消</Button><Button loading={busy} onClick={() => void saveUser()}>保存</Button></>}>
+      <div className="space-y-4"><label><span className="label">姓名</span><input className={field} value={userForm.name} onChange={(e) => setUserForm({ ...userForm, name: e.target.value })} /></label><label><span className="label">工作邮箱</span><input className={field} disabled={userModal?.mode === 'edit'} value={userForm.email} onChange={(e) => setUserForm({ ...userForm, email: e.target.value })} /></label>
+        <div className="grid grid-cols-2 gap-4"><label><span className="label">部门</span><select className={field} value={userForm.department} onChange={(e) => setUserForm({ ...userForm, department: e.target.value })}>{enabledDepartments.map((item) => <option key={item.id}>{item.name}</option>)}</select></label><label><span className="label">角色</span><select className={field} value={userForm.role} onChange={(e) => setUserForm({ ...userForm, role: e.target.value })}>{enabledRoles.map((item) => <option key={item.id}>{item.name}</option>)}</select></label></div>
+        {userModal?.mode === 'create' && <label><span className="label">初始密码</span><input type="password" className={field} value={userForm.password} onChange={(e) => setUserForm({ ...userForm, password: e.target.value })} /><span className="mt-1 block text-xs text-slate-400">至少 14 位，需包含大小写字母、数字和符号，且不能包含姓名或邮箱。</span></label>}
+        {userModal?.mode === 'edit' && <label><span className="label">账号状态</span><select className={field} disabled={userModal.user?.id === currentUser?.id} value={userForm.status} onChange={(e) => setUserForm({ ...userForm, status: e.target.value as '启用' | '禁用' })}><option>启用</option><option>禁用</option></select></label>}
+      </div>
+    </Modal>
+    <Modal open={!!passwordUser} title={`重置密码：${passwordUser?.name || ''}`} onClose={() => setPasswordUser(null)} footer={<><Button variant="secondary" onClick={() => setPasswordUser(null)}>取消</Button><Button loading={busy} onClick={() => void mutate(() => apiPost(`/users/${passwordUser!.id}/reset-password`, { password: newPassword }), '密码已重置，目标用户的活动会话已失效。').then((ok) => ok && setPasswordUser(null))}>确认重置</Button></>}><label><span className="label">新密码</span><input type="password" className={field} value={newPassword} onChange={(e) => setNewPassword(e.target.value)} /></label></Modal>
+
+    <Modal open={!!departmentModal} title={departmentModal === 'create' ? '新增部门' : '编辑部门'} onClose={() => setDepartmentModal(null)} footer={<><Button variant="secondary" onClick={() => setDepartmentModal(null)}>取消</Button><Button loading={busy} onClick={() => void saveDepartment()}>保存</Button></>}><div className="space-y-4"><label><span className="label">部门编码</span><input className={field} disabled={departmentModal !== 'create'} value={departmentForm.code} onChange={(e) => setDepartmentForm({ ...departmentForm, code: e.target.value })} /></label><label><span className="label">部门名称</span><input className={field} value={departmentForm.name} onChange={(e) => setDepartmentForm({ ...departmentForm, name: e.target.value })} /></label><label><span className="label">上级部门</span><select className={field} value={departmentForm.parentId} onChange={(e) => setDepartmentForm({ ...departmentForm, parentId: e.target.value })}><option value="">顶级部门</option>{administration.departments.filter((item) => item.id !== (departmentModal as Department)?.id).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label><span className="label">说明</span><textarea className={field} value={departmentForm.description} onChange={(e) => setDepartmentForm({ ...departmentForm, description: e.target.value })} /></label><div className="grid grid-cols-2 gap-4"><label><span className="label">排序</span><input type="number" className={field} value={departmentForm.sortOrder} onChange={(e) => setDepartmentForm({ ...departmentForm, sortOrder: e.target.value })} /></label><label><span className="label">状态</span><select className={field} value={departmentForm.status} onChange={(e) => setDepartmentForm({ ...departmentForm, status: e.target.value as '启用' | '禁用' })}><option>启用</option><option>禁用</option></select></label></div></div></Modal>
+
+    <Modal open={!!roleModal} width="max-w-3xl" title={roleModal === 'create' ? '新增角色' : '配置角色权限'} onClose={() => setRoleModal(null)} footer={<><Button variant="secondary" onClick={() => setRoleModal(null)}>取消</Button><Button loading={busy} onClick={() => void saveRole()}>保存</Button></>}><div className="space-y-4"><div className="grid grid-cols-2 gap-4"><label><span className="label">角色编码</span><input className={field} disabled={roleModal !== 'create'} value={roleForm.code} onChange={(e) => setRoleForm({ ...roleForm, code: e.target.value })} /></label><label><span className="label">角色名称</span><input className={field} disabled={roleModal != null && roleModal !== 'create' && roleModal.builtIn} value={roleForm.name} onChange={(e) => setRoleForm({ ...roleForm, name: e.target.value })} /></label></div><label><span className="label">说明</span><input className={field} value={roleForm.description} onChange={(e) => setRoleForm({ ...roleForm, description: e.target.value })} /></label><div className="grid grid-cols-2 gap-4"><label><span className="label">数据范围</span><select className={field} value={roleForm.dataScope} onChange={(e) => setRoleForm({ ...roleForm, dataScope: e.target.value as Role['dataScope'] })}><option value="self">本人</option><option value="department">本部门</option><option value="all">全部</option></select></label><label><span className="label">状态</span><select className={field} value={roleForm.status} onChange={(e) => setRoleForm({ ...roleForm, status: e.target.value as '启用' | '禁用' })}><option>启用</option><option>禁用</option></select></label></div><div><span className="label">权限项</span><div className="grid grid-cols-2 gap-2">{administration.permissions.map((permission) => { const checked = roleForm.permissionIds.includes(permission.id); return <button key={permission.id} className={`flex items-center rounded-lg border px-3 py-3 text-left text-sm ${checked ? 'border-brand-300 bg-brand-50' : 'border-slate-200'}`} onClick={() => setRoleForm({ ...roleForm, permissionIds: checked ? roleForm.permissionIds.filter((id) => id !== permission.id) : [...roleForm.permissionIds, permission.id] })}><span className={`mr-3 grid h-5 w-5 place-items-center rounded border ${checked ? 'border-brand-600 bg-brand-600 text-white' : 'border-slate-300 text-transparent'}`}><Check className="h-3.5 w-3.5" /></span><span><span className="block font-medium text-slate-700">{permission.name}</span><span className="text-xs text-slate-400">{permission.code}</span></span></button> })}</div></div></div></Modal>
+
+    <Modal open={!!dictionaryModal} title={dictionaryModal === 'create' ? '新增数据字典' : '编辑数据字典'} onClose={() => setDictionaryModal(null)} footer={<><Button variant="secondary" onClick={() => setDictionaryModal(null)}>取消</Button><Button loading={busy} onClick={() => void saveDictionary()}>保存</Button></>}><div className="space-y-4"><label><span className="label">字典编码</span><input className={field} disabled={dictionaryModal !== 'create'} value={dictionaryForm.code} onChange={(e) => setDictionaryForm({ ...dictionaryForm, code: e.target.value })} /></label><label><span className="label">名称</span><input className={field} value={dictionaryForm.name} onChange={(e) => setDictionaryForm({ ...dictionaryForm, name: e.target.value })} /></label><label><span className="label">说明</span><textarea className={field} value={dictionaryForm.description} onChange={(e) => setDictionaryForm({ ...dictionaryForm, description: e.target.value })} /></label><label><span className="label">状态</span><select className={field} value={dictionaryForm.status} onChange={(e) => setDictionaryForm({ ...dictionaryForm, status: e.target.value as '启用' | '禁用' })}><option>启用</option><option>禁用</option></select></label></div></Modal>
+    <Modal open={!!itemModal} title={itemModal?.item ? '编辑字典项' : '新增字典项'} onClose={() => setItemModal(null)} footer={<><Button variant="secondary" onClick={() => setItemModal(null)}>取消</Button><Button loading={busy} onClick={() => void saveDictionaryItem()}>保存</Button></>}><div className="space-y-4"><label><span className="label">值编码</span><input className={field} disabled={!!itemModal?.item} value={itemForm.value} onChange={(e) => setItemForm({ ...itemForm, value: e.target.value })} /></label><label><span className="label">显示名称</span><input className={field} value={itemForm.label} onChange={(e) => setItemForm({ ...itemForm, label: e.target.value })} /></label><div className="grid grid-cols-2 gap-4"><label><span className="label">排序</span><input type="number" className={field} value={itemForm.sortOrder} onChange={(e) => setItemForm({ ...itemForm, sortOrder: e.target.value })} /></label><label><span className="label">状态</span><select className={field} value={itemForm.status} onChange={(e) => setItemForm({ ...itemForm, status: e.target.value as '启用' | '禁用' })}><option>启用</option><option>禁用</option></select></label></div></div></Modal>
+  </div>
 }

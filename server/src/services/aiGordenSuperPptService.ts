@@ -1,4 +1,3 @@
-import { execFile } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import {
@@ -12,7 +11,6 @@ import {
   writeFile,
 } from 'node:fs/promises'
 import path from 'node:path'
-import { promisify } from 'node:util'
 import JSZip from 'jszip'
 import type {
   BusinessContent,
@@ -26,8 +24,7 @@ import {
   prepareInvestmentRecommendationPptWorkflow,
 } from './aiInvestmentRecommendationPptWorkflowService.js'
 import { convertUploadedInvestmentPdfTemplate } from './aiInvestmentTemplateConversionService.js'
-
-const execFileAsync = promisify(execFile)
+import { execFileSupervised as execFileAsync } from '../runtime/supervisedProcessService.js'
 
 type ProjectLike = {
   name: string
@@ -287,15 +284,17 @@ async function findGordenResumeCheckpoint(input: {
               path.join(pageRoot, 'icons', 'icons_manifest.json'),
             ]
             if (requiredAssets.some((asset) => !existsSync(asset))) continue
-            layerPages.set(plan.number, { pageRoot })
             const visualReview = JSON.parse(await readFile(
               path.join(pageRoot, 'qa-visual', 'vision-review.json'),
               'utf8',
             )) as Record<string, unknown>
-            if (
-              !completeTextMap
-              || visualReview.passed !== true
-            ) continue
+            // A failed final review may be caused by the generated frame/icon
+            // layers themselves. Reusing those assets makes a retry repeat the
+            // same overlap or cropping defect, so only passed pages may reuse
+            // either their layers or their full editable checkpoint.
+            if (!reusableGordenVisualReview(visualReview)) continue
+            layerPages.set(plan.number, { pageRoot })
+            if (!completeTextMap) continue
             editablePages.set(plan.number, { pageRoot, layout })
             editableLayoutTimes.push((await stat(layoutPath)).mtimeMs)
           } catch {
@@ -337,6 +336,42 @@ function findExecutable(name: string) {
     .filter(Boolean)
     .map((directory) => path.join(directory, name))
     .find((candidate) => existsSync(candidate))
+}
+
+export async function gordenPythonTlsEnvironment(
+  inherited: NodeJS.ProcessEnv = process.env,
+): Promise<NodeJS.ProcessEnv> {
+  const configured = inherited.AI_PYTHON_CA_FILE
+    || inherited.SSL_CERT_FILE
+    || inherited.REQUESTS_CA_BUNDLE
+  const candidates = configured
+    ? [configured]
+    : process.platform === 'win32'
+      ? []
+      : [
+          '/etc/ssl/cert.pem',
+          '/etc/ssl/certs/ca-certificates.crt',
+          '/etc/pki/tls/certs/ca-bundle.crt',
+        ]
+  for (const candidate of candidates) {
+    const resolved = path.resolve(candidate)
+    const info = await stat(resolved).catch(() => null)
+    if (!info?.isFile()) {
+      if (configured) {
+        throw Object.assign(
+          new Error('Gorden Python TLS CA 文件不存在或不是普通文件'),
+          { code: 'GORDEN_PYTHON_CA_INVALID' },
+        )
+      }
+      continue
+    }
+    return {
+      ...inherited,
+      SSL_CERT_FILE: resolved,
+      REQUESTS_CA_BUNDLE: resolved,
+    }
+  }
+  return { ...inherited }
 }
 
 async function writeJson(filePath: string, value: unknown) {
@@ -494,7 +529,7 @@ export function gordenUnplannedVisibleTexts(
 ) {
   const expected = expectedTexts.map(canonicalVisibleText).filter(Boolean)
   const expectedSet = new Set(expected)
-  return [...new Set(observedUnexpectedTexts
+  const unplanned = [...new Set(observedUnexpectedTexts
     .map((value) => value.trim())
     .filter((value) => {
       const observed = canonicalVisibleText(value)
@@ -511,6 +546,20 @@ export function gordenUnplannedVisibleTexts(
       }
       return true
     }))]
+  const numericMarkers = unplanned
+    .map((value) => canonicalVisibleText(value))
+    .filter((value) => /^(?:[1-9]|1\d|20)$/u.test(value))
+    .map(Number)
+  const orderedMarkers = [...new Set(numericMarkers)].sort((left, right) => left - right)
+  const isDecorativeSequence = orderedMarkers.length >= 3
+    && orderedMarkers.every((value, index) => value === index + 1)
+  if (!isDecorativeSequence) return unplanned
+
+  // A run such as 1/2/3/4 is commonly baked into timeline or process icons.
+  // Ignore only the complete, small sequence; single values, gaps, years,
+  // percentages and amounts continue through the strict text gate.
+  const decorativeMarkerSet = new Set(orderedMarkers.map(String))
+  return unplanned.filter((value) => !decorativeMarkerSet.has(canonicalVisibleText(value)))
 }
 
 function uniqueCompactTexts(values: Array<string | null | undefined>) {
@@ -1461,12 +1510,95 @@ function jsonFromModelText(value: string) {
   return JSON.parse(clean) as Record<string, unknown>
 }
 
+export function buildGordenResponsesVisionBody(input: {
+  model: string
+  prompt: string
+  imageDataUrls: string[]
+}) {
+  return {
+    model: input.model,
+    input: [{
+      role: 'user',
+      content: [
+        { type: 'input_text', text: input.prompt },
+        ...input.imageDataUrls.map((imageUrl) => ({
+          type: 'input_image', image_url: imageUrl, detail: 'high',
+        })),
+      ],
+    }],
+    max_output_tokens: 8000,
+    reasoning: { effort: 'low' },
+    text: { format: { type: 'json_object' } },
+  }
+}
+
+export function buildGordenChatVisionBody(input: {
+  model: string
+  prompt: string
+  imageDataUrls: string[]
+}) {
+  return {
+    model: input.model,
+    messages: [{
+      role: 'user',
+      content: [
+        { type: 'text', text: input.prompt },
+        ...input.imageDataUrls.map((imageUrl) => ({
+          type: 'image_url', image_url: { url: imageUrl },
+        })),
+      ],
+    }],
+    max_tokens: 8000,
+  }
+}
+
+export function gordenVisionResponseText(payload: unknown): string {
+  if (!payload || typeof payload !== 'object') return ''
+  const response = payload as {
+    output_text?: unknown
+    output?: unknown
+    choices?: unknown
+  }
+  if (typeof response.output_text === 'string') return response.output_text
+  if (Array.isArray(response.output)) {
+    const outputText = response.output.flatMap((item) => {
+      if (!item || typeof item !== 'object') return []
+      const content = (item as { content?: unknown }).content
+      if (!Array.isArray(content)) return []
+      return content.flatMap((part) => {
+        if (!part || typeof part !== 'object') return []
+        const typed = part as { type?: unknown; text?: unknown }
+        return typed.type === 'output_text' && typeof typed.text === 'string'
+          ? [typed.text]
+          : []
+      })
+    }).join('')
+    if (outputText) return outputText
+  }
+  if (!Array.isArray(response.choices)) return ''
+  return response.choices.flatMap((choice) => {
+    if (!choice || typeof choice !== 'object') return []
+    const content = (choice as { message?: { content?: unknown } }).message?.content
+    if (typeof content === 'string') return [content]
+    if (!Array.isArray(content)) return []
+    return content.flatMap((part) => (
+      part && typeof part === 'object' && typeof (part as { text?: unknown }).text === 'string'
+        ? [String((part as { text: string }).text)]
+        : []
+    ))
+  }).join('')
+}
+
+export function shouldFallbackGordenVisionToChat(status: number): boolean {
+  return [400, 404, 405, 415, 422, 501].includes(status)
+}
+
 async function requestVisionJson(input: {
   prompt: string
   images: string[]
   timeoutMs: number
 }) {
-  const imageContents = await Promise.all(input.images.map(async (imagePath) => {
+  const imageDataUrls = await Promise.all(input.images.map(async (imagePath) => {
     const buffer = await readFile(imagePath)
     const extension = path.extname(imagePath).toLowerCase()
     const mime = extension === '.jpg' || extension === '.jpeg'
@@ -1474,55 +1606,45 @@ async function requestVisionJson(input: {
       : extension === '.webp'
         ? 'image/webp'
         : 'image/png'
-    return {
-      type: 'image_url',
-      image_url: { url: `data:${mime};base64,${buffer.toString('base64')}` },
-    }
+    return `data:${mime};base64,${buffer.toString('base64')}`
   }))
-  const requestBody = JSON.stringify({
-    model: GORDEN_VISION_MODEL,
-    messages: [{
-      role: 'user',
-      content: [
-        { type: 'text', text: input.prompt },
-        ...imageContents,
-      ],
-    }],
-    max_tokens: 8000,
-    reasoning_effort: 'low',
-    response_format: { type: 'json_object' },
-  })
+  const responsesRequestBody = JSON.stringify(buildGordenResponsesVisionBody({
+    model: GORDEN_VISION_MODEL, prompt: input.prompt, imageDataUrls,
+  }))
+  const chatRequestBody = JSON.stringify(buildGordenChatVisionBody({
+    model: GORDEN_VISION_MODEL, prompt: input.prompt, imageDataUrls,
+  }))
   let lastError: unknown
   for (let attempt = 1; attempt <= GORDEN_VISION_MAX_ATTEMPTS; attempt += 1) {
     try {
-      const response = await fetch(`${GORDEN_LLM_BASE}/chat/completions`, {
+      let response = await fetch(`${GORDEN_LLM_BASE}/responses`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           ...(GORDEN_LLM_KEY ? { Authorization: `Bearer ${GORDEN_LLM_KEY}` } : {}),
         },
-        body: requestBody,
+        body: responsesRequestBody,
         signal: AbortSignal.timeout(input.timeoutMs),
       })
+      if (!response.ok && shouldFallbackGordenVisionToChat(response.status)) {
+        response = await fetch(`${GORDEN_LLM_BASE}/chat/completions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(GORDEN_LLM_KEY ? { Authorization: `Bearer ${GORDEN_LLM_KEY}` } : {}),
+          },
+          body: chatRequestBody,
+          signal: AbortSignal.timeout(input.timeoutMs),
+        })
+      }
       if (!response.ok) {
         throw Object.assign(
           new Error(`Gorden 视觉解析失败：LLM HTTP ${response.status}`),
           { status: response.status },
         )
       }
-      const payload = await response.json() as {
-        choices?: Array<{ message?: { content?: unknown } }>
-      }
-      const content = payload.choices?.[0]?.message?.content
-      const text = typeof content === 'string'
-        ? content
-        : Array.isArray(content)
-          ? content.map((part) => (
-              part && typeof part === 'object' && 'text' in part
-                ? String((part as { text?: unknown }).text ?? '')
-                : ''
-            )).join('')
-          : ''
+      const payload = await response.json() as unknown
+      const text = gordenVisionResponseText(payload)
       if (!text) throw new Error('Gorden 视觉解析没有返回内容')
       return jsonFromModelText(text)
     } catch (error) {
@@ -1567,6 +1689,19 @@ function gordenTextContractIssues(plan: GordenSlidePlan, vision: VisionLayout) {
     (_unused, index) => index + 1,
   ).filter((index) => !presentIndexes.has(index))
   return { unexpectedText, missingTextIndexes }
+}
+
+export function canDeferGordenStageOneUnexpectedText(input: {
+  unexpectedText: string[]
+  missingTextIndexes: number[]
+}) {
+  // The editable pipeline removes rasterized text from every image layer and
+  // recreates only expectedTexts as native text. An extra sentence can thus
+  // continue to that deterministic cleanup stage, while a missing expected
+  // sentence cannot because no authoritative bbox exists for later layout.
+  // The final editable preview still applies the strict unexpected-text gate.
+  return input.unexpectedText.length > 0
+    && input.missingTextIndexes.length === 0
 }
 
 async function ensureGordenStageOneTextContract(input: {
@@ -1620,13 +1755,17 @@ async function ensureGordenStageOneTextContract(input: {
         auditDir,
         'text-contract-preflight.json',
       )
-      await writeJson(auditPath, {
+      const deferredToFinalEditableGate = canDeferGordenStageOneUnexpectedText(issues)
+      const audit = {
         schemaVersion: '1.0',
         slide: input.plan.number,
         passed: false,
         repaired: false,
+        deferredToFinalEditableGate,
         attempts,
-      })
+      }
+      await writeJson(auditPath, audit)
+      if (deferredToFinalEditableGate) return audit
       const detail = [
         issues.unexpectedText.length
           ? `清单外文字：${issues.unexpectedText.join('、')}`
@@ -1988,22 +2127,22 @@ export function normalizeGordenLayout(input: {
       role: 'icon',
     }]
   })
-  const numericEntries = [...byIndex.values()].filter((entry) => (
-    /^\d{1,2}$/u.test(normalizedVisibleMarker(entry.text))
-  ))
   // The frame layer already preserves badge circles and other fixed shapes.
-  // Image models sometimes also put those badges in the icon sheet, often with
-  // the number erased to a white placeholder. Overlaying that crop duplicates
-  // or hides the native editable number, so discard only icons whose center
-  // overlaps a planned numeric text box and always keep the native text.
-  const suppressedBadgeIcons: string[] = []
+  // Image models sometimes also put badges or footer decoration in the icon
+  // sheet. A bad crop can span several regions and cover editable text when it
+  // is composed back onto the slide. Independent icons must not occupy the
+  // centre of a planned text box (and vice versa), so discard those duplicate
+  // or composite crops and always keep the native editable text.
+  const suppressedTextOverlappingIcons: string[] = []
   const icons = detectedIcons.filter((icon) => {
-    const overlapsNumericText = numericEntries.some((entry) => (
+    const overlapsPlannedText = [...byIndex.values()].some((entry) => (
       bboxContainsCenter(icon.source_bbox, entry.source_bbox)
       || bboxContainsCenter(entry.source_bbox, icon.source_bbox)
     ))
-    if (overlapsNumericText) suppressedBadgeIcons.push(path.basename(icon.file))
-    return !overlapsNumericText
+    if (overlapsPlannedText) {
+      suppressedTextOverlappingIcons.push(path.basename(icon.file))
+    }
+    return !overlapsPlannedText
   })
   const texts = [...byIndex.values()]
     .sort((left, right) => left.textIndex - right.textIndex)
@@ -2012,10 +2151,10 @@ export function normalizeGordenLayout(input: {
     frame: path.join(input.pageRoot, 'frame.png'),
     icons,
     texts,
-    ...(suppressedBadgeIcons.length
+    ...(suppressedTextOverlappingIcons.length
       ? {
           qa_notes: [
-            `编号徽标底图已由框架层呈现，移除 ${suppressedBadgeIcons.length} 个重复图标切片并保留原生数字文本。`,
+            `框架层已呈现固定装饰，移除 ${suppressedTextOverlappingIcons.length} 个与文字区域重叠的重复图标切片并保留原生文字。`,
           ],
         }
       : {}),
@@ -2145,6 +2284,7 @@ export async function generateInvestmentRecommendationPptWithGorden(input: {
     300_000,
     Number(process.env.AI_GORDEN_PPT_STEP_TIMEOUT_MS || 20 * 60_000),
   )
+  const env = await gordenPythonTlsEnvironment(process.env)
   await reportProgress(
     input.onProgress,
     '正在检查图片生成、PDF 桥接与可编辑转换环境',
@@ -2156,7 +2296,7 @@ export async function generateInvestmentRecommendationPptWithGorden(input: {
     '--gorden-image-dir', paths.imageGenRoot,
     '--gorden-super-dir', paths.superRoot,
     '--json',
-  ], { timeoutMs, env: process.env })
+  ], { timeoutMs, env })
   const environmentArgs = [pipelinePaths.checkEnvironment, '--json']
   const pdftoppm = process.env.AI_PDF_TO_PPT_PDFTOPPM
     || findExecutable(process.platform === 'win32' ? 'pdftoppm.exe' : 'pdftoppm')
@@ -2164,8 +2304,7 @@ export async function generateInvestmentRecommendationPptWithGorden(input: {
     || findExecutable(process.platform === 'win32' ? 'soffice.exe' : 'soffice')
   if (pdftoppm) environmentArgs.push('--pdftoppm', pdftoppm)
   if (libreoffice) environmentArgs.push('--libreoffice', libreoffice)
-  await runCommand(python, environmentArgs, { timeoutMs, env: process.env })
-  const env = { ...process.env }
+  await runCommand(python, environmentArgs, { timeoutMs, env })
   const outputDir = path.dirname(input.outputPath)
   const slug = safeSlug(input.project.name)
   const referenceSelection = selectInvestmentRecommendationReference({
@@ -3023,6 +3162,7 @@ export async function generateInvestmentRecommendationPptWithGorden(input: {
   )
   return {
     slideCount: plans.length,
+    previewSourcePath: generatedSlides[0],
     editableLevel: 'all',
     templateApplied: false,
     templateSha256: undefined,

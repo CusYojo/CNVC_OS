@@ -13,16 +13,16 @@
 ├─────────────────────────────────────────────────────┤
 │  后端 API (Express 5 + Drizzle ORM)                   │
 │  server/src/                                          │
-│  POST :3100/api/*                                     │
+│  HTTP :3100/api/* + WebSocket :3100/socket.io         │
 ├─────────────────────────────────────────────────────┤
-│  Flue Agent 编排层 (独立服务, :3584)                   │
-│  - assistant agent: AI 对话 / RAG 检索 / PPT 生成     │
-│  - 通过 FLUE_BASE_URL 与后端通信                      │
+│  JW Agent Runtime（内嵌 Express 进程）                 │
+│  - Claude Agent SDK / RAG 检索 / 工具调用              │
+│  - 会话、消息、工具结果持久化到 MySQL                  │
 ├─────────────────────────────────────────────────────┤
-│  PostgreSQL 16 (cybernaut_mvp)                        │
+│  MySQL 8.x（表名前缀由 DB_FREFIX 配置）                │
 ├─────────────────────────────────────────────────────┤
-│  线索发现服务 (Python Flask, project-discovery/)      │
-│  - 公众号 / arXiv / 微信聊天 线索采集                  │
+│  Radar 单次任务 (Python, project-discovery/job.py)    │
+│  - 公众号 / arXiv / 微信聊天线索采集，无常驻端口       │
 │  - Gorden PPT Skills (图片→可编辑PPTX)                 │
 │  - Financial Research Analyst Skill                   │
 └─────────────────────────────────────────────────────┘
@@ -34,10 +34,10 @@
 |---|---|
 | 前端 | React 18 + TypeScript + Vite 6 + TailwindCSS 3 + Zustand |
 | 后端 | Express 5 + TypeScript + Drizzle ORM |
-| AI 编排 | Flue SDK (beta.9) + Agent/Workflow |
-| 数据库 | PostgreSQL 16 (自动建表) |
+| AI 编排 | Claude Agent SDK + 进程内 JW Runtime + Socket.io |
+| 数据库 | MySQL 8.x + Drizzle 版本化迁移 |
 | 路由 | React Router 7 |
-| 线索发现 | Python 3 + Flask |
+| 线索发现 | Python 3 单次 Job；FastAPI 仅保留旧数据导出兼容 |
 | Skills | GordenImage2PPTX / GordenImagePPTGen / Financial Research Analyst |
 
 ## 目录结构
@@ -58,7 +58,8 @@ cybernaut-dist/
 │   ├── routes/                   # 路由 (auth/projects/meetings/risks/...)
 │   └── services/                 # 业务逻辑 + AI 服务
 ├── project-discovery/            # 线索发现 + Skills
-│   ├── app.py                    # Flask 线索发现主服务
+│   ├── job.py                    # 当前单次 Job 入口
+│   ├── app.py                    # 采集核心及旧 FastAPI 兼容路由
 │   ├── GordenSuperPPTSkills/     # PPT 生成/还原技能链
 │   │   ├── GordenImage2PPTX/     #   图片→可编辑 PPTX
 │   │   ├── GordenImagePPTGen/    #   AI 生成图片型 PPT
@@ -80,8 +81,8 @@ cybernaut-dist/
 ### 1. 环境准备
 
 - **Node.js** ≥ 20
-- **PostgreSQL** ≥ 16
-- **Python** ≥ 3.10（如需运行线索发现服务）
+- **MySQL** ≥ 8.0（字符集 `utf8mb4`）
+- **Python** ≥ 3.10（运行 Radar 采集任务需要）
 - **npm** ≥ 10
 
 ### 2. 启动数据库
@@ -90,9 +91,7 @@ cybernaut-dist/
 # 方式 A：Docker（推荐）
 docker compose up -d
 
-# 方式 B：已有 PostgreSQL
-# CREATE USER cybernaut WITH PASSWORD 'cyb_mvp_2026';
-# CREATE DATABASE cybernaut_mvp OWNER cybernaut;
+# 方式 B：使用已有 MySQL 8.x，并确保目标库字符集为 utf8mb4
 ```
 
 ### 3. 配置环境变量
@@ -100,9 +99,13 @@ docker compose up -d
 ```bash
 cp .env.example .env
 # 编辑 .env，至少填入：
-#   - DATABASE_URL（数据库连接串）
-#   - LLM_API_KEY（LLM 网关密钥）
-#   - FLUE_BASE_URL（Flue agent 地址，非必需）
+#   - DB_HOST / DB_PORT / DB_DATABASE
+#   - DB_USERNAME / DB_PASSWORD / DB_FREFIX
+#   - OPENAI_BASE_URL / OPENAI_API_KEY（需兼容 Claude Agent SDK；当前验收地址为 https://skill.zeelin.cn/api/v9）
+#   - LLM_MODEL / JW_AGENT_MODEL / SCORE_MODEL（当前验收模型为 gpt-5.6-sol）
+#   - JW_AGENT_MODEL / JW_AGENT_PERMISSION_MODE
+#   - MODEL_CREDENTIAL_ENCRYPTION_KEY（32 字节 Base64 或 64 位 Hex）
+#   - MODEL_PROVIDER_ALLOWED_HOSTS（逗号分隔的模型网关主机名）
 ```
 
 ### 4. 主平台：安装依赖 & 启动
@@ -112,15 +115,25 @@ npm install
 npm run dev          # 同时启动前端(:5173) + 后端(:3100)
 ```
 
-首次启动会自动建表（`ensureSchema()`）并写入演示用户。
+首次启动会执行版本化 Schema 迁移。演示用户默认不创建；仅本地测试可显式设置 `SEED_DEMO_USERS=1`。
 
-### 5. 线索发现服务（可选）
+模型 Provider、模型清单和七类任务路由由管理员在 `/system/ai/models` 配置。API Key
+只在新增/替换时提交，MySQL 仅保存 AES-256-GCM 密文，页面只显示末四位掩码。
+生产部署脚本会为全新环境生成独立加密主密钥；已有环境必须保留原主密钥，不能直接替换，
+否则已有 Provider 凭据将无法解密。任何曾粘贴到聊天、工单或日志中的网关 Key 都应先在
+供应商侧吊销并生成新值，再通过该页面写入。
+
+### 5. Radar Python 运行时
 
 ```bash
 cd project-discovery
-pip install -r requirements.txt
-bash start.sh        # 启动 Flask 线索采集服务
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python -B job.py health
 ```
+
+不要运行 `start.sh` 或另建 8121 服务。生产入口会按计划启动 `job.py`，每次任务
+输出 JSON 后退出。
 
 ### 6. 访问
 
@@ -128,25 +141,27 @@ bash start.sh        # 启动 Flask 线索采集服务
 |---|---|
 | `http://localhost:5173` | 前端开发服务器 |
 | `http://localhost:3100/api/health` | 后端健康检查 |
+| `http://localhost:3100/socket.io` | JW Agent 实时事件（由客户端连接） |
 
-### 7. 演示账号
+### 7. 本地演示账号
 
-首次运行后自动创建：
+默认不会创建演示账号。仅在本地设置 `SEED_DEMO_USERS=1` 后，首次启动会按需创建：
 
 | 角色 | 邮箱 | 密码 |
 |---|---|---|
-| 系统管理员 | admin@cybernaut.com | admin123 |
-| 投资经理 | pm@cybernaut.com | pm123 |
-| 投资总监 | director@cybernaut.com | director123 |
+| 系统管理员 | admin@cybernaut.com | 123456 |
+| 投资经理 | lin@cybernaut.com | 123456 |
+| 投资总监 | chen@cybernaut.com | 123456 |
 
 ## 构建与生产部署
 
 ```bash
 npm run build        # 编译前端+后端
-npm start            # 生产启动（需先 build）
+npm run start:app    # 唯一项目启动入口（需先 build）
 ```
 
-生产环境推荐使用 `start.sh` 作为入口脚本。
+生产只安装 `cybernaut-app.service`，项目只监听 3100。MySQL 与 LLM Gateway
+属于外部基础设施，不由该 systemd 单元启动。
 
 ## NPM Scripts
 
@@ -157,7 +172,10 @@ npm start            # 生产启动（需先 build）
 | `npm run dev:server` | 仅后端 |
 | `npm run build` | 编译 TypeScript + Vite 打包 |
 | `npm run check` | 类型检查 |
-| `npm start` | 生产启动 |
+| `npm run migrate:radar` | 将 Radar JSONL/JSON/来源清单幂等导入 MySQL |
+| `npm run accept:socket` | 验证 Socket 鉴权、隔离、推送、失效和重连（需先启动 API） |
+| `npm run accept:auth` | 验证 HttpOnly 会话、CSRF/Origin、吊销和旧 Bearer 拒绝（需先启动 API） |
+| `npm start` / `npm run start:app` | 生产统一启动入口 |
 
 ## Skills 说明
 
@@ -184,12 +202,11 @@ npm start            # 生产启动（需先 build）
 
 | 文件 | 用途 |
 |---|---|
-| `daily_intake.mjs` | 每日情报摄入 |
-| `batch_analyze.mjs` | 批量 AI 分析 |
+| `runtime_jobs` / `runtime_job_runs` | MySQL 持久化 Radar 与储备池摄入调度 |
 | `rescore.mjs` / `rescore_all.mjs` | 评分重算 |
 | `import_reserve.mjs` | 导入候选项目 |
 | `patch_*.py` | 数据修复/迁移脚本 |
-| `backfill_papermeta.*` | 论文元数据回填 |
+| `npm run backfill:paper-meta:preview` / `npm run backfill:paper-meta` | 从 MySQL Radar 当前投影预览/执行论文元数据幂等回填，不依赖 8121 HTTP 服务 |
 
 ## 数据库
 
@@ -201,24 +218,26 @@ npm start            # 生产启动（需先 build）
 
 ```
 前端 AI 对话
-  → POST /api/conversations/:id/messages
-  → aiService.answerQuestion()
-  → Flue Agent (FLUE_BASE_URL/agents/assistant/:sessionId)
-    → search_project_docs (RAG, 走 /api/internal)
-    → PPT 生成 / 其他工具
-  → 流式返回结果
+  → POST /api/agent/conversations/:agentId
+  → 进程内 JW Agent Runtime
+    → Claude Agent SDK / LLM Gateway
+    → search_project_docs 等进程内工具
+  → MySQL agent_* 持久化
+  → REST 短轮询返回流式快照与历史补偿
 ```
 
 ## 常见问题
 
 **Q: 数据库连接失败**
-A: 确认 PostgreSQL 运行中，`DATABASE_URL` 正确。
+A: 确认 MySQL 8.x 可用，`DB_HOST`、`DB_PORT`、`DB_DATABASE`、`DB_USERNAME`、
+`DB_PASSWORD` 和 `DB_FREFIX` 正确。
 
 **Q: AI 对话/摘要不工作**
-A: 确认 `LLM_BASE_URL` + `LLM_API_KEY`，以及 `FLUE_BASE_URL`（Flue 代理）。
+A: 确认 `OPENAI_BASE_URL` / `OPENAI_API_KEY` 指向可用的兼容网关，并检查
+`JW_AGENT_MODEL`。本地默认网关未启动时，数据库功能正常但 AI 实答会失败。
 
 **Q: 上传大文件超时**
 A: 默认 body 限制 150MB，可在 `server/src/index.ts` 调整。
 
-**Q: 线索发现服务的 Python 依赖**
+**Q: Radar 的 Python 依赖**
 A: `pip install -r project-discovery/requirements.txt`

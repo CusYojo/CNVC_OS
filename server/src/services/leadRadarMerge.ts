@@ -5,7 +5,7 @@
  * - 空值、占位值永不覆盖已有有效值；
  * - score / scoring 不属于可合并字段，调用方即使误传也不会进入 patch；
  * - Radar 创建的记录可接受新的非空 Radar 标量；非 Radar（人工/BP/情报采集）记录只补空；
- * - 已有 Flue 评分时保护其回填的 team，新的 Radar 团队信息仍保存在 radarProfile；
+ * - 已有 AI 评分时保护其回填的 team，新的 Radar 团队信息仍保存在 radarProfile；
  * - 来源、融资、标签、亮点和风险做去重合并，不整体清空。
  */
 
@@ -192,7 +192,7 @@ export function mergeUniqueValues(existing: unknown, incoming: unknown): unknown
   return merged
 }
 
-function hasFlueScoring(scoring: unknown): boolean {
+function hasAiScoring(scoring: unknown): boolean {
   if (!isPlainObject(scoring)) return false
   return Object.values(scoring).some(isMeaningfulRadarValue)
 }
@@ -207,7 +207,7 @@ export function buildRadarLeadMergePatch(
 ): RadarLeadMergePatch {
   const patch: Record<string, unknown> = {}
   const existingIsRadar = /^项目发现雷达(?:\s|·|$)/.test(String(existing.source ?? '').trim())
-  const scoringReady = hasFlueScoring(existing.scoring)
+  const scoringReady = hasAiScoring(existing.scoring)
 
   const mergeScalar = (
     key: 'companyName' | 'industry' | 'source' | 'summary' | 'team',

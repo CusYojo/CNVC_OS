@@ -3,15 +3,15 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "flue dev --port 3584",
-    "dev:local": "flue dev --port 3584 --env ../.env",
-    "build:client": "vite build",
-    "build:server": "flue build",
-    "build": "vite build && flue build",
+    "dev": "node scripts/retired-runtime.mjs",
+    "dev:local": "node scripts/retired-runtime.mjs",
+    "build:client": "node scripts/retired-runtime.mjs",
+    "build:server": "node scripts/retired-runtime.mjs",
+    "build": "node scripts/retired-runtime.mjs",
     "check": "tsc --noEmit",
-    "health": "node scripts/healthcheck.mjs",
-    "start": "node --env-file-if-exists=.env scripts/start.mjs",
-    "start:local": "node --env-file-if-exists=../.env scripts/start.mjs"
+    "health": "node scripts/retired-runtime.mjs",
+    "start": "node scripts/retired-runtime.mjs",
+    "start:local": "node scripts/retired-runtime.mjs"
   },
   "dependencies": {
     "@earendil-works/pi-ai": "^0.80.2",

@@ -1,843 +1,247 @@
-# intelligent-investment-platform 安装配置指南
+# Cybernaut 单服务安装与迁移
 
-> 适用版本：cybernaut-dist 2026-07  
-> 目标读者：接手开发的工程师  
-> 预计耗时：首次完整部署约 30 分钟
+本手册对应当前 MySQL、进程内 JW Runtime 与 MySQL 持久化 Job 架构。旧 Flue
+3584、Radar 8121、`INTERNAL_SECRET`、`daily_intake` cron 和 localhost 业务回调
+说明已归档到 `docs/archive/INSTALL-flue-legacy.md`，不得用于新部署。
 
----
+## 1. 运行拓扑
 
-## 目录
+- 项目业务单元：`cybernaut-app.service`，一个常驻 Node 进程。
+- 业务端口：仅 `127.0.0.1:3100`。
+- JW Agent Runtime：Express 进程内组件；Socket.io 与 API 共用 3100。
+- Radar：MySQL Job 调度的单次 Python 子进程，无常驻端口。
+- Web：生产由 Nginx 提供静态资源，Express 也保留同包 SPA fallback；二者不增加项目业务服务单元。
+- 外部依赖：MySQL 8.x、LLM Gateway；GSData 仅公众号采集需要。
 
-1. [环境要求](#1-环境要求)
-2. [快速开始（5 分钟）](#2-快速开始5-分钟)
-3. [.env 逐项配置](#3-env-逐项配置)
-4. [PostgreSQL 配置](#4-postgresql-配置)
-5. [Nginx 反向代理（生产）](#5-nginx-反向代理生产)
-6. [systemd 进程守护（生产）](#6-systemd-进程守护生产)
-   - 6.1 [主 API 服务](#61-主-api-服务)
-   - 6.2 [Flue Agent 服务](#62-flue-agent-服务ai-功能必须)
-   - 6.3 [情报雷达服务（可选）](#63-情报雷达服务可选)
-   - 6.4 [启用](#64-启用)
-7. [Flue Agent 编排层](#7-flue-agent-编排层)
-   - 7.1 [架构](#71-架构)
-   - 7.2 [克隆 Flue 源码](#72-克隆-flue-源码)
-   - 7.3 [安装依赖并构建核心包](#73-安装依赖并构建核心包)
-   - 7.4 [创建 Cybernaut Flue 项目](#74-创建-cybernaut-flue-项目)
-   - 7.5 [安装并验证](#75-安装并验证)
-   - 7.6 [systemd 进程守护](#76-systemd-进程守护)
-   - 7.7 [端点验证](#77-端点验证)
-   - 7.8 [.env 配置](#78-env-配置)
-   - 7.9 [Skill 工作区](#79-skill-工作区)
-8. [情报雷达（project-discovery）](#8-情报雷达project-discovery)
-9. [工具脚本运行](#9-工具脚本运行)
-10. [故障排查](#10-故障排查)
+“单服务”仅指项目业务部署单元收敛为一个 `cybernaut-app.service`，不表示数据库、
+反向代理和模型网关也被打进同一个进程。启动边界如下：
 
----
+| 运行单元 | 是否项目业务服务 | 是否常驻 | 启动要求 |
+|---|---|---|---|
+| `cybernaut-app.service` | 是，唯一一个 | 是 | 必须启动；统一承载 Web fallback、API、Socket、JW Runtime、调度器和 Worker 管理 |
+| MySQL 8.x | 否，基础设施 | 是 | 必须先可用，否则应用启动失败；可使用外部托管库或本机独立服务 |
+| Nginx / Ingress | 否，基础设施 | 是 | 生产公网 HTTPS 必须；仅在本机通过 3100 调试时可不启用 |
+| LLM Gateway | 否，外部模型基础设施 | 按部署方式 | 核心数据页面不依赖，但 JW 对话、评分和文档 AI 能力需要其可用 |
+| Radar Python、Office/PDF 子进程 | 否，受监督执行单元 | 否 | 不单独启动，由 `cybernaut-app` 按任务拉起并在完成后退出 |
 
-## 1. 环境要求
+因此，在 MySQL、Nginx/Ingress 和 LLM Gateway 已由平台持续提供的前提下，版本发布或
+业务应用重启只需执行 `systemctl restart cybernaut-app`。若是整机冷启动，必须同时确认
+这些基础设施已就绪，不能只启动 Node 进程就宣称全部功能可用。
 
-```bash
-# 一行检查所有前置条件
-node -v    # ≥ 20
-npm -v     # ≥ 10
-psql --version 2>/dev/null || echo "需安装 PostgreSQL ≥ 16"
-docker -v 2>/dev/null || echo "推荐安装 Docker"
-python3 --version 2>/dev/null || echo "情报雷达需要 Python ≥ 3.10"
-```
+根目录的 `npm start`、`npm run start:app`、`npm run start:all` 和 `./start.sh` 均指向
+同一个 `server-dist/index.js`，不是四套服务。生产统一使用 systemd 命令，其他入口仅用于
+本地或诊断；`docker compose up` 当前只提供 MySQL，不会启动业务应用或 LLM Gateway。
 
-| 软件 | 版本 | 用途 |
-|---|---|---|
-| Node.js | ≥ 20 | 前端 + 后端运行时 |
-| pnpm | ≥ 11 | Flue Agent 构建（`npm install -g pnpm@11`） |
-| PostgreSQL | ≥ 16 | 主数据库，端口 5432 |
-| Docker | ≥ 24 | 快速启动 PG（推荐） |
-| Python | ≥ 3.10 | 情报雷达（可选） |
-| Nginx | 任意 | 生产反代（可选） |
+## 2. 环境要求
 
----
+- Node.js 20+、npm 10+
+- MySQL 8.x，目标库字符集必须为 `utf8mb4`
+- Python 3.10+，并能安装 `project-discovery/requirements.txt`
+- 生产部署需要 systemd、Nginx 和 root 权限
 
-## 2. 快速开始（5 分钟）
+## 3. 配置
 
 ```bash
-# 1. 解压
-cd /path/to/cybernaut-dist
-
-# 2. 配置环境
 cp .env.example .env
-# 编辑 .env：至少确认 DATABASE_URL 正确
-
-# 3. 启动数据库
-docker compose up -d          # 或手动建库
-
-# 4. 导入生产数据（可选，跳过则自动建空库+种子数据）
-PGPASSWORD=cyb_mvp_2026 psql -U cybernaut -h 127.0.0.1 cybernaut_mvp < cybernaut_mvp_dump.sql
-
-# 5. 安装并启动
-npm install
-npm run dev                    # 前端 :5173 + 后端 :3100
-
-# 6. 验证
-curl http://localhost:3100/api/health
-# → {"ok":true,"service":"intelligent-investment-platform-api",...}
 ```
 
-浏览器打开 `http://localhost:5173`，用 `admin@cybernaut.com / 123456` 登录。
+必须配置以下 MySQL 变量：
 
----
-
-## 3. .env 逐项配置
-
-### 3.1 必填项
-
-```ini
-# 数据库连接（唯一必填）
-DATABASE_URL=postgres://cybernaut:cyb_mvp_2026@127.0.0.1:5432/cybernaut_mvp
+```dotenv
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_DATABASE=cybernaut_mvp
+DB_USERNAME=cybernaut
+DB_PASSWORD=change-me
+DB_FREFIX=sbl_
+DB_POOL_SIZE=10
+DB_POOL_QUEUE_LIMIT=40
+DB_CONNECT_TIMEOUT_MS=10000
+PROJECT_FILE_MAX_BYTES=104857600
+PROJECT_FILE_ARCHIVE_MAX_ENTRIES=5000
+PROJECT_FILE_ARCHIVE_MAX_UNCOMPRESSED_BYTES=262144000
+PROJECT_FILE_MAX_COUNT_PER_PROJECT=500
+PROJECT_FILE_MAX_BYTES_PER_PROJECT=5368709120
+PROJECT_FILE_MAX_BYTES_PER_USER=21474836480
 ```
 
-只配置这一项，基础 CRUD 就能跑（项目管理、文件上传、会议记录）。
+`DB_FREFIX` 是现有部署契约中的历史拼写，不要改成 `DB_PREFIX`。迁移器会按该值
+改写迁移 SQL 中的表名、外键引用和约束名，非 `sbl_` 前缀也可使用。
+连接池默认最多 10 条连接、40 个排队请求和 10 秒建连超时；队列满会返回明确错误，
+不会无限积压。可按目标 MySQL 容量调整三个 `DB_POOL_*`/`DB_CONNECT_TIMEOUT_MS` 参数。
+Socket 握手、订阅、广播和周期重认证通过 `SOCKET_DB_CONCURRENCY=8` 共用进程内
+MySQL 背压许可池；该值应小于连接池上限，为 HTTP、Worker 和停机流程保留连接容量。
+Web 默认使用 MySQL `auth_sessions` + HttpOnly Cookie，旧 Bearer 由
+`AUTH_ALLOW_LEGACY_BEARER=false` 关闭。生产配置会拒绝弱会话密钥、HTTP Origin、
+非 Secure Cookie、旧 Bearer 和演示账号种子；部署脚本强制 HTTP→HTTPS、TLS 1.2/1.3
+和 HSTS，并设置 `AUTH_COOKIE_SECURE=true`。
+还需配置 `JWT_SECRET`、LLM 网关地址/密钥和 JW 模型。JW 对话 Runtime 强制
+使用 `dontAsk`，关闭 Claude Code 内建工具、Skills 和文件设置源，只允许宿主绑定的
+单一宿主 MCP Server 只暴露项目摘要、项目资料搜索、文件列表、文件片段读取、受控 AI 任务创建/查询和公开情报采集七个白名单工具；部署脚本会覆盖旧的
+`JW_AGENT_PERMISSION_MODE=bypassPermissions`。
 
-### 3.2 AI 功能（对话/摘要/RAG 需要）
+MySQL 模型设置还要求 `MODEL_CREDENTIAL_ENCRYPTION_KEY`（32 字节 Base64 或 64 位
+Hex）和非空的 `MODEL_PROVIDER_ALLOWED_HOSTS`。生产启动会拒绝缺失/无效主密钥或空主机
+白名单；Provider 默认必须使用 HTTPS。新部署由 `deploy.sh` 生成并以 0600 `.env`
+保存加密主密钥，升级不会覆盖已有值。该主密钥不是模型 API Key，禁止随意轮换；如需轮换，
+必须先实现并执行全部 Provider 密文重加密。系统管理员或 AI 平台管理员在
+`/system/ai/models` 新增 Provider、替换 API Key、配置模型角色和七类 Profile 主备路由。
+接口与页面均不会返回完整 API Key；曾外泄的模型 Key 必须在供应商侧吊销后再写入新值。
 
-```ini
-# LLM 网关 — 所有 AI 能力的底座
-LLM_BASE_URL=http://127.0.0.1:18081/v1
-LLM_API_KEY=sk-xxxxxxxx
-LLM_MODEL=claude-sonnet-4-6
+Radar 与储备池 Job 的默认参数见 `.env.example`。生产部署模板会开启 Radar
+周期采集和 36氪储备池每日 09:00 摄入 50 条；公众号任务只有在凭据可用时才采集。
+项目资料默认单文件上限 100 MiB、每项目 500 个文件/5 GiB、每用户 20 GiB；Office
+OOXML 文件同时限制 5,000 个内部条目和 250 MiB 解压后容量。上传入口会核对规范
+Base64/Data URL、文件名、扩展名、声明 MIME、内容签名和 Office 内部结构，并以
+SHA-256 在项目内拒绝新重复内容；每次替换保留独立路径和不可变版本元数据。
 
-# OpenAI 兼容网关 — RAG 文档解析 / OCR，通常和 LLM 同网关
-OPENAI_BASE_URL=http://127.0.0.1:18081/v1
-OPENAI_API_KEY=sk-xxxxxxxx
-OCR_VISION_MODEL=gemini-3.1-pro-preview
-
-# Flue Agent 编排 — AI 对话多步推理 / PPT 生成
-FLUE_BASE_URL=http://127.0.0.1:3584
-
-# 图片生成网关 — AI 封面 / PPT 出图
-GATEWAY_IMAGE_BASE_URL=https://getways-jumu.zeelin.cn
-GATEWAY_IMAGE_API_KEY=sk-xxxxxxxx
-```
-
-### 3.3 鉴权与安全
-
-```ini
-JWT_SECRET=cybernaut-dev-secret-change-me    # 生产务必换掉！
-JWT_EXPIRES_IN=24h
-INTERNAL_SECRET=cybernaut-internal-2026       # 内部服务间调用密钥，生产换掉
-```
-
-### 3.4 外部服务集成
-
-```ini
-# 情报雷达 — 本地多信源服务
-RADAR_BASE_URL=http://127.0.0.1:8121
-
-# Agent 工作空间 — PPT/文件产物存储目录
-AGENT_WORKSPACE=/var/lib/cybernaut-assistant/workspace
-
-# AI 业务 Skill — 默认读取 $AGENT_WORKSPACE/.agents/skills
-# 若 Skill 以独立只读卷部署，可显式覆盖
-AI_SKILL_ROOT=/var/lib/cybernaut-assistant/workspace/.agents/skills
-```
-
-### 3.5 性能调优
-
-```ini
-SCORE_QUEUE_CONCURRENCY=3     # 线索评分并发数
-INGEST_MAX_ATTEMPTS=3         # RAG 文档摄入重试次数
-```
-
-### 3.6 完整 .env 模板
-
-<details>
-<summary>点击展开完整模板（可直接复制）</summary>
-
-```ini
-# ---- 运行模式 ----
-NODE_ENV=development
-
-# ---- 端口 ----
-API_PORT=3100
-
-# ---- 数据库 ----
-DATABASE_URL=postgres://cybernaut:cyb_mvp_2026@127.0.0.1:5432/cybernaut_mvp
-
-# ---- JWT ----
-JWT_SECRET=cybernaut-dev-secret-change-me
-JWT_EXPIRES_IN=24h
-
-# ---- LLM 网关 ----
-LLM_BASE_URL=http://127.0.0.1:18081/v1
-LLM_MODEL=claude-sonnet-4-6
-LLM_API_KEY=
-
-# ---- OpenAI 兼容网关 ----
-OPENAI_BASE_URL=http://127.0.0.1:18081/v1
-OPENAI_API_KEY=
-OCR_VISION_MODEL=gemini-3.1-pro-preview
-
-# ---- 图片生成网关 ----
-GATEWAY_IMAGE_BASE_URL=https://getways-jumu.zeelin.cn
-GATEWAY_IMAGE_API_KEY=
-
-# ---- Flue Agent ----
-FLUE_BASE_URL=http://127.0.0.1:3584
-
-# ---- 内部密钥 ----
-INTERNAL_SECRET=cybernaut-internal-2026
-
-# ---- 情报雷达 ----
-RADAR_BASE_URL=http://127.0.0.1:8121
-
-# ---- Agent 工作空间 ----
-AGENT_WORKSPACE=/var/lib/cybernaut-assistant/workspace
-AI_SKILL_ROOT=/var/lib/cybernaut-assistant/workspace/.agents/skills
-
-# ---- 性能 ----
-SCORE_QUEUE_CONCURRENCY=3
-INGEST_MAX_ATTEMPTS=3
-```
-</details>
-
----
-
-## 4. PostgreSQL 配置
-
-### 4.1 Docker 方式（推荐）
+## 4. 安装、迁移与验证
 
 ```bash
-docker compose up -d
-```
-
-检查状态：
-
-```bash
-docker compose ps
-# NAME              STATUS              PORTS
-# cybernaut-pg      running             0.0.0.0:5432->5432/tcp
-```
-
-### 4.2 手动安装 PostgreSQL
-
-```bash
-# CentOS/RHEL
-dnf install -y postgresql16-server
-postgresql-16-setup initdb
-systemctl enable --now postgresql-16
-
-# 创建用户和数据库
-sudo -u postgres psql <<SQL
-CREATE USER cybernaut WITH PASSWORD 'cyb_mvp_2026';
-CREATE DATABASE cybernaut_mvp OWNER cybernaut;
-GRANT ALL PRIVILEGES ON DATABASE cybernaut_mvp TO cybernaut;
-SQL
-```
-
-### 4.3 修改 pg_hba.conf（如连不上）
-
-```bash
-# 找到 pg_hba.conf
-sudo -u postgres psql -c "SHOW hba_file;"
-
-# 确保有这一行（允许本地密码登录）
-# local   all   all   md5
-# host    all   all   127.0.0.1/32   md5
-
-# 重载配置
-sudo systemctl reload postgresql-16
-```
-
-### 4.4 导入生产数据
-
-```bash
-# 先确保空库已创建
-PGPASSWORD=cyb_mvp_2026 psql -U cybernaut -h 127.0.0.1 cybernaut_mvp < cybernaut_mvp_dump.sql
-```
-
-> **注意**：如果先跑过 `npm run dev`（自动建了空表），导入会报唯一约束冲突。此时先 `DROP SCHEMA public CASCADE; CREATE SCHEMA public;` 再导入。
-
----
-
-## 5. Nginx 反向代理（生产）
-
-### 5.1 配置
-
-```nginx
-# /etc/nginx/conf.d/cybernaut.conf
-server {
-    listen 80;
-    server_name your-domain.com;       # 改成实际域名
-
-    # 前端静态资源（Vite build 产物，带 hash 可长缓存）
-    location /assets/ {
-        root /path/to/cybernaut-dist/dist;
-        expires 7d;
-        add_header Cache-Control "public, immutable";
-    }
-
-    # 前端入口（禁止缓存）
-    location / {
-        root /path/to/cybernaut-dist/dist;
-        try_files $uri $uri/ /index.html;
-        add_header Cache-Control "no-cache";
-    }
-
-    # Flue Agent 编排层（长前缀优先于 /api/，必须放在 /api/ 前面）
-    location /ai/api/ {
-        proxy_pass http://127.0.0.1:3584/;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_read_timeout 300s;        # Agent 推理耗时较长
-        proxy_connect_timeout 10s;
-    }
-
-    # 后端 API 反代
-    location /api/ {
-        proxy_pass http://127.0.0.1:3100;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_read_timeout 120s;        # AI 对话/PPT 生成较慢
-        client_max_body_size 150m;      # 大文件上传
-    }
-
-    # 生成文件（PPT 产物等）
-    location /generated/ {
-        alias /path/to/cybernaut-dist/server/generated/;
-        expires 1d;
-    }
-}
-```
-
-> **重要**：`/ai/api/` 必须放在 `/api/` **前面**，否则 nginx 会用 `/api/` 规则拦截 Flue 请求转发到 Express，导致前端 Flue SDK 解析 HTML 报错 `Cannot read properties of undefined (reading 'map')`。
-
-### 5.2 生效
-
-```bash
-nginx -t && systemctl reload nginx
-```
-
-### 5.3 HTTPS（Let's Encrypt）
-
-```bash
-# certbot 自动获取证书
-certbot --nginx -d your-domain.com
-```
-
----
-
-## 6. systemd 进程守护（生产）
-
-### 6.1 主 API 服务
-
-```ini
-# /etc/systemd/system/cybernaut-api.service
-[Unit]
-Description=Cybernaut Investment Platform API
-After=network.target postgresql.service
-
-[Service]
-Type=simple
-User=root
-WorkingDirectory=/path/to/cybernaut-dist
-EnvironmentFile=/path/to/cybernaut-dist/.env
-ExecStart=/usr/bin/node --env-file=.env server-dist/index.js
-Restart=on-failure
-RestartSec=5
-
-# 日志
-StandardOutput=append:/path/to/cybernaut-dist/logs/server.log
-StandardError=append:/path/to/cybernaut-dist/logs/server.log
-
-[Install]
-WantedBy=multi-user.target
-```
-
-### 6.2 Flue Agent 服务（AI 功能必须）
-
-```ini
-# /etc/systemd/system/cybernaut-flue.service
-[Unit]
-Description=Cybernaut Flue Agent Server
-After=network.target
-
-[Service]
-Type=simple
-User=root
-WorkingDirectory=/www/flue-cybernaut
-Environment=ANTHROPIC_API_KEY=sk-xxxxxxxx
-ExecStart=/usr/bin/npx vite dev --port 3584 --host 127.0.0.1
-Restart=on-failure
-RestartSec=5
-
-StandardOutput=append:/path/to/cybernaut-dist/logs/flue.log
-StandardError=append:/path/to/cybernaut-dist/logs/flue.log
-
-[Install]
-WantedBy=multi-user.target
-```
-
-### 6.3 情报雷达服务（可选）
-
-```ini
-# /etc/systemd/system/cybernaut-radar.service
-[Unit]
-Description=Cybernaut Project Discovery Radar
-After=network.target
-
-[Service]
-Type=simple
-User=root
-WorkingDirectory=/path/to/cybernaut-dist/project-discovery
-ExecStart=/usr/bin/python3 -m uvicorn app:app --host 0.0.0.0 --port 9888
-Restart=on-failure
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-```
-
-### 6.4 启用
-
-```bash
-# 先编译
-cd /path/to/cybernaut-dist
+npm ci
+python3 -m venv project-discovery/.venv
+project-discovery/.venv/bin/python -m pip install -r project-discovery/requirements.txt
+npm run db:migrate
+npm run migrate:radar
+npm run migrate:project-file-metadata
+# 确认预览报告并挂载齐历史原文件后再执行：
+npm run migrate:project-file-metadata:apply
+# 从明确授权的源目录按精确名称、容量、签名和唯一 SHA 寻找旧原件：
+npm run discover:project-file-sources -- --root /path/to/source-backup
+# 人工审阅 source-discovery.json 后才执行：
+npm run migrate:project-file-sources -- --root /path/to/source-backup
+npm run inventory:files
+npm run audit:mysql-normalization
+npm run audit:password-hashes
+npm run accept:password-rotation
+npm run accept:demo-user-seed-retirement
+npm run accept:system-administration
+npm run check:mysql
+npm run accept:migration-idempotency
+npm run accept:mysql-backup-restore
+npm run accept:mysql-resilience
+npm run accept:structured-logs
+npm run accept:project-files
+npm run accept:project-file-integrity
+npm run accept:project-knowledge-tools
+npm run accept:agent-ai-task-tools
+npm run accept:ai-task-references
+npm run accept:ai-task-lifecycle
+npm run accept:ai-task-persistence
+npm run accept:ai-task-unified
+npm run accept:ai-model-settings
+npm run accept:ai-capabilities
+npm run check:platform
 npm run build
-
-# 创建日志目录
-mkdir -p logs server/generated
-
-# 注册并启动
-systemctl daemon-reload
-systemctl enable --now cybernaut-api
-systemctl enable --now cybernaut-flue     # AI 功能必须
-systemctl enable --now cybernaut-radar   # 可选
+npm run accept:clean-build
+npm run accept:single-service-runtime
+# 若 3100 已由目标服务占用，使用只读观察模式，不停止或重启服务：
+npm run accept:single-service-runtime:observe
 ```
 
----
+PostgreSQL/Flue 历史迁移必须先做一致性备份和 preview，再执行 apply；具体命令与
+证据要求见 `docs/迁移计划/`。没有取得生产 `flue.db` 时，不得删除历史恢复材料。
+`inventory:files` 会只读扫描项目原文件、AI 产物、自定义模板、generated、Agent
+workspace、Skill 和 Radar 文件，生成逐文件 SHA-256、稳定归属和隔离问题报告到
+`.runtime/migration-evidence/file-assets/`。人工处置完全部阻断问题后，用
+`npm run check:file-manifest` 作为严格门禁；工具不会跟随符号链接、猜测归属或删除文件。
+`audit:mysql-normalization` 按 NFKC、空白折叠和小写比较扫描邮箱、项目/公司名与
+线索/公司名；人工处置全部冲突后以 `npm run check:mysql-normalization` 严格复验。
+`audit:password-hashes` 会把 PostgreSQL dump 用户、`iam_user_mappings` 和 MySQL 目标用户
+逐一对账，拒绝明文/无效 bcrypt、缺失映射和已知弱密码。生产 `deploy.sh init` 已将它
+列为发布阻断门禁；命中弱密码时必须先通过受控流程轮换，不能临时跳过审计。
 
-## 7. Flue Agent 编排层
-
-Flue 是独立的 Agent 编排框架，通过 HTTP 与主平台通信。AI 对话、RAG 检索、PPT 生成都依赖它。
-
-### 7.1 架构
-
-```
-浏览器 → :80 nginx
-           ├─ /          → dist/ (React SPA)
-           ├─ /api/*     → :3100 Express 后端
-           └─ /ai/api/*  → :3584 Flue Agent
-                              ↓ tools 回调
-                            :3100 /api/internal (RAG 检索等)
-                              ↓ LLM 调用
-                            Anthropic API (claude-sonnet-4-6)
-```
-
-### 7.2 克隆 Flue 源码
+弱密码账号使用离线隐藏输入逐个轮换：
 
 ```bash
-cd /www
-git clone https://github.com/withastro/flue.git
-cd flue
+# 生产维护窗口先停止业务服务，避免已连接 Socket 等待周期复核
+sudo systemctl stop cybernaut-app
+# 生成 0600 私有作业清单；控制台只输出数量，不输出账号
+npm run prepare:weak-password-rotation-roster
+npm run rotate:user-password -- --email user@example.com
+# 每轮轮换后刷新；weakAccounts 必须最终归零
+npm run check:weak-password-rotation-roster
+npm run audit:password-hashes
 ```
 
-### 7.3 安装依赖并构建核心包
+轮换命令不接受密码 argv 或环境变量；交互终端不回显输入并要求二次确认，也支持从
+受控密钥管理器向 stdin 提供两行相同密码。禁止使用 `echo`、命令行参数或 shell 环境
+变量传递密码。新密码至少 14 位并含大小写、数字和符号，默认 bcrypt cost 12；成功后
+事务性吊销该用户全部会话并写入不含密码的审计日志。必须完成全部弱账号轮换，直到
+`audit:password-hashes` 返回 0，才能重新执行生产部署；不要在审计失败时手工绕过启动。
+私有清单默认写入 `.runtime/migration-decisions/weak-password-rotation-roster.json`，只保存
+账号、bcrypt cost、完整哈希的 SHA-256 指纹和审计状态，不保存密码或完整 bcrypt。该文件
+含账号身份，只能由账号负责人和安全运维在受限主机查看，不得复制到聊天或工单。
+历史固定演示账号生成逻辑已经永久退役；上述轮换只针对已经迁移存在的真实账号，
+不会创建新账号。兼容入口即使收到 `SEED_DEMO_USERS=1` 也只返回跳过；生产配置门禁仍会
+拒绝该遗留开关，要求配置保持为 `0`。
+`accept:migration-idempotency` 先把活动前缀的一致性备份恢复到随机隔离前缀，再只在隔离
+前缀连续运行两次 Schema 迁移，核对全部目标表的 DDL、行数与逐行内容 SHA-256 均不变化，
+最后精确清理隔离表；活动前缀写入始终为 0。构建完成后，`accept:single-service-runtime` 会以生产
+安全配置临时启动唯一业务进程，核对 Web/API/全部进程内组件、仅 3100 监听、旧端口
+3584/8121 关闭、结构化请求日志以及优雅停机后端口完全释放。
+若 3100 已经运行，`accept:single-service-runtime:observe` 只读核对同一服务身份、全部必需组件、
+唯一监听进程和旧端口关闭，并保证不启停任何进程。
+`accept:mysql-resilience` 验证连接耗尽时的有界队列错误、释放后的排队恢复和被终止
+连接的自动替换；`accept:clean-build` 在不复制 `.env`、运行数据或现有依赖的临时目录
+执行全新 `npm ci` 与生产构建，并在完成后删除临时目录。
+`accept:project-files` 对 PDF、Word、Excel、PPT、图片和文本类共 22 种扩展名执行
+原始 Base64/Data URL、私有存储回读及伪造签名/MIME、超限、非法名称、压缩包膨胀等验收。
+`accept:project-file-integrity` 验证每项目/用户配额、并发串行化、SHA-256 内容去重和
+不可变版本原件回读。`migrate:project-file-metadata` 只读扫描数据库引用的现存原件并把
+精确字节、SHA、重复/缺失报告写入 `.runtime/migration-evidence/project-files/`；只有确认
+源文件根完整后才执行 `:apply`，脚本不会为缺失原件编造哈希或自动删除重复文件。
+源文件发现器只读取数据库中仍无原件的精确文件名；名称、历史容量、内容签名和唯一
+SHA 全部满足才允许复制到私有版本目录。源文件保持原位，模糊匹配、不同内容候选、
+缺少稳定上传人或版本冲突均只写报告，不会自动认领。
+
+## 5. 启动与健康
 
 ```bash
-# 需要 pnpm ≥ 11
-npm install -g pnpm@11
-
-# 安装 Flue monorepo 依赖
-pnpm install
-
-# 构建核心包（runtime / vite / cli）
-pnpm build
-# 注：examples 下的 Cloudflare 等示例构建失败属正常，core 包构建成功即可
-# 验证：ls packages/runtime/dist/ packages/vite/dist/ packages/cli/dist/
-```
-
-### 7.4 创建 Cybernaut Flue 项目
-
-为 cybernaut 创建独立的 Flue assistant 项目：
-
-```bash
-mkdir -p /www/flue-cybernaut/src/agents
-cd /www/flue-cybernaut
-```
-
-`package.json`：
-
-```json
-{
-  "name": "cybernaut-assistant",
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "dev": "vite dev --port 3584",
-    "build": "vite build",
-    "start": "node dist/server.mjs"
-  },
-  "dependencies": {
-    "@flue/runtime": "file:/www/flue/packages/runtime",
-    "hono": "^4.7.0",
-    "just-bash": "^3.0.1"
-  },
-  "devDependencies": {
-    "@flue/vite": "file:/www/flue/packages/vite",
-    "vite": "^8.0.14"
-  }
-}
-```
-
-`vite.config.ts`：
-
-```ts
-import { flue } from '@flue/vite';
-import { defineConfig } from 'vite';
-
-export default defineConfig({
-  plugins: [flue()],
-  server: {
-    allowedHosts: ['cybernaut.newmin.cn', 'localhost', '127.0.0.1'],
-  },
-});
-```
-
-`flue.config.ts`：
-
-```ts
-import { defineConfig } from '@flue/runtime/config';
-
-export default defineConfig({
-  target: 'node',
-});
-```
-
-`src/app.ts` — 路由注册，挂载 assistant agent + health 端点：
-
-```ts
-import { createAgentRouter } from '@flue/runtime/routing';
-import { Hono } from 'hono';
-import { Assistant } from './agents/assistant.ts';
-
-const app = new Hono();
-
-app.get('/health', (c) =>
-  c.json({ ok: true, service: 'cybernaut-flue', timestamp: new Date().toISOString() }),
-);
-
-app.route('/agents/assistant', createAgentRouter(Assistant));
-
-export default app;
-```
-
-`src/agents/assistant.ts` — AI 投研助手 agent，包含 `search_project_docs` 和 `collect_intel` 两个工具回调：
-
-```ts
-'use agent';
-import { bash, useModel, useSandbox, useTool } from '@flue/runtime';
-import { Bash, InMemoryFs } from 'just-bash';
-
-export function Assistant() {
-  useModel('anthropic/claude-sonnet-4-6');
-  useSandbox(bash(() =>
-    new Bash({ fs: new InMemoryFs(), network: { dangerouslyAllowFullInternetAccess: true } }),
-  ));
-
-  // 情报采集工具 → Express /api/internal/collect-intel
-  useTool({
-    name: 'collect_intel',
-    description: '从外部源采集公司情报',
-    async run({ data }) {
-      const res = await fetch('http://127.0.0.1:3100/api/internal/collect-intel', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-internal-secret': process.env.INTERNAL_SECRET || 'cybernaut-internal-2026',
-        },
-        body: JSON.stringify(data),
-      });
-      return res.json();
-    },
-  });
-
-  // 项目文档检索 → Express /api/internal/search-docs
-  useTool({
-    name: 'search_project_docs',
-    description: '检索项目资料库中的文档',
-    async run({ data }) {
-      const res = await fetch('http://127.0.0.1:3100/api/internal/search-docs', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-internal-secret': process.env.INTERNAL_SECRET || 'cybernaut-internal-2026',
-        },
-        body: JSON.stringify(data),
-      });
-      return res.json();
-    },
-  });
-
-  return '你是赛智伯乐（Cybernaut）投资中台的 AI 投研助手。使用中文回复，基于检索证据回答，区分事实与分析。';
-}
-```
-
-### 7.5 安装并验证
-
-```bash
-cd /www/flue-cybernaut
-npm install
-
-# 设置 Anthropic API Key（Flue 调用 LLM 需要）
-export ANTHROPIC_API_KEY=sk-xxxxxxxx
-
-# 开发模式启动（前台验证）
-npx vite dev --port 3584 --host 127.0.0.1
-
-# 另开终端验证
-curl http://127.0.0.1:3584/health
-# → {"ok":true,"service":"cybernaut-flue",...}
-```
-
-### 7.6 systemd 进程守护
-
-```ini
-# /etc/systemd/system/cybernaut-flue.service
-[Unit]
-Description=Cybernaut Flue Agent Server
-After=network.target
-
-[Service]
-Type=simple
-User=root
-WorkingDirectory=/www/flue-cybernaut
-Environment=ANTHROPIC_API_KEY=sk-xxxxxxxx
-ExecStart=/usr/bin/npx vite dev --port 3584 --host 127.0.0.1
-Restart=on-failure
-RestartSec=5
-
-StandardOutput=append:/path/to/cybernaut-dist/logs/flue.log
-StandardError=append:/path/to/cybernaut-dist/logs/flue.log
-
-[Install]
-WantedBy=multi-user.target
-```
-
-启用：
-
-```bash
-systemctl daemon-reload
-systemctl enable --now cybernaut-flue
-systemctl status cybernaut-flue
-```
-
-### 7.7 端点验证
-
-```bash
-# Flue 本地
-curl http://127.0.0.1:3584/health
-
-# 通过 Nginx 反代
-curl http://your-domain.com/ai/api/health
-# 预期: {"ok":true,"service":"cybernaut-flue",...}
-
-# Express 同样正常
+npm run start:app
 curl http://127.0.0.1:3100/api/health
-# 预期: {"ok":true,"service":"intelligent-investment-platform-api",...}
+curl http://127.0.0.1:3100/api/health/components
 ```
 
-### 7.8 .env 配置
+组件健康应包含 `jw-agent-runtime`、`agent-socket`、`project-discovery-radar`、
+`radar-mysql-source`、`mysql-runtime-jobs`、`mysql-lead-score-jobs`、
+`mysql-ai-tasks`、`supervised-child-processes` 和 `mysql-auth-sessions`。鉴权组件同时输出活动/吊销/过期会话数、
+Cookie 属性、旧 Bearer 开关与生产就绪警告。不得出现 3584/8121 监听、
+`cybernaut-assistant`、Radar FastAPI、旧同步脚本或外部项目 cron/timer。
 
-```ini
-FLUE_BASE_URL=http://127.0.0.1:3584
-
-# Flue 需要的 LLM API Key（在 .env 或 Flue systemd 的 Environment 中设置）
-ANTHROPIC_API_KEY=sk-xxxxxxxx
-```
-
-### 7.9 Skill 工作区
-
-合规性说明、投资提案、投资建议书、尽调报告和 Q&A 的 Agent Skill
-位于 `server/workspace/.agents/skills/`。Flue assistant 通过 Express 的
-`/api/internal/*` 回调间接使用这些 Skill——Skill 的执行逻辑在 Express 后端，
-Flue agent 只负责编排调度。
-
-如果暂时没有 Flue，基础 CRUD 功能不受影响，以下功能不可用：
-- AI 智能问答
-- 文档 RAG 检索
-- AI 摘要生成
-- PPT 自动生成
-- 线索自动评分
-
----
-
-## 8. 情报雷达（project-discovery）
-
-### 8.1 本地启动
+## 6. 生产部署
 
 ```bash
-cd project-discovery
-python3 -m venv .venv
-.venv/bin/python -m pip install -r requirements.txt
-./start.sh     # 默认仅监听 127.0.0.1:8121
+bash deploy.sh init
+# 后续版本
+bash deploy.sh update
 ```
 
-### 8.2 恢复旧雷达数据
+部署前必须准备证书。默认读取
+`/etc/letsencrypt/live/cybernaut.newmin.cn/fullchain.pem` 和 `privkey.pem`；不同域名或
+证书路径通过 `DOMAIN`、`PUBLIC_ORIGIN`、`TLS_CERT_FILE`、`TLS_KEY_FILE` 提供。
+缺失证书或非 HTTPS Origin 会在 Nginx/应用启动前明确阻断。
 
-本地数据为空时，可通过旧雷达的只读接口恢复候选记录和公众号清单：
+部署脚本会安装 Python 运行时、应用 MySQL 迁移、注册唯一
+`cybernaut-app.service`、停用旧 systemd/timer、清理明确匹配的旧项目 cron、
+配置 Nginx 只反代 3100，并检查健康、Skill、端口和进程。应用以专用
+`cybernaut` 非 root 用户运行；systemd 对整个 cgroup 统一停止并限制内存、CPU、
+任务数和可写目录。可通过 `APP_MEMORY_MAX`、`APP_CPU_QUOTA`、`APP_TASKS_MAX`
+覆盖部署默认值。
 
-```bash
-.venv/bin/python scripts/bootstrap_from_remote.py \
-  --remote-base http://101.126.93.130:8121
-```
+生产应把 DDL 迁移账号与 `.env` 的 DML 运行账号分开。运行服务只读取
+`DB_HOST/DB_PORT/DB_DATABASE/DB_USERNAME/DB_PASSWORD/DB_FREFIX`；迁移账号通过
+root 所有的 `DB_MIGRATION_ENV_FILE` 临时提供，格式与授权见
+`docs/迁移计划/MySQL运行与迁移账号分离方案-20260808.md`。生产进程只读核验
+Schema 版本，不会使用运行账号执行建表或 ALTER。
 
-生产环境的 `deploy.sh` 会自动完成这一步，并将数据保存在
-`/var/lib/cybernaut-radar`。GSData 凭据不能从旧接口导出，需在 `.env`
-单独配置 `GSDATA_APP_KEY` 和 `GSDATA_APP_SECRET`。
+## 7. 当前未关闭的生产门禁
 
-### 8.3 Skills 说明
-
-`project-discovery/` 包含的技能链（供 AI Agent 调用）：
-
-| 目录 | 功能 | 入口 |
-|---|---|---|
-| `GordenImagePPTGen/` | 从主题 AI 出图生成 PPT | `SKILL.md` |
-| `GordenImage2PPTX/` | 图片 PPT → 可编辑 PPTX | `SKILL.md` + `scripts/` |
-| `GordenSuperPPTSkill/` | 一键全流程编排 | `SKILL.md` |
-| `skills-financial-research-analyst-main/` | 金融研究分析（DCF/估值/行业） | `SKILL.md` + `scripts/` |
-
----
-
-## 9. 工具脚本运行
-
-### 9.1 准备工作
-
-所有工具脚本依赖编译后的 `server-dist/`，先构建：
-
-```bash
-npm run build
-```
-
-### 9.2 脚本速查
-
-```bash
-# 每日情报摄入（从储备库取线索入池）
-node daily_intake.mjs
-
-# 批量分析线索
-node batch_analyze.mjs                  # 补漏模式
-SCOPE=all FORCE=1 node batch_analyze.mjs # 强制全量
-
-# 评分重算
-node rescore.mjs                        # 低分线索重评
-node rescore_all.mjs                    # 全量重评
-
-# 导入候选项目
-node import_reserve.mjs
-```
-
-所有脚本已改为相对路径，无需 cd 到特定目录。
-
----
-
-## 10. 故障排查
-
-### 10.1 数据库
-
-```bash
-# 连不上
-pg_isready -h 127.0.0.1 -U cybernaut -d cybernaut_mvp
-# 检查 pg_hba.conf 和防火墙
-
-# 启动报 "role cybernaut does not exist"
-sudo -u postgres psql -c "CREATE USER cybernaut WITH PASSWORD 'cyb_mvp_2026';"
-
-# 导入 dump 报唯一约束冲突
-sudo -u postgres psql -d cybernaut_mvp -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"
-# 然后重新导入
-```
-
-### 10.2 端口占用
-
-```bash
-# 查看端口占用
-ss -tlnp | grep -E '3100|5173|5432'
-
-# 释放端口
-kill -9 $(lsof -t -i:3100)
-
-# 或修改 .env 中 API_PORT
-```
-
-### 10.3 npm 依赖
-
-```bash
-# 安装失败
-rm -rf node_modules package-lock.json
-npm cache clean --force
-npm install
-
-# 确认 Node 版本
-node -v   # 必须 ≥ 20
-```
-
-### 10.4 AI 功能
-
-```bash
-# AI 对话无响应 → 检查网关连通性
-curl http://127.0.0.1:18081/v1/models -H "Authorization: Bearer $LLM_API_KEY"
-
-# Flue Agent 不可达
-curl http://127.0.0.1:3584/health
-
-# RAG 文档解析失败 → 检查 OCR 模型
-curl http://127.0.0.1:18081/v1/chat/completions \
-  -H "Authorization: Bearer $OPENAI_API_KEY" \
-  -d '{"model":"gemini-3.1-pro-preview","messages":[{"role":"user","content":"test"}]}'
-```
-
-### 10.5 前端白屏
-
-```bash
-# 检查构建产物
-ls dist/index.html    # 应存在
-
-# 检查 nginx 配置
-nginx -t
-
-# 检查 Vite 开发服务器
-curl http://localhost:5173
-```
-
----
-
-## 附录：快速检查清单
-
-部署完成后逐项验证：
-
-```bash
-# □ 1. PG 运行
-pg_isready -h 127.0.0.1 -U cybernaut -d cybernaut_mvp
-
-# □ 2. 后端健康
-curl http://localhost:3100/api/health
-
-# □ 3. 前端可访问
-curl -o /dev/null -s -w '%{http_code}' http://localhost:5173
-# → 200
-
-# □ 4. 登录可用
-curl -s http://localhost:3100/api/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"email":"admin@cybernaut.com","password":"123456"}' | grep -o '"token":"[^"]*"'
-# → 应返回 JWT token
-
-# □ 5. LLM 网关（如配置了）
-curl -s http://127.0.0.1:18081/v1/models | head -c 100
-
-# □ 6. Flue Agent（如配置了）
-curl -s http://127.0.0.1:3584/health
-
-# □ 7. 情报雷达（如配置了）
-curl -s http://127.0.0.1:8121/api/candidates?limit=1 | head -c 100
-```
+- 生产 `flue.db` 一致性备份、历史会话实迁与归档；
+- 真实 LLM Gateway 多轮对话、停止、恢复和工具权限验收；
+- 目标机 systemd 沙箱生效取证，以及宿主公开情报工具的网络目标 allowlist；
+- Radar/微信群原始文件的不可变归档与生产恢复演练；
+- 生产 systemd、Nginx、cgroup、cron/timer 和密钥轮换核验；
+- 生产 HTTPS 及 `Secure` Cookie、会话密钥轮换与旧 JWT 使用审计；
+- `pptxgenjs/image-size` 上游修复或 PPT 库替换；当前已禁用有漏洞的 ICNS/JXL/HEIF 解析并加入恶意文件回归，但扫描告警仍存在；
+- 全量业务、压力、回滚及观察期批准。

@@ -1,3 +1,1 @@
-process.env.PORT ||= '3584'
-
-await import('../dist/server/server.mjs')
+await import('./retired-runtime.mjs')

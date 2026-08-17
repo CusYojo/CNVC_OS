@@ -34,6 +34,15 @@ export type InvestmentProposalTableKind =
   | 'forecast_return'
   | 'comparable_valuation'
 
+export const INVESTMENT_PROPOSAL_TABLE_COLUMNS: Record<InvestmentProposalTableKind, string[]> = {
+  equity_structure: ['股东名称', '持股比例'],
+  financial_summary: ['期间', '营业收入'],
+  financing_history: ['日期', '融资轮次', '融资金额'],
+  transaction_plan: ['投资方式', '投资金额'],
+  forecast_return: ['期间', '营业收入'],
+  comparable_valuation: ['可比公司', '估值倍数'],
+}
+
 export type InvestmentProposalBlueprintSection = {
   id: string
   title: string
@@ -579,6 +588,9 @@ export function investmentProposalBlueprintPrompt(
         container: Boolean(item.container),
         analysisKind: item.analysisKind,
         tableKind: item.tableKind,
+        tableColumns: item.tableKind
+          ? INVESTMENT_PROPOSAL_TABLE_COLUMNS[item.tableKind]
+          : undefined,
       })),
   })
 }

@@ -1,119 +1,80 @@
-// AI 网关层：投资中台的 AI 能力统一走 flue agent/workflow 编排层。
-// flue 层地址与 Agent 名称由统一配置提供；flue 内部再走 18081 LLM 网关。
-// RAG 检索已下沉到 flue assistant agent 的 search_project_docs 工具（走 Express 内部端点），此处不再直接检索。
-
-import { FLUE_AGENT_NAME, FLUE_BASE_URL } from '../config/agentRuntime.js'
-
-async function callAgent(agent: string, sessionId: string, message: string): Promise<string> {
-  const res = await fetch(`${FLUE_BASE_URL}/agents/${agent}/${sessionId}?wait=result`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message }),
-    signal: AbortSignal.timeout(90000),
-  })
-  if (!res.ok) throw new Error(`flue agent ${agent} ${res.status}: ${(await res.text()).slice(0, 200)}`)
-  const data = (await res.json()) as { result?: { text?: string } }
-  return data.result?.text?.trim() ?? ''
-}
-
-async function callWorkflow<T>(workflow: string, input: Record<string, unknown>): Promise<T> {
-  const res = await fetch(`${FLUE_BASE_URL}/workflows/${workflow}?wait=result`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(input),
-    signal: AbortSignal.timeout(120000),
-  })
-  if (!res.ok) throw new Error(`flue workflow ${workflow} ${res.status}: ${(await res.text()).slice(0, 200)}`)
-  const data = (await res.json()) as { result?: T }
-  if (!data.result) throw new Error(`flue workflow ${workflow} 返回空 result`)
-  return data.result
-}
+import { gatewayJson, gatewayText } from './inProcessAiWorkflowService.js'
+import { retrieveKnowledge } from './ragService.js'
 
 export async function answerQuestion(question: string, projectName = '当前项目', projectId?: string) {
-  // 真·agent：把问题+项目上下文转发给 flue assistant agent，由它自主决定调 RAG/PPT/情报工具。
-  // agent 在回答文本里用标记回传 jobId 与来源，这里解析出来还原成前端契约字段。
-  const msg = [
-    `【当前项目】${projectName}`,
-    projectId ? `【projectId】${projectId}（调 search_project_docs 时用此 id；若为空说明是全局知识库，projectId 留空）` : '【范围】全局知识库（无 projectId）',
-    `【用户问题】${question}`,
-  ].join('\n')
-
-  try {
-    const raw = await callAgent(FLUE_AGENT_NAME, `chat-${Date.now()}`, msg)
-    // 解析标记
-    let pptJobId: string | undefined
-    let sources: string[] = []
-    let answer = raw
-
-    const pptM = raw.match(/\[\[PPT_JOB:([^\]]+)\]\]/)
-    if (pptM) { pptJobId = pptM[1].trim(); answer = answer.replace(pptM[0], '').trim() }
-
-    const srcM = raw.match(/\[\[SOURCES:([^\]]*)\]\]/)
-    if (srcM) {
-      sources = srcM[1].split('|').map((s) => s.trim()).filter(Boolean)
-      answer = answer.replace(srcM[0], '').trim()
-    }
-
-    return {
-      answer: answer || `关于「${question}」，当前 ${projectName} 仍需结合客户、财务与合规证据综合判断。`,
-      sources,
-      confidence: sources.length ? 0.8 : (pptJobId ? 1 : null),
-      evidenceCount: sources.length,
-      pptJobId,
-      projectName,
-      disclaimer: sources.length
-        ? 'AI 基于已授权项目资料作答，仅供辅助，不构成最终投资决策。'
-        : 'AI 仅提供辅助分析，不构成最终投资决策。',
-    }
-  } catch (err) {
-    return {
-      answer: `关于「${question}」，当前 ${projectName} 仍需结合客户、财务与合规证据综合判断。建议优先核验原始合同、回款和监管文件。`,
-      sources: [] as string[],
-      confidence: null as number | null,
-      evidenceCount: 0,
-      disclaimer: `AI 编排层调用失败（${(err as Error).message}），已回退到占位回复。`,
-    }
+  const chunks = await retrieveKnowledge(projectId ? 'project' : 'org', projectId, question, 6)
+  const sources = [...new Set(chunks.map((chunk) => chunk.fileName).filter(Boolean))]
+  const context = chunks.map((chunk, index) => `【资料${index + 1}｜${chunk.fileName}】\n${chunk.content}`).join('\n\n')
+  const answer = await gatewayText({
+    system: '你是股权投资中台的 AI 投研助手。只能基于用户问题和提供的授权资料作答；资料不足时明确指出缺口，不得编造事实。全文简体中文。',
+    prompt: [
+      `项目：${projectName}`,
+      `问题：${question}`,
+      context ? `授权资料：\n${context}` : '授权资料：本次未检索到匹配证据。',
+    ].join('\n\n'),
+    timeoutMs: 90_000,
+  })
+  return {
+    answer,
+    sources,
+    confidence: sources.length ? 0.8 : null,
+    evidenceCount: sources.length,
+    projectName,
+    disclaimer: sources.length
+      ? 'AI 基于已授权项目资料作答，仅供辅助，不构成最终投资决策。'
+      : '未检索到匹配项目证据，AI 仅提供辅助分析，不构成最终投资决策。',
   }
 }
 
-type Summary = {
-  positioning: string
-  highlights: string[]
-  risks: string[]
-  questions: string[]
-  confidence: number
-  sources: string[]
+export type MeetingTodoSuggestion = {
+  title: string
+  owner?: string | null
+  dueDate?: string | null
+  priority?: '高' | '中' | '低' | null
 }
 
-export async function projectSummary(projectName: string) {
-  const fallback: Summary = {
-    positioning: `${projectName} 的一句话项目定位`,
-    highlights: ['目标场景明确', '形成早期客户验证', '团队能力与方向匹配'],
-    risks: ['收入质量待核验', '合规进度需补充证据', '估值合理性待比较'],
-    questions: ['前十大客户回款如何？', '核心壁垒如何被第三方验证？'],
-    confidence: 0.7,
-    sources: ['项目基础信息'],
+type Minutes = { summary: string; conclusions: string[]; todos: MeetingTodoSuggestion[]; confidence: number }
+
+function normalizeMeetingTodo(value: unknown): MeetingTodoSuggestion | null {
+  if (typeof value === 'string') {
+    const title = value.trim()
+    return title ? { title } : null
   }
-  try {
-    return await callWorkflow<Summary>('project-summary', { projectName })
-  } catch (err) {
-    console.warn('[aiService] projectSummary fallback:', (err as Error).message)
-    return { ...fallback, _warning: `AI 编排层调用失败：${(err as Error).message}` } as Summary & { _warning?: string }
+  if (!value || typeof value !== 'object') return null
+  const record = value as Record<string, unknown>
+  const title = String(record.title || '').trim()
+  if (!title) return null
+  const priority = ['高', '中', '低'].includes(String(record.priority))
+    ? String(record.priority) as MeetingTodoSuggestion['priority']
+    : null
+  return {
+    title,
+    owner: typeof record.owner === 'string' && record.owner.trim() ? record.owner.trim() : null,
+    dueDate: typeof record.dueDate === 'string' && record.dueDate.trim() ? record.dueDate.trim() : null,
+    priority,
   }
 }
-
-type Minutes = { summary: string; conclusions: string[]; todos: string[]; confidence: number }
 
 export async function meetingSummary(transcript: string): Promise<Minutes> {
   try {
-    return await callWorkflow<Minutes>('meeting-summary', { transcript })
-  } catch (err) {
-    console.warn('[aiService] meetingSummary fallback:', (err as Error).message)
+    const result = await gatewayJson<Partial<Minutes> & { todos?: unknown[] }>({
+      system: '你是投资中台的会议纪要助手。忠实原文，不臆造未提及事实。输出严格 JSON。',
+      prompt: `请整理以下会议文本。字段：summary 字符串、conclusions 字符串数组、todos 对象数组、confidence 0到1数字。todos 每项字段为 title、owner、dueDate、priority；原文明确给出负责人或截止日时必须逐字保留，dueDate 统一为 YYYY-MM-DD，未给出则为 null，不得推测；priority 仅可为高、中、低，未给出则为 null。\n\n${transcript}`,
+      timeoutMs: 120_000,
+    })
+    const summary = String(result.summary || '').trim()
+    if (!summary) throw new Error('模型未返回有效会议摘要')
     return {
-      summary: `会议纪要生成失败（${(err as Error).message}），请稍后重试或人工整理。`,
-      conclusions: [],
-      todos: [],
-      confidence: 0.3,
+      summary,
+      conclusions: Array.isArray(result.conclusions) ? result.conclusions.map(String).slice(0, 8) : [],
+      // 兼容仍返回字符串数组的旧模型，并避免把对象用 String() 压成 [object Object]。
+      todos: Array.isArray(result.todos)
+        ? result.todos.map(normalizeMeetingTodo).filter((item): item is MeetingTodoSuggestion => Boolean(item)).slice(0, 8)
+        : [],
+      confidence: Math.max(0, Math.min(1, Number(result.confidence) || 0.5)),
     }
+  } catch (error) {
+    console.warn('[aiService] meetingSummary failed:', (error as Error).message)
+    throw error
   }
 }

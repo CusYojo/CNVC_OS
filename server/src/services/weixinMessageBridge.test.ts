@@ -1,0 +1,23 @@
+import assert from 'node:assert/strict'
+import test from 'node:test'
+import { weixinExternalMessageId, weixinMessageText } from './weixinMessageBridge.js'
+
+test('extracts Weixin text items and ignores unsupported items', () => {
+  assert.equal(weixinMessageText({
+    item_list: [
+      { type: 1, text_item: { text: '  第一段 ' } },
+      { type: 2 },
+      { type: 1, text_item: { text: '第二段' } },
+    ],
+  }), '第一段\n第二段')
+})
+
+test('uses explicit message id and creates stable fallback id', () => {
+  assert.equal(weixinExternalMessageId('account', { msg_id: 'message-1' }), 'message-1')
+  const message = {
+    from_user_id: 'user', create_time_ms: 123,
+    context_token: 'context', item_list: [{ type: 1, text_item: { text: '测试' } }],
+  }
+  assert.equal(weixinExternalMessageId('account', message), weixinExternalMessageId('account', message))
+  assert.equal(weixinExternalMessageId('account', message).length, 64)
+})

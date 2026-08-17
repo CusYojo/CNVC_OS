@@ -38,6 +38,10 @@ def installed_font_families() -> str:
         return ""
 
 
+def any_font_file_exists(paths: tuple[str, ...]) -> bool:
+    return any(Path(candidate).is_file() for candidate in paths)
+
+
 def inspect_runtime() -> dict:
     modules = {
         module: importlib.util.find_spec(module) is not None
@@ -51,12 +55,30 @@ def inspect_runtime() -> dict:
     libreoffice = shutil.which("soffice") or shutil.which("libreoffice")
     renderer = "Microsoft Word" if word else ("LibreOffice" if libreoffice else "")
     font_families = installed_font_families()
-    fangsong = any(name.casefold() in font_families.casefold() for name in (
-        "STFangsong", "FangSong", "仿宋",
-    ))
-    heiti = any(name.casefold() in font_families.casefold() for name in (
-        "STHeiti", "SimHei", "Heiti SC", "黑体", "Noto Sans CJK SC",
-    ))
+    # macOS Fontconfig does not necessarily enumerate fonts bundled with Word,
+    # even though Word is the selected renderer and can use those exact files.
+    # Check the renderer-owned and system font files as well as fc-list; this
+    # keeps the gate strict without falsely rejecting a valid Word runtime.
+    fangsong = (
+        any(name.casefold() in font_families.casefold() for name in (
+            "STFangsong", "FangSong", "仿宋",
+        ))
+        or any_font_file_exists((
+            "/Applications/Microsoft Word.app/Contents/Resources/DFonts/Fangsong.ttf",
+            "/System/Library/Fonts/STFangsong.ttf",
+            "/System/Library/Fonts/Supplemental/STFangsong.ttf",
+        ))
+    )
+    heiti = (
+        any(name.casefold() in font_families.casefold() for name in (
+            "STHeiti", "SimHei", "Heiti SC", "黑体", "Noto Sans CJK SC",
+        ))
+        or any_font_file_exists((
+            "/Applications/Microsoft Word.app/Contents/Resources/DFonts/SimHei.ttf",
+            "/System/Library/Fonts/STHeiti Medium.ttc",
+            "/System/Library/Fonts/STHeiti Light.ttc",
+        ))
+    )
     return {
         "python": sys.executable,
         "python_version": platform.python_version(),

@@ -570,7 +570,7 @@ async function main() {
     checks,
     'AI-010 联网检索 Agent 接收待核验问题并形成可缓存证据',
     researchRequestBody.includes('核心团队：核验创始人教育及任职经历')
-      && researchProbe.audit.provider === 'flue_intel_collect'
+      && researchProbe.audit.provider === 'in_process_intel_collect'
       && researchProbe.audit.status === 'succeeded'
       && researchProbe.sources[0]?.sourceType === 'public_web_agent_search'
       && researchProbe.sources[0]?.locator === 'https://example.com/team',
@@ -758,9 +758,11 @@ async function main() {
       assert(
         checks,
         'AI-009 结尾页包含投资结论与责任声明',
-        finalSlideXml.includes('投资结论与后续事项')
+        finalSlideXml.includes('投资结论与关键风险')
+          && finalSlideXml.includes('投资结论')
+          && finalSlideXml.includes('主要风险与待落实事项')
           && finalSlideXml.includes(template.disclaimer),
-        '投资结论与后续事项 + 免责声明',
+        '投资结论 + 关键风险/待落实事项 + 免责声明',
       )
       assert(checks, 'AI-009 生成元数据页数一致', result.slideCount === names.length, `${result.slideCount}/${names.length}`)
       const forbiddenSampleTerms = ['佳量', '德塔', 'Epilcure', '曹鹏', 'recommendation-jialiang']

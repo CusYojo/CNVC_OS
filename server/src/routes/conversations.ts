@@ -4,6 +4,8 @@ import type { AuthedRequest } from '../middleware/requireAuth.js'
 import {
   listConversations, getConversation, createConversation, appendMessages, deleteConversation, renameConversation,
 } from '../services/conversationService.js'
+import { disposeJwAgentConversation } from '../runtime/jwAgentRuntime.js'
+import { requestAiGatewayText } from '../services/aiGatewayService.js'
 
 export const conversationsRouter = Router()
 const routeId = (value: string | string[]) => z.string().min(1).parse(value)
@@ -31,12 +33,13 @@ conversationsRouter.post('/', async (req: AuthedRequest, res, next) => {
       projectId: z.string().nullable().optional(),
       projectName: z.string().nullable().optional(),
       agentId: z.string().optional(),
+      modelId: z.string().uuid().nullable().optional(),
     }).parse(req.body ?? {})
-    res.status(201).json(await createConversation(req.user!.uid, body))
+    res.status(201).json(await createConversation(req.user!.uid, { ...body, userRole: req.user!.role }))
   } catch (err) { next(err) }
 })
 
-// 改标题（会话内容在 flue，不动本表 messages）
+// 改标题（消息保留在 MySQL，不改 messages）
 // 用 LLM 把首轮对话总结成一句话标题(类似 ChatGPT/Claude),并写库
 // body: { userText, assistantText } —— 首轮的用户问题 + AI 回答
 conversationsRouter.post('/:id/summarize-title', async (req: AuthedRequest, res, next) => {
@@ -54,16 +57,14 @@ conversationsRouter.post('/:id/summarize-title', async (req: AuthedRequest, res,
     const prompt = `请根据下面这轮对话,生成一个不超过 16 个汉字的简短中文标题,概括对话主题。只输出标题本身,不要引号、标点、解释。\n\n【用户】${u}\n\n【助手】${a}`
     let title = ''
     try {
-      const resp = await fetch(`${base}/chat/completions`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model, messages: [{ role: 'user', content: prompt }], max_tokens: 40 }),
-        signal: AbortSignal.timeout(30000),
-      })
-      if (resp.ok) {
-        const d = await resp.json() as { choices?: { message?: { content?: string } }[] }
-        title = (d.choices?.[0]?.message?.content || '').trim().replace(/^["'「」]+|["'「」。.]+$/g, '').slice(0, 20)
-      }
+      title = (await requestAiGatewayText({
+        baseUrl: base,
+        apiKey: key,
+        model,
+        messages: [{ role: 'user', content: prompt }],
+        maxTokens: 40,
+        timeoutMs: 30_000,
+      })).trim().replace(/^["'「」]+|["'「」。.]+$/g, '').slice(0, 20)
     } catch { /* LLM 失败时用用户问题兜底 */ }
     // 兜底:LLM 没给出标题就用用户问题前 16 字
     if (!title) title = (body.userText.replace(/【[^】]*】[^\n]*\n?/g, '').trim() || '新会话').slice(0, 16)
@@ -104,7 +105,10 @@ conversationsRouter.post('/:id/messages', async (req: AuthedRequest, res, next) 
 // 删除会话
 conversationsRouter.delete('/:id', async (req: AuthedRequest, res, next) => {
   try {
-    const ok = await deleteConversation(req.user!.uid, routeId(req.params.id))
+    const id = routeId(req.params.id)
+    const conversation = await getConversation(req.user!.uid, id)
+    if (conversation?.agentId) await disposeJwAgentConversation(req.user!.uid, conversation.agentId)
+    const ok = await deleteConversation(req.user!.uid, id)
     if (!ok) return res.status(404).json({ code: 'NOT_FOUND', message: '会话不存在' })
     res.json({ ok: true })
   } catch (err) { next(err) }

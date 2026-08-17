@@ -1,14 +1,9 @@
-import { mkdirSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
-import { sqlite } from '@flue/runtime/node';
+// 旧 Flue 数据只能由仓库根目录的离线迁移器按批准路径读取。
+// 任何重新导入退休 Runtime 数据库适配器的行为都必须立即失败，不能创建文件或恢复在线写入。
+function retiredDatabaseRuntime(): never {
+  throw Object.assign(new Error('旧 Assistant 数据库 Runtime 已退场；请使用根目录离线迁移命令'), {
+    code: 'RETIRED_ASSISTANT_RUNTIME',
+  });
+}
 
-// 持久化 Flue 的 canonical 会话流（agent 对话历史）到本机文件：
-// 服务重启后历史仍在，前端 useFlueAgent 刷新/切换会话都能重放。
-// 单机部署用 file-backed sqlite 即可（Flue 官方对单机 Node 的推荐适配器）。
-const databasePath = resolve(
-  process.env.FLUE_DB_PATH
-    ?? resolve(process.cwd(), '..', '.runtime', 'cybernaut-assistant', 'flue.db'),
-);
-mkdirSync(dirname(databasePath), { recursive: true });
-
-export default sqlite(databasePath);
+export default retiredDatabaseRuntime();

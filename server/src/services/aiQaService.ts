@@ -24,6 +24,8 @@ import {
   fetchProjectQaModelEvidence,
 } from './aiQaModelResearchService.js'
 import type { EvidenceSource } from './aiBusinessContentService.js'
+import { formatShanghaiDateKey } from '../utils/shanghaiTime.js'
+import { requestAiGatewayText } from './aiGatewayService.js'
 
 export const PROJECT_QA_CATEGORIES = [
   '投资亮点',
@@ -154,7 +156,7 @@ async function evidenceForProject(
         sourceId: project.id,
         sourceName: '项目档案',
         chunkIndex: 0,
-        versionOrDate: project.updatedAt.toISOString().slice(0, 10),
+        versionOrDate: formatShanghaiDateKey(project.updatedAt),
         content: [
           `项目名称：${project.name}`,
           `公司主体：${project.companyName || '待核验'}`,
@@ -176,7 +178,7 @@ async function evidenceForProject(
       sourceId: row.sourceId,
       sourceName: row.sourceName || '项目资料',
       chunkIndex: row.chunkIndex,
-      versionOrDate: row.createdAt.toISOString().slice(0, 10),
+      versionOrDate: formatShanghaiDateKey(row.createdAt),
       locator: row.sourceType.startsWith('public_web')
         ? row.content.match(/(?:来源网址|规范化\s*URL|页面\s*URL)[:：]\s*(https?:\/\/\S+)/i)?.[1]
         : undefined,
@@ -428,26 +430,18 @@ ${skill.referenceInstructions}`
 证据索引从 0 开始，对应下列 S1、S2 顺序：
 ${evidenceText || '无可用项目证据。必须返回证据不足，不得生成项目事实。'}`
   try {
-    const response = await fetch(`${GW_BASE}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(GW_KEY ? { Authorization: `Bearer ${GW_KEY}` } : {}),
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        messages: [
+    const text = await requestAiGatewayText({
+      baseUrl: GW_BASE,
+      apiKey: GW_KEY,
+      model: MODEL,
+      messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt },
-        ],
-        max_tokens: 3000,
-        response_format: { type: 'json_object' },
-      }),
-      signal: AbortSignal.timeout(120000),
+      ],
+      maxTokens: 3000,
+      json: true,
+      timeoutMs: 120_000,
     })
-    if (!response.ok) throw new Error(`LLM ${response.status}`)
-    const data = await response.json() as { choices?: Array<{ message?: { content?: string } }> }
-    const text = data.choices?.[0]?.message?.content?.trim() ?? ''
     const clean = text.replace(/^```json\s*/i, '').replace(/\s*```$/, '')
     return normalizeAnswer(JSON.parse(clean), fallback, input.evidence)
   } catch (error) {

@@ -1,0 +1,84 @@
+{
+  "version": "lead-scoring-gold-v1",
+  "description": "项目七维与论文五维评分技术金标；验证分数区间、路由、排序、成本与运行边界。",
+  "thresholds": {
+    "minRangeAccuracy": 1,
+    "minOrderingAccuracy": 1,
+    "maxMeanAbsoluteMidpointDeviation": 20,
+    "maxAverageCostUsd": 0.15,
+    "maxAverageDurationMs": 60000,
+    "maxTurns": 2,
+    "maxToolCalls": 0,
+    "minPairSeparation": 20
+  },
+  "cases": [
+    {
+      "id": "project-validated-high-001",
+      "workflow": "score-project",
+      "pair": "project-quality",
+      "quality": "high",
+      "expected": { "minTotal": 60, "maxTotal": 90 },
+      "input": {
+        "projectName": "鸿运视觉质检系统",
+        "companyName": "鸿运机器视觉有限公司",
+        "industry": "工业人工智能",
+        "summary": "公司面向汽车零部件工厂提供视觉质检系统，已完成A轮融资，估值4亿元，本轮处于开放初期并向财务投资人开放充足份额。经审计的2025年确认收入860万元、毛利率62%。",
+        "articleText": "鸿运机器视觉有限公司的鸿运视觉质检系统已在12家汽车零部件工厂部署，其中6家头部客户签署年度采购合同并完成验收，4家已复购扩量。国家级检测机构报告显示关键缺陷召回率99.3%，较客户原系统提升31%。公司拥有8项权属清晰且无质押诉讼的核心发明专利，已完成小批量量产，良率和交付成本达到合同要求。创始人为清华大学自动化博士并有十二年工业视觉研发经验，团队共同创业三年，研发、供应链和销售负责人均全职；公司与清华大学实验室有正式联合研发协议。A轮由汽车产业龙头资本领投，估值4亿元；股权结构经律师核验无代持、质押或重大纠纷，无老股转让和极端保护条款。本轮处于开放初期，向财务投资人开放充足份额且尽调时间充足。审计报告确认2025年收入860万元、毛利率62%，客户合同和回款可与银行流水交叉核验。权威行业报告预计细分市场五年规模超过180亿元、复合增速32%；质量追溯和缺陷拦截属于汽车产线刚需。公司与两家下游龙头签署联合开发协议，行业已有三起上市公司并购退出案例。",
+        "team": "创始人清华自动化博士、十二年工业视觉经验且全职；团队共同创业三年，研发、量产供应链、商业化销售核心岗齐全；与清华大学实验室签署正式联合研发协议。",
+        "fundingRounds": [{ "round": "A轮", "amount": "6000万元", "valuation": "4亿元", "investors": "产业资本" }],
+        "sources": [
+          { "title": "客户采购与验收文件汇总", "url": "https://example.com/hongyun/contracts", "reliability": "高", "excerpt": "6家头部客户签署采购合同并完成验收，4家复购扩量" },
+          { "title": "国家级检测机构报告", "url": "https://example.com/hongyun/test", "reliability": "高", "excerpt": "关键缺陷召回率99.3%，较原系统提升31%" },
+          { "title": "会计师审计报告与银行流水核验", "url": "https://example.com/hongyun/audit", "reliability": "高", "excerpt": "2025年收入860万元、毛利率62%，合同回款与银行流水一致" },
+          { "title": "律师股权与知识产权核验报告", "url": "https://example.com/hongyun/legal", "reliability": "高", "excerpt": "无代持、质押、重大纠纷或极端保护条款，8项发明专利权属清晰" },
+          { "title": "工业视觉行业研究报告", "url": "https://example.com/hongyun/market", "reliability": "高", "excerpt": "细分市场五年规模超过180亿元、复合增速32%" }
+        ]
+      }
+    },
+    {
+      "id": "project-sparse-low-001",
+      "workflow": "score-project",
+      "pair": "project-quality",
+      "quality": "low",
+      "expected": { "minTotal": 0, "maxTotal": 35 },
+      "input": {
+        "projectName": "未来智能平台",
+        "industry": "人工智能",
+        "summary": "项目计划开发智能平台，目前处于概念阶段。",
+        "articleText": "未来智能平台拟使用人工智能提升效率，尚无原型、专利、客户、订单、融资、估值、全职团队或可核验第三方资料。",
+        "team": "待组建",
+        "fundingRounds": [],
+        "sources": []
+      }
+    },
+    {
+      "id": "paper-translational-high-001",
+      "workflow": "score-paper",
+      "pair": "paper-quality",
+      "quality": "high",
+      "expected": { "minTotal": 55, "maxTotal": 88 },
+      "input": {
+        "projectName": "Adaptive Tactile Manipulation with Low-Latency World Models",
+        "abstract": "The paper presents an original low-latency world model for tactile manipulation. On three public benchmarks and a physical robot testbed, it improves long-horizon task success by 34% and reduces inference latency by 41% against named baselines. Code, evaluation protocol and ablation results are released.",
+        "articleText": "Adaptive Tactile Manipulation with Low-Latency World Models is authored by a full-time robotics team from a leading university laboratory. The method improves task success by 34% and reduces inference latency by 41% on public benchmarks and a physical robot testbed. The team has integrated the prototype with two robot manufacturers; one manufacturer completed a paid pilot. Two authors previously commercialized a perception module through a university spinout. Code, benchmarks and ablation results are publicly available.",
+        "authors": ["Chen Li", "Ming Zhao", "Rui Wang"],
+        "venue": "Robotics: Science and Systems",
+        "sources": [{ "title": "论文与开源仓库", "url": "https://example.com/paper/high", "reliability": "高" }]
+      }
+    },
+    {
+      "id": "paper-vague-low-001",
+      "workflow": "score-paper",
+      "pair": "paper-quality",
+      "quality": "low",
+      "expected": { "minTotal": 0, "maxTotal": 35 },
+      "input": {
+        "projectName": "Thoughts on Future Intelligent Systems",
+        "abstract": "This article discusses possible future directions for intelligent systems.",
+        "articleText": "Thoughts on Future Intelligent Systems contains a conceptual discussion. It provides no method, benchmark, experiment, prototype, named research team, market evidence, customer validation or commercialization experience.",
+        "authors": [],
+        "sources": []
+      }
+    }
+  ]
+}

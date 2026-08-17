@@ -1,0 +1,188 @@
+import path from 'node:path'
+import { createHash } from 'node:crypto'
+import JSZip from 'jszip'
+
+type FileKind = {
+  label: string
+  mime: string
+  acceptedMimes: readonly string[]
+  signature: 'pdf' | 'ooxml-word' | 'ooxml-sheet' | 'ooxml-presentation' | 'ole' | 'png' | 'jpeg' | 'gif' | 'bmp' | 'webp' | 'text'
+}
+
+const FILE_KINDS: Record<string, FileKind> = {
+  pdf: { label: 'PDF', mime: 'application/pdf', acceptedMimes: ['application/pdf'], signature: 'pdf' },
+  doc: { label: 'DOC', mime: 'application/msword', acceptedMimes: ['application/msword', 'application/octet-stream'], signature: 'ole' },
+  docx: { label: 'DOCX', mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', acceptedMimes: ['application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/zip', 'application/octet-stream'], signature: 'ooxml-word' },
+  xls: { label: 'XLS', mime: 'application/vnd.ms-excel', acceptedMimes: ['application/vnd.ms-excel', 'application/octet-stream'], signature: 'ole' },
+  xlsx: { label: 'XLSX', mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', acceptedMimes: ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/zip', 'application/octet-stream'], signature: 'ooxml-sheet' },
+  xlsm: { label: 'XLSM', mime: 'application/vnd.ms-excel.sheet.macroEnabled.12', acceptedMimes: ['application/vnd.ms-excel.sheet.macroEnabled.12', 'application/zip', 'application/octet-stream'], signature: 'ooxml-sheet' },
+  ppt: { label: 'PPT', mime: 'application/vnd.ms-powerpoint', acceptedMimes: ['application/vnd.ms-powerpoint', 'application/octet-stream'], signature: 'ole' },
+  pptx: { label: 'PPTX', mime: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', acceptedMimes: ['application/vnd.openxmlformats-officedocument.presentationml.presentation', 'application/zip', 'application/octet-stream'], signature: 'ooxml-presentation' },
+  txt: { label: 'TXT', mime: 'text/plain; charset=utf-8', acceptedMimes: ['text/plain', 'application/octet-stream'], signature: 'text' },
+  md: { label: 'MD', mime: 'text/markdown; charset=utf-8', acceptedMimes: ['text/markdown', 'text/plain', 'application/octet-stream'], signature: 'text' },
+  markdown: { label: 'MARKDOWN', mime: 'text/markdown; charset=utf-8', acceptedMimes: ['text/markdown', 'text/plain', 'application/octet-stream'], signature: 'text' },
+  csv: { label: 'CSV', mime: 'text/csv; charset=utf-8', acceptedMimes: ['text/csv', 'text/plain', 'application/vnd.ms-excel', 'application/octet-stream'], signature: 'text' },
+  htm: { label: 'HTML', mime: 'text/html; charset=utf-8', acceptedMimes: ['text/html', 'text/plain', 'application/octet-stream'], signature: 'text' },
+  html: { label: 'HTML', mime: 'text/html; charset=utf-8', acceptedMimes: ['text/html', 'text/plain', 'application/octet-stream'], signature: 'text' },
+  log: { label: 'LOG', mime: 'text/plain; charset=utf-8', acceptedMimes: ['text/plain', 'application/octet-stream'], signature: 'text' },
+  json: { label: 'JSON', mime: 'application/json; charset=utf-8', acceptedMimes: ['application/json', 'text/plain', 'application/octet-stream'], signature: 'text' },
+  png: { label: 'PNG', mime: 'image/png', acceptedMimes: ['image/png', 'application/octet-stream'], signature: 'png' },
+  jpg: { label: 'JPG', mime: 'image/jpeg', acceptedMimes: ['image/jpeg', 'application/octet-stream'], signature: 'jpeg' },
+  jpeg: { label: 'JPEG', mime: 'image/jpeg', acceptedMimes: ['image/jpeg', 'application/octet-stream'], signature: 'jpeg' },
+  gif: { label: 'GIF', mime: 'image/gif', acceptedMimes: ['image/gif', 'application/octet-stream'], signature: 'gif' },
+  bmp: { label: 'BMP', mime: 'image/bmp', acceptedMimes: ['image/bmp', 'image/x-ms-bmp', 'application/octet-stream'], signature: 'bmp' },
+  webp: { label: 'WEBP', mime: 'image/webp', acceptedMimes: ['image/webp', 'application/octet-stream'], signature: 'webp' },
+}
+
+function fileError(status: number, code: string, message: string): Error {
+  return Object.assign(new Error(message), { status, code })
+}
+
+function boundedEnv(name: string, fallback: number, minimum: number, maximum: number): number {
+  const value = Number(process.env[name] || fallback)
+  if (!Number.isSafeInteger(value) || value < minimum || value > maximum) {
+    throw new Error(`${name} must be an integer between ${minimum} and ${maximum}`)
+  }
+  return value
+}
+
+function normalizedMime(value: string | null | undefined): string | null {
+  if (!value?.includes('/')) return null
+  return value.split(';')[0].trim().toLowerCase() || null
+}
+
+function parseBase64(input: string): { payload: string; dataUrlMime: string | null } {
+  if (!input.startsWith('data:')) return { payload: input, dataUrlMime: null }
+  const comma = input.indexOf(',')
+  if (comma < 0) throw fileError(400, 'INVALID_FILE_ENCODING', 'Data URL 缺少文件内容')
+  const metadata = input.slice(5, comma)
+  if (!/(?:^|;)base64$/i.test(metadata)) throw fileError(400, 'INVALID_FILE_ENCODING', '文件 Data URL 必须使用 base64 编码')
+  const mime = metadata.split(';')[0]?.trim().toLowerCase() || null
+  return { payload: input.slice(comma + 1), dataUrlMime: mime }
+}
+
+function startsWith(buffer: Buffer, bytes: number[]): boolean {
+  return bytes.every((value, index) => buffer[index] === value)
+}
+
+function isCanonicalBase64(payload: string): boolean {
+  if (!payload || payload.length % 4 !== 0) return false
+  let padding = 0
+  if (payload.endsWith('==')) padding = 2
+  else if (payload.endsWith('=')) padding = 1
+  const contentLength = payload.length - padding
+  for (let index = 0; index < contentLength; index += 1) {
+    const code = payload.charCodeAt(index)
+    const accepted = (code >= 0x41 && code <= 0x5a) || (code >= 0x61 && code <= 0x7a)
+      || (code >= 0x30 && code <= 0x39) || code === 0x2b || code === 0x2f
+    if (!accepted) return false
+  }
+  for (let index = contentLength; index < payload.length; index += 1) {
+    if (payload.charCodeAt(index) !== 0x3d) return false
+  }
+  return true
+}
+
+async function assertSafeOoxml(buffer: Buffer, requiredEntry: string): Promise<void> {
+  let zip: JSZip
+  try { zip = await JSZip.loadAsync(buffer) }
+  catch { throw fileError(415, 'FILE_SIGNATURE_MISMATCH', 'Office 文件不是有效的 OOXML/ZIP 文档') }
+  const entries = Object.values(zip.files)
+  const maxEntries = boundedEnv('PROJECT_FILE_ARCHIVE_MAX_ENTRIES', 5_000, 10, 50_000)
+  const maxUncompressed = boundedEnv('PROJECT_FILE_ARCHIVE_MAX_UNCOMPRESSED_BYTES', 250 * 1024 * 1024, 1_024, 1024 * 1024 * 1024)
+  if (entries.length > maxEntries) throw fileError(413, 'ARCHIVE_EXPANSION_LIMIT', 'Office 文件内部条目数量超过限制')
+  let uncompressedBytes = 0
+  for (const entry of entries) {
+    const original = (entry as typeof entry & { unsafeOriginalName?: string }).unsafeOriginalName || entry.name
+    if (original.startsWith('/') || original.split('/').includes('..')) {
+      throw fileError(415, 'UNSAFE_ARCHIVE_PATH', 'Office 文件包含不安全的内部路径')
+    }
+    const size = Number((entry as typeof entry & { _data?: { uncompressedSize?: number } })._data?.uncompressedSize || 0)
+    uncompressedBytes += size
+    if (uncompressedBytes > maxUncompressed) throw fileError(413, 'ARCHIVE_EXPANSION_LIMIT', 'Office 文件解压后容量超过限制')
+  }
+  if (!zip.file('[Content_Types].xml') || !zip.file(requiredEntry)) {
+    throw fileError(415, 'FILE_SIGNATURE_MISMATCH', 'Office 文件内部结构与扩展名不一致')
+  }
+}
+
+async function assertSignature(extension: string, kind: FileKind, buffer: Buffer): Promise<void> {
+  let valid = true
+  switch (kind.signature) {
+    case 'pdf':
+      valid = buffer.subarray(0, 5).toString('ascii') === '%PDF-'
+        && buffer.subarray(Math.max(0, buffer.length - 2_048)).includes(Buffer.from('%%EOF'))
+      break
+    case 'png': valid = startsWith(buffer, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); break
+    case 'jpeg': valid = startsWith(buffer, [0xff, 0xd8, 0xff]) && buffer.subarray(-2).equals(Buffer.from([0xff, 0xd9])); break
+    case 'gif': valid = ['GIF87a', 'GIF89a'].includes(buffer.subarray(0, 6).toString('ascii')); break
+    case 'bmp': valid = buffer.subarray(0, 2).toString('ascii') === 'BM'; break
+    case 'webp': valid = buffer.subarray(0, 4).toString('ascii') === 'RIFF' && buffer.subarray(8, 12).toString('ascii') === 'WEBP'; break
+    case 'ole': valid = startsWith(buffer, [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]); break
+    case 'text': {
+      if (buffer.includes(0)) valid = false
+      else {
+        let controls = 0
+        for (const value of buffer) {
+          if (value < 0x20 && value !== 0x09 && value !== 0x0a && value !== 0x0d) controls += 1
+        }
+        valid = controls / Math.max(1, buffer.length) <= 0.01
+      }
+      if (valid && extension === 'json') {
+        try { JSON.parse(buffer.toString('utf8').replace(/^\uFEFF/, '')) }
+        catch { valid = false }
+      }
+      break
+    }
+    case 'ooxml-word': await assertSafeOoxml(buffer, 'word/document.xml'); return
+    case 'ooxml-sheet': await assertSafeOoxml(buffer, 'xl/workbook.xml'); return
+    case 'ooxml-presentation': await assertSafeOoxml(buffer, 'ppt/presentation.xml'); return
+  }
+  if (!valid) throw fileError(415, 'FILE_SIGNATURE_MISMATCH', `文件内容与 .${extension} 扩展名不一致或结构无效`)
+}
+
+export async function decodeAndValidateProjectFile(input: { name: string; dataBase64: string; declaredType?: string }) {
+  const name = input.name.normalize('NFC')
+  if (!name || name !== name.trim() || name.length > 255 || /[\u0000/\\]/.test(name) || path.basename(name) !== name) {
+    throw fileError(400, 'INVALID_FILE_NAME', '文件名不能为空、越界或包含路径字符')
+  }
+  const extension = path.extname(name).slice(1).toLowerCase()
+  const kind = FILE_KINDS[extension]
+  if (!kind) throw fileError(415, 'FILE_UNSUPPORTED_TYPE', '仅支持 PDF、Word、Excel、PPT、图片和文本类项目资料')
+
+  const { payload: rawPayload, dataUrlMime } = parseBase64(input.dataBase64)
+  const payload = rawPayload.replace(/[\r\n]/g, '')
+  const maxBytes = boundedEnv('PROJECT_FILE_MAX_BYTES', 100 * 1024 * 1024, 1, 500 * 1024 * 1024)
+  if (!isCanonicalBase64(payload)) {
+    throw fileError(400, 'INVALID_FILE_ENCODING', '文件内容不是规范 Base64')
+  }
+  if (payload.length > Math.ceil(maxBytes / 3) * 4 + 4) throw fileError(413, 'PAYLOAD_TOO_LARGE', '文件不能超过配置的容量上限')
+  const buffer = Buffer.from(payload, 'base64')
+  if (!buffer.length || buffer.length > maxBytes) throw fileError(buffer.length ? 413 : 400, buffer.length ? 'PAYLOAD_TOO_LARGE' : 'EMPTY_FILE', buffer.length ? '文件不能超过配置的容量上限' : '不能上传空文件')
+  if (buffer.toString('base64').replace(/=+$/, '') !== payload.replace(/=+$/, '')) {
+    throw fileError(400, 'INVALID_FILE_ENCODING', '文件 Base64 解码校验失败')
+  }
+
+  const suppliedMimes = [normalizedMime(input.declaredType), normalizedMime(dataUrlMime)].filter((value): value is string => Boolean(value))
+  const incompatibleMime = suppliedMimes.find((mime) => !kind.acceptedMimes.some((accepted) => accepted.toLowerCase() === mime))
+  if (incompatibleMime) throw fileError(415, 'FILE_MIME_MISMATCH', `声明的 MIME ${incompatibleMime} 与 .${extension} 不一致`)
+  await assertSignature(extension, kind, buffer)
+  return {
+    buffer, name, extension, typeLabel: kind.label, contentType: kind.mime,
+    byteSize: buffer.length, sha256: createHash('sha256').update(buffer).digest('hex'),
+  }
+}
+
+export function projectFileMimeType(fileName: string): string {
+  return FILE_KINDS[path.extname(fileName).slice(1).toLowerCase()]?.mime || 'application/octet-stream'
+}
+
+export function projectFilePreviewMimeType(fileName: string): string | null {
+  const extension = path.extname(fileName).slice(1).toLowerCase()
+  const kind = FILE_KINDS[extension]
+  if (!kind || ['ole', 'ooxml-word', 'ooxml-sheet', 'ooxml-presentation'].includes(kind.signature)) return null
+  if (['htm', 'html', 'md', 'markdown', 'csv', 'log'].includes(extension)) return 'text/plain; charset=utf-8'
+  return kind.mime
+}
+
+export const supportedProjectFileExtensions = Object.freeze(Object.keys(FILE_KINDS))

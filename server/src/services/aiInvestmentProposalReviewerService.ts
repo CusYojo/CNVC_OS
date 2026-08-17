@@ -79,9 +79,13 @@ const INTERNAL_PROJECT_STAGE_TEXT =
 const EVIDENCE_PROCESS_OR_BOILERPLATE =
   /(?:证据属性|Q&A\s*分类|页面标题|发布主体|访问日期|页面正文摘录|内容指纹|项目大模型|来源网址|原文链接|京ICP备|京公网安备|Copyright\s*©|All Rights Reserved|免责声明|使用条款|隐私政策|财经\s+焦点\s+股票|innoHere英诺嘿呀\s+首页|首页\s+权威榜\s+价值榜|行业数据\s+产业图谱\s+行业研究|企业入驻\s+小程序\s+(?:登录|登入))/i
 const PRODUCT_OR_TECHNOLOGY_NAME =
-  /(?:[A-Za-z][A-Za-z0-9.+/_ -]{1,30}|[\u3400-\u9fffA-Za-z0-9.+/_ -]{2,32})(?:平台|系统|引擎|模型|算法|框架|软件|硬件|机器人|芯片|设备)/
+  /(?:[A-Za-z][A-Za-z0-9.+/_ -]{1,30}|[\u3400-\u9fffA-Za-z0-9.+/_ -]{2,32})(?:平台|系统|引擎|模型|算法|框架|软件|硬件|机器人|芯片|设备|SaaS|模块|套件)/i
 const PRODUCT_TECHNOLOGY_DETAIL =
   /(?:模型|算法|框架|架构|模块|多模态|视觉|推理|训练|蒸馏|参数|数据集|API|SDK|传感|控制|编译|上线|发布|内测|商业化|部署|知识产权|专利|软件著作权)/i
+
+export function hasInvestmentProposalNamedProductOrTechnology(value: string) {
+  return PRODUCT_OR_TECHNOLOGY_NAME.test(value)
+}
 const RISK_REQUIRED_PARTS = [
   { label: '具体风险或触发情形', pattern: /(?:风险|触发|若|如|一旦|当|条件|尚未|不足|依赖|波动|不确定|受限|缺乏)/ },
   { label: '潜在影响', pattern: /(?:影响|导致|造成|可能使|可能导致|不利于|制约|削弱|增加|降低|延迟|受阻|损失)/ },
@@ -751,7 +755,7 @@ export function reviewInvestmentProposalContent(input: {
         .filter((finding) => finding.status !== '资料缺口')
         .map((finding) => finding.text)
         .join(' ')
-      if (!PRODUCT_OR_TECHNOLOGY_NAME.test(productText)) {
+      if (!hasInvestmentProposalNamedProductOrTechnology(productText)) {
         issue(issues, {
           sectionId: definition.id,
           code: 'PRODUCT_NAME_OR_FORM_REQUIRED',

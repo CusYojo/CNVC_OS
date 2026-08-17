@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto'
-import { FLUE_BASE_URL } from '../config/agentRuntime.js'
 import type { EvidenceSource } from './aiBusinessContentService.js'
+import { collectCompanyIntel } from './inProcessAiWorkflowService.js'
+import { formatShanghaiDateKey, parseShanghaiDate } from '../utils/shanghaiTime.js'
 
 const WORKFLOW = process.env.AI_DUE_DILIGENCE_RESEARCH_WORKFLOW || 'intel-collect'
-const MODEL = process.env.FLUE_MODEL || 'flue-agent'
+const MODEL = 'deterministic-public-search-v1'
 const TIMEOUT_MS = Math.max(
   30_000,
   // intel-collect 直接返回真实搜索证据；为多主题并发检索及备用搜索源
@@ -43,7 +44,7 @@ type IntelCollectResult = {
 export type DueDiligenceNetworkResearchAudit = {
   enabled: boolean
   status: 'disabled' | 'succeeded' | 'partial' | 'no_results' | 'unavailable'
-  provider: 'flue_intel_collect'
+  provider: 'in_process_intel_collect'
   workflow: string
   model: string
   accessedAt: string
@@ -82,10 +83,11 @@ function normalizedDate(value: unknown) {
   if (!text) return ''
   const chinese = text.match(/\b(20\d{2})[年/-](\d{1,2})[月/-](\d{1,2})日?\b/)
   if (chinese) {
-    return `${chinese[1]}-${chinese[2].padStart(2, '0')}-${chinese[3].padStart(2, '0')}`
+    const date = `${chinese[1]}-${chinese[2].padStart(2, '0')}-${chinese[3].padStart(2, '0')}`
+    try { parseShanghaiDate(date); return date } catch { return '' }
   }
   const parsed = Date.parse(text)
-  return Number.isNaN(parsed) ? '' : new Date(parsed).toISOString().slice(0, 10)
+  return Number.isNaN(parsed) ? '' : formatShanghaiDateKey(parsed)
 }
 
 function enabled(parameters?: Record<string, unknown>) {
@@ -140,7 +142,7 @@ export async function fetchDueDiligenceNetworkEvidence(input: {
   const requestedSections = [...new Set(input.pendingTopics.map(meaningful).filter(Boolean))]
   const auditBase = {
     enabled: researchEnabled,
-    provider: 'flue_intel_collect' as const,
+    provider: 'in_process_intel_collect' as const,
     workflow: WORKFLOW,
     model: MODEL,
     accessedAt,
@@ -161,9 +163,8 @@ export async function fetchDueDiligenceNetworkEvidence(input: {
 
   let result: IntelCollectResult
   try {
-    const response = await (input.fetchImpl ?? fetch)(
-      `${FLUE_BASE_URL}/workflows/${WORKFLOW}?wait=result`,
-      {
+    if (input.fetchImpl) {
+      const response = await input.fetchImpl('http://in-process.invalid/intel-collect', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -171,12 +172,17 @@ export async function fetchDueDiligenceNetworkEvidence(input: {
           topics: requestedSections,
         }),
         signal: AbortSignal.timeout(TIMEOUT_MS),
-      },
-    )
-    if (!response.ok) throw new Error(`Flue ${response.status}`)
-    const payload = await response.json() as { result?: IntelCollectResult }
-    if (!payload.result) throw new Error('Flue 返回空 result')
-    result = payload.result
+      })
+      if (!response.ok) throw new Error(`情报采集模拟入口 ${response.status}`)
+      const payload = await response.json() as { result?: IntelCollectResult }
+      if (!payload.result) throw new Error('情报采集返回空 result')
+      result = payload.result
+    } else {
+      result = await collectCompanyIntel({
+        company: input.project.companyName || input.project.name,
+        topics: requestedSections,
+      })
+    }
   } catch (error) {
     return {
       sources: [],
@@ -241,7 +247,7 @@ export async function fetchDueDiligenceNetworkEvidence(input: {
       versionOrDate: publishedAt || `访问${accessedAt.slice(0, 10)}`,
       locator: url,
       content: [
-        '检索方式：联网检索 Agent 调用 collect_company_intel 工具抓取公开搜索结果。',
+        '检索方式：主服务进程内调用确定性公开检索器抓取搜索结果。',
         `检索问题：${query}`,
         `页面标题：${title || '未提取'}`,
         snippet ? `搜索摘要：${snippet}` : '',
@@ -251,8 +257,8 @@ export async function fetchDueDiligenceNetworkEvidence(input: {
         `来源网址：${url}`,
         `访问日期：${accessedAt.slice(0, 10)}`,
         `内容指纹：${contentHash}`,
-        `项目大模型：${MODEL}`,
-        `联网工作流：${WORKFLOW}`,
+        `采集器：${MODEL}`,
+        `进程内流程：${WORKFLOW}`,
       ].filter(Boolean).join('\n'),
     })
   }

@@ -58,6 +58,7 @@ WECHAT_CHAT_CANDIDATES_FILE = DATA_DIR / "wechat_chat_candidates.jsonl"
 WECHAT_CHAT_CANDIDATES_DIR = DATA_DIR / "wechat_chat_candidates_by_group"
 WECHAT_CHAT_MESSAGES_DIR = DATA_DIR / "wechat_chat_messages"
 INVESTMENT_FILE = DATA_DIR / "investment_candidates.jsonl"
+PUBLIC_SOURCES_FILE = DATA_DIR / "public_sources.json"
 WECHAT_SOURCES_FILE = DATA_DIR / "wechat_985_sources.json"
 AUTO_STATUS_FILE = DATA_DIR / "auto_crawler_status.json"
 WECHAT_DAILY_STATUS_FILE = DATA_DIR / "wechat_daily_status.json"
@@ -82,7 +83,7 @@ WECHAT_ARTICLE_HEADERS = {
 CHAT_CONTEXT_BEFORE = 4
 CHAT_CONTEXT_AFTER = 4
 AUTO_CRAWL_INTERVAL_SECONDS = 30 * 60
-AUTO_CRAWL_GROUPS = ["创投新闻", "海外项目", "论文"]
+AUTO_CRAWL_GROUPS = ["创投新闻", "海外项目", "论文", "专利", "高校成果"]
 AUTO_CRAWL_ENABLED = env_flag("RADAR_AUTO_CRAWL_ENABLED", True)
 WECHAT_DAILY_ENABLED = env_flag("RADAR_WECHAT_DAILY_ENABLED", True)
 CHINA_TZ = ZoneInfo("Asia/Shanghai")
@@ -3644,12 +3645,43 @@ def fetch_36kr_financing_flash_pages(client: httpx.Client, source: dict, first_h
 def enabled_investment_sources(groups: list[str]) -> list[dict]:
     selected = {group for group in groups if group.strip()}
     sources = []
-    for source in SOURCE_DEFAULTS:
+    for source in load_public_sources():
         if not source.get("enabled", True):
             continue
         if selected and source["group"] not in selected:
             continue
         sources.append(dict(source))
+    return sources
+
+
+def load_public_sources() -> list[dict]:
+    """Load the host-managed public-source catalog.
+
+    The single Node service materializes this file from MySQL before every
+    Radar job. SOURCE_DEFAULTS is only the bootstrap catalog for a new
+    installation; once the file exists, MySQL is authoritative for source
+    enablement and configuration.
+    """
+    if not PUBLIC_SOURCES_FILE.exists():
+        return [dict(source) for source in SOURCE_DEFAULTS]
+    try:
+        payload = json.loads(PUBLIC_SOURCES_FILE.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise RuntimeError("主服务生成的公开源配置无法解析") from exc
+    rows = payload.get("sources", []) if isinstance(payload, dict) else []
+    if not isinstance(rows, list):
+        raise RuntimeError("主服务生成的公开源配置格式无效")
+    sources = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        key = clean_text(str(row.get("key", "")))
+        name = clean_text(str(row.get("name", "")))
+        source_type = clean_text(str(row.get("type", "")))
+        url = clean_text(str(row.get("url", "")))
+        if not key or not name or not source_type or not url:
+            continue
+        sources.append(dict(row))
     return sources
 
 
@@ -3748,18 +3780,25 @@ async def run_auto_crawl_once() -> dict:
 
         # 论文：通过 arxiv API 获取更丰富的元数据（作者/分类/pdf_url），存入 arxiv_candidates.jsonl
         arxiv_result = None
-        try:
-            arxiv_req = ArxivRunRequest(categories=["cs.AI", "cs.CL", "cs.CV", "cs.LG"], days=1, max_results=50)
-            arxiv_rows = await asyncio.to_thread(_fetch_arxiv_safe, arxiv_req)
-            arxiv_written = append_jsonl(ARXIV_FILE, arxiv_rows)
-            arxiv_result = {
-                "fetched": len(arxiv_rows),
-                "written": arxiv_written,
-                "filtered": len(arxiv_rows) - arxiv_written,
-                "worth_attention": len([row for row in arxiv_rows if row.get("worth_attention")]),
-            }
-        except Exception as exc:
-            arxiv_result = {"error": str(exc)}
+        arxiv_enabled = any(
+            source.get("enabled", True)
+            and source.get("group") == "论文"
+            and source.get("type") == "arxiv_rss"
+            for source in load_public_sources()
+        )
+        if arxiv_enabled:
+            try:
+                arxiv_req = ArxivRunRequest(categories=["cs.AI", "cs.CL", "cs.CV", "cs.LG"], days=1, max_results=50)
+                arxiv_rows = await asyncio.to_thread(_fetch_arxiv_safe, arxiv_req)
+                arxiv_written = append_jsonl(ARXIV_FILE, arxiv_rows)
+                arxiv_result = {
+                    "fetched": len(arxiv_rows),
+                    "written": arxiv_written,
+                    "filtered": len(arxiv_rows) - arxiv_written,
+                    "worth_attention": len([row for row in arxiv_rows if row.get("worth_attention")]),
+                }
+            except Exception as exc:
+                arxiv_result = {"error": str(exc)}
 
         status = read_auto_status()
         status["last_result"] = {

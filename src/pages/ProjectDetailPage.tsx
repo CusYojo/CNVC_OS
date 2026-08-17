@@ -10,7 +10,6 @@ import {
   Clock3,
   Download,
   ExternalLink,
-  FileStack,
   FileText,
   ListChecks,
   Pencil,
@@ -23,24 +22,34 @@ import {
   Users,
 } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useToast } from '../components/Toast'
 import { Badge, Button, Card, DataTable, FileUpload, Modal, ProgressBar, RiskBadge, StageBadge, StatusBadge, TableCell, Tabs } from '../components/ui'
 import { apiPost, apiGet, ApiError } from '../lib/api'
-import type { AISummary, Lead, Project, ProjectFile, RiskLevel } from '../types'
+import { formatShanghaiDate, formatShanghaiDateTime } from '../lib/dateTime'
+import { getFileTypeLabel } from '../lib/fileType'
+import type { Lead, Project, ProjectFile, RiskLevel } from '../types'
 
 const tabItems = [
   { id: 'overview', label: '项目概览' },
   { id: 'intelligence', label: '公司情报' },
   { id: 'files', label: '资料库' },
   { id: 'summary', label: 'AI 摘要' },
-  { id: 'materials', label: '上会材料' },
   { id: 'meetings', label: '会议纪要' },
   { id: 'workflow', label: '流程记录' },
   { id: 'risks', label: '风险' },
-  { id: 'post', label: '投后' },
 ]
+
+function displayShanghaiDateTime(value: string | null | undefined): string {
+  if (!value) return '—'
+  try { return formatShanghaiDateTime(value) } catch { return '—' }
+}
+
+function displayShanghaiDate(value: string | null | undefined): string {
+  if (!value) return '—'
+  try { return formatShanghaiDate(value) } catch { return '—' }
+}
 
 export function ProjectDetailPage() {
   const { id } = useParams()
@@ -51,37 +60,32 @@ export function ProjectDetailPage() {
   const deleteFile = useAppStore((state) => state.deleteFile)
   const hydrateFromServer = useAppStore((state) => state.hydrateFromServer)
   const files = useAppStore((state) => state.files)
-  const summaries = useAppStore((state) => state.aiSummaries)
-  const materials = useAppStore((state) => state.materialJobs)
   const meetings = useAppStore((state) => state.meetings)
   const workflows = useAppStore((state) => state.workflowLogs)
   const risks = useAppStore((state) => state.risks)
-  const postUpdates = useAppStore((state) => state.postUpdates)
   const leads = useAppStore((state) => state.leads)
   const approvalRequests = useAppStore((state) => state.approvalRequests)
   const auditLogs = useAppStore((state) => state.auditLogs)
   const currentUser = useAuthStore((state) => state.user ?? { id: '', email: '', name: '', role: '', department: '', status: '启用' })
-  const addFile = useAppStore((state) => state.addFile)
-  const finishFileParsing = useAppStore((state) => state.finishFileParsing)
-  const saveSummary = useAppStore((state) => state.saveSummary)
   const updateProject = useAppStore((state) => state.updateProject)
   const project = projects.find((item) => item.id === id)
-  const [activeTab, setActiveTab] = useState(searchParams.get('tab') ?? 'overview')
+  const requestedTab = searchParams.get('tab')
+  const [activeTab, setActiveTab] = useState(
+    requestedTab && tabItems.some((tab) => tab.id === requestedTab) ? requestedTab : 'overview',
+  )
   const [showUpload, setShowUpload] = useState(false)
   const [uploading, setUploading] = useState<{ name: string; progress: number; id?: string; done?: number; total?: number } | null>(null)
   const [generating, setGenerating] = useState(false)
-  const [editingSummary, setEditingSummary] = useState<AISummary | null>(null)
   const [editingProject, setEditingProject] = useState<Project | null>(null)
   const [downloadingFileId, setDownloadingFileId] = useState<string | null>(null)
   const [repairingFileId, setRepairingFileId] = useState<string | null>(null)
   const [missingOriginalFileIds, setMissingOriginalFileIds] = useState<string[]>([])
+  const [savingProject, setSavingProject] = useState(false)
 
   const projectFiles = files.filter((item) => item.projectId === id)
-  const projectMaterials = materials.filter((item) => item.projectId === id)
   const projectMeetings = meetings.filter((item) => item.projectId === id)
   const projectWorkflows = workflows.filter((item) => item.projectId === id).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
   const projectRisks = risks.filter((item) => item.projectId === id)
-  const projectPosts = postUpdates.filter((item) => item.projectId === id)
   const projectApprovals = approvalRequests.filter((item) => item.projectId === id).sort((a, b) => b.submittedAt.localeCompare(a.submittedAt))
   const listLeadMatch = leads.find((item) => item.companyName === project?.companyName || item.name === project?.name)
   // 列表 store.leads 精简了 founders/fundingRounds/companyNews/sources 等大字段,
@@ -93,20 +97,7 @@ export function ProjectDetailPage() {
     else setFullIntel(null)
   }, [listLeadMatch?.id, fetchLeadDetail])
   const companyIntelligence = fullIntel ?? listLeadMatch
-  const summary = summaries.find((item) => item.projectId === id)
   const projectAudits = auditLogs.filter((item) => item.target.includes(project?.name ?? '')).slice(0, 5)
-
-  const defaultSummary = useMemo<AISummary | null>(() => project ? {
-    projectId: project.id,
-    positioning: project.summary,
-    highlights: [`项目处于${project.stage}阶段，已形成较清晰的产品定位`, `${project.industry}赛道仍具结构性成长机会`, '团队背景与目标场景具备较高匹配度'],
-    risks: ['关键商业指标仍需通过客户访谈交叉验证', '融资后资金使用效率和下一轮里程碑需要明确', project.riskLevel === '高' ? '当前存在高等级风险事件，应优先完成处置' : '合规与财务资料完整度仍需提升'],
-    questions: ['前十大客户收入占比、续费率与回款周期如何？', '核心壁垒能否用第三方数据或客户案例验证？', '未来 18 个月的经营里程碑及对应资金投入是什么？'],
-    missing: ['最近两年审计财务报表', '前十大客户及合同明细', '核心知识产权清单'],
-    confidence: Math.max(72, project.score - 4),
-    sources: projectFiles.length ? projectFiles.map((file) => file.name).slice(0, 3) : ['项目基础信息（资料尚未上传）'],
-    updatedAt: new Date().toLocaleString('zh-CN', { hour12: false }),
-  } : null, [project, projectFiles])
 
   if (!project) {
     return <Card className="mx-auto mt-16 max-w-xl p-10 text-center"><AlertCircle className="mx-auto h-10 w-10 text-slate-300" /><h1 className="mt-4 text-lg font-semibold">项目不存在或已归档</h1><p className="mt-2 text-sm text-slate-500">请返回项目列表选择其他项目。</p><Button className="mt-5" onClick={() => navigate('/projects')}>返回项目列表</Button></Card>
@@ -132,7 +123,7 @@ export function ProjectDetailPage() {
     let creep = 80
     const creepTimer = setInterval(() => { creep = Math.min(95, creep + 1); onProgress?.(creep) }, 1500)
     try {
-      // 上传大文件经公网可能慢(几MB要几十秒)，用 5 分钟超时的独立 signal 覆盖 api 默认的 60s，
+      // 上传大文件经公网可能慢(几MB要几十秒)，用 5 分钟超时的独立 signal 覆盖 api 默认的 120s，
       // 避免大文件上传到一半被默认超时掐断("卡80%后闪退"的根因)。
       const upCtrl = new AbortController()
       const upTimer = setTimeout(() => upCtrl.abort(), 300000)
@@ -308,7 +299,7 @@ export function ProjectDetailPage() {
         <Card className="p-5">
           <div className="mb-5 flex items-center justify-between"><h2 className="font-semibold text-slate-800">项目概况</h2><button onClick={() => setEditingProject(project)} className="flex items-center gap-1 text-xs text-brand-600"><Pencil className="h-3.5 w-3.5" />编辑信息</button></div>
           <div className="grid grid-cols-3 gap-x-8 gap-y-5">
-            {[['公司主体', project.companyName], ['所属行业', project.industry], ['融资轮次', project.round], ['计划融资', project.financing], ['投前估值', project.valuation], ['项目来源', project.source], ['项目负责人', project.owner], ['协作成员', project.collaborators.join('、') || '暂无'], ['创建时间', project.createdAt]].map(([label, value]) => <div key={label}><p className="text-xs text-slate-400">{label}</p><p className="mt-1.5 text-sm font-medium text-slate-700">{value}</p></div>)}
+            {[['公司主体', project.companyName], ['所属行业', project.industry], ['融资轮次', project.round], ['计划融资', project.financing], ['投前估值', project.valuation], ['项目来源', project.source], ['项目负责人', project.owner], ['协作成员', project.collaborators.join('、') || '暂无'], ['创建时间', displayShanghaiDateTime(project.createdAt)]].map(([label, value]) => <div key={label}><p className="text-xs text-slate-400">{label}</p><p className="mt-1.5 text-sm font-medium text-slate-700">{value || '—'}</p></div>)}
           </div>
         </Card>
         <Card className="p-5">
@@ -319,7 +310,7 @@ export function ProjectDetailPage() {
         </Card>
         <Card className="p-5">
           <div className="mb-4 flex items-center justify-between"><h2 className="font-semibold text-slate-800">最近操作记录</h2><button onClick={() => navigate('/system')} className="text-xs text-brand-600">查看审计日志</button></div>
-          <div className="space-y-4">{(projectAudits.length ? projectAudits : auditLogs.slice(0, 3)).map((log) => <div key={log.id} className="flex items-start gap-3"><span className="mt-1.5 h-2 w-2 rounded-full bg-brand-400" /><div><p className="text-sm text-slate-700"><strong className="font-medium">{log.user}</strong> · {log.action} <span className="text-slate-500">{log.target}</span></p><p className="mt-1 text-xs text-slate-400">{log.createdAt}</p></div></div>)}</div>
+          <div className="space-y-4">{(projectAudits.length ? projectAudits : auditLogs.slice(0, 3)).map((log) => <div key={log.id} className="flex items-start gap-3"><span className="mt-1.5 h-2 w-2 rounded-full bg-brand-400" /><div><p className="text-sm text-slate-700"><strong className="font-medium">{log.user}</strong> · {log.action} <span className="text-slate-500">{log.target}</span></p><p className="mt-1 text-xs text-slate-400">{displayShanghaiDateTime(log.createdAt)}</p></div></div>)}</div>
         </Card>
       </div>
       <div className="space-y-5">
@@ -335,7 +326,7 @@ export function ProjectDetailPage() {
         <Card className="overflow-hidden">
           <div className="border-b border-slate-100 px-5 py-4"><h2 className="text-sm font-semibold text-slate-800">快捷操作</h2></div>
           <div className="p-2">
-            {[['发起 OA 审批', Users, () => navigate(`/workflow?project=${project.id}`)], ['上传项目资料', Upload, () => setShowUpload(true)], ['生成 AI 摘要', Sparkles, generateSummary], ['准备上会材料', FileStack, () => navigate(`/materials?project=${project.id}`)], ['新建项目会议', CalendarDays, () => navigate(`/meetings?project=${project.id}`)]].map(([label, Icon, action]) => {
+            {[['发起 OA 审批', Users, () => navigate(`/workflow?project=${project.id}`)], ['上传项目资料', Upload, () => setShowUpload(true)], ['生成项目评分', Sparkles, generateSummary], ['新建项目会议', CalendarDays, () => navigate(`/meetings?project=${project.id}`)]].map(([label, Icon, action]) => {
               const IconComponent = Icon as typeof Upload
               return <button key={label as string} onClick={action as () => void} className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-slate-600 hover:bg-brand-50 hover:text-brand-700"><IconComponent className="h-4 w-4" />{label as string}</button>
             })}
@@ -368,7 +359,7 @@ export function ProjectDetailPage() {
   const renderFiles = () => (
     <Card className="overflow-hidden">
       <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4"><div><h2 className="font-semibold text-slate-800">项目资料库</h2><p className="mt-1 text-xs text-slate-400">文件解析完成后可被 AI 摘要、问答和材料生成引用</p></div><Button onClick={() => setShowUpload(true)}><Upload className="h-4 w-4" />上传资料</Button></div>
-      {projectFiles.length ? <DataTable headers={['文件名称', '分类', '大小', '版本', '上传人', '解析状态', '上传时间', '']}>{projectFiles.map((file) => <tr key={file.id} className="hover:bg-slate-50"><TableCell><span className="flex items-center gap-3"><span className="grid h-9 w-9 place-items-center rounded-lg bg-blue-50 text-[10px] font-semibold text-blue-600">{file.type}</span><span className="font-medium text-slate-700">{file.name}</span></span></TableCell><TableCell>{file.category}</TableCell><TableCell>{file.size}</TableCell><TableCell>V{file.version}</TableCell><TableCell>{file.uploader}</TableCell><TableCell><StatusBadge status={file.parseStatus} /></TableCell><TableCell>{file.uploadedAt.slice(5)}</TableCell><TableCell><span className="flex items-center gap-1"><button aria-label={`下载${file.name}`} disabled={!!downloadingFileId || !!repairingFileId} onClick={() => { void downloadProjectFile(file) }} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"><Download className="h-4 w-4" /></button>{(file.hasOriginal === false || missingOriginalFileIds.includes(file.id)) && <button aria-label={`补传${file.name}`} disabled={!!repairingFileId} onClick={() => repairProjectFile(file)} className="rounded-lg px-2 py-1 text-xs text-brand-600 hover:bg-brand-50 disabled:opacity-50">{repairingFileId === file.id ? '补传中…' : '补传原文件'}</button>}<button aria-label={`删除${file.name}`} onClick={() => handleDeleteFile(file)} className="rounded-lg px-2 py-1 text-xs text-rose-600 hover:bg-rose-50">删除</button></span></TableCell></tr>)}</DataTable> : <div className="p-12 text-center"><FileText className="mx-auto h-8 w-8 text-slate-300" /><p className="mt-3 text-sm font-medium text-slate-700">还没有项目资料</p><p className="mt-1 text-xs text-slate-400">上传 BP 后即可生成结构化项目卡片与 AI 摘要</p></div>}
+      {projectFiles.length ? <DataTable headers={['文件名称', '分类', '大小', '版本', '上传人', '解析状态', '上传时间', '']}>{projectFiles.map((file) => <tr key={file.id} className="hover:bg-slate-50"><TableCell><span className="flex items-center gap-3"><span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-blue-50 text-[10px] font-semibold text-blue-600">{getFileTypeLabel(file)}</span><span className="font-medium text-slate-700">{file.name}</span></span></TableCell><TableCell>{file.category}</TableCell><TableCell>{file.size}</TableCell><TableCell>V{file.version}</TableCell><TableCell>{file.uploader}</TableCell><TableCell><StatusBadge status={file.parseStatus} /></TableCell><TableCell>{displayShanghaiDateTime(file.uploadedAt)}</TableCell><TableCell><span className="flex items-center gap-1"><button aria-label={`下载${file.name}`} disabled={!!downloadingFileId || !!repairingFileId} onClick={() => { void downloadProjectFile(file) }} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"><Download className="h-4 w-4" /></button>{(file.hasOriginal === false || missingOriginalFileIds.includes(file.id)) && <button aria-label={`补传${file.name}`} disabled={!!repairingFileId} onClick={() => repairProjectFile(file)} className="rounded-lg px-2 py-1 text-xs text-brand-600 hover:bg-brand-50 disabled:opacity-50">{repairingFileId === file.id ? '补传中…' : '补传原文件'}</button>}<button aria-label={`删除${file.name}`} onClick={() => handleDeleteFile(file)} className="rounded-lg px-2 py-1 text-xs text-rose-600 hover:bg-rose-50">删除</button></span></TableCell></tr>)}</DataTable> : <div className="p-12 text-center"><FileText className="mx-auto h-8 w-8 text-slate-300" /><p className="mt-3 text-sm font-medium text-slate-700">还没有项目资料</p><p className="mt-1 text-xs text-slate-400">上传 BP 后即可生成结构化项目卡片与 AI 摘要</p></div>}
     </Card>
   )
 
@@ -399,17 +390,37 @@ export function ProjectDetailPage() {
     )
   }
 
-  const renderMaterials = () => <Card className="overflow-hidden"><div className="flex items-center justify-between border-b border-slate-100 px-5 py-4"><div><h2 className="font-semibold text-slate-800">上会材料</h2><p className="mt-1 text-xs text-slate-400">每次生成形成独立版本并记录资料范围</p></div><Button onClick={() => navigate(`/materials?project=${project.id}`)}><Plus className="h-4 w-4" />生成材料</Button></div><DataTable headers={['材料名称', '模板', '版本', '状态', '生成人', '时间', '']}>{projectMaterials.map((job) => <tr key={job.id}><TableCell><span className="font-medium text-slate-700">{job.type}</span></TableCell><TableCell>{job.template}</TableCell><TableCell>{job.version}</TableCell><TableCell><StatusBadge status={job.status} /></TableCell><TableCell>{job.createdBy}</TableCell><TableCell>{job.createdAt.slice(5)}</TableCell><TableCell><Button size="sm" variant="secondary" onClick={() => job.outputUrl ? window.open(job.outputUrl, '_blank') : showToast('文件仍在生成中', 'info')}><Download className="h-3.5 w-3.5" />下载</Button></TableCell></tr>)}</DataTable>{!projectMaterials.length && <div className="p-10 text-center text-sm text-slate-400">暂无生成记录</div>}</Card>
+  const renderMeetings = () => <div className="space-y-4">{projectMeetings.length ? projectMeetings.map((meeting) => <Card key={meeting.id} className="p-5"><div className="flex items-start justify-between"><div><div className="flex items-center gap-2"><h3 className="font-semibold text-slate-800">{meeting.title}</h3><StatusBadge status={meeting.status} /></div><p className="mt-2 text-xs text-slate-400">{displayShanghaiDateTime(meeting.meetingTime)} · {meeting.type} · {meeting.participants.join('、')}</p></div><button onClick={() => navigate(`/meetings?meeting=${meeting.id}`)} className="text-xs text-brand-600">查看完整纪要</button></div><p className="mt-4 rounded-lg bg-slate-50 p-3 text-sm leading-6 text-slate-600">{meeting.summary}</p><div className="mt-4 flex items-center gap-5 text-xs text-slate-500"><span>{meeting.conclusions.length} 条关键结论</span><span>{meeting.todoCount} 项待办</span></div></Card>) : <Card className="p-12 text-center text-sm text-slate-400">暂无关联会议</Card>}<Button onClick={() => navigate(`/meetings?project=${project.id}`)}><Plus className="h-4 w-4" />新建会议</Button></div>
 
-  const renderMeetings = () => <div className="space-y-4">{projectMeetings.length ? projectMeetings.map((meeting) => <Card key={meeting.id} className="p-5"><div className="flex items-start justify-between"><div><div className="flex items-center gap-2"><h3 className="font-semibold text-slate-800">{meeting.title}</h3><StatusBadge status={meeting.status} /></div><p className="mt-2 text-xs text-slate-400">{meeting.meetingTime} · {meeting.type} · {meeting.participants.join('、')}</p></div><button onClick={() => navigate(`/meetings?meeting=${meeting.id}`)} className="text-xs text-brand-600">查看完整纪要</button></div><p className="mt-4 rounded-lg bg-slate-50 p-3 text-sm leading-6 text-slate-600">{meeting.summary}</p><div className="mt-4 flex items-center gap-5 text-xs text-slate-500"><span>{meeting.conclusions.length} 条关键结论</span><span>{meeting.todoCount} 项待办</span></div></Card>) : <Card className="p-12 text-center text-sm text-slate-400">暂无关联会议</Card>}<Button onClick={() => navigate(`/meetings?project=${project.id}`)}><Plus className="h-4 w-4" />新建会议</Button></div>
+  const renderWorkflow = () => <div className="space-y-5"><Card className="p-5"><div className="flex items-center justify-between"><div><h2 className="font-semibold text-slate-800">OA 审批实例</h2><p className="mt-1 text-xs text-slate-400">项目阶段不可直接编辑，只由最终通过的 OA 同步</p></div><Button onClick={() => navigate(`/workflow?project=${project.id}`)}><Plus className="h-4 w-4" />发起 OA</Button></div><div className="mt-4 space-y-3">{projectApprovals.map((request) => <button key={request.id} onClick={() => navigate(`/workflow?project=${project.id}&request=${request.id}`)} className="grid w-full grid-cols-[1fr_160px_150px] items-center rounded-xl border border-slate-200 p-4 text-left hover:border-brand-200"><div><div className="flex items-center gap-2"><p className="font-medium text-slate-700">{request.title}</p><Badge tone={request.status === '已通过' ? 'green' : request.status === '审批中' ? 'blue' : request.status === '已退回' ? 'amber' : 'red'}>{request.status}</Badge></div><p className="mt-1 text-xs text-slate-400">{request.requestNo} · {displayShanghaiDateTime(request.submittedAt)}</p></div><div className="flex items-center gap-1"><StageBadge stage={request.fromStage} /><span>→</span><StageBadge stage={request.targetStage} /></div><p className="text-right text-xs text-slate-500">{request.currentNodeName}</p></button>)}{!projectApprovals.length && <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-400">暂无 OA 审批实例</p>}</div></Card><Card className="p-6"><h2 className="mb-6 font-semibold text-slate-800">已生效阶段时间线</h2><div className="relative ml-2 border-l border-slate-200 pl-7">{projectWorkflows.map((log, index) => <div key={log.id} className="relative pb-8 last:pb-0"><span className={`absolute -left-[34px] top-0 grid h-3.5 w-3.5 place-items-center rounded-full ring-4 ring-white ${index === 0 ? 'bg-brand-600' : 'bg-slate-300'}`} /><div className="flex items-center gap-2"><StageBadge stage={log.fromStage} /><span className="text-slate-300">→</span><StageBadge stage={log.toStage} /><Badge tone="green">{log.source ?? '系统记录'}</Badge><span className="ml-auto text-xs text-slate-400">{displayShanghaiDateTime(log.createdAt)}</span></div><p className="mt-2 text-sm text-slate-600">{log.comment}</p><p className="mt-1 text-xs text-slate-400">操作人：{log.operator}{log.requestNo ? ` · ${log.requestNo}` : ''}</p></div>)}</div></Card></div>
 
-  const renderWorkflow = () => <div className="space-y-5"><Card className="p-5"><div className="flex items-center justify-between"><div><h2 className="font-semibold text-slate-800">OA 审批实例</h2><p className="mt-1 text-xs text-slate-400">项目阶段不可直接编辑，只由最终通过的 OA 同步</p></div><Button onClick={() => navigate(`/workflow?project=${project.id}`)}><Plus className="h-4 w-4" />发起 OA</Button></div><div className="mt-4 space-y-3">{projectApprovals.map((request) => <button key={request.id} onClick={() => navigate(`/workflow?project=${project.id}&request=${request.id}`)} className="grid w-full grid-cols-[1fr_160px_150px] items-center rounded-xl border border-slate-200 p-4 text-left hover:border-brand-200"><div><div className="flex items-center gap-2"><p className="font-medium text-slate-700">{request.title}</p><Badge tone={request.status === '已通过' ? 'green' : request.status === '审批中' ? 'blue' : request.status === '已退回' ? 'amber' : 'red'}>{request.status}</Badge></div><p className="mt-1 text-xs text-slate-400">{request.requestNo} · {request.submittedAt}</p></div><div className="flex items-center gap-1"><StageBadge stage={request.fromStage} /><span>→</span><StageBadge stage={request.targetStage} /></div><p className="text-right text-xs text-slate-500">{request.currentNodeName}</p></button>)}{!projectApprovals.length && <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-400">暂无 OA 审批实例</p>}</div></Card><Card className="p-6"><h2 className="mb-6 font-semibold text-slate-800">已生效阶段时间线</h2><div className="relative ml-2 border-l border-slate-200 pl-7">{projectWorkflows.map((log, index) => <div key={log.id} className="relative pb-8 last:pb-0"><span className={`absolute -left-[34px] top-0 grid h-3.5 w-3.5 place-items-center rounded-full ring-4 ring-white ${index === 0 ? 'bg-brand-600' : 'bg-slate-300'}`} /><div className="flex items-center gap-2"><StageBadge stage={log.fromStage} /><span className="text-slate-300">→</span><StageBadge stage={log.toStage} /><Badge tone="green">{log.source ?? '系统记录'}</Badge><span className="ml-auto text-xs text-slate-400">{log.createdAt}</span></div><p className="mt-2 text-sm text-slate-600">{log.comment}</p><p className="mt-1 text-xs text-slate-400">操作人：{log.operator}{log.requestNo ? ` · ${log.requestNo}` : ''}</p></div>)}</div></Card></div>
+  const renderRisks = () => <div className="space-y-4">{projectRisks.length ? projectRisks.map((risk) => <Card key={risk.id} className="p-5"><div className="flex items-start justify-between"><div className="flex items-center gap-2"><RiskBadge level={risk.level} /><Badge>{risk.type}</Badge><StatusBadge status={risk.status} /></div><span className="text-xs text-slate-400">{displayShanghaiDate(risk.occurredAt)}</span></div><p className="mt-4 text-sm leading-6 text-slate-700">{risk.description}</p><p className="mt-3 text-xs text-slate-400">负责人：{risk.owner || '未指定'}</p></Card>) : <Card className="p-12 text-center text-sm text-slate-400">暂无风险记录</Card>}<Button onClick={() => navigate(`/risks?project=${project.id}`)}><Plus className="h-4 w-4" />新增风险</Button></div>
 
-  const renderRisks = () => <div className="space-y-4">{projectRisks.length ? projectRisks.map((risk) => <Card key={risk.id} className="p-5"><div className="flex items-start justify-between"><div className="flex items-center gap-2"><RiskBadge level={risk.level} /><Badge>{risk.type}</Badge><StatusBadge status={risk.status} /></div><span className="text-xs text-slate-400">{risk.occurredAt}</span></div><p className="mt-4 text-sm leading-6 text-slate-700">{risk.description}</p><div className="mt-4 rounded-lg bg-brand-50 p-3"><p className="text-xs font-medium text-brand-700">AI 处置建议</p><p className="mt-1 text-xs leading-5 text-brand-700/80">{risk.suggestion}</p></div></Card>) : <Card className="p-12 text-center text-sm text-slate-400">暂无风险记录</Card>}<Button onClick={() => navigate(`/risks?project=${project.id}`)}><Plus className="h-4 w-4" />新增风险</Button></div>
+  const saveProjectEdit = async () => {
+    if (!editingProject || savingProject) return
+    setSavingProject(true)
+    try {
+      await updateProject(editingProject.id, {
+        name: editingProject.name,
+        companyName: editingProject.companyName,
+        industry: editingProject.industry,
+        round: editingProject.round,
+        financing: editingProject.financing,
+        valuation: editingProject.valuation,
+        riskLevel: editingProject.riskLevel,
+        tags: editingProject.tags,
+        summary: editingProject.summary,
+      })
+      setEditingProject(null)
+      showToast('项目档案已更新，项目阶段未发生变化')
+    } catch (error) {
+      showToast(`保存失败：${(error as Error).message}`, 'error')
+    } finally {
+      setSavingProject(false)
+    }
+  }
 
-  const renderPost = () => <div className="space-y-4">{project.stage !== '投后' && <div className="rounded-xl border border-blue-100 bg-blue-50 p-4 text-sm text-blue-700">当前项目尚未进入投后阶段。你仍可以提前归档经营资料和董事会文件。</div>}{projectPosts.map((update) => <Card key={update.id} className="p-5"><div className="flex items-center justify-between"><h3 className="font-semibold text-slate-800">{update.period} 经营更新</h3><span className="text-xs text-slate-400">{update.updatedAt}</span></div><div className="mt-5 grid grid-cols-3 gap-4">{[['营业收入', update.revenue], ['综合毛利率', update.grossMargin], ['经营现金流', update.cashFlow]].map(([label, value]) => <div key={label} className="rounded-lg bg-slate-50 p-3"><p className="text-xs text-slate-400">{label}</p><p className="mt-1 text-sm font-semibold text-slate-700">{value}</p></div>)}</div><p className="mt-4 text-sm text-slate-600">{update.milestone}</p></Card>)}{!projectPosts.length && <Card className="p-12 text-center text-sm text-slate-400">暂无投后更新记录</Card>}</div>
-
-  const tabContent: Record<string, () => React.ReactNode> = { overview: renderOverview, intelligence: renderIntelligence, files: renderFiles, summary: renderSummary, materials: renderMaterials, meetings: renderMeetings, workflow: renderWorkflow, risks: renderRisks, post: renderPost }
+  const tabContent: Record<string, () => React.ReactNode> = { overview: renderOverview, intelligence: renderIntelligence, files: renderFiles, summary: renderSummary, meetings: renderMeetings, workflow: renderWorkflow, risks: renderRisks }
 
   return (
     <div>
@@ -418,10 +429,10 @@ export function ProjectDetailPage() {
         <div className="flex items-center gap-5 px-6 py-5">
           <div className="grid h-12 w-12 place-items-center rounded-xl bg-brand-50 text-sm font-semibold text-brand-700">{project.name.slice(0, 2)}</div>
           <div className="min-w-0 flex-1"><div className="flex items-center gap-3"><h1 className="text-xl font-semibold text-ink">{project.name}</h1><StageBadge stage={project.stage} /><RiskBadge level={project.riskLevel} /></div><p className="mt-1.5 text-sm text-slate-500">{project.companyName} · {project.industry} · {project.round}</p><p className="mt-1 text-[10px] text-slate-400">阶段来源：{project.stageSource ?? '历史数据'}{projectApprovals.some((item) => item.status === '审批中') ? ' · OA 审批中，当前阶段已锁定' : ''}</p></div>
-          <div className="flex items-center gap-5 border-r border-slate-200 pr-5 text-xs"><div><p className="text-slate-400">负责人</p><p className="mt-1 font-medium text-slate-700">{project.owner}</p></div><div><p className="text-slate-400">最近更新</p><p className="mt-1 font-medium text-slate-700">{project.updatedAt.slice(5)}</p></div></div>
-          <div className="flex items-center gap-2"><Button variant="secondary" onClick={() => setShowUpload(true)}><Upload className="h-4 w-4" />上传资料</Button><Button loading={generating} onClick={generateSummary}><Sparkles className="h-4 w-4" />生成摘要</Button></div>
+          <div className="flex items-center gap-5 border-r border-slate-200 pr-5 text-xs"><div><p className="text-slate-400">负责人</p><p className="mt-1 font-medium text-slate-700">{project.owner}</p></div><div><p className="text-slate-400">最近更新</p><p className="mt-1 whitespace-nowrap font-medium text-slate-700">{displayShanghaiDateTime(project.updatedAt)}</p></div></div>
+          <div className="flex items-center gap-2"><Button variant="secondary" onClick={() => setShowUpload(true)}><Upload className="h-4 w-4" />上传资料</Button><Button loading={generating} onClick={generateSummary}><Sparkles className="h-4 w-4" />生成评分</Button></div>
         </div>
-        <div className="px-4"><Tabs tabs={tabItems.map((tab) => ({ ...tab, count: tab.id === 'files' ? projectFiles.length : tab.id === 'materials' ? projectMaterials.length : tab.id === 'meetings' ? projectMeetings.length : tab.id === 'risks' ? projectRisks.length : undefined }))} value={activeTab} onChange={setActiveTab} /></div>
+        <div className="px-4"><Tabs tabs={tabItems.map((tab) => ({ ...tab, count: tab.id === 'files' ? projectFiles.length : tab.id === 'meetings' ? projectMeetings.length : tab.id === 'risks' ? projectRisks.length : undefined }))} value={activeTab} onChange={setActiveTab} /></div>
       </Card>
       {tabContent[activeTab]?.()}
 
@@ -431,17 +442,17 @@ export function ProjectDetailPage() {
         <div className="mt-4 rounded-lg bg-slate-50 p-3 text-xs leading-5 text-slate-500">上传即表示该资料允许在当前项目范围内被 AI 检索。敏感财务与协议文件可在上传后调整可见范围。</div>
       </Modal>
 
-      <Modal open={!!editingProject} onClose={() => setEditingProject(null)} title="编辑项目档案" width="max-w-3xl" footer={<><Button variant="secondary" onClick={() => setEditingProject(null)}>取消</Button><Button onClick={() => { if (!editingProject) return; updateProject(editingProject.id, editingProject); setEditingProject(null); showToast('项目档案已更新，项目阶段未发生变化') }}>保存修改</Button></>}>
+      <Modal open={!!editingProject} onClose={() => setEditingProject(null)} title="编辑项目档案" width="max-w-3xl" footer={<><Button variant="secondary" onClick={() => setEditingProject(null)}>取消</Button><Button loading={savingProject} onClick={() => { void saveProjectEdit() }}>保存修改</Button></>}>
         {editingProject && <div className="grid grid-cols-2 gap-4">
           <label><span className="label">项目名称</span><input className="input" value={editingProject.name} onChange={(event) => setEditingProject({ ...editingProject, name: event.target.value })} /></label>
-          <label><span className="label">公司主体</span><input className="input" value={editingProject.companyName} onChange={(event) => setEditingProject({ ...editingProject, companyName: event.target.value })} /></label>
-          <label><span className="label">所属行业</span><input className="input" value={editingProject.industry} onChange={(event) => setEditingProject({ ...editingProject, industry: event.target.value })} /></label>
-          <label><span className="label">融资轮次</span><input className="input" value={editingProject.round} onChange={(event) => setEditingProject({ ...editingProject, round: event.target.value })} /></label>
-          <label><span className="label">计划融资</span><input className="input" value={editingProject.financing} onChange={(event) => setEditingProject({ ...editingProject, financing: event.target.value })} /></label>
-          <label><span className="label">投前估值</span><input className="input" value={editingProject.valuation} onChange={(event) => setEditingProject({ ...editingProject, valuation: event.target.value })} /></label>
+          <label><span className="label">公司主体</span><input className="input" value={editingProject.companyName ?? ''} onChange={(event) => setEditingProject({ ...editingProject, companyName: event.target.value })} /></label>
+          <label><span className="label">所属行业</span><input className="input" value={editingProject.industry ?? ''} onChange={(event) => setEditingProject({ ...editingProject, industry: event.target.value })} /></label>
+          <label><span className="label">融资轮次</span><input className="input" value={editingProject.round ?? ''} onChange={(event) => setEditingProject({ ...editingProject, round: event.target.value })} /></label>
+          <label><span className="label">计划融资</span><input className="input" value={editingProject.financing ?? ''} onChange={(event) => setEditingProject({ ...editingProject, financing: event.target.value })} /></label>
+          <label><span className="label">投前估值</span><input className="input" value={editingProject.valuation ?? ''} onChange={(event) => setEditingProject({ ...editingProject, valuation: event.target.value })} /></label>
           <label><span className="label">风险等级</span><select className="input" value={editingProject.riskLevel} onChange={(event) => setEditingProject({ ...editingProject, riskLevel: event.target.value as RiskLevel })}><option>低</option><option>中</option><option>高</option></select></label>
           <label><span className="label">项目标签</span><input className="input" value={editingProject.tags.join('、')} onChange={(event) => setEditingProject({ ...editingProject, tags: event.target.value.split(/[、,，]/).map((item) => item.trim()).filter(Boolean) })} /></label>
-          <label className="col-span-2"><span className="label">项目简介</span><textarea className="textarea min-h-24" value={editingProject.summary} onChange={(event) => setEditingProject({ ...editingProject, summary: event.target.value })} /></label>
+          <label className="col-span-2"><span className="label">项目简介</span><textarea className="textarea min-h-24" value={editingProject.summary ?? ''} onChange={(event) => setEditingProject({ ...editingProject, summary: event.target.value })} /></label>
           <p className="col-span-2 rounded-lg bg-blue-50 p-3 text-xs text-blue-700">项目阶段在此不可编辑；如需推进或终止，请从 OA 项目流程发起申请。</p>
         </div>}
       </Modal>

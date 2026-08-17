@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto'
 import { lookup } from 'node:dns/promises'
 import { isIP } from 'node:net'
 import type { EvidenceSource } from './aiBusinessContentService.js'
+import { formatShanghaiDateKey, parseShanghaiDate } from '../utils/shanghaiTime.js'
+import { fetchAiGatewayChatCompatible } from './aiGatewayService.js'
 
 const GW_BASE = (
   process.env.LLM_BASE_URL
@@ -140,10 +142,10 @@ function normalizedDate(value: unknown) {
   const chinese = text.match(/\b(20\d{2})[年/-](\d{1,2})[月/-](\d{1,2})日?\b/)
   if (chinese) {
     const date = `${chinese[1]}-${chinese[2].padStart(2, '0')}-${chinese[3].padStart(2, '0')}`
-    return Number.isNaN(Date.parse(`${date}T00:00:00Z`)) ? '' : date
+    try { parseShanghaiDate(date); return date } catch { return '' }
   }
   const parsed = Date.parse(text)
-  return Number.isNaN(parsed) ? '' : new Date(parsed).toISOString().slice(0, 10)
+  return Number.isNaN(parsed) ? '' : formatShanghaiDateKey(parsed)
 }
 
 function projectAliases(project: ProjectLike) {
@@ -208,7 +210,7 @@ export async function fetchComplianceModelEvidence(input: {
   const resolveHost = input.resolveHost ?? defaultResolveHost
   let hits: ModelResearchHit[] = []
   try {
-    const response = await fetchImpl(`${GW_BASE}/chat/completions`, {
+    const response = await fetchAiGatewayChatCompatible(GW_BASE, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -238,7 +240,7 @@ export async function fetchComplianceModelEvidence(input: {
         response_format: { type: 'json_object' },
       }),
       signal: AbortSignal.timeout(MODEL_RESEARCH_TIMEOUT_MS),
-    })
+    }, fetchImpl, MODEL_RESEARCH_TIMEOUT_MS)
     if (!response.ok) throw new Error(`LLM ${response.status}`)
     const data = await response.json() as {
       choices?: Array<{ message?: { content?: string } }>

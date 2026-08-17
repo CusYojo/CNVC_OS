@@ -1,11 +1,12 @@
-import { Bot, CheckCircle2, ExternalLink, FileSpreadsheet, FileUp, FolderInput, Globe2, RefreshCw, ShieldCheck, Sparkles, UploadCloud, UsersRound } from 'lucide-react'
+import { Bot, CheckCircle2, ClipboardCheck, Download, ExternalLink, FileSpreadsheet, FolderInput, Globe2, RefreshCw, ShieldCheck, Sparkles, UploadCloud, UsersRound } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import { useEffect, useRef, useState } from 'react'
 import { useToast } from '../components/Toast'
 import { Badge, Button, Card, DataTable, Drawer, FileUpload, Modal, PageHeader, ProgressBar, SearchInput, StatusBadge, TableCell, Tabs } from '../components/ui'
 import { useAuthStore } from '../store/useAuthStore'
-import { apiPost, apiGet } from '../lib/api'
+import { apiGet, apiPost } from '../lib/api'
 import type { Lead, LeadScoreJobStatus, LeadScoring } from '../types'
+import { formatShanghaiDateTime } from '../lib/dateTime'
 
 // 当前创投新闻来源只有 36氪，因此仅展示具体有效渠道；其他创投媒体恢复后再加入。
 const CHANNEL_OPTIONS: string[] = ['36氪', '机构公众号', '高校公众号', '论文']
@@ -30,6 +31,133 @@ const scoreJobLabel = (status?: LeadScoreJobStatus) => status === 'queued'
   : status === 'retrying'
     ? '自动重试中…'
     : '更新中…'
+
+type LeadPipelineReview = {
+  id: string
+  status: 'pending' | 'resolved'
+  reason: string
+  assignedUserName?: string | null
+  reviewerUserName?: string | null
+  createdAt: string
+  resolvedAt?: string | null
+  event: {
+    id: string
+    sourceType: string
+    sourceId?: string | null
+    payload: Record<string, unknown>
+    sourceOccurredAt?: string | null
+    ingestedAt: string
+  }
+  pipeline: { status: string; leadId?: string | null }
+  triggerDecision: {
+    id: string
+    outcome: string
+    subjectType?: 'company' | 'project' | 'team' | 'lab' | 'paper' | null
+    subjectName?: string | null
+    legalName?: string | null
+    confidence?: number | null
+    reason: string
+    output: Record<string, unknown>
+    evidence: Array<{ claim: string; quote?: string | null; sourceUrl?: string | null }>
+  }
+  resolution?: { decisionId: string; outcome: string; reason: string } | null
+  existingLeads: Array<{ id: string; name: string; companyName?: string | null; poolStatus: string }>
+}
+
+type LeadReviewForm = {
+  idempotencyKey: string
+  outcome: 'accept' | 'reject'
+  subjectType: 'company' | 'project' | 'team' | 'lab' | 'paper'
+  subjectName: string
+  legalName: string
+  confidence: string
+  reason: string
+  claim: string
+  quote: string
+  targetLeadId: string
+}
+
+type LeadImportBatch = {
+  id: string
+  status: 'preview' | 'committing' | 'completed' | 'partial_failed'
+  totalRows: number
+  validRows: number
+  errorRows: number
+  committedRows: number
+  reviewRows: number
+  failedRows: number
+  rows: Array<{
+    id: string
+    rowNumber: number
+    raw: Record<string, unknown>
+    normalized: { name?: string; companyName?: string; industry?: string; businessRegion?: string }
+    errors: string[]
+    status: string
+    leadId?: string | null
+    reviewId?: string | null
+    message?: string | null
+  }>
+}
+
+type LeadBpUpload = {
+  id: string
+  name: string
+  status: 'queued' | 'processing' | 'retrying' | 'review' | 'ready' | 'failed' | 'dead_letter'
+  stage: string
+  progress: number
+  attempts: number
+  error?: string | null
+  leadId?: string | null
+  reviewId?: string | null
+}
+
+function fileAsDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result || ''))
+    reader.onerror = () => reject(new Error('文件读取失败'))
+    reader.onabort = () => reject(new Error('文件读取被中断'))
+    reader.readAsDataURL(file)
+  })
+}
+
+function reviewPayloadText(review: LeadPipelineReview) {
+  const payload = review.event.payload
+  const profile = payload.project_profile && typeof payload.project_profile === 'object'
+    ? payload.project_profile as Record<string, unknown>
+    : {}
+  return [
+    ['标题', payload.title],
+    ['摘要', payload.summary],
+    ['正文', payload.article_text],
+    ['项目名', profile.project_name],
+    ['公司名', profile.company_name],
+    ['工商主体', profile.legal_entity || profile.company_full_name],
+    ['核心亮点', profile.core_highlights],
+    ['团队', profile.team_composition],
+    ['融资', [profile.project_round, profile.financing_amount, profile.latest_valuation].filter(Boolean).join(' / ')],
+  ].map(([label, value]) => {
+    const text = typeof value === 'string' || typeof value === 'number' ? String(value).trim() : ''
+    return text ? `${label}：${text}` : ''
+  }).filter(Boolean).join('\n\n').slice(0, 24_000)
+}
+
+function initialReviewForm(review: LeadPipelineReview): LeadReviewForm {
+  const trigger = review.triggerDecision
+  const firstEvidence = trigger.evidence.find((item) => item.quote)
+  return {
+    idempotencyKey: crypto.randomUUID(),
+    outcome: 'accept',
+    subjectType: trigger.subjectType ?? 'company',
+    subjectName: trigger.subjectName ?? '',
+    legalName: trigger.legalName ?? '',
+    confidence: String(trigger.confidence ?? 80),
+    reason: trigger.reason || '人工核对原始材料后确认处理结论',
+    claim: firstEvidence?.claim || '原始材料支持该主体名称及其投资相关性',
+    quote: firstEvidence?.quote || '',
+    targetLeadId: review.existingLeads.length === 1 ? review.existingLeads[0].id : '',
+  }
+}
 
 function SourceLink({ url, children }: { url?: string | null; children: React.ReactNode }) {
   // 容错：来源 url 可能缺失（AI 采集 / 部分线索无链接），无 url 时降级为不可点击的灰色标签，避免 startsWith 崩溃白屏
@@ -75,7 +203,7 @@ function formatPoolEnteredAt(value?: string) {
   if (!value) return '待确认'
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleString('zh-CN', {
+  return formatShanghaiDateTime(date, {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -424,10 +552,14 @@ function LeadDetailPanel({
           </div>)}
         </div>
       </section> : <button onClick={() => onRunScore(lead)} disabled={scoreRefreshing} className="w-full rounded-xl border border-dashed border-brand-300 bg-brand-50/40 p-4 text-sm font-medium text-brand-700 hover:bg-brand-50 disabled:opacity-50">
-        {scoreRefreshing ? `AI 评分${scoreJobLabel(lead.scoreJob?.status)}` : lead.scoreJob?.status === 'failed' ? '重新生成 AI 评分' : '开始 AI 评分'}
+        {scoreRefreshing
+          ? `AI 评分${scoreJobLabel(lead.scoreJob?.status)}`
+          : ['failed', 'dead_letter'].includes(lead.scoreJob?.status ?? '')
+            ? '人工重试 AI 评分'
+            : '开始 AI 评分'}
       </button>}
-      {lead.scoreJob?.status === 'failed' &&
-        <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-700">AI 评分暂未完成。系统已自动重试，仍可点击上方按钮重新生成。</p>}
+      {['failed', 'dead_letter'].includes(lead.scoreJob?.status ?? '') &&
+        <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-700">AI 评分已超过自动重试上限并进入死信。请检查错误后点击上方按钮人工重试，操作会写入审计日志。</p>}
 
       {(lead.highlights ?? []).map(meaningfulLeadText).filter(Boolean).length > 0 && <section>
         <h3 className="text-sm font-semibold text-slate-800">投资亮点</h3>
@@ -507,8 +639,6 @@ export function SourcingPage() {
   const fetchLeadDetail = useAppStore((state) => state.fetchLeadDetail)
   const mergeLeadLocal = useAppStore((state) => state.mergeLeadLocal)
   const hydrateFromServer = useAppStore((state) => state.hydrateFromServer)
-  const addLead = useAppStore((state) => state.addLead)
-  const updateLead = useAppStore((state) => state.updateLead)
   const convertLead = useAppStore((state) => state.convertLead)
   const [page, setPage] = useState(1)
   const [query, setQuery] = useState('')
@@ -524,12 +654,23 @@ export function SourcingPage() {
   const [detailTab, setDetailTab] = useState('overview')
   const scoringLeadIds = useAppStore((state) => state.scoringLeadIds) || []
   const startScoring = useAppStore((state) => state.startScoring)
-  const [showUpload, setShowUpload] = useState(false)
   const [showCollect, setShowCollect] = useState(false)
   const [syncing, setSyncing] = useState(false)
   const [collectName, setCollectName] = useState('')
   const [collecting, setCollecting] = useState(false)
-  const [upload, setUpload] = useState<{ name: string; progress: number; stage: string } | null>(null)
+  const [showImport, setShowImport] = useState(false)
+  const [importBusy, setImportBusy] = useState(false)
+  const [importBatch, setImportBatch] = useState<LeadImportBatch | null>(null)
+  const [showBpUpload, setShowBpUpload] = useState(false)
+  const [bpBusy, setBpBusy] = useState(false)
+  const [bpUpload, setBpUpload] = useState<LeadBpUpload | null>(null)
+  const [showReviews, setShowReviews] = useState(false)
+  const [reviews, setReviews] = useState<LeadPipelineReview[]>([])
+  const [reviewTotal, setReviewTotal] = useState(0)
+  const [reviewLoading, setReviewLoading] = useState(false)
+  const [reviewSaving, setReviewSaving] = useState(false)
+  const [selectedReview, setSelectedReview] = useState<LeadPipelineReview | null>(null)
+  const [reviewForm, setReviewForm] = useState<LeadReviewForm | null>(null)
   const isAuthed = useAuthStore((s) => s.isAuthenticated)
   useEffect(() => { if (isAuthed) hydrateFromServer() }, [isAuthed, hydrateFromServer])
   // 翻页: 监听 page 变化拉分页数据
@@ -569,7 +710,190 @@ export function SourcingPage() {
     }
   }, [isAuthed, leads, scoringLeadIds, startScoring])
 
+  useEffect(() => {
+    if (!bpUpload || !['queued', 'processing', 'retrying'].includes(bpUpload.status)) return
+    let active = true
+    const poll = async () => {
+      try {
+        const latest = await apiGet<LeadBpUpload>(`/leads/bp-uploads/${bpUpload.id}`)
+        if (!active) return
+        setBpUpload(latest)
+        if (latest.status === 'ready') {
+          showToast('BP 已解析并写入公共线索池，AI 评分已排队', 'success')
+          await Promise.all([fetchLeads(page, 50, channel, sort, debouncedQuery, '', industry, region), fetchLeadStats()])
+        } else if (latest.status === 'review') {
+          showToast('BP 已解析，主体或重复匹配需要人工复核', 'success')
+          await loadPendingReviews()
+        } else if (latest.status === 'dead_letter' || latest.status === 'failed') {
+          showToast(`BP 解析失败：${latest.error || '请重试或更换文件'}`, 'error')
+        }
+      } catch (error) {
+        if (active) showToast(`获取 BP 解析进度失败：${(error as Error).message}`, 'error')
+      }
+    }
+    const timer = window.setInterval(() => { void poll() }, 1_500)
+    void poll()
+    return () => { active = false; window.clearInterval(timer) }
+  // loadPendingReviews is declared below and intentionally read only after the timer fires.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bpUpload?.id, bpUpload?.status])
+
   const filtered = leads
+
+  const loadPendingReviews = async () => {
+    setReviewLoading(true)
+    try {
+      const response = await apiGet<{ list: LeadPipelineReview[]; total: number }>(
+        '/lead-pipeline/reviews?status=pending&page=1&pageSize=50',
+      )
+      setReviews(response.list)
+      setReviewTotal(response.total)
+      setSelectedReview((current) => current
+        ? response.list.find((item) => item.id === current.id) ?? null
+        : null)
+    } catch (error) {
+      showToast(`加载人工复核队列失败：${(error as Error).message}`, 'error')
+    } finally {
+      setReviewLoading(false)
+    }
+  }
+
+  const openReviewQueue = async () => {
+    setShowReviews(true)
+    setSelectedReview(null)
+    setReviewForm(null)
+    await loadPendingReviews()
+  }
+
+  const previewImport = async (file: File) => {
+    if (file.size > 100 * 1024 * 1024) return showToast('导入文件不能超过 100MB', 'error')
+    setImportBusy(true)
+    try {
+      const dataBase64 = await fileAsDataUrl(file)
+      const result = await apiPost<LeadImportBatch>('/leads/imports/preview', {
+        name: file.name,
+        declaredType: file.type || undefined,
+        dataBase64,
+      }, { signal: AbortSignal.timeout(5 * 60_000) })
+      setImportBatch(result)
+      showToast(result.errorRows
+        ? `预检完成：${result.validRows} 行有效，${result.errorRows} 行需修复`
+        : `预检通过：共 ${result.validRows} 行，可确认导入`, result.errorRows ? 'error' : 'success')
+    } catch (error) {
+      showToast(`批量导入预检失败：${(error as Error).message}`, 'error')
+    } finally {
+      setImportBusy(false)
+    }
+  }
+
+  const commitImport = async () => {
+    if (!importBatch || importBatch.errorRows) return
+    setImportBusy(true)
+    try {
+      const result = await apiPost<LeadImportBatch>(`/leads/imports/${importBatch.id}/commit`, {})
+      setImportBatch(result)
+      await Promise.all([
+        fetchLeads(page, 50, channel, sort, debouncedQuery, '', industry, region),
+        fetchLeadStats(),
+        result.reviewRows ? loadPendingReviews() : Promise.resolve(),
+      ])
+      showToast(
+        `批量导入完成：入池 ${result.committedRows} 条，待复核 ${result.reviewRows} 条${result.failedRows ? `，失败 ${result.failedRows} 条` : ''}`,
+        result.failedRows ? 'error' : 'success',
+      )
+    } catch (error) {
+      showToast(`确认导入失败：${(error as Error).message}`, 'error')
+    } finally {
+      setImportBusy(false)
+    }
+  }
+
+  const uploadBp = async (file: File) => {
+    if (file.size > 100 * 1024 * 1024) return showToast('BP 文件不能超过 100MB', 'error')
+    setBpBusy(true)
+    try {
+      const dataBase64 = await fileAsDataUrl(file)
+      const result = await apiPost<LeadBpUpload>('/leads/bp-uploads', {
+        name: file.name,
+        declaredType: file.type || undefined,
+        dataBase64,
+      }, { signal: AbortSignal.timeout(5 * 60_000) })
+      setBpUpload(result)
+      showToast('BP 已进入后台解析队列，可以在窗口中查看真实进度', 'success')
+    } catch (error) {
+      showToast(`BP 上传失败：${(error as Error).message}`, 'error')
+    } finally {
+      setBpBusy(false)
+    }
+  }
+
+  const retryBp = async () => {
+    if (!bpUpload) return
+    setBpBusy(true)
+    try {
+      setBpUpload(await apiPost<LeadBpUpload>(`/leads/bp-uploads/${bpUpload.id}/retry`, {}))
+      showToast('BP 解析任务已重新排队', 'success')
+    } catch (error) {
+      showToast(`重试失败：${(error as Error).message}`, 'error')
+    } finally {
+      setBpBusy(false)
+    }
+  }
+
+  const chooseReview = (review: LeadPipelineReview) => {
+    setSelectedReview(review)
+    setReviewForm(initialReviewForm(review))
+  }
+
+  const resolveSelectedReview = async () => {
+    if (!selectedReview || !reviewForm) return
+    if (reviewForm.outcome === 'accept' && !reviewForm.quote.trim()) {
+      showToast('接受线索必须粘贴可在右侧原文中定位的连续引文', 'error')
+      return
+    }
+    setReviewSaving(true)
+    try {
+      const response = await apiPost<{ leadId?: string | null; pipelineStatus: string; scoringQueued: boolean }>(
+        `/lead-pipeline/reviews/${selectedReview.id}/resolve`,
+        {
+          idempotencyKey: reviewForm.idempotencyKey,
+          outcome: reviewForm.outcome,
+          subjectType: reviewForm.outcome === 'accept' ? reviewForm.subjectType : null,
+          subjectName: reviewForm.outcome === 'accept' ? reviewForm.subjectName.trim() : null,
+          legalName: reviewForm.outcome === 'accept' ? reviewForm.legalName.trim() || null : null,
+          confidence: Number(reviewForm.confidence),
+          reason: reviewForm.reason.trim(),
+          targetLeadId: reviewForm.outcome === 'accept' ? reviewForm.targetLeadId || null : null,
+          evidence: reviewForm.outcome === 'accept' ? [{
+            sourceId: selectedReview.event.sourceId,
+            sourceType: selectedReview.event.sourceType,
+            locator: '人工复核 · 不可变原始事件',
+            claim: reviewForm.claim.trim(),
+            quote: reviewForm.quote.trim(),
+            verificationStatus: 'verified',
+            metadata: { reviewId: selectedReview.id },
+          }] : [],
+        },
+      )
+      showToast(
+        reviewForm.outcome === 'accept'
+          ? `人工复核已接受并写入公共线索池${response.scoringQueued ? '，AI 评分已排队' : ''}`
+          : '人工复核已拒绝；原始事件和 Agent 历史均已保留',
+        'success',
+      )
+      setSelectedReview(null)
+      setReviewForm(null)
+      await Promise.all([
+        loadPendingReviews(),
+        fetchLeads(page, 50, channel, sort, debouncedQuery, '', industry, region),
+        fetchLeadStats(),
+      ])
+    } catch (error) {
+      showToast(`提交人工复核失败：${(error as Error).message}`, 'error')
+    } finally {
+      setReviewSaving(false)
+    }
+  }
 
   const syncRadar = async () => {
     setSyncing(true)
@@ -690,50 +1014,32 @@ export function SourcingPage() {
     if (company.length < 2) return showToast('请输入公司全称（至少 2 字）', 'error')
     setCollecting(true)
     try {
-      const { lead, intel } = await apiPost<{ lead: { id: string; name: string; score: number; summary: string; sources: Array<{ title: string; url: string; reliability: string; category?: string; excerpt?: string }>; fundingRounds: unknown[] }; intel: { registeredCapital: string; legalRepresentative: string; foundedAt: string; confidence: number } }>(
+      const { lead, intel, pipelineStatus } = await apiPost<{
+        lead: Lead | null
+        intel: { registeredCapital: string; legalRepresentative: string; foundedAt: string; confidence: number }
+        pipelineStatus?: 'review' | 'rejected'
+      }>(
         '/leads/collect', { company },
       )
-      const created = await addLead({
-        name: lead.name,
-        companyName: company,
-        channel: '新闻',
-        poolStatus: '公共池',
-        source: 'AI 情报采集（必应公开信息）',
-        sourceUrl: (lead.sources[0]?.url) ?? '',
-        industry: '待人工确认',
-        round: '未披露',
-        region: '待核验',
-        website: '待核验',
-        foundedAt: intel.foundedAt || '待核验',
-        registeredCapital: intel.registeredCapital || '待核验',
-        legalRepresentative: intel.legalRepresentative || '待核验',
-        creditCode: '待工商核验',
-        registrationStatus: '待工商核验',
-        registeredAddress: '待核验',
-        companyType: '待核验',
-        score: lead.score,
-        completeness: Math.round((intel.confidence ?? 0) * 100),
-        verificationStatus: '待核验',
-        lastVerifiedAt: new Date().toLocaleString('zh-CN', { hour12: false }),
-        riskTags: [],
-        status: lead.score > 0 ? '成功' : '待处理',
-        summary: lead.summary,
-        team: intel.legalRepresentative && intel.legalRepresentative !== '待核验' ? intel.legalRepresentative : '待核验',
-        product: '待核验',
-        financing: '待核验',
-        highlights: [],
-        risks: [],
-        suggestion: '公开信息初采，建议人工补充工商与财务核验后再评估。',
-        shareholders: [],
-        founders: [],
-        fundingRounds: [],
-        companyNews: [],
-        sources: lead.sources.map((x, i) => ({ id: `s-${i}`, title: x.title, url: x.url, publisher: '公开来源', accessedAt: new Date().toLocaleDateString('zh-CN'), category: '权威媒体' as const, reliability: (x.reliability === '高' || x.reliability === '中' ? x.reliability : '待核验') as '高' | '中' | '待核验', excerpt: x.excerpt ?? '' })),
-      })
       setShowCollect(false)
       setCollectName('')
-      setSelected(created)
-      showToast(`已采集「${company}」公开情报并入库（置信度 ${Math.round((intel.confidence ?? 0) * 100)}%）`)
+      if (!lead) {
+        await loadPendingReviews()
+        showToast(
+          pipelineStatus === 'rejected'
+            ? `「${company}」未通过 Agent 初筛，原始事件和理由已保留`
+            : `「${company}」已进入人工复核，尚未写入正式线索池`,
+          pipelineStatus === 'rejected' ? 'error' : 'success',
+        )
+        return
+      }
+      setPage(1)
+      await Promise.all([
+        fetchLeads(1, 50, channel, sort, debouncedQuery, '', industry, region),
+        fetchLeadStats(),
+      ])
+      setSelected(lead)
+      showToast(`已采集「${company}」公开情报并通过 Agent 初筛（置信度 ${Math.round((intel.confidence ?? 0) * 100)}%）`)
     } catch (err) {
       showToast(`情报采集失败：${(err as Error).message}`, 'error')
     } finally {
@@ -741,68 +1047,16 @@ export function SourcingPage() {
     }
   }
 
-  const parseFile = (file: File) => {
-    const name = file.name.replace(/\.[^.]+$/, '').replace(/[-_]?BP.*/i, '') || '新项目线索'
-    setUpload({ name: file.name, progress: 8, stage: '正在安全上传文件' })
-    const stages = [[28, '提取 BP 文本、表格与图片'], [50, '识别公司、团队与融资信息'], [70, '搜索公开来源并建立证据链'], [90, '生成项目卡片与六维初筛']] as const
-    stages.forEach(([progress, stage], index) => window.setTimeout(() => setUpload({ name: file.name, progress, stage }), 450 * (index + 1)))
-    window.setTimeout(async () => {
-      const created = await addLead({
-        name,
-        companyName: `${name}（主体待工商核验）`,
-        channel: '微信群',
-        poolStatus: '公共池',
-        source: '用户上传 BP',
-        sourceUrl: `/knowledge?file=${encodeURIComponent(file.name)}`,
-        industry: '待人工确认',
-        round: '未披露',
-        region: '待核验',
-        website: '待核验',
-        foundedAt: '待工商核验',
-        registeredCapital: '待工商核验',
-        legalRepresentative: '待工商核验',
-        creditCode: '待工商核验',
-        registrationStatus: '待工商核验',
-        registeredAddress: '待工商核验',
-        companyType: '待工商核验',
-        score: 76,
-        completeness: 46,
-        verificationStatus: '待核验',
-        lastVerifiedAt: new Date().toISOString().slice(0, 10),
-        riskTags: ['公开来源不足', '财务待核验'],
-        status: '成功',
-        summary: '已从企业材料抽取基础项目描述；在连接可靠公开来源前，不将企业自述标记为已核验事实。',
-        team: 'BP 中存在团队介绍，姓名、履历、任职和持股关系待逐项核验。',
-        product: '已识别产品描述，客户案例与产品指标需要外部证据或原始合同支持。',
-        financing: '融资金额与估值未找到可独立核验来源。',
-        highlights: ['企业材料已完成结构化', '已自动生成公开信息核验清单', '可在详情中继续补充核验信息'],
-        risks: ['公司主体未完成工商核验', '客户与收入信息仅来自企业材料', '融资和估值未找到独立来源'],
-        suggestion: '建议先补齐主体、团队、客户和融资四类来源，再决定是否发起初筛审批。',
-        shareholders: [{ name: '待工商穿透', percentage: '待核验', type: '未核验' }],
-        founders: [{ name: '待核验', title: '创始团队', background: '来自企业材料，待访谈和证明文件核验。' }],
-        fundingRounds: [{ round: '未披露', date: '待核验', amount: '未披露', valuation: '未披露', investors: ['待核验'], sourceUrl: `/knowledge?file=${encodeURIComponent(file.name)}` }],
-        companyNews: [],
-        sources: [{ id: `src-${Date.now()}`, title: file.name, url: `/knowledge?file=${encodeURIComponent(file.name)}`, publisher: '项目方', accessedAt: new Date().toISOString().slice(0, 10), category: '企业材料', reliability: '待核验', excerpt: '用户上传企业材料；其中所有数据默认属于企业自述。' }],
-      })
-      setUpload({ name: file.name, progress: 100, stage: '解析完成；已标记信息缺口与证据等级' })
-      setSelected(created)
-      setDetailTab('overview')
-      window.setTimeout(() => setShowUpload(false), 600)
-      showToast('BP 解析完成；未核验字段已明确标记')
-    }, 2300)
-  }
-
   // 旧版详情 JSX 暂留在文件中便于后续删除；运行时只启用上方的精简详情面板。
   const renderLegacyDetail = false as boolean
 
   return (
     <div>
-      <PageHeader title="项目获取池 · 公共线索池" description="按渠道及合伙人关注的行业、地区筛选线索，并优先查看估值、AI 综合评分与更新时间。" actions={<><Button variant="secondary" onClick={syncRadar} loading={syncing}><RefreshCw className="h-4 w-4" />从雷达同步</Button><Button variant="secondary" onClick={() => showToast('批量导入模板已准备')}><FileSpreadsheet className="h-4 w-4" />批量导入</Button><Button onClick={() => { setUpload(null); setShowUpload(true) }}><UploadCloud className="h-4 w-4" />上传 BP</Button></>} />
+      <PageHeader title="项目获取池 · 公共线索池" description="按渠道及合伙人关注的行业、地区筛选线索，并优先查看估值、AI 综合评分与更新时间。" actions={<><Button variant="secondary" onClick={() => { setImportBatch(null); setShowImport(true) }}><FileSpreadsheet className="h-4 w-4" />批量导入</Button><Button variant="secondary" onClick={() => { setBpUpload(null); setShowBpUpload(true) }}><UploadCloud className="h-4 w-4" />上传 BP</Button><Button variant="secondary" onClick={openReviewQueue}><ClipboardCheck className="h-4 w-4" />人工复核{reviewTotal ? `（${reviewTotal}）` : ''}</Button><Button variant="secondary" onClick={syncRadar} loading={syncing}><RefreshCw className="h-4 w-4" />从雷达同步</Button></>} />
 
-      <div className="mb-5 grid grid-cols-3 gap-4">
+      <div className="mb-5 grid grid-cols-2 gap-4">
         {([
           ['有效公共池线索', leadStats.total, '已通过入池质量过滤', Globe2, undefined],
-          ['已有多源证据', leadStats.verified, '主体明确且至少有 2 条来源', ShieldCheck, undefined],
           ['综合 AI 评分 ≥60', leadStats.highPriority, '100 分制 · 点击按最新综合评分排序', Sparkles, () => { setSort('score'); setPage(1) }],
         ] as [string, string | number, string, typeof Globe2, (() => void) | undefined][]).map(([label, value, note, Icon, onClick]) => { const MetricIcon = Icon; const clickable = !!onClick; return <Card key={String(label)} className={`p-4 ${clickable ? 'cursor-pointer transition hover:-translate-y-0.5 hover:border-brand-300 hover:shadow-md' : ''}`}><div onClick={onClick} role={clickable ? 'button' : undefined} tabIndex={clickable ? 0 : undefined}><div className="flex items-center justify-between"><p className="text-sm font-medium text-slate-500">{label}</p><span className="grid h-8 w-8 place-items-center rounded-lg bg-brand-50 text-brand-600"><MetricIcon className="h-4 w-4" /></span></div><p className="mt-2 text-2xl font-semibold text-ink">{value}</p><p className="mt-1 text-xs text-slate-400">{note}</p></div></Card> })}
       </div>
@@ -883,8 +1137,8 @@ export function SourcingPage() {
               </>}
               <TableCell>{scoreRefreshing
                 ? <Badge tone={lead.scoreJob?.status === 'retrying' ? 'amber' : 'blue'}>{scoreJobLabel(lead.scoreJob?.status)}</Badge>
-                : lead.scoreJob?.status === 'failed'
-                ? <Badge tone="amber">待重新生成</Badge>
+                : ['failed', 'dead_letter'].includes(lead.scoreJob?.status ?? '')
+                ? <Badge tone="amber">死信待人工重试</Badge>
                 : lead.analysisStatus === 'ready'
                 ? <div className="w-28"><div className="mb-1 flex items-baseline justify-between"><strong className="text-base text-brand-700">{lead.score}</strong><span className="text-xs text-slate-400">/ 100</span></div><ProgressBar value={Math.max(0, Math.min(100, lead.score))} /></div>
                 : <Badge tone="amber">待分析</Badge>}</TableCell>
@@ -902,10 +1156,58 @@ export function SourcingPage() {
             <button onClick={() => setPage((p) => Math.min(leadPagination.totalPages, p + 1))} disabled={leadPagination.page >= leadPagination.totalPages} className="rounded border border-slate-200 px-2 py-0.5 disabled:opacity-40 hover:bg-slate-50">下一页</button>
             <button onClick={() => setPage(leadPagination.totalPages)} disabled={leadPagination.page >= leadPagination.totalPages} className="rounded border border-slate-200 px-2 py-0.5 disabled:opacity-40 hover:bg-slate-50">末页 »</button>
           </div>
-          <span>数据仅用于产品演示与初筛，不替代尽调</span>
+          <span>数据仅用于线索初筛，不替代尽调</span>
         </div>
         </Card>
       </div>
+
+      <Modal
+        open={showImport}
+        title="公共线索批量导入"
+        width="max-w-6xl"
+        onClose={() => !importBusy && setShowImport(false)}
+      >
+        <div className="space-y-4">
+          <div className="flex items-center justify-between rounded-xl border border-blue-100 bg-blue-50 px-4 py-3">
+            <div><p className="text-sm font-medium text-blue-900">先按模板整理数据，再上传预检</p><p className="mt-1 text-xs text-blue-700">预检不会写入线索池；全部行通过后才可确认导入。单次最多 2000 行。</p></div>
+            <a href="/api/leads/import-template" className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50"><Download className="h-4 w-4" />下载模板</a>
+          </div>
+          {!importBatch && <FileUpload accept=".xls,.xlsx,.xlsm,.csv" onFile={(file) => { void previewImport(file) }} />}
+          {importBusy && <div className="flex items-center gap-2 rounded-lg bg-slate-50 p-3 text-sm text-slate-600"><RefreshCw className="h-4 w-4 animate-spin" />正在校验文件、表头和逐行数据…</div>}
+          {importBatch && <>
+            <div className="grid grid-cols-4 gap-3">
+              {[['总行数', importBatch.totalRows, 'slate'], ['可导入', importBatch.validRows, 'green'], ['预检错误', importBatch.errorRows, 'amber'], ['待复核 / 失败', `${importBatch.reviewRows} / ${importBatch.failedRows}`, 'purple']].map(([label, value, tone]) => <div key={String(label)} className="rounded-xl border border-slate-200 p-3"><p className="text-xs text-slate-400">{label}</p><div className="mt-2"><Badge tone={tone as 'slate' | 'green' | 'amber' | 'purple'}>{value}</Badge></div></div>)}
+            </div>
+            <div className="max-h-[420px] overflow-auto rounded-xl border border-slate-200">
+              <table className="w-full text-left text-xs">
+                <thead className="sticky top-0 bg-slate-50 text-slate-500"><tr><th className="px-3 py-2">行号</th><th className="px-3 py-2">项目 / 公司</th><th className="px-3 py-2">行业 / 地区</th><th className="px-3 py-2">状态</th><th className="px-3 py-2">问题或结果</th></tr></thead>
+                <tbody>{importBatch.rows.map((row) => <tr key={row.id} className="border-t border-slate-100 align-top"><td className="px-3 py-2 text-slate-400">{row.rowNumber}</td><td className="px-3 py-2"><p className="font-medium text-slate-700">{row.normalized.name || '—'}</p><p className="mt-1 text-slate-400">{row.normalized.companyName || ''}</p></td><td className="px-3 py-2 text-slate-500">{[row.normalized.industry, row.normalized.businessRegion].filter(Boolean).join(' · ') || '—'}</td><td className="px-3 py-2"><Badge tone={row.errors.length || row.status === 'failed' ? 'amber' : row.status === 'review' ? 'purple' : row.status === 'committed' ? 'green' : 'blue'}>{row.status === 'valid' ? '可导入' : row.status === 'invalid' ? '需修复' : row.status === 'committed' ? '已入池' : row.status === 'review' ? '待复核' : row.status === 'failed' ? '失败' : row.status}</Badge></td><td className="max-w-[420px] px-3 py-2 text-slate-500">{row.errors.join('；') || row.message || '—'}</td></tr>)}</tbody>
+              </table>
+            </div>
+            {importBatch.errorRows > 0 && <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">请在原文件中修正上述错误后重新上传。为防止半批脏数据，有预检错误时不会开放确认导入。</p>}
+            <div className="flex justify-between gap-2">
+              <Button variant="secondary" disabled={importBusy} onClick={() => setImportBatch(null)}>重新选择文件</Button>
+              <div className="flex gap-2"><Button variant="secondary" disabled={importBusy} onClick={() => setShowImport(false)}>关闭</Button><Button loading={importBusy} disabled={!!importBatch.errorRows || importBatch.status === 'completed'} onClick={() => { void commitImport() }}><FileSpreadsheet className="h-4 w-4" />{importBatch.status === 'completed' ? '已完成' : '确认导入'}</Button></div>
+            </div>
+          </>}
+        </div>
+      </Modal>
+
+      <Modal open={showBpUpload} title="上传 BP 到公共线索池" onClose={() => !bpBusy && setShowBpUpload(false)}>
+        <div className="space-y-4">
+          <p className="text-sm leading-6 text-slate-500">支持 PDF、Word、PPT 和文本文件。服务端会校验真实文件类型、提取正文、识别主体并接入现有去重与人工复核链路；评分由后台真实任务生成。</p>
+          {!bpUpload && <FileUpload accept=".pdf,.doc,.docx,.ppt,.pptx,.txt,.md,.markdown" onFile={(file) => { void uploadBp(file) }} />}
+          {bpBusy && <div className="flex items-center gap-2 rounded-lg bg-slate-50 p-3 text-sm text-slate-600"><RefreshCw className="h-4 w-4 animate-spin" />正在读取并安全上传文件…</div>}
+          {bpUpload && <div className="rounded-xl border border-slate-200 p-4">
+            <div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="truncate font-medium text-slate-800" title={bpUpload.name}>{bpUpload.name}</p><p className="mt-1 text-xs text-slate-400">任务 {bpUpload.id} · 已尝试 {bpUpload.attempts} 次</p></div><Badge tone={bpUpload.status === 'ready' ? 'green' : bpUpload.status === 'review' ? 'purple' : ['failed', 'dead_letter'].includes(bpUpload.status) ? 'amber' : 'blue'}>{bpUpload.status === 'queued' ? '排队中' : bpUpload.status === 'processing' ? '解析中' : bpUpload.status === 'retrying' ? '自动重试' : bpUpload.status === 'review' ? '待人工复核' : bpUpload.status === 'ready' ? '已入池' : '解析失败'}</Badge></div>
+            <div className="mt-4"><div className="mb-1 flex justify-between text-xs text-slate-400"><span>{bpUpload.stage === 'extracting' ? '提取正文' : bpUpload.stage === 'structuring' ? '结构化并匹配主体' : bpUpload.stage === 'retry_wait' ? '等待自动重试' : bpUpload.stage === 'ready' ? '已完成' : bpUpload.stage === 'review' ? '等待人工复核' : bpUpload.stage}</span><span>{bpUpload.progress}%</span></div><ProgressBar value={bpUpload.progress} /></div>
+            {bpUpload.error && <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-700">{bpUpload.error}</p>}
+            {bpUpload.status === 'review' && <Button className="mt-4" variant="secondary" onClick={() => { setShowBpUpload(false); void openReviewQueue() }}><ClipboardCheck className="h-4 w-4" />打开人工复核</Button>}
+            {['failed', 'dead_letter'].includes(bpUpload.status) && <Button className="mt-4" loading={bpBusy} onClick={() => { void retryBp() }}><RefreshCw className="h-4 w-4" />重新解析</Button>}
+          </div>}
+          <div className="flex justify-end"><Button variant="secondary" onClick={() => setShowBpUpload(false)} disabled={bpBusy}>关闭</Button></div>
+        </div>
+      </Modal>
 
       <Modal open={showCollect} title="AI 情报采集" onClose={() => !collecting && setShowCollect(false)}>
         <div className="space-y-4">
@@ -916,10 +1218,68 @@ export function SourcingPage() {
         </div>
       </Modal>
 
-      <Modal open={showUpload} title="上传并解析 BP" onClose={() => { if (!upload || upload.progress === 100) setShowUpload(false) }}>
-        <FileUpload onFile={parseFile} accept=".pdf,.ppt,.pptx,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg" />
-        {upload && <div className="mt-5 rounded-xl border border-slate-200 p-4"><div className="flex items-center gap-3"><span className="grid h-9 w-9 place-items-center rounded-lg bg-blue-50 text-blue-600"><FileUp className="h-4 w-4" /></span><div className="min-w-0 flex-1"><p className="truncate text-sm font-medium text-slate-700">{upload.name}</p><p className="mt-1 text-xs text-slate-400">{upload.stage}</p></div><span className="text-sm font-medium text-brand-600">{upload.progress}%</span></div><div className="mt-4"><ProgressBar value={upload.progress} tone={upload.progress === 100 ? 'green' : 'blue'} /></div></div>}
-        <div className="mt-4 flex items-start gap-2 rounded-lg bg-brand-50 p-3 text-xs leading-5 text-brand-700"><Bot className="mt-0.5 h-4 w-4 shrink-0" />解析结果会先标记为“企业材料 / 待核验”。官网、监管、客户访谈等来源补齐后，才提升核验等级。</div>
+      <Modal
+        open={showReviews}
+        title={`线索人工复核 · 待处理 ${reviewTotal} 条`}
+        width="max-w-6xl"
+        onClose={() => !reviewSaving && setShowReviews(false)}
+      >
+        <div className="grid min-h-[520px] grid-cols-[320px_1fr] gap-5">
+          <div className="border-r border-slate-100 pr-4">
+            <div className="mb-3 flex items-center justify-between">
+              <p className="text-xs text-slate-500">只显示分配给你或尚未分配的 MySQL 待办</p>
+              <button disabled={reviewLoading} onClick={loadPendingReviews} className="text-xs text-brand-600 disabled:opacity-50">刷新</button>
+            </div>
+            <div className="max-h-[500px] space-y-2 overflow-y-auto pr-1">
+              {reviewLoading && !reviews.length ? <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-500">正在加载…</p> : null}
+              {!reviewLoading && !reviews.length ? <p className="rounded-lg bg-emerald-50 p-4 text-sm text-emerald-700">当前没有待处理复核。</p> : null}
+              {reviews.map((review) => {
+                const title = review.triggerDecision.subjectName
+                  || String(review.event.payload.title || review.event.sourceId || '未命名候选')
+                return <button
+                  key={review.id}
+                  onClick={() => chooseReview(review)}
+                  className={`w-full rounded-xl border p-3 text-left transition ${selectedReview?.id === review.id ? 'border-brand-300 bg-brand-50' : 'border-slate-200 hover:border-brand-200 hover:bg-slate-50'}`}
+                >
+                  <div className="flex items-center justify-between gap-2"><span className="truncate text-sm font-medium text-slate-800">{title}</span><Badge tone="amber">待复核</Badge></div>
+                  <p className="mt-2 line-clamp-2 text-xs leading-5 text-slate-500">{review.reason}</p>
+                  <p className="mt-2 text-[11px] text-slate-400">{review.event.sourceType} · {formatPoolEnteredAt(review.createdAt)}</p>
+                </button>
+              })}
+            </div>
+          </div>
+
+          {!selectedReview || !reviewForm ? <div className="grid place-items-center rounded-xl border border-dashed border-slate-200 text-sm text-slate-400">从左侧选择一条待办，核对原始材料后提交结论。</div> : <div className="grid grid-cols-2 gap-5">
+            <div className="space-y-4">
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <div className="flex items-center justify-between"><p className="text-sm font-semibold text-slate-800">不可变原始材料</p><Badge tone="slate">{selectedReview.event.sourceType}</Badge></div>
+                <pre className="mt-3 max-h-[390px] whitespace-pre-wrap break-words text-xs leading-6 text-slate-600">{reviewPayloadText(selectedReview) || JSON.stringify(selectedReview.event.payload, null, 2).slice(0, 24_000)}</pre>
+              </div>
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-800">
+                Agent 原结论：{selectedReview.triggerDecision.reason}。人工结论会新增 Decision，不会覆盖或删除 Agent 历史。
+              </div>
+            </div>
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <button onClick={() => setReviewForm({ ...reviewForm, outcome: 'accept' })} className={`rounded-lg border px-3 py-2 text-sm ${reviewForm.outcome === 'accept' ? 'border-emerald-400 bg-emerald-50 text-emerald-700' : 'border-slate-200 text-slate-500'}`}>接受并入池</button>
+                <button onClick={() => setReviewForm({ ...reviewForm, outcome: 'reject' })} className={`rounded-lg border px-3 py-2 text-sm ${reviewForm.outcome === 'reject' ? 'border-red-300 bg-red-50 text-red-700' : 'border-slate-200 text-slate-500'}`}>拒绝入池</button>
+              </div>
+              {reviewForm.outcome === 'accept' ? <>
+                <div className="grid grid-cols-2 gap-3">
+                  <label><span className="label">主体类型</span><select className="input mt-1 w-full" value={reviewForm.subjectType} onChange={(event) => setReviewForm({ ...reviewForm, subjectType: event.target.value as LeadReviewForm['subjectType'] })}><option value="company">公司</option><option value="project">项目</option><option value="team">团队</option><option value="lab">实验室</option><option value="paper">论文</option></select></label>
+                  <label><span className="label">置信度（0-100）</span><input className="input mt-1 w-full" type="number" min="0" max="100" value={reviewForm.confidence} onChange={(event) => setReviewForm({ ...reviewForm, confidence: event.target.value })} /></label>
+                </div>
+                <label className="block"><span className="label">原文主体名称</span><input className="input mt-1 w-full" value={reviewForm.subjectName} onChange={(event) => setReviewForm({ ...reviewForm, subjectName: event.target.value })} /></label>
+                <label className="block"><span className="label">工商全称（可选）</span><input className="input mt-1 w-full" value={reviewForm.legalName} onChange={(event) => setReviewForm({ ...reviewForm, legalName: event.target.value })} /></label>
+                {selectedReview.existingLeads.length ? <label className="block"><span className="label">同名线索处置</span><select className="input mt-1 w-full" value={reviewForm.targetLeadId} onChange={(event) => setReviewForm({ ...reviewForm, targetLeadId: event.target.value })}><option value="">由宿主按唯一匹配处理</option>{selectedReview.existingLeads.map((lead) => <option key={lead.id} value={lead.id}>合并到：{lead.name}（{lead.poolStatus}）</option>)}</select></label> : null}
+                <label className="block"><span className="label">事实主张</span><input className="input mt-1 w-full" value={reviewForm.claim} onChange={(event) => setReviewForm({ ...reviewForm, claim: event.target.value })} /></label>
+                <label className="block"><span className="label">原文连续引文</span><textarea className="input mt-1 min-h-24 w-full" placeholder="从左侧不可变原始材料复制连续原文；宿主会逐字校验" value={reviewForm.quote} onChange={(event) => setReviewForm({ ...reviewForm, quote: event.target.value })} /></label>
+              </> : null}
+              <label className="block"><span className="label">人工处理理由</span><textarea className="input mt-1 min-h-20 w-full" value={reviewForm.reason} onChange={(event) => setReviewForm({ ...reviewForm, reason: event.target.value })} /></label>
+              <div className="flex justify-end gap-2 pt-2"><Button variant="secondary" onClick={() => { setSelectedReview(null); setReviewForm(null) }} disabled={reviewSaving}>取消</Button><Button onClick={resolveSelectedReview} loading={reviewSaving}><ClipboardCheck className="h-4 w-4" />提交不可变结论</Button></div>
+            </div>
+          </div>}
+        </div>
       </Modal>
 
       <Drawer
@@ -928,7 +1288,6 @@ export function SourcingPage() {
         onClose={() => setSelected(null)}
         width="w-[900px]"
         footer={selected && <>
-          <Button variant="secondary" onClick={() => { updateLead(selected.id, { lastVerifiedAt: new Date().toISOString().slice(0, 10) }); showToast('已刷新核验时间；源数据未被无依据改写') }}><RefreshCw className="h-4 w-4" />刷新核验</Button>
           <Button
             variant="secondary"
             onClick={enrichSelectedLead}

@@ -1,38 +1,33 @@
 # Project Discovery Radar
 
-项目发现雷达是中台的本地多信源聚合服务，提供公众号、创投新闻、微信群聊和
-arXiv 候选项目的统一查询接口。
+项目发现雷达是中台的多信源采集适配器，处理公众号、创投新闻、微信群聊和
+arXiv 候选项目。生产运行采用单次 Job，由主项目按需启动，不再常驻监听端口。
 
-## 本地启动
+## 本地运行
 
 ```bash
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
-./start.sh
+.venv/bin/python -B job.py health
+.venv/bin/python -B job.py candidates --limit 100
 ```
 
-默认只监听 `127.0.0.1:8121`。主项目通过
-`RADAR_BASE_URL=http://127.0.0.1:8121` 调用。
+主项目通过 `npm run start:app` 统一调度这些 Job。`job.py` 每次执行一个动作，
+在标准输出写入一行 JSON 后退出；不会触发 FastAPI 启动事件或常驻采集循环。
 
-常用检查：
+常用命令：
 
 ```bash
-curl http://127.0.0.1:8121/api/health
-curl http://127.0.0.1:8121/api/summary
+.venv/bin/python -B job.py health
+.venv/bin/python -B job.py candidates --limit 100
+.venv/bin/python -B job.py auto
+.venv/bin/python -B job.py wechat-daily
+.venv/bin/python -B job.py wechat-retry
+.venv/bin/python -B job.py wechat-institution
 ```
 
-`/api/health` 默认执行带 5 分钟缓存的 GSData 最小鉴权探测；只检查本地配置时可用：
-
-```bash
-curl 'http://127.0.0.1:8121/api/health?deep=false'
-```
-
-候选记录默认保持原有的评分排序。主系统增量同步使用采集时间排序和游标分页：
-
-```bash
-curl 'http://127.0.0.1:8121/api/candidates?sort=collected&limit=100'
-# 将响应中的 next_cursor 作为下一页 cursor 参数
-```
+`app.py` 中的 FastAPI 路由仅保留为旧部署的数据导出/回滚兼容面，不属于当前
+生产启动链。不要再配置 `RADAR_BASE_URL`、`PORT=8121` 或独立 Radar systemd。
 
 ## 持久化数据
 
@@ -89,17 +84,12 @@ bash deploy.sh radar-configure
 | `RADAR_SYNC_PAGE_SIZE` | `50` | 每页同步候选数 |
 | `RADAR_SYNC_INCREMENTAL_PAGES` | `4` | 每轮优先扫描的最新数据页数 |
 | `RADAR_SYNC_BACKFILL_PAGES` | `1` | 每轮继续回填的历史数据页数 |
-| `PORT` | `8121` | 服务端口 |
-| `HOST` | `127.0.0.1` | 监听地址 |
-
-生产部署会安装 `cybernaut-radar-sync.timer`，每 30 分钟把 Radar JSONL
-中的最新候选同步到主数据库，同时通过数据库游标逐轮完成历史数据回填。
+生产只安装 `cybernaut-app.service`。API 进程内的 MySQL 持久化调度器每 30 分钟
+串行运行采集和同步任务，同时通过数据库游标逐轮完成历史数据回填。任务领取、
+续租、运行历史、重试和死信保存在 `runtime_jobs` / `runtime_job_runs`。
 
 公众号采集每天 08:30 执行全量窗口扫描；机构公众号会优先处理并独立定时
-刷新。网络失败的账号进入补采队列，每 30 分钟重试。以下接口用于区分
-“最后检查时间”“最后发文时间”和“最后有效线索时间”：
-
-```bash
-curl 'http://127.0.0.1:8121/api/wechat-api/daily-status'
-curl 'http://127.0.0.1:8121/api/wechat-api/source-status?group=机构'
-```
+刷新。网络失败的账号进入补采队列，每 30 分钟由单次 Job 重试。调度与运行记录
+已经进入 MySQL Job/Lease；候选原始事件、当前投影、来源和采集状态也进入 MySQL。
+每次 Python Job 前会从 MySQL 物化工作状态，结束后再幂等回写，因此数据目录不再是
+主 API 的在线事实源，但仍需作为原始文件归档纳入备份。

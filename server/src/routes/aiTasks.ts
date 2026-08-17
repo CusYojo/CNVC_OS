@@ -35,6 +35,8 @@ import {
   updateAiTemplateAnalysisProgress,
 } from '../services/aiTemplateAnalysisProgressService.js'
 import { createInvestmentPptTaskFromConversation } from '../services/aiConversationPptIntentService.js'
+import { formatShanghaiDateKey } from '../utils/shanghaiTime.js'
+import { writeAudit } from '../services/auditService.js'
 
 export const aiTasksRouter = Router()
 
@@ -58,7 +60,7 @@ const createSchema = z.object({
   const cutoff = body.parameters.sourceCutoffDate
   if (typeof cutoff !== 'string' || !dateSchema.safeParse(cutoff).success) {
     ctx.addIssue({ code: 'custom', path: ['parameters', 'sourceCutoffDate'], message: '资料截止日必填，格式为 YYYY-MM-DD' })
-  } else if (cutoff > new Date().toISOString().slice(0, 10)) {
+  } else if (cutoff > formatShanghaiDateKey(new Date())) {
     ctx.addIssue({ code: 'custom', path: ['parameters', 'sourceCutoffDate'], message: '资料截止日不能晚于今天' })
   }
   const requireText = (field: string, message: string) => {
@@ -150,7 +152,7 @@ const investmentPptPreparationSchema = z.object({
   userInstructions: z.string().trim().max(2_000).optional(),
   idempotencyKey: z.string().trim().min(8).max(128),
 }).superRefine((body, ctx) => {
-  if (body.sourceCutoffDate > new Date().toISOString().slice(0, 10)) {
+  if (body.sourceCutoffDate > formatShanghaiDateKey(new Date())) {
     ctx.addIssue({
       code: 'custom',
       path: ['sourceCutoffDate'],
@@ -172,7 +174,7 @@ const conversationPptIntentSchema = z.object({
   sourceCutoffDate: dateSchema,
   idempotencyKey: z.string().trim().min(8).max(128),
 }).superRefine((body, ctx) => {
-  if (body.sourceCutoffDate > new Date().toISOString().slice(0, 10)) {
+  if (body.sourceCutoffDate > formatShanghaiDateKey(new Date())) {
     ctx.addIssue({
       code: 'custom',
       path: ['sourceCutoffDate'],
@@ -187,7 +189,7 @@ const qaSchema = z.object({
   question: z.string().trim().min(2, '问题至少需要 2 个字符').max(2000, '问题不能超过 2000 个字符'),
   sourceCutoffDate: dateSchema.optional(),
 }).superRefine((body, ctx) => {
-  if (body.sourceCutoffDate && body.sourceCutoffDate > new Date().toISOString().slice(0, 10)) {
+  if (body.sourceCutoffDate && body.sourceCutoffDate > formatShanghaiDateKey(new Date())) {
     ctx.addIssue({
       code: 'custom',
       path: ['sourceCutoffDate'],
@@ -266,15 +268,22 @@ aiTasksRouter.post('/templates/analyze', async (req: AuthedRequest, res, next) =
         })
       }
     }
-    startAiTemplateAnalysisProgress({
+    const progressRegistration = await startAiTemplateAnalysisProgress({
       id: progressId,
       userId: user.uid,
+      projectId: body.projectId,
+      taskId: body.taskId,
       fileName: body.name,
+      purpose: body.purpose ?? 'custom_template_document',
     })
+    if (!progressRegistration.created) {
+      res.status(202).json(progressRegistration.progress)
+      return
+    }
     setImmediate(() => {
       void createAiCustomTemplate(user, body, {
         onProgress: async (update) => {
-          updateAiTemplateAnalysisProgress(progressId, update)
+          await updateAiTemplateAnalysisProgress(progressId, update)
           if (body.taskId) {
             await updateInvestmentPptPreparationTask(
               user.uid,
@@ -290,10 +299,10 @@ aiTasksRouter.post('/templates/analyze', async (req: AuthedRequest, res, next) =
             originalFileName: template.originalFileName,
           })
         }
-        completeAiTemplateAnalysisProgress(progressId, template)
+        await completeAiTemplateAnalysisProgress(progressId, template)
       }).catch(async (error) => {
         const message = (error as Error).message || '模板分析失败'
-        failAiTemplateAnalysisProgress(progressId, message)
+        await failAiTemplateAnalysisProgress(progressId, message)
         if (body.taskId) {
           await failInvestmentPptPreparationTask(
             user.uid,
@@ -323,9 +332,9 @@ aiTasksRouter.post('/templates/analyze', async (req: AuthedRequest, res, next) =
   }
 })
 
-aiTasksRouter.get('/templates/analyze-progress/:id', (req: AuthedRequest, res, next) => {
+aiTasksRouter.get('/templates/analyze-progress/:id', async (req: AuthedRequest, res, next) => {
   try {
-    const progress = getAiTemplateAnalysisProgress(
+    const progress = await getAiTemplateAnalysisProgress(
       req.user!.uid,
       idSchema.parse(req.params.id),
     )
@@ -373,7 +382,7 @@ aiTasksRouter.post('/qa', async (req: AuthedRequest, res, next) => {
     const body = qaSchema.parse(req.body ?? {})
     const answer = await createProjectQaAnswer(userFrom(req), {
       ...body,
-      sourceCutoffDate: body.sourceCutoffDate ?? new Date().toISOString().slice(0, 10),
+      sourceCutoffDate: body.sourceCutoffDate ?? formatShanghaiDateKey(new Date()),
     })
     res.status(201).json(answer)
   } catch (error) { next(error) }
@@ -492,6 +501,11 @@ aiTasksRouter.get('/artifacts/:id/download', async (req: AuthedRequest, res, nex
       res.status(404).json({ code: 'NOT_FOUND', message: '产物不存在或尚未通过质量检查', details: null })
       return
     }
+    await writeAudit({
+      userId: req.user!.uid, userName: req.user!.name, module: 'AI 智能助手', action: '下载AI产物',
+      target: `ai-artifact:${result.artifact.id};task:${result.artifact.taskId};bytes:${result.size}`,
+      ip: req.ip,
+    })
     res.setHeader('Content-Type', result.artifact.mimeType)
     res.setHeader('Content-Length', String(result.size))
     res.setHeader('Content-Disposition', contentDisposition(result.artifact.fileName))
@@ -508,6 +522,11 @@ aiTasksRouter.get('/artifacts/:id/preview', async (req: AuthedRequest, res, next
       res.status(404).json({ code: 'NOT_FOUND', message: '预览不存在或不可用', details: null })
       return
     }
+    await writeAudit({
+      userId: req.user!.uid, userName: req.user!.name, module: 'AI 智能助手', action: '预览AI产物',
+      target: `ai-artifact:${result.artifact.id};task:${result.artifact.taskId}`,
+      ip: req.ip,
+    })
     res.setHeader('Cache-Control', 'private, no-store')
     res.json({ fileName: result.artifact.fileName, content: result.content })
   } catch (error) { next(error) }

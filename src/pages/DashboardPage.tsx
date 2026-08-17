@@ -8,7 +8,6 @@ import {
   ChevronRight,
   CircleDot,
   ClipboardCheck,
-  FileCheck2,
   FileText,
   FolderKanban,
   ListTodo,
@@ -24,11 +23,13 @@ import { useNavigate } from 'react-router-dom'
 import { ProjectModal } from '../components/ProjectModal'
 import { useToast } from '../components/Toast'
 import { Badge, Button, Card, ProgressBar, RiskBadge, StageBadge, StatusBadge } from '../components/ui'
+import { formatShanghaiDate, shanghaiDateKey } from '../lib/dateTime'
+import { getFileTypeLabel } from '../lib/fileType'
 
 const quickActions = [
   { label: '项目获取', desc: '上传 BP 并自动解析', icon: UploadCloud, color: 'text-blue-600 bg-blue-50', to: '/sourcing' },
   { label: 'AI 问答', desc: '检索机构投资知识', icon: Bot, color: 'text-violet-600 bg-violet-50', to: '/ai' },
-  { label: '生成材料', desc: '快速准备投委会', icon: FileText, color: 'text-amber-600 bg-amber-50', to: '/materials' },
+  { label: '生成材料', desc: '进入统一 AI 任务中心', icon: FileText, color: 'text-amber-600 bg-amber-50', to: '/ai' },
   { label: '会议纪要', desc: '提取结论与待办', icon: ClipboardCheck, color: 'text-emerald-600 bg-emerald-50', to: '/meetings' },
 ]
 
@@ -42,13 +43,13 @@ export function DashboardPage() {
   const files = useAppStore((state) => state.files)
   const meetings = useAppStore((state) => state.meetings)
   const risks = useAppStore((state) => state.risks)
-  const materialJobs = useAppStore((state) => state.materialJobs)
   const approvalRequests = useAppStore((state) => state.approvalRequests)
   const updateTodo = useAppStore((state) => state.updateTodo)
   const addTodo = useAppStore((state) => state.addTodo)
   const deleteTodo = useAppStore((state) => state.deleteTodo)
   const [newTodoTitle, setNewTodoTitle] = useState('')
-  const activeTodos = todos.filter((todo) => todo.status !== '已完成').slice(0, 5)
+  const allActiveTodos = todos.filter((todo) => todo.status !== '已完成')
+  const activeTodos = allActiveTodos.slice(0, 5)
 
   const handleAddTodo = async () => {
     const title = newTodoTitle.trim()
@@ -78,14 +79,22 @@ export function DashboardPage() {
   }
   const highRisks = risks.filter((risk) => risk.level === '高' && risk.status !== '已关闭')
   const keyProjects = projects.filter((project) => !['放弃', '退出'].includes(project.stage)).sort((a, b) => b.score - a.score).slice(0, 4)
-  const date = new Intl.DateTimeFormat('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' }).format(new Date())
+  const date = formatShanghaiDate(new Date(), { month: 'long', day: 'numeric', weekday: 'long' })
+  const today = shanghaiDateKey()
+  const weekAgo = Date.now() - 7 * 86_400_000
+  const myProjects = projects.filter((project) => project.owner === currentUser.name)
+  const projectsCreatedThisWeek = myProjects.filter((project) => {
+    const createdAt = Date.parse(project.createdAt)
+    return Number.isFinite(createdAt) && createdAt >= weekAgo
+  }).length
+  const dueToday = allActiveTodos.filter((todo) => todo.dueDate === today).length
+  const priorityTodoCount = allActiveTodos.filter((todo) => todo.priority === '高').length
 
   const stats = [
-    { label: '我的项目', value: projects.filter((project) => project.owner === currentUser.name).length, suffix: '个', icon: FolderKanban, color: 'text-blue-600 bg-blue-50', note: '本周新增 2 个', to: '/projects' },
+    { label: '我的项目', value: myProjects.length, suffix: '个', icon: FolderKanban, color: 'text-blue-600 bg-blue-50', note: `近 7 天新增 ${projectsCreatedThisWeek} 个`, to: '/projects' },
     { label: '待处理流程', value: approvalRequests.filter((item) => item.status === '审批中').length, suffix: '项', icon: CircleDot, color: 'text-violet-600 bg-violet-50', note: '项目阶段由 OA 结果同步', to: '/workflow?view=pending' },
-    { label: '待生成材料', value: materialJobs.filter((job) => job.status === '生成中' || job.status === '待处理').length + 2, suffix: '份', icon: FileCheck2, color: 'text-amber-600 bg-amber-50', note: '本周已生成 5 份', to: '/materials' },
     { label: '风险提醒', value: risks.filter((risk) => risk.status !== '已关闭').length, suffix: '条', icon: ShieldAlert, color: 'text-rose-600 bg-rose-50', note: `${highRisks.length} 条高风险`, to: '/risks' },
-    { label: '我的待办', value: activeTodos.length, suffix: '项', icon: ListTodo, color: 'text-emerald-600 bg-emerald-50', note: '今日到期 2 项', to: '/workflow' },
+    { label: '我的待办', value: allActiveTodos.length, suffix: '项', icon: ListTodo, color: 'text-emerald-600 bg-emerald-50', note: `今日到期 ${dueToday} 项`, to: '/workflow' },
   ]
 
   return (
@@ -94,12 +103,12 @@ export function DashboardPage() {
         <div>
           <p className="text-sm text-slate-500">{date}</p>
           <h1 className="mt-1 text-[24px] font-semibold tracking-tight text-ink">早上好，{currentUser.name}</h1>
-          <p className="mt-1 text-sm text-slate-500">这里是你今天的投资工作概览，有 <strong className="font-medium text-rose-600">2 项</strong> 任务需要优先处理。</p>
+          <p className="mt-1 text-sm text-slate-500">这里是你今天的投资工作概览，有 <strong className="font-medium text-rose-600">{priorityTodoCount} 项</strong> 高优先级待办。</p>
         </div>
         <Button onClick={() => setShowCreate(true)}><Plus className="h-4 w-4" />创建项目</Button>
       </div>
 
-      <div className="mb-5 grid grid-cols-5 gap-3">
+      <div className="mb-5 grid grid-cols-4 gap-3">
         {stats.map((stat) => (
           <button key={stat.label} type="button" onClick={() => navigate(stat.to)} className="block w-full cursor-pointer rounded-xl border border-slate-200/90 bg-white p-4 text-left shadow-card transition hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-md">
             <div className="flex items-center justify-between"><div className={`grid h-9 w-9 place-items-center rounded-lg ${stat.color}`}><stat.icon className="h-[18px] w-[18px]" /></div><span className="text-[11px] text-slate-400">{stat.note}</span></div>
@@ -130,7 +139,15 @@ export function DashboardPage() {
               <div key={todo.id} className="group flex items-center gap-3 px-5 py-3.5 hover:bg-slate-50/70">
                 <button
                   aria-label={todo.type === '流程' ? '进入流程处理' : '完成待办'}
-                  onClick={() => todo.type === '流程' ? navigate(`/workflow?project=${todo.projectId}`) : (updateTodo(todo.id, { status: '已完成' }), showToast('待办已完成'))}
+                  onClick={async () => {
+                    if (todo.type === '流程') { navigate(`/workflow?project=${todo.projectId}`); return }
+                    try {
+                      await updateTodo(todo.id, { status: '已完成' })
+                      showToast('待办已完成')
+                    } catch (error) {
+                      showToast(`更新失败：${(error as Error).message}`, 'error')
+                    }
+                  }}
                   className={`grid h-5 w-5 shrink-0 place-items-center rounded-full border ${todo.type === '流程' ? 'border-violet-300 bg-violet-50 text-violet-500' : 'border-slate-300 text-transparent hover:border-emerald-500 hover:bg-emerald-50 hover:text-emerald-500'}`}
                 >{todo.type === '流程' ? <CircleDot className="h-3.5 w-3.5" /> : <CheckCircle2 className="h-4 w-4" />}</button>
                 <button onClick={() => navigate(todo.type === '流程' ? `/workflow?project=${todo.projectId}` : `/projects/${todo.projectId}`)} className="min-w-0 flex-1 text-left">
@@ -170,7 +187,7 @@ export function DashboardPage() {
           <div className="grid grid-cols-2 divide-x divide-slate-100">
             <div className="p-4">
               <h3 className="mb-3 flex items-center gap-2 text-xs font-semibold text-slate-500"><FileText className="h-4 w-4 text-blue-500" />最近上传资料</h3>
-              <div className="space-y-3">{files.slice(0, 3).map((file) => <button key={file.id} onClick={() => file.projectId && navigate(`/projects/${file.projectId}?tab=files`)} className="flex w-full items-center gap-3 text-left"><span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-blue-50 text-[9px] font-semibold text-blue-600">{file.type}</span><span className="min-w-0 flex-1"><span className="block truncate text-xs font-medium text-slate-700">{file.name}</span><span className="mt-0.5 block text-[11px] text-slate-400">{file.uploader} · {file.uploadedAt?.slice(5, 16) ?? ''}</span></span><StatusBadge status={file.parseStatus} /></button>)}</div>
+              <div className="space-y-3">{files.slice(0, 3).map((file) => <button key={file.id} onClick={() => file.projectId && navigate(`/projects/${file.projectId}?tab=files`)} className="flex w-full items-center gap-3 text-left"><span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-blue-50 text-[9px] font-semibold text-blue-600">{getFileTypeLabel(file)}</span><span className="min-w-0 flex-1"><span className="block truncate text-xs font-medium text-slate-700">{file.name}</span><span className="mt-0.5 block text-[11px] text-slate-400">{file.uploader} · {file.uploadedAt?.slice(5, 16) ?? ''}</span></span><StatusBadge status={file.parseStatus} /></button>)}</div>
             </div>
             <div className="p-4">
               <h3 className="mb-3 flex items-center gap-2 text-xs font-semibold text-slate-500"><ClipboardCheck className="h-4 w-4 text-emerald-500" />最近会议</h3>

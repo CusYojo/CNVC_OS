@@ -1,8 +1,7 @@
-import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { access, mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
+import { homedir } from 'node:os'
 import path from 'node:path'
-import { promisify } from 'node:util'
 import {
   PROJECT_QA_ANSWER_HARD_FLOOR_CHARACTERS,
   projectQaAnswerCausalDepthScore,
@@ -14,8 +13,7 @@ import {
   getAiSkillDirectory,
   type LoadedAiSkill,
 } from './aiSkillService.js'
-
-const execFileAsync = promisify(execFile)
+import { execFileSupervised as execFileAsync } from '../runtime/supervisedProcessService.js'
 const REQUIRED_SKILL_NAME = 'generate-project-qa-report'
 const COMMAND_TIMEOUT_MS = 120_000
 
@@ -156,7 +154,16 @@ async function resolvePython() {
     path.resolve(process.cwd(), 'server', '.venv', 'bin', 'python'),
     path.resolve(process.cwd(), 'server', '.venv', 'bin', 'python3'),
     'python3',
-    '/Users/lh/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3',
+    path.join(
+      homedir(),
+      '.cache',
+      'codex-runtimes',
+      'codex-primary-runtime',
+      'dependencies',
+      'python',
+      'bin',
+      'python3',
+    ),
   ].filter((value): value is string => Boolean(value))
   for (const candidate of [...new Set(candidates)]) {
     if (await commandWorks(candidate, ['-c', 'import docx'])) return candidate
@@ -235,14 +242,19 @@ async function runMarkdownValidation(input: {
   }
 }
 
-async function renderEveryPage(input: {
-  docxPath: string
-  visualDirectory: string
-  expectedMinimumPages: number
-}) {
-  const bundledBin = '/Users/lh/.cache/codex-runtimes/codex-primary-runtime/dependencies/bin/override'
+export async function resolveProjectQaRenderCommands() {
+  const bundledDependencies = path.join(
+    homedir(),
+    '.cache',
+    'codex-runtimes',
+    'codex-primary-runtime',
+    'dependencies',
+  )
+  const bundledBin = path.join(bundledDependencies, 'bin', 'override')
+  const bundledPopplerBin = path.join(bundledDependencies, 'native', 'poppler', 'poppler', 'bin')
   const soffice = await resolveCommand([
     process.env.AI_QA_SOFFICE_BINARY,
+    process.env.AI_PDF_TO_PPT_LIBREOFFICE,
     'soffice',
     path.join(bundledBin, 'soffice'),
     '/Applications/LibreOffice.app/Contents/MacOS/soffice',
@@ -250,6 +262,7 @@ async function renderEveryPage(input: {
   ], ['--version'])
   const pdftoppm = await resolveCommand([
     process.env.AI_QA_PDFTOPPM_BINARY,
+    process.env.AI_PDF_TO_PPT_PDFTOPPM,
     'pdftoppm',
     path.join(bundledBin, 'pdftoppm'),
     '/opt/homebrew/bin/pdftoppm',
@@ -257,11 +270,22 @@ async function renderEveryPage(input: {
   const pdffonts = await resolveCommand([
     process.env.AI_QA_PDFFONTS_BINARY,
     'pdffonts',
-    '/Users/lh/.cache/codex-runtimes/codex-primary-runtime/dependencies/native/poppler/poppler/bin/pdffonts',
+    path.join(bundledPopplerBin, 'pdffonts'),
     '/opt/homebrew/bin/pdffonts',
   ], ['-v'])
+  return { soffice, pdftoppm, pdffonts }
+}
+
+async function renderEveryPage(input: {
+  docxPath: string
+  visualDirectory: string
+  expectedMinimumPages: number
+}) {
+  const { soffice, pdftoppm, pdffonts } = await resolveProjectQaRenderCommands()
   if (!soffice || !pdftoppm || !pdffonts) {
-    throw new Error('generate-project-qa-report 缺少 DOCX 逐页渲染环境（soffice/pdftoppm/pdffonts）')
+    throw new Error(
+      `generate-project-qa-report 缺少 DOCX 逐页渲染环境（soffice=${Boolean(soffice)}、pdftoppm=${Boolean(pdftoppm)}、pdffonts=${Boolean(pdffonts)}）`,
+    )
   }
   await mkdir(input.visualDirectory, { recursive: true })
   const libreOfficeProfile = path.join(input.visualDirectory, 'libreoffice-profile')

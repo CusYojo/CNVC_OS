@@ -2,16 +2,16 @@ import { createHash, randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import { and, desc, eq, isNull, or } from 'drizzle-orm'
 import JSZip from 'jszip'
-import { db } from '../db/client.js'
+import type {
+  AiCustomTemplateAnalysis,
+  AiCustomTemplateRecord,
+} from '../repositories/aiTaskRepository.js'
 import {
-  aiCustomTemplates,
-  auditLogs,
-  chatConversations,
-  projects,
-  type AiCustomTemplateAnalysis,
-} from '../db/schema.js'
+  agentConversationRepository,
+  aiTaskRepository,
+  identityRepositories,
+} from '../repositories/index.js'
 import {
   AI_TEMPLATE_DRIVEN_SKILL_NAME,
   getAiSkillDirectory,
@@ -537,7 +537,7 @@ async function assertProjectAndConversationAccess(
   projectId: string,
   conversationId?: string,
 ) {
-  const [project] = await db.select().from(projects).where(eq(projects.id, projectId)).limit(1)
+  const project = await identityRepositories.permissions.findProjectById(projectId)
   if (!project) throw typedError('项目不存在', 404, 'NOT_FOUND')
   const collaborators = Array.isArray(project.collaborators) ? project.collaborators : []
   const allowed = user.role === '系统管理员'
@@ -547,12 +547,7 @@ async function assertProjectAndConversationAccess(
     || collaborators.includes(user.name)
   if (!allowed) throw typedError('无权访问该项目', 403, 'FORBIDDEN')
   if (conversationId) {
-    const [conversation] = await db.select().from(chatConversations)
-      .where(and(
-        eq(chatConversations.id, conversationId),
-        eq(chatConversations.userId, user.uid),
-      ))
-      .limit(1)
+    const conversation = await agentConversationRepository.findChatByIdForUser(user.uid, conversationId)
     if (!conversation) throw typedError('会话不存在或不属于当前用户', 404, 'CONVERSATION_NOT_FOUND')
     if (conversation.projectId !== projectId) {
       throw typedError('会话所属项目与模板项目不一致', 409, 'CONVERSATION_PROJECT_MISMATCH')
@@ -561,7 +556,7 @@ async function assertProjectAndConversationAccess(
   return project
 }
 
-function publicTemplate(row: typeof aiCustomTemplates.$inferSelect) {
+function publicTemplate(row: AiCustomTemplateRecord) {
   const {
     storagePath: _storagePath,
     skillName: _skillName,
@@ -705,7 +700,7 @@ export async function createAiCustomTemplate(user: TemplateUser, input: {
     const mimeType = parsed.outputFormat === 'pptx'
       ? 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
       : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-    const [row] = await db.insert(aiCustomTemplates).values({
+    const row = await aiTaskRepository.createCustomTemplateWithAudit({
       id: templateId,
       userId: user.uid,
       projectId: input.projectId,
@@ -721,8 +716,7 @@ export async function createAiCustomTemplate(user: TemplateUser, input: {
       skillPath: getAiSkillDirectory(skillName),
       skillVersion: skill.version,
       status: 'succeeded',
-    }).returning()
-    await db.insert(auditLogs).values({
+    }, {
       userId: user.uid,
       userName: user.name,
       module: 'AI 智能助手',
@@ -742,13 +736,7 @@ export async function listAiCustomTemplates(
   userId: string,
   options: { projectId?: string; conversationId?: string } = {},
 ) {
-  const conditions = [eq(aiCustomTemplates.userId, userId)]
-  if (options.projectId) conditions.push(eq(aiCustomTemplates.projectId, options.projectId))
-  if (options.conversationId) conditions.push(eq(aiCustomTemplates.conversationId, options.conversationId))
-  const rows = await db.select().from(aiCustomTemplates)
-    .where(and(...conditions))
-    .orderBy(desc(aiCustomTemplates.createdAt))
-    .limit(50)
+  const rows = await aiTaskRepository.listCustomTemplates({ userId, ...options, limit: 50 })
   return rows.map(publicTemplate)
 }
 
@@ -756,9 +744,7 @@ export async function getAiCustomTemplate(
   userId: string,
   templateId: string,
 ) {
-  const [row] = await db.select().from(aiCustomTemplates)
-    .where(and(eq(aiCustomTemplates.id, templateId), eq(aiCustomTemplates.userId, userId)))
-    .limit(1)
+  const row = await aiTaskRepository.findCustomTemplateForOwner(userId, templateId)
   return row ? publicTemplate(row) : undefined
 }
 
@@ -771,20 +757,7 @@ export async function findLatestInvestmentPptTemplate(input: {
   projectId: string
   conversationId: string
 }) {
-  const [row] = await db.select().from(aiCustomTemplates)
-    .where(and(
-      eq(aiCustomTemplates.userId, input.userId),
-      eq(aiCustomTemplates.projectId, input.projectId),
-      eq(aiCustomTemplates.skillName, 'create-reference-driven-editable-ppt'),
-      eq(aiCustomTemplates.format, 'pptx'),
-      eq(aiCustomTemplates.status, 'succeeded'),
-      or(
-        eq(aiCustomTemplates.conversationId, input.conversationId),
-        isNull(aiCustomTemplates.conversationId),
-      ),
-    ))
-    .orderBy(desc(aiCustomTemplates.createdAt))
-    .limit(1)
+  const row = await aiTaskRepository.findLatestInvestmentPptTemplate(input)
   return row ? publicTemplate(row) : undefined
 }
 
@@ -795,17 +768,11 @@ export async function resolveAiCustomTemplateForTask(input: {
   templateId: string
   taskType?: 'custom_template_document' | 'investment_recommendation_ppt'
 }): Promise<{
-  row: typeof aiCustomTemplates.$inferSelect
+  row: AiCustomTemplateRecord
   template: AiTemplateDefinition
   skill: LoadedAiSkill
 }> {
-  const [row] = await db.select().from(aiCustomTemplates)
-    .where(and(
-      eq(aiCustomTemplates.id, input.templateId),
-      eq(aiCustomTemplates.userId, input.userId),
-      eq(aiCustomTemplates.projectId, input.projectId),
-    ))
-    .limit(1)
+  const row = await aiTaskRepository.findCustomTemplateForTask(input)
   if (!row) throw typedError('上传模板不存在或不属于当前项目', 404, 'CUSTOM_TEMPLATE_NOT_FOUND')
   if (row.conversationId && row.conversationId !== input.conversationId) {
     throw typedError('上传模板属于其他会话', 409, 'CUSTOM_TEMPLATE_CONVERSATION_MISMATCH')

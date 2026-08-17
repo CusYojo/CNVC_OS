@@ -1,354 +1,164 @@
-// 启动时自动建表（自创建 SQL，避免依赖 drizzle-kit migrate 流程）
-// 后续接正式迁移：drizzle-kit generate -> server/drizzle/*.sql，然后调用 migrate()
+import path from 'node:path'
+import { createHash } from 'node:crypto'
+import { fileURLToPath } from 'node:url'
+import { cp, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { migrate } from 'drizzle-orm/mysql2/migrator'
+import { drizzle } from 'drizzle-orm/mysql2'
+import type { RowDataPacket } from 'mysql2'
 import { pool } from './client.js'
+import { mysqlConfig, mysqlTableName } from './config.js'
 
-const STATEMENTS = [
-  `CREATE EXTENSION IF NOT EXISTS pgcrypto`,
-  `CREATE TABLE IF NOT EXISTS users (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    email VARCHAR(255) NOT NULL UNIQUE,
-    name VARCHAR(64) NOT NULL,
-    role VARCHAR(32) NOT NULL,
-    department VARCHAR(64) NOT NULL DEFAULT '投资部',
-    password_hash TEXT NOT NULL,
-    status VARCHAR(8) NOT NULL DEFAULT '启用',
-    last_login TIMESTAMPTZ,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-  )`,
-  `CREATE TABLE IF NOT EXISTS projects (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name VARCHAR(128) NOT NULL,
-    company_name VARCHAR(128),
-    industry VARCHAR(64),
-    round VARCHAR(64),
-    stage VARCHAR(16) NOT NULL DEFAULT '线索',
-    stage_source VARCHAR(32),
-    owner VARCHAR(64) NOT NULL,
-    collaborators JSONB NOT NULL DEFAULT '[]'::jsonb,
-    source TEXT,
-    financing TEXT,
-    valuation TEXT,
-    risk_level VARCHAR(8) NOT NULL DEFAULT '低',
-    score INTEGER NOT NULL DEFAULT 0,
-    progress INTEGER NOT NULL DEFAULT 0,
-    summary TEXT,
-    business_model TEXT,
-    market TEXT,
-    team TEXT,
-    tags JSONB NOT NULL DEFAULT '[]'::jsonb,
-    latest_approval_id UUID,
-    created_by UUID REFERENCES users(id),
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-  )`,
-  `CREATE INDEX IF NOT EXISTS idx_projects_stage ON projects(stage)`,
-  `CREATE INDEX IF NOT EXISTS idx_projects_owner ON projects(owner)`,
-  `CREATE TABLE IF NOT EXISTS project_files (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-    name VARCHAR(255) NOT NULL,
-    type VARCHAR(16) NOT NULL,
-    category VARCHAR(32) NOT NULL,
-    size VARCHAR(32),
-    uploader VARCHAR(64) NOT NULL,
-    parse_status VARCHAR(16) NOT NULL DEFAULT '解析中',
-    visibility VARCHAR(16) NOT NULL DEFAULT '项目成员',
-    storage_path TEXT,
-    version INTEGER NOT NULL DEFAULT 1,
-    uploaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-  )`,
-  `CREATE INDEX IF NOT EXISTS idx_project_files_project ON project_files(project_id)`,
-  `CREATE TABLE IF NOT EXISTS meetings (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
-    project_name VARCHAR(128) NOT NULL,
-    title VARCHAR(255) NOT NULL,
-    type VARCHAR(32) NOT NULL DEFAULT '项目会议',
-    host VARCHAR(64) NOT NULL,
-    attendees JSONB NOT NULL DEFAULT '[]'::jsonb,
-    raw_transcript TEXT,
-    ai_summary TEXT,
-    conclusions JSONB NOT NULL DEFAULT '[]'::jsonb,
-    started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    created_by UUID REFERENCES users(id)
-  )`,
-  `CREATE INDEX IF NOT EXISTS idx_meetings_project ON meetings(project_id)`,
-  `CREATE TABLE IF NOT EXISTS todos (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
-    project_name VARCHAR(128),
-    title VARCHAR(255) NOT NULL,
-    owner VARCHAR(64) NOT NULL,
-    due_date VARCHAR(10),
-    priority VARCHAR(8) NOT NULL DEFAULT '中',
-    status VARCHAR(16) NOT NULL DEFAULT '未开始',
-    type VARCHAR(32) NOT NULL DEFAULT '待办',
-    meeting_id UUID REFERENCES meetings(id) ON DELETE SET NULL,
-    created_by UUID REFERENCES users(id),
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-  )`,
-  `CREATE INDEX IF NOT EXISTS idx_todos_owner ON todos(owner)`,
-  `CREATE INDEX IF NOT EXISTS idx_todos_project ON todos(project_id)`,
-  `CREATE TABLE IF NOT EXISTS risks (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
-    project_name VARCHAR(128) NOT NULL,
-    type VARCHAR(32) NOT NULL,
-    level VARCHAR(8) NOT NULL DEFAULT '中',
-    title VARCHAR(255) NOT NULL,
-    description TEXT,
-    source VARCHAR(32) NOT NULL DEFAULT '人工录入',
-    status VARCHAR(16) NOT NULL DEFAULT '待处置',
-    assignee VARCHAR(64),
-    detected_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    resolved_at TIMESTAMPTZ
-  )`,
-  `CREATE INDEX IF NOT EXISTS idx_risks_project ON risks(project_id)`,
-  `CREATE INDEX IF NOT EXISTS idx_risks_status ON risks(status)`,
-  `CREATE TABLE IF NOT EXISTS ai_summaries (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-    positioning TEXT,
-    highlights JSONB NOT NULL DEFAULT '[]'::jsonb,
-    risks JSONB NOT NULL DEFAULT '[]'::jsonb,
-    questions JSONB NOT NULL DEFAULT '[]'::jsonb,
-    missing JSONB NOT NULL DEFAULT '[]'::jsonb,
-    confidence INTEGER NOT NULL DEFAULT 0,
-    sources JSONB NOT NULL DEFAULT '[]'::jsonb,
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-  )`,
-  `CREATE INDEX IF NOT EXISTS idx_ai_summaries_project ON ai_summaries(project_id)`,
-  `CREATE TABLE IF NOT EXISTS leads (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name VARCHAR(128) NOT NULL,
-    company_name VARCHAR(128),
-    industry VARCHAR(64),
-    business_region VARCHAR(32),
-    business_region_source VARCHAR(64),
-    business_region_confidence VARCHAR(8),
-    source TEXT,
-    pool_status VARCHAR(32) NOT NULL DEFAULT '成功',
-    score INTEGER NOT NULL DEFAULT 0,
-    summary TEXT,
-    highlights JSONB NOT NULL DEFAULT '[]'::jsonb,
-    risks JSONB NOT NULL DEFAULT '[]'::jsonb,
-    team TEXT,
-    funding_rounds JSONB NOT NULL DEFAULT '[]'::jsonb,
-    risk_tags JSONB NOT NULL DEFAULT '[]'::jsonb,
-    sources JSONB NOT NULL DEFAULT '[]'::jsonb,
-    claimed_by VARCHAR(64),
-    converted_project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-  )`,
-  `CREATE TABLE IF NOT EXISTS audit_logs (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID REFERENCES users(id),
-    user_name VARCHAR(64) NOT NULL,
-    module VARCHAR(32) NOT NULL,
-    action VARCHAR(64) NOT NULL,
-    target TEXT,
-    ip VARCHAR(45),
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-  )`,
-  `CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_logs(user_id)`,
-  `CREATE INDEX IF NOT EXISTS idx_audit_time ON audit_logs(created_at)`,
-  `CREATE TABLE IF NOT EXISTS chat_conversations (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
-    title VARCHAR(128) NOT NULL DEFAULT '新会话',
-    scope VARCHAR(16) NOT NULL DEFAULT 'project',
-    project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
-    project_name VARCHAR(128),
-    messages JSONB NOT NULL DEFAULT '[]'::jsonb,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-  )`,
-  `CREATE INDEX IF NOT EXISTS idx_chat_conv_user ON chat_conversations(user_id)`,
-  `CREATE INDEX IF NOT EXISTS idx_chat_conv_updated ON chat_conversations(updated_at)`,
-  `ALTER TABLE chat_conversations ADD COLUMN IF NOT EXISTS agent_id VARCHAR(64)`,
-  `CREATE INDEX IF NOT EXISTS idx_chat_conv_agent ON chat_conversations(agent_id)`,
-  `ALTER TABLE project_files ADD COLUMN IF NOT EXISTS content_text TEXT`,
-  `ALTER TABLE project_files ADD COLUMN IF NOT EXISTS parse_error TEXT`,
-  `CREATE TABLE IF NOT EXISTS file_chunks (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    file_id UUID NOT NULL REFERENCES project_files(id) ON DELETE CASCADE,
-    project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-    file_name VARCHAR(255) NOT NULL,
-    chunk_index INTEGER NOT NULL DEFAULT 0,
-    content TEXT NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-  )`,
-  `CREATE INDEX IF NOT EXISTS idx_file_chunks_file ON file_chunks(file_id)`,
-  `CREATE INDEX IF NOT EXISTS idx_file_chunks_project ON file_chunks(project_id)`,
-  `ALTER TABLE leads ADD COLUMN IF NOT EXISTS scoring JSONB`,
-  `ALTER TABLE leads ADD COLUMN IF NOT EXISTS radar_profile JSONB`,
-  `ALTER TABLE leads ADD COLUMN IF NOT EXISTS radar_source_keys JSONB NOT NULL DEFAULT '[]'::jsonb`,
-  `UPDATE leads
-    SET radar_profile = jsonb_set(
-      radar_profile,
-      '{channel}',
-      to_jsonb(radar_profile->>'sourceGroup'),
-      true
-    )
-    WHERE radar_profile->>'channel' = '36氪'
-      AND radar_profile->>'sourceGroup' IN ('机构公众号', '高校公众号', '创投新闻', '论文')
-      AND COALESCE(radar_profile->>'sourceName', '') NOT ILIKE '%36氪%'
-      AND COALESCE(radar_profile->>'radarSourceKey', '') NOT ILIKE '%36kr%'`,
-  `UPDATE leads
-    SET radar_profile = jsonb_set(COALESCE(radar_profile, '{}'::jsonb), '{channel}', to_jsonb('36氪'::text), true)
-    WHERE COALESCE(radar_profile->>'channel', '') <> '36氪'
-      AND (
-        COALESCE(radar_profile->>'sourceName', '') ILIKE '%36氪%'
-        OR COALESCE(radar_profile->>'radarSourceKey', '') ILIKE '%36kr%'
-      )`,
-  `ALTER TABLE leads ADD COLUMN IF NOT EXISTS business_region VARCHAR(32)`,
-  `ALTER TABLE leads ADD COLUMN IF NOT EXISTS business_region_source VARCHAR(64)`,
-  `ALTER TABLE leads ADD COLUMN IF NOT EXISTS business_region_confidence VARCHAR(8)`,
-  `CREATE INDEX IF NOT EXISTS idx_leads_business_region ON leads(business_region)`,
-  `CREATE INDEX IF NOT EXISTS idx_leads_radar_source_keys ON leads USING GIN (radar_source_keys)`,
-  `CREATE TABLE IF NOT EXISTS radar_sync_state (
-    id VARCHAR(64) PRIMARY KEY,
-    backfill_cursor TEXT,
-    backfill_complete BOOLEAN NOT NULL DEFAULT FALSE,
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-  )`,
-  `CREATE TABLE IF NOT EXISTS radar_ai_reviews (
-    cache_key VARCHAR(64) PRIMARY KEY,
-    source_key TEXT NOT NULL,
-    content_hash VARCHAR(64) NOT NULL,
-    prompt_version VARCHAR(32) NOT NULL,
-    model VARCHAR(128) NOT NULL,
-    status VARCHAR(16) NOT NULL,
-    decision JSONB NOT NULL DEFAULT '{}'::jsonb,
-    attempts INTEGER NOT NULL DEFAULT 0,
-    last_error TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-  )`,
-  `CREATE INDEX IF NOT EXISTS idx_radar_ai_reviews_source ON radar_ai_reviews(source_key)`,
-  `CREATE INDEX IF NOT EXISTS idx_radar_ai_reviews_status ON radar_ai_reviews(status)`,
+const moduleDir = path.dirname(fileURLToPath(import.meta.url))
 
-  `CREATE TABLE IF NOT EXISTS knowledge_chunks (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    scope VARCHAR(16) NOT NULL,
-    ref_id VARCHAR(64) NOT NULL,
-    source_type VARCHAR(24) NOT NULL,
-    source_id VARCHAR(64),
-    source_name VARCHAR(255) NOT NULL DEFAULT '',
-    chunk_index INTEGER NOT NULL DEFAULT 0,
-    content TEXT NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-  )`,
-  `CREATE INDEX IF NOT EXISTS idx_kc_scope_ref ON knowledge_chunks(scope, ref_id)`,
-  `CREATE INDEX IF NOT EXISTS idx_kc_scope ON knowledge_chunks(scope)`,
-  `CREATE INDEX IF NOT EXISTS idx_kc_source ON knowledge_chunks(source_id)`,
-  // 迁移: 把旧 file_chunks 数据复制进 knowledge_chunks(scope=project)，幂等(仅当目标空)
-  `INSERT INTO knowledge_chunks (scope, ref_id, source_type, source_id, source_name, chunk_index, content, created_at)
-    SELECT 'project', project_id::text, 'file', file_id::text, file_name, chunk_index, content, created_at
-    FROM file_chunks
-    WHERE NOT EXISTS (SELECT 1 FROM knowledge_chunks WHERE scope='project' AND source_type='file')`,
-  `ALTER TABLE projects ADD COLUMN IF NOT EXISTS scoring JSONB`,
-  `ALTER TABLE projects ADD COLUMN IF NOT EXISTS pinned BOOLEAN NOT NULL DEFAULT FALSE`,
-  `CREATE TABLE IF NOT EXISTS ai_tasks (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-    conversation_id VARCHAR(64),
-    type VARCHAR(40) NOT NULL,
-    parameters JSONB NOT NULL DEFAULT '{}'::jsonb,
-    template_version VARCHAR(64) NOT NULL,
-    status VARCHAR(16) NOT NULL DEFAULT 'pending',
-    stage VARCHAR(64) NOT NULL DEFAULT '等待执行',
-    progress INTEGER NOT NULL DEFAULT 0,
-    result_summary TEXT,
-    error_id VARCHAR(64),
-    error_message TEXT,
-    cancellation_requested BOOLEAN NOT NULL DEFAULT FALSE,
-    idempotency_key VARCHAR(128) NOT NULL,
-    request_hash VARCHAR(64),
-    retry_of_task_id UUID,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    started_at TIMESTAMPTZ,
-    completed_at TIMESTAMPTZ,
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    CONSTRAINT uq_ai_tasks_user_idempotency UNIQUE(user_id, idempotency_key)
-  )`,
-  `CREATE INDEX IF NOT EXISTS idx_ai_tasks_user ON ai_tasks(user_id)`,
-  `CREATE INDEX IF NOT EXISTS idx_ai_tasks_project ON ai_tasks(project_id)`,
-  `CREATE INDEX IF NOT EXISTS idx_ai_tasks_status ON ai_tasks(status)`,
-  `ALTER TABLE ai_tasks ADD COLUMN IF NOT EXISTS request_hash VARCHAR(64)`,
-  `CREATE TABLE IF NOT EXISTS ai_artifacts (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    task_id UUID NOT NULL REFERENCES ai_tasks(id) ON DELETE CASCADE,
-    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-    conversation_id VARCHAR(64),
-    file_name VARCHAR(255) NOT NULL,
-    format VARCHAR(16) NOT NULL,
-    mime_type VARCHAR(128) NOT NULL,
-    version INTEGER NOT NULL DEFAULT 1,
-    storage_path TEXT NOT NULL,
-    editable_level VARCHAR(32) NOT NULL DEFAULT 'none',
-    source_cutoff_date VARCHAR(10),
-    template_version VARCHAR(64) NOT NULL,
-    quality_status VARCHAR(16) NOT NULL DEFAULT 'unchecked',
-    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
-    archived BOOLEAN NOT NULL DEFAULT FALSE,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-  )`,
-  `CREATE INDEX IF NOT EXISTS idx_ai_artifacts_task ON ai_artifacts(task_id)`,
-  `CREATE INDEX IF NOT EXISTS idx_ai_artifacts_user ON ai_artifacts(user_id)`,
-  `CREATE INDEX IF NOT EXISTS idx_ai_artifacts_project ON ai_artifacts(project_id)`,
-  `CREATE TABLE IF NOT EXISTS ai_task_sources (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    task_id UUID NOT NULL REFERENCES ai_tasks(id) ON DELETE CASCADE,
-    artifact_id UUID REFERENCES ai_artifacts(id) ON DELETE CASCADE,
-    source_type VARCHAR(24) NOT NULL,
-    source_id VARCHAR(64),
-    source_name VARCHAR(255) NOT NULL,
-    locator TEXT,
-    verification_status VARCHAR(16) NOT NULL DEFAULT '待核验',
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-  )`,
-  `CREATE INDEX IF NOT EXISTS idx_ai_task_sources_task ON ai_task_sources(task_id)`,
-  `CREATE INDEX IF NOT EXISTS idx_ai_task_sources_artifact ON ai_task_sources(artifact_id)`,
-  `CREATE TABLE IF NOT EXISTS ai_custom_templates (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-    conversation_id UUID REFERENCES chat_conversations(id) ON DELETE SET NULL,
-    original_file_name VARCHAR(255) NOT NULL,
-    format VARCHAR(16) NOT NULL,
-    mime_type VARCHAR(128) NOT NULL,
-    file_size INTEGER NOT NULL,
-    sha256 VARCHAR(64) NOT NULL,
-    storage_path TEXT NOT NULL,
-    analysis JSONB NOT NULL,
-    skill_name VARCHAR(64) NOT NULL,
-    skill_path TEXT NOT NULL,
-    skill_version VARCHAR(64) NOT NULL,
-    status VARCHAR(16) NOT NULL DEFAULT 'succeeded',
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-  )`,
-  `CREATE INDEX IF NOT EXISTS idx_ai_custom_templates_user ON ai_custom_templates(user_id)`,
-  `CREATE INDEX IF NOT EXISTS idx_ai_custom_templates_project ON ai_custom_templates(project_id)`,
-  `CREATE INDEX IF NOT EXISTS idx_ai_custom_templates_conversation ON ai_custom_templates(conversation_id)`,
-]
+function resolveMigrationsFolder(): string {
+  const configured = process.env.DB_MIGRATIONS_DIR?.trim()
+  if (configured) return path.resolve(configured)
+
+  // Source execution: server/src/db -> server/drizzle
+  // Compiled execution: server-dist/db -> server/drizzle
+  return path.resolve(moduleDir, moduleDir.includes(`${path.sep}server-dist${path.sep}`)
+    ? '../../server/drizzle'
+    : '../../drizzle')
+}
+
+export function rewriteMigrationSqlForPrefix(sqlText: string, tablePrefix: string): string {
+  if (tablePrefix === 'sbl_') return sqlText
+  const rewrittenConstraints = sqlText.replace(/CONSTRAINT `([^`]+)`(?=\s+(?:FOREIGN\s+KEY|CHECK))/gi, (_match, originalName: string) => {
+    const expanded = originalName.startsWith('sbl_')
+      ? `${tablePrefix}${originalName.slice('sbl_'.length)}`
+      : `${tablePrefix}${originalName}`
+    if (expanded.length <= 64) return `CONSTRAINT \`${expanded}\``
+    const hash = createHash('sha256').update(expanded).digest('hex').slice(0, 12)
+    return `CONSTRAINT \`${expanded.slice(0, 64 - hash.length - 1)}_${hash}\``
+  })
+  return rewrittenConstraints.replaceAll('`sbl_', `\`${tablePrefix}`)
+}
+
+async function prepareMigrationsFolder(): Promise<{ folder: string; cleanup: () => Promise<void> }> {
+  const sourceFolder = resolveMigrationsFolder()
+  if (mysqlConfig.tablePrefix === 'sbl_') {
+    return { folder: sourceFolder, cleanup: async () => undefined }
+  }
+  const folder = await mkdtemp(path.join(tmpdir(), 'cybernaut-migrations-'))
+  await cp(sourceFolder, folder, { recursive: true })
+  for (const entry of await readdir(folder, { withFileTypes: true })) {
+    if (!entry.isFile() || !entry.name.endsWith('.sql')) continue
+    const filePath = path.join(folder, entry.name)
+    const source = await readFile(filePath, 'utf8')
+    await writeFile(filePath, rewriteMigrationSqlForPrefix(source, mysqlConfig.tablePrefix), 'utf8')
+  }
+  return { folder, cleanup: async () => rm(folder, { recursive: true, force: true }) }
+}
+
+async function verifyMySqlRuntime(): Promise<void> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    'SELECT VERSION() AS version, @@character_set_database AS charset, @@session.time_zone AS timeZone',
+  )
+  const runtime = rows[0]
+  const major = Number.parseInt(String(runtime?.version ?? '').split('.')[0] ?? '', 10)
+  if (!Number.isFinite(major) || major < 8) {
+    throw new Error(`[mysql migration] MySQL 8.x or newer is required, received ${String(runtime?.version ?? 'unknown')}`)
+  }
+  if (String(runtime?.charset ?? '').toLowerCase() !== 'utf8mb4') {
+    throw new Error(`[mysql migration] database charset must be utf8mb4, received ${String(runtime?.charset ?? 'unknown')}`)
+  }
+}
+
+const REQUIRED_RUNTIME_TABLES = [
+  'users', 'auth_sessions', 'auth_legacy_bearer_policy', 'projects', 'project_members', 'project_score_jobs', 'project_files', 'project_file_versions',
+  'departments', 'roles', 'permissions', 'role_permissions', 'user_roles', 'user_departments', 'dictionary_groups', 'dictionary_items',
+  'knowledge_chunks', 'chat_conversations', 'agent_conversations', 'agent_messages',
+  'agent_message_parts', 'leads', 'lead_score_jobs', 'lead_pipeline_raw_events',
+  'lead_intake_files', 'lead_import_batches', 'lead_import_rows',
+  'lead_pipeline_items', 'lead_pipeline_transitions', 'lead_pipeline_prompt_versions',
+  'lead_pipeline_runs', 'lead_agent_runtime_permits', 'lead_pipeline_decisions', 'lead_pipeline_evidence',
+  'lead_pipeline_reviews', 'lead_pipeline_entity_matches', 'meetings', 'todos', 'risks',
+  'oa_approval_requests', 'oa_approval_nodes', 'oa_approval_records', 'oa_workflow_logs',
+  'ai_tasks', 'ai_task_templates', 'ai_task_sources', 'ai_artifacts', 'ai_custom_templates',
+  'ai_model_providers', 'ai_models', 'ai_model_routes',
+  'ai_capabilities', 'ai_capability_bindings', 'ai_conversation_capabilities',
+  'im_bots', 'im_bot_bindings', 'im_outbox', 'im_delivery_logs', 'im_inbound_messages',
+  'im_lead_push_rules',
+  'ai_template_analysis_progress', 'ai_summaries',
+  'runtime_jobs', 'runtime_job_runs', 'radar_raw_events', 'radar_candidates',
+  'radar_collector_states', 'radar_source_registry', 'radar_sync_state',
+  'identity_resolution_issues', 'audit_logs',
+  'admin_configuration_revisions',
+  'migration_entity_mappings', 'migration_cdc_checkpoints', 'migration_cdc_events',
+] as const
+
+export async function assertSchemaReady(): Promise<void> {
+  await verifyMySqlRuntime()
+  const journal = JSON.parse(await readFile(path.join(resolveMigrationsFolder(), 'meta', '_journal.json'), 'utf8')) as {
+    entries?: Array<{ when?: number; tag?: string }>
+  }
+  const latest = journal.entries?.at(-1)
+  if (!latest?.when) throw new Error('[mysql runtime] migration journal is empty')
+  const migrationTable = mysqlTableName('__drizzle_migrations')
+  const [migrationRows] = await pool.query<RowDataPacket[]>(
+    `SELECT COUNT(*) AS count, MAX(created_at) AS latest FROM \`${migrationTable}\``,
+  )
+  if (Number(migrationRows[0]?.latest || 0) < latest.when) {
+    throw new Error(`[mysql runtime] schema migration ${latest.tag || latest.when} has not been applied`)
+  }
+  const requiredNames = REQUIRED_RUNTIME_TABLES.map(mysqlTableName)
+  const [tableRows] = await pool.query<RowDataPacket[]>(
+    `SELECT TABLE_NAME AS tableName FROM information_schema.TABLES
+     WHERE TABLE_SCHEMA=? AND TABLE_NAME IN (${requiredNames.map(() => '?').join(',')})`,
+    [mysqlConfig.database, ...requiredNames],
+  )
+  const existing = new Set(tableRows.map((row) => String(row.tableName)))
+  const missing = requiredNames.filter((name) => !existing.has(name))
+  if (missing.length) throw new Error(`[mysql runtime] required tables are missing: ${missing.join(',')}`)
+  console.log(`[mysql] schema verified read-only prefix=${mysqlConfig.tablePrefix} migration=${latest.tag}`)
+}
+
+export async function applySchemaMigrations(): Promise<void> {
+  await verifyMySqlRuntime()
+  const connection = await pool.getConnection()
+  const lockName = `cybernaut-migrate-${createHash('sha256')
+    .update(`${mysqlConfig.database}:${mysqlConfig.tablePrefix}`)
+    .digest('hex')
+    .slice(0, 32)}`
+  let lockAcquired = false
+  let prepared: Awaited<ReturnType<typeof prepareMigrationsFolder>> | null = null
+  try {
+    const [lockRows] = await connection.query<RowDataPacket[]>('SELECT GET_LOCK(?, 60) AS acquired', [lockName])
+    lockAcquired = Number(lockRows[0]?.acquired || 0) === 1
+    if (!lockAcquired) throw new Error('[mysql migration] timed out waiting for schema migration lock')
+    prepared = await prepareMigrationsFolder()
+    const migrationDb = drizzle({ client: connection })
+    await migrate(migrationDb, {
+      migrationsFolder: prepared.folder,
+      migrationsTable: mysqlTableName('__drizzle_migrations'),
+    })
+  } finally {
+    await prepared?.cleanup()
+    if (lockAcquired) await connection.query('SELECT RELEASE_LOCK(?)', [lockName]).catch(() => undefined)
+    connection.release()
+  }
+  console.log(`[mysql] schema migrations ready prefix=${mysqlConfig.tablePrefix}`)
+}
 
 export async function ensureSchema(): Promise<void> {
-  const client = await pool.connect()
   try {
-    for (const stmt of STATEMENTS) {
-      try {
-        await client.query(stmt)
-      } catch (e) {
-        const msg = (e as Error).message
-        // 同事务内 previous statement 失败时自动回滚，需要每条单独提交
-        if (!/current transaction is aborted/i.test(msg)) throw e
+    await assertSchemaReady()
+    return
+  } catch (readinessError) {
+    try {
+      await applySchemaMigrations()
+    } catch (migrationError) {
+      if (
+        migrationError instanceof Error
+        && /denied|privilege/i.test(migrationError.message)
+      ) {
+        throw new Error(
+          '[mysql runtime] schema is not ready and DB_USERNAME has no DDL permission; run db:migrate with the separated migration credential first',
+          { cause: readinessError },
+        )
       }
+      throw migrationError
     }
-  } finally {
-    client.release()
   }
 }

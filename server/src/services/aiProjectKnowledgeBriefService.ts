@@ -6,6 +6,7 @@ import {
   isNearDuplicate,
 } from './aiEvidenceQualityService.js'
 import { cleanCorruptedText } from './textQualityService.js'
+import { requestAiGatewayText } from './aiGatewayService.js'
 
 type ProjectLike = {
   name: string
@@ -395,15 +396,11 @@ export async function buildProjectKnowledgeBrief(input: {
   if (!entries.length || process.env.AI_PROJECT_KNOWLEDGE_DISABLE_LLM === '1') return fallback()
 
   try {
-    const response = await (input.fetchImpl ?? fetch)(`${GW_BASE}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(GW_KEY ? { Authorization: `Bearer ${GW_KEY}` } : {}),
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        messages: [
+    const text = await requestAiGatewayText({
+      baseUrl: GW_BASE,
+      apiKey: GW_KEY,
+      model: MODEL,
+      messages: [
           {
             role: 'system',
             content: `你是 Project Corpus Analyst。你的唯一任务是先完整研读当前项目资料，再形成供后续四类正式投资文档共同使用的内部事实底稿；你不撰写报告正文。
@@ -439,19 +436,12 @@ export async function buildProjectKnowledgeBrief(input: {
 ${corpus}`,
           },
         ],
-        max_tokens: 12_000,
-        reasoning_effort: 'medium',
-        response_format: { type: 'json_object' },
-      }),
-      signal: AbortSignal.timeout(STUDY_TIMEOUT_MS),
+      maxTokens: 12_000,
+      reasoningEffort: 'medium',
+      json: true,
+      timeoutMs: STUDY_TIMEOUT_MS,
+      fetchImpl: input.fetchImpl,
     })
-    if (!response.ok) throw new Error(`Project Corpus Analyst ${response.status}`)
-    const data = await response.json() as {
-      choices?: Array<{ message?: { content?: string; reasoning_content?: string } }>
-    }
-    const text = data.choices?.[0]?.message?.content
-      || data.choices?.[0]?.message?.reasoning_content
-      || ''
     const normalized = normalizeModelBrief(parseJsonObject(text), { ...input, entries })
     if (normalized.facts.length < Math.min(8, Math.max(1, documentCount * 2))) return fallback()
     return {

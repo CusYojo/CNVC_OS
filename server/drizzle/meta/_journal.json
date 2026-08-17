@@ -1,0 +1,293 @@
+{
+  "version": "7",
+  "dialect": "mysql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "5",
+      "when": 1786160707129,
+      "tag": "0000_mysql_baseline",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1786161638393,
+      "tag": "0001_mysql_lead_reserve",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1786162093283,
+      "tag": "0002_allow_legacy_duplicate_leads",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "5",
+      "when": 1786162286600,
+      "tag": "0003_add_iam_user_mappings",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "5",
+      "when": 1786163007474,
+      "tag": "0004_add_agent_conversation_schema",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "5",
+      "when": 1786164725926,
+      "tag": "0005_add_migration_audit_schema",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "5",
+      "when": 1786167420067,
+      "tag": "0006_add_runtime_job_schema",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "5",
+      "when": 1786179937262,
+      "tag": "0007_add_radar_mysql_source_schema",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "5",
+      "when": 1786181073074,
+      "tag": "0008_add_lead_reserve_job_state",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "5",
+      "when": 1786183910000,
+      "tag": "0009_add_lead_score_job_schema",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "5",
+      "when": 1786185120000,
+      "tag": "0010_add_ai_task_lease",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "5",
+      "when": 1786190400000,
+      "tag": "0011_add_auth_sessions",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "5",
+      "when": 1786194000000,
+      "tag": "0012_add_risk_creator",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "5",
+      "when": 1786197600000,
+      "tag": "0013_add_stable_identity_bindings",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "5",
+      "when": 1786201200000,
+      "tag": "0014_add_project_file_integrity",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "5",
+      "when": 1786204800000,
+      "tag": "0015_allow_historical_project_file_duplicates",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "5",
+      "when": 1786243218260,
+      "tag": "0016_add_ai_task_template_registry",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "5",
+      "when": 1786251817000,
+      "tag": "0017_add_ai_task_failure_contract",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "5",
+      "when": 1786255417000,
+      "tag": "0018_add_lead_score_dead_letter",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "5",
+      "when": 1786259017000,
+      "tag": "0019_add_lead_pipeline_raw_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "5",
+      "when": 1786262617000,
+      "tag": "0020_add_lead_pipeline_audit",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "5",
+      "when": 1786352617000,
+      "tag": "0021_add_lead_agent_runtime_guard",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "5",
+      "when": 1786356217000,
+      "tag": "0022_add_project_score_jobs",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "5",
+      "when": 1786359817000,
+      "tag": "0023_add_ai_template_analysis_progress",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "5",
+      "when": 1786363417000,
+      "tag": "0024_add_oa_workflow",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "5",
+      "when": 1786367017000,
+      "tag": "0025_add_ai_model_settings",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "5",
+      "when": 1786370617000,
+      "tag": "0026_add_ai_capability_management",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "5",
+      "when": 1786374217000,
+      "tag": "0027_add_audit_request_result",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "5",
+      "when": 1786460617000,
+      "tag": "0028_add_migration_entity_mappings",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "5",
+      "when": 1786464217000,
+      "tag": "0029_add_postgres_cdc",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "5",
+      "when": 1786467817000,
+      "tag": "0030_add_knowledge_source_chunk_unique",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "5",
+      "when": 1786471417000,
+      "tag": "0031_add_lead_pipeline_entity_matches",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "5",
+      "when": 1786475017000,
+      "tag": "0032_add_legacy_bearer_kill_switch",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "5",
+      "when": 1786478617000,
+      "tag": "0033_add_im_integrations",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "5",
+      "when": 1786482217000,
+      "tag": "0034_add_im_lead_push_rules",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "5",
+      "when": 1786485817000,
+      "tag": "0035_add_admin_configuration_revisions",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "5",
+      "when": 1786489417000,
+      "tag": "0036_add_system_administration",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "5",
+      "when": 1786493017000,
+      "tag": "0037_activate_system_permissions",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "5",
+      "when": 1786496617000,
+      "tag": "0038_add_business_optimistic_versions",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "5",
+      "when": 1786500217000,
+      "tag": "0039_add_lead_field_provenance",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "5",
+      "when": 1786503817000,
+      "tag": "0040_add_lead_intake",
+      "breakpoints": true
+    }
+  ]
+}

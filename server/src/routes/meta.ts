@@ -1,13 +1,22 @@
 import { Router } from 'express'
 import { desc, eq } from 'drizzle-orm'
 import { db } from '../db/client.js'
-import { auditLogs, users, leads } from '../db/schema.js'
+import { auditLogs, leads } from '../db/schema.js'
+import { aiTaskRepository, identityRepositories } from '../repositories/index.js'
 import { z } from 'zod'
 import type { AuthedRequest } from '../middleware/requireAuth.js'
+import { requireSystemAdmin } from '../middleware/requireAuth.js'
+import {
+  createManagedUser,
+  resetManagedUserPassword,
+  updateManagedUser,
+} from '../services/identityAdministrationService.js'
+import { requireAccessibleProject } from '../services/projectAccessService.js'
 import {
   createLead,
   convertLead,
   getLeadById,
+  ingestLeadProfile,
   leadPoolStats,
   listLeads,
   listLeadScoresForRanking,
@@ -16,17 +25,27 @@ import {
   isLeadEligibleForScoring,
   readLeadScoreJob,
   saveLeadScoreJob,
-  syncRadarLeadByName,
+  commitRadarLeadPipelineReady,
   type LeadScoreJob,
-  type LeadScoreJobStatus,
 } from '../services/aiSummaryService.js'
-import { FLUE_BASE_URL } from '../config/agentRuntime.js'
-import { isSpecificLeadSubjectName } from '../services/leadSubjectName.js'
 import {
+  enqueueLeadScoreJob,
+  type LeadScoreExecutionResult,
+} from '../services/leadScoreJobService.js'
+import { collectCompanyIntel, scoreWithAgentDetailed } from '../services/inProcessAiWorkflowService.js'
+import { prepareLeadScoringAuditContext } from '../services/leadScoringPipelineService.js'
+import { isLeadScoringSubjectEligible, isSpecificLeadSubjectName } from '../services/leadSubjectName.js'
+import {
+  commitLeadPublicIntel,
+  leadPublicIntelRawEventInput,
   meaningfulPublicIntelText,
-  mergeLeadPublicIntel,
   type PublicIntelResult,
 } from '../services/leadPublicIntelService.js'
+import {
+  evaluateRadarIntakeWorkflow,
+  runPublicIntelEnrichmentAgents,
+  runPublicIntelIntakeAgents,
+} from '../services/leadOnlineWorkflowService.js'
 import {
   fetchRadarWindow,
   readRadarSyncState,
@@ -35,6 +54,12 @@ import {
 import { resolveLeadBusinessRegion } from '../services/leadRegion.js'
 import { reviewRadarCandidatesWithAi } from '../services/radarAiReviewService.js'
 import { deriveRadarChannel, isRadarPaperCandidate } from '../services/radarChannel.js'
+import { recordLeadPipelineRawEvent, transitionLeadPipelineItem } from '../services/leadPipelineEventService.js'
+import { openLeadPipelineReview } from '../services/leadPipelineAuditService.js'
+import {
+  listLeadPipelineReviews,
+  resolveAndCommitLeadPipelineReview,
+} from '../services/leadPipelineReviewService.js'
 
 /** arxiv 学科分类 → 可读行业标签 */
 const ARXIV_INDUSTRY_MAP: Record<string, string> = {
@@ -71,6 +96,7 @@ function arxivCategoriesToIndustry(categories: unknown): string {
 }
 
 export const metaRouter = Router()
+const metaRouteId = (value: string | string[]) => z.string().min(1).parse(value)
 
 type PublicIntelContextEvidence = { title: string; snippet: string; url: string }
 
@@ -94,43 +120,111 @@ async function collectPublicIntel(
   company: string,
   contextEvidence: PublicIntelContextEvidence[] = [],
 ): Promise<PublicIntelResult> {
-  const resp = await fetch(`${FLUE_BASE_URL}/workflows/intel-collect?wait=result`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ company, contextEvidence }),
-    signal: AbortSignal.timeout(180000),
-  })
-  if (!resp.ok) throw new Error(`情报采集服务 ${resp.status}: ${(await resp.text()).slice(0, 200)}`)
-  const { result } = await resp.json() as { result?: PublicIntelResult }
-  if (!result) throw new Error('情报采集返回空结果')
-  return result
+  return await collectCompanyIntel({ company, contextEvidence }) as PublicIntelResult
 }
 
-metaRouter.get('/users', async (_req, res, next) => {
+metaRouter.get('/users', requireSystemAdmin, async (_req, res, next) => {
   try {
-    const rows = await db.select({
-      id: users.id, email: users.email, name: users.name,
-      role: users.role, department: users.department,
-      status: users.status, lastLogin: users.lastLogin,
-    }).from(users).orderBy(users.email)
+    const rows = await identityRepositories.users.listSafe()
     res.json({ list: rows, total: rows.length, page: 1, pageSize: rows.length })
   } catch (err) { next(err) }
 })
 
-metaRouter.get('/audit-logs', async (_req, res, next) => {
+const CreateManagedUserSchema = z.object({
+  email: z.email().max(255),
+  name: z.string().trim().min(1).max(64),
+  role: z.string().trim().min(1).max(64),
+  department: z.string().trim().min(1).max(64),
+  password: z.string().min(1).max(128),
+})
+
+const UpdateManagedUserSchema = z.object({
+  name: z.string().trim().min(1).max(64).optional(),
+  role: z.string().trim().min(1).max(64).optional(),
+  department: z.string().trim().min(1).max(64).optional(),
+  status: z.enum(['启用', '禁用']).optional(),
+}).strict()
+
+metaRouter.post('/users', requireSystemAdmin, async (req: AuthedRequest, res, next) => {
   try {
-    const rows = await db.select().from(auditLogs).orderBy(desc(auditLogs.createdAt)).limit(200)
+    const row = await createManagedUser(CreateManagedUserSchema.parse(req.body), {
+      userId: req.user!.uid,
+      userName: req.user!.name,
+    })
+    res.status(201).json(row)
+  } catch (error) { next(error) }
+})
+
+metaRouter.patch('/users/:id', requireSystemAdmin, async (req: AuthedRequest, res, next) => {
+  try {
+    const row = await updateManagedUser(
+      metaRouteId(req.params.id),
+      UpdateManagedUserSchema.parse(req.body),
+      { userId: req.user!.uid, userName: req.user!.name },
+    )
+    res.json(row)
+  } catch (error) { next(error) }
+})
+
+// Compatibility endpoint used by the existing client store. The authoritative
+// status transition and its session revocation/audit still run in the service.
+metaRouter.post('/users/:id/toggle-status', requireSystemAdmin, async (req: AuthedRequest, res, next) => {
+  try {
+    const userId = metaRouteId(req.params.id)
+    const current = await identityRepositories.users.findById(userId)
+    if (!current) {
+      res.status(404).json({ code: 'USER_NOT_FOUND', message: '用户不存在', details: null })
+      return
+    }
+    const row = await updateManagedUser(userId, { status: current.status === '启用' ? '禁用' : '启用' }, {
+      userId: req.user!.uid,
+      userName: req.user!.name,
+    })
+    res.json(row)
+  } catch (error) { next(error) }
+})
+
+metaRouter.post('/users/:id/reset-password', requireSystemAdmin, async (req: AuthedRequest, res, next) => {
+  try {
+    const body = z.object({ password: z.string().min(1).max(128) }).parse(req.body)
+    const result = await resetManagedUserPassword(metaRouteId(req.params.id), body.password, {
+      userId: req.user!.uid,
+      userName: req.user!.name,
+    })
+    res.json(result)
+  } catch (error) { next(error) }
+})
+
+metaRouter.get('/audit-logs', requireSystemAdmin, async (_req, res, next) => {
+  try {
+    const rows = await db.select({
+      id: auditLogs.id,
+      user: auditLogs.userName,
+      module: auditLogs.module,
+      action: auditLogs.action,
+      target: auditLogs.target,
+      ip: auditLogs.ip,
+      result: auditLogs.result,
+      requestId: auditLogs.requestId,
+      createdAt: auditLogs.createdAt,
+    }).from(auditLogs).orderBy(desc(auditLogs.createdAt)).limit(200)
     res.json({ list: rows, total: rows.length })
   } catch (err) { next(err) }
 })
 
-metaRouter.get('/templates', async (_req, res) => {
-  res.json({ list: [
-    { id: 'pptx-standard', name: 'PPT 投资建议书（标准）', type: 'pptx' },
-    { id: 'docx-memo', name: 'DOCX 投资备忘录', type: 'docx' },
-    { id: 'xlsx-finmodel', name: 'XLSX 财务分析模型', type: 'xlsx' },
-    { id: 'pptx-ic', name: 'IC 精简版 PPT', type: 'ic' },
-  ], total: 4 })
+metaRouter.get('/templates', async (_req, res, next) => {
+  try {
+    const rows = await aiTaskRepository.listTaskTemplates()
+    const list = rows.map((row) => ({
+      id: row.type,
+      name: row.label,
+      type: row.outputFormat,
+      version: row.templateVersion,
+      updatedAt: row.updatedAt,
+      status: row.status === 'enabled' ? '启用' : '停用',
+    }))
+    res.json({ list, total: list.length })
+  } catch (err) { next(err) }
 })
 
 const LeadCreateSchema = z.object({
@@ -161,9 +255,81 @@ const ListLeadsQuery = z.object({
   sort: z.enum(['latest', 'score']).optional(),
   keyword: z.string().optional(),  // 关键词全库跨字段检索
   source: z.string().optional(),   // 渠道二级标签(按 sourceName 模糊匹配)
-  industry: z.string().optional(), // 行业检索(按 leads.industry ILIKE 模糊匹配)
+  industry: z.string().optional(), // 行业检索（按 leads.industry LIKE 模糊匹配）
   region: z.string().optional(),   // 地区业务标签（按注册地/项目画像匹配）
 })
+
+const LeadReviewListQuery = z.object({
+  status: z.enum(['pending', 'resolved', 'all']).default('pending'),
+  page: z.coerce.number().int().min(1).max(10_000).default(1),
+  pageSize: z.coerce.number().int().min(1).max(50).default(20),
+})
+
+const LeadReviewEvidenceSchema = z.object({
+  sourceId: z.string().max(2_000).nullish(),
+  sourceType: z.string().min(1).max(32),
+  locator: z.string().max(2_000).nullish(),
+  claim: z.string().min(1).max(8_000),
+  quote: z.string().min(1).max(8_000),
+  sourceUrl: z.string().max(4_000).nullish(),
+  reliability: z.string().max(16).nullish(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+})
+
+const ResolveLeadReviewSchema = z.object({
+  idempotencyKey: z.string().min(8).max(128),
+  outcome: z.enum(['accept', 'reject']),
+  subjectType: z.enum(['company', 'project', 'team', 'lab', 'paper']).nullish(),
+  subjectName: z.string().max(128).nullish(),
+  legalName: z.string().max(128).nullish(),
+  confidence: z.coerce.number().min(0).max(100).nullish(),
+  reason: z.string().min(2).max(8_000),
+  evidence: z.array(LeadReviewEvidenceSchema).max(10).default([]),
+  targetLeadId: z.string().uuid().nullish(),
+}).superRefine((value, context) => {
+  if (value.outcome !== 'accept') return
+  if (!value.subjectType) context.addIssue({ code: 'custom', path: ['subjectType'], message: '接受线索必须选择主体类型' })
+  if (!value.subjectName?.trim()) context.addIssue({ code: 'custom', path: ['subjectName'], message: '接受线索必须填写主体名称' })
+  if (!value.evidence.length) context.addIssue({ code: 'custom', path: ['evidence'], message: '接受线索必须提供原文证据' })
+})
+
+metaRouter.get('/lead-pipeline/reviews', async (req: AuthedRequest, res, next) => {
+  try {
+    const query = LeadReviewListQuery.parse(req.query)
+    res.json(await listLeadPipelineReviews({
+      actor: {
+        userId: req.user!.uid,
+        userName: req.user!.name,
+        role: req.user!.role,
+      },
+      ...query,
+    }))
+  } catch (error) { next(error) }
+})
+
+metaRouter.post('/lead-pipeline/reviews/:id/resolve', async (req: AuthedRequest, res, next) => {
+  try {
+    const body = ResolveLeadReviewSchema.parse(req.body)
+    const result = await resolveAndCommitLeadPipelineReview({
+      reviewId: metaRouteId(req.params.id),
+      ...body,
+    }, {
+      userId: req.user!.uid,
+      userName: req.user!.name,
+      role: req.user!.role,
+    })
+    // 人工结论已经在事务中提交；后续评分排队失败不能把成功响应伪装成整笔失败，
+    // 否则浏览器重试会让用户误以为结论尚未落库。队列自身可由恢复任务补偿。
+    const scoringQueued = result.leadId && body.outcome === 'accept'
+      ? await scheduleLeadScoring(result.leadId).catch((error) => {
+          console.error('[lead-review] accepted lead scoring enqueue failed:', error)
+          return false
+        })
+      : false
+    res.json({ ...result, scoringQueued })
+  } catch (error) { next(error) }
+})
+
 metaRouter.get('/leads', async (req, res, next) => {
   try {
     const { page, pageSize, channel, sort, keyword, source, industry, region } = ListLeadsQuery.parse(req.query)
@@ -196,9 +362,29 @@ metaRouter.post('/leads/:id/enrich-public-info', async (req: AuthedRequest, res,
     if (!company) return res.status(400).json({ code: 'INVALID_SUBJECT', message: '公司主体名称尚未确认，无法检索公开信息' })
 
     const intel = await collectPublicIntel(company, publicIntelContextEvidence(lead.sources))
-    await mergeLeadPublicIntel(leadId, intel, req.user!.uid)
+    const captured = await recordLeadPipelineRawEvent(leadPublicIntelRawEventInput(company, intel))
+    const agentStages = await runPublicIntelEnrichmentAgents({
+      eventId: captured.event.id,
+      leadId,
+      company,
+      intel,
+    })
+    const committed = await commitLeadPublicIntel({
+      company,
+      intel,
+      targetLeadId: leadId,
+      userId: req.user!.uid,
+    })
+    void ingestLeadProfile(committed.lead)
     const updated = await getLeadById(leadId)
-    res.json({ lead: updated, intel })
+    res.json({
+      lead: updated,
+      intel,
+      eventId: committed.eventId,
+      replayed: committed.replayed,
+      researchDecisionId: agentStages.research.decision.id,
+      enrichmentDecisionId: agentStages.enrichment.decision.id,
+    })
   } catch (err) { next(err) }
 })
 
@@ -215,11 +401,13 @@ metaRouter.post('/leads', async (req: AuthedRequest, res, next) => {
       ...body,
       radarProfile: { qualityRejected: false },
     } as never, req.user!.uid)
-    res.status(201).json(row)
+    if (!row) throw new Error('线索创建后未返回记录')
+    const { fieldProvenance: _internalFieldProvenance, ...publicRow } = row
+    res.status(201).json(publicRow)
   } catch (err) { next(err) }
 })
 
-// 情报采集：输入公司名 → 调 flue 情报采集 agent 真抓公开信息 → 结构化写入 leads 库
+// 情报采集：输入公司名 → 主服务进程内抓取公开信息 → 结构化写入 leads 库
 metaRouter.post('/leads/collect', async (req: AuthedRequest, res, next) => {
   try {
     const { company } = z.object({ company: z.string().min(2) }).parse(req.body)
@@ -230,48 +418,87 @@ metaRouter.post('/leads/collect', async (req: AuthedRequest, res, next) => {
       })
     }
     const result = await collectPublicIntel(company)
-
-    const score = Math.round((result.confidence ?? 0) * 100)
-    const regionResolution = resolveLeadBusinessRegion({
-      registry: {
-        regLocation: result.region,
-        registeredAddress: result.registeredAddress,
-      },
-      subjectName: company,
-      companyName: company,
+    const captured = await recordLeadPipelineRawEvent(leadPublicIntelRawEventInput(company, result))
+    const agentStages = await runPublicIntelIntakeAgents({
+      eventId: captured.event.id,
+      company,
+      intel: result,
     })
-    const lead = await createLead({
-      name: company,
-      companyName: company,
-      industry: '待核验',
-      businessRegion: regionResolution?.region,
-      businessRegionSource: regionResolution?.source,
-      businessRegionConfidence: regionResolution?.confidence,
-      source: 'AI 情报采集（必应公开信息）',
-      poolStatus: score > 0 ? '成功' : '待处理',
-      radarProfile: { qualityRejected: false },
-      score,
-      summary: result.positioning,
-      highlights: [
-        `注册资本：${result.registeredCapital}`,
-        `法定代表人：${result.legalRepresentative}`,
-        `成立时间：${result.foundedAt}`,
-      ].filter((item) => meaningfulPublicIntelText(item.split('：').slice(1).join('：'))),
-      risks: [],
-      team: result.legalRepresentative && result.legalRepresentative !== '待核验' ? result.legalRepresentative : null,
-      fundingRounds: result.fundingRounds ?? [],
-      riskTags: [],
-      sources: [
-        ...(result.sources ?? []).map((x) => ({ title: x.title, url: x.url, reliability: x.reliability, category: '公开来源' })),
-        ...(result.companyNews ?? []).map((n) => ({ title: n.title, url: n.sourceUrl, reliability: '中', category: '公司动态', excerpt: n.summary })),
-      ],
-    } as never, req.user!.uid)
-    res.status(201).json({ lead, intel: result })
+    const screeningOutcome = agentStages.screening.decision.outcome
+    if (screeningOutcome !== 'accept') {
+      const status = screeningOutcome === 'reject' ? 'rejected' : 'review'
+      await transitionLeadPipelineItem(captured.event.id, {
+        status,
+        reason: agentStages.screening.decision.reason,
+        evidence: [{ decisionId: agentStages.screening.decision.id }],
+        confidence: agentStages.screening.decision.confidence ?? 0,
+        actorType: 'agent',
+        actorId: agentStages.screening.decision.actorId,
+      })
+      let reviewId: string | null = null
+      if (status === 'review') {
+        const review = await openLeadPipelineReview({
+          idempotencyKey: `${captured.event.id}:public-intel-screening-review:v1`,
+          eventId: captured.event.id,
+          triggerDecisionId: agentStages.screening.decision.id,
+          reason: agentStages.screening.decision.reason,
+        })
+        reviewId = review.id
+      }
+      res.status(202).json({
+        lead: null,
+        intel: result,
+        eventId: captured.event.id,
+        pipelineStatus: status,
+        reviewId,
+        researchDecisionId: agentStages.research.decision.id,
+        screeningDecisionId: agentStages.screening.decision.id,
+      })
+      return
+    }
+    let committed: Awaited<ReturnType<typeof commitLeadPublicIntel>>
+    try {
+      committed = await commitLeadPublicIntel({
+        company,
+        intel: result,
+        userId: req.user!.uid,
+      })
+    } catch (error) {
+      const ambiguity = error as Error & {
+        code?: string
+        reviewStaged?: boolean
+        eventId?: string
+        reviewId?: string
+      }
+      if (ambiguity.code === 'PUBLIC_INTEL_ENTITY_AMBIGUOUS' && ambiguity.reviewStaged) {
+        res.status(202).json({
+          lead: null,
+          intel: result,
+          eventId: ambiguity.eventId ?? captured.event.id,
+          pipelineStatus: 'review',
+          reviewId: ambiguity.reviewId ?? null,
+          duplicateMatches: true,
+          researchDecisionId: agentStages.research.decision.id,
+          screeningDecisionId: agentStages.screening.decision.id,
+        })
+        return
+      }
+      throw error
+    }
+    void ingestLeadProfile(committed.lead)
+    res.status(committed.status === 'created' ? 201 : 200).json({
+      lead: await getLeadById(committed.lead.id),
+      intel: result,
+      eventId: committed.eventId,
+      replayed: committed.replayed,
+      duplicateMatches: committed.duplicateMatches,
+      researchDecisionId: agentStages.research.decision.id,
+      screeningDecisionId: agentStages.screening.decision.id,
+    })
   } catch (err) { next(err) }
 })
 
-// 从「项目发现雷达」(project-discovery :8121) 同步真实融资线索到线索池
-const RADAR_BASE = process.env.RADAR_BASE_URL || 'http://127.0.0.1:8121'
+// 从主进程内「项目发现雷达」采集投影同步真实融资线索到线索池
 const RADAR_PLACEHOLDER_TEXT = new Set([
   '',
   '待核验',
@@ -299,6 +526,42 @@ const firstMeaningfulRadarText = (...values: unknown[]): string => {
   return ''
 }
 
+function radarCandidateResearchEvidence(item: Record<string, unknown>, subjectName: string): PublicIntelResult {
+  const title = firstMeaningfulRadarText(item.title, subjectName) || subjectName
+  const snippet = firstMeaningfulRadarText(
+    item.article_text,
+    item.articleText,
+    item.summary,
+    item.description,
+    item.title,
+  ).slice(0, 12_000)
+  const url = firstMeaningfulRadarText(item.link, item.url, (item.project_profile as Record<string, unknown> | undefined)?.source_url)
+  return {
+    positioning: snippet.slice(0, 2_000),
+    registeredCapital: '',
+    legalRepresentative: '',
+    foundedAt: '',
+    region: '',
+    registeredAddress: '',
+    fundingRounds: [],
+    shareholders: [],
+    competitors: [],
+    companyNews: [],
+    sources: url ? [{ title, url, reliability: '雷达已采集公开来源' }] : [],
+    searchEvidence: [{
+      query: subjectName,
+      title,
+      snippet,
+      url,
+      publisher: firstMeaningfulRadarText(item.source_name, item.account_name, item.wx_name, item.source),
+      publishedAt: firstMeaningfulRadarText(item.published_at, item.collected_at),
+      reliability: '雷达已采集公开来源，仍需按原文核验',
+    }],
+    confidence: 0.5,
+    fetchedAt: firstMeaningfulRadarText(item.collected_at, item.published_at) || new Date().toISOString(),
+  }
+}
+
 const radarCandidateSourceKey = (item: Record<string, unknown>): string => {
   let source = String(item.source || 'unknown').trim() || 'unknown'
   for (const field of ['source_id', 'fingerprint', 'link', 'title']) {
@@ -320,24 +583,37 @@ const radarCandidateSourceKey = (item: Record<string, unknown>): string => {
 
 let radarSyncRunning = false
 
-metaRouter.post('/leads/sync-radar', async (req: AuthedRequest, res, next) => {
+export type RadarSyncInput = {
+  limit?: number
+  incrementalPages?: number
+  backfillPages?: number
+  source?: string
+  cursor?: string
+}
+
+export class RadarSyncAlreadyRunningError extends Error {
+  constructor() {
+    super('上一轮雷达同步仍在运行，请稍后重试')
+    this.name = 'RadarSyncAlreadyRunningError'
+  }
+}
+
+// HTTP 路由和 MySQL 持久化调度器共享同一个进程内领域函数，禁止通过
+// localhost HTTP + 固定内部密钥调用自身。
+export async function runRadarSyncImport(input: RadarSyncInput = {}, actorUserId?: string) {
   if (radarSyncRunning) {
-    res.status(409).json({
-      code: 'RADAR_SYNC_RUNNING',
-      message: '上一轮雷达同步仍在运行，请稍后重试',
-    })
-    return
+    throw new RadarSyncAlreadyRunningError()
   }
   radarSyncRunning = true
   try {
-    const limit = Math.max(1, Math.min(Number(req.body?.limit) || 50, 200))
-    const incrementalPages = Math.max(1, Math.min(Number(req.body?.incrementalPages) || 1, 10))
-    const requestedBackfillPages = Number(req.body?.backfillPages)
+    const limit = Math.max(1, Math.min(Number(input.limit) || 50, 200))
+    const incrementalPages = Math.max(1, Math.min(Number(input.incrementalPages) || 1, 10))
+    const requestedBackfillPages = Number(input.backfillPages)
     const backfillPages = Number.isFinite(requestedBackfillPages)
       ? Math.max(0, Math.min(requestedBackfillPages, 10))
       : 0
-    const src = (req.body?.source ?? 'all').toString()  // 默认全部渠道
-    const explicitCursor = String(req.body?.cursor || '').trim()
+    const src = (input.source ?? 'all').toString()  // 默认全部渠道
+    const explicitCursor = String(input.cursor || '').trim()
     const stateId = src === 'all' ? 'main' : `source:${src}`
     let nextState: { backfillCursor: string | null; backfillComplete: boolean } | null = null
     let candidateTotal = 0
@@ -348,7 +624,6 @@ metaRouter.post('/leads/sync-radar', async (req: AuthedRequest, res, next) => {
 
     if (explicitCursor) {
       const window = await fetchRadarWindow({
-        baseUrl: RADAR_BASE,
         pageSize: limit,
         maxPages: incrementalPages,
         cursor: explicitCursor,
@@ -361,7 +636,6 @@ metaRouter.post('/leads/sync-radar', async (req: AuthedRequest, res, next) => {
       hasMore = window.hasMore
     } else {
       const incremental = await fetchRadarWindow({
-        baseUrl: RADAR_BASE,
         pageSize: limit,
         maxPages: incrementalPages,
         source: src,
@@ -376,7 +650,6 @@ metaRouter.post('/leads/sync-radar', async (req: AuthedRequest, res, next) => {
       // 避免即使雷达已采集 arXiv，公共池同步仍永远看不到论文。
       if (src === 'all') {
         const papers = await fetchRadarWindow({
-          baseUrl: RADAR_BASE,
           pageSize: limit,
           maxPages: 1,
           group: '论文',
@@ -390,7 +663,6 @@ metaRouter.post('/leads/sync-radar', async (req: AuthedRequest, res, next) => {
         const backfillCursor = state.backfillCursor || incremental.nextCursor
         if (backfillCursor) {
           const backfill = await fetchRadarWindow({
-            baseUrl: RADAR_BASE,
             pageSize: limit,
             maxPages: backfillPages,
             cursor: backfillCursor,
@@ -414,6 +686,33 @@ metaRouter.post('/leads/sync-radar', async (req: AuthedRequest, res, next) => {
       uniqueItems.set(key || `anonymous:${uniqueItems.size}`, item)
     }
     const items: any[] = [...uniqueItems.values()]
+    // Every candidate crosses the common immutable event boundary before filtering,
+    // model review, entity matching or formal lead writes.
+    const pipelineEvents: Awaited<ReturnType<typeof recordLeadPipelineRawEvent>>[] = new Array(items.length)
+    const rawEventConcurrency = Math.max(1, Math.min(
+      Number(process.env.RADAR_PIPELINE_EVENT_CONCURRENCY) || 8,
+      16,
+    ))
+    let rawEventCursor = 0
+    await Promise.all(Array.from(
+      { length: Math.min(rawEventConcurrency, items.length) },
+      async () => {
+        while (rawEventCursor < items.length) {
+          const index = rawEventCursor++
+          const item = items[index]
+          pipelineEvents[index] = await recordLeadPipelineRawEvent({
+            sourceType: 'radar',
+            sourceId: radarCandidateSourceKey(item) || null,
+            sourceOccurredAt: String(item.collected_at || item.published_at || '') || null,
+            payload: item,
+          })
+        }
+      },
+    ))
+    const transitionRadarCandidate = async (
+      index: number,
+      transition: Parameters<typeof transitionLeadPipelineItem>[1],
+    ) => await transitionLeadPipelineItem(pipelineEvents[index].event.id, transition)
     const createdNames = new Set<string>()
     const updatedNames = new Set<string>()
     const unchangedNames = new Set<string>()
@@ -428,26 +727,115 @@ metaRouter.post('/leads/sync-radar', async (req: AuthedRequest, res, next) => {
     let aiReview = 0
     let aiFailed = 0
     let aiDeferred = 0
+    let workflowAccepted = 0
+    let workflowRejected = 0
+    let workflowReview = 0
+    let workflowFailed = 0
+    let previouslyResolved = 0
     const createdIds: string[] = []
     const scoringLeadIds = new Set<string>()
-    const actorUserId = req.user?.uid
     const splitList = (s: unknown, n = 6) => (s ? String(s).split(/；|;|\n/).map((x) => x.trim()).filter(Boolean).slice(0, n) : [])
     // 雷达已明确过滤的候选无需再调用大模型；只审查仍有入池可能的数据，
     // 避免低价值论文等占用网关资源并拖慢最新融资线索。
     const reviewableEntries = items
       .map((item, index) => ({ item, index }))
-      .filter(({ item }) => item.decision_label !== '过滤')
+      .filter(({ item, index }) => item.decision_label !== '过滤'
+        && ['discovered', 'failed'].includes(pipelineEvents[index].item.status))
     const reviewedCandidates = await reviewRadarCandidatesWithAi(
       reviewableEntries.map(({ item }) => item),
+      { eventIds: reviewableEntries.map(({ index }) => pipelineEvents[index].event.id) },
     )
     const subjectReviews = new Map(
       reviewableEntries.map(({ index }, reviewIndex) => [index, reviewedCandidates[reviewIndex]]),
     )
+    const workflowResults = new Map<number, Awaited<ReturnType<typeof evaluateRadarIntakeWorkflow>>>()
+    const workflowEntries: Array<{
+      index: number
+      item: Record<string, unknown>
+      subjectType: 'company' | 'project' | 'team' | 'lab' | 'paper'
+      subjectName: string
+      legalName?: string
+      evidence: unknown[]
+      confidence: number
+      attempt: number
+    }> = []
+    const workflowNames = new Set<string>()
+    for (const { item, index } of reviewableEntries) {
+      const subjectReview = subjectReviews.get(index)
+      const subjectName = subjectReview?.subjectName.trim().slice(0, 120) || ''
+      if (subjectReview?.status !== 'accepted' || !subjectReview.subjectType || !subjectName || workflowNames.has(subjectName)) continue
+      workflowNames.add(subjectName)
+      workflowEntries.push({
+        index,
+        item,
+        subjectType: subjectReview.subjectType,
+        subjectName,
+        legalName: subjectReview.legalName || undefined,
+        evidence: subjectReview.evidence ? [{ excerpt: subjectReview.evidence }] : [],
+        confidence: subjectReview.confidence * 100,
+        attempt: pipelineEvents[index].item.status === 'failed'
+          ? pipelineEvents[index].item.processingAttempts + 1
+          : 1,
+      })
+    }
+    // The workflow commits entity-match, decision and pipeline state in
+    // transactions. Keep the default below the MySQL pool width to avoid
+    // deadlocks when a newly inherited source produces a full page at once.
+    const workflowConcurrency = Math.max(1, Math.min(Number(process.env.RADAR_WORKFLOW_CONCURRENCY) || 2, 16))
+    let workflowCursor = 0
+    await Promise.all(Array.from(
+      { length: Math.min(workflowConcurrency, workflowEntries.length) },
+      async () => {
+        while (workflowCursor < workflowEntries.length) {
+          const entry = workflowEntries[workflowCursor++]
+          let result: Awaited<ReturnType<typeof evaluateRadarIntakeWorkflow>>
+          let workflowAttempt = entry.attempt
+          for (let deadlockRetry = 0; ; deadlockRetry += 1) {
+            result = await evaluateRadarIntakeWorkflow({
+              eventId: pipelineEvents[entry.index].event.id,
+              subjectType: entry.subjectType,
+              subjectName: entry.subjectName,
+              legalName: entry.legalName,
+              subjectEvidence: entry.evidence,
+              subjectConfidence: entry.confidence,
+              providedPublicIntel: radarCandidateResearchEvidence(entry.item, entry.subjectName),
+              attempt: workflowAttempt,
+            })
+            if (result.status !== 'failed'
+              || !/deadlock found/i.test(result.error || '')
+              || deadlockRetry >= 1) break
+            workflowAttempt += 1
+          }
+          workflowResults.set(entry.index, result)
+        }
+      },
+    ))
     for (let itemIndex = 0; itemIndex < items.length; itemIndex += 1) {
       const it = items[itemIndex]
+      const currentPipelineStatus = pipelineEvents[itemIndex].item.status
+      if (currentPipelineStatus === 'ready') {
+        previouslyResolved += 1
+        continue
+      }
+      if (currentPipelineStatus === 'review') {
+        aiDeferred += 1
+        continue
+      }
+      if (currentPipelineStatus === 'rejected') {
+        filteredOut += 1
+        continue
+      }
       // 雷达服务自身的过滤标记（如论文综合分低于阈值、无投资信息等），
       // 与 AI 主体审查互补——AI 审查只管“名称是否可识别”，雷达过滤只管“是否有投资价值”。
       if (it.decision_label === '过滤') {
+        await transitionRadarCandidate(itemIndex, {
+          status: 'rejected',
+          reason: 'radar deterministic filter rejected candidate',
+          evidence: [{ decisionLabel: it.decision_label, sourceKey: radarCandidateSourceKey(it) }],
+          confidence: 100,
+          actorType: 'system',
+          actorId: 'radar-deterministic-filter',
+        })
         filteredOut += 1
         continue
       }
@@ -461,16 +849,44 @@ metaRouter.post('/leads/sync-radar', async (req: AuthedRequest, res, next) => {
       // 模型失败或要求人工复核不是业务拒绝。候选仍保留在雷达源中，且 failed
       // 缓存不会被复用，下一次同步会自动重试。
       if (!subjectReview || subjectReview.status === 'failed' || subjectReview.status === 'review') {
+        await transitionRadarCandidate(itemIndex, {
+          status: subjectReview?.status === 'review' ? 'review' : 'failed',
+          reason: subjectReview?.status === 'review'
+            ? (subjectReview.rejectReason || 'radar subject requires manual review')
+            : 'radar subject review failed',
+          evidence: subjectReview?.evidence ? [{ excerpt: subjectReview.evidence }] : [],
+          confidence: subjectReview ? subjectReview.confidence * 100 : 0,
+          error: subjectReview?.status === 'failed' ? subjectReview.rejectReason || 'subject review failed' : null,
+          actorType: 'agent',
+          actorId: subjectReview?.model || 'radar-subject-review',
+        })
         aiDeferred += 1
         continue
       }
       if (subjectReview.status === 'rejected') {
+        await transitionRadarCandidate(itemIndex, {
+          status: 'rejected',
+          reason: subjectReview.rejectReason || 'radar subject rejected by review',
+          evidence: subjectReview.evidence ? [{ excerpt: subjectReview.evidence }] : [],
+          confidence: subjectReview.confidence * 100,
+          actorType: 'agent',
+          actorId: subjectReview.model,
+        })
         filteredOut += 1
         continue
       }
 
       const name = subjectReview.subjectName.trim().slice(0, 120)
-      if (!name) {
+      const subjectType = subjectReview.subjectType
+      if (!name || !subjectType) {
+        await transitionRadarCandidate(itemIndex, {
+          status: 'rejected',
+          reason: 'accepted radar review returned an empty subject name or type',
+          evidence: subjectReview.evidence ? [{ excerpt: subjectReview.evidence }] : [],
+          confidence: subjectReview.confidence * 100,
+          actorType: 'system',
+          actorId: 'radar-subject-contract',
+        })
         invalid += 1
         continue
       }
@@ -485,8 +901,50 @@ metaRouter.post('/leads/sync-radar', async (req: AuthedRequest, res, next) => {
       const fundingRound = meaningfulRadarText(prof.project_round)
       const financingAmount = meaningfulRadarText(prof.financing_amount)
       const latestValuation = meaningfulRadarText(prof.latest_valuation)
-      if (seenBatchNames.has(name)) { batchDuplicates += 1; continue }
+      if (seenBatchNames.has(name)) {
+        await transitionRadarCandidate(itemIndex, {
+          status: 'review',
+          reason: 'duplicate normalized subject in the same radar batch',
+          evidence: [{ subjectName: name, sourceKey: radarCandidateSourceKey(it) }],
+          confidence: subjectReview.confidence * 100,
+          actorType: 'system',
+          actorId: 'radar-batch-dedup',
+        })
+        batchDuplicates += 1
+        continue
+      }
       else seenBatchNames.add(name)
+      const workflowResult = workflowResults.get(itemIndex)
+      if (!workflowResult) {
+        await transitionRadarCandidate(itemIndex, {
+          status: 'failed',
+          reason: 'radar research or screening result is missing',
+          evidence: subjectReview.evidence ? [{ excerpt: subjectReview.evidence }] : [],
+          confidence: subjectReview.confidence * 100,
+          error: 'workflow result missing after bounded orchestration',
+          actorType: 'system',
+          actorId: 'radar-workflow-orchestrator',
+        })
+        workflowFailed += 1
+        aiDeferred += 1
+        continue
+      }
+      if (workflowResult.status === 'failed') {
+        workflowFailed += 1
+        aiDeferred += 1
+        continue
+      }
+      if (workflowResult.status !== 'accept') {
+        if (workflowResult.status === 'review') {
+          workflowReview += 1
+          aiDeferred += 1
+        } else {
+          workflowRejected += 1
+          filteredOut += 1
+        }
+        continue
+      }
+      workflowAccepted += 1
       const highlights = splitList(prof.core_highlights, 5)
       const nextActions: string[] = Array.isArray(it.next_actions) ? it.next_actions.map((x: unknown) => String(x)) : []
       const risks = splitList(prof.risk_notes, 5)
@@ -508,7 +966,7 @@ metaRouter.post('/leads/sync-radar', async (req: AuthedRequest, res, next) => {
         sourceUrl: it.link || prof.source_url || '',
       }] : []
       // 雷达情报画像：原样存全部字段，前端详情弹窗"雷达情报"板块还原展示。
-      // 注意：这里 NOT 写 leads.scoring —— scoring 留给"点击 AI 评测"后的 flue 深度 7 维评分。
+      // 注意：这里 NOT 写 leads.scoring —— scoring 留给“点击 AI 评测”后的统一 AI 评分流程。
       const radarProfile = {
         sourceId: firstMeaningfulRadarText(it.source_id, it.fingerprint),
         radarSourceKey: radarCandidateSourceKey(it),
@@ -599,35 +1057,73 @@ metaRouter.post('/leads/sync-radar', async (req: AuthedRequest, res, next) => {
         summary: it.summary,
         articleText: radarProfile.articleText,
       })
-      let syncResult: Awaited<ReturnType<typeof syncRadarLeadByName>> | null = null
+      let syncResult: Awaited<ReturnType<typeof commitRadarLeadPipelineReady>> | null = null
       try {
-        syncResult = await syncRadarLeadByName({
-        name,
-        companyName: companyName || null,
-        industry: (isPaper
-          ? arxivCategoriesToIndustry(it.categories)
-          : (prof.industry || '待核验').toString().slice(0, 64)),
-        businessRegion: regionResolution?.region,
-        businessRegionSource: regionResolution?.source,
-        businessRegionConfidence: regionResolution?.confidence,
-        source: isPaper
-          ? `项目发现雷达 · arxiv`
-          : `项目发现雷达 · ${it.source_name || it.source || '公开渠道'}`,
-        poolStatus: '成功',
-        summary: (isPaper
-          ? (paperSummaryZh || it.summary || prof.core_highlights || '')
-          : (it.summary || prof.core_highlights || '')).toString().slice(0, 1000),
-        highlights,
-        risks,
-        team: [prof.team_composition, prof.lab && `实验室：${prof.lab}`].filter(Boolean).join('\n').slice(0, 800) || '待核验',
-        fundingRounds,
-        riskTags: (it.decision_label ? [it.decision_label] : []),
-        radarSourceKeys: radarCandidateSourceKey(it) ? [radarCandidateSourceKey(it)] : [],
-        radarProfile,
-        sources: [{ title: it.title || name, url: it.link || prof.source_url || '', reliability: '中', category: it.source_group || '公开渠道', excerpt: (it.summary || '').toString().slice(0, 200) }],
-      }, actorUserId)
+        syncResult = await commitRadarLeadPipelineReady({
+          lead: {
+            name,
+            companyName: companyName || null,
+            industry: (isPaper
+              ? arxivCategoriesToIndustry(it.categories)
+              : (prof.industry || '待核验').toString().slice(0, 64)),
+            businessRegion: regionResolution?.region,
+            businessRegionSource: regionResolution?.source,
+            businessRegionConfidence: regionResolution?.confidence,
+            source: isPaper
+              ? `项目发现雷达 · arxiv`
+              : `项目发现雷达 · ${it.source_name || it.source || '公开渠道'}`,
+            poolStatus: '成功',
+            summary: (isPaper
+              ? (paperSummaryZh || it.summary || prof.core_highlights || '')
+              : (it.summary || prof.core_highlights || '')).toString().slice(0, 1000),
+            highlights,
+            risks,
+            team: [prof.team_composition, prof.lab && `实验室：${prof.lab}`].filter(Boolean).join('\n').slice(0, 800) || '待核验',
+            fundingRounds,
+            riskTags: (it.decision_label ? [it.decision_label] : []),
+            radarSourceKeys: radarCandidateSourceKey(it) ? [radarCandidateSourceKey(it)] : [],
+            radarProfile,
+            sources: [{ title: it.title || name, url: it.link || prof.source_url || '', reliability: '中', category: it.source_group || '公开渠道', excerpt: (it.summary || '').toString().slice(0, 200) }],
+          },
+          eventId: pipelineEvents[itemIndex].event.id,
+          transition: {
+            reason: 'reviewed radar candidate committed by host service',
+            evidence: [{
+              subjectName: name,
+              excerpt: subjectReview.evidence,
+              sourceKey: radarCandidateSourceKey(it),
+            }],
+            confidence: subjectReview.confidence * 100,
+            actorType: 'system',
+            actorId: 'radar-sync-import',
+          },
+          userId: actorUserId,
+        })
       } catch (syncErr) {
-        console.error('[radar-sync] 跳过同步失败的候选项（不影响其他项）：', (syncErr as Error).message.slice(0, 200))
+        const syncFailure = syncErr as Error & {
+          code?: string
+          duplicateMatches?: number
+          reviewStaged?: boolean
+        }
+        if (syncFailure.code === 'RADAR_LEAD_ENTITY_AMBIGUOUS' && syncFailure.reviewStaged) {
+          if (!countedDatabaseDuplicateNames.has(name)) {
+            countedDatabaseDuplicateNames.add(name)
+            databaseDuplicates += Math.max(1, Number(syncFailure.duplicateMatches) || 1)
+          }
+          aiDeferred += 1
+          console.warn('[radar-sync] 主体命中多条正式线索，已转人工复核：', name)
+          continue
+        }
+        await transitionRadarCandidate(itemIndex, {
+          status: 'failed',
+          reason: 'host service failed to commit reviewed radar candidate',
+          evidence: subjectReview.evidence ? [{ excerpt: subjectReview.evidence }] : [],
+          confidence: subjectReview.confidence * 100,
+          error: syncFailure.message || String(syncErr),
+          actorType: 'system',
+          actorId: 'radar-sync-import',
+        })
+        console.error('[radar-sync] 跳过同步失败的候选项（不影响其他项）：', syncFailure.message.slice(0, 200))
         invalid += 1
         continue
       }
@@ -668,7 +1164,7 @@ metaRouter.post('/leads/sync-radar', async (req: AuthedRequest, res, next) => {
         backfillComplete: nextState.backfillComplete,
       })
     }
-    res.json({
+    return {
       ok: true,
       fetched: items.length,
       reviewed: reviewableEntries.length,
@@ -680,7 +1176,7 @@ metaRouter.post('/leads/sync-radar', async (req: AuthedRequest, res, next) => {
       created,
       updated,
       unchanged,
-      skipped: unchanged + filteredOut + aiDeferred + invalid,
+      skipped: unchanged + filteredOut + aiDeferred + invalid + previouslyResolved,
       duplicates,
       batchDuplicates,
       databaseDuplicates,
@@ -691,65 +1187,48 @@ metaRouter.post('/leads/sync-radar', async (req: AuthedRequest, res, next) => {
       aiRejected,
       aiReview,
       aiFailed,
+      workflowAccepted,
+      workflowRejected,
+      workflowReview,
+      workflowFailed,
+      previouslyResolved,
       createdIds,
       scoringIds,
       scoringQueued,
-    })
-  } catch (err) {
-    next(err)
+    }
   } finally {
     radarSyncRunning = false
   }
+}
+
+metaRouter.post('/leads/sync-radar', async (req: AuthedRequest, res, next) => {
+  try {
+    res.json(await runRadarSyncImport(req.body ?? {}, req.user?.uid))
+  } catch (err) {
+    if (err instanceof RadarSyncAlreadyRunningError) {
+      res.status(409).json({ code: 'RADAR_SYNC_RUNNING', message: err.message })
+      return
+    }
+    next(err)
+  }
 })
 
-// 项目评分：异步模式 —— 点击秒回，后台调 flue 评分并存库，前端轮询 lead.scoring。
-// 内存状态只负责当前进程调度；任务状态同时写入 leads.scoring.scoreJob，供重启恢复和前端展示。
-const scoreStatus = new Map<string, {
-  status: LeadScoreJobStatus
-  error?: string
-  startedAt: number
-  attempts: number
-  maxAttempts: number
-  retryCycles: number
-}>()
-
-// —— 全局评分队列：N 个并发 worker 消费,N=SCORE_QUEUE_CONCURRENCY(默认2)。
-// 本地模型网关是评分链路的瓶颈，默认并发 2，避免 50 条雷达同步后同时压垮网关。
-const scoreQueue: string[] = []
-const SCORE_QUEUE_CONCURRENCY = Math.max(1, parseInt(process.env.SCORE_QUEUE_CONCURRENCY || '2', 10))
-const SCORE_MAX_ATTEMPTS = Math.max(1, Math.min(4, parseInt(process.env.SCORE_MAX_ATTEMPTS || '1', 10)))
+// 项目评分：HTTP 请求只负责写入 MySQL 队列并秒回。
+// 排队、抢占、租约和延迟重试由 lead_score_jobs 驱动，leads.scoring.scoreJob 是前端展示快照。
+const SCORE_MAX_ATTEMPTS = Math.max(1, Math.min(4, parseInt(process.env.SCORE_MAX_ATTEMPTS || '3', 10)))
 const SCORE_REQUEST_TIMEOUT_MS = Math.max(30_000, parseInt(process.env.SCORE_REQUEST_TIMEOUT_MS || '360000', 10))
 const SCORE_RETRY_BASE_MS = Math.max(1_000, parseInt(process.env.SCORE_RETRY_BASE_MS || '5000', 10))
-const SCORE_DEFERRED_RETRY_LIMIT = Math.max(0, Math.min(5, parseInt(process.env.SCORE_DEFERRED_RETRY_LIMIT || '1', 10)))
+const SCORE_DEFERRED_RETRY_LIMIT = Math.max(0, Math.min(5, parseInt(process.env.SCORE_DEFERRED_RETRY_LIMIT || '0', 10)))
 const SCORE_DEFERRED_RETRY_MS = Math.max(10_000, parseInt(process.env.SCORE_DEFERRED_RETRY_MS || '60000', 10))
-const deferredScoreRetryTimers = new Map<string, ReturnType<typeof setTimeout>>()
-let activeWorkers = 0
-async function worker(): Promise<void> {
-  while (scoreQueue.length) {
-    const id = scoreQueue.shift() as string
-    await doScore(id)
-  }
-}
-function drainQueue(): void {
-  // 补足到 CONCURRENCY 个 worker(每个 worker 跑空队列后自然退出)
-  while (activeWorkers < SCORE_QUEUE_CONCURRENCY && scoreQueue.length > 0) {
-    activeWorkers++
-    void worker().finally(() => {
-      activeWorkers--
-      // enqueueScore 可能恰好发生在 worker 看到空队列与 finally 之间。
-      // 退出后再次 drain，避免该竞态留下永久 queued 的任务。
-      drainQueue()
-    })
-  }
-}
-function enqueueScore(leadId: string): void {
-  if (!scoreQueue.includes(leadId)) scoreQueue.push(leadId)
-  drainQueue()
-}
 
-async function scheduleLeadScoring(leadId: string, options: { recovering?: boolean } = {}): Promise<boolean> {
-  const current = scoreStatus.get(leadId)
-  if (current && ['queued', 'running', 'retrying'].includes(current.status)) return false
+export async function scheduleLeadScoring(
+  leadId: string,
+  options: {
+    recovering?: boolean
+    manualRetry?: boolean
+    actor?: { userId?: string | null; userName: string }
+  } = {},
+): Promise<boolean> {
   const lead = await getLeadById(leadId)
   if (!lead) return false
   const radarProfile = (lead as { radarProfile?: Record<string, unknown> }).radarProfile ?? {}
@@ -759,16 +1238,17 @@ async function scheduleLeadScoring(leadId: string, options: { recovering?: boole
     || !(await isLeadEligibleForScoring(leadId))
   ) {
     await clearLeadScoreJob(leadId)
-    scoreStatus.delete(leadId)
     console.warn(`[lead-score] skip ineligible lead=${leadId} name=${lead.name}`)
     return false
   }
   const isPaper = String(radarProfile.channel ?? '') === '论文'
-  if (!isSpecificLeadSubjectName(lead.name, isPaper)) {
+  if (!isLeadScoringSubjectEligible(lead as unknown as Record<string, unknown>, isPaper)) {
     console.warn(`[lead-score] skip invalid subject lead=${leadId} name=${lead.name}`)
     return false
   }
   const previous = readLeadScoreJob((lead as { scoring?: unknown }).scoring)
+  if (options.manualRetry && !['failed', 'dead_letter'].includes(previous?.status ?? '')) return false
+  if (!options.manualRetry && previous?.status === 'dead_letter') return false
   const now = new Date().toISOString()
   const attempts = options.recovering
     ? Math.min(previous?.attempts ?? 0, SCORE_MAX_ATTEMPTS - 1)
@@ -784,19 +1264,21 @@ async function scheduleLeadScoring(leadId: string, options: { recovering?: boole
     error: undefined,
   }
   try {
-    await saveLeadScoreJob(leadId, job)
+    const queued = await enqueueLeadScoreJob(leadId, {
+      recovering: options.recovering,
+      manualRetry: options.manualRetry,
+      manualRetryAudit: options.manualRetry ? {
+        userId: options.actor?.userId,
+        userName: options.actor?.userName ?? '（系统）',
+        target: lead.name,
+      } : undefined,
+      snapshot: job as unknown as Record<string, unknown>,
+    })
+    if (!queued) return false
   } catch (error) {
     console.error(`[lead-score] persist queued failed lead=${leadId}:`, (error as Error).message)
     return false
   }
-  scoreStatus.set(leadId, {
-    status: 'queued',
-    startedAt: Date.now(),
-    attempts,
-    maxAttempts: SCORE_MAX_ATTEMPTS,
-    retryCycles,
-  })
-  enqueueScore(leadId)
   return true
 }
 
@@ -826,7 +1308,7 @@ async function deferLeadScoringRetry(
     startedAt?: string
     retryCycles: number
   },
-) {
+): Promise<LeadScoreExecutionResult> {
   const retryCycles = input.retryCycles + 1
   const delayMs = SCORE_DEFERRED_RETRY_MS * retryCycles
   const now = new Date().toISOString()
@@ -843,45 +1325,11 @@ async function deferLeadScoringRetry(
     error: input.error.message,
   }
   await saveLeadScoreJob(leadId, retryingJob)
-  scoreStatus.set(leadId, {
+  return {
     status: 'retrying',
+    nextAttemptAt: new Date(nextRetryAt),
     error: input.error.message,
-    startedAt: Date.now(),
-    attempts: SCORE_MAX_ATTEMPTS,
-    maxAttempts: SCORE_MAX_ATTEMPTS,
-    retryCycles,
-  })
-
-  const existingTimer = deferredScoreRetryTimers.get(leadId)
-  if (existingTimer) clearTimeout(existingTimer)
-  const timer = setTimeout(() => {
-    deferredScoreRetryTimers.delete(leadId)
-    void (async () => {
-      const current = scoreStatus.get(leadId)
-      if (!current || current.status !== 'retrying' || current.retryCycles !== retryCycles) return
-      const queuedAt = new Date().toISOString()
-      const queuedJob: LeadScoreJob = {
-        ...retryingJob,
-        status: 'queued',
-        attempts: 0,
-        updatedAt: queuedAt,
-        nextRetryAt: undefined,
-        error: undefined,
-      }
-      await saveLeadScoreJob(leadId, queuedJob)
-      scoreStatus.set(leadId, {
-        status: 'queued',
-        startedAt: Date.now(),
-        attempts: 0,
-        maxAttempts: SCORE_MAX_ATTEMPTS,
-        retryCycles,
-      })
-      enqueueScore(leadId)
-    })().catch((error) => {
-      console.error(`[lead-score] deferred retry enqueue failed lead=${leadId}:`, (error as Error).message)
-    })
-  }, delayMs)
-  deferredScoreRetryTimers.set(leadId, timer)
+  }
 }
 
 type ScoreWorkflowResult = {
@@ -896,28 +1344,28 @@ type ScoreWorkflowResult = {
 async function requestScoreWorkflow(
   scoreWorkflow: string,
   requestBody: Record<string, unknown>,
+  audit: Awaited<ReturnType<typeof prepareLeadScoringAuditContext>>,
 ): Promise<ScoreWorkflowResult> {
-  const resp = await fetch(`${FLUE_BASE_URL}/workflows/${scoreWorkflow}?wait=result`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(requestBody),
-    signal: AbortSignal.timeout(SCORE_REQUEST_TIMEOUT_MS),
-  })
-  if (!resp.ok) {
-    const detail = (await resp.text()).slice(0, 300)
-    const error = new Error(`评分服务(${scoreWorkflow}) ${resp.status}${detail ? `: ${detail}` : ''}`) as Error & { retryable?: boolean }
-    error.retryable = resp.status === 408 || resp.status === 429 || resp.status >= 500
-    throw error
-  }
-  const { result } = await resp.json() as { result?: ScoreWorkflowResult }
-  if (!result || !Array.isArray(result.dimensions) || result.dimensions.length === 0) {
+  const detailed = await scoreWithAgentDetailed(
+    scoreWorkflow === 'score-paper' ? 'score-paper' : 'score-project',
+    requestBody,
+    { audit },
+  )
+  const result = detailed.result as ScoreWorkflowResult
+  if (!Array.isArray(result.dimensions) || result.dimensions.length === 0) {
     throw new Error('评分服务返回空或缺少评分维度')
   }
-  return result
+  return {
+    ...result,
+    provenance: 'agent-run',
+    evidenceChain: detailed.audit,
+  }
 }
 
-async function doScore(leadId: string): Promise<void> {
+export async function executeLeadScoring(leadId: string): Promise<LeadScoreExecutionResult> {
   let runStartedAt: string | undefined
+  let currentAttempt = 0
+  let currentRetryCycles = 0
   try {
     // 评分需要 lead 完整字段(sources/radarProfile/scoring/fundingRounds),listLeads 不返回这些
     const lead = await getLeadById(leadId)
@@ -928,15 +1376,14 @@ async function doScore(leadId: string): Promise<void> {
     if (
       rp.qualityRejected === true
       || String(rp.qualityRejected ?? '') === 'true'
-      || !isSpecificLeadSubjectName(lead.name, isPaper)
+      || !isLeadScoringSubjectEligible(lead as unknown as Record<string, unknown>, isPaper)
       || !(await isLeadEligibleForScoring(leadId))
     ) {
       // 记录可能在入队后被质量回填标记为无效；执行前必须再次拦截，
       // 并清除持久化队列状态，避免重启恢复时反复入队。
       await clearLeadScoreJob(leadId)
-      scoreStatus.delete(leadId)
       console.warn(`[lead-score] discard invalid queued lead=${leadId} name=${lead.name}`)
-      return
+      return { status: 'discarded' }
     }
     const facts: string[] = []
     const reg = rp.registry as Record<string, string> | undefined
@@ -998,8 +1445,10 @@ async function doScore(leadId: string): Promise<void> {
     const persisted = readLeadScoreJob((lead as { scoring?: unknown }).scoring)
     runStartedAt = persisted?.startedAt ?? new Date().toISOString()
     const retryCycles = persisted?.retryCycles ?? 0
+    currentRetryCycles = retryCycles
     const initialAttempts = Math.min(persisted?.attempts ?? 0, SCORE_MAX_ATTEMPTS - 1)
     for (let attempt = initialAttempts + 1; attempt <= SCORE_MAX_ATTEMPTS; attempt += 1) {
+      currentAttempt = attempt
       const now = new Date().toISOString()
       const runningJob: LeadScoreJob = {
         status: 'running',
@@ -1010,16 +1459,15 @@ async function doScore(leadId: string): Promise<void> {
         startedAt: runStartedAt,
         updatedAt: now,
       }
-      scoreStatus.set(leadId, {
-        status: 'running',
-        startedAt: Date.now(),
-        attempts: attempt,
-        maxAttempts: SCORE_MAX_ATTEMPTS,
-        retryCycles,
-      })
       await saveLeadScoreJob(leadId, runningJob)
       try {
-        result = await requestScoreWorkflow(scoreWorkflow, requestBody)
+        const audit = await prepareLeadScoringAuditContext({
+          leadId,
+          workflow: scoreWorkflow,
+          scoringInput: requestBody,
+          queueAttempt: attempt,
+        })
+        result = await requestScoreWorkflow(scoreWorkflow, requestBody, audit)
         finalError = null
         break
       } catch (error) {
@@ -1033,14 +1481,6 @@ async function doScore(leadId: string): Promise<void> {
           nextRetryAt: retryAt,
           error: finalError.message,
         }
-        scoreStatus.set(leadId, {
-          status: 'retrying',
-          error: finalError.message,
-          startedAt: Date.now(),
-          attempts: attempt,
-          maxAttempts: SCORE_MAX_ATTEMPTS,
-          retryCycles,
-        })
         await saveLeadScoreJob(leadId, retryingJob)
         await scoreDelay(SCORE_RETRY_BASE_MS * attempt)
       }
@@ -1052,13 +1492,12 @@ async function doScore(leadId: string): Promise<void> {
           `[lead-score] transient failure lead=${leadId}, deferred retry cycle=${retryCycles + 1}/${SCORE_DEFERRED_RETRY_LIMIT}:`,
           error.message,
         )
-        await deferLeadScoringRetry(leadId, {
+        return await deferLeadScoringRetry(leadId, {
           error,
           queuedAt: persisted?.queuedAt,
           startedAt: runStartedAt,
           retryCycles,
         })
-        return
       }
       throw error
     }
@@ -1090,7 +1529,7 @@ async function doScore(leadId: string): Promise<void> {
       scored_at: new Date().toISOString(),
       scoreJob: {
         status: 'done',
-        attempts: scoreStatus.get(leadId)?.attempts ?? 1,
+        attempts: currentAttempt || 1,
         maxAttempts: SCORE_MAX_ATTEMPTS,
         retryCycles,
         queuedAt: persisted?.queuedAt,
@@ -1101,21 +1540,14 @@ async function doScore(leadId: string): Promise<void> {
     }
     const { saveLeadScoring } = await import('../services/aiSummaryService.js')
     await saveLeadScoring(lead.id, scoring, result.total)
-    scoreStatus.set(leadId, {
-      status: 'done',
-      startedAt: scoreStatus.get(leadId)?.startedAt ?? Date.now(),
-      attempts: scoreStatus.get(leadId)?.attempts ?? 1,
-      maxAttempts: SCORE_MAX_ATTEMPTS,
-      retryCycles,
-    })
+    return { status: 'done' }
   } catch (err) {
-    const current = scoreStatus.get(leadId)
     console.error(`[lead-score] terminal failure lead=${leadId}:`, (err as Error).message)
     const failedJob: LeadScoreJob = {
-      status: 'failed',
-      attempts: current?.attempts ?? SCORE_MAX_ATTEMPTS,
-      maxAttempts: current?.maxAttempts ?? SCORE_MAX_ATTEMPTS,
-      retryCycles: current?.retryCycles ?? 0,
+      status: 'dead_letter',
+      attempts: currentAttempt || SCORE_MAX_ATTEMPTS,
+      maxAttempts: SCORE_MAX_ATTEMPTS,
+      retryCycles: currentRetryCycles,
       startedAt: runStartedAt,
       updatedAt: new Date().toISOString(),
       completedAt: new Date().toISOString(),
@@ -1124,14 +1556,7 @@ async function doScore(leadId: string): Promise<void> {
     await saveLeadScoreJob(leadId, failedJob).catch((persistError) => {
       console.error(`[lead-score] persist failed status lead=${leadId}:`, (persistError as Error).message)
     })
-    scoreStatus.set(leadId, {
-      status: 'failed',
-      error: failedJob.error,
-      startedAt: current?.startedAt ?? Date.now(),
-      attempts: failedJob.attempts,
-      maxAttempts: failedJob.maxAttempts,
-      retryCycles: failedJob.retryCycles ?? 0,
-    })
+    return { status: 'dead_letter', error: failedJob.error }
   }
 }
 
@@ -1141,10 +1566,39 @@ metaRouter.post('/leads/:id/score', async (req: AuthedRequest, res, next) => {
     // 验证存在用 getLeadById 单条查(不拉全表),score 只需要 leadId
     const lead = await getLeadById(String(req.params.id))
     if (!lead) { res.status(404).json({ code: 'NOT_FOUND', message: '线索不存在' }); return }
-    const started = await scheduleLeadScoring(lead.id)
     const persistedJob = readLeadScoreJob((lead as { scoring?: unknown }).scoring)
-    const status = started ? 'queued' : persistedJob?.status ?? scoreStatus.get(lead.id)?.status ?? 'running'
+    if (persistedJob?.status === 'dead_letter') {
+      res.status(409).json({
+        code: 'DEAD_LETTER_RETRY_REQUIRED',
+        message: '该评分任务已进入死信，请执行人工重试。',
+      })
+      return
+    }
+    const started = await scheduleLeadScoring(lead.id)
+    const status = started ? 'queued' : persistedJob?.status ?? 'running'
     res.json({ code: 0, message: started ? 'started' : 'running', status })
+  } catch (err) { next(err) }
+})
+
+// 死信只能通过显式人工操作重新入队，并与队列状态在同一事务写入审计。
+metaRouter.post('/leads/:id/score/retry', async (req: AuthedRequest, res, next) => {
+  try {
+    const lead = await getLeadById(String(req.params.id))
+    if (!lead) { res.status(404).json({ code: 'NOT_FOUND', message: '线索不存在' }); return }
+    const persistedJob = readLeadScoreJob((lead as { scoring?: unknown }).scoring)
+    if (!persistedJob || !['failed', 'dead_letter'].includes(persistedJob.status)) {
+      res.status(409).json({ code: 'NOT_DEAD_LETTER', message: '该评分任务当前不在死信状态。' })
+      return
+    }
+    const started = await scheduleLeadScoring(lead.id, {
+      manualRetry: true,
+      actor: { userId: req.user!.uid, userName: req.user!.name },
+    })
+    if (!started) {
+      res.status(409).json({ code: 'RETRY_CONFLICT', message: '任务状态已变化，请刷新后重试。' })
+      return
+    }
+    res.json({ code: 0, message: 'retried', status: 'queued' })
   } catch (err) { next(err) }
 })
 
@@ -1154,28 +1608,21 @@ metaRouter.get('/leads/:id/score', async (req: AuthedRequest, res, next) => {
   try {
     const lead = await getLeadById(String(req.params.id))
     if (!lead) { res.status(404).json({ code: 'NOT_FOUND', message: '线索不存在' }); return }
-    const st = scoreStatus.get(lead.id)
     const scoring = (lead as { scoring?: { dimensions?: unknown; total?: unknown } }).scoring
     const persistedJob = readLeadScoreJob(scoring)
     // AI 深度分析产物特征:含 dimensions(维度打分)。入池时写的结构化 scoring 只有 registry/股东等,不算已分析。
     const hasAiScoring = !!(scoring && scoring.dimensions)
-    // 状态判定:内存态优先(running/failed 以内存为准),避免被入池的旧结构化 scoring 误判成 done。
-    // 只有内存 done、或已有 AI 分析产物(dimensions)且不在跑,才算 done。
-    let status: string
-    if (st && ['queued', 'running', 'retrying'].includes(st.status)) status = st.status
-    else if (st?.status === 'failed') status = 'failed'
-    else if (st?.status === 'done' || hasAiScoring) status = 'done'
-    else if (persistedJob?.status) status = persistedJob.status
-    else status = 'idle'
-    const publicError = status === 'failed' ? 'AI 评分暂未完成，可重新生成' : undefined
+    // MySQL 任务执行器会同步 scoreJob 快照；已有 dimensions 的历史结果仍判定为完成。
+    const status = persistedJob?.status ?? (hasAiScoring ? 'done' : 'idle')
+    const publicError = ['failed', 'dead_letter'].includes(status) ? 'AI 评分暂未完成，可人工重试' : undefined
     res.json({
       code: 0,
       message: 'success',
       status,
       error: publicError,
-      attempts: st?.attempts ?? persistedJob?.attempts,
-      maxAttempts: st?.maxAttempts ?? persistedJob?.maxAttempts,
-      retryCycles: st?.retryCycles ?? persistedJob?.retryCycles,
+      attempts: persistedJob?.attempts,
+      maxAttempts: persistedJob?.maxAttempts,
+      retryCycles: persistedJob?.retryCycles,
       scoring: scoring ?? null,
     })
   } catch (err) { next(err) }
@@ -1184,19 +1631,41 @@ metaRouter.get('/leads/:id/score', async (req: AuthedRequest, res, next) => {
 metaRouter.post('/leads/:id/convert', async (req: AuthedRequest, res, next) => {
   try {
     const leadId = String(req.params.id)
-    const row = await convertLead(leadId, req.body.projectId, req.user!.uid)
+    const row = await convertLead(leadId, req.user!.uid)
     // 甲方要求"获取(领取)就分析"：领取为专属项目后自动触发 AI 深度分析(后台异步，秒回)。
     // 已在分析中则不重复触发。
-    await scheduleLeadScoring(leadId)
+    await scheduleLeadScoring(leadId).catch((error) => {
+      console.error('[lead-convert] post-commit scoring enqueue failed:', (error as Error).message)
+    })
     res.json(row)
   } catch (err) { next(err) }
 })
 
 // 简化的项目摘要查询（dashboard / 项目详情需要）
-import { getSummary as getSummaryService, listAllSummaries } from '../services/aiSummaryService.js'
-metaRouter.get('/ai-summaries', async (_req, res, next) => {
-  try { res.json({ list: await listAllSummaries() }) } catch (err) { next(err) }
+import { getSummary as getSummaryService, listAllSummaries, upsertSummary } from '../services/aiSummaryService.js'
+metaRouter.get('/ai-summaries', async (req: AuthedRequest, res, next) => {
+  try { res.json({ list: await listAllSummaries(req.user!) }) } catch (err) { next(err) }
 })
-metaRouter.get('/projects/:id/ai-summary', async (req, res, next) => {
-  try { res.json({ summary: await getSummaryService(req.params.id) ?? null }) } catch (err) { next(err) }
+metaRouter.post('/ai-summaries', async (req: AuthedRequest, res, next) => {
+  try {
+    const body = z.object({
+      projectId: z.string().min(1),
+      positioning: z.string().optional(),
+      highlights: z.array(z.string()).optional(),
+      risks: z.array(z.string()).optional(),
+      questions: z.array(z.string()).optional(),
+      missing: z.array(z.string()).optional(),
+      confidence: z.coerce.number().int().min(0).max(100).optional(),
+      sources: z.array(z.string()).optional(),
+    }).parse(req.body)
+    await requireAccessibleProject(req.user!.uid, body.projectId)
+    res.json(await upsertSummary(body.projectId, body, req.user!.uid))
+  } catch (err) { next(err) }
+})
+metaRouter.get('/projects/:id/ai-summary', async (req: AuthedRequest, res, next) => {
+  try {
+    const projectId = metaRouteId(req.params.id)
+    await requireAccessibleProject(req.user!.uid, projectId)
+    res.json({ summary: await getSummaryService(projectId) ?? null })
+  } catch (err) { next(err) }
 })

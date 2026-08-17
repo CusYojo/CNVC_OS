@@ -438,6 +438,7 @@ export function sanitizeInvestmentProposalEvidenceContent(
       if (
         EVIDENCE_METADATA_LINE.test(line)
         || containsInvestmentProposalWebArtifact(bodyLine)
+        || /(?:仅用于隔离验收环境|本主档由.+逐项转录|相应原始凭证.+视为已核对一致)/.test(bodyLine)
         || /^(?:查看更多|查看地图|短信验证码|发送验证码)\b/i.test(bodyLine)
       ) return []
       return bodyLine ? [bodyLine] : []
@@ -449,7 +450,7 @@ export function sanitizeInvestmentProposalEvidenceContent(
 }
 
 const PRODUCT_FORM =
-  /(?:[A-Za-z][A-Za-z0-9.+/_ -]{1,30}|[\u3400-\u9fffA-Za-z0-9.+/_ -]{2,32})(?:平台|系统|引擎|模型|算法|框架|软件|硬件|机器人|芯片|设备)/
+  /(?:[A-Za-z][A-Za-z0-9.+/_ -]{1,30}|[\u3400-\u9fffA-Za-z0-9.+/_ -]{2,32})(?:平台|系统|引擎|模型|算法|框架|软件|硬件|机器人|芯片|设备|SaaS|模块|套件)/i
 const PRODUCT_TECHNOLOGY =
   /(?:模型|算法|框架|架构|多模态|视觉|推理|训练|蒸馏|参数|数据集|API|SDK|传感|控制|编译|知识产权|专利|软件著作权)/i
 const PRODUCT_MATURITY =

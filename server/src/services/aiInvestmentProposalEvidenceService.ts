@@ -283,3 +283,16 @@ export function investmentProposalEvidencePrompt(
     item.content,
   ].filter(Boolean).join('\n')).join('\n\n')
 }
+
+export function investmentProposalSectionEvidenceContract(
+  plan: InvestmentProposalEvidencePlan,
+  sectionIds: ReadonlySet<string>,
+) {
+  return plan.sections
+    .filter((section) => sectionIds.has(section.sectionId))
+    .map((section) => {
+      const allowed = section.sourceIndexes.map((index) => `S${index}`).join('、') || '无'
+      return `${section.sectionId}｜${section.sectionTitle}｜仅可引用：${allowed}`
+    })
+    .join('\n')
+}

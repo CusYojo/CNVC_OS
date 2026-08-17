@@ -12,15 +12,20 @@ import test from 'node:test'
 import type { BusinessContent } from '../src/services/aiBusinessContentService.js'
 import {
   annotateGordenTextWeightQa,
+  buildGordenChatVisionBody,
   buildGordenIconRetryPrompt,
+  buildGordenResponsesVisionBody,
   buildGordenVisualQaPrompt,
   buildReferenceDrivenSemanticOverrides,
   buildGordenSlidePlan,
   buildGordenSlidePrompt,
   buildGordenTextContractRetryPrompt,
   buildGordenEditableLayerPrompts,
+  canDeferGordenStageOneUnexpectedText,
   gordenSlidePlanFingerprint,
+  gordenVisionResponseText,
   gordenLayoutGuardArgs,
+  gordenPythonTlsEnvironment,
   gordenUnplannedVisibleTexts,
   gordenVisionRetryDelayMs,
   gordenSkillPaths,
@@ -29,6 +34,7 @@ import {
   referenceDrivenSkillPaths,
   reusableGordenVisualReview,
   selectInvestmentRecommendationReference,
+  shouldFallbackGordenVisionToChat,
   unsafeGordenIconFiles,
   upgradeGordenCheckpointTextLayouts,
 } from '../src/services/aiGordenSuperPptService.js'
@@ -75,6 +81,58 @@ const content: BusinessContent = {
   risks: ['财务数据仍需审计', '交易条款仍需法务确认'],
   missing: [],
 }
+
+test('Gorden vision uses the Responses API contract with a minimal Chat fallback', () => {
+  const imageDataUrls = ['data:image/png;base64,AAAA']
+  const responses = buildGordenResponsesVisionBody({ model: 'vision-model', prompt: 'JSON only', imageDataUrls })
+  assert.deepEqual(responses.input[0].content, [
+    { type: 'input_text', text: 'JSON only' },
+    { type: 'input_image', image_url: imageDataUrls[0], detail: 'high' },
+  ])
+  assert.deepEqual(responses.reasoning, { effort: 'low' })
+  assert.deepEqual(responses.text, { format: { type: 'json_object' } })
+  assert.equal('messages' in responses, false)
+
+  const chat = buildGordenChatVisionBody({ model: 'vision-model', prompt: 'JSON only', imageDataUrls })
+  assert.deepEqual(chat.messages[0].content, [
+    { type: 'text', text: 'JSON only' },
+    { type: 'image_url', image_url: { url: imageDataUrls[0] } },
+  ])
+  assert.equal('reasoning_effort' in chat, false)
+  assert.equal('response_format' in chat, false)
+  assert.equal(shouldFallbackGordenVisionToChat(404), true)
+  assert.equal(shouldFallbackGordenVisionToChat(429), false)
+})
+
+test('Gorden vision reads both Responses and Chat Completions output shapes', () => {
+  assert.equal(gordenVisionResponseText({
+    object: 'response',
+    output: [{ type: 'message', content: [{ type: 'output_text', text: '{"ok":true}' }] }],
+  }), '{"ok":true}')
+  assert.equal(gordenVisionResponseText({
+    choices: [{ message: { content: [{ type: 'text', text: '{"ok":true}' }] } }],
+  }), '{"ok":true}')
+  assert.equal(gordenVisionResponseText({ choices: [{ message: { content: '{"ok":true}' } }] }), '{"ok":true}')
+  assert.equal(gordenVisionResponseText({ object: 'response', output: [] }), '')
+})
+
+test('Gorden Python image gateway uses a verified CA file without disabling TLS', async () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'gorden-ca-'))
+  const caFile = path.join(root, 'ca.pem')
+  writeFileSync(caFile, 'test-ca')
+  try {
+    const env = await gordenPythonTlsEnvironment({ AI_PYTHON_CA_FILE: caFile })
+    assert.equal(env.SSL_CERT_FILE, caFile)
+    assert.equal(env.REQUESTS_CA_BUNDLE, caFile)
+    assert.equal('PYTHONHTTPSVERIFY' in env, false)
+    await assert.rejects(
+      () => gordenPythonTlsEnvironment({ AI_PYTHON_CA_FILE: path.join(root, 'missing.pem') }),
+      (error: unknown) => (error as { code?: string }).code === 'GORDEN_PYTHON_CA_INVALID',
+    )
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
 
 test('Gorden slide plan carries detailed company, team, finance, funding, valuation and deal content', () => {
   const plan = buildGordenSlidePlan({
@@ -574,6 +632,33 @@ test('Gorden text gate ignores duplicate reports of planned text but preserves r
     gordenUnplannedVisibleTexts(['项目重点'], ['|模板标签']),
     ['|模板标签'],
   )
+  assert.deepEqual(
+    gordenUnplannedVisibleTexts(['验证路径'], ['1', '2', '3', '4', '模板公司']),
+    ['模板公司'],
+  )
+  assert.deepEqual(
+    gordenUnplannedVisibleTexts(['关键数据'], ['1']),
+    ['1'],
+  )
+  assert.deepEqual(
+    gordenUnplannedVisibleTexts(['关键数据'], ['1', '2', '4', '2026', '85%', '100万元']),
+    ['1', '2', '4', '2026', '85%', '100万元'],
+  )
+})
+
+test('Gorden stage-one only defers extra text to the final editable hard gate', () => {
+  assert.equal(canDeferGordenStageOneUnexpectedText({
+    unexpectedText: ['模型额外生成的风险判断'],
+    missingTextIndexes: [],
+  }), true)
+  assert.equal(canDeferGordenStageOneUnexpectedText({
+    unexpectedText: ['模型额外生成的风险判断'],
+    missingTextIndexes: [3],
+  }), false)
+  assert.equal(canDeferGordenStageOneUnexpectedText({
+    unexpectedText: [],
+    missingTextIndexes: [],
+  }), false)
 })
 
 test('Gorden retries only unsafe icon layers with an explicit safe margin', () => {
@@ -700,6 +785,44 @@ test('Gorden layout keeps pixel font units, prevents false wrapping and removes 
   assert.equal(result.texts[2].opacity, undefined)
   assert.equal(result.icons.length, 0)
   assert.match(String((result as unknown as { qa_notes: string[] }).qa_notes[0]), /重复图标切片/)
+})
+
+test('Gorden layout removes oversized composite icon crops that cover planned text', () => {
+  const result = normalizeGordenLayout({
+    vision: {
+      texts: [{
+        textIndex: 1,
+        source_bbox: [382, 881, 240, 52],
+        size_px: 30,
+        color: '#172033',
+        bold: false,
+        align: 'left',
+        valign: 'middle',
+      }],
+      icons: [{
+        file: 'footer-composite.png',
+        source_bbox: [40, 825, 980, 307],
+        visible_text: '',
+      }],
+      unexpectedText: [],
+    },
+    plan: {
+      number: 10,
+      role: 'body',
+      title: '融资与估值',
+      expectedTexts: ['融资与估值口径'],
+      sourceIndexes: [],
+    },
+    iconManifest: { icons: [{ file: 'footer-composite.png' }] },
+    pageRoot: '/tmp/gorden-page',
+    width: 2048,
+    height: 1152,
+    font: 'Microsoft YaHei',
+  }) as { texts: Array<Record<string, unknown>>; icons: Array<Record<string, unknown>>; qa_notes: string[] }
+
+  assert.equal(result.texts.length, 1)
+  assert.equal(result.icons.length, 0)
+  assert.match(String(result.qa_notes[0]), /与文字区域重叠/)
 })
 
 test('Gorden resume upgrades legacy text layouts with estimated line counts', () => {

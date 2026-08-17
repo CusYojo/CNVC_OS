@@ -1,5 +1,3 @@
-import { promisify } from 'node:util'
-import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { mkdtemp, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import os from 'node:os'
@@ -14,8 +12,7 @@ import {
   containsParsedSourceLayoutArtifact,
 } from './aiDocumentEditorialQualityService.js'
 import type { AiTemplateDefinition } from './aiTemplateCatalog.js'
-
-const execFileAsync = promisify(execFile)
+import { execFileSupervised as execFileAsync } from '../runtime/supervisedProcessService.js'
 
 export type ComplianceOutputIssue = {
   code:

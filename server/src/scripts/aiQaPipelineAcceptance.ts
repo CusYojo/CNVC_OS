@@ -270,7 +270,7 @@ async function main() {
     candidateSources: [{
       sourceType: 'public_web_agent_search',
       sourceId: 'agent-candidate',
-      sourceName: 'Flue 情报发现·产品与技术·自动验收机器人项目进展',
+      sourceName: '进程内情报发现·产品与技术·自动验收机器人项目进展',
       chunkIndex: 0,
       versionOrDate: '2026-07-18',
       locator: 'https://example.com/qa-agent-candidate',
@@ -302,7 +302,7 @@ async function main() {
     now: new Date('2026-07-25T08:00:00Z'),
   })
   assert(
-    '阶段2 Flue Intel Discovery：普通会话同源候选经过页面核验后进入证据',
+    '阶段2 In-process Intel Discovery：普通会话同源候选经过页面核验后进入证据',
     agentCandidateResearch.sources.length === 1
       && agentCandidateResearch.audit.discovery === 'agent_search'
       && agentCandidateResearch.audit.agentCandidateCount === 1

@@ -13,6 +13,7 @@ import {
   projectKnowledgeBriefForPrompt,
   type ProjectKnowledgeBrief,
 } from './aiProjectKnowledgeBriefService.js'
+import { requestAiGatewayText } from './aiGatewayService.js'
 
 export const PROJECT_QA_DOCUMENT_CATEGORIES = [
   '阶段与推进建议',
@@ -987,13 +988,10 @@ async function callJson(systemPrompt: string, userPrompt: string, maxTokens: num
   if (process.env.AI_QA_DISABLE_LLM === '1') throw new Error('AI_QA_DISABLE_LLM=1')
   let lastError: Error = new Error('LLM 未返回合法 JSON')
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const response = await fetch(`${GW_BASE}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(GW_KEY ? { Authorization: `Bearer ${GW_KEY}` } : {}),
-      },
-      body: JSON.stringify({
+    try {
+      const content = await requestAiGatewayText({
+        baseUrl: GW_BASE,
+        apiKey: GW_KEY,
         model: MODEL,
         messages: [
           {
@@ -1004,18 +1002,10 @@ async function callJson(systemPrompt: string, userPrompt: string, maxTokens: num
           },
           { role: 'user', content: userPrompt },
         ],
-        max_tokens: maxTokens,
-        response_format: { type: 'json_object' },
-      }),
-      signal: AbortSignal.timeout(120000),
-    })
-    if (!response.ok) {
-      const detail = (await response.text()).replace(/\s+/g, ' ').slice(0, 500)
-      throw new Error(`LLM ${response.status}${detail ? `：${detail}` : ''}`)
-    }
-    const data = await response.json() as { choices?: Array<{ message?: { content?: string } }> }
-    const content = data.choices?.[0]?.message?.content?.trim() ?? ''
-    try {
+        maxTokens,
+        timeoutMs: 120_000,
+        json: true,
+      })
       return parseFirstJsonObject(content)
     } catch (error) {
       lastError = error as Error

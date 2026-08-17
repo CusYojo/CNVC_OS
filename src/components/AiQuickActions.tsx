@@ -14,6 +14,7 @@ import { apiGet, apiPost, ApiError } from '../lib/api'
 import { uid } from '../lib/uid'
 import type { Project } from '../types'
 import { Button, Modal, ProgressBar } from './ui'
+import { shanghaiDateKey } from '../lib/dateTime'
 
 export type AiDocumentActionId = 'compliance' | 'proposal' | 'investment_ppt' | 'due_diligence' | 'qa'
 export type AiQuickActionId = AiDocumentActionId | 'custom_template'
@@ -154,7 +155,7 @@ const ACTIONS: ActionConfig[] = [
   { id: 'custom_template', label: '上传模板', description: '识别模板结构和内容要求', mode: 'template', icon: Upload },
 ]
 
-const today = () => new Date().toISOString().slice(0, 10)
+const today = () => shanghaiDateKey()
 const MAX_TEMPLATE_BYTES = 25 * 1024 * 1024
 
 function readFileAsDataUrl(
@@ -499,12 +500,14 @@ export function AiQuickActions({
       // 投资建议书在上传开始时已经创建正式任务；服务端完成模板分析后会启动同一任务，
       // 不再在这里创建第二条任务。
     } catch (error) {
-      const originalMessage = (error as Error).message || '模板分析失败'
+      const originalMessage = error instanceof ApiError
+        ? error.baseMessage
+        : (error as Error).message || '模板分析失败'
       const message = error instanceof ApiError
         && error.status === 500
         && /^HTTP 500$/i.test(originalMessage)
-        ? '模板转换连接被中断，请重新上传模板。'
-        : originalMessage
+        ? error.withContext('模板转换连接被中断，请重新上传模板。')
+        : error instanceof ApiError ? error.message : originalMessage
       publishProgress((current) => ({
         ...current,
         status: 'failed',

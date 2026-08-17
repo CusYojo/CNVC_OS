@@ -231,6 +231,22 @@ export function isSpecificLeadSubjectName(value: unknown, allowPaperTitle = fals
   return true
 }
 
+export function isLeadScoringSubjectEligible(
+  lead: Record<string, unknown>,
+  isPaper = false,
+): boolean {
+  if (isSpecificLeadSubjectName(lead.name, isPaper)) return true
+  const objectValue = (value: unknown): Record<string, unknown> =>
+    value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
+  const radarProfile = objectValue(lead.radarProfile)
+  const scoring = objectValue(lead.scoring)
+  const registry = objectValue(radarProfile.registry)
+  const scoringRegistry = objectValue(scoring.registry)
+  return [lead.companyName, registry.companyName, scoringRegistry.companyName].some((value) =>
+    /(?:股份有限公司|有限责任公司|有限公司)$/.test(String(value ?? '').trim()),
+  )
+}
+
 export function isLowValueRadarContent(...values: unknown[]): boolean {
   return values.some((value) => LOW_VALUE_RADAR_RE.test(String(value ?? '').slice(0, 2400)))
 }

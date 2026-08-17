@@ -14,6 +14,7 @@ import { apiGet } from '../lib/api'
 import { shouldHideAiTaskFailureDiagnostics } from '../lib/aiTaskPresentation'
 import { authedFetch } from '../store/useAuthStore'
 import { Button, ProgressBar } from './ui'
+import { formatShanghaiDateTime } from '../lib/dateTime'
 
 export type AiTaskStatus = 'pending' | 'running' | 'succeeded' | 'failed' | 'cancelled'
 
@@ -53,7 +54,10 @@ export type AiTask = {
   progress: number
   resultSummary?: string | null
   errorId?: string | null
+  errorCode?: string | null
   errorMessage?: string | null
+  retryable?: boolean | null
+  cancellationRequested?: boolean
   retryOfTaskId?: string | null
   createdAt: string
   updatedAt: string
@@ -264,7 +268,7 @@ function TaskCard({
           </div>
           <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-500">
             <span>{sourceLabel}</span>
-            <span>{new Date(task.createdAt).toLocaleString('zh-CN')}</span>
+            <span>{formatShanghaiDateTime(task.createdAt)}</span>
           </div>
         </div>
       </div>
@@ -282,6 +286,9 @@ function TaskCard({
       {task.status === 'failed' && !hideFailureDiagnostics && (
         <div className="mt-3 rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-xs text-amber-800">
           <p>{failureMessage}</p>
+          {task.retryable === false && (
+            <p className="mt-1 text-[10px] font-medium text-amber-700">该错误不可直接重试，请修正资料、模板或参数后重新创建任务。</p>
+          )}
           {failureStage && <p className="mt-1 text-[10px] text-amber-700">停止阶段：{failureStage}</p>}
           {task.errorId && <p className="mt-1 font-mono text-[10px] text-amber-700">错误编号：{task.errorId}</p>}
         </div>
@@ -320,11 +327,11 @@ function TaskCard({
       {!task.clientOnly && (isActive || task.status === 'failed') && (
         <div className="mt-3 flex justify-end">
           {isActive && (
-            <Button size="sm" variant="danger" loading={mutating} onClick={() => { void onCancel(task) }}>
-              <Square className="h-3 w-3" />取消任务
+            <Button size="sm" variant="danger" loading={mutating} disabled={task.cancellationRequested} onClick={() => { void onCancel(task) }}>
+              <Square className="h-3 w-3" />{task.cancellationRequested ? '取消中…' : '取消任务'}
             </Button>
           )}
-          {task.status === 'failed' && !templatePreparationFailed && (
+          {task.status === 'failed' && !templatePreparationFailed && task.retryable !== false && (
             <Button size="sm" variant="secondary" loading={mutating} onClick={() => { void onRetry(task) }}>
               <RotateCcw className="h-3.5 w-3.5" />继续生成
             </Button>
@@ -443,7 +450,7 @@ export function AiArtifactCenter({
       <div className="max-h-64 space-y-1 overflow-y-auto px-2 py-2">
         {!validProjectId && (
           <p className="rounded-lg border border-dashed border-slate-200 px-3 py-4 text-center text-[11px] leading-5 text-slate-400">
-            当前为未入库的演示项目，无法生成或读取正式交付物。
+            当前项目尚未入库，无法生成或读取正式交付物。
           </p>
         )}
         {validProjectId && error && <p className="px-2 py-2 text-[11px] text-slate-400">{error}</p>}

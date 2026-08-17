@@ -1,22 +1,23 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { hostname } from 'node:os'
 import { createReadStream } from 'node:fs'
-import { copyFile, mkdir, readdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
+import { copyFile, lstat, mkdir, readdir, readFile, realpath, rename, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import { and, asc, desc, eq, inArray, lte, sql } from 'drizzle-orm'
+import { and, asc, eq, inArray, lte, sql } from 'drizzle-orm'
 import JSZip from 'jszip'
 import { db } from '../db/client.js'
 import {
-  aiArtifacts,
-  aiTaskSources,
-  aiTasks,
-  auditLogs,
-  chatConversations,
   fileChunks,
   knowledgeChunks,
   projectFiles,
   projects,
-  users,
 } from '../db/schema.js'
+import type {
+  AiArtifactRecord,
+  AiTaskRecord,
+  CreateAiArtifactRecord,
+} from '../repositories/aiTaskRepository.js'
+import { agentConversationRepository, aiTaskRepository, identityRepositories } from '../repositories/index.js'
 import {
   annotateDueDiligencePendingAfterResearch,
   composeBusinessContent,
@@ -39,9 +40,11 @@ import {
   isAiExecutableTaskType,
   type AiBusinessTaskType,
   type AiExecutableTaskType,
+  type AiTemplateDefinition,
 } from './aiTemplateCatalog.js'
 import { loadAiSkill } from './aiSkillService.js'
 import { resolveAiCustomTemplateForTask } from './aiCustomTemplateService.js'
+import { recordJobCoordinationEventSafely } from '../runtime/jobCoordinationTelemetry.js'
 import {
   curateEvidenceSources,
   dedupeTextList,
@@ -115,6 +118,7 @@ import {
   safeAiTaskFailureMessage,
   safeAiTaskFailureStage,
 } from './aiTaskErrorService.js'
+import { formatShanghaiDateKey } from '../utils/shanghaiTime.js'
 import {
   assessTemplateFidelity,
   TEMPLATE_FIDELITY_MINIMUM,
@@ -127,8 +131,14 @@ import {
   reviewInvestmentRecommendationPpt,
   type InvestmentRecommendationPptWorkflow,
 } from './aiInvestmentRecommendationPptWorkflowService.js'
+import { getAccessibleProject } from './projectAccessService.js'
 
 export type AiTaskStatus = 'pending' | 'running' | 'succeeded' | 'failed' | 'cancelled'
+
+export type AiTaskFailureClassification = {
+  errorCode: string
+  retryable: boolean
+}
 
 export type AiTaskUser = {
   uid: string
@@ -159,8 +169,43 @@ export type CreateInvestmentPptPreparationInput = {
   idempotencyKey: string
 }
 
+export function buildImageDeckArtifactMetadata(input: {
+  existingMetadata?: Record<string, unknown> | null
+  generationMetadata: Record<string, unknown>
+  skill: { name: string; version: string; sha256: string }
+  slideCount: number
+  bytes: number
+  sha256: string
+  refreshedAfterResume: boolean
+}) {
+  return {
+    ...(input.existingMetadata ?? {}),
+    ...input.generationMetadata,
+    skillName: input.skill.name,
+    skillVersion: input.skill.version,
+    skillSha256: input.skill.sha256,
+    artifactStage: 'image-deck',
+    artifactLabel: '图片高保真版',
+    editableScope: 'image',
+    slideCount: input.slideCount,
+    bytes: input.bytes,
+    sha256: input.sha256,
+    encodingClean: true,
+    qualityGate: 'image-generation-and-package',
+    availableWhileTaskRunning: true,
+    refreshedAfterResume: input.refreshedAfterResume,
+  }
+}
+
 const ARTIFACT_ROOT = path.resolve(process.env.AI_ARTIFACT_ROOT || path.join(process.cwd(), 'server', 'ai-artifacts'))
 const running = new Set<string>()
+let aiTaskWorkerStopping = false
+const AI_TASK_WORKER_OWNER = `${hostname()}:${process.pid}:${randomUUID().slice(0, 8)}`
+const AI_TASK_LEASE_SECONDS = (() => {
+  const value = Number(process.env.AI_TASK_LEASE_SECONDS || 900)
+  if (!Number.isSafeInteger(value) || value < 60) throw new Error('AI_TASK_LEASE_SECONDS must be an integer >= 60')
+  return value
+})()
 const AUTO_RECOVERY_TASK_TYPES = new Set<AiExecutableTaskType>([
   'compliance_statement',
   'investment_proposal',
@@ -169,6 +214,71 @@ const AUTO_RECOVERY_TASK_TYPES = new Set<AiExecutableTaskType>([
   'project_qa',
   'custom_template_document',
 ])
+const NON_RETRYABLE_AI_TASK_ERROR_CODES = new Set([
+  'CUSTOM_TEMPLATE_FORMAT_MISMATCH',
+  'INVESTMENT_RECOMMENDATION_CONTENT_QUALITY_REJECTED',
+  'GORDEN_VISIBLE_TEXT_CONTRACT_REJECTED',
+  'TASK_NOT_FOUND',
+  'PROJECT_NOT_FOUND',
+  'TASK_ATTACHMENT_NOT_FOUND',
+  'TASK_ATTACHMENT_PARSE_FAILED',
+  'DUE_DILIGENCE_EVIDENCE_EMPTY',
+  'DUE_DILIGENCE_PUBLIC_RESEARCH_AUDIT_REQUIRED',
+  'DUE_DILIGENCE_SKILL_RUNTIME_UNAVAILABLE',
+  'AI_TEMPLATE_REGISTRY_MISMATCH',
+])
+
+export function classifyAiTaskFailure(error: unknown): AiTaskFailureClassification {
+  const diagnostic = error as { code?: unknown; status?: unknown }
+  const rawCode = typeof diagnostic?.code === 'string'
+    ? diagnostic.code.trim().toUpperCase()
+    : ''
+  const errorCode = /^[A-Z][A-Z0-9_]{1,63}$/.test(rawCode)
+    ? rawCode
+    : 'AI_TASK_EXECUTION_FAILED'
+  const status = Number(diagnostic?.status)
+  const message = error instanceof Error ? error.message : String(error ?? '')
+  const permanentMessage = /项目不存在|模板不存在|输出格式应为|缺少 Document Blueprint|缺少Document Blueprint/.test(message)
+  const permanentStatus = Number.isInteger(status)
+    && status >= 400
+    && status < 500
+    && status !== 408
+    && status !== 429
+  return {
+    errorCode,
+    retryable: !NON_RETRYABLE_AI_TASK_ERROR_CODES.has(errorCode)
+      && !permanentMessage
+      && !permanentStatus,
+  }
+}
+
+async function authorizedArtifactPath(storagePath: string): Promise<{ resolved: string; size: number } | undefined> {
+  const resolved = path.resolve(storagePath)
+  if (!resolved.startsWith(ARTIFACT_ROOT + path.sep)) return undefined
+  const [rootReal, fileReal, linkInfo, fileStat] = await Promise.all([
+    realpath(ARTIFACT_ROOT).catch(() => ARTIFACT_ROOT),
+    realpath(resolved).catch(() => null),
+    lstat(resolved).catch(() => null),
+    stat(resolved).catch(() => null),
+  ])
+  if (!fileReal || !linkInfo || linkInfo.isSymbolicLink() || !fileStat?.isFile()) return undefined
+  if (fileReal !== rootReal && !fileReal.startsWith(rootReal + path.sep)) return undefined
+  return { resolved, size: fileStat.size }
+}
+
+function aiTaskLeaseExpiry(): Date {
+  return new Date(Date.now() + AI_TASK_LEASE_SECONDS * 1_000)
+}
+
+export async function claimAiTaskForExecution(taskId: string): Promise<boolean> {
+  if (aiTaskWorkerStopping) return false
+  return aiTaskRepository.claimTask({
+    taskId,
+    leaseOwner: AI_TASK_WORKER_OWNER,
+    leaseExpiresAt: aiTaskLeaseExpiry(),
+    updatedAt: new Date(),
+  })
+}
 
 async function retryDocumentStep<T>(
   label: string,
@@ -239,10 +349,56 @@ function createRequestHash(input: CreateAiTaskInput) {
     projectId: input.projectId,
     conversationId: input.conversationId ?? null,
     parameters: input.parameters,
+    ...(input.retryOfTaskId ? { retryOfTaskId: input.retryOfTaskId } : {}),
   })).digest('hex')
 }
 
-function publicArtifact(row: typeof aiArtifacts.$inferSelect) {
+function requestIdentityForStoredTask(task: AiTaskRecord): CreateAiTaskInput {
+  return {
+    type: task.type as AiExecutableTaskType,
+    projectId: task.projectId,
+    conversationId: task.conversationId ?? undefined,
+    parameters: (task.parameters ?? {}) as Record<string, unknown>,
+    idempotencyKey: task.idempotencyKey,
+    retryOfTaskId: task.retryOfTaskId ?? undefined,
+  }
+}
+
+function legacyRequestHashWithoutRetrySource(input: CreateAiTaskInput) {
+  return createHash('sha256').update(canonicalJson({
+    type: input.type,
+    projectId: input.projectId,
+    conversationId: input.conversationId ?? null,
+    parameters: input.parameters,
+  })).digest('hex')
+}
+
+async function findIdempotentAiTask(userId: string, input: CreateAiTaskInput) {
+  const existing = await aiTaskRepository.findTaskByIdempotency(userId, input.idempotencyKey)
+  if (!existing) return undefined
+  const expectedHash = createRequestHash(input)
+  const storedIdentity = requestIdentityForStoredTask(existing)
+  const storedHash = existing.requestHash || createRequestHash(storedIdentity)
+  const exactLegacyRetryReplay = Boolean(
+    existing.requestHash
+    && existing.retryOfTaskId
+    && input.retryOfTaskId === existing.retryOfTaskId
+    && existing.requestHash === legacyRequestHashWithoutRetrySource(input)
+    && existing.requestHash === legacyRequestHashWithoutRetrySource(storedIdentity),
+  )
+  if (storedHash !== expectedHash && !exactLegacyRetryReplay) {
+    throw Object.assign(new Error('该幂等键已用于不同的任务参数'), {
+      status: 409,
+      code: 'IDEMPOTENCY_CONFLICT',
+    })
+  }
+  await recordJobCoordinationEventSafely({
+    domain: 'ai-task', entityId: existing.id, event: 'duplicateSuppressed',
+  })
+  return existing
+}
+
+function publicArtifact(row: AiArtifactRecord) {
   const { storagePath: _storagePath, ...safe } = row
   return {
     ...safe,
@@ -251,20 +407,16 @@ function publicArtifact(row: typeof aiArtifacts.$inferSelect) {
 }
 
 async function userCanAccessProject(user: AiTaskUser, projectId: string) {
-  const [project] = await db.select().from(projects).where(eq(projects.id, projectId)).limit(1)
-  if (!project) return { allowed: false as const, project: undefined, reason: '项目不存在' }
-  const collaborators = Array.isArray(project.collaborators) ? project.collaborators : []
-  // 兼容历史项目：created_by 为空时维持当前系统的全员可见行为；新项目按创建者、负责人和协作者判断。
-  const allowed = user.role === '系统管理员'
-    || !project.createdBy
-    || project.createdBy === user.uid
-    || project.owner === user.name
-    || collaborators.includes(user.name)
-  return { allowed, project, reason: allowed ? '' : '无权访问该项目' }
+  const project = await getAccessibleProject(user.uid, projectId)
+  return {
+    allowed: Boolean(project),
+    project: project ?? undefined,
+    reason: project ? '' : '项目不存在或无权访问',
+  }
 }
 
 async function writeTaskAudit(user: AiTaskUser, action: string, target: string) {
-  await db.insert(auditLogs).values({
+  await identityRepositories.audits.append({
     userId: user.uid,
     userName: user.name,
     module: 'AI 智能助手',
@@ -345,7 +497,7 @@ async function sourcesForProject(
       sourceId: row.sourceId,
       sourceName: row.sourceName || '项目资料',
       chunkIndex: row.chunkIndex,
-      versionOrDate: row.createdAt.toISOString().slice(0, 10),
+      versionOrDate: formatShanghaiDateKey(row.createdAt),
       locator: cachedUrl,
       content: row.content,
     }
@@ -365,7 +517,7 @@ async function sourcesForProject(
       sourceId: row.fileId,
       sourceName: row.fileName || '项目文件',
       chunkIndex: row.chunkIndex,
-      versionOrDate: row.createdAt.toISOString().slice(0, 10),
+      versionOrDate: formatShanghaiDateKey(row.createdAt),
       content,
     })
   }
@@ -562,13 +714,15 @@ export function screenEvidenceSources(sources: EvidenceSource[], type?: AiExecut
     ? { maxTotal: 120, maxPerDocument: 10 }
     : type === 'compliance_statement'
       ? { maxTotal: 96, maxPerDocument: 12 }
-      : type === 'due_diligence_report' || type === 'custom_template_document'
-        ? { maxTotal: 96, maxPerDocument: 4 }
-    : type === 'project_qa'
-          ? { maxTotal: 72, maxPerDocument: 8 }
-          : type === 'investment_recommendation_ppt'
-            ? { maxTotal: 120, maxPerDocument: 14 }
-          : { maxTotal: 18, maxPerDocument: 3 }
+      : type === 'due_diligence_report'
+        ? { maxTotal: 96, maxPerDocument: 24 }
+        : type === 'custom_template_document'
+          ? { maxTotal: 96, maxPerDocument: 4 }
+          : type === 'project_qa'
+            ? { maxTotal: 72, maxPerDocument: 8 }
+            : type === 'investment_recommendation_ppt'
+              ? { maxTotal: 120, maxPerDocument: 14 }
+              : { maxTotal: 18, maxPerDocument: 3 }
   const result = curateEvidenceSources(sources, options)
   // 本地项目资料优先，项目档案和用户补充输入其次，缓存公开证据最后。
   const priority = (sourceType: string) => {
@@ -582,31 +736,63 @@ export function screenEvidenceSources(sources: EvidenceSource[], type?: AiExecut
 }
 
 async function getTaskRow(userId: string, taskId: string) {
-  const [task] = await db.select().from(aiTasks)
-    .where(and(eq(aiTasks.id, taskId), eq(aiTasks.userId, userId)))
-    .limit(1)
-  return task
+  return aiTaskRepository.findOwnedTask(userId, taskId)
 }
 
 async function isCancellationRequested(taskId: string) {
-  const [row] = await db.select({ requested: aiTasks.cancellationRequested, status: aiTasks.status })
-    .from(aiTasks).where(eq(aiTasks.id, taskId)).limit(1)
-  return !row || row.requested || row.status === 'cancelled'
+  const row = await aiTaskRepository.getTaskCancellationState(taskId)
+  return !row
+    || row.cancellationRequested
+    || row.status === 'cancelled'
+    || row.leaseOwner !== AI_TASK_WORKER_OWNER
 }
 
 async function updateStage(taskId: string, stage: string, progress: number) {
   const boundedProgress = Math.max(0, Math.min(100, Math.round(progress)))
-  await db.update(aiTasks).set({
+  await aiTaskRepository.updateRunningStage({
+    taskId,
+    leaseOwner: AI_TASK_WORKER_OWNER,
     stage,
-    progress: sql<number>`GREATEST(${aiTasks.progress}, ${boundedProgress})`,
+    progress: boundedProgress,
     updatedAt: new Date(),
-  }).where(eq(aiTasks.id, taskId))
+  })
 }
 
 type InvestmentRecommendationResumeCheckpoint = {
   content: BusinessContent
   sourceSnapshots: Array<Record<string, unknown>>
   checkpointPath: string
+}
+
+export function auditableTaskSourceIndexes(
+  usedSourceIndexes: number[],
+  sources: readonly EvidenceSource[],
+) {
+  const valid = [...new Set(usedSourceIndexes.filter((index) =>
+    Number.isInteger(index) && index >= 0 && index < sources.length))]
+  if (valid.length > 0) return valid
+  const projectRecordIndex = sources.findIndex((source) => source.sourceType === 'project_record')
+  return projectRecordIndex >= 0 ? [projectRecordIndex] : []
+}
+
+export function auditableTaskSources(
+  usedSourceIndexes: number[],
+  sources: readonly EvidenceSource[],
+  rawSources: readonly EvidenceSource[] = sources,
+) {
+  const selected = auditableTaskSourceIndexes(usedSourceIndexes, sources)
+    .map((index) => sources[index])
+    .filter((source): source is EvidenceSource => Boolean(source))
+  if (selected.length > 0) return selected
+  const projectRecord = rawSources.find((source) => source.sourceType === 'project_record')
+  return projectRecord ? [projectRecord] : []
+}
+
+export function investmentRecommendationReviewProjectName(project: {
+  name: string
+  companyName?: string | null
+}) {
+  return String(project.companyName || '').trim() || project.name
 }
 
 function checkpointSourceIdentity(source: Record<string, unknown>) {
@@ -795,12 +981,11 @@ function isTemplatePreparationPending(parameters: Record<string, unknown> | null
 
 async function cancelIfRequested(taskId: string) {
   if (!(await isCancellationRequested(taskId))) return false
-  await db.update(aiTasks).set({
-    status: 'cancelled',
-    stage: '已取消',
+  await aiTaskRepository.markTaskCancelledByLease({
+    taskId,
+    leaseOwner: AI_TASK_WORKER_OWNER,
     completedAt: new Date(),
-    updatedAt: new Date(),
-  }).where(eq(aiTasks.id, taskId))
+  })
   return true
 }
 
@@ -1182,19 +1367,17 @@ function assessQaTemplateFidelity(input: {
 }
 
 async function executeTask(taskId: string) {
-  if (running.has(taskId)) return
+  if (aiTaskWorkerStopping || running.has(taskId)) return
   running.add(taskId)
   let rescheduleAfterRecovery = false
+  let leaseHeartbeat: NodeJS.Timeout | undefined
   try {
-    const [task] = await db.select().from(aiTasks).where(eq(aiTasks.id, taskId)).limit(1)
+    const task = await aiTaskRepository.findTaskById(taskId)
     if (!task || !isAiExecutableTaskType(task.type) || ['succeeded', 'cancelled'].includes(task.status)) return
     const parameters = (task.parameters ?? {}) as Record<string, unknown>
-    const [retrySourceTask] = task.type === 'investment_recommendation_ppt' && task.retryOfTaskId
-      ? await db.select({ progress: aiTasks.progress })
-          .from(aiTasks)
-          .where(eq(aiTasks.id, task.retryOfTaskId))
-          .limit(1)
-      : []
+    const retrySourceTask = task.type === 'investment_recommendation_ppt' && task.retryOfTaskId
+      ? await aiTaskRepository.findTaskById(task.retryOfTaskId)
+      : null
     const resumeProgressFloor = Math.max(
       0,
       Math.min(
@@ -1209,6 +1392,19 @@ async function executeTask(taskId: string) {
     )
     // 上传模板时会先创建正式任务记录，但模板分析完成前不能进入文档生成流水线。
     if (isTemplatePreparationPending(parameters)) return
+    if (!(await claimAiTaskForExecution(taskId))) return
+    if (await cancelIfRequested(taskId)) return
+    leaseHeartbeat = setInterval(() => {
+      void aiTaskRepository.heartbeatTaskLease({
+        taskId,
+        leaseOwner: AI_TASK_WORKER_OWNER,
+        leaseExpiresAt: aiTaskLeaseExpiry(),
+        updatedAt: new Date(),
+      }).catch((error) => {
+        console.warn(`[aiTask] lease heartbeat failed task=${taskId}:`, (error as Error).message)
+      })
+    }, Math.max(10_000, Math.floor(AI_TASK_LEASE_SECONDS * 1_000 / 3)))
+    leaseHeartbeat.unref()
     const resolvedCustomTemplate = (
       task.type === 'custom_template_document'
     )
@@ -1257,16 +1453,15 @@ async function executeTask(taskId: string) {
       await updateStage(taskId, '加载 generate-project-qa-report 版式规范', 6)
       qaTemplateProfile = createProjectQaSkillProfile(skill)
     }
-    const [claimed] = await db.update(aiTasks).set({
-      status: 'running',
+    const started = await aiTaskRepository.markTaskStarted({
+      taskId,
+      leaseOwner: AI_TASK_WORKER_OWNER,
       stage: resumeProgressFloor > 0 ? '读取断点续跑检查点' : '读取项目资料',
       progress: Math.max(10, resumeProgressFloor),
       startedAt: task.startedAt ?? new Date(),
-      errorId: null,
-      errorMessage: null,
       updatedAt: new Date(),
-    }).where(and(eq(aiTasks.id, taskId), eq(aiTasks.status, 'pending'))).returning()
-    if (!claimed || await cancelIfRequested(taskId)) return
+    })
+    if (!started || await cancelIfRequested(taskId)) return
 
     const [project] = await db.select().from(projects).where(eq(projects.id, task.projectId)).limit(1)
     if (!project) throw new Error('项目不存在或已删除')
@@ -1279,7 +1474,7 @@ async function executeTask(taskId: string) {
       await cancelIfRequested(taskId)
       return
     }
-    const sourceCutoffDate = String(parameters.sourceCutoffDate || new Date().toISOString().slice(0, 10))
+    const sourceCutoffDate = String(parameters.sourceCutoffDate || formatShanghaiDateKey(new Date()))
     const knowledgeSources = await sourcesForProject(
       project.id,
       sourceCutoffDate,
@@ -1306,12 +1501,12 @@ async function executeTask(taskId: string) {
       : ''
     const rawSources: EvidenceSource[] = [
       ...knowledgeSources.filter((source) => evidenceSourceMatchesProject(source, project)),
-      ...(project.updatedAt.toISOString().slice(0, 10) <= sourceCutoffDate ? [{
+      ...(formatShanghaiDateKey(project.updatedAt) <= sourceCutoffDate ? [{
         sourceType: 'project_record',
         sourceId: project.id,
         sourceName: '项目档案',
         chunkIndex: 0,
-        versionOrDate: project.updatedAt.toISOString().slice(0, 10),
+        versionOrDate: formatShanghaiDateKey(project.updatedAt),
         content: [
           `项目名称：${project.name}`,
           `公司主体：${project.companyName || '待核验'}`,
@@ -1630,13 +1825,11 @@ async function executeTask(taskId: string) {
       if (await cancelIfRequested(taskId)) return
 
       await updateStage(taskId, '执行 DOCX 内容与版式质量检查', 92)
-      const [{ count }] = await db.select({ count: sql<number>`count(*)::int` }).from(aiArtifacts)
-        .where(and(
-          eq(aiArtifacts.userId, task.userId),
-          eq(aiArtifacts.projectId, task.projectId),
-          eq(aiArtifacts.format, 'docx'),
-        ))
-      const version = Number(count ?? 0) + 1
+      const version = await aiTaskRepository.countArtifacts({
+        userId: task.userId,
+        projectId: task.projectId,
+        format: 'docx',
+      }) + 1
       const sharedMetadata = {
         referenceTemplate: path.basename(template.referencePath),
         referenceTemplates: (template.referencePaths ?? [template.referencePath])
@@ -1677,7 +1870,9 @@ async function executeTask(taskId: string) {
         templateFidelityTarget: TEMPLATE_FIDELITY_MINIMUM,
         templateFidelity,
       }
-      const [qaArtifact] = await db.insert(aiArtifacts).values({
+      const qaArtifactId = randomUUID()
+      const qaArtifact = {
+        id: qaArtifactId,
         taskId: task.id,
         userId: task.userId,
         projectId: task.projectId,
@@ -1696,40 +1891,43 @@ async function executeTask(taskId: string) {
           ...docxGeneration,
           ...sharedMetadata,
         },
-      }).returning()
+        archived: false,
+      }
       const usedSourceIndexes = usedProjectQaSourceIndexes(reviewed.answers, sources.length)
-      if (usedSourceIndexes.length) {
-        await db.insert(aiTaskSources).values(usedSourceIndexes.map((index) => {
+      const qaSourceRecords = usedSourceIndexes.map((index) => {
           const source = sources[index]
           return {
+            id: randomUUID(),
             taskId: task.id,
-            artifactId: qaArtifact.id,
+            artifactId: qaArtifactId,
             sourceType: source.sourceType,
             sourceId: source.sourceType.startsWith('public_web')
               ? createHash('sha256')
                   .update(source.sourceId || source.sourceName)
                   .digest('hex')
                   .slice(0, 64)
-              : source.sourceId,
+              : source.sourceId ?? null,
             sourceName: source.sourceName,
             locator: source.locator || `知识片段 ${source.chunkIndex ?? index}`,
             verificationStatus: source.sourceType.startsWith('public_web')
               ? '页面已核验，事实待交叉核验'
               : '资料记载',
           }
-        })).catch((error) => {
-          console.warn('[aiTask] Q&A 来源审计写入未完成，保留已生成 DOCX:', (error as Error).message)
         })
-      }
-      await db.update(aiTasks).set({
-        status: 'succeeded',
+      const completed = await aiTaskRepository.completeTaskWithArtifacts({
+        taskId,
+        leaseOwner: AI_TASK_WORKER_OWNER,
         stage: 'DOCX 已生成',
-        progress: 100,
         resultSummary: qaContent.executiveSummary,
         completedAt: new Date(),
-        updatedAt: new Date(),
-      }).where(eq(aiTasks.id, taskId))
-      const [userRow] = await db.select().from(users).where(eq(users.id, task.userId)).limit(1)
+        artifacts: [qaArtifact],
+        sources: qaSourceRecords,
+      })
+      if (!completed) {
+        await cancelIfRequested(taskId)
+        return
+      }
+      const userRow = await identityRepositories.users.findById(task.userId)
       if (userRow) {
         await writeTaskAudit(
           { uid: userRow.id, name: userRow.name, role: userRow.role },
@@ -2176,14 +2374,7 @@ async function executeTask(taskId: string) {
     }) => {
       if (task.type !== 'investment_recommendation_ppt') return
       const imageDeckFileName = fileName.replace(/\.pptx$/i, '_图片高保真版.pptx')
-      const existingArtifacts = await db.select().from(aiArtifacts)
-        .where(and(
-          eq(aiArtifacts.taskId, task.id),
-          sql`(${aiArtifacts.metadata}->>'artifactStage' = 'image-deck' or ${aiArtifacts.editableLevel} = 'image')`,
-        ))
-        .orderBy(desc(aiArtifacts.createdAt))
-        .limit(1)
-      const existingArtifact = existingArtifacts[0]
+      const existingArtifact = await aiTaskRepository.findLatestImageDeck(task.id)
       const imageDeckPath = existingArtifact
         ? path.resolve(existingArtifact.storagePath)
         : path.join(taskDir, imageDeckFileName)
@@ -2201,29 +2392,29 @@ async function executeTask(taskId: string) {
           { code: 'IMAGE_DECK_ARTIFACT_COPY_MISMATCH' },
         )
       }
-      const imageDeckMetadata = {
-        ...(existingArtifact?.metadata ?? {}),
-        ...imageDeck.metadata,
-        artifactStage: 'image-deck',
-        artifactLabel: '图片高保真版',
-        editableScope: 'image',
+      const imageDeckMetadata = buildImageDeckArtifactMetadata({
+        existingMetadata: existingArtifact?.metadata,
+        generationMetadata: imageDeck.metadata,
+        skill,
         slideCount: imageDeck.slideCount,
         bytes: copiedStat.size,
         sha256: imageDeck.sha256,
-        encodingClean: true,
-        qualityGate: 'image-generation-and-package',
-        availableWhileTaskRunning: true,
         refreshedAfterResume: Boolean(existingArtifact),
-      }
+      })
       if (existingArtifact) {
         imageDeckArtifactVersion = existingArtifact.version
-        await db.update(aiArtifacts).set({
-          storagePath: imageDeckPath,
-          qualityStatus: 'passed',
-          templateVersion: template.templateVersion,
-          metadata: imageDeckMetadata,
-          createdAt: new Date(),
-        }).where(eq(aiArtifacts.id, existingArtifact.id))
+        const { createdAt: _createdAt, ...storedArtifact } = existingArtifact
+        await aiTaskRepository.upsertImageDeck({
+          existingArtifactId: existingArtifact.id,
+          artifact: {
+            ...storedArtifact,
+            storagePath: imageDeckPath,
+            qualityStatus: 'passed',
+            templateVersion: template.templateVersion,
+            metadata: imageDeckMetadata,
+          },
+          updatedAt: new Date(),
+        })
         await updateStage(
           taskId,
           '图片高保真版已重新生成，可重新下载；可编辑版继续生成中',
@@ -2231,29 +2422,31 @@ async function executeTask(taskId: string) {
         )
         return
       }
-      const [{ count }] = await db.select({ count: sql<number>`count(*)::int` })
-        .from(aiArtifacts)
-        .where(and(
-          eq(aiArtifacts.userId, task.userId),
-          eq(aiArtifacts.projectId, task.projectId),
-          eq(aiArtifacts.format, 'pptx'),
-        ))
-      imageDeckArtifactVersion = Number(count ?? 0) + 1
-      await db.insert(aiArtifacts).values({
-        taskId: task.id,
+      imageDeckArtifactVersion = await aiTaskRepository.countArtifacts({
         userId: task.userId,
         projectId: task.projectId,
-        conversationId: task.conversationId,
-        fileName: imageDeckFileName,
         format: 'pptx',
-        mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-        version: imageDeckArtifactVersion,
-        storagePath: imageDeckPath,
-        editableLevel: 'image',
-        sourceCutoffDate,
-        templateVersion: template.templateVersion,
-        qualityStatus: 'passed',
-        metadata: imageDeckMetadata,
+      }) + 1
+      await aiTaskRepository.upsertImageDeck({
+        artifact: {
+          id: randomUUID(),
+          taskId: task.id,
+          userId: task.userId,
+          projectId: task.projectId,
+          conversationId: task.conversationId,
+          fileName: imageDeckFileName,
+          format: 'pptx',
+          mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+          version: imageDeckArtifactVersion,
+          storagePath: imageDeckPath,
+          editableLevel: 'image',
+          sourceCutoffDate,
+          templateVersion: template.templateVersion,
+          qualityStatus: 'passed',
+          metadata: imageDeckMetadata,
+          archived: false,
+        },
+        updatedAt: new Date(),
       })
       await updateStage(
         taskId,
@@ -2293,13 +2486,27 @@ async function executeTask(taskId: string) {
         })
         previewPath = outputPath.replace(/\.pptx$/i, '.preview.png')
         try {
-          previewMetadata = await generateBusinessPptxPreview({
-            outputPath: previewPath,
-            template,
-            project,
-            content,
-            sourceCutoffDate,
-          })
+          const generatedPreviewSource = 'previewSourcePath' in result
+            ? String(result.previewSourcePath || '')
+            : ''
+          if (generatedPreviewSource) {
+            await copyFile(generatedPreviewSource, previewPath)
+            previewMetadata = {
+              previewSlide: 1,
+              previewSource: 'gorden-generated-cover',
+              templateApplied: false,
+              inheritedCompanyAssets: 0,
+              cjkFont: 'Microsoft YaHei',
+            }
+          } else {
+            previewMetadata = await generateBusinessPptxPreview({
+              outputPath: previewPath,
+              template,
+              project,
+              content,
+              sourceCutoffDate,
+            })
+          }
         } catch (error) {
           previewPath = undefined
           console.warn('[aiTask] PPT 预览生成失败，继续交付 PPTX:', (error as Error).message)
@@ -2308,7 +2515,7 @@ async function executeTask(taskId: string) {
           try {
             pptWorkflowReview = await reviewInvestmentRecommendationPpt({
               outputPath,
-              projectName: project.name,
+              projectName: investmentRecommendationReviewProjectName(project),
               disclaimer: template.disclaimer,
               workflow: pptWorkflow,
               template,
@@ -2487,10 +2694,15 @@ async function executeTask(taskId: string) {
     if (task.type === 'investment_proposal') {
       proposalSkillValidation = await validateInvestmentProposalWithSkill(outputPath)
     }
-    const [{ count }] = await db.select({ count: sql<number>`count(*)::int` }).from(aiArtifacts)
-      .where(and(eq(aiArtifacts.userId, task.userId), eq(aiArtifacts.projectId, task.projectId), eq(aiArtifacts.format, template.outputFormat)))
-    const version = imageDeckArtifactVersion ?? Number(count ?? 0) + 1
-    const [artifact] = await db.insert(aiArtifacts).values({
+    const artifactCount = await aiTaskRepository.countArtifacts({
+      userId: task.userId,
+      projectId: task.projectId,
+      format: template.outputFormat,
+    })
+    const version = imageDeckArtifactVersion ?? artifactCount + 1
+    const artifactId = randomUUID()
+    const artifactRecord = {
+      id: artifactId,
       taskId: task.id,
       userId: task.userId,
       projectId: task.projectId,
@@ -2533,8 +2745,8 @@ async function executeTask(taskId: string) {
               'due_diligence_report',
               'custom_template_document',
             ].includes(task.type)
-            ? 'project_knowledge_primary_flue_discovery_llm_page_verification'
-            : 'project_knowledge_primary_flue_network_supplement',
+            ? 'project_knowledge_primary_in_process_discovery_llm_page_verification'
+            : 'project_knowledge_primary_in_process_network_supplement',
         ...(complianceModelResearch
           || dueDiligenceModelResearch
           || dueDiligencePageResearch
@@ -2649,11 +2861,14 @@ async function executeTask(taskId: string) {
           : {}),
         rejectedEvidenceChunks: evidenceScreening.rejected.length,
       },
-    }).returning()
+      archived: false,
+    }
+    const completionArtifacts: CreateAiArtifactRecord[] = [artifactRecord]
     if (previewPath && previewMetadata) {
       const previewStat = await stat(previewPath)
       if (previewStat.size < 1000) throw new Error('PPT 预览图为空或不完整')
-      await db.insert(aiArtifacts).values({
+      completionArtifacts.push({
+        id: randomUUID(),
         taskId: task.id,
         userId: task.userId,
         projectId: task.projectId,
@@ -2689,8 +2904,9 @@ async function executeTask(taskId: string) {
                   skills: pptWorkflow.skills,
                 },
               }
-            : {}),
+          : {}),
         },
+        archived: false,
       })
     }
     const nativeDueDiligenceSourceIndexes = Array.isArray(generationMetadata.usedSourceIndexes)
@@ -2701,12 +2917,9 @@ async function executeTask(taskId: string) {
     const usedSourceIndexes = task.type === 'due_diligence_report'
       ? [...new Set(nativeDueDiligenceSourceIndexes)]
       : usedBusinessSourceIndexes(content, sources.length)
-    if (usedSourceIndexes.length) {
-      const sourceArtifactIds = [artifact.id]
-      await db.insert(aiTaskSources).values(sourceArtifactIds.flatMap((artifactId) =>
-        usedSourceIndexes.map((index) => {
-          const source = sources[index]
+    const sourceRecords = auditableTaskSources(usedSourceIndexes, sources, rawSources).map((source, index) => {
           return {
+            id: randomUUID(),
             taskId: task.id,
             artifactId,
             sourceType: source.sourceType,
@@ -2715,7 +2928,7 @@ async function executeTask(taskId: string) {
                   .update(source.sourceId || source.sourceName)
                   .digest('hex')
                   .slice(0, 64)
-              : source.sourceId,
+              : source.sourceId ?? null,
             sourceName: source.sourceName,
             locator: source.locator ?? (
               source.sourceType.startsWith('public_web')
@@ -2726,17 +2939,15 @@ async function executeTask(taskId: string) {
               ? '待核验'
               : '资料记载',
           }
-        }))).catch((error) => {
-          console.warn('[aiTask] 来源审计写入未完成，保留已生成主文档:', (error as Error).message)
         })
-    }
     const limitedProposal = task.type === 'investment_proposal'
       && (
         (content.generationAudit?.limitedDraft ?? false)
         || proposalDocxReview?.passed !== true
       )
-    await db.update(aiTasks).set({
-      status: 'succeeded',
+    const completed = await aiTaskRepository.completeTaskWithArtifacts({
+      taskId,
+      leaseOwner: AI_TASK_WORKER_OWNER,
       stage: limitedProposal
         ? '受限初稿已生成'
         : task.type === 'investment_proposal'
@@ -2744,12 +2955,16 @@ async function executeTask(taskId: string) {
         : task.type === 'compliance_statement'
           ? 'DOCX 已生成'
           : '生成完成',
-      progress: 100,
       resultSummary: content.executiveSummary,
       completedAt: new Date(),
-      updatedAt: new Date(),
-    }).where(eq(aiTasks.id, taskId))
-    const [userRow] = await db.select().from(users).where(eq(users.id, task.userId)).limit(1)
+      artifacts: completionArtifacts,
+      sources: sourceRecords,
+    })
+    if (!completed) {
+      await cancelIfRequested(taskId)
+      return
+    }
+    const userRow = await identityRepositories.users.findById(task.userId)
     if (userRow) {
       await writeTaskAudit(
         { uid: userRow.id, name: userRow.name, role: userRow.role },
@@ -2760,6 +2975,7 @@ async function executeTask(taskId: string) {
       })
     }
   } catch (error) {
+    if (await cancelIfRequested(taskId).catch(() => false)) return
     const errorId = `AI-${Date.now().toString(36).toUpperCase()}-${randomUUID().slice(0, 8)}`
     const internalMessage = (error as Error).message
     const diagnosticError = error as {
@@ -2773,14 +2989,7 @@ async function executeTask(taskId: string) {
       slideNumber?: unknown
       layer?: unknown
     }
-    const [context] = await db.select({
-      userId: aiTasks.userId,
-      projectId: aiTasks.projectId,
-      type: aiTasks.type,
-      stage: aiTasks.stage,
-      progress: aiTasks.progress,
-      parameters: aiTasks.parameters,
-    }).from(aiTasks).where(eq(aiTasks.id, taskId)).limit(1).catch(() => [])
+    const context = await aiTaskRepository.findTaskById(taskId).catch(() => null)
     console.error(
       `[${errorId}] AI 任务失败 task=${taskId} user=${context?.userId ?? 'unknown'} project=${context?.projectId ?? 'unknown'} type=${context?.type ?? 'unknown'} stage=${context?.stage ?? 'unknown'}:`,
       internalMessage,
@@ -2801,46 +3010,28 @@ async function executeTask(taskId: string) {
       0,
       Number(recoveryParameters._systemDocumentRecoveryAttempt ?? 0) || 0,
     )
-    const nonRecoverableCode = [
-      'CUSTOM_TEMPLATE_FORMAT_MISMATCH',
-      'INVESTMENT_RECOMMENDATION_CONTENT_QUALITY_REJECTED',
-      'GORDEN_VISIBLE_TEXT_CONTRACT_REJECTED',
-      'GORDEN_VISUAL_QA_REJECTED',
-      'TASK_NOT_FOUND',
-      'PROJECT_NOT_FOUND',
-      'DUE_DILIGENCE_EVIDENCE_EMPTY',
-      'DUE_DILIGENCE_PUBLIC_RESEARCH_AUDIT_REQUIRED',
-      'DUE_DILIGENCE_SKILL_RUNTIME_UNAVAILABLE',
-    ].includes(String(diagnosticError.code ?? ''))
-    const nonRecoverableMessage = /项目不存在|模板不存在|输出格式应为|缺少 Document Blueprint|缺少Document Blueprint/.test(
-      internalMessage,
-    )
+    const failure = classifyAiTaskFailure(error)
     if (
       context
       && isAiExecutableTaskType(context.type)
       && AUTO_RECOVERY_TASK_TYPES.has(context.type)
     ) {
-      const [existingMainArtifact] = await db.select({
-        id: aiArtifacts.id,
-        format: aiArtifacts.format,
-      }).from(aiArtifacts).where(and(
-        eq(aiArtifacts.taskId, taskId),
-        inArray(aiArtifacts.format, ['docx', 'pptx']),
-        context.type === 'investment_recommendation_ppt'
-          ? sql`${aiArtifacts.metadata}->>'artifactStage' = 'editable' and ${aiArtifacts.editableLevel} <> 'image'`
-          : undefined,
-      )).orderBy(desc(aiArtifacts.createdAt)).limit(1).catch(() => [])
+      const existingMainArtifact = await aiTaskRepository.findLatestMainArtifact({
+        taskId,
+        requireEditableStage: context.type === 'investment_recommendation_ppt',
+      }).catch(() => null)
       if (existingMainArtifact) {
-        await db.update(aiTasks).set({
-          status: 'succeeded',
+        const restored = await aiTaskRepository.markSucceededFromExistingArtifact({
+          taskId,
+          leaseOwner: AI_TASK_WORKER_OWNER,
           stage: `${existingMainArtifact.format.toUpperCase()} 已生成`,
-          progress: 100,
-          errorId: null,
-          errorMessage: null,
           completedAt: new Date(),
-          updatedAt: new Date(),
-        }).where(eq(aiTasks.id, taskId)).catch(() => {})
-        console.warn(`[${errorId}] 主文档已登记，任务状态恢复为已完成 task=${taskId}`)
+        }).catch(() => false)
+        if (restored) {
+          console.warn(`[${errorId}] 主文档已登记，任务状态恢复为已完成 task=${taskId}`)
+        } else {
+          await cancelIfRequested(taskId).catch(() => false)
+        }
         return
       }
     }
@@ -2849,11 +3040,11 @@ async function executeTask(taskId: string) {
       && isAiExecutableTaskType(context.type)
       && AUTO_RECOVERY_TASK_TYPES.has(context.type)
       && recoveryAttempt < 1
-      && !nonRecoverableCode
-      && !nonRecoverableMessage
+      && failure.retryable
     ) {
-      const [resetTask] = await db.update(aiTasks).set({
-        status: 'pending',
+      const reset = await aiTaskRepository.resetTaskForAutomaticRecovery({
+        taskId,
+        leaseOwner: AI_TASK_WORKER_OWNER,
         stage: context.type === 'investment_recommendation_ppt'
           ? '正在从 Gorden 检查点继续生成'
           : '正在继续生成文档',
@@ -2867,80 +3058,154 @@ async function executeTask(taskId: string) {
             ? { _resumeProgressFloor: Number(context.progress ?? 0) }
             : {}),
         },
-        errorId: null,
-        errorMessage: null,
-        completedAt: null,
         updatedAt: new Date(),
-      }).where(and(eq(aiTasks.id, taskId), eq(aiTasks.status, 'running'))).returning()
-        .catch(() => [])
-      if (resetTask) {
+      }).catch(() => false)
+      if (reset) {
         rescheduleAfterRecovery = true
         console.warn(`[${errorId}] 主文档尚未完成，系统自动继续生成 task=${taskId}`)
         return
       }
     }
-    await db.update(aiTasks).set({
-      status: 'failed',
+    await aiTaskRepository.markTaskFailed({
+      taskId,
+      leaseOwner: AI_TASK_WORKER_OWNER,
       stage: safeAiTaskFailureStage(error),
       errorId,
+      errorCode: failure.errorCode,
       errorMessage: safeAiTaskFailureMessage(error),
+      retryable: failure.retryable,
       completedAt: new Date(),
-      updatedAt: new Date(),
-    }).where(eq(aiTasks.id, taskId)).catch(() => {})
+    }).catch(() => {})
   } finally {
+    if (leaseHeartbeat) clearInterval(leaseHeartbeat)
+    await aiTaskRepository.releaseTaskLease({
+      taskId,
+      leaseOwner: AI_TASK_WORKER_OWNER,
+      updatedAt: new Date(),
+    }).catch(() => {})
     running.delete(taskId)
-    if (rescheduleAfterRecovery) scheduleTask(taskId)
+    if (rescheduleAfterRecovery && !aiTaskWorkerStopping) scheduleTask(taskId)
   }
 }
 
 function scheduleTask(taskId: string) {
+  if (aiTaskWorkerStopping) return
   setImmediate(() => { void executeTask(taskId) })
 }
 
-async function assertTaskProjectAndConversationAccess(
+export async function validateAiTaskCoreReferences(
   user: AiTaskUser,
-  projectId: string,
-  conversationId?: string,
+  input: {
+    projectId: string
+    conversationId?: string
+    parameters?: Record<string, unknown>
+  },
 ) {
-  const access = await userCanAccessProject(user, projectId)
-  if (!access.allowed || !access.project) {
-    throw Object.assign(new Error(access.reason), {
-      status: access.project ? 403 : 404,
-      code: access.project ? 'FORBIDDEN' : 'NOT_FOUND',
+  const userRecord = await identityRepositories.users.findById(user.uid)
+  if (!userRecord || userRecord.status !== '启用') {
+    throw Object.assign(new Error('用户不存在或已禁用'), {
+      status: 403,
+      code: 'USER_DISABLED_OR_MISSING',
     })
   }
-  if (conversationId) {
-    const [conversation] = await db.select().from(chatConversations)
-      .where(and(
-        eq(chatConversations.id, conversationId),
-        eq(chatConversations.userId, user.uid),
-      ))
-      .limit(1)
+  const stableUser = { uid: userRecord.id, name: userRecord.name, role: userRecord.role }
+  const access = await userCanAccessProject(stableUser, input.projectId)
+  if (!access.allowed || !access.project) {
+    throw Object.assign(new Error(access.reason), {
+      status: 403,
+      code: 'PROJECT_FORBIDDEN',
+    })
+  }
+  if (input.conversationId) {
+    const conversation = await agentConversationRepository.findChatByIdForUser(stableUser.uid, input.conversationId)
     if (!conversation) {
       throw Object.assign(new Error('会话不存在或不属于当前用户'), {
         status: 404,
         code: 'CONVERSATION_NOT_FOUND',
       })
     }
-    if (conversation.projectId && conversation.projectId !== projectId) {
+    if (conversation.projectId !== input.projectId) {
       throw Object.assign(new Error('会话所属项目与任务项目不一致'), {
         status: 409,
         code: 'CONVERSATION_PROJECT_MISMATCH',
       })
     }
   }
-  return access.project
+  const parameters = { ...(input.parameters ?? {}) }
+  if (Object.prototype.hasOwnProperty.call(parameters, 'attachmentFileIds')) {
+    if (!Array.isArray(parameters.attachmentFileIds) || parameters.attachmentFileIds.length > 10) {
+      throw Object.assign(new Error('任务附件引用必须是最多 10 个文件 ID'), {
+        status: 400,
+        code: 'INVALID_TASK_ATTACHMENT_REFERENCES',
+      })
+    }
+    const rawFileIds = parameters.attachmentFileIds
+    if (rawFileIds.some((value) => (
+      typeof value !== 'string'
+      || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+    ))) {
+      throw Object.assign(new Error('任务附件包含无效文件 ID'), {
+        status: 400,
+        code: 'INVALID_TASK_ATTACHMENT_REFERENCES',
+      })
+    }
+    const fileIds = [...new Set(rawFileIds as string[])]
+    if (fileIds.length) {
+      const rows = await db.select({
+        id: projectFiles.id,
+        name: projectFiles.name,
+        parseStatus: projectFiles.parseStatus,
+        parseError: projectFiles.parseError,
+      }).from(projectFiles).where(and(
+        eq(projectFiles.projectId, input.projectId),
+        inArray(projectFiles.id, fileIds),
+      ))
+      if (rows.length !== fileIds.length) {
+        throw Object.assign(new Error('任务附件不存在或不属于当前项目'), {
+          status: 404,
+          code: 'TASK_ATTACHMENT_NOT_FOUND',
+        })
+      }
+      const failed = rows.filter((row) => row.parseStatus === '失败')
+      if (failed.length) {
+        throw Object.assign(new Error(`任务附件解析失败：${failed.map((row) => row.name).join('、')}`), {
+          status: 409,
+          code: 'TASK_ATTACHMENT_PARSE_FAILED',
+        })
+      }
+    }
+    parameters.attachmentFileIds = fileIds
+  }
+  return { project: access.project, user: stableUser, parameters }
+}
+
+export async function assertRegisteredAiTaskTemplate(template: AiTemplateDefinition) {
+  const registered = await aiTaskRepository.isTaskTemplateRegistered({
+    type: template.type,
+    templateVersion: template.templateVersion,
+    skillName: template.skillName,
+    outputFormat: template.outputFormat,
+  })
+  if (!registered) {
+    throw Object.assign(new Error('AI 任务模板未在 MySQL 注册或版本不一致'), {
+      status: 503,
+      code: 'AI_TEMPLATE_REGISTRY_MISMATCH',
+    })
+  }
+  return { type: template.type }
 }
 
 export async function createInvestmentPptPreparationTask(
   user: AiTaskUser,
   input: CreateInvestmentPptPreparationInput,
 ) {
-  const project = await assertTaskProjectAndConversationAccess(
+  const references = await validateAiTaskCoreReferences(
     user,
-    input.projectId,
-    input.conversationId,
+    { projectId: input.projectId, conversationId: input.conversationId },
   )
+  user = references.user
+  const project = references.project
+  await assertRegisteredAiTaskTemplate(AI_TEMPLATE_CATALOG.investment_recommendation_ppt)
   const parameters: Record<string, unknown> = {
     sourceCutoffDate: input.sourceCutoffDate,
     outputFormat: input.outputFormat,
@@ -2959,32 +3224,22 @@ export async function createInvestmentPptPreparationTask(
         }
       : {}),
   }
-  const hash = createRequestHash({
+  const requestIdentity: CreateAiTaskInput = {
     type: 'investment_recommendation_ppt',
     projectId: input.projectId,
     conversationId: input.conversationId,
     parameters,
     idempotencyKey: input.idempotencyKey,
-  })
-  const [existing] = await db.select().from(aiTasks)
-    .where(and(
-      eq(aiTasks.userId, user.uid),
-      eq(aiTasks.idempotencyKey, input.idempotencyKey),
-    ))
-    .limit(1)
+  }
+  const hash = createRequestHash(requestIdentity)
+  const existing = await findIdempotentAiTask(user.uid, requestIdentity)
   if (existing) {
-    if (existing.requestHash && existing.requestHash !== hash) {
-      throw Object.assign(new Error('该幂等键已用于不同的任务参数'), {
-        status: 409,
-        code: 'IDEMPOTENCY_CONFLICT',
-      })
-    }
     return getAiTask(user.uid, existing.id)
   }
   try {
     const now = new Date()
     const startedAt = new Date(input.startedAt)
-    const [task] = await db.insert(aiTasks).values({
+    const task = await aiTaskRepository.createTask({
       userId: user.uid,
       projectId: input.projectId,
       conversationId: input.conversationId,
@@ -2998,17 +3253,12 @@ export async function createInvestmentPptPreparationTask(
       idempotencyKey: input.idempotencyKey,
       requestHash: hash,
       updatedAt: now,
-    }).returning()
+    })
     await writeTaskAudit(user, '创建 AI 任务', `投资建议书（PPT）模板准备：${project.name}`)
     return getAiTask(user.uid, task.id)
   } catch (error) {
-    if ((error as { code?: string }).code === '23505') {
-      const [raceWinner] = await db.select().from(aiTasks)
-        .where(and(
-          eq(aiTasks.userId, user.uid),
-          eq(aiTasks.idempotencyKey, input.idempotencyKey),
-        ))
-        .limit(1)
+    if (['ER_DUP_ENTRY', 'CONFLICT'].includes(String((error as { code?: string }).code))) {
+      const raceWinner = await findIdempotentAiTask(user.uid, requestIdentity)
       if (raceWinner) return getAiTask(user.uid, raceWinner.id)
     }
     throw error
@@ -3045,11 +3295,13 @@ export async function updateInvestmentPptPreparationTask(
     || !isTemplatePreparationPending(parameters)
     || task.status !== 'running'
   ) return getAiTask(userId, taskId)
-  await db.update(aiTasks).set({
+  await aiTaskRepository.updatePreparationProgress({
+    taskId,
+    userId,
     stage: update.stage.slice(0, 64),
     progress: Math.max(1, Math.min(10, Math.ceil(update.progress / 10))),
     updatedAt: new Date(),
-  }).where(and(eq(aiTasks.id, taskId), eq(aiTasks.userId, userId)))
+  })
   return getAiTask(userId, taskId)
 }
 
@@ -3067,14 +3319,13 @@ export async function failInvestmentPptPreparationTask(
     || ['succeeded', 'failed', 'cancelled'].includes(task.status)
   ) return getAiTask(userId, taskId)
   const now = new Date()
-  await db.update(aiTasks).set({
-    status: 'failed',
-    stage: '模板分析失败',
+  await aiTaskRepository.failPreparation({
+    taskId,
+    userId,
     progress: Math.max(1, Math.min(10, task.progress || 1)),
     errorMessage: errorMessage.trim().slice(0, 2000) || '模板分析失败',
     completedAt: now,
-    updatedAt: now,
-  }).where(and(eq(aiTasks.id, taskId), eq(aiTasks.userId, userId)))
+  })
   return getAiTask(userId, taskId)
 }
 
@@ -3096,12 +3347,11 @@ export async function startInvestmentPptTaskAfterPreparation(
     || !isTemplatePreparationPending(currentParameters)
   ) return getAiTask(user.uid, taskId)
   if (task.cancellationRequested || task.status === 'cancelled') {
-    await db.update(aiTasks).set({
-      status: 'cancelled',
-      stage: '已取消',
+    await aiTaskRepository.cancelOwnedPreparation({
+      taskId,
+      userId: user.uid,
       completedAt: new Date(),
-      updatedAt: new Date(),
-    }).where(eq(aiTasks.id, taskId))
+    })
     return getAiTask(user.uid, taskId)
   }
   const parameters: Record<string, unknown> = {
@@ -3126,28 +3376,26 @@ export async function startInvestmentPptTaskAfterPreparation(
   }
   await prepareInvestmentRecommendationPptWorkflow(resolved.template)
   const now = new Date()
-  await db.update(aiTasks).set({
+  await aiTaskRepository.finishPreparation({
+    taskId,
+    userId: user.uid,
     parameters,
     templateVersion: resolved.template.templateVersion,
-    status: 'pending',
-    stage: '模板分析完成，等待生成',
-    progress: 10,
-    errorId: null,
-    errorMessage: null,
-    completedAt: null,
     updatedAt: now,
-  }).where(and(eq(aiTasks.id, taskId), eq(aiTasks.userId, user.uid)))
+  })
   await writeTaskAudit(user, '完成 AI 任务模板准备', taskId)
   scheduleTask(taskId)
   return getAiTask(user.uid, taskId)
 }
 
 export async function createAiTask(user: AiTaskUser, input: CreateAiTaskInput) {
-  const project = await assertTaskProjectAndConversationAccess(
+  const references = await validateAiTaskCoreReferences(
     user,
-    input.projectId,
-    input.conversationId,
+    { projectId: input.projectId, conversationId: input.conversationId, parameters: input.parameters },
   )
+  user = references.user
+  input = { ...input, parameters: references.parameters }
+  const project = references.project
   const resolvedCustomTemplate = (
     input.type === 'custom_template_document'
   )
@@ -3170,6 +3418,7 @@ export async function createAiTask(user: AiTaskUser, input: CreateAiTaskInput) {
       })
     }
   } else {
+    await assertRegisteredAiTaskTemplate(template)
     if (input.type !== 'investment_recommendation_ppt') {
       assertAiTemplateReferences(template)
     }
@@ -3179,13 +3428,8 @@ export async function createAiTask(user: AiTaskUser, input: CreateAiTaskInput) {
     await prepareInvestmentRecommendationPptWorkflow(template)
   }
   const hash = createRequestHash(input)
-  const [existing] = await db.select().from(aiTasks)
-    .where(and(eq(aiTasks.userId, user.uid), eq(aiTasks.idempotencyKey, input.idempotencyKey)))
-    .limit(1)
+  const existing = await findIdempotentAiTask(user.uid, input)
   if (existing) {
-    if (existing.requestHash && existing.requestHash !== hash) {
-      throw Object.assign(new Error('该幂等键已用于不同的任务参数'), { status: 409, code: 'IDEMPOTENCY_CONFLICT' })
-    }
     return getAiTask(user.uid, existing.id)
   }
   try {
@@ -3193,7 +3437,7 @@ export async function createAiTask(user: AiTaskUser, input: CreateAiTaskInput) {
       0,
       Math.min(99, Number(input.parameters._resumeProgressFloor ?? 0) || 0),
     )
-    const [task] = await db.insert(aiTasks).values({
+    const task = await aiTaskRepository.createTask({
       userId: user.uid,
       projectId: input.projectId,
       conversationId: input.conversationId,
@@ -3209,14 +3453,13 @@ export async function createAiTask(user: AiTaskUser, input: CreateAiTaskInput) {
             progress: resumeProgressFloor,
           }
         : {}),
-    }).returning()
+    })
     await writeTaskAudit(user, '创建 AI 任务', `${template.label}：${project.name}`)
     scheduleTask(task.id)
     return getAiTask(user.uid, task.id)
   } catch (error) {
-    if ((error as { code?: string }).code === '23505') {
-      const [raceWinner] = await db.select().from(aiTasks)
-        .where(and(eq(aiTasks.userId, user.uid), eq(aiTasks.idempotencyKey, input.idempotencyKey))).limit(1)
+    if (['ER_DUP_ENTRY', 'CONFLICT'].includes(String((error as { code?: string }).code))) {
+      const raceWinner = await findIdempotentAiTask(user.uid, input)
       if (raceWinner) return getAiTask(user.uid, raceWinner.id)
     }
     throw error
@@ -3226,7 +3469,7 @@ export async function createAiTask(user: AiTaskUser, input: CreateAiTaskInput) {
 export async function getAiTask(userId: string, taskId: string) {
   let task = await getTaskRow(userId, taskId)
   if (!task) return undefined
-  const artifacts = await db.select().from(aiArtifacts).where(eq(aiArtifacts.taskId, task.id)).orderBy(desc(aiArtifacts.createdAt))
+  const artifacts = await aiTaskRepository.listTaskArtifacts(task.id)
   if (task.type === 'investment_recommendation_ppt' && task.status === 'succeeded') {
     const hasImageDeck = artifacts.some((artifact) => (
       artifact.qualityStatus === 'passed'
@@ -3243,28 +3486,25 @@ export async function getAiTask(userId: string, taskId: string) {
     ))
     // 兼容修复旧任务：图片版属于中间交付物，不能单独把整项任务标记为成功。
     if (hasImageDeck && !hasEditableDeck) {
-      const [reconciled] = await db.update(aiTasks).set({
-        status: 'failed',
-        stage: '元素级可编辑版未完成',
-        progress: 78,
-        errorMessage: '图片高保真版已完成，但元素级可编辑版尚未成功生成。系统已保留检查点，可点击“继续生成”。',
-        updatedAt: new Date(),
-      }).where(eq(aiTasks.id, task.id)).returning()
-      task = reconciled ?? task
+      await aiTaskRepository.markEditableArtifactMissing(task.id, new Date())
+      task = await getTaskRow(userId, task.id) ?? task
     }
   }
-  const sources = await db.select().from(aiTaskSources).where(eq(aiTaskSources.taskId, task.id)).orderBy(asc(aiTaskSources.createdAt))
+  const sources = await aiTaskRepository.listTaskSources(task.id)
+  const passedArtifacts = artifacts.filter((artifact) => artifact.qualityStatus === 'passed')
   const deliverables = task.type === 'investment_proposal'
-    ? artifacts.filter((artifact) => artifact.format === 'docx')
-    : artifacts
-  return { ...task, artifacts: deliverables.map(publicArtifact), sources }
+    ? passedArtifacts.filter((artifact) => artifact.format === 'docx')
+    : passedArtifacts
+  const deliverableIds = new Set(deliverables.map((artifact) => artifact.id))
+  return {
+    ...task,
+    artifacts: deliverables.map(publicArtifact),
+    sources: sources.filter((source) => !source.artifactId || deliverableIds.has(source.artifactId)),
+  }
 }
 
 export async function listAiTasks(userId: string, options: { projectId?: string; conversationId?: string; limit?: number } = {}) {
-  const conditions = [eq(aiTasks.userId, userId)]
-  if (options.projectId) conditions.push(eq(aiTasks.projectId, options.projectId))
-  if (options.conversationId) conditions.push(eq(aiTasks.conversationId, options.conversationId))
-  const rows = await db.select().from(aiTasks).where(and(...conditions)).orderBy(desc(aiTasks.createdAt)).limit(options.limit ?? 50)
+  const rows = await aiTaskRepository.listOwnedTasks({ userId, ...options })
   return Promise.all(rows.map((row) => getAiTask(userId, row.id)))
 }
 
@@ -3275,14 +3515,14 @@ export async function cancelAiTask(user: AiTaskUser, taskId: string) {
   const templatePreparation = isTemplatePreparationPending(
     task.parameters as Record<string, unknown>,
   )
-  await db.update(aiTasks).set({
-    cancellationRequested: true,
-    ...(task.status === 'pending' || templatePreparation
-      ? { status: 'cancelled', stage: '已取消', completedAt: new Date() }
-      : {}),
+  const cancelImmediately = task.status === 'pending' || templatePreparation
+  const cancelled = await aiTaskRepository.requestCancellation({
+    taskId,
+    userId: user.uid,
+    cancelImmediately,
     updatedAt: new Date(),
-  }).where(eq(aiTasks.id, taskId))
-  await writeTaskAudit(user, '取消 AI 任务', taskId)
+  })
+  if (cancelled) await writeTaskAudit(user, '取消 AI 任务', taskId)
   return getAiTask(user.uid, taskId)
 }
 
@@ -3292,6 +3532,12 @@ export async function retryAiTask(user: AiTaskUser, taskId: string, idempotencyK
   if (!isAiExecutableTaskType(task.type)) throw new Error('不支持重试的任务类型')
   if (task.status !== 'failed') {
     throw Object.assign(new Error('只有失败任务可以重试'), { status: 409, code: 'TASK_NOT_RETRYABLE' })
+  }
+  if (task.retryable === false) {
+    throw Object.assign(new Error('该错误不可直接重试，请修正资料、模板或参数后重新创建任务'), {
+      status: 409,
+      code: 'TASK_ERROR_NOT_RETRYABLE',
+    })
   }
   if (isTemplatePreparationPending(task.parameters as Record<string, unknown>)) {
     throw Object.assign(new Error('模板分析尚未完成，请重新上传模板'), {
@@ -3316,17 +3562,7 @@ export async function retryAiTask(user: AiTaskUser, taskId: string, idempotencyK
 }
 
 export async function listAiArtifacts(userId: string, projectId?: string) {
-  const conditions = [eq(aiArtifacts.userId, userId), eq(aiArtifacts.archived, false)]
-  if (projectId) conditions.push(eq(aiArtifacts.projectId, projectId))
-  const rows = await db.select({
-    artifact: aiArtifacts,
-    taskType: aiTasks.type,
-  })
-    .from(aiArtifacts)
-    .innerJoin(aiTasks, eq(aiArtifacts.taskId, aiTasks.id))
-    .where(and(...conditions))
-    .orderBy(desc(aiArtifacts.createdAt))
-    .limit(100)
+  const rows = await aiTaskRepository.listOwnedArtifacts({ userId, projectId, limit: 100 })
   return rows
     .filter(({ artifact, taskType }) =>
       taskType !== 'investment_proposal' || artifact.format === 'docx')
@@ -3334,56 +3570,105 @@ export async function listAiArtifacts(userId: string, projectId?: string) {
 }
 
 export async function getArtifactDownload(userId: string, artifactId: string) {
-  const [row] = await db.select({
-    artifact: aiArtifacts,
-    taskType: aiTasks.type,
-  })
-    .from(aiArtifacts)
-    .innerJoin(aiTasks, eq(aiArtifacts.taskId, aiTasks.id))
-    .where(and(eq(aiArtifacts.id, artifactId), eq(aiArtifacts.userId, userId), eq(aiArtifacts.archived, false)))
-    .limit(1)
+  const row = await aiTaskRepository.findOwnedArtifactWithTaskType({ userId, artifactId })
   const artifact = row?.artifact
   if (!artifact || artifact.qualityStatus !== 'passed') return undefined
   if (row.taskType === 'investment_proposal' && artifact.format !== 'docx') return undefined
-  const resolved = path.resolve(artifact.storagePath)
-  if (!resolved.startsWith(ARTIFACT_ROOT + path.sep)) return undefined
-  const fileStat = await stat(resolved).catch(() => null)
-  if (!fileStat?.isFile()) return undefined
-  return { artifact, stream: createReadStream(resolved), size: fileStat.size }
+  const file = await authorizedArtifactPath(artifact.storagePath)
+  if (!file) return undefined
+  return { artifact, stream: createReadStream(file.resolved), size: file.size }
 }
 
 export async function getArtifactPreview(userId: string, artifactId: string) {
-  const [artifact] = await db.select().from(aiArtifacts)
-    .where(and(eq(aiArtifacts.id, artifactId), eq(aiArtifacts.userId, userId), eq(aiArtifacts.archived, false)))
-    .limit(1)
+  const artifact = await aiTaskRepository.findOwnedArtifact(userId, artifactId)
   if (!artifact || artifact.qualityStatus !== 'passed' || artifact.format !== 'md') return undefined
-  const resolved = path.resolve(artifact.storagePath)
-  if (!resolved.startsWith(ARTIFACT_ROOT + path.sep)) return undefined
-  const fileStat = await stat(resolved).catch(() => null)
-  if (!fileStat?.isFile() || fileStat.size > 2 * 1024 * 1024) return undefined
-  return { artifact, content: await readFile(resolved, 'utf8') }
+  const file = await authorizedArtifactPath(artifact.storagePath)
+  if (!file || file.size > 2 * 1024 * 1024) return undefined
+  return { artifact, content: await readFile(file.resolved, 'utf8') }
 }
 
-export async function recoverAiTasks() {
-  const recoverable = await db.select({
-    id: aiTasks.id,
-    parameters: aiTasks.parameters,
-  }).from(aiTasks)
-    .where(inArray(aiTasks.status, ['pending', 'running']))
-    .orderBy(asc(aiTasks.createdAt))
-    .limit(100)
+export async function recoverAiTasks(options: { schedule?: boolean; taskIds?: string[] } = {}) {
+  aiTaskWorkerStopping = false
+  const shouldSchedule = options.schedule !== false
+  if (options.taskIds && options.taskIds.length === 0) {
+    return { found: 0, recovered: 0, templateFailed: 0, cancelled: 0 }
+  }
+  const staleWithoutLeaseBefore = new Date(Date.now() - AI_TASK_LEASE_SECONDS * 1_000)
+  const recoverable = await aiTaskRepository.listRecoverableTasks({
+    taskIds: options.taskIds,
+    staleWithoutLeaseBefore,
+    limit: 100,
+  })
+  let recovered = 0
+  let templateFailed = 0
+  let cancelled = 0
   for (const task of recoverable) {
-    if (isTemplatePreparationPending(task.parameters)) {
-      await db.update(aiTasks).set({
-        status: 'failed',
-        stage: '模板分析中断',
-        errorMessage: '服务重启导致模板分析中断，请重新上传模板。',
+    if (task.cancellationRequested) {
+      const updated = await aiTaskRepository.markRecoverableCancelled({
+        taskId: task.id,
+        previousStatus: task.status,
         completedAt: new Date(),
-        updatedAt: new Date(),
-      }).where(eq(aiTasks.id, task.id))
+      })
+      if (updated) cancelled += 1
       continue
     }
-    await db.update(aiTasks).set({ status: 'pending', stage: '等待恢复', updatedAt: new Date() }).where(eq(aiTasks.id, task.id))
-    scheduleTask(task.id)
+    if (isTemplatePreparationPending(task.parameters)) {
+      const updated = await aiTaskRepository.markRecoverableTemplateFailed({
+        taskId: task.id,
+        previousStatus: task.status,
+        completedAt: new Date(),
+      })
+      if (updated) templateFailed += 1
+      continue
+    }
+    if (task.status === 'running') {
+      const updated = await aiTaskRepository.resetExpiredRunningTask({
+        taskId: task.id,
+        staleWithoutLeaseBefore,
+        updatedAt: new Date(),
+      })
+      if (!updated) continue
+    }
+    if (shouldSchedule) scheduleTask(task.id)
+    recovered += 1
+  }
+  return { found: recoverable.length, recovered, templateFailed, cancelled }
+}
+
+export async function aiTaskWorkerHealth() {
+  try {
+    const row = await aiTaskRepository.taskWorkerHealth()
+    return {
+      name: 'mysql-ai-tasks',
+      ok: true,
+      inProcess: true,
+      stopping: aiTaskWorkerStopping,
+      owner: AI_TASK_WORKER_OWNER,
+      pending: row.pending,
+      running: row.running,
+      failed: row.failed,
+      liveLeases: row.liveLeases,
+      expiredLeases: row.expiredLeases,
+      active: running.size,
+    }
+  } catch (error) {
+    return {
+      name: 'mysql-ai-tasks', ok: false, inProcess: true, owner: AI_TASK_WORKER_OWNER,
+      error: (error as Error).message.slice(0, 1_000),
+    }
+  }
+}
+
+export async function stopAiTaskWorker() {
+  aiTaskWorkerStopping = true
+  const activeTaskIds = [...running]
+  const stopped = await aiTaskRepository.stopOwnedRunningTasks({
+    leaseOwner: AI_TASK_WORKER_OWNER,
+    updatedAt: new Date(),
+  })
+  return {
+    active: activeTaskIds.length,
+    releasedLeases: stopped.released + stopped.cancelled,
+    cancelled: stopped.cancelled,
   }
 }

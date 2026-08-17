@@ -1,9 +1,7 @@
 import { defineTool } from '@flue/runtime';
 import * as v from 'valibot';
 
-// 投研工具：走 cybernaut-mvp Express 的内部端点（x-internal-secret 免 JWT），复用既有 RAG 库。
-const EXPRESS = process.env.EXPRESS_BASE_URL ?? 'http://127.0.0.1:3100';
-const SECRET = process.env.INTERNAL_SECRET ?? 'cybernaut-internal-2026';
+// 退休源码只用于行为对照，不再持有或调用共享密钥内部接口。
 
 export const searchProjectDocs = defineTool({
   name: 'search_project_docs',
@@ -19,14 +17,9 @@ export const searchProjectDocs = defineTool({
     sources: v.array(v.string()),
   }),
   async run({ input }) {
-    const r = await fetch(`${EXPRESS}/api/internal/search-docs`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-internal-secret': SECRET },
-      body: JSON.stringify({ query: input.query, projectId: input.projectId }),
-      signal: AbortSignal.timeout(20000),
+    void input;
+    throw Object.assign(new Error('旧 Assistant 工具 Runtime 已退场'), {
+      code: 'RETIRED_ASSISTANT_RUNTIME',
     });
-    if (!r.ok) return { hasEvidence: false, context: '', sources: [] };
-    const d = (await r.json()) as { hasEvidence?: boolean; context?: string; sources?: string[] };
-    return { hasEvidence: !!d.hasEvidence, context: d.context ?? '', sources: d.sources ?? [] };
   },
 });

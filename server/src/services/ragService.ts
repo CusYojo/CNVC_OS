@@ -3,6 +3,7 @@ import { db } from '../db/client.js'
 import { projectFiles, fileChunks, knowledgeChunks } from '../db/schema.js'
 import mammoth from 'mammoth'
 import { decodeTextBuffer, normalizeUnicodeText } from './textQualityService.js'
+import { requestAiGatewayVisionText } from './aiGatewayService.js'
 
 // 通过 18081 网关多模态模型 OCR：读图片/扫描件，返回其中文字。用于图片文件与图片型PDF。
 const GW_BASE = (process.env.OPENAI_BASE_URL || 'http://127.0.0.1:18081/v1').replace(/\/$/, '')
@@ -11,37 +12,29 @@ const OCR_MODEL = process.env.OCR_VISION_MODEL || 'gemini-3.1-pro-preview'
 async function ocrImage(buffer: Buffer, mime = 'image/png'): Promise<string> {
   if (!GW_KEY) return ''
   const dataUrl = `data:${mime};base64,${buffer.toString('base64')}`
-  const body = {
+  return requestAiGatewayVisionText({
+    baseUrl: GW_BASE,
+    apiKey: GW_KEY,
     model: OCR_MODEL,
-    messages: [{ role: 'user', content: [
-      { type: 'text', text: '请把这张图片中的所有文字（含表格、图注、标题）按阅读顺序完整转写成纯文本；无文字则回复空。只输出文字本身，不要解释。' },
-      { type: 'image_url', image_url: { url: dataUrl } },
-    ] }],
-    max_tokens: 4000,
-  }
-  const resp = await fetch(`${GW_BASE}/chat/completions`, {
-    method: 'POST', headers: { Authorization: `Bearer ${GW_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(body), signal: AbortSignal.timeout(120000),
+    prompt: '请把这张图片中的所有文字（含表格、图注、标题）按阅读顺序完整转写成纯文本；无文字则回复空。只输出文字本身，不要解释。',
+    imageDataUrls: [dataUrl],
+    maxTokens: 4000,
+    timeoutMs: 120_000,
   })
-  if (!resp.ok) throw new Error(`OCR网关 ${resp.status}`)
-  const d = await resp.json() as { choices?: { message?: { content?: string } }[] }
-  return (d.choices?.[0]?.message?.content || '').trim()
 }
 
 // 图片型/扫描PDF：pdftoppm 逐页转PNG → 每页走网关OCR → 合并文本
 async function pdfOcrPages(buffer: Buffer, maxPages = 30): Promise<string> {
-  const { execFile } = await import('node:child_process')
-  const { promisify } = await import('node:util')
+  const { execFileSupervised } = await import('../runtime/supervisedProcessService.js')
   const fs = await import('node:fs/promises')
   const os = await import('node:os')
   const path = await import('node:path')
-  const run = promisify(execFile)
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pdfocr-'))
   try {
     const pdfPath = path.join(dir, 'in.pdf')
     await fs.writeFile(pdfPath, buffer)
     // 转 PNG，150dpi，前 maxPages 页
-    await run('pdftoppm', ['-png', '-r', '150', '-l', String(maxPages), pdfPath, path.join(dir, 'p')], { timeout: 120000 })
+    await execFileSupervised('pdftoppm', ['-png', '-r', '150', '-l', String(maxPages), pdfPath, path.join(dir, 'p')], { timeout: 120000 })
     const files = (await fs.readdir(dir)).filter((f) => f.endsWith('.png')).sort()
     const out: string[] = []
     for (const f of files) {
@@ -203,13 +196,28 @@ export async function ingestFile(fileId: string, projectId: string, fileName: st
       const text = await extractText(buffer, type, fileName)
       if (!text) throw new Error('未能从文件中提取到任何文字（可能是扫描件图片，需 OCR）')
       const chunks = chunkText(text)
-      await db.delete(fileChunks).where(eq(fileChunks.fileId, fileId))
-      if (chunks.length) {
-        await db.insert(fileChunks).values(chunks.map((content, i) => ({ fileId, projectId, fileName, chunkIndex: i, content })))
-      }
-      await db.update(projectFiles).set({ parseStatus: '成功', contentText: text.slice(0, 200000), parseError: null }).where(eq(projectFiles.id, fileId))
-      // 双写统一知识库（scope=project）
-      try { await ingestToKnowledge({ scope: 'project', refId: projectId, sourceType: 'file', sourceId: fileId, sourceName: fileName, text }) } catch (ke) { console.warn(`${tag} 知识库双写失败(不阻断): ${(ke as Error).message}`) }
+      // 文件分块、统一知识分块和解析成功状态必须同时提交。任何一步失败都回滚，
+      // 避免页面显示“解析成功”但 Agent 实际检索不到文件内容。
+      await db.transaction(async (tx) => {
+        await tx.delete(fileChunks).where(eq(fileChunks.fileId, fileId))
+        if (chunks.length) {
+          await tx.insert(fileChunks).values(chunks.map((content, i) => ({ fileId, projectId, fileName, chunkIndex: i, content })))
+        }
+        await tx.delete(knowledgeChunks).where(and(
+          eq(knowledgeChunks.scope, 'project'),
+          eq(knowledgeChunks.refId, projectId),
+          eq(knowledgeChunks.sourceId, fileId),
+        ))
+        if (chunks.length) {
+          await tx.insert(knowledgeChunks).values(chunks.map((content, i) => ({
+            scope: 'project', refId: projectId, sourceType: 'file', sourceId: fileId,
+            sourceName: fileName, chunkIndex: i, content,
+          })))
+        }
+        await tx.update(projectFiles)
+          .set({ parseStatus: '成功', contentText: text.slice(0, 200000), parseError: null })
+          .where(eq(projectFiles.id, fileId))
+      })
       console.log(`${tag} ✅ 解析成功 attempt=${attempt} chars=${text.length} chunks=${chunks.length} 耗时=${Date.now() - t0}ms`)
       return { ok: true, chars: text.length, chunks: chunks.length }
     } catch (e) {
@@ -228,17 +236,52 @@ export async function ingestFile(fileId: string, projectId: string, fileName: st
 }
 
 // ---------- 检索（中文友好的关键词打分，无需 embedding） ----------
+function normalizeSearchText(value: string): string {
+  return normalizeUnicodeText(value).normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim()
+}
+
 function tokenize(q: string): string[] {
   // 抽中文 2-gram + 英文/数字词，去停用词
   const stop = new Set(['的','了','是','在','和','与','这个','那个','什么','如何','怎么','项目','公司','请','帮我','一下','有哪些','吗','呢'])
-  const cn = q.match(/[\u4e00-\u9fa5]{2,}/g) || []
+  const normalized = normalizeSearchText(q)
+  const cn = normalized.match(/[\u3400-\u9fff]{2,}/g) || []
   const grams: string[] = []
   for (const seg of cn) {
     if (seg.length <= 3) grams.push(seg)
     else for (let i = 0; i < seg.length - 1; i++) grams.push(seg.slice(i, i + 2))
   }
-  const en = (q.toLowerCase().match(/[a-z0-9]{2,}/g) || [])
+  const en = normalized.match(/[a-z0-9]{2,}/g) || []
   return [...new Set([...grams, ...en])].filter((t) => !stop.has(t))
+}
+
+function retrievalScore(content: string, sourceName: string, question: string, terms: string[]): number {
+  const haystack = normalizeSearchText(`${sourceName}\n${content}`)
+  const phrase = normalizeSearchText(question)
+  let occurrences = 0
+  let matchedTerms = 0
+  for (const term of terms) {
+    let offset = 0
+    let matches = 0
+    while ((offset = haystack.indexOf(term, offset)) !== -1) {
+      matches += 1
+      offset += term.length
+      if (matches >= 20) break
+    }
+    if (matches > 0) matchedTerms += 1
+    occurrences += matches
+  }
+  const exactPhraseBonus = phrase.length >= 2 && haystack.includes(phrase) ? 24 : 0
+  return occurrences * 4 + matchedTerms * 8 + exactPhraseBonus
+}
+
+function compareRetrievalRows(
+  left: { score: number; sourceName: string; chunkIndex: number; id: string },
+  right: { score: number; sourceName: string; chunkIndex: number; id: string },
+): number {
+  if (left.score !== right.score) return right.score - left.score
+  if (left.sourceName !== right.sourceName) return left.sourceName < right.sourceName ? -1 : 1
+  if (left.chunkIndex !== right.chunkIndex) return left.chunkIndex - right.chunkIndex
+  return left.id < right.id ? -1 : left.id > right.id ? 1 : 0
 }
 
 export async function retrieve(projectId: string, question: string, topK = 5) {
@@ -247,18 +290,9 @@ export async function retrieve(projectId: string, question: string, topK = 5) {
   const terms = tokenize(question)
   if (!terms.length) return []
   const scored = rows.map((r) => {
-    const content = r.content
-    const lc = content.toLowerCase()
-    let score = 0
-    for (const t of terms) {
-      let idx = 0, c = 0
-      const hay = /[a-z0-9]/.test(t) ? lc : content
-      while ((idx = hay.indexOf(t, idx)) !== -1) { c++; idx += t.length; if (c > 20) break }
-      score += c
-    }
-    return { ...r, score }
-  }).filter((r) => r.score > 0).sort((a, b) => b.score - a.score).slice(0, topK)
-  return scored
+    return { ...r, sourceName: r.fileName, score: retrievalScore(r.content, r.fileName, question, terms) }
+  }).filter((r) => r.score > 0).sort(compareRetrievalRows).slice(0, topK)
+  return scored.map(({ sourceName: _sourceName, ...row }) => row)
 }
 
 // 列出某项目已成功解析、可检索的文件
@@ -275,19 +309,25 @@ export async function ingestToKnowledge(opts: {
   scope: 'project' | 'lead' | 'org'
   refId: string
   sourceType: string
-  sourceId?: string
+  sourceId: string
   sourceName?: string
   text: string
 }) {
   const { scope, refId, sourceType, sourceId, sourceName = '', text } = opts
   const chunks = chunkText(text || '')
-  // 先删同源旧块（幂等重入）
-  if (sourceId) {
-    await db.delete(knowledgeChunks).where(and(eq(knowledgeChunks.scope, scope), eq(knowledgeChunks.refId, refId), eq(knowledgeChunks.sourceId, sourceId)))
-  }
-  if (chunks.length) {
-    await db.insert(knowledgeChunks).values(chunks.map((content, i) => ({ scope, refId, sourceType, sourceId: sourceId ?? null, sourceName, chunkIndex: i, content })))
-  }
+  // 删除旧投影与写入新投影必须原子提交。若新内容违反约束，旧的可检索版本继续保留。
+  await db.transaction(async (tx) => {
+    await tx.delete(knowledgeChunks).where(and(
+      eq(knowledgeChunks.scope, scope),
+      eq(knowledgeChunks.refId, refId),
+      eq(knowledgeChunks.sourceId, sourceId),
+    ))
+    if (chunks.length) {
+      await tx.insert(knowledgeChunks).values(chunks.map((content, i) => ({
+        scope, refId, sourceType, sourceId, sourceName, chunkIndex: i, content,
+      })))
+    }
+  })
   return { chunks: chunks.length }
 }
 
@@ -301,24 +341,17 @@ export async function retrieveKnowledge(scope: 'project' | 'lead' | 'org', refId
   const terms = tokenize(question)
   if (!terms.length) return []
   const scored = rows.map((r) => {
-    const content = r.content
-    const lc = content.toLowerCase()
-    let score = 0
-    for (const t of terms) {
-      let idx = 0, c = 0
-      const hay = /[a-z0-9]/.test(t) ? lc : content
-      while ((idx = hay.indexOf(t, idx)) !== -1) { c++; idx += t.length; if (c > 20) break }
-      score += c
-    }
     return {
+      id: r.id,
       fileName: r.sourceName,
-      content,
+      content: r.content,
       sourceType: r.sourceType,
       sourceId: r.sourceId,
       chunkIndex: r.chunkIndex,
       refId: r.refId,
-      score,
+      sourceName: r.sourceName,
+      score: retrievalScore(r.content, r.sourceName, question, terms),
     }
-  }).filter((r) => r.score > 0).sort((a, b) => b.score - a.score).slice(0, topK)
-  return scored
+  }).filter((r) => r.score > 0).sort(compareRetrievalRows).slice(0, topK)
+  return scored.map(({ id: _id, sourceName: _sourceName, ...row }) => row)
 }

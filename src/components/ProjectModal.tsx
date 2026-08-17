@@ -32,14 +32,14 @@ export function ProjectModal({ open, onClose }: { open: boolean; onClose: () => 
     try {
       const project = await addProject({
         ...form,
-        companyName: form.companyName || `${form.name}有限公司`,
+        companyName: form.companyName.trim(),
         owner: currentUser.name,
         collaborators: [],
         tags: [form.industry, form.round],
-        businessModel: '待资料解析后补充',
-        market: '待行业研究后补充',
-        team: '待 BP 解析后补充',
-        summary: form.summary || '项目已创建，等待上传 BP 并生成 AI 项目摘要。',
+        businessModel: '',
+        market: '',
+        team: '',
+        summary: form.summary.trim(),
       })
       showToast(`项目“${project.name}”已创建`)
       onClose()

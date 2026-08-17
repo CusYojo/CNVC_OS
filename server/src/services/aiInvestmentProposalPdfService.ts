@@ -1,19 +1,16 @@
 import { createHash } from 'node:crypto'
-import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { access, copyFile, mkdir, mkdtemp, readFile, rename, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { promisify } from 'node:util'
 import JSZip from 'jszip'
 import { PDFParse } from 'pdf-parse'
 import type { BusinessContent } from './aiBusinessContentService.js'
 import type { InvestmentProposalDocumentBlueprint } from './aiInvestmentProposalBlueprintService.js'
 import type { AiTemplateDefinition } from './aiTemplateCatalog.js'
 import { sanitizeInvestmentProposalClientText } from './aiInvestmentProposalTextService.js'
-
-const execFileAsync = promisify(execFile)
+import { execFileSupervised as execFileAsync } from '../runtime/supervisedProcessService.js'
 
 const SOFFICE_CANDIDATES = [
   process.env.AI_SOFFICE_PATH,

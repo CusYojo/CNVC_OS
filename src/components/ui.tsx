@@ -157,13 +157,13 @@ export function LoadingState({ rows = 4 }: { rows?: number }) {
   )
 }
 
-export function FileUpload({ onFile, onFiles, multiple, accept = '.pdf,.ppt,.pptx,.doc,.docx,.xls,.xlsx,.txt,.mp3,.wav' }: { onFile?: (file: File) => void; onFiles?: (files: File[]) => void; multiple?: boolean; accept?: string }) {
+export function FileUpload({ onFile, onFiles, multiple, accept = '.pdf,.ppt,.pptx,.doc,.docx,.xls,.xlsx,.txt,.md,.markdown,.mp3,.wav' }: { onFile?: (file: File) => void; onFiles?: (files: File[]) => void; multiple?: boolean; accept?: string }) {
   const allowMultiple = multiple ?? !!onFiles
   return (
     <label className="flex min-h-36 cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed border-brand-200 bg-brand-50/40 px-6 text-center transition hover:border-brand-400 hover:bg-brand-50">
       <div className="mb-3 grid h-10 w-10 place-items-center rounded-xl bg-white text-brand-600 shadow-sm"><UploadCloud className="h-5 w-5" /></div>
       <p className="text-sm font-medium text-slate-700">点击选择{allowMultiple ? '一个或多个文件' : '文件'}，或拖放到这里</p>
-      <p className="mt-1 text-xs text-slate-500">支持 PDF、PPT、Word、Excel、文本与音频，单文件不超过 100MB{allowMultiple ? '（可多选批量上传）' : ''}</p>
+      <p className="mt-1 text-xs text-slate-500">支持 PDF、PPT、Word、Excel、TXT、Markdown 与音频，单文件不超过 100MB{allowMultiple ? '（可多选批量上传）' : ''}</p>
       <input
         type="file"
         accept={accept}

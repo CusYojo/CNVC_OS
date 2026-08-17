@@ -2,21 +2,12 @@ import { defineTool } from '@flue/runtime';
 import * as v from 'valibot';
 
 // assistant agent 的工具集 —— 让 agent 自主决策调用，而不是 Express 正则硬分流。
-// 全部走 cybernaut-mvp Express 的内部端点（x-internal-secret 免 JWT），
-// 这样 flue 进程不必自己管 pg 密码，且复用既有的 RAG / 情报编排逻辑。
+// 退休源码只用于行为对照，不再调用主服务内部接口。
 
-const EXPRESS = process.env.EXPRESS_BASE_URL ?? 'http://127.0.0.1:3100';
-const SECRET = process.env.INTERNAL_SECRET ?? 'cybernaut-internal-2026';
-
-async function post(path: string, body: unknown, timeoutMs = 20000): Promise<any> {
-  const r = await fetch(`${EXPRESS}${path}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-internal-secret': SECRET },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(timeoutMs),
+async function post(_path: string, _body: unknown, _timeoutMs = 20000): Promise<any> {
+  throw Object.assign(new Error('旧 Assistant 工具 Runtime 已退场'), {
+    code: 'RETIRED_ASSISTANT_RUNTIME',
   });
-  if (!r.ok) throw new Error(`${path} ${r.status}: ${(await r.text()).slice(0, 200)}`);
-  return await r.json();
 }
 
 // 1) 项目资料检索（RAG）—— agent 需要基于已授权资料回答时调用

@@ -1,0 +1,37 @@
+{
+  "schemaVersion": "1.0",
+  "resolutions": [
+    {
+      "issueId": "c7468bb6-9330-11f1-b50c-00163e6e4c3d",
+      "entityType": "project",
+      "entityId": "5a38d3c9-67bc-4d46-9f57-a1e5955206ee",
+      "fieldName": "owner",
+      "sourceValue": "林",
+      "reason": "missing_user",
+      "resolvedUserId": "8916fb2e-81e5-4677-a1ae-352bad7486cf",
+      "resolvedUserName": "林知远",
+      "sourceDump": "cybernaut_mvp_dump.sql",
+      "sourceDumpSha256": "5afbad0be3891156819917dac925bb4cdd557bab0ce3a5e38fdaac620d361d2e",
+      "evidence": {
+        "projectCreatedBy": "8916fb2e-81e5-4677-a1ae-352bad7486cf",
+        "creationAuditId": "cb62e37e-78ba-482a-aeee-6212dd80c8f0",
+        "projectFileIds": [
+          "cc436b2d-786b-45b2-83fa-a087dadfc912",
+          "f5521992-89be-471a-85c9-1b8f035baa41"
+        ],
+        "meetingIds": ["8e26ae52-8fa6-4978-ba56-8593728a1b12"],
+        "todoIds": [
+          "152be461-fd14-4a01-b930-91f2b742397e",
+          "245751b1-cfc4-4b7f-9588-c64149290d01",
+          "4ca8d5e5-cb85-4b9b-8205-dd46609c8167",
+          "ba21d965-f777-4bae-be0b-6c4af12f7a91",
+          "e2f02f1b-bbbc-45e6-b640-168d37fe28b3",
+          "e3da33c5-7588-4289-8826-ec329d86ac76",
+          "ee96f1f3-b319-40f7-a943-01bc7cf47159"
+        ]
+      },
+      "decision": "bind-project-owner-to-the-single-stable-user-consistently-owning-the-source-graph",
+      "decisionBasis": "source-dump-hash+created_by+creation-audit+2-file-uploaders+meeting-host+7-todo-owners"
+    }
+  ]
+}

@@ -1,0 +1,283 @@
+{
+  "version": "lead-workflow-gold-v1",
+  "description": "研究、初筛和增量补全三个 Profile 的技术金标；验证事实/冲突、准入决策、白名单补丁、来源绑定和运行边界。",
+  "thresholds": {
+    "minContractAccuracy": 1,
+    "minEvidenceBindingAccuracy": 1,
+    "maxAverageCostUsd": 0.1,
+    "maxAverageDurationMs": 60000,
+    "maxTurns": 2,
+    "maxToolCalls": 0,
+    "maxAttemptsPerCase": 2,
+    "maxRetryRate": 0.15
+  },
+  "cases": [
+    {
+      "id": "research-verified-fact-001",
+      "profile": "lead-research-agent",
+      "category": "verified-fact",
+      "input": {
+        "contractVersion": "lead-research-host-tools-v1",
+        "immutableEvent": {
+          "id": "event-research-verified-001",
+          "sourceType": "public-intel",
+          "sourceId": "official-disclosure-001"
+        },
+        "existingLead": null,
+        "sources": [
+          {
+            "sourceId": "official-001",
+            "sourceType": "company-official",
+            "title": "澄明机器人官方融资公告",
+            "quote": "澄明机器人有限公司于2025年3月完成5000万元A轮融资，资金将用于工业巡检机器人量产。",
+            "sourceUrl": "https://example.com/chengming/official-a",
+            "reliability": "high"
+          }
+        ]
+      },
+      "expected": {
+        "minFacts": 1,
+        "maxConflicts": 0,
+        "minGaps": 1,
+        "requiredEvidenceSourceIds": ["official-001"]
+      }
+    },
+    {
+      "id": "research-conflict-preserved-001",
+      "profile": "lead-research-agent",
+      "category": "conflict",
+      "input": {
+        "contractVersion": "lead-research-host-tools-v1",
+        "immutableEvent": {
+          "id": "event-research-conflict-001",
+          "sourceType": "public-intel",
+          "sourceId": "registry-conflict-001"
+        },
+        "existingLead": null,
+        "sources": [
+          {
+            "sourceId": "official-location-001",
+            "sourceType": "company-official",
+            "title": "公司官网",
+            "quote": "凌波传感技术有限公司总部位于北京市海淀区。",
+            "sourceUrl": "https://example.com/lingbo/about",
+            "reliability": "medium"
+          },
+          {
+            "sourceId": "registry-location-001",
+            "sourceType": "registry",
+            "title": "企业登记信息",
+            "quote": "凌波传感技术有限公司登记住所为上海市浦东新区。",
+            "sourceUrl": "https://example.com/lingbo/registry",
+            "reliability": "high"
+          }
+        ]
+      },
+      "expected": {
+        "minConflicts": 1,
+        "requiredConflictSourceIds": ["official-location-001", "registry-location-001"]
+      }
+    },
+    {
+      "id": "screening-evidenced-accept-001",
+      "profile": "lead-screening-agent",
+      "category": "accept",
+      "input": {
+        "contractVersion": "lead-research-host-tools-v1",
+        "immutableEvent": {
+          "id": "event-screening-accept-001",
+          "sourceType": "radar",
+          "sourceId": "customer-validation-001"
+        },
+        "sources": [
+          {
+            "sourceId": "customer-001",
+            "sourceType": "customer-announcement",
+            "title": "客户采购公告",
+            "quote": "远航汽车已采购澄明机器人20套工业巡检设备，并完成首批验收。",
+            "sourceUrl": "https://example.com/customer/procurement",
+            "reliability": "high"
+          }
+        ],
+        "researchFacts": {
+          "summary": "存在可核验客户采购与验收。",
+          "facts": [
+            {
+              "claim": "远航汽车完成设备采购与首批验收",
+              "quote": "远航汽车已采购澄明机器人20套工业巡检设备，并完成首批验收。",
+              "sourceId": "customer-001",
+              "sourceUrl": "https://example.com/customer/procurement",
+              "reliability": "high",
+              "verificationStatus": "verified"
+            }
+          ],
+          "conflicts": [],
+          "gaps": ["合同金额未披露"]
+        }
+      },
+      "expected": {
+        "decision": "accept",
+        "minEvidence": 1,
+        "requiredEvidenceSourceIds": ["customer-001"]
+      }
+    },
+    {
+      "id": "screening-conflict-review-001",
+      "profile": "lead-screening-agent",
+      "category": "review",
+      "input": {
+        "contractVersion": "lead-research-host-tools-v1",
+        "immutableEvent": {
+          "id": "event-screening-review-001",
+          "sourceType": "radar",
+          "sourceId": "valuation-conflict-001"
+        },
+        "sources": [
+          {
+            "sourceId": "financing-news-001",
+            "sourceType": "media",
+            "title": "融资报道",
+            "quote": "本轮融资后公司估值为4亿元。",
+            "sourceUrl": "https://example.com/news/valuation",
+            "reliability": "medium"
+          },
+          {
+            "sourceId": "company-statement-001",
+            "sourceType": "company-official",
+            "title": "公司声明",
+            "quote": "公司声明本轮投后估值为8亿元。",
+            "sourceUrl": "https://example.com/company/valuation",
+            "reliability": "medium"
+          }
+        ],
+        "researchFacts": {
+          "summary": "投后估值存在重大冲突。",
+          "facts": [],
+          "conflicts": [
+            {
+              "field": "valuation",
+              "values": ["4亿元", "8亿元"],
+              "reason": "媒体报道与公司声明不一致",
+              "sourceIds": ["financing-news-001", "company-statement-001"]
+            }
+          ],
+          "gaps": ["缺少交易文件"]
+        }
+      },
+      "expected": {
+        "decision": "review"
+      }
+    },
+    {
+      "id": "enrichment-empty-field-001",
+      "profile": "lead-enrichment-agent",
+      "category": "safe-patch",
+      "input": {
+        "contractVersion": "lead-research-host-tools-v1",
+        "immutableEvent": {
+          "id": "event-enrichment-patch-001",
+          "sourceType": "public-intel",
+          "sourceId": "official-region-001"
+        },
+        "existingLead": {
+          "name": "澄明机器人",
+          "companyName": "澄明机器人有限公司",
+          "businessRegion": "",
+          "industry": "工业机器人"
+        },
+        "sources": [
+          {
+            "sourceId": "official-region-001",
+            "sourceType": "company-official",
+            "title": "公司联系信息",
+            "quote": "澄明机器人有限公司总部位于北京市海淀区。",
+            "sourceUrl": "https://example.com/chengming/contact",
+            "reliability": "high"
+          }
+        ]
+      },
+      "expected": {
+        "requiredPatches": [
+          { "field": "businessRegion", "operation": "set_if_empty", "sourceId": "official-region-001" }
+        ],
+        "maxConflicts": 0
+      }
+    },
+    {
+      "id": "screening-weak-source-review-001",
+      "profile": "lead-screening-agent",
+      "category": "weak-source-review",
+      "input": {
+        "contractVersion": "lead-research-host-tools-v1",
+        "immutableEvent": {
+          "id": "event-screening-weak-source-001",
+          "sourceType": "radar",
+          "sourceId": "anonymous-revenue-claim-001"
+        },
+        "sources": [
+          {
+            "sourceId": "anonymous-forum-001",
+            "sourceType": "public-search",
+            "title": "匿名论坛帖子",
+            "quote": "有匿名用户称云岚智能去年营收已经超过1亿元。",
+            "sourceUrl": "https://example.com/forum/unverified-revenue",
+            "reliability": "low"
+          }
+        ],
+        "researchFacts": {
+          "summary": "仅有匿名论坛对亿元营收的单方说法。",
+          "facts": [
+            {
+              "claim": "匿名用户声称云岚智能去年营收超过1亿元",
+              "quote": "有匿名用户称云岚智能去年营收已经超过1亿元。",
+              "sourceId": "anonymous-forum-001",
+              "sourceUrl": "https://example.com/forum/unverified-revenue",
+              "reliability": "low",
+              "verificationStatus": "unverified"
+            }
+          ],
+          "conflicts": [],
+          "gaps": ["缺少公司披露、财务报表、客户或权威第三方来源"]
+        }
+      },
+      "expected": {
+        "decision": "review"
+      }
+    },
+    {
+      "id": "enrichment-existing-field-conflict-001",
+      "profile": "lead-enrichment-agent",
+      "category": "no-overwrite",
+      "input": {
+        "contractVersion": "lead-research-host-tools-v1",
+        "immutableEvent": {
+          "id": "event-enrichment-conflict-001",
+          "sourceType": "public-intel",
+          "sourceId": "location-change-001"
+        },
+        "existingLead": {
+          "name": "凌波传感",
+          "companyName": "凌波传感技术有限公司",
+          "businessRegion": "北京市",
+          "industry": "智能传感器"
+        },
+        "sources": [
+          {
+            "sourceId": "registry-new-location-001",
+            "sourceType": "registry",
+            "title": "企业登记信息",
+            "quote": "凌波传感技术有限公司登记住所为上海市浦东新区。",
+            "sourceUrl": "https://example.com/lingbo/new-registry",
+            "reliability": "high"
+          }
+        ]
+      },
+      "expected": {
+        "forbiddenPatchFields": ["businessRegion"],
+        "minConflicts": 1,
+        "requiredConflictFields": ["businessRegion"],
+        "requiredConflictSourceIds": ["registry-new-location-001"]
+      }
+    }
+  ]
+}

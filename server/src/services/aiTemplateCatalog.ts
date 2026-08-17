@@ -1,6 +1,6 @@
 import { existsSync, readdirSync } from 'node:fs'
 import path from 'node:path'
-import type { AiCustomTemplateAnalysis } from '../db/schema.js'
+import type { AiCustomTemplateAnalysis } from '../repositories/aiTaskRepository.js'
 import {
   AI_DUE_DILIGENCE_SKILL_NAME,
   AI_QA_SKILL_NAME,

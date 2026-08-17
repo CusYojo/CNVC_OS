@@ -3,6 +3,7 @@ import { db } from '../db/client.js'
 import { leads } from '../db/schema.js'
 import { resolveLeadBusinessRegion } from './leadRegion.js'
 import { deriveRadarSubjectName, isSpecificLeadSubjectName } from './leadSubjectName.js'
+import { applyLeadFieldPolicy } from './leadFieldProvenance.js'
 
 const objectValue = (value: unknown): Record<string, unknown> =>
   value && typeof value === 'object' && !Array.isArray(value)
@@ -60,11 +61,21 @@ export async function backfillLeadBusinessRegions() {
       && row.businessRegionSource === resolution.source
       && row.businessRegionConfidence === resolution.confidence
     ) continue
-    await db.update(leads).set({
-      businessRegion: resolution.region,
-      businessRegionSource: resolution.source,
-      businessRegionConfidence: resolution.confidence,
-    }).where(eq(leads.id, row.id))
+    const patch = applyLeadFieldPolicy(
+      row as unknown as Record<string, unknown>,
+      {
+        businessRegion: resolution.region,
+        businessRegionSource: resolution.source,
+        businessRegionConfidence: resolution.confidence,
+      },
+      'deterministic_backfill',
+      {
+        linkedFields: [['businessRegion', 'businessRegionSource', 'businessRegionConfidence']],
+        operation: 'machine_refresh',
+      },
+    )
+    if (!Object.keys(patch).length) continue
+    await db.update(leads).set(patch as never).where(eq(leads.id, row.id))
     updated += 1
   }
   return { scanned: rows.length, updated, unresolved: rows.length - resolved }
