@@ -9,6 +9,8 @@ export type CapabilityImportCandidate = {
   enabled?: boolean
   allowedRoles?: string[]
   config?: Record<string, unknown>
+  toolNames?: string[]
+  dependencyNames?: string[]
   sourcePath: string
 }
 
@@ -101,7 +103,14 @@ function candidateFromText(kind: CapabilityKind, path: string, text: string, fal
   const capabilityKey = typeof parsed.capabilityKey === 'string' ? parsed.capabilityKey : stem(path)
   if (parsed.kind && parsed.kind !== kind) return null
   if (!/^[a-zA-Z0-9._-]+$/.test(capabilityKey)) throw new Error(`${path} 的能力 ID 不合法。`)
-  return { capabilityKey, kind, name: typeof parsed.name === 'string' ? parsed.name : capabilityKey, description: parsed.description ?? null, enabled: typeof parsed.enabled === 'boolean' ? parsed.enabled : undefined, allowedRoles: Array.isArray(parsed.allowedRoles) ? parsed.allowedRoles.filter((item): item is string => typeof item === 'string') : undefined, config: parsed.config && typeof parsed.config === 'object' ? parsed.config : {}, sourcePath: path }
+  const config = parsed.config && typeof parsed.config === 'object' ? parsed.config : {}
+  const toolNames = Array.isArray((parsed as { toolNames?: unknown }).toolNames)
+    ? (parsed as { toolNames: unknown[] }).toolNames.filter((item): item is string => typeof item === 'string')
+    : Array.isArray(config.toolNames) ? config.toolNames.filter((item): item is string => typeof item === 'string') : undefined
+  const dependencyNames = Array.isArray((parsed as { dependencyNames?: unknown }).dependencyNames)
+    ? (parsed as { dependencyNames: unknown[] }).dependencyNames.filter((item): item is string => typeof item === 'string')
+    : undefined
+  return { capabilityKey, kind, name: typeof parsed.name === 'string' ? parsed.name : capabilityKey, description: parsed.description ?? null, enabled: typeof parsed.enabled === 'boolean' ? parsed.enabled : undefined, allowedRoles: Array.isArray(parsed.allowedRoles) ? parsed.allowedRoles.filter((item): item is string => typeof item === 'string') : undefined, config, toolNames, dependencyNames, sourcePath: path }
 }
 
 function relevant(kind: CapabilityKind, path: string) {

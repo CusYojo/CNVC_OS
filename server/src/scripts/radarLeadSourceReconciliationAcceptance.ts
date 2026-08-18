@@ -14,6 +14,7 @@ type ProductionAssetManifest = {
   approved?: unknown
   restoredAt?: unknown
   ownerApprovedAt?: unknown
+  approvals?: unknown
   assets?: unknown
 }
 
@@ -24,6 +25,7 @@ const requiredProductionKinds = new Set<AssetKind>([
   'collector-state',
   'wechat-accounts-xlsx',
 ])
+const requiredApprovalRoles = new Set(['product', 'development', 'operations', 'data'])
 
 function table(baseName: string): string {
   return quoteMysqlIdentifier(mysqlTableName(baseName))
@@ -49,16 +51,24 @@ function sha256(value: Buffer): string {
 
 async function localAdapterInventory() {
   const definitions = [
-    { category: 'collector-state', file: 'project-discovery/data/auto_crawler_status.json', format: 'json' },
-    { category: 'collector-state', file: 'project-discovery/data/wechat_daily_status.json', format: 'json' },
-    { category: 'collector-state', file: 'project-discovery/data/wechat_source_status.json', format: 'json' },
-    { category: 'source-registry', file: 'project-discovery/data/wechat_985_sources.json', format: 'json' },
-    { category: 'candidate-working-set', file: 'project-discovery/data/wechat_api_candidates.jsonl', format: 'jsonl' },
+    { category: 'collector-state', file: '.runtime/radar-legacy/data/auto_crawler_status.json', format: 'json' },
+    { category: 'collector-state', file: '.runtime/radar-legacy/data/wechat_daily_status.json', format: 'json' },
+    { category: 'collector-state', file: '.runtime/radar-legacy/data/wechat_source_status.json', format: 'json' },
+    { category: 'source-registry', file: '.runtime/radar-legacy/data/wechat_985_sources.json', format: 'json' },
+    { category: 'candidate-working-set', file: '.runtime/radar-legacy/data/wechat_api_candidates.jsonl', format: 'jsonl' },
   ] as const
   const assets = []
+  let missing = 0
   for (const definition of definitions) {
     const absolute = path.resolve(definition.file)
-    const metadata = await lstat(absolute)
+    const metadata = await lstat(absolute).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return null
+      throw error
+    })
+    if (!metadata) {
+      missing += 1
+      continue
+    }
     assert(metadata.isFile() && !metadata.isSymbolicLink(), `${definition.category} adapter asset must be a regular file`)
     const bytes = await readFile(absolute)
     let records = 0
@@ -79,7 +89,11 @@ async function localAdapterInventory() {
       structurallyReadable: true,
     })
   }
-  return assets
+  assert(
+    missing === 0 || missing === definitions.length,
+    'legacy Radar adapter assets must be either a complete read-only set or fully retired',
+  )
+  return { assets, retired: missing === definitions.length }
 }
 
 async function productionAssetStatus(): Promise<{
@@ -87,6 +101,7 @@ async function productionAssetStatus(): Promise<{
   manifestAccepted: boolean
   productionAssetReady: boolean
   acceptedKinds: string[]
+  acceptedApprovalRoles: string[]
 }> {
   const configured = process.env.RADAR_PRODUCTION_ASSET_MANIFEST?.trim()
   if (!configured) return {
@@ -94,6 +109,7 @@ async function productionAssetStatus(): Promise<{
     manifestAccepted: false,
     productionAssetReady: false,
     acceptedKinds: [],
+    acceptedApprovalRoles: [],
   }
   const manifestPath = path.resolve(configured)
   const metadata = await lstat(manifestPath)
@@ -114,16 +130,30 @@ async function productionAssetStatus(): Promise<{
       ? [kind]
       : []
   }))].sort()
+  const acceptedApprovalRoles = [...new Set((Array.isArray(manifest.approvals) ? manifest.approvals : []).flatMap((approval) => {
+    if (!approval || typeof approval !== 'object') return []
+    const item = approval as Record<string, unknown>
+    const role = String(item.role ?? '')
+    const approverId = String(item.approverId ?? '').trim()
+    const approvedAt = String(item.approvedAt ?? '')
+    return requiredApprovalRoles.has(role)
+      && /^[a-zA-Z0-9][a-zA-Z0-9._:@/-]{2,127}$/.test(approverId)
+      && !Number.isNaN(Date.parse(approvedAt))
+      ? [role]
+      : []
+  }))].sort()
   const manifestAccepted = manifest.schemaVersion === '1.0'
     && manifest.approved === true
     && !Number.isNaN(Date.parse(String(manifest.restoredAt ?? '')))
     && !Number.isNaN(Date.parse(String(manifest.ownerApprovedAt ?? '')))
     && [...requiredProductionKinds].every((kind) => acceptedKinds.includes(kind))
+    && [...requiredApprovalRoles].every((role) => acceptedApprovalRoles.includes(role))
   return {
     manifestConfigured: true,
     manifestAccepted,
     productionAssetReady: manifestAccepted,
     acceptedKinds,
+    acceptedApprovalRoles,
   }
 }
 
@@ -167,7 +197,8 @@ async function main(): Promise<void> {
     runtimeJobDefinitionMissing: Math.max(0, 5 - await count(`SELECT COUNT(DISTINCT id) count FROM ${table('runtime_jobs')} WHERE id IN ('radar-collect-sync','radar-paper-daily','radar-wechat-daily','radar-wechat-retry','radar-wechat-institution')`)),
   }
 
-  const localAssets = await localAdapterInventory()
+  const localInventory = await localAdapterInventory()
+  const localAssets = localInventory.assets
   const productionAssets = await productionAssetStatus()
   const checks = {
     reservePartitionIsComplete: reserve.total > 0 && reserve.withDetail + reserve.sourceMissing === reserve.total,
@@ -187,10 +218,12 @@ async function main(): Promise<void> {
       && radar.sourceRegistry > 0
       && radarViolations.malformedCollectorState === 0
       && radarViolations.malformedSourceRegistry === 0,
-    radarSchedulesMovedIntoMySqlRuntimeJobs: radar.runtimeJobs === 4
+    radarSchedulesMovedIntoMySqlRuntimeJobs: radar.runtimeJobs === 5
       && radarViolations.runtimeJobDefinitionMissing === 0,
-    localAdapterAssetsAreReadableAndContentHashed: localAssets.length === 5
-      && localAssets.every((asset) => asset.structurallyReadable && /^[a-f0-9]{64}$/.test(asset.sha256)),
+    legacyAdapterAssetsAreRetiredOrReadable: localInventory.retired || (
+      localAssets.length === 5
+      && localAssets.every((asset) => asset.structurallyReadable && /^[a-f0-9]{64}$/.test(asset.sha256))
+    ),
   }
   assert(Object.values(checks).every(Boolean), `Radar/lead source reconciliation failed: ${JSON.stringify({ reserveViolations, radarViolations, checks })}`)
 
@@ -209,6 +242,7 @@ async function main(): Promise<void> {
     reserveViolations,
     radar,
     radarViolations,
+    legacyAdapterAssetsRetired: localInventory.retired,
     localAdapterAssets: localAssets,
     productionAssets,
     checks,

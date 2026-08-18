@@ -1,7 +1,0 @@
-[
-  {"slide":1,"question":"锁定法定主体、官网与投资材料用途","status":"answered","source_ids":["S002","S003","S004"]},
-  {"slide":2,"question":"公司产品矩阵与技术体系是否有一手来源支持","status":"answered-with-management-claims","source_ids":["S001","S002","S003","S006"]},
-  {"slide":3,"question":"客户、订单与商业化状态分别处于何种阶段","status":"answered-with-diligence-gaps","source_ids":["S001"]},
-  {"slide":4,"question":"成本、现金流与融资估值口径能否形成交易判断","status":"conflicted","source_ids":["S001","S007"]},
-  {"slide":5,"question":"哪些关键事实决定投资逻辑和交易条件是否成立","status":"answered","source_ids":["S001","S002","S007"]}
-]

@@ -5,6 +5,9 @@ import { db, pool } from '../db/client.js'
 import { auditLogs, knowledgeChunks, leads } from '../db/schema.js'
 import { syncRadarLeadByName } from '../services/aiSummaryService.js'
 import { radarJobHealth, runRadarJob } from '../services/radarJobService.js'
+import { assertIsolatedMysqlAcceptanceDatabase } from './mysqlAcceptanceSafety.js'
+
+assertIsolatedMysqlAcceptanceDatabase('radarJobIsolationAcceptance')
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message)

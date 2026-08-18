@@ -906,6 +906,46 @@ export const radarCandidates = mysqlTable('radar_candidates', {
   byAttention: index('idx_radar_candidates_attention').on(t.worthAttention, t.attentionScore),
 }))
 
+// 微信群聊 Push API 的原始消息事实表。候选投影仍写入 radar_candidates，
+// 消息本体独立保存，保证按日期/群组查询、上下文重建与重复推送幂等。
+export const radarWechatChatMessages = mysqlTable('radar_wechat_chat_messages', {
+  id: varchar('id', { length: 64 }).primaryKey(),
+  contentHash: varchar('content_hash', { length: 64 }).notNull(),
+  merchantNo: varchar('merchant_no', { length: 128 }).notNull().default(''),
+  msgKey: varchar('msg_key', { length: 191 }).notNull().default(''),
+  groupName: varchar('group_name', { length: 255 }).notNull(),
+  groupSerialNo: varchar('group_serial_no', { length: 191 }).notNull(),
+  senderName: varchar('sender_name', { length: 255 }).notNull(),
+  senderSerialNo: varchar('sender_serial_no', { length: 191 }).notNull().default(''),
+  citeContent: text('cite_content').notNull(),
+  messageContent: longtext('message_content').notNull(),
+  messageDate: varchar('message_date', { length: 10 }).notNull(),
+  messageTime: timestampColumn('message_time'),
+  messageTimeRaw: varchar('message_time_raw', { length: 64 }).notNull().default(''),
+  pushedAt: timestampColumn('pushed_at'),
+  pushedAtRaw: varchar('pushed_at_raw', { length: 64 }).notNull().default(''),
+  msgType: varchar('msg_type', { length: 32 }).notNull().default(''),
+  file: json('file').$type<Record<string, unknown>>().notNull().default(emptyJsonObject),
+  rawPayload: json('raw_payload').$type<Record<string, unknown>>().notNull().default(emptyJsonObject),
+  receivedAt: timestampColumn('received_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({
+  byGroupTime: index('idx_radar_chat_group_time').on(t.messageDate, t.groupSerialNo, t.messageTime),
+  byMerchantTime: index('idx_radar_chat_merchant_time').on(t.merchantNo, t.messageTime),
+  byContent: index('idx_radar_chat_content').on(t.contentHash),
+}))
+
+// Webhook HMAC receipts provide a durable replay window across application
+// restarts and multiple instances. Only a digest is retained; signatures and
+// request bodies are never persisted here.
+export const radarWebhookReceipts = mysqlTable('radar_webhook_receipts', {
+  receiptHash: varchar('receipt_hash', { length: 64 }).primaryKey(),
+  signedAt: timestampColumn('signed_at').notNull(),
+  expiresAt: timestampColumn('expires_at').notNull(),
+  receivedAt: timestampColumn('received_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({
+  byExpiry: index('idx_radar_webhook_receipts_expiry').on(t.expiresAt),
+}))
+
 export const radarCollectorStates = mysqlTable('radar_collector_states', {
   id: varchar('id', { length: 64 }).primaryKey(),
   stateKind: varchar('state_kind', { length: 32 }).notNull(),
@@ -992,6 +1032,29 @@ export const radarAiReviews = mysqlTable('radar_ai_reviews', {
 }, (t) => ({
   byStatus: index('idx_radar_ai_reviews_status').on(t.status),
 }))
+
+// Radar 采集状态使用独立的钉钉自定义机器人。该配置不引用 IM Bot/Binding，
+// Webhook access_token 与加签密钥作为同一份 AES-GCM 密文保存。
+export const radarDingTalkSettings = mysqlTable('radar_dingtalk_settings', {
+  id: varchar('id', { length: 32 }).primaryKey(),
+  credentialCiphertext: longtext('credential_ciphertext'),
+  credentialHint: varchar('credential_hint', { length: 16 }),
+  credentialFingerprint: varchar('credential_fingerprint', { length: 64 }),
+  enabled: boolean('enabled').notNull().default(false),
+  notifySuccess: boolean('notify_success').notNull().default(true),
+  version: int('version').notNull().default(1),
+  lastTestStatus: varchar('last_test_status', { length: 16 }),
+  lastTestError: text('last_test_error'),
+  lastTestLatencyMs: int('last_test_latency_ms'),
+  lastTestAt: timestampColumn('last_test_at'),
+  lastDeliveryStatus: varchar('last_delivery_status', { length: 16 }),
+  lastDeliveryError: text('last_delivery_error'),
+  lastDeliveryAt: timestampColumn('last_delivery_at'),
+  createdBy: uuidColumn('created_by').references(() => users.id, { onDelete: 'set null' }),
+  updatedBy: uuidColumn('updated_by').references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+  updatedAt: timestampColumn('updated_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+})
 
 export const auditLogs = mysqlTable('audit_logs', {
   id: uuidPrimaryKey('id'),

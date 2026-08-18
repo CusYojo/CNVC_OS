@@ -6,6 +6,39 @@ import path from 'node:path'
 export const AI_TEMPLATE_DRIVEN_SKILL_NAME = 'generate-document-from-template'
 export const AI_DUE_DILIGENCE_SKILL_NAME = 'write-investment-dd-report'
 
+export const AI_DOCUMENT_PLUGIN_BINDINGS = [
+  {
+    taskType: 'compliance_statement',
+    skillName: 'generate-compliance-statement',
+    pluginName: 'sbl-investment-compliance',
+    pluginVersion: '1.0.0',
+    entrySkillName: 'generate-investment-compliance-note',
+  },
+  {
+    taskType: 'investment_proposal',
+    skillName: 'draft-investment-proposal',
+    pluginName: 'sbl-investment-proposal',
+    pluginVersion: '2.0.0',
+    entrySkillName: 'artifact-template-deta',
+  },
+  {
+    taskType: 'due_diligence_report',
+    skillName: AI_DUE_DILIGENCE_SKILL_NAME,
+    pluginName: 'sbl-deta-dd-report',
+    pluginVersion: '1.4.0',
+    entrySkillName: 'generate-deta-dd-report',
+  },
+  {
+    taskType: 'project_qa',
+    skillName: 'generate-project-qa-report',
+    pluginName: 'sbl-investment-qa',
+    pluginVersion: '2.4.0',
+    entrySkillName: 'generate-investment-qa-report',
+  },
+] as const
+
+export type AiDocumentPluginBinding = typeof AI_DOCUMENT_PLUGIN_BINDINGS[number]
+
 export const AI_QA_SKILL_NAMES = [
   'generate-project-qa-report',
 ] as const
@@ -16,6 +49,7 @@ export type AiQaSkillName = typeof AI_QA_SKILL_NAMES[number]
 export const AI_QA_SKILL_NAME: AiQaSkillName = 'generate-project-qa-report'
 
 export const AI_REQUIRED_DOCUMENT_SKILL_NAMES = [
+  'generate-compliance-statement',
   AI_QA_SKILL_NAME,
   'draft-investment-proposal',
   AI_DUE_DILIGENCE_SKILL_NAME,
@@ -27,12 +61,16 @@ export const AI_BUSINESS_SKILLS = [
     label: '合规性说明',
     mode: 'document-task',
     taskType: 'compliance_statement',
+    pluginName: 'sbl-investment-compliance',
+    pluginEntrySkillName: 'generate-investment-compliance-note',
   },
   {
     name: 'draft-investment-proposal',
     label: '投资提案',
     mode: 'document-task',
     taskType: 'investment_proposal',
+    pluginName: 'sbl-investment-proposal',
+    pluginEntrySkillName: 'artifact-template-deta',
   },
   {
     name: 'create-reference-driven-editable-ppt',
@@ -45,12 +83,16 @@ export const AI_BUSINESS_SKILLS = [
     label: '尽调报告',
     mode: 'document-task',
     taskType: 'due_diligence_report',
+    pluginName: 'sbl-deta-dd-report',
+    pluginEntrySkillName: 'generate-deta-dd-report',
   },
   {
     name: AI_QA_SKILL_NAME,
     label: 'Q&A',
     mode: 'document-task',
     taskType: 'project_qa',
+    pluginName: 'sbl-investment-qa',
+    pluginEntrySkillName: 'generate-investment-qa-report',
   },
   {
     name: AI_TEMPLATE_DRIVEN_SKILL_NAME,
@@ -90,6 +132,9 @@ export type LoadedAiSkill = {
   referenceNames: string[]
   sha256: string
   version: string
+  pluginName?: string
+  pluginVersion?: string
+  entrySkillName?: string
 }
 
 const configuredWorkspace = path.resolve(
@@ -114,6 +159,13 @@ const skillRoot = path.resolve(
         : workspaceSkillRoot
     ),
 )
+const pluginRoot = path.resolve(
+  process.env.AI_PLUGIN_ROOT ?? path.join(skillRoot, '..', 'plugins'),
+)
+
+const documentPluginBySkillName = new Map<string, AiDocumentPluginBinding>(
+  AI_DOCUMENT_PLUGIN_BINDINGS.map((binding) => [binding.skillName, binding]),
+)
 
 const AI_SKILL_DIRECTORY_CANDIDATES_BY_NAME: Readonly<Record<string, string[]>> = {
   GordenSuperPPTSkill: [
@@ -129,8 +181,22 @@ export function resolveAiSkillDirectory(name: string, root: string) {
     ?? resolved[0]
 }
 
-export function getAiSkillDirectory(name: string) {
+export function getAiSkillRuntimeDirectory(name: string) {
   return resolveAiSkillDirectory(name, skillRoot)
+}
+
+export function getAiPluginRoot() {
+  return pluginRoot
+}
+
+export function getAiDocumentPluginBinding(taskType: string) {
+  return AI_DOCUMENT_PLUGIN_BINDINGS.find((binding) => binding.taskType === taskType)
+}
+
+export function getAiSkillDirectory(name: string) {
+  const plugin = documentPluginBySkillName.get(name)
+  if (!plugin) return getAiSkillRuntimeDirectory(name)
+  return path.resolve(pluginRoot, plugin.pluginName, 'skills', plugin.entrySkillName)
 }
 
 function parseScalar(value: string) {
@@ -189,6 +255,10 @@ export async function loadAiSkillFromDirectory(input: {
   name: string
   directory: string
   allowedRoot: string
+  expectedName?: string
+  identitySource?: string
+  pluginName?: string
+  pluginVersion?: string
 }): Promise<LoadedAiSkill> {
   const allowedRoot = path.resolve(input.allowedRoot)
   const skillDir = path.resolve(input.directory)
@@ -223,8 +293,9 @@ export async function loadAiSkillFromDirectory(input: {
   }
   const source = await readFile(skillPath, 'utf8')
   const parsed = parseSkillFile(source)
-  if (parsed.name !== input.name) {
-    throw new Error(`AI Skill 名称与目录不一致：${parsed.name} / ${input.name}`)
+  const expectedName = input.expectedName ?? input.name
+  if (parsed.name !== expectedName) {
+    throw new Error(`AI Skill 名称与目录不一致：${parsed.name} / ${expectedName}`)
   }
   const referenceNames = referencedMarkdownFiles(parsed.instructions)
   const referenceSources: string[] = []
@@ -246,6 +317,8 @@ export async function loadAiSkillFromDirectory(input: {
     .update(source)
     .update('\n\n')
     .update(referenceInstructions)
+    .update('\n\n')
+    .update(input.identitySource ?? '')
     .digest('hex')
   return {
     name: input.name,
@@ -255,6 +328,9 @@ export async function loadAiSkillFromDirectory(input: {
     referenceNames,
     sha256,
     version: `sha256-${sha256.slice(0, 12)}`,
+    ...(input.pluginName ? { pluginName: input.pluginName } : {}),
+    ...(input.pluginVersion ? { pluginVersion: input.pluginVersion } : {}),
+    ...(input.expectedName ? { entrySkillName: input.expectedName } : {}),
   }
 }
 
@@ -264,10 +340,30 @@ export async function loadAiSkill(name: string): Promise<LoadedAiSkill> {
   if (!isBusinessSkill && !isPptWorkflowSkill) {
     throw new Error(`未注册的 AI Skill：${name}`)
   }
+  const plugin = documentPluginBySkillName.get(name)
+  if (!plugin) {
+    return loadAiSkillFromDirectory({
+      name,
+      directory: getAiSkillDirectory(name),
+      allowedRoot: skillRoot,
+    })
+  }
+  const manifestPath = path.resolve(pluginRoot, plugin.pluginName, '.claude-plugin', 'plugin.json')
+  const manifestSource = await readFile(manifestPath, 'utf8')
+  const manifest = JSON.parse(manifestSource) as { name?: string; version?: string }
+  if (manifest.name !== plugin.pluginName || manifest.version !== plugin.pluginVersion) {
+    throw new Error(
+      `AI Plugin 清单与绑定不一致：${manifest.name ?? '未知'}@${manifest.version ?? '未知'} / ${plugin.pluginName}@${plugin.pluginVersion}`,
+    )
+  }
   return loadAiSkillFromDirectory({
     name,
     directory: getAiSkillDirectory(name),
-    allowedRoot: skillRoot,
+    allowedRoot: pluginRoot,
+    expectedName: plugin.entrySkillName,
+    identitySource: manifestSource,
+    pluginName: plugin.pluginName,
+    pluginVersion: plugin.pluginVersion,
   })
 }
 

@@ -18,6 +18,7 @@ import { SystemPage } from './pages/SystemPage'
 import { ModelSettingsPage } from './pages/ModelSettingsPage'
 import { CapabilitySettingsPage } from './pages/CapabilitySettingsPage'
 import { ImBotsPage } from './pages/ImBotsPage'
+import { RadarDingTalkSettingsPage } from './pages/RadarDingTalkSettingsPage'
 import { NotFoundPage } from './pages/NotFoundPage'
 
 function ProtectedLayout() {
@@ -79,6 +80,7 @@ export default function App() {
         <Route path="/system/ai/models" element={<AiPlatformAdminOnly><ModelSettingsPage /></AiPlatformAdminOnly>} />
         <Route path="/system/ai/capabilities" element={<AiPlatformAdminOnly><CapabilitySettingsPage /></AiPlatformAdminOnly>} />
         <Route path="/system/integrations/im-bots" element={<ImAdminOnly><ImBotsPage /></ImAdminOnly>} />
+        <Route path="/system/integrations/radar-dingtalk" element={<SystemAdminOnly><RadarDingTalkSettingsPage /></SystemAdminOnly>} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Routes>

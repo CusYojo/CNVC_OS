@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { AlertCircle, Bot, Boxes, CheckCircle2, ChevronRight, Copy, Download, File as FileIcon, FileText, MessageSquarePlus, Paperclip, Pencil, RefreshCw, Send, Square, X } from 'lucide-react'
+import { AlertCircle, Bot, Boxes, Check, CheckCircle2, ChevronDown, ChevronRight, Copy, Download, File as FileIcon, FileText, MessageSquarePlus, Paperclip, Pencil, RefreshCw, Search, Send, Square, X } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useAppStore } from '../store/useAppStore'
@@ -27,6 +27,7 @@ import {
 } from '../lib/aiMessageSafety'
 import { useJwAgent, type JwPendingInteraction } from '../hooks/useJwAgent'
 import { formatShanghaiDateTime, shanghaiDateKey } from '../lib/dateTime'
+import type { Project } from '../types'
 
 const AI_TASK_TYPE_BY_ACTION: Record<AiQuickTaskRequest['actionId'], string> = {
   compliance: 'compliance_statement',
@@ -75,6 +76,154 @@ function triggerBlobDownload(blob: Blob, filename: string) {
 function safeDecodedFileName(url: string): string {
   const rawName = url.split('?')[0].split('/').pop() || '下载文件'
   try { return decodeURIComponent(rawName) } catch { return rawName }
+}
+
+function ProjectPicker({
+  projects,
+  value,
+  onChange,
+  disabled = false,
+}: {
+  projects: Project[]
+  value: string
+  onChange: (projectId: string) => void
+  disabled?: boolean
+}) {
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const [hasTyped, setHasTyped] = useState(false)
+  const pickerRef = useRef<HTMLDivElement>(null)
+  const selected = projects.find((project) => project.id === value)
+
+  const filteredProjects = useMemo(() => {
+    const keyword = hasTyped ? query.trim().toLocaleLowerCase() : ''
+    const matches = projects.filter((project) => {
+      if (!keyword) return true
+      return [
+        project.name,
+        project.companyName,
+        project.industry,
+        project.round,
+        project.stage,
+        ...(project.tags ?? []),
+      ].some((field) => String(field ?? '').toLocaleLowerCase().includes(keyword))
+    })
+    return [...matches].sort((a, b) => Number(b.id === value) - Number(a.id === value))
+  }, [hasTyped, projects, query, value])
+
+  useEffect(() => {
+    if (!open) return
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!pickerRef.current?.contains(event.target as Node)) {
+        setOpen(false)
+        setQuery('')
+        setHasTyped(false)
+      }
+    }
+    document.addEventListener('mousedown', handlePointerDown)
+    return () => document.removeEventListener('mousedown', handlePointerDown)
+  }, [open])
+
+  const selectProject = (projectId: string) => {
+    onChange(projectId)
+    setQuery('')
+    setHasTyped(false)
+    setOpen(false)
+  }
+
+  const openPicker = () => {
+    if (disabled || projects.length === 0 || open) return
+    setQuery(selected?.name ?? '')
+    setHasTyped(false)
+    setOpen(true)
+  }
+
+  return (
+    <div ref={pickerRef} className="relative">
+      <Search className="pointer-events-none absolute left-3 top-5 z-10 h-4 w-4 -translate-y-1/2 text-slate-400" />
+      <input
+        value={open ? query : selected?.name ?? ''}
+        onFocus={(event) => {
+          const inputElement = event.currentTarget
+          openPicker()
+          window.requestAnimationFrame(() => inputElement.select())
+        }}
+        onClick={openPicker}
+        onChange={(event) => {
+          setQuery(event.target.value)
+          setHasTyped(true)
+          if (!open) setOpen(true)
+        }}
+        onKeyDown={(event) => {
+          if (event.key === 'Escape') {
+            setOpen(false)
+            setQuery('')
+            setHasTyped(false)
+            event.currentTarget.blur()
+          }
+          if (event.key === 'Enter' && open && filteredProjects[0]) {
+            event.preventDefault()
+            selectProject(filteredProjects[0].id)
+          }
+        }}
+        placeholder={projects.length ? '输入关键词搜索项目' : '暂无可用项目'}
+        className="input pr-16 pl-9"
+        role="combobox"
+        aria-label="搜索并选择项目"
+        aria-expanded={open}
+        aria-controls="new-session-project-listbox"
+        aria-autocomplete="list"
+        disabled={disabled || projects.length === 0}
+      />
+      {open && query && (
+        <button
+          type="button"
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => {
+            setQuery('')
+            setHasTyped(true)
+          }}
+          className="absolute right-8 top-5 z-10 -translate-y-1/2 rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+          aria-label="清空项目搜索"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      )}
+      <ChevronDown className={`pointer-events-none absolute right-3 top-5 z-10 h-4 w-4 -translate-y-1/2 text-slate-400 transition ${open ? 'rotate-180' : ''}`} />
+
+      {open && (
+        <div className="absolute inset-x-0 top-[calc(100%+6px)] z-30 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl">
+          <div id="new-session-project-listbox" className="max-h-64 overflow-y-auto p-1.5 scrollbar-thin" role="listbox" aria-label="项目列表">
+            {filteredProjects.map((project) => (
+              <button
+                key={project.id}
+                type="button"
+                role="option"
+                aria-selected={project.id === value}
+                onClick={() => selectProject(project.id)}
+                className={`flex w-full items-start gap-3 rounded-lg px-3 py-2.5 text-left transition ${project.id === value ? 'bg-brand-50 text-brand-700' : 'text-slate-700 hover:bg-slate-50'}`}
+              >
+                <span className={`mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-md text-[10px] font-semibold ${project.id === value ? 'bg-brand-100 text-brand-700' : 'bg-slate-100 text-slate-500'}`}>
+                  {(project.name || '项目').slice(0, 2)}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-center gap-2">
+                    <span className="truncate text-sm font-medium">{project.name}</span>
+                    {project.id === value && <Check className="h-4 w-4 shrink-0 text-brand-600" />}
+                  </span>
+                  <span className="mt-0.5 block truncate text-[11px] text-slate-400">
+                    {[project.companyName, project.industry, project.stage].filter(Boolean).join(' · ') || '暂无项目标签'}
+                  </span>
+                </span>
+              </button>
+            ))}
+            {!filteredProjects.length && <div className="px-3 py-8 text-center text-xs text-slate-400">没有找到匹配的项目</div>}
+          </div>
+          <div className="border-t border-slate-100 px-3 py-2 text-[11px] text-slate-400">共 {filteredProjects.length} 个匹配项目 · 回车选择第一项</div>
+        </div>
+      )}
+    </div>
+  )
 }
 
 // Markdown 渲染（标题/表格/列表/粗体/代码块）
@@ -243,10 +392,18 @@ function displayUserMessageText(message: SafeAgentMessage): string {
   return extractTextParts(message)
     .replace(/【当前项目】.*\n【projectId】.*\n【用户问题】/s, '')
     .replace(/【范围】全局知识库\n【用户问题】/s, '')
+    .replace(/\n?【本轮指定技能】[^\n]*/g, '')
     .replace(/\n?【已上传文件】[\s\S]*$/, '')
     // Agent 协议当前没有独立的隐藏提示字段。任务防重复指令仍需发送给 Agent，
     // 但它属于内部控制信息，不能出现在面向用户的聊天气泡中。
     .replace(/\n?【(?:系统已执行|内部任务状态)】[\s\S]*$/, '')
+}
+
+function displayUserMessageSkills(message: SafeAgentMessage): string[] {
+  const match = extractTextParts(message).match(/【本轮指定技能】([^\n]+)/)
+  return match
+    ? match[1].split('、').map((item) => item.trim()).filter(Boolean)
+    : []
 }
 
 function safeAgentErrorMessage(error: unknown): string {
@@ -261,12 +418,29 @@ function safeAgentErrorMessage(error: unknown): string {
   }
 }
 
+function getSlashCommandQuery(value: string): string | null {
+  const match = value.match(/(?:^|\s)\/([^\s]*)$/)
+  return match ? match[1] : null
+}
+
 function MessageRow({ message }: { message: SafeAgentMessage }) {
   if (message.role === 'user') {
+    const skills = displayUserMessageSkills(message)
     return (
       <div className="flex justify-end gap-3">
-        <div className="max-w-[80%] whitespace-pre-wrap rounded-2xl rounded-tr-sm bg-brand-600 px-4 py-2.5 text-sm leading-6 text-white">
-          {displayUserMessageText(message)}
+        <div className="flex max-w-[80%] flex-col items-end gap-1.5">
+          {skills.length > 0 && (
+            <div className="flex flex-wrap justify-end gap-1" aria-label="本条消息使用的技能">
+              {skills.map((skill) => (
+                <span key={skill} className="inline-flex items-center gap-1 rounded-full border border-brand-200 bg-brand-50 px-2 py-0.5 text-[10px] font-medium text-brand-700">
+                  <Boxes className="h-2.5 w-2.5" />使用技能 · {skill}
+                </span>
+              ))}
+            </div>
+          )}
+          <div className="w-fit whitespace-pre-wrap rounded-2xl rounded-tr-sm bg-brand-600 px-4 py-2.5 text-sm leading-6 text-white">
+            {displayUserMessageText(message)}
+          </div>
         </div>
       </div>
     )
@@ -858,7 +1032,11 @@ function Chat() {
   const [availableModels, setAvailableModels] = useState<AvailableModel[]>([])
   const [availableCapabilities, setAvailableCapabilities] = useState<AvailableCapability[]>([])
   const [selectedCapabilityIds, setSelectedCapabilityIds] = useState<string[]>([])
+  const [activeSkillIds, setActiveSkillIds] = useState<string[]>([])
   const [capabilityOpen, setCapabilityOpen] = useState(false)
+  const [capabilitySearch, setCapabilitySearch] = useState('')
+  const [slashMenuOpen, setSlashMenuOpen] = useState(false)
+  const [slashHighlight, setSlashHighlight] = useState(0)
   const [capabilitySaving, setCapabilitySaving] = useState(false)
   const [newSessionModelId, setNewSessionModelId] = useState('')
   const [switchingModel, setSwitchingModel] = useState(false)
@@ -911,16 +1089,91 @@ function Chat() {
     return () => { active = false }
   }, [currentConversationRowId])
 
-  async function saveConversationCapabilities() {
-    if (!currentConversationRowId || !selectedCapabilityIds.length) return
+  const filteredCapabilities = useMemo(() => {
+    const keyword = capabilitySearch.trim().toLocaleLowerCase()
+    const skills = availableCapabilities.filter((item) => item.kind === 'skill')
+    if (!keyword) return skills
+    return skills.filter((item) => (
+      `${item.name} ${item.capabilityKey} ${item.description || ''}`.toLocaleLowerCase().includes(keyword)
+    ))
+  }, [availableCapabilities, capabilitySearch])
+
+  const activeSkills = useMemo(
+    () => activeSkillIds
+      .map((id) => availableCapabilities.find((item) => item.id === id && item.kind === 'skill'))
+      .filter((item): item is AvailableCapability => Boolean(item)),
+    [activeSkillIds, availableCapabilities],
+  )
+
+  const slashCapabilities = useMemo(() => {
+    const query = getSlashCommandQuery(input)?.trim().toLocaleLowerCase() ?? ''
+    return availableCapabilities
+      .filter((item) => item.kind === 'skill')
+      .filter((item) => !query || `${item.name} ${item.capabilityKey} ${item.description || ''}`.toLocaleLowerCase().includes(query))
+      .slice(0, 8)
+  }, [availableCapabilities, input])
+
+  async function saveConversationCapabilities(nextIds: string[]) {
+    if (!currentConversationRowId) return false
     setCapabilitySaving(true)
     try {
-      const result = await apiPut<{ available: AvailableCapability[]; selectedIds: string[] }>(`/ai/capabilities/conversations/${currentConversationRowId}`, { capabilityIds: selectedCapabilityIds })
-      setAvailableCapabilities(result.available); setSelectedCapabilityIds(result.selectedIds); setCapabilityOpen(false)
-      showToast('会话能力已更新；下一次启动 Agent 会按当前选择加载。', 'success')
-    } catch (error) { showToast((error as Error).message, 'error') }
-    finally { setCapabilitySaving(false) }
+      const result = await apiPut<{ available: AvailableCapability[]; selectedIds: string[] }>(
+        `/ai/capabilities/conversations/${currentConversationRowId}`,
+        { capabilityIds: nextIds },
+      )
+      setAvailableCapabilities(result.available)
+      setSelectedCapabilityIds(result.selectedIds)
+      return true
+    } catch (error) {
+      showToast((error as Error).message, 'error')
+      return false
+    } finally { setCapabilitySaving(false) }
   }
+
+  const activateSkill = (item: AvailableCapability) => {
+    setActiveSkillIds((ids) => ids.includes(item.id) ? ids : [...ids, item.id])
+    if (!selectedCapabilityIds.includes(item.id)) {
+      const nextIds = [...selectedCapabilityIds, item.id]
+      setSelectedCapabilityIds(nextIds)
+      void saveConversationCapabilities(nextIds)
+    }
+  }
+
+  const toggleActiveSkill = (item: AvailableCapability) => {
+    if (activeSkillIds.includes(item.id)) {
+      setActiveSkillIds((ids) => ids.filter((id) => id !== item.id))
+      return
+    }
+    activateSkill(item)
+  }
+
+  const selectSlashCapability = (item: AvailableCapability) => {
+    activateSkill(item)
+    setSlashMenuOpen(false)
+    const match = input.match(/(?:^|\s)\/([^\s]*)$/)
+    if (match && typeof match.index === 'number') {
+      const prefix = input.slice(0, match.index)
+      const separator = match[0].startsWith(' ') ? ' ' : ''
+      setInput(`${prefix}${separator}`)
+    }
+    window.requestAnimationFrame(() => inputRef.current?.focus())
+  }
+
+  useEffect(() => {
+    if (!capabilityOpen && !slashMenuOpen) return
+    const closeMenus = (event: MouseEvent) => {
+      const target = event.target
+      if (target instanceof Element && (
+        target.closest('[data-ai-skill-menu="true"]')
+        || target.closest('[data-ai-capability-trigger="true"]')
+      )) return
+      setCapabilityOpen(false)
+      setSlashMenuOpen(false)
+      setCapabilitySearch('')
+    }
+    document.addEventListener('mousedown', closeMenus)
+    return () => document.removeEventListener('mousedown', closeMenus)
+  }, [capabilityOpen, slashMenuOpen])
   // 记住当前项目(下次进来恢复)
   useEffect(() => { if (projectId) localStorage.setItem(LS_LAST_PROJECT, projectId) }, [projectId])
   // 记住当前会话(下次进来恢复)
@@ -1087,6 +1340,7 @@ function Chat() {
   const [uploading, setUploading] = useState(false)
   const [draggingFiles, setDraggingFiles] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const inputRef = useRef<HTMLTextAreaElement>(null)
   const uploadLockRef = useRef(false)
   const dragDepthRef = useRef(0)
 
@@ -1274,6 +1528,11 @@ function Chat() {
     submitLockRef.current = true
     setSubmitting(true)
     setInput('')
+    setCapabilityOpen(false)
+    setSlashMenuOpen(false)
+    const skillCtx = activeSkills.length
+      ? `\n【本轮指定技能】${activeSkills.map((item) => `${item.name}（${item.capabilityKey}）`).join('、')}`
+      : ''
     // 把本轮上传的文件路径随消息带给 agent（落在其工作目录，可直接 read/bash 读；PDF/Excel 用对应技能）
     const fileCtx = uploads.length
       ? `\n【已上传文件】(在你的工作目录，可用 read/bash 直接读；PDF 用 pdf 技能、Excel/CSV 用 spreadsheet 技能)\n`
@@ -1301,8 +1560,8 @@ function Chat() {
           : undefined
     )
     const ctx = effectiveScope === 'global'
-      ? `【范围】全局知识库\n【用户问题】${clean}${fileCtx}`
-      : `【当前项目】${effectiveProject?.projectName ?? ''}\n【projectId】${effectiveProject?.projectId ?? ''}\n【用户问题】${clean}${fileCtx}`
+      ? `【范围】全局知识库\n【用户问题】${clean}${skillCtx}${fileCtx}`
+      : `【当前项目】${effectiveProject?.projectName ?? ''}\n【projectId】${effectiveProject?.projectId ?? ''}\n【用户问题】${clean}${skillCtx}${fileCtx}`
     try {
       let formalPptTaskDispatched = false
       if (
@@ -1313,10 +1572,10 @@ function Chat() {
       ) {
         const forceInvestmentPpt = selectedQuickAction === 'investment_ppt'
         try {
-          const generationMessage = clean
+          const generationMessage = `${clean
             || (forceInvestmentPpt
               ? '请根据本轮上传文件与当前项目资料生成投资建议书 PPT。'
-              : '附件已上传，请读取并等待用户后续要求。')
+              : '附件已上传，请读取并等待用户后续要求。')}${skillCtx}`
           const recentMessages = messages.slice(-8).map((message) => ({
             role: message.role,
             content: extractTextParts(message).slice(0, 4_000),
@@ -1396,6 +1655,11 @@ function Chat() {
       setScope('global')
     }
     setInput('')
+    setActiveSkillIds([])
+    setCapabilityOpen(false)
+    setSlashMenuOpen(false)
+    setSlashHighlight(0)
+    setCapabilitySearch('')
     setSelectedQuickAction(null)
     setAiTasks([])
     setQaAnswers([])
@@ -2083,12 +2347,142 @@ function Chat() {
                 ))}
               </div>
             )}
+            {activeSkills.length > 0 && (
+              <div className="mb-1 flex flex-wrap gap-1.5 px-1" aria-label="当前会话已启用技能">
+                {activeSkills.map((item) => (
+                  <span key={item.id} className="inline-flex items-center gap-1.5 rounded-full border border-brand-200 bg-brand-50 px-2.5 py-1 text-[11px] font-medium text-brand-700">
+                    <Boxes className="h-3 w-3" />
+                    {item.name}
+                    <button
+                      type="button"
+                      onClick={() => setActiveSkillIds((ids) => ids.filter((id) => id !== item.id))}
+                      className="ml-0.5 rounded-full text-brand-400 hover:bg-brand-100 hover:text-brand-700"
+                      aria-label={`移除技能 ${item.name}`}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+            {capabilityOpen && (
+              <div data-ai-skill-menu="true" className="absolute inset-x-2 bottom-[calc(100%+8px)] z-30 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl">
+                <div className="flex items-center gap-2 border-b border-slate-100 px-3 py-2.5">
+                  <Search className="h-4 w-4 shrink-0 text-slate-400" />
+                  <input
+                    autoFocus
+                    value={capabilitySearch}
+                    onChange={(event) => setCapabilitySearch(event.target.value)}
+                    placeholder="搜索可用技能"
+                    className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-slate-400"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => { setCapabilityOpen(false); setCapabilitySearch('') }}
+                    className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                    aria-label="关闭技能列表"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+                <div className="max-h-72 overflow-y-auto p-1.5">
+                  {filteredCapabilities.map((item) => {
+                    const selected = activeSkillIds.includes(item.id)
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => toggleActiveSkill(item)}
+                        className={`flex w-full items-start gap-3 rounded-lg px-3 py-2.5 text-left transition ${selected ? 'bg-brand-50' : 'hover:bg-slate-50'}`}
+                      >
+                        <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${selected ? 'bg-brand-500' : 'bg-slate-300'}`} />
+                        <span className="min-w-0 flex-1">
+                          <span className="flex items-center gap-2">
+                            <span className="truncate text-sm font-medium text-slate-800">{item.name}</span>
+                            <span className="font-mono text-[10px] text-slate-400">/{item.capabilityKey}</span>
+                          </span>
+                          <span className="mt-0.5 block truncate text-[11px] text-slate-500">{item.description || '暂无技能说明'}</span>
+                        </span>
+                        {selected && <Check className="mt-0.5 h-4 w-4 shrink-0 text-brand-600" />}
+                      </button>
+                    )
+                  })}
+                  {filteredCapabilities.length === 0 && <div className="px-3 py-8 text-center text-xs text-slate-400">没有找到匹配的技能</div>}
+                </div>
+                <div className="flex items-center justify-between border-t border-slate-100 px-3 py-2 text-[11px] text-slate-400">
+                  <span>已选 {activeSkillIds.length} 个技能</span>
+                  {capabilitySaving && <span>正在保存…</span>}
+                </div>
+              </div>
+            )}
+            {slashMenuOpen && slashCapabilities.length > 0 && (
+              <div data-ai-skill-menu="true" className="absolute inset-x-2 bottom-[calc(100%+8px)] z-30 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl">
+                <div className="flex items-center justify-between border-b border-slate-100 px-3 py-2 text-[11px] text-slate-400">
+                  <span>可用技能</span>
+                  <span>↑↓ 选择 · Enter 使用 · Esc 关闭</span>
+                </div>
+                <div className="max-h-64 overflow-y-auto p-1.5">
+                  {slashCapabilities.map((item, index) => {
+                    const selected = activeSkillIds.includes(item.id)
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => selectSlashCapability(item)}
+                        className={`flex w-full items-start gap-3 rounded-lg px-3 py-2.5 text-left transition ${index === slashHighlight ? 'bg-brand-50' : 'hover:bg-slate-50'}`}
+                      >
+                        <span className={`mt-1 h-2 w-2 shrink-0 rounded-full ${selected ? 'bg-brand-500' : 'bg-slate-300'}`} />
+                        <span className="min-w-0 flex-1">
+                          <span className="flex items-center gap-2">
+                            <span className="truncate text-sm font-medium text-slate-800">{item.name}</span>
+                            {selected && <Check className="h-3.5 w-3.5 shrink-0 text-brand-600" />}
+                          </span>
+                          <span className="mt-0.5 block truncate font-mono text-[10px] text-slate-400">/{item.capabilityKey}</span>
+                          {item.description && <span className="mt-0.5 block truncate text-[11px] text-slate-500">{item.description}</span>}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
             <textarea
+              ref={inputRef}
               value={input}
-              onChange={(e) => setInput(e.target.value)}
+              onChange={(e) => {
+                const value = e.target.value
+                setInput(value)
+                const hasSlashCommand = getSlashCommandQuery(value) !== null
+                setSlashMenuOpen(hasSlashCommand)
+                if (hasSlashCommand) setCapabilityOpen(false)
+                setSlashHighlight(0)
+              }}
               onKeyDown={(e) => {
                 // 中文输入法选词确认也会产生 Enter；组合态绝不能触发发送。
                 if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) return
+                if (slashMenuOpen && slashCapabilities.length > 0) {
+                  if (e.key === 'ArrowDown') {
+                    e.preventDefault()
+                    setSlashHighlight((index) => (index + 1) % slashCapabilities.length)
+                    return
+                  }
+                  if (e.key === 'ArrowUp') {
+                    e.preventDefault()
+                    setSlashHighlight((index) => (index - 1 + slashCapabilities.length) % slashCapabilities.length)
+                    return
+                  }
+                  if (e.key === 'Escape') {
+                    e.preventDefault()
+                    setSlashMenuOpen(false)
+                    return
+                  }
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault()
+                    selectSlashCapability(slashCapabilities[slashHighlight])
+                    return
+                  }
+                }
                 // Enter 发送；Shift+Enter 保留多行输入能力。
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault()
@@ -2107,7 +2501,7 @@ function Chat() {
                   : '向 AI 询问机构知识库…'}
             />
             <input ref={fileInputRef} type="file" multiple className="hidden" onChange={onPickFiles} accept={AI_UPLOAD_ACCEPT} />
-            <div className="flex items-center justify-between px-1"><div className="flex min-w-0 items-center gap-2 text-[10px] text-slate-400"><button onClick={() => fileInputRef.current?.click()} disabled={uploading} title="上传文件（PDF/Excel/CSV/ZIP 等，agent 可直接读）" className="grid h-6 w-6 shrink-0 place-items-center rounded text-slate-400 hover:bg-slate-100 hover:text-brand-600 disabled:opacity-50">{uploading ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Paperclip className="h-3.5 w-3.5" />}</button><button onClick={() => setCapabilityOpen(true)} disabled={!currentConversationRowId || !availableCapabilities.length || busy} title="选择本会话加载的已授权能力" className="inline-flex h-6 shrink-0 items-center gap-1 rounded px-1.5 text-slate-400 hover:bg-slate-100 hover:text-brand-600 disabled:opacity-40"><Boxes className="h-3.5 w-3.5" /><span>能力 {selectedCapabilityIds.length}</span></button><CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-500" /><span className="truncate">Enter 发送 · Shift + Enter 换行</span></div>{busy
+            <div className="flex items-center justify-between px-1"><div className="flex min-w-0 items-center gap-2 text-[10px] text-slate-400"><button onClick={() => fileInputRef.current?.click()} disabled={uploading} title="上传文件（PDF/Excel/CSV/ZIP 等，agent 可直接读）" className="grid h-6 w-6 shrink-0 place-items-center rounded text-slate-400 hover:bg-slate-100 hover:text-brand-600 disabled:opacity-50">{uploading ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Paperclip className="h-3.5 w-3.5" />}</button><button data-ai-capability-trigger="true" type="button" onClick={() => { setCapabilitySearch(''); setSlashMenuOpen(false); setCapabilityOpen((open) => !open) }} disabled={!currentConversationRowId || !availableCapabilities.some((item) => item.kind === 'skill') || busy} title="选择当前会话持续使用的技能" aria-expanded={capabilityOpen} className={`inline-flex h-6 shrink-0 items-center gap-1 rounded px-1.5 hover:bg-slate-100 disabled:opacity-40 ${activeSkillIds.length ? 'bg-brand-50 text-brand-700' : 'text-slate-400 hover:text-brand-600'}`}><Boxes className="h-3.5 w-3.5" /><span>能力{activeSkillIds.length ? ` ${activeSkillIds.length}` : ''}</span></button><CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-500" /><span className="truncate">Enter 发送 · Shift + Enter 换行</span></div>{busy
               ? <button aria-label="停止" title="停止生成" onClick={stop} className="grid h-8 w-8 place-items-center rounded-lg bg-rose-500 text-white hover:bg-rose-600"><Square className="h-3.5 w-3.5" /></button>
               : <button aria-label="发送" title="发送（Enter）" disabled={sending || uploading || (!input.trim() && uploads.length === 0)} onClick={() => { void send() }} className="grid h-8 w-8 place-items-center rounded-lg bg-brand-600 text-white disabled:cursor-not-allowed disabled:bg-slate-200"><Send className="h-4 w-4" /></button>}</div>
           </div>
@@ -2158,20 +2552,6 @@ function Chat() {
         </AiErrorBoundary>
       )}
       <Modal
-        open={capabilityOpen}
-        title="会话能力"
-        onClose={() => { if (!capabilitySaving) setCapabilityOpen(false) }}
-        footer={<><Button variant="secondary" onClick={() => setCapabilityOpen(false)} disabled={capabilitySaving}>取消</Button><Button onClick={() => { void saveConversationCapabilities() }} loading={capabilitySaving} disabled={!selectedCapabilityIds.length}>保存选择</Button></>}
-      >
-        <p className="mb-3 text-xs leading-5 text-slate-500">这里只能从管理员已启用、当前角色及项目已授权的能力中选择。选择不会修改全局配置，也不能新增工具。</p>
-        <div className="max-h-[55vh] space-y-2 overflow-y-auto">{availableCapabilities.map((item) => {
-          const checked = selectedCapabilityIds.includes(item.id)
-          return <label key={item.id} className={`flex cursor-pointer items-start gap-3 rounded-xl border p-3 ${checked ? 'border-brand-200 bg-brand-50' : 'border-slate-200 bg-white'}`}><input type="checkbox" className="mt-1" checked={checked} onChange={() => setSelectedCapabilityIds((ids) => checked ? ids.filter((id) => id !== item.id) : [...ids, item.id])} /><span className="min-w-0"><span className="flex items-center gap-2"><span className="text-sm font-medium text-slate-800">{item.name}</span><span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] uppercase text-slate-500">{item.kind}</span></span><span className="mt-1 block text-xs text-slate-500">{item.description || item.capabilityKey}</span></span></label>
-        })}</div>
-        {!availableCapabilities.length && <div className="py-8 text-center text-sm text-slate-400">当前会话没有可用能力，请联系 AI 平台管理员检查授权。</div>}
-        {availableCapabilities.length > 0 && selectedCapabilityIds.length === 0 && <p className="mt-3 text-xs text-amber-600">至少保留一项能力；如需全部停用，请由管理员调整授权。</p>}
-      </Modal>
-      <Modal
         open={newSessionOpen}
         title="新建会话"
         onClose={() => { if (!creatingSession && sessions.length > 0) setNewSessionOpen(false) }}
@@ -2196,19 +2576,16 @@ function Chat() {
           <p className="text-xs leading-5 text-slate-500">
             请选择该会话所属项目。创建后项目不可更改，后续问答、快捷任务和交付物均使用该项目资料。
           </p>
-          <label className="block">
+          <div className="block">
             <span className="label">项目</span>
-            <select
-              className="input"
+            <ProjectPicker
+              projects={projects}
               value={newSessionProjectId}
-              onChange={(event) => setNewSessionProjectId(event.target.value)}
+              onChange={setNewSessionProjectId}
               disabled={creatingSession}
-            >
-              {projects.map((project) => (
-                <option key={project.id} value={project.id}>{project.name}</option>
-              ))}
-            </select>
-          </label>
+            />
+            <span className="mt-1 block text-[11px] text-slate-400">可按项目名称、公司名称、行业或阶段搜索。</span>
+          </div>
           <label className="block">
             <span className="label">模型</span>
             <select

@@ -13,7 +13,7 @@
 ├─────────────────────────────────────────────────────┤
 │  后端 API (Express 5 + Drizzle ORM)                   │
 │  server/src/                                          │
-│  HTTP :3100/api/* + WebSocket :3100/socket.io         │
+│  HTTP :4100/api/* + WebSocket :4100/socket.io         │
 ├─────────────────────────────────────────────────────┤
 │  JW Agent Runtime（内嵌 Express 进程）                 │
 │  - Claude Agent SDK / RAG 检索 / 工具调用              │
@@ -21,10 +21,9 @@
 ├─────────────────────────────────────────────────────┤
 │  MySQL 8.x（表名前缀由 DB_FREFIX 配置）                │
 ├─────────────────────────────────────────────────────┤
-│  Radar 单次任务 (Python, project-discovery/job.py)    │
-│  - 公众号 / arXiv / 微信聊天线索采集，无常驻端口       │
-│  - Gorden PPT Skills (图片→可编辑PPTX)                 │
-│  - Financial Research Analyst Skill                   │
+│  Radar TypeScript 采集器（内嵌 Express 进程）          │
+│  - 公众号 / arXiv / 微信聊天 Push / 多渠道采集          │
+│  - 原始事件、候选、来源、状态与调度全部写入 MySQL       │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -37,7 +36,7 @@
 | AI 编排 | Claude Agent SDK + 进程内 JW Runtime + Socket.io |
 | 数据库 | MySQL 8.x + Drizzle 版本化迁移 |
 | 路由 | React Router 7 |
-| 线索发现 | Python 3 单次 Job；FastAPI 仅保留旧数据导出兼容 |
+| 线索发现 | TypeScript 进程内采集器 + MySQL Runtime Job |
 | Skills | GordenImage2PPTX / GordenImagePPTGen / Financial Research Analyst |
 
 ## 目录结构
@@ -57,20 +56,8 @@ cybernaut-dist/
 │   ├── middleware/                # 中间件（鉴权、错误处理）
 │   ├── routes/                   # 路由 (auth/projects/meetings/risks/...)
 │   └── services/                 # 业务逻辑 + AI 服务
-├── project-discovery/            # 线索发现 + Skills
-│   ├── job.py                    # 当前单次 Job 入口
-│   ├── app.py                    # 采集核心及旧 FastAPI 兼容路由
-│   ├── GordenSuperPPTSkills/     # PPT 生成/还原技能链
-│   │   ├── GordenImage2PPTX/     #   图片→可编辑 PPTX
-│   │   ├── GordenImagePPTGen/    #   AI 生成图片型 PPT
-│   │   └── GordenSuperPPTSkill/  #   一键全流程编排
-│   ├── skills-financial-research-analyst-main/
-│   │   └── bigdata-financial-research-analyst/
-│   │       ├── SKILL.md          #   金融研究分析 skill
-│   │       ├── references/       #   分析框架（估值/行业/宏观/...）
-│   │       └── scripts/          #   DCF/盈利质量/可比分析 Python 脚本
-│   ├── data/                     # 线索数据 (JSONL)
-│   └── static/                   # 线索发现前端页面
+├── server/workspace/.agents/skills/ # 文档与 PPT Skills
+├── server/drizzle/               # MySQL 版本化迁移
 ├── public/                       # 静态资源
 ├── docs/                         # 项目文档
 └── 工具脚本                       # 数据批处理/修复脚本
@@ -82,7 +69,7 @@ cybernaut-dist/
 
 - **Node.js** ≥ 20
 - **MySQL** ≥ 8.0（字符集 `utf8mb4`）
-- **Python** ≥ 3.10（运行 Radar 采集任务需要）
+- **Python** ≥ 3.10（文档/PPT/PDF 受监督任务需要，Radar 不依赖）
 - **npm** ≥ 10
 
 ### 2. 启动数据库
@@ -112,7 +99,7 @@ cp .env.example .env
 
 ```bash
 npm install
-npm run dev          # 同时启动前端(:5173) + 后端(:3100)
+npm run dev          # 同时启动前端(:5173) + 后端(:4100)
 ```
 
 首次启动会执行版本化 Schema 迁移。演示用户默认不创建；仅本地测试可显式设置 `SEED_DEMO_USERS=1`。
@@ -123,25 +110,19 @@ npm run dev          # 同时启动前端(:5173) + 后端(:3100)
 否则已有 Provider 凭据将无法解密。任何曾粘贴到聊天、工单或日志中的网关 Key 都应先在
 供应商侧吊销并生成新值，再通过该页面写入。
 
-### 5. Radar Python 运行时
+### 5. Radar 运行时
 
-```bash
-cd project-discovery
-python3 -m venv .venv
-.venv/bin/python -m pip install -r requirements.txt
-.venv/bin/python -B job.py health
-```
-
-不要运行 `start.sh` 或另建 8121 服务。生产入口会按计划启动 `job.py`，每次任务
-输出 JSON 后退出。
+Radar 随 API 主进程启动，不需要额外安装或启动服务。通过
+`/api/health/components` 检查 `radar-typescript-collector` 和
+`radar-mysql-source`；生产环境不得监听 8121。
 
 ### 6. 访问
 
 | 地址 | 说明 |
 |---|---|
 | `http://localhost:5173` | 前端开发服务器 |
-| `http://localhost:3100/api/health` | 后端健康检查 |
-| `http://localhost:3100/socket.io` | JW Agent 实时事件（由客户端连接） |
+| `http://localhost:4100/api/health` | 后端健康检查 |
+| `http://localhost:4100/socket.io` | JW Agent 实时事件（由客户端连接） |
 
 ### 7. 本地演示账号
 
@@ -160,14 +141,14 @@ npm run build        # 编译前端+后端
 npm run start:app    # 唯一项目启动入口（需先 build）
 ```
 
-生产只安装 `cybernaut-app.service`，项目只监听 3100。MySQL 与 LLM Gateway
+生产只安装 `cybernaut-app.service`，项目只监听 4100。MySQL 与 LLM Gateway
 属于外部基础设施，不由该 systemd 单元启动。
 
 ## NPM Scripts
 
 | 命令 | 说明 |
 |---|---|
-| `npm run dev` | 同时启动 API(:3100) + Web(:5173) |
+| `npm run dev` | 同时启动 API(:4100) + Web(:5173) |
 | `npm run dev:web` | 仅前端 |
 | `npm run dev:server` | 仅后端 |
 | `npm run build` | 编译 TypeScript + Vite 打包 |
@@ -239,5 +220,5 @@ A: 确认 `OPENAI_BASE_URL` / `OPENAI_API_KEY` 指向可用的兼容网关，并
 **Q: 上传大文件超时**
 A: 默认 body 限制 150MB，可在 `server/src/index.ts` 调整。
 
-**Q: Radar 的 Python 依赖**
-A: `pip install -r project-discovery/requirements.txt`
+**Q: Radar 如何启动**
+A: 只启动主服务；采集器和 MySQL 调度器会在同一 Node 进程内恢复。

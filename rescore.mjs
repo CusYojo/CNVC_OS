@@ -5,7 +5,7 @@ import { pool } from './server-dist/db/client.js';
 
 const CONCURRENCY = parseInt(process.env.RESCORE_CONCURRENCY || '2', 10);
 const THRESHOLD = parseInt(process.env.RESCORE_MAX || '60', 10);  // 只重评 <此分 的
-const base = 'http://127.0.0.1:3100';
+const base = 'http://127.0.0.1:4100';
 
 const login = await fetch(`${base}/api/auth/login`, {
   method: 'POST', headers: { 'Content-Type': 'application/json' },

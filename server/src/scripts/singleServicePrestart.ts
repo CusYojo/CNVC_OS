@@ -8,7 +8,7 @@ import { promisify } from 'node:util'
 import type { RowDataPacket } from 'mysql2/promise'
 
 const execFileAsync = promisify(execFile)
-const requiredPorts = [3100, 3584, 8121] as const
+const requiredPorts = [4100, 3584, 8121] as const
 
 function assertContract(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(`[single-service prestart] ${message}`)
@@ -107,7 +107,7 @@ async function validateReadOnlyDatabase() {
   ])
   try {
     const runtime = validateRuntimeConfiguration(process.env)
-    assertContract(runtime.port === 3100, 'API_PORT must remain 3100 for the unified service')
+    assertContract(runtime.port === 4100, 'API_PORT must remain 4100 for the unified service')
     assertContract(mysqlConfig.port === 3306, 'DB_PORT must remain 3306 for the approved MySQL target')
     await assertSchemaReady()
     const connection = await pool.getConnection()

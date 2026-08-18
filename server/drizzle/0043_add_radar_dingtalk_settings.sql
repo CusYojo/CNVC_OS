@@ -1,0 +1,23 @@
+CREATE TABLE `sbl_radar_dingtalk_settings` (
+	`id` varchar(32) NOT NULL,
+	`credential_ciphertext` longtext,
+	`credential_hint` varchar(16),
+	`credential_fingerprint` varchar(64),
+	`enabled` boolean NOT NULL DEFAULT false,
+	`notify_success` boolean NOT NULL DEFAULT true,
+	`version` int NOT NULL DEFAULT 1,
+	`last_test_status` varchar(16),
+	`last_test_error` text,
+	`last_test_latency_ms` int,
+	`last_test_at` datetime(3),
+	`last_delivery_status` varchar(16),
+	`last_delivery_error` text,
+	`last_delivery_at` datetime(3),
+	`created_by` varchar(36),
+	`updated_by` varchar(36),
+	`created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+	`updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+	CONSTRAINT `sbl_radar_dingtalk_settings_id` PRIMARY KEY(`id`),
+	CONSTRAINT `fk_radar_dingtalk_created_by` FOREIGN KEY (`created_by`) REFERENCES `sbl_users`(`id`) ON DELETE set null ON UPDATE no action,
+	CONSTRAINT `fk_radar_dingtalk_updated_by` FOREIGN KEY (`updated_by`) REFERENCES `sbl_users`(`id`) ON DELETE set null ON UPDATE no action
+);

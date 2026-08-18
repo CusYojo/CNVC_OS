@@ -11,6 +11,7 @@ import {
   createCapabilityBinding,
   deleteSkill,
   getConversationCapabilities,
+  installUploadedPlugin,
   listAvailableCapabilities,
   listCapabilitySettings,
   listCapabilityConfigurationRevisions,
@@ -82,6 +83,22 @@ aiCapabilitiesRouter.post('/history/:resourceType/:resourceId/:revisionId/rollba
 
 aiCapabilitiesRouter.post('/sync', async (req: AuthedRequest, res, next) => {
   try { res.json(await syncBuiltinCapabilities(actor(req))) } catch (error) { next(error) }
+})
+
+aiCapabilitiesRouter.post('/plugins/install', async (req: AuthedRequest, res, next) => {
+  try {
+    const body = z.object({
+      capabilityKey: z.string().trim().min(1).max(128),
+      name: z.string().trim().min(1).max(128),
+      description: z.string().max(4_000).nullable().optional(),
+      packageVersion: z.string().trim().max(64).optional(),
+      config: z.record(z.string(), z.unknown()).optional(),
+      toolNames: z.array(z.string().trim().min(1).max(128)).max(32).optional(),
+      dependencyNames: z.array(z.string().trim().min(1).max(128)).max(32).optional(),
+      allowedRoles: z.array(z.string().trim().min(1).max(64)).max(32).optional(),
+    }).strict().parse(req.body)
+    res.status(201).json(await installUploadedPlugin(body, actor(req)))
+  } catch (error) { next(error) }
 })
 
 aiCapabilitiesRouter.patch('/agents/:id/policy', async (req: AuthedRequest, res, next) => {

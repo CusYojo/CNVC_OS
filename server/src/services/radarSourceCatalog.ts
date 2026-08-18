@@ -1,6 +1,7 @@
 export type RadarPublicSourceType =
   | 'rss'
   | 'arxiv_rss'
+  | 'openalex_api'
   | 'html_list'
   | '36kr_financing_flash'
   | 'wanfang_search'
@@ -40,6 +41,13 @@ export const DEFAULT_RADAR_PUBLIC_SOURCES: RadarPublicSourceConfig[] = [
   { key: 'casip', url: 'http://www.casip.ac.cn/kjcg/index.html', name: '中国科学院知识产权与产业化网', type: 'html_list', group: '高校成果', enabled: true, frequency: '每周' },
   { key: 'hust_ttc', url: 'http://ttc.hust.edu.cn/kjcg/kjcg.htm', name: '华中科技大学科技成果转化服务中心', type: 'html_list', group: '高校成果', enabled: true, frequency: '每周' },
   { key: 'arxiv_cs_ai', url: 'https://rss.arxiv.org/rss/cs.AI', name: 'arXiv cs.AI', type: 'arxiv_rss', group: '论文', enabled: true, frequency: '工作日' },
+  {
+    key: 'openalex_ai', url: 'https://api.openalex.org/works', name: 'OpenAlex AI 论文',
+    type: 'openalex_api', group: '论文', enabled: false, frequency: '每天',
+    keyword: '("artificial intelligence" OR "machine learning" OR robotics OR semiconductor OR biotechnology)',
+    max_entries_per_run: 50,
+    note: '默认停用；如需恢复，需先配置 OPENALEX_API_KEY 并在 Radar 来源管理中手动启用。',
+  },
   { key: 'pedaily_quicknews', url: 'https://feeds.pedaily.cn/n/quicknews', name: '投资界 快讯', type: 'rss', group: '创投新闻', enabled: false, frequency: '每小时', note: '源站 TLS 不稳定，默认停用。' },
   { key: 'wanfang_ai', url: 'https://s.wanfangdata.com.cn/paper?q={keyword}', name: '万方论文搜索 人工智能', type: 'wanfang_search', group: '论文', enabled: false, keyword: '人工智能', frequency: '每天', note: '公开页主要返回前端外壳，默认不自动抓取。' },
   { key: 'google_patents_ml', url: 'https://patents.google.com/patent/rss?q=machine+learning&after=20260701&language=ZH', name: 'Google Patents machine learning', type: 'rss', group: '专利', enabled: true, frequency: '每天' },

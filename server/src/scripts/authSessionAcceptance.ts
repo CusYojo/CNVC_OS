@@ -4,7 +4,7 @@ import { db, pool } from '../db/client.js'
 import { auditLogs, users } from '../db/schema.js'
 import { hashPassword, signToken } from '../services/authService.js'
 
-const baseUrl = process.env.AUTH_ACCEPTANCE_URL || 'http://127.0.0.1:3100'
+const baseUrl = process.env.AUTH_ACCEPTANCE_URL || 'http://127.0.0.1:4100'
 
 function setCookieLines(headers: Headers): string[] {
   const enhanced = headers as Headers & { getSetCookie?: () => string[] }

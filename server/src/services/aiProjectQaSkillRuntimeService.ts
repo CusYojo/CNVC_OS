@@ -10,7 +10,7 @@ import {
 } from './aiQaPipelineService.js'
 import {
   AI_QA_SKILL_NAME,
-  getAiSkillDirectory,
+  getAiSkillRuntimeDirectory,
   type LoadedAiSkill,
 } from './aiSkillService.js'
 import { execFileSupervised as execFileAsync } from '../runtime/supervisedProcessService.js'
@@ -384,7 +384,7 @@ export async function generateProjectQaWithSkill(input: {
     )
   }
   const depthMetrics = assertSkillContentReady(input.content)
-  const skillDirectory = getAiSkillDirectory(REQUIRED_SKILL_NAME)
+  const skillDirectory = getAiSkillRuntimeDirectory(REQUIRED_SKILL_NAME)
   const validatorPath = path.join(skillDirectory, 'scripts', 'validate_qa_report.py')
   const rendererPath = path.join(skillDirectory, 'scripts', 'render_qa_docx.py')
   const runtimeCheckPath = path.join(skillDirectory, 'scripts', 'check_runtime.py')

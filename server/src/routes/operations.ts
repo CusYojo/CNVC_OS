@@ -5,7 +5,9 @@ import { requireSystemAdmin } from '../middleware/requireAuth.js'
 import { operationalTelemetrySnapshot } from '../services/operationalTelemetryService.js'
 import {
   listManagedRadarSources,
+  importManagedWechatAccounts,
   setManagedRadarSourceEnabled,
+  updateManagedRadarSourceMetadata,
 } from '../services/radarSourceManagementService.js'
 import {
   listRadarRuntimeJobs,
@@ -40,18 +42,51 @@ operationsRouter.get('/radar', requireSystemAdmin, async (_req, res, next) => {
 
 operationsRouter.patch('/radar/sources/:id', requireSystemAdmin, async (req: AuthedRequest, res, next) => {
   try {
-    const input = z.object({ enabled: z.boolean() }).strict().parse(req.body)
-    const source = await setManagedRadarSourceEnabled(z.string().min(1).max(64).parse(req.params.id), input.enabled)
+    const input = z.object({
+      enabled: z.boolean().optional(),
+      group: z.string().max(64).optional(),
+      frequency: z.string().max(64).optional(),
+    }).strict().refine((value) => Object.values(value).some((entry) => entry !== undefined), '至少提供一个修改字段').parse(req.body)
+    const id = z.string().min(1).max(64).parse(req.params.id)
+    let source = input.enabled === undefined
+      ? (await listManagedRadarSources()).find((item) => item.id === id)
+      : await setManagedRadarSourceEnabled(id, input.enabled)
+    if (input.group !== undefined || input.frequency !== undefined) {
+      source = await updateManagedRadarSourceMetadata(id, { group: input.group, frequency: input.frequency })
+    }
     await writeAudit({
       userId: req.user!.uid,
       userName: req.user!.name,
       module: 'Radar来源',
-      action: input.enabled ? '启用来源' : '停用来源',
+      action: input.enabled === true ? '启用来源' : input.enabled === false ? '停用来源' : '修改来源配置',
       target: `${source?.name || req.params.id}:${req.params.id}`,
       ip: req.ip,
       requestId: String(res.locals.requestId || ''),
     })
     res.json(source)
+  } catch (error) {
+    next(error)
+  }
+})
+
+operationsRouter.post('/radar/wechat-accounts/import', requireSystemAdmin, async (req: AuthedRequest, res, next) => {
+  try {
+    const input = z.object({
+      name: z.string().min(1).max(255),
+      dataBase64: z.string().min(1),
+      replace: z.boolean().optional().default(false),
+    }).strict().parse(req.body)
+    const result = await importManagedWechatAccounts(input)
+    await writeAudit({
+      userId: req.user!.uid,
+      userName: req.user!.name,
+      module: 'Radar来源',
+      action: input.replace ? '替换公众号账号' : '导入公众号账号',
+      target: `${input.name};imported:${result.imported};total:${result.total}`,
+      ip: req.ip,
+      requestId: String(res.locals.requestId || ''),
+    })
+    res.status(201).json(result)
   } catch (error) {
     next(error)
   }

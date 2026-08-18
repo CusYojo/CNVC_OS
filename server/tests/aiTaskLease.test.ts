@@ -5,10 +5,11 @@ import { eq } from 'drizzle-orm'
 import { db, pool } from '../src/db/client.js'
 import { aiTasks, projects, users } from '../src/db/schema.js'
 import { claimAiTaskForExecution } from '../src/services/aiTaskService.js'
+import { mysqlIntegrationTestOptions } from './mysqlIntegrationTestSafety.js'
 
 after(async () => await pool.end())
 
-test('AI task lease permits exactly one concurrent claimant and reclaims only after expiry', async (t) => {
+test('AI task lease permits exactly one concurrent claimant and reclaims only after expiry', mysqlIntegrationTestOptions, async (t) => {
   const marker = randomUUID()
   const [user] = await db.insert(users).values({
     email: `ai-task-lease-${marker}@example.invalid`,

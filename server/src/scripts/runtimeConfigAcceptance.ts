@@ -3,7 +3,7 @@ import { validateRuntimeConfiguration } from '../config/runtimeSafety.js'
 
 const productionBase = {
   NODE_ENV: 'production',
-  API_PORT: '3100',
+  API_PORT: '4100',
   AUTH_SESSION_SECRET: 'session-secret-0123456789-abcdefghijklmnopqrstuvwxyz',
   JWT_SECRET: 'jwt-secret-0123456789-abcdefghijklmnopqrstuvwxyz',
   AUTH_COOKIE_SECURE: 'true',

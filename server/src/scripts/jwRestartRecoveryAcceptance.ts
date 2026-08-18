@@ -21,8 +21,8 @@ async function assertApplicationStopped() {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), 500)
   try {
-    const response = await fetch('http://127.0.0.1:3100/api/health', { signal: controller.signal })
-    if (response.ok) throw new Error('请先停止 3100 统一服务；恢复验收不能修改正在运行的流式会话')
+    const response = await fetch('http://127.0.0.1:4100/api/health', { signal: controller.signal })
+    if (response.ok) throw new Error('请先停止 4100 统一服务；恢复验收不能修改正在运行的流式会话')
   } catch (error) {
     if (error instanceof Error && error.message.startsWith('请先停止')) throw error
   } finally {

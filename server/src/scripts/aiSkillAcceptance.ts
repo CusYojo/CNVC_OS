@@ -4,13 +4,16 @@ import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import {
   AI_BUSINESS_SKILLS,
+  AI_DOCUMENT_PLUGIN_BINDINGS,
   AI_DUE_DILIGENCE_SKILL_NAME,
   AI_PPT_WORKFLOW_SKILLS,
   AI_QA_SKILL_NAME,
   getAiSkillDirectory,
   getAiSkillRoot,
+  getAiSkillRuntimeDirectory,
   listAiBusinessSkills,
   loadAiSkill,
+  loadAiSkillFromDirectory,
 } from '../services/aiSkillService.js'
 import {
   AI_QA_TEMPLATE,
@@ -48,6 +51,15 @@ function yamlString(source: string, key: string) {
   return source.match(new RegExp(`^\\s*${key}:\\s*["'](.+)["']\\s*$`, 'm'))?.[1] ?? ''
 }
 
+async function loadHostAdapterSkill(name: string) {
+  const root = getAiSkillRoot()
+  return loadAiSkillFromDirectory({
+    name,
+    directory: getAiSkillRuntimeDirectory(name),
+    allowedRoot: root,
+  })
+}
+
 async function main() {
   const root = getAiSkillRoot()
   const listed = await listAiBusinessSkills()
@@ -58,11 +70,25 @@ async function main() {
     listed.map((item) => item.name).join(', '),
   )
 
+  for (const binding of AI_DOCUMENT_PLUGIN_BINDINGS) {
+    const pluginSkill = await loadAiSkill(binding.skillName)
+    assert(
+      `${binding.taskType} 快捷入口绑定已安装 Plugin`,
+      pluginSkill.pluginName === binding.pluginName
+        && pluginSkill.pluginVersion === binding.pluginVersion
+        && pluginSkill.entrySkillName === binding.entrySkillName
+        && getAiSkillDirectory(binding.skillName).includes(
+          `${path.sep}plugins${path.sep}${binding.pluginName}${path.sep}skills${path.sep}${binding.entrySkillName}`,
+        ),
+      `${pluginSkill.pluginName ?? '未绑定'}:${pluginSkill.entrySkillName ?? '未绑定'}`,
+    )
+  }
+
   for (const definition of AI_BUSINESS_SKILLS) {
     const definitionName = String(definition.name)
     const isProjectQa = definitionName === AI_QA_SKILL_NAME
-    const loaded = await loadAiSkill(definition.name)
-    const directory = getAiSkillDirectory(definition.name)
+    const loaded = await loadHostAdapterSkill(definition.name)
+    const directory = getAiSkillRuntimeDirectory(definition.name)
     const skillSource = await readFile(path.join(directory, 'SKILL.md'), 'utf8')
     const uiSource = await readFile(path.join(directory, 'agents', 'openai.yaml'), 'utf8')
     const referenceName = definitionName === AI_DUE_DILIGENCE_SKILL_NAME
@@ -249,7 +275,7 @@ async function main() {
       AI_TEMPLATE_CATALOG.investment_recommendation_ppt.workflowSkillNames?.join('、')}`,
   )
   const proposalTemplate = AI_TEMPLATE_CATALOG.investment_proposal
-  const proposalSkill = await loadAiSkill('draft-investment-proposal')
+  const proposalSkill = await loadHostAdapterSkill('draft-investment-proposal')
   const proposalProfile = await readFile(
     path.join(root, 'draft-investment-proposal', 'references', 'template-profile.md'),
     'utf8',
@@ -386,7 +412,7 @@ async function main() {
     `${proposalTemplate.sections.length} 个章节`,
   )
   const diligenceTemplate = AI_TEMPLATE_CATALOG.due_diligence_report
-  const diligenceSkill = await loadAiSkill(AI_DUE_DILIGENCE_SKILL_NAME)
+  const diligenceSkill = await loadHostAdapterSkill(AI_DUE_DILIGENCE_SKILL_NAME)
   const diligenceCanonicalSpec = await readFile(
     path.resolve(process.cwd(), 'docs', '尽调报告', '尽调报告统一生成规范.md'),
     'utf8',
@@ -575,7 +601,7 @@ async function main() {
     ].join(' | '),
   )
 
-  const complianceSkill = await loadAiSkill('generate-compliance-statement')
+  const complianceSkill = await loadHostAdapterSkill('generate-compliance-statement')
   const complianceDirectory = path.join(root, 'generate-compliance-statement')
   const complianceCoreSpec = await readFile(
     path.resolve(process.cwd(), 'docs', '合规性说明', '合规性说明模板核心规范.md'),
@@ -701,7 +727,7 @@ async function main() {
   )
 
   const qaCoreRules = await readFile(AI_QA_TEMPLATE.coreRulesPath, 'utf8')
-  const qaSkill = await loadAiSkill(AI_QA_SKILL_NAME)
+  const qaSkill = await loadHostAdapterSkill(AI_QA_SKILL_NAME)
   const qaRuntimeCorpus = `${qaSkill.instructions}\n${qaSkill.referenceInstructions}`
   const aiQaPipelineSource = await readFile(
     path.resolve(process.cwd(), 'server', 'src', 'services', 'aiQaPipelineService.ts'),
@@ -736,24 +762,18 @@ async function main() {
     'utf8',
   )
   assert(
-    'Q&A 部署先暂存校验 Skill，再在停机窗口原子切换',
-    deploySource.includes('skills.next')
-      && deploySource.includes('activate_agent_skills')
-      && deploySource.indexOf('systemctl stop "$API_SERVICE"')
-        < deploySource.indexOf('activate_agent_skills', deploySource.indexOf('start_services()'))
-      && !deploySource.includes('rm -rf "${skills_root:?}"/*'),
-    '旧 API 运行期间不得清空在线 Skill 目录',
-  )
-  assert(
-    '三项投资文档 Skill 部署安装原生运行时并校验线上绑定',
-    deploySource.includes('run setup:qa-skill-runtime')
-      && deploySource.includes('run setup:dd-skill-runtime')
-      && deploySource.includes('draft-investment-proposal')
-      && deploySource.includes('write-investment-dd-report')
-      && deploySource.includes('wait_for_document_skill_bindings')
+    '四项文档 Plugin 随项目安装并在服务启动时校验绑定',
+    AI_DOCUMENT_PLUGIN_BINDINGS.length === 4
+      && AI_DOCUMENT_PLUGIN_BINDINGS.every((binding) =>
+        existsSync(path.resolve(
+          process.cwd(), 'server', 'workspace', '.agents', 'plugins',
+          binding.pluginName, '.claude-plugin', 'plugin.json',
+        )))
+      && deploySource.includes('systemctl stop "${APP_SERVICE}.service"')
+      && deploySource.includes('systemctl start "${APP_SERVICE}.service"')
       && serverIndexSource.includes('qaSkillName: AI_QA_SKILL_NAME')
       && serverIndexSource.includes('AI_REQUIRED_DOCUMENT_SKILL_NAMES.map((name) => loadAiSkill(name))'),
-    'Q&A + 投资提案 + 尽调报告运行时安装 / 启动加载门禁 / health 绑定探针',
+    '合规性说明 + 投资提案 + 尽调报告 + Q&A Plugin 目录 / 启动加载门禁 / health 绑定探针',
   )
   const qaRequired = [
     '# 生成项目 Q&A 报告',

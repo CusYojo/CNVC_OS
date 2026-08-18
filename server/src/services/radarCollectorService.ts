@@ -1,6 +1,4 @@
 import { createHash } from 'node:crypto'
-import { readFile } from 'node:fs/promises'
-import path from 'node:path'
 import { and, eq } from 'drizzle-orm'
 import { db } from '../db/client.js'
 import { radarCandidates, radarCollectorStates, radarSourceRegistry } from '../db/schema.js'
@@ -151,10 +149,11 @@ function sourceCandidate(source: ManagedPublicSource, input: {
   const sourceId = cleanText(input.sourceId) || link || sha256(`${source.key}:${title}`).slice(0, 24)
   const score = candidateScore(source.group, title, summary)
   const isArxiv = source.type === 'arxiv_rss'
+  const isOpenAlex = source.type === 'openalex_api'
   const arxivMatch = `${sourceId} ${link}`.match(/arxiv\.org\/(?:abs|pdf)\/([0-9]{4}\.[0-9]{4,5}(?:v[0-9]+)?)/i)
   const arxivId = arxivMatch?.[1] ?? ''
   return {
-    source: isArxiv ? 'arxiv' : 'investment',
+    source: isArxiv ? 'arxiv' : isOpenAlex ? 'openalex' : 'investment',
     source_id: isArxiv && arxivId ? arxivId : sourceId,
     fingerprint: md5(sourceId || title).slice(0, 16),
     title,
@@ -180,6 +179,90 @@ function sourceCandidate(source: ManagedPublicSource, input: {
     collected_at: new Date().toISOString(),
     ...(input.extra ?? {}),
   }
+}
+
+function openAlexAbstract(invertedIndex: unknown): string {
+  if (!invertedIndex || typeof invertedIndex !== 'object' || Array.isArray(invertedIndex)) return ''
+  const words: Array<{ position: number; word: string }> = []
+  for (const [word, rawPositions] of Object.entries(invertedIndex as JsonObject)) {
+    if (!Array.isArray(rawPositions)) continue
+    for (const rawPosition of rawPositions) {
+      const position = Number(rawPosition)
+      if (Number.isSafeInteger(position) && position >= 0 && position < 100_000) words.push({ position, word })
+    }
+  }
+  return words.sort((left, right) => left.position - right.position).map((item) => item.word).join(' ').slice(0, 12_000)
+}
+
+export function parseOpenAlexWorks(source: ManagedPublicSource, payload: unknown, limit = 50): JsonObject[] {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('OpenAlex 返回格式无效')
+  const results = Array.isArray((payload as JsonObject).results) ? (payload as JsonObject).results as unknown[] : []
+  const rows: JsonObject[] = []
+  for (const raw of results.slice(0, Math.min(100, Math.max(1, limit)))) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue
+    const work = raw as JsonObject
+    const openAlexId = cleanText(work.id)
+    const sourceId = openAlexId.split('/').pop() || openAlexId
+    const title = cleanText(work.title || work.display_name)
+    if (!sourceId || !title) continue
+    const authorships = Array.isArray(work.authorships) ? work.authorships : []
+    const authors = authorships.flatMap((authorship) => {
+      if (!authorship || typeof authorship !== 'object' || Array.isArray(authorship)) return []
+      const author = (authorship as JsonObject).author
+      return author && typeof author === 'object' && !Array.isArray(author)
+        ? [cleanText((author as JsonObject).display_name)].filter(Boolean)
+        : []
+    })
+    const topics = (Array.isArray(work.topics) ? work.topics : []).flatMap((topic) => (
+      topic && typeof topic === 'object' && !Array.isArray(topic)
+        ? [cleanText((topic as JsonObject).display_name)].filter(Boolean)
+        : []
+    ))
+    const keywords = (Array.isArray(work.keywords) ? work.keywords : []).flatMap((keyword) => (
+      keyword && typeof keyword === 'object' && !Array.isArray(keyword)
+        ? [cleanText((keyword as JsonObject).display_name)].filter(Boolean)
+        : []
+    ))
+    const primaryLocation = work.primary_location && typeof work.primary_location === 'object' && !Array.isArray(work.primary_location)
+      ? work.primary_location as JsonObject : {}
+    const bestOaLocation = work.best_oa_location && typeof work.best_oa_location === 'object' && !Array.isArray(work.best_oa_location)
+      ? work.best_oa_location as JsonObject : {}
+    const doi = cleanText(work.doi)
+    const link = cleanText(primaryLocation.landing_page_url || doi || openAlexId)
+    rows.push(sourceCandidate(source, {
+      title,
+      summary: openAlexAbstract(work.abstract_inverted_index),
+      link,
+      publishedAt: cleanText(work.publication_date),
+      sourceId,
+      authors,
+      categories: [...new Set([source.group, source.name, ...topics.slice(0, 8), ...keywords.slice(0, 8)])],
+      extra: {
+        openalex_id: openAlexId,
+        doi,
+        pdf_url: cleanText(bestOaLocation.pdf_url || primaryLocation.pdf_url),
+        cited_by_count: Number(work.cited_by_count || 0),
+        primary_topic: topics[0] || '',
+        openalex_keywords: keywords,
+      },
+    }))
+  }
+  return rows
+}
+
+async function collectOpenAlex(source: ManagedPublicSource, signal: AbortSignal, limit: number, options: { query?: string; days?: number } = {}): Promise<JsonObject[]> {
+  const apiKey = cleanText(process.env.OPENALEX_API_KEY)
+  if (!apiKey) throw new Error('缺少 OPENALEX_API_KEY，无法调用 OpenAlex 官方 Works API')
+  const days = Math.min(90, Math.max(1, options.days ?? (Number(source.days) || 14)))
+  const fromDate = shanghaiDate(-days)
+  const url = new URL(source.url)
+  url.searchParams.set('api_key', apiKey)
+  url.searchParams.set('search', cleanText(options.query || source.keyword || process.env.OPENALEX_SEARCH_QUERY) || 'artificial intelligence')
+  url.searchParams.set('filter', `from_publication_date:${fromDate}`)
+  url.searchParams.set('sort', '-publication_date')
+  url.searchParams.set('per_page', String(Math.min(100, Math.max(1, limit))))
+  const payload = JSON.parse(await fetchText(url.toString(), signal, 35_000)) as unknown
+  return parseOpenAlexWorks(source, payload, limit)
 }
 
 async function fetchText(url: string, signal: AbortSignal, timeoutMs = 25_000, init: RequestInit = {}): Promise<string> {
@@ -364,9 +447,10 @@ async function fetchPitchhub(source: ManagedPublicSource, html: string, signal: 
   return rows
 }
 
-async function collectOnePublicSource(source: ManagedPublicSource, signal: AbortSignal): Promise<JsonObject[]> {
+async function collectOnePublicSource(source: ManagedPublicSource, signal: AbortSignal, requestedLimit?: number): Promise<JsonObject[]> {
   if (['manual', 'wanfang_search'].includes(source.type)) return []
-  const limit = Math.min(100, Math.max(1, Number(source.max_entries_per_run) || 20))
+  const limit = Math.min(100, Math.max(1, requestedLimit ?? (Number(source.max_entries_per_run) || 20)))
+  if (source.type === 'openalex_api') return await collectOpenAlex(source, signal, limit)
   const text = await fetchText(source.url, signal)
   if (source.type === 'rss' || source.type === 'arxiv_rss') return parseRssSource(source, text, limit)
   if (source.type === 'html_list') return parseHtmlListSource(source, text, limit)
@@ -374,13 +458,39 @@ async function collectOnePublicSource(source: ManagedPublicSource, signal: Abort
   throw new Error(`unsupported source type: ${source.type}`)
 }
 
-async function collectDetailedArxiv(enabledSources: ManagedPublicSource[], signal: AbortSignal): Promise<JsonObject[]> {
+async function collectDetailedArxiv(
+  enabledSources: ManagedPublicSource[],
+  signal: AbortSignal,
+  options: { categories?: string[]; keywords?: string[]; maxResults?: number; days?: number; watchAuthors?: string[] } = {},
+): Promise<JsonObject[]> {
   const source = enabledSources.find((item) => item.type === 'arxiv_rss')
   if (!source) return []
-  const query = encodeURIComponent('(cat:cs.AI OR cat:cs.CL OR cat:cs.CV OR cat:cs.LG)')
-  const xml = await fetchText(`https://export.arxiv.org/api/query?search_query=${query}&start=0&max_results=50&sortBy=submittedDate&sortOrder=descending`, signal, 35_000)
+  const categories = (options.categories?.length ? options.categories : ['cs.AI', 'cs.CL', 'cs.CV', 'cs.LG'])
+    .map((value) => cleanText(value)).filter((value) => /^[a-z-]+(?:\.[a-z-]+)?$/i.test(value)).slice(0, 20)
+  const keywords = (options.keywords ?? []).map((value) => cleanText(value)).filter(Boolean).slice(0, 20)
+  const categoryQuery = `(${categories.map((category) => `cat:${category}`).join(' OR ')})`
+  const keywordQuery = keywords.length ? ` AND (${keywords.map((keyword) => `all:"${keyword.replaceAll('"', '')}"`).join(' OR ')})` : ''
+  const query = encodeURIComponent(`${categoryQuery}${keywordQuery}`)
+  const maxResults = Math.min(100, Math.max(1, options.maxResults ?? 50))
+  const xml = await fetchText(`https://export.arxiv.org/api/query?search_query=${query}&start=0&max_results=${maxResults}&sortBy=submittedDate&sortOrder=descending`, signal, 35_000)
   const apiSource: ManagedPublicSource = { ...source, key: 'arxiv_api', name: 'arXiv API', url: 'https://export.arxiv.org/api/query' }
-  return parseRssSource(apiSource, xml, 50)
+  const cutoff = Date.now() - Math.min(90, Math.max(1, options.days ?? 14)) * 86_400_000
+  const watchAuthors = new Set((options.watchAuthors ?? []).map((value) => cleanText(value).toLocaleLowerCase()).filter(Boolean))
+  return parseRssSource(apiSource, xml, maxResults).filter((item) => {
+    const published = Date.parse(cleanText(item.published_at))
+    return Number.isNaN(published) || published >= cutoff
+  }).map((item) => {
+    const authors = Array.isArray(item.authors) ? item.authors.map((value) => cleanText(value)) : []
+    const watchHits = authors.filter((author) => watchAuthors.has(author.toLocaleLowerCase()))
+    if (!watchHits.length) return item
+    return {
+      ...item,
+      attention_score: Math.min(100, Number(item.attention_score || 0) + 10),
+      worth_attention: true,
+      watch_author_hits: watchHits,
+      signals: [...(Array.isArray(item.signals) ? item.signals : []), ...watchHits.map((author) => ({ code: 'watch_author', score: 10, detail: author }))],
+    }
+  })
 }
 
 async function managedPublicSources(): Promise<ManagedPublicSource[]> {
@@ -506,19 +616,126 @@ export async function runRadarPaperCollection(signal: AbortSignal): Promise<Json
   return await runRadarPublicCollectionScope('paper_daily', (source) => source.group === '论文', true, signal)
 }
 
-async function loadGsdataCredentials(): Promise<{ appKey: string; appSecret: string }> {
-  let appKey = cleanText(process.env.GSDATA_APP_KEY)
-  let appSecret = cleanText(process.env.GSDATA_APP_SECRET)
-  if (!appKey || !appSecret) {
-    const filePath = path.resolve(process.env.RADAR_DATA_DIR?.trim() || 'project-discovery/data', 'gsdata_credentials.json')
-    try {
-      const file = JSON.parse(await readFile(filePath, 'utf8')) as JsonObject
-      appKey = cleanText(file.app_key)
-      appSecret = cleanText(file.app_secret)
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+export async function runRadarArxivCollection(options: {
+  categories?: string[]
+  keywords?: string[]
+  maxResults?: number
+  days?: number
+  watchAuthors?: string[]
+}, signal: AbortSignal): Promise<JsonObject> {
+  const sources = (await managedPublicSources()).filter((source) => source.enabled && source.group === '论文')
+  const rows = await collectDetailedArxiv(sources, signal, options)
+  const written = await ingestRadarCandidates(rows)
+  return {
+    fetched: rows.length, retained: rows.length, filtered: 0, written,
+    worth_attention: rows.filter((row) => row.worth_attention !== false).length,
+    items: rows,
+  }
+}
+
+export async function runRadarOpenAlexCollection(options: {
+  query?: string
+  maxResults?: number
+  days?: number
+}, signal: AbortSignal): Promise<JsonObject> {
+  const source = (await managedPublicSources()).find((item) => item.enabled && item.type === 'openalex_api')
+  if (!source) throw new Error('OpenAlex 采集源未启用')
+  const rows = await collectOpenAlex(source, signal, Math.min(100, Math.max(1, options.maxResults ?? 50)), options)
+  const written = await ingestRadarCandidates(rows)
+  return {
+    fetched: rows.length, retained: rows.length, filtered: 0, written,
+    worth_attention: rows.filter((row) => row.worth_attention !== false).length,
+    items: rows,
+  }
+}
+
+export async function runRadarInvestmentCollection(options: {
+  groups?: string[]
+  maxEntriesPerSource?: number
+  keyword?: string
+}, signal: AbortSignal): Promise<JsonObject> {
+  const groupSet = new Set((options.groups ?? []).map((value) => cleanText(value)).filter(Boolean))
+  const sources = (await managedPublicSources()).filter((source) => (
+    source.enabled && source.group !== '论文' && (groupSet.size === 0 || groupSet.has(source.group))
+  ))
+  const rows: JsonObject[] = []
+  const sourceResults: JsonObject[] = []
+  const errors: JsonObject[] = []
+  for (let index = 0; index < sources.length; index += 4) {
+    const results = await Promise.all(sources.slice(index, index + 4).map(async (source) => {
+      try {
+        return { source, items: await collectOnePublicSource(source, signal, options.maxEntriesPerSource), error: '' }
+      } catch (error) {
+        return { source, items: [] as JsonObject[], error: error instanceof Error ? error.message : String(error) }
+      }
+    }))
+    for (const result of results) {
+      rows.push(...result.items)
+      sourceResults.push({ key: result.source.key, name: result.source.name, fetched: result.items.length, error: result.error })
+      if (result.error) errors.push({ source: result.source.name, key: result.source.key, error: result.error.slice(0, 500) })
     }
   }
+  const unique = [...new Map(rows.map((item) => [`${cleanText(item.source)}:${cleanText(item.source_id || item.link || item.title)}`, item])).values()]
+  const retained = unique.filter((item) => item.worth_attention !== false)
+  const written = await ingestRadarCandidates(retained)
+  return {
+    fetched: unique.length, retained: retained.length, filtered: unique.length - retained.length,
+    written, worth_attention: retained.length, keyword: cleanText(options.keyword),
+    source_results: sourceResults, error_samples: errors.slice(0, 50), items: retained,
+  }
+}
+
+// 兼容旧 `/api/wechat/run`：读取已迁入 MySQL 的 985 高校 RSS 配置，
+// 不再依赖 wechat_985_sources.json 文件。
+export async function runRadarUniversityWechatRss(
+  signal: AbortSignal,
+  maxEntriesPerFeed = 20,
+): Promise<JsonObject> {
+  const configured = await db.select().from(radarSourceRegistry)
+    .where(and(eq(radarSourceRegistry.sourceKind, 'university-source'), eq(radarSourceRegistry.enabled, true)))
+  const rows: JsonObject[] = []
+  const errors: JsonObject[] = []
+  let feeds = 0
+  for (const source of configured) {
+    const config = source.config as JsonObject
+    const school = cleanText(config.school || source.displayName)
+    const province = cleanText(config.province)
+    const accounts = Array.isArray(config.accounts) ? config.accounts : []
+    for (const rawAccount of accounts) {
+      if (!rawAccount || typeof rawAccount !== 'object' || Array.isArray(rawAccount)) continue
+      const account = rawAccount as JsonObject
+      const accountName = cleanText(account.name) || school
+      const rssUrl = cleanText(account.rss_url)
+      if (!rssUrl) continue
+      feeds += 1
+      try {
+        const xml = await fetchText(rssUrl, signal)
+        for (const entry of parseFeedEntries(xml).slice(0, Math.min(100, Math.max(1, maxEntriesPerFeed)))) {
+          const sourceId = entry.link || md5(`${school}:${accountName}:${entry.title}`).slice(0, 16)
+          const score = candidateScore('高校成果', entry.title, entry.summary)
+          rows.push({
+            source: 'wechat_985', source_id: sourceId, fingerprint: md5(sourceId).slice(0, 16),
+            title: entry.title, summary: entry.summary, school, province, account_name: accountName,
+            authors: entry.authors, categories: ['985公众号', school], published_at: entry.publishedAt,
+            updated_at: entry.updatedAt, link: entry.link, attention_score: score.score,
+            worth_attention: score.worthAttention, signals: score.signals, decision: score.decision,
+            decision_label: score.decision_label, filter_reasons: score.filter_reasons,
+            collected_at: new Date().toISOString(),
+          })
+        }
+      } catch (error) {
+        errors.push({ school, account: accountName, rss_url: rssUrl, error: error instanceof Error ? error.message.slice(0, 500) : String(error).slice(0, 500) })
+      }
+    }
+  }
+  const retained = rows.filter((row) => row.worth_attention !== false)
+  const written = await ingestRadarCandidates(retained)
+  return { feeds, fetched: rows.length, retained: retained.length, filtered: rows.length - retained.length, written, errors, items: retained.slice(0, 100) }
+}
+
+async function loadGsdataCredentials(): Promise<{ appKey: string; appSecret: string }> {
+  const appKey = cleanText(process.env.GSDATA_APP_KEY)
+  const appSecret = cleanText(process.env.GSDATA_APP_SECRET)
   if (!appKey || !appSecret) throw new Error('缺少 GSData app_key/app_secret')
   return { appKey, appSecret }
 }
@@ -642,10 +859,11 @@ async function fetchWechatAccount(account: WechatAccount, date: string, days: nu
   }
 }
 
-async function runWechatCollection(options: { groups?: string[]; wxNames?: string[]; days?: number; limit?: number }, signal: AbortSignal): Promise<JsonObject> {
+async function runWechatCollection(options: { groups?: string[]; wxNames?: string[]; days?: number; limit?: number; date?: string; maxAccounts?: number }, signal: AbortSignal): Promise<JsonObject> {
   const days = Math.min(30, Math.max(1, options.days ?? 7))
-  const date = shanghaiDate(-days)
-  const accounts = await managedWechatAccounts(options.groups, options.wxNames)
+  const date = cleanText(options.date) || shanghaiDate(-days)
+  const allAccounts = await managedWechatAccounts(options.groups, options.wxNames)
+  const accounts = options.maxAccounts && options.maxAccounts > 0 ? allAccounts.slice(0, Math.min(5_000, options.maxAccounts)) : allAccounts
   const rows: JsonObject[] = []
   const accountResults: JsonObject[] = []
   const errors: JsonObject[] = []
@@ -670,6 +888,17 @@ async function runWechatCollection(options: { groups?: string[]; wxNames?: strin
     failed_accounts: errors.map((error) => ({ group: error.group, account_name: error.account_name, wx_name: error.wx_name })),
     items: rows.slice(0, 100),
   }
+}
+
+export async function runRadarWechatCollection(options: {
+  groups?: string[]
+  wxNames?: string[]
+  days?: number
+  limit?: number
+  date?: string
+  maxAccounts?: number
+}, signal: AbortSignal): Promise<JsonObject> {
+  return await runWechatCollection(options, signal)
 }
 
 export async function runRadarWechatDaily(signal: AbortSignal): Promise<JsonObject> {

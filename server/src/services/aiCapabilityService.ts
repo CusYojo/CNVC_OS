@@ -2,7 +2,12 @@ import { randomUUID } from 'node:crypto'
 import { agentConversationRepository, aiConfigurationRepository, identityRepositories } from '../repositories/index.js'
 import type { AuditRecord, BuiltinCapabilitySeed } from '../repositories/index.js'
 import { AI_MODEL_PROFILE_KEYS, type AiModelProfileKey } from './aiModelSettingsService.js'
-import { AI_BUSINESS_SKILLS, AI_PPT_WORKFLOW_SKILLS, loadAiSkill } from './aiSkillService.js'
+import {
+  AI_BUSINESS_SKILLS,
+  AI_DOCUMENT_PLUGIN_BINDINGS,
+  AI_PPT_WORKFLOW_SKILLS,
+  loadAiSkill,
+} from './aiSkillService.js'
 import { requireAccessibleProject } from './projectAccessService.js'
 import { redactSensitiveText } from '../security/redactSecrets.js'
 import { resolveExtensionFeatureFlags } from '../config/extensionFeatureFlags.js'
@@ -73,6 +78,23 @@ for (const item of [...AI_BUSINESS_SKILLS, ...AI_PPT_WORKFLOW_SKILLS]) {
 
 export const AI_CAPABILITY_CATALOG: readonly CatalogItem[] = [
   ...uniqueSkills.values(),
+  ...AI_DOCUMENT_PLUGIN_BINDINGS.map((plugin) => ({
+    kind: 'plugin' as const,
+    capabilityKey: plugin.pluginName,
+    name: AI_BUSINESS_SKILLS.find((skill) => skill.taskType === plugin.taskType)?.label
+      ?? plugin.pluginName,
+    description: `为${AI_BUSINESS_SKILLS.find((skill) => skill.taskType === plugin.taskType)?.label ?? plugin.taskType}快捷任务提供主 Skill 与模板契约。`,
+    packageVersion: plugin.pluginVersion,
+    config: {
+      runtime: 'controlled-ai-task-plugin',
+      taskType: plugin.taskType,
+      skillName: plugin.skillName,
+      entrySkillName: plugin.entrySkillName,
+      prompt: `用户明确要求生成“${AI_BUSINESS_SKILLS.find((skill) => skill.taskType === plugin.taskType)?.label ?? plugin.taskType}”时，调用 create_ai_task 并使用 type=${plugin.taskType}。生成规则由已安装的 ${plugin.pluginName}:${plugin.entrySkillName} 控制。`,
+    },
+    toolNames: ['create_ai_task', 'get_ai_task_status'],
+    dependencyNames: [plugin.skillName],
+  })),
   ...AI_MODEL_PROFILE_KEYS.map((profileKey) => ({
     kind: 'agent' as const,
     capabilityKey: profileKey,
@@ -102,6 +124,68 @@ function approvedCatalogItem(input: { kind: string; capabilityKey: string; sourc
   return AI_CAPABILITY_CATALOG.find((item) => (
     item.kind === input.kind && item.capabilityKey === input.capabilityKey
   ))
+}
+
+function isPluginInstalled(input: {
+  kind: string; source: string; capabilityKey: string; name?: string; description?: string | null;
+  packageVersion?: string; config?: Record<string, unknown>; toolNames?: string[];
+  dependencyNames?: string[]; allowedRoles?: string[];
+}) {
+  if (input.kind !== 'plugin') return true
+  if (input.source !== 'uploaded') return Boolean(approvedCatalogItem(input))
+  try {
+    normalizeUploadedPlugin({
+      capabilityKey: input.capabilityKey,
+      name: input.name || input.capabilityKey,
+      description: input.description,
+      packageVersion: input.packageVersion,
+      config: input.config,
+      toolNames: input.toolNames,
+      dependencyNames: input.dependencyNames,
+      allowedRoles: input.allowedRoles,
+    })
+    return true
+  } catch {
+    return false
+  }
+}
+
+export function normalizeUploadedPlugin(input: {
+  capabilityKey: string
+  name: string
+  description?: string | null
+  packageVersion?: string
+  config?: Record<string, unknown>
+  toolNames?: string[]
+  dependencyNames?: string[]
+  allowedRoles?: string[]
+}) {
+  if (!/^[a-zA-Z0-9._-]+$/.test(input.capabilityKey)) {
+    throw serviceError('Plugin ID 只能包含字母、数字、点、下划线和短横线', 'PLUGIN_MANIFEST_INVALID', 400)
+  }
+  const config = input.config && typeof input.config === 'object' ? { ...input.config } : {}
+  const prompt = typeof config.prompt === 'string' && config.prompt.trim()
+    ? config.prompt.trim().slice(0, 8_000)
+    : (input.description || input.name).trim().slice(0, 8_000)
+  const requestedTools = [...new Set([
+    ...(Array.isArray(input.toolNames) ? input.toolNames : []),
+    ...(Array.isArray(config.toolNames) ? config.toolNames.filter((item): item is string => typeof item === 'string') : []),
+  ])]
+  const approvedTools = new Set(INVESTMENT_TOOL_NAMES)
+  const unapprovedTools = requestedTools.filter((name) => !approvedTools.has(name as typeof INVESTMENT_TOOL_NAMES[number]))
+  if (unapprovedTools.length) {
+    throw serviceError(`Plugin 包含未批准工具：${unapprovedTools.join('、')}`, 'PLUGIN_TOOL_NOT_APPROVED', 400)
+  }
+  return {
+    capabilityKey: input.capabilityKey,
+    name: input.name.trim().slice(0, 128) || input.capabilityKey,
+    description: input.description?.trim().slice(0, 4_000) || null,
+    packageVersion: input.packageVersion?.trim().slice(0, 64) || 'uploaded',
+    config: { ...config, runtime: 'host-tools', prompt, toolNames: requestedTools },
+    toolNames: requestedTools,
+    dependencyNames: [...new Set((input.dependencyNames || []).filter((item) => /^[a-zA-Z0-9._@/-]{1,128}$/.test(item)))].slice(0, 32),
+    allowedRoles: [...new Set((input.allowedRoles || []).map((item) => item.trim()).filter(Boolean))].slice(0, 32),
+  }
 }
 
 function boundedPolicyNumber(value: unknown, fallback: number, limits: { min: number; max: number }, integer = false) {
@@ -210,7 +294,7 @@ export async function listCapabilitySettings(actor: AiCapabilityActor) {
   assertAiCapabilityAdmin(actor)
   const { capabilities, bindings, projects: projectRows } = await aiConfigurationRepository.listCapabilitySettings()
   const capabilityViews = capabilities.map((capability) => {
-    const pluginApproved = capability.kind !== 'plugin' || Boolean(approvedCatalogItem(capability))
+    const pluginApproved = isPluginInstalled(capability)
     return {
       ...capability,
       configuredEnabled: capability.enabled,
@@ -232,7 +316,7 @@ export async function listCapabilitySettings(actor: AiCapabilityActor) {
       approved: pluginRecords.filter((plugin) => plugin.approvalStatus === 'approved').length,
       installed: pluginRecords.filter((plugin) => plugin.installed).length,
       runtimeEnabled: pluginRecords.filter((plugin) => plugin.runtimeAvailable).length,
-      dynamicInstallEnabled: false,
+      dynamicInstallEnabled: true,
     },
     agentPolicyOptions: {
       modelRouteKeys: AI_MODEL_PROFILE_KEYS,
@@ -276,7 +360,7 @@ export async function updateCapability(capabilityId: string, input: {
   if (!existing) throw serviceError('能力不存在', 'CAPABILITY_NOT_FOUND', 404)
   if (
     existing.kind === 'plugin'
-    && !approvedCatalogItem(existing)
+    && !isPluginInstalled(existing)
     && input.enabled !== false
   ) {
     throw serviceError('Plugin 未进入代码批准目录，只允许保持停用', 'PLUGIN_NOT_APPROVED', 403)
@@ -296,6 +380,34 @@ export async function updateCapability(capabilityId: string, input: {
   })
   if (result.status !== 'ok') throw serviceError('能力不存在或已被其他管理员修改', 'CAPABILITY_VERSION_CONFLICT', 409)
   return result.record
+}
+
+export async function installUploadedPlugin(input: {
+  capabilityKey: string
+  name: string
+  description?: string | null
+  packageVersion?: string
+  config?: Record<string, unknown>
+  toolNames?: string[]
+  dependencyNames?: string[]
+  allowedRoles?: string[]
+}, actor: AiCapabilityActor) {
+  assertAiCapabilityAdmin(actor)
+  const normalized = normalizeUploadedPlugin(input)
+  const record = await aiConfigurationRepository.installUploadedPluginWithAudit({
+    record: {
+      id: randomUUID(), kind: 'plugin', source: 'uploaded', enabled: true,
+      ...normalized, createdBy: actor.userId, updatedBy: actor.userId,
+    },
+    globalBindingId: randomUUID(), updatedAt: new Date(),
+    audit: auditRecord(actor, '安装上传 Plugin', `${normalized.capabilityKey}@${normalized.packageVersion}`),
+  })
+  return {
+    ...record,
+    installed: true,
+    runtimeAvailable: record.enabled,
+    approvalStatus: 'approved' as const,
+  }
 }
 
 export async function deleteSkill(capabilityId: string, expectedVersion: number, actor: AiCapabilityActor) {
@@ -405,7 +517,7 @@ export async function createCapabilityBinding(input: {
   const scope = normalizeBinding(input)
   const capability = await aiConfigurationRepository.findCapability(input.capabilityId)
   if (!capability) throw serviceError('能力不存在', 'CAPABILITY_NOT_FOUND', 404)
-  if (capability.kind === 'plugin' && !approvedCatalogItem(capability)) {
+  if (capability.kind === 'plugin' && !isPluginInstalled(capability)) {
     throw serviceError('Plugin 未进入代码批准目录，不能创建运行授权', 'PLUGIN_NOT_APPROVED', 403)
   }
   if (scope.projectId) {
@@ -445,12 +557,20 @@ export async function testCapability(capabilityId: string, actor: AiCapabilityAc
   let status = 'succeeded'
   let error: string | null = null
   try {
-    const approved = AI_CAPABILITY_CATALOG.some((item) => item.kind === capability.kind && item.capabilityKey === capability.capabilityKey)
-    if (!approved || capability.source !== 'builtin') throw serviceError('仅可测试代码包内批准能力', 'CAPABILITY_NOT_APPROVED', 403)
+    const approved = capability.kind === 'plugin'
+      ? isPluginInstalled(capability)
+      : AI_CAPABILITY_CATALOG.some((item) => item.kind === capability.kind && item.capabilityKey === capability.capabilityKey)
+    const uploadedPlugin = capability.kind === 'plugin' && capability.source === 'uploaded'
+    if (!approved || (capability.source !== 'builtin' && !uploadedPlugin)) throw serviceError('仅可测试已批准或已安装的受控能力', 'CAPABILITY_NOT_APPROVED', 403)
     if (capability.kind === 'skill') await loadAiSkill(capability.capabilityKey)
     if (capability.kind === 'agent' && !(AI_MODEL_PROFILE_KEYS as readonly string[]).includes(capability.capabilityKey)) throw new Error('Agent Profile 未注册')
     if (capability.kind === 'mcp' && capability.capabilityKey !== 'investment') throw new Error('MCP Server 未注册')
-    if (capability.kind === 'plugin') throw new Error('生产运行时未批准任何 Plugin')
+    if (capability.kind === 'plugin') normalizeUploadedPlugin({
+      capabilityKey: capability.capabilityKey, name: capability.name,
+      description: capability.description, packageVersion: capability.packageVersion,
+      config: capability.config, toolNames: capability.toolNames,
+      dependencyNames: capability.dependencyNames, allowedRoles: capability.allowedRoles,
+    })
   } catch (cause) {
     status = 'failed'
     error = redactSensitiveText(cause instanceof Error ? cause.message : String(cause)).slice(0, 1000)
@@ -480,7 +600,7 @@ export async function listAvailableCapabilities(actor: AiCapabilityActor, projec
   )).map((binding) => binding.capabilityId))
   return capabilities.filter((capability) => {
     const roles = Array.isArray(capability.allowedRoles) ? capability.allowedRoles : []
-    const pluginApproved = capability.kind !== 'plugin' || Boolean(approvedCatalogItem(capability))
+    const pluginApproved = isPluginInstalled(capability)
     return pluginApproved && bound.has(capability.id) && (!roles.length || roles.includes(actor.role))
   })
 }
@@ -538,8 +658,8 @@ export async function resolveSelectedRuntimeCapabilities(
   const selected = selectedIds.length
     ? available.filter((item) => selectedIds.includes(item.id))
     : available
-  // 数据库选择只能收窄代码白名单，不能注册新执行器或扩展 SDK 工具。
+  // 数据库选择只能加载内置代码能力或已校验的 Host Plugin；上传 Plugin 也只能复用固定宿主工具，不能注册新执行器。
   return selected.filter((item) => AI_CAPABILITY_CATALOG.some((approved) => (
     approved.kind === item.kind && approved.capabilityKey === item.capabilityKey
-  )))
+  )) || (item.kind === 'plugin' && item.source === 'uploaded'))
 }

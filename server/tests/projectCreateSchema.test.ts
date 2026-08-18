@@ -19,3 +19,12 @@ test('accepts nullable optional lead fields when converting a lead to a project'
   assert.deepEqual(parsed.collaborators, [])
   assert.deepEqual(parsed.tags, ['人工智能', '待核验'])
 })
+
+test('allows project creation payloads without a client-supplied owner', () => {
+  const parsed = ProjectCreateSchema.parse({
+    name: 'SessionOwnedProject',
+    tags: [],
+  })
+
+  assert.equal(parsed.owner, undefined)
+})

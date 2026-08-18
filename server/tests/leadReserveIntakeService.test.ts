@@ -12,10 +12,11 @@ import {
 } from '../src/db/schema.js'
 import { ensureSchema } from '../src/db/migrate.js'
 import { runLeadReserveIntake } from '../src/services/leadReserveIntakeService.js'
+import { mysqlIntegrationTestOptions } from './mysqlIntegrationTestSafety.js'
 
 after(async () => await pool.end())
 
-test('imports one reserve row transactionally and keeps retry idempotent', async () => {
+test('imports one reserve row transactionally and keeps retry idempotent', mysqlIntegrationTestOptions, async () => {
   await ensureSchema()
   const marker = `reserve-smoke-${randomUUID()}`
   const [created] = await db.insert(leadReserve).values({

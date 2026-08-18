@@ -6,7 +6,7 @@ import { promisify } from 'node:util'
 import { redactSensitiveText } from '../security/redactSecrets.js'
 
 const entry = 'server-dist/index.js'
-const apiPort = 3100
+const apiPort = 4100
 const retiredPorts = [3584, 8121]
 const observeExisting = process.argv.includes('--observe-existing')
 const execFileAsync = promisify(execFile)
@@ -14,10 +14,11 @@ const requiredComponents = [
   'jw-agent-runtime',
   'agent-socket',
   'ai-runtime-telemetry',
-  'project-discovery-radar',
+  'radar-typescript-collector',
   'radar-mysql-source',
   'mysql-runtime-jobs',
   'mysql-lead-score-jobs',
+  'mysql-lead-bp-jobs',
   'mysql-project-score-jobs',
   'mysql-ai-tasks',
   'supervised-child-processes',
@@ -75,7 +76,7 @@ async function main() {
   const occupied: number[] = []
   for (const port of [apiPort, ...retiredPorts]) if (await portOpen(port)) occupied.push(port)
   if (observeExisting) {
-    if (!occupied.includes(apiPort)) throw new Error('[single service runtime] existing service is not listening on 3100')
+    if (!occupied.includes(apiPort)) throw new Error('[single service runtime] existing service is not listening on 4100')
     const openRetired = retiredPorts.filter((port) => occupied.includes(port))
     if (openRetired.length) throw new Error(`[single service runtime] retired ports already occupied: ${openRetired.join(',')}`)
     const healthResponse = await fetch(`http://127.0.0.1:${apiPort}/api/health/components`)
@@ -105,7 +106,7 @@ async function main() {
     if (missing.length) throw new Error(`[single service runtime] observed missing/unhealthy components: ${missing.join(',')}`)
     const { stdout } = await execFileAsync('lsof', ['-nP', `-iTCP:${apiPort}`, '-sTCP:LISTEN', '-t'])
     const pids = [...new Set(stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean))]
-    if (pids.length !== 1) throw new Error(`[single service runtime] expected one listener PID on 3100, found ${pids.length}`)
+    if (pids.length !== 1) throw new Error(`[single service runtime] expected one listener PID on 4100, found ${pids.length}`)
     console.log(JSON.stringify({
       ok: true,
       mode: 'observe-existing',
@@ -165,7 +166,7 @@ async function main() {
     const components = new Map((health.components || []).map((item) => [item.name, item.ok]))
     const missing = requiredComponents.filter((name) => components.get(name) !== true)
     if (missing.length) throw new Error(`[single service runtime] missing/unhealthy components: ${missing.join(',')}`)
-    if (!(await portOpen(apiPort))) throw new Error('[single service runtime] API port 3100 is not listening')
+    if (!(await portOpen(apiPort))) throw new Error('[single service runtime] API port 4100 is not listening')
     for (const port of retiredPorts) {
       if (await portOpen(port)) throw new Error(`[single service runtime] retired port ${port} is listening`)
     }

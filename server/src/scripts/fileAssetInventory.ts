@@ -234,7 +234,7 @@ async function main() {
     { key: 'generated', absolutePath: path.resolve('server/generated'), requiredWhenReferenced: false },
     { key: 'workspace', absolutePath: workspaceRoot, requiredWhenReferenced: false },
     { key: 'jw-agent-workspace', absolutePath: jwWorkspaceRoot, requiredWhenReferenced: false },
-    { key: 'radar-data', absolutePath: path.resolve(process.env.RADAR_DATA_DIR?.trim() || 'project-discovery/data'), requiredWhenReferenced: false },
+    { key: 'radar-data', absolutePath: path.resolve(process.env.RADAR_DATA_DIR?.trim() || '.runtime/radar-legacy/data'), requiredWhenReferenced: false },
     { key: 'skills', absolutePath: path.resolve(process.env.AI_SKILL_ROOT?.trim() || path.join(workspaceRoot, '.agents/skills')), requiredWhenReferenced: false },
   ]
   const roots = uniqueRoots(candidates)

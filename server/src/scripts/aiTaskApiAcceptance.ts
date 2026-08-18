@@ -66,7 +66,7 @@ type ProjectQaAnswer = {
   createdAt: string
 }
 
-const apiBase = (process.env.AI_ACCEPTANCE_API_BASE || 'http://127.0.0.1:3100/api').replace(/\/$/, '')
+const apiBase = (process.env.AI_ACCEPTANCE_API_BASE || 'http://127.0.0.1:4100/api').replace(/\/$/, '')
 const apiOrigin = new URL(apiBase).origin
 const reportPath = process.env.AI_API_ACCEPTANCE_REPORT
 // 真实 14 页视觉 PPT 会包含逐页生成、文字清理、PDF 与可编辑化审计；

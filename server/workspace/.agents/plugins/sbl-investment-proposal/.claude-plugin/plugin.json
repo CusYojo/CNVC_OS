@@ -1,0 +1,8 @@
+{
+  "name": "sbl-investment-proposal",
+  "description": "使用批准V7 Word模板克隆、事实门禁和逐页验收生成正式中文投资提案。",
+  "version": "2.0.0",
+  "author": {
+    "name": "浙江赛智伯乐股权投资管理有限公司"
+  }
+}

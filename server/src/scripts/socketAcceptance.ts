@@ -8,7 +8,7 @@ import { agentMessages, auditLogs, authSessions, projects, users } from '../db/s
 import { createAuthSession, hashPassword } from '../services/authService.js'
 import { createConversation, deleteConversation } from '../services/conversationService.js'
 
-const baseUrl = process.env.SOCKET_ACCEPTANCE_URL || 'http://127.0.0.1:3100'
+const baseUrl = process.env.SOCKET_ACCEPTANCE_URL || 'http://127.0.0.1:4100'
 let transientConnectFailures = 0
 let transientSubscriptionFailures = 0
 

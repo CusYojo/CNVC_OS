@@ -462,8 +462,21 @@ export async function openLeadPipelineReview(input: {
     )
     const [rows] = await connection.query<ReviewRow[]>(`SELECT * FROM ${reviewsTable} WHERE review_key=? FOR UPDATE`, [reviewKey])
     const row = rows[0]
-    if (!row || row.event_id !== input.eventId || row.trigger_decision_id !== input.triggerDecisionId
-      || row.reason !== reason || row.assigned_user_id !== (input.assignedUserId ?? null)) {
+    if (!row || row.event_id !== input.eventId) {
+      throw new Error('lead pipeline review idempotency collision')
+    }
+    // A failed/retried pipeline pass may produce a new immutable screening
+    // decision for the same event after the pending review was already opened.
+    // Reuse that pending work item instead of rewriting its audit origin or
+    // treating the legitimate retry as an idempotency collision.
+    const retryMatchesPendingReview = row.status === 'pending'
+      && (row.trigger_decision_id !== input.triggerDecisionId
+        || row.reason !== reason
+        || row.assigned_user_id !== (input.assignedUserId ?? null))
+    if (!retryMatchesPendingReview
+      && (row.trigger_decision_id !== input.triggerDecisionId
+        || row.reason !== reason
+        || row.assigned_user_id !== (input.assignedUserId ?? null))) {
       throw new Error('lead pipeline review idempotency collision')
     }
     return row

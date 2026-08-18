@@ -6,7 +6,7 @@ export { ApiError, apiErrorFromResponse } from '../../server/src/contracts/apiEr
 
 /**
  * Vite dev:  走相对路径 (Vite proxy 或直连同源)
- * Vite prod: 同源 /api（由 nginx 反代到 3100）
+ * Vite prod: 同源 /api（由 nginx 反代到 4100）
  */
 const API_PREFIX = '/api'
 const DEFAULT_REQUEST_TIMEOUT_MS = 120_000

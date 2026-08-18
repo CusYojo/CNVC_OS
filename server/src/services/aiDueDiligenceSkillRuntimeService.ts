@@ -1,7 +1,7 @@
 import { stat, writeFile, access, mkdir, readdir } from 'node:fs/promises'
 import path from 'node:path'
 import type { BusinessContent, EvidenceSource } from './aiBusinessContentService.js'
-import { getAiSkillDirectory } from './aiSkillService.js'
+import { getAiSkillRuntimeDirectory } from './aiSkillService.js'
 import { execFileSupervised as execFileAsync } from '../runtime/supervisedProcessService.js'
 import { fetchAiGatewayChatCompatible } from './aiGatewayService.js'
 const SKILL_NAME = 'write-investment-dd-report' as const
@@ -969,7 +969,7 @@ export async function generateDueDiligenceReportWithSkill(input: {
       { code: 'DUE_DILIGENCE_PUBLIC_RESEARCH_AUDIT_REQUIRED' },
     )
   }
-  const skillDirectory = getAiSkillDirectory(SKILL_NAME)
+  const skillDirectory = getAiSkillRuntimeDirectory(SKILL_NAME)
   const scripts = path.join(skillDirectory, 'scripts')
   const python = await resolvePython()
   const workDirectory = path.join(input.taskDirectory, '.write-investment-dd-report')

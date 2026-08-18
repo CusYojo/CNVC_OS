@@ -929,7 +929,17 @@ async function createRuntimeSession(
   }, conversationId)
   const investmentCapability = runtimeCapabilities.find((item) => item.kind === 'mcp' && item.capabilityKey === 'investment')
   const interactiveAgentCapability = runtimeCapabilities.find((item) => item.kind === 'agent' && item.capabilityKey === 'interactive-assistant')
-  const selectedSkillNames = new Set(runtimeCapabilities.filter((item) => item.kind === 'skill').map((item) => item.capabilityKey))
+  const uploadedPlugins = runtimeCapabilities.filter((item) => item.kind === 'plugin')
+  const selectedSkillNames = new Set([
+    ...runtimeCapabilities.filter((item) => item.kind === 'skill').map((item) => item.capabilityKey),
+    ...uploadedPlugins
+      .map((item) => typeof item.config.skillName === 'string' ? item.config.skillName : '')
+      .filter(Boolean),
+  ])
+  const pluginToolNames = new Set(uploadedPlugins.flatMap((item) => item.toolNames || []).map((name) => `mcp__investment__${name}`))
+  const pluginPrompts = uploadedPlugins
+    .map((item) => typeof item.config.prompt === 'string' ? item.config.prompt.trim() : '')
+    .filter(Boolean)
   if (!interactiveAgentCapability) {
     throw Object.assign(new Error('互动助手能力已停用、未授权或未加载'), { code: 'AGENT_CAPABILITY_FORBIDDEN', status: 403 })
   }
@@ -942,7 +952,11 @@ async function createRuntimeSession(
     interactionTimeoutMs: Math.min(baseConfig.interactionTimeoutMs, agentPolicy.timeoutMs),
   }
   assertJwAgentGatewayAllowed(config.baseUrl)
-  const selectedAgentToolNames = new Set(agentPolicy.toolNames.map((name) => `mcp__investment__${name}`))
+  const selectedAgentToolNames = new Set([
+    ...agentPolicy.toolNames.map((name) => `mcp__investment__${name}`),
+    ...pluginToolNames,
+  ])
+  const hostInvestmentEnabled = Boolean(investmentCapability || pluginToolNames.size)
   const allowedAgentTools = jwAgentToolsForScope(
     JW_AGENT_ALLOWED_TOOLS.filter((name) => selectedAgentToolNames.has(name)),
     projectId,
@@ -1063,7 +1077,7 @@ async function createRuntimeSession(
       skills: [],
       // AskUserQuestion is deliberately absent: allowedTools bypasses the
       // permission callback. The explicit settings.ask rule below routes it to canUseTool.
-      allowedTools: investmentCapability ? allowedAgentTools : [],
+      allowedTools: hostInvestmentEnabled ? allowedAgentTools : [],
       settings: jwAgentPermissionSettings(),
       canUseTool: async (toolName, toolInput, permissionOptions) => {
         if (toolName === JW_AGENT_INTERACTIVE_TOOL) {
@@ -1075,17 +1089,20 @@ async function createRuntimeSession(
             config.interactionTimeoutMs,
           )
         }
-        if (investmentCapability && allowedAgentToolSet.has(toolName) && jwAgentToolAllowed(toolName)) return { behavior: 'allow' }
+        if (hostInvestmentEnabled && allowedAgentToolSet.has(toolName) && jwAgentToolAllowed(toolName)) return { behavior: 'allow' }
         return denyJwAgentToolCall({ toolName, userId, userName: runtimeUser.name, conversationId })
       },
       includePartialMessages: true,
       settingSources: [],
-      mcpServers: investmentCapability ? { investment: investmentTools } : {},
+      mcpServers: hostInvestmentEnabled ? { investment: investmentTools } : {},
       env: restrictedJwAgentEnvironment(config, cwd),
       systemPrompt: {
         type: 'preset',
         preset: 'claude_code',
-        append: jwAgentSystemPrompt(projectId),
+        append: [
+          jwAgentSystemPrompt(projectId),
+          ...pluginPrompts.map((prompt, index) => `\n[已安装 Plugin ${index + 1} 行为说明]\n${prompt}`),
+        ].join('\n'),
       },
     },
   }) as RuntimeQuery
@@ -1370,7 +1387,8 @@ export function jwAgentRuntimeHealth() {
     activeSessions: sessions.size,
     pendingInteractions: pendingInteractions.size,
     configurationError,
-    permissionMode: 'dontAsk',
+    permissionMode: 'default',
+    settingsDefaultMode: 'dontAsk',
     builtInTools: 1,
     interactiveBuiltInTools: ['AskUserQuestion'],
     settingsSources: 0,

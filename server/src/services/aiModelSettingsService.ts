@@ -152,6 +152,18 @@ export async function updateModelProvider(providerId: string, input: {
   return providerView(result.record)
 }
 
+export async function deleteModelProvider(providerId: string, expectedVersion: number, actor: AiModelActor) {
+  assertAiModelAdmin(actor)
+  const result = await aiConfigurationRepository.deleteProviderWithAudit({
+    providerId, expectedVersion,
+    audit: auditRecord(actor, '删除 Provider', providerId),
+  })
+  if (result === 'not_found') throw serviceError('模型 Provider 不存在', 'MODEL_PROVIDER_NOT_FOUND', 404)
+  if (result === 'conflict') throw serviceError('Provider 已被其他管理员修改，请刷新后重试', 'MODEL_VERSION_CONFLICT', 409)
+  if (result === 'has_models') throw serviceError('请先删除该 Provider 下的所有模型', 'MODEL_PROVIDER_HAS_MODELS', 409)
+  return { deleted: true }
+}
+
 export async function createAiModel(input: {
   providerId: string; modelKey: string; displayName: string; contextWindow?: number | null;
   capabilityTags: string[]; allowedRoles: string[]; enabled: boolean; isDefault: boolean
@@ -206,6 +218,18 @@ export async function updateAiModel(modelId: string, input: {
   if (result.status === 'provider_not_found') throw serviceError('模型 Provider 不存在', 'MODEL_PROVIDER_NOT_FOUND', 404)
   if (result.status === 'conflict') throw serviceError('模型已被其他管理员修改，请刷新后重试', 'MODEL_VERSION_CONFLICT', 409)
   return result.record
+}
+
+export async function deleteAiModel(modelId: string, expectedVersion: number, actor: AiModelActor) {
+  assertAiModelAdmin(actor)
+  const result = await aiConfigurationRepository.deleteModelWithAudit({
+    modelId, expectedVersion,
+    audit: auditRecord(actor, '删除模型', modelId),
+  })
+  if (result === 'not_found') throw serviceError('模型不存在', 'MODEL_NOT_FOUND', 404)
+  if (result === 'conflict') throw serviceError('模型已被其他管理员修改，请刷新后重试', 'MODEL_VERSION_CONFLICT', 409)
+  if (result === 'referenced') throw serviceError('模型仍被任务模型路由引用，请先调整主模型或备用模型路由', 'MODEL_REFERENCED_BY_ROUTE', 409)
+  return { deleted: true }
 }
 
 export async function upsertAiModelRoute(input: {

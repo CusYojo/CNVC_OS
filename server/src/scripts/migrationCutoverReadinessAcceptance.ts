@@ -27,7 +27,7 @@ async function authoritativeCounts() {
 
 async function listenerPids() {
   try {
-    const { stdout } = await execFileAsync('lsof', ['-nP', '-iTCP:3100', '-sTCP:LISTEN', '-t'])
+    const { stdout } = await execFileAsync('lsof', ['-nP', '-iTCP:4100', '-sTCP:LISTEN', '-t'])
     return [...new Set(stdout.split(/\r?\n/).map((value) => value.trim()).filter(Boolean))].sort()
   } catch {
     return []
@@ -106,7 +106,7 @@ try {
   assert(!/\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}/.test(raw), 'readiness report contains a bcrypt hash')
   assert(!/(?:\/Users\/|\/home\/|\/www\/|[A-Za-z]:\\)/.test(raw), 'readiness report contains an absolute path')
   assert(JSON.stringify(beforeCounts) === JSON.stringify(afterCounts), 'readiness preflight changed authoritative MySQL counts')
-  assert(JSON.stringify(beforePids) === JSON.stringify(afterPids), 'readiness preflight changed the 3100 listener process set')
+  assert(JSON.stringify(beforePids) === JSON.stringify(afterPids), 'readiness preflight changed the 4100 listener process set')
   console.log(JSON.stringify({
     ok: true,
     ready: report.ready,

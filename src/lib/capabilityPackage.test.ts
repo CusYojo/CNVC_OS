@@ -37,3 +37,15 @@ test('exports skills as JW-compatible directories in a zip', async () => {
   const zip = await JSZip.loadAsync(await blob.arrayBuffer())
   assert.ok(zip.file('demo-skill/SKILL.md'))
 })
+
+test('scans an uploaded plugin manifest and preserves host tool declarations', async () => {
+  const candidates = await scanCapabilityFolder('plugin', [
+    folderFile('plugins/demo-plugin.json', JSON.stringify({
+      capabilityKey: 'demo-plugin', name: '演示插件', description: '受控插件',
+      config: { prompt: '只输出有证据的结论。' }, toolNames: ['search_project_docs'],
+    })),
+  ])
+  assert.equal(candidates[0]?.capabilityKey, 'demo-plugin')
+  assert.deepEqual(candidates[0]?.toolNames, ['search_project_docs'])
+  assert.equal(candidates[0]?.config?.prompt, '只输出有证据的结论。')
+})

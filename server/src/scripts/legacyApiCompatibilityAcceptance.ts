@@ -14,7 +14,7 @@ import { redactSensitiveText } from '../security/redactSecrets.js'
 
 const baselineCommit = '0a43c7d2d7eca0c55630a77c1ae29b02cf0d367d'
 const entry = 'server-dist/index.js'
-const apiPort = 3100
+const apiPort = 4100
 const allowedOrigin = 'https://legacy-compat.example.invalid'
 const evidenceDirectory = path.resolve('.runtime/migration-evidence/legacy-api-compatibility')
 const routeFiles = [

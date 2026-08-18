@@ -1,11 +1,11 @@
 import {
   Check, ChevronRight, CircleDot, Clock3, Eye, EyeOff, History, Pencil, Plus,
-  RefreshCw, RotateCcw, Save, Server, TestTube2, X, XCircle, Zap,
+  RefreshCw, RotateCcw, Save, Server, TestTube2, Trash2, X, XCircle, Zap,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ConfigurationRevisionPanel, type ConfigurationRevisionTarget } from '../components/ConfigurationRevisionPanel'
 import { Modal } from '../components/ui'
-import { apiGet, apiPatch, apiPost, apiPut } from '../lib/api'
+import { apiDelete, apiGet, apiPatch, apiPost, apiPut } from '../lib/api'
 
 type Provider = {
   id: string; name: string; protocol: string; baseUrl: string; timeoutMs: number; enabled: boolean;
@@ -21,15 +21,13 @@ type ModelRoute = { profileKey: string; modelId: string; fallbackModelId: string
 type Settings = { providers: Provider[]; models: Model[]; routes: ModelRoute[]; profileKeys: string[] }
 type ProviderDraft = { name: string; protocol: string; baseUrl: string; apiKey: string; timeoutMs: string; selectedModelId: string }
 type ModelDraft = {
-  id?: string; providerId: string; modelKey: string; displayName: string; contextWindow: string;
-  capabilityTags: string; allowedRoles: string;
+  id?: string; providerId: string; modelKey: string; displayName: string;
 }
 
 const emptySettings: Settings = { providers: [], models: [], routes: [], profileKeys: [] }
 const emptyModel = (providerId = ''): ModelDraft => ({
-  providerId, modelKey: '', displayName: '', contextWindow: '', capabilityTags: 'chat', allowedRoles: '',
+  providerId, modelKey: '', displayName: '',
 })
-const csv = (value: string) => [...new Set(value.split(/[,，]/).map((item) => item.trim()).filter(Boolean))]
 const routeLabels: Record<string, string> = {
   interactive: '互动助手', subject: '线索主体', research: '线索研究', screening: '项目初筛',
   enrichment: '信息补全', scoring: '项目评分', document: '文档生成',
@@ -128,13 +126,11 @@ export function ModelSettingsPage() {
       providerId: modelDraft.providerId,
       modelKey: modelDraft.modelKey,
       displayName: modelDraft.displayName,
-      contextWindow: modelDraft.contextWindow ? Number(modelDraft.contextWindow) : null,
-      capabilityTags: csv(modelDraft.capabilityTags), allowedRoles: csv(modelDraft.allowedRoles),
     }
     const existing = modelDraft.id ? settings.models.find((item) => item.id === modelDraft.id) : null
     const ok = await mutate('model-save', () => existing
       ? apiPatch(`/ai/model-settings/models/${existing.id}`, { expectedVersion: existing.version, ...payload })
-      : apiPost('/ai/model-settings/models', { ...payload, enabled: true, isDefault: providerModels.length === 0 }),
+      : apiPost('/ai/model-settings/models', { ...payload, contextWindow: null, capabilityTags: [], allowedRoles: [], enabled: true, isDefault: providerModels.length === 0 }),
     existing ? '模型配置已保存。' : '模型已添加。', modelDraft.providerId)
     if (ok) { setShowModelModal(false); setModelDraft(emptyModel(selectedProviderId)) }
   }
@@ -161,6 +157,7 @@ export function ModelSettingsPage() {
           {settings.providers.map((provider, index) => <div role="button" tabIndex={0} key={provider.id} className={`jw-object-item ${selectedProviderId === provider.id ? 'active' : ''}`} onClick={() => { setSelectedProviderId(provider.id); setSection('provider') }} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { setSelectedProviderId(provider.id); setSection('provider') } }}>
             <span className="jw-provider-mark" style={{ background: ['#0ea5e9', '#7c3aed', '#10b981', '#f97316'][index % 4] }}><Server className="h-4 w-4" /></span>
             <span className="min-w-0 flex-1 text-left"><strong className="block truncate">{provider.name}</strong><small className="block truncate">{provider.protocol}</small></span>
+            <button type="button" className="jw-item-action" title="删除提供商" aria-label={`删除${provider.name}`} disabled={busy !== ''} onClick={(event) => { event.stopPropagation(); if (window.confirm(`确定删除模型提供商“${provider.name}”吗？必须先删除该提供商下的所有模型。`)) void mutate(`provider-delete-${provider.id}`, () => apiDelete(`/ai/model-settings/providers/${provider.id}?expectedVersion=${provider.version}`), '模型提供商已删除。') }}><Trash2 className="h-4 w-4" /></button>
             <Toggle value={provider.enabled} disabled={busy !== ''} label={`${provider.name}${provider.enabled ? '停用' : '启用'}`} onChange={(enabled) => void mutate(`provider-toggle-${provider.id}`, () => apiPatch(`/ai/model-settings/providers/${provider.id}`, { expectedVersion: provider.version, enabled }), enabled ? '提供商已启用。' : '提供商已停用。', provider.id)} />
           </div>)}
           {!settings.providers.length && <div className="jw-empty-compact"><Server className="h-7 w-7" /><span>暂无模型提供商</span></div>}
@@ -207,10 +204,10 @@ export function ModelSettingsPage() {
             <div className="jw-model-list">
               {providerModels.map((model) => <div role="button" tabIndex={0} key={model.id} className={`jw-model-item ${draft.selectedModelId === model.id ? 'active' : ''} ${!model.enabled ? 'disabled' : ''}`} onClick={() => model.enabled && setDraft({ ...draft, selectedModelId: model.id })} onKeyDown={(event) => { if ((event.key === 'Enter' || event.key === ' ') && model.enabled) setDraft({ ...draft, selectedModelId: model.id }) }}>
                 <span className="jw-radio-dot">{draft.selectedModelId === model.id && <span />}</span>
-                <span className="min-w-0 flex-1 text-left"><strong>{model.displayName}</strong><small>{model.modelKey}</small><em>{[...model.capabilityTags, ...model.allowedRoles].join(' · ') || '未限制能力与角色'}</em></span>
+                <span className="min-w-0 flex-1 text-left"><strong>{model.displayName}</strong><small>{model.modelKey}</small></span>
                 <Toggle value={model.enabled} disabled={busy !== ''} label={`${model.displayName}${model.enabled ? '停用' : '启用'}`} onChange={(enabled) => void mutate(`model-toggle-${model.id}`, () => apiPatch(`/ai/model-settings/models/${model.id}`, { expectedVersion: model.version, enabled }), enabled ? '模型已启用。' : '模型已停用。', selectedProvider.id)} />
-                <span role="button" tabIndex={0} className="jw-item-action" title="编辑模型" onClick={(event) => { event.stopPropagation(); setModelDraft({ id: model.id, providerId: model.providerId, modelKey: model.modelKey, displayName: model.displayName, contextWindow: model.contextWindow ? String(model.contextWindow) : '', capabilityTags: model.capabilityTags.join(', '), allowedRoles: model.allowedRoles.join(', ') }); setShowModelModal(true) }}><Pencil className="h-4 w-4" /></span>
-                <span role="button" tabIndex={0} className="jw-item-action" title="模型历史" onClick={(event) => { event.stopPropagation(); setRevisionTarget({ basePath: '/ai/model-settings', resourceType: 'model', resourceId: model.id, resourceLabel: `模型：${model.displayName}`, currentVersion: model.version }) }}><History className="h-4 w-4" /></span>
+                <button type="button" className="jw-item-action" title="删除模型" aria-label={`删除${model.displayName}`} disabled={busy !== ''} onClick={(event) => { event.stopPropagation(); if (window.confirm(`确定删除模型“${model.displayName}”吗？`)) void mutate(`model-delete-${model.id}`, () => apiDelete(`/ai/model-settings/models/${model.id}?expectedVersion=${model.version}`), '模型已删除。', selectedProvider.id) }}><Trash2 className="h-4 w-4" /></button>
+                <span role="button" tabIndex={0} className="jw-item-action" title="编辑模型" onClick={(event) => { event.stopPropagation(); setModelDraft({ id: model.id, providerId: model.providerId, modelKey: model.modelKey, displayName: model.displayName }); setShowModelModal(true) }}><Pencil className="h-4 w-4" /></span>
               </div>)}
               {!providerModels.length && <div className="jw-empty-compact"><CircleDot className="h-7 w-7" /><span>该提供商尚未添加模型</span></div>}
             </div>
@@ -225,7 +222,7 @@ export function ModelSettingsPage() {
     </Modal>
 
     <Modal open={showModelModal} title={modelDraft.id ? '编辑模型' : '添加模型'} onClose={() => setShowModelModal(false)} footer={<><button className="jw-secondary-button" onClick={() => setShowModelModal(false)}>取消</button><button className="jw-primary-button" disabled={busy !== '' || !modelDraft.providerId || !modelDraft.modelKey || !modelDraft.displayName} onClick={() => void saveModel()}>{modelDraft.id ? '保存' : '添加'}</button></>}>
-      <div className="space-y-4"><label className="jw-form-item"><span>模型提供商</span><select disabled={!!modelDraft.id} value={modelDraft.providerId} onChange={(event) => setModelDraft({ ...modelDraft, providerId: event.target.value })}>{settings.providers.map((provider) => <option key={provider.id} value={provider.id}>{provider.name}</option>)}</select></label><label className="jw-form-item"><span>模型 ID</span><input placeholder="例如：gpt-5.6-sol" value={modelDraft.modelKey} onChange={(event) => setModelDraft({ ...modelDraft, modelKey: event.target.value })} /></label><label className="jw-form-item"><span>模型名称</span><input placeholder="用于界面展示" value={modelDraft.displayName} onChange={(event) => setModelDraft({ ...modelDraft, displayName: event.target.value })} /></label><label className="jw-form-item"><span>上下文窗口</span><input inputMode="numeric" placeholder="可选" value={modelDraft.contextWindow} onChange={(event) => setModelDraft({ ...modelDraft, contextWindow: event.target.value })} /></label><label className="jw-form-item"><span>能力标签</span><input placeholder="多个标签用逗号分隔" value={modelDraft.capabilityTags} onChange={(event) => setModelDraft({ ...modelDraft, capabilityTags: event.target.value })} /></label><label className="jw-form-item"><span>授权角色</span><input placeholder="留空表示全部授权角色" value={modelDraft.allowedRoles} onChange={(event) => setModelDraft({ ...modelDraft, allowedRoles: event.target.value })} /></label></div>
+      <div className="space-y-4"><label className="jw-form-item"><span>模型提供商</span><select disabled={!!modelDraft.id} value={modelDraft.providerId} onChange={(event) => setModelDraft({ ...modelDraft, providerId: event.target.value })}>{settings.providers.map((provider) => <option key={provider.id} value={provider.id}>{provider.name}</option>)}</select></label><label className="jw-form-item"><span>模型 ID</span><input placeholder="例如：gpt-5.6-sol" value={modelDraft.modelKey} onChange={(event) => setModelDraft({ ...modelDraft, modelKey: event.target.value })} /></label><label className="jw-form-item"><span>模型名称</span><input placeholder="用于界面展示" value={modelDraft.displayName} onChange={(event) => setModelDraft({ ...modelDraft, displayName: event.target.value })} /></label></div>
     </Modal>
     {revisionTarget && <ConfigurationRevisionPanel target={revisionTarget} onClose={() => setRevisionTarget(null)} onRolledBack={refresh} />}
   </div>

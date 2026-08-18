@@ -1,4 +1,4 @@
-import { readFile, readdir } from 'node:fs/promises'
+import { access, readFile, readdir } from 'node:fs/promises'
 import path from 'node:path'
 
 const root = process.cwd()
@@ -17,6 +17,16 @@ async function filesUnder(relativeRoot: string): Promise<string[]> {
   }
   await walk(absoluteRoot)
   return result
+}
+
+async function pathExists(target: string): Promise<boolean> {
+  try {
+    await access(target)
+    return true
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false
+    throw error
+  }
 }
 
 function requireCondition(condition: unknown, message: string): asserts condition {
@@ -302,7 +312,7 @@ async function main() {
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/singleServicePrestart.ts'
     && packageJson.scripts?.['accept:single-service-prestart']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/singleServicePrestartAcceptance.ts'
-    && /requiredPorts = \[3100, 3584, 8121\]/.test(singleServicePrestart)
+    && /requiredPorts = \[4100, 3584, 8121\]/.test(singleServicePrestart)
     && /\.env mode must be 0600/.test(singleServicePrestart)
     && /build output contains a symbolic link/.test(singleServicePrestart)
     && /a staged build candidate is still pending activation/.test(singleServicePrestart)
@@ -1195,32 +1205,39 @@ async function main() {
   const rootPackages = { ...packageJson.dependencies, ...packageJson.devDependencies }
   const forbiddenPackages = Object.keys(rootPackages).filter((name) => name.startsWith('@flue/') || name === 'hono')
   requireCondition(forbiddenPackages.length === 0, `root package still contains retired runtime packages: ${forbiddenPackages.join(', ')}`)
-  const legacyPackage = JSON.parse(await readFile(path.resolve(root, 'cybernaut-assistant/package.json'), 'utf8')) as {
-    scripts?: Record<string, string>
-  }
-  for (const script of ['dev', 'dev:local', 'build', 'build:client', 'build:server', 'health', 'start', 'start:local']) {
-    requireCondition(
-      legacyPackage.scripts?.[script] === 'node scripts/retired-runtime.mjs',
-      `legacy assistant script ${script} must be hard-disabled`,
-    )
+  const legacyAssistantRoot = path.resolve(root, 'cybernaut-assistant')
+  const legacyAssistantPresent = await pathExists(legacyAssistantRoot)
+  let retiredAssistantSources: string[] = []
+  if (legacyAssistantPresent) {
+    const legacyPackage = JSON.parse(await readFile(path.resolve(legacyAssistantRoot, 'package.json'), 'utf8')) as {
+      scripts?: Record<string, string>
+    }
+    for (const script of ['dev', 'dev:local', 'build', 'build:client', 'build:server', 'health', 'start', 'start:local']) {
+      requireCondition(
+        legacyPackage.scripts?.[script] === 'node scripts/retired-runtime.mjs',
+        `legacy assistant script ${script} must be hard-disabled`,
+      )
+    }
+    retiredAssistantSources = await Promise.all([
+      '.env.example',
+      'src/db.ts',
+      'src/tools/investment-tools.ts',
+      'src/tools/advisor-tools.ts',
+    ].map(async (file) => await readFile(path.resolve(legacyAssistantRoot, file), 'utf8')))
   }
   const retiredAssistantAcceptance = await readFile(
     path.resolve(root, 'server/src/scripts/retiredAssistantBoundaryAcceptance.ts'),
     'utf8',
   )
-  const retiredAssistantSources = await Promise.all([
-    'cybernaut-assistant/.env.example',
-    'cybernaut-assistant/src/db.ts',
-    'cybernaut-assistant/src/tools/investment-tools.ts',
-    'cybernaut-assistant/src/tools/advisor-tools.ts',
-  ].map(async (file) => await readFile(path.resolve(root, file), 'utf8')))
   requireCondition(
-    retiredAssistantSources.every((source) => !/FLUE_BASE_URL|FLUE_DB_PATH|FLUE_AGENT_NAME|RADAR_BASE_URL|INTERNAL_SECRET|x-internal-secret|cybernaut-internal-2026/.test(source))
+    (!legacyAssistantPresent || retiredAssistantSources.every((source) => !/FLUE_BASE_URL|FLUE_DB_PATH|FLUE_AGENT_NAME|RADAR_BASE_URL|INTERNAL_SECRET|x-internal-secret|cybernaut-internal-2026/.test(source)))
+    && /retired-assistant-source-directory-absent/.test(retiredAssistantAcceptance)
+    && /retired-assistant-absence-does-not-touch-legacy-database/.test(retiredAssistantAcceptance)
     && /retired-start-with-stale-environment-fails-closed-without-touching-legacy-database/.test(retiredAssistantAcceptance)
     && packageJson.scripts?.['accept:retired-assistant-boundary']
       === 'node --import tsx server/src/scripts/retiredAssistantBoundaryAcceptance.ts'
     && /run accept:retired-assistant-boundary/.test(deploy),
-    'retired Assistant source must not retain old runtime variables or shared-secret callbacks and release must prove failure-closed behavior',
+    'retired Assistant source must be absent or hard-disabled without old runtime variables, and release must prove no legacy database writes',
   )
 
   const activeFiles = [
@@ -1324,7 +1341,12 @@ async function main() {
     path.resolve(root, 'server/src/scripts/jwRuntimeBoundaryAcceptance.ts'), 'utf8',
   )
   const projectKnowledgeTools = await readFile(path.resolve(root, 'server/src/services/projectKnowledgeToolService.ts'), 'utf8')
-  requireCondition(/permissionMode:\s*'dontAsk'/.test(jwRuntime), 'JW Runtime must use non-interactive deny-by-default permissions')
+  requireCondition(
+    /permissionMode:\s*'default'/.test(jwRuntime)
+    && /defaultMode:\s*'dontAsk'/.test(jwRuntime)
+    && /disableBypassPermissionsMode:\s*'disable'/.test(jwRuntime),
+    'JW Runtime must route explicit ask rules through the host while keeping all other permissions deny-by-default',
+  )
   requireCondition(
     /JW_AGENT_INTERACTIVE_TOOL = 'AskUserQuestion'/.test(jwRuntime)
     && /tools:\s*\[JW_AGENT_INTERACTIVE_TOOL\]/.test(jwRuntime)
@@ -1335,8 +1357,8 @@ async function main() {
   requireCondition(
     /ask:\s*\[JW_AGENT_INTERACTIVE_TOOL\]/.test(jwRuntime)
     && /settings:\s*jwAgentPermissionSettings\(\)/.test(jwRuntime)
-    && /allowedTools:\s*investmentCapability\s*\?\s*allowedAgentTools\s*:\s*\[\]/.test(jwRuntime)
-    && /selectedAgentToolNames\.has\(toolName\)/.test(jwRuntime),
+    && /allowedTools:\s*hostInvestmentEnabled\s*\?\s*allowedAgentTools\s*:\s*\[\]/.test(jwRuntime)
+    && /allowedAgentToolSet\.has\(toolName\)/.test(jwRuntime),
     'JW AskUserQuestion must be an explicit ask rule and must never be auto-allowed',
   )
   requireCondition(/skills:\s*\[\]/.test(jwRuntime), 'JW Runtime must disable implicit Skills')
@@ -1463,7 +1485,7 @@ async function main() {
     'notification-affordance-stays-hidden-without-server-authority',
     'dashboard-metrics-are-derived-from-authoritative-state',
     'meeting-page-fails-closed-without-manufacturing-business-content',
-    'formal-ui-hides-unimplemented-bp-import-and-fake-job-success',
+    'formal-ui-uses-authoritative-bp-and-batch-import-jobs',
     'project-and-meeting-creation-do-not-write-manufactured-fallbacks',
     'llm-health-uses-the-same-authenticated-gateway-config-as-runtime',
     'lead-conversion-is-one-server-transaction-without-fake-artifacts',
@@ -2448,6 +2470,7 @@ async function main() {
     && /LEAD_AGENT_GLOBAL_MAX_REQUESTS_PER_MINUTE/.test(leadAgentRuntimeGuardService)
     && /LEAD_AGENT_GLOBAL_DAILY_BUDGET_USD/.test(leadAgentRuntimeGuardService)
     && /LEAD_AGENT_CIRCUIT_FAILURE_THRESHOLD/.test(leadAgentRuntimeGuardService)
+    && /WHERE agent_profile=\? AND state IN \('succeeded','failed'\)/.test(leadAgentRuntimeGuardService)
     && /permit_expired/.test(leadAgentRuntimeGuardService)
     && /acquireLeadAgentRuntimePermit/.test(leadSubjectAgentService)
     && /finishLeadAgentRuntimePermit/.test(leadSubjectAgentService)
@@ -2455,13 +2478,14 @@ async function main() {
     && /finishLeadAgentRuntimePermit/.test(leadScoringAgentService)
     && /acquireLeadAgentRuntimePermit/.test(leadWorkflowAgentService)
     && /finishLeadAgentRuntimePermit/.test(leadWorkflowAgentService),
-    'all five lead Agent profiles must share the persistent MySQL concurrency/rate/budget/circuit guard',
+    'all lead Agent profiles must share persistent MySQL concurrency/rate/budget guards while keeping circuit failures profile-scoped',
   )
   for (const contract of [
     'cross-profile-concurrency-is-limited-by-one-mysql-permit-pool',
     'cross-profile-minute-rate-is-persistently-limited',
     'actual-cost-plus-active-reservation-cannot-exceed-global-daily-budget',
-    'consecutive-cross-profile-failures-open-a-persistent-circuit',
+    'cross-profile-failures-do-not-open-an-unrelated-profile-circuit',
+    'consecutive-same-profile-failures-open-a-profile-scoped-circuit',
     'expired-permit-is-recovered-without-permanent-capacity-leak',
   ]) {
     requireCondition(leadAgentRuntimeGuardAcceptance.includes(contract), `lead Agent runtime guard acceptance is missing: ${contract}`)
@@ -3115,7 +3139,7 @@ async function main() {
     && /processMutation: false/.test(singleServiceRuntimeAcceptance)
     && packageJson.scripts?.['accept:single-service-runtime:observe']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/singleServiceRuntimeAcceptance.ts --observe-existing',
-    'single-service acceptance must support a read-only observation mode for an already-running 3100 service without process mutation',
+    'single-service acceptance must support a read-only observation mode for an already-running 4100 service without process mutation',
   )
   requireCondition(
     /--reconcile-existing/.test(postgresDumpMigration)
@@ -3976,27 +4000,27 @@ async function main() {
   const schemaTableNames = [...databaseSchema.matchAll(/mysqlTable\('([a-z0-9_]+)'/g)]
     .map((match) => match[1])
     .sort()
-  const erDomainCatalog = mysqlSchemaErDocument.match(/## 2\. 领域表目录([\s\S]+?)上述目录共 81 张业务表/)
-  requireCondition(erDomainCatalog, 'MySQL ER document must contain the complete 81-table domain catalog')
+  const erDomainCatalog = mysqlSchemaErDocument.match(/## 2\. 领域表目录([\s\S]+?)上述目录共 87 张业务表/)
+  requireCondition(erDomainCatalog, 'MySQL ER document must contain the complete 87-table domain catalog')
   const erTableNames = [...erDomainCatalog[1].matchAll(/`([a-z][a-z0-9_]*)`/g)]
     .map((match) => match[1])
     .sort()
   requireCondition(
-    schemaTableNames.length === 81
-    && erTableNames.length === 81
+    schemaTableNames.length === 87
+    && erTableNames.length === 87
     && schemaTableNames.every((table, index) => table === erTableNames[index]),
-    'MySQL ER domain catalog must exactly match all 81 logical tables in server/src/db/schema.ts',
+    'MySQL ER domain catalog must exactly match all 86 logical tables in server/src/db/schema.ts',
   )
   requireCondition(
-    drizzleMigrationFiles.length === 40
+    drizzleMigrationFiles.length === 44
     && drizzleMigrationFiles[0] === '0000_mysql_baseline.sql'
-    && drizzleMigrationFiles.at(-1) === '0039_add_lead_field_provenance.sql'
+    && drizzleMigrationFiles.at(-1) === '0043_add_radar_dingtalk_settings.sql'
     && ['sbl_projects', 'sbl_meetings', 'sbl_todos', 'sbl_risks']
       .every((table) => businessOptimisticVersionMigration.includes(`ALTER TABLE \`${table}\` ADD COLUMN \`version\``))
     && /ADD COLUMN `field_provenance` json NOT NULL/.test(leadFieldProvenanceMigration)
     && /'legacy_import'/.test(leadFieldProvenanceMigration)
     && (mysqlSchemaErDocument.match(/```mermaid\s+erDiagram/g) || []).length >= 2
-    && /81 张业务表 \+ 1 张迁移台账、133 个外键、40 条迁移日志/.test(mysqlSchemaErDocument)
+    && /87 张业务表 \+ 1 张迁移台账、143 个物理外键、44 条迁移日志/.test(mysqlSchemaErDocument)
     && /生产源盘点、在线 PostgreSQL/.test(mysqlSchemaErDocument)
     && /MySQL-Schema与ER说明-20260810\.md/.test(architectureHandoff),
     'MySQL schema/ER handoff must bind the live migration range, relationship diagrams, current structural evidence and unresolved external blockers',
@@ -4153,8 +4177,10 @@ async function main() {
     && /0036_add_system_administration/.test(adjacentDomainMigrationRetirementReport)
     && /0037_activate_system_permissions/.test(adjacentDomainMigrationRetirementReport)
     && /内置 AI 模板 \| 已正式迁移，系统页只读/.test(adjacentDomainMigrationRetirementReport)
-    && /Radar 服务 \| 常驻服务去除，采集适配器保留/.test(adjacentDomainMigrationRetirementReport)
-    && /Radar 非库资产 \| 本机已归档，生产待交接/.test(adjacentDomainMigrationRetirementReport)
+    && /Radar 服务 \| 已并入主服务，独立服务退场/.test(adjacentDomainMigrationRetirementReport)
+    && /Radar 非库资产 \| 技术盘点完成，四方批准待完成/.test(adjacentDomainMigrationRetirementReport)
+    && /6,176 条候选、6,975 条原始事件和 1,312 个来源注册/.test(adjacentDomainMigrationRetirementReport)
+    && /产品、研发、运维、数据四方稳定身份批准仍未完成/.test(adjacentDomainMigrationRetirementReport)
     && /9,903[^\n]*不可变事件/.test(adjacentDomainMigrationRetirementReport)
     && /97[^\n]*`source_missing`/.test(adjacentDomainMigrationRetirementReport)
     && /MIG-0719\/0728.*保持未通过/.test(adjacentDomainMigrationRetirementReport)
@@ -4224,9 +4250,10 @@ async function main() {
     && /AiPlatformAdminOnly/.test(clientRoutes)
     && /to: '\/system\/ai\/models'/.test(clientLayout)
     && /roles: \['系统管理员', 'AI平台管理员', 'AI 平台管理员'\]/.test(clientLayout)
-    && /Provider 与凭据/.test(modelSettingsPage)
+    && /管理模型提供商、访问凭据、可用模型与任务路由/.test(modelSettingsPage)
+    && /模型提供商/.test(modelSettingsPage)
     && /任务模型路由/.test(modelSettingsPage)
-    && /替换密钥/.test(modelSettingsPage),
+    && /不替换当前密钥/.test(modelSettingsPage),
     'React model settings route, role-scoped navigation, provider, credential, model and profile controls are missing',
   )
   requireCondition(
@@ -4283,13 +4310,16 @@ async function main() {
     && /resolveAgentRuntimePolicy/.test(aiCapabilityService)
     && /AGENT_TOOL_NOT_APPROVED/.test(aiCapabilityService)
     && /PLUGIN_NOT_APPROVED/.test(aiCapabilityService)
+    && /installUploadedPlugin/.test(aiCapabilityService)
+    && /PLUGIN_TOOL_NOT_APPROVED/.test(aiCapabilityService)
     && /pluginInventory/.test(aiCapabilityService)
-    && /dynamicInstallEnabled:\s*false/.test(aiCapabilityService)
+    && /dynamicInstallEnabled:\s*true/.test(aiCapabilityService)
     && /Math\.min\(policy\.maxBudgetUsd/.test(leadScoringAgentService)
     && /Math\.min\(policy\.timeoutMs/.test(inProcessAiWorkflowService)
-    && /数据库选择只能收窄代码白名单/.test(aiCapabilityService)
+    && /return selected\.filter\(\(item\) => AI_CAPABILITY_CATALOG\.some/.test(aiCapabilityService)
+    && /item\.kind === 'plugin' && item\.source === 'uploaded'/.test(aiCapabilityService)
     && /resolveSelectedRuntimeCapabilities/.test(jwRuntime)
-    && /investmentCapability \? \{ investment: investmentTools \} : \{\}/.test(jwRuntime)
+    && /hostInvestmentEnabled \? \{ investment: investmentTools \} : \{\}/.test(jwRuntime)
     && /selectedSkillsAllowAiTask\(selectedSkillNames, type\)/.test(jwRuntime),
     'capability service must enforce admin, role/project scope, non-escalating conversation selection and runtime code whitelist',
   )
@@ -4310,20 +4340,23 @@ async function main() {
     && /Agents/.test(capabilitySettingsPage)
     && /MCP/.test(capabilitySettingsPage)
     && /Plugins/.test(capabilitySettingsPage)
-    && /未安装 \/ 未批准/.test(capabilitySettingsPage)
-    && /关闭（仅代码白名单）/.test(capabilitySettingsPage)
+    && /动态安装已开放/.test(capabilitySettingsPage)
+    && /可安装/.test(capabilitySettingsPage)
     && /item\.dependencyNames/.test(capabilitySettingsPage)
     && /Agent 运行策略/.test(capabilitySettingsPage)
     && /approvedToolNamesByCapability/.test(capabilitySettingsPage)
     && /确认删除 Skill/.test(capabilitySettingsPage)
     && /\/ai\/capabilities\/conversations\//.test(aiAssistantPage)
-    && /会话能力/.test(aiAssistantPage),
+    && /data-ai-capability-trigger="true"/.test(aiAssistantPage)
+    && /选择当前会话持续使用的技能/.test(aiAssistantPage)
+    && /saveConversationCapabilities/.test(aiAssistantPage),
     'React capability management and authorized conversation capability selector are missing',
   )
   for (const contract of [
     'builtin-catalog-idempotent-and-no-invented-plugin',
     'admin-service-boundary',
     'unapproved-plugin-is-visible-as-uninstalled-but-cannot-enable-bind-or-run',
+    'uploaded-plugin-is-installed-and-runtime-selectable',
     'structured-agent-policy-is-admin-only-and-code-bounded',
     'builtin-sync-preserves-structured-agent-policy',
     'global-department-project-bindings',
@@ -4546,7 +4579,10 @@ async function main() {
     && /workers\.length === 4/.test(operationsOverview)
     && /deliveryFailures15m/.test(operationsOverview)
     && /全量迁移未就绪/.test(operationsOverview)
-    && !/apiPost|apiPut|apiPatch|apiDelete|setInterval/.test(operationsOverview)
+    && /apiPost<[^>]+>\('\/leads\/sync-radar'/.test(operationsOverview)
+    && /apiPost<[^>]+>\('\/operations\/radar\/wechat-accounts\/import'/.test(operationsOverview)
+    && /apiPatch\(`\/operations\/radar\/(?:sources|jobs)\//.test(operationsOverview)
+    && !/apiPut|apiDelete|setInterval/.test(operationsOverview)
     && /authenticationFailuresTotal/.test(agentSocketService)
     && /disconnectedTotal/.test(agentSocketService)
     && /operations-api-requires-system-admin/.test(operationalTelemetryAcceptance)

@@ -9,6 +9,9 @@ import {
   leadAgentRuntimeGuardConfig,
   type LeadAgentRuntimePermit,
 } from '../services/leadAgentRuntimeGuardService.js'
+import { assertIsolatedMysqlAcceptanceDatabase } from './mysqlAcceptanceSafety.js'
+
+assertIsolatedMysqlAcceptanceDatabase('leadAgentRuntimeGuardAcceptance')
 
 const permitsTable = quoteMysqlIdentifier(mysqlTableName('lead_agent_runtime_permits'))
 const permits: LeadAgentRuntimePermit[] = []
@@ -81,11 +84,17 @@ async function main() {
     await finishLeadAgentRuntimePermit({ permit: failureOne, status: 'failed', error: Object.assign(new Error('upstream one'), { code: 'UPSTREAM' }), now: new Date(circuitNow.getTime() + 1_000) })
     const failureTwo = await acquire('lead-screening-agent', new Date(circuitNow.getTime() + 2_000))
     await finishLeadAgentRuntimePermit({ permit: failureTwo, status: 'failed', error: Object.assign(new Error('upstream two'), { code: 'UPSTREAM' }), now: new Date(circuitNow.getTime() + 3_000) })
+    const unrelated = await acquire('lead-enrichment-agent', new Date(circuitNow.getTime() + 4_000))
+    await finishLeadAgentRuntimePermit({ permit: unrelated, status: 'succeeded', actualMicrousd: 1_000, now: new Date(circuitNow.getTime() + 5_000) })
+    checks.push('cross-profile-failures-do-not-open-an-unrelated-profile-circuit')
+
+    const failureThree = await acquire('lead-research-agent', new Date(circuitNow.getTime() + 6_000))
+    await finishLeadAgentRuntimePermit({ permit: failureThree, status: 'failed', error: Object.assign(new Error('upstream three'), { code: 'UPSTREAM' }), now: new Date(circuitNow.getTime() + 7_000) })
     await assert.rejects(
-      () => acquire('lead-enrichment-agent', new Date(circuitNow.getTime() + 4_000)),
+      () => acquire('lead-research-agent', new Date(circuitNow.getTime() + 8_000)),
       (error: Error & { code?: string }) => error.code === 'LEAD_AGENT_CIRCUIT_OPEN',
     )
-    checks.push('consecutive-cross-profile-failures-open-a-persistent-circuit')
+    checks.push('consecutive-same-profile-failures-open-a-profile-scoped-circuit')
 
     process.env.LEAD_AGENT_GLOBAL_MAX_CONCURRENCY = '1'
     process.env.LEAD_AGENT_CIRCUIT_FAILURE_THRESHOLD = '100'

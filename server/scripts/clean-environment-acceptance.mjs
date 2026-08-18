@@ -8,7 +8,7 @@ const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'cybernaut-clean-buil
 const excluded = [
   '.git', '.env', 'node_modules', 'dist', 'server-dist', '.runtime', 'logs',
   'server/generated', 'server/ai-artifacts', 'server/project-files', 'server/ai-template-data',
-  'server/workspace', 'server/agent-workspace', 'project-discovery/data', 'cybernaut_mvp_dump.sql',
+  'server/workspace', 'server/agent-workspace', 'cybernaut_mvp_dump.sql',
 ]
 
 function included(source) {

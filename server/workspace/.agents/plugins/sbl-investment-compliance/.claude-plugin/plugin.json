@@ -1,0 +1,8 @@
+{
+  "name": "sbl-investment-compliance",
+  "version": "1.0.0",
+  "description": "生成、审计、规范排版并逐页核验字段精简的德塔式中文股权投资合规性说明。",
+  "author": {
+    "name": "浙江赛智伯乐股权投资管理有限公司"
+  }
+}

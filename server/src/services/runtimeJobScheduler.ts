@@ -250,7 +250,7 @@ export function runtimeJobDefinitions(): RuntimeJobDefinition[] {
       scheduleKind: 'interval',
       intervalSeconds: Math.ceil(syncIntervalMs / 1_000),
       initialDelayMs: syncStartDelayMs,
-      timeoutMs: 20 * 60_000,
+      timeoutMs: 30 * 60_000,
       run: async (signal) => {
         // The Node process owns collection, persistence and synchronization.
         // No Python service or child process participates in this runtime path.
@@ -392,10 +392,13 @@ export async function setRadarRuntimeJobEnabled(id: string, enabled: boolean) {
   return (await listRadarRuntimeJobs()).find((item) => item.id === id)
 }
 
-export async function queueRadarRuntimeJobNow(id: string) {
-  managedRadarJob(id)
+export async function queueRuntimeJobNow(id: string) {
   const [result] = await pool.query<import('mysql2').ResultSetHeader>(
-    `UPDATE ${jobsTable} SET next_run_at=NOW(3), updated_at=NOW(3)
+    `UPDATE ${jobsTable} SET next_run_at=NOW(3),
+       last_error=IF(last_status='dead_letter',NULL,last_error),
+       consecutive_failures=IF(last_status='dead_letter',0,consecutive_failures),
+       last_status=IF(last_status='dead_letter','queued',last_status),
+       updated_at=NOW(3)
      WHERE id=? AND enabled=1 AND current_run_id IS NULL`,
     [id],
   )
@@ -407,6 +410,11 @@ export async function queueRadarRuntimeJobNow(id: string) {
   }
   if (started) void poll()
   return { id, queued: true }
+}
+
+export async function queueRadarRuntimeJobNow(id: string) {
+  managedRadarJob(id)
+  return await queueRuntimeJobNow(id)
 }
 
 export async function recoverExpiredRuntimeJobLeases(): Promise<void> {
@@ -444,6 +452,7 @@ export async function claimRuntimeJobLease(
     const [rows] = await connection.query<JobRow[]>(
       `SELECT * FROM ${jobsTable}
        WHERE id=? AND enabled=1 AND next_run_at <= NOW(3)
+         AND COALESCE(last_status,'') <> 'dead_letter'
          AND (lease_expires_at IS NULL OR lease_expires_at < NOW(3))
        FOR UPDATE`,
       [id],
@@ -533,10 +542,11 @@ async function finishJob(claim: ClaimedJob, status: 'succeeded' | 'failed' | 'de
   }
 }
 
-async function executeClaimed(claim: ClaimedJob): Promise<void> {
+export async function executeClaimedRuntimeJob(claim: ClaimedJob): Promise<void> {
   const controller = new AbortController()
   let heartbeat: NodeJS.Timeout | undefined
   let timeout: NodeJS.Timeout | undefined
+  let timedOut = false
   const promise = (async () => {
     try {
       heartbeat = setInterval(() => {
@@ -547,12 +557,21 @@ async function executeClaimed(claim: ClaimedJob): Promise<void> {
           [expiresAt, claim.id, claim.runId, claim.leaseOwner],
         ).catch((error) => console.error(`[runtime-job] heartbeat failed job=${claim.id}: ${errorText(error)}`))
       }, Math.max(10_000, Math.floor(leaseSeconds * 1_000 / 3)))
-      timeout = setTimeout(() => controller.abort(new Error(`job timeout after ${claim.timeoutMs}ms`)), claim.timeoutMs)
-      const result = await claim.definition.run(controller.signal)
+      timeout = setTimeout(() => {
+        timedOut = true
+        controller.abort(new Error(`job timeout after ${claim.timeoutMs}ms`))
+      }, claim.timeoutMs)
+      const result = await Promise.race([
+        claim.definition.run(controller.signal),
+        new Promise<never>((_resolve, reject) => {
+          if (controller.signal.aborted) return reject(controller.signal.reason)
+          controller.signal.addEventListener('abort', () => reject(controller.signal.reason), { once: true })
+        }),
+      ])
       await finishJob(claim, 'succeeded', result)
       console.log(`[runtime-job] succeeded job=${claim.id} run=${claim.runId}`)
     } catch (error) {
-      const cancelled = stopping || controller.signal.aborted
+      const cancelled = stopping && !timedOut
       const maxAttempts = claim.definition.maxAttempts ?? maxRetries
       const status = cancelled ? 'cancelled' : (claim.attempt >= maxAttempts ? 'dead_letter' : 'failed')
       await finishJob(claim, status, undefined, error)
@@ -576,6 +595,7 @@ async function poll(): Promise<void> {
     const [rows] = await pool.query<Array<RowDataPacket & { id: string }>>(
       `SELECT id FROM ${jobsTable}
        WHERE enabled=1 AND next_run_at <= NOW(3)
+         AND COALESCE(last_status,'') <> 'dead_letter'
          AND (lease_expires_at IS NULL OR lease_expires_at < NOW(3))
        ORDER BY next_run_at, id LIMIT ?`,
       [capacity],
@@ -583,7 +603,7 @@ async function poll(): Promise<void> {
     const definitions = new Map(runtimeJobDefinitions().map((definition) => [definition.id, definition]))
     for (const row of rows) {
       const claim = await claimRuntimeJobLease(row.id, definitions)
-      if (claim) void executeClaimed(claim)
+      if (claim) void executeClaimedRuntimeJob(claim)
     }
   } catch (error) {
     console.error(`[runtime-job] poll failed: ${errorText(error)}`)

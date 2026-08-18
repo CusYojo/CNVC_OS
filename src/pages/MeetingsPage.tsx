@@ -63,7 +63,7 @@ export function MeetingsPage() {
     if (!project) return showToast('请先创建或选择项目', 'error')
     setGenerating(true)
 
-    // 调统一主服务的 AI 网关生成结构化纪要（Web/API :3100 → LLM）
+    // 调统一主服务的 AI 网关生成结构化纪要（Web/API :4100 → LLM）
     let summaryText = ''
     let conclusions: string[] = []
     let todoSuggestions: MeetingTodoSuggestion[] = []

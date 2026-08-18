@@ -48,6 +48,7 @@ import {
 } from '../services/leadOnlineWorkflowService.js'
 import {
   fetchRadarWindow,
+  readRadarCandidatesByIds,
   readRadarSyncState,
   saveRadarSyncState,
 } from '../services/radarSyncService.js'
@@ -589,6 +590,7 @@ export type RadarSyncInput = {
   backfillPages?: number
   source?: string
   cursor?: string
+  candidateIds?: string[]
 }
 
 export class RadarSyncAlreadyRunningError extends Error {
@@ -614,6 +616,7 @@ export async function runRadarSyncImport(input: RadarSyncInput = {}, actorUserId
       : 0
     const src = (input.source ?? 'all').toString()  // 默认全部渠道
     const explicitCursor = String(input.cursor || '').trim()
+    const candidateIds = Array.isArray(input.candidateIds) ? input.candidateIds.slice(0, 100) : []
     const stateId = src === 'all' ? 'main' : `source:${src}`
     let nextState: { backfillCursor: string | null; backfillComplete: boolean } | null = null
     let candidateTotal = 0
@@ -622,7 +625,12 @@ export async function runRadarSyncImport(input: RadarSyncInput = {}, actorUserId
     let hasMore = false
     const fetchedItems: Record<string, unknown>[] = []
 
-    if (explicitCursor) {
+    if (candidateIds.length > 0) {
+      const selected = await readRadarCandidatesByIds(candidateIds)
+      fetchedItems.push(...selected)
+      candidateTotal = selected.length
+      pagesFetched = selected.length ? 1 : 0
+    } else if (explicitCursor) {
       const window = await fetchRadarWindow({
         pageSize: limit,
         maxPages: incrementalPages,

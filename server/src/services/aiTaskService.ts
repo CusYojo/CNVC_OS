@@ -1839,6 +1839,9 @@ async function executeTask(taskId: string) {
         skillName: skill.name,
         skillVersion: skill.version,
         skillSha256: skill.sha256,
+        pluginName: skill.pluginName ?? template.pluginName,
+        pluginVersion: skill.pluginVersion,
+        pluginEntrySkillName: skill.entrySkillName ?? template.pluginEntrySkillName,
         qaMode,
         questionDepth,
         questionCount: qaContent.questions.length,
@@ -2851,6 +2854,9 @@ async function executeTask(taskId: string) {
         skillName: skill.name,
         skillVersion: skill.version,
         skillSha256: skill.sha256,
+        pluginName: skill.pluginName ?? template.pluginName,
+        pluginVersion: skill.pluginVersion,
+        pluginEntrySkillName: skill.entrySkillName ?? template.pluginEntrySkillName,
         ...(resolvedCustomTemplate
           ? {
               customTemplateId: resolvedCustomTemplate.row.id,
@@ -2896,6 +2902,9 @@ async function executeTask(taskId: string) {
           skillName: skill.name,
           skillVersion: skill.version,
           skillSha256: skill.sha256,
+          pluginName: skill.pluginName ?? template.pluginName,
+          pluginVersion: skill.pluginVersion,
+          pluginEntrySkillName: skill.entrySkillName ?? template.pluginEntrySkillName,
           ...(pptWorkflow
             ? {
                 pptWorkflow: {

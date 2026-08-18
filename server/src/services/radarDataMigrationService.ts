@@ -22,6 +22,10 @@ type RadarSnapshot = {
 
 const LEGACY_CANDIDATE_FILES = [
   'arxiv_candidates.jsonl',
+  // The legacy HTTP projection omitted OpenAlex even though the collector
+  // persisted it. Preserve those dormant candidates before retiring the
+  // retired standalone collector so the source asset is not stranded on disk.
+  'openalex_candidates.jsonl',
   'wechat_985_candidates.jsonl',
   'wechat_api_candidates.jsonl',
   'wechat_chat_candidates.jsonl',
@@ -30,6 +34,7 @@ const LEGACY_CANDIDATE_FILES = [
 
 const LEGACY_STATE_FILES: Record<string, string> = {
   auto: 'auto_crawler_status.json',
+  paper_daily: 'paper_crawler_status.json',
   wechat_daily: 'wechat_daily_status.json',
   wechat_sources: 'wechat_source_status.json',
 }
@@ -142,7 +147,7 @@ function normalizedCandidate(raw: JsonObject) {
 }
 
 function radarDataDirectory(): string {
-  return path.resolve(process.env.RADAR_DATA_DIR?.trim() || 'project-discovery/data')
+  return path.resolve(process.env.RADAR_DATA_DIR?.trim() || '.runtime/radar-legacy/data')
 }
 
 async function readJsonFile(filePath: string): Promise<JsonObject | null> {
@@ -209,7 +214,7 @@ async function readLegacySnapshot(): Promise<RadarSnapshot> {
     : []
   const accounts: JsonObject[] = []
   const accountsPath = path.resolve(
-    process.env.RADAR_WECHAT_ACCOUNTS_XLSX?.trim() || 'project-discovery/公众号来源.xlsx',
+    process.env.RADAR_WECHAT_ACCOUNTS_XLSX?.trim() || '.runtime/radar-legacy/公众号来源.xlsx',
   )
   try {
     const workbook = new ExcelJS.Workbook()
@@ -513,7 +518,7 @@ export async function materializeRadarWorkingStateFromMySql() {
   }
 
   const accountsPath = path.resolve(
-    process.env.RADAR_WECHAT_ACCOUNTS_XLSX?.trim() || 'project-discovery/公众号来源.xlsx',
+    process.env.RADAR_WECHAT_ACCOUNTS_XLSX?.trim() || '.runtime/radar-legacy/公众号来源.xlsx',
   )
   const accounts = registry.filter((item) => item.sourceKind === 'wechat-account')
   if (accounts.length > 0) {

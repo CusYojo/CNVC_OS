@@ -11,6 +11,7 @@ import {
   deleteSkill,
   ensureBuiltinCapabilityCatalog,
   getConversationCapabilities,
+  installUploadedPlugin,
   listCapabilitySettings,
   listAvailableCapabilities,
   resolveSelectedRuntimeCapabilities,
@@ -35,6 +36,7 @@ const owner: AiCapabilityActor = { userId: ids.owner, userName: '能力验收用
 const outsider: AiCapabilityActor = { userId: ids.outsider, userName: '能力验收外部用户', role: '投资经理', department: '投资二部' }
 const checks: string[] = []
 let originalInteractive: typeof aiCapabilities.$inferSelect | null = null
+let uploadedPluginId = ''
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message)
@@ -66,11 +68,12 @@ async function main() {
     },
   ])
 
-  await check('builtin-catalog-idempotent-and-no-invented-plugin', async () => {
+  await check('builtin-catalog-idempotent-and-four-document-plugins', async () => {
     const first = await ensureBuiltinCapabilityCatalog(); const second = await ensureBuiltinCapabilityCatalog()
     assert(first.capabilities === second.capabilities && first.capabilities > 10, '内置目录数量不稳定')
     const builtins = await db.select().from(aiCapabilities).where(eq(aiCapabilities.source, 'builtin'))
-    assert(!builtins.some((item) => item.kind === 'plugin'), '未配置 Plugin 不应被伪造')
+    const documentPlugins = builtins.filter((item) => item.kind === 'plugin')
+    assert(documentPlugins.length === 4, `内置文档 Plugin 数量错误：${documentPlugins.length}`)
   })
   await check('admin-service-boundary', async () => {
     assert(await rejects(() => Promise.resolve(assertAiCapabilityAdmin(owner)), 'ROLE_FORBIDDEN'), '普通用户可管理能力')
@@ -82,7 +85,7 @@ async function main() {
     assert(plugin.configuredEnabled === true && plugin.enabled === false, '旁路启用 Plugin 未被降级为有效停用')
     assert(plugin.installed === false && plugin.runtimeAvailable === false && plugin.approvalStatus === 'not_approved', '未批准 Plugin 安装态错误')
     assert(plugin.packageVersion === '0.0.0-unapproved' && plugin.dependencyNames[0] === 'unapproved-dependency', 'Plugin 版本或依赖不可见')
-    assert(settings.pluginInventory.records === 1 && settings.pluginInventory.approved === 0 && settings.pluginInventory.installed === 0, 'Plugin 汇总状态错误')
+    assert(settings.pluginInventory.records >= 5 && settings.pluginInventory.approved >= 4 && settings.pluginInventory.installed >= 4, 'Plugin 汇总状态错误')
     assert(await rejects(() => updateCapability(ids.forbidden, { expectedVersion: 1, enabled: true }, admin), 'PLUGIN_NOT_APPROVED'), '未批准 Plugin 可被启用')
     assert(await rejects(() => createCapabilityBinding({ capabilityId: ids.forbidden, scopeType: 'global' }, admin), 'PLUGIN_NOT_APPROVED'), '未批准 Plugin 可创建授权')
     const testResult = await testCapability(ids.forbidden, admin)
@@ -92,6 +95,26 @@ async function main() {
       createdBy: ids.admin, updatedBy: ids.admin,
     })
     assert(!(await listAvailableCapabilities(owner)).some((item) => item.id === ids.forbidden), '旁路 Plugin 授权进入用户可用能力')
+  })
+  await check('uploaded-plugin-is-installed-and-runtime-selectable', async () => {
+    const installed = await installUploadedPlugin({
+      capabilityKey: `accept-uploaded-${marker}`,
+      name: '上传验收 Plugin',
+      description: '仅使用批准宿主工具的上传 Plugin',
+      packageVersion: '1.0.0',
+      config: { prompt: '只使用证据支持的结论。' },
+      toolNames: ['search_project_docs'],
+    }, admin)
+    uploadedPluginId = installed.id
+    assert(installed.source === 'uploaded' && installed.enabled, '上传 Plugin 未安装启用')
+    const settings = await listCapabilitySettings(admin)
+    const view = settings.capabilities.find((item) => item.id === installed.id)
+    assert(view?.installed && view.runtimeAvailable && view.approvalStatus === 'approved', '上传 Plugin 安装态错误')
+    assert(settings.pluginInventory.installed >= 5 && settings.pluginInventory.dynamicInstallEnabled, '上传 Plugin 汇总状态错误')
+    assert((await listAvailableCapabilities(owner)).some((item) => item.id === installed.id), '上传 Plugin 未进入用户可用能力')
+    await setConversationCapabilities(owner, ids.conversation, [installed.id])
+    const runtime = await resolveSelectedRuntimeCapabilities(owner, ids.conversation)
+    assert(runtime.some((item) => item.id === installed.id && item.kind === 'plugin'), '上传 Plugin 未进入 Runtime')
   })
   await check('structured-agent-policy-is-admin-only-and-code-bounded', async () => {
     const [interactive] = await db.select().from(aiCapabilities).where(and(
@@ -148,6 +171,7 @@ async function main() {
     assert(await rejects(() => getConversationCapabilities(outsider, ids.conversation), 'CONVERSATION_FORBIDDEN'), '外部用户读取了会话能力')
   })
   await check('runtime-selection-is-approved-code-only', async () => {
+    await setConversationCapabilities(owner, ids.conversation, [ids.global, ids.projectCap])
     const runtime = await resolveSelectedRuntimeCapabilities(owner, ids.conversation)
     assert(!runtime.some((item) => new Set<string>([ids.global, ids.projectCap]).has(item.id)), '非代码目录能力进入 Runtime')
   })
@@ -235,6 +259,8 @@ main().catch((error) => {
   }).where(eq(aiCapabilities.id, originalInteractive.id)).catch(() => undefined)
   await db.delete(auditLogs).where(inArray(auditLogs.userId, [ids.admin, ids.owner, ids.outsider])).catch(() => undefined)
   await db.delete(aiConversationCapabilities).where(eq(aiConversationCapabilities.conversationId, ids.conversation)).catch(() => undefined)
+  if (uploadedPluginId) await db.delete(aiCapabilityBindings).where(eq(aiCapabilityBindings.capabilityId, uploadedPluginId)).catch(() => undefined)
+  if (uploadedPluginId) await db.delete(aiCapabilities).where(eq(aiCapabilities.id, uploadedPluginId)).catch(() => undefined)
   await db.delete(agentConversations).where(eq(agentConversations.id, ids.conversation)).catch(() => undefined)
   await db.delete(aiCapabilities).where(inArray(aiCapabilities.id, [ids.global, ids.department, ids.projectCap, ids.forbidden])).catch(() => undefined)
   await db.delete(projects).where(eq(projects.id, ids.project)).catch(() => undefined)

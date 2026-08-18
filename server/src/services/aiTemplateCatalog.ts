@@ -24,6 +24,8 @@ export type AiExecutableTaskType = AiBusinessTaskType | 'custom_template_documen
 export type AiTemplateDefinition = {
   type: AiExecutableTaskType
   skillName: string
+  pluginName?: string
+  pluginEntrySkillName?: string
   label: string
   description: string
   outputFormat: 'docx' | 'pptx' | 'pdf'
@@ -66,6 +68,8 @@ function docsTemplatePaths(directoryName: string) {
 export type AiQaTemplateDefinition = {
   type: 'project_qa'
   skillName: AiQaSkillName
+  pluginName: string
+  pluginEntrySkillName: string
   label: string
   templateVersion: string
   templateDirectory: string
@@ -81,6 +85,8 @@ export const AI_TEMPLATE_CATALOG: Record<AiBusinessTaskType, AiTemplateDefinitio
   compliance_statement: {
     type: 'compliance_statement',
     skillName: 'generate-compliance-statement',
+    pluginName: 'sbl-investment-compliance',
+    pluginEntrySkillName: 'generate-investment-compliance-note',
     label: '合规性说明',
     description: '依据项目资料及基金投资约束生成合规性说明初稿',
     outputFormat: 'docx',
@@ -98,6 +104,8 @@ export const AI_TEMPLATE_CATALOG: Record<AiBusinessTaskType, AiTemplateDefinitio
   investment_proposal: {
     type: 'investment_proposal',
     skillName: 'draft-investment-proposal',
+    pluginName: 'sbl-investment-proposal',
+    pluginEntrySkillName: 'artifact-template-deta',
     label: '投资提案',
     description: '由资深投资经理研读当前项目资料并按公司标准模板生成内部投资提案',
     outputFormat: 'docx',
@@ -157,6 +165,8 @@ export const AI_TEMPLATE_CATALOG: Record<AiBusinessTaskType, AiTemplateDefinitio
   due_diligence_report: {
     type: 'due_diligence_report',
     skillName: AI_DUE_DILIGENCE_SKILL_NAME,
+    pluginName: 'sbl-deta-dd-report',
+    pluginEntrySkillName: 'generate-deta-dd-report',
     label: '尽调报告',
     description: '由资深投资经理先研读项目资料，再综合公司尽调模板语料库生成内部尽调报告',
     outputFormat: 'docx',
@@ -181,6 +191,8 @@ export const AI_TEMPLATE_CATALOG: Record<AiBusinessTaskType, AiTemplateDefinitio
   project_qa: {
     type: 'project_qa',
     skillName: AI_QA_SKILL_NAME,
+    pluginName: 'sbl-investment-qa',
+    pluginEntrySkillName: 'generate-investment-qa-report',
     label: '项目 Q&A',
     description: '使用 generate-project-qa-report 生成直接式、可交付的项目 Q&A 报告',
     outputFormat: 'docx',
@@ -221,6 +233,8 @@ export const AI_TEMPLATE_CATALOG: Record<AiBusinessTaskType, AiTemplateDefinitio
 export const AI_QA_TEMPLATE: AiQaTemplateDefinition = {
   type: 'project_qa',
   skillName: AI_QA_SKILL_NAME,
+  pluginName: AI_TEMPLATE_CATALOG.project_qa.pluginName!,
+  pluginEntrySkillName: AI_TEMPLATE_CATALOG.project_qa.pluginEntrySkillName!,
   label: '项目 Q&A',
   templateVersion: AI_TEMPLATE_CATALOG.project_qa.templateVersion,
   templateDirectory: qaSkillPath(),

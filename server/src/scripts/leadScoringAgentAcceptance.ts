@@ -53,6 +53,8 @@ async function main() {
     DB_USERNAME: process.env.DB_USERNAME,
     DB_PASSWORD: process.env.DB_PASSWORD,
     DB_FREFIX: process.env.DB_FREFIX,
+    AI_CAPABILITIES_ENABLED: process.env.AI_CAPABILITIES_ENABLED,
+    LEAD_SCORING_AGENT_MAX_TURNS: process.env.LEAD_SCORING_AGENT_MAX_TURNS,
   }
   process.env.LLM_BASE_URL = 'https://agent-acceptance.invalid/api/v9'
   process.env.LLM_API_KEY = 'ScoringAgentAcceptanceApiKey'
@@ -63,6 +65,8 @@ async function main() {
   process.env.DB_USERNAME = 'agent_must_not_see_username'
   process.env.DB_PASSWORD = 'ScoringAgentMustNotSeePassword'
   process.env.DB_FREFIX = 'agent_must_not_see_prefix_'
+  process.env.AI_CAPABILITIES_ENABLED = 'false'
+  process.env.LEAD_SCORING_AGENT_MAX_TURNS = '2'
   try {
     const captured: { value?: Parameters<typeof query>[0] } = {}
     const output = { ok: true }

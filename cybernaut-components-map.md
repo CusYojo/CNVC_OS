@@ -5,7 +5,7 @@
 
 ## 最终结论
 
-项目最终只保留 **1 个业务服务**：`cybernaut-app.service`。它直接启动 `server-dist/index.js`，统一监听 `127.0.0.1:3100`。
+项目最终只保留 **1 个业务服务**：`cybernaut-app.service`。它直接启动 `server-dist/index.js`，统一监听 `127.0.0.1:4100`。
 
 MySQL、Nginx 和外部 LLM Gateway 是基础设施/外部依赖，不计入项目业务服务数量，也不能被误解为可省略。Python、Office/PDF 和 Skill 命令是由主服务按任务启动并监督的短时子进程，不是独立常驻服务。
 
@@ -13,12 +13,12 @@ MySQL、Nginx 和外部 LLM Gateway 是基础设施/外部依赖，不计入项�
 
 | 能力 | 运行归属 | 状态/权威源 |
 |---|---|---|
-| React Web、Express REST、健康检查 | `cybernaut-app` / 3100 | 同一构建和 HTTP Server |
+| React Web、Express REST、健康检查 | `cybernaut-app` / 4100 | 同一构建和 HTTP Server |
 | Socket.io、JW/Claude Agent Runtime | `cybernaut-app` 进程内 | MySQL 会话/消息；Socket 实时推送 |
 | 项目、线索、会议、待办、风险、文件、知识库 | `cybernaut-app` 领域服务 | MySQL + 私有文件存储 |
 | OA 申请、节点、意见、待办和阶段流转 | `cybernaut-app` 领域服务 | MySQL 事务状态机；稳定用户 ID |
 | AI Task、线索评分、项目评分、模板分析 | `cybernaut-app` Worker | MySQL 任务/租约/失败与恢复状态 |
-| Radar、36氪摄入与同步 | `cybernaut-app` 调度 | MySQL Job；Python 仅按次执行 |
+| Radar、36氪摄入与同步 | `cybernaut-app` 进程内 TypeScript 采集与调度 | MySQL 原始事件、候选投影、来源、状态和 Job |
 | 文档/PPT/PDF/Office 处理 | 主服务监督的短时子进程 | 状态与产物索引回写 MySQL |
 | 模型设置与调用 | `cybernaut-app` 管理 API/React 页面；Runtime/Worker 调用外部网关 | Provider/模型/7 类 Profile 路由在 MySQL；API Key 以环境主密钥 AES-256-GCM 加密，列表只返回掩码 |
 
@@ -28,7 +28,7 @@ MySQL、Nginx 和外部 LLM Gateway 是基础设施/外部依赖，不计入项�
 |---|---|
 | `cybernaut-api.service` | 合并/更名为唯一 `cybernaut-app.service` |
 | Flue / `cybernaut-assistant` 常驻服务（3584/历史 8791） | 去除运行依赖；启动入口已硬禁用，源码暂作历史迁移恢复材料 |
-| Radar FastAPI（8121） | 去除常驻 HTTP；保留受监督单次 Python Job |
+| Radar FastAPI / project-discovery（8121） | 功能与数据并入主服务后退役；不保留运行或代码依赖 |
 | Radar Sync service/timer | 去除；改为 MySQL 持久化调度 |
 | `daily_intake` cron/脚本服务 | 去除；改为 MySQL Runtime Job |
 | API↔Flue、timer→API localhost 回调 | 去除；改为进程内领域接口 |
@@ -43,7 +43,7 @@ Nginx / TLS                     外部 LLM Gateway
    │                                   ▲
    ▼                                   │
 cybernaut-app.service ────────────────┘
-127.0.0.1:3100
+127.0.0.1:4100
    ├─ Web / REST / Socket / JW Runtime
    ├─ MySQL 租约 Worker 与调度器 ─── MySQL 8.x
    └─ 按需监督子进程（Python/Office/PDF）
@@ -59,7 +59,7 @@ systemctl start cybernaut-app
 
 ## 复验证据
 
-- `accept:single-service-runtime`：仅启动 1 个业务进程，只监听 3100；3584/8121 关闭。
+- `accept:single-service-runtime`：仅启动 1 个业务进程，只监听 4100；3584/8121 关闭。
 - `check:single-service`：72 项边界检查，扫描 252 个活动文件；含真实 HTTP SQL 注入/路径/越权/任意读取门禁、审计日志只读追加及请求关联、迁移证据脱敏、MySQL JSON 合法性/坏源数据隔离、JW Runtime 五类越界拒绝/审计及宿主密钥隔离、模型配置加密、能力作用域/会话防提权、源证据身份裁决、多实例调度单租约、MySQL 网络故障恢复、备份恢复及 Runtime 收窄边界。
 - `check:mysql`：62 张表、96 条外键、MySQL 8.0.36 契约通过。
 - `accept:migration-idempotency`：28 个 Schema 迁移、62 张表/48,122 行连续重复迁移无变化。

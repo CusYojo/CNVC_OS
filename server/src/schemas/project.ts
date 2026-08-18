@@ -20,7 +20,10 @@ export const ProjectCreateSchema = z.object({
   industry: optionalText,
   round: optionalText,
   stage: z.string().default('线索'),
-  owner: z.string().min(1),
+  // The API derives the owner from the authenticated session. Keep this
+  // optional for compatibility with older clients and lead conversion calls;
+  // the project route never trusts a client-supplied owner value.
+  owner: optionalText,
   collaborators: stringList,
   source: optionalText,
   financing: optionalText,

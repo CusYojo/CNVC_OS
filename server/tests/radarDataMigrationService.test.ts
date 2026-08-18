@@ -13,10 +13,11 @@ import {
   materializeRadarWorkingStateFromMySql,
 } from '../src/services/radarDataMigrationService.js'
 import { fetchRadarWindow } from '../src/services/radarSyncService.js'
+import { mysqlIntegrationTestOptions } from './mysqlIntegrationTestSafety.js'
 
 after(async () => await pool.end())
 
-test('migrates Radar JSONL into idempotent MySQL raw events and current projection', async () => {
+test('migrates Radar JSONL into idempotent MySQL raw events and current projection', mysqlIntegrationTestOptions, async () => {
   await ensureSchema()
   const directory = await mkdtemp(path.join(os.tmpdir(), 'radar-mysql-test-'))
   const source = `mysql-test-${randomUUID()}`

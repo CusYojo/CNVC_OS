@@ -1,0 +1,4 @@
+{"debug":"Calling MCP tool: get_project_summary","timestamp":"2026-08-17T08:13:48.019Z","sessionId":"eb91d0a3-0d6b-40bd-97b9-db723a08af53","cwd":"/Users/hyw/Desktop/sbl_jedi/server/workspace/ec6f43f8-d3bc-4a25-a808-8166641e4a52"}
+{"debug":"Tool 'get_project_summary' completed successfully in 73ms","timestamp":"2026-08-17T08:13:48.092Z","sessionId":"eb91d0a3-0d6b-40bd-97b9-db723a08af53","cwd":"/Users/hyw/Desktop/sbl_jedi/server/workspace/ec6f43f8-d3bc-4a25-a808-8166641e4a52"}
+{"debug":"Calling MCP tool: list_project_files","timestamp":"2026-08-17T08:13:53.076Z","sessionId":"eb91d0a3-0d6b-40bd-97b9-db723a08af53","cwd":"/Users/hyw/Desktop/sbl_jedi/server/workspace/ec6f43f8-d3bc-4a25-a808-8166641e4a52"}
+{"debug":"Tool 'list_project_files' completed successfully in 107ms","timestamp":"2026-08-17T08:13:53.183Z","sessionId":"eb91d0a3-0d6b-40bd-97b9-db723a08af53","cwd":"/Users/hyw/Desktop/sbl_jedi/server/workspace/ec6f43f8-d3bc-4a25-a808-8166641e4a52"}

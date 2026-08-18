@@ -10,7 +10,7 @@ import { createConversation } from '../services/conversationService.js'
 import { saveProjectFile } from '../services/projectFileStorageService.js'
 import { formatShanghaiDateTimeInput } from '../utils/shanghaiTime.js'
 
-const baseUrl = process.env.RESOURCE_ACCEPTANCE_URL || 'http://127.0.0.1:3100'
+const baseUrl = process.env.RESOURCE_ACCEPTANCE_URL || 'http://127.0.0.1:4100'
 
 function cookie(session: { sessionToken: string; csrfToken: string }) {
   return `cybernaut_session=${encodeURIComponent(session.sessionToken)}; cybernaut_csrf=${encodeURIComponent(session.csrfToken)}`

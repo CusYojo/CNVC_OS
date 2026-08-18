@@ -101,7 +101,7 @@ async function runService(apiPort: number) {
     const components = new Map((health?.components || []).map((item) => [item.name, item]))
     assert.equal(components.get('migration-write-freeze')?.ok, true)
     for (const name of [
-      'project-discovery-radar', 'mysql-runtime-jobs', 'mysql-lead-score-jobs',
+      'radar-typescript-collector', 'mysql-runtime-jobs', 'mysql-lead-score-jobs',
       'mysql-project-score-jobs', 'mysql-ai-tasks',
     ]) {
       assert.equal(components.get(name)?.state, 'intentionally-disabled', `${name} must be explicitly disabled`)

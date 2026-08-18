@@ -18,7 +18,7 @@ import {
 import { createAuthSession, hashPassword } from '../services/authService.js'
 import { deleteConversation } from '../services/conversationService.js'
 
-const baseUrl = process.env.JW_MULTITURN_ACCEPTANCE_URL || 'http://127.0.0.1:3100'
+const baseUrl = process.env.JW_MULTITURN_ACCEPTANCE_URL || 'http://127.0.0.1:4100'
 const timeoutMs = (() => {
   const value = Number(process.env.JW_MULTITURN_ACCEPTANCE_TIMEOUT_MS || 180_000)
   if (!Number.isSafeInteger(value) || value < 30_000 || value > 600_000) {

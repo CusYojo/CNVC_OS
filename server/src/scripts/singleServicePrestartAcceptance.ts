@@ -14,7 +14,7 @@ const temporaryRoot = await mkdtemp(path.join(tmpdir(), 'single-service-prestart
 const reportPath = path.join(temporaryRoot, 'prestart-evidence', 'report.json')
 
 async function listenerPids() {
-  const { stdout } = await execFileAsync('lsof', ['-nP', '-iTCP:3100', '-sTCP:LISTEN', '-t']).catch(() => ({ stdout: '' }))
+  const { stdout } = await execFileAsync('lsof', ['-nP', '-iTCP:4100', '-sTCP:LISTEN', '-t']).catch(() => ({ stdout: '' }))
   return stdout.split(/\s+/).filter(Boolean).sort()
 }
 

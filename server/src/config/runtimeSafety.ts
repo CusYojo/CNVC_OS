@@ -76,7 +76,7 @@ function allowedOrigins(env: RuntimeEnvironment, production: boolean): string[] 
 
 export function validateRuntimeConfiguration(env: RuntimeEnvironment = process.env) {
   const production = env.NODE_ENV === 'production'
-  const port = Number(env.API_PORT || 3100)
+  const port = Number(env.API_PORT || 4100)
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     throw new Error('[runtime config] API_PORT must be an integer between 1 and 65535')
   }

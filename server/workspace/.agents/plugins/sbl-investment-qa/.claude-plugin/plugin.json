@@ -1,0 +1,8 @@
+{
+  "name": "sbl-investment-qa",
+  "version": "2.4.0",
+  "description": "根据项目材料生成、审计、排版并逐页核验德塔式证据驱动项目Q&A报告。",
+  "author": {
+    "name": "浙江赛智伯乐股权投资管理有限公司"
+  }
+}

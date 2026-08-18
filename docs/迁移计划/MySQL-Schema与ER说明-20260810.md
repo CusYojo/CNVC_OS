@@ -2,8 +2,8 @@
 
 ## 1. 权威来源与物理约定
 
-- 逻辑 Schema 权威源：`server/src/db/schema.ts`，当前定义 81 张业务表。
-- 物理迁移：`server/drizzle/0000～0039_*.sql`；`__drizzle_migrations` 是第 82 张内部迁移台账表。
+- 逻辑 Schema 权威源：`server/src/db/schema.ts`，当前定义 87 张业务表。
+- 物理迁移：`server/drizzle/0000～0043_*.sql`；`__drizzle_migrations` 是第 88 张内部迁移台账表。
 - 表名前缀：统一由 `DB_FREFIX` 注入；当前环境物理表使用 `sbl_`，代码和本文均使用无前缀逻辑名。
 - 引擎/字符集：InnoDB、`utf8mb4`；目标实例门禁要求 `utf8mb4_0900_ai_ci`、严格 SQL 模式、UTC 会话时区和 `READ-COMMITTED`。
 - 标识：业务 UUID 使用 `varchar(36)`；迁移源整数 ID 仅在确需保留时维持整数并通过实体映射台账关联。
@@ -23,13 +23,13 @@
 | JW/聊天 | `chat_conversations`、`agent_conversations`、`agent_messages`、`agent_message_parts`、`agent_conversation_source_mappings`、`agent_message_source_mappings` |
 | AI 任务与模板 | `ai_tasks`、`ai_artifacts`、`ai_task_sources`、`ai_task_templates`、`ai_custom_templates`、`ai_template_analysis_progress` |
 | 模型与能力 | `ai_model_providers`、`ai_models`、`ai_model_routes`、`ai_capabilities`、`ai_capability_bindings`、`ai_conversation_capabilities` |
-| 线索与 Radar | `leads`、`lead_reserve`、`lead_score_jobs`、`project_score_jobs`、`radar_raw_events`、`radar_candidates`、`radar_source_registry`、`radar_collector_states`、`radar_sync_state`、`radar_ai_reviews` |
+| 线索与 Radar | `leads`、`lead_reserve`、`lead_score_jobs`、`project_score_jobs`、`lead_intake_files`、`lead_import_batches`、`lead_import_rows`、`radar_raw_events`、`radar_candidates`、`radar_wechat_chat_messages`、`radar_webhook_receipts`、`radar_source_registry`、`radar_collector_states`、`radar_sync_state`、`radar_ai_reviews`、`radar_dingtalk_settings` |
 | 线索 Agent/Pipeline | `lead_pipeline_raw_events`、`lead_pipeline_items`、`lead_pipeline_transitions`、`lead_pipeline_prompt_versions`、`lead_pipeline_runs`、`lead_pipeline_decisions`、`lead_pipeline_evidence`、`lead_pipeline_reviews`、`lead_pipeline_entity_matches`、`lead_agent_runtime_permits` |
 | IM | `im_bots`、`im_bot_bindings`、`im_outbox`、`im_delivery_logs`、`im_inbound_messages`、`im_lead_push_rules` |
 | 调度与审计 | `runtime_jobs`、`runtime_job_runs`、`audit_logs`、`admin_configuration_revisions` |
 | 迁移控制面 | `migration_runs`、`migration_issues`、`migration_entity_mappings`、`migration_cdc_events`、`migration_cdc_checkpoints` |
 
-上述目录共 81 张业务表；任何新增或删除必须同时更新 Schema、编号迁移、MySQL 冒烟、迁移幂等快照和本文目录。
+上述目录共 87 张业务表；任何新增或删除必须同时更新 Schema、编号迁移、MySQL 冒烟、迁移幂等快照和本文目录。
 
 ## 3. 核心 ER
 
@@ -123,6 +123,6 @@ erDiagram
 
 生产 Runtime 不执行 DDL。不得重写已在任一环境应用的历史迁移；修正必须新增迁移。删除列/表、收紧唯一约束或改变级联规则前，必须先运行源/目标重复、孤儿和状态机审计，并保留回滚/前向修复方案。Schema 回退按 `ADR-015` 从迁移前备份恢复到隔离表前缀，不在活动前缀执行未验证的逆向 DDL；详见《MySQL-Schema变更种子与回退手册-20260811》。
 
-当前代码目标为 81 张业务表 + 1 张迁移台账、133 个外键、40 条迁移日志；`0038_add_business_optimistic_versions` 为项目、会议、待办和风险增加数据库版本列，用户编辑使用原子版本比较并递增；`0039_add_lead_field_provenance` 为线索字段建立来源/优先级台账，确保人工字段优先、机器补全只按证据增量追加。17 个项目原件已获精确批准永久缺失并保留元数据/补传入口，不再计入未处置缺口；完整迁移仍受生产源盘点、在线 PostgreSQL、97 条缺失线索详情和 7 个 AI 产物源文件阻断，ER 说明不代表这些外部数据缺口已关闭。
+当前生产目标为 87 张业务表 + 1 张迁移台账、143 个物理外键、44 条迁移日志；`0038_add_business_optimistic_versions` 为项目、会议、待办和风险增加数据库版本列，`0039_add_lead_field_provenance` 建立线索字段来源台账，`0040_add_lead_intake` 增加公共线索池批量导入与 BP 任务表，`0041_add_radar_wechat_chat` 和 `0042_add_radar_webhook_receipts` 增加微信群原文与 HMAC 重放收据，`0043_add_radar_dingtalk_settings` 增加与 IM 机器人分离的 Radar 钉钉告警密文配置。17 个项目原件已获精确批准永久缺失并保留元数据/补传入口，不再计入未处置缺口；完整迁移仍受生产源盘点、在线 PostgreSQL、97 条缺失线索详情和 7 个 AI 产物源文件阻断，ER 说明不代表这些外部数据缺口已关闭。
 
 领域命名、运行配置、调度/审计表、部分唯一索引等价和事务约束另由只读门禁 `npm run accept:mysql-architecture-contract` 验证；该门禁不创建夹具，也不关闭线索重复裁决或生产数据缺口。

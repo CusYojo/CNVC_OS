@@ -311,9 +311,9 @@ export class MysqlOperationalTelemetryRepository implements OperationalTelemetry
            (SELECT COUNT(*) FROM ${table('radar_sync_state')} WHERE backfill_complete=0) AS incomplete_backfills,
            (SELECT COALESCE(MAX(cursor_timestamp),0) FROM ${table('radar_candidates')}) AS latest_cursor_timestamp,
            (SELECT COUNT(*) FROM ${table('runtime_jobs')} WHERE id IN
-             ('radar-collect-sync','radar-wechat-daily','radar-wechat-retry','radar-wechat-institution')) AS runtime_jobs,
+             ('radar-collect-sync','radar-paper-daily','radar-wechat-daily','radar-wechat-retry','radar-wechat-institution')) AS runtime_jobs,
            (SELECT COUNT(*) FROM ${table('runtime_jobs')} WHERE id IN
-             ('radar-collect-sync','radar-wechat-daily','radar-wechat-retry','radar-wechat-institution')
+             ('radar-collect-sync','radar-paper-daily','radar-wechat-daily','radar-wechat-retry','radar-wechat-institution')
              AND last_status IN ('failed','dead_letter')) AS failed_runtime_jobs`,
       ),
     ])

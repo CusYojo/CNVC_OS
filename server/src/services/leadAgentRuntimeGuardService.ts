@@ -97,8 +97,9 @@ export async function acquireLeadAgentRuntimePermit(input: {
       finished_at: Date | string | null
     }>>(
       `SELECT state, finished_at FROM ${permitsTable}
-       WHERE state IN ('succeeded','failed') AND finished_at IS NOT NULL
+       WHERE agent_profile=? AND state IN ('succeeded','failed') AND finished_at IS NOT NULL
        ORDER BY finished_at DESC LIMIT ${config.circuitFailureThreshold}`,
+      [input.agentProfile],
     )
     if (recentTerminal.length === config.circuitFailureThreshold
       && recentTerminal.every((row) => row.state === 'failed')) {

@@ -7,9 +7,9 @@
 ## 1. 运行拓扑
 
 - 项目业务单元：`cybernaut-app.service`，一个常驻 Node 进程。
-- 业务端口：仅 `127.0.0.1:3100`。
-- JW Agent Runtime：Express 进程内组件；Socket.io 与 API 共用 3100。
-- Radar：MySQL Job 调度的单次 Python 子进程，无常驻端口。
+- 业务端口：仅 `127.0.0.1:4100`。
+- JW Agent Runtime：Express 进程内组件；Socket.io 与 API 共用 4100。
+- Radar：Node 进程内 TypeScript 采集器与 MySQL Job，无独立进程或端口。
 - Web：生产由 Nginx 提供静态资源，Express 也保留同包 SPA fallback；二者不增加项目业务服务单元。
 - 外部依赖：MySQL 8.x、LLM Gateway；GSData 仅公众号采集需要。
 
@@ -20,9 +20,9 @@
 |---|---|---|---|
 | `cybernaut-app.service` | 是，唯一一个 | 是 | 必须启动；统一承载 Web fallback、API、Socket、JW Runtime、调度器和 Worker 管理 |
 | MySQL 8.x | 否，基础设施 | 是 | 必须先可用，否则应用启动失败；可使用外部托管库或本机独立服务 |
-| Nginx / Ingress | 否，基础设施 | 是 | 生产公网 HTTPS 必须；仅在本机通过 3100 调试时可不启用 |
+| Nginx / Ingress | 否，基础设施 | 是 | 生产公网 HTTPS 必须；仅在本机通过 4100 调试时可不启用 |
 | LLM Gateway | 否，外部模型基础设施 | 按部署方式 | 核心数据页面不依赖，但 JW 对话、评分和文档 AI 能力需要其可用 |
-| Radar Python、Office/PDF 子进程 | 否，受监督执行单元 | 否 | 不单独启动，由 `cybernaut-app` 按任务拉起并在完成后退出 |
+| Office/PDF 子进程 | 否，受监督执行单元 | 否 | 不单独启动，由 `cybernaut-app` 按任务拉起并在完成后退出 |
 
 因此，在 MySQL、Nginx/Ingress 和 LLM Gateway 已由平台持续提供的前提下，版本发布或
 业务应用重启只需执行 `systemctl restart cybernaut-app`。若是整机冷启动，必须同时确认
@@ -36,7 +36,7 @@
 
 - Node.js 20+、npm 10+
 - MySQL 8.x，目标库字符集必须为 `utf8mb4`
-- Python 3.10+，并能安装 `project-discovery/requirements.txt`
+- Python 3.10+（仅文档、PPT、PDF 等受监督任务需要；Radar 不依赖 Python）
 - 生产部署需要 systemd、Nginx 和 root 权限
 
 ## 3. 配置
@@ -99,8 +99,6 @@ SHA-256 在项目内拒绝新重复内容；每次替换保留独立路径和不
 
 ```bash
 npm ci
-python3 -m venv project-discovery/.venv
-project-discovery/.venv/bin/python -m pip install -r project-discovery/requirements.txt
 npm run db:migrate
 npm run migrate:radar
 npm run migrate:project-file-metadata
@@ -135,7 +133,7 @@ npm run check:platform
 npm run build
 npm run accept:clean-build
 npm run accept:single-service-runtime
-# 若 3100 已由目标服务占用，使用只读观察模式，不停止或重启服务：
+# 若 4100 已由目标服务占用，使用只读观察模式，不停止或重启服务：
 npm run accept:single-service-runtime:observe
 ```
 
@@ -178,9 +176,9 @@ npm run audit:password-hashes
 `accept:migration-idempotency` 先把活动前缀的一致性备份恢复到随机隔离前缀，再只在隔离
 前缀连续运行两次 Schema 迁移，核对全部目标表的 DDL、行数与逐行内容 SHA-256 均不变化，
 最后精确清理隔离表；活动前缀写入始终为 0。构建完成后，`accept:single-service-runtime` 会以生产
-安全配置临时启动唯一业务进程，核对 Web/API/全部进程内组件、仅 3100 监听、旧端口
+安全配置临时启动唯一业务进程，核对 Web/API/全部进程内组件、仅 4100 监听、旧端口
 3584/8121 关闭、结构化请求日志以及优雅停机后端口完全释放。
-若 3100 已经运行，`accept:single-service-runtime:observe` 只读核对同一服务身份、全部必需组件、
+若 4100 已经运行，`accept:single-service-runtime:observe` 只读核对同一服务身份、全部必需组件、
 唯一监听进程和旧端口关闭，并保证不启停任何进程。
 `accept:mysql-resilience` 验证连接耗尽时的有界队列错误、释放后的排队恢复和被终止
 连接的自动替换；`accept:clean-build` 在不复制 `.env`、运行数据或现有依赖的临时目录
@@ -199,11 +197,11 @@ SHA 全部满足才允许复制到私有版本目录。源文件保持原位，�
 
 ```bash
 npm run start:app
-curl http://127.0.0.1:3100/api/health
-curl http://127.0.0.1:3100/api/health/components
+curl http://127.0.0.1:4100/api/health
+curl http://127.0.0.1:4100/api/health/components
 ```
 
-组件健康应包含 `jw-agent-runtime`、`agent-socket`、`project-discovery-radar`、
+组件健康应包含 `jw-agent-runtime`、`agent-socket`、`radar-typescript-collector`、
 `radar-mysql-source`、`mysql-runtime-jobs`、`mysql-lead-score-jobs`、
 `mysql-ai-tasks`、`supervised-child-processes` 和 `mysql-auth-sessions`。鉴权组件同时输出活动/吊销/过期会话数、
 Cookie 属性、旧 Bearer 开关与生产就绪警告。不得出现 3584/8121 监听、
@@ -222,9 +220,9 @@ bash deploy.sh update
 证书路径通过 `DOMAIN`、`PUBLIC_ORIGIN`、`TLS_CERT_FILE`、`TLS_KEY_FILE` 提供。
 缺失证书或非 HTTPS Origin 会在 Nginx/应用启动前明确阻断。
 
-部署脚本会安装 Python 运行时、应用 MySQL 迁移、注册唯一
+部署脚本会安装文档处理所需的 Python 运行时、应用 MySQL 迁移、注册唯一
 `cybernaut-app.service`、停用旧 systemd/timer、清理明确匹配的旧项目 cron、
-配置 Nginx 只反代 3100，并检查健康、Skill、端口和进程。应用以专用
+配置 Nginx 只反代 4100，并检查健康、Skill、端口和进程。应用以专用
 `cybernaut` 非 root 用户运行；systemd 对整个 cgroup 统一停止并限制内存、CPU、
 任务数和可写目录。可通过 `APP_MEMORY_MAX`、`APP_CPU_QUOTA`、`APP_TASKS_MAX`
 覆盖部署默认值。

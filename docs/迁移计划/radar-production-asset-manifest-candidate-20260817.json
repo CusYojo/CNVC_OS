@@ -1,0 +1,46 @@
+{
+  "schemaVersion": "1.0",
+  "environment": "production",
+  "generatedAt": "2026-08-17T09:38:37.839Z",
+  "restoredAt": "2026-08-17T09:38:37.839Z",
+  "sourceHostSha256": "6cd184a491bbf051dd5ad0c36d464c13b401294c1c34721cd02a03501831e205",
+  "approved": false,
+  "ownerApprovedAt": null,
+  "approvals": [],
+  "assets": [
+    {
+      "kind": "radar-jsonl",
+      "records": 6071,
+      "bytes": 70716910,
+      "fileCount": 6,
+      "sha256": "e7c3185517c86afb81c1b19da56cd5ea683e4d90fd2be2a2c8f7b5cdb9fcd9fd",
+      "restoredAt": "2026-08-17T09:38:37.839Z"
+    },
+    {
+      "kind": "wechat-chat-originals",
+      "records": 0,
+      "bytes": 0,
+      "fileCount": 0,
+      "sha256": "08638fbc7d2cf977cd966f1b7f167cb3e89b8b0f8b02477cfc04d2f0ad73b70d",
+      "restoredAt": "2026-08-17T09:38:37.839Z",
+      "disposition": "source-absent-verified",
+      "candidateRecordsPreserved": 3
+    },
+    {
+      "kind": "collector-state",
+      "records": 47,
+      "bytes": 565429,
+      "fileCount": 4,
+      "sha256": "1f213d3ae0fbbfb9d5a5ad1e01d139bbcb9fa1c86caf6f202da9bcaddd49d6f4",
+      "restoredAt": "2026-08-17T09:38:37.839Z"
+    },
+    {
+      "kind": "wechat-accounts-xlsx",
+      "records": 1252,
+      "bytes": 41369,
+      "fileCount": 1,
+      "sha256": "775a10d0aeb1651c5aebe8152b9a7c4cbd29fe4274936d0c9a1378100fd0e263",
+      "restoredAt": "2026-08-17T09:38:37.839Z"
+    }
+  ]
+}

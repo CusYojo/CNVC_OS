@@ -46,7 +46,7 @@ import {
   sanitizeInvestmentProposalClientText,
 } from './aiInvestmentProposalTextService.js'
 import type { AiTemplateDefinition } from './aiTemplateCatalog.js'
-import { getAiSkillDirectory } from './aiSkillService.js'
+import { getAiSkillRuntimeDirectory } from './aiSkillService.js'
 
 type ProjectLike = {
   name: string
@@ -303,7 +303,7 @@ function secondaryThreeLineStyle(stylesXml: string) {
 }
 
 async function applyInvestmentProposalLayoutAuthority(buffer: Buffer) {
-  const skillDirectory = getAiSkillDirectory(PROPOSAL_SKILL_NAME)
+  const skillDirectory = getAiSkillRuntimeDirectory(PROPOSAL_SKILL_NAME)
   const primaryPath = path.join(skillDirectory, 'assets', 'primary-layout-authority.docx')
   const secondaryPath = path.join(skillDirectory, 'assets', 'secondary-layout-authority.docx')
   const [target, primary, secondary] = await Promise.all([
@@ -593,7 +593,7 @@ export async function generateInvestmentProposalDocx(input: {
     pageGeometry: blueprint.page,
     formatter: 'investment-proposal-layout-authority-formatter-v5',
     layoutAuthority: path.join(
-      getAiSkillDirectory(PROPOSAL_SKILL_NAME),
+      getAiSkillRuntimeDirectory(PROPOSAL_SKILL_NAME),
       'assets',
       'primary-layout-authority.docx',
     ),

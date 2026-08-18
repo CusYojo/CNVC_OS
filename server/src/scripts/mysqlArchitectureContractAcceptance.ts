@@ -51,6 +51,7 @@ const domainTables = Object.freeze({
     'ai_model_providers', 'ai_models', 'ai_model_routes', 'ai_capabilities',
     'ai_capability_bindings', 'ai_conversation_capabilities', 'im_bots', 'im_bot_bindings',
     'im_outbox', 'im_delivery_logs', 'im_inbound_messages', 'im_lead_push_rules',
+    'radar_dingtalk_settings',
   ],
   scheduler: ['runtime_jobs', 'runtime_job_runs'],
   audit: [
@@ -173,8 +174,9 @@ async function main() {
     for (const columnName of ['credential_ciphertext', 'credential_hint', 'credential_fingerprint']) {
       requireColumn('ai_model_providers', columnName)
       requireColumn('im_bots', columnName)
+      requireColumn('radar_dingtalk_settings', columnName)
     }
-    const credentialTables = new Set(['ai_model_providers', 'im_bots'].map(physical))
+    const credentialTables = new Set(['ai_model_providers', 'im_bots', 'radar_dingtalk_settings'].map(physical))
     const forbiddenCredentialColumns = columnRows.filter((row) => credentialTables.has(row.tableName)
       && /^(api_key|secret|access_token|password|credential_plaintext)$/i.test(row.columnName))
     assertContract(forbiddenCredentialColumns.length === 0, 'runtime configuration contains a plaintext credential column')

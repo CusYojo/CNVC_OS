@@ -30,6 +30,16 @@ function check(condition: unknown, name: string, detail?: unknown) {
   checks.push(name)
 }
 
+async function reviewIsVisible(actor: LeadPipelineReviewActor, reviewId: string) {
+  const first = await listLeadPipelineReviews({ actor, status: 'pending', page: 1, pageSize: 50 })
+  if (first.list.some((item) => item.id === reviewId)) return true
+  for (let page = 2; page <= first.totalPages; page += 1) {
+    const result = await listLeadPipelineReviews({ actor, status: 'pending', page, pageSize: 50 })
+    if (result.list.some((item) => item.id === reviewId)) return true
+  }
+  return false
+}
+
 async function createReviewFixture(input: {
   suffix: string
   label: string
@@ -124,14 +134,35 @@ async function main() {
       assignedUserId: owner.userId,
     })
     fixtures.push(acceptedFixture)
-    const [ownerList, outsiderList, adminList] = await Promise.all([
-      listLeadPipelineReviews({ actor: owner, status: 'pending' }),
-      listLeadPipelineReviews({ actor: outsider, status: 'pending' }),
-      listLeadPipelineReviews({ actor: admin, status: 'pending' }),
+    const retryDecision = await recordLeadPipelineDecision({
+      idempotencyKey: `manual-review-trigger-retry:accept:${suffix}`,
+      eventId: acceptedFixture.raw.event.id,
+      decisionType: 'screening',
+      outcome: 'review',
+      subjectType: 'company',
+      subjectName: `复核闭环星科技${suffix.slice(0, 6)}`,
+      confidence: 62,
+      reason: '重试后仍需要人工复核',
+      output: { source: 'acceptance-agent-retry' },
+      actorType: 'agent',
+      actorId: 'acceptance-agent',
+    })
+    const retriedPendingReview = await openLeadPipelineReview({
+      idempotencyKey: `manual-review:accept:${suffix}`,
+      eventId: acceptedFixture.raw.event.id,
+      triggerDecisionId: retryDecision.id,
+      reason: '重试后仍需要人工复核',
+      assignedUserId: owner.userId,
+    })
+    check(retriedPendingReview.id === acceptedFixture.review.id
+      && retriedPendingReview.trigger_decision_id === acceptedFixture.decision.id,
+    'pipeline-retry-reuses-pending-review-without-rewriting-audit-origin')
+    const [visibleToOwner, visibleToOutsider, visibleToAdmin] = await Promise.all([
+      reviewIsVisible(owner, acceptedFixture.review.id),
+      reviewIsVisible(outsider, acceptedFixture.review.id),
+      reviewIsVisible(admin, acceptedFixture.review.id),
     ])
-    check(ownerList.list.some((item) => item.id === acceptedFixture.review.id)
-      && !outsiderList.list.some((item) => item.id === acceptedFixture.review.id)
-      && adminList.list.some((item) => item.id === acceptedFixture.review.id),
+    check(visibleToOwner && !visibleToOutsider && visibleToAdmin,
     'assigned-review-visible-only-to-assignee-and-system-admin')
 
     await assert.rejects(() => resolveAndCommitLeadPipelineReview({
@@ -201,16 +232,17 @@ async function main() {
         [owner.userId, `%review=${acceptedFixture.review.id}%`],
       ),
     ])
+    const resolutionDecision = decisionRows.find((row) => row.id === reviewRows[0]?.resolution_decision_id)
     check(reviewRows[0]?.status === 'resolved'
       && reviewRows[0]?.reviewer_user_id === owner.userId
       && itemRows[0]?.status === 'ready'
       && itemRows[0]?.lead_id === accepted.leadId
       && leadRows[0]?.name === acceptedFixture.decision.subjectName
       && /人工复核/.test(leadRows[0]?.source ?? '')
-      && decisionRows.length === 2
-      && decisionRows[1]?.parent_decision_id === acceptedFixture.decision.id
-      && decisionRows[1]?.actor_type === 'user'
-      && decisionRows[1]?.outcome === 'accept'
+      && decisionRows.length === 3
+      && resolutionDecision?.parent_decision_id === acceptedFixture.decision.id
+      && resolutionDecision?.actor_type === 'user'
+      && resolutionDecision?.outcome === 'accept'
       && evidenceRows.some((row) => row.verification_status === 'verified'
         && row.quote === acceptedFixture.quote.normalize('NFKC'))
       && Number(auditRows[0]?.count) === 1,
@@ -245,7 +277,7 @@ async function main() {
     )
     check(repeated.decision.id === accepted.decision.id
       && Number(repeatCounts[0]?.leads) === 1
-      && Number(repeatCounts[0]?.decisions) === 2
+      && Number(repeatCounts[0]?.decisions) === 3
       && Number(repeatCounts[0]?.audits) === 1,
     'manual-review-retry-is-idempotent-without-duplicate-lead-decision-or-audit', repeatCounts[0])
 

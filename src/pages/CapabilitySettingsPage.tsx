@@ -8,6 +8,7 @@ import { ConfigurationRevisionPanel, type ConfigurationRevisionTarget } from '..
 import { Modal } from '../components/ui'
 import { apiDelete, apiGet, apiPatch, apiPost } from '../lib/api'
 import { createCapabilityZip, scanCapabilityFolder, scanCapabilityZip, type CapabilityImportCandidate } from '../lib/capabilityPackage'
+import { shanghaiDateKey } from '../lib/dateTime'
 
 type Capability = {
   id: string; kind: 'skill' | 'agent' | 'mcp' | 'plugin'; capabilityKey: string; name: string;
@@ -138,7 +139,7 @@ export function CapabilitySettingsPage() {
     try {
       const url = URL.createObjectURL(await createCapabilityZip(tab, capabilities))
       const anchor = document.createElement('a')
-      anchor.href = url; anchor.download = `jw-${tab}-capabilities-${new Date().toISOString().slice(0, 10)}.zip`; anchor.click()
+      anchor.href = url; anchor.download = `jw-${tab}-capabilities-${shanghaiDateKey()}.zip`; anchor.click()
       URL.revokeObjectURL(url)
       setNotice({ tone: 'ok', text: `${capabilities.length} 项 ${activeTab.label} 已按 JW 目录结构导出为 ZIP。` })
     } catch (error) { setNotice({ tone: 'error', text: (error as Error).message }) }
@@ -156,7 +157,14 @@ export function CapabilitySettingsPage() {
     setImportSourceLabel(sourceType === 'zip' ? files[0]?.name || '' : relativePath.split('/')[0])
     try {
       const candidates = sourceType === 'zip' ? await scanCapabilityZip(tab, files[0]) : await scanCapabilityFolder(tab, files)
-      setImportCandidates(candidates); setSelectedImportKeys(candidates.map((item) => item.capabilityKey)); setImportStep(2)
+      const importableKeys = candidates
+        .filter((candidate) => candidate.kind === 'plugin' || settings.capabilities.some((item) => (
+          item.kind === candidate.kind
+          && item.capabilityKey === candidate.capabilityKey
+          && !(item.kind === 'plugin' && !item.installed)
+        )))
+        .map((candidate) => candidate.capabilityKey)
+      setImportCandidates(candidates); setSelectedImportKeys(importableKeys); setImportStep(2)
     } catch (error) {
       setImportCandidates([]); setSelectedImportKeys([]); setImportError((error as Error).message); setImportStep(2)
     }
@@ -170,7 +178,18 @@ export function CapabilitySettingsPage() {
     try {
       for (const entry of entries) {
         const current = settings.capabilities.find((item) => item.kind === entry.kind && item.capabilityKey === entry.capabilityKey)
-        if (!current || (current.kind === 'plugin' && !current.installed)) { result.skipped.push(`${entry.capabilityKey}：未进入服务端批准目录`); continue }
+        if (entry.kind === 'plugin') {
+          await apiPost('/ai/capabilities/plugins/install', {
+            capabilityKey: entry.capabilityKey, name: entry.name || entry.capabilityKey,
+            description: entry.description ?? null, packageVersion: 'uploaded',
+            config: entry.config || {}, toolNames: entry.toolNames || [],
+            dependencyNames: entry.dependencyNames || [], allowedRoles: entry.allowedRoles || [],
+          })
+          result.imported.push(entry.capabilityKey)
+          continue
+        }
+        if (!current) { result.skipped.push(`${entry.capabilityKey}：未找到服务端批准能力`); continue }
+        if (current.kind === 'plugin' && !current.installed) { result.skipped.push(`${entry.capabilityKey}：未进入服务端代码批准目录`); continue }
         const updated = await apiPatch<Capability>(`/ai/capabilities/${current.id}`, {
           expectedVersion: current.version,
           ...(typeof entry.name === 'string' && entry.name.trim() ? { name: entry.name.trim() } : {}),
@@ -221,7 +240,7 @@ export function CapabilitySettingsPage() {
             <button className="jw-secondary-button" disabled={busy !== ''} onClick={() => void mutate('sync', () => apiPost('/ai/capabilities/sync'), '内置能力目录已同步。')}><RefreshCw className="h-4 w-4" />同步内置目录</button>
           </div>
 
-          {tab === 'plugin' && <div className="jw-plugin-strip"><span><b>{settings.pluginInventory?.records ?? 0}</b>数据库记录</span><span><b>{settings.pluginInventory?.approved ?? 0}</b>代码批准</span><span><b>{settings.pluginInventory?.installed ?? 0}</b>已安装</span><span><b>{settings.pluginInventory?.runtimeEnabled ?? 0}</b>运行启用</span><em>{settings.pluginInventory?.dynamicInstallEnabled ? '动态安装已开放' : '仅允许代码白名单'}</em></div>}
+          {tab === 'plugin' && <div className="jw-plugin-strip"><span><b>{settings.pluginInventory?.records ?? 0}</b>数据库记录</span><span><b>{settings.pluginInventory?.approved ?? 0}</b>已批准</span><span><b>{settings.pluginInventory?.installed ?? 0}</b>已安装</span><span><b>{settings.pluginInventory?.runtimeEnabled ?? 0}</b>运行启用</span><em>{settings.pluginInventory?.dynamicInstallEnabled ? '受控动态安装已开放' : '仅允许代码白名单'}</em></div>}
 
           <div className="jw-tab-scroll">
             {!groups.length ? <div className="jw-empty-panel"><activeTab.icon className="h-12 w-12" /><p>当前没有已批准的 {activeTab.label}</p><small>未知扩展不会自动获得执行权限</small></div> : groups.map(([source, items]) => {
@@ -270,8 +289,8 @@ export function CapabilitySettingsPage() {
     </Modal>
     <Modal open={showImportModal} title={`导入 ${activeTab.label}`} onClose={() => setShowImportModal(false)} width="max-w-2xl" footer={<div className="flex w-full items-center justify-between">{importStep === 2 ? <button className="jw-secondary-button" onClick={() => { setImportStep(1); setImportCandidates([]); setImportError('') }}>上一步</button> : <span />}<div className="flex gap-2"><button className="jw-secondary-button" onClick={() => setShowImportModal(false)}>{importStep === 3 ? '关闭' : '取消'}</button>{importStep === 2 && !importError && <button className="jw-primary-button" disabled={busy !== '' || !selectedImportKeys.length} onClick={() => void applyImport()}><Upload className="h-4 w-4" />确认导入</button>}</div></div>}>
       <div className="jw-import-flow">
-        {importStep === 1 && <><p className="jw-import-step-title">选择导入来源</p><div className="jw-import-source-buttons"><label><Upload className="h-5 w-5" /><strong>从文件夹导入</strong><small>{tab === 'skill' ? '选择包含 SKILL.md 的目录' : tab === 'agent' ? '选择包含 Agent Markdown 的目录' : '选择包含能力 JSON 的目录'}</small><input type="file" multiple {...({ webkitdirectory: '', directory: '' } as React.InputHTMLAttributes<HTMLInputElement>)} onChange={(event) => { const files = Array.from(event.target.files || []); if (files.length) void validateImportSource('folder', files); event.currentTarget.value = '' }} /></label><label><Download className="h-5 w-5" /><strong>从 ZIP 导入</strong><small>支持单个或批量能力包</small><input type="file" accept=".zip,application/zip" onChange={(event) => { const file = event.target.files?.[0]; if (file) void validateImportSource('zip', [file]); event.currentTarget.value = '' }} /></label></div><div className="jw-info-banner compact"><ShieldCheck className="h-4 w-4" /><span>操作流程与 JW 一致；当前中台仍由服务端批准目录控制执行权限，未批准能力会在结果页标记为跳过。</span></div></>}
-        {importStep === 2 && <><p className="jw-import-step-title">校验结果与导入选择</p>{importSourceLabel && <p className="jw-selected-source">已选择：{importSourceLabel}</p>}{importError ? <div className="jw-import-error"><XCircle className="h-4 w-4" />{importError}</div> : <><p className="jw-validation-success"><Check className="h-4 w-4" />发现 {importCandidates.length} 项 {activeTab.label}</p><div className="jw-import-preview">{importCandidates.map((candidate) => { const matched = settings.capabilities.some((item) => item.kind === candidate.kind && item.capabilityKey === candidate.capabilityKey && !(item.kind === 'plugin' && !item.installed)); return <label key={candidate.capabilityKey}><input type="checkbox" checked={selectedImportKeys.includes(candidate.capabilityKey)} onChange={(event) => setSelectedImportKeys((current) => event.target.checked ? [...current, candidate.capabilityKey] : current.filter((key) => key !== candidate.capabilityKey))} /><span><strong>{candidate.capabilityKey}</strong><small>{candidate.name || candidate.sourcePath}</small></span><em className={matched ? 'matched' : ''}>{matched ? '可导入' : '未批准'}</em></label> })}</div></>}</>}
+        {importStep === 1 && <><p className="jw-import-step-title">选择导入来源</p><div className="jw-import-source-buttons"><label><Upload className="h-5 w-5" /><strong>从文件夹导入</strong><small>{tab === 'skill' ? '选择包含 SKILL.md 的目录' : tab === 'agent' ? '选择包含 Agent Markdown 的目录' : '选择包含能力 JSON 的目录'}</small><input type="file" multiple {...({ webkitdirectory: '', directory: '' } as React.InputHTMLAttributes<HTMLInputElement>)} onChange={(event) => { const files = Array.from(event.target.files || []); if (files.length) void validateImportSource('folder', files); event.currentTarget.value = '' }} /></label><label><Download className="h-5 w-5" /><strong>从 ZIP 导入</strong><small>支持单个或批量能力包</small><input type="file" accept=".zip,application/zip" onChange={(event) => { const file = event.target.files?.[0]; if (file) void validateImportSource('zip', [file]); event.currentTarget.value = '' }} /></label></div><div className="jw-info-banner compact"><ShieldCheck className="h-4 w-4" /><span>Plugin 上传后会安装为受控 Host Plugin，只能使用服务端批准的投资工具，不执行上传的 JS、Shell 或外部进程。</span></div></>}
+        {importStep === 2 && <><p className="jw-import-step-title">校验结果与导入选择</p>{importSourceLabel && <p className="jw-selected-source">已选择：{importSourceLabel}</p>}{importError ? <div className="jw-import-error"><XCircle className="h-4 w-4" />{importError}</div> : <><p className="jw-validation-success"><Check className="h-4 w-4" />发现 {importCandidates.length} 项 {activeTab.label}</p><div className="jw-import-preview">{importCandidates.map((candidate) => { const matched = candidate.kind === 'plugin' || settings.capabilities.some((item) => item.kind === candidate.kind && item.capabilityKey === candidate.capabilityKey && !(item.kind === 'plugin' && !item.installed)); return <label key={candidate.capabilityKey}><input type="checkbox" disabled={!matched} checked={matched && selectedImportKeys.includes(candidate.capabilityKey)} onChange={(event) => setSelectedImportKeys((current) => event.target.checked ? [...current, candidate.capabilityKey] : current.filter((key) => key !== candidate.capabilityKey))} /><span><strong>{candidate.capabilityKey}</strong><small>{candidate.name || candidate.sourcePath}</small></span><em className={matched ? 'matched' : ''}>{matched ? (candidate.kind === 'plugin' ? '可安装' : '可导入') : '未批准'}</em></label> })}</div>{importCandidates.length > 0 && !selectedImportKeys.length && <div className="jw-info-banner compact"><ShieldCheck className="h-4 w-4" /><span>没有可导入项：请先将对应能力加入服务端代码批准目录，再重新导入。</span></div>}</>}</>}
         {importStep === 3 && <><p className="jw-import-step-title">导入结果</p><div className="jw-import-result"><section className="success"><strong>成功导入 {importResult.imported.length} 项</strong>{importResult.imported.map((item) => <span key={item}>{item}</span>)}</section>{importResult.skipped.length > 0 && <section className="warning"><strong>跳过 {importResult.skipped.length} 项</strong>{importResult.skipped.map((item) => <span key={item}>{item}</span>)}</section>}{importResult.errors.length > 0 && <section className="error"><strong>错误 {importResult.errors.length} 项</strong>{importResult.errors.map((item) => <span key={item}>{item}</span>)}</section>}</div></>}
       </div>
     </Modal>

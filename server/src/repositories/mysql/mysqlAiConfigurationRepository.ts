@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, ne, sql } from 'drizzle-orm'
+import { and, asc, eq, inArray, ne, or, sql } from 'drizzle-orm'
 import { db } from '../../db/client.js'
 import {
   aiCapabilities,
@@ -94,6 +94,29 @@ class MySqlAiConfigurationRepository implements AiConfigurationRepository {
     }))
   }
 
+  async deleteProviderWithAudit(input: Parameters<AiConfigurationRepository['deleteProviderWithAudit']>[0]) {
+    return mapped('aiConfiguration.deleteProviderWithAudit', () => db.transaction(async (tx) => {
+      const [existing] = await tx.select().from(aiModelProviders)
+        .where(eq(aiModelProviders.id, input.providerId)).limit(1).for('update')
+      if (!existing) return 'not_found' as const
+      if (existing.version !== input.expectedVersion) return 'conflict' as const
+      const models = await tx.select({ id: aiModels.id }).from(aiModels)
+        .where(eq(aiModels.providerId, input.providerId)).limit(1)
+      if (models.length) return 'has_models' as const
+      const [result] = await tx.delete(aiModelProviders).where(and(
+        eq(aiModelProviders.id, input.providerId),
+        eq(aiModelProviders.version, input.expectedVersion),
+      ))
+      if (result.affectedRows !== 1) return 'conflict' as const
+      await tx.insert(adminConfigurationRevisions).values(configurationRevisionValues({
+        domain: 'model', resourceType: 'provider', resourceId: input.providerId,
+        operation: 'delete', sourceVersion: existing.version, snapshot: { ...existing }, createdBy: input.audit.userId,
+      }))
+      await tx.insert(auditLogs).values(input.audit)
+      return 'ok' as const
+    }))
+  }
+
   async createModelWithAudit(input: Parameters<AiConfigurationRepository['createModelWithAudit']>[0]) {
     return mapped('aiConfiguration.createModelWithAudit', () => db.transaction(async (tx) => {
       const [provider] = await tx.select({ id: aiModelProviders.id }).from(aiModelProviders)
@@ -163,6 +186,49 @@ class MySqlAiConfigurationRepository implements AiConfigurationRepository {
       await tx.insert(auditLogs).values(input.audit)
       const [record] = await tx.select().from(aiModels).where(eq(aiModels.id, input.modelId)).limit(1)
       return { status: 'ok' as const, record }
+    }))
+  }
+
+  async deleteModelWithAudit(input: Parameters<AiConfigurationRepository['deleteModelWithAudit']>[0]) {
+    return mapped('aiConfiguration.deleteModelWithAudit', () => db.transaction(async (tx) => {
+      const [existing] = await tx.select().from(aiModels)
+        .where(eq(aiModels.id, input.modelId)).limit(1).for('update')
+      if (!existing) return 'not_found' as const
+      if (existing.version !== input.expectedVersion) return 'conflict' as const
+      const references = await tx.select({ profileKey: aiModelRoutes.profileKey }).from(aiModelRoutes)
+        .where(or(eq(aiModelRoutes.modelId, input.modelId), eq(aiModelRoutes.fallbackModelId, input.modelId))).limit(1)
+      if (references.length) return 'referenced' as const
+
+      let replacement: typeof existing | undefined
+      if (existing.isDefault) {
+        await lockDefaultModelDomain(tx)
+        const [candidate] = await tx.select().from(aiModels)
+          .where(and(eq(aiModels.enabled, true), sql`${aiModels.id} <> ${input.modelId}`))
+          .orderBy(asc(aiModels.displayName)).limit(1).for('update')
+        replacement = candidate
+        if (replacement) {
+          await tx.insert(adminConfigurationRevisions).values(configurationRevisionValues({
+            domain: 'model', resourceType: 'model', resourceId: replacement.id,
+            operation: 'update', sourceVersion: replacement.version, snapshot: { ...replacement }, createdBy: input.audit.userId,
+          }))
+          await tx.update(aiModels).set({
+            isDefault: true, updatedBy: input.audit.userId, updatedAt: new Date(),
+            version: sql`${aiModels.version} + 1`,
+          }).where(and(eq(aiModels.id, replacement.id), eq(aiModels.version, replacement.version)))
+        }
+      }
+
+      const [result] = await tx.delete(aiModels).where(and(
+        eq(aiModels.id, input.modelId),
+        eq(aiModels.version, input.expectedVersion),
+      ))
+      if (result.affectedRows !== 1) return 'conflict' as const
+      await tx.insert(adminConfigurationRevisions).values(configurationRevisionValues({
+        domain: 'model', resourceType: 'model', resourceId: input.modelId,
+        operation: 'delete', sourceVersion: existing.version, snapshot: { ...existing }, createdBy: input.audit.userId,
+      }))
+      await tx.insert(auditLogs).values(input.audit)
+      return 'ok' as const
     }))
   }
 
@@ -417,6 +483,66 @@ class MySqlAiConfigurationRepository implements AiConfigurationRepository {
       )).limit(1)
       return record ?? null
     })
+  }
+
+  async installUploadedPluginWithAudit(input: Parameters<AiConfigurationRepository['installUploadedPluginWithAudit']>[0]) {
+    return mapped('aiConfiguration.installUploadedPluginWithAudit', () => db.transaction(async (tx) => {
+      const [existing] = await tx.select().from(aiCapabilities).where(and(
+        eq(aiCapabilities.kind, 'plugin'), eq(aiCapabilities.capabilityKey, input.record.capabilityKey),
+      )).limit(1).for('update')
+
+      if (existing) {
+        await tx.insert(adminConfigurationRevisions).values(configurationRevisionValues({
+          domain: 'capability', resourceType: 'capability', resourceId: existing.id,
+          operation: 'update', sourceVersion: existing.version, snapshot: { ...existing }, createdBy: input.audit.userId,
+        }))
+        await tx.update(aiCapabilities).set({
+          name: input.record.name,
+          description: input.record.description,
+          source: 'uploaded',
+          packageVersion: input.record.packageVersion,
+          config: input.record.config,
+          toolNames: input.record.toolNames,
+          dependencyNames: input.record.dependencyNames,
+          allowedRoles: input.record.allowedRoles,
+          enabled: true,
+          updatedBy: input.record.updatedBy,
+          updatedAt: input.updatedAt,
+          version: sql`${aiCapabilities.version} + 1`,
+        }).where(eq(aiCapabilities.id, existing.id))
+      } else {
+        await tx.insert(aiCapabilities).values({
+          ...input.record,
+          source: 'uploaded',
+          enabled: true,
+        })
+        await tx.insert(adminConfigurationRevisions).values(configurationRevisionValues({
+          domain: 'capability', resourceType: 'capability', resourceId: input.record.id,
+          operation: 'create', sourceVersion: 0, snapshot: null, createdBy: input.audit.userId,
+        }))
+      }
+
+      const capabilityId = existing?.id ?? input.record.id
+      const [binding] = await tx.select({ id: aiCapabilityBindings.id }).from(aiCapabilityBindings).where(and(
+        eq(aiCapabilityBindings.capabilityId, capabilityId),
+        eq(aiCapabilityBindings.scopeType, 'global'),
+        eq(aiCapabilityBindings.scopeKey, '*'),
+      )).limit(1)
+      if (!binding) {
+        await tx.insert(aiCapabilityBindings).values({
+          id: input.globalBindingId, capabilityId, scopeType: 'global', scopeKey: '*', enabled: true,
+          createdBy: input.audit.userId, updatedBy: input.audit.userId,
+        })
+        await tx.insert(adminConfigurationRevisions).values(configurationRevisionValues({
+          domain: 'capability', resourceType: 'capability_binding', resourceId: input.globalBindingId,
+          operation: 'create', sourceVersion: 0, snapshot: null, createdBy: input.audit.userId,
+        }))
+      }
+      await tx.insert(auditLogs).values(input.audit)
+      const [record] = await tx.select().from(aiCapabilities).where(eq(aiCapabilities.id, capabilityId)).limit(1)
+      if (!record) throw new Error('uploaded plugin cannot be reloaded after installation')
+      return record
+    }))
   }
 
   async updateCapabilityWithAudit(input: Parameters<AiConfigurationRepository['updateCapabilityWithAudit']>[0]) {

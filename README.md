@@ -16,13 +16,13 @@ npm run dev
 开发模式默认地址：
 
 - Web：`http://127.0.0.1:5173`（端口被占用时 Vite 会自动顺延）
-- API：`http://127.0.0.1:3100`
-- 健康检查：`http://127.0.0.1:3100/api/health`
+- API：`http://127.0.0.1:4100`
+- 健康检查：`http://127.0.0.1:4100/api/health`
 - JW Agent Runtime：已内嵌在 API 进程，通过 `/api/agent/*` 与同端口 `/socket.io` 访问
-- 组件健康检查：`http://127.0.0.1:3100/api/health/components`
+- 组件健康检查：`http://127.0.0.1:4100/api/health/components`
 
-`npm run dev` 会启动 Web 和 API（内含 JW Agent Runtime）。Radar 查询由 API
-按需调用单次 Python 任务；定时采集由生产入口统一调度。
+`npm run dev` 会启动 Web 和 API（内含 JW Agent Runtime）。Radar 采集、查询、
+微信群聊 Push、同步与定时任务均在 Node 主服务内执行并写入 MySQL。
 
 生产构建与启动：
 
@@ -31,22 +31,22 @@ npm run build
 npm run start:app
 ```
 
-构建后 `start:app` 是唯一项目启动入口：单个 Node 进程内运行 Express、JW Runtime
-与 MySQL 持久化调度器，并按需启动 Radar 单次 Python 任务。项目只监听 `127.0.0.1:3100`，不再启动 3584 或
+构建后 `start:app` 是唯一项目启动入口：单个 Node 进程内运行 Express、JW Runtime、
+Radar TypeScript 采集器与 MySQL 持久化调度器。项目只监听 `127.0.0.1:4100`，不再启动 3584 或
 8121 服务。MySQL 与 LLM Gateway 是外部基础设施，需要另行可用。
 
 生产运行时不会自动执行 MySQL DDL，只核对已应用迁移和必需表；`.env` 的
 `DB_USERNAME/DB_PASSWORD` 应使用 DML-only 账号，DDL 迁移账号由部署脚本通过
 root-only 文件临时注入。`npm run audit:mysql-privileges` 可检查运行账号是否越权。
 
-旧 Radar JSONL/JSON 首次迁移或需要重新核对时可幂等执行：
+旧 Radar JSONL/JSON 仅在迁移归档核对时可从显式 `RADAR_DATA_DIR` 幂等导入：
 
 ```bash
 npm run migrate:radar
 ```
 
 线上候选读取、原始事件、来源、采集状态、同步游标和 Job 运行记录均以 MySQL
-为准；Python 文件是单次采集器的可重建工作介质。
+为准；线上运行不读取旧 JSONL、Excel 或 Python 服务目录。
 
 36氪 `lead_reserve` 摄入也由 `lead-reserve-daily-intake` MySQL Job 管理；开发环境
 默认关闭，生产部署默认每日 09:00 摄入 50 条，并通过持久化映射补偿评分触发。

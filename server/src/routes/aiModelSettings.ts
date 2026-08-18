@@ -7,6 +7,8 @@ import {
   AI_MODEL_REVISION_TYPES,
   createAiModel,
   createModelProvider,
+  deleteAiModel,
+  deleteModelProvider,
   listAvailableModels,
   listModelSettings,
   listModelConfigurationRevisions,
@@ -132,6 +134,13 @@ aiModelSettingsRouter.patch('/providers/:id', async (req: AuthedRequest, res, ne
   } catch (error) { next(error) }
 })
 
+aiModelSettingsRouter.delete('/providers/:id', async (req: AuthedRequest, res, next) => {
+  try {
+    const body = z.object({ expectedVersion: version }).strict().parse(req.query)
+    res.json(await deleteModelProvider(providerId.parse(req.params.id), body.expectedVersion, actor(req)))
+  } catch (error) { next(error) }
+})
+
 aiModelSettingsRouter.post('/providers/:id/test', async (req: AuthedRequest, res, next) => {
   try { res.json(await testModelProvider(providerId.parse(req.params.id), actor(req))) } catch (error) { next(error) }
 })
@@ -143,6 +152,13 @@ aiModelSettingsRouter.post('/models', async (req: AuthedRequest, res, next) => {
 aiModelSettingsRouter.patch('/models/:id', async (req: AuthedRequest, res, next) => {
   try {
     res.json(await updateAiModel(z.string().uuid().parse(req.params.id), UpdateModel.parse(req.body), actor(req)))
+  } catch (error) { next(error) }
+})
+
+aiModelSettingsRouter.delete('/models/:id', async (req: AuthedRequest, res, next) => {
+  try {
+    const body = z.object({ expectedVersion: version }).strict().parse(req.query)
+    res.json(await deleteAiModel(z.string().uuid().parse(req.params.id), body.expectedVersion, actor(req)))
   } catch (error) { next(error) }
 })
 

@@ -50,7 +50,7 @@ function configuredRoots(): Array<{ key: string; absolutePath: string }> {
     { key: 'generated', absolutePath: path.resolve('server/generated') },
     { key: 'workspace', absolutePath: workspace },
     { key: 'jw-agent-workspace', absolutePath: path.resolve(process.env.AGENT_WORKSPACE?.trim() || 'server/agent-workspace') },
-    { key: 'radar-data', absolutePath: path.resolve(process.env.RADAR_DATA_DIR?.trim() || 'project-discovery/data') },
+    { key: 'radar-data', absolutePath: path.resolve(process.env.RADAR_DATA_DIR?.trim() || '.runtime/radar-legacy/data') },
     { key: 'skills', absolutePath: path.resolve(process.env.AI_SKILL_ROOT?.trim() || path.join(workspace, '.agents/skills')) },
     { key: 'server-assets', absolutePath: path.resolve('server/assets') },
   ]

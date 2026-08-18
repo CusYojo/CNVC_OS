@@ -183,7 +183,7 @@ async function inspectContainerRuntime(command: 'docker' | 'podman') {
   try {
     const result = await run(command, ['ps', '--format', '{{.Names}}\t{{.Image}}\t{{.Ports}}'])
     const projectContainers = result.stdout.split(/\r?\n/).filter((line) => (
-      /cybernaut|(?:^|[\s/_-])flue(?:[\s/_:-]|$)|(?:^|[\s/_-])radar(?:[\s/_:-]|$)|(?:^|[\s/_-])sbl(?:[\s/_:-]|$)|(?::|->)(?:3100|3584|8121)(?:\/|\b)/i.test(line)
+      /cybernaut|(?:^|[\s/_-])flue(?:[\s/_:-]|$)|(?:^|[\s/_-])radar(?:[\s/_:-]|$)|(?:^|[\s/_-])sbl(?:[\s/_:-]|$)|(?::|->)(?:4100|3584|8121)(?:\/|\b)/i.test(line)
     )).length
     return { runtime: command, available: true, inspected: result.code === 0, projectContainers }
   } catch {
@@ -212,7 +212,7 @@ async function staticAcceptance() {
       && /ExecStartPre=.*singleServicePrestart\.js/.test(deploySource)
       && /RestartPreventExitStatus=2 78/.test(deploySource)
       && /StartLimitIntervalSec=300/.test(deploySource) && /StartLimitBurst=5/.test(deploySource),
-    portContract: /3100/.test(source) && /3584/.test(source) && /8121/.test(source)
+    portContract: /4100/.test(source) && /3584/.test(source) && /8121/.test(source)
       && /loopbackListener/.test(source),
     timerCronContainerAndNginxContract: /list-timers/.test(source) && /crontab/.test(source)
       && /inspectContainerRuntime/.test(source)
@@ -256,7 +256,7 @@ async function liveEvidence() {
 
   const socketState = await run('ss', ['-ltnpH'])
   requireCheck(socketState.code === 0, 'cannot inspect TCP listeners')
-  const appListeners = listenerRows(socketState.stdout, 3100)
+  const appListeners = listenerRows(socketState.stdout, 4100)
   const appListenerPids = listenerPids(appListeners)
   const legacyListenerRows = [...listenerRows(socketState.stdout, 3584), ...listenerRows(socketState.stdout, 8121)]
 
@@ -314,7 +314,7 @@ async function liveEvidence() {
     inspectContainerRuntime('podman'),
   ])
   const nginxCheck = await run('nginx', ['-t'])
-  const health = await fetch('http://127.0.0.1:3100/api/health/components', { signal: AbortSignal.timeout(10_000) })
+  const health = await fetch('http://127.0.0.1:4100/api/health/components', { signal: AbortSignal.timeout(10_000) })
   const healthBody = health.ok ? await health.json() as { service?: unknown; status?: unknown } : {}
 
   let cgroupProcessCount = 0
@@ -341,7 +341,7 @@ async function liveEvidence() {
       && !['', 'infinity', '[not set]'].includes(properties.CPUQuotaPerSecUSec || '')
       && !['', 'infinity', '[not set]'].includes(properties.TasksMax || ''),
     oneLoopbackApplicationListener: appListeners.length > 0
-      && appListeners.every((row) => loopbackListener(row, 3100)) && listenerOwnership,
+      && appListeners.every((row) => loopbackListener(row, 4100)) && listenerOwnership,
     retiredPortsClosed: legacyListenerRows.length === 0,
     legacyUnitsInactive,
     legacyUnitsDisabled,
@@ -363,7 +363,7 @@ async function liveEvidence() {
       && (environmentMetadata.mode & 0o077) === 0,
     tlsNginxConfiguration: nginxCheck.code === 0
       && /ssl_protocols\s+TLSv1\.2\s+TLSv1\.3/.test(nginxFile)
-      && /proxy_pass\s+http:\/\/127\.0\.0\.1:3100/.test(nginxFile)
+      && /proxy_pass\s+http:\/\/127\.0\.0\.1:4100/.test(nginxFile)
       && !/\/ai\/api|3584|8121/.test(nginxFile),
     applicationHealth: health.ok && healthBody.service === 'cybernaut-app',
     cgroupProcessInventoryReadable: cgroupProcessCount > 0,
@@ -384,7 +384,7 @@ async function liveEvidence() {
     topology: {
       businessServiceCount: 1,
       businessService: 'cybernaut-app.service',
-      applicationPort: 3100,
+      applicationPort: 4100,
       retiredPorts: [3584, 8121],
       cgroupProcessCount,
       listenerProcessCount: appListenerPids.length,

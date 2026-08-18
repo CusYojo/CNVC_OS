@@ -109,6 +109,9 @@ export type OptimisticResult<T> =
   | { status: 'not_found' }
   | { status: 'conflict' }
 
+export type DeleteProviderResult = 'ok' | 'not_found' | 'conflict' | 'has_models'
+export type DeleteModelResult = 'ok' | 'not_found' | 'conflict' | 'referenced'
+
 export interface AiConfigurationRepository {
   listModelSettings(): Promise<{
     providers: AiModelProviderRecord[]
@@ -127,6 +130,11 @@ export interface AiConfigurationRepository {
     audit: AuditRecord
     updatedAt: Date
   }): Promise<OptimisticResult<AiModelProviderRecord>>
+  deleteProviderWithAudit(input: {
+    providerId: string
+    expectedVersion: number
+    audit: AuditRecord
+  }): Promise<DeleteProviderResult>
   createModelWithAudit(input: {
     record: Omit<AiModelRecord, 'version' | 'createdAt' | 'updatedAt'>
     audit: AuditRecord
@@ -141,6 +149,11 @@ export interface AiConfigurationRepository {
     audit: AuditRecord
     updatedAt: Date
   }): Promise<OptimisticResult<AiModelRecord> | { status: 'provider_not_found' }>
+  deleteModelWithAudit(input: {
+    modelId: string
+    expectedVersion: number
+    audit: AuditRecord
+  }): Promise<DeleteModelResult>
   upsertRouteWithAudit(input: {
     profileKey: string
     modelId: string
@@ -187,6 +200,12 @@ export interface AiConfigurationRepository {
   }>
   findCapability(capabilityId: string): Promise<AiCapabilityRecord | null>
   findBuiltinCapability(kind: string, capabilityKey: string): Promise<AiCapabilityRecord | null>
+  installUploadedPluginWithAudit(input: {
+    record: Omit<AiCapabilityRecord, 'version' | 'lastTestStatus' | 'lastTestError' | 'lastTestLatencyMs' | 'lastTestTraceId' | 'lastTestAt' | 'createdAt' | 'updatedAt'>
+    globalBindingId: string
+    audit: AuditRecord
+    updatedAt: Date
+  }): Promise<AiCapabilityRecord>
   updateCapabilityWithAudit(input: {
     capabilityId: string
     expectedVersion: number

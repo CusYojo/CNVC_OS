@@ -13,6 +13,7 @@ import {
   Sparkles,
   Boxes,
   MessagesSquare,
+  RadioTower,
   UsersRound,
 } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
@@ -39,13 +40,15 @@ const navSections = [
       { to: '/system/ai/models', label: '模型设置', icon: Sparkles, roles: ['系统管理员', 'AI平台管理员', 'AI 平台管理员'] },
       { to: '/system/ai/capabilities', label: '能力管理', icon: Boxes, roles: ['系统管理员', 'AI平台管理员', 'AI 平台管理员'] },
       { to: '/system/integrations/im-bots', label: 'IM 机器人', icon: MessagesSquare, roles: ['系统管理员', '运营管理员'] },
+      { to: '/system/integrations/radar-dingtalk', label: 'Radar 钉钉告警', icon: RadioTower, roles: ['系统管理员'] },
     ],
   },
 ]
 
 function canSeeNavItem(item: { to: string; label: string; roles?: readonly string[] }, role: string, permissionCodes: string[] = []): boolean {
   if (!item.roles) return true
-  const permission = item.to === '/system' ? 'system.manage' : item.to.startsWith('/system/ai/') ? 'ai.configure' : item.to.startsWith('/system/integrations/') ? 'im.manage' : ''
+  const permission = item.to === '/system' || item.to === '/system/integrations/radar-dingtalk'
+    ? 'system.manage' : item.to.startsWith('/system/ai/') ? 'ai.configure' : item.to.startsWith('/system/integrations/') ? 'im.manage' : ''
   return (!!permission && permissionCodes.includes(permission)) || item.roles.includes(role)
 }
 

@@ -18,6 +18,8 @@ import { leadPushTargetsRouter } from './leadPushTargets.js'
 import { operationsRouter } from './operations.js'
 import { systemAdministrationRouter } from './systemAdministration.js'
 import { leadIntakeRouter } from './leadIntake.js'
+import { radarRouter } from './radar.js'
+import { radarDingTalkRouter } from './radarDingTalk.js'
 import type { AuthedRequest } from '../middleware/requireAuth.js'
 import { createReadStream } from 'node:fs'
 import { lstat, realpath, stat } from 'node:fs/promises'
@@ -33,6 +35,7 @@ apiRouter.use('/meetings', meetingsRouter)
 apiRouter.use('/todos', todosRouter)
 apiRouter.use('/risks', risksRouter)
 apiRouter.use('/', leadIntakeRouter)
+apiRouter.use('/', radarRouter)
 apiRouter.use('/', metaRouter) // /users /templates /audit-logs /leads /ai-summaries
 apiRouter.use('/oa', oaRouter)
 apiRouter.use('/ai', aiRouter)
@@ -41,6 +44,7 @@ apiRouter.use('/agent', jwAgentRouter)
 apiRouter.use('/ai/model-settings', aiModelSettingsRouter)
 apiRouter.use('/ai/capabilities', aiCapabilitiesRouter)
 apiRouter.use('/integrations/im', imIntegrationsRouter)
+apiRouter.use('/integrations/radar-dingtalk', radarDingTalkRouter)
 apiRouter.use('/investment/leads/push-targets', leadPushTargetsRouter)
 apiRouter.use('/operations', operationsRouter)
 apiRouter.use('/system-administration', systemAdministrationRouter)

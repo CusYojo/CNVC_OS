@@ -11,6 +11,7 @@ import {
   startLeadScoreJobWorker,
   stopLeadScoreJobWorker,
 } from '../src/services/leadScoreJobService.js'
+import { mysqlIntegrationTestOptions } from './mysqlIntegrationTestSafety.js'
 
 const jobsTable = quoteMysqlIdentifier(mysqlTableName('lead_score_jobs'))
 
@@ -28,7 +29,7 @@ async function waitFor(check: () => Promise<boolean>, timeoutMs = 5_000): Promis
   throw new Error(`condition not reached within ${timeoutMs}ms`)
 }
 
-test('MySQL lead scoring queue claims once and persists deferred retry', async (t) => {
+test('MySQL lead scoring queue claims once and persists deferred retry', mysqlIntegrationTestOptions, async (t) => {
   const leadId = randomUUID()
   await db.insert(leads).values({
     id: leadId,

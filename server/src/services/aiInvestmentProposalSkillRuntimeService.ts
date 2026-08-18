@@ -1,6 +1,6 @@
 import { access } from 'node:fs/promises'
 import path from 'node:path'
-import { getAiSkillDirectory } from './aiSkillService.js'
+import { getAiSkillRuntimeDirectory } from './aiSkillService.js'
 import { execFileSupervised as execFileAsync } from '../runtime/supervisedProcessService.js'
 const SKILL_NAME = 'draft-investment-proposal' as const
 
@@ -68,7 +68,7 @@ async function runValidator<T>(python: string, script: string, args: string[], l
 
 export async function validateInvestmentProposalWithSkill(filePath: string) {
   const python = await resolvePython()
-  const skillDirectory = getAiSkillDirectory(SKILL_NAME)
+  const skillDirectory = getAiSkillRuntimeDirectory(SKILL_NAME)
   const fidelityScript = path.join(skillDirectory, 'scripts', 'validate_case_style_fidelity.py')
   const proposalScript = path.join(skillDirectory, 'scripts', 'validate_proposal.py')
   await Promise.all([access(fidelityScript), access(proposalScript)])

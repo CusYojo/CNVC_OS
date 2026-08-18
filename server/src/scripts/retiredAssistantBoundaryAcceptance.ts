@@ -50,21 +50,26 @@ async function runRetiredRuntime() {
   })
 }
 
-const sourceFiles = [
-  '.env.example',
-  'src/db.ts',
-  'src/tools/investment-tools.ts',
-  'src/tools/advisor-tools.ts',
-]
-const sources = await Promise.all(sourceFiles.map(async (file) => ({
-  file,
-  text: await readFile(path.resolve(legacyRoot, file), 'utf8'),
-})))
-for (const name of forbiddenRuntimeNames) {
-  assert(!sources.some((source) => source.text.includes(name)), `${name} remains in retired runtime source`)
+const legacySourcePresent = (await fileIdentity(legacyRoot)).exists
+if (legacySourcePresent) {
+  const sourceFiles = [
+    '.env.example',
+    'src/db.ts',
+    'src/tools/investment-tools.ts',
+    'src/tools/advisor-tools.ts',
+  ]
+  const sources = await Promise.all(sourceFiles.map(async (file) => ({
+    file,
+    text: await readFile(path.resolve(legacyRoot, file), 'utf8'),
+  })))
+  for (const name of forbiddenRuntimeNames) {
+    assert(!sources.some((source) => source.text.includes(name)), `${name} remains in retired runtime source`)
+  }
+  assert(!sources.some((source) => /x-internal-secret|cybernaut-internal-2026/.test(source.text)))
+  checks.push('retired-assistant-source-has-no-old-runtime-variable-or-shared-secret')
+} else {
+  checks.push('retired-assistant-source-directory-absent')
 }
-assert(!sources.some((source) => /x-internal-secret|cybernaut-internal-2026/.test(source.text)))
-checks.push('retired-assistant-source-has-no-old-runtime-variable-or-shared-secret')
 
 const envNames = new Set((await readFile(path.resolve(root, '.env'), 'utf8'))
   .split(/\r?\n/)
@@ -75,18 +80,24 @@ assert(forbiddenRuntimeNames.every((name) => !envNames.has(name)))
 checks.push('active-root-environment-has-no-retired-runtime-variable-name')
 
 const before = await fileIdentity(legacyDatabase)
-const result = await runRetiredRuntime()
+const result = legacySourcePresent
+  ? await runRetiredRuntime()
+  : { code: null, stdout: '', stderr: '' }
 const after = await fileIdentity(legacyDatabase)
-assert.equal(result.code, 78)
-assert.equal(result.stdout, '')
-assert.match(result.stderr, /standalone Flue runtime has retired/)
-assert(!result.stderr.includes('retired-assistant-acceptance-secret'))
+if (legacySourcePresent) {
+  assert.equal(result.code, 78)
+  assert.equal(result.stdout, '')
+  assert.match(result.stderr, /standalone Flue runtime has retired/)
+  assert(!result.stderr.includes('retired-assistant-acceptance-secret'))
+  checks.push('retired-start-with-stale-environment-fails-closed-without-touching-legacy-database')
+}
 assert.deepEqual(after, before)
-checks.push('retired-start-with-stale-environment-fails-closed-without-touching-legacy-database')
+checks.push('retired-assistant-absence-does-not-touch-legacy-database')
 
 console.log(JSON.stringify({
   ok: true,
   checks,
+  legacySourcePresent,
   retiredRuntimeExitCode: result.code,
   legacyDatabasePresent: before.exists,
   legacyDatabaseUnchanged: true,

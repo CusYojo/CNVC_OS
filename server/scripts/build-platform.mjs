@@ -28,7 +28,7 @@ const liveServerDist = path.join(root, 'server-dist')
 const idPattern = /^build-[0-9]{8}T[0-9]{9}Z-[0-9]+-[a-f0-9]{8}$/
 const activationPort = process.env.NODE_ENV === 'test' && process.env.CYBERNAUT_BUILD_ACTIVATION_PORT
   ? Number(process.env.CYBERNAUT_BUILD_ACTIVATION_PORT)
-  : 3100
+  : 4100
 
 function assert(condition, message) {
   if (!condition) throw new Error(`[build-platform] ${message}`)

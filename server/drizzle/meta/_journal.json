@@ -288,6 +288,27 @@
       "when": 1786503817000,
       "tag": "0040_add_lead_intake",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "5",
+      "when": 1786507417000,
+      "tag": "0041_add_radar_wechat_chat",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "5",
+      "when": 1786511017000,
+      "tag": "0042_add_radar_webhook_receipts",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "5",
+      "when": 1787031817000,
+      "tag": "0043_add_radar_dingtalk_settings",
+      "breakpoints": true
     }
   ]
 }

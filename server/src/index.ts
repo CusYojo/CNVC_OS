@@ -64,12 +64,13 @@ import { aiRuntimeTelemetrySnapshot } from './runtime/aiRuntimeTelemetry.js'
 import { migrationWriteFreezePolicy } from './config/migrationWriteFreezePolicy.js'
 import { startWeixinMessageBridge, stopWeixinMessageBridge } from './services/weixinMessageBridge.js'
 import { leadBpWorkerHealth, startLeadBpWorker, stopLeadBpWorker } from './services/leadIntakeService.js'
+import { radarInboundRouter } from './routes/radar.js'
 
 assertRuntimeConfiguration()
 installStructuredLogging()
 
 const app = express()
-const port = Number(process.env.API_PORT ?? 3100)
+const port = Number(process.env.API_PORT ?? 4100)
 const distDir = path.resolve(process.cwd(), 'dist')
 let serviceReady = false
 let httpServer: Server | undefined
@@ -131,7 +132,16 @@ app.use((req, res, next) => {
     details: { mode: migrationWriteFreezePolicy.mode },
   })
 })
-app.use(express.json({ limit: '150mb' }))
+app.use(express.json({
+  limit: '150mb',
+  verify: (req, _res, buffer) => {
+    // Preserve bytes only for the signed Radar webhook. HMAC must cover the
+    // exact body received over the wire, not a re-serialized JSON object.
+    if (req.url?.startsWith('/api/wechat-chat/push')) {
+      ;(req as typeof req & { rawBody?: Buffer }).rawBody = Buffer.from(buffer)
+    }
+  },
+}))
 // 【上传400修复】express.json 解析失败(如上传大文件传到一半连接断开、body 被截断)时，
 // 默认会返回裸 400 空响应，前端无法 catch 只会卡住。这里捕获成明确 JSON 错误，前端能提示重试。
 app.use((err: unknown, _req: import('express').Request, res: import('express').Response, next: import('express').NextFunction) => {
@@ -173,7 +183,7 @@ app.get('/api/health/components', async (_req, res) => {
         jwAgentRuntimeHealth(),
         agentSocketHealth(),
         aiRuntimeTelemetrySnapshot(),
-        intentionallyDisabled('project-discovery-radar'),
+        intentionallyDisabled('radar-typescript-collector'),
         await radarMySqlSourceHealth(),
         intentionallyDisabled('mysql-runtime-jobs'),
         intentionallyDisabled('mysql-lead-score-jobs'),
@@ -232,6 +242,8 @@ app.use('/api', (req, res, next) => {
 // IM platform callbacks authenticate with a dedicated encrypted per-bot
 // secret, so they must be mounted before the browser-session middleware.
 app.use('/api/integrations/im/inbound', imInboundRouter)
+// 微信群聊采集端使用独立 Push 密钥，必须与 IM 回调一样先于浏览器会话鉴权挂载。
+app.use('/api/wechat-chat', radarInboundRouter)
 
 // 受保护业务路由（仅登录、健康探针与 LLM 探针公开）
 app.use('/api', (req, res, next) => {

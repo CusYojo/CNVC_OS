@@ -4,7 +4,7 @@
 // 3 个 worker 并发触发+轮询;断点续跑(每条落库,重启接着来,已带预测标记的自动跳过)。
 import { pool } from './server-dist/db/client.js';
 
-const base = 'http://127.0.0.1:3100';
+const base = 'http://127.0.0.1:4100';
 const CONCURRENCY = parseInt(process.env.RESCORE_CONCURRENCY || '3', 10);
 const login = await fetch(`${base}/api/auth/login`, {
   method: 'POST', headers: { 'Content-Type': 'application/json' },
