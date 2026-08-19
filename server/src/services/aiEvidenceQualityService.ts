@@ -177,11 +177,16 @@ function evidenceGroupKey(source: EvidenceLike) {
 
 export function curateEvidenceSources<T extends EvidenceLike>(
   sources: readonly T[],
-  options: { maxTotal?: number; maxPerDocument?: number } = {},
+  options: {
+    maxTotal?: number
+    maxPerDocument?: number
+    guaranteeDocumentCoverage?: boolean
+  } = {},
 ) {
   const rejected: RejectedEvidence[] = []
   const cleanedCandidates: Array<T & { content: string; _score: number; _order: number }> = []
   const seenContent: string[] = []
+  const seenContentByDocument = new Map<string, string[]>()
 
   sources.forEach((source, order) => {
     if (isDiagnosticEvidenceSourceName(source.sourceName)) {
@@ -225,7 +230,11 @@ export function curateEvidenceSources<T extends EvidenceLike>(
       })
       return
     }
-    if (isNearDuplicate(curatedContent, seenContent, 0.9)) {
+    const documentKey = evidenceGroupKey(source)
+    const dedupeCorpus = options.guaranteeDocumentCoverage
+      ? seenContentByDocument.get(documentKey) ?? []
+      : seenContent
+    if (isNearDuplicate(curatedContent, dedupeCorpus, 0.9)) {
       rejected.push({
         sourceName: source.sourceName,
         chunkIndex: source.chunkIndex,
@@ -240,7 +249,10 @@ export function curateEvidenceSources<T extends EvidenceLike>(
         reason: '片段含损坏字符，已清除损坏部分后使用可读内容',
       })
     }
-    seenContent.push(curatedContent)
+    dedupeCorpus.push(curatedContent)
+    if (options.guaranteeDocumentCoverage) {
+      seenContentByDocument.set(documentKey, dedupeCorpus)
+    }
     cleanedCandidates.push({
       ...source,
       content: curatedContent.slice(0, 4000),
@@ -258,18 +270,41 @@ export function curateEvidenceSources<T extends EvidenceLike>(
     values.push(source)
     byGroup.set(key, values)
   })
-  const selected = [...byGroup.values()].flatMap((group) =>
+  const priority = (sourceType: string) =>
+    sourceType === 'user_input' ? 0 : sourceType === 'project_record' ? 1 : 2
+  const sortByPriorityAndOrder = (
+    left: typeof cleanedCandidates[number],
+    right: typeof cleanedCandidates[number],
+  ) => {
+    const priorityDiff = priority(left.sourceType) - priority(right.sourceType)
+    if (priorityDiff) return priorityDiff
+    return left._order - right._order
+  }
+  const candidatesByGroup = [...byGroup.values()].map((group) =>
     group
       .sort((left, right) => right._score - left._score || left._order - right._order)
       .slice(0, maxPerDocument))
-    .sort((left, right) => {
-      const priority = (sourceType: string) =>
-        sourceType === 'user_input' ? 0 : sourceType === 'project_record' ? 1 : 2
-      const priorityDiff = priority(left.sourceType) - priority(right.sourceType)
-      if (priorityDiff) return priorityDiff
-      return left._order - right._order
-    })
-    .slice(0, maxTotal)
+  const selectedCandidates = options.guaranteeDocumentCoverage
+    ? (() => {
+        // Complete-document workflows must not let the first few large files consume
+        // the global chunk budget. Reserve one readable representative for every
+        // document first, then spend the remaining budget on the highest-value extras.
+        const representatives = candidatesByGroup
+          .flatMap((group) => group.slice(0, 1))
+          .sort(sortByPriorityAndOrder)
+        const extras = candidatesByGroup
+          .flatMap((group) => group.slice(1))
+          .sort((left, right) => right._score - left._score || sortByPriorityAndOrder(left, right))
+          .slice(0, Math.max(0, maxTotal - representatives.length))
+        // When the project has more documents than maxTotal, document coverage wins:
+        // every document remains represented and downstream batching controls context.
+        return [...representatives, ...extras].sort(sortByPriorityAndOrder)
+      })()
+    : candidatesByGroup
+      .flat()
+      .sort(sortByPriorityAndOrder)
+      .slice(0, maxTotal)
+  const selected = selectedCandidates
     .map(({ _score: _ignoredScore, _order: _ignoredOrder, ...source }) => source as T)
 
   return { usable: selected, rejected }

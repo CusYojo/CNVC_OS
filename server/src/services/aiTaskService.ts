@@ -425,14 +425,36 @@ async function writeTaskAudit(user: AiTaskUser, action: string, target: string) 
   })
 }
 
+type RequiredProjectFile = {
+  sourceId: string
+  sourceName: string
+}
+
+type ProjectSourceLoadResult = {
+  sources: EvidenceSource[]
+  requiredProjectFiles: RequiredProjectFile[]
+}
+
 async function sourcesForProject(
   projectId: string,
   sourceCutoffDate: string,
   limit = 40,
-): Promise<EvidenceSource[]> {
-  const cutoff = new Date(`${sourceCutoffDate}T23:59:59.999Z`)
-  const [rows, legacyFileRows] = await Promise.all([
-    db.select().from(knowledgeChunks)
+  options: { completeProjectFileCoverage?: boolean } = {},
+): Promise<ProjectSourceLoadResult> {
+  const cutoff = new Date(`${sourceCutoffDate}T23:59:59.999+08:00`)
+  const projectFileQuery = db.select({
+    id: projectFiles.id,
+    name: projectFiles.name,
+    parseStatus: projectFiles.parseStatus,
+    contentText: projectFiles.contentText,
+    uploadedAt: projectFiles.uploadedAt,
+  }).from(projectFiles)
+    .where(and(
+      eq(projectFiles.projectId, projectId),
+      lte(projectFiles.uploadedAt, cutoff),
+    ))
+    .orderBy(asc(projectFiles.uploadedAt), asc(projectFiles.name))
+  const knowledgeQuery = db.select().from(knowledgeChunks)
       .where(and(
         eq(knowledgeChunks.scope, 'project'),
         eq(knowledgeChunks.refId, projectId),
@@ -458,10 +480,9 @@ async function sourcesForProject(
         asc(knowledgeChunks.sourceName),
         asc(knowledgeChunks.chunkIndex),
       )
-      .limit(limit),
-    // 历史文件可能已解析进 file_chunks，但知识库双写曾失败。这里直接兜底读取，
-    // 避免“资料库有文件、生成任务却判无资料”。
-    db.select().from(fileChunks)
+  // 历史文件可能已解析进 file_chunks，但知识库双写曾失败。这里直接兜底读取，
+  // 避免“资料库有文件、生成任务却判无资料”。
+  const legacyFileQuery = db.select().from(fileChunks)
       .where(and(
         eq(fileChunks.projectId, projectId),
         lte(fileChunks.createdAt, cutoff),
@@ -485,8 +506,19 @@ async function sourcesForProject(
         asc(fileChunks.fileName),
         asc(fileChunks.chunkIndex),
       )
-      .limit(limit),
-  ])
+  const projectFileRows = await projectFileQuery
+  if (options.completeProjectFileCoverage) {
+    const notReady = projectFileRows.filter((row) => row.parseStatus !== '成功')
+    if (notReady.length > 0) {
+      const names = notReady.slice(0, 6)
+        .map((row) => `${row.name}（${row.parseStatus}）`)
+        .join('、')
+      throw new Error(`项目资料尚未全部解析成功，不能生成完整提案：${names}${notReady.length > 6 ? `等 ${notReady.length} 份` : ''}`)
+    }
+  }
+  const [rows, legacyFileRows] = options.completeProjectFileCoverage
+    ? await Promise.all([knowledgeQuery, legacyFileQuery])
+    : await Promise.all([knowledgeQuery.limit(limit), legacyFileQuery.limit(limit)])
   const knowledgeSources = rows.filter((row) =>
     !isDiagnosticEvidenceSourceName(row.sourceName)).map((row) => {
     const cachedUrl = row.sourceType.startsWith('public_web')
@@ -521,7 +553,36 @@ async function sourcesForProject(
       content,
     })
   }
-  return [...knowledgeSources, ...legacyFileSources]
+  const sources = [...knowledgeSources, ...legacyFileSources]
+  const requiredProjectFiles = options.completeProjectFileCoverage
+    ? projectFileRows
+      .filter((row) => !isDiagnosticEvidenceSourceName(row.name))
+      .map((row) => ({ sourceId: row.id, sourceName: row.name }))
+    : []
+  const representedFileIds = new Set(sources
+    .filter((source) => !source.sourceType.startsWith('public_web'))
+    .map((source) => source.sourceId)
+    .filter((sourceId): sourceId is string => Boolean(sourceId)))
+  const rowsById = new Map(projectFileRows.map((row) => [row.id, row]))
+  for (const file of requiredProjectFiles) {
+    if (representedFileIds.has(file.sourceId)) continue
+    const row = rowsById.get(file.sourceId)
+    const content = row?.contentText?.trim()
+    if (!row || !content) {
+      throw new Error(`项目资料缺少可研读正文，不能生成完整提案：${file.sourceName}`)
+    }
+    // 极少数历史文件只有 project_files.content_text，没有分块记录。
+    // 仍将全文交给后续清洗和代表片段选择，避免静默漏掉该文件。
+    sources.push({
+      sourceType: 'file',
+      sourceId: file.sourceId,
+      sourceName: file.sourceName,
+      chunkIndex: 0,
+      versionOrDate: formatShanghaiDateKey(row.uploadedAt),
+      content,
+    })
+  }
+  return { sources, requiredProjectFiles }
 }
 
 async function cacheProjectNetworkEvidence(projectId: string, sources: EvidenceSource[]) {
@@ -711,7 +772,7 @@ export function evidenceSourceMatchesProject(
 
 export function screenEvidenceSources(sources: EvidenceSource[], type?: AiExecutableTaskType) {
   const options = type === 'investment_proposal'
-    ? { maxTotal: 120, maxPerDocument: 10 }
+    ? { maxTotal: 120, maxPerDocument: 10, guaranteeDocumentCoverage: true }
     : type === 'compliance_statement'
       ? { maxTotal: 96, maxPerDocument: 12 }
       : type === 'due_diligence_report'
@@ -733,6 +794,29 @@ export function screenEvidenceSources(sources: EvidenceSource[], type?: AiExecut
   result.usable.sort((left, right) =>
     priority(left.sourceType) - priority(right.sourceType))
   return result
+}
+
+export function missingRequiredProjectFiles(
+  requiredProjectFiles: readonly RequiredProjectFile[],
+  sources: readonly EvidenceSource[],
+) {
+  const representedIds = new Set(sources
+    .filter((source) => !source.sourceType.startsWith('public_web'))
+    .map((source) => source.sourceId)
+    .filter((sourceId): sourceId is string => Boolean(sourceId)))
+  return requiredProjectFiles.filter((file) => !representedIds.has(file.sourceId))
+}
+
+function assertCompleteProjectFileCoverage(
+  requiredProjectFiles: readonly RequiredProjectFile[],
+  sources: readonly EvidenceSource[],
+) {
+  const missing = missingRequiredProjectFiles(requiredProjectFiles, sources)
+  if (missing.length === 0) return
+  const names = missing.slice(0, 8).map((file) => file.sourceName).join('、')
+  throw new Error(
+    `项目资料未实现完整研读覆盖，已停止生成提案：${names}${missing.length > 8 ? `等 ${missing.length} 份` : ''}`,
+  )
 }
 
 async function getTaskRow(userId: string, taskId: string) {
@@ -1528,7 +1612,7 @@ async function executeTask(taskId: string) {
       return
     }
     const sourceCutoffDate = String(parameters.sourceCutoffDate || formatShanghaiDateKey(new Date()))
-    const knowledgeSources = await sourcesForProject(
+    const projectSourceLoad = await sourcesForProject(
       project.id,
       sourceCutoffDate,
       task.type === 'investment_proposal'
@@ -1544,7 +1628,10 @@ async function executeTask(taskId: string) {
           : task.type === 'investment_recommendation_ppt'
             ? 160
           : 40,
+      { completeProjectFileCoverage: task.type === 'investment_proposal' },
     )
+    const knowledgeSources = projectSourceLoad.sources
+    const requiredProjectFiles = projectSourceLoad.requiredProjectFiles
     await updateStage(taskId, '整理当前项目资料库证据', 18)
     const userInstructions = typeof parameters.userInstructions === 'string'
       ? parameters.userInstructions.trim()
@@ -1722,12 +1809,22 @@ async function executeTask(taskId: string) {
       'investment_recommendation_ppt',
       'due_diligence_report',
     ].includes(task.type)) {
+      if (task.type === 'investment_proposal') {
+        assertCompleteProjectFileCoverage(requiredProjectFiles, sources)
+      }
       await updateStage(taskId, '深度研读项目资料并建立事实底稿', 26)
       projectKnowledgeBrief = await buildProjectKnowledgeBrief({
         project,
         sources,
         sourceCutoffDate,
+        requiredProjectFiles,
       })
+      if (task.type === 'investment_proposal' && !projectKnowledgeBrief.audit.completeProjectFileCoverage) {
+        const missing = projectKnowledgeBrief.audit.missingRequiredSourceFiles
+        throw new Error(
+          `项目资料研读覆盖校验未通过，已停止生成提案：${missing.slice(0, 8).join('、')}`,
+        )
+      }
     }
 
     if (task.type === 'project_qa') {

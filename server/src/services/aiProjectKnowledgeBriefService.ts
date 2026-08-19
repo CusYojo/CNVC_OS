@@ -72,6 +72,11 @@ export type ProjectKnowledgeBrief = {
     sourceFilesRepresented: string[]
     selectedSourceFiles: string[]
     sourceFileCoverageRatio: number
+    requiredSourceDocumentCount: number
+    requiredSourceFiles: string[]
+    missingRequiredSourceFiles: string[]
+    requiredSourceFileCoverageRatio: number
+    completeProjectFileCoverage: boolean
     sourceChunkCount: number
     includedChunkCount: number
     includedCharacterCount: number
@@ -369,6 +374,7 @@ export async function buildProjectKnowledgeBrief(input: {
   project: ProjectLike
   sources: EvidenceSource[]
   sourceCutoffDate: string
+  requiredProjectFiles?: Array<{ sourceId: string; sourceName: string }>
   fetchImpl?: typeof fetch
 }): Promise<ProjectKnowledgeBrief> {
   const entries = selectCorpusEntries(input.sources)
@@ -376,6 +382,17 @@ export async function buildProjectKnowledgeBrief(input: {
   const documentCount = new Set(input.sources.map(sourceDocumentKey)).size
   const sourceFilesRepresented = [...new Set(input.sources.map((source) => source.sourceName))]
   const selectedSourceFiles = [...new Set(entries.map((entry) => entry.source.sourceName))]
+  const requiredProjectFiles = input.requiredProjectFiles ?? []
+  const selectedSourceIds = new Set(entries
+    .map((entry) => entry.source.sourceId)
+    .filter((sourceId): sourceId is string => Boolean(sourceId)))
+  const missingRequiredSourceFiles = requiredProjectFiles
+    .filter((file) => !selectedSourceIds.has(file.sourceId))
+    .map((file) => file.sourceName)
+  const requiredSourceFileCoverageRatio = requiredProjectFiles.length
+    ? Number(((requiredProjectFiles.length - missingRequiredSourceFiles.length)
+      / requiredProjectFiles.length).toFixed(4))
+    : 1
   const auditBase = {
     model: MODEL,
     sourceDocumentCount: documentCount,
@@ -384,6 +401,11 @@ export async function buildProjectKnowledgeBrief(input: {
     sourceFileCoverageRatio: sourceFilesRepresented.length
       ? Number((selectedSourceFiles.length / sourceFilesRepresented.length).toFixed(4))
       : 1,
+    requiredSourceDocumentCount: requiredProjectFiles.length,
+    requiredSourceFiles: requiredProjectFiles.map((file) => file.sourceName),
+    missingRequiredSourceFiles,
+    requiredSourceFileCoverageRatio,
+    completeProjectFileCoverage: missingRequiredSourceFiles.length === 0,
     sourceChunkCount: input.sources.length,
     includedChunkCount: entries.length,
     includedCharacterCount: corpus.length,
