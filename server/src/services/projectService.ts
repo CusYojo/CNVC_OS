@@ -6,7 +6,7 @@ import { projects, projectFiles, projectFileVersions, auditLogs, knowledgeChunks
 import { createMySqlIdentityRepositoryContext, identityRepositories } from '../repositories/index.js'
 import { sanitizeScoringCompetitors } from './competitorEvidence.js'
 import { removeOwnedProjectFile, removeProjectFileDirectory, removeProjectFileHistory } from './projectFileStorageService.js'
-import { getAccessibleProject, projectAccessCondition } from './projectAccessService.js'
+import { projectAccessCondition } from './projectAccessService.js'
 import { syncProjectIdentityBindings } from './identityResolutionService.js'
 import { businessVersionConflict } from './businessOptimisticLock.js'
 
@@ -128,21 +128,46 @@ export async function getProject(id: string) {
   return rows[0] ? publicProject(rows[0]) : undefined
 }
 
+// 列表接口只返回页面需要的元数据。正文由 RAG/受控读取接口使用，不能随文件列表批量下发。
+const projectFileListColumns = {
+  id: projectFiles.id,
+  projectId: projectFiles.projectId,
+  name: projectFiles.name,
+  type: projectFiles.type,
+  category: projectFiles.category,
+  size: projectFiles.size,
+  uploader: projectFiles.uploader,
+  parseStatus: projectFiles.parseStatus,
+  visibility: projectFiles.visibility,
+  storagePath: projectFiles.storagePath,
+  version: projectFiles.version,
+  uploadedAt: projectFiles.uploadedAt,
+}
+
 export async function listFiles(projectId: string) {
-  const rows = await db.select().from(projectFiles).where(eq(projectFiles.projectId, projectId)).orderBy(desc(projectFiles.uploadedAt))
+  const rows = await db.select(projectFileListColumns).from(projectFiles)
+    .where(eq(projectFiles.projectId, projectId)).orderBy(desc(projectFiles.uploadedAt))
   return rows.map(publicProjectFile)
 }
 
 export async function listAllFiles(userId?: string) {
-  const rows = await db.select().from(projectFiles).orderBy(desc(projectFiles.uploadedAt)).limit(500)
-  if (!userId) return rows.map(publicProjectFile)
-  const accessible = await Promise.all(rows.map(async (row) => (
-    await getAccessibleProject(userId, row.projectId) ? row : null
-  )))
-  return accessible.filter((row): row is NonNullable<typeof row> => Boolean(row)).map(publicProjectFile)
+  let accessWhere = sql`TRUE`
+  if (userId) {
+    const user = await identityRepositories.users.findById(userId)
+    if (!user || user.status !== '启用') return []
+    accessWhere = projectAccessCondition({ uid: user.id, name: user.name, role: user.role })
+  }
+  // 权限条件直接下推到 SQL。旧实现对每个文件并发调用 getAccessibleProject，
+  // 会产生 N+1 查询并在几十份文件时耗尽 MySQL 连接池队列。
+  const rows = await db.select(projectFileListColumns).from(projectFiles)
+    .innerJoin(projects, eq(projectFiles.projectId, projects.id))
+    .where(accessWhere)
+    .orderBy(desc(projectFiles.uploadedAt))
+    .limit(500)
+  return rows.map(publicProjectFile)
 }
 
-function publicProjectFile<T extends typeof projectFiles.$inferSelect>(row: T) {
+function publicProjectFile<T extends { storagePath: string | null }>(row: T) {
   const { storagePath, ...file } = row
   return { ...file, hasOriginal: Boolean(storagePath) }
 }

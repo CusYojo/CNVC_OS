@@ -180,7 +180,8 @@ export const useAppStore = create<AppState>()(
           risks: listOrEmpty(results[3]),
           users: listOrEmpty(results[4]),
           aiSummaries: listOrEmpty(results[5]),
-          files: listOrEmpty(results[6]),
+          // 文件接口失败时保留已有状态，不能把网络/数据库错误伪装成“0 份资料”。
+          files: results[6].status === 'fulfilled' ? results[6].value.list : get().files,
           templates: listOrEmpty(results[7]),
           auditLogs: listOrEmpty(results[8]),
           approvalRequests: listOrEmpty(results[9]),

@@ -81,6 +81,9 @@ export function ProjectDetailPage() {
   const [repairingFileId, setRepairingFileId] = useState<string | null>(null)
   const [missingOriginalFileIds, setMissingOriginalFileIds] = useState<string[]>([])
   const [savingProject, setSavingProject] = useState(false)
+  const [projectFilesLoading, setProjectFilesLoading] = useState(true)
+  const [projectFilesError, setProjectFilesError] = useState('')
+  const [projectFilesReloadKey, setProjectFilesReloadKey] = useState(0)
 
   const projectFiles = files.filter((item) => item.projectId === id)
   const projectMeetings = meetings.filter((item) => item.projectId === id)
@@ -98,6 +101,28 @@ export function ProjectDetailPage() {
   }, [listLeadMatch?.id, fetchLeadDetail])
   const companyIntelligence = fullIntel ?? listLeadMatch
   const projectAudits = auditLogs.filter((item) => item.target.includes(project?.name ?? '')).slice(0, 5)
+
+  useEffect(() => {
+    if (!project?.id) return
+    let cancelled = false
+    setProjectFilesLoading(true)
+    setProjectFilesError('')
+    void apiGet<{ list: ProjectFile[] }>(`/projects/${project.id}/files`)
+      .then((response) => {
+        if (cancelled) return
+        useAppStore.setState((state) => ({
+          files: [...response.list, ...state.files.filter((file) => file.projectId !== project.id)],
+        }))
+      })
+      .catch((error) => {
+        if (cancelled) return
+        const message = (error as Error).message || '未知错误'
+        setProjectFilesError(message)
+        showToast(`项目资料加载失败：${message}`, 'error')
+      })
+      .finally(() => { if (!cancelled) setProjectFilesLoading(false) })
+    return () => { cancelled = true }
+  }, [project?.id, projectFilesReloadKey, showToast])
 
   if (!project) {
     return <Card className="mx-auto mt-16 max-w-xl p-10 text-center"><AlertCircle className="mx-auto h-10 w-10 text-slate-300" /><h1 className="mt-4 text-lg font-semibold">项目不存在或已归档</h1><p className="mt-2 text-sm text-slate-500">请返回项目列表选择其他项目。</p><Button className="mt-5" onClick={() => navigate('/projects')}>返回项目列表</Button></Card>
@@ -359,7 +384,7 @@ export function ProjectDetailPage() {
   const renderFiles = () => (
     <Card className="overflow-hidden">
       <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4"><div><h2 className="font-semibold text-slate-800">项目资料库</h2><p className="mt-1 text-xs text-slate-400">文件解析完成后可被 AI 摘要、问答和材料生成引用</p></div><Button onClick={() => setShowUpload(true)}><Upload className="h-4 w-4" />上传资料</Button></div>
-      {projectFiles.length ? <DataTable headers={['文件名称', '分类', '大小', '版本', '上传人', '解析状态', '上传时间', '']}>{projectFiles.map((file) => <tr key={file.id} className="hover:bg-slate-50"><TableCell><span className="flex items-center gap-3"><span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-blue-50 text-[10px] font-semibold text-blue-600">{getFileTypeLabel(file)}</span><span className="font-medium text-slate-700">{file.name}</span></span></TableCell><TableCell>{file.category}</TableCell><TableCell>{file.size}</TableCell><TableCell>V{file.version}</TableCell><TableCell>{file.uploader}</TableCell><TableCell><StatusBadge status={file.parseStatus} /></TableCell><TableCell>{displayShanghaiDateTime(file.uploadedAt)}</TableCell><TableCell><span className="flex items-center gap-1"><button aria-label={`下载${file.name}`} disabled={!!downloadingFileId || !!repairingFileId} onClick={() => { void downloadProjectFile(file) }} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"><Download className="h-4 w-4" /></button>{(file.hasOriginal === false || missingOriginalFileIds.includes(file.id)) && <button aria-label={`补传${file.name}`} disabled={!!repairingFileId} onClick={() => repairProjectFile(file)} className="rounded-lg px-2 py-1 text-xs text-brand-600 hover:bg-brand-50 disabled:opacity-50">{repairingFileId === file.id ? '补传中…' : '补传原文件'}</button>}<button aria-label={`删除${file.name}`} onClick={() => handleDeleteFile(file)} className="rounded-lg px-2 py-1 text-xs text-rose-600 hover:bg-rose-50">删除</button></span></TableCell></tr>)}</DataTable> : <div className="p-12 text-center"><FileText className="mx-auto h-8 w-8 text-slate-300" /><p className="mt-3 text-sm font-medium text-slate-700">还没有项目资料</p><p className="mt-1 text-xs text-slate-400">上传 BP 后即可生成结构化项目卡片与 AI 摘要</p></div>}
+      {projectFilesError ? <div className="p-12 text-center"><AlertCircle className="mx-auto h-8 w-8 text-rose-300" /><p className="mt-3 text-sm font-medium text-slate-700">项目资料加载失败</p><p className="mt-1 text-xs text-slate-400">{projectFilesError}</p><Button className="mt-4" variant="secondary" onClick={() => setProjectFilesReloadKey((key) => key + 1)}><RefreshCw className="h-4 w-4" />重新加载</Button></div> : projectFilesLoading && !projectFiles.length ? <div className="p-12 text-center"><RefreshCw className="mx-auto h-8 w-8 animate-spin text-brand-300" /><p className="mt-3 text-sm text-slate-500">正在加载项目资料…</p></div> : projectFiles.length ? <DataTable headers={['文件名称', '分类', '大小', '版本', '上传人', '解析状态', '上传时间', '']}>{projectFiles.map((file) => <tr key={file.id} className="hover:bg-slate-50"><TableCell><span className="flex items-center gap-3"><span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-blue-50 text-[10px] font-semibold text-blue-600">{getFileTypeLabel(file)}</span><span className="font-medium text-slate-700">{file.name}</span></span></TableCell><TableCell>{file.category}</TableCell><TableCell>{file.size}</TableCell><TableCell>V{file.version}</TableCell><TableCell>{file.uploader}</TableCell><TableCell><StatusBadge status={file.parseStatus} /></TableCell><TableCell>{displayShanghaiDateTime(file.uploadedAt)}</TableCell><TableCell><span className="flex items-center gap-1"><button aria-label={`下载${file.name}`} disabled={!!downloadingFileId || !!repairingFileId} onClick={() => { void downloadProjectFile(file) }} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"><Download className="h-4 w-4" /></button>{(file.hasOriginal === false || missingOriginalFileIds.includes(file.id)) && <button aria-label={`补传${file.name}`} disabled={!!repairingFileId} onClick={() => repairProjectFile(file)} className="rounded-lg px-2 py-1 text-xs text-brand-600 hover:bg-brand-50 disabled:opacity-50">{repairingFileId === file.id ? '补传中…' : '补传原文件'}</button>}<button aria-label={`删除${file.name}`} onClick={() => handleDeleteFile(file)} className="rounded-lg px-2 py-1 text-xs text-rose-600 hover:bg-rose-50">删除</button></span></TableCell></tr>)}</DataTable> : <div className="p-12 text-center"><FileText className="mx-auto h-8 w-8 text-slate-300" /><p className="mt-3 text-sm font-medium text-slate-700">还没有项目资料</p><p className="mt-1 text-xs text-slate-400">上传 BP 后即可生成结构化项目卡片与 AI 摘要</p></div>}
     </Card>
   )
 
@@ -432,7 +457,7 @@ export function ProjectDetailPage() {
           <div className="flex items-center gap-5 border-r border-slate-200 pr-5 text-xs"><div><p className="text-slate-400">负责人</p><p className="mt-1 font-medium text-slate-700">{project.owner}</p></div><div><p className="text-slate-400">最近更新</p><p className="mt-1 whitespace-nowrap font-medium text-slate-700">{displayShanghaiDateTime(project.updatedAt)}</p></div></div>
           <div className="flex items-center gap-2"><Button variant="secondary" onClick={() => setShowUpload(true)}><Upload className="h-4 w-4" />上传资料</Button><Button loading={generating} onClick={generateSummary}><Sparkles className="h-4 w-4" />生成评分</Button></div>
         </div>
-        <div className="px-4"><Tabs tabs={tabItems.map((tab) => ({ ...tab, count: tab.id === 'files' ? projectFiles.length : tab.id === 'meetings' ? projectMeetings.length : tab.id === 'risks' ? projectRisks.length : undefined }))} value={activeTab} onChange={setActiveTab} /></div>
+        <div className="px-4"><Tabs tabs={tabItems.map((tab) => ({ ...tab, count: tab.id === 'files' ? (projectFilesLoading && !projectFiles.length ? undefined : projectFiles.length) : tab.id === 'meetings' ? projectMeetings.length : tab.id === 'risks' ? projectRisks.length : undefined }))} value={activeTab} onChange={setActiveTab} /></div>
       </Card>
       {tabContent[activeTab]?.()}
 
