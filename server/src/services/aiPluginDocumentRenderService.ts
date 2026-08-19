@@ -161,6 +161,14 @@ function cleanComplianceReason(value: string) {
     : '该项理由尚无足够的已确认事实支持，本次不作正向扩展。'
 }
 
+function cleanComplianceConclusion(value: string) {
+  const cleaned = cleanVisibleText(value)
+    .replace(/[。！？]+(?=\S)/g, '；')
+    .replace(/[。！？]+$/g, '')
+    .trim()
+  return `${cleaned || '本项目应在完成必要尽调核验、内部审批及正式交易文件签署后，方可形成最终合规结论'}。`
+}
+
 function numberedBlocks(
   texts: string[],
   sources: EvidenceSource[],
@@ -240,7 +248,7 @@ export function buildCompliancePluginContent(input: {
           ...numberedBlocks(analysisTexts, input.sources, analysis?.findings ?? [], 7).slice(0, 7),
           {
             type: 'conclusion',
-            text: cleanVisibleText(conclusion?.findings[0]?.text || input.content.executiveSummary),
+            text: cleanComplianceConclusion(conclusion?.findings[0]?.text || input.content.executiveSummary),
             source_ids: sourceIds(conclusion?.findings[0]?.sourceIndexes ?? [], input.sources),
             status: conclusion?.findings[0]?.status === '资料记载' ? 'verified' : 'pending',
           },

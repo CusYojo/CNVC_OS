@@ -708,8 +708,11 @@ def verify_command(args: argparse.Namespace) -> int:
     for section in REQUIRED_SECTIONS:
         if section not in visible:
             errors.append(f"missing visible section: {section}")
+    declared_visible = visible_content_text(content)
     for residue in TEMPLATE_RESIDUE:
-        if residue in visible:
+        # A retained-template marker is residue only when it was not supplied by
+        # the current payload. This keeps real portfolio-peer references valid.
+        if residue in visible and residue not in declared_visible:
             errors.append(f"template residue detected: {residue}")
 
     sections_by_heading = {s.get("heading"): s for s in content.get("sections", [])}
