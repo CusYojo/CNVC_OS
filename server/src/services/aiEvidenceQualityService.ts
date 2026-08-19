@@ -210,6 +210,7 @@ export function curateEvidenceSources<T extends EvidenceLike>(
       return
     }
     const readableCjk = (curatedContent.match(/[\u3400-\u9FFF]/g) || []).length
+    const readableLatin = (curatedContent.match(/[A-Za-z]/g) || []).length
     if (!quality.usable || !curatedContent) {
       rejected.push({
         sourceName: source.sourceName,
@@ -220,8 +221,8 @@ export function curateEvidenceSources<T extends EvidenceLike>(
     }
     if (
       DIAGNOSTIC_NOISE.test(curatedContent)
-      || readableCjk < 6
-      || informationScore(curatedContent) < 14
+      || (readableCjk < 6 && readableLatin < 40)
+      || (informationScore(curatedContent) < 14 && readableLatin < 80)
     ) {
       rejected.push({
         sourceName: source.sourceName,

@@ -80,6 +80,19 @@ test('investment proposal screening reserves evidence coverage for every project
   assert.equal(new Set(screened.map((source) => source.sourceId)).size, 13)
 })
 
+test('investment proposal screening accepts information-dense English project documents', () => {
+  const screened = screenEvidenceSources([{
+    sourceType: 'project_file',
+    sourceId: 'english-paper',
+    sourceName: '院士论文.txt',
+    chunkIndex: 0,
+    content: 'This research paper presents a validated spatial intelligence model, experimental methodology, benchmark results, and deployment evidence for robotic systems.',
+  }], 'investment_proposal').usable
+
+  assert.equal(screened.length, 1)
+  assert.equal(screened[0].sourceId, 'english-paper')
+})
+
 test('project file coverage audit reports files missing from screened evidence', () => {
   const required = [
     { sourceId: 'file-a', sourceName: '工商资料.md' },
