@@ -20,6 +20,7 @@ test('项目原始文件只能保存在专用目录并可重新读取', async ()
     for await (const chunk of opened.stream) chunks.push(Buffer.from(chunk))
     assert.equal(opened.size, content.length)
     assert.deepEqual(Buffer.concat(chunks), content)
+    assert.deepEqual(await storage.readProjectFileBuffer(storagePath), content)
 
     await storage.removeProjectFile(storagePath)
     await assert.rejects(storage.openProjectFile(storagePath), (error: { code?: string; status?: number }) => {

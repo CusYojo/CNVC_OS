@@ -4,6 +4,7 @@ import { projectFiles, fileChunks, knowledgeChunks } from '../db/schema.js'
 import mammoth from 'mammoth'
 import { decodeTextBuffer, normalizeUnicodeText } from './textQualityService.js'
 import { requestAiGatewayVisionText } from './aiGatewayService.js'
+import { readProjectFileBuffer } from './projectFileStorageService.js'
 
 // 通过 18081 网关多模态模型 OCR：读图片/扫描件，返回其中文字。用于图片文件与图片型PDF。
 const GW_BASE = (process.env.OPENAI_BASE_URL || 'http://127.0.0.1:18081/v1').replace(/\/$/, '')
@@ -177,14 +178,36 @@ export function chunkText(text: string, target = 500): string[] {
 // ---------- 提取 + 切块 + 入库 ----------
 // 判定错误是否值得重试：瞬时错误(OCR网关抖动/超时/网络/EADDR/ECONN 等)重试有意义；
 // 确定性错误(不支持的类型/未提取到文字/损坏结构)重试也是同样结果，直接失败不浪费。
-function isRetryableIngestError(msg: string): boolean {
+export function isRetryableIngestError(msg: string): boolean {
   if (/暂不支持提取该类型|未能从文件中提取到任何文字|OCR未识别|既无文本层/.test(msg)) return false
+  if (/data too long|ER_DATA_TOO_LONG|value too long|数据过长|1406/i.test(msg)) return false
   if (/timeout|超时|ECONN|ETIMEDOUT|ENETUNREACH|socket hang up|network|fetch failed|OCR网关|502|503|504|429/i.test(msg)) return true
   // 其余未知错误默认重试一次(可能是瞬时 DB/依赖抖动)
   return true
 }
 
 const INGEST_MAX_ATTEMPTS = Number(process.env.INGEST_MAX_ATTEMPTS ?? 3)  // 首次 + 2 次重试
+const INGEST_ERROR_MAX_CHARS = 2_000
+
+export function summarizeIngestError(error: unknown): string {
+  const messages: string[] = []
+  const seen = new Set<unknown>()
+  let current: unknown = error
+  while (current && !seen.has(current)) {
+    seen.add(current)
+    if (current instanceof Error && current.message) messages.push(current.message)
+    if (typeof current === 'object' && current && 'cause' in current) {
+      current = (current as { cause?: unknown }).cause
+    } else {
+      break
+    }
+  }
+  // Drizzle 的外层错误会包含完整 SQL 参数，正文可能被原样写进日志和 parse_error。
+  // 优先取最深层数据库根因；没有 cause 时也剥离 params 段并限制到安全长度。
+  const raw = messages.at(-1) || (typeof error === 'string' ? error : '未知解析错误')
+  const compact = raw.replace(/\s*params:[\s\S]*$/i, '').replace(/\s+/g, ' ').trim()
+  return (compact || '未知解析错误').slice(0, INGEST_ERROR_MAX_CHARS)
+}
 
 export async function ingestFile(fileId: string, projectId: string, fileName: string, buffer: Buffer, type: string) {
   const t0 = Date.now()
@@ -221,7 +244,7 @@ export async function ingestFile(fileId: string, projectId: string, fileName: st
       console.log(`${tag} ✅ 解析成功 attempt=${attempt} chars=${text.length} chunks=${chunks.length} 耗时=${Date.now() - t0}ms`)
       return { ok: true, chars: text.length, chunks: chunks.length }
     } catch (e) {
-      lastErr = (e as Error).message
+      lastErr = summarizeIngestError(e)
       const retryable = isRetryableIngestError(lastErr)
       console.error(`${tag} ❌ 解析失败 attempt=${attempt}/${INGEST_MAX_ATTEMPTS} retryable=${retryable} err=${lastErr}`)
       if (!retryable || attempt >= INGEST_MAX_ATTEMPTS) break
@@ -233,6 +256,48 @@ export async function ingestFile(fileId: string, projectId: string, fileName: st
   await db.update(projectFiles).set({ parseStatus: '失败', parseError: lastErr }).where(eq(projectFiles.id, fileId))
   console.error(`${tag} ☠ 最终失败 已试 ${INGEST_MAX_ATTEMPTS} 次 耗时=${Date.now() - t0}ms err=${lastErr}`)
   return { ok: false, error: lastErr }
+}
+
+type InterruptedProjectFile = Pick<typeof projectFiles.$inferSelect, 'id' | 'projectId' | 'name' | 'type' | 'storagePath'>
+
+async function recoverInterruptedProjectFileRows(rows: InterruptedProjectFile[]) {
+  let recovered = 0
+  let failed = 0
+  for (const file of rows) {
+    try {
+      if (!file.storagePath) throw new Error('原始文件不存在，无法在服务重启后继续解析')
+      const buffer = await readProjectFileBuffer(file.storagePath)
+      const result = await ingestFile(file.id, file.projectId, file.name, buffer, file.type)
+      if (result.ok) recovered += 1
+      else failed += 1
+    } catch (error) {
+      const message = summarizeIngestError(error)
+      await db.update(projectFiles)
+        .set({ parseStatus: '失败', parseError: message })
+        .where(and(eq(projectFiles.id, file.id), eq(projectFiles.parseStatus, '解析中')))
+      console.error(`[project-file-recovery] id=${file.id} name=${file.name} failed=${message}`)
+      failed += 1
+    }
+  }
+  console.log(`[project-file-recovery] completed queued=${rows.length} recovered=${recovered} failed=${failed}`)
+}
+
+// HTTP 就绪前固定住待恢复快照，随后后台顺序执行，既避免与新上传竞争，也不让 OCR 阻塞启动健康检查。
+export async function scheduleInterruptedProjectFileRecovery(): Promise<number> {
+  const rows = await db.select({
+    id: projectFiles.id,
+    projectId: projectFiles.projectId,
+    name: projectFiles.name,
+    type: projectFiles.type,
+    storagePath: projectFiles.storagePath,
+  }).from(projectFiles).where(eq(projectFiles.parseStatus, '解析中'))
+  if (!rows.length) return 0
+  setImmediate(() => {
+    void recoverInterruptedProjectFileRows(rows).catch((error) => {
+      console.error(`[project-file-recovery] batch failed=${summarizeIngestError(error)}`)
+    })
+  })
+  return rows.length
 }
 
 // ---------- 检索（中文友好的关键词打分，无需 embedding） ----------

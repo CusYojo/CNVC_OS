@@ -1,5 +1,5 @@
 import { createReadStream } from 'node:fs'
-import { lstat, mkdir, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, readFile, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { projectFileMimeType, projectFilePreviewMimeType } from '../security/projectFileValidation.js'
@@ -166,6 +166,26 @@ export async function openProjectFile(storagePath: string) {
     throw Object.assign(new Error('项目原始文件不存在'), { status: 404, code: 'FILE_CONTENT_NOT_FOUND' })
   }
   return { size: info.size, stream: createReadStream(filePath) }
+}
+
+export async function readProjectFileBuffer(storagePath: string): Promise<Buffer> {
+  const filePath = resolveStoredPath(storagePath)
+  await assertRealPathInsideRoot(filePath, true).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') {
+      throw Object.assign(new Error('项目原始文件不存在，请重新上传'), { status: 404, code: 'FILE_CONTENT_NOT_FOUND' })
+    }
+    throw error
+  })
+  const info = await stat(filePath).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') {
+      throw Object.assign(new Error('项目原始文件不存在，请重新上传'), { status: 404, code: 'FILE_CONTENT_NOT_FOUND' })
+    }
+    throw error
+  })
+  if (!info.isFile()) {
+    throw Object.assign(new Error('项目原始文件不存在'), { status: 404, code: 'FILE_CONTENT_NOT_FOUND' })
+  }
+  return readFile(filePath)
 }
 
 export async function removeProjectFile(storagePath: string | null | undefined): Promise<void> {

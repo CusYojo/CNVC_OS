@@ -65,6 +65,7 @@ import { migrationWriteFreezePolicy } from './config/migrationWriteFreezePolicy.
 import { startWeixinMessageBridge, stopWeixinMessageBridge } from './services/weixinMessageBridge.js'
 import { leadBpWorkerHealth, startLeadBpWorker, stopLeadBpWorker } from './services/leadIntakeService.js'
 import { radarInboundRouter } from './routes/radar.js'
+import { scheduleInterruptedProjectFileRecovery } from './services/ragService.js'
 
 assertRuntimeConfiguration()
 installStructuredLogging()
@@ -310,6 +311,8 @@ async function start() {
     }
     const fileTempCleanup = await cleanupStaleProjectFileTemps()
     console.log(`[project-files] temporary cleanup scanned=${fileTempCleanup.scanned} removed=${fileTempCleanup.removed} fresh=${fileTempCleanup.retainedFresh} ignored=${fileTempCleanup.ignored} symlinks=${fileTempCleanup.skippedSymlinks}`)
+    const interruptedProjectFiles = await scheduleInterruptedProjectFileRecovery()
+    console.log(`[project-file-recovery] startup queued=${interruptedProjectFiles}`)
     const demoSeed = await seedUsers()
     const capabilityCatalog = await ensureBuiltinCapabilityCatalog()
     console.log(`[ai-capability] builtin catalog ready capabilities=${capabilityCatalog.capabilities}`)

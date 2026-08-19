@@ -263,7 +263,8 @@ export const projectFiles = mysqlTable('project_files', {
   parseStatus: varchar('parse_status', { length: 16 }).notNull().default('解析中'),
   visibility: varchar('visibility', { length: 16 }).notNull().default('项目成员'),
   storagePath: text('storage_path'), // 预留：以后接 OSS 时使用
-  contentText: text('content_text'), // 提取的文档正文（RAG 检索用）
+  // 文档正文可能远超 MySQL TEXT 的 64 KiB 上限（大型 Markdown/尽调报告很常见）。
+  contentText: longtext('content_text'), // 提取的文档正文（RAG 检索用）
   parseError: text('parse_error'),
   version: int('version').notNull().default(1),
   uploadedAt: timestampColumn('uploaded_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
