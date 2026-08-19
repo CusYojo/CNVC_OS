@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useSearchParams } from 'react-router-dom'
 import { AlertCircle, Bot, Boxes, Check, CheckCircle2, ChevronDown, ChevronRight, Copy, Download, File as FileIcon, FileText, MessageSquarePlus, Paperclip, Pencil, RefreshCw, Search, Send, Square, X } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
@@ -93,6 +94,14 @@ function ProjectPicker({
   const [query, setQuery] = useState('')
   const [hasTyped, setHasTyped] = useState(false)
   const pickerRef = useRef<HTMLDivElement>(null)
+  const popupRef = useRef<HTMLDivElement>(null)
+  const [popupLayout, setPopupLayout] = useState<{
+    left: number
+    top: number
+    width: number
+    maxHeight: number
+    opensAbove: boolean
+  } | null>(null)
   const selected = projects.find((project) => project.id === value)
 
   const filteredProjects = useMemo(() => {
@@ -114,7 +123,8 @@ function ProjectPicker({
   useEffect(() => {
     if (!open) return
     const handlePointerDown = (event: MouseEvent) => {
-      if (!pickerRef.current?.contains(event.target as Node)) {
+      const target = event.target as Node
+      if (!pickerRef.current?.contains(target) && !popupRef.current?.contains(target)) {
         setOpen(false)
         setQuery('')
         setHasTyped(false)
@@ -122,6 +132,38 @@ function ProjectPicker({
     }
     document.addEventListener('mousedown', handlePointerDown)
     return () => document.removeEventListener('mousedown', handlePointerDown)
+  }, [open])
+
+  useEffect(() => {
+    if (!open) {
+      setPopupLayout(null)
+      return
+    }
+    const updatePopupLayout = () => {
+      const rect = pickerRef.current?.getBoundingClientRect()
+      if (!rect) return
+      const viewportPadding = 16
+      const gap = 6
+      const spaceBelow = window.innerHeight - rect.bottom - viewportPadding - gap
+      const spaceAbove = rect.top - viewportPadding - gap
+      const openBelow = spaceBelow >= 220 || spaceBelow >= spaceAbove
+      const availableHeight = Math.max(120, openBelow ? spaceBelow : spaceAbove)
+      const maxHeight = Math.min(480, availableHeight)
+      setPopupLayout({
+        left: rect.left,
+        top: openBelow ? rect.bottom + gap : rect.top - gap,
+        width: rect.width,
+        maxHeight,
+        opensAbove: !openBelow,
+      })
+    }
+    updatePopupLayout()
+    window.addEventListener('resize', updatePopupLayout)
+    window.addEventListener('scroll', updatePopupLayout, true)
+    return () => {
+      window.removeEventListener('resize', updatePopupLayout)
+      window.removeEventListener('scroll', updatePopupLayout, true)
+    }
   }, [open])
 
   const selectProject = (projectId: string) => {
@@ -191,9 +233,25 @@ function ProjectPicker({
       )}
       <ChevronDown className={`pointer-events-none absolute right-3 top-5 z-10 h-4 w-4 -translate-y-1/2 text-slate-400 transition ${open ? 'rotate-180' : ''}`} />
 
-      {open && (
-        <div className="absolute inset-x-0 top-[calc(100%+6px)] z-30 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl">
-          <div id="new-session-project-listbox" className="max-h-64 overflow-y-auto p-1.5 scrollbar-thin" role="listbox" aria-label="项目列表">
+      {open && popupLayout && createPortal(
+        <div
+          ref={popupRef}
+          className="fixed z-[70] flex overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl"
+          style={{
+            left: popupLayout.left,
+            top: popupLayout.top,
+            width: popupLayout.width,
+            maxHeight: popupLayout.maxHeight,
+            flexDirection: 'column',
+            transform: popupLayout.opensAbove ? 'translateY(-100%)' : undefined,
+          }}
+        >
+          <div
+            id="new-session-project-listbox"
+            className="min-h-0 flex-1 overflow-y-auto p-1.5 scrollbar-thin"
+            role="listbox"
+            aria-label="项目列表"
+          >
             {filteredProjects.map((project) => (
               <button
                 key={project.id}
@@ -220,7 +278,8 @@ function ProjectPicker({
             {!filteredProjects.length && <div className="px-3 py-8 text-center text-xs text-slate-400">没有找到匹配的项目</div>}
           </div>
           <div className="border-t border-slate-100 px-3 py-2 text-[11px] text-slate-400">共 {filteredProjects.length} 个匹配项目 · 回车选择第一项</div>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   )
@@ -1039,7 +1098,6 @@ function Chat() {
   const [slashHighlight, setSlashHighlight] = useState(0)
   const [capabilitySaving, setCapabilitySaving] = useState(false)
   const [newSessionModelId, setNewSessionModelId] = useState('')
-  const [switchingModel, setSwitchingModel] = useState(false)
   const [creatingSession, setCreatingSession] = useState(false)
   const [selectedQuickAction, setSelectedQuickAction] = useState<'investment_ppt' | null>(null)
 
@@ -1306,22 +1364,6 @@ function Chat() {
   }, [agentError])
   // 正在提交(submitted)或回答(streaming)算"忙"，显示停止按钮；connecting 是初次加载历史/建连，不算忙。
   const busy = agent.status === 'streaming' || agent.status === 'submitted'
-  async function switchCurrentSessionModel(modelId: string | null) {
-    if (!currentSession || switchingModel || busy || agent.interaction) return
-    if ((currentSession.modelId || null) === modelId) return
-    setSwitchingModel(true)
-    try {
-      await apiPatch(`/agent/conversations/${encodeURIComponent(currentSession.agentId)}/model`, { modelId })
-      setSessions((current) => current.map((session) => (
-        session.agentId === currentSession.agentId ? { ...session, modelId } : session
-      )))
-      showToast('当前会话模型已切换，下一轮将使用新模型并保留历史消息', 'success')
-    } catch (error) {
-      showToast(`切换模型失败：${safeAgentErrorMessage(error)}`, 'error')
-    } finally {
-      setSwitchingModel(false)
-    }
-  }
   // React 状态更新前也可能连续触发键盘/点击事件，ref 作为同步锁杜绝重复提交。
   const submitLockRef = useRef(false)
   const [submitting, setSubmitting] = useState(false)
@@ -2164,25 +2206,9 @@ function Chat() {
               </span>
             </div>
           )}
-          <select
-            className="input ml-auto h-9 w-44 bg-slate-50 text-xs text-slate-600"
-            aria-label="切换当前会话模型"
-            value={currentSession?.modelId || ''}
-            onChange={(event) => { void switchCurrentSessionModel(event.target.value || null) }}
-            disabled={!currentSession || switchingModel || busy || Boolean(agent.interaction)}
-            title={busy || agent.interaction ? '当前轮完成或停止后才能切换模型' : '切换后从下一轮生效，历史消息保留'}
-          >
-            <option value="">系统默认模型</option>
-            {availableModels.map((model) => (
-              <option key={model.id} value={model.id}>{model.displayName}{model.isDefault ? '（默认）' : ''}</option>
-            ))}
-            {currentSession?.modelId && !availableModels.some((model) => model.id === currentSession.modelId) && (
-              <option value={currentSession.modelId}>已停用模型（切换后不可恢复）</option>
-            )}
-          </select>
           {agent.runtime && (
             <div
-              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-[11px] text-slate-500"
+              className="ml-auto rounded-lg border border-slate-200 bg-white px-3 py-2 text-[11px] text-slate-500"
               aria-label="模型用量与上下文压缩状态"
               title={agent.runtime.contextCompaction.lastError || undefined}
             >
@@ -2597,7 +2623,7 @@ function Chat() {
                 <option key={model.id} value={model.id}>{model.displayName}{model.isDefault ? '（默认）' : ''}</option>
               ))}
             </select>
-            <span className="mt-1 block text-[11px] text-slate-400">仅显示管理员已启用且当前账号有权使用的模型；创建后仍可在会话顶部切换，下一轮生效并保留历史。</span>
+            <span className="mt-1 block text-[11px] text-slate-400">仅显示管理员已启用且当前账号有权使用的模型。</span>
           </label>
         </div>
       </Modal>

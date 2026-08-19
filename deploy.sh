@@ -23,6 +23,9 @@ LOG_LINES="${LOG_LINES:-100}"
 APP_ENTRY="${PROJECT_DIR}/server-dist/index.js"
 APP_ENV_FILE="${PROJECT_DIR}/.env"
 APP_LOG_FILE="${APP_LOG_FILE:-${PROJECT_DIR}/logs/server.log}"
+DOCUMENT_RUNTIME_LOCK="${PROJECT_DIR}/server/requirements-pdf-to-ppt.lock.txt"
+DOCUMENT_RUNTIME_PYTHON="${PROJECT_DIR}/server/.venv/bin/python3"
+DOCUMENT_RUNTIME_STAMP="${PROJECT_DIR}/server/.venv/.dependency-lock-sha256"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -137,10 +140,37 @@ validate_service_binding() {
     log "服务路径已绑定当前项目: ${PROJECT_DIR}"
 }
 
+prepare_document_runtime() {
+    local expected_lock_sha installed_lock_sha=""
+    if [ ! -f "$DOCUMENT_RUNTIME_LOCK" ]; then
+        err "缺少文档运行时依赖锁: ${DOCUMENT_RUNTIME_LOCK}"
+        return 1
+    fi
+
+    expected_lock_sha=$(sha256sum "$DOCUMENT_RUNTIME_LOCK" | awk '{print $1}')
+    if [ -f "$DOCUMENT_RUNTIME_STAMP" ]; then
+        installed_lock_sha=$(tr -d '[:space:]' < "$DOCUMENT_RUNTIME_STAMP")
+    fi
+
+    if [ ! -x "$DOCUMENT_RUNTIME_PYTHON" ] || [ "$installed_lock_sha" != "$expected_lock_sha" ]; then
+        step "准备文档生成运行时"
+        npm run setup:pdf-to-ppt
+        install -d -m 0700 "$(dirname "$DOCUMENT_RUNTIME_STAMP")"
+        printf '%s\n' "$expected_lock_sha" > "$DOCUMENT_RUNTIME_STAMP"
+        chmod 0600 "$DOCUMENT_RUNTIME_STAMP"
+        log "文档生成运行时已按精确依赖锁重建"
+        return
+    fi
+
+    npm run verify:document-runtime-dependencies
+    log "文档生成运行时依赖核验通过"
+}
+
 prepare_mutation() {
     systemctl daemon-reload
     validate_project_files
     validate_service_binding
+    prepare_document_runtime
 }
 
 wait_for_stopped() {

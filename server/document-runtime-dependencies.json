@@ -2,20 +2,22 @@
   "schemaVersion": "1.0",
   "python": {
     "lockFile": "server/requirements-pdf-to-ppt.lock.txt",
-    "lockSha256": "d7d57a619ebe7318c806eaced1ce1106af05bc1f345a4a4f4d96b1e60d15eaec",
-    "packageCount": 11
+    "lockSha256": "d615af613b5f7acbde3faa4f7966900a57de9154199821b00fc33f786512d129",
+    "packageCount": 19
   },
   "native": {
     "python": { "minimum": "3.11.0", "maximumExclusive": "3.14.0" },
     "libreOffice": { "minimum": "7.4.0", "maximumExclusive": "27.0.0" },
     "popplerRasterizer": { "minimum": "22.0.0", "maximumExclusive": "27.0.0" },
+    "popplerText": { "minimum": "22.0.0", "maximumExclusive": "27.0.0" },
     "popplerFonts": { "minimum": "22.0.0", "maximumExclusive": "27.0.0" },
     "tesseract": { "minimum": "5.0.0", "maximumExclusive": "6.0.0" },
-    "fontconfig": { "minimum": "2.14.0", "maximumExclusive": "3.0.0" }
+    "fontconfig": { "minimum": "2.14.0", "maximumExclusive": "3.0.0" },
+    "legacyWordExtractor": { "minimum": "0.37.0", "maximumExclusive": "1.0.0" }
   },
   "requiredByPlatform": {
-    "darwin": ["python", "libreOffice", "popplerRasterizer", "popplerFonts"],
-    "linux": ["python", "libreOffice", "popplerRasterizer", "popplerFonts", "tesseract", "fontconfig"]
+    "darwin": ["python", "libreOffice", "popplerRasterizer", "popplerText", "popplerFonts"],
+    "linux": ["python", "libreOffice", "popplerRasterizer", "popplerText", "popplerFonts", "tesseract", "fontconfig", "legacyWordExtractor"]
   },
   "linuxRequiredTesseractLanguages": ["chi_sim", "eng"],
   "linuxRequiredFontFamilies": ["Noto Sans CJK SC", "Noto Serif CJK SC"],

@@ -6,7 +6,8 @@ import { homedir } from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
 
-type NativeName = 'python' | 'libreOffice' | 'popplerRasterizer' | 'popplerFonts' | 'tesseract' | 'fontconfig'
+type NativeName = 'python' | 'libreOffice' | 'popplerRasterizer' | 'popplerText'
+  | 'popplerFonts' | 'tesseract' | 'fontconfig' | 'legacyWordExtractor'
 type VersionRange = { minimum: string; maximumExclusive: string }
 type DependencyManifest = {
   schemaVersion: string
@@ -106,6 +107,10 @@ function nativeCandidates() {
       path.join(poppler, 'pdftoppm'),
       'pdftoppm',
     ],
+    popplerText: [
+      path.join(poppler, 'pdftotext'),
+      'pdftotext',
+    ],
     popplerFonts: [
       process.env.AI_PDFFONTS_BIN,
       process.env.AI_QA_PDFFONTS_BINARY,
@@ -114,6 +119,7 @@ function nativeCandidates() {
     ],
     tesseract: [process.env.AI_PDF_TO_PPT_TESSERACT, 'tesseract'],
     fontconfig: [path.join(poppler, 'fc-list'), 'fc-list'],
+    legacyWordExtractor: ['antiword'],
     fontMatch: [path.join(poppler, 'fc-match'), 'fc-match'],
   }
 }
@@ -122,9 +128,11 @@ const commandArguments: Record<NativeName, string[]> = {
   python: ['--version'],
   libreOffice: ['--version'],
   popplerRasterizer: ['-v'],
+  popplerText: ['-v'],
   popplerFonts: ['-v'],
   tesseract: ['--version'],
   fontconfig: ['--version'],
+  legacyWordExtractor: ['-h'],
 }
 
 async function loadContract() {
@@ -167,14 +175,16 @@ async function staticChecks(contract: Awaited<ReturnType<typeof loadContract>>) 
     readFile(path.resolve(root, 'deploy.sh'), 'utf8'),
   ])
   const requiredDirectPackages = [
-    'pymupdf', 'pillow', 'opencv-python-headless', 'numpy', 'pypdf', 'reportlab', 'python-pptx',
+    'pymupdf', 'pillow', 'opencv-python-headless', 'numpy', 'pypdf', 'reportlab',
+    'python-docx', 'python-pptx', 'openpyxl', 'pandas', 'xlrd', 'scipy',
   ]
   const directPackagesLocked = requiredDirectPackages.every((name) => contract.packages.has(name))
   const setupUsesExactLock = /requirements-pdf-to-ppt\.lock\.txt/.test(setupSource)
   const setupRunsLiveVerification = /verifyDocumentRuntimeDependencies\.ts.*--live/s.test(setupSource)
   const deployRunsLiveVerification = /verify:document-runtime-dependencies/.test(deploySource)
   const linuxNativeContractComplete = [
-    'python', 'libreOffice', 'popplerRasterizer', 'popplerFonts', 'tesseract', 'fontconfig',
+    'python', 'libreOffice', 'popplerRasterizer', 'popplerText', 'popplerFonts',
+    'tesseract', 'fontconfig', 'legacyWordExtractor',
   ].every((name) => contract.manifest.requiredByPlatform.linux.includes(name as NativeName))
   const linuxLanguageAndFontContractComplete = ['chi_sim', 'eng'].every((language) => (
     contract.manifest.linuxRequiredTesseractLanguages.includes(language)
