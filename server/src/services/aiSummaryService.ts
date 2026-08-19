@@ -5,7 +5,7 @@ import { drizzle } from 'drizzle-orm/mysql2'
 import type { RowDataPacket } from 'mysql2'
 import type { PoolConnection } from 'mysql2/promise'
 import { db, pool, schema } from '../db/client.js'
-import { aiSummaries, leads, auditLogs, migrationEntityMappings, projectMembers, projects } from '../db/schema.js'
+import { aiSummaries, leads, auditLogs, leadScoreJobs, migrationEntityMappings, projectMembers, projects } from '../db/schema.js'
 import { createMySqlIdentityRepositoryContext } from '../repositories/index.js'
 import { projectAccessCondition, type ProjectAccessActor } from './projectAccessService.js'
 import {
@@ -34,6 +34,8 @@ import { transitionLeadPipelineItem, type LeadPipelineTransitionInput } from './
 import { openLeadPipelineReview, recordLeadPipelineDecision } from './leadPipelineAuditService.js'
 import { recordLeadPipelineEntityMatch } from './leadPipelineEntityMatchService.js'
 import { formatShanghaiDateKey } from '../utils/shanghaiTime.js'
+import { resolvePaperProjectIdentity } from './paperIdentity.js'
+import { publicLeadScoreDeadLetterError, publicLeadScoreError } from './leadScoreRetryPolicy.js'
 
 export async function getSummary(projectId: string) {
   const rows = await db.select().from(aiSummaries).where(eq(aiSummaries.projectId, projectId)).orderBy(desc(aiSummaries.updatedAt)).limit(1)
@@ -178,6 +180,7 @@ const visiblePublicLeadExpr = sql<boolean>`NOT (
   OR COALESCE(${jsonText(leads.radarProfile, '$.qualityRejected')}, '') = 'true'
   OR ${leads.poolStatus} = '解析失败'
   OR ${leads.poolStatus} = '已合并'
+  OR ${leads.poolStatus} = '已删除'
 )`
 
 export type LeadScoreJobStatus = 'queued' | 'running' | 'retrying' | 'done' | 'failed' | 'dead_letter'
@@ -488,8 +491,15 @@ function enrichLead(row: typeof leads.$inferSelect) {
   const isPaper = String(rp.channel ?? '') === '论文'
   const paperMeta = (rp.paperMeta && typeof rp.paperMeta === 'object' ? rp.paperMeta : {}) as Record<string, unknown>
   const paperTitleZh = isPaper ? meaningfulPresentationText(paperMeta.titleZh) : undefined
-  const paperAbstractZh = isPaper ? meaningfulPresentationText(paperMeta.abstractZh) : undefined
   const sourceTitle = String(rp.sourceTitle || ((arr(row.sources)[0] as Record<string, unknown> | undefined)?.title ?? '')).trim()
+  const paperProjectIdentity = isPaper ? resolvePaperProjectIdentity({
+    titleOriginal: paperMeta.titleOriginal || paperMeta.title || sourceTitle || row.name,
+    titleZh: paperTitleZh,
+    modelProjectName: paperMeta.projectNameOriginal,
+    modelProjectNameZh: paperMeta.projectName || profile.projectName,
+  }) : { projectName: '', projectNameOriginal: '' }
+  const paperProjectName = meaningfulPresentationText(paperProjectIdentity.projectName)
+  const paperAbstractZh = isPaper ? meaningfulPresentationText(paperMeta.abstractZh) : undefined
   const acceptedAiSubject = isRadarLead ? readAcceptedAiSubjectReview(rp) : null
   const derivedSubjectName = deriveRadarSubjectName({
     isPaper,
@@ -564,14 +574,18 @@ function enrichLead(row: typeof leads.$inferSelect) {
     : scoreJob
     ? {
         ...scoreJob,
-        error: ['failed', 'dead_letter'].includes(scoreJob.status) ? 'AI 评分暂未完成，可人工重试' : undefined,
+        error: scoreJob.error
+          ? ['failed', 'dead_letter'].includes(scoreJob.status)
+            ? publicLeadScoreDeadLetterError(scoreJob.error)
+            : publicLeadScoreError(scoreJob.error)
+          : undefined,
       }
     : null
   const { fieldProvenance: _fieldProvenance, ...publicRow } = row
   return {
     ...publicRow,
     scoring: sc,
-    name: paperTitleZh || subjectName,
+    name: paperProjectName || paperTitleZh || subjectName,
     summary: paperAbstractZh || row.summary,
     companyName: subjectCompanyName,
     score: deriveOverallScore(sc, row.score),
@@ -723,6 +737,8 @@ export async function listLeads(options: { page?: number; pageSize?: number; cha
           WHEN ${jsonValue(leads.radarProfile, '$.paperMeta')} IS NULL THEN NULL
           ELSE JSON_OBJECT(
             'titleZh', ${jsonValue(leads.radarProfile, '$.paperMeta.titleZh')},
+            'projectName', ${jsonValue(leads.radarProfile, '$.paperMeta.projectName')},
+            'projectNameOriginal', ${jsonValue(leads.radarProfile, '$.paperMeta.projectNameOriginal')},
             'authors', ${jsonValue(leads.radarProfile, '$.paperMeta.authors')},
             'categories', ${jsonValue(leads.radarProfile, '$.paperMeta.categories')}
           )
@@ -809,6 +825,33 @@ export async function getLeadById(leadId: string) {
   const [row] = await db.select({ ...getTableColumns(leads), completeness: completenessExpr })
     .from(leads).where(eq(leads.id, canonicalLeadId)).limit(1)
   return row ? enrichLead(row as typeof leads.$inferSelect & { completeness: number }) : null
+}
+
+export async function deleteLeadFromPublicPool(
+  leadId: string,
+  actor: { userId: string; userName: string },
+) {
+  return await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT ${leads.id} FROM ${leads} WHERE ${leads.id}=${leadId} FOR UPDATE`)
+    const [lead] = await tx.select().from(leads).where(eq(leads.id, leadId)).limit(1)
+    if (!lead) return null
+    if (lead.poolStatus === '已删除') {
+      return { id: lead.id, name: lead.name, alreadyDeleted: true }
+    }
+
+    await tx.update(leads).set({ poolStatus: '已删除' }).where(eq(leads.id, lead.id))
+    // 已领取的评分任务不应继续占用队列；原始 Pipeline、导入和实体匹配记录
+    // 通过外键或不可变审计继续保留，已转专属项目也不受影响。
+    await tx.delete(leadScoreJobs).where(eq(leadScoreJobs.leadId, lead.id))
+    await tx.insert(auditLogs).values({
+      userId: actor.userId,
+      userName: actor.userName,
+      module: '项目获取池',
+      action: '删除公共线索',
+      target: `${lead.name} · ${lead.id}`,
+    })
+    return { id: lead.id, name: lead.name, alreadyDeleted: false }
+  })
 }
 
 type AppDatabase = typeof db

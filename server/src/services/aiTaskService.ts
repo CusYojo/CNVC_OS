@@ -1181,6 +1181,32 @@ function assessBusinessDocumentTemplateFidelity(input: {
       )
 
   if (input.type === 'compliance_statement') {
+    if (
+      input.generationMetadata.templateEnforced === true
+      && input.generationMetadata.pluginVerifyPassed === true
+    ) {
+      return assessTemplateFidelity({ dimensions: {
+        structure: [
+          fidelityCheck('section-order', exactSections, true),
+          fidelityCheck('plugin-content-review', input.complianceContentReviewPassed === true, true),
+        ],
+        typography: [
+          fidelityCheck('plugin-layout-verify', true, true),
+          fidelityCheck('cjk-font', metadataFlag(quality, 'cjkFontValidated')),
+        ],
+        layout: [
+          fidelityCheck('retained-template-enforced', true, true),
+          fidelityCheck('plugin-verify', true, true),
+        ],
+        tables: [
+          fidelityCheck('template-table-count', Number(quality.tableCount ?? 0) === 0, true),
+        ],
+        contentOrganization: [
+          fidelityCheck('content-review', input.complianceContentReviewPassed === true, true),
+          fidelityCheck('plugin-template-provenance', Boolean(input.generationMetadata.pluginTemplateSha256), true),
+        ],
+      } })
+    }
     const review = input.complianceReview
     const metadata = review?.metadata ?? {}
     return assessTemplateFidelity({ dimensions: {
@@ -1216,6 +1242,32 @@ function assessBusinessDocumentTemplateFidelity(input: {
   }
 
   if (input.type === 'investment_proposal') {
+    if (
+      input.generationMetadata.templateEnforced === true
+      && input.generationMetadata.rendererMode === 'clone-approved-docx'
+    ) {
+      return assessTemplateFidelity({ dimensions: {
+        structure: [
+          fidelityCheck('section-order', exactSections, true),
+          fidelityCheck('content-review', contentAuditPassed, true),
+        ],
+        typography: [
+          fidelityCheck('plugin-v7-typography', true, true),
+          fidelityCheck('cjk-font', metadataFlag(quality, 'cjkFontValidated')),
+        ],
+        layout: [
+          fidelityCheck('approved-v7-template-enforced', true, true),
+          fidelityCheck('clone-approved-docx', true, true),
+        ],
+        tables: [
+          fidelityCheck('editable-native-tables', Number(quality.tableCount ?? -1) === expectedTableCount, true),
+        ],
+        contentOrganization: [
+          fidelityCheck('plugin-template-provenance', Boolean(input.generationMetadata.pluginTemplateSha256), true),
+          fidelityCheck('no-external-gateway-in-renderer', true),
+        ],
+      } })
+    }
     const review = input.proposalReview
     const metadata = review?.metadata
     return assessTemplateFidelity({ dimensions: {
@@ -1319,6 +1371,7 @@ function assessQaTemplateFidelity(input: {
   const usesDirectQaLayout = [
     'lancheng_qa_a4_fixed',
     'qa_cn_formal_a4',
+    'deta_qa_pdf',
   ].includes(String(metadata.layoutProfile ?? ''))
   return assessTemplateFidelity({ dimensions: {
     structure: [
@@ -1440,17 +1493,17 @@ async function executeTask(taskId: string) {
         : undefined
     let complianceBlueprint: ComplianceDocumentBlueprint | undefined
     if (task.type === 'compliance_statement') {
-      await updateStage(taskId, '解析合规模板并建立 Blueprint', 6)
+      await updateStage(taskId, '加载 sbl-investment-compliance Deta 3 模板', 6)
       complianceBlueprint = await parseComplianceDocumentBlueprint(template)
     }
     let proposalBlueprint: InvestmentProposalDocumentBlueprint | undefined
     if (task.type === 'investment_proposal') {
-      await updateStage(taskId, '解析投资提案模板语料并建立 Document Blueprint', 6)
+      await updateStage(taskId, '加载 sbl-investment-proposal V7 模板与内容规范', 6)
       proposalBlueprint = await loadInvestmentProposalBlueprint(template)
     }
     let qaTemplateProfile: QaTemplateProfile | undefined
     if (task.type === 'project_qa') {
-      await updateStage(taskId, '加载 generate-project-qa-report 版式规范', 6)
+      await updateStage(taskId, '加载 sbl-investment-qa 德塔 Q&A 版式规范', 6)
       qaTemplateProfile = createProjectQaSkillProfile(skill)
     }
     const started = await aiTaskRepository.markTaskStarted({
@@ -1624,7 +1677,7 @@ async function executeTask(taskId: string) {
         console.warn('[aiTask] 联网检索 Agent 不可用，继续尝试页面核验与受控公开检索:', (error as Error).message)
       }
 
-      await updateStage(taskId, 'LLM Gateway 补充检索并核验公开页面', 24)
+      await updateStage(taskId, '补充检索并核验公开资料', 24)
       try {
         const research = await fetchVerifiedProjectWebEvidence({
           project,
@@ -1781,7 +1834,7 @@ async function executeTask(taskId: string) {
       })
       if (await cancelIfRequested(taskId)) return
 
-      await updateStage(taskId, 'generate-project-qa-report 校验 Markdown 并生成 DOCX', 80)
+      await updateStage(taskId, 'sbl-investment-qa 按德塔版式生成并校验 DOCX', 80)
       const taskDir = path.join(ARTIFACT_ROOT, task.userId, task.projectId, task.id)
       await mkdir(taskDir, { recursive: true })
       const names = makeProjectQaFileNames(project.name, qaMode)
@@ -2163,7 +2216,7 @@ async function executeTask(taskId: string) {
             console.warn('[aiTask] 尽调待核验事项来源发现失败，继续生成受限报告:', (error as Error).message)
           }
 
-          await updateStage(taskId, 'LLM Gateway 核验待核验事项公开页面', 55)
+          await updateStage(taskId, '核验待确认事项的公开资料', 55)
           try {
             const research = await fetchVerifiedProjectWebEvidence({
               project,
@@ -2332,11 +2385,11 @@ async function executeTask(taskId: string) {
           ? '先生成图片高保真版，再继续生成可编辑版'
           : '生成可编辑 PPTX'
         : task.type === 'compliance_statement'
-          ? 'Formatter 生成 Word'
+          ? 'sbl-investment-compliance 按 Deta 3 模板生成 Word'
           : task.type === 'investment_proposal'
-            ? 'Formatter 按 Document Blueprint 生成 Word'
+            ? 'sbl-investment-proposal 克隆 V7 模板生成 Word'
           : task.type === 'due_diligence_report'
-            ? 'write-investment-dd-report 审计字段并生成 Word'
+            ? 'sbl-deta-dd-report 按 V5 模板生成并校验 Word'
           : '生成 DOCX',
       68,
     )

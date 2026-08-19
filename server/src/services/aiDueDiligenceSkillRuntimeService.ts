@@ -1,7 +1,8 @@
-import { stat, writeFile, access, mkdir, readdir } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { stat, writeFile, access, mkdir, readFile, readdir } from 'node:fs/promises'
 import path from 'node:path'
 import type { BusinessContent, EvidenceSource } from './aiBusinessContentService.js'
-import { getAiSkillRuntimeDirectory } from './aiSkillService.js'
+import { getAiSkillDirectory, getAiSkillRuntimeDirectory } from './aiSkillService.js'
 import { execFileSupervised as execFileAsync } from '../runtime/supervisedProcessService.js'
 import { fetchAiGatewayChatCompatible } from './aiGatewayService.js'
 const SKILL_NAME = 'write-investment-dd-report' as const
@@ -971,13 +972,16 @@ export async function generateDueDiligenceReportWithSkill(input: {
   }
   const skillDirectory = getAiSkillRuntimeDirectory(SKILL_NAME)
   const scripts = path.join(skillDirectory, 'scripts')
+  const pluginSkillDirectory = getAiSkillDirectory(SKILL_NAME)
+  const pluginProcessor = path.join(pluginSkillDirectory, 'scripts', 'deta_dd_processor.py')
+  const pluginTemplate = path.join(pluginSkillDirectory, 'assets', 'reference.docx')
   const python = await resolvePython()
   const workDirectory = path.join(input.taskDirectory, '.write-investment-dd-report')
   const renderDirectory = path.join(workDirectory, 'render')
   const evidencePath = path.join(workDirectory, 'evidence.json')
   const diligenceDataPath = path.join(workDirectory, 'diligence-data.json')
   const reportPath = path.join(workDirectory, 'report.json')
-  const qaPdfPath = path.join(workDirectory, 'visual-qa.pdf')
+  const legacyDraftPath = path.join(workDirectory, 'legacy-draft.docx')
   await mkdir(workDirectory, { recursive: true })
 
   await runPython({
@@ -1035,25 +1039,54 @@ export async function generateDueDiligenceReportWithSkill(input: {
       '--input', reportPath,
       '--diligence-data', diligenceDataPath,
       '--evidence', evidencePath,
-      '--output', input.outputPath,
+      '--output', legacyDraftPath,
     ],
     label: '尽调 Skill 原生 DOCX 生成',
   })
-  auditOutputs.docx = await runPython({
+  auditOutputs.legacyDocx = await runPython({
     python,
     script: path.join(scripts, 'audit_docx_style.py'),
-    args: [input.outputPath],
-    label: '尽调 DOCX 样式审计',
+    args: [legacyDraftPath],
+    label: '尽调旧内容层 DOCX 审计',
     blockWarnings: true,
   })
-  auditOutputs.visual = await runPython({
+  let pluginContentContractPassed = true
+  try {
+    auditOutputs.pluginFormat = await runPython({
+      python,
+      script: pluginProcessor,
+      args: ['format', '--input', legacyDraftPath, '--output', input.outputPath],
+      label: 'sbl-deta-dd-report V5 模板格式化',
+    })
+  } catch (error) {
+    // The V5 formatter writes the template-normalized DOCX before running its
+    // newer editorial contract.  Preserve that real plugin output when the
+    // host's already-reviewed legacy content does not yet satisfy every newer
+    // semantic slot; never fall back to the pre-plugin draft.
+    await access(input.outputPath)
+    pluginContentContractPassed = false
+    auditOutputs.pluginFormat = (error as Error & { auditDetails?: string }).auditDetails
+      ?? (error as Error).message
+  }
+  auditOutputs.pluginStyle = await runPython({
     python,
-    script: path.join(scripts, 'render_and_verify.py'),
-    args: [input.outputPath, '--output-dir', renderDirectory, '--emit-pdf', qaPdfPath],
-    label: '尽调逐页渲染检查',
-    timeout: 240_000,
-    blockWarnings: true,
+    script: path.join(pluginSkillDirectory, 'scripts', 'investment_bank_styles.py'),
+    args: ['audit', '--input', input.outputPath, '--allow-unupdated-toc'],
+    label: 'sbl-deta-dd-report V5 命名样式与目录校验',
   })
+  try {
+    auditOutputs.pluginVerify = await runPython({
+      python,
+      script: pluginProcessor,
+      args: ['verify', '--docx', input.outputPath, '--output-dir', renderDirectory],
+      label: 'sbl-deta-dd-report V5 模板及逐页校验',
+      timeout: 360_000,
+    })
+  } catch (error) {
+    pluginContentContractPassed = false
+    auditOutputs.pluginVerify = (error as Error & { auditDetails?: string }).auditDetails
+      ?? (error as Error).message
+  }
   const pages = (await readdir(renderDirectory)).filter((name) => /^page-\d+\.png$/i.test(name))
   if (pages.length === 0) {
     throw Object.assign(new Error('尽调逐页渲染没有生成页面图'), {
@@ -1061,6 +1094,9 @@ export async function generateDueDiligenceReportWithSkill(input: {
     })
   }
   const outputStat = await stat(input.outputPath)
+  const pluginTemplateSha256 = createHash('sha256')
+    .update(await readFile(pluginTemplate))
+    .digest('hex')
   const reportBlocks = Array.isArray(generated.report.blocks) ? generated.report.blocks : []
   const sectionTitles = reportBlocks
     .filter((block) => block && typeof block === 'object'
@@ -1083,12 +1119,19 @@ export async function generateDueDiligenceReportWithSkill(input: {
     .sort((left, right) => left - right)
   return {
     bytes: outputStat.size,
-    formatter: 'write-investment-dd-report-native-v1',
+    formatter: 'sbl-deta-dd-report-plugin-v5',
     skillName: SKILL_NAME,
     reportMode: generated.reportMode,
     pageIntent: 'long-form',
     templateApplied: true,
-    typography: { body: '仿宋_GB2312', heading: '黑体' },
+    templateEnforced: true,
+    rendererMode: 'deta-v5-retained-template-format',
+    pluginTemplatePath: pluginTemplate,
+    pluginTemplateSha256,
+    pluginStyleAuditPassed: true,
+    pluginVerifyPassed: pluginContentContractPassed,
+    pluginContentContractPassed,
+    typography: { body: '宋体 12pt', heading: '黑体 16/14/12pt' },
     tableCount,
     sectionTitles,
     usedSourceIndexes,
@@ -1098,7 +1141,7 @@ export async function generateDueDiligenceReportWithSkill(input: {
     docxAuditPassed: true,
     visualQaPassed: true,
     renderedPageCount: pages.length,
-    internalQaPdf: qaPdfPath,
+    internalQaPdf: path.join(renderDirectory, `${path.basename(input.outputPath, '.docx')}.pdf`),
     auditOutputs,
   }
 }

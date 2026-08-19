@@ -28,14 +28,14 @@ const BODY_FONT = process.env.AI_QA_BODY_FONT || process.env.AI_DOCUMENT_SONG_FO
 const HEADING_FONT = process.env.AI_QA_HEADING_FONT || process.env.AI_DOCUMENT_SONG_FONT || '宋体'
 const LATIN_FONT = 'Times New Roman'
 const MUTED = '595959'
-// generate-project-qa-report 的原生 Formatter 使用宋体正文和黑体标题；
-// 保持与 Skill 脚本写入 OpenXML 的字体家族名一致。
-const PROJECT_QA_REPORT_BODY_FONT = 'Songti SC'
-const PROJECT_QA_REPORT_HEADING_FONT = 'Heiti SC'
+// sbl-investment-qa 的 Deta Formatter 使用 STKaiti；
+// 保持与插件脚本写入 OpenXML 的字体家族名一致。
+const PROJECT_QA_REPORT_BODY_FONT = 'STKaiti'
+const PROJECT_QA_REPORT_HEADING_FONT = 'STKaiti'
 const PROJECT_QA_REPORT_BODY_SIZE = 21
 const PROJECT_QA_REPORT_TITLE_SIZE = 40
 const PROJECT_QA_REPORT_QUESTION_SIZE = 28
-const PROJECT_QA_REPORT_BODY_SPACING = 400
+const PROJECT_QA_REPORT_BODY_SPACING = 288
 const PROJECT_QA_REPORT_QUESTION_SPACING = 420
 const PROJECT_QA_REPORT_TITLE_SPACING = 480
 const ANSWER_HEADING_PATTERN =
@@ -704,8 +704,8 @@ export async function inspectProjectQaDocx(
   if (AI_QA_SKILL_NAME === 'generate-project-qa-report') {
     const reportVisibleText = visibleParagraphs.join('\n')
     const expectedTitle = visibleParagraphs[0] ?? ''
-    if (!/Q&A 报告$/.test(expectedTitle)) {
-      throw new Error('generate-project-qa-report DOCX 标题必须使用“项目名称Q&A 报告”格式')
+    if (!/项目\s*Q&A$/.test(expectedTitle)) {
+      throw new Error('generate-project-qa-report DOCX 标题必须使用德塔模板“项目名称项目 Q&A”格式')
     }
     const questionParagraphIndexes = visibleParagraphs.flatMap((paragraph, index) =>
       /^Q\d+[：:]/.test(paragraph) ? [index] : [])
@@ -739,11 +739,9 @@ export async function inspectProjectQaDocx(
           `generate-project-qa-report DOCX 第 ${index + 1} 题应为 1-8 个自然段，实际 ${answerLines.length} 段`,
         )
       }
-      const visibleLabel = answerLines.find((line) =>
-        /^(?:答复|回答|结论(?:如下)?)\s*[：:]/.test(line))
-      if (visibleLabel) {
+      if (!/^(?:回答)\s*[：:]/.test(answerLines[0] ?? '')) {
         throw new Error(
-          `generate-project-qa-report DOCX 第 ${index + 1} 题不得显示答复或结论标签`,
+          `generate-project-qa-report DOCX 第 ${index + 1} 题首段必须显示“回答：”`,
         )
       }
     })
@@ -781,21 +779,15 @@ export async function inspectProjectQaDocx(
     const reportPageGeometryValidated =
       integerAttribute(pageSize, 'w:w') === 11906
       && integerAttribute(pageSize, 'w:h') === 16838
-      && integerAttribute(pageMargin, 'w:top') === 1531
-      && integerAttribute(pageMargin, 'w:right') === 1701
-      && integerAttribute(pageMargin, 'w:bottom') === 1587
-      && integerAttribute(pageMargin, 'w:left') === 1803
-      && integerAttribute(pageMargin, 'w:header') === 850
-      && integerAttribute(pageMargin, 'w:footer') === 907
+      && integerAttribute(pageMargin, 'w:top') === 1440
+      && integerAttribute(pageMargin, 'w:right') === 1800
+      && integerAttribute(pageMargin, 'w:bottom') === 1440
+      && integerAttribute(pageMargin, 'w:left') === 1800
     if (!reportPageGeometryValidated) {
       throw new Error('generate-project-qa-report DOCX 未使用 qa_cn_formal_a4 页边距')
     }
     const reportFontValidated = cjkFonts.includes(PROJECT_QA_REPORT_BODY_FONT)
-      && cjkFonts.includes(PROJECT_QA_REPORT_HEADING_FONT)
-      && cjkFonts.every((name) => [
-        PROJECT_QA_REPORT_BODY_FONT,
-        PROJECT_QA_REPORT_HEADING_FONT,
-      ].includes(name))
+      && cjkFonts.every((name) => name === PROJECT_QA_REPORT_BODY_FONT)
     if (!reportFontValidated) {
       throw new Error('generate-project-qa-report DOCX 中西文字体映射不符合规范')
     }
@@ -807,7 +799,7 @@ export async function inspectProjectQaDocx(
         `<w:spacing\\b[^>]*w:lineRule="exact"[^>]*w:line="${PROJECT_QA_REPORT_BODY_SPACING}"`,
       ).test(reportFormattingXml)
     if (!exactBodySpacingValidated) {
-      throw new Error('generate-project-qa-report DOCX 正文未使用 20pt 固定行距')
+      throw new Error('generate-project-qa-report DOCX 正文未使用德塔模板 14.4pt 固定行距')
     }
     return {
       qualityStatus: 'passed' as const,
@@ -836,13 +828,13 @@ export async function inspectProjectQaDocx(
               * 100,
             ) / 100
           : 0,
-        layoutProfile: 'qa_cn_formal_a4',
+        layoutProfile: 'deta_qa_pdf',
         directoryCompleteBeforeBody: false,
         frontDirectoryAbsent: true,
         answerParagraphFormValid: true,
         narrativeParagraphRangeValid: true,
-        visibleAnswerLabelsAbsent: true,
-        visibleAnswerLabelPresent: false,
+        visibleAnswerLabelsAbsent: false,
+        visibleAnswerLabelPresent: true,
         visibleSubheadingsAbsent: true,
         sourceOutlineNumberingAbsent: true,
         visibleSourceProcessAbsent: true,

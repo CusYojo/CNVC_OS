@@ -11,7 +11,7 @@ export type LeadAgentRuntimePermit = {
   reservedMicrousd: number
 }
 
-type GuardError = Error & { code?: string; retryable?: boolean }
+type GuardError = Error & { code?: string; retryable?: boolean; retryAfterMs?: number }
 
 function boundedNumber(value: unknown, fallback: number, min: number, max: number) {
   const parsed = Number(value)
@@ -31,15 +31,26 @@ export function leadAgentRuntimeGuardConfig() {
   }
 }
 
-function guardError(code: string, message: string, retryable = true): GuardError {
+function guardError(code: string, message: string, retryable = true, retryAfterMs?: number): GuardError {
   const error = new Error(message) as GuardError
   error.code = code
   error.retryable = retryable
+  if (retryAfterMs !== undefined) error.retryAfterMs = Math.max(1_000, Math.round(retryAfterMs))
   return error
 }
 
 function utcDayStart(now: Date) {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
+}
+
+export function shouldOpenLeadAgentCircuit(
+  activeProfileCount: number,
+  recentTerminalStates: string[],
+  failureThreshold: number,
+) {
+  return activeProfileCount === 0
+    && recentTerminalStates.length === failureThreshold
+    && recentTerminalStates.every((state) => state === 'failed')
 }
 
 export async function acquireLeadAgentRuntimePermit(input: {
@@ -92,6 +103,14 @@ export async function acquireLeadAgentRuntimePermit(input: {
     const recentCount = Number(statRows[0]?.recentCount || 0)
     const budgetMicrousd = Number(statRows[0]?.budgetMicrousd || 0)
 
+    const [profileStateRows] = await connection.query<Array<RowDataPacket & {
+      activeCount: number
+    }>>(
+      `SELECT SUM(CASE WHEN state='active' AND expires_at>? THEN 1 ELSE 0 END) AS activeCount
+       FROM ${permitsTable} WHERE agent_profile=?`,
+      [now, input.agentProfile],
+    )
+    const activeProfileCount = Number(profileStateRows[0]?.activeCount || 0)
     const [recentTerminal] = await connection.query<Array<RowDataPacket & {
       state: string
       finished_at: Date | string | null
@@ -101,18 +120,29 @@ export async function acquireLeadAgentRuntimePermit(input: {
        ORDER BY finished_at DESC LIMIT ${config.circuitFailureThreshold}`,
       [input.agentProfile],
     )
-    if (recentTerminal.length === config.circuitFailureThreshold
-      && recentTerminal.every((row) => row.state === 'failed')) {
+    // 同一批并发请求中，失败请求通常比成功请求更早结束。只看“最近完成”的
+    // 终态会把仍在运行、稍后可能成功的请求排除在窗口外，造成瞬时误熔断。
+    // 等该 profile 没有在途任务后再判定连续失败，仍能在整批失败后及时熔断。
+    if (shouldOpenLeadAgentCircuit(
+      activeProfileCount,
+      recentTerminal.map((row) => row.state),
+      config.circuitFailureThreshold,
+    )) {
       const latestFailureAt = new Date(recentTerminal[0].finished_at || 0).getTime()
       if (latestFailureAt + config.circuitOpenMs > now.getTime()) {
-        throw guardError('LEAD_AGENT_CIRCUIT_OPEN', '线索 Agent 连续失败熔断中')
+        throw guardError(
+          'LEAD_AGENT_CIRCUIT_OPEN',
+          '线索 Agent 连续失败熔断中',
+          true,
+          latestFailureAt + config.circuitOpenMs - now.getTime(),
+        )
       }
     }
     if (activeCount >= config.maxConcurrency) {
-      throw guardError('LEAD_AGENT_CONCURRENCY_LIMIT', '线索 Agent 全局并发已达到上限')
+      throw guardError('LEAD_AGENT_CONCURRENCY_LIMIT', '线索 Agent 全局并发已达到上限', true, 15_000)
     }
     if (recentCount >= config.maxRequestsPerMinute) {
-      throw guardError('LEAD_AGENT_RATE_LIMIT', '线索 Agent 全局分钟请求速率已达到上限')
+      throw guardError('LEAD_AGENT_RATE_LIMIT', '线索 Agent 全局分钟请求速率已达到上限', true, 60_000)
     }
     if (budgetMicrousd + reservationMicrousd > config.dailyBudgetMicrousd) {
       throw guardError('LEAD_AGENT_DAILY_BUDGET_EXCEEDED', '线索 Agent 全局日预算不足', false)

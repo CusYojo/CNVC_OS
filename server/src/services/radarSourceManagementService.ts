@@ -188,9 +188,10 @@ export async function importManagedWechatAccounts(input: {
     const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, raw: false, defval: '', blankrows: false })
     if (!matrix.length) continue
     const headers = matrix[0].map((value) => workbookText(value))
-    const accountIndex = headers.findIndex((value) => ['公众号', '公众号名称', '账号名称'].includes(value))
+    const accountIndex = headers.findIndex((value) => ['公众号', '公众号名称', '公众号名字', '账号名称'].includes(value))
     const wxIndex = headers.findIndex((value) => ['帐号名', '账号名', '微信号', 'wx_name'].includes(value))
-    const groupIndex = headers.findIndex((value) => ['分组', '类型', '来源分组'].includes(value))
+    const groupIndex = headers.findIndex((value) => ['分组', '来源分组'].includes(value))
+    const legacyTypeIndex = headers.findIndex((value) => value === '类型')
     if (accountIndex < 0 || wxIndex < 0) continue
     for (const row of matrix.slice(1)) {
       const accountName = workbookText(row[accountIndex])
@@ -201,8 +202,12 @@ export async function importManagedWechatAccounts(input: {
       }
       if (!accountName || !wxName) continue
       const explicitGroup = groupIndex >= 0 ? workbookText(row[groupIndex]) : ''
+      // 旧账号表曾用“类型”表示高校/机构；业务清单中的“类型”通常是内容分类，
+      // 不能直接写入采集分组，否则每日任务按“高校/机构”筛选时会漏采。
+      const legacyGroup = legacyTypeIndex >= 0 ? workbookText(row[legacyTypeIndex]) : ''
       records.push({
-        group: explicitGroup || (sheetName.includes('机构') ? '机构' : '高校'),
+        group: explicitGroup || (['高校', '机构'].includes(legacyGroup) ? legacyGroup : '')
+          || (sheetName.includes('机构') ? '机构' : '高校'),
         sheet: sheetName,
         account_name: accountName.slice(0, 255),
         wx_name: wxName.slice(0, 255),

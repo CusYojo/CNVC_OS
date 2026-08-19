@@ -125,8 +125,6 @@ export type AiQuickTaskRequest = {
   projectName: string
   conversationId: string
   sourceCutoffDate: string
-  audience?: string
-  length?: string
   userInstructions?: string
   language?: string
   structureMode?: string
@@ -203,12 +201,8 @@ export function AiQuickActions({
   } | null
 }) {
   const [activeAction, setActiveAction] = useState<ActionConfig | null>(null)
-  const [sourceCutoffDate, setSourceCutoffDate] = useState(today)
-  const [audience, setAudience] = useState('内部立项')
-  const [length, setLength] = useState('标准版')
   const [proposalInstructions, setProposalInstructions] = useState('')
   const [language, setLanguage] = useState('中文')
-  const [diligenceScope, setDiligenceScope] = useState('商业尽调')
   const submitLocksRef = useRef(new Set<AiQuickActionId>())
   const [submittingActionIds, setSubmittingActionIds] = useState<AiQuickActionId[]>([])
   const [templateFile, setTemplateFile] = useState<File | null>(null)
@@ -283,13 +277,11 @@ export function AiQuickActions({
         projectId: project.id,
         projectName: project.name,
         conversationId,
-        sourceCutoffDate,
-        audience,
-        length,
+        sourceCutoffDate: today(),
         userInstructions: proposalInstructions.trim(),
         language,
         structureMode: action.id === 'investment_ppt' ? 'strict-template' : undefined,
-        diligenceScope,
+        diligenceScope: action.id === 'due_diligence' ? '商业尽调' : undefined,
         customTemplateId: taskTemplate?.id,
         customTemplateName: taskTemplate?.originalFileName,
         preparationId,
@@ -347,7 +339,7 @@ export function AiQuickActions({
         fileName: file.name,
         progressId,
         startedAt,
-        sourceCutoffDate,
+        sourceCutoffDate: today(),
         outputFormat: 'PPTX',
         language: '中文',
         structureMode: 'strict-template',
@@ -644,10 +636,6 @@ export function AiQuickActions({
                   </div>
                 </label>
                 <label className="block">
-                  <span className="label">资料截止日</span>
-                  <input className="input" type="date" value={sourceCutoffDate} max={today()} onChange={(event) => setSourceCutoffDate(event.target.value)} />
-                </label>
-                <label className="block">
                   <span className="label">
                     {isInvestmentTemplateAction ? '上传投资建议书模板' : '上传模板'}
                   </span>
@@ -757,18 +745,8 @@ export function AiQuickActions({
               {selectedProject?.name ?? '未绑定项目'}
             </div>
           </label>
-          <label className="block">
-            <span className="label">资料截止日</span>
-            <input className="input" type="date" value={sourceCutoffDate} max={today()} onChange={(event) => setSourceCutoffDate(event.target.value)} />
-          </label>
           {(activeAction?.id === 'proposal' || activeAction?.id === 'compliance' || activeAction?.id === 'qa') && (
             <>
-              {activeAction.id === 'proposal' && (
-                <div className="grid grid-cols-2 gap-4">
-                  <label><span className="label">目标受众</span><select className="input" value={audience} onChange={(event) => setAudience(event.target.value)}><option>内部立项</option><option>基金内部汇报</option><option>合作方沟通</option></select></label>
-                  <label><span className="label">篇幅</span><select className="input" value={length} onChange={(event) => setLength(event.target.value)}><option>精简版</option><option>标准版</option><option>详细版</option></select></label>
-                </div>
-              )}
               <label className="block">
                 <span className="label">
                   {activeAction.id === 'qa'
@@ -787,9 +765,6 @@ export function AiQuickActions({
                 <span className="mt-1 block text-right text-[10px] text-slate-400">{proposalInstructions.length}/2000</span>
               </label>
             </>
-          )}
-          {activeAction?.id === 'due_diligence' && (
-            <label className="block"><span className="label">分析范围</span><select className="input" value={diligenceScope} onChange={(event) => setDiligenceScope(event.target.value)}><option value="商业尽调">早期项目线索分析</option></select></label>
           )}
           <div className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
             输出格式：<strong className="text-slate-700">{activeAction?.id === 'investment_ppt' ? 'PPTX' : 'DOCX'}</strong>

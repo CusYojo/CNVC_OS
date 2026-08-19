@@ -74,10 +74,6 @@ const createSchema = z.object({
       ctx.addIssue({ code: 'custom', path: ['parameters', field], message: `${message}；可选值：${allowed.join('、')}` })
     }
   }
-  if (body.type === 'investment_proposal') {
-    requireAllowed('audience', ['内部立项', '基金内部汇报', '合作方沟通'], '目标受众无效')
-    requireAllowed('length', ['精简版', '标准版', '详细版'], '篇幅无效')
-  }
   if (
     body.type === 'investment_proposal'
     || body.type === 'compliance_statement'

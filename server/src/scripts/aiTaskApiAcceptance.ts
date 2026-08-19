@@ -919,8 +919,6 @@ async function main(cleanupState: AcceptanceCleanupState) {
       parameters: {
         sourceCutoffDate: cutoff,
         outputFormat: 'DOCX',
-        audience: '内部立项',
-        length: '标准版',
         userInstructions: '重点说明本轮拟议交易安排；如与项目证据冲突，请标记为待核验。',
       },
       formats: ['docx'],

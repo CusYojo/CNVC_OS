@@ -22,7 +22,7 @@ import {
 } from './leadSubjectAgentService.js'
 
 const PROMPT_VERSION = 'radar-subject-v3-paper-v2'
-const PAPER_PROMPT_VERSION = 'radar-subject-v4-paper-zh-v2'
+const PAPER_PROMPT_VERSION = 'radar-paper-project-v5'
 const EVIDENCE_VALIDATION_REASON = '模型给出的主体名称或来源证据无法在原文中核验'
 const DEFAULT_MODEL = process.env.RADAR_AI_REVIEW_MODEL
   || process.env.LLM_MODEL
@@ -52,6 +52,8 @@ export interface RadarAiReviewDecision {
   legalName: string
   evidence: string
   translatedTitle?: string
+  paperProjectName?: string
+  paperProjectNameZh?: string
   translatedSummary?: string
   confidence: number
   rejectReason: string
@@ -88,6 +90,8 @@ const modelReviewSchema = z.object({
   legalName: z.string().nullish(),
   evidence: z.string().nullish(),
   translatedTitle: z.string().nullish(),
+  paperProjectName: z.string().nullish(),
+  paperProjectNameZh: z.string().nullish(),
   translatedSummary: z.string().nullish(),
   confidence: z.coerce.number(),
   rejectReason: z.string().nullish(),
@@ -104,9 +108,14 @@ export const RADAR_SUBJECT_REVIEW_SYSTEM_PROMPT = `你是私募股权/创业投�
 论文候选特别规则：
 - 当候选明确标注“线索类型：论文”时，不要要求融资、公司主体或已商业化；
 - 论文标题完整、研究对象具体且摘要能说明技术贡献时可接受；
-- subjectType 必须为 paper，subjectName 必须是原文中的完整论文标题，evidence 必须连续引用包含该标题的原文。
-- 英文论文必须同时给出准确、简洁的中文标题 translatedTitle，以及不超过 300 个汉字、忠实概括原摘要的中文摘要 translatedSummary；不得增加原文没有的实验结果、机构、融资或商业化判断；
-- 中文论文的 translatedTitle 可直接使用原标题，translatedSummary 使用中文概括。非论文候选的这两个字段返回空字符串。
+- subjectType 必须为 paper，subjectName 必须是原文中的完整论文标题，evidence 必须连续引用包含该标题的原文；
+- translatedTitle 保存完整中文论文标题，不得删掉主标题或副标题；
+- paperProjectName 保存原文中最能表达研究对象、方法、系统或数据集的简洁项目名，paperProjectNameZh 保存其准确、名词化的中文名称；
+- 对“传播性主标题：实质性副标题”结构，项目名称取实质性副标题。例如 When Agents Coordinate: Measuring Coordination in Multi-Agent AI Coding 的 paperProjectName 是 Measuring Coordination in Multi-Agent AI Coding，paperProjectNameZh 是“多智能体 AI 编程中的协作度量”；
+- 对“专名：解释性副标题”结构，保留专名。例如 GeoMix: Descriptor-Free Visual Localization... 的项目名称是 GeoMix；
+- 若无法安全缩短，paperProjectName 使用完整原标题；不得从摘要创造原文没有出现的英文项目专名；
+- 英文论文必须同时给出准确、简洁的 translatedTitle、paperProjectNameZh，以及不超过 300 个汉字、忠实概括原摘要的中文摘要 translatedSummary；不得增加原文没有的实验结果、机构、融资或商业化判断；
+- 中文论文的 translatedTitle 可直接使用原标题，paperProjectName 与 paperProjectNameZh 可相同，translatedSummary 使用中文概括。非论文候选的这些字段返回空字符串。
 
 准入条件（必须同时满足）：
 1. 原文明确出现具体公司、项目、创业团队、实验室或论文名称；
@@ -129,7 +138,7 @@ export const RADAR_SUBJECT_REVIEW_SYSTEM_PROMPT = `你是私募股权/创业投�
 subjectType 只能是 company、project、team、lab、paper。
 confidence 使用 0 到 1。信息不足时必须 review 或 reject，不得猜测。
 只返回 JSON 对象，格式：
-{"reviews":[{"candidateId":"原样返回","decision":"accept|reject|review","subjectType":"company|project|team|lab|paper|null","subjectName":"原文专名或空字符串","legalName":"原文明示的工商全称或空字符串","evidence":"原文连续引文或空字符串","translatedTitle":"论文中文标题或空字符串","translatedSummary":"论文中文摘要或空字符串","confidence":0.0,"rejectReason":"拒绝/待复核原因或空字符串"}]}`
+{"reviews":[{"candidateId":"原样返回","decision":"accept|reject|review","subjectType":"company|project|team|lab|paper|null","subjectName":"原文专名或空字符串","legalName":"原文明示的工商全称或空字符串","evidence":"原文连续引文或空字符串","translatedTitle":"完整论文中文标题或空字符串","paperProjectName":"论文原文项目名或空字符串","paperProjectNameZh":"论文中文项目名或空字符串","translatedSummary":"论文中文摘要或空字符串","confidence":0.0,"rejectReason":"拒绝/不确定原因或空字符串"}]}`
 
 function cleanText(value: unknown, maxChars = 12_000) {
   return String(value ?? '').replace(/\u0000/g, '').trim().slice(0, maxChars)
@@ -243,15 +252,32 @@ export function validateRadarAiDecision(
   const subjectName = cleanText(parsed.subjectName, 120).replace(/\s+/g, ' ')
   let legalName = cleanText(parsed.legalName, 120).replace(/\s+/g, ' ')
   const evidence = cleanText(parsed.evidence, 1_200).replace(/\s+/g, ' ')
+  const sourceEvidence = normalizeEvidence(sourceText)
+  const comparableSource = normalizeComparable(sourceText)
   const isPaperDecision = allowPaperTitle && parsed.subjectType === 'paper'
   const translatedTitle = isPaperDecision
     ? cleanChineseTranslation(parsed.translatedTitle, 180)
     : ''
+  const rawPaperProjectName = isPaperDecision
+    ? cleanText(parsed.paperProjectName, 180).replace(/\s+/g, ' ')
+    : ''
+  const paperProjectNameAppearsInSource = Boolean(
+    normalizeComparable(rawPaperProjectName)
+    && comparableSource.includes(normalizeComparable(rawPaperProjectName)),
+  )
+  const paperProjectName = paperProjectNameAppearsInSource ? rawPaperProjectName : subjectName
+  const rawPaperProjectNameZh = isPaperDecision
+    ? cleanText(parsed.paperProjectNameZh, 180).replace(/\s+/g, ' ')
+    : ''
+  // Coined method/system names such as GeoMix and gmsEDA are intentionally
+  // unchanged in Chinese; otherwise require an actual Chinese translation.
+  const paperProjectNameZh = /[\u3400-\u9fff]/.test(rawPaperProjectNameZh)
+    || normalizeComparable(rawPaperProjectNameZh) === normalizeComparable(paperProjectName)
+    ? rawPaperProjectNameZh
+    : ''
   const translatedSummary = isPaperDecision
     ? cleanChineseTranslation(parsed.translatedSummary, 600)
     : ''
-  const sourceEvidence = normalizeEvidence(sourceText)
-  const comparableSource = normalizeComparable(sourceText)
   const subjectAppearsInSource = Boolean(
     normalizeComparable(subjectName)
     && comparableSource.includes(normalizeComparable(subjectName)),
@@ -314,6 +340,8 @@ export function validateRadarAiDecision(
       legalName,
       evidence,
       translatedTitle,
+      paperProjectName,
+      paperProjectNameZh,
       translatedSummary,
       confidence,
       rejectReason,
@@ -342,6 +370,8 @@ export function revalidateEvidenceOnlyPaperReview(
     legalName: decision.legalName,
     evidence: decision.evidence,
     translatedTitle: decision.translatedTitle,
+    paperProjectName: decision.paperProjectName,
+    paperProjectNameZh: decision.paperProjectNameZh,
     translatedSummary: decision.translatedSummary,
     confidence: decision.confidence,
     rejectReason: '',
@@ -459,6 +489,8 @@ function failedReview(
     legalName: '',
     evidence: '',
     translatedTitle: '',
+    paperProjectName: '',
+    paperProjectNameZh: '',
     translatedSummary: '',
     confidence: 0,
     rejectReason: `AI 主体审查暂不可用：${cleanText(redactSensitiveText(error.message), 240)}`,

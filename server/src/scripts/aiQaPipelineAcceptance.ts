@@ -68,19 +68,19 @@ async function main() {
   assert(
     '阶段2 Skill：结构、写作、证据和版式规则已加载',
     [
-      'references/structure-blueprint.md',
-      'references/section-writing-guide.md',
-      'references/evidence-and-quality-rules.md',
-      'references/format-guidelines.md',
-    ].every((name) => skill.referenceNames.includes(name)),
-    skill.referenceNames.join('、'),
+      'references/workflow.md',
+      'references/content-contract.md',
+      'references/question-design.md',
+      'references/deta-qa-template.md',
+    ].every((name) => skill.instructions.includes(name)),
+    skill.instructions.slice(0, 240),
   )
   assert(
     '阶段2 Skill：直接式 Q&A 与无来源正文规则已加载',
-    skill.instructions.includes('标题后立即进入 Q1')
-      && skill.instructions.includes('不添加独立的“结论：”段落')
-      && skill.instructions.includes('标准读者版不展示来源清单'),
-    '直接进入 Q1、自然分析、正文不显示来源',
+    skill.instructions.includes('title followed immediately by Q1')
+      && skill.instructions.includes('“回答：”')
+      && skill.instructions.includes('source IDs'),
+    '直接进入 Q1、回答标签、正文不显示来源',
   )
 
   const project = {
@@ -801,7 +801,7 @@ async function main() {
       && Number(docxReview.metadata.averageQuestionLength ?? Infinity) <= 32
       && Number(docxReview.metadata.maximumQuestionLength ?? Infinity) <= 88
       && Number(docxReview.metadata.averageAnswerLength ?? 0) >= 420
-      && docxReview.metadata.layoutProfile === 'qa_cn_formal_a4'
+      && docxReview.metadata.layoutProfile === 'deta_qa_pdf'
       && docxReview.metadata.pageGeometryValidated
       && docxReview.metadata.cjkFontValidated
       && docxReview.metadata.lineSpacingValidated
@@ -809,7 +809,7 @@ async function main() {
       && !docxReview.metadata.directoryCompleteBeforeBody
       && docxReview.metadata.answerParagraphFormValid
       && docxReview.metadata.narrativeParagraphRangeValid
-      && docxReview.metadata.visibleAnswerLabelsAbsent
+      && docxReview.metadata.visibleAnswerLabelPresent
       && docxReview.metadata.visibleSubheadingsAbsent
       && docxReview.metadata.sourceOutlineNumberingAbsent
       && docxReview.metadata.visibleSourceProcessAbsent

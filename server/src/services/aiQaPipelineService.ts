@@ -57,7 +57,7 @@ export const PROJECT_QA_MODES = ['投资委员会 Q&A', '尽调 Q&A'] as const
 export const PROJECT_QA_DEPTHS = ['标准版', '深度版'] as const
 export const PROJECT_QA_QUESTION_COUNTS = {
   标准版: 8,
-  深度版: 10,
+  深度版: 9,
 } as const
 
 export type ProjectQaDocumentCategory = typeof PROJECT_QA_DOCUMENT_CATEGORIES[number]

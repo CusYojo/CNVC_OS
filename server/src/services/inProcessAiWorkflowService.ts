@@ -21,6 +21,7 @@ import {
   runLeadScoringAgent,
   type LeadScoringAgentExecution,
 } from './leadScoringAgentService.js'
+import { shouldAttemptLeadScoreFallback } from './leadScoreRetryPolicy.js'
 const gatewayBase = () => (process.env.LLM_BASE_URL || process.env.OPENAI_BASE_URL || 'http://127.0.0.1:18081/v1').replace(/\/$/, '')
 const gatewayKey = () => process.env.OPENAI_API_KEY || process.env.LLM_API_KEY || ''
 const defaultModel = () => process.env.LLM_MODEL || 'gpt-5.6-sol'
@@ -548,7 +549,8 @@ export async function scoreWithAgentDetailed(
           }).catch(() => undefined)
         }
       }
-      if (modelAttempt >= models.length || !retryableError(lastError)) break
+      if (!retryableError(lastError)
+        || !shouldAttemptLeadScoreFallback(lastError, modelAttempt, models.length)) break
     }
   }
   throw lastError

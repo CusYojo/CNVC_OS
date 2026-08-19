@@ -561,7 +561,7 @@ async function main() {
     [
       'dueDiligencePendingResearchTopics',
       '联网检索 Agent 发现待核验事项来源',
-      'LLM Gateway 核验待核验事项公开页面',
+      '核验待确认事项的公开资料',
       'fetchDueDiligenceNetworkEvidence',
       'fetchVerifiedProjectWebEvidence',
       'cacheProjectNetworkEvidence',
@@ -678,13 +678,16 @@ async function main() {
         'audit_narrative_quality.py',
         'build_report_docx.py',
         'audit_docx_style.py',
-        'render_and_verify.py',
+        'deta_dd_processor.py',
+        'investment_bank_styles.py',
       ].every((term) => dueDiligenceNativeSource.includes(term))
       && dueDiligenceNativeSource.includes('DUE_DILIGENCE_PUBLIC_RESEARCH_AUDIT_REQUIRED')
       && dueDiligenceNativeSource.includes('usedSourceIndexes')
       && dueDiligenceNativeSource.includes('source_index')
-      && dueDiligenceNativeSource.includes("formatter: 'write-investment-dd-report-native-v1'"),
-    '证据台账 → 字段完整性 → 内容/文风 → 原生 DOCX → 样式 → 逐页渲染',
+      && dueDiligenceNativeSource.includes("formatter: 'sbl-deta-dd-report-plugin-v5'")
+      && dueDiligenceNativeSource.includes('deta_dd_processor.py')
+      && dueDiligenceNativeSource.includes('investment_bank_styles.py'),
+    '证据台账 → 字段完整性 → 内容/文风 → V5 插件格式化 → 插件样式与逐页渲染',
   )
   assert(
     'AI-008 投资提案最终 Skill 校验失败时禁止登记产物',
@@ -877,28 +880,24 @@ async function main() {
     'Skill Profile / Current Project RAG / Question Generator / Duplicate Checker / Reviewer / DOCX',
   )
   assert(
-    'Q&A Formatter 落实 qa_cn_formal_a4 字号、固定行距、页边距与直接式结构',
-    qaDocumentSource.includes("const PROJECT_QA_REPORT_BODY_FONT = 'Songti SC'")
-      && qaDocumentSource.includes("const PROJECT_QA_REPORT_HEADING_FONT = 'Heiti SC'")
+    'Q&A Formatter 落实 Deta QA 字号、固定行距、页边距与直接式结构',
+    qaDocumentSource.includes("const PROJECT_QA_REPORT_BODY_FONT = 'STKaiti'")
+      && qaDocumentSource.includes("const PROJECT_QA_REPORT_HEADING_FONT = 'STKaiti'")
       && qaDocumentSource.includes('const PROJECT_QA_REPORT_BODY_SIZE = 21')
       && qaDocumentSource.includes('const PROJECT_QA_REPORT_TITLE_SIZE = 40')
       && qaDocumentSource.includes('const PROJECT_QA_REPORT_QUESTION_SIZE = 28')
-      && qaDocumentSource.includes('const PROJECT_QA_REPORT_BODY_SPACING = 400')
+      && qaDocumentSource.includes('const PROJECT_QA_REPORT_BODY_SPACING = 288')
       && qaDocumentSource.includes('const PROJECT_QA_REPORT_QUESTION_SPACING = 420')
       && qaDocumentSource.includes('const PROJECT_QA_REPORT_TITLE_SPACING = 480')
-      && qaDocumentSource.includes('top: 1531')
-      && qaDocumentSource.includes('right: 1701')
-      && qaDocumentSource.includes('bottom: 1587')
-      && qaDocumentSource.includes('left: 1803')
+      && qaDocumentSource.includes("layoutProfile: 'deta_qa_pdf'")
       && qaDocumentSource.includes('generateProjectQaReportDocx')
-      && qaDocumentSource.includes("layoutProfile: 'qa_cn_formal_a4'")
-      && qaDocumentSource.includes('visibleAnswerLabelsAbsent')
+      && qaDocumentSource.includes('visibleAnswerLabelPresent')
       && qaDocumentSource.includes('visibleSubheadingsAbsent')
       && qaDocumentSource.includes('visibleSourceProcessAbsent')
       && qaDocumentSource.includes('visibleAuditAppendixAbsent')
       && qaDocumentSource.includes('不得包含外部超链接')
-      && qaDocumentSource.includes('不得显示答复或结论标签'),
-    'Songti SC / Heiti SC / 20pt 标题 / 14pt 问题 / 10.5pt 正文 / 20pt 固定行距 / 正式 A4 页边距',
+      && qaDocumentSource.includes('首段必须显示“回答：”'),
+    'STKaiti / 16pt 标题 / 11pt 问答 / 14.4pt 固定行距 / Deta A4 页边距',
   )
   assert(
     'Q&A 快捷任务使用标准 8 题并只登记 DOCX',

@@ -42,6 +42,7 @@ import {
 } from './aiComplianceWorkflowService.js'
 import { sanitizeClientVisibleEvidenceWording } from './aiClientVisibleTextService.js'
 import { generateInvestmentProposalDocx } from './aiInvestmentProposalDocumentService.js'
+import { renderComplianceStatementWithPlugin } from './aiPluginDocumentRenderService.js'
 import { generateInvestmentRecommendationPptWithGorden } from './aiGordenSuperPptService.js'
 import { formatShanghaiDate } from '../utils/shanghaiTime.js'
 
@@ -675,6 +676,17 @@ export async function generateBusinessDocx(input: {
       typography: { body: DOCX_FANGSONG_FONT, heading: DOCX_SANS_FONT },
       ...generation,
     }
+  }
+  if (String(input.template.type) === 'compliance_statement') {
+    const complianceBlueprint = input.blueprint ?? await parseComplianceDocumentBlueprint(input.template)
+    return renderComplianceStatementWithPlugin({
+      outputPath: input.outputPath,
+      taskProjectName: input.project.name,
+      content: input.content,
+      sources: input.sources,
+      company: complianceBlueprint.fixedContent.issuer,
+      generatedAt: input.generatedAt ?? new Date(),
+    })
   }
   const generatedAt = input.generatedAt ?? new Date()
   const profile = docxTemplateProfile(input.template)

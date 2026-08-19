@@ -2,6 +2,7 @@ import { eq, or } from 'drizzle-orm'
 import { db, pool } from '../db/client.js'
 import { leads, radarCandidates } from '../db/schema.js'
 import { applyLeadFieldPolicy } from '../services/leadFieldProvenance.js'
+import { mergePaperMetadataPreservingAuthors } from '../services/paperMetadata.js'
 
 type JsonObject = Record<string, unknown>
 
@@ -78,11 +79,12 @@ async function main() {
       lead as unknown as Record<string, unknown>,
       { radarProfile: {
         ...existing,
-        paperMeta: { ...existingPaper, ...metadata },
+        paperMeta: mergePaperMetadataPreservingAuthors(existingPaper, metadata),
       } },
       'deterministic_backfill',
       { alwaysReplaceFields: ['radarProfile'], operation: 'machine_refresh' },
     )
+    if (Object.keys(patch).length === 0) continue
     await db.update(leads).set(patch as never).where(eq(leads.id, lead.id))
     updated += 1
   }

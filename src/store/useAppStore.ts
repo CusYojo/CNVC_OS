@@ -364,6 +364,7 @@ export const useAppStore = create<AppState>()(
               attempts?: number
               maxAttempts?: number
               retryCycles?: number
+              nextRetryAt?: string
             }>(`/leads/${leadId}/score`)
             if (st.status === 'queued' || st.status === 'running' || st.status === 'retrying') {
               const activeStatus: 'queued' | 'running' | 'retrying' = st.status
@@ -375,6 +376,7 @@ export const useAppStore = create<AppState>()(
                     attempts: st.attempts ?? lead.scoreJob?.attempts ?? 0,
                     maxAttempts: st.maxAttempts ?? lead.scoreJob?.maxAttempts ?? 3,
                     retryCycles: st.retryCycles ?? lead.scoreJob?.retryCycles,
+                    nextRetryAt: st.nextRetryAt ?? lead.scoreJob?.nextRetryAt,
                     updatedAt: new Date().toISOString(),
                     error: st.error,
                   },

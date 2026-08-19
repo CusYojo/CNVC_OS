@@ -27,6 +27,7 @@ export type LeadScoreJobLease = RowDataPacket & {
   next_attempt_at: Date
   lease_owner: string | null
   lease_expires_at: Date | null
+  last_error: string | null
 }
 
 const jobsTable = quoteMysqlIdentifier(mysqlTableName('lead_score_jobs'))
@@ -60,6 +61,7 @@ type LeadScoreEnqueueOptions = {
   snapshot?: Record<string, unknown>
   manualRetry?: boolean
   manualRetryAudit?: { userId?: string | null; userName: string; target: string }
+  automaticCircuitRecovery?: { target: string }
 }
 
 async function enqueueLeadScoreJobOnce(
@@ -80,7 +82,15 @@ async function enqueueLeadScoreJobOnce(
       await connection.rollback()
       return false
     }
-    if (!options.manualRetry && row?.status === 'dead_letter') {
+    if (options.automaticCircuitRecovery && (
+      !row
+      || row.status !== 'dead_letter'
+      || !/熔断|circuit/i.test(String(row.last_error || ''))
+    )) {
+      await connection.rollback()
+      return false
+    }
+    if (!options.manualRetry && !options.automaticCircuitRecovery && row?.status === 'dead_letter') {
       await connection.rollback()
       await recordJobCoordinationEventSafely({
         domain: 'lead-score', entityId: leadId, event: 'duplicateSuppressed',
@@ -141,6 +151,18 @@ async function enqueueLeadScoreJobOnce(
         ],
       )
     }
+    if (options.automaticCircuitRecovery) {
+      await connection.query(
+        `INSERT INTO ${auditLogsTable}
+          (id, user_id, user_name, module, action, target, result, request_id, created_at)
+         VALUES (?, NULL, '（系统）', '项目获取池', '系统恢复 AI 评分熔断死信', ?, 'success', ?, NOW(3))`,
+        [
+          randomUUID(),
+          options.automaticCircuitRecovery.target,
+          currentRequestId() ?? randomUUID(),
+        ],
+      )
+    }
     await connection.commit()
     if (started) void poll()
     return true
@@ -187,6 +209,16 @@ export async function recoverExpiredLeadScoreJobLeases(): Promise<number> {
     event: 'leaseRecovered',
   })
   return recovered
+}
+
+export async function listCircuitDeadLetterLeadScoreIds(limit = 500): Promise<string[]> {
+  const [rows] = await pool.query<Array<RowDataPacket & { lead_id: string }>>(
+    `SELECT lead_id FROM ${jobsTable}
+     WHERE status='dead_letter' AND (last_error LIKE '%熔断%' OR LOWER(last_error) LIKE '%circuit%')
+     ORDER BY dead_lettered_at, updated_at
+     LIMIT ${Math.max(1, Math.min(Math.floor(limit), 1_000))}`,
+  )
+  return rows.map((row) => row.lead_id)
 }
 
 export async function claimLeadScoreJobLease(workerOwner = owner): Promise<LeadScoreJobLease | null> {

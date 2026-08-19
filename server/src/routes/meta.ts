@@ -15,6 +15,7 @@ import { requireAccessibleProject } from '../services/projectAccessService.js'
 import {
   createLead,
   convertLead,
+  deleteLeadFromPublicPool,
   getLeadById,
   ingestLeadProfile,
   leadPoolStats,
@@ -30,9 +31,15 @@ import {
 } from '../services/aiSummaryService.js'
 import {
   enqueueLeadScoreJob,
+  listCircuitDeadLetterLeadScoreIds,
   type LeadScoreExecutionResult,
 } from '../services/leadScoreJobService.js'
 import { collectCompanyIntel, scoreWithAgentDetailed } from '../services/inProcessAiWorkflowService.js'
+import {
+  leadScoreRetryPolicy,
+  publicLeadScoreDeadLetterError,
+  publicLeadScoreError,
+} from '../services/leadScoreRetryPolicy.js'
 import { prepareLeadScoringAuditContext } from '../services/leadScoringPipelineService.js'
 import { isLeadScoringSubjectEligible, isSpecificLeadSubjectName } from '../services/leadSubjectName.js'
 import {
@@ -55,6 +62,7 @@ import {
 import { resolveLeadBusinessRegion } from '../services/leadRegion.js'
 import { reviewRadarCandidatesWithAi } from '../services/radarAiReviewService.js'
 import { deriveRadarChannel, isRadarPaperCandidate } from '../services/radarChannel.js'
+import { resolvePaperProjectIdentity } from '../services/paperIdentity.js'
 import { recordLeadPipelineRawEvent, transitionLeadPipelineItem } from '../services/leadPipelineEventService.js'
 import { openLeadPipelineReview } from '../services/leadPipelineAuditService.js'
 import {
@@ -349,6 +357,22 @@ metaRouter.get('/leads/:id', async (req, res, next) => {
     const row = await getLeadById(req.params.id)
     if (!row) return res.status(404).json({ code: 'NOT_FOUND', message: '线索不存在' })
     res.json(row)
+  } catch (err) { next(err) }
+})
+
+metaRouter.delete('/leads/:id', requireSystemAdmin, async (req: AuthedRequest, res, next) => {
+  try {
+    const result = await deleteLeadFromPublicPool(metaRouteId(req.params.id), {
+      userId: req.user!.uid,
+      userName: req.user!.name,
+    })
+    if (!result) return res.status(404).json({ code: 'NOT_FOUND', message: '线索不存在' })
+    res.json({
+      code: 0,
+      message: result.alreadyDeleted ? 'already_deleted' : 'deleted',
+      deleted: result.id,
+      name: result.name,
+    })
   } catch (err) { next(err) }
 })
 
@@ -902,6 +926,12 @@ export async function runRadarSyncImport(input: RadarSyncInput = {}, actorUserId
       const isPaper = isRadarPaperCandidate(it)
       const paperTitleZh = isPaper ? meaningfulRadarText(subjectReview.translatedTitle) : ''
       const paperSummaryZh = isPaper ? meaningfulRadarText(subjectReview.translatedSummary) : ''
+      const paperProjectIdentity = isPaper ? resolvePaperProjectIdentity({
+        titleOriginal: it.title || prof.paper_title || name,
+        titleZh: paperTitleZh,
+        modelProjectName: subjectReview.paperProjectName,
+        modelProjectNameZh: subjectReview.paperProjectNameZh,
+      }) : { projectName: '', projectNameOriginal: '' }
       const publisherNames = [it.source_name, it.school, it.account_name, it.wx_name]
         .map((value: unknown) => meaningfulRadarText(value))
         .filter(Boolean)
@@ -993,6 +1023,8 @@ export async function runRadarSyncImport(input: RadarSyncInput = {}, actorUserId
           legalName: subjectReview.legalName,
           evidence: subjectReview.evidence,
           translatedTitle: paperTitleZh,
+          paperProjectName: paperProjectIdentity.projectNameOriginal,
+          paperProjectNameZh: paperProjectIdentity.projectName,
           translatedSummary: paperSummaryZh,
           confidence: subjectReview.confidence,
           model: subjectReview.model,
@@ -1002,7 +1034,7 @@ export async function runRadarSyncImport(input: RadarSyncInput = {}, actorUserId
         qualityRejected: false,
         qualityRejectReason: '',
         profile: {
-          projectName: paperTitleZh || name,
+          projectName: paperProjectIdentity.projectName || paperTitleZh || name,
           companyName,
           projectRound: prof.project_round || '',
           financingAmount: prof.financing_amount || '',
@@ -1040,6 +1072,8 @@ export async function runRadarSyncImport(input: RadarSyncInput = {}, actorUserId
           title: it.title || prof.paper_title || name,
           titleOriginal: it.title || prof.paper_title || name,
           titleZh: paperTitleZh,
+          projectName: paperProjectIdentity.projectName,
+          projectNameOriginal: paperProjectIdentity.projectNameOriginal,
           authors: Array.isArray(it.authors) ? it.authors : String(it.authors || prof.paper_authors || '').split(/[,;，；]/).map((x: string) => x.trim()).filter(Boolean),
           firstAuthor: it.first_author || prof.paper_first_author || (Array.isArray(it.authors) ? it.authors[0] : ''),
           secondAuthor: it.second_author || prof.paper_second_author || (Array.isArray(it.authors) ? it.authors[1] : ''),
@@ -1226,7 +1260,7 @@ metaRouter.post('/leads/sync-radar', async (req: AuthedRequest, res, next) => {
 const SCORE_MAX_ATTEMPTS = Math.max(1, Math.min(4, parseInt(process.env.SCORE_MAX_ATTEMPTS || '3', 10)))
 const SCORE_REQUEST_TIMEOUT_MS = Math.max(30_000, parseInt(process.env.SCORE_REQUEST_TIMEOUT_MS || '360000', 10))
 const SCORE_RETRY_BASE_MS = Math.max(1_000, parseInt(process.env.SCORE_RETRY_BASE_MS || '5000', 10))
-const SCORE_DEFERRED_RETRY_LIMIT = Math.max(0, Math.min(5, parseInt(process.env.SCORE_DEFERRED_RETRY_LIMIT || '0', 10)))
+const SCORE_DEFERRED_RETRY_LIMIT = Math.max(0, Math.min(5, parseInt(process.env.SCORE_DEFERRED_RETRY_LIMIT || '3', 10)))
 const SCORE_DEFERRED_RETRY_MS = Math.max(10_000, parseInt(process.env.SCORE_DEFERRED_RETRY_MS || '60000', 10))
 
 export async function scheduleLeadScoring(
@@ -1234,6 +1268,7 @@ export async function scheduleLeadScoring(
   options: {
     recovering?: boolean
     manualRetry?: boolean
+    automaticCircuitRecovery?: boolean
     actor?: { userId?: string | null; userName: string }
   } = {},
 ): Promise<boolean> {
@@ -1256,7 +1291,11 @@ export async function scheduleLeadScoring(
   }
   const previous = readLeadScoreJob((lead as { scoring?: unknown }).scoring)
   if (options.manualRetry && !['failed', 'dead_letter'].includes(previous?.status ?? '')) return false
-  if (!options.manualRetry && previous?.status === 'dead_letter') return false
+  if (options.automaticCircuitRecovery && (
+    previous?.status !== 'dead_letter'
+    || leadScoreRetryPolicy(new Error(previous.error || '')).category !== 'circuit'
+  )) return false
+  if (!options.manualRetry && !options.automaticCircuitRecovery && previous?.status === 'dead_letter') return false
   const now = new Date().toISOString()
   const attempts = options.recovering
     ? Math.min(previous?.attempts ?? 0, SCORE_MAX_ATTEMPTS - 1)
@@ -1280,6 +1319,7 @@ export async function scheduleLeadScoring(
         userName: options.actor?.userName ?? '（系统）',
         target: lead.name,
       } : undefined,
+      automaticCircuitRecovery: options.automaticCircuitRecovery ? { target: lead.name } : undefined,
       snapshot: job as unknown as Record<string, unknown>,
     })
     if (!queued) return false
@@ -1292,16 +1332,24 @@ export async function scheduleLeadScoring(
 
 export async function recoverLeadScoringQueue(limit = 500) {
   const leadIds = await listRecoverableLeadScoreIds(limit)
+  const circuitDeadLetterIds = await listCircuitDeadLetterLeadScoreIds(limit)
   let recovered = 0
   for (const leadId of leadIds) {
     if (await scheduleLeadScoring(leadId, { recovering: true })) recovered += 1
   }
-  return { found: leadIds.length, recovered }
-}
-
-function retryableScoreError(error: unknown) {
-  const value = error as Error & { retryable?: boolean }
-  return value.retryable !== false
+  let circuitDeadLettersRecovered = 0
+  for (const leadId of circuitDeadLetterIds) {
+    if (await scheduleLeadScoring(leadId, { automaticCircuitRecovery: true })) {
+      recovered += 1
+      circuitDeadLettersRecovered += 1
+    }
+  }
+  return {
+    found: leadIds.length + circuitDeadLetterIds.length,
+    recovered,
+    circuitDeadLettersFound: circuitDeadLetterIds.length,
+    circuitDeadLettersRecovered,
+  }
 }
 
 function scoreDelay(ms: number) {
@@ -1315,10 +1363,17 @@ async function deferLeadScoringRetry(
     queuedAt?: string
     startedAt?: string
     retryCycles: number
+    delayMs?: number
   },
 ): Promise<LeadScoreExecutionResult> {
   const retryCycles = input.retryCycles + 1
-  const delayMs = SCORE_DEFERRED_RETRY_MS * retryCycles
+  const delayMs = Math.min(
+    86_400_000,
+    Math.max(
+      input.delayMs ?? 0,
+      SCORE_DEFERRED_RETRY_MS * retryCycles,
+    ) + 10_000 + Math.floor(Math.random() * 20_001),
+  )
   const now = new Date().toISOString()
   const nextRetryAt = new Date(Date.now() + delayMs).toISOString()
   const retryingJob: LeadScoreJob = {
@@ -1480,7 +1535,8 @@ export async function executeLeadScoring(leadId: string): Promise<LeadScoreExecu
         break
       } catch (error) {
         finalError = error as Error
-        if (attempt >= SCORE_MAX_ATTEMPTS || !retryableScoreError(error)) break
+        const retryPolicy = leadScoreRetryPolicy(error)
+        if (attempt >= SCORE_MAX_ATTEMPTS || !retryPolicy.retryable || retryPolicy.deferImmediately) break
         const retryAt = new Date(Date.now() + SCORE_RETRY_BASE_MS * attempt).toISOString()
         const retryingJob: LeadScoreJob = {
           ...runningJob,
@@ -1495,9 +1551,11 @@ export async function executeLeadScoring(leadId: string): Promise<LeadScoreExecu
     }
     if (!result) {
       const error = finalError ?? new Error('评分服务未返回结果')
-      if (retryableScoreError(error) && retryCycles < SCORE_DEFERRED_RETRY_LIMIT) {
+      const retryPolicy = leadScoreRetryPolicy(error)
+      const waitsForCircuitRecovery = retryPolicy.category === 'circuit'
+      if (retryPolicy.retryable && (waitsForCircuitRecovery || retryCycles < SCORE_DEFERRED_RETRY_LIMIT)) {
         console.warn(
-          `[lead-score] transient failure lead=${leadId}, deferred retry cycle=${retryCycles + 1}/${SCORE_DEFERRED_RETRY_LIMIT}:`,
+          `[lead-score] ${retryPolicy.category} failure lead=${leadId}, deferred retry cycle=${retryCycles + 1}/${waitsForCircuitRecovery ? 'until-recovery' : SCORE_DEFERRED_RETRY_LIMIT}:`,
           error.message,
         )
         return await deferLeadScoringRetry(leadId, {
@@ -1505,6 +1563,7 @@ export async function executeLeadScoring(leadId: string): Promise<LeadScoreExecu
           queuedAt: persisted?.queuedAt,
           startedAt: runStartedAt,
           retryCycles,
+          delayMs: retryPolicy.delayMs,
         })
       }
       throw error
@@ -1622,7 +1681,11 @@ metaRouter.get('/leads/:id/score', async (req: AuthedRequest, res, next) => {
     const hasAiScoring = !!(scoring && scoring.dimensions)
     // MySQL 任务执行器会同步 scoreJob 快照；已有 dimensions 的历史结果仍判定为完成。
     const status = persistedJob?.status ?? (hasAiScoring ? 'done' : 'idle')
-    const publicError = ['failed', 'dead_letter'].includes(status) ? 'AI 评分暂未完成，可人工重试' : undefined
+    const publicError = status === 'retrying'
+      ? publicLeadScoreError(persistedJob?.error) ?? 'AI 评分暂未完成，系统将自动重试'
+      : ['failed', 'dead_letter'].includes(status)
+        ? publicLeadScoreDeadLetterError(persistedJob?.error) ?? 'AI 评分暂未完成，可人工重试'
+        : undefined
     res.json({
       code: 0,
       message: 'success',
@@ -1631,6 +1694,7 @@ metaRouter.get('/leads/:id/score', async (req: AuthedRequest, res, next) => {
       attempts: persistedJob?.attempts,
       maxAttempts: persistedJob?.maxAttempts,
       retryCycles: persistedJob?.retryCycles,
+      nextRetryAt: persistedJob?.nextRetryAt,
       scoring: scoring ?? null,
     })
   } catch (err) { next(err) }

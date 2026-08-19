@@ -47,6 +47,7 @@ import {
 } from './aiInvestmentProposalTextService.js'
 import type { AiTemplateDefinition } from './aiTemplateCatalog.js'
 import { getAiSkillRuntimeDirectory } from './aiSkillService.js'
+import { renderInvestmentProposalWithPlugin } from './aiPluginDocumentRenderService.js'
 
 type ProjectLike = {
   name: string
@@ -367,6 +368,93 @@ export async function generateInvestmentProposalDocx(input: {
   const generatedAt = input.generatedAt ?? new Date()
   const company = input.project.companyName?.trim() || input.project.name
   const byTitle = new Map(input.content.sections.map((section) => [section.title, section]))
+  const pluginSections: Array<{
+    title: string
+    page_break_before?: boolean
+    paragraphs?: string[]
+    tables?: Array<Record<string, unknown>>
+    subsections: Array<{
+      title: string
+      paragraphs: string[]
+      tables: Array<Record<string, unknown>>
+    }>
+  }> = []
+  const pluginSectionById = new Map<string, typeof pluginSections[number]>()
+  const pluginTable = (table: BusinessTable) => {
+    const width = 8352
+    const base = Math.floor(width / Math.max(table.columns.length, 1))
+    const widths = table.columns.map((_, index) =>
+      index === table.columns.length - 1
+        ? width - base * (table.columns.length - 1)
+        : base)
+    return {
+      title: sanitizeInvestmentProposalClientText(table.title),
+      note: table.unit ? `单位：${sanitizeInvestmentProposalClientText(table.unit)}` : '',
+      columns: table.columns.map(sanitizeInvestmentProposalClientText),
+      rows: table.rows.map((row) => row.map(sanitizeInvestmentProposalClientText)),
+      widths_dxa: widths,
+      alignments: table.columns.map((_column, index) => index === 0 ? 'left' : 'center'),
+      dense: table.rows.length > 12,
+    }
+  }
+  blueprint.sections.forEach((definition) => {
+    const current = byTitle.get(definition.title)
+    const paragraphs = (current?.findings ?? [])
+      .map((finding) => sanitizeInvestmentProposalClientText(finding.text))
+      .filter(Boolean)
+    const tables = (current?.tables ?? []).map(pluginTable)
+    if (definition.level === 1) {
+      const section = {
+        title: definition.title,
+        page_break_before: definition.id === 'business-plan',
+        paragraphs: definition.container ? [] : paragraphs,
+        tables: definition.container ? [] : tables,
+        subsections: [],
+      }
+      pluginSections.push(section)
+      pluginSectionById.set(definition.id, section)
+      return
+    }
+    const parent = definition.parentId
+      ? pluginSectionById.get(definition.parentId)
+      : pluginSections.at(-1)
+    if (!parent) throw new Error(`投资提案插件模板缺少父章节：${definition.title}`)
+    parent.subsections.push({
+      title: definition.title,
+      paragraphs,
+      tables,
+    })
+  })
+  const pluginGeneration = await renderInvestmentProposalWithPlugin({
+    outputPath: input.outputPath,
+    payload: {
+      meta: {
+        title_lines: [sanitizeInvestmentProposalClientText(
+          input.content.title || `关于对${company}实施股权投资的提案`,
+        )],
+        salutation: blueprint.fixedBlocks.salutation,
+        intro_paragraphs: [
+          sanitizeInvestmentProposalClientText(input.content.executiveSummary),
+          blueprint.fixedBlocks.authorization,
+        ].filter(Boolean),
+        signature_entity: blueprint.fixedBlocks.managementCompany,
+        date: `${generatedAt.getFullYear()}年${generatedAt.getMonth() + 1}月${generatedAt.getDate()}日`,
+      },
+      sections: pluginSections,
+    },
+  })
+  return {
+    ...pluginGeneration,
+    blueprintVersion: blueprint.version,
+    coreStandardSha256: blueprint.coreStandardSha256,
+    templateCorpusSha256: blueprint.corpusSha256,
+    sectionCount: blueprint.sections.length,
+    tableCount: input.content.sections.reduce((count, section) => count + (section.tables?.length ?? 0), 0),
+    headingLevels: [1, 2],
+    tocField: false,
+    updateFields: true,
+  }
+  /* c8 ignore start -- legacy formatter retained for old artifact replay only */
   const body: Array<Paragraph | Table> = [
     new Paragraph({
       style: PROPOSAL_STYLE.title,
@@ -598,6 +686,7 @@ export async function generateInvestmentProposalDocx(input: {
       'primary-layout-authority.docx',
     ),
   }
+  /* c8 ignore stop */
 }
 
 export type InvestmentProposalOutputIssue = {

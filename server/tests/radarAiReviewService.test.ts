@@ -35,6 +35,8 @@ test('accepts a complete paper title for an explicit paper candidate', () => {
     legalName: '',
     evidence: `标题：${title} 摘要：This paper presents a descriptor-free visual localization method.`,
     translatedTitle: 'GeoMix：基于全局上下文与多检测器训练的无描述符视觉定位',
+    paperProjectName: 'GeoMix',
+    paperProjectNameZh: 'GeoMix',
     translatedSummary: '本文提出一种无需局部描述符的视觉定位方法。',
     confidence: 0.95,
     rejectReason: '',
@@ -44,7 +46,33 @@ test('accepts a complete paper title for an explicit paper candidate', () => {
   assert.equal(result.decision.subjectType, 'paper')
   assert.equal(result.decision.subjectName, title)
   assert.equal(result.decision.translatedTitle, 'GeoMix：基于全局上下文与多检测器训练的无描述符视觉定位')
+  assert.equal(result.decision.paperProjectName, 'GeoMix')
+  assert.equal(result.decision.paperProjectNameZh, 'GeoMix')
   assert.equal(result.decision.translatedSummary, '本文提出一种无需局部描述符的视觉定位方法。')
+})
+
+test('separates a paper project name from its complete publication title', () => {
+  const title = 'When Agents Coordinate: Measuring Coordination in Multi-Agent AI Coding'
+  const source = `${title}\nWe study how teams of AI coding agents coordinate while solving programming tasks.`
+  const result = validateRadarAiDecision({
+    candidateId: 'paper-project-name',
+    decision: 'accept',
+    subjectType: 'paper',
+    subjectName: title,
+    legalName: '',
+    evidence: source,
+    translatedTitle: '当智能体协作时：多智能体 AI 编程中的协作度量',
+    paperProjectName: 'Measuring Coordination in Multi-Agent AI Coding',
+    paperProjectNameZh: '多智能体 AI 编程中的协作度量',
+    translatedSummary: '本文研究多智能体 AI 编程中的协作度量。',
+    confidence: 0.99,
+    rejectReason: '',
+  }, source, 'test-model', '2026-08-19T00:00:00.000Z', true)
+
+  assert.equal(result.status, 'accepted')
+  assert.equal(result.decision.subjectName, title)
+  assert.equal(result.decision.paperProjectName, 'Measuring Coordination in Multi-Agent AI Coding')
+  assert.equal(result.decision.paperProjectNameZh, '多智能体 AI 编程中的协作度量')
 })
 
 test('does not expose an English-only string as a Chinese paper translation', () => {
@@ -180,6 +208,6 @@ test('marks arXiv and paper-group candidates as papers before model review', () 
   assert.equal(direct.isPaper, true)
   assert.equal(grouped.isPaper, true)
   assert.equal(investment.promptVersion, 'radar-subject-v3-paper-v2')
-  assert.equal(direct.promptVersion, 'radar-subject-v4-paper-zh-v2')
+  assert.equal(direct.promptVersion, 'radar-paper-project-v5')
   assert.match(grouped.promptText, /线索类型：论文/)
 })

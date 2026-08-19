@@ -97,7 +97,21 @@ function xmlCategories(block: string): string[] {
     .map((match) => cleanText(decodeEntities(match[1]))).filter(Boolean)
 }
 
-function parseFeedEntries(xml: string): Array<{ title: string; summary: string; link: string; publishedAt: string; updatedAt: string; authors: string[]; categories: string[]; id: string }> {
+function parseFeedAuthors(block: string): string[] {
+  const atomNames = xmlValues(block, 'name')
+  if (atomNames.length > 0) return [...new Set(atomNames)]
+
+  const rssAuthors = xmlValues(block, 'author')
+  if (rssAuthors.length > 0) return [...new Set(rssAuthors)]
+
+  // arXiv's category RSS feeds expose the complete author list in
+  // <dc:creator> rather than Atom's <author><name> structure.
+  return [...new Set(xmlValues(block, 'creator').flatMap((value) => (
+    value.split(/\s*[,;；，]\s*/).map((author) => cleanText(author)).filter(Boolean)
+  )))]
+}
+
+export function parseFeedEntries(xml: string): Array<{ title: string; summary: string; link: string; publishedAt: string; updatedAt: string; authors: string[]; categories: string[]; id: string }> {
   const blocks = xmlBlocks(xml, 'entry')
   const entries = blocks.length > 0 ? blocks : xmlBlocks(xml, 'item')
   return entries.map((block) => ({
@@ -106,7 +120,7 @@ function parseFeedEntries(xml: string): Array<{ title: string; summary: string; 
     link: xmlLink(block),
     publishedAt: xmlValue(block, 'published', 'pubDate', 'date'),
     updatedAt: xmlValue(block, 'updated', 'lastBuildDate'),
-    authors: xmlValues(block, 'name').length > 0 ? xmlValues(block, 'name') : xmlValues(block, 'author'),
+    authors: parseFeedAuthors(block),
     categories: xmlCategories(block),
     id: xmlValue(block, 'id', 'guid'),
   })).filter((entry) => entry.title)

@@ -30,6 +30,8 @@ import {
   finishAiRuntimeRequest,
   markAiRuntimeFirstTokenFromSdkMessage,
 } from './aiRuntimeTelemetry.js'
+import type { WeixinInboundImage } from '../services/weixinInboundImage.js'
+import type { WeixinInboundDocument } from '../services/weixinInboundFile.js'
 
 type RuntimeQuery = AsyncIterable<unknown> & {
   interrupt?: () => Promise<void>
@@ -44,6 +46,9 @@ type RuntimeSession = {
   telemetryRequestId: string | null
   outputLoop: Promise<void>
   stoppingReason: 'abort' | 'dispose' | 'shutdown' | null
+  pendingUserMessage: unknown | null
+  resumeRecoveryAttempted: boolean
+  assistantSeenForPending: boolean
 }
 
 export type JwInteractionQuestion = {
@@ -872,6 +877,23 @@ export async function persistJwRuntimeEvent(
   await updateConversationState(conversationId, status, metadataPatch)
 }
 
+export function isMissingSdkConversationResult(rawValue: unknown) {
+  const raw = record(rawValue)
+  if (raw.type !== 'result' || !raw.is_error) return false
+  const errors = Array.isArray(raw.errors)
+    ? raw.errors.filter((item): item is string => typeof item === 'string')
+    : []
+  const combined = [raw.result, raw.error, ...errors]
+    .filter((item): item is string => typeof item === 'string')
+    .join('\n')
+  return isMissingSdkConversationError(combined)
+}
+
+export function isMissingSdkConversationError(value: unknown) {
+  const message = value instanceof Error ? value.message : String(value || '')
+  return /No conversation found with session ID:/i.test(message)
+}
+
 async function runOutputLoop(session: RuntimeSession) {
   try {
     for await (const value of session.query) {
@@ -884,12 +906,34 @@ async function runOutputLoop(session: RuntimeSession) {
       } else if (raw.type === 'stream_event' && raw.event && typeof raw.event === 'object') {
         applyStreamEvent(session, raw.event as Record<string, unknown>)
       } else if (raw.type === 'assistant') {
+        session.assistantSeenForPending = true
         await persistJwAgentProtocolMessage(session.conversationId, raw)
         session.partialParts = []
       } else if (raw.type === 'user') {
         await persistJwAgentProtocolMessage(session.conversationId, raw)
       } else if (raw.type === 'result') {
         session.partialParts = []
+        if (
+          raw.is_error
+          && isMissingSdkConversationResult(raw)
+          && session.pendingUserMessage
+          && !session.resumeRecoveryAttempted
+          && !session.assistantSeenForPending
+        ) {
+          session.resumeRecoveryAttempted = true
+          await updateConversationState(session.conversationId, 'streaming', {
+            lastError: null,
+            sdkSessionRecovery: {
+              reason: 'missing_conversation', attemptedAt: new Date().toISOString(), attempt: 1,
+            },
+          })
+          console.warn(JSON.stringify({
+            event: 'jw_sdk_session_retry', conversationId: session.conversationId,
+          }))
+          session.queue.push(session.pendingUserMessage)
+          continue
+        }
+        session.pendingUserMessage = null
         await persistJwRuntimeEvent(session.conversationId, raw.is_error ? 'error' : 'idle', raw)
         finishAiRuntimeRequest(session.telemetryRequestId, raw.is_error ? 'failed' : 'succeeded')
         session.telemetryRequestId = null
@@ -900,7 +944,15 @@ async function runOutputLoop(session: RuntimeSession) {
     finishAiRuntimeRequest(session.telemetryRequestId, 'failed')
     session.telemetryRequestId = null
     if (!session.stoppingReason) {
-      await updateConversationState(session.conversationId, 'error', { lastError: errorText(error) })
+      const missingConversation = isMissingSdkConversationError(error)
+      await updateConversationState(session.conversationId, 'error', {
+        lastError: errorText(error),
+        ...(missingConversation ? {
+          sdkSessionId: null,
+          sdkSessionInvalidatedAt: new Date().toISOString(),
+          sdkSessionInvalidationReason: 'missing_conversation',
+        } : {}),
+      })
       console.error(`[jw-runtime] conversation ${session.conversationId} failed:`, errorText(error))
     }
   } finally {
@@ -1114,6 +1166,9 @@ async function createRuntimeSession(
     telemetryRequestId: null,
     outputLoop: Promise.resolve(),
     stoppingReason: null,
+    pendingUserMessage: null,
+    resumeRecoveryAttempted: false,
+    assistantSeenForPending: false,
   }
   session.outputLoop = runOutputLoop(session)
   sessions.set(conversationId, session)
@@ -1121,6 +1176,26 @@ async function createRuntimeSession(
 }
 
 export async function sendJwAgentMessage(userId: string, userRole: string, agentId: string, message: string) {
+  return await sendJwAgentMessageWithMedia(userId, userRole, agentId, message, {})
+}
+
+export async function sendJwAgentMessageWithImages(
+  userId: string,
+  userRole: string,
+  agentId: string,
+  message: string,
+  images: WeixinInboundImage[],
+) {
+  return await sendJwAgentMessageWithMedia(userId, userRole, agentId, message, { images })
+}
+
+export async function sendJwAgentMessageWithMedia(
+  userId: string,
+  userRole: string,
+  agentId: string,
+  message: string,
+  media: { images?: WeixinInboundImage[]; documents?: WeixinInboundDocument[] },
+) {
   const resolved = await resolveConversation(userId, agentId)
   if (!resolved) return null
   return await withJwConversationOperation(resolved.agent.id, async () => {
@@ -1132,7 +1207,36 @@ export async function sendJwAgentMessage(userId: string, userRole: string, agent
       })
     }
     const clean = message.trim()
-    if (!clean) throw new Error('消息不能为空')
+    const validImages = (media.images || []).slice(0, 4).filter((image) => (
+      ['image/jpeg', 'image/png', 'image/gif', 'image/webp'].includes(image.mediaType)
+      && image.byteSize > 0
+      && image.byteSize <= 25 * 1024 * 1024
+      && Boolean(image.dataBase64)
+      && /^[0-9a-f]{64}$/.test(image.sha256)
+    ))
+    const validDocuments = (media.documents || []).slice(0, 3).filter((document) => (
+      document.fileName.length > 0
+      && document.fileName.length <= 180
+      && document.byteSize > 0
+      && document.byteSize <= 20 * 1024 * 1024
+      && /^[0-9a-f]{64}$/.test(document.sha256)
+      && (
+        (document.kind === 'pdf'
+          && document.mediaType === 'application/pdf'
+          && Boolean(document.dataBase64)
+          && Buffer.byteLength(document.dataBase64 || '', 'base64') === document.byteSize)
+        || (document.kind === 'text'
+          && ['application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'text/markdown'].includes(document.mediaType)
+          && Boolean(document.text)
+          && (document.text?.length || 0) <= 300_100)
+      )
+    ))
+    if (!clean && !validImages.length && !validDocuments.length) throw new Error('消息不能为空')
+    const attachmentSummary = [
+      validImages.length ? `微信图片 ${validImages.length} 张` : '',
+      validDocuments.length ? `微信文件 ${validDocuments.length} 个` : '',
+    ].filter(Boolean).join('，')
+    const persistedText = clean || `[${attachmentSummary}]`
     if (refreshed.agent.status === 'streaming') {
       const active = sessions.get(refreshed.agent.id)
       if (!active) await updateConversationState(refreshed.agent.id, 'idle', { lastError: '服务重启后已清理旧的流式状态' })
@@ -1143,8 +1247,23 @@ export async function sendJwAgentMessage(userId: string, userRole: string, agent
       conversationId: refreshed.agent.id,
       externalMessageId: `user:${randomUUID()}`,
       role: 'user',
-      content: clean,
-      parts: [{ type: 'text', content: clean }],
+      content: persistedText,
+      parts: [
+        { type: 'text', content: persistedText },
+        ...validImages.map((image) => ({
+          type: 'image',
+          content: '[微信图片]',
+          payload: { mediaType: image.mediaType, byteSize: image.byteSize, sha256: image.sha256 },
+        })),
+        ...validDocuments.map((document) => ({
+          type: 'file',
+          content: `[微信文件：${document.fileName}]`,
+          payload: {
+            kind: document.kind, fileName: document.fileName, mediaType: document.mediaType,
+            byteSize: document.byteSize, sha256: document.sha256, truncated: Boolean(document.truncated),
+          },
+        })),
+      ],
     })
     await updateConversationState(refreshed.agent.id, 'streaming', { lastError: null })
     let telemetryRequestId: string | null = null
@@ -1159,14 +1278,45 @@ export async function sendJwAgentMessage(userId: string, userRole: string, agent
         )
       telemetryRequestId = beginAiRuntimeRequest('jw-agent')
       session.telemetryRequestId = telemetryRequestId
-      session.queue.push({
+      const attachments = [
+        ...validImages.map((image) => ({
+          type: 'image' as const,
+          source: { type: 'base64' as const, media_type: image.mediaType, data: image.dataBase64 },
+        })),
+        ...validDocuments.map((document) => document.kind === 'pdf' ? ({
+          type: 'document' as const,
+          source: {
+            type: 'base64' as const,
+            media_type: 'application/pdf' as const,
+            data: document.dataBase64 || '',
+          },
+          title: document.fileName,
+        }) : ({
+          type: 'document' as const,
+          source: { type: 'text' as const, media_type: 'text/plain' as const, data: document.text || '' },
+          title: document.fileName,
+          context: document.mediaType === 'text/markdown'
+            ? '该文档来自微信接收的 Markdown 文件。'
+            : '该文档来自微信接收的 DOCX 文件，已提取为纯文本。',
+        })),
+      ]
+      const content = attachments.length ? [
+        ...attachments,
+        { type: 'text' as const, text: clean || '请阅读并分析以上微信附件。' },
+      ] : clean
+      const sdkSessionId = typeof fresh?.metadata?.sdkSessionId === 'string'
+        ? fresh.metadata.sdkSessionId
+        : null
+      const userMessage = {
         type: 'user',
-        message: { role: 'user', content: clean },
+        message: { role: 'user', content },
         parent_tool_use_id: null,
-        session_id: typeof fresh?.metadata?.sdkSessionId === 'string'
-          ? fresh.metadata.sdkSessionId
-          : refreshed.agent.id,
-      })
+        ...(sdkSessionId ? { session_id: sdkSessionId } : {}),
+      }
+      session.pendingUserMessage = userMessage
+      session.resumeRecoveryAttempted = false
+      session.assistantSeenForPending = false
+      session.queue.push(userMessage)
     } catch (error) {
       finishAiRuntimeRequest(telemetryRequestId, 'failed')
       await updateConversationState(refreshed.agent.id, 'error', { lastError: errorText(error) })
@@ -1241,6 +1391,19 @@ async function closeJwRuntimeSession(
   try { session.query.close?.() } catch { /* output loop still settles */ }
   await session.outputLoop
   return true
+}
+
+export async function resetJwAgentSdkSession(userId: string, agentId: string) {
+  const resolved = await resolveConversation(userId, agentId)
+  if (!resolved) return null
+  await closeJwRuntimeSession(resolved.agent.id).catch(() => false)
+  await updateConversationState(resolved.agent.id, 'idle', {
+    sdkSessionId: null,
+    lastError: null,
+    sdkSessionResetAt: new Date().toISOString(),
+    sdkSessionResetReason: 'missing_conversation',
+  })
+  return { reset: true, conversationId: resolved.agent.id }
 }
 
 export async function recoverInterruptedJwAgentSessions() {

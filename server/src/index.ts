@@ -330,7 +330,7 @@ async function start() {
     await startProjectScoreJobWorker(executeProjectScoring)
     await startLeadBpWorker(scheduleLeadScoring)
     const scoreRecovery = await recoverLeadScoringQueue()
-    console.log(`[lead-score] startup recovery found=${scoreRecovery.found} queued=${scoreRecovery.recovered}`)
+    console.log(`[lead-score] startup recovery found=${scoreRecovery.found} queued=${scoreRecovery.recovered} circuit-dead-letters=${scoreRecovery.circuitDeadLettersRecovered}/${scoreRecovery.circuitDeadLettersFound}`)
     const radarSeed = await ensureRadarMySqlSeeded()
     console.log(`[radar-mysql] seed skipped=${radarSeed.skipped} candidates=${radarSeed.currentCandidates}`)
     await startRuntimeJobScheduler()

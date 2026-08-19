@@ -18,7 +18,7 @@ import {
 
 export const LEAD_SUBJECT_AGENT_PROFILE = 'lead-subject-agent'
 export const LEAD_SUBJECT_AGENT_PROFILE_VERSION = 'lead-subject-agent-v1'
-export const LEAD_SUBJECT_AGENT_SCHEMA_VERSION = 'radar-subject-decision-v1'
+export const LEAD_SUBJECT_AGENT_SCHEMA_VERSION = 'radar-subject-decision-v2'
 export const LEAD_SUBJECT_AGENT_TOOLSET_VERSION = 'no-tools-v1'
 
 export type LeadSubjectAgentCandidate = {
@@ -62,7 +62,7 @@ const OUTPUT_SCHEMA: Record<string, unknown> = {
         additionalProperties: false,
         required: [
           'candidateId', 'decision', 'subjectType', 'subjectName', 'legalName', 'evidence',
-          'translatedTitle', 'translatedSummary', 'confidence', 'rejectReason',
+          'translatedTitle', 'paperProjectName', 'paperProjectNameZh', 'translatedSummary', 'confidence', 'rejectReason',
         ],
         properties: {
           candidateId: { type: 'string', minLength: 1 },
@@ -72,6 +72,8 @@ const OUTPUT_SCHEMA: Record<string, unknown> = {
           legalName: { type: 'string' },
           evidence: { type: 'string' },
           translatedTitle: { type: 'string' },
+          paperProjectName: { type: 'string' },
+          paperProjectNameZh: { type: 'string' },
           translatedSummary: { type: 'string' },
           confidence: { type: 'number', minimum: 0, maximum: 1 },
           rejectReason: { type: 'string' },

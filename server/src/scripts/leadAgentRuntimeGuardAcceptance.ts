@@ -88,13 +88,23 @@ async function main() {
     await finishLeadAgentRuntimePermit({ permit: unrelated, status: 'succeeded', actualMicrousd: 1_000, now: new Date(circuitNow.getTime() + 5_000) })
     checks.push('cross-profile-failures-do-not-open-an-unrelated-profile-circuit')
 
-    const failureThree = await acquire('lead-research-agent', new Date(circuitNow.getTime() + 6_000))
-    await finishLeadAgentRuntimePermit({ permit: failureThree, status: 'failed', error: Object.assign(new Error('upstream three'), { code: 'UPSTREAM' }), now: new Date(circuitNow.getTime() + 7_000) })
+    const inFlightSuccess = await acquire('lead-research-agent', new Date(circuitNow.getTime() + 6_000))
+    const failureThree = await acquire('lead-research-agent', new Date(circuitNow.getTime() + 7_000))
+    await finishLeadAgentRuntimePermit({ permit: failureThree, status: 'failed', error: Object.assign(new Error('upstream three'), { code: 'UPSTREAM' }), now: new Date(circuitNow.getTime() + 8_000) })
+    const activeBatchProbe = await acquire('lead-research-agent', new Date(circuitNow.getTime() + 9_000))
+    await finishLeadAgentRuntimePermit({ permit: activeBatchProbe, status: 'succeeded', actualMicrousd: 1_000, now: new Date(circuitNow.getTime() + 10_000) })
+    await finishLeadAgentRuntimePermit({ permit: inFlightSuccess, status: 'succeeded', actualMicrousd: 1_000, now: new Date(circuitNow.getTime() + 11_000) })
+    checks.push('same-profile-in-flight-work-prevents-fast-failure-circuit-skew')
+
+    const failureFour = await acquire('lead-screening-agent', new Date(circuitNow.getTime() + 12_000))
+    await finishLeadAgentRuntimePermit({ permit: failureFour, status: 'failed', error: Object.assign(new Error('upstream four'), { code: 'UPSTREAM' }), now: new Date(circuitNow.getTime() + 13_000) })
     await assert.rejects(
-      () => acquire('lead-research-agent', new Date(circuitNow.getTime() + 8_000)),
-      (error: Error & { code?: string }) => error.code === 'LEAD_AGENT_CIRCUIT_OPEN',
+      () => acquire('lead-screening-agent', new Date(circuitNow.getTime() + 14_000)),
+      (error: Error & { code?: string; retryAfterMs?: number }) => (
+        error.code === 'LEAD_AGENT_CIRCUIT_OPEN' && error.retryAfterMs === 59_000
+      ),
     )
-    checks.push('consecutive-same-profile-failures-open-a-profile-scoped-circuit')
+    checks.push('consecutive-same-profile-failures-open-a-profile-scoped-circuit-with-retry-after')
 
     process.env.LEAD_AGENT_GLOBAL_MAX_CONCURRENCY = '1'
     process.env.LEAD_AGENT_CIRCUIT_FAILURE_THRESHOLD = '100'

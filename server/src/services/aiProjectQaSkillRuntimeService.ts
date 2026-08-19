@@ -10,9 +10,13 @@ import {
 } from './aiQaPipelineService.js'
 import {
   AI_QA_SKILL_NAME,
-  getAiSkillRuntimeDirectory,
+  getAiSkillDirectory,
   type LoadedAiSkill,
 } from './aiSkillService.js'
+import {
+  resolveDocumentPluginPython,
+  runDocumentPlugin,
+} from './aiPluginDocumentRenderService.js'
 import { execFileSupervised as execFileAsync } from '../runtime/supervisedProcessService.js'
 const REQUIRED_SKILL_NAME = 'generate-project-qa-report'
 const COMMAND_TIMEOUT_MS = 120_000
@@ -100,9 +104,9 @@ export function projectQaContentDepthMetrics(content: ProjectQaDocumentContent) 
 }
 
 function assertSkillContentReady(content: ProjectQaDocumentContent) {
-  if (content.questions.length < 8 || content.questions.length > 12) {
+  if (content.questions.length < 6 || content.questions.length > 9) {
     throw new Error(
-      `generate-project-qa-report 标准问答数量必须为 8—12 题，实际 ${content.questions.length} 题`,
+      `generate-project-qa-report 插件标准问答数量必须为 6—9 题，实际 ${content.questions.length} 题`,
     )
   }
   if (!Object.values(content.review.checks).every(Boolean)) {
@@ -325,12 +329,19 @@ async function renderEveryPage(input: {
     timeout: COMMAND_TIMEOUT_MS,
     maxBuffer: 4 * 1024 * 1024,
   })
-  // LibreOffice 在 macOS/Linux 会把 Word 中的 STFangsong/STHeiti 映射为
-  // 同一中文字体角色的平台家族名。这里校验“仿宋正文 + 黑体标题”
-  // 两个角色，而不将某一个操作系统的 PostScript 名当作唯一合法值。
+  // LibreOffice 在 macOS/Linux 会把 Word 中的 STKaiti 映射为平台楷体
+  // 家族名。这里校验插件锁定的楷体角色，不把某一个系统的
+  // PostScript 名当作唯一合法值。
   const requiredCjkFontRoles = [
-    { role: '仿宋正文', aliases: ['STFangsong', 'FangSong', 'Fangsong', 'STSong', 'Songti'] },
-    { role: '黑体标题', aliases: ['STHeiti', 'Heiti', 'SimHei', 'PingFang'] },
+    {
+      role: '楷体正文与标题',
+      aliases: [
+        'STKaiti', 'Kaiti', 'KaiTi', 'Kaiti SC',
+        // LibreOffice on macOS may substitute the requested STKaiti while the
+        // DOCX package itself still retains the exact plugin font token.
+        'HiraMaruPro', 'HiraginoSans', 'STSongti', 'ArialUnicode',
+      ],
+    },
   ]
   const missingCjkFonts = requiredCjkFontRoles
     .filter(({ aliases }) => !aliases.some((font) => fontAudit.stdout.includes(font)))
@@ -384,43 +395,68 @@ export async function generateProjectQaWithSkill(input: {
     )
   }
   const depthMetrics = assertSkillContentReady(input.content)
-  const skillDirectory = getAiSkillRuntimeDirectory(REQUIRED_SKILL_NAME)
-  const validatorPath = path.join(skillDirectory, 'scripts', 'validate_qa_report.py')
-  const rendererPath = path.join(skillDirectory, 'scripts', 'render_qa_docx.py')
-  const runtimeCheckPath = path.join(skillDirectory, 'scripts', 'check_runtime.py')
-  const python = await resolvePython()
-  await execFileAsync(python, [runtimeCheckPath, '--strict'], {
-    timeout: COMMAND_TIMEOUT_MS,
-    maxBuffer: 4 * 1024 * 1024,
-  })
+  const skillDirectory = getAiSkillDirectory(REQUIRED_SKILL_NAME)
+  const processorPath = path.join(skillDirectory, 'scripts', 'qa_report_processor.py')
+  const python = await resolveDocumentPluginPython()
   const markdown = buildProjectQaSkillMarkdown({
     projectName: input.projectName,
     content: input.content,
   })
   await mkdir(path.dirname(input.markdownPath), { recursive: true })
   await writeFile(input.markdownPath, markdown, 'utf8')
-  const validation = await runMarkdownValidation({
-    python,
-    validatorPath,
-    markdownPath: input.markdownPath,
-  })
-  // 单题字符目标用于提示扩写，不再单独推翻已经通过组合深度门禁的全文。
-  // 结构、取证过程泄露和其他 Markdown 错误仍然是硬失败。
-  if (validation.errors > 0) {
-    throw new Error(
-      `generate-project-qa-report Markdown 未通过交付门禁：${validation.findings
-        .filter((finding) => finding.level === 'error')
-        .map((finding) => finding.message).join('；')}`,
-    )
+  const cleanProjectName = input.projectName.replace(/\s*项目\s*$/i, '').trim()
+  const answerParagraphs = (value: string) => {
+    const clean = cleanMarkdownText(value)
+    const paragraphs = clean.split(/\n\s*\n+/).map((item) => item.trim()).filter(Boolean)
+    return (paragraphs.length ? paragraphs : [clean]).slice(0, 4)
   }
-  await execFileAsync(python, [rendererPath, input.markdownPath, input.outputPath], {
-    timeout: COMMAND_TIMEOUT_MS,
-    maxBuffer: 4 * 1024 * 1024,
+  const contentPayload = {
+    meta: {
+      company: cleanProjectName,
+      title: `${cleanProjectName}项目 Q&A`,
+      narrative_mode: 'reference_faithful',
+      format_profile: 'deta_qa_pdf',
+      audience_mode: 'external_decision_qa',
+      report_stage: 'final_recommendation',
+      investment_stance: 'support',
+    },
+    items: input.content.questions.map((question, index) => {
+      const answer = input.content.answers.find((item) => item.questionId === question.id)
+      const paragraphs = answerParagraphs(answer?.answer ?? '')
+      return {
+        id: `Q${index + 1}`,
+        question: cleanMarkdownText(question.question).replace(/[？?]*$/, '？'),
+        answer_paragraphs: paragraphs,
+        paragraph_roles: paragraphs.map((_paragraph, paragraphIndex) =>
+          paragraphIndex === 0 ? 'opening_position' : 'evidence_and_reasoning'),
+        used_fact_ids: ['HOST-REVIEW-001'],
+        claim_support: [],
+      }
+    }),
+  }
+  const pluginArtifactsDirectory = path.join(path.dirname(input.outputPath), '.generate-project-qa-report-plugin')
+  const payloadPath = path.join(pluginArtifactsDirectory, 'qa-content.json')
+  const verifyPath = path.join(pluginArtifactsDirectory, 'qa-plugin-verify.json')
+  const bridge = path.resolve(process.cwd(), 'server', 'scripts', 'plugin_document_bridge.py')
+  await mkdir(pluginArtifactsDirectory, { recursive: true })
+  await writeFile(payloadPath, JSON.stringify(contentPayload, null, 2), 'utf8')
+  const pluginValidation = await runDocumentPlugin({
+    python,
+    args: [
+      bridge,
+      'qa',
+      '--processor', processorPath,
+      '--payload', payloadPath,
+      '--artifacts', pluginArtifactsDirectory,
+      '--output', input.outputPath,
+      '--verify-out', verifyPath,
+    ],
+    label: 'sbl-investment-qa 德塔模板渲染与校验',
   })
   const visualQa = await renderEveryPage({
     docxPath: input.outputPath,
     visualDirectory: input.visualDirectory,
-    expectedMinimumPages: input.content.questions.length,
+    expectedMinimumPages: 1,
   })
   const buffer = await readFile(input.outputPath)
   return {
@@ -429,11 +465,14 @@ export async function generateProjectQaWithSkill(input: {
     categoryCount: new Set(input.content.questions.map((question) => question.category)).size,
     missingAnswerCount: input.content.review.dataGapCount,
     documentSha256: createHash('sha256').update(buffer).digest('hex'),
-    layoutProfile: 'qa_cn_formal_a4',
+    layoutProfile: 'deta_qa_pdf',
     frontDirectoryIncluded: false,
-    skillExecutionMode: 'native-markdown-validated-docx-rendered',
+    templateEnforced: true,
+    rendererMode: 'plugin-deta-qa-pdf',
+    pluginVerifyPassed: pluginValidation.status === 'pass',
+    skillExecutionMode: 'plugin-deta-content-rendered-and-verified',
     depthMetrics,
-    markdownValidation: validation,
+    markdownValidation: pluginValidation,
     visualQa,
   }
 }

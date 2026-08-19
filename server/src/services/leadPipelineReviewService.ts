@@ -16,6 +16,7 @@ import {
   recordLeadPipelineEntityMatch,
 } from './leadPipelineEntityMatchService.js'
 import { currentRequestId } from '../runtime/structuredLogger.js'
+import { resolvePaperProjectIdentity } from './paperIdentity.js'
 
 export type LeadPipelineReviewActor = {
   userId: string
@@ -384,6 +385,12 @@ function newLeadFields(row: LockedReviewRow, validated: ReturnType<typeof valida
   const sourceName = meaningful(payload.source_name || payload.source, 128)
   const link = meaningful(payload.link || profile.source_url, 4_000)
   const isPaper = validated.subjectType === 'paper'
+  const paperProjectIdentity = isPaper ? resolvePaperProjectIdentity({
+    titleOriginal: payload.title || profile.paper_title || validated.subjectName,
+    titleZh: triggerOutput.translatedTitle,
+    modelProjectName: triggerOutput.paperProjectName,
+    modelProjectNameZh: triggerOutput.paperProjectNameZh,
+  }) : { projectName: '', projectNameOriginal: '' }
   const summary = meaningful(
     isPaper ? triggerOutput.translatedSummary || payload.summary : payload.summary || profile.core_highlights || payload.article_text,
     4_000,
@@ -416,7 +423,10 @@ function newLeadFields(row: LockedReviewRow, validated: ReturnType<typeof valida
     channel: isPaper ? '论文' : sourceGroup || '人工复核',
     link,
     articleText: meaningful(payload.article_text, 20_000),
-    profile,
+    profile: isPaper ? {
+      ...profile,
+      projectName: paperProjectIdentity.projectName,
+    } : profile,
     aiSubjectReview: triggerOutput,
     manualReview: {
       reviewId: row.id,
@@ -430,6 +440,8 @@ function newLeadFields(row: LockedReviewRow, validated: ReturnType<typeof valida
       title: meaningful(payload.title || profile.paper_title, 1_000) || validated.subjectName,
       titleOriginal: meaningful(payload.title || profile.paper_title, 1_000) || validated.subjectName,
       titleZh: meaningful(triggerOutput.translatedTitle, 500),
+      projectName: paperProjectIdentity.projectName,
+      projectNameOriginal: paperProjectIdentity.projectNameOriginal,
       authors: Array.isArray(payload.authors) ? payload.authors : [],
       categories,
       abstract: meaningful(payload.summary, 4_000),

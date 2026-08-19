@@ -1,10 +1,10 @@
-import { Bot, CheckCircle2, ClipboardCheck, Download, ExternalLink, FileSpreadsheet, FolderInput, Globe2, RefreshCw, ShieldCheck, Sparkles, UploadCloud, UsersRound } from 'lucide-react'
+import { Bot, CheckCircle2, ClipboardCheck, Download, ExternalLink, FileSpreadsheet, FolderInput, Globe2, RefreshCw, ShieldCheck, Sparkles, Trash2, UploadCloud, UsersRound } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import { useEffect, useRef, useState } from 'react'
 import { useToast } from '../components/Toast'
 import { Badge, Button, Card, DataTable, Drawer, FileUpload, Modal, PageHeader, ProgressBar, SearchInput, StatusBadge, TableCell, Tabs } from '../components/ui'
 import { useAuthStore } from '../store/useAuthStore'
-import { apiGet, apiPost } from '../lib/api'
+import { apiDelete, apiGet, apiPost } from '../lib/api'
 import type { Lead, LeadScoreJobStatus, LeadScoring } from '../types'
 import { formatShanghaiDateTime } from '../lib/dateTime'
 
@@ -29,7 +29,7 @@ const isScoreJobActive = (status?: LeadScoreJobStatus) => Boolean(status && ACTI
 const scoreJobLabel = (status?: LeadScoreJobStatus) => status === 'queued'
   ? '排队中…'
   : status === 'retrying'
-    ? '自动重试中…'
+    ? '等待自动重试…'
     : '更新中…'
 
 type LeadPipelineReview = {
@@ -216,12 +216,18 @@ function formatPoolEnteredAt(value?: string) {
 function getLeadIdentity(lead: Lead) {
   const isPaper = lead.radarProfile?.channel === '论文'
   const translatedPaperTitle = isPaper ? meaningfulLeadText(lead.radarProfile?.paperMeta?.titleZh) : undefined
-  const companySubject = translatedPaperTitle
+  const paperProjectName = isPaper
+    ? meaningfulLeadText(lead.radarProfile?.paperMeta?.projectName)
+      ?? meaningfulLeadText(lead.radarProfile?.profile?.projectName)
+    : undefined
+  const companySubject = paperProjectName
+    ?? translatedPaperTitle
     ?? meaningfulLeadText(lead.scoring?.registry?.companyName)
     ?? meaningfulLeadText(lead.companyName)
     ?? meaningfulLeadText(lead.name)
     ?? (isPaper ? '论文标题待翻译' : '公司主体')
-  const projectName = translatedPaperTitle
+  const projectName = paperProjectName
+    ?? translatedPaperTitle
     ?? meaningfulLeadText(lead.radarProfile?.profile?.projectName)
     ?? meaningfulLeadText(lead.scoring?.projectName)
     ?? meaningfulLeadText(lead.name)
@@ -558,8 +564,15 @@ function LeadDetailPanel({
             ? '人工重试 AI 评分'
             : '开始 AI 评分'}
       </button>}
+      {lead.scoreJob?.status === 'retrying' && <div className="rounded-lg bg-blue-50 px-3 py-2 text-xs leading-5 text-blue-700">
+        <p>{lead.scoreJob.error || 'AI 评分服务暂时不可用，系统正在等待自动重试。'}</p>
+        {lead.scoreJob.nextRetryAt && <p className="mt-1 text-blue-500">预计重试时间：{formatShanghaiDateTime(lead.scoreJob.nextRetryAt)}</p>}
+      </div>}
       {['failed', 'dead_letter'].includes(lead.scoreJob?.status ?? '') &&
-        <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-700">AI 评分已超过自动重试上限并进入死信。请检查错误后点击上方按钮人工重试，操作会写入审计日志。</p>}
+        <div className="rounded-lg bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-700">
+          <p>{lead.scoreJob?.error || 'AI 评分在多个延迟重试周期后仍未完成。'}</p>
+          <p className="mt-1 text-amber-600">可点击上方按钮人工重试，操作会写入审计日志。</p>
+        </div>}
 
       {(lead.highlights ?? []).map(meaningfulLeadText).filter(Boolean).length > 0 && <section>
         <h3 className="text-sm font-semibold text-slate-800">投资亮点</h3>
@@ -649,6 +662,8 @@ export function SourcingPage() {
   const [filtering, setFiltering] = useState(false)
   const [debouncedQuery, setDebouncedQuery] = useState('')  // 关键词服务端检索(debounce 后)
   const [selected, setSelected] = useState<Lead | null>(null)
+  const [pendingDeleteLead, setPendingDeleteLead] = useState<Lead | null>(null)
+  const [deletingLeadId, setDeletingLeadId] = useState<string | null>(null)
   const [convertingLeadId, setConvertingLeadId] = useState<string | null>(null)
   const [enrichingLeadId, setEnrichingLeadId] = useState<string | null>(null)
   const [detailTab, setDetailTab] = useState('overview')
@@ -672,6 +687,8 @@ export function SourcingPage() {
   const [selectedReview, setSelectedReview] = useState<LeadPipelineReview | null>(null)
   const [reviewForm, setReviewForm] = useState<LeadReviewForm | null>(null)
   const isAuthed = useAuthStore((s) => s.isAuthenticated)
+  const canDeleteLead = useAuthStore((s) => s.user?.role === '系统管理员'
+    || Boolean(s.user?.permissionCodes?.includes('system.manage')))
   useEffect(() => { if (isAuthed) hydrateFromServer() }, [isAuthed, hydrateFromServer])
   // 翻页: 监听 page 变化拉分页数据
   // 翻页: 监听 page 变化拉分页数据; 翻页后滚到表格顶部,避免用户迷失在长列表里
@@ -1009,6 +1026,28 @@ export function SourcingPage() {
     }
   }
 
+  const confirmDeleteLead = async () => {
+    if (!pendingDeleteLead || deletingLeadId) return
+    const lead = pendingDeleteLead
+    setDeletingLeadId(lead.id)
+    try {
+      await apiDelete(`/leads/${lead.id}`)
+      const nextPage = filtered.length <= 1 && page > 1 ? page - 1 : page
+      setSelected(null)
+      setPendingDeleteLead(null)
+      if (nextPage !== page) setPage(nextPage)
+      await Promise.all([
+        fetchLeads(nextPage, 50, channel, sort, debouncedQuery, '', industry, region),
+        fetchLeadStats(),
+      ])
+      showToast(`已从公共线索池删除「${lead.name}」`, 'success')
+    } catch (error) {
+      showToast(`删除线索失败：${(error as Error).message}`, 'error')
+    } finally {
+      setDeletingLeadId(null)
+    }
+  }
+
   const collectIntel = async () => {
     const company = collectName.trim()
     if (company.length < 2) return showToast('请输入公司全称（至少 2 字）', 'error')
@@ -1102,7 +1141,7 @@ export function SourcingPage() {
       <div ref={tableRef}>
         <Card className="overflow-hidden">
         <DataTable headers={channel === '论文'
-          ? ['主体名称 / 项目', '作者', '分类', '行业', 'AI 综合评分', '入池时间', '详情']
+          ? ['项目名称', '作者', '分类', '行业', 'AI 综合评分', '入池时间', '详情']
           : ['主体名称 / 项目', '行业 / 地区标签', '融资 / 估值', 'AI 综合评分', '入池时间', '详情']}>
           {filtered.map((lead) => {
             const { companySubject } = getLeadIdentity(lead)
@@ -1249,17 +1288,17 @@ export function SourcingPage() {
             </div>
           </div>
 
-          {!selectedReview || !reviewForm ? <div className="grid place-items-center rounded-xl border border-dashed border-slate-200 text-sm text-slate-400">从左侧选择一条待办，核对原始材料后提交结论。</div> : <div className="grid grid-cols-2 gap-5">
-            <div className="space-y-4">
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+          {!selectedReview || !reviewForm ? <div className="grid place-items-center rounded-xl border border-dashed border-slate-200 text-sm text-slate-400">从左侧选择一条待办，核对原始材料后提交结论。</div> : <div className="grid min-w-0 grid-cols-2 gap-5">
+            <div className="min-w-0 space-y-4">
+              <div className="min-w-0 rounded-xl border border-slate-200 bg-slate-50 p-4">
                 <div className="flex items-center justify-between"><p className="text-sm font-semibold text-slate-800">不可变原始材料</p><Badge tone="slate">{selectedReview.event.sourceType}</Badge></div>
-                <pre className="mt-3 max-h-[390px] whitespace-pre-wrap break-words text-xs leading-6 text-slate-600">{reviewPayloadText(selectedReview) || JSON.stringify(selectedReview.event.payload, null, 2).slice(0, 24_000)}</pre>
+                <pre className="scrollbar-thin mt-3 max-h-[390px] overflow-y-auto whitespace-pre-wrap [overflow-wrap:anywhere] rounded-lg bg-white p-3 font-sans text-sm leading-6 text-slate-600">{reviewPayloadText(selectedReview) || JSON.stringify(selectedReview.event.payload, null, 2).slice(0, 24_000)}</pre>
               </div>
               <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-800">
                 Agent 原结论：{selectedReview.triggerDecision.reason}。人工结论会新增 Decision，不会覆盖或删除 Agent 历史。
               </div>
             </div>
-            <div className="space-y-3">
+            <div className="min-w-0 space-y-3">
               <div className="grid grid-cols-2 gap-3">
                 <button onClick={() => setReviewForm({ ...reviewForm, outcome: 'accept' })} className={`rounded-lg border px-3 py-2 text-sm ${reviewForm.outcome === 'accept' ? 'border-emerald-400 bg-emerald-50 text-emerald-700' : 'border-slate-200 text-slate-500'}`}>接受并入池</button>
                 <button onClick={() => setReviewForm({ ...reviewForm, outcome: 'reject' })} className={`rounded-lg border px-3 py-2 text-sm ${reviewForm.outcome === 'reject' ? 'border-red-300 bg-red-50 text-red-700' : 'border-slate-200 text-slate-500'}`}>拒绝入池</button>
@@ -1281,13 +1320,20 @@ export function SourcingPage() {
           </div>}
         </div>
       </Modal>
-
       <Drawer
         open={!!selected}
         title={selected?.name ?? '公司情报'}
         onClose={() => setSelected(null)}
         width="w-[900px]"
         footer={selected && <>
+          {canDeleteLead && <Button
+            variant="danger"
+            onClick={() => setPendingDeleteLead(selected)}
+            disabled={Boolean(deletingLeadId)}
+          >
+            <Trash2 className="h-4 w-4" />
+            删除线索
+          </Button>}
           <Button
             variant="secondary"
             onClick={enrichSelectedLead}
@@ -1341,6 +1387,20 @@ export function SourcingPage() {
           {detailTab === 'sources' && <div className="mt-5 space-y-3"><div className="rounded-lg bg-slate-50 p-3 text-xs leading-5 text-slate-500">可靠性用于描述"来源本身"，不代表来源中的企业自述已经被第三方验证。所有链接均保留访问日期。</div>{selected.scoring?.researchSources?.length ? selected.scoring.researchSources.map((s, i) => <div key={`rs-${i}`} className="rounded-xl border border-slate-200 p-4"><div className="flex items-start justify-between"><div><Badge tone="blue">入库来源</Badge><p className="mt-2 font-medium text-slate-800">{s.title}</p></div>{s.url && <SourceLink url={s.url}>打开源地址</SourceLink>}</div><p className="mt-3 text-sm leading-6 text-slate-600">{s.excerpt}</p></div>) : (selected.sources ?? []).map((source) => <div key={source.id} className="rounded-xl border border-slate-200 p-4"><div className="flex items-start justify-between"><div><div className="flex items-center gap-2"><Badge tone={source.reliability === '高' ? 'green' : source.reliability === '中' ? 'amber' : 'slate'}>{source.reliability}可靠性</Badge><Badge tone="blue">{source.category}</Badge></div><p className="mt-2 font-medium text-slate-800">{source.title}</p><p className="mt-1 text-xs text-slate-400">{source.publisher} · 发布 {source.publishedAt ?? '未标注'} · 访问 {source.accessedAt}</p></div><SourceLink url={source.url}>打开源地址</SourceLink></div><p className="mt-3 text-sm leading-6 text-slate-600">{source.excerpt}</p></div>)}</div>}
         </div>}
       </Drawer>
+
+      <Modal
+        open={!!pendingDeleteLead}
+        onClose={() => { if (!deletingLeadId) setPendingDeleteLead(null) }}
+        title="确认删除线索"
+        footer={<>
+          <Button variant="secondary" disabled={!!deletingLeadId} onClick={() => setPendingDeleteLead(null)}>取消</Button>
+          <Button variant="danger" loading={!!deletingLeadId} onClick={() => { void confirmDeleteLead() }}>确认删除</Button>
+        </>}
+      >
+        <p className="text-sm leading-6 text-slate-600">
+          确认删除线索「{pendingDeleteLead?.name}」？该线索会从公共线索池和统计中移除，雷达后续同步不会自动恢复；原始审计证据及已转成的专属项目仍会保留。
+        </p>
+      </Modal>
     </div>
   )
 }

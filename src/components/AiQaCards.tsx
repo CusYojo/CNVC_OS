@@ -154,7 +154,6 @@ function QaAnswerCard({ answer }: { answer: ProjectQaAnswer }) {
               <p className="text-[11px] text-rose-600">当前无可引用的项目证据，结论不能视为项目事实。</p>
             )}
             <div className="mt-2 flex flex-wrap gap-x-3 text-[10px] text-slate-400">
-              <span>资料截止日：{answer.sourceCutoffDate}</span>
               <span>回答格式：公司项目 Q&amp;A 标准</span>
             </div>
           </section>

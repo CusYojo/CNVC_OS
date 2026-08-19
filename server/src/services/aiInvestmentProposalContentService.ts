@@ -868,8 +868,6 @@ function checkpointFingerprint(input: {
   hash.update(input.sourceCutoffDate)
   hash.update(JSON.stringify(input.project))
   hash.update(JSON.stringify({
-    length: input.parameters.length,
-    audience: input.parameters.audience,
     userInstructions: input.parameters.userInstructions,
   }))
   input.sources.forEach((source) => {
@@ -964,8 +962,7 @@ export async function composeInvestmentProposalContent(input: {
   const executiveSourceIndexes = executiveSourceIndex >= 0 ? [executiveSourceIndex] : []
   const title = `关于对${company}实施股权投资的提案`
   const executiveSummary = `现就${company}股权投资事项提交本提案，提请各位投资决策委员会成员审议。`
-  const requestedLength = String(input.parameters.length || '标准版')
-  const maxFindings = requestedLength === '精简版' ? 2 : requestedLength === '详细版' ? 6 : 4
+  const maxFindings = 4
   const roots = blueprint.sections.filter((section) => section.level === 1)
   const runtime = input.runtime ?? {}
   const timeoutMs = boundedTimeout(runtime.timeoutMs)
@@ -1070,8 +1067,7 @@ export async function composeInvestmentProposalContent(input: {
     const sectionIds = new Set(definitions.map((definition) => definition.id))
     const evidence = investmentProposalEvidenceForSections(evidencePlan, sectionIds, { maxItems: 6 })
     const leafCount = Math.max(1, definitions.filter((definition) => !definition.container).length)
-    const lengthCap = requestedLength === '精简版' ? 2200 : requestedLength === '详细版' ? 4600 : 3200
-    const maxTokens = Math.min(lengthCap, Math.max(1200, 600 + leafCount * 450))
+    const maxTokens = Math.min(3200, Math.max(1200, 600 + leafCount * 450))
     if (!evidence.length) {
       const startedAt = Date.now()
       chapterAttempts[root.id] = 1
@@ -1157,8 +1153,6 @@ ${investmentProposalSectionEvidenceContract(evidencePlan, sectionIds)}
 ${JSON.stringify(input.project)}
 
 资料截止日：${input.sourceCutoffDate}
-目标受众：${safeText(input.parameters.audience, '内部立项')}
-篇幅：${requestedLength}
 用户补充要求：${safeText(input.parameters.userInstructions, '无')}
 
 项目资料研读底稿（已先逐份研读并统一主体、时间和数字口径；只吸收事实，不得在正文提及底稿或研读过程）：
@@ -1225,8 +1219,6 @@ ${investmentProposalBlueprintPrompt(blueprint, leafSectionIds)}
 ${JSON.stringify(input.project)}
 
 资料截止日：${input.sourceCutoffDate}
-目标受众：${safeText(input.parameters.audience, '内部立项')}
-篇幅：紧凑
 用户补充要求：${safeText(input.parameters.userInstructions, '无')}
 
 本节 Evidence：
@@ -1463,7 +1455,7 @@ ${[
           reviewIssuesForPrompt(review),
           ...editorialIssues.map((issue) => `[${issue.code}] ${issue.sectionTitle ? `${issue.sectionTitle}：` : ''}${issue.message}`),
         ].filter(Boolean).join('\n').slice(0, 12_000)}`,
-        maxTokens: requestedLength === '详细版' ? 18_000 : 14_000,
+        maxTokens: 14_000,
       }, {
         fetchImpl: runtime.fetchImpl,
         maxAttempts: 2,

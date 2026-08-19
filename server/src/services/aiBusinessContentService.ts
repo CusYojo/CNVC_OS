@@ -2999,17 +2999,12 @@ export async function composeBusinessContent(input: {
       usesUploadedTemplate
       && (input.template.customAnalysis?.formatProfile.tableCount ?? 0) > 0
     )
-  const requestedLength = String(input.parameters.length || '')
   const maxTokens = input.type === 'investment_proposal'
-    ? requestedLength === '详细版'
-      ? 12000
-      : requestedLength === '精简版'
-        ? 6500
-        : 9000
+    ? 9000
     : isDueDiligence
       ? 8000
       : input.type === 'investment_recommendation_ppt'
-        ? requestedLength === '精简版'
+        ? String(input.parameters.length || '') === '精简版'
           ? 8500
           : 11000
       : isUploadedInvestmentTemplate
