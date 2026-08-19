@@ -37,6 +37,7 @@ export type RuntimeCapability = {
   id: string
   kind: string
   capabilityKey: string
+  source: string
   config: Record<string, unknown>
   toolNames: string[]
 }
@@ -170,12 +171,7 @@ export function normalizeUploadedPlugin(input: {
   const requestedTools = [...new Set([
     ...(Array.isArray(input.toolNames) ? input.toolNames : []),
     ...(Array.isArray(config.toolNames) ? config.toolNames.filter((item): item is string => typeof item === 'string') : []),
-  ])]
-  const approvedTools = new Set(INVESTMENT_TOOL_NAMES)
-  const unapprovedTools = requestedTools.filter((name) => !approvedTools.has(name as typeof INVESTMENT_TOOL_NAMES[number]))
-  if (unapprovedTools.length) {
-    throw serviceError(`Plugin 包含未批准工具：${unapprovedTools.join('、')}`, 'PLUGIN_TOOL_NOT_APPROVED', 400)
-  }
+  ])].map((item) => item.trim()).filter(Boolean).slice(0, 64)
   return {
     capabilityKey: input.capabilityKey,
     name: input.name.trim().slice(0, 128) || input.capabilityKey,
@@ -185,6 +181,99 @@ export function normalizeUploadedPlugin(input: {
     toolNames: requestedTools,
     dependencyNames: [...new Set((input.dependencyNames || []).filter((item) => /^[a-zA-Z0-9._@/-]{1,128}$/.test(item)))].slice(0, 32),
     allowedRoles: [...new Set((input.allowedRoles || []).map((item) => item.trim()).filter(Boolean))].slice(0, 32),
+  }
+}
+
+export function normalizeUploadedAgent(input: {
+  capabilityKey: string
+  name: string
+  description?: string | null
+  packageVersion?: string
+  config?: Record<string, unknown>
+  toolNames?: string[]
+  dependencyNames?: string[]
+  allowedRoles?: string[]
+  enabled?: boolean
+}) {
+  if (!/^[a-zA-Z0-9._-]+$/.test(input.capabilityKey)) {
+    throw serviceError('Agent ID 只能包含字母、数字、点、下划线和短横线', 'AGENT_MANIFEST_INVALID', 400)
+  }
+  const config = input.config && typeof input.config === 'object' ? { ...input.config } : {}
+  const defaults = AGENT_POLICY_DEFAULTS['interactive-assistant']
+  return {
+    capabilityKey: input.capabilityKey,
+    name: input.name.trim().slice(0, 128) || input.capabilityKey,
+    description: input.description?.trim().slice(0, 4_000) || null,
+    packageVersion: input.packageVersion?.trim().slice(0, 64) || 'uploaded',
+    config: {
+      ...config,
+      runtime: 'uploaded-agent',
+      modelRouteKey: typeof config.modelRouteKey === 'string' ? config.modelRouteKey : 'interactive-assistant',
+      timeoutMs: boundedPolicyNumber(config.timeoutMs, defaults.timeoutMs, AGENT_POLICY_LIMITS.timeoutMs, true),
+      maxTurns: boundedPolicyNumber(config.maxTurns, defaults.maxTurns, AGENT_POLICY_LIMITS.maxTurns, true),
+      maxBudgetUsd: boundedPolicyNumber(config.maxBudgetUsd, defaults.maxBudgetUsd, AGENT_POLICY_LIMITS.maxBudgetUsd),
+    },
+    toolNames: [...new Set(input.toolNames || [])].map((item) => item.trim()).filter(Boolean).slice(0, 64),
+    dependencyNames: [...new Set(input.dependencyNames || [])].slice(0, 64),
+    allowedRoles: [...new Set((input.allowedRoles || []).map((item) => item.trim()).filter(Boolean))].slice(0, 32),
+    enabled: input.enabled ?? true,
+  }
+}
+
+export function normalizeUploadedMcp(input: {
+  capabilityKey: string
+  name: string
+  description?: string | null
+  packageVersion?: string
+  config?: Record<string, unknown>
+  toolNames?: string[]
+  dependencyNames?: string[]
+  allowedRoles?: string[]
+  enabled?: boolean
+}) {
+  if (!/^[a-zA-Z0-9._-]+$/.test(input.capabilityKey)) {
+    throw serviceError('MCP ID 只能包含字母、数字、点、下划线和短横线', 'MCP_MANIFEST_INVALID', 400)
+  }
+  const config = input.config && typeof input.config === 'object' ? { ...input.config } : {}
+  return {
+    capabilityKey: input.capabilityKey,
+    name: input.name.trim().slice(0, 128) || input.capabilityKey,
+    description: input.description?.trim().slice(0, 4_000) || null,
+    packageVersion: input.packageVersion?.trim().slice(0, 64) || 'uploaded',
+    config: { ...config, runtime: 'uploaded-mcp' },
+    toolNames: [...new Set(input.toolNames || [])].map((item) => item.trim()).filter(Boolean).slice(0, 64),
+    dependencyNames: [...new Set(input.dependencyNames || [])].slice(0, 64),
+    allowedRoles: [...new Set((input.allowedRoles || []).map((item) => item.trim()).filter(Boolean))].slice(0, 32),
+    enabled: input.enabled ?? true,
+  }
+}
+
+export function normalizeUploadedSkill(input: {
+  capabilityKey: string
+  name: string
+  description?: string | null
+  packageVersion?: string
+  instructions: string
+  allowedRoles?: string[]
+  enabled?: boolean
+}) {
+  if (!/^[a-zA-Z0-9._-]+$/.test(input.capabilityKey)) {
+    throw serviceError('Skill ID 只能包含字母、数字、点、下划线和短横线', 'SKILL_MANIFEST_INVALID', 400)
+  }
+  const instructions = input.instructions.trim()
+  if (!instructions || instructions.length > 512_000) {
+    throw serviceError('Skill 指令正文不能为空且不能超过 500KB', 'SKILL_MANIFEST_INVALID', 400)
+  }
+  return {
+    capabilityKey: input.capabilityKey,
+    name: input.name.trim().slice(0, 128) || input.capabilityKey,
+    description: input.description?.trim().slice(0, 4_000) || null,
+    packageVersion: input.packageVersion?.trim().slice(0, 64) || 'uploaded',
+    config: { runtime: 'uploaded-skill', instructions },
+    toolNames: [] as string[],
+    dependencyNames: [] as string[],
+    allowedRoles: [...new Set((input.allowedRoles || []).map((item) => item.trim()).filter(Boolean))].slice(0, 32),
+    enabled: input.enabled ?? true,
   }
 }
 
@@ -199,16 +288,15 @@ export function normalizeAgentRuntimePolicy(input: {
   capabilityKey: string; config: Record<string, unknown>; toolNames: string[]
 }): AgentRuntimePolicy {
   const catalog = agentCatalogItem(input.capabilityKey)
-  if (!catalog || !(AI_MODEL_PROFILE_KEYS as readonly string[]).includes(input.capabilityKey)) {
-    throw serviceError('Agent Profile 未在代码目录注册', 'AGENT_POLICY_NOT_APPROVED', 403)
-  }
-  const profileKey = input.capabilityKey as AiModelProfileKey
+  const profileKey = ((AI_MODEL_PROFILE_KEYS as readonly string[]).includes(input.capabilityKey)
+    ? input.capabilityKey
+    : 'interactive-assistant') as AiModelProfileKey
   const defaults = AGENT_POLICY_DEFAULTS[profileKey]
   const configuredRoute = typeof input.config.modelRouteKey === 'string' ? input.config.modelRouteKey : profileKey
   const modelRouteKey = (AI_MODEL_PROFILE_KEYS as readonly string[]).includes(configuredRoute)
     ? configuredRoute as AiModelProfileKey
     : profileKey
-  const approvedTools = new Set(catalog.toolNames)
+  const approvedTools = catalog ? new Set(catalog.toolNames) : null
   return {
     profileKey,
     modelRouteKey,
@@ -216,7 +304,7 @@ export function normalizeAgentRuntimePolicy(input: {
     maxTurns: boundedPolicyNumber(input.config.maxTurns, defaults.maxTurns, AGENT_POLICY_LIMITS.maxTurns, true),
     maxBudgetUsd: boundedPolicyNumber(input.config.maxBudgetUsd, defaults.maxBudgetUsd, AGENT_POLICY_LIMITS.maxBudgetUsd),
     budgetMode: 'server-cap',
-    toolNames: [...new Set(input.toolNames)].filter((name) => approvedTools.has(name)),
+    toolNames: [...new Set(input.toolNames)].filter((name) => !approvedTools || approvedTools.has(name)),
   }
 }
 
@@ -394,7 +482,7 @@ export async function installUploadedPlugin(input: {
 }, actor: AiCapabilityActor) {
   assertAiCapabilityAdmin(actor)
   const normalized = normalizeUploadedPlugin(input)
-  const record = await aiConfigurationRepository.installUploadedPluginWithAudit({
+  const record = await aiConfigurationRepository.upsertUploadedCapabilityWithAudit({
     record: {
       id: randomUUID(), kind: 'plugin', source: 'uploaded', enabled: true,
       ...normalized, createdBy: actor.userId, updatedBy: actor.userId,
@@ -408,6 +496,56 @@ export async function installUploadedPlugin(input: {
     runtimeAvailable: record.enabled,
     approvalStatus: 'approved' as const,
   }
+}
+
+export async function importUploadedSkill(input: {
+  capabilityKey: string
+  name: string
+  description?: string | null
+  packageVersion?: string
+  instructions: string
+  allowedRoles?: string[]
+  enabled?: boolean
+}, actor: AiCapabilityActor) {
+  assertAiCapabilityAdmin(actor)
+  const normalized = normalizeUploadedSkill(input)
+  return aiConfigurationRepository.upsertUploadedCapabilityWithAudit({
+    record: {
+      id: randomUUID(), kind: 'skill', source: 'uploaded', ...normalized,
+      createdBy: actor.userId, updatedBy: actor.userId,
+    },
+    globalBindingId: randomUUID(), updatedAt: new Date(),
+    audit: auditRecord(actor, '导入上传 Skill', `${normalized.capabilityKey}@${normalized.packageVersion}`),
+  })
+}
+
+export async function importUploadedCapability(input: {
+  kind: AiCapabilityKind
+  capabilityKey: string
+  name: string
+  description?: string | null
+  packageVersion?: string
+  config?: Record<string, unknown>
+  instructions?: string
+  toolNames?: string[]
+  dependencyNames?: string[]
+  allowedRoles?: string[]
+  enabled?: boolean
+}, actor: AiCapabilityActor) {
+  if (input.kind === 'skill') {
+    return importUploadedSkill({ ...input, instructions: input.instructions || '' }, actor)
+  }
+  if (input.kind === 'plugin') return installUploadedPlugin(input, actor)
+  assertAiCapabilityAdmin(actor)
+  const normalized = input.kind === 'agent' ? normalizeUploadedAgent(input) : normalizeUploadedMcp(input)
+  return aiConfigurationRepository.upsertUploadedCapabilityWithAudit({
+    record: {
+      id: randomUUID(), kind: input.kind, source: 'uploaded', ...normalized,
+      createdBy: actor.userId, updatedBy: actor.userId,
+    },
+    globalBindingId: randomUUID(), updatedAt: new Date(),
+    audit: auditRecord(actor, `导入上传 ${input.kind === 'agent' ? 'Agent' : 'MCP'}`, `${normalized.capabilityKey}@${normalized.packageVersion}`),
+  })
 }
 
 export async function deleteSkill(capabilityId: string, expectedVersion: number, actor: AiCapabilityActor) {
@@ -442,12 +580,12 @@ export async function updateAgentCapabilityPolicy(capabilityId: string, input: {
   const existing = await aiConfigurationRepository.findCapability(capabilityId)
   if (!existing) throw serviceError('Agent 能力不存在', 'CAPABILITY_NOT_FOUND', 404)
   const catalog = agentCatalogItem(existing.capabilityKey)
-  if (existing.kind !== 'agent' || existing.source !== 'builtin' || !catalog) {
-    throw serviceError('仅可配置代码包内批准的 Agent Profile', 'AGENT_POLICY_NOT_APPROVED', 403)
+  if (existing.kind !== 'agent') {
+    throw serviceError('只能配置 Agent 能力', 'CAPABILITY_KIND_INVALID', 400)
   }
-  const approvedTools = new Set(catalog.toolNames)
   const selectedTools = [...new Set(input.toolNames)]
-  if (selectedTools.some((name) => !approvedTools.has(name))) {
+  const approvedTools = catalog ? new Set(catalog.toolNames) : null
+  if (existing.source === 'builtin' && approvedTools && selectedTools.some((name) => !approvedTools.has(name))) {
     throw serviceError('Agent 工具包含未批准项', 'AGENT_TOOL_NOT_APPROVED', 400)
   }
   const policy = normalizeAgentRuntimePolicy({
@@ -464,7 +602,9 @@ export async function updateAgentCapabilityPolicy(capabilityId: string, input: {
     capabilityId,
     expectedVersion: input.expectedVersion,
     patch: {
-      config: policyConfig(policy),
+      config: existing.source === 'uploaded'
+        ? { ...existing.config, ...policyConfig(policy), runtime: 'uploaded-agent' }
+        : policyConfig(policy),
       toolNames: policy.toolNames,
       allowedRoles: [...new Set(input.allowedRoles)],
       updatedBy: actor.userId,
@@ -557,14 +697,24 @@ export async function testCapability(capabilityId: string, actor: AiCapabilityAc
   let status = 'succeeded'
   let error: string | null = null
   try {
+    const uploadedCapability = capability.source === 'uploaded'
+    const uploadedSkill = capability.kind === 'skill' && uploadedCapability
     const approved = capability.kind === 'plugin'
       ? isPluginInstalled(capability)
-      : AI_CAPABILITY_CATALOG.some((item) => item.kind === capability.kind && item.capabilityKey === capability.capabilityKey)
+      : uploadedCapability || AI_CAPABILITY_CATALOG.some((item) => item.kind === capability.kind && item.capabilityKey === capability.capabilityKey)
     const uploadedPlugin = capability.kind === 'plugin' && capability.source === 'uploaded'
-    if (!approved || (capability.source !== 'builtin' && !uploadedPlugin)) throw serviceError('仅可测试已批准或已安装的受控能力', 'CAPABILITY_NOT_APPROVED', 403)
-    if (capability.kind === 'skill') await loadAiSkill(capability.capabilityKey)
-    if (capability.kind === 'agent' && !(AI_MODEL_PROFILE_KEYS as readonly string[]).includes(capability.capabilityKey)) throw new Error('Agent Profile 未注册')
-    if (capability.kind === 'mcp' && capability.capabilityKey !== 'investment') throw new Error('MCP Server 未注册')
+    if (!approved || (capability.source !== 'builtin' && !uploadedCapability)) throw serviceError('仅可测试已登记或已安装的能力', 'CAPABILITY_NOT_APPROVED', 403)
+    if (uploadedSkill) normalizeUploadedSkill({
+      capabilityKey: capability.capabilityKey, name: capability.name,
+      description: capability.description, packageVersion: capability.packageVersion,
+      instructions: typeof capability.config.instructions === 'string' ? capability.config.instructions : '',
+      allowedRoles: capability.allowedRoles, enabled: capability.enabled,
+    })
+    else if (capability.kind === 'skill') await loadAiSkill(capability.capabilityKey)
+    if (capability.kind === 'agent' && uploadedCapability) normalizeUploadedAgent(capability)
+    else if (capability.kind === 'agent' && !(AI_MODEL_PROFILE_KEYS as readonly string[]).includes(capability.capabilityKey)) throw new Error('Agent Profile 未注册')
+    if (capability.kind === 'mcp' && uploadedCapability) normalizeUploadedMcp(capability)
+    else if (capability.kind === 'mcp' && capability.capabilityKey !== 'investment') throw new Error('MCP Server 未注册')
     if (capability.kind === 'plugin') normalizeUploadedPlugin({
       capabilityKey: capability.capabilityKey, name: capability.name,
       description: capability.description, packageVersion: capability.packageVersion,
@@ -648,6 +798,7 @@ export async function resolveSelectedRuntimeCapabilities(
       id: 'builtin:agent:interactive-assistant',
       kind: interactive.kind,
       capabilityKey: interactive.capabilityKey,
+      source: 'builtin',
       config: interactive.config,
       toolNames: [],
     }]
@@ -658,8 +809,8 @@ export async function resolveSelectedRuntimeCapabilities(
   const selected = selectedIds.length
     ? available.filter((item) => selectedIds.includes(item.id))
     : available
-  // 数据库选择只能加载内置代码能力或已校验的 Host Plugin；上传 Plugin 也只能复用固定宿主工具，不能注册新执行器。
+  // 四类上传能力通过清单校验后均可进入 Runtime；具体工具仍由其运行配置决定。
   return selected.filter((item) => AI_CAPABILITY_CATALOG.some((approved) => (
     approved.kind === item.kind && approved.capabilityKey === item.capabilityKey
-  )) || (item.kind === 'plugin' && item.source === 'uploaded'))
+  )) || (item.kind === 'plugin' && item.source === 'uploaded') || item.source === 'uploaded')
 }

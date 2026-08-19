@@ -979,8 +979,10 @@ async function createRuntimeSession(
   const runtimeCapabilities = await resolveSelectedRuntimeCapabilities({
     userId, userName: runtimeUser.name, role: userRole, department: runtimeUser.department,
   }, conversationId)
-  const investmentCapability = runtimeCapabilities.find((item) => item.kind === 'mcp' && item.capabilityKey === 'investment')
-  const interactiveAgentCapability = runtimeCapabilities.find((item) => item.kind === 'agent' && item.capabilityKey === 'interactive-assistant')
+  const mcpCapabilities = runtimeCapabilities.filter((item) => item.kind === 'mcp')
+  const agentCapabilities = runtimeCapabilities.filter((item) => item.kind === 'agent')
+  const interactiveAgentCapability = agentCapabilities.find((item) => item.capabilityKey === 'interactive-assistant')
+    ?? agentCapabilities.find((item) => item.source === 'uploaded')
   const uploadedPlugins = runtimeCapabilities.filter((item) => item.kind === 'plugin')
   const selectedSkillNames = new Set([
     ...runtimeCapabilities.filter((item) => item.kind === 'skill').map((item) => item.capabilityKey),
@@ -989,8 +991,22 @@ async function createRuntimeSession(
       .filter(Boolean),
   ])
   const pluginToolNames = new Set(uploadedPlugins.flatMap((item) => item.toolNames || []).map((name) => `mcp__investment__${name}`))
+  const mcpToolNames = new Set(mcpCapabilities.flatMap((item) => item.toolNames || []).map((name) => `mcp__investment__${name}`))
   const pluginPrompts = uploadedPlugins
     .map((item) => typeof item.config.prompt === 'string' ? item.config.prompt.trim() : '')
+    .filter(Boolean)
+  let uploadedPromptBudget = 128_000
+  const uploadedCapabilityPrompts = runtimeCapabilities
+    .filter((item) => item.source === 'uploaded' && item.kind !== 'plugin')
+    .map((item) => {
+      const value = typeof item.config.instructions === 'string'
+        ? item.config.instructions.trim()
+        : typeof item.config.prompt === 'string' ? item.config.prompt.trim() : ''
+      if (!value || uploadedPromptBudget <= 0) return ''
+      const bounded = value.slice(0, uploadedPromptBudget)
+      uploadedPromptBudget -= bounded.length
+      return `[上传 ${item.kind.toUpperCase()} ${item.capabilityKey}]\n${bounded}`
+    })
     .filter(Boolean)
   if (!interactiveAgentCapability) {
     throw Object.assign(new Error('互动助手能力已停用、未授权或未加载'), { code: 'AGENT_CAPABILITY_FORBIDDEN', status: 403 })
@@ -1007,8 +1023,9 @@ async function createRuntimeSession(
   const selectedAgentToolNames = new Set([
     ...agentPolicy.toolNames.map((name) => `mcp__investment__${name}`),
     ...pluginToolNames,
+    ...mcpToolNames,
   ])
-  const hostInvestmentEnabled = Boolean(investmentCapability || pluginToolNames.size)
+  const hostInvestmentEnabled = Boolean(mcpCapabilities.length || pluginToolNames.size || mcpToolNames.size)
   const allowedAgentTools = jwAgentToolsForScope(
     JW_AGENT_ALLOWED_TOOLS.filter((name) => selectedAgentToolNames.has(name)),
     projectId,
@@ -1154,6 +1171,7 @@ async function createRuntimeSession(
         append: [
           jwAgentSystemPrompt(projectId),
           ...pluginPrompts.map((prompt, index) => `\n[已安装 Plugin ${index + 1} 行为说明]\n${prompt}`),
+          ...uploadedCapabilityPrompts,
         ].join('\n'),
       },
     },

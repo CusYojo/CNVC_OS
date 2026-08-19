@@ -11,22 +11,33 @@ function folderFile(path: string, content: string) {
 
 test('scans a JW skill folder and reads SKILL.md frontmatter', async () => {
   const candidates = await scanCapabilityFolder('skill', [
-    folderFile('skills/demo-skill/SKILL.md', '---\nname: "演示技能"\ndescription: "用于验证导入"\n---\n'),
+    folderFile('skills/demo-skill/SKILL.md', '---\nname: "演示技能"\ndescription: "用于验证导入"\n---\n\n# 演示技能\n\n执行验证流程。'),
     folderFile('skills/demo-skill/references/readme.md', 'ignored'),
   ])
   assert.equal(candidates.length, 1)
   assert.equal(candidates[0]?.capabilityKey, 'demo-skill')
   assert.equal(candidates[0]?.name, '演示技能')
+  assert.equal(candidates[0]?.instructions, '# 演示技能\n\n执行验证流程。')
+})
+
+test('rejects a skill without instruction body', async () => {
+  await assert.rejects(
+    () => scanCapabilityFolder('skill', [
+      folderFile('skills/empty-skill/SKILL.md', '---\nname: "空技能"\ndescription: "缺少正文"\n---\n'),
+    ]),
+    /缺少 Skill 指令正文/,
+  )
 })
 
 test('scans a JW agent zip and retains bounded policy fields', async () => {
   const zip = new JSZip()
-  zip.file('agents/interactive-assistant.md', '---\nname: "互动助手"\ndescription: "Agent"\nmodel-route-key: interactive-assistant\nmax-turns: 8\ntools: [search_project_docs]\n---\n')
+  zip.file('agents/interactive-assistant.md', '---\nname: "互动助手"\ndescription: "Agent"\nmodel-route-key: interactive-assistant\nmax-turns: 8\ntools: [search_project_docs]\n---\n\n# 互动助手\n\n按上传说明工作。')
   const data = await zip.generateAsync({ type: 'uint8array' })
   const candidates = await scanCapabilityZip('agent', new File([data], 'agents.zip'))
   assert.equal(candidates[0]?.capabilityKey, 'interactive-assistant')
   assert.equal(candidates[0]?.config?.maxTurns, 8)
   assert.deepEqual(candidates[0]?.config?.toolNames, ['search_project_docs'])
+  assert.equal(candidates[0]?.config?.instructions, '# 互动助手\n\n按上传说明工作。')
 })
 
 test('exports skills as JW-compatible directories in a zip', async () => {

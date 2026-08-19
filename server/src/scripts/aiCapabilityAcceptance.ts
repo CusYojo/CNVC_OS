@@ -11,6 +11,8 @@ import {
   deleteSkill,
   ensureBuiltinCapabilityCatalog,
   getConversationCapabilities,
+  importUploadedCapability,
+  importUploadedSkill,
   installUploadedPlugin,
   listCapabilitySettings,
   listAvailableCapabilities,
@@ -37,6 +39,9 @@ const outsider: AiCapabilityActor = { userId: ids.outsider, userName: '能力验
 const checks: string[] = []
 let originalInteractive: typeof aiCapabilities.$inferSelect | null = null
 let uploadedPluginId = ''
+let uploadedSkillId = ''
+let uploadedAgentId = ''
+let uploadedMcpId = ''
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message)
@@ -103,10 +108,11 @@ async function main() {
       description: '仅使用批准宿主工具的上传 Plugin',
       packageVersion: '1.0.0',
       config: { prompt: '只使用证据支持的结论。' },
-      toolNames: ['search_project_docs'],
+      toolNames: ['search_project_docs', 'custom_uploaded_tool'],
     }, admin)
     uploadedPluginId = installed.id
     assert(installed.source === 'uploaded' && installed.enabled, '上传 Plugin 未安装启用')
+    assert(installed.toolNames.includes('custom_uploaded_tool'), '上传 Plugin 工具声明被批准目录过滤')
     const settings = await listCapabilitySettings(admin)
     const view = settings.capabilities.find((item) => item.id === installed.id)
     assert(view?.installed && view.runtimeAvailable && view.approvalStatus === 'approved', '上传 Plugin 安装态错误')
@@ -115,6 +121,50 @@ async function main() {
     await setConversationCapabilities(owner, ids.conversation, [installed.id])
     const runtime = await resolveSelectedRuntimeCapabilities(owner, ids.conversation)
     assert(runtime.some((item) => item.id === installed.id && item.kind === 'plugin'), '上传 Plugin 未进入 Runtime')
+  })
+  await check('uploaded-skill-imports-without-code-catalog-approval', async () => {
+    const input = {
+      capabilityKey: `accept-uploaded-skill-${marker}`,
+      name: '上传验收 Skill',
+      description: '无需代码目录预批准的上传 Skill',
+      instructions: '# 上传验收 Skill\n\n只输出有证据支持的结论。',
+      allowedRoles: ['投资经理'],
+    }
+    assert(await rejects(() => importUploadedSkill(input, owner), 'ROLE_FORBIDDEN'), '普通用户可导入 Skill')
+    const imported = await importUploadedSkill(input, admin)
+    uploadedSkillId = imported.id
+    assert(imported.source === 'uploaded' && imported.enabled, '上传 Skill 未直接导入启用')
+    assert(imported.config.runtime === 'uploaded-skill' && typeof imported.config.instructions === 'string', '上传 Skill 指令未保存')
+    const settings = await listCapabilitySettings(admin)
+    assert(settings.capabilities.some((item) => item.id === imported.id), '上传 Skill 未进入管理目录')
+    assert((await testCapability(imported.id, admin)).ok, '上传 Skill 服务端测试失败')
+    await setConversationCapabilities(owner, ids.conversation, [imported.id])
+    const runtime = await resolveSelectedRuntimeCapabilities(owner, ids.conversation)
+    assert(runtime.some((item) => item.id === imported.id && item.kind === 'skill'), '上传 Skill 未进入 Runtime')
+  })
+  await check('uploaded-agent-and-mcp-import-without-code-catalog-approval', async () => {
+    const agent = await importUploadedCapability({
+      kind: 'agent', capabilityKey: `accept-uploaded-agent-${marker}`, name: '上传验收 Agent',
+      description: '直接上传 Agent', config: {
+        modelRouteKey: 'interactive-assistant', maxTurns: 4,
+        instructions: '作为上传 Agent 处理当前会话。',
+      }, toolNames: ['search_project_docs', 'custom_agent_tool'], allowedRoles: ['投资经理'],
+    }, admin)
+    uploadedAgentId = agent.id
+    const mcp = await importUploadedCapability({
+      kind: 'mcp', capabilityKey: `accept-uploaded-mcp-${marker}`, name: '上传验收 MCP',
+      description: '直接上传 MCP', config: { prompt: '使用上传 MCP 工具。' },
+      toolNames: ['search_project_docs', 'custom_mcp_tool'], allowedRoles: ['投资经理'],
+    }, admin)
+    uploadedMcpId = mcp.id
+    assert(agent.source === 'uploaded' && agent.enabled && agent.toolNames.includes('custom_agent_tool'), '上传 Agent 未直接导入')
+    assert(mcp.source === 'uploaded' && mcp.enabled && mcp.toolNames.includes('custom_mcp_tool'), '上传 MCP 未直接导入')
+    assert((await testCapability(agent.id, admin)).ok, '上传 Agent 服务端测试失败')
+    assert((await testCapability(mcp.id, admin)).ok, '上传 MCP 服务端测试失败')
+    await setConversationCapabilities(owner, ids.conversation, [agent.id, mcp.id])
+    const runtime = await resolveSelectedRuntimeCapabilities(owner, ids.conversation)
+    assert(runtime.some((item) => item.id === agent.id && item.kind === 'agent'), '上传 Agent 未进入 Runtime')
+    assert(runtime.some((item) => item.id === mcp.id && item.kind === 'mcp'), '上传 MCP 未进入 Runtime')
   })
   await check('structured-agent-policy-is-admin-only-and-code-bounded', async () => {
     const [interactive] = await db.select().from(aiCapabilities).where(and(
@@ -139,7 +189,7 @@ async function main() {
     assert(runtimePolicy.toolNames.length === 1 && runtimePolicy.toolNames[0] === 'search_project_docs', '工具收窄未进入 Runtime 解析')
     assert(await rejects(() => updateAgentCapabilityPolicy(interactive.id, { ...input, expectedVersion: updated.version, toolNames: ['Bash'] }, admin), 'AGENT_TOOL_NOT_APPROVED'), '未批准工具可进入 Agent 策略')
     assert(await rejects(() => updateAgentCapabilityPolicy(interactive.id, { ...input, expectedVersion: interactive.version }, admin), 'CAPABILITY_VERSION_CONFLICT'), '过期版本覆盖 Agent 策略')
-    assert(await rejects(() => updateAgentCapabilityPolicy(ids.department, { ...input, expectedVersion: 1 }, admin), 'AGENT_POLICY_NOT_APPROVED'), '非 Agent 可写入 Agent 策略')
+    assert(await rejects(() => updateAgentCapabilityPolicy(ids.department, { ...input, expectedVersion: 1 }, admin), 'CAPABILITY_KIND_INVALID'), '非 Agent 可写入 Agent 策略')
   })
   await check('builtin-sync-preserves-structured-agent-policy', async () => {
     await syncBuiltinCapabilities(admin)
@@ -261,6 +311,12 @@ main().catch((error) => {
   await db.delete(aiConversationCapabilities).where(eq(aiConversationCapabilities.conversationId, ids.conversation)).catch(() => undefined)
   if (uploadedPluginId) await db.delete(aiCapabilityBindings).where(eq(aiCapabilityBindings.capabilityId, uploadedPluginId)).catch(() => undefined)
   if (uploadedPluginId) await db.delete(aiCapabilities).where(eq(aiCapabilities.id, uploadedPluginId)).catch(() => undefined)
+  if (uploadedSkillId) await db.delete(aiCapabilityBindings).where(eq(aiCapabilityBindings.capabilityId, uploadedSkillId)).catch(() => undefined)
+  if (uploadedSkillId) await db.delete(aiCapabilities).where(eq(aiCapabilities.id, uploadedSkillId)).catch(() => undefined)
+  if (uploadedAgentId) await db.delete(aiCapabilityBindings).where(eq(aiCapabilityBindings.capabilityId, uploadedAgentId)).catch(() => undefined)
+  if (uploadedAgentId) await db.delete(aiCapabilities).where(eq(aiCapabilities.id, uploadedAgentId)).catch(() => undefined)
+  if (uploadedMcpId) await db.delete(aiCapabilityBindings).where(eq(aiCapabilityBindings.capabilityId, uploadedMcpId)).catch(() => undefined)
+  if (uploadedMcpId) await db.delete(aiCapabilities).where(eq(aiCapabilities.id, uploadedMcpId)).catch(() => undefined)
   await db.delete(agentConversations).where(eq(agentConversations.id, ids.conversation)).catch(() => undefined)
   await db.delete(aiCapabilities).where(inArray(aiCapabilities.id, [ids.global, ids.department, ids.projectCap, ids.forbidden])).catch(() => undefined)
   await db.delete(projects).where(eq(projects.id, ids.project)).catch(() => undefined)

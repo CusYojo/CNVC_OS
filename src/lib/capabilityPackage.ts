@@ -11,6 +11,7 @@ export type CapabilityImportCandidate = {
   config?: Record<string, unknown>
   toolNames?: string[]
   dependencyNames?: string[]
+  instructions?: string
   sourcePath: string
 }
 
@@ -78,11 +79,17 @@ function candidateFromText(kind: CapabilityKind, path: string, text: string, fal
     const capabilityKey = meta['capability-key'] || parent || fallbackName
     if (!/^[a-zA-Z0-9._-]+$/.test(capabilityKey)) throw new Error(`${path} 的 Skill ID 不合法。`)
     if (!meta.name && !meta.description) throw new Error(`${path} 缺少有效 YAML frontmatter。`)
-    return { capabilityKey, kind, name: meta.name || capabilityKey, description: meta.description || null, enabled: booleanValue(meta.enabled), allowedRoles: listValue(meta['allowed-roles']), sourcePath: path }
+    const instructions = text.replace(/^---\s*\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/, '').trim()
+    if (!instructions) throw new Error(`${path} 缺少 Skill 指令正文。`)
+    return {
+      capabilityKey, kind, name: meta.name || capabilityKey, description: meta.description || null,
+      enabled: booleanValue(meta.enabled), allowedRoles: listValue(meta['allowed-roles']), instructions, sourcePath: path,
+    }
   }
   if (kind === 'agent') {
     if (!path.toLowerCase().endsWith('.md') || basename(path).toLowerCase() === 'skill.md') return null
     const meta = frontmatter(text)
+    const instructions = text.replace(/^---\s*\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/, '').trim()
     const capabilityKey = meta['capability-key'] || stem(path)
     if (!/^[a-zA-Z0-9._-]+$/.test(capabilityKey)) throw new Error(`${path} 的 Agent ID 不合法。`)
     if (!meta.name && !meta.description) throw new Error(`${path} 缺少有效 YAML frontmatter。`)
@@ -95,6 +102,7 @@ function candidateFromText(kind: CapabilityKind, path: string, text: string, fal
         ...(meta['max-turns'] ? { maxTurns: Number(meta['max-turns']) } : {}),
         ...(meta['max-budget-usd'] ? { maxBudgetUsd: Number(meta['max-budget-usd']) } : {}),
         ...(meta.tools ? { toolNames: listValue(meta.tools) || [] } : {}),
+        ...(instructions ? { instructions } : {}),
       },
     }
   }

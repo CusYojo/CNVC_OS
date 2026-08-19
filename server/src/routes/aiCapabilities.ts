@@ -6,11 +6,14 @@ import { AI_MODEL_PROFILE_KEYS } from '../services/aiModelSettingsService.js'
 import { requireAiCapabilitiesEnabled } from '../config/extensionFeatureFlags.js'
 import {
   AGENT_POLICY_LIMITS,
+  AI_CAPABILITY_KINDS,
   AI_CAPABILITY_REVISION_TYPES,
   AI_CAPABILITY_SCOPE_TYPES,
   createCapabilityBinding,
   deleteSkill,
   getConversationCapabilities,
+  importUploadedCapability,
+  importUploadedSkill,
   installUploadedPlugin,
   listAvailableCapabilities,
   listCapabilitySettings,
@@ -98,6 +101,40 @@ aiCapabilitiesRouter.post('/plugins/install', async (req: AuthedRequest, res, ne
       allowedRoles: z.array(z.string().trim().min(1).max(64)).max(32).optional(),
     }).strict().parse(req.body)
     res.status(201).json(await installUploadedPlugin(body, actor(req)))
+  } catch (error) { next(error) }
+})
+
+aiCapabilitiesRouter.post('/skills/import', async (req: AuthedRequest, res, next) => {
+  try {
+    const body = z.object({
+      capabilityKey: z.string().trim().min(1).max(128),
+      name: z.string().trim().min(1).max(128),
+      description: z.string().max(4_000).nullable().optional(),
+      packageVersion: z.string().trim().max(64).optional(),
+      instructions: z.string().trim().min(1).max(512_000),
+      allowedRoles: z.array(z.string().trim().min(1).max(64)).max(32).optional(),
+      enabled: z.boolean().optional(),
+    }).strict().parse(req.body)
+    res.status(201).json(await importUploadedSkill(body, actor(req)))
+  } catch (error) { next(error) }
+})
+
+aiCapabilitiesRouter.post('/import', async (req: AuthedRequest, res, next) => {
+  try {
+    const body = z.object({
+      kind: z.enum(AI_CAPABILITY_KINDS),
+      capabilityKey: z.string().trim().min(1).max(128),
+      name: z.string().trim().min(1).max(128),
+      description: z.string().max(4_000).nullable().optional(),
+      packageVersion: z.string().trim().max(64).optional(),
+      config: z.record(z.string(), z.unknown()).optional(),
+      instructions: z.string().trim().max(512_000).optional(),
+      toolNames: z.array(z.string().trim().min(1).max(128)).max(64).optional(),
+      dependencyNames: z.array(z.string().trim().min(1).max(128)).max(64).optional(),
+      allowedRoles: z.array(z.string().trim().min(1).max(64)).max(32).optional(),
+      enabled: z.boolean().optional(),
+    }).strict().parse(req.body)
+    res.status(201).json(await importUploadedCapability(body, actor(req)))
   } catch (error) { next(error) }
 })
 

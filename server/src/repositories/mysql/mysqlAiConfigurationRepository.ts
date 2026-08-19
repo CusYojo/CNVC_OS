@@ -485,10 +485,10 @@ class MySqlAiConfigurationRepository implements AiConfigurationRepository {
     })
   }
 
-  async installUploadedPluginWithAudit(input: Parameters<AiConfigurationRepository['installUploadedPluginWithAudit']>[0]) {
-    return mapped('aiConfiguration.installUploadedPluginWithAudit', () => db.transaction(async (tx) => {
+  async upsertUploadedCapabilityWithAudit(input: Parameters<AiConfigurationRepository['upsertUploadedCapabilityWithAudit']>[0]) {
+    return mapped('aiConfiguration.upsertUploadedCapabilityWithAudit', () => db.transaction(async (tx) => {
       const [existing] = await tx.select().from(aiCapabilities).where(and(
-        eq(aiCapabilities.kind, 'plugin'), eq(aiCapabilities.capabilityKey, input.record.capabilityKey),
+        eq(aiCapabilities.kind, input.record.kind), eq(aiCapabilities.capabilityKey, input.record.capabilityKey),
       )).limit(1).for('update')
 
       if (existing) {
@@ -499,13 +499,13 @@ class MySqlAiConfigurationRepository implements AiConfigurationRepository {
         await tx.update(aiCapabilities).set({
           name: input.record.name,
           description: input.record.description,
-          source: 'uploaded',
+          source: input.record.source,
           packageVersion: input.record.packageVersion,
           config: input.record.config,
           toolNames: input.record.toolNames,
           dependencyNames: input.record.dependencyNames,
           allowedRoles: input.record.allowedRoles,
-          enabled: true,
+          enabled: input.record.enabled,
           updatedBy: input.record.updatedBy,
           updatedAt: input.updatedAt,
           version: sql`${aiCapabilities.version} + 1`,
@@ -513,8 +513,8 @@ class MySqlAiConfigurationRepository implements AiConfigurationRepository {
       } else {
         await tx.insert(aiCapabilities).values({
           ...input.record,
-          source: 'uploaded',
-          enabled: true,
+          source: input.record.source,
+          enabled: input.record.enabled,
         })
         await tx.insert(adminConfigurationRevisions).values(configurationRevisionValues({
           domain: 'capability', resourceType: 'capability', resourceId: input.record.id,
@@ -540,7 +540,7 @@ class MySqlAiConfigurationRepository implements AiConfigurationRepository {
       }
       await tx.insert(auditLogs).values(input.audit)
       const [record] = await tx.select().from(aiCapabilities).where(eq(aiCapabilities.id, capabilityId)).limit(1)
-      if (!record) throw new Error('uploaded plugin cannot be reloaded after installation')
+      if (!record) throw new Error('uploaded capability cannot be reloaded after import')
       return record
     }))
   }

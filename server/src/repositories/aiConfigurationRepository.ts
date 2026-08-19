@@ -200,7 +200,7 @@ export interface AiConfigurationRepository {
   }>
   findCapability(capabilityId: string): Promise<AiCapabilityRecord | null>
   findBuiltinCapability(kind: string, capabilityKey: string): Promise<AiCapabilityRecord | null>
-  installUploadedPluginWithAudit(input: {
+  upsertUploadedCapabilityWithAudit(input: {
     record: Omit<AiCapabilityRecord, 'version' | 'lastTestStatus' | 'lastTestError' | 'lastTestLatencyMs' | 'lastTestTraceId' | 'lastTestAt' | 'createdAt' | 'updatedAt'>
     globalBindingId: string
     audit: AuditRecord
