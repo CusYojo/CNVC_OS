@@ -23,7 +23,7 @@ server-dist/
 *.swp
 .claude/
 tmp/
-
+docs/
 # Local databases and runtime data
 project-discovery/data/
 project-discovery/公众号来源.xlsx

@@ -4,6 +4,43 @@ function recordValue(value: unknown): Record<string, unknown> | null {
     : null
 }
 
+export type CompetitorMatchType = 'self' | 'direct' | 'substitute'
+
+export interface CompetitorEvidenceRow {
+  name: string
+  is_self: boolean
+  tech: string
+  product: string
+  funding: string
+  differentiation: string
+  matchType: CompetitorMatchType
+  sameTargetUser: boolean
+  sameUseCase: boolean
+  sameDeliverable: boolean
+  comparisonBasis: string
+  evidence: string
+  sourceRef: string
+  sourceUrl: string
+  confidence: number
+}
+
+export interface VerifiedCompetitorEvidenceRow extends CompetitorEvidenceRow {
+  [key: string]: string | boolean | number
+  verificationStatus: 'self' | 'evidence-backed'
+}
+
+function normalizeEvidenceText(value: unknown): string {
+  return String(value ?? '')
+    .normalize('NFKC')
+    .toLocaleLowerCase()
+    .replace(/[\p{P}\p{S}\s]+/gu, '')
+}
+
+function occursInCorpus(corpus: string, value: string, minimumLength = 4): boolean {
+  const needle = normalizeEvidenceText(value)
+  return needle.length >= minimumLength && normalizeEvidenceText(corpus).includes(needle)
+}
+
 /**
  * 判断竞对依据是否仅停留在行业/赛道层面，缺乏实质竞争关系。
  * 实质竞对必须说明：具体目标客户、具体任务/场景、或具体可替代产品。
@@ -38,6 +75,38 @@ export function isWeakCompetitorBasis(basis: unknown): boolean {
   if (industryOnlyPatterns.some((p) => p.test(text))) return true
 
   return false
+}
+
+/**
+ * 对模型抽取的竞对逐项执行证据约束。名称、证据、来源和实质竞争关系
+ * 都必须能在本次输入语料中闭环，不能依靠行业常识补齐。
+ */
+export function verifyCompetitorEvidence(
+  rows: CompetitorEvidenceRow[],
+  corpus: string,
+  kind: 'project' | 'paper' = 'project',
+): VerifiedCompetitorEvidenceRow[] {
+  const self = rows.find((row) => row.is_self)
+  const verifiedSelf = self ? [{ ...self, verificationStatus: 'self' as const }] : []
+  const seen = new Set<string>()
+  const verified = rows.filter((row) => {
+    if (row.is_self || !['direct', 'substitute'].includes(row.matchType)) return false
+    const nameKey = normalizeEvidenceText(row.name)
+    if (nameKey.length < 2 || seen.has(nameKey)) return false
+    if (!row.sameUseCase || !row.sameDeliverable) return false
+    if (kind === 'project' && !row.sameTargetUser) return false
+    if (!Number.isFinite(row.confidence) || row.confidence < 0.8) return false
+    if (isWeakCompetitorBasis(row.comparisonBasis)) return false
+    if (!occursInCorpus(corpus, row.evidence) || !occursInCorpus(row.evidence, row.name, 2)) return false
+    if (!occursInCorpus(corpus, row.sourceRef)) return false
+    if (row.sourceUrl && !corpus.includes(row.sourceUrl)) return false
+    seen.add(nameKey)
+    return true
+  }).slice(0, 3).map((row) => ({
+    ...row,
+    verificationStatus: 'evidence-backed' as const,
+  }))
+  return [...verifiedSelf, ...verified]
 }
 
 /**

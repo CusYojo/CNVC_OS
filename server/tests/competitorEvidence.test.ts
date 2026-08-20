@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { verifyCompetitorEvidence, type CompetitorEvidenceRow } from '../../cybernaut-assistant/src/lib/competitor-evidence.js'
-import { filterEvidenceBackedCompetitors } from '../src/services/competitorEvidence.js'
+import {
+  filterEvidenceBackedCompetitors,
+  verifyCompetitorEvidence,
+  type CompetitorEvidenceRow,
+} from '../src/services/competitorEvidence.js'
 
 const directCompetitor: CompetitorEvidenceRow = {
   name: '精密视觉科技',
