@@ -21,6 +21,8 @@ server-dist/
 *.log
 *.tmp
 *.swp
+.claude/
+tmp/
 
 # Local databases and runtime data
 project-discovery/data/
