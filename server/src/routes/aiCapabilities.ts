@@ -10,6 +10,7 @@ import {
   AI_CAPABILITY_REVISION_TYPES,
   AI_CAPABILITY_SCOPE_TYPES,
   createCapabilityBinding,
+  deleteCapability,
   deleteSkill,
   getConversationCapabilities,
   importUploadedCapability,
@@ -157,6 +158,13 @@ aiCapabilitiesRouter.delete('/skills/:id', async (req: AuthedRequest, res, next)
   try {
     const query = z.object({ expectedVersion: version }).strict().parse(req.query)
     res.json(await deleteSkill(uuid.parse(req.params.id), query.expectedVersion, actor(req)))
+  } catch (error) { next(error) }
+})
+
+aiCapabilitiesRouter.delete('/:id', async (req: AuthedRequest, res, next) => {
+  try {
+    const query = z.object({ expectedVersion: version }).strict().parse(req.query)
+    res.json(await deleteCapability(uuid.parse(req.params.id), query.expectedVersion, actor(req)))
   } catch (error) { next(error) }
 })
 

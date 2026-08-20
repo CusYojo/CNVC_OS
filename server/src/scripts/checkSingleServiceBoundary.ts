@@ -4305,6 +4305,7 @@ async function main() {
     && /requireAccessibleProject/.test(aiCapabilityService)
     && /CAPABILITY_FORBIDDEN/.test(aiCapabilityService)
     && /AI_CAPABILITY_CATALOG/.test(aiCapabilityService)
+    && /deleteCapability/.test(aiCapabilityService)
     && /deleteSkill/.test(aiCapabilityService)
     && /updateAgentCapabilityPolicy/.test(aiCapabilityService)
     && /resolveAgentRuntimePolicy/.test(aiCapabilityService)
@@ -4328,6 +4329,7 @@ async function main() {
     && /put\('\/conversations\/:conversationId'/.test(aiCapabilityRoutes)
     && /patch\('\/agents\/:id\/policy'/.test(aiCapabilityRoutes)
     && /delete\('\/skills\/:id'/.test(aiCapabilityRoutes)
+    && /delete\('\/:id'/.test(aiCapabilityRoutes)
     && /z\.enum\(AI_MODEL_PROFILE_KEYS\)/.test(aiCapabilityRoutes)
     && /use\(requireAiPlatformAdmin\)/.test(aiCapabilityRoutes)
     && /aiCapabilitiesRouter/.test(routeIndex),
@@ -4345,7 +4347,8 @@ async function main() {
     && /item\.dependencyNames/.test(capabilitySettingsPage)
     && /Agent 运行策略/.test(capabilitySettingsPage)
     && /approvedToolNamesByCapability/.test(capabilitySettingsPage)
-    && /确认删除 Skill/.test(capabilitySettingsPage)
+    && /确认删除 \$\{pendingDelete \? capabilityKindLabels\[pendingDelete\.kind\] : '能力'\}/.test(capabilitySettingsPage)
+    && /apiDelete\(`\/ai\/capabilities\/\$\{pendingDelete\.id\}/.test(capabilitySettingsPage)
     && /\/ai\/capabilities\/conversations\//.test(aiAssistantPage)
     && /data-ai-capability-trigger="true"/.test(aiAssistantPage)
     && /选择当前会话持续使用的技能/.test(aiAssistantPage)
@@ -4363,11 +4366,11 @@ async function main() {
     'department-and-project-isolation',
     'conversation-selection-cannot-grant',
     'runtime-selection-is-approved-code-only',
-    'skill-delete-is-admin-only-versioned-and-cascades-selections',
+    'all-capability-kinds-delete-is-admin-only-versioned-and-cascades-selections',
     'document-task-requires-selected-skill',
     'disable-capability-effective-immediately',
     'approved-skill-server-test-and-trace',
-    'deleted-builtin-skill-stays-hidden-on-startup-ensure-and-can-be-manually-synced',
+    'deleted-builtin-capability-kinds-stay-hidden-on-startup-ensure-and-can-be-manually-synced',
     'audit-recorded-without-runtime-secret',
   ]) requireCondition(aiCapabilityAcceptance.includes(contract), `AI capability acceptance is missing: ${contract}`)
   requireCondition(

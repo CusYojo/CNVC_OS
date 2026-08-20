@@ -41,6 +41,10 @@ const tabs = [
   { key: 'plugin', label: 'Plugins', short: 'P', icon: Boxes },
 ] as const
 
+const capabilityKindLabels: Record<Capability['kind'], string> = {
+  skill: 'Skill', agent: 'Agent', mcp: 'MCP', plugin: 'Plugin',
+}
+
 function Toggle({ value, disabled, onChange, label }: { value: boolean; disabled?: boolean; onChange: (value: boolean) => void; label: string }) {
   return <button type="button" role="switch" aria-checked={value} aria-label={label} disabled={disabled} onClick={(event) => { event.stopPropagation(); onChange(!value) }} className={`jw-switch ${value ? 'is-on' : ''}`}><span /></button>
 }
@@ -120,12 +124,13 @@ export function CapabilitySettingsPage() {
     if (ok) { setShowBindingModal(false); setBindingDraft({ capabilityId: '', scopeType: 'global', department: '', projectId: '' }) }
   }
 
-  async function deletePendingSkill() {
-    if (!pendingDelete || pendingDelete.kind !== 'skill') return
+  async function deletePendingCapability() {
+    if (!pendingDelete) return
+    const kindLabel = capabilityKindLabels[pendingDelete.kind]
     const deleted = await mutate(
       `delete-${pendingDelete.id}`,
-      () => apiDelete(`/ai/capabilities/skills/${pendingDelete.id}?expectedVersion=${pendingDelete.version}`),
-      `Skill「${pendingDelete.name}」已删除。`,
+      () => apiDelete(`/ai/capabilities/${pendingDelete.id}?expectedVersion=${pendingDelete.version}`),
+      `${kindLabel}「${pendingDelete.name}」已删除。`,
     )
     if (deleted) setPendingDelete(null)
   }
@@ -225,7 +230,7 @@ export function CapabilitySettingsPage() {
                     {item.kind === 'agent' && <button title="配置运行策略" onClick={() => editAgent(item)}><Settings2 className="h-4 w-4" /></button>}
                     <button title="服务端测试" disabled={busy !== '' || (item.kind === 'plugin' && !item.installed)} onClick={() => void mutate(`test-${item.id}`, () => apiPost(`/ai/capabilities/${item.id}/test`), '能力测试已完成。')}><FlaskConical className="h-4 w-4" /></button>
                     <button title="配置历史" onClick={() => setRevisionTarget({ basePath: '/ai/capabilities', resourceType: 'capability', resourceId: item.id, resourceLabel: `能力：${item.name}`, currentVersion: item.version })}><History className="h-4 w-4" /></button>
-                    {item.kind === 'skill' && <button className="danger" title="删除 Skill" aria-label={`删除 ${item.name}`} disabled={busy !== ''} onClick={() => setPendingDelete(item)}><Trash2 className="h-4 w-4" /></button>}
+                    <button className="danger" title={`删除 ${capabilityKindLabels[item.kind]}`} aria-label={`删除 ${item.name}`} disabled={busy !== ''} onClick={() => setPendingDelete(item)}><Trash2 className="h-4 w-4" /></button>
                   </div>
                   {item.kind === 'plugin' && !item.installed ? <span className="jw-readonly-pill">未批准</span> : <Toggle value={item.enabled} disabled={busy !== ''} label={`${item.name}${item.enabled ? '停用' : '启用'}`} onChange={(enabled) => void mutate(`toggle-${item.id}`, () => apiPatch(`/ai/capabilities/${item.id}`, { expectedVersion: item.version, enabled }), enabled ? '能力已启用。' : '能力已停用。')} />}
                 </div>)}</div>}
@@ -251,8 +256,8 @@ export function CapabilitySettingsPage() {
       {agentDraft && <div className="space-y-4"><div className="jw-info-banner compact"><Settings2 className="h-4 w-4" /><span>上传 Agent 可直接使用清单中的模型策略与工具声明。</span></div><div className="jw-form-grid two"><label className="jw-form-item"><span>模型路由</span><select value={agentDraft.modelRouteKey} onChange={(event) => setAgentDraft({ ...agentDraft, modelRouteKey: event.target.value })}>{(settings.agentPolicyOptions?.modelRouteKeys || []).map((key) => <option key={key} value={key}>{key}</option>)}</select></label><label className="jw-form-item"><span>超时（毫秒）</span><input inputMode="numeric" value={agentDraft.timeoutMs} onChange={(event) => setAgentDraft({ ...agentDraft, timeoutMs: event.target.value })} /></label><label className="jw-form-item"><span>最大轮数</span><input inputMode="numeric" value={agentDraft.maxTurns} onChange={(event) => setAgentDraft({ ...agentDraft, maxTurns: event.target.value })} /></label><label className="jw-form-item"><span>单次预算上限（USD）</span><input inputMode="decimal" value={agentDraft.maxBudgetUsd} onChange={(event) => setAgentDraft({ ...agentDraft, maxBudgetUsd: event.target.value })} /></label></div><label className="jw-form-item"><span>允许角色</span><input placeholder="多个角色用逗号分隔" value={agentDraft.allowedRoles} onChange={(event) => setAgentDraft({ ...agentDraft, allowedRoles: event.target.value })} /></label><div className="jw-checkbox-list"><span>工具</span>{[...new Set([...(settings.agentPolicyOptions?.approvedToolNamesByCapability[settings.capabilities.find((item) => item.id === agentDraft.capabilityId)?.capabilityKey || ''] || []), ...agentDraft.toolNames])].map((toolName) => <label key={toolName}><input type="checkbox" checked={agentDraft.toolNames.includes(toolName)} onChange={(event) => setAgentDraft({ ...agentDraft, toolNames: event.target.checked ? [...agentDraft.toolNames, toolName] : agentDraft.toolNames.filter((name) => name !== toolName) })} />{toolName}</label>)}</div></div>}
     </Modal>
 
-    <Modal open={!!pendingDelete} title="确认删除 Skill" onClose={() => { if (!busy.startsWith('delete-')) setPendingDelete(null) }} footer={<><button className="jw-secondary-button" disabled={busy !== ''} onClick={() => setPendingDelete(null)}>取消</button><button className="jw-danger-button" disabled={busy !== ''} onClick={() => void deletePendingSkill()}><Trash2 className="h-4 w-4" />确认删除</button></>}>
-      <p className="text-sm leading-6 text-slate-600">确认删除 Skill「{pendingDelete?.name}」？它的作用域授权和会话选择将同时清除，此操作不可恢复。</p>
+    <Modal open={!!pendingDelete} title={`确认删除 ${pendingDelete ? capabilityKindLabels[pendingDelete.kind] : '能力'}`} onClose={() => { if (!busy.startsWith('delete-')) setPendingDelete(null) }} footer={<><button className="jw-secondary-button" disabled={busy !== ''} onClick={() => setPendingDelete(null)}>取消</button><button className="jw-danger-button" disabled={busy !== ''} onClick={() => void deletePendingCapability()}><Trash2 className="h-4 w-4" />确认删除</button></>}>
+      <p className="text-sm leading-6 text-slate-600">确认删除 {pendingDelete ? capabilityKindLabels[pendingDelete.kind] : '能力'}「{pendingDelete?.name}」？它的作用域授权和会话选择将同时清除。内置能力可通过“同步内置目录”恢复，上传能力需重新导入。</p>
     </Modal>
 
     <Modal open={showBindingModal} title="新增作用域授权" onClose={() => setShowBindingModal(false)} footer={<><button className="jw-secondary-button" onClick={() => setShowBindingModal(false)}>取消</button><button className="jw-primary-button" disabled={busy !== '' || !bindingDraft.capabilityId || (bindingDraft.scopeType === 'department' && !bindingDraft.department) || (bindingDraft.scopeType === 'project' && !bindingDraft.projectId)} onClick={() => void createBinding()}>添加</button></>}>

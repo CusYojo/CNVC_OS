@@ -8,6 +8,7 @@ import {
 import {
   assertAiCapabilityAdmin,
   createCapabilityBinding,
+  deleteCapability,
   deleteSkill,
   ensureBuiltinCapabilityCatalog,
   getConversationCapabilities,
@@ -225,21 +226,29 @@ async function main() {
     const runtime = await resolveSelectedRuntimeCapabilities(owner, ids.conversation)
     assert(!runtime.some((item) => new Set<string>([ids.global, ids.projectCap]).has(item.id)), '非代码目录能力进入 Runtime')
   })
-  await check('skill-delete-is-admin-only-versioned-and-cascades-selections', async () => {
-    await setConversationCapabilities(owner, ids.conversation, [ids.department, ids.projectCap])
-    assert(await rejects(() => deleteSkill(ids.department, 1, owner), 'ROLE_FORBIDDEN'), '普通用户可删除 Skill')
+  await check('all-capability-kinds-delete-is-admin-only-versioned-and-cascades-selections', async () => {
+    const deletions = [
+      { id: uploadedSkillId, kind: 'skill' },
+      { id: uploadedAgentId, kind: 'agent' },
+      { id: uploadedMcpId, kind: 'mcp' },
+      { id: uploadedPluginId, kind: 'plugin' },
+    ] as const
+    await setConversationCapabilities(owner, ids.conversation, deletions.map((item) => item.id))
+    assert(await rejects(() => deleteCapability(uploadedSkillId, 1, owner), 'ROLE_FORBIDDEN'), '普通用户可删除能力')
     assert(await rejects(() => deleteSkill(ids.projectCap, 1, admin), 'CAPABILITY_KIND_INVALID'), 'Skill 删除接口可删除其他能力')
-    assert(await rejects(() => deleteSkill(ids.department, 2, admin), 'CAPABILITY_VERSION_CONFLICT'), '过期版本可删除 Skill')
-    const result = await deleteSkill(ids.department, 1, admin)
-    assert(result.deleted && result.id === ids.department, 'Skill 删除结果错误')
-    const [deletedCapabilities, deletedBindings, deletedSelections] = await Promise.all([
-      db.select().from(aiCapabilities).where(eq(aiCapabilities.id, ids.department)),
-      db.select().from(aiCapabilityBindings).where(eq(aiCapabilityBindings.capabilityId, ids.department)),
-      db.select().from(aiConversationCapabilities).where(eq(aiConversationCapabilities.capabilityId, ids.department)),
-    ])
-    assert(!deletedCapabilities.length, 'Skill 记录未删除')
-    assert(!deletedBindings.length, 'Skill 作用域授权未级联删除')
-    assert(!deletedSelections.length, 'Skill 会话选择未级联删除')
+    assert(await rejects(() => deleteCapability(uploadedSkillId, 2, admin), 'CAPABILITY_VERSION_CONFLICT'), '过期版本可删除能力')
+    for (const deletion of deletions) {
+      const result = await deleteCapability(deletion.id, 1, admin)
+      assert(result.deleted && result.id === deletion.id && result.kind === deletion.kind, `${deletion.kind} 删除结果错误`)
+      const [deletedCapabilities, deletedBindings, deletedSelections] = await Promise.all([
+        db.select().from(aiCapabilities).where(eq(aiCapabilities.id, deletion.id)),
+        db.select().from(aiCapabilityBindings).where(eq(aiCapabilityBindings.capabilityId, deletion.id)),
+        db.select().from(aiConversationCapabilities).where(eq(aiConversationCapabilities.capabilityId, deletion.id)),
+      ])
+      assert(!deletedCapabilities.length, `${deletion.kind} 记录未删除`)
+      assert(!deletedBindings.length, `${deletion.kind} 作用域授权未级联删除`)
+      assert(!deletedSelections.length, `${deletion.kind} 会话选择未级联删除`)
+    }
   })
   await check('document-task-requires-selected-skill', () => {
     assert(selectedSkillsAllowAiTask(new Set(['draft-investment-proposal']), 'investment_proposal'), '已选 Skill 未放行对应任务')
@@ -263,23 +272,29 @@ async function main() {
     const result = await testCapability(skill.id, admin)
     assert(result.ok && Boolean(result.traceId), `Skill 测试失败：${result.error}`)
   })
-  await check('deleted-builtin-skill-stays-hidden-on-startup-ensure-and-can-be-manually-synced', async () => {
-    const [skill] = await db.select().from(aiCapabilities).where(and(
-      eq(aiCapabilities.kind, 'skill'), eq(aiCapabilities.capabilityKey, 'generate-project-qa-report'),
-    )).limit(1)
-    assert(skill, '删除验收 Skill 不存在')
-    await deleteSkill(skill.id, skill.version, admin)
+  await check('deleted-builtin-capability-kinds-stay-hidden-on-startup-ensure-and-can-be-manually-synced', async () => {
+    const builtins = await db.select().from(aiCapabilities).where(eq(aiCapabilities.source, 'builtin'))
+    const targets = (['skill', 'agent', 'mcp', 'plugin'] as const).map((kind) => {
+      const target = builtins.find((item) => item.kind === kind && (kind !== 'agent' || item.capabilityKey !== 'interactive-assistant'))
+      assert(target, `删除验收内置 ${kind} 不存在`)
+      return target
+    })
+    for (const target of targets) await deleteCapability(target.id, target.version, admin)
     await ensureBuiltinCapabilityCatalog()
     const hiddenSettings = await listCapabilitySettings(admin)
-    assert(!hiddenSettings.capabilities.some((item) => item.id === skill.id), '已删除内置 Skill 在启动目录确保后重新出现')
-    const [tombstone] = await db.select().from(aiCapabilities).where(eq(aiCapabilities.id, skill.id)).limit(1)
-    assert(tombstone?.source === 'deleted' && !tombstone.enabled, '内置 Skill 删除标记未保留')
+    for (const target of targets) {
+      assert(!hiddenSettings.capabilities.some((item) => item.id === target.id), `已删除内置 ${target.kind} 在启动目录确保后重新出现`)
+      const [tombstone] = await db.select().from(aiCapabilities).where(eq(aiCapabilities.id, target.id)).limit(1)
+      assert(tombstone?.source === 'deleted' && !tombstone.enabled, `内置 ${target.kind} 删除标记未保留`)
+    }
     await syncBuiltinCapabilities(admin)
-    const [restored] = await db.select().from(aiCapabilities).where(eq(aiCapabilities.id, skill.id)).limit(1)
-    const [restoredBinding] = await db.select().from(aiCapabilityBindings).where(and(
-      eq(aiCapabilityBindings.capabilityId, skill.id), eq(aiCapabilityBindings.scopeType, 'global'),
-    )).limit(1)
-    assert(restored?.source === 'builtin' && restored.enabled && restoredBinding?.enabled, '手动同步未恢复内置 Skill 及全局授权')
+    for (const target of targets) {
+      const [restored] = await db.select().from(aiCapabilities).where(eq(aiCapabilities.id, target.id)).limit(1)
+      const [restoredBinding] = await db.select().from(aiCapabilityBindings).where(and(
+        eq(aiCapabilityBindings.capabilityId, target.id), eq(aiCapabilityBindings.scopeType, 'global'),
+      )).limit(1)
+      assert(restored?.source === 'builtin' && restored.enabled && restoredBinding?.enabled, `手动同步未恢复内置 ${target.kind} 及全局授权`)
+    }
   })
   await check('audit-recorded-without-runtime-secret', async () => {
     const rows = await db.select().from(auditLogs).where(and(eq(auditLogs.userId, ids.admin), eq(auditLogs.module, '能力管理')))

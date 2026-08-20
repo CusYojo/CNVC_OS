@@ -548,6 +548,37 @@ export async function importUploadedCapability(input: {
   })
 }
 
+const CAPABILITY_KIND_LABELS: Record<AiCapabilityKind, string> = {
+  skill: 'Skill', agent: 'Agent', mcp: 'MCP', plugin: 'Plugin',
+}
+
+async function deleteExistingCapability(
+  existing: Awaited<ReturnType<typeof aiConfigurationRepository.findCapability>> & {},
+  expectedVersion: number,
+  actor: AiCapabilityActor,
+) {
+  const kind = existing.kind as AiCapabilityKind
+  const kindLabel = CAPABILITY_KIND_LABELS[kind]
+  const result = await aiConfigurationRepository.deleteCapabilityWithAudit({
+    capabilityId: existing.id,
+    expectedVersion,
+    audit: auditRecord(actor, `删除 ${kindLabel}`, `${existing.name} (${existing.capabilityKey})`),
+  })
+  if (result === 'not_found') throw serviceError(`${kindLabel} 不存在`, 'CAPABILITY_NOT_FOUND', 404)
+  if (result === 'conflict') {
+    throw serviceError(`${kindLabel} 已被其他管理员修改，请刷新后重试`, 'CAPABILITY_VERSION_CONFLICT', 409)
+  }
+  return { deleted: true, id: existing.id, kind }
+}
+
+export async function deleteCapability(capabilityId: string, expectedVersion: number, actor: AiCapabilityActor) {
+  assertAiCapabilityAdmin(actor)
+  const existing = await aiConfigurationRepository.findCapability(capabilityId)
+  if (!existing) throw serviceError('能力不存在', 'CAPABILITY_NOT_FOUND', 404)
+  return deleteExistingCapability(existing, expectedVersion, actor)
+}
+
+// 保留原 Skill 专用接口的类型约束，避免旧客户端通过该路径误删其他能力。
 export async function deleteSkill(capabilityId: string, expectedVersion: number, actor: AiCapabilityActor) {
   assertAiCapabilityAdmin(actor)
   const existing = await aiConfigurationRepository.findCapability(capabilityId)
@@ -555,16 +586,7 @@ export async function deleteSkill(capabilityId: string, expectedVersion: number,
   if (existing.kind !== 'skill') {
     throw serviceError('只能通过此操作删除 Skill', 'CAPABILITY_KIND_INVALID', 400)
   }
-  const result = await aiConfigurationRepository.deleteCapabilityWithAudit({
-    capabilityId,
-    expectedVersion,
-    audit: auditRecord(actor, '删除 Skill', `${existing.name} (${existing.capabilityKey})`),
-  })
-  if (result === 'not_found') throw serviceError('Skill 不存在', 'CAPABILITY_NOT_FOUND', 404)
-  if (result === 'conflict') {
-    throw serviceError('Skill 已被其他管理员修改，请刷新后重试', 'CAPABILITY_VERSION_CONFLICT', 409)
-  }
-  return { deleted: true, id: capabilityId }
+  return deleteExistingCapability(existing, expectedVersion, actor)
 }
 
 export async function updateAgentCapabilityPolicy(capabilityId: string, input: {
