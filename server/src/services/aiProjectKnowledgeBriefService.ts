@@ -79,6 +79,8 @@ export type ProjectKnowledgeBrief = {
     completeProjectFileCoverage: boolean
     sourceChunkCount: number
     includedChunkCount: number
+    completeSourceChunkCoverage: boolean
+    studyBatchCount: number
     includedCharacterCount: number
     corpusSha256: string
   }
@@ -101,6 +103,14 @@ const MODEL = process.env.LLM_MODEL || 'claude-sonnet-4-6'
 const STUDY_TIMEOUT_MS = Math.max(
   30_000,
   Math.min(Number(process.env.AI_PROJECT_KNOWLEDGE_STUDY_TIMEOUT_MS) || 120_000, 300_000),
+)
+const STUDY_BATCH_CHARACTERS = Math.max(
+  12_000,
+  Math.min(Number(process.env.AI_PROJECT_KNOWLEDGE_BATCH_CHARACTERS) || 42_000, 80_000),
+)
+const STUDY_BATCH_CONCURRENCY = Math.max(
+  1,
+  Math.min(Number(process.env.AI_PROJECT_KNOWLEDGE_BATCH_CONCURRENCY) || 2, 4),
 )
 const INTERNAL_STAGE_LANGUAGE =
   /线索阶段|处于线索|进入初筛|申请立项|启动尽调|提请上会|提交投决|继续跟踪|暂缓推进|归档建议|项目阶段(?:为|是|：|:)?\s*线索/
@@ -144,16 +154,22 @@ function contentScore(value: string) {
     + Math.min(4, Math.floor(value.length / 350))
 }
 
-function selectCorpusEntries(sources: EvidenceSource[]) {
+function selectCorpusEntries(sources: EvidenceSource[], includeAllSourceChunks = false) {
   const groups = new Map<string, CorpusEntry[]>()
   sources.forEach((source, sourceIndex) => {
     const content = sourceContent(source.content)
-    if (!content || INTERNAL_STAGE_LANGUAGE.test(content) && content.length < 120) return
+    if (!content || (!includeAllSourceChunks && INTERNAL_STAGE_LANGUAGE.test(content) && content.length < 120)) return
     const key = sourceDocumentKey(source)
     const values = groups.get(key) ?? []
     values.push({ sourceIndex, source, content, score: contentScore(content) })
     groups.set(key, values)
   })
+
+  if (includeAllSourceChunks) {
+    return [...groups.values()]
+      .flat()
+      .sort((left, right) => left.sourceIndex - right.sourceIndex)
+  }
 
   const representatives: CorpusEntry[] = []
   const extras: CorpusEntry[] = []
@@ -192,10 +208,50 @@ function selectCorpusEntries(sources: EvidenceSource[]) {
     .slice(0, entryLimit)
 }
 
-function corpusPrompt(entries: CorpusEntry[]) {
+function corpusPrompt(entries: CorpusEntry[], preserveFullContent = false) {
   return entries.map(({ source, sourceIndex, content }) =>
-    `[S${sourceIndex}] 文件=${source.sourceName}；类型=${source.sourceType}；片段=${source.chunkIndex ?? sourceIndex}；日期=${source.versionOrDate || '未注明'}\n${content.slice(0, 1_300)}`,
+    `[S${sourceIndex}] 文件=${source.sourceName}；类型=${source.sourceType}；片段=${source.chunkIndex ?? sourceIndex}；日期=${source.versionOrDate || '未注明'}\n${preserveFullContent ? content : content.slice(0, 1_300)}`,
   ).join('\n\n')
+}
+
+function corpusBatches(entries: CorpusEntry[], preserveFullContent: boolean) {
+  const batches: CorpusEntry[][] = []
+  let current: CorpusEntry[] = []
+  let currentCharacters = 0
+  for (const entry of entries) {
+    const entryCharacters = corpusPrompt([entry], preserveFullContent).length + 2
+    if (current.length > 0 && currentCharacters + entryCharacters > STUDY_BATCH_CHARACTERS) {
+      batches.push(current)
+      current = []
+      currentCharacters = 0
+    }
+    current.push(entry)
+    currentCharacters += entryCharacters
+  }
+  if (current.length > 0) batches.push(current)
+  return batches
+}
+
+async function mapWithConcurrency<T, R>(
+  values: readonly T[],
+  concurrency: number,
+  worker: (value: T, index: number) => Promise<R>,
+) {
+  const results = new Array<R>(values.length)
+  let nextIndex = 0
+  const run = async () => {
+    while (true) {
+      const index = nextIndex
+      nextIndex += 1
+      if (index >= values.length) return
+      results[index] = await worker(values[index], index)
+    }
+  }
+  await Promise.all(Array.from(
+    { length: Math.min(concurrency, values.length) },
+    () => run(),
+  ))
+  return results
 }
 
 function validIndexes(value: unknown, sourceCount: number, max = 16) {
@@ -313,6 +369,47 @@ function normalizeModelBrief(
   }
 }
 
+function mergeModelBriefs(
+  briefs: Array<Omit<ProjectKnowledgeBrief, 'audit'>>,
+  input: {
+    project: ProjectLike
+    sourceCutoffDate: string
+  },
+): Omit<ProjectKnowledgeBrief, 'audit'> {
+  const facts: ProjectKnowledgeFact[] = []
+  const seenFacts: string[] = []
+  for (const fact of briefs.flatMap((brief) => brief.facts)) {
+    if (isNearDuplicate(fact.text, seenFacts, 0.88)) continue
+    seenFacts.push(fact.text)
+    facts.push(fact)
+  }
+  const chronologySeen = new Set<string>()
+  const chronology = briefs.flatMap((brief) => brief.chronology).filter((item) => {
+    const key = `${item.date}\u001f${item.event}`
+    if (chronologySeen.has(key)) return false
+    chronologySeen.add(key)
+    return true
+  })
+  const tableSeen = new Set<string>()
+  const recommendedTables = briefs.flatMap((brief) => brief.recommendedTables).filter((table) => {
+    const key = `${table.topic}\u001f${table.title}\u001f${JSON.stringify(table.rows)}`
+    if (tableSeen.has(key)) return false
+    tableSeen.add(key)
+    return true
+  })
+  return {
+    version: 'project-knowledge-study-v1',
+    projectName: input.project.name,
+    companyName: input.project.companyName || input.project.name,
+    sourceCutoffDate: input.sourceCutoffDate,
+    facts,
+    chronology,
+    conflicts: dedupeTextList(briefs.flatMap((brief) => brief.conflicts), { limit: 64 }),
+    gaps: dedupeTextList(briefs.flatMap((brief) => brief.gaps), { limit: 64 }),
+    recommendedTables,
+  }
+}
+
 function deterministicBrief(input: {
   project: ProjectLike
   sources: EvidenceSource[]
@@ -375,10 +472,18 @@ export async function buildProjectKnowledgeBrief(input: {
   sources: EvidenceSource[]
   sourceCutoffDate: string
   requiredProjectFiles?: Array<{ sourceId: string; sourceName: string }>
+  includeAllSourceChunks?: boolean
   fetchImpl?: typeof fetch
 }): Promise<ProjectKnowledgeBrief> {
-  const entries = selectCorpusEntries(input.sources)
-  const corpus = corpusPrompt(entries)
+  const includeAllSourceChunks = input.includeAllSourceChunks === true
+  const entries = selectCorpusEntries(input.sources, includeAllSourceChunks)
+  const corpus = corpusPrompt(entries, includeAllSourceChunks)
+  const batches = corpusBatches(entries, includeAllSourceChunks)
+  if (includeAllSourceChunks && entries.length !== input.sources.length) {
+    throw Object.assign(new Error(
+      `项目资料完整研读覆盖失败：应读取 ${input.sources.length} 个片段，实际纳入 ${entries.length} 个片段`,
+    ), { code: 'PROJECT_KNOWLEDGE_CHUNK_COVERAGE_INCOMPLETE' })
+  }
   const documentCount = new Set(input.sources.map(sourceDocumentKey)).size
   const sourceFilesRepresented = [...new Set(input.sources.map((source) => source.sourceName))]
   const selectedSourceFiles = [...new Set(entries.map((entry) => entry.source.sourceName))]
@@ -408,6 +513,8 @@ export async function buildProjectKnowledgeBrief(input: {
     completeProjectFileCoverage: missingRequiredSourceFiles.length === 0,
     sourceChunkCount: input.sources.length,
     includedChunkCount: entries.length,
+    completeSourceChunkCoverage: entries.length === input.sources.length,
+    studyBatchCount: batches.length,
     includedCharacterCount: corpus.length,
     corpusSha256: createHash('sha256').update(corpus).digest('hex'),
   }
@@ -418,11 +525,15 @@ export async function buildProjectKnowledgeBrief(input: {
   if (!entries.length || process.env.AI_PROJECT_KNOWLEDGE_DISABLE_LLM === '1') return fallback()
 
   try {
-    const text = await requestAiGatewayText({
-      baseUrl: GW_BASE,
-      apiKey: GW_KEY,
-      model: MODEL,
-      messages: [
+    const normalizedBatches = await mapWithConcurrency(
+      batches,
+      STUDY_BATCH_CONCURRENCY,
+      async (batch, batchIndex) => {
+        const text = await requestAiGatewayText({
+          baseUrl: GW_BASE,
+          apiKey: GW_KEY,
+          model: MODEL,
+          messages: [
           {
             role: 'system',
             content: `你是 Project Corpus Analyst。你的唯一任务是先完整研读当前项目资料，再形成供后续四类正式投资文档共同使用的内部事实底稿；你不撰写报告正文。
@@ -449,28 +560,44 @@ export async function buildProjectKnowledgeBrief(input: {
               businessModel: input.project.businessModel,
               market: input.project.market,
               team: input.project.team,
-            })}
+})}
 资料截止日：${input.sourceCutoffDate}
 资料文件数：${documentCount}
 资料片段数：${input.sources.length}
+当前研读批次：${batchIndex + 1}/${batches.length}
+本批片段数：${batch.length}
 
-请先逐份研读，再形成事实底稿：
-${corpus}`,
+请逐条研读本批全部片段并形成批次事实底稿；S 编号是全局索引，不得改号或遗漏阅读：
+${corpusPrompt(batch, includeAllSourceChunks)}`,
           },
         ],
-      maxTokens: 12_000,
-      reasoningEffort: 'medium',
-      json: true,
-      timeoutMs: STUDY_TIMEOUT_MS,
-      fetchImpl: input.fetchImpl,
-    })
-    const normalized = normalizeModelBrief(parseJsonObject(text), { ...input, entries })
-    if (normalized.facts.length < Math.min(8, Math.max(1, documentCount * 2))) return fallback()
+          maxTokens: 12_000,
+          reasoningEffort: 'medium',
+          json: true,
+          timeoutMs: STUDY_TIMEOUT_MS,
+          fetchImpl: input.fetchImpl,
+        })
+        return normalizeModelBrief(parseJsonObject(text), { ...input, entries: batch })
+      },
+    )
+    let normalized = mergeModelBriefs(normalizedBatches, input)
+    if (normalized.facts.length < Math.min(8, Math.max(1, documentCount * 2))) {
+      if (!includeAllSourceChunks) return fallback()
+      normalized = mergeModelBriefs([
+        ...normalizedBatches,
+        deterministicBrief({ ...input, entries }),
+      ], input)
+    }
     return {
       ...normalized,
       audit: { mode: 'model-study', ...auditBase },
     }
   } catch (error) {
+    if (includeAllSourceChunks) {
+      throw Object.assign(new Error(
+        `项目全部资料片段研读失败，已停止生成，避免以部分资料形成提案：${(error as Error).message}`,
+      ), { code: 'PROJECT_KNOWLEDGE_COMPLETE_STUDY_FAILED', cause: error })
+    }
     console.warn('[aiProjectKnowledgeBrief] 大模型研读不可用，使用确定性事实底稿:', (error as Error).message)
     return fallback()
   }

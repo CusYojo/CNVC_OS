@@ -347,6 +347,8 @@ test('investment recommendation deterministically re-homes brief facts and adds 
       sourceFileCoverageRatio: 1,
       sourceChunkCount: 20,
       includedChunkCount: 20,
+      completeSourceChunkCoverage: true,
+      studyBatchCount: 1,
       includedCharacterCount: 4_000,
       corpusSha256: 'test-corpus',
     },

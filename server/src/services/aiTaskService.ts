@@ -756,7 +756,12 @@ export function evidenceSourceMatchesProject(
 
 export function screenEvidenceSources(sources: EvidenceSource[], type?: AiExecutableTaskType) {
   const options = type === 'investment_proposal'
-    ? { maxTotal: 120, maxPerDocument: 10, guaranteeDocumentCoverage: true }
+    ? {
+        guaranteeDocumentCoverage: true,
+        retainAllUsable: true,
+        preserveFullContent: true,
+        retainEveryReadableChunk: true,
+      }
     : type === 'compliance_statement'
       ? { maxTotal: 96, maxPerDocument: 12 }
       : type === 'due_diligence_report'
@@ -1535,12 +1540,19 @@ async function executeTaskWithinUsage(taskId: string) {
       if (task.type === 'investment_proposal') {
         assertCompleteProjectFileCoverage(requiredProjectFiles, sources)
       }
-      await updateStage(taskId, '深度研读项目资料并建立事实底稿', 26)
+      await updateStage(
+        taskId,
+        task.type === 'investment_proposal'
+          ? '分批研读全部项目资料片段并建立事实底稿'
+          : '深度研读项目资料并建立事实底稿',
+        26,
+      )
       projectKnowledgeBrief = await buildProjectKnowledgeBrief({
         project,
         sources,
         sourceCutoffDate,
         requiredProjectFiles,
+        includeAllSourceChunks: task.type === 'investment_proposal',
       })
       if (task.type === 'investment_proposal' && !projectKnowledgeBrief.audit.completeProjectFileCoverage) {
         const missing = projectKnowledgeBrief.audit.missingRequiredSourceFiles
@@ -2579,6 +2591,8 @@ async function executeTaskWithinUsage(taskId: string) {
       : []
     const usedSourceIndexes = task.type === 'due_diligence_report'
       ? [...new Set(nativeDueDiligenceSourceIndexes)]
+      : task.type === 'investment_proposal'
+        ? sources.map((_source, index) => index)
       : usedBusinessSourceIndexes(content, sources.length)
     const sourceRecords = auditableTaskSources(usedSourceIndexes, sources, rawSources).map((source, index) => {
           return {

@@ -407,6 +407,8 @@ async function main() {
       completeProjectFileCoverage: true,
       sourceChunkCount: 1,
       includedChunkCount: 1,
+      completeSourceChunkCoverage: true,
+      studyBatchCount: 1,
       includedCharacterCount: denseLayoutSources[0].content.length,
       corpusSha256: sha256(Buffer.from(denseLayoutSources[0].content)),
     },

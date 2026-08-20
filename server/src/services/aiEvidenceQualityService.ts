@@ -181,6 +181,9 @@ export function curateEvidenceSources<T extends EvidenceLike>(
     maxTotal?: number
     maxPerDocument?: number
     guaranteeDocumentCoverage?: boolean
+    retainAllUsable?: boolean
+    preserveFullContent?: boolean
+    retainEveryReadableChunk?: boolean
   } = {},
 ) {
   const rejected: RejectedEvidence[] = []
@@ -198,7 +201,9 @@ export function curateEvidenceSources<T extends EvidenceLike>(
       return
     }
     const quality = cleanCorruptedText(source.content)
-    const collapsed = collapseRepeatedText(quality.cleaned)
+    const collapsed = options.preserveFullContent && !source.sourceType.startsWith('public_web')
+      ? quality.cleaned
+      : collapseRepeatedText(quality.cleaned)
     const publicWeb = sanitizePublicWebContent(source.sourceType, collapsed)
     const curatedContent = publicWeb.content
     if (publicWeb.navigationHeavy) {
@@ -221,8 +226,10 @@ export function curateEvidenceSources<T extends EvidenceLike>(
     }
     if (
       DIAGNOSTIC_NOISE.test(curatedContent)
-      || (readableCjk < 6 && readableLatin < 40)
-      || (informationScore(curatedContent) < 14 && readableLatin < 80)
+      || (!options.retainEveryReadableChunk && (
+        (readableCjk < 6 && readableLatin < 40)
+        || (informationScore(curatedContent) < 14 && readableLatin < 80)
+      ))
     ) {
       rejected.push({
         sourceName: source.sourceName,
@@ -235,7 +242,7 @@ export function curateEvidenceSources<T extends EvidenceLike>(
     const dedupeCorpus = options.guaranteeDocumentCoverage
       ? seenContentByDocument.get(documentKey) ?? []
       : seenContent
-    if (isNearDuplicate(curatedContent, dedupeCorpus, 0.9)) {
+    if (!options.retainEveryReadableChunk && isNearDuplicate(curatedContent, dedupeCorpus, 0.9)) {
       rejected.push({
         sourceName: source.sourceName,
         chunkIndex: source.chunkIndex,
@@ -256,7 +263,7 @@ export function curateEvidenceSources<T extends EvidenceLike>(
     }
     cleanedCandidates.push({
       ...source,
-      content: curatedContent.slice(0, 4000),
+      content: options.preserveFullContent ? curatedContent : curatedContent.slice(0, 4000),
       _score: informationScore(curatedContent),
       _order: order,
     })
@@ -285,7 +292,9 @@ export function curateEvidenceSources<T extends EvidenceLike>(
     group
       .sort((left, right) => right._score - left._score || left._order - right._order)
       .slice(0, maxPerDocument))
-  const selectedCandidates = options.guaranteeDocumentCoverage
+  const selectedCandidates = options.retainAllUsable
+    ? [...cleanedCandidates].sort(sortByPriorityAndOrder)
+    : options.guaranteeDocumentCoverage
     ? (() => {
         // Complete-document workflows must not let the first few large files consume
         // the global chunk budget. Reserve one readable representative for every

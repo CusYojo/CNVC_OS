@@ -64,7 +64,7 @@ test('investment recommendation reviewer uses the company subject before the pro
   }), 'AI API 验收项目')
 })
 
-test('investment proposal screening reserves evidence coverage for every project document', () => {
+test('investment proposal screening retains every usable chunk from every project document', () => {
   const denseSources = Array.from({ length: 13 }, (_, documentIndex) =>
     Array.from({ length: 10 }, (_, chunkIndex) => ({
       sourceType: 'project_file',
@@ -76,8 +76,40 @@ test('investment proposal screening reserves evidence coverage for every project
     }))).flat()
 
   const screened = screenEvidenceSources(denseSources, 'investment_proposal').usable
-  assert.equal(screened.length, 120)
+  assert.equal(screened.length, denseSources.length)
   assert.equal(new Set(screened.map((source) => source.sourceId)).size, 13)
+  assert.deepEqual(
+    screened.map((source) => `${source.sourceId}:${source.chunkIndex}`),
+    denseSources.map((source) => `${source.sourceId}:${source.chunkIndex}`),
+  )
+})
+
+test('investment proposal screening preserves the complete content of a usable chunk', () => {
+  const longContent = `${Array.from({ length: 4_200 }, (_unused, index) =>
+    String.fromCodePoint(0x4e00 + index % 2_000)).join('')}公司产品客户收入财务`
+  const [screened] = screenEvidenceSources([{
+    sourceType: 'project_file',
+    sourceId: 'long-file',
+    sourceName: '完整长片段.md',
+    chunkIndex: 0,
+    content: longContent,
+  }], 'investment_proposal').usable
+
+  assert.equal(screened.content, longContent)
+})
+
+test('investment proposal screening does not drop short or duplicate readable project chunks', () => {
+  const fragments = [0, 1].map((chunkIndex) => ({
+    sourceType: 'project_file',
+    sourceId: 'compact-file',
+    sourceName: '简短关键数据.md',
+    chunkIndex,
+    content: '估值3亿元',
+  }))
+
+  const screened = screenEvidenceSources(fragments, 'investment_proposal').usable
+  assert.equal(screened.length, fragments.length)
+  assert.deepEqual(screened.map((source) => source.chunkIndex), [0, 1])
 })
 
 test('investment proposal screening accepts information-dense English project documents', () => {
@@ -121,6 +153,7 @@ test('project knowledge audit measures coverage against the uploaded file manife
       project: { name: '覆盖测试项目' },
       sourceCutoffDate: '2026-08-19',
       requiredProjectFiles,
+      includeAllSourceChunks: true,
       sources: [
         {
           sourceType: 'project_file',
@@ -141,7 +174,75 @@ test('project knowledge audit measures coverage against the uploaded file manife
     assert.equal(brief.audit.requiredSourceDocumentCount, 2)
     assert.equal(brief.audit.requiredSourceFileCoverageRatio, 1)
     assert.equal(brief.audit.completeProjectFileCoverage, true)
+    assert.equal(brief.audit.sourceChunkCount, 2)
+    assert.equal(brief.audit.includedChunkCount, 2)
+    assert.equal(brief.audit.completeSourceChunkCoverage, true)
+    assert.equal(brief.audit.studyBatchCount, 1)
     assert.deepEqual(brief.audit.missingRequiredSourceFiles, [])
+  } finally {
+    if (previous === undefined) delete process.env.AI_PROJECT_KNOWLEDGE_DISABLE_LLM
+    else process.env.AI_PROJECT_KNOWLEDGE_DISABLE_LLM = previous
+  }
+})
+
+test('investment proposal project study sends every source chunk through bounded model batches', async () => {
+  const previous = process.env.AI_PROJECT_KNOWLEDGE_DISABLE_LLM
+  delete process.env.AI_PROJECT_KNOWLEDGE_DISABLE_LLM
+  const sources = Array.from({ length: 30 }, (_, chunkIndex) => ({
+    sourceType: 'project_file',
+    sourceId: `batch-file-${Math.floor(chunkIndex / 5)}`,
+    sourceName: `批量资料-${Math.floor(chunkIndex / 5)}.md`,
+    chunkIndex,
+    content: `${Array.from({ length: 1_800 }, (_unused, offset) =>
+      String.fromCodePoint(0x4e00 + (chunkIndex * 1_800 + offset) % 20_000)).join('')}公司产品客户收入财务合同${chunkIndex}`,
+  }))
+  const prompts: string[] = []
+  try {
+    const brief = await buildProjectKnowledgeBrief({
+      project: { name: '全部片段分批研读测试项目' },
+      sourceCutoffDate: '2026-08-20',
+      sources,
+      includeAllSourceChunks: true,
+      fetchImpl: async (_input, init) => {
+        const request = JSON.parse(String(init?.body)) as {
+          messages?: Array<{ role?: string; content?: string }>
+          input?: Array<{ role?: string; content?: Array<{ text?: string }> }>
+        }
+        const prompt = request.messages?.find((message) => message.role === 'user')?.content
+          ?? request.input?.find((message) => message.role === 'user')?.content?.[0]?.text
+          ?? ''
+        prompts.push(prompt)
+        const firstSourceIndex = Number(prompt.match(/\[S(\d+)\]/)?.[1] ?? 0)
+        return new Response(JSON.stringify({
+          choices: [{
+            message: {
+              content: JSON.stringify({
+                facts: [{
+                  topic: '商业模式、客户与供应链',
+                  text: '公司资料记录了产品、客户、收入及合同信息。',
+                  sourceIndexes: [firstSourceIndex],
+                  nature: '事实',
+                }],
+                chronology: [],
+                conflicts: [],
+                gaps: [],
+                recommendedTables: [],
+              }),
+            },
+          }],
+        }), { status: 200, headers: { 'content-type': 'application/json' } })
+      },
+    })
+
+    assert.ok(prompts.length > 1)
+    assert.equal(brief.audit.studyBatchCount, prompts.length)
+    assert.equal(brief.audit.sourceChunkCount, sources.length)
+    assert.equal(brief.audit.includedChunkCount, sources.length)
+    assert.equal(brief.audit.completeSourceChunkCoverage, true)
+    const studiedIndexes = new Set(prompts.flatMap((prompt) =>
+      [...prompt.matchAll(/\[S(\d+)\]/g)].map((match) => Number(match[1]))))
+    assert.deepEqual([...studiedIndexes].sort((left, right) => left - right),
+      sources.map((_source, index) => index))
   } finally {
     if (previous === undefined) delete process.env.AI_PROJECT_KNOWLEDGE_DISABLE_LLM
     else process.env.AI_PROJECT_KNOWLEDGE_DISABLE_LLM = previous
