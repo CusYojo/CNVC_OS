@@ -50,7 +50,7 @@ def render_proposal(args: argparse.Namespace) -> int:
     output_path = args.output.expanduser().resolve()
     manifest_path = args.manifest.expanduser().resolve()
     processor = load_processor(processor_path, "draft_investment_proposal_processor")
-    expected_hash = processor.validate_approved_template(template_path)
+    expected_hash = processor.validate_layout_authority(template_path)
     rendered_hash = processor.render_proposal(payload_path, output_path, template_path)
     if rendered_hash != expected_hash:
         raise SystemExit("proposal template provenance was lost during rendering")
@@ -65,6 +65,8 @@ def render_proposal(args: argparse.Namespace) -> int:
         "template_sha256": expected_hash,
         "template_enforced": True,
         "renderer_mode": "skill-native-docx",
+        "acceptance_authority": "agent-and-current-skill",
+        "programmatic_business_acceptance": False,
         "external_llm_gateway": False,
         "rendered_at": datetime.now().astimezone().isoformat(timespec="seconds"),
     }

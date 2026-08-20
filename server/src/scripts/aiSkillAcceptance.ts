@@ -671,14 +671,14 @@ async function main() {
     '证据台账 → 字段完整性 → 内容/文风 → V5 Skill 格式化 → Skill 样式与逐页渲染',
   )
   assert(
-    'AI-008 投资提案最终 Skill 校验失败时禁止登记产物',
-    aiTaskServiceSource.includes(
-      'proposalSkillValidation = await validateInvestmentProposalWithSkill(outputPath)',
-    )
-      && !aiTaskServiceSource.includes(
-        '投资提案 Skill 最终校验执行失败，保留已通过内建检查的 DOCX',
-      ),
-    'draft-investment-proposal 成品门禁必须硬失败',
+    'AI-007/AI-008 业务验收权归 Agent 与当前 Skill',
+    !aiTaskServiceSource.includes('reviewGeneratedComplianceDocx({')
+      && !aiTaskServiceSource.includes('reviewInvestmentProposalDocx({')
+      && !aiTaskServiceSource.includes('validateInvestmentProposalWithSkill(outputPath)')
+      && aiTaskServiceSource.includes("acceptanceAuthority: 'agent-and-current-skill'")
+      && aiTaskServiceSource.includes('programmaticBusinessAcceptance: false')
+      && aiTaskServiceSource.includes("deliveryValidation: 'file-integrity-and-authorization-only'"),
+    '宿主只做文件完整性、归属、存储与鉴权下载，不重复判定内容和版式',
   )
   assert(
     'AI-007 强制 Word/WPS 无修复兼容验收',

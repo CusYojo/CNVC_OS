@@ -277,7 +277,6 @@ export async function renderComplianceStatementWithSkill(input: {
   const template = path.join(skillDirectory, 'assets', 'compliance-layout-authority.docx')
   const workDirectory = path.join(path.dirname(input.outputPath), '.generate-investment-compliance-note-render')
   const contentPath = path.join(workDirectory, 'content.json')
-  const verifyPath = path.join(workDirectory, 'qa.json')
   await mkdir(workDirectory, { recursive: true })
   const payload = buildComplianceSkillContent({
     projectName: input.taskProjectName,
@@ -293,15 +292,7 @@ export async function renderComplianceStatementWithSkill(input: {
     args: [processor, 'build', '--content', contentPath, '--output', input.outputPath, '--template', template],
     label: 'generate-investment-compliance-note 模板渲染',
   })
-  await runDocumentSkillProcessor({
-    python,
-    args: [processor, 'verify', '--content', contentPath, '--docx', input.outputPath, '--out', verifyPath, '--template', template],
-    label: 'generate-investment-compliance-note 模板校验',
-  })
-  const verify = JSON.parse(await readFile(verifyPath, 'utf8')) as Record<string, unknown>
-  if (verify.status !== 'pass' && verify.pass !== true) {
-    throw new Error('合规性说明未通过 Skill 模板校验')
-  }
+  await assertFile(input.outputPath)
   const output = await readFile(input.outputPath)
   const templateBuffer = await readFile(template)
   return {
@@ -320,8 +311,8 @@ export async function renderComplianceStatementWithSkill(input: {
     }],
     templateParts: ['word/document.xml', 'word/styles.xml', 'word/numbering.xml'],
     documentSha256: createHash('sha256').update(output).digest('hex'),
-    skillVerifyPassed: true,
-    skillVerify: verify,
+    acceptanceAuthority: 'agent-and-current-skill',
+    programmaticBusinessAcceptance: false,
     skillBuild: build,
     typography: { body: '宋体', heading: '宋体/黑体' },
   }

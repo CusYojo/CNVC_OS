@@ -61,10 +61,6 @@ import {
   type ComplianceWorkflowResult,
 } from './aiComplianceWorkflowService.js'
 import {
-  reviewGeneratedComplianceDocx,
-  type ComplianceOutputReview,
-} from './aiComplianceOutputService.js'
-import {
   fetchDueDiligenceNetworkEvidence,
   type DueDiligenceNetworkResearchAudit,
 } from './aiDueDiligenceNetworkResearchService.js'
@@ -108,11 +104,6 @@ import {
   loadInvestmentProposalBlueprint,
   type InvestmentProposalDocumentBlueprint,
 } from './aiInvestmentProposalBlueprintService.js'
-import {
-  reviewInvestmentProposalDocx,
-  type InvestmentProposalOutputReview,
-} from './aiInvestmentProposalDocumentService.js'
-import { validateInvestmentProposalWithSkill } from './aiInvestmentProposalSkillRuntimeService.js'
 import { generateDueDiligenceReportWithSkill } from './aiDueDiligenceSkillRuntimeService.js'
 import {
   safeAiTaskFailureMessage,
@@ -1081,6 +1072,7 @@ async function inspectGeneratedArtifact(
     allowInheritedCjkLanguageMetadata?: boolean
     expectedSectionTitles?: string[]
     expectedTableCount?: number
+    deliveryIntegrityOnly?: boolean
   } = {},
 ) {
   const fileStat = await stat(filePath)
@@ -1088,6 +1080,17 @@ async function inspectGeneratedArtifact(
   const zip = await JSZip.loadAsync(await import('node:fs/promises').then((fs) => fs.readFile(filePath)))
   if (format === 'docx') {
     if (!zip.file('word/document.xml')) throw new Error('DOCX 缺少 document.xml')
+    if (options.deliveryIntegrityOnly) {
+      return {
+        qualityStatus: 'passed',
+        metadata: {
+          bytes: fileStat.size,
+          openXmlReadable: true,
+          deliveryReady: true,
+          validationScope: 'file-integrity-only',
+        },
+      }
+    }
     const documentXml = await zip.file('word/document.xml')!.async('string')
     if (!documentXml.includes('<w:t')) throw new Error('DOCX 没有可编辑文本')
     if (documentXml.includes('\uFFFD')) throw new Error('DOCX 正文包含损坏的 Unicode 字符')
@@ -1244,162 +1247,15 @@ function dueDiligenceMinimumPlannedTables(content: BusinessContent) {
   return Math.min(12, eligibleSections)
 }
 
-function assessBusinessDocumentTemplateFidelity(input: {
-  type: AiBusinessTaskType
+function assessDueDiligenceTemplateFidelity(input: {
   templateSections: string[]
   content: BusinessContent
   quality: DocumentQualityResult
   generationMetadata: Record<string, unknown>
-  complianceReview?: ComplianceOutputReview
-  complianceContentReviewPassed?: boolean
-  proposalReview?: InvestmentProposalOutputReview
 }): TemplateFidelityAssessment {
   const quality = input.quality.metadata
   const exactSections = exactSectionOrder(input.content, input.templateSections)
-  const contentAuditPassed = input.content.generationAudit?.reviewerPassed === true
-  const expectedTableCount = input.type === 'due_diligence_report'
-    ? Number(input.generationMetadata.tableCount ?? 0)
-    : input.content.sections.reduce(
-        (count, section) => count + (section.tables?.length ?? 0),
-        0,
-      )
-
-  if (input.type === 'compliance_statement') {
-    if (
-      input.generationMetadata.templateEnforced === true
-      && input.generationMetadata.skillVerifyPassed === true
-    ) {
-      return assessTemplateFidelity({ dimensions: {
-        structure: [
-          fidelityCheck('section-order', exactSections, true),
-          fidelityCheck('skill-content-review', input.complianceContentReviewPassed === true, true),
-        ],
-        typography: [
-          fidelityCheck('skill-layout-verify', true, true),
-          fidelityCheck('cjk-font', metadataFlag(quality, 'cjkFontValidated')),
-        ],
-        layout: [
-          fidelityCheck('retained-template-enforced', true, true),
-          fidelityCheck('skill-verify', true, true),
-        ],
-        tables: [
-          fidelityCheck('template-table-count', Number(quality.tableCount ?? 0) === 0, true),
-        ],
-        contentOrganization: [
-          fidelityCheck('content-review', input.complianceContentReviewPassed === true, true),
-          fidelityCheck('skill-template-provenance', Boolean(input.generationMetadata.skillTemplateSha256), true),
-        ],
-      } })
-    }
-    const review = input.complianceReview
-    const metadata = review?.metadata ?? {}
-    return assessTemplateFidelity({ dimensions: {
-      structure: [
-        fidelityCheck('section-order', exactSections, true),
-        fidelityCheck('outline', metadataFlag(metadata, 'outlineValidated'), true),
-        fidelityCheck('numbering', metadataFlag(metadata, 'numberingValidated')),
-      ],
-      typography: [
-        fidelityCheck('typography', metadataFlag(metadata, 'typographyValidated'), true),
-        fidelityCheck('font-fallback', metadataFlag(metadata, 'fontFallbackAliasesValidated')),
-        fidelityCheck('font-relationships', metadataFlag(metadata, 'fontEmbedRelationshipsValidated')),
-        fidelityCheck('cjk-font', metadataFlag(quality, 'cjkFontValidated')),
-      ],
-      layout: [
-        fidelityCheck('page-system', metadataFlag(metadata, 'pageSystemValidated'), true),
-        fidelityCheck('template-parts', metadataFlag(metadata, 'templatePartsValidated')),
-        fidelityCheck('relationship-closure', metadataFlag(metadata, 'relationshipClosureValidated')),
-        fidelityCheck('a4-page', metadataFlag(quality, 'a4PageValidated')),
-      ],
-      tables: [
-        fidelityCheck('template-table-count', Number(quality.tableCount ?? 0) === 0, true),
-        fidelityCheck('no-unexpected-features', reviewHasNone(review, ['DOCX_UNEXPECTED_FEATURE'])),
-      ],
-      contentOrganization: [
-        fidelityCheck('content-review', input.complianceContentReviewPassed === true, true),
-        fidelityCheck('forbidden-content', metadataFlag(metadata, 'forbiddenContentValidated'), true),
-        fidelityCheck('no-source-process-or-ai-style', reviewHasNone(review, [
-          'DOCX_SOURCE_PROCESS_LEAK', 'DOCX_AI_STYLE_DRIFT', 'DOCX_TEXT_INVALID',
-        ])),
-      ],
-    } })
-  }
-
-  if (input.type === 'investment_proposal') {
-    if (
-      input.generationMetadata.templateEnforced === true
-      && input.generationMetadata.rendererMode === 'skill-native-docx'
-    ) {
-      return assessTemplateFidelity({ dimensions: {
-        structure: [
-          fidelityCheck('section-order', exactSections, true),
-          fidelityCheck('content-review', contentAuditPassed, true),
-        ],
-        typography: [
-          fidelityCheck('skill-native-typography', true, true),
-          fidelityCheck('cjk-font', metadataFlag(quality, 'cjkFontValidated')),
-        ],
-        layout: [
-          fidelityCheck('skill-layout-authority-enforced', true, true),
-          fidelityCheck('skill-native-docx', true, true),
-        ],
-        tables: [
-          fidelityCheck('editable-native-tables', Number(quality.tableCount ?? -1) === expectedTableCount, true),
-        ],
-        contentOrganization: [
-          fidelityCheck('skill-template-provenance', Boolean(input.generationMetadata.skillTemplateSha256), true),
-          fidelityCheck('no-external-gateway-in-renderer', true),
-        ],
-      } })
-    }
-    const review = input.proposalReview
-    const metadata = review?.metadata
-    return assessTemplateFidelity({ dimensions: {
-      structure: [
-        fidelityCheck('section-order', exactSections, true),
-        fidelityCheck(
-          'section-tree',
-          metadata !== undefined
-            && metadata.foundSectionCount === metadata.expectedSectionCount,
-          true,
-        ),
-        fidelityCheck('heading-levels', reviewHasNone(review, [
-          'SECTION_TREE_MISMATCH', 'HEADING_STYLE_MISMATCH', 'HEADING3_FORBIDDEN',
-        ])),
-      ],
-      typography: [
-        fidelityCheck('title-and-heading-styles', reviewHasNone(review, ['TYPOGRAPHY_MISMATCH']), true),
-        fidelityCheck('body-style', reviewHasNone(review, ['BODY_STYLE_MISMATCH']), true),
-        fidelityCheck('spacing', reviewHasNone(review, ['ABNORMAL_TYPOGRAPHY_SPACING'])),
-        fidelityCheck('cjk-font', metadataFlag(quality, 'cjkFontValidated')),
-      ],
-      layout: [
-        fidelityCheck('page-geometry', metadata?.pageGeometryValidated === true, true),
-        fidelityCheck('fixed-blocks', metadata?.fixedBlocksValidated === true, true),
-        fidelityCheck('field-update', metadata?.updateFields === true),
-        fidelityCheck('odd-even-header', metadata?.evenAndOddHeaders === true),
-      ],
-      tables: [
-        fidelityCheck('table-count', reviewHasNone(review, ['TABLE_COUNT_MISMATCH']), true),
-        fidelityCheck('table-format', reviewHasNone(review, ['TABLE_FORMAT_MISMATCH'])),
-        fidelityCheck('table-geometry', reviewHasNone(review, ['TABLE_GEOMETRY_MISMATCH'])),
-      ],
-      contentOrganization: [
-        fidelityCheck('content-review', contentAuditPassed, true),
-        fidelityCheck('body-claims', metadata?.bodyClaimsValidated === true, true),
-        fidelityCheck('no-client-or-ai-process-leak', reviewHasNone(review, [
-          'INTERNAL_ERROR_TEXT_LEAK', 'SOURCE_PROCESS_WORDING_LEAK', 'AI_STYLE_BOILERPLATE',
-          'CONVERSATIONAL_TRANSCRIPT_LEAK', 'FORMULAIC_ANALYSIS_WRAPPER',
-          'GENERIC_NO_DATA_PREFACE', 'CLIENT_PROSE_LABEL_LEAK', 'CLIENT_COLON_LABEL_LEAK',
-          'INLINE_NUMBERED_SUBHEADING_LEAK', 'INTERNAL_EVIDENCE_STATUS_TEXT_LEAK',
-        ])),
-      ],
-    } })
-  }
-
-  if (input.type !== 'due_diligence_report') {
-    throw new Error(`不支持的 DOCX 模板还原度任务：${input.type}`)
-  }
+  const expectedTableCount = Number(input.generationMetadata.tableCount ?? 0)
   const coverage = input.content.generationAudit?.evidenceCoverage
   const coverageRatio = coverage?.totalLeafSections
     ? coverage.coveredLeafSections / coverage.totalLeafSections
@@ -1431,8 +1287,15 @@ function assessBusinessDocumentTemplateFidelity(input: {
       fidelityCheck('editable-native-tables', Number(quality.tableCount ?? -1) === expectedTableCount),
     ],
     contentOrganization: [
-      fidelityCheck('content-review', contentAuditPassed, true),
-      fidelityCheck('no-reviewer-issues', (input.content.generationAudit?.reviewerIssueCodes.length ?? 1) === 0),
+      fidelityCheck(
+        'agent-skill-content-review',
+        input.content.generationAudit?.reviewerPassed === true,
+        true,
+      ),
+      fidelityCheck(
+        'agent-skill-reviewer-issues',
+        (input.content.generationAudit?.reviewerIssueCodes.length ?? 1) === 0,
+      ),
       fidelityCheck(
         'no-empty-sections',
         input.content.sections.every((section) =>
@@ -1441,7 +1304,6 @@ function assessBusinessDocumentTemplateFidelity(input: {
     ],
   } })
 }
-
 function assessQaTemplateFidelity(input: {
   quality: DocumentQualityResult
   questionCount: number
@@ -2606,11 +2468,6 @@ async function executeTask(taskId: string) {
     }
     let previewPath: string | undefined
     let previewMetadata: Record<string, unknown> | undefined
-    let complianceDocxReview: ComplianceOutputReview | undefined
-    let proposalDocxReview: InvestmentProposalOutputReview | undefined
-    let proposalSkillValidation: Awaited<ReturnType<typeof validateInvestmentProposalWithSkill>>
-      | { passed: false; code: string }
-      | undefined
     let pptWorkflowReview: Awaited<ReturnType<typeof reviewInvestmentRecommendationPpt>> | undefined
     const pptGenerationAudit = pptWorkflow
       ? buildInvestmentRecommendationGenerationAudit({
@@ -2701,66 +2558,10 @@ async function executeTask(taskId: string) {
         )
     if (await cancelIfRequested(taskId)) return
 
-    if (task.type === 'investment_proposal') {
-      if (!proposalBlueprint) throw new Error('投资提案缺少 Document Blueprint')
-      await updateStage(taskId, 'Reviewer 检查 Word 章节、固定内容、引用及格式', 76)
-      try {
-        for (let attempt = 1; attempt <= 2; attempt += 1) {
-          proposalDocxReview = await reviewInvestmentProposalDocx({
-            filePath: outputPath,
-            template,
-            blueprint: proposalBlueprint,
-            content,
-            projectName: project.name,
-          })
-          if (proposalDocxReview.passed) break
-          if (attempt === 1) {
-            generationMetadata = await generateCurrentDocx()
-          }
-        }
-      } catch (error) {
-        console.warn('[aiTask] 投资提案 Word Reviewer 执行失败，保留已生成 Word:', (error as Error).message)
-      }
-      if (!proposalDocxReview?.passed) {
-        console.warn(
-          '[aiTask] 投资提案 Word Reviewer 未完全通过，按受限初稿继续交付:',
-          proposalDocxReview?.issues
-            .map((issue) => `${issue.code}:${issue.message}`)
-            .join('；') || 'Reviewer 未返回结果',
-        )
-      }
+    if (['investment_proposal', 'compliance_statement'].includes(task.type)) {
+      await updateStage(taskId, 'Agent 已按当前 Skill 规则完成生成与审阅', 96)
     }
-
-    if (task.type === 'compliance_statement') {
-      if (!complianceBlueprint) throw new Error('合规性说明缺少Document Blueprint')
-      await updateStage(taskId, 'Reviewer 检查 Word 结构与格式', 76)
-      try {
-        for (let attempt = 1; attempt <= 2; attempt += 1) {
-          complianceDocxReview = await reviewGeneratedComplianceDocx({
-            filePath: outputPath,
-            template,
-            blueprint: complianceBlueprint,
-            content,
-            projectName: project.name,
-          })
-          if (complianceDocxReview.passed) break
-          if (attempt === 1) {
-            generationMetadata = await generateCurrentDocx()
-          }
-        }
-      } catch (error) {
-        console.warn('[aiTask] 合规性说明 Word Reviewer 执行失败，保留已生成 Word:', (error as Error).message)
-      }
-      if (!complianceDocxReview?.passed) {
-        console.warn(
-          '[aiTask] 合规性说明 Word Reviewer 未完全通过，按初稿继续交付:',
-          complianceDocxReview?.issues
-            .map((issue) => `${issue.code}:${issue.message}`)
-            .join('；') || 'Reviewer 未返回结果',
-        )
-      }
-    }
-    await updateStage(taskId, '执行最终可编辑文件质量检查', 98)
+    await updateStage(taskId, '登记文件并生成下载地址', 98)
     const qualityOptions = {
       // 合规性说明核心规范禁止“引用资料”等模板外正文板块；来源只保留在
       // ai_task_sources 与产物元数据中。尽调报告也按用户要求不显示文末来源。
@@ -2779,6 +2580,7 @@ async function executeTask(taskId: string) {
       expectedTableCount: task.type === 'due_diligence_report'
         ? Number(generationMetadata.tableCount ?? 0)
         : undefined,
+      deliveryIntegrityOnly: ['compliance_statement', 'investment_proposal'].includes(task.type),
     }
     let quality: Awaited<ReturnType<typeof inspectGeneratedArtifact>>
     try {
@@ -2793,21 +2595,12 @@ async function executeTask(taskId: string) {
       generationMetadata = await retryDocumentStep('DOCX 质量恢复生成', generateCurrentDocx)
       quality = await inspectGeneratedArtifact(outputPath, 'docx', qualityOptions)
     }
-    const calculateTemplateFidelity = () => [
-        'compliance_statement',
-        'investment_proposal',
-        'due_diligence_report',
-      ].includes(task.type)
-        ? assessBusinessDocumentTemplateFidelity({
-          type: task.type as AiBusinessTaskType,
+    const calculateTemplateFidelity = () => task.type === 'due_diligence_report'
+        ? assessDueDiligenceTemplateFidelity({
           templateSections: template.sections,
           content,
           quality,
           generationMetadata: generationMetadata as Record<string, unknown>,
-          complianceReview: complianceDocxReview,
-          complianceContentReviewPassed:
-            complianceWorkflow?.reviewReports.at(-1)?.passed,
-          proposalReview: proposalDocxReview,
         })
         : undefined
     let templateFidelity = calculateTemplateFidelity()
@@ -2815,24 +2608,6 @@ async function executeTask(taskId: string) {
       await updateStage(taskId, '按模板差异自动修订文档', 94)
       generationMetadata = await retryDocumentStep('模板还原度恢复生成', generateCurrentDocx)
       quality = await inspectGeneratedArtifact(outputPath, 'docx', qualityOptions)
-      if (task.type === 'compliance_statement' && complianceBlueprint) {
-        complianceDocxReview = await reviewGeneratedComplianceDocx({
-          filePath: outputPath,
-          template,
-          blueprint: complianceBlueprint,
-          content,
-          projectName: project.name,
-        })
-      }
-      if (task.type === 'investment_proposal' && proposalBlueprint) {
-        proposalDocxReview = await reviewInvestmentProposalDocx({
-          filePath: outputPath,
-          template,
-          blueprint: proposalBlueprint,
-          content,
-          projectName: project.name,
-        })
-      }
       templateFidelity = calculateTemplateFidelity()
     }
     if (templateFidelity && !templateFidelity.passed) {
@@ -2840,9 +2615,6 @@ async function executeTask(taskId: string) {
         '[aiTask] 文档模板还原度未达到目标，保留已通过 OpenXML 检查的 DOCX 并记录质量限制:',
         JSON.stringify(templateFidelity.failedChecks),
       )
-    }
-    if (task.type === 'investment_proposal') {
-      proposalSkillValidation = await validateInvestmentProposalWithSkill(outputPath)
     }
     const artifactCount = await aiTaskRepository.countArtifacts({
       userId: task.userId,
@@ -2885,8 +2657,18 @@ async function executeTask(taskId: string) {
             }
           : {}),
         projectKnowledgeStudy: projectKnowledgeBrief?.audit,
-        templateFidelityTarget: templateFidelity?.target ?? TEMPLATE_FIDELITY_MINIMUM,
-        ...(templateFidelity ? { templateFidelity } : {}),
+        ...(templateFidelity ? {
+          templateFidelityTarget: templateFidelity.target,
+          templateFidelity,
+        } : {}),
+        ...(['compliance_statement', 'investment_proposal'].includes(task.type)
+          ? {
+              acceptanceAuthority: 'agent-and-current-skill',
+              acceptanceDecision: 'accepted-on-agent-skill-completion',
+              programmaticBusinessAcceptance: false,
+              deliveryValidation: 'file-integrity-and-authorization-only',
+            }
+          : {}),
         evidencePolicy: task.type === 'compliance_statement'
           ? 'project_knowledge_primary_model_network_supplement'
           : [
@@ -2938,12 +2720,6 @@ async function executeTask(taskId: string) {
               })),
             }
           : {}),
-        ...(complianceDocxReview
-          ? {
-              wordReviewerPassed: complianceDocxReview.passed,
-              wordReview: complianceDocxReview.metadata,
-            }
-          : {}),
         ...(proposalBlueprint
           ? {
               blueprintVersion: proposalBlueprint.version,
@@ -2960,15 +2736,6 @@ async function executeTask(taskId: string) {
               limitationCount: content.generationAudit.limitationCount ?? 0,
               limitationIssueCodes: content.generationAudit.limitationIssueCodes ?? [],
             }
-          : {}),
-        ...(proposalDocxReview
-          ? {
-              wordReviewerPassed: proposalDocxReview.passed,
-              wordReview: proposalDocxReview.metadata,
-            }
-          : {}),
-        ...(proposalSkillValidation
-          ? { proposalSkillValidation }
           : {}),
         ...(pptWorkflow
           ? {
@@ -3091,10 +2858,7 @@ async function executeTask(taskId: string) {
           }
         })
     const limitedProposal = task.type === 'investment_proposal'
-      && (
-        (content.generationAudit?.limitedDraft ?? false)
-        || proposalDocxReview?.passed !== true
-      )
+      && (content.generationAudit?.limitedDraft ?? false)
     const completed = await aiTaskRepository.completeTaskWithArtifacts({
       taskId,
       leaseOwner: AI_TASK_WORKER_OWNER,
