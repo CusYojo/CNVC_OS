@@ -27,7 +27,7 @@ NS = {"w": W_NS, "w14": W14_NS}
 W = f"{{{W_NS}}}"
 W14 = f"{{{W14_NS}}}"
 SKILL_DIR = Path(__file__).resolve().parent.parent
-DEFAULT_TEMPLATE = SKILL_DIR / "assets" / "reference.docx"
+DEFAULT_TEMPLATE = SKILL_DIR / "assets" / "compliance-layout-authority.docx"
 REQUIRED_SECTIONS = ["公司情况介绍", "投资理由", "投资计划", "投资情形分析"]
 TEMPLATE_RESIDUE = [
     "德塔智能", "北京德塔源创", "马晓健", "刘航欣", "黄思远", "朱松纯",

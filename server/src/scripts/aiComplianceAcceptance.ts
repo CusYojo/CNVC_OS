@@ -57,16 +57,14 @@ async function main() {
   ])
 
   check(
-    '模板语料库完整',
-    blueprint.templates.length === 2,
+    'Skill 自带版式权威完整',
+    blueprint.templates.length === 1,
     `${blueprint.templates.length}份DOCX模板`,
   )
   check(
-    '模板摘要固定',
-    blueprint.templates.map((item) => item.sha256).join(',') === [
-      '5b51cda592736fc3b2bfc69bcc75875f5588496d47f7a6b6691b21daae8b115e',
-      'ce793bf645a35ffa81d76665f1acaad4d3f2d46d3a47f824f1be6c258cb84e1e',
-    ].join(','),
+    '当前版式权威摘要固定',
+    blueprint.templates.map((item) => item.sha256).join(',')
+      === '946037c5e23ba01d3d2fa482c5ef850be18c77300b214a0b05844a644387336e',
     blueprint.templates.map((item) => `${item.fileName}:${item.sha256.slice(0, 12)}`).join('；'),
   )
   check(
@@ -81,11 +79,11 @@ async function main() {
     blueprint.templates.every((item) =>
       item.page.widthDxa === 11906
       && item.page.heightDxa === 16838
-      && item.page.marginTopDxa === 1440
-      && item.page.marginRightDxa === 1800
-      && item.page.marginBottomDxa === 1440
-      && item.page.marginLeftDxa === 1800),
-    'A4纵向，上下1440/左右1800 DXA',
+      && item.page.marginTopDxa === 1417
+      && item.page.marginRightDxa === 1587
+      && item.page.marginBottomDxa === 1417
+      && item.page.marginLeftDxa === 1587),
+    'A4纵向，上下1417/左右1587 DXA',
   )
   check(
     'Skill加载四份约束',
@@ -105,9 +103,11 @@ async function main() {
     'Skill与reference要求逐章节生成',
   )
   check(
-    'Skill不提及样本文件',
-    !/样本|sample/i.test(`${skill.description}\n${skill.instructions}\n${skill.referenceInstructions}`),
-    'Skill仅引用核心规范，不登记样本DOCX',
+    'Skill不引用历史链路或仓库外模板目录',
+    !/sbl-investment-compliance|Deta\s*3|docs\/合规性说明/i.test(
+      `${skill.description}\n${skill.instructions}\n${skill.referenceInstructions}`,
+    ),
+    'Skill只引用自身 Blueprint 与版式权威',
   )
   check(
     '缺失资料采用自然句式并禁用旧占位语',

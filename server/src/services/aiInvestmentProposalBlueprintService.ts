@@ -8,7 +8,7 @@ import type { AiTemplateDefinition } from './aiTemplateCatalog.js'
 export const INVESTMENT_PROPOSAL_BLUEPRINT_VERSION = 'proposal-blueprint-20260804-v14-editorial-quality'
 // 资料缺口只作为内部状态，不向客户正文注入统一占位前缀。
 export const CURRENT_PROJECT_NO_DATA = ''
-const CORE_STANDARD_SHA256 = 'ee3fdb2ebb9b2f67f254334be4e9d85a2d66141e3786b4e56df53602d0a47ee5'
+const CORE_STANDARD_SHA256 = 'f572356619cceb5debbadcc22a37fa49c34f3c86067234300388dd45a444f232'
 
 export type InvestmentProposalAnalysisKind =
   | 'company_profile'
@@ -128,16 +128,8 @@ export type InvestmentProposalDocumentBlueprint = {
 }
 
 const EXPECTED_TEMPLATE_FINGERPRINTS: Record<string, string> = {
-  '佳量脑科学项目投资提案0622(1).docx': '0686dc7cd3bc3f098f6d046239c84ae885e1df03bf8719057e8688a14ec90385',
-  '1.众创叁期对飞阔科技的投资提案(1).docx': '2693a3836cfc25ea3ef848c35678a5b4b583b02b3b7b9ece1182cf52654d93c8',
-  '1. 轻蜓光电投资提案(1).pdf': '8b809e914febf9dc37e1f949c396923157856f5afb618540c02d73cd19448fab',
-  '1. 普雷赛斯投资提案(1).pdf': 'c8faeb9085e8548ff6e30a3ed113d35efe20586566f43edcb7b950b953362032',
-  '微纳核芯投资提案 -东阳基金(2).pdf': 'dfc08421503e549718f9a8c056716d121f12aa7687a411a4d8fe23a6a5a2a174',
-  '微纳核芯投资提案 -众创基金(3).pdf': '18c114ab79279db7f9efc45a623ca9c502664ba97b52987f54502fdc0a7478dc',
-  '关于宁波赛智具身股权投资合伙企业（有限合伙）对北京中数睿智科技有限公司实施股权投资的提案(1).pdf':
-    'f0e01d2016ebebe925d61405c2fbb272993af023964045bd5ed1ad7e9a3373f7',
-  '德塔智能投资提案.pdf': '1ca7df95a1ba50e633fac56d041ec29d28c93aff49ad13d1131d81d17839f2ad',
-  '蓝成应急投资提案(1).pdf': '3905bc12a9d1794d7ee77882f77a7150d5c365d7c4bb657da98c76df3cd49fa5',
+  'primary-layout-authority.docx': '0686dc7cd3bc3f098f6d046239c84ae885e1df03bf8719057e8688a14ec90385',
+  'secondary-layout-authority.docx': '2693a3836cfc25ea3ef848c35678a5b4b583b02b3b7b9ece1182cf52654d93c8',
 }
 
 const section = (
@@ -257,15 +249,6 @@ function textFromXml(xml: string) {
   return [...xml.matchAll(/<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>/g)]
     .map((match) => decodeXmlText(match[1]))
     .join('')
-    .trim()
-}
-
-function normalizedHeading(value: string) {
-  return value
-    .replace(/\s+/g, '')
-    .replace(/^[一二三四五六七八九十]+[、.．]\s*/, '')
-    .replace(/^[（(][一二三四五六七八九十]+[）)]\s*/, '')
-    .replace(/^[0-9]+(?:\.[0-9]+)*[、.．]?\s*/, '')
     .trim()
 }
 
@@ -400,19 +383,8 @@ function validateParsedTemplates(templates: ParsedInvestmentProposalTemplate[]) 
     if (!template.docx?.headerText) issues.push(`${template.fileName} 缺少模板页眉`)
     if (!template.docx?.hasPageField) issues.push(`${template.fileName} 缺少页码字段`)
   })
-  const corpusHeadings = templates.flatMap((template) => template.headings).map(normalizedHeading)
-  ;[
-    '基本情况简介',
-    '交易条件',
-    '公司业务计划',
-    '项目亮点总结',
-    '风险提示与对策',
-    '结论',
-  ].forEach((required) => {
-    if (!corpusHeadings.some((heading) => heading.includes(required) || required.includes(heading))) {
-      issues.push(`模板语料未解析出稳定章节：${required}`)
-    }
-  })
+  // 当前 Skill 的章节树由 core-standard.md 与代码 Blueprint 共同锁定；
+  // 两份 DOCX 只承担版式权威，不再从历史样本文本反推章节契约。
   if (!templates.some((template) => template.textSample.includes('各位投资决策委员会成员：'))) {
     issues.push('模板语料未解析出固定投委会称谓')
   }
@@ -430,14 +402,11 @@ let cachedBlueprint: {
 } | undefined
 
 export async function loadInvestmentProposalBlueprint(
-  template: Pick<AiTemplateDefinition, 'templateVersion' | 'referencePath' | 'referencePaths' | 'disclaimer'>,
+  template: Pick<AiTemplateDefinition, 'templateVersion' | 'referencePath' | 'referencePaths' | 'coreRulesPath' | 'disclaimer'>,
 ) {
   const referencePaths = [...new Set([template.referencePath, ...(template.referencePaths ?? [])])]
-  const coreStandardPath = path.resolve(
-    path.dirname(template.referencePath),
-    '..',
-    '投资提案模板分析',
-    '投资提案模板核心规范.md',
+  const coreStandardPath = template.coreRulesPath ?? path.resolve(
+    path.dirname(template.referencePath), 'references', 'core-standard.md',
   )
   const stats = await Promise.all([...referencePaths, coreStandardPath].map(async (referencePath) => {
     const fileStat = await stat(referencePath)
@@ -458,28 +427,17 @@ export async function loadInvestmentProposalBlueprint(
   const coreStandardSha256 = createHash('sha256').update(coreStandard).digest('hex')
   const coreRequiredRules = [
     '用户本次明确输入',
-    '文档主标题 | 黑体 | 16pt',
-    '正文行距 | 固定值 24pt',
-    '不设置独立封面',
-    '一、基本情况简介',
-    '六、结论',
-    '用户补充内容单独标注为“用户补充输入”',
-    '当前项目资料库是主要事实来源',
-    '你是投资中台的资深投资经理',
+    '主标题 | 黑体，16 pt',
+    '行距 | 固定值 24 pt',
+    '不创建独立封面或模板外目录',
+    '六个一级章、十一个二级节，共 17 个节点',
+    'Skill 自带的主要版式权威',
     '当前会话绑定',
-    '本地项目资料库优先，网络补全为辅，补全结果缓存复用',
+    '默认先检索本地资料，再复用网络补全缓存',
     '只联网搜索',
-    '不得一开始就发起宽泛的全网搜索',
+    '不得一开始就进行宽泛的全网搜索',
     '不恢复或依赖 SearXNG',
-    '进入初筛',
-    '继续跟踪',
-    '申请立项',
-    '启动尽调',
-    '提请上会',
-    '提交投决',
-    '暂缓推进',
-    '归档',
-    '正文末尾不增加“免责声明”或“引用资料”板块',
+    '正文末尾不增加`免责声明`或`引用资料`板块',
     '访谈、聊天记录和会议转录必须先转写为正式事实',
     '短标签：正文',
   ]

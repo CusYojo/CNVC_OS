@@ -1243,7 +1243,7 @@ async function main() {
       `${type} 已应用公司模板可复用部件`,
       result.templateApplied
         && (type === 'investment_proposal'
-          ? result.templateCorpus.length === 9
+          ? result.templateCorpus.length === (template.referencePaths?.length ?? 0)
           : type === 'due_diligence_report'
             ? result.templateCorpus.length === (template.referencePaths?.length ?? 0)
             : result.templateParts.length > 0)
@@ -1293,8 +1293,8 @@ async function main() {
       )
       assert(
         checks,
-        'AI-008 全部九份模板进入生成元数据',
-        result.templateCorpus.length === 9,
+        'AI-008 Skill 自带两份版式权威进入生成元数据',
+        result.templateCorpus.length === 2,
         `${result.templateCorpus.length} 份`,
       )
     }

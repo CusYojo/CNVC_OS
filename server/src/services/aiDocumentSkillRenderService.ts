@@ -76,8 +76,8 @@ export async function renderInvestmentProposalWithSkill(input: {
   payload: Record<string, unknown>
 }) {
   const skillDirectory = getAiSkillDirectory('draft-investment-proposal')
-  const processor = path.join(skillDirectory, 'scripts', 'deta_ic_processor.py')
-  const template = path.join(skillDirectory, 'assets', '德塔式精简工商字段投资提案_固定模板V7.docx')
+  const processor = path.join(skillDirectory, 'scripts', 'proposal_processor.py')
+  const template = path.join(skillDirectory, 'assets', 'primary-layout-authority.docx')
   const workDirectory = path.join(path.dirname(input.outputPath), '.draft-investment-proposal-render')
   const payloadPath = path.join(workDirectory, 'proposal.json')
   const manifestPath = path.join(workDirectory, 'render-manifest.json')
@@ -96,7 +96,7 @@ export async function renderInvestmentProposalWithSkill(input: {
       '--output', input.outputPath,
       '--manifest', manifestPath,
     ],
-    label: 'draft-investment-proposal V7 模板渲染',
+    label: 'draft-investment-proposal Skill 模板渲染',
   })
   await assertFile(input.outputPath)
   const output = await readFile(input.outputPath)
@@ -106,7 +106,7 @@ export async function renderInvestmentProposalWithSkill(input: {
     templateApplied: true,
     templateEnforced: manifest.template_enforced === true,
     rendererMode: manifest.renderer_mode,
-    formatter: 'draft-investment-proposal-v7',
+    formatter: 'draft-investment-proposal-skill-native-v2',
     skillTemplatePath: template,
     skillTemplateSha256: manifest.template_sha256,
     documentSha256: manifest.docx_sha256,
@@ -274,7 +274,7 @@ export async function renderComplianceStatementWithSkill(input: {
 }) {
   const skillDirectory = getAiSkillDirectory('generate-investment-compliance-note')
   const processor = path.join(skillDirectory, 'scripts', 'compliance_processor.py')
-  const template = path.join(skillDirectory, 'assets', 'reference.docx')
+  const template = path.join(skillDirectory, 'assets', 'compliance-layout-authority.docx')
   const workDirectory = path.join(path.dirname(input.outputPath), '.generate-investment-compliance-note-render')
   const contentPath = path.join(workDirectory, 'content.json')
   const verifyPath = path.join(workDirectory, 'qa.json')
@@ -309,8 +309,8 @@ export async function renderComplianceStatementWithSkill(input: {
     pageIntent: 'brief',
     templateApplied: true,
     templateEnforced: true,
-    rendererMode: 'clone-retained-docx',
-    formatter: 'generate-investment-compliance-note-v1',
+    rendererMode: 'skill-native-docx',
+    formatter: 'generate-investment-compliance-note-skill-native-v2',
     skillTemplatePath: template,
     skillTemplateSha256: createHash('sha256').update(templateBuffer).digest('hex'),
     templateSha256: createHash('sha256').update(templateBuffer).digest('hex'),

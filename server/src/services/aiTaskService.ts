@@ -1328,7 +1328,7 @@ function assessBusinessDocumentTemplateFidelity(input: {
   if (input.type === 'investment_proposal') {
     if (
       input.generationMetadata.templateEnforced === true
-      && input.generationMetadata.rendererMode === 'clone-approved-docx'
+      && input.generationMetadata.rendererMode === 'skill-native-docx'
     ) {
       return assessTemplateFidelity({ dimensions: {
         structure: [
@@ -1336,12 +1336,12 @@ function assessBusinessDocumentTemplateFidelity(input: {
           fidelityCheck('content-review', contentAuditPassed, true),
         ],
         typography: [
-          fidelityCheck('skill-v7-typography', true, true),
+          fidelityCheck('skill-native-typography', true, true),
           fidelityCheck('cjk-font', metadataFlag(quality, 'cjkFontValidated')),
         ],
         layout: [
-          fidelityCheck('approved-v7-template-enforced', true, true),
-          fidelityCheck('clone-approved-docx', true, true),
+          fidelityCheck('skill-layout-authority-enforced', true, true),
+          fidelityCheck('skill-native-docx', true, true),
         ],
         tables: [
           fidelityCheck('editable-native-tables', Number(quality.tableCount ?? -1) === expectedTableCount, true),
@@ -1577,12 +1577,12 @@ async function executeTask(taskId: string) {
         : undefined
     let complianceBlueprint: ComplianceDocumentBlueprint | undefined
     if (task.type === 'compliance_statement') {
-      await updateStage(taskId, '加载 sbl-investment-compliance Deta 3 模板', 6)
+      await updateStage(taskId, '加载 generate-investment-compliance-note Skill', 6)
       complianceBlueprint = await parseComplianceDocumentBlueprint(template)
     }
     let proposalBlueprint: InvestmentProposalDocumentBlueprint | undefined
     if (task.type === 'investment_proposal') {
-      await updateStage(taskId, '加载 sbl-investment-proposal V7 模板与内容规范', 6)
+      await updateStage(taskId, '加载 draft-investment-proposal Skill 与内容规范', 6)
       proposalBlueprint = await loadInvestmentProposalBlueprint(template)
     }
     let qaTemplateProfile: QaTemplateProfile | undefined
@@ -2479,9 +2479,9 @@ async function executeTask(taskId: string) {
           ? '先生成图片高保真版，再继续生成可编辑版'
           : '生成可编辑 PPTX'
         : task.type === 'compliance_statement'
-          ? 'sbl-investment-compliance 按 Deta 3 模板生成 Word'
+          ? 'generate-investment-compliance-note 生成并校验 Word'
           : task.type === 'investment_proposal'
-            ? 'sbl-investment-proposal 克隆 V7 模板生成 Word'
+            ? 'draft-investment-proposal 生成并校验 Word'
           : task.type === 'due_diligence_report'
             ? 'draft-due-diligence-report 按 V5 模板生成并校验 Word'
           : '生成 DOCX',

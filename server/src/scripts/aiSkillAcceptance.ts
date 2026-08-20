@@ -287,19 +287,15 @@ async function main() {
     path.join(root, 'draft-investment-proposal', 'references', 'template-profile.md'),
     'utf8',
   )
-  const proposalCanonicalSpec = await readFile(
-    path.resolve(process.cwd(), 'docs', '投资提案模板分析', '投资提案模板核心规范.md'),
-    'utf8',
-  )
   const proposalCoreSpec = await readFile(
     path.join(root, 'draft-investment-proposal', 'references', 'core-standard.md'),
     'utf8',
   )
   assert(
-    'AI-008 登记 docs/投资提案 全部九份模板',
-    proposalTemplate.referencePaths?.length === 9
+    'AI-008 只登记 Skill 自带的两份当前版式权威',
+    proposalTemplate.referencePaths?.length === 2
       && proposalTemplate.referencePaths.every((referencePath) =>
-        referencePath.includes(`${path.sep}docs${path.sep}投资提案${path.sep}`)
+        referencePath.includes(`${path.sep}draft-investment-proposal${path.sep}assets${path.sep}`)
           && existsSync(referencePath)),
     `${proposalTemplate.referencePaths?.length ?? 0} 份`,
   )
@@ -308,10 +304,10 @@ async function main() {
       createHash('sha256').update(await readFile(referencePath)).digest('hex')),
   )
   assert(
-    'AI-008 九份模板指纹与模板画像一致',
-    proposalTemplateHashes.length === 9
+    'AI-008 两份版式权威指纹与 Skill 模板画像一致',
+    proposalTemplateHashes.length === 2
       && proposalTemplateHashes.every((hash) => proposalProfile.includes(hash)),
-    `${proposalTemplateHashes.length} 份模板 SHA-256`,
+    `${proposalTemplateHashes.length} 份版式权威 SHA-256`,
   )
   assert(
     'AI-008 运行时加载核心规范、模板画像与生成契约',
@@ -324,44 +320,22 @@ async function main() {
     proposalSkill.referenceNames.join('、'),
   )
   assert(
-    'AI-008 核心规范来源指纹和关键规则已固化',
-    createHash('sha256').update(proposalCanonicalSpec).digest('hex')
-        === 'ee3fdb2ebb9b2f67f254334be4e9d85a2d66141e3786b4e56df53602d0a47ee5'
-      && proposalCoreSpec.includes('ee3fdb2ebb9b2f67f254334be4e9d85a2d66141e3786b4e56df53602d0a47ee5')
-      && [
-        '你是投资中台的资深投资经理',
+    'AI-008 Skill 当前核心规范和关键规则已固化',
+    [
         '当前会话绑定',
-        '线索池',
-        '进入初筛',
-        '继续跟踪',
-        '申请立项',
-        '启动尽调',
-        '提请上会',
-        '提交投决',
-        '暂缓推进',
-        '归档',
         '用户本次明确输入',
-        '文档主标题 | 黑体 | 16pt',
-        '正文行距 | 固定值 24pt',
-        '不设置独立封面',
-        '四、项目亮点总结',
-        '五、风险提示与对策',
-        '六、结论',
-        '本地项目资料库优先，网络补全为辅，补全结果缓存复用',
+        'Skill 自带的主要版式权威',
+        '主标题 | 黑体，16 pt',
+        '行距 | 固定值 24 pt',
+        '不创建独立封面',
+        '默认先检索本地资料，再复用网络补全缓存',
         '只联网搜索',
-        '不得一开始就发起宽泛的全网搜索',
+        '不得一开始就进行宽泛的全网搜索',
         '不恢复或依赖 SearXNG',
-        '正文末尾不增加“免责声明”或“引用资料”板块',
+        '正文末尾不增加`免责声明`或`引用资料`板块',
         '受限初稿',
-      ].every((term) => proposalCanonicalSpec.includes(term))
-      && [
-        '标准 17 节',
-        '16 pt',
-        '固定值 24 pt',
-        '用户本次明确输入',
-        '不创建独立封面或模板外目录',
       ].every((term) => proposalCoreSpec.includes(term)),
-    '核心规范 SHA-256、资深投资经理角色、阶段建议、17 节结构与版式规则',
+    'Skill 原生版式权威、17 节结构、取证顺序与版式规则',
   )
   assert(
     'AI-008 默认本地优先、进程内发现、LLM Gateway 页面核验并缓存复用',

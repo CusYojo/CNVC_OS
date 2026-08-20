@@ -3135,7 +3135,11 @@ Skill 版本：${input.skill.version}
     ? '无；投资建议书快捷任务禁止读取 docs 或上传模板，仅使用 GordenSuperPPTSkill'
     : usesUploadedTemplate
       ? '用户本次上传模板（作为结构与视觉唯一权威，文件名不得作为项目事实）'
-      : `${input.type === 'investment_proposal' ? 'docs/投资提案' : 'docs'} 中的 ${templateFiles}`}
+      : input.type === 'investment_proposal'
+        ? `draft-investment-proposal Skill 自带版式权威：${templateFiles}`
+        : input.type === 'compliance_statement'
+          ? `generate-investment-compliance-note Skill 自带版式权威：${templateFiles}`
+          : `当前 Skill 登记的版式权威：${templateFiles}`}
 ${input.type === 'investment_recommendation_ppt'
     ? '用户文件和聊天信息只作为当前项目事实来源；不得提取或借鉴其中的模板结构、版式和示例正文。'
     : '模板只规定章节、版式和表达结构；模板内示例项目正文不是当前项目证据，严禁复制或改写为当前项目事实。'}

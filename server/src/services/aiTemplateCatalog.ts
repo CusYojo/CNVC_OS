@@ -44,15 +44,16 @@ export type AiTemplateDefinition = {
 }
 
 const docsPath = (...segments: string[]) => path.resolve(process.cwd(), 'docs', ...segments)
-const qaSkillPath = (...segments: string[]) => path.resolve(
+const skillPath = (skillName: string, ...segments: string[]) => path.resolve(
   process.cwd(),
   'server',
   'workspace',
   '.agents',
   'skills',
-  'draft-investment-qa',
+  skillName,
   ...segments,
 )
+const qaSkillPath = (...segments: string[]) => skillPath('draft-investment-qa', ...segments)
 
 function docsTemplatePaths(directoryName: string) {
   const directoryPath = docsPath(directoryName)
@@ -84,11 +85,18 @@ export const AI_TEMPLATE_CATALOG: Record<AiBusinessTaskType, AiTemplateDefinitio
     label: '合规性说明',
     description: '依据项目资料及基金投资约束生成合规性说明初稿',
     outputFormat: 'docx',
-    templateVersion: 'compliance-corpus-20260804-v5-project-study-template-fidelity',
-    referencePath: docsPath('合规性说明', '关于德塔智能项目投资合规性的说明_20260701.docx'),
+    templateVersion: 'generate-investment-compliance-note-20260820-v2-skill-native',
+    referencePath: skillPath(
+      'generate-investment-compliance-note',
+      'assets',
+      'compliance-layout-authority.docx',
+    ),
     referencePaths: [
-      docsPath('合规性说明', '关于德塔智能项目投资合规性的说明_20260701.docx'),
-      docsPath('合规性说明', '20260615-蓝成合规性说明（初稿）V2-甬元改.docx'),
+      skillPath(
+        'generate-investment-compliance-note',
+        'assets',
+        'compliance-layout-authority.docx',
+      ),
     ],
     editableLevel: 'text-and-structure',
     sections: ['公司情况介绍', '公司简介', '核心团队', '产品及技术', '投资理由', '投资计划', '投资情形分析', '结论'],
@@ -101,19 +109,17 @@ export const AI_TEMPLATE_CATALOG: Record<AiBusinessTaskType, AiTemplateDefinitio
     label: '投资提案',
     description: '由资深投资经理研读当前项目资料并按公司标准模板生成内部投资提案',
     outputFormat: 'docx',
-    templateVersion: 'proposal-corpus-20260804-v10-project-study-template-fidelity',
-    referencePath: docsPath('投资提案', '佳量脑科学项目投资提案0622(1).docx'),
+    templateVersion: 'draft-investment-proposal-20260820-v2-skill-native',
+    referencePath: skillPath(
+      'draft-investment-proposal',
+      'assets',
+      'primary-layout-authority.docx',
+    ),
     referencePaths: [
-      docsPath('投资提案', '佳量脑科学项目投资提案0622(1).docx'),
-      docsPath('投资提案', '1.众创叁期对飞阔科技的投资提案(1).docx'),
-      docsPath('投资提案', '1. 轻蜓光电投资提案(1).pdf'),
-      docsPath('投资提案', '1. 普雷赛斯投资提案(1).pdf'),
-      docsPath('投资提案', '微纳核芯投资提案 -东阳基金(2).pdf'),
-      docsPath('投资提案', '微纳核芯投资提案 -众创基金(3).pdf'),
-      docsPath('投资提案', '关于宁波赛智具身股权投资合伙企业（有限合伙）对北京中数睿智科技有限公司实施股权投资的提案(1).pdf'),
-      docsPath('投资提案', '德塔智能投资提案.pdf'),
-      docsPath('投资提案', '蓝成应急投资提案(1).pdf'),
+      skillPath('draft-investment-proposal', 'assets', 'primary-layout-authority.docx'),
+      skillPath('draft-investment-proposal', 'assets', 'secondary-layout-authority.docx'),
     ],
+    coreRulesPath: skillPath('draft-investment-proposal', 'references', 'core-standard.md'),
     editableLevel: 'text-and-structure',
     sections: INVESTMENT_PROPOSAL_SECTION_TITLES,
     requiredParameters: ['projectId', 'sourceCutoffDate', 'audience', 'length'],

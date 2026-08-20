@@ -1,6 +1,6 @@
 # Retained DOCX template contract
 
-- Reference: `assets/reference.docx` in the `generate-investment-compliance-note` Skill directory.
+- Reference: `assets/compliance-layout-authority.docx` in the `generate-investment-compliance-note` Skill directory.
 - Canonical source SHA-256: `946037c5e23ba01d3d2fa482c5ef850be18c77300b214a0b05844a644387336e`
 - Reference render: 7 A4 pages when Chinese font aliases are correctly resolved; 1 section; 35 non-empty body paragraphs; no tables, visible headers, visible footers, drawings, or content controls.
 - Page geometry: A4 portrait, 8.27 × 11.69 in; margins L/R 2.8 cm, T/B 2.5 cm; one column; no different-first/even-odd header behaviour.

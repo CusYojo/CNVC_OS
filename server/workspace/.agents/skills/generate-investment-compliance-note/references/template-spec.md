@@ -2,12 +2,12 @@
 
 ## 1. 规范权威
 
-唯一权威文件：
+权威文件均位于当前 Skill 内：
 
-- `docs/合规性说明/合规性说明模板核心规范.md`
-- SHA-256：`444c9204e1b547f8a12dbb1497c190d606d78d34d6ab3ed4ec9386cfca4026cd`
+- `references/template-spec.md`：结构、内容职责和样式令牌权威。
+- `assets/compliance-layout-authority.docx`：可编辑 Word 版式权威，SHA-256 为 `946037c5e23ba01d3d2fa482c5ef850be18c77300b214a0b05844a644387336e`。
 
-Blueprint、Formatter 和 Reviewer 均以该核心规范为准。其他文件或历史产物不得改变其结构、内容职责和样式令牌。
+Blueprint、Formatter 和 Reviewer 均以这两项当前 Skill 契约为准。仓库外文件或历史产物不得改变其结构、内容职责和样式令牌。
 
 ## 2. 固定 Blueprint
 
@@ -15,14 +15,14 @@ Blueprint、Formatter 和 Reviewer 均以该核心规范为准。其他文件或
 {
   "kind": "compliance-statement",
   "version": 2,
-  "authority": "docs/合规性说明/合规性说明模板核心规范.md",
+  "authority": "generate-investment-compliance-note/references/template-spec.md",
   "page": {
     "widthDxa": 11906,
     "heightDxa": 16838,
-    "marginTopDxa": 1440,
-    "marginRightDxa": 1800,
-    "marginBottomDxa": 1440,
-    "marginLeftDxa": 1800,
+    "marginTopDxa": 1417,
+    "marginRightDxa": 1587,
+    "marginBottomDxa": 1417,
+    "marginLeftDxa": 1587,
     "headerDistanceDxa": 851,
     "footerDistanceDxa": 992,
     "sectionCount": 1

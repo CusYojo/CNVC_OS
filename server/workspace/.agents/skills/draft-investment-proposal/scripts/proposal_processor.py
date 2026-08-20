@@ -33,8 +33,8 @@ from docx.shared import Cm, Pt, RGBColor, Twips
 
 ROOT = Path(__file__).resolve().parent
 DEFAULT_NATIVE_TOOL = ROOT / "vc_native_tools.py"
-TEMPLATE_FILENAME = "德塔式精简工商字段投资提案_固定模板V7.docx"
-APPROVED_TEMPLATE_SHA256 = "849a6e1ec86c9576f52332ffbf8dc048dea5d929daa438810f701c4e2116da15"
+TEMPLATE_FILENAME = "primary-layout-authority.docx"
+APPROVED_TEMPLATE_SHA256 = "0686dc7cd3bc3f098f6d046239c84ae885e1df03bf8719057e8688a14ec90385"
 DEFAULT_TEMPLATE = ROOT.parent / "assets" / TEMPLATE_FILENAME
 
 
@@ -211,13 +211,16 @@ SECTION_COVERAGE_RULES = {
     "（五）运营摘要": {"label": "运营摘要", "min_dimensions": 3, "min_paragraphs": 3},
     "（一）投资亮点": {"label": "投资亮点", "min_dimensions": 4, "min_paragraphs": 4},
 }
-BODY_FONT = "宋体"
+BODY_FONT = "仿宋"
 HEADING_FONT = "黑体"
-PAGE_WIDTH_CM = 16.2
-PAGE_HEIGHT_CM = 21.0
-PAGE_MARGIN_VERTICAL_CM = 1.5
-PAGE_MARGIN_HORIZONTAL_CM = 1.8
-AVAILABLE_TABLE_WIDTH_DXA = 7140
+LEVEL2_FONT = "楷体"
+PAGE_WIDTH_CM = 21.0
+PAGE_HEIGHT_CM = 29.7
+PAGE_MARGIN_TOP_CM = 2.54
+PAGE_MARGIN_RIGHT_CM = 3.17
+PAGE_MARGIN_BOTTOM_CM = 2.64
+PAGE_MARGIN_LEFT_CM = 3.17
+AVAILABLE_TABLE_WIDTH_DXA = 8306
 TABLE_HEADER_FONT_SIZE = 9.5
 TABLE_BODY_FONT_SIZE = 9.0
 
@@ -818,26 +821,26 @@ def configure_document(doc: Document) -> None:
     section = doc.sections[0]
     section.page_width = Cm(PAGE_WIDTH_CM)
     section.page_height = Cm(PAGE_HEIGHT_CM)
-    section.top_margin = Cm(PAGE_MARGIN_VERTICAL_CM)
-    section.bottom_margin = Cm(PAGE_MARGIN_VERTICAL_CM)
-    section.left_margin = Cm(PAGE_MARGIN_HORIZONTAL_CM)
-    section.right_margin = Cm(PAGE_MARGIN_HORIZONTAL_CM)
-    section.header_distance = Cm(0.5)
-    section.footer_distance = Cm(0.5)
+    section.top_margin = Cm(PAGE_MARGIN_TOP_CM)
+    section.right_margin = Cm(PAGE_MARGIN_RIGHT_CM)
+    section.bottom_margin = Cm(PAGE_MARGIN_BOTTOM_CM)
+    section.left_margin = Cm(PAGE_MARGIN_LEFT_CM)
+    section.header_distance = Cm(1.5)
+    section.footer_distance = Cm(1.75)
     normal = doc.styles["Normal"]
     normal.font.name = BODY_FONT
-    normal.font.size = Pt(10.5)
-    normal.paragraph_format.first_line_indent = Pt(21)
-    normal.paragraph_format.line_spacing = 1.4
-    normal.paragraph_format.space_after = Pt(3.5)
-    for style_name, size, before, after in (
-        ("Heading 1", 14, 12, 6),
-        ("Heading 2", 12, 8, 4),
+    normal.font.size = Pt(12)
+    normal.paragraph_format.first_line_indent = Pt(24)
+    normal.paragraph_format.line_spacing = Pt(24)
+    normal.paragraph_format.space_after = Pt(0)
+    for style_name, font_name in (
+        ("Heading 1", HEADING_FONT),
+        ("Heading 2", LEVEL2_FONT),
     ):
         style = doc.styles[style_name]
-        style.font.name = HEADING_FONT
-        style.font.size = Pt(size)
-        style.font.bold = True
+        style.font.name = font_name
+        style.font.size = Pt(14)
+        style.font.bold = style_name == "Heading 1"
         style.font.color.rgb = RGBColor(0, 0, 0)
         rpr = style._element.get_or_add_rPr()
         rfonts = rpr.rFonts
@@ -845,11 +848,11 @@ def configure_document(doc: Document) -> None:
             rfonts = OxmlElement("w:rFonts")
             rpr.insert(0, rfonts)
         for attr in ("ascii", "hAnsi", "eastAsia", "cs"):
-            rfonts.set(qn(f"w:{attr}"), HEADING_FONT)
+            rfonts.set(qn(f"w:{attr}"), font_name)
         style.paragraph_format.first_line_indent = Pt(0)
-        style.paragraph_format.line_spacing = 1.2
-        style.paragraph_format.space_before = Pt(before)
-        style.paragraph_format.space_after = Pt(after)
+        style.paragraph_format.line_spacing = Pt(24)
+        style.paragraph_format.space_before = Pt(0)
+        style.paragraph_format.space_after = Pt(0)
         style.paragraph_format.keep_with_next = True
     footer_p = section.footer.paragraphs[0]
     footer_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -858,13 +861,13 @@ def configure_document(doc: Document) -> None:
         add_page_field(footer_p)
 
 
-def add_paragraph(doc: Document, text: str, *, bold=False, align=None, size=10.5,
+def add_paragraph(doc: Document, text: str, *, bold=False, align=None, size=12,
                   indent=True, keep_next=False, page_break=False) -> None:
     p = doc.add_paragraph()
     p.alignment = align
-    p.paragraph_format.line_spacing = 1.4
-    p.paragraph_format.space_after = Pt(3.5)
-    p.paragraph_format.first_line_indent = Pt(21) if indent else Pt(0)
+    p.paragraph_format.line_spacing = Pt(24)
+    p.paragraph_format.space_after = Pt(0)
+    p.paragraph_format.first_line_indent = Pt(24) if indent else Pt(0)
     p.paragraph_format.keep_together = True
     p.paragraph_format.keep_with_next = keep_next
     p.paragraph_format.page_break_before = page_break
@@ -1044,7 +1047,7 @@ def render_proposal(
         p.paragraph_format.space_after = Pt(6 if index == 0 else 18)
         p.paragraph_format.keep_with_next = index == 0
         run = p.add_run(line)
-        set_run_font(run, HEADING_FONT, 17, True)
+        set_run_font(run, HEADING_FONT, 16, True)
     if meta.get("salutation"):
         add_paragraph(doc, meta["salutation"], bold=True, indent=False)
     for text in meta.get("intro_paragraphs", []):
@@ -1110,7 +1113,7 @@ def command_render(args: argparse.Namespace) -> None:
         "template": str(template),
         "template_sha256": template_sha256,
         "template_enforced": True,
-        "renderer_mode": "clone-approved-docx",
+        "renderer_mode": "skill-native-docx",
         "audit": str(artifacts / "processor_audit.json"),
         "external_llm_gateway": False,
         "rendered_at": datetime.now().astimezone().isoformat(timespec="seconds"),
@@ -1195,7 +1198,7 @@ end run
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Deta-style evidence-driven IC processor")
+    parser = argparse.ArgumentParser(description="draft-investment-proposal Skill-native DOCX processor")
     sub = parser.add_subparsers(dest="command", required=True)
     p_init = sub.add_parser("init", help="lock an input archive and prepare model packets")
     p_init.add_argument("--input", required=True)

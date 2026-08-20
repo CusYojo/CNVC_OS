@@ -7,13 +7,13 @@ import test from 'node:test'
 import { getAiSkillDirectory } from '../src/services/aiSkillService.js'
 import { validateInvestmentProposalWithSkill } from '../src/services/aiInvestmentProposalSkillRuntimeService.js'
 
-const TEMPLATE_NAME = '德塔式精简工商字段投资提案_固定模板V7.docx'
+const TEMPLATE_NAME = 'primary-layout-authority.docx'
 
 function sha256(value: Buffer) {
   return createHash('sha256').update(value).digest('hex')
 }
 
-test('investment proposal validates the active Deta V7 Skill manifest instead of legacy A4 rules', async () => {
+test('investment proposal validates the current Skill-owned render manifest', async () => {
   const directory = await mkdtemp(path.join(tmpdir(), 'proposal-skill-validation-'))
   try {
     const renderDirectory = path.join(directory, '.draft-investment-proposal-render')
@@ -32,7 +32,7 @@ test('investment proposal validates the active Deta V7 Skill manifest instead of
     ])
     await writeFile(manifestPath, JSON.stringify({
       status: 'rendered',
-      workflow: 'SBL_APP_SKILL_TEMPLATE_RENDER_V1',
+      workflow: 'DRAFT_INVESTMENT_PROPOSAL_SKILL_RENDER_V2',
       docx: documentPath,
       docx_sha256: sha256(document),
       payload: payloadPath,
@@ -40,7 +40,7 @@ test('investment proposal validates the active Deta V7 Skill manifest instead of
       template: templatePath,
       template_sha256: sha256(template),
       template_enforced: true,
-      renderer_mode: 'clone-approved-docx',
+      renderer_mode: 'skill-native-docx',
       external_llm_gateway: false,
     }), 'utf8')
 
@@ -53,7 +53,7 @@ test('investment proposal validates the active Deta V7 Skill manifest instead of
   }
 })
 
-test('investment proposal rejects a Deta V7 Skill manifest when the document hash drifts', async () => {
+test('investment proposal rejects a current Skill manifest when the document hash drifts', async () => {
   const directory = await mkdtemp(path.join(tmpdir(), 'proposal-skill-validation-'))
   try {
     const renderDirectory = path.join(directory, '.draft-investment-proposal-render')
@@ -68,7 +68,7 @@ test('investment proposal rejects a Deta V7 Skill manifest when the document has
     const [payload, template] = await Promise.all([readFile(payloadPath), readFile(templatePath)])
     await writeFile(manifestPath, JSON.stringify({
       status: 'rendered',
-      workflow: 'SBL_APP_SKILL_TEMPLATE_RENDER_V1',
+      workflow: 'DRAFT_INVESTMENT_PROPOSAL_SKILL_RENDER_V2',
       docx: documentPath,
       docx_sha256: '0'.repeat(64),
       payload: payloadPath,
@@ -76,7 +76,7 @@ test('investment proposal rejects a Deta V7 Skill manifest when the document has
       template: templatePath,
       template_sha256: sha256(template),
       template_enforced: true,
-      renderer_mode: 'clone-approved-docx',
+      renderer_mode: 'skill-native-docx',
       external_llm_gateway: false,
     }), 'utf8')
 

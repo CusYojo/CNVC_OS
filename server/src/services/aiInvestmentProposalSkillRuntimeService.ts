@@ -4,8 +4,8 @@ import path from 'node:path'
 import { getAiSkillDirectory } from './aiSkillService.js'
 import { execFileSupervised as execFileAsync } from '../runtime/supervisedProcessService.js'
 const SKILL_NAME = 'draft-investment-proposal' as const
-const SKILL_TEMPLATE_FILE = '德塔式精简工商字段投资提案_固定模板V7.docx'
-const SKILL_TEMPLATE_SHA256 = '849a6e1ec86c9576f52332ffbf8dc048dea5d929daa438810f701c4e2116da15'
+const SKILL_TEMPLATE_FILE = 'primary-layout-authority.docx'
+const SKILL_TEMPLATE_SHA256 = '0686dc7cd3bc3f098f6d046239c84ae885e1df03bf8719057e8688a14ec90385'
 
 type CaseStyleValidation = {
   passed: boolean
@@ -79,7 +79,7 @@ async function validateSkillTemplateRender(filePath: string) {
   }
   const checks = {
     status: manifest.status === 'rendered',
-    workflow: manifest.workflow === 'SBL_APP_SKILL_TEMPLATE_RENDER_V1',
+    workflow: manifest.workflow === 'DRAFT_INVESTMENT_PROPOSAL_SKILL_RENDER_V2',
     documentPath: path.resolve(String(manifest.docx ?? '')) === path.resolve(filePath),
     documentSha256: manifest.docx_sha256 === sha256(documentBuffer),
     payloadPath: path.resolve(String(manifest.payload ?? '')) === path.resolve(expectedPayload),
@@ -88,7 +88,7 @@ async function validateSkillTemplateRender(filePath: string) {
     templateSha256: manifest.template_sha256 === SKILL_TEMPLATE_SHA256
       && sha256(templateBuffer) === SKILL_TEMPLATE_SHA256,
     templateEnforced: manifest.template_enforced === true,
-    rendererMode: manifest.renderer_mode === 'clone-approved-docx',
+    rendererMode: manifest.renderer_mode === 'skill-native-docx',
     externalLlmGateway: manifest.external_llm_gateway === false,
   }
   const errors = Object.entries(checks)
@@ -111,7 +111,7 @@ async function validateSkillTemplateRender(filePath: string) {
       errors: [],
       style_counts: {},
       table_kinds: [],
-      profile: 'artifact-template-deta-v7',
+      profile: 'draft-investment-proposal-skill-native-v2',
       template_sha256: SKILL_TEMPLATE_SHA256,
       manifest_path: manifestPath,
     },
@@ -120,7 +120,7 @@ async function validateSkillTemplateRender(filePath: string) {
       errors: [],
       warnings: [],
       metrics: {
-        validationProfile: 'artifact-template-deta-v7',
+        validationProfile: 'draft-investment-proposal-skill-native-v2',
         rendererMode: manifest.renderer_mode,
       },
     },
@@ -175,11 +175,9 @@ async function runValidator<T>(python: string, script: string, args: string[], l
 }
 
 export async function validateInvestmentProposalWithSkill(filePath: string) {
-  // The installed Deta V7 Skill is the active visual authority for application
-  // tasks. Its small-page template intentionally differs from the legacy A4
-  // case-style assets retained by the host skill runtime. Validate the Skill's
-  // signed render manifest when present instead of applying mutually exclusive
-  // A4 geometry and style rules to a V7 document.
+  // The current Skill owns its template, renderer and signed manifest. Validate
+  // that provenance before running the fallback structural validators used for
+  // older artifacts that do not have a current Skill render manifest.
   const skillValidation = await validateSkillTemplateRender(filePath)
   if (skillValidation) return skillValidation
 
