@@ -384,7 +384,6 @@ async function renderEveryPage(input: {
 export async function generateProjectQaWithSkill(input: {
   outputPath: string
   markdownPath: string
-  visualDirectory: string
   projectName: string
   content: ProjectQaDocumentContent
   skill: LoadedAiSkill
@@ -394,7 +393,6 @@ export async function generateProjectQaWithSkill(input: {
       `快捷任务 Q&A 必须使用 ${REQUIRED_SKILL_NAME}，实际为 ${input.skill.name}`,
     )
   }
-  const depthMetrics = assertSkillContentReady(input.content)
   const skillDirectory = getAiSkillDirectory(REQUIRED_SKILL_NAME)
   const processorPath = path.join(skillDirectory, 'scripts', 'qa_report_processor.py')
   const python = await resolveDocumentSkillPython()
@@ -436,11 +434,10 @@ export async function generateProjectQaWithSkill(input: {
   }
   const skillArtifactsDirectory = path.join(path.dirname(input.outputPath), '.draft-investment-qa-render')
   const payloadPath = path.join(skillArtifactsDirectory, 'qa-content.json')
-  const verifyPath = path.join(skillArtifactsDirectory, 'qa-skill-verify.json')
   const bridge = path.resolve(process.cwd(), 'server', 'scripts', 'skill_document_bridge.py')
   await mkdir(skillArtifactsDirectory, { recursive: true })
   await writeFile(payloadPath, JSON.stringify(contentPayload, null, 2), 'utf8')
-  const skillValidation = await runDocumentSkillProcessor({
+  const renderManifest = await runDocumentSkillProcessor({
     python,
     args: [
       bridge,
@@ -449,14 +446,8 @@ export async function generateProjectQaWithSkill(input: {
       '--payload', payloadPath,
       '--artifacts', skillArtifactsDirectory,
       '--output', input.outputPath,
-      '--verify-out', verifyPath,
     ],
-    label: 'draft-investment-qa 德塔模板渲染与校验',
-  })
-  const visualQa = await renderEveryPage({
-    docxPath: input.outputPath,
-    visualDirectory: input.visualDirectory,
-    expectedMinimumPages: 1,
+    label: 'draft-investment-qa DOCX Formatter',
   })
   const buffer = await readFile(input.outputPath)
   return {
@@ -469,10 +460,10 @@ export async function generateProjectQaWithSkill(input: {
     frontDirectoryIncluded: false,
     templateEnforced: true,
     rendererMode: 'skill-deta-qa-pdf',
-    skillVerifyPassed: skillValidation.status === 'pass',
-    skillExecutionMode: 'skill-deta-content-rendered-and-verified',
-    depthMetrics,
-    markdownValidation: skillValidation,
-    visualQa,
+    skillExecutionMode: 'skill-deta-content-rendered',
+    acceptanceAuthority: 'agent-and-current-skill',
+    acceptanceDecision: 'accepted-on-agent-skill-completion',
+    programmaticBusinessAcceptance: false,
+    renderManifest,
   }
 }

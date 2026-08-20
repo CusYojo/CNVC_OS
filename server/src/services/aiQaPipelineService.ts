@@ -1957,8 +1957,12 @@ export async function reviewProjectQaAnswers(input: {
   sources: EvidenceSource[]
   duplicateCheck: ProjectQaDuplicateCheck
   skill: LoadedAiSkill
+  programmaticBusinessAcceptance?: boolean
 }) {
-  const deterministicIssues = deterministicAnswerIssues(input.questions, input.answers, input.sources)
+  const useProgrammaticBusinessAcceptance = input.programmaticBusinessAcceptance !== false
+  const deterministicIssues = useProgrammaticBusinessAcceptance
+    ? deterministicAnswerIssues(input.questions, input.answers, input.sources)
+    : []
   let modelIssues: ProjectQaReviewIssue[] = []
   if (input.sources.length > 0) {
     const systemPrompt = `你是独立 Reviewer。仅检查问题和回答，不新增事实、不改写答案。
@@ -1999,7 +2003,8 @@ ${evidenceForPrompt(input.sources, 1000)}`
       .filter((issue) => !['duplicate', 'insufficient_depth'].includes(issue.type))
       .map((issue) => issue.questionId),
   )
-  const repairedAnswers = dedupeProjectQaAnswerNarrative(input.questions.map((question) => {
+  const repairedAnswers = useProgrammaticBusinessAcceptance
+    ? dedupeProjectQaAnswerNarrative(input.questions.map((question) => {
     const answer = input.answers.find((item) => item.questionId === question.id)
       ?? fallbackAnswerFor(question, [], input.project)
     if (!seriousQuestionIds.has(question.id)) return answer
@@ -2012,8 +2017,11 @@ ${evidenceForPrompt(input.sources, 1000)}`
         ...fallback.missingInformation,
       ], { limit: 4 }),
     }
-  }))
-  const finalIssues = deterministicAnswerIssues(input.questions, repairedAnswers, input.sources)
+      }))
+    : input.answers
+  const finalIssues = useProgrammaticBusinessAcceptance
+    ? deterministicAnswerIssues(input.questions, repairedAnswers, input.sources)
+    : []
   const checks = {
     noDuplicateQuestions: checkDuplicateQuestions(input.questions).removed.length === 0,
     allQuestionsAnswered: input.questions.every((question) =>

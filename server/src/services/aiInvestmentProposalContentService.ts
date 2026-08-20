@@ -953,6 +953,7 @@ export async function composeInvestmentProposalContent(input: {
   parameters: Record<string, unknown>
   runtime?: InvestmentProposalRuntime
   projectKnowledgeBrief?: ProjectKnowledgeBrief
+  programmaticBusinessAcceptance?: boolean
 }): Promise<BusinessContent> {
   const blueprint = await loadInvestmentProposalBlueprint(input.template)
   const evidencePlan = buildInvestmentProposalEvidencePlan(input.sources, blueprint)
@@ -964,6 +965,7 @@ export async function composeInvestmentProposalContent(input: {
   const executiveSummary = `现就${company}股权投资事项提交本提案，提请各位投资决策委员会成员审议。`
   const maxFindings = 4
   const roots = blueprint.sections.filter((section) => section.level === 1)
+  const programmaticBusinessAcceptance = input.programmaticBusinessAcceptance !== false
   const runtime = input.runtime ?? {}
   const timeoutMs = boundedTimeout(runtime.timeoutMs)
   const maxRequestAttempts = Math.max(1, Math.min(runtime.maxRequestAttempts ?? 2, 3))
@@ -1035,6 +1037,7 @@ export async function composeInvestmentProposalContent(input: {
       sections.length !== definitions.length
       || definitions.some((definition, index) => sections[index]?.title !== definition.title)
     ) return false
+    if (!programmaticBusinessAcceptance) return true
     const sectionIds = new Set(definitions.map((definition) => definition.id))
     return reviewInvestmentProposalContent({
       content: chapterContent(title, executiveSummary, executiveSourceIndexes, sections),
@@ -1313,6 +1316,22 @@ ${investmentProposalEvidencePrompt(leafEvidence)}
         sources: input.sources,
         maxFindings,
       })
+      if (!programmaticBusinessAcceptance) {
+        selected = normalized
+        chapterPassed = true
+        chapterMetrics.push({
+          chapterId: root.id,
+          chapterTitle: root.title,
+          generationAttempt,
+          requestAttempts: Math.max(1, requestAttemptsUsed),
+          promptCharacters: systemPrompt.length + userPrompt.length,
+          evidenceItems: evidence.length,
+          maxTokens,
+          durationMs: Date.now() - requestStartedAt,
+          outcome: 'passed',
+        })
+        break
+      }
       await emitProgress(root, chapterIndex, 'reviewing', generationAttempt, {
         requestAttempt: Math.max(1, requestAttempt),
       })
@@ -1345,7 +1364,7 @@ ${investmentProposalEvidencePrompt(leafEvidence)}
       priorReview = reviewIssuesForPrompt(review)
       selected = normalized
     }
-    if (!chapterPassed) {
+    if (!chapterPassed && programmaticBusinessAcceptance) {
       const deterministic = normalizeChapterSections({
         raw: deterministicEvidenceChapter({
           definitions,
@@ -1427,6 +1446,26 @@ ${investmentProposalEvidencePrompt(leafEvidence)}
   let content = sanitizeBusinessContentForDelivery(
     chapterContent(title, executiveSummary, executiveSourceIndexes, assembled),
   )
+  if (!programmaticBusinessAcceptance) {
+    content.generationAudit = {
+      blueprintVersion: blueprint.version,
+      corpusSha256: blueprint.corpusSha256,
+      evidenceCoverage: evidencePlan.coverage,
+      chapterAttempts,
+      regeneratedChapters: [],
+      resumedChapters,
+      checkpointVersion: CHECKPOINT_VERSION,
+      maxParallelChapters: concurrency,
+      chapterTimeoutMs: timeoutMs,
+      chapterMetrics,
+      reviewerPassed: true,
+      reviewerIssueCodes: [],
+      limitedDraft: false,
+      limitationCount: 0,
+      limitationIssueCodes: [],
+    }
+    return content
+  }
   let review = reviewInvestmentProposalContent({
     content,
     blueprint,

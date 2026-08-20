@@ -1776,6 +1776,7 @@ export async function composeComplianceStatement(input: {
   sourceCutoffDate: string
   parameters: Record<string, unknown>
   projectKnowledgeBrief?: ProjectKnowledgeBrief
+  programmaticBusinessAcceptance?: boolean
 }): Promise<ComplianceWorkflowResult> {
   const evidencePackets = enrichComplianceEvidencePackets(
     buildComplianceEvidencePackets(input.sources),
@@ -1803,6 +1804,15 @@ export async function composeComplianceStatement(input: {
   }), input.sources)
   const reviewReports: ComplianceReviewReport[] = []
   let regenerationRounds = 0
+  if (input.programmaticBusinessAcceptance === false) {
+    return {
+      content,
+      evidencePackets,
+      reviewReports,
+      generationMode: 'chapter-by-chapter',
+      reviewerRegenerationRounds: regenerationRounds,
+    }
+  }
   for (let attempt = 1; attempt <= MAX_REVIEW_REGENERATION_ROUNDS + 1; attempt += 1) {
     const report = reviewComplianceContent({
       content,

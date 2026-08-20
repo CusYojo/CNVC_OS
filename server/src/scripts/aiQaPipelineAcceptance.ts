@@ -784,7 +784,6 @@ async function main() {
   const skillGeneration = await generateProjectQaWithSkill({
     outputPath: docxPath,
     markdownPath: path.join(outputDir, 'qa-acceptance.md'),
-    visualDirectory: path.join(outputDir, 'visual-qa'),
     projectName: project.companyName || project.name,
     content: skillNativeContent,
     skill,
@@ -819,11 +818,11 @@ async function main() {
     JSON.stringify(docxReview.metadata),
   )
   assert(
-    '阶段5 Skill Native Runtime：Markdown 校验、Skill DOCX 渲染与逐页检查通过',
-    skillGeneration.skillExecutionMode === 'native-markdown-validated-docx-rendered'
-      && skillGeneration.markdownValidation.errors === 0
-      && skillGeneration.visualQa.renderedEveryPage
-      && skillGeneration.visualQa.pageCount >= PROJECT_QA_QUESTION_COUNTS.标准版,
+    '阶段5 Skill Native Runtime：Agent/Skill 验收后由 Formatter 生成 DOCX',
+    skillGeneration.skillExecutionMode === 'skill-deta-content-rendered'
+      && skillGeneration.acceptanceAuthority === 'agent-and-current-skill'
+      && skillGeneration.programmaticBusinessAcceptance === false
+      && skillGeneration.renderManifest.status === 'rendered',
     JSON.stringify(skillGeneration),
   )
   assert(

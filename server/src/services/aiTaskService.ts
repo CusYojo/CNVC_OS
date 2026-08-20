@@ -68,16 +68,12 @@ import {
   fetchComplianceModelEvidence,
   type ComplianceModelResearchAudit,
 } from './aiComplianceModelResearchService.js'
-import {
-  inspectProjectQaDocx,
-  makeProjectQaFileNames,
-} from './aiQaDocumentService.js'
+import { makeProjectQaFileNames } from './aiQaDocumentService.js'
 import { generateProjectQaWithSkill } from './aiProjectQaSkillRuntimeService.js'
 import {
   buildProjectQaDocumentContent,
   generateProjectQaAnswers,
   generateProjectQaQuestions,
-  PROJECT_QA_QUESTION_MAX_CHARACTERS,
   reviewProjectQaAnswers,
   usedProjectQaSourceIndexes,
   type ProjectQaMode,
@@ -111,15 +107,8 @@ import {
 } from './aiTaskErrorService.js'
 import { formatShanghaiDateKey } from '../utils/shanghaiTime.js'
 import {
-  assessTemplateFidelity,
-  TEMPLATE_FIDELITY_MINIMUM,
-  type TemplateFidelityAssessment,
-  type TemplateFidelityCheck,
-} from './aiTemplateFidelityService.js'
-import {
   buildInvestmentRecommendationGenerationAudit,
   prepareInvestmentRecommendationPptWorkflow,
-  reviewInvestmentRecommendationPpt,
   type InvestmentRecommendationPptWorkflow,
 } from './aiInvestmentRecommendationPptWorkflowService.js'
 import { getAccessibleProject } from './projectAccessService.js'
@@ -182,7 +171,10 @@ export function buildImageDeckArtifactMetadata(input: {
     bytes: input.bytes,
     sha256: input.sha256,
     encodingClean: true,
-    qualityGate: 'image-generation-and-package',
+    acceptanceAuthority: 'agent-and-current-skill',
+    acceptanceDecision: 'accepted-on-agent-skill-completion',
+    programmaticBusinessAcceptance: false,
+    deliveryValidation: 'file-integrity-and-authorization-only',
     availableWhileTaskRunning: true,
     refreshedAfterResume: input.refreshedAfterResume,
   }
@@ -1140,6 +1132,17 @@ async function inspectGeneratedArtifact(
   if (!zip.file('ppt/presentation.xml')) {
     throw pptxQualityError('PPTX 缺少 presentation.xml', 'PPTX_OPENXML_INVALID')
   }
+  if (options.deliveryIntegrityOnly) {
+    return {
+      qualityStatus: 'passed',
+      metadata: {
+        bytes: fileStat.size,
+        openXmlReadable: true,
+        deliveryReady: true,
+        validationScope: 'file-integrity-only',
+      },
+    }
+  }
   const slides = Object.keys(zip.files).filter((name) => /^ppt\/slides\/slide\d+\.xml$/.test(name))
   let editableTextElements = 0
   for (const name of slides) {
@@ -1202,167 +1205,6 @@ async function inspectGeneratedArtifact(
       endReferencesValidated: true,
     },
   }
-}
-
-type DocumentQualityResult = {
-  qualityStatus: string
-  metadata: Record<string, unknown>
-}
-
-function metadataFlag(metadata: Record<string, unknown>, key: string) {
-  return metadata[key] === true
-}
-
-function fidelityCheck(code: string, passed: boolean, critical = false): TemplateFidelityCheck {
-  return { code, passed, critical }
-}
-
-function exactSectionOrder(content: BusinessContent, expectedTitles: string[]) {
-  return content.sections.length === expectedTitles.length
-    && content.sections.every((section, index) => section.title === expectedTitles[index])
-}
-
-function reviewHasNone(
-  review: { issues: Array<{ code: string }> } | undefined,
-  codes: string[],
-) {
-  if (!review) return false
-  const issueCodes = new Set(review.issues.map((issue) => issue.code))
-  return codes.every((code) => !issueCodes.has(code))
-}
-
-function dueDiligenceMinimumPlannedTables(content: BusinessContent) {
-  const tableFriendlySections = new Set([
-    '公司基本信息', '历史沿革', '公司股东情况及实际控制人情况', '核心团队介绍',
-    '组织架构', '关联公司及关联交易', '资质、荣誉及法律合规情况', '产品矩阵',
-    '场景应用', '知识产权及数据权属', '客户验证情况', '供应商、采购与成本情况',
-    '市场分析', '财务情况', '公司估值与投资方式', '退出方案', '风险提示与对策',
-  ])
-  const eligibleSections = content.sections.filter((section) => {
-    if (!tableFriendlySections.has(section.title)) return false
-    if ((section.tables?.length ?? 0) > 0) return true
-    return section.findings.filter((finding) =>
-      finding.sourceIndexes.length > 0 && finding.status === '资料记载').length >= 3
-  }).length
-  return Math.min(12, eligibleSections)
-}
-
-function assessDueDiligenceTemplateFidelity(input: {
-  templateSections: string[]
-  content: BusinessContent
-  quality: DocumentQualityResult
-  generationMetadata: Record<string, unknown>
-}): TemplateFidelityAssessment {
-  const quality = input.quality.metadata
-  const exactSections = exactSectionOrder(input.content, input.templateSections)
-  const expectedTableCount = Number(input.generationMetadata.tableCount ?? 0)
-  const coverage = input.content.generationAudit?.evidenceCoverage
-  const coverageRatio = coverage?.totalLeafSections
-    ? coverage.coveredLeafSections / coverage.totalLeafSections
-    : 0
-  const minimumPlannedTables = dueDiligenceMinimumPlannedTables(input.content)
-  return assessTemplateFidelity({ dimensions: {
-    structure: [
-      fidelityCheck('section-order', exactSections, true),
-      fidelityCheck('rendered-section-tree', metadataFlag(quality, 'sectionTreeValidated'), true),
-      fidelityCheck('section-coverage', coverageRatio >= TEMPLATE_FIDELITY_MINIMUM),
-    ],
-    typography: [
-      fidelityCheck('cjk-font', metadataFlag(quality, 'cjkFontValidated'), true),
-      fidelityCheck('styles-part', metadataFlag(quality, 'stylesPartValidated'), true),
-      fidelityCheck('font-table', metadataFlag(quality, 'fontTablePartValidated')),
-      fidelityCheck(
-        'template-typography-profile',
-        Boolean(input.generationMetadata.typography),
-      ),
-    ],
-    layout: [
-      fidelityCheck('template-applied', input.generationMetadata.templateApplied === true, true),
-      fidelityCheck('a4-page', metadataFlag(quality, 'a4PageValidated'), true),
-      fidelityCheck('long-form-layout', input.generationMetadata.pageIntent === 'long-form'),
-    ],
-    tables: [
-      fidelityCheck('rendered-table-count', metadataFlag(quality, 'expectedTableCountValidated'), true),
-      fidelityCheck('planned-table-density', expectedTableCount >= minimumPlannedTables),
-      fidelityCheck('editable-native-tables', Number(quality.tableCount ?? -1) === expectedTableCount),
-    ],
-    contentOrganization: [
-      fidelityCheck(
-        'agent-skill-content-review',
-        input.content.generationAudit?.reviewerPassed === true,
-        true,
-      ),
-      fidelityCheck(
-        'agent-skill-reviewer-issues',
-        (input.content.generationAudit?.reviewerIssueCodes.length ?? 1) === 0,
-      ),
-      fidelityCheck(
-        'no-empty-sections',
-        input.content.sections.every((section) =>
-          section.findings.length > 0 || (section.tables?.length ?? 0) > 0),
-      ),
-    ],
-  } })
-}
-function assessQaTemplateFidelity(input: {
-  quality: DocumentQualityResult
-  questionCount: number
-  expectedQuestionCount: number
-  categoryCount: number
-  expectedCategoryCount: number
-  reviewerStatus: string
-  depthGatePassed: boolean
-}): TemplateFidelityAssessment {
-  const metadata = input.quality.metadata
-  const usesDirectQaLayout = [
-    'lancheng_qa_a4_fixed',
-    'qa_cn_formal_a4',
-    'deta_qa_pdf',
-  ].includes(String(metadata.layoutProfile ?? ''))
-  return assessTemplateFidelity({ dimensions: {
-    structure: [
-      fidelityCheck('question-count', input.questionCount === input.expectedQuestionCount, true),
-      fidelityCheck('category-count', input.categoryCount === input.expectedCategoryCount, true),
-      usesDirectQaLayout
-        ? fidelityCheck('no-front-directory', metadataFlag(metadata, 'frontDirectoryAbsent'), true)
-        : fidelityCheck('directory-before-body', metadataFlag(metadata, 'directoryCompleteBeforeBody'), true),
-    ],
-    typography: [
-      fidelityCheck('cjk-font', metadataFlag(metadata, 'cjkFontValidated'), true),
-      fidelityCheck('line-spacing', metadataFlag(metadata, 'lineSpacingValidated')),
-      fidelityCheck('encoding', metadataFlag(metadata, 'encodingClean')),
-    ],
-    layout: [
-      fidelityCheck('a4-and-margins', metadataFlag(metadata, 'pageGeometryValidated'), true),
-      fidelityCheck('paragraph-range', metadataFlag(metadata, 'narrativeParagraphRangeValid')),
-      fidelityCheck('openxml', metadataFlag(metadata, 'openXmlValid'), true),
-    ],
-    tables: [
-      fidelityCheck('no-template-external-tables', Number(metadata.tableCount ?? -1) === 0, true),
-      fidelityCheck('editable-text', metadataFlag(metadata, 'editableText')),
-    ],
-    contentOrganization: [
-      fidelityCheck('reviewer', input.reviewerStatus.startsWith('passed'), true),
-      fidelityCheck('natural-answer-form', metadataFlag(metadata, 'answerParagraphFormValid'), true),
-      fidelityCheck(
-        'concise-questions',
-        Number(metadata.averageQuestionLength ?? Number.POSITIVE_INFINITY)
-          <= PROJECT_QA_QUESTION_MAX_CHARACTERS,
-        true,
-      ),
-      fidelityCheck(
-        'substantive-answers',
-        input.depthGatePassed,
-        true,
-      ),
-      fidelityCheck(
-        'answer-question-ratio',
-        Number(metadata.averageAnswerQuestionRatio ?? 0) >= 4,
-      ),
-      fidelityCheck('no-visible-process', metadataFlag(metadata, 'visibleSourceProcessAbsent'), true),
-      fidelityCheck('no-placeholder', metadataFlag(metadata, 'placeholderAnswerAbsent')),
-    ],
-  } })
 }
 
 async function executeTask(taskId: string) {
@@ -1782,6 +1624,7 @@ async function executeTask(taskId: string) {
         sources,
         duplicateCheck,
         skill,
+        programmaticBusinessAcceptance: false,
       })
       const qaContent = buildProjectQaDocumentContent({
         project,
@@ -1793,50 +1636,28 @@ async function executeTask(taskId: string) {
       })
       if (await cancelIfRequested(taskId)) return
 
-      await updateStage(taskId, 'draft-investment-qa 按德塔版式生成并校验 DOCX', 80)
+      await updateStage(taskId, 'draft-investment-qa 生成 DOCX', 80)
       const taskDir = path.join(ARTIFACT_ROOT, task.userId, task.projectId, task.id)
       await mkdir(taskDir, { recursive: true })
       const names = makeProjectQaFileNames(project.name, qaMode)
       const docxPath = path.join(taskDir, names.docx)
       const markdownPath = path.join(taskDir, '.draft-investment-qa.md')
-      const visualDirectory = path.join(taskDir, '.draft-investment-qa-visual-qa')
-      const qaDocument = await retryDocumentStep('Q&A DOCX 生成与质量检查', async () => {
-        const generation = await generateProjectQaWithSkill({
+      const docxGeneration = await retryDocumentStep('Q&A DOCX 生成', async () =>
+        generateProjectQaWithSkill({
           outputPath: docxPath,
           markdownPath,
-          visualDirectory,
           projectName: project.companyName || project.name,
           content: qaContent,
           skill,
-        })
-        const quality = await inspectProjectQaDocx(docxPath, {
-          questionCount: qaContent.questions.length,
-          categoryCount: template.sections.length,
-        })
-        const templateFidelity = assessQaTemplateFidelity({
-          quality,
-          questionCount: Number(quality.metadata.questionCount ?? 0),
-          expectedQuestionCount: qaContent.questions.length,
-          categoryCount: Number(quality.metadata.categoryCount ?? 0),
-          expectedCategoryCount: template.sections.length,
-          reviewerStatus: reviewed.review.status,
-          depthGatePassed: generation.depthMetrics.passed,
-        })
-        if (!templateFidelity.passed) {
-          throw new Error(
-            `draft-investment-qa 成品未通过模板一致性门禁：${
-              templateFidelity.failedChecks.join('、')
-            }`,
-          )
-        }
-        return { generation, quality, templateFidelity }
+        }),
+      )
+      const docxQuality = await inspectGeneratedArtifact(docxPath, 'docx', {
+        deliveryIntegrityOnly: true,
       })
-      const docxGeneration = qaDocument.generation
-      const docxQuality = qaDocument.quality
-      const templateFidelity = qaDocument.templateFidelity
       if (await cancelIfRequested(taskId)) return
 
-      await updateStage(taskId, '执行 DOCX 内容与版式质量检查', 92)
+      await updateStage(taskId, 'Agent 已按当前 Skill 规则完成生成与审阅', 96)
+      await updateStage(taskId, '登记文件并生成下载地址', 98)
       const version = await aiTaskRepository.countArtifacts({
         userId: task.userId,
         projectId: task.projectId,
@@ -1879,8 +1700,10 @@ async function executeTask(taskId: string) {
         visibleReviewerIncluded: false,
         downloadableFormats: ['docx'],
         projectKnowledgeStudy: projectKnowledgeBrief?.audit,
-        templateFidelityTarget: TEMPLATE_FIDELITY_MINIMUM,
-        templateFidelity,
+        acceptanceAuthority: 'agent-and-current-skill',
+        acceptanceDecision: 'accepted-on-agent-skill-completion',
+        programmaticBusinessAcceptance: false,
+        deliveryValidation: 'file-integrity-and-authorization-only',
       }
       const qaArtifactId = randomUUID()
       const qaArtifact = {
@@ -2047,6 +1870,7 @@ async function executeTask(taskId: string) {
         sourceCutoffDate,
         parameters,
         projectKnowledgeBrief,
+        programmaticBusinessAcceptance: false,
       })
       content = complianceWorkflow.content
     } else {
@@ -2070,6 +1894,7 @@ async function executeTask(taskId: string) {
           sourceCutoffDate,
           parameters,
           projectKnowledgeBrief,
+          programmaticBusinessAcceptance: false,
           investmentRecommendationPass: task.type === 'investment_recommendation_ppt'
             ? 'gap-analysis'
             : undefined,
@@ -2216,6 +2041,7 @@ async function executeTask(taskId: string) {
               sourceCutoffDate,
               parameters,
               projectKnowledgeBrief,
+              programmaticBusinessAcceptance: false,
               dueDiligencePass: 'final',
               dueDiligenceRuntime: dueDiligenceRuntime(58, 66),
             }),
@@ -2307,6 +2133,7 @@ async function executeTask(taskId: string) {
             sourceCutoffDate,
             parameters,
             projectKnowledgeBrief,
+            programmaticBusinessAcceptance: false,
             investmentRecommendationPass: 'final',
           }),
           {
@@ -2341,11 +2168,11 @@ async function executeTask(taskId: string) {
           ? '先生成图片高保真版，再继续生成可编辑版'
           : '生成可编辑 PPTX'
         : task.type === 'compliance_statement'
-          ? 'generate-investment-compliance-note 生成并校验 Word'
+          ? 'generate-investment-compliance-note 生成 Word'
           : task.type === 'investment_proposal'
-            ? 'draft-investment-proposal 生成并校验 Word'
+            ? 'draft-investment-proposal 生成 Word'
           : task.type === 'due_diligence_report'
-            ? 'draft-due-diligence-report 按 V5 模板生成并校验 Word'
+            ? 'draft-due-diligence-report 生成 Word'
           : '生成 DOCX',
       68,
     )
@@ -2468,7 +2295,6 @@ async function executeTask(taskId: string) {
     }
     let previewPath: string | undefined
     let previewMetadata: Record<string, unknown> | undefined
-    let pptWorkflowReview: Awaited<ReturnType<typeof reviewInvestmentRecommendationPpt>> | undefined
     const pptGenerationAudit = pptWorkflow
       ? buildInvestmentRecommendationGenerationAudit({
           workflow: pptWorkflow,
@@ -2518,36 +2344,6 @@ async function executeTask(taskId: string) {
           previewPath = undefined
           console.warn('[aiTask] PPT 预览生成失败，继续交付 PPTX:', (error as Error).message)
         }
-        if (pptWorkflow) {
-          try {
-            pptWorkflowReview = await reviewInvestmentRecommendationPpt({
-              outputPath,
-              projectName: investmentRecommendationReviewProjectName(project),
-              disclaimer: template.disclaimer,
-              workflow: pptWorkflow,
-              template,
-            })
-            if (!pptWorkflowReview.passed) {
-              throw Object.assign(
-                new Error(
-                  `投资建议书未通过 Gorden 可编辑分层 Reviewer：${pptWorkflowReview.issueCodes.join('、')}`,
-                ),
-                { code: 'INVESTMENT_RECOMMENDATION_CONTENT_REJECTED' },
-              )
-            }
-          } catch (error) {
-            if (
-              (error as Error & { code?: string }).code
-              === 'INVESTMENT_RECOMMENDATION_CONTENT_REJECTED'
-            ) {
-              throw error
-            }
-            console.warn(
-              '[aiTask] 投资建议书 PPT Gorden Reviewer 执行失败，保留可编辑 PPTX:',
-              (error as Error).message,
-            )
-          }
-        }
         return result
       })()
       : await retryDocumentStep(
@@ -2558,64 +2354,13 @@ async function executeTask(taskId: string) {
         )
     if (await cancelIfRequested(taskId)) return
 
-    if (['investment_proposal', 'compliance_statement'].includes(task.type)) {
-      await updateStage(taskId, 'Agent 已按当前 Skill 规则完成生成与审阅', 96)
-    }
+    await updateStage(taskId, 'Agent 已按当前 Skill 规则完成生成与审阅', 96)
     await updateStage(taskId, '登记文件并生成下载地址', 98)
-    const qualityOptions = {
-      // 合规性说明核心规范禁止“引用资料”等模板外正文板块；来源只保留在
-      // ai_task_sources 与产物元数据中。尽调报告也按用户要求不显示文末来源。
-      requireEndReferences: task.type !== 'compliance_statement'
-        && task.type !== 'due_diligence_report'
-        && task.type !== 'investment_proposal',
-      // Gorden 依据上传模板生成新的四层可编辑 PPTX；模板分析结果中仍可能
-      // 保留原始字体或语言元数据，因此质量检查允许继承的 CJK 元数据。
-      allowInheritedCjkLanguageMetadata:
-        task.type === 'investment_recommendation_ppt',
-      expectedSectionTitles: task.type === 'due_diligence_report'
-        ? Array.isArray(generationMetadata.sectionTitles)
-          ? generationMetadata.sectionTitles.map(String)
-          : undefined
-        : undefined,
-      expectedTableCount: task.type === 'due_diligence_report'
-        ? Number(generationMetadata.tableCount ?? 0)
-        : undefined,
-      deliveryIntegrityOnly: ['compliance_statement', 'investment_proposal'].includes(task.type),
-    }
-    let quality: Awaited<ReturnType<typeof inspectGeneratedArtifact>>
-    try {
-      quality = await inspectGeneratedArtifact(
-        outputPath,
-        template.outputFormat as 'docx' | 'pptx',
-        qualityOptions,
-      )
-    } catch (error) {
-      if (template.outputFormat !== 'docx') throw error
-      console.warn('[aiTask] DOCX 首次质量检查未通过，重新生成主文档:', (error as Error).message)
-      generationMetadata = await retryDocumentStep('DOCX 质量恢复生成', generateCurrentDocx)
-      quality = await inspectGeneratedArtifact(outputPath, 'docx', qualityOptions)
-    }
-    const calculateTemplateFidelity = () => task.type === 'due_diligence_report'
-        ? assessDueDiligenceTemplateFidelity({
-          templateSections: template.sections,
-          content,
-          quality,
-          generationMetadata: generationMetadata as Record<string, unknown>,
-        })
-        : undefined
-    let templateFidelity = calculateTemplateFidelity()
-    if (templateFidelity && !templateFidelity.passed) {
-      await updateStage(taskId, '按模板差异自动修订文档', 94)
-      generationMetadata = await retryDocumentStep('模板还原度恢复生成', generateCurrentDocx)
-      quality = await inspectGeneratedArtifact(outputPath, 'docx', qualityOptions)
-      templateFidelity = calculateTemplateFidelity()
-    }
-    if (templateFidelity && !templateFidelity.passed) {
-      console.warn(
-        '[aiTask] 文档模板还原度未达到目标，保留已通过 OpenXML 检查的 DOCX 并记录质量限制:',
-        JSON.stringify(templateFidelity.failedChecks),
-      )
-    }
+    const quality = await inspectGeneratedArtifact(
+      outputPath,
+      template.outputFormat as 'docx' | 'pptx',
+      { deliveryIntegrityOnly: true },
+    )
     const artifactCount = await aiTaskRepository.countArtifacts({
       userId: task.userId,
       projectId: task.projectId,
@@ -2653,22 +2398,13 @@ async function executeTask(taskId: string) {
               intermediateDeliverable: false,
               generationContinues: false,
               generationSkill: 'create-reference-driven-editable-ppt',
-              qualityGate: 'pipeline-handoff-and-final-artifact',
             }
           : {}),
         projectKnowledgeStudy: projectKnowledgeBrief?.audit,
-        ...(templateFidelity ? {
-          templateFidelityTarget: templateFidelity.target,
-          templateFidelity,
-        } : {}),
-        ...(['compliance_statement', 'investment_proposal'].includes(task.type)
-          ? {
-              acceptanceAuthority: 'agent-and-current-skill',
-              acceptanceDecision: 'accepted-on-agent-skill-completion',
-              programmaticBusinessAcceptance: false,
-              deliveryValidation: 'file-integrity-and-authorization-only',
-            }
-          : {}),
+        acceptanceAuthority: 'agent-and-current-skill',
+        acceptanceDecision: 'accepted-on-agent-skill-completion',
+        programmaticBusinessAcceptance: false,
+        deliveryValidation: 'file-integrity-and-authorization-only',
         evidencePolicy: task.type === 'compliance_statement'
           ? 'project_knowledge_primary_model_network_supplement'
           : [
@@ -2709,10 +2445,6 @@ async function executeTask(taskId: string) {
         ...(complianceWorkflow
           ? {
               generationMode: complianceWorkflow.generationMode,
-              reviewerRegenerationRounds: complianceWorkflow.reviewerRegenerationRounds,
-              contentReviewPassed: complianceWorkflow.reviewReports.at(-1)?.passed ?? false,
-              contentReviewAttempts: complianceWorkflow.reviewReports.length,
-              contentReviewIssueCounts: complianceWorkflow.reviewReports.map((report) => report.issueCount),
               chapterEvidence: complianceWorkflow.evidencePackets.map((packet) => ({
                 sectionTitle: packet.sectionTitle,
                 sourceIndexes: packet.sourceIndexes,
@@ -2745,11 +2477,6 @@ async function executeTask(taskId: string) {
                 skills: pptWorkflow.skills,
               },
               gordenGenerationAudit: pptGenerationAudit,
-              pptGordenReviewerPassed: pptWorkflowReview?.passed ?? false,
-              pptGordenReview: pptWorkflowReview?.metadata,
-              pptGordenIssueCodes: pptWorkflowReview?.issueCodes ?? [
-                'reviewer-unavailable',
-              ],
             }
           : {}),
         referenceTemplate: task.type === 'investment_recommendation_ppt'

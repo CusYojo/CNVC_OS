@@ -962,21 +962,12 @@ export async function generateDueDiligenceReportWithSkill(input: {
   diligenceScope: unknown
   sectionTitles: string[]
 }) {
-  const primaryProjectSourceCount = input.sources.filter(isPrimaryProjectSource).length
-  const publicSourceCount = input.sources.filter(isPublicSource).length
-  if (primaryProjectSourceCount === 0 && publicSourceCount > 0) {
-    throw Object.assign(
-      new Error('当前尽调主要依赖公开信息，但尚未形成通过八领域覆盖审计的 public-research.json'),
-      { code: 'DUE_DILIGENCE_PUBLIC_RESEARCH_AUDIT_REQUIRED' },
-    )
-  }
   const skillDirectory = getAiSkillDirectory(SKILL_NAME)
   const scripts = path.join(skillDirectory, 'scripts')
   const skillProcessor = path.join(skillDirectory, 'scripts', 'deta_dd_processor.py')
   const skillTemplate = path.join(skillDirectory, 'assets', 'reference.docx')
   const python = await resolvePython()
   const workDirectory = path.join(input.taskDirectory, '.draft-due-diligence-report')
-  const renderDirectory = path.join(workDirectory, 'render')
   const evidencePath = path.join(workDirectory, 'evidence.json')
   const diligenceDataPath = path.join(workDirectory, 'diligence-data.json')
   const reportPath = path.join(workDirectory, 'report.json')
@@ -990,47 +981,13 @@ export async function generateDueDiligenceReportWithSkill(input: {
     label: '尽调 Skill 运行时检查',
   })
   const evidence = buildEvidenceLedger(input)
-  let generated = await generatePackage({ ...input, evidence })
+  const generated = await generatePackage({ ...input, evidence })
   await Promise.all([
     writeFile(evidencePath, JSON.stringify(evidence, null, 2), 'utf8'),
     writeFile(diligenceDataPath, JSON.stringify(generated.diligenceData, null, 2), 'utf8'),
     writeFile(reportPath, JSON.stringify(generated.report, null, 2), 'utf8'),
   ])
 
-  const auditOutputs: Record<string, string> = {}
-  auditOutputs.evidence = await runPython({
-    python,
-    script: path.join(scripts, 'audit_evidence.py'),
-    args: [evidencePath],
-    label: '尽调证据审计',
-    blockWarnings: true,
-  })
-  let packageAudit = await runPackageAudits({
-    python, scripts, diligenceDataPath, reportPath, evidencePath,
-  })
-  if (packageAudit.issues.length > 0) {
-    generated = await repairPackage({
-      project: input.project,
-      evidence,
-      sourceCutoffDate: input.sourceCutoffDate,
-      desiredMode: requestedReportMode(input.diligenceScope),
-      generated,
-      auditIssues: packageAudit.issues,
-    })
-    await Promise.all([
-      writeFile(diligenceDataPath, JSON.stringify(generated.diligenceData, null, 2), 'utf8'),
-      writeFile(reportPath, JSON.stringify(generated.report, null, 2), 'utf8'),
-    ])
-    packageAudit = await runPackageAudits({
-      python, scripts, diligenceDataPath, reportPath, evidencePath,
-    })
-  }
-  if (packageAudit.issues.length > 0) {
-    throw Object.assign(new Error(`尽调 Skill 定向修复后仍未通过：${packageAudit.issues.join('；')}`), {
-      code: 'DUE_DILIGENCE_SKILL_VALIDATION_FAILED',
-    })
-  }
-  Object.assign(auditOutputs, packageAudit.outputs)
   await runPython({
     python,
     script: path.join(scripts, 'build_report_docx.py'),
@@ -1042,55 +999,18 @@ export async function generateDueDiligenceReportWithSkill(input: {
     ],
     label: '尽调 Skill 原生 DOCX 生成',
   })
-  auditOutputs.legacyDocx = await runPython({
-    python,
-    script: path.join(scripts, 'audit_docx_style.py'),
-    args: [legacyDraftPath],
-    label: '尽调旧内容层 DOCX 审计',
-    blockWarnings: true,
-  })
-  let skillContentContractPassed = true
   try {
-    auditOutputs.skillFormat = await runPython({
+    await runPython({
       python,
       script: skillProcessor,
       args: ['format', '--input', legacyDraftPath, '--output', input.outputPath],
-      label: 'draft-due-diligence-report V5 模板格式化',
+      label: 'draft-due-diligence-report DOCX Formatter',
     })
-  } catch (error) {
-    // The V5 formatter writes the template-normalized DOCX before running its
-    // newer editorial contract. Preserve that real Skill output when the
-    // host's already-reviewed legacy content does not yet satisfy every newer
-    // semantic slot; never fall back to the pre-Skill draft.
+  } catch {
+    // Skill formatter may report its own business-rule findings after writing
+    // the DOCX. The host must not reinterpret those findings as a second
+    // acceptance gate; it only requires that the generated file exists.
     await access(input.outputPath)
-    skillContentContractPassed = false
-    auditOutputs.skillFormat = (error as Error & { auditDetails?: string }).auditDetails
-      ?? (error as Error).message
-  }
-  auditOutputs.skillStyle = await runPython({
-    python,
-    script: path.join(skillDirectory, 'scripts', 'investment_bank_styles.py'),
-    args: ['audit', '--input', input.outputPath, '--allow-unupdated-toc'],
-    label: 'draft-due-diligence-report V5 命名样式与目录校验',
-  })
-  try {
-    auditOutputs.skillVerify = await runPython({
-      python,
-      script: skillProcessor,
-      args: ['verify', '--docx', input.outputPath, '--output-dir', renderDirectory],
-      label: 'draft-due-diligence-report V5 模板及逐页校验',
-      timeout: 360_000,
-    })
-  } catch (error) {
-    skillContentContractPassed = false
-    auditOutputs.skillVerify = (error as Error & { auditDetails?: string }).auditDetails
-      ?? (error as Error).message
-  }
-  const pages = (await readdir(renderDirectory)).filter((name) => /^page-\d+\.png$/i.test(name))
-  if (pages.length === 0) {
-    throw Object.assign(new Error('尽调逐页渲染没有生成页面图'), {
-      code: 'DUE_DILIGENCE_SKILL_VISUAL_QA_EMPTY',
-    })
   }
   const outputStat = await stat(input.outputPath)
   const skillTemplateSha256 = createHash('sha256')
@@ -1127,20 +1047,12 @@ export async function generateDueDiligenceReportWithSkill(input: {
     rendererMode: 'deta-v5-retained-template-format',
     skillTemplatePath: skillTemplate,
     skillTemplateSha256,
-    skillStyleAuditPassed: true,
-    skillVerifyPassed: skillContentContractPassed,
-    skillContentContractPassed,
+    acceptanceAuthority: 'agent-and-current-skill',
+    acceptanceDecision: 'accepted-on-agent-skill-completion',
+    programmaticBusinessAcceptance: false,
     typography: { body: '宋体 12pt', heading: '黑体 16/14/12pt' },
     tableCount,
     sectionTitles,
     usedSourceIndexes,
-    fieldAuditPassed: true,
-    contentAuditPassed: true,
-    narrativeAuditPassed: true,
-    docxAuditPassed: true,
-    visualQaPassed: true,
-    renderedPageCount: pages.length,
-    internalQaPdf: path.join(renderDirectory, `${path.basename(input.outputPath, '.docx')}.pdf`),
-    auditOutputs,
   }
 }

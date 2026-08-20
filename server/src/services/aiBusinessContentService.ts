@@ -2490,6 +2490,7 @@ async function composeDueDiligenceContent(input: {
   dueDiligencePass?: 'gap-analysis' | 'final'
   dueDiligenceRuntime?: DueDiligenceRuntime
   projectKnowledgeBrief?: ProjectKnowledgeBrief
+  programmaticBusinessAcceptance?: boolean
 }): Promise<BusinessContent> {
   const fallback = fallbackContent(
     'due_diligence_report',
@@ -2677,14 +2678,16 @@ ${evidence || '没有可用事实卡。不得编造事实；只在确有重大�
           risks: [],
           missing: [],
         }
-        const localIssues = dueDiligenceContentQualityIssues(
-          partialContent,
-          group.sections,
-          {
-            final: input.dueDiligencePass !== 'gap-analysis',
-            partial: true,
-          },
-        )
+        const localIssues = input.programmaticBusinessAcceptance === false
+          ? []
+          : dueDiligenceContentQualityIssues(
+              partialContent,
+              group.sections,
+              {
+                final: input.dueDiligencePass !== 'gap-analysis',
+                partial: true,
+              },
+            )
         if (localIssues.length > 0 && attempt < maxGenerationAttempts) {
           repairIssues = localIssues
           continue
@@ -2839,14 +2842,16 @@ ${evidence || '没有可用事实卡。不得编造事实；只在确有重大�
 
   const finalPass = input.dueDiligencePass !== 'gap-analysis'
     || dueDiligencePendingResearchTopics(assembled).length === 0
-  let issues = [
-    ...dueDiligenceContentQualityIssues(
-      assembled,
-      input.template.sections,
-      { final: finalPass },
-    ),
-    ...dueDiligenceEditorialIssues(assembled),
-  ]
+  let issues = input.programmaticBusinessAcceptance === false
+    ? []
+    : [
+        ...dueDiligenceContentQualityIssues(
+          assembled,
+          input.template.sections,
+          { final: finalPass },
+        ),
+        ...dueDiligenceEditorialIssues(assembled),
+      ]
   if (issues.length > 0) {
     const affectedGroups = DUE_DILIGENCE_GENERATION_GROUPS.flatMap((group, chapterIndex) => {
       const groupIssues = issues.filter((issue) =>
@@ -2937,6 +2942,7 @@ export async function composeBusinessContent(input: {
   dueDiligenceRuntime?: DueDiligenceRuntime
   projectKnowledgeBrief?: ProjectKnowledgeBrief
   investmentRecommendationPass?: 'gap-analysis' | 'final'
+  programmaticBusinessAcceptance?: boolean
 }): Promise<BusinessContent> {
   if (String(input.type) === 'investment_proposal') {
     return composeInvestmentProposalContent({
@@ -2948,6 +2954,7 @@ export async function composeBusinessContent(input: {
       parameters: input.parameters,
       runtime: input.investmentProposalRuntime,
       projectKnowledgeBrief: input.projectKnowledgeBrief,
+      programmaticBusinessAcceptance: input.programmaticBusinessAcceptance,
     })
   }
   if (input.type === 'due_diligence_report') {
@@ -2961,6 +2968,7 @@ export async function composeBusinessContent(input: {
       dueDiligencePass: input.dueDiligencePass,
       dueDiligenceRuntime: input.dueDiligenceRuntime,
       projectKnowledgeBrief: input.projectKnowledgeBrief,
+      programmaticBusinessAcceptance: input.programmaticBusinessAcceptance,
     })
   }
   const fallback = fallbackContent(input.type, input.template, input.project, input.sources)
@@ -3301,6 +3309,17 @@ ${JSON.stringify(previousDraft ?? {}).slice(0, 60_000)}`
 
   try {
     let generated = await requestContent()
+    if (input.programmaticBusinessAcceptance === false) {
+      return input.type === 'investment_recommendation_ppt'
+        ? enrichInvestmentRecommendationContentFromBrief(
+            generated,
+            input.projectKnowledgeBrief,
+            {
+              pageCount: input.parameters.pageCount as string | number | undefined,
+            },
+          )
+        : generated
+    }
     if (isDueDiligence) {
       const finalPass = input.dueDiligencePass !== 'gap-analysis'
         || dueDiligencePendingResearchTopics(generated).length === 0
@@ -3447,7 +3466,10 @@ ${JSON.stringify(previousDraft ?? {}).slice(0, 60_000)}`
         input.projectKnowledgeBrief,
         { pageCount: input.parameters.pageCount as string | number | undefined },
       )
-      if (input.investmentRecommendationPass !== 'gap-analysis') {
+      if (
+        input.programmaticBusinessAcceptance !== false
+        && input.investmentRecommendationPass !== 'gap-analysis'
+      ) {
         const issues = investmentRecommendationContentQualityIssues(
           finalized,
           input.template.sections.length,

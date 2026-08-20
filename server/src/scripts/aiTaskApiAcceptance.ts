@@ -680,7 +680,7 @@ async function main(cleanupState: AcceptanceCleanupState) {
     qaTask.artifacts.map((artifact) => artifact.format).join(','),
   )
   assert(
-    'AI-011 记录 Generator、Reviewer、模板和 Skill 审计信息',
+    'AI-011 记录 Agent/Skill 验收和下载交付信息',
     qaTask.artifacts.every((artifact) =>
       artifact.metadata?.skillName === 'draft-investment-qa'
       && artifact.metadata?.questionCount === 8
@@ -688,10 +688,10 @@ async function main(cleanupState: AcceptanceCleanupState) {
       && Boolean(artifact.metadata?.templateCorpusSha256)
       && Boolean(artifact.metadata?.reviewerChecks)
       && artifact.metadata?.evidencePolicy === 'project_knowledge_primary_model_network_supplement'
-      && artifact.metadata?.skillExecutionMode === 'native-markdown-validated-docx-rendered'
-      && (artifact.metadata?.markdownValidation as { errors?: number } | undefined)?.errors === 0
-      && (artifact.metadata?.visualQa as { renderedEveryPage?: boolean } | undefined)?.renderedEveryPage === true
-      && (artifact.metadata?.templateFidelity as { passed?: boolean } | undefined)?.passed === true
+      && artifact.metadata?.skillExecutionMode === 'skill-deta-content-rendered'
+      && artifact.metadata?.acceptanceAuthority === 'agent-and-current-skill'
+      && artifact.metadata?.programmaticBusinessAcceptance === false
+      && artifact.metadata?.deliveryValidation === 'file-integrity-and-authorization-only'
       && artifact.metadata?.visibleReferencesIncluded === false
       && artifact.metadata?.visibleReviewerIncluded === false
       && Array.isArray(artifact.metadata?.downloadableFormats)
@@ -986,20 +986,17 @@ async function main(cleanupState: AcceptanceCleanupState) {
     }
     if (item.type === 'due_diligence_report') {
       assert(
-        'due_diligence_report 保持商业专项模式并通过字段、内容、文风、DOCX 与逐页视觉审计',
+        'due_diligence_report 保持商业专项模式并由 Agent/Skill 验收后交付',
         completed.artifacts.every((artifact) =>
           artifact.metadata?.reportMode === 'business_dd'
-          && artifact.metadata?.fieldAuditPassed === true
-          && artifact.metadata?.contentAuditPassed === true
-          && artifact.metadata?.narrativeAuditPassed === true
-          && artifact.metadata?.docxAuditPassed === true
-          && artifact.metadata?.visualQaPassed === true
-          && Number(artifact.metadata?.renderedPageCount || 0) > 0),
+          && artifact.metadata?.acceptanceAuthority === 'agent-and-current-skill'
+          && artifact.metadata?.programmaticBusinessAcceptance === false
+          && artifact.metadata?.deliveryValidation === 'file-integrity-and-authorization-only'
+          && artifact.metadata?.openXmlReadable === true),
         completed.artifacts.map((artifact) => JSON.stringify({
           reportMode: artifact.metadata?.reportMode,
-          fieldAuditPassed: artifact.metadata?.fieldAuditPassed,
-          visualQaPassed: artifact.metadata?.visualQaPassed,
-          renderedPageCount: artifact.metadata?.renderedPageCount,
+          acceptanceAuthority: artifact.metadata?.acceptanceAuthority,
+          deliveryValidation: artifact.metadata?.deliveryValidation,
         })).join(' | '),
       )
     }

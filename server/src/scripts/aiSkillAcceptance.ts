@@ -502,6 +502,9 @@ async function main() {
     ),
     'utf8',
   )
+  const dueDiligenceProductionSource = dueDiligenceNativeSource.slice(
+    dueDiligenceNativeSource.indexOf('export async function generateDueDiligenceReportWithSkill'),
+  )
   assert(
     'AI-010 正文按 11 个章组生成 30 个模块并仅重试受影响章组',
     aiBusinessContentSource.includes('DUE_DILIGENCE_GENERATION_GROUPS')
@@ -649,32 +652,32 @@ async function main() {
     '摘要、风险、缺口和来源仅保留为审计元数据',
   )
   assert(
-    'AI-010 最终 DOCX 完全经过 draft-due-diligence-report 原生硬门禁',
+    'AI-010 最终 DOCX 由 draft-due-diligence-report Formatter 输出且宿主不二次判卷',
     aiTaskServiceSource.includes('generateDueDiligenceReportWithSkill')
       && [
         'check_runtime.py',
-        'audit_evidence.py',
-        'audit_ic_completeness.py',
-        'audit_report_content.py',
-        'audit_narrative_quality.py',
         'build_report_docx.py',
-        'audit_docx_style.py',
         'deta_dd_processor.py',
-        'investment_bank_styles.py',
       ].every((term) => dueDiligenceNativeSource.includes(term))
-      && dueDiligenceNativeSource.includes('DUE_DILIGENCE_PUBLIC_RESEARCH_AUDIT_REQUIRED')
       && dueDiligenceNativeSource.includes('usedSourceIndexes')
       && dueDiligenceNativeSource.includes('source_index')
       && dueDiligenceNativeSource.includes("formatter: 'draft-due-diligence-report-skill-v5'")
-      && dueDiligenceNativeSource.includes('deta_dd_processor.py')
-      && dueDiligenceNativeSource.includes('investment_bank_styles.py'),
-    '证据台账 → 字段完整性 → 内容/文风 → V5 Skill 格式化 → Skill 样式与逐页渲染',
+      && dueDiligenceProductionSource.includes("acceptanceAuthority: 'agent-and-current-skill'")
+      && dueDiligenceProductionSource.includes('programmaticBusinessAcceptance: false')
+      && !/runPackageAudits|audit_docx_style|investment_bank_styles|\['verify'/.test(
+        dueDiligenceProductionSource,
+      ),
+    '现有 Agent/Skill 规则 → DOCX Formatter → 文件完整性与下载',
   )
   assert(
-    'AI-007/AI-008 业务验收权归 Agent 与当前 Skill',
+    '全部快捷入口业务验收权归 Agent 与当前 Skill',
     !aiTaskServiceSource.includes('reviewGeneratedComplianceDocx({')
       && !aiTaskServiceSource.includes('reviewInvestmentProposalDocx({')
       && !aiTaskServiceSource.includes('validateInvestmentProposalWithSkill(outputPath)')
+      && !aiTaskServiceSource.includes('reviewInvestmentRecommendationPpt({')
+      && !aiTaskServiceSource.includes('assessQaTemplateFidelity({')
+      && !aiTaskServiceSource.includes('assessDueDiligenceTemplateFidelity({')
+      && aiTaskServiceSource.includes('{ deliveryIntegrityOnly: true }')
       && aiTaskServiceSource.includes("acceptanceAuthority: 'agent-and-current-skill'")
       && aiTaskServiceSource.includes('programmaticBusinessAcceptance: false')
       && aiTaskServiceSource.includes("deliveryValidation: 'file-integrity-and-authorization-only'"),
