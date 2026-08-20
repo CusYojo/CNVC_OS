@@ -3,8 +3,8 @@
 # Cybernaut 统一应用服务快捷运维脚本
 #=============================================================================
 # 用法：
-#   ./deploy.sh start          # 启动服务（已运行时仅检查健康）
-#   ./deploy.sh restart        # 快速重启服务并等待健康检查
+#   ./deploy.sh start          # 重新构建并激活产物，然后启动服务
+#   ./deploy.sh restart        # 重新构建并激活产物，然后重启服务
 #   ./deploy.sh stop           # 停止服务
 #   ./deploy.sh status         # 查看路径绑定、systemd 与健康状态
 #   ./deploy.sh logs [行数]    # 查看应用日志，默认 100 行
@@ -43,8 +43,8 @@ usage() {
 用法: ./deploy.sh <命令>
 
 命令:
-  start          启动 ${SERVICE_UNIT}；已运行时仅检查健康
-  restart        快速重启 ${SERVICE_UNIT} 并等待健康检查
+  start          重新构建并激活产物，然后启动 ${SERVICE_UNIT}
+  restart        重新构建并激活产物，然后重启 ${SERVICE_UNIT}
   stop           停止 ${SERVICE_UNIT}
   status         查看项目路径绑定、systemd 和健康状态
   logs [行数]    查看应用日志，默认 ${LOG_LINES} 行
@@ -168,9 +168,47 @@ prepare_document_runtime() {
 
 prepare_mutation() {
     systemctl daemon-reload
-    validate_project_files
     validate_service_binding
     prepare_document_runtime
+}
+
+rebuild_and_activate() {
+    local service_was_active=0
+    if systemctl is-active --quiet "$SERVICE_UNIT"; then
+        service_was_active=1
+    fi
+
+    step "重新构建前端与服务端"
+    require_command npm
+    if ! npm run build; then
+        err "项目构建失败；现有服务与已激活产物保持不变"
+        return 1
+    fi
+
+    # build-platform 在 4100 端口监听时只生成候选产物。构建成功后再停服，
+    # 将构建耗时留在服务在线阶段，并只为原子激活保留短暂停机窗口。
+    if [ "$service_was_active" -eq 1 ]; then
+        step "停止服务以激活新构建"
+        systemctl stop "$SERVICE_UNIT"
+        if ! wait_for_stopped; then
+            err "${SERVICE_UNIT} 在 ${STOP_TIMEOUT_SECONDS} 秒内未停止，未激活新构建"
+            show_failure_context
+            return 1
+        fi
+    fi
+
+    step "激活新构建"
+    if ! npm run activate:build:if-present; then
+        err "新构建激活失败"
+        if [ "$service_was_active" -eq 1 ]; then
+            warn "尝试使用原有已激活产物恢复服务"
+            systemctl start "$SERVICE_UNIT" || true
+        fi
+        return 1
+    fi
+
+    validate_project_files
+    log "前端与服务端构建产物已更新并激活"
 }
 
 wait_for_stopped() {
@@ -220,15 +258,12 @@ show_failure_context() {
 }
 
 start_project() {
-    step "启动项目"
+    step "重新构建并启动项目"
     require_root_for_mutation "启动服务" "start"
     prepare_mutation
+    rebuild_and_activate
 
-    if systemctl is-active --quiet "$SERVICE_UNIT"; then
-        log "${SERVICE_UNIT} 已在运行，直接检查健康状态"
-    else
-        systemctl start "$SERVICE_UNIT"
-    fi
+    systemctl start "$SERVICE_UNIT"
     if ! wait_for_health; then
         show_failure_context
         exit 1
@@ -237,11 +272,12 @@ start_project() {
 }
 
 restart_project() {
-    step "快速重启项目"
+    step "重新构建并重启项目"
     require_root_for_mutation "重启服务" "restart"
     prepare_mutation
+    rebuild_and_activate
 
-    systemctl restart "$SERVICE_UNIT"
+    systemctl start "$SERVICE_UNIT"
     if ! wait_for_health; then
         show_failure_context
         exit 1
