@@ -1,0 +1,4 @@
+interface:
+  display_name: "生成项目 Q&A 报告"
+  short_description: "生成公司专属、投资争议充分且经过深度门禁的项目 Q&A"
+  default_prompt: "使用 $draft-investment-qa，以资深投资经理视角生成公司专属的项目 Q&A Word 文档；至少 60% 的问题绑定专属产品、技术或案例，关键答案穿透到商业机制、具体财务变量、投资处理和失效条件，并通过严格内容与排版门禁。"

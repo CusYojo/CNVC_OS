@@ -149,14 +149,14 @@ export function assertQaTemplateProfile(profile: QaTemplateProfile) {
 }
 
 export function createProjectQaSkillProfile(skill: LoadedAiSkill): QaTemplateProfile {
-  if (skill.name !== 'generate-project-qa-report') {
+  if (skill.name !== 'draft-investment-qa') {
     throw new Error(`无法为非标准 Q&A Skill 创建版式画像：${skill.name}`)
   }
   return {
-    parserVersion: 'generate-project-qa-report-profile-v1',
+    parserVersion: 'draft-investment-qa-profile-v1',
     corpusSha256: skill.sha256,
     files: [{
-      fileName: 'generate-project-qa-report/SKILL.md',
+      fileName: 'draft-investment-qa/SKILL.md',
       sha256: skill.sha256,
       pageCount: 1,
       pageWidth: 595.3,

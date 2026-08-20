@@ -1,0 +1,128 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Dual-use investment Q&A staged artifacts",
+  "definitions": {
+    "fact": {
+      "type": "object",
+      "required": ["id", "fact", "category", "status", "materiality", "source_ids"],
+      "properties": {
+        "id": {"type": "string"},
+        "fact": {"type": "string"},
+        "category": {"type": "string"},
+        "status": {"enum": ["verified", "management_stated", "calculated", "pending"]},
+        "materiality": {"type": "integer", "minimum": 1, "maximum": 3},
+        "source_ids": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+        "date_hint": {"type": "string"}
+      }
+    },
+    "sector_player": {
+      "type": "object",
+      "required": ["category", "position", "project_difference", "fact_ids"],
+      "properties": {
+        "category": {"enum": ["pure_world_model", "embodiment_oem_internal", "outsourced_data_service"]},
+        "position": {"type": "string"},
+        "project_difference": {"type": "string"},
+        "fact_ids": {"type": "array", "minItems": 1, "items": {"type": "string"}}
+      }
+    },
+    "question": {
+      "type": "object",
+      "required": ["id", "question", "angle", "module", "question_archetype", "answer_structure", "evidence_focus", "queries", "must_cover_fact_ids", "mechanism_chain", "competing_explanation", "discriminator", "economic_bridge", "valuation_treatment", "boundary"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^Q[1-9]$"},
+        "question": {"type": "string"},
+        "angle": {"type": "string"},
+        "module": {"enum": ["valuation_benchmark", "business_flywheel", "financial_reconciliation", "governance_ip", "commercialization_organization", "customer_value", "technology_dependency", "policy_transaction"]},
+        "question_archetype": {"enum": ["positioning", "market_need", "mechanism", "customer_case", "transferability", "product_role", "revenue_quality", "valuation", "organization"]},
+        "answer_structure": {"enum": ["numbered", "natural"]},
+        "evidence_focus": {"type": "array", "minItems": 1, "maxItems": 3, "items": {"type": "string"}},
+        "queries": {"type": "array", "minItems": 1, "maxItems": 6, "items": {"type": "string"}},
+        "must_cover_fact_ids": {"type": "array", "minItems": 1, "maxItems": 10, "items": {"type": "string"}},
+        "mechanism_chain": {"type": "string"},
+        "why_layer": {"type": "string"},
+        "competing_explanation": {"type": "string"},
+        "discriminator": {"type": "string"},
+        "economic_bridge": {"type": "string"},
+        "valuation_treatment": {"type": "string"},
+        "boundary": {"type": "string"}
+      }
+    },
+    "claim_support": {
+      "type": "object",
+      "required": ["claim_type", "expression_level", "fact_ids"],
+      "properties": {
+        "claim_type": {"enum": ["joint_development", "ip_ownership", "control_stability", "equity_incentive", "noncompete", "non_substitutability", "industrial_enablement"]},
+        "expression_level": {"enum": ["confirmed", "management_stated", "conditional"]},
+        "fact_ids": {"type": "array", "minItems": 1, "items": {"type": "string"}}
+      }
+    },
+    "content_item": {
+      "type": "object",
+      "required": ["id", "question", "answer_paragraphs", "paragraph_roles", "used_fact_ids", "claim_support"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^Q[1-9]$"},
+        "question": {"type": "string"},
+        "answer_paragraphs": {"type": "array", "minItems": 1, "maxItems": 4, "items": {"type": "string"}},
+        "paragraph_roles": {
+          "type": "array",
+          "items": {"enum": ["opening_position", "evidence_and_reasoning", "supporting_case", "business_implication", "open_issues", "transaction_treatment"]}
+        },
+        "used_fact_ids": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+        "claim_support": {"type": "array", "items": {"$ref": "#/definitions/claim_support"}}
+      }
+    }
+  },
+  "artifacts": {
+    "facts.json": {"type": "array", "items": {"$ref": "#/definitions/fact"}},
+    "rulings.json": {"type": "object", "required": ["rulings", "blacklist"]},
+    "qa_plan.json": {
+      "type": "object",
+      "required": ["profile", "questions"],
+      "properties": {
+        "profile": {
+          "type": "object",
+          "required": ["narrative_mode", "sector_map", "project_position", "project_position_fact_ids", "coverage"],
+          "properties": {
+            "narrative_mode": {"enum": ["dual_use", "internal_ic", "reference_faithful"]},
+            "sector_map": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"$ref": "#/definitions/sector_player"}},
+            "project_position": {"type": "string"},
+            "project_position_fact_ids": {"type": "array", "minItems": 2, "items": {"type": "string"}},
+            "coverage": {"type": "object"}
+          }
+        },
+        "questions": {"type": "array", "minItems": 6, "maxItems": 9, "items": {"$ref": "#/definitions/question"}}
+      }
+    },
+    "qa_content.json": {
+      "type": "object",
+      "required": ["meta", "items"],
+      "properties": {
+        "meta": {
+          "type": "object",
+          "required": ["company", "title", "narrative_mode", "audience_mode", "report_stage", "investment_stance"],
+          "properties": {
+            "company": {"type": "string"},
+            "title": {"type": "string"},
+            "narrative_mode": {"enum": ["dual_use", "internal_ic", "reference_faithful"]},
+            "audience_mode": {"enum": ["external_decision_qa", "internal_decision_qa"]},
+            "report_stage": {"enum": ["final_recommendation", "team_recommendation", "internal_approved", "terms_agreed", "signed_or_closing"]},
+            "investment_stance": {"enum": ["support", "oppose"]}
+          }
+        },
+        "overview": {
+          "type": "object",
+          "required": ["market_question", "players", "project_position", "used_fact_ids"],
+          "properties": {
+            "market_question": {"type": "string"},
+            "players": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"type": "string"}},
+            "project_position": {"type": "string"},
+            "used_fact_ids": {"type": "array", "minItems": 2, "items": {"type": "string"}}
+          }
+        },
+        "items": {"type": "array", "minItems": 6, "maxItems": 9, "items": {"$ref": "#/definitions/content_item"}}
+      }
+    },
+    "quality_scorecard.json": {"type": "object", "required": ["dimensions", "total", "hard_failures", "revision_routes"]},
+    "revision_log.json": {"type": "array"}
+  }
+}

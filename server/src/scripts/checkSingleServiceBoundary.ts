@@ -93,14 +93,14 @@ async function main() {
   const dueDiligenceRuntimeCheck = await readFile(
     path.resolve(
       root,
-      'server/workspace/.agents/skills/write-investment-dd-report/scripts/check_runtime.py',
+      'server/workspace/.agents/skills/draft-due-diligence-report/scripts/check_runtime.py',
     ),
     'utf8',
   )
   const dueDiligenceRender = await readFile(
     path.resolve(
       root,
-      'server/workspace/.agents/skills/write-investment-dd-report/scripts/render_and_verify.py',
+      'server/workspace/.agents/skills/draft-due-diligence-report/scripts/render_and_verify.py',
     ),
     'utf8',
   )

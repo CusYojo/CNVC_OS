@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { BusinessContent } from '../src/services/aiBusinessContentService.js'
-import { buildCompliancePluginContent } from '../src/services/aiPluginDocumentRenderService.js'
+import { buildComplianceSkillContent } from '../src/services/aiDocumentSkillRenderService.js'
 
 function contentWithConclusion(text: string): BusinessContent {
   return {
@@ -26,8 +26,8 @@ function contentWithConclusion(text: string): BusinessContent {
   }
 }
 
-test('compliance plugin content normalizes the closing conclusion to one sentence', () => {
-  const payload = buildCompliancePluginContent({
+test('compliance Skill content normalizes the closing conclusion to one sentence', () => {
+  const payload = buildComplianceSkillContent({
     projectName: '大衍科技',
     content: contentWithConclusion('本项目仍有事项需要核对。在完成审批前，不宜作出无保留结论。'),
     sources: [],

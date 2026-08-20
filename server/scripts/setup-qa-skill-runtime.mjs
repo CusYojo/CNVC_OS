@@ -14,7 +14,7 @@ const skillRoot = path.join(
   'workspace',
   '.agents',
   'skills',
-  'generate-project-qa-report',
+  'draft-investment-qa',
 )
 
 function run(command, args) {
@@ -36,10 +36,10 @@ if (!existsSync(venvPython)) {
   run(bootstrapPython, ['-m', 'venv', venvRoot])
 }
 
-console.log('安装 generate-project-qa-report Python 依赖…')
+console.log('安装 draft-investment-qa Python 依赖…')
 run(venvPython, ['-m', 'pip', 'install', '-r', path.join(skillRoot, 'requirements.txt')])
 
 console.log('检查 Markdown 校验、DOCX 生成与逐页渲染运行时…')
 run(venvPython, [path.join(skillRoot, 'scripts', 'check_runtime.py'), '--strict'])
 
-console.log('generate-project-qa-report 运行时已就绪。')
+console.log('draft-investment-qa 运行时已就绪。')

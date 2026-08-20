@@ -2,10 +2,10 @@ import { createHash } from 'node:crypto'
 import { stat, writeFile, access, mkdir, readFile, readdir } from 'node:fs/promises'
 import path from 'node:path'
 import type { BusinessContent, EvidenceSource } from './aiBusinessContentService.js'
-import { getAiSkillDirectory, getAiSkillRuntimeDirectory } from './aiSkillService.js'
+import { getAiSkillDirectory } from './aiSkillService.js'
 import { execFileSupervised as execFileAsync } from '../runtime/supervisedProcessService.js'
 import { fetchAiGatewayChatCompatible } from './aiGatewayService.js'
-const SKILL_NAME = 'write-investment-dd-report' as const
+const SKILL_NAME = 'draft-due-diligence-report' as const
 const GW_BASE = (process.env.LLM_BASE_URL || process.env.OPENAI_BASE_URL || 'http://127.0.0.1:18081/v1').replace(/\/$/, '')
 const GW_KEY = process.env.OPENAI_API_KEY || process.env.LLM_API_KEY || ''
 const MODEL = process.env.LLM_MODEL || 'claude-sonnet-4-6'
@@ -719,7 +719,7 @@ async function generatePackage(input: {
   sectionTitles: string[]
 }) {
   const desiredMode = requestedReportMode(input.diligenceScope)
-  const systemPrompt = `你是 write-investment-dd-report 的字段数据层编辑器。只依据给定证据台账和已生成章节内容，生成可被该 Skill 原生审计器直接验证的 JSON。
+  const systemPrompt = `你是 draft-due-diligence-report 的字段数据层编辑器。只依据给定证据台账和已生成章节内容，生成可被该 Skill 原生审计器直接验证的 JSON。
 
 必须返回单个 JSON 对象：
 {"reportMode":"","blockedReasons":[],"diligenceData":{},"report":{}}
@@ -796,7 +796,7 @@ async function repairPackage(input: {
   generated: NormalizedDueDiligencePackage
   auditIssues: string[]
 }) {
-  const systemPrompt = `你是 write-investment-dd-report 的 JSON 修复器。当前尽调包未通过原生审计，请只修复字段结构、证据绑定、报告块结构和人工文风问题，并返回完整 JSON 对象。
+  const systemPrompt = `你是 draft-due-diligence-report 的 JSON 修复器。当前尽调包未通过原生审计，请只修复字段结构、证据绑定、报告块结构和人工文风问题，并返回完整 JSON 对象。
 
 不得新增证据台账中不存在的事实或证据 ID；不得把 absent/conflicted 字段伪装为 supported；不得用“待补充”、免责声明、资料清单或检索过程凑内容。若证据确实不能支撑任何允许模式，必须在 blockedReasons 中列明缺失字段。
 
@@ -866,7 +866,7 @@ async function resolvePython() {
       // 继续检查下一个解释器。
     }
   }
-  throw Object.assign(new Error('write-investment-dd-report 缺少 python-docx/PyMuPDF/lxml 运行环境'), {
+  throw Object.assign(new Error('draft-due-diligence-report 缺少 python-docx/PyMuPDF/lxml 运行环境'), {
     code: 'DUE_DILIGENCE_SKILL_RUNTIME_UNAVAILABLE',
   })
 }
@@ -970,13 +970,12 @@ export async function generateDueDiligenceReportWithSkill(input: {
       { code: 'DUE_DILIGENCE_PUBLIC_RESEARCH_AUDIT_REQUIRED' },
     )
   }
-  const skillDirectory = getAiSkillRuntimeDirectory(SKILL_NAME)
+  const skillDirectory = getAiSkillDirectory(SKILL_NAME)
   const scripts = path.join(skillDirectory, 'scripts')
-  const pluginSkillDirectory = getAiSkillDirectory(SKILL_NAME)
-  const pluginProcessor = path.join(pluginSkillDirectory, 'scripts', 'deta_dd_processor.py')
-  const pluginTemplate = path.join(pluginSkillDirectory, 'assets', 'reference.docx')
+  const skillProcessor = path.join(skillDirectory, 'scripts', 'deta_dd_processor.py')
+  const skillTemplate = path.join(skillDirectory, 'assets', 'reference.docx')
   const python = await resolvePython()
-  const workDirectory = path.join(input.taskDirectory, '.write-investment-dd-report')
+  const workDirectory = path.join(input.taskDirectory, '.draft-due-diligence-report')
   const renderDirectory = path.join(workDirectory, 'render')
   const evidencePath = path.join(workDirectory, 'evidence.json')
   const diligenceDataPath = path.join(workDirectory, 'diligence-data.json')
@@ -1050,41 +1049,41 @@ export async function generateDueDiligenceReportWithSkill(input: {
     label: '尽调旧内容层 DOCX 审计',
     blockWarnings: true,
   })
-  let pluginContentContractPassed = true
+  let skillContentContractPassed = true
   try {
-    auditOutputs.pluginFormat = await runPython({
+    auditOutputs.skillFormat = await runPython({
       python,
-      script: pluginProcessor,
+      script: skillProcessor,
       args: ['format', '--input', legacyDraftPath, '--output', input.outputPath],
-      label: 'sbl-deta-dd-report V5 模板格式化',
+      label: 'draft-due-diligence-report V5 模板格式化',
     })
   } catch (error) {
     // The V5 formatter writes the template-normalized DOCX before running its
-    // newer editorial contract.  Preserve that real plugin output when the
+    // newer editorial contract. Preserve that real Skill output when the
     // host's already-reviewed legacy content does not yet satisfy every newer
-    // semantic slot; never fall back to the pre-plugin draft.
+    // semantic slot; never fall back to the pre-Skill draft.
     await access(input.outputPath)
-    pluginContentContractPassed = false
-    auditOutputs.pluginFormat = (error as Error & { auditDetails?: string }).auditDetails
+    skillContentContractPassed = false
+    auditOutputs.skillFormat = (error as Error & { auditDetails?: string }).auditDetails
       ?? (error as Error).message
   }
-  auditOutputs.pluginStyle = await runPython({
+  auditOutputs.skillStyle = await runPython({
     python,
-    script: path.join(pluginSkillDirectory, 'scripts', 'investment_bank_styles.py'),
+    script: path.join(skillDirectory, 'scripts', 'investment_bank_styles.py'),
     args: ['audit', '--input', input.outputPath, '--allow-unupdated-toc'],
-    label: 'sbl-deta-dd-report V5 命名样式与目录校验',
+    label: 'draft-due-diligence-report V5 命名样式与目录校验',
   })
   try {
-    auditOutputs.pluginVerify = await runPython({
+    auditOutputs.skillVerify = await runPython({
       python,
-      script: pluginProcessor,
+      script: skillProcessor,
       args: ['verify', '--docx', input.outputPath, '--output-dir', renderDirectory],
-      label: 'sbl-deta-dd-report V5 模板及逐页校验',
+      label: 'draft-due-diligence-report V5 模板及逐页校验',
       timeout: 360_000,
     })
   } catch (error) {
-    pluginContentContractPassed = false
-    auditOutputs.pluginVerify = (error as Error & { auditDetails?: string }).auditDetails
+    skillContentContractPassed = false
+    auditOutputs.skillVerify = (error as Error & { auditDetails?: string }).auditDetails
       ?? (error as Error).message
   }
   const pages = (await readdir(renderDirectory)).filter((name) => /^page-\d+\.png$/i.test(name))
@@ -1094,8 +1093,8 @@ export async function generateDueDiligenceReportWithSkill(input: {
     })
   }
   const outputStat = await stat(input.outputPath)
-  const pluginTemplateSha256 = createHash('sha256')
-    .update(await readFile(pluginTemplate))
+  const skillTemplateSha256 = createHash('sha256')
+    .update(await readFile(skillTemplate))
     .digest('hex')
   const reportBlocks = Array.isArray(generated.report.blocks) ? generated.report.blocks : []
   const sectionTitles = reportBlocks
@@ -1119,18 +1118,18 @@ export async function generateDueDiligenceReportWithSkill(input: {
     .sort((left, right) => left - right)
   return {
     bytes: outputStat.size,
-    formatter: 'sbl-deta-dd-report-plugin-v5',
+    formatter: 'draft-due-diligence-report-skill-v5',
     skillName: SKILL_NAME,
     reportMode: generated.reportMode,
     pageIntent: 'long-form',
     templateApplied: true,
     templateEnforced: true,
     rendererMode: 'deta-v5-retained-template-format',
-    pluginTemplatePath: pluginTemplate,
-    pluginTemplateSha256,
-    pluginStyleAuditPassed: true,
-    pluginVerifyPassed: pluginContentContractPassed,
-    pluginContentContractPassed,
+    skillTemplatePath: skillTemplate,
+    skillTemplateSha256,
+    skillStyleAuditPassed: true,
+    skillVerifyPassed: skillContentContractPassed,
+    skillContentContractPassed,
     typography: { body: '宋体 12pt', heading: '黑体 16/14/12pt' },
     tableCount,
     sectionTitles,

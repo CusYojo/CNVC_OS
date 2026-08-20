@@ -71,7 +71,7 @@ export function safeAiTaskFailureMessage(error: unknown) {
     return '当前尽调主要依赖公开信息，但尚未完成公司、产品、团队、市场、竞争、客户、融资及合规八个领域的覆盖审计。请补充项目原始资料，或完成公开研究审计后再继续生成。'
   }
   if (code === 'DUE_DILIGENCE_SKILL_RUNTIME_UNAVAILABLE') {
-    return 'write-investment-dd-report 运行环境未就绪，因此未生成文件。请管理员检查 Python 依赖、LibreOffice 及仿宋/黑体中文字体。'
+    return 'draft-due-diligence-report 运行环境未就绪，因此未生成文件。请管理员检查 Python 依赖、LibreOffice 及仿宋/黑体中文字体。'
   }
   if (code === 'DUE_DILIGENCE_EVIDENCE_EMPTY') {
     return '现有资料中没有可进入尽调证据台账的有效事实，因此未生成文件。请先补充项目原始资料。'

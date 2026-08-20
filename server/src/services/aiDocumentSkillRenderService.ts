@@ -16,8 +16,10 @@ async function commandWorks(command: string) {
   }
 }
 
-export async function resolveDocumentPluginPython() {
+export async function resolveDocumentSkillPython() {
   const candidates = [
+    process.env.AI_DOCUMENT_SKILL_PYTHON,
+    // Backward-compatible environment alias; runtime execution is Skill-owned.
     process.env.AI_DOCUMENT_PLUGIN_PYTHON,
     process.env.AI_QA_SKILL_PYTHON,
     path.resolve(process.cwd(), 'server', '.venv', 'bin', 'python'),
@@ -27,7 +29,7 @@ export async function resolveDocumentPluginPython() {
   for (const candidate of [...new Set(candidates)]) {
     if (await commandWorks(candidate)) return candidate
   }
-  throw new Error('文档插件缺少 python-docx/lxml 运行环境')
+  throw new Error('文档 Skill 缺少 python-docx/lxml 运行环境')
 }
 
 function parseJsonOutput(stdout: string) {
@@ -37,13 +39,13 @@ function parseJsonOutput(stdout: string) {
       const parsed = JSON.parse(line) as Record<string, unknown>
       if (parsed && typeof parsed === 'object') return parsed
     } catch {
-      // Keep looking for the last JSON line emitted by the plugin.
+      // Keep looking for the last JSON line emitted by the Skill processor.
     }
   }
-  throw new Error('文档插件未返回合法 JSON 结果')
+  throw new Error('文档 Skill 未返回合法 JSON 结果')
 }
 
-export async function runDocumentPlugin(input: {
+export async function runDocumentSkillProcessor(input: {
   python: string
   args: string[]
   label: string
@@ -64,27 +66,26 @@ export async function runDocumentPlugin(input: {
       .join('\n')
       .trim()
     throw Object.assign(new Error(`${input.label}失败${details ? `：${details.slice(-6000)}` : ''}`), {
-      code: 'DOCUMENT_PLUGIN_RENDER_FAILED',
+      code: 'DOCUMENT_SKILL_RENDER_FAILED',
     })
   }
 }
 
-export async function renderInvestmentProposalWithPlugin(input: {
+export async function renderInvestmentProposalWithSkill(input: {
   outputPath: string
   payload: Record<string, unknown>
 }) {
   const skillDirectory = getAiSkillDirectory('draft-investment-proposal')
-  const pluginDirectory = path.resolve(skillDirectory, '..', '..')
-  const processor = path.join(pluginDirectory, 'scripts', 'deta_ic_processor.py')
-  const template = path.join(pluginDirectory, 'assets', '德塔式精简工商字段投资提案_固定模板V7.docx')
-  const workDirectory = path.join(path.dirname(input.outputPath), '.investment-proposal-plugin-render')
+  const processor = path.join(skillDirectory, 'scripts', 'deta_ic_processor.py')
+  const template = path.join(skillDirectory, 'assets', '德塔式精简工商字段投资提案_固定模板V7.docx')
+  const workDirectory = path.join(path.dirname(input.outputPath), '.draft-investment-proposal-render')
   const payloadPath = path.join(workDirectory, 'proposal.json')
   const manifestPath = path.join(workDirectory, 'render-manifest.json')
-  const bridge = path.resolve(process.cwd(), 'server', 'scripts', 'plugin_document_bridge.py')
+  const bridge = path.resolve(process.cwd(), 'server', 'scripts', 'skill_document_bridge.py')
   await mkdir(workDirectory, { recursive: true })
   await writeFile(payloadPath, JSON.stringify(input.payload, null, 2), 'utf8')
-  const python = await resolveDocumentPluginPython()
-  const manifest = await runDocumentPlugin({
+  const python = await resolveDocumentSkillPython()
+  const manifest = await runDocumentSkillProcessor({
     python,
     args: [
       bridge,
@@ -95,7 +96,7 @@ export async function renderInvestmentProposalWithPlugin(input: {
       '--output', input.outputPath,
       '--manifest', manifestPath,
     ],
-    label: '投资提案插件 V7 模板渲染',
+    label: 'draft-investment-proposal V7 模板渲染',
   })
   await assertFile(input.outputPath)
   const output = await readFile(input.outputPath)
@@ -105,12 +106,12 @@ export async function renderInvestmentProposalWithPlugin(input: {
     templateApplied: true,
     templateEnforced: manifest.template_enforced === true,
     rendererMode: manifest.renderer_mode,
-    formatter: 'sbl-investment-proposal-plugin-v7',
-    pluginTemplatePath: template,
-    pluginTemplateSha256: manifest.template_sha256,
+    formatter: 'draft-investment-proposal-v7',
+    skillTemplatePath: template,
+    skillTemplateSha256: manifest.template_sha256,
     documentSha256: manifest.docx_sha256,
-    pluginManifestPath: manifestPath,
-    pluginManifest: manifest,
+    skillManifestPath: manifestPath,
+    skillManifest: manifest,
     typography: { body: '宋体 10.5pt', heading: '黑体 14/12pt' },
   }
 }
@@ -187,7 +188,7 @@ function numberedBlocks(
   })
 }
 
-export function buildCompliancePluginContent(input: {
+export function buildComplianceSkillContent(input: {
   projectName: string
   content: BusinessContent
   sources: EvidenceSource[]
@@ -263,7 +264,7 @@ export function buildCompliancePluginContent(input: {
   }
 }
 
-export async function renderComplianceStatementWithPlugin(input: {
+export async function renderComplianceStatementWithSkill(input: {
   outputPath: string
   taskProjectName: string
   content: BusinessContent
@@ -271,14 +272,14 @@ export async function renderComplianceStatementWithPlugin(input: {
   company: string
   generatedAt: Date
 }) {
-  const skillDirectory = getAiSkillDirectory('generate-compliance-statement')
+  const skillDirectory = getAiSkillDirectory('generate-investment-compliance-note')
   const processor = path.join(skillDirectory, 'scripts', 'compliance_processor.py')
-  const template = path.resolve(skillDirectory, '..', 'artifact-template-deta-3', 'assets', 'reference.docx')
-  const workDirectory = path.join(path.dirname(input.outputPath), '.compliance-plugin-render')
+  const template = path.join(skillDirectory, 'assets', 'reference.docx')
+  const workDirectory = path.join(path.dirname(input.outputPath), '.generate-investment-compliance-note-render')
   const contentPath = path.join(workDirectory, 'content.json')
   const verifyPath = path.join(workDirectory, 'qa.json')
   await mkdir(workDirectory, { recursive: true })
-  const payload = buildCompliancePluginContent({
+  const payload = buildComplianceSkillContent({
     projectName: input.taskProjectName,
     content: input.content,
     sources: input.sources,
@@ -286,20 +287,20 @@ export async function renderComplianceStatementWithPlugin(input: {
     generatedAt: input.generatedAt,
   })
   await writeFile(contentPath, JSON.stringify(payload, null, 2), 'utf8')
-  const python = await resolveDocumentPluginPython()
-  const build = await runDocumentPlugin({
+  const python = await resolveDocumentSkillPython()
+  const build = await runDocumentSkillProcessor({
     python,
     args: [processor, 'build', '--content', contentPath, '--output', input.outputPath, '--template', template],
-    label: '合规性说明插件模板渲染',
+    label: 'generate-investment-compliance-note 模板渲染',
   })
-  await runDocumentPlugin({
+  await runDocumentSkillProcessor({
     python,
     args: [processor, 'verify', '--content', contentPath, '--docx', input.outputPath, '--out', verifyPath, '--template', template],
-    label: '合规性说明插件模板校验',
+    label: 'generate-investment-compliance-note 模板校验',
   })
   const verify = JSON.parse(await readFile(verifyPath, 'utf8')) as Record<string, unknown>
   if (verify.status !== 'pass' && verify.pass !== true) {
-    throw new Error('合规性说明未通过插件模板校验')
+    throw new Error('合规性说明未通过 Skill 模板校验')
   }
   const output = await readFile(input.outputPath)
   const templateBuffer = await readFile(template)
@@ -309,9 +310,9 @@ export async function renderComplianceStatementWithPlugin(input: {
     templateApplied: true,
     templateEnforced: true,
     rendererMode: 'clone-retained-docx',
-    formatter: 'sbl-investment-compliance-plugin-v1',
-    pluginTemplatePath: template,
-    pluginTemplateSha256: createHash('sha256').update(templateBuffer).digest('hex'),
+    formatter: 'generate-investment-compliance-note-v1',
+    skillTemplatePath: template,
+    skillTemplateSha256: createHash('sha256').update(templateBuffer).digest('hex'),
     templateSha256: createHash('sha256').update(templateBuffer).digest('hex'),
     templateCorpus: [{
       fileName: path.basename(template),
@@ -319,9 +320,9 @@ export async function renderComplianceStatementWithPlugin(input: {
     }],
     templateParts: ['word/document.xml', 'word/styles.xml', 'word/numbering.xml'],
     documentSha256: createHash('sha256').update(output).digest('hex'),
-    pluginVerifyPassed: true,
-    pluginVerify: verify,
-    pluginBuild: build,
+    skillVerifyPassed: true,
+    skillVerify: verify,
+    skillBuild: build,
     typography: { body: '宋体', heading: '宋体/黑体' },
   }
 }
@@ -329,6 +330,6 @@ export async function renderComplianceStatementWithPlugin(input: {
 export async function assertFile(pathname: string) {
   await access(pathname)
   const result = await stat(pathname)
-  if (!result.isFile() || result.size < 1000) throw new Error(`插件未生成有效文件：${pathname}`)
+  if (!result.isFile() || result.size < 1000) throw new Error(`Skill 未生成有效文件：${pathname}`)
   return result
 }

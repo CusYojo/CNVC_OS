@@ -930,7 +930,7 @@ function normalizeQuestions(
       question: compactProjectQaQuestion(candidate.question),
     })
   })
-  // generate-project-qa-report 要求最后一题收束风险、核验条件和决策动作。
+  // draft-investment-qa 要求最后一题收束风险、核验条件和决策动作。
   // 模型或按证据密度排序都不能把这一题挤出标准版题数。
   if (!candidates.some((candidate) => candidate.category === '风险与核验')) {
     const riskQuestion: Omit<ProjectQaGeneratedQuestion, 'id'> = {

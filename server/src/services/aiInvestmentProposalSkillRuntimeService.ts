@@ -1,11 +1,11 @@
 import { createHash } from 'node:crypto'
 import { access, readFile } from 'node:fs/promises'
 import path from 'node:path'
-import { getAiSkillDirectory, getAiSkillRuntimeDirectory } from './aiSkillService.js'
+import { getAiSkillDirectory } from './aiSkillService.js'
 import { execFileSupervised as execFileAsync } from '../runtime/supervisedProcessService.js'
 const SKILL_NAME = 'draft-investment-proposal' as const
-const PLUGIN_TEMPLATE_FILE = '德塔式精简工商字段投资提案_固定模板V7.docx'
-const PLUGIN_TEMPLATE_SHA256 = '849a6e1ec86c9576f52332ffbf8dc048dea5d929daa438810f701c4e2116da15'
+const SKILL_TEMPLATE_FILE = '德塔式精简工商字段投资提案_固定模板V7.docx'
+const SKILL_TEMPLATE_SHA256 = '849a6e1ec86c9576f52332ffbf8dc048dea5d929daa438810f701c4e2116da15'
 
 type CaseStyleValidation = {
   passed: boolean
@@ -22,7 +22,7 @@ type ProposalValidation = {
   metrics: Record<string, unknown>
 }
 
-type PluginRenderManifest = {
+type SkillRenderManifest = {
   status?: unknown
   workflow?: unknown
   docx?: unknown
@@ -40,8 +40,8 @@ function sha256(buffer: Buffer) {
   return createHash('sha256').update(buffer).digest('hex')
 }
 
-async function validatePluginTemplateRender(filePath: string) {
-  const workDirectory = path.join(path.dirname(filePath), '.investment-proposal-plugin-render')
+async function validateSkillTemplateRender(filePath: string) {
+  const workDirectory = path.join(path.dirname(filePath), '.draft-investment-proposal-render')
   const manifestPath = path.join(workDirectory, 'render-manifest.json')
   try {
     await access(manifestPath)
@@ -49,19 +49,18 @@ async function validatePluginTemplateRender(filePath: string) {
     return undefined
   }
 
-  let manifest: PluginRenderManifest
+  let manifest: SkillRenderManifest
   try {
-    manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as PluginRenderManifest
+    manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as SkillRenderManifest
   } catch (error) {
-    throw Object.assign(new Error('投资提案插件渲染清单无法读取'), {
+    throw Object.assign(new Error('投资提案 Skill 渲染清单无法读取'), {
       code: 'INVESTMENT_PROPOSAL_SKILL_VALIDATION_FAILED',
       report: { manifestPath, error: (error as Error).message },
     })
   }
 
-  const pluginSkillDirectory = getAiSkillDirectory(SKILL_NAME)
-  const pluginDirectory = path.resolve(pluginSkillDirectory, '..', '..')
-  const expectedTemplate = path.join(pluginDirectory, 'assets', PLUGIN_TEMPLATE_FILE)
+  const skillDirectory = getAiSkillDirectory(SKILL_NAME)
+  const expectedTemplate = path.join(skillDirectory, 'assets', SKILL_TEMPLATE_FILE)
   const expectedPayload = path.join(workDirectory, 'proposal.json')
   let documentBuffer: Buffer
   let templateBuffer: Buffer
@@ -73,30 +72,30 @@ async function validatePluginTemplateRender(filePath: string) {
       readFile(expectedPayload),
     ])
   } catch (error) {
-    throw Object.assign(new Error('投资提案插件模板校验所需文件不完整'), {
+    throw Object.assign(new Error('投资提案 Skill 模板校验所需文件不完整'), {
       code: 'INVESTMENT_PROPOSAL_SKILL_VALIDATION_FAILED',
       report: { manifestPath, error: (error as Error).message },
     })
   }
   const checks = {
     status: manifest.status === 'rendered',
-    workflow: manifest.workflow === 'SBL_APP_PLUGIN_TEMPLATE_RENDER_V1',
+    workflow: manifest.workflow === 'SBL_APP_SKILL_TEMPLATE_RENDER_V1',
     documentPath: path.resolve(String(manifest.docx ?? '')) === path.resolve(filePath),
     documentSha256: manifest.docx_sha256 === sha256(documentBuffer),
     payloadPath: path.resolve(String(manifest.payload ?? '')) === path.resolve(expectedPayload),
     payloadSha256: manifest.payload_sha256 === sha256(payloadBuffer),
     templatePath: path.resolve(String(manifest.template ?? '')) === path.resolve(expectedTemplate),
-    templateSha256: manifest.template_sha256 === PLUGIN_TEMPLATE_SHA256
-      && sha256(templateBuffer) === PLUGIN_TEMPLATE_SHA256,
+    templateSha256: manifest.template_sha256 === SKILL_TEMPLATE_SHA256
+      && sha256(templateBuffer) === SKILL_TEMPLATE_SHA256,
     templateEnforced: manifest.template_enforced === true,
     rendererMode: manifest.renderer_mode === 'clone-approved-docx',
     externalLlmGateway: manifest.external_llm_gateway === false,
   }
   const errors = Object.entries(checks)
     .filter(([, passed]) => !passed)
-    .map(([name]) => `PLUGIN_RENDER_${name.replace(/([a-z])([A-Z])/g, '$1_$2').toUpperCase()}`)
+    .map(([name]) => `SKILL_RENDER_${name.replace(/([a-z])([A-Z])/g, '$1_$2').toUpperCase()}`)
   if (errors.length) {
-    throw Object.assign(new Error('投资提案插件模板来源校验未通过'), {
+    throw Object.assign(new Error('投资提案 Skill 模板来源校验未通过'), {
       code: 'INVESTMENT_PROPOSAL_SKILL_VALIDATION_FAILED',
       report: { manifestPath, errors, checks },
     })
@@ -105,7 +104,7 @@ async function validatePluginTemplateRender(filePath: string) {
   return {
     passed: true as const,
     skillName: SKILL_NAME,
-    python: 'plugin-template-renderer',
+    python: 'skill-template-renderer',
     fidelity: {
       passed: true,
       error_count: 0,
@@ -113,7 +112,7 @@ async function validatePluginTemplateRender(filePath: string) {
       style_counts: {},
       table_kinds: [],
       profile: 'artifact-template-deta-v7',
-      template_sha256: PLUGIN_TEMPLATE_SHA256,
+      template_sha256: SKILL_TEMPLATE_SHA256,
       manifest_path: manifestPath,
     },
     proposal: {
@@ -176,16 +175,16 @@ async function runValidator<T>(python: string, script: string, args: string[], l
 }
 
 export async function validateInvestmentProposalWithSkill(filePath: string) {
-  // The installed Deta V7 plugin is the active visual authority for application
+  // The installed Deta V7 Skill is the active visual authority for application
   // tasks. Its small-page template intentionally differs from the legacy A4
-  // case-style assets retained by the host skill runtime. Validate the plugin's
+  // case-style assets retained by the host skill runtime. Validate the Skill's
   // signed render manifest when present instead of applying mutually exclusive
   // A4 geometry and style rules to a V7 document.
-  const pluginValidation = await validatePluginTemplateRender(filePath)
-  if (pluginValidation) return pluginValidation
+  const skillValidation = await validateSkillTemplateRender(filePath)
+  if (skillValidation) return skillValidation
 
   const python = await resolvePython()
-  const skillDirectory = getAiSkillRuntimeDirectory(SKILL_NAME)
+  const skillDirectory = getAiSkillDirectory(SKILL_NAME)
   const fidelityScript = path.join(skillDirectory, 'scripts', 'validate_case_style_fidelity.py')
   const proposalScript = path.join(skillDirectory, 'scripts', 'validate_proposal.py')
   await Promise.all([access(fidelityScript), access(proposalScript)])

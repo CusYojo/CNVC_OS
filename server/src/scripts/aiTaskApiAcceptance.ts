@@ -570,14 +570,14 @@ async function main(cleanupState: AcceptanceCleanupState) {
   )
   assert(
     'AI-011 确定性记录 Q&A Skill 版本',
-    qaAnswer.skillName === 'generate-project-qa-report'
+    qaAnswer.skillName === 'draft-investment-qa'
       && /^sha256-[a-f0-9]{12}$/.test(qaAnswer.skillVersion)
       && /^[a-f0-9]{64}$/.test(qaAnswer.skillSha256),
     `${qaAnswer.skillName}:${qaAnswer.skillVersion}`,
   )
   assert(
     'AI-011 记录 docs Q&A 模板版本',
-    qaAnswer.templateVersion === 'generate-project-qa-report-20260806-v1'
+    qaAnswer.templateVersion === 'draft-investment-qa-20260806-v1'
       && qaAnswer.referenceTemplates.length === 5
       && qaAnswer.referenceTemplates.every((item) => item.toLowerCase().endsWith('.md')),
     `${qaAnswer.templateVersion} / ${qaAnswer.referenceTemplates.join('、')}`,
@@ -650,7 +650,7 @@ async function main(cleanupState: AcceptanceCleanupState) {
       && !('downloadUrl' in qaAnswerRecord)
       && qaAnswer.referenceTemplates.length === 5
       && qaAnswer.referenceTemplates.every((item) => item.toLowerCase().endsWith('.md')),
-    '兼容结构化单题回答 / generate-project-qa-report 的 5 份 Markdown 规范 / 无 artifacts',
+    '兼容结构化单题回答 / draft-investment-qa 的 5 份 Markdown 规范 / 无 artifacts',
   )
 
   const qaTaskKey = `accept-project-qa-${suffix}`
@@ -682,7 +682,7 @@ async function main(cleanupState: AcceptanceCleanupState) {
   assert(
     'AI-011 记录 Generator、Reviewer、模板和 Skill 审计信息',
     qaTask.artifacts.every((artifact) =>
-      artifact.metadata?.skillName === 'generate-project-qa-report'
+      artifact.metadata?.skillName === 'draft-investment-qa'
       && artifact.metadata?.questionCount === 8
       && artifact.metadata?.categoryCount === 15
       && Boolean(artifact.metadata?.templateCorpusSha256)
@@ -700,7 +700,7 @@ async function main(cleanupState: AcceptanceCleanupState) {
   )
 
   if (acceptanceScope === 'qa') {
-    await outputReport('Q&A 专项验收覆盖兼容单题接口及正式 project_qa 文档任务，验证 generate-project-qa-report、内部证据审阅与 DOCX 单产物。')
+    await outputReport('Q&A 专项验收覆盖兼容单题接口及正式 project_qa 文档任务，验证 draft-investment-qa、内部证据审阅与 DOCX 单产物。')
     return
   }
   }
@@ -757,7 +757,7 @@ async function main(cleanupState: AcceptanceCleanupState) {
   assert(
     'AI-007 产物记录 Skill 版本',
     compliance.artifacts.every((artifact) =>
-      artifact.metadata?.skillName === 'generate-compliance-statement'
+      artifact.metadata?.skillName === 'generate-investment-compliance-note'
       && typeof artifact.metadata?.skillSha256 === 'string'),
     compliance.artifacts.map((artifact) => String(artifact.metadata?.skillName)).join(','),
   )
@@ -941,7 +941,7 @@ async function main(cleanupState: AcceptanceCleanupState) {
       type: 'due_diligence_report',
       parameters: { sourceCutoffDate: cutoff, outputFormat: 'DOCX', diligenceScope: '商业尽调' },
       formats: ['docx'],
-      skillName: 'write-investment-dd-report',
+      skillName: 'draft-due-diligence-report',
     },
   ]
   const selectedTaskInputs = selectedRemainingTypes.size > 0

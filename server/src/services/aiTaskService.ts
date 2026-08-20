@@ -1267,27 +1267,27 @@ function assessBusinessDocumentTemplateFidelity(input: {
   if (input.type === 'compliance_statement') {
     if (
       input.generationMetadata.templateEnforced === true
-      && input.generationMetadata.pluginVerifyPassed === true
+      && input.generationMetadata.skillVerifyPassed === true
     ) {
       return assessTemplateFidelity({ dimensions: {
         structure: [
           fidelityCheck('section-order', exactSections, true),
-          fidelityCheck('plugin-content-review', input.complianceContentReviewPassed === true, true),
+          fidelityCheck('skill-content-review', input.complianceContentReviewPassed === true, true),
         ],
         typography: [
-          fidelityCheck('plugin-layout-verify', true, true),
+          fidelityCheck('skill-layout-verify', true, true),
           fidelityCheck('cjk-font', metadataFlag(quality, 'cjkFontValidated')),
         ],
         layout: [
           fidelityCheck('retained-template-enforced', true, true),
-          fidelityCheck('plugin-verify', true, true),
+          fidelityCheck('skill-verify', true, true),
         ],
         tables: [
           fidelityCheck('template-table-count', Number(quality.tableCount ?? 0) === 0, true),
         ],
         contentOrganization: [
           fidelityCheck('content-review', input.complianceContentReviewPassed === true, true),
-          fidelityCheck('plugin-template-provenance', Boolean(input.generationMetadata.pluginTemplateSha256), true),
+          fidelityCheck('skill-template-provenance', Boolean(input.generationMetadata.skillTemplateSha256), true),
         ],
       } })
     }
@@ -1336,7 +1336,7 @@ function assessBusinessDocumentTemplateFidelity(input: {
           fidelityCheck('content-review', contentAuditPassed, true),
         ],
         typography: [
-          fidelityCheck('plugin-v7-typography', true, true),
+          fidelityCheck('skill-v7-typography', true, true),
           fidelityCheck('cjk-font', metadataFlag(quality, 'cjkFontValidated')),
         ],
         layout: [
@@ -1347,7 +1347,7 @@ function assessBusinessDocumentTemplateFidelity(input: {
           fidelityCheck('editable-native-tables', Number(quality.tableCount ?? -1) === expectedTableCount, true),
         ],
         contentOrganization: [
-          fidelityCheck('plugin-template-provenance', Boolean(input.generationMetadata.pluginTemplateSha256), true),
+          fidelityCheck('skill-template-provenance', Boolean(input.generationMetadata.skillTemplateSha256), true),
           fidelityCheck('no-external-gateway-in-renderer', true),
         ],
       } })
@@ -1587,7 +1587,7 @@ async function executeTask(taskId: string) {
     }
     let qaTemplateProfile: QaTemplateProfile | undefined
     if (task.type === 'project_qa') {
-      await updateStage(taskId, '加载 sbl-investment-qa 德塔 Q&A 版式规范', 6)
+      await updateStage(taskId, '加载 draft-investment-qa 德塔 Q&A 版式规范', 6)
       qaTemplateProfile = createProjectQaSkillProfile(skill)
     }
     const started = await aiTaskRepository.markTaskStarted({
@@ -1931,13 +1931,13 @@ async function executeTask(taskId: string) {
       })
       if (await cancelIfRequested(taskId)) return
 
-      await updateStage(taskId, 'sbl-investment-qa 按德塔版式生成并校验 DOCX', 80)
+      await updateStage(taskId, 'draft-investment-qa 按德塔版式生成并校验 DOCX', 80)
       const taskDir = path.join(ARTIFACT_ROOT, task.userId, task.projectId, task.id)
       await mkdir(taskDir, { recursive: true })
       const names = makeProjectQaFileNames(project.name, qaMode)
       const docxPath = path.join(taskDir, names.docx)
-      const markdownPath = path.join(taskDir, '.generate-project-qa-report.md')
-      const visualDirectory = path.join(taskDir, '.generate-project-qa-report-visual-qa')
+      const markdownPath = path.join(taskDir, '.draft-investment-qa.md')
+      const visualDirectory = path.join(taskDir, '.draft-investment-qa-visual-qa')
       const qaDocument = await retryDocumentStep('Q&A DOCX 生成与质量检查', async () => {
         const generation = await generateProjectQaWithSkill({
           outputPath: docxPath,
@@ -1962,7 +1962,7 @@ async function executeTask(taskId: string) {
         })
         if (!templateFidelity.passed) {
           throw new Error(
-            `generate-project-qa-report 成品未通过模板一致性门禁：${
+            `draft-investment-qa 成品未通过模板一致性门禁：${
               templateFidelity.failedChecks.join('、')
             }`,
           )
@@ -1989,9 +1989,6 @@ async function executeTask(taskId: string) {
         skillName: skill.name,
         skillVersion: skill.version,
         skillSha256: skill.sha256,
-        pluginName: skill.pluginName ?? template.pluginName,
-        pluginVersion: skill.pluginVersion,
-        pluginEntrySkillName: skill.entrySkillName ?? template.pluginEntrySkillName,
         qaMode,
         questionDepth,
         questionCount: qaContent.questions.length,
@@ -2486,7 +2483,7 @@ async function executeTask(taskId: string) {
           : task.type === 'investment_proposal'
             ? 'sbl-investment-proposal 克隆 V7 模板生成 Word'
           : task.type === 'due_diligence_report'
-            ? 'sbl-deta-dd-report 按 V5 模板生成并校验 Word'
+            ? 'draft-due-diligence-report 按 V5 模板生成并校验 Word'
           : '生成 DOCX',
       68,
     )
@@ -2698,7 +2695,7 @@ async function executeTask(taskId: string) {
       })()
       : await retryDocumentStep(
           task.type === 'due_diligence_report'
-            ? 'write-investment-dd-report 原生 DOCX Pipeline'
+            ? 'draft-due-diligence-report 原生 DOCX Pipeline'
             : 'DOCX Formatter',
           generateCurrentDocx,
         )
@@ -3004,9 +3001,6 @@ async function executeTask(taskId: string) {
         skillName: skill.name,
         skillVersion: skill.version,
         skillSha256: skill.sha256,
-        pluginName: skill.pluginName ?? template.pluginName,
-        pluginVersion: skill.pluginVersion,
-        pluginEntrySkillName: skill.entrySkillName ?? template.pluginEntrySkillName,
         ...(resolvedCustomTemplate
           ? {
               customTemplateId: resolvedCustomTemplate.row.id,
@@ -3052,9 +3046,6 @@ async function executeTask(taskId: string) {
           skillName: skill.name,
           skillVersion: skill.version,
           skillSha256: skill.sha256,
-          pluginName: skill.pluginName ?? template.pluginName,
-          pluginVersion: skill.pluginVersion,
-          pluginEntrySkillName: skill.entrySkillName ?? template.pluginEntrySkillName,
           ...(pptWorkflow
             ? {
                 pptWorkflow: {

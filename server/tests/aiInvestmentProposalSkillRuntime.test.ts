@@ -13,15 +13,15 @@ function sha256(value: Buffer) {
   return createHash('sha256').update(value).digest('hex')
 }
 
-test('investment proposal validates the active Deta V7 plugin manifest instead of legacy A4 rules', async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), 'proposal-plugin-validation-'))
+test('investment proposal validates the active Deta V7 Skill manifest instead of legacy A4 rules', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'proposal-skill-validation-'))
   try {
-    const renderDirectory = path.join(directory, '.investment-proposal-plugin-render')
+    const renderDirectory = path.join(directory, '.draft-investment-proposal-render')
     const documentPath = path.join(directory, '投资提案.docx')
     const payloadPath = path.join(renderDirectory, 'proposal.json')
     const manifestPath = path.join(renderDirectory, 'render-manifest.json')
-    const pluginSkillDirectory = getAiSkillDirectory('draft-investment-proposal')
-    const templatePath = path.resolve(pluginSkillDirectory, '..', '..', 'assets', TEMPLATE_NAME)
+    const skillDirectory = getAiSkillDirectory('draft-investment-proposal')
+    const templatePath = path.join(skillDirectory, 'assets', TEMPLATE_NAME)
     await mkdir(renderDirectory, { recursive: true })
     await copyFile(templatePath, documentPath)
     await writeFile(payloadPath, JSON.stringify({ meta: {}, sections: [] }), 'utf8')
@@ -32,7 +32,7 @@ test('investment proposal validates the active Deta V7 plugin manifest instead o
     ])
     await writeFile(manifestPath, JSON.stringify({
       status: 'rendered',
-      workflow: 'SBL_APP_PLUGIN_TEMPLATE_RENDER_V1',
+      workflow: 'SBL_APP_SKILL_TEMPLATE_RENDER_V1',
       docx: documentPath,
       docx_sha256: sha256(document),
       payload: payloadPath,
@@ -53,22 +53,22 @@ test('investment proposal validates the active Deta V7 plugin manifest instead o
   }
 })
 
-test('investment proposal rejects a Deta V7 plugin manifest when the document hash drifts', async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), 'proposal-plugin-validation-'))
+test('investment proposal rejects a Deta V7 Skill manifest when the document hash drifts', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'proposal-skill-validation-'))
   try {
-    const renderDirectory = path.join(directory, '.investment-proposal-plugin-render')
+    const renderDirectory = path.join(directory, '.draft-investment-proposal-render')
     const documentPath = path.join(directory, '投资提案.docx')
     const payloadPath = path.join(renderDirectory, 'proposal.json')
     const manifestPath = path.join(renderDirectory, 'render-manifest.json')
-    const pluginSkillDirectory = getAiSkillDirectory('draft-investment-proposal')
-    const templatePath = path.resolve(pluginSkillDirectory, '..', '..', 'assets', TEMPLATE_NAME)
+    const skillDirectory = getAiSkillDirectory('draft-investment-proposal')
+    const templatePath = path.join(skillDirectory, 'assets', TEMPLATE_NAME)
     await mkdir(renderDirectory, { recursive: true })
     await copyFile(templatePath, documentPath)
     await writeFile(payloadPath, '{}', 'utf8')
     const [payload, template] = await Promise.all([readFile(payloadPath), readFile(templatePath)])
     await writeFile(manifestPath, JSON.stringify({
       status: 'rendered',
-      workflow: 'SBL_APP_PLUGIN_TEMPLATE_RENDER_V1',
+      workflow: 'SBL_APP_SKILL_TEMPLATE_RENDER_V1',
       docx: documentPath,
       docx_sha256: '0'.repeat(64),
       payload: payloadPath,
@@ -84,7 +84,7 @@ test('investment proposal rejects a Deta V7 plugin manifest when the document ha
       validateInvestmentProposalWithSkill(documentPath),
       (error: Error & { code?: string; report?: { errors?: string[] } }) => (
         error.code === 'INVESTMENT_PROPOSAL_SKILL_VALIDATION_FAILED'
-        && error.report?.errors?.includes('PLUGIN_RENDER_DOCUMENT_SHA256') === true
+        && error.report?.errors?.includes('SKILL_RENDER_DOCUMENT_SHA256') === true
       ),
     )
   } finally {

@@ -28,7 +28,7 @@ const BODY_FONT = process.env.AI_QA_BODY_FONT || process.env.AI_DOCUMENT_SONG_FO
 const HEADING_FONT = process.env.AI_QA_HEADING_FONT || process.env.AI_DOCUMENT_SONG_FONT || '宋体'
 const LATIN_FONT = 'Times New Roman'
 const MUTED = '595959'
-// sbl-investment-qa 的 Deta Formatter 使用 STKaiti；
+// draft-investment-qa 的 Deta Formatter 使用 STKaiti；
 // 保持与插件脚本写入 OpenXML 的字体家族名一致。
 const PROJECT_QA_REPORT_BODY_FONT = 'STKaiti'
 const PROJECT_QA_REPORT_HEADING_FONT = 'STKaiti'
@@ -423,7 +423,7 @@ async function generateProjectQaReportDocx(input: {
       ).replace(/^\s*结论(?:如下)?\s*[：:]\s*/, '').trim())
       .filter(Boolean)
     if (lines.length === 0) {
-      throw new Error(`generate-project-qa-report 第 ${index + 1} 题缺少有效回答`)
+      throw new Error(`draft-investment-qa 第 ${index + 1} 题缺少有效回答`)
     }
     lines.forEach((line) => {
       children.push(new Paragraph({
@@ -532,9 +532,9 @@ export async function generateProjectQaDocx(input: {
   disclaimer: string
 }) {
   await mkdir(path.dirname(input.outputPath), { recursive: true })
-  if (AI_QA_SKILL_NAME === 'generate-project-qa-report') {
+  if (AI_QA_SKILL_NAME === 'draft-investment-qa') {
     throw new Error(
-      'generate-project-qa-report 禁止使用旧 TypeScript DOCX Formatter；请调用 Skill 原生 Markdown→校验→DOCX→逐页渲染链路',
+      'draft-investment-qa 禁止使用旧 TypeScript DOCX Formatter；请调用 Skill 原生 Markdown→校验→DOCX→逐页渲染链路',
     )
   }
   const children: Paragraph[] = []
@@ -701,17 +701,17 @@ export async function inspectProjectQaDocx(
           .join(''),
       ).trim())
     .filter(Boolean)
-  if (AI_QA_SKILL_NAME === 'generate-project-qa-report') {
+  if (AI_QA_SKILL_NAME === 'draft-investment-qa') {
     const reportVisibleText = visibleParagraphs.join('\n')
     const expectedTitle = visibleParagraphs[0] ?? ''
     if (!/项目\s*Q&A$/.test(expectedTitle)) {
-      throw new Error('generate-project-qa-report DOCX 标题必须使用德塔模板“项目名称项目 Q&A”格式')
+      throw new Error('draft-investment-qa DOCX 标题必须使用德塔模板“项目名称项目 Q&A”格式')
     }
     const questionParagraphIndexes = visibleParagraphs.flatMap((paragraph, index) =>
       /^Q\d+[：:]/.test(paragraph) ? [index] : [])
     if (questionParagraphIndexes.length !== expected.questionCount) {
       throw new Error(
-        `generate-project-qa-report DOCX 问题数量错误：${questionParagraphIndexes.length}/${expected.questionCount}`,
+        `draft-investment-qa DOCX 问题数量错误：${questionParagraphIndexes.length}/${expected.questionCount}`,
       )
     }
     const expectedQuestionLabels = Array.from(
@@ -722,7 +722,7 @@ export async function inspectProjectQaDocx(
       visibleParagraphs[index].match(/^Q\d+[：:]/)?.[0].replace(':', '：') ?? '')
     if (actualQuestionLabels.join('|') !== expectedQuestionLabels.join('|')) {
       throw new Error(
-        `generate-project-qa-report DOCX 问题顺序错误：${actualQuestionLabels.join('、')}`,
+        `draft-investment-qa DOCX 问题顺序错误：${actualQuestionLabels.join('、')}`,
       )
     }
     const questionLengths: number[] = []
@@ -736,12 +736,12 @@ export async function inspectProjectQaDocx(
       answerLengths.push(answerLines.join('').replace(/\s+/g, '').length)
       if (answerLines.length < 1 || answerLines.length > 8) {
         throw new Error(
-          `generate-project-qa-report DOCX 第 ${index + 1} 题应为 1-8 个自然段，实际 ${answerLines.length} 段`,
+          `draft-investment-qa DOCX 第 ${index + 1} 题应为 1-8 个自然段，实际 ${answerLines.length} 段`,
         )
       }
       if (!/^(?:回答)\s*[：:]/.test(answerLines[0] ?? '')) {
         throw new Error(
-          `generate-project-qa-report DOCX 第 ${index + 1} 题首段必须显示“回答：”`,
+          `draft-investment-qa DOCX 第 ${index + 1} 题首段必须显示“回答：”`,
         )
       }
     })
@@ -769,12 +769,12 @@ export async function inspectProjectQaDocx(
       || /\[S\d+\]|\*\*|__|```|https?:\/\/|\[(?:尚无可核验证据|来源待核验|仅有公司单方口径)\]/.test(reportVisibleText)
     ) {
       throw new Error(
-        `generate-project-qa-report DOCX 泄露来源、检索过程或格式标记：${leakedTerm ?? '来源/格式标记'}`,
+        `draft-investment-qa DOCX 泄露来源、检索过程或格式标记：${leakedTerm ?? '来源/格式标记'}`,
       )
     }
     const relationshipXml = await zip.file('word/_rels/document.xml.rels')?.async('string') ?? ''
     if (/TargetMode="External"[^>]*Type="[^"]*\/hyperlink"/.test(relationshipXml)) {
-      throw new Error('generate-project-qa-report DOCX 不得包含外部超链接')
+      throw new Error('draft-investment-qa DOCX 不得包含外部超链接')
     }
     const reportPageGeometryValidated =
       integerAttribute(pageSize, 'w:w') === 11906
@@ -784,12 +784,12 @@ export async function inspectProjectQaDocx(
       && integerAttribute(pageMargin, 'w:bottom') === 1440
       && integerAttribute(pageMargin, 'w:left') === 1800
     if (!reportPageGeometryValidated) {
-      throw new Error('generate-project-qa-report DOCX 未使用 qa_cn_formal_a4 页边距')
+      throw new Error('draft-investment-qa DOCX 未使用 qa_cn_formal_a4 页边距')
     }
     const reportFontValidated = cjkFonts.includes(PROJECT_QA_REPORT_BODY_FONT)
       && cjkFonts.every((name) => name === PROJECT_QA_REPORT_BODY_FONT)
     if (!reportFontValidated) {
-      throw new Error('generate-project-qa-report DOCX 中西文字体映射不符合规范')
+      throw new Error('draft-investment-qa DOCX 中西文字体映射不符合规范')
     }
     const reportFormattingXml = `${documentXml}\n${stylesXml}`
     const exactBodySpacingValidated = new RegExp(
@@ -799,7 +799,7 @@ export async function inspectProjectQaDocx(
         `<w:spacing\\b[^>]*w:lineRule="exact"[^>]*w:line="${PROJECT_QA_REPORT_BODY_SPACING}"`,
       ).test(reportFormattingXml)
     if (!exactBodySpacingValidated) {
-      throw new Error('generate-project-qa-report DOCX 正文未使用德塔模板 14.4pt 固定行距')
+      throw new Error('draft-investment-qa DOCX 正文未使用德塔模板 14.4pt 固定行距')
     }
     return {
       qualityStatus: 'passed' as const,

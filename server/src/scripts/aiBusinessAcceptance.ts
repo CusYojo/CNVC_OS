@@ -388,7 +388,7 @@ async function main() {
       && new Set(dueDiligenceGroupedSections).size === dueDiligenceGroupedSections.length,
     '单次最多四个模块；合并顺序与统一规范三十模块完全一致',
   )
-  const dueDiligenceSkill = await loadAiSkill('write-investment-dd-report')
+  const dueDiligenceSkill = await loadAiSkill('draft-due-diligence-report')
   const requestedChapterGroups: string[][] = []
   const chapterSystemPrompts: string[] = []
   const chapterUserPrompts: string[] = []

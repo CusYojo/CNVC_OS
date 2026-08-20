@@ -150,7 +150,7 @@ test('尽调运行时将模型常见键名归一为原生审计器契约', async
     writeFile(evidencePath, JSON.stringify(evidence)),
   ])
   const scripts = path.resolve(
-    process.cwd(), 'server', 'workspace', '.agents', 'skills', 'write-investment-dd-report', 'scripts',
+    process.cwd(), 'server', 'workspace', '.agents', 'skills', 'draft-due-diligence-report', 'scripts',
   )
   await execFileAsync('python3', [
     path.join(scripts, 'audit_ic_completeness.py'), dataPath,

@@ -42,7 +42,7 @@ import {
 } from './aiComplianceWorkflowService.js'
 import { sanitizeClientVisibleEvidenceWording } from './aiClientVisibleTextService.js'
 import { generateInvestmentProposalDocx } from './aiInvestmentProposalDocumentService.js'
-import { renderComplianceStatementWithPlugin } from './aiPluginDocumentRenderService.js'
+import { renderComplianceStatementWithSkill } from './aiDocumentSkillRenderService.js'
 import { generateInvestmentRecommendationPptWithGorden } from './aiGordenSuperPptService.js'
 import { formatShanghaiDate } from '../utils/shanghaiTime.js'
 
@@ -679,7 +679,7 @@ export async function generateBusinessDocx(input: {
   }
   if (String(input.template.type) === 'compliance_statement') {
     const complianceBlueprint = input.blueprint ?? await parseComplianceDocumentBlueprint(input.template)
-    return renderComplianceStatementWithPlugin({
+    return renderComplianceStatementWithSkill({
       outputPath: input.outputPath,
       taskProjectName: input.project.name,
       content: input.content,

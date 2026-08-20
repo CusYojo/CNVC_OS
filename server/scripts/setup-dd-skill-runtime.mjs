@@ -14,7 +14,7 @@ const skillRoot = path.join(
   'workspace',
   '.agents',
   'skills',
-  'write-investment-dd-report',
+  'draft-due-diligence-report',
 )
 
 function run(command, args) {
@@ -36,7 +36,7 @@ if (!existsSync(venvPython)) {
   run(bootstrapPython, ['-m', 'venv', venvRoot])
 }
 
-console.log('安装 write-investment-dd-report Python 依赖…')
+console.log('安装 draft-due-diligence-report Python 依赖…')
 run(venvPython, ['-m', 'pip', 'install', 'python-docx>=1.1.2', 'PyMuPDF>=1.24.0', 'lxml>=5.0.0'])
 
 console.log('检查尽调报告生成、审计与逐页渲染运行时…')
@@ -49,4 +49,4 @@ for (const script of [
   run(venvPython, [path.join(skillRoot, 'scripts', script), '--self-test'])
 }
 
-console.log('write-investment-dd-report 运行时已就绪。')
+console.log('draft-due-diligence-report 运行时已就绪。')

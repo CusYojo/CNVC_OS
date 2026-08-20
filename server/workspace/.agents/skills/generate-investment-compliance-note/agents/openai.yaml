@@ -1,0 +1,4 @@
+interface:
+  display_name: "生成合规性说明"
+  short_description: "资深投资经理生成可交付合规性说明"
+  default_prompt: "使用 $generate-investment-compliance-note，以投资中台资深投资经理身份，仅针对当前会话绑定项目，先逐份研读项目文件并统一主体、人员关系、交易安排和数字口径，再严格按 docs/合规性说明核心模板的章节、公文语气和版式生成一份可编辑 DOCX。来源与取证过程只保留在审计元数据中，正文不显示内部项目阶段或技术流程。"

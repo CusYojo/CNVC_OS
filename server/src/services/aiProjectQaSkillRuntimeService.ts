@@ -14,11 +14,11 @@ import {
   type LoadedAiSkill,
 } from './aiSkillService.js'
 import {
-  resolveDocumentPluginPython,
-  runDocumentPlugin,
-} from './aiPluginDocumentRenderService.js'
+  resolveDocumentSkillPython,
+  runDocumentSkillProcessor,
+} from './aiDocumentSkillRenderService.js'
 import { execFileSupervised as execFileAsync } from '../runtime/supervisedProcessService.js'
-const REQUIRED_SKILL_NAME = 'generate-project-qa-report'
+const REQUIRED_SKILL_NAME = 'draft-investment-qa'
 const COMMAND_TIMEOUT_MS = 120_000
 
 type RuntimeValidationFinding = {
@@ -54,11 +54,11 @@ export function buildProjectQaSkillMarkdown(input: {
   const titleProjectName = input.projectName
     .replace(/\s*Q&A(?:\s*报告)?\s*$/i, '')
     .trim()
-  if (!titleProjectName) throw new Error('generate-project-qa-report 缺少项目名称')
+  if (!titleProjectName) throw new Error('draft-investment-qa 缺少项目名称')
   const sections = input.content.questions.map((question, index) => {
     const answer = input.content.answers.find((item) => item.questionId === question.id)
     if (!answer?.answer.trim()) {
-      throw new Error(`generate-project-qa-report 第 ${index + 1} 题缺少回答`)
+      throw new Error(`draft-investment-qa 第 ${index + 1} 题缺少回答`)
     }
     const visibleQuestion = cleanMarkdownText(question.question)
       .replace(/[？?]+$/, '')
@@ -106,21 +106,21 @@ export function projectQaContentDepthMetrics(content: ProjectQaDocumentContent) 
 function assertSkillContentReady(content: ProjectQaDocumentContent) {
   if (content.questions.length < 6 || content.questions.length > 9) {
     throw new Error(
-      `generate-project-qa-report 插件标准问答数量必须为 6—9 题，实际 ${content.questions.length} 题`,
+      `draft-investment-qa 标准问答数量必须为 6—9 题，实际 ${content.questions.length} 题`,
     )
   }
   if (!Object.values(content.review.checks).every(Boolean)) {
-    throw new Error('generate-project-qa-report Reviewer 未通过事实与引用一致性检查')
+    throw new Error('draft-investment-qa Reviewer 未通过事实与引用一致性检查')
   }
   const answers = content.questions.map((question) =>
     content.answers.find((answer) => answer.questionId === question.id))
   if (answers.some((answer) => !answer)) {
-    throw new Error('generate-project-qa-report 问题与回答未完整对应')
+    throw new Error('draft-investment-qa 问题与回答未完整对应')
   }
   const depthMetrics = projectQaContentDepthMetrics(content)
   if (!depthMetrics.passed) {
     throw Object.assign(new Error(
-      `generate-project-qa-report 回答深度未通过组合门禁：最短 ${depthMetrics.minimumLength} 字（硬底线 ${depthMetrics.hardFloor}），平均 ${depthMetrics.averageLength} 字（最低 ${depthMetrics.averageMinimum}），形成事实—机制—经营—投资—边界因果层级 ${depthMetrics.causalDepthPassCount}/${answers.length}，全文投资维度覆盖 ${depthMetrics.documentInvestmentDimensionCount}/5`,
+      `draft-investment-qa 回答深度未通过组合门禁：最短 ${depthMetrics.minimumLength} 字（硬底线 ${depthMetrics.hardFloor}），平均 ${depthMetrics.averageLength} 字（最低 ${depthMetrics.averageMinimum}），形成事实—机制—经营—投资—边界因果层级 ${depthMetrics.causalDepthPassCount}/${answers.length}，全文投资维度覆盖 ${depthMetrics.documentInvestmentDimensionCount}/5`,
     ), {
       code: 'PROJECT_QA_DEPTH_GATE_FAILED',
       qualityIssues: [depthMetrics],
@@ -131,14 +131,14 @@ function assertSkillContentReady(content: ProjectQaDocumentContent) {
     /(?:展开[。.]?|首页|登录|小程序|公众号|ICP备|公网安备|All Rights Reserved|公司地址[：:]|联系方式[：:]|对于广大.{0,20}(?:而言|来说)|推动整个.{0,20}(?:行业|产业).{0,12}(?:发展|创新)|公开(?:信息|材料|资料|披露|报道|记录|检索|来源)|项目资料|会议纪要|访谈纪要)/i,
   )?.[0]
   if (noise) {
-    throw new Error(`generate-project-qa-report 正文含网页或资料加工痕迹：${noise}`)
+    throw new Error(`draft-investment-qa 正文含网页或资料加工痕迹：${noise}`)
   }
   if (!/(?:风险|边界|失效|反方|不确定|尚不能|不能确认)/.test(visibleText)) {
-    throw new Error('generate-project-qa-report 正文缺少风险、反方观点或证据边界')
+    throw new Error('draft-investment-qa 正文缺少风险、反方观点或证据边界')
   }
   const lastQuestion = content.questions.at(-1)
   if (!lastQuestion || !/(?:风险|失效|里程碑|判断|条件|决策)/.test(lastQuestion.question)) {
-    throw new Error('generate-project-qa-report 最后一题未形成风险、里程碑与决策收束')
+    throw new Error('draft-investment-qa 最后一题未形成风险、里程碑与决策收束')
   }
   return depthMetrics
 }
@@ -173,7 +173,7 @@ async function resolvePython() {
     if (await commandWorks(candidate, ['-c', 'import docx'])) return candidate
   }
   throw new Error(
-    'generate-project-qa-report 缺少 python-docx 运行环境；请执行 npm run setup:qa-skill-runtime',
+    'draft-investment-qa 缺少 python-docx 运行环境；请执行 npm run setup:qa-skill-runtime',
   )
 }
 
@@ -222,7 +222,7 @@ function parseValidation(stdout: string): RuntimeValidationResult {
   try {
     return JSON.parse(stdout) as RuntimeValidationResult
   } catch {
-    throw new Error('generate-project-qa-report Markdown 校验器未返回合法 JSON')
+    throw new Error('draft-investment-qa Markdown 校验器未返回合法 JSON')
   }
 }
 
@@ -242,7 +242,7 @@ async function runMarkdownValidation(input: {
     const stdout = (error as { stdout?: string }).stdout
     const parsed = stdout ? parseValidation(stdout) : undefined
     const details = parsed?.findings.map((finding) => finding.message).join('；')
-    throw new Error(`generate-project-qa-report Markdown 校验失败${details ? `：${details}` : ''}`)
+    throw new Error(`draft-investment-qa Markdown 校验失败${details ? `：${details}` : ''}`)
   }
 }
 
@@ -288,7 +288,7 @@ async function renderEveryPage(input: {
   const { soffice, pdftoppm, pdffonts } = await resolveProjectQaRenderCommands()
   if (!soffice || !pdftoppm || !pdffonts) {
     throw new Error(
-      `generate-project-qa-report 缺少 DOCX 逐页渲染环境（soffice=${Boolean(soffice)}、pdftoppm=${Boolean(pdftoppm)}、pdffonts=${Boolean(pdffonts)}）`,
+      `draft-investment-qa 缺少 DOCX 逐页渲染环境（soffice=${Boolean(soffice)}、pdftoppm=${Boolean(pdftoppm)}、pdffonts=${Boolean(pdffonts)}）`,
     )
   }
   await mkdir(input.visualDirectory, { recursive: true })
@@ -330,7 +330,7 @@ async function renderEveryPage(input: {
     maxBuffer: 4 * 1024 * 1024,
   })
   // LibreOffice 在 macOS/Linux 会把 Word 中的 STKaiti 映射为平台楷体
-  // 家族名。这里校验插件锁定的楷体角色，不把某一个系统的
+  // 家族名。这里校验 Skill 锁定的楷体角色，不把某一个系统的
   // PostScript 名当作唯一合法值。
   const requiredCjkFontRoles = [
     {
@@ -338,7 +338,7 @@ async function renderEveryPage(input: {
       aliases: [
         'STKaiti', 'Kaiti', 'KaiTi', 'Kaiti SC',
         // LibreOffice on macOS may substitute the requested STKaiti while the
-        // DOCX package itself still retains the exact plugin font token.
+        // DOCX package itself still retains the exact Skill font token.
         'HiraMaruPro', 'HiraginoSans', 'STSongti', 'ArialUnicode',
       ],
     },
@@ -348,7 +348,7 @@ async function renderEveryPage(input: {
     .map(({ role }) => role)
   if (missingCjkFonts.length > 0) {
     throw new Error(
-      `generate-project-qa-report 渲染缺少中文字体：${missingCjkFonts.join('、')}`,
+      `draft-investment-qa 渲染缺少中文字体：${missingCjkFonts.join('、')}`,
     )
   }
   const pagePrefix = path.join(input.visualDirectory, 'page')
@@ -364,7 +364,7 @@ async function renderEveryPage(input: {
     .sort()
   if (pages.length < input.expectedMinimumPages) {
     throw new Error(
-      `generate-project-qa-report 逐页渲染不完整：${pages.length}/${input.expectedMinimumPages} 页`,
+      `draft-investment-qa 逐页渲染不完整：${pages.length}/${input.expectedMinimumPages} 页`,
     )
   }
   return {
@@ -397,7 +397,7 @@ export async function generateProjectQaWithSkill(input: {
   const depthMetrics = assertSkillContentReady(input.content)
   const skillDirectory = getAiSkillDirectory(REQUIRED_SKILL_NAME)
   const processorPath = path.join(skillDirectory, 'scripts', 'qa_report_processor.py')
-  const python = await resolveDocumentPluginPython()
+  const python = await resolveDocumentSkillPython()
   const markdown = buildProjectQaSkillMarkdown({
     projectName: input.projectName,
     content: input.content,
@@ -434,24 +434,24 @@ export async function generateProjectQaWithSkill(input: {
       }
     }),
   }
-  const pluginArtifactsDirectory = path.join(path.dirname(input.outputPath), '.generate-project-qa-report-plugin')
-  const payloadPath = path.join(pluginArtifactsDirectory, 'qa-content.json')
-  const verifyPath = path.join(pluginArtifactsDirectory, 'qa-plugin-verify.json')
-  const bridge = path.resolve(process.cwd(), 'server', 'scripts', 'plugin_document_bridge.py')
-  await mkdir(pluginArtifactsDirectory, { recursive: true })
+  const skillArtifactsDirectory = path.join(path.dirname(input.outputPath), '.draft-investment-qa-render')
+  const payloadPath = path.join(skillArtifactsDirectory, 'qa-content.json')
+  const verifyPath = path.join(skillArtifactsDirectory, 'qa-skill-verify.json')
+  const bridge = path.resolve(process.cwd(), 'server', 'scripts', 'skill_document_bridge.py')
+  await mkdir(skillArtifactsDirectory, { recursive: true })
   await writeFile(payloadPath, JSON.stringify(contentPayload, null, 2), 'utf8')
-  const pluginValidation = await runDocumentPlugin({
+  const skillValidation = await runDocumentSkillProcessor({
     python,
     args: [
       bridge,
       'qa',
       '--processor', processorPath,
       '--payload', payloadPath,
-      '--artifacts', pluginArtifactsDirectory,
+      '--artifacts', skillArtifactsDirectory,
       '--output', input.outputPath,
       '--verify-out', verifyPath,
     ],
-    label: 'sbl-investment-qa 德塔模板渲染与校验',
+    label: 'draft-investment-qa 德塔模板渲染与校验',
   })
   const visualQa = await renderEveryPage({
     docxPath: input.outputPath,
@@ -468,11 +468,11 @@ export async function generateProjectQaWithSkill(input: {
     layoutProfile: 'deta_qa_pdf',
     frontDirectoryIncluded: false,
     templateEnforced: true,
-    rendererMode: 'plugin-deta-qa-pdf',
-    pluginVerifyPassed: pluginValidation.status === 'pass',
-    skillExecutionMode: 'plugin-deta-content-rendered-and-verified',
+    rendererMode: 'skill-deta-qa-pdf',
+    skillVerifyPassed: skillValidation.status === 'pass',
+    skillExecutionMode: 'skill-deta-content-rendered-and-verified',
     depthMetrics,
-    markdownValidation: pluginValidation,
+    markdownValidation: skillValidation,
     visualQa,
   }
 }

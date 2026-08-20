@@ -4,30 +4,30 @@ import test from 'node:test'
 import {
   AI_DOCUMENT_PLUGIN_BINDINGS,
   getAiSkillDirectory,
-  getAiSkillRuntimeDirectory,
   loadAiSkill,
 } from '../src/services/aiSkillService.js'
 import { AI_TEMPLATE_CATALOG } from '../src/services/aiTemplateCatalog.js'
 
-test('four AI assistant document shortcuts load their installed plugin entry skills', async () => {
-  assert.equal(AI_DOCUMENT_PLUGIN_BINDINGS.length, 4)
+test('four AI assistant document shortcuts load same-name standalone Skills', async () => {
+  assert.equal(AI_DOCUMENT_PLUGIN_BINDINGS.length, 0)
+  const bindings = [
+    ['compliance_statement', 'generate-investment-compliance-note'],
+    ['investment_proposal', 'draft-investment-proposal'],
+    ['project_qa', 'draft-investment-qa'],
+    ['due_diligence_report', 'draft-due-diligence-report'],
+  ] as const
 
-  for (const binding of AI_DOCUMENT_PLUGIN_BINDINGS) {
-    const template = AI_TEMPLATE_CATALOG[binding.taskType]
-    const pluginSkillDirectory = getAiSkillDirectory(binding.skillName)
-    const hostRuntimeDirectory = getAiSkillRuntimeDirectory(binding.skillName)
-    const skill = await loadAiSkill(binding.skillName)
+  for (const [taskType, skillName] of bindings) {
+    const template = AI_TEMPLATE_CATALOG[taskType]
+    const skillDirectory = getAiSkillDirectory(skillName)
+    const skill = await loadAiSkill(skillName)
 
-    assert.equal(template.skillName, binding.skillName)
-    assert.equal(template.pluginName, binding.pluginName)
-    assert.equal(template.pluginEntrySkillName, binding.entrySkillName)
-    assert.equal(skill.name, binding.skillName)
-    assert.equal(skill.pluginName, binding.pluginName)
-    assert.equal(skill.pluginVersion, binding.pluginVersion)
-    assert.equal(skill.entrySkillName, binding.entrySkillName)
+    assert.equal(template.skillName, skillName)
+    assert.equal(skill.name, skillName)
     assert.match(skill.version, /^sha256-[a-f0-9]{12}$/)
-    assert.ok(existsSync(`${pluginSkillDirectory}/SKILL.md`))
-    assert.ok(existsSync(`${hostRuntimeDirectory}/SKILL.md`))
-    assert.notEqual(pluginSkillDirectory, hostRuntimeDirectory)
+    assert.ok(existsSync(`${skillDirectory}/SKILL.md`))
+    assert.match(skillDirectory, new RegExp(`/skills/${skillName}$`))
+    assert.equal('pluginName' in skill, false)
+    assert.equal('entrySkillName' in skill, false)
   }
 })

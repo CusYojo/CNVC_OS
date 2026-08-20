@@ -47,9 +47,9 @@ async function main() {
   const skill = await loadAiSkill(AI_QA_SKILL_NAME)
   const profile = createProjectQaSkillProfile(skill)
   assert(
-    '阶段1 Skill Profile：统一加载 generate-project-qa-report',
-    skill.name === 'generate-project-qa-report'
-      && profile.parserVersion === 'generate-project-qa-report-profile-v1',
+    '阶段1 Skill Profile：统一加载 draft-investment-qa',
+    skill.name === 'draft-investment-qa'
+      && profile.parserVersion === 'draft-investment-qa-profile-v1',
     `${skill.name} / ${profile.parserVersion}`,
   )
   assert(

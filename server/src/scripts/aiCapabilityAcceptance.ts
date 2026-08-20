@@ -266,7 +266,7 @@ async function main() {
   })
   await check('approved-skill-server-test-and-trace', async () => {
     const [skill] = await db.select().from(aiCapabilities).where(and(
-      eq(aiCapabilities.kind, 'skill'), eq(aiCapabilities.capabilityKey, 'generate-project-qa-report'),
+      eq(aiCapabilities.kind, 'skill'), eq(aiCapabilities.capabilityKey, 'draft-investment-qa'),
     )).limit(1)
     assert(skill, '批准 Skill 未同步')
     const result = await testCapability(skill.id, admin)

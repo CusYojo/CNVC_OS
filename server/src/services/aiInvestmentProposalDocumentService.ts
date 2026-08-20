@@ -47,7 +47,7 @@ import {
 } from './aiInvestmentProposalTextService.js'
 import type { AiTemplateDefinition } from './aiTemplateCatalog.js'
 import { getAiSkillRuntimeDirectory } from './aiSkillService.js'
-import { renderInvestmentProposalWithPlugin } from './aiPluginDocumentRenderService.js'
+import { renderInvestmentProposalWithSkill } from './aiDocumentSkillRenderService.js'
 
 type ProjectLike = {
   name: string
@@ -368,7 +368,7 @@ export async function generateInvestmentProposalDocx(input: {
   const generatedAt = input.generatedAt ?? new Date()
   const company = input.project.companyName?.trim() || input.project.name
   const byTitle = new Map(input.content.sections.map((section) => [section.title, section]))
-  const pluginSections: Array<{
+  const skillSections: Array<{
     title: string
     page_break_before?: boolean
     paragraphs?: string[]
@@ -379,8 +379,8 @@ export async function generateInvestmentProposalDocx(input: {
       tables: Array<Record<string, unknown>>
     }>
   }> = []
-  const pluginSectionById = new Map<string, typeof pluginSections[number]>()
-  const pluginTable = (table: BusinessTable) => {
+  const skillSectionById = new Map<string, typeof skillSections[number]>()
+  const skillTable = (table: BusinessTable) => {
     const width = 8352
     const base = Math.floor(width / Math.max(table.columns.length, 1))
     const widths = table.columns.map((_, index) =>
@@ -402,7 +402,7 @@ export async function generateInvestmentProposalDocx(input: {
     const paragraphs = (current?.findings ?? [])
       .map((finding) => sanitizeInvestmentProposalClientText(finding.text))
       .filter(Boolean)
-    const tables = (current?.tables ?? []).map(pluginTable)
+    const tables = (current?.tables ?? []).map(skillTable)
     if (definition.level === 1) {
       const section = {
         title: definition.title,
@@ -411,21 +411,21 @@ export async function generateInvestmentProposalDocx(input: {
         tables: definition.container ? [] : tables,
         subsections: [],
       }
-      pluginSections.push(section)
-      pluginSectionById.set(definition.id, section)
+      skillSections.push(section)
+      skillSectionById.set(definition.id, section)
       return
     }
     const parent = definition.parentId
-      ? pluginSectionById.get(definition.parentId)
-      : pluginSections.at(-1)
-    if (!parent) throw new Error(`投资提案插件模板缺少父章节：${definition.title}`)
+      ? skillSectionById.get(definition.parentId)
+      : skillSections.at(-1)
+    if (!parent) throw new Error(`投资提案 Skill 模板缺少父章节：${definition.title}`)
     parent.subsections.push({
       title: definition.title,
       paragraphs,
       tables,
     })
   })
-  const pluginGeneration = await renderInvestmentProposalWithPlugin({
+  const skillGeneration = await renderInvestmentProposalWithSkill({
     outputPath: input.outputPath,
     payload: {
       meta: {
@@ -440,11 +440,11 @@ export async function generateInvestmentProposalDocx(input: {
         signature_entity: blueprint.fixedBlocks.managementCompany,
         date: `${generatedAt.getFullYear()}年${generatedAt.getMonth() + 1}月${generatedAt.getDate()}日`,
       },
-      sections: pluginSections,
+      sections: skillSections,
     },
   })
   return {
-    ...pluginGeneration,
+    ...skillGeneration,
     blueprintVersion: blueprint.version,
     coreStandardSha256: blueprint.coreStandardSha256,
     templateCorpusSha256: blueprint.corpusSha256,

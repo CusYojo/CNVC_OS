@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { summarizeRadarSourceRun } from '../src/services/radarSourceRunSummary.js'
+import { shouldDeliverRadarSourceRun } from '../src/services/radarSourceObservabilityService.js'
 
 test('数据源监控将正常采集结果转换成业务可读摘要', () => {
   const summary = summarizeRadarSourceRun('paper-daily', {
@@ -33,4 +34,21 @@ test('数据源监控区分部分成功和完全失败', () => {
   assert.equal(failed.status, 'failed')
   assert.match(failed.message, /公众号日采集失败/)
   assert.doesNotMatch(failed.message, /very-secret/)
+})
+
+test('数据源监控不发送无待处理账号的跳过通知', () => {
+  const skipped = summarizeRadarSourceRun('wechat-retry', {
+    skipped: true,
+    reason: 'no_pending_accounts',
+    accounts: 0,
+  })
+  assert.equal(skipped.metrics.skipped, true)
+  assert.equal(shouldDeliverRadarSourceRun(skipped), false)
+
+  const failed = summarizeRadarSourceRun(
+    'wechat-retry',
+    { skipped: true, reason: 'no_pending_accounts', accounts: 0 },
+    new Error('collector state unavailable'),
+  )
+  assert.equal(shouldDeliverRadarSourceRun(failed), true)
 })

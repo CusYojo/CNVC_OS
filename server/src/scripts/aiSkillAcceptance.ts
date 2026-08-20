@@ -70,17 +70,24 @@ async function main() {
     listed.map((item) => item.name).join(', '),
   )
 
-  for (const binding of AI_DOCUMENT_PLUGIN_BINDINGS) {
-    const pluginSkill = await loadAiSkill(binding.skillName)
+  assert(
+    '四项正式文档快捷入口不再绑定 Plugin',
+    AI_DOCUMENT_PLUGIN_BINDINGS.length === 0,
+    `${AI_DOCUMENT_PLUGIN_BINDINGS.length} 个内置文档 Plugin 绑定`,
+  )
+  for (const skillName of [
+    'generate-investment-compliance-note',
+    'draft-investment-proposal',
+    'draft-investment-qa',
+    'draft-due-diligence-report',
+  ] as const) {
+    const loadedSkill = await loadAiSkill(skillName)
     assert(
-      `${binding.taskType} 快捷入口绑定已安装 Plugin`,
-      pluginSkill.pluginName === binding.pluginName
-        && pluginSkill.pluginVersion === binding.pluginVersion
-        && pluginSkill.entrySkillName === binding.entrySkillName
-        && getAiSkillDirectory(binding.skillName).includes(
-          `${path.sep}plugins${path.sep}${binding.pluginName}${path.sep}skills${path.sep}${binding.entrySkillName}`,
-        ),
-      `${pluginSkill.pluginName ?? '未绑定'}:${pluginSkill.entrySkillName ?? '未绑定'}`,
+      `${skillName} 快捷入口加载同名独立 Skill`,
+      loadedSkill.name === skillName
+        && getAiSkillDirectory(skillName) === getAiSkillRuntimeDirectory(skillName)
+        && getAiSkillDirectory(skillName).endsWith(`${path.sep}skills${path.sep}${skillName}`),
+      `${loadedSkill.name} / ${getAiSkillDirectory(skillName)}`,
     )
   }
 
@@ -590,19 +597,19 @@ async function main() {
       )
       && AI_TEMPLATE_CATALOG.investment_recommendation_ppt.referencePaths?.length === 0
       && AI_TEMPLATE_CATALOG.project_qa.referencePath.includes(
-        `${path.sep}generate-project-qa-report${path.sep}`,
+        `${path.sep}draft-investment-qa${path.sep}`,
       )
       && AI_QA_TEMPLATE.referencePaths.length >= 1
       && AI_QA_TEMPLATE.referencePaths.every((item) =>
-        item.includes(`${path.sep}generate-project-qa-report${path.sep}`)),
+        item.includes(`${path.sep}draft-investment-qa${path.sep}`)),
     [
       ...AI_TASK_TYPES.map((type) => AI_TEMPLATE_CATALOG[type].referencePath),
       ...AI_QA_TEMPLATE.referencePaths,
     ].join(' | '),
   )
 
-  const complianceSkill = await loadHostAdapterSkill('generate-compliance-statement')
-  const complianceDirectory = path.join(root, 'generate-compliance-statement')
+  const complianceSkill = await loadHostAdapterSkill('generate-investment-compliance-note')
+  const complianceDirectory = path.join(root, 'generate-investment-compliance-note')
   const complianceCoreSpec = await readFile(
     path.resolve(process.cwd(), 'docs', '合规性说明', '合规性说明模板核心规范.md'),
     'utf8',
@@ -668,7 +675,7 @@ async function main() {
     '摘要、风险、缺口和来源仅保留为审计元数据',
   )
   assert(
-    'AI-010 最终 DOCX 完全经过 write-investment-dd-report 原生硬门禁',
+    'AI-010 最终 DOCX 完全经过 draft-due-diligence-report 原生硬门禁',
     aiTaskServiceSource.includes('generateDueDiligenceReportWithSkill')
       && [
         'check_runtime.py',
@@ -684,10 +691,10 @@ async function main() {
       && dueDiligenceNativeSource.includes('DUE_DILIGENCE_PUBLIC_RESEARCH_AUDIT_REQUIRED')
       && dueDiligenceNativeSource.includes('usedSourceIndexes')
       && dueDiligenceNativeSource.includes('source_index')
-      && dueDiligenceNativeSource.includes("formatter: 'sbl-deta-dd-report-plugin-v5'")
+      && dueDiligenceNativeSource.includes("formatter: 'draft-due-diligence-report-skill-v5'")
       && dueDiligenceNativeSource.includes('deta_dd_processor.py')
       && dueDiligenceNativeSource.includes('investment_bank_styles.py'),
-    '证据台账 → 字段完整性 → 内容/文风 → V5 插件格式化 → 插件样式与逐页渲染',
+    '证据台账 → 字段完整性 → 内容/文风 → V5 Skill 格式化 → Skill 样式与逐页渲染',
   )
   assert(
     'AI-008 投资提案最终 Skill 校验失败时禁止登记产物',
@@ -741,8 +748,8 @@ async function main() {
     'utf8',
   )
   assert(
-    'Q&A 快捷任务统一绑定 generate-project-qa-report',
-    AI_QA_SKILL_NAME === 'generate-project-qa-report'
+    'Q&A 快捷任务统一绑定 draft-investment-qa',
+    AI_QA_SKILL_NAME === 'draft-investment-qa'
       && qaSkill.name === AI_QA_SKILL_NAME
       && AI_QA_TEMPLATE.skillName === AI_QA_SKILL_NAME
       && AI_TEMPLATE_CATALOG.project_qa.skillName === AI_QA_SKILL_NAME,
@@ -765,18 +772,21 @@ async function main() {
     'utf8',
   )
   assert(
-    '四项文档 Plugin 随项目安装并在服务启动时校验绑定',
-    AI_DOCUMENT_PLUGIN_BINDINGS.length === 4
-      && AI_DOCUMENT_PLUGIN_BINDINGS.every((binding) =>
-        existsSync(path.resolve(
-          process.cwd(), 'server', 'workspace', '.agents', 'plugins',
-          binding.pluginName, '.claude-plugin', 'plugin.json',
-        )))
-      && deploySource.includes('systemctl stop "${APP_SERVICE}.service"')
-      && deploySource.includes('systemctl start "${APP_SERVICE}.service"')
+    '四项文档同名 Skill 随项目安装并在服务启动时校验',
+    AI_DOCUMENT_PLUGIN_BINDINGS.length === 0
+      && [
+        'generate-investment-compliance-note',
+        'draft-investment-proposal',
+        'draft-investment-qa',
+        'draft-due-diligence-report',
+      ].every((name) => existsSync(path.resolve(
+        process.cwd(), 'server', 'workspace', '.agents', 'skills', name, 'SKILL.md',
+      )))
+      && deploySource.includes('systemctl stop "$SERVICE_UNIT"')
+      && deploySource.includes('systemctl start "$SERVICE_UNIT"')
       && serverIndexSource.includes('qaSkillName: AI_QA_SKILL_NAME')
       && serverIndexSource.includes('AI_REQUIRED_DOCUMENT_SKILL_NAMES.map((name) => loadAiSkill(name))'),
-    '合规性说明 + 投资提案 + 尽调报告 + Q&A Plugin 目录 / 启动加载门禁 / health 绑定探针',
+    '合规性说明 + 投资提案 + 尽调报告 + Q&A 同名 Skill 目录 / 启动加载门禁 / health 绑定探针',
   )
   const qaRequired = [
     '# 生成项目 Q&A 报告',
@@ -796,14 +806,14 @@ async function main() {
     qaRequired.filter((term) => !qaRuntimeCorpus.includes(term)).join(', ') || '完整',
   )
   assert(
-    'Q&A 核心规则直接来自 generate-project-qa-report',
+    'Q&A 核心规则直接来自 draft-investment-qa',
     AI_QA_TEMPLATE.coreRulesPath === path.resolve(
       process.cwd(),
       'server',
       'workspace',
       '.agents',
       'skills',
-      'generate-project-qa-report',
+      'draft-investment-qa',
       'SKILL.md',
     )
       && qaCoreRules.includes('# 生成项目 Q&A 报告')
@@ -820,7 +830,7 @@ async function main() {
       'workspace',
       '.agents',
       'skills',
-      'generate-project-qa-report',
+      'draft-investment-qa',
     )
       && AI_QA_TEMPLATE.referencePaths.length === 5
       && AI_QA_TEMPLATE.referencePaths.every((item) =>
@@ -876,7 +886,7 @@ async function main() {
       && qaDocumentSource.includes('generateProjectQaDocx')
       && !qaDocumentSource.includes('convertProjectQaDocxToPdf')
       && qaParserSource.includes('createProjectQaSkillProfile')
-      && qaParserSource.includes('generate-project-qa-report-profile-v1'),
+      && qaParserSource.includes('draft-investment-qa-profile-v1'),
     'Skill Profile / Current Project RAG / Question Generator / Duplicate Checker / Reviewer / DOCX',
   )
   assert(
@@ -1004,10 +1014,10 @@ async function main() {
   )
   assert(
     '投资提案、合规说明、Q&A 与尽调报告快捷入口按对话消息绑定受控 Skill',
-    assistantPageSource.includes("? 'draft-investment-proposal'")
-      && assistantPageSource.includes(": 'generate-investment-compliance-note'")
-      && assistantPageSource.includes(": 'draft-investment-qa'")
-      && assistantPageSource.includes(": 'draft-due-diligence-report'")
+    assistantPageSource.includes("'draft-investment-proposal'")
+      && assistantPageSource.includes("'generate-investment-compliance-note'")
+      && assistantPageSource.includes("'draft-investment-qa'")
+      && assistantPageSource.includes("'draft-due-diligence-report'")
       && assistantPageSource.includes('{ quickSkillName }')
       && assistantPageSource.includes('attachmentFileIds: uploads')
       && jwAgentHookSource.includes('skillName: options.skillName')
@@ -1068,9 +1078,9 @@ async function main() {
       && !quickActionsSource.includes('questionDepth')
       && !quickActionsSource.includes("activeAction.id === 'qa' ? 'PDF'")
       && !quickActionsSource.includes('QA_GROUPS')
-      && AI_TEMPLATE_CATALOG.project_qa.skillName === 'generate-project-qa-report'
-      && AI_TEMPLATE_CATALOG.project_qa.templateVersion === 'generate-project-qa-report-20260806-v1',
-    'Q&A task / generate-project-qa-report / DOCX',
+      && AI_TEMPLATE_CATALOG.project_qa.skillName === 'draft-investment-qa'
+      && AI_TEMPLATE_CATALOG.project_qa.templateVersion === 'draft-investment-qa-20260820-v1',
+    'Q&A task / draft-investment-qa / DOCX',
   )
   const taskCardsSource = await readFile(
     path.resolve(process.cwd(), 'src', 'components', 'AiTaskCards.tsx'),
@@ -1092,7 +1102,7 @@ async function main() {
     '非 PPT 文档任务以主文档交付为优先并自动恢复一次',
     aiTaskServiceSource.includes('AUTO_RECOVERY_TASK_TYPES')
       && aiTaskServiceSource.includes('_systemDocumentRecoveryAttempt')
-      && aiTaskServiceSource.includes("'write-investment-dd-report 原生 DOCX Pipeline'")
+      && aiTaskServiceSource.includes("'draft-due-diligence-report 原生 DOCX Pipeline'")
       && aiTaskServiceSource.includes(": 'DOCX Formatter'")
       && aiTaskServiceSource.includes('generateCurrentDocx')
       && aiTaskServiceSource.includes("retryDocumentStep('Q&A DOCX 生成与质量检查'")

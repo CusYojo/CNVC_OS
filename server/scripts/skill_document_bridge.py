@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Small host bridge for deterministic document renderers bundled in plugins.
+"""Small host bridge for deterministic document renderers bundled in Skills.
 
 The application owns content generation and evidence review.  This bridge keeps
-the final DOCX construction inside the selected plugin so template provenance
+the final DOCX construction inside the selected Skill so template provenance
 does not get lost in a second, generic renderer.
 """
 
@@ -37,7 +37,7 @@ def sha256(path: Path) -> str:
 def load_processor(path: Path, module_name: str):
     spec = importlib.util.spec_from_file_location(module_name, path)
     if spec is None or spec.loader is None:
-        raise SystemExit(f"cannot load plugin processor: {path}")
+        raise SystemExit(f"cannot load Skill processor: {path}")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -56,7 +56,7 @@ def render_proposal(args: argparse.Namespace) -> int:
         raise SystemExit("proposal template provenance was lost during rendering")
     manifest = {
         "status": "rendered",
-        "workflow": "SBL_APP_PLUGIN_TEMPLATE_RENDER_V1",
+        "workflow": "SBL_APP_SKILL_TEMPLATE_RENDER_V1",
         "docx": str(output_path),
         "docx_sha256": sha256(output_path),
         "payload": str(payload_path),
@@ -84,7 +84,7 @@ def render_qa(args: argparse.Namespace) -> int:
     artifacts.mkdir(parents=True, exist_ok=True)
     write_json(artifacts / "qa_content.json", content)
 
-    # The host already completed evidence and answer review.  The plugin renderer
+    # The host already completed evidence and answer review.  The Skill renderer
     # still expects its six staged filenames before it can enter layout code, so
     # provide explicit host-adapter markers instead of pretending that a second
     # semantic audit was run here.
@@ -105,22 +105,22 @@ def render_qa(args: argparse.Namespace) -> int:
     write_json(artifacts / "revision_log.json", [])
 
     # allow_failed_audit only bridges the host's already-reviewed content into
-    # the plugin's deterministic DOCX formatter.  Release is still blocked below
-    # unless every plugin package/layout check passes.
+    # the Skill.s deterministic DOCX formatter.  Release is still blocked below
+    # unless every Skill package/layout check passes.
     processor.render_docx(artifacts, output_path, allow_failed_audit=True)
     report = processor.verify_docx(artifacts, output_path)
     render_issues = report.get("render_issues") or []
     package = report.get("docx_package") or {}
     expected_questions = len(content.get("items") or [])
     if render_issues:
-        raise SystemExit("QA plugin layout verification failed: " + "; ".join(render_issues))
+        raise SystemExit("QA Skill layout verification failed: " + "; ".join(render_issues))
     if package.get("question_count") != expected_questions:
         raise SystemExit(
-            f"QA plugin question count mismatch: {package.get('question_count')}/{expected_questions}"
+            f"QA Skill question count mismatch: {package.get('question_count')}/{expected_questions}"
         )
     result = {
         "status": "pass",
-        "renderer_mode": "plugin-deta-qa-pdf",
+        "renderer_mode": "Skill-deta-qa-pdf",
         "format_profile": "deta_qa_pdf",
         "docx": str(output_path),
         "docx_sha256": sha256(output_path),

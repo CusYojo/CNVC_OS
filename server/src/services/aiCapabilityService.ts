@@ -4,7 +4,6 @@ import type { AuditRecord, BuiltinCapabilitySeed } from '../repositories/index.j
 import { AI_MODEL_PROFILE_KEYS, type AiModelProfileKey } from './aiModelSettingsService.js'
 import {
   AI_BUSINESS_SKILLS,
-  AI_DOCUMENT_PLUGIN_BINDINGS,
   AI_PPT_WORKFLOW_SKILLS,
   loadAiSkill,
 } from './aiSkillService.js'
@@ -79,23 +78,6 @@ for (const item of [...AI_BUSINESS_SKILLS, ...AI_PPT_WORKFLOW_SKILLS]) {
 
 export const AI_CAPABILITY_CATALOG: readonly CatalogItem[] = [
   ...uniqueSkills.values(),
-  ...AI_DOCUMENT_PLUGIN_BINDINGS.map((plugin) => ({
-    kind: 'plugin' as const,
-    capabilityKey: plugin.pluginName,
-    name: AI_BUSINESS_SKILLS.find((skill) => skill.taskType === plugin.taskType)?.label
-      ?? plugin.pluginName,
-    description: `为${AI_BUSINESS_SKILLS.find((skill) => skill.taskType === plugin.taskType)?.label ?? plugin.taskType}快捷任务提供主 Skill 与模板契约。`,
-    packageVersion: plugin.pluginVersion,
-    config: {
-      runtime: 'controlled-ai-task-plugin',
-      taskType: plugin.taskType,
-      skillName: plugin.skillName,
-      entrySkillName: plugin.entrySkillName,
-      prompt: `用户明确要求生成“${AI_BUSINESS_SKILLS.find((skill) => skill.taskType === plugin.taskType)?.label ?? plugin.taskType}”时，调用 create_ai_task 并使用 type=${plugin.taskType}。生成规则由已安装的 ${plugin.pluginName}:${plugin.entrySkillName} 控制。`,
-    },
-    toolNames: ['create_ai_task', 'get_ai_task_status'],
-    dependencyNames: [plugin.skillName],
-  })),
   ...AI_MODEL_PROFILE_KEYS.map((profileKey) => ({
     kind: 'agent' as const,
     capabilityKey: profileKey,

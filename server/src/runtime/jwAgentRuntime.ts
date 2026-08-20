@@ -205,33 +205,29 @@ const skillByTaskType = new Map(AI_BUSINESS_SKILLS.map((item) => [item.taskType,
 const quickSkillBindings: Record<JwQuickSkillName, {
   internalSkillName: string
   taskType: QuickSkillInvocation['taskType']
-  expectedEntrySkillName?: string
 }> = {
   'draft-investment-proposal': {
     internalSkillName: 'draft-investment-proposal',
     taskType: 'investment_proposal',
   },
   'generate-investment-compliance-note': {
-    internalSkillName: 'generate-compliance-statement',
+    internalSkillName: 'generate-investment-compliance-note',
     taskType: 'compliance_statement',
-    expectedEntrySkillName: 'generate-investment-compliance-note',
   },
   'draft-investment-qa': {
-    internalSkillName: 'generate-project-qa-report',
+    internalSkillName: 'draft-investment-qa',
     taskType: 'project_qa',
-    expectedEntrySkillName: 'generate-investment-qa-report',
   },
   'draft-due-diligence-report': {
-    internalSkillName: 'write-investment-dd-report',
+    internalSkillName: 'draft-due-diligence-report',
     taskType: 'due_diligence_report',
-    expectedEntrySkillName: 'generate-deta-dd-report',
   },
 }
 
 async function resolveQuickSkillBinding(skillName: JwQuickSkillName) {
   const binding = quickSkillBindings[skillName]
   const loaded = await loadAiSkill(binding.internalSkillName)
-  if (binding.expectedEntrySkillName && loaded.entrySkillName !== binding.expectedEntrySkillName) {
+  if (loaded.name !== skillName) {
     throw Object.assign(new Error(`快捷 Skill 部署不一致：${skillName}`), {
       code: 'AI_SKILL_NOT_AVAILABLE', status: 503,
     })
