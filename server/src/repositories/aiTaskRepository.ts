@@ -100,6 +100,14 @@ export type AiTaskRecord = {
   retryable: boolean | null
   cancellationRequested: boolean
   executionAttempts: number
+  modelCalls: number
+  usageCalls: number
+  inputTokens: number
+  outputTokens: number
+  cacheCreationInputTokens: number
+  cacheReadInputTokens: number
+  reasoningTokens: number
+  totalTokens: number
   leaseOwner: string | null
   leaseExpiresAt: Date | null
   idempotencyKey: string
@@ -209,6 +217,18 @@ export interface AiTaskRepository {
     progress: number
     updatedAt: Date
   }): Promise<boolean>
+  addTaskModelUsage(input: {
+    taskId: string
+    usage: {
+      inputTokens: number
+      outputTokens: number
+      cacheCreationInputTokens: number
+      cacheReadInputTokens: number
+      reasoningTokens: number
+      totalTokens: number
+    } | null
+    updatedAt: Date
+  }): Promise<void>
   heartbeatTaskLease(input: {
     taskId: string
     leaseOwner: string

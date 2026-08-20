@@ -1,4 +1,9 @@
 import { observeNonStreamingAiRuntimeRequest } from '../runtime/aiRuntimeTelemetry.js'
+import {
+  normalizeAiTaskModelUsage,
+  recordAiTaskModelCall,
+  type AiTaskModelUsage,
+} from '../runtime/aiTaskModelUsage.js'
 
 export type AiGatewayMessage = {
   role: 'system' | 'developer' | 'user' | 'assistant'
@@ -74,7 +79,7 @@ export function shouldFallbackAiGatewayToChat(status: number) {
   return [400, 404, 405, 415, 422, 501].includes(status)
 }
 
-export async function requestAiGatewayText(input: {
+async function requestAiGatewayCompletion(input: {
   baseUrl: string
   apiKey?: string
   model: string
@@ -84,7 +89,7 @@ export async function requestAiGatewayText(input: {
   json?: boolean
   reasoningEffort?: 'low' | 'medium' | 'high'
   fetchImpl?: FetchLike
-}) {
+}): Promise<{ text: string; usage: AiTaskModelUsage | null }> {
   return observeNonStreamingAiRuntimeRequest('gateway-text', async () => {
     const baseUrl = input.baseUrl.replace(/\/$/, '')
     const fetchImpl = input.fetchImpl ?? fetch
@@ -116,10 +121,38 @@ export async function requestAiGatewayText(input: {
     }
     let payload: unknown
     try { payload = JSON.parse(raw) } catch { throw new Error('LLM 网关返回了非 JSON 响应') }
+    await recordAiTaskModelCall(payload)
     const text = aiGatewayResponseText(payload)
     if (!text) throw new Error('LLM 网关返回空内容')
-    return text
+    return { text, usage: normalizeAiTaskModelUsage(payload) }
   })
+}
+
+export async function requestAiGatewayText(input: {
+  baseUrl: string
+  apiKey?: string
+  model: string
+  messages: AiGatewayMessage[]
+  maxTokens: number
+  timeoutMs: number
+  json?: boolean
+  reasoningEffort?: 'low' | 'medium' | 'high'
+  fetchImpl?: FetchLike
+}) {
+  return (await requestAiGatewayCompletion(input)).text
+}
+
+function chatCompatibleUsage(usage: AiTaskModelUsage | null) {
+  if (!usage) return undefined
+  return {
+    prompt_tokens: usage.inputTokens,
+    completion_tokens: usage.outputTokens,
+    total_tokens: usage.totalTokens,
+    prompt_tokens_details: { cached_tokens: usage.cacheReadInputTokens },
+    completion_tokens_details: { reasoning_tokens: usage.reasoningTokens },
+    cache_creation_input_tokens: usage.cacheCreationInputTokens,
+    cache_read_input_tokens: usage.cacheReadInputTokens,
+  }
 }
 
 export async function fetchAiGatewayChatCompatible(
@@ -148,7 +181,7 @@ export async function fetchAiGatewayChatCompatible(
   const authorization = headers.get('authorization') || ''
   const apiKey = authorization.startsWith('Bearer ') ? authorization.slice(7) : undefined
   try {
-    const text = await requestAiGatewayText({
+    const completion = await requestAiGatewayCompletion({
       baseUrl,
       apiKey,
       model: String(body.model || ''),
@@ -162,7 +195,8 @@ export async function fetchAiGatewayChatCompatible(
       fetchImpl,
     })
     return new Response(JSON.stringify({
-      choices: [{ finish_reason: 'stop', message: { content: text } }],
+      choices: [{ finish_reason: 'stop', message: { content: completion.text } }],
+      usage: chatCompatibleUsage(completion.usage),
     }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
@@ -230,7 +264,9 @@ export async function requestAiGatewayVisionText(input: {
     }
     const raw = await response.text()
     if (!response.ok) throw Object.assign(new Error(`视觉网关 ${response.status}`), { status: response.status })
-    const text = aiGatewayResponseText(JSON.parse(raw))
+    const payload = JSON.parse(raw) as unknown
+    await recordAiTaskModelCall(payload)
+    const text = aiGatewayResponseText(payload)
     if (!text) throw new Error('视觉网关返回空内容')
     return text
   })

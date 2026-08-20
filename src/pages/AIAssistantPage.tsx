@@ -1086,6 +1086,13 @@ function Chat() {
   const scrollRef = useRef<HTMLDivElement>(null)
   const [aiTasks, setAiTasks] = useState<AiTask[]>([])
   const [aiTasksLoading, setAiTasksLoading] = useState(false)
+  const reportTaskUsage = useMemo(() => aiTasks.reduce((summary, task) => {
+    if (!task.usage) return summary
+    summary.modelCalls += task.usage.modelCalls
+    summary.usageCalls += task.usage.usageCalls
+    summary.totalTokens += task.usage.totalTokens
+    return summary
+  }, { modelCalls: 0, usageCalls: 0, totalTokens: 0 }), [aiTasks])
   const [qaAnswers, setQaAnswers] = useState<ProjectQaAnswer[]>([])
   const [qaAnswersLoading, setQaAnswersLoading] = useState(false)
   const [taskMutationId, setTaskMutationId] = useState<string | null>(null)
@@ -2268,23 +2275,37 @@ function Chat() {
               </span>
             </div>
           )}
-          {agent.runtime && (
+          {(agent.runtime || reportTaskUsage.modelCalls > 0) && (
             <div
               className="ml-auto rounded-lg border border-slate-200 bg-white px-3 py-2 text-[11px] text-slate-500"
               aria-label="模型用量与上下文压缩状态"
-              title={agent.runtime.contextCompaction.lastError || undefined}
+              title={agent.runtime?.contextCompaction.lastError || undefined}
             >
-              {agent.runtime.usage
-                ? `${agent.runtime.usage.totalTokens.toLocaleString()} Token`
-                : 'Token 待生成'}
-              <span className="px-1 text-slate-300">·</span>
-              {agent.runtime.contextCompaction.state === 'compacting'
-                ? '上下文压缩中'
-                : agent.runtime.contextCompaction.state === 'failed'
-                  ? '上下文压缩失败'
-                  : `已压缩 ${agent.runtime.contextCompaction.count} 次`}
-              {agent.runtime.totalCostUsd !== null && (
-                <><span className="px-1 text-slate-300">·</span>${agent.runtime.totalCostUsd.toFixed(4)}</>
+              {agent.runtime && (
+                <>
+                  {agent.runtime.usage
+                    ? `对话 ${agent.runtime.usage.totalTokens.toLocaleString()} Token`
+                    : '对话 Token 待生成'}
+                  <span className="px-1 text-slate-300">·</span>
+                  {agent.runtime.contextCompaction.state === 'compacting'
+                    ? '上下文压缩中'
+                    : agent.runtime.contextCompaction.state === 'failed'
+                      ? '上下文压缩失败'
+                      : `已压缩 ${agent.runtime.contextCompaction.count} 次`}
+                  {agent.runtime.totalCostUsd !== null && (
+                    <><span className="px-1 text-slate-300">·</span>${agent.runtime.totalCostUsd.toFixed(4)}</>
+                  )}
+                </>
+              )}
+              {agent.runtime && reportTaskUsage.modelCalls > 0 && (
+                <span className="px-1 text-slate-300">·</span>
+              )}
+              {reportTaskUsage.modelCalls > 0 && (
+                <span title={`模型调用 ${reportTaskUsage.modelCalls} 次，收到用量 ${reportTaskUsage.usageCalls} 次`}>
+                  报告 {reportTaskUsage.usageCalls > 0
+                    ? `${reportTaskUsage.totalTokens.toLocaleString()} Token${reportTaskUsage.usageCalls < reportTaskUsage.modelCalls ? '（部分）' : ''}`
+                    : 'Token 不可用'}
+                </span>
               )}
             </div>
           )}

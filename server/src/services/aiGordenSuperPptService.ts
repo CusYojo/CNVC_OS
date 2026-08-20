@@ -25,6 +25,7 @@ import {
 } from './aiInvestmentRecommendationPptWorkflowService.js'
 import { convertUploadedInvestmentPdfTemplate } from './aiInvestmentTemplateConversionService.js'
 import { execFileSupervised as execFileAsync } from '../runtime/supervisedProcessService.js'
+import { recordAiTaskModelCall } from '../runtime/aiTaskModelUsage.js'
 
 type ProjectLike = {
   name: string
@@ -1644,6 +1645,7 @@ async function requestVisionJson(input: {
         )
       }
       const payload = await response.json() as unknown
+      await recordAiTaskModelCall(payload)
       const text = gordenVisionResponseText(payload)
       if (!text) throw new Error('Gorden 视觉解析没有返回内容')
       return jsonFromModelText(text)

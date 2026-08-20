@@ -316,6 +316,13 @@
       "when": 1787127355000,
       "tag": "0044_expand_project_file_content",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "5",
+      "when": 1787212143000,
+      "tag": "0045_add_ai_task_token_usage",
+      "breakpoints": true
     }
   ]
 }

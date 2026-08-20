@@ -45,6 +45,7 @@ import {
 import { loadAiSkill } from './aiSkillService.js'
 import { resolveAiCustomTemplateForTask } from './aiCustomTemplateService.js'
 import { recordJobCoordinationEventSafely } from '../runtime/jobCoordinationTelemetry.js'
+import { runWithAiTaskModelUsage } from '../runtime/aiTaskModelUsage.js'
 import {
   curateEvidenceSources,
   dedupeTextList,
@@ -1208,6 +1209,24 @@ async function inspectGeneratedArtifact(
 }
 
 async function executeTask(taskId: string) {
+  return runWithAiTaskModelUsage({
+    taskId,
+    onModelCall: async (usage) => {
+      await aiTaskRepository.addTaskModelUsage({
+        taskId,
+        usage,
+        updatedAt: new Date(),
+      }).catch((error) => {
+        // Usage persistence must never turn a successfully generated document
+        // into a failed document task. Coverage is exposed to the UI so a
+        // missing provider usage payload remains visible rather than estimated.
+        console.warn(`[aiTask] token usage persistence failed task=${taskId}:`, (error as Error).message)
+      })
+    },
+  }, () => executeTaskWithinUsage(taskId))
+}
+
+async function executeTaskWithinUsage(taskId: string) {
   if (aiTaskWorkerStopping || running.has(taskId)) return
   running.add(taskId)
   let rescheduleAfterRecovery = false
@@ -3139,6 +3158,17 @@ export async function getAiTask(userId: string, taskId: string) {
   const deliverableIds = new Set(deliverables.map((artifact) => artifact.id))
   return {
     ...task,
+    usage: task.modelCalls > 0 ? {
+      modelCalls: task.modelCalls,
+      usageCalls: task.usageCalls,
+      inputTokens: task.inputTokens,
+      outputTokens: task.outputTokens,
+      cacheCreationInputTokens: task.cacheCreationInputTokens,
+      cacheReadInputTokens: task.cacheReadInputTokens,
+      reasoningTokens: task.reasoningTokens,
+      totalTokens: task.totalTokens,
+      complete: task.usageCalls === task.modelCalls,
+    } : null,
     artifacts: deliverables.map(publicArtifact),
     sources: sources.filter((source) => !source.artifactId || deliverableIds.has(source.artifactId)),
   }

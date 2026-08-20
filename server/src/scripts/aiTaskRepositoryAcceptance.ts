@@ -70,6 +70,35 @@ async function main() {
     })))
     if (claims.filter(Boolean).length !== 1) throw new Error('parallel task claim did not have exactly one winner')
 
+    await aiTaskRepository.addTaskModelUsage({
+      taskId: claimTask.id,
+      usage: {
+        inputTokens: 120,
+        outputTokens: 30,
+        cacheCreationInputTokens: 5,
+        cacheReadInputTokens: 40,
+        reasoningTokens: 8,
+        totalTokens: 150,
+      },
+      updatedAt: new Date(),
+    })
+    await aiTaskRepository.addTaskModelUsage({
+      taskId: claimTask.id,
+      usage: null,
+      updatedAt: new Date(),
+    })
+    const usageTask = await aiTaskRepository.findTaskById(claimTask.id)
+    if (
+      usageTask?.modelCalls !== 2
+      || usageTask.usageCalls !== 1
+      || usageTask.inputTokens !== 120
+      || usageTask.outputTokens !== 30
+      || usageTask.cacheCreationInputTokens !== 5
+      || usageTask.cacheReadInputTokens !== 40
+      || usageTask.reasoningTokens !== 8
+      || usageTask.totalTokens !== 150
+    ) throw new Error('task token usage did not persist or aggregate correctly')
+
     const artifactId = randomUUID()
     const sourceId = randomUUID()
     const completed = await aiTaskRepository.completeTaskWithArtifacts({

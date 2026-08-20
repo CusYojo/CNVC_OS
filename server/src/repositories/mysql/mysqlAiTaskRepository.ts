@@ -197,6 +197,34 @@ class MySqlAiTaskRepository implements AiTaskRepository {
     })
   }
 
+  async addTaskModelUsage(input: {
+    taskId: string
+    usage: {
+      inputTokens: number
+      outputTokens: number
+      cacheCreationInputTokens: number
+      cacheReadInputTokens: number
+      reasoningTokens: number
+      totalTokens: number
+    } | null
+    updatedAt: Date
+  }) {
+    await mapped('aiTask.addTaskModelUsage', async () => {
+      const usage = input.usage
+      await this.executor.update(aiTasks).set({
+        modelCalls: sql`${aiTasks.modelCalls} + 1`,
+        usageCalls: sql`${aiTasks.usageCalls} + ${usage ? 1 : 0}`,
+        inputTokens: sql`${aiTasks.inputTokens} + ${usage?.inputTokens ?? 0}`,
+        outputTokens: sql`${aiTasks.outputTokens} + ${usage?.outputTokens ?? 0}`,
+        cacheCreationInputTokens: sql`${aiTasks.cacheCreationInputTokens} + ${usage?.cacheCreationInputTokens ?? 0}`,
+        cacheReadInputTokens: sql`${aiTasks.cacheReadInputTokens} + ${usage?.cacheReadInputTokens ?? 0}`,
+        reasoningTokens: sql`${aiTasks.reasoningTokens} + ${usage?.reasoningTokens ?? 0}`,
+        totalTokens: sql`${aiTasks.totalTokens} + ${usage?.totalTokens ?? 0}`,
+        updatedAt: input.updatedAt,
+      }).where(eq(aiTasks.id, input.taskId))
+    })
+  }
+
   async heartbeatTaskLease(input: {
     taskId: string
     leaseOwner: string

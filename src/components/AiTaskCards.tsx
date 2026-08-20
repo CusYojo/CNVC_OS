@@ -62,6 +62,17 @@ export type AiTask = {
   createdAt: string
   updatedAt: string
   completedAt?: string | null
+  usage?: {
+    modelCalls: number
+    usageCalls: number
+    inputTokens: number
+    outputTokens: number
+    cacheCreationInputTokens: number
+    cacheReadInputTokens: number
+    reasoningTokens: number
+    totalTokens: number
+    complete: boolean
+  } | null
   artifacts: AiTaskArtifact[]
   sources: AiTaskSource[]
 }
@@ -195,6 +206,27 @@ function TaskCard({
     : task.status === 'failed'
       ? '未形成最终引用清单'
       : '资料读取与引用整理中'
+  const usageLabel = task.usage
+    ? task.usage.usageCalls > 0
+      ? `报告 Token：${task.usage.totalTokens.toLocaleString()}${task.usage.complete ? '' : '（部分统计）'}`
+      : `报告 Token：上游未返回用量（${task.usage.modelCalls} 次调用）`
+    : ''
+  const usageTitle = task.usage
+    ? [
+        `模型调用 ${task.usage.modelCalls} 次，收到用量 ${task.usage.usageCalls} 次`,
+        `输入 ${task.usage.inputTokens.toLocaleString()}`,
+        `输出 ${task.usage.outputTokens.toLocaleString()}`,
+        task.usage.cacheCreationInputTokens
+          ? `缓存写入 ${task.usage.cacheCreationInputTokens.toLocaleString()}`
+          : '',
+        task.usage.cacheReadInputTokens
+          ? `缓存读取 ${task.usage.cacheReadInputTokens.toLocaleString()}`
+          : '',
+        task.usage.reasoningTokens
+          ? `其中推理 ${task.usage.reasoningTokens.toLocaleString()}`
+          : '',
+      ].filter(Boolean).join(' · ')
+    : ''
   const templatePreparationFailed = task.status === 'failed'
     && task.parameters._templatePreparationPending === true
   const hideFailureDiagnostics = shouldHideAiTaskFailureDiagnostics(task)
@@ -268,6 +300,7 @@ function TaskCard({
           </div>
           <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-500">
             <span>{sourceLabel}</span>
+            {usageLabel && <span title={usageTitle}>{usageLabel}</span>}
             <span>{formatShanghaiDateTime(task.createdAt)}</span>
           </div>
         </div>
