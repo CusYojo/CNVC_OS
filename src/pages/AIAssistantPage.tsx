@@ -26,7 +26,11 @@ import {
   type SafeAgentMessage,
   type SafeAgentPart,
 } from '../lib/aiMessageSafety'
-import { useJwAgent, type JwPendingInteraction } from '../hooks/useJwAgent'
+import {
+  useJwAgent,
+  type JwPendingInteraction,
+  type JwQuickSkillName,
+} from '../hooks/useJwAgent'
 import { formatShanghaiDateTime, shanghaiDateKey } from '../lib/dateTime'
 import type { Project } from '../types'
 
@@ -1556,13 +1560,31 @@ function Chat() {
 
   // agent 从"忙"变"闲"（跑完一轮）后刷新工作区，让新生成的文件自动出现
   useEffect(() => {
-    if (prevBusyRef.current && !busy) setWsRefresh((k) => k + 1)
+    if (prevBusyRef.current && !busy) {
+      setWsRefresh((k) => k + 1)
+      // 快捷 Skill 由对话中的 create_ai_task 创建任务；本轮结束后立即恢复
+      // 当前会话任务快照，确保新进度卡无需刷新页面即可出现并进入轮询。
+      if (currentConversationRowId) {
+        void apiGet<{ list: AiTask[] }>(
+          `/ai/tasks?conversationId=${encodeURIComponent(currentConversationRowId)}`,
+        ).then((result) => {
+          setAiTasks((items) => mergeAiTaskSnapshot(
+            items,
+            result.list ?? [],
+            currentConversationRowId,
+          ))
+        }).catch((error) => {
+          console.warn('AI task refresh after Agent turn failed:', (error as Error).message)
+        })
+      }
+    }
     prevBusyRef.current = busy
-  }, [busy])
+  }, [busy, currentConversationRowId])
 
   const send = async (
     question = input,
     contextOverride?: { projectId: string; projectName: string },
+    options?: { quickSkillName?: JwQuickSkillName },
   ): Promise<boolean> => {
     const clean = question.trim()
     if (!clean && uploads.length === 0) return false
@@ -1575,10 +1597,11 @@ function Chat() {
     const skillCtx = activeSkills.length
       ? `\n【本轮指定技能】${activeSkills.map((item) => `${item.name}（${item.capabilityKey}）`).join('、')}`
       : ''
-    // 把本轮上传的文件路径随消息带给 agent（落在其工作目录，可直接 read/bash 读；PDF/Excel 用对应技能）
+    // 把本轮上传文件的可审计路径和入库状态随消息带给 Agent；正式文档
+    // 快捷 Skill 另以结构化 fileId 绑定，服务端会校验文件属于当前项目。
     const fileCtx = uploads.length
-      ? `\n【已上传文件】(在你的工作目录，可用 read/bash 直接读；PDF 用 pdf 技能、Excel/CSV 用 spreadsheet 技能)\n`
-        + uploads.map((u) => `- ${u.path}${u.rag ? '（已入项目知识库，也可用 search_docs 检索）' : ''}`).join('\n')
+      ? `\n【已上传文件】\n`
+        + uploads.map((u) => `- ${u.path}${u.rag ? '（已入项目知识库，可通过项目资料工具检索）' : '（仅会话工作区）'}`).join('\n')
       : ''
     // 把项目上下文随消息带给 agent（agent 的 search_project_docs 工具会用到）
     const sessionProject = currentSession?.projectId
@@ -1607,7 +1630,8 @@ function Chat() {
     try {
       let formalPptTaskDispatched = false
       if (
-        effectiveScope === 'project'
+        !options?.quickSkillName
+        && effectiveScope === 'project'
         && effectiveProject?.projectId
         && UUID_PATTERN.test(effectiveProject.projectId)
         && UUID_PATTERN.test(currentConversationRowId)
@@ -1673,7 +1697,13 @@ function Chat() {
         }
       }
       if (!formalPptTaskDispatched) {
-        await agent.sendMessage(ctx)
+        await agent.sendMessage(ctx, {
+          skillName: options?.quickSkillName,
+          attachmentFileIds: uploads
+            .map((upload) => upload.fileId)
+            .filter((fileId): fileId is string => Boolean(fileId)),
+          attachmentFileNames: uploads.map((upload) => upload.name),
+        })
       }
       setUploads([])
       return true
@@ -2025,6 +2055,50 @@ function Chat() {
       return false
     }
     quickTaskLocksRef.current.add(taskLockKey)
+    if (
+      request.actionId === 'proposal'
+      || request.actionId === 'compliance'
+      || request.actionId === 'qa'
+      || request.actionId === 'due_diligence'
+    ) {
+      try {
+        const taskSession = sessions.find((session) => session.rowId === request.conversationId)
+        if (!taskSession?.projectId || taskSession.projectId !== request.projectId) {
+          showToast('当前项目随会话固定，请重新打开快捷任务后再试', 'error')
+          return false
+        }
+        const unavailableUploads = uploads.filter((upload) => !upload.fileId)
+        if (unavailableUploads.length) {
+          showToast(
+            `以下本轮附件尚未进入项目资料库，无法完整提交给生成 Skill：${unavailableUploads.map((upload) => upload.name).join('、')}`,
+            'error',
+          )
+          return false
+        }
+        const quickSkillName: JwQuickSkillName = request.actionId === 'proposal'
+          ? 'draft-investment-proposal'
+          : request.actionId === 'compliance'
+            ? 'generate-investment-compliance-note'
+            : request.actionId === 'qa'
+              ? 'draft-investment-qa'
+              : 'draft-due-diligence-report'
+        const userRequest = [
+          `请使用 Skill「${quickSkillName}」，结合当前项目全部资料、当前会话上下文和本轮上传文件，生成${request.actionLabel} DOCX。`,
+          request.userInstructions?.trim()
+            ? `补充要求：${request.userInstructions.trim()}`
+            : '',
+        ].filter(Boolean).join('\n')
+        const sent = await send(
+          userRequest,
+          { projectId: request.projectId, projectName: request.projectName },
+          { quickSkillName },
+        )
+        if (sent) showToast(`已使用 ${quickSkillName} 发送生成请求`, 'success')
+        return sent
+      } finally {
+        quickTaskLocksRef.current.delete(taskLockKey)
+      }
+    }
     const parameters: Record<string, unknown> = {
       sourceCutoffDate: request.sourceCutoffDate,
       outputFormat: request.outputFormat,
@@ -2032,15 +2106,7 @@ function Chat() {
       researchIntent: request.userInstructions?.trim()
         || `联网检索“${request.projectName}”的具体项目、主体、团队、产品、客户、融资、商业化与风险信息，并结合当前项目资料生成${request.actionLabel}。`,
     }
-    if (request.actionId === 'proposal') {
-      if (request.userInstructions?.trim()) {
-        parameters.userInstructions = request.userInstructions.trim()
-      }
-    } else if (request.actionId === 'compliance') {
-      if (request.userInstructions?.trim()) {
-        parameters.userInstructions = request.userInstructions.trim()
-      }
-    } else if (request.actionId === 'investment_ppt') {
+    if (request.actionId === 'investment_ppt') {
       parameters.language = request.language || '中文'
       parameters.structureMode = 'standard'
       if (request.userInstructions?.trim()) {
@@ -2053,12 +2119,6 @@ function Chat() {
       }
       if (request.preparationId) {
         parameters.clientPreparationId = request.preparationId
-      }
-    } else if (request.actionId === 'due_diligence') {
-      parameters.diligenceScope = request.diligenceScope || '商业尽调'
-    } else if (request.actionId === 'qa') {
-      if (request.userInstructions?.trim()) {
-        parameters.userInstructions = request.userInstructions.trim()
       }
     } else if (request.actionId === 'custom_template') {
       parameters.customTemplateId = request.customTemplateId

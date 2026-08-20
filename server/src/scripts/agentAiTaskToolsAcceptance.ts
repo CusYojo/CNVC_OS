@@ -68,6 +68,7 @@ async function main() {
       type: 'investment_proposal' as const,
       sourceCutoffDate: '2026-08-08',
       instructions: `重点核验客户与估值 ${marker}`,
+      attachmentFileIds: [randomUUID(), randomUUID()],
     }
     const first = await createAgentAiTaskForUser(createInput, fakeDependencies)
     const second = await createAgentAiTaskForUser(createInput, fakeDependencies)
@@ -77,8 +78,10 @@ async function main() {
       || first.projectId !== project.id || first.conversationId !== conversation.id
       || first.task?.status !== 'pending' || captured[0]?.userId !== owner.id
       || capturedInput?.projectId !== project.id || capturedInput.conversationId !== conversation.id
-      || capturedInput.parameters.audience !== '内部立项' || capturedInput.parameters.length !== '标准版'
       || capturedInput.parameters.outputFormat !== 'DOCX'
+      || Object.prototype.hasOwnProperty.call(capturedInput.parameters, 'audience')
+      || Object.prototype.hasOwnProperty.call(capturedInput.parameters, 'length')
+      || JSON.stringify(capturedInput.parameters.attachmentFileIds) !== JSON.stringify(createInput.attachmentFileIds)
     ) throw new Error('create_ai_task stable context/default parameter contract mismatch')
     if (
       !first.idempotencyKey.startsWith(`jw:${conversation.id}:`)
@@ -135,7 +138,8 @@ async function main() {
       ok: true,
       checks: [
         'create-stable-user-project-conversation-binding',
-        'create-approved-default-parameters',
+        'create-approved-parameters-without-retired-proposal-defaults',
+        'create-bound-attachment-references',
         'create-server-deterministic-idempotency',
         'create-cross-user-project-denial',
         'create-cutoff-date-boundary',

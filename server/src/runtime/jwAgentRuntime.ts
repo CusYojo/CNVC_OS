@@ -23,7 +23,7 @@ import {
 import { redactSensitiveText } from '../security/redactSecrets.js'
 import { resolveAiModelById, resolveAiModelRoute, type AiModelProfileKey } from '../services/aiModelSettingsService.js'
 import { normalizeAgentRuntimePolicy, resolveSelectedRuntimeCapabilities } from '../services/aiCapabilityService.js'
-import { AI_BUSINESS_SKILLS } from '../services/aiSkillService.js'
+import { AI_BUSINESS_SKILLS, loadAiSkill } from '../services/aiSkillService.js'
 import { writeAudit } from '../services/auditService.js'
 import {
   beginAiRuntimeRequest,
@@ -49,6 +49,33 @@ type RuntimeSession = {
   pendingUserMessage: unknown | null
   resumeRecoveryAttempted: boolean
   assistantSeenForPending: boolean
+  selectedSkillNames: Set<string>
+  quickSkillInvocation: QuickSkillInvocation | null
+}
+
+export type JwQuickSkillName =
+  | 'draft-investment-proposal'
+  | 'generate-investment-compliance-note'
+  | 'draft-investment-qa'
+  | 'draft-due-diligence-report'
+
+export type JwMessageOptions = {
+  skillName?: JwQuickSkillName
+  attachmentFileIds?: string[]
+  attachmentFileNames?: string[]
+}
+
+type QuickSkillInvocation = {
+  requestedSkillName: JwQuickSkillName
+  internalSkillName: string
+  taskType:
+    | 'investment_proposal'
+    | 'compliance_statement'
+    | 'project_qa'
+    | 'due_diligence_report'
+  instructions: string
+  attachmentFileIds: string[]
+  attachmentFileNames: string[]
 }
 
 export type JwInteractionQuestion = {
@@ -175,6 +202,75 @@ const projectScopedAgentToolSet = new Set<string>([
   'mcp__investment__get_ai_task_status',
 ])
 const skillByTaskType = new Map(AI_BUSINESS_SKILLS.map((item) => [item.taskType, item.name] as const))
+const quickSkillBindings: Record<JwQuickSkillName, {
+  internalSkillName: string
+  taskType: QuickSkillInvocation['taskType']
+  expectedEntrySkillName?: string
+}> = {
+  'draft-investment-proposal': {
+    internalSkillName: 'draft-investment-proposal',
+    taskType: 'investment_proposal',
+  },
+  'generate-investment-compliance-note': {
+    internalSkillName: 'generate-compliance-statement',
+    taskType: 'compliance_statement',
+    expectedEntrySkillName: 'generate-investment-compliance-note',
+  },
+  'draft-investment-qa': {
+    internalSkillName: 'generate-project-qa-report',
+    taskType: 'project_qa',
+    expectedEntrySkillName: 'generate-investment-qa-report',
+  },
+  'draft-due-diligence-report': {
+    internalSkillName: 'write-investment-dd-report',
+    taskType: 'due_diligence_report',
+    expectedEntrySkillName: 'generate-deta-dd-report',
+  },
+}
+
+async function resolveQuickSkillBinding(skillName: JwQuickSkillName) {
+  const binding = quickSkillBindings[skillName]
+  const loaded = await loadAiSkill(binding.internalSkillName)
+  if (binding.expectedEntrySkillName && loaded.entrySkillName !== binding.expectedEntrySkillName) {
+    throw Object.assign(new Error(`快捷 Skill 部署不一致：${skillName}`), {
+      code: 'AI_SKILL_NOT_AVAILABLE', status: 503,
+    })
+  }
+  return binding
+}
+
+function quickSkillTaskInstructions(message: string, recentMessages: string[]) {
+  const current = message.trim().slice(0, 1_200)
+  const recent = recentMessages
+    .filter(Boolean)
+    .slice(-6)
+    .map((item, index) => `${index + 1}. ${item.replace(/\s+/g, ' ').trim().slice(0, 240)}`)
+    .join('\n')
+  return [
+    current ? `本次生成要求：${current}` : '',
+    recent ? `当前会话最近上下文：\n${recent}` : '',
+  ].filter(Boolean).join('\n\n').slice(0, 2_000)
+}
+
+function quickSkillRuntimeMessage(message: string, invocation: QuickSkillInvocation) {
+  const attachmentManifest = invocation.attachmentFileNames.length || invocation.attachmentFileIds.length
+    ? [
+        ...invocation.attachmentFileNames.map((name) => `- 文件名：${name}`),
+        ...invocation.attachmentFileIds.map((fileId) => `- 已绑定项目文件 ID：${fileId}`),
+      ].join('\n')
+    : '无本轮新增附件；仍须使用当前项目全部已授权资料。'
+  return `【服务端已绑定快捷 Skill】
+Skill：${invocation.requestedSkillName}
+固定任务类型：${invocation.taskType}
+
+这是用户通过快捷入口明确发起的正式文档生成请求。先使用 get_project_summary、list_project_files 和必要的 read_project_file 理解当前项目资料，再调用 create_ai_task；type 必须为 ${invocation.taskType}，instructions 应忠实保留用户本次要求与当前会话中相关上下文。不得改用其他文档类型，也不要只在对话中返回一份纯文本草稿。项目、会话、Skill 与附件范围均由服务端绑定。
+
+【本轮附件清单】
+${attachmentManifest}
+
+【用户请求】
+${message.trim()}`
+}
 
 export function jwAgentToolAllowed(toolName: string): boolean {
   return jwAgentAllowedToolSet.has(toolName)
@@ -1035,6 +1131,7 @@ async function createRuntimeSession(
   const cwd = resolveJwAgentWorkspace(workspaceRoot, conversationId)
   await mkdir(cwd, { recursive: true })
   const queue = new MessageQueue()
+  let session: RuntimeSession | undefined
   const investmentTools = createSdkMcpServer({
     name: 'investment',
     version: '1.0.0',
@@ -1092,13 +1189,26 @@ async function createRuntimeSession(
         },
         async ({ type, sourceCutoffDate, instructions, customTemplateId }) => {
           if (!projectId) throw Object.assign(new Error('当前会话未绑定项目'), { code: 'PROJECT_SCOPE_REQUIRED' })
+          const quickInvocation = session?.quickSkillInvocation
+          if (quickInvocation && type !== quickInvocation.taskType) {
+            throw Object.assign(new Error(`本轮快捷 Skill 只允许创建 ${quickInvocation.taskType} 任务`), {
+              code: 'CAPABILITY_FORBIDDEN', status: 403,
+            })
+          }
           if (!selectedSkillsAllowAiTask(selectedSkillNames, type)) {
             throw Object.assign(new Error('当前会话未加载该文档任务所需 Skill'), {
               code: 'CAPABILITY_FORBIDDEN', status: 403,
             })
           }
           const payload = await createAgentAiTaskForUser({
-            userId, projectId, conversationId, type, sourceCutoffDate, instructions, customTemplateId,
+            userId,
+            projectId,
+            conversationId,
+            type,
+            sourceCutoffDate,
+            instructions: quickInvocation?.instructions || instructions,
+            attachmentFileIds: quickInvocation?.attachmentFileIds,
+            customTemplateId,
           })
           return { content: [{ type: 'text', text: JSON.stringify(payload) }] }
         },
@@ -1176,7 +1286,7 @@ async function createRuntimeSession(
       },
     },
   }) as RuntimeQuery
-  const session: RuntimeSession = {
+  session = {
     conversationId,
     queue,
     query: sdkQuery,
@@ -1187,14 +1297,22 @@ async function createRuntimeSession(
     pendingUserMessage: null,
     resumeRecoveryAttempted: false,
     assistantSeenForPending: false,
+    selectedSkillNames,
+    quickSkillInvocation: null,
   }
   session.outputLoop = runOutputLoop(session)
   sessions.set(conversationId, session)
   return session
 }
 
-export async function sendJwAgentMessage(userId: string, userRole: string, agentId: string, message: string) {
-  return await sendJwAgentMessageWithMedia(userId, userRole, agentId, message, {})
+export async function sendJwAgentMessage(
+  userId: string,
+  userRole: string,
+  agentId: string,
+  message: string,
+  options: JwMessageOptions = {},
+) {
+  return await sendJwAgentMessageWithMedia(userId, userRole, agentId, message, {}, options)
 }
 
 export async function sendJwAgentMessageWithImages(
@@ -1213,6 +1331,7 @@ export async function sendJwAgentMessageWithMedia(
   agentId: string,
   message: string,
   media: { images?: WeixinInboundImage[]; documents?: WeixinInboundDocument[] },
+  options: JwMessageOptions = {},
 ) {
   const resolved = await resolveConversation(userId, agentId)
   if (!resolved) return null
@@ -1225,6 +1344,21 @@ export async function sendJwAgentMessageWithMedia(
       })
     }
     const clean = message.trim()
+    const quickBinding = options.skillName
+      ? await resolveQuickSkillBinding(options.skillName)
+      : null
+    if (quickBinding && !refreshed.agent.projectId) {
+      throw Object.assign(new Error('快捷文档 Skill 只能在已绑定项目的会话中使用'), {
+        code: 'PROJECT_SCOPE_REQUIRED', status: 409,
+      })
+    }
+    const attachmentFileIds = [...new Set(options.attachmentFileIds || [])].slice(0, 10)
+    const attachmentFileNames = [...new Set(options.attachmentFileNames || [])].slice(0, 10)
+    const recentContext = quickBinding
+      ? (await agentConversationRepository.listMessagesWithParts(refreshed.agent.id))
+          .slice(-6)
+          .map(({ message: row }) => row.content || '')
+      : []
     const validImages = (media.images || []).slice(0, 4).filter((image) => (
       ['image/jpeg', 'image/png', 'image/gif', 'image/webp'].includes(image.mediaType)
       && image.byteSize > 0
@@ -1294,6 +1428,19 @@ export async function sendJwAgentMessageWithMedia(
           userRole,
           fresh?.modelId,
         )
+      if (quickBinding && options.skillName) {
+        session.selectedSkillNames.add(quickBinding.internalSkillName)
+        session.quickSkillInvocation = {
+          requestedSkillName: options.skillName,
+          internalSkillName: quickBinding.internalSkillName,
+          taskType: quickBinding.taskType,
+          instructions: quickSkillTaskInstructions(clean, recentContext),
+          attachmentFileIds,
+          attachmentFileNames,
+        }
+      } else {
+        session.quickSkillInvocation = null
+      }
       telemetryRequestId = beginAiRuntimeRequest('jw-agent')
       session.telemetryRequestId = telemetryRequestId
       const attachments = [
@@ -1318,10 +1465,13 @@ export async function sendJwAgentMessageWithMedia(
             : '该文档来自微信接收的 DOCX 文件，已提取为纯文本。',
         })),
       ]
+      const runtimeText = session.quickSkillInvocation
+        ? quickSkillRuntimeMessage(clean, session.quickSkillInvocation)
+        : clean
       const content = attachments.length ? [
         ...attachments,
-        { type: 'text' as const, text: clean || '请阅读并分析以上微信附件。' },
-      ] : clean
+        { type: 'text' as const, text: runtimeText || '请阅读并分析以上微信附件。' },
+      ] : runtimeText
       const sdkSessionId = typeof fresh?.metadata?.sdkSessionId === 'string'
         ? fresh.metadata.sdkSessionId
         : null

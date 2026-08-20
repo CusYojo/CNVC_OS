@@ -43,6 +43,18 @@ export type JwPendingInteraction = {
   }>
 }
 
+export type JwQuickSkillName =
+  | 'draft-investment-proposal'
+  | 'generate-investment-compliance-note'
+  | 'draft-investment-qa'
+  | 'draft-due-diligence-report'
+
+export type JwSendMessageOptions = {
+  skillName?: JwQuickSkillName
+  attachmentFileIds?: string[]
+  attachmentFileNames?: string[]
+}
+
 type JwSnapshot = {
   id: string
   status: string
@@ -135,12 +147,17 @@ export function useJwAgent(agentId?: string) {
     }
   }, [agentId, refresh, applySnapshot])
 
-  const sendMessage = useCallback(async (message: string) => {
+  const sendMessage = useCallback(async (message: string, options: JwSendMessageOptions = {}) => {
     if (!agentId) throw new Error('请先创建或选择会话')
     setStatus('submitted')
     setError(null)
     try {
-      await apiPost(`/agent/conversations/${encodeURIComponent(agentId)}/messages`, { message })
+      await apiPost(`/agent/conversations/${encodeURIComponent(agentId)}/messages`, {
+        message,
+        ...(options.skillName ? { skillName: options.skillName } : {}),
+        ...(options.attachmentFileIds?.length ? { attachmentFileIds: options.attachmentFileIds } : {}),
+        ...(options.attachmentFileNames?.length ? { attachmentFileNames: options.attachmentFileNames } : {}),
+      })
       await refresh()
     } catch (cause) {
       setError(cause instanceof Error ? cause : new Error(String(cause)))

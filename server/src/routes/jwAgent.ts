@@ -22,8 +22,28 @@ jwAgentRouter.get('/conversations/:agentId', async (req: AuthedRequest, res, nex
 
 jwAgentRouter.post('/conversations/:agentId/messages', async (req: AuthedRequest, res, next) => {
   try {
-    const body = z.object({ message: z.string().min(1).max(200_000) }).parse(req.body ?? {})
-    const result = await sendJwAgentMessage(req.user!.uid, req.user!.role, agentId(req.params.agentId), body.message)
+    const body = z.object({
+      message: z.string().min(1).max(200_000),
+      skillName: z.enum([
+        'draft-investment-proposal',
+        'generate-investment-compliance-note',
+        'draft-investment-qa',
+        'draft-due-diligence-report',
+      ]).optional(),
+      attachmentFileIds: z.array(z.string().uuid()).max(10).default([]),
+      attachmentFileNames: z.array(z.string().trim().min(1).max(255)).max(10).default([]),
+    }).parse(req.body ?? {})
+    const result = await sendJwAgentMessage(
+      req.user!.uid,
+      req.user!.role,
+      agentId(req.params.agentId),
+      body.message,
+      {
+        skillName: body.skillName,
+        attachmentFileIds: body.attachmentFileIds,
+        attachmentFileNames: body.attachmentFileNames,
+      },
+    )
     if (!result) return res.status(404).json({ code: 'NOT_FOUND', message: '会话不存在' })
     res.status(202).json(result)
   } catch (error) { next(error) }

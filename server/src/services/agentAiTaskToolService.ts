@@ -70,15 +70,20 @@ function normalizedCutoffDate(value?: string): string {
   return date
 }
 
-function taskParameters(type: AgentCreatableAiTaskType, sourceCutoffDate: string, instructions?: string) {
+function taskParameters(
+  type: AgentCreatableAiTaskType,
+  sourceCutoffDate: string,
+  instructions?: string,
+  attachmentFileIds: string[] = [],
+) {
   const cleanInstructions = instructions?.trim() || ''
   if (cleanInstructions.length > 2_000) throw toolError(400, 'TASK_INSTRUCTIONS_TOO_LONG', '补充要求不能超过 2000 字')
   const parameters: Record<string, unknown> = {
     sourceCutoffDate,
     outputFormat: type === 'investment_recommendation_ppt' ? 'PPTX' : 'DOCX',
     ...(cleanInstructions ? { userInstructions: cleanInstructions, researchIntent: cleanInstructions } : {}),
+    ...(attachmentFileIds.length ? { attachmentFileIds: [...new Set(attachmentFileIds)].slice(0, 10) } : {}),
   }
-  if (type === 'investment_proposal') Object.assign(parameters, { audience: '内部立项', length: '标准版' })
   if (type === 'investment_recommendation_ppt') Object.assign(parameters, { language: '中文', structureMode: 'standard' })
   if (type === 'due_diligence_report') Object.assign(parameters, { diligenceScope: '商业尽调' })
   return parameters
@@ -126,6 +131,7 @@ export async function createAgentAiTaskForUser(input: {
   type: AgentCreatableAiTaskType
   sourceCutoffDate?: string
   instructions?: string
+  attachmentFileIds?: string[]
   customTemplateId?: string
 }, dependencies: AgentAiTaskToolDependencies = defaultDependencies) {
   if (!AGENT_CREATABLE_AI_TASK_TYPES.includes(input.type)) {
@@ -133,7 +139,12 @@ export async function createAgentAiTaskForUser(input: {
   }
   const { user } = await assertBoundTaskContext(input.userId, input.projectId, input.conversationId)
   const sourceCutoffDate = normalizedCutoffDate(input.sourceCutoffDate)
-  const parameters = taskParameters(input.type, sourceCutoffDate, input.instructions)
+  const parameters = taskParameters(
+    input.type,
+    sourceCutoffDate,
+    input.instructions,
+    input.attachmentFileIds,
+  )
   if (input.type === 'custom_template_document') {
     if (!input.customTemplateId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(input.customTemplateId)) {
       throw toolError(400, 'CUSTOM_TEMPLATE_REQUIRED', '自定义模板任务必须指定有效模板 ID')
