@@ -2055,50 +2055,43 @@ function Chat() {
       return false
     }
     quickTaskLocksRef.current.add(taskLockKey)
-    if (
-      request.actionId === 'proposal'
+    const isFormalDocumentTask = request.actionId === 'proposal'
       || request.actionId === 'compliance'
       || request.actionId === 'qa'
       || request.actionId === 'due_diligence'
-    ) {
-      try {
-        const taskSession = sessions.find((session) => session.rowId === request.conversationId)
-        if (!taskSession?.projectId || taskSession.projectId !== request.projectId) {
-          showToast('当前项目随会话固定，请重新打开快捷任务后再试', 'error')
-          return false
-        }
-        const unavailableUploads = uploads.filter((upload) => !upload.fileId)
-        if (unavailableUploads.length) {
-          showToast(
-            `以下本轮附件尚未进入项目资料库，无法完整提交给生成 Skill：${unavailableUploads.map((upload) => upload.name).join('、')}`,
-            'error',
-          )
-          return false
-        }
-        const quickSkillName: JwQuickSkillName = request.actionId === 'proposal'
-          ? 'draft-investment-proposal'
-          : request.actionId === 'compliance'
-            ? 'generate-investment-compliance-note'
-            : request.actionId === 'qa'
-              ? 'draft-investment-qa'
-              : 'draft-due-diligence-report'
-        const userRequest = [
-          `请使用 Skill「${quickSkillName}」，结合当前项目全部资料、当前会话上下文和本轮上传文件，生成${request.actionLabel} DOCX。`,
-          request.userInstructions?.trim()
-            ? `补充要求：${request.userInstructions.trim()}`
-            : '',
-        ].filter(Boolean).join('\n')
-        const sent = await send(
-          userRequest,
-          { projectId: request.projectId, projectName: request.projectName },
-          { quickSkillName },
-        )
-        if (sent) showToast(`已使用 ${quickSkillName} 发送生成请求`, 'success')
-        return sent
-      } finally {
+    const attachmentFileIds = uploads
+      .map((upload) => upload.fileId)
+      .filter((fileId): fileId is string => Boolean(fileId))
+    if (isFormalDocumentTask) {
+      const unavailableUploads = uploads.filter((upload) => !upload.fileId)
+      if (unavailableUploads.length) {
         quickTaskLocksRef.current.delete(taskLockKey)
+        showToast(
+          `以下本轮附件尚未进入项目资料库，无法完整提交给文档任务：${unavailableUploads.map((upload) => upload.name).join('、')}`,
+          'error',
+        )
+        return false
       }
     }
+    const recentConversationContext = messages.slice(-6).map((message) => {
+      const content = (message.role === 'user'
+        ? displayUserMessageText(message)
+        : extractTextParts(message))
+        .replace(/\s+/g, ' ')
+        .trim()
+      return { role: message.role, content }
+    }).filter((message) => (
+      message.content
+      && !message.content.startsWith('请使用 Skill「')
+    )).map((message) => (
+      `${message.role === 'user' ? '用户' : 'AI助手'}：${message.content.slice(0, 500)}`
+    )).join('\n').slice(0, 1_200)
+    const combinedUserInstructions = [
+      request.userInstructions?.trim() || '',
+      recentConversationContext
+        ? `当前会话上下文（仅用于理解生成要求，不作为项目事实证据）：\n${recentConversationContext}`
+        : '',
+    ].filter(Boolean).join('\n\n').slice(0, 2_000)
     const parameters: Record<string, unknown> = {
       sourceCutoffDate: request.sourceCutoffDate,
       outputFormat: request.outputFormat,
@@ -2106,7 +2099,15 @@ function Chat() {
       researchIntent: request.userInstructions?.trim()
         || `联网检索“${request.projectName}”的具体项目、主体、团队、产品、客户、融资、商业化与风险信息，并结合当前项目资料生成${request.actionLabel}。`,
     }
-    if (request.actionId === 'investment_ppt') {
+    if (isFormalDocumentTask) {
+      parameters.attachmentFileIds = attachmentFileIds
+      if (combinedUserInstructions) {
+        parameters.userInstructions = combinedUserInstructions
+      }
+      if (request.actionId === 'due_diligence') {
+        parameters.diligenceScope = request.diligenceScope || '商业尽调'
+      }
+    } else if (request.actionId === 'investment_ppt') {
       parameters.language = request.language || '中文'
       parameters.structureMode = 'standard'
       if (request.userInstructions?.trim()) {
@@ -2147,6 +2148,7 @@ function Chat() {
           ...items.filter((item) => item.id !== task.id && item.id !== clientTaskId),
         ])
       }
+      if (isFormalDocumentTask) setUploads([])
       showToast(`${request.actionLabel}任务已创建，可在消息区查看进度`, 'success')
       return true
     } catch (error) {

@@ -996,40 +996,20 @@ async function main() {
     path.resolve(process.cwd(), 'src', 'pages', 'AIAssistantPage.tsx'),
     'utf8',
   )
-  const jwAgentHookSource = await readFile(
-    path.resolve(process.cwd(), 'src', 'hooks', 'useJwAgent.ts'),
-    'utf8',
-  )
-  const jwAgentRouteSource = await readFile(
-    path.resolve(process.cwd(), 'server', 'src', 'routes', 'jwAgent.ts'),
-    'utf8',
-  )
-  const jwAgentRuntimeSource = await readFile(
-    path.resolve(process.cwd(), 'server', 'src', 'runtime', 'jwAgentRuntime.ts'),
-    'utf8',
-  )
   const aiMessageSafetySource = await readFile(
     path.resolve(process.cwd(), 'src', 'lib', 'aiMessageSafety.ts'),
     'utf8',
   )
   assert(
-    '投资提案、合规说明、Q&A 与尽调报告快捷入口按对话消息绑定受控 Skill',
-    assistantPageSource.includes("'draft-investment-proposal'")
-      && assistantPageSource.includes("'generate-investment-compliance-note'")
-      && assistantPageSource.includes("'draft-investment-qa'")
-      && assistantPageSource.includes("'draft-due-diligence-report'")
-      && assistantPageSource.includes('{ quickSkillName }')
-      && assistantPageSource.includes('attachmentFileIds: uploads')
-      && jwAgentHookSource.includes('skillName: options.skillName')
-      && jwAgentRouteSource.includes("'draft-investment-proposal'")
-      && jwAgentRouteSource.includes("'generate-investment-compliance-note'")
-      && jwAgentRouteSource.includes("'draft-investment-qa'")
-      && jwAgentRouteSource.includes("'draft-due-diligence-report'")
-      && jwAgentRuntimeSource.includes('resolveQuickSkillBinding')
-      && jwAgentRuntimeSource.includes('quickSkillRuntimeMessage')
-      && jwAgentRuntimeSource.includes('quickInvocation?.attachmentFileIds')
-      && jwAgentRuntimeSource.includes('type !== quickInvocation.taskType'),
-    '原 UI 开始生成 → 对话 send → 服务端 Skill 白名单 → 项目/上下文/附件绑定 → 对应文档任务',
+    '四项正式文档快捷入口直接创建进度任务且不展示内部 Skill 指令',
+    assistantPageSource.includes("apiPost<AiTask>('/ai/tasks'")
+      && assistantPageSource.includes('parameters.attachmentFileIds = attachmentFileIds')
+      && assistantPageSource.includes('parameters.userInstructions = combinedUserInstructions')
+      && assistantPageSource.includes("parameters.diligenceScope = request.diligenceScope || '商业尽调'")
+      && assistantPageSource.includes('setAiTasks((items) => [')
+      && assistantPageSource.includes('if (isFormalDocumentTask) setUploads([])')
+      && !assistantPageSource.includes('请使用 Skill「${quickSkillName}」'),
+    '点击开始生成 → POST /ai/tasks → 立即显示进度卡 → 成功后显示结果与 DOCX 下载',
   )
   assert(
     '投资建议书快捷任务以高亮会话模式读取项目、附件和对话',
