@@ -316,9 +316,6 @@ function TaskCard({
               >
                 <Download className="h-3.5 w-3.5" />
                 {artifactDownloadLabel(task, artifact)}
-                {['docx', 'pptx'].includes(artifact.format.toLowerCase())
-                  && artifact.metadata?.encodingClean !== true
-                  && '（历史未校验）'}
               </Button>
             ))}
         </div>
