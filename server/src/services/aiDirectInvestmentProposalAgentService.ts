@@ -4,6 +4,11 @@ import path from 'node:path'
 import { getAiSkillDirectory, type LoadedAiSkill } from './aiSkillService.js'
 import type { EvidenceSource } from './aiBusinessContentService.js'
 import { resolveAiModelRoute } from './aiModelSettingsService.js'
+import {
+  classifyDirectSkillAgentFailure,
+  directSkillAgentGatewayRecoveryPolicy,
+  type DirectSkillAgentGatewayRecoveryOptions,
+} from './aiDirectSkillAgentRecovery.js'
 import { redactSensitiveText } from '../security/redactSecrets.js'
 import { directAgentResultUsage, directAgentTurnUsage } from '../runtime/directAgentUsage.js'
 
@@ -348,6 +353,23 @@ function directAgentPrompt(input: {
 完成后简要说明最终结论和输出路径。`
 }
 
+function directAgentRecoveryPrompt(input: {
+  profile: DirectBusinessDocumentProfile
+  outputFileName: string
+  recoveryAttempt: number
+}) {
+  return `上一个 ${input.profile.skillName} Agent 上下文在模型网关返回普通 403 后已经关闭。当前是第 ${input.recoveryAttempt} 次全新上下文恢复，工作区中的资料、Manifest、事实台账、草稿、Reviewer 结果和渲染文件均被原样保留。
+
+恢复要求：
+1. 首先重新使用 Skill 工具调用 ${input.profile.skillName}；不得沿用未重新加载 Skill 的判断。
+2. 读取 ./REQUEST.json 和 ./materials/manifest.json，检查现有工作成果与 Manifest 的覆盖关系；若现有证据台账不能证明某个来源或片段已经纳入，必须补读缺失资料。
+3. 在现有工作成果上继续，不得删除已完成的事实库、冲突裁决、草稿、Reviewer 结果或渲染结果后从头降级生成。
+4. 业务判断、内容修订和最终验收只服从当前 Skill；宿主不会生成正文、替代审阅或提供旧模板兜底稿。
+5. 完成 Skill 要求的最终复核后，只在 ./output 中保留一份 ${input.outputFileName}；未通过 Skill 最终复核不得发布工作稿。
+
+请检查工作区并从尚未完成的阶段继续。`
+}
+
 export async function runDirectBusinessDocumentAgent(input: {
   taskType: DirectBusinessDocumentTaskType
   taskDirectory: string
@@ -358,12 +380,14 @@ export async function runDirectBusinessDocumentAgent(input: {
   sourceCutoffDate: string
   instructions: string
   userRole: string
+  resumeExistingWorkspace?: boolean
   onProgress?: (event: DirectInvestmentProposalAgentProgress) => void | Promise<void>
   onUsage?: (usage: Record<string, unknown>) => void | Promise<void>
   shouldCancel?: () => boolean | Promise<boolean>
 }, options: {
   queryFactory?: DirectAgentQueryFactory
   runtimeConfig?: DirectAgentRuntimeConfig
+  gatewayRecovery?: DirectSkillAgentGatewayRecoveryOptions
 } = {}): Promise<DirectInvestmentProposalAgentResult> {
   const profile = DIRECT_BUSINESS_DOCUMENT_PROFILES[input.taskType]
   if (!profile || input.skill.name !== profile.skillName) {
@@ -375,7 +399,9 @@ export async function runDirectBusinessDocumentAgent(input: {
   const outputDirectory = path.join(workspace, 'output')
   const projectSettingsDirectory = path.join(workspace, '.claude')
   const targetSkillDirectory = path.join(projectSettingsDirectory, 'skills', profile.skillName)
-  await rm(workspace, { recursive: true, force: true })
+  if (!input.resumeExistingWorkspace) {
+    await rm(workspace, { recursive: true, force: true })
+  }
   await mkdir(outputDirectory, { recursive: true, mode: 0o700 })
   await mkdir(path.dirname(targetSkillDirectory), { recursive: true, mode: 0o700 })
   await cp(getAiSkillDirectory(input.skill.name), targetSkillDirectory, { recursive: true, force: true })
@@ -399,80 +425,130 @@ export async function runDirectBusinessDocumentAgent(input: {
   const abortController = new AbortController()
   const timeout = setTimeout(() => abortController.abort(), config.timeoutMs)
   timeout.unref?.()
+  const gatewayRecovery = directSkillAgentGatewayRecoveryPolicy(options.gatewayRecovery)
   let result: DirectAgentMessage | null = null
   let skillInvoked = false
   let readEvents = 0
   let sdkQuery: DirectAgentQuery | null = null
+  let gatewayRetryCount = 0
+  let prompt = input.resumeExistingWorkspace
+    ? directAgentRecoveryPrompt({ profile, outputFileName, recoveryAttempt: 1 })
+    : directAgentPrompt({
+      profile,
+      project: input.project,
+      sourceCutoffDate: input.sourceCutoffDate,
+      instructions: input.instructions,
+      outputFileName,
+      documentCount: materialized.manifest.length,
+      chunkCount: input.sources.length,
+    })
   try {
-    await input.onProgress?.({ stage: '正在启动隔离文档 Agent 并加载 Skill', progress: 12 })
-    sdkQuery = factory({
-      prompt: directAgentPrompt({
-        profile,
-        project: input.project,
-        sourceCutoffDate: input.sourceCutoffDate,
-        instructions: input.instructions,
-        outputFileName,
-        documentCount: materialized.manifest.length,
-        chunkCount: input.sources.length,
-      }),
-      options: {
-        cwd: workspace,
-        model: config.model,
-        maxTurns: config.maxTurns,
-        maxBudgetUsd: config.maxBudgetUsd,
-        abortController,
-        permissionMode: 'dontAsk',
-        tools: ['Skill', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'Bash'],
-        skills: [profile.skillName],
-        allowedTools: ['Read', 'Write', 'Edit', 'Glob', 'Grep', 'Bash'],
-        disallowedTools: ['WebFetch', 'WebSearch', 'Task'],
-        settingSources: ['project'],
-        sandbox: {
-          enabled: true,
-          failIfUnavailable: true,
-          autoAllowBashIfSandboxed: true,
-          allowUnsandboxedCommands: false,
-          network: { allowManagedDomainsOnly: true, allowedDomains: [new URL(config.baseUrl).hostname] },
-          filesystem: { allowWrite: [workspace], denyRead: [path.resolve(process.cwd(), '.env')] },
-        },
-        persistSession: false,
-        includePartialMessages: true,
-        env: restrictedEnvironment(config, workspace),
-        systemPrompt: {
-          type: 'preset',
-          preset: 'claude_code',
-          append: `你是隔离运行的正式文档 Agent。业务流程、内容质量与验收只服从已调用的 ${profile.skillName} Skill。宿主只准备资料、观察进度、检查文件完整性和登记下载，不会替你生成或审核正文。`,
-        },
-      },
-    })
-    for await (const message of sdkQuery) {
-      if (await input.shouldCancel?.()) {
-        abortController.abort()
-        throw Object.assign(new Error('用户已取消文档 Agent 任务'), { code: 'AI_TASK_CANCELLED' })
+    while (true) {
+      result = null
+      skillInvoked = false
+      readEvents = 0
+      try {
+        await input.onProgress?.({
+          stage: input.resumeExistingWorkspace || gatewayRetryCount > 0
+            ? '正在启动全新文档 Agent 上下文继续 Skill'
+            : '正在启动隔离文档 Agent 并加载 Skill',
+          progress: input.resumeExistingWorkspace || gatewayRetryCount > 0 ? 82 : 12,
+        })
+        sdkQuery = factory({
+          prompt,
+          options: {
+            cwd: workspace,
+            model: config.model,
+            maxTurns: config.maxTurns,
+            maxBudgetUsd: config.maxBudgetUsd,
+            abortController,
+            permissionMode: 'dontAsk',
+            tools: ['Skill', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'Bash'],
+            skills: [profile.skillName],
+            allowedTools: ['Read', 'Write', 'Edit', 'Glob', 'Grep', 'Bash'],
+            disallowedTools: ['WebFetch', 'WebSearch', 'Task'],
+            settingSources: ['project'],
+            sandbox: {
+              enabled: true,
+              failIfUnavailable: true,
+              autoAllowBashIfSandboxed: true,
+              allowUnsandboxedCommands: false,
+              network: { allowManagedDomainsOnly: true, allowedDomains: [new URL(config.baseUrl).hostname] },
+              filesystem: { allowWrite: [workspace], denyRead: [path.resolve(process.cwd(), '.env')] },
+            },
+            persistSession: false,
+            includePartialMessages: true,
+            env: restrictedEnvironment(config, workspace),
+            systemPrompt: {
+              type: 'preset',
+              preset: 'claude_code',
+              append: `你是隔离运行的正式文档 Agent。业务流程、内容质量与验收只服从已调用的 ${profile.skillName} Skill。宿主只准备资料、观察进度、检查文件完整性和登记下载，不会替你生成或审核正文。`,
+            },
+          },
+        })
+        for await (const message of sdkQuery) {
+          if (await input.shouldCancel?.()) {
+            abortController.abort()
+            throw Object.assign(new Error('用户已取消文档 Agent 任务'), { code: 'AI_TASK_CANCELLED' })
+          }
+          for (const toolName of assistantToolNames(message)) {
+            if (toolName === 'Skill') skillInvoked = true
+            if (['Read', 'Glob', 'Grep'].includes(toolName)) readEvents += 1
+            await input.onProgress?.(progressForTool(profile, toolName, readEvents))
+          }
+          const turnUsage = directAgentTurnUsage(message)
+          if (turnUsage) await input.onUsage?.(turnUsage)
+          if (message.type === 'result') result = message
+        }
+        if (result && (result.is_error || result.subtype !== 'success')) {
+          const resultError = (result.errors || []).join('；') || result.result || result.subtype || 'missing result'
+          throw new Error(`文档 Agent 未完成：${resultError}`)
+        }
+        break
+      } catch (error) {
+        const errorCode = (error as { code?: string })?.code
+        const timedOut = abortController.signal.aborted && errorCode !== 'AI_TASK_CANCELLED'
+        const message = timedOut
+          ? `文档 Agent 执行超时（${config.timeoutMs}ms）`
+          : error instanceof Error ? error.message : String(error)
+        const failure = classifyDirectSkillAgentFailure(message, errorCode || 'DIRECT_SKILL_AGENT_FAILED')
+        if (
+          !timedOut
+          && failure.recoverableGateway403
+          && gatewayRetryCount < gatewayRecovery.maxRetries
+        ) {
+          sdkQuery?.close?.()
+          sdkQuery = null
+          gatewayRetryCount += 1
+          await input.onProgress?.({
+            stage: `模型网关暂时拒绝，${Math.ceil(gatewayRecovery.delayMs / 1_000)}秒后由新 Agent 上下文继续`,
+            progress: 82,
+          })
+          await gatewayRecovery.wait(gatewayRecovery.delayMs)
+          if (abortController.signal.aborted) {
+            throw Object.assign(new Error(`文档 Agent 执行超时（${config.timeoutMs}ms）`), {
+              code: 'DIRECT_SKILL_AGENT_TIMEOUT',
+            })
+          }
+          if (await input.shouldCancel?.()) {
+            abortController.abort()
+            throw Object.assign(new Error('用户已取消文档 Agent 任务'), { code: 'AI_TASK_CANCELLED' })
+          }
+          prompt = directAgentRecoveryPrompt({
+            profile,
+            outputFileName,
+            recoveryAttempt: gatewayRetryCount,
+          })
+          continue
+        }
+        throw Object.assign(new Error(redactSensitiveText(message).slice(0, 8_000)), {
+          code: timedOut ? 'DIRECT_SKILL_AGENT_TIMEOUT' : failure.code,
+        })
+      } finally {
+        sdkQuery?.close?.()
+        sdkQuery = null
       }
-      for (const toolName of assistantToolNames(message)) {
-        if (toolName === 'Skill') skillInvoked = true
-        if (['Read', 'Glob', 'Grep'].includes(toolName)) readEvents += 1
-        await input.onProgress?.(progressForTool(profile, toolName, readEvents))
-      }
-      const turnUsage = directAgentTurnUsage(message)
-      if (turnUsage) await input.onUsage?.(turnUsage)
-      if (message.type === 'result') result = message
     }
-  } catch (error) {
-    const errorCode = (error as { code?: string })?.code
-    const timedOut = abortController.signal.aborted && errorCode !== 'AI_TASK_CANCELLED'
-    const message = timedOut
-      ? `文档 Agent 执行超时（${config.timeoutMs}ms）`
-      : error instanceof Error ? error.message : String(error)
-    const authenticationOrQuotaFailure = /Failed to authenticate|API Error:\s*403|额度不足|余额不足/i.test(message)
-    throw Object.assign(new Error(redactSensitiveText(message).slice(0, 8_000)), {
-      code: timedOut
-        ? 'DIRECT_SKILL_AGENT_TIMEOUT'
-        : authenticationOrQuotaFailure
-          ? 'DIRECT_SKILL_AGENT_AUTH_OR_QUOTA'
-          : errorCode || 'DIRECT_SKILL_AGENT_FAILED',
-    })
   } finally {
     clearTimeout(timeout)
     sdkQuery?.close?.()

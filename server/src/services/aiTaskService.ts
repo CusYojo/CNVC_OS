@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { hostname } from 'node:os'
 import { createReadStream } from 'node:fs'
-import { copyFile, lstat, mkdir, readdir, readFile, realpath, rename, stat, writeFile } from 'node:fs/promises'
+import { copyFile, cp, lstat, mkdir, readdir, readFile, realpath, rename, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { and, asc, eq, inArray, lte, sql } from 'drizzle-orm'
 import JSZip from 'jszip'
@@ -212,6 +212,8 @@ const NON_RETRYABLE_AI_TASK_ERROR_CODES = new Set([
   'DUE_DILIGENCE_SKILL_RUNTIME_UNAVAILABLE',
   'AI_TEMPLATE_REGISTRY_MISMATCH',
   'DIRECT_SKILL_AGENT_AUTH_OR_QUOTA',
+  'DIRECT_SKILL_AGENT_AUTHENTICATION_FAILED',
+  'DIRECT_SKILL_AGENT_QUOTA_EXHAUSTED',
 ])
 
 export function classifyAiTaskFailure(error: unknown): AiTaskFailureClassification {
@@ -833,6 +835,49 @@ async function isCancellationRequested(taskId: string) {
     || row.leaseOwner !== AI_TASK_WORKER_OWNER
 }
 
+async function restoreDirectSkillWorkspaceForRetry(input: {
+  task: AiTaskRecord
+  parameters: Record<string, unknown>
+  taskDirectory: string
+}) {
+  const sourceTaskId = typeof input.parameters._directSkillResumeSourceTaskId === 'string'
+    ? input.parameters._directSkillResumeSourceTaskId.trim()
+    : ''
+  if (!sourceTaskId) return
+  const sourceTask = await aiTaskRepository.findTaskById(sourceTaskId)
+  if (
+    !sourceTask
+    || sourceTask.userId !== input.task.userId
+    || sourceTask.projectId !== input.task.projectId
+    || sourceTask.type !== input.task.type
+    || sourceTask.errorCode !== 'DIRECT_SKILL_AGENT_UPSTREAM_FORBIDDEN'
+  ) {
+    throw Object.assign(new Error('直接 Skill Agent 的恢复工作区与当前任务不匹配'), {
+      code: 'DIRECT_SKILL_WORKSPACE_RECOVERY_MISMATCH',
+    })
+  }
+  const sourceWorkspace = path.join(
+    ARTIFACT_ROOT,
+    sourceTask.userId,
+    sourceTask.projectId,
+    sourceTask.id,
+    '.direct-skill-agent',
+  )
+  const targetWorkspace = path.join(input.taskDirectory, '.direct-skill-agent')
+  if (await lstat(targetWorkspace).then(() => true, () => false)) return
+  if (!await lstat(sourceWorkspace).then((entry) => entry.isDirectory(), () => false)) {
+    throw Object.assign(new Error('直接 Skill Agent 的恢复工作区不存在'), {
+      code: 'DIRECT_SKILL_WORKSPACE_RECOVERY_MISSING',
+    })
+  }
+  await cp(sourceWorkspace, targetWorkspace, {
+    recursive: true,
+    force: false,
+    errorOnExist: true,
+    filter: (source) => path.basename(source) !== '.claude-runtime',
+  })
+}
+
 async function updateStage(taskId: string, stage: string, progress: number) {
   const boundedProgress = Math.max(0, Math.min(100, Math.round(progress)))
   await aiTaskRepository.updateRunningStage({
@@ -1433,6 +1478,7 @@ async function executeTaskWithinUsage(taskId: string) {
       if (!userRow) throw new Error('任务用户不存在或已删除')
       const taskDir = path.join(ARTIFACT_ROOT, task.userId, task.projectId, task.id)
       await mkdir(taskDir, { recursive: true })
+      await restoreDirectSkillWorkspaceForRetry({ task, parameters, taskDirectory: taskDir })
       let incrementalUsageObserved = false
       const directResult = await runDirectInvestmentProposalAgent({
         taskDirectory: taskDir,
@@ -1443,6 +1489,7 @@ async function executeTaskWithinUsage(taskId: string) {
         sourceCutoffDate,
         instructions: userInstructions || researchIntent,
         userRole: userRow.role,
+        resumeExistingWorkspace: parameters._preserveDirectSkillWorkspace === true,
         onProgress: async (event) => {
           await updateStage(taskId, event.stage, event.progress)
         },
@@ -1553,6 +1600,7 @@ async function executeTaskWithinUsage(taskId: string) {
       if (!userRow) throw new Error('任务用户不存在或已删除')
       const taskDir = path.join(ARTIFACT_ROOT, task.userId, task.projectId, task.id)
       await mkdir(taskDir, { recursive: true })
+      await restoreDirectSkillWorkspaceForRetry({ task, parameters, taskDirectory: taskDir })
       let incrementalUsageObserved = false
       const directResult = await runDirectInvestmentCommitteePptAgent({
         taskDirectory: taskDir,
@@ -1563,6 +1611,7 @@ async function executeTaskWithinUsage(taskId: string) {
         sourceCutoffDate,
         instructions: userInstructions || researchIntent,
         userRole: userRow.role,
+        resumeExistingWorkspace: parameters._preserveDirectSkillWorkspace === true,
         onProgress: async (event) => {
           await updateStage(taskId, event.stage, event.progress)
         },
@@ -1673,6 +1722,7 @@ async function executeTaskWithinUsage(taskId: string) {
       if (!userRow) throw new Error('任务用户不存在或已删除')
       const taskDir = path.join(ARTIFACT_ROOT, task.userId, task.projectId, task.id)
       await mkdir(taskDir, { recursive: true })
+      await restoreDirectSkillWorkspaceForRetry({ task, parameters, taskDirectory: taskDir })
       let incrementalUsageObserved = false
       const directResult = await runDirectBusinessDocumentAgent({
         taskType: task.type as 'project_qa' | 'due_diligence_report',
@@ -1684,6 +1734,7 @@ async function executeTaskWithinUsage(taskId: string) {
         sourceCutoffDate,
         instructions: userInstructions || researchIntent,
         userRole: userRow.role,
+        resumeExistingWorkspace: parameters._preserveDirectSkillWorkspace === true,
         onProgress: async (event) => {
           await updateStage(taskId, event.stage, event.progress)
         },
@@ -3076,6 +3127,13 @@ async function executeTaskWithinUsage(taskId: string) {
       Number(recoveryParameters._systemDocumentRecoveryAttempt ?? 0) || 0,
     )
     const failure = classifyAiTaskFailure(error)
+    const preserveDirectSkillWorkspace = failure.errorCode === 'DIRECT_SKILL_AGENT_UPSTREAM_FORBIDDEN'
+      && context !== null
+      && (
+        usesDirectInvestmentProposalAgent(context.type)
+        || usesDirectInvestmentCommitteePptAgent(context.type)
+        || usesDirectQaOrDueDiligenceAgent(context.type)
+      )
     if (
       context
       && isAiExecutableTaskType(context.type)
@@ -3112,14 +3170,21 @@ async function executeTaskWithinUsage(taskId: string) {
         taskId,
         leaseOwner: AI_TASK_WORKER_OWNER,
         stage: context.type === 'investment_recommendation_ppt'
-          ? '正在从 Gorden 检查点继续生成'
-          : '正在继续生成文档',
-        progress: context.type === 'investment_recommendation_ppt'
+          ? preserveDirectSkillWorkspace
+            ? '正在保留工作区并由全新 PPT Agent 上下文继续 Skill'
+            : '正在从 Gorden 检查点继续生成'
+          : preserveDirectSkillWorkspace
+            ? '正在保留工作区并由全新文档 Agent 上下文继续 Skill'
+            : '正在继续生成文档',
+        progress: preserveDirectSkillWorkspace
+          ? Number(context.progress ?? 0)
+          : context.type === 'investment_recommendation_ppt'
           ? Number(context.progress ?? 0)
           : Math.min(Number(context.progress ?? 0), 20),
         parameters: {
           ...recoveryParameters,
           _systemDocumentRecoveryAttempt: recoveryAttempt + 1,
+          ...(preserveDirectSkillWorkspace ? { _preserveDirectSkillWorkspace: true } : {}),
           ...(context.type === 'investment_recommendation_ppt'
             ? { _resumeProgressFloor: Number(context.progress ?? 0) }
             : {}),
@@ -3631,6 +3696,20 @@ export async function retryAiTask(user: AiTaskUser, taskId: string, idempotencyK
   }
   // 手动“继续生成”是一轮新的恢复流程，不能继承上一任务已经耗尽的自动恢复次数。
   delete retryParameters._systemDocumentRecoveryAttempt
+  if (
+    task.errorCode === 'DIRECT_SKILL_AGENT_UPSTREAM_FORBIDDEN'
+    && (
+      usesDirectInvestmentProposalAgent(task.type)
+      || usesDirectInvestmentCommitteePptAgent(task.type)
+      || usesDirectQaOrDueDiligenceAgent(task.type)
+    )
+  ) {
+    retryParameters._preserveDirectSkillWorkspace = true
+    retryParameters._directSkillResumeSourceTaskId = task.id
+  } else {
+    delete retryParameters._preserveDirectSkillWorkspace
+    delete retryParameters._directSkillResumeSourceTaskId
+  }
   return createAiTask(user, {
     type: task.type,
     projectId: task.projectId,

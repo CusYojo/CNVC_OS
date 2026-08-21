@@ -12,6 +12,9 @@ export function safeAiTaskFailureStage(error: unknown) {
   const code = errorCode(error)
   if (code === 'PROJECT_KNOWLEDGE_COMPLETE_STUDY_FAILED') return '全部项目资料片段研读未完成'
   if (code === 'DIRECT_SKILL_AGENT_AUTH_OR_QUOTA') return '直接 Skill Agent 模型额度不可用'
+  if (code === 'DIRECT_SKILL_AGENT_AUTHENTICATION_FAILED') return '直接 Skill Agent 模型认证失败'
+  if (code === 'DIRECT_SKILL_AGENT_QUOTA_EXHAUSTED') return '直接 Skill Agent 模型额度不足'
+  if (code === 'DIRECT_SKILL_AGENT_UPSTREAM_FORBIDDEN') return '直接 Skill Agent 模型网关暂时拒绝'
   if (code === 'DIRECT_SKILL_NOT_INVOKED') return '直接 Skill 未被调用'
   if (code === 'DIRECT_SKILL_OUTPUT_CONTRACT_FAILED') return 'Skill 成品输出检查未通过'
   if (code === 'DIRECT_SKILL_OUTPUT_INVALID') return 'Skill 成品文件不完整'
@@ -54,6 +57,15 @@ export function safeAiTaskFailureMessage(error: unknown) {
   }
   if (code === 'DIRECT_SKILL_AGENT_AUTH_OR_QUOTA') {
     return '正式文档模型的认证或额度当前不可用，系统已停止自动重跑以避免重复消耗。请恢复模型额度后重新创建任务。'
+  }
+  if (code === 'DIRECT_SKILL_AGENT_AUTHENTICATION_FAILED') {
+    return '正式文档模型认证失败，系统未继续发送生成请求。请检查当前文档模型凭据后重新创建任务。'
+  }
+  if (code === 'DIRECT_SKILL_AGENT_QUOTA_EXHAUSTED') {
+    return '正式文档模型明确返回额度或余额不足，系统已停止自动重跑以避免重复消耗。请恢复对应 API Key 的额度后重新创建任务。'
+  }
+  if (code === 'DIRECT_SKILL_AGENT_UPSTREAM_FORBIDDEN') {
+    return '模型网关连续返回普通 403。系统已保留全部资料和 Agent 工作区，但本轮全新上下文仍未完成最终复核；可稍后点击“继续生成”。'
   }
   if (code === 'DIRECT_SKILL_NOT_INVOKED') {
     return '隔离 Agent 未实际调用当前任务绑定的 Skill，因此系统未发布替代稿。任务参数已保留，可点击“继续生成”。'

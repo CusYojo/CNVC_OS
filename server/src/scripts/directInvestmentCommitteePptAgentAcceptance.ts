@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { copyFile, mkdtemp, readFile, rm, stat } from 'node:fs/promises'
+import { copyFile, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { getAiSkillDirectory, loadAiSkill } from '../services/aiSkillService.js'
@@ -161,11 +161,88 @@ try {
         timeoutMs: 300_000,
       },
       queryFactory: () => (async function* () {
-        throw new Error('Failed to authenticate. API Error: 403 额度不足')
+        throw new Error('API Error: 403 额度不足')
       })(),
     }),
-    (error: unknown) => (error as { code?: string }).code === 'DIRECT_SKILL_AGENT_AUTH_OR_QUOTA',
+    (error: unknown) => (error as { code?: string }).code === 'DIRECT_SKILL_AGENT_QUOTA_EXHAUSTED',
   )
+
+  const recoveryTaskDirectory = path.join(temporaryRoot, 'gateway-recovery')
+  const recoveryPrompts: string[] = []
+  let recoveryQueryCount = 0
+  const recovered = await runDirectInvestmentCommitteePptAgent({
+    taskDirectory: recoveryTaskDirectory,
+    project: { id: 'project-2', name: '恢复项目', companyName: '恢复科技' },
+    sources: [{
+      sourceType: 'project_file',
+      sourceId: 'file-recovery',
+      sourceName: '恢复材料.pdf',
+      chunkIndex: 0,
+      content: '必须在恢复上下文中继续使用的完整材料。',
+    }],
+    requiredProjectFiles: [{ sourceId: 'file-recovery', sourceName: '恢复材料.pdf' }],
+    skill,
+    sourceCutoffDate: '2026-08-21',
+    instructions: '普通 403 后必须保留 PPT 工作区继续生成。',
+    userRole: 'admin',
+  }, {
+    runtimeConfig: {
+      baseUrl: 'https://model.example.com',
+      apiKey: 'acceptance-only',
+      model: 'acceptance-model',
+      maxTurns: 20,
+      maxBudgetUsd: 2,
+      timeoutMs: 300_000,
+    },
+    gatewayRecovery: { maxRetries: 1, delayMs: 0, wait: async () => {} },
+    queryFactory: ({ prompt, options }) => {
+      recoveryQueryCount += 1
+      recoveryPrompts.push(prompt)
+      const attempt = recoveryQueryCount
+      return (async function* () {
+        const recoveryWorkspace = String(options.cwd)
+        const markerPath = path.join(recoveryWorkspace, '.work', 'resume-marker.json')
+        if (attempt === 1) {
+          await mkdir(path.dirname(markerPath), { recursive: true })
+          await writeFile(markerPath, JSON.stringify({ preserved: true }))
+          yield {
+            type: 'assistant',
+            message: { content: [
+              { type: 'tool_use', name: 'Skill', input: { skill: 'investment-committee-ppt' } },
+              { type: 'tool_use', name: 'Bash', input: { command: '生成候选稿并逐页复核' } },
+            ] },
+          }
+          throw new Error('Response code: 403 gateway policy denied')
+        }
+        assert.ok((await stat(markerPath)).isFile())
+        await copyFile(
+          path.join(getAiSkillDirectory('investment-committee-ppt'), 'assets', 'dayan-investment-deck-example.pptx'),
+          path.join(recoveryWorkspace, 'output', '恢复科技_投资建议书.pptx'),
+        )
+        yield {
+          type: 'assistant',
+          message: { content: [
+            { type: 'tool_use', name: 'Skill', input: { skill: 'investment-committee-ppt' } },
+            { type: 'tool_use', name: 'Read', input: { file_path: './materials/manifest.json' } },
+            { type: 'tool_use', name: 'Bash', input: { command: '继续最终逐页复核' } },
+          ] },
+        }
+        yield {
+          type: 'result',
+          subtype: 'success',
+          result: '全新上下文已按同一 Skill 完成 PPT 恢复与复核',
+          num_turns: 2,
+          total_cost_usd: 0.1,
+          usage: { input_tokens: 20, output_tokens: 10 },
+        }
+      })()
+    },
+  })
+  assert.equal(recoveryQueryCount, 2)
+  assert.match(recoveryPrompts[0], /全部来源文件和全部片段/)
+  assert.match(recoveryPrompts[1], /首先重新使用 Skill 工具调用 investment-committee-ppt/)
+  assert.match(recoveryPrompts[1], /若现有证据台账不能证明某个来源或片段已经纳入，必须补读缺失资料/)
+  assert.ok((await stat(recovered.outputPath)).size > 1_000)
 
   console.log('direct investment committee PPT Skill Agent acceptance passed')
 } finally {

@@ -241,11 +241,26 @@ async function main() {
       new Error('model quota unavailable'),
       { code: 'DIRECT_SKILL_AGENT_AUTH_OR_QUOTA' },
     ))
+    const authenticationFailedDirectAgent = classifyAiTaskFailure(Object.assign(
+      new Error('model authentication unavailable'),
+      { code: 'DIRECT_SKILL_AGENT_AUTHENTICATION_FAILED' },
+    ))
+    const quotaExhaustedDirectAgent = classifyAiTaskFailure(Object.assign(
+      new Error('model quota explicitly exhausted'),
+      { code: 'DIRECT_SKILL_AGENT_QUOTA_EXHAUSTED' },
+    ))
+    const upstreamForbiddenDirectAgent = classifyAiTaskFailure(Object.assign(
+      new Error('model gateway returned a transient 403'),
+      { code: 'DIRECT_SKILL_AGENT_UPSTREAM_FORBIDDEN' },
+    ))
     if (
       !transient.retryable
       || permanent.retryable
       || !resumableVisualQa.retryable
       || exhaustedDirectAgent.retryable
+      || authenticationFailedDirectAgent.retryable
+      || quotaExhaustedDirectAgent.retryable
+      || !upstreamForbiddenDirectAgent.retryable
     ) {
       throw new Error('failure retry classification mismatch')
     }
