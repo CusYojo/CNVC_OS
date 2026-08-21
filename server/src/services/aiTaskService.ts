@@ -45,7 +45,7 @@ import {
 import { loadAiSkill } from './aiSkillService.js'
 import { resolveAiCustomTemplateForTask } from './aiCustomTemplateService.js'
 import { recordJobCoordinationEventSafely } from '../runtime/jobCoordinationTelemetry.js'
-import { runWithAiTaskModelUsage } from '../runtime/aiTaskModelUsage.js'
+import { recordAiTaskModelCall, runWithAiTaskModelUsage } from '../runtime/aiTaskModelUsage.js'
 import {
   curateEvidenceSources,
   dedupeTextList,
@@ -97,15 +97,12 @@ import {
   createProjectQaSkillProfile,
   type QaTemplateProfile,
 } from './aiQaTemplateParser.js'
-import {
-  loadInvestmentProposalBlueprint,
-  type InvestmentProposalDocumentBlueprint,
-} from './aiInvestmentProposalBlueprintService.js'
 import { generateDueDiligenceReportWithSkill } from './aiDueDiligenceSkillRuntimeService.js'
 import {
   safeAiTaskFailureMessage,
   safeAiTaskFailureStage,
 } from './aiTaskErrorService.js'
+import { runDirectInvestmentProposalAgent } from './aiDirectInvestmentProposalAgentService.js'
 import { formatShanghaiDateKey } from '../utils/shanghaiTime.js'
 import {
   buildInvestmentRecommendationGenerationAudit,
@@ -808,6 +805,10 @@ function assertCompleteProjectFileCoverage(
   )
 }
 
+function usesDirectInvestmentProposalAgent(type: string): boolean {
+  return String(type) === 'investment_proposal'
+}
+
 async function getTaskRow(userId: string, taskId: string) {
   return aiTaskRepository.findOwnedTask(userId, taskId)
 }
@@ -1308,10 +1309,8 @@ async function executeTaskWithinUsage(taskId: string) {
       await updateStage(taskId, '加载 generate-investment-compliance-note Skill', 6)
       complianceBlueprint = await parseComplianceDocumentBlueprint(template)
     }
-    let proposalBlueprint: InvestmentProposalDocumentBlueprint | undefined
     if (task.type === 'investment_proposal') {
-      await updateStage(taskId, '加载 draft-investment-proposal Skill 与内容规范', 6)
-      proposalBlueprint = await loadInvestmentProposalBlueprint(template)
+      await updateStage(taskId, '加载 draft-investment-proposal Skill', 6)
     }
     let qaTemplateProfile: QaTemplateProfile | undefined
     if (task.type === 'project_qa') {
@@ -1397,6 +1396,122 @@ async function executeTaskWithinUsage(taskId: string) {
     ]
     let evidenceScreening = screenEvidenceSources(rawSources, task.type)
     let sources = evidenceScreening.usable
+
+    if (usesDirectInvestmentProposalAgent(task.type)) {
+      assertCompleteProjectFileCoverage(requiredProjectFiles, sources)
+      const userRow = await identityRepositories.users.findById(task.userId)
+      if (!userRow) throw new Error('任务用户不存在或已删除')
+      const taskDir = path.join(ARTIFACT_ROOT, task.userId, task.projectId, task.id)
+      await mkdir(taskDir, { recursive: true })
+      const directResult = await runDirectInvestmentProposalAgent({
+        taskDirectory: taskDir,
+        project,
+        sources,
+        requiredProjectFiles,
+        skill,
+        sourceCutoffDate,
+        instructions: userInstructions || researchIntent,
+        userRole: userRow.role,
+        onProgress: async (event) => {
+          await updateStage(taskId, event.stage, event.progress)
+        },
+        shouldCancel: () => isCancellationRequested(taskId),
+      })
+      if (directResult.session.usage) {
+        await recordAiTaskModelCall(directResult.session.usage)
+      }
+      if (await cancelIfRequested(taskId)) return
+
+      await updateStage(taskId, '登记文件并生成下载地址', 98)
+      const quality = await inspectGeneratedArtifact(directResult.outputPath, 'docx', {
+        deliveryIntegrityOnly: true,
+      })
+      const version = await aiTaskRepository.countArtifacts({
+        userId: task.userId,
+        projectId: task.projectId,
+        format: 'docx',
+      }) + 1
+      const artifactId = randomUUID()
+      const artifact: CreateAiArtifactRecord = {
+        id: artifactId,
+        taskId: task.id,
+        userId: task.userId,
+        projectId: task.projectId,
+        conversationId: task.conversationId,
+        fileName: path.basename(directResult.outputPath),
+        format: 'docx',
+        mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        version,
+        storagePath: directResult.outputPath,
+        editableLevel: template.editableLevel,
+        sourceCutoffDate,
+        templateVersion: template.templateVersion,
+        qualityStatus: quality.qualityStatus,
+        metadata: {
+          ...quality.metadata,
+          documentSha256: directResult.documentSha256,
+          bytes: directResult.bytes,
+          directSkillAgent: true,
+          skillInvoked: directResult.skillInvoked,
+          rendererMode: 'agent-owned-skill-execution',
+          skillName: skill.name,
+          skillVersion: skill.version,
+          skillSha256: skill.sha256,
+          agentModel: directResult.session.model,
+          agentTurns: directResult.session.numTurns,
+          agentCostUsd: directResult.session.totalCostUsd,
+          projectKnowledgeStudy: directResult.projectKnowledgeStudy,
+          rejectedEvidenceChunks: evidenceScreening.rejected.length,
+          acceptanceAuthority: 'direct-skill-agent-and-current-skill',
+          acceptanceDecision: 'accepted-on-direct-agent-skill-completion',
+          programmaticBusinessAcceptance: false,
+          deliveryValidation: 'file-integrity-and-authorization-only',
+          hostContentOrchestration: false,
+          hostEvidenceFallback: false,
+        },
+        archived: false,
+      }
+      const sourceRecords = sources.map((source, index) => ({
+        id: randomUUID(),
+        taskId: task.id,
+        artifactId,
+        sourceType: source.sourceType,
+        sourceId: source.sourceType.startsWith('public_web')
+          ? createHash('sha256')
+              .update(source.sourceId || source.sourceName)
+              .digest('hex')
+              .slice(0, 64)
+          : source.sourceId ?? null,
+        sourceName: source.sourceName,
+        locator: source.locator || `知识片段 ${source.chunkIndex ?? index}`,
+        verificationStatus: source.sourceType.startsWith('public_web')
+          ? 'Agent 按 Skill 核验'
+          : 'Agent 按 Skill 完整研读',
+      }))
+      const completed = await aiTaskRepository.completeTaskWithArtifacts({
+        taskId,
+        leaseOwner: AI_TASK_WORKER_OWNER,
+        stage: 'DOCX 已生成',
+        resultSummary: directResult.session.resultText
+          || '文档 Agent 已直接执行 draft-investment-proposal Skill 并完成 DOCX。',
+        completedAt: new Date(),
+        artifacts: [artifact],
+        sources: sourceRecords,
+      })
+      if (!completed) {
+        await cancelIfRequested(taskId)
+        return
+      }
+      await writeTaskAudit(
+        { uid: userRow.id, name: userRow.name, role: userRow.role },
+        '生成业务材料',
+        `${template.label}：${project.name}`,
+      ).catch((error) => {
+        console.warn('[aiTask] 直接 Skill Agent 操作审计写入未完成，保留已生成 DOCX:', (error as Error).message)
+      })
+      return
+    }
+
     let complianceModelResearch: {
       agent?: DueDiligenceNetworkResearchAudit
       projectModel?: ComplianceModelResearchAudit
@@ -2490,15 +2605,6 @@ async function executeTaskWithinUsage(taskId: string) {
                 sourceIndexes: packet.sourceIndexes,
                 evidenceItemCount: packet.items.length,
               })),
-            }
-          : {}),
-        ...(proposalBlueprint
-          ? {
-              blueprintVersion: proposalBlueprint.version,
-              coreStandardSha256: proposalBlueprint.coreStandardSha256,
-              templateCorpusSha256: proposalBlueprint.corpusSha256,
-              parsedTemplateCount: proposalBlueprint.templates.length,
-              blueprintSectionCount: proposalBlueprint.sections.length,
             }
           : {}),
         ...(content.generationAudit
