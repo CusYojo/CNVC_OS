@@ -10,6 +10,7 @@ function errorCode(error: unknown) {
 
 export function safeAiTaskFailureStage(error: unknown) {
   const code = errorCode(error)
+  if (code === 'PROJECT_KNOWLEDGE_COMPLETE_STUDY_FAILED') return '全部项目资料片段研读未完成'
   if (code === 'DUE_DILIGENCE_CONTENT_QUALITY_REJECTED') return '正文质量检查未通过'
   if (code === 'DUE_DILIGENCE_MODEL_UNAVAILABLE') return '大模型正文生成未完成'
   if (code === 'DUE_DILIGENCE_NETWORK_UNAVAILABLE') return '联网资料补全未完成'
@@ -43,6 +44,9 @@ export function safeAiTaskFailureStage(error: unknown) {
 export function safeAiTaskFailureMessage(error: unknown) {
   const code = errorCode(error)
   const upstreamCode = String((error as CodedError | null)?.upstreamCode ?? '')
+  if (code === 'PROJECT_KNOWLEDGE_COMPLETE_STUDY_FAILED') {
+    return '全部项目资料片段中仍有批次未完成研读，因此未使用部分资料生成提案。系统已保留任务参数，请稍后点击“继续生成”；系统只会拆分并重试失败批次，不会减少项目资料。'
+  }
   if (code === 'DUE_DILIGENCE_CONTENT_QUALITY_REJECTED') {
     return '尽调正文未通过完整性、章节匹配或可读性检查，因此未生成文件。系统已保留参数，可点击“继续生成”重新生成并复核。'
   }

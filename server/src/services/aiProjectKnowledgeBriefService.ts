@@ -104,6 +104,10 @@ const STUDY_TIMEOUT_MS = Math.max(
   30_000,
   Math.min(Number(process.env.AI_PROJECT_KNOWLEDGE_STUDY_TIMEOUT_MS) || 120_000, 300_000),
 )
+const COMPLETE_STUDY_TIMEOUT_MS = Math.max(
+  STUDY_TIMEOUT_MS,
+  Math.min(Number(process.env.AI_PROJECT_KNOWLEDGE_COMPLETE_TIMEOUT_MS) || 240_000, 300_000),
+)
 const STUDY_BATCH_CHARACTERS = Math.max(
   12_000,
   Math.min(Number(process.env.AI_PROJECT_KNOWLEDGE_BATCH_CHARACTERS) || 42_000, 80_000),
@@ -230,6 +234,29 @@ function corpusBatches(entries: CorpusEntry[], preserveFullContent: boolean) {
   }
   if (current.length > 0) batches.push(current)
   return batches
+}
+
+function splitCorpusBatch(entries: CorpusEntry[], preserveFullContent: boolean) {
+  if (entries.length < 2) return [entries, []] as [CorpusEntry[], CorpusEntry[]]
+  const sizes = entries.map((entry) => corpusPrompt([entry], preserveFullContent).length + 2)
+  const target = sizes.reduce((sum, size) => sum + size, 0) / 2
+  let splitIndex = 1
+  let consumed = sizes[0]
+  while (splitIndex < entries.length - 1 && consumed + sizes[splitIndex] <= target) {
+    consumed += sizes[splitIndex]
+    splitIndex += 1
+  }
+  return [entries.slice(0, splitIndex), entries.slice(splitIndex)] as [CorpusEntry[], CorpusEntry[]]
+}
+
+function permanentStudyFailure(error: unknown) {
+  const status = Number((error as { status?: unknown } | null)?.status)
+  return status === 401 || status === 403
+}
+
+function transientStudyFailure(error: unknown) {
+  const status = Number((error as { status?: unknown } | null)?.status)
+  return status === 408 || status === 429 || status >= 500 && status <= 599
 }
 
 async function mapWithConcurrency<T, R>(
@@ -473,6 +500,7 @@ export async function buildProjectKnowledgeBrief(input: {
   sourceCutoffDate: string
   requiredProjectFiles?: Array<{ sourceId: string; sourceName: string }>
   includeAllSourceChunks?: boolean
+  onBatchProgress?: (progress: { completedBatches: number; totalBatches: number }) => Promise<void>
   fetchImpl?: typeof fetch
 }): Promise<ProjectKnowledgeBrief> {
   const includeAllSourceChunks = input.includeAllSourceChunks === true
@@ -524,11 +552,16 @@ export async function buildProjectKnowledgeBrief(input: {
   })
   if (!entries.length || process.env.AI_PROJECT_KNOWLEDGE_DISABLE_LLM === '1') return fallback()
 
-  try {
-    const normalizedBatches = await mapWithConcurrency(
-      batches,
-      STUDY_BATCH_CONCURRENCY,
-      async (batch, batchIndex) => {
+  let studyRequestCount = 0
+  const studyCorpusBatch = async (
+    batch: CorpusEntry[],
+    batchLabel: string,
+    splitDepth = 0,
+    singleChunkRetry = 0,
+    transientRetry = 0,
+  ): Promise<Omit<ProjectKnowledgeBrief, 'audit'>> => {
+    studyRequestCount += 1
+    try {
         const text = await requestAiGatewayText({
           baseUrl: GW_BASE,
           apiKey: GW_KEY,
@@ -564,7 +597,7 @@ export async function buildProjectKnowledgeBrief(input: {
 资料截止日：${input.sourceCutoffDate}
 资料文件数：${documentCount}
 资料片段数：${input.sources.length}
-当前研读批次：${batchIndex + 1}/${batches.length}
+当前研读批次：${batchLabel}
 本批片段数：${batch.length}
 
 请逐条研读本批全部片段并形成批次事实底稿；S 编号是全局索引，不得改号或遗漏阅读：
@@ -574,10 +607,51 @@ ${corpusPrompt(batch, includeAllSourceChunks)}`,
           maxTokens: 12_000,
           reasoningEffort: 'medium',
           json: true,
-          timeoutMs: STUDY_TIMEOUT_MS,
+          timeoutMs: includeAllSourceChunks ? COMPLETE_STUDY_TIMEOUT_MS : STUDY_TIMEOUT_MS,
           fetchImpl: input.fetchImpl,
         })
         return normalizeModelBrief(parseJsonObject(text), { ...input, entries: batch })
+    } catch (error) {
+      if (!includeAllSourceChunks || permanentStudyFailure(error)) throw error
+      if (transientStudyFailure(error) && transientRetry < 1) {
+        return studyCorpusBatch(
+          batch,
+          `${batchLabel}.重试`,
+          splitDepth,
+          singleChunkRetry,
+          transientRetry + 1,
+        )
+      }
+      if (batch.length > 1 && splitDepth < 12) {
+        const [left, right] = splitCorpusBatch(batch, true)
+        const leftBrief = await studyCorpusBatch(left, `${batchLabel}.1`, splitDepth + 1)
+        const rightBrief = await studyCorpusBatch(right, `${batchLabel}.2`, splitDepth + 1)
+        return mergeModelBriefs([leftBrief, rightBrief], input)
+      }
+      if (singleChunkRetry < 1) {
+        return studyCorpusBatch(batch, `${batchLabel}.重试`, splitDepth, singleChunkRetry + 1)
+      }
+      throw error
+    }
+  }
+
+  try {
+    let completedBatches = 0
+    const normalizedBatches = await mapWithConcurrency(
+      batches,
+      STUDY_BATCH_CONCURRENCY,
+      async (batch, batchIndex) => {
+        const normalized = await studyCorpusBatch(batch, `${batchIndex + 1}/${batches.length}`)
+        completedBatches += 1
+        if (input.onBatchProgress) {
+          await input.onBatchProgress({
+            completedBatches,
+            totalBatches: batches.length,
+          }).catch((error) => {
+            console.warn('[aiProjectKnowledgeBrief] 批次进度更新失败，继续研读:', (error as Error).message)
+          })
+        }
+        return normalized
       },
     )
     let normalized = mergeModelBriefs(normalizedBatches, input)
@@ -590,7 +664,11 @@ ${corpusPrompt(batch, includeAllSourceChunks)}`,
     }
     return {
       ...normalized,
-      audit: { mode: 'model-study', ...auditBase },
+      audit: {
+        mode: 'model-study',
+        ...auditBase,
+        studyBatchCount: studyRequestCount,
+      },
     }
   } catch (error) {
     if (includeAllSourceChunks) {

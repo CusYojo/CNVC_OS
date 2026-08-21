@@ -8,6 +8,10 @@ import {
   screenEvidenceSources,
 } from '../src/services/aiTaskService.js'
 import { buildProjectKnowledgeBrief } from '../src/services/aiProjectKnowledgeBriefService.js'
+import {
+  safeAiTaskFailureMessage,
+  safeAiTaskFailureStage,
+} from '../src/services/aiTaskErrorService.js'
 
 const sources = [
   { sourceType: 'project_record', sourceName: '项目档案', content: '项目名称：测试项目' },
@@ -141,6 +145,15 @@ test('project file coverage audit reports files missing from screened evidence',
   )
 })
 
+test('complete project study failure explains that no source chunks were dropped', () => {
+  const error = Object.assign(new Error('internal batch timeout'), {
+    code: 'PROJECT_KNOWLEDGE_COMPLETE_STUDY_FAILED',
+  })
+  assert.equal(safeAiTaskFailureStage(error), '全部项目资料片段研读未完成')
+  assert.match(safeAiTaskFailureMessage(error), /只会拆分并重试失败批次/)
+  assert.doesNotMatch(safeAiTaskFailureMessage(error), /internal batch timeout/)
+})
+
 test('project knowledge audit measures coverage against the uploaded file manifest', async () => {
   const previous = process.env.AI_PROJECT_KNOWLEDGE_DISABLE_LLM
   process.env.AI_PROJECT_KNOWLEDGE_DISABLE_LLM = '1'
@@ -197,6 +210,8 @@ test('investment proposal project study sends every source chunk through bounded
       String.fromCodePoint(0x4e00 + (chunkIndex * 1_800 + offset) % 20_000)).join('')}公司产品客户收入财务合同${chunkIndex}`,
   }))
   const prompts: string[] = []
+  const successfulPrompts: string[] = []
+  let injectedTimeout = false
   try {
     const brief = await buildProjectKnowledgeBrief({
       project: { name: '全部片段分批研读测试项目' },
@@ -212,6 +227,12 @@ test('investment proposal project study sends every source chunk through bounded
           ?? request.input?.find((message) => message.role === 'user')?.content?.[0]?.text
           ?? ''
         prompts.push(prompt)
+        const promptSourceCount = [...prompt.matchAll(/\[S(\d+)\]/g)].length
+        if (!injectedTimeout && promptSourceCount > 10) {
+          injectedTimeout = true
+          throw new DOMException('synthetic batch timeout', 'TimeoutError')
+        }
+        successfulPrompts.push(prompt)
         const firstSourceIndex = Number(prompt.match(/\[S(\d+)\]/)?.[1] ?? 0)
         return new Response(JSON.stringify({
           choices: [{
@@ -234,12 +255,13 @@ test('investment proposal project study sends every source chunk through bounded
       },
     })
 
-    assert.ok(prompts.length > 1)
+    assert.equal(injectedTimeout, true)
+    assert.ok(prompts.length > 2)
     assert.equal(brief.audit.studyBatchCount, prompts.length)
     assert.equal(brief.audit.sourceChunkCount, sources.length)
     assert.equal(brief.audit.includedChunkCount, sources.length)
     assert.equal(brief.audit.completeSourceChunkCoverage, true)
-    const studiedIndexes = new Set(prompts.flatMap((prompt) =>
+    const studiedIndexes = new Set(successfulPrompts.flatMap((prompt) =>
       [...prompt.matchAll(/\[S(\d+)\]/g)].map((match) => Number(match[1]))))
     assert.deepEqual([...studiedIndexes].sort((left, right) => left - right),
       sources.map((_source, index) => index))

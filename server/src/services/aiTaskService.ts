@@ -1553,6 +1553,15 @@ async function executeTaskWithinUsage(taskId: string) {
         sourceCutoffDate,
         requiredProjectFiles,
         includeAllSourceChunks: task.type === 'investment_proposal',
+        onBatchProgress: task.type === 'investment_proposal'
+          ? async ({ completedBatches, totalBatches }) => {
+              await updateStage(
+                taskId,
+                `分批研读全部项目资料片段（${completedBatches}/${totalBatches}）`,
+                26 + Math.floor(7 * completedBatches / Math.max(1, totalBatches)),
+              )
+            }
+          : undefined,
       })
       if (task.type === 'investment_proposal' && !projectKnowledgeBrief.audit.completeProjectFileCoverage) {
         const missing = projectKnowledgeBrief.audit.missingRequiredSourceFiles
