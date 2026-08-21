@@ -1,4 +1,4 @@
-import { existsSync, readdirSync } from 'node:fs'
+import { existsSync } from 'node:fs'
 import path from 'node:path'
 import type { AiCustomTemplateAnalysis } from '../repositories/aiTaskRepository.js'
 import {
@@ -43,7 +43,6 @@ export type AiTemplateDefinition = {
   customAnalysis?: AiCustomTemplateAnalysis
 }
 
-const docsPath = (...segments: string[]) => path.resolve(process.cwd(), 'docs', ...segments)
 const skillPath = (skillName: string, ...segments: string[]) => path.resolve(
   process.cwd(),
   'server',
@@ -54,15 +53,6 @@ const skillPath = (skillName: string, ...segments: string[]) => path.resolve(
   ...segments,
 )
 const qaSkillPath = (...segments: string[]) => skillPath('draft-investment-qa', ...segments)
-
-function docsTemplatePaths(directoryName: string) {
-  const directoryPath = docsPath(directoryName)
-  if (!existsSync(directoryPath)) return []
-  return readdirSync(directoryPath, { withFileTypes: true })
-    .filter((entry) => entry.isFile() && /\.(?:docx|pdf)$/i.test(entry.name))
-    .map((entry) => path.join(directoryPath, entry.name))
-    .sort((left, right) => path.basename(left).localeCompare(path.basename(right), 'zh-CN'))
-}
 
 export type AiQaTemplateDefinition = {
   type: 'project_qa'
@@ -156,12 +146,12 @@ export const AI_TEMPLATE_CATALOG: Record<AiBusinessTaskType, AiTemplateDefinitio
     type: 'due_diligence_report',
     skillName: AI_DUE_DILIGENCE_SKILL_NAME,
     label: '尽调报告',
-    description: '由资深投资经理先研读项目资料，再综合公司尽调模板语料库生成内部尽调报告',
+    description: '由隔离文档 Agent 直接调用 draft-due-diligence-report Skill 生成并验收尽调报告',
     outputFormat: 'docx',
-    templateVersion: 'dd-corpus-202608-v15-human-prose-no-meta-summaries',
-    referencePath: docsPath('尽调报告', '尽调报告统一生成规范.md'),
-    referencePaths: docsTemplatePaths('尽调报告'),
-    coreRulesPath: docsPath('尽调报告', '尽调报告统一生成规范.md'),
+    templateVersion: 'draft-due-diligence-report-20260821-v1-skill-native',
+    referencePath: skillPath(AI_DUE_DILIGENCE_SKILL_NAME, 'SKILL.md'),
+    referencePaths: [],
+    coreRulesPath: skillPath(AI_DUE_DILIGENCE_SKILL_NAME, 'SKILL.md'),
     editableLevel: 'text-and-structure',
     sections: [
       '公司情况', '交易要点', '行业概况', '商业模式和经营管理', '投资价值与风险',
@@ -180,9 +170,9 @@ export const AI_TEMPLATE_CATALOG: Record<AiBusinessTaskType, AiTemplateDefinitio
     type: 'project_qa',
     skillName: AI_QA_SKILL_NAME,
     label: '项目 Q&A',
-    description: '使用 draft-investment-qa 生成直接式、可交付的项目 Q&A 报告',
+    description: '由隔离文档 Agent 直接调用 draft-investment-qa Skill 生成并验收项目 Q&A 报告',
     outputFormat: 'docx',
-    templateVersion: 'draft-investment-qa-20260820-v1',
+    templateVersion: 'draft-investment-qa-20260821-v2-skill-native',
     referencePath: qaSkillPath('assets', 'qa-report-template.md'),
     coreRulesPath: qaSkillPath('SKILL.md'),
     referencePaths: [

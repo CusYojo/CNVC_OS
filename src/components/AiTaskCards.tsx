@@ -237,17 +237,18 @@ function TaskCard({
     : task.type === 'due_diligence_report'
     && task.progress <= 35
     && (!task.errorMessage || task.errorMessage === genericFailureMessage)
-    ? '尽调正文生成或质量检查未完成，因此未生成文件。系统已保留参数，可点击“继续生成”。'
+    ? '尽调 Skill Agent 尚未完成生成与验收，因此未生成文件。系统已保留参数，可点击“继续生成”。'
     : task.errorMessage || '文档尚未完成，系统已保留本次生成参数，可点击“继续生成”。'
   const failureStage = task.stage && task.stage !== '文档尚未完成'
     ? task.stage
     : task.type === 'due_diligence_report' && task.progress <= 35
-      ? '结构化正文生成或质量检查'
+      ? '直接 Skill Agent 生成或验收'
       : ''
   const candidateArtifacts = (task.artifacts ?? []).filter((artifact) => {
     const format = artifact.format.toLowerCase()
     if (task.type === 'project_qa') return format === 'docx'
     if (task.type === 'investment_proposal') return format === 'docx'
+    if (task.type === 'due_diligence_report') return format === 'docx'
     return ['docx', 'pptx', 'pdf'].includes(format)
   })
   const isDirectInvestmentPpt = task.type === 'investment_recommendation_ppt'

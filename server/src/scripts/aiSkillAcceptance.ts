@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
-import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import {
   AI_BUSINESS_SKILLS,
@@ -397,34 +397,15 @@ async function main() {
   )
   const diligenceTemplate = AI_TEMPLATE_CATALOG.due_diligence_report
   const diligenceSkill = await loadHostAdapterSkill(AI_DUE_DILIGENCE_SKILL_NAME)
-  const diligenceCanonicalSpec = await readFile(
-    path.resolve(process.cwd(), 'docs', '尽调报告', '尽调报告统一生成规范.md'),
-    'utf8',
-  )
-  const diligenceTemplateDirectory = path.resolve(process.cwd(), 'docs', '尽调报告')
-  const diligenceTemplateFileNames = (await readdir(diligenceTemplateDirectory, {
-    withFileTypes: true,
-  }))
-    .filter((entry) => entry.isFile() && /\.(?:docx|pdf)$/i.test(entry.name))
-    .map((entry) => entry.name)
-    .sort((left, right) => left.localeCompare(right, 'zh-CN'))
-  const diligenceReferencePaths = diligenceTemplate.referencePaths ?? []
-  const registeredDiligenceTemplateFileNames = diligenceReferencePaths
-    .map((referencePath) => path.basename(referencePath))
-    .sort((left, right) => left.localeCompare(right, 'zh-CN'))
   assert(
-    'AI-010 登记 docs/尽调报告 全部模板且不设置单一主模板',
-    diligenceTemplateFileNames.length > 0
-      && JSON.stringify(registeredDiligenceTemplateFileNames)
-        === JSON.stringify(diligenceTemplateFileNames)
-      && diligenceReferencePaths.every((referencePath) =>
-        referencePath.includes(`${path.sep}docs${path.sep}尽调报告${path.sep}`)
-          && existsSync(referencePath))
+    'AI-010 尽调快捷入口只绑定当前 draft-due-diligence-report Skill',
+    diligenceTemplate.skillName === AI_DUE_DILIGENCE_SKILL_NAME
       && diligenceTemplate.referencePath.endsWith(
-        `${path.sep}docs${path.sep}尽调报告${path.sep}尽调报告统一生成规范.md`,
+        `${path.sep}${AI_DUE_DILIGENCE_SKILL_NAME}${path.sep}SKILL.md`,
       )
-      && diligenceTemplate.templateVersion.includes('corpus'),
-    `${diligenceTemplate.referencePaths?.length ?? 0} 份`,
+      && diligenceTemplate.referencePaths?.length === 0
+      && diligenceTemplate.templateVersion.includes('skill-native'),
+    `${diligenceTemplate.skillName} / ${diligenceTemplate.templateVersion}`,
   )
   assert(
     'AI-010 运行时加载字段、证据、文风、版式与质量门禁',
@@ -460,7 +441,7 @@ async function main() {
   assert(
     'AI-010 新尽调 Skill 覆盖字段、证据、联网补全、固定结构和视觉验收',
     diligenceCoreTerms.every((term) => diligenceSkillContract.includes(term))
-      && diligenceCanonicalSpec.includes('投资结论及建议'),
+      && diligenceSkill.instructions.includes('投资结论及建议'),
     diligenceCoreTerms.filter((term) => !diligenceSkillContract.includes(term)).join('、')
       || '字段数据层 → 证据台账 → 公开检索 → 投资判断 → DOCX 逐页验收',
   )
@@ -481,97 +462,35 @@ async function main() {
     path.resolve(process.cwd(), 'server', 'src', 'services', 'aiTaskService.ts'),
     'utf8',
   )
-  const aiBusinessContentSource = await readFile(
-    path.resolve(process.cwd(), 'server', 'src', 'services', 'aiBusinessContentService.ts'),
-    'utf8',
-  )
-  const dueDiligenceResearchSource = await readFile(
-    path.resolve(
-      process.cwd(),
-      'server',
-      'src',
-      'services',
-      'aiDueDiligenceNetworkResearchService.ts',
-    ),
-    'utf8',
-  )
-  const dueDiligenceNativeSource = await readFile(
-    path.resolve(
-      process.cwd(),
-      'server',
-      'src',
-      'services',
-      'aiDueDiligenceSkillRuntimeService.ts',
-    ),
-    'utf8',
-  )
-  const dueDiligenceProductionSource = dueDiligenceNativeSource.slice(
-    dueDiligenceNativeSource.indexOf('export async function generateDueDiligenceReportWithSkill'),
-  )
-  assert(
-    'AI-010 正文按 11 个章组生成 30 个模块并仅重试受影响章组',
-    aiBusinessContentSource.includes('DUE_DILIGENCE_GENERATION_GROUPS')
-      && aiBusinessContentSource.includes('DUE_DILIGENCE_DEFAULT_CONCURRENCY = 3')
-      && aiBusinessContentSource.includes('runDueDiligenceGroupsWithConcurrency')
-      && aiBusinessContentSource.includes('章节 JSON 未完整返回')
-      && aiBusinessContentSource.includes('assembleSections')
-      && aiBusinessContentSource.includes('requestSummary')
-      && aiBusinessContentSource.includes("if (input.type === 'due_diligence_report')")
-      && aiTaskServiceSource.includes('AI_DUE_DILIGENCE_CHAPTER_CONCURRENCY')
-      && diligenceTemplate.sections.length === 30
-      && diligenceSkill.instructions.includes('投资概要')
-      && diligenceSkill.instructions.includes('投资结论及建议'),
-    '快捷任务仍按 11 个固定章组并发生成 30 个模块，新技能负责字段、证据、写作与视觉门禁',
-  )
-  const projectKnowledgeBriefSource = await readFile(
-    path.resolve(
-      process.cwd(),
-      'server',
-      'src',
-      'services',
-      'aiProjectKnowledgeBriefService.ts',
-    ),
+  const directDocumentAgentSource = await readFile(
+    path.resolve(process.cwd(), 'server', 'src', 'services', 'aiDirectInvestmentProposalAgentService.ts'),
     'utf8',
   )
   assert(
-    '四项文档任务在生成前建立项目研读简报',
-    projectKnowledgeBriefSource.includes('PROJECT_KNOWLEDGE_TOPICS')
-      && projectKnowledgeBriefSource.includes('recommendedTables')
-      && projectKnowledgeBriefSource.includes('sourceFilesRepresented')
-      && aiTaskServiceSource.includes('buildProjectKnowledgeBrief')
-      && aiTaskServiceSource.includes('projectKnowledgeStudy')
-      && aiBusinessContentSource.includes('projectKnowledgeBriefForPrompt'),
-    '代表性读取每份文件，输出主题事实、时间线、冲突、缺口与表格候选，并注入四项文档生成流程',
+    'AI-010 Q&A 与尽调由隔离 Agent 原生调用 Skill，宿主不编排正文',
+    aiTaskServiceSource.includes('runDirectBusinessDocumentAgent({')
+      && aiTaskServiceSource.includes('usesDirectQaOrDueDiligenceAgent(task.type)')
+      && directDocumentAgentSource.includes("skillName: 'draft-investment-qa'")
+      && directDocumentAgentSource.includes("skillName: 'draft-due-diligence-report'")
+      && directDocumentAgentSource.includes('全部来源文件和全部片段')
+      && directDocumentAgentSource.includes('宿主不会生成问题、答案、章节、底稿或兜底正文')
+      && directDocumentAgentSource.includes('hostContentOrchestration: false')
+      && directDocumentAgentSource.includes('hostEvidenceFallback: false'),
+    '完整资料 → 隔离 Agent → 原生 Skill → Skill 自审 → 单一 DOCX 下载',
   )
   assert(
-    'AI-010 待核验项触发进程内候选发现、LLM Gateway 页面核验、缓存写回和二次生成',
-    [
-      'dueDiligencePendingResearchTopics',
-      '联网检索 Agent 发现待核验事项来源',
-      '核验待确认事项的公开资料',
-      'fetchDueDiligenceNetworkEvidence',
-      'fetchVerifiedProjectWebEvidence',
-      'cacheProjectNetworkEvidence',
-      '使用本地与联网证据重新生成尽调内容',
-      'project_knowledge_primary_in_process_discovery_llm_page_verification',
-    ].every((term) => aiTaskServiceSource.includes(term))
-      && aiBusinessContentSource.includes('source.sourceType.startsWith(\'public_web\')')
-      && aiBusinessContentSource.includes('finding.status !== \'待核验\'')
-      && aiBusinessContentSource.includes('DUE_DILIGENCE_CONTENT_QUALITY_REJECTED')
-      && aiBusinessContentSource.includes('DUE_DILIGENCE_MODEL_UNAVAILABLE')
-      && !aiTaskServiceSource.includes('DUE_DILIGENCE_NETWORK_UNAVAILABLE')
-      && aiTaskServiceSource.includes('尽调公开页面核验失败，使用现有证据继续生成')
-      && dueDiligenceResearchSource.includes('collectCompanyIntel')
-      && dueDiligenceResearchSource.includes("provider: 'in_process_intel_collect'")
-      && dueDiligenceResearchSource.includes('public_web_agent_search'),
-    '首轮生成 → 待核验问题提取 → 进程内候选发现 → LLM Gateway 页面核验 → 缓存写回 → 带补全证据二次生成；联网异常继续生成受限 DOCX',
+    'Q&A 与尽调完整保留项目全部可研读片段并拒绝静默降级',
+    aiTaskServiceSource.includes("'project_qa',\n    'due_diligence_report',")
+      && aiTaskServiceSource.includes('retainEveryReadableChunk: true')
+      && aiTaskServiceSource.includes('assertCompleteProjectFileCoverage(requiredProjectFiles, sources)')
+      && directDocumentAgentSource.includes('completeSourceChunkCoverage: true'),
+    '不抽样、不截断、不遗漏项目文件；不能完整覆盖时停止生成',
   )
   assert(
-    '投资建议书与 Q&A 绑定原生 Skill，其余业务任务绑定 docs 模板',
-    AI_TASK_TYPES
-      .filter((type) => !['investment_recommendation_ppt', 'project_qa'].includes(type))
-      .every((type) =>
-        AI_TEMPLATE_CATALOG[type].referencePath.includes(`${path.sep}docs${path.sep}`))
+    '投资提案、投资建议书、Q&A 与尽调均绑定各自原生 Skill',
+    AI_TEMPLATE_CATALOG.investment_proposal.referencePath.includes(
+      `${path.sep}draft-investment-proposal${path.sep}`,
+    )
       && AI_TEMPLATE_CATALOG.investment_recommendation_ppt.referencePath.includes(
         `${path.sep}investment-committee-ppt${path.sep}SKILL.md`,
       )
@@ -581,7 +500,11 @@ async function main() {
       )
       && AI_QA_TEMPLATE.referencePaths.length >= 1
       && AI_QA_TEMPLATE.referencePaths.every((item) =>
-        item.includes(`${path.sep}draft-investment-qa${path.sep}`)),
+        item.includes(`${path.sep}draft-investment-qa${path.sep}`))
+      && AI_TEMPLATE_CATALOG.due_diligence_report.referencePath.includes(
+        `${path.sep}draft-due-diligence-report${path.sep}SKILL.md`,
+      )
+      && AI_TEMPLATE_CATALOG.due_diligence_report.referencePaths?.length === 0,
     [
       ...AI_TASK_TYPES.map((type) => AI_TEMPLATE_CATALOG[type].referencePath),
       ...AI_QA_TEMPLATE.referencePaths,
@@ -655,22 +578,14 @@ async function main() {
     '摘要、风险、缺口和来源仅保留为审计元数据',
   )
   assert(
-    'AI-010 最终 DOCX 由 draft-due-diligence-report Formatter 输出且宿主不二次判卷',
-    aiTaskServiceSource.includes('generateDueDiligenceReportWithSkill')
-      && [
-        'check_runtime.py',
-        'build_report_docx.py',
-        'deta_dd_processor.py',
-      ].every((term) => dueDiligenceNativeSource.includes(term))
-      && dueDiligenceNativeSource.includes('usedSourceIndexes')
-      && dueDiligenceNativeSource.includes('source_index')
-      && dueDiligenceNativeSource.includes("formatter: 'draft-due-diligence-report-skill-v5'")
-      && dueDiligenceProductionSource.includes("acceptanceAuthority: 'agent-and-current-skill'")
-      && dueDiligenceProductionSource.includes('programmaticBusinessAcceptance: false')
-      && !/runPackageAudits|audit_docx_style|investment_bank_styles|\['verify'/.test(
-        dueDiligenceProductionSource,
-      ),
-    '现有 Agent/Skill 规则 → DOCX Formatter → 文件完整性与下载',
+    'AI-010 最终 DOCX 由直接 Skill Agent 生成验收且宿主不二次判卷',
+    directDocumentAgentSource.includes('runDirectBusinessDocumentAgent')
+      && directDocumentAgentSource.includes("taskType: 'due_diligence_report'")
+      && directDocumentAgentSource.includes('由当前 Agent 按 Skill 自主')
+      && aiTaskServiceSource.includes("acceptanceAuthority: 'direct-skill-agent-and-current-skill'")
+      && aiTaskServiceSource.includes('programmaticBusinessAcceptance: false')
+      && aiTaskServiceSource.includes("deliveryValidation: 'file-integrity-and-authorization-only'"),
+    '当前 Skill 规则 → 隔离 Agent 原生执行 → Skill 验收 → 文件完整性与下载',
   )
   assert(
     '全部快捷入口业务验收权归 Agent 与当前 Skill',
@@ -681,7 +596,7 @@ async function main() {
       && !aiTaskServiceSource.includes('assessQaTemplateFidelity({')
       && !aiTaskServiceSource.includes('assessDueDiligenceTemplateFidelity({')
       && aiTaskServiceSource.includes('{ deliveryIntegrityOnly: true }')
-      && aiTaskServiceSource.includes("acceptanceAuthority: 'agent-and-current-skill'")
+      && aiTaskServiceSource.includes("acceptanceAuthority: 'direct-skill-agent-and-current-skill'")
       && aiTaskServiceSource.includes('programmaticBusinessAcceptance: false')
       && aiTaskServiceSource.includes("deliveryValidation: 'file-integrity-and-authorization-only'"),
     '宿主只做文件完整性、归属、存储与鉴权下载，不重复判定内容和版式',
@@ -1005,7 +920,7 @@ async function main() {
       && !quickActionsSource.includes("activeAction.id === 'qa' ? 'PDF'")
       && !quickActionsSource.includes('QA_GROUPS')
       && AI_TEMPLATE_CATALOG.project_qa.skillName === 'draft-investment-qa'
-      && AI_TEMPLATE_CATALOG.project_qa.templateVersion === 'draft-investment-qa-20260820-v1',
+      && AI_TEMPLATE_CATALOG.project_qa.templateVersion === 'draft-investment-qa-20260821-v2-skill-native',
     'Q&A task / draft-investment-qa / DOCX',
   )
   const taskCardsSource = await readFile(
@@ -1029,20 +944,13 @@ async function main() {
     '标题 / 已完成 / 业务标准模板 / 引用来源 / Token / 进度条 / 下载 PPTX · Vn',
   )
   assert(
-    '非 PPT 文档任务以主文档交付为优先并自动恢复一次',
-    aiTaskServiceSource.includes('AUTO_RECOVERY_TASK_TYPES')
-      && aiTaskServiceSource.includes('_systemDocumentRecoveryAttempt')
-      && aiTaskServiceSource.includes("'draft-due-diligence-report 原生 DOCX Pipeline'")
-      && aiTaskServiceSource.includes(": 'DOCX Formatter'")
-      && aiTaskServiceSource.includes('generateCurrentDocx')
-      && aiTaskServiceSource.includes("retryDocumentStep('Q&A DOCX 生成与质量检查'")
-      && aiTaskServiceSource.includes('主文档已登记，任务状态恢复为已完成')
-      && aiTaskServiceSource.includes('delete retryParameters._systemDocumentRecoveryAttempt')
-      && aiTaskServiceSource.includes('withTaskHeartbeat')
-      && aiBusinessContentSource.includes('AI_DUE_DILIGENCE_MODEL_TIMEOUT_MS')
-      && aiTaskServiceSource.includes('保留已生成主文档')
-      && aiTaskServiceSource.includes('保留已生成 DOCX'),
-    '联网、模型、Reviewer、来源审计或伴生产物异常不推翻主 DOCX；长耗时尽调模型请求持续更新心跳，生成/质检异常自动继续一次，人工继续生成重新获得完整恢复次数',
+    'Q&A 与尽调不回退旧宿主编排或旧 Formatter',
+    aiTaskServiceSource.indexOf('if (usesDirectQaOrDueDiligenceAgent(task.type))')
+      < aiTaskServiceSource.indexOf('let complianceModelResearch:')
+      && directDocumentAgentSource.includes('code: \'DIRECT_SKILL_OUTPUT_CONTRACT_FAILED\'')
+      && directDocumentAgentSource.includes('最终只在 ./output 中保留一份 DOCX')
+      && directDocumentAgentSource.includes('无法完成时明确失败，不得生成占位文件'),
+    '直接 Skill Agent 成功即登记单一 DOCX；失败即明确失败，不再降级到旧正文拼装链路',
   )
   assert(
     '文档任务卡展示安全、可行动的失败原因和错误编号',

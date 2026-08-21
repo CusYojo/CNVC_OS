@@ -77,6 +77,47 @@ export type DirectInvestmentProposalAgentResult = {
   }
 }
 
+export type DirectBusinessDocumentTaskType =
+  | 'investment_proposal'
+  | 'project_qa'
+  | 'due_diligence_report'
+
+type DirectBusinessDocumentProfile = {
+  taskType: DirectBusinessDocumentTaskType
+  skillName: string
+  outputSuffix: string
+  documentLabel: string
+  authoringStage: string
+  processContract: string
+}
+
+const DIRECT_BUSINESS_DOCUMENT_PROFILES: Record<DirectBusinessDocumentTaskType, DirectBusinessDocumentProfile> = {
+  investment_proposal: {
+    taskType: 'investment_proposal',
+    skillName: 'draft-investment-proposal',
+    outputSuffix: '投资提案',
+    documentLabel: '投资提案',
+    authoringStage: '编制投资提案',
+    processContract: '建立事实库、冲突裁决、Decision Manifest、计算底稿、正文、Reviewer 修订和版式验收',
+  },
+  project_qa: {
+    taskType: 'project_qa',
+    skillName: 'draft-investment-qa',
+    outputSuffix: '项目Q&A报告',
+    documentLabel: '项目 Q&A 报告',
+    authoringStage: '编制项目 Q&A 报告',
+    processContract: '建立事实与证据台账、定义投资主线、设计并筛选问题、起草回答、执行 Markdown 门禁、DOCX 渲染和逐页视觉验收',
+  },
+  due_diligence_report: {
+    taskType: 'due_diligence_report',
+    skillName: 'draft-due-diligence-report',
+    outputSuffix: '尽职调查报告',
+    documentLabel: '尽职调查报告',
+    authoringStage: '编制尽职调查报告',
+    processContract: '确定报告类型、建立证据台账与字段数据层、形成合伙人观点、执行字段/内容/叙事门禁、DOCX 审计和逐页视觉验收',
+  },
+}
+
 function boundedInteger(value: unknown, fallback: number, minimum: number, maximum: number) {
   const parsed = Number(value)
   return Number.isInteger(parsed) ? Math.max(minimum, Math.min(maximum, parsed)) : fallback
@@ -251,8 +292,12 @@ function assistantToolNames(message: DirectAgentMessage): string[] {
   })
 }
 
-function progressForTool(toolName: string, readEvents: number): DirectInvestmentProposalAgentProgress {
-  if (toolName === 'Skill') return { stage: '文档 Agent 已调用 draft-investment-proposal Skill', progress: 18, toolName }
+function progressForTool(
+  profile: DirectBusinessDocumentProfile,
+  toolName: string,
+  readEvents: number,
+): DirectInvestmentProposalAgentProgress {
+  if (toolName === 'Skill') return { stage: `文档 Agent 已调用 ${profile.skillName} Skill`, progress: 18, toolName }
   if (['Read', 'Glob', 'Grep'].includes(toolName)) {
     return {
       stage: '文档 Agent 正在按 Skill 研读全部项目资料',
@@ -261,7 +306,7 @@ function progressForTool(toolName: string, readEvents: number): DirectInvestment
     }
   }
   if (['Write', 'Edit'].includes(toolName)) {
-    return { stage: '文档 Agent 正在按 Skill 编制投资提案', progress: 70, toolName }
+    return { stage: `文档 Agent 正在按 Skill ${profile.authoringStage}`, progress: 70, toolName }
   }
   if (toolName === 'Bash') {
     return { stage: '文档 Agent 正在执行 Skill 校验与 DOCX 渲染', progress: 82, toolName }
@@ -270,6 +315,7 @@ function progressForTool(toolName: string, readEvents: number): DirectInvestment
 }
 
 function directAgentPrompt(input: {
+  profile: DirectBusinessDocumentProfile
   project: ProjectIdentity
   sourceCutoffDate: string
   instructions: string
@@ -277,7 +323,7 @@ function directAgentPrompt(input: {
   documentCount: number
   chunkCount: number
 }) {
-  return `请直接调用 Skill 工具执行 draft-investment-proposal，并严格按该 Skill 的 SKILL.md、references、scripts 与模板完成当前项目投资提案。
+  return `请直接调用 Skill 工具执行 ${input.profile.skillName}，并严格按该 Skill 的 SKILL.md、references、scripts 与模板完成当前项目${input.profile.documentLabel}。
 
 这是正式交付任务，不要创建另一个后台任务，也不要只返回文字草稿。
 
@@ -289,9 +335,9 @@ function directAgentPrompt(input: {
 用户要求：${input.instructions || '无额外要求'}
 
 强制要求：
-1. 首先使用 Skill 工具调用 draft-investment-proposal；未调用 Skill 不得继续。
+1. 首先使用 Skill 工具调用 ${input.profile.skillName}；未调用 Skill 不得继续。
 2. 逐一读取 materials/manifest.json 中的全部来源文件和全部片段，不得抽样、截断或只读摘要。
-3. 由当前 Agent 按 Skill 自主建立事实库、冲突裁决、Decision Manifest、计算底稿、17 节正文、Reviewer 修订和版式验收；宿主不会生成章节或提供兜底正文。
+3. 由当前 Agent 按 Skill 自主${input.profile.processContract}；宿主不会生成问题、答案、章节、底稿或兜底正文，也不会用程序替代 Skill 的业务验收。
 4. 对交易金额、估值、股比、收入、人员任职和协议日期的冲突必须保留来源边界，不得编造。
 5. 使用 Skill 自带脚本、模板和当前工作区可用 Python/LibreOffice 工具完成 DOCX；可以在工作区写临时文件。
 6. 最终只在 ./output 中保留一份 DOCX，文件名必须是 ${input.outputFileName}。不得把模板文件复制到 output。
@@ -300,7 +346,8 @@ function directAgentPrompt(input: {
 完成后简要说明最终结论和输出路径。`
 }
 
-export async function runDirectInvestmentProposalAgent(input: {
+export async function runDirectBusinessDocumentAgent(input: {
+  taskType: DirectBusinessDocumentTaskType
   taskDirectory: string
   project: ProjectIdentity
   sources: EvidenceSource[]
@@ -315,10 +362,16 @@ export async function runDirectInvestmentProposalAgent(input: {
   queryFactory?: DirectAgentQueryFactory
   runtimeConfig?: DirectAgentRuntimeConfig
 } = {}): Promise<DirectInvestmentProposalAgentResult> {
+  const profile = DIRECT_BUSINESS_DOCUMENT_PROFILES[input.taskType]
+  if (!profile || input.skill.name !== profile.skillName) {
+    throw Object.assign(new Error(`直接文档 Agent 的任务与 Skill 不匹配：${input.taskType}/${input.skill.name}`), {
+      code: 'DIRECT_SKILL_TASK_MISMATCH',
+    })
+  }
   const workspace = path.join(input.taskDirectory, '.direct-skill-agent')
   const outputDirectory = path.join(workspace, 'output')
   const projectSettingsDirectory = path.join(workspace, '.claude')
-  const targetSkillDirectory = path.join(projectSettingsDirectory, 'skills', 'draft-investment-proposal')
+  const targetSkillDirectory = path.join(projectSettingsDirectory, 'skills', profile.skillName)
   await rm(workspace, { recursive: true, force: true })
   await mkdir(outputDirectory, { recursive: true, mode: 0o700 })
   await mkdir(path.dirname(targetSkillDirectory), { recursive: true, mode: 0o700 })
@@ -329,7 +382,7 @@ export async function runDirectInvestmentProposalAgent(input: {
     { encoding: 'utf8', mode: 0o600 },
   )
   const materialized = await materializeSources({ workspace, sources: input.sources })
-  const outputFileName = `${safeFileStem(input.project.companyName || input.project.name, '项目')}_投资提案.docx`
+  const outputFileName = `${safeFileStem(input.project.companyName || input.project.name, '项目')}_${profile.outputSuffix}.docx`
   await writeFile(path.join(workspace, 'REQUEST.json'), JSON.stringify({
     project: input.project,
     sourceCutoffDate: input.sourceCutoffDate,
@@ -351,6 +404,7 @@ export async function runDirectInvestmentProposalAgent(input: {
     await input.onProgress?.({ stage: '正在启动隔离文档 Agent 并加载 Skill', progress: 12 })
     sdkQuery = factory({
       prompt: directAgentPrompt({
+        profile,
         project: input.project,
         sourceCutoffDate: input.sourceCutoffDate,
         instructions: input.instructions,
@@ -366,7 +420,7 @@ export async function runDirectInvestmentProposalAgent(input: {
         abortController,
         permissionMode: 'dontAsk',
         tools: ['Skill', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'Bash'],
-        skills: ['draft-investment-proposal'],
+        skills: [profile.skillName],
         allowedTools: ['Read', 'Write', 'Edit', 'Glob', 'Grep', 'Bash'],
         disallowedTools: ['WebFetch', 'WebSearch', 'Task'],
         settingSources: ['project'],
@@ -384,7 +438,7 @@ export async function runDirectInvestmentProposalAgent(input: {
         systemPrompt: {
           type: 'preset',
           preset: 'claude_code',
-          append: '你是隔离运行的正式文档 Agent。业务流程、内容质量与验收只服从已调用的 draft-investment-proposal Skill。宿主只准备资料、观察进度、检查文件完整性和登记下载，不会替你生成或审核正文。',
+          append: `你是隔离运行的正式文档 Agent。业务流程、内容质量与验收只服从已调用的 ${profile.skillName} Skill。宿主只准备资料、观察进度、检查文件完整性和登记下载，不会替你生成或审核正文。`,
         },
       },
     })
@@ -396,7 +450,7 @@ export async function runDirectInvestmentProposalAgent(input: {
       for (const toolName of assistantToolNames(message)) {
         if (toolName === 'Skill') skillInvoked = true
         if (['Read', 'Glob', 'Grep'].includes(toolName)) readEvents += 1
-        await input.onProgress?.(progressForTool(toolName, readEvents))
+        await input.onProgress?.(progressForTool(profile, toolName, readEvents))
       }
       if (message.type === 'result') result = message
     }
@@ -424,7 +478,7 @@ export async function runDirectInvestmentProposalAgent(input: {
     ), { code: 'DIRECT_SKILL_AGENT_INCOMPLETE' })
   }
   if (!skillInvoked) {
-    throw Object.assign(new Error('文档 Agent 未调用 draft-investment-proposal Skill'), {
+    throw Object.assign(new Error(`文档 Agent 未调用 ${profile.skillName} Skill`), {
       code: 'DIRECT_SKILL_NOT_INVOKED',
     })
   }
@@ -469,4 +523,11 @@ export async function runDirectInvestmentProposalAgent(input: {
       hostEvidenceFallback: false,
     },
   }
+}
+
+export async function runDirectInvestmentProposalAgent(
+  input: Omit<Parameters<typeof runDirectBusinessDocumentAgent>[0], 'taskType'>,
+  options: Parameters<typeof runDirectBusinessDocumentAgent>[1] = {},
+) {
+  return runDirectBusinessDocumentAgent({ ...input, taskType: 'investment_proposal' }, options)
 }
