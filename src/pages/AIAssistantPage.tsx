@@ -2237,7 +2237,7 @@ function Chat() {
               )}
               {reportTaskUsage.taskCount > 0 && (
                 <span title={`模型调用 ${reportTaskUsage.modelCalls} 次，收到用量 ${reportTaskUsage.usageCalls} 次`}>
-                  {reportTaskUsage.usageCalls > 0
+                  {reportTaskUsage.usageCalls > 0 && reportTaskUsage.totalTokens > 0
                     ? `报告 ${reportTaskUsage.totalTokens.toLocaleString()} Token${reportTaskUsage.usageCalls < reportTaskUsage.modelCalls ? '（部分）' : ''}`
                     : reportTaskUsage.activeTaskCount > 0
                       ? '报告 Token 统计中'

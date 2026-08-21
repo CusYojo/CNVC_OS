@@ -5,7 +5,7 @@ import { getAiSkillDirectory, type LoadedAiSkill } from './aiSkillService.js'
 import type { EvidenceSource } from './aiBusinessContentService.js'
 import { resolveAiModelRoute } from './aiModelSettingsService.js'
 import { redactSensitiveText } from '../security/redactSecrets.js'
-import { directAgentTurnUsage } from '../runtime/directAgentUsage.js'
+import { directAgentResultUsage, directAgentTurnUsage } from '../runtime/directAgentUsage.js'
 
 type ProjectIdentity = {
   id: string
@@ -34,6 +34,7 @@ type DirectAgentMessage = {
   num_turns?: number
   total_cost_usd?: number
   usage?: Record<string, unknown>
+  modelUsage?: Record<string, Record<string, unknown>>
   message?: { content?: unknown; usage?: Record<string, unknown> }
 }
 
@@ -511,7 +512,7 @@ export async function runDirectBusinessDocumentAgent(input: {
       model: config.model,
       numTurns: Number(result.num_turns || 0),
       totalCostUsd: Number(result.total_cost_usd || 0),
-      usage: result.usage ?? null,
+      usage: directAgentResultUsage(result),
       resultText: String(result.result || '').slice(0, 2_000),
     },
     projectKnowledgeStudy: {

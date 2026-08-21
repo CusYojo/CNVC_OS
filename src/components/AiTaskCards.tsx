@@ -209,9 +209,11 @@ function TaskCard({
       ? '未形成最终引用清单'
       : '资料读取与引用整理中'
   const usageLabel = task.usage
-    ? task.usage.usageCalls > 0
+    ? task.usage.usageCalls > 0 && task.usage.totalTokens > 0
       ? `报告 Token：${task.usage.totalTokens.toLocaleString()}${task.usage.complete ? '' : '（部分统计）'}`
-      : `报告 Token：上游未返回用量（${task.usage.modelCalls} 次调用）`
+      : isActive
+        ? '报告 Token：统计中'
+        : `报告 Token：上游未返回有效用量（${task.usage.modelCalls} 次调用）`
     : isActive
       ? '报告 Token：统计中'
       : task.status === 'succeeded'
