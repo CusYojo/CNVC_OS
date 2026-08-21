@@ -98,6 +98,7 @@ try {
   assert.deepEqual(options.settingSources, ['project'])
   assert.equal((options.sandbox as { enabled?: boolean }).enabled, true)
   assert.equal((options.sandbox as { failIfUnavailable?: boolean }).failIfUnavailable, true)
+  assert.ok((options.tools as string[]).includes('Skill'))
   assert.ok((options.tools as string[]).includes('Read'))
   assert.ok((options.tools as string[]).includes('Write'))
   assert.ok((options.tools as string[]).includes('Bash'))

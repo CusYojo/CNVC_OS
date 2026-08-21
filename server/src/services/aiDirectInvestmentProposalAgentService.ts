@@ -365,7 +365,7 @@ export async function runDirectInvestmentProposalAgent(input: {
         maxBudgetUsd: config.maxBudgetUsd,
         abortController,
         permissionMode: 'dontAsk',
-        tools: ['Read', 'Write', 'Edit', 'Glob', 'Grep', 'Bash'],
+        tools: ['Skill', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'Bash'],
         skills: ['draft-investment-proposal'],
         allowedTools: ['Read', 'Write', 'Edit', 'Glob', 'Grep', 'Bash'],
         disallowedTools: ['WebFetch', 'WebSearch', 'Task'],
