@@ -211,6 +211,14 @@ const NON_RETRYABLE_AI_TASK_ERROR_CODES = new Set([
   'DUE_DILIGENCE_PUBLIC_RESEARCH_AUDIT_REQUIRED',
   'DUE_DILIGENCE_SKILL_RUNTIME_UNAVAILABLE',
   'AI_TEMPLATE_REGISTRY_MISMATCH',
+])
+const DIRECT_SKILL_AGENT_MANUALLY_RESUMABLE_ERROR_CODES = new Set([
+  'DIRECT_SKILL_AGENT_AUTH_OR_QUOTA',
+  'DIRECT_SKILL_AGENT_AUTHENTICATION_FAILED',
+  'DIRECT_SKILL_AGENT_QUOTA_EXHAUSTED',
+  'DIRECT_SKILL_AGENT_UPSTREAM_FORBIDDEN',
+])
+const DIRECT_SKILL_AGENT_NO_AUTO_RECOVERY_ERROR_CODES = new Set([
   'DIRECT_SKILL_AGENT_AUTH_OR_QUOTA',
   'DIRECT_SKILL_AGENT_AUTHENTICATION_FAILED',
   'DIRECT_SKILL_AGENT_QUOTA_EXHAUSTED',
@@ -238,6 +246,11 @@ export function classifyAiTaskFailure(error: unknown): AiTaskFailureClassificati
       && !permanentMessage
       && !permanentStatus,
   }
+}
+
+export function shouldAutomaticallyRecoverAiTaskFailure(failure: AiTaskFailureClassification) {
+  return failure.retryable
+    && !DIRECT_SKILL_AGENT_NO_AUTO_RECOVERY_ERROR_CODES.has(failure.errorCode)
 }
 
 async function authorizedArtifactPath(storagePath: string): Promise<{ resolved: string; size: number } | undefined> {
@@ -850,7 +863,7 @@ async function restoreDirectSkillWorkspaceForRetry(input: {
     || sourceTask.userId !== input.task.userId
     || sourceTask.projectId !== input.task.projectId
     || sourceTask.type !== input.task.type
-    || sourceTask.errorCode !== 'DIRECT_SKILL_AGENT_UPSTREAM_FORBIDDEN'
+    || !DIRECT_SKILL_AGENT_MANUALLY_RESUMABLE_ERROR_CODES.has(sourceTask.errorCode || '')
   ) {
     throw Object.assign(new Error('直接 Skill Agent 的恢复工作区与当前任务不匹配'), {
       code: 'DIRECT_SKILL_WORKSPACE_RECOVERY_MISMATCH',
@@ -3163,7 +3176,7 @@ async function executeTaskWithinUsage(taskId: string) {
       && isAiExecutableTaskType(context.type)
       && AUTO_RECOVERY_TASK_TYPES.has(context.type)
       && recoveryAttempt < 1
-      && failure.retryable
+      && shouldAutomaticallyRecoverAiTaskFailure(failure)
       && failure.errorCode !== 'PROJECT_KNOWLEDGE_COMPLETE_STUDY_FAILED'
     ) {
       const reset = await aiTaskRepository.resetTaskForAutomaticRecovery({
@@ -3630,8 +3643,11 @@ export async function getAiTask(userId: string, taskId: string) {
     ? passedArtifacts.filter((artifact) => artifact.format === 'docx')
     : passedArtifacts
   const deliverableIds = new Set(deliverables.map((artifact) => artifact.id))
+  const manuallyResumableDirectSkillFailure = task.status === 'failed'
+    && DIRECT_SKILL_AGENT_MANUALLY_RESUMABLE_ERROR_CODES.has(task.errorCode || '')
   return {
     ...task,
+    ...(manuallyResumableDirectSkillFailure ? { retryable: true } : {}),
     usage: task.modelCalls > 0 ? {
       modelCalls: task.modelCalls,
       usageCalls: task.usageCalls,
@@ -3678,7 +3694,10 @@ export async function retryAiTask(user: AiTaskUser, taskId: string, idempotencyK
   if (task.status !== 'failed') {
     throw Object.assign(new Error('只有失败任务可以重试'), { status: 409, code: 'TASK_NOT_RETRYABLE' })
   }
-  if (task.retryable === false) {
+  if (
+    task.retryable === false
+    && !DIRECT_SKILL_AGENT_MANUALLY_RESUMABLE_ERROR_CODES.has(task.errorCode || '')
+  ) {
     throw Object.assign(new Error('该错误不可直接重试，请修正资料、模板或参数后重新创建任务'), {
       status: 409,
       code: 'TASK_ERROR_NOT_RETRYABLE',
@@ -3697,7 +3716,7 @@ export async function retryAiTask(user: AiTaskUser, taskId: string, idempotencyK
   // 手动“继续生成”是一轮新的恢复流程，不能继承上一任务已经耗尽的自动恢复次数。
   delete retryParameters._systemDocumentRecoveryAttempt
   if (
-    task.errorCode === 'DIRECT_SKILL_AGENT_UPSTREAM_FORBIDDEN'
+    DIRECT_SKILL_AGENT_MANUALLY_RESUMABLE_ERROR_CODES.has(task.errorCode || '')
     && (
       usesDirectInvestmentProposalAgent(task.type)
       || usesDirectInvestmentCommitteePptAgent(task.type)

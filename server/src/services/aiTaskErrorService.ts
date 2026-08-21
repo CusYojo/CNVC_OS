@@ -56,13 +56,13 @@ export function safeAiTaskFailureMessage(error: unknown) {
     return '全部项目资料片段中仍有批次未完成研读，因此未使用部分资料生成提案。系统已保留任务参数，请稍后点击“继续生成”；系统只会拆分并重试失败批次，不会减少项目资料。'
   }
   if (code === 'DIRECT_SKILL_AGENT_AUTH_OR_QUOTA') {
-    return '正式文档模型的认证或额度当前不可用，系统已停止自动重跑以避免重复消耗。请恢复模型额度后重新创建任务。'
+    return '正式文档模型的认证或额度当前不可用，系统已停止自动重跑并保留 Agent 工作区。请恢复凭据或额度后点击“继续生成”。'
   }
   if (code === 'DIRECT_SKILL_AGENT_AUTHENTICATION_FAILED') {
-    return '正式文档模型认证失败，系统未继续发送生成请求。请检查当前文档模型凭据后重新创建任务。'
+    return '正式文档模型认证失败，系统已停止自动重跑并保留 Agent 工作区。请修复当前文档模型凭据后点击“继续生成”。'
   }
   if (code === 'DIRECT_SKILL_AGENT_QUOTA_EXHAUSTED') {
-    return '正式文档模型明确返回额度或余额不足，系统已停止自动重跑以避免重复消耗。请恢复对应 API Key 的额度后重新创建任务。'
+    return '正式文档模型明确返回令牌额度或余额不足，系统已停止自动重跑并保留 Agent 工作区。请恢复对应 API Key 的额度后点击“继续生成”。'
   }
   if (code === 'DIRECT_SKILL_AGENT_UPSTREAM_FORBIDDEN') {
     return '模型网关连续返回普通 403。系统已保留全部资料和 Agent 工作区，但本轮全新上下文仍未完成最终复核；可稍后点击“继续生成”。'

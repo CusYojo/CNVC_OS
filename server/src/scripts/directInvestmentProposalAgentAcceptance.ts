@@ -130,6 +130,12 @@ try {
     code: 'DIRECT_SKILL_AGENT_QUOTA_EXHAUSTED',
     recoverableGateway403: false,
   })
+  assert.deepEqual(classifyDirectSkillAgentFailure(
+    'Failed to authenticate. API Error: 403 令牌$额度不足：需要 0.1099，可用 0.0376',
+  ), {
+    code: 'DIRECT_SKILL_AGENT_QUOTA_EXHAUSTED',
+    recoverableGateway403: false,
+  })
   assert.deepEqual(classifyDirectSkillAgentFailure('API Error: 403 gateway policy denied'), {
     code: 'DIRECT_SKILL_AGENT_UPSTREAM_FORBIDDEN',
     recoverableGateway403: true,

@@ -16,6 +16,7 @@ import {
   createAiTask,
   recoverAiTasks,
   retryAiTask,
+  shouldAutomaticallyRecoverAiTaskFailure,
   stopAiTaskWorker,
 } from '../services/aiTaskService.js'
 
@@ -257,10 +258,14 @@ async function main() {
       !transient.retryable
       || permanent.retryable
       || !resumableVisualQa.retryable
-      || exhaustedDirectAgent.retryable
-      || authenticationFailedDirectAgent.retryable
-      || quotaExhaustedDirectAgent.retryable
+      || !exhaustedDirectAgent.retryable
+      || !authenticationFailedDirectAgent.retryable
+      || !quotaExhaustedDirectAgent.retryable
       || !upstreamForbiddenDirectAgent.retryable
+      || shouldAutomaticallyRecoverAiTaskFailure(exhaustedDirectAgent)
+      || shouldAutomaticallyRecoverAiTaskFailure(authenticationFailedDirectAgent)
+      || shouldAutomaticallyRecoverAiTaskFailure(quotaExhaustedDirectAgent)
+      || !shouldAutomaticallyRecoverAiTaskFailure(upstreamForbiddenDirectAgent)
     ) {
       throw new Error('failure retry classification mismatch')
     }

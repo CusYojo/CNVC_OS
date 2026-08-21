@@ -41,15 +41,18 @@ export function classifyDirectSkillAgentFailure(
   message: string,
   fallbackCode = 'DIRECT_SKILL_AGENT_FAILED',
 ): DirectSkillAgentFailure {
-  if (/Failed to authenticate|authentication failed|invalid api key|unauthorized|API Error:\s*401|Response code:\s*401|HTTP\s*401/i.test(message)) {
-    return {
-      code: 'DIRECT_SKILL_AGENT_AUTHENTICATION_FAILED',
-      recoverableGateway403: false,
-    }
-  }
+  // Some compatible gateways prefix every 403 with "Failed to authenticate",
+  // including explicit token-balance failures. The concrete quota signal must
+  // therefore win over the generic authentication prefix.
   if (/额度不足|余额不足|insufficient[_ -]?quota|insufficient credits?|billing quota/i.test(message)) {
     return {
       code: 'DIRECT_SKILL_AGENT_QUOTA_EXHAUSTED',
+      recoverableGateway403: false,
+    }
+  }
+  if (/Failed to authenticate|authentication failed|invalid api key|unauthorized|API Error:\s*401|Response code:\s*401|HTTP\s*401/i.test(message)) {
+    return {
+      code: 'DIRECT_SKILL_AGENT_AUTHENTICATION_FAILED',
       recoverableGateway403: false,
     }
   }
