@@ -48,6 +48,13 @@ const AI_UPLOAD_ACCEPT = '.pdf,.ppt,.pptx,.xlsx,.xls,.csv,.docx,.txt,.md,.markdo
 const AI_UPLOAD_EXTENSIONS = new Set(
   AI_UPLOAD_ACCEPT.split(',').map((extension) => extension.slice(1)),
 )
+const CHAT_BOTTOM_FOLLOW_THRESHOLD_PX = 96
+
+export function isConversationNearBottom(
+  scroll: Pick<HTMLElement, 'scrollHeight' | 'scrollTop' | 'clientHeight'>,
+) {
+  return scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight <= CHAT_BOTTOM_FOLLOW_THRESHOLD_PX
+}
 
 type ConversationPptTaskResult = {
   matched: boolean
@@ -1084,6 +1091,7 @@ function Chat() {
   const [renamingTitle, setRenamingTitle] = useState('')
   const initedRef = useRef(false)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const shouldFollowConversationBottomRef = useRef(true)
   const [aiTasks, setAiTasks] = useState<AiTask[]>([])
   const [aiTasksLoading, setAiTasksLoading] = useState(false)
   const reportTaskUsage = useMemo(() => aiTasks.reduce((summary, task) => {
@@ -1561,8 +1569,19 @@ function Chat() {
 
   const removeUpload = (path: string) => setUploads((prev) => prev.filter((u) => u.path !== path))
 
+  const onConversationScroll = (event: React.UIEvent<HTMLDivElement>) => {
+    shouldFollowConversationBottomRef.current = isConversationNearBottom(event.currentTarget)
+  }
+
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
+    // 每个会话独立从最新消息开始；上一会话的手动上滑状态不能带到新会话。
+    shouldFollowConversationBottomRef.current = true
+  }, [convId])
+
+  useEffect(() => {
+    const conversation = scrollRef.current
+    if (!conversation || !shouldFollowConversationBottomRef.current) return
+    conversation.scrollTo({ top: conversation.scrollHeight, behavior: 'smooth' })
   }, [messages, aiTasks.length, qaAnswers.length])
 
   // agent 从"忙"变"闲"（跑完一轮）后刷新工作区，让新生成的文件自动出现
@@ -2312,7 +2331,11 @@ function Chat() {
         </div>
 
         <AiErrorBoundary level="section" title="消息区域显示异常" resetKey={convId}>
-          <div ref={scrollRef} className="flex-1 space-y-6 overflow-y-auto px-6 py-6">
+          <div
+            ref={scrollRef}
+            className="flex-1 space-y-6 overflow-y-auto px-6 py-6"
+            onScroll={onConversationScroll}
+          >
             {conversationTimeline.length === 0
               && !qaAnswersLoading
               && !aiTasksLoading

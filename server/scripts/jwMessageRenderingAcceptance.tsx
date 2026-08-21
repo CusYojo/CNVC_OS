@@ -5,6 +5,7 @@ import path from 'node:path'
 import { createElement, Fragment } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import {
+  isConversationNearBottom,
   isUserVisibleMessagePart,
   Markdown,
   MessagePart,
@@ -69,6 +70,8 @@ assert(combinedHtml.indexOf('</details>') < combinedHtml.indexOf('渲染验收�
 assert.equal(isUserVisibleMessagePart({ type: 'reasoning', text: reasoning }), true)
 assert.equal(isUserVisibleMessagePart({ type: 'dynamic-tool', toolName: 'bash', state: 'call' }), false)
 assert.equal(isUserVisibleMessagePart({ type: 'dynamic-tool', toolName: 'AskUserQuestion', state: 'call' }), false)
+assert.equal(isConversationNearBottom({ scrollHeight: 1_000, scrollTop: 404, clientHeight: 500 }), true)
+assert.equal(isConversationNearBottom({ scrollHeight: 1_000, scrollTop: 403, clientHeight: 500 }), false)
 
 const toolHtml = renderToStaticMarkup(createElement(
   Fragment,
@@ -102,6 +105,7 @@ const checks = [
   'reasoning-defaults-to-closed-details',
   'reasoning-remains-separate-from-final-answer',
   'shell-and-ask-user-question-tool-details-hidden',
+  'conversation-auto-follow-pauses-away-from-bottom',
   'tool-running-success-and-error-states-are-accessible',
   'tool-details-default-to-collapsed-without-rendering-output',
   'mode: 0o600',
