@@ -1,0 +1,53 @@
+profile_name: research_editorial_default
+profile_id: investment-editorial-research
+profile_version: v001
+adapter_id: dense-investment-committee
+adapter_version: a001
+source_of_truth: assets/design-profiles/investment-editorial-research/versions/v001.json
+resolved_by: scripts/resolve_design_profile.py
+canvas:
+  ratio: "16:9"
+  width_in: 13.333
+  height_in: 7.5
+  safe_margin_in:
+    left: 0.45
+    right: 0.45
+    top: 0.30
+    bottom: 0.28
+typography:
+  chinese: "KaiTi"
+  latin_and_numbers: "Times New Roman"
+  title_pt: [24, 34]
+  subtitle_pt: [15, 20]
+  body_pt: [12, 14.5]
+  dense_table_min_pt: 11.2
+  source_pt: [7.5, 9]
+  normalize_11_x_to_12: true
+colors:
+  paper: "#F4F0E7"
+  ink: "#202522"
+  mineral_green: "#2E6F65"
+  sage: "#8EA79B"
+  copper: "#B56250"
+  rule: "#D7D1C5"
+  soft_fill: "#E7EEE9"
+page_rules:
+  core_conclusions: 1
+  major_visual_regions_max: 2
+  accent_colors_max: 2
+  equal_cards_max: 2
+  minimum_visual_line_clearance_px: 10
+  tables_only_for_true_comparison: true
+forbidden_defaults:
+  - dark_navy_full_slide
+  - four_equal_rounded_cards
+  - giant_isolated_number
+  - repeated_three_column_grid
+  - decorative_connector_lines
+  - body_text_below_12pt_to_fit
+  - full_slide_raster_image
+qa:
+  authoritative_renderer: "Microsoft PowerPoint PDF export"
+  render_dpi: 160
+  inspect_every_slide_full_size: true
+  create_contact_sheets: true

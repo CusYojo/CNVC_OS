@@ -1,0 +1,29 @@
+{
+  "adapter_id": "dense-investment-committee",
+  "adapter_name": "Dense Investment Committee / 高密度投委会",
+  "base_profile_id": "investment-editorial-research",
+  "base_version_id": "v001",
+  "current_adapter_version": "a001",
+  "scenario": "equity_investment_committee",
+  "selected_strategy": "dynamic_downgrade",
+  "one_line_summary": "在不缩小正文、不堆表格的前提下提高证据密度和投委会独立阅读能力。",
+  "versions": [
+    {
+      "version_id": "a001",
+      "created_at": "2026-08-20T00:00:00+08:00",
+      "change_reason": "将研究编辑部基础 DNA 调整为大衍最终稿式高密度投委会材料",
+      "snapshot_path": "versions/a001.json",
+      "diff_path": "diffs/base-to-a001.json"
+    }
+  ],
+  "best_for": [
+    "资料量大且要求离开 Word 也能读懂的投委会材料",
+    "需要呈现行业、公司、客户、财务和交易完整证据链的项目",
+    "约 20 至 40 页的投资建议书"
+  ],
+  "risky_for": [
+    "五分钟以内的融资路演",
+    "只展示品牌形象和产品照片的演示",
+    "资料极少且无法形成证据链的项目"
+  ]
+}

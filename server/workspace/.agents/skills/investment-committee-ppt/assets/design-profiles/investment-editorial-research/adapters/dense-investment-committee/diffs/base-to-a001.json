@@ -1,0 +1,82 @@
+{
+  "diff_id": "investment-editorial-research-v001-to-dense-investment-committee-a001",
+  "diff_type": "adapter_version",
+  "profile_id": "investment-editorial-research",
+  "adapter_id": "dense-investment-committee",
+  "from_version": "v001",
+  "to_version": "a001",
+  "created_at": "2026-08-20T00:00:00+08:00",
+  "change_reason": "将基础研究编辑风格适配为大衍最终稿式高密度投委会材料",
+  "parameter_changes": [
+    {
+      "path": "user_dna.fixed_parameters.whitespace",
+      "label": "Whitespace",
+      "from": 46,
+      "to": 34
+    },
+    {
+      "path": "user_dna.fixed_parameters.information_density",
+      "label": "Information density",
+      "from": 72,
+      "to": 86
+    },
+    {
+      "path": "user_dna.fixed_parameters.text_density",
+      "label": "Text density",
+      "from": 70,
+      "to": 84
+    },
+    {
+      "path": "user_dna.fixed_parameters.chart_weight",
+      "label": "Chart weight",
+      "from": 62,
+      "to": 70
+    },
+    {
+      "path": "user_dna.fixed_parameters.hierarchy_strength",
+      "label": "Hierarchy strength",
+      "from": 90,
+      "to": 94
+    }
+  ],
+  "visual_consequences": [
+    {
+      "change_ref": "information_density_and_text_density",
+      "impact": "单页承载更多行业背景、机制解释、口径和来源，但通过连续证据路径组织，不增加等权卡片数量。",
+      "confidence": "direct"
+    },
+    {
+      "change_ref": "whitespace",
+      "impact": "减少无功能的大面积留白，提高正文与图表的有效占比；外边距和模块安全间距仍保持稳定。",
+      "confidence": "direct"
+    },
+    {
+      "change_ref": "chart_weight",
+      "impact": "财务、收入结构、订单和交易页更多使用迁移、瀑布、漏斗与资金流，减少字段表。",
+      "confidence": "direct"
+    },
+    {
+      "change_ref": "hierarchy_strength",
+      "impact": "重点通过位置、关系、色彩和证据邻接形成，不再依靠巨型数字或重色块。",
+      "confidence": "direct"
+    }
+  ],
+  "scenario_consequences": [
+    {
+      "scenario": "equity_investment_committee",
+      "impact": "投委会成员可以在不另读 Word 的情况下理解行业、公司、验证、财务与交易逻辑。",
+      "confidence": "direct"
+    },
+    {
+      "scenario": "short_fundraising_pitch",
+      "impact": "信息密度可能过高，应换用更低密度的场景 Adapter。",
+      "confidence": "inferred"
+    }
+  ],
+  "risks": [
+    "资料不足时，高密度目标可能诱导重复或空泛解释。",
+    "如果不执行原生渲染 QA，字体增大后可能出现换行、线条贴字和图表标签缺失。",
+    "如果机械应用母型，仍可能重新产生模板感。"
+  ],
+  "recommendation": "把 a001 作为 investment-committee-ppt 的默认 Adapter；资料明显不足或用户明确要求路演时，不应强制使用。"
+}

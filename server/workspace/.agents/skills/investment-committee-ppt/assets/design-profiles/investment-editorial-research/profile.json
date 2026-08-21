@@ -1,0 +1,47 @@
+{
+  "profile_id": "investment-editorial-research",
+  "display_name": "Investment Editorial Research / 投资研究编辑部",
+  "current_version": "v001",
+  "created_at": "2026-08-20T00:00:00+08:00",
+  "updated_at": "2026-08-20T00:00:00+08:00",
+  "source_summary": [
+    "从大衍科技投资建议书最终版中提取视觉系统，不保留公司事实作为模板默认值",
+    "吸收高质量投研材料的 state-and-explain 叙事、编辑式密度和可投屏信息设计"
+  ],
+  "best_for": [
+    "投委会投资建议书",
+    "私募股权与创业投资项目汇报",
+    "行业研究与公司研究型 PPT",
+    "需要完整财务、交易、客户和证据链的审议材料"
+  ],
+  "risky_for": [
+    "面向公众的融资路演",
+    "纯品牌形象册",
+    "娱乐活动和高动效发布会",
+    "极少文字的大图演讲"
+  ],
+  "primary_moods": [
+    "editorial",
+    "trustworthy",
+    "serious",
+    "business",
+    "research"
+  ],
+  "one_line_summary": "可信、克制、密集而不拥挤的研究编辑部式投资材料。",
+  "versions": [
+    {
+      "version_id": "v001",
+      "created_at": "2026-08-20T00:00:00+08:00",
+      "change_reason": "由大衍科技最终版提炼的首个正式 Design DNA 快照",
+      "snapshot_path": "versions/v001.json"
+    }
+  ],
+  "adapters": [
+    {
+      "adapter_id": "dense-investment-committee",
+      "adapter_name": "Dense Investment Committee / 高密度投委会",
+      "current_version": "a001",
+      "path": "adapters/dense-investment-committee/adapter.json"
+    }
+  ]
+}

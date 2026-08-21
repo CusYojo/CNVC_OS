@@ -193,7 +193,7 @@ async function main() {
     for (const executionContract of [
       'composeComplianceStatement',
       'investmentProposalRuntime',
-      'prepareInvestmentRecommendationPptWorkflow',
+      'runDirectInvestmentCommitteePptAgent',
       'generateDueDiligenceReportWithSkill',
       'generateProjectQaWithSkill',
       'resolveAiCustomTemplateForTask',

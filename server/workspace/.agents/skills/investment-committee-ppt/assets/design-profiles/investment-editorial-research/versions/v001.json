@@ -1,0 +1,466 @@
+{
+  "version": "3.0",
+  "persistence_state": "saved_profile",
+  "profile_id": "investment-editorial-research",
+  "profile_name": "Investment Editorial Research / 投资研究编辑部",
+  "current_profile_version": "v001",
+  "source": {
+    "input_mode": "multi_image",
+    "fusion_strategy": "evidence_weighted_style_extraction",
+    "source_assets": [
+      {
+        "id": "dayan-final-deck-page-set",
+        "type": "pptx_page_set",
+        "description": "大衍科技最终投资建议书的封面、行业、产品、案例、财务、交易与结尾页面",
+        "weight": 0.72,
+        "role": "style_reference",
+        "style_traits_allowed": [
+          "暖白纸面与低饱和研究色彩",
+          "楷体中文与 Times New Roman 数字混排",
+          "高密度但连续的编辑式信息组织",
+          "行动标题与证据链",
+          "图片、流程、迁移、瀑布和时间轴的多母型节奏",
+          "轻量分隔线、稳定页脚和来源系统"
+        ],
+        "subject_matter_detected": [
+          "大衍科技 Logo",
+          "公司产品",
+          "公司人物",
+          "客户与交易数据",
+          "第三方公开照片"
+        ],
+        "subject_replication_policy": "forbidden"
+      },
+      {
+        "id": "investment-research-editorial-method",
+        "type": "design_method",
+        "description": "投委会研究材料、年报和编辑设计中可迁移的布局逻辑",
+        "weight": 0.28,
+        "role": "style_reference",
+        "style_traits_allowed": [
+          "单页单结论",
+          "主从分明的证据结构",
+          "行文和版式共同解释业务机制",
+          "表格仅用于真实比较",
+          "克制、可信、非营销的视觉心理"
+        ],
+        "subject_matter_detected": [],
+        "subject_replication_policy": "forbidden"
+      }
+    ],
+    "extraction_confidence": 0.94
+  },
+  "user_dna": {
+    "fixed_parameters": {
+      "whitespace": 46,
+      "information_density": 72,
+      "image_weight": 46,
+      "title_weight": 78,
+      "chart_weight": 62,
+      "text_density": 70,
+      "formula_friendliness": 42,
+      "grid_strictness": 72,
+      "hierarchy_strength": 90,
+      "motion_intensity": 0
+    },
+    "semantic_tags": {
+      "editorial": 92,
+      "trustworthy": 96,
+      "serious": 92,
+      "business": 90,
+      "academic": 70,
+      "research": 94,
+      "minimal": 52,
+      "premium": 60,
+      "tech": 28,
+      "playful": 4,
+      "cinematic": 10,
+      "experimental": 22
+    },
+    "plain_language_summary": "像一份被认真编辑过的行业与公司研究报告：证据密集、语气克制、版式连续，避免模板化卡片与科技蓝。",
+    "five_layers": {
+      "mood": {
+        "thesis": "可信、克制、研究型，读者先感到材料可靠，再感到设计精致。",
+        "authoritative": 88,
+        "trustworthy": 96,
+        "serious": 92,
+        "editorial": 92,
+        "emotional": 18,
+        "promotional": 8
+      },
+      "composition": {
+        "alignment": "editorial_grid_with_local_asymmetry",
+        "grid_system": "stable_outer_margin_flexible_inner_zones",
+        "visual_focus": "one_primary_conclusion_one_evidence_path",
+        "asymmetry": 48,
+        "layout_rhythm": "alternate_image_process_case_chart_transaction",
+        "section_rhythm": "continuous_research_chapters_without_empty_dividers",
+        "preferred_layout_archetypes": [
+          "image_plus_explanation_chain",
+          "source_change_to_industry_result",
+          "bottleneck_comparison",
+          "continuous_capability_stack",
+          "feedback_loop",
+          "customer_case_journey",
+          "commercial_relay",
+          "revenue_mix_migration",
+          "operating_waterfall",
+          "order_certainty_funnel",
+          "transaction_fund_flow",
+          "governance_milestone_roadmap"
+        ],
+        "forbidden_layout_patterns": [
+          "three_or_four_equal_rounded_cards",
+          "same_two_column_skeleton_on_every_slide",
+          "dashboard_grid_without_a_primary_reading_path",
+          "decorative_lines_that_do_not_encode_relationships"
+        ]
+      },
+      "visual": {
+        "primary_background": "paper_warm",
+        "secondary_background": "soft_sage",
+        "primary_text": "ink_near_black",
+        "secondary_text": "ink_muted",
+        "accent_primary": "mineral_green",
+        "accent_secondary": "copper",
+        "heading_style": "Chinese_KaiTi_editorial_action_title",
+        "body_style": "Chinese_KaiTi_reading_first",
+        "numeric_style": "Times_New_Roman_contextual_not_isolated",
+        "line_height": "content_specific_not_uniform",
+        "radius": "small_or_none_only_when_container_semantics_exist",
+        "border_style": "thin_low_contrast_functional",
+        "shadow_style": "none_or_extremely_subtle",
+        "gradient_usage": "avoid",
+        "material": "warm_paper",
+        "texture": "clean_print_like",
+        "image_treatment": "documentary_crop_with_concise_caption",
+        "crop_strategy": "evidence_first"
+      },
+      "content_strategy": {
+        "density_mode": "high_explanatory_density",
+        "max_words_per_slide": 190,
+        "max_bullets_per_slide": 5,
+        "max_bullet_length": 42,
+        "image_text_ratio": "35:65_to_50:50_by_page_role",
+        "data_table_friendliness": "only_for_precise_multi_axis_comparison",
+        "text_heavy_tolerance": "high_when_grouped_by_reading_rhythm",
+        "preferred_content_forms": [
+          "action_title",
+          "narrative_lead",
+          "continuous_evidence_chain",
+          "annotated_photo",
+          "editable_process",
+          "case_journey",
+          "financial_chart_with_driver_explanation",
+          "nearby_source_and_definition"
+        ],
+        "split_rules": [
+          "split_when_more_than_one_core_conclusion",
+          "rewrite_before_shrinking_text",
+          "merge_repeated_labels_before_adding_pages",
+          "preserve_required_metrics_with_explicit_destination"
+        ]
+      },
+      "presentation": {
+        "pacing": "source_to_mechanism_to_validation_to_transaction",
+        "narrative_style": "state_and_explain",
+        "speaker_led_vs_reading_first": "reading_first_with_live_explanation_support",
+        "animation_intensity": 0,
+        "transition_style": "none",
+        "section_break_frequency": "low",
+        "emotional_curve": "curiosity_to_understanding_to_evidence_confidence_to_decision_context",
+        "reveal_strategy": "static_complete_page",
+        "motion_recipes": []
+      }
+    }
+  },
+  "execution_dna": {
+    "canvas": {
+      "aspect_ratio": "16:9",
+      "target_size": {
+        "width": 1920,
+        "height": 1080
+      },
+      "powerpoint_size_in": {
+        "width": 13.333,
+        "height": 7.5
+      },
+      "safe_margin": {
+        "top": 43,
+        "right": 65,
+        "bottom": 40,
+        "left": 65
+      }
+    },
+    "composition_rules": {
+      "max_primary_blocks": 2,
+      "max_equal_cards": 2,
+      "max_nested_cards": 0,
+      "prefer_single_primary_focus": true,
+      "use_alignment_before_borders": true,
+      "use_lines_only_for_connection_separation_or_scale": true,
+      "alternate_layout_archetypes_across_adjacent_slides": true,
+      "avoid_centered_everything": true,
+      "avoid_repeated_three_column_grid": true
+    },
+    "density_rules": {
+      "density_source": "evidence_aggregation_not_small_text",
+      "minimum_body_font_pt": 12,
+      "preferred_body_font_pt": [
+        12,
+        14.5
+      ],
+      "dense_table_minimum_font_pt": 11.2,
+      "normalize_11_x_body_to_12": true,
+      "split_when_overflow": true,
+      "rewrite_before_split": true,
+      "maximum_major_visual_regions": 2
+    },
+    "typography_rules": {
+      "chinese_font": "KaiTi",
+      "latin_and_number_font": "Times New Roman",
+      "action_title_required": true,
+      "manual_semantic_line_breaks": true,
+      "forbid_orphan_punctuation": true,
+      "forbid_single_cjk_character_last_line": true,
+      "do_not_emphasize_numbers_by_scale_alone": true
+    },
+    "reference_subject_firewall": {
+      "enabled": true,
+      "forbidden_subjects": [
+        "company_specific_logos_from_example",
+        "company_specific_products_from_example",
+        "people_and_customers_from_example",
+        "company_specific_financial_and_transaction_data",
+        "third_party_photos_without_source_review"
+      ],
+      "allowed_surrogates": [
+        "new_company_official_assets",
+        "properly_sourced_industry_photography",
+        "editable_process_diagram",
+        "typographic_visual",
+        "data_chart",
+        "intentional_whitespace"
+      ],
+      "forbid_subject_silhouette": true,
+      "forbid_subject_parts": true,
+      "forbid_svg_redraw": true,
+      "forbid_ai_redraw_of_company_facts": true
+    },
+    "image_rules": {
+      "role": "evidence_or_explanation_not_decoration",
+      "company_assets_priority": "official_company_or_customer_source",
+      "repeat_primary_image_max": 1,
+      "minimum_half_slide_width_px": 1000,
+      "caption_when_identity_or_context_matters": true,
+      "rebuild_unreadable_small_diagrams": true
+    },
+    "chart_rules": {
+      "editable_native_objects_preferred": true,
+      "units_and_periods_required": true,
+      "actual_and_forecast_visually_distinct": true,
+      "negative_values_must_use_correct_direction": true,
+      "stacked_bars_require_period_and_total_labels": true,
+      "driver_explanation_near_chart": true,
+      "avoid_3d_gradient_and_decorative_effects": true
+    },
+    "table_rules": {
+      "allowed_when": "reader_needs_precise_row_column_comparison",
+      "avoid_outer_box": true,
+      "avoid_excess_vertical_rules": true,
+      "minimum_text_rule_clearance_px": 10,
+      "forbid_field_list_disguised_as_table": true
+    },
+    "mechanical_layout_preflight": {
+      "required_before_generation": true,
+      "estimate_text_fit": true,
+      "reserve_visual_effect_padding": true,
+      "check_line_and_arrow_clearance": true,
+      "check_footer_and_source_safe_zone": true,
+      "check_chart_label_completeness": true,
+      "if_fail": "rewrite_recompose_move_anchor_or_split_without_shrinking_body"
+    },
+    "layout_box_budget": {
+      "required_before_generation": true,
+      "chain_readable_zones": true,
+      "forbid_independent_absolute_top_for_content": true,
+      "forbid_layer_order_as_collision_fix": true,
+      "minimum_visual_clearance_px": 10,
+      "paragraph_inner_spacing_lt_group_spacing": true,
+      "single_line_and_multiline_visual_baselines_must_align": true
+    },
+    "editable_output": {
+      "required": true,
+      "native_text": true,
+      "native_shapes": true,
+      "native_connectors": true,
+      "native_charts_or_editable_shape_charts": true,
+      "forbid_full_slide_rasterization": true
+    },
+    "qa_rules": {
+      "authoritative_renderer": "Microsoft PowerPoint native PDF export",
+      "inspect_every_slide_full_size": true,
+      "create_contact_sheets": true,
+      "metric_retention_audit": true,
+      "font_and_ooxml_audit": true,
+      "rerender_after_every_global_typography_or_layout_change": true
+    }
+  },
+  "tokens": {
+    "color": {
+      "paper": "#F4F0E7",
+      "ink": "#202522",
+      "ink_muted": "#666B66",
+      "mineral_green": "#2E6F65",
+      "sage": "#8EA79B",
+      "copper": "#B56250",
+      "rule": "#D7D1C5",
+      "soft_fill": "#E7EEE9",
+      "white": "#FFFFFF"
+    },
+    "typography": {
+      "chinese": "KaiTi",
+      "latin_and_numbers": "Times New Roman",
+      "title_pt": [
+        24,
+        34
+      ],
+      "subtitle_pt": [
+        15,
+        20
+      ],
+      "body_pt": [
+        12,
+        14.5
+      ],
+      "source_pt": [
+        7.5,
+        9
+      ]
+    },
+    "spacing": {
+      "outer_margin_in": {
+        "left": 0.45,
+        "right": 0.45,
+        "top": 0.3,
+        "bottom": 0.28
+      },
+      "line_clearance_px": 10,
+      "paragraph_to_paragraph_ratio": "1:1.45",
+      "title_to_lead_gap_px": [
+        28,
+        48
+      ]
+    },
+    "shape": {
+      "radius": "0_to_8_px_equivalent",
+      "rule_weight_pt": [
+        0.5,
+        1.25
+      ],
+      "arrow_weight_pt": [
+        1,
+        2
+      ],
+      "shadow": "none"
+    }
+  },
+  "negative_constraints": [
+    "Do not use dark navy as the default full-slide background.",
+    "Do not create three or four equal rounded cards as the default composition.",
+    "Do not repeat one two-column skeleton across the deck.",
+    "Do not use giant isolated numbers without unit, period, driver and context.",
+    "Do not use tables for processes, causal chains, stage migration or transaction flow.",
+    "Do not shrink 11.x pt body text to fit; rewrite or recompose.",
+    "Do not place lines, arrows or separators within the visual clearance of glyphs.",
+    "Do not reuse the same primary photograph across multiple narrative pages.",
+    "Do not copy company facts, logos, customers, people or product images from the example deck.",
+    "Do not write promotional claims such as disruptive, certain, huge blue ocean or must invest without evidence.",
+    "Do not deliver a full-slide image in place of editable PowerPoint content.",
+    "Do not treat application preview as the authoritative Office rendering."
+  ],
+  "design_prompt": {
+    "short": "Investment Editorial Research：暖白纸面、矿物绿与铜红、楷体中文、TNR 数字，以行动标题和连续证据结构呈现高密度投委会研究。",
+    "long": "Create a reading-first investment committee deck that feels like a carefully edited research report rather than a financing pitch. Use warm paper, near-black ink, mineral green and restrained copper. Set Chinese in KaiTi and Latin/numbers in Times New Roman. Build every slide around one action title and one continuous evidence path. Alternate annotated photography, process chains, feedback loops, case journeys, migration charts, waterfalls, funnels, transaction flows and roadmaps. Preserve dense explanations and required metrics without shrinking body text. Use tables only for genuine row-column comparison. Keep all important PowerPoint content editable and validate through Microsoft PowerPoint native PDF export.",
+    "style_do": [
+      "Use state-and-explain narrative from industry source to company mechanism and validation.",
+      "Use one core conclusion and at most two major visual regions per slide.",
+      "Embed numbers in trends, cases, time, ratios and operational explanations.",
+      "Use documentary company or industry images with concise captions.",
+      "Use multiple layout archetypes while preserving one visual system.",
+      "Keep sources, dates, units and actual/forecast definitions near the evidence."
+    ],
+    "style_dont": [
+      "Do not use generic blue technology templates.",
+      "Do not build card walls or field-list tables.",
+      "Do not use decorative hard lines or arrows that touch text.",
+      "Do not reduce density by deleting evidence or increase density by shrinking fonts.",
+      "Do not copy subjects or facts from the Dayan example.",
+      "Do not use marketing slogans as conclusions."
+    ]
+  },
+  "quality_constraints": {
+    "content": {
+      "one_core_conclusion_per_slide": true,
+      "baseline_document_metric_retention": true,
+      "evidence_grade_and_definition_required": true,
+      "standalone_readability_without_word_document": true
+    },
+    "visual": {
+      "three_second_conclusion": true,
+      "ten_second_main_evidence": true,
+      "body_text_projection_readable": true,
+      "no_overflow_collision_or_orphan_punctuation": true,
+      "layout_archetype_repetition_review": true
+    },
+    "delivery": {
+      "editable_pptx": true,
+      "native_pdf": true,
+      "full_deck_contact_sheet": true,
+      "targeted_full_size_visual_review": true
+    }
+  },
+  "profile_metadata": {
+    "profile_id": "investment-editorial-research",
+    "display_name": "Investment Editorial Research / 投资研究编辑部",
+    "created_at": "2026-08-20T00:00:00+08:00",
+    "updated_at": "2026-08-20T00:00:00+08:00",
+    "best_for": [
+      "投委会投资建议书",
+      "公司深度研究",
+      "尽调与交易汇报"
+    ],
+    "risky_for": [
+      "营销路演",
+      "极低密度品牌展示"
+    ],
+    "primary_moods": [
+      "editorial",
+      "trustworthy",
+      "serious",
+      "research"
+    ],
+    "one_line_summary": "暖纸、研究叙事和连续证据构成的投资编辑设计。"
+  },
+  "versioning": {
+    "current_version": "v001",
+    "versions": [
+      {
+        "version_id": "v001",
+        "created_at": "2026-08-20T00:00:00+08:00",
+        "change_reason": "original extraction from the final Dayan investment committee deck",
+        "snapshot_path": "versions/v001.json"
+      }
+    ]
+  },
+  "compact_usage": {
+    "last_used_at": null,
+    "last_output_path": null
+  },
+  "adapters": {
+    "dense-investment-committee": {
+      "path": "adapters/dense-investment-committee/adapter.json",
+      "current_version": "a001"
+    }
+  }
+}

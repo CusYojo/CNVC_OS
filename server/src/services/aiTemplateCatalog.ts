@@ -127,21 +127,13 @@ export const AI_TEMPLATE_CATALOG: Record<AiBusinessTaskType, AiTemplateDefinitio
   },
   investment_recommendation_ppt: {
     type: 'investment_recommendation_ppt',
-    skillName: 'create-reference-driven-editable-ppt',
+    skillName: 'investment-committee-ppt',
     label: '投资建议书（PPT）',
-    description: '先生成并交付图片高保真版，再继续生成元素级可编辑投资建议书',
+    description: '由隔离 PPT Agent 直接调用 investment-committee-ppt Skill 生成可编辑投资建议书',
     outputFormat: 'pptx',
-    templateVersion: 'create-reference-driven-editable-ppt-20260806-v2',
-    referencePath: path.resolve(
-      process.cwd(),
-      'server/workspace/.agents/skills/create-reference-driven-editable-ppt/SKILL.md',
-    ),
+    templateVersion: 'investment-committee-ppt-20260821-v1-skill-native',
+    referencePath: skillPath('investment-committee-ppt', 'SKILL.md'),
     referencePaths: [],
-    workflowSkillNames: [
-      'create-reference-driven-editable-ppt',
-      'GordenSuperPPTSkill',
-      'pdf-to-editable-ppt',
-    ],
     editableLevel: 'all',
     sections: [
       '投资摘要',

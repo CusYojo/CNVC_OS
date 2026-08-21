@@ -6,7 +6,6 @@ import {
   AI_BUSINESS_SKILLS,
   AI_DOCUMENT_PLUGIN_BINDINGS,
   AI_DUE_DILIGENCE_SKILL_NAME,
-  AI_PPT_WORKFLOW_SKILLS,
   AI_QA_SKILL_NAME,
   getAiSkillDirectory,
   getAiSkillRoot,
@@ -78,6 +77,7 @@ async function main() {
   for (const skillName of [
     'generate-investment-compliance-note',
     'draft-investment-proposal',
+    'investment-committee-ppt',
     'draft-investment-qa',
     'draft-due-diligence-report',
   ] as const) {
@@ -94,6 +94,7 @@ async function main() {
   for (const definition of AI_BUSINESS_SKILLS) {
     const definitionName = String(definition.name)
     const isProjectQa = definitionName === AI_QA_SKILL_NAME
+    const isInvestmentCommitteePpt = definitionName === 'investment-committee-ppt'
     const loaded = await loadHostAdapterSkill(definition.name)
     const directory = getAiSkillRuntimeDirectory(definition.name)
     const skillSource = await readFile(path.join(directory, 'SKILL.md'), 'utf8')
@@ -102,6 +103,8 @@ async function main() {
       ? 'quality-gates.md'
       : isProjectQa
         ? 'evidence-and-quality-rules.md'
+        : isInvestmentCommitteePpt
+          ? 'qa-and-delivery.md'
         : 'output-contract.md'
     const referenceSource = await readFile(path.join(directory, 'references', referenceName), 'utf8')
 
@@ -160,6 +163,10 @@ async function main() {
           ? /来源冲突必须显式记录，不得静默调和/.test(skillSource)
             && /不得平均口径冲突的数据/.test(referenceSource)
             && /两个独立高质量来源/.test(referenceSource)
+        : isInvestmentCommitteePpt
+          ? /合并重复内容/.test(skillSource)
+            && /事实表、数字表、来源表、缺口表/.test(loaded.referenceInstructions)
+            && /冲突数据保留各自版本、日期和口径/.test(loaded.referenceInstructions)
         : /重复|去重/.test(skillSource)
           && /重复|去重|不得复述|只(?:能|列)/.test(referenceSource)
           && /同一(?:事实|文件|数字|来源)/.test(`${skillSource}\n${referenceSource}`),
@@ -255,31 +262,27 @@ async function main() {
     new Set(AI_TASK_TYPES.map((type) => AI_TEMPLATE_CATALOG[type].skillName)).size === 5,
     AI_TASK_TYPES.map((type) => `${type}:${AI_TEMPLATE_CATALOG[type].skillName}`).join(', '),
   )
-  const pptWorkflowSkills = await Promise.all(
-    AI_PPT_WORKFLOW_SKILLS.map((definition) => loadAiSkill(definition.name)),
+  const investmentCommitteePptSkill = await loadAiSkill('investment-committee-ppt')
+  assert(
+    '投资建议书直接绑定单一 investment-committee-ppt Skill',
+    investmentCommitteePptSkill.name === 'investment-committee-ppt'
+      && containsChinese(investmentCommitteePptSkill.instructions)
+      && /^sha256-[a-f0-9]{12}$/.test(investmentCommitteePptSkill.version)
+      && /^[a-f0-9]{64}$/.test(investmentCommitteePptSkill.sha256),
+    `${investmentCommitteePptSkill.name}:${investmentCommitteePptSkill.version}`,
   )
   assert(
-    'PPT 总编排、Gorden 两阶段生成与 PDF 可编辑化能力均可审计',
-    pptWorkflowSkills.length === 3
-      && pptWorkflowSkills.every((skill) =>
-        containsChinese(skill.instructions)
-        && /^sha256-[a-f0-9]{12}$/.test(skill.version)
-        && /^[a-f0-9]{64}$/.test(skill.sha256)),
-    pptWorkflowSkills.map((skill) => `${skill.name}:${skill.version}`).join('、'),
-  )
-  assert(
-    '投资建议书固定使用分阶段图片版与元素级可编辑版链路',
+    '投资建议书快捷任务不再绑定旧模板与多技能编排链',
     !AI_TEMPLATE_CATALOG.investment_recommendation_ppt.requiredParameters.includes('customTemplateId')
       && AI_TEMPLATE_CATALOG.investment_recommendation_ppt.requiredParameters.includes('structureMode')
       && !AI_TEMPLATE_CATALOG.investment_recommendation_ppt.requiredParameters.includes('pageCount')
       && AI_TEMPLATE_CATALOG.investment_recommendation_ppt.sections.length === 12
-      && AI_TEMPLATE_CATALOG.investment_recommendation_ppt.workflowSkillNames?.join(',')
-        === 'create-reference-driven-editable-ppt,GordenSuperPPTSkill,pdf-to-editable-ppt'
+      && !AI_TEMPLATE_CATALOG.investment_recommendation_ppt.workflowSkillNames?.length
       && AI_TEMPLATE_CATALOG.investment_recommendation_ppt.skillName
-        === 'create-reference-driven-editable-ppt'
+        === 'investment-committee-ppt'
       && AI_TEMPLATE_CATALOG.investment_recommendation_ppt.referencePaths?.length === 0,
     `${AI_TEMPLATE_CATALOG.investment_recommendation_ppt.requiredParameters.join('、')} / ${
-      AI_TEMPLATE_CATALOG.investment_recommendation_ppt.workflowSkillNames?.join('、')}`,
+      AI_TEMPLATE_CATALOG.investment_recommendation_ppt.skillName}`,
   )
   const proposalTemplate = AI_TEMPLATE_CATALOG.investment_proposal
   const proposalSkill = await loadHostAdapterSkill('draft-investment-proposal')
@@ -570,7 +573,7 @@ async function main() {
       .every((type) =>
         AI_TEMPLATE_CATALOG[type].referencePath.includes(`${path.sep}docs${path.sep}`))
       && AI_TEMPLATE_CATALOG.investment_recommendation_ppt.referencePath.includes(
-        `${path.sep}create-reference-driven-editable-ppt${path.sep}SKILL.md`,
+        `${path.sep}investment-committee-ppt${path.sep}SKILL.md`,
       )
       && AI_TEMPLATE_CATALOG.investment_recommendation_ppt.referencePaths?.length === 0
       && AI_TEMPLATE_CATALOG.project_qa.referencePath.includes(
@@ -894,71 +897,37 @@ async function main() {
     '标准版 8 题 / 快捷任务仅 DOCX / PDF 仅在用户明确要求时生成',
   )
 
-  const pptContract = await readFile(
-    path.join(root, 'GordenSuperPPTSkills', 'GordenSuperPPTSkill', 'SKILL.md'),
-    'utf8',
-  )
-  const pptWorkflowSource = await readFile(
+  const pptContract = await readFile(path.join(root, 'investment-committee-ppt', 'SKILL.md'), 'utf8')
+  const directPptAgentSource = await readFile(
     path.resolve(
       process.cwd(),
       'server',
       'src',
       'services',
-      'aiInvestmentRecommendationPptWorkflowService.ts',
-    ),
-    'utf8',
-  )
-  const pptDocumentSource = await readFile(
-    path.resolve(process.cwd(), 'server', 'src', 'services', 'aiBusinessDocumentService.ts'),
-    'utf8',
-  )
-  const pptGeneratorSource = await readFile(
-    path.resolve(
-      process.cwd(),
-      'server',
-      'src',
-      'services',
-      'aiGordenSuperPptService.ts',
+      'aiDirectInvestmentCommitteePptAgentService.ts',
     ),
     'utf8',
   )
   assert(
-    'PPT Skill 明确图片生成与四层可编辑还原链路',
-    /阶段 1：GordenImagePPTGen/.test(pptContract)
-      && /阶段 2：GordenImage2PPTX/.test(pptContract)
-      && /强制四层/.test(pptContract)
-      && /imagegen-manifest\.json/.test(pptContract)
-      && /imagegen-assets-manifest\.json/.test(pptContract),
-    '网关成品图 / 背景、框架、图标、文本四层 / 生成证据',
+    'investment-committee-ppt Skill 明确研究型可编辑 PPT 与逐页 QA',
+    /研究型建议书/.test(pptContract)
+      && /所有重要文字、图表、流程、时间轴和表格保持可编辑/.test(pptContract)
+      && /逐页 100% 视觉检查/.test(pptContract)
+      && /Investment Editorial Research v001/.test(pptContract),
+    '研究叙事 / 原生可编辑 / Design DNA / 逐页视觉复核',
   )
   assert(
-    '投资建议书工作流禁用外部模板并通过图片 PDF 桥接生成可编辑 PPTX',
-    [
-      "sourceMode: 'gorden-native'",
-      "templateReuse: 'none'",
-      "bridgePolicy: 'image-deck-to-pdf-to-editable-pptx'",
-    ].every((term) => pptWorkflowSource.includes(term)),
-    'Gorden 原生出图 / 禁用外部模板 / PDF 桥接可编辑转换',
-  )
-  assert(
-    '投资建议书按编排、Gorden 出图和 PDF 可编辑转换顺序交付',
-    pptWorkflowSource.includes("loadAiSkill('create-reference-driven-editable-ppt')")
-      && pptWorkflowSource.includes("loadAiSkill('GordenSuperPPTSkill')")
-      && pptWorkflowSource.includes("loadAiSkill('pdf-to-editable-ppt')")
-      && pptDocumentSource.includes('generateInvestmentRecommendationPptWithGorden')
-      && pptGeneratorSource.includes('project-facts.json')
-      && pptGeneratorSource.includes('imagegen-manifest.json')
-      && pptGeneratorSource.includes('imagegen-assets-manifest.json')
-      && pptGeneratorSource.includes('chromaKey')
-      && pptGeneratorSource.includes('sliceGrid')
-      && pptGeneratorSource.includes('layoutGuard')
-      && pptGeneratorSource.includes('visualCompareQa')
-      && pptGeneratorSource.includes('pipelinePaths.packageSlidesAsPdf')
-      && pptGeneratorSource.includes('convertUploadedInvestmentPdfTemplate')
-      && pptGeneratorSource.includes('conversionHandoffPath')
-      && !pptGeneratorSource.includes('referenceImage: plan.referencePage')
-      && !pptGeneratorSource.includes('referencePaths.packageSlidesAsPdf'),
-    '项目事实 / 网关图片证据 / Gorden 四层语义资产 / PDF 桥接 / 可编辑 PPTX',
+    '投资建议书由隔离 Agent 原生调用单一 Skill，宿主只登记成品',
+    directPptAgentSource.includes("skills: ['investment-committee-ppt']")
+      && directPptAgentSource.includes("tools: ['Skill', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'Bash']")
+      && directPptAgentSource.includes('全部来源文件和全部片段')
+      && directPptAgentSource.includes('宿主不会生成页面、编排内容或提供兜底稿')
+      && directPptAgentSource.includes('hostContentOrchestration: false')
+      && directPptAgentSource.includes('hostEvidenceFallback: false')
+      && directPptAgentSource.includes('failIfUnavailable: true')
+      && !directPptAgentSource.includes('GordenSuperPPTSkill')
+      && !directPptAgentSource.includes('pdf-to-editable-ppt'),
+    'Skill tool / 全部资料 / Agent 自主生成与验收 / 宿主无内容编排或兜底',
   )
 
   const quickActionsSource = await readFile(
@@ -1049,11 +1018,15 @@ async function main() {
     '历史或新任务均不展示 Q&A PDF 下载按钮',
   )
   assert(
-    '投资建议书任务卡只展示 PPTX 下载、不展示封面预览',
+    '投资建议书直接 Skill 任务卡展示进度、标准模板与单一 PPTX 下载',
     !taskCardsSource.includes('ProtectedImagePreview')
       && !taskCardsSource.includes('投资建议书封面预览')
-      && !taskCardsSource.includes('加载 PPT 预览'),
-    'PNG 预览可保留用于服务端质量检查，但不在 PPTX 下载按钮下方展示',
+      && !taskCardsSource.includes('加载 PPT 预览')
+      && taskCardsSource.includes("investment_recommendation_ppt: '投资建议书'")
+      && taskCardsSource.includes("artifact.metadata?.directSkillAgent === true")
+      && taskCardsSource.includes('业务标准模板')
+      && taskCardsSource.includes('下载 ${artifact.format.toUpperCase()} · V${artifact.version}'),
+    '标题 / 已完成 / 业务标准模板 / 引用来源 / Token / 进度条 / 下载 PPTX · Vn',
   )
   assert(
     '非 PPT 文档任务以主文档交付为优先并自动恢复一次',

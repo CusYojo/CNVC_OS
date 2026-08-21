@@ -1,0 +1,39 @@
+{
+  "schema_version": "3.0",
+  "profiles": [
+    {
+      "profile_id": "investment-editorial-research",
+      "display_name": "Investment Editorial Research / 投资研究编辑部",
+      "current_version": "v001",
+      "adapters": [
+        "dense-investment-committee"
+      ],
+      "created_at": "2026-08-20T00:00:00+08:00",
+      "updated_at": "2026-08-20T00:00:00+08:00",
+      "source_summary": [
+        "大衍科技最终投资建议书的版式、节奏与视觉 QA 复盘",
+        "研究型投资建议书与年报式编辑设计方法"
+      ],
+      "primary_moods": [
+        "editorial",
+        "trustworthy",
+        "serious",
+        "business",
+        "research"
+      ],
+      "best_for": [
+        "投委会投资建议书",
+        "股权投资项目汇报",
+        "高密度公司研究",
+        "尽调与交易审议材料"
+      ],
+      "risky_for": [
+        "强营销融资路演",
+        "娱乐化发布会",
+        "极低信息密度品牌展示",
+        "不允许使用楷体的企业品牌规范"
+      ],
+      "one_line_summary": "暖白纸面、矿物绿与铜红、编辑式研究叙事，以连续证据结构替代卡片墙和泛表格。"
+    }
+  ]
+}

@@ -23,6 +23,7 @@ export const AI_REQUIRED_DOCUMENT_SKILL_NAMES = [
   'generate-investment-compliance-note',
   AI_QA_SKILL_NAME,
   'draft-investment-proposal',
+  'investment-committee-ppt',
   AI_DUE_DILIGENCE_SKILL_NAME,
 ] as const
 
@@ -40,7 +41,7 @@ export const AI_BUSINESS_SKILLS = [
     taskType: 'investment_proposal',
   },
   {
-    name: 'create-reference-driven-editable-ppt',
+    name: 'investment-committee-ppt',
     label: '投资建议书（PPT）',
     mode: 'document-task',
     taskType: 'investment_recommendation_ppt',

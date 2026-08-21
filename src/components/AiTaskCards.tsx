@@ -80,7 +80,7 @@ export type AiTask = {
 const TASK_LABELS: Record<string, string> = {
   compliance_statement: '合规性说明',
   investment_proposal: '投资提案',
-  investment_recommendation_ppt: '投资建议书（PPT）',
+  investment_recommendation_ppt: '投资建议书',
   due_diligence_report: '尽调报告',
   project_qa: '项目 Q&A',
   custom_template_document: '自定义模板文档',
@@ -137,6 +137,9 @@ function newestArtifactForStage(
 }
 
 function artifactDownloadLabel(task: AiTask, artifact: AiTaskArtifact) {
+  if (task.type === 'investment_recommendation_ppt' && artifact.metadata?.directSkillAgent === true) {
+    return `下载 ${artifact.format.toUpperCase()} · V${artifact.version}`
+  }
   if (task.type === 'investment_recommendation_ppt') {
     const normalizedStage = investmentPptArtifactStage(artifact)
     if (normalizedStage === 'image-deck') return '下载图片高保真版'
@@ -194,9 +197,7 @@ function TaskCard({
   const uploadedTemplateName = typeof task.parameters.customTemplateName === 'string'
     ? task.parameters.customTemplateName
     : ''
-  const templateLabel = task.type === 'investment_recommendation_ppt'
-    ? ''
-    : task.type === 'custom_template_document'
+  const templateLabel = task.type === 'custom_template_document'
       ? uploadedTemplateName
       ? `上传模板：${uploadedTemplateName}`
       : '已分析上传模板'
@@ -249,14 +250,21 @@ function TaskCard({
     if (task.type === 'investment_proposal') return format === 'docx'
     return ['docx', 'pptx', 'pdf'].includes(format)
   })
-  const downloadableArtifacts = task.type === 'investment_recommendation_ppt'
-    ? [
+  const isDirectInvestmentPpt = task.type === 'investment_recommendation_ppt'
+    && candidateArtifacts.some((artifact) => artifact.metadata?.directSkillAgent === true)
+  const downloadableArtifacts = isDirectInvestmentPpt
+    ? candidateArtifacts
+        .filter((artifact) => artifact.format.toLowerCase() === 'pptx' && artifact.qualityStatus === 'passed')
+        .sort((left, right) => right.version - left.version)
+        .slice(0, 1)
+    : task.type === 'investment_recommendation_ppt'
+      ? [
         newestArtifactForStage(candidateArtifacts, 'image-deck'),
         task.status === 'succeeded'
           ? newestArtifactForStage(candidateArtifacts, 'editable')
           : undefined,
-      ].filter((artifact): artifact is AiTaskArtifact => Boolean(artifact))
-    : candidateArtifacts
+        ].filter((artifact): artifact is AiTaskArtifact => Boolean(artifact))
+      : candidateArtifacts
   const hasImageDeck = downloadableArtifacts.some(
     (artifact) => investmentPptArtifactStage(artifact) === 'image-deck',
   )

@@ -1,0 +1,5 @@
+interface:
+  display_name: "投委会投资建议书PPT"
+  short_description: "生成高密度、可编辑、去AI模板感的投委会投资建议书PPT"
+  brand_color: "#2E6F65"
+  default_prompt: "使用 $investment-committee-ppt 将公司资料整理为研究型、可编辑、证据充分的投委会投资建议书PPT，并完成原生渲染QA。"

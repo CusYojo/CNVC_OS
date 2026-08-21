@@ -1,0 +1,4 @@
+id,claim_or_metric,value,unit,period,definition,status,source_grade,source_name,source_path_or_url,source_date,slide_destination,verification_note
+E001,,,,,,actual,A,,,,,
+E002,,,,,,management,B,,,,,
+E003,,,,,,inference,C,,,,,

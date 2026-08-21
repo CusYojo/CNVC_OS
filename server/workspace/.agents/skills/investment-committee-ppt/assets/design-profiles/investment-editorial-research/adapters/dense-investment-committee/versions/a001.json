@@ -1,0 +1,185 @@
+{
+  "version": "3.0",
+  "persistence_state": "saved_adapter",
+  "adapter_id": "dense-investment-committee",
+  "adapter_name": "Dense Investment Committee / 高密度投委会",
+  "adapter_version": "a001",
+  "base_profile_id": "investment-editorial-research",
+  "base_version_id": "v001",
+  "scenario": "equity_investment_committee",
+  "selected_strategy": "dynamic_downgrade",
+  "preserve": [
+    "暖白纸面、矿物绿与铜红",
+    "楷体中文和 Times New Roman 数字",
+    "行动标题和 state-and-explain 叙事",
+    "单页单结论和最多两个主要视觉区域",
+    "多母型连续证据结构",
+    "可编辑 PowerPoint 与原生 PDF QA"
+  ],
+  "conflicts": [
+    "基础研究编辑部 DNA 的留白仍可能使大型尽调资料显得偏空。",
+    "投委会需要比普通研究汇报保留更多口径、来源、订单、财务和交易信息。",
+    "简单提高文字数量容易重新形成卡片墙、泛表格和小字号。"
+  ],
+  "visual_director_advice": "提高有效内容面积和解释密度，同时用一条主路径组织证据；先删除重复框线和字段标签，再增加正文，不降低 12 pt 正文下限。",
+  "parameter_changes": [
+    {
+      "path": "user_dna.fixed_parameters.whitespace",
+      "label": "Whitespace",
+      "from": 46,
+      "to": 34
+    },
+    {
+      "path": "user_dna.fixed_parameters.information_density",
+      "label": "Information density",
+      "from": 72,
+      "to": 86
+    },
+    {
+      "path": "user_dna.fixed_parameters.image_weight",
+      "label": "Image weight",
+      "from": 46,
+      "to": 42
+    },
+    {
+      "path": "user_dna.fixed_parameters.title_weight",
+      "label": "Title weight",
+      "from": 78,
+      "to": 82
+    },
+    {
+      "path": "user_dna.fixed_parameters.chart_weight",
+      "label": "Chart weight",
+      "from": 62,
+      "to": 70
+    },
+    {
+      "path": "user_dna.fixed_parameters.text_density",
+      "label": "Text density",
+      "from": 70,
+      "to": 84
+    },
+    {
+      "path": "user_dna.fixed_parameters.grid_strictness",
+      "label": "Grid strictness",
+      "from": 72,
+      "to": 76
+    },
+    {
+      "path": "user_dna.fixed_parameters.hierarchy_strength",
+      "label": "Hierarchy strength",
+      "from": 90,
+      "to": 94
+    },
+    {
+      "path": "user_dna.semantic_tags.research",
+      "label": "Research",
+      "from": 94,
+      "to": 98
+    },
+    {
+      "path": "user_dna.semantic_tags.business",
+      "label": "Business",
+      "from": 90,
+      "to": 95
+    }
+  ],
+  "execution_overrides": {
+    "composition_rules": {
+      "max_primary_blocks": 2,
+      "max_equal_cards": 2,
+      "require_explicit_primary_reading_path": true,
+      "prefer_process_over_field_table": true,
+      "use_full_width_evidence_band_when_it_reduces_fragmentation": true
+    },
+    "density_rules": {
+      "density_mode": "very_high_explanatory_density",
+      "minimum_body_font_pt": 12,
+      "preferred_body_font_pt": [
+        12,
+        15.5
+      ],
+      "maximum_major_visual_regions": 2,
+      "increase_effective_content_area_before_adding_pages": true,
+      "increase_explanation_before_adding_isolated_metrics": true,
+      "never_shrink_body_to_preserve_page_count": true
+    },
+    "narrative_rules": {
+      "opening_sequence": "industry_source_to_customer_workflow_to_company_role",
+      "middle_sequence": "product_mechanism_to_delivery_to_customer_validation_to_commercial_quality",
+      "closing_sequence": "historical_financials_to_forecast_and_orders_to_transaction_and_milestones",
+      "tone": "state_and_explain",
+      "forbid_advantage_disadvantage_labels": true,
+      "standalone_without_word_document": true
+    },
+    "evidence_rules": {
+      "grade_a_b_c": true,
+      "actual_forecast_management_target_separated": true,
+      "intent_order_contract_revenue_collection_separated": true,
+      "numeric_definition_unit_period_and_source_required": true,
+      "baseline_metric_destination_required": true
+    },
+    "layout_rules": {
+      "preferred_archetype_rotation": [
+        "annotated_scene",
+        "industry_change_path",
+        "bottleneck_comparison",
+        "capability_stack",
+        "feedback_loop",
+        "customer_case_journey",
+        "commercial_relay",
+        "financial_migration",
+        "operating_waterfall",
+        "order_funnel",
+        "transaction_flow",
+        "milestone_roadmap"
+      ],
+      "table_share_target_max": 0.25,
+      "avoid_same_archetype_on_adjacent_slides": true,
+      "avoid_more_than_two_information_islands": true
+    }
+  },
+  "token_overrides": {
+    "spacing": {
+      "content_area_fill_target": "78_to_90_percent",
+      "paragraph_to_paragraph_ratio": "1:1.5",
+      "group_gap_px": [
+        22,
+        42
+      ]
+    },
+    "typography": {
+      "body_pt": [
+        12,
+        15.5
+      ],
+      "dense_table_minimum_pt": 11.2,
+      "important_number_treatment": "contextual_scale_plus_color_plus_proximity"
+    }
+  },
+  "contract_overrides": {
+    "default_profile_selection": true,
+    "skip_generic_design_discovery_when_invoked_by_investment_committee_skill": true,
+    "require_design_contract_snapshot": true,
+    "require_slide_blueprint_before_generation": true,
+    "require_metric_retention_audit": true,
+    "require_native_powerpoint_pdf_when_environment_supports_it": true,
+    "require_full_deck_contact_sheet": true
+  },
+  "negative_constraints_additions": [
+    "Do not turn evidence density into many equal cards.",
+    "Do not let a page contain more than two major information islands.",
+    "Do not use a field table when a process, flow, migration, waterfall, funnel or roadmap explains the relationship.",
+    "Do not remove Word or due-diligence facts merely to make the deck look minimal.",
+    "Do not repeat a metric without explaining what question it answers.",
+    "Do not use deep blue pages as section breaks in an otherwise warm-paper deck."
+  ],
+  "quality_targets": {
+    "three_second_core_conclusion": true,
+    "ten_second_main_evidence": true,
+    "content_coverage_matrix_complete": true,
+    "body_text_100_percent_readable": true,
+    "editable_native_content": true,
+    "no_unresolved_p0_visual_defects": true
+  }
+}
