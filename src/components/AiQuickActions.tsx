@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import {
   BriefcaseBusiness,
   CheckCircle2,
@@ -86,38 +86,6 @@ type TemplateAnalysisAccepted = {
   progress: number
 }
 
-export type AiQuickTaskPreparationProgress = {
-  id: string
-  taskId: string
-  actionId: 'investment_ppt'
-  actionLabel: string
-  projectId: string
-  projectName: string
-  conversationId: string
-  fileName: string
-  status: 'running' | 'failed'
-  stage: string
-  progress: number
-  startedAt: string
-  updatedAt: string
-  elapsedSeconds: number
-  errorMessage?: string
-}
-
-export type AiQuickTaskPreparationRequest = {
-  projectId: string
-  projectName: string
-  conversationId: string
-  fileName: string
-  progressId: string
-  startedAt: string
-  sourceCutoffDate: string
-  outputFormat: 'PPTX'
-  language: '中文'
-  structureMode: 'strict-template'
-  userInstructions?: string
-}
-
 export type AiQuickTaskRequest = {
   actionId: AiQuickActionId
   actionLabel: string
@@ -131,8 +99,6 @@ export type AiQuickTaskRequest = {
   diligenceScope?: string
   customTemplateId?: string
   customTemplateName?: string
-  preparationId?: string
-  preparationStartedAt?: string
   outputFormat: 'DOCX' | 'PPTX' | 'PDF'
 }
 
@@ -140,14 +106,14 @@ type ActionConfig = {
   id: AiQuickActionId
   label: string
   description: string
-  mode: 'task' | 'template' | 'chat'
+  mode: 'task' | 'template'
   icon: typeof ShieldCheck
 }
 
 const ACTIONS: ActionConfig[] = [
   { id: 'compliance', label: '合规性说明', description: '基于当前项目资料库生成合规初稿', mode: 'task', icon: ShieldCheck },
   { id: 'proposal', label: '投资提案', description: '按核心规范生成内部立项或投委会材料', mode: 'task', icon: BriefcaseBusiness },
-  { id: 'investment_ppt', label: '投资建议书（PPT）', description: '选中后，结合当前项目、上传文件和会话信息生成', mode: 'chat', icon: Presentation },
+  { id: 'investment_ppt', label: '投资建议书（PPT）', description: '直接调用 investment-committee-ppt 生成正式 PPTX', mode: 'task', icon: Presentation },
   { id: 'due_diligence', label: '尽调报告', description: '资深投资经理生成当前项目内部尽调报告', mode: 'task', icon: ClipboardCheck },
   { id: 'qa', label: 'Q&A', description: '资深投资经理生成当前项目投资问答 DOCX', mode: 'task', icon: HelpCircle },
   { id: 'custom_template', label: '上传模板', description: '识别模板结构和内容要求', mode: 'template', icon: Upload },
@@ -179,35 +145,20 @@ export function AiQuickActions({
   currentProjectId,
   conversationId,
   onRunTask,
-  onCreatePreparationTask,
-  onPreparationProgress,
-  selectedActionId,
-  onSelectAction,
-  requestedAction,
 }: {
   disabled: boolean
   projects: Project[]
   currentProjectId: string
   conversationId: string
   onRunTask: (request: AiQuickTaskRequest) => Promise<boolean>
-  onCreatePreparationTask: (request: AiQuickTaskPreparationRequest) => Promise<string | null>
-  onPreparationProgress?: (progress: AiQuickTaskPreparationProgress) => void
-  selectedActionId?: 'investment_ppt' | null
-  onSelectAction?: (actionId: 'investment_ppt' | null) => void
-  requestedAction?: {
-    id: 'investment_ppt'
-    nonce: number
-    userInstructions?: string
-  } | null
 }) {
   const [activeAction, setActiveAction] = useState<ActionConfig | null>(null)
   const [proposalInstructions, setProposalInstructions] = useState('')
-  const [language, setLanguage] = useState('中文')
+  const [language] = useState('中文')
   const submitLocksRef = useRef(new Set<AiQuickActionId>())
   const [submittingActionIds, setSubmittingActionIds] = useState<AiQuickActionId[]>([])
   const [templateFile, setTemplateFile] = useState<File | null>(null)
   const [analyzingCustomTemplate, setAnalyzingCustomTemplate] = useState(false)
-  const [analyzingInvestmentPpt, setAnalyzingInvestmentPpt] = useState(false)
   const [analyzedTemplate, setAnalyzedTemplate] = useState<AnalyzedCustomTemplate | null>(null)
   const [templateError, setTemplateError] = useState('')
   const [templateProgress, setTemplateProgress] = useState<TemplateAnalysisProgress | null>(null)
@@ -222,14 +173,7 @@ export function AiQuickActions({
       disabled
       || !selectedProject
       || submitLocksRef.current.has(action.id)
-      || (action.id === 'investment_ppt' && analyzingInvestmentPpt)
     ) return
-    if (action.id === 'investment_ppt') {
-      setActiveAction(null)
-      onSelectAction?.(selectedActionId === action.id ? null : action.id)
-      return
-    }
-    onSelectAction?.(null)
     // 补充要求只属于本次快捷任务。每次重新打开弹窗均从空值开始，
     // 避免上一个合规、提案或 Q&A 任务的要求串入下一份文档。
     setProposalInstructions(initialInstructions.slice(0, 2_000))
@@ -242,29 +186,17 @@ export function AiQuickActions({
     setActiveAction(action)
   }
 
-  // 兼容旧的聊天分发信号：投资建议书不再打开模板弹窗，而是进入会话生成模式。
-  useEffect(() => {
-    if (!requestedAction || !selectedProject || analyzingInvestmentPpt) return
-    const action = ACTIONS.find((item) => item.id === requestedAction.id)
-    if (!action) return
-    setActiveAction(null)
-    onSelectAction?.('investment_ppt')
-  }, [requestedAction?.nonce, selectedProject?.id, analyzingInvestmentPpt])
-
   const submit = async (
     templateOverride?: AnalyzedCustomTemplate,
     actionOverride?: ActionConfig | null,
     projectOverride?: Project,
-    preparationId?: string,
-    preparationStartedAt?: string,
   ) => {
     const action = actionOverride ?? activeAction
     const project = projectOverride ?? selectedProject
     if (!action || !project || submitLocksRef.current.has(action.id)) return false
     const taskTemplate = templateOverride ?? analyzedTemplate
     if (
-      (action.id === 'custom_template' || action.id === 'investment_ppt')
-      && !taskTemplate
+      action.id === 'custom_template' && !taskTemplate
     ) return false
     submitLocksRef.current.add(action.id)
     setSubmittingActionIds((items) => items.includes(action.id) ? items : [...items, action.id])
@@ -280,12 +212,10 @@ export function AiQuickActions({
         sourceCutoffDate: today(),
         userInstructions: proposalInstructions.trim(),
         language,
-        structureMode: action.id === 'investment_ppt' ? 'strict-template' : undefined,
+        structureMode: action.id === 'investment_ppt' ? 'standard' : undefined,
         diligenceScope: action.id === 'due_diligence' ? '商业尽调' : undefined,
         customTemplateId: taskTemplate?.id,
         customTemplateName: taskTemplate?.originalFileName,
-        preparationId,
-        preparationStartedAt,
         outputFormat: action.id === 'custom_template'
           ? taskTemplate?.format === 'pptx' ? 'PPTX' : 'DOCX'
           : action.id === 'investment_ppt'
@@ -304,22 +234,13 @@ export function AiQuickActions({
 
   const analyzeTemplate = async () => {
     if (!templateFile || !selectedProject) return
-    const action = activeAction
     const project = selectedProject
     const file = templateFile
     const extension = file.name.split('.').pop()?.toLowerCase()
-    const isInvestmentPpt = action?.id === 'investment_ppt'
-    if (
-      (isInvestmentPpt && analyzingInvestmentPpt)
-      || (!isInvestmentPpt && analyzingCustomTemplate)
-    ) return
-    const supported = isInvestmentPpt
-      ? extension === 'pdf' || extension === 'pptx'
-      : extension === 'docx' || extension === 'pptx'
+    if (activeAction?.id !== 'custom_template' || analyzingCustomTemplate) return
+    const supported = extension === 'docx' || extension === 'pptx'
     if (!supported) {
-      setTemplateError(isInvestmentPpt
-        ? '投资建议书模板仅支持 PDF 或 PPTX。'
-        : '仅支持可编辑的 DOCX 和 PPTX 模板。')
+      setTemplateError('仅支持可编辑的 DOCX 和 PPTX 模板。')
       return
     }
     if (file.size > MAX_TEMPLATE_BYTES) {
@@ -330,26 +251,7 @@ export function AiQuickActions({
     // uid() 在 HTTPS/localhost 使用原生 UUID，在 HTTP 环境自动降级。
     const progressId = uid()
     const startedAt = new Date().toISOString()
-    let preparationTaskId = ''
-    if (isInvestmentPpt) {
-      const createdTaskId = await onCreatePreparationTask({
-        projectId: project.id,
-        projectName: project.name,
-        conversationId,
-        fileName: file.name,
-        progressId,
-        startedAt,
-        sourceCutoffDate: today(),
-        outputFormat: 'PPTX',
-        language: '中文',
-        structureMode: 'strict-template',
-        userInstructions: proposalInstructions.trim() || undefined,
-      })
-      if (!createdTaskId) return
-      preparationTaskId = createdTaskId
-    }
-    if (isInvestmentPpt) setAnalyzingInvestmentPpt(true)
-    else setAnalyzingCustomTemplate(true)
+    setAnalyzingCustomTemplate(true)
     setTemplateError('')
     setAnalyzedTemplate(null)
     let latestProgress: TemplateAnalysisProgress = {
@@ -366,37 +268,9 @@ export function AiQuickActions({
       next: TemplateAnalysisProgress | ((current: TemplateAnalysisProgress) => TemplateAnalysisProgress),
     ) => {
       latestProgress = typeof next === 'function' ? next(latestProgress) : next
-      if (isInvestmentPpt) {
-        try {
-          onPreparationProgress?.({
-            id: latestProgress.id,
-            taskId: preparationTaskId,
-            actionId: 'investment_ppt',
-            actionLabel: action?.label ?? '投资建议书（PPT）',
-            projectId: project.id,
-            projectName: project.name,
-            conversationId,
-            fileName: latestProgress.fileName,
-            status: latestProgress.status === 'failed' ? 'failed' : 'running',
-            stage: latestProgress.stage,
-            // 模板读取与预检是整个 PPT 生成流程的前置阶段，占总进度前 10%。
-            progress: Math.max(1, Math.min(10, Math.ceil(latestProgress.progress / 10))),
-            startedAt: latestProgress.startedAt,
-            updatedAt: latestProgress.updatedAt,
-            elapsedSeconds: latestProgress.elapsedSeconds,
-            errorMessage: latestProgress.errorMessage,
-          })
-        } catch (progressError) {
-          // 会话任务卡渲染异常不能阻塞模板上传，也不能让按钮永久保持加载状态。
-          console.warn('模板分析进度未能同步到会话任务卡', progressError)
-        }
-      } else {
-        setTemplateProgress(latestProgress)
-      }
+      setTemplateProgress(latestProgress)
     }
     publishProgress(latestProgress)
-    // 投资建议书会自动衔接生成任务；点击开始后立即回到会话，由任务卡统一承载进度。
-    if (isInvestmentPpt) setActiveAction(null)
     const waitForTemplateAnalysis = async () => {
       const deadline = Date.now() + 40 * 60_000
       const progressRegistrationDeadline = Date.now() + 10_000
@@ -464,10 +338,7 @@ export function AiQuickActions({
         name: file.name,
         dataBase64,
         progressId,
-        purpose: isInvestmentPpt
-          ? 'investment_recommendation_ppt'
-          : 'custom_template_document',
-        ...(isInvestmentPpt ? { taskId: preparationTaskId } : {}),
+        purpose: 'custom_template_document',
       }, {
         signal: AbortSignal.timeout(5 * 60_000),
       })
@@ -478,9 +349,7 @@ export function AiQuickActions({
       publishProgress((current) => ({
         ...current,
         status: 'succeeded',
-        stage: isInvestmentPpt
-          ? '模板分析完成，正在创建生成任务'
-          : '模板分析完成',
+        stage: '模板分析完成',
         progress: 100,
         updatedAt: new Date().toISOString(),
         elapsedSeconds: Math.max(
@@ -488,9 +357,7 @@ export function AiQuickActions({
           Math.floor((Date.now() - Date.parse(current.startedAt)) / 1000),
         ),
       }))
-      if (!isInvestmentPpt) setAnalyzedTemplate(result)
-      // 投资建议书在上传开始时已经创建正式任务；服务端完成模板分析后会启动同一任务，
-      // 不再在这里创建第二条任务。
+      setAnalyzedTemplate(result)
     } catch (error) {
       const originalMessage = error instanceof ApiError
         ? error.baseMessage
@@ -507,30 +374,18 @@ export function AiQuickActions({
         errorMessage: message,
         updatedAt: new Date().toISOString(),
       }))
-      if (isInvestmentPpt && preparationTaskId) {
-        await apiPost(`/ai/tasks/${preparationTaskId}/preparation/fail`, {
-          errorMessage: message,
-        }).catch((persistError) => {
-          console.warn('模板分析失败状态未能写入正式任务', persistError)
-        })
-      }
-      if (!isInvestmentPpt) setTemplateError(message)
+      setTemplateError(message)
     } finally {
-      if (isInvestmentPpt) setAnalyzingInvestmentPpt(false)
-      else setAnalyzingCustomTemplate(false)
+      setAnalyzingCustomTemplate(false)
     }
   }
 
-  const isInvestmentTemplateAction = activeAction?.id === 'investment_ppt'
   const isTemplateUploadAction = activeAction?.id === 'custom_template'
-    || isInvestmentTemplateAction
   const activeActionSubmitting = !!activeAction
     && submittingActionIds.includes(activeAction.id)
-  const activeActionAnalyzing = isInvestmentTemplateAction
-    ? analyzingInvestmentPpt
-    : activeAction?.id === 'custom_template'
-      ? analyzingCustomTemplate
-      : false
+  const activeActionAnalyzing = activeAction?.id === 'custom_template'
+    ? analyzingCustomTemplate
+    : false
 
   return (
     <>
@@ -542,25 +397,18 @@ export function AiQuickActions({
         <div className="flex gap-2 overflow-x-auto pb-1">
           {ACTIONS.map((action) => {
             const Icon = action.icon
-            const selected = action.id === selectedActionId
+            const selected = action.id === activeAction?.id
             const actionDisabled = disabled
               || !selectedProject
               || submittingActionIds.includes(action.id)
-              || (action.id === 'investment_ppt' && analyzingInvestmentPpt)
             return (
               <button
                 key={action.id}
                 type="button"
                 disabled={actionDisabled}
-                title={
-                  action.id === 'investment_ppt' && analyzingInvestmentPpt
-                    ? '模板正在后台分析，请在会话任务卡查看进度'
-                    : !selectedProject
-                      ? '当前会话未绑定可用项目'
-                      : action.description
-                }
+                title={!selectedProject ? '当前会话未绑定可用项目' : action.description}
                 onClick={() => openAction(action)}
-                aria-pressed={action.id === 'investment_ppt' ? selected : undefined}
+                aria-pressed={selected}
                 className={`group flex min-w-[142px] items-center gap-2 rounded-lg border px-3 py-2 text-left transition disabled:cursor-not-allowed disabled:opacity-45 ${selected
                   ? 'border-brand-500 bg-brand-50 ring-2 ring-brand-100'
                   : 'border-slate-200 bg-white hover:border-brand-200 hover:bg-brand-50/50'}`}
@@ -572,12 +420,10 @@ export function AiQuickActions({
                   <span className="block whitespace-nowrap text-[11px] font-medium text-slate-700">{action.label}</span>
                   <span className="block truncate text-[9px] text-slate-400">
                     {selected
-                      ? '已选中，请输入要求或添加文件'
+                      ? '已打开，请确认生成要求'
                       : action.mode === 'template'
                         ? '识别结构与内容'
-                        : action.mode === 'chat'
-                          ? '结合项目、文件与对话生成'
-                          : '确认参数后执行'}
+                        : '确认参数后执行'}
                   </span>
                 </span>
               </button>
@@ -606,7 +452,7 @@ export function AiQuickActions({
                     loading={activeActionAnalyzing}
                     disabled={!selectedProject || !templateFile}
                   >
-                    {isInvestmentTemplateAction ? '上传、分析并开始生成' : '上传并分析'}
+                    上传并分析
                   </Button>
                 )
               : (
@@ -617,9 +463,7 @@ export function AiQuickActions({
                   >
                     {activeAction?.id === 'custom_template'
                       ? '根据模板生成文档'
-                      : isInvestmentTemplateAction
-                        ? '根据模板生成 PPT'
-                        : '开始生成'}
+                      : '开始生成'}
                   </Button>
                 )}
           </>
@@ -637,15 +481,13 @@ export function AiQuickActions({
                 </label>
                 <label className="block">
                   <span className="label">
-                    {isInvestmentTemplateAction ? '上传投资建议书模板' : '上传模板'}
+                    上传模板
                   </span>
                   <input
                     type="file"
-                    accept={isInvestmentTemplateAction ? '.pdf,.pptx' : '.docx,.pptx'}
+                    accept=".docx,.pptx"
                     className="hidden"
-                    id={isInvestmentTemplateAction
-                      ? 'ai-investment-ppt-template-file'
-                      : 'ai-custom-template-file'}
+                    id="ai-custom-template-file"
                     onChange={(event) => {
                       const file = event.target.files?.[0] ?? null
                       setTemplateFile(file)
@@ -655,9 +497,7 @@ export function AiQuickActions({
                     }}
                   />
                   <label
-                    htmlFor={isInvestmentTemplateAction
-                      ? 'ai-investment-ppt-template-file'
-                      : 'ai-custom-template-file'}
+                    htmlFor="ai-custom-template-file"
                     className="mt-1 flex cursor-pointer items-center gap-3 rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-4 hover:border-brand-300 hover:bg-brand-50/30"
                   >
                     <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-white text-brand-600 shadow-sm">
@@ -665,36 +505,14 @@ export function AiQuickActions({
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm font-medium text-slate-700">
-                        {templateFile?.name ?? (
-                          isInvestmentTemplateAction
-                            ? '选择 PDF 或 PPTX 模板'
-                            : '选择 DOCX 或 PPTX 模板'
-                        )}
+                        {templateFile?.name ?? '选择 DOCX 或 PPTX 模板'}
                       </span>
                       <span className="mt-1 block text-xs text-slate-400">
-                        {isInvestmentTemplateAction
-                          ? '最大 25MB；PPTX 直接分析，PDF 先转换为可编辑 PPTX 并通过交接检查'
-                          : '最大 25MB；模板只用于版式、结构和内容规则分析，不进入项目知识库'}
+                        最大 25MB；模板只用于版式、结构和内容规则分析，不进入项目知识库
                       </span>
                     </span>
                   </label>
                 </label>
-                {isInvestmentTemplateAction && (
-                  <div className="grid grid-cols-2 gap-4">
-                    <label>
-                      <span className="label">结构模式</span>
-                      <div className="input flex items-center bg-slate-50 text-slate-600">
-                        严格沿用上传模板
-                      </div>
-                    </label>
-                    <label>
-                      <span className="label">语言</span>
-                      <select className="input" value={language} onChange={(event) => setLanguage(event.target.value)}>
-                        <option>中文</option>
-                      </select>
-                    </label>
-                  </div>
-                )}
                 {activeActionAnalyzing && templateProgress && (
                   <div className="rounded-lg border border-brand-100 bg-brand-50 px-3 py-3">
                     <div className="mb-2 flex items-center justify-between gap-3 text-xs text-brand-700">
@@ -720,19 +538,13 @@ export function AiQuickActions({
                     <div className="min-w-0">
                       <p className="text-sm font-medium text-emerald-800">
                         模板识别完成，可以严格依据该模板生成
-                        {isInvestmentTemplateAction ? '投资建议书' : '文档'}
+                        文档
                       </p>
                       <p className="mt-1 text-xs text-emerald-700">
                         已识别 {analyzedTemplate.analysis.structures.length} 个页面/结构；
                         点击下方按钮继续
                       </p>
                     </div>
-                  </div>
-                )}
-                {isInvestmentTemplateAction && (
-                  <div className="rounded-lg bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-500">
-                    输出格式：<strong className="text-slate-700">PPTX</strong>。
-                    页面尺寸、母版、版式、字体、字号、行距、页面顺序和内容槽位以上传模板为准。
                   </div>
                 )}
               </div>
@@ -745,12 +557,19 @@ export function AiQuickActions({
               {selectedProject?.name ?? '未绑定项目'}
             </div>
           </label>
-          {(activeAction?.id === 'proposal' || activeAction?.id === 'compliance' || activeAction?.id === 'qa') && (
+          {(
+            activeAction?.id === 'proposal'
+            || activeAction?.id === 'investment_ppt'
+            || activeAction?.id === 'compliance'
+            || activeAction?.id === 'qa'
+          ) && (
             <>
               <label className="block">
                 <span className="label">
                   {activeAction.id === 'qa'
                     ? '重点问题或检索要求（可选）'
+                    : activeAction.id === 'investment_ppt'
+                      ? '投资建议书重点、口径或其他要求（可选）'
                     : '补充项目数据或写作要求（可选）'}
                 </span>
                 <textarea
@@ -759,6 +578,8 @@ export function AiQuickActions({
                   maxLength={2000}
                   placeholder={activeAction.id === 'qa'
                     ? '例如：需要重点回答的争议、用户已确认的数据、指定比较对象或希望重点分析的关键假设。'
+                    : activeAction.id === 'investment_ppt'
+                      ? '例如：重点展示的投资逻辑、交易方案、风险事项或需要强调的项目事实。'
                     : '例如：本轮拟投资金额、投资主体、基金名称、需重点说明的交易安排，以及希望采用的结构和表达重点。'}
                   onChange={(event) => setProposalInstructions(event.target.value)}
                 />

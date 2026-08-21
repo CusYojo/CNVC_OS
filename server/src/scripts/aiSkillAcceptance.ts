@@ -849,10 +849,6 @@ async function main() {
     path.resolve(process.cwd(), 'src', 'components', 'AiQuickActions.tsx'),
     'utf8',
   )
-  const aiTasksRouteSource = await readFile(
-    path.resolve(process.cwd(), 'server', 'src', 'routes', 'aiTasks.ts'),
-    'utf8',
-  )
   const assistantPageSource = await readFile(
     path.resolve(process.cwd(), 'src', 'pages', 'AIAssistantPage.tsx'),
     'utf8',
@@ -862,41 +858,39 @@ async function main() {
     'utf8',
   )
   assert(
-    '四项正式文档快捷入口直接创建进度任务且不展示内部 Skill 指令',
+    '五项正式文档快捷入口直接创建进度任务且不展示内部 Skill 指令',
     assistantPageSource.includes("apiPost<AiTask>('/ai/tasks'")
+      && assistantPageSource.includes("|| request.actionId === 'investment_ppt'")
       && assistantPageSource.includes('parameters.attachmentFileIds = attachmentFileIds')
       && assistantPageSource.includes('parameters.userInstructions = combinedUserInstructions')
       && assistantPageSource.includes("parameters.diligenceScope = request.diligenceScope || '商业尽调'")
       && assistantPageSource.includes('setAiTasks((items) => [')
       && assistantPageSource.includes('if (isFormalDocumentTask) setUploads([])')
       && !assistantPageSource.includes('请使用 Skill「${quickSkillName}」'),
-    '点击开始生成 → POST /ai/tasks → 立即显示进度卡 → 成功后显示结果与 DOCX 下载',
+    '点击开始生成 → POST /ai/tasks → 立即显示进度卡 → 成功后显示 DOCX/PPTX 下载',
   )
   assert(
-    '投资建议书快捷任务以高亮会话模式读取项目、附件和对话',
-    quickActionsSource.includes("mode: 'chat'")
-      && quickActionsSource.includes('selectedActionId')
-      && quickActionsSource.includes('aria-pressed')
-      && quickActionsSource.includes('已选中，请输入要求或添加文件')
-      && assistantPageSource.includes("selectedQuickAction === 'investment_ppt'")
-      && assistantPageSource.includes('attachmentFileIds: uploads')
-      && assistantPageSource.includes('attachmentFileNames: uploads.map')
-      && assistantPageSource.includes('force: forceInvestmentPpt')
-      && aiTasksRouteSource.includes("['standard', 'strict-template']")
+    '投资建议书快捷任务与投资提案使用同一正式任务提交流程',
+    quickActionsSource.includes("id: 'investment_ppt'")
+      && quickActionsSource.includes("mode: 'task'")
+      && quickActionsSource.includes("structureMode: action.id === 'investment_ppt' ? 'standard'")
+      && quickActionsSource.includes("activeAction?.id === 'investment_ppt'")
+      && assistantPageSource.includes('parameters.userInstructions = combinedUserInstructions')
+      && assistantPageSource.includes('parameters.attachmentFileIds = attachmentFileIds')
+      && assistantPageSource.includes("parameters.structureMode = 'standard'")
+      && !quickActionsSource.includes('selectedActionId')
+      && !assistantPageSource.includes("'/ai/tasks/preparations/investment-ppt'")
       && !AI_TEMPLATE_CATALOG.investment_recommendation_ppt.requiredParameters.includes('customTemplateId'),
-    '点击高亮 → 输入文字/添加文件 → 当前项目与最近对话 → 系统标准 PPTX',
+    '点击入口 → 确认要求 → 全部项目资料/当前会话/本轮附件 → investment-committee-ppt → PPTX',
   )
   assert(
-    '历史投资建议书模板准备任务仍可恢复',
-    quickActionsSource.includes('onCreatePreparationTask')
-      && quickActionsSource.includes('taskId: preparationTaskId')
-      && !quickActionsSource.includes('const taskCreated = await submit(result)')
-      && quickActionsSource.includes("stage: isInvestmentPpt")
-      && quickActionsSource.includes('上传、分析并开始生成')
-      && assistantPageSource.includes("'/ai/tasks/preparations/investment-ppt'")
-      && assistantPageSource.includes('onCreatePreparationTask={createQuickTaskPreparation}')
-      && aiTasksRouteSource.includes('startInvestmentPptTaskAfterPreparation'),
-    '旧任务上传开始 → 持久任务 → 模板分析 → 同一任务启动生成；切换会话后仍可恢复',
+    '投资建议书快捷入口不再创建模板准备任务',
+    !quickActionsSource.includes('onCreatePreparationTask')
+      && !quickActionsSource.includes('preparationTaskId')
+      && !quickActionsSource.includes('上传、分析并开始生成')
+      && !assistantPageSource.includes('createQuickTaskPreparation')
+      && !assistantPageSource.includes('onPreparationProgress'),
+    '旧模板准备接口仅保留服务端历史兼容，不再参与快捷入口',
   )
   assert(
     '会话消息、文档任务和项目 Q&A 按创建时间统一排列',

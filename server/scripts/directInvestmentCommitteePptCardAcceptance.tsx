@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
+import path from 'node:path'
 import * as React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { AiTaskCards, type AiTask } from '../../src/components/AiTaskCards.js'
@@ -65,5 +67,25 @@ for (const text of [
 ]) assert.ok(html.includes(text), `task card missing: ${text}`)
 assert.ok(!html.includes('下载图片高保真版'))
 assert.ok(!html.includes('下载元素级可编辑版'))
+
+const quickActionsSource = await readFile(
+  path.resolve(process.cwd(), 'src', 'components', 'AiQuickActions.tsx'),
+  'utf8',
+)
+const assistantPageSource = await readFile(
+  path.resolve(process.cwd(), 'src', 'pages', 'AIAssistantPage.tsx'),
+  'utf8',
+)
+assert.ok(quickActionsSource.includes("id: 'investment_ppt'"))
+assert.ok(quickActionsSource.includes("mode: 'task'"))
+assert.ok(quickActionsSource.includes("structureMode: action.id === 'investment_ppt' ? 'standard'"))
+assert.ok(quickActionsSource.includes("activeAction?.id === 'investment_ppt'"))
+assert.ok(!quickActionsSource.includes('onCreatePreparationTask'))
+assert.ok(!quickActionsSource.includes('preparationTaskId'))
+assert.ok(assistantPageSource.includes("|| request.actionId === 'investment_ppt'"))
+assert.ok(assistantPageSource.includes('parameters.attachmentFileIds = attachmentFileIds'))
+assert.ok(assistantPageSource.includes('parameters.userInstructions = combinedUserInstructions'))
+assert.ok(assistantPageSource.includes("parameters.structureMode = 'standard'"))
+assert.ok(!assistantPageSource.includes("'/ai/tasks/preparations/investment-ppt'"))
 
 console.log('direct investment committee PPT task card acceptance passed')

@@ -9,8 +9,6 @@ import { useAuthStore, authedFetch } from '../store/useAuthStore'
 import { Button, Modal } from '../components/ui'
 import {
   AiQuickActions,
-  type AiQuickTaskPreparationProgress,
-  type AiQuickTaskPreparationRequest,
   type AiQuickTaskRequest,
 } from '../components/AiQuickActions'
 import { AiArtifactCenter, AiTaskCards, type AiTask } from '../components/AiTaskCards'
@@ -1118,7 +1116,6 @@ function Chat() {
   const [capabilitySaving, setCapabilitySaving] = useState(false)
   const [newSessionModelId, setNewSessionModelId] = useState('')
   const [creatingSession, setCreatingSession] = useState(false)
-  const [selectedQuickAction, setSelectedQuickAction] = useState<'investment_ppt' | null>(null)
 
   const selectedProject = projects.find((project) => project.id === projectId) ?? projects[0]
   const currentSession = sessions.find((session) => session.agentId === convId)
@@ -1662,7 +1659,7 @@ function Chat() {
         && UUID_PATTERN.test(effectiveProject.projectId)
         && UUID_PATTERN.test(currentConversationRowId)
       ) {
-        const forceInvestmentPpt = selectedQuickAction === 'investment_ppt'
+        const forceInvestmentPpt = false
         try {
           const generationMessage = `${clean
             || (forceInvestmentPpt
@@ -1709,7 +1706,6 @@ function Chat() {
                 : '已根据当前对话和项目资料启动投资建议书 PPT 任务',
               'success',
             )
-            setSelectedQuickAction(null)
             formalPptTaskDispatched = true
           }
         } catch (error) {
@@ -1758,7 +1754,6 @@ function Chat() {
     setSlashMenuOpen(false)
     setSlashHighlight(0)
     setCapabilitySearch('')
-    setSelectedQuickAction(null)
     setAiTasks([])
     setQaAnswers([])
   }
@@ -2004,75 +1999,6 @@ function Chat() {
     catch (err) { showToast(`停止失败：${(err as Error).message}`, 'error') }
   }
 
-  const updateQuickTaskPreparation = (progress: AiQuickTaskPreparationProgress) => {
-    if (progress.conversationId !== currentConversationRowIdRef.current) return
-    setAiTasks((items) => items.map((task) => {
-      if (
-        task.id !== progress.taskId
-        || task.parameters._templatePreparationPending !== true
-      ) return task
-      return {
-        ...task,
-        status: progress.status,
-        stage: progress.stage,
-        progress: progress.progress,
-        errorMessage: progress.errorMessage,
-        updatedAt: progress.updatedAt,
-        completedAt: progress.status === 'failed' ? progress.updatedAt : null,
-      }
-    }))
-  }
-
-  const createQuickTaskPreparation = async (
-    request: AiQuickTaskPreparationRequest,
-  ): Promise<string | null> => {
-    const taskLockKey = `${request.conversationId}:investment_ppt`
-    if (quickTaskLocksRef.current.has(taskLockKey)) return null
-    if (!UUID_PATTERN.test(request.projectId)) {
-      showToast(`“${request.projectName}”尚未入库，不能提交正式 AI 任务。请先创建或选择已入库项目。`, 'error')
-      return null
-    }
-    quickTaskLocksRef.current.add(taskLockKey)
-    try {
-      const taskSession = sessions.find(
-        (session) => session.rowId === request.conversationId,
-      )
-      if (!taskSession?.projectId || taskSession.projectId !== request.projectId) {
-        showToast('当前项目随会话固定，请重新打开快捷任务后再试', 'error')
-        return null
-      }
-      const task = await apiPost<AiTask>(
-        '/ai/tasks/preparations/investment-ppt',
-        {
-          projectId: request.projectId,
-          conversationId: request.conversationId,
-          fileName: request.fileName,
-          progressId: request.progressId,
-          startedAt: request.startedAt,
-          sourceCutoffDate: request.sourceCutoffDate,
-          outputFormat: request.outputFormat,
-          language: request.language,
-          structureMode: request.structureMode,
-          userInstructions: request.userInstructions,
-          idempotencyKey: `ppt-preparation-${request.progressId}`,
-        },
-      )
-      if (currentConversationRowIdRef.current === request.conversationId) {
-        setAiTasks((items) => [
-          task,
-          ...items.filter((item) => item.id !== task.id),
-        ])
-      }
-      return task.id
-    } catch (error) {
-      console.warn('Investment PPT preparation task was not created', error)
-      showToast('投资建议书任务暂未创建，请稍后再试', 'error')
-      return null
-    } finally {
-      quickTaskLocksRef.current.delete(taskLockKey)
-    }
-  }
-
   const runQuickTask = async (request: AiQuickTaskRequest): Promise<boolean> => {
     const taskLockKey = `${request.conversationId}:${request.actionId}`
     if (quickTaskLocksRef.current.has(taskLockKey)) return false
@@ -2083,6 +2009,7 @@ function Chat() {
     quickTaskLocksRef.current.add(taskLockKey)
     const isFormalDocumentTask = request.actionId === 'proposal'
       || request.actionId === 'compliance'
+      || request.actionId === 'investment_ppt'
       || request.actionId === 'qa'
       || request.actionId === 'due_diligence'
     const attachmentFileIds = uploads
@@ -2133,19 +2060,9 @@ function Chat() {
       if (request.actionId === 'due_diligence') {
         parameters.diligenceScope = request.diligenceScope || '商业尽调'
       }
-    } else if (request.actionId === 'investment_ppt') {
-      parameters.language = request.language || '中文'
-      parameters.structureMode = 'standard'
-      if (request.userInstructions?.trim()) {
-        parameters.userInstructions = request.userInstructions.trim()
-        parameters.researchIntent = request.userInstructions.trim()
-        parameters.conversationTriggered = request.userInstructions.includes('本次会话生成要求：')
-      }
-      if (request.preparationStartedAt) {
-        parameters.clientTimelineStartedAt = request.preparationStartedAt
-      }
-      if (request.preparationId) {
-        parameters.clientPreparationId = request.preparationId
+      if (request.actionId === 'investment_ppt') {
+        parameters.language = request.language || '中文'
+        parameters.structureMode = 'standard'
       }
     } else if (request.actionId === 'custom_template') {
       parameters.customTemplateId = request.customTemplateId
@@ -2165,13 +2082,10 @@ function Chat() {
         parameters,
         idempotencyKey: `quick-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`,
       })
-      const clientTaskId = request.preparationId
-        ? `template-preparation:${request.preparationId}`
-        : ''
       if (currentConversationRowIdRef.current === request.conversationId) {
         setAiTasks((items) => [
           task,
-          ...items.filter((item) => item.id !== task.id && item.id !== clientTaskId),
+          ...items.filter((item) => item.id !== task.id),
         ])
       }
       if (isFormalDocumentTask) setUploads([])
@@ -2436,10 +2350,6 @@ function Chat() {
               currentProjectId={scope === 'project' ? currentSession?.projectId ?? '' : ''}
               conversationId={currentConversationRowId}
               onRunTask={runQuickTask}
-              onCreatePreparationTask={createQuickTaskPreparation}
-              onPreparationProgress={updateQuickTaskPreparation}
-              selectedActionId={selectedQuickAction}
-              onSelectAction={setSelectedQuickAction}
             />
           </AiErrorBoundary>
           <div
@@ -2622,13 +2532,11 @@ function Chat() {
               aria-keyshortcuts="Enter Shift+Enter"
               rows={2}
               className="w-full resize-none border-0 px-2 py-1 text-sm leading-6 outline-none placeholder:text-slate-400"
-              placeholder={selectedQuickAction === 'investment_ppt'
-                ? '输入投资建议书的重点、口径或其他要求，也可以直接添加文件后发送…'
-                : scope === 'project'
-                  ? currentProject
-                    ? `向 AI 询问 ${currentProject.name}…`
-                    : '请先选择项目，再向 AI 提问…'
-                  : '向 AI 询问机构知识库…'}
+              placeholder={scope === 'project'
+                ? currentProject
+                  ? `向 AI 询问 ${currentProject.name}…`
+                  : '请先选择项目，再向 AI 提问…'
+                : '向 AI 询问机构知识库…'}
             />
             <input ref={fileInputRef} type="file" multiple className="hidden" onChange={onPickFiles} accept={AI_UPLOAD_ACCEPT} />
             <div className="flex items-center justify-between px-1"><div className="flex min-w-0 items-center gap-2 text-[10px] text-slate-400"><button onClick={() => fileInputRef.current?.click()} disabled={uploading} title="上传文件（PDF/PPT/Excel/CSV/ZIP 等，agent 可直接读）" className="grid h-6 w-6 shrink-0 place-items-center rounded text-slate-400 hover:bg-slate-100 hover:text-brand-600 disabled:opacity-50">{uploading ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Paperclip className="h-3.5 w-3.5" />}</button><button data-ai-capability-trigger="true" type="button" onClick={() => { setCapabilitySearch(''); setSlashMenuOpen(false); setCapabilityOpen((open) => !open) }} disabled={!currentConversationRowId || !availableCapabilities.some((item) => item.kind === 'skill') || busy} title="选择当前会话持续使用的技能" aria-expanded={capabilityOpen} className={`inline-flex h-6 shrink-0 items-center gap-1 rounded px-1.5 hover:bg-slate-100 disabled:opacity-40 ${activeSkillIds.length ? 'bg-brand-50 text-brand-700' : 'text-slate-400 hover:text-brand-600'}`}><Boxes className="h-3.5 w-3.5" /><span>能力{activeSkillIds.length ? ` ${activeSkillIds.length}` : ''}</span></button><CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-500" /><span className="truncate">Enter 发送 · Shift + Enter 换行</span></div>{busy
