@@ -15,6 +15,16 @@ jobs:
     name: TypeScript and server tests
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      # Unit tests import repository modules even when MySQL integration tests
+      # are disabled. Supply an isolated, non-production configuration so the
+      # fail-closed DB config can be evaluated without CI secrets.
+      DB_HOST: 127.0.0.1
+      DB_PORT: 3306
+      DB_DATABASE: sbl_jedi_ci
+      DB_USERNAME: ci
+      DB_PASSWORD: ci-not-used
+      DB_FREFIX: ci_
 
     steps:
       - name: Check out repository
