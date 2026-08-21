@@ -1485,8 +1485,8 @@ async function executeTaskWithinUsage(taskId: string) {
         sourceName: source.sourceName,
         locator: source.locator || `知识片段 ${source.chunkIndex ?? index}`,
         verificationStatus: source.sourceType.startsWith('public_web')
-          ? 'Agent 按 Skill 核验'
-          : 'Agent 按 Skill 完整研读',
+          ? 'Skill公开核验'
+          : 'Skill完整研读',
       }))
       const completed = await aiTaskRepository.completeTaskWithArtifacts({
         taskId,

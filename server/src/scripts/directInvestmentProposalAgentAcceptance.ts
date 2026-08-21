@@ -117,6 +117,8 @@ try {
   assert.equal(result.projectKnowledgeStudy.includedChunkCount, 3)
   assert.equal(result.projectKnowledgeStudy.hostContentOrchestration, false)
   assert.equal(result.projectKnowledgeStudy.hostEvidenceFallback, false)
+  assert.ok(Array.from('Skill公开核验').length <= 16)
+  assert.ok(Array.from('Skill完整研读').length <= 16)
   assert.ok((await stat(result.outputPath)).size > 1_000)
   console.log('direct investment proposal Skill Agent acceptance passed')
 } finally {
