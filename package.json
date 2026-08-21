@@ -95,6 +95,7 @@
     "db:migrate:separated": "node --env-file-if-exists=.env --env-file-if-exists=.runtime/secrets/mysql-migration.env --import tsx server/src/scripts/migrateMySqlSchema.ts",
     "db:seed:preview": "node --env-file-if-exists=.env --import tsx server/src/scripts/seedMySql.ts",
     "db:seed": "node --env-file-if-exists=.env --import tsx server/src/scripts/seedMySql.ts --apply",
+    "db:sync-ai-task-templates": "node --env-file-if-exists=.env --import tsx server/src/scripts/syncAiTaskTemplates.ts",
     "db:backup": "node --env-file-if-exists=.env --import tsx server/src/scripts/backupMySqlSchema.ts",
     "accept:mysql-backup-inventory": "node --env-file-if-exists=.env --import tsx server/src/scripts/mysqlBackupInventoryAcceptance.ts",
     "accept:operations-telemetry": "node --env-file-if-exists=.env --import tsx server/src/scripts/operationalTelemetryAcceptance.ts",

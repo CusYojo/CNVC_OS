@@ -204,8 +204,11 @@ rebuild_and_activate() {
             warn "尝试使用原有已激活产物恢复服务"
             systemctl start "$SERVICE_UNIT" || true
         fi
-        return 1
+      return 1
     fi
+
+    step "同步内置文档任务模板注册"
+    npm run db:sync-ai-task-templates
 
     validate_project_files
     log "前端与服务端构建产物已更新并激活"
