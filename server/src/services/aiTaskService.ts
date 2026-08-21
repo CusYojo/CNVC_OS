@@ -1433,6 +1433,7 @@ async function executeTaskWithinUsage(taskId: string) {
       if (!userRow) throw new Error('任务用户不存在或已删除')
       const taskDir = path.join(ARTIFACT_ROOT, task.userId, task.projectId, task.id)
       await mkdir(taskDir, { recursive: true })
+      let incrementalUsageObserved = false
       const directResult = await runDirectInvestmentProposalAgent({
         taskDirectory: taskDir,
         project,
@@ -1445,9 +1446,13 @@ async function executeTaskWithinUsage(taskId: string) {
         onProgress: async (event) => {
           await updateStage(taskId, event.stage, event.progress)
         },
+        onUsage: async (usage) => {
+          incrementalUsageObserved = true
+          await recordAiTaskModelCall(usage)
+        },
         shouldCancel: () => isCancellationRequested(taskId),
       })
-      if (directResult.session.usage) {
+      if (!incrementalUsageObserved && directResult.session.usage) {
         await recordAiTaskModelCall(directResult.session.usage)
       }
       if (await cancelIfRequested(taskId)) return
@@ -1548,6 +1553,7 @@ async function executeTaskWithinUsage(taskId: string) {
       if (!userRow) throw new Error('任务用户不存在或已删除')
       const taskDir = path.join(ARTIFACT_ROOT, task.userId, task.projectId, task.id)
       await mkdir(taskDir, { recursive: true })
+      let incrementalUsageObserved = false
       const directResult = await runDirectInvestmentCommitteePptAgent({
         taskDirectory: taskDir,
         project,
@@ -1560,9 +1566,13 @@ async function executeTaskWithinUsage(taskId: string) {
         onProgress: async (event) => {
           await updateStage(taskId, event.stage, event.progress)
         },
+        onUsage: async (usage) => {
+          incrementalUsageObserved = true
+          await recordAiTaskModelCall(usage)
+        },
         shouldCancel: () => isCancellationRequested(taskId),
       })
-      if (directResult.session.usage) {
+      if (!incrementalUsageObserved && directResult.session.usage) {
         await recordAiTaskModelCall(directResult.session.usage)
       }
       if (await cancelIfRequested(taskId)) return
@@ -1663,6 +1673,7 @@ async function executeTaskWithinUsage(taskId: string) {
       if (!userRow) throw new Error('任务用户不存在或已删除')
       const taskDir = path.join(ARTIFACT_ROOT, task.userId, task.projectId, task.id)
       await mkdir(taskDir, { recursive: true })
+      let incrementalUsageObserved = false
       const directResult = await runDirectBusinessDocumentAgent({
         taskType: task.type as 'project_qa' | 'due_diligence_report',
         taskDirectory: taskDir,
@@ -1676,9 +1687,13 @@ async function executeTaskWithinUsage(taskId: string) {
         onProgress: async (event) => {
           await updateStage(taskId, event.stage, event.progress)
         },
+        onUsage: async (usage) => {
+          incrementalUsageObserved = true
+          await recordAiTaskModelCall(usage)
+        },
         shouldCancel: () => isCancellationRequested(taskId),
       })
-      if (directResult.session.usage) {
+      if (!incrementalUsageObserved && directResult.session.usage) {
         await recordAiTaskModelCall(directResult.session.usage)
       }
       if (await cancelIfRequested(taskId)) return

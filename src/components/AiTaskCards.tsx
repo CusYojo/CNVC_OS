@@ -211,7 +211,11 @@ function TaskCard({
     ? task.usage.usageCalls > 0
       ? `报告 Token：${task.usage.totalTokens.toLocaleString()}${task.usage.complete ? '' : '（部分统计）'}`
       : `报告 Token：上游未返回用量（${task.usage.modelCalls} 次调用）`
-    : ''
+    : isActive
+      ? '报告 Token：统计中'
+      : task.status === 'succeeded'
+        ? '报告 Token：无统计记录'
+        : '报告 Token：未产生用量'
   const usageTitle = task.usage
     ? [
         `模型调用 ${task.usage.modelCalls} 次，收到用量 ${task.usage.usageCalls} 次`,

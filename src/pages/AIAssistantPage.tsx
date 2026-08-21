@@ -1093,12 +1093,14 @@ function Chat() {
   const [aiTasks, setAiTasks] = useState<AiTask[]>([])
   const [aiTasksLoading, setAiTasksLoading] = useState(false)
   const reportTaskUsage = useMemo(() => aiTasks.reduce((summary, task) => {
+    summary.taskCount += 1
+    if (task.status === 'pending' || task.status === 'running') summary.activeTaskCount += 1
     if (!task.usage) return summary
     summary.modelCalls += task.usage.modelCalls
     summary.usageCalls += task.usage.usageCalls
     summary.totalTokens += task.usage.totalTokens
     return summary
-  }, { modelCalls: 0, usageCalls: 0, totalTokens: 0 }), [aiTasks])
+  }, { taskCount: 0, activeTaskCount: 0, modelCalls: 0, usageCalls: 0, totalTokens: 0 }), [aiTasks])
   const [qaAnswers, setQaAnswers] = useState<ProjectQaAnswer[]>([])
   const [qaAnswersLoading, setQaAnswersLoading] = useState(false)
   const [taskMutationId, setTaskMutationId] = useState<string | null>(null)
@@ -2208,7 +2210,7 @@ function Chat() {
               </span>
             </div>
           )}
-          {(agent.runtime || reportTaskUsage.modelCalls > 0) && (
+          {(agent.runtime || reportTaskUsage.taskCount > 0) && (
             <div
               className="ml-auto rounded-lg border border-slate-200 bg-white px-3 py-2 text-[11px] text-slate-500"
               aria-label="模型用量与上下文压缩状态"
@@ -2230,14 +2232,16 @@ function Chat() {
                   )}
                 </>
               )}
-              {agent.runtime && reportTaskUsage.modelCalls > 0 && (
+              {agent.runtime && reportTaskUsage.taskCount > 0 && (
                 <span className="px-1 text-slate-300">·</span>
               )}
-              {reportTaskUsage.modelCalls > 0 && (
+              {reportTaskUsage.taskCount > 0 && (
                 <span title={`模型调用 ${reportTaskUsage.modelCalls} 次，收到用量 ${reportTaskUsage.usageCalls} 次`}>
-                  报告 {reportTaskUsage.usageCalls > 0
-                    ? `${reportTaskUsage.totalTokens.toLocaleString()} Token${reportTaskUsage.usageCalls < reportTaskUsage.modelCalls ? '（部分）' : ''}`
-                    : 'Token 不可用'}
+                  {reportTaskUsage.usageCalls > 0
+                    ? `报告 ${reportTaskUsage.totalTokens.toLocaleString()} Token${reportTaskUsage.usageCalls < reportTaskUsage.modelCalls ? '（部分）' : ''}`
+                    : reportTaskUsage.activeTaskCount > 0
+                      ? '报告 Token 统计中'
+                      : '报告 Token 无统计记录'}
                 </span>
               )}
             </div>

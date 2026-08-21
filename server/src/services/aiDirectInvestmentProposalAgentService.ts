@@ -5,6 +5,7 @@ import { getAiSkillDirectory, type LoadedAiSkill } from './aiSkillService.js'
 import type { EvidenceSource } from './aiBusinessContentService.js'
 import { resolveAiModelRoute } from './aiModelSettingsService.js'
 import { redactSensitiveText } from '../security/redactSecrets.js'
+import { directAgentTurnUsage } from '../runtime/directAgentUsage.js'
 
 type ProjectIdentity = {
   id: string
@@ -33,7 +34,7 @@ type DirectAgentMessage = {
   num_turns?: number
   total_cost_usd?: number
   usage?: Record<string, unknown>
-  message?: { content?: unknown }
+  message?: { content?: unknown; usage?: Record<string, unknown> }
 }
 
 type DirectAgentQuery = AsyncIterable<DirectAgentMessage> & {
@@ -357,6 +358,7 @@ export async function runDirectBusinessDocumentAgent(input: {
   instructions: string
   userRole: string
   onProgress?: (event: DirectInvestmentProposalAgentProgress) => void | Promise<void>
+  onUsage?: (usage: Record<string, unknown>) => void | Promise<void>
   shouldCancel?: () => boolean | Promise<boolean>
 }, options: {
   queryFactory?: DirectAgentQueryFactory
@@ -452,6 +454,8 @@ export async function runDirectBusinessDocumentAgent(input: {
         if (['Read', 'Glob', 'Grep'].includes(toolName)) readEvents += 1
         await input.onProgress?.(progressForTool(profile, toolName, readEvents))
       }
+      const turnUsage = directAgentTurnUsage(message)
+      if (turnUsage) await input.onUsage?.(turnUsage)
       if (message.type === 'result') result = message
     }
   } catch (error) {
