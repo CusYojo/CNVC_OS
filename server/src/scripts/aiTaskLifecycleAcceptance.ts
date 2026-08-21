@@ -237,7 +237,16 @@ async function main() {
       new Error('checkpointed visual QA rejection'),
       { code: 'GORDEN_VISUAL_QA_REJECTED' },
     ))
-    if (!transient.retryable || permanent.retryable || !resumableVisualQa.retryable) {
+    const exhaustedDirectAgent = classifyAiTaskFailure(Object.assign(
+      new Error('model quota unavailable'),
+      { code: 'DIRECT_SKILL_AGENT_AUTH_OR_QUOTA' },
+    ))
+    if (
+      !transient.retryable
+      || permanent.retryable
+      || !resumableVisualQa.retryable
+      || exhaustedDirectAgent.retryable
+    ) {
       throw new Error('failure retry classification mismatch')
     }
 

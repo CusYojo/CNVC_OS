@@ -11,6 +11,7 @@ function errorCode(error: unknown) {
 export function safeAiTaskFailureStage(error: unknown) {
   const code = errorCode(error)
   if (code === 'PROJECT_KNOWLEDGE_COMPLETE_STUDY_FAILED') return '全部项目资料片段研读未完成'
+  if (code === 'DIRECT_SKILL_AGENT_AUTH_OR_QUOTA') return '直接 Skill Agent 模型额度不可用'
   if (code === 'DIRECT_SKILL_NOT_INVOKED') return '直接 Skill 未被调用'
   if (code === 'DIRECT_SKILL_OUTPUT_CONTRACT_FAILED') return 'Skill 成品输出检查未通过'
   if (code === 'DIRECT_SKILL_OUTPUT_INVALID') return 'Skill 成品文件不完整'
@@ -50,6 +51,9 @@ export function safeAiTaskFailureMessage(error: unknown) {
   const upstreamCode = String((error as CodedError | null)?.upstreamCode ?? '')
   if (code === 'PROJECT_KNOWLEDGE_COMPLETE_STUDY_FAILED') {
     return '全部项目资料片段中仍有批次未完成研读，因此未使用部分资料生成提案。系统已保留任务参数，请稍后点击“继续生成”；系统只会拆分并重试失败批次，不会减少项目资料。'
+  }
+  if (code === 'DIRECT_SKILL_AGENT_AUTH_OR_QUOTA') {
+    return '正式文档模型的认证或额度当前不可用，系统已停止自动重跑以避免重复消耗。请恢复模型额度后重新创建任务。'
   }
   if (code === 'DIRECT_SKILL_NOT_INVOKED') {
     return '隔离 Agent 未实际调用当前任务绑定的 Skill，因此系统未发布替代稿。任务参数已保留，可点击“继续生成”。'

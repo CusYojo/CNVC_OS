@@ -406,8 +406,13 @@ export async function runDirectInvestmentProposalAgent(input: {
     const message = timedOut
       ? `文档 Agent 执行超时（${config.timeoutMs}ms）`
       : error instanceof Error ? error.message : String(error)
+    const authenticationOrQuotaFailure = /Failed to authenticate|API Error:\s*403|额度不足|余额不足/i.test(message)
     throw Object.assign(new Error(redactSensitiveText(message).slice(0, 8_000)), {
-      code: timedOut ? 'DIRECT_SKILL_AGENT_TIMEOUT' : errorCode || 'DIRECT_SKILL_AGENT_FAILED',
+      code: timedOut
+        ? 'DIRECT_SKILL_AGENT_TIMEOUT'
+        : authenticationOrQuotaFailure
+          ? 'DIRECT_SKILL_AGENT_AUTH_OR_QUOTA'
+          : errorCode || 'DIRECT_SKILL_AGENT_FAILED',
     })
   } finally {
     clearTimeout(timeout)

@@ -135,6 +135,38 @@ try {
   assert.ok(Array.from('Skill完整研读').length <= 16)
   assert.ok((await stat(result.outputPath)).size > 1_000)
 
+  await assert.rejects(
+    () => runDirectInvestmentCommitteePptAgent({
+      taskDirectory: temporaryRoot,
+      project: { id: 'project-1', name: '验收项目', companyName: '验收科技' },
+      sources: [{
+        sourceType: 'project_file',
+        sourceId: 'file-1',
+        sourceName: '商业计划书.pdf',
+        chunkIndex: 0,
+        content: '完整资料。',
+      }],
+      requiredProjectFiles: [{ sourceId: 'file-1', sourceName: '商业计划书.pdf' }],
+      skill,
+      sourceCutoffDate: '2026-08-21',
+      instructions: '',
+      userRole: 'admin',
+    }, {
+      runtimeConfig: {
+        baseUrl: 'https://model.example.com',
+        apiKey: 'acceptance-only',
+        model: 'acceptance-model',
+        maxTurns: 20,
+        maxBudgetUsd: 2,
+        timeoutMs: 300_000,
+      },
+      queryFactory: () => (async function* () {
+        throw new Error('Failed to authenticate. API Error: 403 额度不足')
+      })(),
+    }),
+    (error: unknown) => (error as { code?: string }).code === 'DIRECT_SKILL_AGENT_AUTH_OR_QUOTA',
+  )
+
   console.log('direct investment committee PPT Skill Agent acceptance passed')
 } finally {
   await rm(temporaryRoot, { recursive: true, force: true })
