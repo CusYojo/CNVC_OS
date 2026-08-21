@@ -5,6 +5,7 @@ import {
   cancelAiTask,
   createAiTask,
   createInvestmentPptPreparationTask,
+  deleteAiArtifact,
   failInvestmentPptPreparationTask,
   getAiTask,
   getArtifactDownload,
@@ -487,6 +488,22 @@ aiTasksRouter.get('/artifacts', async (req: AuthedRequest, res, next) => {
   try {
     const query = z.object({ projectId: z.string().uuid().optional() }).parse(req.query)
     res.json({ list: await listAiArtifacts(req.user!.uid, query.projectId) })
+  } catch (error) { next(error) }
+})
+
+aiTasksRouter.delete('/artifacts/:id', async (req: AuthedRequest, res, next) => {
+  try {
+    const artifact = await deleteAiArtifact(req.user!.uid, idSchema.parse(req.params.id))
+    if (!artifact) {
+      res.status(404).json({ code: 'NOT_FOUND', message: '交付物不存在或无权删除', details: null })
+      return
+    }
+    await writeAudit({
+      userId: req.user!.uid, userName: req.user!.name, module: 'AI 智能助手', action: '删除AI交付物',
+      target: `ai-artifact:${artifact.id};task:${artifact.taskId};file:${artifact.fileName}`,
+      ip: req.ip,
+    })
+    res.status(204).end()
   } catch (error) { next(error) }
 })
 

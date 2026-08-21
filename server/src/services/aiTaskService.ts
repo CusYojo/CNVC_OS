@@ -3649,6 +3649,10 @@ export async function listAiArtifacts(userId: string, projectId?: string) {
     .map(({ artifact }) => publicArtifact(artifact))
 }
 
+export async function deleteAiArtifact(userId: string, artifactId: string) {
+  return aiTaskRepository.archiveOwnedArtifact({ userId, artifactId })
+}
+
 export async function getArtifactDownload(userId: string, artifactId: string) {
   const row = await aiTaskRepository.findOwnedArtifactWithTaskType({ userId, artifactId })
   const artifact = row?.artifact

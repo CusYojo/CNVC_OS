@@ -9,8 +9,9 @@ import {
   Presentation,
   RotateCcw,
   Square,
+  Trash2,
 } from 'lucide-react'
-import { apiGet } from '../lib/api'
+import { apiDelete, apiGet } from '../lib/api'
 import { shouldHideAiTaskFailureDiagnostics } from '../lib/aiTaskPresentation'
 import { authedFetch } from '../store/useAuthStore'
 import { Button, ProgressBar } from './ui'
@@ -428,15 +429,18 @@ export function AiArtifactCenter({
   projectId,
   refreshKey,
   onNotify,
+  onDeleted,
 }: {
   projectId?: string
   refreshKey?: string | number
   onNotify?: (message: string, kind: 'success' | 'error' | 'info') => void
+  onDeleted?: (artifactId: string) => void
 }) {
   const [artifacts, setArtifacts] = useState<AiTaskArtifact[] | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [downloadingId, setDownloadingId] = useState<string | null>(null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
   const validProjectId = !!projectId && UUID_PATTERN.test(projectId)
 
   useEffect(() => {
@@ -478,6 +482,23 @@ export function AiArtifactCenter({
       onNotify?.('文档下载暂未开始，请稍后重试', 'info')
     } finally {
       setDownloadingId(null)
+    }
+  }
+
+  const remove = async (artifact: AiTaskArtifact) => {
+    if (deletingId || downloadingId) return
+    if (!window.confirm(`确定删除正式交付物“${artifact.fileName}”吗？删除后将从交付物列表和任务记录中移除。`)) return
+    setDeletingId(artifact.id)
+    try {
+      await apiDelete(`/ai/artifacts/${artifact.id}`)
+      setArtifacts((items) => items?.filter((item) => item.id !== artifact.id) ?? [])
+      onDeleted?.(artifact.id)
+      onNotify?.(`正式交付物“${artifact.fileName}”已删除`, 'success')
+    } catch (deleteError) {
+      console.warn('AI artifact deletion failed', deleteError)
+      onNotify?.('交付物删除失败，请稍后重试', 'error')
+    } finally {
+      setDeletingId(null)
     }
   }
 
@@ -529,12 +550,22 @@ export function AiArtifactCenter({
             </span>
             <button
               type="button"
-              disabled={!!downloadingId}
+              disabled={!!downloadingId || !!deletingId}
               onClick={() => { void download(artifact) }}
               title="鉴权下载"
               className="grid h-7 w-7 shrink-0 place-items-center rounded text-slate-300 hover:bg-brand-50 hover:text-brand-600 disabled:opacity-50"
             >
               {downloadingId === artifact.id ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+            </button>
+            <button
+              type="button"
+              disabled={!!downloadingId || !!deletingId}
+              onClick={() => { void remove(artifact) }}
+              title="删除交付物"
+              aria-label={`删除交付物 ${artifact.fileName}`}
+              className="grid h-7 w-7 shrink-0 place-items-center rounded text-slate-300 hover:bg-rose-50 hover:text-rose-600 disabled:opacity-50"
+            >
+              {deletingId === artifact.id ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
             </button>
           </div>
         ))}

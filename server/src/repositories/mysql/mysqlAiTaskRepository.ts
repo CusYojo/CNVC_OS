@@ -430,7 +430,10 @@ class MySqlAiTaskRepository implements AiTaskRepository {
 
   async listTaskArtifacts(taskId: string) {
     return mapped('aiTask.listTaskArtifacts', () => this.executor.select().from(aiArtifacts)
-      .where(eq(aiArtifacts.taskId, taskId)).orderBy(desc(aiArtifacts.createdAt)))
+      .where(and(
+        eq(aiArtifacts.taskId, taskId),
+        eq(aiArtifacts.archived, false),
+      )).orderBy(desc(aiArtifacts.createdAt)))
   }
 
   async listTaskSources(taskId: string) {
@@ -474,10 +477,28 @@ class MySqlAiTaskRepository implements AiTaskRepository {
     })
   }
 
+  async archiveOwnedArtifact(input: { userId: string; artifactId: string }) {
+    return mapped('aiTask.archiveOwnedArtifact', async () => {
+      const [artifact] = await this.executor.select().from(aiArtifacts).where(and(
+        eq(aiArtifacts.id, input.artifactId),
+        eq(aiArtifacts.userId, input.userId),
+        eq(aiArtifacts.archived, false),
+      )).limit(1)
+      if (!artifact) return null
+      const [result] = await this.executor.update(aiArtifacts).set({ archived: true }).where(and(
+        eq(aiArtifacts.id, input.artifactId),
+        eq(aiArtifacts.userId, input.userId),
+        eq(aiArtifacts.archived, false),
+      ))
+      return result.affectedRows === 1 ? artifact : null
+    })
+  }
+
   async findLatestImageDeck(taskId: string) {
     return mapped('aiTask.findLatestImageDeck', async () => {
       const [row] = await this.executor.select().from(aiArtifacts).where(and(
         eq(aiArtifacts.taskId, taskId),
+        eq(aiArtifacts.archived, false),
         sql`(JSON_UNQUOTE(JSON_EXTRACT(${aiArtifacts.metadata}, '$.artifactStage')) = 'image-deck' or ${aiArtifacts.editableLevel} = 'image')`,
       )).orderBy(desc(aiArtifacts.createdAt)).limit(1)
       return row ?? null
@@ -489,6 +510,7 @@ class MySqlAiTaskRepository implements AiTaskRepository {
       const [row] = await this.executor.select({ id: aiArtifacts.id, format: aiArtifacts.format })
         .from(aiArtifacts).where(and(
           eq(aiArtifacts.taskId, input.taskId),
+          eq(aiArtifacts.archived, false),
           inArray(aiArtifacts.format, ['docx', 'pptx']),
           input.requireEditableStage
             ? sql`JSON_UNQUOTE(JSON_EXTRACT(${aiArtifacts.metadata}, '$.artifactStage')) = 'editable' and ${aiArtifacts.editableLevel} <> 'image'`

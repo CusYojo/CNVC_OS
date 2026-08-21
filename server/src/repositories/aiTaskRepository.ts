@@ -298,6 +298,10 @@ export interface AiTaskRepository {
     artifactId: string
   }): Promise<{ artifact: AiArtifactRecord; taskType: string } | null>
   findOwnedArtifact(userId: string, artifactId: string): Promise<AiArtifactRecord | null>
+  archiveOwnedArtifact(input: {
+    userId: string
+    artifactId: string
+  }): Promise<AiArtifactRecord | null>
   findLatestImageDeck(taskId: string): Promise<AiArtifactRecord | null>
   findLatestMainArtifact(input: {
     taskId: string

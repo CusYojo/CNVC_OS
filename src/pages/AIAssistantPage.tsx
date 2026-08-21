@@ -2575,6 +2575,12 @@ function Chat() {
             projectId={scope === 'project' ? currentProject?.id : undefined}
             refreshKey={artifactRefreshKey}
             onNotify={showToast}
+            onDeleted={(artifactId) => {
+              setAiTasks((tasks) => tasks.map((task) => ({
+                ...task,
+                artifacts: task.artifacts.filter((artifact) => artifact.id !== artifactId),
+              })))
+            }}
           />
         </AiErrorBoundary>
         <details className="min-h-0 flex-1 overflow-y-auto">

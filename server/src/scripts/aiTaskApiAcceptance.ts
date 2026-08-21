@@ -1138,6 +1138,28 @@ async function main(cleanupState: AcceptanceCleanupState) {
     `${artifacts.list.length} 个 / 至少 ${expectedArtifactCount} 个`,
   )
 
+  const artifactToDelete = artifacts.list[0]
+  if (artifactToDelete) {
+    await request(`/ai/artifacts/${artifactToDelete.id}`, { method: 'DELETE' }, adminAuth, 204)
+    const { data: afterDelete } = await request<{ list: Array<{ id: string }> }>(
+      `/ai/artifacts?projectId=${encodeURIComponent(project.id)}`,
+      {},
+      adminAuth,
+    )
+    assert(
+      '删除正式交付物后列表立即隐藏',
+      !afterDelete.list.some((artifact) => artifact.id === artifactToDelete.id),
+      artifactToDelete.id,
+    )
+    await request(
+      `/ai/artifacts/${artifactToDelete.id}/download`,
+      {},
+      adminAuth,
+      404,
+    )
+    assert('已删除正式交付物不可继续下载', true, artifactToDelete.id)
+  }
+
   await outputReport('全量验收必须对隔离测试数据库运行；脱敏项目、会话和任务记录会在验收结束时自动清理。')
 }
 
