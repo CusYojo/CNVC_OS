@@ -2724,6 +2724,7 @@ async function executeTaskWithinUsage(taskId: string) {
       && AUTO_RECOVERY_TASK_TYPES.has(context.type)
       && recoveryAttempt < 1
       && failure.retryable
+      && failure.errorCode !== 'PROJECT_KNOWLEDGE_COMPLETE_STUDY_FAILED'
     ) {
       const reset = await aiTaskRepository.resetTaskForAutomaticRecovery({
         taskId,

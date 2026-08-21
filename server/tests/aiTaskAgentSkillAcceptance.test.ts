@@ -37,6 +37,11 @@ test('all quick-entry business acceptance belongs to Agent and current Skill', a
   assert.match(taskService, /acceptanceAuthority:\s*'agent-and-current-skill'/)
   assert.match(taskService, /programmaticBusinessAcceptance:\s*false/)
   assert.match(taskService, /deliveryValidation:\s*'file-integrity-and-authorization-only'/)
+  assert.match(
+    taskService,
+    /failure\.errorCode !== 'PROJECT_KNOWLEDGE_COMPLETE_STUDY_FAILED'/,
+    'complete-study batch recovery must not restart the entire expensive task',
+  )
   assert.ok((taskService.match(/programmaticBusinessAcceptance:\s*false/g) ?? []).length >= 7)
 
   assert.doesNotMatch(renderService, /compliance_processor\.py[\s\S]{0,2000}'verify'/)
