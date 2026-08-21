@@ -118,7 +118,7 @@ async function runtimeConfig(role: string): Promise<DirectAgentRuntimeConfig> {
     baseUrl,
     apiKey,
     model,
-    maxTurns: boundedInteger(process.env.AI_DIRECT_SKILL_MAX_TURNS, 50, 10, 80),
+    maxTurns: boundedInteger(process.env.AI_DIRECT_SKILL_MAX_TURNS, 80, 10, 80),
     maxBudgetUsd: boundedNumber(process.env.AI_DIRECT_SKILL_MAX_BUDGET_USD, 20, 1, 100),
     timeoutMs: boundedInteger(process.env.AI_DIRECT_SKILL_TIMEOUT_MS, 3_600_000, 300_000, 3_600_000),
   }
