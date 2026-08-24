@@ -56,13 +56,18 @@ type RuntimeSession = {
 export type JwQuickSkillName =
   | 'draft-investment-proposal'
   | 'generate-investment-compliance-note'
+  | 'investment-committee-ppt'
   | 'draft-investment-qa'
   | 'draft-due-diligence-report'
+  | 'generate-document-from-template'
 
 export type JwMessageOptions = {
   skillName?: JwQuickSkillName
   attachmentFileIds?: string[]
   attachmentFileNames?: string[]
+  customTemplateId?: string
+  customTemplateName?: string
+  outputFormat?: 'DOCX' | 'PPTX' | 'PDF'
 }
 
 export const JW_AGENT_BUILT_IN_AI_TASK_TYPES = [
@@ -90,11 +95,16 @@ type QuickSkillInvocation = {
   taskType:
     | 'investment_proposal'
     | 'compliance_statement'
+    | 'investment_recommendation_ppt'
     | 'project_qa'
     | 'due_diligence_report'
+    | 'custom_template_document'
   instructions: string
   attachmentFileIds: string[]
   attachmentFileNames: string[]
+  customTemplateId?: string
+  customTemplateName?: string
+  precreatedTaskId?: string
 }
 
 export type JwInteractionQuestion = {
@@ -221,7 +231,7 @@ const projectScopedAgentToolSet = new Set<string>([
   'mcp__investment__get_ai_task_status',
 ])
 const skillByTaskType = new Map(AI_BUSINESS_SKILLS.map((item) => [item.taskType, item.name] as const))
-const quickSkillBindings: Record<JwQuickSkillName, {
+export const JW_AGENT_QUICK_SKILL_BINDINGS: Record<JwQuickSkillName, {
   internalSkillName: string
   taskType: QuickSkillInvocation['taskType']
 }> = {
@@ -233,6 +243,10 @@ const quickSkillBindings: Record<JwQuickSkillName, {
     internalSkillName: 'generate-investment-compliance-note',
     taskType: 'compliance_statement',
   },
+  'investment-committee-ppt': {
+    internalSkillName: 'investment-committee-ppt',
+    taskType: 'investment_recommendation_ppt',
+  },
   'draft-investment-qa': {
     internalSkillName: 'draft-investment-qa',
     taskType: 'project_qa',
@@ -241,10 +255,14 @@ const quickSkillBindings: Record<JwQuickSkillName, {
     internalSkillName: 'draft-due-diligence-report',
     taskType: 'due_diligence_report',
   },
+  'generate-document-from-template': {
+    internalSkillName: 'generate-document-from-template',
+    taskType: 'custom_template_document',
+  },
 }
 
 async function resolveQuickSkillBinding(skillName: JwQuickSkillName) {
-  const binding = quickSkillBindings[skillName]
+  const binding = JW_AGENT_QUICK_SKILL_BINDINGS[skillName]
   const loaded = await loadAiSkill(binding.internalSkillName)
   if (loaded.name !== skillName) {
     throw Object.assign(new Error(`快捷 Skill 部署不一致：${skillName}`), {
@@ -274,6 +292,17 @@ function quickSkillRuntimeMessage(message: string, invocation: QuickSkillInvocat
         ...invocation.attachmentFileIds.map((fileId) => `- 已绑定项目文件 ID：${fileId}`),
       ].join('\n')
     : '无本轮新增附件；仍须使用当前项目全部已授权资料。'
+  if (invocation.taskType === 'custom_template_document' && invocation.precreatedTaskId) {
+    return `【服务端已绑定快捷 Skill】
+Skill：${invocation.requestedSkillName}
+固定任务类型：${invocation.taskType}
+模板：${invocation.customTemplateName || invocation.customTemplateId || '已分析模板'}
+
+用户已通过普通对话发送模板生成要求。服务端已安全创建任务 ${invocation.precreatedTaskId}，自定义模板 ID 未暴露给通用工具 schema。请调用 get_ai_task_status 查询该任务，然后用普通对话简洁说明已开始执行；不得再次调用 create_ai_task，不得直接输出宿主兜底稿。
+
+【用户请求】
+${message.trim()}`
+  }
   return `【服务端已绑定快捷 Skill】
 Skill：${invocation.requestedSkillName}
 固定任务类型：${invocation.taskType}
@@ -1446,6 +1475,31 @@ export async function sendJwAgentMessageWithMedia(
           instructions: quickSkillTaskInstructions(clean, recentContext),
           attachmentFileIds,
           attachmentFileNames,
+          customTemplateId: options.customTemplateId,
+          customTemplateName: options.customTemplateName,
+        }
+        if (quickBinding.taskType === 'custom_template_document') {
+          if (!options.customTemplateId) {
+            throw Object.assign(new Error('上传模板快捷 Skill 缺少已分析模板'), {
+              code: 'CUSTOM_TEMPLATE_REQUIRED', status: 400,
+            })
+          }
+          const created = await createAgentAiTaskForUser({
+            userId,
+            projectId: refreshed.agent.projectId!,
+            conversationId: session.conversationId,
+            type: 'custom_template_document',
+            instructions: session.quickSkillInvocation.instructions,
+            attachmentFileIds,
+            customTemplateId: options.customTemplateId,
+          })
+          const createdTask = created.task && typeof created.task === 'object'
+            ? created.task as Record<string, unknown>
+            : null
+          if (!createdTask || typeof createdTask.id !== 'string') {
+            throw new Error('上传模板任务创建后未返回有效任务 ID')
+          }
+          session.quickSkillInvocation.precreatedTaskId = createdTask.id
         }
       } else {
         session.quickSkillInvocation = null

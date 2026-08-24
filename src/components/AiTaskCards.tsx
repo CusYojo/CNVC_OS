@@ -76,6 +76,13 @@ export type AiTask = {
   } | null
   artifacts: AiTaskArtifact[]
   sources: AiTaskSource[]
+  events?: Array<{
+    id: string
+    taskId: string
+    stage: string
+    progress: number
+    createdAt: string
+  }>
 }
 
 const TASK_LABELS: Record<string, string> = {
@@ -88,10 +95,6 @@ const TASK_LABELS: Record<string, string> = {
 }
 
 function artifactQualityLabel(artifact: AiTaskArtifact) {
-  const officeFormat = ['docx', 'pptx'].includes(artifact.format.toLowerCase())
-  if (officeFormat && artifact.qualityStatus === 'passed' && artifact.metadata?.encodingClean !== true) {
-    return '历史版本·未执行新编码检查'
-  }
   return artifact.qualityStatus === 'passed' ? '质量检查通过' : artifact.qualityStatus
 }
 

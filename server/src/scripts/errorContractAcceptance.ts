@@ -113,20 +113,29 @@ async function main() {
   }, '<script>alert(1)</script>')
   assertContract(malformed.requestId === undefined && !malformed.message.includes('<script>'), 'malformed request ID was trusted')
 
-  const [serverEntry, apiContractSource, clientApiSource, taskCards, errorBoundary, assistantPage] = await Promise.all([
+  const [serverEntry, apiContractSource, clientApiSource, taskCards, taskConversation, errorBoundary, assistantPage] = await Promise.all([
     readFile(path.resolve('server/src/index.ts'), 'utf8'),
     readFile(path.resolve('server/src/contracts/apiErrorContract.ts'), 'utf8'),
     readFile(path.resolve('src/lib/api.ts'), 'utf8'),
     readFile(path.resolve('src/components/AiTaskCards.tsx'), 'utf8'),
+    readFile(path.resolve('src/components/AiTaskConversationMessage.tsx'), 'utf8'),
     readFile(path.resolve('src/components/AiErrorBoundary.tsx'), 'utf8'),
     readFile(path.resolve('src/pages/AIAssistantPage.tsx'), 'utf8'),
   ])
   assertContract(/res\.statusCode >= 400/.test(serverEntry) && /requestId: errorBody\.requestId \|\| requestId/.test(serverEntry), 'manual route errors are not centrally enriched')
   assertContract(/bodyRequestId === headerRequestId/.test(apiContractSource) && /\^\[A-Za-z0-9\._:-\]\{8,64\}\$/.test(apiContractSource), 'frontend request ID validation is missing')
   assertContract(/server\/src\/contracts\/apiErrorContract/.test(clientApiSource), 'frontend does not consume the shared error contract')
-  assertContract(/错误编号：\{task\.errorId\}/.test(taskCards), 'AI task error ID is not rendered')
+  assertContract(
+    /错误编号：\{task\.errorId\}/.test(taskCards)
+      && /错误编号：\{task\.errorId\}/.test(taskConversation),
+    'AI task error ID is not rendered in both historical and chat-native views',
+  )
   assertContract(/错误编号：\{this\.state\.errorId\}/.test(errorBoundary), 'AI render error ID is not rendered')
-  assertContract(/error\.withContext/.test(assistantPage), 'AI task creation errors do not retain the server trace ID')
+  assertContract(
+    /发送失败：\$\{\(err as Error\)\.message\}/.test(assistantPage)
+      && /agentError\.message/.test(assistantPage),
+    'chat-native Agent errors do not retain the safe API message and server trace ID',
+  )
 
   const report = {
     ok: true,

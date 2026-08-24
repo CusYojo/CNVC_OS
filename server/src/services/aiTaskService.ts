@@ -3638,6 +3638,17 @@ export async function getAiTask(userId: string, taskId: string) {
     }
   }
   const sources = await aiTaskRepository.listTaskSources(task.id)
+  const storedEvents = await aiTaskRepository.listTaskEvents(task.id)
+  const currentStage = task.stage?.trim() || ''
+  const events = currentStage && !storedEvents.some((event) => event.stage === currentStage)
+    ? [...storedEvents, {
+        id: `current:${task.id}`,
+        taskId: task.id,
+        stage: currentStage,
+        progress: task.progress,
+        createdAt: task.updatedAt,
+      }]
+    : storedEvents
   const passedArtifacts = artifacts.filter((artifact) => artifact.qualityStatus === 'passed')
   const deliverables = task.type === 'investment_proposal'
     ? passedArtifacts.filter((artifact) => artifact.format === 'docx')
@@ -3661,6 +3672,7 @@ export async function getAiTask(userId: string, taskId: string) {
     } : null,
     artifacts: deliverables.map(publicArtifact),
     sources: sources.filter((source) => !source.artifactId || deliverableIds.has(source.artifactId)),
+    events,
   }
 }
 

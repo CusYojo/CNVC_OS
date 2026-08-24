@@ -857,31 +857,38 @@ async function main() {
     path.resolve(process.cwd(), 'src', 'lib', 'aiMessageSafety.ts'),
     'utf8',
   )
-  assert(
-    '五项正式文档快捷入口直接创建进度任务且不展示内部 Skill 指令',
-    assistantPageSource.includes("apiPost<AiTask>('/ai/tasks'")
-      && assistantPageSource.includes("|| request.actionId === 'investment_ppt'")
-      && assistantPageSource.includes('parameters.attachmentFileIds = attachmentFileIds')
-      && assistantPageSource.includes('parameters.userInstructions = combinedUserInstructions')
-      && assistantPageSource.includes("parameters.diligenceScope = request.diligenceScope || '商业尽调'")
-      && assistantPageSource.includes('setAiTasks((items) => [')
-      && assistantPageSource.includes('if (isFormalDocumentTask) setUploads([])')
-      && !assistantPageSource.includes('请使用 Skill「${quickSkillName}」'),
-    '点击开始生成 → POST /ai/tasks → 立即显示进度卡 → 成功后显示 DOCX/PPTX 下载',
+  const jwAgentRuntimeSource = await readFile(
+    path.resolve(process.cwd(), 'server', 'src', 'runtime', 'jwAgentRuntime.ts'),
+    'utf8',
+  )
+  const taskConversationSource = await readFile(
+    path.resolve(process.cwd(), 'src', 'components', 'AiTaskConversationMessage.tsx'),
+    'utf8',
   )
   assert(
-    '投资建议书快捷任务与投资提案使用同一正式任务提交流程',
+    '六项文档快捷入口只预选 Skill 并复用普通 Agent 发送',
+    quickActionsSource.includes('onSelectSkill')
+      && quickActionsSource.includes("skillName: 'draft-investment-proposal'")
+      && quickActionsSource.includes("skillName: 'investment-committee-ppt'")
+      && quickActionsSource.includes("skillName: 'generate-document-from-template'")
+      && assistantPageSource.includes('selectedQuickSkill')
+      && assistantPageSource.includes('await agent.sendMessage(ctx, {')
+      && assistantPageSource.includes('skillName: quickSkill?.skillName')
+      && !assistantPageSource.includes("apiPost<AiTask>('/ai/tasks'"),
+    '点击入口 → 普通输入框补充要求 → 发送 → Agent 调用绑定 Skill',
+  )
+  assert(
+    '投资建议书快捷入口与投资提案使用同一普通 Agent 发送流程',
     quickActionsSource.includes("id: 'investment_ppt'")
       && quickActionsSource.includes("mode: 'task'")
-      && quickActionsSource.includes("structureMode: action.id === 'investment_ppt' ? 'standard'")
-      && quickActionsSource.includes("activeAction?.id === 'investment_ppt'")
-      && assistantPageSource.includes('parameters.userInstructions = combinedUserInstructions')
-      && assistantPageSource.includes('parameters.attachmentFileIds = attachmentFileIds')
-      && assistantPageSource.includes("parameters.structureMode = 'standard'")
-      && !quickActionsSource.includes('selectedActionId')
+      && quickActionsSource.includes("skillName: 'investment-committee-ppt'")
+      && quickActionsSource.includes('selectedActionId')
+      && assistantPageSource.includes('attachmentFileIds: uploads')
+      && assistantPageSource.includes('customTemplateId: quickSkill?.customTemplateId')
+      && jwAgentRuntimeSource.includes("taskType: 'investment_recommendation_ppt'")
       && !assistantPageSource.includes("'/ai/tasks/preparations/investment-ppt'")
       && !AI_TEMPLATE_CATALOG.investment_recommendation_ppt.requiredParameters.includes('customTemplateId'),
-    '点击入口 → 确认要求 → 全部项目资料/当前会话/本轮附件 → investment-committee-ppt → PPTX',
+    '点击入口 → 输入要求 → 普通 Agent 消息 → investment-committee-ppt → PPTX',
   )
   assert(
     '投资建议书快捷入口不再创建模板准备任务',
@@ -898,7 +905,7 @@ async function main() {
       && assistantPageSource.includes('function buildConversationTimeline(')
       && assistantPageSource.includes('left.timestampMs - right.timestampMs')
       && assistantPageSource.includes('conversationTimeline.map((item)')
-      && assistantPageSource.includes('tasks={[item.task]}')
+      && assistantPageSource.includes('task={item.task}')
       && assistantPageSource.includes('answers={[item.answer]}'),
     'MySQL 消息时间、任务 createdAt 和 Q&A createdAt 合并升序；最新内容位于最下方',
   )
@@ -906,7 +913,8 @@ async function main() {
     'Q&A 前端创建正式项目文档任务',
     quickActionsSource.includes("id: 'qa'")
       && quickActionsSource.includes("mode: 'task'")
-      && quickActionsSource.includes('项目投资问答 DOCX')
+      && quickActionsSource.includes("skillName: 'draft-investment-qa'")
+      && quickActionsSource.includes("outputFormat: 'DOCX'")
       && !quickActionsSource.includes('Q&amp;A 类型')
       && !quickActionsSource.includes('问题深度')
       && !quickActionsSource.includes('qaMode')
@@ -922,20 +930,20 @@ async function main() {
     'utf8',
   )
   assert(
-    'Q&A 前端只展示 DOCX 下载',
-    taskCardsSource.includes("if (task.type === 'project_qa') return format === 'docx'"),
-    '历史或新任务均不展示 Q&A PDF 下载按钮',
+    '聊天原生文档消息只展示通过 Skill 验收的正式产物',
+    taskConversationSource.includes("artifact.qualityStatus === 'passed'")
+      && taskConversationSource.includes("['docx', 'pptx', 'pdf'].includes")
+      && taskConversationSource.includes('/api/ai/artifacts/${artifact.id}/download'),
+    '对话下载与右侧产物中心共用 ai_artifacts ID 和受保护下载接口',
   )
   assert(
-    '投资建议书直接 Skill 任务卡展示进度、标准模板与单一 PPTX 下载',
-    !taskCardsSource.includes('ProtectedImagePreview')
-      && !taskCardsSource.includes('投资建议书封面预览')
-      && !taskCardsSource.includes('加载 PPT 预览')
-      && taskCardsSource.includes("investment_recommendation_ppt: '投资建议书'")
-      && taskCardsSource.includes("artifact.metadata?.directSkillAgent === true")
-      && taskCardsSource.includes('业务标准模板')
-      && taskCardsSource.includes('下载 ${artifact.format.toUpperCase()} · V${artifact.version}'),
-    '标题 / 已完成 / 业务标准模板 / 引用来源 / Token / 进度条 / 下载 PPTX · Vn',
+    '投资建议书直接 Skill 任务以普通 assistant 消息展示实际阶段和下载',
+    taskConversationSource.includes("investment_recommendation_ppt: '投资建议书（PPT）'")
+      && taskConversationSource.includes("investment_recommendation_ppt: 'investment-committee-ppt'")
+      && taskConversationSource.includes('文档 Agent 实际执行阶段')
+      && taskConversationSource.includes('下载 {artifact.format.toUpperCase()} · V{artifact.version}')
+      && !taskConversationSource.includes('ProgressBar'),
+    '普通对话头像 / 实际阶段 / 无固定百分比 / 正式 PPTX 下载',
   )
   assert(
     'Q&A 与尽调不回退旧宿主编排或旧 Formatter',
@@ -947,31 +955,32 @@ async function main() {
     '直接 Skill Agent 成功即登记单一 DOCX；失败即明确失败，不再降级到旧正文拼装链路',
   )
   assert(
-    '文档任务卡展示安全、可行动的失败原因和错误编号',
-    taskCardsSource.includes('task.errorMessage')
-      && taskCardsSource.includes('错误编号：{task.errorId}')
-      && taskCardsSource.includes('停止阶段：{failureStage}')
-      && taskCardsSource.includes('文档尚未完成，系统已保留本次生成参数')
-      && taskCardsSource.includes('继续生成'),
-    '只展示服务端清洗后的业务原因、停止阶段和错误编号，不展示模型原文或堆栈',
+    '聊天原生文档消息展示安全、可行动的失败原因和错误编号',
+    taskConversationSource.includes('task.errorMessage')
+      && taskConversationSource.includes('错误编号：{task.errorId}')
+      && taskConversationSource.includes('继续执行')
+      && !taskConversationSource.includes('error.stack'),
+    '只展示服务端清洗后的业务原因和错误编号，不展示模型原文或堆栈',
   )
 
   assert(
-    'Q&A 通过统一任务 API 生成可下载产物',
-    assistantPageSource.includes("qa: 'project_qa'")
-      && assistantPageSource.includes("apiPost<AiTask>('/ai/tasks'")
+    'Q&A 通过普通 Agent 与绑定 Skill 生成可下载产物',
+    quickActionsSource.includes("skillName: 'draft-investment-qa'")
+      && assistantPageSource.includes('await agent.sendMessage(ctx, {')
+      && jwAgentRuntimeSource.includes("taskType: 'project_qa'")
       && !assistantPageSource.includes('parameters.qaMode')
       && !assistantPageSource.includes('parameters.questionDepth')
       && AI_TEMPLATE_CATALOG.project_qa.requiredParameters.join(',') === 'projectId,sourceCutoffDate'
       && !assistantPageSource.includes('Q&A任务创建失败：${(error as Error).message}'),
-    'POST /api/ai/tasks type=project_qa；类型与深度由标准 Skill 统一决定',
+    '普通消息 → draft-investment-qa → 受控持久任务；类型与深度由标准 Skill 决定',
   )
   assert(
-    'AI 助手生成界面显示安全的实时阶段和进度心跳',
-    !assistantPageSource.includes('阶段：{stage}')
-      && !taskCardsSource.includes('阶段：{visibleStage}')
-      && taskCardsSource.includes("task.stage || '生成进度'"),
-    '任务卡在进度条上显示“正在生成尽调正文/整合联网证据”和等待秒数，不展示技术堆栈',
+    'AI 助手以普通消息显示持久化的真实阶段且不展示伪百分比',
+    taskConversationSource.includes('task.events ?? []')
+      && taskConversationSource.includes('event.stage')
+      && !taskConversationSource.includes('task.progress}%')
+      && !taskConversationSource.includes('ProgressBar'),
+    '任务实际阶段跨刷新恢复；固定 82%/98% 和进度条不进入聊天原生展示',
   )
   assert(
     '任务完成进度下方不显示结果摘要提示栏',

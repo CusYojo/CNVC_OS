@@ -3,6 +3,7 @@ import test from 'node:test'
 import {
   JW_AGENT_BUILT_IN_AI_TASK_TYPES,
   JW_AGENT_CREATE_AI_TASK_INPUT_SCHEMA,
+  JW_AGENT_QUICK_SKILL_BINDINGS,
   jwAgentSystemPrompt,
   jwAgentToolsForScope,
 } from './jwAgentRuntime.js'
@@ -38,4 +39,19 @@ test('built-in create_ai_task schema cannot require or receive a custom template
     false,
   )
   assert.match(jwAgentSystemPrompt('project-id'), /不得给内置任务虚构模板 ID/)
+})
+
+test('chat-native quick actions bind every formal document Skill', () => {
+  assert.deepEqual(JW_AGENT_QUICK_SKILL_BINDINGS['draft-investment-proposal'], {
+    internalSkillName: 'draft-investment-proposal',
+    taskType: 'investment_proposal',
+  })
+  assert.deepEqual(JW_AGENT_QUICK_SKILL_BINDINGS['investment-committee-ppt'], {
+    internalSkillName: 'investment-committee-ppt',
+    taskType: 'investment_recommendation_ppt',
+  })
+  assert.deepEqual(JW_AGENT_QUICK_SKILL_BINDINGS['generate-document-from-template'], {
+    internalSkillName: 'generate-document-from-template',
+    taskType: 'custom_template_document',
+  })
 })

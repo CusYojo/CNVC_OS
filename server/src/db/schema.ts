@@ -1614,6 +1614,17 @@ export const aiTasks = mysqlTable('ai_tasks', {
   uniqueIdempotency: uniqueIndex('uq_ai_tasks_user_idempotency').on(t.userId, t.idempotencyKey),
 }))
 
+export const aiTaskEvents = mysqlTable('ai_task_events', {
+  id: uuidPrimaryKey('id'),
+  taskId: uuidColumn('task_id').notNull().references(() => aiTasks.id, { onDelete: 'cascade' }),
+  stage: varchar('stage', { length: 64 }).notNull(),
+  progress: int('progress').notNull().default(0),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({
+  byTask: index('idx_ai_task_events_task').on(t.taskId, t.createdAt),
+  uniqueTaskStage: uniqueIndex('uq_ai_task_events_task_stage').on(t.taskId, t.stage),
+}))
+
 export const aiArtifacts = mysqlTable('ai_artifacts', {
   id: uuidPrimaryKey('id'),
   taskId: uuidColumn('task_id').notNull().references(() => aiTasks.id, { onDelete: 'cascade' }),

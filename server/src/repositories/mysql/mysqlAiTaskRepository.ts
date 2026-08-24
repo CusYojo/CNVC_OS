@@ -5,6 +5,7 @@ import { mysqlTableName, quoteMysqlIdentifier } from '../../db/config.js'
 import {
   aiArtifacts,
   aiCustomTemplates,
+  aiTaskEvents,
   aiTaskSources,
   aiTaskTemplates,
   aiTasks,
@@ -39,6 +40,26 @@ type ProgressRow = RowDataPacket & {
 }
 
 const progressTable = quoteMysqlIdentifier(mysqlTableName('ai_template_analysis_progress'))
+
+export function visibleTaskEventStage(stage: string) {
+  return stage
+    .replace(/[（(]已等待\s*\d+\s*秒[）)]/g, '')
+    .replace(/，已等待\s*\d+\s*秒/g, '')
+    .replace(/[（(]已用时\s*\d+\s*秒[）)]/g, '')
+    .replace(/，已用时\s*\d+\s*秒/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 64)
+}
+
+function errorChainHasCode(error: unknown, code: string) {
+  let current: unknown = error
+  for (let depth = 0; depth < 6 && current && typeof current === 'object'; depth += 1) {
+    if ('code' in current && (current as { code?: unknown }).code === code) return true
+    current = 'cause' in current ? (current as { cause?: unknown }).cause : undefined
+  }
+  return false
+}
 
 function mapProgress(row: ProgressRow) {
   return {
@@ -91,6 +112,21 @@ class MySqlAiTaskRepository implements AiTaskRepository {
       )).limit(1)
       return row ?? null
     })
+  }
+
+  async listTaskEvents(taskId: string) {
+    try {
+      return await mapped('aiTask.listTaskEvents', async () => this.executor
+        .select()
+        .from(aiTaskEvents)
+        .where(eq(aiTaskEvents.taskId, taskId))
+        .orderBy(asc(aiTaskEvents.createdAt), asc(aiTaskEvents.id)))
+    } catch (error) {
+      // 允许应用候选构建先于 0046 迁移启动；任务仍以 ai_tasks 为事实源，
+      // 迁移完成后无需重启即可开始返回持久阶段历史。
+      if (errorChainHasCode(error, 'ER_NO_SUCH_TABLE')) return []
+      throw error
+    }
   }
 
   async findTaskByIdempotency(userId: string, idempotencyKey: string) {
@@ -184,6 +220,11 @@ class MySqlAiTaskRepository implements AiTaskRepository {
     updatedAt: Date
   }) {
     return mapped('aiTask.updateRunningStage', async () => {
+      const [before] = await this.executor.select({ stage: aiTasks.stage }).from(aiTasks).where(and(
+        eq(aiTasks.id, input.taskId),
+        eq(aiTasks.status, 'running'),
+        eq(aiTasks.leaseOwner, input.leaseOwner),
+      )).limit(1)
       const [result] = await this.executor.update(aiTasks).set({
         stage: input.stage,
         progress: sql<number>`GREATEST(${aiTasks.progress}, ${input.progress})`,
@@ -193,6 +234,23 @@ class MySqlAiTaskRepository implements AiTaskRepository {
         eq(aiTasks.status, 'running'),
         eq(aiTasks.leaseOwner, input.leaseOwner),
       ))
+      const eventStage = visibleTaskEventStage(input.stage)
+      if (
+        result.affectedRows === 1
+        && eventStage
+        && eventStage !== visibleTaskEventStage(before?.stage || '')
+      ) {
+        await this.executor.insert(aiTaskEvents).values({
+          taskId: input.taskId,
+          stage: eventStage,
+          progress: Math.max(0, Math.min(100, input.progress)),
+          createdAt: input.updatedAt,
+        }).onDuplicateKeyUpdate({
+          set: { progress: Math.max(0, Math.min(100, input.progress)) },
+        }).catch((error: unknown) => {
+          console.warn('[ai-task-event] 阶段事实记录失败，不影响正式任务执行', error)
+        })
+      }
       return result.affectedRows === 1
     })
   }

@@ -9,9 +9,13 @@ import { useAuthStore, authedFetch } from '../store/useAuthStore'
 import { Button, Modal } from '../components/ui'
 import {
   AiQuickActions,
-  type AiQuickTaskRequest,
+  type AiQuickSkillSelection,
 } from '../components/AiQuickActions'
-import { AiArtifactCenter, AiTaskCards, type AiTask } from '../components/AiTaskCards'
+import { AiArtifactCenter, type AiTask } from '../components/AiTaskCards'
+import {
+  AiTaskConversationLoading,
+  AiTaskConversationMessage,
+} from '../components/AiTaskConversationMessage'
 import { AiQaCards, type ProjectQaAnswer } from '../components/AiQaCards'
 import { AiErrorBoundary, copyAiErrorId, createAiErrorId } from '../components/AiErrorBoundary'
 import { useToast } from '../components/Toast'
@@ -27,19 +31,9 @@ import {
 import {
   useJwAgent,
   type JwPendingInteraction,
-  type JwQuickSkillName,
 } from '../hooks/useJwAgent'
 import { formatShanghaiDateTime, shanghaiDateKey } from '../lib/dateTime'
 import type { Project } from '../types'
-
-const AI_TASK_TYPE_BY_ACTION: Record<AiQuickTaskRequest['actionId'], string> = {
-  compliance: 'compliance_statement',
-  proposal: 'investment_proposal',
-  investment_ppt: 'investment_recommendation_ppt',
-  due_diligence: 'due_diligence_report',
-  qa: 'project_qa',
-  custom_template: 'custom_template_document',
-}
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const AI_UPLOAD_ACCEPT = '.pdf,.ppt,.pptx,.xlsx,.xls,.csv,.docx,.txt,.md,.markdown,.png,.jpg,.jpeg,.zip'
@@ -47,6 +41,14 @@ const AI_UPLOAD_EXTENSIONS = new Set(
   AI_UPLOAD_ACCEPT.split(',').map((extension) => extension.slice(1)),
 )
 const CHAT_BOTTOM_FOLLOW_THRESHOLD_PX = 96
+const AI_TASK_LABEL_BY_TYPE: Record<string, string> = {
+  compliance_statement: '合规性说明',
+  investment_proposal: '投资提案',
+  investment_recommendation_ppt: '投资建议书（PPT）',
+  due_diligence_report: '尽调报告',
+  project_qa: '项目 Q&A',
+  custom_template_document: '上传模板文档',
+}
 
 export function isConversationNearBottom(
   scroll: Pick<HTMLElement, 'scrollHeight' | 'scrollTop' | 'clientHeight'>,
@@ -1104,7 +1106,7 @@ function Chat() {
   const [qaAnswers, setQaAnswers] = useState<ProjectQaAnswer[]>([])
   const [qaAnswersLoading, setQaAnswersLoading] = useState(false)
   const [taskMutationId, setTaskMutationId] = useState<string | null>(null)
-  const quickTaskLocksRef = useRef(new Set<string>())
+  const [selectedQuickSkill, setSelectedQuickSkill] = useState<AiQuickSkillSelection | null>(null)
   const [newSessionOpen, setNewSessionOpen] = useState(false)
   const [newSessionProjectId, setNewSessionProjectId] = useState(initialProject)
   const [availableModels, setAvailableModels] = useState<AvailableModel[]>([])
@@ -1137,7 +1139,7 @@ function Chat() {
     (task) => !task.clientOnly && (task.status === 'pending' || task.status === 'running'),
   )
   const artifactRefreshKey = aiTasks
-    .map((task) => `${task.id}:${task.status}:${task.artifacts?.length ?? 0}`)
+    .map((task) => `${task.id}:${task.status}:${task.updatedAt}:${(task.artifacts ?? []).map((artifact) => artifact.id).join(',')}`)
     .join('|')
   // 把 showToast 注册到模块级 toast 桥（供 downloadWorkspaceFile / downloadRemoteUrl 等模块函数弹提示）
   useEffect(() => { registerAiToast(showToast) }, [showToast])
@@ -1350,7 +1352,7 @@ function Chat() {
           ))
         }
       } catch (error) {
-        // 轮询失败不清空已有任务卡，避免短暂网络波动造成结果消失。
+        // 轮询失败不清空已有文档 Agent 消息，避免短暂网络波动造成结果消失。
         console.warn('AI task polling failed:', (error as Error).message)
       }
     }
@@ -1588,7 +1590,7 @@ function Chat() {
     if (prevBusyRef.current && !busy) {
       setWsRefresh((k) => k + 1)
       // 快捷 Skill 由对话中的 create_ai_task 创建任务；本轮结束后立即恢复
-      // 当前会话任务快照，确保新进度卡无需刷新页面即可出现并进入轮询。
+      // 当前会话任务快照，确保文档 Agent 执行消息无需刷新即可出现并进入轮询。
       if (currentConversationRowId) {
         void apiGet<{ list: AiTask[] }>(
           `/ai/tasks?conversationId=${encodeURIComponent(currentConversationRowId)}`,
@@ -1609,18 +1611,40 @@ function Chat() {
   const send = async (
     question = input,
     contextOverride?: { projectId: string; projectName: string },
-    options?: { quickSkillName?: JwQuickSkillName },
   ): Promise<boolean> => {
-    const clean = question.trim()
+    const quickSkill = contextOverride ? null : selectedQuickSkill
+    const clean = question.trim() || (quickSkill
+      ? quickSkill.actionId === 'custom_template'
+        ? '请根据已上传模板生成文档。'
+        : `请生成${quickSkill.actionLabel}。`
+      : '')
     if (!clean && uploads.length === 0) return false
     if (busy || uploading || submitLockRef.current) return false
+    if (quickSkill) {
+      if (!UUID_PATTERN.test(quickSkill.projectId) || quickSkill.projectId !== currentSession?.projectId) {
+        showToast('快捷 Skill 与当前会话项目不一致，请重新选择', 'error')
+        return false
+      }
+      const unavailableUploads = uploads.filter((upload) => !upload.fileId)
+      if (unavailableUploads.length) {
+        showToast(
+          `以下本轮附件尚未进入项目资料库，无法完整提交给文档 Skill：${unavailableUploads.map((upload) => upload.name).join('、')}`,
+          'error',
+        )
+        return false
+      }
+    }
     submitLockRef.current = true
     setSubmitting(true)
     setInput('')
     setCapabilityOpen(false)
     setSlashMenuOpen(false)
-    const skillCtx = activeSkills.length
-      ? `\n【本轮指定技能】${activeSkills.map((item) => `${item.name}（${item.capabilityKey}）`).join('、')}`
+    const requestedSkills = [
+      ...(quickSkill ? [`${quickSkill.actionLabel}（${quickSkill.skillName}）`] : []),
+      ...activeSkills.map((item) => `${item.name}（${item.capabilityKey}）`),
+    ]
+    const skillCtx = requestedSkills.length
+      ? `\n【本轮指定技能】${requestedSkills.join('、')}`
       : ''
     // 把本轮上传文件的可审计路径和入库状态随消息带给 Agent；正式文档
     // 快捷 Skill 另以结构化 fileId 绑定，服务端会校验文件属于当前项目。
@@ -1655,7 +1679,7 @@ function Chat() {
     try {
       let formalPptTaskDispatched = false
       if (
-        !options?.quickSkillName
+        !quickSkill
         && effectiveScope === 'project'
         && effectiveProject?.projectId
         && UUID_PATTERN.test(effectiveProject.projectId)
@@ -1704,7 +1728,7 @@ function Chat() {
             ])
             showToast(
               dispatch.reused
-                ? '当前会话已有投资建议书任务，已定位到进度卡'
+                ? '当前会话已有投资建议书任务，已定位到执行消息'
                 : '已根据当前对话和项目资料启动投资建议书 PPT 任务',
               'success',
             )
@@ -1712,8 +1736,7 @@ function Chat() {
           }
         } catch (error) {
           console.warn('Conversation PPT intent dispatch failed:', (error as Error).message)
-          // 快捷任务必须创建正式任务卡。失败时停止发送通用 Agent，
-          // 否则 Agent 会直接执行 Skill，用户只能看到工具气泡而没有进度条。
+          // 强制投资建议书意图必须成功创建持久任务，避免只产生一次性文本回复。
           if (forceInvestmentPpt) {
             throw new Error(`投资建议书任务创建失败：${(error as Error).message}`)
           }
@@ -1722,14 +1745,18 @@ function Chat() {
       }
       if (!formalPptTaskDispatched) {
         await agent.sendMessage(ctx, {
-          skillName: options?.quickSkillName,
+          skillName: quickSkill?.skillName,
           attachmentFileIds: uploads
             .map((upload) => upload.fileId)
             .filter((fileId): fileId is string => Boolean(fileId)),
           attachmentFileNames: uploads.map((upload) => upload.name),
+          customTemplateId: quickSkill?.customTemplateId,
+          customTemplateName: quickSkill?.customTemplateName,
+          outputFormat: quickSkill?.outputFormat,
         })
       }
       setUploads([])
+      if (quickSkill) setSelectedQuickSkill(null)
       return true
     } catch (err) {
       showToast(`发送失败：${(err as Error).message}`, 'error')
@@ -1756,6 +1783,7 @@ function Chat() {
     setSlashMenuOpen(false)
     setSlashHighlight(0)
     setCapabilitySearch('')
+    setSelectedQuickSkill(null)
     setAiTasks([])
     setQaAnswers([])
   }
@@ -2001,112 +2029,6 @@ function Chat() {
     catch (err) { showToast(`停止失败：${(err as Error).message}`, 'error') }
   }
 
-  const runQuickTask = async (request: AiQuickTaskRequest): Promise<boolean> => {
-    const taskLockKey = `${request.conversationId}:${request.actionId}`
-    if (quickTaskLocksRef.current.has(taskLockKey)) return false
-    if (!UUID_PATTERN.test(request.projectId)) {
-      showToast(`“${request.projectName}”尚未入库，不能提交正式 AI 任务。请先创建或选择已入库项目。`, 'error')
-      return false
-    }
-    quickTaskLocksRef.current.add(taskLockKey)
-    const isFormalDocumentTask = request.actionId === 'proposal'
-      || request.actionId === 'compliance'
-      || request.actionId === 'investment_ppt'
-      || request.actionId === 'qa'
-      || request.actionId === 'due_diligence'
-    const attachmentFileIds = uploads
-      .map((upload) => upload.fileId)
-      .filter((fileId): fileId is string => Boolean(fileId))
-    if (isFormalDocumentTask) {
-      const unavailableUploads = uploads.filter((upload) => !upload.fileId)
-      if (unavailableUploads.length) {
-        quickTaskLocksRef.current.delete(taskLockKey)
-        showToast(
-          `以下本轮附件尚未进入项目资料库，无法完整提交给文档任务：${unavailableUploads.map((upload) => upload.name).join('、')}`,
-          'error',
-        )
-        return false
-      }
-    }
-    const recentConversationContext = messages.slice(-6).map((message) => {
-      const content = (message.role === 'user'
-        ? displayUserMessageText(message)
-        : extractTextParts(message))
-        .replace(/\s+/g, ' ')
-        .trim()
-      return { role: message.role, content }
-    }).filter((message) => (
-      message.content
-      && !message.content.startsWith('请使用 Skill「')
-    )).map((message) => (
-      `${message.role === 'user' ? '用户' : 'AI助手'}：${message.content.slice(0, 500)}`
-    )).join('\n').slice(0, 1_200)
-    const combinedUserInstructions = [
-      request.userInstructions?.trim() || '',
-      recentConversationContext
-        ? `当前会话上下文（仅用于理解生成要求，不作为项目事实证据）：\n${recentConversationContext}`
-        : '',
-    ].filter(Boolean).join('\n\n').slice(0, 2_000)
-    const parameters: Record<string, unknown> = {
-      sourceCutoffDate: request.sourceCutoffDate,
-      outputFormat: request.outputFormat,
-      networkSupplement: true,
-      researchIntent: request.userInstructions?.trim()
-        || `联网检索“${request.projectName}”的具体项目、主体、团队、产品、客户、融资、商业化与风险信息，并结合当前项目资料生成${request.actionLabel}。`,
-    }
-    if (isFormalDocumentTask) {
-      parameters.attachmentFileIds = attachmentFileIds
-      if (combinedUserInstructions) {
-        parameters.userInstructions = combinedUserInstructions
-      }
-      if (request.actionId === 'due_diligence') {
-        parameters.diligenceScope = request.diligenceScope || '商业尽调'
-      }
-      if (request.actionId === 'investment_ppt') {
-        parameters.language = request.language || '中文'
-        parameters.structureMode = 'standard'
-      }
-    } else if (request.actionId === 'custom_template') {
-      parameters.customTemplateId = request.customTemplateId
-      parameters.customTemplateName = request.customTemplateName
-    }
-    try {
-      const taskSession = sessions.find((session) => session.rowId === request.conversationId)
-      if (!taskSession?.projectId || taskSession.projectId !== request.projectId) {
-        showToast('当前项目随会话固定，请重新打开快捷任务后再试', 'error')
-        return false
-      }
-      const task = await apiPost<AiTask>('/ai/tasks', {
-        type: AI_TASK_TYPE_BY_ACTION[request.actionId],
-        projectId: request.projectId,
-        // 任务关联 chat_conversations 的 UUID 主键，而不是运行时 agentId。
-        conversationId: request.conversationId,
-        parameters,
-        idempotencyKey: `quick-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`,
-      })
-      if (currentConversationRowIdRef.current === request.conversationId) {
-        setAiTasks((items) => [
-          task,
-          ...items.filter((item) => item.id !== task.id),
-        ])
-      }
-      if (isFormalDocumentTask) setUploads([])
-      showToast(`${request.actionLabel}任务已创建，可在消息区查看进度`, 'success')
-      return true
-    } catch (error) {
-      console.warn(`${request.actionLabel} task was not created`, error)
-      const message = error instanceof ApiError
-        ? error.code === 'AI_SKILL_NOT_AVAILABLE'
-          ? error.withContext(`${request.actionLabel}生成技能尚未部署完成，请联系管理员更新并重启服务`)
-          : `${request.actionLabel}任务创建失败：${error.message}`
-        : `${request.actionLabel}任务暂未创建，请稍后再试`
-      showToast(message, 'error')
-      return false
-    } finally {
-      quickTaskLocksRef.current.delete(taskLockKey)
-    }
-  }
-
   const cancelAiTask = async (task: AiTask) => {
     if (taskMutationId) return
     setTaskMutationId(task.id)
@@ -2130,7 +2052,15 @@ function Chat() {
         idempotencyKey: `retry-${task.id}-${Date.now().toString(36)}`,
       })
       setAiTasks((items) => [retried, ...items.filter((item) => item.id !== retried.id)])
-      showToast('已按原参数继续生成文档', 'success')
+      const label = AI_TASK_LABEL_BY_TYPE[task.type] ?? '文档'
+      const visibleRequest = `请继续生成${label}。`
+      if (currentProject?.id && currentConversationRowId === task.conversationId) {
+        const runtimeMessage = `【当前项目】${currentProject.name}\n【projectId】${currentProject.id}\n【用户问题】${visibleRequest}\n【系统已执行】已根据原任务 ${task.id} 创建续跑任务 ${retried.id}。不要再次创建任务；请调用 get_ai_task_status 查询新任务，并用普通对话说明已继续执行。`
+        await agent.sendMessage(runtimeMessage).catch((error) => {
+          console.warn('AI task continuation message was not sent, task remains active', error)
+        })
+      }
+      showToast('已按原参数继续生成，执行过程将在对话中更新', 'success')
     } catch (error) {
       console.warn('AI task continuation was not created', error)
       showToast('继续生成操作暂未开始，请稍后再试', 'info')
@@ -2288,13 +2218,13 @@ function Chat() {
               return (
                 <AiErrorBoundary
                   key={item.key}
-                  level="section"
-                  title="AI 业务任务卡显示异常"
+                  level="message"
+                  title="文档 Agent 消息显示异常"
                   resetKey={`${item.task.id}:${item.task.updatedAt}`}
                 >
-                  <AiTaskCards
-                    tasks={[item.task]}
-                    mutatingTaskId={taskMutationId}
+                  <AiTaskConversationMessage
+                    task={item.task}
+                    mutating={taskMutationId === item.task.id}
                     onCancel={cancelAiTask}
                     onRetry={retryAiTask}
                     onNotify={showToast}
@@ -2320,18 +2250,11 @@ function Chat() {
             )}
             {aiTasksLoading && (
               <AiErrorBoundary
-                level="section"
-                title="AI 业务任务卡显示异常"
+                level="message"
+                title="文档 Agent 消息显示异常"
                 resetKey={`${currentConversationRowId}:task-loading`}
               >
-                <AiTaskCards
-                  tasks={[]}
-                  loading
-                  mutatingTaskId={taskMutationId}
-                  onCancel={cancelAiTask}
-                  onRetry={retryAiTask}
-                  onNotify={showToast}
-                />
+                <AiTaskConversationLoading />
               </AiErrorBoundary>
             )}
             {busy && (() => {
@@ -2353,7 +2276,11 @@ function Chat() {
               projects={projects}
               currentProjectId={scope === 'project' ? currentSession?.projectId ?? '' : ''}
               conversationId={currentConversationRowId}
-              onRunTask={runQuickTask}
+              selectedActionId={selectedQuickSkill?.actionId}
+              onSelectSkill={(selection) => {
+                setSelectedQuickSkill(selection)
+                window.requestAnimationFrame(() => inputRef.current?.focus())
+              }}
             />
           </AiErrorBoundary>
           <div
@@ -2389,6 +2316,25 @@ function Chat() {
                     <button onClick={() => removeUpload(u.path)} className="ml-0.5 text-slate-400 hover:text-rose-500" aria-label="移除">×</button>
                   </span>
                 ))}
+              </div>
+            )}
+            {selectedQuickSkill && (
+              <div className="mb-1 flex flex-wrap gap-1.5 px-1" aria-label="本轮快捷 Skill">
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-brand-300 bg-brand-50 px-2.5 py-1 text-[11px] font-medium text-brand-700">
+                  <Boxes className="h-3 w-3" />
+                  Skill · {selectedQuickSkill.skillName}
+                  {selectedQuickSkill.customTemplateName && (
+                    <span className="max-w-44 truncate text-brand-500" title={selectedQuickSkill.customTemplateName}>
+                      · {selectedQuickSkill.customTemplateName}
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setSelectedQuickSkill(null)}
+                    className="ml-0.5 rounded-full text-brand-400 hover:bg-brand-100 hover:text-brand-700"
+                    aria-label={`取消快捷 Skill ${selectedQuickSkill.skillName}`}
+                  >×</button>
+                </span>
               </div>
             )}
             {activeSkills.length > 0 && (
@@ -2536,7 +2482,9 @@ function Chat() {
               aria-keyshortcuts="Enter Shift+Enter"
               rows={2}
               className="w-full resize-none border-0 px-2 py-1 text-sm leading-6 outline-none placeholder:text-slate-400"
-              placeholder={scope === 'project'
+              placeholder={selectedQuickSkill
+                ? '补充项目数据或写作要求（可选）'
+                : scope === 'project'
                 ? currentProject
                   ? `向 AI 询问 ${currentProject.name}…`
                   : '请先选择项目，再向 AI 提问…'
@@ -2545,7 +2493,7 @@ function Chat() {
             <input ref={fileInputRef} type="file" multiple className="hidden" onChange={onPickFiles} accept={AI_UPLOAD_ACCEPT} />
             <div className="flex items-center justify-between px-1"><div className="flex min-w-0 items-center gap-2 text-[10px] text-slate-400"><button onClick={() => fileInputRef.current?.click()} disabled={uploading} title="上传文件（PDF/PPT/Excel/CSV/ZIP 等，agent 可直接读）" className="grid h-6 w-6 shrink-0 place-items-center rounded text-slate-400 hover:bg-slate-100 hover:text-brand-600 disabled:opacity-50">{uploading ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Paperclip className="h-3.5 w-3.5" />}</button><button data-ai-capability-trigger="true" type="button" onClick={() => { setCapabilitySearch(''); setSlashMenuOpen(false); setCapabilityOpen((open) => !open) }} disabled={!currentConversationRowId || !availableCapabilities.some((item) => item.kind === 'skill') || busy} title="选择当前会话持续使用的技能" aria-expanded={capabilityOpen} className={`inline-flex h-6 shrink-0 items-center gap-1 rounded px-1.5 hover:bg-slate-100 disabled:opacity-40 ${activeSkillIds.length ? 'bg-brand-50 text-brand-700' : 'text-slate-400 hover:text-brand-600'}`}><Boxes className="h-3.5 w-3.5" /><span>能力{activeSkillIds.length ? ` ${activeSkillIds.length}` : ''}</span></button><CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-500" /><span className="truncate">Enter 发送 · Shift + Enter 换行</span></div>{busy
               ? <button aria-label="停止" title="停止生成" onClick={stop} className="grid h-8 w-8 place-items-center rounded-lg bg-rose-500 text-white hover:bg-rose-600"><Square className="h-3.5 w-3.5" /></button>
-              : <button aria-label="发送" title="发送（Enter）" disabled={sending || uploading || (!input.trim() && uploads.length === 0)} onClick={() => { void send() }} className="grid h-8 w-8 place-items-center rounded-lg bg-brand-600 text-white disabled:cursor-not-allowed disabled:bg-slate-200"><Send className="h-4 w-4" /></button>}</div>
+              : <button aria-label="发送" title="发送（Enter）" disabled={sending || uploading || (!selectedQuickSkill && !input.trim() && uploads.length === 0)} onClick={() => { void send() }} className="grid h-8 w-8 place-items-center rounded-lg bg-brand-600 text-white disabled:cursor-not-allowed disabled:bg-slate-200"><Send className="h-4 w-4" /></button>}</div>
           </div>
           {agentError && (
             <div className="mt-2 flex items-center gap-2 rounded-lg border border-rose-100 bg-rose-50 px-3 py-2 text-[11px] text-rose-600">

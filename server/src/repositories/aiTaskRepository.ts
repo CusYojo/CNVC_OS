@@ -119,6 +119,14 @@ export type AiTaskRecord = {
   updatedAt: Date
 }
 
+export type AiTaskEventRecord = {
+  id: string
+  taskId: string
+  stage: string
+  progress: number
+  createdAt: Date
+}
+
 export type AiArtifactRecord = {
   id: string
   taskId: string
@@ -199,6 +207,7 @@ export interface AiTaskRepository {
     conversationId?: string
     limit?: number
   }): Promise<AiTaskRecord[]>
+  listTaskEvents(taskId: string): Promise<AiTaskEventRecord[]>
   claimTask(input: {
     taskId: string
     leaseOwner: string

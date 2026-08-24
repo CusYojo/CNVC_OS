@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import {
   BriefcaseBusiness,
   CheckCircle2,
@@ -14,7 +14,6 @@ import { apiGet, apiPost, ApiError } from '../lib/api'
 import { uid } from '../lib/uid'
 import type { Project } from '../types'
 import { Button, Modal, ProgressBar } from './ui'
-import { shanghaiDateKey } from '../lib/dateTime'
 
 export type AiDocumentActionId = 'compliance' | 'proposal' | 'investment_ppt' | 'due_diligence' | 'qa'
 export type AiQuickActionId = AiDocumentActionId | 'custom_template'
@@ -86,17 +85,21 @@ type TemplateAnalysisAccepted = {
   progress: number
 }
 
-export type AiQuickTaskRequest = {
+export type AiQuickSkillName =
+  | 'generate-investment-compliance-note'
+  | 'draft-investment-proposal'
+  | 'investment-committee-ppt'
+  | 'draft-due-diligence-report'
+  | 'draft-investment-qa'
+  | 'generate-document-from-template'
+
+export type AiQuickSkillSelection = {
   actionId: AiQuickActionId
   actionLabel: string
+  skillName: AiQuickSkillName
   projectId: string
   projectName: string
   conversationId: string
-  sourceCutoffDate: string
-  userInstructions?: string
-  language?: string
-  structureMode?: string
-  diligenceScope?: string
   customTemplateId?: string
   customTemplateName?: string
   outputFormat: 'DOCX' | 'PPTX' | 'PDF'
@@ -107,19 +110,20 @@ type ActionConfig = {
   label: string
   description: string
   mode: 'task' | 'template'
+  skillName: AiQuickSkillName
+  outputFormat: 'DOCX' | 'PPTX'
   icon: typeof ShieldCheck
 }
 
 const ACTIONS: ActionConfig[] = [
-  { id: 'compliance', label: '合规性说明', description: '基于当前项目资料库生成合规初稿', mode: 'task', icon: ShieldCheck },
-  { id: 'proposal', label: '投资提案', description: '按核心规范生成内部立项或投委会材料', mode: 'task', icon: BriefcaseBusiness },
-  { id: 'investment_ppt', label: '投资建议书（PPT）', description: '直接调用 investment-committee-ppt 生成正式 PPTX', mode: 'task', icon: Presentation },
-  { id: 'due_diligence', label: '尽调报告', description: '资深投资经理生成当前项目内部尽调报告', mode: 'task', icon: ClipboardCheck },
-  { id: 'qa', label: 'Q&A', description: '资深投资经理生成当前项目投资问答 DOCX', mode: 'task', icon: HelpCircle },
-  { id: 'custom_template', label: '上传模板', description: '识别模板结构和内容要求', mode: 'template', icon: Upload },
+  { id: 'compliance', label: '合规性说明', description: '预选 generate-investment-compliance-note', mode: 'task', skillName: 'generate-investment-compliance-note', outputFormat: 'DOCX', icon: ShieldCheck },
+  { id: 'proposal', label: '投资提案', description: '预选 draft-investment-proposal', mode: 'task', skillName: 'draft-investment-proposal', outputFormat: 'DOCX', icon: BriefcaseBusiness },
+  { id: 'investment_ppt', label: '投资建议书（PPT）', description: '预选 investment-committee-ppt', mode: 'task', skillName: 'investment-committee-ppt', outputFormat: 'PPTX', icon: Presentation },
+  { id: 'due_diligence', label: '尽调报告', description: '预选 draft-due-diligence-report', mode: 'task', skillName: 'draft-due-diligence-report', outputFormat: 'DOCX', icon: ClipboardCheck },
+  { id: 'qa', label: 'Q&A', description: '预选 draft-investment-qa', mode: 'task', skillName: 'draft-investment-qa', outputFormat: 'DOCX', icon: HelpCircle },
+  { id: 'custom_template', label: '上传模板', description: '分析模板后预选 generate-document-from-template', mode: 'template', skillName: 'generate-document-from-template', outputFormat: 'DOCX', icon: Upload },
 ]
 
-const today = () => shanghaiDateKey()
 const MAX_TEMPLATE_BYTES = 25 * 1024 * 1024
 
 function readFileAsDataUrl(
@@ -144,19 +148,17 @@ export function AiQuickActions({
   projects,
   currentProjectId,
   conversationId,
-  onRunTask,
+  selectedActionId,
+  onSelectSkill,
 }: {
   disabled: boolean
   projects: Project[]
   currentProjectId: string
   conversationId: string
-  onRunTask: (request: AiQuickTaskRequest) => Promise<boolean>
+  selectedActionId?: AiQuickActionId | null
+  onSelectSkill: (selection: AiQuickSkillSelection) => void
 }) {
   const [activeAction, setActiveAction] = useState<ActionConfig | null>(null)
-  const [proposalInstructions, setProposalInstructions] = useState('')
-  const [language] = useState('中文')
-  const submitLocksRef = useRef(new Set<AiQuickActionId>())
-  const [submittingActionIds, setSubmittingActionIds] = useState<AiQuickActionId[]>([])
   const [templateFile, setTemplateFile] = useState<File | null>(null)
   const [analyzingCustomTemplate, setAnalyzingCustomTemplate] = useState(false)
   const [analyzedTemplate, setAnalyzedTemplate] = useState<AnalyzedCustomTemplate | null>(null)
@@ -168,68 +170,34 @@ export function AiQuickActions({
     [currentProjectId, projects],
   )
 
-  const openAction = (action: ActionConfig, initialInstructions = '') => {
-    if (
-      disabled
-      || !selectedProject
-      || submitLocksRef.current.has(action.id)
-    ) return
-    // 补充要求只属于本次快捷任务。每次重新打开弹窗均从空值开始，
-    // 避免上一个合规、提案或 Q&A 任务的要求串入下一份文档。
-    setProposalInstructions(initialInstructions.slice(0, 2_000))
-    if (action.id === 'custom_template') {
-      setTemplateFile(null)
-      setAnalyzedTemplate(null)
-      setTemplateError('')
-      setTemplateProgress(null)
-    }
-    setActiveAction(action)
+  const selectSkill = (action: ActionConfig, template?: AnalyzedCustomTemplate) => {
+    if (disabled || !selectedProject) return
+    onSelectSkill({
+      actionId: action.id,
+      actionLabel: action.id === 'custom_template' ? '按上传模板生成' : action.label,
+      skillName: action.skillName,
+      projectId: selectedProject.id,
+      projectName: selectedProject.name,
+      conversationId,
+      customTemplateId: template?.id,
+      customTemplateName: template?.originalFileName,
+      outputFormat: template
+        ? template.format === 'pptx' ? 'PPTX' : 'DOCX'
+        : action.outputFormat,
+    })
   }
 
-  const submit = async (
-    templateOverride?: AnalyzedCustomTemplate,
-    actionOverride?: ActionConfig | null,
-    projectOverride?: Project,
-  ) => {
-    const action = actionOverride ?? activeAction
-    const project = projectOverride ?? selectedProject
-    if (!action || !project || submitLocksRef.current.has(action.id)) return false
-    const taskTemplate = templateOverride ?? analyzedTemplate
-    if (
-      action.id === 'custom_template' && !taskTemplate
-    ) return false
-    submitLocksRef.current.add(action.id)
-    setSubmittingActionIds((items) => items.includes(action.id) ? items : [...items, action.id])
-    try {
-      const ok = await onRunTask({
-        actionId: action.id,
-        actionLabel: action.id === 'custom_template'
-          ? '按上传模板生成'
-          : action.label,
-        projectId: project.id,
-        projectName: project.name,
-        conversationId,
-        sourceCutoffDate: today(),
-        userInstructions: proposalInstructions.trim(),
-        language,
-        structureMode: action.id === 'investment_ppt' ? 'standard' : undefined,
-        diligenceScope: action.id === 'due_diligence' ? '商业尽调' : undefined,
-        customTemplateId: taskTemplate?.id,
-        customTemplateName: taskTemplate?.originalFileName,
-        outputFormat: action.id === 'custom_template'
-          ? taskTemplate?.format === 'pptx' ? 'PPTX' : 'DOCX'
-          : action.id === 'investment_ppt'
-          ? 'PPTX'
-          : 'DOCX',
-      })
-      if (ok) {
-        setActiveAction((current) => current?.id === action.id ? null : current)
-      }
-      return ok
-    } finally {
-      submitLocksRef.current.delete(action.id)
-      setSubmittingActionIds((items) => items.filter((id) => id !== action.id))
+  const openAction = (action: ActionConfig) => {
+    if (disabled || !selectedProject) return
+    if (action.mode === 'task') {
+      selectSkill(action)
+      return
     }
+    setTemplateFile(null)
+    setAnalyzedTemplate(null)
+    setTemplateError('')
+    setTemplateProgress(null)
+    setActiveAction(action)
   }
 
   const analyzeTemplate = async () => {
@@ -381,8 +349,6 @@ export function AiQuickActions({
   }
 
   const isTemplateUploadAction = activeAction?.id === 'custom_template'
-  const activeActionSubmitting = !!activeAction
-    && submittingActionIds.includes(activeAction.id)
   const activeActionAnalyzing = activeAction?.id === 'custom_template'
     ? analyzingCustomTemplate
     : false
@@ -392,15 +358,14 @@ export function AiQuickActions({
       <div className="mb-3">
         <div className="mb-2 flex items-center gap-2 text-[11px] font-medium text-slate-500">
           <FileCheck2 className="h-3.5 w-3.5 text-brand-600" />
-          快捷任务
+          快捷 Skill
         </div>
         <div className="flex gap-2 overflow-x-auto pb-1">
           {ACTIONS.map((action) => {
             const Icon = action.icon
-            const selected = action.id === activeAction?.id
+            const selected = action.id === selectedActionId || action.id === activeAction?.id
             const actionDisabled = disabled
               || !selectedProject
-              || submittingActionIds.includes(action.id)
             return (
               <button
                 key={action.id}
@@ -420,10 +385,10 @@ export function AiQuickActions({
                   <span className="block whitespace-nowrap text-[11px] font-medium text-slate-700">{action.label}</span>
                   <span className="block truncate text-[9px] text-slate-400">
                     {selected
-                      ? '已打开，请确认生成要求'
+                      ? action.mode === 'template' ? '正在准备模板' : '已选中，直接在下方输入要求'
                       : action.mode === 'template'
                         ? '识别结构与内容'
-                        : '确认参数后执行'}
+                        : '点击后在输入框补充要求'}
                   </span>
                 </span>
               </button>
@@ -433,15 +398,15 @@ export function AiQuickActions({
       </div>
 
       <Modal
-        open={!!activeAction}
-        title={activeAction?.id === 'custom_template' ? '上传并分析模板' : activeAction ? `生成${activeAction.label}` : '快捷任务'}
-        onClose={() => { if (!activeActionSubmitting && !activeActionAnalyzing) setActiveAction(null) }}
+        open={isTemplateUploadAction}
+        title="上传并分析模板"
+        onClose={() => { if (!activeActionAnalyzing) setActiveAction(null) }}
         footer={(
           <>
             <Button
               variant="secondary"
               onClick={() => setActiveAction(null)}
-              disabled={activeActionSubmitting || activeActionAnalyzing}
+              disabled={activeActionAnalyzing}
             >
               取消
             </Button>
@@ -457,21 +422,21 @@ export function AiQuickActions({
                 )
               : (
                   <Button
-                    onClick={() => { void submit() }}
-                    loading={activeActionSubmitting}
-                    disabled={!selectedProject || (isTemplateUploadAction && !analyzedTemplate)}
+                    onClick={() => {
+                      if (!activeAction || !analyzedTemplate) return
+                      selectSkill(activeAction, analyzedTemplate)
+                      setActiveAction(null)
+                    }}
+                    disabled={!selectedProject || !analyzedTemplate}
                   >
-                    {activeAction?.id === 'custom_template'
-                      ? '根据模板生成文档'
-                      : '开始生成'}
+                    使用此模板
                   </Button>
                 )}
           </>
         )}
-        width={isTemplateUploadAction ? 'max-w-4xl' : undefined}
+        width="max-w-4xl"
       >
-        {isTemplateUploadAction
-          ? (
+        {isTemplateUploadAction && (
               <div className="space-y-4">
                 <label className="block">
                   <span className="label">项目（随当前会话固定）</span>
@@ -548,49 +513,6 @@ export function AiQuickActions({
                   </div>
                 )}
               </div>
-            )
-          : (
-        <div className="space-y-4">
-          <label className="block">
-            <span className="label">项目（随当前会话固定）</span>
-            <div className="input flex items-center bg-slate-50 text-slate-600" aria-label="当前会话项目">
-              {selectedProject?.name ?? '未绑定项目'}
-            </div>
-          </label>
-          {(
-            activeAction?.id === 'proposal'
-            || activeAction?.id === 'investment_ppt'
-            || activeAction?.id === 'compliance'
-            || activeAction?.id === 'qa'
-          ) && (
-            <>
-              <label className="block">
-                <span className="label">
-                  {activeAction.id === 'qa'
-                    ? '重点问题或检索要求（可选）'
-                    : activeAction.id === 'investment_ppt'
-                      ? '投资建议书重点、口径或其他要求（可选）'
-                    : '补充项目数据或写作要求（可选）'}
-                </span>
-                <textarea
-                  className="input min-h-24 resize-y"
-                  value={proposalInstructions}
-                  maxLength={2000}
-                  placeholder={activeAction.id === 'qa'
-                    ? '例如：需要重点回答的争议、用户已确认的数据、指定比较对象或希望重点分析的关键假设。'
-                    : activeAction.id === 'investment_ppt'
-                      ? '例如：重点展示的投资逻辑、交易方案、风险事项或需要强调的项目事实。'
-                    : '例如：本轮拟投资金额、投资主体、基金名称、需重点说明的交易安排，以及希望采用的结构和表达重点。'}
-                  onChange={(event) => setProposalInstructions(event.target.value)}
-                />
-                <span className="mt-1 block text-right text-[10px] text-slate-400">{proposalInstructions.length}/2000</span>
-              </label>
-            </>
-          )}
-          <div className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
-            输出格式：<strong className="text-slate-700">{activeAction?.id === 'investment_ppt' ? 'PPTX' : 'DOCX'}</strong>
-          </div>
-        </div>
             )}
       </Modal>
 

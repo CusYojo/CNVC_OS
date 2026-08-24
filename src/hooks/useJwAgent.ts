@@ -46,13 +46,18 @@ export type JwPendingInteraction = {
 export type JwQuickSkillName =
   | 'draft-investment-proposal'
   | 'generate-investment-compliance-note'
+  | 'investment-committee-ppt'
   | 'draft-investment-qa'
   | 'draft-due-diligence-report'
+  | 'generate-document-from-template'
 
 export type JwSendMessageOptions = {
   skillName?: JwQuickSkillName
   attachmentFileIds?: string[]
   attachmentFileNames?: string[]
+  customTemplateId?: string
+  customTemplateName?: string
+  outputFormat?: 'DOCX' | 'PPTX' | 'PDF'
 }
 
 type JwSnapshot = {
@@ -157,6 +162,9 @@ export function useJwAgent(agentId?: string) {
         ...(options.skillName ? { skillName: options.skillName } : {}),
         ...(options.attachmentFileIds?.length ? { attachmentFileIds: options.attachmentFileIds } : {}),
         ...(options.attachmentFileNames?.length ? { attachmentFileNames: options.attachmentFileNames } : {}),
+        ...(options.customTemplateId ? { customTemplateId: options.customTemplateId } : {}),
+        ...(options.customTemplateName ? { customTemplateName: options.customTemplateName } : {}),
+        ...(options.outputFormat ? { outputFormat: options.outputFormat } : {}),
       })
       await refresh()
     } catch (cause) {

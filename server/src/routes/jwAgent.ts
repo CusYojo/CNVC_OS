@@ -27,11 +27,16 @@ jwAgentRouter.post('/conversations/:agentId/messages', async (req: AuthedRequest
       skillName: z.enum([
         'draft-investment-proposal',
         'generate-investment-compliance-note',
+        'investment-committee-ppt',
         'draft-investment-qa',
         'draft-due-diligence-report',
+        'generate-document-from-template',
       ]).optional(),
       attachmentFileIds: z.array(z.string().uuid()).max(10).default([]),
       attachmentFileNames: z.array(z.string().trim().min(1).max(255)).max(10).default([]),
+      customTemplateId: z.string().uuid().optional(),
+      customTemplateName: z.string().trim().min(1).max(255).optional(),
+      outputFormat: z.enum(['DOCX', 'PPTX', 'PDF']).optional(),
     }).parse(req.body ?? {})
     const result = await sendJwAgentMessage(
       req.user!.uid,
@@ -42,6 +47,9 @@ jwAgentRouter.post('/conversations/:agentId/messages', async (req: AuthedRequest
         skillName: body.skillName,
         attachmentFileIds: body.attachmentFileIds,
         attachmentFileNames: body.attachmentFileNames,
+        customTemplateId: body.customTemplateId,
+        customTemplateName: body.customTemplateName,
+        outputFormat: body.outputFormat,
       },
     )
     if (!result) return res.status(404).json({ code: 'NOT_FOUND', message: '会话不存在' })

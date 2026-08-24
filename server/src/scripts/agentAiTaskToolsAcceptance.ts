@@ -79,6 +79,8 @@ async function main() {
       || first.task?.status !== 'pending' || captured[0]?.userId !== owner.id
       || capturedInput?.projectId !== project.id || capturedInput.conversationId !== conversation.id
       || capturedInput.parameters.outputFormat !== 'DOCX'
+      || capturedInput.parameters.skillName !== 'draft-investment-proposal'
+      || capturedInput.parameters.displayMode !== 'chat'
       || Object.prototype.hasOwnProperty.call(capturedInput.parameters, 'audience')
       || Object.prototype.hasOwnProperty.call(capturedInput.parameters, 'length')
       || JSON.stringify(capturedInput.parameters.attachmentFileIds) !== JSON.stringify(createInput.attachmentFileIds)
@@ -105,6 +107,8 @@ async function main() {
       custom.task?.type !== 'custom_template_document'
       || customInput?.parameters.customTemplateId !== customTemplateId
       || customInput?.parameters.outputFormat !== 'PPTX'
+      || customInput?.parameters.skillName !== 'generate-document-from-template'
+      || customInput?.parameters.displayMode !== 'chat'
     ) throw new Error('create_ai_task custom template ownership/output contract mismatch')
 
     const [task] = await db.insert(aiTasks).values({

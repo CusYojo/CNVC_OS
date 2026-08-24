@@ -22,6 +22,15 @@ export const AGENT_CREATABLE_AI_TASK_TYPES = [
 
 type AgentCreatableAiTaskType = typeof AGENT_CREATABLE_AI_TASK_TYPES[number]
 
+const AGENT_TASK_SKILLS: Record<AgentCreatableAiTaskType, string> = {
+  compliance_statement: 'generate-investment-compliance-note',
+  investment_proposal: 'draft-investment-proposal',
+  investment_recommendation_ppt: 'investment-committee-ppt',
+  due_diligence_report: 'draft-due-diligence-report',
+  project_qa: 'draft-investment-qa',
+  custom_template_document: 'generate-document-from-template',
+}
+
 type AgentAiTaskToolDependencies = {
   createTask: (user: AiTaskUser, input: CreateAiTaskInput) => Promise<unknown>
   getTask: (userId: string, taskId: string) => Promise<unknown>
@@ -81,6 +90,8 @@ function taskParameters(
   const parameters: Record<string, unknown> = {
     sourceCutoffDate,
     outputFormat: type === 'investment_recommendation_ppt' ? 'PPTX' : 'DOCX',
+    skillName: AGENT_TASK_SKILLS[type],
+    displayMode: 'chat',
     ...(cleanInstructions ? { userInstructions: cleanInstructions, researchIntent: cleanInstructions } : {}),
     ...(attachmentFileIds.length ? { attachmentFileIds: [...new Set(attachmentFileIds)].slice(0, 10) } : {}),
   }

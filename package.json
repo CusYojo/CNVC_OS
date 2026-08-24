@@ -182,6 +182,7 @@
     "accept:ai-proposal-template-api": "AI_ACCEPTANCE_SCOPE=remaining AI_ACCEPTANCE_REMAINING_TYPES=custom_template_document,investment_proposal node --env-file-if-exists=.env --import tsx server/src/scripts/aiTaskApiAcceptance.ts",
     "accept:ai-dd-api": "AI_ACCEPTANCE_SCOPE=remaining AI_ACCEPTANCE_REMAINING_TYPES=due_diligence_report node --env-file-if-exists=.env --import tsx server/src/scripts/aiTaskApiAcceptance.ts",
     "accept:ai-skills": "node --env-file-if-exists=.env --import tsx server/src/scripts/aiSkillAcceptance.ts",
+    "accept:ai-chat-native": "node --env-file-if-exists=.env --import tsx server/src/scripts/aiChatNativeQuickActionsAcceptance.ts",
     "accept:socket": "node --env-file-if-exists=.env --import tsx server/src/scripts/socketAcceptance.ts",
     "accept:jw-multiturn-live": "node --env-file-if-exists=.env --import tsx server/src/scripts/jwMultiTurnLiveAcceptance.ts",
     "accept:jw-usage-compaction": "node --env-file-if-exists=.env --import tsx server/src/scripts/jwUsageCompactionAcceptance.ts",
