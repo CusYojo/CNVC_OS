@@ -21,6 +21,42 @@ export type SafeAgentMessage = {
   malformed: boolean
 }
 
+const FORMAL_AI_TASK_CONTROL_TOOL_SUFFIXES = [
+  'create_ai_task',
+  'get_ai_task_status',
+] as const
+
+export function isFormalAiTaskControlPart(part: SafeAgentPart): boolean {
+  if (part.type !== 'dynamic-tool') return false
+  const toolName = (part.toolName ?? '').trim().toLowerCase()
+  return FORMAL_AI_TASK_CONTROL_TOOL_SUFFIXES.some((suffix) => (
+    toolName === suffix || toolName.endsWith(`__${suffix}`)
+  ))
+}
+
+export function isFormalAiTaskReceiptMessage(
+  message: SafeAgentMessage,
+  taskIds: Iterable<string> = [],
+): boolean {
+  if (message.role !== 'assistant') return false
+
+  const text = extractTextParts(message).replace(/\s+/g, ' ').trim()
+  if (!text) {
+    return message.parts.length > 0 && message.parts.every(isFormalAiTaskControlPart)
+  }
+
+  // 正式任务已有独立的对话进度消息。Agent 在工具调用前后生成的“任务已创建”
+  // 和“正在查询状态”属于重复的编排回执，不再展示任务 ID、固定百分比或内部策略。
+  const creationReceipt = (
+    /(?:已创建|创建成功)[^。！？\n]{0,48}(?:正式[^。！？\n]{0,24})?任务/.test(text)
+    || /(?:正式)?[^。！？\n]{0,48}任务(?:已创建|创建成功)/.test(text)
+  )
+  if (creationReceipt) return true
+
+  const mentionsKnownTask = Array.from(taskIds).some((taskId) => taskId && text.includes(taskId))
+  return mentionsKnownTask && /(?:当前进度|执行阶段|任务状态|产物状态|补充资料请求)/.test(text)
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
 }

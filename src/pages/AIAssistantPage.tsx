@@ -22,6 +22,8 @@ import { useToast } from '../components/Toast'
 import { apiGet, apiPost, apiPut, apiPatch, apiDelete, ApiError } from '../lib/api'
 import {
   extractTextParts,
+  isFormalAiTaskControlPart,
+  isFormalAiTaskReceiptMessage,
   normalizeAgentMessages,
   safeStringify,
   toSafeText,
@@ -455,7 +457,8 @@ export function MessagePart({ part }: { part: SafeAgentPart }) {
 export function isUserVisibleMessagePart(part: SafeAgentPart) {
   // Shell commands are implementation details. Keep them in the conversation
   // state for task/progress inference, but never expose command text to users.
-  return !(part.type === 'dynamic-tool' && (part.toolName === 'bash' || part.toolName === 'AskUserQuestion'))
+  return !isFormalAiTaskControlPart(part)
+    && !(part.type === 'dynamic-tool' && (part.toolName === 'bash' || part.toolName === 'AskUserQuestion'))
 }
 
 function displayUserMessageText(message: SafeAgentMessage): string {
@@ -703,13 +706,18 @@ function buildConversationTimeline(
   tasks: AiTask[],
   answers: ProjectQaAnswer[],
 ): ConversationTimelineItem[] {
-  const messageItems: ConversationTimelineItem[] = messages.map((message, index) => ({
-    kind: 'message',
-    key: `message:${message.id}:${index}`,
-    timestampMs: messageTimelineTimestamp(messages, index),
-    stableOrder: index,
-    message,
-  }))
+  const taskIds = tasks.map((task) => task.id)
+  const messageItems: ConversationTimelineItem[] = messages.flatMap((message, index) => (
+    isFormalAiTaskReceiptMessage(message, taskIds)
+      ? []
+      : [{
+          kind: 'message' as const,
+          key: `message:${message.id}:${index}`,
+          timestampMs: messageTimelineTimestamp(messages, index),
+          stableOrder: index,
+          message,
+        }]
+  ))
   const visibleUserPrompts = new Set(
     messages
       .filter((message) => message.role === 'user')
