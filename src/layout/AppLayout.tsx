@@ -2,7 +2,6 @@ import { useAuthStore } from '../store/useAuthStore'
 import {
   Bot,
   BriefcaseBusiness,
-  CalendarCheck2,
   ChevronDown,
   ClipboardCheck,
   FolderKanban,
@@ -11,7 +10,6 @@ import {
   Menu,
   Search,
   Settings,
-  ShieldAlert,
   Sparkles,
   Boxes,
   MessagesSquare,
@@ -27,9 +25,7 @@ const primaryNav = [
   { to: '/projects', label: '我的专属项目', icon: FolderKanban },
   { to: '/sourcing', label: '共享线索池', icon: BriefcaseBusiness },
   { to: '/ai', label: 'AI 智能助手', icon: Bot },
-  { to: '/meetings', label: '会议与待办', icon: CalendarCheck2 },
   { to: '/workflow?view=project', label: 'OA 项目流程', icon: ClipboardCheck },
-  { to: '/risks', label: '风险预警', icon: ShieldAlert },
 ]
 const navSections = [
   {
