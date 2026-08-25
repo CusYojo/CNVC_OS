@@ -47,9 +47,10 @@ export function isFormalAiTaskReceiptMessage(
 
   // 正式任务已有独立的对话进度消息。Agent 在工具调用前后生成的“任务已创建”
   // 和“正在查询状态”属于重复的编排回执，不再展示任务 ID、固定百分比或内部策略。
+  const createdPhrase = '(?:已(?:经)?(?:成功)?创建|创建成功)'
   const creationReceipt = (
-    /(?:已创建|创建成功)[^。！？\n]{0,48}(?:正式[^。！？\n]{0,24})?任务/.test(text)
-    || /(?:正式)?[^。！？\n]{0,48}任务(?:已创建|创建成功)/.test(text)
+    new RegExp(`${createdPhrase}[^。！？\\n]{0,48}(?:正式[^。！？\\n]{0,24})?任务`).test(text)
+    || new RegExp(`(?:正式)?[^。！？\\n]{0,48}任务${createdPhrase}`).test(text)
   )
   if (creationReceipt) return true
 
