@@ -5,7 +5,7 @@ import { AlertCircle, Bot, Boxes, Check, CheckCircle2, ChevronDown, ChevronRight
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useAppStore } from '../store/useAppStore'
-import { useAuthStore, authedFetch } from '../store/useAuthStore'
+import { useAuthStore } from '../store/useAuthStore'
 import { Button, Modal } from '../components/ui'
 import {
   AiQuickActions,
@@ -68,8 +68,8 @@ type ConversationPptTaskResult = {
 }
 
 // —— 模块级 toast 桥 ——
-// downloadWorkspaceFile / OSS 下载等模块级函数与深层组件（WsNode）都需要弹提示，
-// 但它们拿不到 Chat 组件里的 useToast。Chat 挂载时把 showToast 注册到这里。
+// OSS 下载等模块级函数需要弹提示，但它们拿不到 Chat 组件里的 useToast。
+// Chat 挂载时把 showToast 注册到这里。
 let __toast: ((msg: string, kind?: 'success' | 'error' | 'info') => void) | null = null
 export function registerAiToast(fn: (msg: string, kind?: 'success' | 'error' | 'info') => void) { __toast = fn }
 function toast(msg: string, kind: 'success' | 'error' | 'info' = 'info') { __toast?.(msg, kind) }
@@ -860,47 +860,6 @@ function PptTaskBoard({ parts, busy }: { parts: SafeAgentPart[]; busy: boolean }
   )
 }
 
-// ———————————— AI 生成产物 + 内联预览（免 OSS 中转）————————————
-type WsArtifact = { name: string; path: string; type: 'file'; size: number; mtime: number; ext: string }
-type WsFile = { path: string; name: string }
-
-function fmtSize(n: number): string {
-  if (!n) return ''
-  if (n < 1024) return `${n} B`
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
-  return `${(n / 1024 / 1024).toFixed(1)} MB`
-}
-
-function fmtTime(ms: number): string {
-  if (!ms) return ''
-  return formatShanghaiDateTime(ms, {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
-}
-
-// 工作区下载：统一走 authedFetch 携带同源会话取字节→blob→程序化下载。
-async function downloadWorkspaceFile(file: WsFile): Promise<void> {
-  toast(`正在下载「${file.name}」…`, 'info')
-  let res: Response
-  try {
-    res = await authedFetch(`/api/workspace/file?path=${encodeURIComponent(file.path)}&download=1`)
-  } catch (e) {
-    toast(`下载失败：网络错误（${(e as Error).message}）`, 'error')
-    throw e
-  }
-  if (!res.ok) {
-    const msg = res.status === 401 ? '登录已过期，请刷新页面重新登录后再下载' : `下载失败：服务端返回 HTTP ${res.status}`
-    toast(msg, 'error')
-    throw new Error(`HTTP ${res.status}`)
-  }
-  const blob = await res.blob()
-  triggerBlobDownload(blob, file.name)
-  toast(`「${file.name}」已开始下载`, 'success')
-}
-
 // OSS/外链下载：跨域 URL 的 <a download> 会被浏览器忽略而变成导航（尤其 pptx 会当成预览打开），
 // 故先 fetch 成 blob 再走强制下载，保证真的落盘。失败时兜底用原链接新标签打开。
 async function downloadRemoteUrl(url: string, filename: string): Promise<void> {
@@ -914,150 +873,6 @@ async function downloadRemoteUrl(url: string, filename: string): Promise<void> {
     toast(`直接下载失败，已为你在新标签打开：${(e as Error).message}`, 'error')
     window.open(url, '_blank', 'noopener')
   }
-}
-
-function WorkspacePanel({ refreshKey, onRefresh, onOpen }: { refreshKey: number; onRefresh: () => void; onOpen: (f: WsFile) => void }) {
-  const [artifacts, setArtifacts] = useState<WsArtifact[] | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [truncated, setTruncated] = useState(false)
-
-  useEffect(() => {
-    let active = true
-    setLoading(true)
-    apiGet<{ entries: WsArtifact[]; truncated?: boolean }>('/workspace/artifacts')
-      .then((r) => {
-        if (!active) return
-        setArtifacts(r.entries)
-        setTruncated(Boolean(r.truncated))
-        setError(null)
-      })
-      .catch((e) => {
-        if (!active) return
-        setError((e as Error).message)
-      })
-      .finally(() => { if (active) setLoading(false) })
-    return () => { active = false }
-  }, [refreshKey])
-
-  return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex items-center justify-between px-3 pb-1 pt-3">
-        <div>
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">AI 生成产物</p>
-          <p className="mt-0.5 text-[10px] text-slate-400">点击预览，或直接下载</p>
-        </div>
-        <button
-          onClick={onRefresh}
-          disabled={loading}
-          title="刷新产物"
-          className="rounded p-1 text-slate-300 hover:bg-white hover:text-brand-600 disabled:opacity-50"
-        >
-          <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
-        </button>
-      </div>
-      <div className="min-h-0 flex-1 space-y-1 overflow-y-auto px-2 py-2">
-        {error && <p className="px-3 py-2 text-[11px] text-rose-500">{error}</p>}
-        {!artifacts && !error && <p className="px-2 py-3 text-[11px] text-slate-400">正在加载产物…</p>}
-        {artifacts?.map((artifact) => {
-          const parent = artifact.path.split('/').slice(0, -1).join('/')
-          return (
-            <div
-              key={artifact.path}
-              role="button"
-              tabIndex={0}
-              onClick={() => onOpen({ path: artifact.path, name: artifact.name })}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault()
-                  onOpen({ path: artifact.path, name: artifact.name })
-                }
-              }}
-              className="group flex cursor-pointer items-center gap-2 rounded-lg border border-transparent bg-white/70 px-2.5 py-2 outline-none hover:border-brand-100 hover:bg-white focus:border-brand-300"
-            >
-              <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-slate-100 text-slate-500">
-                <FileIcon className="h-4 w-4" />
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-xs font-medium text-slate-700" title={artifact.name}>{artifact.name}</span>
-                <span className="mt-0.5 block truncate text-[10px] text-slate-400" title={parent}>
-                  {[artifact.ext.replace('.', '').toUpperCase(), fmtSize(artifact.size), fmtTime(artifact.mtime), parent].filter(Boolean).join(' · ')}
-                </span>
-              </span>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation()
-                  void downloadWorkspaceFile({ path: artifact.path, name: artifact.name }).catch(() => {})
-                }}
-                title="下载"
-                className="grid h-7 w-7 shrink-0 place-items-center rounded text-slate-300 hover:bg-brand-50 hover:text-brand-600"
-              >
-                <Download className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          )
-        })}
-        {artifacts && artifacts.length === 0 && !error && (
-          <div className="rounded-lg border border-dashed border-slate-200 px-3 py-6 text-center">
-            <FileIcon className="mx-auto h-6 w-6 text-slate-300" />
-            <p className="mt-2 text-[11px] text-slate-400">暂无生成产物</p>
-            <p className="mt-1 text-[10px] text-slate-300">AI 完成文件生成后会自动出现在这里</p>
-          </div>
-        )}
-        {truncated && <p className="px-2 pt-1 text-[10px] text-slate-400">仅展示最近 200 个产物</p>}
-      </div>
-    </div>
-  )
-}
-
-// 内联预览（Canvas）：用 authedFetch 带同源会话取文件字节，按 MIME 渲染图片/PDF/HTML/文本/Markdown，免 OSS。
-function FilePreview({ file, onClose }: { file: WsFile; onClose: () => void }) {
-  const [kind, setKind] = useState<'image' | 'pdf' | 'html' | 'md' | 'text' | 'other'>('other')
-  const [url, setUrl] = useState<string | null>(null)
-  const [text, setText] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    let objUrl: string | null = null
-    setUrl(null); setText(null); setError(null); setKind('other')
-    const ext = (file.name.split('.').pop() ?? '').toLowerCase()
-    void (async () => {
-      try {
-        const res = await authedFetch(`/api/workspace/file?path=${encodeURIComponent(file.path)}`)
-        if (!res.ok) throw new Error(`HTTP ${res.status}`)
-        const ct = (res.headers.get('Content-Type') ?? '').toLowerCase()
-        if (ct.startsWith('image/')) { objUrl = URL.createObjectURL(await res.blob()); setKind('image'); setUrl(objUrl) }
-        else if (ct.includes('pdf')) { objUrl = URL.createObjectURL(await res.blob()); setKind('pdf'); setUrl(objUrl) }
-        else if (ct.includes('html')) { setKind('html'); setText(await res.text()) }
-        else if (ext === 'md' || ct.includes('markdown')) { setKind('md'); setText(await res.text()) }
-        else if (ct.startsWith('text/') || ct.includes('json') || ct.includes('csv') || ct.includes('xml')) { setKind('text'); setText(await res.text()) }
-        else { objUrl = URL.createObjectURL(await res.blob()); setKind('other'); setUrl(objUrl) }
-      } catch (e) { setError((e as Error).message) }
-    })()
-    return () => { if (objUrl) URL.revokeObjectURL(objUrl) }
-  }, [file.path, file.name])
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-6" onClick={onClose}>
-      <div className="flex h-full max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center gap-3 border-b border-slate-200 px-4 py-2.5">
-          <FileIcon className="h-4 w-4 shrink-0 text-slate-400" />
-          <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-700" title={file.path}>{file.name}</span>
-          <button onClick={() => { void downloadWorkspaceFile(file).catch((e) => setError(`下载失败：${(e as Error).message}`)) }} className="grid h-7 w-7 place-items-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-brand-600" title="下载"><Download className="h-4 w-4" /></button>
-          <button onClick={onClose} className="grid h-7 w-7 place-items-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-rose-500" title="关闭"><X className="h-4 w-4" /></button>
-        </div>
-        <div className="min-h-0 flex-1 overflow-auto bg-slate-50">
-          {error && <div className="grid h-full place-items-center p-6 text-sm text-rose-500">加载失败：{error}</div>}
-          {!error && kind === 'image' && url && <div className="grid min-h-full place-items-center p-4"><img src={url} alt={file.name} className="max-h-full max-w-full object-contain" /></div>}
-          {!error && kind === 'pdf' && url && <iframe src={url} title={file.name} className="h-full w-full border-0" />}
-          {!error && kind === 'html' && text != null && <iframe srcDoc={text} sandbox="allow-scripts" title={file.name} className="h-full w-full border-0 bg-white" />}
-          {!error && kind === 'md' && text != null && <div className="mx-auto max-w-3xl p-6"><Markdown>{text}</Markdown></div>}
-          {!error && kind === 'text' && text != null && <pre className="whitespace-pre-wrap break-all p-4 text-[13px] leading-6 text-slate-700">{text}</pre>}
-          {!error && kind === 'other' && <div className="grid h-full place-items-center p-6 text-center text-sm text-slate-500"><div><FileIcon className="mx-auto mb-2 h-8 w-8 text-slate-300" />该类型暂不支持内联预览<br /><span className="text-xs text-slate-400">点右上角下载查看</span></div></div>}
-        </div>
-      </div>
-    </div>
-  )
 }
 
 function Chat() {
@@ -1149,7 +964,7 @@ function Chat() {
   const artifactRefreshKey = aiTasks
     .map((task) => `${task.id}:${task.status}:${task.updatedAt}:${(task.artifacts ?? []).map((artifact) => artifact.id).join(',')}`)
     .join('|')
-  // 把 showToast 注册到模块级 toast 桥（供 downloadWorkspaceFile / downloadRemoteUrl 等模块函数弹提示）
+  // 把 showToast 注册到模块级 toast 桥（供 downloadRemoteUrl 等模块函数弹提示）
   useEffect(() => { registerAiToast(showToast) }, [showToast])
   useEffect(() => {
     let active = true
@@ -1396,9 +1211,6 @@ function Chat() {
   const submitLockRef = useRef(false)
   const [submitting, setSubmitting] = useState(false)
   const sending = busy || submitting
-  // 工作区面板：refreshKey 触发重拉；preview 为当前内联预览的文件
-  const [wsRefresh, setWsRefresh] = useState(0)
-  const [preview, setPreview] = useState<WsFile | null>(null)
   const prevBusyRef = useRef(false)
   // 用户上传的文件（本轮待发）：path=沙箱相对路径(agent 可 read/bash 直读)，rag=是否已入项目知识库
   const [uploads, setUploads] = useState<{
@@ -1593,10 +1405,9 @@ function Chat() {
     conversation.scrollTo({ top: conversation.scrollHeight, behavior: 'smooth' })
   }, [messages, aiTasks.length, qaAnswers.length])
 
-  // agent 从"忙"变"闲"（跑完一轮）后刷新工作区，让新生成的文件自动出现
+  // agent 从"忙"变"闲"（跑完一轮）后刷新正式任务快照
   useEffect(() => {
     if (prevBusyRef.current && !busy) {
-      setWsRefresh((k) => k + 1)
       // 快捷 Skill 由对话中的 create_ai_task 创建任务；本轮结束后立即恢复
       // 当前会话任务快照，确保文档 Agent 执行消息无需刷新即可出现并进入轮询。
       if (currentConversationRowId) {
@@ -2539,22 +2350,7 @@ function Chat() {
             }}
           />
         </AiErrorBoundary>
-        <details className="min-h-0 flex-1 overflow-y-auto">
-          <summary className="cursor-pointer border-b border-slate-200 px-3 py-2.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400 hover:bg-white/60 hover:text-slate-600">
-            历史兼容产物（只读）
-          </summary>
-          <div className="min-h-[260px]">
-            <AiErrorBoundary level="section" title="历史产物区域显示异常" resetKey={wsRefresh}>
-              <WorkspacePanel refreshKey={wsRefresh} onRefresh={() => setWsRefresh((k) => k + 1)} onOpen={setPreview} />
-            </AiErrorBoundary>
-          </div>
-        </details>
       </aside>
-      {preview && (
-        <AiErrorBoundary level="part" title="文件预览显示异常" resetKey={preview.path}>
-          <FilePreview file={preview} onClose={() => setPreview(null)} />
-        </AiErrorBoundary>
-      )}
       <Modal
         open={newSessionOpen}
         title="新建会话"
