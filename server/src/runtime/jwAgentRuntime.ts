@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { mkdir } from 'node:fs/promises'
+import { cp, mkdir, rm } from 'node:fs/promises'
 import path from 'node:path'
 import { z } from 'zod'
 import { agentConversationRepository, identityRepositories } from '../repositories/index.js'
@@ -77,6 +77,23 @@ export const JW_AGENT_BUILT_IN_AI_TASK_TYPES = [
   'due_diligence_report',
   'project_qa',
 ] as const satisfies readonly (typeof AGENT_CREATABLE_AI_TASK_TYPES)[number][]
+
+// Interactive conversations may load only these reviewed native Claude Agent
+// SDK Skills. Skill loading grants instructions only; filesystem, subprocess,
+// network and database tools remain outside the interactive tool allowlist.
+export const JW_AGENT_NATIVE_SKILLS = ['skill-creator'] as const
+
+export async function materializeJwAgentNativeSkills(workDir: string): Promise<string[]> {
+  const skillsRoot = path.join(workDir, '.claude', 'skills')
+  await mkdir(skillsRoot, { recursive: true, mode: 0o700 })
+  for (const skillName of JW_AGENT_NATIVE_SKILLS) {
+    const source = path.resolve(process.cwd(), 'server', 'workspace', '.agents', 'skills', skillName)
+    const target = path.join(skillsRoot, skillName)
+    await rm(target, { recursive: true, force: true })
+    await cp(source, target, { recursive: true, force: true })
+  }
+  return [...JW_AGENT_NATIVE_SKILLS]
+}
 
 // Keep the built-in Agent tool free of custom-template parameters. Some model
 // gateways normalize optional tool fields as required fields; exposing
@@ -1174,6 +1191,7 @@ async function createRuntimeSession(
   const workspaceRoot = path.resolve(process.env.AGENT_WORKSPACE || path.join(process.cwd(), 'server', 'agent-workspace'))
   const cwd = resolveJwAgentWorkspace(workspaceRoot, conversationId)
   await mkdir(cwd, { recursive: true })
+  const nativeSkillNames = await materializeJwAgentNativeSkills(cwd)
   const queue = new MessageQueue()
   let session: RuntimeSession | undefined
   const investmentTools = createSdkMcpServer({
@@ -1284,14 +1302,15 @@ async function createRuntimeSession(
       maxTurns: config.maxTurns,
       maxBudgetUsd: config.maxBudgetUsd,
       resume: typeof metadata.sdkSessionId === 'string' ? metadata.sdkSessionId : undefined,
-      // 对话 Runtime 只暴露宿主绑定的固定 MCP 工具和由服务端暂停/鉴权/持久化的
-      // AskUserQuestion。文件、Shell 与其他 Claude Code 内建工具不进入模型上下文。
+      // 对话 Runtime 只暴露宿主绑定的固定 MCP 工具、受控 Skill 白名单，以及由
+      // 服务端暂停/鉴权/持久化的 AskUserQuestion。文件、Shell 与其他 Claude Code
+      // 内建工具不进入模型上下文。
       // `dontAsk` 会在进入 canUseTool 前自动拒绝需要确认的工具；使用 default
       // 才能让显式 settings.permissions.ask 规则把 AskUserQuestion 交给宿主。
       // 可见内建工具仍只有这一项，未知工具继续由 canUseTool 失败关闭。
       permissionMode: 'default',
-      tools: [JW_AGENT_INTERACTIVE_TOOL],
-      skills: [],
+      tools: [JW_AGENT_INTERACTIVE_TOOL, 'Skill'],
+      skills: nativeSkillNames,
       // AskUserQuestion is deliberately absent: allowedTools bypasses the
       // permission callback. The explicit settings.ask rule below routes it to canUseTool.
       allowedTools: hostInvestmentEnabled ? allowedAgentTools : [],
@@ -1310,7 +1329,7 @@ async function createRuntimeSession(
         return denyJwAgentToolCall({ toolName, userId, userName: runtimeUser.name, conversationId })
       },
       includePartialMessages: true,
-      settingSources: [],
+      settingSources: ['project'],
       mcpServers: hostInvestmentEnabled ? { investment: investmentTools } : {},
       env: restrictedJwAgentEnvironment(config, cwd),
       systemPrompt: {

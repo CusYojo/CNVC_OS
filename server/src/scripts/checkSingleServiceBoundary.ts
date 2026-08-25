@@ -1349,10 +1349,13 @@ async function main() {
   )
   requireCondition(
     /JW_AGENT_INTERACTIVE_TOOL = 'AskUserQuestion'/.test(jwRuntime)
-    && /tools:\s*\[JW_AGENT_INTERACTIVE_TOOL\]/.test(jwRuntime)
+    && /JW_AGENT_NATIVE_SKILLS = \['skill-creator'\]/.test(jwRuntime)
+    && /materializeJwAgentNativeSkills\(cwd\)/.test(jwRuntime)
+    && /tools:\s*\[JW_AGENT_INTERACTIVE_TOOL, 'Skill'\]/.test(jwRuntime)
+    && /skills:\s*nativeSkillNames/.test(jwRuntime)
     && /toolName === JW_AGENT_INTERACTIVE_TOOL/.test(jwRuntime)
     && /beginJwAgentInteraction/.test(jwRuntime),
-    'JW Runtime must disable all Claude Code built-in tools except the host-handled AskUserQuestion interaction',
+    'JW Runtime must expose only the reviewed native Skill allowlist and host-handled AskUserQuestion interaction',
   )
   requireCondition(
     /ask:\s*\[JW_AGENT_INTERACTIVE_TOOL\]/.test(jwRuntime)
@@ -1361,8 +1364,7 @@ async function main() {
     && /allowedAgentToolSet\.has\(toolName\)/.test(jwRuntime),
     'JW AskUserQuestion must be an explicit ask rule and must never be auto-allowed',
   )
-  requireCondition(/skills:\s*\[\]/.test(jwRuntime), 'JW Runtime must disable implicit Skills')
-  requireCondition(/settingSources:\s*\[\]/.test(jwRuntime), 'JW Runtime must not load filesystem settings')
+  requireCondition(/settingSources:\s*\['project'\]/.test(jwRuntime), 'JW Runtime must load only controlled project Skill settings')
   requireCondition(/maxTurns:\s*config\.maxTurns/.test(jwRuntime), 'JW Runtime must cap model turns')
   requireCondition(/maxBudgetUsd:\s*config\.maxBudgetUsd/.test(jwRuntime), 'JW Runtime must cap model cost')
   requireCondition(!/bypassPermissions/.test(jwRuntime), 'JW Runtime must not bypass tool permissions')
@@ -3766,7 +3768,7 @@ async function main() {
     'JW model, token usage, cost and context compaction state must persist in MySQL and recover through snapshots',
   )
   requireCondition(
-    /tools:\s*\[JW_AGENT_INTERACTIVE_TOOL\]/.test(jwRuntime)
+    /tools:\s*\[JW_AGENT_INTERACTIVE_TOOL, 'Skill'\]/.test(jwRuntime)
     && /permissionMode: 'default'/.test(jwRuntime)
     && /ask:\s*\[JW_AGENT_INTERACTIVE_TOOL\]/.test(jwRuntime)
     && /ask-user-question-visible-but-not-auto-allowed/.test(jwInteractionAcceptance)
