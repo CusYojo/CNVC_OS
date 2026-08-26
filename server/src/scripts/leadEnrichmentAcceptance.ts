@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import {
   LEAD_ENRICHMENT_SCHEMA_VERSION,
+  LEAD_DETAIL_ENRICHMENT_TOPIC_KEYS,
   LEAD_ENRICHMENT_TOPIC_KEYS,
   classifyPaperContent,
   initialTopicStates,
@@ -9,10 +10,11 @@ import {
   normalizePaperIdentity,
 } from '../services/leadEnrichmentContract.js'
 import { buildLeadEnrichmentSnapshot, validateLeadFactCandidate } from '../services/leadEnrichmentService.js'
+import { leadTopicResearchContract } from '../services/leadTopicWebResearchService.js'
 import { companyRegistrationEligibility } from '../services/leadRegistry.js'
 
 const root = process.cwd()
-const [migration, instanceMigration, eventService, enrichmentService, worker, retryPolicy, circuitBreaker, evidenceClassification, conflictDetection, sourceSubjectMatch, publicIntelService, scoreService, routes, serverEntry, sourceDocuments, detailPage, systemPage, backfill, summaryService, intakeService, reserveIntakeService, reviewService, topicResearch, envExample] = await Promise.all([
+const [migration, instanceMigration, eventService, enrichmentService, worker, retryPolicy, circuitBreaker, evidenceClassification, conflictDetection, sourceSubjectMatch, publicIntelService, scoreService, routes, serverEntry, sourceDocuments, detailPage, systemPage, backfill, summaryService, intakeService, reserveIntakeService, reviewService, topicResearch, codexCliResearch, codexWorkerRunner, envExample] = await Promise.all([
   readFile(`${root}/server/drizzle/0047_add_lead_enrichment_evidence.sql`, 'utf8'),
   readFile(`${root}/server/drizzle/0049_add_lead_fact_instance_keys.sql`, 'utf8'),
   readFile(`${root}/server/src/services/leadPipelineEventService.ts`, 'utf8'),
@@ -36,6 +38,8 @@ const [migration, instanceMigration, eventService, enrichmentService, worker, re
   readFile(`${root}/server/src/services/leadReserveIntakeService.ts`, 'utf8'),
   readFile(`${root}/server/src/services/leadPipelineReviewService.ts`, 'utf8'),
   readFile(`${root}/server/src/services/leadTopicWebResearchService.ts`, 'utf8'),
+  readFile(`${root}/server/src/services/codexCliWebSearchService.ts`, 'utf8'),
+  readFile(`${root}/server/src/scripts/runLeadEnrichmentCodexWorker.ts`, 'utf8'),
   readFile(`${root}/.env.example`, 'utf8'),
 ])
 
@@ -49,7 +53,10 @@ assert.match(migration, /rating_schema_version/)
 assert.match(instanceMigration, /instance_key/)
 assert.match(instanceMigration, /uq_lead_facts_instance_version/)
 assert.equal(LEAD_ENRICHMENT_TOPIC_KEYS.length, 13)
-assert.equal(LEAD_ENRICHMENT_SCHEMA_VERSION, 'lead-enrichment-v2')
+assert.equal(LEAD_ENRICHMENT_SCHEMA_VERSION, 'lead-enrichment-v3')
+assert.deepEqual(LEAD_DETAIL_ENRICHMENT_TOPIC_KEYS, [
+  'basic_profile', 'financing', 'team', 'products', 'latest_developments',
+])
 assert.match(eventService, /enqueueLeadEnrichmentJob/)
 assert.match(eventService, /lead-scoring-input.*project-scoring-input/s)
 assert.match(eventService, /company_deregistered/)
@@ -69,6 +76,9 @@ assert.match(worker, /leadEnrichmentCircuitBreaker/)
 assert.match(worker, /quarantineProviderBudgetLeadEnrichmentRetries/)
 assert.match(worker, /provider_billing_dead_letter_on_startup/)
 assert.match(worker, /isLeadEnrichmentProviderBudgetError\(error\) \? 'billing'/)
+assert.match(worker, /not_rendered_on_lead_detail/)
+assert.match(worker, /polling = current[\s\S]*if \(polling === current\) polling = undefined/)
+assert.doesNotMatch(worker, /polling = current\.finally/)
 assert.match(retryPolicy, /rate_limit[\s\S]*network[\s\S]*model[\s\S]*parse[\s\S]*validation[\s\S]*budget/)
 assert.match(retryPolicy, /isLeadEnrichmentProviderBudgetError/)
 assert.match(retryPolicy, /额度不足/)
@@ -81,9 +91,26 @@ assert.match(evidenceClassification, /official_public_record/)
 assert.match(conflictDetection, /同一事实键出现多个不同值/)
 assert.match(conflictDetection, /leadFactIdentityKey/)
 assert.match(topicResearch, /repeatable fact requires a stable instanceKey/)
-assert.match(topicResearch, /lead-topic-web-research-v6/)
+assert.match(topicResearch, /lead-topic-web-research-v7-detail-fields/)
+assert.deepEqual(leadTopicResearchContract('financing').factKeys, [
+  'financing.status', 'financing.round', 'financing.amount', 'financing.investors',
+])
+assert.deepEqual(leadTopicResearchContract('latest_developments').factKeys, ['news.event', 'news.event_date'])
+assert(leadTopicResearchContract('basic_profile').factKeys.includes('profile.website'))
+assert(leadTopicResearchContract('basic_profile').factKeys.includes('profile.industry'))
 assert.match(topicResearch, /candidates: z\.array/)
 assert.match(topicResearch, /quote: z\.string/)
+assert.match(topicResearch, /LEAD_ENRICHMENT_RESEARCH_BACKEND === 'codex-cli'/)
+assert.match(codexCliResearch, /'--search', 'exec'/)
+assert.match(codexCliResearch, /'--ephemeral'/)
+assert.match(codexCliResearch, /'read-only'/)
+assert.match(codexCliResearch, /--output-schema/)
+assert.match(codexCliResearch, /requestCodexCliMultiTopicWebSearchText/)
+assert.match(codexCliResearch, /minItems: topicKeys\.length/)
+assert.match(codexCliResearch, /maxItems: topicKeys\.length/)
+assert.match(codexCliResearch, /budgetMultiplier: index === 0 \? topicKeys\.length : 1/)
+assert.doesNotMatch(codexCliResearch, /dangerously-bypass/)
+assert.match(codexWorkerRunner, /LEAD_ENRICHMENT_RESEARCH_BACKEND !== 'codex-cli'/)
 assert.match(sourceSubjectMatch, /market_policy/)
 assert.match(enrichmentService, /手动重试联网补全专题/)
 assert.match(enrichmentService, /getLeadEnrichmentDisplayProfile/)
@@ -212,6 +239,9 @@ assert.throws(() => validateLeadFactCandidate({
 }), /E3 evidence cannot be verified/)
 
 const states = initialTopicStates({ entityType: 'research', hasCommercialCompany: false })
+assert.equal(states.basic_profile, 'queued')
+assert.equal(states.financing, 'not_applicable')
+assert.equal(states.ownership, 'not_applicable')
 for (const key of LEAD_ENRICHMENT_TOPIC_KEYS) if (states[key] === 'queued') states[key] = 'missing'
 const snapshot = buildLeadEnrichmentSnapshot({
   leadId: 'lead', jobId: 'job', entityType: 'research', topicStates: states,
@@ -219,12 +249,23 @@ const snapshot = buildLeadEnrichmentSnapshot({
 })
 assert.equal(snapshot.status, 'ready')
 
+const companyStates = initialTopicStates({ entityType: 'company' })
+assert.equal(Object.values(companyStates).filter((status) => status === 'queued').length, 5)
+assert.equal(Object.values(companyStates).filter((status) => status === 'not_applicable').length, 8)
+for (const key of LEAD_DETAIL_ENRICHMENT_TOPIC_KEYS) companyStates[key] = 'completed'
+const completeDetailSnapshot = buildLeadEnrichmentSnapshot({
+  leadId: 'company-lead', jobId: 'company-job', entityType: 'company', topicStates: companyStates,
+  facts: [], evidenceIndex: {}, gaps: [], conflicts: [],
+})
+assert.equal(completeDetailSnapshot.coverage, 100)
+
 console.log(JSON.stringify({
   ok: true,
   checks: [
     'entity-graph-and-seven-versioned-enrichment-tables-with-score-binding',
     'pipeline-ready-enqueues-without-scoring-recursion',
-    'thirteen-topic-worker-health-and-provider-billing-circuit',
+    'detail-field-topic-scope-worker-health-provider-billing-circuit-and-repeat-polling',
+    'codex-cli-web-search-worker-keeps-host-evidence-gates',
     'evidence-gate-and-immutable-snapshot',
     'openalex-content-and-deregistered-company-guards',
     'independent-intake-worker-and-auto-score-rollback-switches',

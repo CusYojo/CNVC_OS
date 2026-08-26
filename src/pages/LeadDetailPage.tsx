@@ -274,15 +274,23 @@ export function LeadDetailPage() {
   const profile = lead.radarProfile?.profile ?? {}
   const paperMeta = lead.radarProfile?.paperMeta
   const registry = lead.companyRegistry ?? lead.scoring?.registry ?? {}
+  const verifiedFacts = enrichmentFacts.filter(isEvidenceBackedFact)
+  const verifiedFact = (...factKeys: string[]) => verifiedFacts.find((fact) => factKeys.includes(fact.factKey))
+  const verifiedFactText = (factKeys: string[], fallback = '') => {
+    const fact = verifiedFact(...factKeys)
+    return fact ? displayFactValue(fact.value) : fallback
+  }
   const companyName = research ? lead.name : text(lead.companyName, lead.name)
+  const verifiedWebsite = verifiedFactText(['profile.website'])
   const officialSite = research
-    ? externalUrl(lead.scoring?.officialSite) || externalUrl(lead.website) || externalUrl(lead.radarProfile?.link)
-    : verifiedCompanyWebsite(lead.scoring?.officialSite, lead.website)
+    ? externalUrl(verifiedWebsite) || externalUrl(lead.scoring?.officialSite) || externalUrl(lead.website) || externalUrl(lead.radarProfile?.link)
+    : externalUrl(verifiedWebsite) || verifiedCompanyWebsite(lead.scoring?.officialSite, lead.website)
   const articleSourceUrl = externalUrl(lead.fundingRounds?.[0]?.sourceUrl)
     || externalUrl(lead.sourceUrl)
     || (!research ? externalUrl(lead.radarProfile?.link) : '')
   const converted = lead.poolStatus === '已转专属项目' || Boolean(lead.convertedProjectId)
-  const industryTags = splitLeadIndustryTags(lead.industry)
+  const industryValue = verifiedFactText(['profile.industry'], text(lead.industry))
+  const industryTags = splitLeadIndustryTags(industryValue)
   const firstFunding = lead.fundingRounds?.[0]
   const rawFundingStage = displayLeadFundingValue(lead.stageDisplay, firstFunding?.round, lead.round) || '融资轮次待核验'
   const fundingStage = rawFundingStage === '未融资（来源标注）' ? '未融资' : rawFundingStage
@@ -309,12 +317,6 @@ export function LeadDetailPage() {
     const field = sourceLabeledField(key)
     if (!field) return fallback
     return <span className="lead-review-rights-note">{field.value}<a className="lead-review-inline-link" href={externalUrl(field.sourceUrl)} target="_blank" rel="noreferrer">来源<ExternalLink /></a><small>{field.evidenceStatus === 'derived_source_labeled' ? 'Codex 基于原文归纳，待交叉核验' : '原文已标注，待交叉核验'}</small></span>
-  }
-  const verifiedFacts = enrichmentFacts.filter(isEvidenceBackedFact)
-  const verifiedFact = (...factKeys: string[]) => verifiedFacts.find((fact) => factKeys.includes(fact.factKey))
-  const verifiedFactText = (factKeys: string[], fallback = '') => {
-    const fact = verifiedFact(...factKeys)
-    return fact ? displayFactValue(fact.value) : fallback
   }
   const verifiedFactNode = (factKeys: string[], fallback: ReactNode = '待核验'): ReactNode => {
     const fact = verifiedFact(...factKeys)
@@ -350,7 +352,7 @@ export function LeadDetailPage() {
       registry.regLocation,
       lead.registeredAddress,
     ), 'registeredAddress'))],
-    ['所属行业', text(lead.industry)],
+    ['所属行业', industryValue],
     ['所在地区', verifiedFactNode(['profile.headquarters'], registryFact(lead.region, 'registeredAddress'))],
     [isUnfinanced ? '融资状态' : '融资轮次', verifiedFactNode(['financing.status', 'financing.round'], articleSourceUrl ? fundingStage : '待核验')],
     ['业务阶段', verifiedFactNode(['profile.development_stage', 'profile.project_stage'], '待核验')],
@@ -382,7 +384,7 @@ export function LeadDetailPage() {
     ['所属机构', paperAffiliations.length ? <span className="lead-review-inline-tags">{paperAffiliations.map((affiliation) => <a href={externalUrl(affiliation.sourceUrl) || undefined} target="_blank" rel="noreferrer" key={affiliation.name}>{affiliation.name}<ExternalLink /></a>)}</span> : '机构待核验'],
     ['研究团队', text(paperMeta?.researchTeam?.name || verifiedFactText(['profile.team_name']), '研究团队待核验')],
     ['作者—机构对应', paperAuthorAffiliations.length ? <span className="lead-review-rights-note">{paperAuthorAffiliations.map((item) => `${item.author}—${item.affiliation}`).join('；')}<small>仅展示来源明确确认的逐人对应关系</small></span> : <span className="lead-review-rights-note">未确认<small>不根据机构列表强行分配作者</small></span>],
-    ['研究方向', text(lead.industry)],
+    ['研究方向', industryValue],
     ['成果公开时间', displayDate(paperMeta?.publishedAt || lead.radarProfile?.publishedAt)],
     ...(paperMeta?.publicationDateStatus === 'source_declared_future' && paperMeta.declaredPublishedAt ? [[
       '来源声明日期',

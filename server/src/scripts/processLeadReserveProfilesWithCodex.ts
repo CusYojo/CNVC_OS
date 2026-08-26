@@ -239,6 +239,14 @@ function validateBatchOutput(batch: Candidate[], raw: unknown) {
       const sourceText = sourceKey ? compact(candidate.modelInput[sourceKey], 4_000) : ''
       if (!value || !quote || !sourceText || !sourceText.includes(quote)) continue
       if (/^(?:待核验|待补充|未披露|暂无|不详)$/.test(value)) continue
+      const foreignSubjects = batch
+        .filter((item) => item.row.lead_id !== candidate.row.lead_id)
+        .flatMap((item) => [item.modelInput.brandName, item.modelInput.companyName])
+        .map((item) => compact(item, 256))
+        .filter((item) => item.length >= 4)
+      if (foreignSubjects.some((subject) => value.includes(subject) && !sourceText.includes(subject))) continue
+      const valueNumbers = value.match(/\d+(?:\.\d+)?/g) || []
+      if (valueNumbers.some((number) => !quote.includes(number))) continue
       values[field] = { value, quote, sourceKey: sourceKey as 'intro' | 'oneWord' }
     }
     output.set(candidate.row.lead_id, values)
@@ -253,6 +261,12 @@ async function runCodexBatch(batch: Candidate[], batchIndex: number, schemaPath:
   const inputPath = join(batchDir, 'input.json')
   const outputPath = join(batchDir, 'output.json')
   await writeFile(inputPath, JSON.stringify({ records: batch.map((item) => item.modelInput) }, null, 2))
+  try {
+    const cached = JSON.parse(await readFile(outputPath, 'utf8')) as unknown
+    const validated = validateBatchOutput(batch, cached)
+    console.log(JSON.stringify({ event: 'codex_profile_batch_reused', batchIndex, records: batch.length }))
+    return validated
+  } catch { /* missing or invalid output is regenerated */ }
   let lastError = ''
   for (let attempt = 1; attempt <= retries + 1; attempt += 1) {
     const result = await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve, reject) => {
@@ -268,7 +282,7 @@ async function runCodexBatch(batch: Candidate[], batchIndex: number, schemaPath:
       const timeout = setTimeout(() => {
         child.kill('SIGTERM')
         setTimeout(() => child.kill('SIGKILL'), 5_000).unref()
-      }, 240_000)
+      }, 420_000)
       child.on('error', reject)
       child.on('close', (code) => {
         clearTimeout(timeout)

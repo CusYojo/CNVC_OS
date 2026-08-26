@@ -371,19 +371,21 @@ export async function refreshLeadEnrichmentProjection(leadId: string, jobId?: st
   )
   const job = jobRows[0]
   if (!job) return null
-  const [topicRows] = await pool.query<Array<RowDataPacket & { status: string; count: number }>>(
-    `SELECT status,COUNT(*) count FROM ${topicRunsTable} WHERE job_id=? GROUP BY status`, [job.id],
+  const [topicRows] = await pool.query<Array<RowDataPacket & { topic_key: string; status: string }>>(
+    `SELECT topic_key,status FROM ${topicRunsTable} WHERE job_id=?`, [job.id],
   )
-  const counts = Object.fromEntries(topicRows.map((row) => [row.status, Number(row.count)]))
-  const completed = [...LEAD_ENRICHMENT_TERMINAL_TOPIC_STATUSES]
-    .reduce((sum, status) => sum + Number(counts[status] || 0), 0)
+  const counts = topicRows.reduce<Record<string, number>>((result, row) => ({
+    ...result, [row.status]: (result[row.status] || 0) + 1,
+  }), {})
+  const applicableRows = topicRows.filter((row) => row.status !== 'not_applicable')
+  const completed = applicableRows.filter((row) => LEAD_ENRICHMENT_TERMINAL_TOPIC_STATUSES.has(row.status as LeadEnrichmentTopicStatus)).length
   const projection = {
     jobId: job.id,
     status: job.status,
     entityType: job.entity_type,
     entityStatus: job.entity_status,
     completedTopics: completed,
-    totalTopics: LEAD_ENRICHMENT_TOPIC_KEYS.length,
+    totalTopics: applicableRows.length,
     topicCounts: counts,
     updatedAt: job.updated_at instanceof Date ? job.updated_at.toISOString() : String(job.updated_at),
   }
@@ -492,8 +494,8 @@ export async function enqueueLeadEnrichmentJob(input: {
         `UPDATE ${leadsTable} SET scoring=JSON_SET(COALESCE(scoring,JSON_OBJECT()),'$.enrichment',CAST(? AS JSON)) WHERE id=?`,
         [JSON.stringify({
           jobId: persistedJobId, status: 'queued', entityType, entityStatus,
-          completedTopics: Object.values(states).filter((status) => LEAD_ENRICHMENT_TERMINAL_TOPIC_STATUSES.has(status)).length,
-          totalTopics: LEAD_ENRICHMENT_TOPIC_KEYS.length,
+          completedTopics: Object.values(states).filter((status) => status !== 'not_applicable' && LEAD_ENRICHMENT_TERMINAL_TOPIC_STATUSES.has(status)).length,
+          totalTopics: Object.values(states).filter((status) => status !== 'not_applicable').length,
           topicCounts: Object.values(states).reduce<Record<string, number>>((counts, status) => ({ ...counts, [status]: (counts[status] || 0) + 1 }), {}),
           updatedAt: new Date().toISOString(),
         }), input.leadId],
@@ -1570,8 +1572,10 @@ export function buildLeadEnrichmentSnapshot(input: {
   const sortedTopicRuns = [...(input.topicRuns ?? [])].sort((left, right) => (
     canonicalEnrichmentJson(left).localeCompare(canonicalEnrichmentJson(right))
   ))
-  const coverage = Math.round(Object.values(input.topicStates)
-    .filter((status) => status === 'completed' || status === 'partial').length / LEAD_ENRICHMENT_TOPIC_KEYS.length * 100)
+  const applicableTopicStates = Object.values(input.topicStates).filter((status) => status !== 'not_applicable')
+  const coverage = applicableTopicStates.length
+    ? Math.round(applicableTopicStates.filter((status) => status === 'completed' || status === 'partial').length / applicableTopicStates.length * 100)
+    : 100
   const content = {
     schemaVersion: LEAD_ENRICHMENT_SCHEMA_VERSION,
     leadId: input.leadId,

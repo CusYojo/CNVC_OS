@@ -6,6 +6,7 @@ import { mysqlTableName, quoteMysqlIdentifier } from '../db/config.js'
 import { redactSensitiveText } from '../security/redactSecrets.js'
 import {
   LEAD_ENRICHMENT_TERMINAL_TOPIC_STATUSES,
+  leadDetailEnrichmentTopicApplies,
   normalizePaperIdentity,
   topicRequiresConfirmedEntity,
   type LeadEntityStatus,
@@ -263,7 +264,7 @@ function paperDeterministicFacts(topicKey: LeadEnrichmentTopicKey, radarProfile:
 }
 
 async function finishTopic(lease: TopicLease, input: {
-  status: 'completed' | 'partial' | 'missing' | 'review'
+  status: 'completed' | 'partial' | 'missing' | 'not_applicable' | 'review'
   metrics: JsonObject
   promptVersion?: string
   model?: string
@@ -332,6 +333,13 @@ async function failTopic(lease: TopicLease, error: unknown) {
 
 async function executeTopic(lease: TopicLease) {
   const topicStartedAt = Date.now()
+  if (!leadDetailEnrichmentTopicApplies({ topicKey: lease.topic_key, entityType: lease.entity_type })) {
+    await finishTopic(lease, {
+      status: 'not_applicable',
+      metrics: { reason: 'not_rendered_on_lead_detail', durationMs: Date.now() - topicStartedAt },
+    })
+    return
+  }
   const [leadRows] = await pool.query<Array<RowDataPacket & {
     name: string; company_name: string | null; industry: string | null; summary: string | null;
     scoring: unknown; radar_profile: unknown; sources: unknown; pool_status: string
@@ -615,8 +623,9 @@ function poll(): Promise<void> {
       capacity -= 1
     }
   })().catch((error) => console.error('[lead-enrichment] poll failed:', redactSensitiveText(error)))
-  polling = current.finally(() => { if (polling === current) polling = undefined })
-  return polling
+  polling = current
+  void current.finally(() => { if (polling === current) polling = undefined })
+  return current
 }
 
 export async function startLeadEnrichmentWorker() {

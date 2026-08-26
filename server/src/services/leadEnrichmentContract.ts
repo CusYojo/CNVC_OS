@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 
-export const LEAD_ENRICHMENT_SCHEMA_VERSION = 'lead-enrichment-v2' as const
+export const LEAD_ENRICHMENT_SCHEMA_VERSION = 'lead-enrichment-v3' as const
 export const LEAD_ENRICHMENT_TOPIC_KEYS = [
   'basic_profile',
   'financing',
@@ -18,6 +18,30 @@ export const LEAD_ENRICHMENT_TOPIC_KEYS = [
 ] as const
 
 export type LeadEnrichmentTopicKey = typeof LEAD_ENRICHMENT_TOPIC_KEYS[number]
+
+// The shared-lead detail page consumes only these web-enrichment topics. Keep the
+// complete topic enum for stored snapshots and historical rows, but do not spend
+// network/model budget on fields that the current product does not render.
+export const LEAD_DETAIL_ENRICHMENT_TOPIC_KEYS = [
+  'basic_profile',
+  'financing',
+  'team',
+  'products',
+  'latest_developments',
+] as const satisfies readonly LeadEnrichmentTopicKey[]
+
+const LEAD_DETAIL_ENRICHMENT_TOPICS = new Set<LeadEnrichmentTopicKey>(LEAD_DETAIL_ENRICHMENT_TOPIC_KEYS)
+
+export function leadDetailEnrichmentTopicApplies(input: {
+  topicKey: LeadEnrichmentTopicKey
+  entityType: LeadEntityType
+}) {
+  if (!LEAD_DETAIL_ENRICHMENT_TOPICS.has(input.topicKey)) return false
+  // The research detail variant has no financing block.
+  if (input.entityType === 'research' && input.topicKey === 'financing') return false
+  return true
+}
+
 export const LEAD_ENTITY_CONFIRMATION_REQUIRED_TOPICS = new Set<LeadEnrichmentTopicKey>([
   'financing', 'ownership', 'customers_contracts', 'financial_operations',
   'technology_ip', 'industrialization', 'transaction_exit',
@@ -230,12 +254,10 @@ export function initialTopicStates(input: {
   entityType: LeadEntityType
   hasCommercialCompany?: boolean
 }): Record<LeadEnrichmentTopicKey, LeadEnrichmentTopicStatus> {
-  const states = Object.fromEntries(LEAD_ENRICHMENT_TOPIC_KEYS.map((topic) => [topic, 'queued'])) as Record<LeadEnrichmentTopicKey, LeadEnrichmentTopicStatus>
-  if (input.entityType === 'research' && !input.hasCommercialCompany) {
-    states.ownership = 'not_applicable'
-    states.financial_operations = 'not_applicable'
-    states.transaction_exit = 'not_applicable'
-  }
+  const states = Object.fromEntries(LEAD_ENRICHMENT_TOPIC_KEYS.map((topicKey) => [
+    topicKey,
+    leadDetailEnrichmentTopicApplies({ topicKey, entityType: input.entityType }) ? 'queued' : 'not_applicable',
+  ])) as Record<LeadEnrichmentTopicKey, LeadEnrichmentTopicStatus>
   return states
 }
 

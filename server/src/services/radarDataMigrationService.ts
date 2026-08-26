@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import { count, eq, sql } from 'drizzle-orm'
+import { count, eq, inArray, sql } from 'drizzle-orm'
 import ExcelJS from 'exceljs'
 import { db } from '../db/client.js'
 import {
@@ -249,6 +249,29 @@ function chunks<T>(values: T[], size: number): T[][] {
 export async function ingestRadarCandidates(items: JsonObject[]) {
   const normalized = items.map(normalizedCandidate).filter((item): item is NonNullable<typeof item> => Boolean(item))
   for (const batch of chunks(normalized, 100)) {
+    const existingRows = await db.select({
+      sourceKeyHash: radarCandidates.sourceKeyHash,
+      contentHash: radarCandidates.contentHash,
+      payload: radarCandidates.payload,
+    }).from(radarCandidates).where(inArray(
+      radarCandidates.sourceKeyHash,
+      batch.map((item) => item.current.sourceKeyHash),
+    ))
+    const existingByKey = new Map(existingRows.map((row) => [row.sourceKeyHash, row]))
+    for (const item of batch) {
+      const existing = existingByKey.get(item.current.sourceKeyHash)
+      const extraction = existing?.payload?.codex_extraction
+      if (existing?.contentHash !== item.current.contentHash
+        || !extraction || typeof extraction !== 'object' || Array.isArray(extraction)) continue
+      item.current.payload = {
+        ...item.current.payload,
+        ...(existing.payload.project_profile && typeof existing.payload.project_profile === 'object'
+          && !Array.isArray(existing.payload.project_profile)
+          ? { project_profile: existing.payload.project_profile }
+          : {}),
+        codex_extraction: extraction,
+      }
+    }
     await db.insert(radarRawEvents).values(batch.map((item) => item.raw)).onDuplicateKeyUpdate({
       set: { id: sql`VALUES(id)` },
     })
