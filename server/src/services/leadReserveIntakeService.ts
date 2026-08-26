@@ -5,6 +5,7 @@ import { mysqlTableName, quoteMysqlIdentifier } from '../db/config.js'
 import { resolveLeadBusinessRegion } from './leadRegion.js'
 import { recordLeadPipelineRawEvent, transitionLeadPipelineItem } from './leadPipelineEventService.js'
 import { formatShanghaiDateKey } from '../utils/shanghaiTime.js'
+import { companyRegistrationEligibility } from './leadRegistry.js'
 
 export type LeadReserveRawRow = RowDataPacket & {
   id: number
@@ -65,6 +66,10 @@ function reserveLead(row: LeadReserveRawRow, sourceKey: string) {
     : (Array.isArray(detail.tagList) ? detail.tagList.filter(Boolean).join('、') : '待核验')
   const oneLiner = String(detail.oneWord || detail.intro || '').trim()
   const detailUrl = String(row.detail_url || (detail.companyId ? `https://pitchhub.36kr.com/company/${detail.companyId}` : ''))
+  const registrationStatus = String(
+    business.registrationStatus || business.businessStatus || business.regStatus || business.regStatusName
+      || detail.registrationStatus || detail.businessStatus || detail.regStatus || '',
+  ).normalize('NFKC').trim().slice(0, 64)
   const shareholders = Array.isArray(business.shareholder)
     ? business.shareholder.map((item: any) => ({
       name: item?.name || '', percent: item?.percent || '', amount: item?.amomon || '', date: item?.time || '',
@@ -89,6 +94,7 @@ function reserveLead(row: LeadReserveRawRow, sourceKey: string) {
     sourceName: '36氪',
     sourceGroup: '36氪项目库',
     qualityRejected: false,
+    registry: { registrationStatus },
     profile: {
       projectName: name,
       companyName,
@@ -102,11 +108,12 @@ function reserveLead(row: LeadReserveRawRow, sourceKey: string) {
     whatIsIt: oneLiner,
     registry: {
       companyName,
-      registeredCapital: business.shareholder?.[0]?.amomon || '待核验',
       legalRepresentative: business.legalPersonName || '待核验',
-      establishDate: formatDate(business.estiblishTime || detail.setupDate),
-      address: business.regLocation || '待核验',
+      foundedAt: formatDate(business.estiblishTime || detail.setupDate),
+      registeredAddress: business.regLocation || '待核验',
+      regLocation: business.regLocation || '待核验',
       province: detail.provinceName || '待核验',
+      registrationStatus,
     },
     structuredTeam: [],
     structuredShareholders: shareholders,
@@ -124,6 +131,7 @@ function reserveLead(row: LeadReserveRawRow, sourceKey: string) {
   return {
     id: randomUUID(), name, companyName, industry: String(industry || '待核验').slice(0, 64),
     summary: oneLiner.slice(0, 1_000), detailUrl, fundingRounds, radarProfile, scoring, sourceKey, region,
+    registrationStatus,
   }
 }
 
@@ -179,6 +187,23 @@ export async function runLeadReserveIntake(options: {
       const sourceKey = `lead-reserve-event:${raw.event.id}`
       const legacySourceKey = `lead-reserve:${row.id}`
       const lead = reserveLead(row, sourceKey)
+      const registration = companyRegistrationEligibility(lead.registrationStatus)
+      if (!registration.eligibleForLeadPool) {
+        await transitionLeadPipelineItem(raw.event.id, {
+          status: 'rejected', reason: registration.reason!, confidence: 100,
+          evidence: [{
+            field: 'registrationStatus', value: registration.normalizedStatus,
+            rule: 'deregistered-company-exclusion-v1', sourceId: row.src_id || `reserve-row:${row.id}`,
+          }],
+          actorType: 'system', actorId: 'lead-registration-admission-guard',
+        }, connection)
+        await connection.query(
+          `UPDATE ${reserveTable} SET imported=1,imported_at=COALESCE(imported_at,NOW(3)),
+             imported_lead_id=NULL,score_status='excluded',score_last_error=? WHERE id=?`,
+          [registration.reason, row.id],
+        )
+        continue
+      }
       const [existing] = await connection.query<Array<RowDataPacket & { id: string }>>(
         `SELECT id FROM ${leadsTable}
          WHERE JSON_CONTAINS(radar_source_keys, JSON_QUOTE(?))

@@ -17,6 +17,7 @@ import {
 } from './leadPipelineEntityMatchService.js'
 import { currentRequestId } from '../runtime/structuredLogger.js'
 import { resolvePaperProjectIdentity } from './paperIdentity.js'
+import { companyRegistrationEligibility, normalizeLeadRegistry } from './leadRegistry.js'
 
 export type LeadPipelineReviewActor = {
   userId: string
@@ -357,7 +358,15 @@ function validatedManualEvidence(input: ResolveLeadPipelineReviewInput, row: Loc
   if (!subjectName || !isSpecificLeadSubjectName(subjectName, subjectType === 'paper')) {
     throw reviewError('LEAD_REVIEW_INVALID_SUBJECT', '接受线索必须填写明确、可识别的主体名称')
   }
-  const rawText = canonicalJson(parseObject(row.raw_payload))
+  const rawPayload = parseObject(row.raw_payload)
+  const rawProfile = asObject(rawPayload.project_profile)
+  const triggerOutput = parseObject(row.trigger_output)
+  const registry = normalizeLeadRegistry(rawPayload.registry, rawProfile.registry, rawProfile, triggerOutput.registry, triggerOutput)
+  const registration = companyRegistrationEligibility(registry.registrationStatus)
+  if (['company', 'project'].includes(subjectType) && !registration.eligibleForLeadPool) {
+    throw reviewError('COMPANY_DEREGISTERED', '登记状态明确为注销的企业不能人工确认进入共享线索池', 409)
+  }
+  const rawText = canonicalJson(rawPayload)
   if (!normalizeComparable(rawText).includes(normalizeComparable(subjectName))) {
     throw reviewError('LEAD_REVIEW_SUBJECT_NOT_IN_SOURCE', '主体名称无法在不可变原始事件中定位')
   }
@@ -449,6 +458,18 @@ function newLeadFields(row: LockedReviewRow, validated: ReturnType<typeof valida
       abstractZh: meaningful(triggerOutput.translatedSummary, 4_000),
       pdfUrl: meaningful(payload.pdf_url || profile.paper_pdf_url, 4_000),
       publishedAt: meaningful(payload.published_at, 128),
+      declaredPublishedAt: meaningful(payload.declared_published_at, 128),
+      publicationDateStatus: meaningful(payload.publication_date_status, 64),
+      publicationDateBasis: meaningful(payload.publication_date_basis, 64),
+      doi: meaningful(payload.doi, 512),
+      resourceType: meaningful(payload.paper_resource_type, 128),
+      affiliations: Array.isArray(payload.paper_affiliations) ? payload.paper_affiliations : [],
+      paperAuthors: Array.isArray(payload.paper_authors) ? payload.paper_authors : [],
+      authorAffiliations: Array.isArray(payload.paper_author_affiliations) ? payload.paper_author_affiliations : [],
+      researchTeam: asObject(payload.paper_research_team),
+      authorContributions: Array.isArray(payload.paper_author_contributions) ? payload.paper_author_contributions : [],
+      rights: asObject(payload.paper_rights),
+      metadataSource: asObject(payload.paper_metadata_source),
     } : {},
   }
   return {

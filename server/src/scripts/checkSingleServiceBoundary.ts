@@ -298,9 +298,11 @@ async function main() {
     && /failedReleasePreserved: true/.test(buildPlatform)
     && /--discard-candidate/.test(cleanBuild)
     && !/\['dist', 'server-dist'\]/.test(cleanBuild)
-    && deploy.indexOf('stop_app_service_and_orphans') < deploy.indexOf('"$NPM_BIN" run activate:build')
-    && /"\$NPM_BIN" run rollback:build/.test(deploy)
-    && /run accept:build-release/.test(deploy)
+    && deploy.indexOf('systemctl stop "$SERVICE_UNIT"') < deploy.indexOf('npm run activate:build:if-present')
+    && /npm run rollback:build/.test(deploy)
+    && /npm run accept:build-release/.test(deploy)
+    && /rollback_failed_release/.test(deploy)
+    && deploy.indexOf('npm run db:migrate:separated') < deploy.indexOf('systemctl stop "$SERVICE_UNIT"')
     && /active-listener-blocks-activation-with-live-artifacts-unchanged/.test(buildReleaseAcceptance)
     && /invalid-candidate-hash-blocks-activation-with-live-artifacts-unchanged/.test(buildReleaseAcceptance)
     && /rollback-restores-previous-web-and-server-pair/.test(buildReleaseAcceptance)
@@ -326,10 +328,10 @@ async function main() {
     && /pathsExcluded: true/.test(singleServicePrestart)
     && /SINGLE_SERVICE_PRESTART_EVIDENCE_DIR must be absolute/.test(singleServicePrestart)
     && /prestart evidence directory must be a non-symlink directory/.test(singleServicePrestart)
-    && deploy.indexOf('"$NPM_BIN" run activate:build')
-      < deploy.indexOf('run check:single-service-prestart')
-    && deploy.indexOf('run check:single-service-prestart')
-      < deploy.indexOf('systemctl restart "$APP_SERVICE"', deploy.indexOf('run check:single-service-prestart'))
+    && deploy.indexOf('npm run activate:build:if-present')
+      < deploy.indexOf('npm run check:single-service-prestart')
+    && deploy.indexOf('npm run check:single-service-prestart')
+      < deploy.indexOf('systemctl start "$SERVICE_UNIT"', deploy.indexOf('start_project()'))
     && /env-permission-failure-closed/.test(singleServicePrestartAcceptance)
     && /build-symlink-failure-closed/.test(singleServicePrestartAcceptance)
     && /occupied-port-failure-closed/.test(singleServicePrestartAcceptance)
@@ -2313,10 +2315,12 @@ async function main() {
     'manual review host must validate immutable evidence and atomically commit decision, lead, state and audit',
   )
   requireCondition(
-    /线索人工复核/.test(sourcingPage)
-    && /不可变原始材料/.test(sourcingPage)
-    && /提交不可变结论/.test(sourcingPage),
-    'Sourcing page must expose an evidence-first manual review workflow',
+    /线索类型/.test(sourcingPage)
+    && /推荐理由 \/ 信号/.test(sourcingPage)
+    && /更新时间/.test(sourcingPage)
+    && !/线索人工复核|不可变原始材料|提交不可变结论|批量导入|上传 BP|从雷达同步/.test(sourcingPage)
+    && !/\/lead-pipeline\/reviews|\/leads\/imports|\/leads\/bp-uploads|\/leads\/sync-radar/.test(sourcingPage),
+    'Sourcing page must expose the shared pool discovery workflow while operational actions stay hidden',
   )
   for (const contract of [
     'assigned-review-visible-only-to-assignee-and-system-admin',

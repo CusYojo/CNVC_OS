@@ -22,6 +22,22 @@ import {
   type LeadScoringAgentExecution,
 } from './leadScoringAgentService.js'
 import { shouldAttemptLeadScoreFallback } from './leadScoreRetryPolicy.js'
+import {
+  computeLeadRatingV3,
+  leadRatingV3JsonSchema,
+  leadRatingV3PromptTemplate,
+  LEAD_RATING_V3_SCHEMA_VERSION,
+  LEAD_RATING_V3_WORKFLOW,
+} from './leadRatingV3Service.js'
+import {
+  LEAD_COMPANY_INTEL_FIELDS,
+  validateLeadCompanyIntelExtraction,
+  type LeadCompanyIntelField,
+} from './leadCompanyIntelExtractionService.js'
+import {
+  LEAD_COMPANY_WEB_SEARCH_METHOD,
+  searchCompaniesWithCodex,
+} from './leadCompanyWebSearchService.js'
 const gatewayBase = () => (process.env.LLM_BASE_URL || process.env.OPENAI_BASE_URL || 'http://127.0.0.1:18081/v1').replace(/\/$/, '')
 const gatewayKey = () => process.env.OPENAI_API_KEY || process.env.LLM_API_KEY || ''
 const defaultModel = () => process.env.LLM_MODEL || 'gpt-5.6-sol'
@@ -76,6 +92,8 @@ type IntelInput = {
   company: string
   topics?: string[]
   contextEvidence?: Array<{ title: string; snippet: string; url: string }>
+  registryFields?: LeadCompanyIntelField[]
+  model?: string
 }
 
 type CollectedIntel = {
@@ -89,7 +107,11 @@ export async function collectCompanyIntel(input: IntelInput) {
   const requestFile = path.join(temporaryDirectory, 'request.json')
   let stdout = ''
   try {
-    await writeFile(requestFile, JSON.stringify({ company: input.company, topics: input.topics || [] }), { mode: 0o600 })
+    await writeFile(requestFile, JSON.stringify({
+      company: input.company,
+      topics: input.topics || [],
+      registryFields: input.registryFields || LEAD_COMPANY_INTEL_FIELDS,
+    }), { mode: 0o600 })
     const result = await execFileAsync('python3', ['-B', script, `@${requestFile}`], {
       timeout: 120_000,
       maxBuffer: 8 * 1024 * 1024,
@@ -120,16 +142,78 @@ export async function collectCompanyIntel(input: IntelInput) {
     seen.add(key)
     return true
   })
+  const requestedFields = [...new Set(input.registryFields || LEAD_COMPANY_INTEL_FIELDS)]
+  let extractedFields: ReturnType<typeof validateLeadCompanyIntelExtraction> = []
+  let enrichmentError = ''
+  if (requestedFields.length && searchEvidence.length) {
+    try {
+      const raw = await gatewayJson({
+        model: input.model,
+        timeoutMs: 180_000,
+        system: [
+          '你是企业公开信息结构化审计员。只允许从宿主给出的搜索结果标题和摘要中逐字抽取字段，不得使用记忆、常识或输入外事实。',
+          '每个字段必须返回原文连续 quote 和对应 sourceUrl。搜索摘要没有明确出现的字段必须省略；冲突时必须省略。',
+          'website 只能返回可判断为该企业官网的 http/https URL。统一社会信用代码必须为原文中的18位代码。严格返回 JSON。',
+        ].join('\n'),
+        prompt: `${JSON.stringify({
+          company: input.company,
+          requestedFields,
+          searchEvidence: searchEvidence.map((item) => ({ title: item.title, snippet: item.snippet, url: item.url })),
+        })}\n返回 {"fields":[{"field":"...","value":"...","quote":"...","sourceUrl":"..."}]}。field 只能来自 requestedFields。`,
+      })
+      extractedFields = validateLeadCompanyIntelExtraction({ raw, requestedFields, searchEvidence })
+    } catch (error) {
+      // Public search evidence remains useful even when the model route is temporarily
+      // unavailable. Collection must degrade to an explicit gap instead of inventing data.
+      enrichmentError = redactSensitiveText(error instanceof Error ? error.message : String(error)).slice(0, 2_000)
+    }
+  }
+  const locallyCompleted = new Set(extractedFields.map((item) => item.field))
+  const webRequestedFields = requestedFields.filter((field) => !locallyCompleted.has(field))
+  let webSearchUsed = false
+  if (webRequestedFields.length && process.env.LEAD_INTEL_WEB_SEARCH_ENABLED !== 'false') {
+    webSearchUsed = true
+    const web = await searchCompaniesWithCodex({
+      companies: [{ company: input.company, requestedFields: webRequestedFields }],
+      model: input.model,
+    })
+    if (web.error) enrichmentError = web.error
+    const result = web.results[0]
+    if (result) {
+      extractedFields = [...extractedFields, ...result.evidence]
+      for (const source of result.sources) {
+        const key = `${source.url}|`
+        if (seen.has(key)) continue
+        seen.add(key)
+        searchEvidence.push({
+          query: 'Codex 内置联网搜索',
+          title: source.title,
+          snippet: '',
+          url: source.url,
+          publisher: (() => { try { return new URL(source.url).hostname } catch { return '' } })(),
+          publishedAt: '',
+          reliability: source.reliability,
+        })
+      }
+    }
+  }
+  const extracted = Object.fromEntries(extractedFields.map((item) => [item.field, item.value]))
   return {
     company: input.company,
-    positioning: searchEvidence.length
+    canonicalCompanyName: extracted.companyName || '',
+    positioning: extracted.companyIntroduction || (searchEvidence.length
       ? `已取得${searchEvidence.length}条公开检索线索，具体事实以原始页面和后续章节核验为准。`
-      : '未获取到有效公开信息，建议核验公司全称或补充一手材料。',
-    registeredCapital: '待核验',
-    legalRepresentative: '待核验',
-    foundedAt: '待核验',
+      : '未获取到有效公开信息，建议核验公司全称或补充一手材料。'),
+    companyIntroduction: extracted.companyIntroduction || '',
+    website: extracted.website || '',
+    registeredCapital: extracted.registeredCapital || '待核验',
+    legalRepresentative: extracted.legalRepresentative || '待核验',
+    foundedAt: extracted.foundedAt || '待核验',
+    creditCode: extracted.creditCode || '',
+    registrationStatus: extracted.registrationStatus || '',
+    companyType: extracted.companyType || '',
     region: '待核验',
-    registeredAddress: '待核验',
+    registeredAddress: extracted.registeredAddress || '待核验',
     fundingRounds: [],
     shareholders: [],
     competitors: [],
@@ -138,6 +222,21 @@ export async function collectCompanyIntel(input: IntelInput) {
       title: item.title, url: item.url, reliability: item.reliability,
     }])).values()],
     searchEvidence,
+    registryEvidence: extractedFields,
+    registryEnrichment: {
+      method: webSearchUsed ? LEAD_COMPANY_WEB_SEARCH_METHOD : 'codex-evidence-bound-web-enrichment-v1' as const,
+      model: input.model || defaultModel(),
+      requestedFields,
+      completedFields: extractedFields.map((item) => item.field),
+      status: enrichmentError
+        ? 'model_failed' as const
+        : !searchEvidence.length
+          ? 'no_results' as const
+          : !extractedFields.length
+            ? 'no_match' as const
+            : 'completed' as const,
+      error: enrichmentError || undefined,
+    },
     confidence: Math.min(0.8, new Set(searchEvidence.map((item) => item.url)).size / 20),
     fetchedAt: collected.fetched_at || new Date().toISOString(),
   }
@@ -168,6 +267,28 @@ export type InProcessScoreResult = {
   [key: string]: unknown
 }
 
+type DetailedNormalizedScore = {
+  total: number
+  verdict: string
+  overall_comment: string
+  dimensions: Array<{
+    key: string
+    name: string
+    score: number | null
+    max: number
+    items: unknown[]
+    weight?: number
+    assessment?: string
+  }>
+  competitors?: unknown[]
+  highlights?: string[]
+  risks?: string[]
+  next_actions?: string[]
+  ratingV3?: ReturnType<typeof computeLeadRatingV3>
+  projectName?: unknown
+  [key: string]: unknown
+}
+
 const paperStandard = {
   version: 'paper-v1',
   dimensions: [
@@ -194,6 +315,8 @@ type ScoreStandard = {
   }>
   verdict_bands: Array<{ min: number; label: string }>
 }
+
+export type ScoreWorkflow = 'score-project' | 'score-paper' | typeof LEAD_RATING_V3_WORKFLOW
 
 async function scoreStandard(workflow: string): Promise<ScoreStandard> {
   if (workflow === 'score-paper') return paperStandard
@@ -395,6 +518,14 @@ export type ScoreWithAgentOptions = {
   audit?: LeadScoringAuditContext
 }
 
+type ScoreAgentEnvelope<T> = {
+  result: T
+  execution: LeadScoringAgentExecution
+  model: string
+  workflow: ScoreWorkflow
+  audit: { runId: string; decisionId: string | null; inputEventId: string } | null
+}
+
 function retryableError(error: unknown) {
   return (error as Error & { retryable?: boolean }).retryable !== false
 }
@@ -417,19 +548,32 @@ function safeRunError(error: unknown) {
   return redactSensitiveText(error instanceof Error ? error.message : String(error)).slice(0, 8_000)
 }
 
-export async function scoreWithAgentDetailed(
+export function scoreWithAgentDetailed(
   workflow: 'score-project' | 'score-paper',
   input: Record<string, unknown>,
+  options?: ScoreWithAgentOptions,
+): Promise<ScoreAgentEnvelope<InProcessScoreResult & { projectName?: unknown }>>
+export function scoreWithAgentDetailed(
+  workflow: typeof LEAD_RATING_V3_WORKFLOW,
+  input: Record<string, unknown>,
+  options?: ScoreWithAgentOptions,
+): Promise<ScoreAgentEnvelope<DetailedNormalizedScore>>
+export async function scoreWithAgentDetailed(
+  workflow: ScoreWorkflow,
+  input: Record<string, unknown>,
   options: ScoreWithAgentOptions = {},
-) {
-  const standard = await scoreStandard(workflow)
+): Promise<ScoreAgentEnvelope<DetailedNormalizedScore>> {
+  const ratingV3Workflow = workflow === LEAD_RATING_V3_WORKFLOW
+  const standard = ratingV3Workflow ? null : await scoreStandard(workflow)
   const primary = options.primaryModel || process.env.SCORE_MODEL || process.env.LLM_MODEL || 'claude-sonnet-4-6'
   const fallback = process.env.SCORE_FALLBACK_MODEL || primary
   const configuredFallback = options.fallbackModel || fallback
   const models = configuredFallback === primary ? [primary] : [primary, configuredFallback]
-  const prompt = scoringPrompt(workflow, standard, input)
-  const promptTemplate = scoringPromptTemplate(workflow, standard)
-  const outputSchema = scoringOutputSchema(standard)
+  const promptTemplate = ratingV3Workflow
+    ? leadRatingV3PromptTemplate()
+    : scoringPromptTemplate(workflow, standard!)
+  const prompt = promptTemplate.replace('<runtime-input-json>', JSON.stringify(input))
+  const outputSchema = ratingV3Workflow ? leadRatingV3JsonSchema() : scoringOutputSchema(standard!)
   const agentRunner = options.agentRunner || runLeadScoringAgent
   let lastError: Error = new Error('评分 Agent 未返回结果')
 
@@ -443,8 +587,8 @@ export async function scoreWithAgentDetailed(
       if (options.audit) {
         const promptVersion = await registerLeadPipelinePromptVersion({
           agentProfile: LEAD_SCORING_AGENT_PROFILE,
-          promptVersion: `${workflow}-${standard.version || 'v1'}-agent-v1`,
-          schemaVersion: LEAD_SCORING_AGENT_SCHEMA_VERSION,
+          promptVersion: `${workflow}-${ratingV3Workflow ? LEAD_RATING_V3_SCHEMA_VERSION : standard!.version || 'v1'}-agent-v1`,
+          schemaVersion: ratingV3Workflow ? LEAD_RATING_V3_SCHEMA_VERSION : LEAD_SCORING_AGENT_SCHEMA_VERSION,
           skillVersion: LEAD_SCORING_AGENT_PROFILE_VERSION,
           toolsetVersion: LEAD_SCORING_AGENT_TOOLSET_VERSION,
           prompt: `${SCORING_SYSTEM_PROMPT}\n\n${promptTemplate}`,
@@ -474,15 +618,41 @@ export async function scoreWithAgentDetailed(
         })
       }
       execution = await agentRunner({ systemPrompt: SCORING_SYSTEM_PROMPT, prompt, outputSchema, model })
-      const normalized = { ...normalizeScore(execution.output, standard, input), projectName: input.projectName }
+      const normalized: DetailedNormalizedScore = ratingV3Workflow
+        ? (() => {
+            const ratingV3 = computeLeadRatingV3(execution!.output)
+            const detail = ratingV3.detailView
+            return {
+              total: ratingV3.computed.score ?? 0,
+              verdict: ratingV3.mainView.displayGrade,
+              overall_comment: detail.rating.oneSentenceJudgment,
+              dimensions: detail.dimensionScores.map((dimension) => ({
+                key: dimension.key,
+                name: dimension.dimension,
+                score: dimension.score,
+                max: 10,
+                items: [],
+                weight: dimension.weight,
+                assessment: dimension.assessment,
+              })),
+              highlights: detail.investmentThesis.map((item) => item.thesis).slice(0, 5),
+              risks: detail.keyRisks.slice(0, 5),
+              next_actions: detail.dueDiligence.P0.map((item) => item.question).slice(0, 5),
+              ratingV3,
+              projectName: input.projectName,
+            }
+          })()
+        : { ...normalizeScore(execution.output, standard!, input), projectName: input.projectName }
       if (auditRun && options.audit) {
-        const outcome = scoreOutcome(normalized.total)
+        const outcome = ratingV3Workflow && normalized.ratingV3?.computed.ratingStatus === '无法评级'
+          ? 'review' as const
+          : scoreOutcome(normalized.total)
         const reason = `${workflow} 评分 ${normalized.total}/100，结论：${normalized.verdict}`
         const decision = await recordLeadPipelineDecision({
           idempotencyKey: `lead-score:${auditRun.id}:succeeded`,
           eventId: options.audit.inputEventId,
           runId: auditRun.id,
-          decisionType: workflow === 'score-paper' ? 'paper_scoring' : 'project_scoring',
+          decisionType: workflow === 'score-paper' ? 'paper_scoring' : workflow === LEAD_RATING_V3_WORKFLOW ? 'lead_rating_v3' : 'project_scoring',
           outcome,
           subjectType: workflow === 'score-paper' ? 'paper' : 'project',
           subjectName: String(input.projectName || ''),
@@ -538,7 +708,7 @@ export async function scoreWithAgentDetailed(
             idempotencyKey: `lead-score:${auditRun.id}:failed`,
             eventId: options.audit.inputEventId,
             runId: auditRun.id,
-            decisionType: workflow === 'score-paper' ? 'paper_scoring' : 'project_scoring',
+            decisionType: workflow === 'score-paper' ? 'paper_scoring' : workflow === LEAD_RATING_V3_WORKFLOW ? 'lead_rating_v3' : 'project_scoring',
             outcome: 'failed',
             subjectType: workflow === 'score-paper' ? 'paper' : 'project',
             subjectName: String(input.projectName || ''),
@@ -557,9 +727,12 @@ export async function scoreWithAgentDetailed(
 }
 
 export async function scoreWithAgent(
-  workflow: 'score-project' | 'score-paper',
+  workflow: ScoreWorkflow,
   input: Record<string, unknown>,
   options: ScoreWithAgentOptions = {},
 ) {
+  if (workflow === LEAD_RATING_V3_WORKFLOW) {
+    return (await scoreWithAgentDetailed(workflow, input, options)).result
+  }
   return (await scoreWithAgentDetailed(workflow, input, options)).result
 }

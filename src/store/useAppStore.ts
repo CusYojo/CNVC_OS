@@ -20,6 +20,20 @@ import type {
 
 let latestLeadListRequest = 0
 
+export type LeadListQuery = {
+  page?: number
+  pageSize?: number
+  channel?: string
+  sort?: 'latest' | 'score' | ''
+  keyword?: string
+  source?: string
+  industry?: string
+  region?: string
+  leadType?: 'company' | 'research' | ''
+  stage?: string
+  updatedRange?: '7d' | '30d' | '90d' | ''
+}
+
 function requiredVersion(entity: { version?: number } | undefined, label: string): number {
   if (!entity || !Number.isInteger(entity.version) || Number(entity.version) < 1) {
     throw new Error(`${label}版本信息缺失，请刷新页面后重试`)
@@ -68,9 +82,9 @@ interface AppState {
   withdrawRequest: (requestId: string, comment: string) => Promise<void>
   deleteFile: (fileId: string) => Promise<void>
   addLead: (lead: Omit<Lead, 'id'>) => Promise<Lead>
-  fetchLeads: (page?: number, pageSize?: number, channel?: string, sort?: string, keyword?: string, source?: string, industry?: string, region?: string) => Promise<void>
+  fetchLeads: (query?: LeadListQuery) => Promise<void>
   fetchLeadStats: () => Promise<void>
-  startScoring: (leadId: string) => Promise<void>
+  startScoring: (leadId: string, statusOverride?: NonNullable<Lead['scoreJob']>['status']) => Promise<void>
   fetchLeadDetail: (leadId: string) => Promise<Lead | null>
   mergeLeadLocal: (leadId: string, patch: Partial<Lead>) => void
   convertLead: (leadId: string) => Promise<Project | undefined>
@@ -115,7 +129,7 @@ export const useAppStore = create<AppState>()(
       leadPagination: {
         total: 0,
         page: 1,
-        pageSize: 50,
+        pageSize: 20,
         totalPages: 1,
       },
       leadStats: {
@@ -137,7 +151,7 @@ export const useAppStore = create<AppState>()(
           projects: [], files: [], aiSummaries: [], todos: [], meetings: [], risks: [],
           workflowLogs: [], approvalRequests: [], leads: [],
           users: [], templates: [], auditLogs: [], notifications: [], scoringLeadIds: [],
-          leadPagination: { total: 0, page: 1, pageSize: 50, totalPages: 1 },
+          leadPagination: { total: 0, page: 1, pageSize: 20, totalPages: 1 },
           leadStats: { total: 0, verified: 0, highPriority: 0, avgCompleteness: 0 },
         })
       },
@@ -320,7 +334,11 @@ export const useAppStore = create<AppState>()(
           throw e
         }
       },
-      fetchLeads: async (page = 1, pageSize = 50, channel = '', sort = '', keyword = '', source = '', industry = '', region = '') => {
+      fetchLeads: async (query = {}) => {
+        const {
+          page = 1, pageSize = 20, channel = '', sort = '', keyword = '', source = '',
+          industry = '', region = '', leadType = '', stage = '', updatedRange = '',
+        } = query
         const requestId = ++latestLeadListRequest
         try {
           const qs = `/leads?page=${page}&pageSize=${pageSize}`
@@ -330,6 +348,9 @@ export const useAppStore = create<AppState>()(
             + (source ? `&source=${encodeURIComponent(source)}` : '')
             + (industry ? `&industry=${encodeURIComponent(industry)}` : '')
             + (region ? `&region=${encodeURIComponent(region)}` : '')
+            + (leadType ? `&leadType=${encodeURIComponent(leadType)}` : '')
+            + (stage ? `&stage=${encodeURIComponent(stage)}` : '')
+            + (updatedRange ? `&updatedRange=${encodeURIComponent(updatedRange)}` : '')
           const r = await apiGet<{ list: Lead[]; total: number; page: number; pageSize: number; totalPages: number }>(qs)
           // 用户快速切换筛选条件时，只允许最后一次请求更新列表，避免旧结果后到并覆盖新结果。
           if (requestId !== latestLeadListRequest) return
@@ -349,9 +370,9 @@ export const useAppStore = create<AppState>()(
       },
       // 触发 AI 评分并全局轮询到完成 —— 状态存 store 的 scoringLeadIds,
       // 不依赖组件生命周期,切换项目/页面再回来评分不中断,完成后自动把结果 merge 进列表。
-      startScoring: async (leadId: string) => {
+      startScoring: async (leadId: string, statusOverride) => {
         if (get().scoringLeadIds.includes(leadId)) return  // 已在评分中,避免重复触发
-        const currentStatus = get().leads.find((lead) => lead.id === leadId)?.scoreJob?.status
+        const currentStatus = statusOverride ?? get().leads.find((lead) => lead.id === leadId)?.scoreJob?.status
         set((state) => ({ scoringLeadIds: [...state.scoringLeadIds, leadId] }))
         const finish = () => set((state) => ({ scoringLeadIds: state.scoringLeadIds.filter((x) => x !== leadId) }))
         try {
@@ -439,7 +460,7 @@ export const useAppStore = create<AppState>()(
       },
       convertLead: async (leadId) => {
         const listLead = get().leads.find((item) => item.id === leadId)
-        if (!listLead || listLead.poolStatus === '已转专属项目') return undefined
+        if (listLead?.poolStatus === '已转专属项目') return undefined
         const converted = await apiPost<{ project: Project; lead: Lead }>(`/leads/${leadId}/convert`)
         set((state) => ({
           projects: [converted.project, ...state.projects.filter((project) => project.id !== converted.project.id)],

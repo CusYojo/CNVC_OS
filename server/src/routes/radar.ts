@@ -9,7 +9,10 @@ import {
   listRadarWechatChatMessages,
 } from '../services/radarWechatChatService.js'
 import { listRadarCandidates, radarCandidateSummary } from '../services/radarSyncService.js'
-import { queueRadarRuntimeJobNow } from '../services/runtimeJobScheduler.js'
+import {
+  queueRadarRuntimeJobNow,
+  queueRadarSyncAfterCollection,
+} from '../services/runtimeJobScheduler.js'
 import {
   listManagedRadarSources,
   listUniversityWechatSources,
@@ -215,7 +218,8 @@ radarRouter.post('/wechat/sources', requireSystemAdmin, async (req: AuthedReques
 radarRouter.post('/wechat/run', requireSystemAdmin, async (req, res, next) => {
   try {
     const body = z.object({ max_entries_per_feed: z.number().int().min(1).max(100).default(20) }).parse(req.body ?? {})
-    res.json(await runRadarUniversityWechatRss(AbortSignal.timeout(10 * 60_000), body.max_entries_per_feed))
+    const result = await runRadarUniversityWechatRss(AbortSignal.timeout(10 * 60_000), body.max_entries_per_feed)
+    res.json({ ...result, syncHandoff: await queueRadarSyncAfterCollection(result) })
   } catch (error) { next(error) }
 })
 
@@ -269,7 +273,7 @@ radarRouter.post('/wechat-api/run', requireSystemAdmin, async (req: AuthedReques
       maxAccounts: body.max_accounts, limit: body.limit_per_account,
     }, AbortSignal.timeout(30 * 60_000))
     await writeAudit({ userId: req.user!.uid, userName: req.user!.name, module: 'Radar采集', action: '单次公众号采集', target: `accounts:${result.accounts ?? 0}`, ip: req.ip, requestId: String(res.locals.requestId || '') })
-    res.json(result)
+    res.json({ ...result, syncHandoff: await queueRadarSyncAfterCollection(result) })
   } catch (error) { next(error) }
 })
 radarRouter.post('/wechat-api/run-yesterday', requireSystemAdmin, async (req: AuthedRequest, res, next) => {
@@ -283,7 +287,7 @@ radarRouter.post('/wechat-api/run-yesterday', requireSystemAdmin, async (req: Au
       maxAccounts: body.max_accounts, limit: body.limit_per_account,
     }, AbortSignal.timeout(30 * 60_000))
     await writeAudit({ userId: req.user!.uid, userName: req.user!.name, module: 'Radar采集', action: '补采公众号历史日', target: `date:${body.date || yesterday};accounts:${result.accounts ?? 0}`, ip: req.ip, requestId: String(res.locals.requestId || '') })
-    res.json(result)
+    res.json({ ...result, syncHandoff: await queueRadarSyncAfterCollection(result) })
   } catch (error) { next(error) }
 })
 

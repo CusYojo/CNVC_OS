@@ -532,11 +532,258 @@ export const leadScoreJobs = mysqlTable('lead_score_jobs', {
   completedAt: timestampColumn('completed_at'),
   deadLetteredAt: timestampColumn('dead_lettered_at'),
   lastError: text('last_error'),
+  enrichmentSnapshotId: uuidColumn('enrichment_snapshot_id'),
+  snapshotHash: varchar('snapshot_hash', { length: 64 }),
+  ratingSchemaVersion: varchar('rating_schema_version', { length: 64 }),
   createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
   updatedAt: timestampColumn('updated_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
 }, (t) => ({
   byDue: index('idx_lead_score_jobs_due').on(t.status, t.nextAttemptAt),
   byLease: index('idx_lead_score_jobs_lease').on(t.leaseExpiresAt),
+}))
+
+// 共享线索联网研究任务。正式入池事件只负责幂等创建任务；专题运行、事实、
+// 证据和快照均独立版本化，避免将模型临时输出直接写入评分 JSON。
+export const leadEntities = mysqlTable('lead_entities', {
+  id: uuidPrimaryKey('id'),
+  leadId: uuidColumn('lead_id').notNull().references(() => leads.id, { onDelete: 'cascade' }),
+  entityType: varchar('entity_type', { length: 16 }).notNull(),
+  canonicalName: varchar('canonical_name', { length: 255 }).notNull(),
+  normalizedName: varchar('normalized_name', { length: 255 }).notNull(),
+  status: varchar('status', { length: 16 }).notNull(),
+  aliases: json('aliases').$type<string[]>().notNull().default(emptyJsonArray),
+  identifiers: json('identifiers').$type<Record<string, unknown>>().notNull().default(emptyJsonObject),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+  updatedAt: timestampColumn('updated_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({
+  uniqueIdentity: uniqueIndex('uq_lead_entities_identity').on(t.leadId, t.entityType, t.normalizedName),
+  byLead: index('idx_lead_entities_lead').on(t.leadId, t.entityType, t.status),
+}))
+
+export const leadEntityRelations = mysqlTable('lead_entity_relations', {
+  id: uuidPrimaryKey('id'),
+  leadId: uuidColumn('lead_id').notNull().references(() => leads.id, { onDelete: 'cascade' }),
+  fromEntityId: uuidColumn('from_entity_id').notNull().references(() => leadEntities.id, { onDelete: 'cascade' }),
+  toEntityId: uuidColumn('to_entity_id').notNull().references(() => leadEntities.id, { onDelete: 'cascade' }),
+  relationType: varchar('relation_type', { length: 48 }).notNull(),
+  status: varchar('status', { length: 16 }).notNull().default('claimed'),
+  evidenceFactId: uuidColumn('evidence_fact_id'),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+  updatedAt: timestampColumn('updated_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({
+  uniqueRelation: uniqueIndex('uq_lead_entity_relations_identity').on(t.fromEntityId, t.toEntityId, t.relationType),
+  byLead: index('idx_lead_entity_relations_lead').on(t.leadId, t.relationType, t.status),
+}))
+
+export const leadEnrichmentJobs = mysqlTable('lead_enrichment_jobs', {
+  id: uuidPrimaryKey('id'),
+  leadId: uuidColumn('lead_id').notNull().references(() => leads.id, { onDelete: 'cascade' }),
+  triggerType: varchar('trigger_type', { length: 48 }).notNull(),
+  triggerEventId: varchar('trigger_event_id', { length: 64 }).references(() => leadPipelineRawEvents.id, { onDelete: 'set null' }),
+  idempotencyKey: varchar('idempotency_key', { length: 64 }).notNull(),
+  entityId: uuidColumn('entity_id').references(() => leadEntities.id, { onDelete: 'set null' }),
+  entityType: varchar('entity_type', { length: 16 }).notNull().default('unknown'),
+  entityStatus: varchar('entity_status', { length: 16 }).notNull().default('missing'),
+  status: varchar('status', { length: 24 }).notNull().default('queued'),
+  priority: int('priority').notNull().default(100),
+  executionAttempts: int('execution_attempts').notNull().default(0),
+  nextAttemptAt: timestampColumn('next_attempt_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+  leaseOwner: varchar('lease_owner', { length: 128 }),
+  leaseExpiresAt: timestampColumn('lease_expires_at'),
+  lastError: text('last_error'),
+  startedAt: timestampColumn('started_at'),
+  completedAt: timestampColumn('completed_at'),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+  updatedAt: timestampColumn('updated_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({
+  uniqueIdempotency: uniqueIndex('uq_lead_enrichment_jobs_idempotency').on(t.idempotencyKey),
+  byDue: index('idx_lead_enrichment_jobs_due').on(t.status, t.priority, t.nextAttemptAt),
+  byLead: index('idx_lead_enrichment_jobs_lead').on(t.leadId, t.createdAt),
+  byLease: index('idx_lead_enrichment_jobs_lease').on(t.leaseExpiresAt),
+}))
+
+export const leadEnrichmentTopicRuns = mysqlTable('lead_enrichment_topic_runs', {
+  id: uuidPrimaryKey('id'),
+  jobId: uuidColumn('job_id').notNull().references(() => leadEnrichmentJobs.id, { onDelete: 'cascade' }),
+  leadId: uuidColumn('lead_id').notNull().references(() => leads.id, { onDelete: 'cascade' }),
+  topicKey: varchar('topic_key', { length: 48 }).notNull(),
+  status: varchar('status', { length: 24 }).notNull().default('queued'),
+  promptVersion: varchar('prompt_version', { length: 64 }),
+  model: varchar('model', { length: 128 }),
+  toolsetVersion: varchar('toolset_version', { length: 64 }),
+  queryPlan: json('query_plan').$type<unknown[]>().notNull().default(emptyJsonArray),
+  metrics: json('metrics').$type<Record<string, unknown>>().notNull().default(emptyJsonObject),
+  executionAttempts: int('execution_attempts').notNull().default(0),
+  nextAttemptAt: timestampColumn('next_attempt_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+  leaseOwner: varchar('lease_owner', { length: 128 }),
+  leaseExpiresAt: timestampColumn('lease_expires_at'),
+  lastError: text('last_error'),
+  startedAt: timestampColumn('started_at'),
+  completedAt: timestampColumn('completed_at'),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+  updatedAt: timestampColumn('updated_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({
+  uniqueJobTopic: uniqueIndex('uq_lead_enrichment_topic_job').on(t.jobId, t.topicKey),
+  byDue: index('idx_lead_enrichment_topic_due').on(t.status, t.nextAttemptAt),
+  byLead: index('idx_lead_enrichment_topic_lead').on(t.leadId, t.topicKey, t.createdAt),
+  byLease: index('idx_lead_enrichment_topic_lease').on(t.leaseExpiresAt),
+}))
+
+export const leadTopicSearchCache = mysqlTable('lead_topic_search_cache', {
+  cacheKey: varchar('cache_key', { length: 64 }).primaryKey(),
+  subjectFingerprint: varchar('subject_fingerprint', { length: 64 }).notNull(),
+  topicKey: varchar('topic_key', { length: 48 }).notNull(),
+  promptVersion: varchar('prompt_version', { length: 64 }).notNull(),
+  queryPlanHash: varchar('query_plan_hash', { length: 64 }).notNull(),
+  model: varchar('model', { length: 128 }).notNull(),
+  result: json('result').$type<Record<string, unknown>>().notNull(),
+  expiresAt: timestampColumn('expires_at').notNull(),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+  updatedAt: timestampColumn('updated_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({
+  bySubjectTopic: index('idx_lead_topic_search_cache_subject').on(t.subjectFingerprint, t.topicKey, t.expiresAt),
+  byExpiry: index('idx_lead_topic_search_cache_expiry').on(t.expiresAt),
+}))
+
+export const leadFacts = mysqlTable('lead_facts', {
+  id: uuidPrimaryKey('id'),
+  leadId: uuidColumn('lead_id').notNull().references(() => leads.id, { onDelete: 'cascade' }),
+  topicRunId: uuidColumn('topic_run_id').references(() => leadEnrichmentTopicRuns.id, { onDelete: 'set null' }),
+  topicKey: varchar('topic_key', { length: 48 }).notNull(),
+  subjectType: varchar('subject_type', { length: 24 }).notNull(),
+  subjectId: varchar('subject_id', { length: 128 }).notNull(),
+  factKey: varchar('fact_key', { length: 128 }).notNull(),
+  instanceKey: varchar('instance_key', { length: 128 }).notNull().default('singleton'),
+  value: json('value').$type<unknown>().notNull(),
+  valueHash: varchar('value_hash', { length: 64 }).notNull(),
+  unit: varchar('unit', { length: 32 }),
+  currency: varchar('currency', { length: 16 }),
+  periodStart: varchar('period_start', { length: 32 }),
+  periodEnd: varchar('period_end', { length: 32 }),
+  scope: varchar('scope', { length: 128 }),
+  evidenceLevel: varchar('evidence_level', { length: 4 }).notNull(),
+  verificationStatus: varchar('verification_status', { length: 24 }).notNull(),
+  version: int('version').notNull().default(1),
+  supersedesFactId: uuidColumn('supersedes_fact_id'),
+  isCurrent: boolean('is_current').notNull().default(true),
+  validFrom: timestampColumn('valid_from').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+  validUntil: timestampColumn('valid_until'),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({
+  uniqueVersion: uniqueIndex('uq_lead_facts_instance_version').on(t.leadId, t.subjectId, t.factKey, t.instanceKey, t.version),
+  byCurrent: index('idx_lead_facts_current').on(t.leadId, t.isCurrent, t.topicKey),
+  byValue: index('idx_lead_facts_value').on(t.leadId, t.factKey, t.valueHash),
+  byInstance: index('idx_lead_facts_instance').on(t.leadId, t.factKey, t.instanceKey, t.isCurrent),
+}))
+
+// 受控 Web Fetch/PDF 解析得到的不可变来源正文。搜索摘要只负责发现 URL，
+// 正式事实引用必须能够落到这里保存的内容哈希和正文定位。
+export const leadSourceDocuments = mysqlTable('lead_source_documents', {
+  id: uuidPrimaryKey('id'),
+  leadId: uuidColumn('lead_id').references(() => leads.id, { onDelete: 'cascade' }),
+  canonicalUrl: text('canonical_url').notNull(),
+  canonicalUrlHash: varchar('canonical_url_hash', { length: 64 }).notNull(),
+  finalUrl: text('final_url').notNull(),
+  fetchStatus: varchar('fetch_status', { length: 24 }).notNull(),
+  httpStatus: int('http_status'),
+  contentType: varchar('content_type', { length: 96 }),
+  title: text('title'),
+  publisher: varchar('publisher', { length: 255 }),
+  publishedAt: timestampColumn('published_at'),
+  contentHash: varchar('content_hash', { length: 64 }).notNull(),
+  extractedText: longtext('extracted_text').notNull(),
+  errorCode: varchar('error_code', { length: 64 }),
+  accessedAt: timestampColumn('accessed_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+  expiresAt: timestampColumn('expires_at').notNull(),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({
+  uniqueVersion: uniqueIndex('uq_lead_source_documents_version').on(t.canonicalUrlHash, t.contentHash),
+  byCache: index('idx_lead_source_documents_cache').on(t.canonicalUrlHash, t.fetchStatus, t.expiresAt),
+  byLead: index('idx_lead_source_documents_lead').on(t.leadId, t.createdAt),
+}))
+
+export const leadFactEvidence = mysqlTable('lead_fact_evidence', {
+  id: uuidPrimaryKey('id'),
+  factId: uuidColumn('fact_id').notNull().references(() => leadFacts.id, { onDelete: 'cascade' }),
+  sourceDocumentId: uuidColumn('source_document_id').references(() => leadSourceDocuments.id, { onDelete: 'set null' }),
+  sourceUrl: text('source_url').notNull(),
+  canonicalUrlHash: varchar('canonical_url_hash', { length: 64 }).notNull(),
+  sourceType: varchar('source_type', { length: 32 }).notNull(),
+  contentType: varchar('content_type', { length: 32 }).notNull().default('unknown'),
+  title: text('title'),
+  publisher: varchar('publisher', { length: 255 }),
+  quote: longtext('quote').notNull(),
+  locator: varchar('locator', { length: 255 }),
+  pageHash: varchar('page_hash', { length: 64 }),
+  reliability: varchar('reliability', { length: 16 }),
+  publishedAt: timestampColumn('published_at'),
+  accessedAt: timestampColumn('accessed_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({
+  uniqueFactSource: uniqueIndex('uq_lead_fact_evidence_source').on(t.factId, t.canonicalUrlHash),
+  byFact: index('idx_lead_fact_evidence_fact').on(t.factId, t.createdAt),
+  bySource: index('idx_lead_fact_evidence_source').on(t.canonicalUrlHash),
+}))
+
+export const leadFactConflicts = mysqlTable('lead_fact_conflicts', {
+  id: uuidPrimaryKey('id'),
+  leadId: uuidColumn('lead_id').notNull().references(() => leads.id, { onDelete: 'cascade' }),
+  topicKey: varchar('topic_key', { length: 48 }).notNull(),
+  factKey: varchar('fact_key', { length: 128 }).notNull(),
+  instanceKey: varchar('instance_key', { length: 128 }).notNull().default('singleton'),
+  status: varchar('status', { length: 24 }).notNull().default('open'),
+  severity: varchar('severity', { length: 16 }).notNull().default('material'),
+  candidateFactIds: json('candidate_fact_ids').$type<string[]>().notNull().default(emptyJsonArray),
+  automaticReason: text('automatic_reason'),
+  resolution: json('resolution').$type<Record<string, unknown>>().notNull().default(emptyJsonObject),
+  resolvedBy: uuidColumn('resolved_by').references(() => users.id, { onDelete: 'set null' }),
+  resolvedAt: timestampColumn('resolved_at'),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+  updatedAt: timestampColumn('updated_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({
+  byLeadStatus: index('idx_lead_fact_conflicts_status').on(t.leadId, t.status, t.severity),
+  byInstance: index('idx_lead_fact_conflicts_instance').on(t.leadId, t.topicKey, t.factKey, t.instanceKey, t.status),
+}))
+
+export const leadEnrichmentSnapshots = mysqlTable('lead_enrichment_snapshots', {
+  id: uuidPrimaryKey('id'),
+  leadId: uuidColumn('lead_id').notNull().references(() => leads.id, { onDelete: 'cascade' }),
+  jobId: uuidColumn('job_id').notNull().references(() => leadEnrichmentJobs.id, { onDelete: 'restrict' }),
+  schemaVersion: varchar('schema_version', { length: 64 }).notNull(),
+  status: varchar('status', { length: 24 }).notNull(),
+  snapshotHash: varchar('snapshot_hash', { length: 64 }).notNull(),
+  topicStates: json('topic_states').$type<Record<string, unknown>>().notNull().default(emptyJsonObject),
+  subjectProfile: json('subject_profile').$type<Record<string, unknown>>().notNull().default(emptyJsonObject),
+  facts: json('facts').$type<unknown[]>().notNull().default(emptyJsonArray),
+  evidenceIndex: json('evidence_index').$type<Record<string, unknown>>().notNull().default(emptyJsonObject),
+  gaps: json('gaps').$type<unknown[]>().notNull().default(emptyJsonArray),
+  conflicts: json('conflicts').$type<unknown[]>().notNull().default(emptyJsonArray),
+  coverage: int('coverage').notNull().default(0),
+  frozenAt: timestampColumn('frozen_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({
+  uniqueLeadHash: uniqueIndex('uq_lead_enrichment_snapshot_hash').on(t.leadId, t.snapshotHash, t.schemaVersion),
+  byLead: index('idx_lead_enrichment_snapshots_lead').on(t.leadId, t.createdAt),
+  byJob: index('idx_lead_enrichment_snapshots_job').on(t.jobId),
+}))
+
+export const leadRatingHistory = mysqlTable('lead_rating_history', {
+  id: uuidPrimaryKey('id'),
+  leadId: uuidColumn('lead_id').notNull().references(() => leads.id, { onDelete: 'cascade' }),
+  snapshotId: uuidColumn('snapshot_id').notNull().references(() => leadEnrichmentSnapshots.id, { onDelete: 'restrict' }),
+  snapshotHash: varchar('snapshot_hash', { length: 64 }).notNull(),
+  ratingSchemaVersion: varchar('rating_schema_version', { length: 64 }).notNull(),
+  workflow: varchar('workflow', { length: 64 }).notNull(),
+  promptVersion: varchar('prompt_version', { length: 128 }).notNull(),
+  model: varchar('model', { length: 128 }).notNull(),
+  status: varchar('status', { length: 24 }).notNull(),
+  result: json('result').$type<Record<string, unknown>>().notNull(),
+  completedAt: timestampColumn('completed_at').notNull(),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({
+  uniqueSnapshotRating: uniqueIndex('uq_lead_rating_history_snapshot').on(t.leadId, t.snapshotHash, t.ratingSchemaVersion),
+  byLead: index('idx_lead_rating_history_lead').on(t.leadId, t.completedAt),
+  bySnapshot: index('idx_lead_rating_history_snapshot').on(t.snapshotId),
 }))
 
 // 公共线索池人工导入文件与 BP 解析任务。原始文件只保存私有存储路径，数据库

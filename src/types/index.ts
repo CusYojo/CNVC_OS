@@ -191,6 +191,9 @@ export interface LeadScoreJob {
   error?: string
 }
 export interface LeadScoring {
+  companyIntroduction?: string
+  claimedFoundedAt?: string
+  claimedFoundedAtEvidence?: { quote: string; sourceUrl: string }
   total: number
   verdict: string
   overall_comment: string
@@ -204,10 +207,158 @@ export interface LeadScoring {
   fundingRoundsResearched?: Array<{ round: string; date: string; amount: string; valuation: string; investors: string; sourceUrl?: string }>
   researchSources?: Array<{ title: string; url: string; excerpt: string }>
   registry?: Record<string,string>
-  structuredTeam?: { name: string; title: string; background: string }[]
+  registryEvidence?: Array<{
+    field: string
+    value: string
+    quote: string
+    sourceUrl: string
+    evidenceStatus?: 'source_labeled' | 'derived_source_labeled'
+    note?: string
+  }>
+  sourceLabeledProfile?: Partial<Record<
+    | 'projectIntroduction'
+    | 'product'
+    | 'productDescription'
+    | 'applicationScenario'
+    | 'applicationDescription'
+    | 'mainBusiness'
+    | 'mainBusinessDescription'
+    | 'teamIntroduction',
+    {
+      value: string
+      quote: string
+      sourceUrl: string
+      sourceTitle?: string
+      evidenceStatus: 'source_labeled' | 'derived_source_labeled'
+      note?: string
+    }
+  >>
+  structuredTeam?: {
+    name: string
+    title: string
+    background: string
+    sourceUrl?: string
+    evidenceStatus?: 'source_labeled'
+  }[]
   structuredShareholders?: { name: string; percentage: string; type: string; sourceUrl?: string }[]
   structuredNews?: { date: string; title: string; summary: string; sourceName: string; sourceUrl: string }[]
   scoreJob?: LeadScoreJob
+  enrichment?: {
+    jobId: string
+    status: 'queued' | 'running' | 'snapshot_ready' | 'review' | 'rejected'
+    entityType: 'company' | 'project' | 'team' | 'research' | 'unknown'
+    entityStatus: 'confirmed' | 'claimed' | 'inferred' | 'ambiguous' | 'missing'
+    completedTopics: number
+    totalTopics: number
+    topicCounts: Record<string, number>
+    updatedAt: string
+  }
+  ratingV3?: LeadRatingV3
+  dataQualityV1?: {
+    schemaVersion: 'lead-data-quality-v1'
+    method: 'codex-semantic-normalization-v1'
+    model: string
+    reviewedAt: string
+    sourceStage: string
+    funding: {
+      stageDisplay: string
+      evidenceStatus: 'source_supported' | 'source_labeled' | 'unverified' | 'not_applicable'
+      amountDisplay?: string
+      amountEvidenceStatus?: 'source_supported' | 'source_labeled' | 'unverified' | 'not_applicable'
+    }
+    businessStage: { stageDisplay: string; evidenceStatus: 'source_supported' | 'source_labeled' | 'unverified' | 'not_applicable' }
+    reason: string
+  }
+}
+
+export interface LeadCompanyRegistry {
+  companyName?: string
+  foundedAt?: string
+  registeredCapital?: string
+  legalRepresentative?: string
+  creditCode?: string
+  registrationStatus?: string
+  companyType?: string
+  registeredAddress?: string
+  regLocation?: string
+}
+
+export type LeadRatingGrade = 'A+' | 'A' | 'A-' | 'B+' | 'B' | 'B-' | 'C+' | 'C' | 'C-' | 'D' | '待评级'
+export type LeadRatingStatus = '正式评级' | '参考评级' | '无法评级'
+export type LeadRatingConfidence = '高' | '中' | '低'
+
+export interface LeadRatingEvidence {
+  content: string
+  evidenceLevel: 'E1' | 'E2' | 'E3'
+}
+
+export interface LeadRatingDimension {
+  key: string
+  dimension: string
+  weight: number
+  score: number | null
+  assessment: string
+  keyEvidence: LeadRatingEvidence[]
+  risksOrGaps: string[]
+}
+
+export interface LeadRatingV3 {
+  schemaVersion: 'lead-rating-v3'
+  mainView: { displayGrade: LeadRatingGrade }
+  detailView: {
+    project: { name: string; industry: string; stage: string }
+    rating: {
+      grade: Exclude<LeadRatingGrade, '待评级'> | null
+      status: LeadRatingStatus
+      score: number | null
+      informationCoverage: number
+      confidence: LeadRatingConfidence
+      oneSentenceJudgment: string
+      coreTags: string[]
+      recommendedAction: string
+    }
+    evidenceSummary: {
+      confirmedFacts: string[]
+      unverifiedCompanyClaims: string[]
+      conflictingInformation: string[]
+      criticalMissingInformation: string[]
+    }
+    dimensionScores: LeadRatingDimension[]
+    investmentThesis: Array<{ thesis: string; supportingBasis: string; necessaryConditions: string[] }>
+    keyRisks: string[]
+    failureScenario: string[]
+    investmentRedFlags: string[]
+    transactionValue: {
+      valuationInformationAvailable: boolean
+      termsInformationAvailable: boolean
+      assessment: string
+    }
+    dueDiligence: {
+      P0: Array<{ question: string; requiredMaterialOrMethod: string }>
+      P1: Array<{ question: string; requiredMaterialOrMethod: string }>
+      P2: Array<{ question: string; requiredMaterialOrMethod: string }>
+    }
+    ratingSystemImprovements: string[]
+  }
+  computed: {
+    score: number | null
+    assessableWeight: number
+    informationCoverage: number
+    ratingStatus: LeadRatingStatus
+  }
+  scoreJob?: LeadScoreJob
+  scoredAt?: string
+}
+
+export interface LeadPoolLatestUpdate {
+  occurredAt: string
+  title: string
+  sourceUrl?: string
+}
+
+export interface LeadPoolRatingSummary {
+  displayGrade: LeadRatingGrade
+  status: 'ready' | 'pending' | 'running' | 'failed' | 'stale'
 }
 
 export interface LeadValuationDisplay {
@@ -223,12 +374,95 @@ export interface LeadTechnicalScore {
   status: 'ready' | 'pending'
 }
 
+export interface PaperAffiliation {
+  name: string
+  sourceUrl: string
+  evidenceStatus: 'source_confirmed'
+}
+
+export interface PaperAuthorContribution {
+  author: string
+  role: 'joint_first_author' | 'joint_senior_author' | 'sole_author' | 'first_author' | 'corresponding_author' | 'coauthor'
+  label: string
+}
+
+export interface PaperAuthorIdentity {
+  name: string
+  normalizedName?: string
+  position?: number
+  role?: PaperAuthorContribution['role']
+  openAlexAuthorId?: string
+  orcid?: string
+  affiliations?: Array<{ id?: string; name: string; evidenceUrl?: string }>
+  identityStatus?: 'confirmed' | 'claimed' | 'ambiguous'
+  evidenceUrl?: string
+}
+
+export interface PaperAuthorAffiliation {
+  author: string
+  authorOpenAlexId?: string
+  affiliation: string
+  institutionOpenAlexId?: string
+  evidenceUrl: string
+  status: 'source_confirmed'
+}
+
+export interface PaperResearchRights {
+  articleLicense?: {
+    code: string
+    label: string
+    url: string
+    status: 'confirmed'
+    scope: 'article'
+  }
+  dataset?: { url: string; licenseStatus: 'pending' | 'confirmed'; license?: string }
+  code?: { url: string; licenseStatus: 'pending' | 'confirmed'; license?: string }
+  intellectualProperty: {
+    status: 'undisclosed' | 'confirmed'
+    label: string
+    note: string
+    owner?: string
+    sourceUrl?: string
+  }
+}
+
+export interface PaperMetadata {
+  title?: string
+  titleOriginal?: string
+  titleZh?: string
+  projectName?: string
+  projectNameOriginal?: string
+  abstract?: string
+  abstractOriginal?: string
+  abstractZh?: string
+  authors?: string[]
+  firstAuthor?: string
+  secondAuthor?: string
+  categories?: string[]
+  venue?: string
+  comment?: string
+  pdfUrl?: string
+  publishedAt?: string
+  declaredPublishedAt?: string
+  publicationDateStatus?: 'confirmed' | 'source_declared_future'
+  publicationDateBasis?: 'publisher_published_at' | 'metadata_record_created_at'
+  doi?: string
+  resourceType?: string
+  affiliations?: PaperAffiliation[]
+  paperAuthors?: PaperAuthorIdentity[]
+  authorAffiliations?: PaperAuthorAffiliation[]
+  researchTeam?: { name: string; basis: 'paper_coauthorship'; memberCount: number }
+  authorContributions?: PaperAuthorContribution[]
+  rights?: PaperResearchRights
+  metadataSource?: { url: string; provider?: string; recordCreatedAt?: string; declaredPublishedAt?: string; publicationDateStatus?: 'confirmed' | 'source_declared_future'; publicationDateBasis?: 'publisher_published_at' | 'metadata_record_created_at' }
+}
+
 export interface Lead {
   id: string
   name: string
   companyName: string
   channel: LeadChannel
-  poolStatus?: '公共池' | '已转专属项目'
+  poolStatus?: '公共池' | '已转专属项目' | '已注销' | '已删除' | '已合并' | '解析失败'
   claimedBy?: string
   convertedProjectId?: string
   source: string
@@ -256,6 +490,17 @@ export interface Lead {
   businessTags?: { industry: string[]; region: string[] }
   valuationDisplay?: LeadValuationDisplay
   technicalScore?: LeadTechnicalScore
+  leadType?: 'company' | 'research'
+  stageDisplay?: string
+  fundingStatusDisplay?: '已融资' | '未融资' | '未披露' | '待核验' | '不适用'
+  businessStageDisplay?: string
+  stageEvidenceStatus?: 'source_supported' | 'source_labeled' | 'unverified' | 'not_applicable'
+  teamSizeDisplay?: string
+  foundedAtDisplay?: string
+  companyRegistry?: LeadCompanyRegistry
+  backgroundTags?: string[]
+  latestUpdates?: LeadPoolLatestUpdate[]
+  rating?: LeadPoolRatingSummary
   scoreJob?: LeadScoreJob | null
   /** 首次进入公共线索池的时间；“最新入池”排序和列表展示统一使用该字段。 */
   poolEnteredAt?: string
@@ -274,11 +519,27 @@ export interface Lead {
   suggestion: string
   shareholders: { name: string; percentage: string; type: string; sourceUrl?: string }[]
   founders: { name: string; title: string; background: string }[]
-  fundingRounds: { round: string; date: string; amount: string; valuation: string; investors: string[]; sourceUrl: string }[]
+  fundingRounds: {
+    round: string
+    roundRaw?: string
+    date: string
+    amount: string
+    amountRaw?: string
+    currency?: 'CNY' | 'USD' | ''
+    valuation: string
+    investors: string[]
+    leadInvestors?: string[]
+    sourceUrl: string
+    evidenceQuote?: string
+    evidenceStatus?: 'source_labeled' | 'source_supported' | 'conflicting'
+    extractionMethod?: string
+    extractorVersion?: string
+    idempotencyKey?: string
+  }[]
   companyNews: { date: string; type: string; title: string; summary: string; sourceName: string; sourceUrl: string }[]
   sources: SourceEvidence[]
   scoring?: LeadScoring
-  radarProfile?: { decisionLabel?: string; thesis?: string; sourceName?: string; sourceGroup?: string; sourceTitle?: string; channel?: string; accountName?: string; publishedAt?: string; profile?: Record<string,string>; team?: { name: string }[]; radarDimensions?: { code: string; label: string; score: number; maxScore: number; detail: string }[]; radarScore?: number; disclosure?: Record<string,string>; nextActions?: string[]; signals?: { code: string; score: number; detail: string }[]; articleText?: string; articleTextLength?: number; link?: string; paperMeta?: { title?: string; titleOriginal?: string; titleZh?: string; projectName?: string; projectNameOriginal?: string; abstract?: string; abstractOriginal?: string; abstractZh?: string; authors?: string[]; firstAuthor?: string; secondAuthor?: string; categories?: string[]; venue?: string; comment?: string; pdfUrl?: string; publishedAt?: string } }
+  radarProfile?: { decisionLabel?: string; thesis?: string; sourceName?: string; sourceGroup?: string; sourceTitle?: string; sourceId?: string; channel?: string; accountName?: string; publishedAt?: string; profile?: Record<string,string>; team?: { name: string }[]; radarDimensions?: { code: string; label: string; score: number; maxScore: number; detail: string }[]; radarScore?: number; disclosure?: Record<string,string>; nextActions?: string[]; signals?: { code: string; score: number; detail: string }[]; articleText?: string; articleTextLength?: number; link?: string; paperMeta?: PaperMetadata }
 }
 
 export interface SourceEvidence {

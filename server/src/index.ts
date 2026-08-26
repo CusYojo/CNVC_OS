@@ -33,6 +33,11 @@ import {
   stopLeadScoreJobWorker,
 } from './services/leadScoreJobService.js'
 import {
+  leadEnrichmentWorkerHealth,
+  startLeadEnrichmentWorker,
+  stopLeadEnrichmentWorker,
+} from './services/leadEnrichmentWorkerService.js'
+import {
   projectScoreJobHealth,
   startProjectScoreJobWorker,
   stopProjectScoreJobWorker,
@@ -188,6 +193,7 @@ app.get('/api/health/components', async (_req, res) => {
         await radarMySqlSourceHealth(),
         intentionallyDisabled('mysql-runtime-jobs'),
         intentionallyDisabled('mysql-lead-score-jobs'),
+        intentionallyDisabled('mysql-lead-enrichment'),
         intentionallyDisabled('mysql-lead-bp-jobs'),
         intentionallyDisabled('mysql-project-score-jobs'),
         intentionallyDisabled('mysql-ai-tasks'),
@@ -208,6 +214,7 @@ app.get('/api/health/components', async (_req, res) => {
         await radarMySqlSourceHealth(),
         await runtimeJobSchedulerHealth(),
         await leadScoreJobHealth(),
+        await leadEnrichmentWorkerHealth(),
         await leadBpWorkerHealth(),
         await projectScoreJobHealth(),
         await aiTaskWorkerHealth(),
@@ -330,6 +337,7 @@ async function start() {
     const interruptedTemplateAnalyses = await recoverInterruptedAiTemplateAnalysisProgress()
     console.log(`[ai-template-analysis] startup recovery interrupted=${interruptedTemplateAnalyses}`)
     await startLeadScoreJobWorker(executeLeadScoring)
+    await startLeadEnrichmentWorker()
     await startProjectScoreJobWorker(executeProjectScoring)
     await startLeadBpWorker(scheduleLeadScoring)
     const scoreRecovery = await recoverLeadScoringQueue()
@@ -361,6 +369,7 @@ async function shutdown(signal: string): Promise<void> {
   await stopRuntimeJobScheduler()
   await stopProjectScoreJobWorker()
   await stopLeadBpWorker()
+  await stopLeadEnrichmentWorker()
   await stopLeadScoreJobWorker()
   const aiTasks = migrationWriteFreezePolicy.enabled
     ? { active: 0, releasedLeases: 0, cancelled: 0 }

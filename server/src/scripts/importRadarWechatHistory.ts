@@ -15,13 +15,16 @@ try {
   const parsed = JSON.parse(await readFile(sourcePath, 'utf8')) as unknown
   const prepared = prepareHistoricalWechatImport(parsed)
   let written = 0
+  let syncHandoff: Record<string, unknown> | null = null
   if (apply) {
-    const [{ pool }, { ingestRadarCandidates }] = await Promise.all([
+    const [{ pool }, { ingestRadarCandidates }, { queueRadarSyncAfterCollection }] = await Promise.all([
       import('../db/client.js'),
       import('../services/radarDataMigrationService.js'),
+      import('../services/runtimeJobScheduler.js'),
     ])
     databasePool = pool
     written = await ingestRadarCandidates(prepared.rows)
+    syncHandoff = await queueRadarSyncAfterCollection({ written })
   }
   console.log(JSON.stringify({
     mode: apply ? 'apply' : 'preview',
@@ -33,6 +36,7 @@ try {
     duplicatesInInput: prepared.duplicatesInInput,
     readyToWrite: prepared.rows.length,
     written,
+    syncHandoff,
   }, null, 2))
 } finally {
   await databasePool?.end()

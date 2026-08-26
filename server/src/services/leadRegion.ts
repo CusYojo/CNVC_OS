@@ -112,6 +112,16 @@ function leadingRegion(value: unknown): BusinessRegion | undefined {
   return REGION_ALIASES.find(([, pattern]) => text.match(pattern)?.index === 0)?.[0]
 }
 
+function subjectAdministrativeRegion(value: unknown): BusinessRegion | undefined {
+  const text = meaningfulRegionText(value)
+  if (!text) return undefined
+  // A city name inside a person/team label is not location evidence. Legal entities and
+  // concrete projects may still use an administrative prefix (for example 武汉某某有限公司).
+  if (/(?:创始人|联合创始人|负责人|教授|博士|先生|女士|团队|课题组)$/.test(text)
+    && !/(?:公司|企业|项目|研究院|研究所|实验室)/.test(text)) return undefined
+  return leadingRegion(text)
+}
+
 function explicitLocationRegion(subjects: unknown[], ...values: unknown[]): BusinessRegion | undefined {
   const subjectTokens = subjects
     .map((value) => meaningfulRegionText(value))
@@ -200,13 +210,11 @@ export function resolveLeadBusinessRegion(input: LeadRegionInput): LeadRegionRes
     break
   }
 
-  const companyRegion = leadingRegion(input.companyName)
+  const companyRegion = subjectAdministrativeRegion(input.companyName)
   if (companyRegion) return { region: companyRegion, source: '主体名称行政区划', confidence: '中' }
 
-  const subjectRegion = leadingRegion(input.subjectName)
+  const subjectRegion = subjectAdministrativeRegion(input.subjectName)
   if (subjectRegion) return { region: subjectRegion, source: '主体名称行政区划', confidence: '中' }
-
-  if (mediumProfileRegion) return mediumProfileRegion
 
   const explicit = explicitLocationRegion(
     [input.companyName, input.subjectName],
@@ -215,6 +223,8 @@ export function resolveLeadBusinessRegion(input: LeadRegionInput): LeadRegionRes
     input.articleText,
   )
   if (explicit) return { region: explicit, source: '来源原文明确地点', confidence: '中' }
+
+  if (mediumProfileRegion) return mediumProfileRegion
 
   // 公司法定全称或项目名称以行政区划开头时，可作为业务地区候选；
   // 不扫描普通正文中的孤立城市词，避免把会议举办地误认为公司注册地。

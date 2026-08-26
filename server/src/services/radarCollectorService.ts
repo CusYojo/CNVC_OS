@@ -3,6 +3,13 @@ import { and, eq } from 'drizzle-orm'
 import { db } from '../db/client.js'
 import { radarCandidates, radarCollectorStates, radarSourceRegistry } from '../db/schema.js'
 import { ingestRadarCandidates, saveRadarCollectorState } from './radarDataMigrationService.js'
+import { authorContributions } from './externalPaperMetadataService.js'
+import { arxivPaperId, fetchArxivResearchMetadata } from './paperResearchMetadataService.js'
+import {
+  classifyPaperContent,
+  normalizePaperIdentity,
+  normalizePaperPublicationDate,
+} from './leadEnrichmentContract.js'
 import type { RadarPublicSourceConfig, RadarPublicSourceType } from './radarSourceCatalog.js'
 
 type JsonObject = Record<string, unknown>
@@ -208,6 +215,28 @@ function openAlexAbstract(invertedIndex: unknown): string {
   return words.sort((left, right) => left.position - right.position).map((item) => item.word).join(' ').slice(0, 12_000)
 }
 
+function openAlexResourceType(value: unknown): string {
+  const normalized = cleanText(value).toLowerCase()
+  if (normalized === 'article') return '期刊论文'
+  if (normalized === 'dissertation') return '学位论文'
+  if (['dataset', 'model'].includes(normalized)) return '研究数据/模型'
+  if (normalized === 'standard') return '研究标准/框架'
+  return cleanText(value) || '科研成果'
+}
+
+function openAlexLicense(value: unknown) {
+  const slug = cleanText(value).toLowerCase()
+  const mappings: Record<string, { code: string; url: string }> = {
+    'cc-by': { code: 'CC BY 4.0', url: 'https://creativecommons.org/licenses/by/4.0/' },
+    'cc-by-sa': { code: 'CC BY-SA 4.0', url: 'https://creativecommons.org/licenses/by-sa/4.0/' },
+    'cc-by-nc': { code: 'CC BY-NC 4.0', url: 'https://creativecommons.org/licenses/by-nc/4.0/' },
+    'cc-by-nc-sa': { code: 'CC BY-NC-SA 4.0', url: 'https://creativecommons.org/licenses/by-nc-sa/4.0/' },
+    'cc-by-nc-nd': { code: 'CC BY-NC-ND 4.0', url: 'https://creativecommons.org/licenses/by-nc-nd/4.0/' },
+  }
+  const mapped = mappings[slug]
+  return mapped ? { ...mapped, label: mapped.code, status: 'confirmed' as const, scope: 'article' as const } : undefined
+}
+
 export function parseOpenAlexWorks(source: ManagedPublicSource, payload: unknown, limit = 50): JsonObject[] {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('OpenAlex 返回格式无效')
   const results = Array.isArray((payload as JsonObject).results) ? (payload as JsonObject).results as unknown[] : []
@@ -227,6 +256,46 @@ export function parseOpenAlexWorks(source: ManagedPublicSource, payload: unknown
         ? [cleanText((author as JsonObject).display_name)].filter(Boolean)
         : []
     })
+    const paperAuthors = authorships.flatMap((authorship, position) => {
+      if (!authorship || typeof authorship !== 'object' || Array.isArray(authorship)) return []
+      const authorRecord = authorship as JsonObject
+      const author = authorRecord.author && typeof authorRecord.author === 'object' && !Array.isArray(authorRecord.author)
+        ? authorRecord.author as JsonObject : {}
+      const name = cleanText(author.display_name)
+      if (!name) return []
+      const institutions = (Array.isArray(authorRecord.institutions) ? authorRecord.institutions : []).flatMap((institution) => {
+        if (!institution || typeof institution !== 'object' || Array.isArray(institution)) return []
+        const item = institution as JsonObject
+        const institutionName = cleanText(item.display_name)
+        return institutionName ? [{
+          id: cleanText(item.id).split('/').pop() || cleanText(item.id),
+          name: institutionName,
+          evidenceUrl: openAlexId,
+        }] : []
+      })
+      return [{
+        name,
+        normalizedName: name.normalize('NFKC').toLocaleLowerCase('en-US'),
+        position: position + 1,
+        role: position === 0 ? 'first_author' : 'coauthor',
+        openAlexAuthorId: cleanText(author.id).split('/').pop() || cleanText(author.id),
+        orcid: cleanText(author.orcid).replace(/^https?:\/\/orcid\.org\//i, ''),
+        affiliations: institutions,
+        identityStatus: cleanText(author.id) || cleanText(author.orcid) ? 'confirmed' : 'claimed',
+        evidenceUrl: openAlexId,
+      }]
+    })
+    const affiliations = [...new Map(authorships.flatMap((authorship) => {
+      if (!authorship || typeof authorship !== 'object' || Array.isArray(authorship)) return []
+      const authorRecord = authorship as JsonObject
+      const institutions = Array.isArray(authorRecord.institutions) ? authorRecord.institutions : []
+      return institutions.flatMap((institution) => {
+        if (!institution || typeof institution !== 'object' || Array.isArray(institution)) return []
+        const item = institution as JsonObject
+        const name = cleanText(item.display_name)
+        return name ? [[name.toLocaleLowerCase('en-US'), { name, sourceUrl: openAlexId, evidenceStatus: 'source_confirmed' as const }] as const] : []
+      })
+    })).values()]
     const topics = (Array.isArray(work.topics) ? work.topics : []).flatMap((topic) => (
       topic && typeof topic === 'object' && !Array.isArray(topic)
         ? [cleanText((topic as JsonObject).display_name)].filter(Boolean)
@@ -242,22 +311,75 @@ export function parseOpenAlexWorks(source: ManagedPublicSource, payload: unknown
     const bestOaLocation = work.best_oa_location && typeof work.best_oa_location === 'object' && !Array.isArray(work.best_oa_location)
       ? work.best_oa_location as JsonObject : {}
     const doi = cleanText(work.doi)
-    const link = cleanText(primaryLocation.landing_page_url || doi || openAlexId)
+    const rawPdfUrl = cleanText(bestOaLocation.pdf_url || primaryLocation.pdf_url)
+    const landingCandidates = [doi, bestOaLocation.landing_page_url, primaryLocation.landing_page_url, openAlexId]
+      .map(cleanText).filter(Boolean)
+    const link = landingCandidates.find((url) => !['supplement', 'paper_pdf'].includes(classifyPaperContent({ url }))) || openAlexId
+    const declaredPublishedAt = cleanText(work.publication_date)
+    const recordCreatedAt = cleanText(work.created_date)
+    const publication = normalizePaperPublicationDate({ declaredPublishedAt, recordCreatedAt })
+    const publishedAt = publication.publishedAt
+    const license = openAlexLicense(bestOaLocation.license || primaryLocation.license)
+    const contributions = authorContributions(authors)
+    const researchTeam = { name: `${title}联合研究团队`, basis: 'paper_coauthorship', memberCount: authors.length }
+    const rights = {
+      ...(license ? { articleLicense: license } : {}),
+      intellectualProperty: { status: 'undisclosed', label: '未披露', note: '论文或成果开放许可不等于知识产权归属' },
+    }
+    const resourceType = openAlexResourceType(work.type)
+    const normalizedIdentity = normalizePaperIdentity({
+      provider: 'openalex', sourceId, openAlexId, doi, landingPageUrl: link, pdfUrl: rawPdfUrl,
+    })
+    const paperIdentity = publication.status === 'review' ? {
+      ...normalizedIdentity,
+      sourceStatus: 'review' as const,
+      reviewReasons: [...normalizedIdentity.reviewReasons, ...publication.reviewReasons],
+    } : normalizedIdentity
     rows.push(sourceCandidate(source, {
       title,
       summary: openAlexAbstract(work.abstract_inverted_index),
       link,
-      publishedAt: cleanText(work.publication_date),
+      publishedAt,
       sourceId,
       authors,
       categories: [...new Set([source.group, source.name, ...topics.slice(0, 8), ...keywords.slice(0, 8)])],
       extra: {
         openalex_id: openAlexId,
         doi,
-        pdf_url: cleanText(bestOaLocation.pdf_url || primaryLocation.pdf_url),
+        pdf_url: classifyPaperContent({ url: rawPdfUrl }) === 'paper_pdf' ? rawPdfUrl : '',
         cited_by_count: Number(work.cited_by_count || 0),
         primary_topic: topics[0] || '',
         openalex_keywords: keywords,
+        declared_published_at: declaredPublishedAt,
+        publication_date_status: publication.status === 'review' ? 'source_declared_future' : 'confirmed',
+        publication_date_basis: publication.basis,
+        paper_source_identity: paperIdentity,
+        paper_content_links: [
+          { url: link, contentType: classifyPaperContent({ url: link }) },
+          ...(rawPdfUrl ? [{ url: rawPdfUrl, contentType: classifyPaperContent({ url: rawPdfUrl }) }] : []),
+        ],
+        paper_authors: paperAuthors,
+        paper_author_affiliations: paperAuthors.flatMap((author) => author.affiliations.map((affiliation) => ({
+          author: author.name,
+          authorOpenAlexId: author.openAlexAuthorId,
+          affiliation: affiliation.name,
+          institutionOpenAlexId: affiliation.id,
+          evidenceUrl: affiliation.evidenceUrl,
+          status: 'source_confirmed',
+        }))),
+        paper_affiliations: affiliations,
+        paper_research_team: researchTeam,
+        paper_author_contributions: contributions,
+        paper_rights: rights,
+        paper_metadata_source: {
+          provider: 'OpenAlex',
+          url: `https://api.openalex.org/works/${sourceId}`,
+          recordCreatedAt,
+          declaredPublishedAt,
+          publicationDateStatus: publication.status === 'review' ? 'source_declared_future' : 'confirmed',
+          publicationDateBasis: publication.basis,
+        },
+        paper_resource_type: resourceType,
       },
     }))
   }
@@ -269,10 +391,11 @@ async function collectOpenAlex(source: ManagedPublicSource, signal: AbortSignal,
   if (!apiKey) throw new Error('缺少 OPENALEX_API_KEY，无法调用 OpenAlex 官方 Works API')
   const days = Math.min(90, Math.max(1, options.days ?? (Number(source.days) || 14)))
   const fromDate = shanghaiDate(-days)
+  const toDate = shanghaiDate()
   const url = new URL(source.url)
   url.searchParams.set('api_key', apiKey)
   url.searchParams.set('search', cleanText(options.query || source.keyword || process.env.OPENALEX_SEARCH_QUERY) || 'artificial intelligence')
-  url.searchParams.set('filter', `from_publication_date:${fromDate}`)
+  url.searchParams.set('filter', `from_publication_date:${fromDate},to_publication_date:${toDate}`)
   url.searchParams.set('sort', '-publication_date')
   url.searchParams.set('per_page', String(Math.min(100, Math.max(1, limit))))
   const payload = JSON.parse(await fetchText(url.toString(), signal, 35_000)) as unknown
@@ -490,7 +613,7 @@ async function collectDetailedArxiv(
   const apiSource: ManagedPublicSource = { ...source, key: 'arxiv_api', name: 'arXiv API', url: 'https://export.arxiv.org/api/query' }
   const cutoff = Date.now() - Math.min(90, Math.max(1, options.days ?? 14)) * 86_400_000
   const watchAuthors = new Set((options.watchAuthors ?? []).map((value) => cleanText(value).toLocaleLowerCase()).filter(Boolean))
-  return parseRssSource(apiSource, xml, maxResults).filter((item) => {
+  const parsed = parseRssSource(apiSource, xml, maxResults).filter((item) => {
     const published = Date.parse(cleanText(item.published_at))
     return Number.isNaN(published) || published >= cutoff
   }).map((item) => {
@@ -505,6 +628,39 @@ async function collectDetailedArxiv(
       signals: [...(Array.isArray(item.signals) ? item.signals : []), ...watchHits.map((author) => ({ code: 'watch_author', score: 10, detail: author }))],
     }
   })
+  const enriched: JsonObject[] = new Array(parsed.length)
+  let nextIndex = 0
+  async function worker() {
+    while (nextIndex < parsed.length) {
+      const index = nextIndex++
+      const item = parsed[index]
+      try {
+        const authors = Array.isArray(item.authors) ? item.authors.map((value) => cleanText(value)).filter(Boolean) : []
+        const researchMetadata = await fetchArxivResearchMetadata({
+          arxivId: arxivPaperId(cleanText(item.source_id || item.id || item.link || item.pdf_url)),
+          authors,
+          projectName: cleanText(item.project_name || item.title) || '论文',
+        })
+        enriched[index] = {
+          ...item,
+          paper_affiliations: researchMetadata.affiliations,
+          paper_authors: researchMetadata.paperAuthors,
+          paper_author_affiliations: researchMetadata.authorAffiliations,
+          paper_research_team: researchMetadata.researchTeam,
+          paper_author_contributions: researchMetadata.authorContributions,
+          paper_rights: researchMetadata.rights,
+          paper_metadata_source: researchMetadata.metadataSource,
+        }
+      } catch (cause) {
+        enriched[index] = {
+          ...item,
+          paper_research_metadata_error: cause instanceof Error ? cause.message.slice(0, 500) : String(cause).slice(0, 500),
+        }
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(4, parsed.length) }, worker))
+  return enriched
 }
 
 async function managedPublicSources(): Promise<ManagedPublicSource[]> {

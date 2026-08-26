@@ -70,6 +70,8 @@ const REQUIRED_RUNTIME_TABLES = [
   'departments', 'roles', 'permissions', 'role_permissions', 'user_roles', 'user_departments', 'dictionary_groups', 'dictionary_items',
   'knowledge_chunks', 'chat_conversations', 'agent_conversations', 'agent_messages',
   'agent_message_parts', 'leads', 'lead_score_jobs', 'lead_pipeline_raw_events',
+  'lead_entities', 'lead_entity_relations', 'lead_enrichment_jobs', 'lead_enrichment_topic_runs', 'lead_facts', 'lead_source_documents',
+  'lead_topic_search_cache', 'lead_fact_evidence', 'lead_fact_conflicts', 'lead_enrichment_snapshots', 'lead_rating_history',
   'lead_intake_files', 'lead_import_batches', 'lead_import_rows',
   'lead_pipeline_items', 'lead_pipeline_transitions', 'lead_pipeline_prompt_versions',
   'lead_pipeline_runs', 'lead_agent_runtime_permits', 'lead_pipeline_decisions', 'lead_pipeline_evidence',

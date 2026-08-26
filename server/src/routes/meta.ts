@@ -31,9 +31,26 @@ import {
 } from '../services/aiSummaryService.js'
 import {
   enqueueLeadScoreJob,
+  getLeadScoreJobBinding,
   listCircuitDeadLetterLeadScoreIds,
   type LeadScoreExecutionResult,
 } from '../services/leadScoreJobService.js'
+import {
+  confirmLeadEnrichmentEntity,
+  enqueueLeadEnrichmentJob,
+  excludeDeregisteredLeadFromPool,
+  getLeadEnrichmentDisplayProfile,
+  getLeadEnrichmentStatus,
+  listLeadEnrichmentConflicts,
+  listLeadEnrichmentFacts,
+  leadRatingSubjectProfile,
+  loadLeadEnrichmentSnapshot,
+  resolveLeadEnrichmentConflict,
+  retryLeadEnrichmentTopic,
+} from '../services/leadEnrichmentService.js'
+import { LEAD_ENRICHMENT_TOPIC_KEYS } from '../services/leadEnrichmentContract.js'
+import { leadEnrichmentOperationalMetrics } from '../services/leadEnrichmentWorkerService.js'
+import { listLeadRatingHistory, restoreLeadRatingHistory } from '../services/leadRatingHistoryService.js'
 import { collectCompanyIntel, scoreWithAgentDetailed } from '../services/inProcessAiWorkflowService.js'
 import {
   leadScoreRetryPolicy,
@@ -41,13 +58,22 @@ import {
   publicLeadScoreError,
 } from '../services/leadScoreRetryPolicy.js'
 import { prepareLeadScoringAuditContext } from '../services/leadScoringPipelineService.js'
+import {
+  LEAD_RATING_V3_SCHEMA_VERSION,
+  LEAD_RATING_V3_WORKFLOW,
+  validateSnapshotBoundLeadRatingApplicability,
+  validateSnapshotBoundLeadRatingEvidence,
+} from '../services/leadRatingV3Service.js'
+import { companyRegistrationEligibility, normalizeLeadRegistry } from '../services/leadRegistry.js'
 import { isLeadScoringSubjectEligible, isSpecificLeadSubjectName } from '../services/leadSubjectName.js'
 import {
   commitLeadPublicIntel,
   leadPublicIntelRawEventInput,
   meaningfulPublicIntelText,
+  missingLeadCompanyIntelFields,
   type PublicIntelResult,
 } from '../services/leadPublicIntelService.js'
+import type { LeadCompanyIntelField } from '../services/leadCompanyIntelExtractionService.js'
 import {
   evaluateRadarIntakeWorkflow,
   runPublicIntelEnrichmentAgents,
@@ -60,6 +86,10 @@ import {
   saveRadarSyncState,
 } from '../services/radarSyncService.js'
 import { resolveLeadBusinessRegion } from '../services/leadRegion.js'
+import {
+  extractLeadFinancingFacts,
+  extractLeadFinancingFactsWithStatus,
+} from '../services/leadFinancingFactService.js'
 import { reviewRadarCandidatesWithAi } from '../services/radarAiReviewService.js'
 import { deriveRadarChannel, isRadarPaperCandidate } from '../services/radarChannel.js'
 import { resolvePaperProjectIdentity } from '../services/paperIdentity.js'
@@ -128,8 +158,9 @@ function publicIntelContextEvidence(value: unknown): PublicIntelContextEvidence[
 async function collectPublicIntel(
   company: string,
   contextEvidence: PublicIntelContextEvidence[] = [],
+  registryFields?: LeadCompanyIntelField[],
 ): Promise<PublicIntelResult> {
-  return await collectCompanyIntel({ company, contextEvidence }) as PublicIntelResult
+  return await collectCompanyIntel({ company, contextEvidence, registryFields }) as PublicIntelResult
 }
 
 metaRouter.get('/users', requireSystemAdmin, async (_req, res, next) => {
@@ -259,13 +290,16 @@ const LeadCreateSchema = z.object({
 // 旧前端代码不读 list 之外的字段,升级时同步改 store + SourcingPage。
 const ListLeadsQuery = z.object({
   page: z.coerce.number().int().min(1).max(10000).default(1),
-  pageSize: z.coerce.number().int().min(1).max(100).default(50),
+  pageSize: z.coerce.number().int().min(1).max(100).default(20),
   channel: z.string().optional(),
   sort: z.enum(['latest', 'score']).optional(),
   keyword: z.string().optional(),  // 关键词全库跨字段检索
   source: z.string().optional(),   // 渠道二级标签(按 sourceName 模糊匹配)
   industry: z.string().optional(), // 行业检索（按 leads.industry LIKE 模糊匹配）
   region: z.string().optional(),   // 地区业务标签（按注册地/项目画像匹配）
+  leadType: z.enum(['company', 'research']).optional(),
+  stage: z.string().max(64).optional(),
+  updatedRange: z.enum(['7d', '30d', '90d']).optional(),
 })
 
 const LeadReviewListQuery = z.object({
@@ -341,8 +375,8 @@ metaRouter.post('/lead-pipeline/reviews/:id/resolve', async (req: AuthedRequest,
 
 metaRouter.get('/leads', async (req, res, next) => {
   try {
-    const { page, pageSize, channel, sort, keyword, source, industry, region } = ListLeadsQuery.parse(req.query)
-    res.json(await listLeads({ page, pageSize, channel, sort, keyword, source, industry, region }))
+    const { page, pageSize, channel, sort, keyword, source, industry, region, leadType, stage, updatedRange } = ListLeadsQuery.parse(req.query)
+    res.json(await listLeads({ page, pageSize, channel, sort, keyword, source, industry, region, leadType, stage, updatedRange }))
   } catch (err) { next(err) }
 })
 
@@ -358,6 +392,159 @@ metaRouter.get('/leads/:id', async (req, res, next) => {
     if (!row) return res.status(404).json({ code: 'NOT_FOUND', message: '线索不存在' })
     res.json(row)
   } catch (err) { next(err) }
+})
+
+metaRouter.get('/leads/:id/enrichment', requireSystemAdmin, async (req, res, next) => {
+  try {
+    const leadId = metaRouteId(req.params.id)
+    const lead = await getLeadById(leadId, { includeHidden: true })
+    if (!lead) return res.status(404).json({ code: 'NOT_FOUND', message: '线索不存在' })
+    res.json(await getLeadEnrichmentStatus(leadId))
+  } catch (error) { next(error) }
+})
+
+metaRouter.post('/leads/:id/enrichment', requireSystemAdmin, async (req: AuthedRequest, res, next) => {
+  try {
+    const leadId = metaRouteId(req.params.id)
+    const body = z.object({ idempotencyKey: z.string().min(8).max(128) }).strict().parse(req.body)
+    const lead = await getLeadById(leadId)
+    if (!lead) return res.status(404).json({ code: 'NOT_FOUND', message: '线索不存在' })
+    const result = await enqueueLeadEnrichmentJob({
+      leadId,
+      triggerType: 'manual-refresh',
+      idempotencyToken: body.idempotencyKey,
+      priority: 50,
+    })
+    res.status(result.queued ? 202 : 200).json(result)
+  } catch (error) { next(error) }
+})
+
+metaRouter.post('/leads/:id/enrichment/topics/:topic/retry', requireSystemAdmin, async (req: AuthedRequest, res, next) => {
+  try {
+    const leadId = metaRouteId(req.params.id)
+    const topicKey = z.enum(LEAD_ENRICHMENT_TOPIC_KEYS).parse(req.params.topic)
+    const body = z.object({ reason: z.string().trim().min(4).max(2_000) }).strict().parse(req.body)
+    const retried = await retryLeadEnrichmentTopic({
+      leadId, topicKey, reason: body.reason,
+      actor: { userId: req.user!.uid, userName: req.user!.name },
+    })
+    res.status(retried ? 202 : 409).json({ retried, leadId, topicKey })
+  } catch (error) { next(error) }
+})
+
+metaRouter.post('/leads/:id/enrichment/entity/confirm', requireSystemAdmin, async (req: AuthedRequest, res, next) => {
+  try {
+    const leadId = metaRouteId(req.params.id)
+    const body = z.object({
+      canonicalName: z.string().trim().min(2).max(255),
+      entityType: z.enum(['company', 'project', 'team', 'research']).optional(),
+      identifiers: z.object({
+        creditCode: z.string().trim().max(64).optional(),
+        websiteDomain: z.string().trim().max(255).optional(),
+        legalRepresentative: z.string().trim().max(128).optional(),
+        registeredAddress: z.string().trim().max(500).optional(),
+      }).strict().optional(),
+      reason: z.string().trim().min(4).max(2_000),
+    }).strict().parse(req.body)
+    const result = await confirmLeadEnrichmentEntity({
+      leadId, ...body, actor: { userId: req.user!.uid, userName: req.user!.name },
+    })
+    res.status(result.alreadyConfirmed ? 200 : 202).json(result)
+  } catch (error) { next(error) }
+})
+
+metaRouter.get('/leads/:id/enrichment/conflicts', requireSystemAdmin, async (req, res, next) => {
+  try {
+    const leadId = metaRouteId(req.params.id)
+    const lead = await getLeadById(leadId, { includeHidden: true })
+    if (!lead) return res.status(404).json({ code: 'NOT_FOUND', message: '线索不存在' })
+    res.json({ leadId, conflicts: await listLeadEnrichmentConflicts(leadId) })
+  } catch (error) { next(error) }
+})
+
+metaRouter.get('/leads/:id/facts', requireSystemAdmin, async (req, res, next) => {
+  try {
+    const leadId = metaRouteId(req.params.id)
+    const query = z.object({
+      topic: z.enum(LEAD_ENRICHMENT_TOPIC_KEYS).optional(),
+      page: z.coerce.number().int().min(1).max(100_000).default(1),
+      pageSize: z.coerce.number().int().min(1).max(100).default(25),
+    }).strict().parse(req.query)
+    const lead = await getLeadById(leadId, { includeHidden: true })
+    if (!lead) return res.status(404).json({ code: 'NOT_FOUND', message: '线索不存在' })
+    res.json(await listLeadEnrichmentFacts({
+      leadId, topicKey: query.topic, page: query.page, pageSize: query.pageSize,
+    }))
+  } catch (error) { next(error) }
+})
+
+metaRouter.get('/leads/:id/verified-profile', async (req, res, next) => {
+  try {
+    const leadId = metaRouteId(req.params.id)
+    const lead = await getLeadById(leadId)
+    if (!lead) return res.status(404).json({ code: 'NOT_FOUND', message: '线索不存在' })
+    res.json(await getLeadEnrichmentDisplayProfile(leadId))
+  } catch (error) { next(error) }
+})
+
+metaRouter.get('/leads/:id/verified-facts', async (req, res, next) => {
+  try {
+    const leadId = metaRouteId(req.params.id)
+    const query = z.object({
+      topic: z.enum(LEAD_ENRICHMENT_TOPIC_KEYS).optional(),
+      page: z.coerce.number().int().min(1).max(100_000).default(1),
+      pageSize: z.coerce.number().int().min(1).max(100).default(25),
+    }).strict().parse(req.query)
+    const lead = await getLeadById(leadId)
+    if (!lead) return res.status(404).json({ code: 'NOT_FOUND', message: '线索不存在' })
+    res.json(await listLeadEnrichmentFacts({
+      leadId, topicKey: query.topic, page: query.page, pageSize: query.pageSize,
+      projection: 'verified-display',
+    }))
+  } catch (error) { next(error) }
+})
+
+metaRouter.get('/lead-enrichment/metrics', requireSystemAdmin, async (_req, res, next) => {
+  try { res.json(await leadEnrichmentOperationalMetrics()) } catch (error) { next(error) }
+})
+
+metaRouter.get('/leads/:id/ratings/history', requireSystemAdmin, async (req, res, next) => {
+  try {
+    const leadId = metaRouteId(req.params.id)
+    const query = z.object({
+      page: z.coerce.number().int().min(1).max(100_000).default(1),
+      pageSize: z.coerce.number().int().min(1).max(50).default(10),
+    }).strict().parse(req.query)
+    const lead = await getLeadById(leadId, { includeHidden: true })
+    if (!lead) return res.status(404).json({ code: 'NOT_FOUND', message: '线索不存在' })
+    res.json(await listLeadRatingHistory({ leadId, page: query.page, pageSize: query.pageSize }))
+  } catch (error) { next(error) }
+})
+
+metaRouter.post('/leads/:id/ratings/history/:historyId/restore', requireSystemAdmin, async (req: AuthedRequest, res, next) => {
+  try {
+    const body = z.object({ reason: z.string().trim().min(4).max(2_000) }).strict().parse(req.body)
+    const result = await restoreLeadRatingHistory({
+      leadId: metaRouteId(req.params.id), historyId: metaRouteId(req.params.historyId), reason: body.reason,
+      actor: { userId: req.user!.uid, userName: req.user!.name },
+    })
+    res.json(result)
+  } catch (error) { next(error) }
+})
+
+metaRouter.post('/leads/:id/enrichment/conflicts/:conflictId/resolve', requireSystemAdmin, async (req: AuthedRequest, res, next) => {
+  try {
+    const body = z.object({
+      decision: z.enum(['accept_fact', 'dismiss']),
+      selectedFactId: z.string().uuid().optional(),
+      reason: z.string().trim().min(4).max(2_000),
+    }).strict().parse(req.body)
+    const result = await resolveLeadEnrichmentConflict({
+      leadId: metaRouteId(req.params.id), conflictId: metaRouteId(req.params.conflictId),
+      ...body, actor: { userId: req.user!.uid, userName: req.user!.name },
+    })
+    res.status(202).json(result)
+  } catch (error) { next(error) }
 })
 
 metaRouter.delete('/leads/:id', requireSystemAdmin, async (req: AuthedRequest, res, next) => {
@@ -386,8 +573,40 @@ metaRouter.post('/leads/:id/enrich-public-info', async (req: AuthedRequest, res,
       || meaningfulPublicIntelText(lead.name)
     if (!company) return res.status(400).json({ code: 'INVALID_SUBJECT', message: '公司主体名称尚未确认，无法检索公开信息' })
 
-    const intel = await collectPublicIntel(company, publicIntelContextEvidence(lead.sources))
+    const missingFields = missingLeadCompanyIntelFields({
+      scoring: lead.scoring,
+      radarProfile: lead.radarProfile,
+      website: (lead as { website?: unknown }).website,
+    })
+    if (!missingFields.length) {
+      res.json({
+        lead,
+        intel: null,
+        skipped: true,
+        reason: 'company registry fields are already complete',
+      })
+      return
+    }
+
+    const intel = await collectPublicIntel(company, publicIntelContextEvidence(lead.sources), missingFields)
     const captured = await recordLeadPipelineRawEvent(leadPublicIntelRawEventInput(company, intel))
+    const registration = companyRegistrationEligibility(intel.registrationStatus)
+    if (!registration.eligibleForLeadPool) {
+      await excludeDeregisteredLeadFromPool({
+        leadId, registrationStatus: registration.normalizedStatus,
+        sourceUrl: intel.sources?.[0]?.url || '',
+        actor: { userId: req.user!.uid, userName: req.user!.name },
+      })
+      res.status(202).json({
+        lead: null,
+        intel,
+        eventId: captured.event.id,
+        pipelineStatus: 'rejected',
+        code: 'COMPANY_DEREGISTERED',
+        reason: registration.reason,
+      })
+      return
+    }
     const agentStages = await runPublicIntelEnrichmentAgents({
       eventId: captured.event.id,
       leadId,
@@ -444,6 +663,30 @@ metaRouter.post('/leads/collect', async (req: AuthedRequest, res, next) => {
     }
     const result = await collectPublicIntel(company)
     const captured = await recordLeadPipelineRawEvent(leadPublicIntelRawEventInput(company, result))
+    const registration = companyRegistrationEligibility(result.registrationStatus)
+    if (!registration.eligibleForLeadPool) {
+      await transitionLeadPipelineItem(captured.event.id, {
+        status: 'rejected',
+        reason: registration.reason!,
+        evidence: [{
+          field: 'registrationStatus',
+          value: registration.normalizedStatus,
+          rule: 'deregistered-company-exclusion-v1',
+        }],
+        confidence: 100,
+        actorType: 'system',
+        actorId: 'lead-registration-admission-guard',
+      })
+      res.status(202).json({
+        lead: null,
+        intel: result,
+        eventId: captured.event.id,
+        pipelineStatus: 'rejected',
+        code: 'COMPANY_DEREGISTERED',
+        reason: registration.reason,
+      })
+      return
+    }
     const agentStages = await runPublicIntelIntakeAgents({
       eventId: captured.event.id,
       company,
@@ -561,6 +804,27 @@ function radarCandidateResearchEvidence(item: Record<string, unknown>, subjectNa
     item.title,
   ).slice(0, 12_000)
   const url = firstMeaningfulRadarText(item.link, item.url, (item.project_profile as Record<string, unknown> | undefined)?.source_url)
+  const fundingRounds = extractLeadFinancingFacts({
+    text: snippet,
+    sourceUrl: url,
+    publishedAt: firstMeaningfulRadarText(item.published_at, item.collected_at),
+  }).map((fact) => ({
+    round: fact.round,
+    roundRaw: fact.roundRaw,
+    date: fact.date,
+    amount: fact.amount,
+    amountRaw: fact.amountRaw,
+    currency: fact.currency,
+    valuation: fact.valuation,
+    investors: fact.investors.join('；'),
+    sourceUrl: fact.sourceUrl,
+    leadInvestors: fact.leadInvestors,
+    evidenceQuote: fact.evidenceQuote,
+    evidenceStatus: fact.evidenceStatus,
+    extractionMethod: fact.extractionMethod,
+    extractorVersion: fact.extractorVersion,
+    idempotencyKey: fact.idempotencyKey,
+  }))
   return {
     positioning: snippet.slice(0, 2_000),
     registeredCapital: '',
@@ -568,7 +832,7 @@ function radarCandidateResearchEvidence(item: Record<string, unknown>, subjectNa
     foundedAt: '',
     region: '',
     registeredAddress: '',
-    fundingRounds: [],
+    fundingRounds,
     shareholders: [],
     competitors: [],
     companyNews: [],
@@ -618,6 +882,8 @@ export type RadarSyncInput = {
 }
 
 export class RadarSyncAlreadyRunningError extends Error {
+  readonly code = 'RADAR_SYNC_ALREADY_RUNNING'
+
   constructor() {
     super('上一轮雷达同步仍在运行，请稍后重试')
     this.name = 'RadarSyncAlreadyRunningError'
@@ -996,7 +1262,29 @@ export async function runRadarSyncImport(input: RadarSyncInput = {}, actorUserId
       // 历史高校/公众号画像曾把来源账号写入 institutions；来源方不是投资方。
       const fundingInstitutions = publisherNames.includes(rawFundingInstitutions) ? '' : rawFundingInstitutions
       const hasFundingData = Boolean(fundingRound || financingAmount || latestValuation || fundingInstitutions)
-      const fundingRounds = hasFundingData ? [{
+      const fundingExtraction = extractLeadFinancingFactsWithStatus({
+        text: firstMeaningfulRadarText(it.article_text, it.articleText, it.summary),
+        sourceUrl: firstMeaningfulRadarText(it.link, prof.source_url),
+        publishedAt: firstMeaningfulRadarText(it.published_at, it.collected_at),
+      })
+      const articleFundingRounds = fundingExtraction.facts.map((fact) => ({
+        round: fact.round,
+        roundRaw: fact.roundRaw,
+        date: fact.date,
+        amount: fact.amount,
+        amountRaw: fact.amountRaw,
+        currency: fact.currency,
+        valuation: fact.valuation,
+        investors: fact.investors,
+        leadInvestors: fact.leadInvestors,
+        sourceUrl: fact.sourceUrl,
+        evidenceQuote: fact.evidenceQuote,
+        evidenceStatus: fact.evidenceStatus,
+        extractionMethod: fact.extractionMethod,
+        extractorVersion: fact.extractorVersion,
+        idempotencyKey: fact.idempotencyKey,
+      }))
+      const fundingRounds = articleFundingRounds.length ? articleFundingRounds : hasFundingData ? [{
         round: fundingRound || '待核验',
         amount: financingAmount || '未披露',
         valuation: latestValuation || '未披露',
@@ -1066,6 +1354,16 @@ export async function runRadarSyncImport(input: RadarSyncInput = {}, actorUserId
         signals: Array.isArray(it.signals) ? it.signals.map((s: any) => ({ code: s.code, score: s.score, detail: s.detail })) : [],
         articleText: (it.article_text || '').toString().slice(0, 20000),
         articleTextLength: it.article_text_length || 0,
+        sourceFetch: {
+          status: firstMeaningfulRadarText(it.fetch_status, it.content_status)
+            || (firstMeaningfulRadarText(it.article_text, it.articleText) ? 'content_available' : 'content_unavailable'),
+        },
+        fundingExtraction: {
+          status: fundingExtraction.status,
+          extractorVersion: fundingExtraction.extractorVersion,
+          error: fundingExtraction.error || '',
+        },
+        fundingRounds,
         link: it.link || prof.source_url || '',
         // 论文原文用于来源核验和评分，中文译文仅用于产品展示；两者不能互相覆盖。
         paperMeta: isPaper ? {
@@ -1085,6 +1383,18 @@ export async function runRadarSyncImport(input: RadarSyncInput = {}, actorUserId
           abstractOriginal: (it.summary || '').toString().slice(0, 4000),
           abstractZh: paperSummaryZh,
           publishedAt: it.published_at || '',
+          declaredPublishedAt: it.declared_published_at || '',
+          publicationDateStatus: it.publication_date_status || 'confirmed',
+          publicationDateBasis: it.publication_date_basis || 'publisher_published_at',
+          doi: it.doi || '',
+          resourceType: it.paper_resource_type || '',
+          affiliations: Array.isArray(it.paper_affiliations) ? it.paper_affiliations : [],
+          paperAuthors: Array.isArray(it.paper_authors) ? it.paper_authors : [],
+          authorAffiliations: Array.isArray(it.paper_author_affiliations) ? it.paper_author_affiliations : [],
+          researchTeam: it.paper_research_team && typeof it.paper_research_team === 'object' ? it.paper_research_team : undefined,
+          authorContributions: Array.isArray(it.paper_author_contributions) ? it.paper_author_contributions : [],
+          rights: it.paper_rights && typeof it.paper_rights === 'object' ? it.paper_rights : undefined,
+          metadataSource: it.paper_metadata_source && typeof it.paper_metadata_source === 'object' ? it.paper_metadata_source : undefined,
         } : {},
       }
       const regionResolution = resolveLeadBusinessRegion({
@@ -1112,7 +1422,7 @@ export async function runRadarSyncImport(input: RadarSyncInput = {}, actorUserId
             businessRegionSource: regionResolution?.source,
             businessRegionConfidence: regionResolution?.confidence,
             source: isPaper
-              ? `项目发现雷达 · arxiv`
+              ? `项目发现雷达 · ${it.source_name || it.source || '论文'}`
               : `项目发现雷达 · ${it.source_name || it.source || '公开渠道'}`,
             poolStatus: '成功',
             summary: (isPaper
@@ -1310,6 +1620,21 @@ export async function scheduleLeadScoring(
     updatedAt: now,
     error: undefined,
   }
+  const enrichment = await getLeadEnrichmentStatus(leadId)
+  if (!enrichment.job) {
+    const prerequisite = await enqueueLeadEnrichmentJob({
+      leadId,
+      triggerType: 'score-prerequisite',
+      idempotencyToken: 'score-prerequisite-v1',
+      priority: 40,
+    })
+    console.warn(`[lead-score] enrichment prerequisite lead=${leadId} queued=${prerequisite.queued} reason=${prerequisite.reason || 'none'}`)
+    return false
+  }
+  if (enrichment.snapshot?.status !== 'ready') {
+    console.warn(`[lead-score] wait for enrichment snapshot lead=${leadId} enrichment=${enrichment.status}`)
+    return false
+  }
   try {
     const queued = await enqueueLeadScoreJob(leadId, {
       recovering: options.recovering,
@@ -1321,6 +1646,9 @@ export async function scheduleLeadScoring(
       } : undefined,
       automaticCircuitRecovery: options.automaticCircuitRecovery ? { target: lead.name } : undefined,
       snapshot: job as unknown as Record<string, unknown>,
+      enrichmentSnapshotId: enrichment.snapshot.id,
+      snapshotHash: enrichment.snapshot.hash,
+      ratingSchemaVersion: LEAD_RATING_V3_SCHEMA_VERSION,
     })
     if (!queued) return false
   } catch (error) {
@@ -1405,12 +1733,12 @@ type ScoreWorkflowResult = {
 }
 
 async function requestScoreWorkflow(
-  scoreWorkflow: string,
+  scoreWorkflow: typeof LEAD_RATING_V3_WORKFLOW,
   requestBody: Record<string, unknown>,
   audit: Awaited<ReturnType<typeof prepareLeadScoringAuditContext>>,
 ): Promise<ScoreWorkflowResult> {
   const detailed = await scoreWithAgentDetailed(
-    scoreWorkflow === 'score-paper' ? 'score-paper' : 'score-project',
+    scoreWorkflow,
     requestBody,
     { audit },
   )
@@ -1422,6 +1750,13 @@ async function requestScoreWorkflow(
     ...result,
     provenance: 'agent-run',
     evidenceChain: detailed.audit,
+    scoringExecution: {
+      workflow: detailed.workflow,
+      model: detailed.model,
+      promptVersion: `${detailed.workflow}-${LEAD_RATING_V3_SCHEMA_VERSION}-agent-v1`,
+      runId: detailed.audit?.runId ?? null,
+      decisionId: detailed.audit?.decisionId ?? null,
+    },
   }
 }
 
@@ -1448,61 +1783,48 @@ export async function executeLeadScoring(leadId: string): Promise<LeadScoreExecu
       console.warn(`[lead-score] discard invalid queued lead=${leadId} name=${lead.name}`)
       return { status: 'discarded' }
     }
-    const facts: string[] = []
-    const reg = rp.registry as Record<string, string> | undefined
-    if (reg) facts.push(`工商信息：公司=${reg.companyName || ''}，成立=${reg.foundedAt || ''}，注册资本=${reg.registeredCapital || ''}，法人=${reg.legalRepresentative || ''}，地址=${reg.regLocation || ''}`)
-    const tm = rp.team as Array<{ name?: string; title?: string; background?: string }> | undefined
-    if (Array.isArray(tm) && tm.length) facts.push(`核心团队：${tm.map((t) => `${t.name}(${t.title})${t.background ? '-' + t.background : ''}`).join('；')}`)
-    const sh = rp.shareholders as Array<{ name?: string; percentage?: string }> | undefined
-    if (Array.isArray(sh) && sh.length) facts.push(`股东：${sh.map((s) => `${s.name} ${s.percentage}`).join('；')}`)
-    const leadFundingRounds = lead.fundingRounds as Array<{ round?: string; date?: string; amount?: string; investors?: string }> | undefined
-    const fr = Array.isArray(leadFundingRounds) && leadFundingRounds.length
-      ? leadFundingRounds
-      : (rp.fundingRounds as Array<{ round?: string; date?: string; amount?: string; investors?: string }> | undefined)
-    if (Array.isArray(fr) && fr.length) facts.push(`融资历史：${fr.map((f) => `${f.round} ${f.date} ${f.amount} 投资方:${f.investors}`).join('；')}`)
-    const baseArticle = [
-      (rp.articleText as string) || '',
-      facts.length ? `\n【已有结构化资料(来自36氪/雷达)】\n${facts.join('\n')}` : '',
-    ].join('')
-    // 【论文专属分析流程路由】radar_profile.channel==='论文' 的线索走 score-paper workflow
-    // (5维:技术实力/落地可能/市场空间/学术背景/商业化经验,放宽对团队/估值/融资的要求),
-    // 其余线索仍走通用 score-project(7维)。把 paperMeta 的作者/分类/摘要喂进论文评分输入。
-    const paperMeta = (rp as { paperMeta?: Record<string, unknown> }).paperMeta || {}
-    const scoreWorkflow = isPaper ? 'score-paper' : 'score-project'
-    // 【review P0 修复】论文走 score-paper 时,必须传它 input schema 认的 typed 字段
-    // (title/authors/categories/abstract 等,从 paperMeta 取)+ articleText(读取已入库资料);
-    // 之前只塞 articleText，而 score-paper 无该字段时会被 valibot 静默丢弃，导致摘要、作者和入库补充资料丢失。
-    const commonBody = {
-      projectName: lead.name,
-      industry: lead.industry ?? undefined,
-      summary: lead.summary ?? undefined,
-      highlights: Array.isArray(lead.highlights) ? lead.highlights : [],
-      risks: Array.isArray(lead.risks) ? lead.risks : [],
-      sources: Array.isArray(lead.sources)
-        ? (lead.sources as Array<{ title?: string; url?: string }>).map((item) => [item.title, item.url].filter(Boolean).join('｜')).filter(Boolean)
-        : [],
+    // 共享线索统一走独立 V3 评级流程。专属项目继续使用 score-project，
+    // 因而本次评级升级不会改变“我的专属项目”板块的既有评分契约。
+    // 论文/科研成果由 V3 的阶段适配和 N/A 规则处理，不再用缺少融资资料机械扣分。
+    const scoreWorkflow = LEAD_RATING_V3_WORKFLOW
+    const scoreBinding = await getLeadScoreJobBinding(leadId)
+    if (!scoreBinding?.enrichmentSnapshotId || !scoreBinding.snapshotHash
+      || scoreBinding.ratingSchemaVersion !== LEAD_RATING_V3_SCHEMA_VERSION) {
+      await enqueueLeadEnrichmentJob({
+        leadId,
+        triggerType: 'score-prerequisite',
+        idempotencyToken: 'score-prerequisite-v1',
+        priority: 40,
+      })
+      console.warn(`[lead-score] discard legacy unbound score job lead=${leadId}; enrichment prerequisite required`)
+      return { status: 'discarded' }
     }
-    const requestBody = isPaper
-      ? {
-          ...commonBody,
-          // score-paper 论文专属 typed 字段(从雷达 paperMeta 取)
-          title: (paperMeta.title as string) || lead.name,
-          authors: Array.isArray(paperMeta.authors) ? (paperMeta.authors as string[]) : undefined,
-          firstAuthor: (paperMeta.firstAuthor as string) || undefined,
-          categories: Array.isArray(paperMeta.categories) ? (paperMeta.categories as string[]) : undefined,
-          venue: (paperMeta.venue as string) || undefined,
-          abstract: (paperMeta.abstract as string) || undefined,
-          pdfUrl: (paperMeta.pdfUrl as string) || undefined,
-          // 已入库论文正文和工商结构化资料。
-          articleText: baseArticle || undefined,
-        }
-      : {
-          ...commonBody,
-          // score-project 通用 7 维字段
-          round: (lead as { round?: string }).round,
-          team: (lead as { team?: string }).team ?? undefined,
-          articleText: baseArticle || undefined,
-        }
+    const boundSnapshot = await loadLeadEnrichmentSnapshot(scoreBinding.enrichmentSnapshotId, leadId)
+    if (
+      !boundSnapshot
+      || boundSnapshot.status !== 'ready'
+      || boundSnapshot.snapshotHash !== scoreBinding.snapshotHash
+    ) {
+      throw new Error('评分任务绑定的补全快照缺失、未就绪或哈希不一致')
+    }
+    const ratingSubjectProfile = leadRatingSubjectProfile(boundSnapshot.subjectProfile)
+    const requestBody = {
+      projectName: ratingSubjectProfile.identity.name || lead.name,
+      industry: ratingSubjectProfile.identity.industry,
+      enrichmentSnapshot: {
+        id: boundSnapshot.id,
+        hash: boundSnapshot.snapshotHash,
+        schemaVersion: boundSnapshot.schemaVersion,
+        frozenAt: boundSnapshot.frozenAt,
+        coverage: boundSnapshot.coverage,
+        subjectProfile: ratingSubjectProfile,
+        topicStates: boundSnapshot.topicStates,
+        facts: boundSnapshot.facts,
+        evidenceIndex: boundSnapshot.evidenceIndex,
+        gaps: boundSnapshot.gaps,
+        conflicts: boundSnapshot.conflicts,
+      },
+    }
     let result: ScoreWorkflowResult | null = null
     let finalError: Error | null = null
     const persisted = readLeadScoreJob((lead as { scoring?: unknown }).scoring)
@@ -1568,6 +1890,10 @@ export async function executeLeadScoring(leadId: string): Promise<LeadScoreExecu
       }
       throw error
     }
+    if (boundSnapshot) {
+      validateSnapshotBoundLeadRatingEvidence(result.ratingV3, boundSnapshot.facts)
+      validateSnapshotBoundLeadRatingApplicability(result.ratingV3, boundSnapshot.topicStates)
+    }
 
     const industry = lead.industry
     // 改用 listLeadScoresForRanking 拉全表 industry+total 极轻量列表(避免 listLeads 全表反序列化大 jsonb)
@@ -1575,16 +1901,52 @@ export async function executeLeadScoring(leadId: string): Promise<LeadScoreExecu
     const peers = allScoresForRank
       .filter((l) => l.industry === industry && l.id !== lead.id && l.total != null)
       .map((l) => l.total as number)
-    const allScores = [...peers, result.total].sort((a, b) => b - a)
-    const rankIndex = allScores.indexOf(result.total)
-    const percentile = allScores.length > 1 ? Math.round((1 - rankIndex / (allScores.length - 1)) * 100) : 100
+    const ratingV3ForRanking = result.ratingV3 as { computed?: { score?: number | null } } | undefined
+    const formalRatingScore = ratingV3ForRanking?.computed?.score
+    const rankableScore = result.ratingV3 ? formalRatingScore : result.total
+    const allScores = (rankableScore == null ? peers : [...peers, rankableScore]).sort((a, b) => b - a)
+    const rankIndex = rankableScore == null ? -1 : allScores.indexOf(rankableScore)
+    const percentile = rankIndex < 0
+      ? null
+      : allScores.length > 1 ? Math.round((1 - rankIndex / (allScores.length - 1)) * 100) : 100
+    const completedAt = new Date().toISOString()
+    const completedScoreJob = {
+      status: 'done',
+      attempts: currentAttempt || 1,
+      maxAttempts: SCORE_MAX_ATTEMPTS,
+      retryCycles,
+      queuedAt: persisted?.queuedAt,
+      startedAt: runStartedAt,
+      updatedAt: completedAt,
+      completedAt,
+      enrichmentSnapshotId: boundSnapshot?.id,
+      snapshotHash: boundSnapshot?.snapshotHash,
+      ratingSchemaVersion: boundSnapshot ? 'lead-rating-v3' : undefined,
+    } satisfies LeadScoreJob
+    const resultRatingV3 = result.ratingV3 && typeof result.ratingV3 === 'object'
+      ? result.ratingV3 as Record<string, unknown>
+      : null
     const scoring = {
       ...result,
+      // 无法评级不是低分：V3 资料不足时不写入兼容总分，也不参与同赛道排名。
+      total: result.ratingV3 && formalRatingScore == null ? null : result.total,
+      ratingV3: resultRatingV3 ? {
+        ...resultRatingV3,
+        status: 'ready',
+        scoredAt: completedAt,
+        scoreJob: completedScoreJob,
+        enrichmentSnapshotId: boundSnapshot?.id,
+        snapshotHash: boundSnapshot?.snapshotHash,
+        ratingSchemaVersion: boundSnapshot ? 'lead-rating-v3' : undefined,
+      } : undefined,
       // 评分结果只补充判断字段；工商、团队、股东、融资及来源继续以入库资料为准。
       projectName: result.projectName || lead.name,
       whatIsIt: (rp as { profile?: { projectName?: string } }).profile?.projectName || lead.summary,
       officialSite: (rp.officialSite as string) || '待核验',
-      registry: (rp.registry || {}) as Record<string, string>,
+      registry: normalizeLeadRegistry(
+        (lead.scoring as { registry?: unknown } | undefined)?.registry,
+        rp.registry,
+      ),
       structuredTeam: rp.team || [],
       structuredShareholders: rp.shareholders || [],
       fundingRoundsResearched: Array.isArray(lead.fundingRounds) && lead.fundingRounds.length
@@ -1592,21 +1954,28 @@ export async function executeLeadScoring(leadId: string): Promise<LeadScoreExecu
         : (rp.fundingRounds || []),
       structuredNews: rp.news || [],
       researchSources: lead.sources || [],
-      rank: { peers_count: allScores.length, position: rankIndex + 1, percentile, industry: industry ?? '未分类' },
-      scored_at: new Date().toISOString(),
-      scoreJob: {
-        status: 'done',
-        attempts: currentAttempt || 1,
-        maxAttempts: SCORE_MAX_ATTEMPTS,
-        retryCycles,
-        queuedAt: persisted?.queuedAt,
-        startedAt: runStartedAt,
-        updatedAt: new Date().toISOString(),
-        completedAt: new Date().toISOString(),
-      } satisfies LeadScoreJob,
+      rank: { peers_count: allScores.length, position: rankIndex < 0 ? null : rankIndex + 1, percentile, industry: industry ?? '未分类' },
+      scored_at: completedAt,
+      scoreJob: completedScoreJob,
     }
     const { saveLeadScoring } = await import('../services/aiSummaryService.js')
-    await saveLeadScoring(lead.id, scoring, result.total)
+    const scoringExecution = result.scoringExecution && typeof result.scoringExecution === 'object'
+      ? result.scoringExecution as Record<string, unknown>
+      : {}
+    await saveLeadScoring(lead.id, scoring, rankableScore ?? lead.score, {
+      ...(boundSnapshot ? {
+        ratingHistory: {
+          snapshotId: boundSnapshot.id,
+          snapshotHash: boundSnapshot.snapshotHash,
+          ratingSchemaVersion: LEAD_RATING_V3_SCHEMA_VERSION,
+          workflow: LEAD_RATING_V3_WORKFLOW,
+          promptVersion: String(scoringExecution.promptVersion || `${LEAD_RATING_V3_WORKFLOW}-${LEAD_RATING_V3_SCHEMA_VERSION}-agent-v1`),
+          model: String(scoringExecution.model || 'unknown'),
+          status: 'ready',
+          completedAt: new Date(completedAt),
+        },
+      } : {}),
+    })
     return { status: 'done' }
   } catch (err) {
     console.error(`[lead-score] terminal failure lead=${leadId}:`, (err as Error).message)
@@ -1628,7 +1997,7 @@ export async function executeLeadScoring(leadId: string): Promise<LeadScoreExecu
 }
 
 // 触发评分：秒回，后台跑
-metaRouter.post('/leads/:id/score', async (req: AuthedRequest, res, next) => {
+metaRouter.post('/leads/:id/score', requireSystemAdmin, async (req: AuthedRequest, res, next) => {
   try {
     // 验证存在用 getLeadById 单条查(不拉全表),score 只需要 leadId
     const lead = await getLeadById(String(req.params.id))
@@ -1642,13 +2011,25 @@ metaRouter.post('/leads/:id/score', async (req: AuthedRequest, res, next) => {
       return
     }
     const started = await scheduleLeadScoring(lead.id)
+    if (!started) {
+      const enrichment = await getLeadEnrichmentStatus(lead.id)
+      if (enrichment.snapshot?.status !== 'ready') {
+        res.status(202).json({
+          code: 0,
+          message: 'enrichment_required',
+          status: enrichment.job ? 'enrichment_pending' : 'enrichment_not_queued',
+          enrichmentJobId: enrichment.job?.id ?? null,
+        })
+        return
+      }
+    }
     const status = started ? 'queued' : persistedJob?.status ?? 'running'
     res.json({ code: 0, message: started ? 'started' : 'running', status })
   } catch (err) { next(err) }
 })
 
 // 死信只能通过显式人工操作重新入队，并与队列状态在同一事务写入审计。
-metaRouter.post('/leads/:id/score/retry', async (req: AuthedRequest, res, next) => {
+metaRouter.post('/leads/:id/score/retry', requireSystemAdmin, async (req: AuthedRequest, res, next) => {
   try {
     const lead = await getLeadById(String(req.params.id))
     if (!lead) { res.status(404).json({ code: 'NOT_FOUND', message: '线索不存在' }); return }

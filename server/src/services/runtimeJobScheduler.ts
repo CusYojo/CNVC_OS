@@ -3,7 +3,11 @@ import { hostname } from 'node:os'
 import type { RowDataPacket } from 'mysql2'
 import { pool } from '../db/client.js'
 import { mysqlTableName, quoteMysqlIdentifier } from '../db/config.js'
-import { recoverLeadScoringQueue, runRadarSyncImport, scheduleLeadScoring } from '../routes/meta.js'
+import {
+  recoverLeadScoringQueue,
+  runRadarSyncImport,
+  scheduleLeadScoring,
+} from '../routes/meta.js'
 import {
   runRadarPaperCollection,
   runRadarPublicCollection,
@@ -18,6 +22,10 @@ import { redactSensitiveText } from '../security/redactSecrets.js'
 import { processImOutboxBatch } from './imIntegrationService.js'
 import { resolveExtensionFeatureFlags } from '../config/extensionFeatureFlags.js'
 import { reportRadarSourceRun, type RadarRunAction } from './radarSourceObservabilityService.js'
+import {
+  isRadarSyncContentionError,
+  radarCandidateWriteCount,
+} from './radarSyncRuntimePolicy.js'
 import {
   recordJobCoordinationEventSafely,
   recordJobCoordinationEventsSafely,
@@ -141,6 +149,53 @@ async function runRadarCollectorAction(
   })
 }
 
+async function runRadarSyncWhenAvailable(input: Record<string, unknown>) {
+  try {
+    return await runRadarSyncImport(input)
+  } catch (error) {
+    // HTTP 手工同步与周期同步可能在同一进程短暂重叠。已有同步会处理同一候选表，
+    // 因此这是幂等并发折叠，不是业务失败，更不能累计为永久死信。
+    if (isRadarSyncContentionError(error)) {
+      return { skipped: true, reason: 'sync_already_running', contentionCollapsed: true }
+    }
+    throw error
+  }
+}
+
+async function runWechatCollectorWithSyncHandoff(action: Exclude<RadarRunAction, 'auto' | 'paper-daily'>, signal: AbortSignal) {
+  const collection = await runRadarCollectorAction(action, signal)
+  const syncHandoff = await queueRadarSyncAfterCollection(collection)
+  return { ...collection, syncHandoff }
+}
+
+async function consumeRadarSyncHandoff(): Promise<{ syncOnly: boolean; candidateWrites: number }> {
+  const connection = await pool.getConnection()
+  try {
+    await connection.beginTransaction()
+    const [rows] = await connection.query<Array<RowDataPacket & { payload: Record<string, unknown> | null }>>(
+      `SELECT payload FROM ${jobsTable} WHERE id='radar-collect-sync' FOR UPDATE`,
+    )
+    const payload = rows[0]?.payload && typeof rows[0].payload === 'object' ? rows[0].payload : {}
+    const syncOnly = payload.syncOnly === true || payload.syncOnly === 1 || payload.syncOnly === 'true'
+    const candidateWrites = Math.max(0, Number(payload.candidateWrites) || 0)
+    if (syncOnly) {
+      await connection.query(
+        `UPDATE ${jobsTable}
+         SET payload=JSON_REMOVE(COALESCE(payload,JSON_OBJECT()),'$.syncOnly','$.candidateWrites','$.handoffQueuedAt'),
+           updated_at=NOW(3)
+         WHERE id='radar-collect-sync'`,
+      )
+    }
+    await connection.commit()
+    return { syncOnly, candidateWrites }
+  } catch (error) {
+    await connection.rollback()
+    throw error
+  } finally {
+    connection.release()
+  }
+}
+
 function millisecondsUntilShanghai(hour: number, minute: number, from = new Date()): number {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
@@ -254,8 +309,11 @@ export function runtimeJobDefinitions(): RuntimeJobDefinition[] {
       run: async (signal) => {
         // The Node process owns collection, persistence and synchronization.
         // No Python service or child process participates in this runtime path.
-        const collection = await runRadarCollectorAction('auto', signal)
-        const sync = await runRadarSyncImport(syncInput)
+        const handoff = await consumeRadarSyncHandoff()
+        const collection = handoff.syncOnly
+          ? { skipped: true, reason: 'wechat_candidate_handoff', candidateWrites: handoff.candidateWrites }
+          : await runRadarCollectorAction('auto', signal)
+        const sync = await runRadarSyncWhenAvailable(syncInput)
         return { collection, sync }
       },
     },
@@ -280,7 +338,7 @@ export function runtimeJobDefinitions(): RuntimeJobDefinition[] {
       dailyMinute: 30,
       initialDelayMs: millisecondsUntilShanghai(8, 30),
       timeoutMs: 30 * 60_000,
-      run: async (signal) => await runRadarCollectorAction('wechat-daily', signal),
+      run: async (signal) => await runWechatCollectorWithSyncHandoff('wechat-daily', signal),
     },
     {
       id: 'radar-wechat-retry',
@@ -290,7 +348,7 @@ export function runtimeJobDefinitions(): RuntimeJobDefinition[] {
       intervalSeconds: retrySeconds,
       initialDelayMs: retrySeconds * 1_000,
       timeoutMs: 15 * 60_000,
-      run: async (signal) => await runRadarCollectorAction('wechat-retry', signal),
+      run: async (signal) => await runWechatCollectorWithSyncHandoff('wechat-retry', signal),
     },
     {
       id: 'radar-wechat-institution',
@@ -300,7 +358,7 @@ export function runtimeJobDefinitions(): RuntimeJobDefinition[] {
       intervalSeconds: institutionSeconds,
       initialDelayMs: 30_000,
       timeoutMs: 20 * 60_000,
-      run: async (signal) => await runRadarCollectorAction('wechat-institution', signal),
+      run: async (signal) => await runWechatCollectorWithSyncHandoff('wechat-institution', signal),
     },
   ]
 }
@@ -410,6 +468,48 @@ export async function queueRuntimeJobNow(id: string) {
   }
   if (started) void poll()
   return { id, queued: true }
+}
+
+export async function queueRadarSyncAfterCollection(collection: Record<string, unknown>) {
+  const candidateWrites = radarCandidateWriteCount(collection)
+  if (candidateWrites === 0) {
+    return { queued: false, candidateWrites: 0, reason: 'no_candidate_writes' }
+  }
+  const [result] = await pool.query<import('mysql2').ResultSetHeader>(
+    `UPDATE ${jobsTable}
+     SET next_run_at=NOW(3),
+       payload=JSON_SET(COALESCE(payload,JSON_OBJECT()),
+         '$.syncOnly',TRUE,
+         '$.candidateWrites',COALESCE(JSON_EXTRACT(payload,'$.candidateWrites'),0)+?,
+         '$.handoffQueuedAt',DATE_FORMAT(UTC_TIMESTAMP(3),'%Y-%m-%dT%H:%i:%s.%fZ')),
+       last_error=IF(last_status='dead_letter',NULL,last_error),
+       consecutive_failures=IF(last_status='dead_letter',0,consecutive_failures),
+       last_status=IF(last_status='dead_letter','queued',last_status),
+       updated_at=NOW(3)
+     WHERE id='radar-collect-sync' AND enabled=1`,
+    [candidateWrites],
+  )
+  if (result.affectedRows !== 1) {
+    const error = new Error('公众号候选已写入，但雷达同步任务未启用或不存在') as Error & { status?: number; code?: string }
+    error.status = 503
+    error.code = 'RADAR_SYNC_HANDOFF_UNAVAILABLE'
+    throw error
+  }
+  if (started) void poll()
+  return { queued: true, candidateWrites, reason: 'candidate_write_handoff', syncOnly: true }
+}
+
+export async function recoverBenignRadarSyncDeadLetter(): Promise<{ recovered: number }> {
+  const [result] = await pool.query<import('mysql2').ResultSetHeader>(
+    `UPDATE ${jobsTable}
+     SET last_status='queued', last_error=NULL, consecutive_failures=0,
+       next_run_at=NOW(3), updated_at=NOW(3)
+     WHERE id='radar-collect-sync' AND enabled=1 AND current_run_id IS NULL
+       AND last_status='dead_letter'
+       AND (last_error='上一轮雷达同步仍在运行，请稍后重试'
+         OR last_error LIKE '%RADAR_SYNC_ALREADY_RUNNING%')`,
+  )
+  return { recovered: result.affectedRows }
 }
 
 export async function queueRadarRuntimeJobNow(id: string) {
@@ -618,6 +718,10 @@ export async function startRuntimeJobScheduler(): Promise<void> {
   const definitions = runtimeJobDefinitions()
   await seedRuntimeJobDefinitions(definitions)
   await recoverExpiredRuntimeJobLeases()
+  const benignRecovery = await recoverBenignRadarSyncDeadLetter()
+  if (benignRecovery.recovered > 0) {
+    console.warn('[runtime-job] recovered benign radar sync contention dead-letter')
+  }
   started = true
   pollTimer = setInterval(() => void poll(), pollMs)
   pollTimer.unref()
@@ -649,11 +753,12 @@ export async function runtimeJobSchedulerHealth() {
         SUM(CASE WHEN last_status='dead_letter' THEN 1 ELSE 0 END) AS dead_count
        FROM ${jobsTable} WHERE enabled=1`,
     )
+    const deadLetter = Number(rows[0]?.dead_count || 0)
     return {
-      name: 'mysql-runtime-jobs', ok: true, inProcess: true, owner,
+      name: 'mysql-runtime-jobs', ok: deadLetter === 0, inProcess: true, owner,
       enabled: Number(rows[0]?.enabled_count || 0),
       leased: Number(rows[0]?.leased_count || 0),
-      deadLetter: Number(rows[0]?.dead_count || 0),
+      deadLetter,
       active: active.size,
     }
   } catch (error) {

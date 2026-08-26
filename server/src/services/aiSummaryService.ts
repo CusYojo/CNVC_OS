@@ -5,7 +5,10 @@ import { drizzle } from 'drizzle-orm/mysql2'
 import type { RowDataPacket } from 'mysql2'
 import type { PoolConnection } from 'mysql2/promise'
 import { db, pool, schema } from '../db/client.js'
-import { aiSummaries, leads, auditLogs, leadScoreJobs, migrationEntityMappings, projectMembers, projects } from '../db/schema.js'
+import {
+  aiSummaries, leads, auditLogs, leadScoreJobs, leadEnrichmentJobs, leadEnrichmentTopicRuns, leadRatingHistory,
+  migrationEntityMappings, projectMembers, projects,
+} from '../db/schema.js'
 import { createMySqlIdentityRepositoryContext } from '../repositories/index.js'
 import { projectAccessCondition, type ProjectAccessActor } from './projectAccessService.js'
 import {
@@ -36,6 +39,8 @@ import { recordLeadPipelineEntityMatch } from './leadPipelineEntityMatchService.
 import { formatShanghaiDateKey } from '../utils/shanghaiTime.js'
 import { resolvePaperProjectIdentity } from './paperIdentity.js'
 import { publicLeadScoreDeadLetterError, publicLeadScoreError } from './leadScoreRetryPolicy.js'
+import { companyRegistrationEligibility, normalizeLeadRegistry } from './leadRegistry.js'
+import { publicLeadStageDisplay } from './leadDataQualityService.js'
 
 export async function getSummary(projectId: string) {
   const rows = await db.select().from(aiSummaries).where(eq(aiSummaries.projectId, projectId)).orderBy(desc(aiSummaries.updatedAt)).limit(1)
@@ -181,6 +186,7 @@ const visiblePublicLeadExpr = sql<boolean>`NOT (
   OR ${leads.poolStatus} = '解析失败'
   OR ${leads.poolStatus} = '已合并'
   OR ${leads.poolStatus} = '已删除'
+  OR ${leads.poolStatus} = '已注销'
 )`
 
 export type LeadScoreJobStatus = 'queued' | 'running' | 'retrying' | 'done' | 'failed' | 'dead_letter'
@@ -196,6 +202,9 @@ export interface LeadScoreJob {
   completedAt?: string
   nextRetryAt?: string
   error?: string
+  enrichmentSnapshotId?: string
+  snapshotHash?: string
+  ratingSchemaVersion?: string
 }
 
 const LEAD_SCORE_JOB_STATUSES = new Set<LeadScoreJobStatus>(['queued', 'running', 'retrying', 'done', 'failed', 'dead_letter'])
@@ -448,6 +457,89 @@ export function derivePoolEnteredAt(createdAt: Date | null) {
   return createdAt && !Number.isNaN(createdAt.getTime()) ? createdAt.toISOString() : ''
 }
 
+type PublicRatingV3 = {
+  schemaVersion?: string
+  status?: 'ready' | 'stale'
+  mainView?: { displayGrade?: string }
+  detailView?: { project?: { stage?: string } }
+}
+
+function leadPoolRating(scoring: Record<string, unknown>, scoreJob: LeadScoreJob | null | undefined) {
+  const ratingV3 = scoring.ratingV3 && typeof scoring.ratingV3 === 'object'
+    ? scoring.ratingV3 as PublicRatingV3
+    : null
+  const validGrades = new Set(['A+', 'A', 'A-', 'B+', 'B', 'B-', 'C+', 'C', 'C-', 'D', '待评级'])
+  const grade = ratingV3?.schemaVersion === 'lead-rating-v3'
+    && validGrades.has(String(ratingV3.mainView?.displayGrade || ''))
+    ? String(ratingV3.mainView!.displayGrade)
+    : '待评级'
+  const status = scoreJob && ['queued', 'running', 'retrying'].includes(scoreJob.status)
+    ? 'running'
+    : scoreJob && ['failed', 'dead_letter'].includes(scoreJob.status)
+      ? 'failed'
+      : ratingV3?.status === 'stale'
+        ? 'stale'
+      : ratingV3?.schemaVersion === 'lead-rating-v3'
+        ? 'ready'
+        : 'pending'
+  return { displayGrade: grade, status }
+}
+
+function leadPoolLatestUpdates(scoring: Record<string, unknown>, radarProfile: Record<string, unknown>, createdAt: Date | null) {
+  const structuredNews = Array.isArray(scoring.structuredNews) ? scoring.structuredNews : []
+  const radarNews = Array.isArray(radarProfile.news) ? radarProfile.news : []
+  const rows = [...structuredNews, ...radarNews]
+    .map((value) => value && typeof value === 'object' ? value as Record<string, unknown> : {})
+    .map((item) => ({
+      occurredAt: meaningfulPresentationText(item.date)
+        ?? meaningfulPresentationText(item.publishedAt)
+        ?? meaningfulPresentationText(radarProfile.publishedAt)
+        ?? createdAt?.toISOString()
+        ?? '',
+      title: meaningfulPresentationText(item.title)
+        ?? meaningfulPresentationText(item.summary)
+        ?? '',
+      sourceUrl: meaningfulPresentationText(item.sourceUrl)
+        ?? meaningfulPresentationText(item.url)
+        ?? meaningfulPresentationText(radarProfile.link),
+    }))
+    .filter((item) => item.title)
+    .sort((a, b) => {
+      const aTime = new Date(a.occurredAt).getTime()
+      const bTime = new Date(b.occurredAt).getTime()
+      return (Number.isNaN(bTime) ? 0 : bTime) - (Number.isNaN(aTime) ? 0 : aTime)
+    })
+  if (!rows.length) {
+    const sourceTitle = meaningfulPresentationText(radarProfile.sourceTitle)
+    if (sourceTitle) rows.push({
+      occurredAt: meaningfulPresentationText(radarProfile.publishedAt) ?? createdAt?.toISOString() ?? '',
+      title: sourceTitle,
+      sourceUrl: meaningfulPresentationText(radarProfile.link),
+    })
+  }
+  const seen = new Set<string>()
+  return rows.filter((item) => {
+    const key = `${item.occurredAt}|${item.title}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  }).slice(0, 2)
+}
+
+function leadPoolBackgroundTags(scoring: Record<string, unknown>, radarProfile: Record<string, unknown>) {
+  const text = JSON.stringify([
+    scoring.structuredTeam,
+    radarProfile.team,
+    (radarProfile.profile as Record<string, unknown> | undefined)?.lab,
+  ])
+  const rules = [
+    ['北航', '北航系'], ['北京航空航天大学', '北航系'],
+    ['中科院', '中科院系'], ['中国科学院', '中科院系'],
+    ['清华', '清华系'], ['北京大学', '北大系'], ['浙江大学', '浙大系'],
+  ] as const
+  return [...new Set(rules.filter(([pattern]) => text.includes(pattern)).map(([, label]) => label))].slice(0, 2)
+}
+
 function enrichLead(row: typeof leads.$inferSelect) {
   const arr = (v: unknown) => Array.isArray(v) ? v : []
   const has = (v: unknown) => typeof v === 'string' ? v.trim().length > 0 : !!v
@@ -486,6 +578,8 @@ function enrichLead(row: typeof leads.$inferSelect) {
   const src = String(row.source ?? '')
   // 优先用雷达同步时写入的真实渠道(radarProfile.channel)，避免被"项目发现雷达"前缀误判成新闻
   const rp = (row as { radarProfile?: Record<string, unknown> }).radarProfile || {}
+  const companyRegistry = normalizeLeadRegistry(sc.registry, rp.registry)
+  const publicScoring = { ...sc, registry: companyRegistry }
   const profile = (rp.profile && typeof rp.profile === 'object' ? rp.profile : {}) as Record<string, unknown>
   const isRadarLead = /^项目发现雷达(?:\s|·|$)/.test(src)
   const isPaper = String(rp.channel ?? '') === '论文'
@@ -528,7 +622,9 @@ function enrichLead(row: typeof leads.$inferSelect) {
   const isResearchSubjectFallback = isRadarLead
     && row.companyName === row.name
     && /(?:大学|学院|研究院|研究所|医院|实验室|课题组|教授团队|研究员团队|科研团队|研究团队)$/.test(String(row.companyName ?? ''))
-  const subjectCompanyName = acceptedAiSubject?.companyName
+  const registryCompanyName = meaningfulPresentationText(companyRegistry.companyName)
+  const subjectCompanyName = registryCompanyName
+    || acceptedAiSubject?.companyName
     || (
       isRadarLead && (!isSpecificLeadSubjectName(row.companyName) || isResearchSubjectFallback)
         ? null
@@ -547,7 +643,7 @@ function enrichLead(row: typeof leads.$inferSelect) {
     businessRegion: (row as { businessRegion?: string | null }).businessRegion,
     businessRegionSource: (row as { businessRegionSource?: string | null }).businessRegionSource,
     businessRegionConfidence: (row as { businessRegionConfidence?: string | null }).businessRegionConfidence,
-    registry: (sc.registry && typeof sc.registry === 'object' ? sc.registry : {}) as Record<string, unknown>,
+    registry: companyRegistry,
     profile,
     subjectName,
     companyName: subjectCompanyName,
@@ -561,7 +657,17 @@ function enrichLead(row: typeof leads.$inferSelect) {
   })
   const region = regionResolution?.region ?? '待确认'
   const scoreJob = readLeadScoreJob(sc)
-  const publicScoreJob = analysisStatus === 'ready'
+  const exposeCurrentJob = scoreJob && ['queued', 'running', 'retrying', 'failed', 'dead_letter'].includes(scoreJob.status)
+  const publicScoreJob = exposeCurrentJob
+    ? {
+        ...scoreJob,
+        error: scoreJob.error
+          ? ['failed', 'dead_letter'].includes(scoreJob.status)
+            ? publicLeadScoreDeadLetterError(scoreJob.error)
+            : publicLeadScoreError(scoreJob.error)
+          : undefined,
+      }
+    : analysisStatus === 'ready'
     ? {
         ...(scoreJob ?? {
           attempts: 1,
@@ -571,23 +677,34 @@ function enrichLead(row: typeof leads.$inferSelect) {
         status: 'done' as const,
         error: undefined,
       }
-    : scoreJob
-    ? {
-        ...scoreJob,
-        error: scoreJob.error
-          ? ['failed', 'dead_letter'].includes(scoreJob.status)
-            ? publicLeadScoreDeadLetterError(scoreJob.error)
-            : publicLeadScoreError(scoreJob.error)
-          : undefined,
-      }
-    : null
+    : scoreJob ?? null
   const { fieldProvenance: _fieldProvenance, ...publicRow } = row
+  const leadType = isPaper ? 'research' as const : 'company' as const
+  const ratingV3 = sc.ratingV3 && typeof sc.ratingV3 === 'object' ? sc.ratingV3 as PublicRatingV3 : null
+  const rawStageDisplay = meaningfulPresentationText(ratingV3?.detailView?.project?.stage)
+    ?? meaningfulPresentationText(profile.projectRound)
+    ?? meaningfulPresentationText((arr(row.fundingRounds)[0] as Record<string, unknown> | undefined)?.round)
+    ?? (isPaper ? '科研成果' : '待核验')
+  const normalizedStages = publicLeadStageDisplay({
+    dataQuality: sc.dataQualityV1,
+    fallbackStage: rawStageDisplay,
+    isResearch: isPaper,
+  })
+  const structuredTeam = Array.isArray(sc.structuredTeam) ? sc.structuredTeam : []
+  const radarTeam = Array.isArray(rp.team) ? rp.team : []
+  const paperAuthors = isPaper && Array.isArray(paperMeta.authors)
+    ? [...new Set(paperMeta.authors.map((author) => String(author).trim()).filter(Boolean))]
+    : []
+  const teamSize = paperAuthors.length || structuredTeam.length || radarTeam.length
+  const foundedAtDisplay = meaningfulPresentationText(companyRegistry.foundedAt)
+  const claimedFoundedAt = meaningfulPresentationText(sc.claimedFoundedAt)
   return {
     ...publicRow,
-    scoring: sc,
+    scoring: publicScoring,
     name: paperProjectName || paperTitleZh || subjectName,
     summary: paperAbstractZh || row.summary,
     companyName: subjectCompanyName,
+    foundedAt: claimedFoundedAt ?? '',
     score: deriveOverallScore(sc, row.score),
     radarProfile: displayRadarProfile,
     completeness,
@@ -604,6 +721,17 @@ function enrichLead(row: typeof leads.$inferSelect) {
     },
     valuationDisplay: deriveValuationDisplay(sc, rp, analysisStatus, row.fundingRounds),
     technicalScore: deriveTechnicalScore(sc),
+    leadType,
+    stageDisplay: normalizedStages.fundingStage,
+    fundingStatusDisplay: normalizedStages.fundingStatus,
+    businessStageDisplay: normalizedStages.businessStage,
+    stageEvidenceStatus: normalizedStages.evidenceStatus,
+    teamSizeDisplay: teamSize ? `${teamSize}人` : '待核验',
+    foundedAtDisplay: foundedAtDisplay ?? (isPaper ? meaningfulPresentationText(paperMeta.publishedAt) ?? '待核验' : '待核验'),
+    companyRegistry,
+    backgroundTags: leadPoolBackgroundTags(sc, rp),
+    latestUpdates: leadPoolLatestUpdates(sc, rp, row.createdAt),
+    rating: leadPoolRating(sc, publicScoreJob),
     scoreJob: publicScoreJob,
     // “最新入池”只认首次进入公共线索池的数据库时间，不受原文发布时间、
     // AI 评分完成时间或后续资料补全影响。
@@ -617,9 +745,21 @@ function enrichLead(row: typeof leads.$inferSelect) {
 // 并行两条 query:数据页 + 计数。count(*) over() 在 offset 越界时不会计算 total,不能用
 // 性能关键:列表只 SELECT 必要展示列,排除 jsonb 大字段(scoring/radar_profile/sources/funding_rounds/highlights/risks/risk_tags)
 // 这些字段详情页按需走 GET /leads/:id
-export async function listLeads(options: { page?: number; pageSize?: number; channel?: string; sort?: string; keyword?: string; source?: string; industry?: string; region?: string } = {}) {
+export async function listLeads(options: {
+  page?: number
+  pageSize?: number
+  channel?: string
+  sort?: string
+  keyword?: string
+  source?: string
+  industry?: string
+  region?: string
+  leadType?: 'company' | 'research'
+  stage?: string
+  updatedRange?: '7d' | '30d' | '90d'
+} = {}) {
   const page = Math.max(1, Math.floor(options.page ?? 1))
-  const pageSize = Math.min(100, Math.max(1, Math.floor(options.pageSize ?? 50)))
+  const pageSize = Math.min(100, Math.max(1, Math.floor(options.pageSize ?? 20)))
   const offset = (page - 1) * pageSize
   // 渠道过滤:通常按 radar_profile.channel 精确匹配。36氪历史数据曾被 source_group
   // 错标为“创投新闻”，查询时同时依据具体来源字段识别，避免回填前筛选漏数。
@@ -631,6 +771,7 @@ export async function listLeads(options: { page?: number; pageSize?: number; cha
   const source = (options.source ?? '').trim()
   const industry = (options.industry ?? '').trim()
   const region = (options.region ?? '').trim()
+  const stage = (options.stage ?? '').trim()
   const conds: ReturnType<typeof sql>[] = [visiblePublicLeadExpr]
   // 已入库线索全部可见；未完成 AI 分析的记录由 enrichLead 标为 pending。
   // 同步和 AI 评分解耦，避免“已经同步但列表看不到”。
@@ -679,6 +820,28 @@ export async function listLeads(options: { page?: number; pageSize?: number; cha
   if (region && BUSINESS_REGIONS.some((candidate) => candidate === region)) {
     conds.push(sql`${leads.businessRegion} = ${region}`)
   }
+  if (options.leadType === 'research') {
+    conds.push(sql`COALESCE(${jsonText(leads.radarProfile, '$.channel')}, '') = '论文'`)
+  } else if (options.leadType === 'company') {
+    conds.push(sql`COALESCE(${jsonText(leads.radarProfile, '$.channel')}, '') <> '论文'`)
+  }
+  if (stage) {
+    const stageKeyword = `%${stage}%`
+    conds.push(sql`(
+      COALESCE(${jsonText(leads.radarProfile, '$.profile.projectRound')}, '') LIKE ${stageKeyword}
+      OR COALESCE(${jsonText(leads.fundingRounds, '$[0].round')}, '') LIKE ${stageKeyword}
+      OR COALESCE(${jsonText(leads.scoring, '$.ratingV3.detailView.project.stage')}, '') LIKE ${stageKeyword}
+    )`)
+  }
+  if (options.updatedRange) {
+    const days = options.updatedRange === '7d' ? 7 : options.updatedRange === '30d' ? 30 : 90
+    conds.push(sql`GREATEST(
+      COALESCE(STR_TO_DATE(LEFT(${jsonText(leads.scoring, '$.ratingV3.scoredAt')}, 10), '%Y-%m-%d'), '1970-01-01'),
+      COALESCE(STR_TO_DATE(LEFT(${jsonText(leads.scoring, '$.scored_at')}, 10), '%Y-%m-%d'), '1970-01-01'),
+      COALESCE(STR_TO_DATE(LEFT(${jsonText(leads.radarProfile, '$.publishedAt')}, 10), '%Y-%m-%d'), '1970-01-01'),
+      ${leads.createdAt}
+    ) >= DATE_SUB(NOW(3), INTERVAL ${sql.raw(String(days))} DAY)`)
+  }
   if (keyword) {
     const kw = '%' + keyword + '%'
     // 跨字段: 主展示列 + radar_profile/scoring 全文(投资方/团队/机构/来源账号等都在里面)
@@ -708,6 +871,8 @@ export async function listLeads(options: { page?: number; pageSize?: number; cha
       poolStatus: leads.poolStatus,
       score: overallScoreExpr,
       summary: leads.summary,
+      highlights: leads.highlights,
+      team: leads.team,
       // 轻量 scoring 摘要:只挑 completeness 计算需要的数组长度/存在性(不拉整个 scoring 大 jsonb)
       scoring: sql<unknown>`CASE WHEN ${leads.scoring} IS NULL THEN NULL ELSE JSON_OBJECT(
         'dimensions', COALESCE(${jsonValue(leads.scoring, '$.dimensions')}, JSON_ARRAY()),
@@ -720,6 +885,10 @@ export async function listLeads(options: { page?: number; pageSize?: number; cha
         'overall_comment', ${jsonValue(leads.scoring, '$.overall_comment')},
         'scored_at', ${jsonValue(leads.scoring, '$.scored_at')},
         'scoreJob', ${jsonValue(leads.scoring, '$.scoreJob')},
+        'enrichment', ${jsonValue(leads.scoring, '$.enrichment')},
+        'ratingV3', ${jsonValue(leads.scoring, '$.ratingV3')},
+        'dataQualityV1', ${jsonValue(leads.scoring, '$.dataQualityV1')},
+        'structuredNews', COALESCE(${jsonValue(leads.scoring, '$.structuredNews')}, JSON_ARRAY()),
         'registry', COALESCE(${jsonValue(leads.scoring, '$.registry')}, JSON_OBJECT())
       ) END`,
       // 列表只取 radar_profile 里列表渲染需要的字段,保持与详情接口"同构"({profile,channel,sourceName,...})
@@ -732,6 +901,13 @@ export async function listLeads(options: { page?: number; pageSize?: number; cha
         'sourceGroup', ${jsonValue(leads.radarProfile, '$.sourceGroup')},
         'sourceTitle', COALESCE(${jsonValue(leads.radarProfile, '$.sourceTitle')}, ${jsonValue(leads.sources, '$[0].title')}),
         'publishedAt', ${jsonValue(leads.radarProfile, '$.publishedAt')},
+        'link', ${jsonValue(leads.radarProfile, '$.link')},
+        'thesis', ${jsonValue(leads.radarProfile, '$.thesis')},
+        'team', COALESCE(${jsonValue(leads.radarProfile, '$.team')}, JSON_ARRAY()),
+        'news', COALESCE(${jsonValue(leads.radarProfile, '$.news')}, JSON_ARRAY()),
+        'signals', COALESCE(${jsonValue(leads.radarProfile, '$.signals')}, JSON_ARRAY()),
+        'fundingRounds', COALESCE(${jsonValue(leads.radarProfile, '$.fundingRounds')}, JSON_ARRAY()),
+        'registry', COALESCE(${jsonValue(leads.radarProfile, '$.registry')}, JSON_OBJECT()),
         'aiSubjectReview', ${jsonValue(leads.radarProfile, '$.aiSubjectReview')},
         'paperMeta', CASE
           WHEN ${jsonValue(leads.radarProfile, '$.paperMeta')} IS NULL THEN NULL
@@ -748,7 +924,10 @@ export async function listLeads(options: { page?: number; pageSize?: number; cha
       fundingRounds: sql<unknown[]>`CASE
         WHEN JSON_LENGTH(COALESCE(${leads.fundingRounds}, JSON_ARRAY())) > 0 THEN JSON_ARRAY(JSON_OBJECT(
           'round', ${jsonValue(leads.fundingRounds, '$[0].round')},
-          'valuation', ${jsonValue(leads.fundingRounds, '$[0].valuation')}
+          'date', ${jsonValue(leads.fundingRounds, '$[0].date')},
+          'amount', ${jsonValue(leads.fundingRounds, '$[0].amount')},
+          'valuation', ${jsonValue(leads.fundingRounds, '$[0].valuation')},
+          'investors', ${jsonValue(leads.fundingRounds, '$[0].investors')}
         ))
         ELSE JSON_ARRAY()
       END`,
@@ -813,7 +992,7 @@ export async function leadPoolStats() {
   }
 }
 
-export async function getLeadById(leadId: string) {
+export async function getLeadById(leadId: string, options: { includeHidden?: boolean } = {}) {
   const [mapping] = await db.select({ targetId: migrationEntityMappings.targetId })
     .from(migrationEntityMappings)
     .where(and(
@@ -823,7 +1002,9 @@ export async function getLeadById(leadId: string) {
     )).limit(1)
   const canonicalLeadId = mapping?.targetId || leadId
   const [row] = await db.select({ ...getTableColumns(leads), completeness: completenessExpr })
-    .from(leads).where(eq(leads.id, canonicalLeadId)).limit(1)
+    .from(leads).where(options.includeHidden
+      ? eq(leads.id, canonicalLeadId)
+      : and(eq(leads.id, canonicalLeadId), visiblePublicLeadExpr)).limit(1)
   return row ? enrichLead(row as typeof leads.$inferSelect & { completeness: number }) : null
 }
 
@@ -843,6 +1024,14 @@ export async function deleteLeadFromPublicPool(
     // 已领取的评分任务不应继续占用队列；原始 Pipeline、导入和实体匹配记录
     // 通过外键或不可变审计继续保留，已转专属项目也不受影响。
     await tx.delete(leadScoreJobs).where(eq(leadScoreJobs.leadId, lead.id))
+    await tx.update(leadEnrichmentTopicRuns).set({
+      status: 'missing', lastError: 'cancelled: lead deleted', completedAt: new Date(),
+      leaseOwner: null, leaseExpiresAt: null, updatedAt: new Date(),
+    }).where(and(eq(leadEnrichmentTopicRuns.leadId, lead.id), inArray(leadEnrichmentTopicRuns.status, ['queued', 'retrying', 'running'])))
+    await tx.update(leadEnrichmentJobs).set({
+      status: 'rejected', lastError: 'cancelled: lead deleted', completedAt: new Date(),
+      leaseOwner: null, leaseExpiresAt: null, updatedAt: new Date(),
+    }).where(and(eq(leadEnrichmentJobs.leadId, lead.id), inArray(leadEnrichmentJobs.status, ['queued', 'running'])))
     await tx.insert(auditLogs).values({
       userId: actor.userId,
       userName: actor.userName,
@@ -1090,6 +1279,33 @@ export async function commitRadarLeadPipelineReady(input: {
   transition: Omit<LeadPipelineTransitionInput, 'status' | 'leadId'>
   userId?: string
 }): Promise<RadarLeadSyncResult> {
+  const radarProfile = input.lead.radarProfile && typeof input.lead.radarProfile === 'object'
+    && !Array.isArray(input.lead.radarProfile)
+    ? input.lead.radarProfile as Record<string, unknown>
+    : {}
+  const profile = radarProfile.profile && typeof radarProfile.profile === 'object'
+    && !Array.isArray(radarProfile.profile)
+    ? radarProfile.profile as Record<string, unknown>
+    : {}
+  const registry = normalizeLeadRegistry(radarProfile.registry, profile.registry, profile)
+  const registration = companyRegistrationEligibility(registry.registrationStatus)
+  if (!registration.eligibleForLeadPool) {
+    await transitionLeadPipelineItem(input.eventId, {
+      status: 'rejected',
+      reason: registration.reason!,
+      evidence: [{
+        field: 'registrationStatus',
+        value: registration.normalizedStatus,
+        rule: 'deregistered-company-exclusion-v1',
+      }],
+      confidence: 100,
+      actorType: 'system',
+      actorId: 'lead-registration-admission-guard',
+    })
+    throw Object.assign(new Error(registration.reason!), {
+      code: 'COMPANY_DEREGISTERED', retryable: false, eventId: input.eventId,
+    })
+  }
   const connection = await pool.getConnection()
   let result: RadarLeadSyncResult | null = null
   try {
@@ -1226,6 +1442,9 @@ export async function convertLead(leadId: string, userId: string) {
     await tx.execute(sql`SELECT ${leads.id} FROM ${leads} WHERE ${leads.id}=${canonicalLeadId} FOR UPDATE`)
     const [lead] = await tx.select().from(leads).where(eq(leads.id, canonicalLeadId)).limit(1)
     if (!lead) throw leadConversionError(404, 'LEAD_NOT_FOUND', '线索不存在')
+    if (lead.poolStatus === '已注销') {
+      throw leadConversionError(409, 'COMPANY_DEREGISTERED', '登记状态明确为注销的企业不能转为专属项目')
+    }
     if (lead.convertedProjectId) {
       throw leadConversionError(409, 'LEAD_ALREADY_CONVERTED', '该线索已转为专属项目，请刷新后查看')
     }
@@ -1272,6 +1491,15 @@ export async function convertLead(leadId: string, userId: string) {
       convertedProjectId: inserted.id,
       claimedBy: actor.name,
     }).where(eq(leads.id, lead.id))
+    await tx.delete(leadScoreJobs).where(eq(leadScoreJobs.leadId, lead.id))
+    await tx.update(leadEnrichmentTopicRuns).set({
+      status: 'missing', lastError: 'cancelled: converted to exclusive project', completedAt: new Date(),
+      leaseOwner: null, leaseExpiresAt: null, updatedAt: new Date(),
+    }).where(and(eq(leadEnrichmentTopicRuns.leadId, lead.id), inArray(leadEnrichmentTopicRuns.status, ['queued', 'retrying', 'running'])))
+    await tx.update(leadEnrichmentJobs).set({
+      status: 'rejected', lastError: 'cancelled: converted to exclusive project', completedAt: new Date(),
+      leaseOwner: null, leaseExpiresAt: null, updatedAt: new Date(),
+    }).where(and(eq(leadEnrichmentJobs.leadId, lead.id), inArray(leadEnrichmentJobs.status, ['queued', 'running'])))
     await tx.insert(auditLogs).values([
       { userId: actor.id, userName: actor.name, module: '项目管理', action: '从线索创建项目', target: lead.name },
       { userId: actor.id, userName: actor.name, module: '项目获取池', action: '领取为我的专属项目', target: lead.name },
@@ -1293,7 +1521,19 @@ export async function saveLeadScoring(
   leadId: string,
   scoring: unknown,
   score: number,
-  options: { ingest?: boolean } = {},
+  options: {
+    ingest?: boolean
+    ratingHistory?: {
+      snapshotId: string
+      snapshotHash: string
+      ratingSchemaVersion: string
+      workflow: string
+      promptVersion: string
+      model: string
+      status: string
+      completedAt: Date
+    }
+  } = {},
 ) {
   // AI 分析只使用已入库资料。结构化维度回填到 leads 独立列时，
   // 仅用实质内容更新，不以空值覆盖原始资料。
@@ -1304,7 +1544,29 @@ export async function saveLeadScoring(
     await tx.execute(sql`SELECT ${leads.id} FROM ${leads} WHERE ${leads.id}=${leadId} FOR UPDATE`)
     const [current] = await tx.select().from(leads).where(eq(leads.id, leadId)).limit(1)
     if (!current) return undefined
-    const proposed: Record<string, unknown> = { scoring: scoring as never, score }
+    const currentScoring = current.scoring && typeof current.scoring === 'object' && !Array.isArray(current.scoring)
+      ? current.scoring as Record<string, unknown>
+      : {}
+    const currentRadarProfile = current.radarProfile && typeof current.radarProfile === 'object' && !Array.isArray(current.radarProfile)
+      ? current.radarProfile as Record<string, unknown>
+      : {}
+    // 评分只拥有分析字段。工商资料必须按“现有正式资料优先”合并，空评分结果不能覆盖。
+    const registry = normalizeLeadRegistry(currentScoring.registry, sc.registry, currentRadarProfile.registry)
+    const ratingStage = (value: Record<string, unknown>) => meaningfulPresentationText(
+      ((value.ratingV3 as { detailView?: { project?: { stage?: unknown } } } | undefined)?.detailView?.project?.stage),
+    )
+    const currentRatingStage = ratingStage(currentScoring)
+    const incomingRatingStage = ratingStage(sc)
+    // 数据质量复核绑定到被审阅的评分阶段。常规评分未改变阶段时保留；
+    // V3 重新评分改变阶段时主动失效，前端先走保守规则，等待下一次质量复核。
+    const preserveDataQuality = currentScoring.dataQualityV1
+      && (!incomingRatingStage || incomingRatingStage === currentRatingStage)
+    const scoringWithRegistry = {
+      ...sc,
+      registry,
+      ...(preserveDataQuality ? { dataQualityV1: currentScoring.dataQualityV1 } : {}),
+    }
+    const proposed: Record<string, unknown> = { scoring: scoringWithRegistry as never, score }
 
     // AI 只能刷新自身拥有的标量；人工/人工复核/旧源字段受来源优先级保护。
     const team = arr(sc.structuredTeam) as Array<{ name?: string; title?: string; background?: string }>
@@ -1322,9 +1584,6 @@ export async function saveLeadScoring(
 
     const whatIsIt = typeof sc.whatIsIt === 'string' ? sc.whatIsIt.trim() : ''
     if (whatIsIt) proposed.summary = whatIsIt.slice(0, 1000)
-    const registry = sc.registry && typeof sc.registry === 'object' && !Array.isArray(sc.registry)
-      ? sc.registry as Record<string, unknown>
-      : {}
     const regionResolution = resolveLeadBusinessRegion({ registry })
     if (regionResolution) {
       proposed.businessRegion = regionResolution.region
@@ -1349,6 +1608,20 @@ export async function saveLeadScoring(
     )
     if (Object.keys(protectedPatch).length) {
       await tx.update(leads).set(protectedPatch as never).where(eq(leads.id, leadId))
+    }
+    if (options.ratingHistory) {
+      await tx.insert(leadRatingHistory).values({
+        leadId,
+        snapshotId: options.ratingHistory.snapshotId,
+        snapshotHash: options.ratingHistory.snapshotHash,
+        ratingSchemaVersion: options.ratingHistory.ratingSchemaVersion,
+        workflow: options.ratingHistory.workflow,
+        promptVersion: options.ratingHistory.promptVersion,
+        model: options.ratingHistory.model,
+        status: options.ratingHistory.status,
+        result: scoring as Record<string, unknown>,
+        completedAt: options.ratingHistory.completedAt,
+      }).onDuplicateKeyUpdate({ set: { id: sql`${leadRatingHistory.id}` } })
     }
     const [updated] = await tx.select().from(leads).where(eq(leads.id, leadId)).limit(1)
     return updated

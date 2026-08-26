@@ -5,6 +5,7 @@ import type { LeadWorkflowAgentQueryFactory } from './leadWorkflowAgentService.j
 import { transitionLeadPipelineItem } from './leadPipelineEventService.js'
 import { openLeadPipelineReview } from './leadPipelineAuditService.js'
 import { redactSensitiveText } from '../security/redactSecrets.js'
+import { companyRegistrationEligibility } from './leadRegistry.js'
 
 type LeadWorkflowSubjectType = 'company' | 'project' | 'team' | 'lab' | 'paper'
 
@@ -154,6 +155,22 @@ export async function evaluateRadarIntakeWorkflow(input: {
       actorType: 'system',
       actorId: 'radar-workflow-retry',
     })
+  }
+  const registration = companyRegistrationEligibility(input.providedPublicIntel?.registrationStatus)
+  if (!registration.eligibleForLeadPool) {
+    await transitionLeadPipelineItem(input.eventId, {
+      status: 'rejected',
+      reason: registration.reason!,
+      evidence: [{
+        field: 'registrationStatus',
+        value: registration.normalizedStatus,
+        rule: 'deregistered-company-exclusion-v1',
+      }],
+      confidence: 100,
+      actorType: 'system',
+      actorId: 'lead-registration-admission-guard',
+    })
+    return { status: 'reject' as const, stages: null, reviewId: null, error: null }
   }
   let stages: Awaited<ReturnType<typeof runRadarIntakeAgents>>
   try {

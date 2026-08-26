@@ -9,6 +9,7 @@ import { DashboardPage } from './pages/DashboardPage'
 import { ProjectsPage } from './pages/ProjectsPage'
 import { ProjectDetailPage } from './pages/ProjectDetailPage'
 import { SourcingPage } from './pages/SourcingPage'
+import { LeadDetailPage } from './pages/LeadDetailPage'
 import { AIAssistantPage } from './pages/AIAssistantPage'
 import { MeetingsPage } from './pages/MeetingsPage'
 import { WorkflowPage } from './pages/WorkflowPage'
@@ -62,6 +63,7 @@ export default function App() {
         <Route path="/projects" element={<ProjectsPage />} />
         <Route path="/projects/:id" element={<ProjectDetailPage />} />
         <Route path="/sourcing" element={<SourcingPage />} />
+        <Route path="/sourcing/:id" element={<LeadDetailPage />} />
         <Route
           path="/ai"
           element={(

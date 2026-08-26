@@ -12,6 +12,7 @@ import { commitRadarLeadPipelineReady } from './aiSummaryService.js'
 import { openLeadPipelineReview, recordLeadPipelineDecision } from './leadPipelineAuditService.js'
 import { recordLeadPipelineRawEvent, transitionLeadPipelineItem } from './leadPipelineEventService.js'
 import { isSpecificLeadSubjectName } from './leadSubjectName.js'
+import { companyRegistrationEligibility } from './leadRegistry.js'
 import { extractText } from './ragService.js'
 import { readLeadIntakeFile, removeLeadIntakeFile, saveLeadIntakeFile } from './leadIntakeFileStorageService.js'
 
@@ -28,6 +29,7 @@ type NormalizedLead = {
   risks?: string[]
   team?: string
   fundingRounds?: unknown[]
+  registrationStatus?: string
 }
 
 type IntakeFileRow = RowDataPacket & {
@@ -106,6 +108,8 @@ const HEADER_ALIASES: Record<string, keyof NormalizedLead> = {
   风险: 'risks', 风险点: 'risks', risks: 'risks',
   团队: 'team', 核心团队: 'team', team: 'team',
   融资轮次: 'fundingRounds', 融资: 'fundingRounds', funding: 'fundingRounds',
+  登记状态: 'registrationStatus', 企业状态: 'registrationStatus', 经营状态: 'registrationStatus',
+  registrationstatus: 'registrationStatus', businessstatus: 'registrationStatus',
 }
 
 function sha256(value: string | Buffer) {
@@ -179,12 +183,25 @@ async function commitNormalizedLead(input: {
       core_highlights: input.lead.highlights ?? [],
       team_composition: input.lead.team ?? '',
       funding_rounds: input.lead.fundingRounds ?? [],
+      registration_status: input.lead.registrationStatus ?? '',
     },
     intake: { sourceType: input.sourceType, sourceId: input.sourceId, submittedBy: input.actor.userName },
   }
   const captured = await recordLeadPipelineRawEvent({ sourceType: input.sourceType, sourceId: input.sourceId, payload })
   if (captured.item.status === 'ready' && captured.item.leadId) {
     return { status: 'unchanged' as const, eventId: captured.event.id, leadId: captured.item.leadId, reviewId: null }
+  }
+  const registration = companyRegistrationEligibility(input.lead.registrationStatus)
+  if (!registration.eligibleForLeadPool) {
+    await transitionLeadPipelineItem(captured.event.id, {
+      status: 'rejected', reason: registration.reason!, confidence: 100,
+      evidence: [{
+        field: 'registrationStatus', value: registration.normalizedStatus,
+        rule: 'deregistered-company-exclusion-v1', sourceId: input.sourceId,
+      }],
+      actorType: 'system', actorId: 'lead-registration-admission-guard',
+    })
+    return { status: 'rejected' as const, eventId: captured.event.id, leadId: null, reviewId: null }
   }
   const quote = input.evidenceQuote.trim().slice(0, 8_000) || input.lead.name
   if (!isSpecificLeadSubjectName(input.lead.name)) {
@@ -217,9 +234,10 @@ async function commitNormalizedLead(input: {
     }],
   })
   try {
+    const { registrationStatus: _registrationStatus, ...leadFields } = input.lead
     const result = await commitRadarLeadPipelineReady({
       lead: {
-        ...input.lead,
+        ...leadFields,
         source: input.lead.source || (input.sourceType === 'bp-upload' ? '用户上传 BP' : '批量导入'),
         poolStatus: '成功',
         risks: [...(input.lead.risks ?? []), '上传材料为项目方/用户自报信息，关键事实仍需独立核验'],
@@ -230,6 +248,7 @@ async function commitNormalizedLead(input: {
           intake: { sourceType: input.sourceType, sourceId: input.sourceId, decisionId: decision.id },
           articleText: input.evidenceQuote.slice(0, 50_000),
           articleTextLength: input.evidenceQuote.length,
+          registry: { registrationStatus: input.lead.registrationStatus ?? '' },
         },
         radarSourceKeys: [`${input.sourceType}:${input.sourceId}`],
       },
@@ -261,14 +280,16 @@ export async function buildLeadImportTemplate() {
     { header: '来源', key: 'source', width: 18 }, { header: '项目简介', key: 'summary', width: 48 },
     { header: '投资亮点（分号分隔）', key: 'highlights', width: 36 }, { header: '风险点（分号分隔）', key: 'risks', width: 36 },
     { header: '核心团队', key: 'team', width: 36 }, { header: '融资轮次（分号分隔）', key: 'funding', width: 30 },
+    { header: '登记状态', key: 'registrationStatus', width: 18 },
   ]
   sheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } }
   sheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2563EB' } }
-  sheet.autoFilter = 'A1:J1'
+  sheet.autoFilter = 'A1:K1'
   const guide = workbook.addWorksheet('填写说明')
   guide.addRows([
     ['字段', '说明'], ['项目名称*', '必填，需为明确的公司、项目、团队或实验室名称'],
     ['多值字段', '投资亮点、风险点、融资轮次使用分号或换行分隔'],
+    ['登记状态', '如果已明确为“注销”或“已注销”，系统会在入池前排除，不创建补全或评分任务'],
     ['数据安全', '不要填写公式；单次最多 2000 行，上传后会先预检，不会立即入池'],
     ['示例', '示例科技｜示例科技有限公司｜人工智能｜北京｜合作伙伴推荐（请勿把示例当作真实线索导入）'],
   ])
@@ -315,7 +336,9 @@ async function queryBatch(batchId: string, userId: string) {
     id: batch.id, status: batch.status, totalRows: Number(batch.total_rows), validRows: Number(batch.valid_rows),
     errorRows: Number(batch.error_rows), committedRows: Number(batch.committed_rows), reviewRows: Number(batch.review_rows),
     failedRows: Number(batch.failed_rows), createdAt: batch.created_at, updatedAt: batch.updated_at,
-    completedAt: batch.completed_at, rows: rows.map(publicImportRow),
+    completedAt: batch.completed_at,
+    excludedRows: rows.filter((row) => row.status === 'rejected').length,
+    rows: rows.map(publicImportRow),
   }
 }
 
@@ -398,15 +421,18 @@ export async function commitLeadImportBatch(batchId: string, actor: IntakeActor,
         lead: row.normalized as NormalizedLead, sourceType: 'batch-import', sourceId: `${batchId}:${row.rowNumber}`,
         actor, evidenceQuote: Object.entries(row.raw).map(([key, value]) => `${key}：${value}`).join('\n'),
       })
-      const rowStatus = result.status === 'review' ? 'review' : 'committed'
+      const rowStatus = result.status === 'review' ? 'review' : result.status === 'rejected' ? 'rejected' : 'committed'
       if (rowStatus === 'review') review += 1
-      else {
+      else if (rowStatus === 'committed') {
         committed += 1
         if (result.leadId) await scheduleScoring(result.leadId).catch(() => false)
       }
       await pool.query(
         `UPDATE ${rowsTable} SET status=?,event_id=?,lead_id=?,review_id=?,result_message=?,updated_at=NOW(3) WHERE id=?`,
-        [rowStatus, result.eventId, result.leadId, result.reviewId, rowStatus === 'review' ? '已进入人工复核' : '已写入公共线索池', row.id],
+        [rowStatus, result.eventId, result.leadId, result.reviewId,
+          rowStatus === 'review' ? '已进入人工复核'
+            : rowStatus === 'rejected' ? '登记状态为注销，已在入池前排除'
+              : '已写入公共线索池', row.id],
       )
     } catch (error) {
       failed += 1
@@ -519,7 +545,7 @@ async function processBpJob(row: IntakeFileRow) {
       actor: { userId: row.uploaded_by, userName: row.uploaded_by_name }, evidenceQuote: text,
     })
     if (result.leadId) await bpScheduleScoring?.(result.leadId).catch(() => false)
-    const status = result.status === 'review' ? 'review' : 'ready'
+    const status = result.status === 'review' ? 'review' : result.status === 'rejected' ? 'rejected' : 'ready'
     await pool.query(
       `UPDATE ${filesTable} SET status=?,stage=?,progress=100,event_id=?,lead_id=?,review_id=?,lease_owner=NULL,lease_expires_at=NULL,last_error=NULL,completed_at=NOW(3),updated_at=NOW(3) WHERE id=? AND lease_owner=?`,
       [status, status, result.eventId, result.leadId, result.reviewId, row.id, owner],

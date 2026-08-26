@@ -142,6 +142,74 @@ export async function requestAiGatewayText(input: {
   return (await requestAiGatewayCompletion(input)).text
 }
 
+export type AiGatewayWebSearchSource = { url: string; title: string }
+
+export async function requestAiGatewayWebSearchText(input: {
+  baseUrl: string
+  apiKey?: string
+  model: string
+  messages: AiGatewayMessage[]
+  maxTokens: number
+  maxToolCalls?: number
+  timeoutMs: number
+  fetchImpl?: FetchLike
+}) {
+  return observeNonStreamingAiRuntimeRequest('gateway-text', async () => {
+    const fetchImpl = input.fetchImpl ?? fetch
+    const response = await fetchImpl(`${input.baseUrl.replace(/\/$/, '')}/responses`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(input.apiKey ? { Authorization: `Bearer ${input.apiKey}` } : {}),
+      },
+      body: JSON.stringify({
+        model: input.model,
+        input: input.messages.map((message) => ({
+          role: message.role,
+          content: [{ type: 'input_text', text: message.content }],
+        })),
+        tools: [{ type: 'web_search' }],
+        tool_choice: 'required',
+        include: ['web_search_call.action.sources'],
+        max_tool_calls: Math.max(1, Math.min(input.maxToolCalls || 4, 20)),
+        max_output_tokens: input.maxTokens,
+      }),
+      signal: AbortSignal.timeout(input.timeoutMs),
+    })
+    const raw = await response.text()
+    let payload: unknown
+    try { payload = JSON.parse(raw) } catch { throw new Error('联网搜索网关返回了非 JSON 响应') }
+    if (!response.ok) {
+      const message = payload && typeof payload === 'object'
+        ? String((payload as { error?: { message?: unknown } }).error?.message || '')
+        : ''
+      throw Object.assign(new Error(`联网搜索网关 ${response.status}${message ? `：${message.slice(0, 500)}` : ''}`), {
+        status: response.status,
+      })
+    }
+    await recordAiTaskModelCall(payload)
+    const text = aiGatewayResponseText(payload)
+    if (!text) throw new Error('联网搜索网关返回空内容')
+    const output = payload && typeof payload === 'object' && Array.isArray((payload as { output?: unknown }).output)
+      ? (payload as { output: unknown[] }).output
+      : []
+    const sources = new Map<string, AiGatewayWebSearchSource>()
+    for (const item of output) {
+      if (!item || typeof item !== 'object') continue
+      const action = (item as { action?: { sources?: unknown } }).action
+      if (Array.isArray(action?.sources)) {
+        for (const source of action.sources) {
+          if (!source || typeof source !== 'object') continue
+          const url = String((source as { url?: unknown }).url || '').trim()
+          if (!/^https?:\/\//i.test(url)) continue
+          sources.set(url, { url, title: String((source as { title?: unknown }).title || '').trim() })
+        }
+      }
+    }
+    return { text, sources: [...sources.values()], usage: normalizeAiTaskModelUsage(payload) }
+  })
+}
+
 function chatCompatibleUsage(usage: AiTaskModelUsage | null) {
   if (!usage) return undefined
   return {

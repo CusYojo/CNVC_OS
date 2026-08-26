@@ -4,6 +4,7 @@ import type { RowDataPacket } from 'mysql2'
 import { pool } from '../db/client.js'
 import { mysqlTableName, quoteMysqlIdentifier } from '../db/config.js'
 import { redactSensitiveText } from '../security/redactSecrets.js'
+import { enqueueLeadEnrichmentJob } from './leadEnrichmentService.js'
 
 export type LeadPipelineStatus = 'discovered' | 'ready' | 'review' | 'rejected' | 'failed'
 
@@ -361,6 +362,38 @@ export async function transitionLeadPipelineItem(
       [randomUUID(), eventId, current.status, input.status, reason, canonicalJson(evidence),
         confidence, input.actorType, input.actorId ?? null],
     )
+    if (input.status === 'ready' && leadId) {
+      const [sourceRows] = await connection.query<Array<RowDataPacket & { source_type: string }>>(
+        `SELECT source_type FROM ${rawTable} WHERE id=? LIMIT 1`, [eventId],
+      )
+      const sourceType = sourceRows[0]?.source_type || 'unknown'
+      // Scoring input snapshots are audit artifacts produced after enrichment. They must
+      // never recursively start another enrichment cycle.
+      if (!['lead-scoring-input', 'project-scoring-input'].includes(sourceType)) {
+        const enrichment = await enqueueLeadEnrichmentJob({
+          leadId,
+          triggerType: 'pipeline-ready',
+          triggerEventId: eventId,
+          priority: sourceType === 'radar' ? 80 : 100,
+        }, connection)
+        if (enrichment.reason === 'company_deregistered') {
+          const rejectionReason = '工商登记状态明确为注销，不符合共享线索池准入条件'
+          const rejectionEvidence = canonicalJson([{ code: 'COMPANY_DEREGISTERED', leadId }])
+          await connection.query(
+            `UPDATE ${itemsTable}
+             SET status='rejected',decision_reason=?,evidence=CAST(? AS JSON),confidence=100,last_error=NULL,updated_at=NOW(3)
+             WHERE event_id=?`,
+            [rejectionReason, rejectionEvidence, eventId],
+          )
+          await connection.query(
+            `INSERT INTO ${transitionsTable}
+              (id,event_id,from_status,to_status,reason,evidence,confidence,actor_type,actor_id,created_at)
+             VALUES (?,?,'ready','rejected',?,CAST(? AS JSON),100,'system','lead-registration-admission-guard',NOW(3))`,
+            [randomUUID(), eventId, rejectionReason, rejectionEvidence],
+          )
+        }
+      }
+    }
     const [updatedRows] = await connection.query<PipelineItemRow[]>(
       `SELECT * FROM ${itemsTable} WHERE event_id=?`,
       [eventId],

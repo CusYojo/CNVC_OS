@@ -38,9 +38,13 @@ const checks: string[] = []
 function fixtureIntel(overrides: Partial<PublicIntelResult> = {}): PublicIntelResult {
   return {
     positioning: '该主体提供企业级数据治理产品，现有描述来自公开检索线索。',
+    companyIntroduction: '该公司面向企业客户提供数据治理软件与配套服务，公开信息显示其产品覆盖数据管理和分析场景。',
     registeredCapital: '1000万元人民币',
     legalRepresentative: '张三',
     foundedAt: '2020-01-02',
+    creditCode: '91110108MA01ABC123',
+    registrationStatus: '存续',
+    companyType: '有限责任公司',
     region: '北京市',
     registeredAddress: '北京市海淀区中关村大街1号',
     fundingRounds: [{
@@ -145,6 +149,10 @@ async function main() {
     const scoring = stored.scoring as Record<string, unknown>
     const registry = scoring.registry as Record<string, unknown>
     assert.equal(registry.registeredCapital, '1000万元人民币')
+    assert.equal(registry.creditCode, '91110108MA01ABC123')
+    assert.equal(registry.registrationStatus, '存续')
+    assert.equal(registry.companyType, '有限责任公司')
+    assert.equal(scoring.companyIntroduction, intel.companyIntroduction)
     assert.equal((scoring.fundingRoundsResearched as unknown[]).length, 1)
     checks.push('host-cleaning-deduplicates-sources-and-persists-only-sourced-facts')
 
@@ -216,7 +224,7 @@ async function main() {
     checks.push('explicit-public-intel-target-must-match-the-requested-subject-with-full-rollback')
 
     const terminalIntel = fixtureIntel({
-      positioning: '终态线索不得继续被公开情报入口合并。',
+      positioning: '已转项目线索继续作为证据权威来源接受公开情报补全。',
       fetchedAt: '2026-08-09T12:20:00+08:00',
       sources: [{ title: '终态目标来源', url: `https://example.com/${marker}/terminal`, reliability: '中' }],
     })
@@ -228,16 +236,18 @@ async function main() {
     })
     await db.update(leads).set({ poolStatus: '已转专属项目' }).where(eq(leads.id, first.lead.id))
     try {
-      await assert.rejects(
-        commitLeadPublicIntel({ company, intel: terminalIntel, targetLeadId: first.lead.id }),
-        (error: unknown) => (error as { code?: string }).code === 'PUBLIC_INTEL_TARGET_TERMINAL',
-      )
+      const convertedEnrichment = await commitLeadPublicIntel({
+        company, intel: terminalIntel, targetLeadId: first.lead.id,
+      })
+      eventIds.add(convertedEnrichment.eventId)
+      assert.equal(convertedEnrichment.status, 'updated')
+      assert.equal(convertedEnrichment.lead.poolStatus, '已转专属项目')
     } finally {
       await db.update(leads).set({ poolStatus: '成功' }).where(eq(leads.id, first.lead.id))
     }
-    assert.equal(await count(rawTable, 'id=?', [terminalIdentity.id]), 0)
-    assert.equal(await count(auditLogsTable, 'target=?', [company]), 2)
-    checks.push('terminal-public-intel-target-cannot-be-enriched-and-transaction-fully-rolls-back')
+    assert.equal(await count(rawTable, 'id=?', [terminalIdentity.id]), 1)
+    assert.equal(await count(auditLogsTable, 'target=?', [company]), 3)
+    checks.push('converted-lead-remains-the-evidence-authority-for-safe-public-intel-enrichment')
 
     const ambiguousRows = await db.insert(leads).values([
       { name: ambiguousCompany, companyName: ambiguousCompany, source: 'public-intel-ambiguity-fixture', poolStatus: '成功' },

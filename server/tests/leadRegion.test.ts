@@ -80,3 +80,20 @@ test('uses only explicit location sentences and ignores casual city mentions', (
     confidence: '中',
   })
 })
+
+test('does not infer Ningxia from a founder name or a team label containing Yinchuan', () => {
+  assert.equal(resolveLeadBusinessRegion({ subjectName: '银川团队' }), undefined)
+  assert.equal(resolveLeadBusinessRegion({ subjectName: '创始人李银川' }), undefined)
+})
+
+test('explicit company location can correct a polluted medium-confidence profile region', () => {
+  assert.deepEqual(resolveLeadBusinessRegion({
+    subjectName: '诺因智能',
+    profile: { region: '宁夏', regionSource: '所属高校/研究机构', regionConfidence: '中' },
+    articleText: '诺因智能公司总部位于深圳市南山区，团队专注家庭具身智能产品。',
+  }), {
+    region: '广东',
+    source: '来源原文明确地点',
+    confidence: '中',
+  })
+})

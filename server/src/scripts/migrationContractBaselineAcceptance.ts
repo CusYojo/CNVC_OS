@@ -81,10 +81,12 @@ async function main() {
     requireCondition(aiPage.includes(marker), `AI interaction baseline is missing ${marker}`)
   }
   for (const marker of [
-    '人工复核', '从雷达同步', '/leads', '/lead-pipeline/reviews', 'convertSelectedLead',
+    '共享线索池', '线索类型', '推荐理由 / 信号', 'fetchLeads', '/sourcing/${leadId}',
   ]) {
     requireCondition(sourcingPage.includes(marker), `lead workflow baseline is missing ${marker}`)
   }
+  requireCondition(!/人工复核|从雷达同步|批量导入|上传 BP/.test(sourcingPage),
+    'shared lead pool must keep operational actions hidden')
 
   const issueIds = [...issues.matchAll(/\| `?(ISSUE-\d{3})`? \|/g)].map((match) => match[1])
   requireCondition(issueIds.length >= 12, 'known-issue baseline must preserve all approved issue IDs')

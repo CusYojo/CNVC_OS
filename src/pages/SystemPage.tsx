@@ -1,5 +1,5 @@
 import {
-  Building2, Check, Database, FileText, Plus, RefreshCw, Search, UserCog, Users,
+  Building2, Check, Database, FileText, Plus, RefreshCw, RotateCcw, Search, UserCog, Users,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useToast } from '../components/Toast'
@@ -29,6 +29,11 @@ type DictionaryGroup = {
   version: number; items: DictionaryItem[];
 }
 type Administration = { departments: Department[]; roles: Role[]; permissions: Permission[]; dictionaries: DictionaryGroup[] }
+type LeadRatingHistory = {
+  id: string; snapshotId: string; snapshotHash: string; ratingSchemaVersion: string;
+  status: string; result: unknown; completedAt: string;
+}
+type LeadRatingHistoryResponse = { leadId: string; ratings: LeadRatingHistory[]; total: number }
 
 const emptyAdministration: Administration = { departments: [], roles: [], permissions: [], dictionaries: [] }
 const field = 'input w-full'
@@ -36,12 +41,23 @@ const tabItems = [
   { id: 'users', label: '用户管理' }, { id: 'org', label: '组织管理' },
   { id: 'roles', label: '角色权限' }, { id: 'dicts', label: '数据字典' },
   { id: 'templates', label: '模板管理' }, { id: 'audit', label: '审计日志' },
+  { id: 'rating-recovery', label: 'V3评分恢复' },
   { id: 'operations', label: '迁移运维' },
 ]
 
 function displayTime(value: string | null | undefined) {
   if (!value) return '尚未登录'
   try { return formatShanghaiDateTime(value) } catch { return '—' }
+}
+
+function ratingHistoryScore(value: unknown) {
+  const result = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
+  const ratingV3 = result.ratingV3 && typeof result.ratingV3 === 'object' && !Array.isArray(result.ratingV3)
+    ? result.ratingV3 as Record<string, unknown> : {}
+  const computed = ratingV3.computed && typeof ratingV3.computed === 'object' && !Array.isArray(ratingV3.computed)
+    ? ratingV3.computed as Record<string, unknown> : {}
+  const score = Number(computed.score ?? result.total)
+  return Number.isFinite(score) ? score : null
 }
 
 export function SystemPage() {
@@ -68,6 +84,11 @@ export function SystemPage() {
   const [dictionaryForm, setDictionaryForm] = useState({ code: '', name: '', description: '', status: '启用' as '启用' | '禁用' })
   const [itemModal, setItemModal] = useState<{ group: DictionaryGroup; item?: DictionaryItem } | null>(null)
   const [itemForm, setItemForm] = useState({ value: '', label: '', sortOrder: '0', status: '启用' as '启用' | '禁用' })
+  const [ratingLeadId, setRatingLeadId] = useState('')
+  const [ratingHistory, setRatingHistory] = useState<LeadRatingHistory[]>([])
+  const [ratingHistoryLoading, setRatingHistoryLoading] = useState(false)
+  const [ratingRestoreTarget, setRatingRestoreTarget] = useState<LeadRatingHistory | null>(null)
+  const [ratingRestoreReason, setRatingRestoreReason] = useState('')
 
   const refreshAdministration = useCallback(async () => {
     setLoading(true)
@@ -193,6 +214,36 @@ export function SystemPage() {
     if (ok) setItemModal(null)
   }
 
+  async function loadRatingHistory() {
+    const leadId = ratingLeadId.trim()
+    if (!leadId) return
+    setRatingHistoryLoading(true)
+    try {
+      const result = await apiGet<LeadRatingHistoryResponse>(`/leads/${leadId}/ratings/history?page=1&pageSize=50`)
+      setRatingHistory(result.ratings)
+      if (!result.ratings.length) showToast('该线索尚无可恢复的V3历史评级。')
+    } catch (error) {
+      setRatingHistory([])
+      showToast((error as Error).message, 'error')
+    } finally { setRatingHistoryLoading(false) }
+  }
+
+  async function restoreRatingHistory() {
+    if (!ratingRestoreTarget || ratingRestoreReason.trim().length < 4) return
+    setBusy(true)
+    try {
+      await apiPost(`/leads/${ratingLeadId.trim()}/ratings/history/${ratingRestoreTarget.id}/restore`, {
+        reason: ratingRestoreReason.trim(),
+      })
+      setRatingRestoreTarget(null)
+      setRatingRestoreReason('')
+      await loadRatingHistory()
+      showToast('已恢复所选V3历史评级；事实、证据和快照未被修改。')
+    } catch (error) {
+      showToast((error as Error).message, 'error')
+    } finally { setBusy(false) }
+  }
+
   const toolbar = (placeholder: string, actions?: React.ReactNode) => <div className="mb-4 flex items-center gap-3">
     <SearchInput className="w-[360px]" placeholder={placeholder} value={query} onChange={(event) => setQuery(event.target.value)} />
     <span className="ml-auto inline-flex items-center gap-1.5 text-xs text-slate-400"><Database className="h-3.5 w-3.5" />MySQL 权威数据</span>
@@ -253,9 +304,16 @@ export function SystemPage() {
     {filteredLogs.map((log) => <tr key={log.id}><TableCell><span className="whitespace-nowrap text-xs">{displayTime(log.createdAt)}</span></TableCell><TableCell>{log.user}</TableCell><TableCell><Badge>{log.module}</Badge></TableCell><TableCell>{log.action}</TableCell><TableCell><span className="block max-w-[460px] truncate">{log.target}</span></TableCell><TableCell><span className="font-mono text-xs text-slate-400">{log.ip || '—'}</span></TableCell></tr>)}
   </DataTable></Card></>
 
+  const renderRatingRecovery = () => <div className="space-y-4">
+    <Card className="p-5"><div className="flex items-end gap-3"><label className="min-w-0 flex-1"><span className="label">共享线索ID</span><input className={field} value={ratingLeadId} placeholder="粘贴线索UUID后读取历史版本" onChange={(event) => setRatingLeadId(event.target.value)} /></label><Button loading={ratingHistoryLoading} disabled={!ratingLeadId.trim()} onClick={() => void loadRatingHistory()}><Search className="h-4 w-4" />读取历史</Button></div><p className="mt-3 text-xs text-slate-500">该入口仅用于故障回滚。恢复评分不会修改联网事实、原始证据或不可变快照，操作原因会进入管理员审计。</p></Card>
+    <Card className="overflow-hidden"><DataTable headers={['完成时间', '分值', '快照', '评级版本', '状态', '操作']}>
+      {ratingHistory.map((rating) => <tr key={rating.id}><TableCell>{displayTime(rating.completedAt)}</TableCell><TableCell>{ratingHistoryScore(rating.result) ?? '待评级'}</TableCell><TableCell><span className="font-mono text-xs">{rating.snapshotHash.slice(0, 12)}</span></TableCell><TableCell>{rating.ratingSchemaVersion}</TableCell><TableCell><StatusBadge status={rating.status} /></TableCell><TableCell><button className="inline-flex items-center gap-1 text-xs text-brand-600" onClick={() => { setRatingRestoreTarget(rating); setRatingRestoreReason('') }}><RotateCcw className="h-3.5 w-3.5" />恢复此版本</button></TableCell></tr>)}
+    </DataTable>{!ratingHistory.length && <div className="border-t border-slate-100 px-5 py-8 text-center text-sm text-slate-400">请输入线索ID读取可恢复版本</div>}</Card>
+  </div>
+
   const contents: Record<string, () => React.ReactNode> = {
     users: renderUsers, org: renderOrganization, roles: renderRoles, dicts: renderDictionaries,
-    templates: renderTemplates, audit: renderAudit, operations: () => <OperationsOverview />,
+    templates: renderTemplates, audit: renderAudit, 'rating-recovery': renderRatingRecovery, operations: () => <OperationsOverview />,
   }
 
   return <div>
@@ -282,5 +340,6 @@ export function SystemPage() {
 
     <Modal open={!!dictionaryModal} title={dictionaryModal === 'create' ? '新增数据字典' : '编辑数据字典'} onClose={() => setDictionaryModal(null)} footer={<><Button variant="secondary" onClick={() => setDictionaryModal(null)}>取消</Button><Button loading={busy} onClick={() => void saveDictionary()}>保存</Button></>}><div className="space-y-4"><label><span className="label">字典编码</span><input className={field} disabled={dictionaryModal !== 'create'} value={dictionaryForm.code} onChange={(e) => setDictionaryForm({ ...dictionaryForm, code: e.target.value })} /></label><label><span className="label">名称</span><input className={field} value={dictionaryForm.name} onChange={(e) => setDictionaryForm({ ...dictionaryForm, name: e.target.value })} /></label><label><span className="label">说明</span><textarea className={field} value={dictionaryForm.description} onChange={(e) => setDictionaryForm({ ...dictionaryForm, description: e.target.value })} /></label><label><span className="label">状态</span><select className={field} value={dictionaryForm.status} onChange={(e) => setDictionaryForm({ ...dictionaryForm, status: e.target.value as '启用' | '禁用' })}><option>启用</option><option>禁用</option></select></label></div></Modal>
     <Modal open={!!itemModal} title={itemModal?.item ? '编辑字典项' : '新增字典项'} onClose={() => setItemModal(null)} footer={<><Button variant="secondary" onClick={() => setItemModal(null)}>取消</Button><Button loading={busy} onClick={() => void saveDictionaryItem()}>保存</Button></>}><div className="space-y-4"><label><span className="label">值编码</span><input className={field} disabled={!!itemModal?.item} value={itemForm.value} onChange={(e) => setItemForm({ ...itemForm, value: e.target.value })} /></label><label><span className="label">显示名称</span><input className={field} value={itemForm.label} onChange={(e) => setItemForm({ ...itemForm, label: e.target.value })} /></label><div className="grid grid-cols-2 gap-4"><label><span className="label">排序</span><input type="number" className={field} value={itemForm.sortOrder} onChange={(e) => setItemForm({ ...itemForm, sortOrder: e.target.value })} /></label><label><span className="label">状态</span><select className={field} value={itemForm.status} onChange={(e) => setItemForm({ ...itemForm, status: e.target.value as '启用' | '禁用' })}><option>启用</option><option>禁用</option></select></label></div></div></Modal>
+    <Modal open={!!ratingRestoreTarget} title="恢复V3历史评级" onClose={() => { if (!busy) setRatingRestoreTarget(null) }} footer={<><Button variant="secondary" disabled={busy} onClick={() => setRatingRestoreTarget(null)}>取消</Button><Button loading={busy} disabled={ratingRestoreReason.trim().length < 4} onClick={() => void restoreRatingHistory()}>确认恢复</Button></>}><div className="space-y-4"><p className="text-sm leading-6 text-slate-600">将恢复到 <strong>{ratingHistoryScore(ratingRestoreTarget?.result) ?? '待评级'}分</strong>。仅切换有效评分结果，不回滚事实、证据和快照。</p><label><span className="label">恢复原因</span><textarea className={field} maxLength={2000} value={ratingRestoreReason} placeholder="至少4个字，说明恢复原因" onChange={(event) => setRatingRestoreReason(event.target.value)} /></label></div></Modal>
   </div>
 }

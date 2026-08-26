@@ -19,12 +19,12 @@ test('public lead deletion is admin-only, audited, and implemented as a hidden s
   assert.match(routes, /metaRouter\.delete\('\/leads\/:id', requireSystemAdmin/)
 })
 
-test('Sourcing detail exposes a two-step lead deletion flow to administrators', async () => {
-  const page = await source('../../src/pages/SourcingPage.tsx')
+test('the dedicated lead detail page exposes a two-step deletion flow to administrators', async () => {
+  const page = await source('../../src/pages/LeadDetailPage.tsx')
 
-  assert.match(page, /canDeleteLead/)
+  assert.match(page, /currentUser\?\.role === '系统管理员'/)
   assert.match(page, />\s*删除线索\s*</)
-  assert.match(page, /title="确认删除线索"/)
-  assert.match(page, /apiDelete\(\`\/leads\/\$\{lead\.id\}\`\)/)
-  assert.match(page, /原始审计证据及已转成的专属项目仍会保留/)
+  assert.match(page, /title="删除共享线索"/)
+  assert.match(page, /apiDelete<[^\n]+>\(\`\/leads\/\$\{lead\.id\}\`\)/)
+  assert.match(page, /历史导入记录、审计记录及已转化的专属项目会继续保留/)
 })

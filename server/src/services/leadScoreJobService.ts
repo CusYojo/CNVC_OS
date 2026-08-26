@@ -28,6 +28,9 @@ export type LeadScoreJobLease = RowDataPacket & {
   lease_owner: string | null
   lease_expires_at: Date | null
   last_error: string | null
+  enrichment_snapshot_id: string | null
+  snapshot_hash: string | null
+  rating_schema_version: string | null
 }
 
 const jobsTable = quoteMysqlIdentifier(mysqlTableName('lead_score_jobs'))
@@ -56,12 +59,15 @@ function errorText(error: unknown): string {
   return redactSensitiveText(error instanceof Error ? error.message : error).slice(0, 8_000)
 }
 
-type LeadScoreEnqueueOptions = {
+export type LeadScoreEnqueueOptions = {
   recovering?: boolean
   snapshot?: Record<string, unknown>
   manualRetry?: boolean
   manualRetryAudit?: { userId?: string | null; userName: string; target: string }
   automaticCircuitRecovery?: { target: string }
+  enrichmentSnapshotId?: string
+  snapshotHash?: string
+  ratingSchemaVersion?: string
 }
 
 async function enqueueLeadScoreJobOnce(
@@ -117,16 +123,21 @@ async function enqueueLeadScoreJobOnce(
          SET status='queued', next_attempt_at=NOW(3), lease_owner=NULL, lease_expires_at=NULL,
            execution_attempts=IF(?, 0, execution_attempts),
            manual_retry_count=manual_retry_count+IF(?, 1, 0),
-           completed_at=NULL, dead_lettered_at=NULL, last_error=NULL, updated_at=NOW(3)
+           completed_at=NULL, dead_lettered_at=NULL, last_error=NULL,
+           enrichment_snapshot_id=COALESCE(?,enrichment_snapshot_id),
+           snapshot_hash=COALESCE(?,snapshot_hash),
+           rating_schema_version=COALESCE(?,rating_schema_version),updated_at=NOW(3)
          WHERE lead_id=?`,
-        [resetAttempts, options.manualRetry === true, leadId],
+        [resetAttempts, options.manualRetry === true, options.enrichmentSnapshotId ?? null,
+          options.snapshotHash ?? null, options.ratingSchemaVersion ?? null, leadId],
       )
     } else {
       await connection.query(
         `INSERT INTO ${jobsTable}
-          (lead_id, status, execution_attempts, next_attempt_at, created_at, updated_at)
-         VALUES (?, 'queued', 0, NOW(3), NOW(3), NOW(3))`,
-        [leadId],
+          (lead_id,status,execution_attempts,next_attempt_at,enrichment_snapshot_id,snapshot_hash,
+           rating_schema_version,created_at,updated_at)
+         VALUES (?, 'queued', 0, NOW(3), ?, ?, ?, NOW(3), NOW(3))`,
+        [leadId, options.enrichmentSnapshotId ?? null, options.snapshotHash ?? null, options.ratingSchemaVersion ?? null],
       )
     }
     if (options.snapshot) {
@@ -209,6 +220,23 @@ export async function recoverExpiredLeadScoreJobLeases(): Promise<number> {
     event: 'leaseRecovered',
   })
   return recovered
+}
+
+export async function getLeadScoreJobBinding(leadId: string) {
+  const [rows] = await pool.query<Array<RowDataPacket & {
+    enrichment_snapshot_id: string | null
+    snapshot_hash: string | null
+    rating_schema_version: string | null
+  }>>(
+    `SELECT enrichment_snapshot_id,snapshot_hash,rating_schema_version FROM ${jobsTable} WHERE lead_id=? LIMIT 1`,
+    [leadId],
+  )
+  const row = rows[0]
+  return row ? {
+    enrichmentSnapshotId: row.enrichment_snapshot_id,
+    snapshotHash: row.snapshot_hash,
+    ratingSchemaVersion: row.rating_schema_version,
+  } : null
 }
 
 export async function listCircuitDeadLetterLeadScoreIds(limit = 500): Promise<string[]> {

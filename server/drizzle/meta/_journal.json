@@ -330,6 +330,27 @@
       "when": 1787298543000,
       "tag": "0046_add_ai_task_events",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "5",
+      "when": 1787644143000,
+      "tag": "0047_add_lead_enrichment_evidence",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "5",
+      "when": 1787730543000,
+      "tag": "0048_repair_lead_enrichment_tables",
+      "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "5",
+      "when": 1787816943000,
+      "tag": "0049_add_lead_fact_instance_keys",
+      "breakpoints": true
     }
   ]
 }

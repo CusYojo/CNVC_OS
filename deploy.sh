@@ -185,6 +185,14 @@ rebuild_and_activate() {
         return 1
     fi
 
+    # 本轮数据库变更仅新增表、索引和可空绑定列，先在旧服务仍在线时执行向前兼容迁移。
+    # 迁移失败则不停止服务、不激活候选产物；发布回滚只切回应用构建，不删除历史事实或快照。
+    step "执行向前兼容数据库迁移"
+    if ! npm run db:migrate:separated; then
+        err "数据库迁移失败；保持现有服务与已激活产物"
+        return 1
+    fi
+
     # build-platform 在 4100 端口监听时只生成候选产物。构建成功后再停服，
     # 将构建耗时留在服务在线阶段，并只为原子激活保留短暂停机窗口。
     if [ "$service_was_active" -eq 1 ]; then
@@ -207,11 +215,50 @@ rebuild_and_activate() {
       return 1
     fi
 
+    step "验收已激活的 Web 与服务端成对构建"
+    if ! npm run accept:build-release; then
+        err "已激活构建未通过发布契约验收，开始回滚"
+        npm run rollback:build || true
+        if [ "$service_was_active" -eq 1 ]; then
+            systemctl start "$SERVICE_UNIT" || true
+        fi
+        return 1
+    fi
+
+    step "执行统一服务离线启动前门禁"
+    if ! npm run check:single-service-prestart; then
+        err "离线启动前门禁失败，开始回滚"
+        npm run rollback:build || true
+        if [ "$service_was_active" -eq 1 ]; then
+            systemctl start "$SERVICE_UNIT" || true
+        fi
+        return 1
+    fi
+
     step "同步内置文档任务模板注册"
     npm run db:sync-ai-task-templates
 
     validate_project_files
     log "前端与服务端构建产物已更新并激活"
+}
+
+rollback_failed_release() {
+    step "回滚未通过在线健康检查的新版本"
+    systemctl stop "$SERVICE_UNIT" || true
+    wait_for_stopped || true
+    if ! npm run rollback:build; then
+        err "自动回滚失败，需要人工介入"
+        show_failure_context
+        return 1
+    fi
+    systemctl start "$SERVICE_UNIT"
+    if wait_for_health; then
+        warn "新版本未通过健康检查，旧版本已恢复"
+        return 0
+    fi
+    err "旧版本回滚后仍未恢复健康"
+    show_failure_context
+    return 1
 }
 
 wait_for_stopped() {
@@ -269,6 +316,7 @@ start_project() {
     systemctl start "$SERVICE_UNIT"
     if ! wait_for_health; then
         show_failure_context
+        rollback_failed_release || true
         exit 1
     fi
     log "项目启动完成"
@@ -283,6 +331,7 @@ restart_project() {
     systemctl start "$SERVICE_UNIT"
     if ! wait_for_health; then
         show_failure_context
+        rollback_failed_release || true
         exit 1
     fi
     log "项目重启完成"

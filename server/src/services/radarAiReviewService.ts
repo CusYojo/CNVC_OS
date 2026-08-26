@@ -12,6 +12,7 @@ import {
   registerLeadPipelinePromptVersion,
   startLeadPipelineRun,
 } from './leadPipelineAuditService.js'
+import { radarAiDecisionAuditKey, radarAiReviewAuditKey } from './radarAiAuditPolicy.js'
 import {
   LEAD_SUBJECT_AGENT_PROFILE,
   LEAD_SUBJECT_AGENT_PROFILE_VERSION,
@@ -589,7 +590,11 @@ async function reviewUncachedBatch(
               ? 'radar subject passed model and host evidence validation'
               : `radar subject decision: ${outcome}`)
             const decision = await recordLeadPipelineDecision({
-              idempotencyKey: `radar-ai:${result.cacheKey}:${result.status}`,
+              idempotencyKey: radarAiDecisionAuditKey({
+                cacheKey: result.cacheKey,
+                status: result.status,
+                runId: auditRun.id,
+              }),
               eventId,
               runId: auditRun.id,
               decisionType: 'subject_identification',
@@ -616,7 +621,10 @@ async function reviewUncachedBatch(
             })
             if (outcome === 'review') {
               await openLeadPipelineReview({
-                idempotencyKey: `radar-ai:${result.cacheKey}`,
+                idempotencyKey: radarAiReviewAuditKey({
+                  cacheKey: result.cacheKey,
+                  decisionId: decision.id,
+                }),
                 eventId,
                 triggerDecisionId: decision.id,
                 reason,
@@ -664,7 +672,11 @@ async function reviewUncachedBatch(
       const eventId = auditEventIds.get(batch[index].cacheKey)
       if (!eventId) continue
       await recordLeadPipelineDecision({
-        idempotencyKey: `radar-ai:${result.cacheKey}:failed`,
+        idempotencyKey: radarAiDecisionAuditKey({
+          cacheKey: result.cacheKey,
+          status: 'failed',
+          runId: lastAuditRunId,
+        }),
         eventId,
         runId: lastAuditRunId,
         decisionType: 'subject_identification',

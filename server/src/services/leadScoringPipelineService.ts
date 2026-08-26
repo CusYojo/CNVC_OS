@@ -6,13 +6,14 @@ import {
   transitionLeadPipelineItem,
 } from './leadPipelineEventService.js'
 import type { LeadScoringAuditContext } from './inProcessAiWorkflowService.js'
+import type { ScoreWorkflow } from './inProcessAiWorkflowService.js'
 
 const itemsTable = quoteMysqlIdentifier(mysqlTableName('lead_pipeline_items'))
 const rawTable = quoteMysqlIdentifier(mysqlTableName('lead_pipeline_raw_events'))
 
 export async function prepareLeadScoringAuditContext(input: {
   leadId: string
-  workflow: 'score-project' | 'score-paper'
+  workflow: ScoreWorkflow
   scoringInput: Record<string, unknown>
   queueAttempt: number
 }): Promise<LeadScoringAuditContext> {

@@ -1,10 +1,10 @@
 import { createHash } from 'node:crypto'
-import { and, asc, eq, ne, or } from 'drizzle-orm'
+import { and, asc, eq, ne, or, sql } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/mysql2'
 import type { RowDataPacket } from 'mysql2'
 import type { PoolConnection } from 'mysql2/promise'
 import { db, pool, schema } from '../db/client.js'
-import { auditLogs, leads } from '../db/schema.js'
+import { auditLogs, leads, projects } from '../db/schema.js'
 import { resolveLeadBusinessRegion } from './leadRegion.js'
 import { formatShanghaiDateKey } from '../utils/shanghaiTime.js'
 import {
@@ -15,14 +15,31 @@ import {
 import { openLeadPipelineReview, recordLeadPipelineDecision } from './leadPipelineAuditService.js'
 import { recordLeadPipelineEntityMatch } from './leadPipelineEntityMatchService.js'
 import { applyLeadFieldPolicy, initialLeadFieldProvenance } from './leadFieldProvenance.js'
+import { companyRegistrationEligibility, meaningfulLeadRegistryText, normalizeLeadRegistry } from './leadRegistry.js'
+import { excludeDeregisteredLeadFromPool } from './leadEnrichmentService.js'
+import {
+  LEAD_COMPANY_INTEL_FIELDS,
+  validLegalCompanyName,
+  type LeadCompanyIntelEvidence,
+  type LeadCompanyIntelField,
+} from './leadCompanyIntelExtractionService.js'
 
 export interface PublicIntelFundingRound {
   round: string
+  roundRaw?: string
   date: string
   amount: string
+  amountRaw?: string
+  currency?: 'CNY' | 'USD' | ''
   valuation: string
   investors: string
   sourceUrl: string
+  leadInvestors?: string[]
+  evidenceQuote?: string
+  evidenceStatus?: 'source_labeled' | 'source_supported' | 'conflicting'
+  extractionMethod?: string
+  extractorVersion?: string
+  idempotencyKey?: string
 }
 
 export interface PublicIntelShareholder {
@@ -53,9 +70,17 @@ export interface PublicIntelCompetitor {
 
 export interface PublicIntelResult {
   positioning: string
+  canonicalCompanyName?: string
+  companyIntroduction?: string
+  claimedFoundedAt?: string
+  claimedFoundedAtEvidence?: { quote: string; sourceUrl: string }
+  website?: string
   registeredCapital: string
   legalRepresentative: string
   foundedAt: string
+  creditCode?: string
+  registrationStatus?: string
+  companyType?: string
   region: string
   registeredAddress: string
   fundingRounds: PublicIntelFundingRound[]
@@ -74,6 +99,15 @@ export interface PublicIntelResult {
     publishedAt?: string
     reliability?: string
   }>
+  registryEvidence?: LeadCompanyIntelEvidence[]
+  registryEnrichment?: {
+    method: 'codex-evidence-bound-web-enrichment-v1' | 'codex-built-in-web-search-v2'
+    model: string
+    requestedFields: LeadCompanyIntelField[]
+    completedFields: LeadCompanyIntelField[]
+    status: 'completed' | 'no_results' | 'no_match' | 'model_failed'
+    error?: string
+  }
 }
 
 const PLACEHOLDERS = new Set([
@@ -159,24 +193,54 @@ function normalizedSourceIdentity(item: Record<string, unknown>) {
   return keys
 }
 
-function mergeFundingRounds(existing: unknown, incoming: PublicIntelFundingRound[]) {
+function normalizedFundingAmount(value: unknown) {
+  return meaningfulPublicIntelText(value)
+    .normalize('NFKC')
+    .replace(/\s+/g, '')
+    .replace(/(?:人民币|RMB|CNY)$/i, '')
+}
+
+export function mergeFundingRounds(existing: unknown, incoming: PublicIntelFundingRound[]) {
   const researched = incoming
     .map((item) => ({
       round: meaningfulPublicIntelText(item.round),
+      roundRaw: meaningfulPublicIntelText(item.roundRaw),
       date: meaningfulPublicIntelText(item.date),
       amount: meaningfulPublicIntelText(item.amount),
+      amountRaw: meaningfulPublicIntelText(item.amountRaw),
+      currency: meaningfulPublicIntelText(item.currency),
       valuation: meaningfulPublicIntelText(item.valuation),
       investors: meaningfulPublicIntelText(item.investors),
       sourceUrl: meaningfulPublicIntelText(item.sourceUrl),
+      leadInvestors: Array.isArray(item.leadInvestors) ? item.leadInvestors.map(meaningfulPublicIntelText).filter(Boolean) : [],
+      evidenceQuote: meaningfulPublicIntelText(item.evidenceQuote),
+      evidenceStatus: item.evidenceStatus,
+      extractionMethod: meaningfulPublicIntelText(item.extractionMethod),
+      extractorVersion: meaningfulPublicIntelText(item.extractorVersion),
+      idempotencyKey: meaningfulPublicIntelText(item.idempotencyKey),
     }))
     .filter((item) => usefulObject(item, ['round', 'date', 'amount', 'valuation', 'investors']))
     // 公开情报字段必须有来源；没有 URL 的具体融资数据不写回。
     .filter((item) => Boolean(item.sourceUrl))
   const current = objectArray(existing)
     .filter((item) => usefulObject(item, ['round', 'date', 'amount', 'valuation', 'investors']))
+    .filter((item) => !researched.some((researchedItem) => {
+      if (!meaningfulPublicIntelText(researchedItem.evidenceQuote)) return false
+      const currentUrl = meaningfulPublicIntelText(item.sourceUrl)
+      const researchedUrl = meaningfulPublicIntelText(researchedItem.sourceUrl)
+      if (!currentUrl || currentUrl !== researchedUrl) return false
+      const currentRound = meaningfulPublicIntelText(item.round)
+      const placeholderRound = !currentRound || /待核验|待核实|未披露/.test(currentRound)
+      const sameAmount = normalizedFundingAmount(item.amount)
+        && normalizedFundingAmount(item.amount) === normalizedFundingAmount(researchedItem.amount)
+      return placeholderRound || sameAmount
+    }))
   return dedupeObjects([...researched, ...current], (item) => {
+    const idempotencyKey = meaningfulPublicIntelText(item.idempotencyKey)
+    if (idempotencyKey) return `fact:${idempotencyKey}`
     const url = meaningfulPublicIntelText(item.sourceUrl)
-    return url || [
+    return [
+      url,
       meaningfulPublicIntelText(item.round),
       meaningfulPublicIntelText(item.date),
       meaningfulPublicIntelText(item.amount),
@@ -272,24 +336,80 @@ function mergeSources(
 
 type AppDatabase = typeof db
 
+const PROJECT_FUNDING_PLACEHOLDER = /^(?:|待核验|待核实|待确认|未披露|暂未披露|融资轮次待核验|融资金额待核验|融资信息未披露)$/
+
+export function buildConvertedProjectFundingPatch(
+  project: { round?: unknown; financing?: unknown; valuation?: unknown },
+  fundingRound: { round?: unknown; amount?: unknown; valuation?: unknown } | undefined,
+) {
+  const patch: { round?: string; financing?: string; valuation?: string } = {}
+  const changes: Array<{ field: 'round' | 'financing' | 'valuation'; oldValue: string; newValue: string }> = []
+  if (!fundingRound) return { patch, changes }
+  const candidates = {
+    round: meaningfulPublicIntelText(fundingRound.round),
+    financing: meaningfulPublicIntelText(fundingRound.amount),
+    valuation: meaningfulPublicIntelText(fundingRound.valuation),
+  }
+  for (const field of ['round', 'financing', 'valuation'] as const) {
+    const current = String(project[field] ?? '').trim()
+    const next = candidates[field]
+    if (!next || !PROJECT_FUNDING_PLACEHOLDER.test(current)) continue
+    patch[field] = next
+    changes.push({ field, oldValue: current, newValue: next })
+  }
+  return { patch, changes }
+}
+
 function buildLeadPublicIntelPatch(
   lead: typeof leads.$inferSelect,
   intel: PublicIntelResult,
 ) {
   const scoring = objectValue(lead.scoring)
-  const registry = objectValue(scoring.registry)
+  const registry = normalizeLeadRegistry(scoring.registry, objectValue(lead.radarProfile).registry)
   const registryPatch: Record<string, unknown> = { ...registry }
+  const canonicalCompanyName = meaningfulPublicIntelText(intel.canonicalCompanyName)
+  const canonicalCompanyNameSupported = validLegalCompanyName(canonicalCompanyName)
+    && (intel.registryEvidence ?? []).some((item) => item.field === 'companyName'
+      && normalizedCompanyIdentity(item.value) === normalizedCompanyIdentity(canonicalCompanyName)
+      && Boolean(meaningfulPublicIntelText(item.sourceUrl)))
+  const mayReplaceCompanyAlias = canonicalCompanyNameSupported
+    && (!validLegalCompanyName(lead.companyName)
+      || normalizedCompanyIdentity(lead.companyName) === normalizedCompanyIdentity(canonicalCompanyName))
+  if (mayReplaceCompanyAlias) registryPatch.companyName = canonicalCompanyName
   const registryFields: Array<[string, unknown]> = [
     ['registeredCapital', intel.registeredCapital],
     ['legalRepresentative', intel.legalRepresentative],
     ['foundedAt', intel.foundedAt],
-    ['regLocation', intel.region],
+    ['creditCode', intel.creditCode],
+    ['registrationStatus', intel.registrationStatus],
+    ['companyType', intel.companyType],
     ['registeredAddress', intel.registeredAddress],
   ]
   for (const [key, value] of registryFields) {
     const researched = meaningfulPublicIntelText(value)
-    if (researched) registryPatch[key] = researched
+    // Automated research is strictly fill-only. Existing meaningful fields may represent
+    // retained source data or human review and must never be silently replaced.
+    if (researched && !meaningfulLeadRegistryText(registryPatch[key])) registryPatch[key] = researched
   }
+  if (!meaningfulLeadRegistryText(registryPatch.registeredAddress)) {
+    const region = meaningfulPublicIntelText(intel.region)
+    if (region) registryPatch.registeredAddress = region
+  }
+  if (meaningfulLeadRegistryText(registryPatch.registeredAddress)) {
+    registryPatch.regLocation = registryPatch.registeredAddress
+  }
+  const existingRegistryEvidence = objectArray(scoring.registryEvidence)
+  const incomingRegistryEvidence = objectArray(intel.registryEvidence)
+    .filter((item) => Boolean(
+      meaningfulPublicIntelText(item.field)
+      && meaningfulPublicIntelText(item.value)
+      && meaningfulPublicIntelText(item.quote)
+      && meaningfulPublicIntelText(item.sourceUrl)
+    ))
+  const registryEvidence = dedupeObjects(
+    [...incomingRegistryEvidence, ...existingRegistryEvidence],
+    (item) => `${meaningfulPublicIntelText(item.field)}|${meaningfulPublicIntelText(item.sourceUrl)}|${meaningfulPublicIntelText(item.value)}`,
+  )
 
   const fundingRounds = mergeFundingRounds([
     ...objectArray(scoring.fundingRoundsResearched),
@@ -308,19 +428,45 @@ function buildLeadPublicIntelPatch(
     ...existingResearchSources,
   ], normalizedSourceIdentity)
 
-  const scoringPatch = {
+  const scoringPatch: Record<string, unknown> = {
     ...scoring,
     registry: registryPatch,
     fundingRoundsResearched: fundingRounds,
     structuredShareholders,
     competitors,
     researchSources,
+    registryEvidence,
+    registryEnrichment: intel.registryEnrichment || scoring.registryEnrichment,
     publicIntelUpdatedAt: new Date().toISOString(),
   }
+  const claimedFoundedAt = meaningfulPublicIntelText(intel.claimedFoundedAt)
+  const claimedFoundedAtEvidence = intel.claimedFoundedAtEvidence
+  const claimedFoundedAtSource = meaningfulPublicIntelText(claimedFoundedAtEvidence?.sourceUrl)
+  const claimedFoundedAtQuote = meaningfulPublicIntelText(claimedFoundedAtEvidence?.quote)
+  const claimedFoundedAtSourceBound = Boolean(
+    claimedFoundedAt
+    && claimedFoundedAtSource
+    && claimedFoundedAtQuote
+    && (intel.sources ?? []).some((source) => meaningfulPublicIntelText(source.url) === claimedFoundedAtSource),
+  )
+  if (claimedFoundedAtSourceBound && !meaningfulPublicIntelText(scoring.claimedFoundedAt)) {
+    scoringPatch.claimedFoundedAt = claimedFoundedAt
+    scoringPatch.claimedFoundedAtEvidence = {
+      quote: claimedFoundedAtQuote,
+      sourceUrl: claimedFoundedAtSource,
+    }
+  }
+  const companyIntroduction = meaningfulPublicIntelText(intel.companyIntroduction)
+  if (companyIntroduction && !meaningfulPublicIntelText(scoring.companyIntroduction)) {
+    scoringPatch.companyIntroduction = companyIntroduction.slice(0, 1_000)
+  }
+  const website = meaningfulPublicIntelText(intel.website)
+  if (website && !meaningfulPublicIntelText(scoring.officialSite)) scoringPatch.officialSite = website
   const patch: Partial<typeof leads.$inferInsert> = {
     scoring: scoringPatch,
     fundingRounds,
     sources,
+    ...(mayReplaceCompanyAlias ? { companyName: canonicalCompanyName } : {}),
   }
   const regionResolution = resolveLeadBusinessRegion({
     registry: registryPatch,
@@ -338,6 +484,33 @@ function buildLeadPublicIntelPatch(
   return patch
 }
 
+export function missingLeadCompanyIntelFields(input: {
+  scoring?: unknown
+  radarProfile?: unknown
+  website?: unknown
+  companyName?: unknown
+}): LeadCompanyIntelField[] {
+  const scoring = objectValue(input.scoring)
+  const radar = objectValue(input.radarProfile)
+  const registry = normalizeLeadRegistry(scoring.registry, radar.registry)
+  const currentCompanyName = meaningfulPublicIntelText(
+    registry.companyName || input.companyName || radar.companyName,
+  )
+  const values: Partial<Record<LeadCompanyIntelField, unknown>> = {
+    companyName: validLegalCompanyName(currentCompanyName) ? currentCompanyName : undefined,
+    companyIntroduction: scoring.companyIntroduction,
+    website: scoring.officialSite || input.website,
+    registeredCapital: registry.registeredCapital,
+    legalRepresentative: registry.legalRepresentative,
+    foundedAt: registry.foundedAt,
+    creditCode: registry.creditCode,
+    registrationStatus: registry.registrationStatus,
+    companyType: registry.companyType,
+    registeredAddress: registry.registeredAddress,
+  }
+  return LEAD_COMPANY_INTEL_FIELDS.filter((field) => !meaningfulLeadRegistryText(values[field]))
+}
+
 async function mergeLeadPublicIntelRecord(
   leadId: string,
   intel: PublicIntelResult,
@@ -348,19 +521,60 @@ async function mergeLeadPublicIntelRecord(
   const [lead] = await database.select().from(leads).where(eq(leads.id, leadId)).limit(1).for('update')
   if (!lead) return null
   const proposed = buildLeadPublicIntelPatch(lead, intel)
+  const allowVerifiedRegionCorrection = proposed.businessRegionConfidence === '高'
+    && lead.businessRegionConfidence === '中'
+    && /(?:所属高校|研究机构|雷达|来源原文)/.test(String(lead.businessRegionSource || ''))
   const patch = applyLeadFieldPolicy(
     lead as unknown as Record<string, unknown>,
     proposed as Record<string, unknown>,
     'public_intel',
     {
       additiveFields: ['fundingRounds', 'sources'],
-      alwaysReplaceFields: ['scoring'],
+      // companyName is proposed only when buildLeadPublicIntelPatch has an evidence-bound
+      // current legal name and the stored value is merely a non-legal alias.
+      alwaysReplaceFields: [
+        'scoring',
+        ...(proposed.companyName ? ['companyName'] : []),
+        ...(allowVerifiedRegionCorrection
+          ? ['businessRegion', 'businessRegionSource', 'businessRegionConfidence']
+          : []),
+      ],
       linkedFields: [['businessRegion', 'businessRegionSource', 'businessRegionConfidence']],
       operation: 'machine_refresh',
     },
   )
   if (Object.keys(patch).length) await database.update(leads).set(patch as never).where(eq(leads.id, leadId))
   const [updated] = await database.select().from(leads).where(eq(leads.id, leadId)).limit(1)
+  if (updated?.convertedProjectId) {
+    const [project] = await database.select().from(projects)
+      .where(eq(projects.id, updated.convertedProjectId))
+      .limit(1)
+      .for('update')
+    if (project) {
+      const firstFunding = objectArray(updated.fundingRounds)[0]
+      const projection = buildConvertedProjectFundingPatch(project, firstFunding)
+      if (projection.changes.length) {
+        await database.update(projects).set({
+          ...projection.patch,
+          version: sql`${projects.version} + 1`,
+          updatedAt: new Date(),
+        }).where(eq(projects.id, project.id))
+        await database.insert(auditLogs).values({
+          userId: userId ?? null,
+          userName: '（系统）',
+          module: '项目管理',
+          action: '从线索补齐融资事实',
+          target: JSON.stringify({
+            projectId: project.id,
+            leadId: updated.id,
+            changes: projection.changes,
+            sourceUrl: meaningfulPublicIntelText(firstFunding?.sourceUrl),
+            factId: meaningfulPublicIntelText(firstFunding?.idempotencyKey),
+          }),
+        })
+      }
+    }
+  }
   if (updated) {
     await database.insert(auditLogs).values({
       userId: userId ?? null,
@@ -383,6 +597,10 @@ export async function mergeLeadPublicIntel(
 
 function publicIntelSourceId(company: string) {
   return `company:${company.normalize('NFKC').trim().replace(/\s+/g, ' ').toLocaleLowerCase()}`
+}
+
+function normalizedCompanyIdentity(value: unknown) {
+  return meaningfulPublicIntelText(value).normalize('NFKC').replace(/\s+/g, ' ').toLocaleLowerCase()
 }
 
 export function leadPublicIntelRawEventInput(companyInput: string, intel: PublicIntelResult): LeadPipelineRawEventInput {
@@ -465,6 +683,34 @@ export async function commitLeadPublicIntel(input: {
 }): Promise<PublicIntelCommitResult> {
   const company = input.company.normalize('NFKC').trim().replace(/\s+/g, ' ')
   if (!company) throw new Error('公开情报提交必须提供明确主体名称')
+  const registration = companyRegistrationEligibility(input.intel.registrationStatus)
+  if (!registration.eligibleForLeadPool) {
+    const captured = await recordLeadPipelineRawEvent(leadPublicIntelRawEventInput(company, input.intel))
+    await transitionLeadPipelineItem(captured.event.id, {
+      status: 'rejected',
+      reason: registration.reason!,
+      evidence: [{
+        field: 'registrationStatus',
+        value: registration.normalizedStatus,
+        sourceUrl: input.intel.sources?.[0]?.url || '',
+        rule: 'deregistered-company-exclusion-v1',
+      }],
+      confidence: 100,
+      actorType: 'system',
+      actorId: 'lead-registration-admission-guard',
+    })
+    if (input.targetLeadId) {
+      await excludeDeregisteredLeadFromPool({
+        leadId: input.targetLeadId,
+        registrationStatus: registration.normalizedStatus,
+        sourceUrl: input.intel.sources?.[0]?.url || '',
+        actor: { userId: input.userId ?? null, userName: '（系统）' },
+      })
+    }
+    throw Object.assign(new Error(registration.reason!), {
+      code: 'COMPANY_DEREGISTERED', retryable: false, eventId: captured.event.id,
+    })
+  }
   return await withPublicIntelLock(company, async (connection) => {
     await connection.beginTransaction()
     try {
@@ -494,18 +740,17 @@ export async function commitLeadPublicIntel(input: {
           .limit(1)
         if (!matches.length) throw new Error(`公开情报目标线索不存在: ${input.targetLeadId}`)
         const target = matches[0]
-        if (target.name !== company && target.companyName !== company) {
+        const companyIdentity = normalizedCompanyIdentity(company)
+        if (normalizedCompanyIdentity(target.name) !== companyIdentity
+          && normalizedCompanyIdentity(target.companyName) !== companyIdentity) {
           throw Object.assign(new Error(`公开情报目标线索与当前主体不一致: ${company}`), {
             code: 'PUBLIC_INTEL_TARGET_SUBJECT_MISMATCH',
             retryable: false,
           })
         }
-        if (target.poolStatus === '已转专属项目') {
-          throw Object.assign(new Error(`公开情报目标线索已转为专属项目，不能继续合并: ${company}`), {
-            code: 'PUBLIC_INTEL_TARGET_TERMINAL',
-            retryable: false,
-          })
-        }
+        // Converted leads remain the evidence authority for the project projection. They may
+        // continue receiving evidence-bound enrichment; project fields are synchronized only
+        // through the protected placeholder-only policy below.
       } else {
         matches = await transactionDb.select().from(leads)
           .where(and(or(eq(leads.name, company), eq(leads.companyName, company)), ne(leads.poolStatus, '已合并')))

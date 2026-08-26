@@ -60,7 +60,7 @@ leadIntakeRouter.post('/leads/imports/:id/commit', async (req: AuthedRequest, re
     await writeAudit({
       userId: req.user!.uid, userName: req.user!.name, module: '项目获取池',
       action: '确认公共线索批量导入',
-      target: `${result.id};committed:${result.committedRows};review:${result.reviewRows};failed:${result.failedRows}`, ip: req.ip,
+      target: `${result.id};committed:${result.committedRows};excluded:${result.excludedRows};review:${result.reviewRows};failed:${result.failedRows}`, ip: req.ip,
     })
     res.json(result)
   } catch (error) { next(error) }
@@ -84,4 +84,3 @@ leadIntakeRouter.get('/leads/bp-uploads/:id', async (req: AuthedRequest, res, ne
 leadIntakeRouter.post('/leads/bp-uploads/:id/retry', async (req: AuthedRequest, res, next) => {
   try { res.json(await retryLeadBpUpload(routeId(req.params.id), actor(req))) } catch (error) { next(error) }
 })
-
