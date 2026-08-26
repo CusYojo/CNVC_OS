@@ -109,6 +109,10 @@ function meaningful(value: unknown) {
     : ''
 }
 
+function valueIdentity(value: unknown) {
+  return compact(value, 1_000).replace(/[\s（）()，,。；;:：\-—_]/g, '').toLocaleLowerCase()
+}
+
 function stableHash(value: unknown) {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex')
 }
@@ -331,6 +335,7 @@ function buildPatch(candidate: Candidate, modelValues: Partial<Record<ProfileFie
   const registry = { ...record(scoring.registry) }
   const registryEvidence = array(scoring.registryEvidence)
   const incomingEvidence: Array<Record<string, any>> = []
+  const registryConflicts = array(record(scoring.codexSourceLabeledEnrichment).registryConflicts)
   const registryInputs: Array<[string, string, string]> = [
     ['companyName', legalCompanyName(business.name || detail.companyName), compact(business.name || detail.companyName, 256)],
     ['foundedAt', compact(business.estiblishTime || detail.setupDate, 64), compact(business.estiblishTime || detail.setupDate, 64)],
@@ -339,22 +344,24 @@ function buildPatch(candidate: Candidate, modelValues: Partial<Record<ProfileFie
   ]
   for (const [field, value, quote] of registryInputs) {
     if (!value) continue
-    if (!meaningful(registry[field])) registry[field] = value
+    const currentValue = meaningful(registry[field])
+    const mayReplaceAlias = field === 'companyName' && !legalCompanyName(currentValue) && legalCompanyName(value)
+    if (!currentValue || mayReplaceAlias) registry[field] = value
     if (field === 'registeredAddress' && !meaningful(registry.regLocation)) registry.regLocation = value
-    incomingEvidence.push({
-      field, value, quote, sourceUrl, evidenceStatus: 'source_labeled',
-      note: '36氪项目页原文标注，待官方工商来源交叉核验',
-    })
-  }
-  const projectIntro = modelValues.projectIntroduction
-  const companyIntroduction = meaningful(scoring.companyIntroduction)
-    || meaningful(projectIntro?.value)
-  if (!meaningful(scoring.companyIntroduction) && projectIntro) {
-    incomingEvidence.push({
-      field: 'companyIntroduction', value: projectIntro.value, quote: projectIntro.quote,
-      sourceUrl, evidenceStatus: 'derived_source_labeled',
-      note: 'Codex仅依据36氪原始介绍作客观归纳，待交叉核验',
-    })
+    if (valueIdentity(registry[field]) === valueIdentity(value)) {
+      incomingEvidence.push({
+        field, value, quote, sourceUrl, evidenceStatus: 'source_labeled',
+        note: '36氪项目页原文标注，待官方工商来源交叉核验',
+      })
+    } else {
+      registryConflicts.push({
+        field,
+        storedValue: registry[field],
+        sourceValue: value,
+        sourceUrl,
+        status: 'open',
+      })
+    }
   }
   const nextRegistryEvidence = mergeBy(incomingEvidence, registryEvidence, (item) => (
     `${compact(item.field, 80)}|${compact(item.sourceUrl, 1_000)}|${compact(item.value, 500)}`
@@ -372,7 +379,6 @@ function buildPatch(candidate: Candidate, modelValues: Partial<Record<ProfileFie
   }], candidate.sources, (item) => compact(item.url, 1_000))
   const nextScoring = {
     ...scoring,
-    ...(companyIntroduction ? { companyIntroduction } : {}),
     ...(officialSite ? { officialSite } : {}),
     registry,
     registryEvidence: nextRegistryEvidence,
@@ -385,6 +391,9 @@ function buildPatch(candidate: Candidate, modelValues: Partial<Record<ProfileFie
       completedAt: new Date().toISOString(),
       completedFields: Object.keys(sourceLabeledProfile),
       sourceUrl,
+      registryConflicts: mergeBy(registryConflicts, [], (item) => (
+        `${compact(item.field, 80)}|${valueIdentity(item.storedValue)}|${valueIdentity(item.sourceValue)}`
+      )),
     },
   }
   const sourceCompanyName = legalCompanyName(business.name || detail.companyName)
@@ -496,7 +505,7 @@ const patches = candidates.map((candidate) => ({
   candidate,
   patch: buildPatch(candidate, modelResults.get(candidate.row.lead_id) || {}),
 }))
-const before = patches.map(({ candidate }) => ({
+let before = patches.map(({ candidate }) => ({
   id: candidate.row.lead_id,
   companyName: candidate.row.company_name,
   businessRegion: candidate.row.business_region,
@@ -531,7 +540,50 @@ if (apply && patches.length) {
   const connection = await pool.getConnection()
   try {
     await connection.beginTransaction()
-    for (const { candidate, patch } of patches) {
+    const currentBefore: typeof before = []
+    for (const { candidate } of patches) {
+      const [currentRows] = await connection.query<Array<RowDataPacket & {
+        id: string
+        name: string
+        company_name: string | null
+        business_region: string | null
+        business_region_source: string | null
+        business_region_confidence: string | null
+        scoring: unknown
+        sources: unknown
+      }>>(
+        `SELECT id,name,company_name,business_region,business_region_source,
+                business_region_confidence,scoring,sources
+         FROM ${leadsTable} WHERE id=? FOR UPDATE`,
+        [candidate.row.lead_id],
+      )
+      const current = currentRows[0]
+      if (!current) throw new Error(`lead disappeared before apply: ${candidate.row.lead_id}`)
+      currentBefore.push({
+        id: current.id,
+        companyName: current.company_name,
+        businessRegion: current.business_region,
+        businessRegionSource: current.business_region_source,
+        businessRegionConfidence: current.business_region_confidence,
+        scoring: current.scoring,
+        sources: current.sources,
+      })
+      const currentCandidate: Candidate = {
+        ...candidate,
+        row: {
+          ...candidate.row,
+          name: current.name,
+          company_name: current.company_name,
+          business_region: current.business_region,
+          business_region_source: current.business_region_source,
+          business_region_confidence: current.business_region_confidence,
+          scoring: current.scoring,
+          sources: current.sources,
+        },
+        scoring: record(current.scoring),
+        sources: array(current.sources),
+      }
+      const patch = buildPatch(currentCandidate, modelResults.get(candidate.row.lead_id) || {})
       await connection.query(
         `UPDATE ${leadsTable}
          SET company_name=?,business_region=?,business_region_source=?,business_region_confidence=?,
@@ -539,15 +591,17 @@ if (apply && patches.length) {
          WHERE id=?`,
         [
           patch.companyName,
-          patch.region || candidate.row.business_region,
+          patch.region || current.business_region,
           patch.regionSource,
           patch.regionConfidence,
           JSON.stringify(patch.scoring),
           JSON.stringify(patch.sources),
-          candidate.row.lead_id,
+          current.id,
         ],
       )
     }
+    before = currentBefore
+    await writeFile(join(runDir, 'before.json'), JSON.stringify(before))
     await connection.query(
       `INSERT INTO ${auditTable}
         (id,user_id,user_name,module,action,target,result,request_id,created_at)
