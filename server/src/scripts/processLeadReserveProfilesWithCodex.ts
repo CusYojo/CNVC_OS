@@ -16,6 +16,8 @@ const PROFILE_FIELDS = [
   'mainBusinessDescription',
 ] as const
 type ProfileField = typeof PROFILE_FIELDS[number]
+const PROMPT_VERSION = 'lead-source-labeled-profile-prompt-v1'
+const SCHEMA_VERSION = 'lead-source-labeled-profile-v1'
 
 type LeadRow = RowDataPacket & {
   reserve_id: number
@@ -287,6 +289,9 @@ async function runCodexBatch(batch: Candidate[], batchIndex: number, schemaPath:
       lastError = compact(result.stderr || result.stdout, 2_000) || `codex exited ${result.code}`
     }
     console.error(JSON.stringify({ event: 'codex_profile_batch_retry', batchIndex, attempt, error: lastError }))
+    if (attempt <= retries) {
+      await new Promise((resolve) => setTimeout(resolve, attempt === 1 ? 5_000 : 20_000))
+    }
   }
   throw new Error(`batch ${batchIndex} failed after ${retries + 1} attempts: ${lastError}`)
 }
@@ -318,8 +323,8 @@ function buildPatch(candidate: Candidate, modelValues: Partial<Record<ProfileFie
     sourceLabeledProfile[field] = sourceProfile(item.value, item.quote, sourceUrl, sourceTitle)
   }
   const incomingTeam = directTeam(detail, sourceUrl)
-  const structuredTeam = mergeBy(incomingTeam, array(scoring.structuredTeam), (item) => (
-    `${compact(item.name, 80)}|${compact(item.title, 100)}`
+  const structuredTeam = mergeBy(array(scoring.structuredTeam), incomingTeam, (item) => (
+    `${compact(item.name, 80)}|${compact(item.title, 100)}|${compact(item.sourceUrl, 1_000)}|${compact(item.evidenceStatus, 40)}`
   ))
   if (incomingTeam.length && !sourceLabeledProfile.teamIntroduction) {
     const names = incomingTeam.slice(0, 4).map((item) => `${item.name}${item.title ? `（${item.title}）` : ''}`).join('、')
@@ -363,11 +368,18 @@ function buildPatch(candidate: Candidate, modelValues: Partial<Record<ProfileFie
       })
     }
   }
+  const website = normalizeWebsite(detail.corpWebUrl)
+  const officialSite = normalizeWebsite(scoring.officialSite) || website || meaningful(scoring.officialSite)
+  if (website && normalizeWebsite(officialSite) === website) {
+    incomingEvidence.push({
+      field: 'website', value: website, quote: compact(detail.corpWebUrl, 1_000), sourceUrl,
+      evidenceStatus: 'source_labeled',
+      note: '36氪项目页标注为公司官网，域名归属与可用性待进一步核验',
+    })
+  }
   const nextRegistryEvidence = mergeBy(incomingEvidence, registryEvidence, (item) => (
     `${compact(item.field, 80)}|${compact(item.sourceUrl, 1_000)}|${compact(item.value, 500)}`
   ))
-  const website = normalizeWebsite(detail.corpWebUrl)
-  const officialSite = normalizeWebsite(scoring.officialSite) || website || meaningful(scoring.officialSite)
   const sources = mergeBy([{
     id: `pitchhub-${compact(row.src_id || detail.companyId, 128)}`,
     title: compact(detail.name || row.name, 128),
@@ -388,6 +400,9 @@ function buildPatch(candidate: Candidate, modelValues: Partial<Record<ProfileFie
       method: 'codex-cli-evidence-bound-profile-v1',
       model,
       runId,
+      schemaVersion: SCHEMA_VERSION,
+      promptVersion: PROMPT_VERSION,
+      sourceContentHash: stableHash({ intro: compact(detail.intro), oneWord: compact(detail.oneWord) }),
       completedAt: new Date().toISOString(),
       completedFields: Object.keys(sourceLabeledProfile),
       sourceUrl,
