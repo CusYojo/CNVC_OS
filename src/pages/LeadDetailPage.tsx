@@ -8,7 +8,6 @@ import { Button, EmptyState, Modal } from '../components/ui'
 import { useToast } from '../components/Toast'
 import { apiDelete, apiGet } from '../lib/api'
 import {
-  displayLeadEvidenceStatus,
   displayLeadFundingValue,
   displayLeadInvestorNames,
   displayLeadRegisteredAddress,
@@ -23,6 +22,12 @@ import type { Lead } from '../types'
 function text(value: unknown, fallback = '待核验') {
   const result = typeof value === 'string' || typeof value === 'number' ? String(value).trim() : ''
   return result && !['null', 'undefined'].includes(result) ? result : fallback
+}
+
+function multilineText(value: unknown, fallback: string) {
+  return text(value, fallback)
+    .replace(/\\r\\n|\\n|\\r/g, '\n')
+    .replace(/\r\n?/g, '\n')
 }
 
 function isResearch(lead: Lead) {
@@ -300,9 +305,6 @@ export function LeadDetailPage() {
     firstFunding?.amount,
     profile.financingAmount,
   )
-  const fundingEvidenceStatus = displayLeadEvidenceStatus(
-    firstFunding?.evidenceStatus || lead.scoring?.dataQualityV1?.funding.amountEvidenceStatus || lead.stageEvidenceStatus,
-  )
   const hasFundingAmount = Boolean(fundingAmount)
     && !/^(?:融资金额)?(?:未披露|暂未披露|未透露|无|不适用)$/.test(fundingAmount)
   const legalCompanyName = isLegalCompanyName(lead.companyName)
@@ -316,37 +318,43 @@ export function LeadDetailPage() {
   const sourceLabeledNode = (key: keyof typeof sourceLabeledProfile, fallback: ReactNode): ReactNode => {
     const field = sourceLabeledField(key)
     if (!field) return fallback
-    return <span className="lead-review-rights-note">{field.value}<a className="lead-review-inline-link" href={externalUrl(field.sourceUrl)} target="_blank" rel="noreferrer">来源<ExternalLink /></a><small>{field.evidenceStatus === 'derived_source_labeled' ? 'Codex 基于原文归纳，待交叉核验' : '原文已标注，待交叉核验'}</small></span>
+    return field.value
   }
   const verifiedFactNode = (factKeys: string[], fallback: ReactNode = '待核验'): ReactNode => {
     const fact = verifiedFact(...factKeys)
     if (!fact) return fallback
-    const evidence = fact.evidence[0]
-    return evidence ? <span className="lead-review-rights-note">{displayFactValue(fact.value)}<a className="lead-review-inline-link" href={externalUrl(evidence.sourceUrl) || undefined} target="_blank" rel="noreferrer">来源<ExternalLink /></a></span> : displayFactValue(fact.value)
+    return displayFactValue(fact.value)
   }
   const registryFact = (value: unknown, field: string, fallback = '待核验'): ReactNode => {
     const displayed = text(value, fallback)
     const evidence = registryEvidence.find((item) => item.field === field && Boolean(externalUrl(item.sourceUrl)))
-    return evidence
-      ? <span className="lead-review-rights-note">{displayed}<a className="lead-review-inline-link" href={externalUrl(evidence.sourceUrl)} target="_blank" rel="noreferrer">来源<ExternalLink /></a><small>{evidence.evidenceStatus === 'derived_source_labeled' ? '原文推算，待工商核验' : '原文已标注，待交叉核验'}</small></span>
-      : fallback
+    return evidence ? displayed : fallback
   }
   const claimedFoundedAt = text(lead.foundedAt, '')
   const registeredAt = text(registry.foundedAt, '')
   const claimedFoundedAtSource = externalUrl(lead.scoring?.claimedFoundedAtEvidence?.sourceUrl)
+  const sourceBoundShareholders = (lead.scoring?.structuredShareholders ?? []).filter((shareholder) => (
+    text(shareholder.name, '') && Boolean(externalUrl(shareholder.sourceUrl))
+  ))
+  const shareholderSummary = sourceBoundShareholders.map((shareholder) => {
+    const details = [shareholder.percentage || shareholder.percent, shareholder.amount]
+      .map((value) => text(value, '')).filter(Boolean)
+    return `${text(shareholder.name)}${details.length ? `（${details.join('，')}）` : ''}`
+  }).join('；')
   const companyFacts: Array<[string, ReactNode]> = [
     ['品牌名称', text(lead.name)],
     [legalCompanyName ? '公司全称' : '主体名称', verifiedFactNode(['registry.company_name'], registryFact(lead.companyName || lead.name, 'companyName'))],
     ...(!legalCompanyName ? [['工商全称', '待核验'] as [string, ReactNode]] : []),
     ['工商成立日期', verifiedFactNode(['registry.founded_at'], registryFact(registeredAt, 'foundedAt'))],
     ...(claimedFoundedAt && claimedFoundedAt !== registeredAt && claimedFoundedAtSource ? [['品牌/团队成立时间',
-      <span className="lead-review-rights-note">{claimedFoundedAt}<a className="lead-review-inline-link" href={claimedFoundedAtSource} target="_blank" rel="noreferrer">来源<ExternalLink /></a></span>,
+      claimedFoundedAt,
     ] as [string, ReactNode]] : []),
     ['注册资本', verifiedFactNode(['registry.registered_capital'], registryFact(registry.registeredCapital || lead.registeredCapital, 'registeredCapital'))],
     ['法定代表人', verifiedFactNode(['registry.legal_representative'], registryFact(registry.legalRepresentative || lead.legalRepresentative, 'legalRepresentative'))],
     ['统一社会信用代码', verifiedFactNode(['registry.credit_code'], registryFact(registry.creditCode || lead.creditCode, 'creditCode'))],
     ['登记状态', verifiedFactNode(['registry.registration_status'], registryFact(registry.registrationStatus || lead.registrationStatus, 'registrationStatus'))],
     ['公司类型', verifiedFactNode(['registry.company_type'], registryFact(registry.companyType || lead.companyType, 'companyType'))],
+    ...(shareholderSummary ? [['股东信息', shareholderSummary] as [string, ReactNode]] : []),
     ['注册地址', verifiedFactNode(['registry.registered_address'], registryFact(displayLeadRegisteredAddress(
       registry.registeredAddress,
       registry.regLocation,
@@ -358,20 +366,11 @@ export function LeadDetailPage() {
     ['业务阶段', verifiedFactNode(['profile.development_stage', 'profile.project_stage'], '待核验')],
     ...(!isUnfinanced && hasFundingAmount ? [[
       '融资金额',
-      verifiedFact('financing.amount') ? verifiedFactNode(['financing.amount']) : fundingEvidenceStatus
-        ? <span className="lead-review-rights-note">{fundingAmount}<small>{fundingEvidenceStatus}</small></span>
-        : fundingAmount,
+      verifiedFact('financing.amount') ? verifiedFactNode(['financing.amount']) : fundingAmount,
     ] as [string, ReactNode]] : []),
     ...(!isUnfinanced && leadInvestors.length ? [[
       '领投方',
       verifiedFactText(['financing.investors'], leadInvestors.join('、')),
-    ] as [string, ReactNode]] : []),
-    ...(!isUnfinanced && articleSourceUrl ? [[
-      '融资证据',
-      <span className="lead-review-rights-note">
-        <a className="lead-review-inline-link" href={articleSourceUrl} target="_blank" rel="noreferrer">查看原文<ExternalLink /></a>
-        {fundingEvidenceStatus && <small>{fundingEvidenceStatus}</small>}
-      </span>,
     ] as [string, ReactNode]] : []),
   ]
   const paperAffiliations = paperMeta?.affiliations ?? []
@@ -381,7 +380,7 @@ export function LeadDetailPage() {
   const intellectualProperty = paperMeta?.rights?.intellectualProperty
   const metadataSourceUrl = externalUrl(paperMeta?.metadataSource?.url)
   const researchFacts: Array<[string, ReactNode]> = [
-    ['所属机构', paperAffiliations.length ? <span className="lead-review-inline-tags">{paperAffiliations.map((affiliation) => <a href={externalUrl(affiliation.sourceUrl) || undefined} target="_blank" rel="noreferrer" key={affiliation.name}>{affiliation.name}<ExternalLink /></a>)}</span> : '机构待核验'],
+    ['所属机构', paperAffiliations.length ? paperAffiliations.map((affiliation) => affiliation.name).join('、') : '机构待核验'],
     ['研究团队', text(paperMeta?.researchTeam?.name || verifiedFactText(['profile.team_name']), '研究团队待核验')],
     ['作者—机构对应', paperAuthorAffiliations.length ? <span className="lead-review-rights-note">{paperAuthorAffiliations.map((item) => `${item.author}—${item.affiliation}`).join('；')}<small>仅展示来源明确确认的逐人对应关系</small></span> : <span className="lead-review-rights-note">未确认<small>不根据机构列表强行分配作者</small></span>],
     ['研究方向', industryValue],
@@ -391,10 +390,10 @@ export function LeadDetailPage() {
       <span className="lead-review-rights-note">{displayDate(paperMeta.declaredPublishedAt)}<small>来源填写为未来日期，未作为公开时间</small></span>,
     ] as [string, ReactNode]] : []),
     ['成果形态', text(paperMeta?.resourceType || paperMeta?.venue || paperMeta?.categories?.join('、'), '论文/科研成果')],
-    ['论文/成果许可', articleLicense ? <a className="lead-review-inline-link" href={externalUrl(articleLicense.url) || undefined} target="_blank" rel="noreferrer">{articleLicense.label}<ExternalLink /></a> : '未披露'],
-    ['数据集许可', datasetRights ? <a className="lead-review-inline-link" href={externalUrl(datasetRights.url) || undefined} target="_blank" rel="noreferrer">待核验<ExternalLink /></a> : '未披露'],
+    ['论文/成果许可', articleLicense?.label || '未披露'],
+    ['数据集许可', datasetRights ? '待核验' : '未披露'],
     ['知识产权归属', <span className="lead-review-rights-note" title={intellectualProperty?.note || '论文开放许可不等于知识产权归属'}>{intellectualProperty?.label || '未披露'}<small>论文许可不代表成果所有权</small></span>],
-    ['元数据来源', metadataSourceUrl ? <a className="lead-review-inline-link" href={metadataSourceUrl} target="_blank" rel="noreferrer">{text(paperMeta?.metadataSource?.provider, '原始论文页面')}<ExternalLink /></a> : '待核验'],
+    ['元数据来源', metadataSourceUrl ? text(paperMeta?.metadataSource?.provider, '原始论文页面') : '待核验'],
   ]
   const facts: Array<[string, ReactNode]> = research ? researchFacts : companyFacts
   const paperTeam = research ? paperAuthorsAsTeam(lead) : []
@@ -420,19 +419,22 @@ export function LeadDetailPage() {
     : ''
   const headlineIntroduction = research ? verifiedProjectIntroduction : verifiedCompanyIntroduction
   const generatedIntroductions = verifiedProfile?.introductions
-  const generatedCompanyIntroduction = text(generatedIntroductions?.companyIntroduction, '')
-  const generatedTeamIntroduction = text(generatedIntroductions?.teamIntroduction, '')
-  const generatedProjectIntroduction = text(generatedIntroductions?.projectIntroduction, '')
   const generatedIntroductionSources = verifiedProfile?.introductionSources
-  const introductionSource = (fact: LeadEnrichmentFact | undefined, generated: LeadEnrichmentEvidence[] | undefined) => (
-    fact?.evidence.find((evidence) => Boolean(externalUrl(evidence.sourceUrl)))
-      || generated?.find((evidence) => Boolean(externalUrl(evidence.sourceUrl)))
-  )
-  const headlineIntroductionSource = introductionSource(headlineIntroduction, research
-    ? generatedIntroductionSources?.projectIntroduction : generatedIntroductionSources?.companyIntroduction)
-    || (companyIntroductionEvidence?.sourceUrl ? { sourceUrl: companyIntroductionEvidence.sourceUrl } : undefined)
-  const projectIntroductionSource = introductionSource(verifiedProjectIntroduction, generatedIntroductionSources?.projectIntroduction)
-  const teamIntroductionSource = introductionSource(verifiedTeamIntroduction, generatedIntroductionSources?.teamIntroduction)
+  const generatedCompanyIntroduction = generatedIntroductionSources?.companyIntroduction.some((source) => Boolean(externalUrl(source.sourceUrl)))
+    ? text(generatedIntroductions?.companyIntroduction, '') : ''
+  const generatedTeamIntroduction = generatedIntroductionSources?.teamIntroduction.some((source) => Boolean(externalUrl(source.sourceUrl)))
+    ? text(generatedIntroductions?.teamIntroduction, '') : ''
+  const generatedProjectIntroduction = generatedIntroductionSources?.projectIntroduction.some((source) => Boolean(externalUrl(source.sourceUrl)))
+    ? text(generatedIntroductions?.projectIntroduction, '') : ''
+  const sourceLabeledProjectIntroduction = sourceLabeledField('projectIntroduction')
+  const projectIntroductionCandidates = [
+    { value: text(lead.projectIntroduction, ''), sourceUrl: externalUrl(lead.projectIntroductionSourceUrl) || articleSourceUrl },
+    { value: verifiedProjectIntroduction ? displayFactValue(verifiedProjectIntroduction.value) : '', sourceUrl: verifiedProjectIntroduction?.evidence[0]?.sourceUrl },
+    { value: generatedProjectIntroduction, sourceUrl: generatedIntroductionSources?.projectIntroduction?.[0]?.sourceUrl },
+    { value: text(sourceLabeledProjectIntroduction?.value, ''), sourceUrl: sourceLabeledProjectIntroduction?.sourceUrl },
+    { value: text(lead.summary, ''), sourceUrl: articleSourceUrl },
+  ].filter((candidate) => candidate.value)
+  const projectIntroduction = [...projectIntroductionCandidates].sort((left, right) => right.value.length - left.value.length)[0]
   const headlineIntroductionText = headlineIntroduction
     ? displayFactValue(headlineIntroduction.value)
     : research ? generatedProjectIntroduction : generatedCompanyIntroduction
@@ -471,7 +473,7 @@ export function LeadDetailPage() {
           <div className="lead-review-heading-line"><h1>{companyName}</h1><div className="lead-review-meta"><span><MapPin />{text(lead.region)}</span></div></div>
           <p className="lead-review-positioning">{headlineIntroductionText
             ? headlineIntroductionText
-            : evidenceBoundCompanyIntroduction || `暂无已验证的${research ? '项目' : '企业'}介绍`}{headlineIntroductionSource && <a className="lead-review-inline-link" href={externalUrl(headlineIntroductionSource.sourceUrl) || undefined} target="_blank" rel="noreferrer">来源<ExternalLink /></a>}</p>
+            : evidenceBoundCompanyIntroduction || `暂无已验证的${research ? '项目' : '企业'}介绍`}</p>
           <div className="lead-review-website-line"><span>{research ? '项目主页' : '公司官网'}：</span>{officialSite ? <a href={officialSite} target="_blank" rel="noreferrer">{officialSite}<ExternalLink /></a> : <span>待补充</span>}</div>
           {!research && articleSourceUrl && <div className="lead-review-website-line"><span>文章来源：</span><a href={articleSourceUrl} target="_blank" rel="noreferrer">{articleSourceUrl}<ExternalLink /></a></div>}
           <div className="lead-review-kicker">{industryTags.map((tag) => <span key={`industry-${tag}`}>{tag}</span>)}{(lead.backgroundTags ?? []).map((tag) => <span className="background" key={`background-${tag}`}>{tag}</span>)}</div>
@@ -483,14 +485,14 @@ export function LeadDetailPage() {
       </header>
 
       <main className="lead-review-content">
-        <ReviewSection title="项目简介" icon={<Sparkles />}><p className="lead-review-introduction">{verifiedProjectIntroduction ? displayFactValue(verifiedProjectIntroduction.value) : generatedProjectIntroduction || sourceLabeledNode('projectIntroduction', '暂无已验证的项目介绍，不使用企业介绍或原始宣传文案替代')}{projectIntroductionSource && <a className="lead-review-inline-link" href={externalUrl(projectIntroductionSource.sourceUrl) || undefined} target="_blank" rel="noreferrer">来源<ExternalLink /></a>}</p></ReviewSection>
+        <ReviewSection title="项目简介" icon={<Sparkles />}><p className="lead-review-introduction">{multilineText(projectIntroduction?.value, '暂无项目简介')}</p></ReviewSection>
         <ReviewSection title={research ? '科研主体信息' : '主体基础信息'} icon={<Building2 />}><dl className="lead-review-fact-table">{facts.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl></ReviewSection>
         <ReviewSection title="产品与商业化" icon={<Sparkles />}><div className="lead-review-business-grid">
           <BusinessCard label="产品" value={productValue} description={productDescription} />
           <BusinessCard label="应用场景" value={applicationValue} description={applicationDescription} />
           <BusinessCard label="主营业务" value={mainBusinessValue} description={mainBusinessDescription} />
         </div></ReviewSection>
-        <ReviewSection title="团队成员" icon={<UsersRound />}><>{(verifiedTeamIntroduction || generatedTeamIntroduction || sourceLabeledField('teamIntroduction')) && <p className="lead-review-team-summary">{verifiedTeamIntroduction ? displayFactValue(verifiedTeamIntroduction.value) : generatedTeamIntroduction || sourceLabeledNode('teamIntroduction', '')}{teamIntroductionSource && <a className="lead-review-inline-link" href={externalUrl(teamIntroductionSource.sourceUrl) || undefined} target="_blank" rel="noreferrer">来源<ExternalLink /></a>}</p>}<div className="lead-review-team-list">{team.length ? team.map((member, index) => <article key={`${member.name}-${index}`}><span><UserRound /></span><div><h3>{member.profileUrl ? <a href={externalUrl(member.profileUrl) || undefined} target="_blank" rel="noreferrer">{text(member.name)}<ExternalLink /></a> : text(member.name)}<em>{text(member.title, '角色待核验')}</em></h3><p>{text(member.background, '团队背景待核验')}{member.sourceUrl && <a className="lead-review-inline-link" href={externalUrl(member.sourceUrl) || undefined} target="_blank" rel="noreferrer">来源<ExternalLink /></a>}</p></div></article>) : <p className="lead-review-section-empty">暂无可验证的团队成员信息</p>}</div></></ReviewSection>
+        <ReviewSection title="团队成员" icon={<UsersRound />}><>{(verifiedTeamIntroduction || generatedTeamIntroduction || sourceLabeledField('teamIntroduction')) && <p className="lead-review-team-summary">{verifiedTeamIntroduction ? displayFactValue(verifiedTeamIntroduction.value) : generatedTeamIntroduction || sourceLabeledNode('teamIntroduction', '')}</p>}<div className="lead-review-team-list">{team.length ? team.map((member, index) => <article key={`${member.name}-${index}`}><span><UserRound /></span><div><h3>{member.profileUrl ? <a href={externalUrl(member.profileUrl) || undefined} target="_blank" rel="noreferrer">{text(member.name)}<ExternalLink /></a> : text(member.name)}<em>{text(member.title, '角色待核验')}</em></h3><p>{text(member.background, '团队背景待核验')}</p></div></article>) : <p className="lead-review-section-empty">暂无可验证的团队成员信息</p>}</div></></ReviewSection>
         <ReviewSection title="证据与动态" icon={<CalendarDays />}><div className="lead-review-evidence-grid">
           <section className="lead-review-path-panel"><header><span>01</span><div><h3>动态路径</h3><p>仅展示已有来源的已验证进展</p></div></header><div className="lead-review-path">{updates.length ? updates.map((item) => <article key={`${item.occurredAt}-${item.title}`}><time>{displayDate(item.occurredAt)}</time>{item.sourceUrl ? <a href={externalUrl(item.sourceUrl) || undefined} target="_blank" rel="noreferrer"><strong>{item.title}</strong><ExternalLink /></a> : <strong>{item.title}</strong>}</article>) : <p className="lead-review-section-empty">暂无经过来源标注的动态</p>}</div></section>
           <section className="lead-review-news-panel"><header><span>02</span><div><h3>相关来源</h3><p>展示可打开的原始来源与已验证事实来源</p></div></header><div className="lead-review-news-list">{relatedSources.slice(0, 10).map((source, index) => <a className="lead-review-news-item" href={externalUrl(source.url) || undefined} target="_blank" rel="noreferrer" key={`${source.url}-${index}`}><div><span>{source.publisher || '公开来源'}</span><time>{displayDate(source.publishedAt || source.accessedAt)}</time></div><strong>{source.title || '原始来源'}</strong><ExternalLink /></a>)}</div></section>

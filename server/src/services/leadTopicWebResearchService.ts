@@ -552,10 +552,14 @@ export async function researchLeadTopicWithWeb(input: {
 }) {
   const contract = TOPIC_CONTRACTS[input.topicKey]
   const policy = await resolveAgentRuntimePolicy('ai-document')
-  const configured = input.model
-    ? await resolveAiModelByKey(input.model)
+  // A dedicated batch override must win over the persisted interactive model
+  // route; otherwise restarting workers with a requested Codex model appears to
+  // succeed while requests continue using the route's previous model.
+  const explicitModel = input.model || process.env.LEAD_ENRICHMENT_MODEL?.trim()
+  const configured = explicitModel
+    ? await resolveAiModelByKey(explicitModel)
     : await resolveAiModelRoute(policy.modelRouteKey)
-  const model = (configured?.model || input.model || process.env.LLM_MODEL || 'gpt-5.6-sol')
+  const model = (explicitModel || configured?.model || process.env.LLM_MODEL || 'gpt-5.6-sol')
     .replace(/^zeelin-oai\//, '').replace(/^zeelin\//, '')
   const apiKey = configured?.apiKey || process.env.OPENAI_API_KEY || process.env.LLM_API_KEY || ''
   const baseUrl = configured?.baseUrl || process.env.LLM_BASE_URL || process.env.OPENAI_BASE_URL || 'http://127.0.0.1:18081/v1'

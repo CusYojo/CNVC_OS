@@ -176,6 +176,8 @@
     "retry:lead-enrichment-backfill:preview": "node --env-file-if-exists=.env --import tsx server/src/scripts/backfillLeadEnrichment.ts --retry",
     "retry:lead-enrichment-backfill": "node --env-file-if-exists=.env --import tsx server/src/scripts/backfillLeadEnrichment.ts --retry --apply",
     "worker:lead-enrichment:codex": "LEAD_ENRICHMENT_RESEARCH_BACKEND=codex-cli LEAD_ENRICHMENT_ENABLED=true node --env-file-if-exists=.env --import tsx server/src/scripts/runLeadEnrichmentCodexWorker.ts",
+    "backfill:visible-lead-enrichment:preview": "node --env-file-if-exists=.env --import tsx server/src/scripts/backfillVisibleLeadEnrichment.ts",
+    "backfill:visible-lead-enrichment": "node --env-file-if-exists=.env --import tsx server/src/scripts/backfillVisibleLeadEnrichment.ts --apply",
     "setup:pdf-to-ppt": "node server/scripts/setup-pdf-to-ppt-runtime.mjs",
     "accept:document-runtime-dependencies": "node --env-file-if-exists=.env --import tsx server/src/scripts/verifyDocumentRuntimeDependencies.ts --static",
     "verify:document-runtime-dependencies": "node --env-file-if-exists=.env --import tsx server/src/scripts/verifyDocumentRuntimeDependencies.ts --live",

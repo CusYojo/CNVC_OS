@@ -1,4 +1,5 @@
-import { mkdir, mkdtemp, rm } from 'node:fs/promises'
+import { spawn } from 'node:child_process'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { query, type SDKMessage, type SDKResultMessage } from '@anthropic-ai/claude-agent-sdk'
@@ -23,7 +24,7 @@ export const LEAD_SCORING_AGENT_TOOLSET_VERSION = 'no-tools-v1'
 
 export type LeadScoringAgentExecution = {
   output: unknown
-  runtime: 'claude-agent-sdk'
+  runtime: 'claude-agent-sdk' | 'codex-cli'
   usage: {
     inputTokens: number
     outputTokens: number
@@ -34,6 +35,14 @@ export type LeadScoringAgentExecution = {
   toolCalls: number
   numTurns: number
   sessionId: string | null
+}
+
+export function leadScoringAgentRuntime(model?: string, forceClaudeSdk = false): LeadScoringAgentExecution['runtime'] {
+  if (forceClaudeSdk) return 'claude-agent-sdk'
+  const configured = process.env.LEAD_SCORING_AGENT_BACKEND?.trim().toLowerCase()
+  if (configured === 'codex-cli' || configured === 'claude-agent-sdk') return configured
+  const selectedModel = model || process.env.SCORE_MODEL || process.env.LLM_MODEL || ''
+  return /^gpt-/i.test(selectedModel) ? 'codex-cli' : 'claude-agent-sdk'
 }
 
 export type LeadScoringAgentQueryFactory = (params: Parameters<typeof query>[0]) => AsyncIterable<SDKMessage> & {
@@ -98,6 +107,102 @@ function parseJsonObject(value: string) {
   return parsed
 }
 
+function codexUsage(stdout: string) {
+  let inputTokens = 0
+  let outputTokens = 0
+  for (const line of stdout.split('\n')) {
+    let value: unknown
+    try { value = JSON.parse(line) } catch { continue }
+    const stack: unknown[] = [value]
+    while (stack.length) {
+      const current = stack.pop()
+      if (!current || typeof current !== 'object') continue
+      const data = current as Record<string, unknown>
+      const usage = data.usage && typeof data.usage === 'object'
+        ? data.usage as Record<string, unknown>
+        : null
+      if (usage) {
+        inputTokens = Math.max(inputTokens, Number(usage.input_tokens ?? usage.inputTokens) || 0)
+        outputTokens = Math.max(outputTokens, Number(usage.output_tokens ?? usage.outputTokens) || 0)
+      }
+      stack.push(...Object.values(data))
+    }
+  }
+  return { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens }
+}
+
+async function runLeadScoringCodexCli(input: {
+  systemPrompt: string
+  prompt: string
+  outputSchema: Record<string, unknown>
+  model?: string
+}, config: Awaited<ReturnType<typeof runtimeConfig>>, options: { workDir?: string; timeoutMs?: number }) {
+  const ownsWorkDir = !options.workDir
+  const workDir = options.workDir
+    ? path.resolve(options.workDir)
+    : await mkdtemp(path.join(tmpdir(), 'cybernaut-lead-scoring-codex-'))
+  if (!ownsWorkDir) await mkdir(workDir, { recursive: true, mode: 0o700 })
+  const schemaPath = path.join(workDir, `output-schema-${process.pid}-${Date.now()}.json`)
+  const outputPath = path.join(workDir, `output-${process.pid}-${Date.now()}.json`)
+  await writeFile(schemaPath, `${JSON.stringify(input.outputSchema)}\n`, { mode: 0o600 })
+  const startedAt = Date.now()
+  const timeoutMs = options.timeoutMs ?? config.timeoutMs
+  const codexBin = process.env.CODEX_BIN?.trim() || 'codex'
+  let timeout: NodeJS.Timeout | undefined
+  try {
+    const result = await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve, reject) => {
+      const child = spawn(codexBin, [
+        'exec', '--ephemeral', '--ignore-user-config', '--ignore-rules', '--skip-git-repo-check',
+        '--json', '-m', input.model || config.model, '-s', 'read-only', '-C', workDir,
+        '--output-schema', schemaPath, '--output-last-message', outputPath, '-',
+      ], { stdio: ['pipe', 'pipe', 'pipe'] })
+      let stdout = ''
+      let stderr = ''
+      child.stdout.on('data', (chunk) => { stdout = `${stdout}${chunk}`.slice(-2_000_000) })
+      child.stderr.on('data', (chunk) => { stderr = `${stderr}${chunk}`.slice(-100_000) })
+      child.on('error', reject)
+      child.on('close', (code) => resolve({ code, stdout, stderr }))
+      timeout = setTimeout(() => {
+        child.kill('SIGTERM')
+        setTimeout(() => child.kill('SIGKILL'), 5_000).unref()
+      }, Math.max(30_000, timeoutMs))
+      child.stdin.end([
+        input.systemPrompt,
+        input.prompt,
+        '仅根据输入中的已冻结补全快照完成评级。严格按输出 schema 返回 JSON，不要调用工具，不要输出 Markdown 或额外解释。',
+      ].join('\n\n'))
+    })
+    let output: unknown
+    try { output = parseJsonObject(await readFile(outputPath, 'utf8')) } catch { output = undefined }
+    if (result.code !== 0 && !output) {
+      const error = new Error(redactSensitiveText(
+        `lead-scoring Codex CLI exited ${result.code}; stdout=${result.stdout.slice(-4_000)}; stderr=${result.stderr.slice(-2_000)}`,
+      ).slice(0, 8_000)) as AgentExecutionError
+      error.retryable = true
+      throw error
+    }
+    if (!output) {
+      const error = new Error('lead-scoring Codex CLI did not produce valid structured output') as AgentExecutionError
+      error.retryable = true
+      throw error
+    }
+    const usage = codexUsage(result.stdout)
+    return {
+      output,
+      runtime: 'codex-cli' as const,
+      usage,
+      durationMs: Date.now() - startedAt,
+      costMicrousd: 0,
+      toolCalls: 0,
+      numTurns: 1,
+      sessionId: null,
+    }
+  } finally {
+    if (timeout) clearTimeout(timeout)
+    if (ownsWorkDir) await rm(workDir, { recursive: true, force: true }).catch(() => undefined)
+  }
+}
+
 function resultError(message: string, result: SDKResultMessage, retryable: boolean): AgentExecutionError {
   const error = new Error(redactSensitiveText(message).slice(0, 8_000)) as AgentExecutionError
   error.retryable = retryable
@@ -125,6 +230,9 @@ export async function runLeadScoringAgent(input: {
 } = {}): Promise<LeadScoringAgentExecution> {
   if (!input.prompt.trim()) throw new Error('lead scoring Agent requires a prompt')
   const config = await runtimeConfig(input.model)
+  if (leadScoringAgentRuntime(config.model, Boolean(options.queryFactory)) === 'codex-cli') {
+    return await runLeadScoringCodexCli(input, config, options)
+  }
   const runtimePermit = options.queryFactory ? null : await acquireLeadAgentRuntimePermit({
     agentProfile: LEAD_SCORING_AGENT_PROFILE,
     reservationMicrousd: Math.round(config.maxBudgetUsd * 1_000_000),

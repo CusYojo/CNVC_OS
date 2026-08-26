@@ -238,9 +238,19 @@ export interface LeadScoring {
     title: string
     background: string
     sourceUrl?: string
+    profileUrl?: string
     evidenceStatus?: 'source_labeled'
   }[]
-  structuredShareholders?: { name: string; percentage: string; type: string; sourceUrl?: string }[]
+  structuredShareholders?: {
+    name: string
+    percentage?: string
+    percent?: string
+    amount?: string
+    date?: string
+    type?: string
+    sourceUrl?: string
+    evidenceStatus?: 'source_labeled'
+  }[]
   structuredNews?: { date: string; title: string; summary: string; sourceName: string; sourceUrl: string }[]
   scoreJob?: LeadScoreJob
   enrichment?: {
@@ -511,6 +521,10 @@ export interface Lead {
   riskTags: string[]
   status: JobStatus
   summary: string
+  /** 详情页使用的完整项目介绍；列表仍使用 summary 一句话摘要。 */
+  projectIntroduction?: string
+  projectIntroductionSourceUrl?: string
+  projectLogoUrl?: string
   team: string
   product: string
   financing: string

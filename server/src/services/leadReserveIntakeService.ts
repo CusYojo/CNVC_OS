@@ -4,8 +4,8 @@ import { pool } from '../db/client.js'
 import { mysqlTableName, quoteMysqlIdentifier } from '../db/config.js'
 import { resolveLeadBusinessRegion } from './leadRegion.js'
 import { recordLeadPipelineRawEvent, transitionLeadPipelineItem } from './leadPipelineEventService.js'
-import { formatShanghaiDateKey } from '../utils/shanghaiTime.js'
 import { companyRegistrationEligibility } from './leadRegistry.js'
+import { project36KrLeadDetail } from './leadReserveProjection.js'
 
 export type LeadReserveRawRow = RowDataPacket & {
   id: number
@@ -30,16 +30,6 @@ function objectValue(value: unknown): Record<string, any> {
   return typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : {}
 }
 
-function formatDate(value: unknown): string {
-  if (!value) return '待核验'
-  const text = String(value)
-  if (/^\d{12,}$/.test(text)) {
-    const parsed = new Date(Number(text))
-    return Number.isNaN(parsed.getTime()) ? '待核验' : formatShanghaiDateKey(parsed)
-  }
-  return text.slice(0, 32)
-}
-
 export function leadReserveRawEventInput(row: LeadReserveRawRow) {
   return {
     sourceType: 'lead_reserve',
@@ -58,35 +48,15 @@ export function leadReserveRawEventInput(row: LeadReserveRawRow) {
 
 function reserveLead(row: LeadReserveRawRow, sourceKey: string) {
   const detail = objectValue(row.detail_json)
-  const business = objectValue(detail.business)
-  const name = String(detail.name || row.name || '未命名项目').trim().slice(0, 128) || '未命名项目'
-  const companyName = String(detail.companyName || business.name || name).trim().slice(0, 128)
-  const industry = Array.isArray(detail.industryList) && detail.industryList.length
-    ? detail.industryList.map((item: any) => item?.name).filter(Boolean).join('、')
-    : (Array.isArray(detail.tagList) ? detail.tagList.filter(Boolean).join('、') : '待核验')
-  const oneLiner = String(detail.oneWord || detail.intro || '').trim()
   const detailUrl = String(row.detail_url || (detail.companyId ? `https://pitchhub.36kr.com/company/${detail.companyId}` : ''))
-  const registrationStatus = String(
-    business.registrationStatus || business.businessStatus || business.regStatus || business.regStatusName
-      || detail.registrationStatus || detail.businessStatus || detail.regStatus || '',
-  ).normalize('NFKC').trim().slice(0, 64)
-  const shareholders = Array.isArray(business.shareholder)
-    ? business.shareholder.map((item: any) => ({
-      name: item?.name || '', percent: item?.percent || '', amount: item?.amomon || '', date: item?.time || '',
-    }))
-    : []
-  const fundingRounds = Array.isArray(detail.financingList)
-    ? detail.financingList.map((item: any) => ({
-      round: item?.roundTxt || '未披露',
-      amount: item?.amount || '未披露',
-      valuation: '未披露',
-      investors: (Array.isArray(item?.investorList)
-        ? item.investorList.map((investor: any) => investor?.name).filter((entry: unknown) => entry && entry !== 'null').join('、')
-        : '') || (item?.vc && item.vc !== 'null' ? item.vc : '待核验'),
-      date: formatDate(item?.date),
-      sourceUrl: detailUrl,
-    }))
-    : []
+  const projection = project36KrLeadDetail(detail, detailUrl, row.name || '')
+  const name = projection.projectName
+  const companyName = projection.companyName
+  const industry = projection.industry || '待核验'
+  const detailedIntroduction = projection.introduction
+  const oneLiner = projection.oneWord
+  const registrationStatus = projection.registrationStatus
+  const fundingRounds = projection.fundingRounds
   const radarProfile = {
     sourceId: row.src_id || String(row.id),
     radarSourceKey: sourceKey,
@@ -97,26 +67,23 @@ function reserveLead(row: LeadReserveRawRow, sourceKey: string) {
     registry: { registrationStatus },
     profile: {
       projectName: name,
+      projectIntroduction: detailedIntroduction,
       companyName,
-      projectRound: detail.currentFinancing?.name || fundingRounds[0]?.round || '未披露',
+      projectRound: projection.projectRound,
       industry,
-      region: detail.provinceName || business.regLocation || '',
+      region: projection.region,
+      logoUrl: projection.logoUrl,
     },
   }
   const scoring = {
     projectName: name,
     whatIsIt: oneLiner,
-    registry: {
-      companyName,
-      legalRepresentative: business.legalPersonName || '待核验',
-      foundedAt: formatDate(business.estiblishTime || detail.setupDate),
-      registeredAddress: business.regLocation || '待核验',
-      regLocation: business.regLocation || '待核验',
-      province: detail.provinceName || '待核验',
-      registrationStatus,
-    },
-    structuredTeam: [],
-    structuredShareholders: shareholders,
+    ...(projection.officialSite ? { officialSite: projection.officialSite } : {}),
+    registry: projection.registry,
+    registryEvidence: projection.registryEvidence,
+    sourceLabeledProfile: projection.sourceLabeledProfile,
+    structuredTeam: projection.structuredTeam,
+    structuredShareholders: projection.structuredShareholders,
     fundingRoundsResearched: fundingRounds,
     structuredNews: [],
   }

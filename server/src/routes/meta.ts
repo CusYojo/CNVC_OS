@@ -59,6 +59,7 @@ import {
 } from '../services/leadScoreRetryPolicy.js'
 import { prepareLeadScoringAuditContext } from '../services/leadScoringPipelineService.js'
 import {
+  LEAD_RATING_V3_PROMPT_VERSION,
   LEAD_RATING_V3_SCHEMA_VERSION,
   LEAD_RATING_V3_WORKFLOW,
   validateSnapshotBoundLeadRatingApplicability,
@@ -1753,7 +1754,7 @@ async function requestScoreWorkflow(
     scoringExecution: {
       workflow: detailed.workflow,
       model: detailed.model,
-      promptVersion: `${detailed.workflow}-${LEAD_RATING_V3_SCHEMA_VERSION}-agent-v1`,
+      promptVersion: detailed.promptVersion,
       runId: detailed.audit?.runId ?? null,
       decisionId: detailed.audit?.decisionId ?? null,
     },
@@ -1969,7 +1970,7 @@ export async function executeLeadScoring(leadId: string): Promise<LeadScoreExecu
           snapshotHash: boundSnapshot.snapshotHash,
           ratingSchemaVersion: LEAD_RATING_V3_SCHEMA_VERSION,
           workflow: LEAD_RATING_V3_WORKFLOW,
-          promptVersion: String(scoringExecution.promptVersion || `${LEAD_RATING_V3_WORKFLOW}-${LEAD_RATING_V3_SCHEMA_VERSION}-agent-v1`),
+          promptVersion: String(scoringExecution.promptVersion || LEAD_RATING_V3_PROMPT_VERSION),
           model: String(scoringExecution.model || 'unknown'),
           status: 'ready',
           completedAt: new Date(completedAt),

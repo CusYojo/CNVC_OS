@@ -18,6 +18,7 @@ import {
   LEAD_SCORING_AGENT_PROFILE_VERSION,
   LEAD_SCORING_AGENT_SCHEMA_VERSION,
   LEAD_SCORING_AGENT_TOOLSET_VERSION,
+  leadScoringAgentRuntime,
   runLeadScoringAgent,
   type LeadScoringAgentExecution,
 } from './leadScoringAgentService.js'
@@ -26,6 +27,8 @@ import {
   computeLeadRatingV3,
   leadRatingV3JsonSchema,
   leadRatingV3PromptTemplate,
+  LEAD_RATING_V3_CLAUDE_PROMPT_VERSION,
+  LEAD_RATING_V3_PROMPT_VERSION,
   LEAD_RATING_V3_SCHEMA_VERSION,
   LEAD_RATING_V3_WORKFLOW,
 } from './leadRatingV3Service.js'
@@ -523,6 +526,7 @@ type ScoreAgentEnvelope<T> = {
   execution: LeadScoringAgentExecution
   model: string
   workflow: ScoreWorkflow
+  promptVersion: string
   audit: { runId: string; decisionId: string | null; inputEventId: string } | null
 }
 
@@ -579,6 +583,10 @@ export async function scoreWithAgentDetailed(
 
   for (let modelAttempt = 1; modelAttempt <= models.length; modelAttempt += 1) {
     const model = models[modelAttempt - 1]
+    const runtime = leadScoringAgentRuntime(model, Boolean(options.agentRunner))
+    const ratingPromptVersion = runtime === 'codex-cli'
+      ? LEAD_RATING_V3_PROMPT_VERSION
+      : LEAD_RATING_V3_CLAUDE_PROMPT_VERSION
     let auditRun: Awaited<ReturnType<typeof startLeadPipelineRun>> | null = null
     let execution: LeadScoringAgentExecution | null = null
     let auditRunFinished = false
@@ -587,19 +595,21 @@ export async function scoreWithAgentDetailed(
       if (options.audit) {
         const promptVersion = await registerLeadPipelinePromptVersion({
           agentProfile: LEAD_SCORING_AGENT_PROFILE,
-          promptVersion: `${workflow}-${ratingV3Workflow ? LEAD_RATING_V3_SCHEMA_VERSION : standard!.version || 'v1'}-agent-v1`,
+          promptVersion: ratingV3Workflow
+            ? ratingPromptVersion
+            : `${workflow}-${standard!.version || 'v1'}-agent-v1`,
           schemaVersion: ratingV3Workflow ? LEAD_RATING_V3_SCHEMA_VERSION : LEAD_SCORING_AGENT_SCHEMA_VERSION,
           skillVersion: LEAD_SCORING_AGENT_PROFILE_VERSION,
           toolsetVersion: LEAD_SCORING_AGENT_TOOLSET_VERSION,
           prompt: `${SCORING_SYSTEM_PROMPT}\n\n${promptTemplate}`,
           configuration: {
-            runtime: 'claude-agent-sdk', workflow, tools: [], skills: [],
+            runtime, workflow, tools: [], skills: [],
             permissionMode: 'dontAsk', outputFormat: 'json_schema',
           },
         })
         auditRun = await startLeadPipelineRun({
           eventIds: options.audit.eventIds,
-          runtime: 'claude-agent-sdk',
+          runtime,
           agentProfile: LEAD_SCORING_AGENT_PROFILE,
           promptVersionId: promptVersion.id,
           model,
@@ -612,7 +622,7 @@ export async function scoreWithAgentDetailed(
             workflow,
             queueAttempt: options.audit.queueAttempt || 1,
             modelAttempt,
-            transport: 'claude-agent-sdk',
+            transport: runtime,
             toolsetVersion: LEAD_SCORING_AGENT_TOOLSET_VERSION,
           },
         })
@@ -687,6 +697,7 @@ export async function scoreWithAgentDetailed(
         execution,
         model,
         workflow,
+        promptVersion: ratingV3Workflow ? ratingPromptVersion : `${workflow}-${standard!.version || 'v1'}-agent-v1`,
         audit: auditRun && options.audit ? {
           runId: auditRun.id,
           decisionId: auditDecisionId,

@@ -7,7 +7,7 @@ import type { PoolConnection } from 'mysql2/promise'
 import { db, pool, schema } from '../db/client.js'
 import {
   aiSummaries, leads, auditLogs, leadScoreJobs, leadEnrichmentJobs, leadEnrichmentTopicRuns, leadRatingHistory,
-  migrationEntityMappings, projectMembers, projects,
+  leadReserve, migrationEntityMappings, projectMembers, projects,
 } from '../db/schema.js'
 import { createMySqlIdentityRepositoryContext } from '../repositories/index.js'
 import { projectAccessCondition, type ProjectAccessActor } from './projectAccessService.js'
@@ -41,6 +41,7 @@ import { resolvePaperProjectIdentity } from './paperIdentity.js'
 import { publicLeadScoreDeadLetterError, publicLeadScoreError } from './leadScoreRetryPolicy.js'
 import { companyRegistrationEligibility, normalizeLeadRegistry } from './leadRegistry.js'
 import { publicLeadStageDisplay } from './leadDataQualityService.js'
+import { mergeLeadScoringWithRetainedSources } from './leadReserveProjection.js'
 
 export async function getSummary(projectId: string) {
   const rows = await db.select().from(aiSummaries).where(eq(aiSummaries.projectId, projectId)).orderBy(desc(aiSummaries.updatedAt)).limit(1)
@@ -1005,7 +1006,21 @@ export async function getLeadById(leadId: string, options: { includeHidden?: boo
     .from(leads).where(options.includeHidden
       ? eq(leads.id, canonicalLeadId)
       : and(eq(leads.id, canonicalLeadId), visiblePublicLeadExpr)).limit(1)
-  return row ? enrichLead(row as typeof leads.$inferSelect & { completeness: number }) : null
+  if (!row) return null
+  const [reserve] = await db.select({ detailJson: leadReserve.detailJson, detailUrl: leadReserve.detailUrl })
+    .from(leadReserve)
+    .where(eq(leadReserve.importedLeadId, canonicalLeadId))
+    .orderBy(desc(leadReserve.importedAt), desc(leadReserve.id))
+    .limit(1)
+  const reserveDetail = objectValue(reserve?.detailJson)
+  const projectIntroduction = textValue(reserveDetail.intro)
+  const projectLogoUrl = textValue(reserveDetail.logo)
+  return {
+    ...enrichLead(row as typeof leads.$inferSelect & { completeness: number }),
+    projectIntroduction,
+    projectIntroductionSourceUrl: projectIntroduction ? textValue(reserve?.detailUrl) : undefined,
+    projectLogoUrl,
+  }
 }
 
 export async function deleteLeadFromPublicPool(
@@ -1561,11 +1576,9 @@ export async function saveLeadScoring(
     // V3 重新评分改变阶段时主动失效，前端先走保守规则，等待下一次质量复核。
     const preserveDataQuality = currentScoring.dataQualityV1
       && (!incomingRatingStage || incomingRatingStage === currentRatingStage)
-    const scoringWithRegistry = {
-      ...sc,
-      registry,
-      ...(preserveDataQuality ? { dataQualityV1: currentScoring.dataQualityV1 } : {}),
-    }
+    const scoringWithRegistry = mergeLeadScoringWithRetainedSources(currentScoring, sc, registry, {
+      preserveDataQuality: Boolean(preserveDataQuality),
+    })
     const proposed: Record<string, unknown> = { scoring: scoringWithRegistry as never, score }
 
     // AI 只能刷新自身拥有的标量；人工/人工复核/旧源字段受来源优先级保护。

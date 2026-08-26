@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  LEAD_DETAIL_ENRICHMENT_TOPIC_KEYS,
   LEAD_ENRICHMENT_TOPIC_KEYS,
   canonicalEnrichmentJson,
   classifyPaperContent,
@@ -72,14 +73,18 @@ test('future paper dates enter review and use record creation date', () => {
   assert.equal(date.basis, 'metadata_record_created_at')
 })
 
-test('research projects mark company-only topics not applicable', () => {
+test('research projects run only detail-visible non-financing topics', () => {
   const states = initialTopicStates({ entityType: 'research', hasCommercialCompany: false })
   assert.equal(Object.keys(states).length, LEAD_ENRICHMENT_TOPIC_KEYS.length)
+  assert.equal(states.basic_profile, 'queued')
+  assert.equal(states.financing, 'not_applicable')
   assert.equal(states.ownership, 'not_applicable')
   assert.equal(states.financial_operations, 'not_applicable')
   assert.equal(states.transaction_exit, 'not_applicable')
-  assert.equal(states.technology_ip, 'queued')
+  assert.equal(states.technology_ip, 'not_applicable')
   assert.equal(states.team, 'queued')
+  assert.equal(states.products, 'queued')
+  assert.equal(states.latest_developments, 'queued')
 })
 
 test('material topics require a confirmed or at least claimed entity after basic profile resolution', () => {
@@ -187,7 +192,7 @@ test('web research treats external prompt injection as untrusted data and keeps 
 })
 
 test('web conflict contract requires two independently sourced and context-complete candidates', () => {
-  assert.equal(leadTopicResearchContract('financing').promptVersion, 'lead-topic-web-research-v6')
+  assert.equal(leadTopicResearchContract('financing').promptVersion, 'lead-topic-web-research-v7-detail-fields')
   const base = {
     topicKey: 'financing' as const,
     allowedFactKeys: ['financing.amount'],
@@ -322,20 +327,18 @@ test('web research keeps customer relationship types explicit', () => {
   }).ok, true)
 })
 
-test('topic dictionaries keep separately scored business semantics in separate fact keys', () => {
+test('detail-visible topic dictionaries expose only the fields consumed by the detail page', () => {
   const required: Record<string, string[]> = {
-    basic_profile: ['profile.company_introduction', 'profile.team_introduction', 'profile.project_introduction'],
-    ownership: ['ownership.shareholder_type', 'ownership.beneficial_owner'],
-    customers_contracts: [
-      'customer.intent', 'customer.trial', 'customer.framework_agreement', 'customer.formal',
-      'contract.status', 'order.status', 'delivery.status', 'cash_collection.amount',
+    basic_profile: [
+      'profile.company_introduction', 'profile.team_introduction', 'profile.project_introduction',
+      'profile.website', 'profile.industry', 'registry.company_name', 'registry.registration_status',
     ],
-    financial_operations: ['financial.growth', 'financial.cash', 'financial.debt', 'financial.data_basis'],
-    products: ['product.release_status', 'product.price', 'product.use_case'],
-    competition: ['competition.performance', 'competition.price', 'competition.financing'],
-    market_policy: ['market.currency', 'market.methodology', 'policy.effective_date'],
-    transaction_exit: ['transaction.pre_money', 'transaction.post_money', 'transaction.preferred_rights', 'transaction.earnout'],
+    financing: ['financing.status', 'financing.round', 'financing.amount', 'financing.investors'],
+    team: ['team.member', 'team.role', 'team.education', 'team.current_employment', 'team.historical_employment'],
+    products: ['product.name', 'product.parameter', 'product.performance', 'product.use_case', 'product.matrix'],
+    latest_developments: ['news.event', 'news.event_date'],
   }
+  assert.deepEqual(Object.keys(required), [...LEAD_DETAIL_ENRICHMENT_TOPIC_KEYS])
   for (const [topicKey, factKeys] of Object.entries(required)) {
     const contract = leadTopicResearchContract(topicKey as Parameters<typeof leadTopicResearchContract>[0])
     for (const factKey of factKeys) assert(contract.factKeys.includes(factKey), `${topicKey} missing ${factKey}`)
@@ -404,20 +407,19 @@ test('date and lifecycle facts require concrete host-recognized semantics', () =
   }).ok, true)
 })
 
-test('latest-development fact sets reject orphan events without occurrence and report dates', () => {
+test('latest-development fact sets reject orphan events without occurrence dates', () => {
   const incomplete = enforceLeadTopicFactSetContract('latest_developments', [{
     factKey: 'news.event', instanceKey: '2026-08 产品发布', period: '2026-08',
   }])
   assert.equal(incomplete.facts.length, 0)
   assert.equal(incomplete.rejectedFactCount, 1)
-  assert.match(incomplete.reasons.join(';'), /event_date and reported_date/)
+  assert.match(incomplete.reasons.join(';'), /event and event_date/)
   const complete = enforceLeadTopicFactSetContract('latest_developments', [
     { factKey: 'news.event', instanceKey: '2026-08 产品发布', period: '2026-08' },
     { factKey: 'news.event_date', instanceKey: '2026-08 产品发布' },
-    { factKey: 'news.reported_date', instanceKey: '2026-08 产品发布' },
   ])
   assert.equal(complete.rejectedFactCount, 0)
-  assert.equal(complete.facts.length, 3)
+  assert.equal(complete.facts.length, 2)
 })
 
 test('direct competitors require three-way product-market matching and a comparison basis', () => {

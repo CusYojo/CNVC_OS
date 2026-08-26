@@ -2,6 +2,10 @@ import { z } from 'zod'
 
 export const LEAD_RATING_V3_SCHEMA_VERSION = 'lead-rating-v3' as const
 export const LEAD_RATING_V3_WORKFLOW = 'score-lead-rating-v3' as const
+// Prompt contracts are immutable in the audit ledger. Bump this whenever the
+// rendered V3 scoring prompt changes so existing runs remain reproducible.
+export const LEAD_RATING_V3_PROMPT_VERSION = 'score-lead-rating-v3-lead-rating-v3-agent-v3-codex' as const
+export const LEAD_RATING_V3_CLAUDE_PROMPT_VERSION = 'score-lead-rating-v3-lead-rating-v3-agent-v2' as const
 
 export const LEAD_RATING_DIMENSIONS = [
   { key: 'financial_operations', dimension: '财务经营状况', weight: 15 },
