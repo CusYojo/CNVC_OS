@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { and, count, eq } from 'drizzle-orm'
 import { db, pool } from '../db/client.js'
 import { ensureSchema } from '../db/migrate.js'
-import { aiSummaries, auditLogs, leads, projectFiles, projectMembers, projects, users } from '../db/schema.js'
+import { aiSummaries, auditLogs, leads, projectClassificationHistory, projectFiles, projectMembers, projects, users } from '../db/schema.js'
 import { convertLead } from '../services/aiSummaryService.js'
 
 const checks: string[] = []
@@ -65,13 +65,32 @@ try {
   check('lead-project-link-owner-and-factual-fields-persist-atomically', () => {
     assert.equal(lead.convertedProjectId, project.id)
     assert.equal(lead.claimedBy, userName)
+    assert.equal(project.owner, userName)
     assert.equal(project.ownerUserId, userId)
     assert.equal(member?.memberRole, 'owner')
+    assert.equal(project.classification, 'normal')
+    assert.equal(project.lifecycle, 'active')
+    assert.equal(project.stage, '立项')
+    assert.equal(project.progress, 10)
+    assert.equal(project.stageSource, '线索转入')
+    assert.equal(project.workflowModel, 'fde-v1')
+    assert.equal(project.latestApprovalId, null)
+    assert.equal(result.project.classification, project.classification)
+    assert.equal(result.project.stage, project.stage)
     assert.equal(project.companyName, `真实主体-${marker}`)
     assert.equal(project.round, 'A轮')
     assert.equal(project.financing, '人民币1亿元')
     assert.equal(project.valuation, '人民币5亿元')
     assert.equal(project.summary, '仅来自验收夹具的线索摘要')
+  })
+
+  const classificationHistory = await db.select().from(projectClassificationHistory)
+    .where(eq(projectClassificationHistory.projectId, project.id))
+  check('lead-conversion-creates-normal-project-classification-history', () => {
+    assert.equal(classificationHistory.length, 1)
+    assert.equal(classificationHistory[0]?.fromClassification, null)
+    assert.equal(classificationHistory[0]?.toClassification, 'normal')
+    assert.equal(classificationHistory[0]?.changedBy, userId)
   })
 
   const [{ value: fakeSummaryCount }] = await db.select({ value: count() }).from(aiSummaries)

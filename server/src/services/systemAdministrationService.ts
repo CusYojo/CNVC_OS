@@ -2,6 +2,8 @@ import { and, asc, eq, inArray } from 'drizzle-orm'
 import { db } from '../db/client.js'
 import { createMySqlIdentityRepositoryContext } from '../repositories/index.js'
 import type { AuditRepository, UserRepository } from '../repositories/identityRepository.js'
+import type { FdeRoleCategory } from '../contracts/fdeGovernanceContract.js'
+import { emitAuthInvalidation } from '../runtime/authSessionEvents.js'
 import {
   departments,
   dictionaryGroups,
@@ -67,6 +69,7 @@ export async function listSystemAdministration() {
     departments: departmentRows.map((row) => ({ ...row, memberCount: departmentMemberCounts.get(row.id) || 0 })),
     roles: roleRows.map((row) => ({ ...row, memberCount: roleMemberCounts.get(row.id) || 0, permissionIds: permissionIdsByRole.get(row.id) || [] })),
     permissions: permissionRows,
+    userRoleBindings: userRoleRows,
     dictionaries: groupRows.map((group) => ({ ...group, items: itemRows.filter((item) => item.groupId === group.id) })),
   }
 }
@@ -130,7 +133,7 @@ export async function updateDepartment(id: string, input: {
 }
 
 export async function createRole(input: {
-  code: string; name: string; description?: string | null; dataScope: 'self' | 'department' | 'all'; permissionIds?: string[]
+  code: string; name: string; description?: string | null; dataScope: 'self' | 'department' | 'all'; fdeCategory?: FdeRoleCategory | null; permissionIds?: string[]
 }, actor: SystemAdministrator) {
   if (input.name.trim().length > 32) throw adminError(400, 'ROLE_NAME_TOO_LONG', '角色名称不能超过 32 个字符')
   return db.transaction(async (tx) => {
@@ -143,7 +146,7 @@ export async function createRole(input: {
     }
     const [created] = await tx.insert(roles).values({
       code: input.code.trim().toUpperCase(), name: input.name.trim(), description: input.description?.trim() || null,
-      dataScope: input.dataScope, builtIn: false,
+      dataScope: input.dataScope, fdeCategory: input.fdeCategory ?? null, builtIn: false,
     }).$returningId()
     if (permissionIds.length) await tx.insert(rolePermissions).values(permissionIds.map((permissionId) => ({ roleId: created.id, permissionId })))
     await appendAudit(identity.audits, administrator, '创建角色', { roleId: created.id, code: input.code, permissionIds })
@@ -154,20 +157,26 @@ export async function createRole(input: {
 
 export async function updateRole(id: string, input: {
   name?: string; description?: string | null; dataScope?: 'self' | 'department' | 'all'; status?: '启用' | '禁用'
+  fdeCategory?: FdeRoleCategory | null
   permissionIds?: string[]; expectedVersion: number
 }, actor: SystemAdministrator) {
   if (input.name && input.name.trim().length > 32) throw adminError(400, 'ROLE_NAME_TOO_LONG', '角色名称不能超过 32 个字符')
-  return db.transaction(async (tx) => {
+  const result = await db.transaction(async (tx) => {
     const identity = createMySqlIdentityRepositoryContext(tx)
     const administrator = await requireCurrentAdministrator(identity.users, actor)
     const [current] = await tx.select().from(roles).where(eq(roles.id, id)).limit(1).for('update')
     if (!current) throw adminError(404, 'ROLE_NOT_FOUND', '角色不存在')
     if (current.version !== input.expectedVersion) throw adminError(409, 'VERSION_CONFLICT', '角色已被其他管理员修改，请刷新后重试')
     if (current.name === '系统管理员' && input.status === '禁用') throw adminError(409, 'SYSTEM_ADMIN_ROLE_REQUIRED', '系统管理员角色不能停用')
+    if (['SYSTEM_ADMIN', 'AI_PLATFORM_ADMIN'].includes(current.code) && input.fdeCategory !== undefined && input.fdeCategory !== 'system_admin') throw adminError(409, 'FDE_ADMIN_CATEGORY_REQUIRED', '管理角色必须保留系统管理员类别；业务职责请通过独立业务角色授予')
     const permissionIds = input.permissionIds ? [...new Set(input.permissionIds)] : undefined
     if (permissionIds) {
       const valid = permissionIds.length ? await tx.select({ id: permissions.id }).from(permissions).where(inArray(permissions.id, permissionIds)) : []
       if (valid.length !== permissionIds.length) throw adminError(400, 'PERMISSION_INVALID', '包含不存在的权限项')
+      if (current.code === 'SYSTEM_ADMIN') {
+        const [required] = await tx.select({ id: permissions.id }).from(permissions).where(eq(permissions.code, 'system.manage')).limit(1)
+        if (!required || !permissionIds.includes(required.id)) throw adminError(409, 'SYSTEM_ADMIN_ROLE_REQUIRED', '系统管理员角色必须保留系统管理权限')
+      }
       await tx.delete(rolePermissions).where(eq(rolePermissions.roleId, id))
       if (permissionIds.length) await tx.insert(rolePermissions).values(permissionIds.map((permissionId) => ({ roleId: id, permissionId })))
     }
@@ -175,6 +184,7 @@ export async function updateRole(id: string, input: {
       ...(input.name !== undefined && !current.builtIn ? { name: input.name.trim() } : {}),
       ...(input.description !== undefined ? { description: input.description?.trim() || null } : {}),
       ...(input.dataScope !== undefined ? { dataScope: input.dataScope } : {}),
+      ...(input.fdeCategory !== undefined ? { fdeCategory: input.fdeCategory } : {}),
       ...(input.status !== undefined ? { status: input.status } : {}),
       version: current.version + 1, updatedAt: new Date(),
     }).where(and(eq(roles.id, id), eq(roles.version, input.expectedVersion)))
@@ -182,8 +192,39 @@ export async function updateRole(id: string, input: {
     const [row] = await tx.select().from(roles).where(eq(roles.id, id)).limit(1)
     const bindings = await tx.select({ permissionId: rolePermissions.permissionId }).from(rolePermissions).where(eq(rolePermissions.roleId, id))
     const members = await tx.select({ userId: userRoles.userId }).from(userRoles).where(eq(userRoles.roleId, id))
-    return { ...row!, memberCount: members.length, permissionIds: bindings.map((item) => item.permissionId) }
+    if (!(await identity.users.listPermissionCodes(administrator.id)).includes('system.manage')) throw adminError(409, 'ADMIN_SELF_LOCKOUT', '不能移除当前管理员的系统管理权限')
+    const securityChanged = input.status !== undefined || input.dataScope !== undefined || input.fdeCategory !== undefined || input.permissionIds !== undefined
+    if (securityChanged) for (const member of members) await identity.users.revokeActiveSessions(member.userId, new Date())
+    return { row: { ...row!, memberCount: members.length, permissionIds: bindings.map((item) => item.permissionId) }, invalidatedIds: securityChanged ? members.map((member) => member.userId) : [] }
   })
+  for (const userId of result.invalidatedIds) emitAuthInvalidation({ type: 'user', userId })
+  return result.row
+}
+
+export async function updateUserRoleBindings(userId: string, input: { primaryRoleId: string; roleIds: string[]; expectedRoleIds: string[]; expectedPrimaryRoleId: string | null }, actor: SystemAdministrator) {
+  const result = await db.transaction(async (tx) => {
+    const identity = createMySqlIdentityRepositoryContext(tx)
+    const administrator = await requireCurrentAdministrator(identity.users, actor)
+    const user = await identity.users.lockById(userId)
+    if (!user) throw adminError(404, 'USER_NOT_FOUND', '用户不存在')
+    const current = await tx.select().from(userRoles).where(eq(userRoles.userId, userId))
+    if ((current.find((binding) => binding.isPrimary)?.roleId ?? null) !== input.expectedPrimaryRoleId) throw adminError(409, 'VERSION_CONFLICT', '主角色已改变，请刷新后重试')
+    const roleIds = [...new Set(input.roleIds)].sort()
+    if (JSON.stringify(current.map((binding) => binding.roleId).sort()) !== JSON.stringify([...new Set(input.expectedRoleIds)].sort())) throw adminError(409, 'VERSION_CONFLICT', '用户角色绑定已改变，请刷新后重试')
+    if (!roleIds.includes(input.primaryRoleId)) throw adminError(400, 'PRIMARY_ROLE_REQUIRED', '主角色必须包含在授予的角色中')
+    const selected = roleIds.length ? await tx.select().from(roles).where(inArray(roles.id, roleIds)) : []
+    if (selected.length !== roleIds.length || selected.some((role) => role.status !== '启用')) throw adminError(400, 'ROLE_INVALID', '只能分配存在且启用的角色')
+    const primary = selected.find((role) => role.id === input.primaryRoleId)!
+    await tx.delete(userRoles).where(eq(userRoles.userId, userId))
+    await tx.insert(userRoles).values(roleIds.map((roleId) => ({ userId, roleId, isPrimary: roleId === primary.id })))
+    await identity.users.update(userId, { role: primary.name })
+    if (userId === administrator.id && !(await identity.users.listPermissionCodes(userId)).includes('system.manage')) throw adminError(409, 'ADMIN_SELF_LOCKOUT', '不能移除当前管理员的系统管理权限')
+    const revokedSessions = await identity.users.revokeActiveSessions(userId, new Date())
+    await appendAudit(identity.audits, administrator, '配置用户角色绑定', { userId, before: current.map(({ roleId, isPrimary }) => ({ roleId, isPrimary })), after: roleIds.map((roleId) => ({ roleId, isPrimary: roleId === primary.id })), revokedSessions })
+    return { userId, primaryRoleId: primary.id, roleIds }
+  })
+  emitAuthInvalidation({ type: 'user', userId })
+  return result
 }
 
 export async function createDictionaryGroup(input: { code: string; name: string; description?: string | null }, actor: SystemAdministrator) {

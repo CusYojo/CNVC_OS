@@ -7,10 +7,12 @@ import type { PoolConnection } from 'mysql2/promise'
 import { db, pool, schema } from '../db/client.js'
 import {
   aiSummaries, leads, auditLogs, leadScoreJobs, leadEnrichmentJobs, leadEnrichmentTopicRuns, leadRatingHistory,
-  leadReserve, migrationEntityMappings, projectMembers, projects,
+  leadReserve, migrationEntityMappings, projectClassificationHistory, projectMembers, projects,
 } from '../db/schema.js'
 import { createMySqlIdentityRepositoryContext } from '../repositories/index.js'
 import { projectAccessCondition, type ProjectAccessActor } from './projectAccessService.js'
+import { activeWorkflowPolicyVersion } from './fdeWorkflowPolicyService.js'
+import { canReadAllProjectFiles, projectSummaryFileAccessCondition } from './projectFileAccessService.js'
 import {
   buildRadarLeadMergePatch,
   mergeRadarFundingRounds,
@@ -43,7 +45,8 @@ import { companyRegistrationEligibility, normalizeLeadRegistry } from './leadReg
 import { publicLeadStageDisplay } from './leadDataQualityService.js'
 import { mergeLeadScoringWithRetainedSources } from './leadReserveProjection.js'
 
-export async function getSummary(projectId: string) {
+export async function getSummary(projectId: string, userId?: string) {
+  if (userId && !await canReadAllProjectFiles(db, projectId, userId)) return undefined
   const rows = await db.select().from(aiSummaries).where(eq(aiSummaries.projectId, projectId)).orderBy(desc(aiSummaries.updatedAt)).limit(1)
   return rows[0]
 }
@@ -52,7 +55,7 @@ export async function listAllSummaries(actor?: ProjectAccessActor) {
   const where = actor
     ? inArray(
         aiSummaries.projectId,
-        db.select({ id: projects.id }).from(projects).where(projectAccessCondition(actor)),
+        db.select({ id: projects.id }).from(projects).where(and(projectAccessCondition(actor), projectSummaryFileAccessCondition(actor.uid))),
       )
     : undefined
   return db.select().from(aiSummaries).where(where).orderBy(desc(aiSummaries.updatedAt))
@@ -1471,13 +1474,20 @@ export async function convertLead(leadId: string, userId: string) {
       ? lead.riskTags.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
       : []
     const tags = [...new Set([textValue(lead.industry), ...riskTags].filter((item): item is string => Boolean(item)))]
+    const workflowPolicyVersionId = await activeWorkflowPolicyVersion(tx)
     const [inserted] = await tx.insert(projects).values({
       name: lead.name,
       companyName: textValue(lead.companyName),
       industry: textValue(lead.industry),
       round: textValue(firstFunding.round) ?? textValue(profile.project_round),
-      stage: '线索',
+      // 人工领取后直接进入普通项目的立项待审批阶段，不自动通过立项审批。
+      stage: '立项',
       stageSource: '线索转入',
+      classification: 'normal',
+      lifecycle: 'active',
+      workflowModel: 'fde-v1',
+      workflowPolicyVersionId,
+      projectType: '投资项目',
       owner: actor.name,
       ownerUserId: actor.id,
       collaborators: [],
@@ -1486,7 +1496,7 @@ export async function convertLead(leadId: string, userId: string) {
       valuation: textValue(firstFunding.valuation) ?? textValue(profile.latest_valuation),
       riskLevel: riskTags.length > 1 ? '中' : '低',
       score: lead.score,
-      progress: 12,
+      progress: 10,
       summary: textValue(lead.summary),
       businessModel: null,
       market: null,
@@ -1500,6 +1510,14 @@ export async function convertLead(leadId: string, userId: string) {
       userId: actor.id,
       memberRole: 'owner',
       sourceName: actor.name,
+    })
+    await tx.insert(projectClassificationHistory).values({
+      projectId: inserted.id,
+      fromClassification: null,
+      toClassification: 'normal',
+      reason: '线索执行“转为我的专属项目”，直接进入普通项目',
+      changedBy: actor.id,
+      changedByName: actor.name,
     })
     await tx.update(leads).set({
       poolStatus: '已转专属项目',

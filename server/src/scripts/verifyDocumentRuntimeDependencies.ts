@@ -1,10 +1,12 @@
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { constants } from 'node:fs'
-import { access, chmod, mkdir, readFile, writeFile } from 'node:fs/promises'
+import { constants, existsSync, realpathSync } from 'node:fs'
+import { access, chmod, mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
+import { pathToFileURL } from 'node:url'
+import { projectQaCommandCandidates } from '../services/documentRuntimeDiscovery.js'
 
 type NativeName = 'python' | 'libreOffice' | 'popplerRasterizer' | 'popplerText'
   | 'popplerFonts' | 'tesseract' | 'fontconfig' | 'legacyWordExtractor'
@@ -22,8 +24,9 @@ type DependencyManifest = {
 
 const execFileAsync = promisify(execFile)
 const root = process.cwd()
-const manifestPath = path.resolve(root, 'server/document-runtime-dependencies.json')
-const mode = process.argv.includes('--live') ? 'live' : 'static'
+const mode = process.argv.includes('--native-only') ? 'native' : process.argv.includes('--live') ? 'live' : 'static'
+export type RuntimeContext = { root: string; env: NodeJS.ProcessEnv; platform: NodeJS.Platform; home: string }
+const runtimeContext = (): RuntimeContext => ({ root, env: process.env, platform: process.platform, home: homedir() })
 
 function sha256(data: string | Buffer) {
   return createHash('sha256').update(data).digest('hex')
@@ -57,52 +60,54 @@ function versionCompatible(versionText: string, range: VersionRange) {
     && compareVersions(version, maximum) < 0)
 }
 
-async function executable(candidates: Array<string | undefined>) {
-  const pathDirectories = (process.env.PATH || '').split(path.delimiter).filter(Boolean)
+async function executable(candidates: Array<string | undefined>, context: RuntimeContext) {
+  const pathDirectories = (context.env.PATH || '').split(path.delimiter).filter(Boolean)
   for (const candidate of candidates.filter(Boolean) as string[]) {
-    const resolvedCandidates = path.isAbsolute(candidate)
-      ? [candidate]
-      : pathDirectories.map((directory) => path.join(directory, candidate))
+    const resolvedCandidates = path.isAbsolute(candidate) || candidate.includes(path.sep)
+      ? [path.resolve(context.root, candidate)]
+      : pathDirectories.map((directory) => path.resolve(context.root, directory, candidate))
     for (const resolved of resolvedCandidates) {
-      if (await access(resolved, constants.X_OK).then(() => true).catch(() => false)) return resolved
+      if (await stat(resolved).then(info => info.isFile()).catch(() => false)
+        && await access(resolved, constants.X_OK).then(() => true).catch(() => false)) return resolved
     }
   }
   return null
 }
 
-async function commandOutput(command: string, args: string[]) {
+async function commandOutput(command: string, args: string[], context: RuntimeContext) {
   const result = await execFileAsync(command, args, {
-    cwd: root,
-    env: process.env,
+    cwd: context.root,
+    env: context.env,
     timeout: 15_000,
     maxBuffer: 2 * 1024 * 1024,
   })
   return `${result.stdout || ''}\n${result.stderr || ''}`.trim()
 }
 
-function nativeCandidates() {
-  const bundled = path.join(homedir(), '.cache', 'codex-runtimes', 'codex-primary-runtime', 'dependencies')
+function nativeCandidates(context: RuntimeContext) {
+  const { root, env } = context
+  const bundled = path.join(context.home, '.cache', 'codex-runtimes', 'codex-primary-runtime', 'dependencies')
   const override = path.join(bundled, 'bin', 'override')
   const poppler = path.join(bundled, 'native', 'poppler', 'poppler', 'bin')
-  return {
+  const candidates = {
     python: [
-      process.env.AI_PDF_TO_PPT_PYTHON,
+      env.AI_PDF_TO_PPT_PYTHON,
       path.resolve(root, 'server/.venv/bin/python3'),
       path.resolve(root, 'server/.venv/bin/python'),
       'python3',
     ],
     libreOffice: [
-      process.env.AI_PDF_TO_PPT_LIBREOFFICE,
-      process.env.AI_SOFFICE_PATH,
-      process.env.AI_QA_SOFFICE_BINARY,
+      env.AI_PDF_TO_PPT_LIBREOFFICE,
+      env.AI_SOFFICE_PATH,
+      env.AI_QA_SOFFICE_BINARY,
       path.join(override, 'soffice'),
       '/Applications/LibreOffice.app/Contents/MacOS/soffice',
       'soffice',
       'libreoffice',
     ],
     popplerRasterizer: [
-      process.env.AI_PDF_TO_PPT_PDFTOPPM,
-      process.env.AI_QA_PDFTOPPM_BINARY,
+      env.AI_PDF_TO_PPT_PDFTOPPM,
+      env.AI_QA_PDFTOPPM_BINARY,
       path.join(override, 'pdftoppm'),
       path.join(poppler, 'pdftoppm'),
       'pdftoppm',
@@ -112,16 +117,27 @@ function nativeCandidates() {
       'pdftotext',
     ],
     popplerFonts: [
-      process.env.AI_PDFFONTS_BIN,
-      process.env.AI_QA_PDFFONTS_BINARY,
+      env.AI_PDFFONTS_BIN,
+      env.AI_QA_PDFFONTS_BINARY,
       path.join(poppler, 'pdffonts'),
       'pdffonts',
     ],
-    tesseract: [process.env.AI_PDF_TO_PPT_TESSERACT, 'tesseract'],
+    tesseract: [env.AI_PDF_TO_PPT_TESSERACT, 'tesseract'],
     fontconfig: [path.join(poppler, 'fc-list'), 'fc-list'],
     legacyWordExtractor: ['antiword'],
     fontMatch: [path.join(poppler, 'fc-match'), 'fc-match'],
   }
+  // A preflight must not approve a broken explicit setting merely because a
+  // different executable is installed. Runtime fallback behavior stays intact.
+  const keys = {
+    python: ['AI_PDF_TO_PPT_PYTHON'], libreOffice: ['AI_PDF_TO_PPT_LIBREOFFICE', 'AI_SOFFICE_PATH', 'AI_QA_SOFFICE_BINARY'],
+    popplerRasterizer: ['AI_PDF_TO_PPT_PDFTOPPM', 'AI_QA_PDFTOPPM_BINARY'], popplerFonts: ['AI_PDFFONTS_BIN', 'AI_QA_PDFFONTS_BINARY'], tesseract: ['AI_PDF_TO_PPT_TESSERACT'],
+  } as const
+  for (const name of Object.keys(keys) as Array<keyof typeof keys>) {
+    const explicit = keys[name].map(key => env[key]).find(Boolean)
+    if (explicit) candidates[name] = [explicit]
+  }
+  return candidates
 }
 
 const commandArguments: Record<NativeName, string[]> = {
@@ -135,10 +151,11 @@ const commandArguments: Record<NativeName, string[]> = {
   legacyWordExtractor: ['-h'],
 }
 
-async function loadContract() {
+export async function loadDocumentRuntimeContract(projectRoot = root) {
+  const manifestPath = path.resolve(projectRoot, 'server/document-runtime-dependencies.json')
   const manifestRaw = await readFile(manifestPath, 'utf8')
   const manifest = JSON.parse(manifestRaw) as DependencyManifest
-  const lockPath = path.resolve(root, manifest.python.lockFile)
+  const lockPath = path.resolve(projectRoot, manifest.python.lockFile)
   const lockRaw = await readFile(lockPath, 'utf8')
   const pins = lockRaw.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
   const exactPinPattern = /^[A-Za-z0-9_.-]+==[A-Za-z0-9_.+!-]+$/
@@ -169,7 +186,7 @@ async function loadContract() {
   return { manifest, lockHash, packages }
 }
 
-async function staticChecks(contract: Awaited<ReturnType<typeof loadContract>>) {
+async function staticChecks(contract: Awaited<ReturnType<typeof loadDocumentRuntimeContract>>) {
   const [setupSource, deploySource] = await Promise.all([
     readFile(path.resolve(root, 'server/scripts/setup-pdf-to-ppt-runtime.mjs'), 'utf8'),
     readFile(path.resolve(root, 'deploy.sh'), 'utf8'),
@@ -207,82 +224,115 @@ async function staticChecks(contract: Awaited<ReturnType<typeof loadContract>>) 
   }
 }
 
-async function liveChecks(contract: Awaited<ReturnType<typeof loadContract>>) {
-  if (!['darwin', 'linux'].includes(process.platform)) {
-    throw new Error(`unsupported live verification platform: ${process.platform}`)
+export async function checkDocumentRuntime(contract: Awaited<ReturnType<typeof loadDocumentRuntimeContract>>, context = runtimeContext(), nativeOnly = false) {
+  if (!['darwin', 'linux'].includes(context.platform)) {
+    throw new Error('unsupported live verification platform')
   }
-  const candidates = nativeCandidates()
-  const required = new Set(contract.manifest.requiredByPlatform[process.platform as 'darwin' | 'linux'])
+  const candidates = nativeCandidates(context)
+  const required = new Set(contract.manifest.requiredByPlatform[context.platform as 'darwin' | 'linux'])
   const native = {} as Record<NativeName, {
     required: boolean
     available: boolean
     version: string | null
     versionOutputSha256: string | null
     compatible: boolean
+    error: 'unavailable' | 'command_failed' | null
   }>
   const resolved = {} as Record<NativeName, string | null>
   for (const name of Object.keys(contract.manifest.native) as NativeName[]) {
-    const command = await executable(candidates[name])
+    const command = await executable(candidates[name], context)
     resolved[name] = command
     let version: string | null = null
     let versionOutputSha256: string | null = null
-    if (command) {
-      const output = await commandOutput(command, commandArguments[name])
+    let error: 'unavailable' | 'command_failed' | null = command ? null : 'unavailable'
+    if (command) try {
+      const output = await commandOutput(command, commandArguments[name], context)
       version = versionTuple(output)?.join('.') || null
       versionOutputSha256 = sha256(output)
-    }
+    } catch { error = 'command_failed' }
     native[name] = {
       required: required.has(name),
       available: Boolean(command),
       version,
       versionOutputSha256,
       compatible: Boolean(version && versionCompatible(version, contract.manifest.native[name])),
+      error,
     }
   }
   const python = resolved.python
-  if (!python) throw new Error('document runtime Python is unavailable')
-  const freeze = await commandOutput(python, ['-m', 'pip', 'freeze'])
+  const freeze = !nativeOnly && python ? await commandOutput(python, ['-m', 'pip', 'freeze'], context).catch(() => '') : ''
   const installed = new Map(freeze.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).map((pin) => {
     const [name, version] = pin.split('==')
     return [normalizedPackageName(name || ''), version || '']
   }))
-  const exactPythonEnvironment = installed.size === contract.packages.size
+  const exactPythonEnvironment = !nativeOnly && installed.size === contract.packages.size
     && [...contract.packages.entries()].every(([name, version]) => installed.get(name) === version)
+  const pythonEnvironmentSummary = nativeOnly ? null : {
+    expectedEntries: contract.packages.size,
+    observedEntries: installed.size,
+    missingEntries: [...contract.packages.keys()].filter(name => !installed.has(name)).length,
+    versionMismatches: [...contract.packages.entries()].filter(([name, version]) => installed.has(name) && installed.get(name) !== version).length,
+    unexpectedEntries: [...installed.keys()].filter(name => !contract.packages.has(name)).length,
+  }
   const tesseractLanguages = Object.fromEntries(contract.manifest.linuxRequiredTesseractLanguages.map((name) => [name, false]))
-  if (process.platform === 'linux' && resolved.tesseract) {
-    const languageOutput = await commandOutput(resolved.tesseract, ['--list-langs'])
+  if (context.platform === 'linux' && resolved.tesseract) {
+    const languageOutput = await commandOutput(resolved.tesseract, ['--list-langs'], context).catch(() => '')
     for (const language of Object.keys(tesseractLanguages)) tesseractLanguages[language] = languageOutput.split(/\s+/).includes(language)
   }
   const fontFamilies = Object.fromEntries(contract.manifest.linuxRequiredFontFamilies.map((name) => [name, false]))
-  if (process.platform === 'linux') {
-    const fontMatch = await executable(candidates.fontMatch)
+  if (context.platform === 'linux') {
+    const fontMatch = await executable(candidates.fontMatch, context)
     if (fontMatch) {
       for (const family of Object.keys(fontFamilies)) {
-        const match = await commandOutput(fontMatch, ['-f', '%{family}', family])
-        fontFamilies[family] = /Noto/i.test(match) && /CJK/i.test(match)
+        const match = await commandOutput(fontMatch, ['-f', '%{family}', family], context).catch(() => '')
+        fontFamilies[family] = fontFamilyMatches(match, family)
       }
     }
   }
   const requiredNativeCompatible = Object.values(native).every((item) => !item.required || (item.available && item.compatible))
-  const languageContractSatisfied = process.platform !== 'linux' || Object.values(tesseractLanguages).every(Boolean)
-  const fontContractSatisfied = process.platform !== 'linux' || Object.values(fontFamilies).every(Boolean)
+  const languageContractSatisfied = context.platform !== 'linux' || Object.values(tesseractLanguages).every(Boolean)
+  const fontContractSatisfied = context.platform !== 'linux' || Object.values(fontFamilies).every(Boolean)
+  const qaCandidates = projectQaCommandCandidates(context.env, context.home)
+  const qaKinds = { soffice: 'libreOffice', pdftoppm: 'popplerRasterizer', pdffonts: 'popplerFonts' } as const
+  const qaKeys = { soffice: ['AI_QA_SOFFICE_BINARY', 'AI_PDF_TO_PPT_LIBREOFFICE'], pdftoppm: ['AI_QA_PDFTOPPM_BINARY', 'AI_PDF_TO_PPT_PDFTOPPM'], pdffonts: ['AI_QA_PDFFONTS_BINARY'] }
+  const qaRender = {} as Record<keyof typeof qaKinds, { available: boolean; compatible: boolean; version: string | null; versionOutputSha256: string | null }>
+  for (const name of Object.keys(qaKinds) as Array<keyof typeof qaKinds>) {
+    const explicit = qaKeys[name].map(key => context.env[key]).find(Boolean)
+    let output: string | null = null
+    for (const candidate of explicit ? [explicit] : qaCandidates[name]) {
+      const selected = await executable([candidate], context)
+      if (selected) try { output = await commandOutput(selected, commandArguments[qaKinds[name]], context); break } catch { /* Same fallback order as QA when no explicit override. */ }
+    }
+    qaRender[name] = { available: output !== null, compatible: output !== null && versionCompatible(output, contract.manifest.native[qaKinds[name]]), version: output === null ? null : versionTuple(output)?.join('.') || null, versionOutputSha256: output === null ? null : sha256(output) }
+  }
+  const qaRenderRuntimeCompatible = Object.values(qaRender).every(item => item.available && item.compatible)
   return {
-    ok: exactPythonEnvironment && requiredNativeCompatible && languageContractSatisfied && fontContractSatisfied,
+    ok: (nativeOnly || exactPythonEnvironment) && requiredNativeCompatible && languageContractSatisfied && fontContractSatisfied && qaRenderRuntimeCompatible,
     checks: {
-      exactPythonEnvironment,
+      exactPythonEnvironment: nativeOnly ? null : exactPythonEnvironment,
+      pythonPackagesChecked: !nativeOnly,
       requiredNativeCompatible,
       languageContractSatisfied,
       fontContractSatisfied,
+      qaRenderRuntimeCompatible,
     },
     native,
-    tesseractLanguages: process.platform === 'linux' ? tesseractLanguages : { required: false },
-    fontFamilies: process.platform === 'linux' ? fontFamilies : { required: false },
+    qaRender,
+    pythonEnvironmentSummary,
+    tesseractLanguages: context.platform === 'linux' ? tesseractLanguages : { required: false },
+    fontFamilies: context.platform === 'linux' ? fontFamilies : { required: false },
   }
 }
 
+export function fontFamilyMatches(output: string, expected: string) {
+  return output.split(/[,\r\n]/).some(family => family.trim().toLocaleLowerCase('en') === expected.toLocaleLowerCase('en'))
+}
+
 async function main() {
-  const contract = await loadContract()
-  const verification = mode === 'live' ? await liveChecks(contract) : await staticChecks(contract)
+  const args = process.argv.slice(2)
+  if (args.some(arg => !['--live', '--static', '--native-only', '--stdout-only'].includes(arg)) || args.filter(arg => ['--live', '--static', '--native-only'].includes(arg)).length > 1) throw new Error('invalid document runtime verification arguments')
+  const contract = await loadDocumentRuntimeContract()
+  const verification = mode === 'static' ? await staticChecks(contract) : await checkDocumentRuntime(contract, runtimeContext(), mode === 'native')
   const { ok, ...verificationDetails } = verification
   const report = {
     ok,
@@ -296,17 +346,19 @@ async function main() {
     businessContentExcluded: true,
     generatedAt: new Date().toISOString(),
   }
-  const evidenceRoot = path.resolve(root, '.runtime/migration-evidence/document-runtime-dependencies')
-  await mkdir(evidenceRoot, { recursive: true, mode: 0o700 })
-  await chmod(evidenceRoot, 0o700)
-  const reportPath = path.join(evidenceRoot, `${mode}-report.json`)
-  await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`, { mode: 0o600 })
-  await chmod(reportPath, 0o600)
+  if (!args.includes('--stdout-only')) {
+    const evidenceRoot = path.resolve(root, '.runtime/migration-evidence/document-runtime-dependencies')
+    await mkdir(evidenceRoot, { recursive: true, mode: 0o700 })
+    await chmod(evidenceRoot, 0o700)
+    const reportPath = path.join(evidenceRoot, `${mode}-report.json`)
+    await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`, { mode: 0o600 })
+    await chmod(reportPath, 0o600)
+  }
   console.log(JSON.stringify(report))
   if (!ok) process.exitCode = 1
 }
 
-main().catch((error) => {
-  console.error(JSON.stringify({ ok: false, mode, error: error instanceof Error ? error.message : String(error) }))
+if (process.argv[1] && existsSync(process.argv[1]) && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) main().catch(() => {
+  console.error(JSON.stringify({ ok: false, mode, code: 'DOCUMENT_RUNTIME_VERIFICATION_FAILED', error: '文档运行时检查失败；请核对参数、依赖锁和安装环境。', pathsExcluded: true }))
   process.exitCode = 1
 })

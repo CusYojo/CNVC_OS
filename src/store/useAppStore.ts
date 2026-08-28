@@ -9,6 +9,7 @@ import type {
   Meeting,
   Notification,
   Project,
+  ProjectClassification,
   ProjectFile,
   ProjectStage,
   RiskAlert,
@@ -65,6 +66,7 @@ interface AppState {
   updateProject: (projectId: string, patch: Partial<Project>) => Promise<Project>
   deleteProject: (projectId: string) => Promise<void>
   pinProject: (projectId: string, pinned: boolean) => Promise<void>
+  classifyProject: (projectId: string, toClassification: ProjectClassification, reason: string) => Promise<Project>
   moveProjectStage: (projectId: string, nextStage: ProjectStage, comment: string) => void
   createApprovalRequest: (input: {
     projectId: string
@@ -258,6 +260,24 @@ export const useAppStore = create<AppState>()(
           throw e
         }
       },
+      classifyProject: async (projectId, toClassification, reason) => {
+        try {
+          const expectedVersion = requiredVersion(get().projects.find((project) => project.id === projectId), '项目')
+          const updated = await apiPatch<Project>(`/projects/${projectId}/classification`, {
+            toClassification,
+            reason,
+            expectedVersion,
+          })
+          set((state) => ({
+            projects: state.projects.map((project) => project.id === projectId ? updated : project),
+          }))
+          return updated
+        } catch (e) {
+          const msg = e instanceof ApiError ? e.message : '项目分类调整失败'
+          get().addAudit('项目管理', '项目分类调整失败', `${projectId}: ${msg}`)
+          throw e
+        }
+      },
       moveProjectStage: (projectId, nextStage, comment) => {
         void get().createApprovalRequest({ projectId, targetStage: nextStage, reason: comment })
       },
@@ -271,10 +291,11 @@ export const useAppStore = create<AppState>()(
             amount: input.amount ?? project?.financing,
             valuation: input.valuation ?? project?.valuation,
           })
+          const refreshedProject = await apiGet<Project>(`/projects/${created.projectId}`).catch(() => undefined)
           set((state) => ({
             approvalRequests: [created, ...state.approvalRequests.filter((item) => item.id !== created.id)],
             projects: state.projects.map((item) => item.id === created.projectId
-              ? { ...item, latestApprovalId: created.id, updatedAt: created.submittedAt }
+              ? { ...item, ...refreshedProject, latestApprovalId: created.id, updatedAt: refreshedProject?.updatedAt ?? created.submittedAt }
               : item),
           }))
           return created
@@ -285,7 +306,7 @@ export const useAppStore = create<AppState>()(
       },
       approveRequest: async (requestId, comment) => {
         const result = await apiPost<{ request: ApprovalRequest; project?: Project }>(
-          `/oa/requests/${requestId}/actions`, { action: 'approve', comment },
+          `/oa/requests/${requestId}/actions`, { action: 'approve', comment, expectedVersion: get().approvalRequests.find((item) => item.id === requestId)?.lockVersion },
         )
         set((state) => ({
           approvalRequests: state.approvalRequests.map((item) => item.id === requestId ? result.request : item),
@@ -299,28 +320,28 @@ export const useAppStore = create<AppState>()(
         }
       },
       returnRequest: async (requestId, comment) => {
-        const result = await apiPost<{ request: ApprovalRequest }>(
-          `/oa/requests/${requestId}/actions`, { action: 'return', comment },
+        const result = await apiPost<{ request: ApprovalRequest; project?: Project }>(
+          `/oa/requests/${requestId}/actions`, { action: 'return', comment, expectedVersion: get().approvalRequests.find((item) => item.id === requestId)?.lockVersion },
         )
-        set((state) => ({ approvalRequests: state.approvalRequests.map((item) => item.id === requestId ? result.request : item) }))
+        set((state) => ({ approvalRequests: state.approvalRequests.map((item) => item.id === requestId ? result.request : item), projects: result.project ? state.projects.map((item) => item.id === result.project!.id ? { ...item, ...result.project } : item) : state.projects }))
       },
       resubmitApprovalRequest: async (requestId, comment) => {
-        const result = await apiPost<{ request: ApprovalRequest }>(
-          `/oa/requests/${requestId}/actions`, { action: 'resubmit', comment },
+        const result = await apiPost<{ request: ApprovalRequest; project?: Project }>(
+          `/oa/requests/${requestId}/actions`, { action: 'resubmit', comment, expectedVersion: get().approvalRequests.find((item) => item.id === requestId)?.lockVersion },
         )
-        set((state) => ({ approvalRequests: state.approvalRequests.map((item) => item.id === requestId ? result.request : item) }))
+        set((state) => ({ approvalRequests: state.approvalRequests.map((item) => item.id === requestId ? result.request : item), projects: result.project ? state.projects.map((item) => item.id === result.project!.id ? { ...item, ...result.project } : item) : state.projects }))
       },
       rejectRequest: async (requestId, comment) => {
-        const result = await apiPost<{ request: ApprovalRequest }>(
-          `/oa/requests/${requestId}/actions`, { action: 'reject', comment },
+        const result = await apiPost<{ request: ApprovalRequest; project?: Project }>(
+          `/oa/requests/${requestId}/actions`, { action: 'reject', comment, expectedVersion: get().approvalRequests.find((item) => item.id === requestId)?.lockVersion },
         )
-        set((state) => ({ approvalRequests: state.approvalRequests.map((item) => item.id === requestId ? result.request : item) }))
+        set((state) => ({ approvalRequests: state.approvalRequests.map((item) => item.id === requestId ? result.request : item), projects: result.project ? state.projects.map((item) => item.id === result.project!.id ? { ...item, ...result.project } : item) : state.projects }))
       },
       withdrawRequest: async (requestId, comment) => {
-        const result = await apiPost<{ request: ApprovalRequest }>(
-          `/oa/requests/${requestId}/actions`, { action: 'withdraw', comment },
+        const result = await apiPost<{ request: ApprovalRequest; project?: Project }>(
+          `/oa/requests/${requestId}/actions`, { action: 'withdraw', comment, expectedVersion: get().approvalRequests.find((item) => item.id === requestId)?.lockVersion },
         )
-        set((state) => ({ approvalRequests: state.approvalRequests.map((item) => item.id === requestId ? result.request : item) }))
+        set((state) => ({ approvalRequests: state.approvalRequests.map((item) => item.id === requestId ? result.request : item), projects: result.project ? state.projects.map((item) => item.id === result.project!.id ? { ...item, ...result.project } : item) : state.projects }))
       },
       deleteFile: async (fileId) => {
         const f = get().files.find((x) => x.id === fileId)

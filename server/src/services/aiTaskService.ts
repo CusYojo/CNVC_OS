@@ -114,6 +114,7 @@ import {
   type InvestmentRecommendationPptWorkflow,
 } from './aiInvestmentRecommendationPptWorkflowService.js'
 import { getAccessibleProject } from './projectAccessService.js'
+import { fileKnowledgeAccessCondition, projectFileAccessCondition, readableAiTaskIds } from './projectFileAccessService.js'
 
 export type AiTaskStatus = 'pending' | 'running' | 'succeeded' | 'failed' | 'cancelled'
 
@@ -440,7 +441,7 @@ async function sourcesForProject(
   projectId: string,
   sourceCutoffDate: string,
   limit = 40,
-  options: { completeProjectFileCoverage?: boolean } = {},
+  options: { completeProjectFileCoverage?: boolean; userId: string },
 ): Promise<ProjectSourceLoadResult> {
   const cutoff = new Date(`${sourceCutoffDate}T23:59:59.999+08:00`)
   const projectFileQuery = db.select({
@@ -452,6 +453,7 @@ async function sourcesForProject(
   }).from(projectFiles)
     .where(and(
       eq(projectFiles.projectId, projectId),
+      projectFileAccessCondition(options.userId),
       lte(projectFiles.uploadedAt, cutoff),
     ))
     .orderBy(asc(projectFiles.uploadedAt), asc(projectFiles.name))
@@ -459,6 +461,7 @@ async function sourcesForProject(
       .where(and(
         eq(knowledgeChunks.scope, 'project'),
         eq(knowledgeChunks.refId, projectId),
+        fileKnowledgeAccessCondition(options.userId),
         lte(knowledgeChunks.createdAt, cutoff),
       ))
       .orderBy(
@@ -486,6 +489,7 @@ async function sourcesForProject(
   const legacyFileQuery = db.select().from(fileChunks)
       .where(and(
         eq(fileChunks.projectId, projectId),
+        inArray(fileChunks.fileId, db.select({ id: projectFiles.id }).from(projectFiles).where(projectFileAccessCondition(options.userId))),
         lte(fileChunks.createdAt, cutoff),
       ))
       .orderBy(
@@ -1073,6 +1077,7 @@ async function waitForRequestedAttachments(
   taskId: string,
   projectId: string,
   fileIds: string[],
+  userId: string,
 ) {
   if (!fileIds.length) return true
   const timeoutMs = Math.max(
@@ -1090,6 +1095,7 @@ async function waitForRequestedAttachments(
     }).from(projectFiles).where(and(
       eq(projectFiles.projectId, projectId),
       inArray(projectFiles.id, fileIds),
+      projectFileAccessCondition(userId),
     ))
     const missingCount = fileIds.length - rows.length
     if (missingCount > 0) {
@@ -1411,10 +1417,12 @@ async function executeTaskWithinUsage(taskId: string) {
 
     const [project] = await db.select().from(projects).where(eq(projects.id, task.projectId)).limit(1)
     if (!project) throw new Error('项目不存在或已删除')
+    if (!await getAccessibleProject(task.userId, project.id)) throw Object.assign(new Error('项目访问权限已变化'), { code: 'PROJECT_FORBIDDEN', status: 403 })
     const attachmentsReady = await waitForRequestedAttachments(
       taskId,
       project.id,
       requestedAttachmentFileIds(parameters),
+      task.userId,
     )
     if (!attachmentsReady) {
       await cancelIfRequested(taskId)
@@ -1437,6 +1445,7 @@ async function executeTaskWithinUsage(taskId: string) {
             ? 80
           : 40,
       {
+        userId: task.userId,
         completeProjectFileCoverage: [
           'investment_proposal',
           'investment_recommendation_ppt',
@@ -3303,6 +3312,7 @@ export async function validateAiTaskCoreReferences(
       }).from(projectFiles).where(and(
         eq(projectFiles.projectId, input.projectId),
         inArray(projectFiles.id, fileIds),
+        projectFileAccessCondition(stableUser.uid),
       ))
       if (rows.length !== fileIds.length) {
         throw Object.assign(new Error('任务附件不存在或不属于当前项目'), {
@@ -3616,6 +3626,7 @@ export async function createAiTask(user: AiTaskUser, input: CreateAiTaskInput) {
 export async function getAiTask(userId: string, taskId: string) {
   let task = await getTaskRow(userId, taskId)
   if (!task) return undefined
+  if (!(await readableAiTaskIds(userId, [taskId])).has(taskId)) return undefined
   const artifacts = await aiTaskRepository.listTaskArtifacts(task.id)
   if (task.type === 'investment_recommendation_ppt' && task.status === 'succeeded') {
     const hasImageDeck = artifacts.some((artifact) => (
@@ -3678,7 +3689,7 @@ export async function getAiTask(userId: string, taskId: string) {
 
 export async function listAiTasks(userId: string, options: { projectId?: string; conversationId?: string; limit?: number } = {}) {
   const rows = await aiTaskRepository.listOwnedTasks({ userId, ...options })
-  return Promise.all(rows.map((row) => getAiTask(userId, row.id)))
+  return (await Promise.all(rows.map((row) => getAiTask(userId, row.id)))).filter((row) => row !== undefined)
 }
 
 export async function cancelAiTask(user: AiTaskUser, taskId: string) {
@@ -3753,7 +3764,9 @@ export async function retryAiTask(user: AiTaskUser, taskId: string, idempotencyK
 
 export async function listAiArtifacts(userId: string, projectId?: string) {
   const rows = await aiTaskRepository.listOwnedArtifacts({ userId, projectId, limit: 100 })
+  const readable = await readableAiTaskIds(userId, [...new Set(rows.map(row => row.artifact.taskId))])
   return rows
+    .filter(({ artifact }) => readable.has(artifact.taskId))
     .filter(({ artifact, taskType }) =>
       taskType !== 'investment_proposal' || artifact.format === 'docx')
     .map(({ artifact }) => publicArtifact(artifact))
@@ -3767,6 +3780,7 @@ export async function getArtifactDownload(userId: string, artifactId: string) {
   const row = await aiTaskRepository.findOwnedArtifactWithTaskType({ userId, artifactId })
   const artifact = row?.artifact
   if (!artifact || artifact.qualityStatus !== 'passed') return undefined
+  if (!(await readableAiTaskIds(userId, [artifact.taskId])).has(artifact.taskId)) return undefined
   if (row.taskType === 'investment_proposal' && artifact.format !== 'docx') return undefined
   const file = await authorizedArtifactPath(artifact.storagePath)
   if (!file) return undefined
@@ -3776,6 +3790,7 @@ export async function getArtifactDownload(userId: string, artifactId: string) {
 export async function getArtifactPreview(userId: string, artifactId: string) {
   const artifact = await aiTaskRepository.findOwnedArtifact(userId, artifactId)
   if (!artifact || artifact.qualityStatus !== 'passed' || artifact.format !== 'md') return undefined
+  if (!(await readableAiTaskIds(userId, [artifact.taskId])).has(artifact.taskId)) return undefined
   const file = await authorizedArtifactPath(artifact.storagePath)
   if (!file || file.size > 2 * 1024 * 1024) return undefined
   return { artifact, content: await readFile(file.resolved, 'utf8') }

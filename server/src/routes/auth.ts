@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import { z } from 'zod'
+import { LoginSchema } from '../schemas/login.js'
 import {
   createAuthSession,
   legacyBearerAllowedForUser,
@@ -15,12 +15,6 @@ import { listEffectivePermissionCodes } from '../services/systemAuthorizationSer
 
 export const authRouter = Router()
 
-const LoginSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(1),
-  remember: z.boolean().optional().default(false),
-})
-
 authRouter.post('/login', async (req, res, next) => {
   try {
     if (!requestOriginAllowed(req.headers)) {
@@ -29,12 +23,12 @@ authRouter.post('/login', async (req, res, next) => {
     const body = LoginSchema.safeParse(req.body)
     if (!body.success) {
       res.status(400).json({
-        code: 'INVALID_ARGUMENT', message: '请输入合法的邮箱和密码', details: body.error.flatten(),
+        code: 'INVALID_ARGUMENT', message: '请输入姓名或邮箱和密码', details: body.error.flatten(),
         requestId: String(res.locals.requestId || ''),
       })
       return
     }
-    const result = await login(body.data.email, body.data.password)
+    const result = await login(body.data.identifier, body.data.password)
     const session = await createAuthSession({
       userId: result.payload.uid,
       remember: body.data.remember,

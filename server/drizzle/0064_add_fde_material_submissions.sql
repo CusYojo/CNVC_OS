@@ -1,0 +1,80 @@
+CREATE TABLE `sbl_project_material_submissions` (
+  `id` varchar(36) NOT NULL PRIMARY KEY,
+  `project_id` varchar(36) NOT NULL,
+  `file_id` varchar(36) NOT NULL,
+  `file_version` int NOT NULL,
+  `file_name` varchar(255) NOT NULL,
+  `file_sha256` varchar(64) NOT NULL,
+  `file_byte_size` bigint NOT NULL,
+  `sender_id` varchar(36) NOT NULL,
+  `title` varchar(100) NOT NULL,
+  `note` text NOT NULL,
+  `stage` varchar(32) NOT NULL,
+  `status` varchar(24) NOT NULL DEFAULT 'pending',
+  `version` int NOT NULL DEFAULT 1,
+  `revision` int NOT NULL DEFAULT 1,
+  `previous_id` varchar(36) NULL,
+  `withdrawn_at` datetime(3) NULL,
+  `withdrawal_reason` text NULL,
+  `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  UNIQUE KEY `uq_material_previous` (`previous_id`),
+  KEY `idx_material_project_status` (`project_id`,`status`,`created_at`),
+  FOREIGN KEY (`project_id`) REFERENCES `sbl_projects` (`id`) ON DELETE RESTRICT,
+  FOREIGN KEY (`file_id`,`file_version`) REFERENCES `sbl_project_file_versions` (`file_id`,`version`) ON DELETE RESTRICT,
+  FOREIGN KEY (`sender_id`) REFERENCES `sbl_users` (`id`) ON DELETE RESTRICT,
+  FOREIGN KEY (`previous_id`) REFERENCES `sbl_project_material_submissions` (`id`) ON DELETE RESTRICT,
+  CHECK (`file_version`>0 AND `file_byte_size`>0 AND `version`>0 AND `revision`>0),
+  CHECK (`status` IN ('pending','read','partial','partial_returned','approved','returned','withdrawn')),
+  CHECK ((`status`='withdrawn' AND `withdrawn_at` IS NOT NULL AND `withdrawal_reason` IS NOT NULL AND CHAR_LENGTH(`withdrawal_reason`)>=5) OR (`status`<>'withdrawn' AND `withdrawn_at` IS NULL AND `withdrawal_reason` IS NULL))
+);
+--> statement-breakpoint
+CREATE TABLE `sbl_project_material_recipients` (
+  `id` varchar(36) NOT NULL PRIMARY KEY,
+  `submission_id` varchar(36) NOT NULL,
+  `user_id` varchar(36) NOT NULL,
+  `version` int NOT NULL DEFAULT 1,
+  `read_at` datetime(3) NULL,
+  `decision` varchar(16) NULL,
+  `feedback` text NULL,
+  `decided_at` datetime(3) NULL,
+  UNIQUE KEY `uq_material_recipient` (`submission_id`,`user_id`),
+  KEY `idx_material_recipient_user` (`user_id`,`decision`),
+  FOREIGN KEY (`submission_id`) REFERENCES `sbl_project_material_submissions` (`id`) ON DELETE RESTRICT,
+  FOREIGN KEY (`user_id`) REFERENCES `sbl_users` (`id`) ON DELETE RESTRICT,
+  CHECK (`version`>0),
+  CHECK ((`decision` IS NULL AND `feedback` IS NULL AND `decided_at` IS NULL) OR (`decision` IS NOT NULL AND `decision` IN ('approve','return') AND `feedback` IS NOT NULL AND CHAR_LENGTH(`feedback`) BETWEEN 1 AND 400 AND `decided_at` IS NOT NULL AND `read_at` IS NOT NULL))
+);
+--> statement-breakpoint
+CREATE TABLE `sbl_project_material_events` (
+  `id` varchar(36) NOT NULL PRIMARY KEY,
+  `submission_id` varchar(36) NOT NULL,
+  `actor_id` varchar(36) NOT NULL,
+  `request_id` varchar(36) NOT NULL,
+  `request_hash` varchar(64) NOT NULL,
+  `action` varchar(24) NOT NULL,
+  `version` int NOT NULL,
+  `reason` text NOT NULL,
+  `snapshot` json NOT NULL,
+  `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  UNIQUE KEY `uq_material_event_request` (`request_id`),
+  UNIQUE KEY `uq_material_event_version` (`submission_id`,`version`),
+  FOREIGN KEY (`submission_id`) REFERENCES `sbl_project_material_submissions` (`id`) ON DELETE RESTRICT,
+  FOREIGN KEY (`actor_id`) REFERENCES `sbl_users` (`id`) ON DELETE RESTRICT
+);
+--> statement-breakpoint
+CREATE TABLE `sbl_project_material_notices` (
+  `id` varchar(36) NOT NULL PRIMARY KEY,
+  `submission_id` varchar(36) NOT NULL,
+  `recipient_id` varchar(36) NOT NULL,
+  `kind` varchar(16) NOT NULL,
+  `version` int NOT NULL,
+  `read_at` datetime(3) NULL,
+  `closed_at` datetime(3) NULL,
+  `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  UNIQUE KEY `uq_material_notice` (`submission_id`,`recipient_id`,`kind`,`version`),
+  KEY `idx_material_notice_recipient` (`recipient_id`,`closed_at`,`created_at`),
+  FOREIGN KEY (`submission_id`) REFERENCES `sbl_project_material_submissions` (`id`) ON DELETE RESTRICT,
+  FOREIGN KEY (`recipient_id`) REFERENCES `sbl_users` (`id`) ON DELETE RESTRICT,
+  CHECK (`kind` IN ('review','feedback'))
+);

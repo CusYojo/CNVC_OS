@@ -47,6 +47,10 @@ async function main() {
     devDependencies?: Record<string, string>
   }
   const deploy = await readFile(path.resolve(root, 'deploy.sh'), 'utf8')
+  const leadDuplicateReleaseAcceptance = await readFile(path.resolve(root, 'server/src/scripts/leadDuplicateReleaseAcceptance.ts'), 'utf8')
+  const pythonCaPreflight = await readFile(path.resolve(root, 'server/scripts/check-python-ca.mjs'), 'utf8')
+  const documentNativePreflight = await readFile(path.resolve(root, 'server/src/scripts/verifyDocumentRuntimeDependencies.ts'), 'utf8')
+  const qaCommandDiscovery = await readFile(path.resolve(root, 'server/src/services/documentRuntimeDiscovery.ts'), 'utf8')
   const buildPlatform = await readFile(path.resolve(root, 'server/scripts/build-platform.mjs'), 'utf8')
   const cleanBuild = await readFile(path.resolve(root, 'server/scripts/clean-build.mjs'), 'utf8')
   const buildReleaseAcceptance = await readFile(
@@ -385,8 +389,19 @@ async function main() {
     && /REQUESTS_CA_BUNDLE/.test(gordenSuperPptService)
     && !/PYTHONHTTPSVERIFY/.test(gordenSuperPptService)
     && /AI_PYTHON_CA_FILE=/.test(environmentExample)
-    && /ca-certificates/.test(deploy)
-    && /set_env_value "\$env_file" "AI_PYTHON_CA_FILE"/.test(deploy),
+    // deploy.sh is now an operational wrapper, not a host installer. Require
+    // an actual fail-closed probe before mutation, without overwriting .env.
+    && /node --env-file="\$APP_ENV_FILE".*check-python-ca\.mjs.*--print-ca-file/.test(deploy)
+    && /prepare_mutation\(\) \{\s*prepare_document_tls\s*prepare_document_native_tools\s*systemctl daemon-reload/.test(deploy)
+    && /export SSL_CERT_FILE="\$ca_file"/.test(deploy)
+    && /export REQUESTS_CA_BUNDLE="\$ca_file"/.test(deploy)
+    && /ssl\.create_default_context/.test(pythonCaPreflight)
+    && /context\.check_hostname and context\.verify_mode == ssl\.CERT_REQUIRED/.test(pythonCaPreflight)
+    && /stats\.get\('x509_ca', 0\) > 0/.test(pythonCaPreflight)
+    && /configured \? \[configured\]/.test(pythonCaPreflight)
+    && /realpathSync\(process\.argv\[1\]\)/.test(pythonCaPreflight)
+    && /process\.exitCode = 78/.test(pythonCaPreflight)
+    && !/CERT_NONE|check_hostname\s*=\s*False|_create_unverified_context/.test(pythonCaPreflight),
     'Gorden vision must support the Responses API and verified Python CA chains without disabling TLS',
   )
   requireCondition(
@@ -397,7 +412,8 @@ async function main() {
     && /shouldFallbackAiGatewayToChat/.test(aiGatewayService)
     && /fetchAiGatewayChatCompatible/.test(aiGatewayService)
     && /homedir\(\)/.test(projectQaSkillRuntime)
-    && /AI_QA_PDFFONTS_BINARY/.test(projectQaSkillRuntime)
+    && /projectQaCommandCandidates\(\)/.test(projectQaSkillRuntime)
+    && /AI_QA_PDFFONTS_BINARY/.test(qaCommandDiscovery)
     && !/\/Users\/lh\//.test(projectQaSkillRuntime)
     && /Microsoft Word\.app\/Contents\/Resources\/DFonts\/Fangsong\.ttf/.test(dueDiligenceRuntimeCheck)
     && /Microsoft Word\.app\/Contents\/Resources\/DFonts\/SimHei\.ttf/.test(dueDiligenceRuntimeCheck)
@@ -407,7 +423,12 @@ async function main() {
     && dueDiligenceRender.indexOf('or shutil.which("soffice")')
       < dueDiligenceRender.indexOf('word_pdf = convert_with_word')
     && /AI_QA_SOFFICE_BINARY=/.test(environmentExample)
-    && /set_env_value "\$env_file" "AI_QA_PDFFONTS_BINARY"/.test(deploy),
+    && /verifyDocumentRuntimeDependencies\.ts --native-only --stdout-only/.test(deploy)
+    && /projectQaCommandCandidates\(context\.env, context\.home\)/.test(documentNativePreflight)
+    && /qaRenderRuntimeCompatible/.test(documentNativePreflight)
+    && /fontFamilyMatches\(match, family\)/.test(documentNativePreflight)
+    && /pythonPackagesChecked: !nativeOnly/.test(documentNativePreflight)
+    && /languageOutput\.split/.test(documentNativePreflight),
     'shared AI gateway and document render runtimes must use Responses contracts and portable executable/font discovery',
   )
   requireCondition(
@@ -513,8 +534,18 @@ async function main() {
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/applyLeadDuplicateDispositions.ts --apply'
     && packageJson.scripts?.['accept:lead-duplicate-apply']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/leadDuplicateApplyAcceptance.ts'
-    && /run accept:lead-duplicate-dispositions/.test(deploy)
-    && /run accept:lead-duplicate-apply/.test(deploy),
+    && packageJson.scripts?.['accept:lead-duplicate-release']
+      === 'node --env-file-if-exists=.env --env-file-if-exists=.runtime/secrets/mysql-acceptance.env --import tsx server/src/scripts/leadDuplicateReleaseAcceptance.ts'
+    && /assertIsolatedMysqlAcceptanceDatabase\('leadDuplicateReleaseAcceptance'\)/.test(leadDuplicateReleaseAcceptance)
+    && /run accept:lead-duplicate-release/.test(deploy)
+    && !/run accept:lead-duplicate-(?:dispositions|apply)(?:\s|;)/.test(deploy)
+    && /leadDuplicateDispositionAcceptance\.ts/.test(leadDuplicateReleaseAcceptance)
+    && /leadDuplicateApplyAcceptance\.ts/.test(leadDuplicateReleaseAcceptance)
+    && /assertLeadDuplicateAcceptanceIsolation/.test(leadDuplicateApplyAcceptance)
+    && /cleanupFdeTables/.test(leadDuplicateReleaseAcceptance)
+    && /withFdeAcceptanceSignals/.test(leadDuplicateReleaseAcceptance)
+    && /cwd: fixtureRoot/.test(leadDuplicateReleaseAcceptance)
+    && /cleanupCompleted: true/.test(leadDuplicateReleaseAcceptance),
     'lead duplicate adjudication must bind exact groups and live row fingerprints, reject conflicting decisions, preserve source rows, atomically move exact references, and fail closed until every group is approved',
   )
   requireCondition(

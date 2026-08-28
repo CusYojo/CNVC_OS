@@ -11,6 +11,7 @@ import {
 } from '../security/integrationCredentialCrypto.js'
 import { redactSensitiveText } from '../security/redactSecrets.js'
 import { listConfigurationRevisions, rollbackConfigurationRevision } from './adminConfigurationRevisionService.js'
+import { userHasPermission } from './systemAuthorizationService.js'
 
 export const IM_ADMIN_ROLES = ['系统管理员', '运营管理员'] as const
 export const IM_PLATFORMS = ['dingtalk', 'feishu', 'wechat'] as const
@@ -23,9 +24,9 @@ function serviceError(message: string, code: string, status: number) {
   return Object.assign(new Error(message), { code, status })
 }
 
-export function assertImAdmin(actor: ImActor) {
-  if (!(IM_ADMIN_ROLES as readonly string[]).includes(actor.role)) {
-    throw serviceError('仅系统管理员或运营管理员可管理 IM 机器人', 'ROLE_FORBIDDEN', 403)
+export async function assertImAdmin(actor: ImActor): Promise<void> {
+  if (!await userHasPermission(actor.userId, actor.role, 'im.manage')) {
+    throw serviceError('仅具有 IM 管理权限的用户可管理 IM 机器人', 'ROLE_FORBIDDEN', 403)
   }
 }
 
@@ -115,7 +116,7 @@ export function validateImCredentials(platform: ImPlatform, credentials: Record<
 }
 
 export async function listImSettings(actor: ImActor) {
-  assertImAdmin(actor)
+  await assertImAdmin(actor)
   const data = await imIntegrationRepository.listSettingsData()
   const userOptions = data.users.map((user) => ({
       id: user.id,
@@ -146,7 +147,7 @@ export async function listImConfigurationRevisions(
   resourceId: string,
   actor: ImActor,
 ) {
-  assertImAdmin(actor)
+  await assertImAdmin(actor)
   return listConfigurationRevisions({ domain: 'im', resourceType, resourceId })
 }
 
@@ -157,7 +158,7 @@ export async function rollbackImConfigurationRevision(input: {
   expectedVersion: number
   confirmImpact?: boolean
 }, actor: ImActor) {
-  assertImAdmin(actor)
+  await assertImAdmin(actor)
   return rollbackConfigurationRevision({
     domain: 'im', resourceType: input.resourceType, resourceId: input.resourceId,
     revisionId: input.revisionId, expectedVersion: input.expectedVersion,
@@ -189,7 +190,7 @@ async function requireEnabledPushTarget(botId: string, bindingId: string) {
 }
 
 export async function listLeadPushSettings(actor: ImActor) {
-  assertImAdmin(actor)
+  await assertImAdmin(actor)
   const data = await imIntegrationRepository.listLeadPushSettingsData()
   return { targets: data.targets, rules: data.rules, projects: data.projects }
 }
@@ -204,7 +205,7 @@ export async function createLeadPushRule(input: {
   messageTemplate: string
   enabled?: boolean
 }, actor: ImActor) {
-  assertImAdmin(actor)
+  await assertImAdmin(actor)
   const target = await requireEnabledPushTarget(input.botId, input.bindingId)
   if (target.binding.projectId && target.binding.projectId !== input.projectId) {
     throw serviceError('规则项目必须与机器人绑定项目一致', 'IM_PUSH_PROJECT_MISMATCH', 400)
@@ -235,7 +236,7 @@ export async function updateLeadPushRule(ruleId: string, input: {
   messageTemplate?: string
   enabled?: boolean
 }, actor: ImActor) {
-  assertImAdmin(actor)
+  await assertImAdmin(actor)
   const existing = await imIntegrationRepository.findLeadPushRule(ruleId)
   if (!existing) throw serviceError('线索推送规则不存在', 'IM_PUSH_RULE_NOT_FOUND', 404)
   const target = await requireEnabledPushTarget(existing.botId, existing.bindingId)
@@ -271,7 +272,7 @@ export async function updateLeadPushRule(ruleId: string, input: {
 }
 
 export async function deleteLeadPushRule(ruleId: string, actor: ImActor) {
-  assertImAdmin(actor)
+  await assertImAdmin(actor)
   const deleted = await imIntegrationRepository.deleteLeadPushRuleWithAudit(ruleId, auditRecord(actor, '删除线索推送规则', ruleId))
   if (!deleted) throw serviceError('线索推送规则不存在', 'IM_PUSH_RULE_NOT_FOUND', 404)
   return { ok: true }
@@ -290,7 +291,7 @@ export async function dispatchLeadPushRule(input: {
   leadId: string
   idempotencyKey: string
 }, actor: ImActor) {
-  assertImAdmin(actor)
+  await assertImAdmin(actor)
   const row = await imIntegrationRepository.findLeadPushDispatch(input.ruleId, input.leadId)
   if (!row || !row.rule.enabled) throw serviceError('线索推送规则不存在或未启用', 'IM_PUSH_RULE_DISABLED', 409)
   await requireEnabledPushTarget(row.rule.botId, row.rule.bindingId)
@@ -317,7 +318,7 @@ export async function createImBot(input: {
   config?: Record<string, unknown>
   enabled?: boolean
 }, actor: ImActor) {
-  assertImAdmin(actor)
+  await assertImAdmin(actor)
   const id = randomUUID()
   const credentials = validateImCredentials(input.platform, input.credentials)
   const encrypted = encryptIntegrationCredential(credentials, id)
@@ -343,7 +344,7 @@ export async function createWeixinBotFromLogin(input: {
   botToken: string
   baseUrl: string
 }, actor: ImActor) {
-  assertImAdmin(actor)
+  await assertImAdmin(actor)
   const credentials = {
     transport: 'ilink',
     accountId: input.accountId,
@@ -395,7 +396,7 @@ export async function updateImBot(botId: string, input: {
   enabled?: boolean
   confirmDisableImpact?: boolean
 }, actor: ImActor) {
-  assertImAdmin(actor)
+  await assertImAdmin(actor)
   const existing = await imIntegrationRepository.findBot(botId)
   if (!existing) throw serviceError('IM 机器人不存在', 'IM_BOT_NOT_FOUND', 404)
     const credentialPatch = input.credentials === undefined ? {} : (() => {
@@ -476,7 +477,7 @@ async function deliverWebhook(
 }
 
 export async function testImBotConnection(botId: string, actor: ImActor) {
-  assertImAdmin(actor)
+  await assertImAdmin(actor)
   const bot = await imIntegrationRepository.findBot(botId)
   if (!bot) throw serviceError('IM 机器人不存在', 'IM_BOT_NOT_FOUND', 404)
   const storedCredentials = decryptIntegrationCredential(bot.credentialCiphertext, bot.id)
@@ -510,7 +511,7 @@ export async function createImBinding(input: {
   department?: string | null
   enabled?: boolean
 }, actor: ImActor) {
-  assertImAdmin(actor)
+  await assertImAdmin(actor)
   const id = randomUUID()
   const result = await imIntegrationRepository.createBindingWithAudit({
     record: {
@@ -540,7 +541,7 @@ export async function updateImBinding(bindingId: string, input: {
   externalConversationId?: string
   enabled?: boolean
 }, actor: ImActor) {
-  assertImAdmin(actor)
+  await assertImAdmin(actor)
   const result = await imIntegrationRepository.updateBindingWithAudit({
     bindingId,
     expectedVersion: input.expectedVersion,
@@ -557,7 +558,7 @@ export async function updateImBinding(bindingId: string, input: {
 }
 
 export async function deleteImBinding(bindingId: string, actor: ImActor) {
-  assertImAdmin(actor)
+  await assertImAdmin(actor)
   const result = await imIntegrationRepository.deleteBindingWithAudit(bindingId, auditRecord(actor, '删除机器人绑定', bindingId))
   if (result === 'has_push_rule') throw serviceError('绑定仍被线索推送规则引用，请先删除规则', 'IM_BINDING_HAS_PUSH_RULE', 409)
   if (result === 'has_history') throw serviceError('绑定已有投递历史，请停用以保留审计链', 'IM_BINDING_HAS_HISTORY', 409)
@@ -579,7 +580,7 @@ export async function enqueueImMessage(input: {
   const id = randomUUID()
   const result = await imIntegrationRepository.enqueueMessageWithAudit({
     id, botId: input.botId, bindingId: input.bindingId, actorUserId: actor.userId,
-    actorIsAdmin: (IM_ADMIN_ROLES as readonly string[]).includes(actor.role),
+    actorIsAdmin: await userHasPermission(actor.userId, actor.role, 'im.manage'),
     idempotencyKey: input.idempotencyKey, payloadHash, payload,
     successAudit: auditRecord(actor, '创建发送任务', `${id}:${input.botId}:${input.bindingId}`),
     deniedAudit: auditRecord(actor, '发送机器人消息', input.bindingId, 'denied'),

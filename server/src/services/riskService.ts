@@ -15,7 +15,6 @@ function isGlobalRiskViewer(actor: ProjectAccessActor) {
 }
 
 function riskAccessCondition(actor: ProjectAccessActor) {
-  if (isSystemAdmin(actor)) return sql<boolean>`TRUE`
   const accessibleProjectIds = db.select({ id: projects.id }).from(projects)
     .where(projectAccessCondition(actor))
   const globalConditions = [eq(risks.createdBy, actor.uid), eq(risks.assigneeUserId, actor.uid)]

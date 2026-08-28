@@ -32,6 +32,7 @@ export type ProjectIdentityRecord = {
   ownerUserId: string | null
   collaborators: string[]
   createdBy: string | null
+  workflowModel?: string
 }
 
 export type ProjectMemberBinding = {

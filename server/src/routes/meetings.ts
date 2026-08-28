@@ -39,6 +39,8 @@ const CreateSchema = z.object({
   conclusions: z.array(z.string()).default([]),
   newTodos: z.array(z.object({
     title: z.string().min(1), owner: z.string().min(1), dueDate: z.string().optional(),
+    ownerUserId: z.string().uuid().optional(),
+    deliverable: z.string().max(2000).optional(),
     priority: z.enum(['高', '中', '低']).default('中'),
     type: z.string().default('待办'),
     status: z.string().default('未开始'),
@@ -128,6 +130,8 @@ const TodoSchema = z.object({
   projectName: z.string().optional(),
   title: z.string(),
   owner: z.string(),
+  ownerUserId: z.string().uuid().optional(),
+  deliverable: z.string().max(2000).optional(),
   dueDate: z.string().optional(),
   priority: z.enum(['高', '中', '低']).default('中'),
   type: z.string().default('待办'),
@@ -182,7 +186,7 @@ aiRouter.post('/chat', async (req: AuthedRequest, res, next) => {
     }).parse(req.body)
     const pid = scope === 'global' ? undefined : projectId
     if (pid) await requireAccessibleProject(req.user!.uid, pid)
-    res.json(await answerQuestion(question, projectName, pid))
+    res.json(await answerQuestion(question, projectName, pid, req.user!.uid))
   } catch (err) { next(err) }
 })
 
@@ -220,7 +224,7 @@ aiRouter.post('/chat-stream', async (req: AuthedRequest, res) => {
   const sse = (event: string, data: unknown) => { res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`) }
 
   try {
-    const result = await answerQuestion(question, projectName, pid)
+    const result = await answerQuestion(question, projectName, pid, req.user!.uid)
     sse('delta', { text: result.answer })
     sse('done', result)
     res.end()

@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, or, sql } from 'drizzle-orm'
 import { db } from '../db/client.js'
 import {
   aiSummaries,
@@ -11,6 +11,8 @@ import {
 import { identityRepositories } from '../repositories/index.js'
 import { retrieveKnowledge } from './ragService.js'
 import { getAccessibleProject } from './projectAccessService.js'
+import { directiveTaskAccessCondition } from './fdeDirectiveLinksService.js'
+import { canReadAllProjectFiles, projectFileAccessCondition, requireProjectFileAccess } from './projectFileAccessService.js'
 
 function toolError(status: number, code: string, message: string) {
   return Object.assign(new Error(message), { status, code })
@@ -48,20 +50,20 @@ export async function getProjectSummaryForUser(input: { userId: string; projectI
       total: sql<number>`COUNT(*)`,
       parsed: sql<number>`SUM(CASE WHEN ${projectFiles.parseStatus} = '成功' THEN 1 ELSE 0 END)`,
       withOriginal: sql<number>`SUM(CASE WHEN ${projectFiles.storagePath} IS NOT NULL THEN 1 ELSE 0 END)`,
-    }).from(projectFiles).where(eq(projectFiles.projectId, input.projectId)),
+    }).from(projectFiles).where(and(eq(projectFiles.projectId, input.projectId), projectFileAccessCondition(input.userId))),
     db.select({ total: sql<number>`COUNT(*)` }).from(meetings)
-      .where(eq(meetings.projectId, input.projectId)),
+      .where(and(eq(meetings.projectId, input.projectId), or(eq(meetings.workflowKind, 'legacy'), eq(meetings.workflowStatus, 'completed')))),
     db.select({
       total: sql<number>`COUNT(*)`,
-      open: sql<number>`SUM(CASE WHEN ${todos.status} NOT IN ('已完成', '已退回') THEN 1 ELSE 0 END)`,
-    }).from(todos).where(eq(todos.projectId, input.projectId)),
+      open: sql<number>`SUM(CASE WHEN ${todos.status} NOT IN ('已完成', '已取消', '已归档', '已关闭') THEN 1 ELSE 0 END)`,
+    }).from(todos).where(and(eq(todos.projectId, input.projectId), directiveTaskAccessCondition(input.userId))),
     db.select({
       total: sql<number>`COUNT(*)`,
       open: sql<number>`SUM(CASE WHEN ${risks.status} NOT IN ('已解除', '已忽略') THEN 1 ELSE 0 END)`,
       openHigh: sql<number>`SUM(CASE WHEN ${risks.status} NOT IN ('已解除', '已忽略') AND ${risks.level} = '高' THEN 1 ELSE 0 END)`,
     }).from(risks).where(eq(risks.projectId, input.projectId)),
   ])
-  const latestSummary = latestSummaries[0] ?? null
+  const latestSummary = await canReadAllProjectFiles(db, input.projectId, input.userId) ? latestSummaries[0] ?? null : null
   const sources = [
     {
       citationId: 'S1', projectId: input.projectId, sourceId: project.id,
@@ -142,7 +144,7 @@ export async function searchProjectDocsForUser(input: {
   if (input.projectId) await assertProjectToolAccess(input.userId, input.projectId)
   else await assertEnabledUser(input.userId)
   const topK = Math.max(1, Math.min(20, input.topK || 6))
-  const chunks = await retrieveKnowledge(scope, input.projectId || undefined, input.query, topK)
+  const chunks = await retrieveKnowledge(scope, input.projectId || undefined, input.query, topK, input.userId)
   const leadChunks = input.compareLeadPool
     ? await retrieveKnowledge('lead', undefined, input.query, Math.min(10, topK))
     : []
@@ -185,7 +187,7 @@ export async function listProjectFilesForUser(input: { userId: string; projectId
     size: projectFiles.size, byteSize: projectFiles.byteSize, sha256: projectFiles.sha256,
     version: projectFiles.version, parseStatus: projectFiles.parseStatus, visibility: projectFiles.visibility,
     storagePath: projectFiles.storagePath, uploadedAt: projectFiles.uploadedAt,
-  }).from(projectFiles).where(eq(projectFiles.projectId, input.projectId)).orderBy(asc(projectFiles.name))
+  }).from(projectFiles).where(and(eq(projectFiles.projectId, input.projectId), projectFileAccessCondition(input.userId))).orderBy(asc(projectFiles.name))
   return {
     permission: permission('project', input.projectId), projectId: input.projectId,
     files: rows.map(({ storagePath, ...row }) => ({ ...row, hasOriginal: Boolean(storagePath) })),
@@ -203,6 +205,7 @@ export async function readProjectFileForUser(input: {
   const [file] = await db.select().from(projectFiles)
     .where(and(eq(projectFiles.id, input.fileId), eq(projectFiles.projectId, input.projectId))).limit(1)
   if (!file) throw toolError(404, 'PROJECT_FILE_NOT_FOUND', '当前项目中不存在该文件')
+  await requireProjectFileAccess(db, file.id, input.userId, 'view')
   const maxChunks = Math.max(1, Math.min(20, input.maxChunks || 10))
   const maxChars = Math.max(200, Math.min(8_000, input.maxCharsPerChunk || 4_000))
   const rows = await db.select({ chunkIndex: fileChunks.chunkIndex, content: fileChunks.content })

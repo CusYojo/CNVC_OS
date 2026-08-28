@@ -24,14 +24,17 @@ function resolveMigrationsFolder(): string {
 
 export function rewriteMigrationSqlForPrefix(sqlText: string, tablePrefix: string): string {
   if (tablePrefix === 'sbl_') return sqlText
-  const rewrittenConstraints = sqlText.replace(/CONSTRAINT `([^`]+)`(?=\s+(?:FOREIGN\s+KEY|CHECK))/gi, (_match, originalName: string) => {
+  const constraintName = (originalName: string) => {
     const expanded = originalName.startsWith('sbl_')
       ? `${tablePrefix}${originalName.slice('sbl_'.length)}`
       : `${tablePrefix}${originalName}`
-    if (expanded.length <= 64) return `CONSTRAINT \`${expanded}\``
+    if (expanded.length <= 64) return expanded
     const hash = createHash('sha256').update(expanded).digest('hex').slice(0, 12)
-    return `CONSTRAINT \`${expanded.slice(0, 64 - hash.length - 1)}_${hash}\``
-  })
+    return `${expanded.slice(0, 64 - hash.length - 1)}_${hash}`
+  }
+  const rewrittenConstraints = sqlText
+    .replace(/CONSTRAINT `([^`]+)`(?=\s+(?:FOREIGN\s+KEY|CHECK))/gi, (_match, name: string) => `CONSTRAINT \`${constraintName(name)}\``)
+    .replace(/DROP CHECK `([^`]+)`/gi, (_match, name: string) => `DROP CHECK \`${constraintName(name)}\``)
   return rewrittenConstraints.replaceAll('`sbl_', `\`${tablePrefix}`)
 }
 
@@ -66,7 +69,35 @@ async function verifyMySqlRuntime(): Promise<void> {
 }
 
 const REQUIRED_RUNTIME_TABLES = [
-  'users', 'auth_sessions', 'auth_legacy_bearer_policy', 'projects', 'project_members', 'project_score_jobs', 'project_files', 'project_file_versions',
+  'users', 'auth_sessions', 'auth_legacy_bearer_policy', 'projects', 'project_classification_history', 'project_members', 'project_score_jobs', 'project_files', 'project_file_versions',
+  'project_stage_materials', 'project_plans', 'project_plan_actions',
+  'project_duty_assignments', 'project_governance_changes',
+  'fde_workflow_policies', 'fde_workflow_policy_versions',
+  'fde_type_policy_reviews', 'fde_type_policy_commands', 'fde_type_policy_events',
+  'fde_type_registration_commands',
+  'fde_type_instances', 'fde_type_execution_reviews', 'fde_type_execution_files', 'fde_type_execution_commands', 'fde_type_execution_events',
+  'fde_type_execution_notices',
+  'responsibility_policies', 'responsibility_policy_versions', 'responsibility_policy_commands', 'responsibility_policy_events',
+  'responsibility_records', 'responsibility_evidence', 'responsibility_events', 'responsibility_commands', 'responsibility_notices', 'responsibility_task_markers',
+  'responsibility_scan_cycles', 'responsibility_scan_state',
+  'project_agent_configs', 'project_agent_runs', 'project_agent_recommendations', 'project_agent_decisions', 'project_agent_commands',
+  'project_agent_schedule_requests', 'project_stage_dates',
+  'project_replan_policies', 'project_replan_requests',
+  'project_timeline_tasks', 'project_timeline_syncs',
+  'todo_feedbacks', 'todo_feedback_evidence', 'todo_acceptances',
+  'project_weekly_plans', 'project_weekly_plan_items', 'project_weekly_plan_events', 'project_weekly_plan_notices',
+  'personal_weekly_reports', 'personal_weekly_report_events', 'personal_weekly_report_recipients',
+  'meeting_workflow_events', 'meeting_workflow_notices',
+  'committee_meetings', 'committee_years', 'committee_agendas', 'committee_files', 'committee_commands',
+  'project_directives', 'directive_events', 'directive_notices', 'leader_time_requests',
+  'leader_time_events', 'leader_time_notices', 'personal_calendar_events', 'personal_calendar_history',
+  'leader_time_batches',
+  'project_records', 'project_record_comments', 'project_record_events',
+  'project_file_grants', 'project_file_events', 'project_material_submissions',
+  'project_material_recipients', 'project_material_events', 'project_material_notices', 'project_material_request_closures',
+  'company_knowledge', 'company_knowledge_grants', 'company_knowledge_comments', 'company_knowledge_ratings', 'company_knowledge_events', 'company_knowledge_commands',
+  'oa_office_policies', 'oa_office_policy_versions', 'oa_office_events', 'oa_office_commands', 'oa_office_policy_commands', 'oa_office_attachments', 'oa_office_attachment_grants', 'oa_office_notices',
+  'oa_office_executions', 'oa_office_execution_files',
   'departments', 'roles', 'permissions', 'role_permissions', 'user_roles', 'user_departments', 'dictionary_groups', 'dictionary_items',
   'knowledge_chunks', 'chat_conversations', 'agent_conversations', 'agent_messages',
   'agent_message_parts', 'leads', 'lead_score_jobs', 'lead_pipeline_raw_events',
@@ -76,7 +107,7 @@ const REQUIRED_RUNTIME_TABLES = [
   'lead_pipeline_items', 'lead_pipeline_transitions', 'lead_pipeline_prompt_versions',
   'lead_pipeline_runs', 'lead_agent_runtime_permits', 'lead_pipeline_decisions', 'lead_pipeline_evidence',
   'lead_pipeline_reviews', 'lead_pipeline_entity_matches', 'meetings', 'todos', 'risks',
-  'oa_approval_requests', 'oa_approval_nodes', 'oa_approval_records', 'oa_workflow_logs',
+  'oa_approval_requests', 'oa_approval_nodes', 'oa_approval_records', 'oa_approval_revisions', 'oa_workflow_logs',
   'ai_tasks', 'ai_task_templates', 'ai_task_sources', 'ai_artifacts', 'ai_custom_templates',
   'ai_model_providers', 'ai_models', 'ai_model_routes',
   'ai_capabilities', 'ai_capability_bindings', 'ai_conversation_capabilities',

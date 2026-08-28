@@ -16,7 +16,7 @@ export function ProjectModal({ open, onClose }: { open: boolean; onClose: () => 
     companyName: '',
     industry: 'AI 医疗',
     round: 'A 轮',
-    stage: '线索' as ProjectStage,
+    stage: '入库' as ProjectStage,
     source: '手工录入',
     financing: '未披露，待核验',
     valuation: '未披露，待核验',
@@ -63,7 +63,7 @@ export function ProjectModal({ open, onClose }: { open: boolean; onClose: () => 
         <label><span className="label">公司名称</span><input className="input" placeholder="公司工商全称" value={form.companyName} onChange={(event) => setForm({ ...form, companyName: event.target.value })} /></label>
         <label><span className="label">所属行业 <b className="text-rose-500">*</b></span><select className="input" value={form.industry} onChange={(event) => setForm({ ...form, industry: event.target.value })}><option>AI 医疗</option><option>工业软件</option><option>具身智能</option><option>新能源</option><option>合成生物</option><option>企业服务</option><option>消费科技</option></select></label>
         <label><span className="label">融资轮次</span><select className="input" value={form.round} onChange={(event) => setForm({ ...form, round: event.target.value })}><option>天使轮</option><option>Pre-A</option><option>A 轮</option><option>B 轮</option><option>C 轮</option><option>Pre-IPO</option></select></label>
-        <label><span className="label">初始阶段</span><input className="input" value="线索（通过 OA 后进入初筛）" readOnly /><span className="mt-1 block text-[10px] text-slate-400">新建项目不能跳过审批直接进入业务阶段。</span></label>
+        <label><span className="label">初始阶段</span><input className="input" value="项目池 · 入库" readOnly /><span className="mt-1 block text-[10px] text-slate-400">新建项目先进入项目池，完成入库初筛后成为普通项目。</span></label>
         <label><span className="label">项目来源</span><select className="input" value={form.source} onChange={(event) => setForm({ ...form, source: event.target.value })}><option>手工录入</option><option>机构推荐</option><option>FA</option><option>BP 邮箱</option><option>行业会议</option><option>产业方推荐</option></select></label>
         <label><span className="label">计划融资</span><input className="input" value={form.financing} onChange={(event) => setForm({ ...form, financing: event.target.value })} /></label>
         <label><span className="label">投前估值</span><input className="input" value={form.valuation} onChange={(event) => setForm({ ...form, valuation: event.target.value })} /></label>

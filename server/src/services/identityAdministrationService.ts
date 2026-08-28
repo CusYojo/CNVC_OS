@@ -186,6 +186,7 @@ export async function replaceProjectMembers(input: {
     const administrator = await requireCurrentAdministrator(users, actor)
     const project = await permissions.lockProjectById(input.projectId)
     if (!project) throw identityError(404, 'PROJECT_NOT_FOUND', '项目不存在')
+    if (project.workflowModel === 'fde-v1') throw identityError(409, 'FDE_GOVERNANCE_ENDPOINT_REQUIRED', 'FDE 项目必须通过项目职责变更流程管理成员')
     const memberUsers = await users.findManyByIds(memberIds)
     if (memberUsers.length !== memberIds.length || memberUsers.some((member) => member.status !== '启用')) {
       throw identityError(400, 'PROJECT_MEMBER_INVALID', '项目负责人和协作成员必须是存在且已启用的用户')

@@ -18,6 +18,7 @@ import {
   runDocumentSkillProcessor,
 } from './aiDocumentSkillRenderService.js'
 import { execFileSupervised as execFileAsync } from '../runtime/supervisedProcessService.js'
+import { projectQaCommandCandidates } from './documentRuntimeDiscovery.js'
 const REQUIRED_SKILL_NAME = 'draft-investment-qa'
 const COMMAND_TIMEOUT_MS = 120_000
 
@@ -247,36 +248,10 @@ async function runMarkdownValidation(input: {
 }
 
 export async function resolveProjectQaRenderCommands() {
-  const bundledDependencies = path.join(
-    homedir(),
-    '.cache',
-    'codex-runtimes',
-    'codex-primary-runtime',
-    'dependencies',
-  )
-  const bundledBin = path.join(bundledDependencies, 'bin', 'override')
-  const bundledPopplerBin = path.join(bundledDependencies, 'native', 'poppler', 'poppler', 'bin')
-  const soffice = await resolveCommand([
-    process.env.AI_QA_SOFFICE_BINARY,
-    process.env.AI_PDF_TO_PPT_LIBREOFFICE,
-    'soffice',
-    path.join(bundledBin, 'soffice'),
-    '/Applications/LibreOffice.app/Contents/MacOS/soffice',
-    '/opt/homebrew/bin/soffice',
-  ], ['--version'])
-  const pdftoppm = await resolveCommand([
-    process.env.AI_QA_PDFTOPPM_BINARY,
-    process.env.AI_PDF_TO_PPT_PDFTOPPM,
-    'pdftoppm',
-    path.join(bundledBin, 'pdftoppm'),
-    '/opt/homebrew/bin/pdftoppm',
-  ], ['-v'])
-  const pdffonts = await resolveCommand([
-    process.env.AI_QA_PDFFONTS_BINARY,
-    'pdffonts',
-    path.join(bundledPopplerBin, 'pdffonts'),
-    '/opt/homebrew/bin/pdffonts',
-  ], ['-v'])
+  const candidates = projectQaCommandCandidates()
+  const soffice = await resolveCommand(candidates.soffice, ['--version'])
+  const pdftoppm = await resolveCommand(candidates.pdftoppm, ['-v'])
+  const pdffonts = await resolveCommand(candidates.pdffonts, ['-v'])
   return { soffice, pdftoppm, pdffonts }
 }
 

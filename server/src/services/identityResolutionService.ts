@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm'
+import { and, eq, sql } from 'drizzle-orm'
 import { db } from '../db/client.js'
 import {
   identityResolutionIssues,
@@ -9,7 +9,9 @@ import {
   risks,
   todos,
 } from '../db/schema.js'
-import { identityRepositories } from '../repositories/index.js'
+import { createMySqlIdentityRepositoryContext, identityRepositories } from '../repositories/index.js'
+import { lockSchedulePeople, requireMeetingSlot, type ScheduleTx } from './fdeScheduleService.js'
+import { scheduleTransaction } from './fdeScheduleTransactionService.js'
 
 type EntityType = 'project' | 'meeting' | 'todo' | 'risk'
 type IssueReason = 'missing_user' | 'duplicate_name' | 'disabled_user'
@@ -24,10 +26,10 @@ function normalizeName(value: unknown): string {
   return typeof value === 'string' ? value.trim().slice(0, 64) : ''
 }
 
-async function resolveUserName(value: unknown): Promise<Resolution> {
+async function resolveUserName(value: unknown, tx?: ScheduleTx): Promise<Resolution> {
   const sourceName = normalizeName(value)
   if (!sourceName) return { sourceName, userId: null, reason: null }
-  const matches = await identityRepositories.users.findByTrimmedName(sourceName, 3)
+  const matches = await (tx ? createMySqlIdentityRepositoryContext(tx).users : identityRepositories.users).findByTrimmedName(sourceName, 3)
   if (matches.length === 0) return { sourceName, userId: null, reason: 'missing_user' }
   if (matches.length > 1) return { sourceName, userId: null, reason: 'duplicate_name' }
   if (matches[0].status !== '启用') return { sourceName, userId: null, reason: 'disabled_user' }
@@ -39,8 +41,9 @@ async function resolvedUserOverride(
   entityId: string,
   fieldName: string,
   sourceName: string,
+  tx?: ScheduleTx,
 ): Promise<string | null> {
-  const [resolved] = await db.select({ userId: identityResolutionIssues.resolvedUserId })
+  const [resolved] = await (tx ?? db).select({ userId: identityResolutionIssues.resolvedUserId })
     .from(identityResolutionIssues)
     .where(and(
       eq(identityResolutionIssues.entityType, entityType),
@@ -50,7 +53,7 @@ async function resolvedUserOverride(
       eq(identityResolutionIssues.status, 'resolved'),
     )).limit(1)
   if (!resolved?.userId) return null
-  const user = await identityRepositories.users.findById(resolved.userId)
+  const user = await (tx ? createMySqlIdentityRepositoryContext(tx).users : identityRepositories.users).findById(resolved.userId)
   return user?.status === '启用' ? user.id : null
 }
 
@@ -59,8 +62,9 @@ async function resolveField(
   entityId: string,
   fieldName: string,
   values: unknown[],
+  tx?: ScheduleTx,
 ): Promise<Resolution[]> {
-  await db.update(identityResolutionIssues)
+  await (tx ?? db).update(identityResolutionIssues)
     .set({ status: 'superseded', updatedAt: new Date() })
     .where(and(
       eq(identityResolutionIssues.entityType, entityType),
@@ -71,12 +75,12 @@ async function resolveField(
 
   const uniqueNames = [...new Set(values.map(normalizeName).filter(Boolean))]
   const resolutions = await Promise.all(uniqueNames.map(async (sourceName) => {
-    const override = await resolvedUserOverride(entityType, entityId, fieldName, sourceName)
-    return override ? { sourceName, userId: override, reason: null } : resolveUserName(sourceName)
+    const override = await resolvedUserOverride(entityType, entityId, fieldName, sourceName, tx)
+    return override ? { sourceName, userId: override, reason: null } : resolveUserName(sourceName, tx)
   }))
   for (const resolution of resolutions) {
     if (!resolution.reason) continue
-    await db.insert(identityResolutionIssues).values({
+    await (tx ?? db).insert(identityResolutionIssues).values({
       entityType,
       entityId,
       fieldName,
@@ -132,20 +136,31 @@ export async function syncMeetingIdentityBindings(
   meetingId: string,
   host: unknown,
   attendees: unknown,
-) {
-  const hostResolution = (await resolveField('meeting', meetingId, 'host', [host]))[0]
+  tx?: ScheduleTx,
+): Promise<void> {
+  if (!tx) return scheduleTransaction(transaction => syncMeetingIdentityBindings(meetingId, host, attendees, transaction), { isolationLevel: 'read committed' })
+  const [initial] = await tx.select().from(meetings).where(eq(meetings.id, meetingId)).limit(1)
+  if (!initial || initial.workflowKind !== 'legacy') return // 专用会议只接受显式稳定账号，不能被姓名回填重绑。
+  if (initial.projectId) await tx.execute(sql`SELECT ${projects.id} FROM ${projects} WHERE ${projects.id}=${initial.projectId} FOR UPDATE`)
+  const [meeting] = await tx.select().from(meetings).where(eq(meetings.id, meetingId)).for('update')
+  if (meeting.projectId !== initial.projectId || meeting.version !== initial.version) throw Object.assign(new Error('会议已变更，请重新绑定'), { code: 'VERSION_CONFLICT', status: 409 })
+  const hostResolution = (await resolveField('meeting', meetingId, 'host', [host], tx))[0]
   const attendeeNames = Array.isArray(attendees) ? attendees : []
-  const attendeeResolutions = await resolveField('meeting', meetingId, 'attendees', attendeeNames)
-  await db.update(meetings)
+  const attendeeResolutions = await resolveField('meeting', meetingId, 'attendees', attendeeNames, tx)
+  const oldPeople = await tx.select({ id: meetingParticipants.userId }).from(meetingParticipants).where(eq(meetingParticipants.meetingId, meetingId))
+  const newPeople = [hostResolution?.userId, ...attendeeResolutions.map(row => row.userId)].filter((id): id is string => Boolean(id))
+  await lockSchedulePeople(tx, [...newPeople, ...oldPeople.map(row => row.id), ...(meeting.hostUserId ? [meeting.hostUserId] : [])])
+  await requireMeetingSlot(tx, meetingId, newPeople, meeting.startedAt, meeting.endsAt)
+  await tx.update(meetings)
     .set({ hostUserId: hostResolution?.userId ?? null })
     .where(eq(meetings.id, meetingId))
-  await db.delete(meetingParticipants).where(eq(meetingParticipants.meetingId, meetingId))
+  await tx.delete(meetingParticipants).where(eq(meetingParticipants.meetingId, meetingId))
   const participants = new Map<string, string>()
   for (const resolution of attendeeResolutions) {
     if (resolution.userId) participants.set(resolution.userId, resolution.sourceName)
   }
   if (participants.size) {
-    await db.insert(meetingParticipants).values([...participants].map(([userId, sourceName]) => ({
+    await tx.insert(meetingParticipants).values([...participants].map(([userId, sourceName]) => ({
       meetingId,
       userId,
       sourceName,
@@ -154,6 +169,8 @@ export async function syncMeetingIdentityBindings(
 }
 
 export async function syncTodoOwnerIdentity(todoId: string, owner: unknown) {
+  const [task] = await db.select({ executionModel: todos.executionModel }).from(todos).where(eq(todos.id, todoId)).limit(1)
+  if (task?.executionModel === 'fde-v1') return // 正式 FDE 任务只接受显式稳定 ID，不按姓名重新绑定。
   const resolution = (await resolveField('todo', todoId, 'owner', [owner]))[0]
   await db.update(todos)
     .set({ ownerUserId: resolution?.userId ?? null })

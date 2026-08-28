@@ -1,5 +1,8 @@
 import { Router } from 'express'
 import { z } from 'zod'
+import { officeRouter } from './office.js'
+import { listApprovalCenter } from '../services/fdeApprovalCenterService.js'
+import { readTypeApprovalNotice } from '../services/fdeTypeApprovalService.js'
 import type { AuthedRequest } from '../middleware/requireAuth.js'
 import {
   actOnOaApprovalRequest,
@@ -9,8 +12,24 @@ import {
 } from '../services/oaWorkflowService.js'
 
 export const oaRouter = Router()
+oaRouter.use('/office', officeRouter)
+oaRouter.get('/center', async (req: AuthedRequest, res, next) => {
+  try {
+    res.setHeader('Cache-Control', 'private, no-store')
+    res.setHeader('X-Content-Type-Options', 'nosniff')
+    res.json(await listApprovalCenter(req.user!.uid, req.query))
+  } catch (error) { next(error) }
+})
 
-const projectStage = z.enum(['线索', '初筛', '立项', '尽调', '上会', '投决', '投后', '退出', '放弃'])
+oaRouter.post('/type-notices/:id/read', async (req: AuthedRequest, res, next) => {
+  try {
+    z.object({}).strict().parse(req.body)
+    res.setHeader('Cache-Control', 'private, no-store'); res.setHeader('X-Content-Type-Options', 'nosniff')
+    res.json(await readTypeApprovalNotice(z.string().uuid().parse(req.params.id), req.user!.uid))
+  } catch (error) { next(error) }
+})
+
+const projectStage = z.enum(['入库', '立项', '尽调计划制定', '尽调计划审核', '启动尽调', '内核', '投决', '打款', '已 Close', '线索', '初筛', '尽调', '上会', '投后', '退出', '放弃'])
 const createSchema = z.object({
   projectId: z.string().uuid(),
   targetStage: projectStage,
@@ -23,6 +42,7 @@ const createSchema = z.object({
 const actionSchema = z.object({
   action: z.enum(['approve', 'return', 'reject', 'withdraw', 'resubmit']),
   comment: z.string().trim().min(2).max(8_000),
+  expectedVersion: z.number().int().positive().optional(),
 })
 
 oaRouter.get('/requests', async (req: AuthedRequest, res, next) => {

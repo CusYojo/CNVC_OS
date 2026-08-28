@@ -5,7 +5,7 @@ import { once } from 'node:events'
 import { eq } from 'drizzle-orm'
 import { db, pool } from '../db/client.js'
 import { ensureSchema } from '../db/migrate.js'
-import { adminConfigurationRevisions, aiModelProviders, aiModelRoutes, aiModels, auditLogs, users } from '../db/schema.js'
+import { adminConfigurationRevisions, aiModelProviders, aiModelRoutes, aiModels, auditLogs, roles, userRoles, users } from '../db/schema.js'
 import { decryptModelCredential, encryptModelCredential } from '../security/modelCredentialCrypto.js'
 import {
   createAiModel,
@@ -69,7 +69,10 @@ try {
     status: '启用',
   })
   const actor = { userId, userName: '模型设置验收用户', role: '系统管理员' }
-  const forbiddenActor = { ...actor, role: '投资经理' }
+  const [adminRole] = await db.select({ id: roles.id }).from(roles).where(eq(roles.code, 'SYSTEM_ADMIN')).limit(1)
+  assert(adminRole, '隔离验收库缺少系统管理员角色')
+  await db.insert(userRoles).values({ userId, roleId: adminRole.id, isPrimary: true })
+  const forbiddenActor = { ...actor, userId: randomUUID(), role: '投资经理' }
 
   const cryptoRoundTrip = encryptModelCredential(firstKey, 'crypto-round-trip')
   assert.equal(decryptModelCredential(cryptoRoundTrip.ciphertext, 'crypto-round-trip'), firstKey)

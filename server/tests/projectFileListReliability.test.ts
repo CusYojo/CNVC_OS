@@ -7,14 +7,21 @@ async function source(relativeUrl: string) {
 }
 
 test('project file listing pushes access control into one SQL query and omits document bodies', async () => {
-  const service = await source('../src/services/projectService.ts')
+  const [service, fileAccess] = await Promise.all([
+    source('../src/services/projectService.ts'),
+    source('../src/services/projectFileAccessService.ts'),
+  ])
   const start = service.indexOf('export async function listAllFiles')
   const end = service.indexOf('function publicProjectFile', start)
   const implementation = service.slice(start, end)
 
   assert.match(implementation, /identityRepositories\.users\.findById\(userId\)/)
   assert.match(implementation, /innerJoin\(projects/)
-  assert.match(implementation, /projectAccessCondition/)
+  assert.match(implementation, /projectFileAccessCondition\(userId\)/)
+  assert.match(implementation, /\.where\(accessWhere\)/)
+  assert.match(fileAccess, /projectAccessCondition\(\{ uid: userId/)
+  assert.match(fileAccess, /currentProjectScope\(userId\)/)
+  assert.match(fileAccess, /eq\(projectFiles\.lifecycle, 'active'\)/)
   assert.doesNotMatch(implementation, /Promise\.all\(rows\.map/)
   assert.doesNotMatch(service.slice(service.indexOf('const projectFileListColumns'), start), /contentText/)
 })

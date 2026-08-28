@@ -1,0 +1,35 @@
+.fde-workspace { --fde-brand: #315f68; --fde-ink: #1a292e; --fde-line: #dfe6e4; color: var(--fde-ink); }
+.fde-workspace button.bg-brand-600 { background-color: var(--fde-brand); border-color: var(--fde-brand); box-shadow: 0 1px 2px rgba(27,53,58,.08); }
+.fde-workspace button.bg-brand-600:hover { background-color: #214b54; border-color: #214b54; }
+.fde-workspace button:focus-visible { outline: 2px solid var(--fde-brand); outline-offset: 2px; }
+.fde-workspace .fde-panel { border-color: var(--fde-line); border-radius: 12px; box-shadow: 0 10px 30px rgba(27,53,58,.035); }
+.fde-workspace-tabs { display: flex; gap: 6px; flex-wrap: wrap; padding: 6px; border: 1px solid #dfe6e4; border-radius: 12px; background: #fff; }
+.fde-workspace-tabs > button { padding: 11px 20px; border-radius: 8px; color: #64777c; font-size: 14px; font-weight: 600; }
+.fde-workspace-tabs > button.active { background: #315f68; color: #fff; }
+.fde-workspace-tabs > button:focus-visible { outline: 2px solid #315f68; outline-offset: 2px; }
+.fde-stage-grid { display: grid; grid-template-columns: repeat(8,minmax(100px,1fr)); gap: 8px; overflow-x: auto; padding-bottom: 4px; }
+.fde-stage { min-height: 96px; border: 1px solid var(--fde-line); border-radius: 10px; background: #f8faf9; padding: 12px 8px; text-align: left; color: #64777c; display: flex; flex-direction: column; gap: 8px; }
+.fde-stage > span { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 7px; background: #eef2f1; font-size: 12px; }
+.fde-stage strong { font-size: 12px; font-weight: 600; white-space: nowrap; }
+.fde-stage small { font-size: 10px; }
+.fde-stage.selected { border-color: #315f68; background: #e6f0ef; color: #214b54; }
+.fde-stage.selected > span { color: white; background: #315f68; }
+.fde-stage.completed { color: #2f775e; }
+.fde-plan-table { border-collapse: collapse; width: 100%; min-width: 820px; font-size: 12px; }
+.fde-plan-table th { color: #64777c; background: #f8faf9; text-align: left; font-weight: 600; }
+.fde-plan-table th,.fde-plan-table td { padding: 10px 8px; border-bottom: 1px solid #dfe6e4; }
+.fde-plan-table td:first-child { min-width: 150px; }
+.fde-plan-table .input { min-width: 110px; font-size: 12px; height: 34px; }
+@media (max-width: 900px) { .fde-stage-grid { grid-template-columns: repeat(8,112px); } }
+.fde-archive-layout { display: grid; grid-template-columns: 200px minmax(0,1fr); gap: 16px; }
+.fde-archive-folder { display: flex; justify-content: space-between; align-items: center; gap: 8px; width: 100%; padding: 11px 12px; border-radius: 8px; text-align: left; font-size: 12px; color: #64777c; }
+.fde-archive-folder.selected { background: #e6f0ef; color: #214b54; font-weight: 600; }
+.fde-archive-folder:hover { background: #f1f6f5; }
+@media (max-width: 900px) { .fde-archive-layout { grid-template-columns: minmax(0,1fr); } .fde-archive-layout nav { display: flex; flex-wrap: wrap; } .fde-archive-folder { width: auto; } }
+.fde-workspace .fde-responsibility-layout { display: grid; grid-template-columns: minmax(0, 1fr) 270px; gap: 20px; align-items: start; }
+.fde-workspace .fde-responsibility-filters .input { width: auto; min-width: 160px; flex: 1; }
+/* Preserve legacy/AI/lead layouts: only the responsibility workspace opts out. */
+body:has(.fde-responsibility-workspace) { min-width: 320px; }
+.fde-responsibility-workspace { min-width: 0; }
+.fde-responsibility-workspace .fde-workspace-tabs > button { max-width: 100%; }
+@media (max-width: 1100px) { .fde-workspace .fde-responsibility-layout { grid-template-columns: minmax(0, 1fr); } }

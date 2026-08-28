@@ -11,6 +11,7 @@ import { requireAccessibleProject } from './projectAccessService.js'
 import { redactSensitiveText } from '../security/redactSecrets.js'
 import { resolveExtensionFeatureFlags } from '../config/extensionFeatureFlags.js'
 import { listConfigurationRevisions, rollbackConfigurationRevision } from './adminConfigurationRevisionService.js'
+import { userHasPermission } from './systemAuthorizationService.js'
 
 export const AI_CAPABILITY_KINDS = ['skill', 'agent', 'mcp', 'plugin'] as const
 export const AI_CAPABILITY_SCOPE_TYPES = ['global', 'department', 'project'] as const
@@ -314,9 +315,9 @@ function serviceError(message: string, code: string, status: number) {
   return Object.assign(new Error(message), { message, code, status })
 }
 
-export function assertAiCapabilityAdmin(actor: AiCapabilityActor) {
-  if (!['系统管理员', 'AI平台管理员', 'AI 平台管理员'].includes(actor.role)) {
-    throw serviceError('仅系统管理员或 AI 平台管理员可管理能力', 'ROLE_FORBIDDEN', 403)
+export async function assertAiCapabilityAdmin(actor: AiCapabilityActor): Promise<void> {
+  if (!await userHasPermission(actor.userId, actor.role, 'ai.configure')) {
+    throw serviceError('仅具有 AI 配置权限的用户可管理能力', 'ROLE_FORBIDDEN', 403)
   }
 }
 
@@ -327,7 +328,7 @@ function auditRecord(actor: AiCapabilityActor, action: string, target: string): 
 }
 
 export async function syncBuiltinCapabilities(actor: AiCapabilityActor) {
-  assertAiCapabilityAdmin(actor)
+  await assertAiCapabilityAdmin(actor)
   const current = await aiConfigurationRepository.listCapabilitySettings()
   const existingByKey = new Map(current.capabilities.map((item) => [`${item.kind}:${item.capabilityKey}`, item]))
   const items: BuiltinCapabilitySeed[] = AI_CAPABILITY_CATALOG.map((item) => {
@@ -361,7 +362,7 @@ export async function syncBuiltinCapabilities(actor: AiCapabilityActor) {
 }
 
 export async function listCapabilitySettings(actor: AiCapabilityActor) {
-  assertAiCapabilityAdmin(actor)
+  await assertAiCapabilityAdmin(actor)
   const { capabilities, bindings, projects: projectRows } = await aiConfigurationRepository.listCapabilitySettings()
   const capabilityViews = capabilities.map((capability) => {
     const pluginApproved = isPluginInstalled(capability)
@@ -403,7 +404,7 @@ export async function listCapabilityConfigurationRevisions(
   resourceId: string,
   actor: AiCapabilityActor,
 ) {
-  assertAiCapabilityAdmin(actor)
+  await assertAiCapabilityAdmin(actor)
   return listConfigurationRevisions({ domain: 'capability', resourceType, resourceId })
 }
 
@@ -413,7 +414,7 @@ export async function rollbackCapabilityConfigurationRevision(input: {
   revisionId: string
   expectedVersion: number
 }, actor: AiCapabilityActor) {
-  assertAiCapabilityAdmin(actor)
+  await assertAiCapabilityAdmin(actor)
   return rollbackConfigurationRevision({
     domain: 'capability', resourceType: input.resourceType, resourceId: input.resourceId,
     revisionId: input.revisionId, expectedVersion: input.expectedVersion,
@@ -425,7 +426,7 @@ export async function updateCapability(capabilityId: string, input: {
   expectedVersion: number; name?: string; description?: string | null;
   allowedRoles?: string[]; enabled?: boolean
 }, actor: AiCapabilityActor) {
-  assertAiCapabilityAdmin(actor)
+  await assertAiCapabilityAdmin(actor)
   const existing = await aiConfigurationRepository.findCapability(capabilityId)
   if (!existing) throw serviceError('能力不存在', 'CAPABILITY_NOT_FOUND', 404)
   if (
@@ -462,7 +463,7 @@ export async function installUploadedPlugin(input: {
   dependencyNames?: string[]
   allowedRoles?: string[]
 }, actor: AiCapabilityActor) {
-  assertAiCapabilityAdmin(actor)
+  await assertAiCapabilityAdmin(actor)
   const normalized = normalizeUploadedPlugin(input)
   const record = await aiConfigurationRepository.upsertUploadedCapabilityWithAudit({
     record: {
@@ -489,7 +490,7 @@ export async function importUploadedSkill(input: {
   allowedRoles?: string[]
   enabled?: boolean
 }, actor: AiCapabilityActor) {
-  assertAiCapabilityAdmin(actor)
+  await assertAiCapabilityAdmin(actor)
   const normalized = normalizeUploadedSkill(input)
   return aiConfigurationRepository.upsertUploadedCapabilityWithAudit({
     record: {
@@ -518,7 +519,7 @@ export async function importUploadedCapability(input: {
     return importUploadedSkill({ ...input, instructions: input.instructions || '' }, actor)
   }
   if (input.kind === 'plugin') return installUploadedPlugin(input, actor)
-  assertAiCapabilityAdmin(actor)
+  await assertAiCapabilityAdmin(actor)
   const normalized = input.kind === 'agent' ? normalizeUploadedAgent(input) : normalizeUploadedMcp(input)
   return aiConfigurationRepository.upsertUploadedCapabilityWithAudit({
     record: {
@@ -554,7 +555,7 @@ async function deleteExistingCapability(
 }
 
 export async function deleteCapability(capabilityId: string, expectedVersion: number, actor: AiCapabilityActor) {
-  assertAiCapabilityAdmin(actor)
+  await assertAiCapabilityAdmin(actor)
   const existing = await aiConfigurationRepository.findCapability(capabilityId)
   if (!existing) throw serviceError('能力不存在', 'CAPABILITY_NOT_FOUND', 404)
   return deleteExistingCapability(existing, expectedVersion, actor)
@@ -562,7 +563,7 @@ export async function deleteCapability(capabilityId: string, expectedVersion: nu
 
 // 保留原 Skill 专用接口的类型约束，避免旧客户端通过该路径误删其他能力。
 export async function deleteSkill(capabilityId: string, expectedVersion: number, actor: AiCapabilityActor) {
-  assertAiCapabilityAdmin(actor)
+  await assertAiCapabilityAdmin(actor)
   const existing = await aiConfigurationRepository.findCapability(capabilityId)
   if (!existing) throw serviceError('Skill 不存在', 'CAPABILITY_NOT_FOUND', 404)
   if (existing.kind !== 'skill') {
@@ -580,7 +581,7 @@ export async function updateAgentCapabilityPolicy(capabilityId: string, input: {
   toolNames: string[]
   allowedRoles: string[]
 }, actor: AiCapabilityActor) {
-  assertAiCapabilityAdmin(actor)
+  await assertAiCapabilityAdmin(actor)
   const existing = await aiConfigurationRepository.findCapability(capabilityId)
   if (!existing) throw serviceError('Agent 能力不存在', 'CAPABILITY_NOT_FOUND', 404)
   const catalog = agentCatalogItem(existing.capabilityKey)
@@ -657,7 +658,7 @@ function normalizeBinding(input: { scopeType: AiCapabilityScopeType; department?
 export async function createCapabilityBinding(input: {
   capabilityId: string; scopeType: AiCapabilityScopeType; department?: string | null; projectId?: string | null; enabled?: boolean
 }, actor: AiCapabilityActor) {
-  assertAiCapabilityAdmin(actor)
+  await assertAiCapabilityAdmin(actor)
   const scope = normalizeBinding(input)
   const capability = await aiConfigurationRepository.findCapability(input.capabilityId)
   if (!capability) throw serviceError('能力不存在', 'CAPABILITY_NOT_FOUND', 404)
@@ -679,7 +680,7 @@ export async function createCapabilityBinding(input: {
 }
 
 export async function updateCapabilityBinding(bindingId: string, input: { expectedVersion: number; enabled: boolean }, actor: AiCapabilityActor) {
-  assertAiCapabilityAdmin(actor)
+  await assertAiCapabilityAdmin(actor)
   const result = await aiConfigurationRepository.updateCapabilityBindingWithAudit({
     bindingId,
     expectedVersion: input.expectedVersion,
@@ -693,7 +694,7 @@ export async function updateCapabilityBinding(bindingId: string, input: { expect
 }
 
 export async function testCapability(capabilityId: string, actor: AiCapabilityActor) {
-  assertAiCapabilityAdmin(actor)
+  await assertAiCapabilityAdmin(actor)
   const capability = await aiConfigurationRepository.findCapability(capabilityId)
   if (!capability) throw serviceError('能力不存在', 'CAPABILITY_NOT_FOUND', 404)
   const traceId = randomUUID()

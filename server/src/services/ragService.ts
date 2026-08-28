@@ -1,10 +1,12 @@
-import { and, eq, inArray } from 'drizzle-orm'
+import { and, eq, inArray, sql } from 'drizzle-orm'
+import { createHash } from 'node:crypto'
 import { db } from '../db/client.js'
 import { projectFiles, fileChunks, knowledgeChunks } from '../db/schema.js'
 import mammoth from 'mammoth'
 import { decodeTextBuffer, normalizeUnicodeText } from './textQualityService.js'
 import { requestAiGatewayVisionText } from './aiGatewayService.js'
 import { readProjectFileBuffer } from './projectFileStorageService.js'
+import { fileKnowledgeAccessCondition, projectFileAccessCondition } from './projectFileAccessService.js'
 
 // 通过 18081 网关多模态模型 OCR：读图片/扫描件，返回其中文字。用于图片文件与图片型PDF。
 const GW_BASE = (process.env.OPENAI_BASE_URL || 'http://127.0.0.1:18081/v1').replace(/\/$/, '')
@@ -179,6 +181,7 @@ export function chunkText(text: string, target = 500): string[] {
 // 判定错误是否值得重试：瞬时错误(OCR网关抖动/超时/网络/EADDR/ECONN 等)重试有意义；
 // 确定性错误(不支持的类型/未提取到文字/损坏结构)重试也是同样结果，直接失败不浪费。
 export function isRetryableIngestError(msg: string): boolean {
+  if (msg.includes('FILE_SOURCE_CHANGED')) return false
   if (/暂不支持提取该类型|未能从文件中提取到任何文字|OCR未识别|既无文本层/.test(msg)) return false
   if (/data too long|ER_DATA_TOO_LONG|value too long|数据过长|1406/i.test(msg)) return false
   if (/timeout|超时|ECONN|ETIMEDOUT|ENETUNREACH|socket hang up|network|fetch failed|OCR网关|502|503|504|429/i.test(msg)) return true
@@ -210,10 +213,13 @@ export function summarizeIngestError(error: unknown): string {
 }
 
 export async function ingestFile(fileId: string, projectId: string, fileName: string, buffer: Buffer, type: string) {
+  const sourceHash = createHash('sha256').update(buffer).digest('hex')
   const t0 = Date.now()
   const tag = `[ingestFile] id=${fileId} name=${fileName} type=${type} size=${(buffer.length / 1024).toFixed(0)}KB`
   let lastErr = ''
+  let attempts = 0
   for (let attempt = 1; attempt <= INGEST_MAX_ATTEMPTS; attempt++) {
+    attempts = attempt
     try {
       if (attempt > 1) console.log(`${tag} 重试第 ${attempt - 1} 次…`)
       const text = await extractText(buffer, type, fileName)
@@ -222,6 +228,9 @@ export async function ingestFile(fileId: string, projectId: string, fileName: st
       // 文件分块、统一知识分块和解析成功状态必须同时提交。任何一步失败都回滚，
       // 避免页面显示“解析成功”但 Agent 实际检索不到文件内容。
       await db.transaction(async (tx) => {
+        await tx.execute(sql`SELECT ${projectFiles.id} FROM ${projectFiles} WHERE ${projectFiles.id}=${fileId} FOR UPDATE`)
+        const [current] = await tx.select().from(projectFiles).where(eq(projectFiles.id, fileId))
+        if (!current || current.projectId !== projectId || current.lifecycle !== 'active' || current.sha256 && current.sha256 !== sourceHash) throw new Error('FILE_SOURCE_CHANGED: 文件已删除或内容版本已变化，本次旧解析结果不保存')
         await tx.delete(fileChunks).where(eq(fileChunks.fileId, fileId))
         if (chunks.length) {
           await tx.insert(fileChunks).values(chunks.map((content, i) => ({ fileId, projectId, fileName, chunkIndex: i, content })))
@@ -253,8 +262,8 @@ export async function ingestFile(fileId: string, projectId: string, fileName: st
     }
   }
   // 全部尝试用尽，落失败态
-  await db.update(projectFiles).set({ parseStatus: '失败', parseError: lastErr }).where(eq(projectFiles.id, fileId))
-  console.error(`${tag} ☠ 最终失败 已试 ${INGEST_MAX_ATTEMPTS} 次 耗时=${Date.now() - t0}ms err=${lastErr}`)
+  if (!lastErr.includes('FILE_SOURCE_CHANGED')) await db.update(projectFiles).set({ parseStatus: '失败', parseError: lastErr }).where(and(eq(projectFiles.id, fileId), eq(projectFiles.lifecycle, 'active'), sql`(${projectFiles.sha256} IS NULL OR ${projectFiles.sha256}=${sourceHash})`))
+  console.error(`${tag} ☠ 最终失败 已试 ${attempts} 次 耗时=${Date.now() - t0}ms err=${lastErr}`)
   return { ok: false, error: lastErr }
 }
 
@@ -349,8 +358,8 @@ function compareRetrievalRows(
   return left.id < right.id ? -1 : left.id > right.id ? 1 : 0
 }
 
-export async function retrieve(projectId: string, question: string, topK = 5) {
-  const rows = await db.select().from(fileChunks).where(eq(fileChunks.projectId, projectId))
+export async function retrieve(projectId: string, question: string, topK = 5, userId?: string) {
+  const rows = await db.select().from(fileChunks).where(and(eq(fileChunks.projectId, projectId), inArray(fileChunks.fileId, db.select({ id: projectFiles.id }).from(projectFiles).where(userId ? projectFileAccessCondition(userId) : and(eq(projectFiles.lifecycle, 'active'), eq(projectFiles.accessMode, 'project'))))))
   if (!rows.length) return []
   const terms = tokenize(question)
   if (!terms.length) return []
@@ -361,8 +370,8 @@ export async function retrieve(projectId: string, question: string, topK = 5) {
 }
 
 // 列出某项目已成功解析、可检索的文件
-export async function listIndexedFiles(projectId: string) {
-  const rows = await db.select().from(projectFiles).where(and(eq(projectFiles.projectId, projectId), eq(projectFiles.parseStatus, '成功')))
+export async function listIndexedFiles(projectId: string, userId?: string) {
+  const rows = await db.select().from(projectFiles).where(and(eq(projectFiles.projectId, projectId), eq(projectFiles.parseStatus, '成功'), userId ? projectFileAccessCondition(userId) : and(eq(projectFiles.lifecycle, 'active'), eq(projectFiles.accessMode, 'project'))))
   return rows
 }
 
@@ -397,11 +406,11 @@ export async function ingestToKnowledge(opts: {
 }
 
 // 多 scope 检索：scope + refId(可选，lead池比对时传空查全部线索)
-export async function retrieveKnowledge(scope: 'project' | 'lead' | 'org', refId: string | undefined, question: string, topK = 5) {
+export async function retrieveKnowledge(scope: 'project' | 'lead' | 'org', refId: string | undefined, question: string, topK = 5, userId?: string) {
   const where = refId
     ? and(eq(knowledgeChunks.scope, scope), eq(knowledgeChunks.refId, refId))
     : eq(knowledgeChunks.scope, scope)
-  const rows = await db.select().from(knowledgeChunks).where(where)
+  const rows = await db.select().from(knowledgeChunks).where(and(where, scope === 'lead' ? undefined : fileKnowledgeAccessCondition(userId)))
   if (!rows.length) return []
   const terms = tokenize(question)
   if (!terms.length) return []

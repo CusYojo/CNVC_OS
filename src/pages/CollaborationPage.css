@@ -1,0 +1,162 @@
+/* Retained FDE executionPage. All rules are scoped to collaboration. */
+body:has(.fde-collaboration-page) { min-width: 320px; }
+.fde-collaboration-page { width: min(100%,1540px); margin: 0 auto; min-width: 0; }
+.fde-collaboration-page .fde-collab-tabs { display: flex; align-items: center; gap: 4px; margin-bottom: 14px; padding: 4px; overflow-x: auto; border: 1px solid var(--line); border-radius: 11px; background: var(--surface); scrollbar-width: none; }
+.fde-collaboration-page .fde-collab-tabs button { min-height: 36px; padding: 0 13px; flex: 0 0 auto; border: 0; border-radius: 8px; color: var(--ink-2); background: transparent; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.fde-collaboration-page .fde-collab-tabs button[aria-selected="true"] { color: var(--brand-strong); background: var(--brand-soft); box-shadow: inset 0 0 0 1px color-mix(in srgb,var(--brand) 14%,transparent); }
+.fde-collaboration-page :is(.fde-collab-execution,.fde-collab-review,.fde-collab-calendar) { display: grid; gap: 14px; min-width: 0; }
+.fde-collaboration-page .fde-collab-summary { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 12px; }
+.fde-collaboration-page .fde-collab-summary article { min-height: 92px; padding: 15px 17px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.fde-collaboration-page .fde-collab-summary span { display: block; color: var(--ink-2); font-size: 11px; }
+.fde-collaboration-page .fde-collab-summary strong { display: block; margin-top: 6px; font-size: 24px; line-height: 1; }
+.fde-collaboration-page .fde-collab-summary small { display: block; margin-top: 8px; color: var(--ink-3); font-size: 10px; }
+.fde-collaboration-page .fde-collab-danger { color: var(--danger); }
+.fde-collaboration-page .fde-collab-card { min-width: 0; overflow: hidden; border: 1px solid color-mix(in srgb,var(--line) 88%,transparent); border-radius: 11px; background: var(--surface); box-shadow: 0 8px 26px rgba(24,55,61,.045); }
+.fde-collaboration-page .fde-collab-card-head { display: flex; min-height: 56px; align-items: center; justify-content: space-between; gap: 16px; padding: 13px 18px; border-bottom: 1px solid var(--line); }
+.fde-collaboration-page .fde-collab-card-head h2 { margin: 0; font-size: 15px; line-height: 1.4; font-weight: 650; letter-spacing: -.012em; }
+.fde-collaboration-page .fde-collab-segmented { display: inline-flex; flex-shrink: 0; padding: 4px; gap: 3px; border: 0; border-radius: 9px; background: var(--surface-3); }
+.fde-collaboration-page .fde-collab-segmented button { min-height: 29px; padding: 0 10px; border-radius: 6px; color: var(--ink-3); font-size: 10px; white-space: nowrap; }
+.fde-collaboration-page .fde-collab-segmented button[aria-pressed="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 2px 5px rgba(20,43,48,.08); }
+.fde-collaboration-page .fde-collab-table-scroll { overflow-x: auto; }
+.fde-collaboration-page .fde-collab-table { width: 100%; border-collapse: collapse; text-align: left; }
+.fde-collaboration-page .fde-collab-table th { height: 42px; padding: 11px 15px; color: var(--ink-3); font-size: 10px; font-weight: 650; background: var(--surface-2); border-bottom: 1px solid var(--line); white-space: nowrap; }
+.fde-collaboration-page .fde-collab-table td { height: 58px; padding: 13px 15px; border-bottom: 1px solid var(--line); color: var(--ink-2); font-size: 12px; }
+.fde-collaboration-page .fde-collab-table tbody tr:last-child td { border-bottom: 0; }
+.fde-collaboration-page .fde-collab-project { display: flex; gap: 11px; align-items: center; text-align: left; }
+.fde-collaboration-page .fde-collab-project strong { display: block; color: var(--ink); font-size: 13px; white-space: nowrap; }
+.fde-collaboration-page .fde-collab-project small { display: block; color: var(--ink-3); font-size: 12px; }
+.fde-collaboration-page .fde-collab-logo { display: grid; place-items: center; width: 36px; height: 36px; flex-shrink: 0; border-radius: 9px; background: #4e747b; color: #fff; font-size: 12px; font-weight: 800; }
+.fde-collaboration-page .fde-collab-work-title { display: grid; grid-template-columns: 26px minmax(0,1fr); gap: 9px; align-items: start; min-width: 150px; }
+.fde-collaboration-page .fde-collab-work-title strong { display: block; color: var(--ink); font-size: 12px; line-height: 1.45; }
+.fde-collaboration-page .fde-collab-work-title small { display: block; margin-top: 3px; font-size: 11px; line-height: 1.4; color: var(--ink-3); }
+.fde-collaboration-page .fde-collab-check { display: grid; place-items: center; width: 22px; height: 22px; border: 1px solid var(--line-strong,#aab7ba); border-radius: 6px; }
+.fde-collaboration-page .fde-collab-check.is-done { color: var(--positive); background: var(--positive-soft); border-color: var(--positive); }
+.fde-collaboration-page .fde-collab-badge { display: inline-flex; padding: 3px 9px; border-radius: 6px; font-size: 12px; font-weight: 650; line-height: 1.5; white-space: nowrap; color: var(--brand); background: var(--brand-soft); }
+.fde-collaboration-page .fde-collab-badge[data-tone="success"] { color: var(--positive); background: var(--positive-soft); }
+.fde-collaboration-page .fde-collab-badge[data-tone="warning"] { color: var(--warning); background: var(--warning-soft); }
+.fde-collaboration-page .fde-collab-row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; white-space: nowrap; }
+.fde-collaboration-page .fde-collab-row-actions button, .fde-collaboration-page .fde-collab-button { display: inline-flex; align-items: center; justify-content: center; min-height: 34px; padding: 0 11px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); font-size: 12px; font-weight: 600; }
+.fde-collaboration-page .fde-collab-button { min-height: 40px; padding: 0 15px; font-size: 13px; }
+.fde-collaboration-page .fde-collab-state { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 38px 18px; color: var(--ink-3); font-size: 12px; line-height: 1.58; text-align: center; }
+.fde-collaboration-page .fde-collab-state strong { color: var(--ink-2); font-size: 14px; }
+.fde-collaboration-page .fde-collab-state small { font-size: 12px; }
+.fde-collaboration-page .fde-collab-state[role="alert"] { color: var(--danger); }
+.fde-collaboration-page .fde-collab-tools { margin-top: 12px; color: var(--ink-3); font-size: 11px; }
+.fde-collaboration-page .fde-collab-tools > summary { width: fit-content; padding: 4px 0; cursor: pointer; }
+.fde-collaboration-page .fde-collab-tools > div { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; padding: 12px 0; }
+.fde-collaboration-page .fde-collab-tools > div > button { text-decoration: underline; text-underline-offset: 3px; }
+.fde-collaboration-page .fde-collab-tools input { min-height: 32px; border: 1px solid var(--line); border-radius: 6px; padding: 3px; }
+.fde-collaboration-page .fde-collab-detail .fde-project-picker { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; font-size: 13px; }
+.fde-collaboration-page :is(.fde-collab-calendar-scope,.fde-collab-calendar-layer) { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 54px; padding: 8px 12px 8px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); font-size: 13px; }
+.fde-collaboration-page .fde-collab-calendar-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.fde-collaboration-page .fde-collab-week { display: inline-flex; align-items: center; gap: 6px; padding: 3px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); }
+.fde-collaboration-page .fde-collab-week button { min-height: 30px; padding: 0 9px; font-size: 12px; }
+.fde-collaboration-page .fde-collab-week input { width: 118px; min-width: 0; background: transparent; font-size: 11px; }
+.fde-collaboration-page .fde-collab-legend { display: flex; align-items: center; gap: 12px; color: var(--ink-3); font-size: 10px; }
+.fde-collaboration-page .fde-collab-legend span { display: inline-flex; gap: 5px; align-items: center; }
+.fde-collaboration-page .fde-collab-legend i { width: 8px; height: 8px; border-radius: 3px; background: var(--positive); }
+.fde-collaboration-page .fde-collab-legend i[data-tone="pending"] { background: var(--warning); }
+.fde-collaboration-page .fde-collab-legend i[data-tone="locked"] { background: var(--ink-3); }
+.fde-collaboration-page .fde-collab-time-grid { margin-top: 0; border: 0; border-radius: 0; }
+.fde-collaboration-page .fde-collab-time-grid > p { display: none; }
+.fde-collaboration-page .fde-collab-time-grid > div { min-width: 1040px; }
+.fde-collaboration-page .fde-collab-time-grid > div > .grid { grid-template-columns: 58px repeat(7,minmax(132px,1fr)); }
+.fde-collaboration-page .fde-collab-time-grid > div > .grid:first-child { min-height: 50px; background: var(--surface-2); }
+.fde-collaboration-page .fde-collab-time-grid > div > .grid:first-child > div { display: grid; align-content: center; font-size: 11px; font-weight: 650; }
+.fde-collaboration-page .fde-collab-time-block { padding: 7px; border-radius: 8px; color: var(--brand-strong); }
+.fde-collaboration-page .fde-collab-time-block-head { display: flex; justify-content: space-between; font-size: 10px; }
+.fde-collaboration-page .fde-collab-time-title { margin-top: 4px; font-size: 11px; font-weight: 600; }
+.fde-collaboration-page .fde-collab-company-scroll { overflow: auto; }
+.fde-collaboration-page .fde-collab-company-grid { min-width: 1040px; display: grid; grid-template-columns: 190px repeat(5,minmax(150px,1fr)); }
+.fde-collaboration-page .fde-collab-company-grid > * { min-height: 66px; padding: 9px 10px; border-right: 1px solid var(--line); border-top: 1px solid var(--line); font-size: 12px; }
+.fde-collaboration-page .fde-collab-company-grid > :nth-child(-n+6) { min-height: 48px; border-top: 0; background: var(--surface-2); }
+.fde-collaboration-page .fde-collab-company-day :is(strong,small) { display: block; }
+.fde-collaboration-page .fde-collab-company-day small { margin-top: 2px; color: var(--ink-3); }
+.fde-collaboration-page .fde-collab-company-person { display: flex; align-items: center; gap: 9px; position: sticky; left: 0; background: var(--surface); }
+.fde-collaboration-page .fde-collab-avatar { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--brand-soft); color: var(--brand); }
+.fde-collaboration-page .fde-collab-company-cell { display: grid; align-content: start; gap: 5px; }
+.fde-collaboration-page .fde-collab-company-cell > span { color: var(--ink-3); }
+.fde-collaboration-page .fde-collab-company-event { display: grid; grid-template-columns: 42px minmax(0,1fr); gap: 6px; padding: 7px 8px; border: 1px solid transparent; border-radius: 7px; background: var(--brand-soft); color: var(--brand-strong); font-size: 11px; line-height: 1.35; }
+.fde-collaboration-page .fde-collab-company-event time { font-weight: 800; }
+.fde-collaboration-page .fde-collab-company-event span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fde-collaboration-page .fde-collab-company-event[data-source="busy"] { background: var(--surface-2); color: var(--ink-3); }
+.fde-collaboration-page .fde-collab-company-mobile { display: none; }
+.fde-collaboration-page .fde-collab-report-summary { padding: 14px 20px 12px; display: grid; grid-template-columns: repeat(3,1fr); gap: 9px; }
+.fde-collaboration-page .fde-collab-report-summary > div { padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-2); }
+.fde-collaboration-page .fde-collab-report-summary span { display: block; font-size: 9px; color: var(--ink-3); }
+.fde-collaboration-page .fde-collab-report-summary strong { display: block; margin-top: 3px; font-size: 18px; }
+.fde-collaboration-page .fde-collab-report > p { margin: 0 20px 10px; color: var(--ink-2); font-size: 13px; line-height: 1.7; white-space: pre-wrap; }
+.fde-collaboration-page .fde-collab-report > small { display: block; margin: 0 20px 18px; color: var(--ink-3); }
+.fde-collaboration-page .fde-collab-meeting { display: grid; width: 100%; min-height: 72px; grid-template-columns: 48px minmax(0,1fr) auto; align-items: center; gap: 12px; padding: 12px 18px; border-top: 1px solid var(--line); background: var(--surface); text-align: left; }
+.fde-collaboration-page .fde-collab-meeting:first-child { border-top: 0; }
+.fde-collaboration-page .fde-collab-meeting:hover { background: var(--surface-2); }
+.fde-collaboration-page .fde-collab-date-tile { display: grid; justify-items: center; gap: 2px; padding: 6px; border: 0; border-radius: 9px; background: var(--brand-soft); color: var(--brand); }
+.fde-collaboration-page .fde-collab-date-tile strong { font-size: 16px; }
+.fde-collaboration-page .fde-collab-date-tile small { font-size: 9px; color: var(--ink-3); }
+.fde-collaboration-page .fde-collab-meeting-copy strong { display: block; font-size: 13px; }
+.fde-collaboration-page .fde-collab-meeting-copy small { display: block; margin-top: 4px; color: var(--ink-3); font-size: 11px; }
+.fde-collaboration-page .fde-collab-meeting-result { display: flex; gap: 9px; align-items: center; font-size: 10px; color: var(--ink-2); }
+.fde-collaboration-page .fde-collab-time-mobile { display: none; }
+.fde-collaboration-page .fde-collab-time-grid .fde-collab-time-track { background: repeating-linear-gradient(to bottom,transparent 0,transparent 12px,color-mix(in srgb,var(--line) 34%,transparent) 12px,color-mix(in srgb,var(--line) 34%,transparent) 13px),repeating-linear-gradient(to bottom,transparent 0,transparent 51px,var(--line) 51px,var(--line) 52px) !important; }
+.fde-collaboration-page .fde-collab-time-block { margin-left: 3px; max-width: calc(100% - 6px); background: var(--surface-2); }
+.fde-collaboration-page .fde-collab-time-block[data-editable="false"] { border-color: var(--line); color: var(--ink-3); }
+.fde-collaboration-page .fde-collab-leader-layout { display: grid; grid-template-columns: minmax(270px,.74fr) minmax(560px,1.65fr) minmax(250px,.7fr); gap: 14px; align-items: start; min-width: 0; }
+.fde-collaboration-page .fde-collab-leader-layout > * { min-width: 0; }
+.fde-collaboration-page .fde-collab-request-list { display: grid; align-content: start; gap: 9px; padding: 10px; max-height: 680px; overflow-y: auto; }
+.fde-collaboration-page .fde-collab-request { display: grid; gap: 6px; padding: 13px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); text-align: left; min-width: 0; }
+.fde-collaboration-page .fde-collab-request-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.fde-collaboration-page .fde-collab-request > strong { margin-top: 4px; font-size: 13px; line-height: 1.4; }
+.fde-collaboration-page .fde-collab-request small { font-size: 10px; color: var(--ink-3); }
+.fde-collaboration-page .fde-collab-request dl { margin-top: 5px; display: grid; gap: 8px; }
+.fde-collaboration-page .fde-collab-request dl > div { display: grid; grid-template-columns: 63px minmax(0,1fr); gap: 8px; font-size: 10px; }
+.fde-collaboration-page .fde-collab-request dt { color: var(--ink-3); }
+.fde-collaboration-page .fde-collab-request dd { color: var(--ink-2); overflow-wrap: anywhere; }
+.fde-collaboration-page .fde-collab-leader-impact button { text-align: left; }
+@media (max-width: 1440px) {
+  .fde-collaboration-page .fde-collab-leader-layout { grid-template-columns: minmax(230px,.58fr) minmax(0,2fr); }
+  .fde-collaboration-page .fde-collab-leader-impact { grid-column: 1 / -1; }
+}
+@media (max-width: 1120px) { .fde-collaboration-page .fde-collab-leader-layout { grid-template-columns: minmax(0,1fr); } }
+@media (max-width: 900px) {
+  .fde-collaboration-page .fde-collab-leader-layout { grid-template-columns: minmax(0,1fr); }
+  .fde-collaboration-page .fde-collab-card-head { flex-wrap: wrap; }
+  .fde-collaboration-page .fde-collab-table-scroll { overflow: visible; }
+  .fde-collaboration-page .fde-collab-table { display: block; width: 100%; }
+  .fde-collaboration-page .fde-collab-table thead { display: none; }
+  .fde-collaboration-page .fde-collab-table tbody { display: grid; gap: 10px; padding: 10px; }
+  .fde-collaboration-page .fde-collab-table tr { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; padding: 12px; border: 1px solid var(--line); border-radius: 11px; }
+  .fde-collaboration-page .fde-collab-table td { height: auto; min-width: 0; padding: 8px 0; display: block; border: 0; }
+  .fde-collaboration-page .fde-collab-table td:nth-child(-n+2), .fde-collaboration-page .fde-collab-table td:nth-child(6) { grid-column: 1 / -1; }
+  .fde-collaboration-page .fde-collab-table td::before { display: block; margin-bottom: 4px; color: var(--ink-3); font-size: 9px; font-weight: 700; }
+  .fde-collaboration-page .fde-collab-table td:nth-child(3)::before { content: '负责人'; }
+  .fde-collaboration-page .fde-collab-table td:nth-child(4)::before { content: '截止时间'; }
+  .fde-collaboration-page .fde-collab-table td:nth-child(5)::before { content: '状态'; }
+  .fde-collaboration-page .fde-collab-table td:nth-child(6)::before { content: '操作'; }
+  .fde-collaboration-page .fde-collab-row-actions { justify-content: flex-start; flex-wrap: wrap; }
+}
+@media (max-width: 760px) {
+  .fde-collaboration-page .fde-collab-time-grid { display: none; }
+  .fde-collaboration-page .fde-collab-time-mobile { display: grid; }
+  .fde-collaboration-page .fde-collab-time-mobile > section { border-top: 1px solid var(--line); }
+  .fde-collaboration-page .fde-collab-time-mobile header { padding: 10px 13px; display: flex; align-items: center; justify-content: space-between; background: var(--surface-2); font-size: 12px; }
+  .fde-collaboration-page .fde-collab-time-mobile header small { color: var(--ink-3); }
+  .fde-collaboration-page .fde-collab-time-mobile > section > div { display: grid; gap: 9px; padding: 10px 12px; }
+  .fde-collaboration-page .fde-collab-time-mobile button { display: grid; grid-template-columns: 46px minmax(0,1fr); gap: 8px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; text-align: left; }
+  .fde-collaboration-page .fde-collab-time-mobile time { font-size: 11px; font-weight: 700; color: var(--brand); }
+  .fde-collaboration-page .fde-collab-time-mobile strong { display: block; font-size: 12px; }
+  .fde-collaboration-page .fde-collab-time-mobile :is(small,p) { color: var(--ink-3); font-size: 11px; }
+  .fde-collaboration-page .fde-collab-tabs button { min-height: 38px; }
+  .fde-collaboration-page .fde-collab-summary { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 9px; }
+  .fde-collaboration-page .fde-collab-summary article { min-height: 86px; padding: 13px; }
+  .fde-collaboration-page .fde-collab-summary strong { font-size: 22px; }
+  .fde-collaboration-page :is(.fde-collab-calendar-scope,.fde-collab-calendar-layer) { align-items: stretch; flex-direction: column; }
+  .fde-collaboration-page .fde-collab-calendar-actions { align-items: stretch; flex-direction: column; }
+  .fde-collaboration-page .fde-collab-segmented button { flex: 1; min-height: 42px; }
+  .fde-collaboration-page .fde-collab-company-scroll { display: none; }
+  .fde-collaboration-page .fde-collab-company-mobile { display: grid; gap: 12px; padding: 14px; }
+  .fde-collaboration-page .fde-collab-company-mobile section { padding: 12px; border: 1px solid var(--line); border-radius: 10px; }
+  .fde-collaboration-page .fde-collab-company-mobile h3 { margin-bottom: 10px; font-size: 13px; }
+  .fde-collaboration-page .fde-collab-company-mobile article { display: grid; gap: 8px; margin-top: 10px; font-size: 12px; }
+  .fde-collaboration-page .fde-collab-meeting { grid-template-columns: 44px minmax(0,1fr); padding: 12px 14px; }
+  .fde-collaboration-page .fde-collab-meeting-result { grid-column: 2; justify-items: start; }
+}

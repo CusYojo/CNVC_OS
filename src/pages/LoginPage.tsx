@@ -1,15 +1,26 @@
-import { ArrowRight, CheckCircle2, Eye, EyeOff, ShieldCheck, Sparkles } from 'lucide-react'
+import { EyeOff } from 'lucide-react'
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../store/useAuthStore'
 import { Button } from '../components/ui'
 import { useToast } from '../components/Toast'
+import './LoginPage.css'
+
+function LoginIcon({ name }: { name: 'user' | 'lock' | 'eye' }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {name === 'user' && <><circle cx="12" cy="8" r="4" /><path d="M4.5 21a7.5 7.5 0 0 1 15 0" /></>}
+      {name === 'lock' && <><rect x="4.5" y="10" width="15" height="11" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14.5v2" /></>}
+      {name === 'eye' && <><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z" /><circle cx="12" cy="12" r="2.5" /></>}
+    </svg>
+  )
+}
 
 export function LoginPage() {
   const navigate = useNavigate()
   const setAuth = useAuthStore((s) => s.setAuth)
   const { showToast } = useToast()
-  const [email, setEmail] = useState('')
+  const [identifier, setIdentifier] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [remember, setRemember] = useState(true)
@@ -17,14 +28,14 @@ export function LoginPage() {
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault()
-    if (!email || !password) return showToast('请输入邮箱和密码', 'error')
+    if (!identifier.trim() || !password) return showToast('请输入姓名或邮箱和密码', 'error')
     setLoading(true)
     try {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password, remember }),
+        body: JSON.stringify({ identifier: identifier.trim(), password, remember }),
       })
       const body = await res.json()
       if (!res.ok || !body.user) throw new Error(body.message || '登录失败')
@@ -39,41 +50,56 @@ export function LoginPage() {
   }
 
   return (
-    <div className="grid min-h-screen grid-cols-[1.05fr_.95fr] bg-white">
-      <section className="relative flex overflow-hidden bg-[#102a56] p-16 text-white">
-        <div className="absolute -left-20 -top-24 h-80 w-80 rounded-full border border-blue-300/10" />
-        <div className="absolute -left-6 -top-10 h-80 w-80 rounded-full border border-blue-300/10" />
-        <div className="absolute bottom-[-160px] right-[-140px] h-[520px] w-[520px] rounded-full border border-blue-300/10" />
-        <div className="relative z-10 flex max-w-[580px] flex-col">
-          <div className="flex items-center gap-3">
-            <div><p className="text-lg font-semibold text-white">浙江赛智伯乐股权投资管理有限公司</p><p className="mt-1 text-sm font-medium tracking-[.24em] text-blue-100">投资中台</p><p className="mt-1 text-[9px] tracking-[.12em] text-blue-200/60">ZHEJIANG SAIZHI CYBERNAUT EQUITY INVESTMENT MANAGEMENT CO., LTD.</p></div>
+    <main className="login-screen">
+      <div className="login-frame">
+        <section className="login-brand-panel" aria-labelledby="login-brand-title">
+          <div className="login-brand-lockup">
+            <span className="login-brand-logo"><img src="/fde-company-logo.png" alt="赛智伯乐 Logo" /></span>
+            <div><strong>赛智伯乐</strong><span>SAIZHI BOLE</span></div>
           </div>
-          <div className="my-auto py-16">
-            <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-blue-300/20 bg-blue-300/10 px-3 py-1.5 text-xs text-blue-100"><Sparkles className="h-3.5 w-3.5" />AI 驱动的一级市场投资工作台</div>
-            <h1 className="text-[42px] font-semibold leading-[1.18] tracking-tight">让每一个投资判断<br />都有据可循</h1>
-            <p className="mt-6 max-w-lg text-base leading-8 text-blue-100/70">统一项目档案、沉淀机构知识，用 AI 完成资料摘要、智能问答、上会材料与会议纪要，让投资团队把时间留给真正重要的判断。</p>
-            <div className="mt-10 grid grid-cols-2 gap-x-8 gap-y-5">
-              {['项目全周期协同', '答案来源可追溯', '上会材料快速生成', '企业级权限审计'].map((item) => <div key={item} className="flex items-center gap-2.5 text-sm text-blue-50/90"><CheckCircle2 className="h-4 w-4 text-sky-300" />{item}</div>)}
+          <div className="login-brand-copy">
+            <span className="login-brand-kicker">内部业务工作台</span>
+            <h1 id="login-brand-title">重点项目与<br />投资管理平台</h1>
+            <p>让项目推进、材料沉淀、日程协同和审批决策保持在同一工作空间。</p>
+            <div className="login-brand-capabilities" aria-label="平台核心能力">
+              {['项目推进', '材料归档', '协同排期', '审批办公'].map((item, index) => <span key={item}><b>{String(index + 1).padStart(2, '0')}</b>{item}</span>)}
             </div>
           </div>
-          <p className="text-xs text-blue-200/45">© 2026 浙江赛智伯乐股权投资管理有限公司 · 内部系统</p>
-        </div>
-      </section>
-      <section className="flex items-center justify-center p-12">
-        <div className="w-full max-w-[420px]">
-          <div className="mb-9">
-            <div className="mb-4 grid h-11 w-11 place-items-center rounded-xl bg-brand-50 text-brand-600"><ShieldCheck className="h-5 w-5" /></div>
-            <h2 className="text-2xl font-semibold tracking-tight text-ink">欢迎回来</h2>
-            <p className="mt-2 text-sm text-slate-500">登录公司投资中台，继续今天的投资工作。</p>
+        </section>
+        <section className="login-entry-panel" aria-labelledby="login-title">
+          <div className="login-mobile-lockup">
+            <span className="login-brand-logo"><img src="/fde-company-logo.png" alt="赛智伯乐 Logo" /></span>
+            <div><strong>赛智伯乐</strong><span>重点项目与投资管理平台</span></div>
           </div>
-          <form onSubmit={submit} className="space-y-5">
-            <label><span className="label">工作邮箱</span><input autoFocus type="email" className="input h-11" value={email} onChange={(event) => setEmail(event.target.value)} /></label>
-            <label><span className="label">密码</span><div className="relative"><input type={showPassword ? 'text' : 'password'} className="input h-11 pr-11" value={password} onChange={(event) => setPassword(event.target.value)} /><button type="button" aria-label="显示密码" onClick={() => setShowPassword((value) => !value)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">{showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button></div></label>
-            <div className="flex items-center text-sm"><label className="flex items-center gap-2 text-slate-600"><input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} className="rounded border-slate-300 text-brand-600" />保持登录</label></div>
-            <Button type="submit" loading={loading} className="h-11 w-full">登录系统 <ArrowRight className="h-4 w-4" /></Button>
-          </form>
-        </div>
-      </section>
-    </div>
+          <div className="login-card">
+            <header className="login-head">
+              <span>统一工作空间</span>
+              <h2 id="login-title">账号登录</h2>
+              <p>使用已开通的姓名账号进入系统</p>
+            </header>
+            <form onSubmit={submit} className="login-form">
+              <label className="login-field" htmlFor="login-identifier">
+                <span>账号姓名</span>
+                <div>
+                  <span aria-hidden="true"><LoginIcon name="user" /></span>
+                  <input id="login-identifier" autoFocus type="text" autoComplete="username" maxLength={255} placeholder="例如：陈斌" title="支持姓名或工作邮箱" value={identifier} onChange={(event) => setIdentifier(event.target.value)} />
+                </div>
+              </label>
+              <label className="login-field" htmlFor="login-password">
+                <span>登录密码</span>
+                <div>
+                  <span aria-hidden="true"><LoginIcon name="lock" /></span>
+                  <input id="login-password" type={showPassword ? 'text' : 'password'} autoComplete="current-password" placeholder="请输入密码" value={password} onChange={(event) => setPassword(event.target.value)} />
+                  <button type="button" className="login-password-toggle" aria-label={showPassword ? '隐藏密码' : '显示密码'} aria-pressed={showPassword} onClick={() => setShowPassword((value) => !value)}>{showPassword ? <EyeOff aria-hidden="true" /> : <LoginIcon name="eye" />}</button>
+                </div>
+              </label>
+              <label className="login-remember"><input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} />保持登录</label>
+              <Button type="submit" loading={loading} className="login-submit"><span>进入工作台</span><span aria-hidden="true">→</span></Button>
+            </form>
+          </div>
+          <div className="login-entry-foot"><span aria-hidden="true" />企业内部数据 · 权限隔离访问</div>
+        </section>
+      </div>
+    </main>
   )
 }

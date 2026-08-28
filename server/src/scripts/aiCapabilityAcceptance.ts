@@ -3,7 +3,7 @@ import { and, eq, inArray } from 'drizzle-orm'
 import { db, pool } from '../db/client.js'
 import {
   adminConfigurationRevisions, agentConversations, aiCapabilities, aiCapabilityBindings, aiConversationCapabilities,
-  auditLogs, projects, users,
+  auditLogs, projects, roles, userRoles, users,
 } from '../db/schema.js'
 import {
   assertAiCapabilityAdmin,
@@ -61,6 +61,9 @@ async function main() {
     { id: ids.owner, email: `cap-owner-${marker}@example.invalid`, name: owner.userName, role: owner.role, department: owner.department, passwordHash: 'not-used' },
     { id: ids.outsider, email: `cap-outsider-${marker}@example.invalid`, name: outsider.userName, role: outsider.role, department: outsider.department, passwordHash: 'not-used' },
   ])
+  const [adminRole] = await db.select({ id: roles.id }).from(roles).where(eq(roles.code, 'SYSTEM_ADMIN')).limit(1)
+  assert(adminRole, '隔离验收库缺少系统管理员角色')
+  await db.insert(userRoles).values({ userId: ids.admin, roleId: adminRole.id, isPrimary: true })
   await db.insert(projects).values({ id: ids.project, name: `能力验收项目-${marker}`, owner: owner.userName, ownerUserId: ids.owner, createdBy: ids.owner })
   await db.insert(agentConversations).values({ id: ids.conversation, userId: ids.owner, projectId: ids.project, title: '能力验收会话' })
   await db.insert(aiCapabilities).values([

@@ -2120,6 +2120,6 @@ metaRouter.get('/projects/:id/ai-summary', async (req: AuthedRequest, res, next)
   try {
     const projectId = metaRouteId(req.params.id)
     await requireAccessibleProject(req.user!.uid, projectId)
-    res.json({ summary: await getSummaryService(projectId) ?? null })
+    res.json({ summary: await getSummaryService(projectId, req.user!.uid) ?? null })
   } catch (err) { next(err) }
 })

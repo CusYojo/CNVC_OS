@@ -7,6 +7,7 @@ import {
   type LeadDuplicateCollision, type LeadDuplicateDispositionFile, type LeadSnapshot,
 } from './leadDuplicateDispositionContract.js'
 import { applyApprovedLeadDuplicateDispositions } from './leadDuplicateDispositionApplyRuntime.js'
+import { assertLeadDuplicateAcceptanceIsolation } from './leadDuplicateAcceptanceGuard.js'
 
 function table(name: string) {
   return quoteMysqlIdentifier(mysqlTableName(name))
@@ -23,6 +24,7 @@ async function count(sql: string, params: unknown[] = []) {
 }
 
 async function main() {
+  assertLeadDuplicateAcceptanceIsolation(process.env, process.cwd())
   const marker = randomUUID()
   const canonicalId = randomUUID()
   const mergedId = randomUUID()

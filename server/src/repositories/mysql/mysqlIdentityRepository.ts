@@ -199,8 +199,9 @@ class MySqlUserRepository implements UserRepository {
         }).$returningId()
         department = created
       }
-      await this.executor.delete(userRoles).where(eq(userRoles.userId, userId))
-      await this.executor.insert(userRoles).values({ userId, roleId: role.id, isPrimary: true })
+      // 旧主角色字段的编辑不能清除 FDE 明确授予的附加业务角色。
+      await this.executor.delete(userRoles).where(and(eq(userRoles.userId, userId), eq(userRoles.isPrimary, true)))
+      await this.executor.insert(userRoles).values({ userId, roleId: role.id, isPrimary: true }).onDuplicateKeyUpdate({ set: { isPrimary: true } })
       await this.executor.delete(userDepartments).where(eq(userDepartments.userId, userId))
       await this.executor.insert(userDepartments).values({ userId, departmentId: department.id, isPrimary: true })
     })
@@ -219,6 +220,7 @@ class MySqlPermissionRepository implements PermissionRepository {
         ownerUserId: projects.ownerUserId,
         collaborators: projects.collaborators,
         createdBy: projects.createdBy,
+        workflowModel: projects.workflowModel,
       }).from(projects).where(eq(projects.id, projectId)).limit(1)
       return row ?? null
     })

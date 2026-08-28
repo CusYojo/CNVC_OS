@@ -6,15 +6,18 @@ import { useAuthStore } from './store/useAuthStore'
 import { useAppStore } from './store/useAppStore'
 import { LoginPage } from './pages/LoginPage'
 import { DashboardPage } from './pages/DashboardPage'
-import { ProjectsPage } from './pages/ProjectsPage'
+import { ProjectCenterPage } from './pages/ProjectCenterPage'
 import { ProjectDetailPage } from './pages/ProjectDetailPage'
-import { SourcingPage } from './pages/SourcingPage'
 import { LeadDetailPage } from './pages/LeadDetailPage'
 import { AIAssistantPage } from './pages/AIAssistantPage'
 import { MeetingsPage } from './pages/MeetingsPage'
+import { CollaborationPage } from './pages/CollaborationPage'
+import { CommitteePage } from './pages/CommitteePage'
 import { WorkflowPage } from './pages/WorkflowPage'
 import { RisksPage } from './pages/RisksPage'
-import { KnowledgePage } from './pages/KnowledgePage'
+import { DataKnowledgePage } from './pages/DataKnowledgePage'
+import { ResponsibilityPage } from './pages/ResponsibilityPage'
+import { FdeResponsibilityPolicyPanel } from './components/FdeResponsibilityPolicyPanel'
 import { SystemPage } from './pages/SystemPage'
 import { ModelSettingsPage } from './pages/ModelSettingsPage'
 import { CapabilitySettingsPage } from './pages/CapabilitySettingsPage'
@@ -60,9 +63,9 @@ export default function App() {
       <Route path="/login" element={initialized && authenticated ? <Navigate to="/" replace /> : <LoginPage />} />
       <Route element={<ProtectedLayout />}>
         <Route index element={<DashboardPage />} />
-        <Route path="/projects" element={<ProjectsPage />} />
+        <Route path="/projects" element={<ProjectCenterPage />} />
         <Route path="/projects/:id" element={<ProjectDetailPage />} />
-        <Route path="/sourcing" element={<SourcingPage />} />
+        <Route path="/sourcing" element={<Navigate to="/projects?view=leads" replace />} />
         <Route path="/sourcing/:id" element={<LeadDetailPage />} />
         <Route
           path="/ai"
@@ -74,10 +77,14 @@ export default function App() {
         />
         <Route path="/materials" element={<Navigate to="/ai" replace />} />
         <Route path="/meetings" element={<MeetingsPage />} />
+        <Route path="/collaboration" element={<CollaborationPage />} />
+        <Route path="/committee" element={<CommitteePage />} />
         <Route path="/workflow" element={<WorkflowPage />} />
         <Route path="/risks" element={<RisksPage />} />
         <Route path="/post-investment" element={<Navigate to="/projects" replace />} />
-        <Route path="/knowledge" element={<KnowledgePage />} />
+        <Route path="/knowledge" element={<DataKnowledgePage />} />
+        <Route path="/responsibility" element={<ResponsibilityPage />} />
+        <Route path="/responsibility/rules" element={<FdeResponsibilityPolicyPanel />} />
         <Route path="/system" element={<SystemAdminOnly><SystemPage /></SystemAdminOnly>} />
         <Route path="/system/ai/models" element={<AiPlatformAdminOnly><ModelSettingsPage /></AiPlatformAdminOnly>} />
         <Route path="/system/ai/capabilities" element={<AiPlatformAdminOnly><CapabilitySettingsPage /></AiPlatformAdminOnly>} />

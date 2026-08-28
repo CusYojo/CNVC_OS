@@ -20,6 +20,7 @@ import {
 } from './aiSkillService.js'
 import type { AiTemplateDefinition } from './aiTemplateCatalog.js'
 import { convertUploadedInvestmentPdfTemplate } from './aiInvestmentTemplateConversionService.js'
+import { requireAccessibleProject } from './projectAccessService.js'
 
 const MAX_TEMPLATE_BYTES = 25 * 1024 * 1024
 // 用户上传文件继续限制为 25MB；PDF 可编辑化会嵌入页面图片、OCR 文本和形状，
@@ -540,7 +541,8 @@ async function assertProjectAndConversationAccess(
   const project = await identityRepositories.permissions.findProjectById(projectId)
   if (!project) throw typedError('项目不存在', 404, 'NOT_FOUND')
   const collaborators = Array.isArray(project.collaborators) ? project.collaborators : []
-  const allowed = user.role === '系统管理员'
+  if (project.workflowModel === 'fde-v1') await requireAccessibleProject(user.uid, projectId)
+  const allowed = project.workflowModel === 'fde-v1' || user.role === '系统管理员'
     || !project.createdBy
     || project.createdBy === user.uid
     || project.owner === user.name

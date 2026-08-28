@@ -11,6 +11,7 @@ import { resolveAuthSessionPolicy } from '../config/authSessionPolicy.js'
 import { legacyBearerUserAllowed, resolveLegacyBearerPolicy } from '../config/legacyBearerPolicy.js'
 import { writeAudit } from './auditService.js'
 import { migrationWriteFreezePolicy } from '../config/migrationWriteFreezePolicy.js'
+import { resolveLoginIdentity } from '../security/loginIdentity.js'
 
 const SECRET = process.env.JWT_SECRET || 'cybernaut-dev-secret-change-me'
 const EXPIRES_IN = process.env.JWT_EXPIRES_IN || '24h'
@@ -274,8 +275,8 @@ export async function checkPassword(plain: string, hash: string): Promise<boolea
   return bcrypt.compare(plain, hash)
 }
 
-export async function login(email: string, password: string) {
-  const user = await identityRepositories.users.findByEmail(email)
+export async function login(identifier: string, password: string) {
+  const user = await resolveLoginIdentity(identifier, identityRepositories.users)
   if (!user || user.status !== '启用') {
     throw Object.assign(new Error('账号不存在或已禁用'), { code: 'AUTH_NOT_FOUND' })
   }

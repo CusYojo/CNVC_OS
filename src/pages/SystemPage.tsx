@@ -2,14 +2,21 @@ import {
   Building2, Check, Database, FileText, Plus, RefreshCw, RotateCcw, Search, UserCog, Users,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
+import { FDE_ROLE_CATEGORIES, type FdeRoleCategory } from '../../server/src/contracts/fdeGovernanceContract'
 import { useToast } from '../components/Toast'
 import { Badge, Button, Card, DataTable, Modal, PageHeader, SearchInput, StatusBadge, TableCell, Tabs } from '../components/ui'
-import { apiGet, apiPatch, apiPost } from '../lib/api'
+import { apiGet, apiPatch, apiPost, apiPut } from '../lib/api'
 import { formatShanghaiDateTime } from '../lib/dateTime'
+import { getSystemWorkspace, resolveSystemTab } from '../lib/systemWorkspaces'
 import { useAppStore } from '../store/useAppStore'
 import { useAuthStore } from '../store/useAuthStore'
 import type { User } from '../types'
-import { OperationsOverview } from '../components/OperationsOverview'
+import { FdePolicyPanel } from '../components/FdePolicyPanel'
+import { FdeTypePolicyPanel } from '../components/FdeTypePolicyPanel'
+import { FdeOfficePolicyPanel } from '../components/FdeOfficePolicyPanel'
+import { FdeResponsibilityPolicyPanel } from '../components/FdeResponsibilityPolicyPanel'
+import '../components/fde-workspace.css'
 
 type Department = {
   id: string; code: string; name: string; parentId: string | null; managerUserId: string | null;
@@ -19,6 +26,7 @@ type Permission = { id: string; code: string; name: string; module: string; acti
 type Role = {
   id: string; code: string; name: string; description: string | null; dataScope: 'self' | 'department' | 'all';
   builtIn: boolean; status: '启用' | '禁用'; version: number; memberCount: number; permissionIds: string[];
+  fdeCategory: FdeRoleCategory | null;
 }
 type DictionaryItem = {
   id: string; groupId: string; value: string; label: string; sortOrder: number; status: '启用' | '禁用';
@@ -28,22 +36,27 @@ type DictionaryGroup = {
   id: string; code: string; name: string; description: string | null; status: '启用' | '禁用';
   version: number; items: DictionaryItem[];
 }
-type Administration = { departments: Department[]; roles: Role[]; permissions: Permission[]; dictionaries: DictionaryGroup[] }
+type RoleBinding = { userId: string; roleId: string; isPrimary: boolean }
+type Administration = { departments: Department[]; roles: Role[]; permissions: Permission[]; dictionaries: DictionaryGroup[]; userRoleBindings: RoleBinding[] }
 type LeadRatingHistory = {
   id: string; snapshotId: string; snapshotHash: string; ratingSchemaVersion: string;
   status: string; result: unknown; completedAt: string;
 }
 type LeadRatingHistoryResponse = { leadId: string; ratings: LeadRatingHistory[]; total: number }
 
-const emptyAdministration: Administration = { departments: [], roles: [], permissions: [], dictionaries: [] }
+const emptyAdministration: Administration = { departments: [], roles: [], permissions: [], dictionaries: [], userRoleBindings: [] }
 const field = 'input w-full'
 const tabItems = [
   { id: 'users', label: '用户管理' }, { id: 'org', label: '组织管理' },
   { id: 'roles', label: '角色权限' }, { id: 'dicts', label: '数据字典' },
   { id: 'templates', label: '模板管理' }, { id: 'audit', label: '审计日志' },
   { id: 'rating-recovery', label: 'V3评分恢复' },
-  { id: 'operations', label: '迁移运维' },
+  { id: 'workflow-rules', label: '流程与周期规则' },
+  { id: 'type-rules', label: '非投资流程模板' },
+  { id: 'office-rules', label: '办公审批规则' },
+  { id: 'responsibility-rules', label: '责任规则' },
 ]
+const categoryLabel = (category: string | null) => FDE_ROLE_CATEGORIES.find((item) => item.code === category)?.label ?? '兼容角色（未映射）'
 
 function displayTime(value: string | null | undefined) {
   if (!value) return '尚未登录'
@@ -70,8 +83,19 @@ export function SystemPage() {
   const [administration, setAdministration] = useState<Administration>(emptyAdministration)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
-  const [tab, setTab] = useState('users')
+  const [searchParams, setSearchParams] = useSearchParams()
+  const requestedTab = searchParams.get('tab')
+  const tab = resolveSystemTab(requestedTab)
+  useEffect(() => {
+    if (requestedTab !== 'operations' && requestedTab !== 'integrations-overview') return
+    const next = new URLSearchParams(searchParams)
+    next.set('tab', 'audit')
+    setSearchParams(next, { replace: true })
+  }, [requestedTab, searchParams, setSearchParams])
+  const workspace = getSystemWorkspace(tab)
+  const setTab = (value: string) => { const next = new URLSearchParams(searchParams); next.set('tab', value); setSearchParams(next); setQuery('') }
   const [query, setQuery] = useState('')
+  useEffect(() => { setQuery('') }, [tab])
   const [userModal, setUserModal] = useState<{ mode: 'create' | 'edit'; user?: User } | null>(null)
   const [userForm, setUserForm] = useState({ name: '', email: '', department: '', role: '', password: '', status: '启用' as '启用' | '禁用' })
   const [passwordUser, setPasswordUser] = useState<User | null>(null)
@@ -79,7 +103,9 @@ export function SystemPage() {
   const [departmentModal, setDepartmentModal] = useState<Department | 'create' | null>(null)
   const [departmentForm, setDepartmentForm] = useState({ code: '', name: '', parentId: '', description: '', sortOrder: '0', status: '启用' as '启用' | '禁用' })
   const [roleModal, setRoleModal] = useState<Role | 'create' | null>(null)
-  const [roleForm, setRoleForm] = useState({ code: '', name: '', description: '', dataScope: 'self' as Role['dataScope'], status: '启用' as '启用' | '禁用', permissionIds: [] as string[] })
+  const [roleForm, setRoleForm] = useState({ code: '', name: '', description: '', dataScope: 'self' as Role['dataScope'], fdeCategory: '' as FdeRoleCategory | '', status: '启用' as '启用' | '禁用', permissionIds: [] as string[] })
+  const [bindingUser, setBindingUser] = useState<User | null>(null)
+  const [bindingForm, setBindingForm] = useState({ primaryRoleId: '', roleIds: [] as string[], expectedRoleIds: [] as string[], expectedPrimaryRoleId: null as string | null })
   const [dictionaryModal, setDictionaryModal] = useState<DictionaryGroup | 'create' | null>(null)
   const [dictionaryForm, setDictionaryForm] = useState({ code: '', name: '', description: '', status: '启用' as '启用' | '禁用' })
   const [itemModal, setItemModal] = useState<{ group: DictionaryGroup; item?: DictionaryItem } | null>(null)
@@ -164,8 +190,8 @@ export function SystemPage() {
   function openRole(role?: Role) {
     setRoleForm(role ? {
       code: role.code, name: role.name, description: role.description || '', dataScope: role.dataScope,
-      status: role.status, permissionIds: role.permissionIds,
-    } : { code: '', name: '', description: '', dataScope: 'self', status: '启用', permissionIds: [] })
+      status: role.status, permissionIds: role.permissionIds, fdeCategory: role.fdeCategory ?? '',
+    } : { code: '', name: '', description: '', dataScope: 'self', fdeCategory: '', status: '启用', permissionIds: [] })
     setRoleModal(role || 'create')
   }
 
@@ -174,6 +200,7 @@ export function SystemPage() {
     const payload = {
       name: roleForm.name, description: roleForm.description || null, dataScope: roleForm.dataScope,
       status: roleForm.status, permissionIds: roleForm.permissionIds,
+      fdeCategory: roleForm.fdeCategory || null,
     }
     const ok = await mutate(
       () => editing
@@ -182,6 +209,19 @@ export function SystemPage() {
       editing ? '角色权限已保存。' : '角色已创建。',
     )
     if (ok) setRoleModal(null)
+  }
+
+  function openBindings(user: User) {
+    const bindings = administration.userRoleBindings.filter((item) => item.userId === user.id)
+    const primaryRoleId = bindings.find((item) => item.isPrimary)?.roleId ?? null
+    setBindingForm({ primaryRoleId: primaryRoleId ?? '', roleIds: bindings.map((item) => item.roleId), expectedRoleIds: bindings.map((item) => item.roleId), expectedPrimaryRoleId: primaryRoleId })
+    setBindingUser(user)
+  }
+
+  async function saveBindings() {
+    if (!bindingUser) return
+    const ok = await mutate(() => apiPut(`/system-administration/users/${bindingUser.id}/roles`, bindingForm), '角色绑定已保存；相关旧会话已失效。', true)
+    if (ok) setBindingUser(null)
   }
 
   function openDictionary(group?: DictionaryGroup) {
@@ -255,9 +295,9 @@ export function SystemPage() {
     <Card className="overflow-hidden"><DataTable headers={['用户', '部门', '角色', '账号状态', '最后登录', '操作']}>
       {filteredUsers.map((user) => <tr key={user.id}>
         <TableCell><span className="font-medium text-slate-700">{user.name}{user.id === currentUser?.id && <span className="ml-2 text-[10px] text-brand-500">当前用户</span>}</span><span className="mt-1 block text-xs text-slate-400">{user.email}</span></TableCell>
-        <TableCell>{user.department}</TableCell><TableCell><Badge tone={user.role === '系统管理员' ? 'purple' : 'blue'}>{user.role}</Badge></TableCell>
+        <TableCell>{user.department}</TableCell><TableCell><div className="flex flex-wrap gap-1">{administration.userRoleBindings.filter((item) => item.userId === user.id).map((binding) => <Badge key={binding.roleId} tone={binding.isPrimary ? 'blue' : 'slate'}>{administration.roles.find((role) => role.id === binding.roleId)?.name ?? '未知角色'}{binding.isPrimary ? ' · 主' : ''}</Badge>)}</div></TableCell>
         <TableCell><StatusBadge status={user.status} /></TableCell><TableCell>{displayTime(user.lastLogin)}</TableCell>
-        <TableCell><div className="flex gap-3"><button className="text-xs text-brand-600" onClick={() => openUser(user)}>编辑</button><button className="text-xs text-slate-500" onClick={() => { setPasswordUser(user); setNewPassword('') }}>重置密码</button></div></TableCell>
+        <TableCell><div className="flex flex-wrap gap-3"><button className="text-xs text-brand-600" onClick={() => openUser(user)}>编辑</button><button className="text-xs text-brand-600" onClick={() => openBindings(user)}>角色与范围</button><button className="text-xs text-slate-500" onClick={() => { setPasswordUser(user); setNewPassword('') }}>重置密码</button></div></TableCell>
       </tr>)}
     </DataTable></Card>
   </>
@@ -276,11 +316,11 @@ export function SystemPage() {
   </>
 
   const renderRoles = () => <>
-    <div className="mb-4 flex items-center"><p className="text-xs text-slate-500">权限按资源与操作保存；旧角色字符串在兼容窗口继续供登录会话使用。</p><Button className="ml-auto" onClick={() => openRole()}><Plus className="h-4 w-4" />新增角色</Button></div>
-    <Card className="overflow-hidden"><DataTable headers={['角色', '编码', '数据范围', '成员', '权限数', '状态', '操作']}>
+    <div className="mb-4 flex items-center gap-3"><p className="text-xs text-slate-500">机构角色决定职责资格；项目分工与资源 ACL 决定实际可见内容。管理员身份不自动授予投资资料。</p><Button className="ml-auto" onClick={() => openRole()}><Plus className="h-4 w-4" />新增角色</Button></div>
+    <Card className="overflow-x-auto"><DataTable headers={['角色', '编码', 'FDE 职责类别', '数据范围', '成员', '权限数', '状态', '操作']}>
       {administration.roles.map((role) => <tr key={role.id}>
         <TableCell><span className="font-medium text-slate-700">{role.name}</span>{role.builtIn && <Badge tone="slate">内置</Badge>}<span className="mt-1 block text-xs text-slate-400">{role.description || '—'}</span></TableCell>
-        <TableCell><span className="font-mono text-xs">{role.code}</span></TableCell><TableCell>{role.dataScope === 'all' ? '全部' : role.dataScope === 'department' ? '本部门' : '本人'}</TableCell>
+        <TableCell><span className="font-mono text-xs">{role.code}</span></TableCell><TableCell><Badge>{categoryLabel(role.fdeCategory)}</Badge></TableCell><TableCell>{role.dataScope === 'all' ? '授权全量' : role.dataScope === 'department' ? '本部门' : '本人/项目职责'}</TableCell>
         <TableCell>{role.memberCount}</TableCell><TableCell>{role.permissionIds.length}</TableCell><TableCell><StatusBadge status={role.status} /></TableCell>
         <TableCell><button className="text-xs text-brand-600" onClick={() => openRole(role)}>配置权限</button></TableCell>
       </tr>)}
@@ -313,17 +353,28 @@ export function SystemPage() {
 
   const contents: Record<string, () => React.ReactNode> = {
     users: renderUsers, org: renderOrganization, roles: renderRoles, dicts: renderDictionaries,
-    templates: renderTemplates, audit: renderAudit, 'rating-recovery': renderRatingRecovery, operations: () => <OperationsOverview />,
+    templates: renderTemplates, audit: renderAudit, 'rating-recovery': renderRatingRecovery,
+    'workflow-rules': () => <FdePolicyPanel />,
+    'type-rules': () => <FdeTypePolicyPanel />,
+    'office-rules': () => <FdeOfficePolicyPanel />,
+    'responsibility-rules': () => <FdeResponsibilityPolicyPanel />,
   }
 
-  return <div>
+  return <div className="fde-workspace fde-system-page">
     <PageHeader title="系统管理" description="维护账号、组织、角色权限、数据字典、模板与审计；所有写操作进入 MySQL 并记录管理员审计。" actions={<Button variant="secondary" loading={loading} onClick={() => void refreshAdministration()}><RefreshCw className="h-4 w-4" />刷新</Button>} />
-    <div className="mb-5 grid grid-cols-4 gap-4">{[
+    <div className="fde-system-summary mb-5 grid grid-cols-4 gap-4">{[
       ['账号', users.length, Users], ['部门', administration.departments.length, Building2],
       ['角色', administration.roles.length, UserCog], ['字典', administration.dictionaries.length, Database],
     ].map(([label, value, Icon]) => { const C = Icon as typeof Search; return <Card key={label as string} className="p-4"><C className="h-4 w-4 text-brand-600" /><p className="mt-3 text-xs text-slate-400">{label as string}</p><p className="mt-1 text-xl font-semibold text-slate-800">{value as number}</p></Card> })}</div>
-    <Card className="mb-5 overflow-x-auto px-4"><Tabs tabs={tabItems.map((item) => ({ ...item, count: item.id === 'users' ? users.length : item.id === 'org' ? administration.departments.length : item.id === 'roles' ? administration.roles.length : item.id === 'dicts' ? administration.dictionaries.length : item.id === 'templates' ? templates.length : item.id === 'audit' ? logs.length : undefined }))} value={tab} onChange={(value) => { setTab(value); setQuery('') }} /></Card>
+    {workspace.id === 'organization' && <Card className="fde-panel mb-4 p-4 text-xs leading-6 text-slate-600">内部账号、组织角色与项目职责统一使用稳定身份。岗位可多选；主角色保留原系统兼容语义。角色或范围变更会使受影响账号重新登录，已提交审批仍保留原审批人快照。</Card>}
+    <Card className="mb-5 overflow-x-auto px-4"><Tabs tabs={tabItems.filter((item) => workspace.tabs.includes(item.id)).map((item) => ({ ...item, count: item.id === 'users' ? users.length : item.id === 'org' ? administration.departments.length : item.id === 'roles' ? administration.roles.length : item.id === 'dicts' ? administration.dictionaries.length : item.id === 'templates' ? templates.length : item.id === 'audit' ? logs.length : undefined }))} value={tab} onChange={setTab} /></Card>
     {contents[tab]?.()}
+
+    <Modal open={Boolean(bindingUser)} width="max-w-3xl" title={`角色与数据范围：${bindingUser?.name ?? ''}`} onClose={() => setBindingUser(null)} footer={<><Button variant="secondary" onClick={() => setBindingUser(null)}>取消</Button><Button loading={busy} disabled={!bindingForm.roleIds.includes(bindingForm.primaryRoleId)} onClick={() => void saveBindings()}>保存角色绑定</Button></>}>
+      <p className="mb-4 text-xs leading-5 text-slate-500">每个角色分别声明数据范围。项目文件与审批还要检查项目职责和资源授权，多个角色不表示绕过材料权限。</p>
+      <div className="space-y-2">{enabledRoles.map((role) => { const checked = bindingForm.roleIds.includes(role.id); return <label key={role.id} className="flex cursor-pointer items-center gap-3 rounded-lg border border-slate-200 p-3"><input type="checkbox" checked={checked} onChange={() => setBindingForm({ ...bindingForm, roleIds: checked ? bindingForm.roleIds.filter((id) => id !== role.id) : [...bindingForm.roleIds, role.id] })} /><span className="flex-1"><span className="block text-sm font-medium">{role.name}</span><span className="text-xs text-slate-500">{categoryLabel(role.fdeCategory)} · {role.dataScope === 'all' ? '授权全量' : role.dataScope === 'department' ? '本部门' : '本人/项目职责'}</span></span><span className="font-mono text-xs text-slate-400">{role.code}</span></label> })}</div>
+      <label className="mt-4 block"><span className="label">主角色</span><select className={field} value={bindingForm.primaryRoleId} onChange={(event) => setBindingForm({ ...bindingForm, primaryRoleId: event.target.value })}><option value="">请选择已授予的主角色</option>{enabledRoles.filter((role) => bindingForm.roleIds.includes(role.id)).map((role) => <option key={role.id} value={role.id}>{role.name}</option>)}</select></label>
+    </Modal>
 
     <Modal open={!!userModal} title={userModal?.mode === 'edit' ? '编辑用户' : '新增用户'} onClose={() => setUserModal(null)} footer={<><Button variant="secondary" onClick={() => setUserModal(null)}>取消</Button><Button loading={busy} onClick={() => void saveUser()}>保存</Button></>}>
       <div className="space-y-4"><label><span className="label">姓名</span><input className={field} value={userForm.name} onChange={(e) => setUserForm({ ...userForm, name: e.target.value })} /></label><label><span className="label">工作邮箱</span><input className={field} disabled={userModal?.mode === 'edit'} value={userForm.email} onChange={(e) => setUserForm({ ...userForm, email: e.target.value })} /></label>
@@ -336,7 +387,9 @@ export function SystemPage() {
 
     <Modal open={!!departmentModal} title={departmentModal === 'create' ? '新增部门' : '编辑部门'} onClose={() => setDepartmentModal(null)} footer={<><Button variant="secondary" onClick={() => setDepartmentModal(null)}>取消</Button><Button loading={busy} onClick={() => void saveDepartment()}>保存</Button></>}><div className="space-y-4"><label><span className="label">部门编码</span><input className={field} disabled={departmentModal !== 'create'} value={departmentForm.code} onChange={(e) => setDepartmentForm({ ...departmentForm, code: e.target.value })} /></label><label><span className="label">部门名称</span><input className={field} value={departmentForm.name} onChange={(e) => setDepartmentForm({ ...departmentForm, name: e.target.value })} /></label><label><span className="label">上级部门</span><select className={field} value={departmentForm.parentId} onChange={(e) => setDepartmentForm({ ...departmentForm, parentId: e.target.value })}><option value="">顶级部门</option>{administration.departments.filter((item) => item.id !== (departmentModal as Department)?.id).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label><span className="label">说明</span><textarea className={field} value={departmentForm.description} onChange={(e) => setDepartmentForm({ ...departmentForm, description: e.target.value })} /></label><div className="grid grid-cols-2 gap-4"><label><span className="label">排序</span><input type="number" className={field} value={departmentForm.sortOrder} onChange={(e) => setDepartmentForm({ ...departmentForm, sortOrder: e.target.value })} /></label><label><span className="label">状态</span><select className={field} value={departmentForm.status} onChange={(e) => setDepartmentForm({ ...departmentForm, status: e.target.value as '启用' | '禁用' })}><option>启用</option><option>禁用</option></select></label></div></div></Modal>
 
-    <Modal open={!!roleModal} width="max-w-3xl" title={roleModal === 'create' ? '新增角色' : '配置角色权限'} onClose={() => setRoleModal(null)} footer={<><Button variant="secondary" onClick={() => setRoleModal(null)}>取消</Button><Button loading={busy} onClick={() => void saveRole()}>保存</Button></>}><div className="space-y-4"><div className="grid grid-cols-2 gap-4"><label><span className="label">角色编码</span><input className={field} disabled={roleModal !== 'create'} value={roleForm.code} onChange={(e) => setRoleForm({ ...roleForm, code: e.target.value })} /></label><label><span className="label">角色名称</span><input className={field} disabled={roleModal != null && roleModal !== 'create' && roleModal.builtIn} value={roleForm.name} onChange={(e) => setRoleForm({ ...roleForm, name: e.target.value })} /></label></div><label><span className="label">说明</span><input className={field} value={roleForm.description} onChange={(e) => setRoleForm({ ...roleForm, description: e.target.value })} /></label><div className="grid grid-cols-2 gap-4"><label><span className="label">数据范围</span><select className={field} value={roleForm.dataScope} onChange={(e) => setRoleForm({ ...roleForm, dataScope: e.target.value as Role['dataScope'] })}><option value="self">本人</option><option value="department">本部门</option><option value="all">全部</option></select></label><label><span className="label">状态</span><select className={field} value={roleForm.status} onChange={(e) => setRoleForm({ ...roleForm, status: e.target.value as '启用' | '禁用' })}><option>启用</option><option>禁用</option></select></label></div><div><span className="label">权限项</span><div className="grid grid-cols-2 gap-2">{administration.permissions.map((permission) => { const checked = roleForm.permissionIds.includes(permission.id); return <button key={permission.id} className={`flex items-center rounded-lg border px-3 py-3 text-left text-sm ${checked ? 'border-brand-300 bg-brand-50' : 'border-slate-200'}`} onClick={() => setRoleForm({ ...roleForm, permissionIds: checked ? roleForm.permissionIds.filter((id) => id !== permission.id) : [...roleForm.permissionIds, permission.id] })}><span className={`mr-3 grid h-5 w-5 place-items-center rounded border ${checked ? 'border-brand-600 bg-brand-600 text-white' : 'border-slate-300 text-transparent'}`}><Check className="h-3.5 w-3.5" /></span><span><span className="block font-medium text-slate-700">{permission.name}</span><span className="text-xs text-slate-400">{permission.code}</span></span></button> })}</div></div></div></Modal>
+    <Modal open={!!roleModal} width="max-w-3xl" title={roleModal === 'create' ? '新增角色' : '配置角色权限'} onClose={() => setRoleModal(null)} footer={<><Button variant="secondary" onClick={() => setRoleModal(null)}>取消</Button><Button loading={busy} onClick={() => void saveRole()}>保存</Button></>}><div className="space-y-4">
+      <label className="block"><span className="label">FDE 职责类别</span><select className={field} disabled={['SYSTEM_ADMIN', 'AI_PLATFORM_ADMIN'].includes(roleForm.code)} value={roleForm.fdeCategory} onChange={(event) => setRoleForm({ ...roleForm, fdeCategory: event.target.value as FdeRoleCategory | '' })}><option value="">兼容角色（未映射）</option>{FDE_ROLE_CATEGORIES.map((category) => <option key={category.code} value={category.code}>{category.label}</option>)}</select><span className="mt-2 block text-xs text-slate-500">类别决定可承担的项目职责，不自动改变当前项目分工。权限、范围变化会使受影响账号重新登录。</span></label>
+      <div className="grid grid-cols-2 gap-4"><label><span className="label">角色编码</span><input className={field} disabled={roleModal !== 'create'} value={roleForm.code} onChange={(e) => setRoleForm({ ...roleForm, code: e.target.value })} /></label><label><span className="label">角色名称</span><input className={field} disabled={roleModal != null && roleModal !== 'create' && roleModal.builtIn} value={roleForm.name} onChange={(e) => setRoleForm({ ...roleForm, name: e.target.value })} /></label></div><label><span className="label">说明</span><input className={field} value={roleForm.description} onChange={(e) => setRoleForm({ ...roleForm, description: e.target.value })} /></label><div className="grid grid-cols-2 gap-4"><label><span className="label">数据范围</span><select className={field} value={roleForm.dataScope} onChange={(e) => setRoleForm({ ...roleForm, dataScope: e.target.value as Role['dataScope'] })}><option value="self">本人</option><option value="department">本部门</option><option value="all">全部</option></select></label><label><span className="label">状态</span><select className={field} value={roleForm.status} onChange={(e) => setRoleForm({ ...roleForm, status: e.target.value as '启用' | '禁用' })}><option>启用</option><option>禁用</option></select></label></div><div><span className="label">权限项</span><div className="grid grid-cols-2 gap-2">{administration.permissions.map((permission) => { const checked = roleForm.permissionIds.includes(permission.id); return <button key={permission.id} className={`flex items-center rounded-lg border px-3 py-3 text-left text-sm ${checked ? 'border-brand-300 bg-brand-50' : 'border-slate-200'}`} onClick={() => setRoleForm({ ...roleForm, permissionIds: checked ? roleForm.permissionIds.filter((id) => id !== permission.id) : [...roleForm.permissionIds, permission.id] })}><span className={`mr-3 grid h-5 w-5 place-items-center rounded border ${checked ? 'border-brand-600 bg-brand-600 text-white' : 'border-slate-300 text-transparent'}`}><Check className="h-3.5 w-3.5" /></span><span><span className="block font-medium text-slate-700">{permission.name}</span><span className="text-xs text-slate-400">{permission.code}</span></span></button> })}</div></div></div></Modal>
 
     <Modal open={!!dictionaryModal} title={dictionaryModal === 'create' ? '新增数据字典' : '编辑数据字典'} onClose={() => setDictionaryModal(null)} footer={<><Button variant="secondary" onClick={() => setDictionaryModal(null)}>取消</Button><Button loading={busy} onClick={() => void saveDictionary()}>保存</Button></>}><div className="space-y-4"><label><span className="label">字典编码</span><input className={field} disabled={dictionaryModal !== 'create'} value={dictionaryForm.code} onChange={(e) => setDictionaryForm({ ...dictionaryForm, code: e.target.value })} /></label><label><span className="label">名称</span><input className={field} value={dictionaryForm.name} onChange={(e) => setDictionaryForm({ ...dictionaryForm, name: e.target.value })} /></label><label><span className="label">说明</span><textarea className={field} value={dictionaryForm.description} onChange={(e) => setDictionaryForm({ ...dictionaryForm, description: e.target.value })} /></label><label><span className="label">状态</span><select className={field} value={dictionaryForm.status} onChange={(e) => setDictionaryForm({ ...dictionaryForm, status: e.target.value as '启用' | '禁用' })}><option>启用</option><option>禁用</option></select></label></div></Modal>
     <Modal open={!!itemModal} title={itemModal?.item ? '编辑字典项' : '新增字典项'} onClose={() => setItemModal(null)} footer={<><Button variant="secondary" onClick={() => setItemModal(null)}>取消</Button><Button loading={busy} onClick={() => void saveDictionaryItem()}>保存</Button></>}><div className="space-y-4"><label><span className="label">值编码</span><input className={field} disabled={!!itemModal?.item} value={itemForm.value} onChange={(e) => setItemForm({ ...itemForm, value: e.target.value })} /></label><label><span className="label">显示名称</span><input className={field} value={itemForm.label} onChange={(e) => setItemForm({ ...itemForm, label: e.target.value })} /></label><div className="grid grid-cols-2 gap-4"><label><span className="label">排序</span><input type="number" className={field} value={itemForm.sortOrder} onChange={(e) => setItemForm({ ...itemForm, sortOrder: e.target.value })} /></label><label><span className="label">状态</span><select className={field} value={itemForm.status} onChange={(e) => setItemForm({ ...itemForm, status: e.target.value as '启用' | '禁用' })}><option>启用</option><option>禁用</option></select></label></div></div></Modal>

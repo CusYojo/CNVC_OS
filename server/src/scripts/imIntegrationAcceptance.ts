@@ -14,6 +14,8 @@ import {
   imOutbox,
   leads,
   projects,
+  roles,
+  userRoles,
   users,
 } from '../db/schema.js'
 import { decryptIntegrationCredential } from '../security/integrationCredentialCrypto.js'
@@ -86,6 +88,9 @@ async function main() {
     { id: ids.ordinary, email: `im-user-${marker}@example.invalid`, name: ordinary.userName, role: ordinary.role, department: ordinary.department, passwordHash: 'not-used' },
     { id: ids.outsider, email: `im-outsider-${marker}@example.invalid`, name: outsider.userName, role: outsider.role, department: outsider.department, passwordHash: 'not-used' },
   ])
+  const [adminRole] = await db.select({ id: roles.id }).from(roles).where(eq(roles.code, 'SYSTEM_ADMIN')).limit(1)
+  assert(adminRole, '隔离验收库缺少系统管理员角色')
+  await db.insert(userRoles).values({ userId: ids.admin, roleId: adminRole.id, isPrimary: true })
   await db.insert(projects).values({
     id: ids.project, name: `IM 验收项目-${marker}`, owner: ordinary.userName,
     ownerUserId: ids.ordinary, createdBy: ids.ordinary,

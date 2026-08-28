@@ -25,21 +25,26 @@ import { useAppStore } from '../store/useAppStore'
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useToast } from '../components/Toast'
-import { Badge, Button, Card, DataTable, FileUpload, Modal, ProgressBar, RiskBadge, StageBadge, StatusBadge, TableCell, Tabs } from '../components/ui'
+import { Badge, Button, Card, DataTable, FileUpload, Modal, ProgressBar, RiskBadge, StageBadge, StatusBadge, TableCell } from '../components/ui'
 import { apiPost, apiGet, ApiError } from '../lib/api'
 import { formatShanghaiDate, formatShanghaiDateTime } from '../lib/dateTime'
 import { getFileTypeLabel } from '../lib/fileType'
 import type { Lead, Project, ProjectFile, RiskLevel } from '../types'
+import { FdeWorkflowPanel } from '../components/FdeWorkflowPanel'
+import { FdeTypeRuntimePanel } from '../components/FdeTypeRuntimePanel'
+import { FdeProjectAgentPanel } from '../components/FdeProjectAgentPanel'
+import { FdeProjectReplanPanel } from '../components/FdeProjectReplanPanel'
+import { ProjectGovernancePanel } from '../components/ProjectGovernancePanel'
+import { FdeTaskPanel } from '../components/FdeTaskPanel'
+import { FdeWeeklyPlanPanel } from '../components/FdeWeeklyPlanPanel'
+import { FdeDirectivePanel } from '../components/FdeDirectivePanel'
+import { FdeProjectRecordPanel } from '../components/FdeProjectRecordPanel'
+import { FdeFilePanel } from '../components/FdeFilePanel'
+import { ProjectDetailHero } from '../components/ProjectDetailHero'
+import { projectDetailTab, projectDetailTabs } from '../lib/projectDetailPresentation'
+import './ProjectDetailPage.css'
 
-const tabItems = [
-  { id: 'overview', label: '项目概览' },
-  { id: 'intelligence', label: '公司情报' },
-  { id: 'files', label: '资料库' },
-  { id: 'summary', label: 'AI 摘要' },
-  { id: 'meetings', label: '会议纪要' },
-  { id: 'workflow', label: '流程记录' },
-  { id: 'risks', label: '风险' },
-]
+const tabItems = projectDetailTabs
 
 function displayShanghaiDateTime(value: string | null | undefined): string {
   if (!value) return '—'
@@ -54,13 +59,14 @@ function displayShanghaiDate(value: string | null | undefined): string {
 export function ProjectDetailPage() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const { showToast } = useToast()
   const projects = useAppStore((state) => state.projects)
   const deleteFile = useAppStore((state) => state.deleteFile)
   const hydrateFromServer = useAppStore((state) => state.hydrateFromServer)
   const files = useAppStore((state) => state.files)
   const meetings = useAppStore((state) => state.meetings)
+  const todos = useAppStore((state) => state.todos)
   const workflows = useAppStore((state) => state.workflowLogs)
   const risks = useAppStore((state) => state.risks)
   const leads = useAppStore((state) => state.leads)
@@ -70,9 +76,16 @@ export function ProjectDetailPage() {
   const updateProject = useAppStore((state) => state.updateProject)
   const project = projects.find((item) => item.id === id)
   const requestedTab = searchParams.get('tab')
-  const [activeTab, setActiveTab] = useState(
-    requestedTab && tabItems.some((tab) => tab.id === requestedTab) ? requestedTab : 'overview',
-  )
+  const archiveReturn = searchParams.get('archiveReturn')
+  const archiveBack = archiveReturn?.startsWith('/knowledge?') ? archiveReturn : null
+  const activeTab = projectDetailTab(requestedTab)
+  const setActiveTab = (tab: string) => {
+    const next = new URLSearchParams(searchParams)
+    next.set('tab', tab)
+    setSearchParams(next)
+  }
+  const [workspace, setWorkspace] = useState<'directives' | 'weekly' | 'archive' | 'governance' | null>(null)
+  useEffect(() => { setWorkspace(null) }, [id])
   const [showUpload, setShowUpload] = useState(false)
   const [uploading, setUploading] = useState<{ name: string; progress: number; id?: string; done?: number; total?: number } | null>(null)
   const [generating, setGenerating] = useState(false)
@@ -84,9 +97,12 @@ export function ProjectDetailPage() {
   const [projectFilesLoading, setProjectFilesLoading] = useState(true)
   const [projectFilesError, setProjectFilesError] = useState('')
   const [projectFilesReloadKey, setProjectFilesReloadKey] = useState(0)
+  const [taskRevision, setTaskRevision] = useState(0)
+
 
   const projectFiles = files.filter((item) => item.projectId === id)
   const projectMeetings = meetings.filter((item) => item.projectId === id)
+  const projectTodos = todos.filter((item) => item.projectId === id)
   const projectWorkflows = workflows.filter((item) => item.projectId === id).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
   const projectRisks = risks.filter((item) => item.projectId === id)
   const projectApprovals = approvalRequests.filter((item) => item.projectId === id).sort((a, b) => b.submittedAt.localeCompare(a.submittedAt))
@@ -301,6 +317,7 @@ export function ProjectDetailPage() {
             name: replacement.name,
             type: replacement.type,
             dataBase64,
+            expectedVersion: file.version,
           })
           useAppStore.setState((state) => ({
             files: state.files.map((item) => item.id === file.id ? response.file : item),
@@ -381,7 +398,7 @@ export function ProjectDetailPage() {
     catch (e) { showToast(`删除失败：${(e as Error).message}`, 'error') }
   }
 
-  const renderFiles = () => (
+  const renderFiles = () => project.workflowModel === 'fde-v1' ? <FdeFilePanel projectId={project.id} initialFileId={searchParams.get('file')} refreshKey={`${showUpload}:${projectFiles.map(file => `${file.id}:${file.version}`).join(',')}`} onUpload={() => setShowUpload(true)} onReplace={repairProjectFile} onChanged={hydrateFromServer} /> : (
     <Card className="overflow-hidden">
       <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4"><div><h2 className="font-semibold text-slate-800">项目资料库</h2><p className="mt-1 text-xs text-slate-400">文件解析完成后可被 AI 摘要、问答和材料生成引用</p></div><Button onClick={() => setShowUpload(true)}><Upload className="h-4 w-4" />上传资料</Button></div>
       {projectFilesError ? <div className="p-12 text-center"><AlertCircle className="mx-auto h-8 w-8 text-rose-300" /><p className="mt-3 text-sm font-medium text-slate-700">项目资料加载失败</p><p className="mt-1 text-xs text-slate-400">{projectFilesError}</p><Button className="mt-4" variant="secondary" onClick={() => setProjectFilesReloadKey((key) => key + 1)}><RefreshCw className="h-4 w-4" />重新加载</Button></div> : projectFilesLoading && !projectFiles.length ? <div className="p-12 text-center"><RefreshCw className="mx-auto h-8 w-8 animate-spin text-brand-300" /><p className="mt-3 text-sm text-slate-500">正在加载项目资料…</p></div> : projectFiles.length ? <DataTable headers={['文件名称', '分类', '大小', '版本', '上传人', '解析状态', '上传时间', '']}>{projectFiles.map((file) => <tr key={file.id} className="hover:bg-slate-50"><TableCell><span className="flex items-center gap-3"><span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-blue-50 text-[10px] font-semibold text-blue-600">{getFileTypeLabel(file)}</span><span className="font-medium text-slate-700">{file.name}</span></span></TableCell><TableCell>{file.category}</TableCell><TableCell>{file.size}</TableCell><TableCell>V{file.version}</TableCell><TableCell>{file.uploader}</TableCell><TableCell><StatusBadge status={file.parseStatus} /></TableCell><TableCell>{displayShanghaiDateTime(file.uploadedAt)}</TableCell><TableCell><span className="flex items-center gap-1"><button aria-label={`下载${file.name}`} disabled={!!downloadingFileId || !!repairingFileId} onClick={() => { void downloadProjectFile(file) }} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"><Download className="h-4 w-4" /></button>{(file.hasOriginal === false || missingOriginalFileIds.includes(file.id)) && <button aria-label={`补传${file.name}`} disabled={!!repairingFileId} onClick={() => repairProjectFile(file)} className="rounded-lg px-2 py-1 text-xs text-brand-600 hover:bg-brand-50 disabled:opacity-50">{repairingFileId === file.id ? '补传中…' : '补传原文件'}</button>}<button aria-label={`删除${file.name}`} onClick={() => handleDeleteFile(file)} className="rounded-lg px-2 py-1 text-xs text-rose-600 hover:bg-rose-50">删除</button></span></TableCell></tr>)}</DataTable> : <div className="p-12 text-center"><FileText className="mx-auto h-8 w-8 text-slate-300" /><p className="mt-3 text-sm font-medium text-slate-700">还没有项目资料</p><p className="mt-1 text-xs text-slate-400">上传 BP 后即可生成结构化项目卡片与 AI 摘要</p></div>}
@@ -390,9 +407,14 @@ export function ProjectDetailPage() {
 
   const renderSummary = () => {
     const sc = project.scoring
-    if (!sc) return <Card className="p-12 text-center"><Bot className="mx-auto h-9 w-9 text-brand-300" /><h3 className="mt-4 font-medium text-slate-700">尚未生成项目 AI 评分</h3><p className="mt-2 text-sm text-slate-400">与公有线索池同款：按 7 大维度严格打分，给出总分、各维度得分与原因、竞品对标与同赛道分位，并入库。</p><Button className="mt-5" loading={generating} onClick={generateSummary}><Sparkles className="h-4 w-4" />生成项目评分</Button></Card>
+    // scoring 也承载公司补全资料；对象存在不代表已经有可展示的评分。
+    // 默认流程页中的折叠区仍会渲染，必须在读取维度及明细前校验数组。
+    if (!sc || !Number.isFinite(sc.total) || !Array.isArray(sc.dimensions) || !sc.dimensions.length
+      || sc.dimensions.some((dim) => !dim || !Array.isArray(dim.items) || dim.items.some((item) => !item))) {
+      return <Card className="p-12 text-center"><Bot className="mx-auto h-9 w-9 text-brand-300" /><h3 className="mt-4 font-medium text-slate-700">暂无完整的项目 AI 评分</h3><p className="mt-2 text-sm text-slate-400">公司补全资料不代表已完成评分。生成评分后可查看总分、各维度得分与原因；已有项目资料保持不变。</p><Button className="mt-5" loading={generating} onClick={generateSummary}><Sparkles className="h-4 w-4" />生成项目评分</Button></Card>
+    }
     const tone = sc.total >= 80 ? 'green' : sc.total >= 65 ? 'blue' : 'amber'
-    const verifiedCompetitors = (sc.competitors ?? []).filter((item) => item.is_self || item.verificationStatus === 'evidence-backed')
+    const verifiedCompetitors = (Array.isArray(sc.competitors) ? sc.competitors : []).filter((item) => item && (item.is_self || item.verificationStatus === 'evidence-backed'))
     const hasVerifiedCompetitor = verifiedCompetitors.some((item) => !item.is_self)
     return (
       <div className="space-y-5">
@@ -415,7 +437,7 @@ export function ProjectDetailPage() {
     )
   }
 
-  const renderMeetings = () => <div className="space-y-4">{projectMeetings.length ? projectMeetings.map((meeting) => <Card key={meeting.id} className="p-5"><div className="flex items-start justify-between"><div><div className="flex items-center gap-2"><h3 className="font-semibold text-slate-800">{meeting.title}</h3><StatusBadge status={meeting.status} /></div><p className="mt-2 text-xs text-slate-400">{displayShanghaiDateTime(meeting.meetingTime)} · {meeting.type} · {meeting.participants.join('、')}</p></div><button onClick={() => navigate(`/meetings?meeting=${meeting.id}`)} className="text-xs text-brand-600">查看完整纪要</button></div><p className="mt-4 rounded-lg bg-slate-50 p-3 text-sm leading-6 text-slate-600">{meeting.summary}</p><div className="mt-4 flex items-center gap-5 text-xs text-slate-500"><span>{meeting.conclusions.length} 条关键结论</span><span>{meeting.todoCount} 项待办</span></div></Card>) : <Card className="p-12 text-center text-sm text-slate-400">暂无关联会议</Card>}<Button onClick={() => navigate(`/meetings?project=${project.id}`)}><Plus className="h-4 w-4" />新建会议</Button></div>
+
 
   const renderWorkflow = () => <div className="space-y-5"><Card className="p-5"><div className="flex items-center justify-between"><div><h2 className="font-semibold text-slate-800">OA 审批实例</h2><p className="mt-1 text-xs text-slate-400">项目阶段不可直接编辑，只由最终通过的 OA 同步</p></div><Button onClick={() => navigate(`/workflow?project=${project.id}`)}><Plus className="h-4 w-4" />发起 OA</Button></div><div className="mt-4 space-y-3">{projectApprovals.map((request) => <button key={request.id} onClick={() => navigate(`/workflow?project=${project.id}&request=${request.id}`)} className="grid w-full grid-cols-[1fr_160px_150px] items-center rounded-xl border border-slate-200 p-4 text-left hover:border-brand-200"><div><div className="flex items-center gap-2"><p className="font-medium text-slate-700">{request.title}</p><Badge tone={request.status === '已通过' ? 'green' : request.status === '审批中' ? 'blue' : request.status === '已退回' ? 'amber' : 'red'}>{request.status}</Badge></div><p className="mt-1 text-xs text-slate-400">{request.requestNo} · {displayShanghaiDateTime(request.submittedAt)}</p></div><div className="flex items-center gap-1"><StageBadge stage={request.fromStage} /><span>→</span><StageBadge stage={request.targetStage} /></div><p className="text-right text-xs text-slate-500">{request.currentNodeName}</p></button>)}{!projectApprovals.length && <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-400">暂无 OA 审批实例</p>}</div></Card><Card className="p-6"><h2 className="mb-6 font-semibold text-slate-800">已生效阶段时间线</h2><div className="relative ml-2 border-l border-slate-200 pl-7">{projectWorkflows.map((log, index) => <div key={log.id} className="relative pb-8 last:pb-0"><span className={`absolute -left-[34px] top-0 grid h-3.5 w-3.5 place-items-center rounded-full ring-4 ring-white ${index === 0 ? 'bg-brand-600' : 'bg-slate-300'}`} /><div className="flex items-center gap-2"><StageBadge stage={log.fromStage} /><span className="text-slate-300">→</span><StageBadge stage={log.toStage} /><Badge tone="green">{log.source ?? '系统记录'}</Badge><span className="ml-auto text-xs text-slate-400">{displayShanghaiDateTime(log.createdAt)}</span></div><p className="mt-2 text-sm text-slate-600">{log.comment}</p><p className="mt-1 text-xs text-slate-400">操作人：{log.operator}{log.requestNo ? ` · ${log.requestNo}` : ''}</p></div>)}</div></Card></div>
 
@@ -432,6 +454,7 @@ export function ProjectDetailPage() {
         round: editingProject.round,
         financing: editingProject.financing,
         valuation: editingProject.valuation,
+        investmentFund: editingProject.investmentFund,
         riskLevel: editingProject.riskLevel,
         tags: editingProject.tags,
         summary: editingProject.summary,
@@ -445,21 +468,41 @@ export function ProjectDetailPage() {
     }
   }
 
-  const tabContent: Record<string, () => React.ReactNode> = { overview: renderOverview, intelligence: renderIntelligence, files: renderFiles, summary: renderSummary, meetings: renderMeetings, workflow: renderWorkflow, risks: renderRisks }
+  const fdePanel = (mode: 'workflow' | 'materials' | 'tasks') => project.workflowModel === 'fde-v1'
+    ? project.projectType !== '投资项目'
+      ? <FdeTypeRuntimePanel key={`${mode}-${taskRevision}`} project={project} files={projectFiles} onChanged={hydrateFromServer} />
+      : <FdeWorkflowPanel key={`${mode}-${taskRevision}`} project={project} files={projectFiles} mode={mode} onChanged={hydrateFromServer} onUpload={() => setShowUpload(true)} afterStage={<FdeProjectAgentPanel projectId={project.id} onChanged={hydrateFromServer} />} /> : null
+
+  const renderProjectArchive = () => <div className="space-y-4"><details className="rounded-xl border border-slate-200 bg-white p-5" open={requestedTab === 'overview'}><summary className="cursor-pointer text-sm font-semibold">项目概况与投资信息</summary><div className="mt-5">{renderOverview()}</div></details><details className="rounded-xl border border-slate-200 bg-white p-5" open={requestedTab === 'intelligence'}><summary className="cursor-pointer text-sm font-semibold">公司情报与证据</summary><div className="mt-5">{renderIntelligence()}</div></details><details className="rounded-xl border border-slate-200 bg-white p-5" open={requestedTab === 'summary'}><summary className="cursor-pointer text-sm font-semibold">项目 AI 摘要与评分</summary><div className="mt-5">{renderSummary()}</div></details><details className="rounded-xl border border-slate-200 bg-white p-5" open={requestedTab === 'risks'}><summary className="cursor-pointer text-sm font-semibold">项目风险</summary><div className="mt-5">{renderRisks()}</div></details><details className="rounded-xl border border-slate-200 p-5"><summary className="cursor-pointer text-sm font-semibold">阶段审批与时间线</summary><div className="mt-5">{renderWorkflow()}</div></details>{project.workflowModel === 'fde-v1' && <FdeProjectReplanPanel projectId={project.id} onChanged={hydrateFromServer} />}</div>
+
+  const tabContent: Record<string, () => React.ReactNode> = {
+    workflow: () => <div className="fde-detail-stack">{fdePanel('workflow')}{project.workflowModel !== 'fde-v1' && renderWorkflow()}</div>,
+    files: () => <div className="fde-detail-stack">{fdePanel('materials')}{renderFiles()}</div>,
+    tasks: () => <div className="space-y-5">{project.workflowModel === 'fde-v1' ? <><FdeTaskPanel project={project} files={projectFiles} onWeeklyPlan={() => setWorkspace('weekly')} onChanged={async () => { await hydrateFromServer(); setTaskRevision((value) => value + 1) }} /></> : <Card className="p-5"><h2 className="font-semibold">项目任务</h2><div className="mt-4 space-y-3">{projectTodos.length ? projectTodos.map((todo) => <div key={todo.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 p-3"><div><p className="text-sm font-medium">{todo.title}</p><p className="mt-1 text-xs text-slate-500">{todo.owner} · {todo.dueDate} · {todo.type}</p></div><StatusBadge status={todo.status} /></div>) : <p className="text-sm text-slate-500">当前没有项目任务。</p>}</div></Card>}</div>,
+    collaboration: () => <div className="fde-detail-stack">
+      <div className="fde-detail-collaboration-toolbar"><div><strong>协作互动</strong><span>领导事项、例会与关键讨论</span></div><div className="fde-detail-inline-actions"><Button variant="secondary" onClick={() => setWorkspace('governance')}>项目成员</Button><Button variant="secondary" onClick={() => navigate(`/collaboration?view=time&project=${project.id}`)}>领导时间</Button><Button variant="secondary" onClick={() => navigate(`/collaboration?view=friday&project=${project.id}`)}>周五例会</Button></div></div>
+      <div className="fde-detail-collaboration-grid">
+        {project.workflowModel === 'fde-v1' && <FdeDirectivePanel projectId={project.id} onChanged={hydrateFromServer} compact />}
+        <Card className="fde-detail-meetings"><div className="fde-detail-card-head"><h2>例会与动态</h2><Button variant="secondary" onClick={() => navigate(`/meetings?project=${project.id}`)}>查看会议</Button></div><div className="fde-detail-meeting-list">{projectMeetings.slice(0, 3).map(meeting => <button key={meeting.id} onClick={() => navigate(`/meetings?meeting=${meeting.id}`)}><span className="fde-detail-date-tile"><strong>{displayShanghaiDate(meeting.meetingTime).slice(-2)}</strong><small>会议</small></span><span><strong>{meeting.title}</strong><small>{displayShanghaiDateTime(meeting.meetingTime)} · {meeting.type}</small></span><StatusBadge status={meeting.status} /></button>)}{!projectMeetings.length && <p className="fde-detail-empty">暂无关联会议</p>}</div><div className="fde-detail-activity-list">{projectWorkflows.slice(0, 4).map(log => <div key={log.id}><span /><div><strong>{log.operator} · {log.toStage}</strong><small>{log.comment} · {displayShanghaiDateTime(log.createdAt)}</small></div></div>)}</div></Card>
+      </div>
+      {project.workflowModel === 'fde-v1' && <FdeProjectRecordPanel projectId={project.id} compact />}
+    </div>,
+  }
 
   return (
-    <div>
-      <button onClick={() => navigate('/projects')} className="mb-4 flex items-center gap-1 text-xs text-slate-500 hover:text-brand-600"><ArrowLeft className="h-3.5 w-3.5" />返回项目列表</button>
-      <Card className="mb-5 overflow-hidden">
-        <div className="flex items-center gap-5 px-6 py-5">
-          <div className="grid h-12 w-12 place-items-center rounded-xl bg-brand-50 text-sm font-semibold text-brand-700">{project.name.slice(0, 2)}</div>
-          <div className="min-w-0 flex-1"><div className="flex items-center gap-3"><h1 className="text-xl font-semibold text-ink">{project.name}</h1><StageBadge stage={project.stage} /><RiskBadge level={project.riskLevel} /></div><p className="mt-1.5 text-sm text-slate-500">{project.companyName} · {project.industry} · {project.round}</p><p className="mt-1 text-[10px] text-slate-400">阶段来源：{project.stageSource ?? '历史数据'}{projectApprovals.some((item) => item.status === '审批中') ? ' · OA 审批中，当前阶段已锁定' : ''}</p></div>
-          <div className="flex items-center gap-5 border-r border-slate-200 pr-5 text-xs"><div><p className="text-slate-400">负责人</p><p className="mt-1 font-medium text-slate-700">{project.owner}</p></div><div><p className="text-slate-400">最近更新</p><p className="mt-1 whitespace-nowrap font-medium text-slate-700">{displayShanghaiDateTime(project.updatedAt)}</p></div></div>
-          <div className="flex items-center gap-2"><Button variant="secondary" onClick={() => setShowUpload(true)}><Upload className="h-4 w-4" />上传资料</Button><Button loading={generating} onClick={generateSummary}><Sparkles className="h-4 w-4" />生成评分</Button></div>
-        </div>
-        <div className="px-4"><Tabs tabs={tabItems.map((tab) => ({ ...tab, count: tab.id === 'files' ? (projectFilesLoading && !projectFiles.length ? undefined : projectFiles.length) : tab.id === 'meetings' ? projectMeetings.length : tab.id === 'risks' ? projectRisks.length : undefined }))} value={activeTab} onChange={setActiveTab} /></div>
-      </Card>
-      {tabContent[activeTab]?.()}
+    <div className="fde-project-detail">
+      <div className="fde-detail-breadcrumb"><button onClick={() => navigate(archiveBack ?? `/projects?view=${project.classification ?? 'normal'}`)}><ArrowLeft className="h-3.5 w-3.5" />{archiveBack ? '返回项目档案' : '项目中心'}</button></div>
+      <ProjectDetailHero key={project.id} project={project} todos={projectTodos} onUpload={() => setShowUpload(true)} onWorkspace={setWorkspace} onArchive={() => setWorkspace('archive')} />
+      <div className="fde-detail-tabs" role="tablist" aria-label="项目详情工作区">{tabItems.map(tab => <button id={`project-tab-${tab.id}`} type="button" role="tab" aria-selected={activeTab === tab.id} aria-controls={`project-panel-${tab.id}`} tabIndex={activeTab === tab.id ? 0 : -1} className={activeTab === tab.id ? 'active' : ''} key={tab.id} onClick={() => setActiveTab(tab.id)} onKeyDown={event => {
+        const index = tabItems.findIndex(item => item.id === activeTab)
+        const next = event.key === 'ArrowRight' ? (index + 1) % tabItems.length : event.key === 'ArrowLeft' ? (index + tabItems.length - 1) % tabItems.length : event.key === 'Home' ? 0 : event.key === 'End' ? tabItems.length - 1 : -1
+        if (next >= 0) { event.preventDefault(); setActiveTab(tabItems[next].id); document.getElementById(`project-tab-${tabItems[next].id}`)?.focus() }
+      }}>{tab.label}</button>)}</div>
+      <div className="fde-detail-tab-content" id={`project-panel-${activeTab}`} role="tabpanel" aria-labelledby={`project-tab-${activeTab}`} key={`${project.id}:${activeTab}`}>{tabContent[activeTab]?.()}</div>
+
+      <Modal open={workspace !== null || searchParams.has('replan') || ['overview', 'intelligence', 'summary', 'risks'].includes(requestedTab ?? '')} onClose={() => { setWorkspace(null); if (searchParams.has('replan')) { const next = new URLSearchParams(searchParams); next.delete('replan'); setSearchParams(next) } if (['overview', 'intelligence', 'summary', 'risks'].includes(requestedTab ?? '')) setActiveTab('workflow') }} title={workspace === 'directives' ? '领导批示' : workspace === 'weekly' ? '本周工作与周计划' : workspace === 'governance' ? '项目成员与职责' : '项目档案与历史'} width="max-w-6xl">
+        {workspace === 'directives' ? <FdeDirectivePanel projectId={project.id} onChanged={hydrateFromServer} /> : workspace === 'weekly' ? <FdeWeeklyPlanPanel projectId={project.id} onChanged={hydrateFromServer} /> : workspace === 'governance' ? <ProjectGovernancePanel projectId={project.id} onChanged={hydrateFromServer} /> : renderProjectArchive()}
+      </Modal>
 
       <Modal open={showUpload} onClose={() => { setUploading(null); setShowUpload(false) }} title="上传项目资料">
         <FileUpload onFiles={handleUploadFiles} multiple />
@@ -475,6 +518,7 @@ export function ProjectDetailPage() {
           <label><span className="label">融资轮次</span><input className="input" value={editingProject.round ?? ''} onChange={(event) => setEditingProject({ ...editingProject, round: event.target.value })} /></label>
           <label><span className="label">计划融资</span><input className="input" value={editingProject.financing ?? ''} onChange={(event) => setEditingProject({ ...editingProject, financing: event.target.value })} /></label>
           <label><span className="label">投前估值</span><input className="input" value={editingProject.valuation ?? ''} onChange={(event) => setEditingProject({ ...editingProject, valuation: event.target.value })} /></label>
+          <label><span className="label">投资基金（内核必填）</span><input className="input" value={editingProject.investmentFund ?? ''} onChange={(event) => setEditingProject({ ...editingProject, investmentFund: event.target.value })} /></label>
           <label><span className="label">风险等级</span><select className="input" value={editingProject.riskLevel} onChange={(event) => setEditingProject({ ...editingProject, riskLevel: event.target.value as RiskLevel })}><option>低</option><option>中</option><option>高</option></select></label>
           <label><span className="label">项目标签</span><input className="input" value={editingProject.tags.join('、')} onChange={(event) => setEditingProject({ ...editingProject, tags: event.target.value.split(/[、,，]/).map((item) => item.trim()).filter(Boolean) })} /></label>
           <label className="col-span-2"><span className="label">项目简介</span><textarea className="textarea min-h-24" value={editingProject.summary ?? ''} onChange={(event) => setEditingProject({ ...editingProject, summary: event.target.value })} /></label>

@@ -2,6 +2,14 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { rewriteMigrationSqlForPrefix } from '../src/db/migrate.js'
 
+test('drop-check references use the identical tenant-scoped name as creation', () => {
+  const source = 'ALTER TABLE `sbl_project_plans` DROP CHECK `ck_fde_plan_cycle`, ADD CONSTRAINT `ck_fde_plan_cycle` CHECK (`cycle_days` IN (15,30,40));'
+  const result = rewriteMigrationSqlForPrefix(source, 'fde_accept_1234567890_')
+  assert.match(result, /DROP CHECK `fde_accept_1234567890_ck_fde_plan_cycle`/)
+  assert.match(result, /ADD CONSTRAINT `fde_accept_1234567890_ck_fde_plan_cycle` CHECK/)
+  assert.match(result, /ALTER TABLE `fde_accept_1234567890_project_plans`/)
+})
+
 test('migration SQL honors DB_FREFIX for tables, constraints and references', () => {
   const source = [
     'CREATE TABLE `sbl_jobs` (`id` int, `active_name` varchar(20), CONSTRAINT `sbl_jobs_id` PRIMARY KEY (`id`), CONSTRAINT `uq_jobs_active` UNIQUE (`active_name`), CONSTRAINT `ck_jobs_id` CHECK (`id` > 0));',

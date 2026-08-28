@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useToast } from '../components/Toast'
 import { Badge, Button, Card, Modal, PageHeader, SearchInput, StatusBadge } from '../components/ui'
-import { apiPost } from '../lib/api'
+import { apiGet, apiPost } from '../lib/api'
 import { useAuthStore } from '../store/useAuthStore'
 import type { Meeting } from '../types'
 import { addShanghaiDaysDateKey, shanghaiDateTimeInputValue } from '../lib/dateTime'
@@ -44,6 +44,7 @@ export function MeetingsPage() {
   const [selectedId, setSelectedId] = useState(searchParams.get('meeting') ?? meetings[0]?.id)
   const [showNew, setShowNew] = useState(!!searchParams.get('project'))
   const [generating, setGenerating] = useState(false)
+  const [taskReview, setTaskReview] = useState<{ meeting: Parameters<typeof addMeeting>[0]; todos: NonNullable<Parameters<typeof addMeeting>[1]>; members: Array<{ id: string; name: string }> } | null>(null)
   const localNow = shanghaiDateTimeInputValue()
   const [form, setForm] = useState({
     title: '',
@@ -94,24 +95,33 @@ export function MeetingsPage() {
       type: '会议' as const,
     }))
 
-    try {
-      const meeting = await addMeeting({
+    const meetingInput = {
         projectId: project.id,
         projectName: project.name,
         title: form.title,
         meetingTime: form.meetingTime,
         participants: form.participants.split(/[、,，]/).filter(Boolean),
         type: form.type,
-        status: '成功',
+        status: '成功' as const,
         rawText: form.rawText,
         summary: summaryText,
         conclusions,
         todoCount: todoObjs.length,
-      }, todoObjs)
+      }
+    try {
+      if (project.workflowModel === 'fde-v1' && todoObjs.length) {
+        const roster = await apiGet<{ members: Array<{ id: string; name: string }>; canAssign: boolean }>(`/projects/${project.id}/fde-tasks`)
+        setTaskReview({ meeting: meetingInput, todos: todoObjs.map((todo) => ({ ...todo, ownerUserId: '' })), members: roster.members.filter((member) => roster.canAssign || member.id === currentUser.id) })
+        setShowNew(false)
+        return
+      }
+      const meeting = await addMeeting(meetingInput, todoObjs)
       setSelectedId(meeting.id)
       setShowNew(false)
       setForm((value) => ({ ...value, title: '', rawText: '' }))
       showToast(`会议纪要与 ${todoObjs.length} 项待办已生成，并同步到项目和工作台`)
+    } catch (error) {
+      showToast(`保存失败：${(error as Error).message}`, 'error')
     } finally {
       setGenerating(false)
     }
@@ -160,6 +170,19 @@ export function MeetingsPage() {
         </div>
         <div className="pt-4"><label><span className="label">会议原文</span><textarea className="textarea min-h-40" value={form.rawText} onChange={(event) => setForm({ ...form, rawText: event.target.value })} placeholder="粘贴真实速记、转写原文或会议记录…" /></label></div>
         <p className="mt-4 rounded-lg bg-slate-50 p-3 text-xs leading-5 text-slate-500">AI 会生成一句话摘要、详细纪要、关键结论、分歧、风险点及待办。待办将自动同步到首页工作台。</p>
+      </Modal>
+      <Modal open={Boolean(taskReview)} onClose={() => { if (!generating) setTaskReview(null) }} title="确认会议任务负责人" width="max-w-3xl" footer={<><Button variant="secondary" disabled={generating} onClick={() => { setTaskReview(null); setShowNew(true) }}>返回编辑</Button><Button loading={generating} disabled={!taskReview?.todos.every((todo) => Boolean(todo.ownerUserId && todo.dueDate))} onClick={async () => {
+        if (!taskReview) return
+        setGenerating(true)
+        try {
+          const meeting = await addMeeting(taskReview.meeting, taskReview.todos)
+          setSelectedId(meeting.id); setTaskReview(null); setForm((value) => ({ ...value, title: '', rawText: '' }))
+          showToast('会议与已确认负责人的任务已保存，成果仍需异人验收')
+        } catch (error) { showToast(`保存失败：${(error as Error).message}`, 'error') }
+        finally { setGenerating(false) }
+      }}>确认并保存会议</Button></>}>
+        <p className="mb-4 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">AI 提取的姓名仅供参考。请为每项任务选择本项目真实账号，确认后才生成正式任务；不能按同名自动归属。</p>
+        <div className="space-y-4">{taskReview?.todos.map((todo, index) => <div key={index} className="rounded-lg border border-slate-200 p-3"><p className="text-sm font-medium">{todo.title}</p><p className="mt-1 text-xs text-slate-500">原文/模型建议负责人：{todo.owner}</p><div className="mt-3 flex gap-3"><label className="flex-1"><span className="label">正式负责人</span><select className="input w-full" value={todo.ownerUserId ?? ''} onChange={(event) => setTaskReview({ ...taskReview, todos: taskReview.todos.map((item, i) => i === index ? { ...item, ownerUserId: event.target.value } : item) })}><option value="">请选择账号</option>{taskReview.members.map((member) => <option value={member.id} key={member.id}>{member.name} · {member.id.slice(0, 8)}</option>)}</select></label><label><span className="label">截止日期</span><input type="date" className="input" value={todo.dueDate} onChange={(event) => setTaskReview({ ...taskReview, todos: taskReview.todos.map((item, i) => i === index ? { ...item, dueDate: event.target.value } : item) })} /></label></div></div>)}</div>
       </Modal>
     </div>
   )

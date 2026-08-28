@@ -3,6 +3,14 @@ import { mysqlTableCreator, text, longtext, customType, int, bigint, boolean, js
 import { sql } from 'drizzle-orm'
 import { mysqlConfig } from './config.js'
 import { currentRequestId } from '../runtime/structuredLogger.js'
+import type { FdeWorkflowPolicyConfig } from '../contracts/fdeWorkflowPolicyContract.js'
+import type { TypePolicyDefinition, TypePolicyReceipt } from '../contracts/fdeTypePolicyContract.js'
+import type { TypeRegistrationReceipt } from '../contracts/fdeTypeRegistrationContract.js'
+import type { WeeklyReportFacts } from '../contracts/fdeWeeklyReportContract.js'
+import type { FridayMinutes } from '../contracts/fdeFridayMeetingContract.js'
+import type { CommitteeReceipt } from '../contracts/fdeCommitteeContract.js'
+import type { ResponsibilityPolicy, ResponsibilityPolicyReceipt } from '../contracts/fdeResponsibilityPolicyContract.js'
+import type { ResponsibilityReceipt } from '../contracts/fdeResponsibilityContract.js'
 
 const mysqlTable = mysqlTableCreator((name) => `${mysqlConfig.tablePrefix}${name}`)
 const uuidPrimaryKey = (name: string) => varchar(name, { length: 36 }).primaryKey().$defaultFn(randomUUID)
@@ -100,6 +108,7 @@ export const roles = mysqlTable('roles', {
   name: varchar('name', { length: 64 }).notNull(),
   description: text('description'),
   dataScope: varchar('data_scope', { length: 16 }).notNull().default('self'),
+  fdeCategory: varchar('fde_category', { length: 32 }),
   builtIn: boolean('built_in').notNull().default(false),
   status: varchar('status', { length: 8 }).notNull().default('启用'),
   version: int('version').notNull().default(1),
@@ -181,6 +190,53 @@ export const dictionaryItems = mysqlTable('dictionary_items', {
   byGroup: index('idx_dictionary_items_group_order').on(t.groupId, t.sortOrder),
 }))
 
+export const fdeWorkflowPolicies = mysqlTable('fde_workflow_policies', {
+  id: uuidPrimaryKey('id'), code: varchar('code', { length: 64 }).notNull(),
+  name: varchar('name', { length: 128 }).notNull(), activeVersionId: uuidColumn('active_version_id'),
+  enabled: boolean('enabled').notNull().default(true), version: int('version').notNull().default(1),
+  nextRevision: int('next_revision').notNull().default(2),
+}, (t) => ({ uniqueCode: uniqueIndex('uq_fde_policy_code').on(t.code) }))
+
+export const fdeWorkflowPolicyVersions = mysqlTable('fde_workflow_policy_versions', {
+  id: uuidPrimaryKey('id'), policyId: uuidColumn('policy_id').notNull().references(() => fdeWorkflowPolicies.id, { onDelete: 'restrict' }),
+  revision: int('revision').notNull(), status: varchar('status', { length: 16 }).notNull().default('draft'),
+  configuration: json('configuration').$type<FdeWorkflowPolicyConfig | TypePolicyDefinition>().notNull(), sha256: varchar('sha256', { length: 64 }).notNull(),
+  reason: text('reason').notNull(), version: int('version').notNull().default(1),
+  createdBy: uuidColumn('created_by').references(() => users.id, { onDelete: 'set null' }),
+  publishedBy: uuidColumn('published_by').references(() => users.id, { onDelete: 'set null' }),
+  publishedAt: timestampColumn('published_at'),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+  updatedAt: timestampColumn('updated_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({ uniqueRevision: uniqueIndex('uq_fde_policy_revision').on(t.policyId, t.revision) }))
+
+// Non-investment definitions share the authoritative version IDs, but use their
+// own review/command journal. Investment policies keep their original contract.
+export const fdeTypePolicyReviews = mysqlTable('fde_type_policy_reviews', {
+  versionId: uuidColumn('version_id').primaryKey().references(() => fdeWorkflowPolicyVersions.id, { onDelete: 'restrict' }),
+  approvedBy: uuidColumn('approved_by').references(() => users.id, { onDelete: 'restrict' }),
+  approvedAt: timestampColumn('approved_at'), approvedHash: varchar('approved_hash', { length: 64 }),
+})
+export const fdeTypePolicyCommands = mysqlTable('fde_type_policy_commands', {
+  id: uuidPrimaryKey('id'), actorId: uuidColumn('actor_id').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  commandId: uuidColumn('command_id').notNull(), commandHash: varchar('command_hash', { length: 64 }),
+  receipt: json('receipt').$type<TypePolicyReceipt>(), closedAt: timestampColumn('closed_at'),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, t => ({ command: uniqueIndex('uq_type_policy_command').on(t.actorId, t.commandId) }))
+export const fdeTypePolicyEvents = mysqlTable('fde_type_policy_events', {
+  id: uuidPrimaryKey('id'), policyId: uuidColumn('policy_id').notNull().references(() => fdeWorkflowPolicies.id, { onDelete: 'restrict' }),
+  versionId: uuidColumn('version_id').notNull().references(() => fdeWorkflowPolicyVersions.id, { onDelete: 'restrict' }),
+  actorId: uuidColumn('actor_id').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  commandId: uuidColumn('command_id').notNull(), action: varchar('action', { length: 16 }).notNull(), reason: text('reason').notNull(),
+  snapshot: json('snapshot').$type<Record<string, unknown>>().notNull(), createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, t => ({ command: uniqueIndex('uq_type_policy_event_command').on(t.actorId, t.commandId), history: index('idx_type_policy_history').on(t.policyId, t.createdAt) }))
+
+export const fdeTypeRegistrationCommands = mysqlTable('fde_type_registration_commands', {
+  id: uuidPrimaryKey('id'), actorId: uuidColumn('actor_id').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  commandId: uuidColumn('command_id').notNull(), commandHash: varchar('command_hash', { length: 64 }),
+  receipt: json('receipt').$type<TypeRegistrationReceipt>(), closedAt: timestampColumn('closed_at'),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, t => ({ command: uniqueIndex('uq_type_registration_command').on(t.actorId, t.commandId) }))
+
 export const projects = mysqlTable('projects', {
   id: uuidPrimaryKey('id'),
   name: varchar('name', { length: 128 }).notNull(),
@@ -189,6 +245,19 @@ export const projects = mysqlTable('projects', {
   round: varchar('round', { length: 64 }),
   stage: varchar('stage', { length: 16 }).notNull().default('线索'), // 线索/初筛/立项/尽调/上会/投决/投后/退出/放弃
   stageSource: varchar('stage_source', { length: 32 }),
+  classification: varchar('classification', { length: 16 }).notNull().default('normal'), // pool/normal/key
+  lifecycle: varchar('lifecycle', { length: 16 }).notNull().default('active'), // active/closed/archived/deleted
+  workflowModel: varchar('workflow_model', { length: 16 }).notNull().default('legacy'), // legacy/fde-v1
+  governanceVersion: int('governance_version').notNull().default(1),
+  workflowPolicyVersionId: uuidColumn('workflow_policy_version_id').references(() => fdeWorkflowPolicyVersions.id, { onDelete: 'restrict' }),
+  projectType: varchar('project_type', { length: 32 }).notNull().default('投资项目'),
+  healthStatus: varchar('health_status', { length: 16 }).notNull().default('正常'),
+  targetDate: varchar('target_date', { length: 10 }), // YYYY-MM-DD
+  cycleDays: int('cycle_days').notNull().default(40),
+  requirements: text('requirements'),
+  investmentFund: varchar('investment_fund', { length: 128 }),
+  leaderPriority: varchar('leader_priority', { length: 8 }).notNull().default('中'),
+  confidentiality: varchar('confidentiality', { length: 16 }).notNull().default('项目成员'),
   owner: varchar('owner', { length: 64 }).notNull(),
   ownerUserId: uuidColumn('owner_user_id').references(() => users.id, { onDelete: 'set null' }),
   collaborators: json('collaborators').$type<string[]>().notNull().default(emptyJsonArray),
@@ -214,6 +283,22 @@ export const projects = mysqlTable('projects', {
   byStage: index('idx_projects_stage').on(t.stage),
   byOwner: index('idx_projects_owner').on(t.owner),
   byOwnerUser: index('idx_projects_owner_user').on(t.ownerUserId),
+  byClassificationLifecycle: index('idx_projects_classification_lifecycle').on(t.classification, t.lifecycle, t.updatedAt),
+  byTargetDate: index('idx_projects_target_date').on(t.targetDate, t.lifecycle),
+}))
+
+export const projectClassificationHistory = mysqlTable('project_classification_history', {
+  id: uuidPrimaryKey('id'),
+  projectId: uuidColumn('project_id').notNull().references(() => projects.id, { onDelete: 'cascade' }),
+  fromClassification: varchar('from_classification', { length: 16 }),
+  toClassification: varchar('to_classification', { length: 16 }).notNull(),
+  reason: text('reason').notNull(),
+  changedBy: uuidColumn('changed_by').references(() => users.id, { onDelete: 'set null' }),
+  changedByName: varchar('changed_by_name', { length: 64 }).notNull(),
+  requestId: varchar('request_id', { length: 64 }),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({
+  byProjectTime: index('idx_project_classification_history_project_time').on(t.projectId, t.createdAt),
 }))
 
 // 项目成员的稳定身份绑定。owner/collaborators 字符串仅保留作展示和迁移审计，
@@ -249,6 +334,40 @@ export const projectScoreJobs = mysqlTable('project_score_jobs', {
   byLease: index('idx_project_score_jobs_lease').on(t.leaseExpiresAt),
 }))
 
+export const projectDutyAssignments = mysqlTable('project_duty_assignments', {
+  id: uuidPrimaryKey('id'),
+  projectId: uuidColumn('project_id').notNull().references(() => projects.id, { onDelete: 'cascade' }),
+  duty: varchar('duty', { length: 32 }).notNull(),
+  userId: uuidColumn('user_id').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  assignedBy: uuidColumn('assigned_by').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({
+  uniqueAssignment: uniqueIndex('uq_project_duty_assignment').on(t.projectId, t.duty, t.userId),
+  byUser: index('idx_project_duty_user').on(t.userId, t.projectId),
+}))
+
+export const projectGovernanceChanges = mysqlTable('project_governance_changes', {
+  id: uuidPrimaryKey('id'),
+  projectId: uuidColumn('project_id').notNull().references(() => projects.id, { onDelete: 'cascade' }),
+  baseVersion: int('base_version').notNull(),
+  proposedOwnerId: uuidColumn('proposed_owner_id').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  proposedAssignments: json('proposed_assignments').$type<Array<{ duty: string; userId: string }>>().notNull().default(emptyJsonArray),
+  previousSnapshot: json('previous_snapshot').$type<Record<string, unknown>>().notNull(),
+  reason: text('reason').notNull(),
+  status: varchar('status', { length: 32 }).notNull(),
+  activeKey: uuidColumn('active_key'),
+  requestedBy: uuidColumn('requested_by').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  requiredConfirmers: json('required_confirmers').$type<string[]>().notNull().default(emptyJsonArray),
+  confirmations: json('confirmations').$type<Array<{ userId: string; decision: string; comment: string; at: string }>>().notNull().default(emptyJsonArray),
+  version: int('version').notNull().default(1),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+  updatedAt: timestampColumn('updated_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+  appliedAt: timestampColumn('applied_at'),
+}, (t) => ({
+  uniquePending: uniqueIndex('uq_project_governance_pending').on(t.activeKey),
+  byProject: index('idx_project_governance_history').on(t.projectId, t.createdAt),
+}))
+
 export const projectFiles = mysqlTable('project_files', {
   id: uuidPrimaryKey('id'),
   projectId: uuidColumn('project_id').notNull().references(() => projects.id, { onDelete: 'cascade' }),
@@ -262,6 +381,13 @@ export const projectFiles = mysqlTable('project_files', {
   uploadedBy: uuidColumn('uploaded_by').references(() => users.id, { onDelete: 'set null' }),
   parseStatus: varchar('parse_status', { length: 16 }).notNull().default('解析中'),
   visibility: varchar('visibility', { length: 16 }).notNull().default('项目成员'),
+  accessMode: varchar('access_mode', { length: 16 }).notNull().default('project'),
+  accessVersion: int('access_version').notNull().default(1),
+  lifecycle: varchar('lifecycle', { length: 16 }).notNull().default('active'),
+  deletedBy: uuidColumn('deleted_by').references(() => users.id, { onDelete: 'restrict' }),
+  deletedAt: timestampColumn('deleted_at'),
+  deleteReason: text('delete_reason'),
+  retentionUntil: timestampColumn('retention_until'),
   storagePath: text('storage_path'), // 预留：以后接 OSS 时使用
   // 文档正文可能远超 MySQL TEXT 的 64 KiB 上限（大型 Markdown/尽调报告很常见）。
   contentText: longtext('content_text'), // 提取的文档正文（RAG 检索用）
@@ -273,6 +399,25 @@ export const projectFiles = mysqlTable('project_files', {
   byUploader: index('idx_project_files_uploader').on(t.uploadedBy, t.projectId),
   byProjectContent: index('idx_project_files_project_sha256').on(t.projectId, t.sha256),
 }))
+
+export const projectFileGrants = mysqlTable('project_file_grants', {
+  id: uuidPrimaryKey('id'),
+  fileId: uuidColumn('file_id').notNull().references(() => projectFiles.id, { onDelete: 'restrict' }),
+  userId: uuidColumn('user_id').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  canView: boolean('can_view').notNull().default(false),
+  canDownload: boolean('can_download').notNull().default(false),
+  grantedBy: uuidColumn('granted_by').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  updatedAt: timestampColumn('updated_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, t => ({ user: uniqueIndex('uq_file_grant_user').on(t.fileId, t.userId) }))
+
+export const projectFileEvents = mysqlTable('project_file_events', {
+  id: uuidPrimaryKey('id'), fileId: uuidColumn('file_id').notNull().references(() => projectFiles.id, { onDelete: 'restrict' }),
+  actorId: uuidColumn('actor_id').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  requestId: uuidColumn('request_id').notNull(), requestHash: varchar('request_hash', { length: 64 }).notNull(),
+  action: varchar('action', { length: 24 }).notNull(), version: int('version').notNull(), reason: text('reason').notNull(),
+  snapshot: json('snapshot').$type<Record<string, unknown>>().notNull(),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, t => ({ request: uniqueIndex('uq_file_event_request').on(t.requestId), version: uniqueIndex('uq_file_event_version').on(t.fileId, t.version) }))
 
 // 每次原始文件写入均保留不可变版本元数据和独立存储路径；project_files 指向当前版本。
 export const projectFileVersions = mysqlTable('project_file_versions', {
@@ -289,6 +434,209 @@ export const projectFileVersions = mysqlTable('project_file_versions', {
   byHash: index('idx_project_file_versions_sha256').on(t.sha256),
 }))
 
+export const projectMaterialSubmissions = mysqlTable('project_material_submissions', {
+  id: uuidPrimaryKey('id'), projectId: uuidColumn('project_id').notNull().references(() => projects.id, { onDelete: 'restrict' }),
+  fileId: uuidColumn('file_id').notNull(), fileVersion: int('file_version').notNull(), fileName: varchar('file_name', { length: 255 }).notNull(),
+  fileSha256: varchar('file_sha256', { length: 64 }).notNull(), fileByteSize: bigint('file_byte_size', { mode: 'number' }).notNull(),
+  senderId: uuidColumn('sender_id').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  title: varchar('title', { length: 100 }).notNull(), note: text('note').notNull(), stage: varchar('stage', { length: 32 }).notNull(),
+  status: varchar('status', { length: 24 }).notNull().default('pending'), version: int('version').notNull().default(1), revision: int('revision').notNull().default(1), previousId: uuidColumn('previous_id'),
+  withdrawnAt: timestampColumn('withdrawn_at'), withdrawalReason: text('withdrawal_reason'),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`), updatedAt: timestampColumn('updated_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, t => ({ previous: uniqueIndex('uq_material_previous').on(t.previousId), list: index('idx_material_project_status').on(t.projectId, t.status, t.createdAt),
+  original: foreignKey({ columns: [t.fileId, t.fileVersion], foreignColumns: [projectFileVersions.fileId, projectFileVersions.version] }).onDelete('restrict'),
+  previousLink: foreignKey({ columns: [t.previousId], foreignColumns: [t.id] }).onDelete('restrict'),
+}))
+export const projectMaterialRecipients = mysqlTable('project_material_recipients', {
+  id: uuidPrimaryKey('id'), submissionId: uuidColumn('submission_id').notNull().references(() => projectMaterialSubmissions.id, { onDelete: 'restrict' }),
+  userId: uuidColumn('user_id').notNull().references(() => users.id, { onDelete: 'restrict' }), version: int('version').notNull().default(1),
+  readAt: timestampColumn('read_at'), decision: varchar('decision', { length: 16 }), feedback: text('feedback'), decidedAt: timestampColumn('decided_at'),
+}, t => ({ recipient: uniqueIndex('uq_material_recipient').on(t.submissionId, t.userId), user: index('idx_material_recipient_user').on(t.userId, t.decision) }))
+export const projectMaterialEvents = mysqlTable('project_material_events', {
+  id: uuidPrimaryKey('id'), submissionId: uuidColumn('submission_id').notNull().references(() => projectMaterialSubmissions.id, { onDelete: 'restrict' }),
+  actorId: uuidColumn('actor_id').notNull().references(() => users.id, { onDelete: 'restrict' }), requestId: uuidColumn('request_id').notNull(), requestHash: varchar('request_hash', { length: 64 }).notNull(),
+  action: varchar('action', { length: 24 }).notNull(), version: int('version').notNull(), reason: text('reason').notNull(), snapshot: json('snapshot').$type<Record<string, unknown>>().notNull(),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, t => ({ request: uniqueIndex('uq_material_event_request').on(t.requestId), version: uniqueIndex('uq_material_event_version').on(t.submissionId, t.version) }))
+// A resolved, uncommitted request is permanently fenced against late delivery.
+// No material text or duplicate business state is stored here.
+export const projectMaterialRequestClosures = mysqlTable('project_material_request_closures', {
+  id: uuidPrimaryKey('id'), requestId: uuidColumn('request_id').notNull(),
+  projectId: uuidColumn('project_id').notNull().references(() => projects.id, { onDelete: 'restrict' }),
+  actorId: uuidColumn('actor_id').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, t => ({ request: uniqueIndex('uq_material_request_closure').on(t.projectId, t.actorId, t.requestId) }))
+export const projectMaterialNotices = mysqlTable('project_material_notices', {
+  id: uuidPrimaryKey('id'), submissionId: uuidColumn('submission_id').notNull().references(() => projectMaterialSubmissions.id, { onDelete: 'restrict' }),
+  recipientId: uuidColumn('recipient_id').notNull().references(() => users.id, { onDelete: 'restrict' }), kind: varchar('kind', { length: 16 }).notNull(), version: int('version').notNull(),
+  readAt: timestampColumn('read_at'), closedAt: timestampColumn('closed_at'), createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, t => ({ notice: uniqueIndex('uq_material_notice').on(t.submissionId, t.recipientId, t.kind, t.version), recipient: index('idx_material_notice_recipient').on(t.recipientId, t.closedAt, t.createdAt) }))
+
+export const projectStageMaterials = mysqlTable('project_stage_materials', {
+  id: uuidPrimaryKey('id'),
+  projectId: uuidColumn('project_id').notNull().references(() => projects.id, { onDelete: 'cascade' }),
+  stage: varchar('stage', { length: 32 }).notNull(),
+  requirementKey: varchar('requirement_key', { length: 64 }).notNull(),
+  fileId: uuidColumn('file_id').references(() => projectFiles.id, { onDelete: 'restrict' }),
+  fileVersion: int('file_version'),
+  waiverReason: text('waiver_reason'),
+  updatedBy: uuidColumn('updated_by').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  version: int('version').notNull().default(1),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+  updatedAt: timestampColumn('updated_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({
+  uniqueRequirement: uniqueIndex('uq_project_stage_material').on(t.projectId, t.stage, t.requirementKey),
+  byFile: index('idx_project_stage_material_file').on(t.fileId),
+}))
+
+export const projectPlans = mysqlTable('project_plans', {
+  id: uuidPrimaryKey('id'),
+  projectId: uuidColumn('project_id').notNull().references(() => projects.id, { onDelete: 'cascade' }),
+  revision: int('revision').notNull().default(1),
+  status: varchar('status', { length: 16 }).notNull().default('draft'),
+  cycleDays: int('cycle_days').notNull(),
+  executionKind: varchar('execution_kind', { length: 16 }).notNull().default('investment'),
+  targetDate: varchar('target_date', { length: 10 }).notNull(),
+  createdBy: uuidColumn('created_by').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  lockedAt: timestampColumn('locked_at'),
+  version: int('version').notNull().default(1),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+  updatedAt: timestampColumn('updated_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({
+  uniqueRevision: uniqueIndex('uq_project_plan_revision').on(t.projectId, t.revision),
+}))
+
+export const projectAgentConfigs = mysqlTable('project_agent_configs', {
+  projectId: uuidColumn('project_id').primaryKey().references(() => projects.id, { onDelete: 'restrict' }),
+  configuration: json('configuration').$type<import('../contracts/fdeProjectAgentContract.js').ProjectAgentConfig>().notNull(),
+  version: int('version').notNull(), updatedBy: uuidColumn('updated_by').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  updatedAt: timestampColumn('updated_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+})
+export const projectAgentRuns = mysqlTable('project_agent_runs', {
+  id: uuidPrimaryKey('id'), projectId: uuidColumn('project_id').notNull().references(() => projects.id, { onDelete: 'restrict' }),
+  actorId: uuidColumn('actor_id').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  configuration: json('configuration').$type<import('../contracts/fdeProjectAgentContract.js').ProjectAgentConfig>().notNull(),
+  configVersion: int('config_version').notNull(), inputHash: varchar('input_hash', { length: 64 }).notNull(),
+  facts: json('facts').$type<import('../contracts/fdeProjectAgentContract.js').ProjectAgentFacts>().notNull(),
+  status: varchar('status', { length: 16 }).notNull(), provider: varchar('provider', { length: 16 }).notNull().default('rules'),
+  fallbackReason: varchar('fallback_reason', { length: 64 }),
+  startedAt: timestampColumn('started_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`), completedAt: timestampColumn('completed_at'),
+}, t => ({ byProject: index('idx_project_agent_run').on(t.projectId, t.startedAt, t.id) }))
+export const projectAgentRecommendations = mysqlTable('project_agent_recommendations', {
+  id: uuidPrimaryKey('id'), runId: uuidColumn('run_id').notNull().references(() => projectAgentRuns.id, { onDelete: 'restrict' }),
+  projectId: uuidColumn('project_id').notNull().references(() => projects.id, { onDelete: 'restrict' }),
+  recommendation: json('recommendation').$type<import('../contracts/fdeProjectAgentContract.js').AgentRecommendation>().notNull(),
+  status: varchar('status', { length: 32 }).notNull().default('open'), version: int('version').notNull().default(1),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, t => ({ uniqueRun: uniqueIndex('uq_project_agent_recommendation_run').on(t.runId) }))
+export const projectAgentDecisions = mysqlTable('project_agent_decisions', {
+  id: uuidPrimaryKey('id'), recommendationId: uuidColumn('recommendation_id').notNull().references(() => projectAgentRecommendations.id, { onDelete: 'restrict' }),
+  actorId: uuidColumn('actor_id').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  decision: varchar('decision', { length: 32 }).notNull(), note: text('note').notNull(),
+  scheduleDraft: json('schedule_draft').$type<import('../contracts/fdeProjectAgentContract.js').AgentScheduleDraft | null>(),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, t => ({ uniqueRecommendation: uniqueIndex('uq_project_agent_decision').on(t.recommendationId) }))
+export const projectAgentCommands = mysqlTable('project_agent_commands', {
+  id: uuidPrimaryKey('id'), actorId: uuidColumn('actor_id').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  projectId: uuidColumn('project_id').notNull().references(() => projects.id, { onDelete: 'restrict' }),
+  requestId: uuidColumn('request_id').notNull(), requestHash: varchar('request_hash', { length: 64 }),
+  receipt: json('receipt').$type<{ kind: 'config' | 'run' | 'decision' | 'schedule' | 'timeline' | 'replan'; id: string; version: number } | null>(),
+  closedAt: timestampColumn('closed_at'), createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, t => ({ uniqueActorRequest: uniqueIndex('uq_project_agent_command').on(t.actorId, t.requestId) }))
+
+export const projectAgentScheduleRequests = mysqlTable('project_agent_schedule_requests', {
+  requestId: uuidColumn('request_id').primaryKey().references(() => oaApprovalRequests.id, { onDelete: 'restrict' }),
+  recommendationId: uuidColumn('recommendation_id').notNull().references(() => projectAgentRecommendations.id, { onDelete: 'restrict' }),
+  projectId: uuidColumn('project_id').notNull().references(() => projects.id, { onDelete: 'restrict' }),
+  stage: varchar('stage', { length: 16 }).notNull(), previousDate: varchar('previous_date', { length: 10 }).notNull(),
+  requestedDate: varchar('requested_date', { length: 10 }).notNull(), timelineHash: varchar('timeline_hash', { length: 64 }).notNull(),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, t => ({ uniqueRecommendation: uniqueIndex('uq_agent_schedule_recommendation').on(t.recommendationId), byProject: index('idx_agent_schedule_project').on(t.projectId, t.createdAt) }))
+
+export const projectStageDates = mysqlTable('project_stage_dates', {
+  id: uuidPrimaryKey('id'), projectId: uuidColumn('project_id').notNull().references(() => projects.id, { onDelete: 'restrict' }),
+  stage: varchar('stage', { length: 16 }).notNull(), plannedDate: varchar('planned_date', { length: 10 }).notNull(),
+  approvalId: uuidColumn('approval_id').notNull().references(() => oaApprovalRequests.id, { onDelete: 'restrict' }),
+  version: int('version').notNull().default(1), updatedAt: timestampColumn('updated_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, t => ({ uniqueStage: uniqueIndex('uq_project_stage_date').on(t.projectId, t.stage) }))
+
+// No seed or public activation endpoint: formal calendar/approval policy is a
+// separate business decision. Absent/disabled configuration fails closed.
+export const projectReplanPolicies = mysqlTable('project_replan_policies', {
+  projectId: uuidColumn('project_id').primaryKey().references(() => projects.id, { onDelete: 'restrict' }),
+  version: int('version').notNull(), enabled: boolean('enabled').notNull().default(false),
+  configuration: json('configuration').$type<import('../contracts/fdeProjectReplanContract.js').ProjectReplanPolicy>().notNull(),
+  configurationHash: varchar('configuration_hash', { length: 64 }).notNull(), approvalEvidence: text('approval_evidence').notNull(),
+  createdBy: uuidColumn('created_by').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  approvedBy: uuidColumn('approved_by').references(() => users.id, { onDelete: 'restrict' }),
+  updatedAt: timestampColumn('updated_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+})
+export const projectReplanRequests = mysqlTable('project_replan_requests', {
+  requestId: uuidColumn('request_id').primaryKey().references(() => oaApprovalRequests.id, { onDelete: 'restrict' }),
+  projectId: uuidColumn('project_id').notNull().references(() => projects.id, { onDelete: 'restrict' }),
+  revision: int('revision').notNull(), policyVersion: int('policy_version').notNull(),
+  fingerprint: varchar('fingerprint', { length: 64 }).notNull(),
+  impact: json('impact').$type<import('../contracts/fdeProjectReplanContract.js').ReplanImpact>().notNull(),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, t => ({ revision: uniqueIndex('uq_project_replan_revision').on(t.projectId, t.revision) }))
+
+export const projectPlanActions = mysqlTable('project_plan_actions', {
+  id: uuidPrimaryKey('id'),
+  planId: uuidColumn('plan_id').notNull().references(() => projectPlans.id, { onDelete: 'cascade' }),
+  actionKey: varchar('action_key', { length: 64 }).notNull(),
+  title: varchar('title', { length: 128 }).notNull(),
+  ownerUserId: uuidColumn('owner_user_id').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  dueDate: varchar('due_date', { length: 10 }).notNull(),
+  deliverable: text('deliverable').notNull(),
+  status: varchar('status', { length: 16 }).notNull().default('未开始'),
+  sortOrder: int('sort_order').notNull(),
+  version: int('version').notNull().default(1),
+}, (t) => ({
+  uniqueAction: uniqueIndex('uq_project_plan_action').on(t.planId, t.actionKey),
+  byOwnerDate: index('idx_project_plan_action_owner_date').on(t.ownerUserId, t.dueDate),
+}))
+
+export const fdeTypeInstances = mysqlTable('fde_type_instances', {
+  projectId: uuidColumn('project_id').primaryKey().references(() => projects.id, { onDelete: 'restrict' }),
+  policyVersionId: uuidColumn('policy_version_id').notNull().references(() => fdeWorkflowPolicyVersions.id, { onDelete: 'restrict' }),
+  planId: uuidColumn('plan_id').references(() => projectPlans.id, { onDelete: 'restrict' }),
+  plan: json('plan').$type<import('../contracts/fdeTypeExecutionContract.js').TypeExecutionPlan>().notNull(),
+  planHash: varchar('plan_hash', { length: 64 }).notNull(), stageKey: varchar('stage_key', { length: 48 }).notNull(),
+  status: varchar('status', { length: 24 }).$type<import('../contracts/fdeTypeRuntimeContract.js').TypeRuntimeStatus>().notNull(),
+  version: int('version').notNull().default(1), createdBy: uuidColumn('created_by').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`), updatedAt: timestampColumn('updated_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+})
+export const fdeTypeExecutionReviews = mysqlTable('fde_type_execution_reviews', {
+  id: uuidPrimaryKey('id'), projectId: uuidColumn('project_id').notNull().references(() => fdeTypeInstances.projectId, { onDelete: 'restrict' }),
+  kind: varchar('kind', { length: 16 }).$type<'plan' | 'stage'>().notNull(), activeKey: uuidColumn('active_key'),
+  snapshot: json('snapshot').$type<import('../contracts/fdeTypeRuntimeContract.js').TypeRuntimeReview>().notNull(),
+  planSnapshot: json('plan_snapshot').$type<import('../contracts/fdeTypeExecutionContract.js').TypeExecutionPlan>().notNull(),
+  status: varchar('status', { length: 16 }).$type<import('../contracts/fdeTypeRuntimeContract.js').TypeRuntimeReview['status']>().notNull(),
+  version: int('version').notNull().default(1), createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`), updatedAt: timestampColumn('updated_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, t => ({ active: uniqueIndex('uq_type_execution_active').on(t.activeKey), history: index('idx_type_execution_history').on(t.projectId, t.createdAt, t.id) }))
+export const fdeTypeExecutionFiles = mysqlTable('fde_type_execution_files', {
+  id: uuidPrimaryKey('id'), reviewId: uuidColumn('review_id').notNull().references(() => fdeTypeExecutionReviews.id, { onDelete: 'restrict' }),
+  fileId: uuidColumn('file_id').notNull().references(() => projectFiles.id, { onDelete: 'restrict' }),
+  fileVersionId: uuidColumn('file_version_id').notNull().references(() => projectFileVersions.id, { onDelete: 'restrict' }),
+}, t => ({ uniqueVersion: uniqueIndex('uq_type_execution_file').on(t.reviewId, t.fileVersionId), byFile: index('idx_type_execution_file').on(t.fileId) }))
+export const fdeTypeExecutionCommands = mysqlTable('fde_type_execution_commands', {
+  id: uuidPrimaryKey('id'), projectId: uuidColumn('project_id').notNull().references(() => projects.id, { onDelete: 'restrict' }),
+  actorId: uuidColumn('actor_id').notNull().references(() => users.id, { onDelete: 'restrict' }), commandId: uuidColumn('command_id').notNull(),
+  commandHash: varchar('command_hash', { length: 64 }), receipt: json('receipt').$type<import('../contracts/fdeTypeRuntimeContract.js').TypeRuntimeReceipt | null>(), closedAt: timestampColumn('closed_at'),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, t => ({ uniqueCommand: uniqueIndex('uq_type_execution_command').on(t.projectId, t.actorId, t.commandId) }))
+export const fdeTypeExecutionNotices = mysqlTable('fde_type_execution_notices', {
+  id: uuidPrimaryKey('id'), reviewId: uuidColumn('review_id').notNull().references(() => fdeTypeExecutionReviews.id, { onDelete: 'restrict' }),
+  nodeKey: varchar('node_key', { length: 48 }).notNull(), recipientId: uuidColumn('recipient_id').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`), readAt: timestampColumn('read_at'), closedAt: timestampColumn('closed_at'),
+}, t => ({ uniqueNotice: uniqueIndex('uq_type_notice_node_recipient').on(t.reviewId, t.nodeKey, t.recipientId), recipient: index('idx_type_notice_recipient').on(t.recipientId, t.closedAt) }))
+export const fdeTypeExecutionEvents = mysqlTable('fde_type_execution_events', {
+  id: uuidPrimaryKey('id'), projectId: uuidColumn('project_id').notNull().references(() => fdeTypeInstances.projectId, { onDelete: 'restrict' }),
+  actorId: uuidColumn('actor_id').notNull().references(() => users.id, { onDelete: 'restrict' }), commandId: uuidColumn('command_id').notNull(),
+  action: varchar('action', { length: 24 }).notNull(), version: int('version').notNull(), reason: text('reason').notNull(),
+  snapshot: json('snapshot').$type<Record<string, unknown>>().notNull(), createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, t => ({ uniqueVersion: uniqueIndex('uq_type_execution_event').on(t.projectId, t.version) }))
+
 export const meetings = mysqlTable('meetings', {
   id: uuidPrimaryKey('id'),
   projectId: uuidColumn('project_id').references(() => projects.id, { onDelete: 'set null' }),
@@ -302,6 +650,12 @@ export const meetings = mysqlTable('meetings', {
   aiSummary: text('ai_summary'),
   conclusions: json('conclusions').$type<string[]>().notNull().default(emptyJsonArray),
   startedAt: timestampColumn('started_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+  endsAt: timestampColumn('ends_at'),
+  workflowKind: varchar('workflow_kind', { length: 24 }).notNull().default('legacy'),
+  workflowStatus: varchar('workflow_status', { length: 24 }).notNull().default('recorded'),
+  weeklyReview: json('weekly_review').$type<FridayMinutes>(),
+  confirmedBy: uuidColumn('confirmed_by').references(() => users.id, { onDelete: 'restrict' }),
+  confirmedAt: timestampColumn('confirmed_at'),
   createdBy: uuidColumn('created_by').references(() => users.id),
   version: int('version').notNull().default(1),
 }, (t) => ({
@@ -319,6 +673,70 @@ export const meetingParticipants = mysqlTable('meeting_participants', {
   byUser: index('idx_meeting_participants_user').on(t.userId, t.meetingId),
 }))
 
+// Committee schedules use the existing meeting ID/time/participants. Agenda
+// contents are separate so no single-project or legacy reader can disclose them.
+export const committeeMeetings = mysqlTable('committee_meetings', {
+  meetingId: uuidColumn('meeting_id').primaryKey().references(() => meetings.id, { onDelete: 'restrict' }),
+  sequenceYear: int('sequence_year'), sequenceNumber: int('sequence_number'),
+  ruleNote: text('rule_note').notNull(), materialCheckAt: timestampColumn('material_check_at'),
+  checkedAt: timestampColumn('checked_at'), checkedBy: uuidColumn('checked_by').references(() => users.id, { onDelete: 'restrict' }),
+  checkHash: varchar('check_hash', { length: 64 }), archivedAt: timestampColumn('archived_at'),
+}, t => ({ annualNumber: uniqueIndex('uq_committee_annual_number').on(t.sequenceYear, t.sequenceNumber) }))
+
+export const committeeYears = mysqlTable('committee_years', {
+  year: int('year').primaryKey(), nextSequence: int('next_sequence').notNull().default(1),
+})
+
+export const committeeAgendas = mysqlTable('committee_agendas', {
+  id: uuidPrimaryKey('id'), meetingId: uuidColumn('meeting_id').notNull().references(() => meetings.id, { onDelete: 'restrict' }),
+  projectId: uuidColumn('project_id').notNull().references(() => projects.id, { onDelete: 'restrict' }),
+  position: int('position').notNull(), title: varchar('title', { length: 255 }).notNull(),
+  participantIds: json('participant_ids').$type<string[]>().notNull(), active: boolean('active').notNull().default(true),
+  minutes: text('minutes'), resolutionNote: text('resolution_note'),
+  approvalId: uuidColumn('approval_id').references(() => oaApprovalRequests.id, { onDelete: 'restrict' }),
+  recordedBy: uuidColumn('recorded_by').references(() => users.id, { onDelete: 'restrict' }), recordedAt: timestampColumn('recorded_at'),
+}, t => ({ byMeeting: index('idx_committee_agenda_meeting').on(t.meetingId, t.active, t.position), byProject: index('idx_committee_agenda_project').on(t.projectId, t.meetingId) }))
+
+export const committeeFiles = mysqlTable('committee_files', {
+  id: uuidPrimaryKey('id'), agendaId: uuidColumn('agenda_id').notNull().references(() => committeeAgendas.id, { onDelete: 'restrict' }),
+  fileId: uuidColumn('file_id').notNull().references(() => projectFiles.id, { onDelete: 'restrict' }),
+  fileVersionId: uuidColumn('file_version_id').notNull().references(() => projectFileVersions.id, { onDelete: 'restrict' }),
+  version: int('version').notNull(), sha256: varchar('sha256', { length: 64 }).notNull(),
+  kind: varchar('kind', { length: 16 }).$type<'material' | 'minutes' | 'resolution' | 'approval'>().notNull(),
+  active: boolean('active').notNull().default(true),
+}, t => ({ reference: uniqueIndex('uq_committee_file_reference').on(t.agendaId, t.fileVersionId, t.kind), byFile: index('idx_committee_file').on(t.fileId) }))
+
+export const committeeCommands = mysqlTable('committee_commands', {
+  id: uuidPrimaryKey('id'), actorId: uuidColumn('actor_id').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  commandId: uuidColumn('command_id').notNull(), commandHash: varchar('command_hash', { length: 64 }),
+  receipt: json('receipt').$type<CommitteeReceipt>(), closedAt: timestampColumn('closed_at'),
+}, t => ({ actorCommand: uniqueIndex('uq_committee_actor_command').on(t.actorId, t.commandId) }))
+
+export const meetingWorkflowEvents = mysqlTable('meeting_workflow_events', {
+  id: uuidPrimaryKey('id'),
+  meetingId: uuidColumn('meeting_id').notNull().references(() => meetings.id, { onDelete: 'restrict' }),
+  requestId: uuidColumn('request_id').notNull(),
+  requestHash: varchar('request_hash', { length: 64 }).notNull(),
+  actorId: uuidColumn('actor_id').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  action: varchar('action', { length: 24 }).notNull(),
+  version: int('version').notNull(),
+  reason: text('reason').notNull(),
+  snapshot: json('snapshot').$type<Record<string, unknown>>().notNull(),
+  result: json('result').$type<{ meetingId: string; planId?: string; weekStart?: string }>().notNull(),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({ uniqueRequest: uniqueIndex('uq_meeting_workflow_request').on(t.requestId), byMeeting: index('idx_meeting_workflow_event').on(t.meetingId, t.version) }))
+
+export const meetingWorkflowNotices = mysqlTable('meeting_workflow_notices', {
+  id: uuidPrimaryKey('id'),
+  meetingId: uuidColumn('meeting_id').notNull().references(() => meetings.id, { onDelete: 'restrict' }),
+  recipientId: uuidColumn('recipient_id').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  kind: varchar('kind', { length: 24 }).notNull(),
+  version: int('version').notNull(),
+  closedAt: timestampColumn('closed_at'),
+  readAt: timestampColumn('read_at'),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({ uniqueNotice: uniqueIndex('uq_meeting_workflow_notice').on(t.meetingId, t.recipientId, t.version) }))
+
 export const todos = mysqlTable('todos', {
   id: uuidPrimaryKey('id'),
   projectId: uuidColumn('project_id').references(() => projects.id, { onDelete: 'set null' }),
@@ -327,11 +745,19 @@ export const todos = mysqlTable('todos', {
   owner: varchar('owner', { length: 64 }).notNull(),
   ownerUserId: uuidColumn('owner_user_id').references(() => users.id, { onDelete: 'set null' }),
   dueDate: varchar('due_date', { length: 10 }), // YYYY-MM-DD
+  dueTime: varchar('due_time', { length: 5 }), // HH:mm Asia/Shanghai; null means end of day
   priority: varchar('priority', { length: 8 }).notNull().default('中'), // 高/中/低
   status: varchar('status', { length: 16 }).notNull().default('未开始'), // 未开始/进行中/已完成/已退回
   type: varchar('type', { length: 32 }).notNull().default('待办'), // 待办/流程
   meetingId: uuidColumn('meeting_id').references(() => meetings.id, { onDelete: 'set null' }),
   approvalRequestId: uuidColumn('approval_request_id'),
+  executionModel: varchar('execution_model', { length: 16 }).notNull().default('legacy'),
+  creationFingerprint: varchar('creation_fingerprint', { length: 64 }),
+  planActionId: uuidColumn('plan_action_id').references(() => projectPlanActions.id, { onDelete: 'restrict' }),
+  progress: int('progress').notNull().default(0),
+  deliverable: text('deliverable'),
+  closureReason: text('closure_reason'),
+  completedAt: timestampColumn('completed_at'),
   createdBy: uuidColumn('created_by').references(() => users.id),
   version: int('version').notNull().default(1),
   createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
@@ -340,7 +766,305 @@ export const todos = mysqlTable('todos', {
   byOwnerUser: index('idx_todos_owner_user').on(t.ownerUserId),
   byProject: index('idx_todos_project').on(t.projectId),
   byApproval: index('idx_todos_approval').on(t.approvalRequestId, t.status),
+  uniquePlanAction: uniqueIndex('uq_todo_plan_action').on(t.planActionId),
 }))
+
+// Stable provenance for generated stage actions. Execution remains exclusively in todos.
+export const projectTimelineTasks = mysqlTable('project_timeline_tasks', {
+  taskId: uuidColumn('task_id').primaryKey().references(() => todos.id, { onDelete: 'restrict' }),
+  projectId: uuidColumn('project_id').notNull().references(() => projects.id, { onDelete: 'restrict' }),
+  stage: varchar('stage', { length: 16 }).notNull(), actionKey: varchar('action_key', { length: 96 }).notNull(),
+  dueDate: varchar('due_date', { length: 10 }).notNull(), dueTime: varchar('due_time', { length: 5 }).notNull(),
+  ownerUserId: uuidColumn('owner_user_id').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  needLeader: boolean('need_leader').notNull().default(false), critical: boolean('critical').notNull().default(false),
+  retired: boolean('retired').notNull().default(false), version: int('version').notNull().default(1),
+}, t => ({ uniqueSource: uniqueIndex('uq_project_timeline_task').on(t.projectId, t.stage, t.actionKey) }))
+export const projectTimelineSyncs = mysqlTable('project_timeline_syncs', {
+  id: uuidPrimaryKey('id'), projectId: uuidColumn('project_id').notNull().references(() => projects.id, { onDelete: 'restrict' }),
+  actorId: uuidColumn('actor_id').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  approvalId: uuidColumn('approval_id').references(() => oaApprovalRequests.id, { onDelete: 'restrict' }),
+  fingerprint: varchar('fingerprint', { length: 64 }).notNull(),
+  source: varchar('source', { length: 24 }).$type<import('../contracts/fdeTimelineTaskContract.js').TimelineSyncSource>().notNull().default('manual'),
+  sourceKey: varchar('source_key', { length: 128 }),
+  status: varchar('status', { length: 16 }).$type<'completed' | 'pending' | 'resolved' | 'closed'>().notNull().default('completed'),
+  resolvedBy: uuidColumn('resolved_by'),
+  changes: json('changes').$type<import('../contracts/fdeTimelineTaskContract.js').TimelineChange[]>().notNull(),
+  issues: json('issues').$type<string[]>().notNull(), createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, t => ({ byProject: index('idx_project_timeline_sync').on(t.projectId, t.createdAt), byPending: index('idx_timeline_pending').on(t.projectId, t.status), uniqueEvent: uniqueIndex('uq_timeline_event').on(t.projectId, t.sourceKey) }))
+
+// 批示元数据与执行任务一对一；不保存第二份完成状态。
+export const projectRecords = mysqlTable('project_records', {
+  id: uuidPrimaryKey('id'), projectId: uuidColumn('project_id').notNull().references(() => projects.id, { onDelete: 'restrict' }),
+  authorId: uuidColumn('author_id').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  kind: varchar('kind', { length: 24 }).notNull(), title: varchar('title', { length: 255 }).notNull(), content: text('content').notNull(),
+  status: varchar('status', { length: 16 }).notNull().default('published'), version: int('version').notNull().default(1),
+  sourceKey: varchar('source_key', { length: 128 }), sourceMeetingId: uuidColumn('source_meeting_id').references(() => meetings.id, { onDelete: 'restrict' }),
+  sourceApprovalId: uuidColumn('source_approval_id').references(() => oaApprovalRequests.id, { onDelete: 'restrict' }), sourceVersion: int('source_version'),
+  closedBy: uuidColumn('closed_by').references(() => users.id, { onDelete: 'restrict' }), closedAt: timestampColumn('closed_at'), closureReason: text('closure_reason'),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`), updatedAt: timestampColumn('updated_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, t => ({ source: uniqueIndex('uq_project_record_source').on(t.sourceKey), list: index('idx_project_record_list').on(t.projectId, t.status, t.updatedAt) }))
+
+export const projectRecordComments = mysqlTable('project_record_comments', {
+  id: uuidPrimaryKey('id'), recordId: uuidColumn('record_id').notNull().references(() => projectRecords.id, { onDelete: 'restrict' }),
+  authorId: uuidColumn('author_id').notNull().references(() => users.id, { onDelete: 'restrict' }), content: text('content').notNull(),
+  withdrawnBy: uuidColumn('withdrawn_by').references(() => users.id, { onDelete: 'restrict' }), withdrawnAt: timestampColumn('withdrawn_at'), withdrawalReason: text('withdrawal_reason'),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, t => ({ record: index('idx_record_comment').on(t.recordId, t.createdAt) }))
+
+export const projectRecordEvents = mysqlTable('project_record_events', {
+  id: uuidPrimaryKey('id'), recordId: uuidColumn('record_id').notNull().references(() => projectRecords.id, { onDelete: 'restrict' }),
+  actorId: uuidColumn('actor_id').notNull().references(() => users.id, { onDelete: 'restrict' }), requestId: uuidColumn('request_id').notNull(), requestHash: varchar('request_hash', { length: 64 }).notNull(),
+  action: varchar('action', { length: 32 }).notNull(), version: int('version').notNull(), reason: text('reason').notNull(), snapshot: json('snapshot').$type<Record<string, unknown>>().notNull(),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, t => ({ request: uniqueIndex('uq_record_event_request').on(t.requestId), version: uniqueIndex('uq_record_event_version').on(t.recordId, t.version) }))
+
+export const projectDirectives = mysqlTable('project_directives', {
+  id: uuidPrimaryKey('id'),
+  projectId: uuidColumn('project_id').notNull().references(() => projects.id, { onDelete: 'restrict' }),
+  taskId: uuidColumn('task_id').notNull().references(() => todos.id, { onDelete: 'restrict' }),
+  issuerId: uuidColumn('issuer_id').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  content: text('content').notNull(),
+  conversion: varchar('conversion', { length: 24 }).notNull(),
+  requiresReceipt: boolean('requires_receipt').notNull().default(true),
+  acknowledgedAt: timestampColumn('acknowledged_at'),
+  acknowledgedBy: uuidColumn('acknowledged_by').references(() => users.id, { onDelete: 'restrict' }),
+  withdrawnAt: timestampColumn('withdrawn_at'),
+  withdrawalReason: text('withdrawal_reason'),
+  version: int('version').notNull().default(1),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({ uniqueTask: uniqueIndex('uq_directive_task').on(t.taskId), byProject: index('idx_directive_project').on(t.projectId) }))
+
+// 批示转日程先持久化申请草案；排期/冲突/领导确认由领导时间领域接续，不能标为已确认。
+export const leaderTimeRequests = mysqlTable('leader_time_requests', {
+  id: uuidPrimaryKey('id'),
+  projectId: uuidColumn('project_id').notNull().references(() => projects.id, { onDelete: 'restrict' }),
+  sourceDirectiveId: uuidColumn('source_directive_id').references(() => projectDirectives.id, { onDelete: 'restrict' }),
+  taskId: uuidColumn('task_id').references(() => todos.id, { onDelete: 'restrict' }),
+  sourceTimelineTaskId: uuidColumn('source_timeline_task_id').references(() => projectTimelineTasks.taskId, { onDelete: 'restrict' }),
+  sourceWeeklyItemId: uuidColumn('source_weekly_item_id').references(() => projectWeeklyPlanItems.id, { onDelete: 'restrict' }),
+  sourceTypeActionId: uuidColumn('source_type_action_id').references(() => projectPlanActions.id, { onDelete: 'restrict' }),
+  sourceFingerprint: varchar('source_fingerprint', { length: 64 }),
+  sourceVersion: int('source_version'),
+  sourceRetired: boolean('source_retired').notNull().default(false),
+  leaderId: uuidColumn('leader_id').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  submittedBy: uuidColumn('submitted_by').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  title: text('title').notNull(),
+  reason: text('reason'),
+  outcome: text('outcome'),
+  impact: text('impact'),
+  priority: varchar('priority', { length: 4 }),
+  scheduleNote: text('schedule_note'),
+  latestFinish: timestampColumn('latest_finish'),
+  preferredStart: timestampColumn('preferred_start').notNull(),
+  alternativeStart: timestampColumn('alternative_start'),
+  durationMinutes: int('duration_minutes').notNull().default(30),
+  location: varchar('location', { length: 255 }).notNull().default('待确认'),
+  scheduledStart: timestampColumn('scheduled_start'),
+  confirmedAt: timestampColumn('confirmed_at'),
+  confirmedBy: uuidColumn('confirmed_by').references(() => users.id, { onDelete: 'restrict' }),
+  supplementNote: text('supplement_note'),
+  status: varchar('status', { length: 24 }).notNull().default('draft'),
+  version: int('version').notNull().default(1),
+  closureReason: text('closure_reason'),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({ uniqueDirective: uniqueIndex('uq_leader_time_directive').on(t.sourceDirectiveId), uniqueTimeline: uniqueIndex('uq_leader_time_timeline').on(t.sourceTimelineTaskId, t.leaderId), uniqueWeekly: uniqueIndex('uq_leader_time_weekly').on(t.sourceWeeklyItemId, t.leaderId), uniqueTypeAction: uniqueIndex('uq_leader_time_type_action').on(t.sourceTypeActionId, t.leaderId), byLeader: index('idx_leader_time_owner').on(t.leaderId, t.status) }))
+
+export const leaderTimeEvents = mysqlTable('leader_time_events', {
+  id: uuidPrimaryKey('id'), timeRequestId: uuidColumn('time_request_id').notNull().references(() => leaderTimeRequests.id, { onDelete: 'restrict' }),
+  requestId: uuidColumn('request_id').notNull(), requestHash: varchar('request_hash', { length: 64 }).notNull(),
+  actorId: uuidColumn('actor_id').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  action: varchar('action', { length: 32 }).notNull(), reason: text('reason').notNull(),
+  version: int('version').notNull(), snapshot: json('snapshot').$type<Record<string, unknown>>().notNull(),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({ uniqueRequest: uniqueIndex('uq_leader_time_event_request').on(t.requestId), byTime: index('idx_leader_time_event').on(t.timeRequestId, t.version) }))
+export const leaderTimeBatches = mysqlTable('leader_time_batches', {
+  id: uuidColumn('id').primaryKey(), actorId: uuidColumn('actor_id').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  requestHash: varchar('request_hash', { length: 64 }).notNull(),
+  result: json('result').$type<import('../contracts/fdeTimeContract.js').AutoScheduleResult>().notNull(),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+})
+export const leaderTimeNotices = mysqlTable('leader_time_notices', {
+  id: uuidPrimaryKey('id'), timeRequestId: uuidColumn('time_request_id').notNull().references(() => leaderTimeRequests.id, { onDelete: 'restrict' }),
+  recipientId: uuidColumn('recipient_id').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  kind: varchar('kind', { length: 32 }).notNull(), version: int('version').notNull(),
+  readAt: timestampColumn('read_at'), closedAt: timestampColumn('closed_at'),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({ uniqueNotice: uniqueIndex('uq_leader_time_notice').on(t.timeRequestId, t.recipientId, t.version) }))
+export const personalCalendarEvents = mysqlTable('personal_calendar_events', {
+  id: uuidPrimaryKey('id'), ownerId: uuidColumn('owner_id').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  title: varchar('title', { length: 255 }).notNull(), detail: text('detail').notNull(),
+  startsAt: timestampColumn('starts_at').notNull(), endsAt: timestampColumn('ends_at').notNull(),
+  visibility: varchar('visibility', { length: 16 }).notNull().default('private'),
+  status: varchar('status', { length: 16 }).notNull().default('active'), version: int('version').notNull().default(1),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({ byOwnerTime: index('idx_calendar_owner_time').on(t.ownerId, t.startsAt) }))
+export const personalCalendarHistory = mysqlTable('personal_calendar_history', {
+  id: uuidPrimaryKey('id'), eventId: uuidColumn('event_id').notNull().references(() => personalCalendarEvents.id, { onDelete: 'restrict' }),
+  requestId: uuidColumn('request_id').notNull(), requestHash: varchar('request_hash', { length: 64 }).notNull(),
+  actorId: uuidColumn('actor_id').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  action: varchar('action', { length: 16 }).notNull(), reason: text('reason').notNull(),
+  version: int('version').notNull(), snapshot: json('snapshot').$type<Record<string, unknown>>().notNull(),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({ uniqueRequest: uniqueIndex('uq_calendar_history_request').on(t.requestId) }))
+
+export const directiveEvents = mysqlTable('directive_events', {
+  id: uuidPrimaryKey('id'), directiveId: uuidColumn('directive_id').notNull().references(() => projectDirectives.id, { onDelete: 'restrict' }),
+  requestId: uuidColumn('request_id').notNull(), requestHash: varchar('request_hash', { length: 64 }).notNull(),
+  actorId: uuidColumn('actor_id').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  action: varchar('action', { length: 32 }).notNull(), version: int('version').notNull(),
+  reason: text('reason').notNull(), snapshot: json('snapshot').$type<Record<string, unknown>>().notNull(),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({ uniqueRequest: uniqueIndex('uq_directive_request').on(t.requestId), byDirective: index('idx_directive_event').on(t.directiveId, t.version) }))
+
+export const directiveNotices = mysqlTable('directive_notices', {
+  id: uuidPrimaryKey('id'), directiveId: uuidColumn('directive_id').notNull().references(() => projectDirectives.id, { onDelete: 'restrict' }),
+  recipientId: uuidColumn('recipient_id').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  kind: varchar('kind', { length: 32 }).notNull(), version: int('version').notNull(),
+  readAt: timestampColumn('read_at'), closedAt: timestampColumn('closed_at'),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({ uniqueNotice: uniqueIndex('uq_directive_notice').on(t.directiveId, t.recipientId, t.version) }))
+
+// 周计划存放计划定义和发布快照，任务执行状态始终读取 todos。
+export const projectWeeklyPlans = mysqlTable('project_weekly_plans', {
+  id: uuidPrimaryKey('id'),
+  projectId: uuidColumn('project_id').notNull().references(() => projects.id, { onDelete: 'restrict' }),
+  weekStart: varchar('week_start', { length: 10 }).notNull(),
+  revision: int('revision').notNull(),
+  status: varchar('status', { length: 16 }).notNull().default('draft'),
+  activeKey: varchar('active_key', { length: 64 }),
+  goal: text('goal').notNull(),
+  sourceFingerprint: varchar('source_fingerprint', { length: 64 }).notNull(),
+  sourceMeetingId: uuidColumn('source_meeting_id').references(() => meetings.id, { onDelete: 'restrict' }),
+  sourceMeetingVersion: int('source_meeting_version'),
+  version: int('version').notNull().default(1),
+  createdBy: uuidColumn('created_by').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  publishedBy: uuidColumn('published_by').references(() => users.id, { onDelete: 'restrict' }),
+  publishedAt: timestampColumn('published_at'),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+  updatedAt: timestampColumn('updated_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({
+  uniqueWeekRevision: uniqueIndex('uq_weekly_plan_revision').on(t.projectId, t.weekStart, t.revision),
+  uniqueActive: uniqueIndex('uq_weekly_plan_active').on(t.activeKey),
+  bySourceMeeting: index('idx_weekly_source_meeting').on(t.sourceMeetingId),
+}))
+
+export const projectWeeklyPlanItems = mysqlTable('project_weekly_plan_items', {
+  id: uuidPrimaryKey('id'),
+  planId: uuidColumn('plan_id').notNull().references(() => projectWeeklyPlans.id, { onDelete: 'restrict' }),
+  itemKey: varchar('item_key', { length: 80 }).notNull(),
+  sourceKind: varchar('source_kind', { length: 16 }).notNull(), // task/plan/manual
+  taskId: uuidColumn('task_id').references(() => todos.id, { onDelete: 'restrict' }),
+  planActionId: uuidColumn('plan_action_id').references(() => projectPlanActions.id, { onDelete: 'restrict' }),
+  sourceVersion: int('source_version'),
+  title: varchar('title', { length: 255 }).notNull(),
+  ownerUserId: uuidColumn('owner_user_id').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  dueDate: varchar('due_date', { length: 10 }).notNull(),
+  dueTime: varchar('due_time', { length: 5 }),
+  needLeader: boolean('need_leader').notNull().default(false),
+  sourceStage: varchar('source_stage', { length: 64 }),
+  deliverable: text('deliverable').notNull(),
+  priority: varchar('priority', { length: 8 }).notNull().default('中'),
+  sortOrder: int('sort_order').notNull(),
+}, (t) => ({ uniqueItem: uniqueIndex('uq_weekly_plan_item').on(t.planId, t.itemKey) }))
+
+export const projectWeeklyPlanEvents = mysqlTable('project_weekly_plan_events', {
+  id: uuidPrimaryKey('id'),
+  planId: uuidColumn('plan_id').notNull().references(() => projectWeeklyPlans.id, { onDelete: 'restrict' }),
+  requestId: uuidColumn('request_id').notNull(),
+  requestHash: varchar('request_hash', { length: 64 }).notNull(),
+  actorId: uuidColumn('actor_id').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  action: varchar('action', { length: 16 }).notNull(),
+  planVersion: int('plan_version').notNull(),
+  reason: text('reason').notNull(),
+  snapshot: json('snapshot').$type<Record<string, unknown>>().notNull(),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({ uniqueRequest: uniqueIndex('uq_weekly_plan_request').on(t.requestId), byPlan: index('idx_weekly_plan_event').on(t.planId, t.planVersion) }))
+
+// 站内投递事实独立于 IM 外发；没有外部渠道回执时不能显示“已外发”。
+export const projectWeeklyPlanNotices = mysqlTable('project_weekly_plan_notices', {
+  id: uuidPrimaryKey('id'),
+  planId: uuidColumn('plan_id').notNull().references(() => projectWeeklyPlans.id, { onDelete: 'restrict' }),
+  recipientId: uuidColumn('recipient_id').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  kind: varchar('kind', { length: 16 }).notNull(),
+  planVersion: int('plan_version').notNull(),
+  closedAt: timestampColumn('closed_at'),
+  readAt: timestampColumn('read_at'),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({ uniqueNotice: uniqueIndex('uq_weekly_plan_notice').on(t.planId, t.recipientId, t.kind, t.planVersion) }))
+
+export const personalWeeklyReports = mysqlTable('personal_weekly_reports', {
+  id: uuidPrimaryKey('id'),
+  authorId: uuidColumn('author_id').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  weekStart: varchar('week_start', { length: 10 }).notNull(),
+  revision: int('revision').notNull(),
+  version: int('version').notNull().default(1),
+  status: varchar('status', { length: 16 }).notNull().default('draft'),
+  activeKey: varchar('active_key', { length: 64 }),
+  body: longtext('body').notNull(),
+  facts: json('facts').$type<WeeklyReportFacts>().notNull(),
+  sourceHash: varchar('source_hash', { length: 64 }).notNull(),
+  publishedAt: timestampColumn('published_at'),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+  updatedAt: timestampColumn('updated_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({
+  uniqueRevision: uniqueIndex('uq_weekly_report_revision').on(t.authorId, t.weekStart, t.revision),
+  uniqueActive: uniqueIndex('uq_weekly_report_active').on(t.activeKey),
+}))
+
+export const personalWeeklyReportEvents = mysqlTable('personal_weekly_report_events', {
+  id: uuidPrimaryKey('id'),
+  reportId: uuidColumn('report_id').notNull().references(() => personalWeeklyReports.id, { onDelete: 'restrict' }),
+  requestId: uuidColumn('request_id').notNull(),
+  requestHash: varchar('request_hash', { length: 64 }).notNull(),
+  actorId: uuidColumn('actor_id').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  action: varchar('action', { length: 16 }).notNull(),
+  version: int('version').notNull(),
+  reason: text('reason').notNull(),
+  snapshot: json('snapshot').$type<Record<string, unknown>>().notNull(),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({ uniqueRequest: uniqueIndex('uq_weekly_report_request').on(t.requestId), byReport: index('idx_weekly_report_event').on(t.reportId, t.version) }))
+
+export const personalWeeklyReportRecipients = mysqlTable('personal_weekly_report_recipients', {
+  id: uuidPrimaryKey('id'),
+  reportId: uuidColumn('report_id').notNull().references(() => personalWeeklyReports.id, { onDelete: 'restrict' }),
+  userId: uuidColumn('user_id').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  readAt: timestampColumn('read_at'),
+  closedAt: timestampColumn('closed_at'),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({ uniqueRecipient: uniqueIndex('uq_weekly_report_recipient').on(t.reportId, t.userId) }))
+
+export const todoFeedbacks = mysqlTable('todo_feedbacks', {
+  id: uuidPrimaryKey('id'),
+  todoId: uuidColumn('todo_id').notNull().references(() => todos.id, { onDelete: 'restrict' }),
+  taskVersion: int('task_version').notNull(),
+  kind: varchar('kind', { length: 16 }).notNull(),
+  progress: int('progress').notNull(),
+  result: text('result').notNull(),
+  blocker: text('blocker').notNull(),
+  estimatedDate: varchar('estimated_date', { length: 10 }),
+  submittedBy: uuidColumn('submitted_by').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  submittedAt: timestampColumn('submitted_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({ uniqueRevision: uniqueIndex('uq_todo_feedback_revision').on(t.todoId, t.taskVersion) }))
+
+export const todoFeedbackEvidence = mysqlTable('todo_feedback_evidence', {
+  id: uuidPrimaryKey('id'),
+  feedbackId: uuidColumn('feedback_id').notNull().references(() => todoFeedbacks.id, { onDelete: 'restrict' }),
+  fileId: uuidColumn('file_id').notNull().references(() => projectFiles.id, { onDelete: 'restrict' }),
+  fileVersionId: uuidColumn('file_version_id').notNull().references(() => projectFileVersions.id, { onDelete: 'restrict' }),
+  version: int('version').notNull(),
+  sha256: varchar('sha256', { length: 64 }).notNull(),
+  byteSize: bigint('byte_size', { mode: 'number' }).notNull(),
+}, (t) => ({ uniqueEvidence: uniqueIndex('uq_todo_feedback_file').on(t.feedbackId, t.fileId) }))
+
+export const todoAcceptances = mysqlTable('todo_acceptances', {
+  id: uuidPrimaryKey('id'),
+  todoId: uuidColumn('todo_id').notNull().references(() => todos.id, { onDelete: 'restrict' }),
+  feedbackId: uuidColumn('feedback_id').notNull().references(() => todoFeedbacks.id, { onDelete: 'restrict' }),
+  decision: varchar('decision', { length: 16 }).notNull(),
+  reason: text('reason').notNull(),
+  decidedBy: uuidColumn('decided_by').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  decidedAt: timestampColumn('decided_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({ uniqueDecision: uniqueIndex('uq_todo_acceptance_feedback').on(t.feedbackId) }))
 
 // OA 项目审批是正式导航中的业务链路，所有状态、节点、审批人和操作记录
 // 均以 MySQL 为权威源。active_key 在审批中等于 project_id，终态为 NULL，
@@ -348,10 +1072,15 @@ export const todos = mysqlTable('todos', {
 export const oaApprovalRequests = mysqlTable('oa_approval_requests', {
   id: uuidPrimaryKey('id'),
   requestNo: varchar('request_no', { length: 40 }).notNull(),
-  projectId: uuidColumn('project_id').notNull().references(() => projects.id, { onDelete: 'restrict' }),
+  projectId: uuidColumn('project_id').references(() => projects.id, { onDelete: 'restrict' }),
   projectName: varchar('project_name', { length: 128 }).notNull(),
   title: varchar('title', { length: 255 }).notNull(),
   type: varchar('type', { length: 32 }).notNull(),
+  businessType: varchar('business_type', { length: 32 }).notNull().default('project_stage'),
+  taskId: uuidColumn('task_id').references(() => todos.id, { onDelete: 'restrict' }),
+  businessPayload: json('business_payload').$type<Record<string, unknown>>().notNull().default(emptyJsonObject),
+  officePolicyVersionId: uuidColumn('office_policy_version_id').references(() => oaOfficePolicyVersions.id, { onDelete: 'restrict' }),
+  officeRevision: int('office_revision').notNull().default(0),
   fromStage: varchar('from_stage', { length: 16 }).notNull(),
   targetStage: varchar('target_stage', { length: 16 }).notNull(),
   status: varchar('status', { length: 16 }).notNull().default('审批中'),
@@ -367,6 +1096,8 @@ export const oaApprovalRequests = mysqlTable('oa_approval_requests', {
   valuation: text('valuation'),
   attachments: json('attachments').$type<string[]>().notNull().default(emptyJsonArray),
   checklist: json('checklist').$type<Array<{ label: string; passed: boolean; required: boolean }>>().notNull().default(emptyJsonArray),
+  materialSnapshot: json('material_snapshot').$type<Array<{ requirementKey: string; fileId: string | null; fileVersion: number | null; waiverReason: string | null }>>().notNull().default(emptyJsonArray),
+  planId: uuidColumn('plan_id').references(() => projectPlans.id, { onDelete: 'restrict' }),
   lockVersion: int('lock_version').notNull().default(1),
   submittedAt: timestampColumn('submitted_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
   completedAt: timestampColumn('completed_at'),
@@ -387,6 +1118,8 @@ export const oaApprovalNodes = mysqlTable('oa_approval_nodes', {
   approverRole: varchar('approver_role', { length: 128 }).notNull(),
   mode: varchar('mode', { length: 8 }).notNull(),
   sequence: int('sequence').notNull(),
+  officeRevision: int('office_revision'),
+  officeRule: json('office_rule').$type<Record<string, unknown>>().notNull().default(emptyJsonObject),
   status: varchar('status', { length: 16 }).notNull(),
   approverUserIds: json('approver_user_ids').$type<string[]>().notNull().default(emptyJsonArray),
   approverNames: json('approver_names').$type<string[]>().notNull().default(emptyJsonArray),
@@ -399,6 +1132,17 @@ export const oaApprovalNodes = mysqlTable('oa_approval_nodes', {
 }, (t) => ({
   uniqueSequence: uniqueIndex('uq_oa_nodes_request_sequence').on(t.requestId, t.sequence),
   byRequestStatus: index('idx_oa_nodes_request_status').on(t.requestId, t.status),
+}))
+
+export const oaApprovalRevisions = mysqlTable('oa_approval_revisions', {
+  id: uuidPrimaryKey('id'),
+  requestId: uuidColumn('request_id').notNull().references(() => oaApprovalRequests.id, { onDelete: 'cascade' }),
+  revision: int('revision').notNull(),
+  snapshot: json('snapshot').$type<Record<string, unknown>>().notNull(),
+  submittedBy: uuidColumn('submitted_by').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  submittedAt: timestampColumn('submitted_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({
+  uniqueRevision: uniqueIndex('uq_oa_approval_revision').on(t.requestId, t.revision),
 }))
 
 export const oaApprovalRecords = mysqlTable('oa_approval_records', {
@@ -433,6 +1177,43 @@ export const oaWorkflowLogs = mysqlTable('oa_workflow_logs', {
   byRequest: index('idx_oa_workflow_logs_request').on(t.requestId),
 }))
 
+// No seed scores or enabled production rule: a draft needs explicit business
+// approval and a separate publication before consumers may use it.
+export const responsibilityPolicies = mysqlTable('responsibility_policies', {
+  code: varchar('code', { length: 32 }).primaryKey(),
+  activeVersionId: uuidColumn('active_version_id'),
+  enabled: boolean('enabled').notNull().default(false),
+  nextRevision: int('next_revision').notNull().default(1),
+  version: int('version').notNull().default(1),
+})
+export const responsibilityPolicyVersions = mysqlTable('responsibility_policy_versions', {
+  id: uuidPrimaryKey('id'),
+  policyCode: varchar('policy_code', { length: 32 }).notNull().references(() => responsibilityPolicies.code, { onDelete: 'restrict' }),
+  revision: int('revision').notNull(), status: varchar('status', { length: 16 }).notNull().default('draft'),
+  configuration: json('configuration').$type<ResponsibilityPolicy>().notNull(),
+  sha256: varchar('sha256', { length: 64 }).notNull(), reason: text('reason').notNull(),
+  createdBy: uuidColumn('created_by').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  lastEditedBy: uuidColumn('last_edited_by').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  approvedBy: uuidColumn('approved_by').references(() => users.id, { onDelete: 'restrict' }), approvedAt: timestampColumn('approved_at'),
+  publishedBy: uuidColumn('published_by').references(() => users.id, { onDelete: 'restrict' }), publishedAt: timestampColumn('published_at'),
+  version: int('version').notNull().default(1), createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, t => ({ revision: uniqueIndex('uq_resp_policy_revision').on(t.policyCode, t.revision) }))
+export const responsibilityPolicyCommands = mysqlTable('responsibility_policy_commands', {
+  id: uuidPrimaryKey('id'), actorId: uuidColumn('actor_id').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  commandId: uuidColumn('command_id').notNull(), commandHash: varchar('command_hash', { length: 64 }),
+  receipt: json('receipt').$type<ResponsibilityPolicyReceipt>(), closedAt: timestampColumn('closed_at'),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, t => ({ command: uniqueIndex('uq_resp_policy_command').on(t.actorId, t.commandId) }))
+export const responsibilityPolicyEvents = mysqlTable('responsibility_policy_events', {
+  id: uuidPrimaryKey('id'),
+  policyCode: varchar('policy_code', { length: 32 }).notNull().references(() => responsibilityPolicies.code, { onDelete: 'restrict' }),
+  versionId: uuidColumn('version_id').references(() => responsibilityPolicyVersions.id, { onDelete: 'restrict' }),
+  actorId: uuidColumn('actor_id').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  commandId: uuidColumn('command_id').notNull(), action: varchar('action', { length: 16 }).notNull(), reason: text('reason').notNull(),
+  snapshot: json('snapshot').$type<Record<string, unknown>>().notNull(),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, t => ({ command: uniqueIndex('uq_resp_policy_event_command').on(t.actorId, t.commandId), time: index('idx_resp_policy_event_time').on(t.policyCode, t.createdAt, t.id) }))
+
 export const risks = mysqlTable('risks', {
   id: uuidPrimaryKey('id'),
   projectId: uuidColumn('project_id').references(() => projects.id, { onDelete: 'set null' }),
@@ -455,6 +1236,67 @@ export const risks = mysqlTable('risks', {
   byCreator: index('idx_risks_creator').on(t.createdBy),
   byAssigneeUser: index('idx_risks_assignee_user').on(t.assigneeUserId),
 }))
+
+export const responsibilityScanCycles = mysqlTable('responsibility_scan_cycles', {
+  id: uuidPrimaryKey('id'), asOf: timestampColumn('as_of').notNull(),
+  upperTaskId: uuidColumn('upper_task_id'), cursorTaskId: uuidColumn('cursor_task_id'),
+  processed: int('processed').notNull().default(0), candidates: int('candidates').notNull().default(0),
+  lastErrorCode: varchar('last_error_code', { length: 64 }), completedAt: timestampColumn('completed_at'),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+})
+export const responsibilityScanState = mysqlTable('responsibility_scan_state', {
+  name: varchar('name', { length: 64 }).primaryKey(),
+  cycleId: uuidColumn('cycle_id').references(() => responsibilityScanCycles.id, { onDelete: 'restrict' }),
+})
+export const responsibilityRecords = mysqlTable('responsibility_records', {
+  id: uuidPrimaryKey('id'), projectId: uuidColumn('project_id').notNull().references(() => projects.id, { onDelete: 'restrict' }),
+  taskId: uuidColumn('task_id').notNull().references(() => todos.id, { onDelete: 'restrict' }),
+  subjectId: uuidColumn('subject_id').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  policyVersionId: uuidColumn('policy_version_id').notNull().references(() => responsibilityPolicyVersions.id, { onDelete: 'restrict' }),
+  activationEventId: uuidColumn('activation_event_id').notNull().references(() => responsibilityPolicyEvents.id, { onDelete: 'restrict' }),
+  policySha256: varchar('policy_sha256', { length: 64 }).notNull(), eventCode: varchar('event_code', { length: 32 }).notNull(),
+  sourceKey: varchar('source_key', { length: 64 }).notNull(),
+  sourceFeedbackId: uuidColumn('source_feedback_id').references(() => todoFeedbacks.id, { onDelete: 'restrict' }),
+  relatedFeedbackId: uuidColumn('related_feedback_id').references(() => todoFeedbacks.id, { onDelete: 'restrict' }),
+  sourceAcceptanceId: uuidColumn('source_acceptance_id').references(() => todoAcceptances.id, { onDelete: 'restrict' }),
+  sourceRiskId: uuidColumn('source_risk_id').references(() => risks.id, { onDelete: 'restrict' }),
+  deadlineKey: varchar('deadline_key', { length: 32 }), occurredAt: timestampColumn('occurred_at').notNull(),
+  factSnapshot: json('fact_snapshot').$type<Record<string, unknown>>().notNull(),
+  originalPoints: int('original_points').notNull(), effectivePoints: int('effective_points').notNull().default(0),
+  status: varchar('status', { length: 32 }).notNull(), reason: text('reason').notNull(),
+  reviewerId: uuidColumn('reviewer_id').references(() => users.id, { onDelete: 'restrict' }),
+  appealedAt: timestampColumn('appealed_at'), createdBy: uuidColumn('created_by').references(() => users.id, { onDelete: 'restrict' }),
+  creationOrigin: varchar('creation_origin', { length: 16 }).notNull().default('user'),
+  scanCycleId: uuidColumn('scan_cycle_id').references(() => responsibilityScanCycles.id, { onDelete: 'restrict' }),
+  version: int('version').notNull().default(1), createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, t => ({ source: uniqueIndex('uq_resp_record_source').on(t.sourceKey), project: index('idx_resp_record_project').on(t.projectId, t.createdAt, t.id), subject: index('idx_resp_record_subject').on(t.subjectId, t.status), reviewer: index('idx_resp_record_reviewer').on(t.reviewerId, t.status) }))
+export const responsibilityEvidenceLinks = mysqlTable('responsibility_evidence', {
+  id: uuidPrimaryKey('id'), recordId: uuidColumn('record_id').notNull().references(() => responsibilityRecords.id, { onDelete: 'restrict' }),
+  fileId: uuidColumn('file_id').notNull().references(() => projectFiles.id, { onDelete: 'restrict' }),
+  fileVersionId: uuidColumn('file_version_id').notNull().references(() => projectFileVersions.id, { onDelete: 'restrict' }),
+  version: int('version').notNull(), sha256: varchar('sha256', { length: 64 }).notNull(), byteSize: bigint('byte_size', { mode: 'number' }).notNull(),
+}, t => ({ file: uniqueIndex('uq_resp_evidence_version').on(t.recordId, t.fileVersionId) }))
+export const responsibilityEventsLog = mysqlTable('responsibility_events', {
+  id: uuidPrimaryKey('id'), recordId: uuidColumn('record_id').notNull().references(() => responsibilityRecords.id, { onDelete: 'restrict' }),
+  actorId: uuidColumn('actor_id').references(() => users.id, { onDelete: 'restrict' }), action: varchar('action', { length: 32 }).notNull(),
+  reason: text('reason').notNull(), version: int('version').notNull(), snapshot: json('snapshot').$type<Record<string, unknown>>().notNull(),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, t => ({ revision: uniqueIndex('uq_resp_event_version').on(t.recordId, t.version) }))
+export const responsibilityCommands = mysqlTable('responsibility_commands', {
+  id: uuidPrimaryKey('id'), actorId: uuidColumn('actor_id').notNull().references(() => users.id, { onDelete: 'restrict' }), commandId: uuidColumn('command_id').notNull(),
+  projectId: uuidColumn('project_id').notNull(), commandHash: varchar('command_hash', { length: 64 }),
+  receipt: json('receipt').$type<ResponsibilityReceipt>(), closedAt: timestampColumn('closed_at'), createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, t => ({ command: uniqueIndex('uq_resp_command_actor').on(t.actorId, t.commandId) }))
+export const responsibilityNotices = mysqlTable('responsibility_notices', {
+  id: uuidPrimaryKey('id'), recordId: uuidColumn('record_id').notNull().references(() => responsibilityRecords.id, { onDelete: 'restrict' }),
+  recipientId: uuidColumn('recipient_id').notNull().references(() => users.id, { onDelete: 'restrict' }), kind: varchar('kind', { length: 32 }).notNull(), version: int('version').notNull(),
+  readAt: timestampColumn('read_at'), closedAt: timestampColumn('closed_at'), createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, t => ({ notice: uniqueIndex('uq_resp_notice_version').on(t.recordId, t.recipientId, t.version), recipient: index('idx_resp_notice_recipient').on(t.recipientId, t.closedAt) }))
+export const responsibilityTaskMarkers = mysqlTable('responsibility_task_markers', {
+  id: uuidPrimaryKey('id'), taskId: uuidColumn('task_id').notNull().references(() => todos.id, { onDelete: 'restrict' }),
+  critical: boolean('critical').notNull(), actorId: uuidColumn('actor_id').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  reason: text('reason').notNull(), version: int('version').notNull(), createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, t => ({ revision: uniqueIndex('uq_resp_marker_version').on(t.taskId, t.version) }))
 
 // 无法唯一映射到启用用户的历史名称进入持久化冲突台账，默认不参与授权。
 export const identityResolutionIssues = mysqlTable('identity_resolution_issues', {
@@ -2010,6 +2852,110 @@ export const fileChunks = mysqlTable('file_chunks', {
   byFile: index('idx_file_chunks_file').on(t.fileId),
   byProject: index('idx_file_chunks_project').on(t.projectId),
 }))
+
+export const companyKnowledge = mysqlTable('company_knowledge', {
+  id: uuidPrimaryKey('id'), authorId: uuidColumn('author_id').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  kind: varchar('kind', { length: 24 }).notNull(), title: varchar('title', { length: 120 }).notNull(), summary: text('summary').notNull(), link: text('link').notNull(),
+  audience: varchar('audience', { length: 16 }).notNull().default('selected'), status: varchar('status', { length: 16 }).notNull().default('draft'),
+  fileId: uuidColumn('file_id').references(() => projectFiles.id, { onDelete: 'restrict' }), fileVersionId: uuidColumn('file_version_id').references(() => projectFileVersions.id, { onDelete: 'restrict' }),
+  version: int('version').notNull().default(1), publishedAt: timestampColumn('published_at'), archivedAt: timestampColumn('archived_at'),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`), updatedAt: timestampColumn('updated_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, t => ({ list: index('idx_company_knowledge_list').on(t.status, t.updatedAt), file: index('idx_company_knowledge_file').on(t.fileId) }))
+export const companyKnowledgeGrants = mysqlTable('company_knowledge_grants', {
+  id: uuidPrimaryKey('id'), entryId: uuidColumn('entry_id').notNull().references(() => companyKnowledge.id, { onDelete: 'restrict' }),
+  userId: uuidColumn('user_id').notNull().references(() => users.id, { onDelete: 'restrict' }), canEdit: boolean('can_edit').notNull().default(false),
+}, t => ({ member: uniqueIndex('uq_company_knowledge_grant').on(t.entryId, t.userId) }))
+export const companyKnowledgeComments = mysqlTable('company_knowledge_comments', {
+  id: uuidPrimaryKey('id'), entryId: uuidColumn('entry_id').notNull().references(() => companyKnowledge.id, { onDelete: 'restrict' }),
+  authorId: uuidColumn('author_id').notNull().references(() => users.id, { onDelete: 'restrict' }), content: text('content').notNull(),
+  withdrawnAt: timestampColumn('withdrawn_at'), withdrawalReason: text('withdrawal_reason'), createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, t => ({ entry: index('idx_company_knowledge_comment').on(t.entryId, t.createdAt) }))
+export const companyKnowledgeRatings = mysqlTable('company_knowledge_ratings', {
+  id: uuidPrimaryKey('id'), entryId: uuidColumn('entry_id').notNull().references(() => companyKnowledge.id, { onDelete: 'restrict' }),
+  userId: uuidColumn('user_id').notNull().references(() => users.id, { onDelete: 'restrict' }), score: int('score'), updatedAt: timestampColumn('updated_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, t => ({ voter: uniqueIndex('uq_company_knowledge_rating').on(t.entryId, t.userId) }))
+export const companyKnowledgeEvents = mysqlTable('company_knowledge_events', {
+  id: uuidPrimaryKey('id'), entryId: uuidColumn('entry_id').notNull().references(() => companyKnowledge.id, { onDelete: 'restrict' }),
+  actorId: uuidColumn('actor_id').notNull().references(() => users.id, { onDelete: 'restrict' }), requestId: uuidColumn('request_id').notNull(), requestHash: varchar('request_hash', { length: 64 }).notNull(),
+  action: varchar('action', { length: 32 }).notNull(), version: int('version').notNull(), reason: text('reason').notNull(), snapshot: json('snapshot').$type<Record<string, unknown>>().notNull(),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, t => ({ request: uniqueIndex('uq_company_knowledge_request').on(t.requestId), version: uniqueIndex('uq_company_knowledge_event').on(t.entryId, t.version) }))
+
+// A delayed create/comment can be fenced before its business object exists.
+// Deliberately no entry/comment FK; these are recovery keys, not knowledge data.
+export const companyKnowledgeCommands = mysqlTable('company_knowledge_commands', {
+  id: uuidPrimaryKey('id'), actorId: uuidColumn('actor_id').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  commandId: uuidColumn('command_id').notNull(), entryId: uuidColumn('entry_id').notNull(), action: varchar('action', { length: 16 }).notNull(), commentId: uuidColumn('comment_id'),
+  commandHash: varchar('command_hash', { length: 64 }), receipt: json('receipt').$type<{ id: string; version: number }>(), closedAt: timestampColumn('closed_at'),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`), completedAt: timestampColumn('completed_at'),
+}, t => ({ command: uniqueIndex('uq_knowledge_actor_command').on(t.actorId, t.commandId) }))
+
+// Office requests share OA request/node/revision/record identities. These tables
+// extend policy, immutable originals and reliable in-app notices, not an alternate engine.
+export const oaOfficePolicies = mysqlTable('oa_office_policies', {
+  id: uuidPrimaryKey('id'), kind: varchar('kind', { length: 16 }).notNull(), enabled: boolean('enabled').notNull().default(false),
+  activeVersionId: uuidColumn('active_version_id'), nextRevision: int('next_revision').notNull().default(1), version: int('version').notNull().default(1),
+}, t => ({ kind: uniqueIndex('uq_office_policy_kind').on(t.kind) }))
+export const oaOfficePolicyVersions = mysqlTable('oa_office_policy_versions', {
+  id: uuidPrimaryKey('id'), policyId: uuidColumn('policy_id').notNull().references(() => oaOfficePolicies.id, { onDelete: 'restrict' }),
+  revision: int('revision').notNull(), status: varchar('status', { length: 16 }).notNull().default('draft'), configuration: json('configuration').$type<Record<string, unknown>>().notNull(),
+  sha256: varchar('sha256', { length: 64 }).notNull(), version: int('version').notNull().default(1), reason: text('reason').notNull(),
+  createdBy: uuidColumn('created_by').notNull().references(() => users.id, { onDelete: 'restrict' }), publishedBy: uuidColumn('published_by').references(() => users.id, { onDelete: 'restrict' }),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`), publishedAt: timestampColumn('published_at'),
+}, t => ({ revision: uniqueIndex('uq_office_policy_revision').on(t.policyId, t.revision) }))
+export const oaOfficeEvents = mysqlTable('oa_office_events', {
+  id: uuidPrimaryKey('id'), requestId: uuidColumn('request_id').notNull().references(() => oaApprovalRequests.id, { onDelete: 'restrict' }),
+  commandId: uuidColumn('command_id').notNull(), commandHash: varchar('command_hash', { length: 64 }).notNull(), version: int('version').notNull(),
+  actorId: uuidColumn('actor_id').notNull().references(() => users.id, { onDelete: 'restrict' }), action: varchar('action', { length: 32 }).notNull(), reason: text('reason').notNull(),
+  snapshot: json('snapshot').$type<Record<string, unknown>>().notNull(), createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, t => ({ command: uniqueIndex('uq_office_command').on(t.commandId), version: uniqueIndex('uq_office_event_version').on(t.requestId, t.version) }))
+// Technical serialization keys, not OA business history. A request may not yet
+// exist when a delayed create is fenced; deliberately no request/project FK.
+export const oaOfficeCommands = mysqlTable('oa_office_commands', {
+  id: uuidPrimaryKey('id'), actorId: uuidColumn('actor_id').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  commandId: uuidColumn('command_id').notNull(), requestId: uuidColumn('request_id').notNull(), closedAt: timestampColumn('closed_at'),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, t => ({ actorCommand: uniqueIndex('uq_office_actor_command').on(t.actorId, t.commandId) }))
+// Rule command results contain identifiers/versions only, never configuration.
+// An unsent new draft has no target row; deliberately no target FK.
+export const oaOfficePolicyCommands = mysqlTable('oa_office_policy_commands', {
+  id: uuidPrimaryKey('id'), actorId: uuidColumn('actor_id').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  commandId: uuidColumn('command_id').notNull(), targetId: uuidColumn('target_id').notNull(), action: varchar('action', { length: 16 }).notNull(),
+  commandHash: varchar('command_hash', { length: 64 }), receipt: json('receipt').$type<Record<string, unknown>>(),
+  closedAt: timestampColumn('closed_at'), completedAt: timestampColumn('completed_at'), createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, t => ({ actorCommand: uniqueIndex('uq_office_policy_actor_command').on(t.actorId, t.commandId) }))
+export const oaOfficeAttachments = mysqlTable('oa_office_attachments', {
+  id: uuidPrimaryKey('id'), requestId: uuidColumn('request_id').notNull().references(() => oaApprovalRequests.id, { onDelete: 'restrict' }),
+  name: varchar('name', { length: 255 }).notNull(), mime: varchar('mime', { length: 128 }).notNull(), byteSize: bigint('byte_size', { mode: 'number' }).notNull(),
+  sha256: varchar('sha256', { length: 64 }).notNull(), storagePath: text('storage_path').notNull(), purpose: varchar('purpose', { length: 16 }).notNull().default('application'),
+  uploadedBy: uuidColumn('uploaded_by').notNull().references(() => users.id, { onDelete: 'restrict' }), createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, t => ({ request: index('idx_office_attachment_request').on(t.requestId) }))
+export const oaOfficeAttachmentGrants = mysqlTable('oa_office_attachment_grants', {
+  id: uuidPrimaryKey('id'), attachmentId: uuidColumn('attachment_id').notNull().references(() => oaOfficeAttachments.id, { onDelete: 'restrict' }),
+  userId: uuidColumn('user_id').notNull().references(() => users.id, { onDelete: 'restrict' }), canDownload: boolean('can_download').notNull().default(false),
+}, t => ({ grant: uniqueIndex('uq_office_attachment_grant').on(t.attachmentId, t.userId) }))
+// Immutable manual execution facts. Corrections append a linked record and never
+// overwrite approval content or represent calls to payment/seal/signing systems.
+export const oaOfficeExecutions = mysqlTable('oa_office_executions', {
+  id: uuidPrimaryKey('id'), requestId: uuidColumn('request_id').notNull().references(() => oaApprovalRequests.id, { onDelete: 'restrict' }),
+  requestVersion: int('request_version').notNull(), officeRevision: int('office_revision').notNull(),
+  policyVersionId: uuidColumn('policy_version_id').notNull().references(() => oaOfficePolicyVersions.id, { onDelete: 'restrict' }),
+  action: varchar('action', { length: 16 }).notNull(), outcome: varchar('outcome', { length: 16 }).notNull(), supersedesId: uuidColumn('supersedes_id'),
+  actorId: uuidColumn('actor_id').notNull().references(() => users.id, { onDelete: 'restrict' }), actorName: varchar('actor_name', { length: 64 }).notNull(),
+  occurredAt: timestampColumn('occurred_at').notNull(), recordedAt: timestampColumn('recorded_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+  facts: json('facts').$type<Record<string, string>>().notNull(), reason: text('reason').notNull(),
+}, t => ({ version: uniqueIndex('uq_office_execution_version').on(t.requestId, t.requestVersion), predecessor: uniqueIndex('uq_office_execution_predecessor').on(t.supersedesId), previous: foreignKey({ columns: [t.supersedesId], foreignColumns: [t.id] }).onDelete('restrict') }))
+export const oaOfficeExecutionFiles = mysqlTable('oa_office_execution_files', {
+  id: uuidPrimaryKey('id'), executionId: uuidColumn('execution_id').notNull().references(() => oaOfficeExecutions.id, { onDelete: 'restrict' }),
+  fileId: uuidColumn('file_id').notNull().references(() => oaOfficeAttachments.id, { onDelete: 'restrict' }),
+  version: int('version').notNull().default(1), sha256: varchar('sha256', { length: 64 }).notNull(), name: varchar('name', { length: 255 }).notNull(),
+}, t => ({ binding: uniqueIndex('uq_office_execution_file').on(t.executionId, t.fileId) }))
+export const oaOfficeNotices = mysqlTable('oa_office_notices', {
+  id: uuidPrimaryKey('id'), requestId: uuidColumn('request_id').notNull().references(() => oaApprovalRequests.id, { onDelete: 'restrict' }),
+  recipientId: uuidColumn('recipient_id').notNull().references(() => users.id, { onDelete: 'restrict' }), nodeId: uuidColumn('node_id').references(() => oaApprovalNodes.id, { onDelete: 'restrict' }),
+  dedupeKey: varchar('dedupe_key', { length: 200 }).notNull(), status: varchar('status', { length: 16 }).notNull().default('pending'),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`), readAt: timestampColumn('read_at'), closedAt: timestampColumn('closed_at'),
+}, t => ({ unique: uniqueIndex('uq_office_notice_dedupe').on(t.dedupeKey), recipient: index('idx_office_notice_recipient').on(t.recipientId, t.status) }))
 
 // 统一知识库 RAG：scope 区分来源库(project当前项目/lead共有线索池/org机构公共)，ref_id 为通用外键(不强绑FK)
 export const knowledgeChunks = mysqlTable('knowledge_chunks', {

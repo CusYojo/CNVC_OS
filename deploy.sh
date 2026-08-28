@@ -140,6 +140,25 @@ validate_service_binding() {
     log "服务路径已绑定当前项目: ${PROJECT_DIR}"
 }
 
+prepare_document_tls() {
+    local ca_file
+    require_command node
+    if [ ! -f "$APP_ENV_FILE" ]; then
+        err "缺少运行环境文件，不能验证文档 TLS 配置"
+        return 1
+    fi
+    # Never source .env, overwrite a customer CA setting, install packages, or
+    # disable TLS verification. The probe uses the same CA precedence as Gorden.
+    if ! ca_file=$(node --env-file="$APP_ENV_FILE" "${PROJECT_DIR}/server/scripts/check-python-ca.mjs" --print-ca-file); then
+        err "文档 TLS 预检失败；请检查 Python 和 ca-certificates，尚未构建、迁移或停服"
+        return 1
+    fi
+    if [ -n "$ca_file" ]; then
+        export SSL_CERT_FILE="$ca_file"
+        export REQUESTS_CA_BUNDLE="$ca_file"
+    fi
+}
+
 prepare_document_runtime() {
     local expected_lock_sha installed_lock_sha=""
     if [ ! -f "$DOCUMENT_RUNTIME_LOCK" ]; then
@@ -159,27 +178,53 @@ prepare_document_runtime() {
         printf '%s\n' "$expected_lock_sha" > "$DOCUMENT_RUNTIME_STAMP"
         chmod 0600 "$DOCUMENT_RUNTIME_STAMP"
         log "文档生成运行时已按精确依赖锁重建"
+        prepare_document_tls
         return
     fi
 
     npm run verify:document-runtime-dependencies
+    prepare_document_tls
     log "文档生成运行时依赖核验通过"
 }
 
+prepare_document_native_tools() {
+    # Read-only, including the actual QA command candidates, exact CJK families
+    # and OCR languages. Python package installation is checked separately.
+    if ! (cd -- "$PROJECT_DIR" && node --env-file="$APP_ENV_FILE" --import tsx server/src/scripts/verifyDocumentRuntimeDependencies.ts --native-only --stdout-only); then
+        err "文档原生依赖预检失败；尚未构建、迁移或停服，请按依赖合同修复工具、字体及 OCR 语言"
+        return 1
+    fi
+}
+
 prepare_mutation() {
+    prepare_document_tls
+    prepare_document_native_tools
     systemctl daemon-reload
     validate_service_binding
     prepare_document_runtime
 }
 
 rebuild_and_activate() {
+    # 先证明已退役的破坏性入口仍失败关闭；不能等构建激活或迁移后才发现防护回归。
+    require_command npm
+    step "验证线索历史数据安全边界"
+    if ! npm run accept:lead-dedup-safety; then
+        err "线索安全门禁失败；尚未构建、迁移、停服或激活，现有业务保持不变"
+        return 1
+    fi
+
+    step "在独立测试库的临时表中验证线索裁决与合并事务"
+    if ! npm run accept:lead-duplicate-release; then
+        err "线索隔离验收或清理失败；尚未构建、迁移、停服或激活，请核对隔离夹具"
+        return 1
+    fi
+
     local service_was_active=0
     if systemctl is-active --quiet "$SERVICE_UNIT"; then
         service_was_active=1
     fi
 
     step "重新构建前端与服务端"
-    require_command npm
     if ! npm run build; then
         err "项目构建失败；现有服务与已激活产物保持不变"
         return 1
@@ -439,4 +484,6 @@ main() {
     esac
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi

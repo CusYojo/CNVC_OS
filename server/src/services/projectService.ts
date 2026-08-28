@@ -2,13 +2,40 @@ import { and, desc, eq, like, ne, or, sql } from 'drizzle-orm'
 import { readdir, rm } from 'node:fs/promises'
 import path from 'node:path'
 import { db } from '../db/client.js'
-import { projects, projectFiles, projectFileVersions, auditLogs, knowledgeChunks, fileChunks } from '../db/schema.js'
+import {
+  projects,
+  projectClassificationHistory,
+  projectMembers,
+  projectFiles,
+  projectFileVersions,
+  oaApprovalRequests,
+  auditLogs,
+  knowledgeChunks,
+  fileChunks,
+  todoFeedbackEvidence,
+  projectDirectives,
+  projectRecords,
+  projectFileGrants,
+  projectFileEvents,
+  projectMaterialRequestClosures,
+  responsibilityRecords,
+  responsibilityTaskMarkers,
+  projectAgentRuns,
+  projectAgentConfigs,
+  projectAgentCommands,
+  projectTimelineSyncs,
+  projectStageMaterials,
+  todos,
+} from '../db/schema.js'
 import { createMySqlIdentityRepositoryContext, identityRepositories } from '../repositories/index.js'
 import { sanitizeScoringCompetitors } from './competitorEvidence.js'
 import { removeOwnedProjectFile, removeProjectFileDirectory, removeProjectFileHistory } from './projectFileStorageService.js'
-import { projectAccessCondition } from './projectAccessService.js'
+import { projectAccessCondition, requireAccessibleProject } from './projectAccessService.js'
 import { syncProjectIdentityBindings } from './identityResolutionService.js'
 import { businessVersionConflict } from './businessOptimisticLock.js'
+import { activeWorkflowPolicyVersion } from './fdeWorkflowPolicyService.js'
+import { initializeFdeFileGrants } from './fdeFileService.js'
+import { projectFileAccessCondition, requireProjectFileAccess, requireProjectFileUpload } from './projectFileAccessService.js'
 
 const STAGES = ['线索', '初筛', '立项', '尽调', '上会', '投决', '投后', '退出'] as const
 const ARTIFACT_ROOT = path.resolve(
@@ -63,10 +90,12 @@ async function assertProjectFileQuota(
   }
 }
 
-async function lockProjectFileQuotaScope(tx: ProjectFileTransaction, userId: string, projectId: string) {
-  const user = await createMySqlIdentityRepositoryContext(tx).users.lockById(userId)
-  if (!user) throw projectFileError(403, 'USER_DISABLED_OR_MISSING', '当前用户不存在')
+async function lockProjectFileQuotaScope(tx: ProjectFileTransaction, userId: string, projectId: string, otherUserId?: string | null) {
   await tx.execute(sql`SELECT ${projects.id} FROM ${projects} WHERE ${projects.id}=${projectId} FOR UPDATE`)
+  for (const id of [...new Set([userId, otherUserId].filter(Boolean) as string[])].sort()) {
+    const user = await createMySqlIdentityRepositoryContext(tx).users.lockById(id)
+    if (!user) throw projectFileError(403, 'USER_DISABLED_OR_MISSING', '文件容量责任用户不存在')
+  }
 }
 
 async function deleteProjectArtifactDirectories(projectId: string) {
@@ -84,6 +113,8 @@ interface ListArgs {
   keyword?: string
   stage?: string
   owner?: string
+  classification?: 'pool' | 'normal' | 'key'
+  lifecycle?: 'active' | 'closed' | 'archived' | 'deleted'
   page: number
   pageSize: number
 }
@@ -99,9 +130,7 @@ export async function listProjects(args: ListArgs, userId?: string) {
   if (userId) {
     const user = await identityRepositories.users.findById(userId)
     if (!user || user.status !== '启用') return { list: [], total: 0, page: args.page, pageSize: args.pageSize }
-    if (user.role !== '系统管理员') {
-      conds.push(projectAccessCondition({ uid: user.id, name: user.name, role: user.role }))
-    }
+    conds.push(projectAccessCondition({ uid: user.id, name: user.name, role: user.role }))
   }
   if (args.keyword) {
     conds.push(or(
@@ -112,6 +141,8 @@ export async function listProjects(args: ListArgs, userId?: string) {
   }
   if (args.stage) conds.push(eq(projects.stage, args.stage))
   if (args.owner) conds.push(eq(projects.owner, args.owner))
+  if (args.classification) conds.push(eq(projects.classification, args.classification))
+  if (args.lifecycle) conds.push(eq(projects.lifecycle, args.lifecycle))
   const where = conds.length ? and(...conds) : undefined
   const rows = await db.select().from(projects).where(where as never).orderBy(
     desc(projects.pinned),
@@ -144,18 +175,18 @@ const projectFileListColumns = {
   uploadedAt: projectFiles.uploadedAt,
 }
 
-export async function listFiles(projectId: string) {
+export async function listFiles(projectId: string, userId?: string) {
   const rows = await db.select(projectFileListColumns).from(projectFiles)
-    .where(eq(projectFiles.projectId, projectId)).orderBy(desc(projectFiles.uploadedAt))
+    .where(and(eq(projectFiles.projectId, projectId), userId ? projectFileAccessCondition(userId) : eq(projectFiles.lifecycle, 'active'))).orderBy(desc(projectFiles.uploadedAt))
   return rows.map(publicProjectFile)
 }
 
 export async function listAllFiles(userId?: string) {
-  let accessWhere = sql`TRUE`
+  let accessWhere = eq(projectFiles.lifecycle, 'active')
   if (userId) {
     const user = await identityRepositories.users.findById(userId)
     if (!user || user.status !== '启用') return []
-    accessWhere = projectAccessCondition({ uid: user.id, name: user.name, role: user.role })
+    accessWhere = projectFileAccessCondition(userId)
   }
   // 权限条件直接下推到 SQL。旧实现对每个文件并发调用 getAccessibleProject，
   // 会产生 N+1 查询并在几十份文件时耗尽 MySQL 连接池队列。
@@ -173,20 +204,164 @@ function publicProjectFile<T extends { storagePath: string | null }>(row: T) {
 }
 
 export async function createProject(input: Partial<typeof projects.$inferInsert>, userId: string) {
+  // 正式新建入口以稳定登录身份建立项目、成员、分类历史与审计，全部原子提交。
+  // legacy 仅供历史迁移/身份恢复的内部调用；HTTP schema 不接受 workflowModel。
+  if (input.workflowModel !== 'legacy') {
+    if (input.projectType && input.projectType !== '投资项目') throw projectClassificationError(409, 'FDE_TYPE_EXECUTION_REQUIRED', '非投资类型必须使用独立批准模板与执行流程，不能静默创建为投资项目')
+    return db.transaction(async (tx) => {
+      const identity = createMySqlIdentityRepositoryContext(tx)
+      const actor = await identity.users.findById(userId)
+      if (!actor || actor.status !== '启用') throw projectClassificationError(403, 'USER_DISABLED_OR_MISSING', '当前用户不可创建项目')
+      const workflowPolicyVersionId = await activeWorkflowPolicyVersion(tx)
+      const [inserted] = await tx.insert(projects).values({
+        ...input, owner: actor.name, ownerUserId: actor.id, collaborators: [],
+        workflowPolicyVersionId,
+        stage: '入库', stageSource: '系统初始化', classification: 'pool', lifecycle: 'active', workflowModel: 'fde-v1', progress: 0, createdBy: actor.id,
+      } as typeof projects.$inferInsert).$returningId()
+      await tx.insert(projectMembers).values({ projectId: inserted.id, userId: actor.id, memberRole: 'owner', sourceName: actor.name })
+      await tx.insert(projectClassificationHistory).values({ projectId: inserted.id, fromClassification: null, toClassification: 'pool', reason: '授权用户登记项目', changedBy: actor.id, changedByName: actor.name })
+      await identity.audits.append({ userId: actor.id, userName: actor.name, module: '项目管理', action: '创建项目', target: String(input.name ?? '') })
+      const [row] = await tx.select().from(projects).where(eq(projects.id, inserted.id)).limit(1)
+      return row
+    })
+  }
   const stage = input.stage ?? '线索'
-  const progress = stage === '线索' ? 12 : 25
   const [inserted] = await db.insert(projects).values({
     ...input,
-    stage: stage as string,
-    progress,
+    stage,
+    classification: 'normal',
+    lifecycle: 'active',
+    workflowModel: 'legacy',
+    progress: 0,
     stageSource: (input.stageSource as string | undefined) ?? '系统初始化',
     createdBy: userId,
   } as typeof projects.$inferInsert).$returningId()
   const [row] = await db.select().from(projects).where(eq(projects.id, inserted.id)).limit(1)
+  await db.insert(projectClassificationHistory).values({
+    projectId: row.id,
+    fromClassification: null,
+    toClassification: 'normal',
+    reason: '历史项目身份恢复',
+    changedBy: userId,
+    changedByName: row.owner,
+  })
   await syncProjectIdentityBindings(row.id, row.owner, row.collaborators)
   await db.insert(auditLogs).values({ userId, userName: '（系统）', module: '项目管理', action: '创建项目', target: row.name })
   const [boundRow] = await db.select().from(projects).where(eq(projects.id, row.id)).limit(1)
   return boundRow
+}
+
+export type ProjectClassification = 'pool' | 'normal' | 'key'
+
+function projectClassificationError(status: number, code: string, message: string) {
+  return Object.assign(new Error(message), { status, code })
+}
+
+export async function listProjectClassificationHistory(projectId: string) {
+  return db.select().from(projectClassificationHistory)
+    .where(eq(projectClassificationHistory.projectId, projectId))
+    .orderBy(desc(projectClassificationHistory.createdAt), desc(projectClassificationHistory.id))
+}
+
+export async function classifyProject(input: {
+  projectId: string
+  toClassification: ProjectClassification
+  reason: string
+  expectedVersion: number
+  userId: string
+  requestId?: string
+}) {
+  await requireAccessibleProject(input.userId, input.projectId)
+  return db.transaction(async (tx) => {
+    const repositories = createMySqlIdentityRepositoryContext(tx)
+    const actor = await repositories.users.lockById(input.userId)
+    if (!actor || actor.status !== '启用') {
+      throw projectClassificationError(403, 'PROJECT_CLASSIFICATION_ACTOR_INVALID', '当前账号不可调整项目分类')
+    }
+    await tx.execute(sql`SELECT ${projects.id} FROM ${projects} WHERE ${projects.id}=${input.projectId} FOR UPDATE`)
+    const [project] = await tx.select().from(projects).where(eq(projects.id, input.projectId)).limit(1)
+    if (!project) throw projectClassificationError(404, 'PROJECT_NOT_FOUND', '项目不存在')
+    if (project.version !== input.expectedVersion) throw businessVersionConflict('项目')
+    if (project.lifecycle !== 'active') {
+      throw projectClassificationError(409, 'PROJECT_LIFECYCLE_LOCKED', '只有进行中的项目可以调整分类')
+    }
+    if (project.classification === input.toClassification) {
+      throw projectClassificationError(409, 'PROJECT_CLASSIFICATION_UNCHANGED', '项目已经处于该分类')
+    }
+
+    const [membership] = await tx.select({ role: projectMembers.memberRole }).from(projectMembers).where(and(
+      eq(projectMembers.projectId, project.id),
+      eq(projectMembers.userId, actor.id),
+    )).limit(1)
+    const permissionCodes = await repositories.users.listPermissionCodes(actor.id)
+    const canClassify = permissionCodes.includes('project.classify')
+    const isProjectLead = project.ownerUserId === actor.id || membership?.role === 'owner' || membership?.role === 'project_lead'
+
+    const currentClassification = project.classification as ProjectClassification
+    if (currentClassification === 'pool') {
+      if (input.toClassification !== 'normal') {
+        throw projectClassificationError(409, 'PROJECT_POOL_TRANSITION_INVALID', '项目池只能在完成入库后进入普通项目')
+      }
+      if (!isProjectLead && !canClassify) {
+        throw projectClassificationError(403, 'PROJECT_POOL_PROMOTION_FORBIDDEN', '仅项目负责人或授权领导可完成入库')
+      }
+      if (!['入库', '线索'].includes(project.stage)) {
+        throw projectClassificationError(409, 'PROJECT_INTAKE_STAGE_INVALID', '只有入库阶段的项目可以完成入库')
+      }
+    } else {
+      if (!canClassify) {
+        throw projectClassificationError(403, 'PROJECT_CLASSIFICATION_FORBIDDEN', '仅授权领导可调整普通项目与重点项目分类')
+      }
+      const validLeadershipTransition = (currentClassification === 'normal' && input.toClassification === 'key')
+        || (currentClassification === 'key' && input.toClassification === 'normal')
+      if (!validLeadershipTransition) {
+        throw projectClassificationError(409, 'PROJECT_CLASSIFICATION_TRANSITION_INVALID', '不支持该项目分类变更')
+      }
+    }
+
+    const reason = input.reason.trim()
+    if (reason.length < 2) {
+      throw projectClassificationError(400, 'PROJECT_CLASSIFICATION_REASON_REQUIRED', '请填写项目分类调整原因')
+    }
+    const completingIntake = currentClassification === 'pool' && input.toClassification === 'normal'
+    const [result] = await tx.update(projects).set({
+      classification: input.toClassification,
+      ...(completingIntake ? { stage: '立项', stageSource: '入库完成', progress: 10 } : {}),
+      version: sql`${projects.version} + 1`,
+      updatedAt: new Date(),
+    }).where(and(eq(projects.id, project.id), eq(projects.version, input.expectedVersion)))
+    if (result.affectedRows !== 1) throw businessVersionConflict('项目')
+
+    if (completingIntake) {
+      const { reconcileTimelineEvent } = await import('./fdeTimelineTaskService.js')
+      await reconcileTimelineEvent(tx, project.id, actor.id, { source: 'classification', sourceKey: `classification:${project.version + 1}` })
+    }
+
+    await tx.insert(projectClassificationHistory).values({
+      projectId: project.id,
+      fromClassification: currentClassification,
+      toClassification: input.toClassification,
+      reason,
+      changedBy: actor.id,
+      changedByName: actor.name,
+      requestId: input.requestId?.slice(0, 64),
+    })
+    await tx.insert(auditLogs).values({
+      userId: actor.id,
+      userName: actor.name,
+      module: '项目管理',
+      action: completingIntake ? '完成项目入库' : '调整项目分类',
+      target: JSON.stringify({
+        projectId: project.id,
+        projectName: project.name,
+        fromClassification: currentClassification,
+        toClassification: input.toClassification,
+        reason,
+      }),
+    })
+    const [updated] = await tx.select().from(projects).where(eq(projects.id, project.id)).limit(1)
+    return publicProject(updated)
+  })
 }
 
 export async function updateProject(
@@ -196,6 +371,26 @@ export async function updateProject(
   expectedVersion?: number,
 ) {
   const { id: _id, createdBy: _createdBy, ownerUserId: _ownerUserId, version: _version, ...safePatch } = patch
+  const [current] = await db.select().from(projects).where(eq(projects.id, id)).limit(1)
+  if (current?.workflowModel === 'fde-v1') {
+    return db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT ${projects.id} FROM ${projects} WHERE ${projects.id}=${id} FOR UPDATE`)
+      const [locked] = await tx.select().from(projects).where(eq(projects.id, id)).limit(1)
+      if (!locked) throw projectClassificationError(404, 'PROJECT_NOT_FOUND', '项目不存在')
+      if (expectedVersion !== undefined && locked.version !== expectedVersion) throw businessVersionConflict('项目')
+      const { stage: _stage, stageSource: _source, classification: _classification, lifecycle: _lifecycle, workflowModel: _model, workflowPolicyVersionId: _policyVersion, governanceVersion: _governanceVersion, progress: _progress, owner: _owner, collaborators: _collaborators, ...fdePatch } = safePatch
+      if (('investmentFund' in fdePatch && fdePatch.investmentFund !== locked.investmentFund) || ('requirements' in fdePatch && fdePatch.requirements !== locked.requirements)) {
+        if (locked.ownerUserId !== userId) throw projectClassificationError(403, 'FDE_OWNER_REQUIRED', '项目要求和投资基金只能由负责人修改')
+        const [active] = await tx.select({ id: oaApprovalRequests.id }).from(oaApprovalRequests).where(and(eq(oaApprovalRequests.projectId, id), eq(oaApprovalRequests.status, '审批中'))).limit(1)
+        if (active) throw projectClassificationError(409, 'FDE_APPROVAL_ACTIVE', '审批期间不能修改项目要求或投资基金，请先撤回修订')
+      }
+      await tx.update(projects).set({ ...fdePatch, version: locked.version + 1, updatedAt: new Date() }).where(eq(projects.id, id))
+      const actor = await createMySqlIdentityRepositoryContext(tx).users.findById(userId)
+      await createMySqlIdentityRepositoryContext(tx).audits.append({ userId, userName: actor?.name ?? '未知用户', module: '项目管理', action: '编辑项目', target: locked.name })
+      const [updated] = await tx.select().from(projects).where(eq(projects.id, id)).limit(1)
+      return updated
+    })
+  }
   const condition = expectedVersion === undefined
     ? eq(projects.id, id)
     : and(eq(projects.id, id), eq(projects.version, expectedVersion))
@@ -215,6 +410,8 @@ export async function updateProject(
 }
 
 export async function moveProjectStage(id: string, nextStage: string, userId: string, expectedVersion?: number) {
+  const [current] = await db.select({ workflowModel: projects.workflowModel }).from(projects).where(eq(projects.id, id)).limit(1)
+  if (current?.workflowModel === 'fde-v1') throw projectClassificationError(409, 'FDE_APPROVAL_REQUIRED', 'FDE 项目阶段只能通过入库初筛或正式审批推进')
   // 推进 progress（与前端规则一致）
   const idx = STAGES.indexOf(nextStage as typeof STAGES[number])
   const progress = nextStage === '放弃' ? undefined : Math.min(100, Math.max(0, (idx + 1) * 13))
@@ -235,13 +432,16 @@ export async function addFile(input: typeof projectFiles.$inferInsert, userId: s
   return db.transaction(async (tx) => {
     const byteSize = Number(input.byteSize || 0)
     await lockProjectFileQuotaScope(tx, userId, input.projectId)
+    await requireProjectFileUpload(tx, input.projectId, userId)
     if (input.sha256) {
       const [duplicate] = await tx.select({ id: projectFiles.id, name: projectFiles.name }).from(projectFiles)
         .where(and(eq(projectFiles.projectId, input.projectId), eq(projectFiles.sha256, input.sha256))).limit(1)
-      if (duplicate) throw projectFileError(409, 'DUPLICATE_CONTENT', `相同内容已存在于「${duplicate.name}」`)
+      if (duplicate) throw projectFileError(409, 'DUPLICATE_CONTENT', '当前项目已存在相同内容，请核对有权访问的文件或联系项目负责人')
     }
     await assertProjectFileQuota(tx, { projectId: input.projectId, userId, byteSize, countDelta: 1 })
     const [inserted] = await tx.insert(projectFiles).values({ ...input, uploadedBy: userId, byteSize }).$returningId()
+    const [initial] = await tx.select().from(projectFiles).where(eq(projectFiles.id, inserted.id)).limit(1)
+    await initializeFdeFileGrants(tx, initial, userId)
     const [row] = await tx.select().from(projectFiles).where(eq(projectFiles.id, inserted.id)).limit(1)
     if (row) await tx.insert(auditLogs).values({ userId, userName: '（系统）', module: '资料库', action: '上传文件', target: row.name })
     return row
@@ -253,6 +453,8 @@ export async function setFileStoragePath(fileId: string, storagePath: string, us
     const [initialFile] = await tx.select().from(projectFiles).where(eq(projectFiles.id, fileId)).limit(1)
     if (!initialFile) return undefined
     await lockProjectFileQuotaScope(tx, userId, initialFile.projectId)
+    await requireProjectFileUpload(tx, initialFile.projectId, userId)
+    await requireProjectFileAccess(tx, fileId, userId, 'delete')
     const [file] = await tx.select().from(projectFiles).where(eq(projectFiles.id, fileId)).limit(1)
     if (!file) return undefined
     await tx.update(projectFiles).set({ storagePath }).where(eq(projectFiles.id, fileId))
@@ -265,12 +467,17 @@ export async function setFileStoragePath(fileId: string, storagePath: string, us
   })
 }
 
-export async function replaceFileContent(fileId: string, storagePath: string, size: string, byteSize: number, sha256: string, userId: string) {
+export async function replaceFileContent(fileId: string, storagePath: string, size: string, byteSize: number, sha256: string, userId: string, expectedVersion?: number) {
   return db.transaction(async (tx) => {
-    const [file] = await tx.select().from(projectFiles).where(eq(projectFiles.id, fileId)).limit(1)
-    if (!file) return undefined
+    const [initial] = await tx.select().from(projectFiles).where(eq(projectFiles.id, fileId)).limit(1)
+    if (!initial) return undefined
+    await lockProjectFileQuotaScope(tx, userId, initial.projectId, initial.uploadedBy)
+    const project = await requireProjectFileUpload(tx, initial.projectId, userId)
+    const file = await requireProjectFileAccess(tx, fileId, userId, 'delete')
+    if (project.workflowModel === 'fde-v1' && expectedVersion !== file.version) throw businessVersionConflict('文件内容')
+    const quotaOwner = project.workflowModel === 'fde-v1' ? file.uploadedBy ?? userId : userId
     await assertProjectFileQuota(tx, {
-      projectId: file.projectId, userId, byteSize, countDelta: 0,
+      projectId: file.projectId, userId: quotaOwner, byteSize, countDelta: 0,
       replacedByteSize: file.byteSize, previousUploaderId: file.uploadedBy,
     })
     if (file.storagePath && file.sha256 === sha256) {
@@ -278,12 +485,16 @@ export async function replaceFileContent(fileId: string, storagePath: string, si
     }
     const [duplicate] = await tx.select({ id: projectFiles.id, name: projectFiles.name }).from(projectFiles)
       .where(and(eq(projectFiles.projectId, file.projectId), eq(projectFiles.sha256, sha256), ne(projectFiles.id, fileId))).limit(1)
-    if (duplicate) throw projectFileError(409, 'DUPLICATE_CONTENT', `相同内容已存在于「${duplicate.name}」`)
+    if (duplicate) throw projectFileError(409, 'DUPLICATE_CONTENT', '当前项目已存在相同内容，请核对有权访问的文件或联系项目负责人')
     const nextVersion = file.storagePath ? file.version + 1 : file.version
     await tx.update(projectFiles).set({
-      storagePath, size, byteSize, sha256, uploadedBy: userId, version: nextVersion,
-      parseStatus: '解析中', parseError: null,
+      storagePath, size, byteSize, sha256, uploadedBy: quotaOwner, version: nextVersion,
+      parseStatus: '解析中', parseError: null, contentText: null,
     }).where(eq(projectFiles.id, fileId))
+    // The old text must not be labelled as the new content version while parsing.
+    // Original bytes and immutable revisions remain available through version APIs.
+    await tx.delete(fileChunks).where(eq(fileChunks.fileId, fileId))
+    await tx.delete(knowledgeChunks).where(and(eq(knowledgeChunks.scope, 'project'), eq(knowledgeChunks.refId, file.projectId), eq(knowledgeChunks.sourceId, fileId)))
     await tx.insert(projectFileVersions).values({
       fileId, version: nextVersion, byteSize, sha256, storagePath, createdBy: userId,
     })
@@ -291,6 +502,11 @@ export async function replaceFileContent(fileId: string, storagePath: string, si
       userId, userName: '（系统）', module: '资料库',
       action: file.storagePath ? '替换原文件' : '补传原文件', target: `${file.name} v${nextVersion}`,
     })
+    const [binding] = await tx.select({ id: projectStageMaterials.id }).from(projectStageMaterials).where(eq(projectStageMaterials.fileId, fileId)).limit(1)
+    if (binding) {
+      const { reconcileTimelineEvent } = await import('./fdeTimelineTaskService.js')
+      await reconcileTimelineEvent(tx, file.projectId, userId, { source: 'material', sourceKey: `file:${fileId}:${nextVersion}` })
+    }
     const [row] = await tx.select().from(projectFiles).where(eq(projectFiles.id, fileId)).limit(1)
     return row ? publicProjectFile(row) : undefined
   })
@@ -351,15 +567,46 @@ export async function getFileVersion(fileId: string, version: number) {
   return row
 }
 
-// 删除项目：连带删知识库(scope=project 的 knowledge_chunks;file_chunks/meetings 等由FK级联或set null)
+// 先锁项目及校验引用，数据库删除/索引/审计同事务，原文件只在提交后处理。
+// 受保护的 FDE 历史不能通过旧删除接口绕过生命周期保留规则。
 export async function deleteProject(id: string, userId: string) {
-  const [proj] = await db.select().from(projects).where(eq(projects.id, id))
+  const proj = await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT ${projects.id} FROM ${projects} WHERE ${projects.id}=${id} FOR UPDATE`)
+    const [project] = await tx.select().from(projects).where(eq(projects.id, id))
+    if (!project) return null
+    const actor = await createMySqlIdentityRepositoryContext(tx).users.findById(userId)
+    if (!actor || actor.status !== '启用') throw Object.assign(new Error('当前账号无权删除项目'), { status: 403, code: 'PROJECT_FORBIDDEN' })
+    const [accessible] = await tx.select({ id: projects.id }).from(projects).where(and(eq(projects.id, id), projectAccessCondition({ uid: actor.id, name: actor.name, role: actor.role })))
+    if (!accessible) throw Object.assign(new Error('无权删除该项目'), { status: 403, code: 'PROJECT_FORBIDDEN' })
+    const [directive] = await tx.select({ id: projectDirectives.id }).from(projectDirectives).where(eq(projectDirectives.projectId, id)).limit(1)
+    if (directive) throw Object.assign(new Error('项目包含需保留的批示及执行历史，不能直接删除；请按项目生命周期规则处理'), { status: 409, code: 'PROJECT_DIRECTIVE_HISTORY_PROTECTED' })
+    const [record] = await tx.select({ id: projectRecords.id }).from(projectRecords).where(eq(projectRecords.projectId, id)).limit(1)
+    if (record) throw Object.assign(new Error('项目包含需保留的记录与讨论历史，不能直接删除；请按项目生命周期规则处理'), { status: 409, code: 'PROJECT_RECORD_HISTORY_PROTECTED' })
+    if (project.workflowModel === 'fde-v1') {
+      const [agentRun] = await tx.select({ id: projectAgentRuns.id }).from(projectAgentRuns).where(eq(projectAgentRuns.projectId, id)).limit(1)
+      const [agentConfig] = await tx.select({ id: projectAgentConfigs.projectId }).from(projectAgentConfigs).where(eq(projectAgentConfigs.projectId, id)).limit(1)
+      if (agentRun || agentConfig) throw Object.assign(new Error('项目包含研判、配置或改期审批历史，不能通过旧接口删除；请使用受控生命周期流程'), { status: 409, code: 'PROJECT_AGENT_HISTORY_PROTECTED' })
+      const [responsibility] = await tx.select({ id: responsibilityRecords.id }).from(responsibilityRecords).where(eq(responsibilityRecords.projectId, id)).limit(1)
+      const [marker] = await tx.select({ id: responsibilityTaskMarkers.id }).from(responsibilityTaskMarkers).innerJoin(todos, eq(todos.id, responsibilityTaskMarkers.taskId)).where(eq(todos.projectId, id)).limit(1)
+      if (responsibility || marker) throw Object.assign(new Error('项目包含责任或关键行动历史，不能直接删除；请按保留和生命周期政策处理'), { status: 409, code: 'PROJECT_RESPONSIBILITY_HISTORY_PROTECTED' })
+      const [fileHistory] = await tx.select({ id: projectFiles.id }).from(projectFiles).where(eq(projectFiles.projectId, id)).limit(1)
+      if (fileHistory) throw Object.assign(new Error('项目包含文件历史，不能通过旧接口删除原件；请使用受控生命周期流程'), { status: 409, code: 'PROJECT_FILE_HISTORY_PROTECTED' })
+      // Preserve established business-history error priority as automatic syncs become ubiquitous.
+      const [timelineSync] = await tx.select({ id: projectTimelineSyncs.id }).from(projectTimelineSyncs).where(eq(projectTimelineSyncs.projectId, id)).limit(1)
+      if (timelineSync) throw Object.assign(new Error('项目包含流程行动及对账历史，不能通过旧接口删除'), { status: 409, code: 'PROJECT_TIMELINE_HISTORY_PROTECTED' })
+    }
+    // Fences only prevent a previously uncommitted command from arriving late;
+    // they are not material history. Once the project is deleted, the same
+    // project-first lock/context check rejects every late command. Keep audit
+    // history and roll this cleanup back if any subsequent delete fails.
+    await tx.delete(projectMaterialRequestClosures).where(eq(projectMaterialRequestClosures.projectId, id))
+    await tx.delete(projectAgentCommands).where(and(eq(projectAgentCommands.projectId, id), sql`${projectAgentCommands.closedAt} IS NOT NULL`))
+    await tx.delete(knowledgeChunks).where(and(eq(knowledgeChunks.scope, 'project'), eq(knowledgeChunks.refId, id)))
+    await tx.delete(projects).where(eq(projects.id, id))
+    await tx.insert(auditLogs).values({ userId, userName: actor.name, module: '我的专属项目', action: '删除项目(连带知识库)', target: project.name })
+    return project
+  })
   if (!proj) return null
-  // 显式删统一知识库(无FK,不会自动级联)
-  await db.delete(knowledgeChunks).where(and(eq(knowledgeChunks.scope, 'project'), eq(knowledgeChunks.refId, id)))
-  // 删项目(file_chunks/project_files 由 onDelete cascade/set null 处理)
-  await db.delete(projects).where(eq(projects.id, id))
-  await db.insert(auditLogs).values({ userId, userName: '（系统）', module: '我的专属项目', action: '删除项目(连带知识库)', target: proj.name })
   await removeProjectFileDirectory(id).catch((error) => {
     console.warn(`[projects] 清理项目原始文件目录失败：${id}`, error)
   })
@@ -401,9 +648,23 @@ export async function deleteFile(fileId: string, userId?: string) {
   if (!f) return false
   const versions = await db.select({ storagePath: projectFileVersions.storagePath })
     .from(projectFileVersions).where(eq(projectFileVersions.fileId, fileId))
-  await db.delete(fileChunks).where(eq(fileChunks.fileId, fileId))
-  await db.delete(knowledgeChunks).where(eq(knowledgeChunks.sourceId, fileId))
-  await db.delete(projectFiles).where(eq(projectFiles.id, fileId))
+  await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT ${projects.id} FROM ${projects} WHERE ${projects.id}=${f.projectId} FOR UPDATE`)
+    await tx.execute(sql`SELECT ${projectFiles.id} FROM ${projectFiles} WHERE ${projectFiles.id}=${fileId} FOR UPDATE`)
+    const [project] = await tx.select().from(projects).where(eq(projects.id, f.projectId))
+    const [evidence] = await tx.select({ id: todoFeedbackEvidence.id }).from(todoFeedbackEvidence).where(eq(todoFeedbackEvidence.fileId, fileId)).limit(1)
+    if (evidence) throw Object.assign(new Error('文件已作为任务成果证据，不能删除原始版本和验收证据'), { status: 409, code: 'FILE_TASK_EVIDENCE_REFERENCED' })
+    if (project?.workflowModel === 'fde-v1') {
+      const [event] = await tx.select({ id: projectFileEvents.id }).from(projectFileEvents).where(eq(projectFileEvents.fileId, fileId)).limit(1)
+      // The only no-actor cleanup is a newly created upload whose bytes never committed.
+      const [current] = await tx.select().from(projectFiles).where(eq(projectFiles.id, fileId))
+      if (userId || current?.storagePath || versions.length || event) throw projectFileError(409, 'FILE_LIFECYCLE_REQUIRED', 'FDE 文件必须填写原因并移入回收站，不能硬删除')
+      await tx.delete(projectFileGrants).where(eq(projectFileGrants.fileId, fileId))
+    }
+    await tx.delete(fileChunks).where(eq(fileChunks.fileId, fileId))
+    await tx.delete(knowledgeChunks).where(eq(knowledgeChunks.sourceId, fileId))
+    await tx.delete(projectFiles).where(eq(projectFiles.id, fileId))
+  })
   await Promise.all([...new Set([f.storagePath, ...versions.map((row) => row.storagePath)].filter(Boolean))]
     .map((storagePath) => removeOwnedProjectFile(storagePath, f.projectId, fileId).catch((error) => {
       const code = (error as Error & { code?: string }).code || 'DELETE_FAILED'

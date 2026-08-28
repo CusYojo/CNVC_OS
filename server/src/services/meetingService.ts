@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNull, or, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNull, ne, or, sql } from 'drizzle-orm'
 import { db } from '../db/client.js'
 import { meetingParticipants, meetings, todos, auditLogs, projects } from '../db/schema.js'
 import {
@@ -11,16 +11,18 @@ import {
   syncTodoOwnerIdentity,
 } from './identityResolutionService.js'
 import { businessVersionConflict } from './businessOptimisticLock.js'
+import { prepareFdeTodo } from './fdeTaskService.js'
+import { directiveTaskAccessCondition } from './fdeDirectiveLinksService.js'
+import { scheduleTransaction } from './fdeScheduleTransactionService.js'
 
 function meetingAccessCondition(actor: ProjectAccessActor) {
-  if (isSystemAdmin(actor)) return sql<boolean>`TRUE`
   const accessibleProjectIds = db.select({ id: projects.id }).from(projects)
     .where(projectAccessCondition(actor))
   return or(
     inArray(meetings.projectId, accessibleProjectIds),
     and(
       isNull(meetings.projectId),
-      or(
+      isSystemAdmin(actor) ? sql<boolean>`TRUE` : or(
         eq(meetings.createdBy, actor.uid),
         eq(meetings.hostUserId, actor.uid),
         inArray(
@@ -33,21 +35,20 @@ function meetingAccessCondition(actor: ProjectAccessActor) {
   )!
 }
 
-function todoAccessCondition(actor: ProjectAccessActor) {
-  if (isSystemAdmin(actor)) return sql<boolean>`TRUE`
+export function todoAccessCondition(actor: ProjectAccessActor) {
   const accessibleProjectIds = db.select({ id: projects.id }).from(projects)
     .where(projectAccessCondition(actor))
-  return or(
+  return and(directiveTaskAccessCondition(actor.uid), or(
     inArray(todos.projectId, accessibleProjectIds),
     and(
       isNull(todos.projectId),
-      or(eq(todos.createdBy, actor.uid), eq(todos.ownerUserId, actor.uid)),
+      isSystemAdmin(actor) ? sql<boolean>`TRUE` : or(eq(todos.createdBy, actor.uid), eq(todos.ownerUserId, actor.uid)),
     ),
-  )!
+  ))!
 }
 
 export async function listMeetings(projectId?: string, actor?: ProjectAccessActor) {
-  const conditions = []
+  const conditions = [and(ne(meetings.workflowKind, 'committee'), or(eq(meetings.workflowKind, 'legacy'), eq(meetings.workflowStatus, 'completed')))]
   if (projectId) conditions.push(eq(meetings.projectId, projectId))
   if (actor) conditions.push(meetingAccessCondition(actor))
   const where = conditions.length ? and(...conditions) : undefined
@@ -55,9 +56,10 @@ export async function listMeetings(projectId?: string, actor?: ProjectAccessActo
 }
 
 export async function getMeeting(id: string, actor?: ProjectAccessActor) {
+  const visible = and(ne(meetings.workflowKind, 'committee'), or(eq(meetings.workflowKind, 'legacy'), eq(meetings.workflowStatus, 'completed')))
   const where = actor
-    ? and(eq(meetings.id, id), meetingAccessCondition(actor))
-    : eq(meetings.id, id)
+    ? and(eq(meetings.id, id), meetingAccessCondition(actor), visible)
+    : and(eq(meetings.id, id), visible)
   const rows = await db.select().from(meetings).where(where).limit(1)
   return rows[0]
 }
@@ -135,16 +137,22 @@ export async function createMeeting(
   userId: string,
   userName = '（系统）',
 ) {
-  const insertedId = await db.transaction(async (tx) => {
+  if (input.workflowKind === 'friday' || input.type === '周五例会') throw Object.assign(new Error('请通过周五例会工作区创建、排期和确认纪要'), { status: 409, code: 'FDE_MEETING_WORKFLOW_REQUIRED' })
+  const insertedId = await scheduleTransaction(async (tx) => {
+    const projectIds = [...new Set([input.projectId, ...newTodos.map(todo => todo.projectId)].filter((id): id is string => Boolean(id)))].sort()
+    for (const projectId of projectIds) await tx.execute(sql`SELECT ${projects.id} FROM ${projects} WHERE ${projects.id}=${projectId} FOR UPDATE`)
     const [inserted] = await tx.insert(meetings).values({ ...input, createdBy: userId }).$returningId()
+    await syncMeetingIdentityBindings(inserted.id, input.host, input.attendees, tx)
     if (newTodos?.length) {
-      await tx.insert(todos).values(newTodos.map((todo) => ({
+      const prepared = []
+      for (const todo of newTodos) prepared.push(await prepareFdeTodo(tx, {
         ...todo,
         projectId: todo.projectId ?? input.projectId,
         projectName: todo.projectName ?? input.projectName,
         meetingId: inserted.id,
         createdBy: userId,
-      })))
+      }, userId))
+      await tx.insert(todos).values(prepared)
     }
     await tx.insert(auditLogs).values({
       userId,
@@ -154,13 +162,12 @@ export async function createMeeting(
       target: input.title,
     })
     return inserted.id
-  })
+  }, { isolationLevel: 'read committed' })
 
   let [row] = await db.select().from(meetings).where(eq(meetings.id, insertedId)).limit(1)
-  await syncMeetingIdentityBindings(row.id, row.host, row.attendees)
   if (newTodos?.length) {
     const createdTodos = await db.select().from(todos).where(eq(todos.meetingId, row.id))
-    await Promise.all(createdTodos.map((todo) => syncTodoOwnerIdentity(todo.id, todo.owner)))
+    await Promise.all(createdTodos.filter((todo) => !todo.ownerUserId).map((todo) => syncTodoOwnerIdentity(todo.id, todo.owner)))
   }
   ;[row] = await db.select().from(meetings).where(eq(meetings.id, insertedId)).limit(1)
   void ingestMeeting(row)
@@ -168,20 +175,27 @@ export async function createMeeting(
 }
 
 export async function updateMeeting(id: string, patch: Partial<typeof meetings.$inferInsert>, expectedVersion?: number) {
-  const { id: _id, createdBy: _createdBy, hostUserId: _hostUserId, version: _version, ...safePatch } = patch
+  const { id: _id, createdBy: _createdBy, hostUserId: _hostUserId, version: _version, workflowKind: _kind, workflowStatus: _status, weeklyReview: _review, confirmedBy: _confirmedBy, confirmedAt: _confirmedAt, endsAt: _endsAt, ...safePatch } = patch
   const condition = expectedVersion === undefined
     ? eq(meetings.id, id)
     : and(eq(meetings.id, id), eq(meetings.version, expectedVersion))
-  const [result] = await db.update(meetings).set({
-    ...safePatch,
-    version: sql`${meetings.version} + 1`,
-  }).where(condition)
+  const result = await scheduleTransaction(async (tx) => {
+    const [existing] = await tx.select().from(meetings).where(eq(meetings.id, id))
+    const projectIds = [...new Set([existing?.projectId, safePatch.projectId].filter((value): value is string => Boolean(value)))].sort()
+    for (const projectId of projectIds) await tx.execute(sql`SELECT ${projects.id} FROM ${projects} WHERE ${projects.id}=${projectId} FOR UPDATE`)
+    const [current] = await tx.select().from(meetings).where(eq(meetings.id, id)).for('update')
+    if (current?.projectId !== existing?.projectId) throw businessVersionConflict('会议')
+    // Specialized meetings cannot be edited/rebound through legacy PATCH or internal callers.
+    if (current && current.workflowKind !== 'legacy' || safePatch.type === '周五例会') throw Object.assign(new Error('请在对应专用会议工作区修改；已确认纪要不可覆盖'), { status: 409, code: 'FDE_MEETING_WORKFLOW_REQUIRED' })
+    const [updated] = await tx.update(meetings).set({ ...safePatch, version: sql`${meetings.version} + 1` }).where(condition)
+    if (updated.affectedRows === 1) {
+      const [row] = await tx.select().from(meetings).where(eq(meetings.id, id))
+      await syncMeetingIdentityBindings(row.id, row.host, row.attendees, tx)
+    }
+    return updated
+  }, { isolationLevel: 'read committed' })
   if (expectedVersion !== undefined && result.affectedRows !== 1) throw businessVersionConflict('会议')
   let [row] = await db.select().from(meetings).where(eq(meetings.id, id)).limit(1)
-  if (row) {
-    await syncMeetingIdentityBindings(row.id, row.host, row.attendees)
-    ;[row] = await db.select().from(meetings).where(eq(meetings.id, id)).limit(1)
-  }
   if (row) void ingestMeeting(row)
   return row
 }
@@ -211,23 +225,40 @@ export async function getTodo(id: string, actor?: ProjectAccessActor) {
 }
 
 export async function createTodo(input: typeof todos.$inferInsert, userId: string) {
-  const [inserted] = await db.insert(todos).values({ ...input, createdBy: userId }).$returningId()
+  const inserted = await db.transaction(async (tx) => {
+    const prepared = await prepareFdeTodo(tx, input, userId)
+    const [created] = await tx.insert(todos).values({ ...prepared, createdBy: userId }).$returningId()
+    await tx.insert(auditLogs).values({ userId, userName: '（系统）', module: '待办管理', action: '创建待办', target: prepared.title })
+    return created
+  })
   let [row] = await db.select().from(todos).where(eq(todos.id, inserted.id)).limit(1)
-  await syncTodoOwnerIdentity(row.id, row.owner)
+  if (!row.ownerUserId) await syncTodoOwnerIdentity(row.id, row.owner)
   ;[row] = await db.select().from(todos).where(eq(todos.id, inserted.id)).limit(1)
-  if (row) await db.insert(auditLogs).values({ userId, userName: '（系统）', module: '待办管理', action: '创建待办', target: row.title })
+  return row
+}
+
+async function assertLegacyTodoMutation(tx: Parameters<Parameters<typeof db.transaction>[0]>[0], id: string, targetProjectId?: string | null) {
+  const [row] = await tx.select().from(todos).where(eq(todos.id, id))
+  if (row?.approvalRequestId) throw Object.assign(new Error('流程待办只能通过正式审批处理'), { status: 409, code: 'TODO_APPROVAL_REQUIRED' })
+  const projectIds = [...new Set([row?.projectId, targetProjectId].filter((value): value is string => Boolean(value)))]
+  for (const projectId of projectIds.sort()) {
+    await tx.execute(sql`SELECT ${projects.id} FROM ${projects} WHERE ${projects.id}=${projectId} FOR UPDATE`)
+    const [project] = await tx.select().from(projects).where(eq(projects.id, projectId))
+    if (project?.workflowModel === 'fde-v1') throw Object.assign(new Error('请在 FDE 项目待办中反馈、验收、延期或取消，不能直接修改或删除'), { status: 409, code: 'FDE_TASK_EXECUTION_REQUIRED' })
+  }
   return row
 }
 
 export async function updateTodo(id: string, patch: Partial<typeof todos.$inferInsert>, expectedVersion?: number) {
-  const { id: _id, createdBy: _createdBy, ownerUserId: _ownerUserId, version: _version, ...safePatch } = patch
+  const { id: _id, createdBy: _createdBy, ownerUserId: _ownerUserId, version: _version, executionModel: _executionModel, creationFingerprint: _creationFingerprint, planActionId: _planActionId, progress: _progress, completedAt: _completedAt, closureReason: _closureReason, approvalRequestId: _approvalRequestId, ...safePatch } = patch
   const condition = expectedVersion === undefined
     ? eq(todos.id, id)
     : and(eq(todos.id, id), eq(todos.version, expectedVersion))
-  const [result] = await db.update(todos).set({
-    ...safePatch,
-    version: sql`${todos.version} + 1`,
-  }).where(condition)
+  const result = await db.transaction(async (tx) => {
+    await assertLegacyTodoMutation(tx, id, patch.projectId)
+    const [updated] = await tx.update(todos).set({ ...safePatch, version: sql`${todos.version} + 1` }).where(condition)
+    return updated
+  })
   if (expectedVersion !== undefined && result.affectedRows !== 1) throw businessVersionConflict('待办')
   let [row] = await db.select().from(todos).where(eq(todos.id, id)).limit(1)
   if (row) {
@@ -238,9 +269,11 @@ export async function updateTodo(id: string, patch: Partial<typeof todos.$inferI
 }
 
 export async function deleteTodo(id: string) {
-  const [row] = await db.select().from(todos).where(eq(todos.id, id)).limit(1)
-  if (row) await db.delete(todos).where(eq(todos.id, id))
-  return row
+  return db.transaction(async (tx) => {
+    const row = await assertLegacyTodoMutation(tx, id)
+    if (row) await tx.delete(todos).where(eq(todos.id, id))
+    return row
+  })
 }
 
 export async function todoCounts(actor?: ProjectAccessActor) {

@@ -148,7 +148,7 @@ export async function saveProjectFileRevision(projectId: string, fileId: string,
   return saveProjectFile(projectId, path.join(fileId, randomUUID()), buffer)
 }
 
-export async function openProjectFile(storagePath: string) {
+export async function inspectProjectFile(storagePath: string) {
   const filePath = resolveStoredPath(storagePath)
   await assertRealPathInsideRoot(filePath, true).catch((error: NodeJS.ErrnoException) => {
     if (error.code === 'ENOENT') {
@@ -165,7 +165,12 @@ export async function openProjectFile(storagePath: string) {
   if (!info.isFile()) {
     throw Object.assign(new Error('项目原始文件不存在'), { status: 404, code: 'FILE_CONTENT_NOT_FOUND' })
   }
-  return { size: info.size, stream: createReadStream(filePath) }
+  return { size: info.size, filePath }
+}
+
+export async function openProjectFile(storagePath: string) {
+  const { size, filePath } = await inspectProjectFile(storagePath)
+  return { size, stream: createReadStream(filePath) }
 }
 
 export async function readProjectFileBuffer(storagePath: string): Promise<Buffer> {

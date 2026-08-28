@@ -7,6 +7,8 @@ import {
   projects,
 } from '../db/schema.js'
 import { appendMessages, getConversation } from './conversationService.js'
+import { requireAccessibleProject } from './projectAccessService.js'
+import { fileKnowledgeAccessCondition } from './projectFileAccessService.js'
 import {
   AI_QA_SKILL_NAME,
   loadAiSkill,
@@ -113,7 +115,8 @@ async function assertQaAccess(user: QaUser, projectId: string, conversationId: s
     throw Object.assign(new Error('项目不存在'), { status: 404, code: 'NOT_FOUND' })
   }
   const collaborators = Array.isArray(project.collaborators) ? project.collaborators : []
-  const allowed = user.role === '系统管理员'
+  if (project.workflowModel === 'fde-v1') await requireAccessibleProject(user.uid, projectId)
+  const allowed = project.workflowModel === 'fde-v1' || user.role === '系统管理员'
     || !project.createdBy
     || project.createdBy === user.uid
     || project.owner === user.name
@@ -140,12 +143,14 @@ async function assertQaAccess(user: QaUser, projectId: string, conversationId: s
 async function evidenceForProject(
   project: typeof projects.$inferSelect,
   sourceCutoffDate: string,
+  userId: string,
 ): Promise<QaEvidence[]> {
   const cutoff = new Date(`${sourceCutoffDate}T23:59:59.999Z`)
   const rows = await db.select().from(knowledgeChunks)
     .where(and(
       eq(knowledgeChunks.scope, 'project'),
       eq(knowledgeChunks.refId, project.id),
+      fileKnowledgeAccessCondition(userId),
       lte(knowledgeChunks.createdAt, cutoff),
     ))
     .orderBy(asc(knowledgeChunks.sourceName), asc(knowledgeChunks.chunkIndex))
@@ -458,7 +463,7 @@ export async function createProjectQaAnswer(user: QaUser, input: {
   sourceCutoffDate: string
 }) {
   const { project } = await assertQaAccess(user, input.projectId, input.conversationId)
-  let evidence = await evidenceForProject(project, input.sourceCutoffDate)
+  let evidence = await evidenceForProject(project, input.sourceCutoffDate, user.uid)
   const research = await fetchProjectQaModelEvidence({
     project,
     currentSources: evidence as EvidenceSource[],

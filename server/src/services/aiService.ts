@@ -1,8 +1,8 @@
 import { gatewayJson, gatewayText } from './inProcessAiWorkflowService.js'
 import { retrieveKnowledge } from './ragService.js'
 
-export async function answerQuestion(question: string, projectName = '当前项目', projectId?: string) {
-  const chunks = await retrieveKnowledge(projectId ? 'project' : 'org', projectId, question, 6)
+export async function answerQuestion(question: string, projectName = '当前项目', projectId?: string, userId?: string) {
+  const chunks = await retrieveKnowledge(projectId ? 'project' : 'org', projectId, question, 6, userId)
   const sources = [...new Set(chunks.map((chunk) => chunk.fileName).filter(Boolean))]
   const context = chunks.map((chunk, index) => `【资料${index + 1}｜${chunk.fileName}】\n${chunk.content}`).join('\n\n')
   const answer = await gatewayText({

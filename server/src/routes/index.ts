@@ -1,6 +1,17 @@
 import { Router } from 'express'
 import { authRouter } from './auth.js'
 import { projectsRouter } from './projects.js'
+import { weeklyReportsRouter } from './weeklyReports.js'
+import { companyKnowledgeRouter } from './companyKnowledge.js'
+import { projectArchivesRouter } from './projectArchives.js'
+import { dataKnowledgeRouter } from './dataKnowledge.js'
+import { workbenchRouter } from './workbench.js'
+import { responsibilityPoliciesRouter } from './responsibilityPolicies.js'
+import { fdeTypePoliciesRouter } from './fdeTypePolicies.js'
+import { fdeTypeRegistrationRouter } from './fdeTypeRegistration.js'
+import { committeeRouter } from './committee.js'
+import { responsibilityRouter } from './responsibility.js'
+import { leaderTimeRouter, calendarRouter } from './fdeTime.js'
 import { meetingsRouter, todosRouter, aiRouter } from './meetings.js'
 import { risksRouter } from './risks.js'
 import { metaRouter } from './meta.js'
@@ -31,6 +42,18 @@ export const apiRouter = Router()
 
 apiRouter.use('/auth', authRouter)
 apiRouter.use('/projects', projectsRouter)
+apiRouter.use('/weekly-reports', weeklyReportsRouter)
+apiRouter.use('/company-knowledge', companyKnowledgeRouter)
+apiRouter.use('/project-archives', projectArchivesRouter)
+apiRouter.use('/data-knowledge', dataKnowledgeRouter)
+apiRouter.use('/workbench', workbenchRouter)
+apiRouter.use('/responsibility-policies', responsibilityPoliciesRouter)
+apiRouter.use('/fde-type-policies', fdeTypePoliciesRouter)
+apiRouter.use('/fde-type-registration', fdeTypeRegistrationRouter)
+apiRouter.use('/committee', committeeRouter)
+apiRouter.use('/responsibility', responsibilityRouter)
+apiRouter.use('/leader-time', leaderTimeRouter)
+apiRouter.use('/calendar', calendarRouter)
 apiRouter.use('/meetings', meetingsRouter)
 apiRouter.use('/todos', todosRouter)
 apiRouter.use('/risks', risksRouter)

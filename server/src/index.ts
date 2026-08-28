@@ -21,6 +21,7 @@ import {
   shutdownJwAgentRuntime,
 } from './runtime/jwAgentRuntime.js'
 import { radarCollectorHealth } from './services/radarCollectorService.js'
+import { responsibilityScannerHealth, startResponsibilityScanner, stopResponsibilityScanner } from './services/fdeResponsibilityScanner.js'
 import { ensureRadarMySqlSeeded, radarMySqlSourceHealth } from './services/radarDataMigrationService.js'
 import {
   runtimeJobSchedulerHealth,
@@ -197,6 +198,7 @@ app.get('/api/health/components', async (_req, res) => {
         intentionallyDisabled('mysql-lead-bp-jobs'),
         intentionallyDisabled('mysql-project-score-jobs'),
         intentionallyDisabled('mysql-ai-tasks'),
+        intentionallyDisabled('fde-responsibility-scanner'),
         supervisedProcessHealth(),
         await sessionAuthHealth(),
         {
@@ -218,6 +220,7 @@ app.get('/api/health/components', async (_req, res) => {
         await leadBpWorkerHealth(),
         await projectScoreJobHealth(),
         await aiTaskWorkerHealth(),
+        responsibilityScannerHealth(),
         supervisedProcessHealth(),
         await sessionAuthHealth(),
       ]
@@ -345,6 +348,7 @@ async function start() {
     const radarSeed = await ensureRadarMySqlSeeded()
     console.log(`[radar-mysql] seed skipped=${radarSeed.skipped} candidates=${radarSeed.currentCandidates}`)
     await startRuntimeJobScheduler()
+    startResponsibilityScanner()
     startWeixinMessageBridge()
     initializeAgentSocket(httpServer!)
     console.log(`[db] schema ready account-seed=${demoSeed.retired ? 'retired' : demoSeed.skipped ? 'disabled' : demoSeed.seeded}`)
@@ -367,6 +371,7 @@ async function shutdown(signal: string): Promise<void> {
   await shutdownAgentSocket()
   await stopWeixinMessageBridge()
   await stopRuntimeJobScheduler()
+  await stopResponsibilityScanner()
   await stopProjectScoreJobWorker()
   await stopLeadBpWorker()
   await stopLeadEnrichmentWorker()

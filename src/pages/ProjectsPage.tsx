@@ -6,12 +6,17 @@ import { ProjectModal } from '../components/ProjectModal'
 import { useToast } from '../components/Toast'
 import { Button, Card, DataTable, Drawer, EmptyState, Modal, PageHeader, RiskBadge, SearchInput, StageBadge, TableCell } from '../components/ui'
 import { useAuthStore } from '../store/useAuthStore'
-import type { Project, ProjectStage, RiskLevel } from '../types'
+import type { Project, ProjectClassification, ProjectStage, RiskLevel } from '../types'
 import { formatShanghaiDateTime } from '../lib/dateTime'
 
-const stages: ProjectStage[] = ['线索', '初筛', '立项', '尽调', '上会', '投决', '投后', '退出', '放弃']
+const stages: ProjectStage[] = ['入库', '立项', '尽调计划制定', '尽调计划审核', '启动尽调', '内核', '投决', '打款', '已 Close', '线索', '初筛', '尽调', '上会', '投后', '退出', '放弃']
+const viewCopy: Record<ProjectClassification, { title: string; description: string }> = {
+  pool: { title: '项目池', description: '已由专属项目转换或授权登记、等待完成入库初筛的项目。' },
+  normal: { title: '普通项目', description: '已完成入库并进入正式投资流程的项目。' },
+  key: { title: '重点项目', description: '由授权领导标记、需要重点推进和关注的项目。' },
+}
 
-export function ProjectsPage() {
+export function ProjectsPage({ classification = 'normal', embedded = false }: { classification?: ProjectClassification; embedded?: boolean }) {
   const navigate = useNavigate()
   const { showToast } = useToast()
   const projects = useAppStore((state) => state.projects)
@@ -20,6 +25,7 @@ export function ProjectsPage() {
   const updateProject = useAppStore((state) => state.updateProject)
   const deleteProject = useAppStore((state) => state.deleteProject)
   const pinProject = useAppStore((state) => state.pinProject)
+  const classifyProject = useAppStore((state) => state.classifyProject)
   const [query, setQuery] = useState('')
   const [menuId, setMenuId] = useState<string | null>(null)
   const [scope, setScope] = useState('mine')
@@ -38,13 +44,14 @@ export function ProjectsPage() {
   const industries = Array.from(new Set(projects.map((item) => item.industry)))
   const owners = Array.from(new Set(projects.map((item) => item.owner)))
   const filtered = useMemo(() => projects
+    .filter((project) => (project.classification ?? 'normal') === classification && (project.lifecycle ?? 'active') === 'active')
     .filter((project) => scope === 'all' || project.owner === currentUser.name)
     .filter((project) => !query || `${project.name}${project.companyName}`.toLowerCase().includes(query.toLowerCase()))
     .filter((project) => !stage || project.stage === stage)
     .filter((project) => !industry || project.industry === industry)
     .filter((project) => !owner || project.owner === owner)
     .filter((project) => !risk || project.riskLevel === risk)
-    .sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)) || b.updatedAt.localeCompare(a.updatedAt)), [projects, scope, currentUser.name, query, stage, industry, owner, risk])
+    .sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)) || b.updatedAt.localeCompare(a.updatedAt)), [projects, classification, scope, currentUser.name, query, stage, industry, owner, risk])
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize))
   const rows = filtered.slice((page - 1) * pageSize, page * pageSize)
 
@@ -98,16 +105,33 @@ export function ProjectsPage() {
     }
   }
 
-  return (
-    <div>
-      <PageHeader
-        title="我的专属项目"
-        description="管理本人领取或创建的项目；项目阶段由 OA 审批结果驱动。"
-        actions={<Button onClick={() => setShowCreate(true)}><Plus className="h-4 w-4" />新建项目</Button>}
-      />
+  const changeClassification = async (project: Project, target: ProjectClassification) => {
+    setMenuId(null)
+    const action = project.classification === 'pool' ? '完成入库' : target === 'key' ? '升级为重点项目' : '调整为普通项目'
+    const reason = window.prompt(`请填写“${action}”原因：`, project.classification === 'pool' ? '入库初筛完成' : '')
+    if (!reason?.trim()) return
+    try {
+      await classifyProject(project.id, target, reason)
+      showToast(`${project.name}：${action}成功`)
+    } catch (error) {
+      showToast(`${action}失败：${(error as Error).message}`, 'error')
+    }
+  }
 
-      <Card className="mb-4 p-4">
+  const canClassify = currentUser.permissionCodes?.includes('project.classify') ?? false
+  const currentCopy = viewCopy[classification]
+
+  return (
+    <div className="fde-project-list">
+      {!embedded && <PageHeader
+        title={currentCopy.title}
+        description={currentCopy.description}
+        actions={classification === 'pool' ? <Button onClick={() => setShowCreate(true)}><Plus className="h-4 w-4" />登记项目</Button> : undefined}
+      />}
+
+      <Card className="fde-toolbar mb-4 p-4">
         <div className="flex flex-wrap items-center gap-3">
+          {embedded && classification === 'pool' && <Button onClick={() => setShowCreate(true)}><Plus className="h-4 w-4" />登记项目</Button>}
           <SearchInput className="min-w-[220px] flex-1" placeholder="搜索项目名称或公司…" value={query} onChange={(event) => { setQuery(event.target.value); setPage(1) }} />
           <select className="input w-32" value={scope} onChange={(event) => { setScope(event.target.value); setPage(1) }}><option value="mine">我的专属项目</option><option value="all">全部项目</option></select>
           <select className="input w-32" value={stage} onChange={(event) => { setStage(event.target.value); setPage(1) }}><option value="">全部阶段</option>{stages.map((item) => <option key={item}>{item}</option>)}</select>
@@ -118,8 +142,8 @@ export function ProjectsPage() {
         </div>
       </Card>
 
-      <Card className="overflow-hidden">
-        {rows.length === 0 ? <EmptyState title="没有找到项目" description="调整搜索或筛选条件，也可以直接创建一个新项目。" action={<Button onClick={() => setShowCreate(true)}><Plus className="h-4 w-4" />创建项目</Button>} /> : (
+      <Card className="fde-project-table overflow-hidden">
+        {rows.length === 0 ? <EmptyState title={`没有找到${currentCopy.title}`} description="调整搜索或筛选条件后重试。" action={classification === 'pool' ? <Button onClick={() => setShowCreate(true)}><Plus className="h-4 w-4" />登记项目</Button> : undefined} /> : (
           <>
             <DataTable headers={['项目 / 公司', '行业与轮次', '项目阶段', '负责人', '融资 / 估值', '风险', '最近更新', '']}>
               {rows.map((project) => (
@@ -139,10 +163,10 @@ export function ProjectsPage() {
                   <TableCell><RiskBadge level={project.riskLevel} /></TableCell>
                   <TableCell><span className="whitespace-nowrap text-xs">{formatShanghaiDateTime(project.updatedAt, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</span></TableCell>
                   <TableCell>
-                    <div className="flex items-center gap-1 opacity-0 transition group-hover:opacity-100">
+                    <div className="flex items-center gap-1 transition">
                       <button aria-label="发起OA审批" title="发起 OA 审批" className="rounded-lg p-1.5 text-slate-400 hover:bg-white hover:text-brand-600" onClick={(event) => { event.stopPropagation(); navigate(`/workflow?project=${project.id}`) }}><GitBranch className="h-4 w-4" /></button>
                       <button aria-label="编辑项目" className="rounded-lg p-1.5 text-slate-400 hover:bg-white hover:text-brand-600" onClick={(event) => { event.stopPropagation(); setEditing(project) }}><Pencil className="h-4 w-4" /></button>
-                      <span className="relative inline-block"><button aria-label="更多操作" className="rounded-lg p-1.5 text-slate-400 hover:bg-white" onClick={(event) => { event.stopPropagation(); setMenuId(menuId === project.id ? null : project.id) }}><MoreHorizontal className="h-4 w-4" /></button>{menuId === project.id && <span className="absolute right-0 top-9 z-20 w-32 rounded-lg border border-slate-200 bg-white py-1 text-sm shadow-lg" onClick={(event) => event.stopPropagation()}><button className="flex w-full items-center gap-2 px-3 py-2 text-left text-slate-600 hover:bg-slate-50" onClick={() => handlePin(project)}>{project.pinned ? '取消置顶' : '置顶'}</button><button className="flex w-full items-center gap-2 px-3 py-2 text-left text-rose-600 hover:bg-rose-50" onClick={() => requestDelete(project)}>删除项目</button></span>}</span>
+                      <span className="relative inline-block"><button aria-label="更多操作" className="rounded-lg p-1.5 text-slate-400 hover:bg-white" onClick={(event) => { event.stopPropagation(); setMenuId(menuId === project.id ? null : project.id) }}><MoreHorizontal className="h-4 w-4" /></button>{menuId === project.id && <span className="absolute right-0 top-9 z-20 w-40 rounded-lg border border-slate-200 bg-white py-1 text-sm shadow-lg" onClick={(event) => event.stopPropagation()}>{classification === 'pool' && (project.owner === currentUser.name || canClassify) && <button className="flex w-full items-center gap-2 px-3 py-2 text-left text-brand-700 hover:bg-brand-50" onClick={() => { void changeClassification(project, 'normal') }}>完成入库</button>}{classification === 'normal' && canClassify && <button className="flex w-full items-center gap-2 px-3 py-2 text-left text-brand-700 hover:bg-brand-50" onClick={() => { void changeClassification(project, 'key') }}>升级为重点项目</button>}{classification === 'key' && canClassify && <button className="flex w-full items-center gap-2 px-3 py-2 text-left text-slate-600 hover:bg-slate-50" onClick={() => { void changeClassification(project, 'normal') }}>调整为普通项目</button>}<button className="flex w-full items-center gap-2 px-3 py-2 text-left text-slate-600 hover:bg-slate-50" onClick={() => handlePin(project)}>{project.pinned ? '取消置顶' : '置顶'}</button><button className="flex w-full items-center gap-2 px-3 py-2 text-left text-rose-600 hover:bg-rose-50" onClick={() => requestDelete(project)}>删除项目</button></span>}</span>
                     </div>
                   </TableCell>
                 </tr>

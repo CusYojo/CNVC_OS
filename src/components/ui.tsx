@@ -22,7 +22,9 @@ export function Button({
   }
   return (
     <button
-      className={`inline-flex items-center justify-center gap-2 rounded-lg border font-medium transition disabled:cursor-not-allowed disabled:opacity-50 ${size === 'sm' ? 'h-8 px-3 text-xs' : 'h-10 px-4 text-sm'} ${variants[variant]} ${className}`}
+      className={`fde-ui-button inline-flex items-center justify-center gap-2 rounded-lg border font-medium transition disabled:cursor-not-allowed disabled:opacity-50 ${size === 'sm' ? 'h-8 px-3 text-xs' : 'h-10 px-4 text-sm'} ${variants[variant]} ${className}`}
+      data-variant={variant}
+      data-size={size}
       disabled={loading || props.disabled}
       {...props}
     >
@@ -33,7 +35,7 @@ export function Button({
 }
 
 export function Card({ children, className = '', id }: { children: ReactNode; className?: string; id?: string }) {
-  return <section id={id} className={`rounded-xl border border-slate-200/90 bg-white shadow-card ${className}`}>{children}</section>
+  return <section id={id} className={`fde-ui-card rounded-xl border border-slate-200/90 bg-white shadow-card ${className}`}>{children}</section>
 }
 
 export function Badge({ children, tone = 'slate' }: { children: ReactNode; tone?: 'blue' | 'green' | 'amber' | 'red' | 'purple' | 'slate' | 'cyan' }) {
@@ -46,11 +48,13 @@ export function Badge({ children, tone = 'slate' }: { children: ReactNode; tone?
     slate: 'bg-slate-100 text-slate-600 ring-slate-200',
     cyan: 'bg-cyan-50 text-cyan-700 ring-cyan-100',
   }
-  return <span className={`inline-flex items-center whitespace-nowrap rounded-md px-2 py-1 text-xs font-medium ring-1 ring-inset ${tones[tone]}`}>{children}</span>
+  return <span data-tone={tone} className={`fde-ui-badge inline-flex items-center whitespace-nowrap rounded-md px-2 py-1 text-xs font-medium ring-1 ring-inset ${tones[tone]}`}>{children}</span>
 }
 
 const stageTone: Record<string, Parameters<typeof Badge>[0]['tone']> = {
-  线索: 'slate', 初筛: 'cyan', 立项: 'blue', 尽调: 'purple', 上会: 'amber', 投决: 'red', 投后: 'green', 退出: 'slate', 放弃: 'slate',
+  入库: 'slate', 线索: 'slate', 初筛: 'cyan', 立项: 'blue', 尽调计划制定: 'cyan', 尽调计划审核: 'blue',
+  启动尽调: 'purple', 尽调: 'purple', 内核: 'amber', 上会: 'amber', 投决: 'red', 打款: 'cyan',
+  '已 Close': 'green', 投后: 'green', 退出: 'slate', 放弃: 'slate',
 }
 
 export function StageBadge({ stage }: { stage: string }) {
@@ -74,7 +78,7 @@ export function StatusBadge({ status }: { status: JobStatus | string }) {
 
 export function PageHeader({ title, description, actions }: { title: string; description?: string; actions?: ReactNode }) {
   return (
-    <div className="mb-5 flex min-h-14 items-center justify-between">
+    <div className="fde-ui-page-header mb-5 flex min-h-14 items-center justify-between">
       <div>
         <h1 className="text-[22px] font-semibold tracking-tight text-ink">{title}</h1>
         {description && <p className="mt-1 text-sm text-slate-500">{description}</p>}
@@ -88,7 +92,7 @@ export function Modal({ open, title, children, onClose, width = 'max-w-xl', foot
   if (!open) return null
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 p-6 backdrop-blur-[2px]" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <div className={`max-h-[88vh] w-full ${width} overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl`}>
+      <div role="dialog" aria-modal="true" aria-label={title} className={`fde-ui-modal max-h-[88vh] w-full ${width} overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl`}>
         <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
           <h2 className="text-lg font-semibold text-ink">{title}</h2>
           <button aria-label="关闭" className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700" onClick={onClose}><X className="h-5 w-5" /></button>
@@ -104,7 +108,7 @@ export function Drawer({ open, title, children, onClose, width = 'w-[560px]', fo
   if (!open) return null
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/25 backdrop-blur-[1px]" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <aside className={`absolute right-0 top-0 flex h-full ${width} flex-col bg-white shadow-2xl`}>
+      <aside role="dialog" aria-modal="true" aria-label={title} className={`fde-ui-drawer absolute right-0 top-0 flex h-full ${width} flex-col bg-white shadow-2xl`}>
         <div className="flex items-center justify-between border-b border-slate-100 px-6 py-5">
           <h2 className="text-lg font-semibold text-ink">{title}</h2>
           <button aria-label="关闭" className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100" onClick={onClose}><X className="h-5 w-5" /></button>
@@ -118,9 +122,9 @@ export function Drawer({ open, title, children, onClose, width = 'w-[560px]', fo
 
 export function Tabs({ tabs, value, onChange }: { tabs: { id: string; label: string; count?: number }[]; value: string; onChange: (value: string) => void }) {
   return (
-    <div className="flex items-center gap-1 border-b border-slate-200">
+    <div className="fde-ui-tabs flex items-center gap-1 border-b border-slate-200" role="tablist">
       {tabs.map((tab) => (
-        <button key={tab.id} onClick={() => onChange(tab.id)} className={`relative px-4 py-3 text-sm font-medium transition ${value === tab.id ? 'text-brand-700' : 'text-slate-500 hover:text-slate-800'}`}>
+        <button key={tab.id} role="tab" aria-selected={value === tab.id} onClick={() => onChange(tab.id)} className={`relative px-4 py-3 text-sm font-medium transition ${value === tab.id ? 'text-brand-700' : 'text-slate-500 hover:text-slate-800'}`}>
           {tab.label}{tab.count !== undefined && <span className="ml-1.5 rounded-full bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-500">{tab.count}</span>}
           {value === tab.id && <span className="absolute inset-x-2 bottom-0 h-0.5 rounded-full bg-brand-600" />}
         </button>
@@ -190,7 +194,7 @@ export function ProgressBar({ value, tone = 'blue' }: { value: number; tone?: 'b
 export function DataTable({ headers, children }: { headers: string[]; children: ReactNode }) {
   return (
     <div className="overflow-x-auto">
-      <table className="w-full border-collapse text-left text-sm">
+      <table className="fde-ui-table w-full border-collapse text-left text-sm">
         <thead><tr className="border-b border-slate-200 bg-slate-50/80">{headers.map((header, index) => <th key={`${header}-${index}`} className="whitespace-nowrap px-4 py-3 text-xs font-semibold text-slate-500">{header}</th>)}</tr></thead>
         <tbody className="divide-y divide-slate-100">{children}</tbody>
       </table>

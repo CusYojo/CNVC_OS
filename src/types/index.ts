@@ -1,11 +1,15 @@
-export type ProjectStage = '线索' | '初筛' | '立项' | '尽调' | '上会' | '投决' | '投后' | '退出' | '放弃'
+export type ProjectStage =
+  | '入库' | '立项' | '尽调计划制定' | '尽调计划审核' | '启动尽调' | '内核' | '投决' | '打款' | '已 Close'
+  | '线索' | '初筛' | '尽调' | '上会' | '投后' | '退出' | '放弃'
+export type ProjectClassification = 'pool' | 'normal' | 'key'
+export type ProjectLifecycle = 'active' | 'closed' | 'archived' | 'deleted'
 export type RiskLevel = '低' | '中' | '高'
-export type TaskStatus = '未开始' | '进行中' | '已完成' | '已逾期'
+export type TaskStatus = '未开始' | '进行中' | '已完成' | '已逾期' | '已关闭' | '待验收' | '已退回' | '已取消' | '已归档'
 export type JobStatus = '待处理' | '解析中' | '生成中' | '成功' | '失败' | '已取消'
 export type ApprovalStatus = '草稿' | '审批中' | '已通过' | '已退回' | '已拒绝' | '已撤回'
 export type ApprovalNodeStatus = '未开始' | '待审批' | '会签中' | '已通过' | '已退回' | '已拒绝' | '已跳过'
 export type ApprovalAction = '提交' | '同意' | '退回' | '拒绝' | '撤回' | '转交'
-export type ApprovalType = '初筛审批' | '立项审批' | '尽调启动审批' | '上会申请' | '投决审批' | '投后移交审批' | '项目终止审批'
+export type ApprovalType = '初筛审批' | '立项审批' | '尽调计划审核' | '尽调启动审批' | '内核审批' | '打款审批' | '上会申请' | '投决审批' | '投后移交审批' | '项目终止审批' | '任务延期'
 export type LeadChannel = '微信群' | '论文专利' | '院校' | '重点机构' | '新闻' | '其他'
 
 export interface Project {
@@ -18,6 +22,18 @@ export interface Project {
   industry: string
   round: string
   stage: ProjectStage
+  classification?: ProjectClassification
+  lifecycle?: ProjectLifecycle
+  workflowModel?: 'legacy' | 'fde-v1'
+  ownerUserId?: string
+  investmentFund?: string
+  projectType?: string
+  healthStatus?: string
+  targetDate?: string | null
+  cycleDays?: number
+  requirements?: string | null
+  leaderPriority?: '高' | '中' | '低'
+  confidentiality?: string
   owner: string
   collaborators: string[]
   source: string
@@ -33,7 +49,7 @@ export interface Project {
   market: string
   team: string
   progress: number
-  stageSource?: 'OA审批' | '系统初始化' | '线索转入'
+  stageSource?: 'OA审批' | '系统初始化' | '线索转入' | '入库完成'
   latestApprovalId?: string
 }
 
@@ -65,6 +81,11 @@ export interface AISummary {
 }
 
 export interface Todo {
+  ownerUserId?: string | null
+  dueTime?: string | null
+  executionModel?: string
+  planActionId?: string | null
+  approvalRequestId?: string | null
   version: number
   id: string
   title: string
@@ -147,6 +168,9 @@ export interface ApprovalRecord {
 }
 
 export interface ApprovalRequest {
+  businessType?: 'project_stage' | 'task_extension' | 'agent_schedule' | 'project_replan'
+  taskId?: string | null
+  businessPayload?: { originalDueDate?: string; requestedDueDate?: string }
   id: string
   requestNo: string
   projectId: string
@@ -169,6 +193,9 @@ export interface ApprovalRequest {
   completedAt?: string
   attachments: string[]
   checklist: { label: string; passed: boolean; required: boolean }[]
+  materialSnapshot?: Array<{ requirementKey: string; fileId: string | null; fileVersion: number | null; waiverReason: string | null }>
+  planId?: string
+  revisions?: Array<{ id: string; revision: number; submittedBy: string; submittedAt: string; snapshot: Record<string, unknown> }>
   nodes: ApprovalNode[]
   records: ApprovalRecord[]
   lockVersion?: number

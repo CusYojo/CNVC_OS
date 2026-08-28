@@ -58,6 +58,7 @@ async function main() {
   try {
     const project = await createProject({
       name: `稳定身份验收-${marker}`,
+      workflowModel: 'legacy',
       owner: names.owner,
       collaborators: [names.collaborator, names.duplicate, names.disabled, names.missing],
     }, creatorId)
@@ -77,6 +78,7 @@ async function main() {
 
     const unresolvedOwnerProject = await createProject({
       name: `显式身份裁决验收-${marker}`,
+      workflowModel: 'legacy',
       owner: names.missing,
       collaborators: [],
     }, creatorId)

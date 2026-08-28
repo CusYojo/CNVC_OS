@@ -1889,7 +1889,7 @@ function Chat() {
   }
 
   return (
-    <div className="-m-6 flex h-[calc(100vh-64px)] min-h-[720px] overflow-hidden bg-white">
+    <div className="fde-ai-page -m-6 flex h-[calc(100vh-64px)] min-h-[720px] overflow-hidden bg-white">
       <aside className="flex w-[250px] shrink-0 flex-col border-r border-slate-200 bg-slate-50/60">
         <div className="p-4">
           <Button className="w-full" onClick={openNewSessionDialog} disabled={projects.length === 0}>

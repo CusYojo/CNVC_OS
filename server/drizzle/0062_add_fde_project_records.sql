@@ -1,0 +1,63 @@
+CREATE TABLE `sbl_project_records` (
+  `id` varchar(36) NOT NULL PRIMARY KEY,
+  `project_id` varchar(36) NOT NULL,
+  `author_id` varchar(36) NOT NULL,
+  `kind` varchar(24) NOT NULL,
+  `title` varchar(255) NOT NULL,
+  `content` text NOT NULL,
+  `status` varchar(16) NOT NULL DEFAULT 'published',
+  `version` int NOT NULL DEFAULT 1,
+  `source_key` varchar(128) NULL,
+  `source_meeting_id` varchar(36) NULL,
+  `source_approval_id` varchar(36) NULL,
+  `source_version` int NULL,
+  `closed_by` varchar(36) NULL,
+  `closed_at` datetime(3) NULL,
+  `closure_reason` text NULL,
+  `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  UNIQUE KEY `uq_project_record_source` (`source_key`),
+  KEY `idx_project_record_list` (`project_id`,`status`,`updated_at`),
+  FOREIGN KEY (`project_id`) REFERENCES `sbl_projects` (`id`) ON DELETE RESTRICT,
+  FOREIGN KEY (`author_id`) REFERENCES `sbl_users` (`id`) ON DELETE RESTRICT,
+  FOREIGN KEY (`closed_by`) REFERENCES `sbl_users` (`id`) ON DELETE RESTRICT,
+  FOREIGN KEY (`source_meeting_id`) REFERENCES `sbl_meetings` (`id`) ON DELETE RESTRICT,
+  FOREIGN KEY (`source_approval_id`) REFERENCES `sbl_oa_approval_requests` (`id`) ON DELETE RESTRICT,
+  CHECK (`status` IN ('published','archived','withdrawn')),
+  CHECK (`version` > 0),
+  CHECK ((`status`='published' AND `closed_by` IS NULL AND `closed_at` IS NULL AND `closure_reason` IS NULL) OR (`status`<>'published' AND `closed_by` IS NOT NULL AND `closed_at` IS NOT NULL AND `closure_reason` IS NOT NULL AND CHAR_LENGTH(`closure_reason`)>=5)),
+  CHECK ((`source_key` IS NULL AND `source_version` IS NULL AND `source_meeting_id` IS NULL AND `source_approval_id` IS NULL) OR (`source_key` IS NOT NULL AND `source_version` IS NOT NULL AND `source_version`>0 AND ((`source_meeting_id` IS NOT NULL AND `source_approval_id` IS NULL) OR (`source_meeting_id` IS NULL AND `source_approval_id` IS NOT NULL))))
+);
+--> statement-breakpoint
+CREATE TABLE `sbl_project_record_comments` (
+  `id` varchar(36) NOT NULL PRIMARY KEY,
+  `record_id` varchar(36) NOT NULL,
+  `author_id` varchar(36) NOT NULL,
+  `content` text NOT NULL,
+  `withdrawn_by` varchar(36) NULL,
+  `withdrawn_at` datetime(3) NULL,
+  `withdrawal_reason` text NULL,
+  `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  KEY `idx_record_comment` (`record_id`,`created_at`),
+  FOREIGN KEY (`record_id`) REFERENCES `sbl_project_records` (`id`) ON DELETE RESTRICT,
+  FOREIGN KEY (`author_id`) REFERENCES `sbl_users` (`id`) ON DELETE RESTRICT,
+  FOREIGN KEY (`withdrawn_by`) REFERENCES `sbl_users` (`id`) ON DELETE RESTRICT,
+  CHECK ((`withdrawn_by` IS NULL AND `withdrawn_at` IS NULL AND `withdrawal_reason` IS NULL) OR (`withdrawn_by` IS NOT NULL AND `withdrawn_at` IS NOT NULL AND `withdrawal_reason` IS NOT NULL AND CHAR_LENGTH(`withdrawal_reason`)>=5))
+);
+--> statement-breakpoint
+CREATE TABLE `sbl_project_record_events` (
+  `id` varchar(36) NOT NULL PRIMARY KEY,
+  `record_id` varchar(36) NOT NULL,
+  `actor_id` varchar(36) NOT NULL,
+  `request_id` varchar(36) NOT NULL,
+  `request_hash` varchar(64) NOT NULL,
+  `action` varchar(32) NOT NULL,
+  `version` int NOT NULL,
+  `reason` text NOT NULL,
+  `snapshot` json NOT NULL,
+  `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  UNIQUE KEY `uq_record_event_request` (`request_id`),
+  UNIQUE KEY `uq_record_event_version` (`record_id`,`version`),
+  FOREIGN KEY (`record_id`) REFERENCES `sbl_project_records` (`id`) ON DELETE RESTRICT,
+  FOREIGN KEY (`actor_id`) REFERENCES `sbl_users` (`id`) ON DELETE RESTRICT
+);

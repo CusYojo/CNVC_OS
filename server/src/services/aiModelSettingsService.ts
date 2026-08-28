@@ -4,6 +4,7 @@ import { aiConfigurationRepository } from '../repositories/index.js'
 import { decryptModelCredential, encryptModelCredential } from '../security/modelCredentialCrypto.js'
 import { redactSensitiveText } from '../security/redactSecrets.js'
 import { listConfigurationRevisions, rollbackConfigurationRevision } from './adminConfigurationRevisionService.js'
+import { userHasPermission } from './systemAuthorizationService.js'
 
 export const AI_MODEL_ADMIN_ROLES = ['系统管理员', 'AI平台管理员', 'AI 平台管理员'] as const
 export const AI_MODEL_PROFILE_KEYS = [
@@ -25,9 +26,9 @@ function serviceError(message: string, code: string, status: number) {
   return Object.assign(new Error(message), { code, status })
 }
 
-export function assertAiModelAdmin(actor: AiModelActor): void {
-  if (!(AI_MODEL_ADMIN_ROLES as readonly string[]).includes(actor.role)) {
-    throw serviceError('仅系统管理员或 AI 平台管理员可管理模型', 'ROLE_FORBIDDEN', 403)
+export async function assertAiModelAdmin(actor: AiModelActor): Promise<void> {
+  if (!await userHasPermission(actor.userId, actor.role, 'ai.configure')) {
+    throw serviceError('仅具有 AI 配置权限的用户可管理模型', 'ROLE_FORBIDDEN', 403)
   }
 }
 
@@ -68,7 +69,7 @@ function auditRecord(actor: AiModelActor, action: string, target: string) {
 }
 
 export async function listModelSettings(actor: AiModelActor) {
-  assertAiModelAdmin(actor)
+  await assertAiModelAdmin(actor)
   const { providers, models, routes } = await aiConfigurationRepository.listModelSettings()
   return { providers: providers.map(providerView), models, routes, profileKeys: AI_MODEL_PROFILE_KEYS }
 }
@@ -78,7 +79,7 @@ export async function listModelConfigurationRevisions(
   resourceId: string,
   actor: AiModelActor,
 ) {
-  assertAiModelAdmin(actor)
+  await assertAiModelAdmin(actor)
   return listConfigurationRevisions({ domain: 'model', resourceType, resourceId })
 }
 
@@ -88,7 +89,7 @@ export async function rollbackModelConfigurationRevision(input: {
   revisionId: string
   expectedVersion: number
 }, actor: AiModelActor) {
-  assertAiModelAdmin(actor)
+  await assertAiModelAdmin(actor)
   return rollbackConfigurationRevision({
     domain: 'model', resourceType: input.resourceType, resourceId: input.resourceId,
     revisionId: input.revisionId, expectedVersion: input.expectedVersion,
@@ -99,7 +100,7 @@ export async function rollbackModelConfigurationRevision(input: {
 export async function createModelProvider(input: {
   name: string; protocol: string; baseUrl: string; apiKey: string; timeoutMs: number; enabled: boolean
 }, actor: AiModelActor) {
-  assertAiModelAdmin(actor)
+  await assertAiModelAdmin(actor)
   const id = randomUUID()
   const encrypted = encryptModelCredential(input.apiKey, id)
   const baseUrl = normalizeModelProviderUrl(input.baseUrl)
@@ -123,7 +124,7 @@ export async function updateModelProvider(providerId: string, input: {
   expectedVersion: number; name?: string; protocol?: string; baseUrl?: string;
   apiKey?: string; timeoutMs?: number; enabled?: boolean
 }, actor: AiModelActor) {
-  assertAiModelAdmin(actor)
+  await assertAiModelAdmin(actor)
   const credential = input.apiKey === undefined ? {} : (() => {
       const encrypted = encryptModelCredential(input.apiKey!, providerId)
       return {
@@ -153,7 +154,7 @@ export async function updateModelProvider(providerId: string, input: {
 }
 
 export async function deleteModelProvider(providerId: string, expectedVersion: number, actor: AiModelActor) {
-  assertAiModelAdmin(actor)
+  await assertAiModelAdmin(actor)
   const result = await aiConfigurationRepository.deleteProviderWithAudit({
     providerId, expectedVersion,
     audit: auditRecord(actor, '删除 Provider', providerId),
@@ -168,7 +169,7 @@ export async function createAiModel(input: {
   providerId: string; modelKey: string; displayName: string; contextWindow?: number | null;
   capabilityTags: string[]; allowedRoles: string[]; enabled: boolean; isDefault: boolean
 }, actor: AiModelActor) {
-  assertAiModelAdmin(actor)
+  await assertAiModelAdmin(actor)
   const id = randomUUID()
   const result = await aiConfigurationRepository.createModelWithAudit({
     record: {
@@ -196,7 +197,7 @@ export async function updateAiModel(modelId: string, input: {
   contextWindow?: number | null; capabilityTags?: string[]; allowedRoles?: string[];
   enabled?: boolean; isDefault?: boolean
 }, actor: AiModelActor) {
-  assertAiModelAdmin(actor)
+  await assertAiModelAdmin(actor)
   const result = await aiConfigurationRepository.updateModelWithAudit({
     modelId,
     expectedVersion: input.expectedVersion,
@@ -221,7 +222,7 @@ export async function updateAiModel(modelId: string, input: {
 }
 
 export async function deleteAiModel(modelId: string, expectedVersion: number, actor: AiModelActor) {
-  assertAiModelAdmin(actor)
+  await assertAiModelAdmin(actor)
   const result = await aiConfigurationRepository.deleteModelWithAudit({
     modelId, expectedVersion,
     audit: auditRecord(actor, '删除模型', modelId),
@@ -236,7 +237,7 @@ export async function upsertAiModelRoute(input: {
   profileKey: AiModelProfileKey; modelId: string; fallbackModelId?: string | null;
   enabled: boolean; expectedVersion?: number
 }, actor: AiModelActor) {
-  assertAiModelAdmin(actor)
+  await assertAiModelAdmin(actor)
   if (input.fallbackModelId === input.modelId) throw serviceError('备用模型不能与主模型相同', 'MODEL_ROUTE_INVALID', 400)
   const result = await aiConfigurationRepository.upsertRouteWithAudit({
     profileKey: input.profileKey,
@@ -302,7 +303,7 @@ export async function resolveAiModelById(modelId: string, role?: string) {
 }
 
 export async function testModelProvider(providerId: string, actor: AiModelActor) {
-  assertAiModelAdmin(actor)
+  await assertAiModelAdmin(actor)
   const provider = await aiConfigurationRepository.findProvider(providerId)
   if (!provider) throw serviceError('模型 Provider 不存在', 'MODEL_PROVIDER_NOT_FOUND', 404)
   if (!provider.credentialCiphertext) throw serviceError('Provider 尚未配置 API Key', 'MODEL_CREDENTIAL_MISSING', 409)
