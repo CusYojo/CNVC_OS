@@ -242,7 +242,11 @@ try {
     await db.execute(sql`INSERT INTO ${sql.raw(guardTable)} (project_id) VALUES (${otherProject.id})`)
     const auditsBefore = (await db.select({ n: count() }).from(auditLogs))[0].n
     const blockedDelete = await deleteProject(otherProject.id, member.id).then(() => null, error => error)
-    assert.equal(blockedDelete?.cause?.code ?? blockedDelete?.code, 'ER_ROW_IS_REFERENCED_2')
+    // MySQL exposes both variants for a referenced parent row; either must
+    // still leave the project, request fences and audit log unchanged.
+    const deleteCause = blockedDelete?.cause ?? blockedDelete
+    assert.ok(['ER_ROW_IS_REFERENCED', 'ER_ROW_IS_REFERENCED_2'].includes(deleteCause?.code), `expected FK delete protection, got ${deleteCause?.code}`)
+    assert.equal(deleteCause?.sqlState, '23000')
     assert.deepEqual(await closuresFor(otherProject.id), emptyClosures)
     assert.equal((await db.select().from(projects).where(eq(projects.id, otherProject.id))).length, 1)
     assert.equal((await db.select({ n: count() }).from(auditLogs))[0].n, auditsBefore)
