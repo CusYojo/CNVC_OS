@@ -1,108 +1,83 @@
-# Evidence Policy
+# 证据与事实规则
 
-## Contents
+## V22交易新鲜度字段
 
-1. Evidence ledger
-2. Status taxonomy
-3. Commercial and technical state machines
-4. Source hierarchy
-5. Conflict handling
-6. Writing rules
+交易证据在通用字段之外必须记录`round_id`、`round_role`、`document_version`、`document_date`、`execution_status`、`drafting_note_status`和`freshness_status`。本轮最新、未被替代且批注已消解的文件优先于历史报告、旧版意向书和管理层口头口径。`1.2`、`7.2`和末章的每一项交易主张必须在证据台账中有同一`claim_id`，并满足`transaction-version-contract.md`。
 
-## 1. Evidence ledger
+## 来源层级
 
-Create one `evidence.json` per project:
+从高到低评估，但具体事项以适用性、时点和原件状态为准：
 
-```json
-{
-  "project": {
-    "name": "Project name",
-    "legal_entity": "Exact legal entity",
-    "cutoff_date": "YYYY-MM-DD",
-    "currency": "CNY"
-  },
-  "facts": [
-    {
-      "id": "F001",
-      "statement": "Exact, atomic fact",
-      "entity": "Entity to which it applies",
-      "period": "2025A or 2026-06-30",
-      "unit": "CNY 10k / units / % / n.a.",
-      "source": "/absolute/path/file.pdf#page=8",
-      "source_type": "primary_document",
-      "status": "verified",
-      "materiality": "high",
-      "conflicts": [],
-      "notes": "Scope and limitations"
-    }
-  ]
-}
-```
+1. 政府/监管记录、营业执照、工商档案、正式章程、签署生效的协议、银行或税务原始凭证；
+2. 审计报告、律师尽调、会计师财务尽调、专项鉴证等第三方专业文件；
+3. 股东名册、财务报表、合同台账、员工名册和公司制度等公司正式内部材料；
+4. 商业计划书、产品介绍、预算、预测和管理层书面说明；
+5. 访谈纪要、口头陈述、邮件、报价、意向和Pipeline；
+6. 官网、监管网站、合作方公告和可靠公开资料；
+7. 媒体、聚合平台和搜索摘要等公开线索。
 
-Keep facts atomic. Split a sentence when its clauses have different sources or verification status.
+来源层级不是自动裁决。签署日期较早的协议可能被后续协议替代；第三方报告也只在其范围与基准日内有效。
 
-## 2. Status taxonomy
+## 证据台账字段
 
-- `verified`: supported by original or authoritative evidence inspected by the analyst.
-- `third_party_confirmed`: confirmed by an identifiable independent counterparty or expert; record interview date and role.
-- `public_fact`: supported by a current authoritative public source.
-- `company_claim`: provided by management without sufficient independent verification.
-- `analyst_estimate`: calculated from disclosed assumptions; preserve formula and sensitivity.
-- `analyst_judgment`: reasoned interpretation; cite underlying facts.
-- `unverified`: material assertion for which adequate evidence is absent.
-- `conflicted`: credible sources disagree or internal records do not reconcile.
+至少记录：
 
-Never upgrade status because a claim appears in multiple company-controlled documents.
+| 字段 | 要求 |
+|---|---|
+| `claim_id` | 稳定编号 |
+| `claim` | 一个可核验事实点，不把多个事实塞进一行 |
+| `value/units/period` | 数值、单位、期间或时点 |
+| `source_id` | 文件级证据编号 |
+| `locator` | PDF页码、工作表单元格、DOCX标题/表格、访谈日期/对象 |
+| `source_tier` | 来源层级与文件性质 |
+| `status` | 已核实/公司披露/访谈陈述/公开线索/冲突/未取得 |
+| `chapter` | 拟使用章节 |
+| `notes` | 口径、限制、冲突和复核结果 |
 
-## 3. State machines
+同一重大事实至少在主体、数值或状态之一上获得交叉证据。没有交叉来源时，先在内部台账标明证据属性和投资影响；若该事实可能反转投资结论则阻断终稿，若不影响结论则留在内部台账或直接不作为正文论据。不在可见正文解释“为何未采用”，也不追加开放式核验任务。
 
-Commercial status must remain explicit:
+## 正文表达
 
-`lead -> discussion -> non-binding intention -> framework agreement -> binding order -> delivery -> acceptance -> revenue recognition -> invoice -> cash collection -> repeat purchase`
+### 内部台账与交付正文分层
 
-Technical status must remain explicit:
+- `claim_id`、`source_id`、`SRC-*`、OCR页码键、文件哈希和本机路径是内部追溯字段，只能出现在工作目录中的台账、冲突表和校验日志。
+- 交付DOCX/PDF默认不显示内部编号，不生成`〔SRC-0008—0010〕`、`[SRC-xxxx]`、`CLAIM-*`、表后来源串、来源脚注、来源尾注或证据索引附录。
+- 终稿默认不显示取证属性：不写“根据公司提供的……”“法律/财务尽调报告显示”“台账列示”。先在内部台账完成证据裁决，正文直接陈述裁决后的事实。
+- 用户明确要求可见来源时，另行使用文件名/出具机构/日期/页码等读者可理解的引注体系；内部编号仍不得直接外露。
+- 默认终稿把DOCX/PDF作为投资经理决策层，把来源定位、补件记录、核验任务、备选口径和非重大资料覆盖限制留在内部审计层。不得把审计层任务改写为正文中的“建议核验”“仍需确认”或“待补充”。
 
-`concept -> design -> simulation -> prototype -> internal test -> third-party test -> customer test -> qualification -> pilot production -> mass production -> stable field operation`
+- 一手一致资料：直接陈述，并在需要时注明“截至某日”。
+- 公司材料：在台账中保留`company_stated`属性。如未达到可支持终稿事实的程度，不写入正文；不用“公司披露/公司自述”将证据不足暴露给投委会。
+- 管理层预测：使用“管理层预计/预算”，不得写成投资团队确定性结论。
+- 访谈：只能用于形成经营理解或与一手资料交叉；未经交叉的客户意愿不写成订单，也不在正文追加“据访谈”。
+- 第三方报告：基准日、非审计/非保证性质和依赖范围进入内部台账。只有该性质直接影响某个可见财务或法律结论时，在对应期间/单位说明中陈述一次；不在各章重复书写限制。
+- 公开资料：在内部台账记录公开来源和查询日期；正文只使用已完成主体消歧与时点复核的事实，不用“据某网站/公开查询”引入；公开资料不能替代股权、财务和交易原始文件。
+- 分析判断：事实与判断直接连接，不使用“据此判断/投资团队认为”标记推理过程。
 
-Regulatory and clinical status must remain explicit:
+## 冲突处理
 
-`research -> pre-submission -> application accepted -> review -> clinical trial -> primary endpoint -> approval/registration -> market access -> hospital adoption -> reimbursement -> commercial sales`
+1. 确认是否为日期、主体、合并范围、含税/不含税、元/万元、实际/预测或完全稀释口径差异。
+2. 回到原始文件，不用旧稿或摘要裁决。
+3. 记录两套口径、差额、可能原因和影响。
+4. 只有证据充分时选定最终事实值；不能裁决且可能影响投资结论时阻断终稿。对不影响结论的差异，备选值与裁决理由保留在内部台账，正文只使用最终事实值，不展开内部排除过程。
+5. 不选择更有利于投资的数字。
 
-Do not collapse adjacent stages. State the exact date, scope, quantity, acceptance standard, and remaining condition.
+## 缺失、范围限制与终稿就绪
 
-## 4. Source hierarchy
+- 可省略对判断无影响的空表和次要缺口，并在内部审计层保留记录。
+- 影响主体资格、控制权、核心知识产权、收入质量、现金、重大负债、估值、股比或合规结论的缺口必须在起草终稿前解决；无法解决时停止终稿，不得把“待核验”作为终稿结论的一部分。
+- “未取得”与“不存在”严格区分。
+- 已核实的不利事实必须披露，并写明投资影响与具体交易控制、交割安排或投后责任；不得为保持积极语气删除重大风险，也不得在每个相关章节重复“不纳入估值/不计入测算”。
+- 第三方报告的非审计、非保证、基准日和依赖范围可以在最相关位置准确说明一次；不得扩展成样例外“范围限制”模块或在各章重复。
 
-Prefer, in order:
+## 事实溯源门禁
 
-1. signed contracts, bank statements, invoices, acceptance records, audited ledgers, regulatory decisions, official registries, patent records, raw test reports;
-2. identifiable customer/supplier/expert interviews and independently issued reports;
-3. company operational systems, management accounts, board materials, formal written responses;
-4. authoritative public databases and primary research publications;
-5. company BP, marketing material, press releases, media summaries;
-6. analyst assumptions.
+冻结报告前逐项检查：
 
-For material market, policy, technical, clinical, valuation, or competitor data, record title, publisher, date, page/table, URL when public, geography, currency, and unit.
-
-Before classifying an externally verifiable item as absent, search current official registries, regulator and court databases, patent/trademark records, government procurement and tender platforms, company disclosures, authoritative standards and primary research. Log the search terms, date and result. Public research can verify public facts but cannot stand in for private contracts, ledgers, customer lists, bank statements or cap-table instruments.
-
-## 5. Conflict handling
-
-For every conflict:
-
-1. preserve both values and sources;
-2. test entity, period, tax, currency, gross/net, consolidated/standalone, contract/revenue/cash, and forecast/actual differences;
-3. determine which value is safe to use;
-4. quantify decision impact;
-5. add a diligence request or transaction condition when unresolved.
-
-Never average incompatible facts.
-
-## 6. Writing rules
-
-- Attach evidence IDs to factual blocks in `report.json`.
-- Label management targets and analyst forecasts explicitly.
-- Use “截至[date]” for current status.
-- Use `A`, `E`, and scenario labels consistently.
-- State sample size and interview role for validation claims.
-- Do not cite anonymous interviews as independent confirmation when identity and authority cannot be assessed.
-- Keep unresolved issues in the internal evidence ledger and, when reader action requires it, one concise final “尽调缺口/资料请求” appendix. In the main body, state their valuation, transaction-condition, risk-trigger or recommendation consequence rather than the document request itself.
+- 每个数字、日期、比例、名称、关系、人员身份、产品参数、合同状态和市场数据均可定位；
+- 表格合计、百分比、估值和股权计算可重算；
+- 正文没有样例项目残留和无法解释的训练知识；
+- 旧版报告继承的事实重新核验；
+- 报告截止日之后的信息未被倒灌为当时事实；
+- 引用不泄露工具标记、内部路径或提示词。
+- 正文、表格、脚注、尾注和附录均不含`SRC-*`、`CLAIM-*`或其他内部证据编号。

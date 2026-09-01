@@ -75,6 +75,10 @@ const retries = Math.max(0, Math.min(Number(
   process.argv.find((item) => item.startsWith('--retries='))?.slice('--retries='.length),
 ) || 2, 3))
 const model = process.argv.find((item) => item.startsWith('--model='))?.slice('--model='.length) || 'gpt-5.6-sol'
+const createdFrom = process.argv.find((item) => item.startsWith('--created-from='))?.slice('--created-from='.length).trim() || ''
+if (createdFrom && !/^\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}:\d{2})?$/.test(createdFrom)) {
+  throw new Error('--created-from must use YYYY-MM-DD or YYYY-MM-DD HH:mm:ss')
+}
 const runId = process.argv.find((item) => item.startsWith('--run-id='))?.slice('--run-id='.length)
   || `lead-profile-${new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14)}-${randomUUID().slice(0, 8)}`
 const leadsTable = quoteMysqlIdentifier(mysqlTableName('leads'))
@@ -448,7 +452,9 @@ const [rows] = await pool.query<LeadRow[]>(
    JOIN ${leadsTable} l ON l.id=r.imported_lead_id
    WHERE r.imported=1 AND r.imported_lead_id IS NOT NULL AND r.detail_json IS NOT NULL
      AND l.pool_status IN ('成功','公共池')
+     ${createdFrom ? 'AND l.created_at>=?' : ''}
    ORDER BY r.id`,
+  createdFrom ? [createdFrom] : [],
 )
 
 const candidates: Candidate[] = []
@@ -499,7 +505,7 @@ for (const row of rows) {
 }
 
 await writeFile(join(runDir, 'manifest.json'), JSON.stringify({
-  runId, model, apply, batchSize, concurrency, retries,
+  runId, model, apply, batchSize, concurrency, retries, createdFrom: createdFrom || null,
   databaseRows: rows.length,
   selected: candidates.length,
   leadIds: candidates.map((item) => item.row.lead_id),
@@ -553,6 +559,7 @@ const summary = {
   runId,
   runDir,
   model,
+  createdFrom: createdFrom || null,
   scanned: rows.length,
   selected: candidates.length,
   modelProcessed: modelResults.size,

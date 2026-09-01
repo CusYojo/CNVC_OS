@@ -1,4 +1,4 @@
 interface:
-  display_name: "生成合规性说明"
-  short_description: "资深投资经理生成可交付合规性说明"
-  default_prompt: "使用 $generate-investment-compliance-note，以投资中台资深投资经理身份，仅针对当前会话绑定项目，先逐份研读项目文件并统一主体、人员关系、交易安排和数字口径，再严格按 Skill 自带 Blueprint 与版式权威的章节、公文语气和版式生成一份可编辑 DOCX。来源与取证过程只保留在审计元数据中，正文不显示内部项目阶段或技术流程。"
+  display_name: "生成投资合规性说明"
+  short_description: "结合尽调资料与受控公开核验生成德塔式投资合规说明"
+  default_prompt: "Use $generate-investment-compliance-note to cross-check official public information, create a concise conclusion-first Deta-style compliance note, and verify the final DOCX."

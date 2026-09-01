@@ -1,0 +1,93 @@
+{
+  "version": 4,
+  "authority": "reference reports plus V21 user feedback: role-consistent paragraph spacing, adaptive business-model headers without duplicated commercial validation, factual related-party disclosure and exact 12pt table typography",
+  "palette": {
+    "key_label": "F2F2F2",
+    "matrix_header": "D9D9D9",
+    "financial_header": "D7D7D7",
+    "financial_body": "FFFFFF"
+  },
+  "defaults": {
+    "long_row_chars": 80,
+    "body_fill_values": [null, "auto", "FFFFFF"],
+    "forbid_exact_row_height": true,
+    "label_paragraph_spacing": {"line": 276, "line_rule": "auto", "before": 0, "after": 0},
+    "header_paragraph_spacing": {"line": 276, "line_rule": "auto", "before": 0, "after": 0},
+    "body_paragraph_spacing": {"line": 360, "line_rule": "auto", "before": 0, "after": 0}
+  },
+  "roles": {
+    "key_value_short": {
+      "header_rows": [],
+      "repeat_header_rows": [],
+      "label_columns": [0],
+      "label_fill": "F2F2F2",
+      "label_bold": true,
+      "label_alignment": "center",
+      "value_fill_values": [null, "auto", "FFFFFF"],
+      "value_bold": false,
+      "value_alignment": "center",
+      "row_split_policy": "keep_rows"
+    },
+    "key_value_narrative": {
+      "header_rows": [],
+      "repeat_header_rows": [],
+      "label_columns": [0],
+      "label_fill": "F2F2F2",
+      "label_bold": true,
+      "label_alignment": "center",
+      "value_fill_values": [null, "auto", "FFFFFF"],
+      "value_bold": false,
+      "value_alignment": "left",
+      "row_split_policy": "allow_long_rows"
+    },
+    "matrix": {
+      "header_rows": [0],
+      "header_fill": "D9D9D9",
+      "header_bold": true,
+      "header_alignment": "center",
+      "body_fill": null,
+      "body_fill_values": [null, "auto", "FFFFFF"],
+      "body_bold": false,
+      "body_alignment": "center",
+      "row_split_policy": "keep_short_rows"
+    },
+    "financial": {
+      "header_fill": "D7D7D7",
+      "header_bold": true,
+      "body_fill": "FFFFFF",
+      "body_fill_values": [null, "auto", "FFFFFF"],
+      "body_bold": false,
+      "body_alignment": "center",
+      "row_split_policy": "allow_rows"
+    }
+  },
+  "tables": [
+    {"number": 1, "role": "key_value_short"},
+    {"number": 2, "role": "key_value_short"},
+    {"number": 3, "role": "key_value_narrative"},
+    {"number": 4, "role": "key_value_narrative"},
+    {"number": 5, "role": "key_value_narrative"},
+    {"number": 6, "role": "key_value_short"},
+    {"number": 7, "role": "matrix", "repeat_header_rows": []},
+    {"number": 8, "role": "matrix", "repeat_header_rows": [0], "semantic_role": "current_shareholders"},
+    {"number": 9, "role": "matrix", "repeat_header_rows": []},
+    {"number": 10, "role": "matrix", "repeat_header_rows": [], "semantic_role": "organization_chart_container"},
+    {"number": 11, "role": "matrix", "repeat_header_rows": [], "body_alignment_by_column": ["center", "left"], "semantic_role": "related_party_facts_only"},
+    {"number": 12, "role": "matrix", "repeat_header_rows": [0], "row_split_policy": "allow_long_rows", "body_alignment_by_column": ["center", "left"], "semantic_role": "qualifications_honors_only"},
+    {"number": 13, "role": "matrix", "repeat_header_rows": [], "semantic_role": "core_products"},
+    {"number": 14, "role": "matrix", "repeat_header_rows": [], "semantic_role": "core_technologies"},
+    {"number": 15, "role": "matrix", "repeat_header_rows": [0], "row_split_policy": "allow_long_rows", "body_alignment_by_column": ["center", "left"]},
+    {"number": 16, "role": "matrix", "repeat_header_rows": [], "body_alignment_by_column": ["center", "center", "left"]},
+    {"number": 17, "role": "matrix", "repeat_header_rows": []},
+    {"number": 18, "role": "matrix", "repeat_header_rows": [], "semantic_role": "business_model_without_commercial_validation"},
+    {"number": 19, "role": "matrix", "repeat_header_rows": []},
+    {"number": 20, "role": "matrix", "repeat_header_rows": [0], "row_split_policy": "allow_long_rows", "body_alignment_by_column": ["center", "left", "left"]},
+    {"number": 21, "role": "matrix", "repeat_header_rows": []},
+    {"number": 22, "role": "financial", "header_rows": [0], "repeat_header_rows": [], "header_alignment": "center"},
+    {"number": 23, "role": "financial", "header_rows": [0], "repeat_header_rows": [0], "body_paragraph_spacing": {"line": 276, "line_rule": "auto", "before": 0, "after": 0}, "header_row_styles": [{"row": 0, "fill": "D7D7D7", "alignment": "center", "bold": true}], "section_row_labels": ["利润表", "资产负债表", "现金流量表"], "section_fill": "E7E6E6", "section_alignment": "center", "section_bold": true, "semantic_role": "grouped_historical_financials"},
+    {"number": 24, "role": "financial", "header_rows": [0], "repeat_header_rows": [0], "header_alignment": "center"},
+    {"number": 25, "role": "matrix", "repeat_header_rows": []},
+    {"number": 26, "role": "matrix", "repeat_header_rows": [], "body_alignment_by_column": ["center", "left"]},
+    {"number": 27, "role": "matrix", "repeat_header_rows": [0], "row_split_policy": "allow_long_rows", "body_alignment_by_column": ["center", "left", "left"]}
+  ]
+}

@@ -1,4 +1,4 @@
 interface:
-  display_name: "决策级投资提案"
-  short_description: "一次完成证据核验、回报测算、自适应表格与专业Word投资提案"
-  default_prompt: "使用 $draft-investment-proposal 读取当前项目全部资料，完成证据、计算、投资判断、自适应表格和逐页验收，只交付一份决策级DOCX。"
+  display_name: "案例型投资提案"
+  short_description: "按佳量脑科学版式生成可核验的股权投资提案DOCX和PDF"
+  default_prompt: "使用 $draft-investment-proposal 根据目标公司名称和现有资料，按佳量脑科学案例的A4页面、12pt正文、中文分级编号、页眉页码和灰色全框线表格生成简明正式投资提案，并交付同内容、同主文件名的DOCX和PDF。"

@@ -2,10 +2,35 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Investment compliance note content",
   "type": "object",
-  "required": ["title", "sections", "closing", "open_issues"],
+  "required": ["title", "target_company", "sections", "public_verification", "delivery_readiness", "closing", "open_issues"],
   "properties": {
     "title": {"type": "string", "minLength": 6},
     "as_of": {"type": "string"},
+    "target_company": {
+      "type": "object",
+      "required": ["legal_name"],
+      "properties": {
+        "legal_name": {"type": "string", "minLength": 4},
+        "source_ids": {"type": "array", "items": {"type": "string", "minLength": 1}}
+      },
+      "additionalProperties": false
+    },
+    "company_profile_financial_disclosure": {
+      "type": "object",
+      "required": ["allowed", "user_requested", "basis", "no_material_conflict", "source_ids"],
+      "properties": {
+        "allowed": {"const": true},
+        "user_requested": {"const": true},
+        "basis": {"enum": ["audited", "special_audit"]},
+        "no_material_conflict": {"const": true},
+        "source_ids": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"type": "string", "minLength": 1}
+        }
+      },
+      "additionalProperties": false
+    },
     "sections": {
       "type": "array",
       "minItems": 4,
@@ -23,11 +48,154 @@
                 "type": {"enum": ["subheading", "paragraph", "numbered", "conclusion"]},
                 "label": {"type": "string"},
                 "text": {"type": "string"},
+                "person_name": {"type": "string", "minLength": 1},
+                "role_title": {"type": "string", "minLength": 1},
                 "source_ids": {"type": "array", "items": {"type": "string"}},
                 "status": {"enum": ["verified", "management_stated", "calculated", "pending", "not_applicable"]},
                 "notes": {"type": "string"}
               }
             }
+          }
+        }
+      }
+    },
+    "public_verification": {
+      "type": "object",
+      "required": ["mode", "record", "as_of_date", "sha256", "validation_status", "coverage_status", "decision_impact"],
+      "properties": {
+        "mode": {"enum": ["online", "online_limited", "offline_user_requested"]},
+        "record": {"type": "string"},
+        "as_of_date": {"type": "string", "format": "date"},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "validation_status": {"const": "pass"},
+        "coverage_status": {"enum": ["complete", "limited", "offline"]},
+        "decision_impact": {"enum": ["no_material_public_conflict_found", "conditions_added", "not_verified"]},
+        "source_ids": {"type": "array", "items": {"type": "string"}},
+        "notes": {"type": "string"}
+      }
+    },
+    "delivery_readiness": {
+      "type": "object",
+      "required": [
+        "status",
+        "as_of_date",
+        "supplement_request",
+        "continuation_authorization",
+        "blocking_issues",
+        "fund_agreement",
+        "transaction_terms",
+        "return_investment",
+        "concentration",
+        "related_party"
+      ],
+      "properties": {
+        "status": {"enum": ["ready", "awaiting_user_input", "proceed_with_available_materials", "blocked"]},
+        "as_of_date": {"type": "string", "format": "date"},
+        "missing_decisive_inputs": {"type": "array", "items": {"type": "string"}},
+        "blocking_issues": {"type": "array", "items": {"type": "string"}},
+        "supplement_request": {
+          "type": "object",
+          "required": ["requested", "outcome", "requested_items"],
+          "properties": {
+            "requested": {"type": "boolean"},
+            "outcome": {"enum": ["not_needed", "provided", "awaiting_response", "not_provided", "declined"]},
+            "requested_items": {"type": "array", "items": {"type": "string"}}
+          }
+        },
+        "continuation_authorization": {
+          "type": "object",
+          "required": ["authorized", "basis"],
+          "properties": {
+            "authorized": {"type": "boolean"},
+            "basis": {"enum": ["not_required", "awaiting_response", "explicit_user_instruction"]},
+            "instruction": {"type": "string"}
+          },
+          "additionalProperties": false
+        },
+        "fund_agreement": {
+          "type": "object",
+          "required": ["status"],
+          "properties": {
+            "status": {"enum": ["verified", "pending", "not_applicable"]},
+            "source_ids": {"type": "array", "items": {"type": "string", "minLength": 1}},
+            "applicable_clauses": {
+              "type": "object",
+              "properties": {
+                "investment_scope": {},
+                "investment_restrictions": {},
+                "return_investment": {},
+                "concentration": {},
+                "configuration": {}
+              }
+            }
+          }
+        },
+        "transaction_terms": {
+          "type": "object",
+          "required": ["status"],
+          "properties": {
+            "status": {"enum": ["verified", "pending", "not_applicable"]},
+            "source_ids": {"type": "array", "items": {"type": "string", "minLength": 1}},
+            "terms": {
+              "type": "object",
+              "properties": {
+                "investment_amount": {},
+                "currency": {},
+                "transaction_form": {},
+                "pre_money_valuation": {},
+                "post_money_valuation": {},
+                "post_investment_ownership": {},
+                "fully_diluted_basis": {}
+              }
+            }
+          }
+        },
+        "return_investment": {
+          "type": "object",
+          "required": ["status"],
+          "properties": {
+            "status": {"enum": ["calculated", "pending", "not_applicable"]},
+            "source_ids": {"type": "array", "items": {"type": "string", "minLength": 1}},
+            "calculation": {
+              "type": "object",
+              "properties": {
+                "as_of_date": {},
+                "denominator": {},
+                "multiplier": {},
+                "completed_amount": {},
+                "proposed_eligible_credit": {},
+                "post_investment_headroom": {}
+              }
+            }
+          }
+        },
+        "concentration": {
+          "type": "object",
+          "required": ["status"],
+          "properties": {
+            "status": {"enum": ["calculated", "pending", "not_applicable"]},
+            "source_ids": {"type": "array", "items": {"type": "string", "minLength": 1}},
+            "calculation": {
+              "type": "object",
+              "properties": {
+                "as_of_date": {},
+                "denominator": {},
+                "limit_ratio": {},
+                "existing_aggregated_exposure": {},
+                "proposed_amount": {},
+                "post_investment_ratio": {},
+                "headroom": {}
+              }
+            }
+          }
+        },
+        "related_party": {
+          "type": "object",
+          "required": ["status"],
+          "properties": {
+            "status": {"enum": ["verified", "pending", "not_applicable"]},
+            "source_ids": {"type": "array", "items": {"type": "string", "minLength": 1}},
+            "perimeter": {"type": "array", "items": {"type": "string", "minLength": 1}}
           }
         }
       }

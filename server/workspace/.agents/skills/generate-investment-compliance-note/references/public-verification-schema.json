@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Public information cross-verification record",
+  "type": "object",
+  "required": ["schema_version", "project", "as_of_date", "scope", "entities", "checks", "limitations", "conflicts", "summary"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "project": {
+      "type": "object",
+      "required": ["name", "unified_social_credit_code"],
+      "properties": {
+        "name": {"type": "string", "minLength": 2},
+        "unified_social_credit_code": {"type": "string", "pattern": "^[0-9A-Z]{18}$"}
+      }
+    },
+    "as_of_date": {"type": "string", "format": "date"},
+    "scope": {
+      "type": "object",
+      "required": ["mode", "query_terms", "excluded_sensitive_topics", "sensitive_terms_excluded", "coverage_status"],
+      "properties": {
+        "mode": {"enum": ["online", "online_limited", "offline_user_requested"]},
+        "query_terms": {"type": "array", "items": {"type": "string"}},
+        "excluded_sensitive_topics": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+        "sensitive_terms_excluded": {"const": true},
+        "coverage_status": {"enum": ["complete", "limited", "offline"]}
+      }
+    },
+    "entities": {"type": "array", "minItems": 1, "items": {"type": "object"}},
+    "checks": {"type": "array", "items": {"type": "object"}},
+    "limitations": {"type": "array", "items": {"type": "string"}},
+    "conflicts": {"type": "array", "items": {"type": "object"}},
+    "summary": {
+      "type": "object",
+      "required": ["validation_status", "coverage_status", "unresolved_material_conflicts", "decision_impact"],
+      "properties": {
+        "validation_status": {"const": "pass"},
+        "coverage_status": {"enum": ["complete", "limited", "offline"]},
+        "unresolved_material_conflicts": {"type": "integer", "minimum": 0},
+        "decision_impact": {"enum": ["no_material_public_conflict_found", "conditions_added", "not_verified"]}
+      }
+    }
+  }
+}

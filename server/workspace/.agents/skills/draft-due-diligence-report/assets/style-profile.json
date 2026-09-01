@@ -1,0 +1,97 @@
+{
+  "version": 5,
+  "authority": "V21 investment-recommendation typography and paragraph-spacing contract",
+  "fallback_size_pt": 12.0,
+  "font_aliases": {
+    "heiti": ["黑体"],
+    "fangsong": ["仿宋_GB2312"],
+    "table_cjk": ["仿宋_GB2312"]
+  },
+  "render_font_aliases": {
+    "黑体": ["黑体", "Heiti SC Medium", "Hiragino Sans GB", "SimHei"],
+    "仿宋_GB2312": ["仿宋_GB2312", "FangSong_GB2312", "仿宋", "FangSong"]
+  },
+  "roles": {
+    "cover_company": {
+      "font_group": "heiti",
+      "size_pt": 22.0,
+      "bold": true,
+      "alignment": "center"
+    },
+    "cover_report_title": {
+      "font_group": "heiti",
+      "size_pt": 22.0,
+      "bold": true,
+      "alignment": "center"
+    },
+    "cover_team": {
+      "font_group": "fangsong",
+      "size_pt": 14.0,
+      "bold": false,
+      "alignment": "center"
+    },
+    "cover_date": {
+      "font_group": "fangsong",
+      "size_pt": 14.0,
+      "bold": false,
+      "alignment": "center"
+    },
+    "heading_1": {
+      "font_group": "heiti",
+      "size_pt": 15.0,
+      "bold": true
+    },
+    "heading_2": {
+      "font_group": "heiti",
+      "size_pt": 15.0,
+      "bold": true
+    },
+    "heading_3": {
+      "font_group": "heiti",
+      "size_pt": 12.0,
+      "bold": true
+    },
+    "body": {
+      "font_group": "fangsong",
+      "size_pt": 12.0,
+      "bold": false
+    },
+    "table_header": {
+      "font_group": "table_cjk",
+      "preferred_size_pt": 12.0,
+      "minimum_size_pt": 12.0,
+      "exact_size_pt": 12.0,
+      "bold": true
+    },
+    "table_body": {
+      "font_group": "table_cjk",
+      "preferred_size_pt": 12.0,
+      "minimum_size_pt": 12.0,
+      "exact_size_pt": 12.0
+    }
+  },
+  "paragraph_roles": {
+    "table_label": {"line_twips": 276, "line_rule": "auto", "before_twips": 0, "after_twips": 0},
+    "table_header": {"line_twips": 276, "line_rule": "auto", "before_twips": 0, "after_twips": 0},
+    "table_body": {"line_twips": 360, "line_rule": "auto", "before_twips": 0, "after_twips": 0},
+    "dense_financial_body": {"line_twips": 276, "line_rule": "auto", "before_twips": 0, "after_twips": 0}
+  },
+  "anti_patterns": {
+    "uniform_table_share_threshold": 0.8,
+    "uniform_table_size_pt_max": 8.5,
+    "forbid_blanket_font_size_pairs": [
+      {
+        "font": "宋体",
+        "size_pt": 8.5
+      },
+      {
+        "font": "SimSun",
+        "size_pt": 8.5
+      },
+      {
+        "font": "Songti SC",
+        "size_pt": 8.5
+      }
+    ]
+  }
+}
