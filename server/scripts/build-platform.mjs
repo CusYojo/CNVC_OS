@@ -81,6 +81,33 @@ async function collectFiles(directory) {
   return files.sort()
 }
 
+async function normalizeWebPermissions(directory) {
+  async function walk(current) {
+    await chmod(current, 0o755)
+    for (const entry of await readdir(current, { withFileTypes: true })) {
+      const absolute = path.join(current, entry.name)
+      assert(!entry.isSymbolicLink(), `build output contains a symbolic link: ${entry.name}`)
+      if (entry.isDirectory()) await walk(absolute)
+      else if (entry.isFile()) await chmod(absolute, 0o644)
+      else throw new Error(`[build-platform] unsupported build output entry: ${entry.name}`)
+    }
+  }
+  await walk(directory)
+}
+
+async function validateWebPermissions(directory, files) {
+  assert(((await stat(directory)).mode & 0o001) !== 0, 'candidate Web root is not public-searchable')
+  for (const file of files) {
+    const mode = (await stat(path.join(directory, file))).mode
+    assert((mode & 0o004) !== 0, `candidate Web file is not public-readable: ${file}`)
+    let parent = path.dirname(file)
+    while (parent !== '.') {
+      assert(((await stat(path.join(directory, parent))).mode & 0o001) !== 0, `candidate Web directory is not public-searchable: ${parent}`)
+      parent = path.dirname(parent)
+    }
+  }
+}
+
 async function pruneManagedDirectories(base, keepIds, maxEntries = 3) {
   if (!await exists(base)) return
   const managed = []
@@ -109,6 +136,7 @@ async function validateArtifacts(dist, serverDist, expected) {
   assert(serverFiles.includes('index.js'), 'candidate server build has no unified entry')
   assert(!distFiles.some((file) => /(^|\/)\.env(?:\.|$)/.test(file)), 'candidate Web build contains an environment file')
   assert(!serverFiles.some((file) => /(^|\/)\.env(?:\.|$)/.test(file)), 'candidate server build contains an environment file')
+  await validateWebPermissions(dist, distFiles)
   const hashes = {
     distIndexSha256: await sha256(indexFile),
     serverEntrySha256: await sha256(serverEntry),
@@ -195,6 +223,7 @@ async function buildCandidate() {
     await run(node, [tsc, '-b'])
     await run(node, [tsc, '-p', 'server/tsconfig.build.json', '--outDir', serverDist])
     await run(node, [vite, 'build', '--outDir', dist, '--emptyOutDir'])
+    await normalizeWebPermissions(dist)
     await run(node, ['--check', path.join(serverDist, 'index.js')])
     const evidence = await validateArtifacts(dist, serverDist)
     const manifest = {
@@ -234,6 +263,7 @@ async function activateCandidate({ optional = false } = {}) {
   const candidate = safeChild(candidatesRoot, pointer.releaseId)
   const manifest = await readJson(path.join(candidate, 'manifest.json'))
   assert(manifest.releaseId === pointer.releaseId && manifest.version === 1, 'candidate manifest does not match pointer')
+  await normalizeWebPermissions(path.join(candidate, 'dist'))
   await validateArtifacts(path.join(candidate, 'dist'), path.join(candidate, 'server-dist'), manifest)
   const currentDistExists = await exists(liveDist)
   const currentServerExists = await exists(liveServerDist)
@@ -282,6 +312,7 @@ async function rollbackBuild() {
   if (pointer.hadPrevious) {
     await rename(path.join(rollback, 'dist'), liveDist)
     await rename(path.join(rollback, 'server-dist'), liveServerDist)
+    await normalizeWebPermissions(liveDist)
     await validateArtifacts(liveDist, liveServerDist)
   }
   await rm(rollbackPointer, { force: true })

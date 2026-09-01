@@ -26,6 +26,8 @@ async function writeArtifacts(root: string, webVersion: string, serverVersion: s
   const serverEntry = `export const buildVersion = ${JSON.stringify(serverVersion)}\n`
   await writeFile(path.join(dist, 'index.html'), index)
   await writeFile(path.join(dist, 'assets/app.js'), `globalThis.__build=${JSON.stringify(webVersion)}\n`)
+  await writeFile(path.join(dist, 'company-logo.png'), 'test-logo\n', { mode: 0o600 })
+  await chmod(path.join(dist, 'company-logo.png'), 0o600)
   await writeFile(path.join(serverDist, 'index.js'), serverEntry)
   return { index, serverEntry }
 }
@@ -61,7 +63,7 @@ try {
     createdAt: '2026-08-11T12:00:00.000Z',
     distIndexSha256: digest(nextArtifacts.index),
     serverEntrySha256: digest(nextArtifacts.serverEntry),
-    distFileCount: 2,
+    distFileCount: 3,
     serverFileCount: 1,
     secretsIncluded: false,
   }
@@ -94,6 +96,7 @@ try {
   assert(activated.code === 0, `stopped activation failed: ${activated.output}`)
   assert((await readFile(path.join(temporaryRoot, 'dist/index.html'), 'utf8')) === nextArtifacts.index, 'activation did not publish Web candidate')
   assert((await readFile(path.join(temporaryRoot, 'server-dist/index.js'), 'utf8')) === nextArtifacts.serverEntry, 'activation did not publish server candidate')
+  assert(((await stat(path.join(temporaryRoot, 'dist/company-logo.png'))).mode & 0o004) !== 0, 'activation did not make Web static files public-readable')
   assert(!await exists(pointer), 'candidate pointer remained after activation')
   assert((await stat(path.join(temporaryRoot, '.runtime/build-rollback.json'))).mode % 0o1000 === 0o600, 'rollback pointer is not owner-only')
 
@@ -101,6 +104,7 @@ try {
   assert(rolledBack.code === 0, `rollback failed: ${rolledBack.output}`)
   assert((await readFile(path.join(temporaryRoot, 'dist/index.html'), 'utf8')) === oldArtifacts.index, 'rollback did not restore previous Web artifacts')
   assert((await readFile(path.join(temporaryRoot, 'server-dist/index.js'), 'utf8')) === oldArtifacts.serverEntry, 'rollback did not restore previous server artifacts')
+  assert(((await stat(path.join(temporaryRoot, 'dist/company-logo.png'))).mode & 0o004) !== 0, 'rollback did not make restored Web static files public-readable')
   assert(!await exists(path.join(temporaryRoot, '.runtime/build-rollback.json')), 'rollback pointer remained after restoration')
   assert(await exists(path.join(temporaryRoot, '.runtime/build-failed')), 'failed candidate was not preserved for diagnosis')
 
@@ -110,6 +114,7 @@ try {
       'active-listener-blocks-activation-with-live-artifacts-unchanged',
       'invalid-candidate-hash-blocks-activation-with-live-artifacts-unchanged',
       'stopped-activation-publishes-validated-web-and-server-pair',
+      'web-static-files-public-readable-after-activation-and-rollback',
       'rollback-pointer-owner-only',
       'rollback-restores-previous-web-and-server-pair',
       'failed-release-preserved-for-diagnosis',
