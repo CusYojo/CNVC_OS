@@ -7,6 +7,21 @@ export function splitLeadIndustryTags(value: unknown, fallback = '行业待核�
   return [...new Set(tags.length ? tags : [fallback])]
 }
 
+const PENDING_VERIFICATION_TEXT = /(?:待[^，。；\n]{0,12}核验|待核实|待确认)/
+
+/**
+ * Project-detail fields use a neutral dash for any value that still carries a
+ * pending-verification qualifier. The underlying value and evidence state stay
+ * unchanged; this helper is display-only.
+ */
+export function displayLeadDetailValue(value: unknown, fallback = '-') {
+  const candidate = typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean'
+    ? String(value).trim()
+    : ''
+  const displayed = candidate && !['null', 'undefined'].includes(candidate) ? candidate : fallback
+  return PENDING_VERIFICATION_TEXT.test(displayed) ? '-' : displayed
+}
+
 const INVALID_REGISTERED_ADDRESS = new Set([
   '', '高', '中', '低', '中国', '待核验', '待核实', '待确认', '未披露', '未公开', 'null', 'undefined',
 ])

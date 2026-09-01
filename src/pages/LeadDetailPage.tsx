@@ -8,6 +8,7 @@ import { Button, EmptyState, Modal } from '../components/ui'
 import { useToast } from '../components/Toast'
 import { apiDelete, apiGet } from '../lib/api'
 import {
+  displayLeadDetailValue,
   displayLeadFundingValue,
   displayLeadInvestorNames,
   displayLeadRegisteredAddress,
@@ -19,9 +20,8 @@ import { useAppStore } from '../store/useAppStore'
 import { useAuthStore } from '../store/useAuthStore'
 import type { Lead } from '../types'
 
-function text(value: unknown, fallback = '待核验') {
-  const result = typeof value === 'string' || typeof value === 'number' ? String(value).trim() : ''
-  return result && !['null', 'undefined'].includes(result) ? result : fallback
+function text(value: unknown, fallback = '-') {
+  return displayLeadDetailValue(value, fallback)
 }
 
 function multilineText(value: unknown, fallback: string) {
@@ -35,9 +35,9 @@ function isResearch(lead: Lead) {
 }
 
 function displayDate(value?: string) {
-  if (!value) return '待核验'
+  if (!value) return '-'
   const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
+  if (Number.isNaN(date.getTime())) return displayLeadDetailValue(value)
   return new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(date).replace(/\//g, '.')
 }
 
@@ -102,10 +102,10 @@ function isEvidenceBackedFact(fact: LeadEnrichmentFact) {
 }
 
 function displayFactValue(value: unknown) {
-  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return String(value)
-  if (Array.isArray(value)) return value.map((item) => displayFactValue(item)).filter(Boolean).join('、')
-  if (value && typeof value === 'object') return Object.entries(value as Record<string, unknown>)
-    .map(([key, item]) => `${key}：${displayFactValue(item)}`).join('；')
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return displayLeadDetailValue(value)
+  if (Array.isArray(value)) return displayLeadDetailValue(value.map((item) => displayFactValue(item)).filter(Boolean).join('、'), '未披露')
+  if (value && typeof value === 'object') return displayLeadDetailValue(Object.entries(value as Record<string, unknown>)
+    .map(([key, item]) => `${key}：${displayFactValue(item)}`).join('；'), '未披露')
   return '未披露'
 }
 
@@ -188,7 +188,7 @@ function verifiedTeamAsMembers(facts: LeadEnrichmentFact[]): DisplayTeamMember[]
     return [{
       name,
       title: explicitRole ? displayFactValue(explicitRole.value) : roleLabels[memberFact.factKey] || '团队成员',
-      background: backgrounds.length ? [...new Set(backgrounds)].join('；') : '公开来源仅确认成员身份，履历待进一步核验。',
+      background: backgrounds.length ? [...new Set(backgrounds)].join('；') : '-',
     }]
   }).filter((member, index, all) => all.findIndex((candidate) => candidate.name === member.name) === index)
 }
@@ -297,7 +297,7 @@ export function LeadDetailPage() {
   const industryValue = verifiedFactText(['profile.industry'], text(lead.industry))
   const industryTags = splitLeadIndustryTags(industryValue)
   const firstFunding = lead.fundingRounds?.[0]
-  const rawFundingStage = displayLeadFundingValue(lead.stageDisplay, firstFunding?.round, lead.round) || '融资轮次待核验'
+  const rawFundingStage = displayLeadFundingValue(lead.stageDisplay, firstFunding?.round, lead.round) || '-'
   const fundingStage = rawFundingStage === '未融资（来源标注）' ? '未融资' : rawFundingStage
   const isUnfinanced = fundingStage === '未融资'
   const fundingAmount = displayLeadFundingValue(
@@ -317,15 +317,15 @@ export function LeadDetailPage() {
   }
   const sourceLabeledNode = (key: keyof typeof sourceLabeledProfile, fallback: ReactNode): ReactNode => {
     const field = sourceLabeledField(key)
-    if (!field) return fallback
-    return field.value
+    if (!field) return typeof fallback === 'string' || typeof fallback === 'number' ? displayLeadDetailValue(fallback) : fallback
+    return displayLeadDetailValue(field.value)
   }
-  const verifiedFactNode = (factKeys: string[], fallback: ReactNode = '待核验'): ReactNode => {
+  const verifiedFactNode = (factKeys: string[], fallback: ReactNode = '-'): ReactNode => {
     const fact = verifiedFact(...factKeys)
-    if (!fact) return fallback
+    if (!fact) return typeof fallback === 'string' || typeof fallback === 'number' ? displayLeadDetailValue(fallback) : fallback
     return displayFactValue(fact.value)
   }
-  const registryFact = (value: unknown, field: string, fallback = '待核验'): ReactNode => {
+  const registryFact = (value: unknown, field: string, fallback = '-'): ReactNode => {
     const displayed = text(value, fallback)
     const evidence = registryEvidence.find((item) => item.field === field && Boolean(externalUrl(item.sourceUrl)))
     return evidence ? displayed : fallback
@@ -344,7 +344,7 @@ export function LeadDetailPage() {
   const companyFacts: Array<[string, ReactNode]> = [
     ['品牌名称', text(lead.name)],
     [legalCompanyName ? '公司全称' : '主体名称', verifiedFactNode(['registry.company_name'], registryFact(lead.companyName || lead.name, 'companyName'))],
-    ...(!legalCompanyName ? [['工商全称', '待核验'] as [string, ReactNode]] : []),
+    ...(!legalCompanyName ? [['工商全称', '-'] as [string, ReactNode]] : []),
     ['工商成立日期', verifiedFactNode(['registry.founded_at'], registryFact(registeredAt, 'foundedAt'))],
     ...(claimedFoundedAt && claimedFoundedAt !== registeredAt && claimedFoundedAtSource ? [['品牌/团队成立时间',
       claimedFoundedAt,
@@ -362,8 +362,8 @@ export function LeadDetailPage() {
     ), 'registeredAddress'))],
     ['所属行业', industryValue],
     ['所在地区', verifiedFactNode(['profile.headquarters'], registryFact(lead.region, 'registeredAddress'))],
-    [isUnfinanced ? '融资状态' : '融资轮次', verifiedFactNode(['financing.status', 'financing.round'], articleSourceUrl ? fundingStage : '待核验')],
-    ['业务阶段', verifiedFactNode(['profile.development_stage', 'profile.project_stage'], '待核验')],
+    [isUnfinanced ? '融资状态' : '融资轮次', verifiedFactNode(['financing.status', 'financing.round'], articleSourceUrl ? fundingStage : '-')],
+    ['业务阶段', verifiedFactNode(['profile.development_stage', 'profile.project_stage'], '-')],
     ...(!isUnfinanced && hasFundingAmount ? [[
       '融资金额',
       verifiedFact('financing.amount') ? verifiedFactNode(['financing.amount']) : fundingAmount,
@@ -380,8 +380,8 @@ export function LeadDetailPage() {
   const intellectualProperty = paperMeta?.rights?.intellectualProperty
   const metadataSourceUrl = externalUrl(paperMeta?.metadataSource?.url)
   const researchFacts: Array<[string, ReactNode]> = [
-    ['所属机构', paperAffiliations.length ? paperAffiliations.map((affiliation) => affiliation.name).join('、') : '机构待核验'],
-    ['研究团队', text(paperMeta?.researchTeam?.name || verifiedFactText(['profile.team_name']), '研究团队待核验')],
+    ['所属机构', paperAffiliations.length ? paperAffiliations.map((affiliation) => affiliation.name).join('、') : '-'],
+    ['研究团队', text(paperMeta?.researchTeam?.name || verifiedFactText(['profile.team_name']), '-')],
     ['作者—机构对应', paperAuthorAffiliations.length ? <span className="lead-review-rights-note">{paperAuthorAffiliations.map((item) => `${item.author}—${item.affiliation}`).join('；')}<small>仅展示来源明确确认的逐人对应关系</small></span> : <span className="lead-review-rights-note">未确认<small>不根据机构列表强行分配作者</small></span>],
     ['研究方向', industryValue],
     ['成果公开时间', displayDate(paperMeta?.publishedAt || lead.radarProfile?.publishedAt)],
@@ -391,9 +391,9 @@ export function LeadDetailPage() {
     ] as [string, ReactNode]] : []),
     ['成果形态', text(paperMeta?.resourceType || paperMeta?.venue || paperMeta?.categories?.join('、'), '论文/科研成果')],
     ['论文/成果许可', articleLicense?.label || '未披露'],
-    ['数据集许可', datasetRights ? '待核验' : '未披露'],
+    ['数据集许可', datasetRights ? '-' : '未披露'],
     ['知识产权归属', <span className="lead-review-rights-note" title={intellectualProperty?.note || '论文开放许可不等于知识产权归属'}>{intellectualProperty?.label || '未披露'}<small>论文许可不代表成果所有权</small></span>],
-    ['元数据来源', metadataSourceUrl ? text(paperMeta?.metadataSource?.provider, '原始论文页面') : '待核验'],
+    ['元数据来源', metadataSourceUrl ? text(paperMeta?.metadataSource?.provider, '原始论文页面') : '-'],
   ]
   const facts: Array<[string, ReactNode]> = research ? researchFacts : companyFacts
   const paperTeam = research ? paperAuthorsAsTeam(lead) : []
@@ -440,19 +440,19 @@ export function LeadDetailPage() {
     : research ? generatedProjectIntroduction : generatedCompanyIntroduction
   const productValue = verifiedFact('product.name', 'profile.product')
     ? verifiedFactText(['product.name', 'profile.product'])
-    : sourceLabeledNode('product', '产品信息待核验')
+    : sourceLabeledNode('product', '-')
   const productDescription = verifiedFact('product.performance', 'product.parameter', 'product.matrix')
     ? verifiedFactText(['product.performance', 'product.parameter', 'product.matrix'])
     : sourceLabeledNode('productDescription', '暂无经过来源验证的产品参数或性能数据。')
   const applicationValue = verifiedFact('profile.application_scenario', 'product.use_case')
     ? verifiedFactText(['profile.application_scenario', 'product.use_case'])
-    : sourceLabeledNode('applicationScenario', '应用场景待核验')
+    : sourceLabeledNode('applicationScenario', '-')
   const applicationDescription = verifiedFact('profile.customer_type', 'profile.user_problem')
     ? verifiedFactText(['profile.customer_type', 'profile.user_problem'])
     : sourceLabeledNode('applicationDescription', '暂无经过来源验证的客户类型或用户问题。')
   const mainBusinessValue = verifiedFact('profile.main_business')
     ? verifiedFactText(['profile.main_business'])
-    : sourceLabeledNode('mainBusiness', '主营业务待核验')
+    : sourceLabeledNode('mainBusiness', '-')
   const mainBusinessDescription = verifiedFact('profile.positioning', 'profile.solution')
     ? verifiedFactText(['profile.positioning', 'profile.solution'])
     : sourceLabeledNode('mainBusinessDescription', '暂无经过来源验证的业务定位或解决方案。')
@@ -492,10 +492,10 @@ export function LeadDetailPage() {
           <BusinessCard label="应用场景" value={applicationValue} description={applicationDescription} />
           <BusinessCard label="主营业务" value={mainBusinessValue} description={mainBusinessDescription} />
         </div></ReviewSection>
-        <ReviewSection title="团队成员" icon={<UsersRound />}><>{(verifiedTeamIntroduction || generatedTeamIntroduction || sourceLabeledField('teamIntroduction')) && <p className="lead-review-team-summary">{verifiedTeamIntroduction ? displayFactValue(verifiedTeamIntroduction.value) : generatedTeamIntroduction || sourceLabeledNode('teamIntroduction', '')}</p>}<div className="lead-review-team-list">{team.length ? team.map((member, index) => <article key={`${member.name}-${index}`}><span><UserRound /></span><div><h3>{member.profileUrl ? <a href={externalUrl(member.profileUrl) || undefined} target="_blank" rel="noreferrer">{text(member.name)}<ExternalLink /></a> : text(member.name)}<em>{text(member.title, '角色待核验')}</em></h3><p>{text(member.background, '团队背景待核验')}</p></div></article>) : <p className="lead-review-section-empty">暂无可验证的团队成员信息</p>}</div></></ReviewSection>
+        <ReviewSection title="团队成员" icon={<UsersRound />}><>{(verifiedTeamIntroduction || generatedTeamIntroduction || sourceLabeledField('teamIntroduction')) && <p className="lead-review-team-summary">{verifiedTeamIntroduction ? displayFactValue(verifiedTeamIntroduction.value) : generatedTeamIntroduction || sourceLabeledNode('teamIntroduction', '')}</p>}<div className="lead-review-team-list">{team.length ? team.map((member, index) => <article key={`${member.name}-${index}`}><span><UserRound /></span><div><h3>{member.profileUrl ? <a href={externalUrl(member.profileUrl) || undefined} target="_blank" rel="noreferrer">{text(member.name)}<ExternalLink /></a> : text(member.name)}<em>{text(member.title, '-')}</em></h3><p>{text(member.background, '-')}</p></div></article>) : <p className="lead-review-section-empty">暂无可验证的团队成员信息</p>}</div></></ReviewSection>
         <ReviewSection title="证据与动态" icon={<CalendarDays />}><div className="lead-review-evidence-grid">
-          <section className="lead-review-path-panel"><header><span>01</span><div><h3>动态路径</h3><p>仅展示已有来源的已验证进展</p></div></header><div className="lead-review-path">{updates.length ? updates.map((item) => <article key={`${item.occurredAt}-${item.title}`}><time>{displayDate(item.occurredAt)}</time>{item.sourceUrl ? <a href={externalUrl(item.sourceUrl) || undefined} target="_blank" rel="noreferrer"><strong>{item.title}</strong><ExternalLink /></a> : <strong>{item.title}</strong>}</article>) : <p className="lead-review-section-empty">暂无经过来源标注的动态</p>}</div></section>
-          <section className="lead-review-news-panel"><header><span>02</span><div><h3>相关来源</h3><p>展示可打开的原始来源与已验证事实来源</p></div></header><div className="lead-review-news-list">{relatedSources.slice(0, 10).map((source, index) => <a className="lead-review-news-item" href={externalUrl(source.url) || undefined} target="_blank" rel="noreferrer" key={`${source.url}-${index}`}><div><span>{source.publisher || '公开来源'}</span><time>{displayDate(source.publishedAt || source.accessedAt)}</time></div><strong>{source.title || '原始来源'}</strong><ExternalLink /></a>)}</div></section>
+          <section className="lead-review-path-panel"><header><span>01</span><div><h3>动态路径</h3><p>仅展示已有来源的已验证进展</p></div></header><div className="lead-review-path">{updates.length ? updates.map((item) => <article key={`${item.occurredAt}-${item.title}`}><time>{displayDate(item.occurredAt)}</time>{item.sourceUrl ? <a href={externalUrl(item.sourceUrl) || undefined} target="_blank" rel="noreferrer"><strong>{text(item.title)}</strong><ExternalLink /></a> : <strong>{text(item.title)}</strong>}</article>) : <p className="lead-review-section-empty">暂无经过来源标注的动态</p>}</div></section>
+          <section className="lead-review-news-panel"><header><span>02</span><div><h3>相关来源</h3><p>展示可打开的原始来源与已验证事实来源</p></div></header><div className="lead-review-news-list">{relatedSources.slice(0, 10).map((source, index) => <a className="lead-review-news-item" href={externalUrl(source.url) || undefined} target="_blank" rel="noreferrer" key={`${source.url}-${index}`}><div><span>{text(source.publisher, '公开来源')}</span><time>{displayDate(source.publishedAt || source.accessedAt)}</time></div><strong>{text(source.title, '原始来源')}</strong><ExternalLink /></a>)}</div></section>
         </div></ReviewSection>
       </main>
     </div>
@@ -529,5 +529,6 @@ function ReviewSection({ title, icon, children }: { title: string; icon: ReactNo
 }
 
 function BusinessCard({ label, value, description }: { label: string; value: ReactNode; description: ReactNode }) {
-  return <article><span>{label}</span><strong>{value}</strong><p>{description}</p></article>
+  const display = (node: ReactNode) => typeof node === 'string' || typeof node === 'number' ? displayLeadDetailValue(node) : node
+  return <article><span>{label}</span><strong>{display(value)}</strong><p>{display(description)}</p></article>
 }

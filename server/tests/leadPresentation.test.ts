@@ -1,12 +1,23 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  displayLeadDetailValue,
   displayLeadEvidenceStatus,
   displayLeadFundingValue,
   displayLeadInvestorNames,
   isLegalCompanyName,
   verifiedCompanyWebsite,
 } from '../../src/lib/leadPresentation.js'
+
+test('project detail replaces every pending-verification value with a dash', () => {
+  assert.equal(displayLeadDetailValue('待核验'), '-')
+  assert.equal(displayLeadDetailValue('融资轮次待核验'), '-')
+  assert.equal(displayLeadDetailValue('原文已标注，待交叉核验'), '-')
+  assert.equal(displayLeadDetailValue('注册地址待核实'), '-')
+  assert.equal(displayLeadDetailValue('主体待确认'), '-')
+  assert.equal(displayLeadDetailValue('A轮'), 'A轮')
+  assert.equal(displayLeadDetailValue(null), '-')
+})
 
 test('real funding facts are not hidden by unverified placeholders', () => {
   assert.equal(displayLeadFundingValue('融资金额待核验', '5 亿元', ''), '5 亿元')

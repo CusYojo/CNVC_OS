@@ -75,6 +75,8 @@ assert.match(summaryService, /dataQualityV1/, '列表接口必须返回 Codex �
 assert.match(page, /companyRegistry\?\.foundedAt/, '列表成立时间必须读取统一工商字段')
 assert.match(page, /companyRegistry\?\.legalRepresentative/, '列表法人必须读取统一工商字段')
 assert.match(detail, /displayLeadRegisteredAddress\(/, '注册地址必须通过专用展示校验')
+assert.match(detail, /displayLeadDetailValue/, '详情页必须通过统一规则隐藏待核验类占位')
+assert.doesNotMatch(detail, /待核验|待核实|待确认/, '详情页源码不得继续直接渲染待核验类文案')
 assert.match(industryPresentation, /INVALID_REGISTERED_ADDRESS/, '注册地址校验必须拒绝置信度与占位值')
 assert.match(industryPresentation, /split\(\/\[，,、；;｜\|\]\+\//, '行业拆分必须覆盖逗号、顿号、分号和竖线')
 assert.doesNotMatch(industryPresentation, /split\(\/[^\n]*\\\//, '标准行业名称中的斜杠不得误拆')
