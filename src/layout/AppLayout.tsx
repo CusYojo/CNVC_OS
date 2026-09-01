@@ -28,6 +28,7 @@ import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-do
 import { ProjectModal } from '../components/ProjectModal'
 import { Drawer, EmptyState, Modal, SearchInput } from '../components/ui'
 import { getSystemWorkspace, systemWorkspaces } from '../lib/systemWorkspaces'
+import { shanghaiToday, shiftDate } from '../../server/src/contracts/fdeWeeklyPlanContract'
 import './fde-shell.css'
 
 const primaryNav = [
@@ -92,7 +93,9 @@ export function AppLayout() {
   const projects = useAppStore((state) => state.projects)
   const files = useAppStore((state) => state.files)
   const todos = useAppStore((state) => state.todos)
-  const pendingTodos = todos.filter(item => !['已完成', '已关闭', '已取消', '已归档'].includes(item.status))
+  const today = shanghaiToday()
+  const threeDayEndKey = shiftDate(today, 2)
+  const pendingTodos = todos.filter(item => item.ownerUserId === currentUser.id && Boolean(item.dueDate) && item.dueDate! >= today && item.dueDate! <= threeDayEndKey && !['已完成', '已关闭', '已取消', '已归档'].includes(item.status)).sort((left, right) => `${left.dueDate}${left.dueTime ?? ''}`.localeCompare(`${right.dueDate}${right.dueTime ?? ''}`))
   const pageTitle = location.pathname.startsWith('/system') ? '系统管理'
     : location.pathname === '/committee' || location.pathname === '/meetings' ? '协同中心'
       : location.pathname === '/responsibility' ? '数据与知识'
@@ -179,8 +182,8 @@ export function AppLayout() {
         </div>
       </Modal>
       <Drawer open={showNotifications} onClose={() => setShowNotifications(false)} title="我的待办">
-        <div className="fde-search-results">{pendingTodos.map(todo => <button key={todo.id} onClick={() => openResult(todo.type === '流程' ? `/workflow?project=${todo.projectId}` : todo.projectId ? `/projects/${todo.projectId}?tab=tasks` : '/collaboration')}><ClipboardCheck /><span><strong>{todo.title}</strong><small>{todo.projectName} · {todo.dueDate || '未设置截止日期'}</small></span><span>→</span></button>)}</div>
-        {!pendingTodos.length && <EmptyState title="暂无待办" description="当前已加载的事项中没有未完成待办。" />}
+        <div className="fde-search-results">{pendingTodos.map(todo => <button key={todo.id} onClick={() => openResult(todo.type === '流程' ? `/workflow?view=project&project=${todo.projectId}` : todo.type === '通知' && todo.projectId ? `/projects/${todo.projectId}?tab=workflow` : todo.projectId ? `/projects/${todo.projectId}?tab=tasks` : '/collaboration')}><ClipboardCheck /><span><strong>{todo.title}</strong><small>{todo.projectName} · {todo.dueDate}</small></span><span>→</span></button>)}</div>
+        {!pendingTodos.length && <EmptyState title="近三天暂无待办" description="仅显示当前账号今天至后天需完成的事项。" />}
       </Drawer>
       <ProjectModal open={showCreate} onClose={() => setShowCreate(false)} />
     </div>

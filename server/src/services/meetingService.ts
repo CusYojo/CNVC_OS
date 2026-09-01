@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNull, ne, or, sql } from 'drizzle-orm'
+import { and, desc, eq, gte, inArray, isNull, lte, ne, notInArray, or, sql } from 'drizzle-orm'
 import { db } from '../db/client.js'
 import { meetingParticipants, meetings, todos, auditLogs, projects } from '../db/schema.js'
 import {
@@ -200,11 +200,16 @@ export async function updateMeeting(id: string, patch: Partial<typeof meetings.$
   return row
 }
 
-export async function listTodos(owner?: string, projectId?: string, actor?: ProjectAccessActor) {
+export async function listTodos(owner?: string, projectId?: string, actor?: ProjectAccessActor, personal?: { personalOwnerUserId: string; dateFrom?: string; dateTo?: string }) {
   const conds = []
   if (owner) conds.push(eq(todos.owner, owner))
   if (projectId) conds.push(eq(todos.projectId, projectId))
   if (actor) conds.push(todoAccessCondition(actor))
+  if (personal) {
+    conds.push(isNull(todos.projectId), eq(todos.ownerUserId, personal.personalOwnerUserId), isNull(todos.approvalRequestId), notInArray(todos.type, ['流程', '审批']), notInArray(todos.status, ['已完成', '已关闭', '已取消', '已归档']))
+    if (personal.dateFrom) conds.push(gte(todos.dueDate, personal.dateFrom))
+    if (personal.dateTo) conds.push(lte(todos.dueDate, personal.dateTo))
+  }
   const where = conds.length ? and(...conds) : undefined
   return db.select().from(todos).where(where as never).orderBy(desc(todos.createdAt)).limit(100)
 }

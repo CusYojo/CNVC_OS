@@ -71,7 +71,6 @@ export function FdeTimelineSyncPanel({ projectId, onChanged }: { projectId: stri
     <Modal open={Boolean(preview)} title="从时间线更新流程行动" onClose={() => { if (!busy && !uncertain) setPreview(null) }} footer={uncertain ? <Button loading={busy} onClick={() => { void resolve() }}>核对原请求结果</Button> : <><Button variant="secondary" disabled={busy} onClick={() => setPreview(null)}>取消</Button><Button loading={busy} disabled={!preview?.canSync || Boolean(preview?.issues.length) || Boolean(recoveryError)} onClick={() => { void submit() }}>确认同步</Button></>}>
       {preview && <div className="space-y-3">
         <p className="text-sm">{preview.stage} · 节点日期 {preview.date}</p>
-        <p className="text-xs text-slate-500">仅对账流程来源行动，不修改独立任务、已完成成果或独立获批延期。已发布周计划和周报保留原版本；草稿需重新对账。需领导参与的行动按有效职责生成领导时间申请，未经人工处理的申请随来源更新或撤回；已人工处理的排期只提示核对，不自动覆盖。时间申请不代表领导确认或审批通过。</p>
         {uncertain && <p role="alert" className="rounded-lg bg-amber-50 p-3 text-sm">提交结果待核对。请勿新建另一次操作；先核对原请求。</p>}
         {preview.issues.map(issue => <p key={issue} className="text-sm text-red-600">{issue}</p>)}
         {!preview.changes.length && <p className="text-sm text-slate-500">当前节点无独立流程行动。</p>}

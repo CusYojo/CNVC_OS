@@ -55,6 +55,15 @@ export const calendarDefinitionSchema = z.object({
 })
 export const calendarWriteSchema = z.object({ clientRequestId: z.string().uuid(), expectedVersion: z.number().int().positive().optional(), definition: calendarDefinitionSchema }).strict()
 export const calendarCancelSchema = z.object({ clientRequestId: z.string().uuid(), expectedVersion: z.number().int().positive(), reason: z.string().trim().min(2).max(2000) }).strict()
+export const taskCalendarScheduleSchema = z.object({
+  clientRequestId: z.string().uuid(), expectedVersion: z.number().int().min(0), sourceVersion: z.number().int().positive(),
+  startsAt: fridayLocalTime, endsAt: fridayLocalTime, hidden: z.boolean().default(false),
+  reason: z.string().trim().min(2).max(2000),
+}).strict().superRefine((value, ctx) => {
+  const duration = timeInstant(value.endsAt).getTime() - timeInstant(value.startsAt).getTime()
+  const startMinute = Number(value.startsAt.slice(14))
+  if (duration <= 0 || duration > 86400000 || duration % 900000 || startMinute % 15) ctx.addIssue({ code: 'custom', message: '任务排期按 15 分钟步长，结束须晚于开始且不超过 24 小时' })
+})
 
 export const autoScheduleSelection = z.object({ weekStart: fdeWeekStart, requests: z.array(z.object({ id: z.string().uuid(), expectedVersion: z.number().int().positive() }).strict()).min(1).max(100) }).strict()
   .refine(value => new Set(value.requests.map(row => row.id)).size === value.requests.length, '需求不能重复')

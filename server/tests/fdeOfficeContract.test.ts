@@ -20,8 +20,10 @@ test('OA date, typed fields, immutable command input and invoice totals', () => 
   assert.throws(() => officeDefinition.parse({ ...definition, targetStage: '投决' }))
   assert.throws(() => officeDefinition.parse({ ...definition, details: { kind: '出差', startDate: '2026-02-30' } }))
   assert.throws(() => officeAction.parse({ clientRequestId: randomUUID(), expectedVersion: 1, reason: '明确提交申请', action: 'submit', expectedRouteHash: 'invalid' }))
-  const bad = officeDefinition.parse({ ...definition, details: { kind: '报销', amount: '99', currency: 'CNY', items: [] } })
-  assert.ok(validateOfficeSubmission(bad, policy).includes('报销明细与总额不一致'))
+  const tolerated = officeDefinition.parse({ ...definition, details: { kind: '报销', amount: '0.5', currency: 'CNY', items: [] } })
+  assert.doesNotMatch(validateOfficeSubmission(tolerated, policy).join('；'), /偏差/)
+  const bad = officeDefinition.parse({ ...definition, details: { kind: '报销', amount: '2', currency: 'CNY', items: [] } })
+  assert.ok(validateOfficeSubmission(bad, policy).includes('报销明细与总额偏差超过 1 元'))
   const item = definition.details.kind === '报销' ? definition.details.items[0] : null
   assert.ok(item)
   const duplicate = officeDefinition.parse({ ...definition, details: { kind: '报销', amount: '200', currency: 'CNY', items: [{ ...item, invoiceNumber: 'same' }, { ...item, invoiceNumber: 'same' }] } })

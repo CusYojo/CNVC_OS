@@ -24,6 +24,8 @@ export function projectCountdown(value?: string | null, today = shanghaiToday())
   return days > 0 ? `距项目目标日 ${days} 天` : days < 0 ? `已超目标日 ${-days} 天` : '今天到达目标日'
 }
 
-export function materialIsSatisfied(binding: { waiverReason: string | null; fileId: string | null; fileVersion: number | null } | undefined, files: ProjectFile[]): boolean {
-  return Boolean(binding?.waiverReason?.trim() || (binding?.fileId && files.some(file => file.id === binding.fileId && file.version === binding.fileVersion)))
+export function materialIsSatisfied(bindings: Array<{ waiverReason: string | null; fileId: string | null; fileVersion: number | null }>, files: ProjectFile[]): boolean {
+  const waiver = bindings.some(binding => binding.waiverReason?.trim())
+  const fileBindings = bindings.filter(binding => binding.fileId)
+  return waiver || Boolean(fileBindings.length && fileBindings.every(binding => files.some(file => file.id === binding.fileId && file.version === binding.fileVersion)))
 }

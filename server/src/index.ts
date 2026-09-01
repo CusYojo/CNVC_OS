@@ -334,8 +334,6 @@ async function start() {
       .join(' ')}`)
     const jwRecovery = await recoverInterruptedJwAgentSessions()
     console.log(`[jw-runtime] startup recovery conversations=${jwRecovery.conversations} messages=${jwRecovery.messages} parts=${jwRecovery.parts}`)
-    const regionBackfill = await backfillLeadBusinessRegions()
-    console.log(`[lead-region] startup backfill scanned=${regionBackfill.scanned} updated=${regionBackfill.updated} unresolved=${regionBackfill.unresolved}`)
     await recoverAiTasks()
     const interruptedTemplateAnalyses = await recoverInterruptedAiTemplateAnalysisProgress()
     console.log(`[ai-template-analysis] startup recovery interrupted=${interruptedTemplateAnalyses}`)
@@ -343,8 +341,6 @@ async function start() {
     await startLeadEnrichmentWorker()
     await startProjectScoreJobWorker(executeProjectScoring)
     await startLeadBpWorker(scheduleLeadScoring)
-    const scoreRecovery = await recoverLeadScoringQueue()
-    console.log(`[lead-score] startup recovery found=${scoreRecovery.found} queued=${scoreRecovery.recovered} circuit-dead-letters=${scoreRecovery.circuitDeadLettersRecovered}/${scoreRecovery.circuitDeadLettersFound}`)
     const radarSeed = await ensureRadarMySqlSeeded()
     console.log(`[radar-mysql] seed skipped=${radarSeed.skipped} candidates=${radarSeed.currentCandidates}`)
     await startRuntimeJobScheduler()
@@ -354,6 +350,24 @@ async function start() {
     console.log(`[db] schema ready account-seed=${demoSeed.retired ? 'retired' : demoSeed.skipped ? 'disabled' : demoSeed.seeded}`)
     serviceReady = true
     console.log(`[app] listening on http://127.0.0.1:${port}`)
+    // Historical lead normalization is maintenance work, not a prerequisite
+    // for serving authenticated requests. Run it after readiness as well.
+    void backfillLeadBusinessRegions()
+      .then((regionBackfill) => {
+        console.log(`[lead-region] startup backfill scanned=${regionBackfill.scanned} updated=${regionBackfill.updated} unresolved=${regionBackfill.unresolved}`)
+      })
+      .catch((error) => {
+        console.error('[lead-region] startup backfill failed:', (error as Error).message)
+      })
+    // Queue reconciliation may inspect hundreds of historical leads. Keep it
+    // behind readiness so a restart never blocks login and the main workspace.
+    void recoverLeadScoringQueue()
+      .then((scoreRecovery) => {
+        console.log(`[lead-score] startup recovery found=${scoreRecovery.found} queued=${scoreRecovery.recovered} circuit-dead-letters=${scoreRecovery.circuitDeadLettersRecovered}/${scoreRecovery.circuitDeadLettersFound}`)
+      })
+      .catch((error) => {
+        console.error('[lead-score] startup recovery failed:', (error as Error).message)
+      })
   } catch (err) {
     console.error('[db] startup failed:', (err as Error).message)
     process.exit(1)

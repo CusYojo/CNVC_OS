@@ -117,7 +117,13 @@ try {
       assert.ok(reviewRecords.some(row => row.kind === '审批结论' && row.content.includes('申请状态：已通过')))
       assert.equal(new Set(reviewRecords.map(row => row.sourceKey)).size, reviewRecords.length)
       checks.push('FDE-COLLAB-010:plan-review-return-and-approval-records-retain-source-version-without-duplicate-decisions')
-      await expectCode(saveFdePlan({ projectId: project.id, userId: ownerId, cycleDays: 40, targetDate: '2027-02-28', expectedVersion: workflow.plan?.version }), 'FDE_PLAN_LOCKED')
+      const amendedActions = workflow.plan!.actions.map((action, index) => ({ actionKey: action.actionKey, title: index === 0 ? `${action.title}（修订）` : action.title, ownerUserId: action.ownerUserId, participantUserIds: index === 0 ? [...new Set([...action.participantUserIds, accounts[4].id])] : action.participantUserIds, dueDate: action.dueDate, deliverable: action.deliverable }))
+      const amended = await saveFdePlan({ projectId: project.id, userId: ownerId, cycleDays: workflow.plan!.cycleDays, targetDate: workflow.plan!.targetDate, actions: amendedActions, expectedVersion: workflow.plan!.version })
+      assert.equal(amended.plan?.status, 'locked')
+      assert.equal(amended.plan?.actions[0].title.endsWith('（修订）'), true)
+      assert.equal(amended.plan?.actions[0].participantUserIds.includes(accounts[4].id), true)
+      await expectCode(saveFdePlan({ projectId: project.id, userId: ownerId, cycleDays: 40, targetDate: '2027-02-28', expectedVersion: amended.plan?.version }), 'FDE_APPROVED_TIMELINE_EXISTS')
+      checks.push('approved-plan-actions-remain-amendable-and-participants-resynchronize')
     }
   }
   assert.equal(project.lifecycle, 'closed')
@@ -126,6 +132,6 @@ try {
   assert.equal(closedTodo.status, '已关闭')
   const bindings = await db.select().from(projectStageMaterials).where(eq(projectStageMaterials.projectId, project.id))
   assert.ok(bindings.every((binding) => Boolean(binding.waiverReason) || Boolean(binding.fileId)))
-  checks.push('eight-stage-success-chain', 'applicant-self-approval-denied', 'active-material-snapshot-frozen', 'approved-plan-locked', 'payment-closes-project-at-100-percent', 'stale-decision-version-rejected', 'direct-stage-bypass-rejected', 'mysql-null-evidence-constraint')
+  checks.push('eight-stage-success-chain', 'applicant-self-approval-denied', 'active-material-snapshot-frozen', 'approved-plan-baseline-locked', 'payment-closes-project-at-100-percent', 'stale-decision-version-rejected', 'direct-stage-bypass-rejected', 'mysql-null-evidence-constraint')
   console.log(JSON.stringify({ ok: true, checks }))
 } finally { await pool.end() }

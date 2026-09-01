@@ -118,7 +118,7 @@ function PolicyAccountPanel({ uid }: { uid: string }) {
   const confirmationReady = !blocked && acknowledged && reason.trim().length >= 5 && reason.trim().length <= 1000
   const recovery = <>{storageError && <div role="alert" className="rounded-lg bg-red-50 p-3 text-sm">{storageError}<Button variant="secondary" disabled={busy} onClick={readRecovery}>重新读取规则恢复标识</Button></div>}{notice && <p role="status" className="rounded-lg bg-slate-50 p-3 text-sm">{notice}</p>}{pending && <Card className="p-4"><p className="mb-3 text-sm">有一笔{actionNames[pending.action]}结果待核对。原编号跨重载保留，核对前禁止新写入。</p><Button disabled={busy || Boolean(storageError)} onClick={() => void recover()}>核对上一笔责任规则操作</Button></Card>}</>
   return <div className="fde-workspace space-y-4">
-    <Card className="fde-panel p-5"><div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-semibold">责任规则配置与独立批准</h2><p className="mt-2 text-sm text-slate-500">草稿 → 独立业务批准 → 发布（仍停用）→ 明确启用。编制人不能自批，不使用演示分值作为正式政策。</p></div><Button variant="secondary" disabled={busy} onClick={reload}>刷新规则与权限</Button></div></Card>
+    <Card className="fde-panel p-5"><div className="flex flex-wrap items-center justify-between gap-3"><h2 className="font-semibold">责任规则配置与独立批准</h2><Button variant="secondary" disabled={busy} onClick={reload}>刷新规则与权限</Button></div></Card>
     {!editor && recovery}
     {error && <p role="alert" className="rounded-lg bg-amber-50 p-3 text-sm">{error}</p>}
     {!data && !error && <p role="status">正在核对责任规则访问权限…</p>}
@@ -146,7 +146,6 @@ function PolicyAccountPanel({ uid }: { uid: string }) {
           <label className="block text-sm">申诉期间的汇总口径<select className="input mt-2 w-full" value={aggregation} onChange={e => setAggregation(e.target.value)}><option value="">请选择已确认口径</option><option value="exclude_pending">申诉中暂不计入</option><option value="retain_pending">申诉中保留原有效值</option></select></label>
           <div className="flex flex-wrap gap-5 text-sm"><label><input type="checkbox" checked={configuration.allowAdjustment} onChange={e => setConfiguration({ ...configuration, allowAdjustment: e.target.checked })} /> 允许复核调整分值</label><label><input type="checkbox" checked={configuration.allowExemption} onChange={e => setConfiguration({ ...configuration, allowExemption: e.target.checked })} /> 允许复核豁免</label></div>
         </fieldset>
-        <div className="rounded-lg border p-3 text-xs leading-6 text-slate-600">每条负向记录限本人申诉一次；完成奖励每任务互斥，反馈按本人/任务/业务日防重；缺独立复核人保持待分配。历史追加留痕，不自动重算。发布会将新版本保持停用；重新启用不追溯停用期间的事件。</div>
         {(editable || editor?.kind === 'toggle' || editor?.version?.capabilities.approve || editor?.version?.capabilities.publish) && <><label className="block text-sm">本次操作依据与原因（5—1000 字）<textarea aria-label="责任规则操作依据" className="input mt-2 min-h-24 w-full" minLength={5} maxLength={1000} value={reason} disabled={blocked} onChange={e => setReason(e.target.value)} /></label><label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={acknowledged} disabled={blocked} onChange={e => setAcknowledged(e.target.checked)} /><span>已核对本次规则、当前版本和影响范围；正式业务政策需有明确批准，不能把测试演练当作正式启用。</span></label></>}
       </div>
     </Modal></div>

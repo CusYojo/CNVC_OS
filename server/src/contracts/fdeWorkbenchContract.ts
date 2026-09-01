@@ -1,4 +1,4 @@
-import { shiftDate, taskInWeek } from './fdeWeeklyPlanContract.js'
+import { shiftDate } from './fdeWeeklyPlanContract.js'
 
 export type WorkbenchView = 'leader' | 'lead' | 'secretary' | 'member' | 'specialist' | 'coordinator' | 'admin' | 'unassigned'
 export type WorkbenchTone = 'info' | 'success' | 'warning' | 'danger' | 'purple' | 'neutral'
@@ -23,8 +23,11 @@ export function workbenchView(bindings: { category: string | null; primary?: boo
 }
 
 export const workbenchTaskOpen = (status: string) => !['已完成', '已关闭', '已取消', '已归档'].includes(status)
-export function workbenchActions<T extends WorkbenchAction>(rows: T[], week: string) {
-  return rows.filter(t => taskInWeek(t, week)).sort((a, b) => Number(!workbenchTaskOpen(a.status)) - Number(!workbenchTaskOpen(b.status)) || (a.dueDate ?? '').localeCompare(b.dueDate ?? '') || a.id.localeCompare(b.id))
+export function workbenchActions<T extends WorkbenchAction>(rows: T[], today: string) {
+  const lastDay = shiftDate(today, 2)
+  return rows
+    .filter(t => workbenchTaskOpen(t.status) && Boolean(t.dueDate) && t.dueDate! >= today && t.dueDate! <= lastDay)
+    .sort((a, b) => (a.dueDate ?? '').localeCompare(b.dueDate ?? '') || a.id.localeCompare(b.id))
 }
 export function workbenchProjectRank(rows: WorkbenchProject[]) {
   const health: Record<string, number> = { 已停滞: 0, 紧急抢救: 0, 存在风险: 1, 需关注: 2, 正常: 3 }

@@ -26,11 +26,11 @@ test('completed and closed rows are not personal pending work', () => {
   const rows = ['已完成', '已关闭', '已取消', '已归档'].map(status => action({ status }))
   assert.equal(workbenchActionCounts(rows, 'alice', '2026-08-28').count, 0)
 })
-test('weekly scope retains overdue unfinished but not historic completed rows', () => {
-  const rows = [action(), action({ id: 'overdue', dueDate: '2026-08-01' }), action({ id: 'done-old', dueDate: '2026-08-01', status: '已完成' }), action({ id: 'future', dueDate: '2026-08-31' }), action({ id: 'undated', dueDate: null })]
-  assert.deepEqual(workbenchActions(rows, '2026-08-24').map(t => t.id), ['overdue', 'task-1'])
+test('dashboard actions only include open work due today through the next two days', () => {
+  const rows = [action(), action({ id: 'overdue', dueDate: '2026-08-27' }), action({ id: 'done', status: '已完成' }), action({ id: 'day-two', dueDate: '2026-08-30' }), action({ id: 'future', dueDate: '2026-08-31' }), action({ id: 'undated', dueDate: null })]
+  assert.deepEqual(workbenchActions(rows, '2026-08-28').map(t => t.id), ['task-1', 'day-two'])
 })
-test('done this week remains in weekly completion denominator', () => assert.equal(workbenchActions([action({ status: '已完成' })], '2026-08-24').length, 1))
+test('completed work is not shown in the three-day dashboard window', () => assert.equal(workbenchActions([action({ status: '已完成' })], '2026-08-28').length, 0))
 test('upcoming count has inclusive today to two-days boundary', () => {
   const rows = ['2026-08-27', '2026-08-28', '2026-08-30', '2026-08-31'].map(dueDate => action({ dueDate }))
   assert.equal(workbenchActionCounts(rows, 'alice', '2026-08-28').dueSoon, 2)
@@ -69,9 +69,11 @@ test('configuration-only branch exits before business queries', () => {
   assert.match(source.slice(start, end), /system\.manage/); assert.match(source.slice(start, end), /return result/)
   assert.doesNotMatch(source.slice(start, end), /from\(projects\)|listLeaderTimes\(|listApprovalCenter\(/)
 })
-test('workbench has no store-page totals, mock statistics or direct task mutation', () => {
-  assert.doesNotMatch(page, /useAppStore|updateTodo|deleteTodo|score\s*-/)
-  assert.match(page, /本周关键动作/); assert.match(page, /领导参与/); assert.match(page, /metric\.value \?\? '—'/)
+test('workbench uses persistent personal todo APIs and has no store-page totals or mock statistics', () => {
+  assert.doesNotMatch(page, /useAppStore|score\s*-/)
+  assert.match(page, /apiPost<PersonalTodo>\('\/todos'/); assert.match(page, /apiPatch<PersonalTodo>/); assert.match(page, /apiDelete/)
+  assert.match(page, /最近三天任务/); assert.match(page, /工作待办/); assert.match(page, /项目状态/); assert.match(page, /metric\.value \?\? '—'/)
+  assert.match(source, /project\.classification === 'key'/)
 })
 test('reload clears data and gates late responses and changed identity', () => {
   assert.match(page, /setData\(null\)/); assert.match(page, /token === generation\.current/)
@@ -85,5 +87,5 @@ test('mobile matrix keeps the full-width tbody grid and accessible hidden-metric
   const css = readFileSync(new URL('../../src/pages/DashboardPage.css', import.meta.url), 'utf8')
   assert.match(css, /\.action-matrix tbody \{ display: grid; gap: 10px; padding: 10px; \}/)
   assert.match(css, /\.fde-page-content:has\(> \.fde-dashboard\)/)
-  assert.match(page, /统计口径与更多工作入口/)
+  assert.match(page, /更多工作入口/)
 })

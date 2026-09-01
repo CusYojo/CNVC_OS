@@ -3,7 +3,7 @@ import { z } from 'zod'
 import type { AuthedRequest } from '../middleware/requireAuth.js'
 import { shanghaiToday, weekStartFor } from '../contracts/fdeWeeklyPlanContract.js'
 import { actOnLeaderTime, createLeaderTime, listLeaderTimes, readLeaderTimeNotice, saveLeaderTime } from '../services/fdeLeaderTimeService.js'
-import { cancelCalendarEvent, listCalendar, writeCalendarEvent } from '../services/fdeCalendarService.js'
+import { cancelCalendarEvent, listCalendar, writeCalendarEvent, writeTaskCalendarSchedule } from '../services/fdeCalendarService.js'
 import { applyAutoSchedule, previewAutoSchedule } from '../services/fdeAutoScheduleService.js'
 import { milestoneQueryFlag } from '../contracts/fdeMilestoneSourcesContract.js'
 
@@ -22,3 +22,4 @@ calendarRouter.get('/', async (req: AuthedRequest, res, next) => { try { res.jso
 calendarRouter.post('/', async (req: AuthedRequest, res, next) => { try { res.status(201).json(await writeCalendarEvent(req.user!.uid, req.body)) } catch (error) { next(error) } })
 calendarRouter.post('/:id/save', async (req: AuthedRequest, res, next) => { try { res.json(await writeCalendarEvent(req.user!.uid, req.body, id(req.params.id))) } catch (error) { next(error) } })
 calendarRouter.post('/:id/cancel', async (req: AuthedRequest, res, next) => { try { res.json(await cancelCalendarEvent(id(req.params.id), req.user!.uid, req.body)) } catch (error) { next(error) } })
+calendarRouter.post('/tasks/:id/schedule', async (req: AuthedRequest, res, next) => { try { res.json(await writeTaskCalendarSchedule(id(req.params.id), req.user!.uid, req.body)) } catch (error) { next(error) } })

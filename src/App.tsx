@@ -56,8 +56,21 @@ export default function App() {
   const initialized = useAuthStore((state) => state.initialized)
   const restoreSession = useAuthStore((state) => state.restoreSession)
   const hydrate = useAppStore((state) => state.hydrateFromServer)
+  const refreshProjectDomain = useAppStore((state) => state.refreshProjectDomain)
   useEffect(() => { void restoreSession() }, [restoreSession])
   useEffect(() => { if (authenticated) { void hydrate() } }, [authenticated, hydrate])
+  useEffect(() => {
+    if (!authenticated) return
+    const refresh = () => { if (document.visibilityState === 'visible') void refreshProjectDomain() }
+    const timer = window.setInterval(refresh, 15_000)
+    window.addEventListener('focus', refresh)
+    document.addEventListener('visibilitychange', refresh)
+    return () => {
+      window.clearInterval(timer)
+      window.removeEventListener('focus', refresh)
+      document.removeEventListener('visibilitychange', refresh)
+    }
+  }, [authenticated, refreshProjectDomain])
   return (
     <Routes>
       <Route path="/login" element={initialized && authenticated ? <Navigate to="/" replace /> : <LoginPage />} />

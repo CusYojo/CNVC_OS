@@ -40,7 +40,7 @@ export function KnowledgePage({ initialTab = 'files', initialUpload = false, all
   }), [files, selectedProjectId, category, query, visibility])
 
   const handleDeleteFile = async (file: { id: string; name: string }) => {
-    if (!window.confirm(`确认删除资料「${file.name}」？\n将同时从知识库(RAG)移除其内容，此操作不可恢复。`)) return
+    if (!window.confirm(`确认删除资料「${file.name}」？\n相关索引也会一并删除，此操作不可恢复。`)) return
     try { await deleteFile(file.id); showToast(`已删除「${file.name}」`) }
     catch (e) { showToast(`删除失败：${(e as Error).message}`, 'error') }
   }
@@ -87,7 +87,7 @@ export function KnowledgePage({ initialTab = 'files', initialUpload = false, all
 
   return (
     <div>
-      <PageHeader title="项目知识库" description="以项目为一级目录管理 BP、尽调、会议与上会材料。" actions={canUpload ? <Button disabled={!uploadProjects.length} onClick={() => { setUploadProjectId(uploadProjects.some(project => project.id === selectedProjectId) ? selectedProjectId : uploadProjects[0]?.id ?? ''); setShowUpload(true) }}><UploadCloud className="h-4 w-4" />上传资料</Button> : undefined} />
+      <PageHeader title="项目知识库" actions={canUpload ? <Button disabled={!uploadProjects.length} onClick={() => { setUploadProjectId(uploadProjects.some(project => project.id === selectedProjectId) ? selectedProjectId : uploadProjects[0]?.id ?? ''); setShowUpload(true) }}><UploadCloud className="h-4 w-4" />上传资料</Button> : undefined} />
       <div className="grid grid-cols-[270px_minmax(0,1fr)] gap-5">
         <Card className="self-start overflow-hidden">
           <div className="border-b border-slate-100 px-4 py-4"><p className="text-xs font-semibold text-slate-700">项目目录</p><p className="mt-1 text-[10px] text-slate-400">资料必须归属项目或机构公共库</p></div>
@@ -108,19 +108,18 @@ export function KnowledgePage({ initialTab = 'files', initialUpload = false, all
           </div>
           {kbTab === 'files' && <><Card className="mb-4 p-4"><div className="flex items-center gap-3"><SearchInput className="w-[300px]" placeholder="搜索当前项目资料…" value={query} onChange={(event) => setQuery(event.target.value)} /><select className="input w-36" value={category} onChange={(event) => setCategory(event.target.value)}>{fileCategories.map((item) => <option key={item}>{item}</option>)}</select><select className="input w-36" value={visibility} onChange={(event) => setVisibility(event.target.value)}><option value="">全部权限</option><option>项目成员</option><option>管理层</option><option>全公司</option></select><div className="ml-auto flex rounded-lg border border-slate-200 p-0.5"><button aria-label="列表视图" onClick={() => setView('list')} className={`grid h-8 w-8 place-items-center rounded-md ${view === 'list' ? 'bg-slate-100 text-slate-700' : 'text-slate-400'}`}><List className="h-4 w-4" /></button><button aria-label="网格视图" onClick={() => setView('grid')} className={`grid h-8 w-8 place-items-center rounded-md ${view === 'grid' ? 'bg-slate-100 text-slate-700' : 'text-slate-400'}`}><Grid2X2 className="h-4 w-4" /></button></div></div></Card>
           <Card className="overflow-hidden">
-            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4"><div><h2 className="font-semibold text-slate-800">{selectedProjectId === 'all' ? '全部项目资料' : selectedProject?.name}</h2><p className="mt-1 text-xs text-slate-400">当前目录 {filtered.length} 份资料 · AI 引用保留项目、文件和片段定位</p></div><Badge>MySQL 文件索引</Badge></div>
+            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4"><div><h2 className="font-semibold text-slate-800">{selectedProjectId === 'all' ? '全部项目资料' : selectedProject?.name}</h2><p className="mt-1 text-xs text-slate-400">{filtered.length} 份资料</p></div><Badge>文件索引</Badge></div>
             {view === 'list' ? <DataTable headers={['资料名称', '所属项目', '分类', '上传人', '权限范围', '解析状态', '更新时间', '操作']}>{filtered.map((file) => <tr key={file.id} className="hover:bg-slate-50"><TableCell><span className="flex items-center gap-3"><span className="grid h-9 w-9 place-items-center rounded-lg bg-blue-50 text-[9px] font-semibold text-blue-600">{getFileTypeLabel(file)}</span><span><span className="block font-medium text-slate-700">{file.name}</span><span className="mt-1 block text-xs text-slate-400">{file.size} · V{file.version}</span></span></span></TableCell><TableCell>{projects.find((project) => project.id === file.projectId)?.name ?? '机构公共知识'}</TableCell><TableCell><Badge>{file.category}</Badge></TableCell><TableCell>{file.uploader}</TableCell><TableCell>{file.visibility}</TableCell><TableCell><StatusBadge status={file.parseStatus} /></TableCell><TableCell>{file.uploadedAt.slice(5)}</TableCell><TableCell><button onClick={() => handleDeleteFile(file)} className="rounded-md px-2 py-1 text-xs text-rose-600 hover:bg-rose-50">删除</button></TableCell></tr>)}</DataTable> : <div className="grid grid-cols-3 gap-4 p-5">{filtered.map((file) => <div key={file.id} className="rounded-xl border border-slate-200 p-4 hover:border-brand-200"><span className="grid h-10 w-10 place-items-center rounded-lg bg-blue-50 text-[10px] font-semibold text-blue-600">{getFileTypeLabel(file)}</span><p className="mt-4 truncate text-sm font-medium text-slate-700">{file.name}</p><p className="mt-1 text-xs text-slate-400">{projects.find((project) => project.id === file.projectId)?.name ?? '机构公共知识'} · {file.category}</p><div className="mt-3 flex items-center justify-between"><StatusBadge status={file.parseStatus} /><button onClick={() => handleDeleteFile(file)} className="text-[10px] text-rose-600 hover:underline">删除</button></div></div>)}</div>}
             {!filtered.length && <div className="p-12 text-center text-sm text-slate-400">当前项目目录暂无符合条件的资料</div>}
           </Card></>}
           {kbTab === 'input' && (allowedTools?.input ?? true) && <Card className="p-6">
             <h2 className="font-semibold text-slate-800">知识库输入</h2>
-            <p className="mt-1 mb-4 text-xs text-slate-400">上传资料汇入所选项目知识库(RAG)，供 AI 助手检索。</p>
             <label className="mb-4 block"><span className="label">归属项目</span><select className="input" value={uploadProjectId} onChange={(event) => setUploadProjectId(event.target.value)}>{uploadProjects.map((project) => <option key={project.id} value={project.id}>{project.name} · {project.owner}</option>)}</select></label>
             <FileUpload onFile={(file) => { void upload(file) }} />
-            <p className="mt-4 text-xs leading-5 text-slate-400">支持 PDF / Word / PPT / Excel / TXT / Markdown / 图片；原文件安全归档后由后台提取正文并写入项目知识库。{uploading ? ' 当前文件正在上传…' : ''}</p>
+            {uploading && <p className="mt-4 text-xs text-slate-400">正在上传…</p>}
           </Card>}
           {kbTab === 'meetings' && (allowedTools?.meetings ?? true) && <Card className="overflow-hidden">
-            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4"><div><h2 className="font-semibold text-slate-800">会议纪要</h2><p className="mt-1 text-xs text-slate-400">项目相关会议纪要，纪要内容自动汇入项目知识库</p></div><a href="/meetings" className="text-xs text-brand-600 hover:underline">前往会议纪要工作台 →</a></div>
+            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4"><h2 className="font-semibold text-slate-800">会议纪要</h2><a href="/meetings" className="text-xs text-brand-600 hover:underline">前往会议纪要工作台 →</a></div>
             <DataTable headers={['会议标题', '类型', '所属项目', '状态', '时间']}>{meetings.filter((m) => selectedProjectId === 'all' || m.projectId === selectedProjectId).map((m) => <tr key={m.id} className="hover:bg-slate-50"><TableCell><span className="font-medium text-slate-700">{m.title}</span></TableCell><TableCell><Badge>{m.type}</Badge></TableCell><TableCell>{projects.find((p) => p.id === m.projectId)?.name ?? '—'}</TableCell><TableCell><StatusBadge status={m.status} /></TableCell><TableCell>{(m.meetingTime ?? '').slice(5, 16)}</TableCell></tr>)}</DataTable>
             {!meetings.length && <div className="p-12 text-center text-sm text-slate-400">暂无会议纪要</div>}
           </Card>}
@@ -130,7 +129,7 @@ export function KnowledgePage({ initialTab = 'files', initialUpload = false, all
       <Modal open={showUpload && canUpload} title="上传知识资料" onClose={() => { if (!uploading) setShowUpload(false) }}>
         <label className="mb-4 block"><span className="label">归属项目</span><select className="input" value={uploadProjectId} onChange={(event) => setUploadProjectId(event.target.value)}>{uploadProjects.map((project) => <option key={project.id} value={project.id}>{project.name} · {project.owner}</option>)}</select></label>
         <FileUpload onFile={(file) => { void upload(file) }} />
-        <p className="mt-4 text-xs leading-5 text-slate-400">支持 PDF / Word / PPT / Excel / TXT / Markdown / 图片；原文件、SHA-256、版本和解析状态均由服务端持久化。机构公共知识库尚未建立稳定权限与文件归属契约，本页暂只允许上传到有权限的项目。{uploading ? ' 当前文件正在上传…' : ''}</p>
+        {uploading && <p className="mt-4 text-xs text-slate-400">正在上传…</p>}
       </Modal>
     </div>
   )

@@ -21,9 +21,9 @@ import { requireAccessibleProject } from '../services/projectAccessService.js'
 import { decodeAndValidateProjectFile } from '../security/projectFileValidation.js'
 import { enqueueProjectScoreJob, getProjectScoreJob } from '../services/projectScoreJobService.js'
 import { writeAudit } from '../services/auditService.js'
-import { bindFdeMaterial, getFdeWorkflow, saveFdePlan, updateFdePlanAction } from '../services/fdeWorkflowService.js'
+import { bindFdeMaterial, getFdeWorkflow, removeFdeMaterialBinding, saveFdePlan, updateFdePlanAction } from '../services/fdeWorkflowService.js'
 import { previewTimelineTasks, syncTimelineTasks } from '../services/fdeTimelineTaskService.js'
-import { decideFdeGovernance, getFdeGovernance, proposeFdeGovernance } from '../services/fdeGovernanceService.js'
+import { decideFdeGovernance, getFdeGovernance, getFdeProjectCreationRoster, proposeFdeGovernance } from '../services/fdeGovernanceService.js'
 import { FDE_PROJECT_DUTIES, type FdeProjectDuty } from '../contracts/fdeGovernanceContract.js'
 import { cancelFdeTask, createFdeTask, decideFdeTask, feedbackFdeTask, getFdeTasks, requestFdeTaskExtension, syncFdePlanTasks } from '../services/fdeTaskService.js'
 import { actOnFdeWeeklyPlan, createFdeWeeklyPlan, getFdeWeeklyPlans, readFdeWeeklyNotice, saveFdeWeeklyPlan } from '../services/fdeWeeklyPlanService.js'
@@ -234,11 +234,27 @@ const ProjectClassificationSchema = z.object({
   expectedVersion: z.number().int().positive(),
 }).strict()
 
+const ProjectQuickCreateSchema = ProjectCreateSchema.extend({
+  governance: z.object({
+    ownerUserId: z.string().uuid(),
+    assignments: z.array(z.object({
+      duty: z.enum(['boss', 'project_manager', 'legal', 'finance']),
+      userId: z.string().uuid(),
+    }).strict()).min(4).max(100),
+  }).strict(),
+}).strict()
+
 projectsRouter.get('/', async (req: AuthedRequest, res, next) => {
   try {
     const args = ListSchema.parse(req.query)
     const data = await listProjects(args, req.user!.uid)
     res.json(data)
+  } catch (err) { next(err) }
+})
+
+projectsRouter.get('/creation-roster', async (req: AuthedRequest, res, next) => {
+  try {
+    res.set('Cache-Control', 'private, no-store').json(await getFdeProjectCreationRoster(req.user!.uid))
   } catch (err) { next(err) }
 })
 
@@ -329,6 +345,13 @@ projectsRouter.put('/:id/fde-materials', async (req: AuthedRequest, res, next) =
   } catch (err) { next(err) }
 })
 
+projectsRouter.delete('/:id/fde-materials/:bindingId', async (req: AuthedRequest, res, next) => {
+  try {
+    const expectedVersion = z.coerce.number().int().positive().parse(req.query.expectedVersion)
+    res.json(await removeFdeMaterialBinding({ projectId: routeId(req.params.id), bindingId: z.string().uuid().parse(req.params.bindingId), userId: req.user!.uid, expectedVersion }))
+  } catch (err) { next(err) }
+})
+
 projectsRouter.put('/:id/fde-plan', async (req: AuthedRequest, res, next) => {
   try {
     const body = z.object({
@@ -338,8 +361,9 @@ projectsRouter.put('/:id/fde-plan', async (req: AuthedRequest, res, next) => {
       actions: z.array(z.object({
         actionKey: z.string().trim().min(1).max(64), title: z.string().trim().min(1).max(128),
         ownerUserId: z.string().uuid(), dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        participantUserIds: z.array(z.string().uuid()).min(1).max(100),
         deliverable: z.string().trim().min(1).max(255),
-      }).strict()).min(14).max(100).optional(),
+      }).strict()).min(4).max(100).optional(),
     }).strict().parse(req.body)
     res.json(await saveFdePlan({ ...body, projectId: routeId(req.params.id), userId: req.user!.uid }))
   } catch (err) { next(err) }
@@ -369,15 +393,12 @@ projectsRouter.patch('/:id/classification', async (req: AuthedRequest, res, next
 
 projectsRouter.post('/', async (req: AuthedRequest, res, next) => {
   try {
-    const body = ProjectCreateSchema.parse(req.body)
-    // Every new project starts with the authenticated creator as its sole
-    // stable owner. Later assignment must use the audited admin member route.
+    const { governance, ...body } = ProjectQuickCreateSchema.parse(req.body)
     const row = await createProject({
       ...body,
-      owner: req.user!.name,
       collaborators: [],
-    } as never, req.user!.uid)
-    res.status(201).json(row)
+    } as never, req.user!.uid, governance)
+    res.status(201).json({ ...row, isParticipant: true, participantRole: row.ownerUserId === req.user!.uid ? 'owner' : 'collaborator' })
   } catch (err) { next(err) }
 })
 

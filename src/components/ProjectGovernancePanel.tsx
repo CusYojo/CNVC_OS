@@ -69,7 +69,7 @@ export function ProjectGovernancePanel({ projectId, onChanged }: { projectId: st
   if (error) return <Card className="p-5 text-sm text-red-600">治理配置加载失败：{error}</Card>
   if (!data) return <Card className="p-5 text-sm text-slate-500">正在读取项目职责与参与规则…</Card>
   return <div className="fde-workspace"><Card className="fde-panel p-5">
-    <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-semibold">组织与项目职责 <Badge>治理 V{data.version}</Badge></h2><p className="mt-1 text-xs text-slate-500">机构角色决定可承担职责，项目分工决定实际数据范围；活动审批保留原审批人快照。</p></div>{data.capabilities.canManage && <Button variant="secondary" disabled={Boolean(pending)} onClick={openEditor}><UserCog className="h-4 w-4" />配置项目职责</Button>}</div>
+    <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="font-semibold">组织与项目职责 <Badge>治理 V{data.version}</Badge></h2>{data.capabilities.canManage && <Button variant="secondary" disabled={Boolean(pending)} onClick={openEditor}><UserCog className="h-4 w-4" />配置项目职责</Button>}</div>
     <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3"><div className="rounded-lg border border-slate-200 p-3"><p className="text-xs text-slate-500">项目负责人</p><p className="mt-2 text-sm font-semibold">{data.ownerUserId ? name(data.ownerUserId) : '未配置'}</p></div>{FDE_PROJECT_DUTIES.map((duty) => {
       const explicit = data.assignments.filter((item) => item.duty === duty.code)
       const effective = explicit.length ? explicit : data.effectiveLeadership.filter((item) => item.duty === duty.code)

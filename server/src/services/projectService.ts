@@ -1,10 +1,11 @@
-import { and, desc, eq, like, ne, or, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, like, ne, or, sql } from 'drizzle-orm'
 import { readdir, rm } from 'node:fs/promises'
 import path from 'node:path'
 import { db } from '../db/client.js'
 import {
   projects,
   projectClassificationHistory,
+  projectDutyAssignments,
   projectMembers,
   projectFiles,
   projectFileVersions,
@@ -36,6 +37,8 @@ import { businessVersionConflict } from './businessOptimisticLock.js'
 import { activeWorkflowPolicyVersion } from './fdeWorkflowPolicyService.js'
 import { initializeFdeFileGrants } from './fdeFileService.js'
 import { projectFileAccessCondition, requireProjectFileAccess, requireProjectFileUpload } from './projectFileAccessService.js'
+import { prepareFdeCreationGovernance } from './fdeGovernanceService.js'
+import type { FdeCreationAssignment } from './fdeGovernanceService.js'
 
 const STAGES = ['线索', '初筛', '立项', '尽调', '上会', '投决', '投后', '退出'] as const
 const ARTIFACT_ROOT = path.resolve(
@@ -151,7 +154,21 @@ export async function listProjects(args: ListArgs, userId?: string) {
   )
     .limit(args.pageSize).offset((args.page - 1) * args.pageSize)
   const totalRows = await db.select({ c: sql<number>`count(*)` }).from(projects).where(where as never)
-  return { list: rows.map(publicProject), total: totalRows[0]?.c ?? rows.length, page: args.page, pageSize: args.pageSize }
+  const memberships = userId && rows.length
+    ? await db.select({ projectId: projectMembers.projectId, memberRole: projectMembers.memberRole })
+      .from(projectMembers).where(and(eq(projectMembers.userId, userId), inArray(projectMembers.projectId, rows.map((row) => row.id))))
+    : []
+  const membershipByProject = new Map(memberships.map((membership) => [membership.projectId, membership.memberRole]))
+  return {
+    list: rows.map((row) => publicProject({
+      ...row,
+      isParticipant: membershipByProject.has(row.id),
+      participantRole: membershipByProject.get(row.id) ?? null,
+    })),
+    total: totalRows[0]?.c ?? rows.length,
+    page: args.page,
+    pageSize: args.pageSize,
+  }
 }
 
 export async function getProject(id: string) {
@@ -203,7 +220,11 @@ function publicProjectFile<T extends { storagePath: string | null }>(row: T) {
   return { ...file, hasOriginal: Boolean(storagePath) }
 }
 
-export async function createProject(input: Partial<typeof projects.$inferInsert>, userId: string) {
+export async function createProject(
+  input: Partial<typeof projects.$inferInsert>,
+  userId: string,
+  governance?: { ownerUserId: string; assignments: FdeCreationAssignment[] },
+) {
   // 正式新建入口以稳定登录身份建立项目、成员、分类历史与审计，全部原子提交。
   // legacy 仅供历史迁移/身份恢复的内部调用；HTTP schema 不接受 workflowModel。
   if (input.workflowModel !== 'legacy') {
@@ -212,14 +233,40 @@ export async function createProject(input: Partial<typeof projects.$inferInsert>
       const identity = createMySqlIdentityRepositoryContext(tx)
       const actor = await identity.users.findById(userId)
       if (!actor || actor.status !== '启用') throw projectClassificationError(403, 'USER_DISABLED_OR_MISSING', '当前用户不可创建项目')
+      const prepared = governance ? await prepareFdeCreationGovernance(tx, governance) : null
+      const owner = prepared?.owner ?? { id: actor.id, name: actor.name }
+      const participantIds = prepared
+        ? [...new Set([actor.id, owner.id, ...prepared.assignments.filter((assignment) => assignment.duty !== 'coordinator').map((assignment) => assignment.userId)])]
+        : [actor.id]
+      const peopleById = new Map<string, { name: string }>((prepared?.people ?? []).map((person) => [person.id, { name: person.name }]))
+      peopleById.set(actor.id, { name: actor.name })
       const workflowPolicyVersionId = await activeWorkflowPolicyVersion(tx)
       const [inserted] = await tx.insert(projects).values({
-        ...input, owner: actor.name, ownerUserId: actor.id, collaborators: [],
+        ...input, owner: owner.name, ownerUserId: owner.id,
+        collaborators: participantIds.filter((id) => id !== owner.id).map((id) => peopleById.get(id)?.name).filter((name): name is string => Boolean(name)),
         workflowPolicyVersionId,
-        stage: '入库', stageSource: '系统初始化', classification: 'pool', lifecycle: 'active', workflowModel: 'fde-v1', progress: 0, createdBy: actor.id,
+        stage: prepared ? '立项' : '入库', stageSource: prepared ? '入库完成' : '系统初始化',
+        classification: prepared ? 'normal' : 'pool', lifecycle: 'active', workflowModel: 'fde-v1', progress: prepared ? 10 : 0, createdBy: actor.id,
       } as typeof projects.$inferInsert).$returningId()
-      await tx.insert(projectMembers).values({ projectId: inserted.id, userId: actor.id, memberRole: 'owner', sourceName: actor.name })
-      await tx.insert(projectClassificationHistory).values({ projectId: inserted.id, fromClassification: null, toClassification: 'pool', reason: '授权用户登记项目', changedBy: actor.id, changedByName: actor.name })
+      await tx.insert(projectMembers).values(participantIds.map((participantId) => ({
+        projectId: inserted.id,
+        userId: participantId,
+        memberRole: participantId === owner.id ? 'owner' : 'collaborator',
+        sourceName: peopleById.get(participantId)?.name ?? actor.name,
+      })))
+      if (prepared?.assignments.length) await tx.insert(projectDutyAssignments).values(prepared.assignments.map((assignment) => ({
+        ...assignment,
+        projectId: inserted.id,
+        assignedBy: actor.id,
+      })))
+      await tx.insert(projectClassificationHistory).values({
+        projectId: inserted.id,
+        fromClassification: null,
+        toClassification: prepared ? 'normal' : 'pool',
+        reason: prepared ? '快速新建并完成组织配置' : '授权用户登记项目',
+        changedBy: actor.id,
+        changedByName: actor.name,
+      })
       await identity.audits.append({ userId: actor.id, userName: actor.name, module: '项目管理', action: '创建项目', target: String(input.name ?? '') })
       const [row] = await tx.select().from(projects).where(eq(projects.id, inserted.id)).limit(1)
       return row
@@ -309,8 +356,9 @@ export async function classifyProject(input: {
         throw projectClassificationError(409, 'PROJECT_INTAKE_STAGE_INVALID', '只有入库阶段的项目可以完成入库')
       }
     } else {
-      if (!canClassify) {
-        throw projectClassificationError(403, 'PROJECT_CLASSIFICATION_FORBIDDEN', '仅授权领导可调整普通项目与重点项目分类')
+      const projectLeadPromotion = currentClassification === 'normal' && input.toClassification === 'key' && isProjectLead
+      if (!canClassify && !projectLeadPromotion) {
+        throw projectClassificationError(403, 'PROJECT_CLASSIFICATION_FORBIDDEN', '项目负责人可将普通项目转为重点项目；调回普通项目需授权领导操作')
       }
       const validLeadershipTransition = (currentClassification === 'normal' && input.toClassification === 'key')
         || (currentClassification === 'key' && input.toClassification === 'normal')

@@ -26,6 +26,8 @@ export interface Project {
   lifecycle?: ProjectLifecycle
   workflowModel?: 'legacy' | 'fde-v1'
   ownerUserId?: string
+  isParticipant?: boolean
+  participantRole?: 'owner' | 'collaborator' | string | null
   investmentFund?: string
   projectType?: string
   healthStatus?: string
@@ -95,7 +97,7 @@ export interface Todo {
   dueDate: string
   priority: '高' | '中' | '低'
   status: TaskStatus
-  type: '流程' | '会议' | '材料' | '风险' | '投后'
+  type: '待办' | '流程' | '审批' | '通知' | '会议' | '材料' | '风险' | '投后'
   meetingId?: string | null
 }
 

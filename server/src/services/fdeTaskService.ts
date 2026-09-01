@@ -106,7 +106,13 @@ export async function createFdeTask(projectId: string, userId: string, raw: unkn
   return getFdeTasks(projectId, userId)
 }
 
-// 已批准计划只负责定义；执行事实在 todos。按 planActionId 唯一生成，重复调用不重置任务。
+export function participantTaskId(actionId: string, userId: string) {
+  const hex = createHash('sha256').update(`fde-plan-participant:${actionId}:${userId}`).digest('hex').slice(0, 32)
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-5${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20, 32)}`
+}
+
+// 已批准计划只负责定义；执行事实在 todos。主负责人任务绑定 planActionId，其他参与人获得稳定身份的协同待办。
+// 重复调用只补齐缺失任务，不重置任何人的执行状态；待办会由日历服务自动投影到个人日程。
 export async function materializeFdePlanTasks(tx: Tx, projectId: string, planId: string) {
   const [project] = await tx.select().from(projects).where(eq(projects.id, projectId))
   const [plan] = await tx.select().from(projectPlans).where(and(eq(projectPlans.id, planId), eq(projectPlans.projectId, projectId), eq(projectPlans.status, 'locked')))
@@ -114,10 +120,23 @@ export async function materializeFdePlanTasks(tx: Tx, projectId: string, planId:
   if (project.projectType !== '投资项目' || plan.executionKind !== 'investment') return fail('TYPE_RUNTIME_TASK_ADAPTER_REQUIRED', '非投资计划由独立执行事务生成任务，不能使用投资补齐入口丢失时刻或来源')
   const actions = await tx.select().from(projectPlanActions).where(eq(projectPlanActions.planId, planId)).orderBy(asc(projectPlanActions.sortOrder))
   for (const action of actions) {
-    const [existing] = await tx.select({ id: todos.id }).from(todos).where(eq(todos.planActionId, action.id))
-    if (existing) continue
-    const owner = await ownerForTask(tx, project, action.ownerUserId)
-    await tx.insert(todos).values({ projectId, projectName: project.name, title: action.title, owner: owner.name, ownerUserId: owner.id, dueDate: action.dueDate, deliverable: action.deliverable, planActionId: action.id, executionModel: 'fde-v1', type: '待办', status: action.status, progress: action.status === '已完成' ? 100 : 0, closureReason: action.status === '已完成' ? '迁移前已完成记录；无新增成果验收证明' : null, createdBy: plan.createdBy })
+    const participantIds = [...new Set(action.participantUserIds.length ? action.participantUserIds : [action.ownerUserId])]
+    for (const participantId of participantIds) {
+      const lead = participantId === action.ownerUserId
+      const generatedId = lead ? null : participantTaskId(action.id, participantId)
+      const [existing] = lead
+        ? await tx.select({ id: todos.id }).from(todos).where(eq(todos.planActionId, action.id))
+        : await tx.select({ id: todos.id }).from(todos).where(eq(todos.id, generatedId!))
+      if (existing) continue
+      const owner = await ownerForTask(tx, project, participantId)
+      await tx.insert(todos).values({
+        ...(generatedId ? { id: generatedId, creationFingerprint: createHash('sha256').update(`plan-participant:${action.id}:${participantId}`).digest('hex') } : {}),
+        projectId, projectName: project.name, title: lead ? action.title : `协同：${action.title}`, owner: owner.name, ownerUserId: owner.id,
+        dueDate: action.dueDate, deliverable: lead ? action.deliverable : `${action.deliverable}（协同参与，主负责人统筹验收）`,
+        planActionId: lead ? action.id : null, executionModel: 'fde-v1', type: '待办', status: action.status,
+        progress: action.status === '已完成' ? 100 : 0, closureReason: action.status === '已完成' ? '迁移前已完成记录；无新增成果验收证明' : null, createdBy: plan.createdBy,
+      })
+    }
   }
 }
 
@@ -324,7 +343,7 @@ export async function closeTaskExtensions(tx: Tx, taskIds: string[], actorId: st
 export async function getFdeTasks(projectId: string, userId: string) {
   const project = await requireAccessibleProject(userId, projectId)
   if (project.workflowModel !== 'fde-v1') return fail('FDE_LEGACY_PROJECT', '当前不是 FDE 项目')
-  const tasks = await db.select().from(todos).where(and(eq(todos.projectId, projectId), directiveTaskAccessCondition(userId))).orderBy(desc(todos.createdAt), asc(todos.id))
+  const tasks = await db.select().from(todos).where(and(eq(todos.projectId, projectId), ne(todos.type, '通知'), directiveTaskAccessCondition(userId))).orderBy(desc(todos.createdAt), asc(todos.id))
   const directives = await db.select({ id: projectDirectives.id, taskId: projectDirectives.taskId }).from(projectDirectives).where(eq(projectDirectives.projectId, projectId))
   const timelineLinks = await db.select().from(projectTimelineTasks).where(eq(projectTimelineTasks.projectId, projectId))
   const [secretary] = await db.select({ id: projectDutyAssignments.id }).from(projectDutyAssignments).where(and(eq(projectDutyAssignments.projectId, projectId), eq(projectDutyAssignments.duty, 'secretary'), eq(projectDutyAssignments.userId, userId)))

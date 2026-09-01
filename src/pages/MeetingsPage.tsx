@@ -129,7 +129,7 @@ export function MeetingsPage() {
 
   return (
     <div>
-      <PageHeader title="会议纪要" description="粘贴真实会议文本，由 AI 提取摘要、结论和责任到人的待办。录音转写在建立正式文件处理契约前不开放。" actions={<Button onClick={() => setShowNew(true)}><Plus className="h-4 w-4" />新建会议</Button>} />
+      <PageHeader title="会议纪要" actions={<Button onClick={() => setShowNew(true)}><Plus className="h-4 w-4" />新建会议</Button>} />
       <div className="grid h-[calc(100vh-170px)] min-h-[650px] grid-cols-[390px_1fr] gap-5">
         <Card className="flex min-h-0 flex-col overflow-hidden">
           <div className="border-b border-slate-100 p-4"><div className="flex gap-2"><SearchInput className="flex-1" placeholder="搜索会议…" value={query} onChange={(event) => setQuery(event.target.value)} /><select className="input w-28" value={status} onChange={(event) => setStatus(event.target.value)}><option value="">全部状态</option><option>成功</option><option>生成中</option><option>失败</option></select></div></div>
@@ -169,7 +169,6 @@ export function MeetingsPage() {
           <label><span className="label">参与人</span><input className="input" value={form.participants} onChange={(event) => setForm({ ...form, participants: event.target.value })} /></label>
         </div>
         <div className="pt-4"><label><span className="label">会议原文</span><textarea className="textarea min-h-40" value={form.rawText} onChange={(event) => setForm({ ...form, rawText: event.target.value })} placeholder="粘贴真实速记、转写原文或会议记录…" /></label></div>
-        <p className="mt-4 rounded-lg bg-slate-50 p-3 text-xs leading-5 text-slate-500">AI 会生成一句话摘要、详细纪要、关键结论、分歧、风险点及待办。待办将自动同步到首页工作台。</p>
       </Modal>
       <Modal open={Boolean(taskReview)} onClose={() => { if (!generating) setTaskReview(null) }} title="确认会议任务负责人" width="max-w-3xl" footer={<><Button variant="secondary" disabled={generating} onClick={() => { setTaskReview(null); setShowNew(true) }}>返回编辑</Button><Button loading={generating} disabled={!taskReview?.todos.every((todo) => Boolean(todo.ownerUserId && todo.dueDate))} onClick={async () => {
         if (!taskReview) return

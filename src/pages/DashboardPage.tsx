@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
-import { api } from '../lib/api'
+import { Check, Eye, Pencil, Plus, Trash2, X } from 'lucide-react'
+import { api, apiDelete, apiGet, apiPatch, apiPost } from '../lib/api'
 import { useAuthStore } from '../store/useAuthStore'
 import { formatShanghaiDate } from '../lib/dateTime'
-import { workbenchTargetLabel, workbenchTone, type WorkbenchAttention, type WorkbenchData, type WorkbenchTone } from '../../server/src/contracts/fdeWorkbenchContract'
+import { workbenchTone, type WorkbenchAttention, type WorkbenchData, type WorkbenchTone } from '../../server/src/contracts/fdeWorkbenchContract'
+import { FdeCalendarPanel } from '../components/FdeCalendarPanel'
 import './DashboardPage.css'
+import './CollaborationPage.css'
 
 function Badge({ children, tone = 'neutral' }: { children: ReactNode; tone?: WorkbenchTone }) {
   return <span className={`badge ${tone}`}>{children}</span>
@@ -21,15 +24,156 @@ function FocusList({ rows, showStatus = true }: { rows: WorkbenchAttention[]; sh
 function ActionList({ data }: { data: WorkbenchData }) {
   return <div className="action-list">{data.actions.length ? data.actions.map(action => <div className="action-row" key={action.id}><span className={`action-state ${workbenchTone(action.status)}`} /><div className="action-main"><div className="action-title-row"><strong>{action.title}</strong></div><small>{action.projectName} · {action.dueDate ?? '未配置截止日'}</small></div><Badge tone={workbenchTone(action.status)}>{action.status}</Badge><Link className="button small" to={action.to}>查看行动</Link></div>) : <Empty title="当前没有待处理行动" note="新的项目任务会自动出现在这里" />}</div>
 }
-function ProjectMatrix({ data }: { data: WorkbenchData }) {
-  if (!data.projects.length) return <Empty title="暂无授权重点项目" note="项目明确标记为重点后在此展示，不按 AI 分数代替重点分类" />
-  return <div className="table-scroll"><table className="action-matrix"><thead><tr>{['重点项目', '本周关键动作', '推进状态', '领导参与', '项目目标日'].map(text => <th key={text} scope="col">{text}</th>)}</tr></thead><tbody>{data.projects.map(project => <tr key={project.id}>
-    <td><Link className="project-cell" to={`/projects/${project.id}`}><span className={`project-logo ${project.priority === 'P0' ? 'gold' : ''}`}>{project.name.slice(0, 1)}</span><div><strong>{project.name}</strong><small>{project.owner} · {project.secretary}</small></div></Link></td>
-    <td><div className="micro-action-list">{project.actions.length ? project.actions.map(action => <Link className={`micro-action ${action.status === '已完成' ? 'done' : ''}`} key={action.id} to={action.to}><i />{action.title}</Link>) : <span className="muted">本周暂无授权行动</span>}</div></td>
-    <td><Badge tone={workbenchTone(project.health)}>{project.health}</Badge><small className="matrix-progress" title="仅计入当前账号有权访问的本周行动及未完成逾期行动">{project.done} / {project.total} 已完成</small></td>
-    <td>{project.leaderParticipation && project.leaderParticipation !== '无需参与' ? <Badge tone={project.leaderParticipation.startsWith('今日') ? 'warning' : 'info'}>{project.leaderParticipation}</Badge> : <span className="muted">{project.leaderParticipation ?? '待核对'}</span>}</td>
-    <td><strong>{project.targetDate ? `${Number(project.targetDate.slice(5, 7))}月${Number(project.targetDate.slice(8, 10))}日` : '—'}</strong><small className="matrix-progress" title="由项目目标日按 Asia/Shanghai 动态计算">{workbenchTargetLabel(project.targetDate, data.today)}</small></td>
-  </tr>)}</tbody></table></div>
+type PersonalTodo = {
+  id: string
+  title: string
+  projectId: string | null
+  projectName: string | null
+  owner: string
+  ownerUserId: string | null
+  dueDate: string | null
+  priority: '高' | '中' | '低'
+  status: string
+  type: string
+  approvalRequestId: string | null
+  version: number
+}
+
+const terminalTodoStatuses = new Set(['已完成', '已关闭', '已取消', '已归档'])
+function shiftDashboardDate(date: string, days: number) {
+  return new Date(Date.parse(`${date}T00:00:00Z`) + days * 86400000).toISOString().slice(0, 10)
+}
+function todoDateLabel(date: string, today: string) {
+  if (date === today) return '今天'
+  if (date === shiftDashboardDate(today, 1)) return '明天'
+  return '后天'
+}
+
+function PersonalTodoPanel({ data }: { data: WorkbenchData }) {
+  const lastDay = shiftDashboardDate(data.today, 2)
+  const [todos, setTodos] = useState<PersonalTodo[]>([])
+  const [draft, setDraft] = useState({ title: '', priority: '中' as PersonalTodo['priority'] })
+  const [editing, setEditing] = useState<{ id: string; title: string; priority: PersonalTodo['priority'] } | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState('')
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    let active = true
+    setLoading(true); setError('')
+    void apiGet<{ list: PersonalTodo[] }>(`/todos?personal=true&dateFrom=${data.today}&dateTo=${lastDay}`).then(response => {
+      if (active) setTodos(response.list)
+    }).catch(cause => {
+      if (active) setError(cause instanceof Error ? cause.message : '个人待办加载失败')
+    }).finally(() => {
+      if (active) setLoading(false)
+    })
+    return () => { active = false }
+  }, [data.actorId, data.today, lastDay])
+
+  const visibleTodos = todos.filter(todo => !todo.projectId
+    && todo.ownerUserId === data.actorId
+    && !todo.approvalRequestId
+    && todo.type !== '流程'
+    && !terminalTodoStatuses.has(todo.status)
+    && Boolean(todo.dueDate)
+    && todo.dueDate === data.today)
+    .sort((a, b) => (a.dueDate ?? '').localeCompare(b.dueDate ?? '') || ({ 高: 0, 中: 1, 低: 2 }[a.priority] - { 高: 0, 中: 1, 低: 2 }[b.priority]) || a.id.localeCompare(b.id))
+
+  const createTodo = async () => {
+    const title = draft.title.trim()
+    if (!title || busy) return
+    setBusy('create'); setError('')
+    try {
+      const created = await apiPost<PersonalTodo>('/todos', {
+        projectId: null,
+        projectName: '个人待办',
+        title,
+        owner: data.name,
+        ownerUserId: data.actorId,
+        dueDate: data.today,
+        priority: draft.priority,
+        type: '待办',
+        status: '未开始',
+      })
+      setTodos(current => [created, ...current.filter(todo => todo.id !== created.id)])
+      setDraft(current => ({ ...current, title: '' }))
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '新增待办失败')
+    } finally { setBusy('') }
+  }
+
+  const saveTodo = async () => {
+    if (!editing || !editing.title.trim() || busy) return
+    const current = todos.find(todo => todo.id === editing.id)
+    if (!current) return
+    setBusy(editing.id); setError('')
+    try {
+      const updated = await apiPatch<PersonalTodo>(`/todos/${editing.id}`, {
+        expectedVersion: current.version,
+        title: editing.title.trim(),
+        dueDate: data.today,
+        priority: editing.priority,
+      })
+      setTodos(rows => rows.map(todo => todo.id === updated.id ? updated : todo))
+      setEditing(null)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '保存待办失败')
+    } finally { setBusy('') }
+  }
+
+  const completeTodo = async (todo: PersonalTodo) => {
+    if (busy) return
+    setBusy(todo.id); setError('')
+    try {
+      const updated = await apiPatch<PersonalTodo>(`/todos/${todo.id}`, { expectedVersion: todo.version, status: '已完成' })
+      setTodos(rows => rows.map(row => row.id === updated.id ? updated : row))
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '完成待办失败')
+    } finally { setBusy('') }
+  }
+
+  const removeTodo = async (todo: PersonalTodo) => {
+    if (busy || !window.confirm(`确定删除待办“${todo.title}”吗？`)) return
+    setBusy(todo.id); setError('')
+    try {
+      await apiDelete(`/todos/${todo.id}`)
+      setTodos(rows => rows.filter(row => row.id !== todo.id))
+      if (editing?.id === todo.id) setEditing(null)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '删除待办失败')
+    } finally { setBusy('') }
+  }
+
+  const todayProjectActions = data.actions.filter(action => action.dueDate === data.today)
+  return <section className="card personal-todo-card work-todo-card">
+    <div className="card-head"><div><h2>工作待办</h2></div><Badge tone={visibleTodos.length + todayProjectActions.length ? 'info' : 'neutral'}>{visibleTodos.length + todayProjectActions.length} 项</Badge></div>
+    <form className="personal-todo-create" onSubmit={event => { event.preventDefault(); void createTodo() }}>
+      <label className="todo-title-field"><span className="sr-only">待办内容</span><input className="input" maxLength={255} placeholder="输入待办内容" value={draft.title} onChange={event => setDraft({ ...draft, title: event.target.value })} /></label>
+      <span className="todo-today-label">今天</span>
+      <label><span className="sr-only">优先级</span><select className="input" value={draft.priority} onChange={event => setDraft({ ...draft, priority: event.target.value as PersonalTodo['priority'] })}><option value="高">高优先级</option><option value="中">中优先级</option><option value="低">低优先级</option></select></label>
+      <button className="button primary" type="submit" disabled={!draft.title.trim() || Boolean(busy)}><Plus size={16} />新增任务</button>
+    </form>
+    {error && <div className="personal-todo-error" role="alert">{error}</div>}
+    <div className="personal-todo-list" aria-busy={loading}>
+      {todayProjectActions.map(action => <div className="personal-todo-row project-work-todo" key={`project-${action.id}`}>
+        <Link className="todo-complete-button" aria-label={`完成项目任务：${action.title}`} title="进入任务完成流程" to={`${action.to}&action=submission`}><Check size={15} /></Link>
+        <div className="personal-todo-main"><strong>{action.title}</strong><small>{action.projectName} · 今日任务</small></div>
+        <Link className="button small" to={action.to}>查看任务</Link>
+      </div>)}
+      {visibleTodos.map(todo => editing?.id === todo.id ? <form className="personal-todo-row editing" key={todo.id} onSubmit={event => { event.preventDefault(); void saveTodo() }}>
+        <input className="input todo-edit-title" aria-label="待办内容" maxLength={255} value={editing.title} onChange={event => setEditing({ ...editing, title: event.target.value })} autoFocus />
+        <select className="input" aria-label="优先级" value={editing.priority} onChange={event => setEditing({ ...editing, priority: event.target.value as PersonalTodo['priority'] })}><option value="高">高</option><option value="中">中</option><option value="低">低</option></select>
+        <div className="todo-row-actions"><button className="todo-icon-button confirm" type="submit" aria-label="保存待办" title="保存" disabled={busy === todo.id || !editing.title.trim()}><Check size={16} /></button><button className="todo-icon-button" type="button" aria-label="取消编辑" title="取消" disabled={busy === todo.id} onClick={() => setEditing(null)}><X size={16} /></button></div>
+      </form> : <div className="personal-todo-row" key={todo.id}>
+        <button className="todo-complete-button" type="button" aria-label={`完成待办：${todo.title}`} title="标记完成" disabled={busy === todo.id} onClick={() => void completeTodo(todo)}><Check size={15} /></button>
+        <div className="personal-todo-main"><strong>{todo.title}</strong><small>{todoDateLabel(todo.dueDate!, data.today)} · {todo.priority}优先级</small></div>
+        <div className="todo-row-actions"><button className="todo-icon-button" type="button" aria-label={`编辑待办：${todo.title}`} title="编辑" disabled={Boolean(busy)} onClick={() => setEditing({ id: todo.id, title: todo.title, priority: todo.priority })}><Pencil size={15} /></button><button className="todo-icon-button danger" type="button" aria-label={`删除待办：${todo.title}`} title="删除" disabled={Boolean(busy)} onClick={() => void removeTodo(todo)}><Trash2 size={15} /></button></div>
+      </div>)}
+      {!loading && !visibleTodos.length && !todayProjectActions.length && <Empty title="今天没有待办" note="" />}
+      {loading && <Empty title="正在加载个人待办…" note="" />}
+    </div>
+  </section>
 }
 function roleHeading(data: WorkbenchData) {
   const headings = {
@@ -52,6 +196,8 @@ function primaryAction(data: WorkbenchData) {
 
 export function DashboardPage() {
   const userId = useAuthStore(state => state.user?.id)
+  const calendarKey = `fde-dashboard-calendar-hidden:${userId ?? 'anonymous'}`
+  const [calendarHidden, setCalendarHidden] = useState(() => { try { return localStorage.getItem(calendarKey) === '1' } catch { return false } })
   const [data, setData] = useState<WorkbenchData | null>(null), [error, setError] = useState('')
   const [revision, setRevision] = useState(0), generation = useRef(0)
   useEffect(() => {
@@ -76,22 +222,28 @@ export function DashboardPage() {
     window.addEventListener('focus', refresh); document.addEventListener('visibilitychange', visible)
     return () => { ++generation.current; controller?.abort(); window.removeEventListener('focus', refresh); document.removeEventListener('visibilitychange', visible) }
   }, [userId, revision])
+  useEffect(() => { try { setCalendarHidden(localStorage.getItem(calendarKey) === '1') } catch { setCalendarHidden(false) } }, [calendarKey])
+  const hideCalendar = () => { setCalendarHidden(true); try { localStorage.setItem(calendarKey, '1') } catch { /* visibility remains valid for this page */ } }
+  const showCalendar = () => { setCalendarHidden(false); try { localStorage.removeItem(calendarKey) } catch { /* visibility remains valid for this page */ } }
   const current = data?.actorId === userId ? data : null
   if (!current) return <div className="fde-dashboard page-wrap role-workbench"><div className="workbench-heading"><div><h1>工作台</h1></div></div><section className="card" aria-busy={!error}>{error ? <div className="workbench-error" role="alert"><strong>工作台暂时无法加载</strong><p>{error}</p><button className="button" onClick={() => setRevision(n => n + 1)}>重新加载</button></div> : <Empty title="正在核对当前角色与工作台数据…" note="统计和待办以服务端当前授权为准" />}</section></div>
   const action = primaryAction(current)
-  const projectRows: WorkbenchAttention[] = current.projects.map(p => ({ id: p.id, title: p.name, detail: `${p.done}/${p.total} 本周授权行动已完成`, icon: p.name.slice(0, 1), to: `/projects/${p.id}`, status: p.health }))
+  const projectRows: WorkbenchAttention[] = current.projects.map(p => ({ id: p.id, title: p.name, detail: `${p.total} 项三日内任务待完成`, icon: p.name.slice(0, 1), to: `/projects/${p.id}`, status: p.health }))
   return <div className="fde-dashboard page-wrap role-workbench" data-view={current.view}>
     {current.view === 'admin' ? <div className="page-heading"><div><h1>系统工作台</h1></div><div className="page-actions"><span className="view-chip secure">配置权限视角</span><Link className="button primary" to="/system">进入系统管理</Link></div></div> : <div className="workbench-heading"><div><div className="eyebrow-row"><span className="view-chip">{current.perspective}</span><span>{formatShanghaiDate(`${current.today}T12:00:00+08:00`, { year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' })}</span></div><h1>{roleHeading(current)}</h1></div><div className="page-actions"><span className="update-note">更新于 {formatShanghaiDate(current.asOf, { hour: '2-digit', minute: '2-digit' })}</span>{action.length > 0 && <Link className="button primary" to={action[1]}>{action[0]}</Link>}</div></div>}
     {current.warnings.length > 0 && <div className="workbench-warning" role="alert"><span>{current.warnings.join(' ')}</span><button className="button small" onClick={() => setRevision(n => n + 1)}>重新核对</button></div>}
     <section className="metric-grid compact" aria-label="工作台统计">{current.metrics.map(metric => <Link className="metric-card compact-metric" data-nav={metric.to} key={metric.label} to={metric.to} title={metric.note} aria-label={`${metric.label}：${metric.value ?? '待核对'}。${metric.note}`}><div className="metric-label"><span>{metric.label}</span><span className={`metric-dot ${metric.tone}`} /></div><div className={`metric-value ${metric.value === null ? 'unknown' : ''}`}>{metric.value ?? '—'}</div><div className="metric-note">{metric.note}</div></Link>)}</section>
+    {current.view !== 'admin' && current.view !== 'unassigned' && (calendarHidden
+      ? <button type="button" className="dashboard-calendar-reveal" onClick={showCalendar}><Eye size={16}/><span>显示任务时间轴</span></button>
+      : <section className="dashboard-calendar-shell fde-collaboration-page" aria-label="任务时间轴"><FdeCalendarPanel compact allowLeader={false} onHide={hideCalendar}/></section>)}
     <div className={`workspace-grid ${current.view === 'admin' ? 'two' : ''}`}>
-      {['leader', 'lead'].includes(current.view) ? <><Panel title="重点项目 × 本周行动" className="table-card" to="/projects"><ProjectMatrix data={current} /></Panel><Panel title={current.view === 'leader' ? '需要我处理' : '待我确认'} count={current.attention.length}><FocusList rows={current.attention} showStatus={false} /></Panel></> :
-        current.view === 'coordinator' ? <><Panel title="待处理时间需求" to="/collaboration?view=time" action="进入排期 →"><FocusList rows={current.attention} /></Panel><Panel title="冲突与容量"><div className="capacity-card">{[['总申请', current.capacity ? `${(current.capacity.requested / 60).toFixed(1)}h` : '—'], ['已确认', current.capacity ? `${(current.capacity.confirmed / 60).toFixed(1)}h` : '—'], ['待配置', current.capacity ? `${current.capacity.pending} 项` : '—'], ['机动预留', '—']].map(([label, value]) => <div key={label}><span>{label}</span><strong title={value === '—' ? '待核对：未取得可靠数据' : undefined}>{value}</strong></div>)}</div>{Boolean(current.capacity?.conflicts) && <div className="conflict-note"><strong>{current.capacity!.conflicts} 项需求存在冲突</strong><p>请进入排期核对可用时段与项目目标日。</p></div>}</Panel></> :
-        current.view === 'admin' ? <><Panel title="系统与集成状态"><div className="compact-status-grid">{['企业微信同步', '审批消息队列', '文件安全扫描', '审计日志完整率'].map(label => <div key={label}><span>{label}</span><strong title="尚未接入可靠运行统计，不宣称正常">待核对</strong></div>)}</div></Panel><Panel title="权限待办"><FocusList rows={[{ id: 'settings', title: '进入权限与配置管理', detail: '仅展示配置事项，不读取项目商业资料', icon: '权', to: '/system' }]} /></Panel></> :
-        current.view === 'specialist' ? <><Panel title={`待处理${current.specialty}事项`} to="/workflow?view=pending"><FocusList rows={current.attention} /></Panel><Panel title="我的项目行动"><ActionList data={current} /></Panel></> :
-        current.view === 'unassigned' ? <Panel title="角色待核对"><Empty title="请先绑定业务角色" note="不根据姓名或展示职称推断项目权限" /></Panel> :
-          <><Panel title={current.view === 'secretary' ? '今日催办与推进' : '今日待办与催办'} to="/collaboration" action="进入本周工作 →"><ActionList data={current} /></Panel><Panel title="项目状态"><FocusList rows={projectRows} /></Panel></>}
+      {current.view === 'admin' ? <><Panel title="系统与集成状态"><div className="compact-status-grid">{['企业微信同步', '审批消息队列', '文件安全扫描', '审计日志完整率'].map(label => <div key={label}><span>{label}</span><strong title="尚未接入可靠运行统计，不宣称正常">待核对</strong></div>)}</div></Panel><Panel title="权限待办"><FocusList rows={[{ id: 'settings', title: '进入权限与配置管理', detail: '仅展示配置事项，不读取项目商业资料', icon: '权', to: '/system' }]} /></Panel></> :
+        current.view === 'unassigned' ? <Panel title="角色待核对"><Empty title="请先绑定业务角色" note="" /></Panel> : <>
+          <PersonalTodoPanel data={current} />
+          <Panel title="最近三天任务" to="/collaboration" action="进入任务中心 →"><ActionList data={current} /></Panel>
+          <Panel title="项目状态" to="/projects"><FocusList rows={projectRows} /></Panel>
+        </>}
     </div>
-    <details className="workbench-notes"><summary>统计口径与更多工作入口</summary><p>“—”表示待核对，不代表 0；指标按当前账号权限汇总，日期采用上海时区。项目表只展示重点分类，行动完成数只计入有权查看的本周及未完成逾期行动。</p><div>{current.metrics.map(metric => <Link key={metric.label} to={metric.to}>{metric.label}：{metric.value ?? '待核对'}</Link>)}</div>{current.view !== 'admin' && current.view !== 'unassigned' && <div><Link to="/workflow?view=pending">完整审批待办</Link><Link to="/responsibility?view=mine">我的职责</Link><Link to="/knowledge">数据与知识</Link><Link to="/risks">风险提醒</Link></div>}<button className="button small" onClick={() => setRevision(n => n + 1)}>刷新工作台</button></details>
+    <details className="workbench-notes"><summary>更多工作入口</summary><div>{current.metrics.map(metric => <Link key={metric.label} to={metric.to}>{metric.label}：{metric.value ?? '待核对'}</Link>)}</div>{current.view !== 'admin' && current.view !== 'unassigned' && <div><Link to="/workflow?view=pending">完整审批待办</Link><Link to="/responsibility?view=mine">我的职责</Link><Link to="/knowledge">数据与知识</Link><Link to="/risks">风险提醒</Link></div>}<button className="button small" onClick={() => setRevision(n => n + 1)}>刷新工作台</button></details>
   </div>
 }

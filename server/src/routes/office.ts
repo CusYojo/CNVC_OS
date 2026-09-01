@@ -1,7 +1,7 @@
 import { Router } from 'express'
 import { z } from 'zod'
 import type { AuthedRequest } from '../middleware/requireAuth.js'
-import { actOnOfficeRequest, getOfficeAttachment, getOfficeRequest, getOfficeRevision, grantOfficeAttachment, listOfficeRequests, officeCommandReceipt, officeOptions, officeTransferCandidates, previewOfficeRequest, resolveOfficeCommand, saveOfficeRequest, uploadOfficeAttachment } from '../services/fdeOfficeService.js'
+import { actOnOfficeRequest, getOfficeAttachment, getOfficeRequest, getOfficeRevision, grantOfficeAttachment, listOfficeRequests, listReusableOfficeRequests, officeCommandReceipt, officeOptions, officeTransferCandidates, previewOfficeRequest, resolveOfficeCommand, saveOfficeRequest, uploadOfficeAttachment } from '../services/fdeOfficeService.js'
 import { projectFilePreviewContentType } from '../services/projectFileStorageService.js'
 import { writeAudit } from '../services/auditService.js'
 import { readOfficeNotice } from '../services/fdeApprovalCenterService.js'
@@ -13,6 +13,7 @@ officeRouter.use((_req, res, next) => { res.setHeader('Cache-Control', 'private,
 officeRouter.get('/options', async (req: AuthedRequest, res, next) => { try { res.json(await officeOptions(req.user!.uid)) } catch (e) { next(e) } })
 officeRouter.post('/notices/:id/read', async (req: AuthedRequest, res, next) => { try { z.object({}).strict().parse(req.body); res.json(await readOfficeNotice(id(req.params.id), req.user!.uid)) } catch (e) { next(e) } })
 officeRouter.get('/requests', async (req: AuthedRequest, res, next) => { try { res.json(await listOfficeRequests(req.user!.uid, req.query)) } catch (e) { next(e) } })
+officeRouter.get('/history', async (req: AuthedRequest, res, next) => { try { res.json(await listReusableOfficeRequests(req.user!.uid, req.query.kind)) } catch (e) { next(e) } })
 officeRouter.get('/requests/:id', async (req: AuthedRequest, res, next) => { try { res.json(await getOfficeRequest(id(req.params.id), req.user!.uid, z.coerce.number().int().min(1).default(1).parse(req.query.page))) } catch (e) { next(e) } })
 officeRouter.get('/requests/:id/executions', async (req: AuthedRequest, res, next) => { try { res.json(await getOfficeExecutions(id(req.params.id), req.user!.uid, z.coerce.number().int().min(1).max(100000).default(1).parse(req.query.page))) } catch (e) { next(e) } })
 officeRouter.post('/requests/:id/executions', async (req: AuthedRequest, res, next) => { try { res.json(await recordOfficeExecution(id(req.params.id), req.user!.uid, req.body)) } catch (e) { next(e) } })

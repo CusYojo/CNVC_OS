@@ -80,7 +80,6 @@ function ReplanWorkspace({ projectId, userId, onChanged }: { projectId: string; 
   }
   return <Card className="min-w-0 border-[#dfe6e4] p-5" aria-label="项目整体重排">
     <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="font-semibold">项目整体重排</h2><Button variant="secondary" disabled={busy} onClick={() => setRefresh(v => v + 1)}>刷新整体计划</Button></div>
-    <p className="mt-2 text-xs leading-5 text-slate-500">整体预览 → 独立审批 → 日期、原任务和来源同事务生效。不会代办阶段审批或领导确认；已有独立倒排计划的映射规则未定时阻塞。</p>
     {params.has('center') && <Link className="mt-2 block text-sm text-[#315f68]" to={approvalCenterReturnPath(params.get('center'))}>返回审批列表</Link>}
     {error && <p role="alert" className="mt-3 text-sm text-red-700">{error}</p>}{notice && <p role="status" className="mt-3 text-sm text-[#315f68]">{notice}</p>}
     {storageError && <p role="alert" className="mt-3 text-sm text-red-700">{storageError}</p>}

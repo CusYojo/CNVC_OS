@@ -62,7 +62,9 @@ interface AppState {
   auditLogs: AuditLog[]
   notifications: Notification[]
   logout: () => void
-  addProject: (project: Omit<Project, 'id' | 'version' | 'updatedAt' | 'createdAt' | 'score' | 'progress'>) => Promise<Project>
+  addProject: (project: Omit<Project, 'id' | 'version' | 'updatedAt' | 'createdAt' | 'score' | 'progress'> & {
+    governance: { ownerUserId: string; assignments: Array<{ duty: 'boss' | 'project_manager' | 'legal' | 'finance'; userId: string }> }
+  }) => Promise<Project>
   updateProject: (projectId: string, patch: Partial<Project>) => Promise<Project>
   deleteProject: (projectId: string) => Promise<void>
   pinProject: (projectId: string, pinned: boolean) => Promise<void>
@@ -103,6 +105,7 @@ interface AppState {
   addUser: (user: Omit<User, 'id' | 'lastLogin'>) => void
   markNotificationsRead: () => void
   hydrateFromServer: () => Promise<void>
+  refreshProjectDomain: () => Promise<void>
 }
 
 const emptyUser: User = {
@@ -165,7 +168,7 @@ export const useAppStore = create<AppState>()(
         // 注意: 故意不发 /leads 请求 — leads 走分页(由 SourcingPage 单独 fetchLeads 拉)
         // 之前 hydrate 拉全量 leads 阻塞首次页面渲染 7s+,改成按需拉
         const results = await Promise.allSettled([
-          apiGet<{ list: Project[] }>('/projects'),
+          apiGet<{ list: Project[] }>('/projects?pageSize=100'),
           apiGet<{ list: Meeting[] }>('/meetings'),
           apiGet<{ list: Todo[] }>('/todos'),
           apiGet<{ list: RiskAlert[] }>('/risks'),
@@ -206,10 +209,25 @@ export const useAppStore = create<AppState>()(
         }
         set(next as AppState)
       },
+      refreshProjectDomain: async () => {
+        if (!useAuthStore.getState().isAuthenticated) return
+        const results = await Promise.allSettled([
+          apiGet<{ list: Project[] }>('/projects?pageSize=100'),
+          apiGet<{ list: ApprovalRequest[] }>('/oa/requests'),
+          apiGet<{ list: Todo[] }>('/todos'),
+          apiGet<{ list: WorkflowLog[] }>('/oa/workflow-logs'),
+        ])
+        const patch: Partial<AppState> = {}
+        if (results[0].status === 'fulfilled') patch.projects = results[0].value.list
+        if (results[1].status === 'fulfilled') patch.approvalRequests = results[1].value.list
+        if (results[2].status === 'fulfilled') patch.todos = results[2].value.list
+        if (results[3].status === 'fulfilled') patch.workflowLogs = results[3].value.list
+        set(patch as AppState)
+      },
       addProject: async (project) => {
         try {
           const created = await apiPost<Project>('/projects', project)
-          set((state) => ({ projects: [created, ...state.projects] }))
+          await get().refreshProjectDomain()
           get().addAudit('项目管理', '创建项目', created.name)
           return created
         } catch (e) {
@@ -298,6 +316,7 @@ export const useAppStore = create<AppState>()(
               ? { ...item, ...refreshedProject, latestApprovalId: created.id, updatedAt: refreshedProject?.updatedAt ?? created.submittedAt }
               : item),
           }))
+          await get().refreshProjectDomain()
           return created
         } catch (error) {
           get().addAudit('OA 流程', '发起审批失败', (error as Error).message)
@@ -318,30 +337,35 @@ export const useAppStore = create<AppState>()(
           const logs = await apiGet<{ list: WorkflowLog[] }>('/oa/workflow-logs')
           set({ workflowLogs: logs.list })
         }
+        await get().refreshProjectDomain()
       },
       returnRequest: async (requestId, comment) => {
         const result = await apiPost<{ request: ApprovalRequest; project?: Project }>(
           `/oa/requests/${requestId}/actions`, { action: 'return', comment, expectedVersion: get().approvalRequests.find((item) => item.id === requestId)?.lockVersion },
         )
         set((state) => ({ approvalRequests: state.approvalRequests.map((item) => item.id === requestId ? result.request : item), projects: result.project ? state.projects.map((item) => item.id === result.project!.id ? { ...item, ...result.project } : item) : state.projects }))
+        await get().refreshProjectDomain()
       },
       resubmitApprovalRequest: async (requestId, comment) => {
         const result = await apiPost<{ request: ApprovalRequest; project?: Project }>(
           `/oa/requests/${requestId}/actions`, { action: 'resubmit', comment, expectedVersion: get().approvalRequests.find((item) => item.id === requestId)?.lockVersion },
         )
         set((state) => ({ approvalRequests: state.approvalRequests.map((item) => item.id === requestId ? result.request : item), projects: result.project ? state.projects.map((item) => item.id === result.project!.id ? { ...item, ...result.project } : item) : state.projects }))
+        await get().refreshProjectDomain()
       },
       rejectRequest: async (requestId, comment) => {
         const result = await apiPost<{ request: ApprovalRequest; project?: Project }>(
           `/oa/requests/${requestId}/actions`, { action: 'reject', comment, expectedVersion: get().approvalRequests.find((item) => item.id === requestId)?.lockVersion },
         )
         set((state) => ({ approvalRequests: state.approvalRequests.map((item) => item.id === requestId ? result.request : item), projects: result.project ? state.projects.map((item) => item.id === result.project!.id ? { ...item, ...result.project } : item) : state.projects }))
+        await get().refreshProjectDomain()
       },
       withdrawRequest: async (requestId, comment) => {
         const result = await apiPost<{ request: ApprovalRequest; project?: Project }>(
           `/oa/requests/${requestId}/actions`, { action: 'withdraw', comment, expectedVersion: get().approvalRequests.find((item) => item.id === requestId)?.lockVersion },
         )
         set((state) => ({ approvalRequests: state.approvalRequests.map((item) => item.id === requestId ? result.request : item), projects: result.project ? state.projects.map((item) => item.id === result.project!.id ? { ...item, ...result.project } : item) : state.projects }))
+        await get().refreshProjectDomain()
       },
       deleteFile: async (fileId) => {
         const f = get().files.find((x) => x.id === fileId)

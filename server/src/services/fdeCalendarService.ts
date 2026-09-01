@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto'
-import { and, asc, eq, gt, gte, inArray, isNull, lt, ne, or, sql } from 'drizzle-orm'
+import { and, asc, eq, gt, gte, inArray, isNull, lt, ne, notInArray, or, sql } from 'drizzle-orm'
 import { db } from '../db/client.js'
-import { personalCalendarEvents, personalCalendarHistory, leaderTimeRequests, projects, todos, meetings, meetingParticipants, users } from '../db/schema.js'
-import { calendarCancelSchema, calendarWriteSchema, timeInstant } from '../contracts/fdeTimeContract.js'
+import { personalCalendarEvents, personalCalendarHistory, todoCalendarSchedules, todoCalendarScheduleHistory, leaderTimeRequests, projects, todos, meetings, meetingParticipants, users } from '../db/schema.js'
+import { calendarCancelSchema, calendarWriteSchema, taskCalendarScheduleSchema, timeInstant } from '../contracts/fdeTimeContract.js'
 import { fdeWeekStart, shiftDate } from '../contracts/fdeWeeklyPlanContract.js'
 import { timeActor, timeFail, type TimeTx } from './fdeTimeAccessService.js'
 import { leaderTimeConflicts } from './fdeLeaderTimeService.js'
@@ -61,7 +61,32 @@ export async function cancelCalendarEvent(id: string, userId: string, raw: unkno
   })
 }
 
-type CalendarItem = { key: string; id: string | null; source: string; title: string; detail: string; ownerId: string; ownerName: string; startsAt: string; endsAt: string | null; allDay: boolean; version: number | null; visibility?: string; editable: boolean; target: string | null }
+export async function writeTaskCalendarSchedule(id: string, userId: string, raw: unknown) {
+  const input = taskCalendarScheduleSchema.parse(raw), hash = timeHash({ id, userId, input })
+  return scheduleTransaction(async tx => {
+    await tx.execute(sql`SELECT ${users.id} FROM ${users} WHERE ${users.id}=${userId} FOR UPDATE`)
+    await tx.execute(sql`SELECT ${todos.id} FROM ${todos} WHERE ${todos.id}=${id} FOR UPDATE`)
+    await timeActor(tx, userId)
+    const [replayed] = await tx.select().from(todoCalendarScheduleHistory).where(eq(todoCalendarScheduleHistory.requestId, input.clientRequestId))
+    if (replayed) {
+      if (replayed.requestHash !== hash || replayed.actorId !== userId || replayed.taskId !== id) return timeFail('CALENDAR_REQUEST_REUSED', '请求编号已用于其他内容')
+      return { id, version: replayed.version }
+    }
+    const [task] = await tx.select().from(todos).where(eq(todos.id, id))
+    if (!task || task.ownerUserId !== userId || task.approvalRequestId || task.type === '流程') return timeFail('CALENDAR_TASK_FORBIDDEN', '只能调整本人的非流程任务', 403)
+    if (task.version !== input.sourceVersion || !['未开始', '进行中', '待验收', '已退回', '待确认'].includes(task.status)) return timeFail('VERSION_CONFLICT', '任务已变化或已结束，请刷新')
+    const [current] = await tx.select().from(todoCalendarSchedules).where(eq(todoCalendarSchedules.taskId, id))
+    if ((current?.version ?? 0) !== input.expectedVersion || (current && current.ownerUserId !== userId)) return timeFail('VERSION_CONFLICT', '排期已变化，请刷新')
+    const startsAt = timeInstant(input.startsAt), endsAt = timeInstant(input.endsAt), version = (current?.version ?? 0) + 1
+    const fields = { ownerUserId: userId, startsAt, endsAt, hidden: input.hidden, version, updatedAt: new Date() }
+    if (current) await tx.update(todoCalendarSchedules).set(fields).where(eq(todoCalendarSchedules.taskId, id))
+    else await tx.insert(todoCalendarSchedules).values({ taskId: id, ...fields })
+    await tx.insert(todoCalendarScheduleHistory).values({ id: randomUUID(), taskId: id, requestId: input.clientRequestId, requestHash: hash, actorId: userId, action: input.hidden ? 'hide' : 'schedule', reason: input.reason, version, snapshot: { ...fields, startsAt: startsAt.toISOString(), endsAt: endsAt.toISOString(), sourceVersion: task.version } })
+    return { id, version }
+  })
+}
+
+type CalendarItem = { key: string; id: string | null; source: string; title: string; detail: string; projectName?: string | null; ownerId: string; ownerName: string; startsAt: string; endsAt: string | null; allDay: boolean; version: number | null; sourceVersion?: number; visibility?: string; editable: boolean; target: string | null }
 export async function listCalendar(userId: string, rawWeek: string, view: 'personal' | 'company', includeMilestones = false) {
   const week = fdeWeekStart.parse(rawWeek), next = shiftDate(week, 7), start = timeInstant(`${week}T00:00`), end = timeInstant(`${next}T00:00`)
   return db.transaction(async (tx) => {
@@ -81,10 +106,23 @@ export async function listCalendar(userId: string, rawWeek: string, view: 'perso
       const allowed = projectIds.has(row.projectId) && (!row.taskId || await canReadReferencedDirectiveTasks(tx, [row.taskId], userId))
       add({ id: row.id, source: 'leader', title: row.title, detail: row.location, ownerId: row.leaderId, ownerName: names.get(row.leaderId) ?? '已停用人员', startsAt: row.scheduledStart!.toISOString(), endsAt: new Date(row.scheduledStart!.getTime() + row.durationMinutes * 60000).toISOString(), allDay: false, version: row.version, editable: false, target: `/collaboration?view=time&week=${week}&request=${row.id}` }, allowed)
     }
-    const tasks = await tx.select().from(todos).where(and(view === 'personal' ? eq(todos.ownerUserId, userId) : undefined, gte(todos.dueDate, week), lt(todos.dueDate, next), isNull(todos.approvalRequestId), ne(todos.type, '流程'), inArray(todos.status, ['未开始', '进行中', '待验收', '已退回', '待确认']))).limit(501)
+    const scheduledTaskIds = tx.select({ id: todoCalendarSchedules.taskId }).from(todoCalendarSchedules).where(and(lt(todoCalendarSchedules.startsAt, end), gt(todoCalendarSchedules.endsAt, start)))
+    const tasks = await tx.select().from(todos).where(and(view === 'personal' ? eq(todos.ownerUserId, userId) : undefined, or(and(gte(todos.dueDate, week), lt(todos.dueDate, next)), inArray(todos.id, scheduledTaskIds)), isNull(todos.approvalRequestId), notInArray(todos.type, ['流程', '通知']), inArray(todos.status, ['未开始', '进行中', '待验收', '已退回', '待确认']))).limit(501)
+    const taskSchedules = tasks.length ? await tx.select().from(todoCalendarSchedules).where(inArray(todoCalendarSchedules.taskId, tasks.map(row => row.id))) : []
+    const taskScheduleById = new Map(taskSchedules.map(row => [row.taskId, row]))
+    const taskSlots = new Map<string, number>()
     for (const row of tasks) {
+      const schedule = taskScheduleById.get(row.id)
+      if (schedule?.hidden || (!schedule && !row.dueDate)) continue
       const allowed = (row.projectId ? projectIds.has(row.projectId) : row.ownerUserId === userId) && await canReadReferencedDirectiveTasks(tx, [row.id], userId)
-      add({ id: row.id, source: 'task', title: row.title, detail: `任务截止 · ${row.status}`, ownerId: row.ownerUserId ?? '', ownerName: row.ownerUserId ? names.get(row.ownerUserId) ?? '已停用人员' : '待绑定', startsAt: timeInstant(`${row.dueDate}T${row.dueTime ?? '00:00'}`).toISOString(), endsAt: null, allDay: !row.dueTime, version: row.version, editable: false, target: row.projectId ? `/projects/${row.projectId}?tab=tasks` : '/' }, allowed)
+      const dueDate = row.dueDate ?? week, automatic = taskSlots.get(dueDate) ?? 0
+      taskSlots.set(dueDate, automatic + 1)
+      const dueMinutes = row.dueTime ? Number(row.dueTime.slice(0, 2)) * 60 + Number(row.dueTime.slice(3)) : 540 + (automatic % 9) * 60
+      const startMinutes = Math.max(420, Math.min(1140, dueMinutes))
+      const automaticStart = timeInstant(`${dueDate}T${String(Math.floor(startMinutes / 60)).padStart(2, '0')}:${String(startMinutes % 60).padStart(2, '0')}`)
+      const startsAt = schedule?.startsAt ?? automaticStart, endsAt = schedule?.endsAt ?? new Date(automaticStart.getTime() + 60 * 60000)
+      if (startsAt >= end || endsAt <= start) continue
+      add({ id: row.id, source: 'task', title: row.title, detail: `${row.projectName ?? '个人任务'} · ${row.status}${row.dueTime ? ` · 截止 ${row.dueTime}` : ''}`, projectName: row.projectName ?? '个人任务', ownerId: row.ownerUserId ?? '', ownerName: row.ownerUserId ? names.get(row.ownerUserId) ?? '已停用人员' : '待绑定', startsAt: startsAt.toISOString(), endsAt: endsAt.toISOString(), allDay: false, version: schedule?.version ?? 0, sourceVersion: row.version, editable: view === 'personal' && row.ownerUserId === userId && allowed, target: row.projectId ? `/projects/${row.projectId}?tab=tasks` : '/' }, allowed)
     }
     const attended = new Set((await tx.select({ id: meetingParticipants.meetingId }).from(meetingParticipants).where(eq(meetingParticipants.userId, userId))).map(row => row.id))
     const meetingRows = await tx.select().from(meetings).where(and(or(eq(meetings.workflowKind, 'legacy'), inArray(meetings.workflowStatus, ['scheduled', 'completed'])),
@@ -100,6 +138,6 @@ export async function listCalendar(userId: string, rawWeek: string, view: 'perso
       ownerId: row.ownerId ?? '', ownerName: row.ownerName, startsAt: timeInstant(`${row.date}T00:00`).toISOString(), endsAt: null, allDay: true, version: row.version, editable: false, target: milestoneSourceTarget(row),
     }, true)
     if ([personal, times, tasks, meetingRows].some((rows) => rows.length > 500) || items.length > 500) return timeFail('CALENDAR_LIST_LIMIT', '当前周数据超过单次容量，不能静默截断日历')
-    return { weekStart: week, view, timezone: 'Asia/Shanghai', items: items.sort((a, b) => a.startsAt.localeCompare(b.startsAt) || a.key.localeCompare(b.key)), notice: '任务为截止点；OA 仅展示获批出差/请假范围，日期型行程的结束边界为末日次日零点，不代表全天独占或执行完成。缺少日期/出差人时不推定日程；硬冲突和额度政策尚待确认。来源业务只能在原入口修改。' }
+    return { weekStart: week, view, timezone: 'Asia/Shanghai', items: items.sort((a, b) => a.startsAt.localeCompare(b.startsAt) || a.key.localeCompare(b.key)), notice: '任务、会议与获批行程已汇总到本周时间轴。' }
   })
 }

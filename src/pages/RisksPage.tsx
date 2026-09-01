@@ -65,7 +65,7 @@ export function RisksPage() {
 
   return (
     <div>
-      <PageHeader title="风险预警" description="统一记录工商、舆情、法律、财务、合规与协议到期风险，形成处置闭环。" actions={<Button onClick={() => setShowNew(true)}><Plus className="h-4 w-4" />新增风险</Button>} />
+      <PageHeader title="风险预警" actions={<Button onClick={() => setShowNew(true)}><Plus className="h-4 w-4" />新增风险</Button>} />
       <div className="mb-5 grid grid-cols-4 gap-4">{stats.map(([label, value, color]) => <Card key={label as string} className="p-4"><div className="flex items-center justify-between"><p className="text-sm text-slate-500">{label}</p><span className={`grid h-8 w-8 place-items-center rounded-lg ${color}`}><ShieldAlert className="h-4 w-4" /></span></div><p className="mt-3 text-2xl font-semibold text-ink">{value}</p></Card>)}</div>
       <Card className="mb-4 p-4"><div className="flex gap-3"><SearchInput className="w-[320px]" placeholder="搜索项目、风险类型或描述…" value={query} onChange={(event) => setQuery(event.target.value)} /><select className="input w-32" value={level} onChange={(event) => setLevel(event.target.value)}><option value="">全部等级</option><option>高</option><option>中</option><option>低</option></select><select className="input w-36" value={status} onChange={(event) => setStatus(event.target.value)}><option value="">全部状态</option><option>待确认</option><option>处理中</option><option>已关闭</option><option>误报</option></select></div></Card>
       <Card className="overflow-hidden">
@@ -82,7 +82,7 @@ export function RisksPage() {
         </div>
       </Modal>
       <Drawer open={!!selected} title="风险详情与处置" onClose={() => setSelected(null)} footer={selected && <><Button variant="secondary" onClick={() => { void changeStatus('误报') }}>标记误报</Button><Button onClick={() => { void changeStatus(selected.status === '待确认' ? '处理中' : '已关闭') }}>{selected.status === '待确认' ? '开始处置' : '关闭风险'}</Button></>}>
-        {selected && <div className="space-y-5"><div className="rounded-xl bg-slate-50 p-4"><div className="flex items-center gap-2"><RiskBadge level={selected.level} /><Badge>{selected.type}</Badge><StatusBadge status={selected.status} /></div><h3 className="mt-4 font-semibold text-slate-800">{selected.projectName}</h3><p className="mt-3 text-sm leading-7 text-slate-600">{selected.description}</p></div><div className="grid grid-cols-2 gap-4 text-sm"><div><p className="text-xs text-slate-400">负责人</p><p className="mt-1 font-medium text-slate-700">{selected.owner}</p></div><div><p className="text-xs text-slate-400">发生日期</p><p className="mt-1 font-medium text-slate-700">{selected.occurredAt}</p></div></div><div className="rounded-xl border border-slate-200 p-4 text-xs leading-6 text-slate-500">当前仅展示已持久化的风险事实和处置状态。状态变更由服务端审计记录，未建立正式分析任务前不展示 AI 处置建议或模拟时间线。</div></div>}
+        {selected && <div className="space-y-5"><div className="rounded-xl bg-slate-50 p-4"><div className="flex items-center gap-2"><RiskBadge level={selected.level} /><Badge>{selected.type}</Badge><StatusBadge status={selected.status} /></div><h3 className="mt-4 font-semibold text-slate-800">{selected.projectName}</h3><p className="mt-3 text-sm leading-7 text-slate-600">{selected.description}</p></div><div className="grid grid-cols-2 gap-4 text-sm"><div><p className="text-xs text-slate-400">负责人</p><p className="mt-1 font-medium text-slate-700">{selected.owner}</p></div><div><p className="text-xs text-slate-400">发生日期</p><p className="mt-1 font-medium text-slate-700">{selected.occurredAt}</p></div></div></div>}
       </Drawer>
     </div>
   )

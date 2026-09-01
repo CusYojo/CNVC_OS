@@ -67,7 +67,7 @@ export function FdeOfficePolicyPanel() {
   const writable = edit?.status === 'draft'
   const routeChange = (i: number, patch: Partial<OfficePolicy['routes'][number]>) => setConfiguration(c => ({ ...c, routes: c.routes.map((r, n) => n === i ? { ...r, ...patch } : r) }))
   if (visibleFor !== userId) return <p className="p-4 text-sm text-slate-500">正在核对当前账号的规则权限…</p>
-  return <div className="space-y-4"><Card className="fde-panel p-5"><h2 className="font-semibold">通用 OA 类型与审批规则</h2><p className="mt-2 text-sm text-slate-500">五类表单、金额与组织路由、节点职责均使用版本化规则。新规则仅影响下一次明确提交；未发布时不允许正式提审。请先确认客户规则，不以默认空表或演示人员代替批准。</p><div className="mt-4 flex flex-wrap gap-2">{officeKinds.map(kind => <Button key={kind} variant="secondary" disabled={busy || blocked} onClick={() => open(undefined, kind)}>新建{kind}规则草稿</Button>)}<Button variant="secondary" disabled={busy} onClick={() => void work(refresh)}>刷新</Button></div></Card>
+  return <div className="space-y-4"><Card className="fde-panel p-5"><div className="flex flex-wrap items-center justify-between gap-3"><h2 className="font-semibold">通用 OA 类型与审批规则</h2><div className="flex flex-wrap gap-2">{officeKinds.map(kind => <Button key={kind} variant="secondary" disabled={busy || blocked} onClick={() => open(undefined, kind)}>新建{kind}规则草稿</Button>)}<Button variant="secondary" disabled={busy} onClick={() => void work(refresh)}>刷新</Button></div></div></Card>
     {error && <p role="alert" className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">{error}</p>}
     {storageError && <p role="alert" className="p-3 text-sm text-red-700">{storageError}</p>}
     {notice && <p role="status" className="p-3 text-sm text-[#315f68]">{notice}</p>}

@@ -75,7 +75,7 @@ function AccountRegistration({ uid, compact }: { uid: string; compact: boolean }
     finally { finishWrite() }
   }
   return <Card className={compact ? 'fde-registration-entry space-y-3' : 'mb-4 space-y-3 p-4'}>
-    <div className="flex flex-wrap items-center justify-between gap-3">{!compact && <div><h2 className="text-sm font-semibold">非投资项目受控登记</h2><p className="mt-1 text-xs text-slate-500">仅使用独立批准并显式启用的模板，不经过投资线索转换，不自动生成任务。</p></div>}<Button variant="secondary" disabled={blocked || !options?.policies.length} onClick={() => { editDraft({ open: true }); setResult(null) }}>登记非投资项目</Button></div>
+    <div className="flex flex-wrap items-center justify-between gap-3">{!compact && <h2 className="text-sm font-semibold">非投资项目受控登记</h2>}<Button variant="secondary" disabled={blocked || !options?.policies.length} onClick={() => { editDraft({ open: true }); setResult(null) }}>登记非投资项目</Button></div>
     {view.phase === 'checking' && <p role="status" className="text-xs text-slate-500">正在重新核对当前账号、登记权限与精确模板版本，表单暂时锁定；核对一致后恢复未提交草稿…</p>}
     {view.phase === 'ready' && options && !options.policies.length && <p className="text-xs text-slate-500">暂无对当前账号开放的已批准登记模板；需先明确规则并完成独立审核、发布及启用。</p>}
     {(error || storageError) && <p role="alert" className="text-sm text-red-700">{storageError || error}</p>}

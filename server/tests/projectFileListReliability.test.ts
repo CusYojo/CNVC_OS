@@ -37,3 +37,16 @@ test('project detail loads its own files and never turns a global list failure i
   assert.match(page, /重新加载/)
   assert.match(store, /results\[6\]\.status === 'fulfilled' \? results\[6\]\.value\.list : get\(\)\.files/)
 })
+
+test('current approval material access is node-bound, snapshot-bound and view-only', async () => {
+  const fileAccess = await source('../src/services/projectFileAccessService.ts')
+  const start = fileAccess.indexOf('function currentApprovalMaterialScope')
+  const end = fileAccess.indexOf('export function projectFileAccessCondition', start)
+  const approvalScope = fileAccess.slice(start, end)
+  assert.match(approvalScope, /approval_request\.current_node_id/)
+  assert.match(approvalScope, /approval_request\.status='审批中'/)
+  assert.match(approvalScope, /JSON_TABLE\(approval_request\.material_snapshot/)
+  assert.match(approvalScope, /approver_user_ids/)
+  assert.match(approvalScope, /approved_by_user_ids/)
+  assert.match(fileAccess, /operation === 'view' \? currentApprovalMaterialScope\(userId\) : undefined/)
+})

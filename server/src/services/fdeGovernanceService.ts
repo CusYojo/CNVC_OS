@@ -10,22 +10,102 @@ import { getProjectWorkflowPolicy } from './fdeWorkflowPolicyService.js'
 type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0]
 type Reader = Pick<typeof db, 'select'>
 type ProjectRow = typeof projects.$inferSelect
-type Person = { id: string; name: string; department: string; roleCodes: string[]; categories: string[] }
+export type FdeCreationPerson = {
+  id: string
+  name: string
+  department: string
+  role: string
+  roleCodes: string[]
+  categories: string[]
+  capabilities: {
+    canOwn: boolean
+    canBoss: boolean
+    canProjectManager: boolean
+    canLegal: boolean
+    canFinance: boolean
+  }
+}
+type Person = Omit<FdeCreationPerson, 'capabilities'>
+export type FdeCreationDuty = 'boss' | 'project_manager' | 'legal' | 'finance'
+export type FdeCreationAssignment = { duty: FdeCreationDuty; userId: string }
 const failure = (status: number, code: string, message: string) => Object.assign(new Error(message), { status, code })
 const assignmentKey = (item: { duty: string; userId: string }) => `${item.duty}:${item.userId}`
 
 async function enabledPeople(reader: Reader): Promise<Person[]> {
-  const rows = await reader.select({ id: users.id, name: users.name, department: users.department, roleCode: roles.code, category: roles.fdeCategory }).from(users)
+  const rows = await reader.select({ id: users.id, name: users.name, department: users.department, role: users.role, roleCode: roles.code, category: roles.fdeCategory }).from(users)
     .innerJoin(userRoles, eq(userRoles.userId, users.id)).innerJoin(roles, eq(roles.id, userRoles.roleId))
     .where(and(eq(users.status, '启用'), eq(roles.status, '启用'))).orderBy(asc(users.name))
   const people = new Map<string, Person>()
   for (const row of rows) {
-    const person = people.get(row.id) ?? { id: row.id, name: row.name, department: row.department, roleCodes: [], categories: [] }
+    const person = people.get(row.id) ?? { id: row.id, name: row.name, department: row.department, role: row.role, roleCodes: [], categories: [] }
     person.roleCodes.push(row.roleCode)
     if (row.category && !person.categories.includes(row.category)) person.categories.push(row.category)
     people.set(row.id, person)
   }
   return [...people.values()]
+}
+
+function creationPerson(person: Person): FdeCreationPerson {
+  const businessCategories = ['institution_leader', 'project_lead', 'member']
+  return {
+    ...person,
+    capabilities: {
+      canOwn: person.categories.some((category) => businessCategories.includes(category)),
+      canBoss: person.roleCodes.some((code) => ['FDE_CHAIRMAN', 'FDE_PRESIDENT'].includes(code)),
+      canProjectManager: person.categories.some((category) => ['institution_leader', 'secretary', 'project_lead', 'member'].includes(category)),
+      canLegal: person.roleCodes.includes('FDE_LEGAL') || /法务/.test(person.role),
+      // 当前组织没有单独的财务角色编码，专业岗均可承担财务复核；新增专岗后会自动进入候选列表。
+      canFinance: person.categories.includes('specialist'),
+    },
+  }
+}
+
+export async function getFdeProjectCreationRoster(userId: string) {
+  const actor = await identityRepositories.users.findById(userId)
+  if (!actor || actor.status !== '启用') throw failure(403, 'USER_DISABLED_OR_MISSING', '当前账号不可创建项目')
+  const people = (await enabledPeople(db))
+    .filter((person) => person.categories.some((category) => category !== 'system_admin'))
+    .map(creationPerson)
+  return { people }
+}
+
+export async function prepareFdeCreationGovernance(reader: Reader, input: { ownerUserId: string; assignments: FdeCreationAssignment[] }) {
+  const people = await enabledPeople(reader)
+  const byId = new Map(people.map((person) => [person.id, creationPerson(person)]))
+  const normalized = new Map<string, FdeDutyAssignment>()
+  const selected = (duty: FdeCreationDuty) => input.assignments.filter((item) => item.duty === duty)
+  const requireDuty = (duty: FdeCreationDuty, label: string) => {
+    if (!selected(duty).length) throw failure(400, 'FDE_CREATION_DUTY_REQUIRED', `快速新建项目必须至少配置 1 位${label}`)
+  }
+  requireDuty('boss', '老板（陈斌或黄昕）')
+  requireDuty('project_manager', '项目经理')
+  requireDuty('legal', '法务')
+  requireDuty('finance', '财务')
+  const owner = byId.get(input.ownerUserId)
+  if (!owner?.capabilities.canOwn) throw failure(400, 'FDE_OWNER_INVALID', '项目负责人必须是启用的业务人员')
+  for (const assignment of input.assignments) {
+    const person = byId.get(assignment.userId)
+    if (!person) throw failure(400, 'FDE_DUTY_PERSON_INVALID', '职责人员不存在或已禁用')
+    if (assignment.duty === 'boss' && !person.capabilities.canBoss) throw failure(400, 'FDE_BOSS_INVALID', '老板只能选择陈斌或黄昕对应的启用账号')
+    if (assignment.duty === 'project_manager' && !person.capabilities.canProjectManager) throw failure(400, 'FDE_PROJECT_MANAGER_INVALID', '项目经理必须是启用的项目业务人员')
+    if (assignment.duty === 'legal' && !person.capabilities.canLegal) throw failure(400, 'FDE_LEGAL_INVALID', '法务必须选择具备法务岗位的启用账号')
+    if (assignment.duty === 'finance' && !person.capabilities.canFinance) throw failure(400, 'FDE_FINANCE_INVALID', '财务必须选择具备专业复核岗位的启用账号')
+    if (assignment.duty === 'legal' || assignment.duty === 'finance') {
+      const persistent: FdeDutyAssignment = { duty: assignment.duty, userId: assignment.userId }
+      normalized.set(assignmentKey(persistent), persistent)
+    }
+  }
+  // 快速创建时同步补齐现有审批策略依赖的职责，避免进入下一阶段后因缺岗中断。
+  for (const boss of selected('boss')) {
+    normalized.set(assignmentKey({ duty: 'concerned_leader', userId: boss.userId }), { duty: 'concerned_leader', userId: boss.userId })
+    const person = byId.get(boss.userId)!
+    if (person.roleCodes.includes('FDE_CHAIRMAN')) normalized.set(assignmentKey({ duty: 'chairman', userId: boss.userId }), { duty: 'chairman', userId: boss.userId })
+    if (person.roleCodes.includes('FDE_PRESIDENT')) normalized.set(assignmentKey({ duty: 'president', userId: boss.userId }), { duty: 'president', userId: boss.userId })
+  }
+  for (const manager of selected('project_manager')) normalized.set(assignmentKey({ duty: 'secretary', userId: manager.userId }), { duty: 'secretary', userId: manager.userId })
+  const assignments = [...normalized.values()]
+  validateAssignments(input.ownerUserId, assignments, people)
+  return { owner: byId.get(input.ownerUserId)!, assignments, people: [...byId.values()] }
 }
 
 async function canManage(project: ProjectRow, userId: string, tx?: Transaction) {

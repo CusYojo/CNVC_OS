@@ -113,12 +113,24 @@ meetingsRouter.patch('/:id', async (req: AuthedRequest, res, next) => {
 })
 
 export const todosRouter = Router()
+const TodoListQuerySchema = z.object({
+  owner: z.string().optional(),
+  projectId: z.string().uuid().optional(),
+  personal: z.enum(['true']).optional(),
+  dateFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  dateTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+}).refine(value => !value.dateFrom || !value.dateTo || value.dateFrom <= value.dateTo, '待办日期范围无效')
 todosRouter.get('/', async (req: AuthedRequest, res, next) => {
   try {
-    const projectId = req.query.projectId as string | undefined
+    const query = TodoListQuerySchema.parse(req.query)
+    const projectId = query.projectId
     if (projectId) await requireAccessibleProject(req.user!.uid, projectId)
     res.json({
-      list: await listTodos(req.query.owner as string | undefined, projectId, req.user!),
+      list: await listTodos(query.owner, projectId, req.user!, query.personal === 'true' ? {
+        personalOwnerUserId: req.user!.uid,
+        dateFrom: query.dateFrom,
+        dateTo: query.dateTo,
+      } : undefined),
       counts: await todoCounts(req.user!),
     })
   }

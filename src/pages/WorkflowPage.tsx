@@ -5,7 +5,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useToast } from '../components/Toast'
 import { Badge, Button, Card, Drawer, Modal, PageHeader, SearchInput, StageBadge, Tabs } from '../components/ui'
 import { useAuthStore } from '../store/useAuthStore'
-import type { ApprovalRequest, ProjectStage } from '../types'
+import type { ApprovalRequest, Project, ProjectStage } from '../types'
 import { FdeOfficePanel } from '../components/FdeOfficePanel'
 import { FdeTypePolicyPanel } from '../components/FdeTypePolicyPanel'
 import { approvalCenterReturnPath } from '../../server/src/contracts/fdeApprovalCenterContract'
@@ -14,7 +14,7 @@ const workflowStages: ProjectStage[] = ['入库', '立项', '尽调计划制定'
 const legacyWorkflowStages: ProjectStage[] = ['线索', '初筛', '立项', '尽调', '上会', '投决', '投后', '退出']
 const approvalTone = (status: ApprovalRequest['status']) => status === '已通过' ? 'green' : status === '审批中' ? 'blue' : status === '已退回' ? 'amber' : status === '已拒绝' ? 'red' : 'slate'
 const nextStageFor = (stage: ProjectStage, model = 'legacy') => {
-  if (['放弃', '退出', '已 Close', '入库'].includes(stage)) return null
+  if (['放弃', '退出', '已 Close'].includes(stage)) return null
   const stages = model === 'fde-v1' ? [...workflowStages, '已 Close' as ProjectStage] : legacyWorkflowStages
   const index = stages.indexOf(stage)
   return index >= 0 ? stages[index + 1] ?? null : null
@@ -31,10 +31,31 @@ const standardApprovalChain = [
   ['打款 → Close', '财务复核', '法务复核', '董事长', '总裁'],
 ]
 
+function WorkflowStageRail({ project, pending }: { project: Project; pending?: ApprovalRequest }) {
+  const stages = [...workflowStages, '已 Close' as ProjectStage]
+  const currentIndex = Math.max(0, stages.indexOf(project.stage))
+  return (
+    <div className="mt-6 overflow-x-auto rounded-2xl border border-slate-200 bg-gradient-to-r from-slate-50 via-white to-brand-50/50 px-5 py-5">
+      <div className="flex min-w-[850px] items-start">
+        {stages.map((stage, index) => {
+          const done = index < currentIndex
+          const current = index === currentIndex
+          return <div key={stage} className="relative flex flex-1 flex-col items-center text-center">
+            {index > 0 && <span className={`absolute right-1/2 top-4 h-0.5 w-full ${index <= currentIndex ? 'bg-emerald-400' : 'bg-slate-200'}`} />}
+            <span className={`relative z-10 grid h-8 w-8 place-items-center rounded-full text-xs font-bold shadow-sm ${done ? 'bg-emerald-500 text-white' : current ? 'bg-brand-600 text-white ring-4 ring-brand-100' : 'border border-slate-200 bg-white text-slate-400'}`}>{done ? <CheckCircle2 className="h-4 w-4" /> : index + 1}</span>
+            <span className={`mt-2 whitespace-nowrap text-[11px] ${current ? 'font-semibold text-brand-700' : done ? 'text-emerald-700' : 'text-slate-400'}`}>{stage}</span>
+            {current && <span className="mt-1 rounded-full bg-brand-100 px-2 py-0.5 text-[10px] text-brand-700">{pending ? `${pending.currentNodeName}审批中` : '当前阶段'}</span>}
+          </div>
+        })}
+      </div>
+    </div>
+  )
+}
+
 export function WorkflowPage() {
   const [params] = useSearchParams()
   if (params.get('view') === 'type-policies') return <FdeTypePolicyPanel />
-  return ['project', 'board'].includes(params.get('view') ?? '') || Boolean(params.get('request')) ? <ProjectWorkflowPage /> : <FdeOfficePanel />
+  return ['project', 'board'].includes(params.get('view') ?? '') || Boolean(params.get('project')) || Boolean(params.get('request')) ? <ProjectWorkflowPage /> : <FdeOfficePanel />
 }
 
 function ProjectWorkflowPage() {
@@ -50,7 +71,7 @@ function ProjectWorkflowPage() {
   const rejectRequest = useAppStore((state) => state.rejectRequest)
   const withdrawRequest = useAppStore((state) => state.withdrawRequest)
   const { showToast } = useToast()
-  const initialProjectId = searchParams.get('project') ?? projects.find((project) => currentUser.role === '系统管理员' || project.owner === currentUser.name || project.collaborators.includes(currentUser.name))?.id ?? ''
+  const initialProjectId = searchParams.get('project') ?? projects.find((project) => currentUser.role === '系统管理员' || project.isParticipant)?.id ?? ''
   const requestedView = searchParams.get('view')
   const [tab, setTab] = useState(['project', 'pending', 'mine', 'all', 'board'].includes(requestedView ?? '') ? requestedView! : 'project')
   const [query, setQuery] = useState('')
@@ -85,14 +106,22 @@ function ProjectWorkflowPage() {
     if (requestId) setSelected(requests.find((item) => item.id === requestId) ?? null)
   }, [searchParams, requests])
   const visibleRequests = useMemo(() => requests
-    .filter((item) => tab === 'pending' ? isActionableByCurrentUser(item) : tab === 'mine' ? item.applicant === currentUser.name : true)
+    .filter((item) => tab === 'pending' ? isActionableByCurrentUser(item) : tab === 'mine' ? (item.applicantUserId ? item.applicantUserId === currentUser.id : item.applicant === currentUser.name) : true)
     .filter((item) => !query || `${item.requestNo}${item.title}${item.projectName}`.toLowerCase().includes(query.toLowerCase()))
     .sort((a, b) => b.submittedAt.localeCompare(a.submittedAt)), [requests, tab, currentUser.name, currentUser.role, query])
 
   const selectedProject = projects.find((item) => item.id === projectId)
   const projectRequests = requests.filter((item) => item.projectId === projectId).sort((a, b) => b.submittedAt.localeCompare(a.submittedAt))
-  const manageableProjects = projects.filter((project) => currentUser.role === '系统管理员' || project.owner === currentUser.name || project.collaborators.includes(currentUser.name))
+  const manageableProjects = projects.filter((project) => currentUser.role === '系统管理员' || (project.workflowModel === 'fde-v1' ? project.ownerUserId === currentUser.id : project.owner === currentUser.name || project.collaborators.includes(currentUser.name)))
   const visibleProjects = manageableProjects.filter((project) => (project.lifecycle ?? 'active') === 'active' && project.classification !== 'pool' && !['退出', '放弃', '已 Close'].includes(project.stage) && (!query || `${project.name}${project.companyName}`.toLowerCase().includes(query.toLowerCase())))
+  const firstVisibleProjectId = visibleProjects[0]?.id
+  useEffect(() => {
+    if (projectId || !firstVisibleProjectId) return
+    const project = projects.find((item) => item.id === firstVisibleProjectId)
+    setProjectId(firstVisibleProjectId)
+    const next = project && nextStageFor(project.stage, project.workflowModel)
+    if (next) setTargetStage(next)
+  }, [projectId, firstVisibleProjectId, projects])
   const defaultTarget = selectedProject ? nextStageFor(selectedProject.stage, selectedProject.workflowModel) : null
   const activeRequest = selectedProject && requests.find((item) => item.projectId === selectedProject.id && item.status === '审批中' && item.businessType !== 'task_extension')
   const selectedCurrentNode = selected?.nodes.find((node) => node.id === selected.currentNodeId)
@@ -109,8 +138,9 @@ function ProjectWorkflowPage() {
   const openCreate = (nextProjectId = projectId) => {
     const project = projects.find((item) => item.id === nextProjectId)
     if (!project) return
-    if (currentUser.role !== '系统管理员' && project.owner !== currentUser.name && !project.collaborators.includes(currentUser.name)) {
-      showToast('你不是该项目负责人或协作成员，不能发起申请', 'error')
+    const canSubmit = currentUser.role === '系统管理员' || (project.workflowModel === 'fde-v1' ? project.ownerUserId === currentUser.id : project.owner === currentUser.name || project.collaborators.includes(currentUser.name))
+    if (!canSubmit) {
+      showToast('只有项目负责人可以发起该项目的阶段审批', 'error')
       return
     }
     const active = requests.find((item) => item.projectId === project.id && item.status === '审批中')
@@ -175,17 +205,16 @@ function ProjectWorkflowPage() {
     <div>
       <PageHeader
         title="项目审批与阶段看板"
-        description="发起、审批、退回与归档形成完整闭环；项目阶段只接受“全部审批通过”的 OA 结果。"
         actions={<><a className="text-sm text-teal-800" href={approvalCenterReturnPath(searchParams.get('center'))}>统一审批中心</a><Button variant="secondary" onClick={() => setShowChain(true)}><GitBranch className="h-4 w-4" />标准投资审批链</Button><Button onClick={() => openCreate()}><Plus className="h-4 w-4" />发起项目审批</Button></>}
       />
 
       <div className="mb-5 grid grid-cols-4 gap-4">
         {[
-          ['我的待办审批', pendingCount, '当前节点由我处理', 'blue'],
-          ['本月通过', requests.filter((item) => item.status === '已通过').length, '完成后自动同步阶段', 'green'],
-          ['退回 / 拒绝', requests.filter((item) => ['已退回', '已拒绝'].includes(item.status)).length, '项目阶段保持不变', 'amber'],
-          ['受 OA 管控项目', projects.filter((item) => item.stageSource === 'OA审批' || requests.some((request) => request.projectId === item.id)).length, '全程留痕可审计', 'purple'],
-        ].map(([label, value, note, tone]) => <Card key={String(label)} className="p-4"><div className="flex items-center justify-between"><p className="text-xs text-slate-500">{label}</p><Badge tone={tone as 'blue'}>{note}</Badge></div><p className="mt-3 text-2xl font-semibold text-slate-900">{value}</p></Card>)}
+          ['我的待办审批', pendingCount],
+          ['本月通过', requests.filter((item) => item.status === '已通过').length],
+          ['退回 / 拒绝', requests.filter((item) => ['已退回', '已拒绝'].includes(item.status)).length],
+          ['受 OA 管控项目', projects.filter((item) => item.stageSource === 'OA审批' || requests.some((request) => request.projectId === item.id)).length],
+        ].map(([label, value]) => <Card key={String(label)} className="p-4"><p className="text-xs font-medium text-slate-500">{label}</p><p className="mt-3 text-2xl font-semibold text-slate-900">{value}</p></Card>)}
       </div>
 
       <Card className="overflow-hidden">
@@ -208,7 +237,8 @@ function ProjectWorkflowPage() {
             <div className="p-6">
               {selectedProject ? <div>
                 <div className="flex items-start justify-between"><div><p className="text-xs font-medium text-brand-600">第二步：确认项目与申请类型</p><h2 className="mt-2 text-xl font-semibold text-slate-900">{selectedProject.name}</h2><p className="mt-1 text-sm text-slate-400">{selectedProject.companyName} · {selectedProject.industry} · 负责人 {selectedProject.owner}</p></div>{activeRequest ? <Button variant="secondary" onClick={() => setSelected(activeRequest)}>查看审批中的 OA</Button> : <Button onClick={() => openCreate(selectedProject.id)}><Plus className="h-4 w-4" />发起该项目申请</Button>}</div>
-                <div className="mt-6 rounded-xl border border-brand-100 bg-brand-50/60 p-5"><p className="text-xs text-brand-600">系统建议的下一项申请</p><div className="mt-3 flex items-center gap-3"><StageBadge stage={selectedProject.stage} /><ArrowRight className="h-4 w-4 text-slate-300" />{defaultTarget ? <StageBadge stage={defaultTarget} /> : <Badge>无后续阶段</Badge>}<span className="text-sm font-medium text-slate-700">{defaultTarget ? `${selectedProject.stage} → ${defaultTarget} 阶段审批` : '项目流程已完成'}</span></div><p className="mt-3 text-xs leading-5 text-slate-500">系统按项目当前阶段自动匹配审批模板、节点和前置检查；不能跨阶段申请，也不能直接修改项目状态。</p></div>
+                <WorkflowStageRail project={selectedProject} pending={activeRequest} />
+                <div className="mt-6 rounded-xl border border-brand-100 bg-brand-50/60 p-5"><p className="text-xs font-medium text-brand-600">下一阶段申请</p><div className="mt-3 flex items-center gap-3"><StageBadge stage={selectedProject.stage} /><ArrowRight className="h-4 w-4 text-slate-300" />{defaultTarget ? <StageBadge stage={defaultTarget} /> : <Badge>无后续阶段</Badge>}<span className="text-sm font-medium text-slate-700">{defaultTarget ? `${selectedProject.stage} → ${defaultTarget} 阶段审批` : '项目流程已完成'}</span></div></div>
                 <div className="mt-6 grid grid-cols-3 gap-3">{[['当前阶段', selectedProject.stage], ['项目负责人', selectedProject.owner], ['历史 OA', `${projectRequests.length} 条`]].map(([label, value]) => <div key={label} className="rounded-lg bg-slate-50 p-4"><p className="text-xs text-slate-400">{label}</p><p className="mt-1 text-sm font-semibold text-slate-700">{value}</p></div>)}</div>
                 <div className="mt-6"><h3 className="text-sm font-semibold text-slate-800">该项目的申请记录</h3><div className="mt-3 space-y-2">{projectRequests.map((request) => <button key={request.id} onClick={() => setSelected(request)} className="flex w-full items-center rounded-lg border border-slate-200 p-3 text-left hover:border-brand-200"><div className="flex-1"><p className="text-sm font-medium text-slate-700">{request.title}</p><p className="mt-1 text-xs text-slate-400">{request.requestNo} · {request.applicant} · {request.submittedAt}</p></div><Badge tone={approvalTone(request.status)}>{request.status}</Badge><span className="ml-4 text-xs text-brand-600">查看 →</span></button>)}{!projectRequests.length && <div className="rounded-lg border border-dashed border-slate-200 p-8 text-center text-sm text-slate-400">该项目尚未发起 OA 申请</div>}</div></div>
               </div> : <div className="grid h-full place-items-center text-sm text-slate-400">请先从左侧选择项目</div>}
@@ -241,7 +271,7 @@ function ProjectWorkflowPage() {
 
       <Drawer open={!!selected} onClose={() => setSelected(null)} title={selected?.title ?? '审批详情'} width="w-[760px]" footer={selected?.status === '审批中' ? <>{canWithdrawSelected && <Button variant="secondary" onClick={() => act('withdraw')}>撤回</Button>}{canApproveSelected ? <><Button variant="danger" onClick={() => act('reject')}><XCircle className="h-4 w-4" />拒绝</Button><Button variant="secondary" onClick={() => act('return')}><RotateCcw className="h-4 w-4" />退回补充</Button><Button onClick={() => act('approve')}><CheckCircle2 className="h-4 w-4" />同意并流转</Button></> : <span className="text-xs text-slate-500">当前节点由 {selectedCurrentNode?.approver ?? '指定审批人'} 处理；你只能查看流程。</span>}</> : canResubmitSelected ? <Button onClick={resubmit}><Send className="h-4 w-4" />补充后重新提交</Button> : undefined}>
         {selected && <div className="space-y-6">
-          <div className="rounded-xl border border-brand-100 bg-brand-50/60 p-4"><div className="flex items-center justify-between"><div><p className="text-xs text-brand-600">{selected.requestNo}</p><p className="mt-1 font-semibold text-slate-800">{selected.projectName}</p></div><Badge tone={approvalTone(selected.status)}>{selected.status}</Badge></div><div className="mt-4 flex items-center gap-2">{selected.businessType === 'task_extension' ? <p className="text-sm">任务期限：{selected.businessPayload?.originalDueDate} → {selected.businessPayload?.requestedDueDate}<span className="mt-1 block text-xs text-slate-500">批准前原期限有效；不推进项目阶段。</span></p> : <><StageBadge stage={selected.fromStage} /><ArrowRight className="h-4 w-4 text-slate-300" /><StageBadge stage={selected.targetStage} /><span className="ml-2 text-xs text-slate-500">仅最终通过后同步项目阶段</span></>}</div></div>
+          <div className="rounded-xl border border-brand-100 bg-brand-50/60 p-4"><div className="flex items-center justify-between"><div><p className="text-xs text-brand-600">{selected.requestNo}</p><p className="mt-1 font-semibold text-slate-800">{selected.projectName}</p></div><Badge tone={approvalTone(selected.status)}>{selected.status}</Badge></div><div className="mt-4 flex items-center gap-2">{selected.businessType === 'task_extension' ? <p className="text-sm">任务期限：{selected.businessPayload?.originalDueDate} → {selected.businessPayload?.requestedDueDate}</p> : <><StageBadge stage={selected.fromStage} /><ArrowRight className="h-4 w-4 text-slate-300" /><StageBadge stage={selected.targetStage} /></>}</div></div>
           <div className="grid grid-cols-2 gap-3 text-sm"><div className="rounded-lg bg-slate-50 p-3"><p className="text-xs text-slate-400">申请人 / 部门</p><p className="mt-1 text-slate-700">{selected.applicant} · {selected.department}</p></div><div className="rounded-lg bg-slate-50 p-3"><p className="text-xs text-slate-400">融资计划 / 估值</p><p className="mt-1 text-slate-700">{selected.amount || '未披露'} / {selected.valuation || '待核验'}</p></div></div>
           <section><h3 className="text-sm font-semibold text-slate-800">申请事由</h3><p className="mt-2 rounded-lg bg-slate-50 p-3 text-sm leading-6 text-slate-600">{selected.reason}</p></section>
           {Boolean(selected.materialSnapshot?.length) && <section><h3 className="text-sm font-semibold text-slate-800">冻结材料证据</h3><div className="mt-3 space-y-2">{selected.materialSnapshot!.map((material) => <div key={material.requirementKey} className="rounded-lg border border-slate-200 p-3 text-xs"><strong>{material.requirementKey}</strong><p className="mt-1 text-slate-600">{material.waiverReason ? `免传说明：${material.waiverReason}` : `文件 ID：${material.fileId} · 版本 V${material.fileVersion}`}</p></div>)}</div></section>}
@@ -257,7 +287,7 @@ function ProjectWorkflowPage() {
         <div className="space-y-5">
           <div className="grid grid-cols-2 gap-4"><label><span className="label">项目</span><select className="input" value={projectId} onChange={(event) => { const nextId = event.target.value; const project = projects.find((item) => item.id === nextId); setProjectId(nextId); if (project && nextStageFor(project.stage, project.workflowModel)) setTargetStage(nextStageFor(project.stage, project.workflowModel)!); setReason('') }}>{visibleProjects.map((item) => <option key={item.id} value={item.id}>{item.name}（当前：{item.stage}）</option>)}</select></label><label><span className="label">优先级</span><select className="input" value={priority} onChange={(event) => setPriority(event.target.value as '普通' | '紧急')}><option>普通</option><option>紧急</option></select></label></div>
           {activeRequest && <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">该项目已有审批中的 OA：{activeRequest.requestNo}，不能重复发起。</div>}
-          <div className="rounded-xl border border-brand-100 bg-brand-50/50 p-4"><p className="text-xs font-medium text-brand-700">申请的阶段变更</p><div className="mt-3 flex items-center gap-3"><StageBadge stage={selectedProject?.stage ?? '线索'} /><ArrowRight className="h-4 w-4 text-slate-300" /><select className="input w-32" value={targetStage} onChange={(event) => setTargetStage(event.target.value as ProjectStage)}>{defaultTarget && <option>{defaultTarget}</option>}<option>放弃</option></select><span className="text-xs text-slate-500">提交不会立即改状态；所有审批节点通过后自动同步。</span></div></div>
+          <div className="rounded-xl border border-brand-100 bg-brand-50/50 p-4"><p className="text-xs font-medium text-brand-700">申请的阶段变更</p><div className="mt-3 flex items-center gap-3"><StageBadge stage={selectedProject?.stage ?? '线索'} /><ArrowRight className="h-4 w-4 text-slate-300" /><select className="input w-32" value={targetStage} onChange={(event) => setTargetStage(event.target.value as ProjectStage)}>{defaultTarget && <option>{defaultTarget}</option>}<option>放弃</option></select></div></div>
           <label><span className="label">申请事由与决策依据</span><textarea className="textarea min-h-32" value={reason} onChange={(event) => setReason(event.target.value)} placeholder="说明为什么进入下一阶段、已完成哪些核验、仍有哪些风险…" /></label>
           <div className="grid grid-cols-2 gap-4"><label><span className="label">融资计划（来自项目档案）</span><input className="input" value={selectedProject?.financing ?? ''} readOnly /></label><label><span className="label">估值（来自项目档案）</span><input className="input" value={selectedProject?.valuation ?? ''} readOnly /></label></div>
         </div>

@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, Filter, GitBranch, MoreHorizontal, Pencil, Pin, Plus } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Filter, GitBranch, MoreHorizontal, Pencil, Pin, Plus, Star } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -45,13 +45,13 @@ export function ProjectsPage({ classification = 'normal', embedded = false }: { 
   const owners = Array.from(new Set(projects.map((item) => item.owner)))
   const filtered = useMemo(() => projects
     .filter((project) => (project.classification ?? 'normal') === classification && (project.lifecycle ?? 'active') === 'active')
-    .filter((project) => scope === 'all' || project.owner === currentUser.name)
+    .filter((project) => scope === 'all' || project.isParticipant)
     .filter((project) => !query || `${project.name}${project.companyName}`.toLowerCase().includes(query.toLowerCase()))
     .filter((project) => !stage || project.stage === stage)
     .filter((project) => !industry || project.industry === industry)
     .filter((project) => !owner || project.owner === owner)
     .filter((project) => !risk || project.riskLevel === risk)
-    .sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)) || b.updatedAt.localeCompare(a.updatedAt)), [projects, classification, scope, currentUser.name, query, stage, industry, owner, risk])
+    .sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)) || b.updatedAt.localeCompare(a.updatedAt)), [projects, classification, scope, query, stage, industry, owner, risk])
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize))
   const rows = filtered.slice((page - 1) * pageSize, page * pageSize)
 
@@ -119,6 +119,7 @@ export function ProjectsPage({ classification = 'normal', embedded = false }: { 
   }
 
   const canClassify = currentUser.permissionCodes?.includes('project.classify') ?? false
+  const canPromote = (project: Project) => canClassify || project.ownerUserId === currentUser.id || ['owner', 'project_lead'].includes(project.participantRole ?? '')
   const currentCopy = viewCopy[classification]
 
   return (
@@ -133,7 +134,7 @@ export function ProjectsPage({ classification = 'normal', embedded = false }: { 
         <div className="flex flex-wrap items-center gap-3">
           {embedded && classification === 'pool' && <Button onClick={() => setShowCreate(true)}><Plus className="h-4 w-4" />登记项目</Button>}
           <SearchInput className="min-w-[220px] flex-1" placeholder="搜索项目名称或公司…" value={query} onChange={(event) => { setQuery(event.target.value); setPage(1) }} />
-          <select className="input w-32" value={scope} onChange={(event) => { setScope(event.target.value); setPage(1) }}><option value="mine">我的专属项目</option><option value="all">全部项目</option></select>
+          <select className="input w-32" value={scope} onChange={(event) => { setScope(event.target.value); setPage(1) }}><option value="mine">我的参与项目</option><option value="all">全部可访问项目</option></select>
           <select className="input w-32" value={stage} onChange={(event) => { setStage(event.target.value); setPage(1) }}><option value="">全部阶段</option>{stages.map((item) => <option key={item}>{item}</option>)}</select>
           <select className="input w-36" value={industry} onChange={(event) => { setIndustry(event.target.value); setPage(1) }}><option value="">全部行业</option>{industries.map((item) => <option key={item}>{item}</option>)}</select>
           <select className="input w-32" value={owner} onChange={(event) => { setOwner(event.target.value); setPage(1) }}><option value="">全部负责人</option>{owners.map((item) => <option key={item}>{item}</option>)}</select>
@@ -164,9 +165,10 @@ export function ProjectsPage({ classification = 'normal', embedded = false }: { 
                   <TableCell><span className="whitespace-nowrap text-xs">{formatShanghaiDateTime(project.updatedAt, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</span></TableCell>
                   <TableCell>
                     <div className="flex items-center gap-1 transition">
-                      <button aria-label="发起OA审批" title="发起 OA 审批" className="rounded-lg p-1.5 text-slate-400 hover:bg-white hover:text-brand-600" onClick={(event) => { event.stopPropagation(); navigate(`/workflow?project=${project.id}`) }}><GitBranch className="h-4 w-4" /></button>
+                      {classification === 'normal' && canPromote(project) && <button aria-label={`将${project.name}转为重点项目`} title="转为重点项目" className="inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs font-medium text-amber-700 hover:bg-amber-50" onClick={(event) => { event.stopPropagation(); void changeClassification(project, 'key') }}><Star className="h-4 w-4" />转重点</button>}
+                      <button aria-label="发起OA审批" title="发起 OA 审批" className="rounded-lg p-1.5 text-slate-400 hover:bg-white hover:text-brand-600" onClick={(event) => { event.stopPropagation(); navigate(`/workflow?view=project&project=${project.id}`) }}><GitBranch className="h-4 w-4" /></button>
                       <button aria-label="编辑项目" className="rounded-lg p-1.5 text-slate-400 hover:bg-white hover:text-brand-600" onClick={(event) => { event.stopPropagation(); setEditing(project) }}><Pencil className="h-4 w-4" /></button>
-                      <span className="relative inline-block"><button aria-label="更多操作" className="rounded-lg p-1.5 text-slate-400 hover:bg-white" onClick={(event) => { event.stopPropagation(); setMenuId(menuId === project.id ? null : project.id) }}><MoreHorizontal className="h-4 w-4" /></button>{menuId === project.id && <span className="absolute right-0 top-9 z-20 w-40 rounded-lg border border-slate-200 bg-white py-1 text-sm shadow-lg" onClick={(event) => event.stopPropagation()}>{classification === 'pool' && (project.owner === currentUser.name || canClassify) && <button className="flex w-full items-center gap-2 px-3 py-2 text-left text-brand-700 hover:bg-brand-50" onClick={() => { void changeClassification(project, 'normal') }}>完成入库</button>}{classification === 'normal' && canClassify && <button className="flex w-full items-center gap-2 px-3 py-2 text-left text-brand-700 hover:bg-brand-50" onClick={() => { void changeClassification(project, 'key') }}>升级为重点项目</button>}{classification === 'key' && canClassify && <button className="flex w-full items-center gap-2 px-3 py-2 text-left text-slate-600 hover:bg-slate-50" onClick={() => { void changeClassification(project, 'normal') }}>调整为普通项目</button>}<button className="flex w-full items-center gap-2 px-3 py-2 text-left text-slate-600 hover:bg-slate-50" onClick={() => handlePin(project)}>{project.pinned ? '取消置顶' : '置顶'}</button><button className="flex w-full items-center gap-2 px-3 py-2 text-left text-rose-600 hover:bg-rose-50" onClick={() => requestDelete(project)}>删除项目</button></span>}</span>
+                      <span className="relative inline-block"><button aria-label="更多操作" className="rounded-lg p-1.5 text-slate-400 hover:bg-white" onClick={(event) => { event.stopPropagation(); setMenuId(menuId === project.id ? null : project.id) }}><MoreHorizontal className="h-4 w-4" /></button>{menuId === project.id && <span className="absolute right-0 top-9 z-20 w-40 rounded-lg border border-slate-200 bg-white py-1 text-sm shadow-lg" onClick={(event) => event.stopPropagation()}>{classification === 'pool' && (project.owner === currentUser.name || canClassify) && <button className="flex w-full items-center gap-2 px-3 py-2 text-left text-brand-700 hover:bg-brand-50" onClick={() => { void changeClassification(project, 'normal') }}>完成入库</button>}{classification === 'normal' && canPromote(project) && <button className="flex w-full items-center gap-2 px-3 py-2 text-left text-brand-700 hover:bg-brand-50" onClick={() => { void changeClassification(project, 'key') }}>升级为重点项目</button>}{classification === 'key' && canClassify && <button className="flex w-full items-center gap-2 px-3 py-2 text-left text-slate-600 hover:bg-slate-50" onClick={() => { void changeClassification(project, 'normal') }}>调整为普通项目</button>}<button className="flex w-full items-center gap-2 px-3 py-2 text-left text-slate-600 hover:bg-slate-50" onClick={() => handlePin(project)}>{project.pinned ? '取消置顶' : '置顶'}</button><button className="flex w-full items-center gap-2 px-3 py-2 text-left text-rose-600 hover:bg-rose-50" onClick={() => requestDelete(project)}>删除项目</button></span>}</span>
                     </div>
                   </TableCell>
                 </tr>

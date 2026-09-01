@@ -90,7 +90,7 @@ const REQUIRED_RUNTIME_TABLES = [
   'meeting_workflow_events', 'meeting_workflow_notices',
   'committee_meetings', 'committee_years', 'committee_agendas', 'committee_files', 'committee_commands',
   'project_directives', 'directive_events', 'directive_notices', 'leader_time_requests',
-  'leader_time_events', 'leader_time_notices', 'personal_calendar_events', 'personal_calendar_history',
+  'leader_time_events', 'leader_time_notices', 'personal_calendar_events', 'personal_calendar_history', 'todo_calendar_schedules', 'todo_calendar_schedule_history',
   'leader_time_batches',
   'project_records', 'project_record_comments', 'project_record_events',
   'project_file_grants', 'project_file_events', 'project_material_submissions',

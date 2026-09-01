@@ -71,14 +71,13 @@ function RuntimePanel({ project, files, onChanged, uid }: Props & { uid: string 
   } catch (e) { setError(explain(e)) } }
   return <Card className="fde-workspace fde-detail-type-flow space-y-4 p-5">
     {returnCenter !== null && <Link className="text-sm text-[#315f68]" to={approvalCenterReturnPath(returnCenter)}>返回统一审批中心</Link>}
-    <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-semibold">流程推进</h2><p className="mt-1 text-xs text-slate-500">绑定批准版本，计划发布后生成正式任务，阶段通过依赖真实成果验收。</p></div><Badge>{instance ? statuses[instance.status] : '尚未保存执行计划'}</Badge></div>
+    <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="font-semibold">流程推进</h2><Badge>{instance ? statuses[instance.status] : '尚未保存执行计划'}</Badge></div>
     {error && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</p>}{notice && <p role="status" className="text-sm text-emerald-700">{notice}</p>}
     {pending && <div className="rounded-lg bg-amber-50 p-3 text-sm">存在待核对操作：{pending.action}。<Button variant="secondary" disabled={busy} onClick={() => void recover()}>核对原请求结果</Button></div>}
     {!data && <p className="text-sm text-slate-500">{error ? '当前执行状态未能读取。' : '正在读取执行状态…'}</p>}
     {data && <>
       {!data.policyEnabled && <p className="rounded-lg bg-amber-50 p-3 text-sm">{data.canAdvance ? '模板当前不接受新登记；本项目按独立批准的停用规则继续绑定版本，不自动换版。' : '模板未获准执行；可编制/核对计划，不能生成正式任务或推进阶段。'}</p>}
       {config?.actions.some(a => a.needLeader) && <section className="space-y-2 rounded-lg bg-slate-50 p-3 text-sm" aria-label="非投资计划领导时间">
-        <p>需领导参与行动在计划批准后生成独立时间需求，按当前有效牵头领导关联；生成申请不代表领导已确认。</p>
         {data.leaderTimes.issues.map(issue => <p role="alert" className="text-amber-800" key={issue}>{issue}</p>)}
         {data.leaderTimes.requests.map(row => <div key={row.id}><Link className="text-[#315f68] underline" to={row.target}>{data.tasks.find(t => t.id === row.taskId)?.title ?? '计划行动'} · {row.leaderName} · {{ draft: '草稿', requested: '已申请', pending: '待领导确认', supplement: '需补信息', confirmed: '已确认', rejected: '已拒绝', withdrawn: '已撤回', cancelled: '已取消' }[row.status] ?? row.status}</Link>{row.changed && <p className="text-amber-800">{row.reason}</p>}</div>)}
         {instance?.planId && data.canPrepare && data.canWrite && <Button variant="secondary" disabled={blocked || reason.trim().length < 5} onClick={() => void execute({ action: 'reconcile_times' })}>按当前职责核对领导需求</Button>}

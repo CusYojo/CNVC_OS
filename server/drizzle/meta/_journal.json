@@ -617,6 +617,27 @@
       "when": 1791100143000,
       "tag": "0087_add_fde_office_execution",
       "breakpoints": true
+    },
+    {
+      "idx": 88,
+      "version": "5",
+      "when": 1791186543000,
+      "tag": "0088_add_fde_plan_participants",
+      "breakpoints": true
+    },
+    {
+      "idx": 89,
+      "version": "5",
+      "when": 1791272943000,
+      "tag": "0089_allow_multiple_stage_materials",
+      "breakpoints": true
+    },
+    {
+      "idx": 90,
+      "version": "5",
+      "when": 1791359343000,
+      "tag": "0090_add_todo_calendar_schedules",
+      "breakpoints": true
     }
   ]
 }

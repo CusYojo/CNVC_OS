@@ -21,6 +21,31 @@ type Node = typeof nodes.$inferSelect
 const definitionOf = (row: Request) => officeDefinition.parse(row.businessPayload.definition)
 const departmentsOf = (row: Request) => z.array(z.string().uuid()).parse(row.businessPayload.departmentIds ?? [])
 const byteHash = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex')
+const defaultLeaveAllowance: Record<string, number | null> = { '年假': 10, '事假': 5, '病假': 10, '婚假': null, '产假': null, '调休': null }
+
+async function leaveBalances(reader: Pick<OfficeTx, 'select'>, userId: string) {
+  const year = new Date(Date.now() + 8 * 3600000).getUTCFullYear()
+  const used = new Map<string, number>()
+  const rows = await reader.select({ status: requests.status, payload: requests.businessPayload }).from(requests).where(and(eq(requests.applicantUserId, userId), eq(requests.businessType, 'office'), eq(requests.type, '请假'), eq(requests.status, '已通过')))
+  for (const row of rows) {
+    const parsed = officeDefinition.safeParse(row.payload?.definition)
+    if (!parsed.success || parsed.data.details.kind !== '请假' || !parsed.data.details.startAt || Number(parsed.data.details.startAt.slice(0, 4)) !== year) continue
+    const days = (Number(parsed.data.details.hours ?? '0') || 0) / 8
+    used.set(parsed.data.details.leaveType, (used.get(parsed.data.details.leaveType) ?? 0) + days)
+  }
+  return Object.entries(defaultLeaveAllowance).map(([type, allowanceDays]) => {
+    const usedDays = Math.round((used.get(type) ?? 0) * 100) / 100
+    return { type, allowanceDays, usedDays, remainingDays: allowanceDays == null ? null : Math.max(0, Math.round((allowanceDays - usedDays) * 100) / 100) }
+  })
+}
+
+async function validateLeaveBalance(reader: Pick<OfficeTx, 'select'>, userId: string, definition: OfficeDefinition) {
+  const details = definition.details
+  if (details.kind !== '请假') return []
+  const balance = (await leaveBalances(reader, userId)).find(row => row.type === details.leaveType)
+  const requestedDays = (Number(details.hours ?? '0') || 0) / 8
+  return balance?.remainingDays != null && requestedDays > balance.remainingDays ? [`${balance.type}剩余 ${balance.remainingDays} 天，本次申请 ${requestedDays} 天`] : []
+}
 const expected = (row: Request, version: number) => { if (row.lockVersion !== version) return fail('OFFICE_VERSION_CONFLICT', '申请已更新，请核对最新版本后重新确认') }
 async function lockCommand(tx: OfficeTx, requestId: string, userId: string, commandId: string) {
   const [actor] = await tx.select({ id: users.id, name: users.name }).from(users).where(and(eq(users.id, userId), eq(users.status, '启用')))
@@ -126,7 +151,7 @@ export async function previewOfficeRequest(id: string, userId: string) {
   return locked(id, userId, async (tx, row) => {
     await editable(tx, row, userId)
     const definition = definitionOf(row), route = await resolveOfficeRoute(tx, definition, userId)
-    return { requestVersion: row.lockVersion, policyVersionId: route.policy.id, policyRevision: route.policy.revision, routeKey: route.routeKey, routeHash: route.routeHash, nodes: route.nodes, issues: validateOfficeSubmission(definition, route.policy.configuration), sharingRequired: definition.attachmentIds.length > 0 }
+    return { requestVersion: row.lockVersion, policyVersionId: route.policy.id, policyRevision: route.policy.revision, routeKey: route.routeKey, routeHash: route.routeHash, nodes: route.nodes, issues: [...validateOfficeSubmission(definition, route.policy.configuration), ...await validateLeaveBalance(tx, userId, definition)], sharingRequired: definition.attachmentIds.length > 0 }
   })
 }
 export async function actOnOfficeRequest(id: string, userId: string, raw: unknown) {
@@ -140,7 +165,7 @@ export async function actOnOfficeRequest(id: string, userId: string, raw: unknow
       await officeProject(tx, userId, row.projectId, true)
       const definition = definitionOf(row), resolved = await resolveOfficeRoute(tx, definition, userId, true)
       if (input.expectedPolicyVersionId !== resolved.policy.id || input.expectedRouteHash !== resolved.routeHash) return fail('OFFICE_POLICY_CHANGED', '规则或审批人员已变化，请重新预览并确认审批路径')
-      const issues = validateOfficeSubmission(definition, resolved.policy.configuration)
+      const issues = [...validateOfficeSubmission(definition, resolved.policy.configuration), ...await validateLeaveBalance(tx, userId, definition)]
       if (issues.length) return fail('OFFICE_VALIDATION_FAILED', issues.join('；'), 400)
       const selected = await evidence(tx, row, userId, true)
       if (selected.length && input.confirmAttachmentSharing !== true) return fail('OFFICE_SHARING_CONFIRMATION', '请明确确认向审批路径人员授予原件查看权')
@@ -207,6 +232,7 @@ export async function uploadOfficeAttachment(id: string, fileId: string, userId:
   return locked(id, userId, async (tx, row) => {
     const prior = await replay(tx, input.clientRequestId, hash); if (prior) return prior
     expected(row, input.expectedVersion)
+    if (row.type === '报销' && input.purpose === 'application' && !['pdf', 'jpg', 'jpeg', 'png'].includes(validated.extension)) return fail('OFFICE_EXPENSE_FILE_TYPE', '报销证明材料仅支持 PDF、JPG/JPEG 和 PNG', 415)
     if (input.purpose === 'signed') {
       if (row.type !== '合同' || row.status !== '已通过' || row.applicantUserId !== userId) return fail('OFFICE_SIGNED_COPY_FORBIDDEN', '只有申请人可为已批准合同另存签署件', 403)
     } else if (input.purpose === 'execution') { await requireOfficeExecutor(tx, row, userId); await evidence(tx, row, userId, true) }
@@ -216,7 +242,8 @@ export async function uploadOfficeAttachment(id: string, fileId: string, userId:
     // Unique revisions are retained if DB commit fails; never delete possibly committed bytes.
     const storagePath = await saveProjectFileRevision(`_oa/${id}`, fileId, validated.buffer)
     await tx.insert(files).values({ id: fileId, requestId: id, name: validated.name, mime: validated.contentType, byteSize: validated.byteSize, sha256: validated.sha256, storagePath, uploadedBy: userId, purpose: input.purpose })
-    const next = await update(tx, row, {})
+    const definition = definitionOf(row)
+    const next = await update(tx, row, input.purpose === 'application' ? { businessPayload: { ...row.businessPayload, definition: { ...definition, attachmentIds: [...definition.attachmentIds, fileId] } } } : {})
     return event(tx, next, userId, input.clientRequestId, hash, input.purpose === 'signed' ? 'signed-copy' : 'upload', input.reason)
   }, undefined, tx => beginCommand(tx, id, userId, input.clientRequestId, hash))
 }
@@ -276,6 +303,13 @@ export async function listOfficeRequests(userId: string, raw: unknown) {
   return { list, total, page, pageSize }
 }
 
+export async function listReusableOfficeRequests(userId: string, raw: unknown) {
+  const kind = z.enum(['出差', '用印', '报销', '请假', '合同']).parse(raw)
+  await officeActor(db, userId)
+  const rows = await db.select().from(requests).where(and(eq(requests.applicantUserId, userId), eq(requests.businessType, 'office'), eq(requests.type, kind), ne(requests.status, '已删除'))).orderBy(desc(requests.updatedAt)).limit(20)
+  return rows.map(row => ({ id: row.id, requestNo: row.requestNo, title: row.title, status: row.status, updatedAt: row.updatedAt, definition: { ...definitionOf(row), attachmentIds: [] } }))
+}
+
 export async function officeOptions(userId: string) {
   const { actor } = await officeActor(db, userId)
   const people = []
@@ -284,7 +318,7 @@ export async function officeOptions(userId: string) {
   }
   const projectRows = await db.select({ id: projects.id, name: projects.name }).from(projects).where(and(eq(projects.lifecycle, 'active'), projectAccessCondition({ uid: userId, name: actor.name, role: actor.role }))).orderBy(asc(projects.name))
   const enabledKinds = (await db.select({ kind: policies.kind }).from(policies).where(eq(policies.enabled, true))).map(p => p.kind)
-  return { people, projects: projectRows, enabledKinds }
+  return { people, projects: projectRows, enabledKinds, leaveBalances: await leaveBalances(db, userId) }
 }
 
 export async function officeTransferCandidates(id: string, userId: string) {

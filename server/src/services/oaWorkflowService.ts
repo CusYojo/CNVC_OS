@@ -178,7 +178,7 @@ function iso(value: Date | null | undefined) {
 function materialSnapshotIdentity(snapshot: typeof oaApprovalRequests.$inferSelect['materialSnapshot']) {
   // MySQL 的 JSON 二进制格式会重新排列对象键；比较业务字段，不能比较对象序列化顺序。
   return JSON.stringify(snapshot.map((item) => [item.requirementKey, item.fileId, item.fileVersion, item.waiverReason])
-    .sort((left, right) => String(left[0]).localeCompare(String(right[0]))))
+    .sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right))))
 }
 
 async function activeUser(userRepository: UserRepository, userId: string) {

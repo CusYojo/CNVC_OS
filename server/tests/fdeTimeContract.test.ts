@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { randomUUID } from 'node:crypto'
-import { validLeaderSlot, timeInstant, timeLocal, intervalsOverlap, timeActionSchema, calendarDefinitionSchema, timeCreateSchema } from '../src/contracts/fdeTimeContract.js'
+import { validLeaderSlot, timeInstant, timeLocal, intervalsOverlap, timeActionSchema, calendarDefinitionSchema, taskCalendarScheduleSchema, timeCreateSchema } from '../src/contracts/fdeTimeContract.js'
 
 test('leader slot enforces real Shanghai date, 07-20 bounds and quarter hours',()=>{
   assert.ok(validLeaderSlot('2026-08-28T07:00',780))
@@ -25,6 +25,12 @@ test('personal schedules support cross-midnight without accepting rollover or ar
   assert.ok(calendarDefinitionSchema.safeParse(event).success)
   assert.equal(calendarDefinitionSchema.safeParse({...event,endsAt:'2026-08-30T00:15'}).success,false)
   assert.equal(calendarDefinitionSchema.safeParse({...event,startsAt:'2026-08-28T23:46'}).success,false)
+})
+test('task calendar schedules use source and schedule versions and retain quarter-hour duration',()=>{
+  const input={clientRequestId:randomUUID(),expectedVersion:0,sourceVersion:2,startsAt:'2026-09-01T09:15',endsAt:'2026-09-01T10:45',hidden:false,reason:'本人调整任务排期'}
+  assert.ok(taskCalendarScheduleSchema.safeParse(input).success)
+  assert.equal(taskCalendarScheduleSchema.safeParse({...input,endsAt:'2026-09-01T10:46'}).success,false)
+  assert.equal(taskCalendarScheduleSchema.safeParse({...input,expectedVersion:-1}).success,false)
 })
 test('new leader requests require a real deadline; deadline precision is separate from slot precision',()=>{
   const input={clientRequestId:randomUUID(),projectId:randomUUID(),leaderId:randomUUID(),title:'业务沟通',reason:'需要确认业务沟通安排',outcome:'明确下一步',impact:'影响项目进度',preferredStart:'2030-01-08T10:00',alternativeStart:'2030-01-08T14:00',durationMinutes:60,location:'线上会议'}

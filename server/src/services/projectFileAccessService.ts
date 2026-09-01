@@ -1,6 +1,6 @@
 import { and, eq, inArray, isNull, ne, not, or, sql, type SQL } from 'drizzle-orm'
 import { db } from '../db/client.js'
-import { aiTasks, aiTaskSources, companyKnowledge, companyKnowledgeGrants, knowledgeChunks, projectDutyAssignments, projectFileGrants, projectFiles, projects, roles, userRoles, users } from '../db/schema.js'
+import { aiTasks, aiTaskSources, companyKnowledge, companyKnowledgeGrants, knowledgeChunks, oaApprovalNodes, oaApprovalRequests, projectDutyAssignments, projectFileGrants, projectFiles, projects, roles, userRoles, users } from '../db/schema.js'
 import { projectAccessCondition } from './projectAccessService.js'
 
 export type FileTx = Parameters<Parameters<typeof db.transaction>[0]>[0]
@@ -27,9 +27,25 @@ function financeScope(userId: string | SQL) {
     OR ${projectFiles.category} REGEXP '财务|合同|协议|票据|预算|项目基础资料')`
 }
 
+// Only the current stable-ID approver may read files frozen into the active
+// request. Advancing the node removes this narrow grant immediately.
+function currentApprovalMaterialScope(userId: string | SQL) {
+  return sql<boolean>`EXISTS (
+    SELECT 1 FROM ${oaApprovalRequests} approval_request
+    JOIN ${oaApprovalNodes} approval_node ON approval_node.id=approval_request.current_node_id
+      AND approval_node.request_id=approval_request.id
+    JOIN JSON_TABLE(approval_request.material_snapshot,'$[*]' COLUMNS(file_id varchar(36) PATH '$.fileId')) approval_material
+      ON approval_material.file_id=${projectFiles.id}
+    WHERE approval_request.project_id=${projects.id}
+      AND approval_request.status='审批中'
+      AND approval_node.status IN ('待审批','会签中')
+      AND JSON_CONTAINS(approval_node.approver_user_ids,JSON_QUOTE(${userId}))
+      AND NOT JSON_CONTAINS(approval_node.approved_by_user_ids,JSON_QUOTE(${userId})))`
+}
+
 export function projectFileAccessCondition(userId: string | SQL, operation: FileOperation = 'view', includeDeleted = false) {
   const grant = sql<boolean>`EXISTS (SELECT 1 FROM ${projectFileGrants} fg WHERE fg.file_id=${projectFiles.id} AND fg.user_id=${userId} AND fg.can_view=1 ${operation === 'download' ? sql`AND fg.can_download=1` : sql``})`
-  const fdeOperation = operation === 'manage' ? manager(userId) : operation === 'delete' ? or(manager(userId), eq(projectFiles.uploadedBy, userId))! : and(financeScope(userId), or(eq(projectFiles.accessMode, 'project'), grant))!
+  const fdeOperation = operation === 'manage' ? manager(userId) : operation === 'delete' ? or(manager(userId), eq(projectFiles.uploadedBy, userId))! : or(and(financeScope(userId), or(eq(projectFiles.accessMode, 'project'), grant)), operation === 'view' ? currentApprovalMaterialScope(userId) : undefined)!
   const projectScope = and(currentProjectScope(userId), or(ne(projects.workflowModel, 'fde-v1'), and(businessRole(userId), fdeOperation)))
   return and(
     sql`EXISTS (SELECT 1 FROM ${users} enabled_file_actor WHERE enabled_file_actor.id=${userId} AND enabled_file_actor.status='启用')`,

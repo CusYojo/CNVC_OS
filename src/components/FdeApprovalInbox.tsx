@@ -42,7 +42,7 @@ export function FdeApprovalInbox({ inbox }: { inbox: ReturnType<typeof useApprov
   const { data, error, loading, reading, markRead, reload, setPage } = inbox
   return <Card className="mb-5 overflow-hidden">
     <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 p-4">
-      <div><h2 className="font-semibold">待我审批</h2><p className="mt-1 text-xs text-slate-500">仅列本人当前可处理事项 · 阅读通知不代表同意审批</p></div>
+      <h2 className="font-semibold">待我审批</h2>
       <div className="flex items-center gap-3"><Link className="text-sm text-[#315f68]" to="/workflow?view=pending">全部审批</Link><Button variant="secondary" disabled={loading || Boolean(reading)} onClick={reload}>刷新审批待办</Button></div>
     </div>
     {error && <p role="alert" className="p-4 text-sm text-red-700">{error}</p>}

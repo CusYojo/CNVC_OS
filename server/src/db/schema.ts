@@ -485,7 +485,8 @@ export const projectStageMaterials = mysqlTable('project_stage_materials', {
   createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
   updatedAt: timestampColumn('updated_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
 }, (t) => ({
-  uniqueRequirement: uniqueIndex('uq_project_stage_material').on(t.projectId, t.stage, t.requirementKey),
+  uniqueMaterialFile: uniqueIndex('uq_project_stage_material_file').on(t.projectId, t.stage, t.requirementKey, t.fileId),
+  byRequirement: index('idx_project_stage_material_requirement').on(t.projectId, t.stage, t.requirementKey),
   byFile: index('idx_project_stage_material_file').on(t.fileId),
 }))
 
@@ -586,6 +587,7 @@ export const projectPlanActions = mysqlTable('project_plan_actions', {
   actionKey: varchar('action_key', { length: 64 }).notNull(),
   title: varchar('title', { length: 128 }).notNull(),
   ownerUserId: uuidColumn('owner_user_id').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  participantUserIds: json('participant_user_ids').$type<string[]>().notNull().default(emptyJsonArray),
   dueDate: varchar('due_date', { length: 10 }).notNull(),
   deliverable: text('deliverable').notNull(),
   status: varchar('status', { length: 16 }).notNull().default('未开始'),
@@ -906,6 +908,22 @@ export const personalCalendarHistory = mysqlTable('personal_calendar_history', {
   version: int('version').notNull(), snapshot: json('snapshot').$type<Record<string, unknown>>().notNull(),
   createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
 }, (t) => ({ uniqueRequest: uniqueIndex('uq_calendar_history_request').on(t.requestId) }))
+
+export const todoCalendarSchedules = mysqlTable('todo_calendar_schedules', {
+  taskId: uuidColumn('task_id').primaryKey().references(() => todos.id, { onDelete: 'restrict' }),
+  ownerUserId: uuidColumn('owner_user_id').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  startsAt: timestampColumn('starts_at').notNull(), endsAt: timestampColumn('ends_at').notNull(),
+  hidden: boolean('hidden').notNull().default(false), version: int('version').notNull().default(1),
+  updatedAt: timestampColumn('updated_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({ byOwnerTime: index('idx_todo_calendar_owner_time').on(t.ownerUserId, t.startsAt) }))
+export const todoCalendarScheduleHistory = mysqlTable('todo_calendar_schedule_history', {
+  id: uuidPrimaryKey('id'), taskId: uuidColumn('task_id').notNull().references(() => todos.id, { onDelete: 'restrict' }),
+  requestId: uuidColumn('request_id').notNull(), requestHash: varchar('request_hash', { length: 64 }).notNull(),
+  actorId: uuidColumn('actor_id').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  action: varchar('action', { length: 16 }).notNull(), reason: text('reason').notNull(), version: int('version').notNull(),
+  snapshot: json('snapshot').$type<Record<string, unknown>>().notNull(),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({ uniqueRequest: uniqueIndex('uq_todo_calendar_history_request').on(t.requestId), byTask: index('idx_todo_calendar_history_task').on(t.taskId, t.version) }))
 
 export const directiveEvents = mysqlTable('directive_events', {
   id: uuidPrimaryKey('id'), directiveId: uuidColumn('directive_id').notNull().references(() => projectDirectives.id, { onDelete: 'restrict' }),

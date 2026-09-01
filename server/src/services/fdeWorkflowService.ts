@@ -1,15 +1,16 @@
 import { randomUUID } from 'node:crypto'
-import { and, asc, desc, eq, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, notInArray, sql } from 'drizzle-orm'
 import { db } from '../db/client.js'
 import { requireProjectFileAccess } from './projectFileAccessService.js'
-import { oaApprovalRequests, projectFiles, projectMembers, projectPlanActions, projectPlans, projectStageDates, projectStageMaterials, projects, todos, users } from '../db/schema.js'
+import { oaApprovalRequests, projectDutyAssignments, projectFiles, projectMembers, projectPlanActions, projectPlans, projectStageDates, projectStageMaterials, projects, roles, todos, userRoles, users } from '../db/schema.js'
 import { readAgentTimeline } from './fdeAgentTimelineService.js'
 import { createMySqlIdentityRepositoryContext } from '../repositories/index.js'
 import { requireAccessibleProject } from './projectAccessService.js'
 import { inspectProjectFile } from './projectFileStorageService.js'
 import { getProjectWorkflowPolicy } from './fdeWorkflowPolicyService.js'
-import { materializeFdePlanTasks } from './fdeTaskService.js'
+import { materializeFdePlanTasks, participantTaskId } from './fdeTaskService.js'
 import { reconcileTimelineEvent } from './fdeTimelineTaskService.js'
+import { shanghaiToday } from '../contracts/fdeWeeklyPlanContract.js'
 
 type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0]
 type ProjectRow = typeof projects.$inferSelect
@@ -32,7 +33,7 @@ export const FDE_PLAN_ACTIONS = [
   ['close', 'Close', '交割归档清单', 15],
 ] as const
 
-export type PlanActionInput = { actionKey: string; title: string; ownerUserId: string; dueDate: string; deliverable: string }
+export type PlanActionInput = { actionKey: string; title: string; ownerUserId: string; participantUserIds: string[]; dueDate: string; deliverable: string }
 const error = (status: number, code: string, message: string) => Object.assign(new Error(message), { status, code })
 
 export function validDateKey(value: string): boolean {
@@ -45,7 +46,7 @@ export function buildFdePlan(cycleDays: number, targetDate: string, ownerUserId:
   if (![15, 30, 40].includes(cycleDays) || !validDateKey(targetDate)) throw error(400, 'FDE_PLAN_INVALID', '周期必须为 15/30/40 天，最终日期必须有效')
   const end = new Date(`${targetDate}T00:00:00.000Z`).getTime()
   return FDE_PLAN_ACTIONS.map(([actionKey, title, deliverable, position]) => ({
-    actionKey, title, deliverable, ownerUserId,
+    actionKey, title, deliverable, ownerUserId, participantUserIds: [ownerUserId],
     dueDate: new Date(end - Math.round(((15 - position) / 15) * cycleDays) * 86_400_000).toISOString().slice(0, 10),
   }))
 }
@@ -54,11 +55,12 @@ export function validateFdePlan(cycleDays: number, targetDate: string, actions: 
   if (![15, 30, 40].includes(cycleDays) || !validDateKey(targetDate)) throw error(400, 'FDE_PLAN_INVALID', '周期或最终日期无效')
   const keys = actions.map((item) => item.actionKey)
   if (new Set(keys).size !== keys.length) throw error(400, 'FDE_PLAN_DUPLICATE_ACTION', '计划行动编号不可重复')
-  const missing = FDE_PLAN_ACTIONS.filter(([key]) => !keys.includes(key)).map(([, title]) => title)
+  const criticalKeys = new Set(['internal_review', 'ic', 'payment', 'close'])
+  const missing = FDE_PLAN_ACTIONS.filter(([key]) => criticalKeys.has(key) && !keys.includes(key)).map(([, title]) => title)
   if (missing.length) throw error(400, 'FDE_PLAN_INCOMPLETE', `计划缺少必要行动：${missing.join('、')}`)
   const start = new Date(new Date(`${targetDate}T00:00:00.000Z`).getTime() - cycleDays * 86_400_000).toISOString().slice(0, 10)
-  if (actions.some((item) => !item.ownerUserId || !item.title.trim() || !item.deliverable.trim() || !validDateKey(item.dueDate) || item.dueDate < start || item.dueDate > targetDate)) {
-    throw error(400, 'FDE_PLAN_ACTION_INVALID', '每个行动必须有负责人、交付物和周期范围内的有效日期')
+  if (actions.some((item) => !item.ownerUserId || !item.participantUserIds.length || !item.participantUserIds.includes(item.ownerUserId) || new Set(item.participantUserIds).size !== item.participantUserIds.length || !item.title.trim() || !item.deliverable.trim() || !validDateKey(item.dueDate) || item.dueDate < start || item.dueDate > targetDate)) {
+    throw error(400, 'FDE_PLAN_ACTION_INVALID', '每个行动必须有主负责人、至少一名参与人、交付物和周期范围内的有效日期；主负责人必须属于参与人')
   }
   const byKey = new Map(actions.map((item) => [item.actionKey, item]))
   const order = ['internal_review', 'ic', 'payment', 'close']
@@ -89,6 +91,71 @@ async function requireOwner(tx: Transaction, project: ProjectRow, userId: string
   return actor
 }
 
+async function canAmendApprovedPlan(reader: Pick<typeof db, 'select'>, project: ProjectRow, userId: string) {
+  if (project.ownerUserId === userId) return true
+  const [departmentLead] = await reader.select({ id: users.id }).from(projectMembers)
+    .innerJoin(users, eq(users.id, projectMembers.userId))
+    .innerJoin(userRoles, eq(userRoles.userId, users.id))
+    .innerJoin(roles, eq(roles.id, userRoles.roleId))
+    .where(and(eq(projectMembers.projectId, project.id), eq(users.id, userId), eq(users.status, '启用'), eq(roles.status, '启用'), eq(roles.code, 'FDE_PARTNER'))).limit(1)
+  return Boolean(departmentLead)
+}
+
+async function requireApprovedPlanEditor(tx: Transaction, project: ProjectRow, userId: string) {
+  const [actor] = await tx.select().from(users).where(eq(users.id, userId)).limit(1)
+  if (!actor || actor.status !== '启用') throw error(403, 'USER_DISABLED_OR_MISSING', '当前用户不可用')
+  if (!await canAmendApprovedPlan(tx, project, userId)) throw error(403, 'FDE_PLAN_AMEND_FORBIDDEN', '仅项目负责人或已加入本项目的合伙人（部门负责人）可修订已通过计划')
+  return actor
+}
+
+const terminalTaskStatuses = ['已完成', '已关闭', '已取消', '已归档']
+const sameParticipants = (left: string[], right: string[]) => JSON.stringify([...new Set(left)].sort()) === JSON.stringify([...new Set(right)].sort())
+
+async function amendApprovedFdePlan(tx: Transaction, project: ProjectRow, plan: typeof projectPlans.$inferSelect, actor: typeof users.$inferSelect, actions: PlanActionInput[], cycleDays: number, targetDate: string) {
+  if (cycleDays !== plan.cycleDays || targetDate !== plan.targetDate) throw error(409, 'FDE_APPROVED_BASELINE_CHANGE', '已通过计划的周期和最终日期需走整体改期；部门负责人可直接修改任务、日期、主责人和参与人')
+  const existing = await tx.select().from(projectPlanActions).where(eq(projectPlanActions.planId, plan.id)).orderBy(asc(projectPlanActions.sortOrder))
+  const taskRows = await tx.select().from(todos).where(eq(todos.projectId, project.id))
+  const peopleIds = [...new Set(actions.flatMap(action => [action.ownerUserId, ...action.participantUserIds]))]
+  const people = await tx.select({ id: users.id, name: users.name }).from(users).where(inArray(users.id, peopleIds))
+  const names = new Map(people.map(person => [person.id, person.name]))
+  const nextByKey = new Map(actions.map(action => [action.actionKey, { ...action, participantUserIds: [...new Set([action.ownerUserId, ...action.participantUserIds])] }]))
+  const existingByKey = new Map(existing.map(action => [action.actionKey, action]))
+
+  for (const old of existing) {
+    const next = nextByKey.get(old.actionKey)
+    const participantIds = [...new Set((old.participantUserIds.length ? old.participantUserIds : [old.ownerUserId]).filter(id => id !== old.ownerUserId).map(id => participantTaskId(old.id, id)))]
+    const related = taskRows.filter(task => task.planActionId === old.id || participantIds.includes(task.id))
+    const changed = !next || old.title !== next.title || old.ownerUserId !== next.ownerUserId || old.dueDate !== next.dueDate || old.deliverable !== next.deliverable || !sameParticipants(old.participantUserIds, next.participantUserIds)
+    if (changed && related.some(task => terminalTaskStatuses.includes(task.status))) throw error(409, 'FDE_APPROVED_ACTION_COMPLETED', `任务“${old.title}”已有完成或关闭的执行记录，不能改写或删除`)
+    if (!next) {
+      await tx.update(todos).set({ planActionId: null, status: '已取消', closureReason: '已通过计划由部门负责人修订，原任务取消', version: sql`${todos.version} + 1` }).where(and(eq(todos.planActionId, old.id), notInArray(todos.status, terminalTaskStatuses)))
+      if (participantIds.length) await tx.update(todos).set({ status: '已取消', closureReason: '已通过计划已移除该参与任务', version: sql`${todos.version} + 1` }).where(and(inArray(todos.id, participantIds), notInArray(todos.status, terminalTaskStatuses)))
+      await tx.delete(projectPlanActions).where(eq(projectPlanActions.id, old.id))
+      continue
+    }
+    await tx.update(projectPlanActions).set({ title: next.title, ownerUserId: next.ownerUserId, participantUserIds: next.participantUserIds, dueDate: next.dueDate, deliverable: next.deliverable, sortOrder: actions.findIndex(action => action.actionKey === next.actionKey), version: old.version + 1 }).where(eq(projectPlanActions.id, old.id))
+    const primary = taskRows.find(task => task.planActionId === old.id)
+    if (primary && !terminalTaskStatuses.includes(primary.status)) await tx.update(todos).set({ title: next.title, ownerUserId: next.ownerUserId, owner: names.get(next.ownerUserId)!, dueDate: next.dueDate, deliverable: next.deliverable, version: primary.version + 1 }).where(eq(todos.id, primary.id))
+    const removed = old.participantUserIds.filter(id => id !== old.ownerUserId && !next.participantUserIds.includes(id)).map(id => participantTaskId(old.id, id))
+    const redundantNewOwner = participantTaskId(old.id, next.ownerUserId)
+    if (!removed.includes(redundantNewOwner)) removed.push(redundantNewOwner)
+    if (removed.length) await tx.update(todos).set({ status: '已取消', closureReason: '已通过计划的参与人已调整', version: sql`${todos.version} + 1` }).where(and(inArray(todos.id, removed), notInArray(todos.status, terminalTaskStatuses)))
+    const retained = next.participantUserIds.filter(id => id !== next.ownerUserId).map(id => participantTaskId(old.id, id))
+    if (retained.length) await tx.update(todos).set({ title: `协同：${next.title}`, dueDate: next.dueDate, deliverable: `${next.deliverable}（协同参与，主负责人统筹验收）`, version: sql`${todos.version} + 1` }).where(and(inArray(todos.id, retained), notInArray(todos.status, terminalTaskStatuses)))
+  }
+
+  const additions = actions.filter(action => !existingByKey.has(action.actionKey))
+  if (additions.length) await tx.insert(projectPlanActions).values(additions.map(action => ({ ...action, participantUserIds: [...new Set([action.ownerUserId, ...action.participantUserIds])], id: randomUUID(), planId: plan.id, sortOrder: actions.findIndex(item => item.actionKey === action.actionKey) })))
+  await tx.update(projectPlans).set({ version: plan.version + 1, updatedAt: new Date() }).where(eq(projectPlans.id, plan.id))
+  await materializeFdePlanTasks(tx, project.id, plan.id)
+
+  const bosses = await tx.select({ id: users.id, name: users.name }).from(projectDutyAssignments).innerJoin(users, eq(users.id, projectDutyAssignments.userId)).where(and(eq(projectDutyAssignments.projectId, project.id), eq(projectDutyAssignments.duty, 'concerned_leader'), eq(users.status, '启用')))
+  const recipients = [...new Map(bosses.filter(person => person.id !== actor.id).map(person => [person.id, person])).values()]
+  if (recipients.length) await tx.insert(todos).values(recipients.map(person => ({ id: randomUUID(), projectId: project.id, projectName: project.name, title: `计划变更：${project.name}`, owner: person.name, ownerUserId: person.id, dueDate: shanghaiToday(), priority: '中', status: '未开始', type: '通知', deliverable: `部门负责人${actor.name}已修订通过后的投资周期行动计划，请查看当前任务、日期和参与人。`, createdBy: actor.id })))
+  await reconcileTimelineEvent(tx, project.id, actor.id, { source: 'plan', sourceKey: `plan-amend:${plan.id}:${plan.version + 1}` })
+  await createMySqlIdentityRepositoryContext(tx).audits.append({ userId: actor.id, userName: actor.name, module: '倒排计划', action: '修订已通过计划', target: `${project.name} / V${plan.revision} / 计划版本 ${plan.version + 1} / 同步老板 ${recipients.map(person => person.name).join('、') || '本人'}` })
+}
+
 export async function getFdeWorkflow(projectId: string, userId: string) {
   const project = await requireAccessibleProject(userId, projectId)
   const policy = await getProjectWorkflowPolicy(db, project)
@@ -102,9 +169,10 @@ export async function getFdeWorkflow(projectId: string, userId: string) {
   const taskRows = currentPlan ? await db.select().from(todos).where(eq(todos.projectId, projectId)) : []
   const actions = definitions.map((action) => {
     const task = taskRows.find((item) => item.planActionId === action.id)
-    return { ...action, status: task?.status ?? action.status, taskId: task?.id ?? null, effectiveDueDate: task?.dueDate ?? action.dueDate }
+    return { ...action, participantUserIds: action.participantUserIds.length ? action.participantUserIds : [action.ownerUserId], status: task?.status ?? action.status, taskId: task?.id ?? null, effectiveDueDate: task?.dueDate ?? action.dueDate }
   })
-  return { stages: policy.configuration.stages, timeline: await readAgentTimeline(db, project), policy: { id: policy.id, revision: policy.revision, cycleDays: policy.configuration.cycleDays }, materials, plan: currentPlan ? { ...currentPlan, actions } : null, planHistory: plans, members: memberRows }
+  const canEditPlan = project.lifecycle === 'active' && (project.ownerUserId === userId || currentPlan?.status === 'locked' && await canAmendApprovedPlan(db, project, userId))
+  return { stages: policy.configuration.stages, timeline: await readAgentTimeline(db, project), policy: { id: policy.id, revision: policy.revision, cycleDays: policy.configuration.cycleDays }, materials, plan: currentPlan ? { ...currentPlan, actions } : null, planHistory: plans, members: memberRows, capabilities: { canEditPlan } }
 }
 
 export async function bindFdeMaterial(input: { projectId: string; userId: string; stage: string; requirementKey: string; fileId?: string; waiverReason?: string; expectedVersion?: number }) {
@@ -131,14 +199,38 @@ export async function bindFdeMaterial(input: { projectId: string; userId: string
       if (!stage?.allowWaiver) throw error(409, 'FDE_MATERIAL_WAIVER_DISABLED', '当前项目绑定规则不允许该阶段材料免传')
       if ((input.waiverReason?.trim().length ?? 0) < 5) throw error(400, 'FDE_MATERIAL_WAIVER_REASON', '免传必须由负责人填写至少 5 字说明')
     }
-    const [existing] = await tx.select().from(projectStageMaterials).where(and(eq(projectStageMaterials.projectId, project.id), eq(projectStageMaterials.stage, input.stage), eq(projectStageMaterials.requirementKey, input.requirementKey))).limit(1)
+    const bindings = await tx.select().from(projectStageMaterials).where(and(eq(projectStageMaterials.projectId, project.id), eq(projectStageMaterials.stage, input.stage), eq(projectStageMaterials.requirementKey, input.requirementKey)))
+    const existing = bindings.find(binding => input.fileId ? binding.fileId === input.fileId : binding.fileId === null)
+    if (!input.fileId && bindings.some(binding => binding.fileId)) throw error(409, 'FDE_MATERIAL_WAIVER_CONFLICT', '当前要求已绑定文件；如确需免传，请先逐份解除文件绑定')
     if (existing && existing.version !== input.expectedVersion) throw error(409, 'VERSION_CONFLICT', '材料绑定已被修改，请刷新后重试')
     const values = { fileId: input.fileId ?? null, fileVersion, waiverReason: input.fileId ? null : input.waiverReason!.trim(), updatedBy: actor.id, updatedAt: new Date() }
     const bindingId = existing?.id ?? randomUUID()
     if (existing) await tx.update(projectStageMaterials).set({ ...values, version: existing.version + 1 }).where(eq(projectStageMaterials.id, existing.id))
-    else await tx.insert(projectStageMaterials).values({ ...values, id: bindingId, projectId: project.id, stage: input.stage, requirementKey: input.requirementKey })
+    else {
+      if (input.fileId) await tx.delete(projectStageMaterials).where(and(eq(projectStageMaterials.projectId, project.id), eq(projectStageMaterials.stage, input.stage), eq(projectStageMaterials.requirementKey, input.requirementKey), sql`${projectStageMaterials.fileId} IS NULL`))
+      await tx.insert(projectStageMaterials).values({ ...values, id: bindingId, projectId: project.id, stage: input.stage, requirementKey: input.requirementKey })
+    }
     await reconcileTimelineEvent(tx, project.id, actor.id, { source: 'material', sourceKey: `material:${bindingId}:${(existing?.version ?? 0) + 1}` })
     await createMySqlIdentityRepositoryContext(tx).audits.append({ userId: actor.id, userName: actor.name, module: '项目材料', action: input.fileId ? '绑定材料' : '材料免传', target: `${project.name} / ${input.stage} / ${requirement.label} / ${input.fileId ?? input.waiverReason}` })
+  })
+  return getFdeWorkflow(input.projectId, input.userId)
+}
+
+export async function removeFdeMaterialBinding(input: { projectId: string; bindingId: string; userId: string; expectedVersion: number }) {
+  await requireAccessibleProject(input.userId, input.projectId)
+  await db.transaction(async tx => {
+    const project = await lockProject(tx, input.projectId)
+    await assertNoActiveApproval(tx, project.id)
+    const [binding] = await tx.select().from(projectStageMaterials).where(and(eq(projectStageMaterials.id, input.bindingId), eq(projectStageMaterials.projectId, project.id))).limit(1)
+    if (!binding) throw error(404, 'FDE_MATERIAL_BINDING_NOT_FOUND', '材料绑定不存在或已被移除')
+    if (binding.version !== input.expectedVersion) throw error(409, 'VERSION_CONFLICT', '材料绑定已变化，请刷新后重试')
+    const actor = await createMySqlIdentityRepositoryContext(tx).users.findById(input.userId)
+    if (!actor || actor.status !== '启用') throw error(403, 'USER_DISABLED_OR_MISSING', '当前用户不可用')
+    if (binding.waiverReason) await requireOwner(tx, project, input.userId)
+    if (binding.fileId) await requireProjectFileAccess(tx, binding.fileId, input.userId, 'view')
+    await tx.delete(projectStageMaterials).where(eq(projectStageMaterials.id, binding.id))
+    await reconcileTimelineEvent(tx, project.id, actor.id, { source: 'material', sourceKey: `material-remove:${binding.id}:${binding.version}` })
+    await createMySqlIdentityRepositoryContext(tx).audits.append({ userId: actor.id, userName: actor.name, module: '项目材料', action: '解除材料绑定', target: `${project.name} / ${binding.stage} / ${binding.requirementKey} / ${binding.fileId ?? '免传说明'}` })
   })
   return getFdeWorkflow(input.projectId, input.userId)
 }
@@ -147,22 +239,35 @@ export async function saveFdePlan(input: { projectId: string; userId: string; cy
   await requireAccessibleProject(input.userId, input.projectId)
   await db.transaction(async (tx) => {
     const project = await lockProject(tx, input.projectId)
-    const actor = await requireOwner(tx, project, input.userId)
     const policy = await getProjectWorkflowPolicy(tx, project)
     if (!policy.configuration.cycleDays.includes(input.cycleDays as 15 | 30 | 40)) throw error(400, 'FDE_PLAN_CYCLE_DISABLED', '当前项目规则不允许该周期')
     await assertNoActiveApproval(tx, project.id)
     const [previous] = await tx.select().from(projectPlans).where(eq(projectPlans.projectId, project.id)).orderBy(desc(projectPlans.revision)).limit(1)
+    const actor = previous?.status === 'locked' ? await requireApprovedPlanEditor(tx, project, input.userId) : await requireOwner(tx, project, input.userId)
     const [approvedDate] = await tx.select({ id: projectStageDates.id }).from(projectStageDates).where(eq(projectStageDates.projectId, project.id)).limit(1)
     if (approvedDate && (input.targetDate !== project.targetDate || input.cycleDays !== project.cycleDays)) throw error(409, 'FDE_APPROVED_TIMELINE_EXISTS', '已有批准节点日期，不能通过重新生成计划覆盖日期基准；需正式整体改期流程')
-    if (previous?.status === 'locked') throw error(409, 'FDE_PLAN_LOCKED', '计划已审核锁定，结构或关键日期变更必须走新版本审批')
     if (previous && previous.version !== input.expectedVersion) throw error(409, 'VERSION_CONFLICT', '计划已被修改，请刷新后重试')
-    const actions = input.actions ?? buildFdePlan(input.cycleDays, input.targetDate, project.ownerUserId ?? actor.id)
+    const dutyRows = input.actions ? [] : await tx.select({ duty: projectDutyAssignments.duty, userId: projectDutyAssignments.userId }).from(projectDutyAssignments).where(eq(projectDutyAssignments.projectId, project.id))
+    const dutyParticipants = (duties: string[]) => dutyRows.filter(row => duties.includes(row.duty)).map(row => row.userId)
+    const automaticDuties: Record<string, string[]> = {
+      data_room: ['secretary'], management_dd: ['secretary'], founder_meeting_1: ['concerned_leader', 'executive_lead'], founder_meeting_2: ['concerned_leader', 'executive_lead'],
+      financial_dd: ['finance'], legal_dd: ['legal'], internal_review: ['finance', 'legal'], ic: ['chairman', 'president', 'concerned_leader'], payment: ['finance'], close: ['finance', 'legal'],
+    }
+    const actions = input.actions ?? buildFdePlan(input.cycleDays, input.targetDate, project.ownerUserId ?? actor.id).map(action => ({
+      ...action, participantUserIds: [...new Set([action.ownerUserId, ...dutyParticipants(automaticDuties[action.actionKey] ?? [])])],
+    }))
     validateFdePlan(input.cycleDays, input.targetDate, actions)
     const memberRows = await tx.select({ userId: projectMembers.userId }).from(projectMembers).where(eq(projectMembers.projectId, project.id))
     const allowed = new Set([project.ownerUserId, ...memberRows.map((row) => row.userId)])
     for (const action of actions) {
-      const [owner] = await tx.select({ status: users.status }).from(users).where(eq(users.id, action.ownerUserId)).limit(1)
-      if (!allowed.has(action.ownerUserId) || owner?.status !== '启用') throw error(403, 'FDE_PLAN_OWNER_INVALID', '行动负责人必须是当前项目启用的成员')
+      const selectedIds = [...new Set([action.ownerUserId, ...action.participantUserIds])]
+      const enabled = await tx.select({ id: users.id }).from(users).where(and(inArray(users.id, selectedIds), eq(users.status, '启用')))
+      if (selectedIds.some((id) => !allowed.has(id)) || enabled.length !== selectedIds.length) throw error(403, 'FDE_PLAN_PARTICIPANT_INVALID', '行动负责人和参与人必须是当前项目启用的成员')
+    }
+    if (previous?.status === 'locked') {
+      if (!input.actions) throw error(409, 'FDE_APPROVED_PLAN_ACTIONS_REQUIRED', '已通过计划不能一键重新生成；请编辑具体任务后保存')
+      await amendApprovedFdePlan(tx, project, previous, actor, actions, input.cycleDays, input.targetDate)
+      return
     }
     if (previous) await tx.update(projectPlans).set({ status: 'archived', updatedAt: new Date(), version: previous.version + 1 }).where(eq(projectPlans.id, previous.id))
     const planId = randomUUID()
@@ -183,18 +288,24 @@ export async function inspectFdeStageGate(tx: Transaction, project: ProjectRow) 
   const checklist: Array<{ label: string; passed: boolean; required: boolean }> = []
   const snapshot: Array<{ requirementKey: string; fileId: string | null; fileVersion: number | null; waiverReason: string | null }> = []
   for (const requirement of stage.materials) {
-    const binding = bindings.find((row) => row.requirementKey === requirement.key)
-    let passed = Boolean(stage.allowWaiver && binding?.waiverReason && binding.waiverReason.trim().length >= 5)
-    if (binding?.fileId) {
-      const [file] = await tx.select().from(projectFiles).where(and(eq(projectFiles.id, binding.fileId), eq(projectFiles.projectId, project.id))).limit(1)
-      passed = Boolean(file?.lifecycle === 'active' && file.storagePath && file.byteSize > 0 && file.version === binding.fileVersion)
-      if (passed && file?.storagePath) {
-        const original = await inspectProjectFile(file.storagePath).catch(() => null)
-        passed = Boolean(original && original.size === file.byteSize)
+    const requirementBindings = bindings.filter(row => row.requirementKey === requirement.key)
+    const waiver = requirementBindings.find(binding => binding.waiverReason)
+    const fileBindings = requirementBindings.filter(binding => binding.fileId)
+    let passed = Boolean(stage.allowWaiver && waiver?.waiverReason && waiver.waiverReason.trim().length >= 5)
+    if (fileBindings.length) {
+      passed = true
+      for (const binding of fileBindings) {
+        const [file] = await tx.select().from(projectFiles).where(and(eq(projectFiles.id, binding.fileId!), eq(projectFiles.projectId, project.id))).limit(1)
+        let current = Boolean(file?.lifecycle === 'active' && file.storagePath && file.byteSize > 0 && file.version === binding.fileVersion)
+        if (current && file?.storagePath) {
+          const original = await inspectProjectFile(file.storagePath).catch(() => null)
+          current = Boolean(original && original.size === file.byteSize)
+        }
+        if (!current) passed = false
       }
     }
     checklist.push({ label: requirement.label, required: true, passed })
-    if (binding) snapshot.push({ requirementKey: requirement.key, fileId: binding.fileId, fileVersion: binding.fileVersion, waiverReason: binding.waiverReason })
+    for (const binding of requirementBindings) snapshot.push({ requirementKey: requirement.key, fileId: binding.fileId, fileVersion: binding.fileVersion, waiverReason: binding.waiverReason })
   }
   let planId: string | undefined
   if (stage.requiresFund) checklist.push({ label: '明确投资基金', required: true, passed: Boolean(project.investmentFund?.trim()) })
@@ -210,8 +321,9 @@ export async function inspectFdeStageGate(tx: Transaction, project: ProjectRow) 
         const allowedOwners = new Set([project.ownerUserId, ...members.map((member) => member.userId)])
         passed = true
         for (const action of actions) {
-          const [owner] = await tx.select({ status: users.status }).from(users).where(eq(users.id, action.ownerUserId)).limit(1)
-          if (!allowedOwners.has(action.ownerUserId) || owner?.status !== '启用') passed = false
+          const selectedIds = [...new Set([action.ownerUserId, ...action.participantUserIds])]
+          const enabled = await tx.select({ id: users.id }).from(users).where(and(inArray(users.id, selectedIds), eq(users.status, '启用')))
+          if (selectedIds.some((id) => !allowedOwners.has(id)) || enabled.length !== selectedIds.length) passed = false
         }
         if (passed) planId = plan.id
       } catch { /* gate reports missing/invalid plan */ }
