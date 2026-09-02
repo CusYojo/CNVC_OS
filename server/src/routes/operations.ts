@@ -11,10 +11,15 @@ import {
 } from '../services/radarSourceManagementService.js'
 import {
   listRadarRuntimeJobs,
+  listKr36RuntimeJobs,
+  queueKr36RuntimeJobNow,
   queueRadarRuntimeJobNow,
+  setKr36RuntimeJobEnabled,
   setRadarRuntimeJobEnabled,
 } from '../services/runtimeJobScheduler.js'
 import { writeAudit } from '../services/auditService.js'
+import { getKr36CandidateSupplySnapshot } from '../services/kr36ProjectCandidateService.js'
+import { previewKr36ProjectSupply } from '../services/kr36ProjectSyncService.js'
 
 export const operationsRouter = Router()
 
@@ -35,6 +40,70 @@ operationsRouter.get('/radar', requireSystemAdmin, async (_req, res, next) => {
       listRadarRuntimeJobs(),
     ])
     res.json({ sources, jobs })
+  } catch (error) {
+    next(error)
+  }
+})
+
+operationsRouter.get('/kr36', requireSystemAdmin, async (_req, res, next) => {
+  try {
+    res.setHeader('Cache-Control', 'private, no-store')
+    const [supply, jobs] = await Promise.all([
+      getKr36CandidateSupplySnapshot(),
+      listKr36RuntimeJobs(),
+    ])
+    res.json({ supply, jobs })
+  } catch (error) {
+    next(error)
+  }
+})
+
+operationsRouter.get('/kr36/preview', requireSystemAdmin, async (req, res, next) => {
+  try {
+    const query = z.object({
+      pages: z.coerce.number().int().min(1).max(5).default(1),
+    }).parse(req.query)
+    res.setHeader('Cache-Control', 'private, no-store')
+    res.json(await previewKr36ProjectSupply({ pagesPerYear: query.pages, minimumYear: 2025 }))
+  } catch (error) {
+    next(error)
+  }
+})
+
+operationsRouter.patch('/kr36/jobs/:id', requireSystemAdmin, async (req: AuthedRequest, res, next) => {
+  try {
+    const input = z.object({ enabled: z.boolean() }).strict().parse(req.body)
+    const id = z.string().min(1).max(64).parse(req.params.id)
+    const job = await setKr36RuntimeJobEnabled(id, input.enabled)
+    await writeAudit({
+      userId: req.user!.uid,
+      userName: req.user!.name,
+      module: '36氪项目源',
+      action: input.enabled ? '启用任务' : '停用任务',
+      target: id,
+      ip: req.ip,
+      requestId: String(res.locals.requestId || ''),
+    })
+    res.json(job)
+  } catch (error) {
+    next(error)
+  }
+})
+
+operationsRouter.post('/kr36/jobs/:id/run', requireSystemAdmin, async (req: AuthedRequest, res, next) => {
+  try {
+    const id = z.string().min(1).max(64).parse(req.params.id)
+    const result = await queueKr36RuntimeJobNow(id)
+    await writeAudit({
+      userId: req.user!.uid,
+      userName: req.user!.name,
+      module: '36氪项目源',
+      action: '立即执行任务',
+      target: id,
+      ip: req.ip,
+      requestId: String(res.locals.requestId || ''),
+    })
+    res.status(202).json(result)
   } catch (error) {
     next(error)
   }

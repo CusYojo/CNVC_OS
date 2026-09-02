@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { mysqlTableCreator, text, longtext, customType, int, bigint, boolean, json, varchar, index, uniqueIndex, foreignKey } from 'drizzle-orm/mysql-core'
+import { mysqlTableCreator, text, longtext, customType, int, bigint, boolean, json, varchar, date, index, uniqueIndex, foreignKey } from 'drizzle-orm/mysql-core'
 import { sql } from 'drizzle-orm'
 import { mysqlConfig } from './config.js'
 import { currentRequestId } from '../runtime/structuredLogger.js'
@@ -1757,6 +1757,43 @@ export const leadPipelineRawEvents = mysqlTable('lead_pipeline_raw_events', {
   uniqueIdempotency: uniqueIndex('uq_lead_pipeline_raw_idempotency').on(t.idempotencyKey),
   bySource: index('idx_lead_pipeline_raw_source').on(t.sourceType, t.sourceIdHash),
   byContent: index('idx_lead_pipeline_raw_content').on(t.sourceType, t.contentHash),
+}))
+
+// 外部项目库的当前态候选索引。原始响应仍写入不可变 Pipeline 事件；本表只承担
+// 范围判断、更新游标和每日准入状态，不与历史 lead_reserve 混用。
+export const leadSourceCandidates = mysqlTable('lead_source_candidates', {
+  id: uuidPrimaryKey('id'),
+  sourceType: varchar('source_type', { length: 32 }).notNull(),
+  sourceProjectId: text('source_project_id').notNull(),
+  sourceProjectIdHash: varchar('source_project_id_hash', { length: 64 }).notNull(),
+  canonicalUrl: text('canonical_url').notNull(),
+  projectName: varchar('project_name', { length: 128 }).notNull(),
+  companyName: varchar('company_name', { length: 128 }),
+  foundedAt: date('founded_at', { mode: 'string' }),
+  sourceIndustries: json('source_industries').$type<string[]>().notNull().default(emptyJsonArray),
+  sectorLabels: json('sector_labels').$type<string[]>().notNull().default(emptyJsonArray),
+  scopeStatus: varchar('scope_status', { length: 32 }).notNull(),
+  scopeReasons: json('scope_reasons').$type<string[]>().notNull().default(emptyJsonArray),
+  rulesVersion: varchar('rules_version', { length: 32 }).notNull(),
+  firstSeenAt: timestampColumn('first_seen_at').notNull(),
+  lastSeenAt: timestampColumn('last_seen_at').notNull(),
+  fetchedAt: timestampColumn('fetched_at').notNull(),
+  contentHash: varchar('content_hash', { length: 64 }).notNull(),
+  rawEventId: varchar('raw_event_id', { length: 64 }).notNull()
+    .references(() => leadPipelineRawEvents.id, { onDelete: 'restrict' }),
+  admissionStatus: varchar('admission_status', { length: 24 }).notNull().default('not_ready'),
+  processingStartedAt: timestampColumn('processing_started_at'),
+  admittedAt: timestampColumn('admitted_at'),
+  admittedLeadId: uuidColumn('admitted_lead_id').references(() => leads.id, { onDelete: 'set null' }),
+  attempts: int('attempts').notNull().default(0),
+  lastError: text('last_error'),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+  updatedAt: timestampColumn('updated_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({
+  uniqueSourceProject: uniqueIndex('uq_lead_source_candidates_source').on(t.sourceType, t.sourceProjectIdHash),
+  byAdmission: index('idx_lead_source_candidates_admission').on(t.admissionStatus, t.firstSeenAt),
+  byScope: index('idx_lead_source_candidates_scope').on(t.scopeStatus, t.lastSeenAt),
+  byLead: index('idx_lead_source_candidates_lead').on(t.admittedLeadId),
 }))
 
 export const leadPipelineItems = mysqlTable('lead_pipeline_items', {

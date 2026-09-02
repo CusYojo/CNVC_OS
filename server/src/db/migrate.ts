@@ -100,7 +100,7 @@ const REQUIRED_RUNTIME_TABLES = [
   'oa_office_executions', 'oa_office_execution_files',
   'departments', 'roles', 'permissions', 'role_permissions', 'user_roles', 'user_departments', 'dictionary_groups', 'dictionary_items',
   'knowledge_chunks', 'chat_conversations', 'agent_conversations', 'agent_messages',
-  'agent_message_parts', 'leads', 'lead_score_jobs', 'lead_pipeline_raw_events',
+  'agent_message_parts', 'leads', 'lead_score_jobs', 'lead_pipeline_raw_events', 'lead_source_candidates',
   'lead_entities', 'lead_entity_relations', 'lead_enrichment_jobs', 'lead_enrichment_topic_runs', 'lead_facts', 'lead_source_documents',
   'lead_topic_search_cache', 'lead_fact_evidence', 'lead_fact_conflicts', 'lead_enrichment_snapshots', 'lead_rating_history',
   'lead_intake_files', 'lead_import_batches', 'lead_import_rows',

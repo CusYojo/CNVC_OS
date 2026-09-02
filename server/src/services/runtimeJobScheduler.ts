@@ -86,6 +86,10 @@ const managedRadarJobIds = new Set([
   'radar-wechat-retry',
   'radar-wechat-institution',
 ])
+const managedKr36JobIds = new Set([
+  'kr36-project-sync',
+  'kr36-project-daily-admission',
+])
 let pollTimer: NodeJS.Timeout | undefined
 let polling = false
 let started = false
@@ -219,6 +223,10 @@ export function runtimeJobDefinitions(): RuntimeJobDefinition[] {
   }
   const intakeHour = Math.min(23, readIntegerEnv('DAILY_INTAKE_HOUR', 9, 0))
   const intakeMinute = Math.min(59, readIntegerEnv('DAILY_INTAKE_MINUTE', 0, 0))
+  const kr36SyncIntervalSeconds = readIntegerEnv('KR36_PROJECT_SYNC_INTERVAL_SECONDS', 6 * 60 * 60, 300)
+  const kr36SyncStartDelayMs = readIntegerEnv('KR36_PROJECT_SYNC_START_DELAY_MS', 5 * 60_000, 0)
+  const kr36AdmissionHour = Math.min(23, readIntegerEnv('KR36_PROJECT_ADMISSION_HOUR', 9, 0))
+  const kr36AdmissionMinute = Math.min(59, readIntegerEnv('KR36_PROJECT_ADMISSION_MINUTE', 10, 0))
   const paperHour = Math.min(23, readIntegerEnv('RADAR_PAPER_DAILY_HOUR', 7, 0))
   const paperMinute = Math.min(59, readIntegerEnv('RADAR_PAPER_DAILY_MINUTE', 30, 0))
   return [
@@ -285,9 +293,45 @@ export function runtimeJobDefinitions(): RuntimeJobDefinition[] {
       run: async () => await purgeExpiredAuthSessions(),
     },
     {
+      id: 'kr36-project-sync',
+      task: 'kr36-project-sync',
+      enabled: enabledEnv('KR36_PROJECT_SYNC_ENABLED', false),
+      scheduleKind: 'interval',
+      intervalSeconds: kr36SyncIntervalSeconds,
+      initialDelayMs: kr36SyncStartDelayMs,
+      timeoutMs: 60 * 60_000,
+      run: async (signal) => {
+        const { runKr36ProjectSync } = await import('./kr36ProjectSyncService.js')
+        return await runKr36ProjectSync({
+          mode: process.env.KR36_PROJECT_SYNC_MODE === 'backfill' ? 'backfill' : 'incremental',
+          minimumYear: readIntegerEnv('KR36_PROJECT_MIN_FOUNDED_YEAR', 2025, 2025),
+          incrementalPages: readIntegerEnv('KR36_PROJECT_INCREMENTAL_PAGES', 4, 1),
+          maximumBackfillPages: readIntegerEnv('KR36_PROJECT_MAX_BACKFILL_PAGES', 500, 1),
+          detailConcurrency: readIntegerEnv('KR36_PROJECT_DETAIL_CONCURRENCY', 3, 1),
+          recheckRecentDays: readIntegerEnv('KR36_PROJECT_RECHECK_RECENT_DAYS', 90, 1),
+          recheckLimit: readIntegerEnv('KR36_PROJECT_RECHECK_LIMIT', 200, 1),
+          signal,
+        })
+      },
+    },
+    {
+      id: 'kr36-project-daily-admission',
+      task: 'kr36-project-daily-admission',
+      enabled: enabledEnv('KR36_PROJECT_ADMISSION_ENABLED', false),
+      scheduleKind: 'daily',
+      dailyHour: kr36AdmissionHour,
+      dailyMinute: kr36AdmissionMinute,
+      initialDelayMs: millisecondsUntilShanghai(kr36AdmissionHour, kr36AdmissionMinute),
+      timeoutMs: 30 * 60_000,
+      run: async () => {
+        const { runKr36DailyAdmission } = await import('./kr36ProjectAdmissionService.js')
+        return await runKr36DailyAdmission({ quota: readIntegerEnv('KR36_PROJECT_DAILY_QUOTA', 10, 1) })
+      },
+    },
+    {
       id: 'lead-reserve-daily-intake',
       task: 'lead-reserve-daily-intake',
-      enabled: enabledEnv('DAILY_INTAKE_ENABLED', false),
+      enabled: enabledEnv('LEGACY_LEAD_RESERVE_INTAKE_ENABLED', false),
       scheduleKind: 'daily',
       dailyHour: intakeHour,
       dailyMinute: intakeMinute,
@@ -381,7 +425,7 @@ export async function seedRuntimeJobDefinitions(
        VALUES (?, ?, ?, ?, ?, ?, ?, JSON_OBJECT(), ?, NOW(3), NOW(3))
        ON DUPLICATE KEY UPDATE
         task=VALUES(task),
-        enabled=IF(id LIKE 'radar-%', enabled, VALUES(enabled)),
+        enabled=IF(id LIKE 'radar-%' OR id LIKE 'kr36-%', enabled, VALUES(enabled)),
         schedule_kind=VALUES(schedule_kind),
         interval_seconds=VALUES(interval_seconds), daily_hour=VALUES(daily_hour), daily_minute=VALUES(daily_minute),
         updated_at=NOW(3)`,
@@ -393,19 +437,19 @@ export async function seedRuntimeJobDefinitions(
   return { jobs: definitions.length }
 }
 
-function managedRadarJob(id: string): RuntimeJobDefinition {
-  if (!managedRadarJobIds.has(id)) {
-    const error = new Error('不支持的 Radar 调度任务') as Error & { status?: number; code?: string }
+function managedJob(id: string, ids: ReadonlySet<string>, label: string): RuntimeJobDefinition {
+  if (!ids.has(id)) {
+    const error = new Error(`不支持的${label}调度任务`) as Error & { status?: number; code?: string }
     error.status = 404
-    error.code = 'RADAR_JOB_NOT_FOUND'
+    error.code = `${label === 'Radar' ? 'RADAR' : 'KR36'}_JOB_NOT_FOUND`
     throw error
   }
   const definition = runtimeJobDefinitions().find((item) => item.id === id)
-  if (!definition) throw new Error(`Radar runtime definition missing: ${id}`)
+  if (!definition) throw new Error(`${label} runtime definition missing: ${id}`)
   return definition
 }
 
-export async function listRadarRuntimeJobs() {
+async function listRuntimeJobs(ids: ReadonlySet<string>) {
   const [rows] = await pool.query<Array<RowDataPacket & {
     id: string
     enabled: number | boolean
@@ -422,8 +466,8 @@ export async function listRadarRuntimeJobs() {
   }>>(
     `SELECT id, enabled, schedule_kind, interval_seconds, daily_hour, daily_minute,
       next_run_at, last_status, last_started_at, last_finished_at, last_error, current_run_id
-     FROM ${jobsTable} WHERE id IN (${[...managedRadarJobIds].map(() => '?').join(',')}) ORDER BY id`,
-    [...managedRadarJobIds],
+     FROM ${jobsTable} WHERE id IN (${[...ids].map(() => '?').join(',')}) ORDER BY id`,
+    [...ids],
   )
   return rows.map((row) => ({
     id: row.id,
@@ -441,13 +485,30 @@ export async function listRadarRuntimeJobs() {
   }))
 }
 
+export async function listRadarRuntimeJobs() {
+  return await listRuntimeJobs(managedRadarJobIds)
+}
+
+export async function listKr36RuntimeJobs() {
+  return await listRuntimeJobs(managedKr36JobIds)
+}
+
 export async function setRadarRuntimeJobEnabled(id: string, enabled: boolean) {
-  managedRadarJob(id)
+  managedJob(id, managedRadarJobIds, 'Radar')
   await pool.query(
     `UPDATE ${jobsTable} SET enabled=?, next_run_at=IF(?, NOW(3), next_run_at), updated_at=NOW(3) WHERE id=?`,
     [enabled, enabled, id],
   )
   return (await listRadarRuntimeJobs()).find((item) => item.id === id)
+}
+
+export async function setKr36RuntimeJobEnabled(id: string, enabled: boolean) {
+  managedJob(id, managedKr36JobIds, '36氪')
+  await pool.query(
+    `UPDATE ${jobsTable} SET enabled=?, next_run_at=IF(?, NOW(3), next_run_at), updated_at=NOW(3) WHERE id=?`,
+    [enabled, enabled, id],
+  )
+  return (await listKr36RuntimeJobs()).find((item) => item.id === id)
 }
 
 export async function queueRuntimeJobNow(id: string) {
@@ -513,7 +574,12 @@ export async function recoverBenignRadarSyncDeadLetter(): Promise<{ recovered: n
 }
 
 export async function queueRadarRuntimeJobNow(id: string) {
-  managedRadarJob(id)
+  managedJob(id, managedRadarJobIds, 'Radar')
+  return await queueRuntimeJobNow(id)
+}
+
+export async function queueKr36RuntimeJobNow(id: string) {
+  managedJob(id, managedKr36JobIds, '36氪')
   return await queueRuntimeJobNow(id)
 }
 

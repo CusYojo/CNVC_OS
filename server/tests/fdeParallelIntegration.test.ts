@@ -25,7 +25,7 @@ function selectedScripts(args: string[]): string[] {
 
 test('parallel migration journal retains ordered 0084 through 0087 with no duplicate index or tag', () => {
   const journal = JSON.parse(read('../drizzle/meta/_journal.json')) as { entries: Array<{ idx: number; tag: string; when: number }> }
-  assert.deepEqual(journal.entries.slice(-4).map(x => [x.idx, x.tag]), [
+  assert.deepEqual(journal.entries.filter((entry) => entry.idx >= 84 && entry.idx <= 87).map(x => [x.idx, x.tag]), [
     [84, '0084_add_fde_committee'], [85, '0085_add_fde_type_registration'],
     [86, '0086_add_fde_project_replan'], [87, '0087_add_fde_office_execution'],
   ])

@@ -48,8 +48,13 @@ npm run migrate:radar
 线上候选读取、原始事件、来源、采集状态、同步游标和 Job 运行记录均以 MySQL
 为准；线上运行不读取旧 JSONL、Excel 或 Python 服务目录。
 
-36氪 `lead_reserve` 摄入也由 `lead-reserve-daily-intake` MySQL Job 管理；开发环境
-默认关闭，生产部署默认每日 09:00 摄入 50 条，并通过持久化映射补偿评分触发。
+36氪新项目由独立的 `kr36-project-sync` 采集到 `lead_source_candidates`，再由
+`kr36-project-daily-admission` 按日准入正式线索；两套任务默认关闭、独立开关，
+采集全部行业中成立于 2025 年及以后的项目；AI、具身智能和半导体标签仅用于统计，不再作为准入条件。历史
+`lead-reserve-daily-intake` 已默认停用，仅可通过 `LEGACY_LEAD_RESERVE_INTAKE_ENABLED=true`
+进行显式回滚；新链路默认每日准入10个合格候选。
+`npm run preview:kr36-projects` 仅访问公开来源并输出预览，不写数据库；
+`npm run report:kr36-supply` 只读查看候选库存和当日准入状态。
 线索评分使用 `lead_score_jobs` 持久化领取、续租和延迟重试；AI 文档任务的执行租约
 保存在 `ai_tasks`，因此应用重启或多实例交接不再依赖进程内队列状态。
 
