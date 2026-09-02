@@ -25,7 +25,7 @@ import {
 import { useAppStore } from '../store/useAppStore'
 import { useEffect, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { ProjectModal } from '../components/ProjectModal'
+import { UnifiedProjectCreateModal } from '../components/UnifiedProjectCreateModal'
 import { Drawer, EmptyState, Modal, SearchInput } from '../components/ui'
 import { getSystemWorkspace, systemWorkspaces } from '../lib/systemWorkspaces'
 import { shanghaiToday, shiftDate } from '../../server/src/contracts/fdeWeeklyPlanContract'
@@ -185,7 +185,7 @@ export function AppLayout() {
         <div className="fde-search-results">{pendingTodos.map(todo => <button key={todo.id} onClick={() => openResult(todo.type === '流程' ? `/workflow?view=project&project=${todo.projectId}` : todo.type === '通知' && todo.projectId ? `/projects/${todo.projectId}?tab=workflow` : todo.projectId ? `/projects/${todo.projectId}?tab=tasks` : '/collaboration')}><ClipboardCheck /><span><strong>{todo.title}</strong><small>{todo.projectName} · {todo.dueDate}</small></span><span>→</span></button>)}</div>
         {!pendingTodos.length && <EmptyState title="近三天暂无待办" description="仅显示当前账号今天至后天需完成的事项。" />}
       </Drawer>
-      <ProjectModal open={showCreate} onClose={() => setShowCreate(false)} />
+      <UnifiedProjectCreateModal open={showCreate} onClose={() => setShowCreate(false)} />
     </div>
   )
 }

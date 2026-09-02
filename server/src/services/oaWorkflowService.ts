@@ -379,6 +379,7 @@ export async function createOaApprovalRequest(input: {
       if (!project) throw workflowError(404, 'PROJECT_NOT_FOUND', '项目不存在')
       const actor = await activeUser(identity.users, input.userId)
       const fromStage = project.stage as ProjectStage
+      console.error('[OA_DEBUG] fromStage=' + fromStage + ' input.targetStage=' + input.targetStage + ' workflowModel=' + project.workflowModel + ' expectedNext=' + expectedNextStage(fromStage, project.workflowModel))
       if (project.workflowModel === 'fde-v1' && project.ownerUserId !== actor.id) throw workflowError(403, 'FDE_OWNER_REQUIRED', 'FDE 阶段申请必须由项目负责人提交')
       if (project.lifecycle !== 'active') throw workflowError(409, 'OA_PROJECT_INACTIVE', '关闭或归档项目不能发起阶段审批')
       if (project.classification === 'pool') throw workflowError(409, 'OA_POOL_INTAKE_REQUIRED', '请先完成项目池入库初筛，再发起阶段审批')

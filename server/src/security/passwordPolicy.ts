@@ -19,7 +19,7 @@ export function validateNewPassword(password: string, identity: PasswordIdentity
   if (!/[a-z]/.test(password)) violations.push('密码必须包含小写字母')
   if (!/[A-Z]/.test(password)) violations.push('密码必须包含大写字母')
   if (!/\d/.test(password)) violations.push('密码必须包含数字')
-  if (!/[^A-Za-z0-9]/.test(password)) violations.push('密码必须包含符号')
+  if (!/[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?~`]/.test(password)) violations.push('密码必须包含符号')
   if (/\s/.test(password)) violations.push('密码不能包含空白字符')
   if (KNOWN_INSECURE_PASSWORDS.includes(password.toLowerCase())) violations.push('密码属于已知弱密码')
   const lowered = password.toLowerCase()

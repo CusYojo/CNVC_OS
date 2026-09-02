@@ -13,7 +13,7 @@ import { useAppStore } from '../store/useAppStore'
 type PlanAction = { id: string; actionKey: string; title: string; ownerUserId: string; participantUserIds: string[]; dueDate: string; effectiveDueDate: string; taskId: string | null; deliverable: string; status: string; version: number }
 type Workflow = {
   timeline: Array<{ stage: string; date: string; basis: string; version: number; actualDate?: string | null }>
-  stages: Array<{ stage: string; allowWaiver: boolean; materials: Array<{ key: string; label: string }> }>
+  stages: Array<{ stage: string; allowWaiver: boolean; requiresFund?: boolean; materials: Array<{ key: string; label: string }>; approvals: Array<{ duty: string; name: string; mode: string; approverNames: string[] }> }>
   policy: { id: string; revision: number; cycleDays: number[] }
   materials: Array<{ id: string; stage: string; requirementKey: string; fileId: string | null; fileVersion: number | null; waiverReason: string | null; version: number }>
   plan: { id: string; revision: number; version: number; status: string; cycleDays: number; targetDate: string; actions: PlanAction[] } | null
@@ -43,6 +43,7 @@ export function FdeWorkflowPanel({ project, files, mode = 'workflow', onChanged,
   const [materialsOpen, setMaterialsOpen] = useState(false)
   const [planEditing, setPlanEditing] = useState(false)
   const [draggedAction, setDraggedAction] = useState<number | null>(null)
+  const [expandedStage, setExpandedStage] = useState<string | null>(null)
   const isOwner = currentUser?.id === project.ownerUserId
   const isActive = (project.lifecycle ?? 'active') === 'active'
 
@@ -126,7 +127,7 @@ export function FdeWorkflowPanel({ project, files, mode = 'workflow', onChanged,
         const completed = index < currentIndex || project.stage === '已 Close'
         const current = item.stage === project.stage && !completed
         const date = data.timeline.find(value => value.stage === item.stage)
-        return <button type="button" key={item.stage} aria-pressed={stage === item.stage} className={`fde-detail-stage ${completed ? 'completed' : current ? 'current' : ''}`} onClick={() => setStage(item.stage)}>
+        return <button type="button" key={item.stage} aria-pressed={stage === item.stage} className={`fde-detail-stage ${completed ? 'completed' : current ? 'current' : ''} ${expandedStage === item.stage ? 'fde-detail-stage-active' : ''}`} onClick={() => { setStage(item.stage); setExpandedStage(expandedStage === item.stage ? null : item.stage) }}>
           <span className="fde-detail-stage-rail"><span>{completed ? '✓' : index + 1}</span></span>
           <span className="fde-detail-stage-copy"><strong>{item.stage}</strong><small>{date?.actualDate ? `已于 ${shortProjectDate(date.actualDate)} 通过` : `计划 ${shortProjectDate(date?.date)}`}</small></span>
           <span className="fde-detail-stage-state"><Badge tone={completed ? 'green' : current ? 'blue' : 'slate'}>{completed ? '已通过' : current ? '进行中' : '待开始'}</Badge></span>
@@ -136,6 +137,45 @@ export function FdeWorkflowPanel({ project, files, mode = 'workflow', onChanged,
       {data.timeline?.some(item => item.basis === 'approved') && <p className="mt-3 text-xs text-[#315f68]">已批准节点日期：{data.timeline.filter(item => item.basis === 'approved').map(item => `${item.stage} ${item.date}（V${item.version}）`).join('；')}。最终目标日不变。</p>}
       {project.stage === '已 Close' && <p className="mt-4 rounded-lg bg-emerald-50 p-3 text-sm text-emerald-800">项目已 Close，流程进度 100%，活动任务已关闭。</p>}
     </Card>
+      {expandedStage && (() => {
+        const expandedIndex = data.stages.findIndex(item => item.stage === expandedStage)
+        const expanded = data.stages[expandedIndex]
+        if (!expanded) return null
+        const expandedDone = expandedIndex < currentIndex || project.stage === '已 Close'
+        const expandedCurrent = expanded.stage === project.stage && !expandedDone
+        const expandedDate = data.timeline.find(v => v.stage === expanded.stage)
+        const expandedBindings = data.materials.filter(b => b.stage === expanded.stage)
+        const prevStage = expandedIndex > 0 ? data.stages[expandedIndex - 1].stage : null
+        return <Card className="mt-4 rounded-xl border border-slate-200 bg-white p-5">
+          <div className="mb-3 flex items-center gap-2"><span className={`grid h-6 w-6 place-items-center rounded-full text-xs font-bold ${expandedDone ? 'bg-emerald-500 text-white' : expandedCurrent ? 'bg-blue-500 text-white' : 'bg-slate-200 text-slate-500'}`}>{expandedDone ? '✓' : expandedIndex + 1}</span><h2 className="text-sm font-semibold">阶段详情 · {expanded.stage}</h2><span className="text-xs text-slate-400">{expandedDone ? '已完成' : expandedCurrent ? '进行中' : '待开始'}</span></div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
+              <h3 className="mb-2 text-xs font-semibold text-slate-500">进入条件</h3>
+              <ul className="space-y-1 text-sm text-slate-700">
+                {prevStage ? <li>· 完成「{prevStage}」审批</li> : <li>· 由项目池或线索转入</li>}
+                {expanded.requiresFund && <li>· 明确投资基金</li>}
+                {expanded.stage === '尽调计划审核' && <li>· 完整有效的倒排计划</li>}
+              </ul>
+            </div>
+            <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
+              <h3 className="mb-2 text-xs font-semibold text-slate-500">必备材料</h3>
+              {expanded.materials.length ? <ul className="space-y-1 text-sm">{expanded.materials.map(requirement => { const satisfied = materialIsSatisfied(expandedBindings.filter(b => b.requirementKey === requirement.key), files); return <li key={requirement.key} className={satisfied ? 'text-slate-700' : 'text-amber-700'}>{satisfied ? '✓' : '○'} {requirement.label}</li> })}</ul> : <p className="text-sm text-slate-400">无独立文件要求</p>}
+            </div>
+            <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
+              <h3 className="mb-2 text-xs font-semibold text-slate-500">负责人</h3>
+              {expanded.approvals.length ? <div className="flex flex-wrap gap-1">{expanded.approvals.map(approval => <span key={approval.duty} className="rounded bg-brand-50 px-2 py-1 text-xs text-brand-700">{approval.name}{approval.approverNames.length ? ` · ${approval.approverNames.join('、')}` : ' · 未配置'}</span>)}</div> : <p className="text-sm text-slate-400">无审批节点</p>}
+            </div>
+            <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
+              <h3 className="mb-2 text-xs font-semibold text-slate-500">计划</h3>
+              <p className="text-sm text-slate-700">{expandedDate?.actualDate ? `已于 ${shortProjectDate(expandedDate.actualDate)} 通过` : `计划 ${shortProjectDate(expandedDate?.date)}`}</p>
+            </div>
+            <div className="rounded-lg border border-slate-100 bg-slate-50 p-3 sm:col-span-2">
+              <h3 className="mb-2 text-xs font-semibold text-slate-500">完成标准</h3>
+              <p className="text-sm text-slate-700">{expanded.approvals.length ? expanded.approvals.map(approval => `${approval.name}（${approval.mode}）`).join(' → ') + ' 通过' : '完成阶段动作'}</p>
+            </div>
+          </div>
+        </Card>
+      })()}
       <Card className="fde-detail-stage-focus">
         <div className="fde-detail-card-head"><h2>{stage === project.stage ? '当前节点' : '节点详情'} · {stage}</h2><div className="fde-detail-inline-actions">
           <Button variant="secondary" onClick={() => setMaterialsOpen(true)}>查看节点材料</Button>

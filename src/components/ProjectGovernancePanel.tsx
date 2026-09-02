@@ -42,7 +42,15 @@ export function ProjectGovernancePanel({ projectId, onChanged }: { projectId: st
     setAssignments(data.assignments.map(({ duty, userId }) => ({ duty, userId })))
     setReason(''); setEditing(true)
   }
-  const selectDuty = (duty: FdeProjectDuty, selectedIds: string[]) => setAssignments((current) => { const next = [...current.filter((item) => item.duty !== duty), ...selectedIds.filter(Boolean).map((userId) => ({ duty, userId }))]; if (duty === "executive_lead" && selectedIds[0] && !next.some(item => item.duty === "concerned_leader" && item.userId === selectedIds[0])) next.push({ duty: "concerned_leader", userId: selectedIds[0] }); return next })
+  const selectDuty = (duty: FdeProjectDuty, selectedIds: string[]) => {
+    setAssignments((current) => {
+      const next = [...current.filter((item) => item.duty !== duty), ...selectedIds.filter(Boolean).map((userId) => ({ duty, userId }))]
+      if (duty === "executive_lead" && selectedIds[0] && !next.some(item => item.duty === "concerned_leader" && item.userId === selectedIds[0])) {
+        next.push({ duty: "concerned_leader", userId: selectedIds[0] })
+      }
+      return next
+    })
+  }
   const save = async () => {
     if (!data) return
     setBusy(true)
@@ -81,7 +89,51 @@ export function ProjectGovernancePanel({ projectId, onChanged }: { projectId: st
   <Modal open={editing} onClose={() => setEditing(false)} title="配置项目组织与职责" width="max-w-4xl" footer={<><Button variant="secondary" onClick={() => setEditing(false)}>取消</Button><Button loading={busy} disabled={!ownerId || reason.trim().length < 5} onClick={() => { void save() }}>提交职责变更</Button></>}>
     <p className="mb-4 rounded-lg bg-amber-50 p-3 text-xs leading-5 text-amber-800">移除已有关注领导、牵头领导、董事长或总裁参与职责时，必须由相关领导确认后生效。仅分配时间协调人不会授予完整项目内容权限。</p>
     <label><span className="label">项目负责人</span><select className="input" value={ownerId} onChange={(event) => setOwnerId(event.target.value)}>{data.eligiblePeople.filter((person) => person.categories.some((category) => ['institution_leader', 'project_lead', 'member'].includes(category))).map((person) => <option key={person.id} value={person.id}>{person.name} · {person.department}</option>)}</select></label>
-    <div className="mt-4 grid gap-4 md:grid-cols-2">{FDE_PROJECT_DUTIES.map((duty) => <label key={duty.code}><span className="label">{duty.label}{duty.code === "executive_lead" ? "（单选，同时纳入关注领导）" : "（可多选）"}</span><select multiple={duty.code !== "executive_lead"} className={duty.code === "executive_lead" ? "input" : "input h-28"} value={duty.code === "executive_lead" ? assignments.find(item => item.duty === duty.code)?.userId ?? "" : assignments.filter((item) => item.duty === duty.code).map((item) => item.userId)} onChange={(event) => selectDuty(duty.code, Array.from(event.target.selectedOptions).map((option) => option.value))}>{duty.code === "executive_lead" && <option value="">未配置，保留缺岗待处理</option>}{data.eligiblePeople.filter((person) => person.categories.some((category) => (duty.eligible as readonly string[]).includes(category)) && (duty.code !== 'chairman' || person.roleCodes.includes('FDE_CHAIRMAN')) && (duty.code !== 'president' || person.roleCodes.includes('FDE_PRESIDENT'))).map((person) => <option key={person.id} value={person.id}>{person.name} · {person.department}</option>)}</select></label>)}</div>
+    <div className="mt-4 space-y-4">{FDE_PROJECT_DUTIES.map((duty) => {
+      const candidates = data.eligiblePeople.filter((person) => person.categories.some((category) => (duty.eligible as readonly string[]).includes(category)) && (duty.code !== 'chairman' || person.roleCodes.includes('FDE_CHAIRMAN')) && (duty.code !== 'president' || person.roleCodes.includes('FDE_PRESIDENT')))
+      const selectedIds = duty.code === "executive_lead"
+        ? assignments.filter(item => item.duty === duty.code).map(item => item.userId)
+        : assignments.filter(item => item.duty === duty.code).map(item => item.userId)
+      return (
+        <fieldset key={duty.code} className="rounded-xl border border-slate-200 bg-white p-3">
+          <legend className="px-1 text-sm font-semibold text-slate-800">
+            {duty.label}
+            <span className="ml-2 text-xs font-normal text-slate-400">
+              {duty.code === "executive_lead" ? "单选，同时纳入关注领导" : "可多选"}
+            </span>
+          </legend>
+          {candidates.length === 0 && <p className="py-2 text-xs text-slate-400">暂无符合条件的人员</p>}
+          <div className="mt-2 flex flex-wrap gap-2">
+            {candidates.map((person) => {
+              const isSelected = selectedIds.includes(person.id)
+              return (
+                <label
+                  key={person.id}
+                  className={`flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-sm transition ${
+                    isSelected ? 'bg-brand-50 text-brand-800 border border-brand-200' : 'bg-slate-50 hover:bg-slate-100 border border-transparent'
+                  }`}
+                >
+                  <input
+                    type={duty.code === "executive_lead" ? "radio" : "checkbox"}
+                    name={duty.code === "executive_lead" ? duty.code : undefined}
+                    checked={isSelected}
+                    onChange={() => selectDuty(duty.code, duty.code === "executive_lead"
+                      ? [person.id]
+                      : isSelected
+                        ? selectedIds.filter(id => id !== person.id)
+                        : [...selectedIds, person.id]
+                    )}
+                    className="sr-only"
+                  />
+                  <span className="font-medium">{person.name}</span>
+                  <span className="text-xs text-slate-400">{person.department}</span>
+                </label>
+              )
+            })}
+          </div>
+        </fieldset>
+      )
+    })}</div>
     <label className="mt-4 block"><span className="label">变更理由</span><textarea className="textarea min-h-24" value={reason} onChange={(event) => setReason(event.target.value)} placeholder="说明职责调整和交接安排，至少 5 字" /></label>
   </Modal>
   <Modal open={Boolean(decision)} onClose={() => setDecision(null)} title="确认参与规则决定" footer={<><Button variant="secondary" onClick={() => setDecision(null)}>取消</Button><Button loading={busy} disabled={comment.trim().length < 2} onClick={() => { void decide() }}>记录决定</Button></>}><p className="mb-3 text-sm text-slate-600">{decision?.change.reason}</p><textarea className="textarea min-h-24" value={comment} onChange={(event) => setComment(event.target.value)} placeholder="填写确认、拒绝或撤回理由" /></Modal>

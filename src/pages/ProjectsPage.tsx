@@ -2,7 +2,7 @@ import { ChevronLeft, ChevronRight, Filter, GitBranch, MoreHorizontal, Pencil, P
 import { useAppStore } from '../store/useAppStore'
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ProjectModal } from '../components/ProjectModal'
+import { UnifiedProjectCreateModal } from '../components/UnifiedProjectCreateModal'
 import { useToast } from '../components/Toast'
 import { Button, Card, DataTable, Drawer, EmptyState, Modal, PageHeader, RiskBadge, SearchInput, StageBadge, TableCell } from '../components/ui'
 import { useAuthStore } from '../store/useAuthStore'
@@ -185,7 +185,7 @@ export function ProjectsPage({ classification = 'normal', embedded = false }: { 
           </>
         )}
       </Card>
-      <ProjectModal open={showCreate} onClose={() => setShowCreate(false)} />
+      <UnifiedProjectCreateModal open={showCreate} onClose={() => setShowCreate(false)} />
       <Modal
         open={!!pendingDelete}
         onClose={() => { if (!deletingProjectId) setPendingDelete(null) }}

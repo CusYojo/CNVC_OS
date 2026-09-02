@@ -104,7 +104,15 @@ export async function prepareFdeCreationGovernance(reader: Reader, input: { owne
   }
   for (const manager of selected('project_manager')) normalized.set(assignmentKey({ duty: 'secretary', userId: manager.userId }), { duty: 'secretary', userId: manager.userId })
   const assignments = [...normalized.values()]
-  validateAssignments(input.ownerUserId, assignments, people)
+  // 用户显式选的职责必须严格校验类别；系统自动补齐的职责（concerned_leader/chairman/president/secretary）
+  // 用于下游审批策略依赖，不强制要求 eligible 类别，只校验人员存在且启用。
+  const explicitDuties = new Set(input.assignments.map(a => a.duty))
+  const explicitAssignments = assignments.filter((a) => explicitDuties.has(a.duty))
+  const autoAssignments = assignments.filter((a) => !explicitDuties.has(a.duty))
+  validateAssignments(input.ownerUserId, explicitAssignments, people)
+  for (const assignment of autoAssignments) {
+    if (!byId.get(assignment.userId)) throw failure(400, 'FDE_DUTY_PERSON_INVALID', `自动补配的职责人员不存在或已禁用：${assignment.duty}`)
+  }
   return { owner: byId.get(input.ownerUserId)!, assignments, people: [...byId.values()] }
 }
 
@@ -124,6 +132,7 @@ function validateAssignments(ownerId: string, assignments: FdeDutyAssignment[], 
   for (const assignment of assignments) {
     const definition = FDE_PROJECT_DUTIES.find((item) => item.code === assignment.duty)
     const person = byId.get(assignment.userId)
+    console.error('[validateAssignments] duty=' + assignment.duty + ' userId=' + assignment.userId + ' person=' + (person?.name ?? 'NOT_FOUND') + ' categories=' + JSON.stringify(person?.categories ?? null) + ' eligible=' + JSON.stringify(definition?.eligible ?? null))
     if (!definition || !person || !person.categories.some((category) => (definition.eligible as readonly string[]).includes(category))) throw failure(400, 'FDE_DUTY_PERSON_INVALID', '职责人员不存在、已禁用或不符合机构角色类别')
     if (assignment.duty === 'chairman' && !person.roleCodes.includes('FDE_CHAIRMAN')) throw failure(400, 'FDE_EXECUTIVE_ROLE_INVALID', '董事长审批职责必须绑定董事长角色')
     if (assignment.duty === 'president' && !person.roleCodes.includes('FDE_PRESIDENT')) throw failure(400, 'FDE_EXECUTIVE_ROLE_INVALID', '计划审核职责必须绑定总裁角色')

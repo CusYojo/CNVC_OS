@@ -156,13 +156,39 @@ async function amendApprovedFdePlan(tx: Transaction, project: ProjectRow, plan: 
   await createMySqlIdentityRepositoryContext(tx).audits.append({ userId: actor.id, userName: actor.name, module: '倒排计划', action: '修订已通过计划', target: `${project.name} / V${plan.revision} / 计划版本 ${plan.version + 1} / 同步老板 ${recipients.map(person => person.name).join('、') || '本人'}` })
 }
 
+// 为每个阶段审批职责解析启用人员名单，用于前端阶段详情展示
+async function readStageApproverNames(projectId: string): Promise<Map<string, string[]>> {
+  const assignments = await db.select({ duty: projectDutyAssignments.duty, userId: projectDutyAssignments.userId }).from(projectDutyAssignments).where(eq(projectDutyAssignments.projectId, projectId))
+  const byDuty = new Map<string, string[]>()
+  for (const item of assignments) {
+    const list = byDuty.get(item.duty) ?? []
+    list.push(item.userId)
+    byDuty.set(item.duty, list)
+  }
+  const fallbackRoles = { chairman: 'FDE_CHAIRMAN', president: 'FDE_PRESIDENT' } as const
+  const fallbackNames = new Map<string, string[]>()
+  for (const [duty, roleCode] of Object.entries(fallbackRoles)) {
+    if (byDuty.has(duty)) continue
+    const rows = await db.select({ name: users.name }).from(userRoles).innerJoin(users, eq(users.id, userRoles.userId)).innerJoin(roles, eq(roles.id, userRoles.roleId)).where(and(eq(roles.code, roleCode), eq(roles.status, '启用'), eq(users.status, '启用')))
+    if (rows.length) fallbackNames.set(duty, rows.map((row) => row.name))
+  }
+  const allIds = [...new Set([...byDuty.values()].flat())]
+  const people = allIds.length ? await db.select({ id: users.id, name: users.name }).from(users).where(inArray(users.id, allIds)) : []
+  const nameById = new Map(people.map((person) => [person.id, person.name]))
+  const result = new Map<string, string[]>()
+  for (const [duty, ids] of byDuty) result.set(duty, ids.map((id) => nameById.get(id)).filter((name): name is string => Boolean(name)))
+  for (const [duty, names] of fallbackNames) result.set(duty, names)
+  return result
+}
+
 export async function getFdeWorkflow(projectId: string, userId: string) {
   const project = await requireAccessibleProject(userId, projectId)
   const policy = await getProjectWorkflowPolicy(db, project)
-  const [materials, plans, memberRows] = await Promise.all([
+  const [materials, plans, memberRows, approverNames] = await Promise.all([
     db.select().from(projectStageMaterials).where(eq(projectStageMaterials.projectId, projectId)),
     db.select().from(projectPlans).where(eq(projectPlans.projectId, projectId)).orderBy(desc(projectPlans.revision)),
     db.select({ id: users.id, name: users.name, role: projectMembers.memberRole }).from(projectMembers).innerJoin(users, eq(projectMembers.userId, users.id)).where(eq(projectMembers.projectId, projectId)),
+    readStageApproverNames(projectId),
   ])
   const currentPlan = plans.find((plan) => plan.status !== 'archived')
   const definitions = currentPlan ? await db.select().from(projectPlanActions).where(eq(projectPlanActions.planId, currentPlan.id)).orderBy(asc(projectPlanActions.sortOrder)) : []
@@ -172,7 +198,11 @@ export async function getFdeWorkflow(projectId: string, userId: string) {
     return { ...action, participantUserIds: action.participantUserIds.length ? action.participantUserIds : [action.ownerUserId], status: task?.status ?? action.status, taskId: task?.id ?? null, effectiveDueDate: task?.dueDate ?? action.dueDate }
   })
   const canEditPlan = project.lifecycle === 'active' && (project.ownerUserId === userId || currentPlan?.status === 'locked' && await canAmendApprovedPlan(db, project, userId))
-  return { stages: policy.configuration.stages, timeline: await readAgentTimeline(db, project), policy: { id: policy.id, revision: policy.revision, cycleDays: policy.configuration.cycleDays }, materials, plan: currentPlan ? { ...currentPlan, actions } : null, planHistory: plans, members: memberRows, capabilities: { canEditPlan } }
+  const stages = policy.configuration.stages.map((stage) => ({
+    ...stage,
+    approvals: stage.approvals.map((approval) => ({ ...approval, approverNames: approverNames.get(approval.duty) ?? [] })),
+  }))
+  return { stages, timeline: await readAgentTimeline(db, project), policy: { id: policy.id, revision: policy.revision, cycleDays: policy.configuration.cycleDays }, materials, plan: currentPlan ? { ...currentPlan, actions } : null, planHistory: plans, members: memberRows, capabilities: { canEditPlan } }
 }
 
 export async function bindFdeMaterial(input: { projectId: string; userId: string; stage: string; requirementKey: string; fileId?: string; waiverReason?: string; expectedVersion?: number }) {

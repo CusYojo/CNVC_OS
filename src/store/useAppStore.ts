@@ -164,7 +164,7 @@ export const useAppStore = create<AppState>()(
       hydrateFromServer: async () => {
         const authUser = useAuthStore.getState().user
         if (!useAuthStore.getState().isAuthenticated || !authUser) return
-        const isSystemAdmin = authUser.role === '系统管理员'
+        const isSystemAdmin = authUser.permissionCodes?.includes('system.manage') ?? authUser.role === '系统管理员'
         // 注意: 故意不发 /leads 请求 — leads 走分页(由 SourcingPage 单独 fetchLeads 拉)
         // 之前 hydrate 拉全量 leads 阻塞首次页面渲染 7s+,改成按需拉
         const results = await Promise.allSettled([

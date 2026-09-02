@@ -4,7 +4,6 @@ import { useAppStore } from '../store/useAppStore'
 import type { ProjectClassification } from '../types'
 import { ProjectsPage } from './ProjectsPage'
 import { SourcingPage } from './SourcingPage'
-import { FdeTypeRegistrationPanel } from '../components/FdeTypeRegistrationPanel'
 
 type ProjectCenterView = 'leads' | ProjectClassification
 
@@ -36,8 +35,7 @@ export function ProjectCenterPage() {
   return (
     <div className="fde-project-center">
       <div className="fde-page-heading">
-        <div><h1>项目中心</h1></div>
-        {view !== 'leads' && <FdeTypeRegistrationPanel compact />}
+        <div><h1>项目中心</h1><p className="mt-1 text-sm text-slate-500">使用顶部导航栏的"快速新建"按钮创建投资项目或登记非投资项目。</p></div>
       </div>
         <div className="fde-workspace-tabs fde-saved-views" role="tablist" aria-label="项目中心">
           {visibleViews.map((item) => {
