@@ -173,6 +173,7 @@ export async function runKr36DailyAdmission(input: { quota?: number } = {}) {
   const quota = Math.max(1, Math.min(input.quota ?? 1, 50))
   const dateKey = shanghaiDateKey()
   const lockName = `kr36-daily-admission:${dateKey}`
+  const selectionSeed = `kr36-daily-admission:${dateKey}`
   const connection = await pool.getConnection()
   let acquired = false
   const selectedIds: string[] = []
@@ -201,12 +202,9 @@ export async function runKr36DailyAdmission(input: { quota?: number } = {}) {
       const [rows] = await connection.query<Array<RowDataPacket & { id: string }>>(
         `SELECT id FROM ${candidateTable}
          WHERE source_type='36kr-project' AND scope_status='eligible' AND admission_status='ready'
-         ORDER BY
-          (first_seen_at>=CURRENT_DATE()) DESC,
-          (first_seen_at>=DATE_SUB(CURRENT_DATE(),INTERVAL 7 DAY)) DESC,
-          first_seen_at ASC,id ASC
+         ORDER BY SHA2(CONCAT(?,':',id),256),id
          LIMIT ? FOR UPDATE SKIP LOCKED`,
-        [remaining],
+        [selectionSeed, remaining],
       )
       for (const row of rows) {
         await connection.query(

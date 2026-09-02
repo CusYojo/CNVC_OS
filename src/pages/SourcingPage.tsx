@@ -9,11 +9,14 @@ import { splitLeadIndustryTags } from '../lib/leadPresentation'
 import { useAppStore, type LeadListQuery } from '../store/useAppStore'
 import type { Lead, LeadRatingGrade } from '../types'
 
-const CHANNEL_OPTIONS = ['36氪', '机构公众号', '高校公众号', '论文']
+const CHANNEL_OPTIONS = ['36氪', '机构公众号', '高校公众号', '论文', '新闻', '微信群聊']
 const INDUSTRY_OPTIONS = [
   '人工智能', '具身智能/机器人', '半导体/芯片', '前沿技术', '产业升级', '先进制造',
   '企业服务', '医疗健康', '生物医药', '新能源', '新材料', '汽车出行',
   '消费科技', '文化娱乐', '教育', '农业科技',
+  '自然语言处理', '计算机视觉', '网络安全', '数据科学', '软件工程',
+  '金融', '智能硬件/传感器', '工具软件', '算力基础设施', '能源环保', '物联网/硬件',
+  '低空经济', '本地生活', '跨境出海', '物流', '旅游', '其他',
 ]
 const REGION_OPTIONS = [
   '北京', '上海', '天津', '重庆', '河北', '山西', '内蒙古', '辽宁', '吉林', '黑龙江',
@@ -224,6 +227,7 @@ export function SourcingPage() {
     if (debouncedQuery) next.set('keyword', debouncedQuery)
     else next.delete('keyword')
     next.set('page', '1')
+    window.sessionStorage.removeItem(LIST_SCROLL_KEY)
     setParams(next, { replace: true })
   }, [debouncedQuery, params, setParams])
 
@@ -255,11 +259,13 @@ export function SourcingPage() {
     if (value) next.set(key, value)
     else next.delete(key)
     next.set('page', key === 'page' ? value : '1')
+    window.sessionStorage.removeItem(LIST_SCROLL_KEY)
     setParams(next)
   }
 
   const resetFilters = () => {
     setQueryInput('')
+    window.sessionStorage.removeItem(LIST_SCROLL_KEY)
     setParams(new URLSearchParams({ page: '1', pageSize: String(pageSize) }))
   }
 
@@ -328,13 +334,16 @@ function LeadRow({ lead, onOpen }: { lead: Lead; onOpen: () => void }) {
   const rating = ratingLabel(lead)
   const funding = fundingDisplay(lead)
   const signals = signalLabels(lead)
-  const industryTags = splitLeadIndustryTags(lead.industry)
+  const industryTags = [...new Set([
+    ...(lead.businessTags?.industry ?? []),
+    ...splitLeadIndustryTags(lead.industry),
+  ])].slice(0, 6)
   const updates = (lead.latestUpdates ?? []).slice(0, 2)
   const summaryText = displayText(lead.summary, '暂无可验证摘要')
   const reasonText = ratingReason(lead)
   const researchFacts = [
     ['成果', displayText(lead.radarProfile?.paperMeta?.venue || lead.radarProfile?.paperMeta?.categories?.[0], '论文/成果')],
-    ['验证', lead.verificationStatus], ['转化', displayText(lead.stageDisplay, '待核验')],
+    ['验证', lead.verificationStatus], ['转化', displayText(lead.businessStageDisplay || lead.stageDisplay, '待核验')],
   ]
   const companyFacts = [
     ['成立', displayText(lead.companyRegistry?.foundedAt || lead.foundedAtDisplay)],

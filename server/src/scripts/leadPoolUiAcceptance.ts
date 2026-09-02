@@ -32,6 +32,12 @@ for (const endpoint of ['/leads/imports', '/leads/bp-uploads', '/lead-pipeline/r
 for (const filter of ['线索类型', '行业', '阶段', '地区', '渠道', '更新时间']) {
   assert.match(page, new RegExp(`label="${filter}"`), `缺少筛选项：${filter}`)
 }
+for (const channel of ['36氪', '机构公众号', '高校公众号', '论文', '新闻', '微信群聊']) {
+  assert.match(page, new RegExp(`'${channel}'`), `渠道筛选缺少 ${channel}`)
+}
+for (const industry of ['自然语言处理', '计算机视觉', '网络安全', '数据科学', '软件工程', '金融', '工具软件', '本地生活', '旅游']) {
+  assert.match(page, new RegExp(`'${industry}'`), `全行业筛选缺少 ${industry}`)
+}
 for (const column of ['项目概况', '一句话摘要', '核心信息', '推荐理由 / 信号', '融资 / 估值', '最新动态', '更新时间']) {
   assert.match(page, new RegExp(`columnheader">${column.replace('/', '\\/')}`), `缺少列表列：${column}`)
 }
@@ -56,6 +62,23 @@ for (const field of ['融资状态', '融资金额', '估值']) {
   assert.match(page, new RegExp(`'${field}'`), `融资 / 估值列缺少固定子项：${field}`)
 }
 assert.match(summaryService, /fundingStatusDisplay:\s*normalizedStages\.fundingStatus/, '列表 DTO 必须返回独立融资状态字段')
+for (const [industry, sectorLabel] of [
+  ['人工智能', 'artificial_intelligence'],
+  ['具身智能/机器人', 'embodied_intelligence'],
+  ['半导体/芯片', 'semiconductor'],
+]) {
+  assert.match(summaryService, new RegExp(`'${industry}':\\s*'${sectorLabel}'`), `${industry}筛选必须映射到36氪归一化赛道`)
+}
+assert.match(summaryService, /\$\.profile\.sectorLabels/, '行业筛选必须读取36氪候选入池后的赛道标签')
+assert.match(summaryService, /JSON_CONTAINS\([\s\S]*?sectorLabels[\s\S]*?JSON_QUOTE\(\$\{sectorLabel\}\)/, '赛道筛选必须使用 JSON 数组精确包含匹配')
+assert.match(summaryService, /LEAD_STAGE_FILTER_PATTERNS/, '阶段筛选必须使用归一化分组规则')
+assert.match(summaryService, /'C轮及以后':\s*'\^\(\[C-F\]/, 'C轮及以后必须覆盖 C-F 轮及上市前阶段')
+assert.match(summaryService, /stage === '科研成果'[\s\S]*?channel'[\s\S]*?= '论文'/, '科研成果必须按论文线索类型筛选')
+assert.doesNotMatch(summaryService, /const stageKeyword = `%\$\{stage\}%`/, '阶段筛选不得继续使用会混入 Pre-A 的模糊匹配')
+assert.match(summaryService, /meaningfulPresentationText\(ratingV3\.scoredAt\)/, '更新日期展示必须与筛选同时纳入 V3 评级时间')
+assert.match(page, /businessStageDisplay \|\| lead\.stageDisplay/, '科研成果列表必须展示经营或转化阶段')
+assert.match(page, /businessTags\?\.industry/, '列表必须展示归一化行业与赛道标签')
+assert.match(page, /sessionStorage\.removeItem\(LIST_SCROLL_KEY\)/, '主动切换筛选时必须清除旧滚动位置')
 for (const status of ['已融资', '未融资', '未披露', '待核验', '不适用']) {
   assert.match(dataQualityService, new RegExp(`'${status}'`), `融资状态投影缺少状态：${status}`)
 }
@@ -208,6 +231,10 @@ console.log(JSON.stringify({
     'hidden-operations-not-rendered',
     'hidden-operations-not-called',
     'six-filter-contract',
+    'kr36-sector-label-filter-contract',
+    'normalized-stage-filter-contract',
+    'all-industry-and-channel-options',
+    'filter-scroll-reset',
     'seven-column-contract',
     'twenty-row-pagination',
     'independent-detail-route',

@@ -296,7 +296,7 @@ const ListLeadsQuery = z.object({
   sort: z.enum(['latest', 'score']).optional(),
   keyword: z.string().optional(),  // 关键词全库跨字段检索
   source: z.string().optional(),   // 渠道二级标签(按 sourceName 模糊匹配)
-  industry: z.string().optional(), // 行业检索（按 leads.industry LIKE 模糊匹配）
+  industry: z.string().optional(), // 归一化行业检索（兼容 leads.industry 与采集赛道标签）
   region: z.string().optional(),   // 地区业务标签（按注册地/项目画像匹配）
   leadType: z.enum(['company', 'research']).optional(),
   stage: z.string().max(64).optional(),

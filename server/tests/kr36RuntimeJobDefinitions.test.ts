@@ -61,3 +61,10 @@ test('正式切换默认每日10条并保持旧50条任务关闭', () => {
     else process.env.DAILY_INTAKE_ENABLED = previous.old
   }
 })
+
+test('每日准入从全部合格候选按日期稳定随机抽取', () => {
+  const source = readFileSync(new URL('../src/services/kr36ProjectAdmissionService.ts', import.meta.url), 'utf8')
+  assert.match(source, /const selectionSeed = `kr36-daily-admission:\$\{dateKey\}`/)
+  assert.match(source, /ORDER BY SHA2\(CONCAT\(\?,':',id\),256\),id/)
+  assert.doesNotMatch(source, /first_seen_at>=CURRENT_DATE\(\)/)
+})

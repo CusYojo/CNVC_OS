@@ -304,7 +304,42 @@ const BUSINESS_INDUSTRY_RULES: Array<{ label: string; terms: string[] }> = [
   { label: '文化娱乐', terms: ['文化娱乐', '游戏', '内容'] },
   { label: '教育', terms: ['教育'] },
   { label: '农业科技', terms: ['农业科技', '农业'] },
+  { label: '金融', terms: ['金融'] },
+  { label: '智能硬件/传感器', terms: ['智能硬件', '传感器'] },
+  { label: '工具软件', terms: ['工具软件'] },
+  { label: '算力基础设施', terms: ['算力基础设施'] },
+  { label: '能源环保', terms: ['能源环保'] },
+  { label: '物联网/硬件', terms: ['物联网', '物联网/硬件'] },
+  { label: '低空经济', terms: ['低空经济'] },
+  { label: '本地生活', terms: ['本地生活'] },
+  { label: '跨境出海', terms: ['跨境出海'] },
+  { label: '物流', terms: ['物流'] },
+  { label: '旅游', terms: ['旅游'] },
+  { label: '其他', terms: ['其他'] },
 ]
+
+// 36氪项目采集链路保留源行业文本，同时将重点赛道归一化到
+// radar_profile.profile.sectorLabels。页面上的同一筛选条件必须同时兼容两种表达，
+// 否则“AI 标签 + 工具软件源行业”会被错误排除。
+const BUSINESS_INDUSTRY_SECTOR_LABELS: Record<string, string> = {
+  '人工智能': 'artificial_intelligence',
+  '具身智能/机器人': 'embodied_intelligence',
+  '半导体/芯片': 'semiconductor',
+}
+
+const SECTOR_LABEL_INDUSTRIES: Record<string, string> = Object.fromEntries(
+  Object.entries(BUSINESS_INDUSTRY_SECTOR_LABELS).map(([industry, sectorLabel]) => [sectorLabel, industry]),
+)
+
+const LEAD_STAGE_FILTER_PATTERNS: Record<string, string> = {
+  '种子轮': '^种子([+]{1,2})?轮$',
+  '天使轮': '^天使([+]{1,2})?轮$',
+  'Pre-A轮': '^Pre-A([+])?轮?$',
+  'A轮': '^A([0-9]|[+]{1,2})?轮$',
+  'B轮': '^B([0-9]|[+]{1,2})?轮$',
+  'C轮及以后': '^([C-F]([0-9]|[+]{1,2})?轮|Pre-IPO|IPO|PE)$',
+  '战略融资': '^(战略融资|战略投资)$',
+}
 
 const PRESENTATION_PLACEHOLDERS = new Set(['', '待核验', '待核实', '未披露', '未披露/待核实', '融资轮次待核实', '无', '-', 'N/A', 'null', '不适用'])
 
@@ -348,13 +383,19 @@ export function readAcceptedAiSubjectReview(
   }
 }
 
-export function deriveIndustryTags(industry: unknown): string[] {
+export function deriveIndustryTags(industry: unknown, sectorLabels: unknown = []): string[] {
   const text = meaningfulPresentationText(industry)
-  if (!text) return ['待确认']
-  const matched = BUSINESS_INDUSTRY_RULES
-    .filter((rule) => rule.terms.some((term) => text.toLocaleLowerCase().includes(term.toLocaleLowerCase())))
-    .map((rule) => rule.label)
-  return matched.length ? matched.slice(0, 2) : ['其他']
+  const sectorTags = Array.isArray(sectorLabels)
+    ? sectorLabels.map((value) => SECTOR_LABEL_INDUSTRIES[String(value)]).filter(Boolean)
+    : []
+  const matched = text
+    ? BUSINESS_INDUSTRY_RULES
+        .filter((rule) => rule.terms.some((term) => text.toLocaleLowerCase().includes(term.toLocaleLowerCase())))
+        .map((rule) => rule.label)
+    : []
+  const tags = [...new Set([...sectorTags, ...matched])]
+  if (tags.length) return tags.slice(0, 4)
+  return text ? ['其他'] : ['待确认']
 }
 
 export function deriveRegion(scoring: Record<string, unknown>, radarProfile: Record<string, unknown>): string {
@@ -446,7 +487,11 @@ export function deriveOverallScore(scoring: Record<string, unknown>, fallbackSco
 }
 
 export function deriveDataUpdatedAt(scoring: Record<string, unknown>, radarProfile: Record<string, unknown>, createdAt: Date | null) {
+  const ratingV3 = scoring.ratingV3 && typeof scoring.ratingV3 === 'object' && !Array.isArray(scoring.ratingV3)
+    ? scoring.ratingV3 as Record<string, unknown>
+    : {}
   const candidates = [
+    meaningfulPresentationText(ratingV3.scoredAt),
     meaningfulPresentationText(scoring.scored_at),
     meaningfulPresentationText(radarProfile.publishedAt),
     createdAt?.toISOString(),
@@ -720,7 +765,7 @@ function enrichLead(row: typeof leads.$inferSelect) {
     regionSource: regionResolution?.source,
     regionConfidence: regionResolution?.confidence,
     businessTags: {
-      industry: deriveIndustryTags(row.industry),
+      industry: deriveIndustryTags(row.industry, profile.sectorLabels),
       region: [region],
     },
     valuationDisplay: deriveValuationDisplay(sc, rp, analysisStatus, row.fundingRounds),
@@ -785,6 +830,14 @@ export async function listLeads(options: {
   )`
   if (channel === '36氪') {
     conds.push(sql`(${jsonText(leads.radarProfile, '$.channel')} = '36氪' OR ${is36KrSource})`)
+  } else if (channel === '新闻') {
+    conds.push(sql`(
+      ${jsonText(leads.radarProfile, '$.channel')} = '新闻'
+      OR (
+        COALESCE(${jsonText(leads.radarProfile, '$.channel')}, '') = ''
+        AND COALESCE(${leads.source}, '') NOT REGEXP '情报|必应|公开信息|论文|专利|arxiv|院校|大学|高校|实验室|微信|群'
+      )
+    )`)
   } else if (channel === '创投新闻') {
     // 前端渠道需要互斥：“创投新闻”只展示非 36氪的其他创投媒体。
     // 同时检查 channel 和具体来源字段，兼容历史数据中 channel 尚未正确回填的记录。
@@ -810,16 +863,20 @@ export async function listLeads(options: {
     }
   }
   if (industry) {
-    // 行业检索：LIKE 模糊匹配 leads.industry（行业值杂乱，多为逗号拼接的多标签如“企业服务、前沿技术”），
-    // 选"前沿技术"用 %前沿技术% 即可命中所有含该词的多标签行。支持逗号分隔多关键词(任一命中)。
+    // 行业检索保留 leads.industry 的历史模糊匹配；三个重点赛道还要同时匹配
+    // 36氪新链路的 sectorLabels，使源行业和归一化赛道任一命中即可入选。
     const selectedTerms = BUSINESS_INDUSTRY_RULES.find((rule) => rule.label === industry)?.terms ?? [industry]
     const indKws = selectedTerms.map((x) => x.trim()).filter(Boolean)
-    if (indKws.length === 1) {
-      conds.push(sql`${leads.industry} LIKE ${'%' + indKws[0] + '%'}`)
-    } else if (indKws.length > 1) {
-      const ors = indKws.map((kw) => sql`${leads.industry} LIKE ${'%' + kw + '%'}`)
-      conds.push(sql`(${sql.join(ors, sql` OR `)})`)
+    const matches = indKws.map((kw) => sql`${leads.industry} LIKE ${'%' + kw + '%'}`)
+    const sectorLabel = BUSINESS_INDUSTRY_SECTOR_LABELS[industry]
+    if (sectorLabel) {
+      matches.push(sql`JSON_CONTAINS(
+        COALESCE(${jsonValue(leads.radarProfile, '$.profile.sectorLabels')}, JSON_ARRAY()),
+        JSON_QUOTE(${sectorLabel})
+      )`)
     }
+    if (matches.length === 1) conds.push(matches[0])
+    else if (matches.length > 1) conds.push(sql`(${sql.join(matches, sql` OR `)})`)
   }
   if (region && BUSINESS_REGIONS.some((candidate) => candidate === region)) {
     conds.push(sql`${leads.businessRegion} = ${region}`)
@@ -830,12 +887,31 @@ export async function listLeads(options: {
     conds.push(sql`COALESCE(${jsonText(leads.radarProfile, '$.channel')}, '') <> '论文'`)
   }
   if (stage) {
-    const stageKeyword = `%${stage}%`
-    conds.push(sql`(
-      COALESCE(${jsonText(leads.radarProfile, '$.profile.projectRound')}, '') LIKE ${stageKeyword}
-      OR COALESCE(${jsonText(leads.fundingRounds, '$[0].round')}, '') LIKE ${stageKeyword}
-      OR COALESCE(${jsonText(leads.scoring, '$.ratingV3.detailView.project.stage')}, '') LIKE ${stageKeyword}
-    )`)
+    if (stage === '科研成果') {
+      conds.push(sql`COALESCE(${jsonText(leads.radarProfile, '$.channel')}, '') = '论文'`)
+    } else {
+      const reviewedStage = jsonText(leads.scoring, '$.dataQualityV1.funding.stageDisplay')
+      const rawStage = sql<string>`COALESCE(
+        NULLIF(${jsonText(leads.scoring, '$.ratingV3.detailView.project.stage')}, ''),
+        NULLIF(${jsonText(leads.radarProfile, '$.profile.projectRound')}, ''),
+        NULLIF(${jsonText(leads.fundingRounds, '$[0].round')}, ''),
+        ''
+      )`
+      const effectiveStage = sql<string>`CASE
+        WHEN ${jsonText(leads.scoring, '$.dataQualityV1.schemaVersion')} = 'lead-data-quality-v1'
+          AND ${jsonText(leads.scoring, '$.dataQualityV1.method')} = 'codex-semantic-normalization-v1'
+          AND COALESCE(${reviewedStage}, '') <> ''
+          AND COALESCE(${jsonText(leads.scoring, '$.dataQualityV1.funding.evidenceStatus')}, '')
+            IN ('source_supported','source_labeled','unverified','not_applicable')
+          AND COALESCE(${jsonText(leads.scoring, '$.dataQualityV1.businessStage.stageDisplay')}, '') <> ''
+          AND COALESCE(${jsonText(leads.scoring, '$.dataQualityV1.businessStage.evidenceStatus')}, '')
+            IN ('source_supported','source_labeled','unverified','not_applicable')
+        THEN CASE WHEN ${reviewedStage} = '未融资（来源标注）' THEN '未融资' ELSE ${reviewedStage} END
+        ELSE ${rawStage}
+      END`
+      const pattern = LEAD_STAGE_FILTER_PATTERNS[stage]
+      conds.push(pattern ? sql`${effectiveStage} REGEXP ${pattern}` : sql`${effectiveStage} = ${stage}`)
+    }
   }
   if (options.updatedRange) {
     const days = options.updatedRange === '7d' ? 7 : options.updatedRange === '30d' ? 30 : 90
