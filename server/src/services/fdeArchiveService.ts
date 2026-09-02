@@ -89,7 +89,7 @@ export async function listArchiveAudit(userId: string, raw: unknown = {}) {
       const [total] = await tx.select({ value: count() }).from(projectFileEvents).innerJoin(projectFiles, eq(projectFiles.id, projectFileEvents.fileId)).innerJoin(projects, eq(projects.id, projectFiles.projectId)).leftJoin(users, eq(users.id, projectFiles.uploadedBy)).where(where)
       const page = actualPage(query.page, query.pageSize, total.value)
       const list = await base().where(where).orderBy(desc(projectFileEvents.createdAt), desc(projectFileEvents.id)).limit(query.pageSize).offset((page - 1) * query.pageSize)
-      return { list, total: total.value, page, pageSize: query.pageSize, coverage: '当前有权文件的权限与状态变更；版本为权限版本，不包含原件访问日志。回收文件请到原项目回收站查阅。' }
+      return { list, total: total.value, page, pageSize: query.pageSize, coverage: '文件变更记录' }
     }
     // Only stable, structured file/project targets are linked. Never match names
     // or invent historical access records from permission changes.
@@ -98,6 +98,6 @@ export async function listArchiveAudit(userId: string, raw: unknown = {}) {
     const [total] = await tx.select({ value: count() }).from(auditLogs).innerJoin(projectFiles, link).innerJoin(projects, eq(projects.id, projectFiles.projectId)).leftJoin(users, eq(users.id, projectFiles.uploadedBy)).where(accessWhere)
     const page = actualPage(query.page, query.pageSize, total.value)
     const list = await tx.select({ id: auditLogs.id, fileId: projectFiles.id, fileName: projectFiles.name, projectName: projects.name, actorName: auditLogs.userName, action: auditLogs.action, result: auditLogs.result, version: sql<string>`SUBSTRING_INDEX(SUBSTRING_INDEX(${auditLogs.target},';version:',-1),';',1)`, reason: sql<string>`''`, createdAt: auditLogs.createdAt }).from(auditLogs).innerJoin(projectFiles, link).innerJoin(projects, eq(projects.id, projectFiles.projectId)).leftJoin(users, eq(users.id, projectFiles.uploadedBy)).where(accessWhere).orderBy(desc(auditLogs.createdAt), desc(auditLogs.id)).limit(query.pageSize).offset((page - 1) * query.pageSize)
-    return { list, total: total.value, page, pageSize: query.pageSize, coverage: '仅展示带稳定文件/项目标识的原件访问记录；服务端准许访问不代表客户端完整收到文件。旧的名称型日志及未记录的拒绝访问不在此覆盖。版本为内容版本。' }
+    return { list, total: total.value, page, pageSize: query.pageSize, coverage: '文件访问记录' }
   }, { isolationLevel: 'repeatable read', accessMode: 'read only' })
 }

@@ -4,9 +4,9 @@ import { aiConfigurationRepository } from '../repositories/index.js'
 import { decryptModelCredential, encryptModelCredential } from '../security/modelCredentialCrypto.js'
 import { redactSensitiveText } from '../security/redactSecrets.js'
 import { listConfigurationRevisions, rollbackConfigurationRevision } from './adminConfigurationRevisionService.js'
-import { userHasPermission } from './systemAuthorizationService.js'
+import { AI_PLATFORM_ADMIN_ROLES, isAiPlatformAdminRole } from '../contracts/adminRoleContract.js'
 
-export const AI_MODEL_ADMIN_ROLES = ['系统管理员', 'AI平台管理员', 'AI 平台管理员'] as const
+export const AI_MODEL_ADMIN_ROLES = AI_PLATFORM_ADMIN_ROLES
 export const AI_MODEL_PROFILE_KEYS = [
   'interactive-assistant',
   'lead-subject',
@@ -27,8 +27,8 @@ function serviceError(message: string, code: string, status: number) {
 }
 
 export async function assertAiModelAdmin(actor: AiModelActor): Promise<void> {
-  if (!await userHasPermission(actor.userId, actor.role, 'ai.configure')) {
-    throw serviceError('仅具有 AI 配置权限的用户可管理模型', 'ROLE_FORBIDDEN', 403)
+  if (!isAiPlatformAdminRole(actor.role)) {
+    throw serviceError('仅 AI 平台管理员可管理模型', 'ROLE_FORBIDDEN', 403)
   }
 }
 

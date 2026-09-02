@@ -37,11 +37,12 @@ export function isSystemAdmin(actor: Pick<ProjectAccessActor, 'role'>): boolean 
 // SQL identifiers are internal correlated actors; request identities remain strings.
 export function projectAccessCondition(actor: Omit<ProjectAccessActor, 'uid'> & { uid: string | SQL }) {
   const membership = inArray(projects.id, db.select({ id: projectMembers.projectId }).from(projectMembers).where(eq(projectMembers.userId, actor.uid)))
-  const legacy = isSystemAdmin(actor) ? sql<boolean>`TRUE` : or(
+  const legacyAccess = isSystemAdmin(actor) ? sql<boolean>`TRUE` : or(
     eq(projects.createdBy, actor.uid),
     eq(projects.ownerUserId, actor.uid),
     membership,
   )!
+  const legacy = and(ne(projects.lifecycle, 'deleted'), legacyAccess)
   const organizationScope = sql<boolean>`EXISTS (
     SELECT 1 FROM ${userRoles} ur
     JOIN ${roles} rr ON rr.id=ur.role_id

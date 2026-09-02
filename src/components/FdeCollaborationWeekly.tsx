@@ -1,44 +1,81 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { apiGet } from '../lib/api'
+import { apiGet, apiPost } from '../lib/api'
 import type { Project } from '../types'
-import { weeklyActions, weeklySummary, mapCollaborationProjects, type CollaborationAction, type CollaborationTask, type CollaborationGroup } from '../lib/fdeCollaborationView'
+import {
+  collaborationDeadlineGroups, mapCollaborationProjects, taskDeadlineGroup, weeklyActions,
+  type CollaborationAction, type CollaborationTask,
+} from '../lib/fdeCollaborationView'
 import { Button } from './ui'
+import { normalizeTaskStatus, taskPrimaryAction, type UnifiedTaskPrimaryAction } from '../../server/src/contracts/unifiedTaskContract'
+import { MoreActions, PrimaryAction, StatusBadge, TaskDrawer, TaskSourceBadge } from './task/TaskSystem'
+import { useToast } from './Toast'
+import { useAuthStore } from '../store/useAuthStore'
 
 type PlanBoard = { canDraft: boolean; canPublish: boolean; plans: Array<{ revision: number; status: string; items: Array<{ taskId: string | null; needLeader: boolean; leaderTimeSource: unknown }> }> }
+
 export function FdeCollaborationWeekly({ projects, week, onPlan }: { projects: Project[]; week: string; onPlan: (projectId: string) => void }) {
   const navigate = useNavigate()
-  const [group, setGroup] = useState<CollaborationGroup>('project')
+  const userId = useAuthStore(state => state.user?.id ?? '')
+  const { showToast } = useToast()
   const [data, setData] = useState<{ actions: CollaborationAction[]; managers: Project[] } | null>(null)
   const [error, setError] = useState(''), [revision, setRevision] = useState(0)
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
+  const [busyTaskId, setBusyTaskId] = useState('')
   useEffect(() => {
     let current = true
     setData(null); setError('')
     void mapCollaborationProjects(projects, async project => {
       const [tasks, plans] = await Promise.all([apiGet<{ tasks: CollaborationTask[] }>(`/projects/${project.id}/fde-tasks`), apiGet<PlanBoard>(`/projects/${project.id}/weekly-plans?weekStart=${week}`)])
       const published = plans.plans.filter(plan => plan.status === 'published').sort((a, b) => b.revision - a.revision)[0]
-      return { project, manage: plans.canDraft || plans.canPublish, actions: tasks.tasks.map(task => {
+      return { project, manage: plans.canDraft || plans.canPublish, actions: tasks.tasks.filter(task => task.ownerUserId === userId || task.participantUserIds.includes(userId)).map(task => {
         const source = published?.items.find(item => item.taskId === task.id)
         return { ...task, projectId: project.id, projectName: project.name, projectType: project.projectType || '投资项目', needLeader: Boolean(task.timelineSource?.needLeader || source?.needLeader), leaderLinked: Boolean(source?.leaderTimeSource) }
       }) }
-    }).then(results => { if (current) setData({ actions: results.flatMap(result => result.actions), managers: results.filter(result => result.manage).map(result => result.project) }) }).catch(cause => { if (current) setError(`工作清单加载失败：${(cause as Error).message}。统计未展示，避免将未读取的数据当作零。`) })
+    }).then(results => { if (current) setData({ actions: results.flatMap(result => result.actions), managers: results.filter(result => result.manage).map(result => result.project) }) }).catch(cause => { if (current) setError((cause as Error).message) })
     return () => { current = false }
-  }, [projects, week, revision])
-  const items = weeklyActions(data?.actions ?? [], week, group), stats = weeklySummary(items)
+  }, [projects, week, revision, userId])
+
+  const items = weeklyActions(data?.actions ?? [], week, 'date')
   const taskLink = (item: CollaborationAction, action?: string) => navigate(`/projects/${item.projectId}?tab=tasks&task=${item.id}${action ? `&action=${action}` : ''}`)
+  const primaryFor = async (item: CollaborationAction, action: UnifiedTaskPrimaryAction) => {
+    if (action === 'not_started') {
+      setBusyTaskId(item.id)
+      try { await apiPost(`/projects/${item.projectId}/fde-tasks/${item.id}/start`, { expectedVersion: item.version }); setRevision(value => value + 1); showToast('任务已开始') }
+      catch (cause) { showToast((cause as Error).message, 'error') }
+      finally { setBusyTaskId('') }
+      return
+    }
+    if (action === 'in_progress' || action === 'returned') taskLink(item, 'submission')
+    else if (action === 'pending_acceptance') taskLink(item, 'accept')
+    else if (action === 'approval') navigate(`/workflow?view=project&project=${item.projectId}`)
+    else setSelectedTaskId(item.id)
+  }
+  const moreFor = (item: CollaborationAction, action: string) => {
+    if (action === 'feedback') taskLink(item, 'progress')
+    else if (action === 'extension') taskLink(item, 'extension')
+    else if (action === 'cancel') taskLink(item, 'cancel')
+    else if (action === 'project') navigate(`/projects/${item.projectId}`)
+  }
+
   return <div className="fde-collab-execution">
-    <section className="fde-collab-summary" aria-label="本周工作统计">{[
-      ['本周工作', stats.total, `${stats.timeline} 项来自阶段时间线或批准计划`], ['已完成', stats.completed, '以原任务的正式验收结果为准'],
-      ['今日到期 / 阻塞', stats.urgent, '含未结束的逾期事项，需要优先处理'], ['需领导参与', stats.leaders, `${stats.linked} 项有已发布周计划的领导来源关联`],
-    ].map(([label, value, note], index) => <article key={label}><span>{label}</span><strong className={index === 2 ? 'fde-collab-danger' : ''}>{data ? value : '—'}</strong><small>{note}</small></article>)}</section>
-    <section className="fde-collab-card"><div className="fde-collab-card-head"><h2>本周工作清单</h2><div className="fde-collab-segmented" aria-label="工作清单分组">{([['project', '按项目'], ['person', '按人员'], ['date', '按日期']] as const).map(([value, title]) => <button type="button" key={value} aria-pressed={group === value} onClick={() => setGroup(value)}>{title}</button>)}</div></div>
-      {error ? <div className="fde-collab-state" role="alert">{error}<Button variant="secondary" onClick={() => setRevision(value => value + 1)}>重试</Button></div> : !data ? <div className="fde-collab-state" role="status">正在读取本周工作…</div> : <div className="fde-collab-table-scroll"><table className="fde-collab-table"><thead><tr>{['项目', '具体行动', '负责人', '截止', '状态', '下一步'].map(title => <th key={title}>{title}</th>)}</tr></thead><tbody>{items.map(item => <tr key={`${item.projectId}:${item.id}`}>
-        <td><button className="fde-collab-project" onClick={() => navigate(`/projects/${item.projectId}`)}><span className="fde-collab-logo">{item.projectName.slice(0, 1)}</span><span><strong>{item.projectName}</strong><small>{item.projectType}</small></span></button></td>
-        <td><div className="fde-collab-work-title">{item.capabilities.canFeedback ? <button className="fde-collab-check" aria-label={`提交成果：${item.title}`} title="提交成果后由异人验收" onClick={() => taskLink(item, 'submission')} /> : <span className={`fde-collab-check ${item.status === '已完成' ? 'is-done' : ''}`} aria-hidden="true">{item.status === '已完成' ? '✓' : ''}</span>}<div><strong>{item.title}</strong><small>{item.timelineSource ? `${item.timelineSource.stage}流程行动` : item.directiveId ? '领导批示' : item.planActionId ? '倒排计划' : '项目任务'}{item.needLeader ? ' · 需领导参与' : ''}{item.extensions.some(extension => extension.status === '审批中') ? ' · 延期审批中' : ''}</small></div></div>{item.feedbacks[0]?.blocker && item.status !== '已完成' && <small className="fde-collab-danger">阻塞：{item.feedbacks[0].blocker}</small>}</td>
-        <td>{item.owner || '待绑定'}</td><td>{item.dueDate}<br />{item.dueTime}</td><td><span className="fde-collab-badge" data-tone={item.status === '已完成' ? 'success' : item.status === '待验收' ? 'warning' : 'info'}>{item.status}</span></td>
-        <td><div className="fde-collab-row-actions">{item.capabilities.canFeedback && <button onClick={() => taskLink(item, 'progress')}>反馈</button>}{item.capabilities.canExtend && !item.extensions.some(extension => extension.status === '审批中') && <button onClick={() => taskLink(item, 'extension')}>延期</button>}{item.capabilities.canAccept && <button onClick={() => taskLink(item, 'accept')}>验收</button>}{item.capabilities.canCancel && <button className="fde-collab-danger" onClick={() => taskLink(item, 'cancel')}>取消</button>}<button onClick={() => taskLink(item)}>项目</button></div></td>
-      </tr>)}</tbody></table>{!items.length && <div className="fde-collab-state"><strong>本周暂无可展示的工作</strong><small>仅展示有权项目的正式任务；周计划草稿不计入已发布工作。</small></div>}</div>}
+    <section className="fde-collab-card fde-my-task-board">
+      <div className="fde-collab-card-head"><h2>我的任务</h2><span>{items.length} 项</span></div>
+      {error ? <div className="fde-collab-state" role="alert">{error}<Button variant="secondary" onClick={() => setRevision(value => value + 1)}>重试</Button></div> : !data ? <div className="fde-collab-state" role="status">正在读取我的任务…</div> : <div className="fde-task-deadline-groups">{collaborationDeadlineGroups.map(([groupId, label]) => {
+        const rows = items.filter(item => taskDeadlineGroup(item) === groupId)
+        if (!rows.length) return null
+        return <section key={groupId} className="fde-task-deadline-group" data-group={groupId}><header><h3>{label}</h3><span>{rows.length}</span></header><div className="fde-task-table-wrap"><table className="fde-task-table"><thead><tr><th>任务</th><th>项目</th><th>截止时间</th><th>状态</th><th>当前操作</th></tr></thead><tbody>{rows.map(item => {
+          const status = normalizeTaskStatus(item.status)
+          const primary = taskPrimaryAction(status, item.executionModel === 'approval')
+          const capabilities = item.capabilities ?? { canFeedback: false, canAccept: false, canExtend: false, canCancel: false }
+          const enabled = primary.key === 'not_started' || primary.key === 'in_progress' || primary.key === 'returned' ? capabilities.canFeedback : primary.key === 'pending_acceptance' ? capabilities.canAccept : true
+          const source = item.executionModel === 'approval' ? 'approval' : item.directiveId ? 'directive' : item.timelineSource ? 'workflow' : item.planActionId ? 'plan' : 'project'
+          const more = [...(capabilities.canFeedback && status !== 'not_started' && status !== 'pending_acceptance' ? [{ key: 'feedback', label: '更新进度' }] : []), ...(capabilities.canExtend ? [{ key: 'extension', label: '申请延期' }] : []), { key: 'project', label: '打开项目' }, ...(capabilities.canCancel ? [{ key: 'cancel', label: '取消任务', danger: true }] : [])]
+          return <tr key={`${item.projectId}:${item.id}`} onClick={() => setSelectedTaskId(item.id)}><td><button type="button" className="fde-task-name" onClick={() => setSelectedTaskId(item.id)}><strong>{item.title}</strong><TaskSourceBadge source={source} /></button></td><td>{item.projectName}</td><td><time>{item.dueDate}{item.dueTime ? ` ${item.dueTime}` : ''}</time></td><td><StatusBadge status={status} /></td><td onClick={event => event.stopPropagation()}><div className="fde-task-current-action"><PrimaryAction action={primary.key} label={primary.label} disabled={!enabled || busyTaskId === item.id} loading={busyTaskId === item.id} onClick={() => enabled ? void primaryFor(item, primary.key) : setSelectedTaskId(item.id)} /><MoreActions actions={more} onAction={action => moreFor(item, action)} /></div></td></tr>
+        })}</tbody></table></div></section>
+      })}{!items.length && <div className="fde-collab-state"><strong>本周暂无任务</strong></div>}</div>}
     </section>
-    <details className="fde-collab-tools"><summary>周计划维护与工作清单工具</summary><div><Button variant="secondary" onClick={() => setRevision(value => value + 1)}>刷新工作清单</Button>{data?.managers.map(project => <Button key={project.id} variant="secondary" onClick={() => onPlan(project.id)}>维护周计划 · {project.name}</Button>)}</div></details>
+    <TaskDrawer taskId={selectedTaskId} open={Boolean(selectedTaskId)} onClose={() => setSelectedTaskId(null)} onAction={(action, task) => { const item = data?.actions.find(value => value.id === task.id); if (!item) return; setSelectedTaskId(null); if (['feedback', 'extension', 'cancel', 'project'].includes(action)) moreFor(item, action); else void primaryFor(item, action as UnifiedTaskPrimaryAction) }} />
+    <details className="fde-collab-tools"><summary>计划维护</summary><div><Button variant="secondary" onClick={() => setRevision(value => value + 1)}>刷新任务</Button>{data?.managers.map(project => <Button key={project.id} variant="secondary" onClick={() => onPlan(project.id)}>维护周计划 · {project.name}</Button>)}</div></details>
   </div>
 }

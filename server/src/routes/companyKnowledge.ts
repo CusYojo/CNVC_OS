@@ -3,6 +3,7 @@ import { z } from 'zod'
 import type { AuthedRequest } from '../middleware/requireAuth.js'
 import { actOnCompanyKnowledge, commentCompanyKnowledge, companyKnowledgeOptions, companyKnowledgeOriginal, companyKnowledgeSummary, getCompanyKnowledge, listCompanyKnowledge, rateCompanyKnowledge, saveCompanyKnowledge, withdrawCompanyKnowledgeComment } from '../services/fdeKnowledgeService.js'
 import { projectFilePreviewContentType } from '../services/projectFileStorageService.js'
+import { canonicalizeProjectTextBuffer } from '../security/projectFileValidation.js'
 import { writeAudit } from '../services/auditService.js'
 import { resolveKnowledgeCommand } from '../services/fdeKnowledgeCommandService.js'
 
@@ -34,6 +35,6 @@ for (const operation of ['preview', 'download'] as const) companyKnowledgeRouter
     await writeAudit({ userId: req.user!.uid, userName: req.user!.name, module: '公司知识', action: operation === 'preview' ? '预览原始附件' : '下载原始附件', target: `${id(req.params.id)} / v${result.version}`, ip: req.ip })
     res.setHeader('Content-Type', contentType); res.setHeader('Content-Disposition', `${operation === 'preview' ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(result.name)}`)
     res.setHeader('X-Content-Type-Options', 'nosniff'); res.setHeader('Content-Security-Policy', "sandbox; default-src 'none'; img-src data:")
-    res.setHeader('X-File-Version', String(result.version)); res.setHeader('X-Content-SHA256', result.sha256); res.send(result.bytes)
+    res.setHeader('X-File-Version', String(result.version)); res.setHeader('X-Content-SHA256', result.sha256); res.send(operation === 'preview' ? canonicalizeProjectTextBuffer(result.name, result.bytes) : result.bytes)
   } catch (error) { next(error) }
 })

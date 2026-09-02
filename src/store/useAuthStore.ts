@@ -63,6 +63,6 @@ export async function authedFetch(input: string, init: RequestInit = {}): Promis
     const csrf = readCookie('cybernaut_csrf')
     if (csrf) headers.set('X-CSRF-Token', csrf)
   }
-  if (init.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
+  if (init.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json; charset=utf-8')
   return fetch(input, { ...init, headers, credentials: 'include' })
 }

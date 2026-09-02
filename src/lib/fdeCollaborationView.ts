@@ -2,14 +2,26 @@ import { shiftDate, shanghaiToday, weekStartFor } from '../../server/src/contrac
 
 export type CollaborationTask = {
   id: string; title: string; owner: string; ownerUserId: string; dueDate: string | null; dueTime: string | null
-  status: string; executionModel: string; directiveId: string | null; planActionId: string | null
+  status: string; version: number; progress: number; deliverable: string | null; executionModel: string; directiveId: string | null; planActionId: string | null
+  participantUserIds: string[]; participants: Array<{ id: string; name: string }>
   timelineSource: { needLeader: boolean; stage: string } | null
   feedbacks: Array<{ blocker: string }>; extensions: Array<{ status: string }>
   capabilities: { canFeedback: boolean; canAccept: boolean; canExtend: boolean; canCancel: boolean }
 }
 export type CollaborationAction = CollaborationTask & { projectId: string; projectName: string; projectType: string; needLeader: boolean; leaderLinked: boolean }
 export type CollaborationGroup = 'project' | 'person' | 'date'
-export const collaborationTabs = [['weekly', '本周工作'], ['calendar', '日历'], ['review', '周报与例会']] as const
+export const collaborationTabs = [['weekly', '我的任务'], ['calendar', '日历'], ['review', '周报与例会']] as const
+export const collaborationDeadlineGroups = [
+  ['overdue', '已逾期'], ['today', '今天'], ['tomorrow', '明天'], ['dayAfter', '后天'], ['rest', '本周其余任务'],
+] as const
+export type CollaborationDeadlineGroup = typeof collaborationDeadlineGroups[number][0]
+export function taskDeadlineGroup(item: CollaborationAction, today = shanghaiToday()): CollaborationDeadlineGroup {
+  if (item.dueDate! < today) return 'overdue'
+  if (item.dueDate === today) return 'today'
+  if (item.dueDate === shiftDate(today, 1)) return 'tomorrow'
+  if (item.dueDate === shiftDate(today, 2)) return 'dayAfter'
+  return 'rest'
+}
 export function collaborationView(value: string | null) {
   if (value === 'time' || value === 'calendar') return 'calendar'
   if (['reports', 'friday', 'review', 'committee', 'meetings'].includes(value ?? '')) return 'review'

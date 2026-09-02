@@ -9,7 +9,7 @@ const read = (path: string) => readFileSync(new URL(`../../${path}`, import.meta
 const action = (id: string, patch: Partial<CollaborationAction> = {}): CollaborationAction => ({ id, projectId: 'p', projectName: '星澜', projectType: '投资项目', title: id, owner: '成员', ownerUserId: 'u', dueDate: '2026-08-28', dueTime: null, status: '进行中', executionModel: 'fde-v1', directiveId: null, planActionId: null, timelineSource: null, feedbacks: [], extensions: [], capabilities: { canFeedback: true, canAccept: false, canExtend: true, canCancel: false }, needLeader: false, leaderLinked: false, ...patch })
 
 test('three reference tabs preserve all historical deep-link destinations', () => {
-  assert.deepEqual(collaborationTabs.map(item => item[1]), ['本周工作', '日历', '周报与例会'])
+  assert.deepEqual(collaborationTabs.map(item => item[1]), ['我的任务', '日历', '周报与例会'])
   for (const value of ['time','calendar']) assert.equal(collaborationView(value), 'calendar')
   for (const value of ['friday','reports','review','committee','meetings']) assert.equal(collaborationView(value), 'review')
   assert.equal(collaborationView('unknown'), 'weekly')
@@ -51,17 +51,20 @@ test('company calendar uses Shanghai half-open intervals across days and week bo
   assert.doesNotMatch(source, /apiPost|apiPatch|localStorage/)
 })
 
-test('all visual rules remain page-scoped; reference summary/table and responsive cards are retained', () => {
+test('all visual rules remain page-scoped; compact task table and responsive cards are retained', () => {
   const css = read('src/pages/CollaborationPage.css')
   postcss.parse(css).walkRules(rule => assert.match(rule.selector, /fde-collaboration-page/))
   assert.match(css, /repeat\(4,minmax\(0,1fr\)\)/)
   assert.match(css, /max-width: 760px/)
   assert.match(css, /\.fde-collab-table thead \{ display: none/)
   assert.ok(css.split('\n').every(line => !/[\t ]+$/.test(line)))
-  assert.match(read('src/components/FdeCollaborationWeekly.tsx'), /\['项目', '具体行动', '负责人', '截止', '状态', '下一步'\]/)
+  const weekly = read('src/components/FdeCollaborationWeekly.tsx')
+  for (const label of ['任务', '项目', '截止时间', '状态', '当前操作']) assert.match(weekly, new RegExp(`<th>${label}</th>`))
+  assert.match(weekly, /collaborationDeadlineGroups/)
+  assert.doesNotMatch(weekly, /<th>负责人<\/th>/)
 })
 
-test('entry uses fresh authorized scope, role-specific views and original guarded task operations', () => {
+test('entry uses fresh authorized scope, role-specific views and guarded canonical task operations', () => {
   const page = read('src/pages/CollaborationPage.tsx'), task = read('src/components/FdeTaskPanel.tsx')
   assert.match(page, /workbench\.actorId !== userId/)
   assert.match(page, /apiGet<\{ list: Project\[\] \}>\('\/projects'\)/)
@@ -69,7 +72,8 @@ test('entry uses fresh authorized scope, role-specific views and original guarde
   assert.match(task, /if \(allowed\) open\(action as Mode, task\)/)
   assert.match(task, /expectedVersion/)
   assert.match(task, /task\.capabilities\.canAccept/)
-  assert.doesNotMatch(read('src/components/FdeCollaborationWeekly.tsx'), /apiPost|localStorage/)
+  assert.match(read('src/components/FdeCollaborationWeekly.tsx'), /PrimaryAction/)
+  assert.doesNotMatch(read('src/components/FdeCollaborationWeekly.tsx'), /localStorage/)
 })
 
 test('visual fixture cannot access DB, proxy upstream or accept mutations', () => {

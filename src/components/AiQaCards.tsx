@@ -63,7 +63,7 @@ function QaAnswerCard({ answer }: { answer: ProjectQaAnswer }) {
     <div className="space-y-4">
       <div className="flex justify-end gap-3">
         <div className="max-w-[82%] rounded-2xl rounded-tr-sm bg-brand-600 px-4 py-2.5 text-sm leading-6 text-white">
-          <div className="mb-1 text-[10px] text-brand-100">{answer.category}</div>
+          <div className="mb-1 text-xs text-brand-100">{answer.category}</div>
           问题：{answer.question}
         </div>
         <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-slate-100 text-slate-500">
@@ -79,10 +79,10 @@ function QaAnswerCard({ answer }: { answer: ProjectQaAnswer }) {
           <div className="border-b border-slate-100 px-4 py-3">
             <div className="flex flex-wrap items-center gap-2">
               <h3 className="text-sm font-semibold text-slate-800">答复</h3>
-              <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${CONFIDENCE_CLASS[answer.confidenceStatus]}`}>
+              <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${CONFIDENCE_CLASS[answer.confidenceStatus]}`}>
                 置信状态：{answer.confidenceStatus}
               </span>
-              <span className="text-[10px] text-slate-400">去重证据 {answer.evidenceCount} 条</span>
+              <span className="text-xs text-slate-400">去重证据 {answer.evidenceCount} 条</span>
             </div>
             <p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-slate-700">
               <span className="font-semibold text-slate-800">答复：</span>
@@ -100,11 +100,11 @@ function QaAnswerCard({ answer }: { answer: ProjectQaAnswer }) {
                 {answer.keyPoints.map((point, index) => (
                   <li key={`${answer.id}-point-${index}`} className="border-l-2 border-slate-200 py-1 pl-3 text-xs leading-6 text-slate-700">
                     <div className="mb-1 flex flex-wrap items-center gap-1.5">
-                      <span className={`rounded border px-1.5 py-0.5 text-[10px] ${STATUS_CLASS[point.status]}`}>
+                      <span className={`rounded border px-1.5 py-0.5 text-xs ${STATUS_CLASS[point.status]}`}>
                         {point.status}
                       </span>
                       {point.citations.map((citation) => (
-                        <span key={citation} className="font-mono text-[10px] text-brand-600">[{citation}]</span>
+                        <span key={citation} className="font-mono text-xs text-brand-600">[{citation}]</span>
                       ))}
                     </div>
                     {point.text}
@@ -120,7 +120,7 @@ function QaAnswerCard({ answer }: { answer: ProjectQaAnswer }) {
                 <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
                 风险与不确定性
               </h4>
-              <ul className="list-disc space-y-1 pl-4 text-[11px] leading-5 text-slate-600">
+              <ul className="list-disc space-y-1 pl-4 text-xs leading-5 text-slate-600">
                 {answer.risksOrUncertainties.map((item, index) => <li key={`${answer.id}-risk-${index}`}>{item}</li>)}
               </ul>
             </section>
@@ -129,7 +129,7 @@ function QaAnswerCard({ answer }: { answer: ProjectQaAnswer }) {
                 <CircleHelp className="h-3.5 w-3.5 text-sky-500" />
                 建议核验动作
               </h4>
-              <ul className="list-disc space-y-1 pl-4 text-[11px] leading-5 text-slate-600">
+              <ul className="list-disc space-y-1 pl-4 text-xs leading-5 text-slate-600">
                 {answer.verificationActions.map((item, index) => <li key={`${answer.id}-verify-${index}`}>{item}</li>)}
               </ul>
             </section>
@@ -141,7 +141,7 @@ function QaAnswerCard({ answer }: { answer: ProjectQaAnswer }) {
               引用来源
             </h4>
             {answer.sources.length > 0 ? (
-              <ol className="space-y-1 text-[11px] leading-5 text-slate-600">
+              <ol className="space-y-1 text-xs leading-5 text-slate-600">
                 {answer.sources.map((source) => (
                   <li key={source.id}>
                     <span className="mr-1 font-mono font-medium text-brand-600">[{source.id}]</span>
@@ -151,14 +151,14 @@ function QaAnswerCard({ answer }: { answer: ProjectQaAnswer }) {
                 ))}
               </ol>
             ) : (
-              <p className="text-[11px] text-rose-600">当前无可引用的项目证据，结论不能视为项目事实。</p>
+              <p className="text-xs text-rose-600">当前无可引用的项目证据，结论不能视为项目事实。</p>
             )}
-            <div className="mt-2 flex flex-wrap gap-x-3 text-[10px] text-slate-400">
+            <div className="mt-2 flex flex-wrap gap-x-3 text-xs text-slate-400">
               <span>回答格式：公司项目 Q&amp;A 标准</span>
             </div>
           </section>
 
-          <div className="flex gap-2 border-t border-amber-100 bg-amber-50 px-4 py-2.5 text-[10px] leading-5 text-amber-800">
+          <div className="flex gap-2 border-t border-amber-100 bg-amber-50 px-4 py-2.5 text-xs leading-5 text-amber-800">
             <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
             <span>{answer.disclaimer}</span>
           </div>

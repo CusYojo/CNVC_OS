@@ -6,6 +6,7 @@ import {
   type RequestAuth,
 } from '../services/sessionAuthService.js'
 import { userHasPermission } from '../services/systemAuthorizationService.js'
+import { isAiPlatformAdminRole, isSystemAdminRole } from '../contracts/adminRoleContract.js'
 
 export interface AuthedRequest extends Request {
   user?: {
@@ -60,11 +61,19 @@ async function requirePermission(req: AuthedRequest, res: Response, next: NextFu
 }
 
 export function requireSystemAdmin(req: AuthedRequest, res: Response, next: NextFunction) {
-  void requirePermission(req, res, next, 'system.manage', '仅具有系统管理权限的用户可访问').catch(next)
+  if (!req.user || !isSystemAdminRole(req.user.role)) {
+    res.status(403).json({ code: 'ROLE_FORBIDDEN', message: '仅系统管理员可访问', details: null, requestId: String(res.locals.requestId || '') })
+    return
+  }
+  next()
 }
 
 export function requireAiPlatformAdmin(req: AuthedRequest, res: Response, next: NextFunction) {
-  void requirePermission(req, res, next, 'ai.configure', '仅具有 AI 配置权限的用户可访问').catch(next)
+  if (!req.user || !isAiPlatformAdminRole(req.user.role)) {
+    res.status(403).json({ code: 'ROLE_FORBIDDEN', message: '仅 AI 平台管理员可访问', details: null, requestId: String(res.locals.requestId || '') })
+    return
+  }
+  next()
 }
 
 export function requireImAdmin(req: AuthedRequest, res: Response, next: NextFunction) {

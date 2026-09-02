@@ -14,6 +14,7 @@ import { apiGet, apiPost, ApiError } from '../lib/api'
 import { uid } from '../lib/uid'
 import type { Project } from '../types'
 import { Button, Modal, ProgressBar } from './ui'
+import { aiBusinessErrorMessage } from '../lib/aiBusinessError'
 
 export type AiDocumentActionId = 'compliance' | 'proposal' | 'investment_ppt' | 'due_diligence' | 'qa'
 export type AiQuickActionId = AiDocumentActionId | 'custom_template'
@@ -116,12 +117,12 @@ type ActionConfig = {
 }
 
 const ACTIONS: ActionConfig[] = [
-  { id: 'compliance', label: '合规性说明', description: '预选 generate-investment-compliance-note', mode: 'task', skillName: 'generate-investment-compliance-note', outputFormat: 'DOCX', icon: ShieldCheck },
-  { id: 'proposal', label: '投资提案', description: '预选 draft-investment-proposal', mode: 'task', skillName: 'draft-investment-proposal', outputFormat: 'DOCX', icon: BriefcaseBusiness },
-  { id: 'investment_ppt', label: '投资建议书（PPT）', description: '预选 investment-committee-ppt', mode: 'task', skillName: 'investment-committee-ppt', outputFormat: 'PPTX', icon: Presentation },
-  { id: 'due_diligence', label: '尽调报告', description: '预选 draft-due-diligence-report', mode: 'task', skillName: 'draft-due-diligence-report', outputFormat: 'DOCX', icon: ClipboardCheck },
-  { id: 'qa', label: 'Q&A', description: '预选 draft-investment-qa', mode: 'task', skillName: 'draft-investment-qa', outputFormat: 'DOCX', icon: HelpCircle },
-  { id: 'custom_template', label: '上传模板', description: '分析模板后预选 generate-document-from-template', mode: 'template', skillName: 'generate-document-from-template', outputFormat: 'DOCX', icon: Upload },
+  { id: 'compliance', label: '合规说明', description: '根据项目资料生成说明', mode: 'task', skillName: 'generate-investment-compliance-note', outputFormat: 'DOCX', icon: ShieldCheck },
+  { id: 'proposal', label: '投资提案', description: '生成可编辑投资提案', mode: 'task', skillName: 'draft-investment-proposal', outputFormat: 'DOCX', icon: BriefcaseBusiness },
+  { id: 'investment_ppt', label: '投资建议书', description: '生成投委会演示文稿', mode: 'task', skillName: 'investment-committee-ppt', outputFormat: 'PPTX', icon: Presentation },
+  { id: 'due_diligence', label: '尽调报告', description: '整理尽调资料并生成报告', mode: 'task', skillName: 'draft-due-diligence-report', outputFormat: 'DOCX', icon: ClipboardCheck },
+  { id: 'qa', label: '项目问答', description: '针对当前项目快速问答', mode: 'task', skillName: 'draft-investment-qa', outputFormat: 'DOCX', icon: HelpCircle },
+  { id: 'custom_template', label: '上传模板', description: '按上传模板生成文档', mode: 'template', skillName: 'generate-document-from-template', outputFormat: 'DOCX', icon: Upload },
 ]
 
 const MAX_TEMPLATE_BYTES = 25 * 1024 * 1024
@@ -342,7 +343,7 @@ export function AiQuickActions({
         errorMessage: message,
         updatedAt: new Date().toISOString(),
       }))
-      setTemplateError(message)
+      setTemplateError(aiBusinessErrorMessage(error))
     } finally {
       setAnalyzingCustomTemplate(false)
     }
@@ -356,9 +357,9 @@ export function AiQuickActions({
   return (
     <>
       <div className="mb-3">
-        <div className="mb-2 flex items-center gap-2 text-[11px] font-medium text-slate-500">
+        <div className="mb-2 flex items-center gap-2 text-xs font-medium text-slate-500">
           <FileCheck2 className="h-3.5 w-3.5 text-brand-600" />
-          快捷 Skill
+          常用工具
         </div>
         <div className="flex gap-2 overflow-x-auto pb-1">
           {ACTIONS.map((action) => {
@@ -382,14 +383,7 @@ export function AiQuickActions({
                   <Icon className="h-3.5 w-3.5" />
                 </span>
                 <span className="min-w-0">
-                  <span className="block whitespace-nowrap text-[11px] font-medium text-slate-700">{action.label}</span>
-                  <span className="block truncate text-[9px] text-slate-400">
-                    {selected
-                      ? action.mode === 'template' ? '正在准备模板' : '已选中，直接在下方输入要求'
-                      : action.mode === 'template'
-                        ? '识别结构与内容'
-                        : '点击后在输入框补充要求'}
-                  </span>
+                  <span className="block whitespace-nowrap text-xs font-medium text-slate-700">{action.label}</span>
                 </span>
               </button>
             )
@@ -487,7 +481,7 @@ export function AiQuickActions({
                       </span>
                     </div>
                     <ProgressBar value={templateProgress.progress} tone="blue" />
-                    <p className="mt-2 text-[10px] text-brand-500">
+                    <p className="mt-2 text-xs text-brand-500">
                       已用时 {templateProgress.elapsedSeconds} 秒；PDF 严格水印检查可能需要数分钟，可继续等待当前进度自动更新。
                     </p>
                   </div>

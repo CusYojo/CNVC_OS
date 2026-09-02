@@ -17,9 +17,10 @@ const week = '2026-08-24'
 const id = n => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`
 const user = { id: id(1), name: '沈嘉言', email: 'visual@example.invalid', role: '投资经理', department: '隔离视觉夹具' }
 const projects = ['星澜科技', '三期基金首关'].map((name, i) => ({ id: id(10+i), name, projectType: i ? '基金设立' : '投资项目', workflowModel: 'fde-v1', lifecycle: 'active', status: '正常', ownerUserId: user.id }))
-const tasks = ['完成核心客户访谈', '汇总尽调资料与验证结果', '确认首关材料与本周目标'].map((title, i) => ({ id: id(20+i), version: 1, progress: i === 1 ? 100 : 30, deliverable: '验证结果与记录', projectId: projects[i === 2 ? 1 : 0].id, title, owner: i === 1 ? '林若晨' : user.name, ownerUserId: i === 1 ? id(2) : user.id, dueDate: '2026-08-28', dueTime: '17:00', status: i === 1 ? '已完成' : '进行中', executionModel: 'fde-v1', directiveId: null, planActionId: null, timelineSource: { needLeader: i === 0, stage: '尽调' }, feedbacks: [], extensions: [], capabilities: { canFeedback: i !== 1, canAccept: false, canExtend: i !== 1, canCancel: false } }))
+const tasks = ['完成核心客户访谈', '汇总尽调资料与验证结果', '确认首关材料与本周目标'].map((title, i) => ({ id: id(20+i), version: 1, progress: i === 1 ? 100 : 30, deliverable: '验证结果与记录', projectId: projects[i === 2 ? 1 : 0].id, title, owner: i === 1 ? '林若晨' : user.name, ownerUserId: i === 1 ? id(2) : user.id, participantUserIds: [i === 1 ? id(2) : user.id], participants: [{ id: i === 1 ? id(2) : user.id, name: i === 1 ? '林若晨' : user.name }], dueDate: '2026-08-28', dueTime: '17:00', status: i === 1 ? '已完成' : '进行中', executionModel: 'fde-v1', directiveId: null, planActionId: null, timelineSource: { needLeader: i === 0, stage: '尽调' }, feedbacks: [], extensions: [], capabilities: { canFeedback: i !== 1, canAccept: false, canExtend: i !== 1, canCancel: false } }))
 const calendar = [
   { key: 'personal:1', id: id(30), source: 'personal', ownerId: user.id, ownerName: user.name, title: '项目资料整理', detail: '仅视觉验证', startsAt: '2026-08-24T02:00:00Z', endsAt: '2026-08-24T03:00:00Z', allDay: false, version: 1, visibility: 'private', editable: true, target: null },
+  { key: `task:${id(20)}`, id: id(20), source: 'task', ownerId: user.id, ownerName: user.name, title: '完成核心客户访谈', projectId: projects[0].id, projectName: projects[0].name, detail: '视觉验证任务', startsAt: '2026-08-24T02:30:00Z', endsAt: '2026-08-24T04:00:00Z', allDay: false, version: 1, sourceVersion: 1, visibility: 'project', editable: true, target: `/projects/${projects[0].id}?tab=tasks&task=${id(20)}` },
   { key: 'busy:2', id: null, source: 'busy', ownerId: id(2), ownerName: '林若晨', title: '已占用', detail: '', startsAt: '2026-08-25T06:00:00Z', endsAt: '2026-08-25T07:00:00Z', allDay: false, version: null, editable: false, target: null },
 ]
 const meetings = projects.map((project, i) => ({ id: id(40+i), title: project.name+'周五例会', projectId: project.id, host: user.name, hostUserId: user.id, startedAt: '2026-08-28T08:00:00Z', endsAt: '2026-08-28T09:00:00Z', workflowStatus: 'scheduled', version: 1, plans: [], events: [], participants: [], weeklyReview: null }))
@@ -29,7 +30,7 @@ const bundled = await build({ stdin: { contents: entry, loader: 'tsx', resolveDi
 const js = bundled.outputFiles.find(file => file.path.endsWith('.js')).text
 const baseCss = (await postcss([tailwindcss({ ...tailwindConfig, content: [resolve(root,'src/**/*.{ts,tsx}')] }), autoprefixer]).process(await readFile(resolve(root,'src/styles.css'),'utf8'),{ from: resolve(root,'src/styles.css') })).css
 const css = baseCss+'\n'+await readFile(resolve(root,'src/layout/fde-shell.css'),'utf8')+'\n'+bundled.outputFiles.filter(file=>file.path.endsWith('.css')).map(file=>file.text).join('\n')
-const source = await readFile(resolve(referenceRoot,'site.js'),'utf8'), referenceCss = await readFile(resolve(referenceRoot,'site.css'),'utf8')
+const source = await readFile(resolve(referenceRoot,'site.js'),'utf8').catch(() => ''), referenceCss = await readFile(resolve(referenceRoot,'site.css'),'utf8').catch(() => '')
 const ast = ts.createSourceFile('site.js', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS)
 const wanted = new Set(['badge','pageHeading','weeklyBattleView','executionPage','meetingReviewView','unifiedCalendarView','personalCalendarView','companyCalendarView'])
 const renderSource = ast.statements.flatMap(node => {
@@ -39,6 +40,7 @@ const renderSource = ast.statements.flatMap(node => {
 }).join('\n')
 const escape = value => String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c])
 function renderReference(view) {
+  if (!renderSource) return '<section style="padding:24px">历史视觉基线当前不可用</section>'
   const company = view === 'company'
   const referenceProjects = projects.map(p=>({...p,type:p.projectType}))
   const sandbox = { roles:[{key:'member',name:user.name}],state:{roleIndex:0,executionView:view==='review'?'周报与例会':view==='calendar'||company?'日历':'本周工作',executionGroup:'按项目',calendarScope:company?'公司总表':'我的日历',calendarLayer:'我的安排'},escapeHtml:escape,escapeAttr:escape,
@@ -58,7 +60,12 @@ function api(path, params, scenario) {
   if(scenario==='error')throw new Error('视觉夹具：接口加载失败')
   if(path==='/api/workbench')return {actorId:user.id,view:scenario==='admin'?'admin':scenario==='coordinator'?'coordinator':'member'}
   if(path==='/api/projects')return {list:projects}
-  if(path.endsWith('/fde-tasks'))return {members:[],reviewers:[{id:id(2),name:'林若晨'}],canAssign:false,canSyncPlan:false,canSyncTimeline:false,timelinePending:{count:0,items:[]},tasks:scenario==='empty'?[]:tasks.filter(t=>path.includes(t.projectId)).map(t=>scenario==='denied'?{...t,capabilities:{canFeedback:false,canExtend:false,canAccept:false,canCancel:false}}:t)}
+  if(path.startsWith('/api/tasks/')){
+    const task=tasks.find(item=>path.endsWith(item.id));if(!task)throw new Error('任务不存在')
+    const project=projects.find(item=>item.id===task.projectId)
+    return {id:task.id,title:task.title,category:'mine',source:'workflow',sourceLabel:'流程行动',status:task.status==='已完成'?'completed':'in_progress',statusLabel:task.status,rawStatus:task.status,primaryAction:task.status==='已完成'?'completed':'in_progress',primaryActionLabel:task.status==='已完成'?'查看成果':'提交成果',project:project?{id:project.id,name:project.name}:null,owner:{id:task.ownerUserId,name:task.owner,role:'投资经理'},participants:task.participants,startsAt:null,dueDate:task.dueDate,dueTime:task.dueTime,deliverable:task.deliverable,progress:task.progress,feedbacks:[],attachments:[],acceptance:null,calendar:null,version:task.version,history:[{id:'history-1',kind:'created',title:'任务已创建',detail:'',actorName:task.owner,createdAt:'2026-08-24T02:00:00Z'}],capabilities:{canStart:false,canSubmit:task.status!=='已完成',canAccept:false,canFeedback:task.capabilities.canFeedback,canExtend:task.capabilities.canExtend,canCancel:false,canEditParticipants:false}}
+  }
+  if(path.endsWith('/fde-tasks'))return {members:[],reviewers:[{id:id(2),name:'林若晨'}],canAssign:false,canSyncPlan:false,planSyncIssue:{count:0,items:[]},canSyncTimeline:false,timelinePending:{count:0,items:[]},tasks:scenario==='empty'?[]:tasks.filter(t=>path.includes(t.projectId)).map(t=>scenario==='denied'?{...t,capabilities:{canFeedback:false,canExtend:false,canAccept:false,canCancel:false}}:t)}
   if(path.endsWith('/weekly-plans'))return {canDraft:scenario!=='denied',canPublish:false,plans:[],members:[],notices:[],leaderTimePendingCount:0,leaderTimePending:[]}
   if(path==='/api/weekly-reports')return {reports:[]}
   if(path.endsWith('/friday-meetings'))return {list:scenario==='empty'?[]:meetings.filter(m=>path.includes(m.projectId)),canManage:scenario!=='denied',canDerive:false,members:[],notices:[]}

@@ -13,6 +13,7 @@ import { retrieveKnowledge } from './ragService.js'
 import { getAccessibleProject } from './projectAccessService.js'
 import { directiveTaskAccessCondition } from './fdeDirectiveLinksService.js'
 import { canReadAllProjectFiles, projectFileAccessCondition, requireProjectFileAccess } from './projectFileAccessService.js'
+import { readableStoredText } from './textQualityService.js'
 
 function toolError(status: number, code: string, message: string) {
   return Object.assign(new Error(message), { status, code })
@@ -221,11 +222,13 @@ export async function readProjectFileForUser(input: {
       sha256: file.sha256, version: file.version, parseStatus: file.parseStatus,
       hasOriginal: Boolean(file.storagePath), totalChunksReturned: selected.length,
     },
-    evidence: selected.map((chunk, index) => ({
-      citationId: `F${index + 1}`, projectId: input.projectId, sourceId: file.id,
-      sourceType: 'project_file', fileName: file.name, chunkIndex: chunk.chunkIndex,
-      locator: `文件片段 ${chunk.chunkIndex + 1}`, content: chunk.content.slice(0, maxChars),
-      truncated: chunk.content.length > maxChars,
-    })),
+    evidence: selected.map((chunk) => ({ ...chunk, content: readableStoredText(chunk.content) }))
+      .filter((chunk) => Boolean(chunk.content))
+      .map((chunk, index) => ({
+        citationId: `F${index + 1}`, projectId: input.projectId, sourceId: file.id,
+        sourceType: 'project_file', fileName: file.name, chunkIndex: chunk.chunkIndex,
+        locator: `文件片段 ${chunk.chunkIndex + 1}`, content: chunk.content.slice(0, maxChars),
+        truncated: chunk.content.length > maxChars,
+      })),
   }
 }

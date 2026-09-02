@@ -4,7 +4,7 @@ import { shanghaiToday } from '../../server/src/contracts/fdeWeeklyPlanContract'
 export const projectDetailTabs = [
   { id: 'workflow', label: '流程推进' },
   { id: 'files', label: '材料文件' },
-  { id: 'tasks', label: '项目待办' },
+  { id: 'tasks', label: '项目任务' },
   { id: 'collaboration', label: '协作互动' },
 ] as const
 

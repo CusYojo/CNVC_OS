@@ -238,6 +238,7 @@ class MySqlPermissionRepository implements PermissionRepository {
       userId: projectMembers.userId,
       name: users.name,
       email: users.email,
+      role: users.role,
       memberRole: projectMembers.memberRole,
       status: users.status,
     }).from(projectMembers)

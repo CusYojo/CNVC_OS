@@ -189,7 +189,7 @@ function timestamp(value: string | null | undefined) {
 
 function metricCard(icon: typeof Activity, label: string, value: string | number, note: string) {
   const Icon = icon
-  return <Card className="p-4"><Icon className="h-4 w-4 text-brand-600" /><p className="mt-3 text-xs text-slate-400">{label}</p><p className="mt-1 text-xl font-semibold text-slate-800">{value}</p><p className="mt-1 text-[11px] text-slate-400">{note}</p></Card>
+  return <Card className="p-4"><Icon className="h-4 w-4 text-brand-600" /><p className="mt-3 text-xs text-slate-400">{label}</p><p className="mt-1 text-xl font-semibold text-slate-800">{value}</p><p className="mt-1 text-xs text-slate-400">{note}</p></Card>
 }
 
 function healthCard(
@@ -204,7 +204,7 @@ function healthCard(
     <div className="flex items-center justify-between gap-2"><Icon className="h-4 w-4 shrink-0 text-brand-600" />{readinessBadge(ready, '正常', '需关注')}</div>
     <p className="mt-3 text-xs text-slate-400">{label}</p>
     <p className="mt-1 truncate text-xl font-semibold text-slate-800">{value}</p>
-    <p className="mt-1 text-[11px] text-slate-400">{note}</p>
+    <p className="mt-1 text-xs text-slate-400">{note}</p>
   </Card>
 }
 
@@ -364,7 +364,7 @@ export function OperationsOverview() {
         {healthCard(Bot, 'Agent', agent?.ok === true, agent?.activeSessions ?? 0, `活跃会话 · 待交互 ${agent?.pendingInteractions ?? 0}`)}
         {healthCard(MessageSquare, 'IM', imReady, im.queued + im.sending, `待发/发送中 · 15 分钟成功 ${im.deliveries15m} · 失败 ${im.deliveryFailures15m} · 死信 ${im.deadLetter}`)}
       </div>
-      <p className="mt-2 text-[11px] text-slate-400">任务历史 24 小时：失败 {jobHistory.failed24h} · 超时 {jobHistory.timeoutFailures24h} · 死信 {jobHistory.deadLetter24h} · 过期租约 {jobHistory.expiredLeases}；MySQL 慢查询累计 {mysqlServer.slowQueriesTotal}。</p>
+      <p className="mt-2 text-xs text-slate-400">任务历史 24 小时：失败 {jobHistory.failed24h} · 超时 {jobHistory.timeoutFailures24h} · 死信 {jobHistory.deadLetter24h} · 过期租约 {jobHistory.expiredLeases}；MySQL 慢查询累计 {mysqlServer.slowQueriesTotal}。</p>
     </div>
 
     <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -381,11 +381,11 @@ export function OperationsOverview() {
       </div>
       <div className="grid gap-0 xl:grid-cols-[1.3fr_1fr]">
         <div className="border-b border-slate-100 xl:border-b-0 xl:border-r">
-          <div className="grid grid-cols-[1fr_110px_90px_80px] gap-3 bg-slate-50 px-5 py-2 text-[11px] font-medium text-slate-400"><span>来源</span><span>分组/频率</span><span>类型</span><span>状态</span></div>
+          <div className="grid grid-cols-[1fr_110px_90px_80px] gap-3 bg-slate-50 px-5 py-2 text-xs font-medium text-slate-400"><span>来源</span><span>分组/频率</span><span>类型</span><span>状态</span></div>
           <div className="max-h-80 divide-y divide-slate-100 overflow-y-auto">
             {publicSources.map((source) => <div key={source.id}>
               <div className="grid grid-cols-[1fr_110px_90px_110px] items-center gap-3 px-5 py-3 text-sm">
-                <div className="min-w-0"><p className="truncate font-medium text-slate-700">{source.name}</p><p className={`mt-0.5 truncate text-[11px] ${source.lastError ? 'text-rose-500' : 'text-slate-400'}`} title={source.lastError || source.config.url}>{source.lastError ? `采集异常：${source.lastError}` : source.config.url}</p></div>
+                <div className="min-w-0"><p className="truncate font-medium text-slate-700">{source.name}</p><p className={`mt-0.5 truncate text-xs ${source.lastError ? 'text-rose-500' : 'text-slate-400'}`} title={source.lastError || source.config.url}>{source.lastError ? `采集异常：${source.lastError}` : source.config.url}</p></div>
                 <div className="text-xs text-slate-500"><p>{source.group || '未分组'}</p><p className="text-slate-400">{source.config.frequency || '按任务'}</p></div>
                 <span className="truncate text-xs text-slate-500">{source.config.type || '适配器'}{source.lastFetched !== null ? ` · ${source.lastFetched}` : ''}</span>
                 <div className="flex gap-1"><button disabled={radarBusy !== ''} className={`inline-flex items-center justify-center gap-1 rounded-md px-2 py-1 text-xs ${source.enabled ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`} onClick={() => void mutateRadar(`source-${source.id}`, () => apiPatch(`/operations/radar/sources/${source.id}`, { enabled: !source.enabled }), source.enabled ? `${source.name} 已停用` : `${source.name} 已启用`)}><Power className="h-3 w-3" />{source.enabled ? '启用' : '停用'}</button><button className="rounded-md px-2 py-1 text-xs text-brand-600 hover:bg-brand-50" onClick={() => setSourceEdit(sourceEdit?.id === source.id ? null : { id: source.id, group: source.group, frequency: source.config.frequency })}>编辑</button></div>
@@ -394,15 +394,15 @@ export function OperationsOverview() {
             </div>)}
             {!publicSources.length && <p className="p-8 text-center text-sm text-slate-400">公开源目录尚未继承；重启主服务后会从 Radar 内置目录自动引入 MySQL。</p>}
           </div>
-          <p className="border-t border-slate-100 px-5 py-3 text-[11px] text-slate-400">另有 {inheritedSources.length} 个高校/公众号来源已纳入同一来源注册表；公众号账号标识缺失的来源不会被误报为可采集。</p>
+          <p className="border-t border-slate-100 px-5 py-3 text-xs text-slate-400">另有 {inheritedSources.length} 个高校/公众号来源已纳入同一来源注册表；公众号账号标识缺失的来源不会被误报为可采集。</p>
         </div>
         <div>
-          <div className="bg-slate-50 px-5 py-2 text-[11px] font-medium text-slate-400">统一调度任务</div>
+          <div className="bg-slate-50 px-5 py-2 text-xs font-medium text-slate-400">统一调度任务</div>
           <div className="divide-y divide-slate-100">
             {(radarManagement?.jobs ?? []).map((job) => <div key={job.id} className="px-5 py-3">
               <div className="flex items-center gap-2"><p className="min-w-0 flex-1 truncate text-sm font-medium text-slate-700">{job.id}</p><Badge tone={job.running ? 'blue' : job.lastStatus === 'failed' || job.lastStatus === 'dead_letter' ? 'red' : job.enabled ? 'green' : 'slate'}>{job.running ? '运行中' : job.enabled ? '已启用' : '已停用'}</Badge></div>
-              <p className="mt-1 text-[11px] text-slate-400">{job.scheduleKind === 'daily' ? `每天 ${String(job.dailyHour ?? 0).padStart(2, '0')}:${String(job.dailyMinute ?? 0).padStart(2, '0')}` : `每 ${Math.round((job.intervalSeconds ?? 0) / 60)} 分钟`} · 上次 {job.lastFinishedAt ? timestamp(job.lastFinishedAt) : '未运行'}</p>
-              {job.lastError && <p className="mt-1 line-clamp-2 text-[11px] text-rose-500">{job.lastError}</p>}
+              <p className="mt-1 text-xs text-slate-400">{job.scheduleKind === 'daily' ? `每天 ${String(job.dailyHour ?? 0).padStart(2, '0')}:${String(job.dailyMinute ?? 0).padStart(2, '0')}` : `每 ${Math.round((job.intervalSeconds ?? 0) / 60)} 分钟`} · 上次 {job.lastFinishedAt ? timestamp(job.lastFinishedAt) : '未运行'}</p>
+              {job.lastError && <p className="mt-1 line-clamp-2 text-xs text-rose-500">{job.lastError}</p>}
               <div className="mt-2 flex gap-2"><Button size="sm" variant="secondary" disabled={radarBusy !== '' || !job.enabled || job.running} onClick={() => void mutateRadar(`run-${job.id}`, () => apiPost(`/operations/radar/jobs/${job.id}/run`), `${job.id} 已加入立即执行队列`)}><Play className="h-3.5 w-3.5" />立即执行</Button><Button size="sm" variant="ghost" disabled={radarBusy !== '' || job.running} onClick={() => void mutateRadar(`job-${job.id}`, () => apiPatch(`/operations/radar/jobs/${job.id}`, { enabled: !job.enabled }), job.enabled ? `${job.id} 已停用` : `${job.id} 已启用`)}>{job.enabled ? '停用' : '启用'}</Button></div>
             </div>)}
           </div>
@@ -410,7 +410,7 @@ export function OperationsOverview() {
       </div>
       <div className="border-t border-slate-100">
         <div className="flex flex-wrap items-center gap-3 bg-slate-50 px-5 py-3">
-          <div><p className="text-sm font-medium text-slate-700">公众号账号</p><p className="text-[11px] text-slate-400">{wechatAccounts.filter((source) => source.enabled).length}/{wechatAccounts.length} 个账号启用；工作簿表头使用“公众号、帐号名”，工作表名可区分高校/机构。</p></div>
+          <div><p className="text-sm font-medium text-slate-700">公众号账号</p><p className="text-xs text-slate-400">{wechatAccounts.filter((source) => source.enabled).length}/{wechatAccounts.length} 个账号启用；工作簿表头使用“公众号、帐号名”，工作表名可区分高校/机构。</p></div>
           <input className="input ml-auto w-64" placeholder="搜索公众号、微信号或分组" value={accountQuery} onChange={(event) => setAccountQuery(event.target.value)} />
           <label className="flex items-center gap-2 text-xs text-slate-600"><input type="checkbox" checked={replaceAccounts} onChange={(event) => setReplaceAccounts(event.target.checked)} />导入时停用文件外账号</label>
           <label className="inline-flex cursor-pointer items-center rounded-lg bg-brand-600 px-3 py-2 text-xs font-medium text-white hover:bg-brand-700">
@@ -418,7 +418,7 @@ export function OperationsOverview() {
             <input className="hidden" type="file" accept=".xls,.xlsx,.csv" disabled={radarBusy !== ''} onChange={(event) => { const file = event.target.files?.[0]; event.currentTarget.value = ''; if (file) void importWechatAccounts(file) }} />
           </label>
         </div>
-        <div className="grid grid-cols-[1fr_180px_110px_90px] gap-3 border-t border-slate-100 px-5 py-2 text-[11px] font-medium text-slate-400"><span>公众号</span><span>微信号</span><span>分组</span><span>状态</span></div>
+        <div className="grid grid-cols-[1fr_180px_110px_90px] gap-3 border-t border-slate-100 px-5 py-2 text-xs font-medium text-slate-400"><span>公众号</span><span>微信号</span><span>分组</span><span>状态</span></div>
         <div className="max-h-72 divide-y divide-slate-100 overflow-y-auto">
           {visibleWechatAccounts.map((source) => <div key={source.id} className="grid grid-cols-[1fr_180px_110px_90px] items-center gap-3 px-5 py-2 text-xs">
             <span className="truncate font-medium text-slate-700" title={source.name}>{source.name}</span>
@@ -428,7 +428,7 @@ export function OperationsOverview() {
           </div>)}
           {!visibleWechatAccounts.length && <p className="p-6 text-center text-sm text-slate-400">没有匹配的公众号账号。</p>}
         </div>
-        {wechatAccounts.length > visibleWechatAccounts.length && <p className="border-t border-slate-100 px-5 py-2 text-[11px] text-slate-400">为保证页面性能最多展示前 100 条，请使用搜索框缩小范围。</p>}
+        {wechatAccounts.length > visibleWechatAccounts.length && <p className="border-t border-slate-100 px-5 py-2 text-xs text-slate-400">为保证页面性能最多展示前 100 条，请使用搜索框缩小范围。</p>}
       </div>
     </Card>
 
@@ -462,7 +462,7 @@ export function OperationsOverview() {
           return <div key={candidate.candidate_id} className="px-5 py-3">
             <div className="flex items-start gap-3">
               <input className="mt-1" type="checkbox" checked={checked} onChange={() => setSelectedCandidateIds((ids) => checked ? ids.filter((id) => id !== candidate.candidate_id) : [...ids, candidate.candidate_id])} />
-              <div className="min-w-0 flex-1"><p className="font-medium text-slate-700">{candidate.title || '未命名候选'}</p><p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500">{candidate.summary || '暂无摘要'}</p><div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-slate-400"><Badge tone={candidate.worth_attention ? 'green' : 'slate'}>{Number(candidate.attention_score ?? 0)} 分</Badge><span>{candidate.source_group || candidate.source || '未知来源'}</span><span>{candidate.source_name || '—'}</span><span>{timestamp(candidate.published_at || candidate.collected_at)}</span></div></div>
+              <div className="min-w-0 flex-1"><p className="font-medium text-slate-700">{candidate.title || '未命名候选'}</p><p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500">{candidate.summary || '暂无摘要'}</p><div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-400"><Badge tone={candidate.worth_attention ? 'green' : 'slate'}>{Number(candidate.attention_score ?? 0)} 分</Badge><span>{candidate.source_group || candidate.source || '未知来源'}</span><span>{candidate.source_name || '—'}</span><span>{timestamp(candidate.published_at || candidate.collected_at)}</span></div></div>
             </div>
             <details className="ml-7 mt-2 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2"><summary className="cursor-pointer text-xs text-brand-600">查看原文与信号</summary><div className="mt-2 whitespace-pre-wrap text-xs leading-6 text-slate-600">{candidate.article_text || candidate.summary || '暂无原文'}</div>{candidate.link && <a className="mt-2 inline-block text-xs text-brand-600" href={candidate.link} target="_blank" rel="noreferrer">打开原始来源</a>}</details>
           </div>

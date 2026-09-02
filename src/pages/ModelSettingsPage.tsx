@@ -1,11 +1,12 @@
 import {
   Check, ChevronRight, CircleDot, Clock3, Eye, EyeOff, History, Pencil, Plus,
-  RefreshCw, RotateCcw, Save, Server, TestTube2, Trash2, X, XCircle, Zap,
+  RefreshCw, RotateCcw, Save, Server, TestTube2, X, XCircle, Zap,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ConfigurationRevisionPanel, type ConfigurationRevisionTarget } from '../components/ConfigurationRevisionPanel'
 import { Modal } from '../components/ui'
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut } from '../lib/api'
+import { MoreActions } from '../components/task/TaskSystem'
 
 type Provider = {
   id: string; name: string; protocol: string; baseUrl: string; timeoutMs: number; enabled: boolean;
@@ -31,10 +32,6 @@ const emptyModel = (providerId = ''): ModelDraft => ({
 const routeLabels: Record<string, string> = {
   interactive: '互动助手', subject: '线索主体', research: '线索研究', screening: '项目初筛',
   enrichment: '信息补全', scoring: '项目评分', document: '文档生成',
-}
-
-function Toggle({ value, disabled, onChange, label }: { value: boolean; disabled?: boolean; onChange: (value: boolean) => void; label: string }) {
-  return <button type="button" role="switch" aria-checked={value} aria-label={label} disabled={disabled} onClick={(event) => { event.stopPropagation(); onChange(!value) }} className={`jw-switch ${value ? 'is-on' : ''}`}><span /></button>
 }
 
 export function ModelSettingsPage() {
@@ -141,6 +138,26 @@ export function ModelSettingsPage() {
     setDraft({ name: selectedProvider.name, protocol: selectedProvider.protocol, baseUrl: selectedProvider.baseUrl, apiKey: '', timeoutMs: String(selectedProvider.timeoutMs), selectedModelId: defaultModel?.id || '' })
   }
 
+  function providerAction(provider: Provider, action: string) {
+    if (action === 'delete') {
+      if (window.confirm(`确定删除模型提供商“${provider.name}”吗？此操作无法撤销，且需要先删除其下所有模型。`)) void mutate(`provider-delete-${provider.id}`, () => apiDelete(`/ai/model-settings/providers/${provider.id}?expectedVersion=${provider.version}`), '模型提供商已删除。')
+      return
+    }
+    const enabled = !provider.enabled
+    if (!enabled && !window.confirm(`确定停用“${provider.name}”吗？使用该提供商的模型将暂停调用。`)) return
+    void mutate(`provider-toggle-${provider.id}`, () => apiPatch(`/ai/model-settings/providers/${provider.id}`, { expectedVersion: provider.version, enabled }), enabled ? '提供商已启用。' : '提供商已停用。', provider.id)
+  }
+
+  function modelAction(model: Model, action: string) {
+    if (action === 'delete') {
+      if (window.confirm(`确定删除模型“${model.displayName}”吗？此操作无法撤销。`)) void mutate(`model-delete-${model.id}`, () => apiDelete(`/ai/model-settings/models/${model.id}?expectedVersion=${model.version}`), '模型已删除。', selectedProviderId)
+      return
+    }
+    const enabled = !model.enabled
+    if (!enabled && !window.confirm(`确定停用“${model.displayName}”吗？`)) return
+    void mutate(`model-toggle-${model.id}`, () => apiPatch(`/ai/model-settings/models/${model.id}`, { expectedVersion: model.version, enabled }), enabled ? '模型已启用。' : '模型已停用。', selectedProviderId)
+  }
+
   if (loading && !settings.providers.length) return <div className="grid min-h-[50vh] place-items-center text-sm text-slate-500">正在读取模型配置…</div>
 
   return <div className="jw-admin-page">
@@ -157,8 +174,7 @@ export function ModelSettingsPage() {
           {settings.providers.map((provider, index) => <div role="button" tabIndex={0} key={provider.id} className={`jw-object-item ${selectedProviderId === provider.id ? 'active' : ''}`} onClick={() => { setSelectedProviderId(provider.id); setSection('provider') }} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { setSelectedProviderId(provider.id); setSection('provider') } }}>
             <span className="jw-provider-mark" style={{ background: ['#0ea5e9', '#7c3aed', '#10b981', '#f97316'][index % 4] }}><Server className="h-4 w-4" /></span>
             <span className="min-w-0 flex-1 text-left"><strong className="block truncate">{provider.name}</strong><small className="block truncate">{provider.protocol}</small></span>
-            <button type="button" className="jw-item-action" title="删除提供商" aria-label={`删除${provider.name}`} disabled={busy !== ''} onClick={(event) => { event.stopPropagation(); if (window.confirm(`确定删除模型提供商“${provider.name}”吗？必须先删除该提供商下的所有模型。`)) void mutate(`provider-delete-${provider.id}`, () => apiDelete(`/ai/model-settings/providers/${provider.id}?expectedVersion=${provider.version}`), '模型提供商已删除。') }}><Trash2 className="h-4 w-4" /></button>
-            <Toggle value={provider.enabled} disabled={busy !== ''} label={`${provider.name}${provider.enabled ? '停用' : '启用'}`} onChange={(enabled) => void mutate(`provider-toggle-${provider.id}`, () => apiPatch(`/ai/model-settings/providers/${provider.id}`, { expectedVersion: provider.version, enabled }), enabled ? '提供商已启用。' : '提供商已停用。', provider.id)} />
+            <MoreActions actions={[{ key: 'toggle', label: provider.enabled ? '停用提供商' : '启用提供商', danger: provider.enabled, disabled: busy !== '' }, { key: 'delete', label: '删除提供商', danger: true, disabled: busy !== '' }]} onAction={(action) => providerAction(provider, action)} />
           </div>)}
           {!settings.providers.length && <div className="jw-empty-compact"><Server className="h-7 w-7" /><span>暂无模型提供商</span></div>}
         </div>
@@ -205,8 +221,7 @@ export function ModelSettingsPage() {
               {providerModels.map((model) => <div role="button" tabIndex={0} key={model.id} className={`jw-model-item ${draft.selectedModelId === model.id ? 'active' : ''} ${!model.enabled ? 'disabled' : ''}`} onClick={() => model.enabled && setDraft({ ...draft, selectedModelId: model.id })} onKeyDown={(event) => { if ((event.key === 'Enter' || event.key === ' ') && model.enabled) setDraft({ ...draft, selectedModelId: model.id }) }}>
                 <span className="jw-radio-dot">{draft.selectedModelId === model.id && <span />}</span>
                 <span className="min-w-0 flex-1 text-left"><strong>{model.displayName}</strong><small>{model.modelKey}</small></span>
-                <Toggle value={model.enabled} disabled={busy !== ''} label={`${model.displayName}${model.enabled ? '停用' : '启用'}`} onChange={(enabled) => void mutate(`model-toggle-${model.id}`, () => apiPatch(`/ai/model-settings/models/${model.id}`, { expectedVersion: model.version, enabled }), enabled ? '模型已启用。' : '模型已停用。', selectedProvider.id)} />
-                <button type="button" className="jw-item-action" title="删除模型" aria-label={`删除${model.displayName}`} disabled={busy !== ''} onClick={(event) => { event.stopPropagation(); if (window.confirm(`确定删除模型“${model.displayName}”吗？`)) void mutate(`model-delete-${model.id}`, () => apiDelete(`/ai/model-settings/models/${model.id}?expectedVersion=${model.version}`), '模型已删除。', selectedProvider.id) }}><Trash2 className="h-4 w-4" /></button>
+                <MoreActions actions={[{ key: 'toggle', label: model.enabled ? '停用模型' : '启用模型', danger: model.enabled, disabled: busy !== '' }, { key: 'delete', label: '删除模型', danger: true, disabled: busy !== '' }]} onAction={(action) => modelAction(model, action)} />
                 <span role="button" tabIndex={0} className="jw-item-action" title="编辑模型" onClick={(event) => { event.stopPropagation(); setModelDraft({ id: model.id, providerId: model.providerId, modelKey: model.modelKey, displayName: model.displayName }); setShowModelModal(true) }}><Pencil className="h-4 w-4" /></span>
               </div>)}
               {!providerModels.length && <div className="jw-empty-compact"><CircleDot className="h-7 w-7" /><span>该提供商尚未添加模型</span></div>}

@@ -16,16 +16,16 @@ import {
   listFileVersions, listProjectClassificationHistory, listProjects, moveProjectStage,
   replaceFileContent, setFileStoragePath, updateProject, deleteProject, pinProject, listAllFiles,
 } from '../services/projectService.js'
-import { openProjectFile, projectFileContentType, projectFilePreviewContentType, removeProjectFile, saveProjectFileRevision } from '../services/projectFileStorageService.js'
+import { openProjectFile, projectFileContentType, projectFilePreviewContentType, readProjectFileBuffer, removeProjectFile, saveProjectFileRevision } from '../services/projectFileStorageService.js'
 import { requireAccessibleProject } from '../services/projectAccessService.js'
-import { decodeAndValidateProjectFile } from '../security/projectFileValidation.js'
+import { canonicalizeProjectTextBuffer, decodeAndValidateProjectFile } from '../security/projectFileValidation.js'
 import { enqueueProjectScoreJob, getProjectScoreJob } from '../services/projectScoreJobService.js'
 import { writeAudit } from '../services/auditService.js'
 import { bindFdeMaterial, getFdeWorkflow, removeFdeMaterialBinding, saveFdePlan, updateFdePlanAction } from '../services/fdeWorkflowService.js'
 import { previewTimelineTasks, syncTimelineTasks } from '../services/fdeTimelineTaskService.js'
 import { decideFdeGovernance, getFdeGovernance, getFdeProjectCreationRoster, proposeFdeGovernance } from '../services/fdeGovernanceService.js'
 import { FDE_PROJECT_DUTIES, type FdeProjectDuty } from '../contracts/fdeGovernanceContract.js'
-import { cancelFdeTask, createFdeTask, decideFdeTask, feedbackFdeTask, getFdeTasks, requestFdeTaskExtension, syncFdePlanTasks } from '../services/fdeTaskService.js'
+import { cancelFdeTask, createFdeTask, decideFdeTask, feedbackFdeTask, getFdeTasks, requestFdeTaskExtension, startFdeTask, syncFdePlanTasks } from '../services/fdeTaskService.js'
 import { actOnFdeWeeklyPlan, createFdeWeeklyPlan, getFdeWeeklyPlans, readFdeWeeklyNotice, saveFdeWeeklyPlan } from '../services/fdeWeeklyPlanService.js'
 import { shanghaiToday, weekStartFor } from '../contracts/fdeWeeklyPlanContract.js'
 import { actOnFdeFridayMeeting, createFdeFridayMeeting, getFdeFridayMeetings, readFdeFridayNotice, saveFdeFridayMeeting } from '../services/fdeFridayMeetingService.js'
@@ -127,7 +127,7 @@ projectsRouter.get('/:id/material-submissions/:materialId/preview', async (req: 
     res.setHeader('Content-Security-Policy', "sandbox; default-src 'none'; img-src data:")
     res.setHeader('X-File-Version', String(result.version))
     res.setHeader('X-Content-SHA256', result.sha256)
-    res.send(result.bytes)
+    res.send(canonicalizeProjectTextBuffer(result.name, result.bytes))
   } catch (error) { next(error) }
 })
 
@@ -299,6 +299,9 @@ projectsRouter.post('/:id/fde-tasks/sync-plan', async (req: AuthedRequest, res, 
 })
 projectsRouter.post('/:id/fde-tasks/:taskId/feedback', async (req: AuthedRequest, res, next) => {
   try { res.json(await feedbackFdeTask(routeId(req.params.id), z.string().uuid().parse(req.params.taskId), req.user!.uid, req.body)) } catch (error) { next(error) }
+})
+projectsRouter.post('/:id/fde-tasks/:taskId/start', async (req: AuthedRequest, res, next) => {
+  try { res.json(await startFdeTask(routeId(req.params.id), z.string().uuid().parse(req.params.taskId), req.user!.uid, req.body)) } catch (error) { next(error) }
 })
 projectsRouter.post('/:id/fde-tasks/:taskId/acceptance', async (req: AuthedRequest, res, next) => {
   try { res.json(await decideFdeTask(routeId(req.params.id), z.string().uuid().parse(req.params.taskId), req.user!.uid, req.body)) } catch (error) { next(error) }
@@ -497,10 +500,13 @@ projectsRouter.get('/:id/score', async (req: AuthedRequest, res, next) => {
 projectsRouter.delete('/:id', async (req: AuthedRequest, res, next) => {
   try {
     const projectId = routeId(req.params.id)
-    await requireAccessibleProject(req.user!.uid, projectId)
-    const row = await deleteProject(projectId, req.user!.uid)
+    const input = z.object({
+      confirmation: z.string().trim().min(1).max(128),
+      expectedVersion: z.number().int().positive(),
+    }).strict().parse(req.body ?? {})
+    const row = await deleteProject(projectId, req.user!.uid, input)
     if (!row) { res.status(404).json({ code: 'NOT_FOUND', message: '项目不存在' }); return }
-    res.json({ code: 0, message: 'success', deleted: row.id })
+    res.json({ code: 0, message: '项目已删除', deleted: row.id })
   } catch (err) { next(err) }
 })
 projectsRouter.post('/:id/pin', async (req: AuthedRequest, res, next) => {
@@ -668,20 +674,29 @@ projectsRouter.get('/files/:id/preview', async (req: AuthedRequest, res, next) =
       res.status(415).json({ code: 'FILE_PREVIEW_UNSUPPORTED', message: '该格式请下载后使用本地软件查看', details: null })
       return
     }
-    const result = await openProjectFile(file.storagePath)
+    const textPreview = contentType.startsWith('text/') || contentType.startsWith('application/json')
+    const previewBytes = textPreview
+      ? canonicalizeProjectTextBuffer(file.name, await readProjectFileBuffer(file.storagePath))
+      : null
+    const result = textPreview ? null : await openProjectFile(file.storagePath)
     await writeAudit({
       userId: req.user!.uid, userName: req.user!.name, module: '项目资料', action: '预览项目资料',
-      target: `project-file:${file.id};project:${file.projectId};version:${file.version};bytes:${result.size}`,
+      target: `project-file:${file.id};project:${file.projectId};version:${file.version};bytes:${previewBytes?.length ?? result!.size}`,
       ip: req.ip,
     })
     res.setHeader('Content-Type', contentType)
-    res.setHeader('Content-Length', String(result.size))
     res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(file.name)}`)
     res.setHeader('Cache-Control', 'private, no-store')
     res.setHeader('X-Content-Type-Options', 'nosniff')
     res.setHeader('Content-Security-Policy', "sandbox; default-src 'none'; img-src data:")
-    result.stream.on('error', next)
-    result.stream.pipe(res)
+    if (previewBytes) {
+      res.setHeader('Content-Length', String(previewBytes.length))
+      res.send(previewBytes)
+    } else {
+      res.setHeader('Content-Length', String(result!.size))
+      result!.stream.on('error', next)
+      result!.stream.pipe(res)
+    }
   } catch (error) { next(error) }
 })
 

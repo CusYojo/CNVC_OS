@@ -116,7 +116,7 @@ body:has(.login-screen) {
 .login-brand-lockup span {
   margin-top: 3px;
   color: #a2bbbd;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 650;
   letter-spacing: .16em;
 }
@@ -175,7 +175,7 @@ body:has(.login-screen) {
 
 .login-brand-capabilities b {
   color: #d7b27b;
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: .08em;
 }
 
@@ -385,7 +385,7 @@ body:has(.login-screen) {
   .login-entry-panel { min-height: 100dvh; padding: 30px 22px; justify-content: flex-start; background: linear-gradient(180deg, #15373f 0 132px, #f3f6f5 132px); }
   .login-mobile-lockup { display: flex; width: min(100%, 420px); margin: 0 auto 24px; color: #fff; }
   .login-mobile-lockup strong { color: #fff; font-size: 19px; letter-spacing: .08em; }
-  .login-mobile-lockup span { margin-top: 2px; color: #aec3c5; font-size: 11px; }
+  .login-mobile-lockup span { margin-top: 2px; color: #aec3c5; font-size: 12px; }
   .login-card { margin: 0 auto; }
 }
 

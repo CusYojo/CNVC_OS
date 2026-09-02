@@ -13,9 +13,11 @@ import {
 } from 'lucide-react'
 import { apiDelete, apiGet } from '../lib/api'
 import { shouldHideAiTaskFailureDiagnostics } from '../lib/aiTaskPresentation'
-import { authedFetch } from '../store/useAuthStore'
+import { authedFetch, useAuthStore } from '../store/useAuthStore'
 import { Button, ProgressBar } from './ui'
 import { formatShanghaiDateTime } from '../lib/dateTime'
+import { isAiPlatformAdminRole } from '../../server/src/contracts/adminRoleContract'
+import { aiBusinessErrorMessage } from '../lib/aiBusinessError'
 
 export type AiTaskStatus = 'pending' | 'running' | 'succeeded' | 'failed' | 'cancelled'
 
@@ -194,6 +196,7 @@ function TaskCard({
   onNotify?: (message: string, kind: 'success' | 'error' | 'info') => void
 }) {
   const [downloadingId, setDownloadingId] = useState<string | null>(null)
+  const showDiagnostics = useAuthStore(state => isAiPlatformAdminRole(state.user?.role ?? ''))
   const meta = STATUS_META[task.status] ?? STATUS_META.pending
   const StatusIcon = meta.icon
   const isActive = task.status === 'pending' || task.status === 'running'
@@ -309,17 +312,17 @@ function TaskCard({
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="text-sm font-semibold text-slate-800">{TASK_LABELS[task.type] ?? 'AI 业务任务'}</h3>
-            <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${meta.className}`}>
+            <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${meta.className}`}>
               <StatusIcon className={`h-3 w-3 ${task.status === 'running' ? 'animate-spin' : ''}`} />
               {meta.label}
             </span>
             {templateLabel && (
-              <span className="max-w-48 truncate text-[10px] text-slate-400" title={templateLabel}>{templateLabel}</span>
+              <span className="max-w-48 truncate text-xs text-slate-400" title={templateLabel}>{templateLabel}</span>
             )}
           </div>
-          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-500">
+          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500">
             <span>{sourceLabel}</span>
-            {usageLabel && <span title={usageTitle}>{usageLabel}</span>}
+            {showDiagnostics && usageLabel && <span title={usageTitle}>{usageLabel}</span>}
             <span>{formatShanghaiDateTime(task.createdAt)}</span>
           </div>
         </div>
@@ -327,7 +330,7 @@ function TaskCard({
 
       {(isActive || task.progress > 0) && (
         <div className="mt-3">
-          <div className="mb-1 flex items-center justify-between text-[10px] text-slate-500">
+          <div className="mb-1 flex items-center justify-between text-xs text-slate-500">
             <span>{isActive ? task.stage || '生成进度' : '完成进度'}</span>
             <span className="font-mono">{Math.max(0, Math.min(100, task.progress || 0))}%</span>
           </div>
@@ -337,12 +340,12 @@ function TaskCard({
 
       {task.status === 'failed' && !hideFailureDiagnostics && (
         <div className="mt-3 rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-          <p>{failureMessage}</p>
+          <p>{showDiagnostics ? failureMessage : aiBusinessErrorMessage(failureMessage)}</p>
           {task.retryable === false && (
-            <p className="mt-1 text-[10px] font-medium text-amber-700">该错误不可直接重试，请修正资料、模板或参数后重新创建任务。</p>
+            <p className="mt-1 text-xs font-medium text-amber-700">该错误不可直接重试，请修正资料、模板或参数后重新创建任务。</p>
           )}
-          {failureStage && <p className="mt-1 text-[10px] text-amber-700">停止阶段：{failureStage}</p>}
-          {task.errorId && <p className="mt-1 font-mono text-[10px] text-amber-700">错误编号：{task.errorId}</p>}
+          {showDiagnostics && failureStage && <p className="mt-1 text-xs text-amber-700">停止阶段：{failureStage}</p>}
+          {showDiagnostics && task.errorId && <p className="mt-1 font-mono text-xs text-amber-700">错误编号：{task.errorId}</p>}
         </div>
       )}
 
@@ -511,21 +514,21 @@ export function AiArtifactCenter({
     <section className="border-b border-slate-200">
       <div className="flex items-center justify-between px-3 pb-1 pt-3">
         <div>
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">正式交付物</p>
-          <p className="mt-0.5 text-[10px] text-slate-400">按用户与项目隔离 · 版本可追溯</p>
+          <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">正式交付物</p>
+          <p className="mt-0.5 text-xs text-slate-400">按用户与项目隔离 · 版本可追溯</p>
         </div>
         {loading && <LoaderCircle className="h-3.5 w-3.5 animate-spin text-brand-500" />}
       </div>
       <div className="max-h-64 space-y-1 overflow-y-auto px-2 py-2">
         {!validProjectId && (
-          <p className="rounded-lg border border-dashed border-slate-200 px-3 py-4 text-center text-[11px] leading-5 text-slate-400">
+          <p className="rounded-lg border border-dashed border-slate-200 px-3 py-4 text-center text-xs leading-5 text-slate-400">
             当前项目尚未入库，无法生成或读取正式交付物。
           </p>
         )}
-        {validProjectId && error && <p className="px-2 py-2 text-[11px] text-slate-400">{error}</p>}
-        {validProjectId && artifacts === null && !error && <p className="px-2 py-3 text-[11px] text-slate-400">正在加载正式交付物…</p>}
+        {validProjectId && error && <p className="px-2 py-2 text-xs text-slate-400">{error}</p>}
+        {validProjectId && artifacts === null && !error && <p className="px-2 py-3 text-xs text-slate-400">正在加载正式交付物…</p>}
         {validProjectId && artifacts?.length === 0 && !loading && !error && (
-          <p className="rounded-lg border border-dashed border-slate-200 px-3 py-4 text-center text-[11px] text-slate-400">
+          <p className="rounded-lg border border-dashed border-slate-200 px-3 py-4 text-center text-xs text-slate-400">
             暂无通过质量检查的正式交付物
           </p>
         )}
@@ -536,7 +539,7 @@ export function AiArtifactCenter({
             </span>
             <span className="min-w-0 flex-1">
               <span className="block truncate text-xs font-medium text-slate-700" title={artifact.fileName}>{artifact.fileName}</span>
-              <span className="mt-0.5 block truncate text-[10px] text-slate-400">
+              <span className="mt-0.5 block truncate text-xs text-slate-400">
                 {artifact.format.toUpperCase()} · V{artifact.version} · {
                   artifactStageLabel(artifact)
                     ? `${artifactStageLabel(artifact)} · `

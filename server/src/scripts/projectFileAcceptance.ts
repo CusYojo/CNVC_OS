@@ -72,7 +72,23 @@ async function main() {
     await expectCode(() => decodeAndValidateProjectFile({ name: 'fake.exe', dataBase64: Buffer.from('MZ').toString('base64') }), 'FILE_UNSUPPORTED_TYPE')
     await expectCode(() => decodeAndValidateProjectFile({ name: '../escape.txt', dataBase64: Buffer.from('text').toString('base64') }), 'INVALID_FILE_NAME')
     await expectCode(() => decodeAndValidateProjectFile({ name: 'bad.txt', dataBase64: 'not-base64' }), 'INVALID_FILE_ENCODING')
-    await expectCode(() => decodeAndValidateProjectFile({ name: 'binary.txt', dataBase64: Buffer.from([0, 1, 2, 3]).toString('base64') }), 'FILE_SIGNATURE_MISMATCH')
+    await expectCode(() => decodeAndValidateProjectFile({ name: 'binary.txt', dataBase64: Buffer.from([0, 1, 2, 3]).toString('base64') }), 'FILE_TEXT_ENCODING_INVALID')
+
+    const utf16Text = Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from('项目资料', 'utf16le')])
+    const utf16Validated = await decodeAndValidateProjectFile({ name: 'utf16.txt', dataBase64: utf16Text.toString('base64') })
+    if (utf16Validated.buffer.toString('utf8') !== '项目资料') throw new Error('UTF-16 text was not converted to canonical UTF-8')
+    const utf16WithoutBom = Buffer.from('项目资料', 'utf16le')
+    const utf16WithoutBomValidated = await decodeAndValidateProjectFile({ name: 'utf16-no-bom.txt', dataBase64: utf16WithoutBom.toString('base64') })
+    if (utf16WithoutBomValidated.buffer.toString('utf8') !== '项目资料') throw new Error('BOM-less UTF-16 text was not detected')
+
+    // 项目资料 encoded as GB18030/GBK. Plain-text uploads must be converted
+    // before persistence so browsers can safely use charset=utf-8.
+    const gb18030Text = Buffer.from([0xcf, 0xee, 0xc4, 0xbf, 0xd7, 0xca, 0xc1, 0xcf])
+    const gb18030Validated = await decodeAndValidateProjectFile({ name: 'gb18030.txt', dataBase64: gb18030Text.toString('base64') })
+    if (gb18030Validated.buffer.toString('utf8') !== '项目资料') throw new Error('GB18030 text was not converted to canonical UTF-8')
+
+    await expectCode(() => decodeAndValidateProjectFile({ name: '坏�文件.txt', dataBase64: Buffer.from('内容').toString('base64') }), 'FILE_NAME_ENCODING_INVALID')
+    await expectCode(() => decodeAndValidateProjectFile({ name: 'damaged.txt', dataBase64: Buffer.from('内容���').toString('base64') }), 'FILE_TEXT_ENCODING_INVALID')
 
     const largeText = Buffer.alloc(16 * 1024 * 1024, 0x41)
     const largeValidated = await decodeAndValidateProjectFile({ name: 'large-linear.txt', dataBase64: largeText.toString('base64') })
@@ -94,7 +110,7 @@ async function main() {
     console.log(JSON.stringify({
       ok: true,
       supportedExtensions: supportedProjectFileExtensions.length,
-      checks: ['raw-base64', 'data-url-base64', 'all-supported-types', 'private-storage-roundtrip', 'signature-mismatch', 'mime-mismatch', 'unsupported-extension', 'unsafe-name', 'invalid-base64', 'binary-text', 'large-base64-linear-validation', 'size-limit', 'archive-expansion-limit'],
+      checks: ['raw-base64', 'data-url-base64', 'all-supported-types', 'private-storage-roundtrip', 'signature-mismatch', 'mime-mismatch', 'unsupported-extension', 'unsafe-name', 'invalid-base64', 'binary-text', 'utf16-to-utf8', 'utf16-no-bom-to-utf8', 'gb18030-to-utf8', 'damaged-name-rejected', 'damaged-text-rejected', 'large-base64-linear-validation', 'size-limit', 'archive-expansion-limit'],
     }))
   } finally {
     if (previousRoot == null) delete process.env.PROJECT_FILE_ROOT

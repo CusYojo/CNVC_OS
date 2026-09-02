@@ -3,7 +3,7 @@ import { z } from 'zod'
 import type { AuthedRequest } from '../middleware/requireAuth.js'
 import { shanghaiToday, weekStartFor } from '../contracts/fdeWeeklyPlanContract.js'
 import { actOnLeaderTime, createLeaderTime, listLeaderTimes, readLeaderTimeNotice, saveLeaderTime } from '../services/fdeLeaderTimeService.js'
-import { cancelCalendarEvent, listCalendar, writeCalendarEvent, writeTaskCalendarSchedule } from '../services/fdeCalendarService.js'
+import { cancelCalendarEvent, cancelPersonalCalendarTask, createCalendarTask, listCalendar, writeCalendarEvent, writeTaskCalendarSchedule } from '../services/fdeCalendarService.js'
 import { applyAutoSchedule, previewAutoSchedule } from '../services/fdeAutoScheduleService.js'
 import { milestoneQueryFlag } from '../contracts/fdeMilestoneSourcesContract.js'
 
@@ -20,6 +20,8 @@ leaderTimeRouter.post('/:id/actions', async (req: AuthedRequest, res, next) => {
 leaderTimeRouter.post('/notices/:id/read', async (req: AuthedRequest, res, next) => { try { res.json(await readLeaderTimeNotice(id(req.params.id), req.user!.uid)) } catch (error) { next(error) } })
 calendarRouter.get('/', async (req: AuthedRequest, res, next) => { try { res.json(await listCalendar(req.user!.uid, week(req.query.weekStart), z.enum(['personal', 'company']).parse(req.query.view ?? 'personal'), milestoneQueryFlag.parse(req.query.includeMilestones))) } catch (error) { next(error) } })
 calendarRouter.post('/', async (req: AuthedRequest, res, next) => { try { res.status(201).json(await writeCalendarEvent(req.user!.uid, req.body)) } catch (error) { next(error) } })
+calendarRouter.post('/tasks', async (req: AuthedRequest, res, next) => { try { res.status(201).json(await createCalendarTask(req.user!.uid, req.body)) } catch (error) { next(error) } })
+calendarRouter.post('/tasks/:id/cancel', async (req: AuthedRequest, res, next) => { try { res.json(await cancelPersonalCalendarTask(id(req.params.id), req.user!.uid, req.body)) } catch (error) { next(error) } })
 calendarRouter.post('/:id/save', async (req: AuthedRequest, res, next) => { try { res.json(await writeCalendarEvent(req.user!.uid, req.body, id(req.params.id))) } catch (error) { next(error) } })
 calendarRouter.post('/:id/cancel', async (req: AuthedRequest, res, next) => { try { res.json(await cancelCalendarEvent(id(req.params.id), req.user!.uid, req.body)) } catch (error) { next(error) } })
 calendarRouter.post('/tasks/:id/schedule', async (req: AuthedRequest, res, next) => { try { res.json(await writeTaskCalendarSchedule(id(req.params.id), req.user!.uid, req.body)) } catch (error) { next(error) } })

@@ -24,6 +24,7 @@ import { CapabilitySettingsPage } from './pages/CapabilitySettingsPage'
 import { ImBotsPage } from './pages/ImBotsPage'
 import { RadarDingTalkSettingsPage } from './pages/RadarDingTalkSettingsPage'
 import { NotFoundPage } from './pages/NotFoundPage'
+import { isAiPlatformAdminRole, isSystemAdminRole } from '../server/src/contracts/adminRoleContract'
 
 function ProtectedLayout() {
   const authenticated = useAuthStore((state) => state.isAuthenticated)
@@ -36,12 +37,12 @@ function ProtectedLayout() {
 
 function SystemAdminOnly({ children }: { children: React.ReactNode }) {
   const user = useAuthStore((state) => state.user)
-  return user?.permissionCodes?.includes('system.manage') || user?.role === '系统管理员' ? children : <Navigate to="/" replace />
+  return isSystemAdminRole(user?.role ?? '') ? children : <Navigate to="/" replace />
 }
 
 function AiPlatformAdminOnly({ children }: { children: React.ReactNode }) {
   const user = useAuthStore((state) => state.user)
-  return user?.permissionCodes?.includes('ai.configure') || ['系统管理员', 'AI平台管理员', 'AI 平台管理员'].includes(user?.role || '')
+  return isAiPlatformAdminRole(user?.role ?? '')
     ? children : <Navigate to="/" replace />
 }
 

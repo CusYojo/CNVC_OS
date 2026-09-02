@@ -115,6 +115,7 @@ import {
 } from './aiInvestmentRecommendationPptWorkflowService.js'
 import { getAccessibleProject } from './projectAccessService.js'
 import { fileKnowledgeAccessCondition, projectFileAccessCondition, readableAiTaskIds } from './projectFileAccessService.js'
+import { readableStoredText } from './textQualityService.js'
 
 export type AiTaskStatus = 'pending' | 'running' | 'succeeded' | 'failed' | 'cancelled'
 
@@ -526,8 +527,9 @@ async function sourcesForProject(
     : await Promise.all([knowledgeQuery.limit(limit), legacyFileQuery.limit(limit)])
   const knowledgeSources = rows.filter((row) =>
     !isDiagnosticEvidenceSourceName(row.sourceName)).map((row) => {
+    const content = readableStoredText(row.content)
     const cachedUrl = row.sourceType.startsWith('public_web')
-      ? row.content.match(/(?:来源网址|规范化\s*URL|页面\s*URL)[:：]\s*(https?:\/\/\S+)/i)?.[1]
+      ? content.match(/(?:来源网址|规范化\s*URL|页面\s*URL)[:：]\s*(https?:\/\/\S+)/i)?.[1]
       : undefined
     return {
       sourceType: row.sourceType,
@@ -536,15 +538,15 @@ async function sourcesForProject(
       chunkIndex: row.chunkIndex,
       versionOrDate: formatShanghaiDateKey(row.createdAt),
       locator: cachedUrl,
-      content: row.content,
+      content,
     }
-  })
+  }).filter((source) => Boolean(source.content))
   const contentHashes = new Set(knowledgeSources.map((source) =>
     createHash('sha256').update(source.content.trim()).digest('hex')))
   const legacyFileSources: EvidenceSource[] = []
   for (const row of legacyFileRows) {
     if (isDiagnosticEvidenceSourceName(row.fileName)) continue
-    const content = row.content.trim()
+    const content = readableStoredText(row.content)
     if (!content) continue
     const contentHash = createHash('sha256').update(content).digest('hex')
     if (contentHashes.has(contentHash)) continue
@@ -572,7 +574,7 @@ async function sourcesForProject(
   for (const file of requiredProjectFiles) {
     if (representedFileIds.has(file.sourceId)) continue
     const row = rowsById.get(file.sourceId)
-    const content = row?.contentText?.trim()
+    const content = readableStoredText(row?.contentText)
     if (!row || !content) {
       throw new Error(`项目资料缺少可研读正文，不能执行完整资料生成：${file.sourceName}`)
     }

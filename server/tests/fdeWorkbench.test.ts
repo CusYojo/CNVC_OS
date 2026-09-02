@@ -5,7 +5,7 @@ import { workbenchActionCounts, workbenchActions, workbenchProjectRank, workbenc
 import { shanghaiToday, weekStartFor } from '../src/contracts/fdeWeeklyPlanContract.js'
 
 const action = (fields: Partial<WorkbenchAction> = {}): WorkbenchAction => ({ id: 'task-1', projectId: 'p1', projectName: '项目', title: '行动', ownerUserId: 'alice', dueDate: '2026-08-28', status: '进行中', to: '/collaboration', ...fields })
-const project = (fields: Partial<WorkbenchProject> = {}): WorkbenchProject => ({ id: 'p1', name: '项目', owner: '同名人员', ownerUserId: 'alice', secretary: '秘书', secretaryId: null, classification: 'key', health: '正常', priority: 'P2', targetDate: null, related: true, actions: [], done: 0, total: 0, leaderParticipation: null, ...fields })
+const project = (fields: Partial<WorkbenchProject> = {}): WorkbenchProject => ({ id: 'p1', name: '项目', owner: '同名人员', ownerUserId: 'alice', secretary: '秘书', secretaryId: null, classification: 'key', health: '正常', priority: 'P2', targetDate: null, stage: '立项', stageSource: null, updatedAt: '2026-08-28T00:00:00.000Z', related: true, actions: [], done: 0, total: 0, leaderParticipation: null, ...fields })
 for (const [category, expected] of Object.entries({ institution_leader: 'leader', project_lead: 'lead', secretary: 'secretary', member: 'member', coordinator: 'coordinator', specialist: 'specialist', system_admin: 'admin' })) {
   test(`current role category maps ${category}`, () => assert.equal(workbenchView([{ category }]), expected))
 }
@@ -26,9 +26,9 @@ test('completed and closed rows are not personal pending work', () => {
   const rows = ['已完成', '已关闭', '已取消', '已归档'].map(status => action({ status }))
   assert.equal(workbenchActionCounts(rows, 'alice', '2026-08-28').count, 0)
 })
-test('dashboard actions only include open work due today through the next two days', () => {
+test('dashboard actions include today plus the following three-day preview', () => {
   const rows = [action(), action({ id: 'overdue', dueDate: '2026-08-27' }), action({ id: 'done', status: '已完成' }), action({ id: 'day-two', dueDate: '2026-08-30' }), action({ id: 'future', dueDate: '2026-08-31' }), action({ id: 'undated', dueDate: null })]
-  assert.deepEqual(workbenchActions(rows, '2026-08-28').map(t => t.id), ['task-1', 'day-two'])
+  assert.deepEqual(workbenchActions(rows, '2026-08-28').map(t => t.id), ['task-1', 'day-two', 'future'])
 })
 test('completed work is not shown in the three-day dashboard window', () => assert.equal(workbenchActions([action({ status: '已完成' })], '2026-08-28').length, 0))
 test('upcoming count has inclusive today to two-days boundary', () => {
@@ -69,10 +69,11 @@ test('configuration-only branch exits before business queries', () => {
   assert.match(source.slice(start, end), /system\.manage/); assert.match(source.slice(start, end), /return result/)
   assert.doesNotMatch(source.slice(start, end), /from\(projects\)|listLeaderTimes\(|listApprovalCenter\(/)
 })
-test('workbench uses persistent personal todo APIs and has no store-page totals or mock statistics', () => {
+test('workbench uses persistent personal todo APIs and renders the four daily regions without metric cards', () => {
   assert.doesNotMatch(page, /useAppStore|score\s*-/)
   assert.match(page, /apiPost<PersonalTodo>\('\/todos'/); assert.match(page, /apiPatch<PersonalTodo>/); assert.match(page, /apiDelete/)
-  assert.match(page, /最近三天任务/); assert.match(page, /工作待办/); assert.match(page, /项目状态/); assert.match(page, /metric\.value \?\? '—'/)
+  for (const label of ['任务时间轴', '今日待办', '未来三天', '重点项目风险']) assert.match(page, new RegExp(label))
+  assert.doesNotMatch(page, /metric\.value \?\? '—'|className="metric-grid"/)
   assert.match(source, /project\.classification === 'key'/)
 })
 test('reload clears data and gates late responses and changed identity', () => {

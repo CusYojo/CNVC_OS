@@ -6,6 +6,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useAppStore } from '../store/useAppStore'
 import { useAuthStore } from '../store/useAuthStore'
+import { isAiPlatformAdminRole } from '../../server/src/contracts/adminRoleContract'
 import { Button, Modal } from '../components/ui'
 import {
   AiQuickActions,
@@ -36,6 +37,7 @@ import {
 } from '../hooks/useJwAgent'
 import { formatShanghaiDateTime, shanghaiDateKey } from '../lib/dateTime'
 import type { Project } from '../types'
+import { aiBusinessErrorMessage } from '../lib/aiBusinessError'
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const AI_UPLOAD_ACCEPT = '.pdf,.ppt,.pptx,.xlsx,.xls,.csv,.docx,.txt,.md,.markdown,.png,.jpg,.jpeg,.zip'
@@ -274,7 +276,7 @@ function ProjectPicker({
                 onClick={() => selectProject(project.id)}
                 className={`flex w-full items-start gap-3 rounded-lg px-3 py-2.5 text-left transition ${project.id === value ? 'bg-brand-50 text-brand-700' : 'text-slate-700 hover:bg-slate-50'}`}
               >
-                <span className={`mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-md text-[10px] font-semibold ${project.id === value ? 'bg-brand-100 text-brand-700' : 'bg-slate-100 text-slate-500'}`}>
+                <span className={`mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-md text-xs font-semibold ${project.id === value ? 'bg-brand-100 text-brand-700' : 'bg-slate-100 text-slate-500'}`}>
                   {(project.name || '项目').slice(0, 2)}
                 </span>
                 <span className="min-w-0 flex-1">
@@ -282,7 +284,7 @@ function ProjectPicker({
                     <span className="truncate text-sm font-medium">{project.name}</span>
                     {project.id === value && <Check className="h-4 w-4 shrink-0 text-brand-600" />}
                   </span>
-                  <span className="mt-0.5 block truncate text-[11px] text-slate-400">
+                  <span className="mt-0.5 block truncate text-xs text-slate-400">
                     {[project.companyName, project.industry, project.stage].filter(Boolean).join(' · ') || '暂无项目标签'}
                   </span>
                 </span>
@@ -290,7 +292,7 @@ function ProjectPicker({
             ))}
             {!filteredProjects.length && <div className="px-3 py-8 text-center text-xs text-slate-400">没有找到匹配的项目</div>}
           </div>
-          <div className="border-t border-slate-100 px-3 py-2 text-[11px] text-slate-400">共 {filteredProjects.length} 个匹配项目 · 回车选择第一项</div>
+          <div className="border-t border-slate-100 px-3 py-2 text-xs text-slate-400">共 {filteredProjects.length} 个匹配项目 · 回车选择第一项</div>
         </div>,
         document.body,
       )}
@@ -407,18 +409,18 @@ function ToolStep({ part }: { part: SafeAgentPart }) {
             ? <AlertCircle className="h-3.5 w-3.5 shrink-0 text-rose-500" />
             : <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-500" />}
         <span className={`shrink-0 font-medium ${labelColor}`}>{label}{running ? '…' : ''}</span>
-        {preview && <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-slate-400" title={preview}>{preview}</span>}
+        {preview && <span className="min-w-0 flex-1 truncate font-mono text-xs text-slate-400" title={preview}>{preview}</span>}
         <ChevronRight className={`ml-auto h-3.5 w-3.5 shrink-0 text-slate-300 transition-transform ${expanded ? 'rotate-90' : ''}`} />
       </button>
       {expanded && (
         <div className="space-y-2 border-t border-black/5 px-3 py-2">
           {part.input != null && (
-            <pre className="overflow-x-auto whitespace-pre-wrap break-all rounded bg-white/70 p-2 text-[11px] leading-5 text-slate-500">{safeStringify(part.input)}</pre>
+            <pre className="overflow-x-auto whitespace-pre-wrap break-all rounded bg-white/70 p-2 text-xs leading-5 text-slate-500">{safeStringify(part.input)}</pre>
           )}
           {isError
-            ? <pre className="overflow-x-auto whitespace-pre-wrap break-all rounded bg-rose-50 p-2 text-[11px] leading-5 text-rose-600">{toSafeText(part.errorText, 4000) || '执行出错'}</pre>
+            ? <pre className="overflow-x-auto whitespace-pre-wrap break-all rounded bg-rose-50 p-2 text-xs leading-5 text-rose-600">{toSafeText(part.errorText, 4000) || '执行出错'}</pre>
             : part.state === 'output-available' && outputText.trim() !== '' && (
-              <pre className="overflow-x-auto whitespace-pre-wrap break-all rounded bg-white/70 p-2 text-[11px] leading-5 text-slate-500">{outputText}</pre>
+              <pre className="overflow-x-auto whitespace-pre-wrap break-all rounded bg-white/70 p-2 text-xs leading-5 text-slate-500">{outputText}</pre>
             )}
         </div>
       )}
@@ -475,7 +477,7 @@ function displayUserMessageText(message: SafeAgentMessage): string {
 function displayUserMessageSkills(message: SafeAgentMessage): string[] {
   const match = extractTextParts(message).match(/【本轮指定技能】([^\n]+)/)
   return match
-    ? match[1].split('、').map((item) => item.trim()).filter(Boolean)
+    ? match[1].split('、').map((item) => item.replace(/（[^）]+）/g, '').trim()).filter(Boolean)
     : []
 }
 
@@ -505,8 +507,8 @@ function MessageRow({ message }: { message: SafeAgentMessage }) {
           {skills.length > 0 && (
             <div className="flex flex-wrap justify-end gap-1" aria-label="本条消息使用的技能">
               {skills.map((skill) => (
-                <span key={skill} className="inline-flex items-center gap-1 rounded-full border border-brand-200 bg-brand-50 px-2 py-0.5 text-[10px] font-medium text-brand-700">
-                  <Boxes className="h-2.5 w-2.5" />使用技能 · {skill}
+                <span key={skill} className="inline-flex items-center gap-1 rounded-full border border-brand-200 bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-700">
+                  <Boxes className="h-2.5 w-2.5" />使用工具 · {skill}
                 </span>
               ))}
             </div>
@@ -594,7 +596,7 @@ function AgentInteractionCard({
         {interaction.questions.map((question) => (
           <fieldset key={question.id} disabled={submitting}>
             <legend className="text-sm font-medium text-slate-800">
-              <span className="mr-2 rounded bg-white px-1.5 py-0.5 text-[10px] text-brand-600">{question.header}</span>
+              <span className="mr-2 rounded bg-white px-1.5 py-0.5 text-xs text-brand-600">{question.header}</span>
               {question.question}
             </legend>
             <div className="mt-2 grid gap-2 sm:grid-cols-2">
@@ -620,7 +622,7 @@ function AgentInteractionCard({
                       />
                       <span>
                         <span className="block text-xs font-medium text-slate-700">{option.label}</span>
-                        {option.description && <span className="mt-0.5 block text-[11px] leading-4 text-slate-500">{option.description}</span>}
+                        {option.description && <span className="mt-0.5 block text-xs leading-4 text-slate-500">{option.description}</span>}
                       </span>
                     </span>
                   </label>
@@ -855,7 +857,7 @@ function PptTaskBoard({ parts, busy }: { parts: SafeAgentPart[]; busy: boolean }
         <span className="text-sm font-semibold text-brand-800">PPT 生成任务进行中</span>
         <span className="ml-auto font-mono text-xs text-brand-600">已用时 {mm}:{ss}</span>
       </div>
-      <p className="mt-1 text-[11px] leading-5 text-brand-500">PPT 生成通常需要 3–8 分钟，取决于页数与图像网关负载，请耐心等待，期间可查看下方工具调用进度。</p>
+      <p className="mt-1 text-xs leading-5 text-brand-500">PPT 生成通常需要 3–8 分钟，取决于页数与图像网关负载，请耐心等待，期间可查看下方工具调用进度。</p>
     </div>
   )
 }
@@ -880,6 +882,7 @@ function Chat() {
   const projects = useAppStore((state) => state.projects)
   const files = useAppStore((state) => state.files)
   const { showToast } = useToast()
+  const showAiDiagnostics = useAuthStore(state => isAiPlatformAdminRole(state.user?.role ?? ''))
   const LS_LAST_PROJECT = 'cybernaut-ai-last-project'
   const LS_LAST_CONV = 'cybernaut-ai-last-conv'
   // 项目优先级: URL ?project= > 上次选的(localStorage) > 空（等待 store 加载）
@@ -1005,6 +1008,14 @@ function Chat() {
       .filter((item): item is AvailableCapability => Boolean(item)),
     [activeSkillIds, availableCapabilities],
   )
+  const businessSkillName = (item: AvailableCapability) => ({
+    'generate-investment-compliance-note': '合规说明',
+    'draft-investment-proposal': '投资提案',
+    'investment-committee-ppt': '投资建议书',
+    'draft-due-diligence-report': '尽调报告',
+    'draft-investment-qa': '项目问答',
+    'generate-document-from-template': '上传模板',
+  }[item.capabilityKey] ?? item.name)
 
   const slashCapabilities = useMemo(() => {
     const query = getSlashCommandQuery(input)?.trim().toLocaleLowerCase() ?? ''
@@ -1441,7 +1452,7 @@ function Chat() {
     if (busy || uploading || submitLockRef.current) return false
     if (quickSkill) {
       if (!UUID_PATTERN.test(quickSkill.projectId) || quickSkill.projectId !== currentSession?.projectId) {
-        showToast('快捷 Skill 与当前会话项目不一致，请重新选择', 'error')
+        showToast('快捷工具与当前会话项目不一致，请重新选择', 'error')
         return false
       }
       const unavailableUploads = uploads.filter((upload) => !upload.fileId)
@@ -1578,7 +1589,7 @@ function Chat() {
       if (quickSkill) setSelectedQuickSkill(null)
       return true
     } catch (err) {
-      showToast(`发送失败：${(err as Error).message}`, 'error')
+      showToast(aiBusinessErrorMessage(err), 'error')
       // 用户可能已开始输入下一条草稿，失败恢复时不能覆盖新内容。
       setInput((draft) => draft.trim() ? draft : clean)
       return false
@@ -1897,8 +1908,8 @@ function Chat() {
           </Button>
         </div>
         <div className="flex-1 overflow-y-auto px-3">
-          <p className="px-2 py-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">会话历史</p>
-          {sessions.length === 0 && <p className="px-2 py-2 text-[11px] text-slate-400">暂无会话</p>}
+          <p className="px-2 py-2 text-xs font-semibold uppercase tracking-wider text-slate-400">会话历史</p>
+          {sessions.length === 0 && <p className="px-2 py-2 text-xs text-slate-400">暂无会话</p>}
           {sessions.map((s) => (
             <div
               key={s.rowId}
@@ -1940,7 +1951,6 @@ function Chat() {
               </div>
             </div>
           ))}
-          <p className="px-2 pt-3 text-[10px] leading-4 text-slate-400">点"新建会话"开始新对话；同一会话内 AI 记住上下文，刷新不丢。</p>
         </div>
       </aside>
 
@@ -1959,9 +1969,9 @@ function Chat() {
               </span>
             </div>
           )}
-          {(agent.runtime || reportTaskUsage.taskCount > 0) && (
+          {showAiDiagnostics && (agent.runtime || reportTaskUsage.taskCount > 0) && (
             <div
-              className="ml-auto rounded-lg border border-slate-200 bg-white px-3 py-2 text-[11px] text-slate-500"
+              className="ml-auto rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-500"
               aria-label="模型用量与上下文压缩状态"
               title={agent.runtime?.contextCompaction.lastError || undefined}
             >
@@ -2122,7 +2132,7 @@ function Chat() {
               </div>
             )}
             {uploadProgress && uploadProgress.total > 0 && (
-              <div className="mb-1 flex items-center gap-2 px-1 text-[11px] text-brand-600">
+              <div className="mb-1 flex items-center gap-2 px-1 text-xs text-brand-600">
                 <RefreshCw className="h-3 w-3 animate-spin" />
                 上传中 {uploadProgress.done}/{uploadProgress.total}…
               </div>
@@ -2130,7 +2140,7 @@ function Chat() {
             {uploads.length > 0 && (
               <div className="mb-1 flex flex-wrap gap-1.5 px-1">
                 {uploads.map((u) => (
-                  <span key={u.path} className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-1 text-[11px] text-slate-600">
+                  <span key={u.path} className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-600">
                     <FileText className="h-3 w-3" />{u.name}{u.rag && <span className="text-emerald-600">·已入库</span>}
                     <button onClick={() => removeUpload(u.path)} className="ml-0.5 text-slate-400 hover:text-rose-500" aria-label="移除">×</button>
                   </span>
@@ -2138,10 +2148,10 @@ function Chat() {
               </div>
             )}
             {selectedQuickSkill && (
-              <div className="mb-1 flex flex-wrap gap-1.5 px-1" aria-label="本轮快捷 Skill">
-                <span className="inline-flex items-center gap-1.5 rounded-full border border-brand-300 bg-brand-50 px-2.5 py-1 text-[11px] font-medium text-brand-700">
+              <div className="mb-1 flex flex-wrap gap-1.5 px-1" aria-label="本轮快捷工具">
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-brand-300 bg-brand-50 px-2.5 py-1 text-xs font-medium text-brand-700">
                   <Boxes className="h-3 w-3" />
-                  Skill · {selectedQuickSkill.skillName}
+                  {selectedQuickSkill.actionLabel}
                   {selectedQuickSkill.customTemplateName && (
                     <span className="max-w-44 truncate text-brand-500" title={selectedQuickSkill.customTemplateName}>
                       · {selectedQuickSkill.customTemplateName}
@@ -2151,22 +2161,22 @@ function Chat() {
                     type="button"
                     onClick={() => setSelectedQuickSkill(null)}
                     className="ml-0.5 rounded-full text-brand-400 hover:bg-brand-100 hover:text-brand-700"
-                    aria-label={`取消快捷 Skill ${selectedQuickSkill.skillName}`}
+                    aria-label={`取消快捷工具 ${selectedQuickSkill.actionLabel}`}
                   >×</button>
                 </span>
               </div>
             )}
             {activeSkills.length > 0 && (
-              <div className="mb-1 flex flex-wrap gap-1.5 px-1" aria-label="当前会话已启用技能">
+              <div className="mb-1 flex flex-wrap gap-1.5 px-1" aria-label="当前会话已启用工具">
                 {activeSkills.map((item) => (
-                  <span key={item.id} className="inline-flex items-center gap-1.5 rounded-full border border-brand-200 bg-brand-50 px-2.5 py-1 text-[11px] font-medium text-brand-700">
+                  <span key={item.id} className="inline-flex items-center gap-1.5 rounded-full border border-brand-200 bg-brand-50 px-2.5 py-1 text-xs font-medium text-brand-700">
                     <Boxes className="h-3 w-3" />
-                    {item.name}
+                    {businessSkillName(item)}
                     <button
                       type="button"
                       onClick={() => setActiveSkillIds((ids) => ids.filter((id) => id !== item.id))}
                       className="ml-0.5 rounded-full text-brand-400 hover:bg-brand-100 hover:text-brand-700"
-                      aria-label={`移除技能 ${item.name}`}
+                      aria-label={`移除工具 ${businessSkillName(item)}`}
                     >
                       <X className="h-3 w-3" />
                     </button>
@@ -2182,7 +2192,7 @@ function Chat() {
                     autoFocus
                     value={capabilitySearch}
                     onChange={(event) => setCapabilitySearch(event.target.value)}
-                    placeholder="搜索可用技能"
+                    placeholder="搜索可用工具"
                     className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-slate-400"
                   />
                   <button
@@ -2207,10 +2217,10 @@ function Chat() {
                         <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${selected ? 'bg-brand-500' : 'bg-slate-300'}`} />
                         <span className="min-w-0 flex-1">
                           <span className="flex items-center gap-2">
-                            <span className="truncate text-sm font-medium text-slate-800">{item.name}</span>
-                            <span className="font-mono text-[10px] text-slate-400">/{item.capabilityKey}</span>
+                            <span className="truncate text-sm font-medium text-slate-800">{businessSkillName(item)}</span>
+                            {showAiDiagnostics && <span className="font-mono text-xs text-slate-400">/{item.capabilityKey}</span>}
                           </span>
-                          <span className="mt-0.5 block truncate text-[11px] text-slate-500">{item.description || '暂无技能说明'}</span>
+                          <span className="mt-0.5 block truncate text-xs text-slate-500">{item.description || '暂无技能说明'}</span>
                         </span>
                         {selected && <Check className="mt-0.5 h-4 w-4 shrink-0 text-brand-600" />}
                       </button>
@@ -2218,16 +2228,16 @@ function Chat() {
                   })}
                   {filteredCapabilities.length === 0 && <div className="px-3 py-8 text-center text-xs text-slate-400">没有找到匹配的技能</div>}
                 </div>
-                <div className="flex items-center justify-between border-t border-slate-100 px-3 py-2 text-[11px] text-slate-400">
-                  <span>已选 {activeSkillIds.length} 个技能</span>
+                <div className="flex items-center justify-between border-t border-slate-100 px-3 py-2 text-xs text-slate-400">
+                  <span>已选 {activeSkillIds.length} 个工具</span>
                   {capabilitySaving && <span>正在保存…</span>}
                 </div>
               </div>
             )}
             {slashMenuOpen && slashCapabilities.length > 0 && (
               <div data-ai-skill-menu="true" className="absolute inset-x-2 bottom-[calc(100%+8px)] z-30 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl">
-                <div className="flex items-center justify-between border-b border-slate-100 px-3 py-2 text-[11px] text-slate-400">
-                  <span>可用技能</span>
+                <div className="flex items-center justify-between border-b border-slate-100 px-3 py-2 text-xs text-slate-400">
+                  <span>可用工具</span>
                   <span>↑↓ 选择 · Enter 使用 · Esc 关闭</span>
                 </div>
                 <div className="max-h-64 overflow-y-auto p-1.5">
@@ -2244,11 +2254,11 @@ function Chat() {
                         <span className={`mt-1 h-2 w-2 shrink-0 rounded-full ${selected ? 'bg-brand-500' : 'bg-slate-300'}`} />
                         <span className="min-w-0 flex-1">
                           <span className="flex items-center gap-2">
-                            <span className="truncate text-sm font-medium text-slate-800">{item.name}</span>
+                            <span className="truncate text-sm font-medium text-slate-800">{businessSkillName(item)}</span>
                             {selected && <Check className="h-3.5 w-3.5 shrink-0 text-brand-600" />}
                           </span>
-                          <span className="mt-0.5 block truncate font-mono text-[10px] text-slate-400">/{item.capabilityKey}</span>
-                          {item.description && <span className="mt-0.5 block truncate text-[11px] text-slate-500">{item.description}</span>}
+                          {showAiDiagnostics && <span className="mt-0.5 block truncate font-mono text-xs text-slate-400">/{item.capabilityKey}</span>}
+                          {item.description && <span className="mt-0.5 block truncate text-xs text-slate-500">{item.description}</span>}
                         </span>
                       </button>
                     )
@@ -2310,16 +2320,16 @@ function Chat() {
                 : '向 AI 询问机构知识库…'}
             />
             <input ref={fileInputRef} type="file" multiple className="hidden" onChange={onPickFiles} accept={AI_UPLOAD_ACCEPT} />
-            <div className="flex items-center justify-between px-1"><div className="flex min-w-0 items-center gap-2 text-[10px] text-slate-400"><button onClick={() => fileInputRef.current?.click()} disabled={uploading} title="上传文件（PDF/PPT/Excel/CSV/ZIP 等，agent 可直接读）" className="grid h-6 w-6 shrink-0 place-items-center rounded text-slate-400 hover:bg-slate-100 hover:text-brand-600 disabled:opacity-50">{uploading ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Paperclip className="h-3.5 w-3.5" />}</button><button data-ai-capability-trigger="true" type="button" onClick={() => { setCapabilitySearch(''); setSlashMenuOpen(false); setCapabilityOpen((open) => !open) }} disabled={!currentConversationRowId || !availableCapabilities.some((item) => item.kind === 'skill') || busy} title="选择当前会话持续使用的技能" aria-expanded={capabilityOpen} className={`inline-flex h-6 shrink-0 items-center gap-1 rounded px-1.5 hover:bg-slate-100 disabled:opacity-40 ${activeSkillIds.length ? 'bg-brand-50 text-brand-700' : 'text-slate-400 hover:text-brand-600'}`}><Boxes className="h-3.5 w-3.5" /><span>能力{activeSkillIds.length ? ` ${activeSkillIds.length}` : ''}</span></button><CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-500" /><span className="truncate">Enter 发送 · Shift + Enter 换行</span></div>{busy
+            <div className="flex items-center justify-between px-1"><div className="flex min-w-0 items-center gap-2 text-xs text-slate-400"><button onClick={() => fileInputRef.current?.click()} disabled={uploading} title="上传文件" className="grid h-6 w-6 shrink-0 place-items-center rounded text-slate-400 hover:bg-slate-100 hover:text-brand-600 disabled:opacity-50">{uploading ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Paperclip className="h-3.5 w-3.5" />}</button><button data-ai-capability-trigger="true" type="button" onClick={() => { setCapabilitySearch(''); setSlashMenuOpen(false); setCapabilityOpen((open) => !open) }} disabled={!currentConversationRowId || !availableCapabilities.some((item) => item.kind === 'skill') || busy} title="选择当前会话持续使用的工具" aria-expanded={capabilityOpen} className={`inline-flex h-6 shrink-0 items-center gap-1 rounded px-1.5 hover:bg-slate-100 disabled:opacity-40 ${activeSkillIds.length ? 'bg-brand-50 text-brand-700' : 'text-slate-400 hover:text-brand-600'}`}><Boxes className="h-3.5 w-3.5" /><span>工具{activeSkillIds.length ? ` ${activeSkillIds.length}` : ''}</span></button><CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-500" /><span className="truncate">Enter 发送 · Shift + Enter 换行</span></div>{busy
               ? <button aria-label="停止" title="停止生成" onClick={stop} className="grid h-8 w-8 place-items-center rounded-lg bg-rose-500 text-white hover:bg-rose-600"><Square className="h-3.5 w-3.5" /></button>
               : <button aria-label="发送" title="发送（Enter）" disabled={sending || uploading || (!selectedQuickSkill && !input.trim() && uploads.length === 0)} onClick={() => { void send() }} className="grid h-8 w-8 place-items-center rounded-lg bg-brand-600 text-white disabled:cursor-not-allowed disabled:bg-slate-200"><Send className="h-4 w-4" /></button>}</div>
           </div>
           {agentError && (
-            <div className="mt-2 flex items-center gap-2 rounded-lg border border-rose-100 bg-rose-50 px-3 py-2 text-[11px] text-rose-600">
+            <div className="mt-2 flex items-center gap-2 rounded-lg border border-rose-100 bg-rose-50 px-3 py-2 text-xs text-rose-600">
               <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-              <span className="min-w-0 flex-1">{agentError.message}</span>
-              <span className="shrink-0 font-mono text-rose-400">{agentError.errorId}</span>
-              <button
+              <span className="min-w-0 flex-1">{aiBusinessErrorMessage(agentError.message)}</span>
+              {showAiDiagnostics && <details className="shrink-0"><summary className="cursor-pointer">查看详情</summary><p className="mt-2 max-w-md break-words font-mono text-xs">{agentError.message} · {agentError.errorId}</p></details>}
+              {showAiDiagnostics && <button
                 type="button"
                 title="复制错误编号"
                 aria-label="复制错误编号"
@@ -2327,7 +2337,7 @@ function Chat() {
                 className="rounded p-1 text-rose-400 hover:bg-rose-100 hover:text-rose-600"
               >
                 <Copy className="h-3.5 w-3.5" />
-              </button>
+              </button>}
             </div>
           )}
         </div>
@@ -2335,7 +2345,7 @@ function Chat() {
 
       <aside className="hidden w-[300px] shrink-0 flex-col border-l border-slate-200 bg-slate-50/60 xl:flex">
         <div className="border-b border-slate-200 p-3">
-          <div className="rounded-lg bg-brand-50 p-3"><p className="text-sm font-medium text-brand-800">{scope === 'project' ? currentProject?.name : '全局知识库'}</p><p className="mt-1 text-[11px] text-brand-600">{scope === 'project' ? `${projectFiles.length} 份项目资料可检索` : '机构知识库可检索'}</p></div>
+          <div className="rounded-lg bg-brand-50 p-3"><p className="text-sm font-medium text-brand-800">{scope === 'project' ? currentProject?.name : '全局知识库'}</p><p className="mt-1 text-xs text-brand-600">{scope === 'project' ? `${projectFiles.length} 份项目资料可检索` : '机构知识库可检索'}</p></div>
         </div>
         <AiErrorBoundary level="section" title="正式交付物区域显示异常" resetKey={`${projectId}:${artifactRefreshKey}`}>
           <AiArtifactCenter
@@ -2384,7 +2394,7 @@ function Chat() {
               onChange={setNewSessionProjectId}
               disabled={creatingSession}
             />
-            <span className="mt-1 block text-[11px] text-slate-400">可按项目名称、公司名称、行业或阶段搜索。</span>
+            <span className="mt-1 block text-xs text-slate-400">可按项目名称、公司名称、行业或阶段搜索。</span>
           </div>
           <label className="block">
             <span className="label">模型</span>
@@ -2399,7 +2409,7 @@ function Chat() {
                 <option key={model.id} value={model.id}>{model.displayName}{model.isDefault ? '（默认）' : ''}</option>
               ))}
             </select>
-            <span className="mt-1 block text-[11px] text-slate-400">仅显示管理员已启用且当前账号有权使用的模型。</span>
+            <span className="mt-1 block text-xs text-slate-400">仅显示管理员已启用且当前账号有权使用的模型。</span>
           </label>
         </div>
       </Modal>

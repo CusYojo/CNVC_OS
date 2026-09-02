@@ -66,7 +66,7 @@ interface AppState {
     governance: { ownerUserId: string; assignments: Array<{ duty: 'boss' | 'project_manager' | 'legal' | 'finance'; userId: string }> }
   }) => Promise<Project>
   updateProject: (projectId: string, patch: Partial<Project>) => Promise<Project>
-  deleteProject: (projectId: string) => Promise<void>
+  deleteProject: (projectId: string, confirmation: string) => Promise<void>
   pinProject: (projectId: string, pinned: boolean) => Promise<void>
   classifyProject: (projectId: string, toClassification: ProjectClassification, reason: string) => Promise<Project>
   moveProjectStage: (projectId: string, nextStage: ProjectStage, comment: string) => void
@@ -252,10 +252,11 @@ export const useAppStore = create<AppState>()(
           throw e
         }
       },
-      deleteProject: async (projectId) => {
+      deleteProject: async (projectId, confirmation) => {
         const proj = get().projects.find((p) => p.id === projectId)
         try {
-          await apiDelete(`/projects/${projectId}`)
+          const expectedVersion = requiredVersion(proj, '项目')
+          await apiDelete(`/projects/${projectId}`, { confirmation, expectedVersion })
           set((state) => ({ projects: state.projects.filter((p) => p.id !== projectId) }))
           get().addAudit('项目管理', '删除项目(连带知识库)', proj?.name ?? projectId)
         } catch (e) {

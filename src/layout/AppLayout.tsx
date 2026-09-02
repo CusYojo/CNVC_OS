@@ -15,6 +15,7 @@ import {
   MessagesSquare,
   RadioTower,
   Bell,
+  AlertTriangle,
   ChevronLeft,
   FileText,
   Moon,
@@ -28,16 +29,16 @@ import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-do
 import { UnifiedProjectCreateModal } from '../components/UnifiedProjectCreateModal'
 import { Drawer, EmptyState, Modal, SearchInput } from '../components/ui'
 import { getSystemWorkspace, systemWorkspaces } from '../lib/systemWorkspaces'
-import { shanghaiToday, shiftDate } from '../../server/src/contracts/fdeWeeklyPlanContract'
 import './fde-shell.css'
+import { isAiPlatformAdminRole, isSystemAdminRole } from '../../server/src/contracts/adminRoleContract'
 
 const primaryNav = [
   { to: '/', label: '工作台', icon: Gauge },
   { to: '/ai', label: 'AI 智能助手', icon: Bot },
   { to: '/projects', label: '项目中心', icon: FolderKanban },
-  { to: '/collaboration', label: '协同中心', icon: BriefcaseBusiness },
+  { to: '/collaboration', label: '任务与日历', icon: BriefcaseBusiness },
   { to: '/workflow', label: '审批与办公', icon: ClipboardCheck },
-  { to: '/knowledge', label: '数据与知识', icon: BookOpen },
+  { to: '/knowledge', label: '知识库', icon: BookOpen },
 ]
 const navSections = [
   {
@@ -56,11 +57,9 @@ const navSections = [
   },
 ]
 
-function canSeeNavItem(item: { to: string; label: string; roles?: readonly string[] }, role: string, permissionCodes: string[] = []): boolean {
+function canSeeNavItem(item: { to: string; label: string; roles?: readonly string[] }, role: string, _permissionCodes: string[] = []): boolean {
   if (!item.roles) return true
-  const permission = item.to.split('?')[0] === '/system' || item.to === '/system/integrations/radar-dingtalk'
-    ? 'system.manage' : item.to.startsWith('/system/ai/') ? 'ai.configure' : item.to.startsWith('/system/integrations/') ? 'im.manage' : ''
-  return (!!permission && permissionCodes.includes(permission)) || item.roles.includes(role)
+  return item.roles.includes(role)
 }
 
 function isSystemNavItemActive(item: { to: string }, pathname: string, search: string): boolean {
@@ -73,15 +72,14 @@ export function AppLayout() {
   const navigate = useNavigate()
   const location = useLocation()
   const [collapsed, setCollapsed] = useState(false)
-  const [narrow, setNarrow] = useState(() => typeof window !== 'undefined' && window.matchMedia('(max-width: 720px)').matches)
+  const [narrow, setNarrow] = useState(() => typeof window !== 'undefined' && window.matchMedia('(max-width: 900px)').matches)
   useEffect(() => {
-    const media = window.matchMedia('(max-width: 720px)')
+    const media = window.matchMedia('(max-width: 900px)')
     const update = () => setNarrow(media.matches)
     update(); media.addEventListener('change', update)
     return () => media.removeEventListener('change', update)
   }, [])
-  const responsibilityView = location.pathname === '/responsibility' || location.pathname === '/knowledge' && new URLSearchParams(location.search).get('view') === 'responsibility'
-  const navigationCollapsed = collapsed || responsibilityView && narrow
+  const navigationCollapsed = collapsed || narrow
   const [showProfile, setShowProfile] = useState(false)
   const [showCreate, setShowCreate] = useState(false)
   const [dark, setDark] = useState(false)
@@ -93,12 +91,23 @@ export function AppLayout() {
   const projects = useAppStore((state) => state.projects)
   const files = useAppStore((state) => state.files)
   const todos = useAppStore((state) => state.todos)
-  const today = shanghaiToday()
-  const threeDayEndKey = shiftDate(today, 2)
-  const pendingTodos = todos.filter(item => item.ownerUserId === currentUser.id && Boolean(item.dueDate) && item.dueDate! >= today && item.dueDate! <= threeDayEndKey && !['已完成', '已关闭', '已取消', '已归档'].includes(item.status)).sort((left, right) => `${left.dueDate}${left.dueTime ?? ''}`.localeCompare(`${right.dueDate}${right.dueTime ?? ''}`))
+  const meetings = useAppStore((state) => state.meetings)
+  const approvalRequests = useAppStore((state) => state.approvalRequests)
+  const risks = useAppStore((state) => state.risks)
+  const notifications = useAppStore((state) => state.notifications)
+  const approvalMessages = approvalRequests.filter(request => {
+    if (request.status !== '审批中') return false
+    const currentNode = request.nodes.find(node => node.id === request.currentNodeId) ?? request.nodes.find(node => ['待审批', '会签中'].includes(node.status))
+    return currentNode?.approverUserIds?.includes(currentUser.id)
+  }).map(request => ({ id: `approval:${request.id}`, kind: '审批', title: request.title, detail: `${request.projectName} · ${request.currentNodeName}`, path: `/workflow?view=project&project=${request.projectId}&request=${request.id}`, priority: request.priority === '紧急' ? 0 : 1 }))
+  const warningMessages = risks.filter(risk => risk.level === '高' && !['已关闭', '误报'].includes(risk.status)).map(risk => ({ id: `risk:${risk.id}`, kind: '预警', title: risk.type, detail: `${risk.projectName} · ${risk.description}`, path: `/risks?project=${risk.projectId}`, priority: 0 }))
+  const collaborationMessages = todos.filter(item => item.ownerUserId === currentUser.id && item.type === '通知' && !['已完成', '已关闭', '已取消', '已归档'].includes(item.status)).map(item => ({ id: `interaction:${item.id}`, kind: '协作', title: item.title, detail: item.projectName || '协作消息', path: item.projectId ? `/projects/${item.projectId}?tab=collaboration` : '/collaboration', priority: item.priority === '高' ? 0 : 2 }))
+  const meetingMessages = meetings.filter(item => item.unreadNoticeId).map(item => ({ id: `meeting:${item.id}`, kind: '会议', title: item.title, detail: `${item.projectName} · ${item.meetingTime.slice(0, 16).replace('T', ' ')}`, path: `/meetings?meeting=${item.id}`, priority: 1 }))
+  const storedMessages = notifications.filter(item => !item.isRead).map(item => ({ id: `notice:${item.id}`, kind: item.type || '消息', title: item.title, detail: item.content, path: '/collaboration', priority: 2 }))
+  const messageItems = [...approvalMessages, ...warningMessages, ...meetingMessages, ...collaborationMessages, ...storedMessages].sort((left, right) => left.priority - right.priority)
   const pageTitle = location.pathname.startsWith('/system') ? '系统管理'
-    : location.pathname === '/committee' || location.pathname === '/meetings' ? '协同中心'
-      : location.pathname === '/responsibility' ? '数据与知识'
+    : location.pathname === '/committee' || location.pathname === '/meetings' ? '任务与日历'
+      : location.pathname === '/responsibility' ? '知识库'
         : primaryNav.find(item => item.to === '/' ? location.pathname === '/' : location.pathname.startsWith(item.to))?.label ?? '投资工作空间'
   const query = search.trim().toLowerCase()
   const matchedProjects = query ? projects.filter(item => item.lifecycle !== 'deleted' && `${item.name} ${item.companyName}`.toLowerCase().includes(query)).slice(0, 8) : []
@@ -127,7 +136,7 @@ export function AppLayout() {
         <nav>
           {!navigationCollapsed && <div className="fde-nav-label">统一工作空间</div>}
           {primaryNav.map((item) => <NavLink key={item.to} to={item.to} end={item.to === '/'} title={item.label} className={({ isActive }) => `fde-nav-item${isActive ? ' active' : ''}`}><item.icon className="fde-nav-icon" />{!navigationCollapsed && <span>{item.label}</span>}</NavLink>)}
-          {navSections.filter((section) => section.label !== '系统管理' || section.children.some((item) => canSeeNavItem(item, currentUser.role, currentUser.permissionCodes))).map((section) => {
+          {navSections.filter((section) => section.label !== '系统管理').map((section) => {
             const visibleChildren = section.children.filter((item) => canSeeNavItem(item, currentUser.role, currentUser.permissionCodes))
             const sectionActive = visibleChildren.some((item) => location.pathname === item.to.split('?')[0])
             return <NavLink key={section.label} to={visibleChildren[0].to} title={section.label} className={`fde-nav-item${sectionActive ? ' active' : ''}`}>
@@ -145,7 +154,7 @@ export function AppLayout() {
           <div className="fde-top-actions">
             <button className="fde-quick-create" onClick={() => setShowCreate(true)}><Plus /><span>快速新建</span></button>
             <button className="fde-icon-button" aria-label="切换深浅主题" aria-pressed={dark} onClick={() => setDark(value => !value)}>{dark ? <Sun /> : <Moon />}</button>
-            <button className="fde-icon-button fde-notification-button" aria-label={`查看待办，${pendingTodos.length} 项`} onClick={() => setShowNotifications(true)}><Bell />{pendingTodos.length > 0 && <i>{pendingTodos.length > 99 ? '99+' : pendingTodos.length}</i>}</button>
+            <button className="fde-icon-button fde-notification-button" aria-label={`查看消息与预警，${messageItems.length} 项`} onClick={() => setShowNotifications(true)}><Bell />{messageItems.length > 0 && <i>{messageItems.length > 99 ? '99+' : messageItems.length}</i>}</button>
             <div className="relative">
               <button onClick={() => setShowProfile((value) => !value)} className="fde-top-profile" aria-label="打开账户与角色信息" aria-expanded={showProfile}>
                 <span className="fde-avatar">{currentUser.name.slice(0, 1)}</span>
@@ -156,6 +165,8 @@ export function AppLayout() {
                 <div className="fde-profile-menu absolute right-0 top-12 w-52 rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl">
                   <div className="border-b border-slate-100 px-3 py-2.5"><p className="text-xs text-slate-400">{currentUser.email}</p><p className="mt-1 text-xs text-slate-500">{currentUser.department}</p></div>
                   <button onClick={() => navigate('/ai')} className="mt-1 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-600 hover:bg-slate-50"><Sparkles className="h-4 w-4" />AI 助手</button>
+                  {isSystemAdminRole(currentUser.role) && <button onClick={() => { setShowProfile(false); navigate('/system') }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-600 hover:bg-slate-50"><Settings className="h-4 w-4" />系统管理</button>}
+                  {!isSystemAdminRole(currentUser.role) && isAiPlatformAdminRole(currentUser.role) && <button onClick={() => { setShowProfile(false); navigate('/system/ai/models') }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-600 hover:bg-slate-50"><Settings className="h-4 w-4" />AI 平台管理</button>}
                   <button onClick={() => { logout(); navigate('/login') }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-rose-600 hover:bg-rose-50"><LogOut className="h-4 w-4" />退出登录</button>
                 </div>
               )}
@@ -181,9 +192,9 @@ export function AppLayout() {
           {!query && <p className="py-6 text-sm text-slate-500">输入关键词查找当前工作空间中的项目与文件。</p>}
         </div>
       </Modal>
-      <Drawer open={showNotifications} onClose={() => setShowNotifications(false)} title="我的待办">
-        <div className="fde-search-results">{pendingTodos.map(todo => <button key={todo.id} onClick={() => openResult(todo.type === '流程' ? `/workflow?view=project&project=${todo.projectId}` : todo.type === '通知' && todo.projectId ? `/projects/${todo.projectId}?tab=workflow` : todo.projectId ? `/projects/${todo.projectId}?tab=tasks` : '/collaboration')}><ClipboardCheck /><span><strong>{todo.title}</strong><small>{todo.projectName} · {todo.dueDate}</small></span><span>→</span></button>)}</div>
-        {!pendingTodos.length && <EmptyState title="近三天暂无待办" description="仅显示当前账号今天至后天需完成的事项。" />}
+      <Drawer open={showNotifications} onClose={() => setShowNotifications(false)} title="消息与预警">
+        <div className="fde-search-results">{messageItems.map(item => <button key={item.id} onClick={() => openResult(item.path)}>{item.kind === '审批' ? <ClipboardCheck /> : item.kind === '预警' ? <AlertTriangle /> : <MessagesSquare />}<span><strong>{item.title}</strong><small><b>{item.kind}</b> · {item.detail}</small></span><span>→</span></button>)}</div>
+        {!messageItems.length && <EmptyState title="暂无新消息" description="领导批示、会议提醒、待处理审批、协作互动和项目预警会显示在这里。" />}
       </Drawer>
       <UnifiedProjectCreateModal open={showCreate} onClose={() => setShowCreate(false)} />
     </div>

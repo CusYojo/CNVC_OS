@@ -97,10 +97,10 @@ test('FDE visual navigation preserves role and explicit capability gates', () =>
   assert.equal(navigation.canSeeNavItem(capabilities, 'AI 平台管理员'), true)
   assert.equal(navigation.canSeeNavItem(im, '运营管理员'), true)
   assert.equal(navigation.canSeeNavItem(im, 'AI平台管理员'), false)
-  assert.equal(navigation.canSeeNavItem(models, '投资经理', ['ai.configure']), true)
-  assert.equal(navigation.canSeeNavItem(im, '投资经理', ['im.manage']), true)
+  assert.equal(navigation.canSeeNavItem(models, '投资经理', ['ai.configure']), false)
+  assert.equal(navigation.canSeeNavItem(im, '投资经理', ['im.manage']), false)
   assert.equal(navigation.canSeeNavItem(system, '投资经理', ['ai.configure']), false)
-  assert.deepEqual(Array.from(items.filter(item => navigation.canSeeNavItem(item, '投资经理', ['system.manage'])), item => item.label), ['组织与权限', '模板与规则', '集成与审计', 'Radar 钉钉告警'])
+  assert.deepEqual(Array.from(items.filter(item => navigation.canSeeNavItem(item, '投资经理', ['system.manage'])), item => item.label), [])
   assert.deepEqual(Array.from(items.filter(item => navigation.canSeeNavItem(item, 'AI平台管理员')), item => item.label), ['模型设置', '能力管理'])
   assert.deepEqual(Array.from(items.filter(item => navigation.canSeeNavItem(item, '运营管理员')), item => item.label), ['IM 机器人'])
 })
@@ -131,7 +131,7 @@ test('reference restyling leaves session restoration and protected routes in pla
 })
 
 test('detail tab links and Shanghai countdown retain empty, overdue and legacy states', () => {
-  assert.deepEqual(projectDetailTabs.map(tab => tab.label), ['流程推进', '材料文件', '项目待办', '协作互动'])
+  assert.deepEqual(projectDetailTabs.map(tab => tab.label), ['流程推进', '材料文件', '项目任务', '协作互动'])
   assert.equal(projectDetailTab('files'), 'files')
   assert.equal(projectDetailTab('meetings'), 'collaboration')
   assert.equal(projectDetailTab(null), 'workflow')
@@ -146,12 +146,12 @@ test('detail tab links and Shanghai countdown retain empty, overdue and legacy s
 
 test('detail material counters require an accessible matching file version or explicit waiver', () => {
   const files = [{ id: 'file-1', version: 2 }] as Parameters<typeof materialIsSatisfied>[1]
-  assert.equal(materialIsSatisfied(undefined, files), false)
-  assert.equal(materialIsSatisfied({ fileId: 'file-1', fileVersion: 1, waiverReason: null }, files), false)
-  assert.equal(materialIsSatisfied({ fileId: 'not-visible', fileVersion: 2, waiverReason: null }, files), false)
-  assert.equal(materialIsSatisfied({ fileId: 'file-1', fileVersion: 2, waiverReason: null }, files), true)
-  assert.equal(materialIsSatisfied({ fileId: null, fileVersion: null, waiverReason: ' ' }, files), false)
-  assert.equal(materialIsSatisfied({ fileId: null, fileVersion: null, waiverReason: '已提供替代证据' }, files), true)
+  assert.equal(materialIsSatisfied([], files), false)
+  assert.equal(materialIsSatisfied([{ fileId: 'file-1', fileVersion: 1, waiverReason: null }], files), false)
+  assert.equal(materialIsSatisfied([{ fileId: 'not-visible', fileVersion: 2, waiverReason: null }], files), false)
+  assert.equal(materialIsSatisfied([{ fileId: 'file-1', fileVersion: 2, waiverReason: null }], files), true)
+  assert.equal(materialIsSatisfied([{ fileId: null, fileVersion: null, waiverReason: ' ' }], files), false)
+  assert.equal(materialIsSatisfied([{ fileId: null, fileVersion: null, waiverReason: '已提供替代证据' }], files), true)
 })
 
 // Run the actual component JSX with bounded hook state, without connecting to a business DB.
@@ -175,31 +175,28 @@ function renderDetailComponent(file: string, name: string, props: object, states
   return renderToStaticMarkup(element)
 }
 
-test('FDE detail hero has four status cells and no unauthorized primary actions', () => {
+test('FDE detail hero is a compact two-row summary with one primary action', () => {
   const project = { id: 'fixture', name: '布局验收项目', classification: 'key', projectType: '投资项目', workflowModel: 'fde-v1', lifecycle: 'active', stage: '立项', targetDate: null }
-  const props = { project, todos: [{ status: '进行中' }, { status: '已完成' }, { status: '已取消' }], onUpload: () => {}, onWorkspace: () => {}, onArchive: () => {} }
-  const restricted = renderDetailComponent('ProjectDetailHero.tsx', 'ProjectDetailHero', props, [{}])
-  for (const label of ['当前阶段', '执行状态', '项目目标日', '待办', '重点项目', '未设置', '1 项']) assert.match(restricted, new RegExp(label))
+  const props = { project, incompleteTaskCount: 1, onOverview: () => {}, onPrimary: () => {} }
+  const restricted = renderDetailComponent('ProjectDetailHero.tsx', 'ProjectDetailHero', props, [])
+  for (const label of ['布局验收项目', '重点项目', '立项', '项目负责人', '目标日期', '未完成任务', '1 项', '项目概况', '推进当前阶段']) assert.match(restricted, new RegExp(label))
   assert.doesNotMatch(restricted, /上传材料|领导批示|维护周计划|确认周计划|生成评分/)
-  const leader = renderDetailComponent('ProjectDetailHero.tsx', 'ProjectDetailHero', props, [{ upload: true, directive: true, draft: true, publish: true }])
-  assert.match(leader, /上传材料/)
-  assert.match(leader, /领导批示/)
-  assert.doesNotMatch(leader, /确认周计划|维护周计划/)
-  const closed = renderDetailComponent('ProjectDetailHero.tsx', 'ProjectDetailHero', { ...props, project: { ...project, lifecycle: 'archived' } }, [{ upload: true, directive: true }])
-  assert.doesNotMatch(closed, /上传材料|领导批示/)
+  const closed = renderDetailComponent('ProjectDetailHero.tsx', 'ProjectDetailHero', { ...props, project: { ...project, lifecycle: 'archived' } }, [])
+  assert.match(closed, /查看项目档案/)
+  assert.doesNotMatch(closed, /推进当前阶段/)
 })
 
 test('workflow renders marker rail, evidence dates and current focus instead of inline binding forms', () => {
   const project = { id: 'fixture', stage: '立项', owner: '测试负责人', ownerUserId: 'owner', lifecycle: 'active', targetDate: '2026-09-15' }
-  const data = { stages: [{ stage: '入库', materials: [] }, { stage: '立项', materials: [{ key: 'bp', label: '商业计划书' }] }], timeline: [{ stage: '入库', date: '2026-08-01', actualDate: null }, { stage: '立项', date: '2026-08-10', actualDate: '2026-08-09' }], policy: { cycleDays: [40], revision: 1 }, materials: [], plan: null, planHistory: [], members: [] }
+  const data = { stages: [{ stage: '入库', materials: [] }, { stage: '立项', materials: [{ key: 'bp', label: '商业计划书' }] }], timeline: [{ stage: '入库', date: '2026-08-01', basis: 'cycle_projection', actualDate: null }, { stage: '立项', date: '2026-08-10', basis: 'cycle_projection', actualDate: '2026-08-09' }], policy: { cycleDays: [40], revision: 1 }, materials: [], plan: null, planHistory: [], members: [], duties: [], capabilities: { canEditPlan: true } }
   const html = renderDetailComponent('FdeWorkflowPanel.tsx', 'FdeWorkflowPanel', { project, files: [], onChanged: async () => {} }, [data])
   assert.match(html, /aria-label="项目流程"/)
   assert.match(html, /fde-detail-stage-rail/)
-  assert.match(html, /当前节点 · 立项/)
-  assert.match(html, /待处理：商业计划书/)
-  assert.match(html, /计划 08.01/)
-  assert.match(html, /已于 08.09 通过/)
-  assert.doesNotMatch(html, /已于 08.01 通过|选择项目材料文件|<select/)
+  assert.match(html, /当前节点/)
+  assert.match(html, /待补材料 1 项/)
+  assert.match(html, /入库<\/strong><small>08\.01/)
+  assert.match(html, /计划 08.10/)
+  assert.doesNotMatch(html, /选择项目材料文件|<select/)
   const materials = renderDetailComponent('FdeWorkflowPanel.tsx', 'FdeWorkflowPanel', { project, files: [], mode: 'materials', onChanged: async () => {} }, [data])
   assert.match(materials, /节点材料/)
   assert.match(materials, /0 \/ 1 已齐备/)

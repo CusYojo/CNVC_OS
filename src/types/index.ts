@@ -108,13 +108,29 @@ export interface Meeting {
   projectName: string
   title: string
   meetingTime: string
+  meetingEndTime?: string | null
   participants: string[]
+  host?: string
   type: string
-  status: JobStatus
+  status: JobStatus | '待开始' | '进行中' | '已结束' | '已取消'
+  purpose?: string
+  requirements?: string
   summary: string
   conclusions: string[]
   rawText?: string
   todoCount: number
+  contributions?: Array<{
+    id: string
+    authorId: string
+    authorName: string
+    content: string
+    files: Array<{ id: string; name: string; version: number }>
+    createdAt: string
+  }>
+  unreadNoticeId?: string | null
+  canContribute?: boolean
+  canManage?: boolean
+  minutesConfirmedAt?: string | null
 }
 
 export interface RiskAlert {

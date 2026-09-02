@@ -10,16 +10,18 @@ import {
   Square,
   XCircle,
 } from 'lucide-react'
-import { authedFetch } from '../store/useAuthStore'
+import { authedFetch, useAuthStore } from '../store/useAuthStore'
 import { formatShanghaiDateTime } from '../lib/dateTime'
 import type { AiTask, AiTaskArtifact } from './AiTaskCards'
+import { isAiPlatformAdminRole } from '../../server/src/contracts/adminRoleContract'
+import { aiBusinessErrorMessage } from '../lib/aiBusinessError'
 
 const TASK_LABELS: Record<string, string> = {
-  compliance_statement: '合规性说明',
+  compliance_statement: '合规说明',
   investment_proposal: '投资提案',
-  investment_recommendation_ppt: '投资建议书（PPT）',
+  investment_recommendation_ppt: '投资建议书',
   due_diligence_report: '尽调报告',
-  project_qa: '项目 Q&A',
+  project_qa: '项目问答',
   custom_template_document: '上传模板文档',
 }
 
@@ -83,6 +85,7 @@ export function AiTaskConversationMessage({
   onNotify?: (message: string, kind: 'success' | 'error' | 'info') => void
 }) {
   const [downloadingId, setDownloadingId] = useState<string | null>(null)
+  const showDiagnostics = useAuthStore(state => isAiPlatformAdminRole(state.user?.role ?? ''))
   const active = task.status === 'pending' || task.status === 'running'
   const artifacts = downloadableArtifacts(task)
   const taskLabel = TASK_LABELS[task.type] ?? '正式文档'
@@ -139,7 +142,7 @@ export function AiTaskConversationMessage({
           </span>
         </div>
 
-        <p className="text-xs text-brand-700">使用 Skill · {skillName}</p>
+        {showDiagnostics && <p className="text-xs text-brand-700">执行能力 · {skillName}</p>}
 
         <div className="space-y-1">
           {events.length > 0 ? (
@@ -165,14 +168,14 @@ export function AiTaskConversationMessage({
               {completeSourceCoverage && ' · 全部可用片段已覆盖'}
             </p>
           )}
-          {tokenUsage && <p className="text-xs text-slate-500">报告用量：{tokenUsage}</p>}
-          <p className="text-[11px] text-slate-400">开始于 {formatShanghaiDateTime(task.createdAt)}</p>
+          {showDiagnostics && tokenUsage && <p className="text-xs text-slate-500">报告用量：{tokenUsage}</p>}
+          <p className="text-xs text-slate-400">开始于 {formatShanghaiDateTime(task.createdAt)}</p>
         </div>
 
         {task.status === 'failed' && (
           <div className="text-sm text-amber-800">
-            <p>{task.errorMessage || '本轮生成没有形成通过 Skill 验收的正式文档。'}</p>
-            {task.errorId && <p className="font-mono text-[11px] text-amber-700">错误编号：{task.errorId}</p>}
+            <p>{showDiagnostics ? task.errorMessage || '本轮生成未形成正式文档。' : aiBusinessErrorMessage(task.errorMessage)}</p>
+            {showDiagnostics && task.errorId && <p className="font-mono text-xs text-amber-700">错误编号：{task.errorId}</p>}
           </div>
         )}
 

@@ -5,6 +5,7 @@ import type { AuthedRequest } from '../middleware/requireAuth.js'
 import { getConversation, listConversations } from '../services/conversationService.js'
 import { createHash } from 'node:crypto'
 import { writeAudit } from '../services/auditService.js'
+import { canonicalizeUtf8TextBuffer } from '../security/projectFileValidation.js'
 
 // 只读工作区浏览：把 assistant 沙箱工作目录(AGENT_WORKSPACE)以文件树 + 预览暴露给前端，
 // 让 agent 生成的 PPT/图片/PDF/HTML 直接在页面右侧空白区查看，无需经 OSS 中转。
@@ -32,6 +33,7 @@ const RESULT_EXTS = new Set([
   '.pdf', '.pptx', '.docx', '.xlsx', '.csv', '.html', '.htm', '.md', '.markdown',
   '.mp4', '.mp3', '.wav', '.zip',
 ])
+const UTF8_TEXT_EXTS = new Set(['.txt', '.md', '.markdown', '.csv', '.html', '.htm', '.json', '.log', '.py', '.js', '.ts', '.yml', '.yaml', '.xml', '.svg'])
 
 // 上传文件是用户输入，不是 AI 生成产物；右侧“产物面板”不应混入这些目录。
 // 这里不按猜测屏蔽 preview/out 等目录，避免误伤 Agent 真正的交付文件。
@@ -240,13 +242,19 @@ workspaceRouter.get('/file', async (req: AuthedRequest, res, next) => {
       ip: req.ip,
     })
     res.setHeader('Content-Type', type)
-    res.setHeader('Content-Length', String(st.size))
     res.setHeader('Cache-Control', 'no-store')
     res.setHeader(
       'Content-Disposition',
       `${download ? 'attachment' : 'inline'}; filename*=UTF-8''${encodeURIComponent(name)}`,
     )
-    createReadStream(abs).pipe(res)
+    if (!download && UTF8_TEXT_EXTS.has(ext)) {
+      const bytes = canonicalizeUtf8TextBuffer(await fs.readFile(abs))
+      res.setHeader('Content-Length', String(bytes.length))
+      res.send(bytes)
+    } else {
+      res.setHeader('Content-Length', String(st.size))
+      createReadStream(abs).pipe(res)
+    }
   } catch (err) {
     next(err)
   }
@@ -268,7 +276,7 @@ workspaceRouter.post('/file', async (req: AuthedRequest, res, next) => {
     if (!dataBase64 || typeof dataBase64 !== 'string') return res.status(400).json({ code: 'BAD_REQUEST', message: '缺少 dataBase64' })
     // 允许带 data URL 前缀（data:...;base64,xxxx）
     const b64 = dataBase64.includes(',') ? dataBase64.slice(dataBase64.indexOf(',') + 1) : dataBase64
-    const buffer = Buffer.from(b64, 'base64')
+    let buffer = Buffer.from(b64, 'base64')
     if (!buffer.length) return res.status(400).json({ code: 'BAD_REQUEST', message: '文件内容为空或非法 base64' })
 
     // 目标目录固定在 uploads/ 之下（subdir 仅取安全单段，如会话id）
@@ -285,6 +293,7 @@ workspaceRouter.post('/file', async (req: AuthedRequest, res, next) => {
 
     // 同名则加时间戳后缀避免覆盖
     let fname = safeName(name ?? '')
+    if (UTF8_TEXT_EXTS.has(extname(fname).toLowerCase())) buffer = canonicalizeUtf8TextBuffer(buffer)
     let absFile = resolve(dirAbs, fname)
     if (await fs.stat(absFile).then(() => true).catch(() => false)) {
       const ext = extname(fname)

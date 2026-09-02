@@ -1,6 +1,7 @@
 // 后端 API 调用封装（dev 跟 prod 自动适配）
 import { authedFetch } from '../store/useAuthStore'
 import { ApiError, apiErrorFromResponse } from '../../server/src/contracts/apiErrorContract'
+import { normalizeTextPayload } from '../../server/src/contracts/textIntegrityContract'
 
 export { ApiError, apiErrorFromResponse } from '../../server/src/contracts/apiErrorContract'
 
@@ -35,8 +36,8 @@ export async function api<T = unknown>(
   try {
     res = await authedFetch(url, finalInit)
   } catch (e) {
-    if ((e as Error).name === 'AbortError') throw new ApiError('请求超时（120s），请重试或检查网络', 'TIMEOUT', 0)
-    throw e
+    if ((e as Error).name === 'AbortError') throw new ApiError('请求超时，请重试', 'TIMEOUT', 0)
+    throw new ApiError('连接失败，请检查网络后重试', 'NETWORK_ERROR', 0)
   } finally {
     if (timer) clearTimeout(timer)
   }
@@ -61,10 +62,10 @@ export async function api<T = unknown>(
       message: looksLikeHtml
         ? (
             res.status === 404
-              ? '接口不存在，当前后端可能尚未加载最新版本，请重启后端服务'
-              : `服务端返回了异常页面（HTTP ${res.status}），请稍后重试`
+              ? '服务暂时不可用，请稍后重试'
+              : '服务暂时不可用，请稍后重试'
           )
-        : plainText || `HTTP ${res.status}`,
+        : plainText || '服务暂时不可用，请稍后重试',
     }
   }
   if (!res.ok) {
@@ -85,14 +86,22 @@ export async function api<T = unknown>(
 
 // GET 助手
 export const apiGet = <T = unknown>(path: string) => api<T>(path, { method: 'GET' })
+const jsonBody = (body: unknown) => {
+  const normalized = normalizeTextPayload(body)
+  if (normalized.issue) {
+    throw new ApiError('检测到无法识别的文字，请重新输入；若来自文件，请重新导出后上传', 'TEXT_ENCODING_INVALID', 0)
+  }
+  return JSON.stringify(normalized.value)
+}
 // POST 助手
 export const apiPost = <T = unknown>(path: string, body?: unknown, init?: RequestInit) =>
-  api<T>(path, { method: 'POST', body: body !== undefined ? JSON.stringify(body) : undefined, ...init })
+  api<T>(path, { ...init, method: 'POST', body: body !== undefined ? jsonBody(body) : undefined })
 // PATCH 助手
 export const apiPatch = <T = unknown>(path: string, body?: unknown) =>
-  api<T>(path, { method: 'PATCH', body: body !== undefined ? JSON.stringify(body) : undefined })
+  api<T>(path, { method: 'PATCH', body: body !== undefined ? jsonBody(body) : undefined })
 // PUT 助手
 export const apiPut = <T = unknown>(path: string, body?: unknown) =>
-  api<T>(path, { method: 'PUT', body: body !== undefined ? JSON.stringify(body) : undefined })
-// DELETE 助手
-export const apiDelete = <T = unknown>(path: string) => api<T>(path, { method: 'DELETE' })
+  api<T>(path, { method: 'PUT', body: body !== undefined ? jsonBody(body) : undefined })
+// DELETE 助手。需要二次确认或乐观锁的删除操作可携带 JSON 请求体。
+export const apiDelete = <T = unknown>(path: string, body?: unknown) =>
+  api<T>(path, { method: 'DELETE', body: body !== undefined ? jsonBody(body) : undefined })

@@ -1,6 +1,8 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
 import { AlertTriangle, Copy, RefreshCw } from 'lucide-react'
 import { uid } from '../lib/uid'
+import { useAuthStore } from '../store/useAuthStore'
+import { isAiPlatformAdminRole } from '../../server/src/contracts/adminRoleContract'
 
 type BoundaryLevel = 'route' | 'section' | 'message' | 'part'
 
@@ -71,6 +73,7 @@ export class AiErrorBoundary extends Component<Props, State> {
     const level = this.props.level ?? 'section'
     const title = this.props.title ?? (level === 'route' ? 'AI 助手暂时无法显示' : '这部分内容显示异常')
     const compact = level === 'message' || level === 'part'
+    const showDiagnostics = isAiPlatformAdminRole(useAuthStore.getState().user?.role ?? '')
 
     return (
       <div className={
@@ -89,23 +92,21 @@ export class AiErrorBoundary extends Component<Props, State> {
                 已阻止异常扩散到整个页面。会话记录仍保存在服务端，可刷新后重新加载。
               </p>
             )}
-            <p className={compact ? 'mt-0.5 text-[11px] text-amber-700' : 'mt-3 font-mono text-xs text-slate-500'}>
-              错误编号：{this.state.errorId}
-            </p>
+            {showDiagnostics && <p className={compact ? 'mt-0.5 text-xs text-amber-700' : 'mt-3 font-mono text-xs text-slate-500'}>错误编号：{this.state.errorId}</p>}
           </div>
           <div className={compact ? 'flex shrink-0 items-center gap-1' : 'mt-4 flex justify-center gap-2'}>
-            <button
+            {showDiagnostics && <button
               type="button"
               onClick={() => { void copyAiErrorId(this.state.errorId) }}
               title="复制错误编号"
-              className="inline-flex items-center gap-1 rounded-md border border-amber-200 bg-white px-2 py-1 text-[11px] text-amber-800 hover:bg-amber-100"
+              className="inline-flex items-center gap-1 rounded-md border border-amber-200 bg-white px-2 py-1 text-xs text-amber-800 hover:bg-amber-100"
             >
               <Copy className="h-3 w-3" />{compact ? '' : '复制编号'}
-            </button>
+            </button>}
             <button
               type="button"
               onClick={this.reset}
-              className="inline-flex items-center gap-1 rounded-md border border-amber-200 bg-white px-2 py-1 text-[11px] text-amber-800 hover:bg-amber-100"
+              className="inline-flex items-center gap-1 rounded-md border border-amber-200 bg-white px-2 py-1 text-xs text-amber-800 hover:bg-amber-100"
             >
               <RefreshCw className="h-3 w-3" />{compact ? '' : '重试显示'}
             </button>

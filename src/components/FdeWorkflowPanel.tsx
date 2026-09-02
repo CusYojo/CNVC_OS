@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties, type DragEvent, type ReactNode } from 'react'
+import { useEffect, useState, type CSSProperties, type DragEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { CheckCircle2, Circle, FileCheck2, GripVertical, Plus, Save, Trash2, Users } from 'lucide-react'
 import { apiDelete, apiGet, apiPut } from '../lib/api'
@@ -16,15 +16,16 @@ type Workflow = {
   stages: Array<{ stage: string; allowWaiver: boolean; requiresFund?: boolean; materials: Array<{ key: string; label: string }>; approvals: Array<{ duty: string; name: string; mode: string; approverNames: string[] }> }>
   policy: { id: string; revision: number; cycleDays: number[] }
   materials: Array<{ id: string; stage: string; requirementKey: string; fileId: string | null; fileVersion: number | null; waiverReason: string | null; version: number }>
-  plan: { id: string; revision: number; version: number; status: string; cycleDays: number; targetDate: string; actions: PlanAction[] } | null
+  plan: { id: string; revision: number; version: number; status: string; cycleDays: number; targetDate: string; updatedAt: string; actions: PlanAction[] } | null
   planHistory: Array<{ id: string; revision: number; status: string; targetDate: string }>
   members: Array<{ id: string; name: string; role: string }>
+  duties: Array<{ duty: string; userId: string }>
   capabilities: { canEditPlan: boolean }
 }
 
-export function FdeWorkflowPanel({ project, files, mode = 'workflow', onChanged, afterStage, onUpload }: {
+export function FdeWorkflowPanel({ project, files, mode = 'workflow', onChanged, onUpload, onGovernance }: {
   project: Project; files: ProjectFile[]; mode?: 'workflow' | 'materials' | 'tasks'; onChanged: () => Promise<void>;
-  afterStage?: ReactNode; onUpload?: () => void
+  onUpload?: () => void; onGovernance?: () => void
 }) {
   const navigate = useNavigate()
   const { showToast } = useToast()
@@ -42,6 +43,7 @@ export function FdeWorkflowPanel({ project, files, mode = 'workflow', onChanged,
   const [actions, setActions] = useState<PlanAction[]>([])
   const [materialsOpen, setMaterialsOpen] = useState(false)
   const [planEditing, setPlanEditing] = useState(false)
+  const [planExpanded, setPlanExpanded] = useState(false)
   const [draggedAction, setDraggedAction] = useState<number | null>(null)
   const [expandedStage, setExpandedStage] = useState<string | null>(null)
   const isOwner = currentUser?.id === project.ownerUserId
@@ -109,16 +111,28 @@ export function FdeWorkflowPanel({ project, files, mode = 'workflow', onChanged,
   const selectedStage = data.stages.find((item) => item.stage === stage)
   const currentIndex = data.stages.findIndex((item) => item.stage === project.stage)
   const planLocked = data.plan?.status === 'locked'
-  const canEditPlan = data.capabilities.canEditPlan && isActive && data.plan?.status !== 'review'
+  const canEditPlan = Boolean(data.capabilities?.canEditPlan) && isActive && data.plan?.status !== 'review'
   const stageRequirements = selectedStage?.materials ?? []
   const missing = stageRequirements.filter(requirement => !materialIsSatisfied(data.materials.filter(item => item.stage === stage && item.requirementKey === requirement.key), files))
   const approval = approvals.filter(item => item.projectId === project.id && item.fromStage === stage).sort((a, b) => b.submittedAt.localeCompare(a.submittedAt))[0]
   const stageDate = data.timeline.find(item => item.stage === stage)
-  const selectedIndex = data.stages.findIndex(item => item.stage === stage)
-  const nextStage = data.stages[selectedIndex + 1]?.stage ?? 'Close'
   const materialStages = data.stages.filter(item => item.materials.length)
   const totalRequired = materialStages.reduce((sum, item) => sum + item.materials.length, 0)
   const totalSatisfied = materialStages.reduce((sum, item) => sum + item.materials.filter(requirement => materialIsSatisfied(data.materials.filter(binding => binding.stage === item.stage && binding.requirementKey === requirement.key), files)).length, 0)
+  const planCompletion = actions.length ? Math.round(actions.filter(action => action.status === '已完成').length / actions.length * 100) : 0
+  const requiredDuties = [['concerned_leader', '老板'], ['secretary', '项目经理'], ['legal', '法务'], ['finance', '财务']] as const
+  const missingDuties = requiredDuties.filter(([duty]) => !data.duties.some(item => item.duty === duty)).map(([, label]) => label)
+  const peopleConfigured = Boolean(project.ownerUserId) && missingDuties.length === 0
+  const planRequired = ['尽调计划审核', '启动尽调', '内核', '投决', '打款'].includes(stage)
+  const planConfirmed = data.plan?.status === 'locked'
+  const blockers = [
+    ...(project.classification === 'pool' ? ['项目尚未入库'] : []),
+    ...(missing.length ? [`待补材料 ${missing.length} 项`] : []),
+    ...(!peopleConfigured ? [`缺少${missingDuties.join('、') || '项目负责人'}`] : []),
+    ...(planRequired && !planConfirmed ? ['项目计划未确认'] : []),
+  ]
+  const canStartApproval = isActive && blockers.length === 0
+  const remainingTasks = actions.filter(action => !['已完成', '已关闭', '已取消', '已归档'].includes(action.status)).length
 
   return <div className="fde-workspace fde-detail-flow">
     {mode === 'workflow' && <><Card className="fde-detail-stage-card">
@@ -129,13 +143,11 @@ export function FdeWorkflowPanel({ project, files, mode = 'workflow', onChanged,
         const date = data.timeline.find(value => value.stage === item.stage)
         return <button type="button" key={item.stage} aria-pressed={stage === item.stage} className={`fde-detail-stage ${completed ? 'completed' : current ? 'current' : ''} ${expandedStage === item.stage ? 'fde-detail-stage-active' : ''}`} onClick={() => { setStage(item.stage); setExpandedStage(expandedStage === item.stage ? null : item.stage) }}>
           <span className="fde-detail-stage-rail"><span>{completed ? '✓' : index + 1}</span></span>
-          <span className="fde-detail-stage-copy"><strong>{item.stage}</strong><small>{date?.actualDate ? `已于 ${shortProjectDate(date.actualDate)} 通过` : `计划 ${shortProjectDate(date?.date)}`}</small></span>
-          <span className="fde-detail-stage-state"><Badge tone={completed ? 'green' : current ? 'blue' : 'slate'}>{completed ? '已通过' : current ? '进行中' : '待开始'}</Badge></span>
+          <span className="fde-detail-stage-copy"><strong>{item.stage}</strong><small>{completed ? shortProjectDate(date?.actualDate ?? date?.date) : date?.basis === 'approved' ? `改期至 ${shortProjectDate(date.date)}` : `计划 ${shortProjectDate(date?.date)}`}</small></span>
+          {current && <span className="fde-detail-stage-state"><Badge tone="blue">当前节点</Badge></span>}
         </button>
       })}</div>
-      {project.classification === 'pool' && <p className="mt-4 rounded-lg bg-amber-50 p-3 text-xs text-amber-800">当前仍在项目池。请由负责人完成入库初筛，进入普通项目后再发起立项审批。</p>}
-      {data.timeline?.some(item => item.basis === 'approved') && <p className="mt-3 text-xs text-[#315f68]">已批准节点日期：{data.timeline.filter(item => item.basis === 'approved').map(item => `${item.stage} ${item.date}（V${item.version}）`).join('；')}。最终目标日不变。</p>}
-      {project.stage === '已 Close' && <p className="mt-4 rounded-lg bg-emerald-50 p-3 text-sm text-emerald-800">项目已 Close，流程进度 100%，活动任务已关闭。</p>}
+      {project.stage === '已 Close' && <p className="fde-flow-finished">项目已完成交割</p>}
     </Card>
       {expandedStage && (() => {
         const expandedIndex = data.stages.findIndex(item => item.stage === expandedStage)
@@ -177,17 +189,10 @@ export function FdeWorkflowPanel({ project, files, mode = 'workflow', onChanged,
         </Card>
       })()}
       <Card className="fde-detail-stage-focus">
-        <div className="fde-detail-card-head"><h2>{stage === project.stage ? '当前节点' : '节点详情'} · {stage}</h2><div className="fde-detail-inline-actions">
-          <Button variant="secondary" onClick={() => setMaterialsOpen(true)}>查看节点材料</Button>
-          {isActive && onUpload && <Button variant="secondary" onClick={onUpload}>上传材料</Button>}
-          <Button variant={!approval && missing.length === 0 ? 'primary' : 'secondary'} disabled={!isActive || project.classification === 'pool' || (!approval && missing.length > 0)} onClick={() => navigate(`/workflow?view=project&project=${project.id}${approval ? `&request=${approval.id}` : ''}`)}>{approval ? '查看阶段审批' : missing.length === 0 ? '材料已齐，发起审批' : `补齐 ${missing.length} 项材料后审批`}</Button>
-        </div></div>
-        <div className="fde-detail-focus-layout"><div className="fde-detail-focus-facts">
-          <div><span>负责人</span><strong>{project.owner || '未配置'}</strong></div><div><span>计划完成</span><strong>{shortProjectDate(stageDate?.date)}</strong></div>
-          <div><span>材料</span><strong>{stageRequirements.length ? `${stageRequirements.length - missing.length} / ${stageRequirements.length}` : '无需材料'}</strong></div>
-          <div><span>审批</span><strong>{approval?.status ?? '未发起'}</strong></div>
-        </div><aside className={`fde-detail-next-step ${missing.length ? 'warning' : ''}`}><span>进入 {nextStage} 前</span><strong>{approval?.status === '审批中' ? `等待 ${approval.currentNodeName} 处理阶段审批` : missing.length ? `待处理：${missing.slice(0, 2).map(item => item.label).join('、')}${missing.length > 2 ? ` 等 ${missing.length} 项` : ''}` : '材料已处理，提交时校验人员、计划和其他准入条件'}</strong></aside></div>
-      </Card>{afterStage}</>}
+        <div className="fde-current-stage-head"><div><span>{stage === project.stage ? '当前节点' : '节点详情'}</span><h2>{stage}</h2><p>计划日期 {shortProjectDate(stageDate?.date)}{stage === project.stage && remainingTasks ? ` · 剩余任务 ${remainingTasks} 项` : ''}</p></div><div className="fde-detail-inline-actions"><Button variant="secondary" onClick={() => setMaterialsOpen(true)}>节点材料</Button>{approval ? <Button onClick={() => navigate(`/workflow?view=project&project=${project.id}&request=${approval.id}`)}>查看阶段审批</Button> : canStartApproval ? <Button onClick={() => navigate(`/workflow?view=project&project=${project.id}`)}>发起阶段审批</Button> : null}</div></div>
+        <div className="fde-stage-readiness" aria-label="节点状态"><span data-state={missing.length ? 'warning' : 'ready'}>{stageRequirements.length ? `材料 ${stageRequirements.length - missing.length}/${stageRequirements.length}` : '无需材料'}</span><span data-state={peopleConfigured ? 'ready' : 'warning'}>{peopleConfigured ? '人员已配置' : '人员待配置'}</span><span data-state={!planRequired || planConfirmed ? 'ready' : 'warning'}>{planRequired ? planConfirmed ? '计划已确认' : '计划待确认' : '无需确认计划'}</span><span data-state={blockers.length ? 'warning' : 'ready'}>{blockers.length ? `${blockers.length} 项阻塞` : '无阻塞'}</span>{canStartApproval && !approval && <span data-state="active">可发起审批</span>}</div>
+        {approval?.status === '审批中' ? <div className="fde-stage-approval-waiting"><strong>审批进行中</strong><span>{approval.currentNodeName}</span></div> : blockers.length > 0 && <div className="fde-stage-blockers">{missing.length > 0 && <div><span>待补材料 {missing.length} 项</span>{onUpload && <Button variant="secondary" onClick={onUpload}>去上传</Button>}</div>}{!peopleConfigured && <div><span>缺少{missingDuties.join('、') || '项目负责人'}</span>{onGovernance && <Button variant="secondary" onClick={onGovernance}>配置人员</Button>}</div>}{planRequired && !planConfirmed && <div><span>项目计划未确认</span><Button variant="secondary" onClick={() => navigate(`/projects/${project.id}?tab=tasks`)}>去确认</Button></div>}{project.classification === 'pool' && <div><span>项目尚未入库</span><Button variant="secondary" onClick={() => navigate(`/workflow?view=project&project=${project.id}`)}>去处理</Button></div>}</div>}
+      </Card></>}
 
     {mode === 'materials' && <Card className="fde-detail-material-register"><div className="fde-detail-card-head"><h2>节点材料</h2><div className="fde-detail-inline-actions"><Badge tone={totalRequired === totalSatisfied ? 'green' : 'amber'}>{totalSatisfied} / {totalRequired} 已齐备</Badge>{onUpload && isActive && <Button onClick={onUpload}>上传文件</Button>}</div></div><div>{materialStages.map(item => {
       const remaining = item.materials.filter(requirement => !materialIsSatisfied(data.materials.filter(binding => binding.stage === item.stage && binding.requirementKey === requirement.key), files))
@@ -197,7 +202,7 @@ export function FdeWorkflowPanel({ project, files, mode = 'workflow', onChanged,
 
     <Modal open={materialsOpen} onClose={() => setMaterialsOpen(false)} title={`节点材料 · ${stage}`} width="max-w-3xl"><Card className="fde-panel p-5">
       <div className="flex items-center justify-between"><h2 className="font-semibold">阶段材料 · {stage}</h2>{mode === 'materials' && <select className="input max-w-44" value={stage} onChange={(event) => setStage(event.target.value)}>{data.stages.map((item) => <option key={item.stage}>{item.stage}</option>)}</select>}</div>
-      {!selectedStage?.materials.length && <p className="mt-4 rounded-lg bg-slate-50 p-3 text-sm text-slate-500">本阶段无独立文件要求；计划阶段需通过下方倒排计划完整性校验。</p>}
+      {!selectedStage?.materials.length && <p className="mt-4 rounded-lg bg-slate-50 p-3 text-sm text-slate-500">本阶段无文件要求。</p>}
       <div className="mt-4 space-y-3">{selectedStage?.materials.map((requirement) => {
         const bindings = data.materials.filter((item) => item.stage === stage && item.requirementKey === requirement.key)
         const waiverBinding = bindings.find(binding => binding.waiverReason)
@@ -212,13 +217,13 @@ export function FdeWorkflowPanel({ project, files, mode = 'workflow', onChanged,
       })}</div>
     </Card></Modal>
 
-    {mode !== 'materials' && <Card className="fde-detail-reverse-plan">
-      <div className="fde-detail-card-head"><h2>投资周期行动计划</h2><div className="fde-detail-inline-actions">{data.plan && <Badge tone={planLocked ? 'green' : 'amber'}>{planLocked && <CheckCircle2 className="mr-1 h-3 w-3" />}V{data.plan.revision} · {planLocked ? '已通过·可修订' : data.plan.status === 'review' ? '审核中' : '草稿'}</Badge>}{canEditPlan && <Button variant="secondary" onClick={() => setPlanEditing(value => !value)}>{planEditing ? '收起编辑' : data.plan ? '编辑计划' : '制定计划'}</Button>}</div></div>
-      {canEditPlan && planEditing && <div className="p-4"><div className="flex flex-wrap items-end gap-3"><label><span className="label">周期</span><select className="input" disabled={planLocked} value={cycleDays} onChange={(event) => setCycleDays(Number(event.target.value))}>{data.policy.cycleDays.map((days) => <option value={days} key={days}>{days} 天</option>)}</select></label><label><span className="label">最终日期</span><input type="date" className="input" disabled={planLocked} value={targetDate} onChange={(event) => setTargetDate(event.target.value)} /></label>{!planLocked && <Button disabled={!targetDate} loading={busy} onClick={() => { void savePlan(true) }}>生成倒排计划</Button>}{actions.length > 0 && <Button variant="secondary" loading={busy} onClick={() => { void savePlan(false) }}><Save className="h-4 w-4" />{planLocked ? '保存已通过计划的变更' : '保存修订版'}</Button>}</div>{planLocked && <p className="mt-3 text-xs text-slate-500">周期和最终日期保持不变；任务、主责人、参与人和周期内截止日可修订，保存后同步老板、待办和日程。</p>}</div>}
-      {!data.plan && <p className="mt-4 rounded-lg bg-slate-50 p-4 text-sm text-slate-500">尚未制定计划，请由项目负责人选择周期和最终日期生成。</p>}
-      {data.plan && !planEditing && <div className="fde-detail-plan-list">{actions.map(action => <div className="fde-detail-plan-row" key={action.id}><button className={`fde-detail-plan-check ${action.status === '已完成' ? 'completed' : ''}`} disabled={!action.taskId} aria-label={`${action.title}：查看反馈与验收`} onClick={() => navigate(`/projects/${project.id}?tab=tasks`)}>{action.status === '已完成' ? '✓' : ''}</button><div><strong>{action.title}</strong><small>主责 {data.members.find(member => member.id === action.ownerUserId)?.name ?? '项目成员'} · 参与 {action.participantUserIds.map(id => data.members.find(member => member.id === id)?.name).filter(Boolean).join('、') || '主负责人'} · {shortProjectDate(action.effectiveDueDate)} · {action.status}</small><span>{action.deliverable || '尚未填写交付物'}</span></div></div>)}</div>}
-      {data.plan && planEditing && <div className="fde-plan-editor" aria-label="倒排计划任务编辑器">
-        <p className="fde-plan-editor-hint"><GripVertical className="h-4 w-4" />拖动左侧手柄调整顺序；每项可在上方或下方插入任务。保存并获批后，参与人会收到个人待办，截止日同步进入日程。</p>
+    {mode === 'tasks' && <Card className="fde-detail-reverse-plan">
+      <div className="fde-project-plan-summary"><div><span>项目计划</span><h2>{data.plan ? `V${data.plan.revision}` : '尚未配置'}</h2></div><dl><div><dt>项目目标日</dt><dd>{shortProjectDate(data.plan?.targetDate ?? project.targetDate)}</dd></div><div><dt>计划完成率</dt><dd>{planCompletion}%</dd></div><div><dt>最近更新</dt><dd>{data.plan?.updatedAt ? shortProjectDate(data.plan.updatedAt) : '未更新'}</dd></div></dl><div className="fde-detail-inline-actions">{data.plan && <Badge tone={planLocked ? 'green' : 'amber'}>{planLocked ? '已通过·可修订' : data.plan.status === 'review' ? '审核中' : '草稿'}</Badge>}{data.plan && <Button variant="secondary" onClick={() => setPlanExpanded(value => !value)}>{planExpanded ? '收起计划' : '展开计划'}</Button>}{canEditPlan && <Button onClick={() => { setPlanExpanded(true); setPlanEditing(value => !value) }}>{planEditing ? '结束编辑' : data.plan ? '编辑计划' : '配置计划'}</Button>}</div></div>
+      {!data.plan && !planEditing && <div className="fde-detail-plan-empty">尚未配置项目计划</div>}
+      {planExpanded && canEditPlan && planEditing && <div className="fde-plan-baseline"><div className="flex flex-wrap items-end gap-3"><label><span className="label">周期</span><select className="input" disabled={planLocked} value={cycleDays} onChange={(event) => setCycleDays(Number(event.target.value))}>{data.policy.cycleDays.map((days) => <option value={days} key={days}>{days} 天</option>)}</select></label><label><span className="label">最终日期</span><input type="date" className="input" disabled={planLocked} value={targetDate} onChange={(event) => setTargetDate(event.target.value)} /></label>{!planLocked && <Button disabled={!targetDate} loading={busy} onClick={() => { void savePlan(true) }}>生成计划</Button>}{actions.length > 0 && <Button variant="secondary" loading={busy} onClick={() => { void savePlan(false) }}><Save className="h-4 w-4" />保存修订</Button>}</div></div>}
+      {planExpanded && data.plan && !planEditing && <div className="fde-detail-plan-list">{actions.map(action => <div className="fde-detail-plan-row" key={action.id}><button className={`fde-detail-plan-check ${action.status === '已完成' ? 'completed' : ''}`} disabled={!action.taskId} aria-label={`${action.title}：打开对应任务`} onClick={() => navigate(`/projects/${project.id}?tab=tasks&task=${action.taskId ?? ''}`)}>{action.status === '已完成' ? '✓' : ''}</button><div><strong>{action.title}</strong><div className="fde-plan-row-facts"><span>主负责人：{data.members.find(member => member.id === action.ownerUserId)?.name ?? '未配置'}</span><span>参与人员：{action.participantUserIds.map(id => data.members.find(member => member.id === id)?.name).filter(Boolean).join('、') || '仅主负责人'}</span><span>截止日期：{shortProjectDate(action.effectiveDueDate)}</span><span>交付物：{action.deliverable || '未填写'}</span><Badge tone={action.status === '已完成' ? 'green' : action.status === '待验收' ? 'amber' : 'blue'}>{action.status}</Badge></div></div></div>)}</div>}
+      {planExpanded && data.plan && planEditing && <div className="fde-plan-editor" aria-label="项目计划任务编辑器">
+        <p className="fde-plan-editor-hint"><GripVertical className="h-4 w-4" />拖动调整顺序</p>
         {actions.map((action, index) => {
           const critical = ['internal_review', 'ic', 'payment', 'close'].includes(action.actionKey)
           return <article key={action.id} className={`fde-plan-editor-row ${draggedAction === index ? 'dragging' : ''}`} draggable onDragStart={() => setDraggedAction(index)} onDragEnd={() => setDraggedAction(null)} onDragOver={event => event.preventDefault()} onDrop={event => dropAction(index, event)}>
@@ -232,12 +237,12 @@ export function FdeWorkflowPanel({ project, files, mode = 'workflow', onChanged,
               </div>
               <details className="fde-plan-participants"><summary><Users className="h-4 w-4" />参与人员 <strong>{action.participantUserIds.length}</strong><span>{action.participantUserIds.map(id => data.members.find(member => member.id === id)?.name).filter(Boolean).join('、')}</span></summary><div>{data.members.map(member => <label key={member.id}><input type="checkbox" checked={action.participantUserIds.includes(member.id)} disabled={member.id === action.ownerUserId} onChange={event => updateAction(index, { participantUserIds: event.target.checked ? [...action.participantUserIds, member.id] : action.participantUserIds.filter(id => id !== member.id) })} /><span>{member.name}</span><small>{member.role}{member.id === action.ownerUserId ? ' · 主负责人' : ''}</small></label>)}</div></details>
             </div>
-            <div className="fde-plan-editor-actions"><button type="button" onClick={() => addAction(index, false)}><Plus />上方增加</button><button type="button" onClick={() => addAction(index, true)}><Plus />下方增加</button><button type="button" className="danger" disabled={critical} title={critical ? '内核、投决、打款与 Close 为流程关键任务，不可删除' : '删除此任务'} onClick={() => setActions(current => current.filter((_, itemIndex) => itemIndex !== index))}><Trash2 />删除</button></div>
+            <div className="fde-plan-editor-actions"><button type="button" onClick={() => addAction(index, false)}><Plus />上方增加</button><button type="button" onClick={() => addAction(index, true)}><Plus />下方增加</button><button type="button" className="danger" disabled={critical} title={critical ? '内核、投决、打款与完成交割为流程关键任务，不可删除' : '删除此任务'} onClick={() => setActions(current => current.filter((_, itemIndex) => itemIndex !== index))}><Trash2 />删除</button></div>
           </article>
         })}
       </div>}
-      {data.planHistory.length > 1 && <p className="mt-4 text-xs text-slate-500">历史计划版本：{data.planHistory.map((plan) => `V${plan.revision}（${plan.status === 'archived' ? '已归档' : '当前'}，${plan.targetDate}）`).join(' · ')}</p>}
+      {data.planHistory.length > 1 && <div className="fde-plan-history" aria-label="历史计划版本"><span>历史版本</span><div>{data.planHistory.map((plan) => <Badge key={plan.id} tone={plan.status === 'archived' ? 'slate' : 'blue'}>V{plan.revision} · {plan.status === 'archived' ? '已归档' : '当前'} · {shortProjectDate(plan.targetDate)}</Badge>)}</div></div>}
     </Card>}
-    <Modal open={Boolean(waiver)} onClose={() => setWaiver(null)} title={`材料免传：${waiver?.label ?? ''}`} footer={<><Button variant="secondary" onClick={() => setWaiver(null)}>取消</Button><Button loading={busy} disabled={waiverReason.trim().length < 5} onClick={async () => { if (waiver) { await bind(waiver.key, undefined, waiverReason); setWaiver(null) } }}>保存免传说明</Button></>}><p className="mb-3 text-sm text-slate-500">免传不等于材料已存在。说明将与申请一起交给审批人并记录审计。</p><textarea className="textarea min-h-28" value={waiverReason} onChange={(event) => setWaiverReason(event.target.value)} placeholder="填写免传原因、替代证据及责任说明（至少 5 字）" /></Modal>
+    <Modal open={Boolean(waiver)} onClose={() => setWaiver(null)} title={`材料免传：${waiver?.label ?? ''}`} footer={<><Button variant="secondary" onClick={() => setWaiver(null)}>取消</Button><Button loading={busy} disabled={waiverReason.trim().length < 5} onClick={async () => { if (waiver) { await bind(waiver.key, undefined, waiverReason); setWaiver(null) } }}>保存免传说明</Button></>}><p className="mb-3 text-sm text-slate-500">请填写免传原因和替代证据。</p><textarea className="textarea min-h-28" value={waiverReason} onChange={(event) => setWaiverReason(event.target.value)} placeholder="填写免传原因、替代证据及责任说明（至少 5 字）" /></Modal>
   </div>
 }

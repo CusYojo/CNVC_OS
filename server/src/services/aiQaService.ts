@@ -21,7 +21,7 @@ import {
   dedupeTextList,
   isNearDuplicate,
 } from './aiEvidenceQualityService.js'
-import { cleanCorruptedText } from './textQualityService.js'
+import { cleanCorruptedText, readableStoredText } from './textQualityService.js'
 import {
   fetchProjectQaModelEvidence,
 } from './aiQaModelResearchService.js'
@@ -178,17 +178,19 @@ async function evidenceForProject(
     : []
   const candidates = [
     ...projectEvidence,
-    ...rows.map((row): QaEvidence => ({
+    ...rows.map((row): QaEvidence => {
+      const content = readableStoredText(row.content)
+      return ({
       sourceType: row.sourceType,
       sourceId: row.sourceId,
       sourceName: row.sourceName || '项目资料',
       chunkIndex: row.chunkIndex,
       versionOrDate: formatShanghaiDateKey(row.createdAt),
       locator: row.sourceType.startsWith('public_web')
-        ? row.content.match(/(?:来源网址|规范化\s*URL|页面\s*URL)[:：]\s*(https?:\/\/\S+)/i)?.[1]
+        ? content.match(/(?:来源网址|规范化\s*URL|页面\s*URL)[:：]\s*(https?:\/\/\S+)/i)?.[1]
         : undefined,
-      content: row.content,
-    })),
+      content,
+    }) }).filter((source) => Boolean(source.content)),
   ]
   return curateEvidenceSources(candidates, { maxTotal: 12, maxPerDocument: 2 }).usable
 }

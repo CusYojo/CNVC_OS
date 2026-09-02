@@ -12,75 +12,86 @@ const capabilities = await import('../src/services/aiCapabilityService.js')
 const im = await import('../src/services/imIntegrationService.js')
 after(() => pool.end())
 
-const actor = { userId: 'secondary-admin', userName: '多角色测试用户', role: '董事长', department: '管理层' }
-const boundaries = [
-  { name: '模型', permission: 'ai.configure', guard: models.assertAiModelAdmin, list: models.listModelSettings },
-  { name: '能力', permission: 'ai.configure', guard: capabilities.assertAiCapabilityAdmin, list: capabilities.listCapabilitySettings },
-  { name: 'IM', permission: 'im.manage', guard: im.assertImAdmin, list: im.listImSettings },
-]
+const businessActor = { userId: 'business-user', userName: '业务用户', role: '投资经理', department: '投资部' }
+const aiAdminActor = { ...businessActor, userId: 'ai-admin', userName: 'AI 管理员', role: 'AI平台管理员' }
+const systemAdminActor = { ...businessActor, userId: 'system-admin', userName: '系统管理员', role: '系统管理员' }
 
-for (const boundary of boundaries) {
-  test(`${boundary.name}管理接受附加角色权限，并在权限撤销后拒绝访问`, async (t) => {
-    let granted = [boundary.permission]
-    const permissionLookup = t.mock.method(identityRepositories.users, 'listPermissionCodes', async (userId: string) => {
-      assert.equal(userId, actor.userId)
-      return granted
-    })
-    await boundary.guard(actor)
-    granted = []
-    await assert.rejects(boundary.guard(actor), { code: 'ROLE_FORBIDDEN', status: 403 })
-    assert.equal(permissionLookup.mock.callCount(), 2)
-  })
-
-  test(`${boundary.name}管理不能仅凭管理员主角色名称或无关权限放行`, async (t) => {
-    t.mock.method(identityRepositories.users, 'listPermissionCodes', async () => ['fde.governance.manage', 'system.manage'])
-    for (const role of ['董事长', '系统管理员', 'AI平台管理员', '运营管理员']) {
-      await assert.rejects(boundary.guard({ ...actor, role }), { code: 'ROLE_FORBIDDEN', status: 403 })
+for (const boundary of [
+  { name: '模型', guard: models.assertAiModelAdmin },
+  { name: '能力', guard: capabilities.assertAiCapabilityAdmin },
+]) {
+  test(`${boundary.name}管理仅接受明确的 AI 或系统管理角色`, async () => {
+    await boundary.guard(aiAdminActor)
+    await boundary.guard(systemAdminActor)
+    for (const role of ['董事长', '合伙人', '投资经理', '法务', '风控', '董秘', '运营管理员']) {
+      await assert.rejects(boundary.guard({ ...businessActor, role }), { code: 'ROLE_FORBIDDEN', status: 403 })
     }
-  })
-
-  test(`${boundary.name}设置读取等待权限结果，拒绝时不读取配置`, async (t) => {
-    let release!: (codes: string[]) => void
-    t.mock.method(identityRepositories.users, 'listPermissionCodes', () => new Promise<string[]>(resolve => { release = resolve }))
-    const modelRead = t.mock.method(aiConfigurationRepository, 'listModelSettings', async () => { throw new Error('unauthorized read') })
-    const capabilityRead = t.mock.method(aiConfigurationRepository, 'listCapabilitySettings', async () => { throw new Error('unauthorized read') })
-    const imRead = t.mock.method(imIntegrationRepository, 'listSettingsData', async () => { throw new Error('unauthorized read') })
-    const pending = boundary.list(actor)
-    assert.equal(modelRead.mock.callCount() + capabilityRead.mock.callCount() + imRead.mock.callCount(), 0)
-    release([])
-    await assert.rejects(pending, { code: 'ROLE_FORBIDDEN', status: 403 })
-    assert.equal(modelRead.mock.callCount() + capabilityRead.mock.callCount() + imRead.mock.callCount(), 0)
   })
 }
 
-test('附加管理员可读取模型、能力与 IM 设置', async (t) => {
-  t.mock.method(identityRepositories.users, 'listPermissionCodes', async () => ['ai.configure', 'im.manage'])
-  t.mock.method(aiConfigurationRepository, 'listModelSettings', async () => ({ providers: [], models: [], routes: [] }))
-  t.mock.method(aiConfigurationRepository, 'listCapabilitySettings', async () => ({ capabilities: [], bindings: [], projects: [] }))
-  t.mock.method(imIntegrationRepository, 'listSettingsData', async () => ({ bots: [], bindings: [], outbox: [], logs: [], users: [], projects: [], conversations: [] }))
-  assert.deepEqual((await models.listModelSettings(actor)).providers, [])
-  assert.deepEqual((await capabilities.listCapabilitySettings(actor)).capabilities, [])
-  assert.deepEqual((await im.listImSettings(actor)).bots, [])
+test('未授权用户读取模型设置前即被拒绝', async (t) => {
+  const read = t.mock.method(aiConfigurationRepository, 'listModelSettings', async () => { throw new Error('unauthorized read') })
+  await assert.rejects(models.listModelSettings(businessActor), { code: 'ROLE_FORBIDDEN', status: 403 })
+  assert.equal(read.mock.callCount(), 0)
 })
 
-test('权限查询失败时配置管理不放行', async (t) => {
+test('未授权用户读取能力设置前即被拒绝', async (t) => {
+  const read = t.mock.method(aiConfigurationRepository, 'listCapabilitySettings', async () => { throw new Error('unauthorized read') })
+  await assert.rejects(capabilities.listCapabilitySettings(businessActor), { code: 'ROLE_FORBIDDEN', status: 403 })
+  assert.equal(read.mock.callCount(), 0)
+})
+
+test('AI 平台管理员可读取模型与能力配置', async (t) => {
+  t.mock.method(aiConfigurationRepository, 'listModelSettings', async () => ({ providers: [], models: [], routes: [] }))
+  t.mock.method(aiConfigurationRepository, 'listCapabilitySettings', async () => ({ capabilities: [], bindings: [], projects: [] }))
+  assert.deepEqual((await models.listModelSettings(aiAdminActor)).providers, [])
+  assert.deepEqual((await capabilities.listCapabilitySettings(aiAdminActor)).capabilities, [])
+})
+
+test('IM 管理使用明确权限码，撤销后立即拒绝', async (t) => {
+  let granted = ['im.manage']
+  const lookup = t.mock.method(identityRepositories.users, 'listPermissionCodes', async () => granted)
+  await im.assertImAdmin(businessActor)
+  granted = []
+  await assert.rejects(im.assertImAdmin(businessActor), { code: 'ROLE_FORBIDDEN', status: 403 })
+  assert.equal(lookup.mock.callCount(), 2)
+})
+
+test('IM 设置读取会等待权限结果，拒绝时不读数据', async (t) => {
+  let release!: (codes: string[]) => void
+  t.mock.method(identityRepositories.users, 'listPermissionCodes', () => new Promise<string[]>(resolve => { release = resolve }))
+  const read = t.mock.method(imIntegrationRepository, 'listSettingsData', async () => { throw new Error('unauthorized read') })
+  const pending = im.listImSettings(businessActor)
+  assert.equal(read.mock.callCount(), 0)
+  release([])
+  await assert.rejects(pending, { code: 'ROLE_FORBIDDEN', status: 403 })
+  assert.equal(read.mock.callCount(), 0)
+})
+
+test('IM 管理权限用户可读取设置', async (t) => {
+  t.mock.method(identityRepositories.users, 'listPermissionCodes', async () => ['im.manage'])
+  t.mock.method(imIntegrationRepository, 'listSettingsData', async () => ({ bots: [], bindings: [], outbox: [], logs: [], users: [], projects: [], conversations: [] }))
+  assert.deepEqual((await im.listImSettings(businessActor)).bots, [])
+})
+
+test('IM 权限查询失败时不放行', async (t) => {
   const failure = new Error('permission lookup failed')
   t.mock.method(identityRepositories.users, 'listPermissionCodes', async () => { throw failure })
-  for (const boundary of boundaries) await assert.rejects(boundary.guard(actor), error => error === failure)
+  await assert.rejects(im.assertImAdmin(businessActor), error => error === failure)
 })
 
 test('IM 发送的管理员标记使用已授予权限，保留普通绑定用户路径', async (t) => {
   let granted = ['im.manage']
   t.mock.method(identityRepositories.users, 'listPermissionCodes', async () => granted)
   const enqueue = t.mock.method(imIntegrationRepository, 'enqueueMessageWithAudit', async (input) => {
-    assert.equal(input.actorUserId, actor.userId)
+    assert.equal(input.actorUserId, businessActor.userId)
     assert.equal(input.actorIsAdmin, granted.includes('im.manage'))
     return { status: 'forbidden' as const }
   })
   const input = { botId: 'bot', bindingId: 'binding', idempotencyKey: 'message', message: 'test' }
-  await assert.rejects(im.enqueueImMessage(input, actor), { code: 'IM_BINDING_FORBIDDEN' })
+  await assert.rejects(im.enqueueImMessage(input, businessActor), { code: 'IM_BINDING_FORBIDDEN' })
   granted = []
-  await assert.rejects(im.enqueueImMessage(input, actor), { code: 'IM_BINDING_FORBIDDEN' })
+  await assert.rejects(im.enqueueImMessage(input, businessActor), { code: 'IM_BINDING_FORBIDDEN' })
   assert.equal(enqueue.mock.callCount(), 2)
 })
 

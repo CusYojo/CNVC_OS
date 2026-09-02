@@ -1,7 +1,7 @@
 /* Port of the retained FDE detail workspace. Every rule stays on this page. */
 body:has(.fde-project-detail) { min-width: 320px; }
 .fde-project-detail { min-width: 0; }
-.fde-project-detail .fde-detail-breadcrumb { min-height: 30px; margin-bottom: 10px; display: flex; align-items: center; color: var(--ink-3); font-size: 11px; }
+.fde-project-detail .fde-detail-breadcrumb { min-height: 30px; margin-bottom: 10px; display: flex; align-items: center; color: var(--ink-3); font-size: 12px; }
 .fde-project-detail .fde-detail-breadcrumb button { display: flex; align-items: center; gap: 4px; color: var(--brand-strong); font-weight: 600; }
 .fde-project-detail > .fde-ui-card.fde-detail-hero { display: grid; grid-template-columns: minmax(360px, 1.2fr) minmax(420px, .95fr) auto; gap: 20px; padding: 18px 20px; align-items: center; margin: 0; }
 .fde-project-detail .fde-detail-identity { display: flex; align-items: flex-start; gap: 14px; min-width: 0; }
@@ -9,23 +9,23 @@ body:has(.fde-project-detail) { min-width: 320px; }
 .fde-project-detail .fde-detail-logo { display: grid; place-items: center; width: 52px; height: 52px; flex: 0 0 52px; border-radius: 13px; background: var(--brand-soft); color: var(--brand-strong); font-size: 16px; font-weight: 700; }
 .fde-project-detail .fde-detail-logo.gold { color: #715631; background: #e8d9b8; }
 .fde-project-detail .fde-detail-eyebrow { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
-.fde-project-detail .fde-detail-eyebrow > span { padding: 2px 8px; border: 1px solid var(--line); border-radius: 20px; color: var(--ink-2); background: var(--surface-2); font-size: 10px; line-height: 1.55; }
+.fde-project-detail .fde-detail-eyebrow > span { padding: 2px 8px; border: 1px solid var(--line); border-radius: 20px; color: var(--ink-2); background: var(--surface-2); font-size: 12px; line-height: 1.55; }
 .fde-project-detail .fde-detail-eyebrow > .subtle { color: var(--brand-strong); background: var(--brand-soft); border-color: transparent; }
-.fde-project-detail .fde-detail-eyebrow small { padding: 2px 8px; border: 1px solid color-mix(in srgb, var(--gold) 20%, var(--line)); border-radius: 20px; color: #8a6b3e; background: #f5f0e8; font-size: 10px; }
+.fde-project-detail .fde-detail-eyebrow small { padding: 2px 8px; border: 1px solid color-mix(in srgb, var(--gold) 20%, var(--line)); border-radius: 20px; color: #8a6b3e; background: #f5f0e8; font-size: 12px; }
 .fde-project-detail .fde-detail-identity h1 { margin: 5px 0 0; overflow-wrap: anywhere; color: var(--ink); font-size: clamp(20px, 1.8vw, 26px); font-weight: 700; line-height: 1.25; letter-spacing: -.02em; }
 .fde-project-detail .fde-detail-objective { display: -webkit-box; margin: 7px 0 0; max-width: 720px; overflow: hidden; color: var(--ink-2); font-size: 12px; line-height: 1.55; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
-.fde-project-detail .fde-detail-meta { display: flex; flex-wrap: wrap; gap: 5px 14px; margin-top: 8px; color: var(--ink-3); font-size: 11px; }
+.fde-project-detail .fde-detail-meta { display: flex; flex-wrap: wrap; gap: 5px 14px; margin-top: 8px; color: var(--ink-3); font-size: 12px; }
 .fde-project-detail .fde-detail-meta span { overflow-wrap: anywhere; }
 .fde-project-detail .fde-detail-states { min-width: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); }
 .fde-project-detail .fde-detail-states > div { min-width: 0; min-height: 54px; padding: 7px 14px; border-left: 1px solid var(--line); }
 .fde-project-detail .fde-detail-states > div:first-child { border-left: 0; }
-.fde-project-detail .fde-detail-states > div > span:first-child { display: block; margin-bottom: 4px; color: var(--ink-3); font-size: 9px; }
+.fde-project-detail .fde-detail-states > div > span:first-child { display: block; margin-bottom: 4px; color: var(--ink-3); font-size: 12px; }
 .fde-project-detail .fde-detail-states strong { font-size: 12px; }
-.fde-project-detail .fde-detail-states small { display: block; color: var(--ink-3); font-size: 10px; line-height: 1.5; }
+.fde-project-detail .fde-detail-states small { display: block; color: var(--ink-3); font-size: 12px; line-height: 1.5; }
 .fde-project-detail .fde-detail-actions { max-width: 240px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; justify-content: flex-end; }
-.fde-project-detail .fde-detail-actions > small { color: var(--warning); font-size: 10px; }
+.fde-project-detail .fde-detail-actions > small { color: var(--warning); font-size: 12px; }
 .fde-project-detail .fde-detail-actions .fde-ui-button { white-space: nowrap; }
-.fde-project-detail .fde-detail-tabs { position: sticky; top: 70px; z-index: 18; margin-top: 10px; padding: 4px; display: grid; grid-template-columns: repeat(4, minmax(110px, 1fr)); gap: 3px; border: 1px solid var(--line); border-radius: 11px; background: color-mix(in srgb, var(--surface) 96%, transparent); box-shadow: 0 7px 18px color-mix(in srgb, var(--ink) 5%, transparent); backdrop-filter: blur(12px); }
+.fde-project-detail .fde-detail-tabs { position: sticky; top: 70px; z-index: 18; margin-top: 10px; padding: 4px; display: grid; grid-template-columns: repeat(4, minmax(110px, 1fr)); gap: 3px; border: 1px solid var(--line); border-radius: 11px; background: color-mix(in srgb, var(--surface) 96%, transparent); box-shadow: none; backdrop-filter: blur(12px); }
 .fde-project-detail .fde-detail-tabs button { min-width: 0; min-height: 39px; border: 0; border-radius: 8px; color: var(--ink-2); font-size: 13px; }
 .fde-project-detail .fde-detail-tabs button.active { color: var(--brand-strong); background: var(--brand-soft); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--brand) 16%, transparent); font-weight: 650; }
 .fde-project-detail .fde-detail-tabs button:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; }
@@ -35,7 +35,7 @@ body:has(.fde-project-detail) { min-width: 320px; }
 .fde-project-detail .fde-detail-card-head { min-height: 56px; padding: 13px 18px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--line); }
 .fde-project-detail .fde-detail-card-head h2 { font-size: 14px; font-weight: 650; }
 .fde-project-detail .fde-detail-inline-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: flex-end; }
-.fde-project-detail .fde-detail-inline-actions > span { color: var(--ink-3); font-size: 11px; }
+.fde-project-detail .fde-detail-inline-actions > span { color: var(--ink-3); font-size: 12px; }
 .fde-project-detail .fde-detail-inline-actions > span strong { margin-left: 5px; color: var(--ink); font-size: 12px; }
 .fde-project-detail .fde-detail-timeline { display: grid; grid-template-columns: repeat(var(--stage-count, 8), minmax(0, 1fr)); width: 100%; gap: 0; padding: 23px 12px 25px; overflow: hidden; }
 .fde-project-detail .fde-detail-stage { position: relative; display: grid; min-width: 0; min-height: 116px; padding: 0 5px; grid-template-rows: 38px minmax(49px, auto) 24px; gap: 5px; align-items: start; text-align: center; }
@@ -49,19 +49,19 @@ body:has(.fde-project-detail) { min-width: 320px; }
 .fde-project-detail .fde-detail-stage:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; border-radius: 8px; }
 .fde-project-detail .fde-detail-stage-copy { min-width: 0; padding: 5px 2px 0; position: relative; z-index: 2; background: var(--surface); }
 .fde-project-detail .fde-detail-stage-copy strong { min-height: 35px; display: grid; place-items: start center; font-size: 12px; font-weight: 600; line-height: 1.4; }
-.fde-project-detail .fde-detail-stage-copy small { display: block; margin-top: 2px; color: var(--ink-3); font-size: 11px; line-height: 1.35; }
+.fde-project-detail .fde-detail-stage-copy small { display: block; margin-top: 2px; color: var(--ink-3); font-size: 12px; line-height: 1.35; }
 .fde-project-detail .fde-detail-stage-state { display: flex; justify-content: center; }
-.fde-project-detail .fde-detail-stage-state .fde-ui-badge { min-height: 20px; padding: 2px 7px; font-size: 11px; }
+.fde-project-detail .fde-detail-stage-state .fde-ui-badge { min-height: 20px; padding: 2px 7px; font-size: 12px; }
 .fde-project-detail .fde-ui-card.fde-detail-stage-focus { overflow: hidden; border-top: 3px solid var(--brand); }
 .fde-project-detail .fde-detail-focus-layout { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(270px, .72fr); align-items: stretch; }
 .fde-project-detail .fde-detail-focus-facts { padding: 17px 18px 19px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 9px; }
 .fde-project-detail .fde-detail-focus-facts > div { min-width: 0; padding: 11px 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-2); }
 .fde-project-detail .fde-detail-focus-facts span, .fde-project-detail .fde-detail-focus-facts strong { display: block; }
-.fde-project-detail .fde-detail-focus-facts span { color: var(--ink-3); font-size: 11px; }
+.fde-project-detail .fde-detail-focus-facts span { color: var(--ink-3); font-size: 12px; }
 .fde-project-detail .fde-detail-focus-facts strong { margin-top: 4px; overflow-wrap: anywhere; font-size: 12px; line-height: 1.45; }
 .fde-project-detail .fde-detail-next-step { display: flex; flex-direction: column; justify-content: center; padding: 17px 20px; border-left: 1px solid var(--line); background: color-mix(in srgb, var(--brand-soft) 42%, var(--surface)); }
 .fde-project-detail .fde-detail-next-step.warning { background: color-mix(in srgb, var(--warning-soft) 58%, var(--surface)); }
-.fde-project-detail .fde-detail-next-step > span { color: var(--ink-3); font-size: 11px; }
+.fde-project-detail .fde-detail-next-step > span { color: var(--ink-3); font-size: 12px; }
 .fde-project-detail .fde-detail-next-step strong { margin-top: 6px; font-size: 13px; line-height: 1.5; }
 .fde-project-detail .fde-detail-empty { padding: 24px 18px; color: var(--ink-3); text-align: center; font-size: 12px; }
 .fde-project-detail .fde-detail-plan-list { padding: 0 18px; }
@@ -71,30 +71,30 @@ body:has(.fde-project-detail) { min-width: 320px; }
 .fde-project-detail .fde-detail-plan-check.completed { background: var(--positive-soft); border-color: var(--positive); }
 .fde-project-detail .fde-detail-plan-row strong, .fde-project-detail .fde-detail-plan-row small, .fde-project-detail .fde-detail-plan-row div > span { display: block; }
 .fde-project-detail .fde-detail-plan-row strong { font-size: 12px; font-weight: 600; }
-.fde-project-detail .fde-detail-plan-row small { margin-top: 3px; color: var(--ink-3); font-size: 11px; }
-.fde-project-detail .fde-detail-plan-row div > span { margin-top: 4px; color: var(--ink-2); font-size: 11px; }
+.fde-project-detail .fde-detail-plan-row small { margin-top: 3px; color: var(--ink-3); font-size: 12px; }
+.fde-project-detail .fde-detail-plan-row div > span { margin-top: 4px; color: var(--ink-2); font-size: 12px; }
 .fde-project-detail .fde-detail-material-row { display: grid; width: 100%; grid-template-columns: 24px minmax(0, 1fr) 150px 14px; align-items: center; gap: 12px; padding: 14px 18px; text-align: left; border-bottom: 1px solid var(--line); }
 .fde-project-detail .fde-detail-material-row:last-child { border-bottom: 0; }
 .fde-project-detail .fde-detail-material-row.current { background: color-mix(in srgb, var(--brand-soft) 36%, var(--surface)); }
 .fde-project-detail .fde-detail-material-row strong { display: block; font-size: 12px; font-weight: 600; }
-.fde-project-detail .fde-detail-material-row small { display: block; margin-top: 4px; color: var(--ink-3); font-size: 11px; }
+.fde-project-detail .fde-detail-material-row small { display: block; margin-top: 4px; color: var(--ink-3); font-size: 12px; }
 .fde-project-detail .fde-detail-material-marker { color: var(--brand); }
 .fde-project-detail .fde-detail-material-progress { display: flex; align-items: center; gap: 12px; }
 .fde-project-detail .fde-detail-material-progress > span { width: 84px; height: 5px; overflow: hidden; border-radius: 5px; background: var(--surface-3); }
 .fde-project-detail .fde-detail-material-progress i { display: block; height: 100%; background: var(--brand); }
 .fde-project-detail .fde-detail-collaboration-toolbar { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; padding: 3px 0; }
 .fde-project-detail .fde-detail-collaboration-toolbar strong { font-size: 14px; }
-.fde-project-detail .fde-detail-collaboration-toolbar div > span { margin-left: 12px; color: var(--ink-3); font-size: 11px; }
+.fde-project-detail .fde-detail-collaboration-toolbar div > span { margin-left: 12px; color: var(--ink-3); font-size: 12px; }
 .fde-project-detail .fde-detail-collaboration-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 13px; align-items: start; }
 .fde-project-detail .fde-detail-meeting-list > button { display: flex; width: 100%; align-items: center; gap: 12px; padding: 13px 18px; text-align: left; border-bottom: 1px solid var(--line); }
 .fde-project-detail .fde-detail-meeting-list > button > span:nth-child(2) { flex: 1; min-width: 0; }
 .fde-project-detail .fde-detail-meeting-list strong { display: block; font-size: 12px; }
-.fde-project-detail .fde-detail-meeting-list small { display: block; color: var(--ink-3); font-size: 11px; }
+.fde-project-detail .fde-detail-meeting-list small { display: block; color: var(--ink-3); font-size: 12px; }
 .fde-project-detail .fde-detail-date-tile { flex: 0 0 38px; padding: 5px; border-radius: 8px; background: var(--brand-soft); color: var(--brand-strong); text-align: center; }
 .fde-project-detail .fde-detail-activity-list { padding: 0 18px; }
 .fde-project-detail .fde-detail-activity-list > div { display: flex; gap: 12px; padding: 12px 0; }
 .fde-project-detail .fde-detail-activity-list > div > span { width: 6px; height: 6px; margin-top: 7px; flex-shrink: 0; border-radius: 50%; background: var(--brand); }
-.fde-project-detail .fde-detail-activity-list strong, .fde-project-detail .fde-detail-activity-list small { display: block; font-size: 11px; }
+.fde-project-detail .fde-detail-activity-list strong, .fde-project-detail .fde-detail-activity-list small { display: block; font-size: 12px; }
 .fde-project-detail .fde-detail-activity-list small { margin-top: 3px; color: var(--ink-3); }
 .fde-project-detail .fde-detail-directives > .fde-panel, .fde-project-detail .fde-detail-records > .fde-panel { padding: 0; overflow: hidden; }
 .fde-project-detail .fde-detail-directives > .fde-panel > div:first-child, .fde-project-detail .fde-detail-records > .fde-panel > div:first-child { min-height: 56px; padding: 13px 18px; border-bottom: 1px solid var(--line); }
@@ -103,10 +103,10 @@ body:has(.fde-project-detail) { min-width: 320px; }
 .fde-project-detail .fde-detail-file-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; padding: 18px; }
 .fde-project-detail .fde-detail-file-card { min-width: 0; padding: 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
 .fde-project-detail .fde-detail-file-card > button { display: flex; width: 100%; gap: 12px; text-align: left; }
-.fde-project-detail .fde-detail-file-icon { display: grid; flex: 0 0 38px; height: 44px; place-items: center; border: 1px solid var(--line); border-radius: 7px; background: var(--brand-soft); color: var(--brand-strong); font-size: 10px; font-weight: 700; }
+.fde-project-detail .fde-detail-file-icon { display: grid; flex: 0 0 38px; height: 44px; place-items: center; border: 1px solid var(--line); border-radius: 7px; background: var(--brand-soft); color: var(--brand-strong); font-size: 12px; font-weight: 700; }
 .fde-project-detail .fde-detail-file-card strong { display: block; overflow-wrap: anywhere; font-size: 12px; font-weight: 600; }
-.fde-project-detail .fde-detail-file-card small { display: block; margin-top: 4px; color: var(--ink-3); font-size: 11px; }
-.fde-project-detail .fde-detail-file-card footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--line); color: var(--ink-3); font-size: 11px; }
+.fde-project-detail .fde-detail-file-card small { display: block; margin-top: 4px; color: var(--ink-3); font-size: 12px; }
+.fde-project-detail .fde-detail-file-card footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--line); color: var(--ink-3); font-size: 12px; }
 .fde-project-detail .fde-detail-tasks > .fde-panel { padding: 0; overflow: hidden; }
 .fde-project-detail .fde-detail-task-head { min-height: 68px; padding: 13px 18px; border-bottom: 1px solid var(--line); }
 .fde-project-detail .fde-detail-task-list { margin-top: 0; padding: 0 18px; }
@@ -115,10 +115,23 @@ body:has(.fde-project-detail) { min-width: 320px; }
 .fde-project-detail .fde-detail-task-list > section { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 14px; align-items: center; }
 .fde-project-detail .fde-detail-task-summary { grid-column: 1; grid-row: 1; }
 .fde-project-detail .fde-detail-task-controls { grid-column: 2; grid-row: 1; margin-top: 0; justify-content: flex-end; }
-.fde-project-detail .fde-detail-task-controls .fde-ui-button { min-height: 30px; height: 30px; padding: 0 9px; font-size: 11px; }
+.fde-project-detail .fde-detail-task-controls .fde-ui-button { min-height: 30px; height: 30px; padding: 0 9px; font-size: 12px; }
 .fde-project-detail .fde-detail-task-list > section > p, .fde-project-detail .fde-detail-task-list > section > details { grid-column: 1 / -1; }
 .fde-project-detail .fde-detail-file-head > div > p { display: none; }
-.fde-project-detail .fde-detail-task-counts { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 4px; color: var(--ink-3); font-size: 11px; }
+.fde-project-detail .fde-detail-task-counts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; color: var(--ink-2); font-size: 12px; }
+.fde-project-detail .fde-detail-task-counts span { padding: 3px 8px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface-2); }
+.fde-project-detail .fde-plan-history { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin: 0; padding: 12px 18px; border-top: 1px solid var(--line); background: var(--surface-2); }
+.fde-project-detail .fde-plan-history > span { color: var(--ink-3); font-size: 12px; font-weight: 650; letter-spacing: .06em; }
+.fde-project-detail .fde-plan-history > div { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
+.fde-project-detail .fde-detail-task-section { margin: 0; border-top: 1px solid var(--line); }
+.fde-project-detail .fde-detail-task-section > header, .fde-project-detail .fde-detail-task-section > summary { min-height: 52px; padding: 11px 18px; display: flex; align-items: center; justify-content: space-between; gap: 12px; background: var(--surface-2); cursor: default; list-style: none; }
+.fde-project-detail .fde-detail-task-section > summary { cursor: pointer; }
+.fde-project-detail .fde-detail-task-section > summary::-webkit-details-marker { display: none; }
+.fde-project-detail .fde-detail-task-section > header div, .fde-project-detail .fde-detail-task-section > summary div { display: flex; align-items: center; gap: 9px; }
+.fde-project-detail .fde-detail-task-section > header strong, .fde-project-detail .fde-detail-task-section > summary strong { font-size: 13px; }
+.fde-project-detail .fde-detail-task-section > header span, .fde-project-detail .fde-detail-task-section > summary span { padding: 2px 7px; border-radius: 999px; color: var(--brand-strong); background: var(--brand-soft); font-size: 12px; }
+.fde-project-detail .fde-detail-task-section > header small, .fde-project-detail .fde-detail-task-section > summary small { color: var(--ink-3); font-size: 12px; }
+.fde-project-detail .fde-detail-task-completed > summary span { color: var(--positive); background: var(--positive-soft); }
 .fde-project-detail .fde-detail-agent { padding: 0; overflow: hidden; }
 .fde-project-detail .fde-detail-agent > div:first-child { padding: 13px 18px; border-bottom: 1px solid var(--line); }
 .fde-project-detail .fde-detail-agent > p, .fde-project-detail .fde-detail-agent > div:not(:first-child) { margin: 0; padding: 16px 18px; }
@@ -127,34 +140,49 @@ body:has(.fde-project-detail) { min-width: 320px; }
 .fde-project-detail .fde-detail-agent-result h3 { margin: 11px 0 0; font-size: clamp(18px, 1.6vw, 22px); font-weight: 650; line-height: 1.35; letter-spacing: -.02em; }
 .fde-project-detail .fde-detail-agent-result p { margin-top: 8px; color: var(--ink-2); font-size: 13px; line-height: 1.7; overflow-wrap: anywhere; }
 .fde-project-detail .fde-detail-agent-next { min-width: 0; padding: 14px 16px; display: flex; flex-direction: column; justify-content: center; border: 1px solid var(--line); border-radius: 11px; background: var(--surface-2); }
-.fde-project-detail .fde-detail-agent-next > span, .fde-project-detail .fde-detail-agent-next small { color: var(--ink-3); font-size: 11px; }
+.fde-project-detail .fde-detail-agent-next > span, .fde-project-detail .fde-detail-agent-next small { color: var(--ink-3); font-size: 12px; }
 .fde-project-detail .fde-detail-agent-next > strong { margin-top: 6px; font-size: 13px; line-height: 1.55; overflow-wrap: anywhere; }
 .fde-project-detail .fde-detail-agent-next small { margin-top: 8px; }
 .fde-project-detail .fde-detail-agent-dates { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 10px; align-items: center; margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
-.fde-project-detail .fde-detail-agent-dates span { display: block; color: var(--ink-3); font-size: 10px; }
+.fde-project-detail .fde-detail-agent-dates span { display: block; color: var(--ink-3); font-size: 12px; }
 .fde-project-detail .fde-detail-agent-dates strong { display: block; margin-top: 4px; font-size: 13px; }
 .fde-project-detail .fde-detail-agent-dates b { color: var(--purple); }
+.fde-project-detail .fde-progress-assessment { padding: 16px 18px; }
+.fde-project-detail .fde-progress-assessment-status { display: flex; align-items: center; gap: 12px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface-2); }
+.fde-project-detail .fde-progress-assessment-status > svg { width: 24px; height: 24px; color: var(--positive); }
+.fde-project-detail .fde-progress-assessment-status.amber > svg, .fde-project-detail .fde-progress-assessment-status.red > svg { color: var(--warning); }
+.fde-project-detail .fde-progress-assessment-status > div { min-width: 0; flex: 1; }
+.fde-project-detail .fde-progress-assessment-status span { display: block; color: var(--ink-3); font-size: 12px; }
+.fde-project-detail .fde-progress-assessment-status strong { display: block; margin-top: 3px; font-size: 17px; }
+.fde-project-detail .fde-progress-assessment-detail { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(260px, .7fr); gap: 18px; margin-top: 14px; }
+.fde-project-detail .fde-progress-assessment-detail > div, .fde-project-detail .fde-progress-assessment-detail dl { padding: 14px 16px; border: 1px solid var(--line); border-radius: 11px; }
+.fde-project-detail .fde-progress-assessment-detail span, .fde-project-detail .fde-progress-assessment-detail dt { color: var(--ink-3); font-size: 12px; }
+.fde-project-detail .fde-progress-assessment-detail strong { display: block; margin-top: 5px; font-size: 14px; }
+.fde-project-detail .fde-progress-assessment-detail p { margin-top: 7px; color: var(--ink-2); font-size: 12px; line-height: 1.65; }
+.fde-project-detail .fde-progress-assessment-detail dl { display: grid; gap: 9px; }
+.fde-project-detail .fde-progress-assessment-detail dl div { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.fde-project-detail .fde-progress-assessment-detail dd { font-size: 12px; font-weight: 600; text-align: right; }
 .fde-project-detail .fde-agent-schedule { margin: 0; padding: 0; border-top: 1px solid var(--line); background: var(--surface); }
 .fde-project-detail .fde-agent-schedule > header { display: grid; grid-template-columns: minmax(220px,.65fr) minmax(0,1.35fr); gap: 22px; align-items: center; padding: 16px 18px; border-bottom: 1px solid var(--line); }
-.fde-project-detail .fde-agent-schedule > header span { color: var(--brand-strong); font-size: 10px; font-weight: 700; letter-spacing: .08em; }
+.fde-project-detail .fde-agent-schedule > header span { color: var(--brand-strong); font-size: 12px; font-weight: 700; letter-spacing: .08em; }
 .fde-project-detail .fde-agent-schedule > header h3 { margin-top: 3px; font-size: 14px; font-weight: 650; }
-.fde-project-detail .fde-agent-schedule > header p { margin: 0; color: var(--ink-3); font-size: 11px; line-height: 1.65; }
+.fde-project-detail .fde-agent-schedule > header p { margin: 0; color: var(--ink-3); font-size: 12px; line-height: 1.65; }
 .fde-project-detail .fde-agent-schedule-timeline { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 9px; padding: 16px 18px 0; }
 .fde-project-detail .fde-agent-schedule-timeline > div { position: relative; min-width: 0; padding: 12px 13px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-2); }
-.fde-project-detail .fde-agent-schedule-timeline > div > span { position: absolute; top: 10px; right: 10px; color: var(--brand-strong); font-size: 9px; }
+.fde-project-detail .fde-agent-schedule-timeline > div > span { position: absolute; top: 10px; right: 10px; color: var(--brand-strong); font-size: 12px; }
 .fde-project-detail .fde-agent-schedule-timeline strong,.fde-project-detail .fde-agent-schedule-timeline p,.fde-project-detail .fde-agent-schedule-timeline small { display: block; }
-.fde-project-detail .fde-agent-schedule-timeline strong { padding-right: 34px; overflow-wrap: anywhere; font-size: 11px; }
+.fde-project-detail .fde-agent-schedule-timeline strong { padding-right: 34px; overflow-wrap: anywhere; font-size: 12px; }
 .fde-project-detail .fde-agent-schedule-timeline p { margin: 8px 0 0; font-size: 14px; font-weight: 650; }
-.fde-project-detail .fde-agent-schedule-timeline small { margin-top: 3px; color: var(--ink-3); font-size: 10px; }
+.fde-project-detail .fde-agent-schedule-timeline small { margin-top: 3px; color: var(--ink-3); font-size: 12px; }
 .fde-project-detail .fde-agent-schedule-content { display: grid; gap: 9px; padding: 14px 18px 18px; }
 .fde-project-detail .fde-agent-schedule-draft { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 14px; border: 1px solid color-mix(in srgb,var(--warning) 35%,var(--line)); border-radius: 10px; background: var(--warning-soft); }
 .fde-project-detail .fde-agent-schedule-draft span,.fde-project-detail .fde-agent-schedule-draft strong { display: block; }
-.fde-project-detail .fde-agent-schedule-draft span { color: var(--warning); font-size: 10px; font-weight: 700; }
+.fde-project-detail .fde-agent-schedule-draft span { color: var(--warning); font-size: 12px; font-weight: 700; }
 .fde-project-detail .fde-agent-schedule-draft strong { margin-top: 3px; font-size: 15px; }
-.fde-project-detail .fde-agent-schedule-draft p { margin: 4px 0 0; color: var(--ink-3); font-size: 10px; }
+.fde-project-detail .fde-agent-schedule-draft p { margin: 4px 0 0; color: var(--ink-3); font-size: 12px; }
 .fde-project-detail .fde-agent-schedule-approval { padding: 14px; border: 1px solid var(--line); border-radius: 10px; font-size: 12px; }
 .fde-project-detail .fde-agent-schedule-approval.selected { border-color: var(--brand); box-shadow: 0 0 0 2px color-mix(in srgb,var(--brand) 25%,transparent); }
-.fde-project-detail .fde-agent-schedule-empty { margin: 0; padding: 15px; border: 1px dashed var(--line); border-radius: 9px; color: var(--ink-3); text-align: center; font-size: 11px; }
+.fde-project-detail .fde-agent-schedule-empty { margin: 0; padding: 15px; border: 1px dashed var(--line); border-radius: 9px; color: var(--ink-3); text-align: center; font-size: 12px; }
 @media (max-width: 1440px) {
   .fde-project-detail > .fde-ui-card.fde-detail-hero { grid-template-columns: minmax(0, 1fr) minmax(360px, .9fr); }
   .fde-project-detail .fde-detail-actions { grid-column: 1 / -1; max-width: none; justify-content: flex-start; padding-left: 66px; }
@@ -164,8 +192,8 @@ body:has(.fde-project-detail) { min-width: 320px; }
   .fde-project-detail .fde-detail-next-step { border-left: 0; border-top: 1px solid var(--line); }
   .fde-project-detail .fde-detail-timeline { padding-inline: 6px; }
   .fde-project-detail .fde-detail-stage { padding-inline: 3px; }
-  .fde-project-detail .fde-detail-stage-copy strong { font-size: 11px; }
-  .fde-project-detail .fde-detail-stage-copy small { font-size: 10px; }
+  .fde-project-detail .fde-detail-stage-copy strong { font-size: 12px; }
+  .fde-project-detail .fde-detail-stage-copy small { font-size: 12px; }
   .fde-project-detail .fde-detail-file-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 900px) {
@@ -173,6 +201,7 @@ body:has(.fde-project-detail) { min-width: 320px; }
   .fde-project-detail .fde-detail-actions { grid-column: auto; padding-left: 0; }
   .fde-project-detail .fde-detail-collaboration-grid { grid-template-columns: minmax(0, 1fr); }
   .fde-project-detail .fde-detail-agent-result { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+  .fde-project-detail .fde-progress-assessment-detail { grid-template-columns: minmax(0, 1fr); gap: 10px; }
   .fde-project-detail .fde-agent-schedule > header { grid-template-columns: minmax(0,1fr); gap: 7px; }
   .fde-project-detail .fde-agent-schedule-timeline { grid-template-columns: repeat(2,minmax(0,1fr)); }
   .fde-project-detail .fde-detail-task-list > section { grid-template-columns: minmax(0, 1fr); }
@@ -190,7 +219,7 @@ body:has(.fde-project-detail) { min-width: 320px; }
   .fde-project-detail .fde-detail-states > div:nth-child(odd) { border-left: 0; }
   .fde-project-detail .fde-detail-states > div:nth-child(n+3) { border-top: 1px solid var(--line); }
   .fde-project-detail .fde-detail-tabs { top: var(--topbar-h); grid-template-columns: repeat(4, minmax(0, 1fr)); }
-  .fde-project-detail .fde-detail-tabs button { padding-inline: 5px; font-size: 11px; }
+  .fde-project-detail .fde-detail-tabs button { padding-inline: 5px; font-size: 12px; }
   .fde-project-detail .fde-detail-card-head { flex-wrap: wrap; padding: 12px 14px; }
   .fde-project-detail .fde-detail-timeline { grid-template-columns: minmax(0, 1fr); padding: 15px 17px 17px; overflow: visible; }
   .fde-project-detail .fde-detail-stage { min-height: 64px; padding: 0 0 10px; grid-template-columns: 38px minmax(0, 1fr) auto; grid-template-rows: auto; gap: 10px; text-align: left; }
@@ -204,4 +233,126 @@ body:has(.fde-project-detail) { min-width: 320px; }
   .fde-project-detail .fde-detail-material-row { grid-template-columns: 20px minmax(0, 1fr) 52px 12px; gap: 8px; padding: 12px 14px; }
   .fde-project-detail .fde-detail-material-progress > span { display: none; }
   .fde-project-detail .fde-detail-file-grid { grid-template-columns: minmax(0, 1fr); padding: 14px; }
+}
+
+/* Compact two-row project header. The first screen stays focused on the active stage. */
+.fde-project-detail > .fde-ui-card.fde-detail-hero {
+  display: block;
+  padding: 0;
+  overflow: hidden;
+}
+.fde-project-detail .fde-detail-hero-primary,
+.fde-project-detail .fde-detail-hero-secondary {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 15px 20px;
+}
+.fde-project-detail .fde-detail-hero-primary { min-height: 72px; }
+.fde-project-detail .fde-detail-hero-secondary { min-height: 62px; border-top: 1px solid var(--line); background: var(--surface-2); }
+.fde-project-detail .fde-detail-hero-title { min-width: 0; flex: 1; display: flex; align-items: center; gap: 16px; }
+.fde-project-detail .fde-detail-hero-title h1 { min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fde-project-detail .fde-detail-hero-badges { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.fde-project-detail .fde-detail-hero-secondary dl { display: flex; min-width: 0; align-items: stretch; gap: 0; }
+.fde-project-detail .fde-detail-hero-secondary dl > div { min-width: 150px; padding: 0 24px; border-left: 1px solid var(--line); }
+.fde-project-detail .fde-detail-hero-secondary dl > div:first-child { padding-left: 0; border-left: 0; }
+.fde-project-detail .fde-detail-hero-secondary dt { color: var(--ink-3); font-size: 12px; }
+.fde-project-detail .fde-detail-hero-secondary dd { margin: 4px 0 0; color: var(--ink); font-size: 14px; font-weight: 650; }
+.fde-project-detail .fde-detail-hero-secondary dd small { margin-left: 7px; color: var(--ink-3); font-size: 12px; font-weight: 500; }
+.fde-project-detail .fde-detail-hero-secondary .fde-detail-actions { max-width: none; flex-wrap: nowrap; padding: 0; }
+
+.fde-project-detail .fde-project-overview-drawer { display: grid; gap: 14px; }
+.fde-project-detail .fde-project-overview-drawer > section,
+.fde-project-detail .fde-project-overview-drawer > details { padding: 17px 18px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.fde-project-detail .fde-project-overview-drawer h3 { margin: 0 0 12px; color: var(--ink); font-size: 14px; font-weight: 650; }
+.fde-project-detail .fde-project-overview-drawer section > p { margin: 0; color: var(--ink-2); font-size: 13px; line-height: 1.7; }
+.fde-project-detail .fde-project-overview-drawer dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 15px 24px; }
+.fde-project-detail .fde-project-overview-drawer dt { color: var(--ink-3); font-size: 12px; }
+.fde-project-detail .fde-project-overview-drawer dd { margin: 5px 0 0; overflow-wrap: anywhere; color: var(--ink); font-size: 13px; font-weight: 600; }
+.fde-project-detail .fde-overview-section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.fde-project-detail .fde-overview-section-head h3 { margin: 0; }
+.fde-project-detail .fde-project-overview-drawer > details > summary { display: flex; align-items: center; justify-content: space-between; cursor: pointer; list-style: none; color: var(--ink); font-size: 14px; font-weight: 650; }
+.fde-project-detail .fde-project-overview-drawer > details > summary::-webkit-details-marker { display: none; }
+.fde-project-detail .fde-project-overview-drawer > details > summary span { color: var(--ink-3); font-size: 12px; font-weight: 500; }
+.fde-project-detail .fde-overview-history { display: grid; gap: 14px; margin-top: 16px; }
+.fde-project-detail .fde-overview-history article { display: grid; grid-template-columns: 8px minmax(0, 1fr); gap: 10px; }
+.fde-project-detail .fde-overview-history article > i { width: 7px; height: 7px; margin-top: 6px; border-radius: 50%; background: var(--brand); }
+.fde-project-detail .fde-overview-history strong, .fde-project-detail .fde-overview-history p, .fde-project-detail .fde-overview-history time { display: block; font-size: 12px; }
+.fde-project-detail .fde-overview-history p { margin: 4px 0; color: var(--ink-2); }
+.fde-project-detail .fde-overview-history time { color: var(--ink-3); }
+
+.fde-project-detail .fde-detail-task-head { padding: 0; }
+.fde-project-detail .fde-detail-task-heading-row { min-height: 64px; padding: 12px 18px; display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.fde-project-detail .fde-detail-task-heading-row h2 { margin: 0; font-size: 15px; font-weight: 650; }
+.fde-project-detail .fde-detail-task-toolbar { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.fde-project-detail .fde-detail-task-toolbar .input { width: auto; min-width: 142px; }
+.fde-project-detail .fde-detail-task-counts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; margin: 0; border-top: 1px solid var(--line); background: var(--surface-2); }
+.fde-project-detail .fde-detail-task-counts span { display: flex; min-height: 56px; align-items: baseline; justify-content: center; gap: 6px; padding: 15px 12px; border: 0; border-left: 1px solid var(--line); border-radius: 0; background: transparent; color: var(--ink-2); font-size: 12px; }
+.fde-project-detail .fde-detail-task-counts span:first-child { border-left: 0; }
+.fde-project-detail .fde-detail-task-counts strong { color: var(--ink); font-size: 18px; }
+.fde-project-detail .fde-detail-task-counts .danger strong { color: var(--danger); }
+.fde-project-detail .fde-plan-sync-warning { border-top: 1px solid color-mix(in srgb, var(--warning) 28%, var(--line)); background: var(--warning-soft); }
+.fde-project-detail .fde-plan-sync-warning > button { width: 100%; padding: 12px 18px; display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--warning); text-align: left; }
+.fde-project-detail .fde-plan-sync-warning > button span { padding: 3px 8px; border-radius: 999px; background: var(--surface); font-size: 12px; font-weight: 700; }
+.fde-project-detail .fde-plan-sync-warning > button strong { color: var(--ink-2); font-size: 13px; }
+.fde-project-detail .fde-plan-sync-warning > div { padding: 0 18px 14px; display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; }
+.fde-project-detail .fde-plan-sync-warning ul { margin: 0; padding-left: 18px; color: var(--ink-2); font-size: 12px; line-height: 1.7; }
+.fde-project-detail .fde-detail-task-acceptance > header { background: color-mix(in srgb, var(--warning-soft) 56%, var(--surface)); }
+.fde-project-detail .fde-detail-stage.current { z-index: 2; margin: -7px 0; padding: 7px 6px; border: 1px solid color-mix(in srgb, var(--brand) 28%, var(--line)); border-radius: 12px; background: var(--brand-soft); box-shadow: none; }
+.fde-project-detail .fde-detail-stage.current .fde-detail-stage-copy { background: transparent; }
+.fde-project-detail .fde-flow-finished { margin: 0; padding: 12px 18px; border-top: 1px solid var(--line); color: var(--positive); background: var(--positive-soft); font-size: 13px; font-weight: 650; }
+.fde-project-detail .fde-current-stage-head { display: flex; min-height: 92px; align-items: center; justify-content: space-between; gap: 18px; padding: 17px 20px; }
+.fde-project-detail .fde-current-stage-head > div:first-child > span { color: var(--brand); font-size: 12px; font-weight: 700; }
+.fde-project-detail .fde-current-stage-head h2 { margin: 3px 0 0; font-size: 22px; letter-spacing: -.02em; }
+.fde-project-detail .fde-current-stage-head p { margin: 5px 0 0; color: var(--ink-3); font-size: 12px; }
+.fde-project-detail .fde-stage-readiness { display: flex; flex-wrap: wrap; gap: 8px; padding: 13px 20px; border-top: 1px solid var(--line); background: var(--surface-2); }
+.fde-project-detail .fde-stage-readiness > span { display: inline-flex; min-height: 28px; align-items: center; padding: 4px 10px; border-radius: 999px; color: var(--positive); background: var(--positive-soft); font-size: 12px; font-weight: 600; }
+.fde-project-detail .fde-stage-readiness > span[data-state="warning"] { color: var(--warning); background: var(--warning-soft); }
+.fde-project-detail .fde-stage-readiness > span[data-state="active"] { color: var(--brand); background: var(--brand-soft); }
+.fde-project-detail .fde-stage-blockers { display: grid; border-top: 1px solid var(--line); }
+.fde-project-detail .fde-stage-blockers > div { min-height: 58px; display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 10px 20px; border-top: 1px solid var(--line); }
+.fde-project-detail .fde-stage-blockers > div:first-child { border-top: 0; }
+.fde-project-detail .fde-stage-blockers span { color: var(--danger); font-size: 13px; font-weight: 600; }
+.fde-project-detail .fde-stage-approval-waiting { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 14px 20px; border-top: 1px solid var(--line); color: var(--brand-strong); background: var(--brand-soft); font-size: 13px; }
+.fde-project-detail .fde-stage-approval-waiting span { color: var(--ink-2); }
+.fde-project-detail .fde-project-plan-summary { display: grid; grid-template-columns: minmax(120px,.42fr) minmax(380px,1.3fr) auto; align-items: center; gap: 18px; padding: 16px 18px; }
+.fde-project-detail .fde-project-plan-summary > div:first-child > span { color: var(--ink-3); font-size: 12px; }
+.fde-project-detail .fde-project-plan-summary h2 { margin: 4px 0 0; font-size: 20px; }
+.fde-project-detail .fde-project-plan-summary dl { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 0; }
+.fde-project-detail .fde-project-plan-summary dl > div { padding: 0 18px; border-left: 1px solid var(--line); }
+.fde-project-detail .fde-project-plan-summary dt { color: var(--ink-3); font-size: 12px; }
+.fde-project-detail .fde-project-plan-summary dd { margin: 4px 0 0; font-size: 13px; font-weight: 650; }
+.fde-project-detail .fde-plan-baseline { padding: 16px 18px; border-top: 1px solid var(--line); background: var(--surface-2); }
+.fde-project-detail .fde-detail-plan-empty { padding: 18px; border-top: 1px solid var(--line); color: var(--ink-3); font-size: 13px; }
+.fde-project-detail .fde-plan-row-facts { display: flex; align-items: center; gap: 6px 14px; flex-wrap: wrap; margin-top: 6px; }
+.fde-project-detail .fde-plan-row-facts > span { margin: 0; color: var(--ink-2); font-size: 12px; }
+
+@media (max-width: 900px) {
+  .fde-project-detail .fde-detail-hero-title { align-items: flex-start; flex-direction: column; gap: 7px; }
+  .fde-project-detail .fde-detail-hero-secondary { align-items: stretch; flex-direction: column; }
+  .fde-project-detail .fde-detail-hero-secondary .fde-detail-actions { justify-content: flex-start; }
+  .fde-project-detail .fde-project-plan-summary { grid-template-columns: minmax(0,1fr); }
+  .fde-project-detail .fde-project-plan-summary dl > div:first-child { padding-left: 0; border-left: 0; }
+  .fde-project-detail .fde-project-plan-summary .fde-detail-inline-actions { justify-content: flex-start; }
+}
+@media (max-width: 640px) {
+  .fde-project-detail .fde-detail-hero-primary, .fde-project-detail .fde-detail-hero-secondary { padding: 13px 14px; }
+  .fde-project-detail .fde-detail-hero-secondary dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .fde-project-detail .fde-detail-hero-secondary dl > div { min-width: 0; padding: 0 10px; }
+  .fde-project-detail .fde-detail-hero-secondary dd small { display: none; }
+  .fde-project-detail .fde-detail-hero-secondary .fde-detail-actions { display: grid; grid-template-columns: 1fr 1fr; }
+  .fde-project-detail .fde-project-overview-drawer dl { grid-template-columns: 1fr; }
+  .fde-project-detail .fde-detail-task-heading-row { align-items: stretch; flex-direction: column; }
+  .fde-project-detail .fde-detail-task-toolbar { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .fde-project-detail .fde-detail-task-toolbar .input { width: 100%; }
+  .fde-project-detail .fde-detail-task-counts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .fde-project-detail .fde-detail-task-counts span:nth-child(3) { border-left: 0; border-top: 1px solid var(--line); }
+  .fde-project-detail .fde-detail-task-counts span:nth-child(4) { border-top: 1px solid var(--line); }
+  .fde-project-detail .fde-plan-sync-warning > div { align-items: stretch; flex-direction: column; }
+  .fde-project-detail .fde-current-stage-head { align-items: flex-start; flex-direction: column; }
+  .fde-project-detail .fde-project-plan-summary dl { grid-template-columns: 1fr; }
+  .fde-project-detail .fde-project-plan-summary dl > div { padding: 10px 0; border-top: 1px solid var(--line); border-left: 0; }
+  .fde-project-detail .fde-project-plan-summary dl > div:first-child { border-top: 0; }
 }

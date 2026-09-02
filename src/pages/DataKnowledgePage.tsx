@@ -60,8 +60,8 @@ function DataKnowledgeWorkspace({ userId }: { userId: string }) {
     return <FdeProjectArchivePanel capabilities={capabilities} onOpenTools={openTool} />
   }
   return <div className="fde-workspace fde-knowledge-page">
-    <div className="fde-page-heading"><div><h1>数据与知识</h1></div></div>
-    {capabilities && <div className="fde-workspace-tabs" role="tablist" aria-label="数据与知识">
+    <div className="fde-page-heading"><div><h1>知识库</h1></div></div>
+    {capabilities && <div className="fde-workspace-tabs" role="tablist" aria-label="知识库">
       {([['company', '公司知识库'], ['archives', '项目档案']] as const).filter(([key]) => capabilities[key]).map(([key, title]) => <button key={key} role="tab" aria-selected={requestedView !== 'responsibility' && selection?.view === key} className={requestedView !== 'responsibility' && selection?.view === key ? 'active' : ''} onClick={() => { const next = new URLSearchParams(params); next.set('view', key); next.delete('archiveTool'); next.delete('entry'); setParams(next) }}>{title}</button>)}
       {management && <button role="tab" aria-selected={requestedView === 'responsibility'} className={requestedView === 'responsibility' ? 'active' : ''} onClick={() => { const next = new URLSearchParams(params); next.set('view', 'responsibility'); next.delete('archiveTool'); next.delete('entry'); setParams(next) }}>管理参考</button>}
     </div>}

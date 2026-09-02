@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { db } from '../db/client.js'
 import { projectFiles, fileChunks, knowledgeChunks } from '../db/schema.js'
 import mammoth from 'mammoth'
-import { decodeTextBuffer, normalizeUnicodeText } from './textQualityService.js'
+import { decodeTextBuffer, inspectTextQuality, normalizeUnicodeText, readableStoredText } from './textQualityService.js'
 import { requestAiGatewayVisionText } from './aiGatewayService.js'
 import { readProjectFileBuffer } from './projectFileStorageService.js'
 import { fileKnowledgeAccessCondition, projectFileAccessCondition } from './projectFileAccessService.js'
@@ -222,8 +222,11 @@ export async function ingestFile(fileId: string, projectId: string, fileName: st
     attempts = attempt
     try {
       if (attempt > 1) console.log(`${tag} 重试第 ${attempt - 1} 次…`)
-      const text = await extractText(buffer, type, fileName)
-      if (!text) throw new Error('未能从文件中提取到任何文字（可能是扫描件图片，需 OCR）')
+      const extractedText = await extractText(buffer, type, fileName)
+      if (!extractedText) throw new Error('未能从文件中提取到任何文字（可能是扫描件图片，需 OCR）')
+      const quality = inspectTextQuality(extractedText)
+      if (quality.corrupted) throw new Error('文件正文存在无法识别的文字，请重新导出原文件后上传')
+      const text = quality.text.trim()
       const chunks = chunkText(text)
       // 文件分块、统一知识分块和解析成功状态必须同时提交。任何一步失败都回滚，
       // 避免页面显示“解析成功”但 Agent 实际检索不到文件内容。
@@ -364,7 +367,8 @@ export async function retrieve(projectId: string, question: string, topK = 5, us
   const terms = tokenize(question)
   if (!terms.length) return []
   const scored = rows.map((r) => {
-    return { ...r, sourceName: r.fileName, score: retrievalScore(r.content, r.fileName, question, terms) }
+    const content = readableStoredText(r.content)
+    return { ...r, content, sourceName: r.fileName, score: content ? retrievalScore(content, r.fileName, question, terms) : 0 }
   }).filter((r) => r.score > 0).sort(compareRetrievalRows).slice(0, topK)
   return scored.map(({ sourceName: _sourceName, ...row }) => row)
 }
@@ -415,16 +419,17 @@ export async function retrieveKnowledge(scope: 'project' | 'lead' | 'org', refId
   const terms = tokenize(question)
   if (!terms.length) return []
   const scored = rows.map((r) => {
+    const content = readableStoredText(r.content)
     return {
       id: r.id,
       fileName: r.sourceName,
-      content: r.content,
+      content,
       sourceType: r.sourceType,
       sourceId: r.sourceId,
       chunkIndex: r.chunkIndex,
       refId: r.refId,
       sourceName: r.sourceName,
-      score: retrievalScore(r.content, r.sourceName, question, terms),
+      score: content ? retrievalScore(content, r.sourceName, question, terms) : 0,
     }
   }).filter((r) => r.score > 0).sort(compareRetrievalRows).slice(0, topK)
   return scored.map(({ id: _id, sourceName: _sourceName, ...row }) => row)

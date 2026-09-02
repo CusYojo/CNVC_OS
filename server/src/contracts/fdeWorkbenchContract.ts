@@ -4,7 +4,7 @@ export type WorkbenchView = 'leader' | 'lead' | 'secretary' | 'member' | 'specia
 export type WorkbenchTone = 'info' | 'success' | 'warning' | 'danger' | 'purple' | 'neutral'
 export type WorkbenchMetric = { label: string; value: number | string | null; note: string; tone: WorkbenchTone; to: string }
 export type WorkbenchAction = { id: string; projectId: string | null; projectName: string; title: string; ownerUserId: string | null; dueDate: string | null; status: string; to: string }
-export type WorkbenchProject = { id: string; name: string; owner: string; ownerUserId: string | null; secretary: string; classification: string; health: string; priority: string; targetDate: string | null; related: boolean; secretaryId: string | null; actions: WorkbenchAction[]; done: number; total: number; leaderParticipation: string | null }
+export type WorkbenchProject = { id: string; name: string; owner: string; ownerUserId: string | null; secretary: string; classification: string; health: string; priority: string; targetDate: string | null; stage: string; stageSource: string | null; updatedAt: string; related: boolean; secretaryId: string | null; actions: WorkbenchAction[]; done: number; total: number; leaderParticipation: string | null }
 export type WorkbenchAttention = { id: string; title: string; detail: string; icon: string; to: string; status?: string }
 export type WorkbenchData = {
   actorId: string; name: string; view: WorkbenchView; perspective: string; specialty: string; asOf: string; today: string; weekStart: string
@@ -24,7 +24,7 @@ export function workbenchView(bindings: { category: string | null; primary?: boo
 
 export const workbenchTaskOpen = (status: string) => !['已完成', '已关闭', '已取消', '已归档'].includes(status)
 export function workbenchActions<T extends WorkbenchAction>(rows: T[], today: string) {
-  const lastDay = shiftDate(today, 2)
+  const lastDay = shiftDate(today, 3)
   return rows
     .filter(t => workbenchTaskOpen(t.status) && Boolean(t.dueDate) && t.dueDate! >= today && t.dueDate! <= lastDay)
     .sort((a, b) => (a.dueDate ?? '').localeCompare(b.dueDate ?? '') || a.id.localeCompare(b.id))
@@ -41,7 +41,8 @@ export function workbenchActionCounts(rows: WorkbenchAction[], actorId: string, 
 export function workbenchTone(status: string): WorkbenchTone {
   if (['已完成', '已确认', '正常', 'confirmed'].includes(status)) return 'success'
   if (['存在风险', '已停滞', '紧急抢救', '已逾期', '已退回'].includes(status)) return 'danger'
-  if (['需关注', '待确认', '进行中', '待验收', 'pending', 'requested', 'supplement'].includes(status)) return 'warning'
+  if (['进行中', '审批中', '处理中'].includes(status)) return 'info'
+  if (['需关注', '待确认', '待处理', '临期', '待验收', 'pending', 'requested', 'supplement'].includes(status)) return 'warning'
   return 'neutral'
 }
 export function workbenchTargetLabel(date: string | null, today: string) {

@@ -1,6 +1,7 @@
 import path from 'node:path'
 import { createHash } from 'node:crypto'
 import JSZip from 'jszip'
+import { decodeTextBuffer, inspectTextQuality } from '../services/textQualityService.js'
 
 type FileKind = {
   label: string
@@ -120,14 +121,6 @@ async function assertSignature(extension: string, kind: FileKind, buffer: Buffer
     case 'webp': valid = buffer.subarray(0, 4).toString('ascii') === 'RIFF' && buffer.subarray(8, 12).toString('ascii') === 'WEBP'; break
     case 'ole': valid = startsWith(buffer, [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]); break
     case 'text': {
-      if (buffer.includes(0)) valid = false
-      else {
-        let controls = 0
-        for (const value of buffer) {
-          if (value < 0x20 && value !== 0x09 && value !== 0x0a && value !== 0x0d) controls += 1
-        }
-        valid = controls / Math.max(1, buffer.length) <= 0.01
-      }
       if (valid && extension === 'json') {
         try { JSON.parse(buffer.toString('utf8').replace(/^\uFEFF/, '')) }
         catch { valid = false }
@@ -141,8 +134,36 @@ async function assertSignature(extension: string, kind: FileKind, buffer: Buffer
   if (!valid) throw fileError(415, 'FILE_SIGNATURE_MISMATCH', `文件内容与 .${extension} 扩展名不一致或结构无效`)
 }
 
+/** Convert every supported text upload to canonical UTF-8 before persistence.
+ * The same helper is used when previewing legacy files saved in GB18030/UTF-16. */
+export function canonicalizeUtf8TextBuffer(buffer: Buffer): Buffer {
+  const decoded = decodeTextBuffer(buffer)
+  const quality = inspectTextQuality(decoded.text)
+  if (quality.corrupted) {
+    throw fileError(422, 'FILE_TEXT_ENCODING_INVALID', '文件文字编码异常，请重新导出为 UTF-8、PDF 或图片后上传')
+  }
+  const canonical = quality.text
+  if (!canonical.trim()) throw fileError(400, 'EMPTY_FILE', '文件中没有可读取的文字')
+  return Buffer.from(canonical, 'utf8')
+}
+
+export function canonicalizeProjectTextBuffer(fileName: string, buffer: Buffer): Buffer {
+  const extension = path.extname(fileName).slice(1).toLowerCase()
+  const kind = FILE_KINDS[extension]
+  if (kind?.signature !== 'text') return buffer
+  const canonicalBuffer = canonicalizeUtf8TextBuffer(buffer)
+  const canonical = canonicalBuffer.toString('utf8')
+  if (extension === 'json') {
+    try { JSON.parse(canonical) }
+    catch { throw fileError(415, 'FILE_SIGNATURE_MISMATCH', 'JSON 文件内容无效') }
+  }
+  return canonicalBuffer
+}
+
 export async function decodeAndValidateProjectFile(input: { name: string; dataBase64: string; declaredType?: string }) {
-  const name = input.name.normalize('NFC')
+  const nameQuality = inspectTextQuality(input.name)
+  if (nameQuality.corrupted) throw fileError(422, 'FILE_NAME_ENCODING_INVALID', '文件名包含无法识别的文字，请重命名后上传')
+  const name = nameQuality.text
   if (!name || name !== name.trim() || name.length > 255 || /[\u0000/\\]/.test(name) || path.basename(name) !== name) {
     throw fileError(400, 'INVALID_FILE_NAME', '文件名不能为空、越界或包含路径字符')
   }
@@ -157,7 +178,7 @@ export async function decodeAndValidateProjectFile(input: { name: string; dataBa
     throw fileError(400, 'INVALID_FILE_ENCODING', '文件内容不是规范 Base64')
   }
   if (payload.length > Math.ceil(maxBytes / 3) * 4 + 4) throw fileError(413, 'PAYLOAD_TOO_LARGE', '文件不能超过配置的容量上限')
-  const buffer = Buffer.from(payload, 'base64')
+  let buffer = Buffer.from(payload, 'base64')
   if (!buffer.length || buffer.length > maxBytes) throw fileError(buffer.length ? 413 : 400, buffer.length ? 'PAYLOAD_TOO_LARGE' : 'EMPTY_FILE', buffer.length ? '文件不能超过配置的容量上限' : '不能上传空文件')
   if (buffer.toString('base64').replace(/=+$/, '') !== payload.replace(/=+$/, '')) {
     throw fileError(400, 'INVALID_FILE_ENCODING', '文件 Base64 解码校验失败')
@@ -166,6 +187,7 @@ export async function decodeAndValidateProjectFile(input: { name: string; dataBa
   const suppliedMimes = [normalizedMime(input.declaredType), normalizedMime(dataUrlMime)].filter((value): value is string => Boolean(value))
   const incompatibleMime = suppliedMimes.find((mime) => !kind.acceptedMimes.some((accepted) => accepted.toLowerCase() === mime))
   if (incompatibleMime) throw fileError(415, 'FILE_MIME_MISMATCH', `声明的 MIME ${incompatibleMime} 与 .${extension} 不一致`)
+  buffer = canonicalizeProjectTextBuffer(name, buffer)
   await assertSignature(extension, kind, buffer)
   return {
     buffer, name, extension, typeLabel: kind.label, contentType: kind.mime,

@@ -15,7 +15,7 @@ export function Button({
   loading?: boolean
 }) {
   const variants = {
-    primary: 'bg-brand-600 text-white hover:bg-brand-700 border-brand-600 shadow-sm shadow-brand-500/10',
+    primary: 'bg-brand-600 text-white hover:bg-brand-700 border-brand-600',
     secondary: 'bg-white text-slate-700 hover:bg-slate-50 border-slate-200',
     ghost: 'bg-transparent text-slate-600 hover:bg-slate-100 border-transparent',
     danger: 'bg-white text-rose-600 hover:bg-rose-50 border-rose-200',
@@ -35,7 +35,7 @@ export function Button({
 }
 
 export function Card({ children, className = '', id }: { children: ReactNode; className?: string; id?: string }) {
-  return <section id={id} className={`fde-ui-card rounded-xl border border-slate-200/90 bg-white shadow-card ${className}`}>{children}</section>
+  return <section id={id} className={`fde-ui-card rounded-xl border border-slate-200/90 bg-white ${className}`}>{children}</section>
 }
 
 export function Badge({ children, tone = 'slate' }: { children: ReactNode; tone?: 'blue' | 'green' | 'amber' | 'red' | 'purple' | 'slate' | 'cyan' }) {
@@ -58,7 +58,7 @@ const stageTone: Record<string, Parameters<typeof Badge>[0]['tone']> = {
 }
 
 export function StageBadge({ stage }: { stage: string }) {
-  return <Badge tone={stageTone[stage] ?? 'slate'}>{stage}</Badge>
+  return <Badge tone={stageTone[stage] ?? 'slate'}>{stage === '已 Close' ? '完成交割' : stage}</Badge>
 }
 
 export function RiskBadge({ level }: { level: RiskLevel }) {
@@ -66,14 +66,17 @@ export function RiskBadge({ level }: { level: RiskLevel }) {
 }
 
 export function StatusBadge({ status }: { status: JobStatus | string }) {
-  const tone = status === '成功' || status === '已完成' || status === '已关闭' || status === '启用'
+  const display = status === '成功' ? '已完成' : status
+  const tone = status === '成功' || status === '已完成' || status === '已结束' || status === '已关闭' || status === '启用' || status === '正常' || status === '已通过'
     ? 'green'
-    : status === '失败' || status === '已逾期' || status === '禁用'
+    : status === '失败' || status === '已逾期' || status === '禁用' || status === '阻塞' || status === '已停滞' || status === '紧急抢救' || status === '存在风险'
       ? 'red'
-      : status === '生成中' || status === '解析中' || status === '进行中' || status === '处理中'
+      : status === '生成中' || status === '解析中' || status === '进行中' || status === '处理中' || status === '审批中' || status === '会签中'
         ? 'blue'
-        : 'slate'
-  return <Badge tone={tone}>{status}</Badge>
+        : status === '待处理' || status === '待审批' || status === '待验收' || status === '临期' || status === '需关注' || status === '待确认'
+          ? 'amber'
+          : 'slate'
+  return <Badge tone={tone}>{display}</Badge>
 }
 
 export function PageHeader({ title, description, actions }: { title: string; description?: string; actions?: ReactNode }) {
@@ -92,13 +95,13 @@ export function Modal({ open, title, children, onClose, width = 'max-w-xl', foot
   if (!open) return null
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 p-6 backdrop-blur-[2px]" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <div role="dialog" aria-modal="true" aria-label={title} className={`fde-ui-modal max-h-[88vh] w-full ${width} overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl`}>
+      <div role="dialog" aria-modal="true" aria-label={title} className={`fde-ui-modal max-h-[88vh] w-full max-w-[calc(100vw-2rem)] ${width} overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl`}>
         <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
           <h2 className="text-lg font-semibold text-ink">{title}</h2>
           <button aria-label="关闭" className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700" onClick={onClose}><X className="h-5 w-5" /></button>
         </div>
         <div className="max-h-[calc(88vh-132px)] overflow-y-auto px-6 py-5 scrollbar-thin">{children}</div>
-        {footer && <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50/60 px-6 py-4">{footer}</div>}
+        {footer && <div className="flex flex-wrap items-center justify-end gap-2 border-t border-slate-100 bg-slate-50/60 px-6 py-4">{footer}</div>}
       </div>
     </div>
   )
@@ -108,13 +111,13 @@ export function Drawer({ open, title, children, onClose, width = 'w-[560px]', fo
   if (!open) return null
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/25 backdrop-blur-[1px]" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <aside role="dialog" aria-modal="true" aria-label={title} className={`fde-ui-drawer absolute right-0 top-0 flex h-full ${width} flex-col bg-white shadow-2xl`}>
+      <aside role="dialog" aria-modal="true" aria-label={title} className={`fde-ui-drawer absolute right-0 top-0 flex h-full max-w-full ${width} flex-col bg-white shadow-2xl`}>
         <div className="flex items-center justify-between border-b border-slate-100 px-6 py-5">
           <h2 className="text-lg font-semibold text-ink">{title}</h2>
           <button aria-label="关闭" className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100" onClick={onClose}><X className="h-5 w-5" /></button>
         </div>
         <div className="flex-1 overflow-y-auto px-6 py-5 scrollbar-thin">{children}</div>
-        {footer && <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50 px-6 py-4">{footer}</div>}
+        {footer && <div className="flex flex-wrap items-center justify-end gap-2 border-t border-slate-100 bg-slate-50 px-6 py-4">{footer}</div>}
       </aside>
     </div>
   )
@@ -125,7 +128,7 @@ export function Tabs({ tabs, value, onChange }: { tabs: { id: string; label: str
     <div className="fde-ui-tabs flex items-center gap-1 border-b border-slate-200" role="tablist">
       {tabs.map((tab) => (
         <button key={tab.id} role="tab" aria-selected={value === tab.id} onClick={() => onChange(tab.id)} className={`relative px-4 py-3 text-sm font-medium transition ${value === tab.id ? 'text-brand-700' : 'text-slate-500 hover:text-slate-800'}`}>
-          {tab.label}{tab.count !== undefined && <span className="ml-1.5 rounded-full bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-500">{tab.count}</span>}
+          {tab.label}{tab.count !== undefined && <span className="ml-1.5 rounded-full bg-slate-100 px-1.5 py-0.5 text-xs text-slate-500">{tab.count}</span>}
           {value === tab.id && <span className="absolute inset-x-2 bottom-0 h-0.5 rounded-full bg-brand-600" />}
         </button>
       ))}

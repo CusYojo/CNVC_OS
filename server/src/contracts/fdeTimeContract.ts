@@ -55,6 +55,20 @@ export const calendarDefinitionSchema = z.object({
 })
 export const calendarWriteSchema = z.object({ clientRequestId: z.string().uuid(), expectedVersion: z.number().int().positive().optional(), definition: calendarDefinitionSchema }).strict()
 export const calendarCancelSchema = z.object({ clientRequestId: z.string().uuid(), expectedVersion: z.number().int().positive(), reason: z.string().trim().min(2).max(2000) }).strict()
+export const calendarTaskCreateSchema = z.object({
+  clientRequestId: z.string().uuid(),
+  title: z.string().trim().min(2).max(255),
+  detail: z.string().trim().max(2000).default(''),
+  startsAt: fridayLocalTime,
+  endsAt: fridayLocalTime,
+}).strict().superRefine((value, ctx) => {
+  const duration = timeInstant(value.endsAt).getTime() - timeInstant(value.startsAt).getTime()
+  if (duration <= 0 || duration > 86400000 || duration % 900000 || Number(value.startsAt.slice(14)) % 15) ctx.addIssue({ code: 'custom', message: '任务时间按 15 分钟步长，结束须晚于开始且不超过 24 小时' })
+})
+export const calendarTaskCancelSchema = z.object({
+  clientRequestId: z.string().uuid(), expectedTaskVersion: z.number().int().positive(), expectedScheduleVersion: z.number().int().min(0),
+  reason: z.string().trim().min(2).max(2000),
+}).strict()
 export const taskCalendarScheduleSchema = z.object({
   clientRequestId: z.string().uuid(), expectedVersion: z.number().int().min(0), sourceVersion: z.number().int().positive(),
   startsAt: fridayLocalTime, endsAt: fridayLocalTime, hidden: z.boolean().default(false),

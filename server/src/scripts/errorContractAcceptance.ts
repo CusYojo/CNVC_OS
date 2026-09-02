@@ -52,8 +52,8 @@ async function persistEvidence(report: Record<string, unknown>) {
     `- 结果：${report.ok ? '通过' : '未通过'}`,
     '- 400、401、403、404、409、500 使用统一 code/message/details/requestId 契约',
     '- 500 只向客户端返回通用中文消息，内部异常和敏感内容不进入响应',
-    '- 前端仅在响应头和正文请求编号完全匹配且格式合法时展示追踪编号',
-    '- AI Task 失败和界面渲染异常继续显示独立错误编号',
+    '- 前端保留合法追踪编号供管理员诊断，普通错误文案不展示编号',
+    '- AI Task 与渲染异常的技术编号仅在管理员诊断视图显示',
     '',
     '报告不记录错误原文、请求路径、编号值、身份或连接信息。',
     '',
@@ -102,7 +102,8 @@ async function main() {
     )
     assertContract(frontend.status === fixture.status && frontend.code === fixture.code, `${fixture.status} frontend code/status mismatch`)
     assertContract(frontend.baseMessage === fixture.message && frontend.requestId === requestId, `${fixture.status} frontend base/requestId mismatch`)
-    assertContract(frontend.message.includes(fixture.message) && frontend.message.includes(requestId), `${fixture.status} visible message lacks trace ID`)
+    assertContract(!frontend.message.includes(requestId), `${fixture.status} visible message disclosed trace ID`)
+    assertContract(fixture.status < 500 ? frontend.message.includes(fixture.message) : frontend.message === '服务暂时不可用，请稍后重试', `${fixture.status} public message mismatch`)
   }
   const spoofed = apiErrorFromResponse(403, {
     code: 'ROLE_FORBIDDEN', message: '没有权限执行此操作', requestId: 'spoofed-request-id',
@@ -126,11 +127,11 @@ async function main() {
   assertContract(/bodyRequestId === headerRequestId/.test(apiContractSource) && /\^\[A-Za-z0-9\._:-\]\{8,64\}\$/.test(apiContractSource), 'frontend request ID validation is missing')
   assertContract(/server\/src\/contracts\/apiErrorContract/.test(clientApiSource), 'frontend does not consume the shared error contract')
   assertContract(
-    /错误编号：\{task\.errorId\}/.test(taskCards)
-      && /错误编号：\{task\.errorId\}/.test(taskConversation),
-    'AI task error ID is not rendered in both historical and chat-native views',
+    /showDiagnostics && task\.errorId/.test(taskCards)
+      && /showDiagnostics && task\.errorId/.test(taskConversation),
+    'AI task error ID is not guarded by diagnostics permission',
   )
-  assertContract(/错误编号：\{this\.state\.errorId\}/.test(errorBoundary), 'AI render error ID is not rendered')
+  assertContract(/showDiagnostics && <p/.test(errorBoundary), 'AI render error ID is not guarded by diagnostics permission')
   assertContract(
     /发送失败：\$\{\(err as Error\)\.message\}/.test(assistantPage)
       && /agentError\.message/.test(assistantPage),
@@ -151,8 +152,8 @@ async function main() {
       'manual-route-error-request-id-enrichment',
       'frontend-header-body-request-id-match',
       'frontend-request-id-format-rejection',
-      'visible-safe-message-retains-trace-id',
-      'ai-task-and-render-error-id-visible',
+      'public-message-hides-trace-id',
+      'ai-task-and-render-error-id-admin-only',
       'evidence-excludes-errors-paths-identities-and-request-ids',
     ],
   }

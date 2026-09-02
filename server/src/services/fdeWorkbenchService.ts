@@ -1,6 +1,6 @@
 import { and, asc, count, eq, gte, inArray, isNull, lte, ne, notInArray, or } from 'drizzle-orm'
 import { db } from '../db/client.js'
-import { permissions, projectDutyAssignments, projectMembers, projects, projectWeeklyPlans, rolePermissions, roles, todos, userRoles, users } from '../db/schema.js'
+import { permissions, projectDutyAssignments, projectMembers, projectPlanActions, projectPlans, projects, projectWeeklyPlans, rolePermissions, roles, todos, userRoles, users } from '../db/schema.js'
 import { projectAccessCondition } from './projectAccessService.js'
 import { todoAccessCondition } from './meetingService.js'
 import { listApprovalCenter } from './fdeApprovalCenterService.js'
@@ -11,6 +11,7 @@ import { shanghaiToday, shiftDate, weekStartFor } from '../contracts/fdeWeeklyPl
 import { timeLocal } from '../contracts/fdeTimeContract.js'
 import { FDE_PROJECT_DUTIES } from '../contracts/fdeGovernanceContract.js'
 import { workbenchActionCounts, workbenchActions, workbenchProjectRank, workbenchView, type WorkbenchData, type WorkbenchMetric, type WorkbenchProject, type WorkbenchTone } from '../contracts/fdeWorkbenchContract.js'
+import { participantTaskId } from './fdeTaskService.js'
 
 const execution = '/collaboration', approvalsPath = '/workflow?view=pending'
 function fail(code: string, message: string, status = 503): never { throw Object.assign(new Error(message), { code, status }) }
@@ -23,7 +24,8 @@ export async function getWorkbench(userId: string): Promise<WorkbenchData> {
   const view = workbenchView(bindings), specialty = bindings.some(b => b.category === 'specialist' && b.name.includes('法务')) ? '法务' : bindings.some(b => b.category === 'specialist' && /风控|风险/.test(b.name)) ? '风控' : '财务'
   const labels = { leader: '机构领导', lead: '项目负责人', secretary: '推进秘书', member: '项目成员', coordinator: '时间协调', specialist: specialty, admin: '配置权限', unassigned: '未绑定业务角色' }
   const result: WorkbenchData = { actorId: userId, name: actor.name, view, perspective: `${labels[view]}视角`, specialty, asOf: now.toISOString(), today, weekStart: week, metrics: [], projects: [], actions: [], attention: [], capacity: null, warnings: [] }
-  const threeDayEnd = shiftDate(today, 2)
+  // 工作台“未来三天”不含今天，因此统一读取今天至第三天的任务。
+  const threeDayEnd = shiftDate(today, 3)
   const metric = (label: string, value: WorkbenchMetric['value'], tone: WorkbenchTone, to = execution, note = '当前账号授权范围；今天至后天待完成事项') => result.metrics.push({ label, value, tone, to, note: value === null ? '尚无完整、可靠的统计来源，待核对；不按 0 处理' : note })
   if (view === 'unassigned') { result.warnings.push('尚未绑定有效 FDE 角色，请联系管理员核对角色映射。'); return result }
   // A configuration-only account must not query business projects, tasks or inboxes.
@@ -38,10 +40,20 @@ export async function getWorkbench(userId: string): Promise<WorkbenchData> {
   let own = { own: result.actions, count: 0, dueToday: 0, dueSoon: 0 }, acceptance = 0
   if (view !== 'coordinator') {
     const core = await db.transaction(async tx => {
-      const visible = await tx.select({ id: projects.id, name: projects.name, owner: projects.owner, ownerUserId: projects.ownerUserId, classification: projects.classification, health: projects.healthStatus, priority: projects.leaderPriority, targetDate: projects.targetDate }).from(projects).where(and(projectAccessCondition({ uid: userId, name: actor.name, role: actor.role }), eq(projects.lifecycle, 'active'), inArray(projects.classification, ['normal', 'key']), notInArray(projects.stage, ['放弃', '退出']))).limit(5001)
+      const visible = await tx.select({ id: projects.id, name: projects.name, owner: projects.owner, ownerUserId: projects.ownerUserId, classification: projects.classification, health: projects.healthStatus, priority: projects.leaderPriority, targetDate: projects.targetDate, stage: projects.stage, stageSource: projects.stageSource, updatedAt: projects.updatedAt }).from(projects).where(and(projectAccessCondition({ uid: userId, name: actor.name, role: actor.role }), eq(projects.lifecycle, 'active'), inArray(projects.classification, ['normal', 'key']), notInArray(projects.stage, ['放弃', '退出']))).limit(5001)
       if (visible.length > 5000) return fail('WORKBENCH_PROJECT_LIMIT', '授权项目超过工作台统计容量，请使用项目中心；未返回截断统计')
       const ids = visible.map(p => p.id)
-      const tasks = await tx.select({ id: todos.id, projectId: todos.projectId, title: todos.title, ownerUserId: todos.ownerUserId, dueDate: todos.dueDate, status: todos.status }).from(todos).where(and(todoAccessCondition({ uid: userId, name: actor.name, role: actor.role }), isNull(todos.approvalRequestId), notInArray(todos.type, ['流程', '审批', '通知']), gte(todos.dueDate, today), lte(todos.dueDate, threeDayEnd), notInArray(todos.status, ['已完成', '已关闭', '已取消', '已归档']), or(inArray(todos.projectId, ids.length ? ids : ['']), and(isNull(todos.projectId), eq(todos.ownerUserId, userId))))).limit(10001)
+      const taskRows = await tx.select({ id: todos.id, projectId: todos.projectId, title: todos.title, ownerUserId: todos.ownerUserId, dueDate: todos.dueDate, status: todos.status, planActionId: todos.planActionId }).from(todos).where(and(todoAccessCondition({ uid: userId, name: actor.name, role: actor.role }), isNull(todos.approvalRequestId), notInArray(todos.type, ['流程', '审批', '通知']), gte(todos.dueDate, today), lte(todos.dueDate, threeDayEnd), notInArray(todos.status, ['已完成', '已关闭', '已取消', '已归档']), or(inArray(todos.projectId, ids.length ? ids : ['']), and(isNull(todos.projectId), eq(todos.ownerUserId, userId))))).limit(10001)
+      const planActions = ids.length ? await tx.select({ id: projectPlanActions.id, ownerUserId: projectPlanActions.ownerUserId, participantUserIds: projectPlanActions.participantUserIds }).from(projectPlanActions).innerJoin(projectPlans, eq(projectPlanActions.planId, projectPlans.id)).where(inArray(projectPlans.projectId, ids)) : []
+      const actionById = new Map(planActions.map(action => [action.id, action]))
+      const legacyParticipantIds = new Set(planActions.flatMap(action => action.participantUserIds.filter(id => id !== action.ownerUserId).map(id => participantTaskId(action.id, id))))
+      const projectOwners = new Map(visible.map(project => [project.id, project.ownerUserId]))
+      const tasks = taskRows.filter(task => {
+        if (legacyParticipantIds.has(task.id)) return false
+        if (!task.projectId) return task.ownerUserId === userId
+        const action = task.planActionId ? actionById.get(task.planActionId) : undefined
+        return task.ownerUserId === userId || Boolean(action?.participantUserIds.includes(userId)) || task.status === '待验收' && projectOwners.get(task.projectId) === userId
+      })
       if (tasks.length > 10000) return fail('WORKBENCH_TASK_LIMIT', '授权行动超过工作台统计容量，请使用行动列表；未返回截断统计')
       const members = ids.length ? await tx.select({ projectId: projectMembers.projectId }).from(projectMembers).where(and(inArray(projectMembers.projectId, ids), eq(projectMembers.userId, userId))) : []
       const myDuties = ids.length ? await tx.select({ projectId: projectDutyAssignments.projectId, duty: projectDutyAssignments.duty }).from(projectDutyAssignments).where(and(inArray(projectDutyAssignments.projectId, ids), eq(projectDutyAssignments.userId, userId), ne(projectDutyAssignments.duty, 'coordinator'))) : []
@@ -62,7 +74,7 @@ export async function getWorkbench(userId: string): Promise<WorkbenchData> {
     scoped = core.visible.map(p => {
       const projectActions = actions.filter(t => t.projectId === p.id), secretaries = core.secretaries.filter(s => s.projectId === p.id).sort((a, b) => a.id.localeCompare(b.id))
       const secretary = secretaries.find(s => s.id === userId) ?? secretaries[0]
-      return { ...p, secretary: secretaries.map(s => s.name).join('、') || '未配置推进秘书', secretaryId: secretary?.id ?? null, related: p.ownerUserId === userId || core.members.some(m => m.projectId === p.id) || core.relatedDuties.some(d => d.projectId === p.id), actions: projectActions.slice(0, 3), done: projectActions.filter(t => t.status === '已完成').length, total: projectActions.length, leaderParticipation: null }
+      return { ...p, updatedAt: p.updatedAt.toISOString(), secretary: secretaries.map(s => s.name).join('、') || '未配置推进秘书', secretaryId: secretary?.id ?? null, related: p.ownerUserId === userId || core.members.some(m => m.projectId === p.id) || core.relatedDuties.some(d => d.projectId === p.id), actions: projectActions.slice(0, 3), done: projectActions.filter(t => t.status === '已完成').length, total: projectActions.length, leaderParticipation: null }
     })
     acceptance = actions.filter(t => t.status === '待验收' && scoped.some(p => p.id === t.projectId && p.ownerUserId === userId)).length
     pendingPlans = core.plans

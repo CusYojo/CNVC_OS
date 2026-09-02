@@ -154,7 +154,7 @@ check('project-page-awaits-authoritative-writes-and-hides-unimplemented-actions'
   assert.match(projectsPageSource, /await pinProject\(project\.id, !project\.pinned\)/)
   assert.match(projectsPageSource, /Number\(Boolean\(b\.pinned\)\) - Number\(Boolean\(a\.pinned\)\)/)
   assert.match(projectsPageSource, /aria-label="已置顶"/)
-  assert.match(projectsPageSource, /await deleteProject\(pendingDelete\.id\)/)
+  assert.match(projectsPageSource, /await deleteProject\(pendingDelete\.id, pendingDelete\.name\)/)
   assert.match(projectsPageSource, /title="确认删除项目"/)
   assert.doesNotMatch(projectsPageSource, /window\.confirm|导出任务已创建|批量导入模板已准备|>导出<|>批量导入|批量分配|批量标签操作已完成|自定义字段/)
 })

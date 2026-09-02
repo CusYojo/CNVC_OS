@@ -72,6 +72,8 @@ import { startWeixinMessageBridge, stopWeixinMessageBridge } from './services/we
 import { leadBpWorkerHealth, startLeadBpWorker, stopLeadBpWorker } from './services/leadIntakeService.js'
 import { radarInboundRouter } from './routes/radar.js'
 import { scheduleInterruptedProjectFileRecovery } from './services/ragService.js'
+import { normalizeTextPayload } from './contracts/textIntegrityContract.js'
+import { sanitizeTextPayloadForDisplay } from './services/textQualityService.js'
 
 assertRuntimeConfiguration()
 installStructuredLogging()
@@ -99,22 +101,23 @@ app.use((req, res, next) => {
   })
   const sendJson = res.json.bind(res)
   res.json = ((body: unknown) => {
+    const safeBody = sanitizeTextPayloadForDisplay(body)
     if (
       res.statusCode >= 400
-      && body
-      && typeof body === 'object'
-      && !Array.isArray(body)
-      && 'code' in body
-      && 'message' in body
+      && safeBody
+      && typeof safeBody === 'object'
+      && !Array.isArray(safeBody)
+      && 'code' in safeBody
+      && 'message' in safeBody
     ) {
-      const errorBody = body as Record<string, unknown>
+      const errorBody = safeBody as Record<string, unknown>
       return sendJson({
         ...errorBody,
         details: errorBody.details ?? null,
         requestId: errorBody.requestId || requestId,
       })
     }
-    return sendJson(body)
+    return sendJson(safeBody)
   }) as typeof res.json
   runWithRequestLogContext(requestId, next)
 })
@@ -165,6 +168,23 @@ app.use((err: unknown, _req: import('express').Request, res: import('express').R
     }
   }
   next(err)
+})
+app.use((req, res, next) => {
+  if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method) || req.body == null) {
+    next()
+    return
+  }
+  const normalized = normalizeTextPayload(req.body)
+  if (normalized.issue) {
+    res.status(422).json({
+      code: 'TEXT_ENCODING_INVALID',
+      message: '检测到无法识别的文字，请重新输入；若来自文件，请重新导出后上传',
+      details: { field: normalized.issue.path },
+    })
+    return
+  }
+  req.body = normalized.value
+  next()
 })
 
 // 公共探针与登录（无鉴权）

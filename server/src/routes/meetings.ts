@@ -1,7 +1,7 @@
 import { Router } from 'express'
 import { z } from 'zod'
 import type { AuthedRequest } from '../middleware/requireAuth.js'
-import { createMeeting, createTodo, deleteTodo, getMeeting, getTodo, listMeetingTodos, listMeetings, listTodos, presentMeeting, presentMeetings, todoCounts, updateMeeting, updateTodo } from '../services/meetingService.js'
+import { addMeetingContribution, createMeeting, createTodo, deleteTodo, finalizeMeeting, getMeeting, getTodo, listMeetingTodos, listMeetings, listTodos, presentMeeting, presentMeetings, readMeetingNotice, todoCounts, updateMeeting, updateMeetingLifecycle, updateTodo } from '../services/meetingService.js'
 import { answerQuestion, meetingSummary } from '../services/aiService.js'
 import { requireAccessibleProject } from '../services/projectAccessService.js'
 import { parseShanghaiDateTime } from '../utils/shanghaiTime.js'
@@ -13,7 +13,7 @@ meetingsRouter.get('/', async (req: AuthedRequest, res, next) => {
   try {
     const projectId = req.query.projectId as string | undefined
     if (projectId) await requireAccessibleProject(req.user!.uid, projectId)
-    res.json({ list: await presentMeetings(await listMeetings(projectId, req.user!)) })
+    res.json({ list: await presentMeetings(await listMeetings(projectId, req.user!), req.user!.uid) })
   }
   catch (err) { next(err) }
 })
@@ -22,7 +22,7 @@ meetingsRouter.get('/:id', async (req: AuthedRequest, res, next) => {
   try {
     const row = await getMeeting(routeId(req.params.id), req.user!)
     if (!row) { res.status(404).json({ code: 'NOT_FOUND', message: '会议不存在', details: null }); return }
-    res.json(await presentMeeting(row))
+    res.json(await presentMeeting(row, req.user!.uid))
   } catch (err) { next(err) }
 })
 
@@ -32,7 +32,11 @@ const CreateSchema = z.object({
   title: z.string().min(1),
   type: z.string().default('项目会议'),
   meetingTime: z.string().min(1),
+  meetingEndTime: z.string().min(1).nullable().optional(),
   participants: z.array(z.string().trim().min(1)).min(1),
+  participantUserIds: z.array(z.string().uuid()).min(1).optional(),
+  purpose: z.string().trim().max(2000).default(''),
+  requirements: z.string().trim().max(2000).default(''),
   status: z.string().optional(),
   rawText: z.string().optional(),
   summary: z.string().optional(),
@@ -71,20 +75,29 @@ meetingsRouter.post('/', async (req: AuthedRequest, res, next) => {
       ...body.newTodos.map((todo) => todo.projectId),
     ].filter((value): value is string => Boolean(value)))
     await Promise.all([...projectIds].map((projectId) => requireAccessibleProject(req.user!.uid, projectId)))
+    const startedAt = parseMeetingTime(body.meetingTime)
+    const endsAt = body.meetingEndTime ? parseMeetingTime(body.meetingEndTime) : null
+    if (endsAt && endsAt <= startedAt) {
+      const error = new Error('会议结束时间必须晚于开始时间') as Error & { status?: number; code?: string }
+      error.status = 400; error.code = 'INVALID_MEETING_TIME_RANGE'; throw error
+    }
     const row = await createMeeting({
       projectId: body.projectId,
       projectName: body.projectName,
       title: body.title,
       type: body.type,
-      host: body.participants[0],
+      host: req.user!.name,
       attendees: body.participants,
       rawTranscript: body.rawText,
       aiSummary: body.summary,
       conclusions: body.conclusions,
-      startedAt: parseMeetingTime(body.meetingTime),
-    }, body.newTodos as never, req.user!.uid, req.user!.name)
+      weeklyReview: { kind: 'project_meeting_workspace', purpose: body.purpose, requirements: body.requirements, contributions: [] } as never,
+      workflowStatus: 'scheduled',
+      startedAt,
+      endsAt,
+    }, body.newTodos as never, req.user!.uid, req.user!.name, body.participantUserIds)
     const createdTodos = await listMeetingTodos(row.id, req.user!)
-    res.status(201).json({ ...await presentMeeting(row), createdTodos })
+    res.status(201).json({ ...await presentMeeting(row, req.user!.uid), createdTodos })
   } catch (err) { next(err) }
 })
 
@@ -106,9 +119,54 @@ meetingsRouter.patch('/:id', async (req: AuthedRequest, res, next) => {
       ...(body.summary !== undefined ? { aiSummary: body.summary } : {}),
       ...(body.conclusions !== undefined ? { conclusions: body.conclusions } : {}),
       ...(body.meetingTime !== undefined ? { startedAt: parseMeetingTime(body.meetingTime) } : {}),
+      ...(body.meetingEndTime !== undefined ? { endsAt: body.meetingEndTime ? parseMeetingTime(body.meetingEndTime) : null } : {}),
     }
     const row = await updateMeeting(existing.id, patch, expectedVersion)
-    res.json(await presentMeeting(row))
+    res.json(await presentMeeting(row, req.user!.uid))
+  } catch (err) { next(err) }
+})
+
+const ContributionSchema = z.object({
+  expectedVersion: z.number().int().positive(),
+  content: z.string().trim().max(4000).default(''),
+  fileIds: z.array(z.string().uuid()).max(20).default([]),
+}).refine((value) => Boolean(value.content || value.fileIds.length), '请填写会议想法或上传文件')
+
+meetingsRouter.post('/:id/contributions', async (req: AuthedRequest, res, next) => {
+  try {
+    const input = ContributionSchema.parse(req.body)
+    const row = await addMeetingContribution({ meetingId: routeId(req.params.id), userId: req.user!.uid, ...input })
+    res.status(201).json(await presentMeeting(row, req.user!.uid))
+  } catch (err) { next(err) }
+})
+
+const LifecycleSchema = z.object({ expectedVersion: z.number().int().positive(), action: z.enum(['start', 'end', 'cancel']) }).strict()
+meetingsRouter.post('/:id/lifecycle', async (req: AuthedRequest, res, next) => {
+  try {
+    const input = LifecycleSchema.parse(req.body)
+    const row = await updateMeetingLifecycle({ meetingId: routeId(req.params.id), userId: req.user!.uid, ...input })
+    res.json(await presentMeeting(row, req.user!.uid))
+  } catch (err) { next(err) }
+})
+
+const FinalizeSchema = z.object({
+  expectedVersion: z.number().int().positive(),
+  summary: z.string().trim().min(1).max(5000),
+  conclusions: z.array(z.string().trim().min(1).max(1000)).max(50),
+  tasks: z.array(z.object({ title: z.string().trim().min(1).max(500), ownerUserId: z.string().uuid(), dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) })).max(50),
+}).strict()
+meetingsRouter.post('/:id/finalize', async (req: AuthedRequest, res, next) => {
+  try {
+    const input = FinalizeSchema.parse(req.body)
+    const row = await finalizeMeeting({ meetingId: routeId(req.params.id), userId: req.user!.uid, userName: req.user!.name, ...input })
+    res.json({ ...await presentMeeting(row, req.user!.uid), createdTodos: await listMeetingTodos(row.id, req.user!) })
+  } catch (err) { next(err) }
+})
+
+meetingsRouter.post('/:id/notices/:noticeId/read', async (req: AuthedRequest, res, next) => {
+  try {
+    z.object({}).strict().parse(req.body)
+    res.json(await readMeetingNotice(routeId(req.params.id), routeId(req.params.noticeId), req.user!.uid))
   } catch (err) { next(err) }
 })
 

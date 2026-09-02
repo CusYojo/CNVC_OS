@@ -13,6 +13,7 @@ import { committeeRouter } from './committee.js'
 import { responsibilityRouter } from './responsibility.js'
 import { leaderTimeRouter, calendarRouter } from './fdeTime.js'
 import { meetingsRouter, todosRouter, aiRouter } from './meetings.js'
+import { unifiedTasksRouter } from './unifiedTasks.js'
 import { risksRouter } from './risks.js'
 import { metaRouter } from './meta.js'
 import { conversationsRouter } from './conversations.js'
@@ -56,6 +57,7 @@ apiRouter.use('/leader-time', leaderTimeRouter)
 apiRouter.use('/calendar', calendarRouter)
 apiRouter.use('/meetings', meetingsRouter)
 apiRouter.use('/todos', todosRouter)
+apiRouter.use('/tasks', unifiedTasksRouter)
 apiRouter.use('/risks', risksRouter)
 apiRouter.use('/', leadIntakeRouter)
 apiRouter.use('/', radarRouter)

@@ -106,7 +106,8 @@ export async function prepareFdeCreationGovernance(reader: Reader, input: { owne
   const assignments = [...normalized.values()]
   // 用户显式选的职责必须严格校验类别；系统自动补齐的职责（concerned_leader/chairman/president/secretary）
   // 用于下游审批策略依赖，不强制要求 eligible 类别，只校验人员存在且启用。
-  const explicitDuties = new Set(input.assignments.map(a => a.duty))
+  const explicitDuties = new Set<FdeProjectDuty>(input.assignments.flatMap((assignment): FdeProjectDuty[] =>
+    assignment.duty === 'legal' || assignment.duty === 'finance' ? [assignment.duty] : []))
   const explicitAssignments = assignments.filter((a) => explicitDuties.has(a.duty))
   const autoAssignments = assignments.filter((a) => !explicitDuties.has(a.duty))
   validateAssignments(input.ownerUserId, explicitAssignments, people)
@@ -181,7 +182,7 @@ export async function getFdeGovernance(projectId: string, userId: string) {
   ])
   const leadership = effectiveLeadership(assignments, people)
   const rosterIds = [...new Set([project.ownerUserId, ...assignments.map((item) => item.userId), ...leadership.map((item) => item.userId), ...changes.flatMap((change) => [change.requestedBy, ...change.requiredConfirmers])].filter((id): id is string => Boolean(id)))]
-  const allUsers = rosterIds.length ? await db.select({ id: users.id, name: users.name, status: users.status }).from(users).where(inArray(users.id, rosterIds)) : []
+  const allUsers = rosterIds.length ? await db.select({ id: users.id, name: users.name, role: users.role, status: users.status }).from(users).where(inArray(users.id, rosterIds)) : []
   return {
     projectId, version: project.governanceVersion, ownerUserId: project.ownerUserId,
     duties: FDE_PROJECT_DUTIES, assignments, effectiveLeadership: leadership,

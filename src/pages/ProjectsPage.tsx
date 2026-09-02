@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, Filter, GitBranch, MoreHorizontal, Pencil, Pin, Plus, Star } from 'lucide-react'
+import { AlertTriangle, ChevronLeft, ChevronRight, Filter, GitBranch, MoreHorizontal, Pencil, Pin, Plus, Star } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -8,6 +8,7 @@ import { Button, Card, DataTable, Drawer, EmptyState, Modal, PageHeader, RiskBad
 import { useAuthStore } from '../store/useAuthStore'
 import type { Project, ProjectClassification, ProjectStage, RiskLevel } from '../types'
 import { formatShanghaiDateTime } from '../lib/dateTime'
+import { canDirectlyDeleteProject } from '../../server/src/contracts/adminRoleContract'
 
 const stages: ProjectStage[] = ['入库', '立项', '尽调计划制定', '尽调计划审核', '启动尽调', '内核', '投决', '打款', '已 Close', '线索', '初筛', '尽调', '上会', '投后', '退出', '放弃']
 const viewCopy: Record<ProjectClassification, { title: string; description: string }> = {
@@ -95,8 +96,8 @@ export function ProjectsPage({ classification = 'normal', embedded = false }: { 
     if (!pendingDelete || deletingProjectId) return
     setDeletingProjectId(pendingDelete.id)
     try {
-      await deleteProject(pendingDelete.id)
-      showToast(`已删除「${pendingDelete.name}」及其知识库`)
+      await deleteProject(pendingDelete.id, pendingDelete.name)
+      showToast(`已删除「${pendingDelete.name}」`)
       setPendingDelete(null)
     } catch (e) {
       showToast(`删除失败：${(e as Error).message}`, 'error')
@@ -119,6 +120,7 @@ export function ProjectsPage({ classification = 'normal', embedded = false }: { 
   }
 
   const canClassify = currentUser.permissionCodes?.includes('project.classify') ?? false
+  const canDelete = canDirectlyDeleteProject(currentUser.role, currentUser.permissionCodes)
   const canPromote = (project: Project) => canClassify || project.ownerUserId === currentUser.id || ['owner', 'project_lead'].includes(project.participantRole ?? '')
   const currentCopy = viewCopy[classification]
 
@@ -157,9 +159,9 @@ export function ProjectsPage({ classification = 'normal', embedded = false }: { 
                   </TableCell>
                   <TableCell><span className="block text-slate-700">{project.industry}</span><span className="mt-1 block text-xs text-slate-400">{project.round}</span></TableCell>
                   <TableCell>
-                    <div><StageBadge stage={project.stage} /><p className="mt-1 whitespace-nowrap text-[10px] text-slate-400">{approvalRequests.some((item) => item.projectId === project.id && item.status === '审批中') ? 'OA 审批中，阶段锁定' : project.stageSource === 'OA审批' ? '由 OA 审批同步' : '可发起下一阶段审批'}</p></div>
+                    <div><StageBadge stage={project.stage} /><p className="mt-1 whitespace-nowrap text-xs text-slate-400">{approvalRequests.some((item) => item.projectId === project.id && item.status === '审批中') ? 'OA 审批中，阶段锁定' : project.stageSource === 'OA审批' ? '由 OA 审批同步' : '可发起下一阶段审批'}</p></div>
                   </TableCell>
-                  <TableCell><span className="flex items-center gap-2"><span className="grid h-6 w-6 place-items-center rounded-full bg-slate-100 text-[10px] font-medium text-slate-600">{project.owner.slice(-2)}</span>{project.owner}</span></TableCell>
+                  <TableCell><span className="flex items-center gap-2"><span className="grid h-6 w-6 place-items-center rounded-full bg-slate-100 text-xs font-medium text-slate-600">{project.owner.slice(-2)}</span>{project.owner}</span></TableCell>
                   <TableCell><span className="block text-slate-700">{project.financing}</span><span className="mt-1 block text-xs text-slate-400">估值 {project.valuation}</span></TableCell>
                   <TableCell><RiskBadge level={project.riskLevel} /></TableCell>
                   <TableCell><span className="whitespace-nowrap text-xs">{formatShanghaiDateTime(project.updatedAt, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</span></TableCell>
@@ -168,7 +170,7 @@ export function ProjectsPage({ classification = 'normal', embedded = false }: { 
                       {classification === 'normal' && canPromote(project) && <button aria-label={`将${project.name}转为重点项目`} title="转为重点项目" className="inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs font-medium text-amber-700 hover:bg-amber-50" onClick={(event) => { event.stopPropagation(); void changeClassification(project, 'key') }}><Star className="h-4 w-4" />转重点</button>}
                       <button aria-label="发起OA审批" title="发起 OA 审批" className="rounded-lg p-1.5 text-slate-400 hover:bg-white hover:text-brand-600" onClick={(event) => { event.stopPropagation(); navigate(`/workflow?view=project&project=${project.id}`) }}><GitBranch className="h-4 w-4" /></button>
                       <button aria-label="编辑项目" className="rounded-lg p-1.5 text-slate-400 hover:bg-white hover:text-brand-600" onClick={(event) => { event.stopPropagation(); setEditing(project) }}><Pencil className="h-4 w-4" /></button>
-                      <span className="relative inline-block"><button aria-label="更多操作" className="rounded-lg p-1.5 text-slate-400 hover:bg-white" onClick={(event) => { event.stopPropagation(); setMenuId(menuId === project.id ? null : project.id) }}><MoreHorizontal className="h-4 w-4" /></button>{menuId === project.id && <span className="absolute right-0 top-9 z-20 w-40 rounded-lg border border-slate-200 bg-white py-1 text-sm shadow-lg" onClick={(event) => event.stopPropagation()}>{classification === 'pool' && (project.owner === currentUser.name || canClassify) && <button className="flex w-full items-center gap-2 px-3 py-2 text-left text-brand-700 hover:bg-brand-50" onClick={() => { void changeClassification(project, 'normal') }}>完成入库</button>}{classification === 'normal' && canPromote(project) && <button className="flex w-full items-center gap-2 px-3 py-2 text-left text-brand-700 hover:bg-brand-50" onClick={() => { void changeClassification(project, 'key') }}>升级为重点项目</button>}{classification === 'key' && canClassify && <button className="flex w-full items-center gap-2 px-3 py-2 text-left text-slate-600 hover:bg-slate-50" onClick={() => { void changeClassification(project, 'normal') }}>调整为普通项目</button>}<button className="flex w-full items-center gap-2 px-3 py-2 text-left text-slate-600 hover:bg-slate-50" onClick={() => handlePin(project)}>{project.pinned ? '取消置顶' : '置顶'}</button><button className="flex w-full items-center gap-2 px-3 py-2 text-left text-rose-600 hover:bg-rose-50" onClick={() => requestDelete(project)}>删除项目</button></span>}</span>
+                      <span className="relative inline-block"><button aria-label="更多操作" className="rounded-lg p-1.5 text-slate-400 hover:bg-white" onClick={(event) => { event.stopPropagation(); setMenuId(menuId === project.id ? null : project.id) }}><MoreHorizontal className="h-4 w-4" /></button>{menuId === project.id && <span className="absolute right-0 top-9 z-20 w-40 rounded-lg border border-slate-200 bg-white py-1 text-sm shadow-lg" onClick={(event) => event.stopPropagation()}>{classification === 'pool' && (project.owner === currentUser.name || canClassify) && <button className="flex w-full items-center gap-2 px-3 py-2 text-left text-brand-700 hover:bg-brand-50" onClick={() => { void changeClassification(project, 'normal') }}>完成入库</button>}{classification === 'normal' && canPromote(project) && <button className="flex w-full items-center gap-2 px-3 py-2 text-left text-brand-700 hover:bg-brand-50" onClick={() => { void changeClassification(project, 'key') }}>升级为重点项目</button>}{classification === 'key' && canClassify && <button className="flex w-full items-center gap-2 px-3 py-2 text-left text-slate-600 hover:bg-slate-50" onClick={() => { void changeClassification(project, 'normal') }}>调整为普通项目</button>}<button className="flex w-full items-center gap-2 px-3 py-2 text-left text-slate-600 hover:bg-slate-50" onClick={() => handlePin(project)}>{project.pinned ? '取消置顶' : '置顶'}</button>{canDelete && <button className="flex w-full items-center gap-2 px-3 py-2 text-left text-rose-600 hover:bg-rose-50" onClick={() => requestDelete(project)}>删除项目</button>}</span>}</span>
                     </div>
                   </TableCell>
                 </tr>
@@ -192,7 +194,13 @@ export function ProjectsPage({ classification = 'normal', embedded = false }: { 
         title="确认删除项目"
         footer={<><Button variant="secondary" disabled={!!deletingProjectId} onClick={() => setPendingDelete(null)}>取消</Button><Button variant="danger" loading={!!deletingProjectId} onClick={() => { void confirmDelete() }}>确认删除</Button></>}
       >
-        <p className="text-sm leading-6 text-slate-600">确认删除项目「{pendingDelete?.name}」？项目知识库、文件版本和关联记录将按数据库删除规则一并处理，此操作不可恢复。</p>
+        <div className="flex gap-3 rounded-xl bg-rose-50 p-4">
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-white text-rose-600"><AlertTriangle className="h-5 w-5" /></span>
+          <div>
+            <p className="font-medium text-slate-900">删除「{pendingDelete?.name}」？</p>
+            <p className="mt-1 text-sm leading-6 text-slate-600">项目将从所有成员的项目列表、任务和日历中移除，相关记录保留用于审计。</p>
+          </div>
+        </div>
       </Modal>
       <Drawer open={!!editing} onClose={() => setEditing(null)} title="编辑项目信息" footer={<><Button variant="secondary" onClick={() => setEditing(null)}>取消</Button><Button loading={savingEdit} onClick={() => { void saveEdit() }}>保存修改</Button></>}>
         {editing && <div className="space-y-4">

@@ -6,6 +6,7 @@ import { scoreWithAgentDetailed } from './inProcessAiWorkflowService.js'
 import { prepareProjectScoringAuditContext } from './leadScoringPipelineService.js'
 import { getProject, listProjects, saveProjectScoring } from './projectService.js'
 import type { ProjectScoreExecutionResult } from './projectScoreJobService.js'
+import { readableStoredText } from './textQualityService.js'
 
 const maxAttempts = readIntegerEnv('PROJECT_SCORE_MAX_ATTEMPTS', 3, 1, 10)
 const retryBaseMs = readIntegerEnv('PROJECT_SCORE_RETRY_BASE_MS', 60_000, 1_000, 3_600_000)
@@ -39,8 +40,10 @@ export async function scoreProjectAndPersist(projectId: string, executionAttempt
     eq(knowledgeChunks.scope, 'project'),
     eq(knowledgeChunks.refId, projectId),
   ))
-  const knowledgeText = chunks.map((chunk) => chunk.content).join('\n').slice(0, 24_000)
-  const knowledgeSources = [...new Set(chunks.map((chunk) => chunk.sourceName).filter(Boolean))]
+  const readableChunks = chunks.map((chunk) => ({ ...chunk, content: readableStoredText(chunk.content) }))
+    .filter((chunk) => Boolean(chunk.content))
+  const knowledgeText = readableChunks.map((chunk) => chunk.content).join('\n').slice(0, 24_000)
+  const knowledgeSources = [...new Set(readableChunks.map((chunk) => chunk.sourceName).filter(Boolean))]
   const summary = [
     project.summary ?? '',
     knowledgeText ? `\n\n=== 知识库资料（项目已上传文档/纪要，评分请以此为准）===\n${knowledgeText}` : '',

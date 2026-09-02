@@ -9,7 +9,7 @@ test('agent commands reject auto-apply, client facts and unsupported configurati
   assert.ok(agentConfigInput.safeParse({ clientRequestId: id, expectedVersion: 0, configuration: defaultProjectAgentConfig }).success)
   assert.equal(agentConfigInput.safeParse({ clientRequestId: id, expectedVersion: 0, configuration: { ...defaultProjectAgentConfig, autoApply: true } }).success, false)
   assert.equal(agentRunInput.safeParse({ clientRequestId: id, expectedConfigVersion: 0, facts: fact() }).success, false)
-  assert.equal(defaultProjectAgentConfig.modelEnabled, false)
+  assert.equal(defaultProjectAgentConfig.modelEnabled, true)
 })
 test('dates are real calendar dates and reference cycle projection never fabricates history', () => {
   assert.equal(agentDate.safeParse('2026-02-30').success, false)
@@ -21,9 +21,11 @@ test('dates are real calendar dates and reference cycle projection never fabrica
 test('closed, unknown or partial sources cannot be judged ready', () => {
   for (const extra of [{ gateKnown: false }, { incomplete: true }, { lifecycle: 'closed' }]) assert.equal(evaluateProjectAgentRules(fact(extra)).health, 'needs_information')
 })
-test('missing material and in-flight approvals outrank date proposals', () => {
+test('material preparation is tolerant before the node date and warns when the node is near', () => {
   const overdue = [{ id: 't1', title: '待交付', status: '进行中', overdue: true, blocked: false }]
-  assert.equal(evaluateProjectAgentRules(fact({ gateMissing: ['商业计划书'], tasks: overdue })).action, 'pause')
+  const preparing = evaluateProjectAgentRules(fact({ gateMissing: ['商业计划书'] }))
+  assert.equal(preparing.health, 'on_track'); assert.equal(preparing.action, 'keep')
+  assert.equal(evaluateProjectAgentRules(fact({ gateMissing: ['商业计划书'], currentDate: '2026-08-30', tasks: overdue })).action, 'pause')
   for (const extra of [{ activeApprovalIds: ['a1'] }, { pendingExtensionIds: ['a1'] }]) {
     const result = evaluateProjectAgentRules(fact({ ...extra, tasks: overdue }))
     assert.equal(result.health, 'waiting_approval'); assert.equal(result.suggestedDate, null)
@@ -37,13 +39,13 @@ test('delay, overdue and advance derive only from provided current facts', () =>
   assert.equal(evaluateProjectAgentRules(fact({ targetDate: '2026-08-01' })).health, 'overdue')
   assert.equal(evaluateProjectAgentRules(fact()).suggestedDate, '2026-08-30')
 })
-test('model packet honors document and communication switches without relaxing hard gates', () => {
+test('model packet honors document and communication switches without relaxing near-date hard gates', () => {
   const files = ['file', 'material', 'record', 'leadership', 'approval'] as const
   const facts = fact({ gateMissing: ['材料缺失'], evidence: [...fact().evidence, ...files.map(kind => ({ id: kind, kind, label: '敏感来源', version: 1, fingerprint: kind }))], observations: files.map(id => ({ id, text: '不应发送的内容' })) })
   const config = { ...defaultProjectAgentConfig, analyzeDocuments: false, analyzeCommunications: false }
   const packet = projectAgentModelPacket(facts, config)
   assert.deepEqual(packet.evidence.map(e => e.id), ['p1']); assert.deepEqual(packet.observations, [])
-  assert.equal(evaluateProjectAgentRules(facts).action, 'pause')
+  assert.equal(evaluateProjectAgentRules({ ...facts, currentDate: '2026-08-30' }).action, 'pause')
 })
 test('unknown, suppressed and forged model evidence cause complete fallback', () => {
   const facts = fact(), good = evaluateProjectAgentRules(facts)
@@ -54,7 +56,7 @@ test('unknown, suppressed and forged model evidence cause complete fallback', ()
 })
 test('model cannot override deterministic blocks or forge baseline dates', () => {
   const good = evaluateProjectAgentRules(fact())
-  assert.equal(mergeProjectAgentModel(fact({ gateMissing: ['材料'] }), defaultProjectAgentConfig, good).fallbackReason, 'DETERMINISTIC_GATE_PREVAILS')
+  assert.equal(mergeProjectAgentModel(fact({ gateMissing: ['材料'], currentDate: '2026-08-30' }), defaultProjectAgentConfig, good).fallbackReason, 'DETERMINISTIC_GATE_PREVAILS')
   assert.equal(mergeProjectAgentModel(fact(), defaultProjectAgentConfig, { ...good, currentDate: '2026-09-21' }).fallbackReason, 'MODEL_DATE_INVALID')
   assert.equal(mergeProjectAgentModel(fact(), defaultProjectAgentConfig, { ...good, suggestedDate: '2026-10-01' }).fallbackReason, 'MODEL_DATE_INVALID')
 })

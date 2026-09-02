@@ -184,10 +184,11 @@ async function readStageApproverNames(projectId: string): Promise<Map<string, st
 export async function getFdeWorkflow(projectId: string, userId: string) {
   const project = await requireAccessibleProject(userId, projectId)
   const policy = await getProjectWorkflowPolicy(db, project)
-  const [materials, plans, memberRows, approverNames] = await Promise.all([
+  const [materials, plans, memberRows, duties, approverNames] = await Promise.all([
     db.select().from(projectStageMaterials).where(eq(projectStageMaterials.projectId, projectId)),
     db.select().from(projectPlans).where(eq(projectPlans.projectId, projectId)).orderBy(desc(projectPlans.revision)),
     db.select({ id: users.id, name: users.name, role: projectMembers.memberRole }).from(projectMembers).innerJoin(users, eq(projectMembers.userId, users.id)).where(eq(projectMembers.projectId, projectId)),
+    db.select({ duty: projectDutyAssignments.duty, userId: projectDutyAssignments.userId }).from(projectDutyAssignments).where(eq(projectDutyAssignments.projectId, projectId)),
     readStageApproverNames(projectId),
   ])
   const currentPlan = plans.find((plan) => plan.status !== 'archived')
@@ -202,7 +203,7 @@ export async function getFdeWorkflow(projectId: string, userId: string) {
     ...stage,
     approvals: stage.approvals.map((approval) => ({ ...approval, approverNames: approverNames.get(approval.duty) ?? [] })),
   }))
-  return { stages, timeline: await readAgentTimeline(db, project), policy: { id: policy.id, revision: policy.revision, cycleDays: policy.configuration.cycleDays }, materials, plan: currentPlan ? { ...currentPlan, actions } : null, planHistory: plans, members: memberRows, capabilities: { canEditPlan } }
+  return { stages, timeline: await readAgentTimeline(db, project), policy: { id: policy.id, revision: policy.revision, cycleDays: policy.configuration.cycleDays }, materials, plan: currentPlan ? { ...currentPlan, actions } : null, planHistory: plans, members: memberRows, duties, capabilities: { canEditPlan } }
 }
 
 export async function bindFdeMaterial(input: { projectId: string; userId: string; stage: string; requirementKey: string; fileId?: string; waiverReason?: string; expectedVersion?: number }) {

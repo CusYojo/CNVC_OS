@@ -111,8 +111,8 @@ export function participantTaskId(actionId: string, userId: string) {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-5${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20, 32)}`
 }
 
-// 已批准计划只负责定义；执行事实在 todos。主负责人任务绑定 planActionId，其他参与人获得稳定身份的协同待办。
-// 重复调用只补齐缺失任务，不重置任何人的执行状态；待办会由日历服务自动投影到个人日程。
+// 已批准计划只负责定义；执行事实只在 todos 保留一条。
+// 参与人关系由 projectPlanActions 投影到“我的任务”和日历，不再生成“协同：”副本。
 export async function materializeFdePlanTasks(tx: Tx, projectId: string, planId: string) {
   const [project] = await tx.select().from(projects).where(eq(projects.id, projectId))
   const [plan] = await tx.select().from(projectPlans).where(and(eq(projectPlans.id, planId), eq(projectPlans.projectId, projectId), eq(projectPlans.status, 'locked')))
@@ -120,30 +120,28 @@ export async function materializeFdePlanTasks(tx: Tx, projectId: string, planId:
   if (project.projectType !== '投资项目' || plan.executionKind !== 'investment') return fail('TYPE_RUNTIME_TASK_ADAPTER_REQUIRED', '非投资计划由独立执行事务生成任务，不能使用投资补齐入口丢失时刻或来源')
   const actions = await tx.select().from(projectPlanActions).where(eq(projectPlanActions.planId, planId)).orderBy(asc(projectPlanActions.sortOrder))
   for (const action of actions) {
-    const participantIds = [...new Set(action.participantUserIds.length ? action.participantUserIds : [action.ownerUserId])]
-    for (const participantId of participantIds) {
-      const lead = participantId === action.ownerUserId
-      const generatedId = lead ? null : participantTaskId(action.id, participantId)
-      const [existing] = lead
-        ? await tx.select({ id: todos.id }).from(todos).where(eq(todos.planActionId, action.id))
-        : await tx.select({ id: todos.id }).from(todos).where(eq(todos.id, generatedId!))
-      if (existing) continue
-      const owner = await ownerForTask(tx, project, participantId)
-      await tx.insert(todos).values({
-        ...(generatedId ? { id: generatedId, creationFingerprint: createHash('sha256').update(`plan-participant:${action.id}:${participantId}`).digest('hex') } : {}),
-        projectId, projectName: project.name, title: lead ? action.title : `协同：${action.title}`, owner: owner.name, ownerUserId: owner.id,
-        dueDate: action.dueDate, deliverable: lead ? action.deliverable : `${action.deliverable}（协同参与，主负责人统筹验收）`,
-        planActionId: lead ? action.id : null, executionModel: 'fde-v1', type: '待办', status: action.status,
-        progress: action.status === '已完成' ? 100 : 0, closureReason: action.status === '已完成' ? '迁移前已完成记录；无新增成果验收证明' : null, createdBy: plan.createdBy,
-      })
+    const [existing] = await tx.select().from(todos).where(eq(todos.planActionId, action.id))
+    if (existing) {
+      if (!taskTerminal(existing.status) && (existing.title !== action.title || existing.ownerUserId !== action.ownerUserId || existing.dueDate !== action.dueDate || existing.deliverable !== action.deliverable)) {
+        const owner = await ownerForTask(tx, project, action.ownerUserId)
+        await tx.update(todos).set({ title: action.title, owner: owner.name, ownerUserId: owner.id, dueDate: action.dueDate, deliverable: action.deliverable, version: existing.version + 1 }).where(eq(todos.id, existing.id))
+      }
+      continue
     }
+    const owner = await ownerForTask(tx, project, action.ownerUserId)
+    await tx.insert(todos).values({
+      projectId, projectName: project.name, title: action.title, owner: owner.name, ownerUserId: owner.id,
+      dueDate: action.dueDate, deliverable: action.deliverable, planActionId: action.id,
+      executionModel: 'fde-v1', type: '待办', status: action.status,
+      progress: action.status === '已完成' ? 100 : 0, closureReason: action.status === '已完成' ? '迁移前已完成记录；无新增成果验收证明' : null, createdBy: plan.createdBy,
+    })
   }
 }
 
 export async function syncFdePlanTasks(projectId: string, userId: string) {
   await db.transaction(async (tx) => {
     const { project } = await context(tx, projectId, userId)
-    if (project.ownerUserId !== userId) return fail('FDE_OWNER_REQUIRED', '仅项目负责人可以补齐已批准计划任务', 403)
+    if (!await isFdeTaskManager(tx, project, userId)) return fail('FDE_OWNER_REQUIRED', '仅项目负责人或授权负责人可以修复计划同步', 403)
     const [plan] = await tx.select().from(projectPlans).where(and(eq(projectPlans.projectId, projectId), eq(projectPlans.status, 'locked'))).orderBy(desc(projectPlans.revision)).limit(1)
     if (!plan) return fail('FDE_PLAN_NOT_LOCKED', '尚无已批准计划')
     await materializeFdePlanTasks(tx, projectId, plan.id)
@@ -184,6 +182,17 @@ export async function feedbackFdeTask(projectId: string, taskId: string, userId:
     await audit(tx, userId, input.kind === 'submission' ? '提交成果待验收' : '执行反馈', `${projectId} / ${taskId} / ${feedbackId}`)
   })
   return getFdeTasks(projectId, userId)
+}
+
+export async function startFdeTask(projectId: string, taskId: string, userId: string, raw: unknown) {
+  const input = z.object({ expectedVersion: z.number().int().positive() }).strict().parse(raw)
+  const [task] = await db.select().from(todos).where(and(eq(todos.id, taskId), eq(todos.projectId, projectId))).limit(1)
+  if (!task) return fail('FDE_TASK_NOT_FOUND', '项目任务不存在', 404)
+  if (task.status !== '未开始') return fail('FDE_TASK_STATE_INVALID', '只有未开始的任务可以开始执行')
+  return feedbackFdeTask(projectId, taskId, userId, {
+    expectedVersion: input.expectedVersion,
+    kind: 'progress', progress: 1, result: '开始执行任务', blocker: '', estimatedDate: null, evidence: [],
+  })
 }
 
 export async function decideFdeTask(projectId: string, taskId: string, userId: string, raw: unknown) {
@@ -343,7 +352,10 @@ export async function closeTaskExtensions(tx: Tx, taskIds: string[], actorId: st
 export async function getFdeTasks(projectId: string, userId: string) {
   const project = await requireAccessibleProject(userId, projectId)
   if (project.workflowModel !== 'fde-v1') return fail('FDE_LEGACY_PROJECT', '当前不是 FDE 项目')
-  const tasks = await db.select().from(todos).where(and(eq(todos.projectId, projectId), ne(todos.type, '通知'), directiveTaskAccessCondition(userId))).orderBy(desc(todos.createdAt), asc(todos.id))
+  const taskRows = await db.select().from(todos).where(and(eq(todos.projectId, projectId), ne(todos.type, '通知'), directiveTaskAccessCondition(userId))).orderBy(desc(todos.createdAt), asc(todos.id))
+  const planActions = await db.select().from(projectPlanActions).innerJoin(projectPlans, eq(projectPlanActions.planId, projectPlans.id)).where(eq(projectPlans.projectId, projectId))
+  const legacyParticipantIds = new Set(planActions.flatMap(({ project_plan_actions: action }) => action.participantUserIds.filter(id => id !== action.ownerUserId).map(id => participantTaskId(action.id, id))))
+  const tasks = taskRows.filter(task => !legacyParticipantIds.has(task.id))
   const directives = await db.select({ id: projectDirectives.id, taskId: projectDirectives.taskId }).from(projectDirectives).where(eq(projectDirectives.projectId, projectId))
   const timelineLinks = await db.select().from(projectTimelineTasks).where(eq(projectTimelineTasks.projectId, projectId))
   const [secretary] = await db.select({ id: projectDutyAssignments.id }).from(projectDutyAssignments).where(and(eq(projectDutyAssignments.projectId, projectId), eq(projectDutyAssignments.duty, 'secretary'), eq(projectDutyAssignments.userId, userId)))
@@ -357,15 +369,25 @@ export async function getFdeTasks(projectId: string, userId: string) {
   for (const person of people) if (await isFdeTaskManager(db, project, person.id)) managers.push(person)
   const members = await db.select({ id: users.id, name: users.name }).from(projectMembers).innerJoin(users, eq(users.id, projectMembers.userId)).where(and(eq(projectMembers.projectId, projectId), eq(users.status, '启用')))
   const manager = managers.some((person) => person.id === userId), active = project.lifecycle === 'active'
+  const lockedPlan = planActions.map(item => item.project_plans).filter(plan => plan.status === 'locked').sort((left, right) => right.revision - left.revision)[0]
+  const lockedActions = lockedPlan ? planActions.filter(item => item.project_plan_actions.planId === lockedPlan.id).map(item => item.project_plan_actions) : []
+  const syncItems = lockedActions.flatMap(action => {
+    const task = tasks.find(item => item.planActionId === action.id)
+    if (!task) return [{ actionId: action.id, title: action.title, issue: '缺少执行任务' }]
+    const mismatch = !taskTerminal(task.status) && (task.title !== action.title || task.ownerUserId !== action.ownerUserId || task.dueDate !== action.dueDate || task.deliverable !== action.deliverable)
+    return mismatch ? [{ actionId: action.id, title: action.title, issue: '任务信息与计划不一致' }] : []
+  })
   const canSyncTimeline = active && project.projectType === '投资项目' && (manager || Boolean(secretary))
   const pendingWhere = and(eq(projectTimelineSyncs.projectId, projectId), eq(projectTimelineSyncs.status, 'pending'))
   const pending = canSyncTimeline ? await db.select({ id: projectTimelineSyncs.id, source: projectTimelineSyncs.source, issues: projectTimelineSyncs.issues }).from(projectTimelineSyncs).where(pendingWhere).orderBy(desc(projectTimelineSyncs.createdAt), desc(projectTimelineSyncs.id)).limit(20) : []
   const pendingCount = canSyncTimeline ? (await db.select({ value: count() }).from(projectTimelineSyncs).where(pendingWhere))[0].value : 0
   return { tasks: tasks.map((task) => {
     const directiveId = directives.find((item) => item.taskId === task.id)?.id ?? null
-    return { ...task, directiveId, timelineSource: timelineLinks.find(item => item.taskId === task.id) ?? null, executionModel: task.approvalRequestId || task.type === '流程' ? 'approval' : 'fde-v1',
+    const action = planActions.find(item => item.project_plan_actions.id === task.planActionId)?.project_plan_actions
+    const participantIds = [...new Set([task.ownerUserId, ...(action?.participantUserIds ?? [])].filter((id): id is string => Boolean(id)))]
+    return { ...task, participantUserIds: participantIds, participants: participantIds.map(id => members.find(member => member.id === id)).filter((person): person is { id: string; name: string } => Boolean(person)), directiveId, timelineSource: timelineLinks.find(item => item.taskId === task.id) ?? null, executionModel: task.approvalRequestId || task.type === '流程' ? 'approval' : 'fde-v1',
       feedbacks: feedbacks.filter((item) => item.todoId === task.id).map((item) => ({ ...item, evidence: evidence.filter((ref) => ref.feedbackId === item.id), acceptance: acceptances.find((decision) => decision.feedbackId === item.id) ?? null })),
       extensions: extensions.filter((request) => request.taskId === task.id).map((request) => ({ id: request.id, status: request.status, reason: request.reason, payload: request.businessPayload, lockVersion: request.lockVersion, applicantUserId: request.applicantUserId })),
       capabilities: { canFeedback: active && task.ownerUserId === userId && !taskTerminal(task.status) && !['待验收', '待确认'].includes(task.status) && !task.approvalRequestId, canAccept: active && manager && task.ownerUserId !== userId && task.status === '待验收', canCancel: active && manager && !directiveId && !task.planActionId && !task.approvalRequestId && !taskTerminal(task.status), canExtend: active && task.ownerUserId === userId && !taskTerminal(task.status) && Boolean(task.dueDate) && !task.approvalRequestId } }
-  }), members, reviewers: managers.filter((person) => person.id !== userId), canAssign: active && manager, canSyncPlan: active && project.projectType === '投资项目' && project.ownerUserId === userId, canSyncTimeline, timelinePending: { count: pendingCount, items: pending } }
+  }), members, reviewers: managers.filter((person) => person.id !== userId), canAssign: active && manager, canSyncPlan: active && project.projectType === '投资项目' && manager, planSyncIssue: { count: syncItems.length, items: syncItems.slice(0, 6) }, canSyncTimeline, timelinePending: { count: pendingCount, items: pending } }
 }

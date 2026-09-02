@@ -11,7 +11,7 @@ import { requireAccessibleProject } from './projectAccessService.js'
 import { redactSensitiveText } from '../security/redactSecrets.js'
 import { resolveExtensionFeatureFlags } from '../config/extensionFeatureFlags.js'
 import { listConfigurationRevisions, rollbackConfigurationRevision } from './adminConfigurationRevisionService.js'
-import { userHasPermission } from './systemAuthorizationService.js'
+import { isAiPlatformAdminRole } from '../contracts/adminRoleContract.js'
 
 export const AI_CAPABILITY_KINDS = ['skill', 'agent', 'mcp', 'plugin'] as const
 export const AI_CAPABILITY_SCOPE_TYPES = ['global', 'department', 'project'] as const
@@ -316,8 +316,8 @@ function serviceError(message: string, code: string, status: number) {
 }
 
 export async function assertAiCapabilityAdmin(actor: AiCapabilityActor): Promise<void> {
-  if (!await userHasPermission(actor.userId, actor.role, 'ai.configure')) {
-    throw serviceError('仅具有 AI 配置权限的用户可管理能力', 'ROLE_FORBIDDEN', 403)
+  if (!isAiPlatformAdminRole(actor.role)) {
+    throw serviceError('仅 AI 平台管理员可管理能力', 'ROLE_FORBIDDEN', 403)
   }
 }
 

@@ -10,7 +10,7 @@ export const projectAgentConfigSchema = z.object({
 }).strict()
 export type ProjectAgentConfig = z.infer<typeof projectAgentConfigSchema>
 export const defaultProjectAgentConfig: ProjectAgentConfig = {
-  enabled: true, analyzeDocuments: true, analyzeCommunications: true, modelEnabled: false, confidenceThreshold: 0.65,
+  enabled: true, analyzeDocuments: true, analyzeCommunications: true, modelEnabled: true, confidenceThreshold: 0.65,
 }
 const command = { clientRequestId: z.string().uuid() }
 export const agentConfigInput = z.object({ ...command, expectedVersion: z.number().int().min(0), configuration: projectAgentConfigSchema }).strict()
@@ -81,13 +81,19 @@ export function evaluateProjectAgentRules(facts: ProjectAgentFacts): AgentRecomm
   const cite = (ids: string[]) => [...new Set([...base.evidenceIds, ...ids])].slice(0, 12)
   if (!facts.gateKnown || facts.incomplete || facts.lifecycle !== 'active') return { ...base, action: 'information_required', health: 'needs_information', severity: 'warning', confidence: .96,
     title: '先核对完整且有效的项目事实', summary: '项目状态、阶段或授权来源不完整，不能据局部事实认定具备推进条件。', missingInformation: ['有效项目、阶段及完整授权来源'] }
-  if (facts.gateMissing.length) return { ...base, action: 'pause', health: 'blocked', severity: 'warning', confidence: .98,
-    title: `${facts.stage}尚不具备推进条件`, summary: `当前阶段有 ${facts.gateMissing.length} 项门禁未满足，请补齐或按批准规则办理免传。`,
-    evidenceIds: cite(facts.evidence.filter(e => e.kind === 'material' || e.kind === 'policy').map(e => e.id)), missingInformation: facts.gateMissing }
   // An in-flight stage/date decision or extension cannot be bypassed by a new date proposal.
   if (facts.activeApprovalIds.length || facts.pendingExtensionIds.length) return { ...base, health: 'waiting_approval', confidence: .9,
-    title: '保持当前基准，等待在途审批', summary: '当前存在未完成审批或延期待批；批准前不改写有效期限，也不再提出可执行改期。',
+    title: '等待当前审批处理', summary: '当前存在未完成审批或延期申请，批准前维持现有节点日期。',
     evidenceIds: cite([...facts.activeApprovalIds, ...facts.pendingExtensionIds]) }
+  if (facts.gateMissing.length) {
+    const nearNodeDate = !facts.currentDate || facts.currentDate <= agentDayOffset(facts.asOfDate, 5)
+    if (!nearNodeDate) return { ...base, confidence: .86, title: `${facts.stage}正常准备中`,
+      summary: `当前有 ${facts.gateMissing.length} 项阶段材料正在准备，距离节点日期仍有处理空间，暂未判断为改期风险。`,
+      evidenceIds: cite(facts.evidence.filter(e => e.kind === 'material' || e.kind === 'policy').map(e => e.id)), missingInformation: facts.gateMissing }
+    return { ...base, action: 'pause', health: 'blocked', severity: 'warning', confidence: .98,
+      title: `${facts.stage}临近节点，材料仍待补齐`, summary: `当前阶段有 ${facts.gateMissing.length} 项材料未完成，请优先补齐或按规定办理免传。`,
+      evidenceIds: cite(facts.evidence.filter(e => e.kind === 'material' || e.kind === 'policy').map(e => e.id)), missingInformation: facts.gateMissing }
+  }
   const affected = facts.tasks.filter(task => task.overdue || task.blocked)
   if (affected.length) {
     const suggestedDate = facts.currentDate ? agentDayOffset(facts.currentDate > facts.asOfDate ? facts.currentDate : facts.asOfDate, Math.min(10, Math.max(3, affected.length * 2))) : null

@@ -34,7 +34,7 @@ function PeoplePicker({ label, hint, people, value, onChange }: {
   return (
     <fieldset className="rounded-xl border border-slate-200 bg-white p-3">
       <legend className="px-1 text-sm font-semibold text-slate-800">{label} <b className="text-rose-500">*</b></legend>
-      <p className="mb-2 text-[11px] leading-5 text-slate-400">{hint}</p>
+      <p className="mb-2 text-xs leading-5 text-slate-400">{hint}</p>
       <div className="max-h-28 space-y-1 overflow-y-auto pr-1">
         {people.map((person) => {
           const checked = value.includes(person.id)
@@ -108,7 +108,7 @@ export function ProjectModal({ open, onClose }: { open: boolean; onClose: () => 
         businessModel: '', market: '', team: '', summary: form.summary.trim(),
         governance: { ownerUserId, assignments },
       })
-      showToast(`项目“${project.name}”已落库，成员和审批职责已同步`)
+      showToast(`项目“${project.name}”已创建`)
       onClose()
       setForm((value) => ({ ...value, name: '', companyName: '', summary: '' }))
       navigate(`/projects/${project.id}`)
@@ -128,13 +128,13 @@ export function ProjectModal({ open, onClose }: { open: boolean; onClose: () => 
           <label><span className="label">所属行业 <b className="text-rose-500">*</b></span><select className="input" value={form.industry} onChange={(event) => setForm({ ...form, industry: event.target.value })}><option>AI 医疗</option><option>工业软件</option><option>具身智能</option><option>新能源</option><option>合成生物</option><option>企业服务</option><option>消费科技</option></select></label>
           <label><span className="label">融资轮次</span><select className="input" value={form.round} onChange={(event) => setForm({ ...form, round: event.target.value })}><option>天使轮</option><option>Pre-A</option><option>A 轮</option><option>B 轮</option><option>C 轮</option><option>Pre-IPO</option></select></label>
           <label><span className="label">项目来源</span><select className="input" value={form.source} onChange={(event) => setForm({ ...form, source: event.target.value })}><option>手工录入</option><option>机构推荐</option><option>FA</option><option>BP 邮箱</option><option>行业会议</option><option>产业方推荐</option></select></label>
-          <label><span className="label">项目负责人 <b className="text-rose-500">*</b></span><select className="input" value={ownerUserId} onChange={(event) => setOwnerUserId(event.target.value)} disabled={rosterLoading}><option value="">请选择负责人</option>{people.filter((person) => person.capabilities.canOwn).map((person) => <option key={person.id} value={person.id}>{person.name} · {person.department}</option>)}</select><span className="mt-1 block text-[10px] text-slate-400">负责人与项目经理可选择同一人。</span></label>
+          <label><span className="label">项目负责人 <b className="text-rose-500">*</b></span><select className="input" value={ownerUserId} onChange={(event) => setOwnerUserId(event.target.value)} disabled={rosterLoading}><option value="">请选择负责人</option>{people.filter((person) => person.capabilities.canOwn).map((person) => <option key={person.id} value={person.id}>{person.name} · {person.department}</option>)}</select><span className="mt-1 block text-xs text-slate-400">负责人与项目经理可选择同一人。</span></label>
           <label><span className="label">计划融资</span><input className="input" value={form.financing} onChange={(event) => setForm({ ...form, financing: event.target.value })} /></label>
           <label><span className="label">投前估值</span><input className="input" value={form.valuation} onChange={(event) => setForm({ ...form, valuation: event.target.value })} /></label>
         </div>
 
         <section className="rounded-2xl bg-slate-50 p-4">
-          <div className="mb-3 flex items-start gap-3"><span className="grid h-9 w-9 place-items-center rounded-xl bg-brand-100 text-brand-700"><UsersRound className="h-4 w-4" /></span><div><h3 className="text-sm font-semibold text-slate-800">项目人员与强制职责</h3><p className="mt-1 text-xs text-slate-500">可一人兼任多个角色。创建成功后会原子写入项目库、成员关系和审批职责，并同步到每位成员账号。</p></div></div>
+          <div className="mb-3 flex items-start gap-3"><span className="grid h-9 w-9 place-items-center rounded-xl bg-brand-100 text-brand-700"><UsersRound className="h-4 w-4" /></span><div><h3 className="text-sm font-semibold text-slate-800">项目人员与职责</h3><p className="mt-1 text-xs text-slate-500">一人可兼任多个角色。</p></div></div>
           <div className="grid gap-3 md:grid-cols-2">
             <PeoplePicker label="老板" hint="至少 1 人，仅董事长陈斌或总裁黄昕。" people={candidates.boss} value={duties.boss} onChange={(ids) => setDuties({ ...duties, boss: ids })} />
             <PeoplePicker label="项目经理" hint="至少 1 人，可与项目负责人为同一人。" people={candidates.project_manager} value={duties.project_manager} onChange={(ids) => setDuties({ ...duties, project_manager: ids })} />
@@ -144,7 +144,7 @@ export function ProjectModal({ open, onClose }: { open: boolean; onClose: () => 
         </section>
 
         <div className="grid grid-cols-2 gap-4">
-          <label><span className="label">初始阶段</span><input className="input" value="普通项目 · 立项" readOnly /><span className="mt-1 block text-[10px] text-slate-400">快速新建完成强制组织配置后直接进入正式项目库。</span></label>
+          <label><span className="label">初始阶段</span><input className="input" value="普通项目 · 立项" readOnly /><span className="mt-1 block text-xs text-slate-400">快速新建完成强制组织配置后直接进入正式项目库。</span></label>
           <label><span className="label">初始风险等级</span><select className="input" value={form.riskLevel} onChange={(event) => setForm({ ...form, riskLevel: event.target.value as RiskLevel })}><option>低</option><option>中</option><option>高</option></select></label>
           <label className="col-span-2"><span className="label">项目简介</span><textarea className="textarea min-h-20" placeholder="一句话描述产品、客户和价值主张" value={form.summary} onChange={(event) => setForm({ ...form, summary: event.target.value })} /></label>
         </div>

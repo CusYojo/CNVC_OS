@@ -3,6 +3,7 @@ import { eq, inArray } from 'drizzle-orm'
 import XLSX from 'xlsx'
 import { db } from '../db/client.js'
 import { radarCollectorStates, radarSourceRegistry } from '../db/schema.js'
+import { inspectBusinessText } from '../contracts/textIntegrityContract.js'
 
 function publicConfig(config: Record<string, unknown>) {
   return {
@@ -163,7 +164,11 @@ export async function radarWechatOperationalStatus() {
 }
 
 function workbookText(value: unknown): string {
-  return String(value ?? '').replace(/\s+/g, ' ').trim()
+  const quality = inspectBusinessText(value)
+  if (quality.corrupted) {
+    throw Object.assign(new Error('工作簿中含有无法识别的文字，请重新导出后上传'), { status: 422, code: 'WORKBOOK_TEXT_ENCODING_INVALID' })
+  }
+  return quality.text.replace(/\s+/g, ' ').trim()
 }
 
 export async function importManagedWechatAccounts(input: {
@@ -183,6 +188,7 @@ export async function importManagedWechatAccounts(input: {
   }
   const records: Array<{ group: string; sheet: string; account_name: string; wx_name: string }> = []
   for (const sheetName of workbook.SheetNames) {
+    const safeSheetName = workbookText(sheetName)
     const sheet = workbook.Sheets[sheetName]
     if (!sheet) continue
     const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, raw: false, defval: '', blankrows: false })
@@ -207,8 +213,8 @@ export async function importManagedWechatAccounts(input: {
       const legacyGroup = legacyTypeIndex >= 0 ? workbookText(row[legacyTypeIndex]) : ''
       records.push({
         group: explicitGroup || (['高校', '机构'].includes(legacyGroup) ? legacyGroup : '')
-          || (sheetName.includes('机构') ? '机构' : '高校'),
-        sheet: sheetName,
+          || (safeSheetName.includes('机构') ? '机构' : '高校'),
+        sheet: safeSheetName,
         account_name: accountName.slice(0, 255),
         wx_name: wxName.slice(0, 255),
       })

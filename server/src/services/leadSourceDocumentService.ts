@@ -5,6 +5,7 @@ import type { RowDataPacket } from 'mysql2'
 import { PDFParse } from 'pdf-parse'
 import { pool } from '../db/client.js'
 import { mysqlTableName, quoteMysqlIdentifier } from '../db/config.js'
+import { decodeTextBuffer, readableStoredText } from './textQualityService.js'
 
 type ResolveHost = (hostname: string) => Promise<string[]>
 type FetchLike = typeof fetch
@@ -133,13 +134,16 @@ async function extractDocument(buffer: Buffer, contentType: string, finalUrl: st
     const parser = new PDFParse({ data: buffer })
     try {
       const result = await parser.getText()
-      return { text: result.text.slice(0, 1_000_000), title: '', publisher: '', publishedAt: null, kind: 'paper_pdf' }
+      const text = readableStoredText(result.text)
+      if (!text && result.text.trim()) throw Object.assign(new Error('source PDF text encoding is invalid'), { code: 'SOURCE_TEXT_ENCODING_INVALID' })
+      return { text: text.slice(0, 1_000_000), title: '', publisher: '', publishedAt: null, kind: 'paper_pdf' }
     } finally { await parser.destroy() }
   }
   if (!/(?:html|text|xml|json)/i.test(contentType)) {
     throw Object.assign(new Error(`unsupported source content type: ${contentType || 'unknown'}`), { code: 'SOURCE_CONTENT_UNSUPPORTED' })
   }
-  const html = buffer.toString('utf8')
+  const html = readableStoredText(decodeTextBuffer(buffer).text)
+  if (!html && buffer.length) throw Object.assign(new Error('source text encoding is invalid'), { code: 'SOURCE_TEXT_ENCODING_INVALID' })
   const text = /html|xml/i.test(contentType) ? htmlText(html) : html.replace(/\s+/g, ' ').trim()
   const title = metaContent(html, ['og:title', 'twitter:title']) || decodeHtml(html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || '').replace(/<[^>]+>/g, ' ').trim()
   const publisher = metaContent(html, ['og:site_name', 'article:publisher', 'publisher'])

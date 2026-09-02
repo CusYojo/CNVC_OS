@@ -15,10 +15,11 @@ test('approved investment plans remain editable without changing the approved ba
   assert.match(service, /duty, 'concerned_leader'/)
   assert.match(service, /type: '通知'/)
   assert.match(panel, /已通过·可修订/)
-  assert.match(panel, /保存已通过计划的变更/)
+  assert.match(panel, /保存修订/)
+  assert.match(panel, /setPlanExpanded\(true\)/)
 })
 
-test('calendar task blocks and the top-right inbox keep project and three-day identity boundaries', async () => {
+test('calendar task blocks keep project identity while the top-right inbox only carries messages and warnings', async () => {
   const [calendar, grid, layout] = await Promise.all([
     source('../src/services/fdeCalendarService.ts'),
     source('../../src/components/FdeTimeGrid.tsx'),
@@ -28,6 +29,9 @@ test('calendar task blocks and the top-right inbox keep project and three-day id
   assert.match(grid, /row\.source === 'task'/)
   assert.match(grid, /row\.projectName \|\| '个人任务'/)
   assert.match(layout, /item\.ownerUserId === currentUser\.id/)
-  assert.match(layout, /item\.dueDate! >= today/)
-  assert.match(layout, /item\.dueDate! <= threeDayEndKey/)
+  assert.match(layout, /item\.type === '通知'/)
+  assert.match(layout, /request\.status !== '审批中'/)
+  assert.match(layout, /risk\.level === '高'/)
+  assert.match(layout, /title="消息与预警"/)
+  assert.doesNotMatch(layout, /title="我的待办"/)
 })

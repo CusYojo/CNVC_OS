@@ -1,3 +1,5 @@
+import { safeVisibleText } from '../contracts/textIntegrityContract.js'
+
 const UTF8_BOM = Buffer.from([0xef, 0xbb, 0xbf])
 const UTF16_LE_BOM = Buffer.from([0xff, 0xfe])
 const UTF16_BE_BOM = Buffer.from([0xfe, 0xff])
@@ -133,15 +135,25 @@ export function decodeTextBuffer(buffer: Buffer): {
     return { text: decodeUtf16Be(buffer), encoding: 'utf-16be' }
   }
 
-  const candidates = [
-    { encoding: 'utf-8' as const, text: decodeWith('utf-8', buffer) },
-    { encoding: 'gb18030' as const, text: decodeWith('gb18030', buffer) },
-  ].filter((candidate) => candidate.text)
-  if (!candidates.length) {
-    return { text: buffer.toString('utf8'), encoding: 'utf-8' }
+  // UTF-8 must win whenever it is strictly valid. GB18030 can decode many
+  // UTF-8 byte sequences into plausible-looking CJK characters, so scoring
+  // both candidates by CJK count can silently turn correct Chinese into junk.
+  const utf8 = decodeWith('utf-8', buffer)
+  if (utf8) return { text: utf8, encoding: 'utf-8' }
+  const gb18030 = decodeWith('gb18030', buffer)
+  if (buffer.length % 2 === 0) {
+    const utf16Candidates = [
+      { text: decodeWith('utf-16le', buffer), encoding: 'utf-16le' as const },
+      { text: decodeUtf16Be(buffer), encoding: 'utf-16be' as const },
+    ].filter((candidate) => candidate.text)
+      .sort((left, right) => textScore(right.text) - textScore(left.text))
+    const utf16 = utf16Candidates[0]
+    // BOM-less, Chinese-only UTF-16 has few or no NUL bytes. Prefer it only
+    // when it is materially more readable than the GB18030 interpretation.
+    if (utf16 && (!gb18030 || textScore(utf16.text) >= textScore(gb18030) + 2)) return utf16
   }
-  candidates.sort((left, right) => textScore(right.text) - textScore(left.text))
-  return candidates[0]
+  if (gb18030) return { text: gb18030, encoding: 'gb18030' }
+  return { text: buffer.toString('utf8'), encoding: 'utf-8' }
 }
 
 export function normalizeUnicodeText(value: unknown) {
@@ -153,14 +165,17 @@ export function normalizeUnicodeText(value: unknown) {
 }
 
 export function inspectTextQuality(value: unknown) {
-  const text = normalizeUnicodeText(value)
+  const raw = String(value ?? '')
+  const controlCount = (raw.match(DISALLOWED_CONTROL) || []).length
+  const text = normalizeUnicodeText(raw)
   const replacementCount = (text.match(/\uFFFD/g) || []).length
   const mojibakeCount = (text.match(new RegExp(SUSPICIOUS_MOJIBAKE.source, 'g')) || []).length
   return {
     text,
+    controlCount,
     replacementCount,
     mojibakeCount,
-    corrupted: replacementCount > 0 || mojibakeCount > 0,
+    corrupted: controlCount > 0 || replacementCount > 0 || mojibakeCount > 0,
   }
 }
 
@@ -185,4 +200,27 @@ export function cleanCorruptedText(value: unknown) {
     cleaned,
     usable: !quality.corrupted || readableCjk >= 12,
   }
+}
+
+/** Read historical persisted text without propagating irrecoverable bytes into
+ * search, AI prompts, exports or workflow-derived records. */
+export function readableStoredText(value: unknown): string {
+  const quality = cleanCorruptedText(value)
+  if (!quality.corrupted) return quality.text.trim()
+  return quality.usable ? quality.cleaned.trim() : ''
+}
+
+/** Replace already-damaged legacy values at the API boundary instead of
+ * allowing replacement-character noise to leak into business screens. */
+export function sanitizeTextPayloadForDisplay<T>(value: T, fallback = ''): T {
+  if (typeof value === 'string') {
+    return safeVisibleText(value, fallback) as T
+  }
+  if (Array.isArray(value)) return value.map((item) => sanitizeTextPayloadForDisplay(item, fallback)) as T
+  if (!value || typeof value !== 'object' || Buffer.isBuffer(value) || value instanceof Date) return value
+  const prototype = Object.getPrototypeOf(value)
+  if (prototype !== Object.prototype && prototype !== null) return value
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).map(([key, child]) => [key, sanitizeTextPayloadForDisplay(child, fallback)]),
+  ) as T
 }

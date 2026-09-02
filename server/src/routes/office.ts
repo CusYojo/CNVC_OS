@@ -3,6 +3,7 @@ import { z } from 'zod'
 import type { AuthedRequest } from '../middleware/requireAuth.js'
 import { actOnOfficeRequest, getOfficeAttachment, getOfficeRequest, getOfficeRevision, grantOfficeAttachment, listOfficeRequests, listReusableOfficeRequests, officeCommandReceipt, officeOptions, officeTransferCandidates, previewOfficeRequest, resolveOfficeCommand, saveOfficeRequest, uploadOfficeAttachment } from '../services/fdeOfficeService.js'
 import { projectFilePreviewContentType } from '../services/projectFileStorageService.js'
+import { canonicalizeProjectTextBuffer } from '../security/projectFileValidation.js'
 import { writeAudit } from '../services/auditService.js'
 import { readOfficeNotice } from '../services/fdeApprovalCenterService.js'
 import { getOfficeExecutions, recordOfficeExecution } from '../services/fdeOfficeService.js'
@@ -34,6 +35,6 @@ for (const operation of ['preview', 'download'] as const) officeRouter.get(`/req
     await writeAudit({ userId: req.user!.uid, userName: req.user!.name, module: '通用OA', action: operation === 'preview' ? '预览原件' : '下载原件', target: `${id(req.params.id)} / ${id(req.params.fileId)}`, ip: req.ip })
     res.setHeader('Content-Type', contentType); res.setHeader('Content-Disposition', `${operation === 'preview' ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(result.name)}`)
     res.setHeader('X-Content-Type-Options', 'nosniff'); res.setHeader('Content-Security-Policy', "sandbox; default-src 'none'; img-src data:")
-    res.setHeader('X-Content-SHA256', result.sha256); res.send(result.bytes)
+    res.setHeader('X-Content-SHA256', result.sha256); res.send(operation === 'preview' ? canonicalizeProjectTextBuffer(result.name, result.bytes) : result.bytes)
   } catch (e) { next(e) }
 })

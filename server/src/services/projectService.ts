@@ -39,6 +39,7 @@ import { initializeFdeFileGrants } from './fdeFileService.js'
 import { projectFileAccessCondition, requireProjectFileAccess, requireProjectFileUpload } from './projectFileAccessService.js'
 import { prepareFdeCreationGovernance } from './fdeGovernanceService.js'
 import type { FdeCreationAssignment } from './fdeGovernanceService.js'
+import { canDirectlyDeleteProject } from '../contracts/adminRoleContract.js'
 
 const STAGES = ['线索', '初筛', '立项', '尽调', '上会', '投决', '投后', '退出'] as const
 const ARTIFACT_ROOT = path.resolve(
@@ -615,17 +616,33 @@ export async function getFileVersion(fileId: string, version: number) {
   return row
 }
 
-// 先锁项目及校验引用，数据库删除/索引/审计同事务，原文件只在提交后处理。
-// 受保护的 FDE 历史不能通过旧删除接口绕过生命周期保留规则。
-export async function deleteProject(id: string, userId: string) {
+// 授权领导通过可审计的生命周期删除立即移出业务视图；普通项目成员仍沿用
+// 原有的空项目硬删除，并且不能绕过 FDE 历史保留规则。
+export async function deleteProject(id: string, userId: string, input?: { confirmation?: string; expectedVersion?: number }) {
   const proj = await db.transaction(async (tx) => {
     await tx.execute(sql`SELECT ${projects.id} FROM ${projects} WHERE ${projects.id}=${id} FOR UPDATE`)
     const [project] = await tx.select().from(projects).where(eq(projects.id, id))
     if (!project) return null
     const actor = await createMySqlIdentityRepositoryContext(tx).users.findById(userId)
     if (!actor || actor.status !== '启用') throw Object.assign(new Error('当前账号无权删除项目'), { status: 403, code: 'PROJECT_FORBIDDEN' })
+    if (input?.confirmation !== undefined && input.confirmation !== project.name) {
+      throw Object.assign(new Error('项目名称已变化，请刷新后重新确认'), { status: 409, code: 'PROJECT_DELETE_CONFIRMATION_MISMATCH' })
+    }
+    if (input?.expectedVersion !== undefined && input.expectedVersion !== project.version) throw businessVersionConflict('项目')
+    if (project.lifecycle === 'deleted') throw Object.assign(new Error('项目已删除'), { status: 409, code: 'PROJECT_ALREADY_DELETED' })
+    const permissionCodes = await createMySqlIdentityRepositoryContext(tx).users.listPermissionCodes(actor.id)
+    const canDeleteWithHistory = canDirectlyDeleteProject(actor.role, permissionCodes)
     const [accessible] = await tx.select({ id: projects.id }).from(projects).where(and(eq(projects.id, id), projectAccessCondition({ uid: actor.id, name: actor.name, role: actor.role })))
-    if (!accessible) throw Object.assign(new Error('无权删除该项目'), { status: 403, code: 'PROJECT_FORBIDDEN' })
+    if (!accessible && !canDeleteWithHistory) throw Object.assign(new Error('无权删除该项目'), { status: 403, code: 'PROJECT_FORBIDDEN' })
+    if (canDeleteWithHistory) {
+      await tx.update(projects).set({ lifecycle: 'deleted', pinned: false, version: sql`${projects.version} + 1`, updatedAt: new Date() }).where(eq(projects.id, id))
+      await tx.update(todos).set({ status: '已关闭', closureReason: '所属项目已删除', version: sql`${todos.version} + 1` }).where(and(
+        eq(todos.projectId, id),
+        sql`${todos.status} NOT IN ('已完成','已关闭','已取消','已归档')`,
+      ))
+      await tx.insert(auditLogs).values({ userId, userName: actor.name, module: '项目管理', action: '删除项目', target: project.name })
+      return { ...project, lifecycle: 'deleted' as const, pinned: false, version: project.version + 1 }
+    }
     const [directive] = await tx.select({ id: projectDirectives.id }).from(projectDirectives).where(eq(projectDirectives.projectId, id)).limit(1)
     if (directive) throw Object.assign(new Error('项目包含需保留的批示及执行历史，不能直接删除；请按项目生命周期规则处理'), { status: 409, code: 'PROJECT_DIRECTIVE_HISTORY_PROTECTED' })
     const [record] = await tx.select({ id: projectRecords.id }).from(projectRecords).where(eq(projectRecords.projectId, id)).limit(1)
@@ -655,6 +672,7 @@ export async function deleteProject(id: string, userId: string) {
     return project
   })
   if (!proj) return null
+  if (proj.lifecycle === 'deleted') return proj
   await removeProjectFileDirectory(id).catch((error) => {
     console.warn(`[projects] 清理项目原始文件目录失败：${id}`, error)
   })
