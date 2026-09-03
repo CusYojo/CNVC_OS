@@ -1,7 +1,8 @@
 import { FolderKanban, Inbox, Star, UsersRound } from 'lucide-react'
 import { useSearchParams } from 'react-router-dom'
-import { useAppStore } from '../store/useAppStore'
+import { useState } from 'react'
 import type { ProjectClassification } from '../types'
+import type { ProjectListCounts } from '../services/projectListApi'
 import { ProjectsPage } from './ProjectsPage'
 import { SourcingPage } from './SourcingPage'
 
@@ -24,7 +25,7 @@ function validView(value: string | null): ProjectCenterView {
 export function ProjectCenterPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const view = validView(searchParams.get('view'))
-  const projects = useAppStore(state => state.projects)
+  const [classificationCounts, setClassificationCounts] = useState<ProjectListCounts>({ normal: 0, key: 0 })
 
   const selectView = (next: ProjectCenterView) => {
     const params = new URLSearchParams(searchParams)
@@ -49,12 +50,12 @@ export function ProjectCenterPage() {
                 onClick={() => selectView(item.id)}
                 className={active ? 'active' : ''}
               >
-                {item.label}{item.id !== 'leads' && <em>{projects.filter(project => (project.classification ?? 'normal') === item.id && (project.lifecycle ?? 'active') === 'active').length}</em>}
+                {item.label}{item.id !== 'leads' && item.id !== 'pool' && <em>{classificationCounts[item.id]}</em>}
               </button>
             )
           })}
         </div>
-      {view === 'leads' ? <SourcingPage /> : <ProjectsPage classification={view} embedded />}
+      {view === 'leads' ? <SourcingPage /> : <ProjectsPage classification={view} embedded onCountsChange={setClassificationCounts} />}
     </div>
   )
 }

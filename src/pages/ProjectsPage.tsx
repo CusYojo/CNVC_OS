@@ -1,6 +1,6 @@
 import { AlertTriangle, ChevronLeft, ChevronRight, Filter, GitBranch, MoreHorizontal, Pencil, Pin, Plus, Star } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
-import { useMemo, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { UnifiedProjectCreateModal } from '../components/UnifiedProjectCreateModal'
 import { useToast } from '../components/Toast'
@@ -9,6 +9,7 @@ import { useAuthStore } from '../store/useAuthStore'
 import type { Project, ProjectClassification, ProjectStage, RiskLevel } from '../types'
 import { formatShanghaiDateTime } from '../lib/dateTime'
 import { canDirectlyDeleteProject } from '../../server/src/contracts/adminRoleContract'
+import { fetchProjectList, type ProjectListCounts } from '../services/projectListApi'
 
 const stages: ProjectStage[] = ['入库', '立项', '尽调计划制定', '尽调计划审核', '启动尽调', '内核', '投决', '打款', '已 Close', '线索', '初筛', '尽调', '上会', '投后', '退出', '放弃']
 const viewCopy: Record<ProjectClassification, { title: string; description: string }> = {
@@ -17,7 +18,13 @@ const viewCopy: Record<ProjectClassification, { title: string; description: stri
   key: { title: '重点项目', description: '由授权领导标记、需要重点推进和关注的项目。' },
 }
 
-export function ProjectsPage({ classification = 'normal', embedded = false }: { classification?: ProjectClassification; embedded?: boolean }) {
+export function ProjectsPage({
+  classification = 'normal', embedded = false, onCountsChange,
+}: {
+  classification?: ProjectClassification
+  embedded?: boolean
+  onCountsChange?: (counts: ProjectListCounts) => void
+}) {
   const navigate = useNavigate()
   const { showToast } = useToast()
   const projects = useAppStore((state) => state.projects)
@@ -40,21 +47,47 @@ export function ProjectsPage({ classification = 'normal', embedded = false }: { 
   const [savingEdit, setSavingEdit] = useState(false)
   const [pendingDelete, setPendingDelete] = useState<Project | null>(null)
   const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null)
+  const [rows, setRows] = useState<Project[]>([])
+  const [total, setTotal] = useState(0)
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
+  const [debouncedQuery, setDebouncedQuery] = useState('')
+  const [refreshKey, setRefreshKey] = useState(0)
+  const latestRequest = useRef(0)
   const pageSize = 6
 
   const industries = Array.from(new Set(projects.map((item) => item.industry)))
   const owners = Array.from(new Set(projects.map((item) => item.owner)))
-  const filtered = useMemo(() => projects
-    .filter((project) => (project.classification ?? 'normal') === classification && (project.lifecycle ?? 'active') === 'active')
-    .filter((project) => scope === 'all' || project.isParticipant)
-    .filter((project) => !query || `${project.name}${project.companyName}`.toLowerCase().includes(query.toLowerCase()))
-    .filter((project) => !stage || project.stage === stage)
-    .filter((project) => !industry || project.industry === industry)
-    .filter((project) => !owner || project.owner === owner)
-    .filter((project) => !risk || project.riskLevel === risk)
-    .sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)) || b.updatedAt.localeCompare(a.updatedAt)), [projects, classification, scope, query, stage, industry, owner, risk])
-  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize))
-  const rows = filtered.slice((page - 1) * pageSize, page * pageSize)
+  const totalPages = Math.max(1, Math.ceil(total / pageSize))
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedQuery(query.trim()), 250)
+    return () => window.clearTimeout(timer)
+  }, [query])
+
+  useEffect(() => {
+    const requestId = ++latestRequest.current
+    setLoading(true)
+    setLoadError('')
+    void fetchProjectList({
+      page, pageSize, scope: scope as 'mine' | 'all', classification, lifecycle: 'active',
+      keyword: debouncedQuery, stage, industry, owner, risk: risk as RiskLevel | '',
+    }).then((result) => {
+      if (requestId !== latestRequest.current) return
+      const nextTotalPages = Math.max(1, Math.ceil(result.total / pageSize))
+      if (page > nextTotalPages) { setPage(nextTotalPages); return }
+      setRows(result.list)
+      setTotal(result.total)
+      onCountsChange?.(result.counts)
+      useAppStore.setState((state) => ({
+        projects: [...result.list, ...state.projects.filter((item) => !result.list.some((row) => row.id === item.id))],
+      }))
+    }).catch((error: Error) => {
+      if (requestId === latestRequest.current) setLoadError(error.message || '项目列表加载失败')
+    }).finally(() => {
+      if (requestId === latestRequest.current) setLoading(false)
+    })
+  }, [classification, debouncedQuery, industry, onCountsChange, owner, page, refreshKey, risk, scope, stage])
 
   const clearFilters = () => {
     setQuery(''); setScope('mine'); setStage(''); setIndustry(''); setOwner(''); setRisk(''); setPage(1)
@@ -76,6 +109,7 @@ export function ProjectsPage({ classification = 'normal', embedded = false }: { 
       })
       showToast('项目信息已保存')
       setEditing(null)
+      setRefreshKey((value) => value + 1)
     } catch (error) {
       showToast(`保存失败：${(error as Error).message}`, 'error')
     } finally {
@@ -85,7 +119,7 @@ export function ProjectsPage({ classification = 'normal', embedded = false }: { 
 
   const handlePin = async (project: Project) => {
     setMenuId(null)
-    try { await pinProject(project.id, !project.pinned); showToast(project.pinned ? '已取消置顶' : '已置顶') }
+    try { await pinProject(project.id, !project.pinned); showToast(project.pinned ? '已取消置顶' : '已置顶'); setRefreshKey((value) => value + 1) }
     catch (e) { showToast(`操作失败：${(e as Error).message}`, 'error') }
   }
   const requestDelete = (project: Project) => {
@@ -99,6 +133,7 @@ export function ProjectsPage({ classification = 'normal', embedded = false }: { 
       await deleteProject(pendingDelete.id, pendingDelete.name)
       showToast(`已删除「${pendingDelete.name}」`)
       setPendingDelete(null)
+      setRefreshKey((value) => value + 1)
     } catch (e) {
       showToast(`删除失败：${(e as Error).message}`, 'error')
     } finally {
@@ -114,6 +149,7 @@ export function ProjectsPage({ classification = 'normal', embedded = false }: { 
     try {
       await classifyProject(project.id, target, reason)
       showToast(`${project.name}：${action}成功`)
+      setRefreshKey((value) => value + 1)
     } catch (error) {
       showToast(`${action}失败：${(error as Error).message}`, 'error')
     }
@@ -146,7 +182,7 @@ export function ProjectsPage({ classification = 'normal', embedded = false }: { 
       </Card>
 
       <Card className="fde-project-table overflow-hidden">
-        {rows.length === 0 ? <EmptyState title={`没有找到${currentCopy.title}`} description="调整搜索或筛选条件后重试。" action={classification === 'pool' ? <Button onClick={() => setShowCreate(true)}><Plus className="h-4 w-4" />登记项目</Button> : undefined} /> : (
+        {loading && rows.length === 0 ? <EmptyState title="正在加载项目" description="正在查询最新项目数据…" /> : loadError ? <EmptyState title="项目列表加载失败" description={loadError} action={<Button onClick={() => setRefreshKey((value) => value + 1)}>重新加载</Button>} /> : rows.length === 0 ? <EmptyState title={`没有找到${currentCopy.title}`} description="调整搜索或筛选条件后重试。" action={classification === 'pool' ? <Button onClick={() => setShowCreate(true)}><Plus className="h-4 w-4" />登记项目</Button> : undefined} /> : (
           <>
             <DataTable headers={['项目 / 公司', '行业与轮次', '项目阶段', '负责人', '融资 / 估值', '风险', '最近更新', '']}>
               {rows.map((project) => (
@@ -177,7 +213,7 @@ export function ProjectsPage({ classification = 'normal', embedded = false }: { 
               ))}
             </DataTable>
             <div className="flex items-center justify-between border-t border-slate-100 px-4 py-3">
-              <p className="text-xs text-slate-400">共 {filtered.length} 个项目 · 第 {page}/{totalPages} 页</p>
+              <p className="text-xs text-slate-400">共 {total} 个项目 · 第 {page}/{totalPages} 页</p>
               <div className="flex items-center gap-1">
                 <button aria-label="上一页" disabled={page === 1} onClick={() => setPage((value) => value - 1)} className="grid h-8 w-8 place-items-center rounded-lg border border-slate-200 text-slate-500 disabled:opacity-40"><ChevronLeft className="h-4 w-4" /></button>
                 {Array.from({ length: totalPages }).map((_, index) => <button key={index} onClick={() => setPage(index + 1)} className={`grid h-8 min-w-8 place-items-center rounded-lg text-xs ${page === index + 1 ? 'bg-brand-600 text-white' : 'border border-slate-200 bg-white text-slate-500'}`}>{index + 1}</button>)}
@@ -187,7 +223,7 @@ export function ProjectsPage({ classification = 'normal', embedded = false }: { 
           </>
         )}
       </Card>
-      <UnifiedProjectCreateModal open={showCreate} onClose={() => setShowCreate(false)} />
+      <UnifiedProjectCreateModal open={showCreate} onClose={() => { setShowCreate(false); setRefreshKey((value) => value + 1) }} />
       <Modal
         open={!!pendingDelete}
         onClose={() => { if (!deletingProjectId) setPendingDelete(null) }}

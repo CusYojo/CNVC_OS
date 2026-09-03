@@ -19,6 +19,7 @@ function renderCenter(view: string | null, projects: Array<{ classification?: st
     exports: {}, React, URLSearchParams,
     FolderKanban: 'svg', Inbox: 'svg', Star: 'svg', UsersRound: 'svg',
     useSearchParams: () => [params, () => {}],
+    useState: () => [{ normal: 1, key: 1 }, () => {}],
     useAppStore: (select: (state: { projects: typeof projects }) => unknown) => select({ projects }),
     ProjectsPage: ({ classification }: { classification: string }) => React.createElement('div', { 'data-classification': classification }),
     SourcingPage: () => React.createElement('div', { 'data-view': 'leads' }),

@@ -117,6 +117,9 @@ interface ListArgs {
   keyword?: string
   stage?: string
   owner?: string
+  industry?: string
+  risk?: '低' | '中' | '高'
+  scope?: 'mine' | 'all'
   classification?: 'pool' | 'normal' | 'key'
   lifecycle?: 'active' | 'closed' | 'archived' | 'deleted'
   page: number
@@ -130,31 +133,47 @@ function publicProject<T extends { scoring?: unknown }>(row: T): T {
 }
 
 export async function listProjects(args: ListArgs, userId?: string) {
-  const conds = []
+  const baseConditions = []
   if (userId) {
     const user = await identityRepositories.users.findById(userId)
-    if (!user || user.status !== '启用') return { list: [], total: 0, page: args.page, pageSize: args.pageSize }
-    conds.push(projectAccessCondition({ uid: user.id, name: user.name, role: user.role }))
+    if (!user || user.status !== '启用') return { list: [], total: 0, page: args.page, pageSize: args.pageSize, counts: { normal: 0, key: 0 } }
+    baseConditions.push(projectAccessCondition({ uid: user.id, name: user.name, role: user.role }))
+    if (args.scope === 'mine') {
+      baseConditions.push(inArray(projects.id, db.select({ id: projectMembers.projectId }).from(projectMembers).where(eq(projectMembers.userId, user.id))))
+    }
   }
   if (args.keyword) {
-    conds.push(or(
+    baseConditions.push(or(
       like(projects.name, `%${args.keyword}%`),
       like(projects.companyName, `%${args.keyword}%`),
       like(projects.industry, `%${args.keyword}%`),
     ))
   }
-  if (args.stage) conds.push(eq(projects.stage, args.stage))
-  if (args.owner) conds.push(eq(projects.owner, args.owner))
-  if (args.classification) conds.push(eq(projects.classification, args.classification))
-  if (args.lifecycle) conds.push(eq(projects.lifecycle, args.lifecycle))
-  const where = conds.length ? and(...conds) : undefined
-  const rows = await db.select().from(projects).where(where as never).orderBy(
+  if (args.stage) baseConditions.push(eq(projects.stage, args.stage))
+  if (args.owner) baseConditions.push(eq(projects.owner, args.owner))
+  if (args.industry) baseConditions.push(eq(projects.industry, args.industry))
+  if (args.risk) baseConditions.push(eq(projects.riskLevel, args.risk))
+  if (args.lifecycle) baseConditions.push(eq(projects.lifecycle, args.lifecycle))
+  const listConditions = args.classification
+    ? [...baseConditions, eq(projects.classification, args.classification)]
+    : baseConditions
+  const listWhere = listConditions.length ? and(...listConditions) : undefined
+  const countsWhere = baseConditions.length ? and(...baseConditions) : undefined
+  const rows = await db.select().from(projects).where(listWhere as never).orderBy(
     desc(projects.pinned),
     desc(projects.updatedAt),
     desc(projects.id),
   )
     .limit(args.pageSize).offset((args.page - 1) * args.pageSize)
-  const totalRows = await db.select({ c: sql<number>`count(*)` }).from(projects).where(where as never)
+  const [totalRows, countRows] = await Promise.all([
+    db.select({ c: sql<number>`count(*)` }).from(projects).where(listWhere as never),
+    db.select({ classification: projects.classification, c: sql<number>`count(*)` })
+      .from(projects).where(countsWhere as never).groupBy(projects.classification),
+  ])
+  const classificationCounts = { normal: 0, key: 0 }
+  for (const row of countRows) {
+    if (row.classification === 'normal' || row.classification === 'key') classificationCounts[row.classification] = Number(row.c)
+  }
   const memberships = userId && rows.length
     ? await db.select({ projectId: projectMembers.projectId, memberRole: projectMembers.memberRole })
       .from(projectMembers).where(and(eq(projectMembers.userId, userId), inArray(projectMembers.projectId, rows.map((row) => row.id))))
@@ -169,6 +188,7 @@ export async function listProjects(args: ListArgs, userId?: string) {
     total: totalRows[0]?.c ?? rows.length,
     page: args.page,
     pageSize: args.pageSize,
+    counts: classificationCounts,
   }
 }
 

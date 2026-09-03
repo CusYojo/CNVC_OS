@@ -32,7 +32,11 @@ function assertStablePages(
 
 async function projectPages(keyword: string): Promise<string[]> {
   const pages = await Promise.all([1, 2, 3].map((page) => listProjects({ keyword, page, pageSize })))
-  for (const result of pages) assert.equal(result.total, fixtureSize, 'project pagination total changed')
+  for (const result of pages) {
+    assert.equal(result.total, fixtureSize, 'project pagination total changed')
+    assert.equal(result.counts.normal, fixtureSize, 'project normal classification count changed')
+    assert.equal(result.counts.key, 0, 'project key classification count changed')
+  }
   return pages.flatMap((result) => result.list.map((row) => row.id))
 }
 
@@ -182,6 +186,7 @@ async function main(): Promise<void> {
       pageSize,
       checks: [
         'project-pagination-tied-sort-values-use-unique-id-without-duplicates-or-omissions',
+        'project-pagination-classification-counts-share-filter-scope',
         'lead-created-time-pagination-ties-use-unique-id-and-repeat-stably',
         'lead-score-pagination-ties-use-unique-id-and-repeat-stably',
         'lead-filtered-pagination-shrink-returns-new-final-page',
