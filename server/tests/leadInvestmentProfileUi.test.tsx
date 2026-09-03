@@ -88,6 +88,23 @@ test('lead row no longer renders customer profile values after restoring latest 
   assert.match(html, /完成首批设备交付/)
 })
 
+test('enterprise capital background hides the generic source-confirmed relation label', () => {
+  const lead = leadFixture()
+  const html = renderToStaticMarkup(React.createElement(LeadRow, {
+    lead: {
+      ...lead,
+      investmentProfile: {
+        ...lead.investmentProfile!,
+        academicLinks: [{ institution: '清华大学', person: '张三', relationType: '来源确认关系', commercialization: false }],
+      },
+    },
+    onOpen: () => {},
+  }))
+  assert.match(html, /清华大学/)
+  assert.match(html, /张三/)
+  assert.doesNotMatch(html, /来源确认关系/)
+})
+
 test('research lead row does not present company financing, valuation or customer values', () => {
   const html = renderToStaticMarkup(React.createElement(LeadRow, {
     lead: {
