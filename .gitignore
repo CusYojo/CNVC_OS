@@ -42,6 +42,7 @@ cybernaut-assistant/workspace/
 
 # Generated acceptance artifacts
 docs/ai-assistant/验收产物/
+outputs/
 
 # Python cache
 __pycache__/

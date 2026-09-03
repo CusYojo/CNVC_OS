@@ -4,6 +4,7 @@ import type { RowDataPacket } from 'mysql2'
 import { pool } from '../db/client.js'
 import { mysqlTableName, quoteMysqlIdentifier } from '../db/config.js'
 import { redactSensitiveText } from '../security/redactSecrets.js'
+import { LEAD_ENRICHMENT_SCHEMA_VERSION } from './leadEnrichmentContract.js'
 import { enqueueLeadEnrichmentJob } from './leadEnrichmentService.js'
 
 export type LeadPipelineStatus = 'discovered' | 'ready' | 'review' | 'rejected' | 'failed'
@@ -391,6 +392,10 @@ export async function transitionLeadPipelineItem(
              VALUES (?,?,'ready','rejected',?,CAST(? AS JSON),100,'system','lead-registration-admission-guard',NOW(3))`,
             [randomUUID(), eventId, rejectionReason, rejectionEvidence],
           )
+        } else if (!enrichment.jobId) {
+          throw Object.assign(new Error(`ready pipeline item requires a persisted ${LEAD_ENRICHMENT_SCHEMA_VERSION} enrichment job`), {
+            code: 'LEAD_ENRICHMENT_JOB_REQUIRED',
+          })
         }
       }
     }

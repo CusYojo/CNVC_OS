@@ -11,6 +11,13 @@ import type { FridayMinutes } from '../contracts/fdeFridayMeetingContract.js'
 import type { CommitteeReceipt } from '../contracts/fdeCommitteeContract.js'
 import type { ResponsibilityPolicy, ResponsibilityPolicyReceipt } from '../contracts/fdeResponsibilityPolicyContract.js'
 import type { ResponsibilityReceipt } from '../contracts/fdeResponsibilityContract.js'
+import type {
+  LeadInvestmentProfileAcademicLink,
+  LeadInvestmentProfileCustomer,
+  LeadInvestmentProfileInstitution,
+  LeadInvestmentProfileProduct,
+} from '../contracts/leadInvestmentProfileContract.js'
+import type { LeadResearchProfileSummary } from '../contracts/leadResearchProfileContract.js'
 
 const mysqlTable = mysqlTableCreator((name) => `${mysqlConfig.tablePrefix}${name}`)
 const uuidPrimaryKey = (name: string) => varchar(name, { length: 36 }).primaryKey().$defaultFn(randomUUID)
@@ -1395,6 +1402,7 @@ export const leadScoreJobs = mysqlTable('lead_score_jobs', {
   enrichmentSnapshotId: uuidColumn('enrichment_snapshot_id'),
   snapshotHash: varchar('snapshot_hash', { length: 64 }),
   ratingSchemaVersion: varchar('rating_schema_version', { length: 64 }),
+  requestMode: varchar('request_mode', { length: 24 }).notNull().default('automatic'),
   createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
   updatedAt: timestampColumn('updated_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
 }, (t) => ({
@@ -1438,6 +1446,7 @@ export const leadEntityRelations = mysqlTable('lead_entity_relations', {
 export const leadEnrichmentJobs = mysqlTable('lead_enrichment_jobs', {
   id: uuidPrimaryKey('id'),
   leadId: uuidColumn('lead_id').notNull().references(() => leads.id, { onDelete: 'cascade' }),
+  schemaVersion: varchar('schema_version', { length: 64 }).notNull().default('lead-enrichment-v3'),
   triggerType: varchar('trigger_type', { length: 48 }).notNull(),
   triggerEventId: varchar('trigger_event_id', { length: 64 }).references(() => leadPipelineRawEvents.id, { onDelete: 'set null' }),
   idempotencyKey: varchar('idempotency_key', { length: 64 }).notNull(),
@@ -1459,6 +1468,7 @@ export const leadEnrichmentJobs = mysqlTable('lead_enrichment_jobs', {
   uniqueIdempotency: uniqueIndex('uq_lead_enrichment_jobs_idempotency').on(t.idempotencyKey),
   byDue: index('idx_lead_enrichment_jobs_due').on(t.status, t.priority, t.nextAttemptAt),
   byLead: index('idx_lead_enrichment_jobs_lead').on(t.leadId, t.createdAt),
+  bySchemaDue: index('idx_lead_enrichment_jobs_schema_due').on(t.schemaVersion, t.status, t.priority, t.nextAttemptAt),
   byLease: index('idx_lead_enrichment_jobs_lease').on(t.leaseExpiresAt),
 }))
 
@@ -1625,6 +1635,175 @@ export const leadEnrichmentSnapshots = mysqlTable('lead_enrichment_snapshots', {
   uniqueLeadHash: uniqueIndex('uq_lead_enrichment_snapshot_hash').on(t.leadId, t.snapshotHash, t.schemaVersion),
   byLead: index('idx_lead_enrichment_snapshots_lead').on(t.leadId, t.createdAt),
   byJob: index('idx_lead_enrichment_snapshots_job').on(t.jobId),
+}))
+
+export const leadInstitutionDictionary = mysqlTable('lead_institution_dictionary', {
+  id: uuidPrimaryKey('id'),
+  canonicalName: varchar('canonical_name', { length: 255 }).notNull(),
+  aliases: json('aliases').$type<string[]>().notNull().default(emptyJsonArray),
+  institutionType: varchar('institution_type', { length: 64 }).notNull(),
+  tier: varchar('tier', { length: 32 }),
+  major: boolean('major').notNull().default(false),
+  status: varchar('status', { length: 16 }).notNull().default('active'),
+  version: int('version').notNull().default(1),
+  updatedBy: uuidColumn('updated_by').references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+  updatedAt: timestampColumn('updated_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({
+  uniqueName: uniqueIndex('uq_lead_institution_dictionary_name').on(t.canonicalName),
+  byStatus: index('idx_lead_institution_dictionary_status').on(t.status, t.major),
+}))
+
+export const leadCustomerDictionary = mysqlTable('lead_customer_dictionary', {
+  id: uuidPrimaryKey('id'),
+  canonicalName: varchar('canonical_name', { length: 255 }).notNull(),
+  aliases: json('aliases').$type<string[]>().notNull().default(emptyJsonArray),
+  tier: varchar('tier', { length: 8 }).notNull(),
+  confidentiality: varchar('confidentiality', { length: 16 }).notNull(),
+  status: varchar('status', { length: 16 }).notNull().default('active'),
+  version: int('version').notNull().default(1),
+  updatedBy: uuidColumn('updated_by').references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+  updatedAt: timestampColumn('updated_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({
+  uniqueName: uniqueIndex('uq_lead_customer_dictionary_name').on(t.canonicalName),
+  byStatus: index('idx_lead_customer_dictionary_status').on(t.status, t.confidentiality, t.tier),
+}))
+
+export const leadIndustryDictionary = mysqlTable('lead_industry_dictionary', {
+  id: uuidPrimaryKey('id'),
+  canonicalName: varchar('canonical_name', { length: 255 }).notNull(),
+  aliases: json('aliases').$type<string[]>().notNull().default(emptyJsonArray),
+  level1: varchar('level1', { length: 128 }).notNull(),
+  level2: varchar('level2', { length: 128 }),
+  segment: varchar('segment', { length: 255 }),
+  chainPosition: varchar('chain_position', { length: 128 }),
+  status: varchar('status', { length: 16 }).notNull().default('active'),
+  version: int('version').notNull().default(1),
+  updatedBy: uuidColumn('updated_by').references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+  updatedAt: timestampColumn('updated_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({
+  uniqueName: uniqueIndex('uq_lead_industry_dictionary_name').on(t.canonicalName),
+  byStatus: index('idx_lead_industry_dictionary_status').on(t.status, t.level1, t.level2),
+}))
+
+export const leadAcademicInstitutionDictionary = mysqlTable('lead_academic_institution_dictionary', {
+  id: uuidPrimaryKey('id'),
+  canonicalName: varchar('canonical_name', { length: 255 }).notNull(),
+  aliases: json('aliases').$type<string[]>().notNull().default(emptyJsonArray),
+  institutionType: varchar('institution_type', { length: 64 }).notNull(),
+  status: varchar('status', { length: 16 }).notNull().default('active'),
+  version: int('version').notNull().default(1),
+  updatedBy: uuidColumn('updated_by').references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+  updatedAt: timestampColumn('updated_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({
+  uniqueName: uniqueIndex('uq_lead_academic_institution_dictionary_name').on(t.canonicalName),
+  byStatus: index('idx_lead_academic_institution_dictionary_status').on(t.status, t.institutionType),
+}))
+
+// 共享线索池读取专用投影。权威事实仍在 lead_facts / lead_fact_evidence，
+// 本表只保存冻结快照（ready/review）的确定性归并结果，避免列表请求逐条解析证据 JSON。
+export const leadInvestmentProfileProjections = mysqlTable('lead_investment_profile_projections', {
+  leadId: uuidColumn('lead_id').primaryKey().references(() => leads.id, { onDelete: 'cascade' }),
+  schemaVersion: varchar('schema_version', { length: 64 }).notNull(),
+  snapshotId: uuidColumn('snapshot_id').notNull().references(() => leadEnrichmentSnapshots.id, { onDelete: 'restrict' }),
+  snapshotHash: varchar('snapshot_hash', { length: 64 }).notNull(),
+  dictionaryHash: varchar('dictionary_hash', { length: 64 }).notNull(),
+  projectionVersion: varchar('projection_version', { length: 64 }).notNull().default('lead-investment-profile-projection-v2'),
+  dictionaryBinding: json('dictionary_binding').$type<Record<string, string>>().notNull().default(emptyJsonObject),
+  profilePayload: json('profile_payload').$type<Record<string, unknown>>(),
+  staleReason: varchar('stale_reason', { length: 64 }),
+  snapshotCreatedAt: timestampColumn('snapshot_created_at'),
+  projectedAt: timestampColumn('projected_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+  industryLevel1: varchar('industry_level1', { length: 128 }),
+  industryLevel2: varchar('industry_level2', { length: 128 }),
+  industrySegment: varchar('industry_segment', { length: 255 }),
+  industryChainPosition: varchar('industry_chain_position', { length: 255 }),
+  products: json('products').$type<LeadInvestmentProfileProduct[]>().notNull().default(emptyJsonArray),
+  productTotalCount: int('product_total_count').notNull().default(0),
+  institutions: json('institutions').$type<LeadInvestmentProfileInstitution[]>().notNull().default(emptyJsonArray),
+  institutionTotalCount: int('institution_total_count').notNull().default(0),
+  academicLinks: json('academic_links').$type<LeadInvestmentProfileAcademicLink[]>().notNull().default(emptyJsonArray),
+  academicLinkTotalCount: int('academic_link_total_count').notNull().default(0),
+  customerRepresentatives: json('customer_representatives').$type<LeadInvestmentProfileCustomer[]>().notNull().default(emptyJsonArray),
+  customerTotalCount: int('customer_total_count').notNull().default(0),
+  mentionedCustomerCount: int('mentioned_customer_count').notNull().default(0),
+  engagedCustomerCount: int('engaged_customer_count').notNull().default(0),
+  trialCustomerCount: int('trial_customer_count').notNull().default(0),
+  contractedCustomerCount: int('contracted_customer_count').notNull().default(0),
+  deliveredCustomerCount: int('delivered_customer_count').notNull().default(0),
+  payingCustomerCount: int('paying_customer_count').notNull().default(0),
+  productSearchText: text('product_search_text'),
+  productRouteSearchText: text('product_route_search_text'),
+  productionStageSearchText: text('production_stage_search_text'),
+  institutionSearchText: text('institution_search_text'),
+  academicSearchText: text('academic_search_text'),
+  academicInstitutionSearchText: text('academic_institution_search_text'),
+  academicRelationSearchText: text('academic_relation_search_text'),
+  hasMajorInstitution: boolean('has_major_institution').notNull().default(false),
+  hasCommercializationLink: boolean('has_commercialization_link').notNull().default(false),
+  financingStatus: varchar('financing_status', { length: 64 }),
+  latestRound: varchar('latest_round', { length: 64 }),
+  latestRoundDate: date('latest_round_date', { mode: 'string' }),
+  latestAmountDisplay: varchar('latest_amount_display', { length: 128 }),
+  latestAmountValue: bigint('latest_amount_value', { mode: 'number' }),
+  latestAmountCurrency: varchar('latest_amount_currency', { length: 16 }),
+  cumulativeAmountDisplay: varchar('cumulative_amount_display', { length: 128 }),
+  cumulativeAmountValue: bigint('cumulative_amount_value', { mode: 'number' }),
+  completedRoundCount: int('completed_round_count').notNull().default(0),
+  valuationDisplay: varchar('valuation_display', { length: 128 }),
+  valuationValue: bigint('valuation_value', { mode: 'number' }),
+  valuationType: varchar('valuation_type', { length: 24 }),
+  valuationCurrency: varchar('valuation_currency', { length: 16 }),
+  valuationDate: date('valuation_date', { mode: 'string' }),
+  valuationRound: varchar('valuation_round', { length: 64 }),
+  highestCustomerStage: varchar('highest_customer_stage', { length: 8 }),
+  verifiedCustomerCount: int('verified_customer_count').notNull().default(0),
+  tierACustomerCount: int('tier_a_customer_count').notNull().default(0),
+  tierBCustomerCount: int('tier_b_customer_count').notNull().default(0),
+  tierCCustomerCount: int('tier_c_customer_count').notNull().default(0),
+  verifiedDimensions: int('verified_dimensions').notNull().default(0),
+  applicableDimensions: int('applicable_dimensions').notNull().default(0),
+  conflictCount: int('conflict_count').notNull().default(0),
+  profileStatus: varchar('profile_status', { length: 24 }).notNull().default('missing'),
+  sourceFactIds: json('source_fact_ids').$type<string[]>().notNull().default(emptyJsonArray),
+  factsUpdatedAt: timestampColumn('facts_updated_at'),
+  updatedAt: timestampColumn('updated_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({
+  byIndustry: index('idx_lead_investment_profiles_industry').on(t.industryLevel1, t.industryLevel2),
+  byFinancing: index('idx_lead_investment_profiles_financing').on(t.latestRound, t.latestRoundDate),
+  byFundingSort: index('idx_lead_investment_profiles_funding_sort').on(t.latestRoundDate, t.leadId),
+  byValuation: index('idx_lead_investment_profiles_valuation').on(t.valuationCurrency, t.valuationValue),
+  byValuationSort: index('idx_lead_investment_profiles_valuation_sort').on(t.valuationValue, t.leadId),
+  byCustomer: index('idx_lead_investment_profiles_customer').on(t.highestCustomerStage, t.verifiedCustomerCount),
+  byCustomerTierA: index('idx_lead_investment_profiles_customer_tier_a').on(t.tierACustomerCount, t.leadId),
+  byCustomerTierB: index('idx_lead_investment_profiles_customer_tier_b').on(t.tierBCustomerCount, t.leadId),
+  byCustomerTierC: index('idx_lead_investment_profiles_customer_tier_c').on(t.tierCCustomerCount, t.leadId),
+  byStatus: index('idx_lead_investment_profiles_status').on(t.profileStatus, t.updatedAt),
+  byUpdatedSort: index('idx_lead_investment_profiles_updated_sort').on(t.factsUpdatedAt, t.leadId),
+  byInstitution: index('idx_lead_investment_profiles_institution').on(t.hasMajorInstitution),
+}))
+
+// 科研线索读取专用投影。论文元数据可直接生成确定性基线，冻结快照中的
+// 已核验事实只负责增量补强；不得把企业融资、估值或客户字段映射到此表。
+export const leadResearchProfileProjections = mysqlTable('lead_research_profile_projections', {
+  leadId: uuidColumn('lead_id').primaryKey().references(() => leads.id, { onDelete: 'cascade' }),
+  schemaVersion: varchar('schema_version', { length: 64 }).notNull(),
+  projectionVersion: varchar('projection_version', { length: 64 }).notNull(),
+  snapshotId: uuidColumn('snapshot_id').references(() => leadEnrichmentSnapshots.id, { onDelete: 'set null' }),
+  snapshotHash: varchar('snapshot_hash', { length: 64 }),
+  sourceHash: varchar('source_hash', { length: 64 }).notNull(),
+  profilePayload: json('profile_payload').$type<LeadResearchProfileSummary>().notNull(),
+  profileStatus: varchar('profile_status', { length: 24 }).notNull().default('missing'),
+  sourceFactIds: json('source_fact_ids').$type<string[]>().notNull().default(emptyJsonArray),
+  factsUpdatedAt: timestampColumn('facts_updated_at'),
+  projectedAt: timestampColumn('projected_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+  updatedAt: timestampColumn('updated_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({
+  byStatus: index('idx_lead_research_profiles_status').on(t.profileStatus, t.updatedAt),
+  byUpdated: index('idx_lead_research_profiles_updated').on(t.factsUpdatedAt, t.leadId),
 }))
 
 export const leadRatingHistory = mysqlTable('lead_rating_history', {

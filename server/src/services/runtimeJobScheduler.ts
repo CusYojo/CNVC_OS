@@ -4,9 +4,7 @@ import type { RowDataPacket } from 'mysql2'
 import { pool } from '../db/client.js'
 import { mysqlTableName, quoteMysqlIdentifier } from '../db/config.js'
 import {
-  recoverLeadScoringQueue,
   runRadarSyncImport,
-  scheduleLeadScoring,
 } from '../routes/meta.js'
 import {
   runRadarPaperCollection,
@@ -258,18 +256,6 @@ export function runtimeJobDefinitions(): RuntimeJobDefinition[] {
       run: async () => await recoverAiTasks(),
     },
     {
-      id: 'lead-score-recovery',
-      task: 'lead-score-recovery',
-      enabled: enabledEnv('SCORE_RECOVERY_ENABLED'),
-      scheduleKind: 'interval',
-      intervalSeconds: readIntegerEnv('SCORE_RECOVERY_INTERVAL_SECONDS', 900, 60),
-      initialDelayMs: 45_000,
-      timeoutMs: 5 * 60_000,
-      run: async () => await recoverLeadScoringQueue(
-        readIntegerEnv('SCORE_RECOVERY_BATCH_SIZE', 500, 1),
-      ),
-    },
-    {
       id: 'file-storage-capacity-snapshot',
       task: 'file-storage-capacity-snapshot',
       enabled: true,
@@ -339,7 +325,6 @@ export function runtimeJobDefinitions(): RuntimeJobDefinition[] {
       timeoutMs: 30 * 60_000,
       run: async () => await runLeadReserveIntake({
         limit: readIntegerEnv('DAILY_INTAKE', 50, 1),
-        scheduleScoring: scheduleLeadScoring,
       }),
     },
     {

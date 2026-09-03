@@ -22,7 +22,8 @@ test('public lead deletion is admin-only, audited, and implemented as a hidden s
 test('the dedicated lead detail page exposes a two-step deletion flow to administrators', async () => {
   const page = await source('../../src/pages/LeadDetailPage.tsx')
 
-  assert.match(page, /currentUser\?\.role === '系统管理员'/)
+  assert.match(page, /canManageLeadPool\(currentUser\)/)
+  assert.match(page, /permissionCodes\?\.includes\('system\.manage'\)/)
   assert.match(page, />\s*删除线索\s*</)
   assert.match(page, /title="删除共享线索"/)
   assert.match(page, /apiDelete<[^\n]+>\(\`\/leads\/\$\{lead\.id\}\`\)/)

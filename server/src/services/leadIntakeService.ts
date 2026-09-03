@@ -9,6 +9,7 @@ import { mysqlTableName, quoteMysqlIdentifier } from '../db/config.js'
 import { decodeAndValidateProjectFile } from '../security/projectFileValidation.js'
 import { redactSensitiveText } from '../security/redactSecrets.js'
 import { commitRadarLeadPipelineReady } from './aiSummaryService.js'
+import { canonicalEnrichmentJson } from './leadEnrichmentContract.js'
 import { openLeadPipelineReview, recordLeadPipelineDecision } from './leadPipelineAuditService.js'
 import { recordLeadPipelineRawEvent, transitionLeadPipelineItem } from './leadPipelineEventService.js'
 import { isSpecificLeadSubjectName } from './leadSubjectName.js'
@@ -17,8 +18,7 @@ import { extractText } from './ragService.js'
 import { readLeadIntakeFile, removeLeadIntakeFile, saveLeadIntakeFile } from './leadIntakeFileStorageService.js'
 
 type IntakeActor = { userId: string; userName: string }
-type ScheduleScoring = (leadId: string) => Promise<boolean>
-type NormalizedLead = {
+export type NormalizedLead = {
   name: string
   companyName?: string
   industry?: string
@@ -27,8 +27,10 @@ type NormalizedLead = {
   summary?: string
   highlights?: string[]
   risks?: string[]
+  riskTags?: string[]
   team?: string
   fundingRounds?: unknown[]
+  sources?: unknown[]
   registrationStatus?: string
 }
 
@@ -92,7 +94,6 @@ const owner = `${hostname()}:${process.pid}:${randomUUID().slice(0, 8)}`
 const MAX_IMPORT_ROWS = 2_000
 const MAX_BP_TEXT = 120_000
 const BP_MAX_ATTEMPTS = 3
-let bpScheduleScoring: ScheduleScoring | undefined
 let bpTimer: NodeJS.Timeout | undefined
 let bpPolling = false
 let bpStopping = false
@@ -166,7 +167,7 @@ async function findReviewId(eventId: string) {
 
 async function commitNormalizedLead(input: {
   lead: NormalizedLead
-  sourceType: 'batch-import' | 'bp-upload'
+  sourceType: 'batch-import' | 'bp-upload' | 'manual'
   sourceId: string
   actor: IntakeActor
   evidenceQuote: string
@@ -221,15 +222,18 @@ async function commitNormalizedLead(input: {
     })
     return { status: 'review' as const, eventId: captured.event.id, leadId: null, reviewId: review.id }
   }
+  const sourceLabel = input.sourceType === 'bp-upload'
+    ? '用户上传 BP'
+    : input.sourceType === 'batch-import' ? '批量导入文件' : '人工录入'
   const decision = await recordLeadPipelineDecision({
-    idempotencyKey: `${captured.event.id}:uploaded-material-accept:v1`, eventId: captured.event.id,
-    decisionType: 'uploaded_material_intake', outcome: 'accept', subjectType: 'project',
+    idempotencyKey: `${captured.event.id}:submitted-material-accept:v2`, eventId: captured.event.id,
+    decisionType: input.sourceType === 'manual' ? 'manual_intake' : 'uploaded_material_intake', outcome: 'accept', subjectType: 'project',
     subjectName: input.lead.name, legalName: input.lead.companyName, confidence: 80,
     reason: '用户提交的原始材料通过格式与主体名称校验，按未核验来源进入公共线索池',
     output: { sourceType: input.sourceType, candidate: input.lead }, actorType: 'system', actorId: 'lead-intake',
     evidence: [{
-      sourceId: input.sourceId, sourceType: input.sourceType, locator: '用户上传原始文件',
-      claim: `上传材料声明主体为“${input.lead.name}”`, quote,
+      sourceId: input.sourceId, sourceType: input.sourceType, locator: sourceLabel,
+      claim: `${sourceLabel}声明主体为“${input.lead.name}”`, quote,
       reliability: 'self_reported', verificationStatus: 'unverified',
     }],
   })
@@ -238,12 +242,12 @@ async function commitNormalizedLead(input: {
     const result = await commitRadarLeadPipelineReady({
       lead: {
         ...leadFields,
-        source: input.lead.source || (input.sourceType === 'bp-upload' ? '用户上传 BP' : '批量导入'),
+        source: input.lead.source || sourceLabel,
         poolStatus: '成功',
         risks: [...(input.lead.risks ?? []), '上传材料为项目方/用户自报信息，关键事实仍需独立核验'],
-        sources: [{ title: input.sourceType === 'bp-upload' ? '用户上传 BP' : '批量导入文件', sourceId: input.sourceId }],
+        sources: [{ title: sourceLabel, sourceId: input.sourceId }, ...(input.lead.sources ?? [])],
         radarProfile: {
-          channel: input.sourceType === 'bp-upload' ? 'BP上传' : '批量导入',
+          channel: input.sourceType === 'bp-upload' ? 'BP上传' : input.sourceType === 'batch-import' ? '批量导入' : '人工录入',
           qualityRejected: false,
           intake: { sourceType: input.sourceType, sourceId: input.sourceId, decisionId: decision.id },
           articleText: input.evidenceQuote.slice(0, 50_000),
@@ -268,6 +272,28 @@ async function commitNormalizedLead(input: {
     }
     throw error
   }
+}
+
+export async function commitManualLead(input: {
+  lead: NormalizedLead
+  actor: IntakeActor
+  idempotencyKey?: string
+}) {
+  const normalized = canonicalEnrichmentJson(input.lead)
+  const sourceId = sha256(`lead-manual-v1:${input.actor.userId}:${input.idempotencyKey || normalized}`)
+  const evidenceQuote = [
+    `项目名称：${input.lead.name}`,
+    input.lead.companyName ? `公司名称：${input.lead.companyName}` : '',
+    input.lead.summary ? `项目简介：${input.lead.summary}` : '',
+    input.lead.industry ? `行业：${input.lead.industry}` : '',
+  ].filter(Boolean).join('\n')
+  return await commitNormalizedLead({
+    lead: input.lead,
+    sourceType: 'manual',
+    sourceId,
+    actor: input.actor,
+    evidenceQuote,
+  })
 }
 
 export async function buildLeadImportTemplate() {
@@ -407,7 +433,7 @@ export async function getLeadImportBatch(batchId: string, actor: IntakeActor) {
   return await queryBatch(batchId, actor.userId)
 }
 
-export async function commitLeadImportBatch(batchId: string, actor: IntakeActor, scheduleScoring: ScheduleScoring) {
+export async function commitLeadImportBatch(batchId: string, actor: IntakeActor) {
   const batch = await queryBatch(batchId, actor.userId)
   if (batch.status === 'completed') return batch
   if (batch.errorRows) throw Object.assign(new Error('请先修复全部预检错误后再确认导入'), { status: 409, code: 'IMPORT_HAS_ERRORS' })
@@ -423,10 +449,7 @@ export async function commitLeadImportBatch(batchId: string, actor: IntakeActor,
       })
       const rowStatus = result.status === 'review' ? 'review' : result.status === 'rejected' ? 'rejected' : 'committed'
       if (rowStatus === 'review') review += 1
-      else if (rowStatus === 'committed') {
-        committed += 1
-        if (result.leadId) await scheduleScoring(result.leadId).catch(() => false)
-      }
+      else if (rowStatus === 'committed') committed += 1
       await pool.query(
         `UPDATE ${rowsTable} SET status=?,event_id=?,lead_id=?,review_id=?,result_message=?,updated_at=NOW(3) WHERE id=?`,
         [rowStatus, result.eventId, result.leadId, result.reviewId,
@@ -544,7 +567,6 @@ async function processBpJob(row: IntakeFileRow) {
       lead, sourceType: 'bp-upload', sourceId: row.id,
       actor: { userId: row.uploaded_by, userName: row.uploaded_by_name }, evidenceQuote: text,
     })
-    if (result.leadId) await bpScheduleScoring?.(result.leadId).catch(() => false)
     const status = result.status === 'review' ? 'review' : result.status === 'rejected' ? 'rejected' : 'ready'
     await pool.query(
       `UPDATE ${filesTable} SET status=?,stage=?,progress=100,event_id=?,lead_id=?,review_id=?,lease_owner=NULL,lease_expires_at=NULL,last_error=NULL,completed_at=NOW(3),updated_at=NOW(3) WHERE id=? AND lease_owner=?`,
@@ -563,7 +585,7 @@ async function processBpJob(row: IntakeFileRow) {
 }
 
 async function pollBpQueue() {
-  if (bpPolling || bpStopping || !bpScheduleScoring) return
+  if (bpPolling || bpStopping) return
   bpPolling = true
   try {
     const job = await claimBpJob()
@@ -571,9 +593,8 @@ async function pollBpQueue() {
   } finally { bpPolling = false }
 }
 
-export async function startLeadBpWorker(scheduleScoring: ScheduleScoring) {
+export async function startLeadBpWorker() {
   if (bpTimer) return
-  bpScheduleScoring = scheduleScoring
   bpStopping = false
   await pool.query(
     `UPDATE ${filesTable} SET status='retrying',stage='retry_wait',lease_owner=NULL,lease_expires_at=NULL,next_attempt_at=NOW(3),updated_at=NOW(3)
@@ -590,7 +611,6 @@ export async function stopLeadBpWorker() {
   if (bpTimer) clearInterval(bpTimer)
   bpTimer = undefined
   for (let index = 0; bpPolling && index < 200; index += 1) await new Promise((resolve) => setTimeout(resolve, 50))
-  bpScheduleScoring = undefined
 }
 
 export async function leadBpWorkerHealth() {

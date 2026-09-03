@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 
-export const LEAD_ENRICHMENT_SCHEMA_VERSION = 'lead-enrichment-v3' as const
+export const LEAD_ENRICHMENT_SCHEMA_VERSION = 'lead-enrichment-v4-investment-profile' as const
 export const LEAD_ENRICHMENT_TOPIC_KEYS = [
   'basic_profile',
   'financing',
@@ -19,14 +19,18 @@ export const LEAD_ENRICHMENT_TOPIC_KEYS = [
 
 export type LeadEnrichmentTopicKey = typeof LEAD_ENRICHMENT_TOPIC_KEYS[number]
 
-// The shared-lead detail page consumes only these web-enrichment topics. Keep the
-// complete topic enum for stored snapshots and historical rows, but do not spend
-// network/model budget on fields that the current product does not render.
+// The shared-lead list and detail page consume these investment-profile topics.
+// Keep the complete topic enum for stored snapshots and historical rows, but do
+// not spend network/model budget on fields that the current product does not use.
 export const LEAD_DETAIL_ENRICHMENT_TOPIC_KEYS = [
   'basic_profile',
   'financing',
   'team',
+  'customers_contracts',
   'products',
+  'technology_ip',
+  'industrialization',
+  'transaction_exit',
   'latest_developments',
 ] as const satisfies readonly LeadEnrichmentTopicKey[]
 
@@ -37,8 +41,11 @@ export function leadDetailEnrichmentTopicApplies(input: {
   entityType: LeadEntityType
 }) {
   if (!LEAD_DETAIL_ENRICHMENT_TOPICS.has(input.topicKey)) return false
-  // The research detail variant has no financing block.
-  if (input.entityType === 'research' && input.topicKey === 'financing') return false
+  // Research-only subjects expose technical and academic evidence, but cannot be
+  // presented as a financed company, commercial customer or transaction target.
+  if (input.entityType === 'research' && new Set<LeadEnrichmentTopicKey>([
+    'financing', 'customers_contracts', 'transaction_exit',
+  ]).has(input.topicKey)) return false
   return true
 }
 
@@ -57,8 +64,23 @@ export function leadEnrichmentRuntimePolicy(
   return {
     workerEnabled: env.LEAD_ENRICHMENT_ENABLED !== 'false',
     acceptNewJobs: env.LEAD_ENRICHMENT_ACCEPT_NEW_JOBS !== 'false',
-    autoScore: env.LEAD_ENRICHMENT_AUTO_SCORE !== 'false',
+    // Shared-lead enrichment and investment-profile generation are the default
+    // pipeline. V3 rating is retained only behind an explicit opt-in/manual path.
+    autoScore: env.LEAD_ENRICHMENT_AUTO_SCORE === 'true',
   }
+}
+
+export function leadResearchWebEnrichmentEnabled(input: {
+  jobCreatedAt: string | Date
+  env?: Record<string, string | undefined>
+}) {
+  const env = input.env ?? process.env
+  if (String(env.LEAD_RESEARCH_WEB_ENRICHMENT_ENABLED ?? '').trim().toLowerCase() !== 'true') return false
+  const cutoffText = String(env.LEAD_RESEARCH_WEB_ENRICHMENT_AFTER ?? '').trim()
+  if (!cutoffText) return true
+  const cutoff = Date.parse(cutoffText)
+  const createdAt = new Date(input.jobCreatedAt).getTime()
+  return Number.isFinite(cutoff) && Number.isFinite(createdAt) && createdAt >= cutoff
 }
 export type LeadEnrichmentTopicStatus =
   | 'queued'

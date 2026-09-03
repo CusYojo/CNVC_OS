@@ -31,6 +31,7 @@ export type LeadScoreJobLease = RowDataPacket & {
   enrichment_snapshot_id: string | null
   snapshot_hash: string | null
   rating_schema_version: string | null
+  request_mode: 'automatic' | 'manual' | 'dedicated_project'
 }
 
 const jobsTable = quoteMysqlIdentifier(mysqlTableName('lead_score_jobs'))
@@ -68,6 +69,7 @@ export type LeadScoreEnqueueOptions = {
   enrichmentSnapshotId?: string
   snapshotHash?: string
   ratingSchemaVersion?: string
+  requestMode?: 'automatic' | 'manual' | 'dedicated_project'
 }
 
 async function enqueueLeadScoreJobOnce(
@@ -126,18 +128,21 @@ async function enqueueLeadScoreJobOnce(
            completed_at=NULL, dead_lettered_at=NULL, last_error=NULL,
            enrichment_snapshot_id=COALESCE(?,enrichment_snapshot_id),
            snapshot_hash=COALESCE(?,snapshot_hash),
-           rating_schema_version=COALESCE(?,rating_schema_version),updated_at=NOW(3)
+           rating_schema_version=COALESCE(?,rating_schema_version),
+           request_mode=COALESCE(?,request_mode),updated_at=NOW(3)
          WHERE lead_id=?`,
         [resetAttempts, options.manualRetry === true, options.enrichmentSnapshotId ?? null,
-          options.snapshotHash ?? null, options.ratingSchemaVersion ?? null, leadId],
+          options.snapshotHash ?? null, options.ratingSchemaVersion ?? null,
+          options.requestMode ?? null, leadId],
       )
     } else {
       await connection.query(
         `INSERT INTO ${jobsTable}
           (lead_id,status,execution_attempts,next_attempt_at,enrichment_snapshot_id,snapshot_hash,
-           rating_schema_version,created_at,updated_at)
-         VALUES (?, 'queued', 0, NOW(3), ?, ?, ?, NOW(3), NOW(3))`,
-        [leadId, options.enrichmentSnapshotId ?? null, options.snapshotHash ?? null, options.ratingSchemaVersion ?? null],
+           rating_schema_version,request_mode,created_at,updated_at)
+         VALUES (?, 'queued', 0, NOW(3), ?, ?, ?, ?, NOW(3), NOW(3))`,
+        [leadId, options.enrichmentSnapshotId ?? null, options.snapshotHash ?? null,
+          options.ratingSchemaVersion ?? null, options.requestMode ?? 'automatic'],
       )
     }
     if (options.snapshot) {

@@ -26,6 +26,7 @@ import {
 import { leadTopicSearchCacheIdentity } from '../src/services/leadTopicSearchCacheService.js'
 import {
   LEAD_TOPIC_UNTRUSTED_SOURCE_POLICY,
+  LEAD_TOPIC_PRIMARY_SOURCE_POLICY,
   enforceLeadTopicFactSetContract,
   leadTopicResearchContract,
   validateLeadTopicResearchConflict,
@@ -81,7 +82,9 @@ test('research projects run only detail-visible non-financing topics', () => {
   assert.equal(states.ownership, 'not_applicable')
   assert.equal(states.financial_operations, 'not_applicable')
   assert.equal(states.transaction_exit, 'not_applicable')
-  assert.equal(states.technology_ip, 'not_applicable')
+  assert.equal(states.customers_contracts, 'not_applicable')
+  assert.equal(states.technology_ip, 'queued')
+  assert.equal(states.industrialization, 'queued')
   assert.equal(states.team, 'queued')
   assert.equal(states.products, 'queued')
   assert.equal(states.latest_developments, 'queued')
@@ -156,7 +159,7 @@ test('only explicit relationship facts can bind evidence to directional entity r
 
 test('enrichment runtime has independent intake, worker and automatic-score rollback switches', () => {
   assert.deepEqual(leadEnrichmentRuntimePolicy({}), {
-    workerEnabled: true, acceptNewJobs: true, autoScore: true,
+    workerEnabled: true, acceptNewJobs: true, autoScore: false,
   })
   assert.deepEqual(leadEnrichmentRuntimePolicy({
     LEAD_ENRICHMENT_ENABLED: 'false',
@@ -192,7 +195,10 @@ test('web research treats external prompt injection as untrusted data and keeps 
 })
 
 test('web conflict contract requires two independently sourced and context-complete candidates', () => {
-  assert.equal(leadTopicResearchContract('financing').promptVersion, 'lead-topic-web-research-v7-detail-fields')
+  assert.equal(leadTopicResearchContract('financing').promptVersion, 'lead-topic-web-research-v9-primary-sources')
+  assert.match(LEAD_TOPIC_PRIMARY_SOURCE_POLICY, /一手来源/)
+  assert.match(LEAD_TOPIC_PRIMARY_SOURCE_POLICY, /site:gov\.cn/)
+  assert.match(LEAD_TOPIC_PRIMARY_SOURCE_POLICY, /低等级来源冒充/)
   const base = {
     topicKey: 'financing' as const,
     allowedFactKeys: ['financing.amount'],
@@ -327,15 +333,43 @@ test('web research keeps customer relationship types explicit', () => {
   }).ok, true)
 })
 
+test('investment profile metadata facts remain evidence-bound and reject invalid lifecycle semantics', () => {
+  assert.equal(validateLeadTopicResearchFact({
+    topicKey: 'customers_contracts', factKey: 'customer.name', value: '客户A',
+    instanceKey: '客户A 2026', quote: '客户A已开展试点。', sourceUrls: ['https://example.com/customer'],
+  }).ok, true)
+  assert.equal(validateLeadTopicResearchFact({
+    topicKey: 'customers_contracts', factKey: 'customer.confidentiality', value: '顶级客户',
+    instanceKey: '客户A 2026', quote: '该客户为顶级客户。', sourceUrls: ['https://example.com/customer'],
+  }).ok, false)
+  assert.equal(validateLeadTopicResearchFact({
+    topicKey: 'financing', factKey: 'financing.investor_role', value: '跟投',
+    instanceKey: '2026 A轮', quote: '甲基金跟投本轮融资。', sourceUrls: ['https://example.com/funding'],
+  }).ok, false)
+  assert.equal(validateLeadTopicResearchFact({
+    topicKey: 'financing', factKey: 'financing.investor_role', value: '跟投', scope: '甲基金',
+    instanceKey: '2026 A轮', quote: '甲基金跟投本轮融资。', sourceUrls: ['https://example.com/funding'],
+  }).ok, true)
+  assert.equal(validateLeadTopicResearchFact({
+    topicKey: 'products', factKey: 'product.stage', value: '行业领先',
+    instanceKey: '产品A', quote: '产品A行业领先。', sourceUrls: ['https://example.com/product'],
+  }).ok, false)
+})
+
 test('detail-visible topic dictionaries expose only the fields consumed by the detail page', () => {
   const required: Record<string, string[]> = {
     basic_profile: [
       'profile.company_introduction', 'profile.team_introduction', 'profile.project_introduction',
-      'profile.website', 'profile.industry', 'registry.company_name', 'registry.registration_status',
+      'profile.website', 'profile.industry', 'industry.level1', 'industry.segment',
+      'registry.company_name', 'registry.registration_status',
     ],
-    financing: ['financing.status', 'financing.round', 'financing.amount', 'financing.investors'],
-    team: ['team.member', 'team.role', 'team.education', 'team.current_employment', 'team.historical_employment'],
-    products: ['product.name', 'product.parameter', 'product.performance', 'product.use_case', 'product.matrix'],
+    financing: ['financing.status', 'financing.round', 'financing.date', 'financing.amount', 'financing.investors', 'financing.lead_investor'],
+    team: ['team.member', 'team.role', 'team.education', 'team.current_employment', 'team.historical_employment', 'team.institution', 'team.institution_relation'],
+    customers_contracts: ['customer.name', 'customer.anonymized_label', 'customer.confidentiality', 'customer.trial', 'customer.formal', 'contract.status', 'cash_collection.status'],
+    products: ['product.name', 'product.route', 'product.form', 'product.stage', 'product.parameter', 'product.performance', 'product.use_case', 'product.matrix'],
+    technology_ip: ['technology.route', 'technology.barrier', 'patent.owner'],
+    industrialization: ['production.stage', 'production.capacity', 'delivery.capability'],
+    transaction_exit: ['transaction.round', 'transaction.date', 'transaction.valuation', 'transaction.pre_money', 'transaction.post_money'],
     latest_developments: ['news.event', 'news.event_date'],
   }
   assert.deepEqual(Object.keys(required), [...LEAD_DETAIL_ENRICHMENT_TOPIC_KEYS])

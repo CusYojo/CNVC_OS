@@ -10,7 +10,6 @@ import {
   retryLeadBpUpload,
   uploadLeadBp,
 } from '../services/leadIntakeService.js'
-import { scheduleLeadScoring } from './meta.js'
 import { writeAudit } from '../services/auditService.js'
 
 export const leadIntakeRouter = Router()
@@ -56,7 +55,7 @@ leadIntakeRouter.get('/leads/imports/:id', async (req: AuthedRequest, res, next)
 
 leadIntakeRouter.post('/leads/imports/:id/commit', async (req: AuthedRequest, res, next) => {
   try {
-    const result = await commitLeadImportBatch(routeId(req.params.id), actor(req), scheduleLeadScoring)
+    const result = await commitLeadImportBatch(routeId(req.params.id), actor(req))
     await writeAudit({
       userId: req.user!.uid, userName: req.user!.name, module: '项目获取池',
       action: '确认公共线索批量导入',

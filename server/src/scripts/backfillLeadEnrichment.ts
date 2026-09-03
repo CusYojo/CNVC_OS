@@ -13,6 +13,7 @@ const jobsTable = quoteMysqlIdentifier(mysqlTableName('lead_enrichment_jobs'))
 const topicsTable = quoteMysqlIdentifier(mysqlTableName('lead_enrichment_topic_runs'))
 const factsTable = quoteMysqlIdentifier(mysqlTableName('lead_facts'))
 const snapshotsTable = quoteMysqlIdentifier(mysqlTableName('lead_enrichment_snapshots'))
+const investmentProfilesTable = quoteMysqlIdentifier(mysqlTableName('lead_investment_profile_projections'))
 const ratingHistoryTable = quoteMysqlIdentifier(mysqlTableName('lead_rating_history'))
 const auditTable = quoteMysqlIdentifier(mysqlTableName('audit_logs'))
 const args = new Set(process.argv.slice(2))
@@ -75,7 +76,8 @@ async function cancelBatch(batchId: string) {
     await connection.beginTransaction()
     const [protectedRows] = await connection.query<Array<RowDataPacket & { count: number }>>(
       `SELECT COUNT(DISTINCT j.id) count FROM ${jobsTable} j
-       LEFT JOIN ${factsTable} f ON f.lead_id=j.lead_id
+       LEFT JOIN ${topicsTable} tr ON tr.job_id=j.id
+       LEFT JOIN ${factsTable} f ON f.topic_run_id=tr.id
        LEFT JOIN ${snapshotsTable} s ON s.job_id=j.id
        WHERE j.trigger_type=? AND (f.id IS NOT NULL OR s.id IS NOT NULL)`, [triggerType],
     )
@@ -83,12 +85,13 @@ async function cancelBatch(batchId: string) {
       `UPDATE ${topicsTable} tr JOIN ${jobsTable} j ON j.id=tr.job_id
        SET tr.status='missing',tr.last_error='cancelled by historical backfill rollback',
            tr.completed_at=NOW(3),tr.lease_owner=NULL,tr.lease_expires_at=NULL,tr.updated_at=NOW(3)
-       WHERE j.trigger_type=? AND j.status='queued' AND tr.status IN ('queued','retrying')`, [triggerType],
+       WHERE j.trigger_type=? AND j.status IN ('queued','running')
+         AND tr.status IN ('queued','retrying','running')`, [triggerType],
     )
     const [jobs] = await connection.query(
       `UPDATE ${jobsTable} SET status='rejected',last_error='cancelled by historical backfill rollback',
          completed_at=NOW(3),lease_owner=NULL,lease_expires_at=NULL,updated_at=NOW(3)
-       WHERE trigger_type=? AND status='queued'`, [triggerType],
+       WHERE trigger_type=? AND status IN ('queued','running')`, [triggerType],
     )
     await connection.query(
       `INSERT INTO ${auditTable}(id,user_id,user_name,module,action,target,result,request_id,created_at)
@@ -113,23 +116,30 @@ async function reportBatch(batchId: string) {
   if (!batchId) throw new Error('--report requires --batch-id=<stable-id>')
   if (!await tableExists('lead_enrichment_jobs')) throw new Error('lead enrichment migration is not installed')
   const triggerType = `historical-backfill:${batchId}`
-  const [[jobRows], [topicRows], [factRows], [snapshotRows], [ratingRows], [deregisteredRows]] = await Promise.all([
+  const [[jobRows], [topicRows], [factRows], [snapshotRows], [profileRows], [ratingRows], [deregisteredRows]] = await Promise.all([
     pool.query<Array<RowDataPacket & { status: string; count: number }>>(
       `SELECT status,COUNT(*) count FROM ${jobsTable} WHERE trigger_type=? GROUP BY status ORDER BY status`, [triggerType],
     ),
-    pool.query<Array<RowDataPacket & { status: string; count: number }>>(
-      `SELECT tr.status,COUNT(*) count FROM ${topicsTable} tr JOIN ${jobsTable} j ON j.id=tr.job_id
+    pool.query<Array<RowDataPacket & { status: string; count: number; cancelled: number }>>(
+      `SELECT tr.status,COUNT(*) count,
+              SUM(CASE WHEN tr.last_error='cancelled by historical backfill rollback' THEN 1 ELSE 0 END) cancelled
+       FROM ${topicsTable} tr JOIN ${jobsTable} j ON j.id=tr.job_id
        WHERE j.trigger_type=? GROUP BY tr.status ORDER BY tr.status`, [triggerType],
     ),
     pool.query<Array<RowDataPacket & { facts: number; leads: number }>>(
       `SELECT COUNT(DISTINCT f.id) facts,COUNT(DISTINCT f.lead_id) leads
-       FROM ${factsTable} f JOIN ${jobsTable} j ON j.lead_id=f.lead_id WHERE j.trigger_type=?`, [triggerType],
+       FROM ${factsTable} f JOIN ${topicsTable} tr ON tr.id=f.topic_run_id
+       JOIN ${jobsTable} j ON j.id=tr.job_id WHERE j.trigger_type=?`, [triggerType],
     ),
     pool.query<Array<RowDataPacket & { snapshots: number; ready: number; review: number }>>(
       `SELECT COUNT(DISTINCT s.id) snapshots,
               COUNT(DISTINCT CASE WHEN s.status='ready' THEN s.id END) ready,
               COUNT(DISTINCT CASE WHEN s.status='review' THEN s.id END) review
        FROM ${snapshotsTable} s JOIN ${jobsTable} j ON j.id=s.job_id WHERE j.trigger_type=?`, [triggerType],
+    ),
+    pool.query<Array<RowDataPacket & { profiles: number }>>(
+      `SELECT COUNT(DISTINCT p.lead_id) profiles FROM ${investmentProfilesTable} p
+       JOIN ${jobsTable} j ON j.lead_id=p.lead_id WHERE j.trigger_type=?`, [triggerType],
     ),
     pool.query<Array<RowDataPacket & { ratings: number; leads: number }>>(
       `SELECT COUNT(DISTINCT rh.id) ratings,COUNT(DISTINCT rh.lead_id) leads
@@ -142,9 +152,10 @@ async function reportBatch(batchId: string) {
     ),
   ])
   const topics = Object.fromEntries(topicRows.map((row) => [row.status, Number(row.count)]))
+  const cancelled = topicRows.reduce((sum, row) => sum + Number(row.cancelled || 0), 0)
   const searched = topicRows
     .filter((row) => !['queued', 'not_applicable'].includes(row.status))
-    .reduce((sum, row) => sum + Number(row.count), 0)
+    .reduce((sum, row) => sum + Number(row.count) - Number(row.cancelled || 0), 0)
   console.log(JSON.stringify({
     mode: 'report-read-only', batchId,
     jobs: Object.fromEntries(jobRows.map((row) => [row.status, Number(row.count)])),
@@ -152,16 +163,18 @@ async function reportBatch(batchId: string) {
     outcome: {
       searched,
       found: Number(topics.completed || 0) + Number(topics.partial || 0),
-      missing: Number(topics.missing || 0),
+      missing: Math.max(0, Number(topics.missing || 0) - cancelled),
       review: Number(topics.review || 0),
       failed: Number(topics.failed || 0) + Number(topics.dead_letter || 0),
       notApplicable: Number(topics.not_applicable || 0),
+      cancelled,
     },
     facts: { count: Number(factRows[0]?.facts || 0), leads: Number(factRows[0]?.leads || 0) },
     snapshots: {
       count: Number(snapshotRows[0]?.snapshots || 0), ready: Number(snapshotRows[0]?.ready || 0),
       review: Number(snapshotRows[0]?.review || 0),
     },
+    profilesAvailable: Number(profileRows[0]?.profiles || 0),
     reRated: { results: Number(ratingRows[0]?.ratings || 0), leads: Number(ratingRows[0]?.leads || 0) },
     deregisteredEvicted: Number(deregisteredRows[0]?.count || 0),
     note: 'Read-only batch report; no task, fact, snapshot, rating or lead was changed.',
@@ -285,22 +298,45 @@ async function retryBatch(batchId: string, rawErrorClass: string, apply: boolean
 
 async function main() {
   const batchId = option('batch-id')
+  if (batchId && (!/^[A-Za-z0-9._-]{1,28}$/.test(batchId))) {
+    throw new Error('--batch-id must be 1-28 safe characters so the persisted trigger type is lossless')
+  }
   if (retrying) return await retryBatch(batchId, option('error-class'), applying)
   if (rollback) return await cancelBatch(batchId)
   if (reporting) return await reportBatch(batchId)
   const limit = positiveInteger(option('limit'), applying ? 100 : 10_000, 10_000)
   const offset = positiveInteger(option('offset'), 0, 10_000_000)
+  const priority = positiveInteger(option('priority'), 500, 1_000)
+  const explicitLeadIdsRequested = [...args].some((arg) => arg.startsWith('--lead-ids='))
+  const explicitLeadIds = [...new Set(option('lead-ids').split(',').map((value) => value.trim()).filter(Boolean))]
+  if (explicitLeadIdsRequested && !explicitLeadIds.length) {
+    throw new Error('--lead-ids was provided but empty; refusing to fall back to page mode')
+  }
+  if (applying && !explicitLeadIds.length && !args.has('--allow-page-selection')) {
+    throw new Error('page-mode apply requires explicit --allow-page-selection acknowledgement')
+  }
+  if (explicitLeadIds.length > 100) throw new Error('--lead-ids accepts at most 100 explicit IDs per batch')
+  if (explicitLeadIds.some((id) => !/^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(id))) {
+    throw new Error('--lead-ids contains an invalid UUID')
+  }
   if (applying && !batchId) throw new Error('--apply requires --batch-id=<stable-id> for idempotent resume')
   if (applying && !await tableExists('lead_enrichment_jobs')) throw new Error('lead enrichment migration is not installed')
 
+  const leadSelectionSql = explicitLeadIds.length
+    ? `SELECT id,company_name,scoring,radar_profile,pool_status FROM ${leadsTable}
+       WHERE id IN (${explicitLeadIds.map(() => '?').join(',')})
+         AND pool_status NOT IN ('已删除','已合并','已注销','解析失败','已转专属项目')
+       ORDER BY created_at,id`
+    : `SELECT id,company_name,scoring,radar_profile,pool_status FROM ${leadsTable}
+       WHERE pool_status NOT IN ('已删除','已合并','已注销','解析失败','已转专属项目')
+       ORDER BY created_at,id LIMIT ? OFFSET ?`
   const [rows] = await pool.query<Array<RowDataPacket & {
     id: string; company_name: string | null;
     scoring: unknown; radar_profile: unknown; pool_status: string;
-  }>>(
-    `SELECT id,company_name,scoring,radar_profile,pool_status FROM ${leadsTable}
-     WHERE pool_status NOT IN ('已删除','已合并','已注销','解析失败','已转专属项目')
-     ORDER BY created_at,id LIMIT ? OFFSET ?`, [limit, offset],
-  )
+  }>>(leadSelectionSql, explicitLeadIds.length ? explicitLeadIds : [limit, offset])
+  if (explicitLeadIds.length && rows.length !== explicitLeadIds.length) {
+    throw new Error('--lead-ids includes a missing or inactive lead; no jobs were queued')
+  }
 
   const summary = {
     candidatesRead: rows.length,
@@ -337,7 +373,7 @@ async function main() {
     const queued = await enqueueLeadEnrichmentJob({
       leadId: row.id,
       triggerType: `historical-backfill:${batchId}`,
-      priority: 500,
+      priority,
       idempotencyToken: batchId,
     })
     if (queued.queued) summary.queuedJobs += 1
@@ -348,7 +384,8 @@ async function main() {
   console.log(JSON.stringify({
     mode: applying ? 'apply' : 'preview',
     batchId: batchId || null,
-    page: { limit, offset },
+    priority,
+    target: explicitLeadIds.length ? { mode: 'explicit-lead-ids', leadIds: explicitLeadIds } : { mode: 'page', limit, offset },
     ...summary,
     estimatedSearchCallsUpperBound: summary.estimatedTopicRuns * 6,
     note: applying

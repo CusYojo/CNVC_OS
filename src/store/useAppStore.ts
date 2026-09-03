@@ -6,6 +6,7 @@ import type {
   ApprovalRequest,
   AuditLog,
   Lead,
+  LeadListItem,
   Meeting,
   Notification,
   Project,
@@ -25,14 +26,45 @@ export type LeadListQuery = {
   page?: number
   pageSize?: number
   channel?: string
-  sort?: 'latest' | 'score' | ''
+  sort?: 'latest' | 'score' | 'funding' | 'valuation' | 'customer' | 'profileUpdated' | ''
   keyword?: string
   source?: string
   industry?: string
+  industryLevel1?: string
+  industryLevel2?: string
+  industrySegment?: string
   region?: string
   leadType?: 'company' | 'research' | ''
   stage?: string
   updatedRange?: '7d' | '30d' | '90d' | ''
+  productRoute?: string
+  institution?: string
+  institutionType?: string
+  academicInstitution?: string
+  latestRound?: string
+  customerStageMin?: 'L0' | 'L1' | 'L2' | 'L3' | 'L4' | 'L5' | ''
+  profileStatus?: 'never' | 'verified' | 'partial' | 'conflicted' | 'missing' | 'not_applicable' | 'stale' | ''
+  hasConflict?: 'true' | 'false' | ''
+  productionStage?: string
+  hasMajorInstitution?: 'true' | 'false' | ''
+  academicRelation?: string
+  hasCommercializationLink?: 'true' | 'false' | ''
+  fundingDateFrom?: string
+  fundingDateTo?: string
+  valuationMin?: number
+  valuationMax?: number
+  valuationCurrency?: 'CNY' | 'USD' | 'HKD' | 'EUR' | ''
+  valuationType?: 'pre_money' | 'post_money' | 'undisclosed' | ''
+  customerTier?: 'A' | 'B' | 'C' | ''
+  hasVerifiedCustomer?: 'true' | 'false' | ''
+}
+
+export type LeadListResponse = {
+  list: LeadListItem[]
+  total: number
+  page: number
+  pageSize: number
+  totalPages: number
 }
 
 function requiredVersion(entity: { version?: number } | undefined, label: string): number {
@@ -86,7 +118,7 @@ interface AppState {
   withdrawRequest: (requestId: string, comment: string) => Promise<void>
   deleteFile: (fileId: string) => Promise<void>
   addLead: (lead: Omit<Lead, 'id'>) => Promise<Lead>
-  fetchLeads: (query?: LeadListQuery) => Promise<void>
+  fetchLeads: (query?: LeadListQuery) => Promise<LeadListResponse | null>
   fetchLeadStats: () => Promise<void>
   startScoring: (leadId: string, statusOverride?: NonNullable<Lead['scoreJob']>['status']) => Promise<void>
   fetchLeadDetail: (leadId: string) => Promise<Lead | null>
@@ -384,6 +416,13 @@ export const useAppStore = create<AppState>()(
         const {
           page = 1, pageSize = 20, channel = '', sort = '', keyword = '', source = '',
           industry = '', region = '', leadType = '', stage = '', updatedRange = '',
+          industryLevel1 = '', industryLevel2 = '', industrySegment = '',
+          productRoute = '', institution = '', institutionType = '', academicInstitution = '', latestRound = '',
+          customerStageMin = '', profileStatus = '', hasConflict = '',
+          productionStage = '', hasMajorInstitution = '', academicRelation = '',
+          hasCommercializationLink = '', fundingDateFrom = '', fundingDateTo = '',
+          valuationMin, valuationMax, valuationCurrency = '', valuationType = '',
+          customerTier = '', hasVerifiedCustomer = '',
         } = query
         const requestId = ++latestLeadListRequest
         try {
@@ -393,16 +432,42 @@ export const useAppStore = create<AppState>()(
             + (keyword ? `&keyword=${encodeURIComponent(keyword)}` : '')
             + (source ? `&source=${encodeURIComponent(source)}` : '')
             + (industry ? `&industry=${encodeURIComponent(industry)}` : '')
+            + (industryLevel1 ? `&industryLevel1=${encodeURIComponent(industryLevel1)}` : '')
+            + (industryLevel2 ? `&industryLevel2=${encodeURIComponent(industryLevel2)}` : '')
+            + (industrySegment ? `&industrySegment=${encodeURIComponent(industrySegment)}` : '')
             + (region ? `&region=${encodeURIComponent(region)}` : '')
             + (leadType ? `&leadType=${encodeURIComponent(leadType)}` : '')
             + (stage ? `&stage=${encodeURIComponent(stage)}` : '')
             + (updatedRange ? `&updatedRange=${encodeURIComponent(updatedRange)}` : '')
-          const r = await apiGet<{ list: Lead[]; total: number; page: number; pageSize: number; totalPages: number }>(qs)
+            + (productRoute ? `&productRoute=${encodeURIComponent(productRoute)}` : '')
+            + (institution ? `&institution=${encodeURIComponent(institution)}` : '')
+            + (institutionType ? `&institutionType=${encodeURIComponent(institutionType)}` : '')
+            + (academicInstitution ? `&academicInstitution=${encodeURIComponent(academicInstitution)}` : '')
+            + (latestRound ? `&latestRound=${encodeURIComponent(latestRound)}` : '')
+            + (customerStageMin ? `&customerStageMin=${encodeURIComponent(customerStageMin)}` : '')
+            + (profileStatus ? `&profileStatus=${encodeURIComponent(profileStatus)}` : '')
+            + (hasConflict ? `&hasConflict=${encodeURIComponent(hasConflict)}` : '')
+            + (productionStage ? `&productionStage=${encodeURIComponent(productionStage)}` : '')
+            + (hasMajorInstitution ? `&hasMajorInstitution=${encodeURIComponent(hasMajorInstitution)}` : '')
+            + (academicRelation ? `&academicRelation=${encodeURIComponent(academicRelation)}` : '')
+            + (hasCommercializationLink ? `&hasCommercializationLink=${encodeURIComponent(hasCommercializationLink)}` : '')
+            + (fundingDateFrom ? `&fundingDateFrom=${encodeURIComponent(fundingDateFrom)}` : '')
+            + (fundingDateTo ? `&fundingDateTo=${encodeURIComponent(fundingDateTo)}` : '')
+            + (valuationMin !== undefined ? `&valuationMin=${encodeURIComponent(valuationMin)}` : '')
+            + (valuationMax !== undefined ? `&valuationMax=${encodeURIComponent(valuationMax)}` : '')
+            + (valuationCurrency ? `&valuationCurrency=${encodeURIComponent(valuationCurrency)}` : '')
+            + (valuationType ? `&valuationType=${encodeURIComponent(valuationType)}` : '')
+            + (customerTier ? `&customerTier=${encodeURIComponent(customerTier)}` : '')
+            + (hasVerifiedCustomer ? `&hasVerifiedCustomer=${encodeURIComponent(hasVerifiedCustomer)}` : '')
+          const r = await apiGet<LeadListResponse>(qs)
           // 用户快速切换筛选条件时，只允许最后一次请求更新列表，避免旧结果后到并覆盖新结果。
-          if (requestId !== latestLeadListRequest) return
-          set({ leads: r.list, leadPagination: { total: r.total, page: r.page, pageSize: r.pageSize, totalPages: r.totalPages } })
+          if (requestId !== latestLeadListRequest) return null
+          // The shared legacy store also backs detail-era consumers typed as full Lead. The HTTP contract is
+          // intentionally narrower; only the seven-column page should consume these list items directly.
+          set({ leads: r.list as unknown as Lead[], leadPagination: { total: r.total, page: r.page, pageSize: r.pageSize, totalPages: r.totalPages } })
+          return r
         } catch (e) {
-          if (requestId !== latestLeadListRequest) return
+          if (requestId !== latestLeadListRequest) return null
           get().addAudit('项目获取池', '分页拉取失败', (e as Error).message)
           throw e
         }

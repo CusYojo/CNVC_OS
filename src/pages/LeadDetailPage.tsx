@@ -2,11 +2,11 @@ import {
   AlertTriangle, ArrowLeft, Building2, CalendarDays, ExternalLink,
   LoaderCircle, MapPin, Sparkles, Trash2, UserRound, UsersRound,
 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { Button, EmptyState, Modal } from '../components/ui'
 import { useToast } from '../components/Toast'
-import { apiDelete, apiGet } from '../lib/api'
+import { apiDelete, apiGet, apiPost } from '../lib/api'
 import {
   displayLeadDetailValue,
   displayLeadFundingValue,
@@ -49,6 +49,13 @@ function externalUrl(value?: string | null) {
   } catch { return '' }
 }
 
+function productionStageLabel(product: NonNullable<Lead['investmentProfile']>['products'][number]) {
+  if (!product.productionStage) return ''
+  if (product.productionStageStatus === 'planned') return `计划：${product.productionStage}`
+  if (product.productionStageStatus === 'realized') return `已实现：${product.productionStage}`
+  return `阶段口径未披露：${product.productionStage}`
+}
+
 type DisplayTeamMember = {
   name: string
   title?: string
@@ -85,6 +92,7 @@ type LeadEnrichmentFact = {
   instanceKey?: string
   value: unknown
   verificationStatus: string
+  investmentProfileSource?: boolean
   evidence: LeadEnrichmentEvidence[]
 }
 
@@ -96,9 +104,84 @@ type LeadEnrichmentFactsResponse = {
   pageSize: number
 }
 
+type LeadEnrichmentConflictCandidate = {
+  id: string
+  value: unknown
+  evidenceLevel: string
+  verificationStatus: string
+  isCurrent: boolean
+  evidence: Array<LeadEnrichmentEvidence & { quote?: string; reliability?: string | null }>
+}
+
+type LeadEnrichmentConflict = {
+  id: string
+  factKey: string
+  instanceKey: string
+  status: string
+  severity: string
+  automaticReason?: string | null
+  candidates: LeadEnrichmentConflictCandidate[]
+}
+
+export type InvestmentProfileEvidenceArea = 'industryProduct' | 'background' | 'financing' | 'valuation' | 'customers'
+
+export function canManageLeadPool(user: { role?: string; permissionCodes?: string[] } | null | undefined): boolean {
+  return Boolean(user?.permissionCodes?.includes('system.manage') || user?.role === '系统管理员')
+}
+
+export function canReviewLeadInvestmentProfileConflicts(
+  user: { role?: string; permissionCodes?: string[] } | null | undefined,
+  conflictCount: number | undefined,
+): boolean {
+  return canManageLeadPool(user) && Number.isInteger(conflictCount) && Number(conflictCount) > 0
+}
+
+export function shouldRetainLeadConflictReview(input: {
+  user: { role?: string; permissionCodes?: string[] } | null | undefined
+  routeLeadId: string | undefined
+  loadedLeadId: string | undefined
+  conflictCount: number | undefined
+}): boolean {
+  return Boolean(
+    input.routeLeadId
+    && input.loadedLeadId === input.routeLeadId
+    && canReviewLeadInvestmentProfileConflicts(input.user, input.conflictCount),
+  )
+}
+
+const INVESTMENT_PROFILE_FACT_MATCHERS: Record<InvestmentProfileEvidenceArea, (factKey: string) => boolean> = {
+  industryProduct: (factKey) => /^(?:industry\.|product\.)/.test(factKey)
+    || /^(?:technology\.route|production\.stage)$/.test(factKey),
+  background: (factKey) => /^financing\.(?:lead_investor|investors|investor_role)$/.test(factKey)
+    || /^team\.(?:institution|institution_relation|department_lab|institution_period|member|founder|cofounder)$/.test(factKey)
+    || factKey === 'technology.transfer_status',
+  financing: (factKey) => /^financing\./.test(factKey),
+  valuation: (factKey) => /^transaction\.(?:valuation|pre_money|post_money|round|currency|date)$/.test(factKey)
+    || /^financing\.(?:round|date)$/.test(factKey),
+  customers: (factKey) => /^(?:customer\.|contract\.|order\.|delivery\.|cash_collection\.)/.test(factKey),
+}
+
 function isEvidenceBackedFact(fact: LeadEnrichmentFact) {
   return fact.verificationStatus === 'verified'
     && fact.evidence.some((evidence) => Boolean(externalUrl(evidence.sourceUrl)))
+}
+
+export function investmentProfileEvidenceSources(facts: LeadEnrichmentFact[], area: InvestmentProfileEvidenceArea) {
+  const matcher = INVESTMENT_PROFILE_FACT_MATCHERS[area]
+  const sources = facts
+    .filter((fact) => fact.investmentProfileSource === true && isEvidenceBackedFact(fact) && matcher(fact.factKey))
+    .flatMap((fact) => fact.evidence)
+    .flatMap((evidence) => {
+      const sourceUrl = externalUrl(evidence.sourceUrl)
+      return sourceUrl ? [{ ...evidence, sourceUrl }] : []
+    })
+  return [...new Map(sources.map((source) => [source.sourceUrl, source])).values()]
+}
+
+function investmentProfileCustomerName(customer: NonNullable<Lead['investmentProfile']>['customers']['representatives'][number]) {
+  if (!customer.anonymized) return customer.name
+  const label = customer.name.trim()
+  return /^(?:某.{0,18}(?:客户|企业|公司|机构)|(?:匿名|保密)客户(?:\s*\d+)?)$/.test(label) ? label : '某保密客户'
 }
 
 function displayFactValue(value: unknown) {
@@ -114,9 +197,10 @@ async function loadAllLeadVerifiedFacts(leadId: string) {
   for (let page = 1; page <= 20; page += 1) {
     const result = await apiGet<LeadEnrichmentFactsResponse>(`/leads/${leadId}/verified-facts?page=${page}&pageSize=100`)
     all.push(...result.facts)
-    if (!result.hasMore) break
+    if (!result.hasMore) return [...new Map(all.map((fact) => [fact.id, fact])).values()]
+    if (page === 20) throw new Error('已验证事实超过详情页安全读取上限，不能展示不完整来源链')
   }
-  return [...new Map(all.map((fact) => [fact.id, fact])).values()]
+  return []
 }
 
 function arxivAuthorQuery(name: string) {
@@ -223,24 +307,63 @@ export function LeadDetailPage() {
   const [deleting, setDeleting] = useState(false)
   const [verifiedProfile, setVerifiedProfile] = useState<LeadVerifiedProfile | null>(null)
   const [enrichmentFacts, setEnrichmentFacts] = useState<LeadEnrichmentFact[]>([])
+  const [factsLoadError, setFactsLoadError] = useState('')
+  const [conflictReviewOpen, setConflictReviewOpen] = useState(false)
+  const [conflicts, setConflicts] = useState<LeadEnrichmentConflict[]>([])
+  const [conflictsLoading, setConflictsLoading] = useState(false)
+  const [conflictsError, setConflictsError] = useState('')
+  const [selectedConflictId, setSelectedConflictId] = useState('')
+  const [selectedFactId, setSelectedFactId] = useState('')
+  const [resolutionReason, setResolutionReason] = useState('')
+  const [resolvingConflict, setResolvingConflict] = useState(false)
+  const conflictRequestVersion = useRef(0)
+
+  const clearConflictReview = useCallback(() => {
+    conflictRequestVersion.current += 1
+    setConflictReviewOpen(false)
+    setConflicts([])
+    setConflictsLoading(false)
+    setConflictsError('')
+    setSelectedConflictId('')
+    setSelectedFactId('')
+    setResolutionReason('')
+    setResolvingConflict(false)
+  }, [])
 
   const load = useCallback(async () => {
     if (!id) return
     setLoading(true)
     setError('')
+    setFactsLoadError('')
     const [result, profileResult, factsResult] = await Promise.all([
       fetchLeadDetail(id),
       apiGet<LeadVerifiedProfile>(`/leads/${id}/verified-profile`).catch(() => null),
-      loadAllLeadVerifiedFacts(id).catch(() => []),
+      loadAllLeadVerifiedFacts(id)
+        .then((facts) => ({ facts, error: '' }))
+        .catch((cause) => ({
+          facts: [] as LeadEnrichmentFact[],
+          error: cause instanceof Error ? cause.message : '画像来源暂时不可用',
+        })),
     ])
     if (result) setLead(result)
     else setError('线索不存在、已移除，或当前账号无权访问。')
     setVerifiedProfile(profileResult)
-    setEnrichmentFacts(factsResult)
+    setEnrichmentFacts(factsResult.facts)
+    setFactsLoadError(factsResult.error)
     setLoading(false)
   }, [fetchLeadDetail, id])
 
   useEffect(() => { void load() }, [load])
+
+  useEffect(() => {
+    if (shouldRetainLeadConflictReview({
+      user: currentUser,
+      routeLeadId: id,
+      loadedLeadId: lead?.id,
+      conflictCount: lead?.investmentProfile?.dataStatus.conflictCount,
+    })) return
+    clearConflictReview()
+  }, [clearConflictReview, currentUser, id, lead?.id, lead?.investmentProfile?.dataStatus.conflictCount])
 
   const state = location.state as { from?: string } | null
   const goBack = () => navigate(state?.from || '/sourcing')
@@ -270,6 +393,51 @@ export function LeadDetailPage() {
       showToast(cause instanceof Error ? cause.message : '删除失败，请稍后重试', 'error')
       setDeleting(false)
     }
+  }
+
+  const readConflicts = async (leadId: string) => {
+    const requestVersion = ++conflictRequestVersion.current
+    setConflictsLoading(true)
+    setConflictsError('')
+    try {
+      const result = await apiGet<{ leadId: string; conflicts: LeadEnrichmentConflict[] }>(`/leads/${leadId}/enrichment/conflicts`)
+      if (requestVersion !== conflictRequestVersion.current) return
+      const openConflicts = result.conflicts.filter((conflict) => conflict.status === 'open')
+      setConflicts(openConflicts)
+      setSelectedConflictId((current) => openConflicts.some((conflict) => conflict.id === current) ? current : openConflicts[0]?.id || '')
+      setSelectedFactId('')
+    } catch (cause) {
+      if (requestVersion !== conflictRequestVersion.current) return
+      setConflicts([])
+      setConflictsError(cause instanceof Error ? cause.message : '冲突证据暂时不可用')
+    } finally {
+      if (requestVersion === conflictRequestVersion.current) setConflictsLoading(false)
+    }
+  }
+
+  const openConflictReview = () => {
+    if (!lead || !canReviewLeadInvestmentProfileConflicts(currentUser, lead.investmentProfile?.dataStatus.conflictCount)) return
+    setConflictReviewOpen(true)
+    setResolutionReason('')
+    void readConflicts(lead.id)
+  }
+
+  const resolveConflict = async (decision: 'accept_fact' | 'dismiss') => {
+    if (!lead || resolvingConflict || !selectedConflictId || resolutionReason.trim().length < 4) return
+    if (decision === 'accept_fact' && !selectedFactId) return
+    setResolvingConflict(true)
+    try {
+      await apiPost(`/leads/${lead.id}/enrichment/conflicts/${selectedConflictId}/resolve`, {
+        decision,
+        ...(decision === 'accept_fact' ? { selectedFactId } : {}),
+        reason: resolutionReason.trim(),
+      })
+      showToast('冲突裁决已提交，画像将在新快照后更新', 'success')
+      setResolutionReason('')
+      await Promise.all([readConflicts(lead.id), load()])
+    } catch (cause) {
+      showToast(cause instanceof Error ? cause.message : '冲突裁决失败', 'error')
+    } finally { setResolvingConflict(false) }
   }
 
   if (loading && !lead) return <DetailShell onBack={goBack}><div className="lead-review-loading"><LoaderCircle /><strong>正在读取线索详情</strong></div></DetailShell>
@@ -464,6 +632,63 @@ export function LeadDetailPage() {
     accessedAt: evidence.accessedAt,
   }])).values()]
   const relatedSources = evidenceSources.length ? evidenceSources : (lead.sources ?? []).filter((source) => Boolean(externalUrl(source.url)))
+  const investmentProfile = lead.investmentProfile
+  const customerSourcesRestricted = Boolean(investmentProfile?.customers.representatives.some((item) => item.anonymized))
+  const investmentProfileCards = investmentProfile ? [
+    {
+      label: '行业与产品路线',
+      value: [investmentProfile.industry.segment, investmentProfile.industry.level2, investmentProfile.industry.level1].find(Boolean) || '-',
+      detail: investmentProfile.products.slice(0, 2).map((item) => [item.name, item.productRoute, item.technologyRoute, productionStageLabel(item)].filter(Boolean).join(' · ')).join('；') || '-',
+      sources: investmentProfileEvidenceSources(verifiedFacts, 'industryProduct'),
+      expectsEvidence: Boolean(investmentProfile.industry.level1 || investmentProfile.industry.level2 || investmentProfile.industry.segment
+        || investmentProfile.industry.chainPosition || investmentProfile.products.length),
+      sourceRestricted: false,
+    },
+    {
+      label: '机构与高校背景',
+      value: investmentProfile.institutions.slice(0, 3).map((item) => `${item.name}${item.role === 'lead' ? '（领投）' : ''}`).join('、') || '-',
+      detail: investmentProfile.academicLinks.slice(0, 3).map((item) => `${item.institution} · ${item.relationType}${item.commercialization ? ' · 成果转化' : ''}`).join('；') || '-',
+      sources: investmentProfileEvidenceSources(verifiedFacts, 'background'),
+      expectsEvidence: Boolean(investmentProfile.institutions.length || investmentProfile.academicLinks.length),
+      sourceRestricted: false,
+    },
+    {
+      label: '融资进展',
+      value: research ? '-' : [investmentProfile.financing.status, investmentProfile.financing.latestRound, investmentProfile.financing.latestAmount].filter(Boolean).join(' · ') || '-',
+      detail: research ? '-' : [`日期 ${displayDate(investmentProfile.financing.latestRoundDate)}`, `累计 ${text(investmentProfile.financing.cumulativeAmount)}`].join('；'),
+      sources: research ? [] : investmentProfileEvidenceSources(verifiedFacts, 'financing'),
+      expectsEvidence: !research && Boolean(investmentProfile.financing.latestRound || investmentProfile.financing.latestRoundDate
+        || investmentProfile.financing.latestAmount || investmentProfile.financing.cumulativeAmount
+        || !/^(?:未披露|不适用)$/.test(investmentProfile.financing.status)),
+      sourceRestricted: false,
+    },
+    {
+      label: '最新估值',
+      value: research ? '-' : text(investmentProfile.valuation.value),
+      detail: research ? '-' : [investmentProfile.valuation.type === 'pre_money' ? '投前' : investmentProfile.valuation.type === 'post_money' ? '投后' : '口径未披露', investmentProfile.valuation.currency, investmentProfile.valuation.round, displayDate(investmentProfile.valuation.date)].filter((item) => item && item !== '-').join(' · ') || '-',
+      sources: research ? [] : investmentProfileEvidenceSources(verifiedFacts, 'valuation'),
+      expectsEvidence: !research && Boolean(investmentProfile.valuation.value),
+      sourceRestricted: false,
+    },
+    {
+      label: '大客户验证',
+      value: research ? '-' : investmentProfile.customers.representatives.map(investmentProfileCustomerName).join('、') || '-',
+      detail: research ? '-' : `最高 ${text(investmentProfile.customers.highestStage)}；已验证 ${investmentProfile.customers.verifiedCount}；A/B/C ${investmentProfile.customers.tierACount}/${investmentProfile.customers.tierBCount}/${investmentProfile.customers.tierCCount}`,
+      sources: research || customerSourcesRestricted ? [] : investmentProfileEvidenceSources(verifiedFacts, 'customers'),
+      expectsEvidence: !research && Boolean(investmentProfile.customers.representatives.length || investmentProfile.customers.verifiedCount
+        || (investmentProfile.customers.highestStage && investmentProfile.customers.highestStage !== 'L0')),
+      sourceRestricted: customerSourcesRestricted,
+    },
+    {
+      label: '数据状态',
+      value: ({ verified: '已验证', partial: '部分验证', conflicted: '存在冲突', missing: '缺失', not_applicable: '不适用', stale: '数据过期' } as const)[investmentProfile.dataStatus.status],
+      detail: `覆盖 ${investmentProfile.dataStatus.verifiedDimensions}/${investmentProfile.dataStatus.applicableDimensions}；冲突 ${investmentProfile.dataStatus.conflictCount}；更新 ${displayDate(investmentProfile.dataStatus.updatedAt)}`,
+      sources: [],
+      expectsEvidence: false,
+      sourceRestricted: false,
+    },
+  ] : []
+  const selectedConflict = conflicts.find((conflict) => conflict.id === selectedConflictId)
 
   return <div className="lead-review-page">
     <div className="lead-review-shell">
@@ -480,7 +705,7 @@ export function LeadDetailPage() {
         </div>
         <div className="lead-review-actions">
           <button className="lead-review-convert-button" type="button" disabled={converted || converting} onClick={() => void handleConvert()}>{converting ? '正在转换…' : converted ? '已转为我的专属项目' : '转为我的专属项目'}</button>
-          {currentUser?.role === '系统管理员' && <button className="lead-review-delete-button" type="button" onClick={() => setDeleteConfirmOpen(true)}><Trash2 />删除线索</button>}
+          {canManageLeadPool(currentUser) && <button className="lead-review-delete-button" type="button" onClick={() => setDeleteConfirmOpen(true)}><Trash2 />删除线索</button>}
         </div>
       </header>
 
@@ -492,6 +717,13 @@ export function LeadDetailPage() {
           <BusinessCard label="应用场景" value={applicationValue} description={applicationDescription} />
           <BusinessCard label="主营业务" value={mainBusinessValue} description={mainBusinessDescription} />
         </div></ReviewSection>
+        <ReviewSection title="投资证据画像" icon={<Building2 />}><>{factsLoadError && <div className="lead-review-investment-warning" role="status"><AlertTriangle /><span>画像值已读取，但来源链暂时不可用：{factsLoadError}</span><button type="button" onClick={() => void load()}>重新读取</button></div>}{investmentProfile && investmentProfile.dataStatus.conflictCount > 0 && <div className="lead-review-investment-warning" role="status"><AlertTriangle /><span>当前画像有 {investmentProfile.dataStatus.conflictCount} 项事实冲突，冲突解决前不会静默选择展示值。</span>{canReviewLeadInvestmentProfileConflicts(currentUser, investmentProfile.dataStatus.conflictCount) && <button type="button" onClick={openConflictReview}>复核冲突证据</button>}</div>}<div className="lead-review-investment-grid">{investmentProfileCards.length ? investmentProfileCards.map((item) => {
+          return <article key={item.label}><span>{item.label}</span><strong>{item.value}</strong><p>{item.detail}</p>{item.sources.length > 0
+            ? <div className="lead-review-investment-sources" aria-label={`${item.label}核对来源`}>{item.sources.slice(0, 2).map((source, index) => <a href={source.sourceUrl} target="_blank" rel="noreferrer" key={source.sourceUrl} title={item.label === '大客户验证' ? '大客户验证公开来源' : text(source.title || source.publisher, '公开来源')}>核对来源 {index + 1}<ExternalLink /></a>)}{item.sources.length > 2 && <span>另有 {item.sources.length - 2} 条来源</span>}</div>
+            : item.sourceRestricted
+              ? <span className="lead-review-investment-source-restricted">受限客户来源不在此页展示</span>
+              : item.expectsEvidence && !factsLoadError && <span className="lead-review-investment-source-empty" role="status">来源链未返回，请稍后重试</span>}</article>
+        }) : <p className="lead-review-section-empty">暂无可用于投资画像的已验证事实</p>}</div></></ReviewSection>
         <ReviewSection title="团队成员" icon={<UsersRound />}><>{(verifiedTeamIntroduction || generatedTeamIntroduction || sourceLabeledField('teamIntroduction')) && <p className="lead-review-team-summary">{verifiedTeamIntroduction ? displayFactValue(verifiedTeamIntroduction.value) : generatedTeamIntroduction || sourceLabeledNode('teamIntroduction', '')}</p>}<div className="lead-review-team-list">{team.length ? team.map((member, index) => <article key={`${member.name}-${index}`}><span><UserRound /></span><div><h3>{member.profileUrl ? <a href={externalUrl(member.profileUrl) || undefined} target="_blank" rel="noreferrer">{text(member.name)}<ExternalLink /></a> : text(member.name)}<em>{text(member.title, '-')}</em></h3><p>{text(member.background, '-')}</p></div></article>) : <p className="lead-review-section-empty">暂无可验证的团队成员信息</p>}</div></></ReviewSection>
         <ReviewSection title="证据与动态" icon={<CalendarDays />}><div className="lead-review-evidence-grid">
           <section className="lead-review-path-panel"><header><span>01</span><div><h3>动态路径</h3><p>仅展示已有来源的已验证进展</p></div></header><div className="lead-review-path">{updates.length ? updates.map((item) => <article key={`${item.occurredAt}-${item.title}`}><time>{displayDate(item.occurredAt)}</time>{item.sourceUrl ? <a href={externalUrl(item.sourceUrl) || undefined} target="_blank" rel="noreferrer"><strong>{text(item.title)}</strong><ExternalLink /></a> : <strong>{text(item.title)}</strong>}</article>) : <p className="lead-review-section-empty">暂无经过来源标注的动态</p>}</div></section>
@@ -499,6 +731,28 @@ export function LeadDetailPage() {
         </div></ReviewSection>
       </main>
     </div>
+    <Modal
+      open={conflictReviewOpen}
+      title="复核投资画像事实冲突"
+      width="max-w-4xl"
+      onClose={() => { if (!resolvingConflict) setConflictReviewOpen(false) }}
+      footer={<Button variant="secondary" disabled={resolvingConflict} onClick={() => setConflictReviewOpen(false)}>关闭</Button>}
+    >
+      <div className="lead-review-conflict-review">
+        {conflictsLoading && <p role="status">正在读取冲突候选与证据…</p>}
+        {conflictsError && <div className="lead-review-investment-warning" role="alert"><AlertTriangle /><span>{conflictsError}</span><button type="button" onClick={() => { if (lead) void readConflicts(lead.id) }}>重试</button></div>}
+        {!conflictsLoading && !conflictsError && conflicts.length === 0 && <p role="status">当前没有待复核冲突，画像刷新后状态会自动更新。</p>}
+        {conflicts.length > 0 && <>
+          <nav aria-label="待复核冲突">{conflicts.map((conflict) => <button type="button" className={conflict.id === selectedConflictId ? 'active' : ''} key={conflict.id} onClick={() => { setSelectedConflictId(conflict.id); setSelectedFactId('') }}><strong>{conflict.factKey}</strong><span>{conflict.instanceKey || '默认实例'} · {conflict.severity === 'material' ? '重大冲突' : '一般冲突'}</span></button>)}</nav>
+          {selectedConflict && <section>
+            <header><strong>{selectedConflict.factKey}</strong><span>{selectedConflict.automaticReason || '候选事实值不一致，请按原始证据复核'}</span></header>
+            <div className="lead-review-conflict-candidates">{selectedConflict.candidates.map((candidate) => <label key={candidate.id} className={candidate.id === selectedFactId ? 'selected' : ''}><input type="radio" name="lead-conflict-candidate" checked={candidate.id === selectedFactId} onChange={() => setSelectedFactId(candidate.id)} /><span><strong>{displayFactValue(candidate.value)}</strong><small>{candidate.evidenceLevel} · {candidate.verificationStatus}</small>{candidate.evidence.map((evidence) => { const url = externalUrl(evidence.sourceUrl); return <span className="evidence" key={`${candidate.id}-${evidence.sourceUrl}`}><em>{text(evidence.title || evidence.publisher, '公开来源')}</em>{evidence.quote && <q>{evidence.quote}</q>}{url && <a href={url} target="_blank" rel="noreferrer">打开来源<ExternalLink /></a>}</span> })}</span></label>)}</div>
+            <label className="lead-review-conflict-reason">裁决原因<textarea value={resolutionReason} onChange={(event) => setResolutionReason(event.target.value)} maxLength={2000} placeholder="至少填写 4 个字，说明采用或驳回依据" /></label>
+            <div className="lead-review-conflict-actions"><Button variant="secondary" disabled={resolvingConflict || resolutionReason.trim().length < 4} onClick={() => void resolveConflict('dismiss')}>驳回全部候选</Button><Button loading={resolvingConflict} disabled={!selectedFactId || resolutionReason.trim().length < 4} onClick={() => void resolveConflict('accept_fact')}>采用所选事实</Button></div>
+          </section>}
+        </>}
+      </div>
+    </Modal>
     <Modal
       open={deleteConfirmOpen}
       title="删除共享线索"

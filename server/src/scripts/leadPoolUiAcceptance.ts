@@ -6,18 +6,22 @@ import { publicLeadFundingStatus } from '../services/leadDataQualityService.js'
 const root = resolve(import.meta.dirname, '../../..')
 const read = (path: string) => readFile(resolve(root, path), 'utf8')
 
-const [page, detail, app, store, metaRoutes, intakeRoutes, ratingService, summaryService, dataQualityService, industryPresentation, styles] = await Promise.all([
+const [page, filterContract, detail, app, store, metaRoutes, queryContract, intakeRoutes, ratingService, summaryService, dataQualityService, industryPresentation, styles, fdeShell, appLayout] = await Promise.all([
   read('src/pages/SourcingPage.tsx'),
+  read('src/lib/leadPoolFilters.ts'),
   read('src/pages/LeadDetailPage.tsx'),
   read('src/App.tsx'),
   read('src/store/useAppStore.ts'),
   read('server/src/routes/meta.ts'),
+  read('server/src/contracts/leadPoolQueryContract.ts'),
   read('server/src/routes/leadIntake.ts'),
   read('server/src/services/leadRatingV3Service.ts'),
   read('server/src/services/aiSummaryService.ts'),
   read('server/src/services/leadDataQualityService.ts'),
   read('src/lib/leadPresentation.ts'),
   read('src/styles.css'),
+  read('src/layout/fde-shell.css'),
+  read('src/layout/AppLayout.tsx'),
 ])
 
 for (const label of ['批量导入', '上传 BP', '人工复核', 'Radar 同步']) {
@@ -32,20 +36,46 @@ for (const endpoint of ['/leads/imports', '/leads/bp-uploads', '/lead-pipeline/r
 for (const filter of ['线索类型', '行业', '阶段', '地区', '渠道', '更新时间']) {
   assert.match(page, new RegExp(`label="${filter}"`), `缺少筛选项：${filter}`)
 }
-for (const channel of ['36氪', '机构公众号', '高校公众号', '论文', '新闻', '微信群聊']) {
-  assert.match(page, new RegExp(`'${channel}'`), `渠道筛选缺少 ${channel}`)
+for (const removedFilter of ['一级行业', '二级行业', '细分赛道', '历史行业标签', '产品路线', '投资机构', '高校/院所', '最新轮次', '客户验证', '数据状态', '事实冲突', '排序', '产业化阶段', '机构类型', '重点机构', '高校关系', '成果转化', '融资起始日期', '融资截止日期', '最低估值', '最高估值', '估值币种', '估值口径', '客户等级', '验证客户']) {
+  assert.doesNotMatch(page, new RegExp(`label="${removedFilter}"`), `顶部筛选必须保持旧版，不应展示：${removedFilter}`)
+}
+assert.doesNotMatch(page, /更多投资筛选/, '顶部筛选必须保持旧版，不应展示更多投资筛选入口')
+for (const channel of ['36氪', '机构公众号', '高校公众号', '论文']) {
+  assert.match(filterContract, new RegExp(`'${channel}'`), `渠道筛选缺少 ${channel}`)
+}
+for (const removedChannel of ['新闻', '微信群聊']) {
+  assert.doesNotMatch(filterContract, new RegExp(`'${removedChannel}'`), `渠道筛选不应展示 ${removedChannel}`)
 }
 for (const industry of ['自然语言处理', '计算机视觉', '网络安全', '数据科学', '软件工程', '金融', '工具软件', '本地生活', '旅游']) {
-  assert.match(page, new RegExp(`'${industry}'`), `全行业筛选缺少 ${industry}`)
+  assert.match(filterContract, new RegExp(`'${industry}'`), `全行业筛选缺少 ${industry}`)
 }
-for (const column of ['项目概况', '一句话摘要', '核心信息', '推荐理由 / 信号', '融资 / 估值', '最新动态', '更新时间']) {
+for (const column of ['线索主体', '方向 / 产品', '团队 / 机构', '进展 / 阶段', '价值 / 转化', '最新动态', '更新时间']) {
   assert.match(page, new RegExp(`columnheader">${column.replace('/', '\\/')}`), `缺少列表列：${column}`)
+}
+for (const removedColumn of ['一句话摘要', '核心信息', '推荐理由 / 信号', '大客户验证', '数据状态']) {
+  assert.doesNotMatch(page, new RegExp(`columnheader">${removedColumn.replace('/', '\\/')}`), `列表不应继续展示旧列：${removedColumn}`)
 }
 
 assert.match(page, /pageSize[^\n]+20|:\s*20/, '默认分页必须为每页 20 条')
-for (const query of ['leadType', 'industry', 'stage', 'region', 'channel', 'updatedRange']) {
+const rowCells = page.match(/role="cell"/g) ?? []
+assert.equal(rowCells.length, 14, `企业与科研两种列表行必须各自恰好 7 个单元格，当前总计 ${rowCells.length} 个`)
+assert.match(page, /role="row" tabIndex=\{0\}/, '线索行必须可通过键盘聚焦')
+assert.match(page, /event\.key === 'Enter' \|\| event\.key === ' '/, '线索行必须支持 Enter 和 Space 打开详情')
+assert.match(page, /event\.target === event\.currentTarget/, '子控件键盘事件不得重复触发行打开')
+assert.match(styles, /\.lead-pool-row:hover, \.lead-pool-row:focus-visible/, '键盘聚焦必须提供可见焦点反馈')
+assert.match(page, /className="lead-pool-table-scroll"/, '表格和固定分页之间必须有独立横向滚动容器')
+assert.match(styles, /\.lead-pool-table-scroll \{ overflow-x: auto;/, '不足宽度时必须提供可用的横向滚动降级')
+assert.match(styles, /\.lead-pool-table \{ position: relative; min-width: 1120px; \}/, '桌面主验收宽度必须容纳七列而不裁切')
+assert.match(fdeShell, /body:has\(\.fde-app\) \{ min-width: 320px; \}/, 'FDE 工作台不得继承旧页面 1180px 的全局最小宽度')
+assert.match(appLayout, /leadPoolView = location\.pathname === '\/projects'[\s\S]*?view'\) === 'leads'/, '窄屏侧栏折叠必须精确识别共享线索池视图')
+assert.match(appLayout, /navigationCollapsed = collapsed \|\| narrow && \(responsibilityView \|\| leadPoolView\)/, '共享线索池窄屏必须复用受控侧栏折叠')
+for (const query of ['leadType', 'industry', 'industryLevel1', 'industryLevel2', 'industrySegment', 'stage', 'region', 'channel', 'updatedRange', 'productRoute',
+  'institution', 'institutionType', 'academicInstitution', 'latestRound', 'customerStageMin', 'profileStatus', 'hasConflict', 'sort',
+  'productionStage', 'hasMajorInstitution', 'academicRelation', 'hasCommercializationLink',
+  'fundingDateFrom', 'fundingDateTo', 'valuationMin', 'valuationMax', 'valuationCurrency',
+  'valuationType', 'customerTier', 'hasVerifiedCustomer']) {
   assert.match(store, new RegExp(`${query}\\?:`), `客户端查询契约缺少 ${query}`)
-  assert.match(metaRoutes, new RegExp(query), `服务端查询契约缺少 ${query}`)
+  assert.match(queryContract, new RegExp(query), `服务端查询契约缺少 ${query}`)
 }
 assert.match(app, /path="\/sourcing\/:id"/, '缺少独立线索研判页路由')
 assert.doesNotMatch(detail, /ratingV3|评级研判|开始 V3 评级|人工重试评级/, '详情页不得展示评级研判及评分入口')
@@ -58,9 +88,6 @@ for (const field of ['融资轮次', '融资状态', '业务阶段']) {
   assert.match(detail, new RegExp(field), `详情页缺少严谨拆分字段：${field}`)
 }
 assert.doesNotMatch(detail, /\['融资阶段'/, '详情页不得再用“融资阶段”混淆融资轮次与业务阶段')
-for (const field of ['融资状态', '融资金额', '估值']) {
-  assert.match(page, new RegExp(`'${field}'`), `融资 / 估值列缺少固定子项：${field}`)
-}
 assert.match(summaryService, /fundingStatusDisplay:\s*normalizedStages\.fundingStatus/, '列表 DTO 必须返回独立融资状态字段')
 for (const [industry, sectorLabel] of [
   ['人工智能', 'artificial_intelligence'],
@@ -72,21 +99,42 @@ for (const [industry, sectorLabel] of [
 assert.match(summaryService, /\$\.profile\.sectorLabels/, '行业筛选必须读取36氪候选入池后的赛道标签')
 assert.match(summaryService, /JSON_CONTAINS\([\s\S]*?sectorLabels[\s\S]*?JSON_QUOTE\(\$\{sectorLabel\}\)/, '赛道筛选必须使用 JSON 数组精确包含匹配')
 assert.match(summaryService, /LEAD_STAGE_FILTER_PATTERNS/, '阶段筛选必须使用归一化分组规则')
-assert.match(summaryService, /'C轮及以后':\s*'\^\(\[C-F\]/, 'C轮及以后必须覆盖 C-F 轮及上市前阶段')
+assert.match(summaryService, /'C轮及以后':\s*'\^\(Pre-C/, 'C轮及以后必须覆盖 Pre-C、C-F 轮及上市前阶段')
+assert.match(summaryService, /'股权融资\/轮次未披露':/, '阶段筛选必须覆盖已识别但轮次不明确的股权融资')
 assert.match(summaryService, /stage === '科研成果'[\s\S]*?channel'[\s\S]*?= '论文'/, '科研成果必须按论文线索类型筛选')
 assert.doesNotMatch(summaryService, /const stageKeyword = `%\$\{stage\}%`/, '阶段筛选不得继续使用会混入 Pre-A 的模糊匹配')
 assert.match(summaryService, /meaningfulPresentationText\(ratingV3\.scoredAt\)/, '更新日期展示必须与筛选同时纳入 V3 评级时间')
-assert.match(page, /businessStageDisplay \|\| lead\.stageDisplay/, '科研成果列表必须展示经营或转化阶段')
-assert.match(page, /businessTags\?\.industry/, '列表必须展示归一化行业与赛道标签')
+assert.match(page, /availableData\?\.industryTags/, '画像行业缺失时必须展示列表 DTO 中已有的行业数据')
+assert.match(summaryService, /LEAD_POOL_SHOW_CANDIDATE_DATA/, '候选数据展示必须具有独立运行时开关')
+assert.match(summaryService, /dataStatus:\s*'candidate'/, '候选列表 DTO 必须明确标注 candidate 状态')
+assert.match(summaryService, /verificationStatus:\s*'unverified'/, '候选列表 DTO 不得冒充已验证画像')
+assert.match(summaryService, /sourceKinds/, '候选列表 DTO 必须区分入池资料与联网候选来源')
+assert.doesNotMatch(page, /lead-pool-candidate-note|candidateLabel/, '页面不得显示已有资料或联网候选的待核验提示')
+assert.doesNotMatch(styles, /\.lead-pool-candidate-note/, '样式表不得保留候选待核验提示样式')
+assert.doesNotMatch(page, /<dt>累计<\/dt>|cumulativeAmount/, '融资进展列不得展示累计融资字段')
+for (const hiddenCandidateText of ['联网候选', '已有资料', '已有/联网资料']) {
+  assert.match(page, new RegExp(`LIST_EMPTY_VALUES[\\s\\S]*?'${hiddenCandidateText.replace('/', '\\/')}'`), `列表必须隐藏候选提示字样：${hiddenCandidateText}`)
+}
+assert.match(page, /\^\\d\{4\}-\\d\{2\}\$/, '年月候选必须保留原始精度，不得虚构每月1日')
+assert.doesNotMatch(page, /splitLeadIndustryTags\(lead\.industry\)/, '投资画像行业列不得混入没有画像证据绑定的旧 industry 字段')
+assert.match(page, /LIST_EMPTY_VALUES/, '列表必须统一识别待核验类占位')
+assert.match(page, /function displayText\(value: unknown, fallback = '-'\)/, '列表待核验类占位必须显示为短横线')
 assert.match(page, /sessionStorage\.removeItem\(LIST_SCROLL_KEY\)/, '主动切换筛选时必须清除旧滚动位置')
+assert.match(page, /const next = new URLSearchParams\(params\)[\s\S]*?next\.delete\(key\)[\s\S]*?setParams\(next\)/, '清空线索筛选必须保留父级 view 等路由参数')
+assert.match(page, /normalizedLeadPoolSearchParams/, '页面必须清理非法 URL 查询条件')
+assert.match(page, /maxLength=\{100\}/, '搜索输入框必须在浏览器侧限制为 100 字符')
+assert.match(page, /event\.target\.value\.slice\(0, 100\)/, '搜索状态入口必须截断绕过 HTML 属性的超长输入')
+assert.match(page, /response\.page !== request\.page/, '服务端修正越界页后页面必须同步实际页')
+assert.match(page, /void runRequest\(\)/, '首次加载与重试必须复用统一错误处理')
+assert.match(summaryService, /\$\{leads\.team\} LIKE \$\{kw\}/, '关键词搜索必须覆盖直接团队字段')
+assert.match(summaryService, /normalizeLeadListPage\(requestedPage, pageSize, total\)/, '服务端必须按真实总数回退越界页')
+assert.match(summaryService, /LEAD_LIST_READ_TRANSACTION\s*=\s*\{[\s\S]*?isolationLevel:\s*'repeatable read'[\s\S]*?accessMode:\s*'read only'/, '线索列表必须声明只读一致快照契约')
+assert.match(summaryService, /db\.transaction\([\s\S]*?LEAD_LIST_READ_TRANSACTION\)/, '计数和分页列表必须应用只读一致快照契约')
+assert.match(summaryService, /industry === '其他'[\s\S]*?AND NOT/, '“其他”行业必须使用标准行业规则的补集')
+assert.match(summaryService, /deriveAuthoritativeLeadRegion/, '列表地区必须使用权威标准字段')
 for (const status of ['已融资', '未融资', '未披露', '待核验', '不适用']) {
   assert.match(dataQualityService, new RegExp(`'${status}'`), `融资状态投影缺少状态：${status}`)
 }
-assert.doesNotMatch(page, /funding\.stage/, '列表不得再把融资轮次字段直接当作融资状态')
-assert.match(page, /const amount = status === '未融资'\s*\? '—'/, '未融资项目的融资金额必须显示横线')
-assert.match(page, /const valuation = status === '未融资'\s*\? '—'/, '未融资项目的估值必须显示横线')
-assert.match(page, /leadType\(lead\) === '科研项目'\) return \{ status: '-', amount: '-', valuation: '-' \}/, '科研项目的融资与估值字段必须显示短横线')
-assert.match(page, /status === '不适用'\) return \{ status: '-', amount: '-', valuation: '-' \}/, '不适用的融资与估值字段必须统一显示短横线')
 assert.equal(publicLeadFundingStatus('A轮', 'source_labeled'), '已融资')
 assert.equal(publicLeadFundingStatus('历史B轮，当前轮次待核验', 'source_labeled'), '已融资')
 assert.equal(publicLeadFundingStatus('未融资', 'source_labeled'), '未融资')
@@ -95,8 +143,6 @@ assert.equal(publicLeadFundingStatus('融资轮次待核验', 'unverified'), '�
 assert.equal(publicLeadFundingStatus('不适用', 'not_applicable'), '不适用')
 assert.match(detail, /!isUnfinanced\s*&&\s*hasFundingAmount/, '详情仅在存在有效融资金额时展示金额字段')
 assert.match(summaryService, /dataQualityV1/, '列表接口必须返回 Codex 数据质量复核结果')
-assert.match(page, /companyRegistry\?\.foundedAt/, '列表成立时间必须读取统一工商字段')
-assert.match(page, /companyRegistry\?\.legalRepresentative/, '列表法人必须读取统一工商字段')
 assert.match(detail, /displayLeadRegisteredAddress\(/, '注册地址必须通过专用展示校验')
 assert.match(detail, /displayLeadDetailValue/, '详情页必须通过统一规则隐藏待核验类占位')
 assert.doesNotMatch(detail, /待核验|待核实|待确认/, '详情页源码不得继续直接渲染待核验类文案')
@@ -104,7 +150,7 @@ assert.match(industryPresentation, /INVALID_REGISTERED_ADDRESS/, '注册地址�
 assert.match(industryPresentation, /split\(\/\[，,、；;｜\|\]\+\//, '行业拆分必须覆盖逗号、顿号、分号和竖线')
 assert.doesNotMatch(industryPresentation, /split\(\/[^\n]*\\\//, '标准行业名称中的斜杠不得误拆')
 assert.match(industryPresentation, /new Set/, '拆分后的行业标签必须去重')
-assert.match(page, /industryTags\.map\(\(tag\) => <em key=\{`industry-\$\{tag\}`\}>/, '项目概况必须把复合行业拆成独立标签')
+assert.match(page, /industryTags\.map\(\(tag\) => <em key=\{tag\}>/, '行业与产品列必须把复合行业拆成独立标签')
 assert.match(detail, /industryTags\.map\(\(tag\) => <span key=\{`industry-\$\{tag\}`\}>/, '详情页必须把复合行业拆成独立标签')
 assert.match(detail, /paperMeta\?\.authors/, '科研项目团队必须读取论文完整作者列表')
 assert.match(detail, /paperMeta\?\.authorContributions/, '科研项目团队必须优先读取论文原文贡献标记')
@@ -132,15 +178,21 @@ assert.match(detail, /paperMeta\?\.resourceType/, '论文、学位论文、数�
 assert.match(detail, /论文许可不代表成果所有权/, '详情必须明确开放许可不等于成果所有权')
 assert.doesNotMatch(detail, /\['成果权属',\s*'待核验'\]/, '论文详情不得继续使用无法解释的成果权属待核验占位')
 assert.doesNotMatch(detail, /联网资料补全/, '详情页不得展示联网资料补全运营区块')
-assert.doesNotMatch(detail, /主体与关系|已提取事实与直接来源|裁决联网补全冲突|加载更多事实/, '详情页不得展示主体图、事实浏览或冲突裁决等运营信息')
-for (const endpoint of ['enrichment/topics', 'enrichment/entity/confirm', 'enrichment/conflicts']) {
+assert.doesNotMatch(detail, /主体与关系|已提取事实与直接来源|加载更多事实/, '详情页不得展示主体图或事实浏览等运营信息')
+for (const endpoint of ['enrichment/topics', 'enrichment/entity/confirm']) {
   assert.doesNotMatch(detail, new RegExp(endpoint.replaceAll('/', '\\/')), `详情页不得调用补全运营接口：${endpoint}`)
 }
+assert.match(detail, /canManageLeadPool\(currentUser\)[\s\S]*dataStatus\.conflictCount/, '冲突复核入口必须同时受有效权限和画像冲突数约束')
+assert.match(detail, /`\/leads\/\$\{leadId\}\/enrichment\/conflicts`/, '管理员必须按需读取冲突候选证据')
+assert.match(detail, /enrichment\/conflicts\/\$\{selectedConflictId\}\/resolve/, '管理员必须通过现有审计接口裁决冲突')
 assert.doesNotMatch(detail, /`\/leads\/\$\{id\}\/enrichment`/, '详情页不得下载完整补全运行状态')
 assert.doesNotMatch(detail, /`\/leads\/\$\{leadId\}\/facts\?/, '详情页不得下载包含未验证候选与原文的审计事实')
 assert.match(detail, /`\/leads\/\$\{id\}\/verified-profile`/, '详情页只能读取已验证介绍投影')
 assert.match(detail, /`\/leads\/\$\{leadId\}\/verified-facts\?/, '详情页只能读取已验证事实最小投影')
 assert.match(detail, /loadAllLeadVerifiedFacts/, '详情页必须分页加载全部已验证事实用于投影到现有信息块')
+assert.match(detail, /已验证事实超过详情页安全读取上限，不能展示不完整来源链/, '来源超过安全上限时必须失败关闭，不能静默截断')
+assert.match(detail, /factsLoadError[\s\S]*画像值已读取，但来源链暂时不可用/, '来源读取失败必须向用户显示独立状态')
+assert.match(detail, /factsLoadError[\s\S]*重新读取/, '来源读取失败必须提供可见重试入口')
 assert.match(detail, /fact\.verificationStatus === 'verified'/, '详情页只允许投影已验证事实')
 assert.match(detail, /fact\.evidence\.some\(\(evidence\) => Boolean\(externalUrl\(evidence\.sourceUrl\)\)\)/, '已验证事实还必须至少绑定一个合法公开来源')
 assert.match(detail, /verifiedFactNode/, '主体基础信息必须从已验证事实读取')
@@ -179,36 +231,57 @@ for (const anchor of anchors) {
   assert.match(anchor, /rel="noreferrer"/, '详情页新窗口链接必须隔离 referrer')
 }
 assert.doesNotMatch(styles, /\.lead-review-enrichment|\.lead-review-entity-graph|\.lead-review-conflict-form/, '详情样式不得保留已移除运营区块的展示契约')
+assert.match(styles, /\.lead-review-conflict-review/, '详情必须提供最小化的管理员冲突证据复核样式')
 assert.match(page, /sessionStorage/, '列表必须保留滚动位置')
-assert.match(page, /function FastClampedText/, '摘要与推荐理由必须共用即时完整内容浮层')
-assert.match(page, /function FastSummaryText/, '一句话摘要必须使用即时完整内容浮层')
-assert.match(page, /<FastSummaryText text=\{summaryText\} \/>/, '列表摘要必须接入即时完整内容浮层')
-assert.match(page, /function FastReasonText/, '推荐理由必须使用快速完整内容浮层')
-assert.match(page, /createPortal\(<div className="lead-pool-fast-tooltip"/, '推荐理由完整浮层必须脱离滚动容器以避免裁切')
-assert.match(page, /detailView\.rating\.coreTags/, '推荐理由区域必须展示最新评级核心标签')
-assert.match(page, /function joinedReason/, '推荐理由必须清理历史句尾标点后再拼接')
-assert.match(page, /function ratingReason/, '推荐理由必须通过统一优先级函数生成')
-assert.match(page, /rating\.status === '无法评级'/, '无法评级线索必须优先展示最新证据不足判断')
-assert.match(page, /mainView\.displayGrade === 'D'/, 'D 级线索必须优先展示最新证据不足判断')
-assert.match(page, /detailView\.investmentThesis/, '正式或参考评级必须优先展示最新投资逻辑')
-assert.match(page, /oneSentenceJudgment/, '缺少投资逻辑时必须回退最新一句话判断')
-assert.match(page, /legacyHighlights/, '没有可用 V3 理由时必须兼容历史 highlights')
-for (const status of ['补全中', '待复核', '待评级', '评级中', '评级过期', '补全失败', '评级失败']) {
-  assert.match(page, new RegExp(`'${status}'`), `共享线索列表缺少处理状态：${status}`)
+assert.doesNotMatch(page, /FastSummaryText|FastReasonText|lead-pool-fast-tooltip|createPortal/, '列表不得继续保留摘要或推荐理由浮层')
+assert.doesNotMatch(styles, /\.lead-pool-(?:summary|facts|reason-copy|fast-tooltip|signals|funding)\b/, '列表样式不得保留已移除摘要、核心信息、推荐理由和旧融资列契约')
+assert.match(styles, /\.lead-pool-updates\b/, '最新动态列必须恢复旧版时间轴样式')
+assert.match(styles, /\.lead-pool-updated\b/, '更新时间列必须恢复旧版时间样式')
+for (const field of ['investmentProfile', 'profile?.products', 'profile?.institutions', 'profile?.academicLinks',
+  'profile?.financing', 'profile?.valuation']) {
+  assert.match(page, new RegExp(field.replace(/[?.]/g, '\\$&')), `七列列表缺少画像字段：${field}`)
 }
-assert.match(page, /enrichment\?\.status === 'rejected'/, '补全任务拒绝后必须展示为补全失败')
-assert.match(page, /rating\?\.status === 'stale'[^\n]+评级过期/, '评级快照过期后必须与待评级区分展示')
-assert.match(styles, /\.lead-pool-summary\s*>\s*p[^}]+-webkit-line-clamp:\s*3/, '一句话摘要默认最多显示三行')
-assert.match(styles, /\.lead-pool-reason-copy\s*>\s*p[^}]+-webkit-line-clamp:\s*2/, '推荐理由默认最多显示两行')
-assert.match(styles, /\.lead-pool-fast-tooltip[^}]+position:\s*fixed/, '推荐理由完整浮层必须即时显示且不受列表裁切')
-assert.match(styles, /\.lead-pool-funding div[^}]+display:\s*grid[^}]+grid-template-columns:\s*48px 1fr/, '融资 / 估值必须与核心信息使用左标签右内容的键值排列')
-assert.doesNotMatch(styles, /\.lead-pool-funding dd\.status[^}]+(?:padding|background|border-radius):/, '融资状态不得使用破坏键值对齐的独立徽标布局')
+assert.match(page, /lead\.latestUpdates/, '列表必须使用精简 latestUpdates 恢复最新动态列')
+assert.match(page, /lead\.dataUpdatedAt \|\| lead\.poolEnteredAt/, '更新时间列必须优先使用数据更新时间并回退入池时间')
+assert.match(summaryService, /leadInvestmentProfileProjections/, '列表查询必须连接权威投资画像投影')
+assert.match(summaryService, /leftJoin\(leadInvestmentProfileProjections/, '列表计数和分页必须使用同一画像投影连接')
+assert.match(summaryService, /function leadPoolListItem/, '列表必须通过独立最小 DTO 投影返回')
+const listItemProjection = summaryService.slice(
+  summaryService.indexOf('function leadPoolListItem'),
+  summaryService.indexOf('// 公共池分页', summaryService.indexOf('function leadPoolListItem')),
+)
+assert.doesNotMatch(listItemProjection, /\.\.\.(?:enriched|listItem)/, '列表 DTO 不得通过对象展开继承未来新增详情字段')
+for (const field of [
+  'id', 'name', 'companyName', 'region', 'leadType', 'businessTags',
+  'poolEnteredAt', 'dataUpdatedAt', 'latestUpdates', 'radarProfile', 'investmentProfile', 'availableData',
+]) {
+  assert.match(listItemProjection, new RegExp(`${field}:`), `列表正向白名单缺少字段 ${field}`)
+}
+assert.doesNotMatch(listItemProjection, /sourceFactIds/, '列表 DTO 不得返回内部事实 ID 列表')
+assert.doesNotMatch(listItemProjection, /snapshotHash/, '列表 DTO 不得返回详情页使用的快照 hash')
+assert.match(detail, /title="投资证据画像"/, '详情页必须提供列表画像的证据落点')
+assert.match(detail, /来源链未返回，请稍后重试/, '画像值存在但证据链缺失时必须明确失败状态')
+assert.match(detail, /customerSourcesRestricted[\s\S]*?受限客户来源不在此页展示/, '普通详情页不得从证据链链接反向泄露受限客户身份')
+assert.match(detail, /investmentProfile\.financing\.status, investmentProfile\.financing\.latestRound/, '详情融资进展必须显示融资状态与轮次')
+assert.match(page, /hasInstitutionAndAcademic[\s\S]*?\? 1 : 2/, '机构与高校同时存在时不得互相挤掉')
+assert.doesNotMatch(page, /profile\?\.customers|customerDisplayName/, '列表移除大客户验证列后不得继续渲染客户画像')
+assert.match(detail, /customer\.anonymized[\s\S]*?某保密客户/, '详情必须对异常的保密客户标签失败关闭')
+assert.match(page, /hiddenProductCount > 0[^\n]+\+\{hiddenProductCount\}/, '产品超出两项时必须显示 +N')
+assert.match(page, /hiddenBackgroundCount > 0[^\n]+\+\{hiddenBackgroundCount\}/, '机构和高校背景超出显示上限时必须显示 +N')
+for (const label of ['行业与产品路线', '机构与高校背景', '融资进展', '最新估值', '大客户验证', '数据状态']) {
+  assert.match(detail, new RegExp(`label: '${label}'`), `详情画像缺少模块：${label}`)
+}
+for (const forbidden of ['待评级', '评级中', '评级过期', '评级失败', '评级分数', '线索评级']) {
+  assert.doesNotMatch(page, new RegExp(forbidden), `共享线索列表不得展示V3状态：${forbidden}`)
+}
+assert.match(styles, /\.lead-pool-profile-list[^}]+display:\s*grid/, '融资和估值必须使用紧凑键值布局')
 assert.match(styles, /\.lead-pool-page/, '共享线索池样式必须使用模块命名空间')
 assert.match(styles, /\.lead-review-page/, '研判详情样式必须使用模块命名空间')
 
-// 删除入口只放在详情页且仅对系统管理员渲染，并复用服务端已有的权限、软删除和审计链。
+// 删除入口只放在详情页且按服务端同一有效权限渲染，并复用已有软删除和审计链。
 assert.doesNotMatch(page, /lead-pool-delete-button|pendingDeleteLead|onDelete=/, '共享线索列表不得展示删除入口')
-assert.match(detail, /currentUser\?\.role === '系统管理员'/, '详情页线索删除入口必须仅对系统管理员渲染')
+assert.match(detail, /permissionCodes\?\.includes\('system\.manage'\)/, '详情页线索删除入口必须接受有效 system.manage 权限')
+assert.match(detail, /canManageLeadPool\(currentUser\)/, '详情页线索删除入口必须复用有效权限判定')
 assert.match(detail, /apiDelete<[^>]+>\(`\/leads\/\$\{lead\.id\}`\)/, '详情页删除确认必须调用单条线索删除接口')
 assert.match(detail, /确认删除「\{lead\.name\}」/, '删除弹窗必须明确展示待删除线索名称')
 assert.match(detail, /navigate\(state\?\.from \|\| '\/sourcing', \{ replace: true \}\)/, '删除成功后必须返回共享线索池列表')
@@ -230,25 +303,22 @@ console.log(JSON.stringify({
   checks: [
     'hidden-operations-not-rendered',
     'hidden-operations-not-called',
-    'six-filter-contract',
+    'legacy-filter-contract',
     'kr36-sector-label-filter-contract',
     'normalized-stage-filter-contract',
     'all-industry-and-channel-options',
     'filter-scroll-reset',
     'seven-column-contract',
     'twenty-row-pagination',
+    'keyboard-and-responsive-row-access',
     'independent-detail-route',
     'detail-rating-hidden',
-    'fast-three-line-summary-and-two-line-reason-tooltip',
-    'rating-core-tags-visible',
-    'v3-recommendation-reason-priority',
-    'three-field-funding-column',
-    'funding-layout-matches-core-facts',
-    'unfinanced-amount-and-valuation-dash',
-    'not-applicable-funding-fields-use-dash',
+    'old-summary-reason-and-news-columns-removed',
+    'investment-profile-seven-column-projection',
     'industry-tags-split-consistently',
     'paper-authors-projected-as-research-team',
     'enrichment-operations-hidden-and-verified-facts-projected',
+    'investment-profile-evidence-failure-visible',
     'list-state-restoration',
     'admin-audited-soft-delete',
     'namespaced-styles',

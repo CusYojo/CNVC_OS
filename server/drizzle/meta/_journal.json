@@ -645,6 +645,34 @@
       "when": 1791445743000,
       "tag": "0091_add_lead_source_candidates",
       "breakpoints": true
+    },
+    {
+      "idx": 92,
+      "version": "5",
+      "when": 1791532143000,
+      "tag": "0092_add_lead_investment_profiles",
+      "breakpoints": true
+    },
+    {
+      "idx": 93,
+      "version": "5",
+      "when": 1791618543000,
+      "tag": "0093_add_lead_enrichment_job_schema_version",
+      "breakpoints": true
+    },
+    {
+      "idx": 94,
+      "version": "5",
+      "when": 1791704943000,
+      "tag": "0094_guard_shared_lead_v4_auto_rating",
+      "breakpoints": true
+    },
+    {
+      "idx": 95,
+      "version": "5",
+      "when": 1791791343000,
+      "tag": "0095_add_lead_research_profile_projections",
+      "breakpoints": true
     }
   ]
 }

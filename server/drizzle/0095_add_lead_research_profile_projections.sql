@@ -1,0 +1,20 @@
+CREATE TABLE `sbl_lead_research_profile_projections` (
+  `lead_id` varchar(36) NOT NULL,
+  `schema_version` varchar(64) NOT NULL,
+  `projection_version` varchar(64) NOT NULL,
+  `snapshot_id` varchar(36),
+  `snapshot_hash` varchar(64),
+  `source_hash` varchar(64) NOT NULL,
+  `profile_payload` json NOT NULL,
+  `profile_status` varchar(24) NOT NULL DEFAULT 'missing',
+  `source_fact_ids` json NOT NULL DEFAULT (JSON_ARRAY()),
+  `facts_updated_at` datetime(3),
+  `projected_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (`lead_id`),
+  CONSTRAINT `fk_lead_research_profile_lead` FOREIGN KEY (`lead_id`) REFERENCES `sbl_leads` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_lead_research_profile_snapshot` FOREIGN KEY (`snapshot_id`) REFERENCES `sbl_lead_enrichment_snapshots` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `ck_lead_research_profile_status` CHECK (`profile_status` IN ('verified','partial','missing','conflicted','stale')),
+  INDEX `idx_lead_research_profiles_status` (`profile_status`, `updated_at`),
+  INDEX `idx_lead_research_profiles_updated` (`facts_updated_at`, `lead_id`)
+);

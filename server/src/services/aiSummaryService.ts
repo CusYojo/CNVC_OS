@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { and, asc, desc, eq, inArray, ne, sql, getTableColumns } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNull, ne, sql, getTableColumns } from 'drizzle-orm'
 import type { SQLWrapper } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/mysql2'
 import type { RowDataPacket } from 'mysql2'
@@ -7,7 +7,7 @@ import type { PoolConnection } from 'mysql2/promise'
 import { db, pool, schema } from '../db/client.js'
 import {
   aiSummaries, leads, auditLogs, leadScoreJobs, leadEnrichmentJobs, leadEnrichmentTopicRuns, leadRatingHistory,
-  leadReserve, migrationEntityMappings, projectClassificationHistory, projectMembers, projects,
+  leadFacts, leadInvestmentProfileProjections, leadResearchProfileProjections, leadReserve, migrationEntityMappings, projectClassificationHistory, projectMembers, projects,
 } from '../db/schema.js'
 import { createMySqlIdentityRepositoryContext } from '../repositories/index.js'
 import { projectAccessCondition, type ProjectAccessActor } from './projectAccessService.js'
@@ -32,8 +32,11 @@ import {
 } from './leadSubjectName.js'
 import {
   BUSINESS_REGIONS,
+  businessRegionStorageAliases,
+  normalizeBusinessRegion,
   resolveLeadBusinessRegion,
 } from './leadRegion.js'
+import { normalizeLeadListPage } from '../contracts/leadPoolQueryContract.js'
 import { sanitizeScoringCompetitors } from './competitorEvidence.js'
 import { transitionLeadPipelineItem, type LeadPipelineTransitionInput } from './leadPipelineEventService.js'
 import { openLeadPipelineReview, recordLeadPipelineDecision } from './leadPipelineAuditService.js'
@@ -315,7 +318,6 @@ const BUSINESS_INDUSTRY_RULES: Array<{ label: string; terms: string[] }> = [
   { label: '跨境出海', terms: ['跨境出海'] },
   { label: '物流', terms: ['物流'] },
   { label: '旅游', terms: ['旅游'] },
-  { label: '其他', terms: ['其他'] },
 ]
 
 // 36氪项目采集链路保留源行业文本，同时将重点赛道归一化到
@@ -336,12 +338,57 @@ const LEAD_STAGE_FILTER_PATTERNS: Record<string, string> = {
   '天使轮': '^天使([+]{1,2})?轮$',
   'Pre-A轮': '^Pre-A([+])?轮?$',
   'A轮': '^A([0-9]|[+]{1,2})?轮$',
+  'Pre-B轮': '^Pre-B([+])?轮?$',
   'B轮': '^B([0-9]|[+]{1,2})?轮$',
-  'C轮及以后': '^([C-F]([0-9]|[+]{1,2})?轮|Pre-IPO|IPO|PE)$',
+  'C轮及以后': '^(Pre-C([+])?轮?|[C-F]([0-9]|[+]{1,2})?轮|Pre-IPO|IPO|PE)$',
   '战略融资': '^(战略融资|战略投资)$',
+  '股权融资/轮次未披露': '^(股权融资|新一轮融资|首轮融资|分拆增资融资|风险投资/联合投资)$',
 }
 
-const PRESENTATION_PLACEHOLDERS = new Set(['', '待核验', '待核实', '未披露', '未披露/待核实', '融资轮次待核实', '无', '-', 'N/A', 'null', '不适用'])
+const PRESENTATION_PLACEHOLDERS = new Set([
+  '', '待核验', '待核实', '未披露', '未披露/待核实',
+  '融资轮次待核实', '无', '-', 'N/A', 'null', '不适用',
+])
+const CANDIDATE_PRESENTATION_PLACEHOLDERS = new Set(['待确认', '暂未披露', '未透露'])
+
+export function leadPoolCandidateDataEnabled(environment: NodeJS.ProcessEnv = process.env): boolean {
+  return String(environment.LEAD_POOL_SHOW_CANDIDATE_DATA ?? '').trim().toLowerCase() === 'true'
+}
+
+export function leadResearchProfileEnabled(environment: NodeJS.ProcessEnv = process.env): boolean {
+  return String(environment.LEAD_RESEARCH_PROFILE_ENABLED ?? '').trim().toLowerCase() === 'true'
+}
+
+const LEAD_LIST_CANDIDATE_FACT_KEYS = [
+  'industry.level1', 'industry.level2', 'industry.segment', 'industry.chain_position', 'profile.industry',
+  'product.name', 'product.route', 'product.stage', 'product.form', 'product.matrix',
+  'profile.product', 'profile.main_business', 'technology.route', 'production.stage',
+  'financing.status', 'financing.round', 'financing.date', 'financing.amount', 'financing.currency',
+  'financing.investors', 'financing.lead_investor',
+  'transaction.valuation', 'transaction.pre_money', 'transaction.post_money',
+  'transaction.round', 'transaction.currency', 'transaction.date',
+  'team.institution', 'team.institution_relation', 'team.department_lab', 'team.education',
+] as const
+
+type LeadListCandidateFact = {
+  leadId: string
+  factKey: string
+  instanceKey: string
+  value: unknown
+  unit: string | null
+  currency: string | null
+  periodStart: string | null
+  periodEnd: string | null
+}
+
+export function literalLeadLikePattern(value: string): string {
+  return `%${value.replaceAll('=', '==').replaceAll('%', '=%').replaceAll('_', '=_')}%`
+}
+
+export const LEAD_LIST_READ_TRANSACTION = {
+  isolationLevel: 'repeatable read',
+  accessMode: 'read only',
+} as const
 
 function meaningfulPresentationText(value: unknown): string | undefined {
   if (Array.isArray(value)) {
@@ -354,6 +401,140 @@ function meaningfulPresentationText(value: unknown): string | undefined {
   if (typeof value !== 'string' && typeof value !== 'number') return undefined
   const text = String(value).trim()
   return PRESENTATION_PLACEHOLDERS.has(text) ? undefined : text
+}
+
+function meaningfulCandidateText(value: unknown): string | undefined {
+  const text = meaningfulPresentationText(value)
+  return text && !CANDIDATE_PRESENTATION_PLACEHOLDERS.has(text) ? text : undefined
+}
+
+function candidateValueStrings(value: unknown): string[] {
+  if (Array.isArray(value)) return [...new Set(value.flatMap(candidateValueStrings))]
+  if (value && typeof value === 'object') {
+    const item = objectValue(value)
+    const preferred = ['name', 'institution', 'investor', 'value'].flatMap((key) => candidateValueStrings(item[key]))
+    return [...new Set(preferred)]
+  }
+  const text = meaningfulCandidateText(value)
+  return text ? [...new Set(text.split(/[、,，;；|]/u).map((item) => meaningfulCandidateText(item)).filter((item): item is string => Boolean(item)))] : []
+}
+
+function candidateFactValue(facts: LeadListCandidateFact[], ...keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = facts.filter((fact) => fact.factKey === key).flatMap((fact) => candidateValueStrings(fact.value))[0]
+    if (value) return value
+  }
+  return undefined
+}
+
+function candidateFactMoney(fact: LeadListCandidateFact | undefined): string | undefined {
+  const value = fact ? candidateValueStrings(fact.value)[0] : undefined
+  if (!value) return undefined
+  const unit = meaningfulCandidateText(fact?.unit)
+  const currency = meaningfulCandidateText(fact?.currency)
+  if (unit && !value.includes(unit)) return `${value}${unit}`
+  if (currency && !value.includes(currency) && !unit) return `${currency} ${value}`
+  return value
+}
+
+function looksLikeInvestmentInstitution(value: string): boolean {
+  if (/(?:行长|董事长|创始人|企业家|先生|女士|个人|自然人|未透露|未披露)/u.test(value)) return false
+  return /(?:资本|基金|投资|创投|创坛|科创|金控|证券|银行|保险|控股|集团|资产|孵化|合伙|公司|Capital|Ventures|Partners|Fund|Bank|Investment)/iu.test(value)
+}
+
+function leadListWebCandidateData(facts: LeadListCandidateFact[]) {
+  const industryTags = [...new Set(facts
+    .filter((fact) => /^(?:industry\.|profile\.industry$)/.test(fact.factKey))
+    .flatMap((fact) => candidateValueStrings(fact.value)))]
+
+  const productGroups = new Map<string, LeadListCandidateFact[]>()
+  for (const fact of facts.filter((item) => /^(?:product\.|profile\.(?:product|main_business)$)/.test(item.factKey))) {
+    productGroups.set(fact.instanceKey, [...(productGroups.get(fact.instanceKey) ?? []), fact])
+  }
+  const technologyRoutes = facts.filter((fact) => fact.factKey === 'technology.route').flatMap((fact) => candidateValueStrings(fact.value))
+  const productCandidates = [...productGroups.values()].map((group, index) => ({
+    name: candidateFactValue(group, 'product.name', 'profile.product', 'product.form', 'product.matrix'),
+    productRoute: candidateFactValue(group, 'product.route', 'profile.main_business', 'product.form'),
+    technologyRoute: candidateFactValue(group, 'technology.route') ?? (index === 0 ? technologyRoutes[0] : undefined),
+    productionStage: candidateFactValue(group, 'product.stage', 'production.stage'),
+  })).flatMap((product) => product.name ? [{ ...product, name: product.name }] : [])
+  const productByName = new Map<string, typeof productCandidates[number]>()
+  for (const product of productCandidates) {
+    const key = comparableSubjectText(product.name)
+    const current = productByName.get(key)
+    const disclosedFieldCount = (item: typeof product) => (
+      [item.name, item.productRoute, item.technologyRoute, item.productionStage].filter(Boolean).length
+    )
+    if (!current || disclosedFieldCount(product) > disclosedFieldCount(current)) productByName.set(key, product)
+  }
+  const products = [...productByName.values()].slice(0, 4)
+
+  const institutionNames = [...new Set(facts
+    .filter((fact) => fact.factKey === 'financing.investors' || fact.factKey === 'financing.lead_investor')
+    .flatMap((fact) => candidateValueStrings(fact.value))
+    .filter(looksLikeInvestmentInstitution))]
+
+  const academicNames = [...new Set(facts
+    .filter((fact) => /^(?:team\.(?:institution|department_lab|education))$/.test(fact.factKey))
+    .flatMap((fact) => candidateValueStrings(fact.value))
+    .filter((value) => /(?:大学|学院|研究院|研究所|实验室|科学院|工程院)/u.test(value) && !/(?:大学生|大学城)/u.test(value)))]
+
+  const financingGroups = new Map<string, LeadListCandidateFact[]>()
+  for (const fact of facts.filter((item) => /^(?:financing\.|transaction\.)/.test(item.factKey))) {
+    financingGroups.set(fact.instanceKey, [...(financingGroups.get(fact.instanceKey) ?? []), fact])
+  }
+  const financingFacts = [...financingGroups.values()].sort((left, right) => {
+    const score = (group: LeadListCandidateFact[]) => group.filter((fact) => (
+      /^(?:financing\.(?:status|round|date|amount|investors|lead_investor)|transaction\.(?:valuation|pre_money|post_money|round|date))$/.test(fact.factKey)
+    )).length
+    return score(right) - score(left)
+      || String(right[0]?.periodEnd ?? right[0]?.periodStart ?? '').localeCompare(String(left[0]?.periodEnd ?? left[0]?.periodStart ?? ''))
+  })[0] ?? []
+  const rawFinancingStatus = candidateFactValue(financingFacts, 'financing.status')
+  const financingStatus = rawFinancingStatus && /^(?:已完成|完成|已融资)$/.test(rawFinancingStatus)
+    ? '已融资'
+    : rawFinancingStatus
+  const amountFact = financingFacts.find((fact) => fact.factKey === 'financing.amount')
+  const latestRound = candidateFactValue(financingFacts, 'financing.round', 'transaction.round')
+  const latestAmount = candidateFactMoney(amountFact)
+  const latestRoundDate = latestRound || latestAmount || financingStatus === '已融资'
+    ? candidateFactValue(financingFacts, 'financing.date', 'transaction.date')
+      ?? meaningfulCandidateText(financingFacts[0]?.periodEnd)
+    : undefined
+  const financing = financingFacts.length ? {
+    status: financingStatus,
+    latestRound,
+    latestRoundDate,
+    latestAmount,
+  } : undefined
+
+  const valuationFact = financingFacts.find((fact) => (
+    fact.factKey === 'transaction.post_money' || fact.factKey === 'transaction.pre_money' || fact.factKey === 'transaction.valuation'
+  )) ?? facts.find((fact) => (
+    fact.factKey === 'transaction.post_money' || fact.factKey === 'transaction.pre_money' || fact.factKey === 'transaction.valuation'
+  ))
+  const valuationValue = candidateFactMoney(valuationFact)
+  const valuation = valuationValue ? {
+    value: valuationValue,
+    type: valuationFact?.factKey === 'transaction.pre_money' ? 'pre_money' as const
+      : valuationFact?.factKey === 'transaction.post_money' ? 'post_money' as const
+        : 'undisclosed' as const,
+    currency: meaningfulCandidateText(valuationFact?.currency),
+    date: candidateFactValue(financingFacts, 'transaction.date', 'financing.date')
+      ?? meaningfulCandidateText(valuationFact?.periodEnd),
+    round: candidateFactValue(financingFacts, 'transaction.round', 'financing.round'),
+  } : undefined
+
+  return {
+    industryTags,
+    products,
+    institutions: institutionNames.map((name) => ({ name, role: 'undisclosed' as const, major: false })),
+    academicLinks: academicNames.map((institution) => ({
+      institution, relationType: '联网候选', commercialization: false,
+    })),
+    financing,
+    valuation,
+  }
 }
 
 function comparableSubjectText(value: string) {
@@ -396,6 +577,20 @@ export function deriveIndustryTags(industry: unknown, sectorLabels: unknown = []
   const tags = [...new Set([...sectorTags, ...matched])]
   if (tags.length) return tags.slice(0, 4)
   return text ? ['其他'] : ['待确认']
+}
+
+export function deriveAuthoritativeLeadRegion(input: {
+  businessRegion?: unknown
+  businessRegionSource?: unknown
+  businessRegionConfidence?: unknown
+}) {
+  const region = normalizeBusinessRegion(input.businessRegion)
+  if (!region) return null
+  return {
+    region,
+    source: meaningfulPresentationText(input.businessRegionSource) ?? '标准地区字段',
+    confidence: input.businessRegionConfidence === '中' ? '中' as const : '高' as const,
+  }
 }
 
 export function deriveRegion(scoring: Record<string, unknown>, radarProfile: Record<string, unknown>): string {
@@ -688,21 +883,10 @@ function enrichLead(row: typeof leads.$inferSelect) {
     : /论文|专利|arxiv/i.test(src) ? '论文专利'
     : /院校|大学|高校|实验室/.test(src) ? '院校'
     : /微信|群/.test(src) ? '微信群' : '新闻'
-  const regionResolution = resolveLeadBusinessRegion({
+  const regionResolution = deriveAuthoritativeLeadRegion({
     businessRegion: (row as { businessRegion?: string | null }).businessRegion,
     businessRegionSource: (row as { businessRegionSource?: string | null }).businessRegionSource,
     businessRegionConfidence: (row as { businessRegionConfidence?: string | null }).businessRegionConfidence,
-    registry: companyRegistry,
-    profile,
-    subjectName,
-    companyName: subjectCompanyName,
-    sourceGroup: rp.sourceGroup,
-    channel: rp.channel,
-    sourceName: rp.sourceName,
-    accountName: rp.accountName,
-    sourceTitle,
-    summary: row.summary,
-    articleText: rp.articleText,
   })
   const region = regionResolution?.region ?? '待确认'
   const scoreJob = readLeadScoreJob(sc)
@@ -728,6 +912,8 @@ function enrichLead(row: typeof leads.$inferSelect) {
       }
     : scoreJob ?? null
   const { fieldProvenance: _fieldProvenance, ...publicRow } = row
+  const investmentProfile = objectValue((row as unknown as { investmentProfile?: unknown }).investmentProfile)
+  const researchProfile = objectValue((row as unknown as { researchProfile?: unknown }).researchProfile)
   const leadType = isPaper ? 'research' as const : 'company' as const
   const ratingV3 = sc.ratingV3 && typeof sc.ratingV3 === 'object' ? sc.ratingV3 as PublicRatingV3 : null
   const rawStageDisplay = meaningfulPresentationText(ratingV3?.detailView?.project?.stage)
@@ -749,6 +935,8 @@ function enrichLead(row: typeof leads.$inferSelect) {
   const claimedFoundedAt = meaningfulPresentationText(sc.claimedFoundedAt)
   return {
     ...publicRow,
+    investmentProfile: Object.keys(investmentProfile).length ? investmentProfile : undefined,
+    researchProfile: Object.keys(researchProfile).length ? researchProfile : undefined,
     scoring: publicScoring,
     name: paperProjectName || paperTitleZh || subjectName,
     summary: paperAbstractZh || row.summary,
@@ -789,6 +977,156 @@ function enrichLead(row: typeof leads.$inferSelect) {
   }
 }
 
+function publicResearchProfilePayload(value: Record<string, unknown>) {
+  const { sourceFactIds: _sourceFactIds, ...publicProfile } = value
+  return publicProfile
+}
+
+function leadPoolListItem(row: typeof leads.$inferSelect, candidateFacts: LeadListCandidateFact[] = []) {
+  const enriched = enrichLead(row)
+  const radarProfile = objectValue(enriched.radarProfile)
+  const radarProfileCore = objectValue(radarProfile.profile)
+  const investmentProfile = objectValue(enriched.investmentProfile)
+  const researchProfile = objectValue((enriched as unknown as { researchProfile?: unknown }).researchProfile)
+  const publicResearchProfile = publicResearchProfilePayload(researchProfile)
+  const scoring = objectValue(enriched.scoring)
+  const sourceLabeledProfile = objectValue(scoring.sourceLabeledProfile)
+  const sourceProduct = meaningfulCandidateText(objectValue(sourceLabeledProfile.product).value)
+    ?? meaningfulCandidateText(objectValue(sourceLabeledProfile.mainBusiness).value)
+  const sourceProductRoute = meaningfulCandidateText(objectValue(sourceLabeledProfile.mainBusiness).value)
+  const firstFundingRound = objectValue(Array.isArray(enriched.fundingRounds) ? enriched.fundingRounds[0] : undefined)
+  const fundingRound = meaningfulCandidateText(firstFundingRound.round)
+  const investors = (Array.isArray(firstFundingRound.investors)
+    ? firstFundingRound.investors
+    : typeof firstFundingRound.investors === 'string'
+      ? firstFundingRound.investors.split(/[、,，;；|/]/)
+      : [])
+    .map((value) => meaningfulCandidateText(value))
+    .filter((value): value is string => Boolean(value))
+    .filter(looksLikeInvestmentInstitution)
+  const financingStatus = meaningfulCandidateText(enriched.fundingStatusDisplay)
+  const latestAmount = meaningfulCandidateText(firstFundingRound.amount)
+  const latestRoundDate = meaningfulCandidateText(firstFundingRound.date)
+  const valuationValue = meaningfulCandidateText(objectValue(enriched.valuationDisplay).value)
+  const industryTags = Array.isArray(enriched.businessTags?.industry)
+    ? enriched.businessTags.industry.map((value) => meaningfulCandidateText(value)).filter((value): value is string => Boolean(value))
+    : []
+  const backgroundTags = Array.isArray(enriched.backgroundTags)
+    ? enriched.backgroundTags.map((value) => meaningfulCandidateText(value)).filter((value): value is string => Boolean(value))
+    : []
+  const academicBackgroundTags = backgroundTags.filter((value) => (
+    /(?:大学|学院|研究院|研究所|实验室|科学院|工程院)/u.test(value)
+    && !/(?:大学生|大学城)/u.test(value)
+  ))
+  const webCandidateData = leadListWebCandidateData(candidateFacts)
+  const legacyProducts = sourceProduct ? [{
+    name: sourceProduct,
+    productRoute: sourceProductRoute && sourceProductRoute !== sourceProduct ? sourceProductRoute : undefined,
+  }] : []
+  const legacyInstitutions = [...new Set(investors)].slice(0, 8).map((name) => ({
+    name,
+    round: fundingRound,
+    role: 'undisclosed' as const,
+    major: false,
+  }))
+  const institutions = (legacyInstitutions.length ? legacyInstitutions : webCandidateData.institutions).slice(0, 8)
+  const academicLinks = [
+    ...academicBackgroundTags.map((institution) => ({
+      institution,
+      relationType: '来源标注',
+      commercialization: false,
+    })),
+    ...webCandidateData.academicLinks,
+  ].filter((item, index, values) => values.findIndex((candidate) => candidate.institution === item.institution) === index)
+    .slice(0, 8)
+  const legacyFinancing = financingStatus || fundingRound || latestRoundDate || latestAmount ? {
+    status: financingStatus,
+    latestRound: fundingRound,
+    latestRoundDate,
+    latestAmount,
+  } : undefined
+  const legacySaysUnfinanced = legacyFinancing?.status === '未融资'
+  const webSaysUnfinanced = webCandidateData.financing?.status === '未融资'
+  const legacyHasFinancingSignal = legacyFinancing?.status === '已融资'
+    || Boolean(legacyFinancing?.latestRound || legacyFinancing?.latestAmount)
+  const webHasFinancingSignal = webCandidateData.financing?.status === '已融资'
+    || Boolean(webCandidateData.financing?.latestRound || webCandidateData.financing?.latestAmount)
+  const financingConflict = (legacySaysUnfinanced && Boolean(legacyFinancing?.latestRound || legacyFinancing?.latestAmount))
+    || (webSaysUnfinanced && Boolean(webCandidateData.financing?.latestRound || webCandidateData.financing?.latestAmount))
+    || (legacySaysUnfinanced && webHasFinancingSignal)
+    || (webSaysUnfinanced && legacyHasFinancingSignal)
+  const financing = financingConflict ? { status: '候选冲突' } : legacyFinancing || webCandidateData.financing ? {
+    status: legacyFinancing?.status ?? webCandidateData.financing?.status,
+    latestRound: legacyFinancing?.latestRound ?? webCandidateData.financing?.latestRound,
+    latestRoundDate: legacyFinancing?.latestRoundDate ?? webCandidateData.financing?.latestRoundDate,
+    latestAmount: legacyFinancing?.latestAmount ?? webCandidateData.financing?.latestAmount,
+  } : undefined
+  const legacyValuation = valuationValue ? { value: valuationValue, date: latestRoundDate, round: fundingRound } : undefined
+  const valuation = legacyValuation ?? webCandidateData.valuation
+  const sourceKinds = [
+    industryTags.length || legacyProducts.length || legacyInstitutions.length || academicBackgroundTags.length
+      || legacyFinancing || legacyValuation ? 'intake' as const : undefined,
+    webCandidateData.industryTags.length || webCandidateData.products.length || webCandidateData.institutions.length
+      || webCandidateData.academicLinks.length || webCandidateData.financing || webCandidateData.valuation
+      ? 'web_research' as const : undefined,
+  ].filter((value): value is 'intake' | 'web_research' => Boolean(value))
+  const availableData = {
+    dataStatus: 'candidate' as const,
+    verificationStatus: 'unverified' as const,
+    sourceKinds,
+    conflictFields: financingConflict ? ['financing'] as const : [],
+    displayLabel: financingConflict ? '候选冲突 · 待核验' : sourceKinds.includes('web_research')
+      ? sourceKinds.includes('intake') ? '已有/联网资料 · 待核验' : '联网候选 · 待核验'
+      : '已有资料 · 待核验',
+    industryTags: [...new Set([...industryTags, ...webCandidateData.industryTags])].slice(0, 8),
+    products: legacyProducts.length ? legacyProducts : webCandidateData.products,
+    institutions,
+    academicLinks,
+    financing,
+    valuation,
+  }
+  const hasAvailableData = availableData.industryTags.length > 0
+    || availableData.products.length > 0
+    || availableData.institutions.length > 0
+    || availableData.academicLinks.length > 0
+    || Boolean(availableData.financing)
+    || Boolean(availableData.valuation)
+  const listInvestmentProfile = Object.keys(investmentProfile).length ? {
+    schemaVersion: investmentProfile.schemaVersion,
+    snapshotId: investmentProfile.snapshotId,
+    industry: investmentProfile.industry,
+    products: investmentProfile.products,
+    institutions: investmentProfile.institutions,
+    academicLinks: investmentProfile.academicLinks,
+    financing: investmentProfile.financing,
+    valuation: investmentProfile.valuation,
+    customers: investmentProfile.customers,
+    dataStatus: investmentProfile.dataStatus,
+  } : undefined
+  return {
+    id: enriched.id,
+    name: enriched.name,
+    companyName: enriched.companyName,
+    region: enriched.region,
+    leadType: enriched.leadType,
+    businessTags: enriched.businessTags,
+    poolEnteredAt: enriched.poolEnteredAt,
+    dataUpdatedAt: enriched.dataUpdatedAt,
+    latestUpdates: (enriched.latestUpdates ?? []).slice(0, 2).map((item) => ({
+      occurredAt: item.occurredAt,
+      title: item.title,
+    })),
+    radarProfile: typeof radarProfile.channel === 'string' || typeof radarProfileCore.lab === 'string'
+      ? { channel: radarProfile.channel, profile: { lab: radarProfileCore.lab } }
+      : undefined,
+    investmentProfile: enriched.leadType === 'research' ? undefined : listInvestmentProfile,
+    researchProfile: leadResearchProfileEnabled() && enriched.leadType === 'research' && Object.keys(publicResearchProfile).length
+      ? publicResearchProfile
+      : undefined,
+    availableData: leadPoolCandidateDataEnabled() && hasAvailableData ? availableData : undefined,
+  }
+}
+
 // 公共池分页:默认每页 50,pageSize 上限 100(防止误用全量拉爆接口)
 // 返回 { list, total, page, pageSize, totalPages }
 // 并行两条 query:数据页 + 计数。count(*) over() 在 offset 越界时不会计算 total,不能用
@@ -806,10 +1144,32 @@ export async function listLeads(options: {
   leadType?: 'company' | 'research'
   stage?: string
   updatedRange?: '7d' | '30d' | '90d'
+  industryLevel1?: string
+  industryLevel2?: string
+  industrySegment?: string
+  productRoute?: string
+  productionStage?: string
+  institution?: string
+  institutionType?: string
+  hasMajorInstitution?: boolean
+  academicInstitution?: string
+  academicRelation?: string
+  hasCommercializationLink?: boolean
+  latestRound?: string
+  fundingDateFrom?: string
+  fundingDateTo?: string
+  valuationMin?: number
+  valuationMax?: number
+  valuationCurrency?: string
+  valuationType?: string
+  customerTier?: 'A' | 'B' | 'C'
+  customerStageMin?: 'L0' | 'L1' | 'L2' | 'L3' | 'L4' | 'L5'
+  hasVerifiedCustomer?: boolean
+  profileStatus?: string
+  hasConflict?: boolean
 } = {}) {
-  const page = Math.max(1, Math.floor(options.page ?? 1))
+  const requestedPage = Math.max(1, Math.floor(options.page ?? 1))
   const pageSize = Math.min(100, Math.max(1, Math.floor(options.pageSize ?? 20)))
-  const offset = (page - 1) * pageSize
   // 渠道过滤:通常按 radar_profile.channel 精确匹配。36氪历史数据曾被 source_group
   // 错标为“创投新闻”，查询时同时依据具体来源字段识别，避免回填前筛选漏数。
   // 空值 = 不过滤；没有 radar channel 且也无法从来源识别的非雷达数据会被排除。
@@ -856,30 +1216,42 @@ export async function listLeads(options: {
     // source 可为逗号分隔的多个关键词(前端二级标签把一个标准机构映射到多个杂乱账号名),任一命中即算该机构
     const srcKws = source.split(',').map((x) => x.trim()).filter(Boolean)
     if (srcKws.length === 1) {
-      conds.push(sql`${jsonText(leads.radarProfile, '$.sourceName')} LIKE ${'%' + srcKws[0] + '%'}`)
+      conds.push(sql`${jsonText(leads.radarProfile, '$.sourceName')} LIKE ${literalLeadLikePattern(srcKws[0])} ESCAPE '='`)
     } else if (srcKws.length > 1) {
-      const ors = srcKws.map((kw) => sql`${jsonText(leads.radarProfile, '$.sourceName')} LIKE ${'%' + kw + '%'}`)
+      const ors = srcKws.map((kw) => sql`${jsonText(leads.radarProfile, '$.sourceName')} LIKE ${literalLeadLikePattern(kw)} ESCAPE '='`)
       conds.push(sql`(${sql.join(ors, sql` OR `)})`)
     }
   }
   if (industry) {
     // 行业检索保留 leads.industry 的历史模糊匹配；三个重点赛道还要同时匹配
     // 36氪新链路的 sectorLabels，使源行业和归一化赛道任一命中即可入选。
-    const selectedTerms = BUSINESS_INDUSTRY_RULES.find((rule) => rule.label === industry)?.terms ?? [industry]
-    const indKws = selectedTerms.map((x) => x.trim()).filter(Boolean)
-    const matches = indKws.map((kw) => sql`${leads.industry} LIKE ${'%' + kw + '%'}`)
-    const sectorLabel = BUSINESS_INDUSTRY_SECTOR_LABELS[industry]
-    if (sectorLabel) {
-      matches.push(sql`JSON_CONTAINS(
-        COALESCE(${jsonValue(leads.radarProfile, '$.profile.sectorLabels')}, JSON_ARRAY()),
-        JSON_QUOTE(${sectorLabel})
+    const allKnownMatches = BUSINESS_INDUSTRY_RULES.flatMap((rule) => rule.terms)
+      .map((term) => sql`${leads.industry} LIKE ${literalLeadLikePattern(term)} ESCAPE '='`)
+    allKnownMatches.push(...Object.values(BUSINESS_INDUSTRY_SECTOR_LABELS).map((sectorLabel) => sql`JSON_CONTAINS(
+      COALESCE(${jsonValue(leads.radarProfile, '$.profile.sectorLabels')}, JSON_ARRAY()),
+      JSON_QUOTE(${sectorLabel})
+    )`))
+    if (industry === '其他') {
+      conds.push(sql`(
+        COALESCE(TRIM(${leads.industry}), '') NOT IN ('', '待核验', '待核实', '未披露', '未披露/待核实', '无', '-', 'N/A', 'null', '不适用')
+        AND NOT (${sql.join(allKnownMatches, sql` OR `)})
       )`)
+    } else {
+      const selectedTerms = BUSINESS_INDUSTRY_RULES.find((rule) => rule.label === industry)?.terms ?? []
+      const matches = selectedTerms.map((term) => sql`${leads.industry} LIKE ${literalLeadLikePattern(term)} ESCAPE '='`)
+      const sectorLabel = BUSINESS_INDUSTRY_SECTOR_LABELS[industry]
+      if (sectorLabel) {
+        matches.push(sql`JSON_CONTAINS(
+          COALESCE(${jsonValue(leads.radarProfile, '$.profile.sectorLabels')}, JSON_ARRAY()),
+          JSON_QUOTE(${sectorLabel})
+        )`)
+      }
+      if (matches.length === 1) conds.push(matches[0])
+      else if (matches.length > 1) conds.push(sql`(${sql.join(matches, sql` OR `)})`)
     }
-    if (matches.length === 1) conds.push(matches[0])
-    else if (matches.length > 1) conds.push(sql`(${sql.join(matches, sql` OR `)})`)
   }
   if (region && BUSINESS_REGIONS.some((candidate) => candidate === region)) {
-    conds.push(sql`${leads.businessRegion} = ${region}`)
+    conds.push(inArray(leads.businessRegion, businessRegionStorageAliases(region as (typeof BUSINESS_REGIONS)[number])))
   }
   if (options.leadType === 'research') {
     conds.push(sql`COALESCE(${jsonText(leads.radarProfile, '$.channel')}, '') = '论文'`)
@@ -923,23 +1295,79 @@ export async function listLeads(options: {
     ) >= DATE_SUB(NOW(3), INTERVAL ${sql.raw(String(days))} DAY)`)
   }
   if (keyword) {
-    const kw = '%' + keyword + '%'
-    // 跨字段: 主展示列 + radar_profile/scoring 全文(投资方/团队/机构/来源账号等都在里面)
+    const kw = literalLeadLikePattern(keyword)
+    // 关键词只读取明确的展示字段和投资画像搜索投影。禁止把完整 radar_profile/scoring
+    // 转成 CHAR 做无边界扫描；团队、主体、来源和机构分别使用窄字段或投影字段覆盖。
     conds.push(sql`(
-      ${leads.name} LIKE ${kw}
-      OR ${leads.companyName} LIKE ${kw}
-      OR ${leads.industry} LIKE ${kw}
-      OR ${leads.summary} LIKE ${kw}
-      OR ${leads.source} LIKE ${kw}
-      OR CAST(${leads.radarProfile} AS CHAR) LIKE ${kw}
-      OR CAST(${leads.scoring} AS CHAR) LIKE ${kw}
+      ${leads.name} LIKE ${kw} ESCAPE '='
+      OR ${leads.companyName} LIKE ${kw} ESCAPE '='
+      OR ${leads.industry} LIKE ${kw} ESCAPE '='
+      OR ${leads.summary} LIKE ${kw} ESCAPE '='
+      OR ${leads.source} LIKE ${kw} ESCAPE '='
+      OR ${leads.team} LIKE ${kw} ESCAPE '='
+      OR ${jsonText(leads.radarProfile, '$.sourceName')} LIKE ${kw} ESCAPE '='
+      OR ${jsonText(leads.radarProfile, '$.sourceTitle')} LIKE ${kw} ESCAPE '='
+      OR ${jsonText(leads.radarProfile, '$.profile.projectName')} LIKE ${kw} ESCAPE '='
+      OR ${jsonText(leads.radarProfile, '$.profile.companyName')} LIKE ${kw} ESCAPE '='
+      OR ${jsonText(leads.radarProfile, '$.profile.lab')} LIKE ${kw} ESCAPE '='
+      OR ${jsonText(leads.radarProfile, '$.profile.teamComposition')} LIKE ${kw} ESCAPE '='
+      OR ${jsonText(leads.scoring, '$.registry.companyName')} LIKE ${kw} ESCAPE '='
+      OR ${leadInvestmentProfileProjections.productSearchText} LIKE ${kw} ESCAPE '='
+      OR ${leadInvestmentProfileProjections.institutionSearchText} LIKE ${kw} ESCAPE '='
+      OR ${leadInvestmentProfileProjections.academicSearchText} LIKE ${kw} ESCAPE '='
     )`)
   }
+  const exactProfileText = (column: SQLWrapper, value: string | undefined) => {
+    const normalized = value?.trim()
+    if (normalized) conds.push(sql`${column} = ${normalized}`)
+  }
+  const fuzzyProfileText = (column: SQLWrapper, value: string | undefined) => {
+    const normalized = value?.trim()
+    if (normalized) conds.push(sql`${column} LIKE ${literalLeadLikePattern(normalized)} ESCAPE '='`)
+  }
+  exactProfileText(leadInvestmentProfileProjections.industryLevel1, options.industryLevel1)
+  exactProfileText(leadInvestmentProfileProjections.industryLevel2, options.industryLevel2)
+  exactProfileText(leadInvestmentProfileProjections.industrySegment, options.industrySegment)
+  fuzzyProfileText(leadInvestmentProfileProjections.productRouteSearchText, options.productRoute)
+  fuzzyProfileText(leadInvestmentProfileProjections.productionStageSearchText, options.productionStage)
+  fuzzyProfileText(leadInvestmentProfileProjections.institutionSearchText, options.institution)
+  if (options.institutionType?.trim()) {
+    const institutionType = options.institutionType.trim()
+    conds.push(sql`EXISTS (
+      SELECT 1 FROM JSON_TABLE(
+        COALESCE(${leadInvestmentProfileProjections.institutions}, JSON_ARRAY()),
+        '$[*]' COLUMNS (institution_type VARCHAR(64) PATH '$.type')
+      ) AS institution_item
+      WHERE institution_item.institution_type = ${institutionType}
+    )`)
+  }
+  fuzzyProfileText(leadInvestmentProfileProjections.academicInstitutionSearchText, options.academicInstitution)
+  fuzzyProfileText(leadInvestmentProfileProjections.academicRelationSearchText, options.academicRelation)
+  if (options.hasMajorInstitution !== undefined) conds.push(eq(leadInvestmentProfileProjections.hasMajorInstitution, options.hasMajorInstitution))
+  if (options.hasCommercializationLink !== undefined) conds.push(eq(leadInvestmentProfileProjections.hasCommercializationLink, options.hasCommercializationLink))
+  if (options.latestRound) conds.push(eq(leadInvestmentProfileProjections.latestRound, options.latestRound))
+  if (options.fundingDateFrom) conds.push(sql`${leadInvestmentProfileProjections.latestRoundDate} >= ${options.fundingDateFrom}`)
+  if (options.fundingDateTo) conds.push(sql`${leadInvestmentProfileProjections.latestRoundDate} <= ${options.fundingDateTo}`)
+  if (options.valuationMin !== undefined) conds.push(sql`${leadInvestmentProfileProjections.valuationValue} >= ${options.valuationMin}`)
+  if (options.valuationMax !== undefined) conds.push(sql`${leadInvestmentProfileProjections.valuationValue} <= ${options.valuationMax}`)
+  if (options.valuationCurrency) conds.push(eq(leadInvestmentProfileProjections.valuationCurrency, options.valuationCurrency))
+  if (options.valuationType) conds.push(eq(leadInvestmentProfileProjections.valuationType, options.valuationType))
+  if (options.customerTier === 'A') conds.push(sql`${leadInvestmentProfileProjections.tierACustomerCount} > 0`)
+  else if (options.customerTier === 'B') conds.push(sql`${leadInvestmentProfileProjections.tierBCustomerCount} > 0`)
+  else if (options.customerTier === 'C') conds.push(sql`${leadInvestmentProfileProjections.tierCCustomerCount} > 0`)
+  if (options.customerStageMin) conds.push(sql`FIELD(${leadInvestmentProfileProjections.highestCustomerStage}, 'L0','L1','L2','L3','L4','L5') >= ${Number(options.customerStageMin.slice(1)) + 1}`)
+  if (options.hasVerifiedCustomer !== undefined) conds.push(options.hasVerifiedCustomer
+    ? sql`${leadInvestmentProfileProjections.verifiedCustomerCount} > 0`
+    : sql`${leadInvestmentProfileProjections.verifiedCustomerCount} = 0`)
+  if (options.profileStatus === 'never') conds.push(isNull(leadInvestmentProfileProjections.leadId))
+  else if (options.profileStatus) conds.push(eq(leadInvestmentProfileProjections.profileStatus, options.profileStatus))
+  if (options.hasConflict !== undefined) conds.push(options.hasConflict
+    ? sql`${leadInvestmentProfileProjections.conflictCount} > 0`
+    : sql`${leadInvestmentProfileProjections.conflictCount} = 0`)
   const whereClause = conds.length === 0 ? undefined
     : conds.length === 1 ? conds[0]
     : sql.join(conds, sql` AND `)
-  const [rows, totalRow] = await Promise.all([
-    db.select({
+  const selectPage = (queryDb: Pick<typeof db, 'select'>, pageOffset: number) => queryDb.select({
       id: leads.id,
       name: leads.name,
       companyName: leads.companyName,
@@ -951,31 +1379,42 @@ export async function listLeads(options: {
       poolStatus: leads.poolStatus,
       score: overallScoreExpr,
       summary: leads.summary,
-      highlights: leads.highlights,
       team: leads.team,
       // 轻量 scoring 摘要:只挑 completeness 计算需要的数组长度/存在性(不拉整个 scoring 大 jsonb)
       scoring: sql<unknown>`CASE WHEN ${leads.scoring} IS NULL THEN NULL ELSE JSON_OBJECT(
         'dimensions', COALESCE(${jsonValue(leads.scoring, '$.dimensions')}, JSON_ARRAY()),
         'structuredTeam', COALESCE(${jsonValue(leads.scoring, '$.structuredTeam')}, JSON_ARRAY()),
-        'structuredShareholders', COALESCE(${jsonValue(leads.scoring, '$.structuredShareholders')}, JSON_ARRAY()),
-        'competitors', COALESCE(${jsonValue(leads.scoring, '$.competitors')}, JSON_ARRAY()),
-        'fundingRoundsResearched', COALESCE(${jsonValue(leads.scoring, '$.fundingRoundsResearched')}, JSON_ARRAY()),
-        'researchSources', COALESCE(${jsonValue(leads.scoring, '$.researchSources')}, JSON_ARRAY()),
+        'sourceLabeledProfile', CASE WHEN ${jsonValue(leads.scoring, '$.sourceLabeledProfile')} IS NULL THEN NULL ELSE JSON_OBJECT(
+          'product', ${jsonValue(leads.scoring, '$.sourceLabeledProfile.product')},
+          'mainBusiness', ${jsonValue(leads.scoring, '$.sourceLabeledProfile.mainBusiness')}
+        ) END,
         'total', ${jsonValue(leads.scoring, '$.total')},
-        'overall_comment', ${jsonValue(leads.scoring, '$.overall_comment')},
         'scored_at', ${jsonValue(leads.scoring, '$.scored_at')},
         'scoreJob', ${jsonValue(leads.scoring, '$.scoreJob')},
         'enrichment', ${jsonValue(leads.scoring, '$.enrichment')},
-        'ratingV3', ${jsonValue(leads.scoring, '$.ratingV3')},
+        'ratingV3', CASE WHEN ${jsonValue(leads.scoring, '$.ratingV3')} IS NULL THEN NULL ELSE JSON_OBJECT(
+          'schemaVersion', ${jsonValue(leads.scoring, '$.ratingV3.schemaVersion')},
+          'status', ${jsonValue(leads.scoring, '$.ratingV3.status')},
+          'scoredAt', ${jsonValue(leads.scoring, '$.ratingV3.scoredAt')},
+          'mainView', JSON_OBJECT('displayGrade', ${jsonValue(leads.scoring, '$.ratingV3.mainView.displayGrade')}),
+          'detailView', JSON_OBJECT('project', JSON_OBJECT('stage', ${jsonValue(leads.scoring, '$.ratingV3.detailView.project.stage')}))
+        ) END,
         'dataQualityV1', ${jsonValue(leads.scoring, '$.dataQualityV1')},
-        'structuredNews', COALESCE(${jsonValue(leads.scoring, '$.structuredNews')}, JSON_ARRAY()),
         'registry', COALESCE(${jsonValue(leads.scoring, '$.registry')}, JSON_OBJECT())
       ) END`,
       // 列表只取 radar_profile 里列表渲染需要的字段,保持与详情接口"同构"({profile,channel,sourceName,...})
       // 否则前端 setSelected(列表lead) 后 Drawer 按嵌套结构访问会拿到 undefined,导致弹窗渲染异常
       // 只构造 profile + 几个行内展示字段，避免返回完整 JSON 大字段，大小从 8-37KB 降到 <1KB。
       radarProfile: sql<unknown>`CASE WHEN ${leads.radarProfile} IS NULL THEN NULL ELSE JSON_OBJECT(
-        'profile', ${jsonValue(leads.radarProfile, '$.profile')},
+        'profile', JSON_OBJECT(
+          'sectorLabels', COALESCE(${jsonValue(leads.radarProfile, '$.profile.sectorLabels')}, JSON_ARRAY()),
+          'projectRound', ${jsonValue(leads.radarProfile, '$.profile.projectRound')},
+          'companyName', ${jsonValue(leads.radarProfile, '$.profile.companyName')},
+          'projectName', ${jsonValue(leads.radarProfile, '$.profile.projectName')},
+          'lab', ${jsonValue(leads.radarProfile, '$.profile.lab')},
+          'teamComposition', ${jsonValue(leads.radarProfile, '$.profile.teamComposition')},
+          'latestValuation', ${jsonValue(leads.radarProfile, '$.profile.latestValuation')}
+        ),
         'channel', ${jsonValue(leads.radarProfile, '$.channel')},
         'sourceName', ${jsonValue(leads.radarProfile, '$.sourceName')},
         'sourceGroup', ${jsonValue(leads.radarProfile, '$.sourceGroup')},
@@ -984,9 +1423,6 @@ export async function listLeads(options: {
         'link', ${jsonValue(leads.radarProfile, '$.link')},
         'thesis', ${jsonValue(leads.radarProfile, '$.thesis')},
         'team', COALESCE(${jsonValue(leads.radarProfile, '$.team')}, JSON_ARRAY()),
-        'news', COALESCE(${jsonValue(leads.radarProfile, '$.news')}, JSON_ARRAY()),
-        'signals', COALESCE(${jsonValue(leads.radarProfile, '$.signals')}, JSON_ARRAY()),
-        'fundingRounds', COALESCE(${jsonValue(leads.radarProfile, '$.fundingRounds')}, JSON_ARRAY()),
         'registry', COALESCE(${jsonValue(leads.radarProfile, '$.registry')}, JSON_OBJECT()),
         'aiSubjectReview', ${jsonValue(leads.radarProfile, '$.aiSubjectReview')},
         'paperMeta', CASE
@@ -1000,7 +1436,7 @@ export async function listLeads(options: {
           )
         END
       ) END`,
-      // 列表估值兜底：仅保留第一条历史融资的轮次/估值，避免返回完整 funding_rounds。
+      // 列表内部仅取第一条历史融资供阶段兜底；leadPoolListItem 会在返回前移除。
       fundingRounds: sql<unknown[]>`CASE
         WHEN JSON_LENGTH(COALESCE(${leads.fundingRounds}, JSON_ARRAY())) > 0 THEN JSON_ARRAY(JSON_OBJECT(
           'round', ${jsonValue(leads.fundingRounds, '$[0].round')},
@@ -1012,20 +1448,100 @@ export async function listLeads(options: {
         ELSE JSON_ARRAY()
       END`,
       completeness: completenessExpr,
+      investmentProfile: sql<unknown>`CASE WHEN ${leadInvestmentProfileProjections.leadId} IS NULL THEN NULL ELSE COALESCE(
+        ${leadInvestmentProfileProjections.profilePayload}, JSON_OBJECT(
+        'schemaVersion', ${leadInvestmentProfileProjections.schemaVersion},
+        'snapshotId', ${leadInvestmentProfileProjections.snapshotId},
+        'industry', JSON_OBJECT(
+          'level1', ${leadInvestmentProfileProjections.industryLevel1},
+          'level2', ${leadInvestmentProfileProjections.industryLevel2},
+          'segment', ${leadInvestmentProfileProjections.industrySegment},
+          'chainPosition', ${leadInvestmentProfileProjections.industryChainPosition}
+        ),
+        'products', COALESCE(${leadInvestmentProfileProjections.products}, JSON_ARRAY()),
+        'institutions', COALESCE(${leadInvestmentProfileProjections.institutions}, JSON_ARRAY()),
+        'academicLinks', COALESCE(${leadInvestmentProfileProjections.academicLinks}, JSON_ARRAY()),
+        'financing', JSON_OBJECT(
+          'status', COALESCE(${leadInvestmentProfileProjections.financingStatus}, ''),
+          'latestRound', ${leadInvestmentProfileProjections.latestRound},
+          'latestRoundDate', ${leadInvestmentProfileProjections.latestRoundDate},
+          'latestAmount', ${leadInvestmentProfileProjections.latestAmountDisplay},
+          'latestAmountValue', ${leadInvestmentProfileProjections.latestAmountValue},
+          'latestAmountCurrency', ${leadInvestmentProfileProjections.latestAmountCurrency},
+          'cumulativeAmount', ${leadInvestmentProfileProjections.cumulativeAmountDisplay},
+          'cumulativeAmountValue', ${leadInvestmentProfileProjections.cumulativeAmountValue},
+          'completedRoundCount', ${leadInvestmentProfileProjections.completedRoundCount}
+        ),
+        'valuation', JSON_OBJECT(
+          'value', ${leadInvestmentProfileProjections.valuationDisplay},
+          'numericValue', ${leadInvestmentProfileProjections.valuationValue},
+          'type', ${leadInvestmentProfileProjections.valuationType},
+          'currency', ${leadInvestmentProfileProjections.valuationCurrency},
+          'date', ${leadInvestmentProfileProjections.valuationDate},
+          'round', ${leadInvestmentProfileProjections.valuationRound}
+        ),
+        'customers', JSON_OBJECT(
+          'highestStage', ${leadInvestmentProfileProjections.highestCustomerStage},
+          'verifiedCount', ${leadInvestmentProfileProjections.verifiedCustomerCount},
+          'tierACount', ${leadInvestmentProfileProjections.tierACustomerCount},
+          'tierBCount', ${leadInvestmentProfileProjections.tierBCustomerCount},
+          'tierCCount', ${leadInvestmentProfileProjections.tierCCustomerCount},
+          'representatives', COALESCE(${leadInvestmentProfileProjections.customerRepresentatives}, JSON_ARRAY())
+        ),
+        'dataStatus', JSON_OBJECT(
+          'verifiedDimensions', ${leadInvestmentProfileProjections.verifiedDimensions},
+          'applicableDimensions', ${leadInvestmentProfileProjections.applicableDimensions},
+          'conflictCount', ${leadInvestmentProfileProjections.conflictCount},
+          'status', ${leadInvestmentProfileProjections.profileStatus},
+          'updatedAt', ${leadInvestmentProfileProjections.factsUpdatedAt}
+        )
+      )) END`,
+      researchProfile: sql<unknown>`CASE WHEN ${leadResearchProfileProjections.leadId} IS NULL THEN NULL ELSE ${leadResearchProfileProjections.profilePayload} END`,
       createdAt: leads.createdAt,
-    }).from(leads).where(whereClause).orderBy(
-      options.sort === 'score' ? desc(overallScoreExpr) : desc(leads.createdAt),
+    }).from(leads)
+      .leftJoin(leadInvestmentProfileProjections, eq(leadInvestmentProfileProjections.leadId, leads.id))
+      .leftJoin(leadResearchProfileProjections, eq(leadResearchProfileProjections.leadId, leads.id))
+      .where(whereClause).orderBy(
+      options.sort === 'funding' ? desc(leadInvestmentProfileProjections.latestRoundDate)
+          : options.sort === 'valuation' ? desc(leadInvestmentProfileProjections.valuationValue)
+            : options.sort === 'customer' ? desc(leadInvestmentProfileProjections.highestCustomerStage)
+              : options.sort === 'profileUpdated' ? desc(leadInvestmentProfileProjections.factsUpdatedAt)
+                : desc(leads.createdAt),
       desc(leads.id),
-    ).limit(pageSize).offset(offset),
-    db.select({ n: sql<number>`count(*)` }).from(leads).where(whereClause),
-  ])
-  const total = totalRow[0]?.n ?? 0
+    ).limit(pageSize).offset(pageOffset)
+  const { rows, pagination, candidateFacts } = await db.transaction(async (tx) => {
+    const totalRow = await tx.select({ n: sql<number>`count(*)` }).from(leads)
+      .leftJoin(leadInvestmentProfileProjections, eq(leadInvestmentProfileProjections.leadId, leads.id)).where(whereClause)
+    const total = totalRow[0]?.n ?? 0
+    const pagination = normalizeLeadListPage(requestedPage, pageSize, total)
+    const rows = await selectPage(tx, (pagination.page - 1) * pageSize)
+    const candidateFacts = leadPoolCandidateDataEnabled() && rows.length ? await tx.select({
+      leadId: leadFacts.leadId,
+      factKey: leadFacts.factKey,
+      instanceKey: leadFacts.instanceKey,
+      value: leadFacts.value,
+      unit: leadFacts.unit,
+      currency: leadFacts.currency,
+      periodStart: leadFacts.periodStart,
+      periodEnd: leadFacts.periodEnd,
+    }).from(leadFacts).where(and(
+      inArray(leadFacts.leadId, rows.map((row) => row.id)),
+      eq(leadFacts.isCurrent, true),
+      eq(leadFacts.verificationStatus, 'unverified'),
+      inArray(leadFacts.factKey, [...LEAD_LIST_CANDIDATE_FACT_KEYS]),
+    )).orderBy(asc(leadFacts.leadId), asc(leadFacts.instanceKey), asc(leadFacts.factKey)) : []
+    return { rows, pagination, candidateFacts }
+  }, LEAD_LIST_READ_TRANSACTION)
+  const candidateFactsByLead = new Map<string, LeadListCandidateFact[]>()
+  for (const fact of candidateFacts) {
+    candidateFactsByLead.set(fact.leadId, [...(candidateFactsByLead.get(fact.leadId) ?? []), fact])
+  }
   return {
-    list: rows.map((r) => enrichLead(r as unknown as typeof leads.$inferSelect)),
-    total,
-    page,
-    pageSize,
-    totalPages: Math.max(1, Math.ceil(total / pageSize)),
+    list: rows.map((r) => leadPoolListItem(
+      r as unknown as typeof leads.$inferSelect,
+      candidateFactsByLead.get(r.id) ?? [],
+    )),
+    ...pagination,
   }
 }
 
@@ -1094,8 +1610,59 @@ export async function getLeadById(leadId: string, options: { includeHidden?: boo
   const reserveDetail = objectValue(reserve?.detailJson)
   const projectIntroduction = textValue(reserveDetail.intro)
   const projectLogoUrl = textValue(reserveDetail.logo)
+  const [investmentProjection] = await db.select().from(leadInvestmentProfileProjections)
+    .where(eq(leadInvestmentProfileProjections.leadId, canonicalLeadId)).limit(1)
+  const investmentProfile = investmentProjection ? {
+    schemaVersion: investmentProjection.schemaVersion,
+    snapshotId: investmentProjection.snapshotId,
+    snapshotHash: investmentProjection.snapshotHash,
+    industry: {
+      level1: investmentProjection.industryLevel1 ?? undefined,
+      level2: investmentProjection.industryLevel2 ?? undefined,
+      segment: investmentProjection.industrySegment ?? undefined,
+      chainPosition: investmentProjection.industryChainPosition ?? undefined,
+    },
+    products: investmentProjection.products,
+    institutions: investmentProjection.institutions,
+    academicLinks: investmentProjection.academicLinks,
+    financing: {
+      status: investmentProjection.financingStatus ?? '',
+      latestRound: investmentProjection.latestRound ?? undefined,
+      latestRoundDate: investmentProjection.latestRoundDate ?? undefined,
+      latestAmount: investmentProjection.latestAmountDisplay ?? undefined,
+      latestAmountValue: investmentProjection.latestAmountValue ?? undefined,
+      latestAmountCurrency: investmentProjection.latestAmountCurrency ?? undefined,
+      cumulativeAmount: investmentProjection.cumulativeAmountDisplay ?? undefined,
+      cumulativeAmountValue: investmentProjection.cumulativeAmountValue ?? undefined,
+      completedRoundCount: investmentProjection.completedRoundCount,
+    },
+    valuation: {
+      value: investmentProjection.valuationDisplay ?? undefined,
+      numericValue: investmentProjection.valuationValue ?? undefined,
+      type: investmentProjection.valuationType ?? undefined,
+      currency: investmentProjection.valuationCurrency ?? undefined,
+      date: investmentProjection.valuationDate ?? undefined,
+      round: investmentProjection.valuationRound ?? undefined,
+    },
+    customers: {
+      highestStage: investmentProjection.highestCustomerStage ?? undefined,
+      verifiedCount: investmentProjection.verifiedCustomerCount,
+      tierACount: investmentProjection.tierACustomerCount,
+      tierBCount: investmentProjection.tierBCustomerCount,
+      tierCCount: investmentProjection.tierCCustomerCount,
+      representatives: investmentProjection.customerRepresentatives,
+    },
+    dataStatus: {
+      verifiedDimensions: investmentProjection.verifiedDimensions,
+      applicableDimensions: investmentProjection.applicableDimensions,
+      conflictCount: investmentProjection.conflictCount,
+      status: investmentProjection.profileStatus,
+      updatedAt: investmentProjection.factsUpdatedAt?.toISOString(),
+    },
+  } : undefined
   return {
     ...enrichLead(row as typeof leads.$inferSelect & { completeness: number }),
+    investmentProfile,
     projectIntroduction,
     projectIntroductionSourceUrl: projectIntroduction ? textValue(reserve?.detailUrl) : undefined,
     projectLogoUrl,

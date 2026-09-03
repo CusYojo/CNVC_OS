@@ -3,11 +3,17 @@ import { randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { inArray } from 'drizzle-orm'
-import { db, pool } from '../db/client.js'
-import { ensureSchema } from '../db/migrate.js'
-import { leads, projects } from '../db/schema.js'
-import { listLeads } from '../services/aiSummaryService.js'
-import { listProjects } from '../services/projectService.js'
+import { assertIsolatedMysqlAcceptanceDatabase } from './mysqlAcceptanceSafety.js'
+
+assertIsolatedMysqlAcceptanceDatabase('stablePaginationAcceptance')
+
+const [{ db, pool }, { ensureSchema }, { leads, projects }, { listLeads }, { listProjects }] = await Promise.all([
+  import('../db/client.js'),
+  import('../db/migrate.js'),
+  import('../db/schema.js'),
+  import('../services/aiSummaryService.js'),
+  import('../services/projectService.js'),
+])
 
 const fixtureSize = 7
 const pageSize = 3
@@ -56,15 +62,47 @@ async function main(): Promise<void> {
       createdAt: tiedAt,
       updatedAt: tiedAt,
     })))
-    await db.insert(leads).values(leadIds.map((id, index) => ({
+    const leadFixtures = leadIds.map((id, index) => ({
       id,
       name: `${marker}-lead-${index}`,
       source: 'pagination-acceptance',
       poolStatus: '成功',
       score: 77,
       scoring: { total: 77 },
+      industry: ['空间计算', '人工智能', '医疗健康', '机器人', '软件工程', '新能源', '教育'][index],
+      businessRegion: index === 0 ? '北京' : index === 1 ? '上海' : null,
+      businessRegionSource: index <= 1 ? 'acceptance-fixture' : null,
+      businessRegionConfidence: index <= 1 ? '高' : null,
+      team: index === 2 ? `${marker}-team-unique` : null,
+      fundingRounds: index === 2
+        ? [{ round: 'Pre-B轮' }]
+        : index === 4
+          ? [{ round: '股权融资' }]
+          : index === 5
+            ? [{ round: '新一轮融资' }]
+            : [],
+      radarProfile: index === 0
+        ? {
+            profile: {
+              region: '上海',
+              regionSource: 'acceptance-derived-conflict',
+              regionConfidence: '高',
+            },
+          }
+        : index === 3
+          ? {
+              channel: '论文',
+              paperMeta: { titleZh: `${marker}-paper` },
+              profile: {
+                region: '广东',
+                regionSource: 'acceptance-derived-without-authoritative-value',
+                regionConfidence: '高',
+              },
+            }
+          : {},
       createdAt: tiedAt,
-    })))
+    }))
+    await db.insert(leads).values(leadFixtures)
 
     const firstProjects = await projectPages(marker)
     const secondProjects = await projectPages(marker)
@@ -77,6 +115,60 @@ async function main(): Promise<void> {
     const firstLeadsByScore = await leadPages(marker, 'score')
     const secondLeadsByScore = await leadPages(marker, 'score')
     assertStablePages('lead score pagination', firstLeadsByScore, secondLeadsByScore, leadIds)
+
+    const other = await listLeads({ keyword: marker, industry: '其他', page: 1, pageSize: 20 })
+    assert.equal(other.total, 1)
+    assert.deepEqual(other.list.map((lead) => lead.id), [leadIds[0]])
+    assert.ok(other.list[0]?.businessTags.industry.includes('其他'))
+
+    const beijing = await listLeads({ keyword: marker, region: '北京', page: 1, pageSize: 20 })
+    assert.equal(beijing.total, 1)
+    assert.equal(beijing.list[0]?.id, leadIds[0])
+    assert.equal(beijing.list[0]?.region, '北京')
+
+    const shanghai = await listLeads({ keyword: marker, region: '上海', page: 1, pageSize: 20 })
+    assert.equal(shanghai.total, 1)
+    assert.deepEqual(shanghai.list.map((lead) => lead.id), [leadIds[1]])
+
+    const guangdong = await listLeads({ keyword: marker, region: '广东', page: 1, pageSize: 20 })
+    assert.equal(guangdong.total, 0)
+    const researchLead = (await listLeads({ keyword: marker, stage: '科研成果', page: 1, pageSize: 20 })).list[0]
+    assert.equal(researchLead?.id, leadIds[3])
+    assert.equal(researchLead?.region, '待确认')
+
+    const team = await listLeads({ keyword: `${marker}-team-unique`, page: 1, pageSize: 20 })
+    assert.equal(team.total, 1)
+    assert.equal(team.list[0]?.id, leadIds[2])
+
+    const preB = await listLeads({ keyword: marker, stage: 'Pre-B轮', page: 1, pageSize: 20 })
+    assert.equal(preB.total, 1)
+    assert.equal(preB.list[0]?.id, leadIds[2])
+
+    const undisclosedEquity = await listLeads({
+      keyword: marker,
+      stage: '股权融资/轮次未披露',
+      page: 1,
+      pageSize: 20,
+    })
+    assert.equal(undisclosedEquity.total, 2)
+    assert.deepEqual(new Set(undisclosedEquity.list.map((lead) => lead.id)), new Set([leadIds[4], leadIds[5]]))
+
+    const combined = await listLeads({
+      keyword: marker,
+      industry: '其他',
+      region: '北京',
+      page: 1,
+      pageSize: 20,
+    })
+    assert.equal(combined.total, 1)
+    assert.equal(combined.list[0]?.id, leadIds[0])
+
+    await db.delete(leads).where(inArray(leads.id, leadIds.slice(4)))
+    const shrunken = await listLeads({ keyword: marker, page: 3, pageSize })
+    assert.equal(shrunken.total, 4)
+    assert.equal(shrunken.totalPages, 2)
+    assert.equal(shrunken.page, 2)
+    assert.equal(shrunken.list.length, 1)
 
     assert.match(
       reviewService,
@@ -92,17 +184,28 @@ async function main(): Promise<void> {
         'project-pagination-tied-sort-values-use-unique-id-without-duplicates-or-omissions',
         'lead-created-time-pagination-ties-use-unique-id-and-repeat-stably',
         'lead-score-pagination-ties-use-unique-id-and-repeat-stably',
+        'lead-filtered-pagination-shrink-returns-new-final-page',
+        'lead-other-industry-display-and-filter-sets-match',
+        'lead-authoritative-region-wins-derived-conflicts-and-empty-values-stay-unconfirmed',
+        'lead-direct-team-keyword-matches',
+        'lead-pre-b-equity-and-undisclosed-round-stage-filters-match',
+        'lead-combined-filters-use-and-semantics',
         'lead-review-pagination-order-ends-in-unique-id',
       ],
     }))
   } finally {
     await db.delete(leads).where(inArray(leads.id, leadIds)).catch(() => undefined)
     await db.delete(projects).where(inArray(projects.id, projectIds)).catch(() => undefined)
-    await pool.end()
+    const [remainingLeads, remainingProjects] = await Promise.all([
+      db.select({ id: leads.id }).from(leads).where(inArray(leads.id, leadIds)),
+      db.select({ id: projects.id }).from(projects).where(inArray(projects.id, projectIds)),
+    ])
+    assert.equal(remainingLeads.length, 0, 'lead pagination fixtures were not cleaned')
+    assert.equal(remainingProjects.length, 0, 'project pagination fixtures were not cleaned')
   }
 }
 
 await main().catch((error: unknown) => {
   console.error(error)
   process.exitCode = 1
-})
+}).finally(async () => pool.end())

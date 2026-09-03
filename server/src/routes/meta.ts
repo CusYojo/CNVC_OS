@@ -4,6 +4,7 @@ import { db } from '../db/client.js'
 import { auditLogs, leads } from '../db/schema.js'
 import { aiTaskRepository, identityRepositories } from '../repositories/index.js'
 import { z } from 'zod'
+import { listLeadsQuery } from '../contracts/leadPoolQueryContract.js'
 import type { AuthedRequest } from '../middleware/requireAuth.js'
 import { requireSystemAdmin } from '../middleware/requireAuth.js'
 import {
@@ -13,7 +14,6 @@ import {
 } from '../services/identityAdministrationService.js'
 import { requireAccessibleProject } from '../services/projectAccessService.js'
 import {
-  createLead,
   convertLead,
   deleteLeadFromPublicPool,
   getLeadById,
@@ -29,6 +29,7 @@ import {
   commitRadarLeadPipelineReady,
   type LeadScoreJob,
 } from '../services/aiSummaryService.js'
+import { commitManualLead } from '../services/leadIntakeService.js'
 import {
   enqueueLeadScoreJob,
   getLeadScoreJobBinding,
@@ -284,23 +285,7 @@ const LeadCreateSchema = z.object({
   team: z.string().optional(),
   fundingRounds: z.array(z.unknown()).default([]),
   sources: z.array(z.unknown()).default([]),
-})
-
-// 公共池分页查询 —— 必传分页,pageSize 1-100,默认 50/1。
-// 注意:返回结构改为 { list, total, page, pageSize, totalPages }(与此前 { list } 不兼容)。
-// 旧前端代码不读 list 之外的字段,升级时同步改 store + SourcingPage。
-const ListLeadsQuery = z.object({
-  page: z.coerce.number().int().min(1).max(10000).default(1),
-  pageSize: z.coerce.number().int().min(1).max(100).default(20),
-  channel: z.string().optional(),
-  sort: z.enum(['latest', 'score']).optional(),
-  keyword: z.string().optional(),  // 关键词全库跨字段检索
-  source: z.string().optional(),   // 渠道二级标签(按 sourceName 模糊匹配)
-  industry: z.string().optional(), // 归一化行业检索（兼容 leads.industry 与采集赛道标签）
-  region: z.string().optional(),   // 地区业务标签（按注册地/项目画像匹配）
-  leadType: z.enum(['company', 'research']).optional(),
-  stage: z.string().max(64).optional(),
-  updatedRange: z.enum(['7d', '30d', '90d']).optional(),
+  idempotencyKey: z.string().min(8).max(128).optional(),
 })
 
 const LeadReviewListQuery = z.object({
@@ -362,22 +347,14 @@ metaRouter.post('/lead-pipeline/reviews/:id/resolve', async (req: AuthedRequest,
       userName: req.user!.name,
       role: req.user!.role,
     })
-    // 人工结论已经在事务中提交；后续评分排队失败不能把成功响应伪装成整笔失败，
-    // 否则浏览器重试会让用户误以为结论尚未落库。队列自身可由恢复任务补偿。
-    const scoringQueued = result.leadId && body.outcome === 'accept'
-      ? await scheduleLeadScoring(result.leadId).catch((error) => {
-          console.error('[lead-review] accepted lead scoring enqueue failed:', error)
-          return false
-        })
-      : false
-    res.json({ ...result, scoringQueued })
+    res.json({ ...result, scoringQueued: false })
   } catch (error) { next(error) }
 })
 
 metaRouter.get('/leads', async (req, res, next) => {
   try {
-    const { page, pageSize, channel, sort, keyword, source, industry, region, leadType, stage, updatedRange } = ListLeadsQuery.parse(req.query)
-    res.json(await listLeads({ page, pageSize, channel, sort, keyword, source, industry, region, leadType, stage, updatedRange }))
+    const query = listLeadsQuery.parse(req.query)
+    res.json(await listLeads(query))
   } catch (err) { next(err) }
 })
 
@@ -642,13 +619,26 @@ metaRouter.post('/leads', async (req: AuthedRequest, res, next) => {
         message: '主体名称不符合规范，请提供明确的项目、公司或团队名称',
       })
     }
-    const row = await createLead({
-      ...body,
-      radarProfile: { qualityRejected: false },
-    } as never, req.user!.uid)
+    const { idempotencyKey, score: _legacyScore, ...lead } = body
+    const committed = await commitManualLead({
+      lead,
+      actor: { userId: req.user!.uid, userName: req.user!.name },
+      idempotencyKey,
+    })
+    if (!committed.leadId) {
+      res.status(committed.status === 'rejected' ? 422 : 202).json({ ...committed, scoringQueued: false })
+      return
+    }
+    const row = await getLeadById(committed.leadId)
     if (!row) throw new Error('线索创建后未返回记录')
-    const { fieldProvenance: _internalFieldProvenance, ...publicRow } = row
-    res.status(201).json(publicRow)
+    const publicRow = row
+    res.status(committed.status === 'created' ? 201 : 200).json({
+      ...publicRow,
+      eventId: committed.eventId,
+      pipelineStatus: 'ready',
+      intakeStatus: committed.status,
+      scoringQueued: false,
+    })
   } catch (err) { next(err) }
 })
 
@@ -1032,7 +1022,6 @@ export async function runRadarSyncImport(input: RadarSyncInput = {}, actorUserId
     let workflowFailed = 0
     let previouslyResolved = 0
     const createdIds: string[] = []
-    const scoringLeadIds = new Set<string>()
     const splitList = (s: unknown, n = 6) => (s ? String(s).split(/；|;|\n/).map((x) => x.trim()).filter(Boolean).slice(0, n) : [])
     // 雷达已明确过滤的候选无需再调用大模型；只审查仍有入池可能的数据，
     // 避免低价值论文等占用网关资源并拖慢最新融资线索。
@@ -1491,12 +1480,10 @@ export async function runRadarSyncImport(input: RadarSyncInput = {}, actorUserId
         unchangedNames.delete(name)
         if (syncResult!.row?.id) {
           createdIds.push(syncResult!.row.id)
-          scoringLeadIds.add(syncResult!.row.id)
         }
       } else if (syncResult!.status === 'updated') {
         if (!createdNames.has(name)) updatedNames.add(name)
         unchangedNames.delete(name)
-        if (syncResult!.row?.id) scoringLeadIds.add(syncResult!.row.id)
       } else if (!createdNames.has(name) && !updatedNames.has(name)) {
         unchangedNames.add(name)
       }
@@ -1505,11 +1492,7 @@ export async function runRadarSyncImport(input: RadarSyncInput = {}, actorUserId
     const updated = updatedNames.size
     const unchanged = unchangedNames.size
     const duplicates = batchDuplicates + databaseDuplicates
-    const scoringIds = [...scoringLeadIds]
-    let scoringQueued = 0
-    for (const leadId of scoringIds) {
-      if (await scheduleLeadScoring(leadId)) scoringQueued += 1
-    }
+    const scoringQueued = 0
     if (nextState && !explicitCursor) {
       await saveRadarSyncState({
         id: stateId,
@@ -1546,7 +1529,6 @@ export async function runRadarSyncImport(input: RadarSyncInput = {}, actorUserId
       workflowFailed,
       previouslyResolved,
       createdIds,
-      scoringIds,
       scoringQueued,
     }
   } finally {
@@ -1580,6 +1562,7 @@ export async function scheduleLeadScoring(
     recovering?: boolean
     manualRetry?: boolean
     automaticCircuitRecovery?: boolean
+    requestMode?: 'automatic' | 'manual' | 'dedicated_project'
     actor?: { userId?: string | null; userName: string }
   } = {},
 ): Promise<boolean> {
@@ -1650,6 +1633,7 @@ export async function scheduleLeadScoring(
       enrichmentSnapshotId: enrichment.snapshot.id,
       snapshotHash: enrichment.snapshot.hash,
       ratingSchemaVersion: LEAD_RATING_V3_SCHEMA_VERSION,
+      requestMode: options.requestMode,
     })
     if (!queued) return false
   } catch (error) {
@@ -2011,7 +1995,7 @@ metaRouter.post('/leads/:id/score', requireSystemAdmin, async (req: AuthedReques
       })
       return
     }
-    const started = await scheduleLeadScoring(lead.id)
+    const started = await scheduleLeadScoring(lead.id, { requestMode: 'manual' })
     if (!started) {
       const enrichment = await getLeadEnrichmentStatus(lead.id)
       if (enrichment.snapshot?.status !== 'ready') {
@@ -2041,6 +2025,7 @@ metaRouter.post('/leads/:id/score/retry', requireSystemAdmin, async (req: Authed
     }
     const started = await scheduleLeadScoring(lead.id, {
       manualRetry: true,
+      requestMode: 'manual',
       actor: { userId: req.user!.uid, userName: req.user!.name },
     })
     if (!started) {
@@ -2088,7 +2073,7 @@ metaRouter.post('/leads/:id/convert', async (req: AuthedRequest, res, next) => {
     const row = await convertLead(leadId, req.user!.uid)
     // 甲方要求"获取(领取)就分析"：领取为专属项目后自动触发 AI 深度分析(后台异步，秒回)。
     // 已在分析中则不重复触发。
-    await scheduleLeadScoring(leadId).catch((error) => {
+    await scheduleLeadScoring(leadId, { requestMode: 'dedicated_project' }).catch((error) => {
       console.error('[lead-convert] post-commit scoring enqueue failed:', (error as Error).message)
     })
     res.json(row)

@@ -36,6 +36,26 @@ type DictionaryGroup = {
   id: string; code: string; name: string; description: string | null; status: '启用' | '禁用';
   version: number; items: DictionaryItem[];
 }
+type InvestmentInstitutionDictionary = {
+  id: string; canonicalName: string; aliases: string[]; institutionType: string; tier: string | null;
+  major: boolean; status: 'active' | 'inactive'; version: number;
+}
+type InvestmentCustomerDictionary = {
+  id: string; canonicalName: string; aliases: string[]; tier: 'A' | 'B' | 'C';
+  confidentiality: 'public' | 'confidential' | 'restricted'; status: 'active' | 'inactive'; version: number;
+}
+type InvestmentIndustryDictionary = {
+  id: string; canonicalName: string; aliases: string[]; level1: string; level2: string | null;
+  segment: string | null; chainPosition: string | null; status: 'active' | 'inactive'; version: number;
+}
+type InvestmentAcademicInstitutionDictionary = {
+  id: string; canonicalName: string; aliases: string[]; institutionType: string;
+  status: 'active' | 'inactive'; version: number;
+}
+type InvestmentProfileDictionaries = {
+  institutions: InvestmentInstitutionDictionary[]; customers: InvestmentCustomerDictionary[];
+  industries: InvestmentIndustryDictionary[]; academicInstitutions: InvestmentAcademicInstitutionDictionary[];
+}
 type RoleBinding = { userId: string; roleId: string; isPrimary: boolean }
 type Administration = { departments: Department[]; roles: Role[]; permissions: Permission[]; dictionaries: DictionaryGroup[]; userRoleBindings: RoleBinding[] }
 type LeadRatingHistory = {
@@ -45,6 +65,9 @@ type LeadRatingHistory = {
 type LeadRatingHistoryResponse = { leadId: string; ratings: LeadRatingHistory[]; total: number }
 
 const emptyAdministration: Administration = { departments: [], roles: [], permissions: [], dictionaries: [], userRoleBindings: [] }
+const emptyInvestmentDictionaries: InvestmentProfileDictionaries = {
+  institutions: [], customers: [], industries: [], academicInstitutions: [],
+}
 const field = 'input w-full'
 const tabItems = [
   { id: 'users', label: '用户管理' }, { id: 'org', label: '组织管理' },
@@ -81,6 +104,7 @@ export function SystemPage() {
   const currentUser = useAuthStore((state) => state.user)
   const { showToast } = useToast()
   const [administration, setAdministration] = useState<Administration>(emptyAdministration)
+  const [investmentDictionaries, setInvestmentDictionaries] = useState<InvestmentProfileDictionaries>(emptyInvestmentDictionaries)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [searchParams, setSearchParams] = useSearchParams()
@@ -110,6 +134,26 @@ export function SystemPage() {
   const [dictionaryForm, setDictionaryForm] = useState({ code: '', name: '', description: '', status: '启用' as '启用' | '禁用' })
   const [itemModal, setItemModal] = useState<{ group: DictionaryGroup; item?: DictionaryItem } | null>(null)
   const [itemForm, setItemForm] = useState({ value: '', label: '', sortOrder: '0', status: '启用' as '启用' | '禁用' })
+  const [institutionModal, setInstitutionModal] = useState<InvestmentInstitutionDictionary | 'create' | null>(null)
+  const [institutionForm, setInstitutionForm] = useState({
+    canonicalName: '', aliases: '', institutionType: '', tier: '', major: false,
+    status: 'active' as 'active' | 'inactive', reason: '',
+  })
+  const [customerModal, setCustomerModal] = useState<InvestmentCustomerDictionary | 'create' | null>(null)
+  const [customerForm, setCustomerForm] = useState({
+    canonicalName: '', aliases: '', tier: '' as 'A' | 'B' | 'C' | '',
+    confidentiality: '' as 'public' | 'confidential' | 'restricted' | '',
+    status: 'active' as 'active' | 'inactive', reason: '',
+  })
+  const [industryModal, setIndustryModal] = useState<InvestmentIndustryDictionary | 'create' | null>(null)
+  const [industryForm, setIndustryForm] = useState({
+    canonicalName: '', aliases: '', level1: '', level2: '', segment: '', chainPosition: '',
+    status: 'active' as 'active' | 'inactive', reason: '',
+  })
+  const [academicInstitutionModal, setAcademicInstitutionModal] = useState<InvestmentAcademicInstitutionDictionary | 'create' | null>(null)
+  const [academicInstitutionForm, setAcademicInstitutionForm] = useState({
+    canonicalName: '', aliases: '', institutionType: '', status: 'active' as 'active' | 'inactive', reason: '',
+  })
   const [ratingLeadId, setRatingLeadId] = useState('')
   const [ratingHistory, setRatingHistory] = useState<LeadRatingHistory[]>([])
   const [ratingHistoryLoading, setRatingHistoryLoading] = useState(false)
@@ -118,7 +162,14 @@ export function SystemPage() {
 
   const refreshAdministration = useCallback(async () => {
     setLoading(true)
-    try { setAdministration(await apiGet<Administration>('/system-administration')) }
+    try {
+      const [nextAdministration, nextInvestmentDictionaries] = await Promise.all([
+        apiGet<Administration>('/system-administration'),
+        apiGet<InvestmentProfileDictionaries>('/system-administration/investment-profile-dictionaries'),
+      ])
+      setAdministration(nextAdministration)
+      setInvestmentDictionaries(nextInvestmentDictionaries)
+    }
     catch (error) { showToast((error as Error).message, 'error') }
     finally { setLoading(false) }
   }, [showToast])
@@ -254,6 +305,121 @@ export function SystemPage() {
     if (ok) setItemModal(null)
   }
 
+  const dictionaryAliases = (value: string) => [...new Set(value.split(/[、,，;；\n]/u).map((item) => item.trim()).filter(Boolean))]
+
+  function openInstitutionDictionary(item?: InvestmentInstitutionDictionary) {
+    setInstitutionForm(item ? {
+      canonicalName: item.canonicalName, aliases: item.aliases.join('、'), institutionType: item.institutionType,
+      tier: item.tier || '', major: item.major, status: item.status, reason: '',
+    } : { canonicalName: '', aliases: '', institutionType: '', tier: '', major: false, status: 'active', reason: '' })
+    setInstitutionModal(item || 'create')
+  }
+
+  async function saveInstitutionDictionary() {
+    const editing = institutionModal !== 'create' ? institutionModal : null
+    const payload = {
+      canonicalName: institutionForm.canonicalName, aliases: dictionaryAliases(institutionForm.aliases),
+      institutionType: institutionForm.institutionType, tier: institutionForm.tier || null,
+      major: institutionForm.major, status: institutionForm.status, reason: institutionForm.reason,
+    }
+    const ok = await mutate(
+      () => editing
+        ? apiPatch(`/system-administration/investment-profile-dictionaries/institutions/${editing.id}`, {
+          ...payload, expectedVersion: editing.version,
+        })
+        : apiPost('/system-administration/investment-profile-dictionaries/institutions', payload),
+      editing ? '投资机构字典项已更新；相关画像已标记为待重建。' : '投资机构字典项已创建；相关画像已标记为待重建。',
+    )
+    if (ok) setInstitutionModal(null)
+  }
+
+  function openCustomerDictionary(item?: InvestmentCustomerDictionary) {
+    setCustomerForm(item ? {
+      canonicalName: item.canonicalName, aliases: item.aliases.join('、'), tier: item.tier,
+      confidentiality: item.confidentiality,
+      status: item.status, reason: '',
+    } : { canonicalName: '', aliases: '', tier: '', confidentiality: '', status: 'active', reason: '' })
+    setCustomerModal(item || 'create')
+  }
+
+  async function saveCustomerDictionary() {
+    if (!customerForm.tier || !customerForm.confidentiality) return
+    const editing = customerModal !== 'create' ? customerModal : null
+    const payload = {
+      canonicalName: customerForm.canonicalName, aliases: dictionaryAliases(customerForm.aliases),
+      tier: customerForm.tier, confidentiality: customerForm.confidentiality,
+      status: customerForm.status, reason: customerForm.reason,
+    }
+    const ok = await mutate(
+      () => editing
+        ? apiPatch(`/system-administration/investment-profile-dictionaries/customers/${editing.id}`, {
+          ...payload, expectedVersion: editing.version,
+        })
+        : apiPost('/system-administration/investment-profile-dictionaries/customers', payload),
+      editing ? '客户等级字典项已更新；相关画像已标记为待重建。' : '客户等级字典项已创建；相关画像已标记为待重建。',
+    )
+    if (ok) setCustomerModal(null)
+  }
+
+  function openIndustryDictionary(item?: InvestmentIndustryDictionary) {
+    setIndustryForm(item ? {
+      canonicalName: item.canonicalName, aliases: item.aliases.join('、'), level1: item.level1,
+      level2: item.level2 || '', segment: item.segment || '', chainPosition: item.chainPosition || '',
+      status: item.status, reason: '',
+    } : {
+      canonicalName: '', aliases: '', level1: '', level2: '', segment: '', chainPosition: '',
+      status: 'active', reason: '',
+    })
+    setIndustryModal(item || 'create')
+  }
+
+  async function saveIndustryDictionary() {
+    const editing = industryModal !== 'create' ? industryModal : null
+    const payload = {
+      canonicalName: industryForm.canonicalName, aliases: dictionaryAliases(industryForm.aliases),
+      level1: industryForm.level1, level2: industryForm.level2 || null,
+      segment: industryForm.segment || null, chainPosition: industryForm.chainPosition || null,
+      status: industryForm.status, reason: industryForm.reason,
+    }
+    const ok = await mutate(
+      () => editing
+        ? apiPatch(`/system-administration/investment-profile-dictionaries/industries/${editing.id}`, {
+          ...payload, expectedVersion: editing.version,
+        })
+        : apiPost('/system-administration/investment-profile-dictionaries/industries', payload),
+      editing ? '行业层级字典项已更新；相关画像已标记为待重建。' : '行业层级字典项已创建；相关画像已标记为待重建。',
+    )
+    if (ok) setIndustryModal(null)
+  }
+
+  function openAcademicInstitutionDictionary(item?: InvestmentAcademicInstitutionDictionary) {
+    setAcademicInstitutionForm(item ? {
+      canonicalName: item.canonicalName, aliases: item.aliases.join('、'), institutionType: item.institutionType,
+      status: item.status, reason: '',
+    } : { canonicalName: '', aliases: '', institutionType: '', status: 'active', reason: '' })
+    setAcademicInstitutionModal(item || 'create')
+  }
+
+  async function saveAcademicInstitutionDictionary() {
+    const editing = academicInstitutionModal !== 'create' ? academicInstitutionModal : null
+    const payload = {
+      canonicalName: academicInstitutionForm.canonicalName,
+      aliases: dictionaryAliases(academicInstitutionForm.aliases),
+      institutionType: academicInstitutionForm.institutionType,
+      status: academicInstitutionForm.status,
+      reason: academicInstitutionForm.reason,
+    }
+    const ok = await mutate(
+      () => editing
+        ? apiPatch(`/system-administration/investment-profile-dictionaries/academic-institutions/${editing.id}`, {
+          ...payload, expectedVersion: editing.version,
+        })
+        : apiPost('/system-administration/investment-profile-dictionaries/academic-institutions', payload),
+      editing ? '高校科研机构字典项已更新；相关画像已标记为待重建。' : '高校科研机构字典项已创建；相关画像已标记为待重建。',
+    )
+    if (ok) setAcademicInstitutionModal(null)
+  }
+
   async function loadRatingHistory() {
     const leadId = ratingLeadId.trim()
     if (!leadId) return
@@ -327,14 +493,28 @@ export function SystemPage() {
     </DataTable></Card>
   </>
 
-  const renderDictionaries = () => <>
-    <div className="mb-4 flex justify-end"><Button onClick={() => openDictionary()}><Plus className="h-4 w-4" />新增字典</Button></div>
+  const renderDictionaries = () => <div className="space-y-5">
+    <Card className="p-5"><div className="flex flex-wrap items-start gap-3"><div className="min-w-0 flex-1"><h3 className="font-semibold text-slate-800">投资画像受控字典</h3><p className="mt-1 text-xs leading-5 text-slate-500">行业层级、高校标准名、“重点机构”和客户 A/B/C 只以这里的管理员确认值为准。修改会保留审计并将现有画像标记为待重建，不会改写事实与快照。</p></div><Button variant="secondary" onClick={() => openIndustryDictionary()}><Plus className="h-4 w-4" />行业层级</Button><Button variant="secondary" onClick={() => openAcademicInstitutionDictionary()}><Plus className="h-4 w-4" />高校院所</Button><Button variant="secondary" onClick={() => openInstitutionDictionary()}><Plus className="h-4 w-4" />投资机构</Button><Button variant="secondary" onClick={() => openCustomerDictionary()}><Plus className="h-4 w-4" />客户等级</Button></div>
+      <div className="mt-5 grid gap-5 xl:grid-cols-2"><div><h4 className="mb-2 text-sm font-medium text-slate-700">投资机构</h4><DataTable headers={['标准名 / 别名', '类型 / 等级', '重点', '状态', '操作']}>
+        {investmentDictionaries.institutions.map((item) => <tr key={item.id}><TableCell><span className="font-medium text-slate-700">{item.canonicalName}</span><span className="mt-1 block max-w-[280px] truncate text-xs text-slate-400">{item.aliases.join('、') || '无别名'} · v{item.version}</span></TableCell><TableCell>{item.institutionType}<span className="mt-1 block text-xs text-slate-400">{item.tier || '未分级'}</span></TableCell><TableCell>{item.major ? <Badge tone="blue">重点</Badge> : '否'}</TableCell><TableCell><Badge tone={item.status === 'active' ? 'blue' : 'slate'}>{item.status === 'active' ? '启用' : '停用'}</Badge></TableCell><TableCell><button className="text-xs text-brand-600" onClick={() => openInstitutionDictionary(item)}>编辑</button></TableCell></tr>)}
+      </DataTable>{!investmentDictionaries.institutions.length && <p className="border-t border-slate-100 py-6 text-center text-xs text-slate-400">尚未配置，模型不会自动判定重点机构</p>}</div>
+      <div><h4 className="mb-2 text-sm font-medium text-slate-700">客户等级</h4><DataTable headers={['标准名 / 别名', '等级', '默认保密', '状态', '操作']}>
+        {investmentDictionaries.customers.map((item) => <tr key={item.id}><TableCell><span className="font-medium text-slate-700">{item.canonicalName}</span><span className="mt-1 block max-w-[280px] truncate text-xs text-slate-400">{item.aliases.join('、') || '无别名'} · v{item.version}</span></TableCell><TableCell><Badge tone={item.tier === 'A' ? 'blue' : 'slate'}>{item.tier} 类</Badge></TableCell><TableCell>{item.confidentiality === 'public' ? '公开' : item.confidentiality === 'confidential' ? '保密' : '受限'}</TableCell><TableCell><Badge tone={item.status === 'active' ? 'blue' : 'slate'}>{item.status === 'active' ? '启用' : '停用'}</Badge></TableCell><TableCell><button className="text-xs text-brand-600" onClick={() => openCustomerDictionary(item)}>编辑</button></TableCell></tr>)}
+      </DataTable>{!investmentDictionaries.customers.length && <p className="border-t border-slate-100 py-6 text-center text-xs text-slate-400">尚未配置，客户不会自动获得 A/B/C 等级</p>}</div>
+      <div><h4 className="mb-2 text-sm font-medium text-slate-700">行业层级</h4><DataTable headers={['标准名 / 别名', '一级 / 二级', '细分 / 产业链', '状态', '操作']}>
+        {investmentDictionaries.industries.map((item) => <tr key={item.id}><TableCell><span className="font-medium text-slate-700">{item.canonicalName}</span><span className="mt-1 block max-w-[260px] truncate text-xs text-slate-400">{item.aliases.join('、') || '无别名'} · v{item.version}</span></TableCell><TableCell>{item.level1}<span className="mt-1 block text-xs text-slate-400">{item.level2 || '未配置二级'}</span></TableCell><TableCell>{item.segment || '未配置细分'}<span className="mt-1 block text-xs text-slate-400">{item.chainPosition || '未配置产业链位置'}</span></TableCell><TableCell><Badge tone={item.status === 'active' ? 'blue' : 'slate'}>{item.status === 'active' ? '启用' : '停用'}</Badge></TableCell><TableCell><button className="text-xs text-brand-600" onClick={() => openIndustryDictionary(item)}>编辑</button></TableCell></tr>)}
+      </DataTable>{!investmentDictionaries.industries.length && <p className="border-t border-slate-100 py-6 text-center text-xs text-slate-400">尚未配置，来源行业只展示为未标准化事实</p>}</div>
+      <div><h4 className="mb-2 text-sm font-medium text-slate-700">高校 / 科研院所</h4><DataTable headers={['标准名 / 别名', '机构类型', '状态', '操作']}>
+        {investmentDictionaries.academicInstitutions.map((item) => <tr key={item.id}><TableCell><span className="font-medium text-slate-700">{item.canonicalName}</span><span className="mt-1 block max-w-[280px] truncate text-xs text-slate-400">{item.aliases.join('、') || '无别名'} · v{item.version}</span></TableCell><TableCell>{item.institutionType}</TableCell><TableCell><Badge tone={item.status === 'active' ? 'blue' : 'slate'}>{item.status === 'active' ? '启用' : '停用'}</Badge></TableCell><TableCell><button className="text-xs text-brand-600" onClick={() => openAcademicInstitutionDictionary(item)}>编辑</button></TableCell></tr>)}
+      </DataTable>{!investmentDictionaries.academicInstitutions.length && <p className="border-t border-slate-100 py-6 text-center text-xs text-slate-400">尚未配置，高校院所不会自动归并别名</p>}</div></div>
+    </Card>
+    <div className="flex items-center"><div><h3 className="font-semibold text-slate-800">通用数据字典</h3><p className="mt-1 text-xs text-slate-400">用于系统既有枚举配置，不替代投资画像专用字典。</p></div><Button className="ml-auto" onClick={() => openDictionary()}><Plus className="h-4 w-4" />新增字典</Button></div>
     <div className="grid grid-cols-2 gap-4">{administration.dictionaries.map((group) => <Card key={group.id} className="p-5">
       <div className="flex items-start"><div><h3 className="font-semibold text-slate-800">{group.name}</h3><p className="mt-1 font-mono text-xs text-slate-400">{group.code} · v{group.version}</p></div><StatusBadge status={group.status} /><button className="ml-auto text-xs text-brand-600" onClick={() => openDictionary(group)}>编辑</button></div>
       <div className="mt-4 space-y-2">{group.items.map((item) => <button key={item.id} className="flex w-full items-center rounded-lg bg-slate-50 px-3 py-2 text-left text-xs" onClick={() => { setItemModal({ group, item }); setItemForm({ value: item.value, label: item.label, sortOrder: String(item.sortOrder), status: item.status }) }}><span className="font-medium text-slate-700">{item.label}</span><span className="ml-2 font-mono text-slate-400">{item.value}</span><StatusBadge status={item.status} /><span className="ml-auto text-slate-400">#{item.sortOrder}</span></button>)}</div>
       <button className="mt-3 text-xs text-brand-600" onClick={() => { setItemModal({ group }); setItemForm({ value: '', label: '', sortOrder: String((group.items.at(-1)?.sortOrder || 0) + 10), status: '启用' }) }}>+ 新增字典项</button>
     </Card>)}</div>
-  </>
+  </div>
 
   const renderTemplates = () => <>{toolbar('搜索模板名称、类型或版本…')}<Card className="overflow-hidden"><DataTable headers={['模板名称', '输出类型', '版本', '状态', '更新时间']}>
     {filteredTemplates.map((template) => <tr key={template.id}><TableCell><span className="flex items-center gap-3"><FileText className="h-4 w-4 text-brand-600" /><span className="font-medium text-slate-700">{template.name}</span></span></TableCell><TableCell><Badge tone="blue">{template.type}</Badge></TableCell><TableCell>{template.version}</TableCell><TableCell><StatusBadge status={template.status} /></TableCell><TableCell>{displayTime(template.updatedAt)}</TableCell></tr>)}
@@ -391,6 +571,10 @@ export function SystemPage() {
 
     <Modal open={!!dictionaryModal} title={dictionaryModal === 'create' ? '新增数据字典' : '编辑数据字典'} onClose={() => setDictionaryModal(null)} footer={<><Button variant="secondary" onClick={() => setDictionaryModal(null)}>取消</Button><Button loading={busy} onClick={() => void saveDictionary()}>保存</Button></>}><div className="space-y-4"><label><span className="label">字典编码</span><input className={field} disabled={dictionaryModal !== 'create'} value={dictionaryForm.code} onChange={(e) => setDictionaryForm({ ...dictionaryForm, code: e.target.value })} /></label><label><span className="label">名称</span><input className={field} value={dictionaryForm.name} onChange={(e) => setDictionaryForm({ ...dictionaryForm, name: e.target.value })} /></label><label><span className="label">说明</span><textarea className={field} value={dictionaryForm.description} onChange={(e) => setDictionaryForm({ ...dictionaryForm, description: e.target.value })} /></label><label><span className="label">状态</span><select className={field} value={dictionaryForm.status} onChange={(e) => setDictionaryForm({ ...dictionaryForm, status: e.target.value as '启用' | '禁用' })}><option>启用</option><option>禁用</option></select></label></div></Modal>
     <Modal open={!!itemModal} title={itemModal?.item ? '编辑字典项' : '新增字典项'} onClose={() => setItemModal(null)} footer={<><Button variant="secondary" onClick={() => setItemModal(null)}>取消</Button><Button loading={busy} onClick={() => void saveDictionaryItem()}>保存</Button></>}><div className="space-y-4"><label><span className="label">值编码</span><input className={field} disabled={!!itemModal?.item} value={itemForm.value} onChange={(e) => setItemForm({ ...itemForm, value: e.target.value })} /></label><label><span className="label">显示名称</span><input className={field} value={itemForm.label} onChange={(e) => setItemForm({ ...itemForm, label: e.target.value })} /></label><div className="grid grid-cols-2 gap-4"><label><span className="label">排序</span><input type="number" className={field} value={itemForm.sortOrder} onChange={(e) => setItemForm({ ...itemForm, sortOrder: e.target.value })} /></label><label><span className="label">状态</span><select className={field} value={itemForm.status} onChange={(e) => setItemForm({ ...itemForm, status: e.target.value as '启用' | '禁用' })}><option>启用</option><option>禁用</option></select></label></div></div></Modal>
+    <Modal open={!!institutionModal} title={institutionModal === 'create' ? '新增投资机构字典项' : '编辑投资机构字典项'} onClose={() => setInstitutionModal(null)} footer={<><Button variant="secondary" onClick={() => setInstitutionModal(null)}>取消</Button><Button loading={busy} disabled={!institutionForm.canonicalName.trim() || !institutionForm.institutionType.trim() || institutionForm.reason.trim().length < 5} onClick={() => void saveInstitutionDictionary()}>保存并标记画像待重建</Button></>}><div className="space-y-4"><label><span className="label">标准机构名称</span><input className={field} value={institutionForm.canonicalName} onChange={(event) => setInstitutionForm({ ...institutionForm, canonicalName: event.target.value })} /></label><label><span className="label">别名</span><textarea className={field} value={institutionForm.aliases} placeholder="多个别名用顿号、逗号或换行分隔" onChange={(event) => setInstitutionForm({ ...institutionForm, aliases: event.target.value })} /></label><div className="grid grid-cols-2 gap-4"><label><span className="label">机构类型</span><input className={field} value={institutionForm.institutionType} placeholder="如：市场化 VC/PE" onChange={(event) => setInstitutionForm({ ...institutionForm, institutionType: event.target.value })} /></label><label><span className="label">机构等级</span><input className={field} value={institutionForm.tier} placeholder="未确认可留空" onChange={(event) => setInstitutionForm({ ...institutionForm, tier: event.target.value })} /></label></div><div className="grid grid-cols-2 gap-4"><label className="flex items-center gap-2 pt-7 text-sm"><input type="checkbox" checked={institutionForm.major} onChange={(event) => setInstitutionForm({ ...institutionForm, major: event.target.checked })} />确认为重点机构</label><label><span className="label">状态</span><select className={field} value={institutionForm.status} onChange={(event) => setInstitutionForm({ ...institutionForm, status: event.target.value as 'active' | 'inactive' })}><option value="active">启用</option><option value="inactive">停用</option></select></label></div><label><span className="label">变更原因</span><textarea className={field} maxLength={1000} value={institutionForm.reason} placeholder="至少 5 个字，作为审计依据" onChange={(event) => setInstitutionForm({ ...institutionForm, reason: event.target.value })} /></label></div></Modal>
+    <Modal open={!!customerModal} title={customerModal === 'create' ? '新增客户等级字典项' : '编辑客户等级字典项'} onClose={() => setCustomerModal(null)} footer={<><Button variant="secondary" onClick={() => setCustomerModal(null)}>取消</Button><Button loading={busy} disabled={!customerForm.canonicalName.trim() || !customerForm.tier || !customerForm.confidentiality || customerForm.reason.trim().length < 5} onClick={() => void saveCustomerDictionary()}>保存并标记画像待重建</Button></>}><div className="space-y-4"><label><span className="label">标准客户名称</span><input className={field} value={customerForm.canonicalName} onChange={(event) => setCustomerForm({ ...customerForm, canonicalName: event.target.value })} /></label><label><span className="label">别名</span><textarea className={field} value={customerForm.aliases} placeholder="多个别名用顿号、逗号或换行分隔" onChange={(event) => setCustomerForm({ ...customerForm, aliases: event.target.value })} /></label><div className="grid grid-cols-3 gap-4"><label><span className="label">客户等级</span><select className={field} value={customerForm.tier} onChange={(event) => setCustomerForm({ ...customerForm, tier: event.target.value as 'A' | 'B' | 'C' | '' })}><option value="">请选择已确认等级</option><option value="A">A 类</option><option value="B">B 类</option><option value="C">C 类</option></select></label><label><span className="label">默认保密要求</span><select className={field} value={customerForm.confidentiality} onChange={(event) => setCustomerForm({ ...customerForm, confidentiality: event.target.value as 'public' | 'confidential' | 'restricted' | '' })}><option value="">请选择保密要求</option><option value="public">公开</option><option value="confidential">保密</option><option value="restricted">受限</option></select></label><label><span className="label">状态</span><select className={field} value={customerForm.status} onChange={(event) => setCustomerForm({ ...customerForm, status: event.target.value as 'active' | 'inactive' })}><option value="active">启用</option><option value="inactive">停用</option></select></label></div><label><span className="label">变更原因</span><textarea className={field} maxLength={1000} value={customerForm.reason} placeholder="至少 5 个字，作为审计依据" onChange={(event) => setCustomerForm({ ...customerForm, reason: event.target.value })} /></label></div></Modal>
+    <Modal open={!!industryModal} title={industryModal === 'create' ? '新增行业层级字典项' : '编辑行业层级字典项'} onClose={() => setIndustryModal(null)} footer={<><Button variant="secondary" onClick={() => setIndustryModal(null)}>取消</Button><Button loading={busy} disabled={!industryForm.canonicalName.trim() || !industryForm.level1.trim() || industryForm.reason.trim().length < 5} onClick={() => void saveIndustryDictionary()}>保存并标记画像待重建</Button></>}><div className="space-y-4"><label><span className="label">标准分类名称</span><input className={field} value={industryForm.canonicalName} placeholder="建议使用最细一级标准名称" onChange={(event) => setIndustryForm({ ...industryForm, canonicalName: event.target.value })} /></label><label><span className="label">外部分类 / 别名</span><textarea className={field} value={industryForm.aliases} placeholder="只录入经确认可映射到本分类的名称" onChange={(event) => setIndustryForm({ ...industryForm, aliases: event.target.value })} /></label><div className="grid grid-cols-2 gap-4"><label><span className="label">一级行业</span><input className={field} value={industryForm.level1} onChange={(event) => setIndustryForm({ ...industryForm, level1: event.target.value })} /></label><label><span className="label">二级行业</span><input className={field} value={industryForm.level2} onChange={(event) => setIndustryForm({ ...industryForm, level2: event.target.value })} /></label><label><span className="label">细分赛道</span><input className={field} value={industryForm.segment} onChange={(event) => setIndustryForm({ ...industryForm, segment: event.target.value })} /></label><label><span className="label">产业链位置</span><input className={field} value={industryForm.chainPosition} placeholder="如：上游设备" onChange={(event) => setIndustryForm({ ...industryForm, chainPosition: event.target.value })} /></label></div><div className="grid grid-cols-2 gap-4"><label><span className="label">状态</span><select className={field} value={industryForm.status} onChange={(event) => setIndustryForm({ ...industryForm, status: event.target.value as 'active' | 'inactive' })}><option value="active">启用</option><option value="inactive">停用</option></select></label><label><span className="label">变更原因</span><input className={field} maxLength={1000} value={industryForm.reason} placeholder="至少 5 个字" onChange={(event) => setIndustryForm({ ...industryForm, reason: event.target.value })} /></label></div></div></Modal>
+    <Modal open={!!academicInstitutionModal} title={academicInstitutionModal === 'create' ? '新增高校院所字典项' : '编辑高校院所字典项'} onClose={() => setAcademicInstitutionModal(null)} footer={<><Button variant="secondary" onClick={() => setAcademicInstitutionModal(null)}>取消</Button><Button loading={busy} disabled={!academicInstitutionForm.canonicalName.trim() || !academicInstitutionForm.institutionType.trim() || academicInstitutionForm.reason.trim().length < 5} onClick={() => void saveAcademicInstitutionDictionary()}>保存并标记画像待重建</Button></>}><div className="space-y-4"><label><span className="label">高校 / 科研机构标准名</span><input className={field} value={academicInstitutionForm.canonicalName} onChange={(event) => setAcademicInstitutionForm({ ...academicInstitutionForm, canonicalName: event.target.value })} /></label><label><span className="label">别名</span><textarea className={field} value={academicInstitutionForm.aliases} placeholder="简称、历史名称或经确认的外文名" onChange={(event) => setAcademicInstitutionForm({ ...academicInstitutionForm, aliases: event.target.value })} /></label><div className="grid grid-cols-2 gap-4"><label><span className="label">机构类型</span><input className={field} value={academicInstitutionForm.institutionType} placeholder="如：高校、科研院所" onChange={(event) => setAcademicInstitutionForm({ ...academicInstitutionForm, institutionType: event.target.value })} /></label><label><span className="label">状态</span><select className={field} value={academicInstitutionForm.status} onChange={(event) => setAcademicInstitutionForm({ ...academicInstitutionForm, status: event.target.value as 'active' | 'inactive' })}><option value="active">启用</option><option value="inactive">停用</option></select></label></div><label><span className="label">变更原因</span><textarea className={field} maxLength={1000} value={academicInstitutionForm.reason} placeholder="至少 5 个字，作为审计依据" onChange={(event) => setAcademicInstitutionForm({ ...academicInstitutionForm, reason: event.target.value })} /></label></div></Modal>
     <Modal open={!!ratingRestoreTarget} title="恢复V3历史评级" onClose={() => { if (!busy) setRatingRestoreTarget(null) }} footer={<><Button variant="secondary" disabled={busy} onClick={() => setRatingRestoreTarget(null)}>取消</Button><Button loading={busy} disabled={ratingRestoreReason.trim().length < 4} onClick={() => void restoreRatingHistory()}>确认恢复</Button></>}><div className="space-y-4"><p className="text-sm leading-6 text-slate-600">将恢复到 <strong>{ratingHistoryScore(ratingRestoreTarget?.result) ?? '待评级'}分</strong>。仅切换有效评分结果，不回滚事实、证据和快照。</p><label><span className="label">恢复原因</span><textarea className={field} maxLength={2000} value={ratingRestoreReason} placeholder="至少4个字，说明恢复原因" onChange={(event) => setRatingRestoreReason(event.target.value)} /></label></div></Modal>
   </div>
 }

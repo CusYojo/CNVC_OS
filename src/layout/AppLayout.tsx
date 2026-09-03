@@ -79,7 +79,9 @@ export function AppLayout() {
     update(); media.addEventListener('change', update)
     return () => media.removeEventListener('change', update)
   }, [])
-  const navigationCollapsed = collapsed || narrow
+  const responsibilityView = location.pathname === '/responsibility' || location.pathname === '/knowledge' && new URLSearchParams(location.search).get('view') === 'responsibility'
+  const leadPoolView = location.pathname === '/projects' && new URLSearchParams(location.search).get('view') === 'leads'
+  const navigationCollapsed = collapsed || narrow && (responsibilityView || leadPoolView)
   const [showProfile, setShowProfile] = useState(false)
   const [showCreate, setShowCreate] = useState(false)
   const [dark, setDark] = useState(false)

@@ -14,7 +14,7 @@ import { leadTopicResearchContract } from '../services/leadTopicWebResearchServi
 import { companyRegistrationEligibility } from '../services/leadRegistry.js'
 
 const root = process.cwd()
-const [migration, instanceMigration, eventService, enrichmentService, worker, retryPolicy, circuitBreaker, evidenceClassification, conflictDetection, sourceSubjectMatch, publicIntelService, scoreService, routes, serverEntry, sourceDocuments, detailPage, systemPage, backfill, summaryService, intakeService, reserveIntakeService, reviewService, topicResearch, codexCliResearch, codexWorkerRunner, envExample] = await Promise.all([
+const [migration, instanceMigration, eventService, enrichmentService, worker, retryPolicy, circuitBreaker, evidenceClassification, conflictDetection, sourceSubjectMatch, publicIntelService, scoreService, routes, serverEntry, sourceDocuments, detailPage, systemPage, backfill, summaryService, intakeService, reserveIntakeService, reviewService, topicResearch, codexCliResearch, codexWorkerRunner, envExample, prefetchResearch] = await Promise.all([
   readFile(`${root}/server/drizzle/0047_add_lead_enrichment_evidence.sql`, 'utf8'),
   readFile(`${root}/server/drizzle/0049_add_lead_fact_instance_keys.sql`, 'utf8'),
   readFile(`${root}/server/src/services/leadPipelineEventService.ts`, 'utf8'),
@@ -41,6 +41,7 @@ const [migration, instanceMigration, eventService, enrichmentService, worker, re
   readFile(`${root}/server/src/services/codexCliWebSearchService.ts`, 'utf8'),
   readFile(`${root}/server/src/scripts/runLeadEnrichmentCodexWorker.ts`, 'utf8'),
   readFile(`${root}/.env.example`, 'utf8'),
+  readFile(`${root}/server/src/scripts/prefetchLeadEnrichmentResearch.ts`, 'utf8'),
 ])
 
 for (const table of [
@@ -53,17 +54,31 @@ assert.match(migration, /rating_schema_version/)
 assert.match(instanceMigration, /instance_key/)
 assert.match(instanceMigration, /uq_lead_facts_instance_version/)
 assert.equal(LEAD_ENRICHMENT_TOPIC_KEYS.length, 13)
-assert.equal(LEAD_ENRICHMENT_SCHEMA_VERSION, 'lead-enrichment-v3')
+assert.equal(LEAD_ENRICHMENT_SCHEMA_VERSION, 'lead-enrichment-v4-investment-profile')
+assert.match(enrichmentService, /schema_version/)
+assert.match(enrichmentService, /triggerType exceeds 48 characters/)
+assert.match(worker, /j\.schema_version=\?/)
+assert.match(worker, /UPDATE \$\{topicRunsTable\} tr JOIN \$\{jobsTable\} j[\s\S]*j\.schema_version=\?/)
+assert.match(worker, /WHERE schema_version=\? AND status='running'/)
+assert.match(worker, /SELECT tr\.id,tr\.job_id,tr\.lead_id,tr\.last_error[\s\S]*j\.schema_version=\?/)
+assert.match(worker, /Math\.min\(10,/)
+assert.doesNotMatch(enrichmentService, /enqueueLeadScoreJob/)
+assert.match(enrichmentService, /enqueueRating: false/)
 assert.deepEqual(LEAD_DETAIL_ENRICHMENT_TOPIC_KEYS, [
-  'basic_profile', 'financing', 'team', 'products', 'latest_developments',
+  'basic_profile', 'financing', 'team', 'customers_contracts', 'products',
+  'technology_ip', 'industrialization', 'transaction_exit', 'latest_developments',
 ])
 assert.match(eventService, /enqueueLeadEnrichmentJob/)
+assert.match(eventService, /LEAD_ENRICHMENT_JOB_REQUIRED/)
+assert.match(eventService, /enrichment\.jobId/)
 assert.match(eventService, /lead-scoring-input.*project-scoring-input/s)
 assert.match(eventService, /company_deregistered/)
 assert.match(eventService, /'ready','rejected'/)
 assert.match(worker, /researchLeadTopicWithWeb/)
 assert.match(worker, /fetchLeadSourceDocument/)
 assert.match(worker, /sourceDocumentContainsQuote/)
+assert.match(worker, /validateLeadFactCandidate\(candidate\)/)
+assert.match(worker, /deterministicRejectedFactCount/)
 assert.match(worker, /sourceDocumentId: document\.id/)
 assert.match(worker, /excludeDeregisteredLeadFromPool/)
 assert.match(worker, /lease_owner=\?/)
@@ -91,9 +106,12 @@ assert.match(evidenceClassification, /official_public_record/)
 assert.match(conflictDetection, /同一事实键出现多个不同值/)
 assert.match(conflictDetection, /leadFactIdentityKey/)
 assert.match(topicResearch, /repeatable fact requires a stable instanceKey/)
-assert.match(topicResearch, /lead-topic-web-research-v7-detail-fields/)
+assert.match(topicResearch, /lead-topic-web-research-v9-primary-sources/)
+assert.match(topicResearch, /LEAD_TOPIC_PRIMARY_SOURCE_POLICY/)
+assert.match(topicResearch, /site:gov\.cn/)
 assert.deepEqual(leadTopicResearchContract('financing').factKeys, [
-  'financing.status', 'financing.round', 'financing.amount', 'financing.investors',
+  'financing.status', 'financing.round', 'financing.date', 'financing.amount',
+  'financing.investors', 'financing.lead_investor', 'financing.investor_role',
 ])
 assert.deepEqual(leadTopicResearchContract('latest_developments').factKeys, ['news.event', 'news.event_date'])
 assert(leadTopicResearchContract('basic_profile').factKeys.includes('profile.website'))
@@ -101,6 +119,16 @@ assert(leadTopicResearchContract('basic_profile').factKeys.includes('profile.ind
 assert.match(topicResearch, /candidates: z\.array/)
 assert.match(topicResearch, /quote: z\.string/)
 assert.match(topicResearch, /LEAD_ENRICHMENT_RESEARCH_BACKEND === 'codex-cli'/)
+assert.match(topicResearch, /acquireLeadAgentRuntimePermit/)
+assert.match(topicResearch, /lead-enrichment-web-research/)
+assert.match(topicResearch, /finishLeadAgentRuntimePermit/)
+assert.match(prefetchResearch, /leadIds\.length >= 1 && leadIds\.length <= 10/)
+assert.match(prefetchResearch, /prefetch fails closed for non-confirmed subjects/)
+assert.match(prefetchResearch, /ALLOW_LEAD_RESEARCH_PREFETCH/)
+assert.match(prefetchResearch, /Math\.min\(10,/)
+assert.match(prefetchResearch, /writeLeadTopicSearchCache/)
+assert.match(prefetchResearch, /businessDataWrites: 0/)
+assert.match(prefetchResearch, /receipt\.sync\(\)/)
 assert.match(codexCliResearch, /'--search', 'exec'/)
 assert.match(codexCliResearch, /'--ephemeral'/)
 assert.match(codexCliResearch, /'read-only'/)
@@ -119,6 +147,11 @@ assert.match(enrichmentService, /companyFactIds/)
 assert.match(enrichmentService, /projection\?: 'audit' \| 'verified-display'/)
 assert.match(enrichmentService, /verification_status='verified'/)
 assert.match(enrichmentService, /displayProjection \? \{[\s\S]*sourceUrl:[\s\S]*\} : \{[\s\S]*quote:/)
+assert.match(enrichmentService, /display_fact\.fact_key LIKE 'customer\.%'/)
+assert.match(enrichmentService, /confidential_fact\.instance_key=display_fact\.instance_key/)
+assert.match(enrichmentService, /JSON_UNQUOTE\(confidential_fact\.value\)[\s\S]*保密\|受限\|confidential\|restricted/)
+assert.match(enrichmentService, /sensitive_customer\.confidentiality IN \('confidential','restricted'\)/)
+assert.match(enrichmentService, /JSON_TABLE\([\s\S]*sensitive_customer\.aliases[\s\S]*sensitive_alias\.alias/)
 assert.match(enrichmentService, /manualRetries/)
 assert.match(enrichmentService, /人工确认联网补全主体/)
 assert.match(enrichmentService, /entityConfirmations/)
@@ -185,12 +218,14 @@ assert.match(routes, /post\('\/leads\/:id\/enrichment\/conflicts\/:conflictId\/r
 assert.doesNotMatch(detailPage, /联网资料补全/)
 assert.doesNotMatch(detailPage, /enrichment\/topics\/\$\{topicKey\}\/retry/)
 assert.doesNotMatch(detailPage, /enrichment\/entity\/confirm/)
-assert.doesNotMatch(detailPage, /enrichment\/conflicts/)
+assert.match(detailPage, /canManageLeadPool\(currentUser\)[\s\S]*dataStatus\.conflictCount/)
+assert.match(detailPage, /`\/leads\/\$\{leadId\}\/enrichment\/conflicts`/)
+assert.match(detailPage, /enrichment\/conflicts\/\$\{selectedConflictId\}\/resolve/)
 assert.doesNotMatch(detailPage, /`\/leads\/\$\{id\}\/enrichment`/)
 assert.doesNotMatch(detailPage, /`\/leads\/\$\{leadId\}\/facts\?/)
 assert.match(detailPage, /`\/leads\/\$\{id\}\/verified-profile`/)
 assert.match(detailPage, /`\/leads\/\$\{leadId\}\/verified-facts\?/)
-assert.doesNotMatch(detailPage, /主体与关系|已提取事实与直接来源|加载更多事实|裁决联网补全冲突/)
+assert.doesNotMatch(detailPage, /主体与关系|已提取事实与直接来源|加载更多事实/)
 assert.match(detailPage, /loadAllLeadVerifiedFacts/)
 assert.match(detailPage, /fact\.verificationStatus === 'verified'/)
 assert.match(detailPage, /fact\.evidence\.some\(\(evidence\) => Boolean\(externalUrl\(evidence\.sourceUrl\)\)\)/)
@@ -211,10 +246,17 @@ assert.match(detailPage, /projectIntroductionCandidates[\s\S]*projectIntroductio
 assert.match(detailPage, /lead\.projectIntroduction/)
 assert.match(detailPage, /headlineIntroductionText/)
 assert.doesNotMatch(detailPage, /lead\.scoring\?\.companyIntroduction \|\| lead\.scoring\?\.whatIsIt \|\| lead\.summary/)
-assert.match(detailPage, /currentUser\?\.role === '系统管理员'/)
+assert.match(detailPage, /permissionCodes\?\.includes\('system\.manage'\)/)
+assert.match(detailPage, /canManageLeadPool\(currentUser\)/)
 assert.match(systemPage, /V3评分恢复/)
 assert.match(systemPage, /ratings\/history\/\$\{ratingRestoreTarget\.id\}\/restore/)
 assert.match(backfill, /report-read-only/)
+assert.match(backfill, /--lead-ids accepts at most 100 explicit IDs per batch/)
+assert.match(backfill, /--lead-ids was provided but empty; refusing to fall back to page mode/)
+assert.match(backfill, /page-mode apply requires explicit --allow-page-selection acknowledgement/)
+assert.match(backfill, /--batch-id must be 1-28 safe characters/)
+assert.match(backfill, /--lead-ids includes a missing or inactive lead; no jobs were queued/)
+assert.match(backfill, /mode: 'explicit-lead-ids'/)
 assert.match(backfill, /deregisteredEvicted/)
 assert.match(backfill, /reRated/)
 assert.match(backfill, /retry-preview/)
@@ -222,6 +264,8 @@ assert.match(backfill, /all-retryable/)
 assert.match(backfill, /budget is never retried automatically/)
 assert.match(backfill, /batchRetries/)
 assert.match(backfill, /按错误类型重试历史补全批次/)
+assert.match(backfill, /j\.status IN \('queued','running'\)/)
+assert.match(backfill, /tr\.status IN \('queued','retrying','running'\)/)
 
 const identity = normalizePaperIdentity({ sourceName: 'arXiv', sourceId: 'W1234567890', link: 'https://openalex.org/W1234567890' })
 assert.equal(identity.provider, 'openalex')
@@ -250,8 +294,8 @@ const snapshot = buildLeadEnrichmentSnapshot({
 assert.equal(snapshot.status, 'ready')
 
 const companyStates = initialTopicStates({ entityType: 'company' })
-assert.equal(Object.values(companyStates).filter((status) => status === 'queued').length, 5)
-assert.equal(Object.values(companyStates).filter((status) => status === 'not_applicable').length, 8)
+assert.equal(Object.values(companyStates).filter((status) => status === 'queued').length, 9)
+assert.equal(Object.values(companyStates).filter((status) => status === 'not_applicable').length, 4)
 for (const key of LEAD_DETAIL_ENRICHMENT_TOPIC_KEYS) companyStates[key] = 'completed'
 const completeDetailSnapshot = buildLeadEnrichmentSnapshot({
   leadId: 'company-lead', jobId: 'company-job', entityType: 'company', topicStates: companyStates,
@@ -266,6 +310,7 @@ console.log(JSON.stringify({
     'pipeline-ready-enqueues-without-scoring-recursion',
     'detail-field-topic-scope-worker-health-provider-billing-circuit-and-repeat-polling',
     'codex-cli-web-search-worker-keeps-host-evidence-gates',
+    'confirmed-subject-codex-prefetch-is-bounded-cached-and-recoverable',
     'evidence-gate-and-immutable-snapshot',
     'openalex-content-and-deregistered-company-guards',
     'independent-intake-worker-and-auto-score-rollback-switches',

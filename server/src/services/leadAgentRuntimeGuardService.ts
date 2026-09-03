@@ -20,7 +20,7 @@ function boundedNumber(value: unknown, fallback: number, min: number, max: numbe
 
 export function leadAgentRuntimeGuardConfig() {
   return {
-    maxConcurrency: Math.round(boundedNumber(process.env.LEAD_AGENT_GLOBAL_MAX_CONCURRENCY, 16, 1, 64)),
+    maxConcurrency: Math.round(boundedNumber(process.env.LEAD_AGENT_GLOBAL_MAX_CONCURRENCY, 10, 1, 64)),
     maxRequestsPerMinute: Math.round(boundedNumber(process.env.LEAD_AGENT_GLOBAL_MAX_REQUESTS_PER_MINUTE, 60, 1, 10_000)),
     dailyBudgetMicrousd: Math.round(boundedNumber(process.env.LEAD_AGENT_GLOBAL_DAILY_BUDGET_USD, 100, 0.1, 100_000) * 1_000_000),
     defaultReservationMicrousd: Math.round(boundedNumber(process.env.LEAD_AGENT_GLOBAL_RESERVATION_USD, 0.75, 0.01, 4) * 1_000_000),

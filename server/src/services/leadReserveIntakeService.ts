@@ -102,42 +102,8 @@ function reserveLead(row: LeadReserveRawRow, sourceKey: string) {
   }
 }
 
-export type LeadScoringScheduler = (leadId: string) => Promise<boolean>
-
-export async function compensateLeadReserveScoring(scheduleScoring: LeadScoringScheduler, limit = 200) {
-  const [rows] = await pool.query<Array<RowDataPacket & { id: number; imported_lead_id: string }>>(
-    `SELECT id, imported_lead_id FROM ${reserveTable}
-     WHERE imported=1 AND imported_lead_id IS NOT NULL AND score_status='pending'
-     ORDER BY imported_at, id LIMIT ?`,
-    [Math.max(1, Math.min(limit, 1_000))],
-  )
-  let requested = 0
-  let deferred = 0
-  for (const row of rows) {
-    try {
-      if (await scheduleScoring(row.imported_lead_id)) {
-        await pool.query(
-          `UPDATE ${reserveTable} SET score_status='requested', score_requested_at=NOW(3), score_last_error=NULL WHERE id=?`,
-          [row.id],
-        )
-        requested += 1
-      } else {
-        deferred += 1
-      }
-    } catch (error) {
-      await pool.query(
-        `UPDATE ${reserveTable} SET score_last_error=? WHERE id=?`,
-        [(error instanceof Error ? error.message : String(error)).slice(0, 4_000), row.id],
-      )
-      deferred += 1
-    }
-  }
-  return { found: rows.length, requested, deferred }
-}
-
 export async function runLeadReserveIntake(options: {
   limit: number
-  scheduleScoring: LeadScoringScheduler
 }) {
   const limit = Math.max(1, Math.min(options.limit, 500))
   const connection = await pool.getConnection()
@@ -204,7 +170,7 @@ export async function runLeadReserveIntake(options: {
       }, connection)
       await connection.query(
         `UPDATE ${reserveTable} SET imported=1, imported_at=COALESCE(imported_at,NOW(3)),
-          imported_lead_id=?, score_status='pending', score_last_error=NULL WHERE id=?`,
+          imported_lead_id=?, score_status='not_requested', score_last_error=NULL WHERE id=?`,
         [leadId, row.id],
       )
       insertedIds.push(leadId)
@@ -217,7 +183,6 @@ export async function runLeadReserveIntake(options: {
     connection.release()
   }
 
-  const scoring = await compensateLeadReserveScoring(options.scheduleScoring, Math.max(limit * 2, 200))
   const [remainingRows] = await pool.query<Array<RowDataPacket & { count: number }>>(
     `SELECT COUNT(*) AS count FROM ${reserveTable} WHERE imported=0`,
   )
@@ -225,7 +190,7 @@ export async function runLeadReserveIntake(options: {
     ok: true,
     selected: insertedIds.length,
     insertedIds,
-    scoring,
+    scoring: { found: 0, requested: 0, deferred: 0, automatic: false },
     remaining: Number(remainingRows[0]?.count) || 0,
   }
 }

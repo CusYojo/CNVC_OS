@@ -1,4 +1,5 @@
 /* FDE's effective 2026.08 visual tokens. Scoped so the login form stays unchanged. */
+body:has(.fde-app) { min-width: 320px; }
 .fde-app {
   --bg: #f5f7f9;
   --surface: #fff;

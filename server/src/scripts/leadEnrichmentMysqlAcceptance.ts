@@ -98,7 +98,7 @@ async function main() {
     await pool.query(`CREATE DATABASE ${quoteMysqlIdentifier(database)} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`)
     created = true
     await runScript('server/src/scripts/migrateMySqlSchema.ts', database)
-    const result = await runScript('server/src/scripts/leadEnrichmentMysqlFixtureAcceptance.ts', database, {
+    const result = await runScript('server/src/scripts/leadEnrichmentMysqlFixtureRunner.ts', database, {
       ALLOW_MYSQL_ACCEPTANCE_WRITES: '1',
       LEAD_ENRICHMENT_ENABLED: 'false',
       LEAD_SCORE_WORKER_ENABLED: 'false',

@@ -3,7 +3,7 @@ import { quoteMysqlIdentifier } from '../db/config.js'
 
 export const MYSQL_RUNTIME_PRIVILEGES = ['SELECT', 'INSERT', 'UPDATE', 'DELETE'] as const
 export const MYSQL_MIGRATION_PRIVILEGES = [
-  'SELECT', 'INSERT', 'UPDATE', 'DELETE', 'CREATE', 'ALTER', 'DROP', 'INDEX', 'REFERENCES',
+  'SELECT', 'INSERT', 'UPDATE', 'DELETE', 'CREATE', 'ALTER', 'DROP', 'INDEX', 'REFERENCES', 'TRIGGER',
 ] as const
 
 export type MysqlAccountSpec = {

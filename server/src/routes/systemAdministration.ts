@@ -19,6 +19,17 @@ import {
   updateRole,
   updateUserRoleBindings,
 } from '../services/systemAdministrationService.js'
+import {
+  createLeadAcademicInstitutionDictionaryItem,
+  createLeadCustomerDictionaryItem,
+  createLeadIndustryDictionaryItem,
+  createLeadInstitutionDictionaryItem,
+  listLeadInvestmentProfileDictionaries,
+  updateLeadAcademicInstitutionDictionaryItem,
+  updateLeadCustomerDictionaryItem,
+  updateLeadIndustryDictionaryItem,
+  updateLeadInstitutionDictionaryItem,
+} from '../services/leadInvestmentProfileDictionaryService.js'
 
 export const systemAdministrationRouter = Router()
 // Already authenticated by /api; only one's own minimal technical receipt.
@@ -34,6 +45,8 @@ const status = z.enum(['启用', '禁用'])
 const dataScope = z.enum(['self', 'department', 'all'])
 const fdeCategory = z.custom<FdeRoleCategory>((value) => FDE_ROLE_CATEGORIES.some((category) => category.code === value)).nullable().optional()
 const ruleReason = z.string().trim().min(5).max(1000)
+const investmentDictionaryStatus = z.enum(['active', 'inactive'])
+const dictionaryAliases = z.array(z.string().trim().min(1).max(255)).max(100)
 
 systemAdministrationRouter.get('/office-policies', async (req: AuthedRequest, res, next) => { try { res.setHeader('Cache-Control', 'private, no-store'); res.json(await listOfficePolicies(req.user!.uid)) } catch (e) { next(e) } })
 systemAdministrationRouter.post('/office-policy-versions/:id/save', async (req: AuthedRequest, res, next) => { try { res.json(await saveOfficePolicy(routeId(req.params.id), req.user!.uid, req.body)) } catch (e) { next(e) } })
@@ -74,6 +87,103 @@ systemAdministrationRouter.patch('/fde-policies/:id', async (req: AuthedRequest,
 
 systemAdministrationRouter.get('/', async (_req, res, next) => {
   try { res.json(await listSystemAdministration()) } catch (error) { next(error) }
+})
+
+systemAdministrationRouter.get('/investment-profile-dictionaries', async (_req, res, next) => {
+  try { res.setHeader('Cache-Control', 'private, no-store'); res.json(await listLeadInvestmentProfileDictionaries()) } catch (error) { next(error) }
+})
+
+systemAdministrationRouter.post('/investment-profile-dictionaries/institutions', async (req: AuthedRequest, res, next) => {
+  try {
+    const body = z.object({
+      canonicalName: z.string().trim().min(1).max(255), aliases: dictionaryAliases.optional(),
+      institutionType: z.string().trim().min(1).max(64), tier: z.string().trim().min(1).max(32).nullable().optional(),
+      major: z.boolean(), status: investmentDictionaryStatus.optional(), reason: ruleReason,
+    }).strict().parse(req.body)
+    res.status(201).json(await createLeadInstitutionDictionaryItem(body, actor(req)))
+  } catch (error) { next(error) }
+})
+
+systemAdministrationRouter.patch('/investment-profile-dictionaries/institutions/:id', async (req: AuthedRequest, res, next) => {
+  try {
+    const body = z.object({
+      canonicalName: z.string().trim().min(1).max(255).optional(), aliases: dictionaryAliases.optional(),
+      institutionType: z.string().trim().min(1).max(64).optional(), tier: z.string().trim().min(1).max(32).nullable().optional(),
+      major: z.boolean().optional(), status: investmentDictionaryStatus.optional(),
+      expectedVersion: z.number().int().positive(), reason: ruleReason,
+    }).strict().parse(req.body)
+    res.json(await updateLeadInstitutionDictionaryItem(routeId(req.params.id), body, actor(req)))
+  } catch (error) { next(error) }
+})
+
+systemAdministrationRouter.post('/investment-profile-dictionaries/customers', async (req: AuthedRequest, res, next) => {
+  try {
+    const body = z.object({
+      canonicalName: z.string().trim().min(1).max(255), aliases: dictionaryAliases.optional(),
+      tier: z.enum(['A', 'B', 'C']), confidentiality: z.enum(['public', 'confidential', 'restricted']),
+      status: investmentDictionaryStatus.optional(), reason: ruleReason,
+    }).strict().parse(req.body)
+    res.status(201).json(await createLeadCustomerDictionaryItem(body, actor(req)))
+  } catch (error) { next(error) }
+})
+
+systemAdministrationRouter.patch('/investment-profile-dictionaries/customers/:id', async (req: AuthedRequest, res, next) => {
+  try {
+    const body = z.object({
+      canonicalName: z.string().trim().min(1).max(255).optional(), aliases: dictionaryAliases.optional(),
+      tier: z.enum(['A', 'B', 'C']).optional(), confidentiality: z.enum(['public', 'confidential', 'restricted']).optional(),
+      status: investmentDictionaryStatus.optional(),
+      expectedVersion: z.number().int().positive(), reason: ruleReason,
+    }).strict().parse(req.body)
+    res.json(await updateLeadCustomerDictionaryItem(routeId(req.params.id), body, actor(req)))
+  } catch (error) { next(error) }
+})
+
+systemAdministrationRouter.post('/investment-profile-dictionaries/industries', async (req: AuthedRequest, res, next) => {
+  try {
+    const body = z.object({
+      canonicalName: z.string().trim().min(1).max(255), aliases: dictionaryAliases.optional(),
+      level1: z.string().trim().min(1).max(128), level2: z.string().trim().min(1).max(128).nullable().optional(),
+      segment: z.string().trim().min(1).max(255).nullable().optional(),
+      chainPosition: z.string().trim().min(1).max(128).nullable().optional(),
+      status: investmentDictionaryStatus.optional(), reason: ruleReason,
+    }).strict().parse(req.body)
+    res.status(201).json(await createLeadIndustryDictionaryItem(body, actor(req)))
+  } catch (error) { next(error) }
+})
+
+systemAdministrationRouter.patch('/investment-profile-dictionaries/industries/:id', async (req: AuthedRequest, res, next) => {
+  try {
+    const body = z.object({
+      canonicalName: z.string().trim().min(1).max(255).optional(), aliases: dictionaryAliases.optional(),
+      level1: z.string().trim().min(1).max(128).optional(), level2: z.string().trim().min(1).max(128).nullable().optional(),
+      segment: z.string().trim().min(1).max(255).nullable().optional(),
+      chainPosition: z.string().trim().min(1).max(128).nullable().optional(),
+      status: investmentDictionaryStatus.optional(), expectedVersion: z.number().int().positive(), reason: ruleReason,
+    }).strict().parse(req.body)
+    res.json(await updateLeadIndustryDictionaryItem(routeId(req.params.id), body, actor(req)))
+  } catch (error) { next(error) }
+})
+
+systemAdministrationRouter.post('/investment-profile-dictionaries/academic-institutions', async (req: AuthedRequest, res, next) => {
+  try {
+    const body = z.object({
+      canonicalName: z.string().trim().min(1).max(255), aliases: dictionaryAliases.optional(),
+      institutionType: z.string().trim().min(1).max(64), status: investmentDictionaryStatus.optional(), reason: ruleReason,
+    }).strict().parse(req.body)
+    res.status(201).json(await createLeadAcademicInstitutionDictionaryItem(body, actor(req)))
+  } catch (error) { next(error) }
+})
+
+systemAdministrationRouter.patch('/investment-profile-dictionaries/academic-institutions/:id', async (req: AuthedRequest, res, next) => {
+  try {
+    const body = z.object({
+      canonicalName: z.string().trim().min(1).max(255).optional(), aliases: dictionaryAliases.optional(),
+      institutionType: z.string().trim().min(1).max(64).optional(), status: investmentDictionaryStatus.optional(),
+      expectedVersion: z.number().int().positive(), reason: ruleReason,
+    }).strict().parse(req.body)
+    res.json(await updateLeadAcademicInstitutionDictionaryItem(routeId(req.params.id), body, actor(req)))
+  } catch (error) { next(error) }
 })
 
 systemAdministrationRouter.put('/users/:id/roles', async (req: AuthedRequest, res, next) => {

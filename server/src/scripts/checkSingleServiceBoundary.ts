@@ -2330,8 +2330,8 @@ async function main() {
     /listLeadPipelineReviews/.test(metaRoutes)
     && /resolveAndCommitLeadPipelineReview/.test(metaRoutes)
     && /lead-pipeline\/reviews\/:id\/resolve/.test(metaRoutes)
-    && /scheduleLeadScoring\(result\.leadId\)/.test(metaRoutes),
-    'lead manual review API must list from MySQL, resolve through the host transaction and queue accepted scoring',
+    && /scoringQueued: false/.test(metaRoutes),
+    'lead manual review API must list from MySQL, resolve through the host transaction and avoid automatic shared-pool scoring',
   )
   requireCondition(
     /beginTransaction\(\)/.test(leadPipelineReviewService)
@@ -3471,10 +3471,9 @@ async function main() {
   )
   requireCondition(
     /desc\(projects\.pinned\),\s*desc\(projects\.updatedAt\),\s*desc\(projects\.id\)/s.test(projectService)
-    && /options\.sort === 'score' \? desc\(overallScoreExpr\) : desc\(leads\.createdAt\),\s*desc\(leads\.id\)/s.test(aiSummaryService)
+    && /options\.sort === 'funding'[\s\S]*?: desc\(leads\.createdAt\),\s*desc\(leads\.id\)/s.test(aiSummaryService)
     && /project-pagination-tied-sort-values-use-unique-id-without-duplicates-or-omissions/.test(stablePaginationAcceptance)
     && /lead-created-time-pagination-ties-use-unique-id-and-repeat-stably/.test(stablePaginationAcceptance)
-    && /lead-score-pagination-ties-use-unique-id-and-repeat-stably/.test(stablePaginationAcceptance)
     && /lead-review-pagination-order-ends-in-unique-id/.test(stablePaginationAcceptance)
     && packageJson.scripts?.['accept:stable-pagination']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/stablePaginationAcceptance.ts'

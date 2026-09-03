@@ -436,6 +436,45 @@
 .lead-review-business-grid span { display: block; color: rgba(38,38,38,.46); font-size: 12px; }
 .lead-review-business-grid strong { display: block; margin-top: 7px; color: #232838; font-size: 16px; font-weight: 600; }
 .lead-review-business-grid p { margin: 7px 0 0; color: rgba(38,38,38,.6); font-size: 13px; line-height: 20px; }
+.lead-review-investment-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 12px; padding: 0 24px 24px; }
+.lead-review-investment-warning { display: flex; align-items: center; gap: 8px; margin: 0 24px 12px; padding: 10px 12px; border: 1px solid rgba(217,119,6,.25); background: rgba(255,247,237,.9); color: #9a5b08; font-size: 12px; line-height: 1.5; }
+.lead-review-investment-warning svg { width: 16px; height: 16px; flex: 0 0 auto; }
+.lead-review-investment-warning span { min-width: 0; flex: 1; }
+.lead-review-investment-warning button { flex: 0 0 auto; border: 0; background: transparent; color: #206cff; font-weight: 600; cursor: pointer; }
+.lead-review-investment-warning button:focus-visible { border-radius: 3px; outline: 2px solid rgba(32,108,255,.45); outline-offset: 2px; }
+.lead-review-investment-grid article { min-height: 116px; padding: 14px 16px; border: 1px solid rgba(32,108,255,.13); background: #fff; }
+.lead-review-investment-grid article > span { display: block; color: rgba(38,38,38,.46); font-size: 12px; }
+.lead-review-investment-grid article > strong { display: block; margin-top: 7px; color: #232838; font-size: 15px; font-weight: 600; line-height: 1.45; }
+.lead-review-investment-grid article > p { margin: 7px 0 0; color: rgba(38,38,38,.6); font-size: 12px; line-height: 1.6; }
+.lead-review-investment-sources { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-top: 10px; }
+.lead-review-investment-sources a { display: inline-flex; align-items: center; gap: 3px; color: #206cff; font-size: 12px; text-decoration: none; }
+.lead-review-investment-sources a:hover { text-decoration: underline; }
+.lead-review-investment-sources a:focus-visible { border-radius: 3px; outline: 2px solid rgba(32,108,255,.45); outline-offset: 2px; }
+.lead-review-investment-sources a svg { width: 12px; height: 12px; }
+.lead-review-investment-sources span { color: rgba(38,38,38,.46); font-size: 12px; }
+.lead-review-investment-source-empty { display: block; margin-top: 10px; color: #9a6700; font-size: 12px; line-height: 1.5; }
+.lead-review-investment-source-restricted { display: block; margin-top: 10px; color: rgba(38,38,38,.5); font-size: 12px; line-height: 1.5; }
+.lead-review-conflict-review { display: grid; min-height: 280px; grid-template-columns: minmax(180px,240px) minmax(0,1fr); gap: 18px; }
+.lead-review-conflict-review > p, .lead-review-conflict-review > .lead-review-investment-warning { grid-column: 1 / -1; align-self: start; margin: 0; }
+.lead-review-conflict-review nav { display: flex; flex-direction: column; gap: 6px; padding-right: 12px; border-right: 1px solid rgba(35,40,56,.1); }
+.lead-review-conflict-review nav button { display: grid; gap: 4px; padding: 10px 12px; border: 1px solid transparent; border-radius: 5px; background: rgba(35,40,56,.03); color: #262626; text-align: left; }
+.lead-review-conflict-review nav button.active { border-color: rgba(32,108,255,.3); background: rgba(32,108,255,.07); }
+.lead-review-conflict-review nav span, .lead-review-conflict-review section > header span { color: rgba(38,38,38,.55); font-size: 12px; }
+.lead-review-conflict-review section { min-width: 0; }
+.lead-review-conflict-review section > header { display: grid; gap: 4px; margin-bottom: 12px; }
+.lead-review-conflict-candidates { display: grid; gap: 9px; }
+.lead-review-conflict-candidates > label { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 10px; padding: 12px; border: 1px solid rgba(35,40,56,.12); border-radius: 5px; }
+.lead-review-conflict-candidates > label.selected { border-color: rgba(32,108,255,.45); background: rgba(32,108,255,.04); }
+.lead-review-conflict-candidates > label > span { display: grid; min-width: 0; gap: 5px; }
+.lead-review-conflict-candidates small { color: rgba(38,38,38,.5); }
+.lead-review-conflict-candidates .evidence { display: grid; gap: 4px; padding-top: 7px; border-top: 1px dashed rgba(35,40,56,.12); }
+.lead-review-conflict-candidates .evidence em { color: rgba(38,38,38,.6); font-size: 12px; font-style: normal; }
+.lead-review-conflict-candidates .evidence q { color: rgba(38,38,38,.75); font-size: 12px; line-height: 1.55; }
+.lead-review-conflict-candidates .evidence a { display: inline-flex; align-items: center; gap: 4px; color: #206cff; font-size: 12px; }
+.lead-review-conflict-candidates .evidence a svg { width: 12px; }
+.lead-review-conflict-reason { display: grid; gap: 6px; margin-top: 14px; color: rgba(38,38,38,.7); font-size: 13px; }
+.lead-review-conflict-reason textarea { min-height: 78px; resize: vertical; border: 1px solid rgba(35,40,56,.18); border-radius: 5px; padding: 9px 10px; }
+.lead-review-conflict-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
 .lead-review-team-summary { margin: 0; padding: 0 24px 14px; color: rgba(38,38,38,.68); font-size: 13px; line-height: 21px; white-space: pre-line; }
 .lead-review-team-list { display: grid; gap: 10px; padding: 0 24px 24px; }
 .lead-review-team-list article { display: flex; min-height: 68px; align-items: flex-start; gap: 14px; padding: 13px 18px; background: rgba(38,38,38,.025); }
@@ -482,7 +521,9 @@
   .lead-review-actions { display: grid; width: 100%; margin-top: 0; }
   .lead-review-convert-button, .lead-review-delete-button { width: 100%; }
   .lead-review-content { margin-top: 24px; }
-  .lead-review-business-grid, .lead-review-fact-table, .lead-review-evidence-grid { grid-template-columns: 1fr; }
+  .lead-review-business-grid, .lead-review-investment-grid, .lead-review-fact-table, .lead-review-evidence-grid { grid-template-columns: 1fr; }
+  .lead-review-conflict-review { grid-template-columns: 1fr; }
+  .lead-review-conflict-review nav { max-height: 180px; overflow-y: auto; padding: 0 0 12px; border-right: 0; border-bottom: 1px solid rgba(35,40,56,.1); }
 }
 
 /* 共享线索池：复用全站页面标题与卡片视觉规范，并严格限定命名空间。 */
@@ -509,12 +550,13 @@
 .lead-pool-clear:hover { color: #1764f6; }
 
 .lead-pool-table-card { position: relative; overflow: hidden; border: 1px solid rgba(226, 232, 240, .9); border-radius: 12px; background: #fff; box-shadow: 0 1px 2px rgba(20, 45, 95, .04), 0 8px 24px rgba(20, 45, 95, .05); }
-.lead-pool-table { position: relative; min-width: 1080px; }
-.lead-pool-table-head, .lead-pool-row { display: grid; grid-template-columns: 1.42fr 1.3fr .8fr 1.28fr .72fr 1fr .7fr; gap: 16px; }
+.lead-pool-table-scroll { overflow-x: auto; scrollbar-width: thin; scrollbar-color: #cbd5e1 transparent; }
+.lead-pool-table { position: relative; min-width: 1120px; }
+.lead-pool-table-head, .lead-pool-row { display: grid; grid-template-columns: 1.18fr 1.42fr 1.4fr .9fr .8fr 1.08fr .78fr; gap: 14px; }
 .lead-pool-table-head { min-height: 46px; align-items: center; padding: 0 16px; border-bottom: 1px solid #dfe5ed; background: #f7f9fc; }
 .lead-pool-table-head span { color: #657289; font-size: 12px; font-weight: 600; }
 .lead-pool-row-group { max-height: calc(100vh - 372px); min-height: 420px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: #cbd5e1 transparent; }
-.lead-pool-row { position: relative; min-height: 156px; align-items: center; padding: 20px 16px; border-bottom: 1px solid #e4e8ee; cursor: pointer; outline: none; transition: background .15s ease, box-shadow .15s ease; }
+.lead-pool-row { position: relative; min-height: 172px; align-items: center; padding: 18px 16px; border-bottom: 1px solid #e4e8ee; cursor: pointer; outline: none; transition: background .15s ease, box-shadow .15s ease; }
 .lead-pool-row:last-child { border-bottom: 0; }
 .lead-pool-row:hover, .lead-pool-row:focus-visible { z-index: 1; background: #fbfdff; box-shadow: inset 3px 0 #6b7cff; }
 .lead-pool-row > * { min-width: 0; }
@@ -545,11 +587,17 @@
 .lead-pool-rating > strong.grade-d { color: #9a6700; }
 .lead-pool-rating > strong.pending { color: #98a2b3; font-size: 12px; font-weight: 500; letter-spacing: 0; }
 .lead-pool-rating > strong.failed { color: #c2414a; font-size: 12px; font-weight: 600; }
-.lead-pool-funding { display: grid; gap: 9px; margin: 0; }
-.lead-pool-funding div { display: grid; min-width: 0; grid-template-columns: 48px 1fr; gap: 7px; font-size: 12px; line-height: 1.5; }
-.lead-pool-funding dt { color: #a1aaba; }
-.lead-pool-funding dd { margin: 0; overflow: hidden; color: #435169; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
-.lead-pool-funding dd.status { color: #2367cc; font-weight: 600; }
+.lead-pool-profile-cell { display: grid; align-content: center; gap: 8px; color: #536075; }
+.lead-pool-profile-cell > p { min-width: 0; margin: 0; font-size: 11px; line-height: 1.45; }
+.lead-pool-profile-cell > p > strong, .lead-pool-profile-cell > p > span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lead-pool-profile-cell > p > strong { color: #33445e; font-size: 12px; font-weight: 600; }
+.lead-pool-profile-cell > p > span { margin-top: 3px; color: #7b8799; }
+.lead-pool-profile-cell > small { color: #778397; font-size: 10px; line-height: 1.45; }
+.lead-pool-profile-cell .lead-pool-tags { margin-top: 0; }
+.lead-pool-profile-list { display: grid; gap: 8px; margin: 0; }
+.lead-pool-profile-list > div { display: grid; min-width: 0; grid-template-columns: 32px 1fr; gap: 5px; font-size: 11px; line-height: 1.45; }
+.lead-pool-profile-list dt { color: #9ba6b6; }
+.lead-pool-profile-list dd { margin: 0; overflow: hidden; color: #3f4f66; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
 .lead-pool-updates { position: relative; display: grid; gap: 10px; padding-left: 2px; }
 .lead-pool-updates::before { position: absolute; top: 8px; bottom: 8px; left: 5px; width: 1px; background: #dfe5ec; content: ""; }
 .lead-pool-updates > div { position: relative; display: grid; grid-template-columns: 11px 1fr; align-items: start; gap: 6px; }
@@ -596,7 +644,6 @@
 .lead-pool-page-size svg { position: absolute; right: 9px; width: 13px; pointer-events: none; color: #8e99aa; }
 
 @media (max-width: 1280px) {
-  .lead-pool-table-card { overflow-x: auto; }
   .lead-pool-filters { grid-template-columns: repeat(3, 1fr); }
   .lead-pool-filter-panel { align-items: flex-start; }
 }

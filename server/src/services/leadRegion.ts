@@ -31,6 +31,19 @@ export interface LeadRegionResolution {
   confidence: RegionConfidence
 }
 
+export function businessRegionStorageAliases(region: BusinessRegion): string[] {
+  if (['北京', '上海', '天津', '重庆'].includes(region)) return [region, `${region}市`]
+  if (region === '内蒙古') return [region, '内蒙古自治区']
+  if (region === '广西') return [region, '广西壮族自治区']
+  if (region === '西藏') return [region, '西藏自治区']
+  if (region === '宁夏') return [region, '宁夏回族自治区']
+  if (region === '新疆') return [region, '新疆维吾尔自治区']
+  if (region === '香港') return [region, '香港特别行政区']
+  if (region === '澳门') return [region, '澳门特别行政区']
+  if (region === '台湾') return [region, '台湾省']
+  return [region, `${region}省`]
+}
+
 const REGION_ALIASES: Array<[BusinessRegion, RegExp]> = [
   ['北京', /北京|北京市/],
   ['上海', /上海|上海市/],
@@ -40,7 +53,7 @@ const REGION_ALIASES: Array<[BusinessRegion, RegExp]> = [
   ['山西', /山西|太原|大同|长治|晋城|晋中|运城|临汾|吕梁|忻州|朔州|阳泉/],
   ['内蒙古', /内蒙古|呼和浩特|包头|鄂尔多斯|赤峰|通辽|呼伦贝尔|乌海/],
   ['辽宁', /辽宁|沈阳|大连|鞍山|抚顺|本溪|丹东|锦州|营口|盘锦/],
-  ['吉林', /吉林省|长春|吉林市|延边|四平|辽源|通化|白山|松原|白城/],
+  ['吉林', /吉林|长春|延边|四平|辽源|通化|白山|松原|白城/],
   ['黑龙江', /黑龙江|哈尔滨|齐齐哈尔|大庆|牡丹江|佳木斯|绥化|黑河/],
   ['江苏', /江苏|南京|苏州|无锡|常州|南通|扬州|镇江|泰州|盐城|徐州|淮安|连云港|宿迁|常熟|昆山|江阴|张家港/],
   ['浙江', /浙江|杭州|宁波|温州|嘉兴|湖州|绍兴|金华|衢州|舟山|台州|丽水|义乌|余杭|滨江|萧山/],

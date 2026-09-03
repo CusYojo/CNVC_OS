@@ -50,7 +50,7 @@ async function main() {
         'DB_MIGRATION_USERNAME', 'DB_MIGRATION_HOST', 'DB_MIGRATION_PASSWORD',
       ],
       runtimePrivileges: ['SELECT', 'INSERT', 'UPDATE', 'DELETE'],
-      migrationPrivileges: ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'CREATE', 'ALTER', 'DROP', 'INDEX', 'REFERENCES'],
+      migrationPrivileges: ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'CREATE', 'ALTER', 'DROP', 'INDEX', 'REFERENCES', 'TRIGGER'],
       note: 'Passwords are required only for --apply and are never printed or written to reports.',
     }))
     return

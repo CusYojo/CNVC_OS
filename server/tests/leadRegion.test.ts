@@ -1,9 +1,28 @@
 import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 import {
   normalizeBusinessRegion,
   resolveLeadBusinessRegion,
 } from '../src/services/leadRegion.js'
+import { assertLeadRegionBackfillAllowed } from '../src/services/leadRegionBackfill.js'
+
+test('region backfill fails closed unless explicitly enabled', () => {
+  assert.throws(
+    () => assertLeadRegionBackfillAllowed({}),
+    /ALLOW_LEAD_REGION_BACKFILL=true/,
+  )
+  assert.doesNotThrow(() => assertLeadRegionBackfillAllowed({ ALLOW_LEAD_REGION_BACKFILL: 'true' }))
+})
+
+test('service startup never auto-applies region backfill and preview stays read-only', async () => {
+  const [serverIndex, previewScript] = await Promise.all([
+    readFile(new URL('../src/index.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../src/scripts/previewLeadRegionBackfill.ts', import.meta.url), 'utf8'),
+  ])
+  assert.doesNotMatch(serverIndex, /backfillLeadBusinessRegions/)
+  assert.doesNotMatch(previewScript, /\bdb\.(?:insert|update|delete)\(|ensureSchema\(/)
+})
 
 test('normalizes city-level addresses to province-level business regions', () => {
   assert.equal(normalizeBusinessRegion('深圳市南山区科技园'), '广东')

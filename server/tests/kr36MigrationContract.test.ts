@@ -5,8 +5,10 @@ import test from 'node:test'
 const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8')
 
 test('0091候选库迁移、Schema和运行时必需表保持一致', () => {
-  const journal = JSON.parse(read('../drizzle/meta/_journal.json')) as { entries: Array<{ idx: number; tag: string }> }
-  assert.deepEqual(journal.entries.at(-1), {
+  const journal = JSON.parse(read('../drizzle/meta/_journal.json')) as {
+    entries: Array<{ idx: number; version: string; when: number; tag: string; breakpoints: boolean }>
+  }
+  assert.deepEqual(journal.entries.find((entry) => entry.idx === 91), {
     idx: 91, version: '5', when: 1791445743000,
     tag: '0091_add_lead_source_candidates', breakpoints: true,
   })

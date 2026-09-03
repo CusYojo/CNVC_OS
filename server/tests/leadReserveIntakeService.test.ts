@@ -35,7 +35,7 @@ test('imports one reserve row transactionally and keeps retry idempotent', mysql
   }).$returningId()
   let leadId = ''
   try {
-    const first = await runLeadReserveIntake({ limit: 1, scheduleScoring: async () => true })
+    const first = await runLeadReserveIntake({ limit: 1 })
     assert.equal(first.selected, 1)
     leadId = first.insertedIds[0]
     const [reserve] = await db.select().from(leadReserve).where(eq(leadReserve.id, created.id)).limit(1)
@@ -51,7 +51,7 @@ test('imports one reserve row transactionally and keeps retry idempotent', mysql
     assert.equal(pipelineItem?.leadId, leadId)
 
     await db.update(leadReserve).set({ imported: false, scoreStatus: 'pending' }).where(eq(leadReserve.id, created.id))
-    const second = await runLeadReserveIntake({ limit: 1, scheduleScoring: async () => true })
+    const second = await runLeadReserveIntake({ limit: 1 })
     assert.equal(second.insertedIds[0], leadId)
     const matching = await db.select({ id: leads.id }).from(leads).where(eq(leads.id, leadId))
     assert.equal(matching.length, 1)

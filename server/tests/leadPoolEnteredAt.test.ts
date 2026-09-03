@@ -1,9 +1,12 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  deriveAuthoritativeLeadRegion,
   deriveDataUpdatedAt,
   deriveIndustryTags,
   derivePoolEnteredAt,
+  LEAD_LIST_READ_TRANSACTION,
+  literalLeadLikePattern,
 } from '../src/services/aiSummaryService.js'
 
 test('uses the database insertion timestamp as the pool entry time', () => {
@@ -30,4 +33,28 @@ test('projects normalized source-sector labels into visible industry tags', () =
     '前沿技术、医疗健康',
     ['artificial_intelligence'],
   ), ['人工智能', '前沿技术', '医疗健康'])
+})
+
+test('uses other only as the complement of known industry rules', () => {
+  assert.deepEqual(deriveIndustryTags('其他、医疗健康'), ['医疗健康'])
+  assert.deepEqual(deriveIndustryTags('空间计算'), ['其他'])
+  assert.deepEqual(deriveIndustryTags('待核验'), ['待确认'])
+})
+
+test('escapes SQL LIKE wildcards as literal lead-pool search text', () => {
+  assert.equal(literalLeadLikePattern('100%_完成=是'), '%100=%=_完成==是%')
+})
+
+test('reads lead-list totals and rows in a repeatable read-only transaction', () => {
+  assert.deepEqual(LEAD_LIST_READ_TRANSACTION, {
+    isolationLevel: 'repeatable read',
+    accessMode: 'read only',
+  })
+})
+
+test('list region uses only the authoritative stored business region', () => {
+  assert.deepEqual(deriveAuthoritativeLeadRegion({
+    businessRegion: '江苏省', businessRegionSource: '工商注册地', businessRegionConfidence: '高',
+  }), { region: '江苏', source: '工商注册地', confidence: '高' })
+  assert.equal(deriveAuthoritativeLeadRegion({ businessRegion: null }), null)
 })

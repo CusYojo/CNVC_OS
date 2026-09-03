@@ -9,11 +9,10 @@ import { apiRouter } from './routes/index.js'
 import { imInboundRouter } from './routes/imIntegrations.js'
 import { errorHandler } from './middleware/errorHandler.js'
 import { requireAuth } from './middleware/requireAuth.js'
-import { assertSchemaReady, ensureSchema } from './db/migrate.js'
+import { assertSchemaReady } from './db/migrate.js'
 import { seedUsers } from './services/authService.js'
 import { aiTaskWorkerHealth, recoverAiTasks, stopAiTaskWorker } from './services/aiTaskService.js'
-import { executeLeadScoring, recoverLeadScoringQueue, scheduleLeadScoring } from './routes/meta.js'
-import { backfillLeadBusinessRegions } from './services/leadRegionBackfill.js'
+import { executeLeadScoring } from './routes/meta.js'
 import { pool } from './db/client.js'
 import {
   jwAgentRuntimeHealth,
@@ -321,7 +320,8 @@ if (existsSync(distDir)) {
 }
 app.use(errorHandler)
 
-// 启动时先确保 schema；历史固定演示账号生成入口已永久退役。
+// 主服务启动只验证 schema；DDL 必须由显式迁移流程使用独立权限执行。
+// 历史固定演示账号生成入口已永久退役。
 async function start() {
   try {
     await new Promise<void>((resolve, reject) => {
@@ -329,9 +329,7 @@ async function start() {
       httpServer.once('listening', resolve)
       httpServer.once('error', reject)
     })
-    if (process.env.NODE_ENV === 'production') await assertSchemaReady()
-    else if (migrationWriteFreezePolicy.enabled) await assertSchemaReady()
-    else await ensureSchema()
+    await assertSchemaReady()
     if (migrationWriteFreezePolicy.enabled) {
       initializeAgentSocket(httpServer!)
       serviceReady = true
@@ -360,7 +358,7 @@ async function start() {
     await startLeadScoreJobWorker(executeLeadScoring)
     await startLeadEnrichmentWorker()
     await startProjectScoreJobWorker(executeProjectScoring)
-    await startLeadBpWorker(scheduleLeadScoring)
+    await startLeadBpWorker()
     const radarSeed = await ensureRadarMySqlSeeded()
     console.log(`[radar-mysql] seed skipped=${radarSeed.skipped} candidates=${radarSeed.currentCandidates}`)
     await startRuntimeJobScheduler()
@@ -370,24 +368,6 @@ async function start() {
     console.log(`[db] schema ready account-seed=${demoSeed.retired ? 'retired' : demoSeed.skipped ? 'disabled' : demoSeed.seeded}`)
     serviceReady = true
     console.log(`[app] listening on http://127.0.0.1:${port}`)
-    // Historical lead normalization is maintenance work, not a prerequisite
-    // for serving authenticated requests. Run it after readiness as well.
-    void backfillLeadBusinessRegions()
-      .then((regionBackfill) => {
-        console.log(`[lead-region] startup backfill scanned=${regionBackfill.scanned} updated=${regionBackfill.updated} unresolved=${regionBackfill.unresolved}`)
-      })
-      .catch((error) => {
-        console.error('[lead-region] startup backfill failed:', (error as Error).message)
-      })
-    // Queue reconciliation may inspect hundreds of historical leads. Keep it
-    // behind readiness so a restart never blocks login and the main workspace.
-    void recoverLeadScoringQueue()
-      .then((scoreRecovery) => {
-        console.log(`[lead-score] startup recovery found=${scoreRecovery.found} queued=${scoreRecovery.recovered} circuit-dead-letters=${scoreRecovery.circuitDeadLettersRecovered}/${scoreRecovery.circuitDeadLettersFound}`)
-      })
-      .catch((error) => {
-        console.error('[lead-score] startup recovery failed:', (error as Error).message)
-      })
   } catch (err) {
     console.error('[db] startup failed:', (err as Error).message)
     process.exit(1)

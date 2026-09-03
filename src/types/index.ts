@@ -512,6 +512,19 @@ export interface PaperMetadata {
   metadataSource?: { url: string; provider?: string; recordCreatedAt?: string; declaredPublishedAt?: string; publicationDateStatus?: 'confirmed' | 'source_declared_future'; publicationDateBasis?: 'publisher_published_at' | 'metadata_record_created_at' }
 }
 
+export interface LeadResearchProfile {
+  schemaVersion: 'lead-research-profile-v1'
+  projectionVersion: 'lead-research-profile-projection-v1'
+  subject: { leadId: string; type: 'research'; name: string; title?: string; provider?: string; providerIds: Record<string, string> }
+  direction: { categories: string[]; researchProblem?: string; methods: string[] }
+  team: { authors: Array<{ name: string; role?: string; openAlexAuthorId?: string; orcid?: string }>; affiliations: string[] }
+  progress: { venue?: string; publishedAt?: string; resourceType?: string; codeUrl?: string; datasetUrl?: string; modelUrl?: string; reproducibility?: string }
+  valueAndTransfer: { applicationScenarios: string[]; trl?: string; prototype?: string; validation?: string; commercialization?: string; transferStatus?: string; spinOff?: string; partners: string[] }
+  rights: { articleLicense?: string; datasetLicense?: string; codeLicense?: string; modelLicense?: string; patents: string[]; intellectualProperty?: string }
+  latestDevelopments: Array<{ title: string; occurredAt?: string; sourceUrl?: string }>
+  dataStatus: { status: 'verified' | 'partial' | 'missing' | 'conflicted' | 'stale'; verifiedDimensions: number; applicableDimensions: number; conflictCount: number; source: 'paper_metadata' | 'snapshot' | 'paper_metadata+snapshot'; updatedAt?: string }
+}
+
 export interface Lead {
   id: string
   name: string
@@ -560,6 +573,47 @@ export interface Lead {
   /** 首次进入公共线索池的时间；“最新入池”排序和列表展示统一使用该字段。 */
   poolEnteredAt?: string
   dataUpdatedAt?: string
+  investmentProfile?: {
+    profileSchemaVersion?: 'lead-investment-profile-v1'
+    enrichmentSchemaVersion?: string
+    projectionVersion?: string
+    dictionaryBinding?: { industryHash?: string; institutionHash?: string; customerHash?: string; academicHash?: string }
+    subject?: { leadId: string; name: string; legalEntityName?: string; subjectType: string; region?: string; profileReviewStatus?: 'clear' | 'review' }
+    schemaVersion: 'lead-investment-profile-v1'
+    snapshotId?: string
+    snapshotHash?: string
+    industry: { level1?: string; level2?: string; segment?: string; chainPosition?: string }
+    products: Array<{
+      instanceKey?: string; name: string; productRoute?: string; technologyRoute?: string; productionStage?: string;
+      productionStageStatus?: 'planned' | 'realized' | 'undisclosed';
+    }>
+    productTotalCount?: number
+    institutions: Array<{ institutionId?: string; name: string; round?: string; role: 'lead' | 'follow' | 'strategic' | 'undisclosed'; type?: string; tier?: string; major: boolean }>
+    institutionTotalCount?: number
+    academicLinks: Array<{ instanceKey?: string; institution: string; relationType: string; person?: string; departmentLab?: string; validFrom?: string; validTo?: string; current?: boolean; commercialization: boolean }>
+    academicLinkTotalCount?: number
+    financing: {
+      status: string; latestRound?: string; latestRoundDate?: string; latestAmount?: string;
+      latestAmountValue?: number; latestAmountCurrency?: string; cumulativeAmount?: string;
+      cumulativeAmountValue?: number; completedRoundCount: number; latestCompletedRound?: string; latestCompletedAt?: string;
+      latestAmountSummary?: { raw?: string; value?: string; minValue?: string; maxValue?: string; unit?: string; currency?: string; undisclosed?: boolean };
+      cumulativeAmountByCurrency?: Array<{ currency: string; value: string; completedRoundCount: number }>
+    }
+    valuation: { value?: string; numericValue?: number; type?: 'pre_money' | 'post_money' | 'planned' | 'estimated' | 'undisclosed'; currency?: string; date?: string; round?: string }
+    customers: {
+      highestStage?: 'L0' | 'L1' | 'L2' | 'L3' | 'L4' | 'L5'; verifiedCount: number;
+      tierACount: number; tierBCount: number; tierCCount: number;
+      mentionedCount?: number; engagedCount?: number; trialCount?: number; contractedCount?: number; deliveredCount?: number; payingCount?: number;
+      verifiedCustomerCount?: number; customerTotalCount?: number;
+      representatives: Array<{ customerId?: string; name: string; displayName?: string; tier?: 'A' | 'B' | 'C'; stage: 'L0' | 'L1' | 'L2' | 'L3' | 'L4' | 'L5'; anonymized: boolean }>
+    }
+    dataStatus: {
+      verifiedDimensions: number; applicableDimensions: number; conflictCount: number;
+      status: 'verified' | 'partial' | 'conflicted' | 'missing' | 'not_applicable' | 'stale'; updatedAt?: string;
+      dimensionStates?: Record<string, 'verified' | 'partial' | 'conflicted' | 'missing' | 'not_applicable'>;
+      stale?: boolean; staleReason?: string; factUpdatedAt?: string; sourceFreshnessAt?: string; snapshotCreatedAt?: string; projectedAt?: string
+    }
+  }
   completeness: number
   verificationStatus: '已核验' | '部分核验' | '待核验'
   lastVerifiedAt: string
@@ -599,6 +653,58 @@ export interface Lead {
   sources: SourceEvidence[]
   scoring?: LeadScoring
   radarProfile?: { decisionLabel?: string; thesis?: string; sourceName?: string; sourceGroup?: string; sourceTitle?: string; sourceId?: string; channel?: string; accountName?: string; publishedAt?: string; profile?: Record<string,string>; team?: { name: string }[]; radarDimensions?: { code: string; label: string; score: number; maxScore: number; detail: string }[]; radarScore?: number; disclosure?: Record<string,string>; nextActions?: string[]; signals?: { code: string; score: number; detail: string }[]; articleText?: string; articleTextLength?: number; link?: string; paperMeta?: PaperMetadata }
+}
+
+export type LeadListItem = Pick<Lead,
+  'id' | 'name' | 'companyName' | 'region' | 'leadType' | 'businessTags'
+  | 'poolEnteredAt' | 'dataUpdatedAt' | 'latestUpdates'
+> & {
+  radarProfile?: { channel?: string; profile?: { lab?: string } }
+  investmentProfile?: NonNullable<Lead['investmentProfile']>
+  researchProfile?: LeadResearchProfile
+  /** 投资画像缺项时使用的已有公开资料；不改变画像的验证状态。 */
+  availableData?: {
+    dataStatus: 'candidate'
+    verificationStatus: 'unverified'
+    displayLabel: string
+    sourceKinds: Array<'intake' | 'web_research'>
+    conflictFields: Array<'financing'>
+    industryTags: string[]
+    products: Array<{
+      name: string
+      productRoute?: string
+      technologyRoute?: string
+      productionStage?: string
+      productionStageStatus?: 'planned' | 'realized' | 'undisclosed'
+    }>
+    institutions: Array<{
+      name: string
+      round?: string
+      role: 'lead' | 'follow' | 'strategic' | 'undisclosed'
+      major: boolean
+    }>
+    academicLinks: Array<{
+      institution: string
+      relationType: string
+      person?: string
+      commercialization: boolean
+    }>
+    financing?: {
+      status?: string
+      latestRound?: string
+      latestRoundDate?: string
+      latestAmount?: string
+      cumulativeAmount?: string
+      completedRoundCount?: number
+    }
+    valuation?: {
+      value?: string
+      type?: 'pre_money' | 'post_money' | 'planned' | 'estimated' | 'undisclosed'
+      currency?: string
+      date?: string
+      round?: string
+    }
+  }
 }
 
 export interface SourceEvidence {

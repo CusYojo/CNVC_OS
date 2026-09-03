@@ -21,6 +21,7 @@ import {
 import { getLeadScoreJobBinding } from '../services/leadScoreJobService.js'
 import { LEAD_RATING_V3_SCHEMA_VERSION } from '../services/leadRatingV3Service.js'
 import { LEAD_RATING_V3_WORKFLOW } from '../services/leadRatingV3Service.js'
+import { LEAD_INVESTMENT_PROFILE_SCHEMA_VERSION } from '../contracts/leadInvestmentProfileContract.js'
 import {
   claimLeadEnrichmentTopicLease,
   leadEnrichmentOperationalMetrics,
@@ -40,6 +41,7 @@ import {
   type LeadScoringAgentExecution,
 } from '../services/leadScoringAgentService.js'
 import { recordLeadPipelineRawEvent, transitionLeadPipelineItem } from '../services/leadPipelineEventService.js'
+import { refreshLeadInvestmentProfileProjectionWithReceipt } from '../services/leadInvestmentProfileProjectionService.js'
 
 const leadsTable = quoteMysqlIdentifier(mysqlTableName('leads'))
 const jobsTable = quoteMysqlIdentifier(mysqlTableName('lead_enrichment_jobs'))
@@ -53,6 +55,7 @@ const auditLogsTable = quoteMysqlIdentifier(mysqlTableName('audit_logs'))
 const pipelineRunsTable = quoteMysqlIdentifier(mysqlTableName('lead_pipeline_runs'))
 const pipelineDecisionsTable = quoteMysqlIdentifier(mysqlTableName('lead_pipeline_decisions'))
 const pipelineItemsTable = quoteMysqlIdentifier(mysqlTableName('lead_pipeline_items'))
+const investmentProfilesTable = quoteMysqlIdentifier(mysqlTableName('lead_investment_profile_projections'))
 
 async function main() {
   assertIsolatedMysqlAcceptanceDatabase('leadEnrichmentMysqlFixtureAcceptance')
@@ -164,12 +167,15 @@ async function main() {
     [sourceDocumentId, leadId, 'https://example.com/acceptance', createHash('sha256').update('https://example.com/acceptance').digest('hex'),
       'https://example.com/acceptance', sourceHash, sourceText],
   )
+  let projectedIndustryFactId = ''
   for (const topic of topics) {
     const value = `隔离验收事实-${topic.topic_key}`
     const factKey = topic.topic_key === 'products'
       ? 'product.main_business'
+      : topic.topic_key === 'market_policy'
+        ? 'industry.segment'
       : `acceptance.${topic.topic_key}`
-    await persistLeadFact({
+    const persisted = await persistLeadFact({
       leadId, topicRunId: topic.id, topicKey: topic.topic_key, subjectType: 'company', subjectId: entityId,
       factKey, value, evidenceLevel: 'E2', verificationStatus: 'verified',
       evidence: [{
@@ -177,7 +183,9 @@ async function main() {
         sourceType: 'acceptance_fixture', quote: value, reliability: 'E2', pageHash: sourceHash,
       }],
     })
+    if (topic.topic_key === 'market_policy') projectedIndustryFactId = persisted.factId
   }
+  assert(projectedIndustryFactId)
   await pool.query(
     `UPDATE ${topicRunsTable} SET status='completed',completed_at=NOW(3),updated_at=NOW(3) WHERE job_id=?`,
     [first.jobId],
@@ -192,6 +200,83 @@ async function main() {
   assert.equal(replay.inserted, false)
   assert.equal(replay.snapshotId, frozen.snapshotId)
   assert.equal(replay.snapshot.snapshotHash, frozen.snapshot.snapshotHash)
+  const [investmentProfileRows] = await pool.query<Array<RowDataPacket & {
+    schema_version: string; snapshot_id: string; snapshot_hash: string; dictionary_hash: string;
+    industry_segment: string | null; verified_dimensions: number;
+    profile_status: string; source_fact_ids: unknown; count: number;
+  }>>(
+    `SELECT schema_version,snapshot_id,snapshot_hash,dictionary_hash,industry_segment,verified_dimensions,
+            profile_status,source_fact_ids,
+            (SELECT COUNT(*) FROM ${investmentProfilesTable} WHERE lead_id=?) count
+     FROM ${investmentProfilesTable} WHERE lead_id=? LIMIT 1`,
+    [leadId, leadId],
+  )
+  assert.equal(investmentProfileRows[0]?.count, 1)
+  assert.equal(investmentProfileRows[0]?.schema_version, LEAD_INVESTMENT_PROFILE_SCHEMA_VERSION)
+  assert.equal(investmentProfileRows[0]?.snapshot_id, frozen.snapshotId)
+  assert.equal(investmentProfileRows[0]?.snapshot_hash, frozen.snapshot.snapshotHash)
+  assert.equal(investmentProfileRows[0]?.industry_segment, '隔离验收事实-market_policy')
+  assert.equal(Number(investmentProfileRows[0]?.verified_dimensions), 1)
+  assert.equal(investmentProfileRows[0]?.profile_status, 'partial')
+  const originalInvestmentProfile = investmentProfileRows[0]!
+  const originalSourceFactIds = typeof originalInvestmentProfile.source_fact_ids === 'string'
+    ? JSON.parse(originalInvestmentProfile.source_fact_ids)
+    : originalInvestmentProfile.source_fact_ids
+  assert.deepEqual(originalSourceFactIds, [projectedIndustryFactId])
+  await pool.query(`DELETE FROM ${investmentProfilesTable} WHERE lead_id=?`, [leadId])
+  const [deletedInvestmentProfiles] = await pool.query<Array<RowDataPacket & { count: number }>>(
+    `SELECT COUNT(*) count FROM ${investmentProfilesTable} WHERE lead_id=?`, [leadId],
+  )
+  assert.equal(Number(deletedInvestmentProfiles[0]?.count), 0)
+  const rebuiltInvestmentProfile = await refreshLeadInvestmentProfileProjectionWithReceipt({
+    leadId, snapshotId: frozen.snapshotId,
+  })
+  assert(rebuiltInvestmentProfile)
+  assert.equal(rebuiltInvestmentProfile.write?.changed, true)
+  assert.equal(rebuiltInvestmentProfile.write?.beforeFingerprint, null)
+  const [rebuiltInvestmentProfileRows] = await pool.query<Array<RowDataPacket & {
+    schema_version: string; snapshot_id: string; snapshot_hash: string; dictionary_hash: string;
+    industry_segment: string | null; verified_dimensions: number;
+    profile_status: string; source_fact_ids: unknown; count: number;
+  }>>(
+    `SELECT schema_version,snapshot_id,snapshot_hash,dictionary_hash,industry_segment,verified_dimensions,
+            profile_status,source_fact_ids,
+            (SELECT COUNT(*) FROM ${investmentProfilesTable} WHERE lead_id=?) count
+     FROM ${investmentProfilesTable} WHERE lead_id=? LIMIT 1`,
+    [leadId, leadId],
+  )
+  const rebuiltInvestmentProfileRow = rebuiltInvestmentProfileRows[0]!
+  assert.equal(rebuiltInvestmentProfileRow.count, 1)
+  assert.deepEqual({
+    schemaVersion: rebuiltInvestmentProfileRow.schema_version,
+    snapshotId: rebuiltInvestmentProfileRow.snapshot_id,
+    snapshotHash: rebuiltInvestmentProfileRow.snapshot_hash,
+    dictionaryHash: rebuiltInvestmentProfileRow.dictionary_hash,
+    industrySegment: rebuiltInvestmentProfileRow.industry_segment,
+    verifiedDimensions: Number(rebuiltInvestmentProfileRow.verified_dimensions),
+    profileStatus: rebuiltInvestmentProfileRow.profile_status,
+    sourceFactIds: typeof rebuiltInvestmentProfileRow.source_fact_ids === 'string'
+      ? JSON.parse(rebuiltInvestmentProfileRow.source_fact_ids)
+      : rebuiltInvestmentProfileRow.source_fact_ids,
+  }, {
+    schemaVersion: originalInvestmentProfile.schema_version,
+    snapshotId: originalInvestmentProfile.snapshot_id,
+    snapshotHash: originalInvestmentProfile.snapshot_hash,
+    dictionaryHash: originalInvestmentProfile.dictionary_hash,
+    industrySegment: originalInvestmentProfile.industry_segment,
+    verifiedDimensions: Number(originalInvestmentProfile.verified_dimensions),
+    profileStatus: originalInvestmentProfile.profile_status,
+    sourceFactIds: originalSourceFactIds,
+  })
+  const rebuiltInvestmentProfileReplay = await refreshLeadInvestmentProfileProjectionWithReceipt({
+    leadId, snapshotId: frozen.snapshotId,
+  })
+  assert(rebuiltInvestmentProfileReplay)
+  assert.equal(rebuiltInvestmentProfileReplay.write?.changed, false)
+  assert.equal(
+    rebuiltInvestmentProfileReplay.write?.beforeFingerprint,
+    rebuiltInvestmentProfileReplay.write?.afterFingerprint,
+  )
   const unchangedResearchReplay = await enqueueLeadEnrichmentJob({
     leadId, triggerType: 'mysql-acceptance-unchanged-replay', idempotencyToken: 'unchanged-facts-new-job',
   })
@@ -1001,6 +1086,8 @@ async function main() {
       'entity-bound-versioned-facts-and-evidence',
       'company-entity-identifiers-and-aliases-merge-without-history-loss',
       'immutable-snapshot-hash-replay',
+      'snapshot-bound-investment-profile-projection-is-idempotent',
+      'deleted-investment-profile-rebuilds-from-frozen-snapshot-and-second-rebuild-is-noop',
       'unchanged-facts-across-new-topic-runs-reuse-snapshot-and-rating-binding',
       'snapshot-bound-single-v3-job',
       'atomic-idempotent-v3-rating-history',

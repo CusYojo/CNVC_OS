@@ -20,11 +20,12 @@ import {
   type LeadEvidenceLevel,
   type LeadFactVerificationStatus,
 } from './leadEnrichmentContract.js'
-import { enqueueLeadScoreJob } from './leadScoreJobService.js'
-import { LEAD_RATING_V3_SCHEMA_VERSION } from './leadRatingV3Service.js'
 import { sourceDocumentContainsQuote } from './leadSourceDocumentService.js'
 import { companyRegistrationEligibility, normalizeLeadRegistry } from './leadRegistry.js'
 import { normalizeLeadFactInstanceKey } from './leadFactInstanceKey.js'
+import { refreshLeadInvestmentProfileProjection } from './leadInvestmentProfileProjectionService.js'
+import { refreshLeadResearchProfileProjection } from './leadResearchProfileProjectionService.js'
+import { runLeadEnrichmentSnapshotPostCommit } from './leadEnrichmentSnapshotPostCommit.js'
 
 type JsonObject = Record<string, unknown>
 
@@ -34,6 +35,9 @@ const factsTable = quoteMysqlIdentifier(mysqlTableName('lead_facts'))
 const evidenceTable = quoteMysqlIdentifier(mysqlTableName('lead_fact_evidence'))
 const conflictsTable = quoteMysqlIdentifier(mysqlTableName('lead_fact_conflicts'))
 const snapshotsTable = quoteMysqlIdentifier(mysqlTableName('lead_enrichment_snapshots'))
+const investmentProfilesTable = quoteMysqlIdentifier(mysqlTableName('lead_investment_profile_projections'))
+const researchProfilesTable = quoteMysqlIdentifier(mysqlTableName('lead_research_profile_projections'))
+const customerDictionaryTable = quoteMysqlIdentifier(mysqlTableName('lead_customer_dictionary'))
 const leadsTable = quoteMysqlIdentifier(mysqlTableName('leads'))
 const entitiesTable = quoteMysqlIdentifier(mysqlTableName('lead_entities'))
 const relationsTable = quoteMysqlIdentifier(mysqlTableName('lead_entity_relations'))
@@ -366,8 +370,8 @@ export async function refreshLeadEnrichmentProjection(leadId: string, jobId?: st
     id: string; status: string; entity_type: string; entity_status: string; updated_at: Date;
   }>>(
     `SELECT id,status,entity_type,entity_status,updated_at FROM ${jobsTable}
-     WHERE lead_id=?${jobId ? ' AND id=?' : ''} ORDER BY created_at DESC,id DESC LIMIT 1`,
-    jobId ? [leadId, jobId] : [leadId],
+     WHERE lead_id=?${jobId ? ' AND id=?' : ' AND schema_version=?'} ORDER BY created_at DESC,id DESC LIMIT 1`,
+    jobId ? [leadId, jobId] : [leadId, LEAD_ENRICHMENT_SCHEMA_VERSION],
   )
   const job = jobRows[0]
   if (!job) return null
@@ -462,20 +466,24 @@ export async function enqueueLeadEnrichmentJob(input: {
     const radar = object(lead.radar_profile)
     const hasCommercialCompany = entityType === 'research' && Boolean(text(radar.companyName || lead.company_name))
     const states = initialTopicStates({ entityType, hasCommercialCompany })
+    const triggerType = text(input.triggerType) || 'pipeline-ready'
+    if (triggerType.length > 48) throw new Error('lead enrichment triggerType exceeds 48 characters')
     const idempotencyKey = sha256([
       LEAD_ENRICHMENT_SCHEMA_VERSION,
       input.leadId,
-      text(input.triggerType) || 'pipeline-ready',
+      triggerType,
       text(input.triggerEventId) || 'no-event',
       text(input.idempotencyToken) || 'default',
     ].join(':'))
     const jobId = randomUUID()
     const [insert] = await connection.query(
       `INSERT IGNORE INTO ${jobsTable}
-        (id,lead_id,trigger_type,trigger_event_id,idempotency_key,entity_id,entity_type,entity_status,status,priority,created_at,updated_at)
-       VALUES (?,?,?,?,?,?,?,?,'queued',?,NOW(3),NOW(3))`,
-      [jobId, input.leadId, text(input.triggerType) || 'pipeline-ready', input.triggerEventId ?? null,
-        idempotencyKey, entityId, entityType, entityStatus, Math.max(1, Math.min(1_000, Math.round(input.priority ?? 100)))],
+        (id,lead_id,schema_version,trigger_type,trigger_event_id,idempotency_key,entity_id,entity_type,entity_status,status,priority,created_at,updated_at)
+       VALUES (?,?,?,?,?,?,?,?,?,'queued',?,NOW(3),NOW(3))`,
+      [jobId, input.leadId, LEAD_ENRICHMENT_SCHEMA_VERSION,
+        triggerType, input.triggerEventId ?? null,
+        idempotencyKey, entityId, entityType, entityStatus,
+        Math.max(1, Math.min(1_000, Math.round(input.priority ?? 100)))],
     )
     const inserted = Number((insert as { affectedRows?: number }).affectedRows || 0) === 1
     const [jobRows] = await connection.query<Array<RowDataPacket & { id: string }>>(
@@ -592,15 +600,16 @@ export async function excludeDeregisteredLeadFromPool(input: {
 
 export async function getLeadEnrichmentStatus(leadId: string) {
   const [jobRows] = await pool.query<Array<RowDataPacket & {
-    id: string; trigger_type: string; entity_type: string; entity_status: string; status: string;
+    id: string; schema_version: string; trigger_type: string; entity_type: string; entity_status: string; status: string;
     priority: number; execution_attempts: number; last_error: string | null; created_at: Date;
     updated_at: Date; completed_at: Date | null; entity_id: string | null;
     canonical_name: string | null; aliases: unknown; identifiers: unknown
   }>>(
-    `SELECT j.id,j.trigger_type,j.entity_type,j.entity_status,j.status,j.priority,j.execution_attempts,j.last_error,
+    `SELECT j.id,j.schema_version,j.trigger_type,j.entity_type,j.entity_status,j.status,j.priority,j.execution_attempts,j.last_error,
             j.created_at,j.updated_at,j.completed_at,j.entity_id,e.canonical_name,e.aliases,e.identifiers
      FROM ${jobsTable} j LEFT JOIN ${entitiesTable} e ON e.id=j.entity_id
-     WHERE j.lead_id=? ORDER BY j.created_at DESC,j.id DESC LIMIT 1`, [leadId],
+     WHERE j.lead_id=? AND j.schema_version=? ORDER BY j.created_at DESC,j.id DESC LIMIT 1`,
+    [leadId, LEAD_ENRICHMENT_SCHEMA_VERSION],
   )
   const job = jobRows[0]
   if (!job) return { leadId, status: 'not_started', job: null, entity: null, entities: [], relations: [], topics: [], snapshot: null }
@@ -647,7 +656,7 @@ export async function getLeadEnrichmentStatus(leadId: string) {
     leadId,
     status: job.status,
     job: {
-      id: job.id, triggerType: job.trigger_type, entityType: job.entity_type,
+      id: job.id, schemaVersion: job.schema_version, triggerType: job.trigger_type, entityType: job.entity_type,
       entityStatus: job.entity_status, status: job.status, priority: Number(job.priority),
       attempts: Number(job.execution_attempts), error: job.last_error,
       createdAt: job.created_at, updatedAt: job.updated_at, completedAt: job.completed_at,
@@ -692,8 +701,8 @@ export async function getLeadEnrichmentDisplayProfile(leadId: string) {
     subject_profile: unknown; frozen_at: Date;
   }>>(
     `SELECT subject_profile,frozen_at FROM ${snapshotsTable}
-     WHERE lead_id=? ORDER BY created_at DESC,id DESC LIMIT 1`,
-    [leadId],
+     WHERE lead_id=? AND schema_version=? ORDER BY created_at DESC,id DESC LIMIT 1`,
+    [leadId, LEAD_ENRICHMENT_SCHEMA_VERSION],
   )
   const profile = object(rows[0]?.subject_profile)
   const introductions = object(profile.introductions)
@@ -1049,24 +1058,70 @@ export async function listLeadEnrichmentFacts(input: {
   const page = Math.max(1, Math.floor(input.page || 1))
   const pageSize = Math.max(1, Math.min(100, Math.floor(input.pageSize || 25)))
   const offset = (page - 1) * pageSize
-  const filters = ['lead_id=?', 'is_current=1']
+  const filters = ['display_fact.lead_id=?', 'display_fact.is_current=1']
   const parameters: unknown[] = [input.leadId]
   const displayProjection = input.projection === 'verified-display'
   if (displayProjection) {
-    filters.push("verification_status='verified'")
+    filters.push("display_fact.verification_status='verified'")
     filters.push(`EXISTS (
       SELECT 1 FROM ${evidenceTable} display_evidence
-      WHERE display_evidence.fact_id=${factsTable}.id
+      WHERE display_evidence.fact_id=display_fact.id
         AND (display_evidence.source_url LIKE 'http://%' OR display_evidence.source_url LIKE 'https://%')
+    )`)
+    // Ordinary detail responses must not expose a confidential customer's real
+    // identity through raw fact values or evidence metadata. The public profile
+    // already carries the approved anonymized label, so omit the whole related
+    // fact instance here instead of relying on renderer-side masking.
+    filters.push(`NOT (
+      (display_fact.fact_key LIKE 'customer.%'
+        OR display_fact.fact_key LIKE 'contract.%'
+        OR display_fact.fact_key LIKE 'order.%'
+        OR display_fact.fact_key LIKE 'delivery.%'
+        OR display_fact.fact_key LIKE 'cash_collection.%')
+      AND (
+        EXISTS (
+          SELECT 1 FROM ${factsTable} confidential_fact
+          WHERE confidential_fact.lead_id=display_fact.lead_id
+            AND confidential_fact.subject_id=display_fact.subject_id
+            AND confidential_fact.instance_key=display_fact.instance_key
+            AND confidential_fact.fact_key='customer.confidentiality'
+            AND confidential_fact.is_current=1
+            AND confidential_fact.verification_status='verified'
+            AND LOWER(JSON_UNQUOTE(confidential_fact.value)) REGEXP '保密|受限|confidential|restricted'
+        )
+        OR EXISTS (
+          SELECT 1 FROM ${factsTable} customer_name_fact
+          JOIN ${customerDictionaryTable} sensitive_customer
+            ON sensitive_customer.status='active'
+           AND sensitive_customer.confidentiality IN ('confidential','restricted')
+           AND (
+             LOWER(JSON_UNQUOTE(customer_name_fact.value))=LOWER(sensitive_customer.canonical_name)
+             OR EXISTS (
+               SELECT 1 FROM JSON_TABLE(
+                 sensitive_customer.aliases,'$[*]' COLUMNS(alias VARCHAR(255) PATH '$')
+               ) sensitive_alias
+               WHERE LOWER(sensitive_alias.alias)=LOWER(JSON_UNQUOTE(customer_name_fact.value))
+             )
+           )
+          WHERE customer_name_fact.lead_id=display_fact.lead_id
+            AND customer_name_fact.subject_id=display_fact.subject_id
+            AND customer_name_fact.instance_key=display_fact.instance_key
+            AND customer_name_fact.fact_key IN (
+              'customer.name','customer.formal','customer.framework_agreement','customer.pilot','customer.trial','customer.intent'
+            )
+            AND customer_name_fact.is_current=1
+            AND customer_name_fact.verification_status='verified'
+        )
+      )
     )`)
   }
   if (input.topicKey) {
-    filters.push('topic_key=?')
+    filters.push('display_fact.topic_key=?')
     parameters.push(input.topicKey)
   }
   const where = filters.join(' AND ')
   const [countRows] = await pool.query<Array<RowDataPacket & { count: number }>>(
-    `SELECT COUNT(*) count FROM ${factsTable} WHERE ${where}`,
+    `SELECT COUNT(*) count FROM ${factsTable} display_fact WHERE ${where}`,
     parameters,
   )
   const [rows] = await pool.query<Array<RowDataPacket & {
@@ -1074,10 +1129,16 @@ export async function listLeadEnrichmentFacts(input: {
     fact_key: string; instance_key: string; value: unknown; unit: string | null; currency: string | null;
     period_start: Date | string | null; period_end: Date | string | null; scope: string | null;
     evidence_level: string; verification_status: string; version: number; created_at: Date;
+    investment_profile_source: number;
   }>>(
     `SELECT id,topic_key,subject_type,subject_id,fact_key,instance_key,value,unit,currency,period_start,period_end,scope,
-            evidence_level,verification_status,version,created_at
-     FROM ${factsTable} WHERE ${where}
+            evidence_level,verification_status,version,created_at,
+            ${displayProjection ? `EXISTS (
+              SELECT 1 FROM ${investmentProfilesTable} profile
+              WHERE profile.lead_id=display_fact.lead_id
+                AND JSON_CONTAINS(profile.source_fact_ids,JSON_QUOTE(display_fact.id))
+            )` : 'FALSE'} investment_profile_source
+     FROM ${factsTable} display_fact WHERE ${where}
      ORDER BY FIELD(topic_key,${LEAD_ENRICHMENT_TOPIC_KEYS.map(() => '?').join(',')}),fact_key,id
      LIMIT ? OFFSET ?`,
     [...parameters, ...LEAD_ENRICHMENT_TOPIC_KEYS, pageSize, offset],
@@ -1113,7 +1174,9 @@ export async function listLeadEnrichmentFacts(input: {
     leadId: input.leadId, page, pageSize, total, hasMore: offset + rows.length < total,
     facts: rows.map((row) => displayProjection ? {
       id: row.id, subjectType: row.subject_type, factKey: row.fact_key, instanceKey: row.instance_key,
-      value: jsonValue(row.value), verificationStatus: 'verified', evidence: evidenceByFact.get(row.id) || [],
+      value: jsonValue(row.value), verificationStatus: 'verified',
+      investmentProfileSource: Boolean(row.investment_profile_source),
+      evidence: evidenceByFact.get(row.id) || [],
     } : ({
       id: row.id, topicKey: row.topic_key, subjectType: row.subject_type, subjectId: row.subject_id,
       factKey: row.fact_key, instanceKey: row.instance_key, value: jsonValue(row.value),
@@ -1325,8 +1388,8 @@ async function bindLeadEntityRelationEvidence(
   const [jobRows] = await connection.query<Array<RowDataPacket & {
     entity_id: string | null; entity_type: LeadEntityType;
   }>>(
-    `SELECT entity_id,entity_type FROM ${jobsTable} WHERE lead_id=? ORDER BY created_at DESC,id DESC LIMIT 1`,
-    [candidate.leadId],
+    `SELECT entity_id,entity_type FROM ${jobsTable} WHERE lead_id=? AND schema_version=? ORDER BY created_at DESC,id DESC LIMIT 1`,
+    [candidate.leadId, LEAD_ENRICHMENT_SCHEMA_VERSION],
   )
   const primary = jobRows[0]
   const relationType = leadFactEntityRelationType(candidate.factKey, primary?.entity_type || 'unknown')
@@ -1605,6 +1668,8 @@ export function buildLeadEnrichmentSnapshot(input: {
 
 export async function freezeLeadEnrichmentSnapshot(jobId: string) {
   const connection = await pool.getConnection()
+  let transactionCommitted = false
+  let connectionReleased = false
   let snapshot: ReturnType<typeof buildLeadEnrichmentSnapshot> | null = null
   let snapshotId = ''
   let inserted = false
@@ -1761,37 +1826,65 @@ export async function freezeLeadEnrichmentSnapshot(jobId: string) {
     snapshotId = persistedRows[0]?.id || snapshotId
     if (inserted) {
       await connection.query(
-        `UPDATE ${leadsTable}
-         SET scoring=JSON_SET(COALESCE(scoring,JSON_OBJECT()),
-           '$.ratingV3.status','stale',
-           '$.ratingV3.staleAt',?,
-           '$.ratingV3.pendingSnapshotId',?,
-           '$.ratingV3.pendingSnapshotHash',?)
-         WHERE id=? AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(scoring,'$.ratingV3.snapshotHash')),'')<>?`,
-        [new Date().toISOString(), snapshotId, snapshot.snapshotHash, job.lead_id, snapshot.snapshotHash],
+        `UPDATE ${investmentProfilesTable}
+         SET profile_status='stale',stale_reason='snapshot_changed',updated_at=NOW(3)
+         WHERE lead_id=? AND snapshot_hash<>?`,
+        [job.lead_id, snapshot.snapshotHash],
+      )
+      await connection.query(
+        `UPDATE ${researchProfilesTable}
+         SET profile_status='stale',updated_at=NOW(3)
+         WHERE lead_id=? AND COALESCE(snapshot_hash,'')<>?`,
+        [job.lead_id, snapshot.snapshotHash],
       )
     }
     await connection.query(
-      `UPDATE ${jobsTable} SET status=?,completed_at=NOW(3),lease_owner=NULL,lease_expires_at=NULL,updated_at=NOW(3) WHERE id=?`,
+      `UPDATE ${jobsTable}
+       SET status=?,completed_at=NOW(3),lease_owner=NULL,lease_expires_at=NULL,last_error=NULL,updated_at=NOW(3)
+       WHERE id=?`,
       [snapshot.status === 'ready' ? 'snapshot_ready' : 'review', jobId],
     )
     await connection.commit()
-    await refreshLeadEnrichmentProjection(job.lead_id, jobId)
-    const autoScoreEnabled = leadEnrichmentRuntimePolicy().autoScore
-    if (inserted && snapshot.status === 'ready' && autoScoreEnabled) {
-      await enqueueLeadScoreJob(job.lead_id, {
-        snapshot: { status: 'queued', attempts: 0, enrichmentSnapshotId: snapshotId, snapshotHash: snapshot.snapshotHash },
-        enrichmentSnapshotId: snapshotId,
-        snapshotHash: snapshot.snapshotHash,
-        ratingSchemaVersion: LEAD_RATING_V3_SCHEMA_VERSION,
-      })
-    }
-    return { inserted, snapshotId, snapshot, autoScoreEnqueued: inserted && snapshot.status === 'ready' && autoScoreEnabled }
+    transactionCommitted = true
+    connection.release()
+    connectionReleased = true
+    const frozenSnapshot = snapshot
+    const postCommit = await runLeadEnrichmentSnapshotPostCommit({
+      enqueueRating: false,
+      projectionTarget: job.entity_type === 'research' ? 'research' : 'investment',
+    }, {
+      refreshEnrichmentProjection: async () => {
+        const projection = await refreshLeadEnrichmentProjection(job.lead_id, jobId)
+        if (!projection) throw new Error('enrichment projection target disappeared after snapshot commit')
+        return projection
+      },
+      refreshInvestmentProfileProjection: async () => {
+        const profile = await refreshLeadInvestmentProfileProjection({ leadId: job.lead_id, snapshotId })
+        if (!profile) throw new Error('investment profile snapshot disappeared after snapshot commit')
+        return profile
+      },
+      refreshResearchProfileProjection: async () => {
+        const result = await refreshLeadResearchProfileProjection({ leadId: job.lead_id, snapshotId })
+        if (!result) throw new Error('research profile target disappeared after snapshot commit')
+        return result.profile
+      },
+      enqueueRating: async () => false,
+      recordFailures: async (failures) => {
+        await pool.query(
+          `UPDATE ${jobsTable} SET last_error=?,updated_at=NOW(3) WHERE id=?`,
+          [`post_commit: ${failures.map((failure) => `${failure.step}: ${failure.message}`).join(' | ')}`.slice(0, 4_000), jobId],
+        )
+      },
+      reportFailure: (failure) => {
+        console.error(`[lead-enrichment] snapshot post-commit ${failure.step} failed: ${failure.message}`)
+      },
+    })
+    return { inserted, snapshotId, snapshot: frozenSnapshot, ...postCommit }
   } catch (error) {
-    await connection.rollback()
+    if (!transactionCommitted) await connection.rollback()
     throw error
   } finally {
-    connection.release()
+    if (!connectionReleased) connection.release()
   }
 }
 
