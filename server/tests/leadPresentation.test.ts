@@ -43,9 +43,15 @@ test('brand aliases remain distinct from legal entity names', () => {
   assert.equal(isLegalCompanyName('深圳诺因智能有限公司'), true)
 })
 
-test('lead investor display keeps institution names and drops editorial fragments', () => {
+test('lead investor display accepts arrays and legacy delimited strings while dropping editorial fragments', () => {
   assert.deepEqual(
     displayLeadInvestorNames(['经纬创投', '经纬观点', '本轮融资由经纬创投领投', '经纬创投']),
     ['经纬创投'],
   )
+  assert.deepEqual(
+    displayLeadInvestorNames('高瓴创投；清流资本；英诺基金；智元机器人；星动纪元'),
+    ['高瓴创投', '清流资本', '英诺基金', '智元机器人', '星动纪元'],
+  )
+  assert.deepEqual(displayLeadInvestorNames('广东省盐业集团'), ['广东省盐业集团'])
+  assert.deepEqual(displayLeadInvestorNames(''), [])
 })

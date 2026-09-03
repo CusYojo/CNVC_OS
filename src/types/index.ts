@@ -641,7 +641,7 @@ export interface Lead {
     amountRaw?: string
     currency?: 'CNY' | 'USD' | ''
     valuation: string
-    investors: string[]
+    investors: string[] | string
     leadInvestors?: string[]
     sourceUrl: string
     evidenceQuote?: string

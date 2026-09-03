@@ -63,7 +63,11 @@ export function displayLeadEvidenceStatus(value: unknown) {
 const INVALID_INVESTOR_TEXT = /(?:观点|融资由|本轮融资|轮融资|领投方|投资方|投资机构)/
 
 export function displayLeadInvestorNames(value: unknown) {
-  const items = Array.isArray(value) ? value : []
+  const items = Array.isArray(value)
+    ? value
+    : typeof value === 'string'
+      ? value.split(/[、,，;；|｜/]+/)
+      : []
   return [...new Set(items
     .map((item) => typeof item === 'string' ? item.normalize('NFKC').trim() : '')
     .filter((item) => item.length >= 2 && item.length <= 80 && !INVALID_INVESTOR_TEXT.test(item)))]
