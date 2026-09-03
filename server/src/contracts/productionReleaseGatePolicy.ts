@@ -1,0 +1,105 @@
+export const PRODUCTION_RELEASE_REQUIRED_COMMANDS = [
+  'check:production-release-gates',
+  'verify:document-runtime-dependencies',
+  'accept:lead-dedup-safety',
+  'accept:lead-duplicate-release',
+  'build',
+  'db:migrate:separated',
+  'activate:build:if-present',
+  'accept:build-release',
+  'check:single-service-prestart',
+  'db:sync-ai-task-templates',
+] as const
+
+export const PLATFORM_AUDIT_ONLY_COMMANDS = `
+accept:source-gap-dispositions
+accept:legacy-api-compatibility
+accept:identity-administration
+accept:system-administration
+accept:identity-repository
+accept:identity-authority
+accept:agent-conversation-repository
+accept:ai-task-repository
+accept:ai-configuration-repository
+accept:im-integration-repository
+accept:admin-configuration-rollback
+accept:mysql-architecture-contract
+accept:mysql-schema-lifecycle
+accept:retired-assistant-boundary
+accept:jw-runtime-boundary
+accept:ai-template-progress
+accept:client-state-authority
+accept:oa-workflow
+accept:meeting-persistence
+accept:lead-conversion
+accept:risk-persistence
+accept:runtime-job-leader
+accept:radar-lead-source-reconciliation
+accept:project-score-lifecycle
+accept:lead-agent-usage
+accept:security-boundary
+accept:lead-subject-gold
+accept:lead-scoring-gold
+accept:lead-workflow-gold
+accept:lead-agent-runtime-guard
+accept:migration-source-allowlist
+accept:jw-sqlite-migration
+check:migration-integrity
+check:flue-migration
+audit:conversation-migration-content
+accept:migration-business-invariants
+check:migration-checklist-status
+accept:production-source-inventory
+accept:migration-evidence-safety
+accept:migration-json-safety
+accept:migration-entity-mappings
+accept:legacy-scoring
+accept:timezone
+accept:migration-scalar-constraints
+accept:stable-pagination
+accept:mysql-resilience
+accept:mysql-operational-config
+accept:chinese-retrieval
+accept:knowledge-ingestion-atomicity
+accept:project-file-temp-cleanup
+accept:project-file-deletion-isolation
+accept:migration-file-samples
+accept:migration-fixture-readiness
+accept:migration-test-data-safety
+accept:socket
+accept:jw-multiturn-live
+accept:jw-usage-compaction
+accept:jw-interaction
+accept:jw-interaction-live
+accept:jw-message-rendering
+accept:jw-model-switch
+accept:jw-tool-lifecycle
+accept:error-contract
+accept:jw-conversation-rollout
+accept:extension-feature-flags
+accept:ai-model-settings
+accept:ai-capabilities
+accept:im-integrations
+accept:auth-session-policy
+accept:auth-session-key-telemetry
+accept:operations-telemetry
+accept:agent-workspace-lifecycle
+accept:ai-runtime-telemetry
+accept:mysql-server-telemetry
+accept:lead-review-telemetry
+accept:lead-duplicate-telemetry
+accept:file-storage-capacity-history
+accept:process-supervisor-telemetry
+accept:job-coordination-telemetry
+accept:operational-alert-delivery
+accept:legacy-bearer-policy
+accept:migration-write-freeze-env
+accept:migration-write-freeze
+accept:cutover-rollback-thresholds
+audit:mysql-privileges
+audit:mysql-account-cutover
+audit:password-hashes
+accept:demo-user-seed-retirement
+`.trim().split(/\s+/)
+
+export type ProductionReleaseRequiredCommand = typeof PRODUCTION_RELEASE_REQUIRED_COMMANDS[number]

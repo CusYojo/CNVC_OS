@@ -1,5 +1,9 @@
 import { access, readFile, readdir } from 'node:fs/promises'
 import path from 'node:path'
+import {
+  PLATFORM_AUDIT_ONLY_COMMANDS,
+  PRODUCTION_RELEASE_REQUIRED_COMMANDS,
+} from '../contracts/productionReleaseGatePolicy.js'
 
 const root = process.cwd()
 const textExtensions = new Set(['.ts', '.tsx', '.js', '.mjs', '.cjs', '.json', '.sh'])
@@ -47,6 +51,18 @@ async function main() {
     devDependencies?: Record<string, string>
   }
   const deploy = await readFile(path.resolve(root, 'deploy.sh'), 'utf8')
+  const perReleaseCommands = new Set<string>(PRODUCTION_RELEASE_REQUIRED_COMMANDS)
+  const auditOnlyCommands = new Set<string>(PLATFORM_AUDIT_ONLY_COMMANDS)
+  const releaseGatePolicyCovers = (command: string): boolean => {
+    if (perReleaseCommands.has(command)) return deploy.includes(`npm run ${command}`)
+    return auditOnlyCommands.has(command) && typeof packageJson.scripts?.[command] === 'string'
+  }
+  requireCondition(
+    packageJson.scripts?.['check:production-release-gates']
+      === 'node --import tsx server/src/scripts/productionReleaseGateAcceptance.ts'
+    && releaseGatePolicyCovers('check:production-release-gates'),
+    'production release must validate its explicit per-release and platform-audit-only gate policy before mutation',
+  )
   const leadDuplicateReleaseAcceptance = await readFile(path.resolve(root, 'server/src/scripts/leadDuplicateReleaseAcceptance.ts'), 'utf8')
   const pythonCaPreflight = await readFile(path.resolve(root, 'server/scripts/check-python-ca.mjs'), 'utf8')
   const documentNativePreflight = await readFile(path.resolve(root, 'server/src/scripts/verifyDocumentRuntimeDependencies.ts'), 'utf8')
@@ -491,7 +507,7 @@ async function main() {
   requireCondition(
     packageJson.scripts?.['accept:lead-dedup-safety']
       === 'node --import tsx server/src/scripts/leadDedupSafetyAcceptance.ts'
-    && /run accept:lead-dedup-safety/.test(deploy),
+    && releaseGatePolicyCovers('accept:lead-dedup-safety'),
     'lead dedup fail-closed behavior must be enforced by the release acceptance gate',
   )
   requireCondition(
@@ -537,7 +553,7 @@ async function main() {
     && packageJson.scripts?.['accept:lead-duplicate-release']
       === 'node --env-file-if-exists=.env --env-file-if-exists=.runtime/secrets/mysql-acceptance.env --import tsx server/src/scripts/leadDuplicateReleaseAcceptance.ts'
     && /assertIsolatedMysqlAcceptanceDatabase\('leadDuplicateReleaseAcceptance'\)/.test(leadDuplicateReleaseAcceptance)
-    && /run accept:lead-duplicate-release/.test(deploy)
+    && releaseGatePolicyCovers('accept:lead-duplicate-release')
     && !/run accept:lead-duplicate-(?:dispositions|apply)(?:\s|;)/.test(deploy)
     && /leadDuplicateDispositionAcceptance\.ts/.test(leadDuplicateReleaseAcceptance)
     && /leadDuplicateApplyAcceptance\.ts/.test(leadDuplicateReleaseAcceptance)
@@ -574,7 +590,7 @@ async function main() {
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/applySourceGapDispositions.ts'
     && packageJson.scripts?.['apply:source-gap-dispositions']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/applySourceGapDispositions.ts --apply'
-    && /run accept:source-gap-dispositions/.test(deploy),
+    && releaseGatePolicyCovers('accept:source-gap-dispositions'),
     'source gaps must bind the exact live 97/7 records, reject drift and test-exclusion shortcuts, remain read-only, and fail closed until separately approved',
   )
   for (const route of [
@@ -628,7 +644,7 @@ async function main() {
     && /API misses must never fall through/.test(await readFile(path.resolve(root, 'server/src/index.ts'), 'utf8'))
     && packageJson.scripts?.['accept:legacy-api-compatibility']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/legacyApiCompatibilityAcceptance.ts'
-    && /run accept:legacy-api-compatibility/.test(deploy),
+    && releaseGatePolicyCovers('accept:legacy-api-compatibility'),
     'release must preserve classified legacy APIs and prove explicit unsafe/placeholder endpoint retirement on the real unified service',
   )
   requireCondition(
@@ -687,7 +703,7 @@ async function main() {
     && /exactHostValueExcluded: true/.test(mysqlAccountHostRotation)
     && /passwordsExcludedFromOutputAndEvidence: true/.test(mysqlAccountHostRotation)
     && /await verifyConnections\(runtime, migration\)/.test(mysqlAccountHostRotation)
-    && /audit:mysql-account-cutover/.test(deploy)
+    && releaseGatePolicyCovers('audit:mysql-account-cutover')
     && /export async function applySchemaMigrations/.test(mysqlMigrationRuntime)
     && /await assertSchemaReady\(\)/.test(mysqlMigrationRuntime)
     && /DB_USERNAME has no DDL permission/.test(mysqlMigrationRuntime)
@@ -955,7 +971,7 @@ async function main() {
     && /audit-secret-exclusion/.test(identityAdministrationAcceptance)
     && packageJson.scripts?.['accept:identity-administration']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/identityAdministrationAcceptance.ts'
-    && /run accept:identity-administration/.test(deploy),
+    && releaseGatePolicyCovers('accept:identity-administration'),
     'identity and project membership administration must be admin-only, session-invalidating, transactional and audit-complete',
   )
   requireCondition(
@@ -982,7 +998,7 @@ async function main() {
     && /fixture-cleanup-verified/.test(systemAdministrationAcceptance)
     && packageJson.scripts?.['accept:system-administration']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/systemAdministrationAcceptance.ts'
-    && /run accept:system-administration/.test(deploy),
+    && releaseGatePolicyCovers('accept:system-administration'),
     'system organization, role, permission and dictionary administration must use MySQL authority, atomic identity bindings, revocable permissions and audited writes',
   )
   requireCondition(
@@ -1021,7 +1037,7 @@ async function main() {
     && /- \[x\] `DEL-002`/.test(repositoryMigrationExecutionChecklist)
     && packageJson.scripts?.['accept:identity-repository']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/identityRepositoryAcceptance.ts'
-    && /run accept:identity-repository/.test(deploy),
+    && releaseGatePolicyCovers('accept:identity-repository'),
     'user and permission repositories must enforce stable errors, transaction scope, concurrency and real service integration',
   )
   requireCondition(
@@ -1032,7 +1048,7 @@ async function main() {
     && /noFixturesOrBusinessWrites: true/.test(identityAuthorityAcceptance)
     && packageJson.scripts?.['accept:identity-authority']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/identityAuthorityAcceptance.ts'
-    && /run accept:identity-authority/.test(deploy)
+    && releaseGatePolicyCovers('accept:identity-authority')
     && /- \[x\] `MIG-0801`/.test(repositoryMigrationExecutionChecklist),
     'conceptual iam_users must resolve to the single physical users authority across login, session, socket, project permissions and browser recovery',
   )
@@ -1058,7 +1074,7 @@ async function main() {
     && /tool-message-part-atomic-interruption/.test(agentConversationRepositoryAcceptance)
     && packageJson.scripts?.['accept:agent-conversation-repository']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/agentConversationRepositoryAcceptance.ts'
-    && /run accept:agent-conversation-repository/.test(deploy)
+    && releaseGatePolicyCovers('accept:agent-conversation-repository')
     && /- \[x\] `MIG-0133`/.test(repositoryMigrationExecutionChecklist),
     'Agent conversation repository must preserve sequence, replay, metadata, tool and restart state boundaries with real MySQL acceptance',
   )
@@ -1104,7 +1120,7 @@ async function main() {
     && /worker-stop-cancel-and-release-transaction/.test(aiTaskRepositoryAcceptance)
     && packageJson.scripts?.['accept:ai-task-repository']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/aiTaskRepositoryAcceptance.ts'
-    && /run accept:ai-task-repository/.test(deploy)
+    && releaseGatePolicyCovers('accept:ai-task-repository')
     && /- \[x\] `MIG-0134`/.test(repositoryMigrationExecutionChecklist),
     'AI task repository must preserve idempotency, lease, artifact/source completion and restart recovery boundaries with real MySQL acceptance',
   )
@@ -1130,7 +1146,7 @@ async function main() {
     && /conversation-capability-atomic-replacement/.test(aiConfigurationRepositoryAcceptance)
     && packageJson.scripts?.['accept:ai-configuration-repository']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/aiConfigurationRepositoryAcceptance.ts'
-    && /run accept:ai-configuration-repository/.test(deploy)
+    && releaseGatePolicyCovers('accept:ai-configuration-repository')
     && /- \[x\] `MIG-0136`/.test(repositoryMigrationExecutionChecklist),
     'AI configuration repository must serialize default models and atomically persist provider, route, capability, binding, selection and audit changes with real MySQL acceptance',
   )
@@ -1155,7 +1171,7 @@ async function main() {
     && /parallel-inbound-message-idempotency-single-record/.test(imIntegrationRepositoryAcceptance)
     && packageJson.scripts?.['accept:im-integration-repository']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/imIntegrationRepositoryAcceptance.ts'
-    && /run accept:im-integration-repository/.test(deploy)
+    && releaseGatePolicyCovers('accept:im-integration-repository')
     && /- \[x\] `MIG-0136`/.test(repositoryMigrationExecutionChecklist),
     'IM repository must atomically preserve bot, binding, outbox lease, delivery log, inbound idempotency and audit boundaries with real MySQL acceptance',
   )
@@ -1179,7 +1195,7 @@ async function main() {
     && /- \[x\] `GATE-M8-03`/.test(configurationRevisionChecklist)
     && packageJson.scripts?.['accept:admin-configuration-rollback']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/adminConfigurationRollbackAcceptance.ts'
-    && /run accept:admin-configuration-rollback/.test(deploy),
+    && releaseGatePolicyCovers('accept:admin-configuration-rollback'),
     'model, capability and IM configuration mutations must have encrypted revision history, optimistic rollback, impact confirmation and audit',
   )
   requireCondition(
@@ -1196,7 +1212,7 @@ async function main() {
     && /事务、幂等与乐观锁规则/.test(mysqlArchitectureDecision)
     && packageJson.scripts?.['accept:mysql-architecture-contract']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/mysqlArchitectureContractAcceptance.ts'
-    && /run accept:mysql-architecture-contract/.test(deploy),
+    && releaseGatePolicyCovers('accept:mysql-architecture-contract'),
     'release must prove the adjudicated MySQL domain mapping, runtime/scheduler/audit schema and partial-unique equivalents without creating duplicate authorities',
   )
   requireCondition(
@@ -1232,7 +1248,7 @@ async function main() {
       === 'node --env-file-if-exists=.env --env-file-if-exists=.runtime/secrets/mysql-migration.env --import tsx server/src/scripts/mysqlSchemaLifecycleAcceptance.ts'
     && deploy.indexOf('run db:backup') < deploy.indexOf('run db:migrate')
     && deploy.indexOf('run db:migrate') < deploy.indexOf('run db:seed')
-    && /run accept:mysql-schema-lifecycle/.test(deploy),
+    && releaseGatePolicyCovers('accept:mysql-schema-lifecycle'),
     'production schema changes must create a pre-migration backup, apply forward migrations and versioned seeds, and prove non-overwriting isolated-prefix rollback',
   )
   const rootPackages = { ...packageJson.dependencies, ...packageJson.devDependencies }
@@ -1269,7 +1285,7 @@ async function main() {
     && /retired-start-with-stale-environment-fails-closed-without-touching-legacy-database/.test(retiredAssistantAcceptance)
     && packageJson.scripts?.['accept:retired-assistant-boundary']
       === 'node --import tsx server/src/scripts/retiredAssistantBoundaryAcceptance.ts'
-    && /run accept:retired-assistant-boundary/.test(deploy),
+    && releaseGatePolicyCovers('accept:retired-assistant-boundary'),
     'retired Assistant source must be absent or hard-disabled without old runtime variables, and release must prove no legacy database writes',
   )
 
@@ -1417,7 +1433,7 @@ async function main() {
     && /agent-subprocess-environment-excludes-database-and-internal-secrets/.test(jwRuntimeBoundaryAcceptance)
     && packageJson.scripts?.['accept:jw-runtime-boundary']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/jwRuntimeBoundaryAcceptance.ts'
-    && /run accept:jw-runtime-boundary/.test(deploy),
+    && releaseGatePolicyCovers('accept:jw-runtime-boundary'),
     'JW Runtime must deny and audit five boundary classes while excluding host secrets from its SDK environment',
   )
   for (const toolName of [
@@ -1455,7 +1471,6 @@ async function main() {
   const templateProgressAcceptance = await readFile(path.resolve(root, 'server/src/scripts/aiTemplateAnalysisProgressAcceptance.ts'), 'utf8')
   const aiTaskRoutesForTemplateProgress = await readFile(path.resolve(root, 'server/src/routes/aiTasks.ts'), 'utf8')
   const serverEntryForTemplateProgress = await readFile(path.resolve(root, 'server/src/index.ts'), 'utf8')
-  const deployForTemplateProgress = await readFile(path.resolve(root, 'deploy.sh'), 'utf8')
   requireCondition(
     /ai_template_analysis_progress/.test(mysqlAiTaskRepository)
     && /recoverInterruptedTemplateAnalysisProgress/.test(mysqlAiTaskRepository)
@@ -1482,7 +1497,7 @@ async function main() {
   requireCondition(
     packageJson.scripts?.['accept:ai-template-progress']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/aiTemplateAnalysisProgressAcceptance.ts'
-    && /run accept:ai-template-progress/.test(deployForTemplateProgress),
+    && releaseGatePolicyCovers('accept:ai-template-progress'),
     'production release must run the MySQL template analysis progress gate',
   )
   const clientAppStore = await readFile(path.resolve(root, 'src/store/useAppStore.ts'), 'utf8')
@@ -1534,7 +1549,7 @@ async function main() {
   requireCondition(
     packageJson.scripts?.['accept:client-state-authority']
       === 'node --import tsx server/src/scripts/clientStateAuthorityAcceptance.ts'
-    && /run accept:client-state-authority/.test(deployForTemplateProgress),
+    && releaseGatePolicyCovers('accept:client-state-authority'),
     'production release must reject demo/browser-authoritative business state',
   )
   requireCondition(
@@ -1602,7 +1617,7 @@ async function main() {
   requireCondition(
     packageJson.scripts?.['accept:oa-workflow']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/oaWorkflowAcceptance.ts'
-    && /run accept:oa-workflow/.test(deployForTemplateProgress),
+    && releaseGatePolicyCovers('accept:oa-workflow'),
     'production release must run the MySQL OA workflow gate',
   )
   const meetingService = await readFile(path.resolve(root, 'server/src/services/meetingService.ts'), 'utf8')
@@ -1631,7 +1646,7 @@ async function main() {
   requireCondition(
     packageJson.scripts?.['accept:meeting-persistence']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/meetingPersistenceAcceptance.ts'
-    && /run accept:meeting-persistence/.test(deployForTemplateProgress),
+    && releaseGatePolicyCovers('accept:meeting-persistence'),
     'production release must run the MySQL meeting persistence gate',
   )
   const leadConversionService = await readFile(path.resolve(root, 'server/src/services/aiSummaryService.ts'), 'utf8')
@@ -1657,7 +1672,7 @@ async function main() {
   requireCondition(
     packageJson.scripts?.['accept:lead-conversion']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/leadConversionAcceptance.ts'
-    && /run accept:lead-conversion/.test(deployForTemplateProgress),
+    && releaseGatePolicyCovers('accept:lead-conversion'),
     'production release must run the atomic lead conversion gate',
   )
   const riskService = await readFile(path.resolve(root, 'server/src/services/riskService.ts'), 'utf8')
@@ -1685,7 +1700,7 @@ async function main() {
   requireCondition(
     packageJson.scripts?.['accept:risk-persistence']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/riskPersistenceAcceptance.ts'
-    && /run accept:risk-persistence/.test(deployForTemplateProgress),
+    && releaseGatePolicyCovers('accept:risk-persistence'),
     'production release must run the risk persistence gate',
   )
   requireCondition(/const passedArtifacts = artifacts\.filter\(\(artifact\) => artifact\.qualityStatus === 'passed'\)/.test(aiTaskService), 'AI task cards must only expose quality-passed artifacts')
@@ -1826,7 +1841,7 @@ async function main() {
     'MySQL runtime scheduler must prove single-lease multi-instance execution and expired-owner takeover',
   )
   requireCondition(
-    /run accept:runtime-job-leader/.test(await readFile(path.resolve(root, 'deploy.sh'), 'utf8')),
+    releaseGatePolicyCovers('accept:runtime-job-leader'),
     'production release must run the MySQL runtime job leader gate',
   )
   requireCondition(
@@ -1857,7 +1872,7 @@ async function main() {
     && /reportContainsBusinessPayload:\s*false/.test(radarLeadSourceReconciliationAcceptance)
     && packageJson.scripts?.['accept:radar-lead-source-reconciliation']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/radarLeadSourceReconciliationAcceptance.ts'
-    && /run accept:radar-lead-source-reconciliation/.test(deploy)
+    && releaseGatePolicyCovers('accept:radar-lead-source-reconciliation')
     && /localTechnicalReady=true/.test(radarLeadSourceReconciliationHandoff)
     && /productionAssetReady=false/.test(radarLeadSourceReconciliationHandoff)
     && /406 条历史 imported/.test(radarLeadSourceReconciliationHandoff)
@@ -1890,7 +1905,6 @@ async function main() {
   )
   const projectScoreRoutes = await readFile(path.resolve(root, 'server/src/routes/projects.ts'), 'utf8')
   const serverEntryForProjectScore = await readFile(path.resolve(root, 'server/src/index.ts'), 'utf8')
-  const deployForProjectScore = await readFile(path.resolve(root, 'deploy.sh'), 'utf8')
   requireCondition(
     /FOR UPDATE SKIP LOCKED/.test(projectScoreJobService)
     && /recoverExpiredProjectScoreJobLeases/.test(projectScoreJobService)
@@ -1913,7 +1927,7 @@ async function main() {
   requireCondition(
     packageJson.scripts?.['accept:project-score-lifecycle']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/projectScoreJobLifecycleAcceptance.ts'
-    && /run accept:project-score-lifecycle/.test(deployForProjectScore),
+    && releaseGatePolicyCovers('accept:project-score-lifecycle'),
     'production release must run the persistent project score lifecycle gate',
   )
   const leadPipelineEventService = await readFile(path.resolve(root, 'server/src/services/leadPipelineEventService.ts'), 'utf8')
@@ -2131,7 +2145,7 @@ async function main() {
     && /negative-and-non-finite-usage-is-not-invented/.test(leadAgentUsageAcceptance)
     && packageJson.scripts?.['accept:lead-agent-usage']
       === 'node --import tsx server/src/scripts/leadAgentUsageAcceptance.ts'
-    && /run accept:lead-agent-usage/.test(deploy),
+    && releaseGatePolicyCovers('accept:lead-agent-usage'),
     'all lead Agents must use aggregate/model token usage fallback without cost-based estimates',
   )
   requireCondition(
@@ -2445,7 +2459,7 @@ async function main() {
     && /AI_SKILL_ROOT/.test(securityBoundaryAcceptance)
     && packageJson.scripts?.['accept:security-boundary']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/securityBoundaryAcceptance.ts'
-    && /run accept:security-boundary/.test(deploy),
+    && releaseGatePolicyCovers('accept:security-boundary'),
     'production release must start the built unified service and prove SQL injection, path, authorization and arbitrary-read defenses over HTTP',
   )
   for (const category of ['company', 'project', 'team', 'lab', 'paper', 'noise', 'ambiguous']) {
@@ -2460,7 +2474,7 @@ async function main() {
     && /usageComplete/.test(leadSubjectGoldAcceptance)
     && packageJson.scripts?.['accept:lead-subject-gold']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/leadSubjectGoldAcceptance.ts'
-    && /run accept:lead-subject-gold/.test(deploy),
+    && releaseGatePolicyCovers('accept:lead-subject-gold'),
     'production release must run the immutable live subject gold quality/cost gate',
   )
   for (const workflow of ['score-project', 'score-paper']) {
@@ -2479,7 +2493,7 @@ async function main() {
     && /usageComplete/.test(leadScoringGoldAcceptance)
     && packageJson.scripts?.['accept:lead-scoring-gold']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/leadScoringGoldAcceptance.ts'
-    && /run accept:lead-scoring-gold/.test(deploy),
+    && releaseGatePolicyCovers('accept:lead-scoring-gold'),
     'production release must run the immutable live project/paper scoring gold quality/cost gate',
   )
   for (const profile of ['lead-research-agent', 'lead-screening-agent', 'lead-enrichment-agent']) {
@@ -2497,7 +2511,7 @@ async function main() {
     && /usageComplete/.test(leadWorkflowGoldAcceptance)
     && packageJson.scripts?.['accept:lead-workflow-gold']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/leadWorkflowGoldAcceptance.ts'
-    && /run accept:lead-workflow-gold/.test(deploy),
+    && releaseGatePolicyCovers('accept:lead-workflow-gold'),
     'production release must run the immutable live research/screening/enrichment gold quality/cost gate',
   )
   requireCondition(
@@ -2530,7 +2544,7 @@ async function main() {
   requireCondition(
     packageJson.scripts?.['accept:lead-agent-runtime-guard']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/leadAgentRuntimeGuardAcceptance.ts'
-    && /run accept:lead-agent-runtime-guard/.test(deploy)
+    && releaseGatePolicyCovers('accept:lead-agent-runtime-guard')
     && /init_database\s*\n\s*run_release_gates/.test(deploy),
     'production release must migrate MySQL before persistent lead Agent runtime and live gold gates',
   )
@@ -3017,7 +3031,7 @@ async function main() {
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/migrationSourceAllowlistAcceptance.ts'
     && /aipinExclusionAudit\.ts/.test(migrationSourceAllowlistAcceptance)
     && /--strict/.test(migrationSourceAllowlistAcceptance)
-    && /run accept:migration-source-allowlist/.test(deploy),
+    && releaseGatePolicyCovers('accept:migration-source-allowlist'),
     'Aipin source/code/environment/target exclusion report and strict command are missing',
   )
   requireCondition(
@@ -3035,7 +3049,7 @@ async function main() {
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/migrateJwSqliteToMySql.ts --apply'
     && packageJson.scripts?.['accept:jw-sqlite-migration']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/jwSqliteMigrationAcceptance.ts'
-    && /run accept:jw-sqlite-migration/.test(deploy),
+    && releaseGatePolicyCovers('accept:jw-sqlite-migration'),
     'JW SQLite checksum-bound allowlist migration and zero-write exclusion gate are missing',
   )
   requireCondition(
@@ -3070,7 +3084,7 @@ async function main() {
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/mysqlMigrationReconciliationAudit.ts --strict-target'
     && packageJson.scripts?.['check:migration-reconciliation']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/mysqlMigrationReconciliationAudit.ts --strict-full'
-    && /run check:migration-integrity/.test(deploy),
+    && releaseGatePolicyCovers('check:migration-integrity'),
     'production release must preserve the read-only target integrity and full source reconciliation contracts',
   )
   requireCondition(
@@ -3096,7 +3110,7 @@ async function main() {
     && /m\.source_system='flue'/.test(flueMigrationSmoke)
     && packageJson.scripts?.['check:flue-migration']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/flueMigrationSmoke.ts'
-    && /run check:flue-migration/.test(deploy),
+    && releaseGatePolicyCovers('check:flue-migration'),
     'Flue content migration must atomically restore the visible chat index and verify order, text, Part, attachment, tool and interrupted state',
   )
   requireCondition(
@@ -3116,7 +3130,7 @@ async function main() {
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/conversationMigrationContentAudit.ts'
     && packageJson.scripts?.['audit:conversation-migration-content:strict']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/conversationMigrationContentAudit.ts --strict-production'
-    && /run audit:conversation-migration-content/.test(deploy),
+    && releaseGatePolicyCovers('audit:conversation-migration-content'),
     'conversation migration must reconcile visible indexes, message/Part order, source dispositions, cross-source mappings and production approval without persisting content',
   )
   requireCondition(
@@ -3130,7 +3144,7 @@ async function main() {
     && /source_sha256=\?/.test(migrationBusinessInvariantAcceptance)
     && packageJson.scripts?.['accept:migration-business-invariants']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/migrationBusinessInvariantAcceptance.ts'
-    && /run accept:migration-business-invariants/.test(deploy),
+    && releaseGatePolicyCovers('accept:migration-business-invariants'),
     'normalized migration checksums, orphan checks and state/cross-table invariants require a checksum-bound release gate',
   )
   requireCondition(
@@ -3151,7 +3165,7 @@ async function main() {
     && packageJson.scripts?.['check:migration-checklist-status']
       === 'node --import tsx server/src/scripts/migrationChecklistStatusAcceptance.ts'
     && packageJson.scripts?.['check:platform']?.includes('npm run check:migration-checklist-status')
-    && /run check:migration-checklist-status/.test(deploy),
+    && releaseGatePolicyCovers('check:migration-checklist-status'),
     'the derived pending-migration document must stay synchronized with every checklist completion and priority count',
   )
   requireCondition(
@@ -3269,7 +3283,7 @@ async function main() {
     && /databaseWrites: 0/.test(productionSourceInventoryAcceptance)
     && packageJson.scripts?.['accept:production-source-inventory']
       === 'node --import tsx server/src/scripts/productionSourceInventoryAcceptance.ts'
-    && /run accept:production-source-inventory/.test(deploy),
+    && releaseGatePolicyCovers('accept:production-source-inventory'),
     'production source inventory must scan explicit roots, reject unreviewed sources and symlinks, and require production approval',
   )
   requireCondition(
@@ -3383,7 +3397,7 @@ async function main() {
     && /isSymbolicLink\(\)/.test(migrationEvidenceSafetyAcceptance)
     && packageJson.scripts?.['accept:migration-evidence-safety']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/migrationEvidenceSafetyAcceptance.ts'
-    && /run accept:migration-evidence-safety/.test(deploy),
+    && releaseGatePolicyCovers('accept:migration-evidence-safety'),
     'migration reports, manifests and quarantine reports must reject secrets, unnecessary body text and unsafe files',
   )
   requireCondition(
@@ -3399,7 +3413,7 @@ async function main() {
     && /invalid-json-issue-excludes-raw-body/.test(migrationJsonSafetyAcceptance)
     && packageJson.scripts?.['accept:migration-json-safety']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/migrationJsonSafetyAcceptance.ts'
-    && /run accept:migration-json-safety/.test(deploy),
+    && releaseGatePolicyCovers('accept:migration-json-safety'),
     'all target JSON must be valid and invalid source JSON must enter a safe migration issue ledger',
   )
   requireCondition(
@@ -3414,7 +3428,7 @@ async function main() {
     && /flue-generic-and-specialized-mappings-agree/.test(migrationEntityMappingAcceptance)
     && packageJson.scripts?.['accept:migration-entity-mappings']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/migrationEntityMappingAcceptance.ts'
-    && /run accept:migration-entity-mappings/.test(deploy),
+    && releaseGatePolicyCovers('accept:migration-entity-mappings'),
     'every migrated source entity must have one checksum-bound and run-linked target id mapping',
   )
   requireCondition(
@@ -3436,7 +3450,7 @@ async function main() {
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/classifyLegacyScoring.ts --apply'
     && packageJson.scripts?.['accept:legacy-scoring']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/legacyScoringAcceptance.ts'
-    && /run accept:legacy-scoring/.test(deploy),
+    && releaseGatePolicyCovers('accept:legacy-scoring'),
     'legacy scores must be classified without fabricated evidence and every new score must bind an Agent audit chain',
   )
   requireCondition(
@@ -3453,7 +3467,7 @@ async function main() {
     && /api-json-serializes-utc-iso-8601/.test(timezoneAcceptance)
     && packageJson.scripts?.['accept:timezone']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/timezoneAcceptance.ts'
-    && /run accept:timezone/.test(deploy),
+    && releaseGatePolicyCovers('accept:timezone'),
     'MySQL, API and UI must use an explicit UTC-instant/Asia-Shanghai business-time boundary',
   )
   requireCondition(
@@ -3466,7 +3480,7 @@ async function main() {
     && /information_schema\.STATISTICS/.test(migrationScalarConstraintAcceptance)
     && packageJson.scripts?.['accept:migration-scalar-constraints']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/migrationScalarConstraintAcceptance.ts'
-    && /run accept:migration-scalar-constraints/.test(deploy),
+    && releaseGatePolicyCovers('accept:migration-scalar-constraints'),
     'source and target enum, boolean, UUID and unique-index conversions require a checksum-bound MySQL release gate',
   )
   requireCondition(
@@ -3477,7 +3491,7 @@ async function main() {
     && /lead-review-pagination-order-ends-in-unique-id/.test(stablePaginationAcceptance)
     && packageJson.scripts?.['accept:stable-pagination']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/stablePaginationAcceptance.ts'
-    && /run accept:stable-pagination/.test(deploy),
+    && releaseGatePolicyCovers('accept:stable-pagination'),
     'offset-paginated project, lead and review lists must end in a unique ordering key and pass a real MySQL tie fixture',
   )
   requireCondition(
@@ -3521,7 +3535,7 @@ async function main() {
     && /proxy\.setAvailable\(false\)/.test(mysqlResilienceAcceptance)
     && packageJson.scripts?.['accept:mysql-resilience']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/mysqlResilienceAcceptance.ts'
-    && /run accept:mysql-resilience/.test(await readFile(path.resolve(root, 'deploy.sh'), 'utf8')),
+    && releaseGatePolicyCovers('accept:mysql-resilience'),
     'production release must prove MySQL network outage recovery and transaction durability without stopping the database',
   )
   for (const contract of [
@@ -3537,7 +3551,7 @@ async function main() {
   requireCondition(
     packageJson.scripts?.['accept:mysql-operational-config']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/mysqlOperationalConfigAcceptance.ts'
-    && /run accept:mysql-operational-config/.test(await readFile(path.resolve(root, 'deploy.sh'), 'utf8')),
+    && releaseGatePolicyCovers('accept:mysql-operational-config'),
     'production release must prove MySQL charset, collation, time zone, capacity and slow-query configuration',
   )
   requireCondition(
@@ -3560,7 +3574,7 @@ async function main() {
   requireCondition(
     packageJson.scripts?.['accept:chinese-retrieval']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/chineseRetrievalAcceptance.ts'
-    && /run accept:chinese-retrieval/.test(await readFile(path.resolve(root, 'deploy.sh'), 'utf8')),
+    && releaseGatePolicyCovers('accept:chinese-retrieval'),
     'production release must prove Chinese retrieval recall, isolation and stable ordering',
   )
   requireCondition(
@@ -3595,7 +3609,7 @@ async function main() {
   requireCondition(
     packageJson.scripts?.['accept:knowledge-ingestion-atomicity']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/knowledgeIngestionAtomicityAcceptance.ts'
-    && /run accept:knowledge-ingestion-atomicity/.test(await readFile(path.resolve(root, 'deploy.sh'), 'utf8')),
+    && releaseGatePolicyCovers('accept:knowledge-ingestion-atomicity'),
     'production release must prove atomic knowledge replacement, rollback and idempotency',
   )
   requireCondition(
@@ -3628,7 +3642,7 @@ async function main() {
   requireCondition(
     packageJson.scripts?.['accept:project-file-temp-cleanup']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/projectFileTempCleanupAcceptance.ts'
-    && /run accept:project-file-temp-cleanup/.test(deploy),
+    && releaseGatePolicyCovers('accept:project-file-temp-cleanup'),
     'production release must prove project-file temporary cleanup retention and safety boundaries',
   )
   requireCondition(
@@ -3652,7 +3666,7 @@ async function main() {
   requireCondition(
     packageJson.scripts?.['accept:project-file-deletion-isolation']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/projectFileDeletionIsolationAcceptance.ts'
-    && /run accept:project-file-deletion-isolation/.test(deploy),
+    && releaseGatePolicyCovers('accept:project-file-deletion-isolation'),
     'production release must prove project-file deletion cannot affect other projects, shared assets or rollback sources',
   )
   for (const format of ['pdf', 'docx', 'pptx', 'xlsx', 'image']) {
@@ -3673,7 +3687,7 @@ async function main() {
     && /mode: 0o600/.test(migrationFileSampleAcceptance)
     && packageJson.scripts?.['accept:migration-file-samples']
       === 'node --import tsx server/src/scripts/migrationFileSampleAcceptance.ts'
-    && /run accept:migration-file-samples/.test(deploy),
+    && releaseGatePolicyCovers('accept:migration-file-samples'),
     'release must structurally open safe PDF, DOCX, PPTX, XLSX and image samples without leaking content or claiming missing production assets are complete',
   )
   for (const contract of [
@@ -3689,7 +3703,7 @@ async function main() {
   requireCondition(
     packageJson.scripts?.['accept:migration-fixture-readiness']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/migrationFixtureReadinessAcceptance.ts'
-    && /run accept:migration-fixture-readiness/.test(deploy),
+    && releaseGatePolicyCovers('accept:migration-fixture-readiness'),
     'production release must prove migration roles, isolated projects, representative files, lead cases and failure simulations are prepared without real data',
   )
   for (const contract of [
@@ -3715,7 +3729,7 @@ async function main() {
     packageJson.scripts?.['accept:migration-test-data-safety']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/migrationTestDataSafetyAcceptance.ts'
     && /await rename\(temporary, target\)/.test(migrationTestDataSafetyAcceptance)
-    && /run accept:migration-test-data-safety/.test(deploy),
+    && releaseGatePolicyCovers('accept:migration-test-data-safety'),
     'production release must atomically scan migration tests and gold fixtures for configured secrets, credentials, PII, real email domains and weak login passwords',
   )
   for (const contract of [
@@ -3740,7 +3754,7 @@ async function main() {
   requireCondition(
     packageJson.scripts?.['accept:socket']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/socketAcceptance.ts'
-    && /run accept:socket/.test(deploy),
+    && releaseGatePolicyCovers('accept:socket'),
     'production start must prove Socket multi-connection, multi-conversation broadcast, reconnect and identity cleanup boundaries',
   )
   requireCondition(
@@ -3781,7 +3795,7 @@ async function main() {
   requireCondition(
     packageJson.scripts?.['accept:jw-multiturn-live']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/jwMultiTurnLiveAcceptance.ts'
-    && /run accept:jw-multiturn-live/.test(deploy)
+    && releaseGatePolicyCovers('accept:jw-multiturn-live')
     && /disposeJwAgentConversation/.test(jwRuntime)
     && /await disposeJwAgentConversation/.test(conversationRoutes),
     'production update must prove real multi-turn JW context and dispose the SDK Runtime session before deleting MySQL conversation state',
@@ -3798,7 +3812,7 @@ async function main() {
     && /mode: 0o600/.test(jwUsageCompactionAcceptance)
     && packageJson.scripts?.['accept:jw-usage-compaction']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/jwUsageCompactionAcceptance.ts'
-    && /run accept:jw-usage-compaction/.test(deploy),
+    && releaseGatePolicyCovers('accept:jw-usage-compaction'),
     'JW model, token usage, cost and context compaction state must persist in MySQL and recover through snapshots',
   )
   requireCondition(
@@ -3832,8 +3846,8 @@ async function main() {
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/jwInteractionAcceptance.ts'
     && packageJson.scripts?.['accept:jw-interaction-live']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/jwInteractionLiveAcceptance.ts'
-    && /run accept:jw-interaction/.test(deploy)
-    && /run accept:jw-interaction-live/.test(deploy)
+    && releaseGatePolicyCovers('accept:jw-interaction')
+    && releaseGatePolicyCovers('accept:jw-interaction-live')
     && /ensure_env_value "\$ENV_FILE" "JW_AGENT_INTERACTION_TIMEOUT_MS" "900000"/.test(deploy),
     'JW AskUserQuestion must support authorized answer/cancel, MySQL snapshots and restart-safe cleanup without enabling other built-in tools',
   )
@@ -3850,7 +3864,7 @@ async function main() {
     && /mode: 0o600/.test(jwMessageRenderingAcceptance)
     && packageJson.scripts?.['accept:jw-message-rendering']
       === 'node --import tsx server/scripts/jwMessageRenderingAcceptance.tsx'
-    && /run accept:jw-message-rendering/.test(deploy),
+    && releaseGatePolicyCovers('accept:jw-message-rendering'),
     'JW text, GFM table, code, link and reasoning rendering must remain safe and separately testable',
   )
   requireCondition(
@@ -3870,7 +3884,7 @@ async function main() {
     && /mode: 0o600/.test(jwModelSwitchAcceptance)
     && packageJson.scripts?.['accept:jw-model-switch']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/jwModelSwitchAcceptance.ts'
-    && /run accept:jw-model-switch/.test(deploy),
+    && releaseGatePolicyCovers('accept:jw-model-switch'),
     'JW model switching must serialize with message submission, validate authorization, preserve MySQL history and recreate the next SDK query from the selected model',
   )
   requireCondition(
@@ -3886,7 +3900,7 @@ async function main() {
     && /mode: 0o600/.test(jwToolLifecycleAcceptance)
     && packageJson.scripts?.['accept:jw-tool-lifecycle']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/jwToolLifecycleAcceptance.ts'
-    && /run accept:jw-tool-lifecycle/.test(deploy),
+    && releaseGatePolicyCovers('accept:jw-tool-lifecycle'),
     'JW tool calls must retain typed input, progress, success and natural failure states in MySQL without terminal-state regression',
   )
   requireCondition(
@@ -3931,7 +3945,7 @@ async function main() {
   requireCondition(
     packageJson.scripts?.['accept:error-contract']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/errorContractAcceptance.ts'
-    && /run accept:error-contract/.test(deploy),
+    && releaseGatePolicyCovers('accept:error-contract'),
     'production release must prove consistent safe and traceable API/Agent error contracts',
   )
   requireCondition(
@@ -3990,7 +4004,7 @@ async function main() {
     && /conversation-create-path-has-no-retired-runtime-import-or-proxy/.test(jwConversationRolloutAcceptance)
     && packageJson.scripts?.['accept:jw-conversation-rollout']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/jwConversationRolloutAcceptance.ts'
-    && /run accept:jw-conversation-rollout/.test(deploy)
+    && releaseGatePolicyCovers('accept:jw-conversation-rollout')
     && /ensure_env_value "\$ENV_FILE" "JW_GLOBAL_NEW_CONVERSATIONS_ENABLED"/.test(deploy)
     && /ensure_env_value "\$ENV_FILE" "JW_PROJECT_NEW_CONVERSATIONS_ENABLED"/.test(deploy),
     'JW global/project new-conversation rollout must be independent, fail closed and have no retired runtime fallback',
@@ -4009,7 +4023,7 @@ async function main() {
     && /disabled-im-management-inbound-and-lead-push-apis-fail-closed/.test(extensionFeatureFlagsAcceptance)
     && packageJson.scripts?.['accept:extension-feature-flags']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/extensionFeatureFlagsAcceptance.ts'
-    && /run accept:extension-feature-flags/.test(deploy)
+    && releaseGatePolicyCovers('accept:extension-feature-flags')
     && /ensure_env_value "\$ENV_FILE" "AI_CAPABILITIES_ENABLED"/.test(deploy)
     && /ensure_env_value "\$ENV_FILE" "IM_INTEGRATIONS_ENABLED"/.test(deploy),
     'AI capability and IM extensions must have independent strict rollback flags with fail-closed APIs and safe core fallback',
@@ -4327,7 +4341,7 @@ async function main() {
   requireCondition(
     packageJson.scripts?.['accept:ai-model-settings']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/aiModelSettingsAcceptance.ts'
-    && /run accept:ai-model-settings/.test(deploy)
+    && releaseGatePolicyCovers('accept:ai-model-settings')
     && /ensure_env_value "\$ENV_FILE" "MODEL_CREDENTIAL_ENCRYPTION_KEY"/.test(deploy)
     && /ensure_env_value "\$ENV_FILE" "MODEL_PROVIDER_ALLOWED_HOSTS"/.test(deploy),
     'production release must run the encrypted model settings, authorization, routing and connection gate',
@@ -4412,7 +4426,7 @@ async function main() {
   requireCondition(
     packageJson.scripts?.['accept:ai-capabilities']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/aiCapabilityAcceptance.ts'
-    && /run accept:ai-capabilities/.test(deploy),
+    && releaseGatePolicyCovers('accept:ai-capabilities'),
     'production release must run the AI capability authorization and runtime gate',
   )
   for (const table of ['im_bots', 'im_bot_bindings', 'im_outbox', 'im_delivery_logs', 'im_inbound_messages']) {
@@ -4488,7 +4502,7 @@ async function main() {
   requireCondition(
     packageJson.scripts?.['accept:im-integrations']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/imIntegrationAcceptance.ts'
-    && /run accept:im-integrations/.test(deploy)
+    && releaseGatePolicyCovers('accept:im-integrations')
     && /ensure_env_value "\$ENV_FILE" "INTEGRATION_CREDENTIAL_ENCRYPTION_KEY"/.test(deploy)
     && /INTEGRATION_CREDENTIAL_ENCRYPTION_KEY/.test(runtimeSafety),
     'production release must configure and run the encrypted IM authorization, routing and delivery gate',
@@ -4535,7 +4549,7 @@ async function main() {
   requireCondition(
     packageJson.scripts?.['accept:auth-session-policy']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/authSessionPolicyAcceptance.ts'
-    && /run accept:auth-session-policy/.test(deploy),
+    && releaseGatePolicyCovers('accept:auth-session-policy'),
     'production release must run the MySQL auth session concurrency, renewal and secret rotation gate',
   )
   requireCondition(
@@ -4568,7 +4582,7 @@ async function main() {
     && /ensure_env_value "\$ENV_FILE" "OPS_AUTH_PREVIOUS_KEY_MATCHES_24H_WARN"/.test(deploy)
     && packageJson.scripts?.['accept:auth-session-key-telemetry']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/authSessionKeyRotationTelemetryAcceptance.ts'
-    && /run accept:auth-session-key-telemetry/.test(deploy),
+    && releaseGatePolicyCovers('accept:auth-session-key-telemetry'),
     'session-key rotation telemetry must persist deduplicated hashed previous-key activity, expose lifecycle readiness and exclude all secrets, tokens and identities',
   )
   requireCondition(
@@ -4631,7 +4645,7 @@ async function main() {
     && /不创建第二个服务、端口、cron、timer 或子进程/.test(operationalTelemetryHandoff)
     && packageJson.scripts?.['accept:operations-telemetry']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/operationalTelemetryAcceptance.ts'
-    && /run accept:operations-telemetry/.test(deploy),
+    && releaseGatePolicyCovers('accept:operations-telemetry'),
     'single service must expose an admin-only content-free HTTP, Socket, MySQL, queue, IM, file, security and CDC telemetry snapshot with threshold acceptance',
   )
   requireCondition(
@@ -4702,7 +4716,7 @@ async function main() {
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/quarantineOrphanAgentWorkspaces.ts'
     && packageJson.scripts?.['accept:agent-workspace-lifecycle']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/agentWorkspaceLifecycleAcceptance.ts'
-    && /run accept:agent-workspace-lifecycle/.test(deploy),
+    && releaseGatePolicyCovers('accept:agent-workspace-lifecycle'),
     'orphan Agent workspaces must be recoverably quarantined only when absent from both MySQL conversation authorities, while normal conversation deletion removes only its exact safe workspace',
   )
   requireCondition(
@@ -4743,7 +4757,7 @@ async function main() {
     && /ensure_env_value "\$ENV_FILE" "OPS_AI_FIRST_TOKEN_OBSERVATION_COVERAGE_WARN"/.test(deploy)
     && packageJson.scripts?.['accept:ai-runtime-telemetry']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/aiRuntimeTelemetryAcceptance.ts'
-    && /run accept:ai-runtime-telemetry/.test(deploy),
+    && releaseGatePolicyCovers('accept:ai-runtime-telemetry'),
     'AI runtime telemetry must measure real SDK first-token latency, expose non-streaming coverage gaps and exclude content, identity and secrets',
   )
   requireCondition(
@@ -4802,7 +4816,7 @@ async function main() {
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/verifyDocumentRuntimeDependencies.ts --static'
     && packageJson.scripts?.['verify:document-runtime-dependencies']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/verifyDocumentRuntimeDependencies.ts --live'
-    && /run verify:document-runtime-dependencies/.test(deploy)
+    && releaseGatePolicyCovers('verify:document-runtime-dependencies')
     && /不执行 PPT、尽调、提案、Q&A 或合规性说明生成/.test(documentRuntimeDependencyHandoff)
     && /完整版本输出只保存 SHA-256/.test(documentRuntimeDependencyHandoff)
     && /apt snapshot 或基础镜像 digest/.test(documentRuntimeDependencyHandoff),
@@ -4834,7 +4848,7 @@ async function main() {
     && /ensure_env_value "\$ENV_FILE" "OPS_MYSQL_REPLICATION_LAG_SECONDS_WARN"/.test(deploy)
     && packageJson.scripts?.['accept:mysql-server-telemetry']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/mysqlServerTelemetryAcceptance.ts'
-    && /run accept:mysql-server-telemetry/.test(deploy),
+    && releaseGatePolicyCovers('accept:mysql-server-telemetry'),
     'runtime MySQL server telemetry must expose slow-query and row-lock counters while reporting unavailable deadlock or replication authority honestly and without identities',
   )
   requireCondition(
@@ -4857,7 +4871,7 @@ async function main() {
     && /review-telemetry-fixture-residue-is-zero/.test(leadReviewTelemetryAcceptance)
     && packageJson.scripts?.['accept:lead-review-telemetry']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/leadReviewTelemetryAcceptance.ts'
-    && /run accept:lead-review-telemetry/.test(deploy),
+    && releaseGatePolicyCovers('accept:lead-review-telemetry'),
     'lead review backlog, throughput, resolution duration and exact fixture cleanup must be operationally observable',
   )
   requireCondition(
@@ -4873,7 +4887,7 @@ async function main() {
     && /ensure_env_value "\$ENV_FILE" "OPS_LEAD_ENTITY_DUPLICATE_GROUPS_WARN"/.test(deploy)
     && packageJson.scripts?.['accept:lead-duplicate-telemetry']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/leadDuplicateTelemetryAcceptance.ts'
-    && /run accept:lead-duplicate-telemetry/.test(deploy),
+    && releaseGatePolicyCovers('accept:lead-duplicate-telemetry'),
     'lead exact-name and company duplicate groups must be measurable, alertable and acceptance-cleaned without automatic merging',
   )
   requireCondition(
@@ -4939,7 +4953,7 @@ async function main() {
     && /ensure_env_value "\$ENV_FILE" "OPS_FILE_CAPACITY_SNAPSHOT_INTERVAL_SECONDS"/.test(deploy)
     && packageJson.scripts?.['accept:file-storage-capacity-history']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/fileStorageCapacityHistoryAcceptance.ts'
-    && /run accept:file-storage-capacity-history/.test(deploy),
+    && releaseGatePolicyCovers('accept:file-storage-capacity-history'),
     'file capacity snapshots must be hourly, idempotent, path-free and cross-day comparable with honest baseline and growth alerts',
   )
   requireCondition(
@@ -4990,7 +5004,7 @@ async function main() {
     && /ensure_env_value "\$ENV_FILE" "OPS_SUPERVISED_PROCESS_FAILURES_24H_WARN"/.test(deploy)
     && packageJson.scripts?.['accept:process-supervisor-telemetry']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/supervisedProcessTelemetryAcceptance.ts'
-    && /run accept:process-supervisor-telemetry/.test(deploy),
+    && releaseGatePolicyCovers('accept:process-supervisor-telemetry'),
     'supervised process exits must persist hashed reason/code/signal/duration/escalation events with alerts and exact fixture cleanup',
   )
   requireCondition(
@@ -5021,7 +5035,7 @@ async function main() {
     && /ensure_env_value "\$ENV_FILE" "OPS_JOB_LEASE_CONTENTIONS_24H_WARN"/.test(deploy)
     && packageJson.scripts?.['accept:job-coordination-telemetry']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/jobCoordinationTelemetryAcceptance.ts'
-    && /run accept:job-coordination-telemetry/.test(deploy)
+    && releaseGatePolicyCovers('accept:job-coordination-telemetry')
     && /- \[x\] `OPS-016`/.test(repositoryMigrationExecutionChecklist)
     && /事件写入失败只产生无标识错误日志/.test(operationalTelemetryHandoff),
     'job lease contention, duplicate suppression, recovery and stale completion rejection must be durable, hashed and operationally aggregated',
@@ -5045,7 +5059,7 @@ async function main() {
     && /OPS_ALERT_REMINDER_MINUTES=\$\{OPS_ALERT_REMINDER_MINUTES:-60\}/.test(deploy)
     && packageJson.scripts?.['accept:operational-alert-delivery']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/operationalAlertDeliveryAcceptance.ts'
-    && /run accept:operational-alert-delivery/.test(deploy)
+    && releaseGatePolicyCovers('accept:operational-alert-delivery')
     && /不增加第二个服务、端口、cron 或 timer/.test(operationalTelemetryHandoff),
     'operational alerts must reuse the in-process IM outbox with durable deduplication, retries, delivery logs and recovery notifications',
   )
@@ -5099,7 +5113,7 @@ async function main() {
       === 'node --env-file-if-exists=.env --env-file-if-exists=.runtime/secrets/mysql-migration.env --import tsx server/src/scripts/legacyBearerHttpSocketAcceptance.ts'
     && packageJson.scripts?.['invalidate:legacy-bearer']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/invalidateLegacyBearerTokens.ts --apply'
-    && /run accept:legacy-bearer-policy/.test(deploy),
+    && releaseGatePolicyCovers('accept:legacy-bearer-policy'),
     'production release must run the legacy bearer retirement gate and expose an explicit invalidation command',
   )
   requireCondition(/listen 443 ssl http2/.test(deploy), 'production Nginx must terminate TLS')
@@ -5133,8 +5147,8 @@ async function main() {
     && /environment file changed after preview/.test(migrationWriteFreezeEnv)
     && /must be owner-only \(0600 or stricter\)/.test(migrationWriteFreezeEnv)
     && /duplicate MIGRATION_WRITE_FREEZE/.test(migrationWriteFreezeEnvAcceptance)
-    && /run accept:migration-write-freeze-env/.test(deploy)
-    && /run accept:migration-write-freeze/.test(deploy),
+    && releaseGatePolicyCovers('accept:migration-write-freeze-env')
+    && releaseGatePolicyCovers('accept:migration-write-freeze'),
     'rollback-window runtime must fail closed at HTTP, startup, auth renewal, worker shutdown and MySQL session layers',
   )
   requireCondition(
@@ -5145,7 +5159,7 @@ async function main() {
     && /pending-production-window-approval/.test(cutoverRollbackThresholdAcceptance)
     && packageJson.scripts?.['accept:cutover-rollback-thresholds']
       === 'node --import tsx server/src/scripts/cutoverRollbackThresholdAcceptance.ts'
-    && /run accept:cutover-rollback-thresholds/.test(deploy),
+    && releaseGatePolicyCovers('accept:cutover-rollback-thresholds'),
     'six-domain cutover thresholds must require zero-write rollback eligibility and forward repair after PONR',
   )
   requireCondition(
@@ -5164,7 +5178,7 @@ async function main() {
     requireCondition(deploy.includes(scoringAgentLimit), `deploy is missing Agent bound: ${scoringAgentLimit}`)
   }
   requireCondition(
-    /run audit:mysql-privileges/.test(deploy)
+    releaseGatePolicyCovers('audit:mysql-privileges')
     && /GRANT USAGE ON \*\.\*/.test(mysqlPrivilegeAudit)
     && /grant parser self-test failed/.test(mysqlPrivilegeAudit)
     && /WITH\\s\+GRANT\\s\+OPTION/.test(mysqlPrivilegeAudit)
@@ -5174,7 +5188,7 @@ async function main() {
     'deploy must reject an over-privileged runtime database account without rejecting harmless global USAGE or matching privilege words in account names',
   )
   requireCondition(
-    /run audit:password-hashes/.test(deploy)
+    releaseGatePolicyCovers('audit:password-hashes')
     && /pathsExcluded: true/.test(passwordHashAudit)
     && /identitiesExcluded: true/.test(passwordHashAudit)
     && /passwordsExcluded: true/.test(passwordHashAudit)
@@ -5205,7 +5219,7 @@ async function main() {
     && /databaseWrites: 0/.test(demoUserSeedRetirementAcceptance)
     && packageJson.scripts?.['accept:demo-user-seed-retirement']
       === 'node --env-file-if-exists=.env --import tsx server/src/scripts/demoUserSeedRetirementAcceptance.ts'
-    && /run accept:demo-user-seed-retirement/.test(deploy),
+    && releaseGatePolicyCovers('accept:demo-user-seed-retirement'),
     'retired demo-account generation must have a live MySQL zero-write acceptance gate',
   )
   requireCondition(

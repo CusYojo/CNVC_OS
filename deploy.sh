@@ -207,6 +207,12 @@ prepare_mutation() {
 rebuild_and_activate() {
     # 先证明已退役的破坏性入口仍失败关闭；不能等构建激活或迁移后才发现防护回归。
     require_command npm
+    step "验证生产发布门禁分层"
+    if ! npm run check:production-release-gates; then
+        err "生产发布门禁契约不完整；尚未构建、迁移、停服或激活"
+        return 1
+    fi
+
     step "验证线索历史数据安全边界"
     if ! npm run accept:lead-dedup-safety; then
         err "线索安全门禁失败；尚未构建、迁移、停服或激活，现有业务保持不变"
