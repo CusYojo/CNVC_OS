@@ -92,6 +92,16 @@ class MySqlUserRepository implements UserRepository {
     })
   }
 
+  async isActiveDepartmentName(name: string): Promise<boolean> {
+    return mapped('user.isActiveDepartmentName', async () => {
+      const [row] = await this.executor.select({ id: departments.id }).from(departments).where(and(
+        eq(departments.name, name.trim()),
+        eq(departments.status, '启用'),
+      )).limit(1)
+      return !!row
+    })
+  }
+
   async listPermissionCodes(userId: string): Promise<string[]> {
     return mapped('user.listPermissionCodes', async () => {
       const rows = await this.executor.select({ code: permissions.code })

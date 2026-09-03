@@ -281,6 +281,8 @@ app.use('/api', (req, res, next) => {
   if (
     req.path === '/health' ||
     req.path === '/auth/login' ||
+    req.path === '/auth/register' ||
+    req.path === '/auth/registration-options' ||
     req.path === '/llm-health' ||
     req.path.startsWith('/auth/login')
   ) {

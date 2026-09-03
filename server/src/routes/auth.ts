@@ -1,5 +1,6 @@
 import { Router } from 'express'
 import { LoginSchema } from '../schemas/login.js'
+import { AccountRegistrationSchema, ChangeOwnPasswordSchema } from '../schemas/account.js'
 import {
   createAuthSession,
   legacyBearerAllowedForUser,
@@ -12,8 +13,37 @@ import type { AuthedRequest } from '../middleware/requireAuth.js'
 import { clearAuthCookies, requestOriginAllowed, setAuthCookies } from '../services/sessionAuthService.js'
 import { writeAudit } from '../services/auditService.js'
 import { listEffectivePermissionCodes } from '../services/systemAuthorizationService.js'
+import { changeOwnPassword, requestUserRegistration } from '../services/identityAdministrationService.js'
+import { listSystemAdministration } from '../services/systemAdministrationService.js'
+import { isAiPlatformAdminRole, isImAdminRole, isSystemAdminRole } from '../contracts/adminRoleContract.js'
 
 export const authRouter = Router()
+
+authRouter.get('/registration-options', async (_req, res, next) => {
+  try {
+    const administration = await listSystemAdministration()
+    res.setHeader('Cache-Control', 'private, max-age=60')
+    res.json({
+      roles: administration.roles
+        .filter((role) => role.status === '启用' && role.fdeCategory !== 'system_admin')
+        .filter((role) => !isSystemAdminRole(role.name) && !isAiPlatformAdminRole(role.name) && !isImAdminRole(role.name))
+        .map((role) => role.name),
+      departments: administration.departments
+        .filter((department) => department.status === '启用')
+        .map((department) => department.name),
+    })
+  } catch (error) { next(error) }
+})
+
+authRouter.post('/register', async (req, res, next) => {
+  try {
+    if (!requestOriginAllowed(req.headers)) {
+      throw Object.assign(new Error('注册请求来源不受信任'), { status: 403, code: 'ORIGIN_FORBIDDEN' })
+    }
+    const result = await requestUserRegistration(AccountRegistrationSchema.parse(req.body))
+    res.status(202).json({ ...result, message: '注册申请已提交，请等待系统管理员审核' })
+  } catch (error) { next(error) }
+})
 
 authRouter.post('/login', async (req, res, next) => {
   try {
@@ -95,5 +125,14 @@ authRouter.post('/logout', async (req: AuthedRequest, res, next) => {
     if (req.auth?.sessionId) await revokeAuthSession(req.auth.sessionId)
     clearAuthCookies(res)
     res.json({ ok: true })
+  } catch (error) { next(error) }
+})
+
+authRouter.post('/change-password', async (req: AuthedRequest, res, next) => {
+  try {
+    const body = ChangeOwnPasswordSchema.parse(req.body)
+    const result = await changeOwnPassword({ userId: req.user!.uid, ...body })
+    clearAuthCookies(res)
+    res.json({ ok: true, reauthRequired: true, revokedSessions: result.revokedSessions })
   } catch (error) { next(error) }
 })

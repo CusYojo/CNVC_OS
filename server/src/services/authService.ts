@@ -277,9 +277,9 @@ export async function checkPassword(plain: string, hash: string): Promise<boolea
 
 export async function login(identifier: string, password: string) {
   const user = await resolveLoginIdentity(identifier, identityRepositories.users)
-  if (!user || user.status !== '启用') {
-    throw Object.assign(new Error('账号不存在或已禁用'), { code: 'AUTH_NOT_FOUND' })
-  }
+  if (!user) throw Object.assign(new Error('账号不存在'), { code: 'AUTH_NOT_FOUND' })
+  if (user.status === '待审核') throw Object.assign(new Error('账号正在等待管理员审核'), { code: 'AUTH_PENDING' })
+  if (user.status !== '启用') throw Object.assign(new Error('账号已注销，请联系系统管理员'), { code: 'AUTH_DISABLED' })
   const ok = await checkPassword(password, user.passwordHash)
   if (!ok) {
     throw Object.assign(new Error('密码错误'), { code: 'AUTH_BAD_PASSWORD' })

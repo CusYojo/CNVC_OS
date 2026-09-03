@@ -38,16 +38,18 @@ body:has(.fde-project-detail) { min-width: 320px; }
 .fde-project-detail .fde-detail-inline-actions > span { color: var(--ink-3); font-size: 12px; }
 .fde-project-detail .fde-detail-inline-actions > span strong { margin-left: 5px; color: var(--ink); font-size: 12px; }
 .fde-project-detail .fde-detail-timeline { display: grid; grid-template-columns: repeat(var(--stage-count, 8), minmax(0, 1fr)); width: 100%; gap: 0; padding: 23px 12px 25px; overflow: hidden; }
-.fde-project-detail .fde-detail-stage { position: relative; display: grid; min-width: 0; min-height: 116px; padding: 0 5px; grid-template-rows: 38px minmax(49px, auto) 24px; gap: 5px; align-items: start; text-align: center; }
-.fde-project-detail .fde-detail-stage::after { content: ''; position: absolute; left: 50%; right: -50%; top: 17px; height: 2px; background: var(--line); z-index: 0; }
+.fde-project-detail .fde-detail-stage { position: relative; isolation: isolate; display: grid; min-width: 0; min-height: 116px; padding: 0 5px; grid-template-rows: 38px minmax(49px, auto) 24px; gap: 5px; align-items: start; text-align: center; }
+.fde-project-detail .fde-detail-stage::after { content: ''; position: absolute; left: 50%; right: -50%; top: 18px; height: 2px; background: var(--line); z-index: 1; }
 .fde-project-detail .fde-detail-stage:last-child::after { display: none; }
 .fde-project-detail .fde-detail-stage.completed::after { background: color-mix(in srgb, var(--positive) 55%, var(--line)); }
-.fde-project-detail .fde-detail-stage-rail { height: 38px; display: grid; place-items: center; position: relative; z-index: 1; }
+.fde-project-detail .fde-detail-stage[aria-pressed="true"]::before { content: ''; position: absolute; inset: -7px 0; z-index: 0; border: 1px solid color-mix(in srgb, var(--brand) 28%, var(--line)); border-radius: 12px; background: var(--brand-soft); }
+.fde-project-detail .fde-detail-stage-rail { height: 38px; display: grid; place-items: center; position: relative; z-index: 2; }
 .fde-project-detail .fde-detail-stage-rail > span { display: grid; width: 36px; height: 36px; place-items: center; border: 2px solid var(--line); border-radius: 50%; color: var(--ink-3); background: var(--surface); font-size: 12px; font-weight: 650; }
 .fde-project-detail .fde-detail-stage.completed .fde-detail-stage-rail > span { background: var(--positive); color: white; border-color: var(--positive); }
 .fde-project-detail .fde-detail-stage.current .fde-detail-stage-rail > span { border-color: var(--gold); color: var(--warning); box-shadow: 0 0 0 5px var(--warning-soft); }
 .fde-project-detail .fde-detail-stage:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; border-radius: 8px; }
 .fde-project-detail .fde-detail-stage-copy { min-width: 0; padding: 5px 2px 0; position: relative; z-index: 2; background: var(--surface); }
+.fde-project-detail .fde-detail-stage[aria-pressed="true"] .fde-detail-stage-copy { background: transparent; }
 .fde-project-detail .fde-detail-stage-copy strong { min-height: 35px; display: grid; place-items: start center; font-size: 12px; font-weight: 600; line-height: 1.4; }
 .fde-project-detail .fde-detail-stage-copy small { display: block; margin-top: 2px; color: var(--ink-3); font-size: 12px; line-height: 1.35; }
 .fde-project-detail .fde-detail-stage-state { display: flex; justify-content: center; }
@@ -300,8 +302,7 @@ body:has(.fde-project-detail) { min-width: 320px; }
 .fde-project-detail .fde-plan-sync-warning > div { padding: 0 18px 14px; display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; }
 .fde-project-detail .fde-plan-sync-warning ul { margin: 0; padding-left: 18px; color: var(--ink-2); font-size: 12px; line-height: 1.7; }
 .fde-project-detail .fde-detail-task-acceptance > header { background: color-mix(in srgb, var(--warning-soft) 56%, var(--surface)); }
-.fde-project-detail .fde-detail-stage.current { z-index: 2; margin: -7px 0; padding: 7px 6px; border: 1px solid color-mix(in srgb, var(--brand) 28%, var(--line)); border-radius: 12px; background: var(--brand-soft); box-shadow: none; }
-.fde-project-detail .fde-detail-stage.current .fde-detail-stage-copy { background: transparent; }
+.fde-project-detail .fde-detail-stage.current { z-index: 2; }
 .fde-project-detail .fde-flow-finished { margin: 0; padding: 12px 18px; border-top: 1px solid var(--line); color: var(--positive); background: var(--positive-soft); font-size: 13px; font-weight: 650; }
 .fde-project-detail .fde-current-stage-head { display: flex; min-height: 92px; align-items: center; justify-content: space-between; gap: 18px; padding: 17px 20px; }
 .fde-project-detail .fde-current-stage-head > div:first-child > span { color: var(--brand); font-size: 12px; font-weight: 700; }

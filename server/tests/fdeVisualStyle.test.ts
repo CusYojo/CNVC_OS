@@ -41,6 +41,8 @@ test('FDE navigation keeps AI first-level and configuration inside system manage
     assert.ok(!primary.includes(path))
   }
   assert.match(shell, /aria-label="系统管理功能"/)
+  assert.match(shell, /修改登录密码/)
+  assert.match(shell, /apiPost\('\/auth\/change-password'/)
   assert.match(shell, /location\.pathname\.startsWith\('\/system'\)/)
   assert.match(shell, /canSeeNavItem\(item, currentUser\.role, currentUser\.permissionCodes\)/)
   const systemPage = readFileSync(new URL('../../src/pages/SystemPage.tsx', import.meta.url), 'utf8')
@@ -197,6 +199,11 @@ test('workflow renders marker rail, evidence dates and current focus instead of 
   assert.match(html, /入库<\/strong><small>08\.01/)
   assert.match(html, /计划 08.10/)
   assert.doesNotMatch(html, /选择项目材料文件|<select/)
+  const expanded = renderDetailComponent('FdeWorkflowPanel.tsx', 'FdeWorkflowPanel', { project, files: [], onChanged: async () => {} }, [
+    data, '', false, '立项', {}, null, '', 40, '2026-09-15', [], false, false, false, null, '立项',
+  ])
+  assert.match(expanded, /阶段详情 · 立项/)
+  assert.match(expanded, /无审批节点/)
   const materials = renderDetailComponent('FdeWorkflowPanel.tsx', 'FdeWorkflowPanel', { project, files: [], mode: 'materials', onChanged: async () => {} }, [data])
   assert.match(materials, /节点材料/)
   assert.match(materials, /0 \/ 1 已齐备/)
@@ -211,7 +218,9 @@ test('detail styling is scoped, with sticky separate tabs and responsive rails',
   const root = postcss.parse(css)
   root.walkRules(rule => assert.ok(rule.selector.includes('.fde-project-detail'), `Unscoped detail rule: ${rule.selector}`))
   assert.match(css, /\.fde-detail-tabs\s*\{[^}]*position: sticky/)
-  assert.match(css, /\.fde-detail-stage::after\s*\{[^}]*top: 17px/)
+  assert.match(css, /\.fde-detail-stage::after\s*\{[^}]*top: 18px/)
+  assert.match(css, /\.fde-detail-stage\[aria-pressed="true"\]::before/)
+  assert.doesNotMatch(css, /\.fde-detail-stage\.current\s*\{[^}]*(?:margin|padding):/)
   assert.match(css, /@media \(max-width: 640px\)/)
   assert.ok(css.split('\n').every(line => !/[\t ]+$/.test(line)))
 })

@@ -153,6 +153,8 @@ export function FdeWorkflowPanel({ project, files, mode = 'workflow', onChanged,
         const expandedIndex = data.stages.findIndex(item => item.stage === expandedStage)
         const expanded = data.stages[expandedIndex]
         if (!expanded) return null
+        const expandedMaterials = expanded.materials ?? []
+        const expandedApprovals = expanded.approvals ?? []
         const expandedDone = expandedIndex < currentIndex || project.stage === '已 Close'
         const expandedCurrent = expanded.stage === project.stage && !expandedDone
         const expandedDate = data.timeline.find(v => v.stage === expanded.stage)
@@ -171,11 +173,11 @@ export function FdeWorkflowPanel({ project, files, mode = 'workflow', onChanged,
             </div>
             <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
               <h3 className="mb-2 text-xs font-semibold text-slate-500">必备材料</h3>
-              {expanded.materials.length ? <ul className="space-y-1 text-sm">{expanded.materials.map(requirement => { const satisfied = materialIsSatisfied(expandedBindings.filter(b => b.requirementKey === requirement.key), files); return <li key={requirement.key} className={satisfied ? 'text-slate-700' : 'text-amber-700'}>{satisfied ? '✓' : '○'} {requirement.label}</li> })}</ul> : <p className="text-sm text-slate-400">无独立文件要求</p>}
+              {expandedMaterials.length ? <ul className="space-y-1 text-sm">{expandedMaterials.map(requirement => { const satisfied = materialIsSatisfied(expandedBindings.filter(b => b.requirementKey === requirement.key), files); return <li key={requirement.key} className={satisfied ? 'text-slate-700' : 'text-amber-700'}>{satisfied ? '✓' : '○'} {requirement.label}</li> })}</ul> : <p className="text-sm text-slate-400">无独立文件要求</p>}
             </div>
             <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
               <h3 className="mb-2 text-xs font-semibold text-slate-500">负责人</h3>
-              {expanded.approvals.length ? <div className="flex flex-wrap gap-1">{expanded.approvals.map(approval => <span key={approval.duty} className="rounded bg-brand-50 px-2 py-1 text-xs text-brand-700">{approval.name}{approval.approverNames.length ? ` · ${approval.approverNames.join('、')}` : ' · 未配置'}</span>)}</div> : <p className="text-sm text-slate-400">无审批节点</p>}
+              {expandedApprovals.length ? <div className="flex flex-wrap gap-1">{expandedApprovals.map(approval => <span key={approval.duty} className="rounded bg-brand-50 px-2 py-1 text-xs text-brand-700">{approval.name}{approval.approverNames?.length ? ` · ${approval.approverNames.join('、')}` : ' · 未配置'}</span>)}</div> : <p className="text-sm text-slate-400">无审批节点</p>}
             </div>
             <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
               <h3 className="mb-2 text-xs font-semibold text-slate-500">计划</h3>
@@ -183,7 +185,7 @@ export function FdeWorkflowPanel({ project, files, mode = 'workflow', onChanged,
             </div>
             <div className="rounded-lg border border-slate-100 bg-slate-50 p-3 sm:col-span-2">
               <h3 className="mb-2 text-xs font-semibold text-slate-500">完成标准</h3>
-              <p className="text-sm text-slate-700">{expanded.approvals.length ? expanded.approvals.map(approval => `${approval.name}（${approval.mode}）`).join(' → ') + ' 通过' : '完成阶段动作'}</p>
+              <p className="text-sm text-slate-700">{expandedApprovals.length ? expandedApprovals.map(approval => `${approval.name}（${approval.mode}）`).join(' → ') + ' 通过' : '完成阶段动作'}</p>
             </div>
           </div>
         </Card>

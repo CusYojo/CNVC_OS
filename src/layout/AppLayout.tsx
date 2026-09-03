@@ -19,6 +19,7 @@ import {
   ChevronLeft,
   FileText,
   Moon,
+  KeyRound,
   Plus,
   Search,
   Sun,
@@ -31,6 +32,8 @@ import { Drawer, EmptyState, Modal, SearchInput } from '../components/ui'
 import { getSystemWorkspace, systemWorkspaces } from '../lib/systemWorkspaces'
 import './fde-shell.css'
 import { isAiPlatformAdminRole, isSystemAdminRole } from '../../server/src/contracts/adminRoleContract'
+import { apiPost } from '../lib/api'
+import { useToast } from '../components/Toast'
 
 const primaryNav = [
   { to: '/', label: '工作台', icon: Gauge },
@@ -88,6 +91,10 @@ export function AppLayout() {
   const [showSearch, setShowSearch] = useState(false)
   const [search, setSearch] = useState('')
   const [showNotifications, setShowNotifications] = useState(false)
+  const [showPassword, setShowPassword] = useState(false)
+  const [passwordBusy, setPasswordBusy] = useState(false)
+  const [passwordForm, setPasswordForm] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' })
+  const { showToast } = useToast()
   const currentUser = useAuthStore((state) => state.user ?? { id: '', email: '', name: '', role: '', department: '', status: '启用', permissionCodes: [] })
   const logout = useAppStore((state) => state.logout)
   const projects = useAppStore((state) => state.projects)
@@ -115,6 +122,21 @@ export function AppLayout() {
   const matchedProjects = query ? projects.filter(item => item.lifecycle !== 'deleted' && `${item.name} ${item.companyName}`.toLowerCase().includes(query)).slice(0, 8) : []
   const matchedFiles = query ? files.filter(item => item.name.toLowerCase().includes(query)).slice(0, 8) : []
   const openResult = (path: string) => { setShowSearch(false); setShowNotifications(false); setShowProfile(false); navigate(path) }
+  const changePassword = async () => {
+    if (!passwordForm.currentPassword || !passwordForm.newPassword) return showToast('请填写当前密码和新密码', 'error')
+    if (passwordForm.newPassword !== passwordForm.confirmPassword) return showToast('两次输入的新密码不一致', 'error')
+    setPasswordBusy(true)
+    try {
+      await apiPost('/auth/change-password', { currentPassword: passwordForm.currentPassword, newPassword: passwordForm.newPassword })
+      setShowPassword(false)
+      setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' })
+      showToast('密码修改成功，请使用新密码重新登录')
+      logout()
+      navigate('/login')
+    } catch (error) {
+      showToast((error as Error).message, 'error')
+    } finally { setPasswordBusy(false) }
+  }
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); setShowSearch(value => !value) }
@@ -167,6 +189,7 @@ export function AppLayout() {
                 <div className="fde-profile-menu absolute right-0 top-12 w-52 rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl">
                   <div className="border-b border-slate-100 px-3 py-2.5"><p className="text-xs text-slate-400">{currentUser.email}</p><p className="mt-1 text-xs text-slate-500">{currentUser.department}</p></div>
                   <button onClick={() => navigate('/ai')} className="mt-1 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-600 hover:bg-slate-50"><Sparkles className="h-4 w-4" />AI 助手</button>
+                  <button onClick={() => { setShowProfile(false); setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' }); setShowPassword(true) }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-600 hover:bg-slate-50"><KeyRound className="h-4 w-4" />修改登录密码</button>
                   {isSystemAdminRole(currentUser.role) && <button onClick={() => { setShowProfile(false); navigate('/system') }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-600 hover:bg-slate-50"><Settings className="h-4 w-4" />系统管理</button>}
                   {!isSystemAdminRole(currentUser.role) && isAiPlatformAdminRole(currentUser.role) && <button onClick={() => { setShowProfile(false); navigate('/system/ai/models') }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-600 hover:bg-slate-50"><Settings className="h-4 w-4" />AI 平台管理</button>}
                   <button onClick={() => { logout(); navigate('/login') }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-rose-600 hover:bg-rose-50"><LogOut className="h-4 w-4" />退出登录</button>
@@ -198,6 +221,14 @@ export function AppLayout() {
         <div className="fde-search-results">{messageItems.map(item => <button key={item.id} onClick={() => openResult(item.path)}>{item.kind === '审批' ? <ClipboardCheck /> : item.kind === '预警' ? <AlertTriangle /> : <MessagesSquare />}<span><strong>{item.title}</strong><small><b>{item.kind}</b> · {item.detail}</small></span><span>→</span></button>)}</div>
         {!messageItems.length && <EmptyState title="暂无新消息" description="领导批示、会议提醒、待处理审批、协作互动和项目预警会显示在这里。" />}
       </Drawer>
+      <Modal open={showPassword} onClose={() => { if (!passwordBusy) setShowPassword(false) }} title="修改登录密码" footer={<><button className="fde-ui-button h-10 rounded-lg border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700" disabled={passwordBusy} onClick={() => setShowPassword(false)}>取消</button><button className="fde-ui-button h-10 rounded-lg border border-brand-600 bg-brand-600 px-4 text-sm font-medium text-white disabled:opacity-50" disabled={passwordBusy} onClick={() => void changePassword()}>{passwordBusy ? '正在修改…' : '确认修改'}</button></>}>
+        <div className="space-y-4">
+          <label className="block"><span className="label">当前密码</span><input className="input w-full" type="password" autoComplete="current-password" value={passwordForm.currentPassword} onChange={(event) => setPasswordForm({ ...passwordForm, currentPassword: event.target.value })} /></label>
+          <label className="block"><span className="label">新密码</span><input className="input w-full" type="password" autoComplete="new-password" value={passwordForm.newPassword} onChange={(event) => setPasswordForm({ ...passwordForm, newPassword: event.target.value })} /></label>
+          <label className="block"><span className="label">确认新密码</span><input className="input w-full" type="password" autoComplete="new-password" value={passwordForm.confirmPassword} onChange={(event) => setPasswordForm({ ...passwordForm, confirmPassword: event.target.value })} /></label>
+          <p className="text-xs leading-5 text-slate-500">至少 14 位，包含大小写字母、数字和符号。修改后需要重新登录。</p>
+        </div>
+      </Modal>
       <UnifiedProjectCreateModal open={showCreate} onClose={() => setShowCreate(false)} />
     </div>
   )

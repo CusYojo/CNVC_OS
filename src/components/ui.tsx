@@ -73,7 +73,7 @@ export function StatusBadge({ status }: { status: JobStatus | string }) {
       ? 'red'
       : status === '生成中' || status === '解析中' || status === '进行中' || status === '处理中' || status === '审批中' || status === '会签中'
         ? 'blue'
-        : status === '待处理' || status === '待审批' || status === '待验收' || status === '临期' || status === '需关注' || status === '待确认'
+        : status === '待处理' || status === '待审批' || status === '待审核' || status === '待验收' || status === '临期' || status === '需关注' || status === '待确认'
           ? 'amber'
           : 'slate'
   return <Badge tone={tone}>{display}</Badge>

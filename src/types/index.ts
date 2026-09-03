@@ -734,7 +734,7 @@ export interface User {
   email: string
   department: string
   role: string
-  status: '启用' | '禁用'
+  status: '待审核' | '启用' | '禁用'
   lastLogin: string
 }
 

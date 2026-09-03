@@ -1,4 +1,4 @@
-export type UserStatus = '启用' | '禁用'
+export type UserStatus = '待审核' | '启用' | '禁用'
 
 export type UserRecord = {
   id: string
@@ -70,6 +70,7 @@ export interface UserRepository {
   findByTrimmedName(name: string, limit?: number): Promise<UserRecord[]>
   findEnabledByRoles(roles: string[]): Promise<UserRecord[]>
   isActiveRoleName(name: string): Promise<boolean>
+  isActiveDepartmentName(name: string): Promise<boolean>
   listPermissionCodes(userId: string): Promise<string[]>
   roleHasPermission(roleName: string, permissionCode: string): Promise<boolean>
   listSafe(): Promise<SafeUserRecord[]>

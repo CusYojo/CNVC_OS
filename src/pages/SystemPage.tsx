@@ -1,5 +1,5 @@
 import {
-  Building2, Check, Database, FileText, Plus, RefreshCw, RotateCcw, Search, UserCog, Users,
+  Building2, Check, Database, FileText, Plus, RefreshCw, RotateCcw, Search, UserCheck, UserCog, Users, UserX,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
@@ -121,9 +121,10 @@ export function SystemPage() {
   const [query, setQuery] = useState('')
   useEffect(() => { setQuery('') }, [tab])
   const [userModal, setUserModal] = useState<{ mode: 'create' | 'edit'; user?: User } | null>(null)
-  const [userForm, setUserForm] = useState({ name: '', email: '', department: '', role: '', password: '', status: '启用' as '启用' | '禁用' })
+  const [userForm, setUserForm] = useState({ name: '', email: '', department: '', role: '', password: '', status: '启用' as User['status'] })
   const [passwordUser, setPasswordUser] = useState<User | null>(null)
   const [newPassword, setNewPassword] = useState('')
+  const [accountAction, setAccountAction] = useState<{ user: User; status: '启用' | '禁用' } | null>(null)
   const [departmentModal, setDepartmentModal] = useState<Department | 'create' | null>(null)
   const [departmentForm, setDepartmentForm] = useState({ code: '', name: '', parentId: '', description: '', sortOrder: '0', status: '启用' as '启用' | '禁用' })
   const [roleModal, setRoleModal] = useState<Role | 'create' | null>(null)
@@ -163,12 +164,14 @@ export function SystemPage() {
   const refreshAdministration = useCallback(async () => {
     setLoading(true)
     try {
-      const [nextAdministration, nextInvestmentDictionaries] = await Promise.all([
+      const [nextAdministration, nextInvestmentDictionaries, userResult] = await Promise.all([
         apiGet<Administration>('/system-administration'),
         apiGet<InvestmentProfileDictionaries>('/system-administration/investment-profile-dictionaries'),
+        apiGet<{ list: User[] }>('/users'),
       ])
       setAdministration(nextAdministration)
       setInvestmentDictionaries(nextInvestmentDictionaries)
+      useAppStore.setState({ users: userResult.list })
     }
     catch (error) { showToast((error as Error).message, 'error') }
     finally { setLoading(false) }
@@ -191,7 +194,10 @@ export function SystemPage() {
 
   const normalizedQuery = query.trim().toLowerCase()
   const matches = (value: string) => !normalizedQuery || value.toLowerCase().includes(normalizedQuery)
-  const filteredUsers = useMemo(() => users.filter((user) => matches(`${user.name}${user.email}${user.department}${user.role}`)), [users, normalizedQuery])
+  const filteredUsers = useMemo(() => users
+    .filter((user) => matches(`${user.name}${user.email}${user.department}${user.role}`))
+    .sort((left, right) => Number(right.status === '待审核') - Number(left.status === '待审核') || left.name.localeCompare(right.name, 'zh-CN')),
+  [users, normalizedQuery])
   const filteredTemplates = useMemo(() => templates.filter((item) => matches(`${item.name}${item.type}${item.version}`)), [templates, normalizedQuery])
   const filteredLogs = useMemo(() => logs.filter((item) => matches(`${item.user}${item.module}${item.action}${item.target}`)), [logs, normalizedQuery])
   const enabledRoles = administration.roles.filter((role) => role.status === '启用')
@@ -206,13 +212,27 @@ export function SystemPage() {
 
   async function saveUser() {
     const editing = userModal?.mode === 'edit' && userModal.user
+    const editPayload = {
+      name: userForm.name,
+      role: userForm.role,
+      department: userForm.department,
+      ...(userForm.status === '待审核' ? {} : { status: userForm.status }),
+    }
     const ok = await mutate(
       () => editing
-        ? apiPatch(`/users/${editing.id}`, { name: userForm.name, role: userForm.role, department: userForm.department, status: userForm.status })
+        ? apiPatch(`/users/${editing.id}`, editPayload)
         : apiPost('/users', { name: userForm.name, email: userForm.email, role: userForm.role, department: userForm.department, password: userForm.password }),
       editing ? '用户身份已更新，原会话已按需失效。' : '用户已创建并纳入组织与角色关系。', true,
     )
     if (ok) setUserModal(null)
+  }
+
+  async function changeAccountStatus(user: User, status: '启用' | '禁用') {
+    const success = status === '启用'
+      ? user.status === '待审核' ? '注册申请已通过，账号已进入人员列表。' : '账号已重新启用。'
+      : user.status === '待审核' ? '注册申请已拒绝。' : '账号已注销，活动会话已失效。'
+    const ok = await mutate(() => apiPatch(`/users/${user.id}`, { status }), success, true)
+    if (ok) setAccountAction(null)
   }
 
   function openDepartment(department?: Department) {
@@ -457,13 +477,13 @@ export function SystemPage() {
   </div>
 
   const renderUsers = () => <>
-    {toolbar('搜索姓名、邮箱、部门或角色…', <Button onClick={() => openUser()}><Plus className="h-4 w-4" />新增用户</Button>)}
+    {toolbar('搜索姓名、邮箱、部门或角色…', <><span className="rounded-full bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-700">待审核 {users.filter((user) => user.status === '待审核').length}</span><Button onClick={() => openUser()}><Plus className="h-4 w-4" />新增用户</Button></>)}
     <Card className="overflow-hidden"><DataTable headers={['用户', '部门', '角色', '账号状态', '最后登录', '操作']}>
       {filteredUsers.map((user) => <tr key={user.id}>
         <TableCell><span className="font-medium text-slate-700">{user.name}{user.id === currentUser?.id && <span className="ml-2 text-xs text-brand-500">当前用户</span>}</span><span className="mt-1 block text-xs text-slate-400">{user.email}</span></TableCell>
-        <TableCell>{user.department}</TableCell><TableCell><div className="flex flex-wrap gap-1">{administration.userRoleBindings.filter((item) => item.userId === user.id).map((binding) => <Badge key={binding.roleId} tone={binding.isPrimary ? 'blue' : 'slate'}>{administration.roles.find((role) => role.id === binding.roleId)?.name ?? '未知角色'}{binding.isPrimary ? ' · 主' : ''}</Badge>)}</div></TableCell>
+        <TableCell>{user.department}</TableCell><TableCell><div className="flex flex-wrap gap-1">{administration.userRoleBindings.filter((item) => item.userId === user.id).map((binding) => <Badge key={binding.roleId} tone={binding.isPrimary ? 'blue' : 'slate'}>{administration.roles.find((role) => role.id === binding.roleId)?.name ?? '未知角色'}{binding.isPrimary ? ' · 主' : ''}</Badge>)}{!administration.userRoleBindings.some((item) => item.userId === user.id) && <Badge tone="slate">{user.role}</Badge>}</div></TableCell>
         <TableCell><StatusBadge status={user.status} /></TableCell><TableCell>{displayTime(user.lastLogin)}</TableCell>
-        <TableCell><div className="flex flex-wrap gap-3"><button className="text-xs text-brand-600" onClick={() => openUser(user)}>编辑</button><button className="text-xs text-brand-600" onClick={() => openBindings(user)}>角色与范围</button><button className="text-xs text-slate-500" onClick={() => { setPasswordUser(user); setNewPassword('') }}>重置密码</button></div></TableCell>
+        <TableCell><div className="flex flex-wrap items-center gap-3">{user.status === '待审核' && <button className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700" onClick={() => void changeAccountStatus(user, '启用')}><UserCheck className="h-3.5 w-3.5" />通过申请</button>}<button className="text-xs text-brand-600" onClick={() => openUser(user)}>编辑</button>{user.status === '启用' && <button className="text-xs text-brand-600" onClick={() => openBindings(user)}>角色与范围</button>}{user.status === '启用' && <button className="text-xs text-slate-500" onClick={() => { setPasswordUser(user); setNewPassword('') }}>重置密码</button>}{user.id !== currentUser?.id && <button className={user.status === '启用' ? 'inline-flex items-center gap-1 text-xs text-rose-600' : 'text-xs text-slate-500'} onClick={() => setAccountAction({ user, status: user.status === '启用' || user.status === '待审核' ? '禁用' : '启用' })}>{user.status === '启用' ? <><UserX className="h-3.5 w-3.5" />注销账号</> : user.status === '待审核' ? '拒绝申请' : '重新启用'}</button>}</div></TableCell>
       </tr>)}
     </DataTable></Card>
   </>
@@ -558,9 +578,10 @@ export function SystemPage() {
       <div className="space-y-4"><label><span className="label">姓名</span><input className={field} value={userForm.name} onChange={(e) => setUserForm({ ...userForm, name: e.target.value })} /></label><label><span className="label">工作邮箱</span><input className={field} disabled={userModal?.mode === 'edit'} value={userForm.email} onChange={(e) => setUserForm({ ...userForm, email: e.target.value })} /></label>
         <div className="grid grid-cols-2 gap-4"><label><span className="label">部门</span><select className={field} value={userForm.department} onChange={(e) => setUserForm({ ...userForm, department: e.target.value })}>{enabledDepartments.map((item) => <option key={item.id}>{item.name}</option>)}</select></label><label><span className="label">角色</span><select className={field} value={userForm.role} onChange={(e) => setUserForm({ ...userForm, role: e.target.value })}>{enabledRoles.map((item) => <option key={item.id}>{item.name}</option>)}</select></label></div>
         {userModal?.mode === 'create' && <label><span className="label">初始密码</span><input type="password" className={field} value={userForm.password} onChange={(e) => setUserForm({ ...userForm, password: e.target.value })} /><span className="mt-1 block text-xs text-slate-400">至少 14 位，需包含大小写字母、数字和符号，且不能包含姓名或邮箱。</span></label>}
-        {userModal?.mode === 'edit' && <label><span className="label">账号状态</span><select className={field} disabled={userModal.user?.id === currentUser?.id} value={userForm.status} onChange={(e) => setUserForm({ ...userForm, status: e.target.value as '启用' | '禁用' })}><option>启用</option><option>禁用</option></select></label>}
+        {userModal?.mode === 'edit' && <label><span className="label">账号状态</span><select className={field} disabled={userModal.user?.id === currentUser?.id || userForm.status === '待审核'} value={userForm.status} onChange={(e) => setUserForm({ ...userForm, status: e.target.value as User['status'] })}>{userForm.status === '待审核' && <option>待审核</option>}<option>启用</option><option>禁用</option></select></label>}
       </div>
     </Modal>
+    <Modal open={!!accountAction} title={accountAction?.status === '禁用' ? accountAction.user.status === '待审核' ? '拒绝注册申请' : '确认注销账号' : '确认重新启用'} onClose={() => setAccountAction(null)} footer={<><Button variant="secondary" onClick={() => setAccountAction(null)}>取消</Button><Button loading={busy} variant={accountAction?.status === '禁用' ? 'danger' : 'primary'} onClick={() => accountAction && void changeAccountStatus(accountAction.user, accountAction.status)}>{accountAction?.status === '禁用' ? accountAction.user.status === '待审核' ? '确认拒绝' : '确认注销' : '确认启用'}</Button></>}><div className="rounded-xl bg-slate-50 p-4 text-sm leading-6 text-slate-600"><strong className="block text-slate-800">{accountAction?.user.name}</strong>{accountAction?.status === '禁用' ? accountAction.user.status === '待审核' ? '该申请将被拒绝，账号不能登录。' : '注销后该账号立即退出登录，不能再进入系统；既有任务和操作记录会保留。' : '启用后该账号可以重新登录并进入人员选择列表。'}</div></Modal>
     <Modal open={!!passwordUser} title={`重置密码：${passwordUser?.name || ''}`} onClose={() => setPasswordUser(null)} footer={<><Button variant="secondary" onClick={() => setPasswordUser(null)}>取消</Button><Button loading={busy} onClick={() => void mutate(() => apiPost(`/users/${passwordUser!.id}/reset-password`, { password: newPassword }), '密码已重置，目标用户的活动会话已失效。').then((ok) => ok && setPasswordUser(null))}>确认重置</Button></>}><label><span className="label">新密码</span><input type="password" className={field} value={newPassword} onChange={(e) => setNewPassword(e.target.value)} /></label></Modal>
 
     <Modal open={!!departmentModal} title={departmentModal === 'create' ? '新增部门' : '编辑部门'} onClose={() => setDepartmentModal(null)} footer={<><Button variant="secondary" onClick={() => setDepartmentModal(null)}>取消</Button><Button loading={busy} onClick={() => void saveDepartment()}>保存</Button></>}><div className="space-y-4"><label><span className="label">部门编码</span><input className={field} disabled={departmentModal !== 'create'} value={departmentForm.code} onChange={(e) => setDepartmentForm({ ...departmentForm, code: e.target.value })} /></label><label><span className="label">部门名称</span><input className={field} value={departmentForm.name} onChange={(e) => setDepartmentForm({ ...departmentForm, name: e.target.value })} /></label><label><span className="label">上级部门</span><select className={field} value={departmentForm.parentId} onChange={(e) => setDepartmentForm({ ...departmentForm, parentId: e.target.value })}><option value="">顶级部门</option>{administration.departments.filter((item) => item.id !== (departmentModal as Department)?.id).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label><span className="label">说明</span><textarea className={field} value={departmentForm.description} onChange={(e) => setDepartmentForm({ ...departmentForm, description: e.target.value })} /></label><div className="grid grid-cols-2 gap-4"><label><span className="label">排序</span><input type="number" className={field} value={departmentForm.sortOrder} onChange={(e) => setDepartmentForm({ ...departmentForm, sortOrder: e.target.value })} /></label><label><span className="label">状态</span><select className={field} value={departmentForm.status} onChange={(e) => setDepartmentForm({ ...departmentForm, status: e.target.value as '启用' | '禁用' })}><option>启用</option><option>禁用</option></select></label></div></div></Modal>
