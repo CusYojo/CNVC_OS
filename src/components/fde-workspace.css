@@ -80,6 +80,9 @@
 .office-subtitle { margin-top: 8px; border-top: 1px solid #e7eeec; }
 .office-field-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 13px; padding: 15px; }
 .office-field-grid .office-wide { grid-column: 1 / -1; }
+.office-field-invalid .input,.office-field-invalid .textarea,.office-field-invalid.office-upload-section { border-color: #dc2626 !important; box-shadow: 0 0 0 2px rgba(220,38,38,.12); }
+.office-field-invalid .label { color: #b91c1c; font-weight: 700; }
+.office-field-invalid::after { content: attr(data-error); display: block; margin-top: 5px; color: #b91c1c; font-size: 12px; font-weight: 600; }
 .office-check { display: flex; align-items: center; gap: 9px; color: #365c64; font-size: 12px; }
 .office-check input { width: 17px; height: 17px; accent-color: #315f68; }
 .office-itinerary { display: grid; gap: 7px; padding: 0 15px 14px; }

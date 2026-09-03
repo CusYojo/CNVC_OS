@@ -3,6 +3,8 @@ import { officeExecutionFields, officeExecutionPolicy } from './fdeOfficeExecuti
 
 export const officeKinds = ['出差', '用印', '报销', '请假', '合同'] as const
 export const officeKind = z.enum(officeKinds)
+export const officeLeaveType = (value: string) => value.replace(/（剩余\s*\d+(?:\.\d+)?\s*天）$/, '').trim()
+export const officeLeaveDays = (hours: string | number | undefined) => (Number(hours ?? 0) || 0) / 24
 const id = z.string().uuid()
 const text = z.string().trim().max(2000)
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(value => {

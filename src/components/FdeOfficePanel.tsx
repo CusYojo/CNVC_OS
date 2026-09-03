@@ -21,8 +21,29 @@ const views = [['pending', '待我处理'], ['mine', '我发起的'], ['processe
 const base = '/oa/office/requests'
 const newDefinition = (kind: typeof officeKinds[number]) => officeDefinition.parse({ title: '', reason: '', projectId: null, priority: '普通', details: { kind }, attachmentIds: [] })
 const preparedDefinition = (value: OfficeDefinition) => officeDefinition.parse(value.details.kind === '用印' ? { ...value, title: `${value.details.sealType || '用印'}申请`, reason: value.details.purpose } : value)
-const fieldLabels: Record<string, string> = { destination: '目的地', budget: '预算', currency: '币种', startDate: '开始日期', endDate: '结束日期', entity: '申请主体', sealType: '印章类型', purpose: '用途', copies: '份数', amount: '金额', leaveType: '假别', startAt: '开始时刻（上海）', endAt: '结束时刻（上海）', hours: '请假小时数', counterparty: '合同相对方', documentVersion: '合同版本' }
+const fieldLabels: Record<string, string> = { title: '申请标题', reason: '申请事由', attachmentIds: '申请附件', travelerIds: '出差人', origin: '出发城市', destination: '目的城市', travelMode: '交通方式', itinerary: '多段行程', budget: '预算', currency: '币种', startDate: '开始日期', endDate: '结束日期', entity: '申请主体', sealType: '印章类型', purpose: '用途', copies: '用印份数', handlerId: '经办人', takeOutAt: '带出时间', returnAt: '归还时间', amount: '金额', items: '费用明细', leaveType: '假期类型', startAt: '开始时间', endAt: '结束时间', hours: '请假时长', counterparty: '合同相对方', documentVersion: '合同版本' }
+const fieldLabelAliases: Record<string, string[]> = { startDate: ['出发日期', '开始日期'], endDate: ['返回日期', '结束日期'], purpose: ['用印事由', '用途'], reason: ['申请事由', '报销原因'] }
 const readFile = (file: File) => new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onerror = () => reject(new Error('本地文件读取失败')); reader.onload = () => resolve(String(reader.result).split(',')[1]); reader.readAsDataURL(file) })
+
+function submissionIssueFields(form: OfficeDefinition, issues: string[]) {
+  const result = new Map<string, string>()
+  const add = (key: string, message: string) => { if (!result.has(key)) result.set(key, message) }
+  for (const issue of issues) {
+    const required = issue.match(/^缺少必填字段：(.+)$/)?.[1]
+    if (required) { add(required, `请填写${fieldLabels[required] ?? required}`); continue }
+    if (issue.includes('标题和至少五字事由')) {
+      if (!form.title.trim()) add('title', '请填写申请标题')
+      if (form.reason.trim().length < 5) add('reason', '申请事由至少填写 5 个字')
+    } else if (issue.includes('附件')) add('attachmentIds', issue)
+    else if (issue.includes('结束日期')) add('endDate', issue)
+    else if (issue.includes('出发城市') || issue.includes('目的城市')) { add('origin', issue); add('destination', issue) }
+    else if (issue.includes('行程')) add('itinerary', issue)
+    else if (issue.includes('带出') || issue.includes('归还')) { add('takeOutAt', issue); add('returnAt', issue) }
+    else if (issue.includes('请假结束')) add('endAt', issue)
+    else if (issue.includes('报销') || issue.includes('票据') || issue.includes('水单') || issue.includes('费用明细')) add('items', issue)
+  }
+  return result
+}
 
 export function FdeOfficePanel() {
   const currentAccount = useAuthStore(s => s.user), userId = currentAccount?.id ?? ''
@@ -47,7 +68,9 @@ export function FdeOfficePanel() {
   const [pending, setPending] = useState<OfficePending | null>(null), [storageError, setStorageError] = useState(false)
   const [recoveryNotice, setRecoveryNotice] = useState<{ message: string; id?: string } | null>(null)
   const [reusable, setReusable] = useState<Reusable[] | null>(null), [autoSavedAt, setAutoSavedAt] = useState('')
+  const [submissionIssues, setSubmissionIssues] = useState<string[]>([])
   const pendingBody = useRef<unknown>(null), loadSequence = useRef(0), busyRef = useRef(false), currentUser = useRef(userId); currentUser.current = userId
+  const formRoot = useRef<HTMLDivElement>(null)
   const storageKey = officeRecoveryKey(userId)
   useEffect(() => {
     setId(null); setDetail(null); setRows([]); setCounts({}); setKinds([]); setCanCreateOffice(false); setRecoveryNotice(null); setGrantFile(null); setPending(null); setBusy(false); busyRef.current = false; pendingBody.current = null
@@ -118,13 +141,32 @@ export function FdeOfficePanel() {
     if (busyRef.current) return
     const actor = userId
     busyRef.current = true; setBusy(true); setError('')
-    try { await fn() } catch (e) { if (actor === currentUser.current) setError((e as Error).message) }
+    try { await fn() } catch (e) {
+      if (actor === currentUser.current) {
+        const message = (e as Error).message
+        setError(message)
+        if (submissionIssueFields(form, message.split('；')).size) setSubmissionIssues(message.split('；'))
+        if (message.includes('重新预览') || message.includes('审批路径')) window.requestAnimationFrame(() => formRoot.current?.querySelector<HTMLElement>('[data-office-preview]')?.scrollIntoView({ behavior: 'smooth', block: 'center' }))
+      }
+    }
     finally { if (actor === currentUser.current) { busyRef.current = false; setBusy(false) } }
   }
   const save = () => work(async () => { const parsed = preparedDefinition(form); await perform(`${base}/${id}/save`, { expectedVersion: detail?.version ?? 0, definition: parsed }); await open(id!); await refresh() })
   const act = (action: string, extra = {}) => work(async () => {
-    if (reason.trim().length < 5) throw new Error('请填写至少五字的操作说明')
-    await perform(`${base}/${id}/actions`, { expectedVersion: detail!.version, action, reason, ...extra })
+    const operationReason = action === 'submit' ? '确认提交办公申请' : reason.trim()
+    if (operationReason.length < 5) {
+      const input = formRoot.current?.querySelector<HTMLTextAreaElement>('textarea[placeholder="填写本次处理意见"]')
+      const field = input?.closest<HTMLElement>('label')
+      field?.classList.add('office-field-invalid')
+      if (field) field.dataset.error = '请填写至少 5 个字的审批意见'
+      input?.setAttribute('aria-invalid', 'true')
+      window.requestAnimationFrame(() => {
+        field?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        input?.focus({ preventScroll: true })
+      })
+      return
+    }
+    await perform(`${base}/${id}/actions`, { expectedVersion: detail!.version, action, reason: operationReason, ...extra })
     if (action === 'delete' || action === 'transfer') { setId(null); setDetail(null) } else await open(id!)
     setReason(''); await refresh()
   })
@@ -148,6 +190,42 @@ export function FdeOfficePanel() {
   const canManageGrantFile = Boolean(detail?.attachments.some(file => file.id === grantFile && file.canManageGrants))
   useEffect(() => { if (grantFile && !canManageGrantFile) { setGrantFile(null); setGrantRows([]) } }, [grantFile, canManageGrantFile])
   const changeDetail = (field: string, value: unknown) => { setForm(f => ({ ...f, details: { ...f.details, [field]: value } as OfficeDefinition['details'] })); setPreview(null) }
+  useEffect(() => {
+    if (reason.trim().length < 5) return
+    const input = formRoot.current?.querySelector<HTMLTextAreaElement>('textarea[placeholder="填写本次处理意见"]')
+    const field = input?.closest<HTMLElement>('label')
+    field?.classList.remove('office-field-invalid'); field?.removeAttribute('data-error'); input?.removeAttribute('aria-invalid')
+  }, [reason])
+  useEffect(() => { setSubmissionIssues([]) }, [form])
+  useEffect(() => {
+    const root = formRoot.current
+    if (!root) return
+    root.querySelectorAll<HTMLElement>('.office-field-invalid').forEach(element => { element.classList.remove('office-field-invalid'); element.removeAttribute('data-error') })
+    if (!submissionIssues.length) return
+    const fields = submissionIssueFields(form, submissionIssues)
+    let first: HTMLElement | null = null
+    for (const [key, message] of fields) {
+      let target = root.querySelector<HTMLElement>(`[data-office-field="${key}"]`)
+      if (!target) {
+        const labels = fieldLabelAliases[key] ?? [fieldLabels[key]]
+        target = [...root.querySelectorAll<HTMLElement>('label')].find(element => labels.some(label => label && element.querySelector('.label')?.textContent?.includes(label))) ?? null
+      }
+      if (!target && key === 'items') target = root.querySelector<HTMLElement>('.expense-sheet')
+      if (!target && key === 'itinerary') target = root.querySelector<HTMLElement>('.office-itinerary')
+      if (!target) continue
+      target.classList.add('office-field-invalid'); target.dataset.error = message; first ??= target
+    }
+    window.requestAnimationFrame(() => {
+      first?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      first?.querySelector<HTMLElement>('input, select, textarea, button')?.focus({ preventScroll: true })
+    })
+  }, [submissionIssues, form])
+  const submit = () => {
+    if (!preview) return
+    if (preview.issues.length) { setSubmissionIssues(preview.issues); return }
+    setSubmissionIssues([])
+    void act('submit', { expectedPolicyVersionId: preview.policyVersionId, expectedRouteHash: preview.routeHash, confirmAttachmentSharing: share })
+  }
   const uploadFiles = (files: File[]) => work(async () => {
     if (!id) throw new Error('申请编号不存在，请重新打开申请')
     if (form.details.kind === '报销') {
@@ -231,15 +309,16 @@ export function FdeOfficePanel() {
       </section>
     </Card>
     <Modal open={Boolean(id)} onClose={() => { setId(null); setDetail(null) }} title={`${form.details.kind}申请${detail ? ` · ${detail.status}` : ' · 新草稿'}`} width="max-w-5xl" footer={officeModalFooter}>
+      <div ref={formRoot}>
       {error && <p role="alert" className="mb-4 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">{error}</p>}
       {pending && <p className="mb-4 text-sm text-amber-900">原请求结果未确认，新的写入已暂停；请关闭此窗口，在审批中心核对原请求。</p>}
       <section><h3 className="mb-3 text-sm font-semibold text-slate-800">核心摘要</h3><div className="office-auto-identity"><div><span>申请人</span><strong>{currentAccount?.name || '—'}</strong></div><div><span>部门</span><strong>{currentAccount?.department || '—'}</strong></div><div><span>申请单号</span><strong>{detail?.requestNo || '保存草稿后生成'}</strong></div></div></section>
       {reusable && <section className="office-history-picker"><div className="office-section-title"><div><span><History size={14} /></span><h3>选择历史申请</h3></div><button type="button" onClick={() => setReusable(null)}>收起</button></div>{reusable.length ? reusable.map(item => <button type="button" key={item.id} onClick={() => { setForm({ ...item.definition, attachmentIds: [] }); setPreview(null); setReusable(null) }}><strong>{item.title}</strong><small>{item.requestNo} · {item.status} · {formatShanghaiDateTime(item.updatedAt)}</small><span>复用字段</span></button>) : <p>暂无可复用的同类申请</p>}</section>}
-      <h3 className="mt-6 mb-3 text-sm font-semibold text-slate-800">申请内容</h3><fieldset disabled={!editable || !canWrite} className="grid gap-4 sm:grid-cols-2"><label><span className="label">类型</span><select className="input" disabled={Boolean(detail)} value={form.details.kind} onChange={e => setForm(newDefinition(e.target.value as typeof officeKinds[number]))}>{officeKinds.map(k => <option key={k}>{k}</option>)}</select></label><label><span className="label">可选项目</span><select className="input" disabled={Boolean(detail?.revision)} value={form.projectId ?? ''} onChange={e => { setForm({ ...form, projectId: e.target.value || null }); setPreview(null) }}><option value="">不关联项目</option>{options.projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>{form.details.kind!=='用印'&&<label className="sm:col-span-2"><span className="label">申请标题</span><input className="input" value={form.title} onChange={e => { setForm({ ...form, title: e.target.value }); setPreview(null) }} /></label>}<label><span className="label">紧急程度</span><select className="input" value={form.priority} onChange={e => { setForm({ ...form, priority: e.target.value as OfficeDefinition['priority'] }); setPreview(null) }}><option>普通</option><option>重要</option><option>紧急</option></select></label>
+      <h3 className="mt-6 mb-3 text-sm font-semibold text-slate-800">申请内容</h3><fieldset disabled={!editable || !canWrite} className="grid gap-4 sm:grid-cols-2"><label><span className="label">类型</span><select className="input" disabled={Boolean(detail)} value={form.details.kind} onChange={e => setForm(newDefinition(e.target.value as typeof officeKinds[number]))}>{officeKinds.map(k => <option key={k}>{k}</option>)}</select></label><label><span className="label">可选项目</span><select className="input" disabled={Boolean(detail?.revision)} value={form.projectId ?? ''} onChange={e => { setForm({ ...form, projectId: e.target.value || null }); setPreview(null) }}><option value="">不关联项目</option>{options.projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>{form.details.kind!=='用印'&&<label data-office-field="title" className="sm:col-span-2"><span className="label">申请标题</span><input className="input" value={form.title} onChange={e => { setForm({ ...form, title: e.target.value }); setPreview(null) }} /></label>}<label><span className="label">紧急程度</span><select className="input" value={form.priority} onChange={e => { setForm({ ...form, priority: e.target.value as OfficeDefinition['priority'] }); setPreview(null) }}><option>普通</option><option>重要</option><option>紧急</option></select></label>
         <FdeOfficeSmartFields form={form} people={options.people} attachments={detail?.attachments.filter(file => form.attachmentIds.includes(file.id)) ?? []} leaveBalances={options.leaveBalances} changeDetail={changeDetail} changeReason={value => { setForm(current => ({ ...current, reason: value })); setPreview(null) }} changeTitle={value => { setForm(current => ({ ...current, title: value })); setPreview(null) }} />
-        {form.details.kind!=='用印'&&<label className="sm:col-span-2"><span className="label">{form.details.kind==='报销'?'报销原因':'申请事由'}</span><textarea className="textarea min-h-24" value={form.reason} onChange={e => { setForm({ ...form, reason: e.target.value }); setPreview(null) }} /></label>}
+        {form.details.kind!=='用印'&&<label data-office-field="reason" className="sm:col-span-2"><span className="label">{form.details.kind==='报销'?'报销原因':'申请事由'}</span><textarea className="textarea min-h-24" value={form.reason} onChange={e => { setForm({ ...form, reason: e.target.value }); setPreview(null) }} /></label>}
       </fieldset>
-      <section className={`office-upload-section mt-6 space-y-3 ${form.details.kind === '报销' ? 'invoice-upload' : ''}`}>
+      <section data-office-field="attachmentIds" className={`office-upload-section mt-6 space-y-3 ${form.details.kind === '报销' ? 'invoice-upload' : ''}`}>
         <div className="office-section-title"><div><span><UploadCloud size={15} /></span><h3>{form.details.kind === '报销' ? '报销证明材料' : '申请附件'}</h3></div><small>{detail?.attachments.length ?? 0} 个文件</small></div>
         {(editable || Boolean(detail?.capabilities.author && detail.kind === '合同' && detail.status === '已通过')) && <label className="office-dropzone" onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); if (event.dataTransfer.files.length) void uploadFiles([...event.dataTransfer.files]) }}>
           <UploadCloud size={25} /><strong>{editable ? '拖拽或选择多个文件' : '上传合同签署件'}</strong><span>{form.details.kind === '报销' ? '支持 PDF、JPG/JPEG、PNG，可一次选择多个凭证' : form.details.kind === '用印' ? '支持 Word、Excel、PDF 和图片，原件按名称排序保留' : '支持批量选择，选择完后统一上传'}</span>
@@ -248,11 +327,12 @@ export function FdeOfficePanel() {
         {!detail && <p className="office-upload-hint">选择文件后会自动建立草稿并继续上传，不需要先点保存。</p>}
         <div className="office-file-list">{detail?.attachments.map(f => <div key={f.id}>{f.purpose === 'application' && <input aria-label={`送审 ${f.name}`} type="checkbox" disabled={!editable || !canWrite} checked={form.attachmentIds.includes(f.id)} onChange={() => { setForm({ ...form, attachmentIds: form.attachmentIds.includes(f.id) ? form.attachmentIds.filter(x => x !== f.id) : [...form.attachmentIds, f.id] }); setPreview(null) }} />}<span>{f.name}<small>{f.purpose === 'signed' ? '签署件' : f.purpose === 'execution' ? '执行证明' : '已选入送审材料'} · {(f.byteSize / 1024).toFixed(1)} KB</small></span><a href={`/api${base}/${id}/attachments/${f.id}/preview`} target="_blank" rel="noreferrer">预览</a>{f.canDownload && <a href={`/api${base}/${id}/attachments/${f.id}/download`} target="_blank" rel="noreferrer">下载</a>}{f.canManageGrants && <button disabled={!canWrite} onClick={() => { setGrantFile(f.id); setGrantRows(f.grants ?? []) }}>授权</button>}</div>)}</div>
       </section>
-      {preview && <section className="mt-6 rounded-xl border border-teal-200 bg-teal-50 p-4"><h3 className="text-sm font-semibold">审批链路</h3>{preview.nodes.map((n, i) => <p key={i} className="mt-2 text-sm">{i + 1}. {n.rule.name} · {n.rule.mode} · {n.names.join('、')}</p>)}{preview.issues.map(issue => <p key={issue} className="mt-2 text-sm text-red-700">{issue}</p>)}{preview.sharingRequired && <label className="mt-3 flex gap-2 text-sm"><input type="checkbox" checked={share} onChange={e => setShare(e.target.checked)} />允许以上审批人查看本次附件</label>}<Button className="mt-4" disabled={!canWrite || preview.issues.length > 0 || (preview.sharingRequired && !share)} onClick={() => void act('submit', { expectedPolicyVersionId: preview.policyVersionId, expectedRouteHash: preview.routeHash, confirmAttachmentSharing: share })}>确认提交</Button></section>}
+      {preview && <section className="mt-6 rounded-xl border border-teal-200 bg-teal-50 p-4"><h3 className="text-sm font-semibold">审批链路</h3>{preview.nodes.map((n, i) => <p key={i} className="mt-2 text-sm">{i + 1}. {n.rule.name} · {n.rule.mode} · {n.names.join('、')}</p>)}{preview.issues.map(issue => <p key={issue} className="mt-2 text-sm text-red-700">{issue}</p>)}{submissionIssues.length > 0 && <p role="alert" className="mt-3 font-semibold text-red-700">还有 {submissionIssueFields(form, submissionIssues).size || submissionIssues.length} 项内容需要完善，已定位到第一项。</p>}{preview.sharingRequired && <label className="mt-3 flex gap-2 text-sm"><input type="checkbox" checked={share} onChange={e => setShare(e.target.checked)} />允许以上审批人查看本次附件</label>}<Button className="mt-4" disabled={!canWrite || (preview.sharingRequired && !share)} onClick={submit}>确认提交</Button></section>}
       {detail && <section className="mt-6 space-y-3"><h3 className="text-sm font-semibold">审批时间轴</h3><div className="office-timeline">{detail.nodes.map(n => <div key={n.id} className={n.status.includes('通过') ? 'done' : n.id === detail.currentNodeId ? 'active' : 'waiting'}><i /><div><strong>{n.name} · {n.mode}</strong><p>处理人：{n.approverNames.join('、')} · {n.status}</p>{n.completedAt && <small>处理时间：{formatShanghaiDateTime(n.completedAt)}</small>}{n.approvedByNames.length > 0 && <small>已处理：{n.approvedByNames.join('、')}</small>}{n.comment && <small>审批意见：{n.comment}</small>}</div></div>)}</div>{(detail.capabilities.review || detail.capabilities.withdraw || detail.capabilities.transfer) && <label className="block"><span className="label">审批意见（至少五字）</span><textarea className="textarea" value={reason} onChange={e => setReason(e.target.value)} placeholder="填写本次处理意见" /></label>}{candidates && <div className="rounded-lg border p-3"><select aria-label="合法转交人" className="input mb-3" value={target} onChange={e => setTarget(e.target.value)}><option value="">{candidates.length ? '请选择接收人' : '无合法候选人'}</option>{candidates.map(p => <option key={p.id} value={p.id}>{p.name} · {p.role}</option>)}</select><Button disabled={!canWrite || !target} onClick={() => void act('transfer', { targetUserId: target })}>确认转交</Button></div>}
         <details className="rounded-xl border border-slate-200 p-4"><summary className="cursor-pointer text-sm font-semibold">版本与操作记录</summary><div className="mt-4 space-y-3"><div className="flex flex-wrap gap-2">{detail.revisions.map(r => <Button key={r.id} variant="secondary" onClick={() => void work(async () => setRevision(await apiGet(`${base}/${id}/revisions/${r.revision}`)))}>提交版本 {r.revision}</Button>)}</div>{revision && <Card className="p-4"><p className="text-sm font-semibold">提交版本 {revision.revision} · {revision.snapshot.definition.title}</p><p className="mt-2 whitespace-pre-wrap text-sm">{revision.snapshot.definition.reason}</p><dl className="mt-3 grid gap-2 sm:grid-cols-2">{Object.entries(revision.snapshot.definition.details).filter(([, value]) => typeof value === 'string' || typeof value === 'number').map(([key, value]) => <div key={key} className="text-xs"><dt className="text-slate-500">{fieldLabels[key] ?? key}</dt><dd>{String(value)}</dd></div>)}</dl></Card>}{detail.history.map(h => <div key={h.id} className="border-l-2 border-slate-200 pl-3 text-xs"><p>{{create: "保存草稿", save: "修订草稿", submit: "提交", approve: "同意", return: "退回", reject: "拒绝", withdraw: "撤回", delete: "删除草稿", transfer: "转交", upload: "上传原件", "signed-copy": "签署件归档", "attachment-grants": "附件授权"}[h.action] ?? h.action} · {formatShanghaiDateTime(h.createdAt)}</p><p className="mt-1 text-slate-500">{h.reason}</p></div>)}<div className="flex gap-2"><Button variant="secondary" disabled={historyPage === 1} onClick={() => void open(id!, historyPage - 1)}>上一页</Button><Button variant="secondary" disabled={detail.history.length < 50} onClick={() => void open(id!, historyPage + 1)}>下一页</Button></div></div></details></section>}
       {detail && <FdeOfficeExecutionPanel key={userId + ':' + detail.id} id={detail.id} version={detail.version} canWrite={canWrite} attachments={detail.attachments} run={work} write={perform} reload={async () => { await open(detail.id); await refresh() }} />}
       {detail?.kind === '出差' && detail.status === '已通过' && <section className="office-followup-card"><div><strong>出差单已关联报销</strong></div><Button onClick={() => { const sourceId = detail.id, sourceTitle = detail.title; setId(crypto.randomUUID()); setDetail(null); setForm(officeDefinition.parse({ title: `${sourceTitle}·差旅报销`, reason: `关联已批准出差单 ${detail.requestNo}`, projectId: detail.definition.projectId, priority: '普通', details: { kind: '报销', linkedRequestId: sourceId }, attachmentIds: [] })); setPreview(null); setReusable(null) }}>去报销 <ArrowRight className="h-4 w-4" /></Button></section>}
+      </div>
     </Modal>
     <Modal open={Boolean(grantFile) && canManageGrantFile} onClose={() => setGrantFile(null)} title="附件访问范围" footer={<Button disabled={!canWrite || !canManageGrantFile || reason.trim().length < 5} onClick={() => void work(async () => { await perform(`${base}/${id}/attachments/${grantFile}/grants`, { expectedVersion: detail!.version, reason, grants: grantRows }); setGrantFile(null); await open(id!); await refresh() })}>保存权限</Button>}>{error && <p role="alert" className="text-sm text-red-700">{error}</p>}<label className="mb-3 block"><span className="label">变更说明（至少五字）</span><textarea className="textarea" value={reason} onChange={e => setReason(e.target.value)} /></label>{options.people.map(p => { const grant = grantRows.find(g => g.userId === p.id); return <div key={p.id} className="flex items-center gap-3 border-b py-3 text-sm"><span className="flex-1">{p.name} · {p.role}</span><label><input type="checkbox" checked={Boolean(grant)} onChange={e => setGrantRows(e.target.checked ? [...grantRows, { userId: p.id, canDownload: false }] : grantRows.filter(g => g.userId !== p.id))} /> 查看</label><label><input type="checkbox" disabled={!grant} checked={Boolean(grant?.canDownload)} onChange={e => setGrantRows(grantRows.map(g => g.userId === p.id ? { ...g, canDownload: e.target.checked } : g))} /> 下载</label></div> })}</Modal>
   </div>

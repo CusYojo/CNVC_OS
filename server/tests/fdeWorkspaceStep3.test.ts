@@ -39,3 +39,11 @@ test('knowledge and AI surfaces use business language and keep diagnostics behin
   assert.equal(aiBusinessErrorMessage(new Error('request timeout')), '生成时间较长，请稍后重试')
   assert.equal(aiBusinessErrorMessage(new Error('unsupported file format')), '暂不支持该文件格式')
 })
+
+test('AI new-session dialog remains dismissible when the user has no projects or sessions', () => {
+  const ai = source('src/pages/AIAssistantPage.tsx')
+  assert.match(ai, /onClose=\{\(\) => \{ if \(!creatingSession\) setNewSessionOpen\(false\) \}\}/)
+  assert.match(ai, /<Button variant="secondary" onClick=\{\(\) => setNewSessionOpen\(false\)\} disabled=\{creatingSession\}>/)
+  assert.match(ai, /\{projects\.length === 0 && <p role="status"[^>]*>当前账号暂无可用项目，暂时不能创建项目会话。<\/p>\}/)
+  assert.doesNotMatch(ai, /if \(!creatingSession && sessions\.length > 0\) setNewSessionOpen/)
+})

@@ -3,7 +3,7 @@ import { and, asc, count, desc, eq, inArray, isNull, ne, or, sql } from 'drizzle
 import { z } from 'zod'
 import { db } from '../db/client.js'
 import { oaApprovalRequests as requests, oaApprovalNodes as nodes, oaApprovalRecords as records, oaApprovalRevisions as revisions, oaOfficeEvents as events, oaOfficeCommands as commands, oaOfficeAttachments as files, oaOfficeAttachmentGrants as grants, oaOfficeNotices as notices, oaOfficePolicies as policies, projects, users } from '../db/schema.js'
-import { officeAction, officeCommand, officeDefinition, officeGrantCommand, officeQuery, officeResolveCommand, officeSave, validateOfficeSubmission, type OfficeDefinition, type OfficeNodeRule } from '../contracts/fdeOfficeContract.js'
+import { officeAction, officeCommand, officeDefinition, officeGrantCommand, officeLeaveDays, officeLeaveType, officeQuery, officeResolveCommand, officeSave, validateOfficeSubmission, type OfficeDefinition, type OfficeNodeRule } from '../contracts/fdeOfficeContract.js'
 import { approveNodeTransition } from '../contracts/approvalNodeTransition.js'
 import { officeAccessCondition, officeActor, officeFail as fail, officeFileGrant, officeProject, officeReadable, officeRoleEligible, officeSelectedFiles, type OfficeTx } from './fdeOfficeAccessService.js'
 import { pinnedOfficePolicy, resolveOfficeRoute } from './fdeOfficePolicyService.js'
@@ -30,8 +30,9 @@ async function leaveBalances(reader: Pick<OfficeTx, 'select'>, userId: string) {
   for (const row of rows) {
     const parsed = officeDefinition.safeParse(row.payload?.definition)
     if (!parsed.success || parsed.data.details.kind !== '请假' || !parsed.data.details.startAt || Number(parsed.data.details.startAt.slice(0, 4)) !== year) continue
-    const days = (Number(parsed.data.details.hours ?? '0') || 0) / 8
-    used.set(parsed.data.details.leaveType, (used.get(parsed.data.details.leaveType) ?? 0) + days)
+    const days = officeLeaveDays(parsed.data.details.hours)
+    const leaveType = officeLeaveType(parsed.data.details.leaveType)
+    used.set(leaveType, (used.get(leaveType) ?? 0) + days)
   }
   return Object.entries(defaultLeaveAllowance).map(([type, allowanceDays]) => {
     const usedDays = Math.round((used.get(type) ?? 0) * 100) / 100
@@ -43,7 +44,7 @@ async function validateLeaveBalance(reader: Pick<OfficeTx, 'select'>, userId: st
   const details = definition.details
   if (details.kind !== '请假') return []
   const balance = (await leaveBalances(reader, userId)).find(row => row.type === details.leaveType)
-  const requestedDays = (Number(details.hours ?? '0') || 0) / 8
+  const requestedDays = officeLeaveDays(details.hours)
   return balance?.remainingDays != null && requestedDays > balance.remainingDays ? [`${balance.type}剩余 ${balance.remainingDays} 天，本次申请 ${requestedDays} 天`] : []
 }
 const expected = (row: Request, version: number) => { if (row.lockVersion !== version) return fail('OFFICE_VERSION_CONFLICT', '申请已更新，请核对最新版本后重新确认') }

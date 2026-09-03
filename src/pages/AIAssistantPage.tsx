@@ -2364,14 +2364,12 @@ function Chat() {
       <Modal
         open={newSessionOpen}
         title="新建会话"
-        onClose={() => { if (!creatingSession && sessions.length > 0) setNewSessionOpen(false) }}
+        onClose={() => { if (!creatingSession) setNewSessionOpen(false) }}
         footer={(
           <>
-            {sessions.length > 0 && (
-              <Button variant="secondary" onClick={() => setNewSessionOpen(false)} disabled={creatingSession}>
-                取消
-              </Button>
-            )}
+            <Button variant="secondary" onClick={() => setNewSessionOpen(false)} disabled={creatingSession}>
+              {projects.length === 0 ? '关闭' : '取消'}
+            </Button>
             <Button
               onClick={() => { void confirmNewSession() }}
               loading={creatingSession}
@@ -2394,6 +2392,7 @@ function Chat() {
               onChange={setNewSessionProjectId}
               disabled={creatingSession}
             />
+            {projects.length === 0 && <p role="status" className="mt-2 text-xs text-amber-700">当前账号暂无可用项目，暂时不能创建项目会话。</p>}
             <span className="mt-1 block text-xs text-slate-400">可按项目名称、公司名称、行业或阶段搜索。</span>
           </div>
           <label className="block">

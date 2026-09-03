@@ -1,5 +1,5 @@
 import { GripVertical, Plus, Trash2 } from 'lucide-react'
-import type { OfficeDefinition } from '../../server/src/contracts/fdeOfficeContract'
+import { officeLeaveDays, type OfficeDefinition } from '../../server/src/contracts/fdeOfficeContract'
 import { Button } from './ui'
 
 type Person = { id: string; name: string; role: string }
@@ -120,7 +120,7 @@ export function FdeOfficeSmartFields({ form, people, attachments, leaveBalances 
       <div className="office-section-title"><div><span>01</span><h3>日期与额度</h3></div><small>{computed ? `${computed} 小时` : '精确到 0.5 小时'}</small></div>
       <div className="leave-balance-strip">{leaveBalances.map(row => <div key={row.type} data-active={row.type === d.leaveType}><span>{row.type}</span><strong>{row.remainingDays == null ? '单独核定' : `${row.remainingDays} 天`}</strong><small>{row.allowanceDays == null ? '暂无固定额度' : `全年 ${row.allowanceDays} 天 · 已用 ${row.usedDays} 天`}</small></div>)}</div>
       <div className="office-field-grid">
-        <label><span className="label">假期类型 *</span><select className="input" value={d.leaveType} onChange={e => changeDetail('leaveType', e.target.value)}><option value="">请选择</option>{['年假', '事假', '病假', '婚假', '产假', '调休'].map(value => { const balance = leaveBalances.find(row => row.type === value); return <option key={value}>{value}{balance?.remainingDays != null ? `（剩余 ${balance.remainingDays} 天）` : ''}</option>})}</select>{selectedBalance?.remainingDays != null && <small className="field-help">本次申请后预计剩余 {Math.max(0, selectedBalance.remainingDays - (Number(computed || d.hours || 0) / 8))} 天</small>}</label>
+        <label><span className="label">假期类型 *</span><select className="input" value={d.leaveType} onChange={e => changeDetail('leaveType', e.target.value)}><option value="">请选择</option>{['年假', '事假', '病假', '婚假', '产假', '调休'].map(value => { const balance = leaveBalances.find(row => row.type === value); return <option key={value} value={value}>{value}{balance?.remainingDays != null ? `（剩余 ${balance.remainingDays} 天）` : ''}</option>})}</select>{selectedBalance?.remainingDays != null && <small className="field-help">本次申请后预计剩余 {Math.max(0, selectedBalance.remainingDays - officeLeaveDays(computed || d.hours))} 天</small>}</label>
         <label><span className="label">开始时间 *</span><input className="input" type="datetime-local" value={d.startAt ?? ''} onChange={e => { changeDetail('startAt', e.target.value || undefined); changeDetail('hours', roundLeaveHours(e.target.value, d.endAt) || undefined) }} /></label>
         <label><span className="label">结束时间 *</span><input className="input" type="datetime-local" value={d.endAt ?? ''} onChange={e => { changeDetail('endAt', e.target.value || undefined); changeDetail('hours', roundLeaveHours(d.startAt, e.target.value) || undefined) }} /></label>
         <label><span className="label">请假时长</span><input className="input" readOnly value={computed || d.hours || ''} /></label>
