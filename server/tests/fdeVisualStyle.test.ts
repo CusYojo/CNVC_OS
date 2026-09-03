@@ -68,7 +68,7 @@ test('system navigation selects one workspace across deep links and direct setti
 
 test('audit workspace removes migration and configuration tabs and redirects legacy links', () => {
   const workspace = systemWorkspaces.find(item => item.id === 'integrations')!
-  assert.deepEqual(workspace.tabs, ['audit', 'rating-recovery'])
+  assert.deepEqual(workspace.tabs, ['audit'])
   const items = navigation.navSections[0].children
   assert.equal(items.find(item => item.label === workspace.label)?.to, '/system?tab=audit')
   for (const tab of ['operations', 'integrations-overview']) {

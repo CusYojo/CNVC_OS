@@ -260,7 +260,6 @@
     "accept:radar-candidate-performance": "node --env-file-if-exists=.env --import tsx server/src/scripts/radarCandidatePerformanceAcceptance.ts",
     "observe:radar-cutover": "node --env-file-if-exists=.env --import tsx server/src/scripts/radarCutoverObservationSnapshot.ts",
     "accept:runtime-job-reliability": "node --env-file-if-exists=.env --import tsx server/src/scripts/runtimeJobReliabilityAcceptance.ts",
-    "accept:lead-score-lifecycle": "node --env-file-if-exists=.env --import tsx server/src/scripts/leadScoreJobLifecycleAcceptance.ts",
     "accept:project-score-lifecycle": "node --env-file-if-exists=.env --import tsx server/src/scripts/projectScoreJobLifecycleAcceptance.ts",
     "accept:runtime-job-leader": "node --env-file-if-exists=.env --import tsx server/src/scripts/runtimeJobLeaderAcceptance.ts",
     "accept:ai-template-progress": "node --env-file-if-exists=.env --import tsx server/src/scripts/aiTemplateAnalysisProgressAcceptance.ts",

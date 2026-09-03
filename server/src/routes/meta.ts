@@ -51,7 +51,7 @@ import {
 } from '../services/leadEnrichmentService.js'
 import { LEAD_ENRICHMENT_TOPIC_KEYS } from '../services/leadEnrichmentContract.js'
 import { leadEnrichmentOperationalMetrics } from '../services/leadEnrichmentWorkerService.js'
-import { listLeadRatingHistory, restoreLeadRatingHistory } from '../services/leadRatingHistoryService.js'
+import { listLeadRatingHistory } from '../services/leadRatingHistoryService.js'
 import { collectCompanyIntel, scoreWithAgentDetailed } from '../services/inProcessAiWorkflowService.js'
 import {
   leadScoreRetryPolicy,
@@ -496,17 +496,6 @@ metaRouter.get('/leads/:id/ratings/history', requireSystemAdmin, async (req, res
     const lead = await getLeadById(leadId, { includeHidden: true })
     if (!lead) return res.status(404).json({ code: 'NOT_FOUND', message: '线索不存在' })
     res.json(await listLeadRatingHistory({ leadId, page: query.page, pageSize: query.pageSize }))
-  } catch (error) { next(error) }
-})
-
-metaRouter.post('/leads/:id/ratings/history/:historyId/restore', requireSystemAdmin, async (req: AuthedRequest, res, next) => {
-  try {
-    const body = z.object({ reason: z.string().trim().min(4).max(2_000) }).strict().parse(req.body)
-    const result = await restoreLeadRatingHistory({
-      leadId: metaRouteId(req.params.id), historyId: metaRouteId(req.params.historyId), reason: body.reason,
-      actor: { userId: req.user!.uid, userName: req.user!.name },
-    })
-    res.json(result)
   } catch (error) { next(error) }
 })
 
@@ -1549,13 +1538,14 @@ metaRouter.post('/leads/sync-radar', async (req: AuthedRequest, res, next) => {
   }
 })
 
-// 项目评分：HTTP 请求只负责写入 MySQL 队列并秒回。
-// 排队、抢占、租约和延迟重试由 lead_score_jobs 驱动，leads.scoring.scoreJob 是前端展示快照。
+// 共享线索评分的历史实现仅为兼容旧数据与隔离验收保留，不再由生产入口调用。
+// 当前共享线索唯一处理链路是 lead-enrichment-v8-web-hit；项目详情评分使用独立 project_score_jobs。
 const SCORE_MAX_ATTEMPTS = Math.max(1, Math.min(4, parseInt(process.env.SCORE_MAX_ATTEMPTS || '3', 10)))
 const SCORE_REQUEST_TIMEOUT_MS = Math.max(30_000, parseInt(process.env.SCORE_REQUEST_TIMEOUT_MS || '360000', 10))
 const SCORE_RETRY_BASE_MS = Math.max(1_000, parseInt(process.env.SCORE_RETRY_BASE_MS || '5000', 10))
 const SCORE_DEFERRED_RETRY_LIMIT = Math.max(0, Math.min(5, parseInt(process.env.SCORE_DEFERRED_RETRY_LIMIT || '3', 10)))
 const SCORE_DEFERRED_RETRY_MS = Math.max(10_000, parseInt(process.env.SCORE_DEFERRED_RETRY_MS || '60000', 10))
+const leadScoringRetired = () => true
 
 export async function scheduleLeadScoring(
   leadId: string,
@@ -1567,6 +1557,7 @@ export async function scheduleLeadScoring(
     actor?: { userId?: string | null; userName: string }
   } = {},
 ): Promise<boolean> {
+  if (leadScoringRetired()) return false
   const lead = await getLeadById(leadId)
   if (!lead) return false
   const radarProfile = (lead as { radarProfile?: Record<string, unknown> }).radarProfile ?? {}
@@ -1645,6 +1636,9 @@ export async function scheduleLeadScoring(
 }
 
 export async function recoverLeadScoringQueue(limit = 500) {
+  if (leadScoringRetired()) {
+    return { found: 0, recovered: 0, circuitDeadLettersFound: 0, circuitDeadLettersRecovered: 0 }
+  }
   const leadIds = await listRecoverableLeadScoreIds(limit)
   const circuitDeadLetterIds = await listCircuitDeadLetterLeadScoreIds(limit)
   let recovered = 0
@@ -1747,6 +1741,7 @@ async function requestScoreWorkflow(
 }
 
 export async function executeLeadScoring(leadId: string): Promise<LeadScoreExecutionResult> {
+  if (leadScoringRetired()) return { status: 'discarded' }
   let runStartedAt: string | undefined
   let currentAttempt = 0
   let currentRetryCycles = 0
@@ -1982,101 +1977,23 @@ export async function executeLeadScoring(leadId: string): Promise<LeadScoreExecu
   }
 }
 
-// 触发评分：秒回，后台跑
-metaRouter.post('/leads/:id/score', requireSystemAdmin, async (req: AuthedRequest, res, next) => {
-  try {
-    // 验证存在用 getLeadById 单条查(不拉全表),score 只需要 leadId
-    const lead = await getLeadById(String(req.params.id))
-    if (!lead) { res.status(404).json({ code: 'NOT_FOUND', message: '线索不存在' }); return }
-    const persistedJob = readLeadScoreJob((lead as { scoring?: unknown }).scoring)
-    if (persistedJob?.status === 'dead_letter') {
-      res.status(409).json({
-        code: 'DEAD_LETTER_RETRY_REQUIRED',
-        message: '该评分任务已进入死信，请执行人工重试。',
-      })
-      return
-    }
-    const started = await scheduleLeadScoring(lead.id, { requestMode: 'manual' })
-    if (!started) {
-      const enrichment = await getLeadEnrichmentStatus(lead.id)
-      if (enrichment.snapshot?.status !== 'ready') {
-        res.status(202).json({
-          code: 0,
-          message: 'enrichment_required',
-          status: enrichment.job ? 'enrichment_pending' : 'enrichment_not_queued',
-          enrichmentJobId: enrichment.job?.id ?? null,
-        })
-        return
-      }
-    }
-    const status = started ? 'queued' : persistedJob?.status ?? 'running'
-    res.json({ code: 0, message: started ? 'started' : 'running', status })
-  } catch (err) { next(err) }
+// 旧调用方得到明确退役响应，避免误以为评分任务仍会执行。
+metaRouter.post('/leads/:id/score', requireSystemAdmin, (_req, res) => {
+  res.status(410).json({ code: 'LEAD_SCORING_RETIRED', message: '线索评分已退役，请使用 V8 数据补全结果。' })
 })
 
-// 死信只能通过显式人工操作重新入队，并与队列状态在同一事务写入审计。
-metaRouter.post('/leads/:id/score/retry', requireSystemAdmin, async (req: AuthedRequest, res, next) => {
-  try {
-    const lead = await getLeadById(String(req.params.id))
-    if (!lead) { res.status(404).json({ code: 'NOT_FOUND', message: '线索不存在' }); return }
-    const persistedJob = readLeadScoreJob((lead as { scoring?: unknown }).scoring)
-    if (!persistedJob || !['failed', 'dead_letter'].includes(persistedJob.status)) {
-      res.status(409).json({ code: 'NOT_DEAD_LETTER', message: '该评分任务当前不在死信状态。' })
-      return
-    }
-    const started = await scheduleLeadScoring(lead.id, {
-      manualRetry: true,
-      requestMode: 'manual',
-      actor: { userId: req.user!.uid, userName: req.user!.name },
-    })
-    if (!started) {
-      res.status(409).json({ code: 'RETRY_CONFLICT', message: '任务状态已变化，请刷新后重试。' })
-      return
-    }
-    res.json({ code: 0, message: 'retried', status: 'queued' })
-  } catch (err) { next(err) }
+metaRouter.post('/leads/:id/score/retry', requireSystemAdmin, (_req, res) => {
+  res.status(410).json({ code: 'LEAD_SCORING_RETIRED', message: '线索评分已退役，请使用 V8 数据补全结果。' })
 })
 
-// 查询评分状态/结果：前端轮询
-// 注意：用 getLeadById 单条查询全字段(包含 scoring),不要用 listLeads(列表接口已砍 jsonb 大字段,scoring 拿不到)
-metaRouter.get('/leads/:id/score', async (req: AuthedRequest, res, next) => {
-  try {
-    const lead = await getLeadById(String(req.params.id))
-    if (!lead) { res.status(404).json({ code: 'NOT_FOUND', message: '线索不存在' }); return }
-    const scoring = (lead as { scoring?: { dimensions?: unknown; total?: unknown } }).scoring
-    const persistedJob = readLeadScoreJob(scoring)
-    // AI 深度分析产物特征:含 dimensions(维度打分)。入池时写的结构化 scoring 只有 registry/股东等,不算已分析。
-    const hasAiScoring = !!(scoring && scoring.dimensions)
-    // MySQL 任务执行器会同步 scoreJob 快照；已有 dimensions 的历史结果仍判定为完成。
-    const status = persistedJob?.status ?? (hasAiScoring ? 'done' : 'idle')
-    const publicError = status === 'retrying'
-      ? publicLeadScoreError(persistedJob?.error) ?? 'AI 评分暂未完成，系统将自动重试'
-      : ['failed', 'dead_letter'].includes(status)
-        ? publicLeadScoreDeadLetterError(persistedJob?.error) ?? 'AI 评分暂未完成，可人工重试'
-        : undefined
-    res.json({
-      code: 0,
-      message: 'success',
-      status,
-      error: publicError,
-      attempts: persistedJob?.attempts,
-      maxAttempts: persistedJob?.maxAttempts,
-      retryCycles: persistedJob?.retryCycles,
-      nextRetryAt: persistedJob?.nextRetryAt,
-      scoring: scoring ?? null,
-    })
-  } catch (err) { next(err) }
+metaRouter.get('/leads/:id/score', (_req, res) => {
+  res.status(410).json({ code: 'LEAD_SCORING_RETIRED', message: '线索评分已退役，请使用 V8 数据补全结果。' })
 })
 
 metaRouter.post('/leads/:id/convert', async (req: AuthedRequest, res, next) => {
   try {
     const leadId = String(req.params.id)
     const row = await convertLead(leadId, req.user!.uid)
-    // 甲方要求"获取(领取)就分析"：领取为专属项目后自动触发 AI 深度分析(后台异步，秒回)。
-    // 已在分析中则不重复触发。
-    await scheduleLeadScoring(leadId, { requestMode: 'dedicated_project' }).catch((error) => {
-      console.error('[lead-convert] post-commit scoring enqueue failed:', (error as Error).message)
-    })
     res.json(row)
   } catch (err) { next(err) }
 })

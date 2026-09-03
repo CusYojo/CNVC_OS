@@ -1892,7 +1892,6 @@ export async function freezeLeadEnrichmentSnapshot(jobId: string) {
     connectionReleased = true
     const frozenSnapshot = snapshot
     const postCommit = await runLeadEnrichmentSnapshotPostCommit({
-      enqueueRating: false,
       projectionTarget: job.entity_type === 'research' ? 'research' : 'investment',
     }, {
       refreshEnrichmentProjection: async () => {
@@ -1910,7 +1909,6 @@ export async function freezeLeadEnrichmentSnapshot(jobId: string) {
         if (!result) throw new Error('research profile target disappeared after snapshot commit')
         return result.profile
       },
-      enqueueRating: async () => false,
       recordFailures: async (failures) => {
         await pool.query(
           `UPDATE ${jobsTable} SET last_error=?,updated_at=NOW(3) WHERE id=?`,

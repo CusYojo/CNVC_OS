@@ -12,7 +12,6 @@ import { requireAuth } from './middleware/requireAuth.js'
 import { assertSchemaReady } from './db/migrate.js'
 import { seedUsers } from './services/authService.js'
 import { aiTaskWorkerHealth, recoverAiTasks, stopAiTaskWorker } from './services/aiTaskService.js'
-import { executeLeadScoring } from './routes/meta.js'
 import { pool } from './db/client.js'
 import {
   jwAgentRuntimeHealth,
@@ -27,11 +26,6 @@ import {
   startRuntimeJobScheduler,
   stopRuntimeJobScheduler,
 } from './services/runtimeJobScheduler.js'
-import {
-  leadScoreJobHealth,
-  startLeadScoreJobWorker,
-  stopLeadScoreJobWorker,
-} from './services/leadScoreJobService.js'
 import {
   leadEnrichmentWorkerHealth,
   startLeadEnrichmentWorker,
@@ -234,7 +228,6 @@ app.get('/api/health/components', async (_req, res) => {
         await radarCollectorHealth(),
         await radarMySqlSourceHealth(),
         await runtimeJobSchedulerHealth(),
-        await leadScoreJobHealth(),
         await leadEnrichmentWorkerHealth(),
         await leadBpWorkerHealth(),
         await projectScoreJobHealth(),
@@ -357,7 +350,6 @@ async function start() {
     await recoverAiTasks()
     const interruptedTemplateAnalyses = await recoverInterruptedAiTemplateAnalysisProgress()
     console.log(`[ai-template-analysis] startup recovery interrupted=${interruptedTemplateAnalyses}`)
-    await startLeadScoreJobWorker(executeLeadScoring)
     await startLeadEnrichmentWorker()
     await startProjectScoreJobWorker(executeProjectScoring)
     await startLeadBpWorker()
@@ -391,7 +383,6 @@ async function shutdown(signal: string): Promise<void> {
   await stopProjectScoreJobWorker()
   await stopLeadBpWorker()
   await stopLeadEnrichmentWorker()
-  await stopLeadScoreJobWorker()
   const aiTasks = migrationWriteFreezePolicy.enabled
     ? { active: 0, releasedLeases: 0, cancelled: 0 }
     : await stopAiTaskWorker()

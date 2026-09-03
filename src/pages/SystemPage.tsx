@@ -1,5 +1,5 @@
 import {
-  Building2, Check, Database, FileText, Plus, RefreshCw, RotateCcw, Search, UserCheck, UserCog, Users, UserX,
+  Building2, Check, Database, FileText, Plus, RefreshCw, Search, UserCheck, UserCog, Users, UserX,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
@@ -58,12 +58,6 @@ type InvestmentProfileDictionaries = {
 }
 type RoleBinding = { userId: string; roleId: string; isPrimary: boolean }
 type Administration = { departments: Department[]; roles: Role[]; permissions: Permission[]; dictionaries: DictionaryGroup[]; userRoleBindings: RoleBinding[] }
-type LeadRatingHistory = {
-  id: string; snapshotId: string; snapshotHash: string; ratingSchemaVersion: string;
-  status: string; result: unknown; completedAt: string;
-}
-type LeadRatingHistoryResponse = { leadId: string; ratings: LeadRatingHistory[]; total: number }
-
 const emptyAdministration: Administration = { departments: [], roles: [], permissions: [], dictionaries: [], userRoleBindings: [] }
 const emptyInvestmentDictionaries: InvestmentProfileDictionaries = {
   institutions: [], customers: [], industries: [], academicInstitutions: [],
@@ -73,7 +67,6 @@ const tabItems = [
   { id: 'users', label: '用户管理' }, { id: 'org', label: '组织管理' },
   { id: 'roles', label: '角色权限' }, { id: 'dicts', label: '数据字典' },
   { id: 'templates', label: '模板管理' }, { id: 'audit', label: '审计日志' },
-  { id: 'rating-recovery', label: 'V3评分恢复' },
   { id: 'workflow-rules', label: '流程与周期规则' },
   { id: 'type-rules', label: '非投资流程模板' },
   { id: 'office-rules', label: '办公审批规则' },
@@ -84,16 +77,6 @@ const categoryLabel = (category: string | null) => FDE_ROLE_CATEGORIES.find((ite
 function displayTime(value: string | null | undefined) {
   if (!value) return '尚未登录'
   try { return formatShanghaiDateTime(value) } catch { return '—' }
-}
-
-function ratingHistoryScore(value: unknown) {
-  const result = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
-  const ratingV3 = result.ratingV3 && typeof result.ratingV3 === 'object' && !Array.isArray(result.ratingV3)
-    ? result.ratingV3 as Record<string, unknown> : {}
-  const computed = ratingV3.computed && typeof ratingV3.computed === 'object' && !Array.isArray(ratingV3.computed)
-    ? ratingV3.computed as Record<string, unknown> : {}
-  const score = Number(computed.score ?? result.total)
-  return Number.isFinite(score) ? score : null
 }
 
 export function SystemPage() {
@@ -155,12 +138,6 @@ export function SystemPage() {
   const [academicInstitutionForm, setAcademicInstitutionForm] = useState({
     canonicalName: '', aliases: '', institutionType: '', status: 'active' as 'active' | 'inactive', reason: '',
   })
-  const [ratingLeadId, setRatingLeadId] = useState('')
-  const [ratingHistory, setRatingHistory] = useState<LeadRatingHistory[]>([])
-  const [ratingHistoryLoading, setRatingHistoryLoading] = useState(false)
-  const [ratingRestoreTarget, setRatingRestoreTarget] = useState<LeadRatingHistory | null>(null)
-  const [ratingRestoreReason, setRatingRestoreReason] = useState('')
-
   const refreshAdministration = useCallback(async () => {
     setLoading(true)
     try {
@@ -440,36 +417,6 @@ export function SystemPage() {
     if (ok) setAcademicInstitutionModal(null)
   }
 
-  async function loadRatingHistory() {
-    const leadId = ratingLeadId.trim()
-    if (!leadId) return
-    setRatingHistoryLoading(true)
-    try {
-      const result = await apiGet<LeadRatingHistoryResponse>(`/leads/${leadId}/ratings/history?page=1&pageSize=50`)
-      setRatingHistory(result.ratings)
-      if (!result.ratings.length) showToast('该线索尚无可恢复的V3历史评级。')
-    } catch (error) {
-      setRatingHistory([])
-      showToast((error as Error).message, 'error')
-    } finally { setRatingHistoryLoading(false) }
-  }
-
-  async function restoreRatingHistory() {
-    if (!ratingRestoreTarget || ratingRestoreReason.trim().length < 4) return
-    setBusy(true)
-    try {
-      await apiPost(`/leads/${ratingLeadId.trim()}/ratings/history/${ratingRestoreTarget.id}/restore`, {
-        reason: ratingRestoreReason.trim(),
-      })
-      setRatingRestoreTarget(null)
-      setRatingRestoreReason('')
-      await loadRatingHistory()
-      showToast('已恢复所选V3历史评级；事实、证据和快照未被修改。')
-    } catch (error) {
-      showToast((error as Error).message, 'error')
-    } finally { setBusy(false) }
-  }
-
   const toolbar = (placeholder: string, actions?: React.ReactNode) => <div className="mb-4 flex items-center gap-3">
     <SearchInput className="w-[360px]" placeholder={placeholder} value={query} onChange={(event) => setQuery(event.target.value)} />
     <span className="ml-auto inline-flex items-center gap-1.5 text-xs text-slate-400"><Database className="h-3.5 w-3.5" />MySQL 权威数据</span>
@@ -544,16 +491,9 @@ export function SystemPage() {
     {filteredLogs.map((log) => <tr key={log.id}><TableCell><span className="whitespace-nowrap text-xs">{displayTime(log.createdAt)}</span></TableCell><TableCell>{log.user}</TableCell><TableCell><Badge>{log.module}</Badge></TableCell><TableCell>{log.action}</TableCell><TableCell><span className="block max-w-[460px] truncate">{log.target}</span></TableCell><TableCell><span className="font-mono text-xs text-slate-400">{log.ip || '—'}</span></TableCell></tr>)}
   </DataTable></Card></>
 
-  const renderRatingRecovery = () => <div className="space-y-4">
-    <Card className="p-5"><div className="flex items-end gap-3"><label className="min-w-0 flex-1"><span className="label">共享线索ID</span><input className={field} value={ratingLeadId} placeholder="粘贴线索UUID后读取历史版本" onChange={(event) => setRatingLeadId(event.target.value)} /></label><Button loading={ratingHistoryLoading} disabled={!ratingLeadId.trim()} onClick={() => void loadRatingHistory()}><Search className="h-4 w-4" />读取历史</Button></div></Card>
-    <Card className="overflow-hidden"><DataTable headers={['完成时间', '分值', '快照', '评级版本', '状态', '操作']}>
-      {ratingHistory.map((rating) => <tr key={rating.id}><TableCell>{displayTime(rating.completedAt)}</TableCell><TableCell>{ratingHistoryScore(rating.result) ?? '待评级'}</TableCell><TableCell>已留存</TableCell><TableCell>{rating.ratingSchemaVersion}</TableCell><TableCell><StatusBadge status={rating.status} /></TableCell><TableCell><button className="inline-flex items-center gap-1 text-xs text-brand-600" onClick={() => { setRatingRestoreTarget(rating); setRatingRestoreReason('') }}><RotateCcw className="h-3.5 w-3.5" />恢复此版本</button></TableCell></tr>)}
-    </DataTable>{!ratingHistory.length && <div className="border-t border-slate-100 px-5 py-8 text-center text-sm text-slate-400">请输入线索ID读取可恢复版本</div>}</Card>
-  </div>
-
   const contents: Record<string, () => React.ReactNode> = {
     users: renderUsers, org: renderOrganization, roles: renderRoles, dicts: renderDictionaries,
-    templates: renderTemplates, audit: renderAudit, 'rating-recovery': renderRatingRecovery,
+    templates: renderTemplates, audit: renderAudit,
     'workflow-rules': () => <FdePolicyPanel />,
     'type-rules': () => <FdeTypePolicyPanel />,
     'office-rules': () => <FdeOfficePolicyPanel />,
@@ -596,6 +536,5 @@ export function SystemPage() {
     <Modal open={!!customerModal} title={customerModal === 'create' ? '新增客户等级字典项' : '编辑客户等级字典项'} onClose={() => setCustomerModal(null)} footer={<><Button variant="secondary" onClick={() => setCustomerModal(null)}>取消</Button><Button loading={busy} disabled={!customerForm.canonicalName.trim() || !customerForm.tier || !customerForm.confidentiality || customerForm.reason.trim().length < 5} onClick={() => void saveCustomerDictionary()}>保存并标记画像待重建</Button></>}><div className="space-y-4"><label><span className="label">标准客户名称</span><input className={field} value={customerForm.canonicalName} onChange={(event) => setCustomerForm({ ...customerForm, canonicalName: event.target.value })} /></label><label><span className="label">别名</span><textarea className={field} value={customerForm.aliases} placeholder="多个别名用顿号、逗号或换行分隔" onChange={(event) => setCustomerForm({ ...customerForm, aliases: event.target.value })} /></label><div className="grid grid-cols-3 gap-4"><label><span className="label">客户等级</span><select className={field} value={customerForm.tier} onChange={(event) => setCustomerForm({ ...customerForm, tier: event.target.value as 'A' | 'B' | 'C' | '' })}><option value="">请选择已确认等级</option><option value="A">A 类</option><option value="B">B 类</option><option value="C">C 类</option></select></label><label><span className="label">默认保密要求</span><select className={field} value={customerForm.confidentiality} onChange={(event) => setCustomerForm({ ...customerForm, confidentiality: event.target.value as 'public' | 'confidential' | 'restricted' | '' })}><option value="">请选择保密要求</option><option value="public">公开</option><option value="confidential">保密</option><option value="restricted">受限</option></select></label><label><span className="label">状态</span><select className={field} value={customerForm.status} onChange={(event) => setCustomerForm({ ...customerForm, status: event.target.value as 'active' | 'inactive' })}><option value="active">启用</option><option value="inactive">停用</option></select></label></div><label><span className="label">变更原因</span><textarea className={field} maxLength={1000} value={customerForm.reason} placeholder="至少 5 个字，作为审计依据" onChange={(event) => setCustomerForm({ ...customerForm, reason: event.target.value })} /></label></div></Modal>
     <Modal open={!!industryModal} title={industryModal === 'create' ? '新增行业层级字典项' : '编辑行业层级字典项'} onClose={() => setIndustryModal(null)} footer={<><Button variant="secondary" onClick={() => setIndustryModal(null)}>取消</Button><Button loading={busy} disabled={!industryForm.canonicalName.trim() || !industryForm.level1.trim() || industryForm.reason.trim().length < 5} onClick={() => void saveIndustryDictionary()}>保存并标记画像待重建</Button></>}><div className="space-y-4"><label><span className="label">标准分类名称</span><input className={field} value={industryForm.canonicalName} placeholder="建议使用最细一级标准名称" onChange={(event) => setIndustryForm({ ...industryForm, canonicalName: event.target.value })} /></label><label><span className="label">外部分类 / 别名</span><textarea className={field} value={industryForm.aliases} placeholder="只录入经确认可映射到本分类的名称" onChange={(event) => setIndustryForm({ ...industryForm, aliases: event.target.value })} /></label><div className="grid grid-cols-2 gap-4"><label><span className="label">一级行业</span><input className={field} value={industryForm.level1} onChange={(event) => setIndustryForm({ ...industryForm, level1: event.target.value })} /></label><label><span className="label">二级行业</span><input className={field} value={industryForm.level2} onChange={(event) => setIndustryForm({ ...industryForm, level2: event.target.value })} /></label><label><span className="label">细分赛道</span><input className={field} value={industryForm.segment} onChange={(event) => setIndustryForm({ ...industryForm, segment: event.target.value })} /></label><label><span className="label">产业链位置</span><input className={field} value={industryForm.chainPosition} placeholder="如：上游设备" onChange={(event) => setIndustryForm({ ...industryForm, chainPosition: event.target.value })} /></label></div><div className="grid grid-cols-2 gap-4"><label><span className="label">状态</span><select className={field} value={industryForm.status} onChange={(event) => setIndustryForm({ ...industryForm, status: event.target.value as 'active' | 'inactive' })}><option value="active">启用</option><option value="inactive">停用</option></select></label><label><span className="label">变更原因</span><input className={field} maxLength={1000} value={industryForm.reason} placeholder="至少 5 个字" onChange={(event) => setIndustryForm({ ...industryForm, reason: event.target.value })} /></label></div></div></Modal>
     <Modal open={!!academicInstitutionModal} title={academicInstitutionModal === 'create' ? '新增高校院所字典项' : '编辑高校院所字典项'} onClose={() => setAcademicInstitutionModal(null)} footer={<><Button variant="secondary" onClick={() => setAcademicInstitutionModal(null)}>取消</Button><Button loading={busy} disabled={!academicInstitutionForm.canonicalName.trim() || !academicInstitutionForm.institutionType.trim() || academicInstitutionForm.reason.trim().length < 5} onClick={() => void saveAcademicInstitutionDictionary()}>保存并标记画像待重建</Button></>}><div className="space-y-4"><label><span className="label">高校 / 科研机构标准名</span><input className={field} value={academicInstitutionForm.canonicalName} onChange={(event) => setAcademicInstitutionForm({ ...academicInstitutionForm, canonicalName: event.target.value })} /></label><label><span className="label">别名</span><textarea className={field} value={academicInstitutionForm.aliases} placeholder="简称、历史名称或经确认的外文名" onChange={(event) => setAcademicInstitutionForm({ ...academicInstitutionForm, aliases: event.target.value })} /></label><div className="grid grid-cols-2 gap-4"><label><span className="label">机构类型</span><input className={field} value={academicInstitutionForm.institutionType} placeholder="如：高校、科研院所" onChange={(event) => setAcademicInstitutionForm({ ...academicInstitutionForm, institutionType: event.target.value })} /></label><label><span className="label">状态</span><select className={field} value={academicInstitutionForm.status} onChange={(event) => setAcademicInstitutionForm({ ...academicInstitutionForm, status: event.target.value as 'active' | 'inactive' })}><option value="active">启用</option><option value="inactive">停用</option></select></label></div><label><span className="label">变更原因</span><textarea className={field} maxLength={1000} value={academicInstitutionForm.reason} placeholder="至少 5 个字，作为审计依据" onChange={(event) => setAcademicInstitutionForm({ ...academicInstitutionForm, reason: event.target.value })} /></label></div></Modal>
-    <Modal open={!!ratingRestoreTarget} title="恢复V3历史评级" onClose={() => { if (!busy) setRatingRestoreTarget(null) }} footer={<><Button variant="secondary" disabled={busy} onClick={() => setRatingRestoreTarget(null)}>取消</Button><Button loading={busy} disabled={ratingRestoreReason.trim().length < 4} onClick={() => void restoreRatingHistory()}>确认恢复</Button></>}><div className="space-y-4"><p className="text-sm leading-6 text-slate-600">将恢复到 <strong>{ratingHistoryScore(ratingRestoreTarget?.result) ?? '待评级'}分</strong>。仅切换有效评分结果，不回滚事实、证据和快照。</p><label><span className="label">恢复原因</span><textarea className={field} maxLength={2000} value={ratingRestoreReason} placeholder="至少4个字，说明恢复原因" onChange={(event) => setRatingRestoreReason(event.target.value)} /></label></div></Modal>
   </div>
 }

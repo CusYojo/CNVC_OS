@@ -1,7 +1,7 @@
 export const systemWorkspaces = [
   { id: 'organization', label: '组织与权限', tabs: ['users', 'org', 'roles'] },
   { id: 'rules', label: '模板与规则', tabs: ['workflow-rules', 'type-rules', 'office-rules', 'responsibility-rules', 'templates', 'dicts'] },
-  { id: 'integrations', label: '集成与审计', tabs: ['audit', 'rating-recovery'] },
+  { id: 'integrations', label: '集成与审计', tabs: ['audit'] },
 ]
 
 export function resolveSystemTab(tab: string | null) {

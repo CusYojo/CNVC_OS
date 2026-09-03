@@ -29,11 +29,13 @@ test('0092 profile base through 0095 research projection migrations stay aligned
   assert.match(ratingGuardMigration, /lead-enrichment-v4-investment-profile/)
   assert.match(ratingGuardMigration, /BEFORE INSERT/)
   assert.match(ratingGuardMigration, /BEFORE UPDATE/)
-  const scoringService = read('src/services/leadScoreJobService.ts')
   const scoringRoute = read('src/routes/meta.ts')
-  assert.match(scoringService, /requestMode\?: 'automatic' \| 'manual' \| 'dedicated_project'/)
-  assert.match(scoringRoute, /requestMode: 'manual'/)
-  assert.match(scoringRoute, /requestMode: 'dedicated_project'/)
+  assert.match(scoringRoute, /LEAD_SCORING_RETIRED/)
+  const conversionRoute = scoringRoute.slice(
+    scoringRoute.indexOf("metaRouter.post('/leads/:id/convert'"),
+    scoringRoute.indexOf('// 简化的项目摘要查询'),
+  )
+  assert.doesNotMatch(conversionRoute, /scheduleLeadScoring|enqueueLeadScoreJob/)
   for (const table of [
     'lead_institution_dictionary', 'lead_customer_dictionary', 'lead_industry_dictionary',
     'lead_academic_institution_dictionary', 'lead_investment_profile_projections',
@@ -213,20 +215,18 @@ test('a new snapshot marks the previous projection stale before replacement and 
 test('post-commit projection failures are recorded without turning a frozen snapshot into a topic retry', async () => {
   const calls: string[] = []
   const recorded: Array<{ step: string; message: string }> = []
-  const result = await runLeadEnrichmentSnapshotPostCommit({ enqueueRating: true }, {
+  const result = await runLeadEnrichmentSnapshotPostCommit({}, {
     refreshEnrichmentProjection: async () => { calls.push('enrichment') },
     refreshInvestmentProfileProjection: async () => {
       calls.push('investment')
       throw new Error('projection unavailable')
     },
-    enqueueRating: async () => { calls.push('rating'); return false },
     recordFailures: async (failures) => { recorded.push(...failures) },
   })
 
-  assert.deepEqual(calls, ['enrichment', 'investment', 'rating'])
+  assert.deepEqual(calls, ['enrichment', 'investment'])
   assert.equal(result.enrichmentProjectionRefreshed, true)
   assert.equal(result.investmentProfileRefreshed, false)
-  assert.equal(result.autoScoreEnqueued, false)
   assert.deepEqual(result.failures.map((failure) => failure.step), ['investment_profile_projection'])
   assert.deepEqual(recorded, result.failures)
 })

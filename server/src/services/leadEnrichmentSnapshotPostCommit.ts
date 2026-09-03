@@ -4,7 +4,6 @@ export type LeadEnrichmentSnapshotPostCommitStep =
   | 'enrichment_projection'
   | 'investment_profile_projection'
   | 'research_profile_projection'
-  | 'rating_queue'
   | 'failure_receipt'
 
 export type LeadEnrichmentSnapshotPostCommitFailure = {
@@ -16,7 +15,6 @@ type LeadEnrichmentSnapshotPostCommitTasks = {
   refreshEnrichmentProjection: () => Promise<unknown>
   refreshInvestmentProfileProjection: () => Promise<unknown>
   refreshResearchProfileProjection?: () => Promise<unknown>
-  enqueueRating: () => Promise<boolean>
   recordFailures: (failures: LeadEnrichmentSnapshotPostCommitFailure[]) => Promise<void>
   reportFailure?: (failure: LeadEnrichmentSnapshotPostCommitFailure) => void
 }
@@ -35,7 +33,6 @@ function failureReceipt(step: LeadEnrichmentSnapshotPostCommitStep, error: unkno
  * stale and is picked up by the guarded rebuild path.
  */
 export async function runLeadEnrichmentSnapshotPostCommit(input: {
-  enqueueRating: boolean
   projectionTarget?: 'investment' | 'research'
 }, tasks: LeadEnrichmentSnapshotPostCommitTasks) {
   const failures: LeadEnrichmentSnapshotPostCommitFailure[] = []
@@ -64,10 +61,6 @@ export async function runLeadEnrichmentSnapshotPostCommit(input: {
   const researchProfile = researchTarget && tasks.refreshResearchProfileProjection
     ? await attempt('research_profile_projection', tasks.refreshResearchProfileProjection)
     : undefined
-  const ratingQueued = input.enqueueRating
-    ? await attempt('rating_queue', tasks.enqueueRating)
-    : false
-
   if (failures.length) {
     try {
       await tasks.recordFailures(failures)
@@ -82,7 +75,6 @@ export async function runLeadEnrichmentSnapshotPostCommit(input: {
     enrichmentProjectionRefreshed: !failures.some((item) => item.step === 'enrichment_projection'),
     investmentProfileRefreshed: investmentProfile !== undefined,
     researchProfileRefreshed: researchProfile !== undefined,
-    autoScoreEnqueued: ratingQueued === true,
     failures,
   }
 }

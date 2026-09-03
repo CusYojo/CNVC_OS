@@ -188,16 +188,15 @@ test('only explicit relationship facts can bind evidence to directional entity r
   assert.equal(leadFactEntityRelationType('team.member', 'team'), null)
 })
 
-test('enrichment runtime has independent intake, worker and automatic-score rollback switches', () => {
+test('enrichment runtime has independent intake and worker switches', () => {
   assert.deepEqual(leadEnrichmentRuntimePolicy({}), {
-    workerEnabled: true, acceptNewJobs: true, autoScore: false,
+    workerEnabled: true, acceptNewJobs: true,
   })
   assert.deepEqual(leadEnrichmentRuntimePolicy({
     LEAD_ENRICHMENT_ENABLED: 'false',
     LEAD_ENRICHMENT_ACCEPT_NEW_JOBS: 'false',
-    LEAD_ENRICHMENT_AUTO_SCORE: 'false',
   }), {
-    workerEnabled: false, acceptNewJobs: false, autoScore: false,
+    workerEnabled: false, acceptNewJobs: false,
   })
 })
 

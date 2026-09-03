@@ -88,7 +88,6 @@ interface AppState {
   leads: Lead[]
   leadPagination: { total: number; page: number; pageSize: number; totalPages: number }
   leadStats: { total: number; verified: number; highPriority: number; avgCompleteness: number }
-  scoringLeadIds: string[]
   users: User[]
   templates: Template[]
   auditLogs: AuditLog[]
@@ -120,7 +119,6 @@ interface AppState {
   addLead: (lead: Omit<Lead, 'id'>) => Promise<Lead>
   fetchLeads: (query?: LeadListQuery) => Promise<LeadListResponse | null>
   fetchLeadStats: () => Promise<void>
-  startScoring: (leadId: string, statusOverride?: NonNullable<Lead['scoreJob']>['status']) => Promise<void>
   fetchLeadDetail: (leadId: string) => Promise<Lead | null>
   mergeLeadLocal: (leadId: string, patch: Partial<Lead>) => void
   convertLead: (leadId: string) => Promise<Project | undefined>
@@ -175,7 +173,6 @@ export const useAppStore = create<AppState>()(
         highPriority: 0,
         avgCompleteness: 0,
       },
-      scoringLeadIds: [],
       users: [],
       templates: [],
       auditLogs: [],
@@ -187,7 +184,7 @@ export const useAppStore = create<AppState>()(
           currentUser: emptyUser,
           projects: [], files: [], aiSummaries: [], todos: [], meetings: [], risks: [],
           workflowLogs: [], approvalRequests: [], leads: [],
-          users: [], templates: [], auditLogs: [], notifications: [], scoringLeadIds: [],
+          users: [], templates: [], auditLogs: [], notifications: [],
           leadPagination: { total: 0, page: 1, pageSize: 20, totalPages: 1 },
           leadStats: { total: 0, verified: 0, highPriority: 0, avgCompleteness: 0 },
         })
@@ -478,69 +475,6 @@ export const useAppStore = create<AppState>()(
           const r = await apiGet<{ total: number; verified: number; highPriority: number; avgCompleteness: number }>('/leads/stats')
           set({ leadStats: r })
         } catch (e) { get().addAudit('项目获取池', '统计拉取失败', (e as Error).message) }
-      },
-      // 触发 AI 评分并全局轮询到完成 —— 状态存 store 的 scoringLeadIds,
-      // 不依赖组件生命周期,切换项目/页面再回来评分不中断,完成后自动把结果 merge 进列表。
-      startScoring: async (leadId: string, statusOverride) => {
-        if (get().scoringLeadIds.includes(leadId)) return  // 已在评分中,避免重复触发
-        const currentStatus = statusOverride ?? get().leads.find((lead) => lead.id === leadId)?.scoreJob?.status
-        set((state) => ({ scoringLeadIds: [...state.scoringLeadIds, leadId] }))
-        const finish = () => set((state) => ({ scoringLeadIds: state.scoringLeadIds.filter((x) => x !== leadId) }))
-        try {
-          await apiPost(currentStatus === 'dead_letter' ? `/leads/${leadId}/score/retry` : `/leads/${leadId}/score`, {})
-          const deadline = Date.now() + 20 * 60 * 1000
-          while (Date.now() < deadline) {
-            await new Promise((r) => setTimeout(r, 6000))
-            const st = await apiGet<{
-              status: 'queued' | 'running' | 'retrying' | 'done' | 'failed' | 'dead_letter' | 'idle'
-              error?: string
-              attempts?: number
-              maxAttempts?: number
-              retryCycles?: number
-              nextRetryAt?: string
-            }>(`/leads/${leadId}/score`)
-            if (st.status === 'queued' || st.status === 'running' || st.status === 'retrying') {
-              const activeStatus: 'queued' | 'running' | 'retrying' = st.status
-              set((state) => ({
-                leads: state.leads.map((lead) => lead.id === leadId ? {
-                  ...lead,
-                  scoreJob: {
-                    status: activeStatus,
-                    attempts: st.attempts ?? lead.scoreJob?.attempts ?? 0,
-                    maxAttempts: st.maxAttempts ?? lead.scoreJob?.maxAttempts ?? 3,
-                    retryCycles: st.retryCycles ?? lead.scoreJob?.retryCycles,
-                    nextRetryAt: st.nextRetryAt ?? lead.scoreJob?.nextRetryAt,
-                    updatedAt: new Date().toISOString(),
-                    error: st.error,
-                  },
-                } : lead),
-              }))
-              continue
-            }
-            if (st.status === 'done') {
-              const fresh = await apiGet<Lead>(`/leads/${leadId}`)
-              if (fresh) set((state) => ({ leads: state.leads.map((l) => l.id === leadId ? { ...l, ...fresh } : l) }))
-              return
-            }
-            if (st.status === 'failed' || st.status === 'dead_letter') {
-              const fresh = await apiGet<Lead>(`/leads/${leadId}`).catch(() => null)
-              if (fresh) set((state) => ({ leads: state.leads.map((l) => l.id === leadId ? { ...l, ...fresh } : l) }))
-              const attemptText = st.attempts && st.maxAttempts ? `（${st.attempts}/${st.maxAttempts} 次）` : ''
-              get().addAudit('项目获取池', 'AI 评分暂未完成', `${leadId}${attemptText}`)
-              return
-            }
-          }
-          // 浏览器停止高频轮询不等于取消任务；后端会继续排队执行，页面刷新后可从持久状态接续。
-          const fresh = await apiGet<Lead>(`/leads/${leadId}`).catch(() => null)
-          if (fresh) set((state) => ({ leads: state.leads.map((l) => l.id === leadId ? { ...l, ...fresh } : l) }))
-          if (fresh?.scoreJob && ['queued', 'running', 'retrying'].includes(fresh.scoreJob.status)) {
-            get().addAudit('项目获取池', 'AI 评分仍在后台执行', fresh.name)
-          }
-        } catch (e) {
-          get().addAudit('项目获取池', 'AI 评分请求失败', (e as Error).message)
-        } finally {
-          finish()
-        }
       },
       // 拉单条 lead 详情(含 scoring/radar_profile/sources/funding_rounds 等 jsonb 大字段)
       // 列表接口已精简不返回这些字段,详情弹窗打开时按需拉

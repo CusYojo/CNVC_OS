@@ -100,9 +100,6 @@ export function leadEnrichmentRuntimePolicy(
   return {
     workerEnabled: env.LEAD_ENRICHMENT_ENABLED !== 'false',
     acceptNewJobs: env.LEAD_ENRICHMENT_ACCEPT_NEW_JOBS !== 'false',
-    // Shared-lead enrichment and investment-profile generation are the default
-    // pipeline. V3 rating is retained only behind an explicit opt-in/manual path.
-    autoScore: env.LEAD_ENRICHMENT_AUTO_SCORE === 'true',
   }
 }
 

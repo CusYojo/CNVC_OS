@@ -14,7 +14,7 @@ import { leadTopicResearchContract } from '../services/leadTopicWebResearchServi
 import { companyRegistrationEligibility } from '../services/leadRegistry.js'
 
 const root = process.cwd()
-const [migration, instanceMigration, eventService, enrichmentService, worker, retryPolicy, circuitBreaker, evidenceClassification, conflictDetection, sourceSubjectMatch, publicIntelService, scoreService, routes, serverEntry, sourceDocuments, detailPage, systemPage, backfill, summaryService, intakeService, reserveIntakeService, reviewService, topicResearch, codexCliResearch, codexWorkerRunner, envExample, prefetchResearch] = await Promise.all([
+const [migration, instanceMigration, eventService, enrichmentService, worker, retryPolicy, circuitBreaker, evidenceClassification, conflictDetection, sourceSubjectMatch, publicIntelService, routes, serverEntry, sourceDocuments, detailPage, systemPage, backfill, summaryService, intakeService, reserveIntakeService, reviewService, topicResearch, codexCliResearch, codexWorkerRunner, envExample, prefetchResearch] = await Promise.all([
   readFile(`${root}/server/drizzle/0047_add_lead_enrichment_evidence.sql`, 'utf8'),
   readFile(`${root}/server/drizzle/0049_add_lead_fact_instance_keys.sql`, 'utf8'),
   readFile(`${root}/server/src/services/leadPipelineEventService.ts`, 'utf8'),
@@ -26,7 +26,6 @@ const [migration, instanceMigration, eventService, enrichmentService, worker, re
   readFile(`${root}/server/src/services/leadFactConflictDetectionService.ts`, 'utf8'),
   readFile(`${root}/server/src/services/leadSourceSubjectMatchService.ts`, 'utf8'),
   readFile(`${root}/server/src/services/leadPublicIntelService.ts`, 'utf8'),
-  readFile(`${root}/server/src/services/leadScoreJobService.ts`, 'utf8'),
   readFile(`${root}/server/src/routes/meta.ts`, 'utf8'),
   readFile(`${root}/server/src/index.ts`, 'utf8'),
   readFile(`${root}/server/src/services/leadSourceDocumentService.ts`, 'utf8'),
@@ -71,7 +70,7 @@ assert.match(worker, /WHERE schema_version=\? AND status='running'/)
 assert.match(worker, /SELECT tr\.id,tr\.job_id,tr\.lead_id,tr\.last_error[\s\S]*j\.schema_version=\?/)
 assert.match(worker, /Math\.min\(10,/)
 assert.doesNotMatch(enrichmentService, /enqueueLeadScoreJob/)
-assert.match(enrichmentService, /enqueueRating: false/)
+assert.doesNotMatch(enrichmentService, /enqueueRating/)
 assert.deepEqual(LEAD_DETAIL_ENRICHMENT_TOPIC_KEYS, [
   'basic_profile', 'financing', 'ownership', 'team', 'products', 'latest_developments',
 ])
@@ -199,8 +198,6 @@ assert.match(routes, /authorAffiliations: Array\.isArray\(it\.paper_author_affil
 assert.match(sourceDocuments, /SOURCE_SSRF_REJECTED/)
 assert.match(sourceDocuments, /robotsAllows/)
 assert.match(sourceDocuments, /contentHash/)
-assert.match(scoreService, /enrichment_snapshot_id/)
-assert.match(routes, /loadLeadEnrichmentSnapshot/)
 assert.match(routes, /resolveLeadEnrichmentConflict/)
 assert.match(routes, /listLeadEnrichmentFacts/)
 assert.match(routes, /leads\/:id\/facts/)
@@ -213,21 +210,19 @@ assert.match(routes, /get\('\/leads\/:id\/verified-facts'/)
 assert.match(routes, /projection: 'verified-display'/)
 assert.match(routes, /leads\/:id\/ratings\/history/)
 assert.match(routes, /get\('\/leads\/:id\/ratings\/history', requireSystemAdmin/)
-assert.match(routes, /ratings\/history\/:historyId\/restore[\s\S]*requireSystemAdmin/)
+assert.doesNotMatch(routes, /ratings\/history\/:historyId\/restore/)
 assert.match(routes, /requireSystemAdmin[\s\S]*enrichment\/conflicts\/.*\/resolve/)
-assert.match(routes, /boundSnapshot[\s\S]*enrichmentSnapshot/)
-assert.match(routes, /leadRatingSubjectProfile\(boundSnapshot\.subjectProfile\)/)
-assert.match(routes, /validateSnapshotBoundLeadRatingApplicability\(result\.ratingV3, boundSnapshot\.topicStates\)/)
-assert.doesNotMatch(routes, /subjectProfile:\s*boundSnapshot\.subjectProfile/)
-assert.match(routes, /triggerType: 'score-prerequisite'/)
-assert.match(routes, /post\('\/leads\/:id\/score', requireSystemAdmin/)
-assert.match(routes, /post\('\/leads\/:id\/score\/retry', requireSystemAdmin/)
+assert.match(routes, /post\('\/leads\/:id\/score', requireSystemAdmin[\s\S]*LEAD_SCORING_RETIRED/)
+assert.match(routes, /post\('\/leads\/:id\/score\/retry', requireSystemAdmin[\s\S]*LEAD_SCORING_RETIRED/)
+assert.match(routes, /get\('\/leads\/:id\/score'[\s\S]*LEAD_SCORING_RETIRED/)
+assert.doesNotMatch(routes, /convertLead\(leadId[\s\S]{0,500}scheduleLeadScoring/)
 assert.match(routes, /post\('\/leads\/:id\/enrichment\/entity\/confirm', requireSystemAdmin/)
 assert.doesNotMatch(routes, /legacyRequestBody/)
 assert.doesNotMatch(routes, /enrichmentSnapshotId: enrichment\.snapshot\?\.id/)
 assert.match(serverEntry, /startLeadEnrichmentWorker/)
 assert.match(serverEntry, /stopLeadEnrichmentWorker/)
 assert.match(serverEntry, /leadEnrichmentWorkerHealth/)
+assert.doesNotMatch(serverEntry, /startLeadScoreJobWorker|stopLeadScoreJobWorker|leadScoreJobHealth|executeLeadScoring/)
 assert.match(routes, /post\('\/leads\/:id\/enrichment\/topics\/:topic\/retry', requireSystemAdmin/)
 assert.match(routes, /post\('\/leads\/:id\/enrichment\/entity\/confirm', requireSystemAdmin/)
 assert.match(routes, /post\('\/leads\/:id\/enrichment\/conflicts\/:conflictId\/resolve', requireSystemAdmin/)
@@ -264,8 +259,7 @@ assert.match(detailPage, /headlineIntroductionText/)
 assert.doesNotMatch(detailPage, /lead\.scoring\?\.companyIntroduction \|\| lead\.scoring\?\.whatIsIt \|\| lead\.summary/)
 assert.match(detailPage, /permissionCodes\?\.includes\('system\.manage'\)/)
 assert.match(detailPage, /canManageLeadPool\(currentUser\)/)
-assert.match(systemPage, /V3评分恢复/)
-assert.match(systemPage, /ratings\/history\/\$\{ratingRestoreTarget\.id\}\/restore/)
+assert.doesNotMatch(systemPage, /V3评分恢复|rating-recovery|ratingRestoreTarget/)
 assert.match(backfill, /report-read-only/)
 assert.match(backfill, /--lead-ids accepts at most 100 explicit IDs per batch/)
 assert.match(backfill, /--lead-ids was provided but empty; refusing to fall back to page mode/)
@@ -290,7 +284,7 @@ assert.equal(classifyPaperContent({ url: 'https://example.org/supplement.xlsx' }
 assert.equal(companyRegistrationEligibility('已注销').eligibleForLeadPool, false)
 assert.equal(companyRegistrationEligibility('吊销未注销').eligibleForLeadPool, true)
 assert.equal(leadEnrichmentRuntimePolicy({ LEAD_ENRICHMENT_ACCEPT_NEW_JOBS: 'false' }).acceptNewJobs, false)
-assert.equal(leadEnrichmentRuntimePolicy({ LEAD_ENRICHMENT_AUTO_SCORE: 'false' }).autoScore, false)
+assert.deepEqual(leadEnrichmentRuntimePolicy({}), { workerEnabled: true, acceptNewJobs: true })
 
 assert.throws(() => validateLeadFactCandidate({
   leadId: 'lead', topicKey: 'financial_operations', subjectType: 'company', subjectId: 'company',
