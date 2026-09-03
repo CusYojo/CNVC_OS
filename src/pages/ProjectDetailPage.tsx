@@ -430,7 +430,7 @@ export function ProjectDetailPage() {
     // 默认流程页中的折叠区仍会渲染，必须在读取维度及明细前校验数组。
     if (!sc || !Number.isFinite(sc.total) || !Array.isArray(sc.dimensions) || !sc.dimensions.length
       || sc.dimensions.some((dim) => !dim || !Array.isArray(dim.items) || dim.items.some((item) => !item))) {
-      return <Card className="p-12 text-center"><Bot className="mx-auto h-9 w-9 text-brand-300" /><h3 className="mt-4 font-medium text-slate-700">暂无项目评分</h3><p className="mt-2 text-sm text-slate-400">生成后可查看评分结果与依据。</p><Button className="mt-5" loading={generating} onClick={generateSummary}><Sparkles className="h-4 w-4" />生成项目评分</Button></Card>
+      return <Card className="p-12 text-center"><Bot className="mx-auto h-9 w-9 text-brand-300" /><h3 className="mt-4 font-medium text-slate-700">暂无完整的项目 AI 评分</h3><p className="mt-2 text-sm text-slate-400">公司补全资料不代表已完成评分。生成评分后可查看总分、各维度得分与原因；已有项目资料保持不变。</p><Button className="mt-5" loading={generating} onClick={generateSummary}><Sparkles className="h-4 w-4" />生成项目评分</Button></Card>
     }
     const tone = sc.total >= 80 ? 'green' : sc.total >= 65 ? 'blue' : 'amber'
     const verifiedCompetitors = (Array.isArray(sc.competitors) ? sc.competitors : []).filter((item) => item && (item.is_self || item.verificationStatus === 'evidence-backed'))
