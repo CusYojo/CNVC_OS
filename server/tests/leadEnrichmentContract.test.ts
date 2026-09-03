@@ -5,8 +5,10 @@ import {
   LEAD_ENRICHMENT_TOPIC_KEYS,
   canonicalEnrichmentJson,
   classifyPaperContent,
+  curateLeadResearchMetadata,
   enrichmentSnapshotHash,
   initialTopicStates,
+  leadDeepEnrichmentFactKeyAllowed,
   leadEnrichmentRuntimePolicy,
   normalizePaperIdentity,
   normalizePaperPublicationDate,
@@ -74,7 +76,7 @@ test('future paper dates enter review and use record creation date', () => {
   assert.equal(date.basis, 'metadata_record_created_at')
 })
 
-test('research projects run only detail-visible non-financing topics', () => {
+test('research projects run only the retained core detail topics', () => {
   const states = initialTopicStates({ entityType: 'research', hasCommercialCompany: false })
   assert.equal(Object.keys(states).length, LEAD_ENRICHMENT_TOPIC_KEYS.length)
   assert.equal(states.basic_profile, 'queued')
@@ -83,11 +85,40 @@ test('research projects run only detail-visible non-financing topics', () => {
   assert.equal(states.financial_operations, 'not_applicable')
   assert.equal(states.transaction_exit, 'not_applicable')
   assert.equal(states.customers_contracts, 'not_applicable')
-  assert.equal(states.technology_ip, 'queued')
-  assert.equal(states.industrialization, 'queued')
+  assert.equal(states.technology_ip, 'not_applicable')
+  assert.equal(states.industrialization, 'not_applicable')
+  assert.equal(states.competition, 'not_applicable')
   assert.equal(states.team, 'queued')
   assert.equal(states.products, 'queued')
   assert.equal(states.latest_developments, 'queued')
+})
+
+test('V8 web-hit scope rejects removed topics and explicitly excluded fact keys', () => {
+  for (const factKey of [
+    'customer.formal', 'contract.value', 'order.status', 'delivery.capability', 'cash_collection.amount',
+    'financial.revenue', 'market.size', 'policy.name', 'license.code', 'ip.owner',
+    'technology.route', 'patent.owner', 'patent.applicant', 'production.capacity',
+    'qualification.name', 'certification.status', 'supply_chain',
+    'competition.direct', 'transaction.valuation',
+    'ownership.snapshot_date', 'ownership.shareholder_type', 'ownership.beneficial_owner',
+    'financing.investors', 'financing.lead_investor', 'financing.investor_role',
+    'team.institution_period', 'team.full_time_status', 'team.institution_relation',
+    'team.historical_employment', 'product.parameter', 'product.performance',
+    'product.use_case', 'product.matrix',
+  ]) assert.equal(leadDeepEnrichmentFactKeyAllowed(factKey), false, factKey)
+  for (const factKey of [
+    'profile.company_introduction', 'registry.founded_at', 'financing.amount',
+    'ownership.shareholder', 'team.member', 'product.stage', 'news.event',
+  ]) assert.equal(leadDeepEnrichmentFactKeyAllowed(factKey), true, factKey)
+  const removedTopic = enforceLeadTopicFactSetContract('industrialization', [{
+    factKey: 'research.prototype', instanceKey: 'prototype-a',
+  }])
+  assert.deepEqual(removedTopic.facts, [])
+  assert.equal(removedTopic.rejectedFactCount, 1)
+  assert.match(removedTopic.reasons[0] ?? '', /topic industrialization is excluded/)
+  assert.deepEqual(curateLeadResearchMetadata({
+    title: '论文', rights: { articleLicense: 'excluded' }, authors: ['甲'],
+  }), { title: '论文', authors: ['甲'] })
 })
 
 test('material topics require a confirmed or at least claimed entity after basic profile resolution', () => {
@@ -191,11 +222,11 @@ test('topic search cache identity normalizes the subject and binds prompt plus q
 test('web research treats external prompt injection as untrusted data and keeps a fixed tool boundary', () => {
   assert.match(LEAD_TOPIC_UNTRUSTED_SOURCE_POLICY, /不可信数据/)
   assert.match(LEAD_TOPIC_UNTRUSTED_SOURCE_POLICY, /调用额外工具/)
-  assert.match(LEAD_TOPIC_UNTRUSTED_SOURCE_POLICY, /宿主重新抓取原文/)
+  assert.match(LEAD_TOPIC_UNTRUSTED_SOURCE_POLICY, /字段白名单和本轮搜索URL放行/)
 })
 
 test('web conflict contract requires two independently sourced and context-complete candidates', () => {
-  assert.equal(leadTopicResearchContract('financing').promptVersion, 'lead-topic-web-research-v9-primary-sources')
+  assert.equal(leadTopicResearchContract('financing').promptVersion, 'lead-topic-web-research-v13-web-hit')
   assert.match(LEAD_TOPIC_PRIMARY_SOURCE_POLICY, /一手来源/)
   assert.match(LEAD_TOPIC_PRIMARY_SOURCE_POLICY, /site:gov\.cn/)
   assert.match(LEAD_TOPIC_PRIMARY_SOURCE_POLICY, /低等级来源冒充/)
@@ -363,13 +394,10 @@ test('detail-visible topic dictionaries expose only the fields consumed by the d
       'profile.website', 'profile.industry', 'industry.level1', 'industry.segment',
       'registry.company_name', 'registry.registration_status',
     ],
-    financing: ['financing.status', 'financing.round', 'financing.date', 'financing.amount', 'financing.investors', 'financing.lead_investor'],
-    team: ['team.member', 'team.role', 'team.education', 'team.current_employment', 'team.historical_employment', 'team.institution', 'team.institution_relation'],
-    customers_contracts: ['customer.name', 'customer.anonymized_label', 'customer.confidentiality', 'customer.trial', 'customer.formal', 'contract.status', 'cash_collection.status'],
-    products: ['product.name', 'product.route', 'product.form', 'product.stage', 'product.parameter', 'product.performance', 'product.use_case', 'product.matrix'],
-    technology_ip: ['technology.route', 'technology.barrier', 'patent.owner'],
-    industrialization: ['production.stage', 'production.capacity', 'delivery.capability'],
-    transaction_exit: ['transaction.round', 'transaction.date', 'transaction.valuation', 'transaction.pre_money', 'transaction.post_money'],
+    financing: ['financing.status', 'financing.round', 'financing.date', 'financing.amount'],
+    ownership: ['ownership.shareholder', 'ownership.percentage'],
+    team: ['team.member', 'team.role', 'team.education', 'team.current_employment', 'team.institution'],
+    products: ['product.name', 'product.route', 'product.form', 'product.stage'],
     latest_developments: ['news.event', 'news.event_date'],
   }
   assert.deepEqual(Object.keys(required), [...LEAD_DETAIL_ENRICHMENT_TOPIC_KEYS])
@@ -377,6 +405,12 @@ test('detail-visible topic dictionaries expose only the fields consumed by the d
     const contract = leadTopicResearchContract(topicKey as Parameters<typeof leadTopicResearchContract>[0])
     for (const factKey of factKeys) assert(contract.factKeys.includes(factKey), `${topicKey} missing ${factKey}`)
   }
+  const activeFactKeys = LEAD_DETAIL_ENRICHMENT_TOPIC_KEYS.flatMap((topicKey) => (
+    leadTopicResearchContract(topicKey).factKeys
+  ))
+  assert.equal(activeFactKeys.length, 51)
+  assert.equal(new Set(activeFactKeys).size, 51)
+  assert.equal(activeFactKeys.every(leadDeepEnrichmentFactKeyAllowed), true)
 })
 
 test('web research requires financial basis, market scope and production stage', () => {
@@ -441,13 +475,12 @@ test('date and lifecycle facts require concrete host-recognized semantics', () =
   }).ok, true)
 })
 
-test('latest-development fact sets reject orphan events without occurrence dates', () => {
+test('latest-development web hits can persist independently when only one field is found', () => {
   const incomplete = enforceLeadTopicFactSetContract('latest_developments', [{
     factKey: 'news.event', instanceKey: '2026-08 产品发布', period: '2026-08',
   }])
-  assert.equal(incomplete.facts.length, 0)
-  assert.equal(incomplete.rejectedFactCount, 1)
-  assert.match(incomplete.reasons.join(';'), /event and event_date/)
+  assert.equal(incomplete.facts.length, 1)
+  assert.equal(incomplete.rejectedFactCount, 0)
   const complete = enforceLeadTopicFactSetContract('latest_developments', [
     { factKey: 'news.event', instanceKey: '2026-08 产品发布', period: '2026-08' },
     { factKey: 'news.event_date', instanceKey: '2026-08 产品发布' },
@@ -608,6 +641,22 @@ test('formal facts require evidence and E3 material claims stay unverified', () 
     evidence: [{ sourceUrl: 'https://example.com/funding?utm_source=test', sourceType: 'news', quote: '完成A轮融资' }],
   })
   assert.equal(accepted.evidence[0]?.sourceUrl, 'https://example.com/funding')
+})
+
+test('web-hit facts keep actual values and bypass strict quote, period and unit validation', () => {
+  const accepted = validateLeadFactCandidate({
+    leadId: 'lead-web-hit', topicKey: 'financing', subjectType: 'company', subjectId: 'company-web-hit',
+    factKey: 'financing.amount', value: '2亿元', evidenceLevel: 'E3', verificationStatus: 'verified',
+    acceptanceMode: 'web_hit',
+    evidence: [{ sourceUrl: 'https://example.com/search-result', sourceType: 'web_search', quote: '该公司完成新一轮融资' }],
+  })
+  assert.equal(accepted.value, '2亿元')
+  assert.equal(accepted.verificationStatus, 'verified')
+  assert.equal(accepted.acceptanceMode, 'web_hit')
+  assert.doesNotThrow(() => validateLeadFactCandidate({
+    ...accepted,
+    evidence: [{ sourceUrl: 'https://example.com/search-result-only', sourceType: 'web_search', quote: '' }],
+  }))
 })
 
 test('rejects E3 numeric values that are absent from quotes or lack period and unit context', () => {

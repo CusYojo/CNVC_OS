@@ -12,7 +12,9 @@ import {
   LEAD_POOL_PROFILE_STATUSES,
   LEAD_POOL_VALUATION_CURRENCIES,
   LEAD_POOL_VALUATION_TYPES,
+  leadPoolFilterSearchParams,
   leadPoolKeywordSearchParams,
+  legacySourcingRedirectTarget,
   normalizedLeadPoolSearchParams,
   readLeadPoolUrlQuery,
   syncLeadPoolKeywordInput,
@@ -179,6 +181,63 @@ test('URL parser removes invalid filters and malformed pagination', () => {
   assert.equal(reversedValuation.has('valuationMax'), false)
 })
 
+test('research-only filters cannot remain combined with company lead type', () => {
+  const channelConflict = normalizedLeadPoolSearchParams(new URLSearchParams({
+    view: 'leads', page: '3', leadType: 'company', channel: '论文',
+  }))
+  assert.equal(channelConflict.get('leadType'), 'research')
+  assert.equal(channelConflict.get('channel'), '论文')
+
+  const stageConflict = normalizedLeadPoolSearchParams(new URLSearchParams({
+    view: 'leads', page: '2', leadType: 'company', stage: '科研成果',
+  }))
+  assert.equal(stageConflict.get('leadType'), 'research')
+  assert.equal(stageConflict.get('stage'), '科研成果')
+
+  const researchWithCompanyFilters = normalizedLeadPoolSearchParams(new URLSearchParams({
+    leadType: 'research', channel: '36氪', stage: 'A轮',
+  }))
+  assert.equal(researchWithCompanyFilters.get('leadType'), 'research')
+  assert.equal(researchWithCompanyFilters.has('channel'), false)
+  assert.equal(researchWithCompanyFilters.has('stage'), false)
+})
+
+test('changing type, channel, or stage keeps research mode filters consistent', () => {
+  const paperChannel = leadPoolFilterSearchParams(new URLSearchParams({
+    view: 'leads', page: '6', leadType: 'company', stage: 'A轮',
+  }), 'channel', '论文')
+  assert.equal(paperChannel.get('leadType'), 'research')
+  assert.equal(paperChannel.get('channel'), '论文')
+  assert.equal(paperChannel.has('stage'), false)
+  assert.equal(paperChannel.get('page'), '1')
+
+  const researchStage = leadPoolFilterSearchParams(new URLSearchParams({
+    leadType: 'company', channel: '36氪',
+  }), 'stage', '科研成果')
+  assert.equal(researchStage.get('leadType'), 'research')
+  assert.equal(researchStage.get('stage'), '科研成果')
+  assert.equal(researchStage.has('channel'), false)
+
+  const backToCompany = leadPoolFilterSearchParams(new URLSearchParams({
+    leadType: 'research', channel: '论文', stage: '科研成果',
+  }), 'leadType', 'company')
+  assert.equal(backToCompany.get('leadType'), 'company')
+  assert.equal(backToCompany.has('channel'), false)
+  assert.equal(backToCompany.has('stage'), false)
+})
+
+test('legacy sourcing route preserves lead-pool filters while redirecting into project center', () => {
+  const target = legacySourcingRedirectTarget('?leadType=research&page=4&pageSize=50&keyword=world-model')
+  const [pathname, search = ''] = target.split('?')
+  const params = new URLSearchParams(search)
+  assert.equal(pathname, '/projects')
+  assert.equal(params.get('view'), 'leads')
+  assert.equal(params.get('leadType'), 'research')
+  assert.equal(params.get('page'), '4')
+  assert.equal(params.get('pageSize'), '50')
+  assert.equal(params.get('keyword'), 'world-model')
+})
+
 test('keyword filtering avoids unbounded full-JSON text scans', async () => {
   const source = await readFile(new URL('../src/services/aiSummaryService.ts', import.meta.url), 'utf8')
   assert.doesNotMatch(source, /CAST\(\$\{leads\.(?:radarProfile|scoring)\} AS CHAR\) LIKE/)
@@ -195,7 +254,7 @@ test('institution type filtering uses an exact bounded projection-array predicat
   assert.match(source, /institution_item\.institution_type = \$\{institutionType\}/)
 })
 
-test('list DTO omits V3 scoring and exposes only the seven-column profile identity fields', async () => {
+test('list DTO omits V3 scoring and exposes only the six-column enterprise identity fields', async () => {
   const source = await readFile(new URL('../src/services/aiSummaryService.ts', import.meta.url), 'utf8')
   const listProjection = source.slice(
     source.indexOf('function leadPoolListItem'),

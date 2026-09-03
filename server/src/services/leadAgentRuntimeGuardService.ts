@@ -20,7 +20,7 @@ function boundedNumber(value: unknown, fallback: number, min: number, max: numbe
 
 export function leadAgentRuntimeGuardConfig() {
   return {
-    maxConcurrency: Math.round(boundedNumber(process.env.LEAD_AGENT_GLOBAL_MAX_CONCURRENCY, 10, 1, 64)),
+    maxConcurrency: Math.round(boundedNumber(process.env.LEAD_AGENT_GLOBAL_MAX_CONCURRENCY, 10, 1, 96)),
     maxRequestsPerMinute: Math.round(boundedNumber(process.env.LEAD_AGENT_GLOBAL_MAX_REQUESTS_PER_MINUTE, 60, 1, 10_000)),
     dailyBudgetMicrousd: Math.round(boundedNumber(process.env.LEAD_AGENT_GLOBAL_DAILY_BUDGET_USD, 100, 0.1, 100_000) * 1_000_000),
     defaultReservationMicrousd: Math.round(boundedNumber(process.env.LEAD_AGENT_GLOBAL_RESERVATION_USD, 0.75, 0.01, 4) * 1_000_000),
@@ -37,6 +37,22 @@ function guardError(code: string, message: string, retryable = true, retryAfterM
   error.retryable = retryable
   if (retryAfterMs !== undefined) error.retryAfterMs = Math.max(1_000, Math.round(retryAfterMs))
   return error
+}
+
+const LOCAL_THROTTLE_CODES = new Set([
+  'LEAD_AGENT_CONCURRENCY_LIMIT',
+  'LEAD_AGENT_RATE_LIMIT',
+  'LEAD_AGENT_GUARD_LOCK_TIMEOUT',
+  'LEAD_AGENT_CIRCUIT_OPEN',
+])
+
+export function isLeadAgentRuntimeThrottleError(error: unknown) {
+  const value = error as { code?: unknown; localThrottle?: unknown }
+  if (value?.localThrottle === true) return true
+  const code = String(value?.code ?? '').normalize('NFKC').trim().toUpperCase()
+  if (LOCAL_THROTTLE_CODES.has(code)) return true
+  const message = error instanceof Error ? error.message : String(error ?? '')
+  return /线索 Agent (?:全局并发已达到上限|全局分钟请求速率已达到上限|全局运行门禁暂时繁忙|连续失败熔断中)/u.test(message)
 }
 
 function utcDayStart(now: Date) {

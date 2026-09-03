@@ -9,6 +9,7 @@ import {
 } from './leadPipelineAuditService.js'
 import {
   leadWorkflowAgentContract,
+  leadWorkflowAgentRuntime,
   runLeadWorkflowAgent,
   type LeadWorkflowAgentExecution,
   type LeadWorkflowAgentProfile,
@@ -118,9 +119,13 @@ export async function executeLeadWorkflowStage(input: {
 } = {}) {
   const contract = leadWorkflowAgentContract(input.profile)
   const model = input.model || process.env.LLM_MODEL || 'gpt-5.6-sol'
+  const runtime = leadWorkflowAgentRuntime(model, Boolean(options.queryFactory))
+  const auditPromptVersion = runtime === 'codex-cli'
+    ? `${contract.promptVersion}-codex-v1`
+    : contract.promptVersion
   const promptVersion = await registerLeadPipelinePromptVersion({
     agentProfile: input.profile,
-    promptVersion: contract.promptVersion,
+    promptVersion: auditPromptVersion,
     schemaVersion: contract.schemaVersion,
     skillVersion: contract.skillVersion,
     toolsetVersion: contract.toolsetVersion,
@@ -131,12 +136,13 @@ export async function executeLeadWorkflowStage(input: {
       outputSchema: contract.outputSchema,
       builtInTools: [],
       hostInputOnly: true,
+      runtime,
     },
   })
   const run = await startLeadPipelineRun({
     runKey: input.idempotencyKey,
     eventIds: [input.eventId],
-    runtime: 'claude-agent-sdk',
+    runtime,
     agentProfile: input.profile,
     promptVersionId: promptVersion.id,
     model,
@@ -147,6 +153,7 @@ export async function executeLeadWorkflowStage(input: {
       skillVersion: contract.skillVersion,
       toolsetVersion: contract.toolsetVersion,
       hostInputOnly: true,
+      transport: runtime,
       hostToolCalls: Math.max(0, Math.round(input.hostToolCalls || 0)),
     },
   })

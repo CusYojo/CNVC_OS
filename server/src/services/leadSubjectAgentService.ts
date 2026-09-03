@@ -15,6 +15,7 @@ import {
   finishAiRuntimeRequest,
   markAiRuntimeFirstTokenFromSdkMessage,
 } from '../runtime/aiRuntimeTelemetry.js'
+import { runCodexStructuredOutput } from './codexStructuredOutputService.js'
 
 export const LEAD_SUBJECT_AGENT_PROFILE = 'lead-subject-agent'
 export const LEAD_SUBJECT_AGENT_PROFILE_VERSION = 'lead-subject-agent-v1'
@@ -28,7 +29,7 @@ export type LeadSubjectAgentCandidate = {
 
 export type LeadSubjectAgentExecution = {
   output: unknown
-  runtime: 'claude-agent-sdk'
+  runtime: 'claude-agent-sdk' | 'codex-cli'
   usage: {
     inputTokens: number
     outputTokens: number
@@ -39,6 +40,15 @@ export type LeadSubjectAgentExecution = {
   toolCalls: number
   numTurns: number
   sessionId: string | null
+}
+
+export function leadSubjectAgentRuntime(model?: string, forceClaudeSdk = false): LeadSubjectAgentExecution['runtime'] {
+  if (forceClaudeSdk) return 'claude-agent-sdk'
+  const configured = process.env.LEAD_SUBJECT_AGENT_BACKEND?.trim().toLowerCase()
+  if (configured === 'codex-cli' || configured === 'claude-agent-sdk') return configured
+  return /^gpt-/i.test(model || process.env.RADAR_AI_REVIEW_MODEL || process.env.LLM_MODEL || '')
+    ? 'codex-cli'
+    : 'claude-agent-sdk'
 }
 
 export type LeadSubjectAgentQueryFactory = (params: Parameters<typeof query>[0]) => AsyncIterable<SDKMessage> & {
@@ -162,6 +172,20 @@ export async function runLeadSubjectAgentBatch(input: {
 } = {}): Promise<LeadSubjectAgentExecution> {
   if (!input.candidates.length) throw new Error('lead subject Agent requires candidates')
   const config = await agentConfig(input.model)
+  const prompt = input.candidates
+    .map((item) => `【candidateId=${item.candidateId}】\n${item.promptText || '无可用原文'}`)
+    .join('\n\n')
+  if (leadSubjectAgentRuntime(config.model, Boolean(options.queryFactory)) === 'codex-cli') {
+    return await runCodexStructuredOutput({
+      profile: LEAD_SUBJECT_AGENT_PROFILE,
+      systemPrompt: input.systemPrompt,
+      prompt,
+      outputSchema: OUTPUT_SCHEMA,
+      model: config.model,
+      timeoutMs: options.timeoutMs ?? config.timeoutMs,
+      workDir: options.workDir,
+    })
+  }
   const runtimePermit = options.queryFactory ? null : await acquireLeadAgentRuntimePermit({
     agentProfile: LEAD_SUBJECT_AGENT_PROFILE,
     reservationMicrousd: Math.round(config.maxBudgetUsd * 1_000_000),
@@ -186,9 +210,6 @@ export async function runLeadSubjectAgentBatch(input: {
   }, timeoutMs)
   timer.unref?.()
   let deniedTool: string | null = null
-  const prompt = input.candidates
-    .map((item) => `【candidateId=${item.candidateId}】\n${item.promptText || '无可用原文'}`)
-    .join('\n\n')
   const factory = options.queryFactory || ((params) => query(params) as ReturnType<LeadSubjectAgentQueryFactory>)
   let sdkQuery: ReturnType<LeadSubjectAgentQueryFactory> | null = null
   let result: SDKResultMessage | null = null

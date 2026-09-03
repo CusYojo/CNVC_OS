@@ -9,8 +9,11 @@ import {
   LEAD_ENRICHMENT_TOPIC_KEYS,
   canonicalEnrichmentJson,
   classifyPaperContent,
+  curateLeadResearchMetadata,
   enrichmentSnapshotHash,
   initialTopicStates,
+  leadDeepEnrichmentFactKeyAllowed,
+  leadDetailEnrichmentTopicApplies,
   leadEnrichmentRuntimePolicy,
   normalizePaperIdentity,
   type LeadEnrichmentTopicKey,
@@ -1287,6 +1290,7 @@ export type LeadFactCandidate = {
   periodEnd?: string | null
   scope?: string | null
   conflictReason?: string | null
+  acceptanceMode?: 'strict' | 'web_hit'
   evidenceLevel: LeadEvidenceLevel
   verificationStatus: LeadFactVerificationStatus
   evidence: Array<{
@@ -1311,21 +1315,24 @@ export function validateLeadFactCandidate(input: LeadFactCandidate) {
   const subjectId = text(input.subjectId)
   if (!LEAD_ENRICHMENT_TOPIC_KEYS.includes(input.topicKey)) throw new Error('unknown enrichment topic')
   if (!factKey || !subjectId) throw new Error('fact requires factKey and subjectId')
+  const webHit = input.acceptanceMode === 'web_hit'
   const formalValue = !['missing', 'not_applicable', 'rejected'].includes(input.verificationStatus)
   const evidence = input.evidence.flatMap((item) => {
     const sourceUrl = normalizeUrl(item.sourceUrl)
     const quote = text(item.quote)
-    if (!sourceUrl || !quote) return []
+    if (!sourceUrl || (!webHit && !quote)) return []
     return [{ ...item, sourceUrl, quote }]
   })
-  if (formalValue && evidence.length === 0) throw new Error('non-empty formal fact requires source URL and quote')
-  if (input.evidenceLevel === 'E3'
+  if (formalValue && evidence.length === 0) {
+    throw new Error(webHit ? 'web-hit fact requires a source URL' : 'non-empty formal fact requires source URL and quote')
+  }
+  if (!webHit && input.evidenceLevel === 'E3'
     && ['financing', 'ownership', 'customers_contracts', 'financial_operations', 'transaction_exit'].includes(input.topicKey)
     && input.verificationStatus === 'verified') {
     throw new Error('material fact supported only by E3 evidence cannot be verified')
   }
   const numericTokens = canonicalEnrichmentJson(input.value).match(/\d+(?:[.,]\d+)*/g) || []
-  if (formalValue && numericTokens.length) {
+  if (!webHit && formalValue && numericTokens.length) {
     const key = factKey.toLowerCase()
     const hasPeriod = Boolean(text(input.periodStart) || text(input.periodEnd) || text(input.scope))
     const hasUnit = Boolean(text(input.unit) || text(input.currency) || text(input.scope))
@@ -1336,7 +1343,7 @@ export function validateLeadFactCandidate(input: LeadFactCandidate) {
       throw new Error('numeric fact requires unit, currency or scope')
     }
   }
-  if (formalValue) {
+  if (!webHit && formalValue) {
     const quoteTokens = evidence.map((item) => item.quote).join(' ').match(/\d+(?:[.,]\d+)*/g) || []
     const normalizedQuoteTokens = new Set(quoteTokens.map((token) => token.replace(/[,，]/g, '')))
     const unsupported = numericTokens.find((token) => !normalizedQuoteTokens.has(token.replace(/[,，]/g, '')))
@@ -1430,7 +1437,25 @@ export async function persistLeadFact(input: LeadFactCandidate) {
   const connection = await pool.getConnection()
   try {
     await connection.beginTransaction()
-    if (!['missing', 'not_applicable', 'rejected'].includes(candidate.verificationStatus)) {
+    if (candidate.topicRunId) {
+      const [schemaRows] = await connection.query<Array<RowDataPacket & {
+        schema_version: string; entity_type: LeadEntityType;
+      }>>(
+        `SELECT j.schema_version,j.entity_type FROM ${topicRunsTable} tr
+         JOIN ${jobsTable} j ON j.id=tr.job_id
+         WHERE tr.id=? AND tr.lead_id=? LIMIT 1 FOR UPDATE`,
+        [candidate.topicRunId, candidate.leadId],
+      )
+      const currentSchemaJob = schemaRows[0]?.schema_version === LEAD_ENRICHMENT_SCHEMA_VERSION
+      if (currentSchemaJob && (!leadDetailEnrichmentTopicApplies({
+        topicKey: candidate.topicKey,
+        entityType: schemaRows[0].entity_type,
+      }) || !leadDeepEnrichmentFactKeyAllowed(candidate.factKey))) {
+        throw new Error(`topic or fact key is excluded from ${LEAD_ENRICHMENT_SCHEMA_VERSION}`)
+      }
+    }
+    if (candidate.acceptanceMode !== 'web_hit'
+      && !['missing', 'not_applicable', 'rejected'].includes(candidate.verificationStatus)) {
       const documentIds = [...new Set(candidate.evidence.map((item) => text(item.sourceDocumentId)).filter(Boolean))]
       if (documentIds.length !== candidate.evidence.length) {
         throw new Error('formal evidence requires a persisted source document')
@@ -1712,11 +1737,17 @@ export async function freezeLeadEnrichmentSnapshot(jobId: string) {
        FROM ${topicRunsTable} WHERE job_id=? ORDER BY topic_key`, [jobId],
     )
     const topicStates = Object.fromEntries(topicRows.map((row) => [row.topic_key, row.status])) as Record<LeadEnrichmentTopicKey, LeadEnrichmentTopicStatus>
-    const [factRows] = await connection.query<Array<RowDataPacket & {
+    const [rawFactRows] = await connection.query<Array<RowDataPacket & {
       id: string; topic_key: string; subject_type: string; subject_id: string; fact_key: string; instance_key: string;
       value: unknown; evidence_level: string; verification_status: string
     }>>(`SELECT id,topic_key,subject_type,subject_id,fact_key,instance_key,value,evidence_level,verification_status
          FROM ${factsTable} WHERE lead_id=? AND is_current=1 ORDER BY topic_key,subject_id,fact_key,instance_key,id`, [job.lead_id])
+    const factRows = rawFactRows.filter((row) => (
+      leadDetailEnrichmentTopicApplies({
+        topicKey: row.topic_key as LeadEnrichmentTopicKey,
+        entityType: job.entity_type,
+      }) && leadDeepEnrichmentFactKeyAllowed(row.fact_key)
+    ))
     const factIds = factRows.map((row) => row.id)
     const evidenceRows = factIds.length ? await connection.query<Array<RowDataPacket & {
       id: string; fact_id: string; source_document_id: string | null; source_url: string; source_type: string; content_type: string;
@@ -1733,11 +1764,18 @@ export async function freezeLeadEnrichmentSnapshot(jobId: string) {
         title: row.title, publisher: row.publisher, quote: row.quote, locator: row.locator, reliability: row.reliability,
       }
     }
-    const [conflictRows] = await connection.query<Array<RowDataPacket & JsonObject>>(
+    const [rawConflictRows] = await connection.query<Array<RowDataPacket & JsonObject>>(
       `SELECT id,topic_key,fact_key,instance_key,severity,candidate_fact_ids,automatic_reason
        FROM ${conflictsTable} WHERE lead_id=? AND status='open' ORDER BY created_at,id`, [job.lead_id],
     )
+    const conflictRows = rawConflictRows.filter((row) => (
+      leadDetailEnrichmentTopicApplies({
+        topicKey: text(row.topic_key) as LeadEnrichmentTopicKey,
+        entityType: job.entity_type,
+      }) && leadDeepEnrichmentFactKeyAllowed(row.fact_key)
+    ))
     const paperMeta = object(object(leadRows[0]?.radar_profile).paperMeta)
+    const curatedPaperMeta = curateLeadResearchMetadata(paperMeta)
     const normalizedFactRows = factRows.map((row) => ({
       ...row,
       value: jsonValue(row.value),
@@ -1752,6 +1790,10 @@ export async function freezeLeadEnrichmentSnapshot(jobId: string) {
        WHERE lead_id=? AND status<>'superseded' ORDER BY relation_type,id`,
       [job.lead_id],
     )
+    const scopedFactIds = new Set(factIds)
+    const scopedRelationRows = relationRows.filter((row) => (
+      !text(row.evidence_fact_id) || scopedFactIds.has(text(row.evidence_fact_id))
+    ))
     const paper = job.entity_type === 'research' ? {
       identity: normalizePaperIdentity({
         provider: object(paperMeta.metadataSource).provider,
@@ -1764,7 +1806,7 @@ export async function freezeLeadEnrichmentSnapshot(jobId: string) {
         fullTextUrl: paperMeta.fullTextUrl,
         pdfUrl: paperMeta.pdfUrl,
       }),
-      metadata: paperMeta,
+      metadata: curatedPaperMeta,
     } : undefined
     snapshot = buildLeadEnrichmentSnapshot({
       leadId: job.lead_id,
@@ -1772,7 +1814,7 @@ export async function freezeLeadEnrichmentSnapshot(jobId: string) {
       entityType: job.entity_type,
       entityStatus: job.entity_status,
       entities: entityRows.map((row) => ({ ...row, aliases: array(row.aliases), identifiers: object(row.identifiers) })),
-      relations: relationRows,
+      relations: scopedRelationRows,
       topicRuns: topicRows.map((row) => ({
         id: row.id, topicKey: row.topic_key, status: row.status, promptVersion: row.prompt_version,
         model: row.model, toolsetVersion: row.toolset_version, queryPlan: array(row.query_plan),

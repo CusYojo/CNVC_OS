@@ -29,6 +29,13 @@ const FETCH_HEADERS = {
   Accept: 'text/html,application/rss+xml,application/atom+xml,application/xml;q=0.9,*/*;q=0.8',
   'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
 }
+const ARXIV_LEGACY_MIN_INTERVAL_MS = Math.max(
+  3_000,
+  Number(process.env.ARXIV_LEGACY_MIN_INTERVAL_MS) || 3_200,
+)
+const ARXIV_LEGACY_MAX_ATTEMPTS = 2
+let arxivLegacyRequestQueue = Promise.resolve()
+let arxivLegacyLastStartedAt = 0
 const GSDATA_API_URL = 'http://databus.gsdata.cn:8888/api/service'
 const GSDATA_WECHAT_ROUTER = '/weixin/article/search1'
 const GSDATA_WECHAT_CONTENT_ROUTER = '/weixin/article/content'
@@ -402,7 +409,42 @@ async function collectOpenAlex(source: ManagedPublicSource, signal: AbortSignal,
   return parseOpenAlexWorks(source, payload, limit)
 }
 
-async function fetchText(url: string, signal: AbortSignal, timeoutMs = 25_000, init: RequestInit = {}): Promise<string> {
+function isArxivLegacyApiUrl(rawUrl: string) {
+  try {
+    const url = new URL(rawUrl)
+    return url.hostname === 'rss.arxiv.org'
+      || (url.hostname === 'export.arxiv.org' && url.pathname.startsWith('/api/'))
+  } catch {
+    return false
+  }
+}
+
+async function waitForDelay(delayMs: number, signal: AbortSignal) {
+  if (delayMs <= 0) return
+  await new Promise<void>((resolve, reject) => {
+    const cleanup = () => signal.removeEventListener('abort', abort)
+    const timer = setTimeout(() => {
+      cleanup()
+      resolve()
+    }, delayMs)
+    const abort = () => {
+      clearTimeout(timer)
+      cleanup()
+      reject(signal.reason instanceof Error ? signal.reason : new Error('request aborted'))
+    }
+    if (signal.aborted) return abort()
+    signal.addEventListener('abort', abort, { once: true })
+  })
+}
+
+function retryAfterMs(response: Response) {
+  const retryAfter = response.headers.get('retry-after')?.trim() || ''
+  if (/^\d+(?:\.\d+)?$/.test(retryAfter)) return Math.ceil(Number(retryAfter) * 1_000)
+  const retryAt = Date.parse(retryAfter)
+  return Number.isFinite(retryAt) ? Math.max(0, retryAt - Date.now()) : 0
+}
+
+async function fetchTextNow(url: string, signal: AbortSignal, timeoutMs: number, init: RequestInit): Promise<string> {
   if (signal.aborted) throw signal.reason instanceof Error ? signal.reason : new Error('request aborted')
   const controller = new AbortController()
   const abort = () => controller.abort(signal.reason)
@@ -415,12 +457,52 @@ async function fetchText(url: string, signal: AbortSignal, timeoutMs = 25_000, i
       signal: controller.signal,
       redirect: 'follow',
     })
-    if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}`)
+    if (!response.ok) {
+      const error = Object.assign(new Error(`HTTP ${response.status} ${response.statusText}`), {
+        status: response.status,
+        retryAfterMs: retryAfterMs(response),
+      })
+      await response.body?.cancel().catch(() => undefined)
+      throw error
+    }
     return await response.text()
   } finally {
     clearTimeout(timer)
     signal.removeEventListener('abort', abort)
   }
+}
+
+async function fetchArxivLegacyText(url: string, signal: AbortSignal, timeoutMs: number, init: RequestInit) {
+  let releaseQueue!: () => void
+  const previous = arxivLegacyRequestQueue
+  arxivLegacyRequestQueue = new Promise<void>((resolve) => { releaseQueue = resolve })
+  await previous
+  try {
+    let lastError: unknown
+    for (let attempt = 1; attempt <= ARXIV_LEGACY_MAX_ATTEMPTS; attempt += 1) {
+      const spacingMs = ARXIV_LEGACY_MIN_INTERVAL_MS - (Date.now() - arxivLegacyLastStartedAt)
+      await waitForDelay(spacingMs, signal)
+      arxivLegacyLastStartedAt = Date.now()
+      try {
+        return await fetchTextNow(url, signal, timeoutMs, init)
+      } catch (error) {
+        lastError = error
+        const detail = error as Error & { status?: number; retryAfterMs?: number }
+        if (detail.status !== 429 || attempt >= ARXIV_LEGACY_MAX_ATTEMPTS) throw error
+        const backoffMs = Math.max(ARXIV_LEGACY_MIN_INTERVAL_MS, detail.retryAfterMs || 0)
+        await waitForDelay(backoffMs, signal)
+      }
+    }
+    throw lastError
+  } finally {
+    releaseQueue()
+  }
+}
+
+async function fetchText(url: string, signal: AbortSignal, timeoutMs = 25_000, init: RequestInit = {}): Promise<string> {
+  return isArxivLegacyApiUrl(url)
+    ? await fetchArxivLegacyText(url, signal, timeoutMs, init)
+    : await fetchTextNow(url, signal, timeoutMs, init)
 }
 
 function parseRssSource(source: ManagedPublicSource, xml: string, limit: number): JsonObject[] {

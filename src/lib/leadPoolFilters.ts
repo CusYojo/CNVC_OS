@@ -262,7 +262,57 @@ export function normalizedLeadPoolSearchParams(params: URLSearchParams): URLSear
   if ((query.valuationMin || query.valuationMax || query.sort === 'valuation') && !query.valuationCurrency) {
     next.set('valuationCurrency', 'CNY')
   }
+  // “论文”渠道和“科研成果”阶段都只属于科研项目。旧链接或浏览器残留参数可能
+  // 同时带着 leadType=company，若不在请求前归一化，后端 AND 语义会得到恒空结果。
+  const researchOnlyFilter = query.channel === '论文' || query.stage === '科研成果'
+  if (researchOnlyFilter) next.set('leadType', 'research')
+  const normalizedLeadType = researchOnlyFilter ? 'research' : query.leadType
+  if (normalizedLeadType === 'research') {
+    if (query.channel && query.channel !== '论文') next.delete('channel')
+    if (query.stage && query.stage !== '科研成果') next.delete('stage')
+  }
   return next
+}
+
+export function leadPoolFilterSearchParams(params: URLSearchParams, key: string, value: string): URLSearchParams {
+  const next = new URLSearchParams(params)
+  if (value) next.set(key, value)
+  else next.delete(key)
+
+  if (key === 'leadType') {
+    if (value === 'company') {
+      if (next.get('channel') === '论文') next.delete('channel')
+      if (next.get('stage') === '科研成果') next.delete('stage')
+    } else if (value === 'research') {
+      if (next.get('channel') && next.get('channel') !== '论文') next.delete('channel')
+      if (next.get('stage') && next.get('stage') !== '科研成果') next.delete('stage')
+    }
+  } else if (key === 'channel') {
+    if (value === '论文') {
+      next.set('leadType', 'research')
+      if (next.get('stage') && next.get('stage') !== '科研成果') next.delete('stage')
+    } else if (value && next.get('leadType') === 'research') {
+      next.set('leadType', 'company')
+      if (next.get('stage') === '科研成果') next.delete('stage')
+    }
+  } else if (key === 'stage') {
+    if (value === '科研成果') {
+      next.set('leadType', 'research')
+      if (next.get('channel') && next.get('channel') !== '论文') next.delete('channel')
+    } else if (value && next.get('leadType') === 'research') {
+      next.set('leadType', 'company')
+      if (next.get('channel') === '论文') next.delete('channel')
+    }
+  }
+
+  next.set('page', '1')
+  return next
+}
+
+export function legacySourcingRedirectTarget(search: string): string {
+  const params = new URLSearchParams(search)
+  params.set('view', 'leads')
+  return `/projects?${params.toString()}`
 }
 
 export function syncLeadPoolKeywordInput(current: string, urlKeyword: string): string {

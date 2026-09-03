@@ -10,6 +10,7 @@ import {
   LEAD_POOL_REGIONS,
   LEAD_POOL_STAGES,
   LEAD_POOL_UPDATED_RANGES,
+  leadPoolFilterSearchParams,
   leadPoolKeywordSearchParams,
   normalizedLeadPoolSearchParams,
   readLeadPoolUrlQuery,
@@ -103,6 +104,7 @@ export function SourcingPage() {
   const [error, setError] = useState('')
 
   const { page, pageSize, keyword, leadType: leadTypeValue, industry, stage, region, channel, updatedRange } = urlQuery
+  const effectiveLeadType = leadTypeValue || 'company'
 
   useEffect(() => {
     if (!paramsAreCanonical) setParams(normalizedParams, { replace: true })
@@ -126,10 +128,10 @@ export function SourcingPage() {
   const request = useMemo<LeadListQuery>(() => ({
     page, pageSize,
     keyword,
-    leadType: leadTypeValue as LeadListQuery['leadType'],
+    leadType: effectiveLeadType as LeadListQuery['leadType'],
     industry, stage, region, channel,
     updatedRange: updatedRange as LeadListQuery['updatedRange'],
-  }), [channel, industry, keyword, leadTypeValue, page, pageSize, region, stage, updatedRange])
+  }), [channel, effectiveLeadType, industry, keyword, page, pageSize, region, stage, updatedRange])
 
   const runRequest = useCallback(async () => {
     const serial = ++requestSerial.current
@@ -167,10 +169,10 @@ export function SourcingPage() {
   }, [paramsAreCanonical, runRequest])
 
   const updateParam = (key: string, value: string) => {
-    const next = new URLSearchParams(params)
-    if (value) next.set(key, value)
-    else next.delete(key)
-    next.set('page', key === 'page' ? value : '1')
+    const next = key === 'page'
+      ? new URLSearchParams(params)
+      : leadPoolFilterSearchParams(params, key, value)
+    if (key === 'page') next.set('page', value)
     window.sessionStorage.removeItem(LIST_SCROLL_KEY)
     setParams(next)
   }
@@ -198,6 +200,7 @@ export function SourcingPage() {
 
   const activeFilterCount = [leadTypeValue, industry, stage, region, channel, updatedRange].filter(Boolean).length
   const pages = pageItems(page, Math.max(1, pagination.totalPages))
+  const researchLayout = effectiveLeadType === 'research' || channel === '论文' || stage === '科研成果'
 
   return <div className="lead-pool-page">
     <header className="lead-pool-hero">
@@ -211,7 +214,7 @@ export function SourcingPage() {
 
     <section className="lead-pool-filter-panel" aria-label="线索筛选">
       <div className="lead-pool-filters">
-        <PoolSelect label="线索类型" value={leadTypeValue} options={[{ value: 'company', label: '企业线索' }, { value: 'research', label: '科研项目' }]} onChange={(value) => updateParam('leadType', value)} />
+        <PoolSelect label="线索类型" value={effectiveLeadType} options={[{ value: 'company', label: '企业线索' }, { value: 'research', label: '科研项目' }]} onChange={(value) => updateParam('leadType', value || 'company')} />
         <PoolSelect label="行业" value={industry} options={LEAD_POOL_INDUSTRIES.map((value) => ({ value, label: value }))} onChange={(value) => updateParam('industry', value)} />
         <PoolSelect label="阶段" value={stage} options={LEAD_POOL_STAGES.map((value) => ({ value, label: value }))} onChange={(value) => updateParam('stage', value)} />
         <PoolSelect label="地区" value={region} options={LEAD_POOL_REGIONS.map((value) => ({ value, label: value }))} onChange={(value) => updateParam('region', value)} />
@@ -223,13 +226,15 @@ export function SourcingPage() {
 
     <section className="lead-pool-table-card" aria-label="共享线索池列表">
       <div className="lead-pool-table-scroll">
-        <div className="lead-pool-table" role="table" aria-label="共享线索池">
+        <div className={`lead-pool-table${researchLayout ? ' lead-pool-table--research' : ''}`} role="table" aria-label={researchLayout ? '论文板块线索池' : '企业线索池'}>
           <div className="lead-pool-table-head" role="row">
-            <span role="columnheader">线索主体</span><span role="columnheader">方向 / 产品</span><span role="columnheader">团队 / 机构</span><span role="columnheader">进展 / 阶段</span><span role="columnheader">价值 / 转化</span><span role="columnheader">最新动态</span><span role="columnheader">更新时间</span>
+            {researchLayout
+              ? <><span role="columnheader">项目 / 论文</span><span role="columnheader">方向 / 研究问题</span><span role="columnheader">作者 / 机构</span><span role="columnheader">最新动态</span><span role="columnheader">更新时间</span></>
+              : <><span role="columnheader">企业主体</span><span role="columnheader">方向 / 产品</span><span role="columnheader">团队 / 资本背景</span><span role="columnheader">进展 / 阶段</span><span role="columnheader">最新动态</span><span role="columnheader">更新时间</span></>}
           </div>
           {loading && !leads.length ? <div className="lead-pool-state"><LoaderCircle className="lead-pool-spinner" /><strong>正在读取共享线索</strong><p>请稍候，系统正在加载当前筛选结果。</p></div>
               : error ? <div className="lead-pool-state lead-pool-error"><AlertCircle /><strong>共享线索读取失败</strong><p>{error}</p><button type="button" onClick={() => { void runRequest() }}>重新加载</button></div>
-              : leads.length ? <div className="lead-pool-row-group" role="rowgroup" ref={listRef}>{leads.map((lead) => <LeadRow key={lead.id} lead={lead} onOpen={() => openLead(lead.id)} />)}</div>
+              : leads.length ? <div className="lead-pool-row-group" role="rowgroup" ref={listRef}>{leads.map((lead) => <LeadRow key={lead.id} lead={lead} researchLayout={researchLayout} onOpen={() => openLead(lead.id)} />)}</div>
                 : <div className="lead-pool-empty"><EmptyState title="没有匹配的线索" description="请调整搜索词或筛选条件后重试。" /></div>}
           {loading && leads.length > 0 && <div className="lead-pool-refreshing"><LoaderCircle />正在更新</div>}
         </div>
@@ -253,9 +258,9 @@ function PoolSelect({ label, value, options, onChange }: { label: string; value:
   return <label className={value ? 'active' : ''}><span>{selected || label}</span><select aria-label={label} value={value} onChange={(event) => onChange(event.target.value)}><option value="">{label}</option>{options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select><ChevronDown /></label>
 }
 
-export function LeadRow({ lead, onOpen }: { lead: LeadListItem; onOpen: () => void }) {
+export function LeadRow({ lead, onOpen, researchLayout = false }: { lead: LeadListItem; onOpen: () => void; researchLayout?: boolean }) {
   const type = leadType(lead)
-  if (type === '科研项目') return <ResearchLeadRow lead={lead} onOpen={onOpen} />
+  if (type === '科研项目') return <ResearchLeadRow lead={lead} onOpen={onOpen} researchLayout={researchLayout} />
   const profile = lead.investmentProfile
   const availableData = lead.availableData
   const profileIndustryTags = [
@@ -294,29 +299,21 @@ export function LeadRow({ lead, onOpen }: { lead: LeadListItem; onOpen: () => vo
     latestRoundDate: displayText(profileFinancing?.latestRoundDate, '') || displayText(fallbackFinancing?.latestRoundDate, ''),
     latestAmount: displayText(profileFinancing?.latestAmount, '') || displayText(fallbackFinancing?.latestAmount, ''),
   }
-  const profileValuation = profile?.valuation
-  const fallbackValuation = availableData?.valuation
-  const valuation = !profileValuation && !fallbackValuation ? null : {
-    value: displayText(profileValuation?.value, '') || displayText(fallbackValuation?.value, ''),
-    type: profileValuation?.type ?? fallbackValuation?.type,
-    currency: displayText(profileValuation?.currency, '') || displayText(fallbackValuation?.currency, ''),
-    round: displayText(profileValuation?.round, '') || displayText(fallbackValuation?.round, ''),
-    date: displayText(profileValuation?.date, '') || displayText(fallbackValuation?.date, ''),
-  }
   const updates = (lead.latestUpdates ?? []).slice(0, 2)
-  return <article className="lead-pool-row" role="row" tabIndex={0} aria-label={`查看${lead.name}研判页`} onClick={onOpen} onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); onOpen() } }}>
-    <div className="lead-pool-project" role="cell"><button type="button" onClick={(event) => { event.stopPropagation(); onOpen() }}><span><strong>{displayText(lead.name, '未命名线索')}</strong><small title={subjectName(lead)}>{subjectName(lead)}</small></span></button><div className="lead-pool-tags"><em>{type}</em><em>{displayText(lead.region, '-')}</em></div></div>
+  const subjectTags = [type, displayText(lead.region, '')].filter((tag) => tag && tag !== '-')
+  return <article className="lead-pool-row" role="row" tabIndex={0} aria-label={`查看${lead.name}详情页`} onClick={onOpen} onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); onOpen() } }}>
+    <div className="lead-pool-project" role="cell"><button type="button" onClick={(event) => { event.stopPropagation(); onOpen() }}><span><strong>{displayText(lead.name, '未命名线索')}</strong><small title={subjectName(lead)}>{subjectName(lead)}</small></span></button><div className="lead-pool-tags">{subjectTags.map((tag, index) => <em key={`${tag}-${index}`}>{tag}</em>)}</div></div>
     <div className="lead-pool-profile-cell" role="cell"><div className="lead-pool-tags">{industryTags.length ? industryTags.map((tag) => <em key={tag}>{tag}</em>) : <span>-</span>}{hiddenIndustryCount > 0 && <small>+{hiddenIndustryCount}</small>}</div>{products.length ? products.map((product) => <p key={`${product.name}-${product.productRoute}`}><strong>{displayText(product.name)}</strong><span>{[displayText(product.productRoute, ''), displayText(product.technologyRoute, ''), productStageLabel(product)].filter(Boolean).join(' · ') || '-'}</span></p>) : <p>-</p>}{hiddenProductCount > 0 && <small>+{hiddenProductCount} 个产品</small>}</div>
     <div className="lead-pool-profile-cell" role="cell">{institutions.map((item) => <p key={`${item.name}-${item.round}`}><strong>{displayText(item.name)}{item.major ? ' · 重点机构' : ''}</strong><span>{[displayText(item.round, ''), item.role === 'lead' ? '领投' : item.role === 'follow' ? '跟投' : item.role === 'strategic' ? '战略投资' : ''].filter(Boolean).join(' · ')}</span></p>)}{academicLinks.map((item) => <p key={`${item.institution}-${item.person}`}><strong>{displayText(item.institution)}</strong><span>{[displayText(item.person, ''), displayText(item.relationType, ''), item.commercialization ? '成果转化' : ''].filter(Boolean).join(' · ')}</span></p>)}{!institutions.length && !academicLinks.length && <p>-</p>}{hiddenBackgroundCount > 0 && <small>+{hiddenBackgroundCount} 项背景</small>}</div>
     <dl className="lead-pool-profile-list" role="cell">{financing ? <><div><dt>状态</dt><dd>{displayText(financing.status, '-')}</dd></div><div><dt>轮次</dt><dd>{[displayText(financing.latestRound, ''), financing.latestRoundDate ? dateLabel(financing.latestRoundDate) : ''].filter(Boolean).join(' · ') || '-'}</dd></div><div><dt>本轮</dt><dd>{displayText(financing.latestAmount, '-')}</dd></div></> : <div><dd>-</dd></div>}</dl>
-    <dl className="lead-pool-profile-list" role="cell">{valuation?.value ? <><div><dt>{valuation.type === 'pre_money' ? '投前' : valuation.type === 'post_money' ? '投后' : '估值'}</dt><dd>{valuation.value}</dd></div><div><dt>币种</dt><dd>{displayText(valuation.currency)}</dd></div><div><dt>轮次</dt><dd>{displayText(valuation.round)}</dd></div><div><dt>日期</dt><dd>{dateLabel(valuation.date)}</dd></div></> : <div><dd>-</dd></div>}</dl>
     <div className="lead-pool-updates" role="cell">{updates.length ? updates.map((item, index) => <div key={`${item.occurredAt}-${item.title}`}><i className={index === 0 ? 'unread' : ''} /><span><time>{dateLabel(item.occurredAt).slice(5)}</time>{item.title}</span></div>) : <span className="lead-pool-no-update">暂无更新</span>}</div>
-    <div className="lead-pool-updated" role="cell"><strong>{dateLabel(lead.dataUpdatedAt || lead.poolEnteredAt)}</strong><span>{relativePoolTime(lead.poolEnteredAt)}</span><div className="lead-pool-row-actions"><button className="lead-pool-open-button" type="button" onClick={(event) => { event.stopPropagation(); onOpen() }} aria-label={`打开${lead.name}研判页`} title="查看详情"><ChevronRight /></button></div></div>
+    <div className="lead-pool-updated" role="cell"><strong>{dateLabel(lead.dataUpdatedAt || lead.poolEnteredAt)}</strong><span>{relativePoolTime(lead.poolEnteredAt)}</span><div className="lead-pool-row-actions"><button className="lead-pool-open-button" type="button" onClick={(event) => { event.stopPropagation(); onOpen() }} aria-label={`打开${lead.name}详情页`} title="查看详情"><ChevronRight /></button></div></div>
   </article>
 }
 
-function ResearchLeadRow({ lead, onOpen }: { lead: LeadListItem; onOpen: () => void }) {
+function ResearchLeadRow({ lead, onOpen, researchLayout }: { lead: LeadListItem; onOpen: () => void; researchLayout: boolean }) {
   const profile = lead.researchProfile
+  const paperMeta = lead.radarProfile?.paperMeta
   const directions = (profile?.direction.categories ?? []).slice(0, 3)
   const methods = (profile?.direction.methods ?? []).slice(0, 2)
   const authors = (profile?.team.authors ?? []).slice(0, 3)
@@ -335,6 +332,17 @@ function ResearchLeadRow({ lead, onOpen }: { lead: LeadListItem; onOpen: () => v
   ].map((item) => displayText(item, '')).filter(Boolean).slice(0, 3)
   const identity = profile?.subject.providerIds ?? {}
   const identityLabel = identity.doi ? `DOI ${identity.doi}` : identity.arxivId ? `arXiv ${identity.arxivId}` : identity.openAlexId ? `OpenAlex ${identity.openAlexId}` : ''
+  if (researchLayout) {
+    const projectName = displayText(paperMeta?.projectName, '') || displayText(profile?.subject.name || lead.name, '未命名科研项目')
+    const paperTitle = displayText(paperMeta?.titleZh || profile?.subject.title || lead.name, projectName)
+    return <article className="lead-pool-row lead-pool-row--research" role="row" tabIndex={0} aria-label={`查看${lead.name}研判页`} onClick={onOpen} onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); onOpen() } }}>
+      <div className="lead-pool-project" role="cell"><button type="button" onClick={(event) => { event.stopPropagation(); onOpen() }}><span><strong>{projectName}</strong><small title={paperTitle}>{paperTitle}</small></span></button><div className="lead-pool-tags"><em>科研项目</em>{identityLabel && <em className="background">{identityLabel}</em>}</div></div>
+      <div className="lead-pool-profile-cell lead-pool-research-problem" role="cell"><div className="lead-pool-tags">{directions.length ? directions.map((tag) => <em key={tag}>{tag}</em>) : <span>-</span>}</div>{methods.length ? methods.map((method) => <p key={method}><strong>{method}</strong></p>) : profile?.direction.researchProblem ? <p title={profile.direction.researchProblem}><span>{profile.direction.researchProblem}</span></p> : null}</div>
+      <div className="lead-pool-profile-cell" role="cell">{authors.length ? <p><strong>{authors.map((author) => author.name).join('、')}</strong><span>{profile && profile.team.authors.length > authors.length ? `共 ${profile.team.authors.length} 位作者` : authors.map((author) => displayText(author.role, '')).filter(Boolean).join(' · ')}</span></p> : <p>-</p>}{affiliations.map((affiliation) => <p key={affiliation}><span>{affiliation}</span></p>)}</div>
+      <div className="lead-pool-updates" role="cell">{updates.length ? updates.map((item, index) => <div key={`${item.occurredAt}-${item.title}`}><i className={index === 0 ? 'unread' : ''} /><span><time>{dateLabel(item.occurredAt).slice(5)}</time>{item.title}</span></div>) : <span className="lead-pool-no-update">暂无更新</span>}</div>
+      <div className="lead-pool-updated" role="cell"><strong>{dateLabel(profile?.dataStatus.updatedAt || lead.dataUpdatedAt || lead.poolEnteredAt)}</strong>{profile && <span>资料 {profile.dataStatus.verifiedDimensions}/{profile.dataStatus.applicableDimensions}</span>}<div className="lead-pool-row-actions"><button className="lead-pool-open-button" type="button" onClick={(event) => { event.stopPropagation(); onOpen() }} aria-label={`打开${lead.name}研判页`} title="查看详情"><ChevronRight /></button></div></div>
+    </article>
+  }
   return <article className="lead-pool-row" role="row" tabIndex={0} aria-label={`查看${lead.name}研判页`} onClick={onOpen} onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); onOpen() } }}>
     <div className="lead-pool-project" role="cell"><button type="button" onClick={(event) => { event.stopPropagation(); onOpen() }}><span><strong>{displayText(profile?.subject.title || lead.name, '未命名科研线索')}</strong><small>{displayText(identityLabel || profile?.subject.provider, '-')}</small></span></button><div className="lead-pool-tags"><em>科研项目</em><em>{displayText(lead.region, '-')}</em></div></div>
     <div className="lead-pool-profile-cell" role="cell"><div className="lead-pool-tags">{directions.length ? directions.map((tag) => <em key={tag}>{tag}</em>) : <span>-</span>}</div>{methods.length ? methods.map((method) => <p key={method}><strong>{method}</strong></p>) : profile?.direction.researchProblem ? <p><span>{profile.direction.researchProblem}</span></p> : <p>-</p>}</div>

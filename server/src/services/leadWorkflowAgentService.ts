@@ -16,6 +16,7 @@ import {
   finishAiRuntimeRequest,
   markAiRuntimeFirstTokenFromSdkMessage,
 } from '../runtime/aiRuntimeTelemetry.js'
+import { runCodexStructuredOutput } from './codexStructuredOutputService.js'
 
 export type LeadWorkflowAgentProfile =
   | 'lead-research-agent'
@@ -142,16 +143,17 @@ const PROFILE_CONTRACTS: Record<LeadWorkflowAgentProfile, {
     },
   },
   'lead-screening-agent': {
-    profileVersion: 'lead-screening-agent-v2',
-    promptVersion: 'lead-screening-prompt-v2',
+    profileVersion: 'lead-screening-agent-v3',
+    promptVersion: 'lead-screening-prompt-v3',
     schemaVersion: 'lead-screening-output-v1',
-    skillVersion: 'lead-screening-skill-v2',
+    skillVersion: 'lead-screening-skill-v3',
     toolsetVersion: 'lead-research-host-tools-v1',
     defaultBudgetUsd: 0.3,
     systemPrompt: [
       '你是线索准入初筛 Agent。只能根据宿主提供的不可变原始事件和研究事实包判断 accept、reject 或 review。',
       'accept 必须至少有一条可定位连续原文证据；事实冲突、主体歧义或证据不足必须 review，不得猜测。',
       '关键财务、融资、客户或商业化结论若仅有 low/unknown 可靠性或 unverified 证据，必须 review，不得自动 accept。',
+      '论文候选不要求具备公司、客户、收入或融资信息；若 arXiv 身份、完整标题和技术摘要可由原始来源连续原文核验，且主体无歧义，应 accept，并把商业化、团队机构和联系方式缺失列入 risks，而不是据此 review。',
       '不得调用工具、数据库、文件或网络，只返回符合 JSON Schema 的对象。',
     ].join('\n'),
     validator: screeningOutputSchema,
@@ -222,13 +224,20 @@ const PROFILE_CONTRACTS: Record<LeadWorkflowAgentProfile, {
 export type LeadWorkflowAgentExecution = {
   profile: LeadWorkflowAgentProfile
   output: unknown
-  runtime: 'claude-agent-sdk'
+  runtime: 'claude-agent-sdk' | 'codex-cli'
   usage: { inputTokens: number; outputTokens: number; totalTokens: number }
   durationMs: number
   costMicrousd: number
   toolCalls: number
   numTurns: number
   sessionId: string | null
+}
+
+export function leadWorkflowAgentRuntime(model?: string, forceClaudeSdk = false): LeadWorkflowAgentExecution['runtime'] {
+  if (forceClaudeSdk) return 'claude-agent-sdk'
+  const configured = process.env.LEAD_WORKFLOW_AGENT_BACKEND?.trim().toLowerCase()
+  if (configured === 'codex-cli' || configured === 'claude-agent-sdk') return configured
+  return /^gpt-/i.test(model || process.env.LLM_MODEL || '') ? 'codex-cli' : 'claude-agent-sdk'
 }
 
 export type LeadWorkflowAgentQueryFactory = (params: Parameters<typeof query>[0]) => AsyncIterable<SDKMessage> & {
@@ -432,6 +441,31 @@ export async function runLeadWorkflowAgent(input: {
   if (!input.prompt.trim()) throw new Error(`${input.profile} requires immutable host input`)
   const contract = PROFILE_CONTRACTS[input.profile]
   const config = await runtimeConfig(input.profile, input.model)
+  if (leadWorkflowAgentRuntime(config.model, Boolean(options.queryFactory)) === 'codex-cli') {
+    const execution = await runCodexStructuredOutput({
+      profile: input.profile,
+      systemPrompt: contract.systemPrompt,
+      prompt: input.prompt,
+      outputSchema: contract.outputSchema,
+      model: config.model,
+      timeoutMs: options.timeoutMs ?? config.timeoutMs,
+      workDir: options.workDir,
+    })
+    try {
+      return {
+        ...execution,
+        profile: input.profile,
+        output: validateLeadWorkflowAgentOutput(input.profile, execution.output, input.prompt),
+      }
+    } catch (cause) {
+      const error = new Error(redactSensitiveText(
+        `${input.profile} structured output is invalid: ${cause instanceof Error ? cause.message : String(cause)}`,
+      ).slice(0, 8_000)) as AgentExecutionError
+      error.retryable = false
+      error.leadRunMetrics = execution
+      throw error
+    }
+  }
   const runtimePermit = options.queryFactory ? null : await acquireLeadAgentRuntimePermit({
     agentProfile: input.profile,
     reservationMicrousd: Math.round(config.maxBudgetUsd * 1_000_000),

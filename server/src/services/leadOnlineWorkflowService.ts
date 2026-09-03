@@ -3,7 +3,7 @@ import { buildLeadResearchHostPackage } from './leadResearchToolService.js'
 import { executeLeadWorkflowStage } from './leadWorkflowPipelineService.js'
 import type { LeadWorkflowAgentQueryFactory } from './leadWorkflowAgentService.js'
 import { transitionLeadPipelineItem } from './leadPipelineEventService.js'
-import { openLeadPipelineReview } from './leadPipelineAuditService.js'
+import { openLeadPipelineReview, recordLeadPipelineDecision } from './leadPipelineAuditService.js'
 import { redactSensitiveText } from '../security/redactSecrets.js'
 import { companyRegistrationEligibility } from './leadRegistry.js'
 
@@ -171,6 +171,43 @@ export async function evaluateRadarIntakeWorkflow(input: {
       actorId: 'lead-registration-admission-guard',
     })
     return { status: 'reject' as const, stages: null, reviewId: null, error: null }
+  }
+  const paperEvidence = (input.subjectEvidence ?? []).flatMap((raw) => {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return []
+    const item = raw as Record<string, unknown>
+    const quote = String(item.excerpt || item.quote || '').trim()
+    if (!quote) return []
+    return [{
+      sourceId: input.eventId,
+      sourceType: 'radar',
+      locator: 'Codex subject evidence validated against immutable Radar event',
+      claim: `原始论文来源可核验主体 ${input.subjectName}`,
+      quote,
+      reliability: 'high',
+      verificationStatus: 'verified' as const,
+      metadata: { policy: 'paper-subject-admission-v1' },
+    }]
+  })
+  if (input.subjectType === 'paper'
+    && input.subjectName.trim()
+    && paperEvidence.length > 0
+    && Number(input.subjectConfidence || 0) >= 78) {
+    await recordLeadPipelineDecision({
+      idempotencyKey: `${input.eventId}:paper-subject-admission-v1`,
+      eventId: input.eventId,
+      decisionType: 'paper_admission',
+      outcome: 'accept',
+      subjectType: input.subjectType,
+      subjectName: input.subjectName,
+      legalName: input.legalName,
+      confidence: input.subjectConfidence,
+      reason: 'Codex 主体识别及宿主连续原文校验通过，按论文专用准入规则接收；商业化缺口转入后续补全。',
+      output: { policy: 'paper-subject-admission-v1', commercialFieldsRequired: false },
+      actorType: 'system',
+      actorId: 'paper-subject-admission-v1',
+      evidence: paperEvidence,
+    })
+    return { status: 'accept' as const, stages: null, reviewId: null, error: null }
   }
   let stages: Awaited<ReturnType<typeof runRadarIntakeAgents>>
   try {

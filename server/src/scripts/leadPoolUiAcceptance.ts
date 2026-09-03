@@ -49,23 +49,24 @@ for (const removedChannel of ['新闻', '微信群聊']) {
 for (const industry of ['自然语言处理', '计算机视觉', '网络安全', '数据科学', '软件工程', '金融', '工具软件', '本地生活', '旅游']) {
   assert.match(filterContract, new RegExp(`'${industry}'`), `全行业筛选缺少 ${industry}`)
 }
-for (const column of ['线索主体', '方向 / 产品', '团队 / 机构', '进展 / 阶段', '价值 / 转化', '最新动态', '更新时间']) {
+for (const column of ['企业主体', '方向 / 产品', '团队 / 资本背景', '进展 / 阶段', '最新动态', '更新时间']) {
   assert.match(page, new RegExp(`columnheader">${column.replace('/', '\\/')}`), `缺少列表列：${column}`)
 }
-for (const removedColumn of ['一句话摘要', '核心信息', '推荐理由 / 信号', '大客户验证', '数据状态']) {
+for (const removedColumn of ['一句话摘要', '核心信息', '推荐理由 / 信号', '价值 / 转化', '大客户验证', '数据状态']) {
   assert.doesNotMatch(page, new RegExp(`columnheader">${removedColumn.replace('/', '\\/')}`), `列表不应继续展示旧列：${removedColumn}`)
 }
 
 assert.match(page, /pageSize[^\n]+20|:\s*20/, '默认分页必须为每页 20 条')
-const rowCells = page.match(/role="cell"/g) ?? []
-assert.equal(rowCells.length, 14, `企业与科研两种列表行必须各自恰好 7 个单元格，当前总计 ${rowCells.length} 个`)
+const enterpriseRowSource = page.slice(page.indexOf('export function LeadRow'), page.indexOf('function ResearchLeadRow'))
+const enterpriseRowCells = enterpriseRowSource.match(/role="cell"/g) ?? []
+assert.equal(enterpriseRowCells.length, 6, `企业列表必须恰好 6 个单元格，当前为 ${enterpriseRowCells.length} 个`)
 assert.match(page, /role="row" tabIndex=\{0\}/, '线索行必须可通过键盘聚焦')
 assert.match(page, /event\.key === 'Enter' \|\| event\.key === ' '/, '线索行必须支持 Enter 和 Space 打开详情')
 assert.match(page, /event\.target === event\.currentTarget/, '子控件键盘事件不得重复触发行打开')
 assert.match(styles, /\.lead-pool-row:hover, \.lead-pool-row:focus-visible/, '键盘聚焦必须提供可见焦点反馈')
 assert.match(page, /className="lead-pool-table-scroll"/, '表格和固定分页之间必须有独立横向滚动容器')
 assert.match(styles, /\.lead-pool-table-scroll \{ overflow-x: auto;/, '不足宽度时必须提供可用的横向滚动降级')
-assert.match(styles, /\.lead-pool-table \{ position: relative; min-width: 1120px; \}/, '桌面主验收宽度必须容纳七列而不裁切')
+assert.match(styles, /\.lead-pool-table \{ position: relative; min-width: 1040px; \}/, '桌面主验收宽度必须容纳企业六列而不裁切')
 assert.match(fdeShell, /body:has\(\.fde-app\) \{ min-width: 320px; \}/, 'FDE 工作台不得继承旧页面 1180px 的全局最小宽度')
 assert.match(appLayout, /leadPoolView = location\.pathname === '\/projects'[\s\S]*?view'\) === 'leads'/, '窄屏侧栏折叠必须精确识别共享线索池视图')
 assert.match(appLayout, /navigationCollapsed = collapsed \|\| narrow && \(responsibilityView \|\| leadPoolView\)/, '共享线索池窄屏必须复用受控侧栏折叠')
@@ -157,11 +158,11 @@ assert.match(detail, /paperMeta\?\.authorContributions/, '科研项目团队必�
 assert.match(detail, /paperMeta\?\.paperAuthors/, '科研项目团队必须读取稳定作者ID和逐人机构元数据')
 assert.match(detail, /https:\/\/orcid\.org\//, '作者存在ORCID时必须优先链接ORCID身份页')
 assert.match(detail, /https:\/\/openalex\.org\//, '作者存在OpenAlex ID时必须链接OpenAlex作者页')
-assert.match(detail, /作者身份待通过ORCID、机构或主页进一步消歧/, '缺少稳定作者ID时必须明确保持身份待消歧')
+assert.match(detail, /论文署名作者，暂无稳定作者ID/, '缺少稳定作者ID时必须明确标注为论文署名身份')
 assert.match(detail, /contributionByAuthor\.get\(name\)\?\.label/, '论文作者卡片必须展示共同第一作者或共同资深作者等原文角色')
 assert.match(detail, /paperTeam\.length \? paperTeam : verifiedTeam/, '论文作者存在时必须优先作为科研项目团队成员，否则只展示已验证团队事实')
 assert.match(detail, /arxiv\.org\/search\//, '论文团队成员必须提供 arXiv 作者检索链接')
-assert.match(detail, /member\.profileUrl[^\n]+target="_blank" rel="noreferrer"/, '论文作者链接必须使用安全外链属性')
+assert.match(detail, /const profileUrl = externalUrl\(member\.profileUrl\)[\s\S]*href=\{profileUrl\} target="_blank" rel="noreferrer"/, '论文作者链接必须使用安全外链属性')
 assert.match(summaryService, /const teamSize = paperAuthors\.length \|\| structuredTeam\.length \|\| radarTeam\.length/, '科研项目团队人数必须优先使用去重后的论文作者数')
 assert.match(summaryService, /and\(eq\(leads\.id, canonicalLeadId\), visiblePublicLeadExpr\)/, '列表排除的注销、删除、合并或质量拒绝线索也不得通过已知ID直接读取')
 for (const field of ['所属机构', '研究团队', '作者—机构对应', '论文/成果许可', '数据集许可', '知识产权归属', '元数据来源']) {
@@ -171,27 +172,26 @@ assert.match(detail, /paperMeta\?\.affiliations/, '所属机构必须读取论�
 assert.match(detail, /paperMeta\?\.researchTeam\?\.name/, '研究团队必须由论文共同署名关系确定')
 assert.doesNotMatch(detail, /paperMeta\?\.researchTeam\?\.name \|\| profile\.lab \|\| lead\.team/, '研究团队不得回退到未核验的企业团队字段')
 assert.match(detail, /paperMeta\?\.authorAffiliations/, '逐人机构关系必须读取来源明确确认的结构化字段')
-assert.match(detail, /不根据机构列表强行分配作者/, '缺少逐人对应时不得把机构列表强行分配给作者')
+assert.match(detail, /作者—机构对应：-/, '缺少逐人对应时不得把机构列表强行分配给作者')
 assert.match(detail, /paperMeta\?\.rights\?\.articleLicense/, '论文许可必须与其他成果权属拆分展示')
 assert.match(detail, /publicationDateStatus === 'source_declared_future'/, '来源声明为未来日期时必须与实际公开时间拆分展示')
 assert.match(detail, /paperMeta\?\.resourceType/, '论文、学位论文、数据模型与标准必须展示正确成果形态')
-assert.match(detail, /论文许可不代表成果所有权/, '详情必须明确开放许可不等于成果所有权')
+assert.doesNotMatch(detail, /articleLicense\?\.label[^\n]+intellectualProperty/, '论文许可与知识产权归属不得合并为同一字段')
 assert.doesNotMatch(detail, /\['成果权属',\s*'待核验'\]/, '论文详情不得继续使用无法解释的成果权属待核验占位')
 assert.doesNotMatch(detail, /联网资料补全/, '详情页不得展示联网资料补全运营区块')
 assert.doesNotMatch(detail, /主体与关系|已提取事实与直接来源|加载更多事实/, '详情页不得展示主体图或事实浏览等运营信息')
 for (const endpoint of ['enrichment/topics', 'enrichment/entity/confirm']) {
   assert.doesNotMatch(detail, new RegExp(endpoint.replaceAll('/', '\\/')), `详情页不得调用补全运营接口：${endpoint}`)
 }
-assert.match(detail, /canManageLeadPool\(currentUser\)[\s\S]*dataStatus\.conflictCount/, '冲突复核入口必须同时受有效权限和画像冲突数约束')
-assert.match(detail, /`\/leads\/\$\{leadId\}\/enrichment\/conflicts`/, '管理员必须按需读取冲突候选证据')
-assert.match(detail, /enrichment\/conflicts\/\$\{selectedConflictId\}\/resolve/, '管理员必须通过现有审计接口裁决冲突')
+assert.doesNotMatch(detail, /conflictReviewOpen|openConflictReview|复核投资画像事实冲突/, '详情页不得展示投资画像冲突复核入口或弹窗')
+assert.doesNotMatch(detail, /enrichment\/conflicts/, '详情页不得调用冲突候选或裁决接口')
 assert.doesNotMatch(detail, /`\/leads\/\$\{id\}\/enrichment`/, '详情页不得下载完整补全运行状态')
 assert.doesNotMatch(detail, /`\/leads\/\$\{leadId\}\/facts\?/, '详情页不得下载包含未验证候选与原文的审计事实')
 assert.match(detail, /`\/leads\/\$\{id\}\/verified-profile`/, '详情页只能读取已验证介绍投影')
 assert.match(detail, /`\/leads\/\$\{leadId\}\/verified-facts\?/, '详情页只能读取已验证事实最小投影')
 assert.match(detail, /loadAllLeadVerifiedFacts/, '详情页必须分页加载全部已验证事实用于投影到现有信息块')
 assert.match(detail, /已验证事实超过详情页安全读取上限，不能展示不完整来源链/, '来源超过安全上限时必须失败关闭，不能静默截断')
-assert.match(detail, /factsLoadError[\s\S]*画像值已读取，但来源链暂时不可用/, '来源读取失败必须向用户显示独立状态')
+assert.match(detail, /factsLoadError[\s\S]*相关来源暂时不可用/, '来源读取失败必须向用户显示独立状态')
 assert.match(detail, /factsLoadError[\s\S]*重新读取/, '来源读取失败必须提供可见重试入口')
 assert.match(detail, /fact\.verificationStatus === 'verified'/, '详情页只允许投影已验证事实')
 assert.match(detail, /fact\.evidence\.some\(\(evidence\) => Boolean\(externalUrl\(evidence\.sourceUrl\)\)\)/, '已验证事实还必须至少绑定一个合法公开来源')
@@ -222,7 +222,9 @@ assert.match(detail, /function multilineText[\s\S]*?\.replace\(/, '项目简介�
 assert.match(detail, /multilineText\(projectIntroduction\?\.value/, '项目简介必须使用多行文本格式化')
 assert.match(styles, /\.lead-review-introduction[^}]+white-space:\s*pre-wrap/, '项目简介必须保留换行和段落空行')
 assert.match(summaryService, /leadReserve\.detailJson[\s\S]*reserveDetail\.intro/, '详情 DTO 必须从储备池返回完整项目介绍')
-assert.match(detail, /sourceBoundShareholders[\s\S]*股东信息/, '详情页必须展示带来源约束的结构化股东信息')
+assert.doesNotMatch(detail, /竞争格局|股权结构|核心团队与股权|sourceBoundShareholders|companyCompetitors/, '企业详情页不得展示竞争格局或股权结构')
+assert.match(detail, /title="核心团队"/, '企业详情页必须保留核心团队项目数据')
+assert(detail.indexOf('title="最近动态"') < detail.indexOf('title="相关来源"'), '企业最近动态必须紧邻展示在相关来源之前')
 assert.match(summaryService, /mergeLeadScoringWithRetainedSources/, 'AI评分保存不得整块覆盖36氪等来源字段')
 const anchors = [...detail.matchAll(/<a\b[\s\S]*?>/g)].map((match) => match[0])
 assert(anchors.length > 0, '详情页应保留可用的外部链接')
@@ -230,16 +232,15 @@ for (const anchor of anchors) {
   assert.match(anchor, /target="_blank"/, '详情页所有链接都必须在新窗口打开')
   assert.match(anchor, /rel="noreferrer"/, '详情页新窗口链接必须隔离 referrer')
 }
-assert.doesNotMatch(styles, /\.lead-review-enrichment|\.lead-review-entity-graph|\.lead-review-conflict-form/, '详情样式不得保留已移除运营区块的展示契约')
-assert.match(styles, /\.lead-review-conflict-review/, '详情必须提供最小化的管理员冲突证据复核样式')
+assert.doesNotMatch(styles, /\.lead-review-enrichment|\.lead-review-entity-graph|\.lead-review-conflict/, '详情样式不得保留已移除运营区块的展示契约')
 assert.match(page, /sessionStorage/, '列表必须保留滚动位置')
 assert.doesNotMatch(page, /FastSummaryText|FastReasonText|lead-pool-fast-tooltip|createPortal/, '列表不得继续保留摘要或推荐理由浮层')
 assert.doesNotMatch(styles, /\.lead-pool-(?:summary|facts|reason-copy|fast-tooltip|signals|funding)\b/, '列表样式不得保留已移除摘要、核心信息、推荐理由和旧融资列契约')
 assert.match(styles, /\.lead-pool-updates\b/, '最新动态列必须恢复旧版时间轴样式')
 assert.match(styles, /\.lead-pool-updated\b/, '更新时间列必须恢复旧版时间样式')
 for (const field of ['investmentProfile', 'profile?.products', 'profile?.institutions', 'profile?.academicLinks',
-  'profile?.financing', 'profile?.valuation']) {
-  assert.match(page, new RegExp(field.replace(/[?.]/g, '\\$&')), `七列列表缺少画像字段：${field}`)
+  'profile?.financing']) {
+  assert.match(page, new RegExp(field.replace(/[?.]/g, '\\$&')), `企业六列列表缺少画像字段：${field}`)
 }
 assert.match(page, /lead\.latestUpdates/, '列表必须使用精简 latestUpdates 恢复最新动态列')
 assert.match(page, /lead\.dataUpdatedAt \|\| lead\.poolEnteredAt/, '更新时间列必须优先使用数据更新时间并回退入池时间')
@@ -259,9 +260,10 @@ for (const field of [
 }
 assert.doesNotMatch(listItemProjection, /sourceFactIds/, '列表 DTO 不得返回内部事实 ID 列表')
 assert.doesNotMatch(listItemProjection, /snapshotHash/, '列表 DTO 不得返回详情页使用的快照 hash')
-assert.match(detail, /title="投资证据画像"/, '详情页必须提供列表画像的证据落点')
-assert.match(detail, /来源链未返回，请稍后重试/, '画像值存在但证据链缺失时必须明确失败状态')
-assert.match(detail, /customerSourcesRestricted[\s\S]*?受限客户来源不在此页展示/, '普通详情页不得从证据链链接反向泄露受限客户身份')
+assert.match(detail, /productCommercialization:\s*!isPaperChannel/, '论文渠道详情页必须隐藏产品与商业化')
+assert.match(detail, /investmentProfile:\s*false/, '所有渠道的详情页都必须隐藏投资证据画像')
+assert.match(detail, /sectionVisibility\.productCommercialization\s*&&\s*<ReviewSection title="产品与商业化"/, '产品与商业化必须按渠道可见性渲染')
+assert.doesNotMatch(detail, /<ReviewSection title="投资证据画像"/, '企业详情不得渲染投资画像、推荐或数据质量模块')
 assert.match(detail, /investmentProfile\.financing\.status, investmentProfile\.financing\.latestRound/, '详情融资进展必须显示融资状态与轮次')
 assert.match(page, /hasInstitutionAndAcademic[\s\S]*?\? 1 : 2/, '机构与高校同时存在时不得互相挤掉')
 assert.doesNotMatch(page, /profile\?\.customers|customerDisplayName/, '列表移除大客户验证列后不得继续渲染客户画像')
@@ -274,7 +276,7 @@ for (const label of ['行业与产品路线', '机构与高校背景', '融资�
 for (const forbidden of ['待评级', '评级中', '评级过期', '评级失败', '评级分数', '线索评级']) {
   assert.doesNotMatch(page, new RegExp(forbidden), `共享线索列表不得展示V3状态：${forbidden}`)
 }
-assert.match(styles, /\.lead-pool-profile-list[^}]+display:\s*grid/, '融资和估值必须使用紧凑键值布局')
+assert.match(styles, /\.lead-pool-profile-list[^}]+display:\s*grid/, '融资进展必须使用紧凑键值布局')
 assert.match(styles, /\.lead-pool-page/, '共享线索池样式必须使用模块命名空间')
 assert.match(styles, /\.lead-review-page/, '研判详情样式必须使用模块命名空间')
 
@@ -308,13 +310,13 @@ console.log(JSON.stringify({
     'normalized-stage-filter-contract',
     'all-industry-and-channel-options',
     'filter-scroll-reset',
-    'seven-column-contract',
+    'enterprise-six-column-contract',
     'twenty-row-pagination',
     'keyboard-and-responsive-row-access',
     'independent-detail-route',
     'detail-rating-hidden',
     'old-summary-reason-and-news-columns-removed',
-    'investment-profile-seven-column-projection',
+    'enterprise-six-column-profile-projection',
     'industry-tags-split-consistently',
     'paper-authors-projected-as-research-team',
     'enrichment-operations-hidden-and-verified-facts-projected',

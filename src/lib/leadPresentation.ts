@@ -8,6 +8,7 @@ export function splitLeadIndustryTags(value: unknown, fallback = '行业待核�
 }
 
 const PENDING_VERIFICATION_TEXT = /(?:待[^，。；\n]{0,12}核验|待核实|待确认)/
+const UNDISCLOSED_PLACEHOLDER_TEXT = /^(?:未确认|未披露|暂未披露|未透露)$/
 
 /**
  * Project-detail fields use a neutral dash for any value that still carries a
@@ -19,7 +20,7 @@ export function displayLeadDetailValue(value: unknown, fallback = '-') {
     ? String(value).trim()
     : ''
   const displayed = candidate && !['null', 'undefined'].includes(candidate) ? candidate : fallback
-  return PENDING_VERIFICATION_TEXT.test(displayed) ? '-' : displayed
+  return PENDING_VERIFICATION_TEXT.test(displayed) || UNDISCLOSED_PLACEHOLDER_TEXT.test(displayed) ? '-' : displayed
 }
 
 const INVALID_REGISTERED_ADDRESS = new Set([

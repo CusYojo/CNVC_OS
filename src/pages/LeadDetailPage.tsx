@@ -1,12 +1,12 @@
 import {
-  AlertTriangle, ArrowLeft, Building2, CalendarDays, ExternalLink,
+  AlertTriangle, ArrowLeft, Building2, CalendarDays, Download, ExternalLink,
   LoaderCircle, MapPin, Sparkles, Trash2, UserRound, UsersRound,
 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { Button, EmptyState, Modal } from '../components/ui'
 import { useToast } from '../components/Toast'
-import { apiDelete, apiGet, apiPost } from '../lib/api'
+import { apiDelete, apiGet } from '../lib/api'
 import {
   displayLeadDetailValue,
   displayLeadFundingValue,
@@ -32,6 +32,14 @@ function multilineText(value: unknown, fallback: string) {
 
 function isResearch(lead: Lead) {
   return lead.leadType === 'research' || lead.radarProfile?.channel === '论文'
+}
+
+export function leadDetailSectionVisibility(lead: Pick<Lead, 'radarProfile'>) {
+  const isPaperChannel = lead.radarProfile?.channel === '论文'
+  return {
+    productCommercialization: !isPaperChannel,
+    investmentProfile: false,
+  }
 }
 
 function displayDate(value?: string) {
@@ -104,25 +112,6 @@ type LeadEnrichmentFactsResponse = {
   pageSize: number
 }
 
-type LeadEnrichmentConflictCandidate = {
-  id: string
-  value: unknown
-  evidenceLevel: string
-  verificationStatus: string
-  isCurrent: boolean
-  evidence: Array<LeadEnrichmentEvidence & { quote?: string; reliability?: string | null }>
-}
-
-type LeadEnrichmentConflict = {
-  id: string
-  factKey: string
-  instanceKey: string
-  status: string
-  severity: string
-  automaticReason?: string | null
-  candidates: LeadEnrichmentConflictCandidate[]
-}
-
 export type InvestmentProfileEvidenceArea = 'industryProduct' | 'background' | 'financing' | 'valuation' | 'customers'
 
 export function canManageLeadPool(user: { role?: string; permissionCodes?: string[] } | null | undefined): boolean {
@@ -192,6 +181,49 @@ function displayFactValue(value: unknown) {
   return '未披露'
 }
 
+function factObject(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
+}
+
+function firstFactField(value: unknown, keys: string[]) {
+  const record = factObject(value)
+  for (const key of keys) {
+    const displayed = text(record[key], '')
+    if (displayed) return displayed
+  }
+  return ''
+}
+
+type ResearchTechnicalEvidence = {
+  id: string
+  metric: string
+  result: string
+  baseline: string
+  context: string
+  source?: LeadEnrichmentEvidence
+}
+
+function researchTechnicalEvidence(facts: LeadEnrichmentFact[]): ResearchTechnicalEvidence[] {
+  const labels: Record<string, string> = {
+    'technology.metric': '技术指标',
+    'research.validation': '验证结果',
+    'research.prototype': '原型进展',
+    'research.reproducibility': '复现情况',
+  }
+  return facts.filter((fact) => isEvidenceBackedFact(fact) && Boolean(labels[fact.factKey])).map((fact) => {
+    const structured = factObject(fact.value)
+    const scalarResult = Object.keys(structured).length ? '' : displayFactValue(fact.value)
+    return {
+      id: fact.id,
+      metric: firstFactField(fact.value, ['metric', 'indicator', 'name', 'label']) || labels[fact.factKey],
+      result: firstFactField(fact.value, ['result', 'value', 'paperResult', 'current']) || scalarResult,
+      baseline: firstFactField(fact.value, ['baseline', 'benchmark', 'comparison', 'comparedWith']),
+      context: firstFactField(fact.value, ['dataset', 'scenario', 'condition', 'context']),
+      source: fact.evidence.find((evidence) => Boolean(externalUrl(evidence.sourceUrl))),
+    }
+  }).filter((item) => item.result)
+}
+
 async function loadAllLeadVerifiedFacts(leadId: string) {
   const all: LeadEnrichmentFact[] = []
   for (let page = 1; page <= 20; page += 1) {
@@ -237,9 +269,9 @@ function paperAuthorsAsTeam(lead: Lead): DisplayTeamMember[] {
       const institutions = detail?.affiliations?.map((affiliation) => affiliation.name).filter(Boolean) || []
       const identityNote = detail?.identityStatus === 'confirmed'
         ? '作者身份已由稳定来源ID确认'
-        : '作者身份待通过ORCID、机构或主页进一步消歧'
+        : '论文署名作者，暂无稳定作者ID'
       const contributionNote = contributionByAuthor.has(name) ? '论文原文标注了作者贡献' : '仅确认论文署名顺序'
-      return `《${paperTitle}》${contributionNote}；${identityNote}${institutions.length ? `；来源确认机构：${institutions.join('、')}` : '；未强行分配作者机构'}。`
+      return `《${paperTitle}》${contributionNote}；${identityNote}${institutions.length ? `；来源确认机构：${institutions.join('、')}` : '；作者—机构对应：-'}。`
     })(),
     profileUrl: (() => {
       const detail = detailsByAuthor.get(name.normalize('NFKC').toLocaleLowerCase('en-US'))
@@ -308,28 +340,6 @@ export function LeadDetailPage() {
   const [verifiedProfile, setVerifiedProfile] = useState<LeadVerifiedProfile | null>(null)
   const [enrichmentFacts, setEnrichmentFacts] = useState<LeadEnrichmentFact[]>([])
   const [factsLoadError, setFactsLoadError] = useState('')
-  const [conflictReviewOpen, setConflictReviewOpen] = useState(false)
-  const [conflicts, setConflicts] = useState<LeadEnrichmentConflict[]>([])
-  const [conflictsLoading, setConflictsLoading] = useState(false)
-  const [conflictsError, setConflictsError] = useState('')
-  const [selectedConflictId, setSelectedConflictId] = useState('')
-  const [selectedFactId, setSelectedFactId] = useState('')
-  const [resolutionReason, setResolutionReason] = useState('')
-  const [resolvingConflict, setResolvingConflict] = useState(false)
-  const conflictRequestVersion = useRef(0)
-
-  const clearConflictReview = useCallback(() => {
-    conflictRequestVersion.current += 1
-    setConflictReviewOpen(false)
-    setConflicts([])
-    setConflictsLoading(false)
-    setConflictsError('')
-    setSelectedConflictId('')
-    setSelectedFactId('')
-    setResolutionReason('')
-    setResolvingConflict(false)
-  }, [])
-
   const load = useCallback(async () => {
     if (!id) return
     setLoading(true)
@@ -354,16 +364,6 @@ export function LeadDetailPage() {
   }, [fetchLeadDetail, id])
 
   useEffect(() => { void load() }, [load])
-
-  useEffect(() => {
-    if (shouldRetainLeadConflictReview({
-      user: currentUser,
-      routeLeadId: id,
-      loadedLeadId: lead?.id,
-      conflictCount: lead?.investmentProfile?.dataStatus.conflictCount,
-    })) return
-    clearConflictReview()
-  }, [clearConflictReview, currentUser, id, lead?.id, lead?.investmentProfile?.dataStatus.conflictCount])
 
   const state = location.state as { from?: string } | null
   const goBack = () => navigate(state?.from || '/sourcing')
@@ -395,57 +395,14 @@ export function LeadDetailPage() {
     }
   }
 
-  const readConflicts = async (leadId: string) => {
-    const requestVersion = ++conflictRequestVersion.current
-    setConflictsLoading(true)
-    setConflictsError('')
-    try {
-      const result = await apiGet<{ leadId: string; conflicts: LeadEnrichmentConflict[] }>(`/leads/${leadId}/enrichment/conflicts`)
-      if (requestVersion !== conflictRequestVersion.current) return
-      const openConflicts = result.conflicts.filter((conflict) => conflict.status === 'open')
-      setConflicts(openConflicts)
-      setSelectedConflictId((current) => openConflicts.some((conflict) => conflict.id === current) ? current : openConflicts[0]?.id || '')
-      setSelectedFactId('')
-    } catch (cause) {
-      if (requestVersion !== conflictRequestVersion.current) return
-      setConflicts([])
-      setConflictsError(cause instanceof Error ? cause.message : '冲突证据暂时不可用')
-    } finally {
-      if (requestVersion === conflictRequestVersion.current) setConflictsLoading(false)
-    }
-  }
-
-  const openConflictReview = () => {
-    if (!lead || !canReviewLeadInvestmentProfileConflicts(currentUser, lead.investmentProfile?.dataStatus.conflictCount)) return
-    setConflictReviewOpen(true)
-    setResolutionReason('')
-    void readConflicts(lead.id)
-  }
-
-  const resolveConflict = async (decision: 'accept_fact' | 'dismiss') => {
-    if (!lead || resolvingConflict || !selectedConflictId || resolutionReason.trim().length < 4) return
-    if (decision === 'accept_fact' && !selectedFactId) return
-    setResolvingConflict(true)
-    try {
-      await apiPost(`/leads/${lead.id}/enrichment/conflicts/${selectedConflictId}/resolve`, {
-        decision,
-        ...(decision === 'accept_fact' ? { selectedFactId } : {}),
-        reason: resolutionReason.trim(),
-      })
-      showToast('冲突裁决已提交，画像将在新快照后更新', 'success')
-      setResolutionReason('')
-      await Promise.all([readConflicts(lead.id), load()])
-    } catch (cause) {
-      showToast(cause instanceof Error ? cause.message : '冲突裁决失败', 'error')
-    } finally { setResolvingConflict(false) }
-  }
-
   if (loading && !lead) return <DetailShell onBack={goBack}><div className="lead-review-loading"><LoaderCircle /><strong>正在读取线索详情</strong></div></DetailShell>
   if (!lead || error) return <DetailShell onBack={goBack}><div className="lead-review-missing"><EmptyState title="未找到这条线索" description={error || '线索可能已被移除。'} /><button type="button" onClick={() => void load()}>重新加载</button></div></DetailShell>
 
   const research = isResearch(lead)
+  const sectionVisibility = leadDetailSectionVisibility(lead)
   const profile = lead.radarProfile?.profile ?? {}
   const paperMeta = lead.radarProfile?.paperMeta
+  const researchProfile = lead.researchProfile
   const registry = lead.companyRegistry ?? lead.scoring?.registry ?? {}
   const verifiedFacts = enrichmentFacts.filter(isEvidenceBackedFact)
   const verifiedFact = (...factKeys: string[]) => verifiedFacts.find((fact) => factKeys.includes(fact.factKey))
@@ -453,10 +410,17 @@ export function LeadDetailPage() {
     const fact = verifiedFact(...factKeys)
     return fact ? displayFactValue(fact.value) : fallback
   }
-  const companyName = research ? lead.name : text(lead.companyName, lead.name)
+  const researchProjectName = research
+    ? text(paperMeta?.projectName || researchProfile?.subject.name || lead.name, '')
+    : ''
+  const companyName = research
+    ? text(paperMeta?.titleZh || researchProfile?.subject.title || lead.name, lead.name)
+    : text(lead.companyName, lead.name)
   const verifiedWebsite = verifiedFactText(['profile.website'])
+  const paperSourceUrl = research ? externalUrl(lead.radarProfile?.link) : ''
+  const paperPdfUrl = research ? externalUrl(paperMeta?.pdfUrl) : ''
   const officialSite = research
-    ? externalUrl(verifiedWebsite) || externalUrl(lead.scoring?.officialSite) || externalUrl(lead.website) || externalUrl(lead.radarProfile?.link)
+    ? paperSourceUrl
     : externalUrl(verifiedWebsite) || verifiedCompanyWebsite(lead.scoring?.officialSite, lead.website)
   const articleSourceUrl = externalUrl(lead.fundingRounds?.[0]?.sourceUrl)
     || externalUrl(lead.sourceUrl)
@@ -501,14 +465,6 @@ export function LeadDetailPage() {
   const claimedFoundedAt = text(lead.foundedAt, '')
   const registeredAt = text(registry.foundedAt, '')
   const claimedFoundedAtSource = externalUrl(lead.scoring?.claimedFoundedAtEvidence?.sourceUrl)
-  const sourceBoundShareholders = (lead.scoring?.structuredShareholders ?? []).filter((shareholder) => (
-    text(shareholder.name, '') && Boolean(externalUrl(shareholder.sourceUrl))
-  ))
-  const shareholderSummary = sourceBoundShareholders.map((shareholder) => {
-    const details = [shareholder.percentage || shareholder.percent, shareholder.amount]
-      .map((value) => text(value, '')).filter(Boolean)
-    return `${text(shareholder.name)}${details.length ? `（${details.join('，')}）` : ''}`
-  }).join('；')
   const companyFacts: Array<[string, ReactNode]> = [
     ['品牌名称', text(lead.name)],
     [legalCompanyName ? '公司全称' : '主体名称', verifiedFactNode(['registry.company_name'], registryFact(lead.companyName || lead.name, 'companyName'))],
@@ -522,7 +478,6 @@ export function LeadDetailPage() {
     ['统一社会信用代码', verifiedFactNode(['registry.credit_code'], registryFact(registry.creditCode || lead.creditCode, 'creditCode'))],
     ['登记状态', verifiedFactNode(['registry.registration_status'], registryFact(registry.registrationStatus || lead.registrationStatus, 'registrationStatus'))],
     ['公司类型', verifiedFactNode(['registry.company_type'], registryFact(registry.companyType || lead.companyType, 'companyType'))],
-    ...(shareholderSummary ? [['股东信息', shareholderSummary] as [string, ReactNode]] : []),
     ['注册地址', verifiedFactNode(['registry.registered_address'], registryFact(displayLeadRegisteredAddress(
       registry.registeredAddress,
       registry.regLocation,
@@ -542,26 +497,35 @@ export function LeadDetailPage() {
     ] as [string, ReactNode]] : []),
   ]
   const paperAffiliations = paperMeta?.affiliations ?? []
-  const paperAuthorAffiliations = paperMeta?.authorAffiliations ?? []
   const articleLicense = paperMeta?.rights?.articleLicense
   const datasetRights = paperMeta?.rights?.dataset
   const intellectualProperty = paperMeta?.rights?.intellectualProperty
   const metadataSourceUrl = externalUrl(paperMeta?.metadataSource?.url)
+  const researchAffiliations = paperAffiliations.length
+    ? paperAffiliations.map((affiliation) => affiliation.name)
+    : researchProfile?.team.affiliations ?? []
+  const researchDirections = [...new Set([
+    ...(paperMeta?.categories ?? []),
+    ...(researchProfile?.direction.categories ?? []),
+    ...(industryValue !== '-' ? splitLeadIndustryTags(industryValue) : []),
+  ].map((item) => text(item, '')).filter(Boolean))]
+  const researchResourceType = text(paperMeta?.resourceType || researchProfile?.progress.resourceType, '-')
   const researchFacts: Array<[string, ReactNode]> = [
-    ['所属机构', paperAffiliations.length ? paperAffiliations.map((affiliation) => affiliation.name).join('、') : '-'],
-    ['研究团队', text(paperMeta?.researchTeam?.name || verifiedFactText(['profile.team_name']), '-')],
-    ['作者—机构对应', paperAuthorAffiliations.length ? <span className="lead-review-rights-note">{paperAuthorAffiliations.map((item) => `${item.author}—${item.affiliation}`).join('；')}<small>仅展示来源明确确认的逐人对应关系</small></span> : <span className="lead-review-rights-note">未确认<small>不根据机构列表强行分配作者</small></span>],
-    ['研究方向', industryValue],
-    ['成果公开时间', displayDate(paperMeta?.publishedAt || lead.radarProfile?.publishedAt)],
+    ['所属机构', researchAffiliations.length ? [...new Set(researchAffiliations)].join('、') : '-'],
+    ...(paperMeta?.researchTeam?.name || verifiedFactText(['profile.team_name']) ? [['研究团队', text(paperMeta?.researchTeam?.name || verifiedFactText(['profile.team_name']))] as [string, ReactNode]] : []),
+    ['研究方向', researchDirections.length ? researchDirections.join('、') : '-'],
+    ['成果形态', researchResourceType],
+    ...(paperMeta?.publishedAt || lead.radarProfile?.publishedAt ? [['成果公开时间', displayDate(paperMeta?.publishedAt || lead.radarProfile?.publishedAt)] as [string, ReactNode]] : []),
     ...(paperMeta?.publicationDateStatus === 'source_declared_future' && paperMeta.declaredPublishedAt ? [[
       '来源声明日期',
       <span className="lead-review-rights-note">{displayDate(paperMeta.declaredPublishedAt)}<small>来源填写为未来日期，未作为公开时间</small></span>,
     ] as [string, ReactNode]] : []),
-    ['成果形态', text(paperMeta?.resourceType || paperMeta?.venue || paperMeta?.categories?.join('、'), '论文/科研成果')],
-    ['论文/成果许可', articleLicense?.label || '未披露'],
-    ['数据集许可', datasetRights ? '-' : '未披露'],
-    ['知识产权归属', <span className="lead-review-rights-note" title={intellectualProperty?.note || '论文开放许可不等于知识产权归属'}>{intellectualProperty?.label || '未披露'}<small>论文许可不代表成果所有权</small></span>],
-    ['元数据来源', metadataSourceUrl ? text(paperMeta?.metadataSource?.provider, '原始论文页面') : '-'],
+    ...(paperMeta?.venue ? [['发表载体', paperMeta.venue] as [string, ReactNode]] : []),
+    ...(paperMeta?.comment ? [['论文备注', paperMeta.comment] as [string, ReactNode]] : []),
+    ...(articleLicense?.label || researchProfile?.rights.articleLicense ? [['论文/成果许可', text(articleLicense?.label || researchProfile?.rights.articleLicense)] as [string, ReactNode]] : []),
+    ...(datasetRights?.license || researchProfile?.rights.datasetLicense ? [['数据集许可', text(datasetRights?.license || researchProfile?.rights.datasetLicense)] as [string, ReactNode]] : []),
+    ...(intellectualProperty?.status === 'confirmed' || researchProfile?.rights.intellectualProperty ? [['知识产权归属', text(intellectualProperty?.label || researchProfile?.rights.intellectualProperty)] as [string, ReactNode]] : []),
+    ...(metadataSourceUrl ? [['元数据来源', text(paperMeta?.metadataSource?.provider, '原始论文页面')] as [string, ReactNode]] : []),
   ]
   const facts: Array<[string, ReactNode]> = research ? researchFacts : companyFacts
   const paperTeam = research ? paperAuthorsAsTeam(lead) : []
@@ -606,6 +570,8 @@ export function LeadDetailPage() {
   const headlineIntroductionText = headlineIntroduction
     ? displayFactValue(headlineIntroduction.value)
     : research ? generatedProjectIntroduction : generatedCompanyIntroduction
+  const positioningIntroductionText = headlineIntroductionText
+    || (!research ? evidenceBoundCompanyIntroduction || '暂无已验证的企业介绍' : '')
   const productValue = verifiedFact('product.name', 'profile.product')
     ? verifiedFactText(['product.name', 'profile.product'])
     : sourceLabeledNode('product', '-')
@@ -631,7 +597,16 @@ export function LeadDetailPage() {
     publishedAt: undefined,
     accessedAt: evidence.accessedAt,
   }])).values()]
-  const relatedSources = evidenceSources.length ? evidenceSources : (lead.sources ?? []).filter((source) => Boolean(externalUrl(source.url)))
+  const paperSources: Array<{ url: string; title?: string; publisher?: string; publishedAt?: string; accessedAt?: string }> = research ? [
+    paperSourceUrl ? { url: paperSourceUrl, title: text(paperMeta?.titleZh || paperMeta?.title || lead.name), publisher: text(paperMeta?.metadataSource?.provider, '论文原始页面') } : null,
+    paperPdfUrl ? { url: paperPdfUrl, title: '论文 PDF', publisher: 'PDF' } : null,
+    metadataSourceUrl && metadataSourceUrl !== paperSourceUrl ? { url: metadataSourceUrl, title: '论文元数据记录', publisher: text(paperMeta?.metadataSource?.provider, '元数据来源') } : null,
+  ].filter((source): source is NonNullable<typeof source> => Boolean(source)) : []
+  const relatedSources = [...new Map([
+    ...evidenceSources,
+    ...(lead.sources ?? []).filter((source) => Boolean(externalUrl(source.url))),
+    ...paperSources,
+  ].map((source) => [source.url, source])).values()]
   const investmentProfile = lead.investmentProfile
   const customerSourcesRestricted = Boolean(investmentProfile?.customers.representatives.some((item) => item.anonymized))
   const investmentProfileCards = investmentProfile ? [
@@ -688,71 +663,81 @@ export function LeadDetailPage() {
       sourceRestricted: false,
     },
   ] : []
-  const selectedConflict = conflicts.find((conflict) => conflict.id === selectedConflictId)
+  const researchAbstract = text(
+    paperMeta?.abstractZh || paperMeta?.abstractOriginal || paperMeta?.abstract
+      || projectIntroduction?.value || researchProfile?.direction.researchProblem,
+    '',
+  )
+  const researchInsightCards = research ? [
+    { label: '核心发现', fact: verifiedFact('research.finding', 'research.conclusion', 'paper.conclusion') },
+    { label: '创新点', fact: verifiedFact('research.innovation', 'paper.innovation') },
+    { label: '研究局限', fact: verifiedFact('research.limitation', 'paper.limitations') },
+  ].filter((item): item is { label: string; fact: LeadEnrichmentFact } => Boolean(item.fact)) : []
+  const technicalEvidence = research ? researchTechnicalEvidence(verifiedFacts) : []
+  const companyFundingRounds = research ? [] : (lead.fundingRounds ?? [])
+  const overviewLatestValuation = text(
+    investmentProfile?.valuation.value
+      || (articleSourceUrl ? firstFunding?.valuation : '')
+      || (externalUrl(lead.valuationDisplay?.sourceUrl) ? lead.valuationDisplay?.value : ''),
+  )
+  const companyOverview: Array<[string, ReactNode]> = research ? [] : [
+    ['成立时间', verifiedFactNode(['registry.founded_at'], registryFact(registeredAt, 'foundedAt'))],
+    ['最新轮次', verifiedFactNode(['financing.status', 'financing.round'], articleSourceUrl ? fundingStage : '-')],
+    ['累计融资', text(investmentProfile?.financing.cumulativeAmount)],
+    ['最新估值', overviewLatestValuation],
+  ]
 
   return <div className="lead-review-page">
     <div className="lead-review-shell">
       <button className="lead-review-back" type="button" onClick={goBack}><ArrowLeft />返回共享线索池</button>
       <header className="lead-review-hero">
         <div className="lead-review-identity">
-          <div className="lead-review-heading-line"><h1>{companyName}</h1><div className="lead-review-meta"><span><MapPin />{text(lead.region)}</span></div></div>
-          <p className="lead-review-positioning">{headlineIntroductionText
-            ? headlineIntroductionText
-            : evidenceBoundCompanyIntroduction || `暂无已验证的${research ? '项目' : '企业'}介绍`}</p>
-          <div className="lead-review-website-line"><span>{research ? '项目主页' : '公司官网'}：</span>{officialSite ? <a href={officialSite} target="_blank" rel="noreferrer">{officialSite}<ExternalLink /></a> : <span>待补充</span>}</div>
+          <div className="lead-review-heading-line"><h1>{companyName}</h1>{!research && <div className="lead-review-meta"><span><MapPin />{text(lead.region)}</span></div>}</div>
+          {research && paperMeta?.titleOriginal && paperMeta.titleOriginal !== companyName && <p className="lead-review-original-title">{paperMeta.titleOriginal}</p>}
+          {!research && positioningIntroductionText && <p className="lead-review-positioning">{positioningIntroductionText}</p>}
+          {research ? officialSite && <div className="lead-review-website-line"><span>论文地址：</span><a href={officialSite} target="_blank" rel="noreferrer">{officialSite}<ExternalLink /></a></div>
+            : <div className="lead-review-website-line"><span>公司官网：</span>{officialSite ? <a href={officialSite} target="_blank" rel="noreferrer">{officialSite}<ExternalLink /></a> : <span>-</span>}</div>}
           {!research && articleSourceUrl && <div className="lead-review-website-line"><span>文章来源：</span><a href={articleSourceUrl} target="_blank" rel="noreferrer">{articleSourceUrl}<ExternalLink /></a></div>}
-          <div className="lead-review-kicker">{industryTags.map((tag) => <span key={`industry-${tag}`}>{tag}</span>)}{(lead.backgroundTags ?? []).map((tag) => <span className="background" key={`background-${tag}`}>{tag}</span>)}</div>
+          <div className="lead-review-kicker">{research && researchProjectName && researchProjectName !== companyName && <span className="background">项目：{researchProjectName}</span>}{industryTags.map((tag) => <span key={`industry-${tag}`}>{tag}</span>)}{!research && (lead.backgroundTags ?? []).map((tag) => <span className="background" key={`background-${tag}`}>{tag}</span>)}</div>
+          {research && (paperSourceUrl || paperPdfUrl) && <div className="lead-review-resource-actions">{paperSourceUrl && <a href={paperSourceUrl} target="_blank" rel="noreferrer">查看原文<ExternalLink /></a>}{paperPdfUrl && <a href={paperPdfUrl} target="_blank" rel="noreferrer"><Download />下载 PDF</a>}</div>}
         </div>
-        <div className="lead-review-actions">
-          <button className="lead-review-convert-button" type="button" disabled={converted || converting} onClick={() => void handleConvert()}>{converting ? '正在转换…' : converted ? '已转为我的专属项目' : '转为我的专属项目'}</button>
-          {canManageLeadPool(currentUser) && <button className="lead-review-delete-button" type="button" onClick={() => setDeleteConfirmOpen(true)}><Trash2 />删除线索</button>}
+        <div className="lead-review-action-panel">
+          <div className="lead-review-actions">
+            <button className="lead-review-convert-button" type="button" disabled={converted || converting} onClick={() => void handleConvert()}>{converting ? '正在转换…' : converted ? '已转为我的专属项目' : '转为我的专属项目'}</button>
+            {canManageLeadPool(currentUser) && <button className="lead-review-delete-button" type="button" onClick={() => setDeleteConfirmOpen(true)}><Trash2 />删除线索</button>}
+          </div>
+          {!research && <time className="lead-review-updated-at">更新于 {displayDate(lead.dataUpdatedAt || lead.poolEnteredAt)}</time>}
         </div>
       </header>
 
       <main className="lead-review-content">
-        <ReviewSection title="项目简介" icon={<Sparkles />}><p className="lead-review-introduction">{multilineText(projectIntroduction?.value, '暂无项目简介')}</p></ReviewSection>
-        <ReviewSection title={research ? '科研主体信息' : '主体基础信息'} icon={<Building2 />}><dl className="lead-review-fact-table">{facts.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl></ReviewSection>
-        <ReviewSection title="产品与商业化" icon={<Sparkles />}><div className="lead-review-business-grid">
+        {(!research || researchAbstract) && <ReviewSection title={research ? '论文摘要 / 研究问题' : '项目简介'} icon={<Sparkles />}><p className="lead-review-introduction">{research ? multilineText(researchAbstract, '') : multilineText(projectIntroduction?.value, '暂无项目简介')}</p></ReviewSection>}
+        {!research && <ReviewSection title="关键概览" icon={<Building2 />}><div className="lead-review-overview-grid">{companyOverview.map(([label, value]) => <article key={label}><span>{label}</span><strong>{value}</strong></article>)}</div></ReviewSection>}
+        {researchInsightCards.length > 0 && <ReviewSection title="核心结论与创新" icon={<Sparkles />}><div className="lead-review-research-insights">{researchInsightCards.map((item) => <article key={item.label}><span>{item.label}</span><p>{displayFactValue(item.fact.value)}</p>{item.fact.evidence[0] && <a href={externalUrl(item.fact.evidence[0].sourceUrl) || undefined} target="_blank" rel="noreferrer">查看证据<ExternalLink /></a>}</article>)}</div></ReviewSection>}
+        {technicalEvidence.length > 0 && <ReviewSection title="技术证据" icon={<Sparkles />}><div className="lead-review-technical-table" role="table" aria-label="论文技术证据"><div className="lead-review-technical-head" role="row"><span role="columnheader">指标</span><span role="columnheader">本论文结果</span><span role="columnheader">对比基线</span><span role="columnheader">数据集 / 场景</span><span role="columnheader">证据来源</span></div>{technicalEvidence.map((item) => <div role="row" key={item.id}><strong role="cell">{item.metric}</strong><span role="cell">{item.result}</span><span role="cell">{item.baseline || '-'}</span><span role="cell">{item.context || '-'}</span><span role="cell">{item.source ? <a href={externalUrl(item.source.sourceUrl) || undefined} target="_blank" rel="noreferrer">{text(item.source.title || item.source.publisher, '查看来源')}<ExternalLink /></a> : '-'}</span></div>)}</div></ReviewSection>}
+        {(!research || facts.length > 0) && <ReviewSection title={research ? '科研主体信息' : '主体基础信息'} icon={<Building2 />}><dl className="lead-review-fact-table">{facts.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl></ReviewSection>}
+        {sectionVisibility.productCommercialization && <ReviewSection title="产品与商业化" icon={<Sparkles />}><div className="lead-review-business-grid">
           <BusinessCard label="产品" value={productValue} description={productDescription} />
           <BusinessCard label="应用场景" value={applicationValue} description={applicationDescription} />
           <BusinessCard label="主营业务" value={mainBusinessValue} description={mainBusinessDescription} />
-        </div></ReviewSection>
-        <ReviewSection title="投资证据画像" icon={<Building2 />}><>{factsLoadError && <div className="lead-review-investment-warning" role="status"><AlertTriangle /><span>画像值已读取，但来源链暂时不可用：{factsLoadError}</span><button type="button" onClick={() => void load()}>重新读取</button></div>}{investmentProfile && investmentProfile.dataStatus.conflictCount > 0 && <div className="lead-review-investment-warning" role="status"><AlertTriangle /><span>当前画像有 {investmentProfile.dataStatus.conflictCount} 项事实冲突，冲突解决前不会静默选择展示值。</span>{canReviewLeadInvestmentProfileConflicts(currentUser, investmentProfile.dataStatus.conflictCount) && <button type="button" onClick={openConflictReview}>复核冲突证据</button>}</div>}<div className="lead-review-investment-grid">{investmentProfileCards.length ? investmentProfileCards.map((item) => {
-          return <article key={item.label}><span>{item.label}</span><strong>{item.value}</strong><p>{item.detail}</p>{item.sources.length > 0
-            ? <div className="lead-review-investment-sources" aria-label={`${item.label}核对来源`}>{item.sources.slice(0, 2).map((source, index) => <a href={source.sourceUrl} target="_blank" rel="noreferrer" key={source.sourceUrl} title={item.label === '大客户验证' ? '大客户验证公开来源' : text(source.title || source.publisher, '公开来源')}>核对来源 {index + 1}<ExternalLink /></a>)}{item.sources.length > 2 && <span>另有 {item.sources.length - 2} 条来源</span>}</div>
-            : item.sourceRestricted
-              ? <span className="lead-review-investment-source-restricted">受限客户来源不在此页展示</span>
-              : item.expectsEvidence && !factsLoadError && <span className="lead-review-investment-source-empty" role="status">来源链未返回，请稍后重试</span>}</article>
-        }) : <p className="lead-review-section-empty">暂无可用于投资画像的已验证事实</p>}</div></></ReviewSection>
-        <ReviewSection title="团队成员" icon={<UsersRound />}><>{(verifiedTeamIntroduction || generatedTeamIntroduction || sourceLabeledField('teamIntroduction')) && <p className="lead-review-team-summary">{verifiedTeamIntroduction ? displayFactValue(verifiedTeamIntroduction.value) : generatedTeamIntroduction || sourceLabeledNode('teamIntroduction', '')}</p>}<div className="lead-review-team-list">{team.length ? team.map((member, index) => <article key={`${member.name}-${index}`}><span><UserRound /></span><div><h3>{member.profileUrl ? <a href={externalUrl(member.profileUrl) || undefined} target="_blank" rel="noreferrer">{text(member.name)}<ExternalLink /></a> : text(member.name)}<em>{text(member.title, '-')}</em></h3><p>{text(member.background, '-')}</p></div></article>) : <p className="lead-review-section-empty">暂无可验证的团队成员信息</p>}</div></></ReviewSection>
-        <ReviewSection title="证据与动态" icon={<CalendarDays />}><div className="lead-review-evidence-grid">
-          <section className="lead-review-path-panel"><header><span>01</span><div><h3>动态路径</h3><p>仅展示已有来源的已验证进展</p></div></header><div className="lead-review-path">{updates.length ? updates.map((item) => <article key={`${item.occurredAt}-${item.title}`}><time>{displayDate(item.occurredAt)}</time>{item.sourceUrl ? <a href={externalUrl(item.sourceUrl) || undefined} target="_blank" rel="noreferrer"><strong>{text(item.title)}</strong><ExternalLink /></a> : <strong>{text(item.title)}</strong>}</article>) : <p className="lead-review-section-empty">暂无经过来源标注的动态</p>}</div></section>
-          <section className="lead-review-news-panel"><header><span>02</span><div><h3>相关来源</h3><p>展示可打开的原始来源与已验证事实来源</p></div></header><div className="lead-review-news-list">{relatedSources.slice(0, 10).map((source, index) => <a className="lead-review-news-item" href={externalUrl(source.url) || undefined} target="_blank" rel="noreferrer" key={`${source.url}-${index}`}><div><span>{text(source.publisher, '公开来源')}</span><time>{displayDate(source.publishedAt || source.accessedAt)}</time></div><strong>{text(source.title, '原始来源')}</strong><ExternalLink /></a>)}</div></section>
-        </div></ReviewSection>
+        </div></ReviewSection>}
+        {!research && <ReviewSection title="融资历史" icon={<Building2 />}><div className="lead-review-funding-table" role="table" aria-label="企业融资历史"><div className="lead-review-funding-head" role="row"><span role="columnheader">轮次</span><span role="columnheader">时间</span><span role="columnheader">金额</span><span role="columnheader">估值</span><span role="columnheader">投资方</span><span role="columnheader">来源</span></div>{companyFundingRounds.length ? companyFundingRounds.map((round, index) => {
+          const sourceUrl = externalUrl(round.sourceUrl)
+          return <div role="row" key={`${round.round}-${round.date}-${index}`}><strong role="cell">{text(round.round)}</strong><span role="cell">{displayDate(round.date)}</span><span role="cell">{text(round.amount)}</span><span role="cell">{text(round.valuation)}</span><span role="cell">{round.investors?.length ? round.investors.join('、') : '-'}</span><span role="cell">{sourceUrl ? <a href={sourceUrl} target="_blank" rel="noreferrer">查看来源<ExternalLink /></a> : '-'}</span></div>
+        }) : <p className="lead-review-section-empty">暂无融资历史数据</p>}</div></ReviewSection>}
+        {research ? <ReviewSection title="团队成员" icon={<UsersRound />}><>{(verifiedTeamIntroduction || generatedTeamIntroduction || sourceLabeledField('teamIntroduction')) && <p className="lead-review-team-summary">{verifiedTeamIntroduction ? displayFactValue(verifiedTeamIntroduction.value) : generatedTeamIntroduction || sourceLabeledNode('teamIntroduction', '')}</p>}{team.length > 0 && <p className="lead-review-team-summary">展示论文署名、作者贡献与来源确认的机构信息；点击成员卡片可打开作者资料页。</p>}<div className="lead-review-team-list">{team.length ? team.map((member, index) => <TeamMemberCard member={member} index={index} key={`${member.name}-${index}`} />) : <p className="lead-review-section-empty">暂无可验证的团队成员信息</p>}</div></></ReviewSection>
+          : <ReviewSection title="核心团队" icon={<UsersRound />}><>{(verifiedTeamIntroduction || generatedTeamIntroduction || sourceLabeledField('teamIntroduction')) && <p className="lead-review-team-summary">{verifiedTeamIntroduction ? displayFactValue(verifiedTeamIntroduction.value) : generatedTeamIntroduction || sourceLabeledNode('teamIntroduction', '')}</p>}<div className="lead-review-team-list">{team.length ? team.map((member, index) => <TeamMemberCard member={member} index={index} key={`${member.name}-${index}`} />) : <p className="lead-review-section-empty">暂无可验证的团队成员信息</p>}</div></></ReviewSection>}
+        {research && (updates.length > 0 || relatedSources.length > 0) && <ReviewSection title="证据与动态" icon={<CalendarDays />}><div className={`lead-review-evidence-grid${!updates.length || !relatedSources.length ? ' single' : ''}`}>
+          {updates.length > 0 && <section className="lead-review-path-panel"><header><span>01</span><div><h3>动态路径</h3><p>仅展示已有来源的已验证进展</p></div></header><div className="lead-review-path">{updates.map((item) => <article key={`${item.occurredAt}-${item.title}`}><time>{displayDate(item.occurredAt)}</time>{item.sourceUrl ? <a href={externalUrl(item.sourceUrl) || undefined} target="_blank" rel="noreferrer"><strong>{text(item.title)}</strong><ExternalLink /></a> : <strong>{text(item.title)}</strong>}</article>)}</div></section>}
+          {relatedSources.length > 0 && <section className="lead-review-news-panel"><header><span>{!updates.length ? '01' : '02'}</span><div><h3>相关来源</h3><p>展示可打开的原始来源与已验证事实来源</p></div></header><div className="lead-review-news-list">{relatedSources.slice(0, 10).map((source, index) => <a className="lead-review-news-item" href={externalUrl(source.url) || undefined} target="_blank" rel="noreferrer" key={`${source.url}-${index}`}><div><span>{text(source.publisher, '公开来源')}</span><time>{displayDate(source.publishedAt || source.accessedAt)}</time></div><strong>{text(source.title, '原始来源')}</strong><ExternalLink /></a>)}</div></section>}
+        </div></ReviewSection>}
+        {!research && <ReviewSection title="最近动态" icon={<CalendarDays />}><div className="lead-review-latest-updates">{updates.length ? updates.slice(0, 4).map((item, index) => {
+          const sourceUrl = externalUrl(item.sourceUrl)
+          return <article key={`${item.occurredAt}-${item.title}`}><time>{displayDate(item.occurredAt)}</time><i className={index === 0 ? 'current' : ''} /><div><strong>{text(item.title)}</strong>{sourceUrl && <a href={sourceUrl} target="_blank" rel="noreferrer">查看来源<ExternalLink /></a>}</div></article>
+        }) : <p className="lead-review-section-empty">暂无经过来源标注的动态</p>}</div></ReviewSection>}
+        {!research && <ReviewSection title="相关来源" icon={<CalendarDays />}>{factsLoadError && <div className="lead-review-source-error" role="alert"><AlertTriangle /><span>相关来源暂时不可用</span><button type="button" onClick={() => void load()}>重新读取</button></div>}<div className="lead-review-source-grid">{relatedSources.length ? relatedSources.slice(0, 10).map((source, index) => <a className="lead-review-news-item" href={externalUrl(source.url) || undefined} target="_blank" rel="noreferrer" key={`${source.url}-${index}`}><div><span>{text(source.publisher, '公开来源')}</span><time>{displayDate(source.publishedAt || source.accessedAt)}</time></div><strong>{text(source.title, '原始来源')}</strong><ExternalLink /></a>) : <p className="lead-review-section-empty">暂无可打开的相关来源</p>}</div></ReviewSection>}
       </main>
     </div>
-    <Modal
-      open={conflictReviewOpen}
-      title="复核投资画像事实冲突"
-      width="max-w-4xl"
-      onClose={() => { if (!resolvingConflict) setConflictReviewOpen(false) }}
-      footer={<Button variant="secondary" disabled={resolvingConflict} onClick={() => setConflictReviewOpen(false)}>关闭</Button>}
-    >
-      <div className="lead-review-conflict-review">
-        {conflictsLoading && <p role="status">正在读取冲突候选与证据…</p>}
-        {conflictsError && <div className="lead-review-investment-warning" role="alert"><AlertTriangle /><span>{conflictsError}</span><button type="button" onClick={() => { if (lead) void readConflicts(lead.id) }}>重试</button></div>}
-        {!conflictsLoading && !conflictsError && conflicts.length === 0 && <p role="status">当前没有待复核冲突，画像刷新后状态会自动更新。</p>}
-        {conflicts.length > 0 && <>
-          <nav aria-label="待复核冲突">{conflicts.map((conflict) => <button type="button" className={conflict.id === selectedConflictId ? 'active' : ''} key={conflict.id} onClick={() => { setSelectedConflictId(conflict.id); setSelectedFactId('') }}><strong>{conflict.factKey}</strong><span>{conflict.instanceKey || '默认实例'} · {conflict.severity === 'material' ? '重大冲突' : '一般冲突'}</span></button>)}</nav>
-          {selectedConflict && <section>
-            <header><strong>{selectedConflict.factKey}</strong><span>{selectedConflict.automaticReason || '候选事实值不一致，请按原始证据复核'}</span></header>
-            <div className="lead-review-conflict-candidates">{selectedConflict.candidates.map((candidate) => <label key={candidate.id} className={candidate.id === selectedFactId ? 'selected' : ''}><input type="radio" name="lead-conflict-candidate" checked={candidate.id === selectedFactId} onChange={() => setSelectedFactId(candidate.id)} /><span><strong>{displayFactValue(candidate.value)}</strong><small>{candidate.evidenceLevel} · {candidate.verificationStatus}</small>{candidate.evidence.map((evidence) => { const url = externalUrl(evidence.sourceUrl); return <span className="evidence" key={`${candidate.id}-${evidence.sourceUrl}`}><em>{text(evidence.title || evidence.publisher, '公开来源')}</em>{evidence.quote && <q>{evidence.quote}</q>}{url && <a href={url} target="_blank" rel="noreferrer">打开来源<ExternalLink /></a>}</span> })}</span></label>)}</div>
-            <label className="lead-review-conflict-reason">裁决原因<textarea value={resolutionReason} onChange={(event) => setResolutionReason(event.target.value)} maxLength={2000} placeholder="至少填写 4 个字，说明采用或驳回依据" /></label>
-            <div className="lead-review-conflict-actions"><Button variant="secondary" disabled={resolvingConflict || resolutionReason.trim().length < 4} onClick={() => void resolveConflict('dismiss')}>驳回全部候选</Button><Button loading={resolvingConflict} disabled={!selectedFactId || resolutionReason.trim().length < 4} onClick={() => void resolveConflict('accept_fact')}>采用所选事实</Button></div>
-          </section>}
-        </>}
-      </div>
-    </Modal>
     <Modal
       open={deleteConfirmOpen}
       title="删除共享线索"
@@ -785,4 +770,12 @@ function ReviewSection({ title, icon, children }: { title: string; icon: ReactNo
 function BusinessCard({ label, value, description }: { label: string; value: ReactNode; description: ReactNode }) {
   const display = (node: ReactNode) => typeof node === 'string' || typeof node === 'number' ? displayLeadDetailValue(node) : node
   return <article><span>{label}</span><strong>{display(value)}</strong><p>{display(description)}</p></article>
+}
+
+function TeamMemberCard({ member, index }: { member: DisplayTeamMember; index: number }) {
+  const profileUrl = externalUrl(member.profileUrl)
+  const content = <><span><UserRound /></span><div><h3>{text(member.name)}<em>{text(member.title, '-')}</em></h3><p>{text(member.background, '-')}</p>{profileUrl && <small>查看作者资料<ExternalLink /></small>}</div></>
+  return profileUrl
+    ? <a className="lead-review-team-card" href={profileUrl} target="_blank" rel="noreferrer" aria-label={`打开${text(member.name)}的作者资料`} data-member-index={index}>{content}</a>
+    : <article className="lead-review-team-card" data-member-index={index}>{content}</article>
 }

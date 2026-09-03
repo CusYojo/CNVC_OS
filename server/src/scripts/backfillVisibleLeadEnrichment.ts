@@ -7,7 +7,10 @@ import { LEAD_ENRICHMENT_SCHEMA_VERSION } from '../services/leadEnrichmentContra
 import { enqueueLeadEnrichmentJob } from '../services/leadEnrichmentService.js'
 
 const apply = process.argv.includes('--apply')
+const force = process.argv.includes('--force')
 const batchId = process.argv.find((arg) => arg.startsWith('--batch-id='))?.slice(11).trim() || ''
+const requestedLeadIds = [...new Set((process.argv.find((arg) => arg.startsWith('--lead-ids='))?.slice(11) || '')
+  .split(',').map((value) => value.trim()).filter(Boolean))]
 const concurrency = Math.max(1, Math.min(8, Number(
   process.argv.find((arg) => arg.startsWith('--concurrency='))?.slice(14),
 ) || 4))
@@ -29,7 +32,15 @@ async function visibleLeadIds() {
 }
 
 async function main() {
-  const ids = await visibleLeadIds()
+  const allVisibleIds = await visibleLeadIds()
+  const visibleIdSet = new Set(allVisibleIds)
+  const ids = requestedLeadIds.length
+    ? requestedLeadIds.filter((leadId) => visibleIdSet.has(leadId))
+    : allVisibleIds
+  const requestedButNotVisible = requestedLeadIds.filter((leadId) => !visibleIdSet.has(leadId))
+  if (apply && requestedButNotVisible.length) {
+    throw new Error(`requested lead ids are not visible: ${requestedButNotVisible.join(',')}`)
+  }
   const states = new Map<string, { hasCurrentSnapshot: boolean; hasActiveJob: boolean }>()
   for (const id of ids) states.set(id, { hasCurrentSnapshot: false, hasActiveJob: false })
   for (let offset = 0; offset < ids.length; offset += 500) {
@@ -42,15 +53,15 @@ async function main() {
     for (const row of snapshots) states.get(row.lead_id)!.hasCurrentSnapshot = true
     const [jobs] = await pool.query<Array<RowDataPacket & { lead_id: string }>>(
       `SELECT DISTINCT lead_id FROM ${jobsTable}
-       WHERE status IN ('queued','running') AND lead_id IN (${placeholders})`,
-      chunk,
+       WHERE schema_version=? AND status IN ('queued','running') AND lead_id IN (${placeholders})`,
+      [LEAD_ENRICHMENT_SCHEMA_VERSION, ...chunk],
     )
     for (const row of jobs) states.get(row.lead_id)!.hasActiveJob = true
   }
 
   const candidates = ids.filter((id) => {
     const state = states.get(id)!
-    return !state.hasCurrentSnapshot && !state.hasActiveJob
+    return (force || !state.hasCurrentSnapshot) && !state.hasActiveJob
   })
   let repairedEntityStatuses = 0
   let queued = 0
@@ -89,7 +100,7 @@ async function main() {
     await pool.query(
       `INSERT INTO ${auditTable}
         (id,user_id,user_name,module,action,target,result,request_id,created_at)
-       VALUES (?,NULL,'Codex','共享线索','补建可见线索V3补全任务',?,'success',?,NOW(3))`,
+       VALUES (?,NULL,'Codex','共享线索','补建可见线索V5深度补全任务',?,'success',?,NOW(3))`,
       [randomUUID(), JSON.stringify({
         batchId, schemaVersion: LEAD_ENRICHMENT_SCHEMA_VERSION, visible: ids.length,
         candidates: candidates.length, queued, duplicate, skipped, repairedEntityStatuses,
@@ -101,6 +112,9 @@ async function main() {
     mode: apply ? 'apply' : 'preview',
     batchId: batchId || null,
     schemaVersion: LEAD_ENRICHMENT_SCHEMA_VERSION,
+    force,
+    requested: requestedLeadIds.length || null,
+    requestedButNotVisible,
     visible: ids.length,
     currentSnapshot: ids.filter((id) => states.get(id)!.hasCurrentSnapshot).length,
     activeJob: ids.filter((id) => states.get(id)!.hasActiveJob).length,

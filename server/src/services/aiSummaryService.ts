@@ -1117,7 +1117,13 @@ function leadPoolListItem(row: typeof leads.$inferSelect, candidateFacts: LeadLi
       title: item.title,
     })),
     radarProfile: typeof radarProfile.channel === 'string' || typeof radarProfileCore.lab === 'string'
-      ? { channel: radarProfile.channel, profile: { lab: radarProfileCore.lab } }
+      ? {
+          channel: radarProfile.channel,
+          link: radarProfile.link,
+          publishedAt: radarProfile.publishedAt,
+          profile: { lab: radarProfileCore.lab },
+          paperMeta: enriched.leadType === 'research' ? objectValue(radarProfile.paperMeta) : undefined,
+        }
       : undefined,
     investmentProfile: enriched.leadType === 'research' ? undefined : listInvestmentProfile,
     researchProfile: leadResearchProfileEnabled() && enriched.leadType === 'research' && Object.keys(publicResearchProfile).length
@@ -1432,7 +1438,9 @@ export async function listLeads(options: {
             'projectName', ${jsonValue(leads.radarProfile, '$.paperMeta.projectName')},
             'projectNameOriginal', ${jsonValue(leads.radarProfile, '$.paperMeta.projectNameOriginal')},
             'authors', ${jsonValue(leads.radarProfile, '$.paperMeta.authors')},
-            'categories', ${jsonValue(leads.radarProfile, '$.paperMeta.categories')}
+            'categories', ${jsonValue(leads.radarProfile, '$.paperMeta.categories')},
+            'pdfUrl', ${jsonValue(leads.radarProfile, '$.paperMeta.pdfUrl')},
+            'rights', ${jsonValue(leads.radarProfile, '$.paperMeta.rights')}
           )
         END
       ) END`,
@@ -1612,6 +1620,9 @@ export async function getLeadById(leadId: string, options: { includeHidden?: boo
   const projectLogoUrl = textValue(reserveDetail.logo)
   const [investmentProjection] = await db.select().from(leadInvestmentProfileProjections)
     .where(eq(leadInvestmentProfileProjections.leadId, canonicalLeadId)).limit(1)
+  const [researchProjection] = await db.select({ profilePayload: leadResearchProfileProjections.profilePayload })
+    .from(leadResearchProfileProjections)
+    .where(eq(leadResearchProfileProjections.leadId, canonicalLeadId)).limit(1)
   const investmentProfile = investmentProjection ? {
     schemaVersion: investmentProjection.schemaVersion,
     snapshotId: investmentProjection.snapshotId,
@@ -1663,6 +1674,9 @@ export async function getLeadById(leadId: string, options: { includeHidden?: boo
   return {
     ...enrichLead(row as typeof leads.$inferSelect & { completeness: number }),
     investmentProfile,
+    researchProfile: researchProjection
+      ? publicResearchProfilePayload(objectValue(researchProjection.profilePayload))
+      : undefined,
     projectIntroduction,
     projectIntroductionSourceUrl: projectIntroduction ? textValue(reserve?.detailUrl) : undefined,
     projectLogoUrl,

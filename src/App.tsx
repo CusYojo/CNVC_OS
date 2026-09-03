@@ -25,6 +25,7 @@ import { ImBotsPage } from './pages/ImBotsPage'
 import { RadarDingTalkSettingsPage } from './pages/RadarDingTalkSettingsPage'
 import { NotFoundPage } from './pages/NotFoundPage'
 import { isAiPlatformAdminRole, isSystemAdminRole } from '../server/src/contracts/adminRoleContract'
+import { legacySourcingRedirectTarget } from './lib/leadPoolFilters'
 
 function ProtectedLayout() {
   const authenticated = useAuthStore((state) => state.isAuthenticated)
@@ -50,6 +51,11 @@ function ImAdminOnly({ children }: { children: React.ReactNode }) {
   const user = useAuthStore((state) => state.user)
   return user?.permissionCodes?.includes('im.manage') || ['系统管理员', '运营管理员'].includes(user?.role || '')
     ? children : <Navigate to="/" replace />
+}
+
+function SourcingRedirect() {
+  const location = useLocation()
+  return <Navigate to={legacySourcingRedirectTarget(location.search)} replace />
 }
 
 export default function App() {
@@ -79,7 +85,7 @@ export default function App() {
         <Route index element={<DashboardPage />} />
         <Route path="/projects" element={<ProjectCenterPage />} />
         <Route path="/projects/:id" element={<ProjectDetailPage />} />
-        <Route path="/sourcing" element={<Navigate to="/projects?view=leads" replace />} />
+        <Route path="/sourcing" element={<SourcingRedirect />} />
         <Route path="/sourcing/:id" element={<LeadDetailPage />} />
         <Route
           path="/ai"

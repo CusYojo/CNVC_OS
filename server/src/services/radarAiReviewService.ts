@@ -18,6 +18,7 @@ import {
   LEAD_SUBJECT_AGENT_PROFILE_VERSION,
   LEAD_SUBJECT_AGENT_SCHEMA_VERSION,
   LEAD_SUBJECT_AGENT_TOOLSET_VERSION,
+  leadSubjectAgentRuntime,
   runLeadSubjectAgentBatch,
   type LeadSubjectAgentExecution,
 } from './leadSubjectAgentService.js'
@@ -26,6 +27,7 @@ const PROMPT_VERSION = 'radar-subject-v3-paper-v2'
 const PAPER_PROMPT_VERSION = 'radar-paper-project-v5'
 const EVIDENCE_VALIDATION_REASON = '模型给出的主体名称或来源证据无法在原文中核验'
 const DEFAULT_MODEL = process.env.RADAR_AI_REVIEW_MODEL
+  || process.env.LEAD_ENRICHMENT_MODEL
   || process.env.LLM_MODEL
   || 'claude-sonnet-4-6'
 const MAX_ATTEMPTS = Math.max(
@@ -509,6 +511,7 @@ async function reviewUncachedBatch(
   model: string,
   auditEventIds: Map<string, string>,
 ) {
+  const runtime = leadSubjectAgentRuntime(model, agentRunner !== runLeadSubjectAgentBatch)
   let lastError = new Error('AI 主体审查未返回结果')
   let lastAuditRunId: string | null = null
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
@@ -519,15 +522,18 @@ async function reviewUncachedBatch(
     try {
       if (eventIds.length) {
         try {
+          const auditPromptVersion = runtime === 'codex-cli'
+            ? `${batch[0].promptVersion}-codex-v1`
+            : batch[0].promptVersion
           const promptVersion = await registerLeadPipelinePromptVersion({
             agentProfile: LEAD_SUBJECT_AGENT_PROFILE,
-            promptVersion: batch[0].promptVersion,
+            promptVersion: auditPromptVersion,
             schemaVersion: LEAD_SUBJECT_AGENT_SCHEMA_VERSION,
             skillVersion: LEAD_SUBJECT_AGENT_PROFILE_VERSION,
             toolsetVersion: LEAD_SUBJECT_AGENT_TOOLSET_VERSION,
             prompt: RADAR_SUBJECT_REVIEW_SYSTEM_PROMPT,
             configuration: {
-              runtime: 'claude-agent-sdk',
+              runtime,
               maxAttempts: MAX_ATTEMPTS,
               tools: [],
               skills: [],
@@ -537,7 +543,7 @@ async function reviewUncachedBatch(
           })
           auditRun = await startLeadPipelineRun({
             eventIds,
-            runtime: 'claude-agent-sdk',
+            runtime,
             agentProfile: LEAD_SUBJECT_AGENT_PROFILE,
             promptVersionId: promptVersion.id,
             model,
@@ -545,7 +551,7 @@ async function reviewUncachedBatch(
             startedAt,
             metadata: {
               cacheKeys: batch.map((item) => item.cacheKey),
-              transport: 'claude-agent-sdk',
+              transport: runtime,
               toolsetVersion: LEAD_SUBJECT_AGENT_TOOLSET_VERSION,
               tokenAccounting: 'exact-batch',
             },

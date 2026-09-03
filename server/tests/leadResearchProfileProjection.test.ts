@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { buildLeadResearchProfile, isLeadResearchProfileFactKey, leadResearchTopicGaps, leadResearchTopicGapsByTopic } from '../src/services/leadResearchProfileProjectionService.js'
 import { leadResearchWebEnrichmentEnabled } from '../src/services/leadEnrichmentContract.js'
+import { isLeadAgentRuntimeThrottleError } from '../src/services/leadAgentRuntimeGuardService.js'
 
 test('research profile maps deterministic paper metadata without company investment fields', () => {
   const profile = buildLeadResearchProfile({
@@ -42,10 +43,12 @@ test('research web rollout is gap-driven and cutoff protected', () => {
   assert.deepEqual(leadResearchTopicGaps('team', radarProfile), ['作者与机构逐一绑定'])
   assert.deepEqual(leadResearchTopicGaps('industrialization', radarProfile), ['技术成熟度、复现性、验证或应用阶段'])
   assert.deepEqual(Object.keys(leadResearchTopicGapsByTopic(radarProfile)), [
-    'basic_profile', 'team', 'products', 'technology_ip', 'industrialization', 'latest_developments',
+    'basic_profile', 'team', 'products', 'latest_developments',
   ])
   const env = { LEAD_RESEARCH_WEB_ENRICHMENT_ENABLED: 'true', LEAD_RESEARCH_WEB_ENRICHMENT_AFTER: '2026-09-03T02:30:00Z' }
   assert.equal(leadResearchWebEnrichmentEnabled({ jobCreatedAt: '2026-09-03T02:29:59Z', env }), false)
   assert.equal(leadResearchWebEnrichmentEnabled({ jobCreatedAt: '2026-09-03T02:30:00Z', env }), true)
   assert.equal(leadResearchWebEnrichmentEnabled({ jobCreatedAt: '2026-09-03T03:00:00Z', env: { ...env, LEAD_RESEARCH_WEB_ENRICHMENT_AFTER: 'invalid' } }), false)
+  assert.equal(isLeadAgentRuntimeThrottleError(Object.assign(new Error('线索 Agent 全局并发已达到上限'), { code: 'LEAD_AGENT_CONCURRENCY_LIMIT' })), true)
+  assert.equal(isLeadAgentRuntimeThrottleError(Object.assign(new Error('provider model failed'), { code: 'LEAD_TOPIC_MODEL_FAILED' })), false)
 })

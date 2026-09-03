@@ -614,6 +614,7 @@ export interface Lead {
       stale?: boolean; staleReason?: string; factUpdatedAt?: string; sourceFreshnessAt?: string; snapshotCreatedAt?: string; projectedAt?: string
     }
   }
+  researchProfile?: LeadResearchProfile
   completeness: number
   verificationStatus: '已核验' | '部分核验' | '待核验'
   lastVerifiedAt: string
@@ -659,7 +660,15 @@ export type LeadListItem = Pick<Lead,
   'id' | 'name' | 'companyName' | 'region' | 'leadType' | 'businessTags'
   | 'poolEnteredAt' | 'dataUpdatedAt' | 'latestUpdates'
 > & {
-  radarProfile?: { channel?: string; profile?: { lab?: string } }
+  radarProfile?: {
+    channel?: string
+    link?: string
+    publishedAt?: string
+    profile?: { lab?: string }
+    paperMeta?: Pick<PaperMetadata,
+      'titleZh' | 'projectName' | 'projectNameOriginal' | 'authors' | 'categories' | 'pdfUrl' | 'rights'
+    >
+  }
   investmentProfile?: NonNullable<Lead['investmentProfile']>
   researchProfile?: LeadResearchProfile
   /** 投资画像缺项时使用的已有公开资料；不改变画像的验证状态。 */

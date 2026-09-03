@@ -42,6 +42,7 @@ import { detectLeadCandidateFactConflicts } from './leadFactConflictDetectionSer
 import { leadFactIdentityKey } from './leadFactInstanceKey.js'
 import { leadSourceSupportsSubject } from './leadSourceSubjectMatchService.js'
 import { readLeadTopicSearchCache, writeLeadTopicSearchCache } from './leadTopicSearchCacheService.js'
+import { isLeadAgentRuntimeThrottleError } from './leadAgentRuntimeGuardService.js'
 
 type JsonObject = Record<string, unknown>
 
@@ -72,11 +73,14 @@ const pollMs = Math.max(500, Number(process.env.LEAD_ENRICHMENT_POLL_MS) || 2_00
 const leaseSeconds = Math.max(60, Number(process.env.LEAD_ENRICHMENT_LEASE_SECONDS) || 600)
 const concurrency = Math.max(1, Math.min(10, Number(process.env.LEAD_ENRICHMENT_CONCURRENCY) || 1))
 const maxAttempts = Math.max(1, Math.min(5, Number(process.env.LEAD_ENRICHMENT_MAX_ATTEMPTS) || 3))
+const triggerTypeFilter = String(process.env.LEAD_ENRICHMENT_TRIGGER_TYPE_FILTER ?? '').normalize('NFKC').trim()
+if (triggerTypeFilter.length > 48) throw new Error('LEAD_ENRICHMENT_TRIGGER_TYPE_FILTER exceeds 48 characters')
 const active = new Map<string, Promise<void>>()
 let timer: NodeJS.Timeout | undefined
 let started = false
 let stopping = false
 let polling: Promise<void> | undefined
+let localThrottleUntilMs = 0
 const gatewayCircuit = createLeadEnrichmentCircuitBreaker({
   failureThreshold: 5,
   cooldownMs: 60_000,
@@ -178,8 +182,13 @@ export async function claimLeadEnrichmentTopicLease(): Promise<TopicLease | null
        WHERE tr.status IN ('queued','retrying') AND tr.next_attempt_at<=NOW(3)
          AND (tr.lease_expires_at IS NULL OR tr.lease_expires_at<NOW(3))
          AND j.schema_version=?
+         AND (?='' OR j.trigger_type=?)
          AND j.status IN ('queued','running')
          AND (j.lease_owner IS NULL OR j.lease_owner=? OR j.lease_expires_at<NOW(3))
+         AND (j.entity_type<>'research' OR NOT EXISTS (
+           SELECT 1 FROM ${topicRunsTable} active_research_topic
+           WHERE active_research_topic.job_id=tr.job_id AND active_research_topic.status='running'
+         ))
          AND (tr.topic_key='basic_profile' OR EXISTS (
            SELECT 1 FROM ${topicRunsTable} identity_run
            WHERE identity_run.job_id=tr.job_id AND identity_run.topic_key='basic_profile'
@@ -187,7 +196,7 @@ export async function claimLeadEnrichmentTopicLease(): Promise<TopicLease | null
          ))
        ORDER BY j.priority,tr.next_attempt_at,tr.created_at
        LIMIT 1 FOR UPDATE SKIP LOCKED`,
-      [LEAD_ENRICHMENT_SCHEMA_VERSION, owner],
+      [LEAD_ENRICHMENT_SCHEMA_VERSION, triggerTypeFilter, triggerTypeFilter, owner],
     )
     const row = rows[0]
     if (!row) { await connection.rollback(); return null }
@@ -319,16 +328,22 @@ async function freezeCompletedJob(jobId: string) {
 
 async function failTopic(lease: TopicLease, error: unknown) {
   const message = redactSensitiveText(error instanceof Error ? error.message : String(error)).slice(0, 4_000)
+  const localThrottle = isLeadAgentRuntimeThrottleError(error)
   const decision = leadEnrichmentRetryDecision({
-    error, executionAttempts: lease.execution_attempts, maxAttempts,
+    error, executionAttempts: localThrottle ? Math.max(0, lease.execution_attempts - 1) : lease.execution_attempts, maxAttempts,
   })
+  const retryAfterMs = Number((error as { retryAfterMs?: unknown }).retryAfterMs)
+  const retrySeconds = localThrottle
+    ? Math.max(15, Math.ceil(Number.isFinite(retryAfterMs) ? retryAfterMs / 1_000 : 15))
+    : decision.retrySeconds
+  if (localThrottle) localThrottleUntilMs = Math.max(localThrottleUntilMs, Date.now() + retrySeconds * 1_000)
   await pool.query(
     `UPDATE ${topicRunsTable}
-     SET status=?,next_attempt_at=DATE_ADD(NOW(3),INTERVAL ? SECOND),lease_owner=NULL,lease_expires_at=NULL,
+     SET status=?,execution_attempts=GREATEST(0,execution_attempts-?),next_attempt_at=DATE_ADD(NOW(3),INTERVAL ? SECOND),lease_owner=NULL,lease_expires_at=NULL,
          last_error=?,metrics=JSON_SET(COALESCE(metrics,JSON_OBJECT()),'$.errorClass',?),
          completed_at=IF(?='dead_letter',NOW(3),NULL),updated_at=NOW(3)
      WHERE id=? AND status='running' AND lease_owner=?`,
-    [decision.terminalStatus, decision.retrySeconds, message, decision.errorClass,
+    [decision.terminalStatus, localThrottle ? 1 : 0, retrySeconds, message, decision.errorClass,
       decision.terminalStatus, lease.id, owner],
   )
   await refreshLeadEnrichmentProjection(lease.lead_id, lease.job_id)
@@ -381,13 +396,7 @@ async function executeTopic(lease: TopicLease) {
     })
     return { subjectType, subjectId: subjectEntityByType.get(subjectType) || subjectId }
   }
-  if (topicRequiresConfirmedEntity(lease.topic_key) && ['ambiguous', 'missing'].includes(lease.entity_status)) {
-    await finishTopic(lease, {
-      status: 'review',
-      metrics: { reason: 'entity_confirmation_required', entityStatus: lease.entity_status, durationMs: Date.now() - topicStartedAt },
-    })
-    return
-  }
+  let effectiveEntityStatus = lease.entity_status
   if (isResearch) {
     const paperMeta = object(radarProfile.paperMeta)
     const sourceStatus = normalizePaperIdentity({
@@ -401,8 +410,16 @@ async function executeTopic(lease: TopicLease) {
       fullTextUrl: paperMeta.fullTextUrl,
       pdfUrl: paperMeta.pdfUrl,
     }).sourceStatus
-    await pool.query(`UPDATE ${jobsTable} SET entity_status=?,updated_at=NOW(3) WHERE id=?`, [sourceStatus === 'confirmed' ? 'confirmed' : 'ambiguous', lease.job_id])
-    if (lease.entity_id) await pool.query(`UPDATE ${entitiesTable} SET status=?,updated_at=NOW(3) WHERE id=?`, [sourceStatus === 'confirmed' ? 'confirmed' : 'ambiguous', lease.entity_id])
+    effectiveEntityStatus = sourceStatus === 'confirmed' ? 'confirmed' : 'ambiguous'
+    await pool.query(`UPDATE ${jobsTable} SET entity_status=?,updated_at=NOW(3) WHERE id=?`, [effectiveEntityStatus, lease.job_id])
+    if (lease.entity_id) await pool.query(`UPDATE ${entitiesTable} SET status=?,updated_at=NOW(3) WHERE id=?`, [effectiveEntityStatus, lease.entity_id])
+  }
+  if (topicRequiresConfirmedEntity(lease.topic_key) && ['ambiguous', 'missing'].includes(effectiveEntityStatus)) {
+    await finishTopic(lease, {
+      status: 'review',
+      metrics: { reason: 'entity_confirmation_required', entityStatus: effectiveEntityStatus, durationMs: Date.now() - topicStartedAt },
+    })
+    return
   }
   await recordTopicPhase(lease, 'fetching')
   const deterministic = isResearch ? paperDeterministicFacts(lease.topic_key, radarProfile) : []
@@ -473,7 +490,7 @@ async function executeTopic(lease: TopicLease) {
     || text(lead.company_name)
   let cacheHit = false
   await recordTopicPhase(lease, 'searching')
-  const cached = lease.entity_status === 'confirmed'
+  const cached = effectiveEntityStatus === 'confirmed'
     ? await readLeadTopicSearchCache<Awaited<ReturnType<typeof researchLeadTopicWithWeb>>>({
       topicKey: lease.topic_key, subjectName, entityType: researchEntityType,
       promptVersion: researchContract.promptVersion, queryPlan: researchContract.queries,
@@ -490,7 +507,7 @@ async function executeTopic(lease: TopicLease) {
       },
     })
     cacheHit = Boolean(cached)
-    if (!cacheHit && lease.entity_status === 'confirmed') {
+    if (!cacheHit && effectiveEntityStatus === 'confirmed') {
       await writeLeadTopicSearchCache({
         topicKey: lease.topic_key, subjectName, entityType: researchEntityType,
         promptVersion: researchContract.promptVersion, queryPlan: researchContract.queries,
@@ -500,7 +517,9 @@ async function executeTopic(lease: TopicLease) {
     gatewayCircuit.recordSuccess()
   } catch (error) {
     const errorClass = classifyLeadEnrichmentError(error)
-    gatewayCircuit.recordFailure(isLeadEnrichmentProviderBudgetError(error) ? 'billing' : errorClass)
+    if (!isLeadAgentRuntimeThrottleError(error)) {
+      gatewayCircuit.recordFailure(isLeadEnrichmentProviderBudgetError(error) ? 'billing' : errorClass)
+    }
     throw error
   }
   const sourceDocuments = new Map<string, Awaited<ReturnType<typeof fetchLeadSourceDocument>>>()
@@ -526,19 +545,17 @@ async function executeTopic(lease: TopicLease) {
   }
   await recordTopicPhase(lease, 'extracting')
   const subjectAliases = [lead.company_name, lead.name].map(text).filter(Boolean)
-  let subjectMismatchRejected = 0
-  const evidenceValidatedFacts = candidateFacts.flatMap((fact) => {
-    const sourceUrls = fact.sourceUrls.filter((sourceUrl) => {
+  let subjectMismatchObserved = 0
+  for (const fact of candidateFacts) {
+    for (const sourceUrl of fact.sourceUrls) {
       const document = sourceDocuments.get(sourceUrl)
-      const valid = Boolean(document
+      const exactMatch = Boolean(document && fact.quote
         && sourceDocumentContainsQuote(document.text, fact.quote)
         && leadSourceSupportsSubject({ topicKey: lease.topic_key, sourceText: document.text, subjectAliases }))
-      if (document && !valid && sourceDocumentContainsQuote(document.text, fact.quote)) subjectMismatchRejected += 1
-      return valid
-    })
-    return sourceUrls.length ? [{ ...fact, sourceUrls }] : []
-  })
-  const factSetContract = enforceLeadTopicFactSetContract(lease.topic_key, evidenceValidatedFacts)
+      if (document && !exactMatch) subjectMismatchObserved += 1
+    }
+  }
+  const factSetContract = enforceLeadTopicFactSetContract(lease.topic_key, candidateFacts)
   const groupValidatedFacts = factSetContract.facts
   const declaredConflictCounts = new Map<string, number>()
   for (const fact of groupValidatedFacts) if (fact.declaredConflictKey) {
@@ -558,14 +575,24 @@ async function executeTopic(lease: TopicLease) {
   let lowerPriorityRejected = 0
   for (const fact of factsForPersistence) {
     const evidence = fact.sourceUrls.map((sourceUrl) => {
-      const document = sourceDocuments.get(sourceUrl)!
-      const classification = classifyLeadWebEvidence({ sourceUrl: document.finalUrl })
+      const document = sourceDocuments.get(sourceUrl)
+      const exactMatch = Boolean(document && fact.quote
+        && sourceDocumentContainsQuote(document.text, fact.quote)
+        && leadSourceSupportsSubject({ topicKey: lease.topic_key, sourceText: document.text, subjectAliases }))
+      if (document && exactMatch) {
+        const classification = classifyLeadWebEvidence({ sourceUrl: document.finalUrl })
+        return {
+          sourceUrl: document.finalUrl, sourceDocumentId: document.id, sourceType: classification.sourceType,
+          contentType: document.contentType, quote: fact.quote,
+          title: document.title || web.sources.find((source) => source.url === sourceUrl)?.title || '',
+          publisher: document.publisher, pageHash: document.contentHash, publishedAt: document.publishedAt,
+          accessedAt: document.accessedAt, reliability: classification.evidenceLevel,
+        }
+      }
       return {
-        sourceUrl: document.finalUrl, sourceDocumentId: document.id, sourceType: classification.sourceType,
-        contentType: document.contentType, quote: fact.quote,
-        title: document.title || web.sources.find((source) => source.url === sourceUrl)?.title || '',
-        publisher: document.publisher, pageHash: document.contentHash, publishedAt: document.publishedAt,
-        accessedAt: document.accessedAt, reliability: classification.evidenceLevel,
+        sourceUrl, sourceDocumentId: null, sourceType: 'web_search', contentType: 'text/html', quote: fact.quote,
+        title: web.sources.find((source) => source.url === sourceUrl)?.title || '',
+        publisher: '', pageHash: '', publishedAt: null, accessedAt: new Date(), reliability: 'E3',
       }
     })
     const evidenceLevel = evidence.some((item) => item.reliability === 'E1') ? 'E1'
@@ -579,7 +606,7 @@ async function executeTopic(lease: TopicLease) {
         factKey: fact.factKey, instanceKey: fact.instanceKey, value: fact.value, unit: fact.unit, currency: fact.currency,
         periodStart: fact.period, periodEnd: fact.period, scope: fact.scope,
         conflictReason: fact.conflictReason,
-        evidenceLevel, verificationStatus: evidenceLevel === 'E3' ? 'unverified' : 'verified', evidence,
+        acceptanceMode: 'web_hit', evidenceLevel, verificationStatus: 'verified', evidence,
       })
     } catch {
       validationRejected += 1
@@ -590,9 +617,9 @@ async function executeTopic(lease: TopicLease) {
     if ((persisted.inserted || persisted.unchanged) && !persisted.rejectedLowerPriority) insertedFacts += 1
     if (fact.factKey === 'registry.registration_status') {
       const status = text(fact.value)
-      if (status) await pool.query(`UPDATE ${jobsTable} SET entity_status='confirmed',updated_at=NOW(3) WHERE id=?`, [lease.job_id])
-      if (status && lease.entity_id) await pool.query(`UPDATE ${entitiesTable} SET status='confirmed',updated_at=NOW(3) WHERE id=?`, [lease.entity_id])
-      if ((await excludeDeregisteredLeadFromPool({
+      if (status && evidenceLevel !== 'E3') await pool.query(`UPDATE ${jobsTable} SET entity_status='confirmed',updated_at=NOW(3) WHERE id=?`, [lease.job_id])
+      if (status && lease.entity_id && evidenceLevel !== 'E3') await pool.query(`UPDATE ${entitiesTable} SET status='confirmed',updated_at=NOW(3) WHERE id=?`, [lease.entity_id])
+      if (evidenceLevel !== 'E3' && (await excludeDeregisteredLeadFromPool({
         leadId: lease.lead_id, registrationStatus: status, sourceUrl: evidence[0]?.sourceUrl || '',
       })).excluded) return
     }
@@ -606,7 +633,7 @@ async function executeTopic(lease: TopicLease) {
   const status = hostDetected.conflicts.length || hostConflicts || candidateEvidenceFailed || explicitConflictEvidenceFailed ? 'review'
     : insertedFacts && (
       web.gaps.length > 0 || totalValidationRejected > 0 || lowerPriorityRejected > 0
-      || validatedFacts.length < candidateFactCount || sourceFetchFailures > 0
+      || validatedFacts.length < candidateFactCount
     ) ? 'partial'
       : insertedFacts ? 'completed'
         : 'missing'
@@ -624,7 +651,7 @@ async function executeTopic(lease: TopicLease) {
       factSetContractRejectedFactCount: factSetContract.rejectedFactCount,
       factSetContractReasons: factSetContract.reasons,
       evidenceRejectedFactCount: Math.max(0, acceptedCandidateFactCount - validatedFacts.length),
-      subjectMismatchRejected,
+      subjectMismatchObserved,
       persistenceRejectedFactCount: validationRejected,
       deterministicRejectedFactCount,
       lowerPriorityRejected,
@@ -658,6 +685,7 @@ async function runLease(lease: TopicLease) {
 function poll(): Promise<void> {
   if (!started || stopping) return Promise.resolve()
   if (!gatewayCircuit.canRequest()) return Promise.resolve()
+  if (Date.now() < localThrottleUntilMs) return Promise.resolve()
   if (polling) return polling
   const current = (async () => {
     await recoverExpiredLeadEnrichmentLeases()
@@ -708,6 +736,8 @@ export async function leadEnrichmentWorkerHealth() {
     return {
       name: 'mysql-lead-enrichment', ok: process.env.LEAD_ENRICHMENT_ENABLED === 'false' || (started && !stopping),
       inProcess: true, enabled: process.env.LEAD_ENRICHMENT_ENABLED !== 'false', owner, active: active.size,
+      triggerTypeFilter: triggerTypeFilter || null,
+      localThrottleUntil: localThrottleUntilMs > Date.now() ? new Date(localThrottleUntilMs).toISOString() : null,
       queued: Number(rows[0]?.queued || 0), running: Number(rows[0]?.running || 0),
       retrying: Number(rows[0]?.retrying || 0), deadLetter: Number(rows[0]?.dead_letter || 0),
       circuit: gatewayCircuit.snapshot(),

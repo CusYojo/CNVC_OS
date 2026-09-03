@@ -1,5 +1,10 @@
 import assert from 'node:assert/strict'
-import { LEAD_ENRICHMENT_TOPIC_KEYS, type LeadEnrichmentTopicKey } from '../services/leadEnrichmentContract.js'
+import {
+  LEAD_DETAIL_ENRICHMENT_TOPIC_KEYS,
+  leadDetailEnrichmentTopicApplies,
+  type LeadEntityType,
+  type LeadEnrichmentTopicKey,
+} from '../services/leadEnrichmentContract.js'
 import { fetchLeadSourceDocument, sourceDocumentContainsQuote } from '../services/leadSourceDocumentService.js'
 import { researchLeadTopicWithWeb } from '../services/leadTopicWebResearchService.js'
 import { pool } from '../db/client.js'
@@ -15,18 +20,19 @@ async function main() {
   assert.equal(process.env.ALLOW_REAL_WEB_ACCEPTANCE, '1', 'requires ALLOW_REAL_WEB_ACCEPTANCE=1 because this calls a paid model and the public web')
   const subjectName = option('subject').normalize('NFKC').trim()
   const entityType = option('entity-type', 'company').normalize('NFKC').trim()
+  assert(['company', 'project', 'team', 'research', 'unknown'].includes(entityType), '--entity-type must be company, project, team, research or unknown')
   assert(subjectName.length >= 2, '--subject=<public subject> is required')
   const requested = option('topics').split(',').map((value) => value.trim()).filter(Boolean)
   assert(requested.length > 0, '--topics=<topic[,topic]> is required; no paid topic runs by default')
-  const allowed = new Set<string>(LEAD_ENRICHMENT_TOPIC_KEYS)
-  assert(requested.every((topic) => allowed.has(topic)), `unknown topic; allowed: ${LEAD_ENRICHMENT_TOPIC_KEYS.join(',')}`)
+  const allowedTopics = LEAD_DETAIL_ENRICHMENT_TOPIC_KEYS.filter((topicKey) => leadDetailEnrichmentTopicApplies({
+    topicKey,
+    entityType: entityType as LeadEntityType,
+  }))
+  const allowed = new Set<string>(allowedTopics)
+  assert(requested.every((topic) => allowed.has(topic)), `unknown or excluded topic; allowed: ${allowedTopics.join(',')}`)
   if (requested.length > 3) {
     assert.equal(process.env.ALLOW_HIGH_COST_REAL_WEB_ACCEPTANCE, '1', 'more than three topics requires ALLOW_HIGH_COST_REAL_WEB_ACCEPTANCE=1')
   }
-  if (requested.length === LEAD_ENRICHMENT_TOPIC_KEYS.length) {
-    assert.equal(process.env.ALLOW_13_TOPIC_REAL_WEB_ACCEPTANCE, '1', 'all 13 topics require ALLOW_13_TOPIC_REAL_WEB_ACCEPTANCE=1')
-  }
-
   const reports = []
   for (const topicKey of requested as LeadEnrichmentTopicKey[]) {
     const startedAt = Date.now()
@@ -38,23 +44,29 @@ async function main() {
         documents.set(sourceUrl, await fetchLeadSourceDocument({ url: sourceUrl, persist: false }))
       } catch { fetchFailures += 1 }
     }
-    const validatedFacts = research.facts.flatMap((fact) => {
-      const evidenceUrls = fact.sourceUrls.filter((url) => {
+    const webHitFacts = research.facts.map((fact) => ({
+      factKey: fact.factKey,
+      value: fact.value,
+      sourceUrls: fact.sourceUrls,
+    }))
+    const exactQuoteValidatedFacts = research.facts.filter((fact) => {
+      if (!fact.quote) return false
+      return fact.sourceUrls.some((url) => {
         const document = documents.get(url)
         return Boolean(document && sourceDocumentContainsQuote(document.text, fact.quote))
       })
-      return evidenceUrls.length ? [{ factKey: fact.factKey, value: fact.value, evidenceUrls }] : []
     })
     reports.push({
       topicKey, promptVersion: research.promptVersion, model: research.model,
       candidateFacts: research.candidateFactCount,
       contractRejectedFacts: research.contractRejectedFactCount,
       modelAcceptedFacts: research.facts.length,
-      exactQuoteValidatedFacts: validatedFacts.length,
+      webHitFacts: webHitFacts.length,
+      exactQuoteValidatedFacts: exactQuoteValidatedFacts.length,
       gaps: research.gaps.length, conflicts: research.conflicts.length,
       searchSources: research.sources.length, fetchedDocuments: documents.size, fetchFailures,
       usage: research.usage, durationMs: Date.now() - startedAt,
-      facts: validatedFacts,
+      facts: webHitFacts,
     })
   }
   console.log(JSON.stringify({

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 
-export const LEAD_ENRICHMENT_SCHEMA_VERSION = 'lead-enrichment-v4-investment-profile' as const
+export const LEAD_ENRICHMENT_SCHEMA_VERSION = 'lead-enrichment-v8-web-hit' as const
 export const LEAD_ENRICHMENT_TOPIC_KEYS = [
   'basic_profile',
   'financing',
@@ -25,12 +25,9 @@ export type LeadEnrichmentTopicKey = typeof LEAD_ENRICHMENT_TOPIC_KEYS[number]
 export const LEAD_DETAIL_ENRICHMENT_TOPIC_KEYS = [
   'basic_profile',
   'financing',
+  'ownership',
   'team',
-  'customers_contracts',
   'products',
-  'technology_ip',
-  'industrialization',
-  'transaction_exit',
   'latest_developments',
 ] as const satisfies readonly LeadEnrichmentTopicKey[]
 
@@ -44,9 +41,48 @@ export function leadDetailEnrichmentTopicApplies(input: {
   // Research-only subjects expose technical and academic evidence, but cannot be
   // presented as a financed company, commercial customer or transaction target.
   if (input.entityType === 'research' && new Set<LeadEnrichmentTopicKey>([
-    'financing', 'customers_contracts', 'transaction_exit',
+    'financing', 'ownership', 'customers_contracts', 'competition', 'transaction_exit',
   ]).has(input.topicKey)) return false
   return true
+}
+
+export const LEAD_DEEP_ENRICHMENT_FORBIDDEN_FACT_KEY_PATTERNS = [
+  /^ownership\.(?:snapshot_date|shareholder_type|beneficial_owner)$/,
+  /^financing\.(?:investors|lead_investor|investor_role)$/,
+  /^team\.(?:institution_period|full_time_status|institution_relation|historical_employment)$/,
+  /^product\.(?:parameter|performance|use_case|matrix)$/,
+  /^customer\./,
+  /^contract\./,
+  /^order\./,
+  /^delivery\./,
+  /^cash_collection\./,
+  /^financial\./,
+  /^market\./,
+  /^policy\./,
+  /^technology\./,
+  /^competition\./,
+  /^transaction\./,
+  /^patent\./,
+  /^qualification\./,
+  /^certification\./,
+  /^production\./,
+  /^supply_chain$/,
+  /^research\.(?:trl|reproducibility|validation|spin_off)$/,
+  /^license\./,
+  /^ip\.owner$/,
+] as const
+
+export function leadDeepEnrichmentFactKeyAllowed(factKey: unknown) {
+  const normalized = typeof factKey === 'string' ? factKey.normalize('NFKC').trim() : ''
+  return Boolean(normalized)
+    && !LEAD_DEEP_ENRICHMENT_FORBIDDEN_FACT_KEY_PATTERNS.some((pattern) => pattern.test(normalized))
+}
+
+export function curateLeadResearchMetadata(input: unknown): Record<string, unknown> {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return {}
+  return Object.fromEntries(
+    Object.entries(input as Record<string, unknown>).filter(([key]) => key !== 'rights'),
+  )
 }
 
 export const LEAD_ENTITY_CONFIRMATION_REQUIRED_TOPICS = new Set<LeadEnrichmentTopicKey>([

@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { readFile } from 'node:fs/promises'
 import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import {
   canManageLeadPool,
   canReviewLeadInvestmentProfileConflicts,
   investmentProfileEvidenceSources,
+  leadDetailSectionVisibility,
   shouldRetainLeadConflictReview,
 } from '../../src/pages/LeadDetailPage.js'
 import { LeadRow } from '../../src/pages/SourcingPage.js'
@@ -56,14 +58,15 @@ function leadFixture(overrides: Partial<Lead> = {}): Lead {
   } as Lead
 }
 
-test('enterprise lead row renders the investment profile and truncation receipts without legacy summary', () => {
+test('enterprise lead row renders the approved six data columns without valuation or legacy summary', () => {
   const html = renderToStaticMarkup(React.createElement(LeadRow, { lead: leadFixture(), onOpen: () => {} }))
   for (const expected of [
     '星河设备', '薄膜沉积设备', 'PEALD 设备', '已实现：小批量', '深创投 · 重点机构', 'A轮', '1亿元',
-    '8亿元', '清华大学', '完成首批设备交付', '2026.09.01', '入池', '+1 个产品', '+1 项背景',
+    '清华大学', '完成首批设备交付', '2026.09.01', '入池', '+1 个产品', '+1 项背景',
   ]) assert.match(html, new RegExp(expected.replace(/[+]/g, '\\+')))
+  assert.equal((html.match(/role="cell"/g) ?? []).length, 6)
   assert.doesNotMatch(html, /THIS_LEGACY_SUMMARY_MUST_NOT_RENDER/)
-  assert.doesNotMatch(html, /一句话摘要|核心信息|推荐理由|宁德时代|某头部汽车客户|覆盖 6\/6|累计|1\.5亿元/)
+  assert.doesNotMatch(html, /一句话摘要|核心信息|推荐理由|宁德时代|某头部汽车客户|覆盖 6\/6|累计|1\.5亿元|8亿元/)
 })
 
 test('lead row no longer renders customer profile values after restoring latest updates', () => {
@@ -87,13 +90,44 @@ test('lead row no longer renders customer profile values after restoring latest 
 
 test('research lead row does not present company financing, valuation or customer values', () => {
   const html = renderToStaticMarkup(React.createElement(LeadRow, {
-    lead: leadFixture({ leadType: 'research', radarProfile: { channel: '论文' } }),
+    lead: {
+      ...leadFixture({ leadType: 'research' }),
+      radarProfile: {
+        channel: '论文', link: 'https://example.com/paper',
+        paperMeta: { projectName: '开源视觉模型', titleZh: '一种高效视觉基础模型', pdfUrl: 'https://example.com/paper.pdf', authors: ['张三', '李四'] },
+      },
+      researchProfile: {
+        schemaVersion: 'lead-research-profile-v1', projectionVersion: 'lead-research-profile-projection-v1',
+        subject: { leadId: 'lead-ui-1', type: 'research', name: '开源视觉模型', title: '一种高效视觉基础模型', providerIds: { arxivId: '2609.00001' } },
+        direction: { categories: ['计算机视觉'], researchProblem: '降低视觉模型训练和推理成本', methods: [] },
+        team: { authors: [{ name: '张三' }, { name: '李四' }], affiliations: ['示例大学'] },
+        progress: { publishedAt: '2026-09-01', codeUrl: 'https://github.com/example/model' },
+        valueAndTransfer: { applicationScenarios: [], partners: [] },
+        rights: { articleLicense: 'CC BY 4.0', patents: [] },
+        latestDevelopments: [{ occurredAt: '2026-09-01', title: '论文公开' }],
+        dataStatus: { status: 'partial', verifiedDimensions: 5, applicableDimensions: 6, conflictCount: 0, source: 'paper_metadata', updatedAt: '2026-09-02' },
+      },
+    },
     onOpen: () => {},
+    researchLayout: true,
   }))
-  assert.match(html, /科研项目/)
-  for (const hidden of ['1亿元', '1.5亿元', '8亿元', '宁德时代', '某头部汽车客户']) {
+  for (const expected of ['科研项目', '开源视觉模型', '一种高效视觉基础模型', '计算机视觉', '张三', '示例大学', '论文公开', '资料 5\/6']) {
+    assert.match(html, new RegExp(expected))
+  }
+  for (const hidden of ['1亿元', '1.5亿元', '8亿元', '宁德时代', '某头部汽车客户', 'CC BY 4.0', '>原文<', '>PDF<', '>代码<']) {
     assert.doesNotMatch(html, new RegExp(hidden))
   }
+})
+
+test('detail sections hide paper commercialization and hide investment profile for every channel', () => {
+  assert.deepEqual(
+    leadDetailSectionVisibility(leadFixture({ radarProfile: { channel: '论文' } })),
+    { productCommercialization: false, investmentProfile: false },
+  )
+  assert.deepEqual(
+    leadDetailSectionVisibility(leadFixture({ radarProfile: { channel: '36氪' } })),
+    { productCommercialization: true, investmentProfile: false },
+  )
 })
 
 test('evidence-backed industry column does not display legacy industry fields', () => {
@@ -127,10 +161,39 @@ test('lead row falls back to existing list data when an investment profile dimen
     },
   } as LeadListItem
   const html = renderToStaticMarkup(React.createElement(LeadRow, { lead, onOpen: () => {} }))
-  for (const expected of ['人工智能', '企业服务', '智能审计平台', 'SaaS', '示例创投', '清华系', '已融资', '5000万元', '5亿元']) {
+  for (const expected of ['人工智能', '企业服务', '智能审计平台', 'SaaS', '示例创投', '清华系', '已融资', '5000万元']) {
     assert.match(html, new RegExp(expected))
   }
-  assert.doesNotMatch(html, /已有资料|已有\/联网资料|联网候选|待核验|累计/)
+  assert.doesNotMatch(html, /已有资料|已有\/联网资料|联网候选|待核验|累计|5亿元/)
+})
+
+test('enterprise list and detail source follow the approved display-only information architecture', async () => {
+  const [listSource, detailSource] = await Promise.all([
+    readFile(new URL('../../src/pages/SourcingPage.tsx', import.meta.url), 'utf8'),
+    readFile(new URL('../../src/pages/LeadDetailPage.tsx', import.meta.url), 'utf8'),
+  ])
+  for (const heading of ['企业主体', '方向 / 产品', '团队 / 资本背景', '进展 / 阶段', '最新动态', '更新时间']) {
+    assert.match(listSource, new RegExp(`columnheader">${heading.replace('/', '\\/')}`))
+  }
+  assert.doesNotMatch(listSource, /columnheader">价值 \/ 转化/)
+  assert.match(listSource, /const effectiveLeadType = leadTypeValue \|\| 'company'/)
+  assert.match(listSource, /leadType: effectiveLeadType as LeadListQuery/)
+
+  const sectionTokens = [
+    { title: '项目简介', token: ": '项目简介'" },
+    { title: '关键概览', token: 'title="关键概览"' },
+    { title: '主体基础信息', token: ": '主体基础信息'" },
+    ...['产品与商业化', '融资历史', '核心团队', '最近动态', '相关来源']
+      .map((title) => ({ title, token: `title="${title}"` })),
+  ]
+  for (const item of sectionTokens) assert.ok(detailSource.includes(item.token), item.title)
+  for (let index = 1; index < sectionTokens.length; index += 1) {
+    assert.ok(detailSource.indexOf(sectionTokens[index - 1].token) < detailSource.indexOf(sectionTokens[index].token), `${sectionTokens[index - 1].title} should precede ${sectionTokens[index].title}`)
+  }
+  assert.doesNotMatch(detailSource, /<ReviewSection title="投资证据画像"/)
+  assert.doesNotMatch(detailSource, /投资初筛|title="数据质量"|加入关注|竞争格局|股权结构|核心团队与股权|sourceBoundShareholders|companyCompetitors/)
+  assert.match(detailSource, /'转为我的专属项目'/)
+  assert.match(detailSource, /<Trash2 \/>删除线索/)
 })
 
 test('lead row renders pending and undisclosed placeholders as a dash', () => {
@@ -152,6 +215,7 @@ test('lead row renders pending and undisclosed placeholders as a dash', () => {
   } as LeadListItem
   const html = renderToStaticMarkup(React.createElement(LeadRow, { lead, onOpen: () => {} }))
   assert.match(html, />-</)
+  assert.doesNotMatch(html, /<em>-<\/em>/)
   assert.doesNotMatch(html, /待核验|待核实|待确认|未披露/)
 })
 

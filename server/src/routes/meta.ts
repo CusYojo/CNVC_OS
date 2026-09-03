@@ -1084,6 +1084,7 @@ export async function runRadarSyncImport(input: RadarSyncInput = {}, actorUserId
               subjectType: entry.subjectType,
               subjectName: entry.subjectName,
               legalName: entry.legalName,
+              model: subjectReviews.get(entry.index)?.model,
               subjectEvidence: entry.evidence,
               subjectConfidence: entry.confidence,
               providedPublicIntel: radarCandidateResearchEvidence(entry.item, entry.subjectName),
