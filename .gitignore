@@ -44,6 +44,12 @@ cybernaut-assistant/workspace/
 docs/ai-assistant/验收产物/
 outputs/
 
+# Root planning and acceptance documents (keep locally, do not publish)
+/*计划*.md
+/*方案*.md
+/*验收*.md
+/*迭代*.md
+
 # Python cache
 __pycache__/
 
