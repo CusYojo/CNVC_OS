@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 
@@ -16,9 +17,45 @@ type ExceptionRow = {
   approver: string
 }
 
+type ChecklistStatusBaseline = {
+  schemaVersion: 1
+  checklistSha256: string
+  pendingDocumentSha256: string
+  coreItems: number
+  completed: number
+  pending: number
+  pendingP0: number
+  pendingP1: number
+  pendingWithoutResult: number
+  totalUnchecked: number
+  derivedPendingIds: number
+  deferredCoreItems: number
+  productionBlockingDeferredP0: number
+  productionBlockingDeferredSmoke: number
+  productionBlockingDeferrals: number
+  exceptionRows: number
+  unapprovedExceptions: number
+  pendingProductionSmoke: number
+  pendingFinalConfirmations: number
+}
+
 const root = process.cwd()
 const checklistPath = path.resolve(root, 'docs/迁移计划/JW底座与MySQL迁移验收清单.md')
 const pendingPath = path.resolve(root, 'docs/迁移计划/未完成迁移清单-20260811.md')
+const baselinePath = path.resolve(root, 'server/src/contracts/migrationChecklistStatusBaseline.json')
+
+function sha256(value: string): string {
+  return createHash('sha256').update(value).digest('hex')
+}
+
+async function readOptional(target: string): Promise<string | null> {
+  try {
+    return await readFile(target, 'utf8')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+    throw error
+  }
+}
 
 function parseChecklist(markdown: string): ChecklistRow[] {
   return markdown.split(/\r?\n/).flatMap((line) => {
@@ -67,10 +104,36 @@ function assert(condition: unknown, message: string): asserts condition {
 }
 
 async function main() {
-  const [checklist, pendingDocument] = await Promise.all([
-    readFile(checklistPath, 'utf8'),
-    readFile(pendingPath, 'utf8'),
+  const [baselineSource, checklist, pendingDocument] = await Promise.all([
+    readFile(baselinePath, 'utf8'),
+    readOptional(checklistPath),
+    readOptional(pendingPath),
   ])
+  const baseline = JSON.parse(baselineSource) as ChecklistStatusBaseline
+  assert(baseline.schemaVersion === 1, 'unsupported tracked checklist baseline schema')
+  assert(baseline.coreItems === baseline.completed + baseline.pending, 'tracked baseline core totals are inconsistent')
+  assert(baseline.pending === baseline.pendingP0 + baseline.pendingP1, 'tracked baseline pending priorities are inconsistent')
+  assert(baseline.totalUnchecked === baseline.pending + baseline.pendingProductionSmoke + baseline.pendingFinalConfirmations,
+    'tracked baseline unchecked total is inconsistent')
+  assert(baseline.productionBlockingDeferrals
+    === baseline.productionBlockingDeferredP0 + baseline.productionBlockingDeferredSmoke,
+  'tracked baseline production blocker total is inconsistent')
+  assert(baseline.derivedPendingIds === baseline.pending, 'tracked baseline derived pending IDs are incomplete')
+  assert(baseline.pendingWithoutResult === 0, 'tracked baseline contains pending rows without a result')
+  if (checklist === null || pendingDocument === null) {
+    assert(checklist === null && pendingDocument === null,
+      'migration checklist source documents must either both be present or both be omitted')
+    console.log(JSON.stringify({
+      ok: true,
+      ...baseline,
+      checklistSha256: undefined,
+      pendingDocumentSha256: undefined,
+      sourceDocumentsVerified: false,
+      sourceDocumentHashesExcludedFromOutput: true,
+      databaseWrites: 0,
+    }))
+    return
+  }
   const rows = parseChecklist(checklist)
   const pending = rows.filter((row) => !row.done)
   const deferred = rows.filter((row) => row.done && /^不适用（本批次延期/.test(row.result))
@@ -128,8 +191,7 @@ async function main() {
   assert(mismatchedStatuses.length === 0, `derived pending document has stale statuses for ${mismatchedStatuses.join(',')}`)
   assert(blank === 0, 'every pending core item must state current evidence or an explicit blocker')
 
-  console.log(JSON.stringify({
-    ok: true,
+  const status = {
     coreItems: rows.length,
     completed,
     pending: pending.length,
@@ -146,6 +208,18 @@ async function main() {
     unapprovedExceptions: unapprovedExceptions.length,
     pendingProductionSmoke,
     pendingFinalConfirmations,
+  }
+  assert(sha256(checklist) === baseline.checklistSha256, 'tracked checklist baseline does not match the local checklist')
+  assert(sha256(pendingDocument) === baseline.pendingDocumentSha256,
+    'tracked checklist baseline does not match the local pending document')
+  for (const [key, value] of Object.entries(status)) {
+    assert(baseline[key as keyof ChecklistStatusBaseline] === value, `tracked checklist baseline is stale: ${key}`)
+  }
+  console.log(JSON.stringify({
+    ok: true,
+    ...status,
+    sourceDocumentsVerified: true,
+    sourceDocumentHashesExcludedFromOutput: true,
     databaseWrites: 0,
   }))
 }

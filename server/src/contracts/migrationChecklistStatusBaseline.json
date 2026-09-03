@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "checklistSha256": "eb3ec01663e676ed91f382c31646c01ca072798238d4d226b0baf215f21a4c5e",
+  "pendingDocumentSha256": "7f0ba653b05c7434dd2dfcebcb692cb3c8bbe3a07a346448056f471b1f36be8d",
+  "coreItems": 297,
+  "completed": 232,
+  "pending": 65,
+  "pendingP0": 60,
+  "pendingP1": 5,
+  "pendingWithoutResult": 0,
+  "totalUnchecked": 84,
+  "derivedPendingIds": 65,
+  "deferredCoreItems": 27,
+  "productionBlockingDeferredP0": 6,
+  "productionBlockingDeferredSmoke": 2,
+  "productionBlockingDeferrals": 8,
+  "exceptionRows": 9,
+  "unapprovedExceptions": 9,
+  "pendingProductionSmoke": 6,
+  "pendingFinalConfirmations": 13
+}
