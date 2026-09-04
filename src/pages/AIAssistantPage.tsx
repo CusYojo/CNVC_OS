@@ -38,6 +38,7 @@ import {
 import { formatShanghaiDateTime, shanghaiDateKey } from '../lib/dateTime'
 import type { Project } from '../types'
 import { aiBusinessErrorMessage } from '../lib/aiBusinessError'
+import { fetchAiAssistantProjects } from '../services/projectListApi'
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const AI_UPLOAD_ACCEPT = '.pdf,.ppt,.pptx,.xlsx,.xls,.csv,.docx,.txt,.md,.markdown,.png,.jpg,.jpeg,.zip'
@@ -946,17 +947,24 @@ function Chat() {
   const [capabilitySaving, setCapabilitySaving] = useState(false)
   const [newSessionModelId, setNewSessionModelId] = useState('')
   const [creatingSession, setCreatingSession] = useState(false)
+  const [selectableProjects, setSelectableProjects] = useState<Project[]>([])
+  const [projectsLoading, setProjectsLoading] = useState(true)
+  const [projectsLoadError, setProjectsLoadError] = useState('')
 
-  const selectedProject = projects.find((project) => project.id === projectId) ?? projects[0]
+  const selectedProject = selectableProjects.find((project) => project.id === projectId)
+    ?? projects.find((project) => project.id === projectId)
+    ?? selectableProjects[0]
+    ?? projects[0]
   const currentSession = sessions.find((session) => session.agentId === convId)
   // 正式任务以会话绑定项目为准。会话加载完成后，头部、文件、快捷任务和
   // 产物区域必须使用同一个项目，不能继续展示 localStorage 中的旧选择。
   const currentProject = currentSession?.projectId
-    ? projects.find((project) => project.id === currentSession.projectId)
+    ? selectableProjects.find((project) => project.id === currentSession.projectId)
+      ?? projects.find((project) => project.id === currentSession.projectId)
     : currentSession
       ? undefined
       : selectedProject
-  const newSessionProject = projects.find((project) => project.id === newSessionProjectId)
+  const newSessionProject = selectableProjects.find((project) => project.id === newSessionProjectId)
   const projectFiles = files.filter((file) => file.projectId === currentProject?.id)
   const currentConversationRowId = currentSession?.rowId ?? ''
   const currentConversationRowIdRef = useRef(currentConversationRowId)
@@ -976,6 +984,24 @@ function Chat() {
       setAvailableModels(list)
       setNewSessionModelId((current) => current || list.find((model) => model.isDefault)?.id || list[0]?.id || '')
     }).catch(() => { if (active) setAvailableModels([]) })
+    return () => { active = false }
+  }, [])
+  useEffect(() => {
+    let active = true
+    setProjectsLoading(true)
+    setProjectsLoadError('')
+    void fetchAiAssistantProjects()
+      .then((list) => {
+        if (active) setSelectableProjects(list)
+      })
+      .catch((error: Error) => {
+        if (!active) return
+        setSelectableProjects([])
+        setProjectsLoadError(error.message || '可用项目加载失败')
+      })
+      .finally(() => {
+        if (active) setProjectsLoading(false)
+      })
     return () => { active = false }
   }, [])
   useEffect(() => {
@@ -1105,12 +1131,13 @@ function Chat() {
   useEffect(() => {
     if (
       newSessionOpen
-      && projects.length > 0
-      && !projects.some((project) => project.id === newSessionProjectId)
+      && !projectsLoading
+      && selectableProjects.length > 0
+      && !selectableProjects.some((project) => project.id === newSessionProjectId)
     ) {
-      setNewSessionProjectId(projects[0].id)
+      setNewSessionProjectId(selectableProjects[0].id)
     }
-  }, [newSessionOpen, newSessionProjectId, projects])
+  }, [newSessionOpen, newSessionProjectId, projectsLoading, selectableProjects])
   // 正式业务任务与 chat_conversations 主键关联。切换或刷新会话时从服务端恢复，
   // 不依赖旧服务的瞬时消息状态。
   useEffect(() => {
@@ -1748,7 +1775,7 @@ function Chat() {
             ?? mapped[0]
           activateSession(restoredSession)
         } else {
-          const preferredProject = projects.find((project) => project.id === initialProject) ?? projects[0]
+          const preferredProject = selectableProjects.find((project) => project.id === initialProject) ?? selectableProjects[0]
           setNewSessionProjectId(preferredProject?.id ?? '')
           setNewSessionOpen(true)
         }
@@ -1798,9 +1825,9 @@ function Chat() {
   const openNewSessionDialog = () => {
     const preferredProject = (
       currentSession?.projectId
-        ? projects.find((project) => project.id === currentSession.projectId)
+        ? selectableProjects.find((project) => project.id === currentSession.projectId)
         : currentProject
-    ) ?? projects[0]
+    ) ?? selectableProjects[0]
     setNewSessionProjectId(preferredProject?.id ?? '')
     setNewSessionModelId((current) => current || availableModels.find((model) => model.isDefault)?.id || availableModels[0]?.id || '')
     setNewSessionOpen(true)
@@ -1903,7 +1930,7 @@ function Chat() {
     <div className="fde-ai-page -m-6 flex h-[calc(100vh-64px)] min-h-[720px] overflow-hidden bg-white">
       <aside className="flex w-[250px] shrink-0 flex-col border-r border-slate-200 bg-slate-50/60">
         <div className="p-4">
-          <Button className="w-full" onClick={openNewSessionDialog} disabled={projects.length === 0}>
+          <Button className="w-full" onClick={openNewSessionDialog} disabled={projectsLoading || !!projectsLoadError || selectableProjects.length === 0}>
             <MessageSquarePlus className="h-4 w-4" />新建会话
           </Button>
         </div>
@@ -2102,7 +2129,7 @@ function Chat() {
           <AiErrorBoundary level="section" title="快捷任务区域显示异常" resetKey={String(sending)}>
             <AiQuickActions
               disabled={scope !== 'project' || !currentSession?.projectId}
-              projects={projects}
+              projects={selectableProjects}
               currentProjectId={scope === 'project' ? currentSession?.projectId ?? '' : ''}
               conversationId={currentConversationRowId}
               selectedActionId={selectedQuickSkill?.actionId}
@@ -2368,12 +2395,12 @@ function Chat() {
         footer={(
           <>
             <Button variant="secondary" onClick={() => setNewSessionOpen(false)} disabled={creatingSession}>
-              {projects.length === 0 ? '关闭' : '取消'}
+              {selectableProjects.length === 0 ? '关闭' : '取消'}
             </Button>
             <Button
               onClick={() => { void confirmNewSession() }}
               loading={creatingSession}
-              disabled={!newSessionProject}
+              disabled={projectsLoading || !!projectsLoadError || !newSessionProject}
             >
               创建会话
             </Button>
@@ -2387,12 +2414,14 @@ function Chat() {
           <div className="block">
             <span className="label">项目</span>
             <ProjectPicker
-              projects={projects}
+              projects={selectableProjects}
               value={newSessionProjectId}
               onChange={setNewSessionProjectId}
-              disabled={creatingSession}
+              disabled={creatingSession || projectsLoading || !!projectsLoadError}
             />
-            {projects.length === 0 && <p role="status" className="mt-2 text-xs text-amber-700">当前账号暂无可用项目，暂时不能创建项目会话。</p>}
+            {projectsLoading && <p role="status" className="mt-2 text-xs text-slate-500">正在加载可用项目…</p>}
+            {!projectsLoading && projectsLoadError && <p role="alert" className="mt-2 text-xs text-rose-700">可用项目加载失败：{projectsLoadError}</p>}
+            {!projectsLoading && !projectsLoadError && selectableProjects.length === 0 && <p role="status" className="mt-2 text-xs text-amber-700">当前账号暂无可用项目，暂时不能创建项目会话。</p>}
             <span className="mt-1 block text-xs text-slate-400">可按项目名称、公司名称、行业或阶段搜索。</span>
           </div>
           <label className="block">

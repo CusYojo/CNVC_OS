@@ -61,3 +61,15 @@ test('new AI project conversations enforce accessible active normal/key projects
   assert.match(access, /project\.classification !== 'key'/)
   assert.match(conversations, /requireAiAssistantProject\(userId, input\.projectId\)/)
 })
+
+test('AI assistant project pickers use the separately loaded authorized candidates', async () => {
+  const page = await readFile(new URL('../../src/pages/AIAssistantPage.tsx', import.meta.url), 'utf8')
+
+  assert.match(page, /import \{ fetchAiAssistantProjects \} from '\.\.\/services\/projectListApi'/)
+  assert.match(page, /const \[selectableProjects, setSelectableProjects\] = useState<Project\[\]>\(\[\]\)/)
+  assert.match(page, /const \[projectsLoading, setProjectsLoading\] = useState\(true\)/)
+  assert.match(page, /const \[projectsLoadError, setProjectsLoadError\] = useState\(''\)/)
+  assert.match(page, /fetchAiAssistantProjects\(\)/)
+  assert.match(page, /projects=\{selectableProjects\}/)
+  assert.match(page, /selectableProjects\.find\(\(project\) => project\.id === newSessionProjectId\)/)
+})
