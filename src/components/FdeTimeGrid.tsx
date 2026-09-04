@@ -23,7 +23,11 @@ export function FdeTimeGrid({ weekStart, items, onPropose, onOpen, onCreateAt, s
   const [preview, setPreview] = useState<Preview | null>(null)
   const days = Array.from({ length: showWeekends ? 7 : 5 }, (_, i) => shiftDate(weekStart, i))
   const gridColumns = `48px repeat(${days.length}, minmax(0, 1fr))`
-  const markers = items.filter(item => (item.allDay || !item.endsAt) && days.includes(timeLocal(new Date(item.startsAt)).slice(0, 10)))
+  const normalizedItems = useMemo(() => items.map(item => item.allDay || item.endsAt ? item : {
+    ...item,
+    endsAt: new Date(new Date(item.startsAt).getTime() + 60 * 60000).toISOString(),
+  }), [items])
+  const markers = normalizedItems.filter(item => item.allDay && days.includes(timeLocal(new Date(item.startsAt)).slice(0, 10)))
   function minute(value: string) {
     const local = timeLocal(new Date(value))
     return Number(local.slice(11, 13)) * 60 + Number(local.slice(14))
@@ -32,11 +36,11 @@ export function FdeTimeGrid({ weekStart, items, onPropose, onOpen, onCreateAt, s
     const value = Math.min(1185, Math.max(420, minutes))
     return `${day}T${String(Math.floor(value / 60)).padStart(2, '0')}:${String(value % 60).padStart(2, '0')}`
   }
-  const displayedItems = useMemo(() => items.map(row => {
+  const displayedItems = useMemo(() => normalizedItems.map(row => {
     if (!preview || row.key !== preview.key) return row
     const startsAt = timeInstant(localTime(preview.sourceDay, preview.start))
     return { ...row, startsAt: startsAt.toISOString(), endsAt: new Date(startsAt.getTime() + preview.duration * 60000).toISOString() }
-  }), [items, preview])
+  }), [normalizedItems, preview])
   const placements = useMemo(() => {
     const result = new Map<string, { lane: number; count: number; conflict: boolean }>()
     for (const day of days) {
@@ -121,8 +125,8 @@ export function FdeTimeGrid({ weekStart, items, onPropose, onOpen, onCreateAt, s
           <div>时间</div>
           {days.map((day, i) => <div className="border-l p-2" key={day}>{['周一', '周二', '周三', '周四', '周五', '周六', '周日'][i]}<br /><small>{Number(day.slice(8))}</small></div>)}
         </div>
-        {markers.length > 0 && <div className="grid border-b bg-slate-50" style={{ gridTemplateColumns: gridColumns }} aria-label="日期与截止标记">
-          <div className="p-1 text-xs text-slate-500">日期/<br />截止</div>
+        {markers.length > 0 && <div className="grid border-b bg-slate-50" style={{ gridTemplateColumns: gridColumns }} aria-label="全天事项">
+          <div className="grid place-items-center p-1 text-xs text-slate-500">全天</div>
           {days.map(day => <div key={day} className="min-w-0 space-y-1 border-l p-1">{markers.filter(item => timeLocal(new Date(item.startsAt)).slice(0, 10) === day).map(item => <p key={item.key} className="break-words rounded border border-[#a8c5c3] bg-[#e7f1ef] p-1 text-xs text-[#315f68]">{item.title}{!item.allDay && ` · ${timeLocal(new Date(item.startsAt)).slice(11)}`}</p>)}</div>)}
         </div>}
         <div className="grid" style={{ gridTemplateColumns: gridColumns }}>
@@ -142,7 +146,7 @@ export function FdeTimeGrid({ weekStart, items, onPropose, onOpen, onCreateAt, s
               event.preventDefault()
               let data: { key: string; resize: boolean }
               try { data = JSON.parse(event.dataTransfer.getData('application/x-fde-time')) } catch { return }
-              const row = items.find(value => value.key === data.key)
+              const row = normalizedItems.find(value => value.key === data.key)
               if (!row?.editable || !row.endsAt) return
               const target = 420 + Math.round((event.clientY - event.currentTarget.getBoundingClientRect().top) / (hourPx / 4)) * 15
               const duration = (Date.parse(row.endsAt) - Date.parse(row.startsAt)) / 60000
@@ -164,8 +168,8 @@ export function FdeTimeGrid({ weekStart, items, onPropose, onOpen, onCreateAt, s
       </div>
     </div>
     <div className="fde-collab-time-mobile">{days.map((day, index) => {
-      const rows = items.filter(item => { const start = timeLocal(new Date(item.startsAt)); return item.endsAt ? start.slice(0, 10) <= day && timeLocal(new Date(item.endsAt)) > `${day}T00:00` : start.slice(0, 10) === day })
-      return <section key={day}><header><strong>{['周一', '周二', '周三', '周四', '周五', '周六', '周日'][index]} · {Number(day.slice(8))}</strong><span><small>{rows.length} 项</small>{onCreateAt&&<button type="button" aria-label={`在${day}新增任务`} onClick={()=>onCreateAt(`${day}T09:00`)}>＋ 新增</button>}</span></header><div>{rows.length ? rows.map(row => <button key={row.key} onClick={() => onOpen?.(row.key)}><time>{row.allDay ? '全天' : timeLocal(new Date(row.startsAt)).slice(11)}</time><span><strong>{row.title}</strong><small>{row.source === 'task' ? row.projectName || '个人任务' : !row.endsAt ? '日期 / 截止' : row.editable ? '可调整任务' : '业务任务'}</small></span></button>) : <p>暂无安排</p>}</div></section>
+      const rows = normalizedItems.filter(item => { const start = timeLocal(new Date(item.startsAt)); return item.endsAt ? start.slice(0, 10) <= day && timeLocal(new Date(item.endsAt)) > `${day}T00:00` : start.slice(0, 10) === day })
+      return <section key={day}><header><strong>{['周一', '周二', '周三', '周四', '周五', '周六', '周日'][index]} · {Number(day.slice(8))}</strong><span><small>{rows.length} 项</small>{onCreateAt&&<button type="button" aria-label={`在${day}新增任务`} onClick={()=>onCreateAt(`${day}T09:00`)}>＋ 新增</button>}</span></header><div>{rows.length ? rows.map(row => <button key={row.key} onClick={() => onOpen?.(row.key)}><time>{row.allDay ? '全天' : timeLocal(new Date(row.startsAt)).slice(11)}</time><span><strong>{row.title}</strong><small>{row.source === 'task' ? row.projectName || '个人任务' : row.allDay ? '全天事项' : row.editable ? '可调整任务' : '业务事项'}</small></span></button>) : <p>暂无安排</p>}</div></section>
     })}</div>
   </>
 }

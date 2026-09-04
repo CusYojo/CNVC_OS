@@ -32,8 +32,21 @@ import { Drawer, EmptyState, Modal, SearchInput } from '../components/ui'
 import { getSystemWorkspace, systemWorkspaces } from '../lib/systemWorkspaces'
 import './fde-shell.css'
 import { isAiPlatformAdminRole, isSystemAdminRole } from '../../server/src/contracts/adminRoleContract'
-import { apiPost } from '../lib/api'
+import { apiGet, apiPost } from '../lib/api'
 import { useToast } from '../components/Toast'
+import type { Meeting, Todo } from '../types'
+
+type MessageItem = {
+  id: string
+  kind: string
+  title: string
+  detail: string
+  path: string
+  priority: number
+  readPath?: string
+  meetingId?: string
+  todoId?: string
+}
 
 const primaryNav = [
   { to: '/', label: '工作台', icon: Gauge },
@@ -104,16 +117,17 @@ export function AppLayout() {
   const approvalRequests = useAppStore((state) => state.approvalRequests)
   const risks = useAppStore((state) => state.risks)
   const notifications = useAppStore((state) => state.notifications)
-  const approvalMessages = approvalRequests.filter(request => {
+  const approvalMessages: MessageItem[] = approvalRequests.filter(request => {
     if (request.status !== '审批中') return false
     const currentNode = request.nodes.find(node => node.id === request.currentNodeId) ?? request.nodes.find(node => ['待审批', '会签中'].includes(node.status))
     return currentNode?.approverUserIds?.includes(currentUser.id)
   }).map(request => ({ id: `approval:${request.id}`, kind: '审批', title: request.title, detail: `${request.projectName} · ${request.currentNodeName}`, path: `/workflow?view=project&project=${request.projectId}&request=${request.id}`, priority: request.priority === '紧急' ? 0 : 1 }))
-  const warningMessages = risks.filter(risk => risk.level === '高' && !['已关闭', '误报'].includes(risk.status)).map(risk => ({ id: `risk:${risk.id}`, kind: '预警', title: risk.type, detail: `${risk.projectName} · ${risk.description}`, path: `/risks?project=${risk.projectId}`, priority: 0 }))
-  const collaborationMessages = todos.filter(item => item.ownerUserId === currentUser.id && item.type === '通知' && !['已完成', '已关闭', '已取消', '已归档'].includes(item.status)).map(item => ({ id: `interaction:${item.id}`, kind: '协作', title: item.title, detail: item.projectName || '协作消息', path: item.projectId ? `/projects/${item.projectId}?tab=collaboration` : '/collaboration', priority: item.priority === '高' ? 0 : 2 }))
-  const meetingMessages = meetings.filter(item => item.unreadNoticeId).map(item => ({ id: `meeting:${item.id}`, kind: '会议', title: item.title, detail: `${item.projectName} · ${item.meetingTime.slice(0, 16).replace('T', ' ')}`, path: `/meetings?meeting=${item.id}`, priority: 1 }))
-  const storedMessages = notifications.filter(item => !item.isRead).map(item => ({ id: `notice:${item.id}`, kind: item.type || '消息', title: item.title, detail: item.content, path: '/collaboration', priority: 2 }))
-  const messageItems = [...approvalMessages, ...warningMessages, ...meetingMessages, ...collaborationMessages, ...storedMessages].sort((left, right) => left.priority - right.priority)
+  const warningMessages: MessageItem[] = risks.filter(risk => risk.level === '高' && !['已关闭', '误报'].includes(risk.status)).map(risk => ({ id: `risk:${risk.id}`, kind: '预警', title: risk.type, detail: `${risk.projectName} · ${risk.description}`, path: `/risks?project=${risk.projectId}`, priority: 0 }))
+  const directiveMessages: MessageItem[] = todos.filter(item => item.directiveId && item.directiveNoticeId && !['已完成', '已关闭', '已取消', '已归档'].includes(item.status)).map(item => ({ id: `directive:${item.directiveNoticeId}`, kind: '批示', title: item.title, detail: `${item.projectName || '项目'} · ${item.owner || '待接办'}`, path: item.projectId ? `/projects/${item.projectId}?tab=collaboration&directive=${item.directiveId}` : '/collaboration', priority: item.priority === '高' ? 0 : 1, readPath: `/projects/${item.projectId}/directive-notices/${item.directiveNoticeId}/read`, todoId: item.id }))
+  const collaborationMessages: MessageItem[] = todos.filter(item => item.ownerUserId === currentUser.id && item.type === '通知' && !['已完成', '已关闭', '已取消', '已归档'].includes(item.status)).map(item => ({ id: `interaction:${item.id}`, kind: '协作', title: item.title, detail: item.projectName || '协作消息', path: item.projectId ? `/projects/${item.projectId}?tab=collaboration` : '/collaboration', priority: item.priority === '高' ? 0 : 2 }))
+  const meetingMessages: MessageItem[] = meetings.filter(item => item.unreadNoticeId).map(item => ({ id: `meeting:${item.id}`, kind: '会议', title: item.title, detail: `${item.projectName} · ${item.meetingTime.slice(0, 16).replace('T', ' ')}`, path: `/meetings?meeting=${item.id}`, priority: 1, readPath: `/meetings/${item.id}/notices/${item.unreadNoticeId}/read`, meetingId: item.id }))
+  const storedMessages: MessageItem[] = notifications.filter(item => !item.isRead).map(item => ({ id: `notice:${item.id}`, kind: item.type || '消息', title: item.title, detail: item.content, path: '/collaboration', priority: 2 }))
+  const messageItems = [...approvalMessages, ...warningMessages, ...directiveMessages, ...meetingMessages, ...collaborationMessages, ...storedMessages].sort((left, right) => left.priority - right.priority)
   const pageTitle = location.pathname.startsWith('/system') ? '系统管理'
     : location.pathname === '/committee' || location.pathname === '/meetings' ? '任务与日历'
       : location.pathname === '/responsibility' ? '知识库'
@@ -122,6 +136,12 @@ export function AppLayout() {
   const matchedProjects = query ? projects.filter(item => item.lifecycle !== 'deleted' && `${item.name} ${item.companyName}`.toLowerCase().includes(query)).slice(0, 8) : []
   const matchedFiles = query ? files.filter(item => item.name.toLowerCase().includes(query)).slice(0, 8) : []
   const openResult = (path: string) => { setShowSearch(false); setShowNotifications(false); setShowProfile(false); navigate(path) }
+  const openMessage = (item: MessageItem) => {
+    if (item.meetingId) useAppStore.setState((state) => ({ meetings: state.meetings.map(meeting => meeting.id === item.meetingId ? { ...meeting, unreadNoticeId: null } : meeting) }))
+    if (item.todoId) useAppStore.setState((state) => ({ todos: state.todos.map(todo => todo.id === item.todoId ? { ...todo, directiveNoticeId: null } : todo) }))
+    if (item.readPath) void apiPost(item.readPath, {}).catch(() => {})
+    openResult(item.path)
+  }
   const changePassword = async () => {
     if (!passwordForm.currentPassword || !passwordForm.newPassword) return showToast('请填写当前密码和新密码', 'error')
     if (passwordForm.newPassword !== passwordForm.confirmPassword) return showToast('两次输入的新密码不一致', 'error')
@@ -145,6 +165,30 @@ export function AppLayout() {
     window.addEventListener('keydown', keydown)
     return () => window.removeEventListener('keydown', keydown)
   }, [])
+  useEffect(() => {
+    if (!currentUser.id) return
+    let active = true
+    const refreshMessages = async () => {
+      const [meetingResult, todoResult] = await Promise.allSettled([
+        apiGet<{ list: Meeting[] }>('/meetings'),
+        apiGet<{ list: Todo[] }>('/todos'),
+      ])
+      if (!active) return
+      useAppStore.setState((state) => ({
+        meetings: meetingResult.status === 'fulfilled' ? meetingResult.value.list : state.meetings,
+        todos: todoResult.status === 'fulfilled' ? todoResult.value.list : state.todos,
+      }))
+    }
+    const onFocus = () => { void refreshMessages() }
+    void refreshMessages()
+    const timer = window.setInterval(refreshMessages, 30_000)
+    window.addEventListener('focus', onFocus)
+    return () => {
+      active = false
+      window.clearInterval(timer)
+      window.removeEventListener('focus', onFocus)
+    }
+  }, [currentUser.id])
 
   return (
     <div className={`fde-app fde-shell${navigationCollapsed ? ' is-collapsed' : ''}`} data-theme={dark ? 'dark' : 'light'}>
@@ -218,7 +262,7 @@ export function AppLayout() {
         </div>
       </Modal>
       <Drawer open={showNotifications} onClose={() => setShowNotifications(false)} title="消息与预警">
-        <div className="fde-search-results">{messageItems.map(item => <button key={item.id} onClick={() => openResult(item.path)}>{item.kind === '审批' ? <ClipboardCheck /> : item.kind === '预警' ? <AlertTriangle /> : <MessagesSquare />}<span><strong>{item.title}</strong><small><b>{item.kind}</b> · {item.detail}</small></span><span>→</span></button>)}</div>
+        <div className="fde-search-results">{messageItems.map(item => <button key={item.id} onClick={() => openMessage(item)}>{item.kind === '审批' ? <ClipboardCheck /> : item.kind === '预警' ? <AlertTriangle /> : <MessagesSquare />}<span><strong>{item.title}</strong><small><b>{item.kind}</b> · {item.detail}</small></span><span>→</span></button>)}</div>
         {!messageItems.length && <EmptyState title="暂无新消息" description="领导批示、会议提醒、待处理审批、协作互动和项目预警会显示在这里。" />}
       </Drawer>
       <Modal open={showPassword} onClose={() => { if (!passwordBusy) setShowPassword(false) }} title="修改登录密码" footer={<><button className="fde-ui-button h-10 rounded-lg border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700" disabled={passwordBusy} onClick={() => setShowPassword(false)}>取消</button><button className="fde-ui-button h-10 rounded-lg border border-brand-600 bg-brand-600 px-4 text-sm font-medium text-white disabled:opacity-50" disabled={passwordBusy} onClick={() => void changePassword()}>{passwordBusy ? '正在修改…' : '确认修改'}</button></>}>

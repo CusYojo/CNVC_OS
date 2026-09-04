@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
-import { Check, Eye, Pencil, Plus, Trash2, X } from 'lucide-react'
+import { Check, Eye, NotebookPen, Pencil, Plus, Trash2, X } from 'lucide-react'
 import { api, apiDelete, apiGet, apiPatch, apiPost } from '../lib/api'
 import { useAuthStore } from '../store/useAuthStore'
 import { formatShanghaiDate } from '../lib/dateTime'
@@ -247,7 +247,7 @@ export function DashboardPage() {
     return { id: project.id, title: project.name, detail, icon: project.name.slice(0, 1), to: `/projects/${project.id}`, status: overdue ? '已逾期' : project.health }
   })
   return <div className="fde-dashboard page-wrap role-workbench" data-view={current.view}>
-    {current.view === 'admin' ? <div className="page-heading"><div><h1>系统工作台</h1></div><div className="page-actions"><span className="view-chip secure">配置权限视角</span><Link className="button primary" to="/system">进入系统管理</Link></div></div> : <div className="workbench-heading"><div><div className="eyebrow-row"><span className="view-chip">{current.perspective}</span><span>{formatShanghaiDate(`${current.today}T12:00:00+08:00`, { year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' })}</span></div><h1>{roleHeading(current)}</h1></div><div className="page-actions"><span className="update-note">更新于 {formatShanghaiDate(current.asOf, { hour: '2-digit', minute: '2-digit' })}</span>{action.length > 0 && <Link className="button primary" to={action[1]}>{action[0]}</Link>}</div></div>}
+    {current.view === 'admin' ? <div className="page-heading"><div><h1>系统工作台</h1></div><div className="page-actions"><Link className="button dashboard-note-shortcut" to="/knowledge?view=notes" title="进入个人笔记"><NotebookPen size={16}/><span>个人笔记</span></Link><span className="view-chip secure">配置权限视角</span><Link className="button primary" to="/system">进入系统管理</Link></div></div> : <div className="workbench-heading"><div><div className="eyebrow-row"><span className="view-chip">{current.perspective}</span><span>{formatShanghaiDate(`${current.today}T12:00:00+08:00`, { year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' })}</span></div><h1>{roleHeading(current)}</h1></div><div className="page-actions"><Link className="button dashboard-note-shortcut" to="/knowledge?view=notes" title="进入个人笔记"><NotebookPen size={16}/><span>个人笔记</span></Link><span className="update-note">更新于 {formatShanghaiDate(current.asOf, { hour: '2-digit', minute: '2-digit' })}</span>{action.length > 0 && <Link className="button primary" to={action[1]}>{action[0]}</Link>}</div></div>}
     {current.warnings.length > 0 && <div className="workbench-warning" role="alert"><span>{current.warnings.join(' ')}</span><button className="button small" onClick={() => setRevision(n => n + 1)}>重新核对</button></div>}
     {current.view !== 'admin' && current.view !== 'unassigned' && (calendarHidden
       ? <button type="button" className="dashboard-calendar-reveal" onClick={showCalendar}><Eye size={16}/><span>显示任务时间轴</span></button>

@@ -160,10 +160,10 @@ export function FdeWorkflowPanel({ project, files, mode = 'workflow', onChanged,
         const expandedDate = data.timeline.find(v => v.stage === expanded.stage)
         const expandedBindings = data.materials.filter(b => b.stage === expanded.stage)
         const prevStage = expandedIndex > 0 ? data.stages[expandedIndex - 1].stage : null
-        return <Card className="mt-4 rounded-xl border border-slate-200 bg-white p-5">
-          <div className="mb-3 flex items-center gap-2"><span className={`grid h-6 w-6 place-items-center rounded-full text-xs font-bold ${expandedDone ? 'bg-emerald-500 text-white' : expandedCurrent ? 'bg-blue-500 text-white' : 'bg-slate-200 text-slate-500'}`}>{expandedDone ? '✓' : expandedIndex + 1}</span><h2 className="text-sm font-semibold">阶段详情 · {expanded.stage}</h2><span className="text-xs text-slate-400">{expandedDone ? '已完成' : expandedCurrent ? '进行中' : '待开始'}</span></div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
+        return <Card className="fde-detail-stage-overview">
+          <div className="fde-detail-stage-overview-head"><span className={`grid h-6 w-6 place-items-center rounded-full text-xs font-bold ${expandedDone ? 'bg-emerald-500 text-white' : expandedCurrent ? 'bg-blue-500 text-white' : 'bg-slate-200 text-slate-500'}`}>{expandedDone ? '✓' : expandedIndex + 1}</span><h2>阶段详情 · {expanded.stage}</h2><span>{expandedDone ? '已完成' : expandedCurrent ? '进行中' : '待开始'}</span></div>
+          <div className="fde-detail-stage-overview-grid">
+            <div className="fde-detail-stage-fact">
               <h3 className="mb-2 text-xs font-semibold text-slate-500">进入条件</h3>
               <ul className="space-y-1 text-sm text-slate-700">
                 {prevStage ? <li>· 完成「{prevStage}」审批</li> : <li>· 由项目池或线索转入</li>}
@@ -171,19 +171,19 @@ export function FdeWorkflowPanel({ project, files, mode = 'workflow', onChanged,
                 {expanded.stage === '尽调计划审核' && <li>· 完整有效的倒排计划</li>}
               </ul>
             </div>
-            <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
+            <div className="fde-detail-stage-fact">
               <h3 className="mb-2 text-xs font-semibold text-slate-500">必备材料</h3>
               {expandedMaterials.length ? <ul className="space-y-1 text-sm">{expandedMaterials.map(requirement => { const satisfied = materialIsSatisfied(expandedBindings.filter(b => b.requirementKey === requirement.key), files); return <li key={requirement.key} className={satisfied ? 'text-slate-700' : 'text-amber-700'}>{satisfied ? '✓' : '○'} {requirement.label}</li> })}</ul> : <p className="text-sm text-slate-400">无独立文件要求</p>}
             </div>
-            <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
+            <div className="fde-detail-stage-fact">
               <h3 className="mb-2 text-xs font-semibold text-slate-500">负责人</h3>
               {expandedApprovals.length ? <div className="flex flex-wrap gap-1">{expandedApprovals.map(approval => <span key={approval.duty} className="rounded bg-brand-50 px-2 py-1 text-xs text-brand-700">{approval.name}{approval.approverNames?.length ? ` · ${approval.approverNames.join('、')}` : ' · 未配置'}</span>)}</div> : <p className="text-sm text-slate-400">无审批节点</p>}
             </div>
-            <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
+            <div className="fde-detail-stage-fact">
               <h3 className="mb-2 text-xs font-semibold text-slate-500">计划</h3>
               <p className="text-sm text-slate-700">{expandedDate?.actualDate ? `已于 ${shortProjectDate(expandedDate.actualDate)} 通过` : `计划 ${shortProjectDate(expandedDate?.date)}`}</p>
             </div>
-            <div className="rounded-lg border border-slate-100 bg-slate-50 p-3 sm:col-span-2">
+            <div className="fde-detail-stage-fact fde-detail-stage-fact-wide">
               <h3 className="mb-2 text-xs font-semibold text-slate-500">完成标准</h3>
               <p className="text-sm text-slate-700">{expandedApprovals.length ? expandedApprovals.map(approval => `${approval.name}（${approval.mode}）`).join(' → ') + ' 通过' : '完成阶段动作'}</p>
             </div>

@@ -673,6 +673,20 @@
       "when": 1791791343000,
       "tag": "0095_add_lead_research_profile_projections",
       "breakpoints": true
+    },
+    {
+      "idx": 96,
+      "version": "5",
+      "when": 1791877743000,
+      "tag": "0096_allow_legacy_meeting_lifecycle",
+      "breakpoints": true
+    },
+    {
+      "idx": 97,
+      "version": "5",
+      "when": 1791964143000,
+      "tag": "0097_add_personal_notes",
+      "breakpoints": true
     }
   ]
 }

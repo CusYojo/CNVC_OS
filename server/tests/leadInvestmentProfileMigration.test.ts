@@ -15,7 +15,7 @@ const read = (path: string) => readFileSync(resolve(root, path), 'utf8')
 
 test('0092 profile base through 0095 research projection migrations stay aligned', () => {
   const journal = JSON.parse(read('drizzle/meta/_journal.json')) as { entries: Array<{ idx: number; tag: string }> }
-  assert.deepEqual(journal.entries.at(-1), {
+  assert.deepEqual(journal.entries.find((entry) => entry.idx === 95), {
     idx: 95, version: '5', when: 1791791343000, tag: '0095_add_lead_research_profile_projections', breakpoints: true,
   })
   const migration = read('drizzle/0092_add_lead_investment_profiles.sql')

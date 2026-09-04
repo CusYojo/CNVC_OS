@@ -19,10 +19,11 @@ test('calendar-created personal tasks require a valid 15-minute time range', () 
 })
 
 test('workbench and task center share the editable calendar interaction', async () => {
-  const [dashboard, collaboration, panel, grid, routes, service] = await Promise.all([
+  const [dashboard, collaboration, panel, grid, routes, service, meetings, shell] = await Promise.all([
     source('../../src/pages/DashboardPage.tsx'), source('../../src/pages/CollaborationPage.tsx'),
     source('../../src/components/FdeCalendarPanel.tsx'), source('../../src/components/FdeTimeGrid.tsx'),
     source('../src/routes/fdeTime.ts'), source('../src/services/fdeCalendarService.ts'),
+    source('../src/services/meetingService.ts'), source('../../src/layout/AppLayout.tsx'),
   ])
   assert.match(dashboard, /<FdeCalendarPanel compact/)
   assert.match(collaboration, /<FdeCalendarPanel/)
@@ -35,4 +36,11 @@ test('workbench and task center share the editable calendar interaction', async 
   assert.match(routes, /calendarRouter\.post\('\/tasks\/:id\/cancel'/)
   assert.match(service, /createCalendarTask/)
   assert.match(service, /cancelPersonalCalendarTask/)
+  assert.match(service, /const meetingEnd = row\.endsAt \?\? new Date\(row\.startedAt\.getTime\(\) \+ 60 \* 60000\)/)
+  assert.match(grid, /const normalizedItems = useMemo/)
+  assert.doesNotMatch(grid, />\s*日期\/<br \/>截止|'日期 \/ 截止'/)
+  assert.match(meetings, /inArray\(meetings\.workflowStatus, \['scheduled', 'completed'\]\)/)
+  assert.match(meetings, /directiveNoticeId: directiveNotices\.id/)
+  assert.match(shell, /const directiveMessages/)
+  assert.match(shell, /window\.setInterval\(refreshMessages, 30_000\)/)
 })

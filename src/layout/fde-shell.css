@@ -85,7 +85,7 @@ body:has(.fde-app) { min-width: 320px; }
 .fde-icon-button svg, .fde-global-search svg, .fde-quick-create svg { width: 18px; height: 18px; flex-shrink: 0; stroke-width: 1.8; }
 .fde-quick-create { display: inline-flex; height: 40px; align-items: center; gap: 6px; padding: 0 16px; border-radius: 8px; color: #fff; background: var(--brand-strong); font-size: 13px; font-weight: 650; box-shadow: none; }
 .fde-notification-button { position: relative; }
-.fde-notification-button i { position: absolute; top: -5px; right: -5px; display: grid; min-width: 16px; height: 16px; padding: 0 2px; place-items: center; border: 2px solid var(--surface); border-radius: 50%; color: #fff; background: var(--danger); font-size: 12px; font-style: normal; }
+.fde-notification-button i { position: absolute; top: 0; right: 0; transform: translate(38%, -38%); display: inline-flex; min-width: 20px; height: 20px; padding: 0 5px; align-items: center; justify-content: center; border: 2px solid var(--surface); border-radius: 999px; color: #fff; background: var(--danger); font-size: 11px; font-style: normal; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1; }
 .fde-top-profile { display: flex; align-items: center; gap: 8px; padding: 0 3px; text-align: left; }
 .fde-avatar { display: grid; width: 36px; height: 36px; flex: 0 0 36px; place-items: center; border-radius: 50%; color: #fff; background: linear-gradient(145deg,#517c81,#315c64); font-size: 13px; font-weight: 700; }
 .fde-top-profile-copy { display: flex; max-width: 125px; flex-direction: column; line-height: 1.3; }

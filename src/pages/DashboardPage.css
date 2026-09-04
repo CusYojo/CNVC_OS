@@ -65,6 +65,8 @@
 .fde-dashboard .page-heading h1 { font-size: 24px; line-height: 1.3; font-weight: 700; letter-spacing: -.02em; }
 .fde-dashboard .page-heading p { margin-top: 6px; font-size: 13px; line-height: 1.55; }
 .fde-dashboard .page-actions { gap: 10px; }
+.fde-dashboard .dashboard-note-shortcut { color: var(--brand-strong); border-color: color-mix(in srgb, var(--brand) 18%, var(--line)); background: var(--brand-soft); }
+.fde-dashboard .dashboard-note-shortcut:hover { color: var(--brand-strong); border-color: color-mix(in srgb, var(--brand) 34%, var(--line)); background: color-mix(in srgb, var(--brand-soft) 78%, #fff); }
 .fde-dashboard .button {
   min-height: 40px;
   padding: 0 15px;

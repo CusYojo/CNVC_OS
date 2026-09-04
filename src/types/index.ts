@@ -99,6 +99,8 @@ export interface Todo {
   status: TaskStatus
   type: '待办' | '流程' | '审批' | '通知' | '会议' | '材料' | '风险' | '投后'
   meetingId?: string | null
+  directiveId?: string | null
+  directiveNoticeId?: string | null
 }
 
 export interface Meeting {

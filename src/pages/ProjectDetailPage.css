@@ -39,12 +39,12 @@ body:has(.fde-project-detail) { min-width: 320px; }
 .fde-project-detail .fde-detail-inline-actions > span strong { margin-left: 5px; color: var(--ink); font-size: 12px; }
 .fde-project-detail .fde-detail-timeline { display: grid; grid-template-columns: repeat(var(--stage-count, 8), minmax(0, 1fr)); width: 100%; gap: 0; padding: 23px 12px 25px; overflow: hidden; }
 .fde-project-detail .fde-detail-stage { position: relative; isolation: isolate; display: grid; min-width: 0; min-height: 116px; padding: 0 5px; grid-template-rows: 38px minmax(49px, auto) 24px; gap: 5px; align-items: start; text-align: center; }
-.fde-project-detail .fde-detail-stage::after { content: ''; position: absolute; left: 50%; right: -50%; top: 18px; height: 2px; background: var(--line); z-index: 1; }
-.fde-project-detail .fde-detail-stage:last-child::after { display: none; }
-.fde-project-detail .fde-detail-stage.completed::after { background: color-mix(in srgb, var(--positive) 55%, var(--line)); }
 .fde-project-detail .fde-detail-stage[aria-pressed="true"]::before { content: ''; position: absolute; inset: -7px 0; z-index: 0; border: 1px solid color-mix(in srgb, var(--brand) 28%, var(--line)); border-radius: 12px; background: var(--brand-soft); }
 .fde-project-detail .fde-detail-stage-rail { height: 38px; display: grid; place-items: center; position: relative; z-index: 2; }
-.fde-project-detail .fde-detail-stage-rail > span { display: grid; width: 36px; height: 36px; place-items: center; border: 2px solid var(--line); border-radius: 50%; color: var(--ink-3); background: var(--surface); font-size: 12px; font-weight: 650; }
+.fde-project-detail .fde-detail-stage-rail::after { content: ''; position: absolute; left: 50%; right: -50%; top: 50%; height: 2px; transform: translateY(-50%); background: var(--line); z-index: 0; }
+.fde-project-detail .fde-detail-stage:last-child .fde-detail-stage-rail::after { display: none; }
+.fde-project-detail .fde-detail-stage.completed .fde-detail-stage-rail::after { background: color-mix(in srgb, var(--positive) 55%, var(--line)); }
+.fde-project-detail .fde-detail-stage-rail > span { position: relative; z-index: 1; display: grid; width: 36px; height: 36px; place-items: center; border: 2px solid var(--line); border-radius: 50%; color: var(--ink-3); background: var(--surface); font-size: 12px; font-weight: 650; }
 .fde-project-detail .fde-detail-stage.completed .fde-detail-stage-rail > span { background: var(--positive); color: white; border-color: var(--positive); }
 .fde-project-detail .fde-detail-stage.current .fde-detail-stage-rail > span { border-color: var(--gold); color: var(--warning); box-shadow: 0 0 0 5px var(--warning-soft); }
 .fde-project-detail .fde-detail-stage:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; border-radius: 8px; }
@@ -54,6 +54,16 @@ body:has(.fde-project-detail) { min-width: 320px; }
 .fde-project-detail .fde-detail-stage-copy small { display: block; margin-top: 2px; color: var(--ink-3); font-size: 12px; line-height: 1.35; }
 .fde-project-detail .fde-detail-stage-state { display: flex; justify-content: center; }
 .fde-project-detail .fde-detail-stage-state .fde-ui-badge { min-height: 20px; padding: 2px 7px; font-size: 12px; }
+.fde-project-detail .fde-ui-card.fde-detail-stage-overview { margin-top: 13px; padding: 18px; font-family: inherit; }
+.fde-project-detail .fde-detail-stage-overview-head { display: flex; min-height: 30px; align-items: center; gap: 9px; margin-bottom: 12px; }
+.fde-project-detail .fde-detail-stage-overview-head h2 { color: var(--ink); font-size: 14px; font-weight: 650; line-height: 1.45; }
+.fde-project-detail .fde-detail-stage-overview-head > span:last-child { color: var(--ink-3); font-size: 12px; line-height: 1.5; }
+.fde-project-detail .fde-detail-stage-overview-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.fde-project-detail .fde-detail-stage-fact { min-width: 0; padding: 13px 14px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-2); }
+.fde-project-detail .fde-detail-stage-fact-wide { grid-column: 1 / -1; }
+.fde-project-detail .fde-detail-stage-fact h3 { margin: 0 0 7px; color: var(--ink-3); font-size: 12px; font-weight: 650; line-height: 1.5; }
+.fde-project-detail .fde-detail-stage-fact p,
+.fde-project-detail .fde-detail-stage-fact li { color: var(--ink-2); font-family: inherit; font-size: 13px; line-height: 1.65; }
 .fde-project-detail .fde-ui-card.fde-detail-stage-focus { overflow: hidden; border-top: 3px solid var(--brand); }
 .fde-project-detail .fde-detail-focus-layout { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(270px, .72fr); align-items: stretch; }
 .fde-project-detail .fde-detail-focus-facts { padding: 17px 18px 19px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 9px; }
@@ -223,9 +233,12 @@ body:has(.fde-project-detail) { min-width: 320px; }
   .fde-project-detail .fde-detail-tabs { top: var(--topbar-h); grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .fde-project-detail .fde-detail-tabs button { padding-inline: 5px; font-size: 12px; }
   .fde-project-detail .fde-detail-card-head { flex-wrap: wrap; padding: 12px 14px; }
+  .fde-project-detail .fde-detail-stage-overview-grid { grid-template-columns: minmax(0, 1fr); }
+  .fde-project-detail .fde-detail-stage-fact-wide { grid-column: auto; }
   .fde-project-detail .fde-detail-timeline { grid-template-columns: minmax(0, 1fr); padding: 15px 17px 17px; overflow: visible; }
   .fde-project-detail .fde-detail-stage { min-height: 64px; padding: 0 0 10px; grid-template-columns: 38px minmax(0, 1fr) auto; grid-template-rows: auto; gap: 10px; text-align: left; }
-  .fde-project-detail .fde-detail-stage::after { left: 17px; right: auto; top: 35px; bottom: -1px; width: 2px; height: auto; }
+  .fde-project-detail .fde-detail-stage-rail::after { left: 50%; right: auto; top: 50%; bottom: -31px; width: 2px; height: auto; transform: translateX(-50%); }
+  .fde-project-detail .fde-detail-stage:last-child .fde-detail-stage-rail::after { display: none; }
   .fde-project-detail .fde-detail-stage-rail { grid-column: 1; grid-row: 1; }
   .fde-project-detail .fde-detail-stage-copy { grid-column: 2; grid-row: 1; padding: 2px 0 10px; background: transparent; }
   .fde-project-detail .fde-detail-stage-copy strong { min-height: 0; display: block; font-size: 12px; }
