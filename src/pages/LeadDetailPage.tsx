@@ -534,13 +534,13 @@ export function LeadDetailPage() {
     : sourceLabeledNode('product', '-')
   const productDescription = verifiedFact('product.performance', 'product.parameter', 'product.matrix')
     ? verifiedFactText(['product.performance', 'product.parameter', 'product.matrix'])
-    : sourceLabeledNode('productDescription', '暂无经过来源验证的产品参数或性能数据。')
+    : sourceLabeledNode('productDescription', null)
   const applicationValue = verifiedFact('profile.application_scenario', 'product.use_case')
     ? verifiedFactText(['profile.application_scenario', 'product.use_case'])
     : sourceLabeledNode('applicationScenario', '-')
   const applicationDescription = verifiedFact('profile.customer_type', 'profile.user_problem')
     ? verifiedFactText(['profile.customer_type', 'profile.user_problem'])
-    : sourceLabeledNode('applicationDescription', '暂无经过来源验证的客户类型或用户问题。')
+    : sourceLabeledNode('applicationDescription', null)
   const mainBusinessValue = verifiedFact('profile.main_business')
     ? verifiedFactText(['profile.main_business'])
     : sourceLabeledNode('mainBusiness', '-')
@@ -725,7 +725,9 @@ function ReviewSection({ title, icon, children }: { title: string; icon: ReactNo
 
 function BusinessCard({ label, value, description }: { label: string; value: ReactNode; description: ReactNode }) {
   const display = (node: ReactNode) => typeof node === 'string' || typeof node === 'number' ? displayLeadDetailValue(node) : node
-  return <article><span>{label}</span><strong>{display(value)}</strong><p>{display(description)}</p></article>
+  const displayedDescription = display(description)
+  const hasDescription = displayedDescription !== null && displayedDescription !== undefined && displayedDescription !== '' && displayedDescription !== '-'
+  return <article><span>{label}</span><strong>{display(value)}</strong>{hasDescription && <p>{displayedDescription}</p>}</article>
 }
 
 function TeamMemberCard({ member, index }: { member: DisplayTeamMember; index: number }) {
