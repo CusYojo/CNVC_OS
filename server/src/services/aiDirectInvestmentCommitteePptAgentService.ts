@@ -3,7 +3,7 @@ import { cp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { getAiSkillDirectory, type LoadedAiSkill } from './aiSkillService.js'
 import type { EvidenceSource } from './aiBusinessContentService.js'
-import { resolveAiModelRoute } from './aiModelSettingsService.js'
+import { resolveAiModelByKey, resolveAiModelRoute } from './aiModelSettingsService.js'
 import {
   classifyDirectSkillAgentFailure,
   directSkillAgentGatewayRecoveryPolicy,
@@ -95,7 +95,10 @@ function boundedNumber(value: unknown, fallback: number, minimum: number, maximu
 }
 
 async function runtimeConfig(role: string): Promise<DirectAgentRuntimeConfig> {
-  const configured = await resolveAiModelRoute('ai-document', role)
+  const configured = (process.env.AI_DOCUMENT_MODEL_OVERRIDE
+    ? await resolveAiModelByKey(process.env.AI_DOCUMENT_MODEL_OVERRIDE, role)
+    : null)
+    ?? await resolveAiModelRoute('ai-document', role)
     ?? await resolveAiModelRoute('interactive-assistant', role)
   const baseUrl = String(
     configured?.baseUrl
