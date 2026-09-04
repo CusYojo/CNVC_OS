@@ -3,6 +3,7 @@ import { authRouter } from './auth.js'
 import { projectsRouter } from './projects.js'
 import { weeklyReportsRouter } from './weeklyReports.js'
 import { companyKnowledgeRouter } from './companyKnowledge.js'
+import { personalNotesRouter } from './personalNotes.js'
 import { projectArchivesRouter } from './projectArchives.js'
 import { dataKnowledgeRouter } from './dataKnowledge.js'
 import { workbenchRouter } from './workbench.js'
@@ -45,6 +46,7 @@ apiRouter.use('/auth', authRouter)
 apiRouter.use('/projects', projectsRouter)
 apiRouter.use('/weekly-reports', weeklyReportsRouter)
 apiRouter.use('/company-knowledge', companyKnowledgeRouter)
+apiRouter.use('/personal-notes', personalNotesRouter)
 apiRouter.use('/project-archives', projectArchivesRouter)
 apiRouter.use('/data-knowledge', dataKnowledgeRouter)
 apiRouter.use('/workbench', workbenchRouter)

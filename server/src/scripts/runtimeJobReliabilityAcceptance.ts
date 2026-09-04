@@ -7,6 +7,7 @@ import {
   claimRuntimeJobLease,
   executeClaimedRuntimeJob,
   queueRuntimeJobNow,
+  retireUnknownRuntimeJobs,
   type RuntimeJobDefinition,
 } from '../services/runtimeJobScheduler.js'
 import { assertIsolatedMysqlAcceptanceDatabase } from './mysqlAcceptanceSafety.js'
@@ -14,6 +15,7 @@ import { assertIsolatedMysqlAcceptanceDatabase } from './mysqlAcceptanceSafety.j
 assertIsolatedMysqlAcceptanceDatabase('runtimeJobReliabilityAcceptance')
 
 type JobState = RowDataPacket & {
+  enabled: number | boolean
   last_status: string | null
   last_error: string | null
   consecutive_failures: number
@@ -28,6 +30,7 @@ const jobsTable = quoteMysqlIdentifier(mysqlTableName('runtime_jobs'))
 const runsTable = quoteMysqlIdentifier(mysqlTableName('runtime_job_runs'))
 const marker = randomUUID()
 const jobId = `reliability-accept-${marker}`
+const retiredJobId = `retired-accept-${marker}`
 const owner = `reliability-owner:${marker}`
 
 const definition: RuntimeJobDefinition = {
@@ -64,7 +67,21 @@ async function main() {
      VALUES (?,?,1,'interval',3600,JSON_OBJECT(),DATE_SUB(NOW(3),INTERVAL 1 SECOND),NOW(3),NOW(3))`,
     [jobId, jobId],
   )
+  await pool.query(
+    `INSERT INTO ${jobsTable}
+      (id,task,enabled,schedule_kind,interval_seconds,payload,next_run_at,created_at,updated_at)
+     VALUES (?,?,1,'interval',3600,JSON_OBJECT(),DATE_SUB(NOW(3),INTERVAL 2 SECOND),NOW(3),NOW(3))`,
+    [retiredJobId, retiredJobId],
+  )
   try {
+    const retirement = await retireUnknownRuntimeJobs([definition])
+    assert.ok(retirement.retired >= 1)
+    const [retiredRows] = await pool.query<Array<RowDataPacket & { enabled: number }>>(
+      `SELECT enabled FROM ${jobsTable} WHERE id=?`, [retiredJobId],
+    )
+    assert.equal(Boolean(retiredRows[0]?.enabled), false, 'retired runtime job stayed enabled')
+    assert.equal(Boolean((await state()).enabled), true, 'current runtime definition was disabled during retirement')
+
     const definitions = new Map([[jobId, definition]])
     const firstClaim = await claimRuntimeJobLease(jobId, definitions, owner)
     assert.ok(firstClaim)
@@ -105,10 +122,11 @@ async function main() {
         'max-consecutive-attempts-enter-dead-letter',
         'dead-letter-is-terminal-until-manually-requeued',
         'timeout-and-dead-letter-are-visible-to-operational-alert-metrics',
+        'unknown-runtime-job-is-disabled-with-current-definition-preserved',
       ],
     }))
   } finally {
-    await pool.query(`DELETE FROM ${jobsTable} WHERE id=?`, [jobId])
+    await pool.query(`DELETE FROM ${jobsTable} WHERE id IN (?,?)`, [jobId, retiredJobId])
   }
 }
 

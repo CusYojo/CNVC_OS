@@ -4,6 +4,7 @@ import { KnowledgePage } from './KnowledgePage'
 import { FdeCompanyKnowledgePanel } from '../components/FdeCompanyKnowledgePanel'
 import { FdeProjectArchivePanel } from '../components/FdeProjectArchivePanel'
 import { FdeResponsibilityPanel } from '../components/FdeResponsibilityPanel'
+import { PersonalNotesPanel } from '../components/PersonalNotesPanel'
 import { responsibilityOverview } from '../../server/src/contracts/fdeResponsibilityViewContract'
 import { Button, Card } from '../components/ui'
 import { useAuthStore } from '../store/useAuthStore'
@@ -52,6 +53,7 @@ function DataKnowledgeWorkspace({ userId }: { userId: string }) {
   const selection = capabilities ? dataKnowledgeSelection(capabilities, requestedView, requestedTool) : null
   const openTool = (value: ArchiveTool | null) => { const next = new URLSearchParams(params); value ? next.set('archiveTool', value) : next.delete('archiveTool'); setParams(next) }
   const content = () => {
+    if (requestedView === 'notes') return <PersonalNotesPanel />
     if (requestedView === 'responsibility') return <FdeResponsibilityPanel management />
     if (!capabilities || !selection) return <Card className="p-6"><p role={error ? 'alert' : 'status'} className="text-sm text-slate-600">{error || '正在核验当前账号的知识与档案访问资格…'}</p>{error && <Button className="mt-4" variant="secondary" onClick={() => setRefresh(value => value + 1)}>重新核验权限</Button>}</Card>
     if (!selection.allowed) return <Card className="p-6"><h2 className="font-semibold">当前职责无权使用此入口</h2><p role="alert" className="mt-2 text-sm text-slate-500">项目档案、公司知识和上传权限分别核验。请切换到有权页签，或联系管理员核对当前岗位与项目职责。</p><Button className="mt-4" variant="secondary" onClick={() => setRefresh(value => value + 1)}>重新核验权限</Button></Card>
@@ -61,10 +63,11 @@ function DataKnowledgeWorkspace({ userId }: { userId: string }) {
   }
   return <div className="fde-workspace fde-knowledge-page">
     <div className="fde-page-heading"><div><h1>知识库</h1></div></div>
-    {capabilities && <div className="fde-workspace-tabs" role="tablist" aria-label="知识库">
-      {([['company', '公司知识库'], ['archives', '项目档案']] as const).filter(([key]) => capabilities[key]).map(([key, title]) => <button key={key} role="tab" aria-selected={requestedView !== 'responsibility' && selection?.view === key} className={requestedView !== 'responsibility' && selection?.view === key ? 'active' : ''} onClick={() => { const next = new URLSearchParams(params); next.set('view', key); next.delete('archiveTool'); next.delete('entry'); setParams(next) }}>{title}</button>)}
+    <div className="fde-workspace-tabs" role="tablist" aria-label="知识库">
+      {capabilities && ([['company', '公司知识库'], ['archives', '项目档案']] as const).filter(([key]) => capabilities[key]).map(([key, title]) => <button key={key} role="tab" aria-selected={requestedView !== 'responsibility' && requestedView !== 'notes' && selection?.view === key} className={requestedView !== 'responsibility' && requestedView !== 'notes' && selection?.view === key ? 'active' : ''} onClick={() => { const next = new URLSearchParams(params); next.set('view', key); next.delete('archiveTool'); next.delete('entry'); setParams(next) }}>{title}</button>)}
+      <button role="tab" aria-selected={requestedView === 'notes'} className={requestedView === 'notes' ? 'active' : ''} onClick={() => { const next = new URLSearchParams(params); next.set('view', 'notes'); next.delete('archiveTool'); next.delete('entry'); setParams(next) }}>个人笔记</button>
       {management && <button role="tab" aria-selected={requestedView === 'responsibility'} className={requestedView === 'responsibility' ? 'active' : ''} onClick={() => { const next = new URLSearchParams(params); next.set('view', 'responsibility'); next.delete('archiveTool'); next.delete('entry'); setParams(next) }}>管理参考</button>}
-    </div>}
+    </div>
     {content()}
   </div>
 }

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { and, desc, eq, gte, inArray, isNull, lte, ne, notInArray, or, sql } from 'drizzle-orm'
 import { db } from '../db/client.js'
-import { meetingParticipants, meetingWorkflowNotices, meetings, todos, auditLogs, projectFiles, projectMembers, projects, users } from '../db/schema.js'
+import { directiveNotices, meetingParticipants, meetingWorkflowNotices, meetings, projectDirectives, todos, auditLogs, projectFiles, projectMembers, projects, users } from '../db/schema.js'
 import {
   isSystemAdmin,
   projectAccessCondition,
@@ -72,7 +72,7 @@ export function todoAccessCondition(actor: ProjectAccessActor) {
 }
 
 export async function listMeetings(projectId?: string, actor?: ProjectAccessActor) {
-  const conditions = [and(ne(meetings.workflowKind, 'committee'), or(eq(meetings.workflowKind, 'legacy'), eq(meetings.workflowStatus, 'completed')))]
+  const conditions = [and(ne(meetings.workflowKind, 'committee'), or(eq(meetings.workflowKind, 'legacy'), inArray(meetings.workflowStatus, ['scheduled', 'completed'])))]
   if (projectId) conditions.push(eq(meetings.projectId, projectId))
   if (actor) conditions.push(meetingAccessCondition(actor))
   const where = conditions.length ? and(...conditions) : undefined
@@ -80,7 +80,7 @@ export async function listMeetings(projectId?: string, actor?: ProjectAccessActo
 }
 
 export async function getMeeting(id: string, actor?: ProjectAccessActor) {
-  const visible = and(ne(meetings.workflowKind, 'committee'), or(eq(meetings.workflowKind, 'legacy'), eq(meetings.workflowStatus, 'completed')))
+  const visible = and(ne(meetings.workflowKind, 'committee'), or(eq(meetings.workflowKind, 'legacy'), inArray(meetings.workflowStatus, ['scheduled', 'completed'])))
   const where = actor
     ? and(eq(meetings.id, id), meetingAccessCondition(actor), visible)
     : and(eq(meetings.id, id), visible)
@@ -350,7 +350,20 @@ export async function listTodos(owner?: string, projectId?: string, actor?: Proj
     if (personal.dateTo) conds.push(lte(todos.dueDate, personal.dateTo))
   }
   const where = conds.length ? and(...conds) : undefined
-  return db.select().from(todos).where(where as never).orderBy(desc(todos.createdAt)).limit(100)
+  const rows = await db.select({
+    todo: todos,
+    directiveId: projectDirectives.id,
+    directiveNoticeId: directiveNotices.id,
+  }).from(todos)
+    .leftJoin(projectDirectives, eq(projectDirectives.taskId, todos.id))
+    .leftJoin(directiveNotices, actor ? and(
+      eq(directiveNotices.directiveId, projectDirectives.id),
+      eq(directiveNotices.recipientId, actor.uid),
+      isNull(directiveNotices.readAt),
+      isNull(directiveNotices.closedAt),
+    ) : sql<boolean>`FALSE`)
+    .where(where as never).orderBy(desc(todos.createdAt)).limit(100)
+  return rows.map((row) => ({ ...row.todo, directiveId: row.directiveId, directiveNoticeId: row.directiveNoticeId }))
 }
 
 export async function listMeetingTodos(meetingId: string, actor?: ProjectAccessActor) {

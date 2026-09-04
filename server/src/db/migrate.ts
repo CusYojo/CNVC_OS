@@ -95,7 +95,7 @@ const REQUIRED_RUNTIME_TABLES = [
   'project_records', 'project_record_comments', 'project_record_events',
   'project_file_grants', 'project_file_events', 'project_material_submissions',
   'project_material_recipients', 'project_material_events', 'project_material_notices', 'project_material_request_closures',
-  'company_knowledge', 'company_knowledge_grants', 'company_knowledge_comments', 'company_knowledge_ratings', 'company_knowledge_events', 'company_knowledge_commands',
+  'company_knowledge', 'company_knowledge_grants', 'company_knowledge_comments', 'company_knowledge_ratings', 'company_knowledge_events', 'company_knowledge_commands', 'personal_notes',
   'oa_office_policies', 'oa_office_policy_versions', 'oa_office_events', 'oa_office_commands', 'oa_office_policy_commands', 'oa_office_attachments', 'oa_office_attachment_grants', 'oa_office_notices',
   'oa_office_executions', 'oa_office_execution_files',
   'departments', 'roles', 'permissions', 'role_permissions', 'user_roles', 'user_departments', 'dictionary_groups', 'dictionary_items',

@@ -3124,6 +3124,18 @@ export const companyKnowledgeCommands = mysqlTable('company_knowledge_commands',
   createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`), completedAt: timestampColumn('completed_at'),
 }, t => ({ command: uniqueIndex('uq_knowledge_actor_command').on(t.actorId, t.commandId) }))
 
+export const personalNotes = mysqlTable('personal_notes', {
+  id: uuidPrimaryKey('id'),
+  ownerId: uuidColumn('owner_id').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  title: varchar('title', { length: 120 }).notNull(),
+  noteDate: date('note_date', { mode: 'string' }).notNull(),
+  content: json('content').$type<import('../contracts/personalNoteContract.js').PersonalNoteContent>().notNull(),
+  plainText: text('plain_text').notNull(),
+  version: int('version').notNull().default(1),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+  updatedAt: timestampColumn('updated_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, t => ({ ownerDate: index('idx_personal_notes_owner_date').on(t.ownerId, t.noteDate, t.updatedAt) }))
+
 // Office requests share OA request/node/revision/record identities. These tables
 // extend policy, immutable originals and reliable in-app notices, not an alternate engine.
 export const oaOfficePolicies = mysqlTable('oa_office_policies', {

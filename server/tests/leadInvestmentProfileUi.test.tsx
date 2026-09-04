@@ -209,6 +209,12 @@ test('enterprise list and detail source follow the approved display-only informa
   }
   assert.doesNotMatch(detailSource, /<ReviewSection title="投资证据画像"/)
   assert.doesNotMatch(detailSource, /投资初筛|title="数据质量"|加入关注|竞争格局|股权结构|核心团队与股权|sourceBoundShareholders|companyCompetitors/)
+  assert.doesNotMatch(detailSource, /暂无经过来源验证的产品参数或性能数据|暂无经过来源验证的客户类型或用户问题/)
+  assert.match(detailSource, /hasDescription && <p>\{displayedDescription\}<\/p>/)
+  assert.match(detailSource, /companyFundingRounds\.length > 0 && <ReviewSection title="融资历史"/)
+  assert.doesNotMatch(detailSource, /暂无融资历史数据/)
+  assert.match(detailSource, /const hasCompanyTeamContent = !research && \(/)
+  assert.match(detailSource, /hasCompanyTeamContent && <ReviewSection title="核心团队"/)
   assert.match(detailSource, /'转为我的专属项目'/)
   assert.match(detailSource, /<Trash2 \/>删除线索/)
 })

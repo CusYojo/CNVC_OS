@@ -110,3 +110,75 @@ body:has(.fde-knowledge-page) { min-width: 320px; }
   .fde-knowledge-page .fde-score-ledger td:nth-child(7)::before { content: "时间"; }
 }
 @media (max-width: 420px) { .fde-page-content:has(.fde-knowledge-page) { padding-inline: 12px; } }
+
+/* Personal notes stay visually quiet and are rendered from structured text runs. */
+.fde-knowledge-page .fde-personal-notes { overflow: hidden; border: 1px solid var(--line, #dfe6e4); border-radius: 12px; background: var(--surface, #fff); }
+.fde-knowledge-page .personal-notes-head { display: flex; align-items: center; justify-content: space-between; gap: 18px; min-height: 72px; padding: 15px 18px; border-bottom: 1px solid var(--line, #dfe6e4); }
+.fde-knowledge-page .personal-notes-title { display: flex; align-items: center; gap: 11px; min-width: 0; }
+.fde-knowledge-page .personal-notes-title-icon { display: grid; width: 38px; height: 38px; place-items: center; flex: 0 0 38px; border-radius: 10px; color: var(--brand-strong, #214b54); background: var(--brand-soft, #e6f0ef); }
+.fde-knowledge-page .personal-notes-title h2 { margin: 0; color: var(--ink, #1b2f35); font-size: 16px; font-weight: 700; line-height: 1.35; }
+.fde-knowledge-page .personal-notes-title div > span { display: inline-flex; align-items: center; gap: 4px; margin-top: 3px; color: var(--ink-3, #64777c); font-size: 12px; }
+.fde-knowledge-page .personal-notes-head > .fde-ui-button[data-variant="primary"] { border-color: var(--brand-strong, #214b54); color: #fff; background: var(--brand-strong, #214b54); }
+.fde-knowledge-page .personal-notes-search { display: flex; align-items: center; gap: 8px; padding: 12px 18px; border-bottom: 1px solid var(--line, #dfe6e4); background: var(--surface-2, #f8faf9); }
+.fde-knowledge-page .personal-notes-search label { position: relative; width: min(100%, 390px); }
+.fde-knowledge-page .personal-notes-search label > svg { position: absolute; left: 12px; top: 50%; color: var(--ink-3, #64777c); transform: translateY(-50%); pointer-events: none; }
+.fde-knowledge-page .personal-notes-search input { width: 100%; min-height: 38px; padding: 0 13px 0 37px; border: 1px solid var(--line, #dfe6e4); border-radius: 8px; color: var(--ink, #1b2f35); background: var(--surface, #fff); font-size: 13px; outline: none; }
+.fde-knowledge-page .personal-notes-search input:focus { border-color: color-mix(in srgb, var(--brand, #315f68) 62%, var(--line, #dfe6e4)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand-soft, #e6f0ef) 68%, transparent); }
+.fde-knowledge-page .personal-notes-search > button { min-height: 34px; padding: 0 8px; border: 0; color: var(--brand, #315f68); background: transparent; font-size: 12px; font-weight: 650; }
+.fde-knowledge-page .personal-notes-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 13px; padding: 18px; }
+.fde-knowledge-page .personal-note-card { position: relative; display: flex; min-height: 248px; flex-direction: column; min-width: 0; padding: 17px; overflow: hidden; border: 1px solid var(--line, #dfe6e4); border-radius: 11px; background: linear-gradient(155deg, var(--surface, #fff), color-mix(in srgb, var(--brand-soft, #e6f0ef) 18%, var(--surface, #fff))); transition: border-color .18s ease, transform .18s ease; }
+.fde-knowledge-page .personal-note-card::before { position: absolute; top: 0; right: 17px; left: 17px; height: 2px; border-radius: 0 0 2px 2px; background: color-mix(in srgb, var(--brand, #315f68) 50%, transparent); content: ""; }
+.fde-knowledge-page .personal-note-card:hover { border-color: color-mix(in srgb, var(--brand, #315f68) 26%, var(--line, #dfe6e4)); transform: translateY(-1px); }
+.fde-knowledge-page .personal-note-card-meta { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--ink-3, #64777c); font-size: 12px; }
+.fde-knowledge-page .personal-note-card-meta time,
+.fde-knowledge-page .personal-note-private { display: inline-flex; align-items: center; gap: 5px; }
+.fde-knowledge-page .personal-note-private { padding: 3px 7px; border-radius: 6px; color: var(--brand, #315f68); background: var(--brand-soft, #e6f0ef); font-weight: 650; }
+.fde-knowledge-page .personal-note-card h3 { margin: 16px 0 10px; color: var(--ink, #1b2f35); font-size: 16px; font-weight: 700; line-height: 1.45; overflow-wrap: anywhere; }
+.fde-knowledge-page .personal-note-content { position: relative; display: -webkit-box; flex: 1; max-height: 109px; overflow: hidden; color: var(--ink-2, #4d6066); font-size: 13px; line-height: 1.68; white-space: pre-wrap; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 4; }
+.fde-knowledge-page .personal-note-card footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 17px; padding-top: 12px; border-top: 1px solid var(--line, #dfe6e4); color: var(--ink-3, #64777c); font-size: 12px; }
+.fde-knowledge-page .personal-note-card footer > div { display: flex; align-items: center; gap: 4px; }
+.fde-knowledge-page .personal-note-card footer button { display: grid; width: 32px; height: 32px; place-items: center; border: 0; border-radius: 7px; color: var(--ink-3, #64777c); background: transparent; transition: color .15s ease, background .15s ease; }
+.fde-knowledge-page .personal-note-card footer button:hover { color: var(--brand-strong, #214b54); background: var(--brand-soft, #e6f0ef); }
+.fde-knowledge-page .personal-note-card footer button.danger:hover { color: #a9444f; background: #fff0f1; }
+.fde-knowledge-page .personal-notes-state,
+.fde-knowledge-page .personal-notes-empty { display: grid; min-height: 330px; place-items: center; align-content: center; gap: 11px; padding: 36px 18px; color: var(--ink-3, #64777c); text-align: center; font-size: 13px; }
+.fde-knowledge-page .personal-notes-state strong,
+.fde-knowledge-page .personal-notes-empty strong { color: var(--ink, #1b2f35); font-size: 15px; }
+.fde-knowledge-page .personal-notes-empty > span { display: grid; width: 48px; height: 48px; place-items: center; border-radius: 12px; color: var(--brand, #315f68); background: var(--brand-soft, #e6f0ef); }
+.fde-knowledge-page .personal-notes-empty p { margin: -4px 0 5px; font-size: 12px; }
+.fde-knowledge-page .personal-notes-pagination { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 13px 18px; border-top: 1px solid var(--line, #dfe6e4); color: var(--ink-3, #64777c); font-size: 12px; }
+.fde-knowledge-page .personal-notes-pagination > div { display: flex; align-items: center; gap: 9px; }
+.personal-note-form { display: grid; gap: 18px; }
+.personal-note-form-row { display: grid; grid-template-columns: minmax(0, 1fr) 190px; gap: 14px; }
+.personal-note-form label > span { display: block; margin-bottom: 7px; color: var(--ink-2, #4d6066); font-size: 13px; font-weight: 650; }
+.personal-note-form .input { width: 100%; min-height: 42px; padding: 0 12px; border: 1px solid var(--line, #dfe6e4); border-radius: 8px; font-size: 13px; }
+.personal-note-editor-shell { overflow: hidden; border: 1px solid var(--line, #dfe6e4); border-radius: 10px; background: var(--surface, #fff); }
+.personal-note-editor-shell:focus-within { border-color: color-mix(in srgb, var(--brand, #315f68) 62%, var(--line, #dfe6e4)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand-soft, #e6f0ef) 68%, transparent); }
+.personal-note-editor-toolbar { display: flex; align-items: center; gap: 7px; min-height: 44px; padding: 7px 10px; border-bottom: 1px solid var(--line, #dfe6e4); background: var(--surface-2, #f8faf9); }
+.personal-note-format-button { display: grid; width: 30px; height: 30px; place-items: center; border: 1px solid var(--line, #dfe6e4); border-radius: 7px; color: var(--ink-2, #4d6066); background: var(--surface, #fff); }
+.personal-note-format-button:hover { color: var(--brand-strong, #214b54); border-color: color-mix(in srgb, var(--brand, #315f68) 35%, var(--line, #dfe6e4)); }
+.personal-note-toolbar-divider { width: 1px; height: 20px; margin: 0 2px; background: var(--line, #dfe6e4); }
+.personal-note-color-label { margin-right: 2px; color: var(--ink-3, #64777c); font-size: 12px; }
+.personal-note-color { width: 20px; height: 20px; padding: 0; border: 4px solid var(--surface, #fff); border-radius: 50%; background: var(--note-color); box-shadow: 0 0 0 1px var(--line, #dfe6e4); }
+.personal-note-color:hover,
+.personal-note-color:focus-visible { box-shadow: 0 0 0 2px color-mix(in srgb, var(--note-color) 70%, transparent); outline: none; }
+.personal-note-editor { min-height: 250px; max-height: 45vh; padding: 16px; overflow-y: auto; color: var(--ink, #24353a); font-size: 14px; line-height: 1.75; white-space: pre-wrap; outline: none; overflow-wrap: anywhere; }
+.personal-note-editor:empty::before { color: var(--ink-3, #64777c); content: attr(data-placeholder); pointer-events: none; }
+.personal-note-delete-copy { margin: 0; color: var(--ink-2, #4d6066); font-size: 14px; line-height: 1.7; overflow-wrap: anywhere; }
+
+@media (max-width: 1440px) { .fde-knowledge-page .personal-notes-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 900px) { .fde-knowledge-page .personal-notes-grid { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 760px) {
+  .fde-knowledge-page .personal-notes-head { align-items: flex-start; padding: 14px; }
+  .fde-knowledge-page .personal-notes-search { padding: 11px 14px; }
+  .fde-knowledge-page .personal-notes-search label { width: 100%; }
+  .fde-knowledge-page .personal-notes-grid { padding: 13px; }
+  .fde-knowledge-page .personal-note-card { min-height: 230px; }
+  .personal-note-form-row { grid-template-columns: minmax(0, 1fr); }
+  .personal-note-editor-toolbar { flex-wrap: wrap; }
+}
+@media (max-width: 480px) {
+  .fde-knowledge-page .personal-notes-head { display: grid; }
+  .fde-knowledge-page .personal-notes-head > .fde-ui-button { width: 100%; }
+  .fde-knowledge-page .personal-notes-pagination { align-items: flex-start; flex-direction: column; }
+}
