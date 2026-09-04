@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 import type { Project } from '../../src/types'
 import {
@@ -47,4 +48,16 @@ test('AI assistant project merge de-duplicates rows and fails closed on a partia
     if (query.classification === 'key') throw new Error('重点项目加载失败')
     return response([project('normal-only')], 1, 1)
   }), /重点项目加载失败/)
+})
+
+test('new AI project conversations enforce accessible active normal/key projects', async () => {
+  const access = await readFile(new URL('../src/services/projectAccessService.ts', import.meta.url), 'utf8')
+  const conversations = await readFile(new URL('../src/services/conversationService.ts', import.meta.url), 'utf8')
+
+  assert.match(access, /export async function requireAiAssistantProject/)
+  assert.match(access, /requireAccessibleProject\(userId, projectId\)/)
+  assert.match(access, /project\.lifecycle !== 'active'/)
+  assert.match(access, /project\.classification !== 'normal'/)
+  assert.match(access, /project\.classification !== 'key'/)
+  assert.match(conversations, /requireAiAssistantProject\(userId, input\.projectId\)/)
 })

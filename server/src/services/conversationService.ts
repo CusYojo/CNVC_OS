@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { assertNewJwConversationAllowed } from '../config/jwConversationRolloutPolicy.js'
 import { agentConversationRepository } from '../repositories/index.js'
-import { getAccessibleProject, requireAccessibleProject } from './projectAccessService.js'
+import { getAccessibleProject, requireAiAssistantProject } from './projectAccessService.js'
 import { listAvailableModels } from './aiModelSettingsService.js'
 import { removeAgentConversationWorkspace } from './agentWorkspaceLifecycleService.js'
 
@@ -47,7 +47,7 @@ export async function createConversation(userId: string, input: {
   // 灰度只控制新建 JW 会话；已有 MySQL 会话仍可读取、续聊、停止和删除。
   // 关闭时失败关闭，绝不回退到已退役的外部会话运行时。
   assertNewJwConversationAllowed(scope)
-  const project = input.projectId ? await requireAccessibleProject(userId, input.projectId) : null
+  const project = input.projectId ? await requireAiAssistantProject(userId, input.projectId) : null
   if (scope === 'project' && !project) {
     throw Object.assign(new Error('项目会话必须绑定有权访问的项目'), { status: 400, code: 'PROJECT_REQUIRED' })
   }
