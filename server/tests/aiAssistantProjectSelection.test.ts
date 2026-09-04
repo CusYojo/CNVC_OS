@@ -35,7 +35,7 @@ test('AI assistant fetches every authorized normal/key page', async () => {
   assert.deepEqual(rows.map((row) => row.id), ['k1', 'n2', 'n1'])
   assert.equal(calls.length, 3)
   assert.deepEqual(calls.map((call) => `${call.classification}:${call.page}`).sort(), ['key:1', 'normal:1', 'normal:2'])
-  assert.ok(calls.every((call) => call.scope === 'all' && call.lifecycle === 'active' && call.pageSize === 100))
+  assert.ok(calls.every((call) => call.scope === 'mine' && call.lifecycle === 'active' && call.pageSize === 100))
 })
 
 test('AI assistant project merge de-duplicates rows and fails closed on a partial request', async () => {
@@ -59,6 +59,7 @@ test('new AI project conversations enforce accessible active normal/key projects
   assert.match(access, /project\.lifecycle !== 'active'/)
   assert.match(access, /project\.classification !== 'normal'/)
   assert.match(access, /project\.classification !== 'key'/)
+  assert.match(access, /eq\(projectMembers\.userId, userId\)/)
   assert.match(conversations, /requireAiAssistantProject\(userId, input\.projectId\)/)
 })
 

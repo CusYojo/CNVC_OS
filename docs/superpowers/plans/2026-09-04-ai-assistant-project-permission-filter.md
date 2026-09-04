@@ -2,7 +2,7 @@
 
 > **面向 AI 代理的工作者：** 必需子技能：使用 superpowers:subagent-driven-development（推荐）或 superpowers:executing-plans 逐任务实现此计划。步骤使用复选框（`- [ ]`）语法来跟踪进度。
 
-**目标：** AI 助手通过现有 `/projects` 接口分别拉取当前用户有权访问的全部活动普通项目和重点项目，合并后用于项目选择，并在创建会话时由服务端再次验证项目资格。
+**目标：** AI 助手通过现有 `/projects` 接口分别拉取当前用户在项目中心默认“我的项目”范围内的全部活动普通项目和重点项目，合并后用于项目选择，并在创建会话时由服务端再次验证项目资格。
 
 **架构：** 前端项目列表服务新增可注入请求函数的分页聚合器，并行拉取 `normal` 与 `key` 两类的所有分页，AI 助手将聚合结果作为新建与切换项目的唯一候选数据源。后端沿用 `requireAccessibleProject`，再检查生命周期和分类，仅在新建项目会话时执行增强校验；历史会话读取保持原逻辑。
 
@@ -26,7 +26,7 @@
 
 - [ ] **步骤 1：编写失败的分页合并测试**
 
-测试通过可注入的 `fetchPage` 记录查询参数：普通项目第一页返回 `total: 101`，重点项目第一页返回 `total: 1`，断言函数继续请求普通项目第二页；所有请求必须包含 `scope: 'all'`、`lifecycle: 'active'` 和单一 `classification`。
+测试通过可注入的 `fetchPage` 记录查询参数：普通项目第一页返回 `total: 101`，重点项目第一页返回 `total: 1`，断言函数继续请求普通项目第二页；所有请求必须包含 `scope: 'mine'`、`lifecycle: 'active'` 和单一 `classification`。
 
 ```ts
 test('AI assistant fetches every authorized normal/key page', async () => {
@@ -40,7 +40,7 @@ test('AI assistant fetches every authorized normal/key page', async () => {
   const rows = await fetchAiAssistantProjects(fetchPage)
   assert.deepEqual(rows.map(row => row.id), ['k1', 'n1', 'n2'])
   assert.equal(calls.length, 3)
-  assert.ok(calls.every(call => call.scope === 'all' && call.lifecycle === 'active'))
+  assert.ok(calls.every(call => call.scope === 'mine' && call.lifecycle === 'active'))
 })
 ```
 
@@ -62,7 +62,7 @@ async function fetchClassificationPages(
   fetchPage: ProjectPageFetcher,
 ) {
   const query = (page: number): ProjectListQuery => ({
-    page, pageSize: 100, scope: 'all', classification, lifecycle: 'active',
+    page, pageSize: 100, scope: 'mine', classification, lifecycle: 'active',
   })
   const first = await fetchPage(query(1))
   const totalPages = Math.ceil(first.total / first.pageSize)

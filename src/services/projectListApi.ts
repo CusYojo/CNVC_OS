@@ -44,7 +44,7 @@ async function fetchProjectClassificationPages(
   const query = (page: number): ProjectListQuery => ({
     page,
     pageSize: 100,
-    scope: 'all',
+    scope: 'mine',
     classification,
     lifecycle: 'active',
   })

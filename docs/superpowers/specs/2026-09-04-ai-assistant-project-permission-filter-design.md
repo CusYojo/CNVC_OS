@@ -4,14 +4,14 @@
 
 AI 助手当前直接使用全局 Zustand `projects` 缓存作为项目选择器的数据源。该缓存由 `/projects?pageSize=100` 填充，虽然列表接口已有项目访问权限过滤，但没有限定项目分类和生命周期，并且最多只取 100 条，因此会混入项目池、关闭或归档项目，也可能遗漏用户有权访问的项目。
 
-目标是让 AI 助手只允许当前登录用户选择其有权访问的、生命周期为 `active` 的普通项目和重点项目。该口径使用项目中心现有的项目访问规则，但不采用项目中心默认的 `scope=mine` 限制。
+目标是让 AI 助手只允许当前登录用户选择项目中心默认“我的项目”范围内、生命周期为 `active` 的普通项目和重点项目，与项目中心当前列表保持一致。
 
 ## 方案
 
 不新增接口，也不改变 `/projects` 的单分类查询契约。AI 助手分别调用两次现有项目列表接口：
 
-- `/projects?classification=normal&lifecycle=active&scope=all&page=<n>&pageSize=100`
-- `/projects?classification=key&lifecycle=active&scope=all&page=<n>&pageSize=100`
+- `/projects?classification=normal&lifecycle=active&scope=mine&page=<n>&pageSize=100`
+- `/projects?classification=key&lifecycle=active&scope=mine&page=<n>&pageSize=100`
 
 两个请求都沿用现有 `listProjects` 和 `projectAccessCondition`，所以服务端先按当前用户权限、活动生命周期和目标分类过滤，再返回数据。AI 助手根据响应中的 `total` 和 `pageSize` 分别拉完两类项目的全部分页，然后按项目 ID 去重、按置顶状态和更新时间合并排序。
 
@@ -35,7 +35,7 @@ type AiAvailableProjectsResponse = {
 
 打开 AI 助手时，页面并行请求普通项目与重点项目的第一页，再根据各自总数继续请求剩余分页并维护合并结果。新建会话弹窗、项目切换选择器及默认项目解析统一使用该候选列表；全局 `projects` 仍用于项目中心等既有页面，不改变其行为。
 
-创建项目会话时，服务端必须再次校验所提交的 `projectId`：项目存在、当前用户可访问、生命周期为 `active`，并且分类为 `normal` 或 `key`。校验失败时返回明确的 403 业务错误，不能仅依赖前端隐藏选项。已有会话的历史读取继续使用既有访问校验，避免因项目后来关闭或归档而无提示丢失历史会话；但不能再用该项目创建新的 AI 项目会话。
+创建项目会话时，服务端必须再次校验所提交的 `projectId`：项目存在、当前用户可访问且为项目成员、生命周期为 `active`，并且分类为 `normal` 或 `key`。校验失败时返回明确的 403 业务错误，不能仅依赖前端隐藏选项。已有会话的历史读取继续使用既有访问校验，避免因项目后来关闭或归档而无提示丢失历史会话；但不能再用该项目创建新的 AI 项目会话。
 
 任一分类的分页请求失败时，整次候选加载视为失败，项目选择器展示加载失败状态并禁止创建项目会话，不展示不完整列表，也不回退到未经限定的全局缓存。若两类候选列表都为空，沿用“当前账号暂无可用项目”的提示。
 

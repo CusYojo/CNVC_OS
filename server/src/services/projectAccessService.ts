@@ -25,8 +25,13 @@ export async function requireAccessibleProject(userId: string, projectId: string
 
 export async function requireAiAssistantProject(userId: string, projectId: string) {
   const project = await requireAccessibleProject(userId, projectId)
+  const [membership] = await db.select({ projectId: projectMembers.projectId })
+    .from(projectMembers)
+    .where(and(eq(projectMembers.projectId, projectId), eq(projectMembers.userId, userId)))
+    .limit(1)
   if (
-    project.lifecycle !== 'active'
+    !membership
+    || project.lifecycle !== 'active'
     || (project.classification !== 'normal' && project.classification !== 'key')
   ) {
     throw Object.assign(new Error('所选项目不是可用于 AI 助手的活动普通项目或重点项目'), {
