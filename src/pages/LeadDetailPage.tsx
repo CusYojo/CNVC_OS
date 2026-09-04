@@ -181,49 +181,6 @@ function displayFactValue(value: unknown) {
   return '未披露'
 }
 
-function factObject(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
-}
-
-function firstFactField(value: unknown, keys: string[]) {
-  const record = factObject(value)
-  for (const key of keys) {
-    const displayed = text(record[key], '')
-    if (displayed) return displayed
-  }
-  return ''
-}
-
-type ResearchTechnicalEvidence = {
-  id: string
-  metric: string
-  result: string
-  baseline: string
-  context: string
-  source?: LeadEnrichmentEvidence
-}
-
-function researchTechnicalEvidence(facts: LeadEnrichmentFact[]): ResearchTechnicalEvidence[] {
-  const labels: Record<string, string> = {
-    'technology.metric': '技术指标',
-    'research.validation': '验证结果',
-    'research.prototype': '原型进展',
-    'research.reproducibility': '复现情况',
-  }
-  return facts.filter((fact) => isEvidenceBackedFact(fact) && Boolean(labels[fact.factKey])).map((fact) => {
-    const structured = factObject(fact.value)
-    const scalarResult = Object.keys(structured).length ? '' : displayFactValue(fact.value)
-    return {
-      id: fact.id,
-      metric: firstFactField(fact.value, ['metric', 'indicator', 'name', 'label']) || labels[fact.factKey],
-      result: firstFactField(fact.value, ['result', 'value', 'paperResult', 'current']) || scalarResult,
-      baseline: firstFactField(fact.value, ['baseline', 'benchmark', 'comparison', 'comparedWith']),
-      context: firstFactField(fact.value, ['dataset', 'scenario', 'condition', 'context']),
-      source: fact.evidence.find((evidence) => Boolean(externalUrl(evidence.sourceUrl))),
-    }
-  }).filter((item) => item.result)
-}
-
 async function loadAllLeadVerifiedFacts(leadId: string) {
   const all: LeadEnrichmentFact[] = []
   for (let page = 1; page <= 20; page += 1) {
@@ -673,7 +630,6 @@ export function LeadDetailPage() {
     { label: '创新点', fact: verifiedFact('research.innovation', 'paper.innovation') },
     { label: '研究局限', fact: verifiedFact('research.limitation', 'paper.limitations') },
   ].filter((item): item is { label: string; fact: LeadEnrichmentFact } => Boolean(item.fact)) : []
-  const technicalEvidence = research ? researchTechnicalEvidence(verifiedFacts) : []
   const companyFundingRounds = research ? [] : (lead.fundingRounds ?? [])
   const overviewLatestValuation = text(
     investmentProfile?.valuation.value
@@ -714,7 +670,6 @@ export function LeadDetailPage() {
         {(!research || researchAbstract) && <ReviewSection title={research ? '论文摘要 / 研究问题' : '项目简介'} icon={<Sparkles />}><p className="lead-review-introduction">{research ? multilineText(researchAbstract, '') : multilineText(projectIntroduction?.value, '暂无项目简介')}</p></ReviewSection>}
         {!research && <ReviewSection title="关键概览" icon={<Building2 />}><div className="lead-review-overview-grid">{companyOverview.map(([label, value]) => <article key={label}><span>{label}</span><strong>{value}</strong></article>)}</div></ReviewSection>}
         {researchInsightCards.length > 0 && <ReviewSection title="核心结论与创新" icon={<Sparkles />}><div className="lead-review-research-insights">{researchInsightCards.map((item) => <article key={item.label}><span>{item.label}</span><p>{displayFactValue(item.fact.value)}</p>{item.fact.evidence[0] && <a href={externalUrl(item.fact.evidence[0].sourceUrl) || undefined} target="_blank" rel="noreferrer">查看证据<ExternalLink /></a>}</article>)}</div></ReviewSection>}
-        {technicalEvidence.length > 0 && <ReviewSection title="技术证据" icon={<Sparkles />}><div className="lead-review-technical-table" role="table" aria-label="论文技术证据"><div className="lead-review-technical-head" role="row"><span role="columnheader">指标</span><span role="columnheader">本论文结果</span><span role="columnheader">对比基线</span><span role="columnheader">数据集 / 场景</span><span role="columnheader">证据来源</span></div>{technicalEvidence.map((item) => <div role="row" key={item.id}><strong role="cell">{item.metric}</strong><span role="cell">{item.result}</span><span role="cell">{item.baseline || '-'}</span><span role="cell">{item.context || '-'}</span><span role="cell">{item.source ? <a href={externalUrl(item.source.sourceUrl) || undefined} target="_blank" rel="noreferrer">{text(item.source.title || item.source.publisher, '查看来源')}<ExternalLink /></a> : '-'}</span></div>)}</div></ReviewSection>}
         {(!research || facts.length > 0) && <ReviewSection title={research ? '科研主体信息' : '主体基础信息'} icon={<Building2 />}><dl className="lead-review-fact-table">{facts.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl></ReviewSection>}
         {sectionVisibility.productCommercialization && <ReviewSection title="产品与商业化" icon={<Sparkles />}><div className="lead-review-business-grid">
           <BusinessCard label="产品" value={productValue} description={productDescription} />

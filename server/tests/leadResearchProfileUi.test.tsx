@@ -37,12 +37,14 @@ test('research detail omits the empty verified-introduction placeholder', async 
   assert.match(source, /\(!research \|\| researchAbstract\)/)
 })
 
-test('research detail exposes evidence-gated sections, restores linked team cards, and omits result resources', async () => {
+test('research detail exposes the requested sections, restores linked team cards, and omits technical evidence and result resources', async () => {
   const source = await readFile(new URL('../../src/pages/LeadDetailPage.tsx', import.meta.url), 'utf8')
-  for (const title of ['论文摘要 / 研究问题', '核心结论与创新', '技术证据', '科研主体信息', '团队成员', '证据与动态']) {
+  for (const title of ['论文摘要 / 研究问题', '核心结论与创新', '科研主体信息', '团队成员', '证据与动态']) {
     assert.ok(source.includes(title), title)
   }
-  assert.match(source, /researchTechnicalEvidence\(verifiedFacts\)/)
+  assert.doesNotMatch(source, /title="技术证据"/)
+  assert.doesNotMatch(source, /aria-label="论文技术证据"/)
+  assert.doesNotMatch(source, /researchTechnicalEvidence/)
   assert.match(source, /researchInsightCards\.length > 0/)
   assert.doesNotMatch(source, /title="成果资源"/)
   assert.doesNotMatch(source, /researchResources/)
