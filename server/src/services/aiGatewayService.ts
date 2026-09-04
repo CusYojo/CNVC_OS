@@ -144,6 +144,14 @@ export async function requestAiGatewayText(input: {
 
 export type AiGatewayWebSearchSource = { url: string; title: string }
 
+function supportsWebSearchActionSourceInclude(baseUrl: string) {
+  try {
+    return new URL(baseUrl).hostname.toLowerCase() !== 'getways-jumu.zeelin.cn'
+  } catch {
+    return true
+  }
+}
+
 export async function requestAiGatewayWebSearchText(input: {
   baseUrl: string
   apiKey?: string
@@ -156,7 +164,8 @@ export async function requestAiGatewayWebSearchText(input: {
 }) {
   return observeNonStreamingAiRuntimeRequest('gateway-text', async () => {
     const fetchImpl = input.fetchImpl ?? fetch
-    const response = await fetchImpl(`${input.baseUrl.replace(/\/$/, '')}/responses`, {
+    const baseUrl = input.baseUrl.replace(/\/$/, '')
+    const response = await fetchImpl(`${baseUrl}/responses`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -170,7 +179,9 @@ export async function requestAiGatewayWebSearchText(input: {
         })),
         tools: [{ type: 'web_search' }],
         tool_choice: 'required',
-        include: ['web_search_call.action.sources'],
+        ...(supportsWebSearchActionSourceInclude(baseUrl)
+          ? { include: ['web_search_call.action.sources'] }
+          : {}),
         max_tool_calls: Math.max(1, Math.min(input.maxToolCalls || 4, 20)),
         max_output_tokens: input.maxTokens,
       }),
@@ -203,6 +214,21 @@ export async function requestAiGatewayWebSearchText(input: {
           const url = String((source as { url?: unknown }).url || '').trim()
           if (!/^https?:\/\//i.test(url)) continue
           sources.set(url, { url, title: String((source as { title?: unknown }).title || '').trim() })
+        }
+      }
+      const content = (item as { content?: unknown }).content
+      if (!Array.isArray(content)) continue
+      for (const part of content) {
+        if (!part || typeof part !== 'object') continue
+        const annotations = (part as { annotations?: unknown }).annotations
+        if (!Array.isArray(annotations)) continue
+        for (const annotation of annotations) {
+          if (!annotation || typeof annotation !== 'object') continue
+          const source = annotation as { type?: unknown; url?: unknown; title?: unknown }
+          if (source.type !== 'url_citation') continue
+          const url = String(source.url || '').trim()
+          if (!/^https?:\/\//i.test(url)) continue
+          sources.set(url, { url, title: String(source.title || '').trim() })
         }
       }
     }

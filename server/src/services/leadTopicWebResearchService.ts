@@ -662,7 +662,8 @@ export async function researchLeadTopicWithWeb(input: {
   const model = (explicitModel || configured?.model || process.env.LLM_MODEL || 'gpt-5.6-sol')
     .replace(/^zeelin-oai\//, '').replace(/^zeelin\//, '')
   const apiKey = configured?.apiKey || process.env.OPENAI_API_KEY || process.env.LLM_API_KEY || ''
-  const baseUrl = configured?.baseUrl || process.env.LLM_BASE_URL || process.env.OPENAI_BASE_URL || 'http://127.0.0.1:18081/v1'
+  const baseUrl = process.env.LEAD_ENRICHMENT_BASE_URL?.trim()
+    || configured?.baseUrl || process.env.LLM_BASE_URL || process.env.OPENAI_BASE_URL || 'http://127.0.0.1:18081/v1'
   if (process.env.LEAD_ENRICHMENT_RESEARCH_BACKEND !== 'codex-cli' && !apiKey) {
     throw new Error('未配置LLM_API_KEY/OPENAI_API_KEY，无法执行专题联网研究')
   }
@@ -728,7 +729,7 @@ export async function researchLeadTopicWithWeb(input: {
         apiKey,
         model,
         timeoutMs: Math.min(360_000, timeoutMs),
-        maxTokens: 5_000,
+        maxTokens: 6_000,
         maxToolCalls: 6,
         messages: [...messages],
       }))
