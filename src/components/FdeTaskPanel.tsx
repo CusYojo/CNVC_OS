@@ -9,7 +9,7 @@ import { useToast } from './Toast'
 import { taskDeadlineKey } from '../../server/src/contracts/fdeTaskContract'
 import './fde-workspace.css'
 import { FdeTimelineSyncPanel } from './FdeTimelineSyncPanel'
-import { timelineSourceLabels, type TimelinePending } from '../../server/src/contracts/fdeTimelineTaskContract'
+import type { TimelinePending } from '../../server/src/contracts/fdeTimelineTaskContract'
 import { shanghaiToday } from '../../server/src/contracts/fdeWeeklyPlanContract'
 import type { UnifiedTaskPrimaryAction } from '../../server/src/contracts/unifiedTaskContract'
 import { EmptyState as TaskEmptyState, ErrorState as TaskErrorState, TaskCard, TaskDrawer } from './task/TaskSystem'
@@ -117,12 +117,6 @@ export function FdeTaskPanel({ project, files, onChanged, onWeeklyPlan }: { proj
     <div className="fde-detail-task-head"><div className="fde-detail-task-heading-row"><h2>项目任务</h2><div className="fde-detail-task-toolbar"><select className="input" aria-label="任务范围" value={scope} onChange={event => setScope(event.target.value)}><option value="active">进行中的任务</option><option value="all">全部任务</option></select><Button variant="secondary" disabled={busy} onClick={() => { void reload().catch((cause) => showToast((cause as Error).message, 'error')) }}><RefreshCw className="h-4 w-4" />刷新</Button>{onWeeklyPlan && <Button variant="secondary" onClick={onWeeklyPlan}>本周计划</Button>}{project.lifecycle === 'active' && <Button onClick={() => open('create')}><Plus className="h-4 w-4" />新建任务</Button>}</div></div><div className="fde-detail-task-counts"><span><strong>{incompleteCount}</strong>未完成</span><span><strong>{relatedCount}</strong>与我相关</span><span><strong>{acceptanceTasks.length}</strong>待验收</span><span className={overdueCount ? 'danger' : ''}><strong>{overdueCount}</strong>已逾期</span></div></div>
     {data.canSyncPlan && data.planSyncIssue.count > 0 && <section className="fde-plan-sync-warning" role="status"><button type="button" onClick={() => setSyncDetailsOpen(value => !value)}><span>同步异常</span><strong>{data.planSyncIssue.count} 项计划任务需要修复</strong></button>{syncDetailsOpen && <div><ul>{data.planSyncIssue.items.map(item => <li key={item.actionId}>{item.title} · {item.issue}</li>)}</ul><Button variant="secondary" loading={busy} onClick={() => { void run(() => apiPost<Data>(`${endpoint}/sync-plan`, {}), '计划与项目任务已重新同步') }}>修复同步</Button></div>}</section>}
     {data.canSyncTimeline && user?.id && <div className="mt-3"><FdeTimelineSyncPanel key={`${project.id}:${user.id}`} projectId={project.id} onChanged={async () => { await reload(); await onChanged() }} /></div>}
-    {data.timelinePending?.count > 0 && <section role="status" className="mt-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-950">
-      <p className="font-medium">流程行动待联动 · {data.timelinePending.count} 项</p>
-      <p className="mt-1 text-xs">请补齐日期或负责人。</p>
-      <ul className="mt-2 list-inside list-disc space-y-1 text-xs">{data.timelinePending.items.map(item => <li key={item.id}>{timelineSourceLabels[item.source]}：{item.issues.join('；')}</li>)}</ul>
-      {data.timelinePending.count > data.timelinePending.items.length && <p className="mt-2 text-xs">另有 {data.timelinePending.count - data.timelinePending.items.length} 项未展开。</p>}
-    </section>}
     {!visibleTasks.length && <TaskEmptyState title="暂无项目任务" description="可以新建任务，或从项目计划生成。" />}
     {pendingTasks.length > 0 && <section className="fde-detail-task-section"><header><div><strong>待推进任务</strong><span>{pendingTasks.length} 项</span></div></header><div className="fde-detail-task-list">{pendingTasks.map(renderTask)}</div></section>}
     {acceptanceTasks.length > 0 && <section className="fde-detail-task-section fde-detail-task-acceptance"><header><div><strong>待验收任务</strong><span>{acceptanceTasks.length} 项</span></div></header><div className="fde-detail-task-list">{acceptanceTasks.map(renderTask)}</div></section>}

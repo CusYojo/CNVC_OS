@@ -8,9 +8,11 @@ import {
   oaApprovalRequests,
   oaWorkflowLogs,
   projectFiles,
+  projectPlanActions,
   projectPlans,
   projects,
   todos,
+  users,
 } from '../db/schema.js'
 import type { UserRepository } from '../repositories/identityRepository.js'
 import { createMySqlIdentityRepositoryContext, identityRepositories } from '../repositories/index.js'
@@ -250,10 +252,40 @@ async function loadPublicRequests(requestIds: string[]) {
   for (const node of nodeRows) nodesByRequest.set(node.requestId, [...(nodesByRequest.get(node.requestId) ?? []), node])
   const recordsByRequest = new Map<string, typeof recordRows>()
   for (const record of recordRows) recordsByRequest.set(record.requestId, [...(recordsByRequest.get(record.requestId) ?? []), record])
+  const planIds = [...new Set(requestRows.map((request) => request.planId).filter((id): id is string => Boolean(id)))]
+  const [planRows, planActionRows] = planIds.length ? await Promise.all([
+    db.select().from(projectPlans).where(inArray(projectPlans.id, planIds)),
+    db.select().from(projectPlanActions).where(inArray(projectPlanActions.planId, planIds)).orderBy(asc(projectPlanActions.sortOrder)),
+  ]) : [[], []]
+  const planPeopleIds = [...new Set(planActionRows.flatMap((action) => [action.ownerUserId, ...action.participantUserIds]))]
+  const planPeople = planPeopleIds.length
+    ? await db.select({ id: users.id, name: users.name }).from(users).where(inArray(users.id, planPeopleIds))
+    : []
+  const planById = new Map(planRows.map((plan) => [plan.id, plan]))
+  const planActionsById = new Map<string, typeof planActionRows>()
+  for (const action of planActionRows) planActionsById.set(action.planId, [...(planActionsById.get(action.planId) ?? []), action])
+  const planPersonName = new Map(planPeople.map((person) => [person.id, person.name]))
   const byId = new Map(requestRows.map((request) => [request.id, request]))
   return requestIds.flatMap((id) => {
     const request = byId.get(id)
     if (!request) return []
+    const plan = request.planId ? planById.get(request.planId) : undefined
+    const planReview = plan ? {
+      revision: plan.revision,
+      cycleDays: plan.cycleDays,
+      targetDate: plan.targetDate,
+      actions: (planActionsById.get(plan.id) ?? []).map((action) => ({
+        id: action.id,
+        title: action.title,
+        owner: planPersonName.get(action.ownerUserId) ?? '待配置',
+        participants: [...new Set(action.participantUserIds)]
+          .map((participantId) => planPersonName.get(participantId))
+          .filter((name): name is string => Boolean(name)),
+        dueDate: action.dueDate,
+        deliverable: action.deliverable,
+        status: action.status,
+      })),
+    } : undefined
     return [{
       id: request.id,
       requestNo: request.requestNo,
@@ -282,6 +314,7 @@ async function loadPublicRequests(requestIds: string[]) {
       checklist: request.checklist,
       materialSnapshot: request.materialSnapshot,
       planId: request.planId ?? undefined,
+      planReview,
       revisions: revisionRows.filter((revision) => revision.requestId === id).map((revision) => ({ ...revision, submittedAt: iso(revision.submittedAt)! })),
       lockVersion: request.lockVersion,
       nodes: (nodesByRequest.get(id) ?? []).map((node) => ({

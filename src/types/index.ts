@@ -215,6 +215,20 @@ export interface ApprovalRequest {
   checklist: { label: string; passed: boolean; required: boolean }[]
   materialSnapshot?: Array<{ requirementKey: string; fileId: string | null; fileVersion: number | null; waiverReason: string | null }>
   planId?: string
+  planReview?: {
+    revision: number
+    cycleDays: number
+    targetDate: string
+    actions: Array<{
+      id: string
+      title: string
+      owner: string
+      participants: string[]
+      dueDate: string
+      deliverable: string
+      status: string
+    }>
+  }
   revisions?: Array<{ id: string; revision: number; submittedBy: string; submittedAt: string; snapshot: Record<string, unknown> }>
   nodes: ApprovalNode[]
   records: ApprovalRecord[]

@@ -4,6 +4,7 @@ import { officeRouter } from './office.js'
 import { listApprovalCenter } from '../services/fdeApprovalCenterService.js'
 import { readTypeApprovalNotice } from '../services/fdeTypeApprovalService.js'
 import type { AuthedRequest } from '../middleware/requireAuth.js'
+import { oaActionSchema } from '../contracts/oaWorkflowActionContract.js'
 import {
   actOnOaApprovalRequest,
   createOaApprovalRequest,
@@ -39,12 +40,6 @@ const createSchema = z.object({
   valuation: z.string().max(2_000).optional(),
   attachments: z.array(z.string().trim().min(1).max(255)).max(100).optional(),
 })
-const actionSchema = z.object({
-  action: z.enum(['approve', 'return', 'reject', 'withdraw', 'resubmit']),
-  comment: z.string().trim().min(2).max(8_000),
-  expectedVersion: z.number().int().positive().optional(),
-})
-
 oaRouter.get('/requests', async (req: AuthedRequest, res, next) => {
   try {
     const list = await listOaApprovalRequests(req.user!.uid)
@@ -70,7 +65,7 @@ oaRouter.post('/requests', async (req: AuthedRequest, res, next) => {
 oaRouter.post('/requests/:id/actions', async (req: AuthedRequest, res, next) => {
   try {
     const requestId = z.string().uuid().parse(req.params.id)
-    const body = actionSchema.parse(req.body)
+    const body = oaActionSchema.parse(req.body)
     const result = await actOnOaApprovalRequest({
       userId: req.user!.uid,
       requestId,

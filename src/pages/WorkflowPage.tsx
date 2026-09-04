@@ -14,6 +14,7 @@ import { safeVisibleText } from '../../server/src/contracts/textIntegrityContrac
 const workflowStages: ProjectStage[] = ['入库', '立项', '尽调计划制定', '尽调计划审核', '启动尽调', '内核', '投决', '打款']
 const legacyWorkflowStages: ProjectStage[] = ['线索', '初筛', '立项', '尽调', '上会', '投决', '投后', '退出']
 const approvalTone = (status: ApprovalRequest['status']) => status === '已通过' ? 'green' : status === '审批中' ? 'blue' : status === '已退回' ? 'amber' : status === '已拒绝' ? 'red' : 'slate'
+const taskTone = (status: string) => status === '已完成' ? 'green' : status === '进行中' || status === '待验收' ? 'blue' : status === '已退回' ? 'amber' : status === '已取消' ? 'slate' : 'slate'
 const nextStageFor = (stage: ProjectStage, model = 'legacy') => {
   if (['放弃', '退出', '已 Close'].includes(stage)) return null
   const stages = model === 'fde-v1' ? [...workflowStages, '已 Close' as ProjectStage] : legacyWorkflowStages
@@ -114,7 +115,9 @@ function ProjectWorkflowPage() {
   })
   const [reason, setReason] = useState('')
   const [priority, setPriority] = useState<'普通' | '紧急'>('普通')
-  const [comment, setComment] = useState('资料核验范围清楚，同意进入下一节点。')
+  const [comment, setComment] = useState('')
+  const [returnDialogOpen, setReturnDialogOpen] = useState(false)
+  const [returnComment, setReturnComment] = useState('')
 
   const isActionableByCurrentUser = (request: ApprovalRequest) => {
     if (['agent_schedule', 'project_replan'].includes(request.businessType ?? '')) return false
@@ -163,6 +166,11 @@ function ProjectWorkflowPage() {
     if (selected?.businessType === 'agent_schedule') navigate(`/projects/${selected.projectId}?tab=workflow&schedule=${selected.id}`)
     if (selected?.businessType === 'project_replan') navigate(`/projects/${selected.projectId}?tab=workflow&replan=${selected.id}`)
   }, [selected?.id, selected?.businessType, selected?.projectId, navigate])
+  useEffect(() => {
+    setComment('')
+    setReturnComment('')
+    setReturnDialogOpen(false)
+  }, [selected?.id])
 
   const openCreate = (nextProjectId = projectId) => {
     const project = projects.find((item) => item.id === nextProjectId)
@@ -203,14 +211,16 @@ function ProjectWorkflowPage() {
     }
   }
 
-  const act = async (action: 'approve' | 'return' | 'reject' | 'withdraw') => {
+  const act = async (action: 'approve' | 'return' | 'reject' | 'withdraw', actionComment = comment) => {
     if (!selected) return
-    if (!comment.trim()) return showToast('请填写审批意见', 'error')
+    const opinion = actionComment.trim()
+    if (opinion.length < (action === 'return' ? 5 : 2)) return showToast(action === 'return' ? '退回意见至少填写 5 个字' : '请填写审批意见', 'error')
     try {
-      if (action === 'approve') await approveRequest(selected.id, comment)
-      if (action === 'return') await returnRequest(selected.id, comment)
-      if (action === 'reject') await rejectRequest(selected.id, comment)
-      if (action === 'withdraw') await withdrawRequest(selected.id, comment)
+      if (action === 'approve') await approveRequest(selected.id, opinion)
+      if (action === 'return') await returnRequest(selected.id, opinion)
+      if (action === 'reject') await rejectRequest(selected.id, opinion)
+      if (action === 'withdraw') await withdrawRequest(selected.id, opinion)
+      setReturnDialogOpen(false)
       setSelected(null)
       showToast(selected.businessType === 'task_extension' ? action === 'approve' ? '延期已批准，有效任务期限已更新；项目阶段未变化' : '延期状态已更新，原任务期限保持不变' : action === 'approve' ? '当前节点已通过；如为末节点，项目阶段已同步' : action === 'return' ? '申请已退回，项目阶段未变化' : action === 'reject' ? '申请已拒绝，项目阶段未变化' : '申请已撤回，项目阶段未变化')
     } catch (error) {
@@ -289,17 +299,43 @@ function ProjectWorkflowPage() {
         )}
       </Card>
 
-      <Drawer open={!!selected} onClose={() => setSelected(null)} title={selected?.title ?? '审批详情'} width="w-[760px]" footer={selected?.status === '审批中' ? <>{canWithdrawSelected && <Button variant="secondary" onClick={() => act('withdraw')}>撤回</Button>}{canApproveSelected ? <><Button variant="danger" onClick={() => act('reject')}><XCircle className="h-4 w-4" />拒绝</Button><Button variant="secondary" onClick={() => act('return')}><RotateCcw className="h-4 w-4" />退回补充</Button><Button onClick={() => act('approve')}><CheckCircle2 className="h-4 w-4" />同意并流转</Button></> : <span className="text-xs text-slate-500">当前节点由 {selectedCurrentNode?.approver ?? '指定审批人'} 处理；你只能查看流程。</span>}</> : canResubmitSelected ? <Button onClick={resubmit}><Send className="h-4 w-4" />补充后重新提交</Button> : undefined}>
+      <Drawer open={!!selected} onClose={() => setSelected(null)} title={selected?.title ?? '审批详情'} width="w-[760px]" footer={selected?.status === '审批中' ? <>{canWithdrawSelected && <Button variant="secondary" onClick={() => act('withdraw')}>撤回</Button>}{canApproveSelected ? <><Button variant="danger" onClick={() => act('reject')}><XCircle className="h-4 w-4" />拒绝</Button><Button variant="secondary" onClick={() => { setReturnComment(''); setReturnDialogOpen(true) }}><RotateCcw className="h-4 w-4" />退回补充</Button><Button onClick={() => act('approve')}><CheckCircle2 className="h-4 w-4" />同意并流转</Button></> : <span className="text-xs text-slate-500">当前节点由 {selectedCurrentNode?.approver ?? '指定审批人'} 处理；你只能查看流程。</span>}</> : canResubmitSelected ? <Button onClick={resubmit}><Send className="h-4 w-4" />补充后重新提交</Button> : undefined}>
         {selected && <div className="space-y-6">
           <section><h3 className="mb-3 text-sm font-semibold text-slate-800">核心摘要</h3><div className="rounded-xl border border-brand-100 bg-brand-50/60 p-4"><div className="flex items-center justify-between"><div><p className="text-xs text-brand-600">{approvalReference(selected)}</p><p className="mt-1 font-semibold text-slate-800">{selected.projectName}</p></div><Badge tone={approvalTone(selected.status)}>{selected.status}</Badge></div><div className="mt-4 flex items-center gap-2">{selected.businessType === 'task_extension' ? <p className="text-sm">任务期限：{selected.businessPayload?.originalDueDate} → {selected.businessPayload?.requestedDueDate}</p> : <><StageBadge stage={selected.fromStage} /><ArrowRight className="h-4 w-4 text-slate-300" /><StageBadge stage={selected.targetStage} /></>}</div></div></section>
           <section><h3 className="mb-3 text-sm font-semibold text-slate-800">申请内容</h3><div className="grid grid-cols-2 gap-3 text-sm"><div className="rounded-lg bg-slate-50 p-3"><p className="text-xs text-slate-400">申请人 / 部门</p><p className="mt-1 text-slate-700">{selected.applicant} · {selected.department}</p></div><div className="rounded-lg bg-slate-50 p-3"><p className="text-xs text-slate-400">融资计划 / 估值</p><p className="mt-1 text-slate-700">{selected.amount || '未披露'} / {selected.valuation || '待核验'}</p></div></div>{readableApprovalText(selected.reason) && <p className="mt-3 rounded-lg bg-slate-50 p-3 text-sm leading-6 text-slate-600">{readableApprovalText(selected.reason)}</p>}</section>
+          {selected.type === '尽调计划审核' && <section>
+            <div className="mb-3 flex items-center justify-between gap-3"><h3 className="text-sm font-semibold text-slate-800">尽调任务安排</h3>{selected.planReview && <Badge tone="blue">{selected.planReview.actions.length} 项任务</Badge>}</div>
+            {selected.planReview ? <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+              <div className="grid grid-cols-3 divide-x divide-slate-100 border-b border-slate-200 bg-slate-50/80">
+                <div className="px-4 py-3"><p className="text-xs text-slate-400">计划版本</p><p className="mt-1 text-sm font-semibold text-slate-700">V{selected.planReview.revision}</p></div>
+                <div className="px-4 py-3"><p className="text-xs text-slate-400">尽调周期</p><p className="mt-1 text-sm font-semibold text-slate-700">{selected.planReview.cycleDays} 天</p></div>
+                <div className="px-4 py-3"><p className="text-xs text-slate-400">项目目标日</p><p className="mt-1 text-sm font-semibold text-slate-700">{selected.planReview.targetDate}</p></div>
+              </div>
+              <div className="divide-y divide-slate-100">
+                {selected.planReview.actions.map((action) => <article key={action.id} className="grid gap-3 px-4 py-3.5 sm:grid-cols-[minmax(0,1fr)_160px_92px] sm:items-center">
+                  <div className="min-w-0"><div className="flex items-center gap-2"><p className="truncate text-sm font-semibold text-slate-800">{readableApprovalText(action.title)}</p><Badge tone={taskTone(action.status)}>{action.status}</Badge></div><p className="mt-1 truncate text-xs text-slate-500">交付物：{readableApprovalText(action.deliverable)}</p></div>
+                  <div className="min-w-0 text-xs"><p className="truncate font-medium text-slate-700">负责人：{action.owner}</p><p className="mt-1 truncate text-slate-400" title={action.participants.join('、')}>参与：{action.participants.length ? action.participants.join('、') : action.owner}</p></div>
+                  <div className="text-left sm:text-right"><p className="text-xs text-slate-400">截止时间</p><p className="mt-1 whitespace-nowrap text-sm font-medium text-slate-700">{action.dueDate}</p></div>
+                </article>)}
+                {!selected.planReview.actions.length && <div className="px-4 py-8 text-center text-sm text-slate-400">本次计划暂无尽调任务</div>}
+              </div>
+            </div> : <div className="rounded-xl border border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-400">本次审批未关联尽调计划</div>}
+          </section>}
           {Boolean(selected.revisions?.length) && <section><h3 className="text-sm font-semibold text-slate-800">提交修订历史</h3><div className="mt-3 space-y-2">{selected.revisions!.map((revision) => <details className="rounded-lg bg-slate-50 p-3 text-xs" key={revision.id}><summary className="cursor-pointer">修订 V{revision.revision} · {readableDateTime(revision.submittedAt)}</summary>{readableApprovalText(revision.snapshot.reason ?? '') && <p className="mt-2 leading-5 text-slate-600">{readableApprovalText(revision.snapshot.reason ?? '')}</p>}<p className="mt-1 text-slate-500">{String(revision.snapshot.fromStage ?? '')} → {String(revision.snapshot.targetStage ?? '')}</p></details>)}</div></section>}
           <section><h3 className="text-sm font-semibold text-slate-800">前置检查</h3><div className="mt-3 grid grid-cols-2 gap-2">{selected.checklist.map((item) => <div key={item.label} className="flex items-center gap-2 rounded-lg border border-slate-100 px-3 py-2 text-xs text-slate-600">{item.passed ? <CheckCircle2 className="h-4 w-4 text-emerald-500" /> : <Circle className="h-4 w-4 text-amber-500" />}{item.label}{item.required && <span className="ml-auto text-rose-400">必需</span>}</div>)}</div></section>
           <section><h3 className="text-sm font-semibold text-slate-800">附件材料</h3>{Boolean(selected.materialSnapshot?.length) && <div className="mt-3 grid gap-2 sm:grid-cols-2">{selected.materialSnapshot!.map((material) => <div key={material.requirementKey} className="rounded-lg border border-slate-200 p-3 text-xs"><strong>{material.requirementKey}</strong><p className="mt-1 text-slate-600">{material.waiverReason ? `免传说明：${material.waiverReason}` : `已锁定送审版本 V${material.fileVersion}`}</p></div>)}</div>}<div className="mt-3 flex flex-wrap gap-2">{selected.attachments.map((item) => <Badge key={item} tone="slate"><FileCheck2 className="mr-1 h-3 w-3" />{item}</Badge>)}{!selected.attachments.length && !selected.materialSnapshot?.length && <span className="text-sm text-slate-400">无附件</span>}</div></section>
-          <section><h3 className="text-sm font-semibold text-slate-800">审批时间轴</h3><div className="mt-4 space-y-0">{selected.nodes.map((node, index) => <div key={node.id} className="relative flex gap-3 pb-5 last:pb-0"><div className="flex flex-col items-center"><span className={`grid h-8 w-8 place-items-center rounded-full ${node.status === '已通过' ? 'bg-emerald-500 text-white' : node.status === '待审批' || node.status === '会签中' ? 'bg-brand-600 text-white ring-4 ring-brand-50' : node.status === '已退回' || node.status === '已拒绝' ? 'bg-rose-500 text-white' : 'bg-slate-100 text-slate-400'}`}>{node.status === '已通过' ? <CheckCircle2 className="h-4 w-4" /> : node.status === '待审批' || node.status === '会签中' ? <Clock3 className="h-4 w-4" /> : index + 1}</span>{index < selected.nodes.length - 1 && <span className="h-full w-px bg-slate-200" />}</div><div className="flex-1 rounded-lg border border-slate-100 p-3"><div className="flex items-center justify-between"><p className="text-sm font-medium text-slate-700">{node.name}</p><Badge tone={node.status === '已通过' ? 'green' : node.status === '待审批' || node.status === '会签中' ? 'blue' : node.status === '已退回' || node.status === '已拒绝' ? 'red' : 'slate'}>{node.status}</Badge></div><p className="mt-1 text-xs text-slate-400">处理人：{node.approver} · {node.approverRole} · {node.mode}</p>{node.completedAt && <p className="mt-1 text-xs text-slate-400">处理时间：{readableDateTime(node.completedAt)}</p>}{node.mode === '会签' && <p className="mt-2 text-xs text-brand-600">会签进度：{node.approvedBy?.length ?? 0}/{splitApprovers(node.approver).length}{node.approvedBy?.length ? ` · 已同意：${node.approvedBy.join('、')}` : ''}</p>}{readableApprovalText(node.comment) && <p className="mt-2 text-xs leading-5 text-slate-600">审批意见：{readableApprovalText(node.comment)}</p>}</div></div>)}</div>{(selected.status === '审批中' || canResubmitSelected) && <textarea className="textarea mt-4 min-h-24" value={comment} onChange={(event) => setComment(event.target.value)} placeholder={canResubmitSelected ? '说明已补充的材料和修订内容…' : '填写审批意见；退回和拒绝时为必填…'} />}</section>
+          <section><h3 className="text-sm font-semibold text-slate-800">审批时间轴</h3><div className="mt-4 space-y-0">{selected.nodes.map((node, index) => <div key={node.id} className="relative flex gap-3 pb-5 last:pb-0"><div className="flex flex-col items-center"><span className={`grid h-8 w-8 place-items-center rounded-full ${node.status === '已通过' ? 'bg-emerald-500 text-white' : node.status === '待审批' || node.status === '会签中' ? 'bg-brand-600 text-white ring-4 ring-brand-50' : node.status === '已退回' || node.status === '已拒绝' ? 'bg-rose-500 text-white' : 'bg-slate-100 text-slate-400'}`}>{node.status === '已通过' ? <CheckCircle2 className="h-4 w-4" /> : node.status === '待审批' || node.status === '会签中' ? <Clock3 className="h-4 w-4" /> : index + 1}</span>{index < selected.nodes.length - 1 && <span className="h-full w-px bg-slate-200" />}</div><div className="flex-1 rounded-lg border border-slate-100 p-3"><div className="flex items-center justify-between"><p className="text-sm font-medium text-slate-700">{node.name}</p><Badge tone={node.status === '已通过' ? 'green' : node.status === '待审批' || node.status === '会签中' ? 'blue' : node.status === '已退回' || node.status === '已拒绝' ? 'red' : 'slate'}>{node.status}</Badge></div><p className="mt-1 text-xs text-slate-400">处理人：{node.approver} · {node.approverRole} · {node.mode}</p>{node.completedAt && <p className="mt-1 text-xs text-slate-400">处理时间：{readableDateTime(node.completedAt)}</p>}{node.mode === '会签' && <p className="mt-2 text-xs text-brand-600">会签进度：{node.approvedBy?.length ?? 0}/{splitApprovers(node.approver).length}{node.approvedBy?.length ? ` · 已同意：${node.approvedBy.join('、')}` : ''}</p>}{readableApprovalText(node.comment) && <p className="mt-2 text-xs leading-5 text-slate-600">审批意见：{readableApprovalText(node.comment)}</p>}</div></div>)}</div>{(selected.status === '审批中' || canResubmitSelected) && <textarea className="textarea mt-4 min-h-24" value={comment} onChange={(event) => setComment(event.target.value)} placeholder={canResubmitSelected ? '说明已补充的材料和修订内容…' : '填写同意、拒绝或撤回意见…'} />}</section>
           <section><h3 className="text-sm font-semibold text-slate-800">操作记录</h3><div className="mt-3 space-y-2">{selected.records.map((record) => <div key={record.id} className="flex gap-3 rounded-lg bg-slate-50 p-3 text-xs"><ShieldCheck className="mt-0.5 h-4 w-4 text-brand-500" /><div><p className="font-medium text-slate-700">{record.operator} · {record.action} · {record.nodeName}</p>{readableApprovalText(record.comment) && <p className="mt-1 leading-5 text-slate-500">{readableApprovalText(record.comment)}</p>}<p className="mt-1 text-slate-400">{readableDateTime(record.createdAt)}</p></div></div>)}</div></section>
         </div>}
       </Drawer>
+
+      <Modal open={returnDialogOpen && Boolean(selected)} onClose={() => setReturnDialogOpen(false)} title="退回申请" footer={<><Button variant="secondary" onClick={() => setReturnDialogOpen(false)}>取消</Button><Button variant="danger" disabled={returnComment.trim().length < 5} onClick={() => void act('return', returnComment)}><RotateCcw className="h-4 w-4" />确认退回</Button></>}>
+        <div className="space-y-4">
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4"><p className="text-sm font-semibold text-slate-800">{selected?.projectName}</p><p className="mt-1 text-xs text-slate-500">当前节点：{selected?.currentNodeName}</p></div>
+          <label className="block"><span className="label">退回意见 <span className="text-rose-500">*</span></span><textarea autoFocus className="textarea min-h-28" maxLength={8000} value={returnComment} onChange={(event) => setReturnComment(event.target.value)} placeholder="请说明需要补充或修改的具体内容（至少 5 个字）" /></label>
+          <div className="flex items-center justify-between text-xs text-slate-500"><span>意见将同步给申请人并保留在审批记录中</span><span>{returnComment.trim().length}/8000</span></div>
+        </div>
+      </Modal>
 
       <Modal open={showCreate} onClose={() => setShowCreate(false)} title="发起项目 OA 审批" width="max-w-3xl" footer={<><Button variant="secondary" onClick={() => setShowCreate(false)}>取消</Button><Button onClick={submit}><Send className="h-4 w-4" />提交审批</Button></>}>
         <div className="space-y-5">
