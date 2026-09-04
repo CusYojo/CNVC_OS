@@ -110,6 +110,7 @@ type ActionConfig = {
   id: AiQuickActionId
   label: string
   description: string
+  hidden?: boolean
   mode: 'task' | 'template'
   skillName: AiQuickSkillName
   outputFormat: 'DOCX' | 'PPTX'
@@ -122,7 +123,7 @@ const ACTIONS: ActionConfig[] = [
   { id: 'investment_ppt', label: '投资建议书', description: '生成投委会演示文稿', mode: 'task', skillName: 'investment-committee-ppt', outputFormat: 'PPTX', icon: Presentation },
   { id: 'due_diligence', label: '尽调报告', description: '整理尽调资料并生成报告', mode: 'task', skillName: 'draft-due-diligence-report', outputFormat: 'DOCX', icon: ClipboardCheck },
   { id: 'qa', label: '项目问答', description: '针对当前项目快速问答', mode: 'task', skillName: 'draft-investment-qa', outputFormat: 'DOCX', icon: HelpCircle },
-  { id: 'custom_template', label: '上传模板', description: '按上传模板生成文档', mode: 'template', skillName: 'generate-document-from-template', outputFormat: 'DOCX', icon: Upload },
+  { id: 'custom_template', label: '上传模板', description: '按上传模板生成文档', hidden: true, mode: 'template', skillName: 'generate-document-from-template', outputFormat: 'DOCX', icon: Upload },
 ]
 
 const MAX_TEMPLATE_BYTES = 25 * 1024 * 1024
@@ -362,7 +363,7 @@ export function AiQuickActions({
           常用工具
         </div>
         <div className="flex gap-2 overflow-x-auto pb-1">
-          {ACTIONS.map((action) => {
+          {ACTIONS.filter((action) => !action.hidden).map((action) => {
             const Icon = action.icon
             const selected = action.id === selectedActionId || action.id === activeAction?.id
             const actionDisabled = disabled
