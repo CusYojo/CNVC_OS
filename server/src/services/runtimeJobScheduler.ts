@@ -110,6 +110,10 @@ function enabledEnv(name: string, fallback = true): boolean {
   return !['0', 'false', 'no', 'off'].includes(value)
 }
 
+function runtimeDefinitionIds(definitions: RuntimeJobDefinition[]): string[] {
+  return [...new Set(definitions.map((definition) => definition.id))]
+}
+
 async function withRadarCollectorLock<T>(signal: AbortSignal, task: () => Promise<T>): Promise<T> {
   const previous = radarCollectorTail
   let release!: () => void
@@ -420,6 +424,19 @@ export async function seedRuntimeJobDefinitions(
     )
   }
   return { jobs: definitions.length }
+}
+
+export async function retireUnknownRuntimeJobs(
+  definitions: RuntimeJobDefinition[] = runtimeJobDefinitions(),
+): Promise<{ retired: number }> {
+  const ids = runtimeDefinitionIds(definitions)
+  if (ids.length === 0) throw new Error('runtime job definitions must not be empty')
+  const [result] = await pool.query<import('mysql2').ResultSetHeader>(
+    `UPDATE ${jobsTable} SET enabled=0, updated_at=NOW(3)
+     WHERE enabled=1 AND id NOT IN (${ids.map(() => '?').join(',')})`,
+    ids,
+  )
+  return { retired: result.affectedRows }
 }
 
 function managedJob(id: string, ids: ReadonlySet<string>, label: string): RuntimeJobDefinition {
@@ -743,15 +760,18 @@ async function poll(): Promise<void> {
   try {
     await recoverExpiredRuntimeJobLeases()
     const capacity = concurrency - active.size
+    const definitions = new Map(runtimeJobDefinitions().map((definition) => [definition.id, definition]))
+    const ids = [...definitions.keys()]
+    if (ids.length === 0) return
     const [rows] = await pool.query<Array<RowDataPacket & { id: string }>>(
       `SELECT id FROM ${jobsTable}
-       WHERE enabled=1 AND next_run_at <= NOW(3)
+       WHERE id IN (${ids.map(() => '?').join(',')})
+         AND enabled=1 AND next_run_at <= NOW(3)
          AND COALESCE(last_status,'') <> 'dead_letter'
          AND (lease_expires_at IS NULL OR lease_expires_at < NOW(3))
        ORDER BY next_run_at, id LIMIT ?`,
-      [capacity],
+      [...ids, capacity],
     )
-    const definitions = new Map(runtimeJobDefinitions().map((definition) => [definition.id, definition]))
     for (const row of rows) {
       const claim = await claimRuntimeJobLease(row.id, definitions)
       if (claim) void executeClaimedRuntimeJob(claim)
@@ -768,6 +788,10 @@ export async function startRuntimeJobScheduler(): Promise<void> {
   stopping = false
   const definitions = runtimeJobDefinitions()
   await seedRuntimeJobDefinitions(definitions)
+  const retirement = await retireUnknownRuntimeJobs(definitions)
+  if (retirement.retired > 0) {
+    console.warn(`[runtime-job] retired unknown jobs=${retirement.retired}`)
+  }
   await recoverExpiredRuntimeJobLeases()
   const benignRecovery = await recoverBenignRadarSyncDeadLetter()
   if (benignRecovery.recovered > 0) {
@@ -798,18 +822,50 @@ export async function runtimeJobSchedulerHealth() {
     return { name: 'mysql-runtime-jobs', ok: false, inProcess: true, owner, active: active.size }
   }
   try {
-    const [rows] = await pool.query<Array<RowDataPacket & { enabled_count: number; leased_count: number; dead_count: number }>>(
+    const ids = runtimeDefinitionIds(runtimeJobDefinitions())
+    if (ids.length === 0) throw new Error('runtime job definitions must not be empty')
+    const overdueGraceSeconds = Math.max(60, Math.ceil(pollMs / 1_000) * 3)
+    const [[rows], [unknownRows]] = await Promise.all([
+      pool.query<Array<RowDataPacket & {
+        enabled_count: number
+        leased_count: number
+        dead_count: number
+        overdue_count: number
+        oldest_overdue_at: Date | null
+      }>>(
       `SELECT COUNT(*) AS enabled_count,
         SUM(CASE WHEN lease_expires_at >= NOW(3) THEN 1 ELSE 0 END) AS leased_count,
-        SUM(CASE WHEN last_status='dead_letter' THEN 1 ELSE 0 END) AS dead_count
-       FROM ${jobsTable} WHERE enabled=1`,
-    )
+        SUM(CASE WHEN last_status='dead_letter' THEN 1 ELSE 0 END) AS dead_count,
+        SUM(CASE WHEN current_run_id IS NULL
+          AND COALESCE(last_status,'') <> 'dead_letter'
+          AND next_run_at < DATE_SUB(NOW(3), INTERVAL ? SECOND)
+          THEN 1 ELSE 0 END) AS overdue_count,
+        MIN(CASE WHEN current_run_id IS NULL
+          AND COALESCE(last_status,'') <> 'dead_letter'
+          AND next_run_at < DATE_SUB(NOW(3), INTERVAL ? SECOND)
+          THEN next_run_at END) AS oldest_overdue_at
+       FROM ${jobsTable} WHERE enabled=1 AND id IN (${ids.map(() => '?').join(',')})`,
+        [overdueGraceSeconds, overdueGraceSeconds, ...ids],
+      ),
+      pool.query<Array<RowDataPacket & { unknown_enabled_count: number }>>(
+        `SELECT COUNT(*) AS unknown_enabled_count FROM ${jobsTable}
+         WHERE enabled=1 AND id NOT IN (${ids.map(() => '?').join(',')})`,
+        ids,
+      ),
+    ])
     const deadLetter = Number(rows[0]?.dead_count || 0)
+    const overdue = Number(rows[0]?.overdue_count || 0)
+    const unknownEnabled = Number(unknownRows[0]?.unknown_enabled_count || 0)
     return {
-      name: 'mysql-runtime-jobs', ok: deadLetter === 0, inProcess: true, owner,
+      name: 'mysql-runtime-jobs',
+      ok: deadLetter === 0 && unknownEnabled === 0 && !(overdue > 0 && active.size === 0),
+      inProcess: true, owner,
       enabled: Number(rows[0]?.enabled_count || 0),
       leased: Number(rows[0]?.leased_count || 0),
       deadLetter,
+      overdue,
+      oldestOverdueAt: rows[0]?.oldest_overdue_at ?? null,
+      unknownEnabled,
       active: active.size,
     }
   } catch (error) {
