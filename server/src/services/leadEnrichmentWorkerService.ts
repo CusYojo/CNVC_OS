@@ -668,6 +668,7 @@ async function executeTopic(lease: TopicLease) {
       declaredConflicts: web.conflicts.length,
       declaredConflictEvidenceFailed: explicitConflictEvidenceFailed ? 1 : 0,
       searchSources: web.sources.length, fetchedSources: sourceDocuments.size, sourceFetchFailures,
+      sourceMetadataFallback: Boolean(web.sourceMetadataFallback),
       queryCount: cacheHit ? 0 : researchContract.queries.length,
       pageCount: sourceDocuments.size,
       durationMs: Date.now() - topicStartedAt,

@@ -1,7 +1,10 @@
 import { createHash } from 'node:crypto'
 import { z } from 'zod'
 import { redactSensitiveText } from '../security/redactSecrets.js'
-import { requestAiGatewayWebSearchText } from './aiGatewayService.js'
+import {
+  requestAiGatewayWebSearchText,
+  type AiGatewayWebSearchSource,
+} from './aiGatewayService.js'
 import { resolveAgentRuntimePolicy } from './aiCapabilityService.js'
 import { resolveAiModelByKey, resolveAiModelRoute } from './aiModelSettingsService.js'
 import {
@@ -332,6 +335,23 @@ const outputSchema = z.object({
 })
 
 type ParsedLeadTopicResearchConflict = z.infer<typeof outputSchema>['conflicts'][number]
+
+export function resolveLeadTopicSearchSources(input: {
+  reportedSources: AiGatewayWebSearchSource[]
+  declaredSourceUrls: string[]
+}) {
+  const sources = new Map<string, AiGatewayWebSearchSource>()
+  for (const source of input.reportedSources) {
+    if (/^https?:\/\//i.test(source.url)) sources.set(source.url, source)
+  }
+  const metadataFallback = sources.size === 0
+  if (metadataFallback) {
+    for (const url of input.declaredSourceUrls) {
+      if (/^https?:\/\//i.test(url)) sources.set(url, { url, title: '' })
+    }
+  }
+  return { sources: [...sources.values()], metadataFallback }
+}
 
 export function validateLeadTopicResearchConflict(input: {
   topicKey: LeadEnrichmentTopicKey
@@ -773,7 +793,14 @@ export async function researchLeadTopicWithWeb(input: {
       })
     }
     const parsed = parseLeadTopicResearchOutput(response.text)
-    const allowedSources = new Map(response.sources.map((source) => [source.url, source]))
+    const sourceResolution = resolveLeadTopicSearchSources({
+      reportedSources: response.sources,
+      declaredSourceUrls: [
+        ...parsed.facts.flatMap((fact) => fact.sourceUrls),
+        ...parsed.conflicts.flatMap((conflict) => conflict.candidates.flatMap((candidate) => candidate.sourceUrls)),
+      ],
+    })
+    const allowedSources = new Map(sourceResolution.sources.map((source) => [source.url, source]))
     const allowedFactKeys = new Set(contract.factKeys)
     let contractRejectedFactCount = 0
     const facts = parsed.facts.flatMap((fact) => {
@@ -803,6 +830,7 @@ export async function researchLeadTopicWithWeb(input: {
       gaps: parsed.gaps,
       conflicts,
       sources: [...allowedSources.values()],
+      sourceMetadataFallback: sourceResolution.metadataFallback,
       usage: response.usage,
     }
   } catch (error) {
