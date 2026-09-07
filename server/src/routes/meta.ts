@@ -87,6 +87,7 @@ import {
   readRadarSyncState,
   saveRadarSyncState,
 } from '../services/radarSyncService.js'
+import { radarPipelineItemReviewable } from '../services/radarSyncRuntimePolicy.js'
 import { resolveLeadBusinessRegion } from '../services/leadRegion.js'
 import {
   extractLeadFinancingFacts,
@@ -1017,7 +1018,10 @@ export async function runRadarSyncImport(input: RadarSyncInput = {}, actorUserId
     const reviewableEntries = items
       .map((item, index) => ({ item, index }))
       .filter(({ item, index }) => item.decision_label !== '过滤'
-        && ['discovered', 'failed'].includes(pipelineEvents[index].item.status))
+        && radarPipelineItemReviewable({
+          ...pipelineEvents[index].item,
+          ingestedAt: pipelineEvents[index].event.ingestedAt,
+        }))
     const reviewedCandidates = await reviewRadarCandidatesWithAi(
       reviewableEntries.map(({ item }) => item),
       { eventIds: reviewableEntries.map(({ index }) => pipelineEvents[index].event.id) },

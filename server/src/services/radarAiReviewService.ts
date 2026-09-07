@@ -13,6 +13,7 @@ import {
   startLeadPipelineRun,
 } from './leadPipelineAuditService.js'
 import { radarAiDecisionAuditKey, radarAiReviewAuditKey } from './radarAiAuditPolicy.js'
+import { leadAgentAuditPromptVersion } from './leadAgentPromptVersion.js'
 import {
   LEAD_SUBJECT_AGENT_PROFILE,
   LEAD_SUBJECT_AGENT_PROFILE_VERSION,
@@ -522,9 +523,7 @@ async function reviewUncachedBatch(
     try {
       if (eventIds.length) {
         try {
-          const auditPromptVersion = runtime === 'codex-cli'
-            ? `${batch[0].promptVersion}-codex-v1`
-            : batch[0].promptVersion
+          const auditPromptVersion = leadAgentAuditPromptVersion(batch[0].promptVersion, runtime)
           const promptVersion = await registerLeadPipelinePromptVersion({
             agentProfile: LEAD_SUBJECT_AGENT_PROFILE,
             promptVersion: auditPromptVersion,

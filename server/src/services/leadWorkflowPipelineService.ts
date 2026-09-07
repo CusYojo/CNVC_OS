@@ -15,6 +15,7 @@ import {
   type LeadWorkflowAgentProfile,
   type LeadWorkflowAgentQueryFactory,
 } from './leadWorkflowAgentService.js'
+import { leadAgentAuditPromptVersion } from './leadAgentPromptVersion.js'
 
 export const SUBMIT_LEAD_DECISION_TOOL = 'submit_lead_decision'
 
@@ -120,9 +121,7 @@ export async function executeLeadWorkflowStage(input: {
   const contract = leadWorkflowAgentContract(input.profile)
   const model = input.model || process.env.LLM_MODEL || 'gpt-5.6-sol'
   const runtime = leadWorkflowAgentRuntime(model, Boolean(options.queryFactory))
-  const auditPromptVersion = runtime === 'codex-cli'
-    ? `${contract.promptVersion}-codex-v1`
-    : contract.promptVersion
+  const auditPromptVersion = leadAgentAuditPromptVersion(contract.promptVersion, runtime)
   const promptVersion = await registerLeadPipelinePromptVersion({
     agentProfile: input.profile,
     promptVersion: auditPromptVersion,

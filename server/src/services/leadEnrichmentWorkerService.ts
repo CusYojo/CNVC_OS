@@ -8,6 +8,7 @@ import {
   LEAD_ENRICHMENT_SCHEMA_VERSION,
   LEAD_ENRICHMENT_TERMINAL_TOPIC_STATUSES,
   leadDetailEnrichmentTopicApplies,
+  leadEnrichmentRuntimePolicy,
   leadResearchWebEnrichmentEnabled,
   normalizePaperIdentity,
   topicRequiresConfirmedEntity,
@@ -703,7 +704,7 @@ function poll(): Promise<void> {
 }
 
 export async function startLeadEnrichmentWorker() {
-  if (started || process.env.LEAD_ENRICHMENT_ENABLED === 'false') return
+  if (started || !leadEnrichmentRuntimePolicy().workerEnabled) return
   stopping = false
   started = true
   await recoverExpiredLeadEnrichmentLeases()
@@ -729,13 +730,15 @@ export async function stopLeadEnrichmentWorker() {
 
 export async function leadEnrichmentWorkerHealth() {
   try {
+    const runtimePolicy = leadEnrichmentRuntimePolicy()
     const [rows] = await pool.query<Array<RowDataPacket & { queued: number; running: number; retrying: number; dead_letter: number }>>(
       `SELECT SUM(status='queued') queued,SUM(status='running') running,SUM(status='retrying') retrying,
               SUM(status='dead_letter') dead_letter FROM ${topicRunsTable}`,
     )
     return {
-      name: 'mysql-lead-enrichment', ok: process.env.LEAD_ENRICHMENT_ENABLED === 'false' || (started && !stopping),
-      inProcess: true, enabled: process.env.LEAD_ENRICHMENT_ENABLED !== 'false', owner, active: active.size,
+      name: 'mysql-lead-enrichment', ok: !runtimePolicy.workerEnabled || (started && !stopping),
+      inProcess: true, enabled: runtimePolicy.workerEnabled, acceptNewJobs: runtimePolicy.acceptNewJobs,
+      owner, active: active.size,
       triggerTypeFilter: triggerTypeFilter || null,
       localThrottleUntil: localThrottleUntilMs > Date.now() ? new Date(localThrottleUntilMs).toISOString() : null,
       queued: Number(rows[0]?.queued || 0), running: Number(rows[0]?.running || 0),
