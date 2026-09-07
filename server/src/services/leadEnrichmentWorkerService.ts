@@ -288,6 +288,14 @@ function paperDeterministicFacts(topicKey: LeadEnrichmentTopicKey, radarProfile:
   return []
 }
 
+export function paperMetadataEvidenceAcceptanceMode(documentText: unknown, quote: unknown): 'strict' | 'web_hit' {
+  return typeof documentText === 'string'
+    && typeof quote === 'string'
+    && sourceDocumentContainsQuote(documentText, quote)
+    ? 'strict'
+    : 'web_hit'
+}
+
 async function finishTopic(lease: TopicLease, input: {
   status: 'completed' | 'partial' | 'missing' | 'not_applicable' | 'review'
   metrics: JsonObject
@@ -431,31 +439,41 @@ async function executeTopic(lease: TopicLease) {
   const deterministic = isResearch ? paperDeterministicFacts(lease.topic_key, radarProfile) : []
   let insertedFacts = 0
   let deterministicRejectedFactCount = 0
+  let deterministicReferenceFactCount = 0
   for (const fact of deterministic) {
-    let document: Awaited<ReturnType<typeof fetchLeadSourceDocument>>
+    let document: Awaited<ReturnType<typeof fetchLeadSourceDocument>> | undefined
     try {
       document = await fetchLeadSourceDocument({ url: fact.evidence[0].sourceUrl, leadId: lease.lead_id })
-    } catch {
-      continue
-    }
-    if (!sourceDocumentContainsQuote(document.text, fact.evidence[0].quote)) continue
+    } catch { /* Retain already-ingested paper metadata as reference evidence below. */ }
+    const acceptanceMode = paperMetadataEvidenceAcceptanceMode(document?.text, fact.evidence[0].quote)
+    const strictEvidence = acceptanceMode === 'strict' ? document : undefined
     const factSubject = routedSubject(fact.factKey)
     const candidate = {
       leadId: lease.lead_id, topicRunId: lease.id, topicKey: lease.topic_key,
       subjectType: factSubject.subjectType, subjectId: factSubject.subjectId, factKey: fact.factKey, value: fact.value,
-      evidenceLevel: 'E2', verificationStatus: 'verified', evidence: fact.evidence.map((evidence) => ({
-        ...evidence, sourceDocumentId: document.id, sourceUrl: document.finalUrl,
-        contentType: document.contentType, title: document.title, publisher: document.publisher,
-        pageHash: document.contentHash, publishedAt: document.publishedAt, accessedAt: document.accessedAt,
-        reliability: 'E2',
-      })),
+      acceptanceMode,
+      evidenceLevel: strictEvidence ? 'E2' as const : 'E3' as const,
+      verificationStatus: 'verified' as const,
+      evidence: strictEvidence
+        ? fact.evidence.map((evidence) => ({
+          ...evidence, sourceDocumentId: strictEvidence.id, sourceUrl: strictEvidence.finalUrl,
+          contentType: strictEvidence.contentType, title: strictEvidence.title, publisher: strictEvidence.publisher,
+          pageHash: strictEvidence.contentHash, publishedAt: strictEvidence.publishedAt, accessedAt: strictEvidence.accessedAt,
+          reliability: 'E2',
+        }))
+        : fact.evidence.map((evidence) => ({
+          ...evidence, sourceDocumentId: null, accessedAt: new Date(), reliability: 'E3',
+        })),
     } as const
     try { validateLeadFactCandidate(candidate) } catch {
       deterministicRejectedFactCount += 1
       continue
     }
     const persisted = await persistLeadFact(candidate)
-    if (persisted.inserted || persisted.unchanged) insertedFacts += 1
+    if (persisted.inserted || persisted.unchanged) {
+      insertedFacts += 1
+      if (acceptanceMode === 'web_hit') deterministicReferenceFactCount += 1
+    }
   }
   await recordTopicPhase(lease, 'planning')
   const researchGaps = isResearch ? leadResearchTopicGaps(lease.topic_key, radarProfile) : []
@@ -466,6 +484,7 @@ async function executeTopic(lease: TopicLease) {
       metrics: {
         deterministicFacts: insertedFacts,
         deterministicRejectedFactCount,
+        deterministicReferenceFactCount,
         webResearch: 'disabled_or_before_cutoff',
         identifiedGaps: researchGaps,
         durationMs: Date.now() - topicStartedAt,
@@ -478,7 +497,12 @@ async function executeTopic(lease: TopicLease) {
   if (isResearch && researchGaps.length === 0 && insertedFacts > 0) {
     await finishTopic(lease, {
       status: 'completed',
-      metrics: { deterministicFacts: insertedFacts, identifiedGaps: [], webResearch: 'gap_driven_skip', durationMs: Date.now() - topicStartedAt },
+      metrics: {
+        deterministicFacts: insertedFacts,
+        deterministicRejectedFactCount,
+        deterministicReferenceFactCount,
+        identifiedGaps: [], webResearch: 'gap_driven_skip', durationMs: Date.now() - topicStartedAt,
+      },
       promptVersion: 'lead-research-deterministic-metadata-v1',
       queryPlan: [],
     })
@@ -660,6 +684,7 @@ async function executeTopic(lease: TopicLease) {
       subjectMismatchObserved,
       persistenceRejectedFactCount: validationRejected,
       deterministicRejectedFactCount,
+      deterministicReferenceFactCount,
       lowerPriorityRejected,
       candidateEvidenceFailed,
       gaps: web.gaps.length + Math.max(0, candidateFactCount - validatedFacts.length),

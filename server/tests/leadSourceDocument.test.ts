@@ -6,6 +6,7 @@ import {
   isPrivateLeadSourceAddress,
   sourceDocumentContainsQuote,
 } from '../src/services/leadSourceDocumentService.js'
+import { paperMetadataEvidenceAcceptanceMode } from '../src/services/leadEnrichmentWorkerService.js'
 
 test('normalizes tracking parameters and identifies private address ranges', () => {
   assert.equal(canonicalLeadSourceUrl('HTTPS://Example.COM/path?utm_source=x&id=1#part'), 'https://example.com/path?id=1')
@@ -61,4 +62,10 @@ test('honors a robots.txt disallow rule', async () => {
       return new Response('<p>must not fetch</p>', { status: 200, headers: { 'content-type': 'text/html' } })
     }) as typeof fetch,
   }), /robots policy disallows/)
+})
+
+test('paper metadata remains usable as reference evidence when a source body cannot verify the quote', () => {
+  assert.equal(paperMetadataEvidenceAcceptanceMode(undefined, 'A paper title'), 'web_hit')
+  assert.equal(paperMetadataEvidenceAcceptanceMode('Different source content', 'A paper title'), 'web_hit')
+  assert.equal(paperMetadataEvidenceAcceptanceMode('A  paper\n title', 'A paper title'), 'strict')
 })
