@@ -409,7 +409,7 @@ export function buildOpenAlexWorksUrl(input: {
   if (mailto) url.searchParams.set('mailto', mailto)
   url.searchParams.set('search', cleanText(input.query) || 'artificial intelligence')
   url.searchParams.set('filter', `from_publication_date:${input.fromDate},to_publication_date:${input.toDate}`)
-  url.searchParams.set('sort', '-publication_date')
+  url.searchParams.set('sort', 'publication_date:desc')
   url.searchParams.set('per_page', String(Math.min(100, Math.max(1, input.limit))))
   return url.toString()
 }

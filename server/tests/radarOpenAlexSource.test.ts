@@ -15,6 +15,7 @@ test('OpenAlex paper source is a default enabled fallback and does not require a
   }))
   assert.equal(url.searchParams.has('api_key'), false)
   assert.equal(url.searchParams.get('per_page'), '50')
+  assert.equal(url.searchParams.get('sort'), 'publication_date:desc')
   assert.equal(url.searchParams.get('filter'), 'from_publication_date:2026-09-01,to_publication_date:2026-09-07')
 })
 
