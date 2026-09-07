@@ -3,6 +3,7 @@ import test from 'node:test'
 import {
   leadEnrichmentResearchAgentProfile,
   leadTopicResearchContract,
+  parseLeadTopicResearchOutput,
   researchLeadTopicWithWeb,
 } from '../src/services/leadTopicWebResearchService.js'
 
@@ -12,6 +13,22 @@ test('isolates enrichment circuit history by backend and model route', () => {
   assert.notEqual(repaired, leadEnrichmentResearchAgentProfile('gateway', 'Doubao-seed-2-0-mini'))
   assert.notEqual(repaired, leadEnrichmentResearchAgentProfile('codex-cli', 'gpt-5.6-sol'))
   assert.ok(repaired.length <= 64)
+})
+
+test('accepts reference-grade model output without arbitrary fact-count or gap-shape rejection', () => {
+  const facts = Array.from({ length: 31 }, (_, index) => ({
+    factKey: 'profile.product', value: `产品${index + 1}`, quote: `产品${index + 1}`,
+    sourceUrls: ['https://example.com/source'], extraModelNote: 'ignored',
+  }))
+  const parsed = parseLeadTopicResearchOutput(JSON.stringify({
+    facts,
+    gaps: [{ field: 'profile.website', reason: 'not found' }],
+    conflicts: [],
+    extraEnvelopeNote: 'ignored',
+  }))
+  assert.equal(parsed.facts.length, 31)
+  assert.equal(parsed.gaps.length, 1)
+  assert.match(parsed.gaps[0]!, /profile\.website/)
 })
 
 test('research topics use stable-identity paper contracts', () => {
