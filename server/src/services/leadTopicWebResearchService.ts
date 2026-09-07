@@ -215,14 +215,25 @@ const RESEARCH_CODEX_BATCH_TOPIC_GROUPS = [
 const codexBatchCache = new Map<string, Map<LeadEnrichmentTopicKey, CodexCliTopicWebSearchResult>>()
 const codexBatchInflight = new Map<string, Promise<void>>()
 
-async function withLeadEnrichmentResearchPermit<T>(run: () => Promise<T>): Promise<T> {
+export function leadEnrichmentResearchAgentProfile(backend: string, model: string) {
+  const routeIdentity = `${identity(backend) || 'gateway'}:${identity(model) || 'default'}`
+  return `lead-enrichment-web-research:${createHash('sha256').update(routeIdentity).digest('hex').slice(0, 16)}`
+}
+
+async function withLeadEnrichmentResearchPermit<T>(input: {
+  backend: string
+  model: string
+  run: () => Promise<T>
+}): Promise<T> {
   const reservationUsd = Math.max(0.01, Math.min(4, Number(process.env.LEAD_ENRICHMENT_RESERVATION_USD) || 0.25))
   const permit = await acquireLeadAgentRuntimePermit({
-    agentProfile: 'lead-enrichment-web-research',
+    // Isolate the circuit history by effective runtime route. A retired model
+    // running on another host must not keep a repaired production route open.
+    agentProfile: leadEnrichmentResearchAgentProfile(input.backend, input.model),
     reservationMicrousd: Math.round(reservationUsd * 1_000_000),
   })
   try {
-    const result = await run()
+    const result = await input.run()
     // Codex CLI exposes tokens but not authoritative billed cost. Charging the
     // reservation keeps the cross-process daily budget conservative.
     await finishLeadAgentRuntimePermit({
@@ -702,10 +713,13 @@ export async function researchLeadTopicWithWeb(input: {
         const inflightKey = `${cacheKey}:${batchGroup[0]}`
         let pending = codexBatchInflight.get(inflightKey)
         if (!pending) {
-          pending = withLeadEnrichmentResearchPermit(() => requestCodexCliMultiTopicWebSearchText({
-            prompt: codexMultiTopicPrompt({ ...input, topicKeys: effectiveBatchGroup }), model,
-            timeoutMs: codexTimeoutMs, topicKeys: effectiveBatchGroup,
-          })).then((results) => {
+          pending = withLeadEnrichmentResearchPermit({
+            backend: 'codex-cli', model,
+            run: () => requestCodexCliMultiTopicWebSearchText({
+              prompt: codexMultiTopicPrompt({ ...input, topicKeys: effectiveBatchGroup }), model,
+              timeoutMs: codexTimeoutMs, topicKeys: effectiveBatchGroup,
+            }),
+          }).then((results) => {
             const cached = codexBatchCache.get(cacheKey) ?? new Map()
             for (const result of results) cached.set(result.topicKey as LeadEnrichmentTopicKey, result)
             codexBatchCache.set(cacheKey, cached)
@@ -720,19 +734,25 @@ export async function researchLeadTopicWithWeb(input: {
         }
         response = consumeCodexBatchResult(cacheKey, input.topicKey)
       }
-      response ??= await withLeadEnrichmentResearchPermit(() => requestCodexCliWebSearchText({
-        prompt: messages[0].content, model, timeoutMs: codexTimeoutMs,
-      }))
+      response ??= await withLeadEnrichmentResearchPermit({
+        backend: 'codex-cli', model,
+        run: () => requestCodexCliWebSearchText({
+          prompt: messages[0].content, model, timeoutMs: codexTimeoutMs,
+        }),
+      })
     } else {
-      response = await withLeadEnrichmentResearchPermit(() => requestAiGatewayWebSearchText({
-        baseUrl,
-        apiKey,
-        model,
-        timeoutMs: Math.min(360_000, timeoutMs),
-        maxTokens: 6_000,
-        maxToolCalls: 6,
-        messages: [...messages],
-      }))
+      response = await withLeadEnrichmentResearchPermit({
+        backend: 'gateway', model,
+        run: () => requestAiGatewayWebSearchText({
+          baseUrl,
+          apiKey,
+          model,
+          timeoutMs: Math.min(360_000, timeoutMs),
+          maxTokens: 6_000,
+          maxToolCalls: 6,
+          messages: [...messages],
+        }),
+      })
     }
     const budgetMultiplier = 'budgetMultiplier' in response ? Number(response.budgetMultiplier) || 1 : 1
     const budget = validateLeadTopicResearchBudget(response.usage, process.env, budgetMultiplier)

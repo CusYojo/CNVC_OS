@@ -1,6 +1,18 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { leadTopicResearchContract, researchLeadTopicWithWeb } from '../src/services/leadTopicWebResearchService.js'
+import {
+  leadEnrichmentResearchAgentProfile,
+  leadTopicResearchContract,
+  researchLeadTopicWithWeb,
+} from '../src/services/leadTopicWebResearchService.js'
+
+test('isolates enrichment circuit history by backend and model route', () => {
+  const repaired = leadEnrichmentResearchAgentProfile('gateway', 'gpt-5.6-sol')
+  assert.equal(repaired, leadEnrichmentResearchAgentProfile('gateway', 'gpt-5.6-sol'))
+  assert.notEqual(repaired, leadEnrichmentResearchAgentProfile('gateway', 'Doubao-seed-2-0-mini'))
+  assert.notEqual(repaired, leadEnrichmentResearchAgentProfile('codex-cli', 'gpt-5.6-sol'))
+  assert.ok(repaired.length <= 64)
+})
 
 test('research topics use stable-identity paper contracts', () => {
   const basic = leadTopicResearchContract('basic_profile', 'research')
