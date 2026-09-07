@@ -128,7 +128,7 @@ async function requestAiGatewayCompletion(input: {
   })
 }
 
-export async function requestAiGatewayText(input: {
+export async function requestAiGatewayTextWithUsage(input: {
   baseUrl: string
   apiKey?: string
   model: string
@@ -139,7 +139,11 @@ export async function requestAiGatewayText(input: {
   reasoningEffort?: 'low' | 'medium' | 'high'
   fetchImpl?: FetchLike
 }) {
-  return (await requestAiGatewayCompletion(input)).text
+  return await requestAiGatewayCompletion(input)
+}
+
+export async function requestAiGatewayText(input: Parameters<typeof requestAiGatewayTextWithUsage>[0]) {
+  return (await requestAiGatewayTextWithUsage(input)).text
 }
 
 export type AiGatewayWebSearchSource = { url: string; title: string }

@@ -97,9 +97,15 @@ export function topicRequiresConfirmedEntity(topicKey: LeadEnrichmentTopicKey) {
 export function leadEnrichmentRuntimePolicy(
   env: Record<string, string | undefined> = process.env,
 ) {
+  const processAfterText = String(env.LEAD_ENRICHMENT_PROCESS_AFTER ?? '').trim()
+  const processAfterMs = processAfterText ? Date.parse(processAfterText) : null
+  if (processAfterText && !Number.isFinite(processAfterMs)) {
+    throw new Error('LEAD_ENRICHMENT_PROCESS_AFTER must be a valid date')
+  }
   return {
     workerEnabled: env.LEAD_ENRICHMENT_ENABLED !== 'false',
     acceptNewJobs: env.LEAD_ENRICHMENT_ACCEPT_NEW_JOBS !== 'false',
+    processAfter: processAfterMs == null ? null : new Date(processAfterMs),
   }
 }
 

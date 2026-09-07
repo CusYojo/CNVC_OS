@@ -393,19 +393,41 @@ export function parseOpenAlexWorks(source: ManagedPublicSource, payload: unknown
   return rows
 }
 
+export function buildOpenAlexWorksUrl(input: {
+  sourceUrl: string
+  apiKey?: string
+  mailto?: string
+  query: string
+  fromDate: string
+  toDate: string
+  limit: number
+}) {
+  const url = new URL(input.sourceUrl)
+  const apiKey = cleanText(input.apiKey)
+  if (apiKey) url.searchParams.set('api_key', apiKey)
+  const mailto = cleanText(input.mailto)
+  if (mailto) url.searchParams.set('mailto', mailto)
+  url.searchParams.set('search', cleanText(input.query) || 'artificial intelligence')
+  url.searchParams.set('filter', `from_publication_date:${input.fromDate},to_publication_date:${input.toDate}`)
+  url.searchParams.set('sort', '-publication_date')
+  url.searchParams.set('per_page', String(Math.min(100, Math.max(1, input.limit))))
+  return url.toString()
+}
+
 async function collectOpenAlex(source: ManagedPublicSource, signal: AbortSignal, limit: number, options: { query?: string; days?: number } = {}): Promise<JsonObject[]> {
-  const apiKey = cleanText(process.env.OPENALEX_API_KEY)
-  if (!apiKey) throw new Error('缺少 OPENALEX_API_KEY，无法调用 OpenAlex 官方 Works API')
   const days = Math.min(90, Math.max(1, options.days ?? (Number(source.days) || 14)))
   const fromDate = shanghaiDate(-days)
   const toDate = shanghaiDate()
-  const url = new URL(source.url)
-  url.searchParams.set('api_key', apiKey)
-  url.searchParams.set('search', cleanText(options.query || source.keyword || process.env.OPENALEX_SEARCH_QUERY) || 'artificial intelligence')
-  url.searchParams.set('filter', `from_publication_date:${fromDate},to_publication_date:${toDate}`)
-  url.searchParams.set('sort', '-publication_date')
-  url.searchParams.set('per_page', String(Math.min(100, Math.max(1, limit))))
-  const payload = JSON.parse(await fetchText(url.toString(), signal, 35_000)) as unknown
+  const url = buildOpenAlexWorksUrl({
+    sourceUrl: source.url,
+    apiKey: process.env.OPENALEX_API_KEY,
+    mailto: process.env.OPENALEX_MAILTO,
+    query: cleanText(options.query || source.keyword || process.env.OPENALEX_SEARCH_QUERY),
+    fromDate,
+    toDate,
+    limit,
+  })
+  const payload = JSON.parse(await fetchText(url, signal, 35_000)) as unknown
   return parseOpenAlexWorks(source, payload, limit)
 }
 

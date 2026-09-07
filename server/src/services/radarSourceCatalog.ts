@@ -43,10 +43,10 @@ export const DEFAULT_RADAR_PUBLIC_SOURCES: RadarPublicSourceConfig[] = [
   { key: 'arxiv_cs_ai', url: 'https://rss.arxiv.org/rss/cs.AI', name: 'arXiv cs.AI', type: 'arxiv_rss', group: '论文', enabled: true, frequency: '工作日' },
   {
     key: 'openalex_ai', url: 'https://api.openalex.org/works', name: 'OpenAlex AI 论文',
-    type: 'openalex_api', group: '论文', enabled: false, frequency: '每天',
+    type: 'openalex_api', group: '论文', enabled: true, frequency: '每天',
     keyword: '("artificial intelligence" OR "machine learning" OR robotics OR semiconductor OR biotechnology)',
     max_entries_per_run: 50,
-    note: '默认停用；如需恢复，需先配置 OPENALEX_API_KEY 并在 Radar 来源管理中手动启用。',
+    note: 'arXiv 在部分网络环境不可达时的论文主数据源；OPENALEX_API_KEY 可选，配置后使用更高额度。',
   },
   { key: 'pedaily_quicknews', url: 'https://feeds.pedaily.cn/n/quicknews', name: '投资界 快讯', type: 'rss', group: '创投新闻', enabled: false, frequency: '每小时', note: '源站 TLS 不稳定，默认停用。' },
   { key: 'wanfang_ai', url: 'https://s.wanfangdata.com.cn/paper?q={keyword}', name: '万方论文搜索 人工智能', type: 'wanfang_search', group: '论文', enabled: false, keyword: '人工智能', frequency: '每天', note: '公开页主要返回前端外壳，默认不自动抓取。' },

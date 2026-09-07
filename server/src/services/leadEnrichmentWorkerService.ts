@@ -74,6 +74,7 @@ const pollMs = Math.max(500, Number(process.env.LEAD_ENRICHMENT_POLL_MS) || 2_00
 const leaseSeconds = Math.max(60, Number(process.env.LEAD_ENRICHMENT_LEASE_SECONDS) || 600)
 const concurrency = Math.max(1, Math.min(10, Number(process.env.LEAD_ENRICHMENT_CONCURRENCY) || 1))
 const maxAttempts = Math.max(1, Math.min(5, Number(process.env.LEAD_ENRICHMENT_MAX_ATTEMPTS) || 3))
+const processAfter = leadEnrichmentRuntimePolicy().processAfter
 const triggerTypeFilter = String(process.env.LEAD_ENRICHMENT_TRIGGER_TYPE_FILTER ?? '').normalize('NFKC').trim()
 if (triggerTypeFilter.length > 48) throw new Error('LEAD_ENRICHMENT_TRIGGER_TYPE_FILTER exceeds 48 characters')
 const active = new Map<string, Promise<void>>()
@@ -128,15 +129,17 @@ export async function recoverExpiredLeadEnrichmentLeases() {
      SET tr.status='retrying',tr.next_attempt_at=NOW(3),tr.lease_owner=NULL,tr.lease_expires_at=NULL,
          tr.metrics=JSON_SET(COALESCE(tr.metrics,JSON_OBJECT()),'$.lastLeaseDisposition','abandoned'),
          tr.last_error=CONCAT('abandoned: lease expired',IF(tr.last_error IS NULL,'',CONCAT(': ',LEFT(tr.last_error,512)))),tr.updated_at=NOW(3)
-     WHERE j.schema_version=? AND tr.status='running' AND tr.lease_expires_at IS NOT NULL AND tr.lease_expires_at<NOW(3)`,
-    [LEAD_ENRICHMENT_SCHEMA_VERSION],
+     WHERE j.schema_version=? AND (? IS NULL OR j.created_at>=?)
+       AND tr.status='running' AND tr.lease_expires_at IS NOT NULL AND tr.lease_expires_at<NOW(3)`,
+    [LEAD_ENRICHMENT_SCHEMA_VERSION, processAfter, processAfter],
   )
   await pool.query(
     `UPDATE ${jobsTable}
      SET status='queued',next_attempt_at=NOW(3),lease_owner=NULL,lease_expires_at=NULL,
          last_error=CONCAT('abandoned: job lease expired',IF(last_error IS NULL,'',CONCAT(': ',LEFT(last_error,512)))),updated_at=NOW(3)
-     WHERE schema_version=? AND status='running' AND lease_expires_at IS NOT NULL AND lease_expires_at<NOW(3)`,
-    [LEAD_ENRICHMENT_SCHEMA_VERSION],
+     WHERE schema_version=? AND (? IS NULL OR created_at>=?)
+       AND status='running' AND lease_expires_at IS NOT NULL AND lease_expires_at<NOW(3)`,
+    [LEAD_ENRICHMENT_SCHEMA_VERSION, processAfter, processAfter],
   )
   return Number((result as { affectedRows?: number }).affectedRows || 0)
 }
@@ -147,8 +150,9 @@ export async function quarantineProviderBudgetLeadEnrichmentRetries() {
   }>>(
     `SELECT tr.id,tr.job_id,tr.lead_id,tr.last_error FROM ${topicRunsTable} tr
      JOIN ${jobsTable} j ON j.id=tr.job_id
-     WHERE j.schema_version=? AND tr.status='retrying' AND tr.last_error IS NOT NULL`,
-    [LEAD_ENRICHMENT_SCHEMA_VERSION],
+     WHERE j.schema_version=? AND (? IS NULL OR j.created_at>=?)
+       AND tr.status='retrying' AND tr.last_error IS NOT NULL`,
+    [LEAD_ENRICHMENT_SCHEMA_VERSION, processAfter, processAfter],
   )
   const affected = rows.filter((row) => isLeadEnrichmentProviderBudgetError(new Error(row.last_error || '')))
   if (!affected.length) return 0
@@ -183,6 +187,7 @@ export async function claimLeadEnrichmentTopicLease(): Promise<TopicLease | null
        WHERE tr.status IN ('queued','retrying') AND tr.next_attempt_at<=NOW(3)
          AND (tr.lease_expires_at IS NULL OR tr.lease_expires_at<NOW(3))
          AND j.schema_version=?
+         AND (? IS NULL OR j.created_at>=?)
          AND (?='' OR j.trigger_type=?)
          AND j.status IN ('queued','running')
          AND (j.lease_owner IS NULL OR j.lease_owner=? OR j.lease_expires_at<NOW(3))
@@ -197,7 +202,7 @@ export async function claimLeadEnrichmentTopicLease(): Promise<TopicLease | null
          ))
        ORDER BY j.priority,tr.next_attempt_at,tr.created_at
        LIMIT 1 FOR UPDATE SKIP LOCKED`,
-      [LEAD_ENRICHMENT_SCHEMA_VERSION, triggerTypeFilter, triggerTypeFilter, owner],
+      [LEAD_ENRICHMENT_SCHEMA_VERSION, processAfter, processAfter, triggerTypeFilter, triggerTypeFilter, owner],
     )
     const row = rows[0]
     if (!row) { await connection.rollback(); return null }
@@ -740,6 +745,7 @@ export async function leadEnrichmentWorkerHealth() {
       inProcess: true, enabled: runtimePolicy.workerEnabled, acceptNewJobs: runtimePolicy.acceptNewJobs,
       owner, active: active.size,
       triggerTypeFilter: triggerTypeFilter || null,
+      processAfter: processAfter?.toISOString() || null,
       localThrottleUntil: localThrottleUntilMs > Date.now() ? new Date(localThrottleUntilMs).toISOString() : null,
       queued: Number(rows[0]?.queued || 0), running: Number(rows[0]?.running || 0),
       retrying: Number(rows[0]?.retrying || 0), deadLetter: Number(rows[0]?.dead_letter || 0),

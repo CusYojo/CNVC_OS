@@ -15,7 +15,11 @@ import {
   finishAiRuntimeRequest,
   markAiRuntimeFirstTokenFromSdkMessage,
 } from '../runtime/aiRuntimeTelemetry.js'
-import { runCodexStructuredOutput } from './codexStructuredOutputService.js'
+import {
+  codexStructuredOutputRuntime,
+  runCodexStructuredOutput,
+  type CodexStructuredOutputRuntime,
+} from './codexStructuredOutputService.js'
 
 export const LEAD_SUBJECT_AGENT_PROFILE = 'lead-subject-agent'
 export const LEAD_SUBJECT_AGENT_PROFILE_VERSION = 'lead-subject-agent-v1'
@@ -29,7 +33,7 @@ export type LeadSubjectAgentCandidate = {
 
 export type LeadSubjectAgentExecution = {
   output: unknown
-  runtime: 'claude-agent-sdk' | 'codex-cli'
+  runtime: 'claude-agent-sdk' | CodexStructuredOutputRuntime
   usage: {
     inputTokens: number
     outputTokens: number
@@ -45,9 +49,9 @@ export type LeadSubjectAgentExecution = {
 export function leadSubjectAgentRuntime(model?: string, forceClaudeSdk = false): LeadSubjectAgentExecution['runtime'] {
   if (forceClaudeSdk) return 'claude-agent-sdk'
   const configured = process.env.LEAD_SUBJECT_AGENT_BACKEND?.trim().toLowerCase()
-  if (configured === 'codex-cli' || configured === 'claude-agent-sdk') return configured
+  if (configured === 'codex-cli' || configured === 'codex-gateway' || configured === 'claude-agent-sdk') return configured
   return /^gpt-/i.test(model || process.env.RADAR_AI_REVIEW_MODEL || process.env.LLM_MODEL || '')
-    ? 'codex-cli'
+    ? codexStructuredOutputRuntime()
     : 'claude-agent-sdk'
 }
 
@@ -175,7 +179,8 @@ export async function runLeadSubjectAgentBatch(input: {
   const prompt = input.candidates
     .map((item) => `【candidateId=${item.candidateId}】\n${item.promptText || '无可用原文'}`)
     .join('\n\n')
-  if (leadSubjectAgentRuntime(config.model, Boolean(options.queryFactory)) === 'codex-cli') {
+  const runtime = leadSubjectAgentRuntime(config.model, Boolean(options.queryFactory))
+  if (runtime === 'codex-cli' || runtime === 'codex-gateway') {
     return await runCodexStructuredOutput({
       profile: LEAD_SUBJECT_AGENT_PROFILE,
       systemPrompt: input.systemPrompt,
@@ -184,6 +189,7 @@ export async function runLeadSubjectAgentBatch(input: {
       model: config.model,
       timeoutMs: options.timeoutMs ?? config.timeoutMs,
       workDir: options.workDir,
+      runtime,
     })
   }
   const runtimePermit = options.queryFactory ? null : await acquireLeadAgentRuntimePermit({

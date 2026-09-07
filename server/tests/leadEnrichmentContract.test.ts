@@ -190,14 +190,23 @@ test('only explicit relationship facts can bind evidence to directional entity r
 
 test('enrichment runtime has independent intake and worker switches', () => {
   assert.deepEqual(leadEnrichmentRuntimePolicy({}), {
-    workerEnabled: true, acceptNewJobs: true,
+    workerEnabled: true, acceptNewJobs: true, processAfter: null,
   })
   assert.deepEqual(leadEnrichmentRuntimePolicy({
     LEAD_ENRICHMENT_ENABLED: 'false',
     LEAD_ENRICHMENT_ACCEPT_NEW_JOBS: 'false',
   }), {
-    workerEnabled: false, acceptNewJobs: false,
+    workerEnabled: false, acceptNewJobs: false, processAfter: null,
   })
+  assert.equal(
+    leadEnrichmentRuntimePolicy({ LEAD_ENRICHMENT_PROCESS_AFTER: '2026-09-01T00:00:00+08:00' })
+      .processAfter?.toISOString(),
+    '2026-08-31T16:00:00.000Z',
+  )
+  assert.throws(
+    () => leadEnrichmentRuntimePolicy({ LEAD_ENRICHMENT_PROCESS_AFTER: 'invalid' }),
+    /must be a valid date/,
+  )
 })
 
 test('evidence priority is deterministic', () => {
