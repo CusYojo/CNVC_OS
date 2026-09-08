@@ -604,6 +604,7 @@ body:has(.fde-dashboard) { min-width: 320px; }
 }
 .fde-dashboard .personal-todo-row:first-child { border-top: 0; }
 .fde-dashboard .personal-todo-row:hover { background: var(--surface-2); }
+.fde-dashboard .personal-todo-row.is-completed .personal-todo-main strong { color: var(--ink-3); text-decoration: line-through; text-decoration-thickness: 1px; }
 .fde-dashboard .personal-todo-row.editing {
   grid-template-columns: minmax(220px, 1fr) 92px auto;
   background: color-mix(in srgb, var(--brand-soft) 35%, var(--surface));
@@ -623,6 +624,7 @@ body:has(.fde-dashboard) { min-width: 320px; }
 .fde-dashboard .personal-todo-main small { margin-top: 4px; color: var(--ink-3); font-size: 12px; }
 .fde-dashboard .todo-row-actions { display: flex; align-items: center; gap: 5px; }
 .fde-dashboard .todo-complete-button,
+.fde-dashboard .todo-completed-mark,
 .fde-dashboard .todo-icon-button {
   width: 34px;
   height: 34px;
@@ -636,6 +638,7 @@ body:has(.fde-dashboard) { min-width: 320px; }
   transition: border-color .16s ease, color .16s ease, background .16s ease;
 }
 .fde-dashboard .todo-complete-button { border-color: color-mix(in srgb, var(--positive) 28%, var(--line)); color: var(--positive); }
+.fde-dashboard .todo-completed-mark { border-color: transparent; color: var(--positive); background: var(--positive-soft); }
 .fde-dashboard .todo-complete-button:hover,
 .fde-dashboard .todo-icon-button.confirm:hover { border-color: var(--positive); color: #fff; background: var(--positive); }
 .fde-dashboard .todo-icon-button:hover { border-color: color-mix(in srgb, var(--brand) 40%, var(--line)); color: var(--brand-strong); background: var(--brand-soft); }
@@ -650,6 +653,24 @@ body:has(.fde-dashboard) { min-width: 320px; }
 .fde-dashboard .todo-icon-button:focus-visible,
 .fde-dashboard .personal-todo-create .input:focus-visible,
 .fde-dashboard .personal-todo-row .input:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.fde-dashboard .todo-history-section {
+  border-top: 1px solid color-mix(in srgb, var(--warning) 18%, var(--line));
+  background: color-mix(in srgb, var(--warning-soft) 38%, var(--surface));
+}
+.fde-dashboard .todo-history-head {
+  min-height: 46px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 18px;
+  color: var(--ink-2);
+}
+.fde-dashboard .todo-history-head strong { font-size: 13px; font-weight: 650; }
+.fde-dashboard .todo-history-head span { color: var(--warning); font-size: 12px; font-weight: 600; }
+.fde-dashboard .todo-history-section .personal-todo-list { border-top: 1px solid color-mix(in srgb, var(--warning) 13%, var(--line)); }
+.fde-dashboard .todo-history-section .personal-todo-row { border-color: color-mix(in srgb, var(--warning) 13%, var(--line)); background: color-mix(in srgb, var(--warning-soft) 22%, var(--surface)); }
+.fde-dashboard .todo-history-section .personal-todo-row:hover { background: color-mix(in srgb, var(--warning-soft) 55%, var(--surface)); }
 
 .fde-dashboard .dashboard-calendar-shell { margin-top: 18px; }
 .fde-dashboard .dashboard-calendar-shell .fde-workspace { max-width: none; padding: 0; }
@@ -674,6 +695,7 @@ body:has(.fde-dashboard) { min-width: 320px; }
   .fde-dashboard .personal-todo-create .todo-title-field { grid-column: 1 / -1; }
   .fde-dashboard .personal-todo-create .button { grid-column: 1 / -1; width: 100%; }
   .fde-dashboard .personal-todo-row { padding: 12px 13px; }
+  .fde-dashboard .todo-history-head { padding-inline: 13px; }
   .fde-dashboard .personal-todo-row.editing { grid-template-columns: 1fr 1fr; }
   .fde-dashboard .personal-todo-row.editing .todo-edit-title { grid-column: 1 / -1; }
   .fde-dashboard .personal-todo-row.editing .todo-row-actions { justify-self: end; }

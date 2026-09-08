@@ -25,6 +25,7 @@ const roleDefinitions: Record<string, { name: string; category: string; scope: s
   FDE_SECRETARY: { name: '推进秘书', category: 'secretary', scope: 'self' },
   FDE_COORDINATOR: { name: '时间协调人', category: 'coordinator', scope: 'self' },
   FDE_FINANCE: { name: '财务', category: 'specialist', scope: 'self' },
+  FDE_CASHIER: { name: '出纳', category: 'specialist', scope: 'self' },
   FDE_LEGAL: { name: '法务', category: 'specialist', scope: 'self' },
   INVESTMENT_MANAGER: { name: '投资经理', category: 'member', scope: 'self' },
   RISK_LEGAL: { name: '风控与法务', category: 'specialist', scope: 'self' },

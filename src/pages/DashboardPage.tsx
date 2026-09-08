@@ -40,18 +40,23 @@ type PersonalTodo = {
   version: number
 }
 
-const terminalTodoStatuses = new Set(['已完成', '已关闭', '已取消', '已归档'])
+const hiddenTodoStatuses = new Set(['已关闭', '已取消', '已归档'])
 function shiftDashboardDate(date: string, days: number) {
   return new Date(Date.parse(`${date}T00:00:00Z`) + days * 86400000).toISOString().slice(0, 10)
 }
 function todoDateLabel(date: string, today: string) {
   if (date === today) return '今天'
+  if (date < today) {
+    const days = Math.max(1, Math.round((Date.parse(`${today}T00:00:00Z`) - Date.parse(`${date}T00:00:00Z`)) / 86400000))
+    return days === 1 ? '昨日' : `逾期 ${days} 天`
+  }
   if (date === shiftDashboardDate(today, 1)) return '明天'
   if (date === shiftDashboardDate(today, 2)) return '后天'
   return '三天后'
 }
 
 function PersonalTodoPanel({ data, onOpenTask }: { data: WorkbenchData; onOpenTask: (id: string) => void }) {
+  const previousDay = shiftDashboardDate(data.today, -1)
   const lastDay = shiftDashboardDate(data.today, 2)
   const [todos, setTodos] = useState<PersonalTodo[]>([])
   const [draft, setDraft] = useState({ title: '', priority: '中' as PersonalTodo['priority'] })
@@ -63,24 +68,28 @@ function PersonalTodoPanel({ data, onOpenTask }: { data: WorkbenchData; onOpenTa
   useEffect(() => {
     let active = true
     setLoading(true); setError('')
-    void apiGet<{ list: PersonalTodo[] }>(`/todos?personal=true&dateFrom=${data.today}&dateTo=${lastDay}`).then(response => {
-      if (active) setTodos(response.list)
+    void Promise.all([
+      apiGet<{ list: PersonalTodo[] }>(`/todos?personal=true&dateTo=${lastDay}`),
+      apiGet<{ list: PersonalTodo[] }>(`/todos?personal=true&includeCompleted=true&dateFrom=${previousDay}&dateTo=${data.today}`),
+    ]).then(([open, recent]) => {
+      if (active) setTodos([...new Map([...open.list, ...recent.list].map(todo => [todo.id, todo])).values()])
     }).catch(cause => {
       if (active) setError(cause instanceof Error ? cause.message : '个人事项加载失败')
     }).finally(() => {
       if (active) setLoading(false)
     })
     return () => { active = false }
-  }, [data.actorId, data.today, lastDay])
+  }, [data.actorId, data.today, lastDay, previousDay])
 
-  const visibleTodos = todos.filter(todo => !todo.projectId
+  const personalTodos = todos.filter(todo => !todo.projectId
     && todo.ownerUserId === data.actorId
     && !todo.approvalRequestId
     && todo.type !== '流程'
-    && !terminalTodoStatuses.has(todo.status)
-    && Boolean(todo.dueDate)
-    && todo.dueDate === data.today)
+    && !hiddenTodoStatuses.has(todo.status)
+    && Boolean(todo.dueDate))
     .sort((a, b) => (a.dueDate ?? '').localeCompare(b.dueDate ?? '') || ({ 高: 0, 中: 1, 低: 2 }[a.priority] - { 高: 0, 中: 1, 低: 2 }[b.priority]) || a.id.localeCompare(b.id))
+  const todayTodos = personalTodos.filter(todo => todo.dueDate === data.today)
+  const historicalTodos = personalTodos.filter(todo => todo.dueDate! < data.today)
 
   const createTodo = async () => {
     const title = draft.title.trim()
@@ -114,7 +123,7 @@ function PersonalTodoPanel({ data, onOpenTask }: { data: WorkbenchData; onOpenTa
       const updated = await apiPatch<PersonalTodo>(`/todos/${editing.id}`, {
         expectedVersion: current.version,
         title: editing.title.trim(),
-        dueDate: data.today,
+        dueDate: current.dueDate,
         priority: editing.priority,
       })
       setTodos(rows => rows.map(todo => todo.id === updated.id ? updated : todo))
@@ -147,9 +156,26 @@ function PersonalTodoPanel({ data, onOpenTask }: { data: WorkbenchData; onOpenTa
     } finally { setBusy('') }
   }
 
+  const renderTodo = (todo: PersonalTodo, historical = false) => {
+    const completed = todo.status === '已完成'
+    if (!completed && editing?.id === todo.id) return <form className={`personal-todo-row editing${historical ? ' is-historical' : ''}`} key={todo.id} onSubmit={event => { event.preventDefault(); void saveTodo() }}>
+      <input className="input todo-edit-title" aria-label="待办内容" maxLength={255} value={editing.title} onChange={event => setEditing({ ...editing, title: event.target.value })} autoFocus />
+      <select className="input" aria-label="优先级" value={editing.priority} onChange={event => setEditing({ ...editing, priority: event.target.value as PersonalTodo['priority'] })}><option value="高">高</option><option value="中">中</option><option value="低">低</option></select>
+      <div className="todo-row-actions"><button className="todo-icon-button confirm" type="submit" aria-label="保存待办" title="保存" disabled={busy === todo.id || !editing.title.trim()}><Check size={16} /></button><button className="todo-icon-button" type="button" aria-label="取消编辑" title="取消" disabled={busy === todo.id} onClick={() => setEditing(null)}><X size={16} /></button></div>
+    </form>
+    return <div className={`personal-todo-row${historical ? ' is-historical' : ''}${completed ? ' is-completed' : ''}`} key={todo.id}>
+      {completed ? <span className="todo-completed-mark" aria-label="已完成"><Check size={15} /></span> : <button className="todo-complete-button" type="button" aria-label={`完成待办：${todo.title}`} title="标记完成" disabled={busy === todo.id} onClick={() => void completeTodo(todo)}><Check size={15} /></button>}
+      <div className="personal-todo-main"><strong>{todo.title}</strong><small>{completed ? '已完成' : todoDateLabel(todo.dueDate!, data.today)} · {todo.priority}优先级</small></div>
+      <div className="todo-row-actions">{!completed && <button className="todo-icon-button" type="button" aria-label={`编辑待办：${todo.title}`} title="编辑" disabled={Boolean(busy)} onClick={() => setEditing({ id: todo.id, title: todo.title, priority: todo.priority })}><Pencil size={15} /></button>}<button className="todo-icon-button danger" type="button" aria-label={`删除待办：${todo.title}`} title="删除" disabled={Boolean(busy)} onClick={() => void removeTodo(todo)}><Trash2 size={15} /></button></div>
+    </div>
+  }
+
   const todayProjectActions = data.actions.filter(action => action.dueDate === data.today)
+  const historicalProjectActions = data.actions.filter(action => Boolean(action.dueDate) && action.dueDate! < data.today)
+  const openPersonalCount = personalTodos.filter(todo => todo.status !== '已完成' && todo.dueDate! <= data.today).length
+  const pendingCount = openPersonalCount + todayProjectActions.length + historicalProjectActions.length
   return <section className="card personal-todo-card work-todo-card">
-    <div className="card-head"><div><h2>今日待办</h2></div><Badge tone={visibleTodos.length + todayProjectActions.length ? 'info' : 'neutral'}>{visibleTodos.length + todayProjectActions.length} 项</Badge></div>
+    <div className="card-head"><div><h2>今日待办</h2></div><Badge tone={pendingCount ? 'info' : 'neutral'}>{pendingCount} 项</Badge></div>
     <form className="personal-todo-create" onSubmit={event => { event.preventDefault(); void createTodo() }}>
       <label className="todo-title-field"><span className="sr-only">待办内容</span><input className="input" maxLength={255} placeholder="输入待办内容" value={draft.title} onChange={event => setDraft({ ...draft, title: event.target.value })} /></label>
       <span className="todo-today-label">今天</span>
@@ -163,18 +189,21 @@ function PersonalTodoPanel({ data, onOpenTask }: { data: WorkbenchData; onOpenTa
         <div className="personal-todo-main"><strong>{action.title}</strong><small>{action.projectName} · 今日任务</small></div>
         <button className="button primary small" type="button" onClick={() => onOpenTask(action.id)}>处理任务</button>
       </div>)}
-      {visibleTodos.map(todo => editing?.id === todo.id ? <form className="personal-todo-row editing" key={todo.id} onSubmit={event => { event.preventDefault(); void saveTodo() }}>
-        <input className="input todo-edit-title" aria-label="待办内容" maxLength={255} value={editing.title} onChange={event => setEditing({ ...editing, title: event.target.value })} autoFocus />
-        <select className="input" aria-label="优先级" value={editing.priority} onChange={event => setEditing({ ...editing, priority: event.target.value as PersonalTodo['priority'] })}><option value="高">高</option><option value="中">中</option><option value="低">低</option></select>
-        <div className="todo-row-actions"><button className="todo-icon-button confirm" type="submit" aria-label="保存待办" title="保存" disabled={busy === todo.id || !editing.title.trim()}><Check size={16} /></button><button className="todo-icon-button" type="button" aria-label="取消编辑" title="取消" disabled={busy === todo.id} onClick={() => setEditing(null)}><X size={16} /></button></div>
-      </form> : <div className="personal-todo-row" key={todo.id}>
-        <button className="todo-complete-button" type="button" aria-label={`完成待办：${todo.title}`} title="标记完成" disabled={busy === todo.id} onClick={() => void completeTodo(todo)}><Check size={15} /></button>
-        <div className="personal-todo-main"><strong>{todo.title}</strong><small>{todoDateLabel(todo.dueDate!, data.today)} · {todo.priority}优先级</small></div>
-        <div className="todo-row-actions"><button className="todo-icon-button" type="button" aria-label={`编辑待办：${todo.title}`} title="编辑" disabled={Boolean(busy)} onClick={() => setEditing({ id: todo.id, title: todo.title, priority: todo.priority })}><Pencil size={15} /></button><button className="todo-icon-button danger" type="button" aria-label={`删除待办：${todo.title}`} title="删除" disabled={Boolean(busy)} onClick={() => void removeTodo(todo)}><Trash2 size={15} /></button></div>
-      </div>)}
-      {!loading && !visibleTodos.length && !todayProjectActions.length && <Empty title="今天没有待办" note="" />}
+      {todayTodos.map(todo => renderTodo(todo))}
+      {!loading && !todayTodos.length && !todayProjectActions.length && <Empty title="今天没有待办" note="" />}
       {loading && <Empty title="正在加载个人事项…" note="" />}
     </div>
+    {!loading && (historicalProjectActions.length > 0 || historicalTodos.length > 0) && <div className="todo-history-section">
+      <div className="todo-history-head"><strong>历史待办</strong><span>{historicalProjectActions.length + historicalTodos.filter(todo => todo.status !== '已完成').length} 项未完成</span></div>
+      <div className="personal-todo-list">
+        {historicalProjectActions.map(action => <div className="personal-todo-row project-work-todo is-historical" key={`project-${action.id}`}>
+          <span className={`todo-project-state ${workbenchTone(action.status)}`} aria-hidden="true" />
+          <div className="personal-todo-main"><strong>{action.title}</strong><small>{action.projectName} · {todoDateLabel(action.dueDate!, data.today)}</small></div>
+          <button className="button primary small" type="button" onClick={() => onOpenTask(action.id)}>处理任务</button>
+        </div>)}
+        {historicalTodos.map(todo => renderTodo(todo, true))}
+      </div>
+    </div>}
   </section>
 }
 function roleHeading(data: WorkbenchData) {

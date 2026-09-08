@@ -191,7 +191,10 @@ export async function listCalendar(userId: string, rawWeek: string, view: 'perso
       add({ id: row.id, source: 'task', title: row.title, detail: `${row.projectName ?? '个人任务'} · ${row.status}${row.dueTime ? ` · 截止 ${row.dueTime}` : ''}`, projectId: row.projectId, projectName: row.projectName ?? '个人任务', ownerId: row.ownerUserId ?? '', ownerName: row.ownerUserId ? names.get(row.ownerUserId) ?? '已停用人员' : '待绑定', startsAt: startsAt.toISOString(), endsAt: endsAt.toISOString(), allDay: false, version: schedule?.version ?? 0, sourceVersion: row.version, editable: view === 'personal' && row.ownerUserId === userId && allowed, target: row.projectId ? `/projects/${row.projectId}?tab=tasks` : '/' }, allowed)
     }
     const attended = new Set((await tx.select({ id: meetingParticipants.meetingId }).from(meetingParticipants).where(eq(meetingParticipants.userId, userId))).map(row => row.id))
-    const meetingRows = await tx.select().from(meetings).where(and(or(eq(meetings.workflowKind, 'legacy'), inArray(meetings.workflowStatus, ['scheduled', 'completed'])),
+    const meetingRows = await tx.select().from(meetings).where(and(or(
+      and(eq(meetings.workflowKind, 'legacy'), notInArray(meetings.workflowStatus, ['cancelled', 'deleted'])),
+      and(ne(meetings.workflowKind, 'legacy'), inArray(meetings.workflowStatus, ['scheduled', 'completed'])),
+    ),
       lt(meetings.startedAt, end), or(gt(meetings.endsAt, start), and(isNull(meetings.endsAt), gte(meetings.startedAt, start))),
       view === 'personal' ? or(eq(meetings.hostUserId, userId), inArray(meetings.id, tx.select({ id: meetingParticipants.meetingId }).from(meetingParticipants).where(eq(meetingParticipants.userId, userId)))) : undefined)).limit(501)
     for (const row of meetingRows) {

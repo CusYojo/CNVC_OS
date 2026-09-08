@@ -32,6 +32,11 @@ function CalendarForAccount({initialWeek, initialLayer, allowLeader, companyOnly
   useEffect(() => { try { localStorage.setItem(weekendKey, showWeekends ? '1' : '0') } catch { /* preference remains active for this session */ } }, [showWeekends, weekendKey])
   async function reload(){const next=await apiGet<Calendar>(endpoint);setData(next);setError('')}
   useEffect(()=>{let cancelled=false;setData(null);void apiGet<Calendar>(endpoint).then(next=>{if(!cancelled){setData(next);setError('')}}).catch(e=>{if(!cancelled)setError(e.message)});return()=>{cancelled=true}},[endpoint])
+  useEffect(() => {
+    const refresh = () => { void reload().catch((cause) => setError((cause as Error).message)) }
+    window.addEventListener('fde-calendar-refresh', refresh)
+    return () => window.removeEventListener('fde-calendar-refresh', refresh)
+  }, [endpoint])
   function field(key:string,value:string){setForm(previous=>({...previous,[key]:value,clientRequestId:crypto.randomUUID()}))}
   function open(item?:Item,cancel=false,proposal?:TimeProposal){
     if(proposal&&(!Number.isFinite(timeInstant(proposal.startsAt).getTime())||!Number.isFinite(proposal.durationMinutes)||proposal.durationMinutes<=0||proposal.durationMinutes>1440)){showToast('调整后的时间范围无效，请重新选择','error');return}

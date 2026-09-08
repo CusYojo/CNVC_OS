@@ -16,7 +16,7 @@ type Props = {
 
 export function FdeTimeGrid({ weekStart, items, onPropose, onOpen, onCreateAt, showWeekends = false }: Props) {
   const hourPx = 52
-  type Gesture = { pointerId:number; row:TimeGridItem; mode:'drag'|'resize'; startX:number; startY:number; day:string; start:number; duration:number; trackWidth:number }
+  type Gesture = { pointerId:number; row:TimeGridItem; mode:'drag'|'resize'; startX:number; startY:number; day:string; start:number; duration:number; gridLeft:number; trackWidth:number }
   type Preview = { key:string; day:string; sourceDay:string; start:number; duration:number; mode:'drag'|'resize'; offsetX:number }
   const gesture = useRef<Gesture | null>(null)
   const suppressClick = useRef(false)
@@ -85,12 +85,17 @@ export function FdeTimeGrid({ weekStart, items, onPropose, onOpen, onCreateAt, s
     if(!row.editable||event.button!==0)return
     if(mode==='resize')event.stopPropagation()
     event.currentTarget.setPointerCapture(event.pointerId)
-    const trackWidth=event.currentTarget.closest<HTMLElement>('[data-time-day]')?.getBoundingClientRect().width??0
-    gesture.current={pointerId:event.pointerId,row,mode,startX:event.clientX,startY:event.clientY,day,start,duration,trackWidth}
+    const track=event.currentTarget.closest<HTMLElement>('[data-time-day]')
+    const trackRect=track?.getBoundingClientRect()
+    const trackWidth=trackRect?.width??0
+    const dayIndex=Math.max(0,days.indexOf(day))
+    const gridLeft=(trackRect?.left??event.clientX)-dayIndex*trackWidth
+    gesture.current={pointerId:event.pointerId,row,mode,startX:event.clientX,startY:event.clientY,day,start,duration,gridLeft,trackWidth}
   }
   function pointerPreview(active:Gesture, clientX:number, clientY:number):Preview {
     const delta=Math.round((clientY-active.startY)/(hourPx/4))*15
-    const target=document.elementFromPoint(clientX,clientY)?.closest<HTMLElement>('[data-time-day]')?.dataset.timeDay??active.day
+    const targetIndex=active.trackWidth>0?Math.max(0,Math.min(days.length-1,Math.floor((clientX-active.gridLeft)/active.trackWidth))):Math.max(0,days.indexOf(active.day))
+    const target=days[targetIndex]??active.day
     const duration=active.mode==='resize'?Math.max(15,Math.min(780,active.duration+delta)):active.duration
     const start=active.mode==='drag'?Math.max(420,Math.min(1200-duration,active.start+delta)):active.start
     const targetDay=active.mode==='resize'?active.day:target

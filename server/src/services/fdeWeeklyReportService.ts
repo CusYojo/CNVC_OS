@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { and, asc, desc, eq, gte, inArray, isNull, lt, ne, or, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, gte, inArray, isNull, lt, ne, notInArray, or, sql } from 'drizzle-orm'
 import { db } from '../db/client.js'
 import { meetingParticipants, meetings, oaApprovalRecords, oaApprovalRequests, personalWeeklyReportEvents, personalWeeklyReportRecipients, personalWeeklyReports, projectDutyAssignments, projectMembers, projects, todos, users } from '../db/schema.js'
 import { projectAccessCondition } from './projectAccessService.js'
@@ -58,7 +58,7 @@ export async function collectWeeklyReportFacts(reader: Reader, authorId: string,
     .from(oaApprovalRecords).innerJoin(oaApprovalRequests, eq(oaApprovalRequests.id, oaApprovalRecords.requestId))
     .where(and(ne(oaApprovalRequests.businessType, 'office'), inArray(oaApprovalRequests.projectId, projectIds), directiveApprovalAccessCondition(authorId), eq(oaApprovalRecords.operatorUserId, authorId), gte(oaApprovalRecords.createdAt, start), lt(oaApprovalRecords.createdAt, end))).orderBy(asc(oaApprovalRecords.id)).limit(501)
   const meetingRows = await reader.select({ id: meetings.id, projectId: meetings.projectId, title: meetings.title, version: meetings.version, startedAt: meetings.startedAt, hostUserId: meetings.hostUserId, createdBy: meetings.createdBy, workflowKind: meetings.workflowKind })
-    .from(meetings).where(and(or(ne(meetings.workflowKind, 'committee'), committeeMeetingAccess(authorId)), or(eq(meetings.workflowKind, 'legacy'), eq(meetings.workflowStatus, 'completed')), or(inArray(meetings.projectId, projectIds), options.independentWork ? isNull(meetings.projectId) : undefined), gte(meetings.startedAt, start), lt(meetings.startedAt, end), or(eq(meetings.hostUserId, authorId), inArray(meetings.id, reader.select({ id: meetingParticipants.meetingId }).from(meetingParticipants).where(eq(meetingParticipants.userId, authorId)))))).orderBy(asc(meetings.id)).limit(501)
+    .from(meetings).where(and(or(ne(meetings.workflowKind, 'committee'), committeeMeetingAccess(authorId)), notInArray(meetings.workflowStatus, ['cancelled', 'deleted']), or(eq(meetings.workflowKind, 'legacy'), eq(meetings.workflowStatus, 'completed')), or(inArray(meetings.projectId, projectIds), options.independentWork ? isNull(meetings.projectId) : undefined), gte(meetings.startedAt, start), lt(meetings.startedAt, end), or(eq(meetings.hostUserId, authorId), inArray(meetings.id, reader.select({ id: meetingParticipants.meetingId }).from(meetingParticipants).where(eq(meetingParticipants.userId, authorId)))))).orderBy(asc(meetings.id)).limit(501)
   if (relevant.length > 500 || approvals.length > 500 || meetingRows.length > 500) return fail('REPORT_SOURCE_LIMIT', '本周记录超过单次快照容量，请减少所选项目；不会截断生成周报')
   const calendar = await collectReportCalendar(reader, authorId, projectIds, weekStart, options)
   const office = options.office ? await collectReportOffice(reader, authorId, projectIds, weekStart) : undefined

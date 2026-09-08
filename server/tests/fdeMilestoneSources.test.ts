@@ -25,8 +25,9 @@ test('date markers use half-open Shanghai calendar weeks including year boundari
 })
 test('milestone text distinguishes date approval from stage completion and links exact approval', () => {
   const item = { id: randomUUID(), projectId: randomUUID(), projectName: '真实项目', stage: '投决', date: '2027-01-02', version: 2, approvalId: randomUUID(), previousDate: '2027-01-01', approvedAt: '2026-12-28T01:00:00.000Z', ownerId: randomUUID(), ownerName: '负责人' }
-  assert.match(milestoneReportBody([item]), /不计任务完成、不代表阶段通过/)
+  assert.match(milestoneReportBody([item]), /项目节点/)
   assert.match(milestoneReportBody([item]), /2027-01-01 → 2027-01-02/)
+  assert.doesNotMatch(milestoneReportBody([item]), /审批|版本|[0-9a-f]{8}-[0-9a-f-]{27}/i)
   assert.ok(milestoneSourceTarget(item).endsWith(`#agent-schedule-${item.approvalId}`))
   assert.ok(milestoneSourceTarget(item).includes('?tab=workflow&schedule='))
 })

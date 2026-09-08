@@ -105,7 +105,7 @@ export function ProjectDetailPage() {
 
 
   const projectFiles = files.filter((item) => item.projectId === id)
-  const projectMeetings = meetings.filter((item) => item.projectId === id)
+  const projectMeetings = meetings.filter((item) => item.projectId === id && item.status !== '已取消')
   const projectTodos = todos.filter((item) => item.projectId === id)
   const legacyOpenTaskCount = projectTodos.filter(todo => !['已完成', '已关闭', '已取消', '已归档'].includes(todo.status)).length
   const projectWorkflows = workflows.filter((item) => item.projectId === id).sort((a, b) => b.createdAt.localeCompare(a.createdAt))

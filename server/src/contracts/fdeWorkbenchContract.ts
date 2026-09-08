@@ -24,9 +24,10 @@ export function workbenchView(bindings: { category: string | null; primary?: boo
 
 export const workbenchTaskOpen = (status: string) => !['已完成', '已关闭', '已取消', '已归档'].includes(status)
 export function workbenchActions<T extends WorkbenchAction>(rows: T[], today: string) {
+  const previousDay = shiftDate(today, -1)
   const lastDay = shiftDate(today, 3)
   return rows
-    .filter(t => workbenchTaskOpen(t.status) && Boolean(t.dueDate) && t.dueDate! >= today && t.dueDate! <= lastDay)
+    .filter(t => workbenchTaskOpen(t.status) && Boolean(t.dueDate) && t.dueDate! >= previousDay && t.dueDate! <= lastDay)
     .sort((a, b) => (a.dueDate ?? '').localeCompare(b.dueDate ?? '') || a.id.localeCompare(b.id))
 }
 export function workbenchProjectRank(rows: WorkbenchProject[]) {

@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { and, desc, eq, inArray, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import { db } from '../db/client.js'
-import { departments, oaOfficePolicies as policies, oaOfficePolicyVersions as versions, oaOfficePolicyCommands as commands, roles, users } from '../db/schema.js'
+import { departments, oaOfficePolicies as policies, oaOfficePolicyVersions as versions, oaOfficePolicyCommands as commands, projectDutyAssignments, roles, users } from '../db/schema.js'
 import { officePolicyCommandTarget, officePolicyReceipt, type OfficePolicyCommandTarget, type OfficePolicyReceipt } from '../contracts/fdeOfficePolicyCommandContract.js'
 import { officePolicyConfig, officeRoute, type OfficeDefinition, type OfficeNodeRule } from '../contracts/fdeOfficeContract.js'
 import { createMySqlIdentityRepositoryContext } from '../repositories/index.js'
@@ -129,9 +129,12 @@ export async function resolveOfficeRoute(tx: OfficeTx, definition: OfficeDefinit
   const all = await tx.select({ id: users.id, name: users.name }).from(users).where(eq(users.status, '启用'))
   const used = new Set([userId]), resolved: Array<{ rule: OfficeNodeRule; userIds: string[]; names: string[] }> = []
   for (const rule of route.nodes) {
+    const dutyUserIds = rule.projectDuty && definition.projectId
+      ? new Set((await tx.select({ userId: projectDutyAssignments.userId }).from(projectDutyAssignments).where(and(eq(projectDutyAssignments.projectId, definition.projectId), eq(projectDutyAssignments.duty, rule.projectDuty)))).map(row => row.userId))
+      : null
     const candidates = []
     for (const person of all) {
-      if (used.has(person.id) || (rule.fixedUserIds.length && !rule.fixedUserIds.includes(person.id)) || !await officeRoleEligible(tx, person.id, rule, actor.departmentIds)) continue
+      if (used.has(person.id) || (rule.fixedUserIds.length && !rule.fixedUserIds.includes(person.id)) || (dutyUserIds && !dutyUserIds.has(person.id)) || !await officeRoleEligible(tx, person.id, rule, actor.departmentIds)) continue
       try { await officeProject(tx, person.id, definition.projectId); candidates.push(person) } catch (error) { if ((error as { code?: string }).code !== 'OFFICE_PROJECT_FORBIDDEN') throw error }
     }
     candidates.sort((a, b) => a.id.localeCompare(b.id))
