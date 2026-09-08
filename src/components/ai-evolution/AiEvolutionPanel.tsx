@@ -79,10 +79,26 @@ export function AiEvolutionPanel({ conversationId }: { conversationId: string })
         {proposal.spec.target.exceptions.length > 0 && <p>例外：{proposal.spec.target.exceptions.join('；')}</p>}
         {proposal.spec.target.replacesVersionIds.length > 0 && <p>将替代已有经验版本：{proposal.spec.target.replacesVersionIds.join('、')}</p>}
       </div>}
+      {proposal.spec.target.type === 'skill' && <div className="mt-3 rounded bg-slate-50 p-2 text-xs leading-5">
+        <p>涉及能力：{proposal.spec.target.capabilityId}</p>
+        <p className="break-all">当前内容基线：{proposal.spec.target.baseContentHash}</p>
+        <p>测试样本：{proposal.spec.target.sampleIds.length ? proposal.spec.target.sampleIds.join('、') : '尚未选择'}</p>
+        <p>预览方式：完成基线与候选的同输入对比后展示产物、页面和评估结果</p>
+      </div>}
+      {proposal.spec.target.type === 'code' && <div className="mt-3 rounded bg-slate-50 p-2 text-xs leading-5">
+        <p>涉及仓库：{proposal.spec.target.repositoryId}</p>
+        <p className="break-all">仓库基线：{proposal.spec.target.baseCommit}</p>
+        <p>允许修改：{proposal.spec.target.allowedPaths.join('、')}</p>
+        <p>数据库变更：{proposal.spec.target.databaseChange ? '涉及，需独立迁移授权' : '不涉及'}；权限变更：{proposal.spec.target.permissionChange ? '涉及，需提高风险等级' : '不涉及'}</p>
+        <p>预览方式：受鉴权的隔离页面，仅连接测试数据，不自动激活正式版本</p>
+      </div>}
       <details className="mt-3 text-xs"><summary className="cursor-pointer text-brand-600">验收条件与预算</summary>
         <ul className="mt-2 list-disc space-y-1 pl-4">{proposal.spec.acceptanceCriteria.map((criterion, i) => <li key={i}>{criterion}</li>)}</ul>
         <p className="mt-2">最多 {Math.ceil(proposal.spec.budget.maxDurationSeconds / 60)} 分钟，{proposal.spec.budget.maxModelTokens.toLocaleString()} Token，{proposal.spec.budget.maxRepairRounds} 轮修复。</p>
         <p className="mt-2">来源：{proposal.spec.sourceRefs.length} 条已授权引用</p>
+        <ul className="mt-1 space-y-1">{proposal.spec.sourceRefs.map((source, index) => <li key={`${source.type}:${source.id}:${index}`} className="break-words">
+          {source.type === 'message' ? '会话消息' : source.type === 'task' ? '业务任务' : source.type === 'page' ? '页面选区' : '结果反馈'} · {source.excerpt?.trim() || source.id}
+        </li>)}</ul>
       </details>
       <AiEvolutionQuestions key={`${proposal.id}:${proposal.revision}`} proposal={proposal} save={saveAnswers} />
       {['draft', 'needs_input', 'ready'].includes(proposal.status) && <div className="mt-3 flex flex-wrap gap-2">
