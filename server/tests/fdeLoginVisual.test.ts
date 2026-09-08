@@ -124,6 +124,19 @@ test('empty and failed login keep the existing error feedback without navigation
   }
 })
 
+test('empty or malformed login responses show a business error instead of JSON parser details', async () => {
+  for (const body of ['', '<html>proxy failure</html>']) {
+    const messages: string[] = []
+    const element = login(['login', { identifier: 'synthetic-user', password: 'sample', remember: true }, emptyRegistration, defaultOptions, false, false, false], {
+      fetch: async () => ({ ok: false, text: async () => body }),
+      useNavigate: () => () => assert.fail('failed login must not navigate'),
+      useToast: () => ({ showToast: (message: string) => messages.push(message) }),
+    })
+    await findForm(element)!.props.onSubmit({ preventDefault() {} })
+    assert.deepEqual(messages, ['服务暂时不可用，请稍后重试'])
+  }
+})
+
 test('registration form posts the selected business position and waits for administrator approval', async () => {
   const requests: Array<{ url: string; options: RequestInit }> = []
   const registration = { name: '测试申请人', email: 'apply@example.invalid', role: '投资经理', department: '投资部', password: 'Strong!Password9', confirmPassword: 'Strong!Password9' }

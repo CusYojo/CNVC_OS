@@ -27,7 +27,7 @@ const taskTypes = [
 // Free-form classification fields (for example risk.type or project_file.type) are intentionally
 // excluded and must not be presented as database enums.
 const ENUM_RULES: readonly EnumRule[] = [
-  { table: 'users', column: 'role', source: true, allowed: ['投资经理', '投资总监', '风控与法务', '风控法务', '风险控制', '投委会秘书', '投委会委员', '投后管理组', '投后负责人', '平台运营', '财务', '董事长', '系统管理员', 'AI平台管理员', 'AI 平台管理员'] },
+  { table: 'users', column: 'role', source: true, allowed: ['投资经理', '投资总监', '风控与法务', '风控法务', '风险控制', '投委会秘书', '投委会委员', '投后管理组', '投后负责人', '平台运营', '财务', '出纳', '董事长', '系统管理员', 'AI平台管理员', 'AI 平台管理员'] },
   { table: 'users', column: 'status', source: true, allowed: ['启用', '禁用'] },
   { table: 'projects', column: 'stage', source: true, allowed: projectStages },
   { table: 'projects', column: 'risk_level', source: true, allowed: ['高', '中', '低'] },

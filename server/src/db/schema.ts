@@ -3045,6 +3045,75 @@ export type AiCustomTemplateAnalysis = {
   summary: string
 }
 
+// User-confirmed conversation preferences. Candidates never affect model behavior
+// until an explicit adopt decision creates an active experience.
+export const assistantExperienceSettings = mysqlTable('assistant_experience_settings', {
+  userId: uuidColumn('user_id').primaryKey().references(() => users.id, { onDelete: 'cascade' }),
+  autoSummaryEnabled: boolean('auto_summary_enabled').notNull().default(true),
+  processedTurnCount: int('processed_turn_count').notNull().default(0),
+  revision: int('revision').notNull().default(1),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+  updatedAt: timestampColumn('updated_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+})
+
+export const assistantExperienceCandidates = mysqlTable('assistant_experience_candidates', {
+  id: uuidPrimaryKey('id'),
+  userId: uuidColumn('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  conversationId: uuidColumn('conversation_id').notNull().references(() => agentConversations.id, { onDelete: 'cascade' }),
+  projectId: uuidColumn('project_id').references(() => projects.id, { onDelete: 'cascade' }),
+  triggerType: varchar('trigger_type', { length: 24 }).notNull(),
+  startTurn: int('start_turn'),
+  endTurn: int('end_turn'),
+  sourceMessageId: uuidColumn('source_message_id'),
+  rule: text('rule').notNull(),
+  evidence: text('evidence').notNull(),
+  example: text('example'),
+  suggestedScope: varchar('suggested_scope', { length: 16 }).notNull(),
+  contentHash: varchar('content_hash', { length: 64 }).notNull(),
+  status: varchar('status', { length: 16 }).notNull().default('pending'),
+  version: int('version').notNull().default(1),
+  decidedAt: timestampColumn('decided_at'),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+  updatedAt: timestampColumn('updated_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({
+  uniqueWindow: uniqueIndex('uq_assistant_experience_candidate_window').on(t.userId, t.conversationId, t.startTurn, t.endTurn, t.triggerType),
+  uniqueSource: uniqueIndex('uq_assistant_experience_candidate_source').on(t.userId, t.sourceMessageId, t.triggerType),
+  byUserStatus: index('idx_assistant_experience_candidates_user_status').on(t.userId, t.status, t.createdAt),
+}))
+
+export const assistantExperiences = mysqlTable('assistant_experiences', {
+  id: uuidPrimaryKey('id'),
+  userId: uuidColumn('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  scopeType: varchar('scope_type', { length: 16 }).notNull(),
+  scopeKey: uuidColumn('scope_key').references(() => projects.id, { onDelete: 'cascade' }),
+  rule: text('rule').notNull(),
+  contentHash: varchar('content_hash', { length: 64 }).notNull(),
+  status: varchar('status', { length: 16 }).notNull().default('active'),
+  version: int('version').notNull().default(1),
+  sourceCandidateId: uuidColumn('source_candidate_id').references(() => assistantExperienceCandidates.id, { onDelete: 'set null' }),
+  lastUsedAt: timestampColumn('last_used_at'),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+  updatedAt: timestampColumn('updated_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({
+  uniqueContent: uniqueIndex('uq_assistant_experience_content').on(t.userId, t.scopeType, t.scopeKey, t.contentHash),
+  byUserStatus: index('idx_assistant_experiences_user_status').on(t.userId, t.status, t.scopeType, t.scopeKey),
+}))
+
+export const assistantExperienceDecisions = mysqlTable('assistant_experience_decisions', {
+  id: uuidPrimaryKey('id'),
+  userId: uuidColumn('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  candidateId: uuidColumn('candidate_id').references(() => assistantExperienceCandidates.id, { onDelete: 'set null' }),
+  experienceId: uuidColumn('experience_id').references(() => assistantExperiences.id, { onDelete: 'set null' }),
+  action: varchar('action', { length: 16 }).notNull(),
+  idempotencyKey: uuidColumn('idempotency_key').notNull(),
+  fromVersion: int('from_version'),
+  toVersion: int('to_version'),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({
+  uniqueIdempotency: uniqueIndex('uq_assistant_experience_decision_idempotency').on(t.userId, t.idempotencyKey),
+  byCandidate: index('idx_assistant_experience_decisions_candidate').on(t.candidateId, t.createdAt),
+}))
+
 export const aiCustomTemplates = mysqlTable('ai_custom_templates', {
   id: uuidPrimaryKey('id'),
   userId: uuidColumn('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),

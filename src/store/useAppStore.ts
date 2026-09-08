@@ -126,8 +126,9 @@ interface AppState {
   addTodo: (todo: Omit<Todo, 'id' | 'version'>) => void
   updateTodo: (todoId: string, patch: Partial<Todo>) => Promise<Todo>
   deleteTodo: (todoId: string) => void
-  addMeeting: (meeting: Omit<Meeting, 'id' | 'version'>, newTodos?: Omit<Todo, 'id' | 'version'>[]) => Promise<Meeting>
+  addMeeting: (meeting: Omit<Meeting, 'id' | 'version'>, newTodos?: Omit<Todo, 'id' | 'version'>[], clientRequestId?: string) => Promise<Meeting>
   updateMeeting: (meetingId: string, patch: Partial<Meeting>) => Promise<Meeting>
+  deleteMeeting: (meetingId: string, reason: string, clientRequestId: string) => Promise<void>
   addRisk: (risk: Omit<RiskAlert, 'id' | 'version'>) => Promise<RiskAlert>
   updateRisk: (riskId: string, patch: Partial<RiskAlert>) => Promise<RiskAlert>
   addAudit: (module: string, action: string, target: string) => void
@@ -563,12 +564,12 @@ export const useAppStore = create<AppState>()(
           throw e
         }
       },
-      addMeeting: async (meeting, newTodos = []) => {
+      addMeeting: async (meeting, newTodos = [], clientRequestId = crypto.randomUUID()) => {
         try {
-          const created = await apiPost<Meeting & { createdTodos: Todo[] }>('/meetings', { ...meeting, newTodos })
+          const created = await apiPost<Meeting & { createdTodos: Todo[] }>('/meetings', { ...meeting, newTodos, clientRequestId })
           set((state) => ({
-            meetings: [created, ...state.meetings],
-            todos: [...created.createdTodos, ...state.todos],
+            meetings: [created, ...state.meetings.filter((item) => item.id !== created.id)],
+            todos: [...created.createdTodos, ...state.todos.filter((item) => !created.createdTodos.some((createdTodo) => createdTodo.id === item.id))],
           }))
           get().addAudit('会议纪要', '新建并生成纪要', created.title)
           return created
@@ -588,6 +589,22 @@ export const useAppStore = create<AppState>()(
         } catch (e) {
           const msg = e instanceof ApiError ? e.message : '更新会议失败'
           get().addAudit('会议纪要', '更新会议失败', `${meetingId}: ${msg}`)
+          throw e
+        }
+      },
+      deleteMeeting: async (meetingId, reason, clientRequestId) => {
+        const meeting = get().meetings.find((item) => item.id === meetingId)
+        const expectedVersion = requiredVersion(meeting, '会议')
+        try {
+          await apiDelete(`/meetings/${meetingId}`, { expectedVersion, reason, clientRequestId })
+          set((state) => ({
+            meetings: state.meetings.filter((item) => item.id !== meetingId),
+            todos: state.todos.map((todo) => todo.meetingId === meetingId && !['已完成', '已关闭', '已取消', '已归档'].includes(todo.status) ? { ...todo, status: '已取消' as const } : todo),
+          }))
+          get().addAudit('项目会议', '删除会议', meeting?.title ?? meetingId)
+        } catch (e) {
+          const msg = e instanceof ApiError ? e.message : '删除会议失败'
+          get().addAudit('项目会议', '删除会议失败', `${meeting?.title ?? meetingId}: ${msg}`)
           throw e
         }
       },

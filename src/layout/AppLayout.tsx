@@ -85,6 +85,12 @@ function isSystemNavItemActive(item: { to: string }, pathname: string, search: s
   return path !== '/system' || getSystemWorkspace(new URLSearchParams(search).get('tab')).id === getSystemWorkspace(new URLSearchParams(query).get('tab')).id
 }
 
+function SidebarHorse() {
+  return <div className="fde-sidebar-horse" aria-hidden="true">
+    <img src="/fde-sidebar-horse.png" alt="" />
+  </div>
+}
+
 export function AppLayout() {
   const navigate = useNavigate()
   const location = useLocation()
@@ -223,6 +229,7 @@ export function AppLayout() {
             </NavLink>
           })}
         </nav>
+        {!navigationCollapsed && <SidebarHorse />}
       </aside>
 
       <div className="fde-main-column">

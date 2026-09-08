@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 import { Bold, CalendarDays, LockKeyhole, NotebookPen, Pencil, Plus, Search, Trash2 } from 'lucide-react'
 import { apiDelete, apiGet, apiPatch, apiPost } from '../lib/api'
 import { useToast } from './Toast'
@@ -76,9 +76,11 @@ function editorRuns(root: HTMLElement): NoteRun[] {
     const bold = inherited.bold || tag === 'b' || tag === 'strong' || Number.parseInt(weight, 10) >= 600 || weight === 'bold'
     const colorValue = node.style.color || (tag === 'font' ? node.getAttribute('color') ?? '' : '')
     const color = colorValue ? normalizedColor(colorValue) : inherited.color
+    const block = tag === 'div' || tag === 'p'
+    if (block && runs.some(run => run.text) && !runs.at(-1)?.text.endsWith('\n')) runs.push({ text: '\n', bold, color })
     const before = runs.length
     node.childNodes.forEach(child => visit(child, { bold, color }))
-    if ((tag === 'div' || tag === 'p') && before !== runs.length && !runs.at(-1)?.text.endsWith('\n')) runs.push({ text: '\n', bold, color })
+    if (block && before !== runs.length && !runs.at(-1)?.text.endsWith('\n')) runs.push({ text: '\n', bold, color })
   }
   root.childNodes.forEach(node => visit(node, { bold: false, color: 'default' }))
   const merged = mergeRuns(runs)
@@ -126,7 +128,10 @@ function RichNoteEditor({ value, editorKey, onChange }: { value: NoteRun[]; edit
 }
 
 function NoteContent({ content }: { content: NoteRun[] }) {
-  return <div className="personal-note-content">{content.map((run, index) => <span key={`${index}-${run.text.slice(0, 8)}`} style={{ color: noteColors[run.color], fontWeight: run.bold ? 700 : 400 }}>{run.text}</span>)}</div>
+  return <div className="personal-note-content">{content.map((run, index) => {
+    const lines = run.text.split('\n')
+    return <span key={`${index}-${run.text.slice(0, 8)}`} style={{ color: noteColors[run.color], fontWeight: run.bold ? 700 : 400 }}>{lines.map((line, lineIndex) => <Fragment key={lineIndex}>{line}{lineIndex < lines.length - 1 && <br />}</Fragment>)}</span>
+  })}</div>
 }
 
 function displayDate(value: string) {

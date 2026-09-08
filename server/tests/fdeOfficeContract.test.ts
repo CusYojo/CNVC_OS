@@ -4,10 +4,10 @@ import { randomUUID } from 'node:crypto'
 import { officeAction, officeCents, officeDefinition, officePolicyConfig, officeRoute, validateOfficeSubmission } from '../src/contracts/fdeOfficeContract.js'
 import { approveNodeTransition } from '../src/contracts/approvalNodeTransition.js'
 
-const role = randomUUID(), department = randomUUID()
+const role = randomUUID(), department = randomUUID(), invoice = randomUUID(), supporting = randomUUID()
 const node = { key: 'finance', name: '财务审核', roleIds: [role], scope: 'institution', mode: '或签', fixedUserIds: [], allowTransfer: true }
 const policy = officePolicyConfig.parse({ kind: '报销', requiredFields: ['items'], attachmentRequired: false, rejectResubmission: false, routes: [{ key: 'large', when: { currency: 'CNY', minimum: '100.00', departmentIds: [department] }, nodes: [node] }, { key: 'default', when: {}, nodes: [node] }] })
-const definition = officeDefinition.parse({ title: '报销申请', reason: '完整事由说明', priority: '普通', projectId: null, attachmentIds: [], details: { kind: '报销', amount: '100.00', currency: 'CNY', items: [{ id: randomUUID(), date: '2026-08-27', category: '交通', description: '合成测试费用', amount: '100.00' }] } })
+const definition = officeDefinition.parse({ title: '报销申请', reason: '完整事由说明', priority: '普通', projectId: null, attachmentIds: [invoice], details: { kind: '报销', amount: '100.00', currency: 'CNY', projectExplanation: '参加项目尽调产生费用', items: [{ id: randomUUID(), date: '2026-08-27', category: '其他', description: '合成测试费用', amount: '100.00', attachmentId: invoice }] } })
 test('OA exact decimal arithmetic and ordered currency/department routing', () => {
   assert.equal(officeCents('0.1') + officeCents('0.20'), 30n)
   for (const amount of ['-1', '1e5', '01', 'NaN', '1.001']) assert.throws(() => officeCents(amount))
@@ -29,6 +29,21 @@ test('OA date, typed fields, immutable command input and invoice totals', () => 
   const duplicate = officeDefinition.parse({ ...definition, details: { kind: '报销', amount: '200', currency: 'CNY', items: [{ ...item, invoiceNumber: 'same' }, { ...item, invoiceNumber: 'same' }] } })
   assert.ok(validateOfficeSubmission(duplicate, policy).includes('本申请内票据编号重复'))
   assert.ok(validateOfficeSubmission(duplicate, policy).includes('费用明细标识重复'))
+})
+test('travel requires a project so its concerned leader can be resolved', () => {
+  const travelPolicy = officePolicyConfig.parse({ kind: '出差', requiredFields: [], attachmentRequired: false, rejectResubmission: true, routes: [{ key: 'default', when: {}, nodes: [node] }] })
+  const travel = officeDefinition.parse({ title: '出差申请', reason: '前往项目现场开展尽调', priority: '普通', projectId: null, attachmentIds: [], details: { kind: '出差' } })
+  assert.ok(validateOfficeSubmission(travel, travelPolicy).includes('出差申请必须关联项目'))
+})
+test('reimbursement materials follow the selected expense category', () => {
+  const baseItem = definition.details.kind === '报销' ? definition.details.items[0] : null
+  assert.ok(baseItem)
+  const flight = officeDefinition.parse({ ...definition, details: { ...definition.details, kind: '报销', items: [{ ...baseItem, category: '机票' }] } })
+  assert.ok(validateOfficeSubmission(flight, policy).includes('第 1 项缺少行程单'))
+  const complete = officeDefinition.parse({ ...flight, attachmentIds: [invoice, supporting], details: { ...flight.details, kind: '报销', items: [{ ...flight.details.items[0], waterAttachmentId: supporting }] } })
+  assert.deepEqual(validateOfficeSubmission(complete, policy), [])
+  const hotel = officeDefinition.parse({ ...complete, details: { ...complete.details, kind: '报销', items: [{ ...complete.details.items[0], category: '酒店', waterAttachmentId: undefined }] } })
+  assert.ok(validateOfficeSubmission(hotel, policy).includes('第 1 项缺少住宿单'))
 })
 test('OA policy forbids untyped requirements, missing final rule and money without currency', () => {
   assert.throws(() => officePolicyConfig.parse({ ...policy, requiredFields: ['unknown'] }))

@@ -694,6 +694,20 @@
       "when": 1791964153000,
       "tag": "0102_add_weixin_link_intakes",
       "breakpoints": true
+    },
+    {
+      "idx": 99,
+      "version": "5",
+      "when": 1792050543000,
+      "tag": "0103_add_cashier_role",
+      "breakpoints": true
+    },
+    {
+      "idx": 100,
+      "version": "5",
+      "when": 1793260143000,
+      "tag": "0112_add_assistant_experience_memory",
+      "breakpoints": true
     }
   ]
 }

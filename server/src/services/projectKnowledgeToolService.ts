@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, or, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, ne, notInArray, or, sql } from 'drizzle-orm'
 import { db } from '../db/client.js'
 import {
   aiSummaries,
@@ -53,7 +53,10 @@ export async function getProjectSummaryForUser(input: { userId: string; projectI
       withOriginal: sql<number>`SUM(CASE WHEN ${projectFiles.storagePath} IS NOT NULL THEN 1 ELSE 0 END)`,
     }).from(projectFiles).where(and(eq(projectFiles.projectId, input.projectId), projectFileAccessCondition(input.userId))),
     db.select({ total: sql<number>`COUNT(*)` }).from(meetings)
-      .where(and(eq(meetings.projectId, input.projectId), or(eq(meetings.workflowKind, 'legacy'), eq(meetings.workflowStatus, 'completed')))),
+      .where(and(eq(meetings.projectId, input.projectId), or(
+        and(eq(meetings.workflowKind, 'legacy'), notInArray(meetings.workflowStatus, ['cancelled', 'deleted'])),
+        and(ne(meetings.workflowKind, 'legacy'), eq(meetings.workflowStatus, 'completed')),
+      ))),
     db.select({
       total: sql<number>`COUNT(*)`,
       open: sql<number>`SUM(CASE WHEN ${todos.status} NOT IN ('已完成', '已取消', '已归档', '已关闭') THEN 1 ELSE 0 END)`,

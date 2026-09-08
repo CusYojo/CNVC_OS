@@ -1,4 +1,4 @@
-import { Ban, CalendarDays, CheckCircle2, ChevronRight, Clock3, FileText, ListTodo, Paperclip, Play, Plus, Square, UploadCloud, UsersRound } from 'lucide-react'
+import { Ban, CalendarDays, CheckCircle2, ChevronRight, Clock3, FileText, ListTodo, Paperclip, Play, Plus, Square, Trash2, UploadCloud, UsersRound } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
@@ -55,12 +55,13 @@ export function MeetingsPage() {
   const projects = useAppStore((state) => state.projects)
   const meetings = useAppStore((state) => state.meetings)
   const addMeeting = useAppStore((state) => state.addMeeting)
+  const deleteMeeting = useAppStore((state) => state.deleteMeeting)
   const hydrateFromServer = useAppStore((state) => state.hydrateFromServer)
   const currentUser = useAuthStore((state) => state.user ?? { id: '', email: '', name: '', role: '', department: '', status: '启用' })
   const { showToast } = useToast()
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState('')
-  const [selectedId, setSelectedId] = useState(searchParams.get('meeting') ?? meetings[0]?.id)
+  const [selectedId, setSelectedId] = useState<string | undefined>(searchParams.get('meeting') ?? meetings[0]?.id)
   const [showNew, setShowNew] = useState(!!searchParams.get('project'))
   const [generating, setGenerating] = useState(false)
   const [members, setMembers] = useState<ProjectMember[]>([])
@@ -75,9 +76,11 @@ export function MeetingsPage() {
   const [minutesMembers, setMinutesMembers] = useState<ProjectMember[]>([])
   const [minutesTasks, setMinutesTasks] = useState<Array<{ title: string; selected: boolean; ownerUserId: string; dueDate: string }>>([])
   const [finalizing, setFinalizing] = useState(false)
+  const [deleting, setDeleting] = useState<{ meeting: Meeting; reason: string; requestId: string } | null>(null)
   const [taskReview, setTaskReview] = useState<{ meeting: Parameters<typeof addMeeting>[0]; todos: NonNullable<Parameters<typeof addMeeting>[1]>; members: Array<{ id: string; name: string }> } | null>(null)
   const localNow = shanghaiDateTimeInputValue().replace(' ', 'T')
   const [form, setForm] = useState({
+    clientRequestId: crypto.randomUUID(),
     title: '',
     projectId: searchParams.get('project') ?? projects[0]?.id ?? '',
     meetingTime: localNow,
@@ -135,7 +138,7 @@ export function MeetingsPage() {
           meetingEndTime: form.meetingEndTime, participants, participantUserIds: form.participantUserIds, type: form.type,
           purpose: form.purpose, requirements: form.requirements,
           status: '待开始', rawText: '', summary: '', conclusions: [], todoCount: 0,
-        } as Parameters<typeof addMeeting>[0])
+        } as Parameters<typeof addMeeting>[0], [], form.clientRequestId)
         let attachmentWarning = ''
         if (preMeetingFiles.length) {
           try {
@@ -151,7 +154,7 @@ export function MeetingsPage() {
             attachmentWarning = (error as Error).message
           }
         }
-        setSelectedId(meeting.id); setShowNew(false); setPreMeetingFiles([]); setForm(value => ({ ...value, title: '', purpose: '', requirements: '', rawText: '' }))
+        setSelectedId(meeting.id); setShowNew(false); setPreMeetingFiles([]); setForm(value => ({ ...value, clientRequestId: crypto.randomUUID(), title: '', purpose: '', requirements: '', rawText: '' }))
         showToast(attachmentWarning ? `会议已发起；会前资料未全部上传：${attachmentWarning}` : '项目会议已发起，参会人员已收到提醒并同步到日程', attachmentWarning ? 'info' : 'success')
       } catch (error) { showToast(`发起失败：${(error as Error).message}`, 'error') }
       finally { setGenerating(false) }
@@ -213,10 +216,10 @@ export function MeetingsPage() {
         setShowNew(false)
         return
       }
-      const meeting = await addMeeting(meetingInput, todoObjs)
+      const meeting = await addMeeting(meetingInput, todoObjs, form.clientRequestId)
       setSelectedId(meeting.id)
       setShowNew(false)
-      setForm((value) => ({ ...value, title: '', purpose: '', requirements: '', rawText: '' }))
+      setForm((value) => ({ ...value, clientRequestId: crypto.randomUUID(), title: '', purpose: '', requirements: '', rawText: '' }))
       showToast(`会议纪要与 ${todoObjs.length} 项待办已生成，并同步到项目和工作台`)
     } catch (error) {
       showToast(`保存失败：${(error as Error).message}`, 'error')
@@ -265,9 +268,29 @@ export function MeetingsPage() {
     setGenerating(true)
     try {
       const updated = await apiPost<Meeting>(`/meetings/${selected.id}/lifecycle`, { expectedVersion: selected.version, action })
-      useAppStore.setState((state) => ({ meetings: state.meetings.map((meeting) => meeting.id === updated.id ? updated : meeting) }))
+      useAppStore.setState((state) => ({
+        meetings: action === 'cancel' ? state.meetings.filter((meeting) => meeting.id !== updated.id) : state.meetings.map((meeting) => meeting.id === updated.id ? updated : meeting),
+        todos: action === 'cancel' ? state.todos.map((todo) => todo.meetingId === updated.id && !['已完成', '已关闭', '已取消', '已归档'].includes(todo.status) ? { ...todo, status: '已取消' as const } : todo) : state.todos,
+      }))
+      if (action === 'cancel') {
+        setSelectedId(undefined)
+        window.dispatchEvent(new Event('fde-calendar-refresh'))
+      }
       showToast(action === 'start' ? '会议已开始' : action === 'end' ? '会议已结束，请确认最终纪要' : '会议已取消')
     } catch (error) { showToast((error as Error).message, 'error'); await hydrateFromServer().catch(() => {}) }
+    finally { setGenerating(false) }
+  }
+
+  const confirmDelete = async () => {
+    if (!deleting || generating) return
+    setGenerating(true)
+    try {
+      await deleteMeeting(deleting.meeting.id, deleting.reason.trim(), deleting.requestId)
+      setDeleting(null)
+      setSelectedId(undefined)
+      window.dispatchEvent(new Event('fde-calendar-refresh'))
+      showToast('会议已删除')
+    } catch (error) { showToast((error as Error).message, 'error') }
     finally { setGenerating(false) }
   }
 
@@ -310,7 +333,7 @@ export function MeetingsPage() {
       <PageHeader title="项目会议" actions={<Button onClick={() => setShowNew(true)}><Plus className="h-4 w-4" />发起项目会议</Button>} />
       <div className="grid h-[calc(100vh-170px)] min-h-[650px] grid-cols-[390px_1fr] gap-5">
         <Card className="flex min-h-0 flex-col overflow-hidden">
-          <div className="border-b border-slate-100 p-4"><div className="flex gap-2"><SearchInput className="flex-1" placeholder="搜索会议…" value={query} onChange={(event) => setQuery(event.target.value)} /><select className="input w-28" value={status} onChange={(event) => setStatus(event.target.value)}><option value="">全部状态</option><option>待开始</option><option>进行中</option><option>已结束</option><option>已取消</option></select></div></div>
+          <div className="border-b border-slate-100 p-4"><div className="flex gap-2"><SearchInput className="flex-1" placeholder="搜索会议…" value={query} onChange={(event) => setQuery(event.target.value)} /><select className="input w-28" value={status} onChange={(event) => setStatus(event.target.value)}><option value="">全部状态</option><option>待开始</option><option>进行中</option><option>已结束</option></select></div></div>
           <div className="flex-1 overflow-y-auto p-2 scrollbar-thin">
             {filtered.map((meeting) => <button key={meeting.id} onClick={() => setSelectedId(meeting.id)} className={`mb-1 w-full rounded-xl p-3.5 text-left transition ${selected?.id === meeting.id ? 'bg-brand-50 ring-1 ring-brand-100' : 'hover:bg-slate-50'}`}><div className="flex items-start justify-between gap-2"><span className="min-w-0"><span className="block truncate text-sm font-semibold text-slate-700">{meeting.title}</span><span className="mt-1 block text-xs text-slate-400">{meeting.projectName}</span></span><StatusBadge status={meeting.status} /></div><div className="mt-3 flex items-center gap-3 text-xs text-slate-400"><span className="flex items-center gap-1"><CalendarDays className="h-3 w-3" />{meeting.meetingTime.slice(5, 16)}</span><span className="flex items-center gap-1"><ListTodo className="h-3 w-3" />{meeting.todoCount} 项待办</span></div></button>)}
           </div>
@@ -322,7 +345,7 @@ export function MeetingsPage() {
             <Card className="mb-4 p-5">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div><div className="flex items-center gap-2"><h2 className="text-lg font-semibold text-slate-800">{selected.title}</h2><StatusBadge status={selected.status} /><Badge tone="blue">{selected.type}</Badge></div><p className="mt-2 text-sm text-slate-500">{selected.projectName}</p></div>
-                {selected.canManage && selected.status !== '已取消' && <div className="flex flex-wrap gap-2">{selected.status === '待开始' && <Button variant="secondary" loading={generating} onClick={() => void changeLifecycle('start')}><Play className="h-4 w-4" />开始会议</Button>}{selected.status === '进行中' && <Button variant="secondary" loading={generating} onClick={() => void changeLifecycle('end')}><Square className="h-4 w-4" />结束会议</Button>}{selected.status === '已结束' && !selected.minutesConfirmedAt && <Button onClick={() => void openMinutes()}><CheckCircle2 className="h-4 w-4" />确认最终纪要</Button>}{selected.status === '待开始' && <Button variant="secondary" loading={generating} onClick={() => void changeLifecycle('cancel')}><Ban className="h-4 w-4" />取消</Button>}</div>}
+                {selected.canManage && selected.status !== '已取消' && <div className="flex flex-wrap gap-2">{selected.status === '待开始' && <Button variant="secondary" loading={generating} onClick={() => void changeLifecycle('start')}><Play className="h-4 w-4" />开始会议</Button>}{selected.status === '进行中' && <Button variant="secondary" loading={generating} onClick={() => void changeLifecycle('end')}><Square className="h-4 w-4" />结束会议</Button>}{selected.status === '已结束' && !selected.minutesConfirmedAt && <Button onClick={() => void openMinutes()}><CheckCircle2 className="h-4 w-4" />确认最终纪要</Button>}{selected.status === '待开始' && <Button variant="secondary" loading={generating} onClick={() => void changeLifecycle('cancel')}><Ban className="h-4 w-4" />取消</Button>}{selected.canDelete && <Button variant="secondary" disabled={generating} onClick={() => setDeleting({ meeting: selected, reason: '会议未召开', requestId: crypto.randomUUID() })}><Trash2 className="h-4 w-4" />删除</Button>}</div>}
               </div>
               <div className="mt-5 flex flex-wrap gap-6 border-t border-slate-100 pt-4 text-xs text-slate-500"><span className="flex items-center gap-1.5"><Clock3 className="h-3.5 w-3.5" />{formatShanghaiDateTime(selected.meetingTime)}{selected.meetingEndTime ? ` — ${formatShanghaiDateTime(selected.meetingEndTime)}` : ''}</span><span className="flex items-center gap-1.5"><UsersRound className="h-3.5 w-3.5" />{selected.participants.join('、')}</span></div>
             </Card>
@@ -359,6 +382,9 @@ export function MeetingsPage() {
         </div>
         <fieldset className="mt-4 rounded-xl border border-slate-200 p-4"><legend className="px-2 text-sm font-semibold text-slate-700">参会人员 <span className="font-normal text-slate-400">（项目组内选择）</span></legend>{membersLoading ? <p className="py-4 text-sm text-slate-400">正在读取项目成员…</p> : <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{members.map((person) => { const checked = form.participantUserIds.includes(person.id); const self = person.id === currentUser.id; return <label key={person.id} className={`flex cursor-pointer items-center gap-3 rounded-xl border p-3 transition ${checked ? 'border-brand-300 bg-brand-50' : 'border-slate-200 hover:border-slate-300'}`}><input type="checkbox" checked={checked} disabled={self} onChange={(event) => setForm({ ...form, participantUserIds: event.target.checked ? [...form.participantUserIds, person.id] : form.participantUserIds.filter((id) => id !== person.id) })} /><span className="min-w-0"><strong className="block truncate text-sm text-slate-700">{person.name}{self ? '（发起人）' : ''}</strong><small className="mt-0.5 block truncate text-xs text-slate-400">{person.role || '项目成员'}</small></span></label> })}</div>}{!membersLoading && !members.length && <p className="py-4 text-sm text-amber-700">当前项目没有可选择的项目组成员，请先完成项目人员配置。</p>}</fieldset>
       </Modal>
+      <Modal open={Boolean(deleting)} onClose={() => !generating && setDeleting(null)} title="删除会议" footer={<><Button variant="secondary" disabled={generating} onClick={() => setDeleting(null)}>取消</Button><Button variant="danger" loading={generating} disabled={!deleting || deleting.reason.trim().length < 2} onClick={() => void confirmDelete()}>确认删除</Button></>}>
+        <div className="space-y-4"><div className="rounded-xl bg-rose-50 p-4"><strong className="text-sm text-rose-900">{deleting?.meeting.title}</strong><p className="mt-1 text-sm leading-6 text-rose-700">删除后将从会议列表和参会人的日历中移除，关联的未完成会议任务会同步取消。</p></div><label className="block"><span className="label">删除原因</span><textarea className="textarea mt-2 w-full" maxLength={500} value={deleting?.reason ?? ''} onChange={(event) => deleting && setDeleting({ ...deleting, reason: event.target.value, requestId: crypto.randomUUID() })} /></label></div>
+      </Modal>
       <Modal open={minutesOpen} onClose={() => !finalizing && setMinutesOpen(false)} title="确认最终会议纪要" width="max-w-4xl" footer={<><Button variant="secondary" disabled={finalizing} onClick={() => setMinutesOpen(false)}>取消</Button><Button loading={finalizing} onClick={() => void finalizeMinutes()}>确认纪要并同步任务</Button></>}>
         <div className="space-y-5"><label className="block"><span className="label">最终纪要 <b className="text-rose-500">*</b></span><textarea className="textarea mt-2 min-h-32" value={minutesSummary} onChange={event => setMinutesSummary(event.target.value)} placeholder="由发起人整理本次会议的最终共识、分歧和决策" /></label><label className="block"><span className="label">会议结论</span><textarea className="textarea mt-2 min-h-28" value={minutesConclusions} onChange={event => syncMinuteTasks(event.target.value)} placeholder="每行填写一条结论，可从中选择生成任务" /></label>{minutesTasks.length > 0 && <section><div className="mb-3 flex items-center justify-between"><h3 className="text-sm font-semibold text-slate-800">选择需要落地的任务</h3><span className="text-xs text-slate-500">将同步到负责人待办与日历</span></div><div className="space-y-2">{minutesTasks.map((task, index) => <div key={`${task.title}-${index}`} className={`grid items-center gap-3 rounded-xl border p-3 sm:grid-cols-[auto_1fr_160px_150px] ${task.selected ? 'border-brand-300 bg-brand-50/40' : 'border-slate-200'}`}><input aria-label={`生成任务 ${task.title}`} type="checkbox" checked={task.selected} onChange={event => setMinutesTasks(items => items.map((item, i) => i === index ? { ...item, selected: event.target.checked } : item))} /><strong className="text-sm text-slate-700">{task.title}</strong><select aria-label="任务负责人" className="input" disabled={!task.selected} value={task.ownerUserId} onChange={event => setMinutesTasks(items => items.map((item, i) => i === index ? { ...item, ownerUserId: event.target.value } : item))}><option value="">选择负责人</option>{minutesMembers.map(person => <option key={person.id} value={person.id}>{person.name}</option>)}</select><input aria-label="任务截止日期" className="input" type="date" disabled={!task.selected} value={task.dueDate} onChange={event => setMinutesTasks(items => items.map((item, i) => i === index ? { ...item, dueDate: event.target.value } : item))} /></div>)}</div></section>}</div>
       </Modal>
@@ -366,8 +392,8 @@ export function MeetingsPage() {
         if (!taskReview) return
         setGenerating(true)
         try {
-          const meeting = await addMeeting(taskReview.meeting, taskReview.todos)
-          setSelectedId(meeting.id); setTaskReview(null); setForm((value) => ({ ...value, title: '', rawText: '' }))
+          const meeting = await addMeeting(taskReview.meeting, taskReview.todos, form.clientRequestId)
+          setSelectedId(meeting.id); setTaskReview(null); setForm((value) => ({ ...value, clientRequestId: crypto.randomUUID(), title: '', rawText: '' }))
           showToast('会议与已确认负责人的任务已保存，成果仍需异人验收')
         } catch (error) { showToast(`保存失败：${(error as Error).message}`, 'error') }
         finally { setGenerating(false) }
