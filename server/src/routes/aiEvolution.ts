@@ -18,6 +18,7 @@ import { registerAiEvolutionSkillVersionForUser, listAiEvolutionSkillPackagesFor
 import { activateAiEvolutionSkillTrial, approveAiEvolutionSkillTrial, rollbackAiEvolutionSkillTrial, planAiEvolutionSkillTrial, getAiEvolutionSkillTrialStatus } from '../services/aiEvolutionSkillTrialApplicationService.js'
 import { getAiEvolutionSkillRunComparisonForUser, getAiEvolutionSkillRunArtifactForUser } from '../services/aiEvolutionApplicationService.js'
 import { createAiEvolutionFeedback, listAiEvolutionFeedback } from '../services/aiEvolutionFeedbackService.js'
+import { getAiEvolutionMetrics } from '../services/aiEvolutionMetricsService.js'
 
 export const aiEvolutionRouter = Router()
 const uuid = z.string().uuid()
@@ -54,6 +55,9 @@ aiEvolutionRouter.post('/feedback', async (req: AuthedRequest, res, next) => {
 })
 aiEvolutionRouter.get('/feedback', async (req: AuthedRequest, res, next) => {
   try { res.setHeader('Cache-Control', 'private, no-store'); res.json(await listAiEvolutionFeedback(req.user!.uid, req.query)) } catch (error) { next(error) }
+})
+aiEvolutionRouter.get('/metrics', async (req: AuthedRequest, res, next) => {
+  try { res.setHeader('Cache-Control', 'private, no-store'); res.json(await getAiEvolutionMetrics(req.user!.uid, req.query)) } catch (error) { next(error) }
 })
 aiEvolutionRouter.post('/proposals/:id/save-experience', async (req: AuthedRequest, res, next) => {
   try {

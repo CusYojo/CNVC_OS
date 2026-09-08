@@ -5,6 +5,7 @@ import { AiEvolutionCandidateReview } from './AiEvolutionCandidateReview'
 import { AiEvolutionRuns } from './AiEvolutionRuns'
 import { AiEvolutionQuestions } from './AiEvolutionQuestions'
 import { AiEvolutionProposalEditor } from './AiEvolutionProposalEditor'
+import { AiEvolutionMetrics } from './AiEvolutionMetrics'
 
 const kinds = { experience: '经验', skill: '技能', code: '系统功能' }
 const statuses = { draft: '草稿', needs_input: '待补充信息', ready: '待开始', approved: '已提交执行', rejected: '已拒绝', superseded: '已替代' }
@@ -44,6 +45,7 @@ export function AiEvolutionPanel({ conversationId }: { conversationId: string })
         onClick={() => setWorkbenchStatus(value)}>{workbenchLabels[value]}</button>)}
     </div>
     <p className="mb-3 text-xs leading-5 text-slate-500">在聊天中提出长期要求、技能改进或功能需求，助手会整理为提案。执行结果经验证和确认后才能生效。</p>
+    <AiEvolutionMetrics />
     {error && <p role="alert" className="mb-3 rounded bg-amber-50 p-3 text-amber-800">{error}</p>}
     {actionError && <p role="alert" className="mb-3 rounded bg-rose-50 p-3 text-rose-700">{actionError}</p>}
     {notice && <p role="status" className="mb-3 rounded bg-emerald-50 p-3 text-emerald-800">{notice}</p>}
