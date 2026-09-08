@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { and, desc, eq, gte, inArray, isNull, lte, ne, notInArray, or, sql } from 'drizzle-orm'
+import { and, desc, eq, gte, inArray, isNull, lt, lte, ne, notInArray, or, sql } from 'drizzle-orm'
 import { db } from '../db/client.js'
 import { directiveNotices, meetingParticipants, meetingWorkflowEvents, meetingWorkflowNotices, meetings, projectDirectives, todos, auditLogs, knowledgeChunks, projectFiles, projectMembers, projects, users } from '../db/schema.js'
 import {
@@ -494,6 +494,27 @@ export async function deleteTodo(id: string) {
     const row = await assertLegacyTodoMutation(tx, id)
     if (row) await tx.delete(todos).where(eq(todos.id, id))
     return row
+  })
+}
+
+export async function archiveExpiredCompletedPersonalTodos(userId: string, beforeDate: string) {
+  return db.transaction(async (tx) => {
+    const condition = and(
+      isNull(todos.projectId),
+      eq(todos.ownerUserId, userId),
+      isNull(todos.approvalRequestId),
+      eq(todos.status, '已完成'),
+      lt(todos.dueDate, beforeDate),
+      notInArray(todos.type, ['流程', '审批', '通知']),
+    )
+    const [result] = await tx.update(todos).set({
+      status: '已归档',
+      closureReason: '已完成个人事项于次日自动归档',
+      version: sql`${todos.version} + 1`,
+    }).where(condition)
+    const archived = Number(result.affectedRows ?? 0)
+    if (archived > 0) await tx.insert(auditLogs).values({ userId, userName: '（系统）', module: '待办管理', action: '归档已完成个人事项', target: `${beforeDate} 前共 ${archived} 项` })
+    return archived
   })
 }
 
