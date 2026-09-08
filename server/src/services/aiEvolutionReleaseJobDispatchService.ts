@@ -10,6 +10,7 @@ import { coordinateEvolutionRelease, type EvolutionReleaseReceipt } from '../run
 import { createLocalEvolutionReleaseAdapter } from '../runtime/evolution/evolutionLocalReleaseAdapter.js'
 import { MySqlAiEvolutionCandidateRepository } from '../repositories/mysql/mysqlAiEvolutionCandidateRepository.js'
 import { MySqlAiEvolutionReleaseJobRepository, type EvolutionReleaseJob, type EvolutionReleaseJobLease } from '../repositories/mysql/mysqlAiEvolutionReleaseJobRepository.js'
+import { coordinateRequestedEvolutionRollback } from '../runtime/evolution/evolutionRequestedRollback.js'
 
 const command = promisify(execFile)
 
@@ -70,5 +71,40 @@ export async function dispatchAiEvolutionReleaseJob(job: EvolutionReleaseJob, re
         await candidateRepository.completeRelease(job.approvalId, job.actorUserId, value, outcome)
         await jobRepository.completeByApproval(job.approvalId, value, outcome)
       } })
+  })
+}
+
+export async function dispatchAiEvolutionRollbackJob(job: EvolutionReleaseJob, receipt: EvolutionReleaseReceipt,
+  control: { identity: EvolutionReleaseJobLease; signal: AbortSignal; assertHeld: () => Promise<void> },
+  lifecycleFactory: (target: { id: string; label: string; repositoryId: string; root: string; baseRef: string },
+    receipt: EvolutionReleaseReceipt) => Promise<EvolutionPublisherLifecycle>) {
+  if (job.operation !== 'rollback' || !job.sourceReleaseJobId) throw evolutionError(409, 'EVOLUTION_ROLLBACK_BINDING', '回退任务缺少原发布记录')
+  const initialCandidate = await getAiEvolutionCandidateForUser(job.actorUserId, job.candidateId)
+  const initialRun = await aiEvolutionService.authorizeRun(job.actorUserId, initialCandidate.runId)
+  if (initialRun.frozenSpec.target.type !== 'code' || initialCandidate.status !== 'active'
+    || initialCandidate.contentHash !== receipt.candidateHash) throw evolutionError(409, 'EVOLUTION_ROLLBACK_BINDING', '回退任务与当前候选不一致')
+  const repositoryId = initialRun.frozenSpec.target.repositoryId
+  const configured = await aiEvolutionReleaseRegistry.resolve(job.actorUserId, repositoryId, job.environment)
+  const root = await realpath(configured.root)
+  const candidateRepository = new MySqlAiEvolutionCandidateRepository(), jobRepository = new MySqlAiEvolutionReleaseJobRepository()
+  return withEvolutionReleaseLock(pool, root, async lock => {
+    const authorize = async () => {
+      await control.assertHeld(); await lock.assertHeld()
+      const candidate = await getAiEvolutionCandidateForUser(job.actorUserId, job.candidateId)
+      const run = await aiEvolutionService.authorizeRun(job.actorUserId, candidate.runId)
+      const target = run.frozenSpec.target.type === 'code'
+        ? await aiEvolutionReleaseRegistry.resolve(job.actorUserId, run.frozenSpec.target.repositoryId, job.environment) : null
+      if (!target || !['active', 'activating'].includes(candidate.status) || candidate.contentHash !== receipt.candidateHash
+        || await realpath(target.root) !== root) throw evolutionError(409, 'EVOLUTION_ROLLBACK_BINDING', '回退期间候选或目标授权发生变化')
+    }
+    await authorize()
+    const lifecycle = await lifecycleFactory({ ...configured, root }, receipt)
+    const adapter = await createLocalEvolutionReleaseAdapter({ root, receipt, ...lifecycle })
+    return coordinateRequestedEvolutionRollback({ receipt, authorize,
+      claim: async value => { await candidateRepository.claimRequestedRollback(job.approvalId, job.actorUserId, value); await jobRepository.markActivating(control.identity) },
+      inspect: value => adapter.inspect(value, control.signal), rollback: value => adapter.rollback(value, control.signal),
+      health: (value, version) => adapter.health(value, version, control.signal),
+      finish: async value => { await candidateRepository.completeRequestedRollback(job.approvalId, job.actorUserId, value)
+        await jobRepository.completeByApproval(job.approvalId, value, 'rolled_back') } })
   })
 }

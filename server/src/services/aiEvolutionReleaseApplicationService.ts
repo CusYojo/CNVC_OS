@@ -98,10 +98,30 @@ export async function queueAiEvolutionRelease(userId: string, candidateId: strin
 
 const publicReleaseJob = (job: Awaited<ReturnType<MySqlAiEvolutionReleaseJobRepository['latestForOwner']>>) => job && ({
   id: job.id, candidateId: job.candidateId, environment: job.environment, status: job.status, attempt: job.attempt,
-  error: job.error, createdAt: job.createdAt, updatedAt: job.updatedAt, completedAt: job.completedAt,
+  operation: job.operation, error: job.error, createdAt: job.createdAt, updatedAt: job.updatedAt, completedAt: job.completedAt,
 })
 
 export async function getAiEvolutionReleaseJob(userId: string, candidateId: string) {
   await context(userId, candidateId)
   return publicReleaseJob(await new MySqlAiEvolutionReleaseJobRepository().latestForOwner(userId, candidateId))
+}
+
+export async function approveAiEvolutionRequestedRollback(userId: string, candidateId: string, input: unknown) {
+  const request = z.object({ targetEnvironment: z.string().min(1).max(80), candidateHash: z.string().regex(/^[a-f0-9]{64}$/),
+    evaluationHash: z.string().regex(/^[a-f0-9]{64}$/) }).strict().parse(input)
+  const { candidate, repositoryId } = await context(userId, candidateId)
+  await aiEvolutionReleaseRegistry.resolve(userId, repositoryId, request.targetEnvironment)
+  if (candidate.status !== 'active') throw evolutionError(409, 'EVOLUTION_ROLLBACK_UNAVAILABLE', '候选当前不是已生效版本')
+  return new MySqlAiEvolutionCandidateRepository().recordRequestedRollbackApproval(candidateId, userId,
+    request.targetEnvironment, request.candidateHash, request.evaluationHash)
+}
+
+export async function queueAiEvolutionRequestedRollback(userId: string, candidateId: string, input: unknown, idempotencyKey: unknown) {
+  const request = z.object({ approvalId: z.string().uuid(), sourceReleaseJobId: z.string().uuid(),
+    targetEnvironment: z.string().min(1).max(80) }).strict().parse(input)
+  const key = z.string().regex(/^[A-Za-z0-9_.:-]{1,128}$/).parse(idempotencyKey)
+  const { repositoryId } = await context(userId, candidateId)
+  await aiEvolutionReleaseRegistry.resolve(userId, repositoryId, request.targetEnvironment)
+  return publicReleaseJob(await new MySqlAiEvolutionReleaseJobRepository().enqueueRollback({ actorUserId: userId,
+    candidateId, idempotencyKey: key, ...request }))
 }

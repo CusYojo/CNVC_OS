@@ -6,7 +6,7 @@ import { MySqlAiEvolutionCandidateRepository } from '../repositories/mysql/mysql
 import { createEvolutionReleaseJobWorker } from '../runtime/evolution/evolutionReleaseJobWorker.js'
 import { createEvolutionReleaseRecoveryWorker } from '../services/aiEvolutionReleaseRecoveryWorker.js'
 import { prepareAiEvolutionReleaseJob } from '../services/aiEvolutionReleaseJobPreparationService.js'
-import { dispatchAiEvolutionReleaseJob } from '../services/aiEvolutionReleaseJobDispatchService.js'
+import { dispatchAiEvolutionReleaseJob, dispatchAiEvolutionRollbackJob } from '../services/aiEvolutionReleaseJobDispatchService.js'
 import { loadEvolutionPublisherLifecycle } from '../services/aiEvolutionPublisherLifecycleRegistry.js'
 import { recoverAiEvolutionRelease } from '../services/aiEvolutionReleaseApplicationService.js'
 import { createLocalEvolutionRecoveryAdapter } from '../runtime/evolution/evolutionLocalRecoveryAdapter.js'
@@ -24,7 +24,7 @@ const publisher = createEvolutionReleaseJobWorker({ leaseOwner: owner,
   renewLease: (identity, seconds) => jobs.renewLease(identity, seconds), savePrepared: (identity, receipt) => jobs.savePrepared(identity, receipt),
   releaseForRetry: (identity, error, retry) => jobs.releaseForRetry(identity, error, retry), prepare: prepareAiEvolutionReleaseJob,
   settleDispatchFailure: (identity, error, maxAttempts) => jobs.settleDispatchFailure(identity, error, maxAttempts),
-  dispatch: (job, receipt, control) => dispatchAiEvolutionReleaseJob(job, receipt, control,
+  dispatch: (job, receipt, control) => (job.operation === 'rollback' ? dispatchAiEvolutionRollbackJob : dispatchAiEvolutionReleaseJob)(job, receipt, control,
     async target => loadEvolutionPublisherLifecycle(target.id, target.root)),
   onError: error => report('error', 'publisher_iteration_failed', { code: (error as { code?: string }).code,
     message: error instanceof Error ? error.message : String(error) }) })

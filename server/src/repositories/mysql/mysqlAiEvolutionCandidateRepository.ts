@@ -88,6 +88,69 @@ export class MySqlAiEvolutionCandidateRepository {
     })
   }
 
+  async recordRequestedRollbackApproval(candidateId: string, actorUserId: string, targetEnvironment: string,
+    candidateHash: string, evaluationHash: string, now = new Date()) {
+    return db.transaction(async tx => {
+      const [row] = await tx.select({ candidate: candidates, run: runs, evaluation: evaluations, job: releaseJobs }).from(candidates)
+        .innerJoin(runs, eq(runs.id, candidates.runId)).innerJoin(evaluations, eq(evaluations.candidateId, candidates.id))
+        .innerJoin(releaseJobs, eq(releaseJobs.candidateId, candidates.id))
+        .where(and(eq(candidates.id, candidateId), eq(runs.ownerUserId, actorUserId), eq(candidates.status, 'active'),
+          eq(releaseJobs.operation, 'release'), eq(releaseJobs.status, 'succeeded'), eq(releaseJobs.environment, targetEnvironment)))
+        .orderBy(desc(releaseJobs.completedAt), desc(releaseJobs.id)).limit(1).for('update')
+      if (!row || row.candidate.contentHash !== candidateHash || row.evaluation.evaluationHash !== evaluationHash || !row.job.receipt) {
+        throw evolutionError(409, 'EVOLUTION_ROLLBACK_UNAVAILABLE', '当前候选没有可回退的已验证发布记录')
+      }
+      const receipt = parseEvolutionReleaseReceipt(row.job.receipt)
+      if (!receipt.previousReleaseId || !receipt.previousIdentity) throw evolutionError(409, 'EVOLUTION_ROLLBACK_UNAVAILABLE', '该发布没有可验证的上一版本')
+      const id = randomUUID(), expiresAt = new Date(now.getTime() + 60 * 60_000)
+      await tx.insert(approvals).values({ id, candidateId, actorUserId, candidateHash, evaluationHash,
+        scope: row.run.frozenSpec.scope, environment: targetEnvironment, decision: 'approved', purpose: 'release_rollback', expiresAt })
+      await tx.insert(audits).values({ id: randomUUID(), actorUserId, proposalId: row.run.proposalId,
+        action: 'release_rollback_approved', contentHash: candidateHash })
+      return { approvalId: id, sourceReleaseJobId: row.job.id, expiresAt }
+    })
+  }
+
+  async claimRequestedRollback(approvalId: string, actorUserId: string, receiptInput: EvolutionReleaseReceipt, now = new Date()) {
+    const receipt = parseEvolutionReleaseReceipt(receiptInput)
+    return db.transaction(async tx => {
+      const [row] = await tx.select({ approval: approvals, candidate: candidates, run: runs }).from(approvals)
+        .innerJoin(candidates, eq(candidates.id, approvals.candidateId)).innerJoin(runs, eq(runs.id, candidates.runId))
+        .where(and(eq(approvals.id, approvalId), eq(approvals.actorUserId, actorUserId))).for('update')
+      if (!row || row.approval.purpose !== 'release_rollback' || row.approval.decision !== 'approved'
+        || row.approval.expiresAt <= now || row.approval.consumedAt || row.candidate.status !== 'active'
+        || row.candidate.contentHash !== receipt.candidateHash) {
+        throw evolutionError(409, 'EVOLUTION_ROLLBACK_APPROVAL_REQUIRED', '回退批准已失效或候选状态已变化')
+      }
+      await tx.update(approvals).set({ consumedAt: now }).where(eq(approvals.id, approvalId))
+      await tx.update(candidates).set({ status: 'activating' }).where(eq(candidates.id, row.candidate.id))
+      await tx.insert(events).values({ id: randomUUID(), runId: row.run.id, sequence: row.run.nextEventSequence,
+        eventType: 'release_rollback_claimed', payload: { schemaVersion: 1, approvalId, targetEnvironment: row.approval.environment, receipt } })
+      await tx.update(runs).set({ nextEventSequence: row.run.nextEventSequence + 1 }).where(eq(runs.id, row.run.id))
+      return { candidateId: row.candidate.id, runId: row.run.id }
+    })
+  }
+
+  async completeRequestedRollback(approvalId: string, actorUserId: string, receiptInput: EvolutionReleaseReceipt) {
+    const receipt = parseEvolutionReleaseReceipt(receiptInput)
+    return db.transaction(async tx => {
+      const [row] = await tx.select({ approval: approvals, candidate: candidates, run: runs }).from(approvals)
+        .innerJoin(candidates, eq(candidates.id, approvals.candidateId)).innerJoin(runs, eq(runs.id, candidates.runId))
+        .where(and(eq(approvals.id, approvalId), eq(approvals.actorUserId, actorUserId))).for('update')
+      if (!row || row.approval.purpose !== 'release_rollback' || !row.approval.consumedAt
+        || row.candidate.status !== 'activating' || row.candidate.contentHash !== receipt.candidateHash) {
+        throw evolutionError(409, 'EVOLUTION_ROLLBACK_BINDING', '回退结果缺少对应的已领取批准')
+      }
+      await tx.update(candidates).set({ status: 'rolled_back' }).where(eq(candidates.id, row.candidate.id))
+      await tx.insert(events).values({ id: randomUUID(), runId: row.run.id, sequence: row.run.nextEventSequence,
+        eventType: 'release_rollback_completed', payload: { schemaVersion: 1, approvalId, receipt, outcome: 'rolled_back' } })
+      await tx.update(runs).set({ nextEventSequence: row.run.nextEventSequence + 1 }).where(eq(runs.id, row.run.id))
+      await tx.insert(audits).values({ id: randomUUID(), actorUserId, proposalId: row.run.proposalId,
+        action: 'release_rolled_back_by_request', contentHash: receipt.candidateHash })
+      return { status: 'rolled_back' as const }
+    })
+  }
+
   /** Transactionally consume a release approval before any deployment side effect. */
   async claimRelease(approvalId: string, input: {
     actor: Parameters<typeof assertEvolutionReleaseBinding>[0]['actor']; currentBaseRef: string; targetEnvironment: string;

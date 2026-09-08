@@ -58,6 +58,47 @@ export class MySqlAiEvolutionReleaseJobRepository {
     })
   }
 
+  async enqueueRollback(input: { actorUserId: string; candidateId: string; approvalId: string; sourceReleaseJobId: string;
+    targetEnvironment: string; idempotencyKey: string }, now = new Date()) {
+    identifier.parse(input.actorUserId); identifier.parse(input.candidateId); identifier.parse(input.approvalId)
+    identifier.parse(input.sourceReleaseJobId); idempotency.parse(input.idempotencyKey)
+    const inputHash = evolutionContentHash({ candidateId: input.candidateId, approvalId: input.approvalId,
+      sourceReleaseJobId: input.sourceReleaseJobId, targetEnvironment: input.targetEnvironment, operation: 'rollback' })
+    return db.transaction(async tx => {
+      const [existing] = await tx.select().from(jobs).where(and(eq(jobs.actorUserId, input.actorUserId),
+        eq(jobs.idempotencyKey, input.idempotencyKey))).for('update')
+      if (existing) {
+        if (existing.inputHash !== inputHash || existing.operation !== 'rollback') throw evolutionError(409, 'EVOLUTION_IDEMPOTENCY_CONFLICT', '相同幂等键对应不同回退请求')
+        return existing
+      }
+      const [bound] = await tx.select({ approval: approvals, candidate: candidates, run: runs, source: jobs }).from(approvals)
+        .innerJoin(candidates, eq(candidates.id, approvals.candidateId)).innerJoin(runs, eq(runs.id, candidates.runId))
+        .innerJoin(jobs, eq(jobs.id, input.sourceReleaseJobId))
+        .where(and(eq(approvals.id, input.approvalId), eq(approvals.actorUserId, input.actorUserId),
+          eq(runs.ownerUserId, input.actorUserId))).for('update')
+      if (!bound || bound.candidate.id !== input.candidateId || bound.candidate.status !== 'active'
+        || bound.approval.purpose !== 'release_rollback' || bound.approval.consumedAt || bound.approval.expiresAt <= now
+        || bound.approval.environment !== input.targetEnvironment || bound.source.candidateId !== input.candidateId
+        || bound.source.operation !== 'release' || bound.source.status !== 'succeeded' || !bound.source.receipt) {
+        throw evolutionError(409, 'EVOLUTION_ROLLBACK_APPROVAL_REQUIRED', '需要与当前发布记录一致的有效回退批准')
+      }
+      const receipt = parseEvolutionReleaseReceipt(bound.source.receipt)
+      const proposedId = randomUUID()
+      await tx.insert(jobs).values({ id: proposedId, actorUserId: input.actorUserId, candidateId: input.candidateId,
+        approvalId: input.approvalId, environment: input.targetEnvironment, idempotencyKey: input.idempotencyKey,
+        inputHash, status: 'prepared', operation: 'rollback', sourceReleaseJobId: input.sourceReleaseJobId, receipt })
+        .onDuplicateKeyUpdate({ set: { id: sql`${jobs.id}` } })
+      const [stored] = await tx.select().from(jobs).where(and(eq(jobs.actorUserId, input.actorUserId),
+        eq(jobs.idempotencyKey, input.idempotencyKey))).for('update')
+      if (!stored || stored.inputHash !== inputHash || stored.operation !== 'rollback') throw evolutionError(409, 'EVOLUTION_IDEMPOTENCY_CONFLICT', '回退请求已发生冲突')
+      await tx.insert(events).values({ id: randomUUID(), runId: bound.run.id, sequence: bound.run.nextEventSequence,
+        eventType: 'release_rollback_queued', payload: { schemaVersion: 1, jobId: stored.id, approvalId: input.approvalId,
+          sourceReleaseJobId: input.sourceReleaseJobId, targetEnvironment: input.targetEnvironment } })
+      await tx.update(runs).set({ nextEventSequence: bound.run.nextEventSequence + 1 }).where(eq(runs.id, bound.run.id))
+      return stored
+    })
+  }
+
   async claimNext(leaseOwner: string, leaseSeconds = 120, now = new Date()) {
     if (!leaseOwner.trim() || leaseOwner.length > 128 || !Number.isInteger(leaseSeconds) || leaseSeconds < 30 || leaseSeconds > 900) throw Error('Invalid release lease')
     return db.transaction(async tx => {

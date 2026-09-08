@@ -775,12 +775,19 @@
     {
       "idx": 110,
       "version": "5",
+      "when": 1793173743000,
+      "tag": "0110_add_ai_evolution_requested_rollback",
+      "breakpoints": true
+    },
+    {
+      "idx": 111,
+      "version": "5",
       "when": 1793260143000,
       "tag": "0112_add_assistant_experience_memory",
       "breakpoints": true
     },
     {
-      "idx": 111,
+      "idx": 112,
       "version": "5",
       "when": 1793346543000,
       "tag": "0113_add_admin_permanent_deletions",

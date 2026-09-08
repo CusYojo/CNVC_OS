@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { api } from '../../lib/api'
 
 type Job = { id: string; candidateId: string; environment: string; status: string; attempt: number;
-  error: { code: string; message: string } | null; createdAt: string; updatedAt: string; completedAt: string | null }
+  operation: 'release' | 'rollback'; error: { code: string; message: string } | null; createdAt: string; updatedAt: string; completedAt: string | null }
 const labels: Record<string, string> = { queued: '等待独立发布进程', preparing: '正在准备候选版本', prepared: '候选版本已准备',
   activating: '正在切换并验证', succeeded: '发布成功', failed: '发布失败', rolled_back: '已验证回退' }
 
@@ -10,6 +10,7 @@ export function AiEvolutionCodeRelease(props: { candidateId: string; candidateHa
   status: string; busy: boolean; setBusy: (value: boolean) => void; onChanged: () => Promise<void> }) {
   const [targets, setTargets] = useState<{ id: string; label: string }[] | null>(null)
   const [target, setTarget] = useState(''), [approvalId, setApprovalId] = useState(''), [job, setJob] = useState<Job | null>(null)
+  const [rollbackApproval, setRollbackApproval] = useState<{ approvalId: string; sourceReleaseJobId: string } | null>(null)
   const [error, setError] = useState('')
   const perform = async (action: () => Promise<void>) => { props.setBusy(true); setError(''); try { await action() }
     catch (cause) { setError(cause instanceof Error ? cause.message : '发布操作失败') } finally { props.setBusy(false) } }
@@ -50,5 +51,20 @@ export function AiEvolutionCodeRelease(props: { candidateId: string; candidateHa
       </div>}
     </> : <p className="mt-2 text-slate-500">候选状态为“{labels[props.status] ?? props.status}”。</p>}
     {error && <p role="alert" className="mt-2 text-rose-700">{error}</p>}
+    {props.status === 'active' && job?.operation === 'release' && job.status === 'succeeded' && <div className="mt-3 border-t border-slate-200 pt-2">
+      <p className="font-medium">回退此版本</p>
+      <p className="text-slate-500">回退只恢复该次发布记录中已验证的上一版本，并由独立发布进程再次检查身份和健康状态。</p>
+      {!rollbackApproval ? <button disabled={props.busy} className="mt-2 rounded border px-2 py-1" onClick={() => void perform(async () => {
+        setRollbackApproval(await api(`/ai/evolution/candidates/${props.candidateId}/rollback-approval`, { method: 'POST',
+          headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ targetEnvironment: job.environment,
+            candidateHash: props.candidateHash, evaluationHash: props.evaluationHash }) }))
+      })}>核对并批准回退</button> : <button disabled={props.busy} className="mt-2 rounded bg-rose-700 px-2 py-1 text-white" onClick={() => void perform(async () => {
+        const rollbackJob = await api<Job>(`/ai/evolution/candidates/${props.candidateId}/rollback`, { method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Idempotency-Key': `rollback:${rollbackApproval.approvalId}` },
+          body: JSON.stringify({ ...rollbackApproval, targetEnvironment: job.environment }) })
+        setJob(rollbackJob); await props.onChanged()
+      })}>确认提交回退任务</button>}
+      {rollbackApproval && <p className="mt-1 text-amber-700">回退批准已生成，再次确认后才会执行。</p>}
+    </div>}
   </div>
 }

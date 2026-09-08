@@ -6,6 +6,7 @@ import type { AuthedRequest } from '../middleware/requireAuth.js'
 import { aiEvolutionService, assertAiEvolutionEnabled, getAiEvolutionCandidateForUser, getAiEvolutionArtifactForUser } from '../services/aiEvolutionApplicationService.js'
 import { createAiEvolutionLocalPreview } from '../services/aiEvolutionLocalPreviewService.js'
 import { listAiEvolutionReleaseTargets, approveAiEvolutionRelease, queueAiEvolutionRelease, getAiEvolutionReleaseJob } from '../services/aiEvolutionReleaseApplicationService.js'
+import { approveAiEvolutionRequestedRollback, queueAiEvolutionRequestedRollback } from '../services/aiEvolutionReleaseApplicationService.js'
 import { getAiEvolutionPatchForUser } from '../services/aiEvolutionApplicationService.js'
 import { decideAiEvolutionCandidate } from '../services/aiEvolutionApplicationService.js'
 import { getLatestAiEvolutionCandidate } from '../services/aiEvolutionApplicationService.js'
@@ -143,6 +144,13 @@ aiEvolutionRouter.post('/candidates/:id/release', async (req: AuthedRequest, res
 aiEvolutionRouter.get('/candidates/:id/release', async (req: AuthedRequest, res, next) => {
   try { res.setHeader('Cache-Control', 'private, no-store'); res.json(await getAiEvolutionReleaseJob(req.user!.uid, uuid.parse(req.params.id))) }
   catch (error) { next(error) }
+})
+aiEvolutionRouter.post('/candidates/:id/rollback-approval', async (req: AuthedRequest, res, next) => {
+  try { res.json(await approveAiEvolutionRequestedRollback(req.user!.uid, uuid.parse(req.params.id), req.body)) } catch (error) { next(error) }
+})
+aiEvolutionRouter.post('/candidates/:id/rollback', async (req: AuthedRequest, res, next) => {
+  try { res.status(202).json(await queueAiEvolutionRequestedRollback(req.user!.uid, uuid.parse(req.params.id), req.body,
+    req.get('Idempotency-Key'))) } catch (error) { next(error) }
 })
 aiEvolutionRouter.get('/candidates/:id/patch', async (req: AuthedRequest, res, next) => {
   try { res.setHeader('Cache-Control', 'private, no-store'); res.json(await getAiEvolutionPatchForUser(req.user!.uid, uuid.parse(req.params.id))) } catch (error) { next(error) }

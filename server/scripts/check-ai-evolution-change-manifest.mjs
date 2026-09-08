@@ -11,6 +11,6 @@ const raw = execFileSync('git', ['status', '--porcelain=v1', '-z', '--untracked-
 const actual = [...new Set([...committed.split('\0').filter(Boolean).map(entry => entry.replaceAll('\\', '/')),
   ...raw.split('\0').filter(Boolean).map(entry => entry.slice(3).replaceAll('\\', '/')),
   'ai-evolution-change-manifest.json'])].sort()
-if (manifest.schemaVersion !== 1 || manifest.latestMigration !== '0109_add_ai_evolution_feedback'
+if (manifest.schemaVersion !== 1 || manifest.latestMigration !== '0110_add_ai_evolution_requested_rollback'
   || JSON.stringify(manifest.files) !== JSON.stringify(actual)) throw Error('AI evolution change manifest is stale or incomplete')
 console.log(JSON.stringify({ ok: true, baseline: manifest.baseCommit, head, files: actual.length, latestMigration: manifest.latestMigration }))

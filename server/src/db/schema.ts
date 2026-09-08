@@ -138,6 +138,8 @@ export const aiEvolutionReleaseJobs = mysqlTable('ai_evolution_release_jobs', {
   approvalId: uuidColumn('approval_id').notNull().references(() => aiEvolutionApprovals.id), actorUserId: uuidColumn('actor_user_id').notNull(),
   environment: varchar('environment', { length: 128 }).notNull(), idempotencyKey: varchar('idempotency_key', { length: 128 }).notNull(),
   inputHash: varchar('input_hash', { length: 64 }).notNull(), status: varchar('status', { length: 24 }).notNull().default('queued'),
+  operation: varchar('operation', { length: 16 }).notNull().default('release'),
+  sourceReleaseJobId: uuidColumn('source_release_job_id'),
   receipt: json('receipt').$type<Record<string, unknown>>(), attempt: int('attempt').notNull().default(0),
   leaseToken: int('lease_token').notNull().default(0), leaseOwner: varchar('lease_owner', { length: 128 }),
   leaseExpiresAt: timestampColumn('lease_expires_at'), error: json('error').$type<{ code: string; message: string }>(),
@@ -145,6 +147,7 @@ export const aiEvolutionReleaseJobs = mysqlTable('ai_evolution_release_jobs', {
   updatedAt: timestampColumn('updated_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`), completedAt: timestampColumn('completed_at'),
 }, (t) => ({ byRequest: uniqueIndex('uq_evo_release_job_request').on(t.actorUserId, t.idempotencyKey),
   byApproval: uniqueIndex('uq_evo_release_job_approval').on(t.approvalId),
+  byRollbackSource: uniqueIndex('uq_evo_release_job_rollback_source').on(t.sourceReleaseJobId),
   byLease: index('idx_evo_release_job_lease').on(t.status, t.leaseExpiresAt),
   byCandidate: index('idx_evo_release_job_candidate').on(t.candidateId, t.createdAt) }))
 
