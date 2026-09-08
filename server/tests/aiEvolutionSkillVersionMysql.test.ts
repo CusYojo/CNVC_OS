@@ -29,7 +29,7 @@ test('isolated MySQL registers immutable packages once and reads actual candidat
   const { MySqlAiEvolutionSkillBindingRepository } = await import('../src/repositories/mysql/mysqlAiEvolutionSkillBindingRepository.js')
   const { MySqlAiEvolutionSkillApplicationRepository } = await import('../src/repositories/mysql/mysqlAiEvolutionSkillApplicationRepository.js')
   try {
-    const migration = await readFile('server/drizzle/0106_add_ai_evolution_skill_applications.sql', 'utf8')
+    const migration = await readFile('server/drizzle/0107_add_ai_evolution_skill_applications.sql', 'utf8')
     await pool.query(migration.replaceAll('`sbl_', '`evo_test_').replace('CREATE TABLE ', 'CREATE TABLE IF NOT EXISTS '))
     const [pending] = await pool.query("SELECT id FROM evo_test_ai_evolution_runs WHERE status NOT IN ('failed','succeeded','cancelled')")
     assert.equal((pending as unknown[]).length, 0)

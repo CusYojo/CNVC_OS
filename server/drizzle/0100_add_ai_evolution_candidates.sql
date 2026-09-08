@@ -11,6 +11,7 @@ CREATE TABLE `sbl_ai_evolution_candidates` (
   FOREIGN KEY (`run_id`) REFERENCES `sbl_ai_evolution_runs` (`id`),
   UNIQUE KEY `uq_evo_candidate_run` (`run_id`)
 );
+--> statement-breakpoint
 CREATE TABLE `sbl_ai_evolution_evaluations` (
   `id` varchar(36) NOT NULL PRIMARY KEY,
   `candidate_id` varchar(36) NOT NULL,
@@ -21,6 +22,7 @@ CREATE TABLE `sbl_ai_evolution_evaluations` (
   FOREIGN KEY (`candidate_id`) REFERENCES `sbl_ai_evolution_candidates` (`id`),
   UNIQUE KEY `uq_evo_evaluation_candidate` (`candidate_id`)
 );
+--> statement-breakpoint
 CREATE TABLE `sbl_ai_evolution_approvals` (
   `id` varchar(36) NOT NULL PRIMARY KEY,
   `candidate_id` varchar(36) NOT NULL,

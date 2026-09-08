@@ -14,6 +14,7 @@ CREATE TABLE `sbl_ai_evolution_proposals` (
   UNIQUE KEY `uq_evo_proposal_create` (`owner_user_id`, `idempotency_key`),
   KEY `idx_evo_proposal_owner` (`owner_user_id`, `created_at`)
 );
+--> statement-breakpoint
 CREATE TABLE `sbl_ai_evolution_runs` (
   `id` varchar(36) NOT NULL PRIMARY KEY,
   `proposal_id` varchar(36) NOT NULL,
@@ -43,6 +44,7 @@ CREATE TABLE `sbl_ai_evolution_runs` (
   KEY `idx_evo_run_lease` (`status`, `lease_expires_at`),
   KEY `idx_evo_run_proposal` (`proposal_id`)
 );
+--> statement-breakpoint
 CREATE TABLE `sbl_ai_evolution_events` (
   `id` varchar(36) NOT NULL PRIMARY KEY,
   `run_id` varchar(36) NOT NULL,
@@ -53,6 +55,7 @@ CREATE TABLE `sbl_ai_evolution_events` (
   FOREIGN KEY (`run_id`) REFERENCES `sbl_ai_evolution_runs` (`id`),
   UNIQUE KEY `uq_evo_event_sequence` (`run_id`, `sequence`)
 );
+--> statement-breakpoint
 CREATE TABLE `sbl_ai_evolution_audits` (
   `id` varchar(36) NOT NULL PRIMARY KEY,
   `actor_user_id` varchar(36) NOT NULL,

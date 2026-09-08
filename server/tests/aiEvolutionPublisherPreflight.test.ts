@@ -8,7 +8,7 @@ const lifecycle = { schemaVersion: 1 as const, targets: [{ targetId: 'production
   stop: { file: '/usr/bin/systemctl', args: ['stop', 'app'] }, start: { file: '/usr/bin/systemctl', args: ['start', 'app'] } }] }
 const valid = { release, lifecycle, columns: [...EVOLUTION_RELEASE_JOB_COLUMNS], indexes: [...EVOLUTION_RELEASE_JOB_INDEXES], table: 'sbl_ai_evolution_release_jobs' }
 
-test('publisher preflight requires matching targets and every 0107 lease/idempotency constraint', () => {
+test('publisher preflight requires matching targets and every 0108 lease/idempotency constraint', () => {
   assert.deepEqual(validateEvolutionPublisherPreflight(valid), { targetIds: ['production'] })
   for (const column of EVOLUTION_RELEASE_JOB_COLUMNS) assert.throws(() => validateEvolutionPublisherPreflight({ ...valid,
     columns: valid.columns.filter(value => value !== column) }), new RegExp(column))

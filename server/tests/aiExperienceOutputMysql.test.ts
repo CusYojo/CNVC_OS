@@ -16,7 +16,7 @@ test('isolated MySQL preserves the first output-check binding under concurrent r
   try {
     const [columns] = await pool.query("SHOW COLUMNS FROM evo_test_ai_evolution_applications LIKE 'check_execution'")
     if (Array.isArray(columns) && columns.length === 0) {
-      await pool.query((await readFile(new URL('../drizzle/0104_add_ai_experience_check_execution.sql', import.meta.url), 'utf8')).replaceAll('`sbl_', '`evo_test_'))
+      await pool.query((await readFile(new URL('../drizzle/0105_add_ai_experience_check_execution.sql', import.meta.url), 'utf8')).replaceAll('`sbl_', '`evo_test_'))
     }
     const repository = new MySqlAiExperienceRepository(), userId = randomUUID(), taskId = randomUUID()
     const snapshot = { schemaVersion: 1, taskType: 'chat', businessProjectId: null,

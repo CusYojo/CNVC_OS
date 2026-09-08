@@ -23,29 +23,29 @@ test('isolated MySQL: idempotency, ownership, revision races, frozen execution a
     }
     const [timeColumns] = await pool.query("SHOW COLUMNS FROM evo_test_ai_evolution_runs LIKE 'time_accounted_at'")
     if (Array.isArray(timeColumns) && timeColumns.length === 0) {
-      const timeMigration = await readFile(new URL('../drizzle/0102_add_ai_evolution_time_accounting.sql', import.meta.url), 'utf8')
+      const timeMigration = await readFile(new URL('../drizzle/0103_add_ai_evolution_time_accounting.sql', import.meta.url), 'utf8')
       for (const statement of timeMigration.replaceAll('`sbl_', '`evo_test_').split(';').map((value) => value.trim()).filter(Boolean)) await pool.query(statement)
     }
     const repo = new MySqlAiEvolutionRepository()
     const [purposeColumns] = await pool.query("SHOW COLUMNS FROM evo_test_ai_evolution_approvals LIKE 'purpose'")
     if (Array.isArray(purposeColumns) && purposeColumns.length === 0) {
-      const releaseMigration = await readFile(new URL('../drizzle/0103_add_ai_evolution_release_approval.sql', import.meta.url), 'utf8')
+      const releaseMigration = await readFile(new URL('../drizzle/0104_add_ai_evolution_release_approval.sql', import.meta.url), 'utf8')
       for (const statement of releaseMigration.replaceAll('`sbl_', '`evo_test_').split(';').map((value) => value.trim()).filter(Boolean)) await pool.query(statement)
     }
     const [checkColumns] = await pool.query("SHOW COLUMNS FROM evo_test_ai_evolution_applications LIKE 'check_execution'")
     if (Array.isArray(checkColumns) && checkColumns.length === 0) {
-      await pool.query((await readFile(new URL('../drizzle/0104_add_ai_experience_check_execution.sql', import.meta.url), 'utf8')).replaceAll('`sbl_', '`evo_test_'))
+      await pool.query((await readFile(new URL('../drizzle/0105_add_ai_experience_check_execution.sql', import.meta.url), 'utf8')).replaceAll('`sbl_', '`evo_test_'))
     }
     // Fixed ephemeral database only; remove earlier runs so queue-claim races are deterministic.
     const [activeRuns] = await pool.query("SELECT id FROM evo_test_ai_evolution_runs WHERE status NOT IN ('failed','succeeded','cancelled')")
     assert.equal((activeRuns as unknown[]).length, 0, 'Refuse to clear the isolated database while evolution work is active')
-    const skillMigration = await readFile(new URL('../drizzle/0105_add_ai_evolution_skill_versions.sql', import.meta.url), 'utf8')
+    const skillMigration = await readFile(new URL('../drizzle/0106_add_ai_evolution_skill_versions.sql', import.meta.url), 'utf8')
     for (const statement of skillMigration.replaceAll('`sbl_', '`evo_test_').split(';').map(value => value.trim()).filter(Boolean)) {
       await pool.query(statement.replace('CREATE TABLE ', 'CREATE TABLE IF NOT EXISTS '))
     }
-    await pool.query((await readFile(new URL('../drizzle/0106_add_ai_evolution_skill_applications.sql', import.meta.url), 'utf8'))
+    await pool.query((await readFile(new URL('../drizzle/0107_add_ai_evolution_skill_applications.sql', import.meta.url), 'utf8'))
       .replaceAll('`sbl_', '`evo_test_').replace('CREATE TABLE ', 'CREATE TABLE IF NOT EXISTS '))
-    await pool.query((await readFile(new URL('../drizzle/0107_add_ai_evolution_release_jobs.sql', import.meta.url), 'utf8'))
+    await pool.query((await readFile(new URL('../drizzle/0108_add_ai_evolution_release_jobs.sql', import.meta.url), 'utf8'))
       .replaceAll('`sbl_', '`evo_test_').replace('CREATE TABLE ', 'CREATE TABLE IF NOT EXISTS '))
     for (const table of ['ai_evolution_release_jobs', 'ai_evolution_skill_applications', 'ai_evolution_skill_binding_changes', 'ai_evolution_skill_bindings', 'ai_evolution_skill_versions', 'ai_evolution_applications', 'ai_experience_versions', 'ai_experiences', 'ai_evolution_approvals', 'ai_evolution_evaluations', 'ai_evolution_candidates', 'ai_evolution_model_calls', 'ai_evolution_events', 'ai_evolution_audits', 'ai_evolution_runs', 'ai_evolution_proposals']) {
       await pool.query(`DELETE FROM evo_test_${table}`)

@@ -9,7 +9,7 @@ test('isolated MySQL installs skill version, binding and atomic history constrai
   assert.equal(process.env.DB_FREFIX, 'evo_test_')
   const { pool } = await import('../src/db/client.js')
   try {
-    const migration = await readFile('server/drizzle/0105_add_ai_evolution_skill_versions.sql', 'utf8')
+    const migration = await readFile('server/drizzle/0106_add_ai_evolution_skill_versions.sql', 'utf8')
     for (const statement of migration.replaceAll('`sbl_', '`evo_test_').split(';').map(value => value.trim()).filter(Boolean)) {
       await pool.query(statement.replace('CREATE TABLE ', 'CREATE TABLE IF NOT EXISTS '))
     }

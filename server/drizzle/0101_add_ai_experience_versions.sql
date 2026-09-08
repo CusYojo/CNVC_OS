@@ -11,6 +11,7 @@ CREATE TABLE `sbl_ai_experiences` (
   `updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   KEY `idx_evo_experience_owner` (`owner_user_id`, `status`)
 );
+--> statement-breakpoint
 CREATE TABLE `sbl_ai_experience_versions` (
   `id` varchar(36) NOT NULL PRIMARY KEY,
   `experience_id` varchar(36) NOT NULL,
@@ -22,6 +23,7 @@ CREATE TABLE `sbl_ai_experience_versions` (
   FOREIGN KEY (`proposal_id`) REFERENCES `sbl_ai_evolution_proposals` (`id`),
   UNIQUE KEY `uq_evo_experience_proposal` (`proposal_id`)
 );
+--> statement-breakpoint
 CREATE TABLE `sbl_ai_evolution_applications` (
   `id` varchar(36) NOT NULL PRIMARY KEY,
   `owner_user_id` varchar(36) NOT NULL,

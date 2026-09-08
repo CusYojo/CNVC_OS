@@ -15,7 +15,7 @@ export function validateEvolutionPublisherPreflight(input: {
     || input.release.targets.some(target => !input.lifecycle.targets.some(row => row.targetId === target.id))) {
     throw Error('Release and lifecycle target sets do not match')
   }
-  for (const column of EVOLUTION_RELEASE_JOB_COLUMNS) if (!input.columns.includes(column)) throw Error(`${input.table} is missing migration 0107 column ${column}`)
+  for (const column of EVOLUTION_RELEASE_JOB_COLUMNS) if (!input.columns.includes(column)) throw Error(`${input.table} is missing migration 0108 column ${column}`)
   for (const index of EVOLUTION_RELEASE_JOB_INDEXES) if (!input.indexes.includes(index)) throw Error(`${input.table} is missing index ${index}`)
   return { targetIds: input.release.targets.map(row => row.id) }
 }
