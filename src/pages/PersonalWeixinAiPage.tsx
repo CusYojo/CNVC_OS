@@ -106,7 +106,7 @@ export function PersonalWeixinAiPage() {
         : !view?.eligible ? <div className="fde-personal-weixin-empty"><Link2Off /><h2>当前账号不能连接</h2><p>{view?.reason || '请确认账号已启用并具有业务角色。'}</p></div>
           : login ? <div className="fde-personal-weixin-qr-stage">
               <div className="fde-personal-weixin-qr"><img src={login.qrcodeUrl} alt="个人微信 AI 登录二维码" /></div>
-              <div><span className="fde-personal-weixin-step">扫码连接</span><h2>请使用本人微信扫码</h2><p>{login.message}</p><p>扫码后在微信中确认，页面会自动更新。</p><strong>二维码剩余 {minutes}:{seconds}</strong><span className="fde-personal-weixin-wait"><LoaderCircle />正在等待扫码结果</span></div>
+              <div><span className="fde-personal-weixin-step">扫码连接</span><h2>请使用本人微信扫码</h2><p>{login.message}</p><p>扫码后在微信中确认，页面会自动更新。</p><strong>二维码剩余 {minutes}:{seconds}</strong><span className="fde-personal-weixin-wait"><LoaderCircle />正在等待扫码结果</span><button className="fde-personal-weixin-secondary" onClick={() => { waitController.current?.abort(); setLogin(null); setBusy('') }}>取消扫码</button></div>
             </div>
             : view?.connected ? <div className="fde-personal-weixin-status">
                 <span className="fde-personal-weixin-success"><CheckCircle2 /></span><div><h2>你的微信 AI 已连接</h2><p>微信账号 {view.accountHint || '已验证'}，消息会进入你的个人会话。</p>{view.lastConnectedAt && <small>连接时间：{new Date(view.lastConnectedAt).toLocaleString('zh-CN')}</small>}</div>

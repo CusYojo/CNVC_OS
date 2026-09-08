@@ -76,6 +76,11 @@ async function startQrLogin(purpose: LoginSession['purpose'], ownerUserId: strin
   // Fail before showing a QR code if the confirmed token cannot be encrypted.
   assertIntegrationCredentialEncryptionReady()
   clearExpiredLogins()
+  if (purpose === 'personal') {
+    for (const [key, login] of activeLogins) {
+      if (login.purpose === 'personal' && login.ownerUserId === ownerUserId) activeLogins.delete(key)
+    }
+  }
   const result = await getJson<{ qrcode?: string; qrcode_img_content?: string }>(
     DEFAULT_BASE_URL,
     `ilink/bot/get_bot_qrcode?bot_type=${encodeURIComponent(BOT_TYPE)}`,
@@ -108,6 +113,7 @@ async function waitForQrLogin(sessionKey: string, actor: ImActor, purpose: Login
   if (login.purpose !== purpose || (purpose === 'personal' && login.ownerUserId !== actor.userId)) {
     throw serviceError('该微信登录不属于当前用户', 'IM_WEIXIN_LOGIN_OWNER_MISMATCH', 403)
   }
+  if (login.completion) return login.completion
   if (Date.now() - login.startedAt >= LOGIN_TTL_MS) {
     activeLogins.delete(sessionKey)
     throw serviceError('二维码已过期，请重新生成', 'IM_WEIXIN_QR_EXPIRED', 410)
@@ -145,7 +151,7 @@ async function waitForQrLogin(sessionKey: string, actor: ImActor, purpose: Login
         return { connected: true as const, bot }
       })()
       const result = await login.completion
-      activeLogins.delete(sessionKey)
+      if (purpose === 'admin-shared') activeLogins.delete(sessionKey)
       return result
     }
     await new Promise((resolve) => setTimeout(resolve, 1_000))

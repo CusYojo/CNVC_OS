@@ -19,6 +19,7 @@ import { getArtifactDownload } from './aiTaskService.js'
 import { weixinArticleUrl, weixinIntakeCommand, weixinIntakeBindingAuthorized } from '../contracts/weixinLinkIntakeContract.js'
 import { personalWeixinSenderAllowed } from '../contracts/personalWeixinAiContract.js'
 import { acquireWeixinBridgeLease, type WeixinBridgeLease } from './weixinBridgeLease.js'
+import { mysqlPersonalWeixinAiRepository } from '../repositories/mysql/mysqlPersonalWeixinAiRepository.js'
 import { processWeixinLinkIntake } from './weixinLinkIntakeService.js'
 import { uploadAndSendWeixinFile, weixinArtifactIdsFromMessages } from './weixinFileDelivery.js'
 import {
@@ -502,19 +503,23 @@ async function dispatchInbound(bot: ActiveBot, message: WeixinMessage) {
 
 async function activeBots(): Promise<ActiveBot[]> {
   const data = await imIntegrationRepository.listSettingsData()
-  return data.bots.flatMap((bot) => {
-    if (bot.platform !== 'wechat' || !bot.enabled || bot.connectionStatus !== 'connected' || !bot.createdBy) return []
+  const active: ActiveBot[] = []
+  for (const bot of data.bots) {
+    if (bot.platform !== 'wechat' || !bot.enabled || bot.connectionStatus !== 'connected' || !bot.createdBy) continue
     let raw: Record<string, string>
     try { raw = decryptIntegrationCredential(bot.credentialCiphertext, bot.id) }
-    catch { return [] }
-    if (raw.transport !== 'ilink' || !raw.botToken || !raw.accountId || !raw.baseUrl || !raw.inboundSecret) return []
-    return [{
+    catch { continue }
+    if (raw.transport !== 'ilink' || !raw.botToken || !raw.accountId || !raw.baseUrl || !raw.inboundSecret) continue
+    const ownershipMode = String(bot.config.ownershipMode || 'shared')
+    if (ownershipMode === 'personal' && !(await mysqlPersonalWeixinAiRepository.eligibility(bot.createdBy)).eligible) continue
+    active.push({
       id: bot.id, accountId: raw.accountId, createdBy: bot.createdBy,
       accountUserId: String(bot.config.accountUserId || ''),
-      ownershipMode: String(bot.config.ownershipMode || 'shared'),
+      ownershipMode,
       credentials: raw as WeixinCredentials,
-    }]
-  })
+    })
+  }
+  return active
 }
 
 async function pollBot(bot: ActiveBot) {

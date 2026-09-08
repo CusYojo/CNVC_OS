@@ -12,6 +12,10 @@ import type {
 
 const personalBotCondition = sql<boolean>`JSON_UNQUOTE(JSON_EXTRACT(${imBots.config}, '$.ownershipMode'))=${PERSONAL_WEIXIN_MODE}`
 
+function businessRoleCondition(userId: string) {
+  return sql<boolean>`(EXISTS (SELECT 1 FROM ${userRoles} pur JOIN ${roles} pr ON pr.id=pur.role_id WHERE pur.user_id=${userId} AND pr.status='启用' AND pr.fde_category IS NOT NULL AND pr.fde_category<>'system_admin') OR (${users.role}<>'系统管理员' AND NOT EXISTS (SELECT 1 FROM ${userRoles} lur WHERE lur.user_id=${users.id})))`
+}
+
 function record(row: typeof imBots.$inferSelect): PersonalWeixinAiRecord {
   return {
     botId: row.id,
@@ -36,9 +40,7 @@ function audit(actor: { userId: string; userName: string; ip?: string }, action:
 
 class MySqlPersonalWeixinAiRepository implements PersonalWeixinAiRepository {
   async eligibility(userId: string) {
-    const businessRole = sql<boolean>`EXISTS (SELECT 1 FROM ${userRoles} pur JOIN ${roles} pr ON pr.id=pur.role_id WHERE pur.user_id=${userId} AND pr.status='启用' AND pr.fde_category IS NOT NULL AND pr.fde_category<>'system_admin')`
-    const legacyBusinessUser = sql<boolean>`(${users.role}<>'系统管理员' AND NOT EXISTS (SELECT 1 FROM ${userRoles} lur WHERE lur.user_id=${users.id}))`
-    const [row] = await db.select({ allowed: sql<boolean>`(${businessRole} OR ${legacyBusinessUser})`.mapWith(Boolean) })
+    const [row] = await db.select({ allowed: businessRoleCondition(userId).mapWith(Boolean) })
       .from(users).where(and(eq(users.id, userId), eq(users.status, '启用'))).limit(1)
     const eligible = Boolean(row?.allowed)
     return { eligible, reason: eligible ? null : '当前账号不可用或仅有系统管理职责' }
@@ -56,9 +58,12 @@ class MySqlPersonalWeixinAiRepository implements PersonalWeixinAiRepository {
   async connect(input: Parameters<PersonalWeixinAiRepository['connect']>[0]) {
     return db.transaction(async (tx) => {
       await tx.execute(sql`SELECT ${users.id} FROM ${users} WHERE ${users.id}=${input.actor.userId} FOR UPDATE`)
-      const [owner] = await tx.select({ id: users.id, department: users.department }).from(users)
+      const [owner] = await tx.select({
+        id: users.id, department: users.department,
+        allowed: businessRoleCondition(input.actor.userId).mapWith(Boolean),
+      }).from(users)
         .where(and(eq(users.id, input.actor.userId), eq(users.status, '启用'))).limit(1)
-      if (!owner) throw Object.assign(new Error('当前账号不可用'), { code: 'PERSONAL_WEIXIN_FORBIDDEN', status: 403 })
+      if (!owner?.allowed) throw Object.assign(new Error('当前账号不可用或仅有系统管理职责'), { code: 'PERSONAL_WEIXIN_FORBIDDEN', status: 403 })
 
       const [existing] = await tx.select().from(imBots).where(and(
         eq(imBots.platform, 'wechat'), eq(imBots.createdBy, input.actor.userId), personalBotCondition,
