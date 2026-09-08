@@ -23,6 +23,7 @@ import { ModelSettingsPage } from './pages/ModelSettingsPage'
 import { CapabilitySettingsPage } from './pages/CapabilitySettingsPage'
 import { ImBotsPage } from './pages/ImBotsPage'
 import { RadarDingTalkSettingsPage } from './pages/RadarDingTalkSettingsPage'
+import { PersonalWeixinAiPage } from './pages/PersonalWeixinAiPage'
 import { NotFoundPage } from './pages/NotFoundPage'
 import { isAiPlatformAdminRole, isSystemAdminRole } from '../server/src/contracts/adminRoleContract'
 import { legacySourcingRedirectTarget } from './lib/leadPoolFilters'
@@ -105,6 +106,7 @@ export default function App() {
         <Route path="/knowledge" element={<DataKnowledgePage />} />
         <Route path="/responsibility" element={<ResponsibilityPage />} />
         <Route path="/responsibility/rules" element={<FdeResponsibilityPolicyPanel />} />
+        <Route path="/settings/weixin-ai" element={<PersonalWeixinAiPage />} />
         <Route path="/system" element={<SystemAdminOnly><SystemPage /></SystemAdminOnly>} />
         <Route path="/system/ai/models" element={<AiPlatformAdminOnly><ModelSettingsPage /></AiPlatformAdminOnly>} />
         <Route path="/system/ai/capabilities" element={<AiPlatformAdminOnly><CapabilitySettingsPage /></AiPlatformAdminOnly>} />
