@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
-import { Check, Eye, NotebookPen, Pencil, Plus, Trash2, X } from 'lucide-react'
+import { Check, Eye, NotebookPen, Pencil, Plus, RotateCcw, Trash2, X } from 'lucide-react'
 import { api, apiDelete, apiGet, apiPatch, apiPost } from '../lib/api'
 import { useAuthStore } from '../store/useAuthStore'
 import { formatShanghaiDate } from '../lib/dateTime'
@@ -40,6 +40,8 @@ type PersonalTodo = {
   version: number
 }
 
+type TodoCompletionMode = 'hide' | 'strike'
+
 const hiddenTodoStatuses = new Set(['已关闭', '已取消', '已归档'])
 function shiftDashboardDate(date: string, days: number) {
   return new Date(Date.parse(`${date}T00:00:00Z`) + days * 86400000).toISOString().slice(0, 10)
@@ -56,11 +58,14 @@ function todoDateLabel(date: string, today: string) {
 }
 
 function PersonalTodoPanel({ data, onOpenTask }: { data: WorkbenchData; onOpenTask: (id: string) => void }) {
-  const previousDay = shiftDashboardDate(data.today, -1)
   const lastDay = shiftDashboardDate(data.today, 2)
+  const completionModeKey = `fde-dashboard-todo-completion-mode:${data.actorId}`
   const [todos, setTodos] = useState<PersonalTodo[]>([])
   const [draft, setDraft] = useState({ title: '', priority: '中' as PersonalTodo['priority'] })
   const [editing, setEditing] = useState<{ id: string; title: string; priority: PersonalTodo['priority'] } | null>(null)
+  const [completionMode, setCompletionMode] = useState<TodoCompletionMode>(() => {
+    try { return localStorage.getItem(completionModeKey) === 'strike' ? 'strike' : 'hide' } catch { return 'hide' }
+  })
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
@@ -69,17 +74,28 @@ function PersonalTodoPanel({ data, onOpenTask }: { data: WorkbenchData; onOpenTa
     let active = true
     setLoading(true); setError('')
     void Promise.all([
-      apiGet<{ list: PersonalTodo[] }>(`/todos?personal=true&dateTo=${lastDay}`),
-      apiGet<{ list: PersonalTodo[] }>(`/todos?personal=true&includeCompleted=true&dateFrom=${previousDay}&dateTo=${data.today}`),
-    ]).then(([open, recent]) => {
-      if (active) setTodos([...new Map([...open.list, ...recent.list].map(todo => [todo.id, todo])).values()])
-    }).catch(cause => {
+      apiDelete<{ ok: true; archived: number }>(`/todos/personal/completed?before=${data.today}`).catch(() => null),
+        apiGet<{ list: PersonalTodo[] }>(`/todos?personal=true&dateTo=${lastDay}`),
+        apiGet<{ list: PersonalTodo[] }>(`/todos?personal=true&includeCompleted=true&dateFrom=${data.today}&dateTo=${data.today}`),
+      ])
+      .then(([, open, recent]) => {
+        if (active) setTodos([...new Map([...open.list, ...recent.list].map(todo => [todo.id, todo])).values()])
+      }).catch(cause => {
       if (active) setError(cause instanceof Error ? cause.message : '个人事项加载失败')
     }).finally(() => {
       if (active) setLoading(false)
     })
     return () => { active = false }
-  }, [data.actorId, data.today, lastDay, previousDay])
+  }, [data.actorId, data.today, lastDay])
+
+  useEffect(() => {
+    try { setCompletionMode(localStorage.getItem(completionModeKey) === 'strike' ? 'strike' : 'hide') } catch { setCompletionMode('hide') }
+  }, [completionModeKey])
+
+  const changeCompletionMode = (mode: TodoCompletionMode) => {
+    setCompletionMode(mode)
+    try { localStorage.setItem(completionModeKey, mode) } catch { /* 当前页面仍保持所选模式 */ }
+  }
 
   const personalTodos = todos.filter(todo => !todo.projectId
     && todo.ownerUserId === data.actorId
@@ -133,14 +149,17 @@ function PersonalTodoPanel({ data, onOpenTask }: { data: WorkbenchData; onOpenTa
     } finally { setBusy('') }
   }
 
-  const completeTodo = async (todo: PersonalTodo) => {
+  const toggleTodoCompletion = async (todo: PersonalTodo) => {
     if (busy) return
     setBusy(todo.id); setError('')
     try {
-      const updated = await apiPatch<PersonalTodo>(`/todos/${todo.id}`, { expectedVersion: todo.version, status: '已完成' })
+      const updated = await apiPatch<PersonalTodo>(`/todos/${todo.id}`, {
+        expectedVersion: todo.version,
+        status: todo.status === '已完成' ? '未开始' : '已完成',
+      })
       setTodos(rows => rows.map(row => row.id === updated.id ? updated : row))
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '完成待办失败')
+      setError(cause instanceof Error ? cause.message : '更新待办失败')
     } finally { setBusy('') }
   }
 
@@ -164,7 +183,7 @@ function PersonalTodoPanel({ data, onOpenTask }: { data: WorkbenchData; onOpenTa
       <div className="todo-row-actions"><button className="todo-icon-button confirm" type="submit" aria-label="保存待办" title="保存" disabled={busy === todo.id || !editing.title.trim()}><Check size={16} /></button><button className="todo-icon-button" type="button" aria-label="取消编辑" title="取消" disabled={busy === todo.id} onClick={() => setEditing(null)}><X size={16} /></button></div>
     </form>
     return <div className={`personal-todo-row${historical ? ' is-historical' : ''}${completed ? ' is-completed' : ''}`} key={todo.id}>
-      {completed ? <span className="todo-completed-mark" aria-label="已完成"><Check size={15} /></span> : <button className="todo-complete-button" type="button" aria-label={`完成待办：${todo.title}`} title="标记完成" disabled={busy === todo.id} onClick={() => void completeTodo(todo)}><Check size={15} /></button>}
+      <button className={completed ? 'todo-completed-mark' : 'todo-complete-button'} type="button" aria-label={`${completed ? '恢复' : '完成'}待办：${todo.title}`} title={completed ? '恢复为未完成' : '标记完成'} disabled={busy === todo.id} onClick={() => void toggleTodoCompletion(todo)}><Check size={15} /></button>
       <div className="personal-todo-main"><strong>{todo.title}</strong><small>{completed ? '已完成' : todoDateLabel(todo.dueDate!, data.today)} · {todo.priority}优先级</small></div>
       <div className="todo-row-actions">{!completed && <button className="todo-icon-button" type="button" aria-label={`编辑待办：${todo.title}`} title="编辑" disabled={Boolean(busy)} onClick={() => setEditing({ id: todo.id, title: todo.title, priority: todo.priority })}><Pencil size={15} /></button>}<button className="todo-icon-button danger" type="button" aria-label={`删除待办：${todo.title}`} title="删除" disabled={Boolean(busy)} onClick={() => void removeTodo(todo)}><Trash2 size={15} /></button></div>
     </div>
@@ -172,10 +191,11 @@ function PersonalTodoPanel({ data, onOpenTask }: { data: WorkbenchData; onOpenTa
 
   const todayProjectActions = data.actions.filter(action => action.dueDate === data.today)
   const historicalProjectActions = data.actions.filter(action => Boolean(action.dueDate) && action.dueDate! < data.today)
+  const visibleTodayTodos = completionMode === 'hide' ? todayTodos.filter(todo => todo.status !== '已完成') : todayTodos
   const openPersonalCount = personalTodos.filter(todo => todo.status !== '已完成' && todo.dueDate! <= data.today).length
   const pendingCount = openPersonalCount + todayProjectActions.length + historicalProjectActions.length
   return <section className="card personal-todo-card work-todo-card">
-    <div className="card-head"><div><h2>今日待办</h2></div><Badge tone={pendingCount ? 'info' : 'neutral'}>{pendingCount} 项</Badge></div>
+    <div className="card-head"><div><h2>今日待办</h2></div><div className="todo-card-head-actions"><Badge tone={pendingCount ? 'info' : 'neutral'}>{pendingCount} 项</Badge><label className="todo-completion-mode" title="切换待办完成后的显示方式"><span>{completionMode === 'hide' ? '完成后隐藏' : '保留划线'}</span><input type="checkbox" checked={completionMode === 'strike'} onChange={event => changeCompletionMode(event.target.checked ? 'strike' : 'hide')} aria-label="完成后保留并划线"/><i aria-hidden="true" /></label></div></div>
     <form className="personal-todo-create" onSubmit={event => { event.preventDefault(); void createTodo() }}>
       <label className="todo-title-field"><span className="sr-only">待办内容</span><input className="input" maxLength={255} placeholder="输入待办内容" value={draft.title} onChange={event => setDraft({ ...draft, title: event.target.value })} /></label>
       <span className="todo-today-label">今天</span>
@@ -189,8 +209,8 @@ function PersonalTodoPanel({ data, onOpenTask }: { data: WorkbenchData; onOpenTa
         <div className="personal-todo-main"><strong>{action.title}</strong><small>{action.projectName} · 今日任务</small></div>
         <button className="button primary small" type="button" onClick={() => onOpenTask(action.id)}>处理任务</button>
       </div>)}
-      {todayTodos.map(todo => renderTodo(todo))}
-      {!loading && !todayTodos.length && !todayProjectActions.length && <Empty title="今天没有待办" note="" />}
+      {visibleTodayTodos.map(todo => renderTodo(todo))}
+      {!loading && !visibleTodayTodos.length && !todayProjectActions.length && <Empty title="今天没有待办" note="" />}
       {loading && <Empty title="正在加载个人事项…" note="" />}
     </div>
     {!loading && (historicalProjectActions.length > 0 || historicalTodos.length > 0) && <div className="todo-history-section">
@@ -215,6 +235,43 @@ function roleHeading(data: WorkbenchData) {
   }
   return headings[data.view]
 }
+
+function EditableWorkbenchHeading({ data }: { data: WorkbenchData }) {
+  const storageKey = `fde-dashboard-heading:${data.actorId}`
+  const fallback = roleHeading(data)
+  const [heading, setHeading] = useState(() => {
+    try { return localStorage.getItem(storageKey)?.trim() || fallback } catch { return fallback }
+  })
+  const [draft, setDraft] = useState(heading)
+  const [editing, setEditing] = useState(false)
+
+  useEffect(() => {
+    let next = fallback
+    try { next = localStorage.getItem(storageKey)?.trim() || fallback } catch { /* 使用默认导语 */ }
+    setHeading(next); setDraft(next); setEditing(false)
+  }, [fallback, storageKey])
+
+  const save = () => {
+    const next = draft.trim()
+    if (!next) return
+    setHeading(next); setEditing(false)
+    try { localStorage.setItem(storageKey, next) } catch { /* 当前页面仍显示已保存导语 */ }
+  }
+  const reset = () => {
+    setHeading(fallback); setDraft(fallback); setEditing(false)
+    try { localStorage.removeItem(storageKey) } catch { /* 当前页面已恢复默认 */ }
+  }
+
+  if (editing) return <form className="workbench-heading-editor" onSubmit={event => { event.preventDefault(); save() }}>
+    <label><span className="sr-only">标题导语</span><input className="input" value={draft} maxLength={80} autoFocus onChange={event => setDraft(event.target.value)} /></label>
+    <button className="heading-icon-button confirm" type="submit" aria-label="保存标题导语" title="保存" disabled={!draft.trim()}><Check size={17}/></button>
+    <button className="heading-icon-button" type="button" aria-label="取消修改" title="取消" onClick={() => { setDraft(heading); setEditing(false) }}><X size={17}/></button>
+    {heading !== fallback && <button className="heading-reset-button" type="button" onClick={reset}><RotateCcw size={14}/>恢复默认</button>}
+  </form>
+
+  return <div className="workbench-title-row"><h1>{heading}</h1><button className="heading-icon-button" type="button" aria-label="修改标题导语" title="修改标题导语" onClick={() => { setDraft(heading); setEditing(true) }}><Pencil size={16}/></button></div>
+}
+
 function primaryAction(data: WorkbenchData) {
   const actions = {
     leader: ['配置下周时间', `/collaboration?view=time&week=${new Date(Date.parse(`${data.weekStart}T00:00:00Z`) + 7 * 86400000).toISOString().slice(0, 10)}`],
@@ -254,6 +311,13 @@ export function DashboardPage() {
     window.addEventListener('focus', refresh); document.addEventListener('visibilitychange', visible)
     return () => { ++generation.current; controller?.abort(); window.removeEventListener('focus', refresh); document.removeEventListener('visibilitychange', visible) }
   }, [userId, revision])
+  useEffect(() => {
+    if (!data?.today) return
+    const nextShanghaiMidnight = Date.parse(`${data.today}T16:00:02Z`)
+    const delay = Math.max(250, nextShanghaiMidnight - Date.now())
+    const timer = window.setTimeout(() => setRevision(value => value + 1), delay)
+    return () => window.clearTimeout(timer)
+  }, [data?.today])
   useEffect(() => { try { setCalendarHidden(localStorage.getItem(calendarKey) === '1') } catch { setCalendarHidden(false) } }, [calendarKey])
   const hideCalendar = () => { setCalendarHidden(true); try { localStorage.setItem(calendarKey, '1') } catch { /* visibility remains valid for this page */ } }
   const showCalendar = () => { setCalendarHidden(false); try { localStorage.removeItem(calendarKey) } catch { /* visibility remains valid for this page */ } }
@@ -276,7 +340,7 @@ export function DashboardPage() {
     return { id: project.id, title: project.name, detail, icon: project.name.slice(0, 1), to: `/projects/${project.id}`, status: overdue ? '已逾期' : project.health }
   })
   return <div className="fde-dashboard page-wrap role-workbench" data-view={current.view}>
-    {current.view === 'admin' ? <div className="page-heading"><div><h1>系统工作台</h1></div><div className="page-actions"><Link className="button dashboard-note-shortcut" to="/knowledge?view=notes" title="进入个人笔记"><NotebookPen size={16}/><span>个人笔记</span></Link><span className="view-chip secure">配置权限视角</span><Link className="button primary" to="/system">进入系统管理</Link></div></div> : <div className="workbench-heading"><div><div className="eyebrow-row"><span className="view-chip">{current.perspective}</span><span>{formatShanghaiDate(`${current.today}T12:00:00+08:00`, { year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' })}</span></div><h1>{roleHeading(current)}</h1></div><div className="page-actions"><Link className="button dashboard-note-shortcut" to="/knowledge?view=notes" title="进入个人笔记"><NotebookPen size={16}/><span>个人笔记</span></Link><span className="update-note">更新于 {formatShanghaiDate(current.asOf, { hour: '2-digit', minute: '2-digit' })}</span>{action.length > 0 && <Link className="button primary" to={action[1]}>{action[0]}</Link>}</div></div>}
+    {current.view === 'admin' ? <div className="page-heading"><div><EditableWorkbenchHeading data={current}/></div><div className="page-actions"><Link className="button dashboard-note-shortcut" to="/knowledge?view=notes" title="进入个人笔记"><NotebookPen size={16}/><span>个人笔记</span></Link><span className="view-chip secure">配置权限视角</span><Link className="button primary" to="/system">进入系统管理</Link></div></div> : <div className="workbench-heading"><div><div className="eyebrow-row"><span className="view-chip">{current.perspective}</span><span>{formatShanghaiDate(`${current.today}T12:00:00+08:00`, { year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' })}</span></div><EditableWorkbenchHeading data={current}/></div><div className="page-actions"><Link className="button dashboard-note-shortcut" to="/knowledge?view=notes" title="进入个人笔记"><NotebookPen size={16}/><span>个人笔记</span></Link><span className="update-note">更新于 {formatShanghaiDate(current.asOf, { hour: '2-digit', minute: '2-digit' })}</span>{action.length > 0 && <Link className="button primary" to={action[1]}>{action[0]}</Link>}</div></div>}
     {current.warnings.length > 0 && <div className="workbench-warning" role="alert"><span>{current.warnings.join(' ')}</span><button className="button small" onClick={() => setRevision(n => n + 1)}>重新核对</button></div>}
     {current.view !== 'admin' && current.view !== 'unassigned' && (calendarHidden
       ? <button type="button" className="dashboard-calendar-reveal" onClick={showCalendar}><Eye size={16}/><span>显示任务时间轴</span></button>

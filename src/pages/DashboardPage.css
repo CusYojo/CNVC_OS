@@ -183,6 +183,58 @@
   line-height: 1.24;
   letter-spacing: -.035em;
 }
+.fde-dashboard .workbench-title-row {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.fde-dashboard .workbench-title-row h1 { min-width: 0; }
+.fde-dashboard .heading-icon-button {
+  width: 34px;
+  height: 34px;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 34px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  color: var(--ink-3);
+  background: transparent;
+  transition: color .16s ease, border-color .16s ease, background .16s ease;
+}
+.fde-dashboard .heading-icon-button:hover { border-color: var(--line); color: var(--brand-strong); background: var(--surface); }
+.fde-dashboard .heading-icon-button.confirm { border-color: color-mix(in srgb, var(--positive) 25%, var(--line)); color: var(--positive); background: var(--positive-soft); }
+.fde-dashboard .heading-icon-button:disabled { cursor: not-allowed; opacity: .45; }
+.fde-dashboard .workbench-heading-editor {
+  width: min(680px, 100%);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 8px;
+}
+.fde-dashboard .workbench-heading-editor label { min-width: 0; flex: 1 1 auto; }
+.fde-dashboard .workbench-heading-editor .input {
+  width: 100%;
+  height: 42px;
+  padding-inline: 13px;
+  border-color: color-mix(in srgb, var(--brand) 45%, var(--line));
+  font-size: 15px;
+  font-weight: 650;
+}
+.fde-dashboard .heading-reset-button {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 8px;
+  border: 0;
+  color: var(--ink-3);
+  background: transparent;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.fde-dashboard .heading-reset-button:hover { color: var(--brand-strong); }
 .fde-dashboard .workbench-heading p {
   max-width: 760px;
   margin: 7px 0 0;
@@ -560,6 +612,50 @@ body:has(.fde-dashboard) { min-width: 320px; }
   margin-top: 0;
   overflow: hidden;
 }
+.fde-dashboard .todo-card-head-actions { display: flex; align-items: center; gap: 12px; }
+.fde-dashboard .todo-completion-mode {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink-3);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+}
+.fde-dashboard .todo-completion-mode input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+.fde-dashboard .todo-completion-mode i {
+  width: 34px;
+  height: 20px;
+  position: relative;
+  flex: 0 0 34px;
+  border: 1px solid color-mix(in srgb, var(--ink-3) 30%, var(--line));
+  border-radius: 999px;
+  background: var(--surface-3);
+  transition: border-color .18s ease, background .18s ease;
+}
+.fde-dashboard .todo-completion-mode i::after {
+  content: "";
+  width: 14px;
+  height: 14px;
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: 0 1px 3px rgba(21, 43, 51, .2);
+  transition: transform .18s ease;
+}
+.fde-dashboard .todo-completion-mode input:checked + i { border-color: var(--brand); background: var(--brand); }
+.fde-dashboard .todo-completion-mode input:checked + i::after { transform: translateX(14px); }
+.fde-dashboard .todo-completion-mode input:focus-visible + i { outline: 2px solid var(--brand); outline-offset: 3px; }
 .fde-dashboard .personal-todo-create {
   display: grid;
   grid-template-columns: minmax(260px, 1fr) auto minmax(120px, .26fr) auto;
@@ -639,17 +735,20 @@ body:has(.fde-dashboard) { min-width: 320px; }
 }
 .fde-dashboard .todo-complete-button { border-color: color-mix(in srgb, var(--positive) 28%, var(--line)); color: var(--positive); }
 .fde-dashboard .todo-completed-mark { border-color: transparent; color: var(--positive); background: var(--positive-soft); }
+.fde-dashboard .todo-completed-mark:hover { border-color: color-mix(in srgb, var(--positive) 38%, var(--line)); color: var(--positive); background: color-mix(in srgb, var(--positive-soft) 72%, var(--surface)); }
 .fde-dashboard .todo-complete-button:hover,
 .fde-dashboard .todo-icon-button.confirm:hover { border-color: var(--positive); color: #fff; background: var(--positive); }
 .fde-dashboard .todo-icon-button:hover { border-color: color-mix(in srgb, var(--brand) 40%, var(--line)); color: var(--brand-strong); background: var(--brand-soft); }
 .fde-dashboard .todo-icon-button.danger:hover { border-color: var(--danger); color: var(--danger); background: var(--danger-soft); }
 .fde-dashboard .todo-complete-button:disabled,
+.fde-dashboard .todo-completed-mark:disabled,
 .fde-dashboard .todo-icon-button:disabled { cursor: wait; opacity: .45; }
 .fde-dashboard .todo-project-state { width: 8px; height: 34px; border-radius: 999px; background: var(--brand); }
 .fde-dashboard .todo-project-state.warning { background: var(--warning); }
 .fde-dashboard .todo-project-state.danger { background: var(--danger); }
 .fde-dashboard .todo-project-state.success { background: var(--positive); }
 .fde-dashboard .todo-complete-button:focus-visible,
+.fde-dashboard .todo-completed-mark:focus-visible,
 .fde-dashboard .todo-icon-button:focus-visible,
 .fde-dashboard .personal-todo-create .input:focus-visible,
 .fde-dashboard .personal-todo-row .input:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
@@ -691,6 +790,12 @@ body:has(.fde-dashboard) { min-width: 320px; }
 }
 
 @media (max-width: 700px) {
+  .fde-dashboard .workbench-title-row { align-items: flex-start; }
+  .fde-dashboard .workbench-heading-editor { flex-wrap: wrap; }
+  .fde-dashboard .workbench-heading-editor label { flex-basis: calc(100% - 82px); }
+  .fde-dashboard .heading-reset-button { width: 100%; justify-content: flex-start; }
+  .fde-dashboard .todo-card-head-actions { gap: 8px; }
+  .fde-dashboard .todo-completion-mode > span { display: none; }
   .fde-dashboard .personal-todo-create { grid-template-columns: 1fr 1fr; padding: 13px; }
   .fde-dashboard .personal-todo-create .todo-title-field { grid-column: 1 / -1; }
   .fde-dashboard .personal-todo-create .button { grid-column: 1 / -1; width: 100%; }

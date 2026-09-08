@@ -1,7 +1,7 @@
 import { Router } from 'express'
 import { z } from 'zod'
 import type { AuthedRequest } from '../middleware/requireAuth.js'
-import { addMeetingContribution, createMeeting, createTodo, deleteMeetingRecord, deleteTodo, finalizeMeeting, getMeeting, getTodo, listMeetingTodos, listMeetings, listTodos, presentMeeting, presentMeetings, readMeetingNotice, todoCounts, updateMeeting, updateMeetingLifecycle, updateTodo } from '../services/meetingService.js'
+import { addMeetingContribution, archiveExpiredCompletedPersonalTodos, createMeeting, createTodo, deleteMeetingRecord, deleteTodo, finalizeMeeting, getMeeting, getTodo, listMeetingTodos, listMeetings, listTodos, presentMeeting, presentMeetings, readMeetingNotice, todoCounts, updateMeeting, updateMeetingLifecycle, updateTodo } from '../services/meetingService.js'
 import { answerQuestion, meetingSummary } from '../services/aiService.js'
 import { requireAccessibleProject } from '../services/projectAccessService.js'
 import { parseShanghaiDateTime } from '../utils/shanghaiTime.js'
@@ -246,6 +246,14 @@ todosRouter.patch('/:id', async (req: AuthedRequest, res, next) => {
     }
     const row = await updateTodo(existing.id, patch, expectedVersion)
     res.json(row)
+  } catch (err) { next(err) }
+})
+
+todosRouter.delete('/personal/completed', async (req: AuthedRequest, res, next) => {
+  try {
+    const { before } = z.object({ before: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) }).parse(req.query)
+    const archived = await archiveExpiredCompletedPersonalTodos(req.user!.uid, before)
+    res.json({ ok: true, archived })
   } catch (err) { next(err) }
 })
 

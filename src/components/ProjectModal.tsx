@@ -4,6 +4,7 @@ import { UsersRound } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import { useAuthStore } from '../store/useAuthStore'
 import { apiGet } from '../lib/api'
+import { DEFAULT_PROJECT_INDUSTRY, PROJECT_INDUSTRIES } from '../lib/projectIndustries'
 import type { ProjectStage, RiskLevel } from '../types'
 import { useToast } from './Toast'
 import { Button, Modal } from './ui'
@@ -60,7 +61,7 @@ export function ProjectModal({ open, onClose }: { open: boolean; onClose: () => 
   const [ownerUserId, setOwnerUserId] = useState('')
   const [duties, setDuties] = useState<Record<RequiredDuty, string[]>>({ boss: [], project_manager: [], legal: [], finance: [] })
   const [form, setForm] = useState({
-    name: '', companyName: '', industry: 'AI 医疗', round: 'A 轮', stage: '立项' as ProjectStage,
+    name: '', companyName: '', industry: DEFAULT_PROJECT_INDUSTRY, round: 'A 轮', stage: '立项' as ProjectStage,
     source: '手工录入', financing: '未披露，待核验', valuation: '未披露，待核验', riskLevel: '低' as RiskLevel, summary: '',
   })
 
@@ -123,9 +124,9 @@ export function ProjectModal({ open, onClose }: { open: boolean; onClose: () => 
     <Modal open={open} onClose={onClose} title="快速新建投资项目" width="max-w-5xl" footer={<><Button variant="secondary" disabled={saving} onClick={onClose}>取消</Button><Button loading={saving} disabled={rosterLoading} onClick={submit}>创建、同步人员并进入项目</Button></>}>
       <div className="space-y-5">
         <div className="grid grid-cols-2 gap-4">
-          <label><span className="label">项目名称 <b className="text-rose-500">*</b></span><input className="input" placeholder="例如：新锐 AI 医疗项目" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>
+          <label><span className="label">项目名称 <b className="text-rose-500">*</b></span><input className="input" placeholder="例如：新锐硬科技项目" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>
           <label><span className="label">公司名称</span><input className="input" placeholder="公司工商全称" value={form.companyName} onChange={(event) => setForm({ ...form, companyName: event.target.value })} /></label>
-          <label><span className="label">所属行业 <b className="text-rose-500">*</b></span><select className="input" value={form.industry} onChange={(event) => setForm({ ...form, industry: event.target.value })}><option>AI 医疗</option><option>工业软件</option><option>具身智能</option><option>新能源</option><option>合成生物</option><option>企业服务</option><option>消费科技</option></select></label>
+          <label><span className="label">所属行业 <b className="text-rose-500">*</b></span><select className="input" value={form.industry} onChange={(event) => setForm({ ...form, industry: event.target.value })}>{PROJECT_INDUSTRIES.map((industry) => <option key={industry} value={industry}>{industry}</option>)}</select></label>
           <label><span className="label">融资轮次</span><select className="input" value={form.round} onChange={(event) => setForm({ ...form, round: event.target.value })}><option>天使轮</option><option>Pre-A</option><option>A 轮</option><option>B 轮</option><option>C 轮</option><option>Pre-IPO</option></select></label>
           <label><span className="label">项目来源</span><select className="input" value={form.source} onChange={(event) => setForm({ ...form, source: event.target.value })}><option>手工录入</option><option>机构推荐</option><option>FA</option><option>BP 邮箱</option><option>行业会议</option><option>产业方推荐</option></select></label>
           <label><span className="label">项目负责人 <b className="text-rose-500">*</b></span><select className="input" value={ownerUserId} onChange={(event) => setOwnerUserId(event.target.value)} disabled={rosterLoading}><option value="">请选择负责人</option>{people.filter((person) => person.capabilities.canOwn).map((person) => <option key={person.id} value={person.id}>{person.name} · {person.department}</option>)}</select><span className="mt-1 block text-xs text-slate-400">负责人与项目经理可选择同一人。</span></label>
