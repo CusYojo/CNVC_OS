@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import QRCode from 'qrcode'
 import type { ImActor } from './imIntegrationService.js'
 import { createWeixinBotFromLogin } from './imIntegrationService.js'
+import { connectPersonalWeixinAi } from './personalWeixinAiService.js'
 import { assertIntegrationCredentialEncryptionReady } from '../security/integrationCredentialCrypto.js'
 
 const DEFAULT_BASE_URL = 'https://ilinkai.weixin.qq.com'
@@ -16,6 +17,9 @@ type LoginSession = {
   qrcodeUrl: string
   startedAt: number
   baseUrl: string
+  purpose: 'admin-shared' | 'personal'
+  ownerUserId: string | null
+  completion?: Promise<{ connected: true; bot: unknown }>
 }
 
 type StatusResponse = {
@@ -68,7 +72,7 @@ function clearExpiredLogins() {
   }
 }
 
-export async function startWeixinQrLogin() {
+async function startQrLogin(purpose: LoginSession['purpose'], ownerUserId: string | null) {
   // Fail before showing a QR code if the confirmed token cannot be encrypted.
   assertIntegrationCredentialEncryptionReady()
   clearExpiredLogins()
@@ -85,13 +89,25 @@ export async function startWeixinQrLogin() {
   })
   activeLogins.set(sessionKey, {
     sessionKey, qrcode: result.qrcode, qrcodeUrl, startedAt: Date.now(), baseUrl: DEFAULT_BASE_URL,
+    purpose, ownerUserId,
   })
   return { sessionKey, qrcodeUrl, expiresInSeconds: LOGIN_TTL_MS / 1000, message: '使用微信扫描二维码并确认授权。' }
 }
 
-export async function waitForWeixinQrLogin(sessionKey: string, actor: ImActor) {
+export async function startWeixinQrLogin() {
+  return startQrLogin('admin-shared', null)
+}
+
+export async function startPersonalWeixinQrLogin(userId: string) {
+  return startQrLogin('personal', userId)
+}
+
+async function waitForQrLogin(sessionKey: string, actor: ImActor, purpose: LoginSession['purpose']) {
   const login = activeLogins.get(sessionKey)
   if (!login) throw serviceError('当前没有进行中的微信登录，请重新生成二维码', 'IM_WEIXIN_LOGIN_NOT_FOUND', 404)
+  if (login.purpose !== purpose || (purpose === 'personal' && login.ownerUserId !== actor.userId)) {
+    throw serviceError('该微信登录不属于当前用户', 'IM_WEIXIN_LOGIN_OWNER_MISMATCH', 403)
+  }
   if (Date.now() - login.startedAt >= LOGIN_TTL_MS) {
     activeLogins.delete(sessionKey)
     throw serviceError('二维码已过期，请重新生成', 'IM_WEIXIN_QR_EXPIRED', 410)
@@ -115,17 +131,33 @@ export async function waitForWeixinQrLogin(sessionKey: string, actor: ImActor) {
       if (!status.bot_token || !status.ilink_bot_id) {
         throw serviceError('微信登录确认但未返回完整凭据', 'IM_WEIXIN_LOGIN_INVALID', 502)
       }
-      const bot = await createWeixinBotFromLogin({
-        accountId: status.ilink_bot_id,
-        accountUserId: status.ilink_user_id || null,
-        botToken: status.bot_token,
-        baseUrl: allowedBaseUrl(status.baseurl || login.baseUrl),
-      }, actor)
+      if (purpose === 'personal' && !status.ilink_user_id) {
+        throw serviceError('微信登录未返回用户身份，请重新扫码', 'PERSONAL_WEIXIN_IDENTITY_MISSING', 502)
+      }
+      login.completion ??= (async () => {
+        const credentials = {
+          accountId: status.ilink_bot_id!, accountUserId: status.ilink_user_id || '',
+          botToken: status.bot_token!, baseUrl: allowedBaseUrl(status.baseurl || login.baseUrl),
+        }
+        const bot = purpose === 'personal'
+          ? await connectPersonalWeixinAi(credentials, actor)
+          : await createWeixinBotFromLogin({ ...credentials, accountUserId: credentials.accountUserId || null }, actor)
+        return { connected: true as const, bot }
+      })()
+      const result = await login.completion
       activeLogins.delete(sessionKey)
-      return { connected: true, bot }
+      return result
     }
     await new Promise((resolve) => setTimeout(resolve, 1_000))
   }
   activeLogins.delete(sessionKey)
   throw serviceError('微信扫码登录超时，请重新生成二维码', 'IM_WEIXIN_LOGIN_TIMEOUT', 408)
+}
+
+export async function waitForWeixinQrLogin(sessionKey: string, actor: ImActor) {
+  return waitForQrLogin(sessionKey, actor, 'admin-shared')
+}
+
+export async function waitForPersonalWeixinQrLogin(sessionKey: string, actor: ImActor) {
+  return waitForQrLogin(sessionKey, actor, 'personal')
 }
