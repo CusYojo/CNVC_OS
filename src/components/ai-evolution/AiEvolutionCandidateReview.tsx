@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { api } from '../../lib/api'
 import type { EvolutionScope } from '../../../server/src/contracts/aiEvolutionContract'
 import type { EvolutionCandidateManifest, EvolutionEvaluationReport } from '../../../server/src/contracts/aiEvolutionEvaluationContract'
@@ -35,6 +35,10 @@ function CandidateReview({ proposalId, onProposalCreated }: { proposalId: string
   const [error, setError] = useState('')
   const [patch, setPatch] = useState<PatchPreview | null>(null)
   const [pagePreview, setPagePreview] = useState<{ url: string; expiresAt: string } | null>(null)
+  const [feedbackType, setFeedbackType] = useState<'helpful' | 'incorrect' | 'regression' | 'suggestion'>('suggestion')
+  const [feedbackComment, setFeedbackComment] = useState('')
+  const [feedbackSaved, setFeedbackSaved] = useState(false)
+  const feedbackKey = useRef<string | null>(null)
   const load = async () => {
     setCandidate(null); setPatch(null); setPagePreview(null)
     const result = await api<{ candidate: Candidate | null }>(`/ai/evolution/proposals/${proposalId}/candidate`)
@@ -100,6 +104,27 @@ function CandidateReview({ proposalId, onProposalCreated }: { proposalId: string
           <FileContent label="修改后" file={change.after} />
         </details>)}
       </details>}
+      <details className="mt-2 rounded border border-slate-200 p-2">
+        <summary className="cursor-pointer">提交效果反馈</summary>
+        <select aria-label="反馈类型" className="mt-2 rounded border border-slate-200 bg-white p-1" value={feedbackType}
+          onChange={(event) => { setFeedbackType(event.target.value as typeof feedbackType); feedbackKey.current = null; setFeedbackSaved(false) }}>
+          <option value="helpful">效果良好</option><option value="incorrect">结果不正确</option>
+          <option value="regression">发现回归</option><option value="suggestion">改进建议</option>
+        </select>
+        <textarea aria-label="反馈内容" className="mt-2 min-h-20 w-full rounded border border-slate-200 p-2" maxLength={4000}
+          value={feedbackComment} onChange={(event) => { setFeedbackComment(event.target.value); feedbackKey.current = null; setFeedbackSaved(false) }} />
+        <button disabled={busy || !feedbackComment.trim()} className="mt-2 rounded border px-2 py-1 disabled:opacity-50" onClick={async () => {
+          setBusy(true); setError(''); setFeedbackSaved(false)
+          try {
+            const key = feedbackKey.current ??= crypto.randomUUID()
+            await api('/ai/evolution/feedback', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key },
+              body: JSON.stringify({ candidateId: candidate.id, feedbackType, comment: feedbackComment.trim(), evidenceRefs: [] }) })
+            setFeedbackSaved(true)
+          } catch (cause) { setError(cause instanceof Error ? cause.message : '反馈提交失败') }
+          finally { setBusy(false) }
+        }}>保存反馈</button>
+        {feedbackSaved && <span role="status" className="ml-2 text-emerald-700">已记录</span>}
+      </details>
       {candidate.status === 'awaiting_approval' ? <div className="mt-2">
         <p className="text-slate-500">确认仅记录本候选的验收决定，发布另行执行。</p>
         <button disabled={busy} className="mr-2 mt-2 rounded bg-brand-600 px-2 py-1 text-white disabled:opacity-50" onClick={() => void decide('approved')}>验收通过</button>

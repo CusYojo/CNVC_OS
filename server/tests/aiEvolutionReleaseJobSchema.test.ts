@@ -16,6 +16,9 @@ test('release jobs migration is durable, leased and registered after its depende
   const journal = JSON.parse(await readFile(new URL('../drizzle/meta/_journal.json', import.meta.url), 'utf8')) as {
     entries: Array<{ idx: number; tag: string }>
   }
-  assert.deepEqual(journal.entries.at(-1), { idx: 108, version: '5', when: 1793000943000,
+  const entry = journal.entries.find(item => item.tag === '0108_add_ai_evolution_release_jobs')
+  assert.deepEqual(entry, { idx: 108, version: '5', when: 1793000943000,
     tag: '0108_add_ai_evolution_release_jobs', breakpoints: true })
+  assert.ok(journal.entries.findIndex(item => item.tag === '0108_add_ai_evolution_release_jobs')
+    > journal.entries.findIndex(item => item.tag === '0100_add_ai_evolution_candidates'))
 })

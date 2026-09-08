@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { mysqlTableCreator, text, longtext, customType, int, bigint, boolean, json, varchar, date, index, uniqueIndex, foreignKey } from 'drizzle-orm/mysql-core'
+import { mysqlTableCreator, text, longtext, customType, int, bigint, boolean, json, varchar, date, index, uniqueIndex, foreignKey, check } from 'drizzle-orm/mysql-core'
 import { sql } from 'drizzle-orm'
 import { mysqlConfig } from './config.js'
 import { currentRequestId } from '../runtime/structuredLogger.js'
@@ -147,6 +147,19 @@ export const aiEvolutionReleaseJobs = mysqlTable('ai_evolution_release_jobs', {
   byApproval: uniqueIndex('uq_evo_release_job_approval').on(t.approvalId),
   byLease: index('idx_evo_release_job_lease').on(t.status, t.leaseExpiresAt),
   byCandidate: index('idx_evo_release_job_candidate').on(t.candidateId, t.createdAt) }))
+
+export const aiEvolutionFeedback = mysqlTable('ai_evolution_feedback', {
+  id: uuidPrimaryKey('id'), ownerUserId: uuidColumn('owner_user_id').notNull(),
+  candidateId: uuidColumn('candidate_id').references(() => aiEvolutionCandidates.id),
+  applicationId: uuidColumn('application_id').references(() => aiEvolutionApplications.id),
+  feedbackType: varchar('feedback_type', { length: 32 }).notNull(), comment: text('comment').notNull(),
+  evidenceRefs: json('evidence_refs').$type<Array<{ type: string; id: string }>>().notNull().default(emptyJsonArray),
+  contentHash: varchar('content_hash', { length: 64 }).notNull(), idempotencyKey: varchar('idempotency_key', { length: 128 }).notNull(),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({ byRequest: uniqueIndex('uq_evo_feedback_request').on(t.ownerUserId, t.idempotencyKey),
+  byCandidate: index('idx_evo_feedback_candidate').on(t.candidateId, t.createdAt),
+  byApplication: index('idx_evo_feedback_application').on(t.applicationId, t.createdAt),
+  oneSubject: check('chk_evo_feedback_subject', sql`(${t.candidateId} IS NULL) <> (${t.applicationId} IS NULL)`) }))
 
 export const aiEvolutionModelCalls = mysqlTable('ai_evolution_model_calls', {
   id: uuidPrimaryKey('id'), runId: uuidColumn('run_id').notNull().references(() => aiEvolutionRuns.id),

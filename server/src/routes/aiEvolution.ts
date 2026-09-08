@@ -16,6 +16,7 @@ import { getAiEvolutionSkillComparisonForUser } from '../services/aiEvolutionApp
 import { registerAiEvolutionSkillVersionForUser, listAiEvolutionSkillPackagesForUser } from '../services/aiEvolutionApplicationService.js'
 import { activateAiEvolutionSkillTrial, approveAiEvolutionSkillTrial, rollbackAiEvolutionSkillTrial, planAiEvolutionSkillTrial, getAiEvolutionSkillTrialStatus } from '../services/aiEvolutionSkillTrialApplicationService.js'
 import { getAiEvolutionSkillRunComparisonForUser, getAiEvolutionSkillRunArtifactForUser } from '../services/aiEvolutionApplicationService.js'
+import { createAiEvolutionFeedback, listAiEvolutionFeedback } from '../services/aiEvolutionFeedbackService.js'
 
 export const aiEvolutionRouter = Router()
 const uuid = z.string().uuid()
@@ -46,6 +47,12 @@ aiEvolutionRouter.get('/applications', async (req: AuthedRequest, res, next) => 
     res.setHeader('Cache-Control', 'no-store')
     res.json(await getPersonalAiExperienceApplication(req.user!.uid, taskId))
   } catch (error) { next(error) }
+})
+aiEvolutionRouter.post('/feedback', async (req: AuthedRequest, res, next) => {
+  try { res.status(201).json(await createAiEvolutionFeedback(req.user!.uid, req.body, req.get('Idempotency-Key'))) } catch (error) { next(error) }
+})
+aiEvolutionRouter.get('/feedback', async (req: AuthedRequest, res, next) => {
+  try { res.setHeader('Cache-Control', 'private, no-store'); res.json(await listAiEvolutionFeedback(req.user!.uid, req.query)) } catch (error) { next(error) }
 })
 aiEvolutionRouter.post('/proposals/:id/save-experience', async (req: AuthedRequest, res, next) => {
   try {

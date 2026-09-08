@@ -2,7 +2,7 @@
 
 业务 API 只创建 `ai_evolution_release_jobs`；独立 publisher 负责领取、暂存、切换、健康核验和恢复。停止 `cybernaut-app.service` 不会中断 publisher。
 
-启用前确认服务器迁移已执行到 `0108_add_ai_evolution_release_jobs`。配置 `AI_EVOLUTION_RELEASE_TARGETS_FILE`、`AI_EVOLUTION_PUBLISHER_LIFECYCLE_FILE` 和 `AI_EVOLUTION_ARTIFACT_ROOT` 的绝对路径。两份 JSON 应由 root 持有并设为 `0600`，格式见本目录 example 文件。
+启用前确认服务器迁移已执行到 `0109_add_ai_evolution_feedback`。配置 `AI_EVOLUTION_RELEASE_TARGETS_FILE`、`AI_EVOLUTION_PUBLISHER_LIFECYCLE_FILE` 和 `AI_EVOLUTION_ARTIFACT_ROOT` 的绝对路径。两份 JSON 应由 root 持有并设为 `0600`，格式见本目录 example 文件。
 
 先执行：
 

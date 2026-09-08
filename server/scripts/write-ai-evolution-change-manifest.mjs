@@ -15,6 +15,6 @@ const files = committed.split('\0').filter(Boolean).map(entry => entry.replaceAl
 files.push(...raw.split('\0').filter(Boolean).map(entry => entry.slice(3).replaceAll('\\', '/')))
 files.push('ai-evolution-change-manifest.json')
 const manifest = { schemaVersion: 1, objective: 'AI assistant self-evolution implementation', baseCommit,
-  latestMigration: '0108_add_ai_evolution_release_jobs', files: [...new Set(files)].sort() }
+  latestMigration: '0109_add_ai_evolution_feedback', files: [...new Set(files)].sort() }
 writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n')
 console.log(JSON.stringify({ ok: true, baseCommit, files: manifest.files.length, latestMigration: manifest.latestMigration }))
