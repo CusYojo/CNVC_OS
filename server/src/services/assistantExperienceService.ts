@@ -51,6 +51,9 @@ export async function listAssistantExperienceCandidates(userId: string, input: {
 }
 
 export async function listAssistantExperiences(userId: string, projectId?: string | null) {
+  if (projectId && !await getAccessibleProject(userId, projectId)) {
+    throw Object.assign(new Error('项目不存在或无权访问'), { status: 404, code: 'NOT_FOUND' })
+  }
   return db.select().from(assistantExperiences).where(and(
     eq(assistantExperiences.userId, userId),
     projectId ? or(eq(assistantExperiences.scopeType, 'global'), and(eq(assistantExperiences.scopeType, 'project'), eq(assistantExperiences.scopeKey, projectId))) : undefined,
@@ -99,30 +102,36 @@ export async function recordAssistantCompletedTurn(input: { userId: string; conv
   const completedTurns = Math.min(users.length, assistants.length)
   if (!completedTurns) return null
   const settings = await getAssistantExperienceSettings(input.userId)
+  const [lastPeriodic] = await db.select({ endTurn: assistantExperienceCandidates.endTurn })
+    .from(assistantExperienceCandidates).where(and(
+      eq(assistantExperienceCandidates.userId, input.userId),
+      eq(assistantExperienceCandidates.conversationId, input.conversationId),
+      eq(assistantExperienceCandidates.triggerType, 'five_turn_summary'),
+    )).orderBy(desc(assistantExperienceCandidates.endTurn)).limit(1)
+  const processedTurns = lastPeriodic?.endTurn || 0
   const lastUser = users[completedTurns - 1]
   const explicit = Boolean(lastUser && detectExplicitPreference(lastUser.content || ''))
-  const periodic = settings.autoSummaryEnabled && completedTurns >= settings.processedTurnCount + 5
+  const periodic = settings.autoSummaryEnabled && completedTurns >= processedTurns + 5
   if (!explicit && !periodic) return null
-  const startTurn = periodic ? Math.max(1, settings.processedTurnCount + 1) : completedTurns
-  const endTurn = periodic ? settings.processedTurnCount + 5 : completedTurns
+  const startTurn = periodic ? processedTurns + 1 : completedTurns
+  const endTurn = periodic ? processedTurns + 5 : completedTurns
   const windowRows = rows.filter((row) => {
     const userIndex = users.findIndex((user) => user.id === row.id) + 1
     if (row.role === 'user') return userIndex >= startTurn && userIndex <= endTurn
     return true
   }).slice(-10)
   const summary = await summarizeWindow(windowRows, input.projectId)
-  if (periodic) await db.update(assistantExperienceSettings).set({ processedTurnCount: endTurn, revision: settings.revision + 1, updatedAt: now() }).where(eq(assistantExperienceSettings.userId, input.userId))
   if (!summary) return null
   const id = randomUUID()
   await db.insert(assistantExperienceCandidates).values({
     id, userId: input.userId, conversationId: input.conversationId, projectId: input.projectId || null,
-    triggerType: explicit ? 'explicit_preference' : 'five_turn_summary', startTurn, endTurn,
-    sourceMessageId: explicit ? lastUser.id : null, rule: summary.rule, evidence: summary.evidence,
+    triggerType: periodic ? 'five_turn_summary' : 'explicit_preference', startTurn, endTurn,
+    sourceMessageId: periodic ? null : lastUser.id, rule: summary.rule, evidence: summary.evidence,
     example: summary.example, suggestedScope: summary.suggestedScope, contentHash: contentHash(summary.rule),
   }).onDuplicateKeyUpdate({ set: { updatedAt: now() } })
   const [candidate] = await db.select().from(assistantExperienceCandidates).where(and(
     eq(assistantExperienceCandidates.userId, input.userId),
-    explicit ? eq(assistantExperienceCandidates.sourceMessageId, lastUser.id) : and(eq(assistantExperienceCandidates.conversationId, input.conversationId), eq(assistantExperienceCandidates.startTurn, startTurn), eq(assistantExperienceCandidates.endTurn, endTurn)),
+    periodic ? and(eq(assistantExperienceCandidates.conversationId, input.conversationId), eq(assistantExperienceCandidates.startTurn, startTurn), eq(assistantExperienceCandidates.endTurn, endTurn)) : eq(assistantExperienceCandidates.sourceMessageId, lastUser.id),
   )).limit(1)
   return candidate || null
 }

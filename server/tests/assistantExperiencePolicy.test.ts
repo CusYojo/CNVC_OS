@@ -13,6 +13,11 @@ test('creates one periodic boundary only when enabled', () => {
   assert.equal(shouldCreatePeriodicCandidate({ enabled: true, processedTurns: 5, completedTurns: 5 }), false)
 })
 
+test('five-turn boundaries are evaluated independently per conversation cursor', () => {
+  assert.equal(shouldCreatePeriodicCandidate({ enabled: true, processedTurns: 0, completedTurns: 5 }), true)
+  assert.equal(shouldCreatePeriodicCandidate({ enabled: true, processedTurns: 5, completedTurns: 5 }), false)
+})
+
 test('filters secrets and orders project experience first', () => {
   assert.equal(sanitizeCandidate('密码是 abc123'), null)
   const prompt = buildExperiencePrompt([
