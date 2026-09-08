@@ -13,4 +13,4 @@ const actual = [...new Set([...committed.split('\0').filter(Boolean).map(entry =
   'ai-evolution-change-manifest.json'])].sort()
 if (manifest.schemaVersion !== 1 || manifest.latestMigration !== '0107_add_ai_evolution_release_jobs'
   || JSON.stringify(manifest.files) !== JSON.stringify(actual)) throw Error('AI evolution change manifest is stale or incomplete')
-console.log(JSON.stringify({ ok: true, baseCommit: head, files: actual.length, latestMigration: manifest.latestMigration }))
+console.log(JSON.stringify({ ok: true, baseline: manifest.baseCommit, head, files: actual.length, latestMigration: manifest.latestMigration }))
