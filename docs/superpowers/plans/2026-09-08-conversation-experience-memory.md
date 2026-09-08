@@ -12,8 +12,8 @@
 
 ## 文件结构
 
-- 创建 `server/drizzle/0104_add_assistant_experience_memory.sql`：四张经验表、唯一键、索引和外键。
-- 修改 `server/drizzle/meta/_journal.json`：登记 0104 迁移，时间戳严格晚于 0103。
+- 创建 `server/drizzle/0112_add_assistant_experience_memory.sql`：四张经验表、唯一键、索引和外键；编号避开服务器已执行并保留的 0104–0111。
+- 修改 `server/drizzle/meta/_journal.json`：登记 0112 迁移，时间戳严格晚于服务器已执行的 0111。
 - 修改 `server/src/db/schema.ts`：四张表的 Drizzle 定义与枚举联合类型。
 - 创建 `server/src/services/assistantExperiencePolicy.ts`：轮次判定、显式偏好识别、候选清洗、提示拼接等无副作用规则。
 - 创建 `server/src/services/assistantExperienceService.ts`：设置、候选、决定、经验生命周期及数据库幂等事务。
@@ -32,14 +32,14 @@
 **文件：**
 - 创建：`server/tests/assistantExperienceMigration.test.ts`
 - 创建：`server/tests/assistantExperiencePolicy.test.ts`
-- 创建：`server/drizzle/0104_add_assistant_experience_memory.sql`
+- 创建：`server/drizzle/0112_add_assistant_experience_memory.sql`
 - 修改：`server/drizzle/meta/_journal.json`
 - 修改：`server/src/db/schema.ts`
 - 创建：`server/src/services/assistantExperiencePolicy.ts`
 
 - [ ] **步骤 1：编写迁移失败测试**
 
-测试读取 SQL、journal 和 schema，断言四张表、默认开启字段、候选轮次窗口唯一键、来源消息唯一键、有效经验唯一哈希以及 0104 journal 条目存在：
+测试读取 SQL、journal 和 schema，断言四张表、默认开启字段、候选轮次窗口唯一键、来源消息唯一键、有效经验唯一哈希以及 0112 journal 条目存在：
 
 ```ts
 assert.match(sql, /CREATE TABLE `assistant_experience_settings`/)
@@ -47,14 +47,14 @@ assert.match(sql, /`auto_summary_enabled` boolean NOT NULL DEFAULT true/)
 assert.match(sql, /CREATE TABLE `assistant_experience_candidates`/)
 assert.match(sql, /CREATE TABLE `assistant_experiences`/)
 assert.match(sql, /CREATE TABLE `assistant_experience_decisions`/)
-assert.match(journal, /"tag": "0104_add_assistant_experience_memory"/)
+assert.match(journal, /"tag": "0112_add_assistant_experience_memory"/)
 ```
 
 - [ ] **步骤 2：运行迁移测试并确认失败**
 
 运行：`node --import tsx --test server/tests/assistantExperienceMigration.test.ts`
 
-预期：FAIL，提示缺少 `0104_add_assistant_experience_memory.sql` 或表定义。
+预期：FAIL，提示缺少 `0112_add_assistant_experience_memory.sql` 或表定义。
 
 - [ ] **步骤 3：编写规则失败测试**
 
@@ -75,7 +75,7 @@ assert.match(buildExperiencePrompt([{ rule: '先总结，再说明原因', scope
 
 - [ ] **步骤 5：实现迁移和 schema**
 
-迁移字段固定为：设置表以 `user_id` 唯一；候选含 `conversation_id/project_id/trigger_type/start_turn/end_turn/source_message_id/rule/evidence/example/suggested_scope/content_hash/status/version/decided_at`；经验含 `user_id/scope_type/scope_key/rule/content_hash/status/version/source_candidate_id/last_used_at`；决定含候选、经验、动作、版本、操作者和时间。所有用户、会话、项目外键遵循现有删除策略，0104 的 `when` 大于 `1792050543000`。
+迁移字段固定为：设置表以 `user_id` 唯一；候选含 `conversation_id/project_id/trigger_type/start_turn/end_turn/source_message_id/rule/evidence/example/suggested_scope/content_hash/status/version/decided_at`；经验含 `user_id/scope_type/scope_key/rule/content_hash/status/version/source_candidate_id/last_used_at`；决定含候选、经验、动作、版本、操作者和时间。所有用户、会话、项目外键遵循现有删除策略，0112 的 `when` 大于服务器 0111 的 `1793173743000`。
 
 - [ ] **步骤 6：实现纯规则模块**
 
@@ -102,7 +102,7 @@ export function shouldCreatePeriodicCandidate(input: {
 - [ ] **步骤 8：提交领域基础**
 
 ```bash
-git add server/drizzle/0104_add_assistant_experience_memory.sql server/drizzle/meta/_journal.json server/src/db/schema.ts server/src/services/assistantExperiencePolicy.ts server/tests/assistantExperienceMigration.test.ts server/tests/assistantExperiencePolicy.test.ts
+git add server/drizzle/0112_add_assistant_experience_memory.sql server/drizzle/meta/_journal.json server/src/db/schema.ts server/src/services/assistantExperiencePolicy.ts server/tests/assistantExperienceMigration.test.ts server/tests/assistantExperiencePolicy.test.ts
 git commit -m "feat: add assistant experience memory schema"
 ```
 
