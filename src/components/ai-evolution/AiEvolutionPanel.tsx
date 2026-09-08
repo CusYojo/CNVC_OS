@@ -4,6 +4,7 @@ import { useAiEvolution } from '../../hooks/useAiEvolution'
 import { AiEvolutionCandidateReview } from './AiEvolutionCandidateReview'
 import { AiEvolutionRuns } from './AiEvolutionRuns'
 import { AiEvolutionQuestions } from './AiEvolutionQuestions'
+import { AiEvolutionProposalEditor } from './AiEvolutionProposalEditor'
 
 const kinds = { experience: '经验', skill: '技能', code: '系统功能' }
 const statuses = { draft: '草稿', needs_input: '待补充信息', ready: '待开始', approved: '已提交执行', rejected: '已拒绝', superseded: '已替代' }
@@ -21,7 +22,8 @@ export function classifyEvolutionWorkbenchStatus(proposal: { status: string; spe
 }
 
 export function AiEvolutionPanel({ conversationId }: { conversationId: string }) {
-  const { proposals, experiences, activity, loading, error, refresh, execute, saveExperience, disableExperience, saveAnswers } = useAiEvolution(conversationId)
+  const { proposals, experiences, activity, loading, error, refresh, execute, saveExperience, disableExperience,
+    saveAnswers, updateProposal, decideProposal } = useAiEvolution(conversationId)
   const [kind, setKind] = useState<EvolutionKind | 'all'>('all')
   const [workbenchStatus, setWorkbenchStatus] = useState<WorkbenchStatus>('pending')
   const [busyId, setBusyId] = useState('')
@@ -81,6 +83,19 @@ export function AiEvolutionPanel({ conversationId }: { conversationId: string })
         <p className="mt-2">来源：{proposal.spec.sourceRefs.length} 条已授权引用</p>
       </details>
       <AiEvolutionQuestions key={`${proposal.id}:${proposal.revision}`} proposal={proposal} save={saveAnswers} />
+      {['draft', 'needs_input', 'ready'].includes(proposal.status) && <div className="mt-3 flex flex-wrap gap-2">
+        <AiEvolutionProposalEditor proposal={proposal} disabled={Boolean(busyId)} save={updateProposal} />
+        <button disabled={Boolean(busyId)} className="rounded border px-2 py-1 text-xs disabled:opacity-50" onClick={async () => {
+          setBusyId(proposal.id); setActionError(''); setNotice('')
+          try { await decideProposal(proposal, 'deferred'); setNotice('提案已保留为草稿，可稍后继续修改或执行。') }
+          catch (error) { setActionError(error instanceof Error ? error.message : '暂存失败') } finally { setBusyId('') }
+        }}>稍后处理</button>
+        <button disabled={Boolean(busyId)} className="rounded border border-rose-200 px-2 py-1 text-xs text-rose-700 disabled:opacity-50" onClick={async () => {
+          setBusyId(proposal.id); setActionError(''); setNotice('')
+          try { await decideProposal(proposal, 'rejected'); setNotice('提案已拒绝，历史记录和来源审计仍保留。') }
+          catch (error) { setActionError(error instanceof Error ? error.message : '拒绝失败') } finally { setBusyId('') }
+        }}>拒绝提案</button>
+      </div>}
       {proposal.status === 'ready' && <button disabled={Boolean(busyId)} className="mt-3 rounded bg-brand-600 px-3 py-1.5 text-white disabled:opacity-50" onClick={async () => {
         setBusyId(proposal.id); setActionError(''); setNotice('')
         try {

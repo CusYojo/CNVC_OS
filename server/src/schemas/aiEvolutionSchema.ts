@@ -52,6 +52,8 @@ export const evolutionSpecSchema = z.object({
 export const evolutionCreateSchema = z.object({ spec: evolutionSpecSchema }).strict()
 export const evolutionEditSchema = z.object({ expectedRevision: z.number().int().positive(), spec: evolutionSpecSchema }).strict()
 export const evolutionExecuteSchema = z.object({ expectedRevision: z.number().int().positive() }).strict()
+export const evolutionProposalDecisionSchema = z.object({ expectedRevision: z.number().int().positive(),
+  decision: z.enum(['rejected', 'deferred']) }).strict()
 export const evolutionDecisionSchema = z.object({
   candidateHash: sha256, evaluationHash: sha256,
   scope: z.object({ type: z.enum(['user', 'project', 'department', 'organization']), key: nonempty(128) }).strict(),

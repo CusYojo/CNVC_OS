@@ -265,6 +265,19 @@ export class MySqlAiEvolutionRepository {
     })
   }
 
+  async decideProposal(userId: string, id: string, revision: number, decision: 'rejected' | 'deferred') {
+    return db.transaction(async tx => {
+      const [row] = await tx.select().from(proposals).where(and(eq(proposals.id, id), eq(proposals.ownerUserId, userId))).for('update')
+      if (!row) throw missing()
+      if (row.revision !== revision || !['draft', 'ready', 'needs_input'].includes(row.status)) throw conflict()
+      const status = decision === 'rejected' ? 'rejected' : 'draft'
+      const update = { status, revision: revision + 1, updatedAt: new Date() }
+      await tx.update(proposals).set(update).where(eq(proposals.id, id))
+      await audit(tx, userId, id, decision === 'rejected' ? 'proposal_rejected' : 'proposal_deferred', row.specHash)
+      return { ...row, ...update }
+    })
+  }
+
   /** Caller rechecks authorization first and passes the exact authorized spec hash. */
   async enqueue(userId: string, proposalId: string, revision: number, authorizedSpecHash: string, idempotencyKey: string) {
     return db.transaction(async (tx) => {

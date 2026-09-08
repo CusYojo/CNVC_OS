@@ -183,6 +183,9 @@ aiEvolutionRouter.get('/proposals/:id/runs', async (req: AuthedRequest, res, nex
 aiEvolutionRouter.patch('/proposals/:id', async (req: AuthedRequest, res, next) => {
   try { res.json(await aiEvolutionService.edit(req.user!.uid, uuid.parse(req.params.id), req.body)) } catch (error) { next(error) }
 })
+aiEvolutionRouter.post('/proposals/:id/decision', async (req: AuthedRequest, res, next) => {
+  try { res.json(await aiEvolutionService.decideProposal(req.user!.uid, uuid.parse(req.params.id), req.body)) } catch (error) { next(error) }
+})
 aiEvolutionRouter.post('/proposals/:id/execute', async (req: AuthedRequest, res, next) => {
   try {
     res.status(202).json(await aiEvolutionService.execute(req.user!.uid, uuid.parse(req.params.id), req.body, req.get('Idempotency-Key')))

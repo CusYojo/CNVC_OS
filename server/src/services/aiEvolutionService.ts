@@ -1,4 +1,5 @@
-import { evolutionCreateSchema, evolutionEditSchema, evolutionExecuteSchema, evolutionPaginationSchema } from '../schemas/aiEvolutionSchema.js'
+import { evolutionCreateSchema, evolutionEditSchema, evolutionExecuteSchema, evolutionPaginationSchema,
+  evolutionProposalDecisionSchema } from '../schemas/aiEvolutionSchema.js'
 import { assertEvolutionSpecAccess, evolutionError, type EvolutionActor, type EvolutionPolicyDependencies } from './aiEvolutionPolicyService.js'
 import type { MySqlAiEvolutionRepository } from '../repositories/mysql/mysqlAiEvolutionRepository.js'
 import type { EvolutionProposal, EvolutionRun, EvolutionEvent } from '../contracts/aiEvolutionContract.js'
@@ -6,7 +7,7 @@ import { aiEvolutionExecutorRegistry, type AiEvolutionExecutorRegistry } from '.
 
 type ProposalRow = NonNullable<Awaited<ReturnType<MySqlAiEvolutionRepository['findProposal']>>>
 type RunRow = NonNullable<Awaited<ReturnType<MySqlAiEvolutionRepository['findRun']>>>
-type Repository = Pick<MySqlAiEvolutionRepository, 'findProposal' | 'listProposals' | 'listProposalActivity' | 'createProposal' | 'editProposal' | 'enqueue' | 'findRun' | 'listEvents' | 'requestCancel' | 'resumeInterrupted'>
+type Repository = Pick<MySqlAiEvolutionRepository, 'findProposal' | 'listProposals' | 'listProposalActivity' | 'createProposal' | 'editProposal' | 'decideProposal' | 'enqueue' | 'findRun' | 'listEvents' | 'requestCancel' | 'resumeInterrupted'>
 
 function proposalDto(row: ProposalRow): EvolutionProposal {
   return { id: row.id, ownerUserId: row.ownerUserId, spec: row.spec, specHash: row.specHash,
@@ -79,6 +80,12 @@ export class AiEvolutionService {
     const { spec, expectedRevision } = evolutionEditSchema.parse(input)
     await assertEvolutionSpecAccess(actor, spec, this.policy)
     return proposalDto(await this.repository.editProposal(userId, id, expectedRevision, spec))
+  }
+
+  async decideProposal(userId: string, id: string, input: unknown) {
+    await this.get(userId, id)
+    const parsed = evolutionProposalDecisionSchema.parse(input)
+    return proposalDto(await this.repository.decideProposal(userId, id, parsed.expectedRevision, parsed.decision))
   }
 
   async execute(userId: string, id: string, input: unknown, key: unknown) {

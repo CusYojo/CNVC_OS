@@ -25,6 +25,8 @@ function fixture(executors = new AiEvolutionExecutorRegistry()) {
   const repository = {
     createProposal: async () => { creates++; return proposal }, findProposal: async () => proposal,
     listProposals: async () => [proposal], listProposalActivity: async () => ({ [proposal.id]: { runStatus: row.status } }), findRun: async () => row,
+    decideProposal: async (_userId: string, _id: string, revision: number, decision: 'rejected' | 'deferred') => ({ ...proposal,
+      status: decision === 'rejected' ? 'rejected' : 'draft', revision: revision + 1 }),
     requestCancel: async () => ({ ...row, cancelRequestedAt: now }),
   } as unknown as ConstructorParameters<typeof AiEvolutionService>[0]
   const service = new AiEvolutionService(repository, {
@@ -82,4 +84,11 @@ test('editing proposal sources cannot bypass revoked access to the original run 
   await assert.rejects(f.service.authorizeSpec(uid, { ...spec, sourceRefs: [{ type: 'message', id: 'original-source' }] }), { code: 'EVOLUTION_SOURCE_FORBIDDEN' })
   const cancelled = await f.service.cancel(uid, 'run')
   assert.ok(cancelled.cancelRequestedAt)
+})
+
+test('proposal decisions use the current revision and preserve a deferred proposal as draft', async () => {
+  const f = fixture()
+  assert.equal((await f.service.decideProposal(uid, 'proposal', { expectedRevision: 1, decision: 'deferred' })).status, 'draft')
+  assert.equal((await f.service.decideProposal(uid, 'proposal', { expectedRevision: 1, decision: 'rejected' })).status, 'rejected')
+  await assert.rejects(f.service.decideProposal(uid, 'proposal', { expectedRevision: 1, decision: 'approved' }))
 })

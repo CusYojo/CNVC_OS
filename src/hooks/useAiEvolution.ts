@@ -54,6 +54,16 @@ export function useAiEvolution(conversationId: string) {
     })
     await refresh()
   }
+  const updateProposal = async (proposal: EvolutionProposal, spec: EvolutionProposal['spec']) => {
+    await api(`/ai/evolution/proposals/${proposal.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ expectedRevision: proposal.revision, spec }) })
+    await refresh()
+  }
+  const decideProposal = async (proposal: EvolutionProposal, decision: 'rejected' | 'deferred') => {
+    await api(`/ai/evolution/proposals/${proposal.id}/decision`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ expectedRevision: proposal.revision, decision }) })
+    await refresh()
+  }
   const saveExperience = async (proposal: EvolutionProposal) => {
     const result = await api<{ experienceId: string; versionId: string; contentHash: string }>(`/ai/evolution/proposals/${proposal.id}/save-experience`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -69,5 +79,6 @@ export function useAiEvolution(conversationId: string) {
     })
     await refresh()
   }
-  return { proposals, experiences, activity, loading, error, refresh, execute, saveExperience, disableExperience, saveAnswers }
+  return { proposals, experiences, activity, loading, error, refresh, execute, saveExperience, disableExperience,
+    saveAnswers, updateProposal, decideProposal }
 }
