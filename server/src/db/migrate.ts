@@ -124,6 +124,14 @@ const REQUIRED_RUNTIME_TABLES = [
   'migration_entity_mappings', 'migration_cdc_checkpoints', 'migration_cdc_events',
 ] as const
 
+const AI_EVOLUTION_RUNTIME_TABLES = [
+  'ai_evolution_proposals', 'ai_evolution_runs', 'ai_evolution_events', 'ai_evolution_audits',
+  'ai_evolution_model_calls', 'ai_evolution_candidates', 'ai_evolution_evaluations', 'ai_evolution_approvals',
+  'ai_experiences', 'ai_experience_versions', 'ai_evolution_applications',
+  'ai_evolution_skill_versions', 'ai_evolution_skill_bindings', 'ai_evolution_skill_binding_changes',
+  'ai_evolution_skill_applications', 'ai_evolution_release_jobs', 'ai_evolution_feedback',
+] as const
+
 export async function assertSchemaReady(): Promise<void> {
   await verifyMySqlRuntime()
   const journal = JSON.parse(await readFile(path.join(resolveMigrationsFolder(), 'meta', '_journal.json'), 'utf8')) as {
@@ -138,7 +146,9 @@ export async function assertSchemaReady(): Promise<void> {
   if (Number(migrationRows[0]?.latest || 0) < latest.when) {
     throw new Error(`[mysql runtime] schema migration ${latest.tag || latest.when} has not been applied`)
   }
-  const requiredNames = REQUIRED_RUNTIME_TABLES.map(mysqlTableName)
+  const requiredTables = process.env.AI_EVOLUTION_ENABLED === 'true'
+    ? [...REQUIRED_RUNTIME_TABLES, ...AI_EVOLUTION_RUNTIME_TABLES] : REQUIRED_RUNTIME_TABLES
+  const requiredNames = requiredTables.map(mysqlTableName)
   const [tableRows] = await pool.query<RowDataPacket[]>(
     `SELECT TABLE_NAME AS tableName FROM information_schema.TABLES
      WHERE TABLE_SCHEMA=? AND TABLE_NAME IN (${requiredNames.map(() => '?').join(',')})`,
