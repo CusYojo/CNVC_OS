@@ -163,6 +163,7 @@
     "server/src/services/aiTaskService.ts",
     "server/src/services/aiUploadedTemplateSnapshot.ts",
     "server/tests/aiDueDiligenceSkillRuntimeService.test.ts",
+    "server/tests/aiEvolutionApplicationFeedbackUi.test.ts",
     "server/tests/aiEvolutionArtifactStore.test.ts",
     "server/tests/aiEvolutionBrowserGate.test.ts",
     "server/tests/aiEvolutionBuildArtifacts.test.ts",

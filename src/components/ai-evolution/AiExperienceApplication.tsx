@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '../../lib/api'
 
-type Application = { taskId: string; checkStatus: string; snapshot: {
+type Application = { id: string; taskId: string; checkStatus: string; snapshot: {
   loaded: { versionId: string; rule: string }[]; excluded: { reason: string }[]
 }; checkResult: null | { checks: { versionId: string; verdict: string; explanation: string; excerpts: string[] }[] } }
 const labels: Record<string, string> = { not_checked: '尚未检查遵守', PASS: '已检查：通过', FAIL: '已检查：未通过',
@@ -12,6 +12,8 @@ const reasons: Record<string, string> = { disabled: '已停用', source_access_r
 export function AiExperienceApplication({ taskId }: { taskId: string }) {
   const [open, setOpen] = useState(false), [refresh, setRefresh] = useState(0)
   const [value, setValue] = useState<Application | null>(null), [loading, setLoading] = useState(false), [error, setError] = useState('')
+  const [feedbackType, setFeedbackType] = useState<'helpful' | 'incorrect' | 'regression' | 'suggestion'>('helpful')
+  const [comment, setComment] = useState(''), [feedbackState, setFeedbackState] = useState<'idle' | 'saving' | 'saved'>('idle')
   useEffect(() => {
     let active = true
     setValue(null); setError('')
@@ -41,6 +43,26 @@ export function AiExperienceApplication({ taskId }: { taskId: string }) {
           <p>{labels[check.verdict] ?? '检查状态未知'} · 版本 {check.versionId}</p><p>{check.explanation}</p>
           {check.excerpts.map((excerpt, index) => <blockquote key={index} className="mt-1 whitespace-pre-wrap border-l-2 pl-2">{excerpt}</blockquote>)}
         </div>)}
+        <div className="border-t pt-2">
+          <p className="font-medium">提交本次应用反馈</p>
+          <select aria-label="经验反馈类型" className="mt-2 rounded border border-slate-200 bg-white p-1" value={feedbackType}
+            onChange={event => { setFeedbackType(event.target.value as typeof feedbackType); setFeedbackState('idle') }}>
+            <option value="helpful">效果良好</option><option value="incorrect">结果不正确</option>
+            <option value="regression">发现回归</option><option value="suggestion">改进建议</option>
+          </select>
+          <textarea aria-label="经验反馈说明" className="mt-2 min-h-16 w-full rounded border border-slate-200 p-2" maxLength={4000}
+            value={comment} onChange={event => { setComment(event.target.value); setFeedbackState('idle') }} placeholder="说明实际效果或需要改进的地方" />
+          <button className="mt-2 rounded bg-brand-600 px-2 py-1 text-white disabled:opacity-50"
+            disabled={feedbackState === 'saving' || !comment.trim()} onClick={async () => {
+              setFeedbackState('saving'); setError('')
+              try {
+                await api('/ai/evolution/feedback', { method: 'POST', headers: { 'Content-Type': 'application/json',
+                  'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify({ applicationId: value.id, feedbackType,
+                    comment: comment.trim(), evidenceRefs: [{ type: 'task', id: taskId }] }) })
+                setFeedbackState('saved'); setComment('')
+              } catch (reason) { setFeedbackState('idle'); setError(reason instanceof Error ? reason.message : '提交反馈失败') }
+            }}>{feedbackState === 'saving' ? '正在提交…' : feedbackState === 'saved' ? '反馈已提交' : '提交反馈'}</button>
+        </div>
       </>}
     </div>}
   </details>
