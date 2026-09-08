@@ -8,6 +8,7 @@ import { createMySqlIdentityRepositoryContext } from '../repositories/index.js'
 import { readProjectFileBuffer } from './projectFileStorageService.js'
 import type { z } from 'zod'
 import { withKnowledgeCommand } from './fdeKnowledgeCommandService.js'
+import { weixinLinkIntakes } from '../db/schema.js'
 
 type Row = typeof entries.$inferSelect
 type Definition = z.infer<typeof knowledgeDefinition>
@@ -39,7 +40,17 @@ async function record(tx: FileTx, row: Row, userId: string, requestId: string, h
 }
 async function syncIndex(tx: FileTx, row: Row) {
   await tx.delete(knowledgeChunks).where(and(eq(knowledgeChunks.sourceType, 'company_knowledge'), eq(knowledgeChunks.sourceId, row.id)))
-  if (row.status === 'published') await tx.insert(knowledgeChunks).values({ scope: 'org', refId: row.id, sourceType: 'company_knowledge', sourceId: row.id, sourceName: row.title, chunkIndex: 0, content: `${row.title}\n${row.summary}` })
+  if (row.status === 'published') {
+    const content = `${row.title}\n${row.summary}\n${await linkedArticleBody(tx, row.id)}`
+    const chunks = Array.from({ length: Math.ceil(content.length / 1500) }, (_, index) => ({ scope: 'org', refId: row.id, sourceType: 'company_knowledge', sourceId: row.id, sourceName: row.title, chunkIndex: index, content: content.slice(index * 1500, (index + 1) * 1500) }))
+    await tx.insert(knowledgeChunks).values(chunks)
+  }
+}
+async function linkedArticleBody(tx: FileTx, entryId: string) {
+  // Call only after the existing knowledge permission checks; the task table is not a public reader API.
+  const [article] = await tx.select({ body: weixinLinkIntakes.articleBody }).from(weixinLinkIntakes)
+    .where(eq(weixinLinkIntakes.knowledgeEntryId, entryId)).orderBy(desc(weixinLinkIntakes.sequence)).limit(1)
+  return article?.body || ''
 }
 async function lockProjects(tx: FileTx, ids: Array<string | null>) {
   const fileIds = [...new Set(ids.filter(Boolean) as string[])]
@@ -172,7 +183,7 @@ export async function listCompanyKnowledge(userId: string, raw: unknown = {}) {
   return db.transaction(async tx => {
     await actor(tx, userId)
     const where = and(companyKnowledgeAccessCondition(userId), eq(entries.status, input.view), input.kind ? eq(entries.kind, input.kind) : undefined,
-      input.keyword ? or(sql`LOCATE(${input.keyword},${entries.title})>0`, sql`LOCATE(${input.keyword},${entries.summary})>0`, inArray(entries.id, tx.select({ id: comments.entryId }).from(comments).where(and(isNull(comments.withdrawnAt), sql`LOCATE(${input.keyword},${comments.content})>0`)))) : undefined)
+      input.keyword ? or(sql`LOCATE(${input.keyword},${entries.title})>0`, sql`LOCATE(${input.keyword},${entries.summary})>0`, inArray(entries.id, tx.select({ id: weixinLinkIntakes.knowledgeEntryId }).from(weixinLinkIntakes).where(sql`LOCATE(${input.keyword},${weixinLinkIntakes.articleBody})>0`)), inArray(entries.id, tx.select({ id: comments.entryId }).from(comments).where(and(isNull(comments.withdrawnAt), sql`LOCATE(${input.keyword},${comments.content})>0`)))) : undefined)
     const [total] = await tx.select({ value: count() }).from(entries).where(where)
     const rows = await tx.select().from(entries).where(where).orderBy(desc(entries.updatedAt), desc(entries.id)).limit(input.pageSize).offset((input.page - 1) * input.pageSize)
     const [creator] = await tx.select({ id: users.id }).from(users).where(and(eq(users.id, userId), companyKnowledgeBusinessActor(userId)))
@@ -190,7 +201,7 @@ export async function getCompanyKnowledge(id: string, userId: string, raw: unkno
     // Snapshots are audit-only. Never disclose old text or old audiences via history.
     const history = await tx.select({ id: events.id, action: events.action, version: events.version, actorName: users.name, reason: events.reason, createdAt: events.createdAt }).from(events).innerJoin(users, eq(users.id, events.actorId)).where(eq(events.entryId, id)).orderBy(desc(events.version)).limit(input.pageSize).offset((input.historyPage - 1) * input.pageSize)
     const [ownRating] = await tx.select({ score: ratings.score }).from(ratings).where(and(eq(ratings.entryId, id), eq(ratings.userId, userId)))
-    return { entry, readerIds: entry.capabilities.edit ? members.filter(g => !g.canEdit).map(g => g.userId) : [], editorIds: entry.capabilities.edit ? members.filter(g => g.canEdit).map(g => g.userId) : [], ownRating: ownRating?.score ?? null,
+    return { entry: { ...entry, body: await linkedArticleBody(tx, row.id) }, readerIds: entry.capabilities.edit ? members.filter(g => !g.canEdit).map(g => g.userId) : [], editorIds: entry.capabilities.edit ? members.filter(g => g.canEdit).map(g => g.userId) : [], ownRating: ownRating?.score ?? null,
       comments: discussion.map(({ comment: c, name }) => ({ id: c.id, authorName: name, content: c.withdrawnAt ? '' : c.content, createdAt: c.createdAt, withdrawnAt: c.withdrawnAt, canWithdraw: entry.capabilities.interact && c.authorId === userId && !c.withdrawnAt })), commentTotal: total.value, history, historyTotal: historyTotal.value, ...input }
   }, { isolationLevel: 'read committed' })
 }

@@ -1,0 +1,20 @@
+CREATE TABLE `sbl_weixin_link_intakes` (
+  `id` varchar(36) NOT NULL PRIMARY KEY,
+  `sequence` bigint NOT NULL AUTO_INCREMENT,
+  `session_key` varchar(64) NOT NULL,
+  `binding_id` varchar(36) NOT NULL,
+  `user_id` varchar(36) NOT NULL,
+  `initial_message_id` varchar(191) NOT NULL,
+  `status` varchar(24) NOT NULL,
+  `mode` varchar(16) NULL,
+  `knowledge_entry_id` varchar(36) NULL,
+  `article_body` longtext NULL,
+  `payload` json NOT NULL,
+  `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  UNIQUE KEY `uq_weixin_intake_sequence` (`sequence`),
+  UNIQUE KEY `uq_weixin_intake_message` (`session_key`, `initial_message_id`),
+  KEY `idx_weixin_intake_session` (`session_key`, `sequence`),
+  KEY `idx_weixin_intake_knowledge` (`knowledge_entry_id`),
+  KEY `idx_weixin_intake_user` (`user_id`, `updated_at`)
+);

@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { sourceContainsText } from '../contracts/sourceTextMatch.js'
 import type { PoolConnection } from 'mysql2/promise'
 import type { RowDataPacket } from 'mysql2'
 import { pool } from '../db/client.js'
@@ -366,8 +367,7 @@ function validatedManualEvidence(input: ResolveLeadPipelineReviewInput, row: Loc
   if (['company', 'project'].includes(subjectType) && !registration.eligibleForLeadPool) {
     throw reviewError('COMPANY_DEREGISTERED', '登记状态明确为注销的企业不能人工确认进入共享线索池', 409)
   }
-  const rawText = canonicalJson(rawPayload)
-  if (!normalizeComparable(rawText).includes(normalizeComparable(subjectName))) {
+  if (!sourceContainsText(rawPayload, subjectName, normalizeComparable)) {
     throw reviewError('LEAD_REVIEW_SUBJECT_NOT_IN_SOURCE', '主体名称无法在不可变原始事件中定位')
   }
   const evidence = (input.evidence ?? []).slice(0, 10).map((item) => ({
@@ -380,7 +380,7 @@ function validatedManualEvidence(input: ResolveLeadPipelineReviewInput, row: Loc
   if (!evidence.length || evidence.some((item) => !item.claim || !item.quote)) {
     throw reviewError('LEAD_REVIEW_EVIDENCE_REQUIRED', '接受线索必须提供原文引文和对应事实主张')
   }
-  if (evidence.some((item) => !normalizeComparable(rawText).includes(normalizeComparable(item.quote)))) {
+  if (evidence.some((item) => !sourceContainsText(rawPayload, item.quote || '', normalizeComparable))) {
     throw reviewError('LEAD_REVIEW_EVIDENCE_NOT_IN_SOURCE', '人工复核引文无法在不可变原始事件中定位')
   }
   return { subjectName, legalName: legalName || null, subjectType, reason, evidence }

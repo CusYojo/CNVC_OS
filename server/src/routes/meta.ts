@@ -873,7 +873,7 @@ export class RadarSyncAlreadyRunningError extends Error {
 
 // HTTP 路由和 MySQL 持久化调度器共享同一个进程内领域函数，禁止通过
 // localhost HTTP + 固定内部密钥调用自身。
-export async function runRadarSyncImport(input: RadarSyncInput = {}, actorUserId?: string) {
+export async function runRadarSyncImport(input: RadarSyncInput = {}, actorUserId?: string, suppliedCandidates?: Record<string, unknown>[]) {
   if (radarSyncRunning) {
     throw new RadarSyncAlreadyRunningError()
   }
@@ -896,7 +896,13 @@ export async function runRadarSyncImport(input: RadarSyncInput = {}, actorUserId
     let hasMore = false
     const fetchedItems: Record<string, unknown>[] = []
 
-    if (candidateIds.length > 0) {
+    if (suppliedCandidates) {
+      // Host-only targeted intake: never discover unrelated candidates or advance collector cursors.
+      if (suppliedCandidates.length > 10) throw new Error('too many supplied radar candidates')
+      fetchedItems.push(...suppliedCandidates)
+      candidateTotal = suppliedCandidates.length
+      pagesFetched = suppliedCandidates.length ? 1 : 0
+    } else if (candidateIds.length > 0) {
       const selected = await readRadarCandidatesByIds(candidateIds)
       fetchedItems.push(...selected)
       candidateTotal = selected.length
@@ -1279,6 +1285,7 @@ export async function runRadarSyncImport(input: RadarSyncInput = {}, actorUserId
       // 注意：这里 NOT 写 leads.scoring —— scoring 留给“点击 AI 评测”后的统一 AI 评分流程。
       const radarProfile = {
         sourceId: firstMeaningfulRadarText(it.source_id, it.fingerprint),
+        ...(it.source === 'weixin_link' ? { submittedBy: it.submitted_by, knowledgeEntryId: it.knowledge_entry_id || null } : {}),
         radarSourceKey: radarCandidateSourceKey(it),
         sourceTitle: it.title || '',
         decisionLabel: it.decision_label || '',

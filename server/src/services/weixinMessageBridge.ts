@@ -14,6 +14,8 @@ import {
 import { createConversation } from './conversationService.js'
 import { createImBinding, routeImInboundMessage, type ImActor } from './imIntegrationService.js'
 import { getArtifactDownload } from './aiTaskService.js'
+import { weixinArticleUrl, weixinIntakeCommand, weixinIntakeBindingAuthorized } from '../contracts/weixinLinkIntakeContract.js'
+import { processWeixinLinkIntake } from './weixinLinkIntakeService.js'
 import { uploadAndSendWeixinFile, weixinArtifactIdsFromMessages } from './weixinFileDelivery.js'
 import {
   downloadWeixinInboundImages,
@@ -67,6 +69,7 @@ type ActiveBot = {
   id: string
   accountId: string
   createdBy: string
+  accountUserId: string
   credentials: WeixinCredentials
 }
 
@@ -335,6 +338,33 @@ async function dispatchInbound(bot: ActiveBot, message: WeixinMessage) {
   const imageCount = weixinInboundImageCount(message)
   const fileCount = weixinInboundFileCount(message)
   if (!targetUserId || !contextToken || (!text && !imageCount && !fileCount)) return
+  if (text && !imageCount && !fileCount && (weixinArticleUrl(text) || weixinIntakeCommand(text))) {
+    const externalConversationId = `${bot.accountId}:${targetUserId}`.slice(0, 191)
+    let intakeBinding = await imIntegrationRepository.findEnabledInboundBinding(bot.id, externalConversationId)
+    if (!intakeBinding && bot.accountUserId === targetUserId) intakeBinding = await ensureInboundBinding(bot, targetUserId)
+    if (!intakeBinding || !weixinIntakeBindingAuthorized({ senderId: targetUserId, accountUserId: bot.accountUserId, botOwnerId: bot.createdBy, bindingUserId: intakeBinding.userId, bindingVersion: intakeBinding.version })) {
+      await sendText(bot.credentials, targetUserId, contextToken, '请先由管理员在平台的 IM 机器人“授权绑定”中绑定你的平台账号。旧的默认聊天绑定需要管理员重新确认（停用后再启用），才能使用微信收录。')
+      return
+    }
+    const intakeUser = await identityRepositories.users.findById(intakeBinding.userId)
+    if (!intakeUser || intakeUser.status !== '启用') {
+      await sendText(bot.credentials, targetUserId, contextToken, '绑定的平台账号不可用，请联系管理员。')
+      return
+    }
+    try {
+      const reply = await processWeixinLinkIntake({ bindingId: intakeBinding.id, userId: intakeUser.id, messageId: weixinExternalMessageId(bot.accountId, message), message: text })
+      if (reply) {
+        await sendText(bot.credentials, targetUserId, contextToken, reply)
+        return
+      }
+    } catch (error) {
+      if ((error as { code?: string }).code === 'WEIXIN_INTAKE_BUSY') {
+        await sendText(bot.credentials, targetUserId, contextToken, '当前收录任务正在处理，请稍后回复“收录状态”。')
+        return
+      }
+      throw error
+    }
+  }
   const routeMessage = text || (fileCount
     ? '请阅读并分析这个微信文件。'
     : '请查看并分析这张微信图片。')
@@ -448,7 +478,7 @@ async function activeBots(): Promise<ActiveBot[]> {
     try { raw = decryptIntegrationCredential(bot.credentialCiphertext, bot.id) }
     catch { return [] }
     if (raw.transport !== 'ilink' || !raw.botToken || !raw.accountId || !raw.baseUrl || !raw.inboundSecret) return []
-    return [{ id: bot.id, accountId: raw.accountId, createdBy: bot.createdBy, credentials: raw as WeixinCredentials }]
+    return [{ id: bot.id, accountId: raw.accountId, createdBy: bot.createdBy, accountUserId: String(bot.config.accountUserId || ''), credentials: raw as WeixinCredentials }]
   })
 }
 

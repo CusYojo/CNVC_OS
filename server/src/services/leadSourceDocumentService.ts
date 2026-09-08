@@ -6,6 +6,7 @@ import { PDFParse } from 'pdf-parse'
 import { pool } from '../db/client.js'
 import { mysqlTableName, quoteMysqlIdentifier } from '../db/config.js'
 import { decodeTextBuffer, readableStoredText } from './textQualityService.js'
+import { weixinArticleBodyHtml } from './weixinArticleHtml.js'
 
 type ResolveHost = (hostname: string) => Promise<string[]>
 type FetchLike = typeof fetch
@@ -124,9 +125,22 @@ async function respectRobots(url: URL, fetchImpl: FetchLike, resolveHost: Resolv
 async function responseBytes(response: Response) {
   const declared = Number(response.headers.get('content-length') || 0)
   if (declared > maxBytes) throw Object.assign(new Error('source document exceeds byte budget'), { code: 'SOURCE_TOO_LARGE' })
-  const buffer = Buffer.from(await response.arrayBuffer())
-  if (buffer.byteLength > maxBytes) throw Object.assign(new Error('source document exceeds byte budget'), { code: 'SOURCE_TOO_LARGE' })
-  return buffer
+  if (!response.body) return Buffer.alloc(0)
+  const reader = response.body.getReader(), chunks: Buffer[] = []
+  let size = 0
+  try {
+    while (true) {
+      const { value, done } = await reader.read()
+      if (done) break
+      size += value.byteLength
+      if (size > maxBytes) {
+        await reader.cancel()
+        throw Object.assign(new Error('source document exceeds byte budget'), { code: 'SOURCE_TOO_LARGE' })
+      }
+      chunks.push(Buffer.from(value))
+    }
+  } finally { reader.releaseLock() }
+  return Buffer.concat(chunks, size)
 }
 
 async function extractDocument(buffer: Buffer, contentType: string, finalUrl: string) {
@@ -144,7 +158,8 @@ async function extractDocument(buffer: Buffer, contentType: string, finalUrl: st
   }
   const html = readableStoredText(decodeTextBuffer(buffer).text)
   if (!html && buffer.length) throw Object.assign(new Error('source text encoding is invalid'), { code: 'SOURCE_TEXT_ENCODING_INVALID' })
-  const text = /html|xml/i.test(contentType) ? htmlText(html) : html.replace(/\s+/g, ' ').trim()
+  const articleHtml = new URL(finalUrl).hostname === 'mp.weixin.qq.com' ? weixinArticleBodyHtml(html) : html
+  const text = /html|xml/i.test(contentType) ? htmlText(articleHtml) : html.replace(/\s+/g, ' ').trim()
   const title = metaContent(html, ['og:title', 'twitter:title']) || decodeHtml(html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || '').replace(/<[^>]+>/g, ' ').trim()
   const publisher = metaContent(html, ['og:site_name', 'article:publisher', 'publisher'])
   const date = metaContent(html, ['article:published_time', 'datePublished', 'date', 'pubdate'])
@@ -175,6 +190,7 @@ export async function fetchLeadSourceDocument(input: {
   resolveHost?: ResolveHost
   persist?: boolean
   respectRobots?: boolean
+  allowedHosts?: string[]
 }): Promise<LeadSourceDocument> {
   const canonicalUrl = canonicalLeadSourceUrl(input.url)
   const canonicalHash = sha256(canonicalUrl)
@@ -197,9 +213,16 @@ export async function fetchLeadSourceDocument(input: {
   }
 
   let current = new URL(canonicalUrl)
+  const checkAllowedHost = (url: URL) => {
+    if (url.username || url.password || (input.allowedHosts && !input.allowedHosts.includes(url.hostname))) {
+      throw Object.assign(new Error('source redirect target is not allowed'), { code: 'SOURCE_REDIRECT_REJECTED' })
+    }
+  }
+  checkAllowedHost(current)
   if (input.respectRobots !== false) await respectRobots(current, fetchImpl, resolveHost)
   let response: Response | null = null
   for (let redirects = 0; redirects <= 3; redirects += 1) {
+    checkAllowedHost(current)
     await assertPublicUrl(current, resolveHost)
     response = await fetchImpl(current, {
       redirect: 'manual', signal: AbortSignal.timeout(20_000),

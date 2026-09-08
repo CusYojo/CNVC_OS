@@ -2853,6 +2853,28 @@ export const imDeliveryLogs = mysqlTable('im_delivery_logs', {
   byStatus: index('idx_im_delivery_logs_status').on(t.status, t.createdAt),
 }))
 
+export const weixinLinkIntakes = mysqlTable('weixin_link_intakes', {
+  id: varchar('id', { length: 36 }).primaryKey(),
+  sequence: bigint('sequence', { mode: 'number' }).autoincrement().notNull(),
+  sessionKey: varchar('session_key', { length: 64 }).notNull(),
+  bindingId: varchar('binding_id', { length: 36 }).notNull(),
+  userId: varchar('user_id', { length: 36 }).notNull(),
+  initialMessageId: varchar('initial_message_id', { length: 191 }).notNull(),
+  status: varchar('status', { length: 24 }).notNull(),
+  mode: varchar('mode', { length: 16 }),
+  knowledgeEntryId: varchar('knowledge_entry_id', { length: 36 }),
+  articleBody: longtext('article_body'),
+  payload: json('payload').notNull(),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+  updatedAt: timestampColumn('updated_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, t => ({
+  user: index('idx_weixin_intake_user').on(t.userId, t.updatedAt),
+  sequence: uniqueIndex('uq_weixin_intake_sequence').on(t.sequence),
+  message: uniqueIndex('uq_weixin_intake_message').on(t.sessionKey, t.initialMessageId),
+  session: index('idx_weixin_intake_session').on(t.sessionKey, t.sequence),
+  knowledge: index('idx_weixin_intake_knowledge').on(t.knowledgeEntryId),
+}))
+
 export const imInboundMessages = mysqlTable('im_inbound_messages', {
   id: uuidPrimaryKey('id'),
   botId: uuidColumn('bot_id').notNull().references(() => imBots.id, { onDelete: 'restrict' }),

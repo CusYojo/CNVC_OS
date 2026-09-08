@@ -687,6 +687,13 @@
       "when": 1791964143000,
       "tag": "0097_add_personal_notes",
       "breakpoints": true
+    },
+    {
+      "idx": 98,
+      "version": "5",
+      "when": 1791964153000,
+      "tag": "0102_add_weixin_link_intakes",
+      "breakpoints": true
     }
   ]
 }
