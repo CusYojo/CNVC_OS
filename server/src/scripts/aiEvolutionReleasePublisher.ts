@@ -8,7 +8,7 @@ import { createEvolutionReleaseRecoveryWorker } from '../services/aiEvolutionRel
 import { prepareAiEvolutionReleaseJob } from '../services/aiEvolutionReleaseJobPreparationService.js'
 import { dispatchAiEvolutionReleaseJob, dispatchAiEvolutionRollbackJob } from '../services/aiEvolutionReleaseJobDispatchService.js'
 import { loadEvolutionPublisherLifecycle } from '../services/aiEvolutionPublisherLifecycleRegistry.js'
-import { recoverAiEvolutionRelease } from '../services/aiEvolutionReleaseApplicationService.js'
+import { recoverAiEvolutionRelease, recoverAiEvolutionRequestedRollback } from '../services/aiEvolutionReleaseApplicationService.js'
 import { createLocalEvolutionRecoveryAdapter } from '../runtime/evolution/evolutionLocalRecoveryAdapter.js'
 
 if (process.env.AI_EVOLUTION_RELEASE_PUBLISHER_ENABLED !== 'true') throw Error('AI evolution release publisher is disabled')
@@ -36,6 +36,14 @@ const recovery = createEvolutionReleaseRecoveryWorker({ list: cursor => candidat
     }),
   onError: (error, row) => report('error', 'release_recovery_failed', { approvalId: row?.approvalId,
     code: (error as { code?: string }).code, message: error instanceof Error ? error.message : String(error) }) })
+const rollbackRecovery = createEvolutionReleaseRecoveryWorker({ list: cursor => candidates.listClaimedRequestedRollbacks(cursor),
+  recover: row => recoverAiEvolutionRequestedRollback(row.actorUserId, row.candidateId,
+    { approvalId: row.approvalId, targetEnvironment: row.targetEnvironment }, async (target, claim) => {
+      const lifecycle = await loadEvolutionPublisherLifecycle(target.id, target.root)
+      return createLocalEvolutionRecoveryAdapter({ root: target.root, receipt: claim.receipt, ...lifecycle })
+    }),
+  onError: (error, row) => report('error', 'rollback_recovery_failed', { approvalId: row?.approvalId,
+    code: (error as { code?: string }).code, message: error instanceof Error ? error.message : String(error) }) })
 
 let stopping = false
 let stopped!: () => void
@@ -43,10 +51,11 @@ const stoppedPromise = new Promise<void>(resolve => { stopped = resolve })
 const stop = async (signal: string) => {
   if (stopping) return
   stopping = true; report('info', 'stopping', { signal })
-  await Promise.allSettled([publisher.stop(), recovery.stop()]); await pool.end(); process.exitCode = 0; stopped()
+  await Promise.allSettled([publisher.stop(), recovery.stop(), rollbackRecovery.stop()]); await pool.end(); process.exitCode = 0; stopped()
 }
 process.once('SIGINT', () => { void stop('SIGINT') })
 process.once('SIGTERM', () => { void stop('SIGTERM') })
 await recovery.tick()
-recovery.start(); publisher.start(); report('info', 'started', { owner })
+await rollbackRecovery.tick()
+recovery.start(); rollbackRecovery.start(); publisher.start(); report('info', 'started', { owner })
 await stoppedPromise

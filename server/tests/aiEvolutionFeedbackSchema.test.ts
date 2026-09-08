@@ -10,6 +10,7 @@ test('feedback migration binds one authorized subject and is registered last', a
   assert.match(migration, /FOREIGN KEY \(`candidate_id`\) REFERENCES `sbl_ai_evolution_candidates`/)
   assert.match(migration, /FOREIGN KEY \(`application_id`\) REFERENCES `sbl_ai_evolution_applications`/)
   const journal = JSON.parse(await readFile(new URL('../drizzle/meta/_journal.json', import.meta.url), 'utf8'))
-  assert.deepEqual(journal.entries.at(-1), { idx: 109, version: '5', when: 1793087343000,
+  assert.deepEqual(journal.entries.find((item: { tag: string }) => item.tag === '0109_add_ai_evolution_feedback'),
+    { idx: 109, version: '5', when: 1793087343000,
     tag: '0109_add_ai_evolution_feedback', breakpoints: true })
 })

@@ -21,6 +21,31 @@ const manifestSchema = z.object({
 }).strict()
 
 export class MySqlAiEvolutionCandidateRepository {
+  async listClaimedRequestedRollbacks(afterApprovalId?: string, limit = 100) {
+    if (afterApprovalId !== undefined) z.string().uuid().parse(afterApprovalId)
+    const where = [eq(approvals.purpose, 'release_rollback'), eq(approvals.decision, 'approved'), isNotNull(approvals.consumedAt),
+      inArray(releaseJobs.status, ['prepared', 'activating'])]
+    if (afterApprovalId) where.push(gt(approvals.id, afterApprovalId))
+    return db.select({ approvalId: approvals.id, candidateId: candidates.id, actorUserId: approvals.actorUserId,
+      targetEnvironment: approvals.environment }).from(approvals).innerJoin(candidates, eq(candidates.id, approvals.candidateId))
+      .innerJoin(releaseJobs, eq(releaseJobs.approvalId, approvals.id)).where(and(...where))
+      .orderBy(asc(approvals.id)).limit(z.number().int().min(1).max(100).parse(limit))
+  }
+
+  async readClaimedRequestedRollback(approvalId: string, actorUserId: string, targetEnvironment: string) {
+    const [row] = await db.select({ approval: approvals, candidate: candidates, run: runs, job: releaseJobs }).from(approvals)
+      .innerJoin(candidates, eq(candidates.id, approvals.candidateId)).innerJoin(runs, eq(runs.id, candidates.runId))
+      .innerJoin(releaseJobs, eq(releaseJobs.approvalId, approvals.id))
+      .where(and(eq(approvals.id, approvalId), eq(approvals.actorUserId, actorUserId), eq(runs.ownerUserId, actorUserId)))
+    if (!row || row.approval.purpose !== 'release_rollback' || !row.approval.consumedAt
+      || row.approval.environment !== targetEnvironment || row.job.operation !== 'rollback' || !row.job.receipt
+      || !['activating', 'rolled_back'].includes(row.candidate.status)) {
+      throw evolutionError(409, 'EVOLUTION_ROLLBACK_BINDING', '回退恢复缺少对应的已领取批准')
+    }
+    return { approvalId, candidateId: row.candidate.id, runId: row.run.id, targetEnvironment,
+      receipt: parseEvolutionReleaseReceipt(row.job.receipt), status: row.candidate.status }
+  }
+
   async listClaimedReleases(afterApprovalId?: string, limit = 100) {
     if (afterApprovalId !== undefined) z.string().uuid().parse(afterApprovalId)
     const size = z.number().int().min(1).max(100).parse(limit)
@@ -138,9 +163,10 @@ export class MySqlAiEvolutionCandidateRepository {
         .innerJoin(candidates, eq(candidates.id, approvals.candidateId)).innerJoin(runs, eq(runs.id, candidates.runId))
         .where(and(eq(approvals.id, approvalId), eq(approvals.actorUserId, actorUserId))).for('update')
       if (!row || row.approval.purpose !== 'release_rollback' || !row.approval.consumedAt
-        || row.candidate.status !== 'activating' || row.candidate.contentHash !== receipt.candidateHash) {
+        || !['activating', 'rolled_back'].includes(row.candidate.status) || row.candidate.contentHash !== receipt.candidateHash) {
         throw evolutionError(409, 'EVOLUTION_ROLLBACK_BINDING', '回退结果缺少对应的已领取批准')
       }
+      if (row.candidate.status === 'rolled_back') return { status: 'rolled_back' as const }
       await tx.update(candidates).set({ status: 'rolled_back' }).where(eq(candidates.id, row.candidate.id))
       await tx.insert(events).values({ id: randomUUID(), runId: row.run.id, sequence: row.run.nextEventSequence,
         eventType: 'release_rollback_completed', payload: { schemaVersion: 1, approvalId, receipt, outcome: 'rolled_back' } })

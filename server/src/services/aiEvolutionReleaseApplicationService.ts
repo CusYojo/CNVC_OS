@@ -10,6 +10,7 @@ import { realpath } from 'node:fs/promises'
 import { pool } from '../db/client.js'
 import { withEvolutionReleaseLock } from './aiEvolutionReleaseLock.js'
 import { runEvolutionReleaseRecovery, type EvolutionRecoveryAdapter } from '../runtime/evolution/evolutionReleaseRecovery.js'
+import { recoverRequestedEvolutionRollback } from '../runtime/evolution/evolutionRequestedRollback.js'
 
 const command = promisify(execFile)
 
@@ -51,6 +52,34 @@ export async function recoverAiEvolutionRelease(userId: string, candidateId: str
     return result
   })
 }
+export async function recoverAiEvolutionRequestedRollback(userId: string, candidateId: string, input: unknown,
+  adapterFactory: (target: Awaited<ReturnType<typeof aiEvolutionReleaseRegistry.resolve>>,
+    claim: Awaited<ReturnType<MySqlAiEvolutionCandidateRepository['readClaimedRequestedRollback']>>) => Promise<EvolutionRecoveryAdapter>) {
+  const request = z.object({ approvalId: z.string().uuid(), targetEnvironment: z.string().min(1).max(80) }).strict().parse(input)
+  const initial = await context(userId, candidateId)
+  const target = await aiEvolutionReleaseRegistry.resolve(userId, initial.repositoryId, request.targetEnvironment)
+  const root = await realpath(target.root), repository = new MySqlAiEvolutionCandidateRepository()
+  return withEvolutionReleaseLock(pool, root, async control => {
+    const authorize = async () => {
+      await control.assertHeld()
+      const current = await context(userId, candidateId)
+      const registered = await aiEvolutionReleaseRegistry.resolve(userId, current.repositoryId, request.targetEnvironment)
+      if (current.repositoryId !== initial.repositoryId || await realpath(registered.root) !== root) {
+        throw evolutionError(409, 'EVOLUTION_ROLLBACK_BINDING', '回退目标配置已变化')
+      }
+    }
+    await authorize()
+    const claim = await repository.readClaimedRequestedRollback(request.approvalId, userId, request.targetEnvironment)
+    const adapter = await adapterFactory({ ...target, root }, claim)
+    return recoverRequestedEvolutionRollback({ receipt: claim.receipt, authorize,
+      inspect: receipt => adapter.inspect(receipt, control.signal), rollback: receipt => adapter.rollback(receipt, control.signal),
+      health: (receipt, version) => adapter.health(receipt, version, control.signal), finish: async receipt => {
+        await repository.completeRequestedRollback(request.approvalId, userId, receipt)
+        await new MySqlAiEvolutionReleaseJobRepository().completeByApproval(request.approvalId, receipt, 'rolled_back')
+      } })
+  })
+}
+
 async function context(userId: string, candidateId: string) {
   const candidate = await getAiEvolutionCandidateForUser(userId, candidateId)
   const run = await aiEvolutionService.authorizeRun(userId, candidate.runId)

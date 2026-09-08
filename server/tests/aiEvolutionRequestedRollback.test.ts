@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { coordinateRequestedEvolutionRollback } from '../src/runtime/evolution/evolutionRequestedRollback.js'
+import { coordinateRequestedEvolutionRollback, recoverRequestedEvolutionRollback } from '../src/runtime/evolution/evolutionRequestedRollback.js'
 
 const hash = (char: string) => char.repeat(64)
 const identity = (char: string) => ({ schemaVersion: 1 as const, baseCommit: char.repeat(40), patchHash: hash(char),
@@ -34,4 +34,19 @@ test('requested rollback never records success without a stable healthy previous
     health: async () => true, finish: async () => { finished = true } }),
   (error: { code?: string }) => error.code === 'EVOLUTION_ROLLBACK_RECOVERY_REQUIRED')
   assert.equal(finished, false)
+})
+
+test('rollback recovery completes bookkeeping when previous version is already healthy', async () => {
+  let rolledBack = 0, finished = 0
+  const result = await recoverRequestedEvolutionRollback({ receipt, authorize: async () => undefined,
+    inspect: async () => 'previous', rollback: async () => { rolledBack++ }, health: async () => true,
+    finish: async () => { finished++ } })
+  assert.equal(result.outcome, 'rolled_back'); assert.equal(rolledBack, 0); assert.equal(finished, 1)
+})
+
+test('rollback recovery retries the approved rollback only from the exact candidate', async () => {
+  let state: 'candidate' | 'previous' = 'candidate', rolledBack = 0
+  await recoverRequestedEvolutionRollback({ receipt, authorize: async () => undefined, inspect: async () => state,
+    rollback: async () => { rolledBack++; state = 'previous' }, health: async () => true, finish: async () => undefined })
+  assert.equal(rolledBack, 1)
 })
