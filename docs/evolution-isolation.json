@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 2,
+  "source": "C:\\Users\\21749\\Desktop\\project\\sbl_jedi-main\\sbl_jedi-main",
+  "worktree": "C:\\Users\\21749\\Desktop\\project\\ai-evolution-isolated",
+  "baseCommit": "dfcadbb5824e018a9aeda962e201ee7a7f41f066",
+  "authoritativeChangeManifest": "ai-evolution-change-manifest.json",
+  "latestMigration": "0110_add_ai_evolution_requested_rollback",
+  "note": "The root manifest is generated from git status with untracked-files=all and must pass npm run check:ai-evolution-change-manifest before transfer."
+}
