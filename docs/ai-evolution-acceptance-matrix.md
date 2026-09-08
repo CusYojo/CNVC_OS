@@ -6,7 +6,7 @@
 
 | ID | 状态 | 当前证据 | 未完成证据 |
 | --- | --- | --- | --- |
-| AT-01 | PASS | `aiEvolutionContract.test.ts`、`aiEvolutionService.test.ts` 验证类型、来源、范围和普通任务边界 | — |
+| AT-01 | PASS | `aiEvolutionContract.test.ts`、`aiEvolutionService.test.ts` 验证类型、来源、范围和普通任务边界；回答操作与页面选区入口绑定真实消息 | — |
 | AT-02 | PASS | `aiEvolutionMysql.test.ts` 的 repository 替身与 service 测试验证幂等契约；发布与反馈分别有冲突检查 | 隔离 MySQL 并发测试归入 AT-09 的环境门禁 |
 | AT-03 | BLOCKED | repository、artifact、preview 和 source 单元测试均验证所有权与范围复核 | `aiEvolutionHttpAuth.test.ts` 需要 `EVOLUTION_TEST_MYSQL_URL` 指向隔离 MySQL |
 | AT-04 | PASS | source schema、授权来源解析和模型补丁测试验证内容不能增加权限或命令 | — |

@@ -503,7 +503,9 @@ function getSlashCommandQuery(value: string): string | null {
   return match ? match[1] : null
 }
 
-function MessageRow({ message }: { message: SafeAgentMessage }) {
+type EvolutionMessageAction = 'correct' | 'experience' | 'skill' | 'selection'
+function MessageRow({ message, onEvolutionAction }: { message: SafeAgentMessage;
+  onEvolutionAction?: (action: EvolutionMessageAction, message: SafeAgentMessage, selectedText?: string) => void }) {
   if (message.role === 'user') {
     const skills = displayUserMessageSkills(message)
     return (
@@ -531,7 +533,7 @@ function MessageRow({ message }: { message: SafeAgentMessage }) {
   if (visibleParts.length === 0) return null
 
   return (
-    <div className="flex gap-3">
+    <div className="flex gap-3" data-evolution-component-id="assistant-answer" data-evolution-message-id={message.id}>
       <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-brand-50 text-brand-600"><Bot className="h-4 w-4" /></span>
       <div className="min-w-0 max-w-[88%] space-y-1">
         {visibleParts.map((part, index) => (
@@ -544,6 +546,17 @@ function MessageRow({ message }: { message: SafeAgentMessage }) {
             <MessagePart part={part} />
           </AiErrorBoundary>
         ))}
+        {onEvolutionAction && <div className="flex flex-wrap gap-2 pt-1 text-xs text-slate-500" aria-label="回答改进操作">
+          <button className="rounded px-1.5 py-0.5 hover:bg-slate-100 hover:text-brand-700" onClick={() => onEvolutionAction('correct', message)}>纠正此处</button>
+          <button className="rounded px-1.5 py-0.5 hover:bg-slate-100 hover:text-brand-700" onClick={() => onEvolutionAction('experience', message)}>沉淀经验</button>
+          <button className="rounded px-1.5 py-0.5 hover:bg-slate-100 hover:text-brand-700" onClick={() => onEvolutionAction('skill', message)}>优化所用技能</button>
+          <button className="rounded px-1.5 py-0.5 hover:bg-slate-100 hover:text-brand-700" onMouseDown={event => event.preventDefault()}
+            onClick={event => {
+              const selection = window.getSelection(), selected = selection?.toString().trim().slice(0, 1000) ?? ''
+              const root = event.currentTarget.closest('[data-evolution-message-id]')
+              if (selected && selection?.anchorNode && root?.contains(selection.anchorNode)) onEvolutionAction('selection', message, selected)
+            }}>改进所选内容</button>
+        </div>}
       </div>
     </div>
   )
@@ -2064,7 +2077,16 @@ function Chat() {
                     title="该条消息显示异常"
                     resetKey={item.message.id}
                   >
-                    <MessageRow message={item.message} />
+                    <MessageRow message={item.message} onEvolutionAction={(action, message, selectedText) => {
+                      const excerpt = extractTextParts(message).replace(/\s+/g, ' ').trim().slice(0, 500)
+                      const prompts: Record<EvolutionMessageAction, string> = {
+                        correct: `请针对你刚才这条回答创建个人经验进化提案。回答摘录：“${excerpt}”\n我的纠正是：`,
+                        experience: `请将你刚才这条回答中可复用的工作规则整理为个人经验进化提案。回答摘录：“${excerpt}”\n需要长期保留的规则是：`,
+                        skill: `请针对生成刚才这条回答所用的技能创建技能进化提案，先核对实际能力版本和评测样本。回答摘录：“${excerpt}”\n希望改进的是：`,
+                        selection: `请把以下页面选区作为定位线索，创建合适类型的进化提案。路由：${window.location.pathname}；稳定组件：assistant-answer；选区：“${selectedText}”。请仍以当前真实会话消息和服务端权限为准。\n希望改进的是：`,
+                      }
+                      setInput(prompts[action]); window.requestAnimationFrame(() => inputRef.current?.focus())
+                    }} />
                   </AiErrorBoundary>
                 )
               }

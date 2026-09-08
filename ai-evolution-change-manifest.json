@@ -191,6 +191,7 @@
     "server/tests/aiEvolutionLocalRecoveryAdapter.test.ts",
     "server/tests/aiEvolutionLocalReleaseAdapter.test.ts",
     "server/tests/aiEvolutionLocalReleasePrepare.test.ts",
+    "server/tests/aiEvolutionMessageActions.test.ts",
     "server/tests/aiEvolutionModelGateway.test.ts",
     "server/tests/aiEvolutionMysql.test.ts",
     "server/tests/aiEvolutionMysqlTimezone.test.ts",
