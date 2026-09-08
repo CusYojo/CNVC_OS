@@ -363,9 +363,10 @@ async function start() {
     const radarSeed = await ensureRadarMySqlSeeded()
     console.log(`[radar-mysql] seed skipped=${radarSeed.skipped} candidates=${radarSeed.currentCandidates}`)
     await startRuntimeJobScheduler()
-    await startAiEvolutionHost()
-    await startAiEvolutionSkillHost()
-    await startAiEvolutionSkillExpiry()
+    const evolutionHosts = await Promise.allSettled([startAiEvolutionHost(), startAiEvolutionSkillHost(), startAiEvolutionSkillExpiry()])
+    for (const [index, result] of evolutionHosts.entries()) {
+      if (result.status === 'rejected') console.error(`[ai-evolution] optional host ${['code', 'skill', 'skill-expiry'][index]} unavailable; corresponding execution remains disabled`)
+    }
     startResponsibilityScanner()
     startWeixinMessageBridge()
     initializeAgentSocket(httpServer!)
