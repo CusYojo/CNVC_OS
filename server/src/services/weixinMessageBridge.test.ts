@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { weixinExternalMessageId, weixinMessageText } from './weixinMessageBridge.js'
+import { routePersonalWeixinSender, weixinExternalMessageId, weixinMessageText } from './weixinMessageBridge.js'
 
 test('extracts Weixin text items and ignores unsupported items', () => {
   assert.equal(weixinMessageText({
@@ -20,4 +20,11 @@ test('uses explicit message id and creates stable fallback id', () => {
   }
   assert.equal(weixinExternalMessageId('account', message), weixinExternalMessageId('account', message))
   assert.equal(weixinExternalMessageId('account', message).length, 64)
+})
+
+test('personal bot accepts only its bound Weixin identity', () => {
+  const bot = { ownershipMode: 'personal', accountUserId: 'wx-owner' }
+  assert.equal(routePersonalWeixinSender(bot, 'wx-owner'), 'allowed')
+  assert.equal(routePersonalWeixinSender(bot, 'wx-other'), 'owner_mismatch')
+  assert.equal(routePersonalWeixinSender({ ownershipMode: 'shared', accountUserId: '' }, 'wx-other'), 'shared')
 })
