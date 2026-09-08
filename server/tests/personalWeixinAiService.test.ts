@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { readFile } from 'node:fs/promises'
 
 import type { ImActor } from '../src/services/imIntegrationService.js'
 import {
@@ -64,4 +65,16 @@ test('status reports eligibility and disconnect uses optimistic version', async 
   await assert.rejects(() => disconnectPersonalWeixinAi(actor('user-a'), connected.version + 1, deps.repository), /已发生变化/)
   const stopped = await disconnectPersonalWeixinAi(actor('user-a'), connected.version, deps.repository)
   assert.equal(stopped.connected, false)
+})
+
+test('self-service routes are authenticated but do not require IM admin', async () => {
+  const source = await readFile(new URL('../src/routes/imIntegrations.ts', import.meta.url), 'utf8')
+  assert.match(source, /get\('\/weixin\/self'/)
+  assert.match(source, /post\('\/weixin\/self\/login\/start'/)
+  assert.match(source, /post\('\/weixin\/self\/login\/wait'/)
+  assert.match(source, /post\('\/weixin\/self\/disconnect'/)
+  for (const path of ['/weixin/self', '/weixin/self/login/start', '/weixin/self/login/wait', '/weixin/self/disconnect']) {
+    const line = source.split('\n').find((candidate) => candidate.includes(`'${path}'`)) || ''
+    assert.doesNotMatch(line, /requireImAdmin/)
+  }
 })
