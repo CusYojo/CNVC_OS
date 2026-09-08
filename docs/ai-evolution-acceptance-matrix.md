@@ -25,6 +25,10 @@
 | AT-17 | NOT_RUN | release adapter、coordinator、health、recovery、requested rollback 共覆盖激活及回退协议；人工回退已进入持久发布队列 | 未对真实服务器执行发布或回退；Docker/Linux 权限门禁未运行 |
 | AT-18 | PASS | hook 使用数据库补拉与可见时轮询；local preview、事件序列和 390px fixture 已验证刷新及窄屏基本交互 | 真实网络断连的浏览器端到端演练可在部署验收时复测 |
 
+EVO-15 的观察入口已实现：经验应用和候选均可提交绑定授权对象的反馈；工作台按 7、30、90 天展示应用率、遵守率和候选通过率，并同时展示分子、分母、样本量及未评估数。当前数据模型不能可靠证明“同一规则再次纠正”或“回归已经确认且观察期完成”，因此重复纠正率和生产回归率明确显示为证据不足，不以反馈条数冒充正式指标。对应验证为 `aiEvolutionApplicationFeedbackUi.test.ts`、`aiEvolutionFeedbackSchema.test.ts` 和 `aiEvolutionMetrics.test.ts`。
+
+产物长期保留期仍属于设计第 19 节要求在首批内部试用前收敛的选择。当前已实现预览到期后独立关闭、执行环境按租约归属清理、失败证据保留；在确定保留期与审计要求前，不删除仍被候选、技能版本或回退链引用的产物。
+
 当前完整源码回归命令：
 
 ```powershell

@@ -9,10 +9,10 @@ export class MySqlAiEvolutionMetricsRepository {
       db.select({ snapshot: applications.snapshot, checkStatus: applications.checkStatus }).from(applications)
         .where(and(eq(applications.ownerUserId, ownerUserId), gte(applications.injectedAt, since)))
         .orderBy(desc(applications.injectedAt)).limit(limit),
-      db.select({ report: evaluations.report }).from(evaluations)
-        .innerJoin(candidates, eq(candidates.id, evaluations.candidateId)).innerJoin(runs, eq(runs.id, candidates.runId))
-        .where(and(eq(runs.ownerUserId, ownerUserId), gte(evaluations.createdAt, since)))
-        .orderBy(desc(evaluations.createdAt)).limit(limit),
+      db.select({ report: evaluations.report }).from(candidates)
+        .innerJoin(runs, eq(runs.id, candidates.runId)).leftJoin(evaluations, eq(evaluations.candidateId, candidates.id))
+        .where(and(eq(runs.ownerUserId, ownerUserId), gte(candidates.createdAt, since)))
+        .orderBy(desc(candidates.createdAt)).limit(limit),
     ])
     return { applicationRows, candidateRows, truncated: applicationRows.length >= limit || candidateRows.length >= limit }
   }
