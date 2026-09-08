@@ -10,5 +10,6 @@ test('assistant answers expose evolution shortcuts and bind actual message or se
   assert.match(page, /onEvolutionAction\('experience', message\)/)
   assert.match(page, /onEvolutionAction\('skill', message\)/)
   assert.match(page, /data-evolution-component-id="assistant-answer"/)
+  for (const card of ['自进化提案卡', '自进化状态卡', '自进化结果卡', '自进化取消卡']) assert.match(page, new RegExp(card))
   assert.match(page, /root\?\.contains\(selection\.anchorNode\)/)
 })

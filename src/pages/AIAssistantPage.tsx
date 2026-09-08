@@ -352,6 +352,10 @@ export function Markdown({ children }: { children: string }) {
 }
 
 const TOOL_LABELS: Record<string, string> = {
+  propose_evolution: '🧬 自进化提案',
+  get_evolution_status: '🧬 自进化状态',
+  get_evolution_result: '🧬 自进化结果',
+  request_evolution_cancel: '🧬 取消自进化任务',
   search_project_docs: '📁 检索项目资料',
   start_ppt_generation: '📊 启动 PPT 生成',
   collect_intel: '📡 采集公司情报',
@@ -363,6 +367,12 @@ const TOOL_LABELS: Record<string, string> = {
   grep: '🔎 搜索内容',
   task: '🧩 派生子任务',
 }
+
+const evolutionToolLabels: Record<string, string> = {
+  propose_evolution: '自进化提案卡', get_evolution_status: '自进化状态卡',
+  get_evolution_result: '自进化结果卡', request_evolution_cancel: '自进化取消卡',
+}
+function toolSuffix(name: string) { return name.split('__').at(-1) ?? name }
 
 // 工具输入的一行摘要（借鉴 pi：优先展示 command/path/query 等关键字段）
 function toolPreview(input: unknown): string {
@@ -388,7 +398,8 @@ function outputToText(output: unknown): string {
 function ToolStep({ part }: { part: SafeAgentPart }) {
   const [expanded, setExpanded] = useState(false)
   const toolName = part.toolName || 'unknown'
-  const label = TOOL_LABELS[toolName] ?? `🔧 ${toolName}`
+  const suffix = toolSuffix(toolName), label = TOOL_LABELS[toolName] ?? TOOL_LABELS[suffix] ?? `🔧 ${toolName}`
+  const evolutionCard = evolutionToolLabels[suffix]
   const running = part.state === 'input-streaming' || part.state === 'input-available' || part.state === 'call'
   const isError = part.state === 'output-error'
   const preview = toolPreview(part.input)
@@ -400,7 +411,8 @@ function ToolStep({ part }: { part: SafeAgentPart }) {
   const statusLabel = isError ? '失败' : running ? '运行中' : '完成'
 
   return (
-    <div className={`my-1.5 overflow-hidden rounded-lg border ${border} ${bg} text-xs`}>
+    <div className={`my-1.5 overflow-hidden rounded-lg border ${border} ${bg} text-xs`} aria-label={evolutionCard}
+      data-evolution-card={evolutionCard ? suffix : undefined}>
       <button
         type="button"
         aria-label={`工具步骤 ${label} ${statusLabel}`}
