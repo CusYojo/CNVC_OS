@@ -14,6 +14,8 @@ import {
   type AiQuickSkillSelection,
 } from '../components/AiQuickActions'
 import { AiArtifactCenter, type AiTask } from '../components/AiTaskCards'
+import { AiEvolutionSidebar } from '../components/ai-evolution/AiEvolutionSidebar'
+import { AiExperienceApplication } from '../components/ai-evolution/AiExperienceApplication'
 import {
   AiTaskConversationLoading,
   AiTaskConversationMessage,
@@ -519,6 +521,7 @@ function MessageRow({ message }: { message: SafeAgentMessage }) {
           <div className="w-fit whitespace-pre-wrap rounded-2xl rounded-tr-sm bg-brand-600 px-4 py-2.5 text-sm leading-6 text-white">
             {displayUserMessageText(message)}
           </div>
+          {message.experienceTaskId && <AiExperienceApplication key={message.experienceTaskId} taskId={message.experienceTaskId} />}
         </div>
       </div>
     )
@@ -1933,7 +1936,7 @@ function Chat() {
   }
 
   return (
-    <div className="fde-ai-page -m-6 flex h-[calc(100vh-64px)] min-h-[720px] overflow-hidden bg-white">
+    <div className="fde-ai-page relative -m-6 flex h-[calc(100vh-64px)] min-h-[720px] overflow-hidden bg-white">
       <aside className="flex w-[250px] shrink-0 flex-col border-r border-slate-200 bg-slate-50/60">
         <div className="p-4">
           <Button className="w-full" onClick={openNewSessionDialog} disabled={projectsLoading || !!projectsLoadError || selectableProjects.length === 0}>
@@ -2091,6 +2094,7 @@ function Chat() {
                     onRetry={retryAiTask}
                     onNotify={showToast}
                   />
+                  <AiExperienceApplication key={item.task.id} taskId={item.task.id} />
                 </AiErrorBoundary>
               )
             })}
@@ -2376,7 +2380,7 @@ function Chat() {
         </div>
       </div>
 
-      <aside className="hidden w-[300px] shrink-0 flex-col border-l border-slate-200 bg-slate-50/60 xl:flex">
+      <AiEvolutionSidebar conversationId={convId}>
         <div className="border-b border-slate-200 p-3">
           <div className="rounded-lg bg-brand-50 p-3"><p className="text-sm font-medium text-brand-800">{scope === 'project' ? currentProject?.name : '全局知识库'}</p><p className="mt-1 text-xs text-brand-600">{scope === 'project' ? `${projectFiles.length} 份项目资料可检索` : '机构知识库可检索'}</p></div>
         </div>
@@ -2399,7 +2403,7 @@ function Chat() {
             }}
           />
         </AiErrorBoundary>
-      </aside>
+      </AiEvolutionSidebar>
       <Modal
         open={newSessionOpen}
         title="新建会话"

@@ -2,16 +2,28 @@ import assert from 'node:assert/strict'
 import { copyFile, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { getAiSkillDirectory, loadAiSkill } from '../services/aiSkillService.js'
+import { getAiSkillDirectory, getAiSkillRoot, loadAiSkill } from '../services/aiSkillService.js'
+import { captureEvolutionSkill } from '../runtime/evolution/evolutionSkillSnapshot.js'
+import { evolutionContentHash } from '../services/aiEvolutionPolicyService.js'
 import { runDirectInvestmentCommitteePptAgent } from '../services/aiDirectInvestmentCommitteePptAgentService.js'
 
 const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'direct-committee-ppt-agent-'))
 
 try {
   const skill = await loadAiSkill('investment-committee-ppt')
+  let evolutionSkillPackage: unknown
+  if (process.env.EVOLUTION_FROZEN_PPT_ACCEPTANCE === 'true') {
+    const snapshot = await captureEvolutionSkill({ capabilityId: '00000000-0000-4000-8000-000000000001',
+      capabilityKey: skill.name, directory: getAiSkillDirectory(skill.name), allowedRoot: getAiSkillRoot(), toolNames: [], dependencyNames: [], config: {} })
+    const version = { ...snapshot.version, instructions: snapshot.version.instructions + '\n冻结 PPT 版本验收标记。' }
+    const contentHash = evolutionContentHash(version)
+    evolutionSkillPackage = { schemaVersion: 1, version, contentHash, runtimeSnapshot: snapshot,
+      packageHash: evolutionContentHash({ contentHash, runtimePackageHash: snapshot.packageHash }) }
+  }
   let observedOptions: Record<string, unknown> | null = null
   let observedPrompt = ''
   const result = await runDirectInvestmentCommitteePptAgent({
+    evolutionSkillPackage,
     taskDirectory: temporaryRoot,
     project: {
       id: 'project-1',
@@ -67,6 +79,8 @@ try {
       observedOptions = options
       return (async function* () {
         const workspace = String(options.cwd)
+        assert.equal((await readFile(path.join(workspace, '.claude', 'skills', skill.name, 'SKILL.md'), 'utf8'))
+          .endsWith('冻结 PPT 版本验收标记。'), Boolean(evolutionSkillPackage))
         const outputPath = path.join(workspace, 'output', '验收科技_投资建议书.pptx')
         await copyFile(
           path.join(getAiSkillDirectory('investment-committee-ppt'), 'assets', 'dayan-investment-deck-example.pptx'),

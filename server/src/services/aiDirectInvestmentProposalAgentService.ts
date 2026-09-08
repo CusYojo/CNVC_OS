@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto'
-import { cp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { cp, mkdir, readFile, readdir, rm, writeFile, realpath } from 'node:fs/promises'
 import path from 'node:path'
-import { getAiSkillDirectory, type LoadedAiSkill } from './aiSkillService.js'
+import { getAiSkillDirectory, parseAiSkillFile, type LoadedAiSkill } from './aiSkillService.js'
+import { reconstructEvolutionSkillRuntime } from '../runtime/evolution/evolutionSkillPackage.js'
 import type { EvidenceSource } from './aiBusinessContentService.js'
 import { resolveAiModelByKey, resolveAiModelFallbackRoute, resolveAiModelRoute } from './aiModelSettingsService.js'
 import {
@@ -406,6 +407,7 @@ export async function runDirectBusinessDocumentAgent(input: {
   sources: EvidenceSource[]
   requiredProjectFiles: Array<{ sourceId: string; sourceName: string }>
   skill: LoadedAiSkill
+  evolutionSkillPackage?: unknown
   sourceCutoffDate: string
   instructions: string
   userRole: string
@@ -425,6 +427,13 @@ export async function runDirectBusinessDocumentAgent(input: {
       code: 'DIRECT_SKILL_TASK_MISMATCH',
     })
   }
+  const frozen = input.evolutionSkillPackage ? reconstructEvolutionSkillRuntime(input.evolutionSkillPackage) : null
+  if (frozen) {
+    const source = Buffer.from(frozen.files.find(file => file.path === 'SKILL.md')!.contentBase64, 'base64').toString('utf8')
+    if (parseAiSkillFile(source).name !== profile.skillName) {
+      throw Object.assign(new Error('冻结技能包与任务要求的技能名称不一致'), { code: 'DIRECT_SKILL_TASK_MISMATCH' })
+    }
+  }
   const workspace = path.join(input.taskDirectory, '.direct-skill-agent')
   const outputDirectory = path.join(workspace, 'output')
   const projectSettingsDirectory = path.join(workspace, '.claude')
@@ -434,7 +443,21 @@ export async function runDirectBusinessDocumentAgent(input: {
   }
   await mkdir(outputDirectory, { recursive: true, mode: 0o700 })
   await mkdir(path.dirname(targetSkillDirectory), { recursive: true, mode: 0o700 })
-  await cp(getAiSkillDirectory(input.skill.name), targetSkillDirectory, { recursive: true, force: true })
+  if (frozen) {
+    const parent = path.dirname(targetSkillDirectory)
+    if (await realpath(parent) !== path.resolve(parent)) throw Error('Frozen skill destination contains a filesystem link')
+    // Replace only this task's skill directory, so removed references cannot survive a retry.
+    if (!path.resolve(targetSkillDirectory).startsWith(`${path.resolve(workspace)}${path.sep}`)) throw Error('Frozen skill destination escapes task workspace')
+    await rm(targetSkillDirectory, { recursive: true, force: true })
+    await mkdir(targetSkillDirectory, { mode: 0o700 })
+    for (const file of frozen.files) {
+      const filename = path.join(targetSkillDirectory, file.path)
+      await mkdir(path.dirname(filename), { recursive: true, mode: 0o700 })
+      await writeFile(filename, Buffer.from(file.contentBase64, 'base64'), { flag: 'wx', mode: 0o600 })
+    }
+  } else {
+    await cp(getAiSkillDirectory(input.skill.name), targetSkillDirectory, { recursive: true, force: true })
+  }
   await writeFile(
     path.join(projectSettingsDirectory, 'settings.json'),
     JSON.stringify({ permissions: { deny: ['WebFetch', 'WebSearch', 'Task'] } }, null, 2),

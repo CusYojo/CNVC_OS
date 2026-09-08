@@ -1,0 +1,33 @@
+[Unit]
+Description=Cybernaut AI Evolution Release Publisher
+After=network-online.target mysql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/cybernaut/app
+EnvironmentFile=/opt/cybernaut/app/.env
+Environment=AI_EVOLUTION_RELEASE_PUBLISHER_ENABLED=true
+ExecStart=/usr/bin/npm run start:ai-evolution-release-publisher
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=150
+KillMode=control-group
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadWritePaths=/opt/cybernaut/app/.runtime /opt/cybernaut/app/dist /opt/cybernaut/app/server-dist
+
+[Install]
+WantedBy=multi-user.target

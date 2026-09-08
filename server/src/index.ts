@@ -1,4 +1,9 @@
 import './security/hardenImageSizeRuntime.js'
+import { captureEvolutionRuntimeIdentity } from './services/aiEvolutionRuntimeIdentity.js'
+import { startAiEvolutionHost, stopAiEvolutionHost } from './services/aiEvolutionHostService.js'
+import { startAiEvolutionSkillHost, stopAiEvolutionSkillHost } from './services/aiEvolutionSkillHostService.js'
+import { startAiEvolutionSkillExpiry, stopAiEvolutionSkillExpiry } from './services/aiEvolutionSkillExpiryService.js'
+import { stopAiEvolutionLocalPreviews } from './services/aiEvolutionLocalPreviewService.js'
 import { randomUUID } from 'node:crypto'
 import cors from 'cors'
 import express from 'express'
@@ -181,10 +186,12 @@ app.use((req, res, next) => {
 })
 
 // 公共探针与登录（无鉴权）
-app.get('/api/health', (_req, res) => res.status(serviceReady ? 200 : 503).json({
+const deploymentIdentity = captureEvolutionRuntimeIdentity(process.argv[1] || '')
+app.get('/api/health', async (_req, res) => res.status(serviceReady ? 200 : 503).json({
   ok: serviceReady,
   service: 'cybernaut-app',
   status: serviceReady ? 'ready' : 'starting',
+  deploymentIdentity: await deploymentIdentity,
   qaSkillName: AI_QA_SKILL_NAME,
   documentSkillNames: AI_REQUIRED_DOCUMENT_SKILL_NAMES,
   writeMode: migrationWriteFreezePolicy.mode,
@@ -356,6 +363,9 @@ async function start() {
     const radarSeed = await ensureRadarMySqlSeeded()
     console.log(`[radar-mysql] seed skipped=${radarSeed.skipped} candidates=${radarSeed.currentCandidates}`)
     await startRuntimeJobScheduler()
+    await startAiEvolutionHost()
+    await startAiEvolutionSkillHost()
+    await startAiEvolutionSkillExpiry()
     startResponsibilityScanner()
     startWeixinMessageBridge()
     initializeAgentSocket(httpServer!)
@@ -376,6 +386,10 @@ async function shutdown(signal: string): Promise<void> {
   console.log(`[shutdown] received ${signal}`)
   const timeout = setTimeout(() => process.exit(1), 30_000)
   timeout.unref()
+  await stopAiEvolutionHost()
+  await stopAiEvolutionSkillHost()
+  await stopAiEvolutionSkillExpiry()
+  await stopAiEvolutionLocalPreviews()
   await shutdownAgentSocket()
   await stopWeixinMessageBridge()
   await stopRuntimeJobScheduler()

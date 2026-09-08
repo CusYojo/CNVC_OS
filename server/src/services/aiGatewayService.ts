@@ -80,6 +80,7 @@ export function shouldFallbackAiGatewayToChat(status: number) {
 }
 
 export async function requestAiGatewayCompletion(input: {
+  signal?: AbortSignal
   baseUrl: string
   apiKey?: string
   model: string
@@ -91,6 +92,7 @@ export async function requestAiGatewayCompletion(input: {
   fetchImpl?: FetchLike
 }): Promise<{ text: string; usage: AiTaskModelUsage | null }> {
   return observeNonStreamingAiRuntimeRequest('gateway-text', async () => {
+    input.signal?.throwIfAborted()
     const baseUrl = input.baseUrl.replace(/\/$/, '')
     const fetchImpl = input.fetchImpl ?? fetch
     const headers = {
@@ -101,14 +103,15 @@ export async function requestAiGatewayCompletion(input: {
       method: 'POST',
       headers,
       body: JSON.stringify(buildAiResponsesBody(input)),
-      signal: AbortSignal.timeout(input.timeoutMs),
+      signal: input.signal ? AbortSignal.any([input.signal, AbortSignal.timeout(input.timeoutMs)]) : AbortSignal.timeout(input.timeoutMs),
     })
     if (!response.ok && shouldFallbackAiGatewayToChat(response.status)) {
+      input.signal?.throwIfAborted()
       response = await fetchImpl(`${baseUrl}/chat/completions`, {
         method: 'POST',
         headers,
         body: JSON.stringify(buildAiChatFallbackBody(input)),
-        signal: AbortSignal.timeout(input.timeoutMs),
+        signal: input.signal ? AbortSignal.any([input.signal, AbortSignal.timeout(input.timeoutMs)]) : AbortSignal.timeout(input.timeoutMs),
       })
     }
     const raw = await response.text()
@@ -309,7 +312,14 @@ export async function fetchAiGatewayChatCompatible(
   }
 }
 
-export async function requestAiGatewayVisionText(input: {
+export async function requestAiGatewayVisionText(input: Parameters<typeof requestAiGatewayVisionCompletion>[0]) {
+  const result = await requestAiGatewayVisionCompletion(input)
+  if (!result.text) throw new Error('视觉网关返回空内容')
+  return result.text
+}
+
+export async function requestAiGatewayVisionCompletion(input: {
+  signal?: AbortSignal
   baseUrl: string
   apiKey?: string
   model: string
@@ -320,6 +330,8 @@ export async function requestAiGatewayVisionText(input: {
   fetchImpl?: FetchLike
 }) {
   return observeNonStreamingAiRuntimeRequest('gateway-vision', async () => {
+    input.signal?.throwIfAborted()
+    const signal = input.signal ? AbortSignal.any([input.signal, AbortSignal.timeout(input.timeoutMs)]) : AbortSignal.timeout(input.timeoutMs)
     const baseUrl = input.baseUrl.replace(/\/$/, '')
     const fetchImpl = input.fetchImpl ?? fetch
     const headers = {
@@ -340,9 +352,10 @@ export async function requestAiGatewayVisionText(input: {
         }],
         max_output_tokens: input.maxTokens,
       }),
-      signal: AbortSignal.timeout(input.timeoutMs),
+      signal,
     })
     if (!response.ok && shouldFallbackAiGatewayToChat(response.status)) {
+      signal.throwIfAborted()
       response = await fetchImpl(`${baseUrl}/chat/completions`, {
         method: 'POST',
         headers,
@@ -357,7 +370,7 @@ export async function requestAiGatewayVisionText(input: {
           }],
           max_tokens: input.maxTokens,
         }),
-        signal: AbortSignal.timeout(input.timeoutMs),
+        signal,
       })
     }
     const raw = await response.text()
@@ -365,7 +378,6 @@ export async function requestAiGatewayVisionText(input: {
     const payload = JSON.parse(raw) as unknown
     await recordAiTaskModelCall(payload)
     const text = aiGatewayResponseText(payload)
-    if (!text) throw new Error('视觉网关返回空内容')
-    return text
+    return { text, usage: normalizeAiTaskModelUsage(payload) }
   })
 }

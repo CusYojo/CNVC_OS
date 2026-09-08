@@ -153,7 +153,7 @@ function parseScalar(value: string) {
   return trimmed
 }
 
-function parseSkillFile(source: string) {
+export function parseAiSkillFile(source: string) {
   const frontmatter = source.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/)
   if (!frontmatter) throw new Error('SKILL.md 缺少 YAML frontmatter')
   const fields = new Map<string, string>()
@@ -183,7 +183,7 @@ function parseSkillFile(source: string) {
   return { name, description, instructions }
 }
 
-function referencedMarkdownFiles(instructions: string) {
+export function referencedAiSkillMarkdownFiles(instructions: string) {
   return [...new Set(
     [...instructions.matchAll(/\]\((references\/[^)\s]+\.md)\)/g)]
       .map((match) => match[1]),
@@ -233,12 +233,12 @@ export async function loadAiSkillFromDirectory(input: {
     throw new Error(`AI Skill 文件无效：${input.name}`)
   }
   const source = await readFile(skillPath, 'utf8')
-  const parsed = parseSkillFile(source)
+  const parsed = parseAiSkillFile(source)
   const expectedName = input.expectedName ?? input.name
   if (parsed.name !== expectedName) {
     throw new Error(`AI Skill 名称与目录不一致：${parsed.name} / ${expectedName}`)
   }
-  const referenceNames = referencedMarkdownFiles(parsed.instructions)
+  const referenceNames = referencedAiSkillMarkdownFiles(parsed.instructions)
   const referenceSources: string[] = []
   for (const referenceName of referenceNames) {
     const referencePath = path.resolve(skillDir, referenceName)

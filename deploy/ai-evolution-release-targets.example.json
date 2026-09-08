@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "targets": [
+    {
+      "id": "production",
+      "label": "生产环境",
+      "repositoryId": "00000000-0000-4000-8000-000000000001",
+      "root": "/opt/cybernaut/app",
+      "baseRef": "main",
+      "allowedUserIds": ["00000000-0000-4000-8000-000000000002"]
+    }
+  ]
+}

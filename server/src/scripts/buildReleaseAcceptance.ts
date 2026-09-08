@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process'
+import { constants as fsConstants } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { access, chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import net from 'node:net'
@@ -98,7 +99,12 @@ try {
   assert((await readFile(path.join(temporaryRoot, 'server-dist/index.js'), 'utf8')) === nextArtifacts.serverEntry, 'activation did not publish server candidate')
   assert(((await stat(path.join(temporaryRoot, 'dist/company-logo.png'))).mode & 0o004) !== 0, 'activation did not make Web static files public-readable')
   assert(!await exists(pointer), 'candidate pointer remained after activation')
-  assert((await stat(path.join(temporaryRoot, '.runtime/build-rollback.json'))).mode % 0o1000 === 0o600, 'rollback pointer is not owner-only')
+  const rollbackPointerPath = path.join(temporaryRoot, '.runtime/build-rollback.json')
+  if (process.platform === 'win32') {
+    await access(rollbackPointerPath, fsConstants.R_OK | fsConstants.W_OK)
+  } else {
+    assert((await stat(rollbackPointerPath)).mode % 0o1000 === 0o600, 'rollback pointer is not owner-only')
+  }
 
   const rolledBack = await run(script, temporaryRoot, address.port, '--rollback')
   assert(rolledBack.code === 0, `rollback failed: ${rolledBack.output}`)
@@ -115,7 +121,7 @@ try {
       'invalid-candidate-hash-blocks-activation-with-live-artifacts-unchanged',
       'stopped-activation-publishes-validated-web-and-server-pair',
       'web-static-files-public-readable-after-activation-and-rollback',
-      'rollback-pointer-owner-only',
+      process.platform === 'win32' ? 'rollback-pointer-service-account-readable-writable' : 'rollback-pointer-owner-only',
       'rollback-restores-previous-web-and-server-pair',
       'failed-release-preserved-for-diagnosis',
     ],

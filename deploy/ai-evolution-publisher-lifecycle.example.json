@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "targets": [
+    {
+      "targetId": "production",
+      "healthUrl": "http://127.0.0.1:4100/api/health",
+      "stop": { "file": "/usr/bin/systemctl", "args": ["stop", "cybernaut-app.service"] },
+      "start": { "file": "/usr/bin/systemctl", "args": ["start", "cybernaut-app.service"] }
+    }
+  ]
+}

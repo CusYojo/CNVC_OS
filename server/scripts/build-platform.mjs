@@ -14,6 +14,8 @@ import {
 } from 'node:fs/promises'
 import net from 'node:net'
 import path from 'node:path'
+import { constants as fsConstants } from 'node:fs'
+import { stageEvolutionBuild, verifyImportedEvolutionFiles } from './stage-evolution-build.mjs'
 
 const root = path.resolve(process.cwd())
 const runtimeRoot = path.join(root, '.runtime')
@@ -96,6 +98,18 @@ async function normalizeWebPermissions(directory) {
 }
 
 async function validateWebPermissions(directory, files) {
+  if (process.platform === 'win32') {
+    // Windows does not expose POSIX execute/read bits through chmod/stat.
+    // Verify effective access for the service account instead of accepting a meaningless mode value.
+    await access(directory, fsConstants.X_OK)
+    for (const file of files) {
+      const absolute = path.join(directory, file)
+      await access(absolute, fsConstants.R_OK)
+      let parent = path.dirname(absolute)
+      while (parent !== directory) { await access(parent, fsConstants.X_OK); parent = path.dirname(parent) }
+    }
+    return
+  }
   assert(((await stat(directory)).mode & 0o001) !== 0, 'candidate Web root is not public-searchable')
   for (const file of files) {
     const mode = (await stat(path.join(directory, file))).mode
@@ -142,6 +156,11 @@ async function validateArtifacts(dist, serverDist, expected) {
     serverEntrySha256: await sha256(serverEntry),
   }
   if (expected) {
+    if (expected.importedArtifacts) {
+      const actualPaths = [...distFiles.map((file) => `dist/${file}`), ...serverFiles.map((file) => `server-dist/${file}`)].sort()
+      assert(JSON.stringify(actualPaths) === JSON.stringify(expected.importedArtifacts.map((file) => file.path).sort()), 'imported artifact file list changed')
+      await verifyImportedEvolutionFiles(path.dirname(dist), expected.importedArtifacts)
+    }
     assert(hashes.distIndexSha256 === expected.distIndexSha256, 'activated Web build hash differs from candidate')
     assert(hashes.serverEntrySha256 === expected.serverEntrySha256, 'activated server build hash differs from candidate')
   }
@@ -332,6 +351,27 @@ async function discardCandidate() {
 async function main() {
   assert(Number.isInteger(activationPort) && activationPort >= 0 && activationPort <= 65535, 'invalid activation port')
   const args = new Set(process.argv.slice(2))
+  const stagedInput = [...args].find((arg) => arg.startsWith('--stage-evolution='))
+  if (stagedInput) {
+    const digest = [...args].find((arg) => arg.startsWith('--manifest-sha256='))
+    assert(args.size === 2 && digest, 'evolution import requires only source and manifest digest')
+    const result = await withLock(async () => {
+      assert(!await exists(candidatePointer), 'an existing candidate must be resolved before importing another')
+      const id = releaseId(), candidate = safeChild(candidatesRoot, id)
+      await mkdir(candidate, { recursive: true, mode: 0o755 })
+      try {
+        const imported = await stageEvolutionBuild(stagedInput.slice('--stage-evolution='.length), candidate, digest.slice('--manifest-sha256='.length))
+        await normalizeWebPermissions(path.join(candidate, 'dist'))
+        const evidence = await validateArtifacts(path.join(candidate, 'dist'), path.join(candidate, 'server-dist'))
+        await atomicJson(path.join(candidate, 'manifest.json'), { version: 1, releaseId: id, createdAt: new Date().toISOString(), ...evidence,
+          evolutionBaseCommit: imported.baseCommit, evolutionPatchHash: imported.patchHash, importedArtifacts: imported.artifacts })
+        await atomicJson(candidatePointer, { version: 1, releaseId: id })
+        return { staged: true, activated: false, releaseId: id }
+      } catch (error) { await rm(candidate, { recursive: true, force: true }); throw error }
+    })
+    console.log(JSON.stringify({ ok: true, ...result }))
+    return
+  }
   const modes = ['--activate', '--activate-if-present', '--rollback', '--discard-candidate'].filter((mode) => args.has(mode))
   assert(modes.length <= 1 && args.size === modes.length, 'unsupported or conflicting build-platform arguments')
   const result = await withLock(async () => {

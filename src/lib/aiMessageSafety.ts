@@ -18,6 +18,7 @@ export type SafeAgentMessage = {
   role: 'user' | 'assistant'
   parts: SafeAgentPart[]
   timestamp?: string
+  experienceTaskId?: string
   malformed: boolean
 }
 
@@ -175,6 +176,7 @@ export function normalizeAgentMessage(value: unknown, index = 0): SafeAgentMessa
   const rawRole = safeProperty(value, 'role')
   const rawParts = safeProperty(value, 'parts')
   const rawMetadata = safeProperty(value, 'metadata')
+  const experienceTaskId = isRecord(rawMetadata) ? safeProperty(rawMetadata, 'experienceTaskId') : undefined
   const rawTimestamp = isRecord(rawMetadata)
     ? safeProperty(rawMetadata, 'timestamp')
     : undefined
@@ -198,6 +200,7 @@ export function normalizeAgentMessage(value: unknown, index = 0): SafeAgentMessa
     id: typeof rawId === 'string' && rawId ? rawId : `message-${index}`,
     role: rawRole === 'user' ? 'user' : 'assistant',
     parts,
+    ...(rawRole === 'user' && typeof experienceTaskId === 'string' && /^user:[a-f0-9-]{36}$/.test(experienceTaskId) ? { experienceTaskId } : {}),
     timestamp: typeof rawTimestamp === 'string' && rawTimestamp.trim()
       ? rawTimestamp
       : undefined,

@@ -9,9 +9,10 @@ import {
   dueDiligenceAtomicStatements,
   dueDiligencePackageContract,
   normalizeDueDiligencePackage,
-} from '../src/services/aiDueDiligenceSkillRuntimeService.js'
+} from '../src/services/aiDueDiligencePackage.js'
 
 const execFileAsync = promisify(execFile)
+const python = process.env.AI_DD_SKILL_PYTHON || 'python3'
 const evidence = {
   project: {
     name: '测试项目', legal_entity: '测试科技有限公司', cutoff_date: '2026-08-07', currency: 'CNY',
@@ -152,11 +153,11 @@ test('尽调运行时将模型常见键名归一为原生审计器契约', async
   const scripts = path.resolve(
     process.cwd(), 'server', 'workspace', '.agents', 'skills', 'draft-due-diligence-report', 'scripts',
   )
-  await execFileAsync('python3', [
+  await execFileAsync(python, [
     path.join(scripts, 'audit_ic_completeness.py'), dataPath,
     '--report', reportPath, '--evidence', evidencePath,
   ])
-  await execFileAsync('python3', [
+  await execFileAsync(python, [
     path.join(scripts, 'audit_report_content.py'), reportPath, '--evidence', evidencePath,
   ])
 })

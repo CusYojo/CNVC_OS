@@ -21,6 +21,7 @@ import {
 import type { AiTemplateDefinition } from './aiTemplateCatalog.js'
 import { convertUploadedInvestmentPdfTemplate } from './aiInvestmentTemplateConversionService.js'
 import { requireAccessibleProject } from './projectAccessService.js'
+import { readVerifiedUploadedTemplate } from './aiUploadedTemplateSnapshot.js'
 
 const MAX_TEMPLATE_BYTES = 25 * 1024 * 1024
 // 用户上传文件继续限制为 25MB；PDF 可编辑化会嵌入页面图片、OCR 文本和形状，
@@ -769,6 +770,7 @@ export async function resolveAiCustomTemplateForTask(input: {
   conversationId?: string
   templateId: string
   taskType?: 'custom_template_document' | 'investment_recommendation_ppt'
+  frozenSkill?: LoadedAiSkill
 }): Promise<{
   row: AiCustomTemplateRecord
   template: AiTemplateDefinition
@@ -787,13 +789,17 @@ export async function resolveAiCustomTemplateForTask(input: {
   const skillName = taskType === 'investment_recommendation_ppt'
     ? 'create-reference-driven-editable-ppt'
     : AI_TEMPLATE_DRIVEN_SKILL_NAME
+  if (input.frozenSkill && input.frozenSkill.name !== skillName) {
+    throw typedError('冻结技能与上传模板任务不一致', 409, 'CUSTOM_TEMPLATE_SKILL_MISMATCH')
+  }
   const [assetStat, skill] = await Promise.all([
     stat(resolvedAsset).catch(() => null),
-    loadAiSkill(skillName),
+    input.frozenSkill ?? loadAiSkill(skillName),
   ])
   if (!assetStat?.isFile() || !existsSync(resolvedAsset)) {
     throw typedError('上传模板文件已丢失', 503, 'CUSTOM_TEMPLATE_FILE_MISSING')
   }
+  await readVerifiedUploadedTemplate(resolvedAsset, row.sha256)
   const analysis = versionAnalysis(row.analysis as AiCustomTemplateAnalysis)
   if (taskType === 'investment_recommendation_ppt' && row.format !== 'pptx') {
     throw typedError(

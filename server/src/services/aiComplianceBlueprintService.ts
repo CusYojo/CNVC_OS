@@ -397,7 +397,9 @@ async function createBlueprint(template: AiTemplateDefinition): Promise<Complian
   }
 }
 
-export function parseComplianceDocumentBlueprint(template: AiTemplateDefinition) {
+export function parseComplianceDocumentBlueprint(template: AiTemplateDefinition, options: { cache?: boolean } = {}) {
+  // Task-owned frozen paths are short-lived and must not accumulate in the process cache.
+  if (options.cache === false) return createBlueprint(template)
   const key = [
     template.templateVersion,
     template.referencePath,

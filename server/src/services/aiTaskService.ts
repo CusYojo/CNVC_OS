@@ -1,4 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { freezeTaskAiExperiences, checkCompletedPersonalAiExperience } from './aiEvolutionApplicationService.js'
+import { aiExperienceDocxOutput } from './aiExperienceDocumentOutput.js'
 import { hostname } from 'node:os'
 import { createReadStream } from 'node:fs'
 import { copyFile, cp, lstat, mkdir, readdir, readFile, realpath, rename, stat, writeFile } from 'node:fs/promises'
@@ -22,7 +24,12 @@ import type {
   AiTaskRecord,
   CreateAiArtifactRecord,
 } from '../repositories/aiTaskRepository.js'
-import { agentConversationRepository, aiTaskRepository, identityRepositories } from '../repositories/index.js'
+import { agentConversationRepository, aiTaskRepository, identityRepositories, aiConfigurationRepository } from '../repositories/index.js'
+import { freezeTaskAiEvolutionSkills, validateExistingTaskSkillSnapshot, readExistingTaskSkillSnapshot } from './aiEvolutionSkillTaskService.js'
+import { materializeEvolutionTemplate } from './aiEvolutionFrozenTemplateService.js'
+import { loadEvolutionSkill } from './aiEvolutionLoadedSkill.js'
+import { materializeUploadedTemplate } from './aiUploadedTemplateSnapshot.js'
+import { getAiSkillDirectory } from './aiSkillService.js'
 import {
   annotateDueDiligencePendingAfterResearch,
   composeBusinessContent,
@@ -47,7 +54,7 @@ import {
   type AiExecutableTaskType,
   type AiTemplateDefinition,
 } from './aiTemplateCatalog.js'
-import { loadAiSkill } from './aiSkillService.js'
+import { AI_TEMPLATE_DRIVEN_SKILL_NAME, loadAiSkill, type LoadedAiSkill } from './aiSkillService.js'
 import { resolveAiCustomTemplateForTask } from './aiCustomTemplateService.js'
 import { recordJobCoordinationEventSafely } from '../runtime/jobCoordinationTelemetry.js'
 import { recordAiTaskModelCall, runWithAiTaskModelUsage } from '../runtime/aiTaskModelUsage.js'
@@ -258,6 +265,21 @@ export function classifyAiTaskFailure(error: unknown): AiTaskFailureClassificati
 export function shouldAutomaticallyRecoverAiTaskFailure(failure: AiTaskFailureClassification) {
   return failure.retryable
     && !DIRECT_SKILL_AGENT_NO_AUTO_RECOVERY_ERROR_CODES.has(failure.errorCode)
+}
+
+async function checkCompletedTaskArtifactExperience(userId: string, taskId: string) {
+  if (process.env.AI_EVOLUTION_ENABLED !== 'true' || !process.env.AI_EXPERIENCE_CHECK_MODEL_ID) return
+  try {
+    const artifacts = (await aiTaskRepository.listTaskArtifacts(taskId)).filter(item => item.userId === userId && !item.archived && item.qualityStatus === 'passed' && item.format === 'docx')
+    if (artifacts.length !== 1) return
+    if (!(await readableAiTaskIds(userId, [taskId])).has(taskId)) return
+    const file = await authorizedArtifactPath(artifacts[0].storagePath)
+    if (!file || file.size > 10 * 1024 * 1024) return
+    const output = await aiExperienceDocxOutput(await readFile(file.resolved))
+    await checkCompletedPersonalAiExperience(userId, taskId, output, AbortSignal.timeout(60_000))
+  } catch {
+    console.warn('[ai-experience] document output check not completed; delivered artifact remains available')
+  }
 }
 
 async function authorizedArtifactPath(storagePath: string): Promise<{ resolved: string; size: number } | undefined> {
@@ -1320,6 +1342,7 @@ async function executeTaskWithinUsage(taskId: string) {
   running.add(taskId)
   let rescheduleAfterRecovery = false
   let leaseHeartbeat: NodeJS.Timeout | undefined
+  let disposeFrozenTemplate: (() => Promise<void>) | undefined
   try {
     const task = await aiTaskRepository.findTaskById(taskId)
     if (!task || !isAiExecutableTaskType(task.type) || ['succeeded', 'cancelled'].includes(task.status)) return
@@ -1358,6 +1381,23 @@ async function executeTaskWithinUsage(taskId: string) {
       })
     }, Math.max(10_000, Math.floor(AI_TASK_LEASE_SECONDS * 1_000 / 3)))
     leaseHeartbeat.unref()
+    const skillName = task.type === 'custom_template_document'
+      ? AI_TEMPLATE_DRIVEN_SKILL_NAME : AI_TEMPLATE_CATALOG[task.type as AiBusinessTaskType]?.skillName
+    if (!skillName) throw new Error('AI 任务技能不存在')
+    let skill: LoadedAiSkill | undefined
+    let evolutionSkillPackage: unknown
+    if (process.env.AI_EVOLUTION_ENABLED === 'true'
+      && (usesDirectQaOrDueDiligenceAgent(task.type) || usesDirectInvestmentProposalAgent(task.type)
+        || usesDirectInvestmentCommitteePptAgent(task.type) || task.type === 'compliance_statement' || task.type === 'custom_template_document')) {
+      const capability = await aiConfigurationRepository.findBuiltinCapability('skill', skillName)
+      if (!capability) throw Error('任务技能能力尚未登记')
+      const application = await freezeTaskAiEvolutionSkills(task.userId, task.id, [capability.id])
+      const selected = application?.packages.find(item => item.bundle.version.capabilityId === capability.id)
+      if (selected) {
+        evolutionSkillPackage = selected.bundle
+        skill = { ...loadEvolutionSkill(selected.bundle, skillName), version: `evolution:${selected.versionId}` }
+      }
+    }
     const resolvedCustomTemplate = (
       task.type === 'custom_template_document'
     )
@@ -1367,9 +1407,10 @@ async function executeTaskWithinUsage(taskId: string) {
           conversationId: task.conversationId ?? undefined,
           templateId: String(parameters.customTemplateId || ''),
           taskType: task.type,
+          frozenSkill: skill,
         })
       : undefined
-    const template = resolvedCustomTemplate?.template ?? AI_TEMPLATE_CATALOG[task.type as AiBusinessTaskType]
+    let template = resolvedCustomTemplate?.template ?? AI_TEMPLATE_CATALOG[task.type as AiBusinessTaskType]
     if (!template) throw new Error('AI 任务模板不存在')
     if (resolvedCustomTemplate) {
       const expectedOutputFormat = template.outputFormat.toUpperCase()
@@ -1379,17 +1420,20 @@ async function executeTaskWithinUsage(taskId: string) {
           code: 'CUSTOM_TEMPLATE_FORMAT_MISMATCH',
         })
       }
-    } else {
-      if (
-        task.type !== 'investment_recommendation_ppt'
-        && !usesDirectQaOrDueDiligenceAgent(task.type)
-      ) {
-        assertAiTemplateReferences(template)
-      }
     }
-    const skill = resolvedCustomTemplate?.skill ?? await loadAiSkill(
-      AI_TEMPLATE_CATALOG[task.type as AiBusinessTaskType].skillName,
-    )
+    skill ??= resolvedCustomTemplate?.skill ?? await loadAiSkill(skillName)
+    if (task.type === 'compliance_statement' && evolutionSkillPackage) {
+      const frozen = await materializeEvolutionTemplate(template, getAiSkillDirectory(skillName), evolutionSkillPackage)
+      disposeFrozenTemplate = frozen.dispose
+      template = frozen.template
+    }
+    if (resolvedCustomTemplate) {
+      const frozen = await materializeUploadedTemplate(template.referencePath, resolvedCustomTemplate.row.sha256)
+      disposeFrozenTemplate = frozen.dispose
+      template = { ...template, referencePath: frozen.referencePath }
+    }
+    if (!resolvedCustomTemplate && !evolutionSkillPackage && task.type !== 'investment_recommendation_ppt'
+      && !usesDirectQaOrDueDiligenceAgent(task.type)) assertAiTemplateReferences(template)
     const pptWorkflow: InvestmentRecommendationPptWorkflow | undefined
       = task.type === 'investment_recommendation_ppt'
         && !usesDirectInvestmentCommitteePptAgent(task.type)
@@ -1398,7 +1442,7 @@ async function executeTaskWithinUsage(taskId: string) {
     let complianceBlueprint: ComplianceDocumentBlueprint | undefined
     if (task.type === 'compliance_statement') {
       await updateStage(taskId, '加载 generate-investment-compliance-note Skill', 6)
-      complianceBlueprint = await parseComplianceDocumentBlueprint(template)
+      complianceBlueprint = await parseComplianceDocumentBlueprint(template, { cache: !evolutionSkillPackage })
     }
     if (task.type === 'investment_proposal') {
       await updateStage(taskId, '加载 draft-investment-proposal Skill', 6)
@@ -1474,6 +1518,9 @@ async function executeTaskWithinUsage(taskId: string) {
     const researchIntent = typeof parameters.researchIntent === 'string'
       ? parameters.researchIntent.trim()
       : ''
+    const experienceApplication = await freezeTaskAiExperiences(task.userId, task.id)
+    // Preferences are generation instructions, never evidence for project facts.
+    const executionInstructions = `${experienceApplication?.prompt ?? ''}${userInstructions || researchIntent}`
     const rawSources: EvidenceSource[] = [
       ...knowledgeSources.filter((source) => evidenceSourceMatchesProject(source, project)),
       ...(formatShanghaiDateKey(project.updatedAt) <= sourceCutoffDate ? [{
@@ -1514,13 +1561,14 @@ async function executeTaskWithinUsage(taskId: string) {
       await restoreDirectSkillWorkspaceForRetry({ task, parameters, taskDirectory: taskDir })
       let incrementalUsageObserved = false
       const directResult = await runDirectInvestmentProposalAgent({
+        evolutionSkillPackage,
         taskDirectory: taskDir,
         project,
         sources,
         requiredProjectFiles,
         skill,
         sourceCutoffDate,
-        instructions: userInstructions || researchIntent,
+        instructions: executionInstructions,
         userRole: userRow.role,
         resumeExistingWorkspace: parameters._preserveDirectSkillWorkspace === true,
         onProgress: async (event) => {
@@ -1617,6 +1665,7 @@ async function executeTaskWithinUsage(taskId: string) {
         await cancelIfRequested(taskId)
         return
       }
+      await checkCompletedTaskArtifactExperience(task.userId, taskId)
       await writeTaskAudit(
         { uid: userRow.id, name: userRow.name, role: userRow.role },
         '生成业务材料',
@@ -1636,13 +1685,14 @@ async function executeTaskWithinUsage(taskId: string) {
       await restoreDirectSkillWorkspaceForRetry({ task, parameters, taskDirectory: taskDir })
       let incrementalUsageObserved = false
       const directResult = await runDirectInvestmentCommitteePptAgent({
+        evolutionSkillPackage,
         taskDirectory: taskDir,
         project,
         sources,
         requiredProjectFiles,
         skill,
         sourceCutoffDate,
-        instructions: userInstructions || researchIntent,
+        instructions: executionInstructions,
         userRole: userRow.role,
         resumeExistingWorkspace: parameters._preserveDirectSkillWorkspace === true,
         onProgress: async (event) => {
@@ -1739,6 +1789,7 @@ async function executeTaskWithinUsage(taskId: string) {
         await cancelIfRequested(taskId)
         return
       }
+      await checkCompletedTaskArtifactExperience(task.userId, taskId)
       await writeTaskAudit(
         { uid: userRow.id, name: userRow.name, role: userRow.role },
         '生成业务材料',
@@ -1759,13 +1810,14 @@ async function executeTaskWithinUsage(taskId: string) {
       let incrementalUsageObserved = false
       const directResult = await runDirectBusinessDocumentAgent({
         taskType: task.type as 'project_qa' | 'due_diligence_report',
+        evolutionSkillPackage,
         taskDirectory: taskDir,
         project,
         sources,
         requiredProjectFiles,
         skill,
         sourceCutoffDate,
-        instructions: userInstructions || researchIntent,
+        instructions: executionInstructions,
         userRole: userRow.role,
         resumeExistingWorkspace: parameters._preserveDirectSkillWorkspace === true,
         onProgress: async (event) => {
@@ -1862,6 +1914,7 @@ async function executeTaskWithinUsage(taskId: string) {
         await cancelIfRequested(taskId)
         return
       }
+      await checkCompletedTaskArtifactExperience(task.userId, taskId)
       await writeTaskAudit(
         { uid: userRow.id, name: userRow.name, role: userRow.role },
         '生成业务材料',
@@ -2110,7 +2163,7 @@ async function executeTaskWithinUsage(taskId: string) {
         depth: questionDepth,
         sources,
         skill,
-        userIntent: userInstructions || researchIntent,
+        userIntent: executionInstructions,
         projectKnowledgeBrief,
       })
       if (duplicateCheck.questions.length === 0) {
@@ -2126,7 +2179,7 @@ async function executeTaskWithinUsage(taskId: string) {
         questions: duplicateCheck.questions,
         sources,
         skill,
-        userIntent: userInstructions || researchIntent,
+        userIntent: executionInstructions,
         projectKnowledgeBrief,
       })
       if (await cancelIfRequested(taskId)) return
@@ -2277,6 +2330,7 @@ async function executeTaskWithinUsage(taskId: string) {
         await cancelIfRequested(taskId)
         return
       }
+      await checkCompletedTaskArtifactExperience(task.userId, taskId)
       const userRow = await identityRepositories.users.findById(task.userId)
       if (userRow) {
         await writeTaskAudit(
@@ -3121,6 +3175,7 @@ async function executeTaskWithinUsage(taskId: string) {
       await cancelIfRequested(taskId)
       return
     }
+    await checkCompletedTaskArtifactExperience(task.userId, taskId)
     const userRow = await identityRepositories.users.findById(task.userId)
     if (userRow) {
       await writeTaskAudit(
@@ -3250,6 +3305,9 @@ async function executeTaskWithinUsage(taskId: string) {
     }).catch(() => {})
   } finally {
     if (leaseHeartbeat) clearInterval(leaseHeartbeat)
+    await disposeFrozenTemplate?.().catch(error => {
+      console.warn(`[aiTask] frozen template cleanup failed task=${taskId}:`, (error as Error).message)
+    })
     await aiTaskRepository.releaseTaskLease({
       taskId,
       leaseOwner: AI_TASK_WORKER_OWNER,
@@ -3569,6 +3627,26 @@ export async function createAiTask(user: AiTaskUser, input: CreateAiTaskInput) {
   user = references.user
   input = { ...input, parameters: references.parameters }
   const project = references.project
+  // A repeated request returns its existing task after access checks, without
+  // depending on mutable template files used only when creating a new task.
+  const existing = await findIdempotentAiTask(user.uid, input)
+  if (existing) return getAiTask(user.uid, existing.id)
+  let hasFrozenRetrySkill = false
+  if (input.retryOfTaskId && process.env.AI_EVOLUTION_ENABLED === 'true'
+    && (usesDirectQaOrDueDiligenceAgent(input.type) || usesDirectInvestmentProposalAgent(input.type) || usesDirectInvestmentCommitteePptAgent(input.type) || input.type === 'compliance_statement')) {
+    const capability = await aiConfigurationRepository.findBuiltinCapability('skill', AI_TEMPLATE_CATALOG[input.type as AiBusinessTaskType].skillName)
+    if (!capability) throw Error('任务技能能力尚未登记')
+    hasFrozenRetrySkill = await validateExistingTaskSkillSnapshot(user.uid, input.retryOfTaskId, {
+      taskType: input.type, projectId: input.projectId, conversationId: input.conversationId, capabilityId: capability.id })
+  }
+  let frozenCustomSkill: LoadedAiSkill | undefined
+  if (input.type === 'custom_template_document' && input.retryOfTaskId && process.env.AI_EVOLUTION_ENABLED === 'true') {
+    const capability = await aiConfigurationRepository.findBuiltinCapability('skill', AI_TEMPLATE_DRIVEN_SKILL_NAME)
+    if (!capability) throw Error('任务技能能力尚未登记')
+    const saved = await readExistingTaskSkillSnapshot(user.uid, input.retryOfTaskId, {
+      taskType: input.type, projectId: input.projectId, conversationId: input.conversationId, capabilityId: capability.id })
+    if (saved) frozenCustomSkill = { ...loadEvolutionSkill(saved.bundle, AI_TEMPLATE_DRIVEN_SKILL_NAME), version: `evolution:${saved.versionId}` }
+  }
   const resolvedCustomTemplate = (
     input.type === 'custom_template_document'
   )
@@ -3578,6 +3656,7 @@ export async function createAiTask(user: AiTaskUser, input: CreateAiTaskInput) {
         conversationId: input.conversationId,
         templateId: String(input.parameters.customTemplateId || ''),
         taskType: input.type,
+        frozenSkill: frozenCustomSkill,
       })
     : undefined
   const template = resolvedCustomTemplate?.template ?? AI_TEMPLATE_CATALOG[input.type as AiBusinessTaskType]
@@ -3593,21 +3672,17 @@ export async function createAiTask(user: AiTaskUser, input: CreateAiTaskInput) {
   } else {
     await assertRegisteredAiTaskTemplate(template)
     if (
-      input.type !== 'investment_recommendation_ppt'
+      !hasFrozenRetrySkill && input.type !== 'investment_recommendation_ppt'
       && !usesDirectQaOrDueDiligenceAgent(input.type)
     ) {
       assertAiTemplateReferences(template)
     }
-    await loadAiSkill(AI_TEMPLATE_CATALOG[input.type as AiBusinessTaskType].skillName)
+    if (!hasFrozenRetrySkill) await loadAiSkill(AI_TEMPLATE_CATALOG[input.type as AiBusinessTaskType].skillName)
   }
-  if (input.type === 'investment_recommendation_ppt') {
+  if (input.type === 'investment_recommendation_ppt' && !usesDirectInvestmentCommitteePptAgent(input.type)) {
     await prepareInvestmentRecommendationPptWorkflow(template)
   }
   const hash = createRequestHash(input)
-  const existing = await findIdempotentAiTask(user.uid, input)
-  if (existing) {
-    return getAiTask(user.uid, existing.id)
-  }
   try {
     const resumeProgressFloor = Math.max(
       0,

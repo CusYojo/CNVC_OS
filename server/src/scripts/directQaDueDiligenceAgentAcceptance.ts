@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict'
-import { copyFile, mkdtemp, readFile, rm, stat } from 'node:fs/promises'
+import { copyFile, mkdtemp, readFile, rm, stat, mkdir, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import { writeAcceptancePdf } from './helpers/acceptancePdf.js'
 import path from 'node:path'
-import { getAiSkillDirectory, loadAiSkill } from '../services/aiSkillService.js'
+import { getAiSkillDirectory, getAiSkillRoot, loadAiSkill } from '../services/aiSkillService.js'
+import { captureEvolutionSkill } from '../runtime/evolution/evolutionSkillSnapshot.js'
+import { evolutionContentHash } from '../services/aiEvolutionPolicyService.js'
 import {
   runDirectBusinessDocumentAgent,
   type DirectBusinessDocumentTaskType,
@@ -15,6 +17,11 @@ const cases: Array<{
   skillName: string
   outputFileName: string
 }> = [
+  {
+    taskType: 'investment_proposal',
+    skillName: 'draft-investment-proposal',
+    outputFileName: '验收科技_投资提案.docx',
+  },
   {
     taskType: 'project_qa',
     skillName: 'draft-investment-qa',
@@ -28,9 +35,26 @@ const cases: Array<{
 ]
 
 try {
-  for (const acceptanceCase of cases) {
+  for (const acceptanceCase of cases.flatMap(item => [{ ...item, evolved: false }, { ...item, evolved: true }])) {
     const skill = await loadAiSkill(acceptanceCase.skillName)
-    const taskDirectory = path.join(temporaryRoot, acceptanceCase.taskType)
+    const snapshot = await captureEvolutionSkill({ capabilityId: '00000000-0000-4000-8000-000000000001',
+      capabilityKey: skill.name, directory: getAiSkillDirectory(skill.name), allowedRoot: getAiSkillRoot(), toolNames: [], dependencyNames: [], config: {} })
+    const version = { ...snapshot.version, instructions: snapshot.version.instructions + '\n冻结进化版本验收标记。' }
+    const contentHash = evolutionContentHash(version)
+    const evolutionSkillPackage = { schemaVersion: 1, version, contentHash,
+      packageHash: evolutionContentHash({ contentHash, runtimePackageHash: snapshot.packageHash }), runtimeSnapshot: snapshot }
+    const taskDirectory = path.join(temporaryRoot, `${acceptanceCase.taskType}-${acceptanceCase.evolved ? 'evolved' : 'baseline'}`)
+    if (acceptanceCase.evolved) {
+      const other = cases.find(item => item.taskType !== acceptanceCase.taskType)!
+      const sentinel = path.join(taskDirectory, '.direct-skill-agent', 'preserve.txt')
+      await mkdir(path.dirname(sentinel), { recursive: true })
+      await writeFile(sentinel, 'existing work')
+      await assert.rejects(runDirectBusinessDocumentAgent({ taskType: other.taskType, taskDirectory,
+        project: { id: 'project-1', name: '验收项目', companyName: '验收科技', industry: '企业服务' },
+        sources: [], requiredProjectFiles: [], skill: await loadAiSkill(other.skillName), evolutionSkillPackage,
+        sourceCutoffDate: '2026-08-21', instructions: '', userRole: 'admin' }), { code: 'DIRECT_SKILL_TASK_MISMATCH' })
+      assert.equal(await readFile(sentinel, 'utf8'), 'existing work')
+    }
     let observedPrompt = ''
     let observedOptions: Record<string, unknown> | null = null
     const result = await runDirectBusinessDocumentAgent({
@@ -71,6 +95,7 @@ try {
         { sourceId: 'file-1', sourceName: '商业计划书.pdf' },
       ],
       skill,
+      evolutionSkillPackage: acceptanceCase.evolved ? evolutionSkillPackage : undefined,
       sourceCutoffDate: '2026-08-21',
       instructions: '必须直接执行 Skill 并读取全部资料。',
       userRole: 'admin',
@@ -88,6 +113,7 @@ try {
         observedOptions = options
         return (async function* () {
           const workspace = String(options.cwd)
+          assert.equal((await readFile(path.join(workspace, '.claude', 'skills', skill.name, 'SKILL.md'), 'utf8')).endsWith('冻结进化版本验收标记。'), acceptanceCase.evolved)
           await copyFile(
             path.join(
               getAiSkillDirectory('draft-due-diligence-report'),

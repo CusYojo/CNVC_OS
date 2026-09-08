@@ -691,22 +691,71 @@
     {
       "idx": 98,
       "version": "5",
-      "when": 1791964153000,
-      "tag": "0102_add_weixin_link_intakes",
+      "when": 1792050543000,
+      "tag": "0098_add_ai_evolution_tasks",
       "breakpoints": true
     },
     {
       "idx": 99,
       "version": "5",
-      "when": 1792050543000,
-      "tag": "0103_add_cashier_role",
+      "when": 1792136943000,
+      "tag": "0099_add_ai_evolution_model_calls",
       "breakpoints": true
     },
     {
       "idx": 100,
       "version": "5",
-      "when": 1793260143000,
-      "tag": "0112_add_assistant_experience_memory",
+      "when": 1792223343000,
+      "tag": "0100_add_ai_evolution_candidates",
+      "breakpoints": true
+    },
+    {
+      "idx": 101,
+      "version": "5",
+      "when": 1792309743000,
+      "tag": "0101_add_ai_experience_versions",
+      "breakpoints": true
+    },
+    {
+      "idx": 102,
+      "version": "5",
+      "when": 1792396143000,
+      "tag": "0102_add_ai_evolution_time_accounting",
+      "breakpoints": true
+    },
+    {
+      "idx": 103,
+      "version": "5",
+      "when": 1792482543000,
+      "tag": "0103_add_ai_evolution_release_approval",
+      "breakpoints": true
+    },
+    {
+      "idx": 104,
+      "version": "5",
+      "when": 1792568943000,
+      "tag": "0104_add_ai_experience_check_execution",
+      "breakpoints": true
+    },
+    {
+      "idx": 105,
+      "version": "5",
+      "when": 1792655343000,
+      "tag": "0105_add_ai_evolution_skill_versions",
+      "breakpoints": true
+    },
+    {
+      "idx": 106,
+      "version": "5",
+      "when": 1792741743000,
+      "tag": "0106_add_ai_evolution_skill_applications",
+      "breakpoints": true
+    },
+    {
+      "idx": 107,
+      "version": "5",
+      "when": 1792828143000,
+      "tag": "0107_add_ai_evolution_release_jobs",
       "breakpoints": true
     },
     {

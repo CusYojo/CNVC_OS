@@ -18,6 +18,10 @@ import type {
   LeadInvestmentProfileProduct,
 } from '../contracts/leadInvestmentProfileContract.js'
 import type { LeadResearchProfileSummary } from '../contracts/leadResearchProfileContract.js'
+import type { EvolutionSpec, EvolutionBudget } from '../contracts/aiEvolutionContract.js'
+import type { EvolutionCandidateManifest, EvolutionEvaluationReport } from '../contracts/aiEvolutionEvaluationContract.js'
+import type { EvolutionSkillVersion } from '../runtime/evolution/evolutionSkillEvaluation.js'
+import type { EvolutionSkillTaskSnapshot } from '../contracts/aiEvolutionSkillApplicationContract.js'
 
 const mysqlTable = mysqlTableCreator((name) => `${mysqlConfig.tablePrefix}${name}`)
 const uuidPrimaryKey = (name: string) => varchar(name, { length: 36 }).primaryKey().$defaultFn(randomUUID)
@@ -34,6 +38,179 @@ const shanghaiDateTime = customType<{ data: Date; driverData: string }>({
 const timestampColumn = (name: string) => shanghaiDateTime(name)
 const emptyJsonArray = sql`(JSON_ARRAY())`
 const emptyJsonObject = sql`(JSON_OBJECT())`
+
+// Evolution is a separate durable domain; business AI task leases are not reused.
+export const aiEvolutionProposals = mysqlTable('ai_evolution_proposals', {
+  id: uuidPrimaryKey('id'),
+  ownerUserId: uuidColumn('owner_user_id').notNull(),
+  kind: varchar('kind', { length: 16 }).notNull(),
+  spec: json('spec').$type<EvolutionSpec>().notNull(),
+  specHash: varchar('spec_hash', { length: 64 }).notNull(),
+  status: varchar('status', { length: 24 }).notNull(),
+  revision: int('revision').notNull().default(1),
+  idempotencyKey: varchar('idempotency_key', { length: 128 }).notNull(),
+  createInputHash: varchar('create_input_hash', { length: 64 }).notNull(),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+  updatedAt: timestampColumn('updated_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({
+  createOnce: uniqueIndex('uq_evo_proposal_create').on(t.ownerUserId, t.idempotencyKey),
+  byOwner: index('idx_evo_proposal_owner').on(t.ownerUserId, t.createdAt),
+}))
+
+export const aiEvolutionRuns = mysqlTable('ai_evolution_runs', {
+  id: uuidPrimaryKey('id'), proposalId: uuidColumn('proposal_id').notNull().references(() => aiEvolutionProposals.id),
+  ownerUserId: uuidColumn('owner_user_id').notNull(),
+  inputHash: varchar('input_hash', { length: 64 }).notNull(),
+  frozenSpec: json('frozen_spec').$type<EvolutionSpec>().notNull(),
+  idempotencyKey: varchar('idempotency_key', { length: 128 }).notNull(),
+  status: varchar('status', { length: 24 }).notNull(), stage: varchar('stage', { length: 64 }).notNull(),
+  attempt: int('attempt').notNull().default(0), leaseToken: int('lease_token').notNull().default(0),
+  leaseOwner: varchar('lease_owner', { length: 128 }), leaseExpiresAt: timestampColumn('lease_expires_at'),
+  budget: json('budget').$type<EvolutionBudget>().notNull(),
+  modelTokens: int('model_tokens'), elapsedSeconds: int('elapsed_seconds').notNull().default(0),
+  timeAccountedAt: timestampColumn('time_accounted_at'),
+  repairRounds: int('repair_rounds').notNull().default(0), checkpoint: json('checkpoint'),
+  cancelRequestedAt: timestampColumn('cancel_requested_at'),
+  error: json('error').$type<{ code: string; message: string }>(),
+  nextEventSequence: int('next_event_sequence').notNull().default(1),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+  updatedAt: timestampColumn('updated_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({
+  executeOnce: uniqueIndex('uq_evo_run_execute').on(t.ownerUserId, t.idempotencyKey),
+  byQueue: index('idx_evo_run_queue').on(t.status, t.createdAt),
+  byLease: index('idx_evo_run_lease').on(t.status, t.leaseExpiresAt),
+  byProposal: index('idx_evo_run_proposal').on(t.proposalId),
+}))
+
+export const aiExperiences = mysqlTable('ai_experiences', {
+  id: uuidPrimaryKey('id'), ownerUserId: uuidColumn('owner_user_id').notNull(),
+  scopeType: varchar('scope_type', { length: 24 }).notNull(), scopeKey: varchar('scope_key', { length: 128 }).notNull(),
+  businessProjectId: uuidColumn('business_project_id'), activeVersionId: uuidColumn('active_version_id'),
+  status: varchar('status', { length: 16 }).notNull(), revision: int('revision').notNull().default(1),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+  updatedAt: timestampColumn('updated_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({ byOwner: index('idx_evo_experience_owner').on(t.ownerUserId, t.status) }))
+
+export const aiExperienceVersions = mysqlTable('ai_experience_versions', {
+  id: uuidPrimaryKey('id'), experienceId: uuidColumn('experience_id').notNull().references(() => aiExperiences.id),
+  proposalId: uuidColumn('proposal_id').notNull().references(() => aiEvolutionProposals.id),
+  spec: json('spec').$type<EvolutionSpec>().notNull(), contentHash: varchar('content_hash', { length: 64 }).notNull(),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({ byProposal: uniqueIndex('uq_evo_experience_proposal').on(t.proposalId) }))
+
+export const aiEvolutionApplications = mysqlTable('ai_evolution_applications', {
+  id: uuidPrimaryKey('id'), ownerUserId: uuidColumn('owner_user_id').notNull(), taskId: varchar('task_id', { length: 128 }).notNull(),
+  conversationId: uuidColumn('conversation_id'), taskType: varchar('task_type', { length: 100 }).notNull(),
+  businessProjectId: uuidColumn('business_project_id'), snapshotHash: varchar('snapshot_hash', { length: 64 }).notNull(),
+  snapshot: json('snapshot').$type<Record<string, unknown>>().notNull(),
+  checkStatus: varchar('check_status', { length: 24 }).notNull().default('not_checked'), checkResult: json('check_result'),
+  checkExecution: json('check_execution').$type<Record<string, unknown>>(),
+  injectedAt: timestampColumn('injected_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({ byTask: uniqueIndex('uq_evo_application_task').on(t.ownerUserId, t.taskId), byOwner: index('idx_evo_application_owner').on(t.ownerUserId, t.injectedAt) }))
+
+export const aiEvolutionCandidates = mysqlTable('ai_evolution_candidates', {
+  id: uuidPrimaryKey('id'), runId: uuidColumn('run_id').notNull().references(() => aiEvolutionRuns.id),
+  kind: varchar('kind', { length: 16 }).notNull(), baseRef: varchar('base_ref', { length: 128 }).notNull(),
+  contentHash: varchar('content_hash', { length: 64 }).notNull(), manifest: json('manifest').$type<EvolutionCandidateManifest>().notNull(),
+  summary: text('summary').notNull(), status: varchar('status', { length: 24 }).notNull(),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({ byRun: uniqueIndex('uq_evo_candidate_run').on(t.runId) }))
+
+export const aiEvolutionEvaluations = mysqlTable('ai_evolution_evaluations', {
+  id: uuidPrimaryKey('id'), candidateId: uuidColumn('candidate_id').notNull().references(() => aiEvolutionCandidates.id),
+  candidateHash: varchar('candidate_hash', { length: 64 }).notNull(), evaluationHash: varchar('evaluation_hash', { length: 64 }).notNull(),
+  report: json('report').$type<EvolutionEvaluationReport>().notNull(),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({ byCandidate: uniqueIndex('uq_evo_evaluation_candidate').on(t.candidateId) }))
+
+export const aiEvolutionApprovals = mysqlTable('ai_evolution_approvals', {
+  id: uuidPrimaryKey('id'), candidateId: uuidColumn('candidate_id').notNull().references(() => aiEvolutionCandidates.id),
+  actorUserId: uuidColumn('actor_user_id').notNull(), candidateHash: varchar('candidate_hash', { length: 64 }).notNull(),
+  evaluationHash: varchar('evaluation_hash', { length: 64 }).notNull(), scope: json('scope').$type<EvolutionSpec['scope']>().notNull(),
+  environment: varchar('environment', { length: 128 }).notNull(), decision: varchar('decision', { length: 16 }).notNull(),
+  purpose: varchar('purpose', { length: 24 }).notNull().default('candidate_review'),
+  consumedAt: timestampColumn('consumed_at'),
+  expiresAt: timestampColumn('expires_at').notNull(), createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({ byCandidate: index('idx_evo_approval_candidate').on(t.candidateId, t.createdAt) }))
+
+export const aiEvolutionReleaseJobs = mysqlTable('ai_evolution_release_jobs', {
+  id: uuidPrimaryKey('id'), candidateId: uuidColumn('candidate_id').notNull().references(() => aiEvolutionCandidates.id),
+  approvalId: uuidColumn('approval_id').notNull().references(() => aiEvolutionApprovals.id), actorUserId: uuidColumn('actor_user_id').notNull(),
+  environment: varchar('environment', { length: 128 }).notNull(), idempotencyKey: varchar('idempotency_key', { length: 128 }).notNull(),
+  inputHash: varchar('input_hash', { length: 64 }).notNull(), status: varchar('status', { length: 24 }).notNull().default('queued'),
+  receipt: json('receipt').$type<Record<string, unknown>>(), attempt: int('attempt').notNull().default(0),
+  leaseToken: int('lease_token').notNull().default(0), leaseOwner: varchar('lease_owner', { length: 128 }),
+  leaseExpiresAt: timestampColumn('lease_expires_at'), error: json('error').$type<{ code: string; message: string }>(),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+  updatedAt: timestampColumn('updated_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`), completedAt: timestampColumn('completed_at'),
+}, (t) => ({ byRequest: uniqueIndex('uq_evo_release_job_request').on(t.actorUserId, t.idempotencyKey),
+  byApproval: uniqueIndex('uq_evo_release_job_approval').on(t.approvalId),
+  byLease: index('idx_evo_release_job_lease').on(t.status, t.leaseExpiresAt),
+  byCandidate: index('idx_evo_release_job_candidate').on(t.candidateId, t.createdAt) }))
+
+export const aiEvolutionModelCalls = mysqlTable('ai_evolution_model_calls', {
+  id: uuidPrimaryKey('id'), runId: uuidColumn('run_id').notNull().references(() => aiEvolutionRuns.id),
+  callKey: varchar('call_key', { length: 128 }).notNull(), inputHash: varchar('input_hash', { length: 64 }).notNull(),
+  attempt: int('attempt').notNull(), leaseToken: int('lease_token').notNull(),
+  reservedTokens: int('reserved_tokens').notNull(), actualTokens: int('actual_tokens'),
+  status: varchar('status', { length: 16 }).notNull(),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+  completedAt: timestampColumn('completed_at'),
+}, (t) => ({ uniqueCall: uniqueIndex('uq_evo_model_call').on(t.runId, t.callKey) }))
+
+export const aiEvolutionEvents = mysqlTable('ai_evolution_events', {
+  id: uuidPrimaryKey('id'), runId: uuidColumn('run_id').notNull().references(() => aiEvolutionRuns.id),
+  sequence: int('sequence').notNull(), eventType: varchar('event_type', { length: 64 }).notNull(),
+  payload: json('payload').$type<Record<string, unknown>>().notNull(),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({ ordered: uniqueIndex('uq_evo_event_sequence').on(t.runId, t.sequence) }))
+
+export const aiEvolutionAudits = mysqlTable('ai_evolution_audits', {
+  id: uuidPrimaryKey('id'), actorUserId: uuidColumn('actor_user_id').notNull(),
+  proposalId: uuidColumn('proposal_id').notNull().references(() => aiEvolutionProposals.id),
+  action: varchar('action', { length: 64 }).notNull(), contentHash: varchar('content_hash', { length: 64 }).notNull(),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({ byProposal: index('idx_evo_audit_proposal').on(t.proposalId, t.createdAt) }))
+
+export const aiEvolutionSkillVersions = mysqlTable('ai_evolution_skill_versions', {
+  id: uuidPrimaryKey('id'), capabilityId: uuidColumn('capability_id').notNull(),
+  ownerUserId: uuidColumn('owner_user_id').notNull(), runId: uuidColumn('run_id').notNull().references(() => aiEvolutionRuns.id),
+  candidateId: uuidColumn('candidate_id').references(() => aiEvolutionCandidates.id),
+  contentHash: varchar('content_hash', { length: 64 }).notNull(), content: json('content').$type<EvolutionSkillVersion>().notNull(),
+  packageHash: varchar('package_hash', { length: 64 }).notNull(),
+  packageArtifact: json('package_artifact').$type<EvolutionCandidateManifest['artifacts'][number]>().notNull(),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({ byContent: uniqueIndex('uq_evo_skill_content').on(t.capabilityId, t.contentHash, t.packageHash) }))
+
+export const aiEvolutionSkillBindings = mysqlTable('ai_evolution_skill_bindings', {
+  id: uuidPrimaryKey('id'), capabilityId: uuidColumn('capability_id').notNull(),
+  scopeType: varchar('scope_type', { length: 24 }).notNull(), scopeKey: varchar('scope_key', { length: 128 }).notNull(),
+  activeVersionId: uuidColumn('active_version_id').notNull().references(() => aiEvolutionSkillVersions.id),
+  fallbackVersionId: uuidColumn('fallback_version_id').references(() => aiEvolutionSkillVersions.id),
+  trialExpiresAt: timestampColumn('trial_expires_at'), revision: int('revision').notNull().default(1),
+  updatedBy: uuidColumn('updated_by').notNull(),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+  updatedAt: timestampColumn('updated_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({ byScope: uniqueIndex('uq_evo_skill_scope').on(t.capabilityId, t.scopeType, t.scopeKey) }))
+
+export const aiEvolutionSkillBindingChanges = mysqlTable('ai_evolution_skill_binding_changes', {
+  id: uuidPrimaryKey('id'), bindingId: uuidColumn('binding_id').notNull().references(() => aiEvolutionSkillBindings.id),
+  actorUserId: uuidColumn('actor_user_id').notNull(), operation: varchar('operation', { length: 24 }).notNull(),
+  idempotencyKey: varchar('idempotency_key', { length: 128 }).notNull(), inputHash: varchar('input_hash', { length: 64 }).notNull(),
+  previousVersionId: uuidColumn('previous_version_id').references(() => aiEvolutionSkillVersions.id),
+  nextVersionId: uuidColumn('next_version_id').notNull().references(() => aiEvolutionSkillVersions.id),
+  revision: int('revision').notNull(), approvalId: uuidColumn('approval_id').references(() => aiEvolutionApprovals.id),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({ byRequest: uniqueIndex('uq_evo_skill_change_request').on(t.actorUserId, t.idempotencyKey),
+  byRevision: uniqueIndex('uq_evo_skill_change_revision').on(t.bindingId, t.revision) }))
+
+export const aiEvolutionSkillApplications = mysqlTable('ai_evolution_skill_applications', {
+  id: uuidPrimaryKey('id'), ownerUserId: uuidColumn('owner_user_id').notNull(), taskId: varchar('task_id', { length: 128 }).notNull(),
+  taskType: varchar('task_type', { length: 100 }).notNull(), conversationId: uuidColumn('conversation_id'),
+  businessProjectId: uuidColumn('business_project_id'), contextHash: varchar('context_hash', { length: 64 }).notNull(),
+  snapshotHash: varchar('snapshot_hash', { length: 64 }).notNull(), snapshot: json('snapshot').$type<EvolutionSkillTaskSnapshot>().notNull(),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({ byTask: uniqueIndex('uq_evo_skill_application_task').on(t.ownerUserId, t.taskId) }))
 
 export const users = mysqlTable('users', {
   id: uuidPrimaryKey('id'),

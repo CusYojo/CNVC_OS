@@ -3,7 +3,8 @@ import assert from 'node:assert/strict'
 import test, { after } from 'node:test'
 import { eq } from 'drizzle-orm'
 import { db, pool } from '../src/db/client.js'
-import { aiTasks, projects, users } from '../src/db/schema.js'
+import { aiTasks, projects, users, auditLogs } from '../src/db/schema.js'
+import { jobCoordinationTarget } from '../src/runtime/jobCoordinationTelemetry.js'
 import { claimAiTaskForExecution } from '../src/services/aiTaskService.js'
 import { mysqlIntegrationTestOptions } from './mysqlIntegrationTestSafety.js'
 
@@ -31,6 +32,7 @@ test('AI task lease permits exactly one concurrent claimant and reclaims only af
     idempotencyKey: marker,
   }).$returningId()
   t.after(async () => {
+    await db.delete(auditLogs).where(eq(auditLogs.target, jobCoordinationTarget('ai-task', task.id)))
     await db.delete(aiTasks).where(eq(aiTasks.id, task.id))
     await db.delete(projects).where(eq(projects.id, project.id))
     await db.delete(users).where(eq(users.id, user.id))
@@ -48,6 +50,9 @@ test('AI task lease permits exactly one concurrent claimant and reclaims only af
   assert.ok(claimed.leaseOwner)
   assert.ok(claimed.leaseExpiresAt && claimed.leaseExpiresAt.getTime() > Date.now())
   assert.equal(await claimAiTaskForExecution(task.id), false)
+  const contention = await db.select().from(auditLogs).where(eq(auditLogs.target, jobCoordinationTarget('ai-task', task.id)))
+  assert.equal(contention.length, 1, 'repeated contention is audited once within the suppression window')
+  assert.equal(contention[0].action, '租约领取争抢未获')
 
   await db.update(aiTasks).set({
     status: 'pending',

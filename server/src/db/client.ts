@@ -26,6 +26,13 @@ pool.pool.on('connection', (connection) => {
   connection.on('error', (error) => console.error(JSON.stringify({
     event: 'mysql_connection_error', error: safeErrorLog(error),
   })))
+  // Match mysql2's timestamp encoding to NOW()/TIMESTAMP on every connection.
+  // A UTC server default otherwise offsets lease expiry by eight hours.
+  connection.query("SET SESSION time_zone = '+08:00'", (error) => {
+    if (!error) return
+    console.error(JSON.stringify({ event: 'mysql_timezone_initialization_failed', error: safeErrorLog(error) }))
+    connection.destroy()
+  })
   if (migrationWriteFreezePolicy.enabled) {
     // Queued before the pool hands a new connection to callers. This makes
     // implicit and explicit transactions read-only; HTTP/startup guards are

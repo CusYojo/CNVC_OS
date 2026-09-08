@@ -26,6 +26,7 @@ import { aiTasksRouter } from './aiTasks.js'
 import { jwAgentRouter } from './jwAgent.js'
 import { aiModelSettingsRouter } from './aiModelSettings.js'
 import { aiCapabilitiesRouter } from './aiCapabilities.js'
+import { aiEvolutionRouter } from './aiEvolution.js'
 import { imIntegrationsRouter } from './imIntegrations.js'
 import { leadPushTargetsRouter } from './leadPushTargets.js'
 import { operationsRouter } from './operations.js'
@@ -71,6 +72,7 @@ apiRouter.use('/ai', aiTasksRouter)
 apiRouter.use('/agent', jwAgentRouter)
 apiRouter.use('/ai/model-settings', aiModelSettingsRouter)
 apiRouter.use('/ai/capabilities', aiCapabilitiesRouter)
+apiRouter.use('/ai/evolution', aiEvolutionRouter)
 apiRouter.use('/integrations/im', imIntegrationsRouter)
 apiRouter.use('/integrations/radar-dingtalk', radarDingTalkRouter)
 apiRouter.use('/investment/leads/push-targets', leadPushTargetsRouter)
