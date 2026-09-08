@@ -10,6 +10,7 @@
     "deploy/ai-evolution-publisher-lifecycle.example.json",
     "deploy/ai-evolution-release-targets.example.json",
     "deploy/cybernaut-ai-evolution-publisher.service.example",
+    "docs/ai-evolution-acceptance-matrix.md",
     "package.json",
     "server/drizzle/0098_add_ai_evolution_tasks.sql",
     "server/drizzle/0099_add_ai_evolution_model_calls.sql",
