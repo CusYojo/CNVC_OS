@@ -102,7 +102,7 @@ export function AiEvolutionPanel({ conversationId }: { conversationId: string })
       </details>
       <AiEvolutionQuestions key={`${proposal.id}:${proposal.revision}`} proposal={proposal} save={saveAnswers} />
       {['draft', 'needs_input', 'ready'].includes(proposal.status) && <div className="mt-3 flex flex-wrap gap-2">
-        <AiEvolutionProposalEditor proposal={proposal} disabled={Boolean(busyId)} save={updateProposal} />
+        <AiEvolutionProposalEditor key={`editor:${proposal.id}:${proposal.revision}`} proposal={proposal} disabled={Boolean(busyId)} save={updateProposal} />
         <button disabled={Boolean(busyId)} className="rounded border px-2 py-1 text-xs disabled:opacity-50" onClick={async () => {
           setBusyId(proposal.id); setActionError(''); setNotice('')
           try { await decideProposal(proposal, 'deferred'); setNotice('提案已保留为草稿，可稍后继续修改或执行。') }
