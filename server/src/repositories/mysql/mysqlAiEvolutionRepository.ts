@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto'
 import { accountEvolutionTime } from '../../services/aiEvolutionElapsedTime.js'
 import { and, asc, desc, eq, gt, sql, inArray, lte, isNull } from 'drizzle-orm'
 import { db } from '../../db/client.js'
-import { aiEvolutionAudits as audits, aiEvolutionEvents as events, aiEvolutionProposals as proposals, aiEvolutionRuns as runs, aiEvolutionModelCalls as modelCalls } from '../../db/schema.js'
+import { aiEvolutionAudits as audits, aiEvolutionEvents as events, aiEvolutionProposals as proposals, aiEvolutionRuns as runs,
+  aiEvolutionModelCalls as modelCalls, aiEvolutionCandidates as candidates } from '../../db/schema.js'
 import { evolutionProposalReadiness, canTransitionEvolutionRun, EVOLUTION_KINDS, type EvolutionKind, type EvolutionRunStatus, type EvolutionSpec } from '../../contracts/aiEvolutionContract.js'
 import { evolutionContentHash, evolutionError, assertEvolutionLease, type EvolutionLeaseIdentity } from '../../services/aiEvolutionPolicyService.js'
 
@@ -219,6 +220,21 @@ export class MySqlAiEvolutionRepository {
       throw evolutionError(400, 'EVOLUTION_INVALID_PAGINATION', '分页参数无效')
     }
     return db.select().from(proposals).where(eq(proposals.ownerUserId, userId)).orderBy(desc(proposals.createdAt), desc(proposals.id)).limit(limit).offset(offset)
+  }
+
+  async listProposalActivity(userId: string, proposalIds: string[]) {
+    if (!proposalIds.length) return {} as Record<string, { runStatus?: string; candidateStatus?: string }>
+    const runRows = await db.select({ proposalId: runs.proposalId, status: runs.status, createdAt: runs.createdAt, id: runs.id })
+      .from(runs).where(and(eq(runs.ownerUserId, userId), inArray(runs.proposalId, proposalIds)))
+      .orderBy(desc(runs.createdAt), desc(runs.id))
+    const candidateRows = await db.select({ proposalId: runs.proposalId, status: candidates.status,
+      createdAt: candidates.createdAt, id: candidates.id }).from(candidates).innerJoin(runs, eq(runs.id, candidates.runId))
+      .where(and(eq(runs.ownerUserId, userId), inArray(runs.proposalId, proposalIds)))
+      .orderBy(desc(candidates.createdAt), desc(candidates.id))
+    const result: Record<string, { runStatus?: string; candidateStatus?: string }> = {}
+    for (const row of runRows) (result[row.proposalId] ??= {}).runStatus ??= row.status
+    for (const row of candidateRows) (result[row.proposalId] ??= {}).candidateStatus ??= row.status
+    return result
   }
 
   async createProposal(userId: string, spec: EvolutionSpec, idempotencyKey: string) {

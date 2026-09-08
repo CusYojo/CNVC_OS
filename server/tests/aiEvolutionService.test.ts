@@ -24,7 +24,7 @@ function fixture(executors = new AiEvolutionExecutorRegistry()) {
     error: null, createdAt: now, updatedAt: now, leaseToken: 999, leaseOwner: 'private-host', frozenSpec: { ...spec, sourceRefs: [{ type: 'message', id: 'original-source' }] } }
   const repository = {
     createProposal: async () => { creates++; return proposal }, findProposal: async () => proposal,
-    listProposals: async () => [proposal], findRun: async () => row,
+    listProposals: async () => [proposal], listProposalActivity: async () => ({ [proposal.id]: { runStatus: row.status } }), findRun: async () => row,
     requestCancel: async () => ({ ...row, cancelRequestedAt: now }),
   } as unknown as ConstructorParameters<typeof AiEvolutionService>[0]
   const service = new AiEvolutionService(repository, {

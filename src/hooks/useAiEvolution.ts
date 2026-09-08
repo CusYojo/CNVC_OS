@@ -10,16 +10,18 @@ export function useAiEvolution(conversationId: string) {
   const [experiences, setExperiences] = useState<PersonalAiExperience[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [activity, setActivity] = useState<Record<string, { runStatus?: string; candidateStatus?: string }>>({})
   const generation = useRef(0)
   const refresh = useCallback(async () => {
     const version = ++generation.current
     try {
       const [result, saved] = await Promise.all([
-        api<{ list: EvolutionProposal[] }>('/ai/evolution/proposals?limit=100'),
+        api<{ list: EvolutionProposal[]; activity: Record<string, { runStatus?: string; candidateStatus?: string }> }>('/ai/evolution/proposals?limit=100'),
         api<{ list: PersonalAiExperience[] }>('/ai/evolution/experiences'),
       ])
+      const visible = result.list.filter((item) => !conversationId || item.spec.sourceRefs.some((source) => source.conversationId === conversationId))
       if (version !== generation.current) return
-      setProposals(result.list.filter((item) => !conversationId || item.spec.sourceRefs.some((source) => source.conversationId === conversationId)))
+      setProposals(visible); setActivity(result.activity)
       setExperiences(saved.list)
       setError('')
     } catch (error) {
@@ -29,7 +31,7 @@ export function useAiEvolution(conversationId: string) {
   }, [conversationId])
 
   useEffect(() => {
-    setLoading(true); setProposals([]); setExperiences([]); setError('')
+    setLoading(true); setProposals([]); setExperiences([]); setActivity({}); setError('')
     void refresh()
     const timer = window.setInterval(() => { if (document.visibilityState === 'visible') void refresh() }, 10_000)
     return () => { generation.current++; window.clearInterval(timer) }
@@ -67,5 +69,5 @@ export function useAiEvolution(conversationId: string) {
     })
     await refresh()
   }
-  return { proposals, experiences, loading, error, refresh, execute, saveExperience, disableExperience, saveAnswers }
+  return { proposals, experiences, activity, loading, error, refresh, execute, saveExperience, disableExperience, saveAnswers }
 }

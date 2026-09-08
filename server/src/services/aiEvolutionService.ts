@@ -6,7 +6,7 @@ import { aiEvolutionExecutorRegistry, type AiEvolutionExecutorRegistry } from '.
 
 type ProposalRow = NonNullable<Awaited<ReturnType<MySqlAiEvolutionRepository['findProposal']>>>
 type RunRow = NonNullable<Awaited<ReturnType<MySqlAiEvolutionRepository['findRun']>>>
-type Repository = Pick<MySqlAiEvolutionRepository, 'findProposal' | 'listProposals' | 'createProposal' | 'editProposal' | 'enqueue' | 'findRun' | 'listEvents' | 'requestCancel' | 'resumeInterrupted'>
+type Repository = Pick<MySqlAiEvolutionRepository, 'findProposal' | 'listProposals' | 'listProposalActivity' | 'createProposal' | 'editProposal' | 'enqueue' | 'findRun' | 'listEvents' | 'requestCancel' | 'resumeInterrupted'>
 
 function proposalDto(row: ProposalRow): EvolutionProposal {
   return { id: row.id, ownerUserId: row.ownerUserId, spec: row.spec, specHash: row.specHash,
@@ -61,7 +61,8 @@ export class AiEvolutionService {
       try { await assertEvolutionSpecAccess(actor, row.spec, this.policy); visible.push(proposalDto(row)) }
       catch (error) { if ((error as { status?: number }).status !== 403) throw error }
     }
-    return { list: visible, nextOffset: rows.length === limit ? offset + limit : null }
+    const activity = await this.repository.listProposalActivity(userId, visible.map(item => item.id))
+    return { list: visible, activity, nextOffset: rows.length === limit ? offset + limit : null }
   }
 
   async get(userId: string, id: string) {

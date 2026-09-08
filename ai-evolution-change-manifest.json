@@ -237,6 +237,7 @@
     "server/tests/aiEvolutionSource.test.ts",
     "server/tests/aiEvolutionStageBuild.test.ts",
     "server/tests/aiEvolutionTestGate.test.ts",
+    "server/tests/aiEvolutionWorkbenchStatus.test.ts",
     "server/tests/aiEvolutionWorkerLifecycle.test.ts",
     "server/tests/aiExperienceApplication.test.ts",
     "server/tests/aiExperienceDocumentOutput.test.ts",
