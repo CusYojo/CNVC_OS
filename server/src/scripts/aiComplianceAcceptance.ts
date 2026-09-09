@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import path from 'node:path'
 import {
   COMPLIANCE_MISSING_DATA_SENTENCE,
@@ -46,7 +47,7 @@ function sha256(buffer: Buffer) {
 async function main() {
   const outputDirectory = path.resolve(
     process.env.AI_COMPLIANCE_ACCEPTANCE_DIR
-      ?? '/private/tmp/codex-compliance-skill-acceptance',
+      ?? path.join(tmpdir(), 'codex-compliance-skill-acceptance'),
   )
   await mkdir(outputDirectory, { recursive: true })
 
@@ -144,6 +145,12 @@ async function main() {
     sourceCutoffDate: '2026-07-25',
     missingSections: ['公司简介', '核心团队', '产品及技术', '投资理由'],
     fetchImpl: (async (url) => {
+      if (String(url).endsWith('/responses')) {
+        return new Response(JSON.stringify({ error: { message: 'not supported in fixture' } }), {
+          status: 404,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
       if (String(url).includes('/chat/completions')) {
         return new Response(JSON.stringify({
           choices: [{

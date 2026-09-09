@@ -140,7 +140,7 @@ export function parseFeedEntries(xml: string): Array<{ title: string; summary: s
   })).filter((entry) => entry.title)
 }
 
-function candidateScore(group: string, title: string, summary: string) {
+export function candidateScore(group: string, title: string, summary: string) {
   const text = `${title}\n${summary}`.toLowerCase()
   const projectHits = PROJECT_TERMS.filter((term) => text.includes(term.toLowerCase())).slice(0, 8)
   const investmentHits = INVESTMENT_TERMS.filter((term) => text.includes(term.toLowerCase())).slice(0, 8)

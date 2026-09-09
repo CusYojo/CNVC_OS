@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import hashlib
+import argparse
 import json
 from pathlib import Path
 from typing import Any
@@ -333,6 +334,13 @@ def render_proposal(
     template_path: Path,
 ) -> str:
     proposal = read_json(proposal_path)
+    if not isinstance(proposal, dict) or not isinstance(proposal.get("meta"), dict):
+        raise ValueError("proposal must contain a meta object")
+    sections = proposal.get("sections")
+    if not isinstance(sections, list) or not sections:
+        raise ValueError("proposal.sections must be a non-empty array")
+    if any(not isinstance(section, dict) or not section.get("title") for section in sections):
+        raise ValueError("each proposal section must contain a title")
     resolved_template = template_path.expanduser().resolve()
     template_sha256 = validate_layout_authority(resolved_template)
     document = Document(resolved_template)
@@ -380,3 +388,25 @@ def render_proposal(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     document.save(output_path)
     return template_sha256
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--proposal-path", required=True, type=Path)
+    parser.add_argument("--output-path", required=True, type=Path)
+    parser.add_argument("--template-path", required=True, type=Path)
+    args = parser.parse_args()
+    if args.output_path.suffix.lower() != ".docx":
+        parser.error("--output-path must end in .docx")
+    if args.output_path.resolve() in (args.proposal_path.resolve(), args.template_path.resolve()):
+        parser.error("output must not overwrite input or layout authority")
+    try:
+        render_proposal(args.proposal_path, args.output_path, args.template_path)
+    except (ValueError, OSError, KeyError, TypeError) as exc:
+        parser.exit(1, f"proposal rendering failed: {type(exc).__name__}: {exc}\n")
+    print(json.dumps({"status": "rendered", "bytes": args.output_path.stat().st_size}))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -10,6 +10,7 @@ function errorCode(error: unknown) {
 
 export function safeAiTaskFailureStage(error: unknown) {
   const code = errorCode(error)
+  if (code === 'COMPLIANCE_RENDER_CONTRACT_MISMATCH') return '合规渲染契约不匹配'
   if (code === 'PROJECT_KNOWLEDGE_COMPLETE_STUDY_FAILED') return '全部项目资料片段研读未完成'
   if (code === 'DIRECT_SKILL_AGENT_AUTH_OR_QUOTA') return '直接 Skill Agent 模型额度不可用'
   if (code === 'DIRECT_SKILL_AGENT_AUTHENTICATION_FAILED') return '直接 Skill Agent 模型认证失败'
@@ -18,6 +19,11 @@ export function safeAiTaskFailureStage(error: unknown) {
   if (code === 'DIRECT_SKILL_NOT_INVOKED') return '直接 Skill 未被调用'
   if (code === 'DIRECT_SKILL_OUTPUT_CONTRACT_FAILED') return 'Skill 成品输出检查未通过'
   if (code === 'DIRECT_SKILL_OUTPUT_INVALID') return 'Skill 成品文件不完整'
+  if (code === 'DIRECT_SKILL_PDF_MISSING') return 'Skill 同名 PDF 成品缺失或数量不符'
+  if (code === 'DIRECT_SKILL_PDF_INVALID') return 'Skill PDF 成品无法读取'
+  if (code === 'DIRECT_SKILL_AGENT_IDLE_TIMEOUT') return 'Skill 执行长时间无响应'
+  if (code === 'DIRECT_SKILL_AGENT_TIMEOUT') return 'Skill 总执行时间超限'
+  if (code === 'DIRECT_SKILL_AGENT_CANCEL_CHECK_FAILED') return 'Skill 任务状态检查失败'
   if (code.startsWith('DIRECT_SKILL_AGENT_')) return '直接 Skill Agent 未完成'
   if (code === 'DUE_DILIGENCE_CONTENT_QUALITY_REJECTED') return '正文质量检查未通过'
   if (code === 'DUE_DILIGENCE_MODEL_UNAVAILABLE') return '大模型正文生成未完成'
@@ -51,6 +57,12 @@ export function safeAiTaskFailureStage(error: unknown) {
 
 export function safeAiTaskFailureMessage(error: unknown) {
   const code = errorCode(error)
+  if (code === 'COMPLIANCE_RENDER_CONTRACT_MISMATCH') return '合规渲染器未收到必要的公开核验、交付就绪或主体信息。需修复上下游数据契约后重试；重复生成不能补齐程序缺失的字段。系统未发布成品。'
+  if (code === 'DIRECT_SKILL_PDF_MISSING') return '输出目录中必须有且只有一份与 DOCX 同主文件名的 PDF。系统未发布不完整的交付文件，请查看任务日志。'
+  if (code === 'DIRECT_SKILL_PDF_INVALID') return '生成的 PDF 无法解析或没有可读内容，系统未发布该文件。工作文件已保留，请查看任务日志。'
+  if (code === 'DIRECT_SKILL_AGENT_IDLE_TIMEOUT') return '文档 Agent 长时间没有返回执行消息，系统已停止等待并保留工作文件。请先查看任务诊断日志定位模型或工具无响应原因。'
+  if (code === 'DIRECT_SKILL_AGENT_TIMEOUT') return '文档 Agent 总执行时间超过限制，系统已停止等待并保留工作文件。请查看任务诊断日志后再决定是否继续生成。'
+  if (code === 'DIRECT_SKILL_AGENT_CANCEL_CHECK_FAILED') return '系统无法确认任务取消状态，已停止文档 Agent，避免任务失控运行。请检查后端数据库连接。'
   const upstreamCode = String((error as CodedError | null)?.upstreamCode ?? '')
   if (code === 'PROJECT_KNOWLEDGE_COMPLETE_STUDY_FAILED') {
     return '全部项目资料片段中仍有批次未完成研读，因此未使用部分资料生成提案。系统已保留任务参数，请稍后点击“继续生成”；系统只会拆分并重试失败批次，不会减少项目资料。'

@@ -11,6 +11,7 @@ import {
 } from './aiDirectSkillAgentRecovery.js'
 import { redactSensitiveText } from '../security/redactSecrets.js'
 import { directAgentResultUsage, directAgentTurnUsage } from '../runtime/directAgentUsage.js'
+import { buildUtf8SafeFileName } from './utf8SafeFileName.js'
 
 type ProjectIdentity = {
   id: string
@@ -166,15 +167,6 @@ function assertDirectAgentGatewayAllowed(baseUrl: string, env: NodeJS.ProcessEnv
   }
 }
 
-function safeFileStem(value: string, fallback: string) {
-  const cleaned = value.normalize('NFKC')
-    .replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 100)
-  return cleaned || fallback
-}
-
 function sourceKey(source: EvidenceSource) {
   return `${source.sourceId || ''}\u0000${source.sourceName}\u0000${source.sourceType}`
 }
@@ -195,7 +187,12 @@ async function materializeSources(input: {
   for (const groupedSources of groups.values()) {
     documentIndex += 1
     const first = groupedSources[0]
-    const fileName = `${String(documentIndex).padStart(3, '0')}-${safeFileStem(first.sourceName, 'source')}.md`
+    const fileName = buildUtf8SafeFileName({
+      prefix: `${String(documentIndex).padStart(3, '0')}-`,
+      stem: first.sourceName,
+      fallback: 'source',
+      suffix: '.md',
+    })
     const ordered = [...groupedSources].sort((left, right) =>
       Number(left.chunkIndex ?? 0) - Number(right.chunkIndex ?? 0))
     const body = [
@@ -360,7 +357,11 @@ export async function runDirectInvestmentCommitteePptAgent(input: {
     { encoding: 'utf8', mode: 0o600 },
   )
   const materialized = await materializeSources({ workspace, sources: input.sources })
-  const outputFileName = `${safeFileStem(input.project.companyName || input.project.name, '项目')}_投资建议书.pptx`
+  const outputFileName = buildUtf8SafeFileName({
+    stem: input.project.companyName || input.project.name,
+    fallback: '项目',
+    suffix: '_投资建议书.pptx',
+  })
   await writeFile(path.join(workspace, 'REQUEST.json'), JSON.stringify({
     project: input.project,
     sourceCutoffDate: input.sourceCutoffDate,

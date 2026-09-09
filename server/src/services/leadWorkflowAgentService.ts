@@ -393,12 +393,15 @@ function validateQuotes(profile: LeadWorkflowAgentProfile, output: unknown, prom
   const sourceCorpora = sourceEvidenceCorpora(prompt)
   for (const item of evidence) {
     const normalized = normalizedEvidenceText(item.quote)
-    if (!normalized || !corpus.includes(normalized)) {
+    // JSON host packages escape newlines/quotes. Match the decoded source text
+    // as well, without accepting paraphrases or quotes from a different source.
+    const declaredSource = sourceCorpora.get(item.sourceId)
+    const matchesSource = Boolean(normalized && declaredSource?.some((sourceText) => sourceText.includes(normalized)))
+    if (!normalized || (!corpus.includes(normalized) && !matchesSource)) {
       throw new Error(`${profile} returned evidence quote not found in immutable host input`)
     }
     if (sourceCorpora.size) {
-      const declaredSource = sourceCorpora.get(item.sourceId)
-      if (!declaredSource?.some((sourceText) => sourceText.includes(normalized))) {
+      if (!matchesSource) {
         throw new Error(`${profile} returned evidence quote not bound to declared sourceId`)
       }
     }

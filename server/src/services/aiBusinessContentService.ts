@@ -39,6 +39,7 @@ export type EvidenceSource = {
 }
 
 export type BusinessFinding = {
+  teamIdentity?: import('./complianceTeamIdentity.js').ComplianceTeamIdentity
   text: string
   status: '资料记载' | 'AI推断' | '待核验' | '资料缺口'
   sourceIndexes: number[]

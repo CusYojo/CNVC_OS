@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
+import type { ComplianceSupplementChoice } from '../../server/src/contracts/complianceSupplementContract'
 import { createPortal } from 'react-dom'
 import { useSearchParams } from 'react-router-dom'
 import { AlertCircle, Bot, Boxes, Check, CheckCircle2, ChevronDown, ChevronRight, Copy, Download, File as FileIcon, FileText, MessageSquarePlus, Paperclip, Pencil, RefreshCw, Search, Send, Square, X } from 'lucide-react'
@@ -1901,16 +1902,19 @@ function Chat() {
     }
   }
 
-  const retryAiTask = async (task: AiTask) => {
+  const retryAiTask = async (task: AiTask, complianceChoice?: ComplianceSupplementChoice) => {
     if (taskMutationId) return
     setTaskMutationId(task.id)
     try {
       const retried = await apiPost<AiTask>(`/ai/tasks/${task.id}/retry`, {
         idempotencyKey: `retry-${task.id}-${Date.now().toString(36)}`,
+        ...(complianceChoice ? { complianceChoice } : {}),
       })
       setAiTasks((items) => [retried, ...items.filter((item) => item.id !== retried.id)])
       const label = AI_TASK_LABEL_BY_TYPE[task.type] ?? '文档'
-      const visibleRequest = `请继续生成${label}。`
+      const visibleRequest = complianceChoice?.action === 'continue_with_gaps'
+        ? `我已了解资料缺口，同意按现有资料继续生成${label}，保留待核验事项。`
+        : complianceChoice?.action === 'supplement' ? `我已补充信息，请重新核验并生成${label}。` : `请继续生成${label}。`
       if (currentProject?.id && currentConversationRowId === task.conversationId) {
         const runtimeMessage = `【当前项目】${currentProject.name}\n【projectId】${currentProject.id}\n【用户问题】${visibleRequest}\n【系统已执行】已根据原任务 ${task.id} 创建续跑任务 ${retried.id}。不要再次创建任务；请调用 get_ai_task_status 查询新任务，并用普通对话说明已继续执行。`
         await agent.sendMessage(runtimeMessage).catch((error) => {
@@ -1921,6 +1925,7 @@ function Chat() {
     } catch (error) {
       console.warn('AI task continuation was not created', error)
       showToast('继续生成操作暂未开始，请稍后再试', 'info')
+      if (complianceChoice) throw error
     } finally {
       setTaskMutationId(null)
     }

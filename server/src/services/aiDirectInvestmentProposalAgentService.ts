@@ -3,7 +3,7 @@ import { cp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { getAiSkillDirectory, type LoadedAiSkill } from './aiSkillService.js'
 import type { EvidenceSource } from './aiBusinessContentService.js'
-import { resolveAiModelByKey, resolveAiModelRoute } from './aiModelSettingsService.js'
+import { resolveAiModelByKey, resolveAiModelFallbackRoute, resolveAiModelRoute } from './aiModelSettingsService.js'
 import {
   classifyDirectSkillAgentFailure,
   directSkillAgentGatewayRecoveryPolicy,
@@ -11,6 +11,12 @@ import {
 } from './aiDirectSkillAgentRecovery.js'
 import { redactSensitiveText } from '../security/redactSecrets.js'
 import { directAgentResultUsage, directAgentTurnUsage } from '../runtime/directAgentUsage.js'
+import { directSkillAgentSandboxEnabled, directSkillAgentSandboxFailIfUnavailable } from './aiDirectSkillAgentSandbox.js'
+import { buildUtf8SafeFileName } from './utf8SafeFileName.js'
+import { createDirectSkillDiagnostics, directSkillErrorSummary } from './directSkillDiagnostics.js'
+import { directSkillPlatformEnvironment } from './directSkillEnvironment.js'
+import { createDirectSkillExecutionGuard } from './directSkillExecutionGuard.js'
+import { assertDueDiligenceValidationEvidence } from './directSkillValidationEvidence.js'
 
 type ProjectIdentity = {
   id: string
@@ -60,6 +66,9 @@ export type DirectInvestmentProposalAgentProgress = {
 
 export type DirectInvestmentProposalAgentResult = {
   outputPath: string
+  pdfPath?: string
+  pdfBytes?: number
+  pdfSha256?: string
   documentSha256: string
   bytes: number
   skillInvoked: boolean
@@ -207,15 +216,6 @@ function assertDirectAgentGatewayAllowed(baseUrl: string, env: NodeJS.ProcessEnv
   }
 }
 
-function safeFileStem(value: string, fallback: string) {
-  const cleaned = value.normalize('NFKC')
-    .replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 100)
-  return cleaned || fallback
-}
-
 function sourceKey(source: EvidenceSource) {
   return `${source.sourceId || ''}\u0000${source.sourceName}\u0000${source.sourceType}`
 }
@@ -236,7 +236,12 @@ async function materializeSources(input: {
   for (const groupedSources of groups.values()) {
     documentIndex += 1
     const first = groupedSources[0]
-    const fileName = `${String(documentIndex).padStart(3, '0')}-${safeFileStem(first.sourceName, 'source')}.md`
+    const fileName = buildUtf8SafeFileName({
+      prefix: `${String(documentIndex).padStart(3, '0')}-`,
+      stem: first.sourceName,
+      fallback: 'source',
+      suffix: '.md',
+    })
     const ordered = [...groupedSources].sort((left, right) =>
       Number(left.chunkIndex ?? 0) - Number(right.chunkIndex ?? 0))
     const body = [
@@ -274,9 +279,8 @@ async function materializeSources(input: {
 
 function restrictedEnvironment(config: DirectAgentRuntimeConfig, workspace: string) {
   const source = process.env
-  const venvBin = path.resolve(process.cwd(), 'server', '.venv', 'bin')
   return {
-    PATH: `${venvBin}:${source.PATH || '/usr/local/bin:/usr/bin:/bin'}`,
+    ...directSkillPlatformEnvironment(process.cwd(), process.platform, source),
     TMPDIR: source.TMPDIR,
     LANG: source.LANG || 'zh_CN.UTF-8',
     LC_ALL: source.LC_ALL,
@@ -350,10 +354,28 @@ function directAgentPrompt(input: {
 3. 由当前 Agent 按 Skill 自主${input.profile.processContract}；宿主不会生成问题、答案、章节、底稿或兜底正文，也不会用程序替代 Skill 的业务验收。
 4. 对交易金额、估值、股比、收入、人员任职和协议日期的冲突必须保留来源边界，不得编造。
 5. 使用 Skill 自带脚本、模板和当前工作区可用 Python/LibreOffice 工具完成 DOCX；可以在工作区写临时文件。
-6. 最终只在 ./output 中保留一份 DOCX，文件名必须是 ${input.outputFileName}。不得把模板文件复制到 output。
+6. 最终在 ./output 中只保留一份 DOCX，文件名必须是 ${input.outputFileName}。${input.profile.taskType === 'project_qa' ? '按 Q&A Skill 保留已校验的 Markdown 底稿。' : ''}当前任务不生成、不导出、不检查 PDF；不得把模板文件复制到 output。
 7. 只有在当前 Agent 按 Skill 完成最终审阅且确认可交付后才结束；无法完成时明确失败，不得生成占位文件。
+8. 当前系统为 ${process.platform}。Python 虚拟环境已加入 PATH；先验证 python --version。写好执行脚本后必须用 Bash 实际运行并检查返回结果，不能以写入脚本代替执行。Windows 原生运行时不存在沙箱虚拟盘符 R:/、S:/，脚本必须用 Path.cwd()、./output 和 ./.claude/skills 下的真实相对路径；不得生成或引用 R:/、S:/。Windows PowerShell 不使用反斜杠续行；Python 复制文件使用 shutil.copyfile，不使用 os.copy。不要通过反复新建包装脚本处理同一个执行错误，不得联网安装依赖。
+${input.profile.taskType === 'investment_proposal' ? '9. 提案渲染入口为 python .claude/skills/draft-investment-proposal/scripts/proposal_processor.py --proposal-path proposal.json --output-path "./output/' + input.outputFileName + '" --template-path .claude/skills/draft-investment-proposal/assets/primary-layout-authority.docx。先写经过 Skill 审阅的 proposal.json（meta 对象、非空 sections 数组），不得虚构 --project-name 等接口参数。渲染成功不等于业务或版式验收通过，仍须完成 Skill 校验。' : ''}
+${input.profile.taskType === 'due_diligence_report' ? '9. 生成脚本前用 python -c "import docx,lxml" 探测依赖；非必需功能不得引入当前 Python 缺失的包。python-docx 的 doc.paragraphs 会重建包装对象，不得对 Paragraph 使用 doc.paragraphs.index，必须用 enumerate 按文本或 XML 定位。在前 55 轮内完成证据和初稿，至少保留 20 轮用于执行脚本、读取完整 traceback、单点修订并运行 validate_dd_report.py 直到 status=pass。' : ''}
 
 完成后简要说明最终结论和输出路径。`
+}
+
+async function fallbackRuntimeConfig(role: string): Promise<DirectAgentRuntimeConfig | null> {
+  const configured = await resolveAiModelFallbackRoute('ai-document', role)
+  if (!configured) return null
+  const baseUrl = configured.baseUrl.replace(/\/v1\/?$/, '').replace(/\/$/, '')
+  assertDirectAgentGatewayAllowed(baseUrl)
+  return {
+    baseUrl,
+    apiKey: configured.apiKey,
+    model: configured.model,
+    maxTurns: boundedInteger(process.env.AI_DIRECT_SKILL_MAX_TURNS, 80, 10, 80),
+    maxBudgetUsd: boundedNumber(process.env.AI_DIRECT_SKILL_MAX_BUDGET_USD, 20, 1, 100),
+    timeoutMs: boundedInteger(process.env.AI_DIRECT_SKILL_TIMEOUT_MS, 7_200_000, 300_000, 7_200_000),
+  }
 }
 
 function directAgentRecoveryPrompt(input: {
@@ -361,14 +383,14 @@ function directAgentRecoveryPrompt(input: {
   outputFileName: string
   recoveryAttempt: number
 }) {
-  return `上一个 ${input.profile.skillName} Agent 上下文在模型网关返回普通 403 后已经关闭。当前是第 ${input.recoveryAttempt} 次全新上下文恢复，工作区中的资料、Manifest、事实台账、草稿、Reviewer 结果和渲染文件均被原样保留。
+  return `上一个 ${input.profile.skillName} Agent 上下文因模型网关拒绝或主模型额度不足已经关闭。当前是第 ${input.recoveryAttempt} 次全新上下文恢复，工作区中的资料、Manifest、事实台账、草稿、Reviewer 结果和渲染文件均被原样保留。
 
 恢复要求：
 1. 首先重新使用 Skill 工具调用 ${input.profile.skillName}；不得沿用未重新加载 Skill 的判断。
 2. 读取 ./REQUEST.json 和 ./materials/manifest.json，检查现有工作成果与 Manifest 的覆盖关系；若现有证据台账不能证明某个来源或片段已经纳入，必须补读缺失资料。
 3. 在现有工作成果上继续，不得删除已完成的事实库、冲突裁决、草稿、Reviewer 结果或渲染结果后从头降级生成。
 4. 业务判断、内容修订和最终验收只服从当前 Skill；宿主不会生成正文、替代审阅或提供旧模板兜底稿。
-5. 完成 Skill 要求的最终复核后，只在 ./output 中保留一份 ${input.outputFileName}；未通过 Skill 最终复核不得发布工作稿。
+5. 完成 Skill 要求的最终复核后，在 ./output 中保留一份 ${input.outputFileName}${input.profile.taskType === 'project_qa' ? '及 Q&A Skill 要求的已校验 Markdown 底稿' : ''}；当前任务不生成、不导出、不检查 PDF，未通过 Skill 最终复核不得发布工作稿。
 
 请检查工作区并从尚未完成的阶段继续。`
 }
@@ -390,6 +412,7 @@ export async function runDirectBusinessDocumentAgent(input: {
 }, options: {
   queryFactory?: DirectAgentQueryFactory
   runtimeConfig?: DirectAgentRuntimeConfig
+  fallbackRuntimeConfig?: DirectAgentRuntimeConfig | null
   gatewayRecovery?: DirectSkillAgentGatewayRecoveryOptions
 } = {}): Promise<DirectInvestmentProposalAgentResult> {
   const profile = DIRECT_BUSINESS_DOCUMENT_PROFILES[input.taskType]
@@ -414,7 +437,11 @@ export async function runDirectBusinessDocumentAgent(input: {
     { encoding: 'utf8', mode: 0o600 },
   )
   const materialized = await materializeSources({ workspace, sources: input.sources })
-  const outputFileName = `${safeFileStem(input.project.companyName || input.project.name, '项目')}_${profile.outputSuffix}.docx`
+  const outputFileName = buildUtf8SafeFileName({
+    stem: input.project.companyName || input.project.name,
+    fallback: '项目',
+    suffix: `_${profile.outputSuffix}.docx`,
+  })
   await writeFile(path.join(workspace, 'REQUEST.json'), JSON.stringify({
     project: input.project,
     sourceCutoffDate: input.sourceCutoffDate,
@@ -422,18 +449,32 @@ export async function runDirectBusinessDocumentAgent(input: {
     outputFileName,
   }, null, 2), { encoding: 'utf8', mode: 0o600 })
 
-  const config = options.runtimeConfig ?? await runtimeConfig(input.userRole)
+  let config = options.runtimeConfig ?? await runtimeConfig(input.userRole)
+  const fallbackConfig = options.fallbackRuntimeConfig === undefined
+    ? (options.runtimeConfig ? null : await fallbackRuntimeConfig(input.userRole))
+    : options.fallbackRuntimeConfig
+  const diagnostics = createDirectSkillDiagnostics(path.join(input.taskDirectory, 'diagnostics'), {
+    taskId: path.basename(input.taskDirectory), skill: profile.skillName, model: config.model,
+  })
+  await diagnostics.record('skill.agent.starting', {
+    platform: process.platform, maxTurns: config.maxTurns, timeoutMs: config.timeoutMs,
+    sourceDocuments: input.requiredProjectFiles.length, sourceChunks: input.sources.length,
+  })
   const { query } = await import('@anthropic-ai/claude-agent-sdk')
   const factory = options.queryFactory ?? ((value) => query(value as never) as DirectAgentQuery)
-  const abortController = new AbortController()
-  const timeout = setTimeout(() => abortController.abort(), config.timeoutMs)
-  timeout.unref?.()
+  const guard = createDirectSkillExecutionGuard({
+    totalMs: config.timeoutMs,
+    idleMs: boundedInteger(process.env.AI_DIRECT_SKILL_IDLE_TIMEOUT_MS, 600_000, 30_000, 7_200_000),
+    shouldCancel: input.shouldCancel,
+  })
+  const abortController = guard.controller
   const gatewayRecovery = directSkillAgentGatewayRecoveryPolicy(options.gatewayRecovery)
   let result: DirectAgentMessage | null = null
   let skillInvoked = false
   let readEvents = 0
   let sdkQuery: DirectAgentQuery | null = null
   let gatewayRetryCount = 0
+  let fallbackUsed = false
   let prompt = input.resumeExistingWorkspace
     ? directAgentRecoveryPrompt({ profile, outputFileName, recoveryAttempt: 1 })
     : directAgentPrompt({
@@ -472,8 +513,8 @@ export async function runDirectBusinessDocumentAgent(input: {
             disallowedTools: ['WebFetch', 'WebSearch', 'Task'],
             settingSources: ['project'],
             sandbox: {
-              enabled: true,
-              failIfUnavailable: true,
+              enabled: directSkillAgentSandboxEnabled(),
+              failIfUnavailable: directSkillAgentSandboxFailIfUnavailable(),
               autoAllowBashIfSandboxed: true,
               allowUnsandboxedCommands: false,
               network: { allowManagedDomainsOnly: true, allowedDomains: [new URL(config.baseUrl).hostname] },
@@ -489,10 +530,17 @@ export async function runDirectBusinessDocumentAgent(input: {
             },
           },
         })
-        for await (const message of sdkQuery) {
+        const iterator = sdkQuery[Symbol.asyncIterator]()
+        while (true) {
+          const next = await guard.wait(iterator.next())
+          if (next.done) break
+          const message = next.value
+          guard.activity()
+          await diagnostics.observe(message)
           if (await input.shouldCancel?.()) {
-            abortController.abort()
-            throw Object.assign(new Error('用户已取消文档 Agent 任务'), { code: 'AI_TASK_CANCELLED' })
+            const cancelled = Object.assign(new Error('用户已取消文档 Agent 任务'), { code: 'AI_TASK_CANCELLED' })
+            abortController.abort(cancelled)
+            throw cancelled
           }
           for (const toolName of assistantToolNames(message)) {
             if (toolName === 'Skill') skillInvoked = true
@@ -509,14 +557,27 @@ export async function runDirectBusinessDocumentAgent(input: {
         }
         break
       } catch (error) {
-        const errorCode = (error as { code?: string })?.code
-        const timedOut = abortController.signal.aborted && errorCode !== 'AI_TASK_CANCELLED'
-        const message = timedOut
-          ? `文档 Agent 执行超时（${config.timeoutMs}ms）`
-          : error instanceof Error ? error.message : String(error)
+        await diagnostics.record('skill.agent.exception', directSkillErrorSummary(error), 'error')
+        const stopped = abortController.signal.aborted
+        const reason = stopped ? abortController.signal.reason : error
+        const errorCode = (reason as { code?: string })?.code
+        const message = reason instanceof Error ? reason.message : String(reason)
         const failure = classifyDirectSkillAgentFailure(message, errorCode || 'DIRECT_SKILL_AGENT_FAILED')
+        if (!stopped && failure.recoverableQuota && fallbackConfig && !fallbackUsed && fallbackConfig.model !== config.model) {
+          sdkQuery?.close?.()
+          sdkQuery = null
+          fallbackUsed = true
+          config = fallbackConfig
+          await diagnostics.record('skill.agent.fallback_model_selected', {
+            reason: failure.code,
+            model: config.model,
+          }, 'warn')
+          await input.onProgress?.({ stage: '主模型额度不足，正在切换备用模型继续 Skill', progress: 82 })
+          prompt = directAgentRecoveryPrompt({ profile, outputFileName, recoveryAttempt: gatewayRetryCount + 1 })
+          continue
+        }
         if (
-          !timedOut
+          !stopped
           && failure.recoverableGateway403
           && gatewayRetryCount < gatewayRecovery.maxRetries
         ) {
@@ -527,15 +588,11 @@ export async function runDirectBusinessDocumentAgent(input: {
             stage: `模型网关暂时拒绝，${Math.ceil(gatewayRecovery.delayMs / 1_000)}秒后由新 Agent 上下文继续`,
             progress: 82,
           })
-          await gatewayRecovery.wait(gatewayRecovery.delayMs)
-          if (abortController.signal.aborted) {
-            throw Object.assign(new Error(`文档 Agent 执行超时（${config.timeoutMs}ms）`), {
-              code: 'DIRECT_SKILL_AGENT_TIMEOUT',
-            })
-          }
+          await guard.wait(gatewayRecovery.wait(gatewayRecovery.delayMs))
           if (await input.shouldCancel?.()) {
-            abortController.abort()
-            throw Object.assign(new Error('用户已取消文档 Agent 任务'), { code: 'AI_TASK_CANCELLED' })
+            const cancelled = Object.assign(new Error('用户已取消文档 Agent 任务'), { code: 'AI_TASK_CANCELLED' })
+            abortController.abort(cancelled)
+            throw cancelled
           }
           prompt = directAgentRecoveryPrompt({
             profile,
@@ -545,7 +602,7 @@ export async function runDirectBusinessDocumentAgent(input: {
           continue
         }
         throw Object.assign(new Error(redactSensitiveText(message).slice(0, 8_000)), {
-          code: timedOut ? 'DIRECT_SKILL_AGENT_TIMEOUT' : failure.code,
+          code: stopped ? errorCode : failure.code,
         })
       } finally {
         sdkQuery?.close?.()
@@ -553,15 +610,17 @@ export async function runDirectBusinessDocumentAgent(input: {
       }
     }
   } finally {
-    clearTimeout(timeout)
+    guard.dispose()
     sdkQuery?.close?.()
   }
   if (!result || result.is_error || result.subtype !== 'success') {
+    await diagnostics.record('skill.agent.incomplete', {}, 'error')
     throw Object.assign(new Error(
       `文档 Agent 未完成：${(result?.errors || []).join('；') || result?.subtype || 'missing result'}`,
     ), { code: 'DIRECT_SKILL_AGENT_INCOMPLETE' })
   }
   if (!skillInvoked) {
+    await diagnostics.record('skill.agent.skill_not_invoked', {}, 'error')
     throw Object.assign(new Error(`文档 Agent 未调用 ${profile.skillName} Skill`), {
       code: 'DIRECT_SKILL_NOT_INVOKED',
     })
@@ -569,6 +628,10 @@ export async function runDirectBusinessDocumentAgent(input: {
   const files = (await readdir(outputDirectory, { withFileTypes: true }))
     .filter((entry) => entry.isFile() && /\.docx$/i.test(entry.name))
   if (files.length !== 1 || files[0].name !== outputFileName) {
+    await diagnostics.record('skill.output.rejected', {
+      expectedFile: outputFileName, actualDocxFiles: files.map((file) => file.name),
+      code: 'DIRECT_SKILL_OUTPUT_CONTRACT_FAILED',
+    }, 'error')
     throw Object.assign(new Error(`文档 Agent 输出目录必须只有 ${outputFileName}`), {
       code: 'DIRECT_SKILL_OUTPUT_CONTRACT_FAILED',
     })
@@ -576,11 +639,29 @@ export async function runDirectBusinessDocumentAgent(input: {
   const outputPath = path.join(outputDirectory, files[0].name)
   const output = await readFile(outputPath)
   if (output.length < 1_000) {
+    await diagnostics.record('skill.output.rejected', {
+      bytes: output.length, code: 'DIRECT_SKILL_OUTPUT_INVALID',
+    }, 'error')
     throw Object.assign(new Error('文档 Agent 生成的 DOCX 为空或不完整'), {
       code: 'DIRECT_SKILL_OUTPUT_INVALID',
     })
   }
+  if (profile.taskType === 'due_diligence_report') {
+    try {
+      const validation = await assertDueDiligenceValidationEvidence({ workspace, outputPath })
+      await diagnostics.record('skill.output.validation_accepted', {
+        reportPath: path.relative(workspace, validation.reportPath),
+        status: validation.status,
+      })
+    } catch (error) {
+      await diagnostics.record('skill.output.validation_rejected', {
+        ...directSkillErrorSummary(error), code: (error as { code?: string }).code,
+      }, 'error')
+      throw error
+    }
+  }
   const represented = [...new Set(input.requiredProjectFiles.map((file) => file.sourceName))]
+  await diagnostics.record('skill.output.accepted', { fileName: outputFileName, bytes: output.length })
   await input.onProgress?.({ stage: 'Agent 已按当前 Skill 完成生成与审阅', progress: 96 })
   return {
     outputPath,

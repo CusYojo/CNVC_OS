@@ -292,6 +292,11 @@ export async function resolveAiModelRoute(profileKey: AiModelProfileKey, role?: 
   return await runtimeCandidate(await aiConfigurationRepository.findDefaultEnabledModelId(), role)
 }
 
+export async function resolveAiModelFallbackRoute(profileKey: AiModelProfileKey, role?: string) {
+  const route = await aiConfigurationRepository.findEnabledRoute(profileKey)
+  return runtimeCandidate(route?.fallbackModelId, role)
+}
+
 export async function resolveAiModelByKey(modelKey: string, role?: string) {
   const ids = await aiConfigurationRepository.findEnabledModelIdsByKey(modelKey, 2)
   if (ids.length !== 1) return null

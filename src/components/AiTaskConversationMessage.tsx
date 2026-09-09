@@ -1,4 +1,6 @@
 import { useState } from 'react'
+import { ComplianceSupplementPanel } from './ComplianceSupplementPanel'
+import type { ComplianceSupplementChoice } from '../../server/src/contracts/complianceSupplementContract'
 import {
   AlertCircle,
   Bot,
@@ -81,7 +83,7 @@ export function AiTaskConversationMessage({
   task: AiTask
   mutating: boolean
   onCancel: (task: AiTask) => Promise<void>
-  onRetry: (task: AiTask) => Promise<void>
+  onRetry: (task: AiTask, choice?: ComplianceSupplementChoice) => Promise<void>
   onNotify?: (message: string, kind: 'success' | 'error' | 'info') => void
 }) {
   const [downloadingId, setDownloadingId] = useState<string | null>(null)
@@ -207,6 +209,9 @@ export function AiTaskConversationMessage({
           </div>
         )}
 
+        {task.status === 'failed' && task.complianceSupplement && <ComplianceSupplementPanel
+          snapshot={task.complianceSupplement} submitting={mutating}
+          onSubmit={choice => onRetry(task, choice)} />}
         <div className="flex flex-wrap gap-2 pt-1">
           {active && (
             <button
@@ -219,7 +224,7 @@ export function AiTaskConversationMessage({
               {task.cancellationRequested ? '正在取消…' : '停止生成'}
             </button>
           )}
-          {task.status === 'failed' && task.retryable !== false && (
+          {task.status === 'failed' && task.retryable !== false && !task.complianceSupplement && (
             <button
               type="button"
               disabled={mutating}

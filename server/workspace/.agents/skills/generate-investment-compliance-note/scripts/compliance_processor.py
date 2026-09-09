@@ -564,7 +564,7 @@ Create a Chinese investment-compliance note from the evidence in `{workdir}`.
 Read `source_manifest.json` and relevant packet files, build a conflict-aware fact ledger, then author `content.json` using the skill's content schema.
 Use the retained standard only for structure and fund facts explicitly identified as such; never carry over the template project facts.
 Required sections: {'、'.join(REQUIRED_SECTIONS)}. The final compliance analysis must contain all seven standard checks and a conditional conclusion.
-Before drafting, check for missing fund clauses, transaction terms, return-investment/concentration data, related-party materials, and material company evidence. If decisive inputs are missing, ask the user for them in a blocking final response, set `delivery_readiness.status: awaiting_user_input`, record `supplement_request.outcome: awaiting_response`, and stop the turn before authoring `content.json` or building a DOCX. Resume only after the user supplies the inputs or explicitly instructs you to continue with the available materials. For the latter, use `status: proceed_with_available_materials` and record `continuation_authorization` with `authorized: true`, `basis: explicit_user_instruction`, and the user's instruction; keep the gaps in `open_issues` and generate the same standard DOCX without an internal-preview label. User silence is not authorization. Never invent a clause, amount, ratio, calculation, or completed review. Use `status: blocked` only for an unresolved material conflict, known prohibited/non-compliant condition, or contradictory supplied data.
+Before drafting, check for missing fund clauses, transaction terms, return-investment/concentration data, related-party materials, and material company evidence. Report specific gaps and use `awaiting_user_input` until evidence is supplied or the user explicitly authorizes continuing with the disclosed gaps. For explicit continuation use `proceed_with_available_materials`, record the actual supplement outcome and current-task authorization, and preserve material limitations in the document. Silence or refusing supplements alone is not authorization. Never present pending matters as verified compliance. Use `ready` only after required evidence and checks are complete. Use `blocked` for unresolved material conflicts, known prohibited/non-compliant conditions or contradictory supplied data; consent cannot override these. Never invent a clause, amount, ratio, calculation, authorization or completed review.
 Keep 公司简介 business-first: after the verified full legal-name opening, cover formation/incubation background, business positioning, products and technology, target customers, operating stage, organization and broad commercial status. Do not put the legal representative, registered/paid-in/subscribed capital, licence identifiers or other routine registry fields in visible 公司简介; retain them in the audit layer and use them elsewhere only when they directly affect a compliance issue. Move revenue-recognition, invoicing/acceptance timing, cut-off, audit-adjustment, collection, tax, and other financial due-diligence issues to notes/open_issues or closing conditions. Do not put exact revenue, profit, margin, receivables, or cash-flow figures in 公司简介 unless the user explicitly requested that disclosure and the figures are supported by audited or special-audit evidence with no material conflict; record that exception in `company_profile_financial_disclosure`. Stage-level wording such as “已形成初步商业化收入” is permitted when supported.
 Record the target's verified full legal name in `target_company.legal_name` and begin the first 公司简介 paragraph with that exact name. After the opening identification, use 公司/标的公司 for the target. In 公司情况介绍、投资理由 and 投资计划, state facts directly. Do not expose attachment filenames, dates/versions, paths, or acquisition-process wording; keep them in source_ids, notes and the fact ledger. Use 我方 for the internal investment side, 本基金 for a determined fund, 指定基金主体 for an undetermined vehicle, and 管理人/基金管理人 only when the legal role matters. The full issuer name in `closing.company` is allowed only in the closing signature and must not appear in any visible section.
 For every 核心团队 member paragraph, populate `role_title` and `person_name`, then begin the visible text with their exact concatenation in the order `role_title + person_name`. Write the company role/title first and the person's name second, followed by education or professional training, representative employers/projects/research results, professional direction, and a documented current company responsibility when available. Do not use a name-first lead. Do not append an inferred statement about how the person can help, support, connect, strengthen or match the company/project; put any collective team-investment thesis once in 投资理由 instead. Objective wording such as `主要负责公司机器人系统、控制及数采硬件平台` is allowed; evaluative wording such as `其能力可支持公司规模化交付` or `其背景与公司产品路线具有直接对应关系` is not. Examples: `公司联合创始人、CTO刘航欣，……` and `公司拟任首席科学家Abdulmotaleb El Saddik，……`. Do not reproduce promotional hyperbole merely because it appears in a reference sample.
@@ -822,7 +822,27 @@ def analysis_process_language_hits(text: str) -> list[str]:
     return sorted(set(hits))
 
 
+def reason_qualification_findings(reasons: list[dict[str, Any]]) -> dict[str, Any]:
+    """A qualification is not evidence of invalid content; never strip it."""
+    hits = []
+    for index, block in enumerate(reasons, start=1):
+        phrases = [phrase for phrase in REASON_DEFENSIVE_PHRASES if phrase in block.get("text", "")]
+        if phrases:
+            hits.append({"item": index, "phrases": phrases})
+    return {
+        "errors": [],
+        "warnings": [f"review investment-reason qualifications against evidence; preserve supported limitations: {hits}"] if hits else [],
+        "hits": hits,
+    }
+
+
 def decision_semantic_findings(content: dict[str, Any]) -> dict[str, Any]:
+    readiness = content.get("delivery_readiness", {})
+    limited = (
+        isinstance(readiness, dict)
+        and readiness.get("status") == "proceed_with_available_materials"
+        and delivery_readiness_findings(content)["status"] == "pass"
+    )
     sections = {
         section.get("heading"): section
         for section in content.get("sections", [])
@@ -839,6 +859,10 @@ def decision_semantic_findings(content: dict[str, Any]) -> dict[str, Any]:
         process_language = analysis_process_language_hits(text)
         role_name, role_markers = ANALYSIS_ROLE_RULES[index - 1]
         role_hits = [marker for marker in role_markers if marker in text]
+        # Pending blocks must disclose uncertainty, not manufacture a positive
+        # finding to satisfy the ordinary ready-document wording check.
+        limited_pending = limited and block.get("status") == "pending"
+        pending_pass = bool(indecisive or process_language) and not assertions and bool(role_hits)
         item_results.append({
             "item": index,
             "lead": lead,
@@ -848,7 +872,8 @@ def decision_semantic_findings(content: dict[str, Any]) -> dict[str, Any]:
             "required_role": role_name,
             "role_markers": role_hits,
             "role_pass": bool(role_hits),
-            "pass": bool(assertions) and not indecisive and not process_language,
+            "limited_pending": limited_pending,
+            "pass": pending_pass if limited_pending else bool(assertions) and not indecisive and not process_language,
         })
 
     conclusions = [block for block in analysis_blocks if block.get("type") == "conclusion"]
@@ -856,18 +881,24 @@ def decision_semantic_findings(content: dict[str, Any]) -> dict[str, Any]:
     conclusion_forbidden = [
         marker for marker in CONCLUSION_FORBIDDEN_MARKERS if marker in conclusion_text
     ]
+    if limited:
+        # A conditional conclusion may disclose outstanding confirmation, but
+        # still cannot assert that pending checks are already complete.
+        conclusion_forbidden = [marker for marker in conclusion_forbidden if marker != "待确认"]
+        conclusion_forbidden.extend(marker for marker in ("已全部核验", "已确认全部合规", "无条件符合") if marker in conclusion_text)
     has_condition = "前提下" in conclusion_text or "条件下" in conclusion_text
     conclusion_pass = (
         len(conclusions) == 1
         and CONCLUSION_REQUIRED_MARKER in conclusion_text
         and has_condition
         and not conclusion_forbidden
+        and (not limited or any(marker in conclusion_text for marker in ("尚待确认", "待核验", "仍需核验")))
     )
     return {
         "items": item_results,
         "invalid_items": [result for result in item_results if not result["pass"]],
         "invalid_process_items": [
-            result for result in item_results if result["process_language"]
+            result for result in item_results if result["process_language"] and not (result["limited_pending"] and result["pass"])
         ],
         "invalid_roles": [result for result in item_results if not result["role_pass"]],
         "conclusion_text": conclusion_text,
@@ -1243,10 +1274,15 @@ def content_completeness_findings(content: dict[str, Any]) -> dict[str, Any]:
         if block.get("type") == "numbered"
     ]
     analysis_process_hits: list[dict[str, Any]] = []
+    # Use the same authorization and per-item semantics as the decision gate.
+    # Consent does not excuse positive claims disguised as pending findings.
+    semantic_items = decision_semantic_findings(content)["items"]
     for index, block in enumerate(analysis_blocks[:7], start=1):
         text = block.get("text", "")
         markers = analysis_process_language_hits(text)
-        if markers:
+        semantic = semantic_items[index - 1] if index <= len(semantic_items) else {}
+        authorized_pending = semantic.get("limited_pending") and semantic.get("pass")
+        if markers and not authorized_pending:
             analysis_process_hits.append({
                 "item": index,
                 "markers": markers,
@@ -1353,7 +1389,7 @@ def visible_source_narration_markers(text: str) -> list[str]:
 
 
 def delivery_readiness_findings(content: dict[str, Any]) -> dict[str, Any]:
-    """Require a user decision before an incomplete evidence packet can proceed."""
+    """Allow disclosed evidence gaps only with explicit continuation consent."""
     readiness = content.get("delivery_readiness")
     errors: list[str] = []
     warnings: list[str] = []
@@ -1403,7 +1439,9 @@ def delivery_readiness_findings(content: dict[str, Any]) -> dict[str, Any]:
         errors.append("delivery_readiness.missing_decisive_inputs must be an array")
         missing_inputs = []
     elif missing_inputs:
-        warnings.append(f"supplemental inputs were not provided: {missing_inputs}")
+        (warnings if declared_status == "proceed_with_available_materials" else errors).append(
+            f"missing decisive inputs prevent unqualified delivery: {missing_inputs}"
+        )
 
     supplement = readiness.get("supplement_request")
     if not isinstance(supplement, dict):
@@ -1473,7 +1511,7 @@ def delivery_readiness_findings(content: dict[str, Any]) -> dict[str, Any]:
         if not missing_inputs:
             errors.append(f"{declared_status} requires non-empty missing_decisive_inputs")
 
-    strict = declared_status == "ready"
+    strict = declared_status != "proceed_with_available_materials"
 
     def add_gap(message: str) -> None:
         (errors if strict else warnings).append(message)
@@ -1579,6 +1617,10 @@ def delivery_readiness_findings(content: dict[str, Any]) -> dict[str, Any]:
                 existing = calculation.get("existing_aggregated_exposure")
                 proposed = calculation.get("proposed_amount")
                 headroom = calculation.get("headroom")
+                if _is_number(post_ratio) and _is_number(limit_ratio) and post_ratio > limit_ratio:
+                    component_errors.append("post_investment_ratio exceeds the applicable concentration limit")
+                if _is_number(headroom) and headroom < 0:
+                    component_errors.append("negative concentration headroom is a material limit breach")
                 if all(_is_number(value) for value in (denominator, existing, proposed, post_ratio)) and denominator > 0:
                     expected_ratio = (existing + proposed) / denominator
                     if abs(post_ratio - expected_ratio) > 1e-6:
@@ -1668,19 +1710,23 @@ def validate_content(content: dict[str, Any]) -> list[str]:
         errors.append("public_verification binding is required")
     else:
         mode = public.get("mode")
-        if mode not in {"online", "online_limited", "offline_user_requested"}:
+        if mode not in {"online", "online_limited", "offline_user_requested", "not_performed"}:
             errors.append("public_verification.mode is invalid")
-        if not isinstance(public.get("record"), str) or not public.get("record"):
+        if mode != "not_performed" and (not isinstance(public.get("record"), str) or not public.get("record")):
             errors.append("public_verification.record is required")
         if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(public.get("as_of_date", ""))):
             errors.append("public_verification.as_of_date must be YYYY-MM-DD")
-        if not re.fullmatch(r"[0-9a-f]{64}", str(public.get("sha256", ""))):
+        if mode != "not_performed" and not re.fullmatch(r"[0-9a-f]{64}", str(public.get("sha256", ""))):
             errors.append("public_verification.sha256 must be a lowercase SHA-256")
-        if public.get("validation_status") != "pass":
+        if mode == "not_performed" and public.get("validation_status") != "not_performed":
+            errors.append("not_performed public verification must use validation_status=not_performed")
+        elif mode != "not_performed" and public.get("validation_status") != "pass":
             errors.append("public_verification.validation_status must be pass")
         coverage = public.get("coverage_status")
-        if coverage not in {"complete", "limited", "offline"}:
+        if coverage not in {"complete", "limited", "offline", "not_verified"}:
             errors.append("public_verification.coverage_status is invalid")
+        if mode == "not_performed" and coverage != "not_verified":
+            errors.append("not_performed public verification must use coverage_status=not_verified")
         if mode == "offline_user_requested" and coverage != "offline":
             errors.append("offline public verification must use coverage_status=offline")
         if mode != "offline_user_requested" and coverage == "offline":
@@ -1689,24 +1735,29 @@ def validate_content(content: dict[str, Any]) -> list[str]:
             "no_material_public_conflict_found", "conditions_added", "not_verified",
         }:
             errors.append("public_verification.decision_impact is invalid")
+        if mode == "not_performed":
+            readiness = content.get("delivery_readiness", {})
+            if public.get("decision_impact") != "not_verified":
+                errors.append("not_performed public verification must use decision_impact=not_verified")
+            if not isinstance(readiness, dict) or readiness.get("status") != "proceed_with_available_materials":
+                errors.append("not_performed public verification requires authorized limited delivery")
     analysis = next((s for s in sections if s.get("heading") == "投资情形分析"), None)
     if analysis:
         item_count = sum(b.get("type") == "numbered" for b in analysis.get("blocks", []))
-        if item_count < 7:
-            errors.append(f"投资情形分析 requires at least 7 numbered checks; got {item_count}")
+        if item_count != 7:
+            errors.append(f"投资情形分析 requires exactly 7 numbered checks; got {item_count}")
         if item_count >= 7:
             semantic = decision_semantic_findings(content)
             if semantic["invalid_items"]:
                 errors.append(
-                    "seven compliance checks must begin with an explicit affirmative judgment "
-                    "and must not use indecisive leads or audit-process language: "
+                    "compliance checks must match readiness: verified checks require supported judgments; "
+                    "authorized pending checks require explicit limitations, not unqualified assertions: "
                     f"{semantic['invalid_items']}"
                 )
             if semantic["invalid_process_items"]:
                 errors.append(
-                    "investment-scenario visible prose must not narrate unfinished review, "
-                    "missing inputs, calculation requests, or refusal to conclude; move those "
-                    f"tasks to the audit layer: {semantic['invalid_process_items']}"
+                    "unfinished-review prose is allowed only for authorized pending checks with "
+                    f"explicit limitations: {semantic['invalid_process_items']}"
                 )
             if semantic["invalid_roles"]:
                 errors.append(
@@ -1735,6 +1786,8 @@ def validate_public_binding(
     if not isinstance(public, dict):
         return [], {}
     record_value = public.get("record")
+    if public.get("mode") == "not_performed":
+        return [], {"binding_status": "not_performed"}
     if not isinstance(record_value, str) or not record_value:
         return [], {}
     record_path = Path(record_value).expanduser()
@@ -1817,9 +1870,11 @@ def build_command(args: argparse.Namespace) -> int:
         ex_conclusion = find_paragraph(paragraphs, startswith="综上，")
         ex_closing_company = find_paragraph(paragraphs, exact="浙江赛智伯乐股权投资管理有限公司")
         ex_closing_date = find_paragraph(paragraphs, startswith="2026年")
-        ex_blank = next((p for p in paragraphs if not paragraph_text(p).strip()), None)
-        if ex_blank is None:
-            raise SystemExit("Template transition paragraph not found")
+        # Some valid authority-template revisions contain no literal empty
+        # paragraph. A cleared body exemplar is a safe transition paragraph:
+        # clone_blank_paragraph preserves paragraph formatting and removes all
+        # runs, so no sample text can leak into the generated document.
+        ex_blank = next((p for p in paragraphs if not paragraph_text(p).strip()), ex_body)
         sectpr = body.find("w:sectPr", NS)
         if sectpr is None:
             raise SystemExit("Template section properties not found")
@@ -2015,14 +2070,9 @@ def verify_command(args: argparse.Namespace) -> int:
 
     sections_by_heading = {s.get("heading"): s for s in content.get("sections", [])}
     reason_blocks = sections_by_heading.get("投资理由", {}).get("blocks", [])
-    reason_hits: list[dict[str, Any]] = []
-    for index, block in enumerate(reason_blocks, start=1):
-        text = block.get("text", "")
-        hits = [phrase for phrase in REASON_DEFENSIVE_PHRASES if phrase in text]
-        if hits:
-            reason_hits.append({"item": index, "phrases": hits})
-    if reason_hits:
-        errors.append(f"investment reasons contain defensive tails: {reason_hits}")
+    qualifications = reason_qualification_findings(reason_blocks)
+    reason_hits = qualifications["hits"]
+    warnings.extend(qualifications["warnings"])
 
     defensive_counts = {phrase: visible.count(phrase) for phrase in DEFENSIVE_PHRASES}
     repeated_defensive = {phrase: count for phrase, count in defensive_counts.items() if count > 1}
@@ -2225,9 +2275,25 @@ def verify_command(args: argparse.Namespace) -> int:
     return 0 if qa["pass"] else 2
 
 
+def review_readiness_command(args: argparse.Namespace) -> int:
+    """Review a candidate without building or asserting a deliverable exists."""
+    content = json.loads(Path(args.content).read_text(encoding="utf-8"))
+    if not isinstance(content, dict):
+        raise ValueError("content must be an object")
+    result = delivery_readiness_findings(content)
+    write_json(Path(args.out), result)
+    # Successful execution returns the review, which may itself fail. No DOCX.
+    print(json.dumps(result, ensure_ascii=False))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
+    readiness = sub.add_parser("review-readiness", help="review readiness without creating a document")
+    readiness.add_argument("--content", required=True)
+    readiness.add_argument("--out", required=True)
+    readiness.set_defaults(func=review_readiness_command)
     prepare = sub.add_parser("prepare", help="extract and index a ZIP/directory")
     prepare.add_argument("input")
     prepare.add_argument("--workdir", required=True)

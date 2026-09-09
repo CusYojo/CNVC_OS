@@ -854,6 +854,7 @@ ${dueDiligencePackageContract(input.desiredMode)}`
 async function resolvePython() {
   const candidates = [
     process.env.AI_DD_SKILL_PYTHON,
+    path.resolve(process.cwd(), 'server', '.venv', 'Scripts', 'python.exe'),
     path.resolve(process.cwd(), 'server', '.venv', 'bin', 'python3'),
     'python3',
   ].filter((value): value is string => Boolean(value))

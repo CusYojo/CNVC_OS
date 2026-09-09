@@ -130,6 +130,7 @@ async function validateSkillTemplateRender(filePath: string) {
 async function resolvePython() {
   const candidates = [
     process.env.AI_INVESTMENT_PROPOSAL_PYTHON,
+    path.resolve(process.cwd(), 'server', '.venv', 'Scripts', 'python.exe'),
     path.resolve(process.cwd(), 'server', '.venv', 'bin', 'python'),
     'python3',
   ].filter((value): value is string => Boolean(value))

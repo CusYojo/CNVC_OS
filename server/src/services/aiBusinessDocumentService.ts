@@ -43,6 +43,8 @@ import {
 import { sanitizeClientVisibleEvidenceWording } from './aiClientVisibleTextService.js'
 import { generateInvestmentProposalDocx } from './aiInvestmentProposalDocumentService.js'
 import { renderComplianceStatementWithSkill } from './aiDocumentSkillRenderService.js'
+import type { finalizeComplianceReadiness } from './complianceReadinessContract.js'
+import { supportedComplianceLegalName } from './complianceLegalName.js'
 import { generateInvestmentRecommendationPptWithGorden } from './aiGordenSuperPptService.js'
 import { formatShanghaiDate } from '../utils/shanghaiTime.js'
 
@@ -634,6 +636,7 @@ async function generateCustomTemplateDocx(input: {
 }
 
 export async function generateBusinessDocx(input: {
+  complianceReadiness?: ReturnType<typeof finalizeComplianceReadiness>
   outputPath: string
   template: AiTemplateDefinition
   project: ProjectLike
@@ -682,6 +685,8 @@ export async function generateBusinessDocx(input: {
     return renderComplianceStatementWithSkill({
       outputPath: input.outputPath,
       taskProjectName: input.project.name,
+      deliveryReadiness: input.complianceReadiness,
+      targetCompanyLegalName: supportedComplianceLegalName(input.project.companyName || input.project.name, input.sources),
       content: input.content,
       sources: input.sources,
       company: complianceBlueprint.fixedContent.issuer,

@@ -5,6 +5,7 @@ import path from 'node:path'
 import { getAiSkillDirectory, loadAiSkill } from '../services/aiSkillService.js'
 import { runDirectInvestmentProposalAgent } from '../services/aiDirectInvestmentProposalAgentService.js'
 import { classifyDirectSkillAgentFailure } from '../services/aiDirectSkillAgentRecovery.js'
+import { writeAcceptancePdf } from '../../tests/helpers/acceptancePdf.js'
 
 const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'direct-proposal-agent-'))
 
@@ -71,6 +72,7 @@ try {
           path.join(getAiSkillDirectory('draft-investment-proposal'), 'assets', 'primary-layout-authority.docx'),
           outputPath,
         )
+        await writeAcceptancePdf(outputPath.replace(/\.docx$/, '.pdf'))
         yield {
           type: 'assistant',
           message: {
@@ -98,7 +100,10 @@ try {
   assert.deepEqual(options.skills, ['draft-investment-proposal'])
   assert.deepEqual(options.settingSources, ['project'])
   assert.equal((options.sandbox as { enabled?: boolean }).enabled, true)
-  assert.equal((options.sandbox as { failIfUnavailable?: boolean }).failIfUnavailable, true)
+  assert.equal(
+    (options.sandbox as { failIfUnavailable?: boolean }).failIfUnavailable,
+    process.platform !== 'win32',
+  )
   assert.ok((options.tools as string[]).includes('Skill'))
   assert.ok((options.tools as string[]).includes('Read'))
   assert.ok((options.tools as string[]).includes('Write'))
@@ -203,6 +208,7 @@ try {
           path.join(getAiSkillDirectory('draft-investment-proposal'), 'assets', 'primary-layout-authority.docx'),
           path.join(recoveryWorkspace, 'output', '恢复科技_投资提案.docx'),
         )
+        await writeAcceptancePdf(path.join(recoveryWorkspace, 'output', '恢复科技_投资提案.pdf'))
         yield {
           type: 'assistant',
           message: { content: [
@@ -274,6 +280,7 @@ try {
           path.join(getAiSkillDirectory('draft-investment-proposal'), 'assets', 'primary-layout-authority.docx'),
           path.join(String(options.cwd), 'output', '任务级恢复科技_投资提案.docx'),
         )
+        await writeAcceptancePdf(path.join(String(options.cwd), 'output', '任务级恢复科技_投资提案.pdf'))
         yield {
           type: 'assistant',
           message: { content: [
@@ -295,6 +302,21 @@ try {
   assert.match(taskLevelPrompt, /工作区中的资料、Manifest、事实台账、草稿、Reviewer 结果和渲染文件均被原样保留/)
   assert.ok((await stat(taskLevelMarker)).isFile())
   assert.ok((await stat(taskLevelRecovered.outputPath)).size > 1_000)
+  assert.ok(taskLevelRecovered.pdfPath)
+  let closed = false
+  await assert.rejects(runDirectInvestmentProposalAgent({
+    taskDirectory: path.join(temporaryRoot, 'silent-sdk'),
+    project: { id: 'offline', name: '离线取消测试' },
+    sources: [], requiredProjectFiles: [], skill, sourceCutoffDate: '2026-09-07',
+    instructions: '', userRole: 'admin', shouldCancel: async () => true,
+  }, {
+    runtimeConfig: { baseUrl: 'https://model.example.com', apiKey: 'unused', model: 'offline', maxTurns: 2, maxBudgetUsd: 1, timeoutMs: 10_000 },
+    queryFactory: () => ({
+      [Symbol.asyncIterator]() { return { next: () => new Promise(() => {}) } },
+      close() { closed = true },
+    }),
+  }), { code: 'AI_TASK_CANCELLED' })
+  assert.equal(closed, true)
   console.log('direct investment proposal Skill Agent acceptance passed')
 } finally {
   await rm(temporaryRoot, { recursive: true, force: true })

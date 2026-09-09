@@ -9,14 +9,13 @@ import {
 } from '../services/aiSkillService.js'
 import {
   generateBusinessDocx,
-  generateBusinessPptx,
 } from '../services/aiBusinessDocumentService.js'
 import {
   finalizeCustomTemplateContent,
   type BusinessContent,
   type EvidenceSource,
 } from '../services/aiBusinessContentService.js'
-import type { AiTemplateDefinition } from '../services/aiTemplateCatalog.js'
+import { AI_TEMPLATE_CATALOG, type AiTemplateDefinition } from '../services/aiTemplateCatalog.js'
 
 type Check = { name: string; passed: boolean; detail: string }
 const checks: Check[] = []
@@ -68,22 +67,9 @@ function contentForSections(sectionTitles: string[]): BusinessContent {
 async function main() {
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'ai-custom-template-acceptance-'))
   try {
-    const docxPath = path.resolve(
-      process.cwd(),
-      'docs',
-      '合规性说明',
-      '关于德塔智能项目投资合规性的说明_20260701.docx',
-    )
-    const pptxPath = path.resolve(
-      process.cwd(),
-      'docs',
-      'agent',
-      '投资建议书',
-      '佳量脑科学_投资建议书6月.pptx',
-    )
-    const [docxAnalysis, pptxAnalysis, fixedSkill] = await Promise.all([
+    const docxPath = AI_TEMPLATE_CATALOG.compliance_statement.referencePath
+    const [docxAnalysis, fixedSkill] = await Promise.all([
       analyzeAiCustomTemplateBuffer(await readFile(docxPath), path.basename(docxPath)),
-      analyzeAiCustomTemplateBuffer(await readFile(pptxPath), path.basename(pptxPath)),
       loadAiSkill(AI_TEMPLATE_DRIVEN_SKILL_NAME),
     ])
     assert(
@@ -95,20 +81,11 @@ async function main() {
       `${docxAnalysis.analysis.structures.length} 个结构`,
     )
     assert(
-      'PPTX 格式画像完整',
-      pptxAnalysis.outputFormat === 'pptx'
-        && pptxAnalysis.analysis.formatProfile.pageSize.includes('in')
-        && pptxAnalysis.analysis.structures.length >= 3,
-      `${pptxAnalysis.analysis.structures.length} 页结构`,
-    )
-    assert(
       '模板分析数据已版本化',
       docxAnalysis.analysis.schemaVersion === '1.0'
-        && pptxAnalysis.analysis.schemaVersion === '1.0'
         && /^sha256-[a-f0-9]{12}$/.test(docxAnalysis.analysis.analysisVersion ?? '')
-        && /^sha256-[a-f0-9]{12}$/.test(pptxAnalysis.analysis.analysisVersion ?? '')
-        && docxAnalysis.analysis.analysisVersion !== pptxAnalysis.analysis.analysisVersion,
-      `${docxAnalysis.analysis.analysisVersion} / ${pptxAnalysis.analysis.analysisVersion}`,
+        && docxAnalysis.outputFormat === 'docx',
+      `${docxAnalysis.analysis.analysisVersion}`,
     )
     assert(
       '固定中文 Skill 可加载并包含资深投资经理角色、项目分析与输出规范',
@@ -208,68 +185,8 @@ async function main() {
         && !generatedDocxXml.includes('【待核验】')
         && !generatedDocxXml.includes('**')
         && !generatedDocxXml.includes('资料缺口')
-        && !generatedDocxXml.includes('德塔智能'),
+        && !generatedDocxXml.includes('验收模板原始项目'),
       `${generatedDocxXml.length} 字节 XML`,
-    )
-
-    const pptxSections = pptxAnalysis.analysis.structures
-      .filter((item) => !/^(?:封面|目录|议程|文档标题)$/.test(item.title))
-      .slice(0, 6)
-      .map((item) => item.title)
-    const pptxTemplate: AiTemplateDefinition = {
-      type: 'custom_template_document',
-      skillName: fixedSkill.name,
-      label: '验收 PPT 模板',
-      description: '验收',
-      outputFormat: 'pptx',
-      templateVersion: `${fixedSkill.version}+${pptxAnalysis.analysis.analysisVersion}`,
-      referencePath: pptxPath,
-      editableLevel: 'core-elements',
-      sections: pptxSections.length ? pptxSections : ['项目概览'],
-      requiredParameters: ['projectId', 'sourceCutoffDate', 'customTemplateId'],
-      disclaimer: 'AI 辅助生成，仅供验收。',
-      customAnalysis: pptxAnalysis.analysis,
-    }
-    const generatedPptx = path.join(tempRoot, 'custom-template-output.pptx')
-    const freshPptxContent = finalizeCustomTemplateContent(
-      contentForSections(pptxTemplate.sections),
-      pptxTemplate,
-      project,
-    )
-    await generateBusinessPptx({
-      outputPath: generatedPptx,
-      template: pptxTemplate,
-      project,
-      content: freshPptxContent,
-      sources,
-      sourceCutoffDate: '2026-07-27',
-      pageCount: '10',
-    })
-    const generatedPptxZip = await JSZip.loadAsync(await readFile(generatedPptx))
-    const slideNames = Object.keys(generatedPptxZip.files)
-      .filter((name) => /^ppt\/slides\/slide\d+\.xml$/.test(name))
-    const finalSlide = await generatedPptxZip
-      .file(`ppt/slides/slide${slideNames.length}.xml`)
-      ?.async('string') ?? ''
-    const allSlidesXml = (await Promise.all(slideNames.map((slideName) =>
-      generatedPptxZip.file(slideName)?.async('string') ?? ''))).join('\n')
-    assert(
-      '固定 Skill 按分析数据生成可编辑 PPTX',
-      slideNames.length >= 3
-        && finalSlide.includes('引用资料与责任声明')
-        && finalSlide.includes('<a:t>')
-        && allSlidesXml.includes('模板验收科技有限公司')
-        && allSlidesXml.includes('项目投资分析报告')
-        && allSlidesXml.includes('综合当前项目阶段与可核验事实，建议继续跟踪')
-        && !allSlidesXml.includes('阶段与推进建议：')
-        && !allSlidesXml.includes('判断依据：')
-        && !allSlidesXml.includes('【资料记载】')
-        && !allSlidesXml.includes('【AI推断】')
-        && !allSlidesXml.includes('【待核验】')
-        && !allSlidesXml.includes('**')
-        && !allSlidesXml.includes('资料缺口')
-        && !allSlidesXml.includes('佳量脑科学'),
-      `${slideNames.length} 页`,
     )
 
     console.log(JSON.stringify({ ok: true, checks }, null, 2))

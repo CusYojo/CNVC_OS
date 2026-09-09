@@ -48,6 +48,6 @@
 - 不显示证据状态、来源路径、文件名、Manifest 或 Reviewer 信息。
 - Word 使用真实 Title、Heading1、Heading2、Heading3 样式、原生表格、PAGE 域和 `updateFields=true`。
 
-## 单产物
+## 成对交付
 
-只生成、登记并交付一份 DOCX。渲染图和 PDF 仅供内部验收，不交付。
+生成并交付同目录、同主文件名的一份 DOCX 和一份由最终冻结 DOCX 原生导出的 PDF，与 SKILL.md 的交付要求一致。渲染图片和校验日志只用于内部验收，不交付。两份文件均通过 Skill 门禁后才结束。

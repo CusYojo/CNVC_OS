@@ -79,7 +79,7 @@ export function shouldFallbackAiGatewayToChat(status: number) {
   return [400, 404, 405, 415, 422, 501].includes(status)
 }
 
-async function requestAiGatewayCompletion(input: {
+export async function requestAiGatewayCompletion(input: {
   baseUrl: string
   apiKey?: string
   model: string

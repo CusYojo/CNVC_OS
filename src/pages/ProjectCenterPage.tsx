@@ -5,11 +5,13 @@ import type { ProjectClassification } from '../types'
 import type { ProjectListCounts } from '../services/projectListApi'
 import { ProjectsPage } from './ProjectsPage'
 import { SourcingPage } from './SourcingPage'
+import { LeadReviewPanel } from '../components/LeadReviewPanel'
 
-type ProjectCenterView = 'leads' | ProjectClassification
+type ProjectCenterView = 'leads' | 'reviews' | ProjectClassification
 
 const views: Array<{ id: ProjectCenterView; label: string; icon: typeof Inbox }> = [
   { id: 'leads', label: '线索池', icon: Inbox },
+  { id: 'reviews', label: '待复核', icon: Inbox },
   { id: 'pool', label: '项目池', icon: FolderKanban },
   { id: 'normal', label: '普通项目', icon: UsersRound },
   { id: 'key', label: '重点项目', icon: Star },
@@ -50,12 +52,12 @@ export function ProjectCenterPage() {
                 onClick={() => selectView(item.id)}
                 className={active ? 'active' : ''}
               >
-                {item.label}{item.id !== 'leads' && item.id !== 'pool' && <em>{classificationCounts[item.id]}</em>}
+                {item.label}{item.id !== 'leads' && item.id !== 'reviews' && item.id !== 'pool' && <em>{classificationCounts[item.id]}</em>}
               </button>
             )
           })}
         </div>
-      {view === 'leads' ? <SourcingPage /> : <ProjectsPage classification={view} embedded onCountsChange={setClassificationCounts} />}
+      {view === 'leads' ? <SourcingPage /> : view === 'reviews' ? <LeadReviewPanel /> : <ProjectsPage classification={view} embedded onCountsChange={setClassificationCounts} />}
     </div>
   )
 }

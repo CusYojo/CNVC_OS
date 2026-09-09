@@ -5,6 +5,11 @@ import { copyFile, cp, lstat, mkdir, readdir, readFile, realpath, rename, stat, 
 import path from 'node:path'
 import { and, asc, eq, inArray, lte, sql } from 'drizzle-orm'
 import JSZip from 'jszip'
+import { directSkillCompanionArtifact } from './directSkillCompanionArtifact.js'
+import { isAiArtifactDeliveryFormat } from './aiArtifactDeliveryPolicy.js'
+import { assertSameComplianceDecision, complianceSupplementSnapshot, decideComplianceSupplement, restoreComplianceSupplementDecision } from './complianceSupplementDecision.js'
+import type { ComplianceSupplementChoice, ComplianceSupplementSnapshot } from '../contracts/complianceSupplementContract.js'
+import { buildComplianceReadiness } from './aiComplianceReadinessService.js'
 import { db } from '../db/client.js'
 import {
   fileChunks,
@@ -1319,6 +1324,10 @@ async function executeTaskWithinUsage(taskId: string) {
     const task = await aiTaskRepository.findTaskById(taskId)
     if (!task || !isAiExecutableTaskType(task.type) || ['succeeded', 'cancelled'].includes(task.status)) return
     const parameters = (task.parameters ?? {}) as Record<string, unknown>
+    // Validate consent before network research or model work incurs any cost.
+    const complianceDecision = task.type === 'compliance_statement'
+      ? await readOwnedComplianceDecision(task)
+      : undefined
     const retrySourceTask = task.type === 'investment_recommendation_ppt' && task.retryOfTaskId
       ? await aiTaskRepository.findTaskById(task.retryOfTaskId)
       : null
@@ -1597,11 +1606,11 @@ async function executeTaskWithinUsage(taskId: string) {
       const completed = await aiTaskRepository.completeTaskWithArtifacts({
         taskId,
         leaseOwner: AI_TASK_WORKER_OWNER,
-        stage: 'DOCX 已生成',
+        stage: 'DOCX 与 PDF 已生成',
         resultSummary: directResult.session.resultText
-          || '文档 Agent 已直接执行 draft-investment-proposal Skill 并完成 DOCX。',
+          || '文档 Agent 已直接执行 draft-investment-proposal Skill 并完成 DOCX 与 PDF。',
         completedAt: new Date(),
-        artifacts: [artifact],
+        artifacts: [artifact, ...directSkillCompanionArtifact(artifact, directResult)],
         sources: sourceRecords,
       })
       if (!completed) {
@@ -1842,11 +1851,11 @@ async function executeTaskWithinUsage(taskId: string) {
       const completed = await aiTaskRepository.completeTaskWithArtifacts({
         taskId,
         leaseOwner: AI_TASK_WORKER_OWNER,
-        stage: 'DOCX 已生成',
+        stage: directResult.pdfPath ? 'DOCX 与 PDF 已生成' : 'DOCX 已生成',
         resultSummary: directResult.session.resultText
-          || `文档 Agent 已直接执行 ${skill.name} Skill 并完成 DOCX。`,
+          || `文档 Agent 已直接执行 ${skill.name} Skill 并完成交付文件。`,
         completedAt: new Date(),
-        artifacts: [artifact],
+        artifacts: [artifact, ...directSkillCompanionArtifact(artifact, directResult)],
         sources: sourceRecords,
       })
       if (!completed) {
@@ -2362,6 +2371,7 @@ async function executeTaskWithinUsage(taskId: string) {
     })
 
     let complianceWorkflow: ComplianceWorkflowResult | undefined
+    let complianceReadiness: Awaited<ReturnType<typeof buildComplianceReadiness>> | undefined
     let content: BusinessContent
     if (task.type === 'compliance_statement') {
       if (!complianceBlueprint) throw new Error('合规性说明缺少Document Blueprint')
@@ -2376,9 +2386,15 @@ async function executeTaskWithinUsage(taskId: string) {
         sourceCutoffDate,
         parameters,
         projectKnowledgeBrief,
-        programmaticBusinessAcceptance: false,
+        programmaticBusinessAcceptance: true,
+        complianceDecision,
       })
       content = complianceWorkflow.content
+      await updateStage(taskId, '校验合规证据、交易口径及测算', 36)
+      complianceReadiness = await buildComplianceReadiness({
+        workDirectory: path.join(taskDir, '.generate-investment-compliance-note-render'),
+        content, sources, sourceCutoffDate, decision: complianceDecision,
+      })
     } else {
     await updateStage(
       taskId,
@@ -2708,6 +2724,7 @@ async function executeTaskWithinUsage(taskId: string) {
           sourceCutoffDate,
           sources,
           blueprint: complianceBlueprint,
+          complianceReadiness,
         })
     let imageDeckArtifactVersion: number | undefined
     const publishImageDeck = async (imageDeck: {
@@ -3625,6 +3642,49 @@ export async function createAiTask(user: AiTaskUser, input: CreateAiTaskInput) {
   }
 }
 
+async function readOwnedComplianceDecision(task: AiTaskRecord) {
+  const decisionId = (task.parameters as Record<string, unknown> | null)?._complianceDecisionId
+  if (decisionId === undefined) return undefined
+  const unavailable = () => Object.assign(new Error('用户确认记录不可用，请刷新后重新确认'), {
+    status: 409, code: 'COMPLIANCE_DECISION_INVALID',
+  })
+  if (task.type !== 'compliance_statement' || !task.retryOfTaskId
+    || typeof decisionId !== 'string' || !/^[a-f0-9]{64}$/.test(decisionId)) throw unavailable()
+  const source = await getTaskRow(task.userId, task.retryOfTaskId)
+  if (!source || source.projectId !== task.projectId || source.type !== task.type) throw unavailable()
+  const snapshot = await readComplianceSupplementSnapshot(source)
+  if (!snapshot) throw unavailable()
+  const decisionPath = await authorizedArtifactPath(path.join(
+    ARTIFACT_ROOT, source.userId, source.projectId, source.id, '.compliance-decisions', `${decisionId}.json`,
+  ))
+  if (!decisionPath) throw unavailable()
+  let record: unknown
+  try {
+    if (decisionPath.size > 1024 * 1024) throw unavailable()
+    record = JSON.parse(await readFile(decisionPath.resolved, 'utf8'))
+  } catch { throw unavailable() }
+  return restoreComplianceSupplementDecision({ record, snapshot, actorId: task.userId })
+}
+
+async function readComplianceSupplementSnapshot(task: AiTaskRecord): Promise<ComplianceSupplementSnapshot | undefined> {
+  if (task.type !== 'compliance_statement' || task.status !== 'failed') return undefined
+  const file = await authorizedArtifactPath(path.join(ARTIFACT_ROOT, task.userId, task.projectId, task.id,
+    '.generate-investment-compliance-note-render', 'content.json'))
+  if (!file || file.size > 8 * 1024 * 1024) return undefined
+  try {
+    const payload = JSON.parse(await readFile(file.resolved, 'utf8')) as Record<string, unknown>
+    const readiness = payload.delivery_readiness as Record<string, unknown> | undefined
+    const strings = (value: unknown) => Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string' && Boolean(item.trim())) : []
+    const missingItems = strings(readiness?.missing_decisive_inputs ?? payload.open_issues)
+    if (!payload.public_verification) missingItems.push('公开信息核验记录尚未形成，不能视为已排除公开风险。')
+    if (!payload.target_company) missingItems.push('公司完整主体名称尚未完成结构化确认，请核对工商材料。')
+    return complianceSupplementSnapshot({ taskId: task.id, projectId: task.projectId,
+      missingItems, blockingIssues: strings(readiness?.blocking_issues) })
+  } catch {
+    return undefined
+  }
+}
+
 export async function getAiTask(userId: string, taskId: string) {
   let task = await getTaskRow(userId, taskId)
   if (!task) return undefined
@@ -3663,14 +3723,13 @@ export async function getAiTask(userId: string, taskId: string) {
       }]
     : storedEvents
   const passedArtifacts = artifacts.filter((artifact) => artifact.qualityStatus === 'passed')
-  const deliverables = task.type === 'investment_proposal'
-    ? passedArtifacts.filter((artifact) => artifact.format === 'docx')
-    : passedArtifacts
+  const deliverables = passedArtifacts.filter((artifact) => isAiArtifactDeliveryFormat(task.type, artifact.format))
   const deliverableIds = new Set(deliverables.map((artifact) => artifact.id))
   const manuallyResumableDirectSkillFailure = task.status === 'failed'
     && DIRECT_SKILL_AGENT_MANUALLY_RESUMABLE_ERROR_CODES.has(task.errorCode || '')
   return {
     ...task,
+    complianceSupplement: await readComplianceSupplementSnapshot(task),
     ...(manuallyResumableDirectSkillFailure ? { retryable: true } : {}),
     usage: task.modelCalls > 0 ? {
       modelCalls: task.modelCalls,
@@ -3712,7 +3771,7 @@ export async function cancelAiTask(user: AiTaskUser, taskId: string) {
   return getAiTask(user.uid, taskId)
 }
 
-export async function retryAiTask(user: AiTaskUser, taskId: string, idempotencyKey: string) {
+export async function retryAiTask(user: AiTaskUser, taskId: string, idempotencyKey: string, complianceChoice?: ComplianceSupplementChoice) {
   const task = await getTaskRow(user.uid, taskId)
   if (!task) return undefined
   if (!isAiExecutableTaskType(task.type)) throw new Error('不支持重试的任务类型')
@@ -3737,6 +3796,29 @@ export async function retryAiTask(user: AiTaskUser, taskId: string, idempotencyK
   const retryParameters: Record<string, unknown> = {
     ...(task.parameters as Record<string, unknown>),
     _resumeProgressFloor: Math.max(0, Math.min(99, Number(task.progress ?? 0))),
+  }
+  // Consent belongs to one reviewed source task, never to subsequent retries.
+  delete retryParameters._complianceDecisionId
+  // This choice is accepted only after the existing owned-task checks above.
+  const supplementSnapshot = await readComplianceSupplementSnapshot(task)
+  if (supplementSnapshot?.missingItems.length && !complianceChoice) {
+    throw Object.assign(new Error('请先补充信息，或明确同意按当前缺口继续生成'), { status: 409, code: 'COMPLIANCE_CHOICE_REQUIRED' })
+  }
+  if (complianceChoice) {
+    if (!supplementSnapshot) throw Object.assign(new Error('没有可确认的合规缺口，请刷新任务'), { status: 409, code: 'COMPLIANCE_REVIEW_UNAVAILABLE' })
+    const decision = decideComplianceSupplement({ snapshot: supplementSnapshot, choice: complianceChoice, actorId: user.uid, decidedAt: new Date() })
+    const decisionId = createHash('sha256').update(idempotencyKey).digest('hex')
+    const decisionDirectory = path.join(ARTIFACT_ROOT, task.userId, task.projectId, task.id, '.compliance-decisions')
+    await mkdir(decisionDirectory, { recursive: true, mode: 0o700 })
+    const decisionPath = path.join(decisionDirectory, `${decisionId}.json`)
+    await writeFile(decisionPath, JSON.stringify(decision), { encoding: 'utf8', mode: 0o600, flag: 'wx' }).catch(async (error) => {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+      assertSameComplianceDecision(JSON.parse(await readFile(decisionPath, 'utf8')), decision)
+    })
+    retryParameters._complianceDecisionId = decisionId
+    if (decision.action === 'supplement') {
+      retryParameters.userInstructions = [String(retryParameters.userInstructions ?? ''), decision.supplementText].filter(Boolean).join('\n').slice(-2000)
+    }
   }
   // 手动“继续生成”是一轮新的恢复流程，不能继承上一任务已经耗尽的自动恢复次数。
   delete retryParameters._systemDocumentRecoveryAttempt
@@ -3770,7 +3852,7 @@ export async function listAiArtifacts(userId: string, projectId?: string) {
   return rows
     .filter(({ artifact }) => readable.has(artifact.taskId))
     .filter(({ artifact, taskType }) =>
-      taskType !== 'investment_proposal' || artifact.format === 'docx')
+      isAiArtifactDeliveryFormat(taskType, artifact.format))
     .map(({ artifact }) => publicArtifact(artifact))
 }
 
@@ -3783,7 +3865,7 @@ export async function getArtifactDownload(userId: string, artifactId: string) {
   const artifact = row?.artifact
   if (!artifact || artifact.qualityStatus !== 'passed') return undefined
   if (!(await readableAiTaskIds(userId, [artifact.taskId])).has(artifact.taskId)) return undefined
-  if (row.taskType === 'investment_proposal' && artifact.format !== 'docx') return undefined
+  if (!isAiArtifactDeliveryFormat(row.taskType, artifact.format)) return undefined
   const file = await authorizedArtifactPath(artifact.storagePath)
   if (!file) return undefined
   return { artifact, stream: createReadStream(file.resolved), size: file.size }

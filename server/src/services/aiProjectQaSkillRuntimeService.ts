@@ -156,6 +156,7 @@ async function commandWorks(command: string, args: string[]) {
 async function resolvePython() {
   const candidates = [
     process.env.AI_QA_SKILL_PYTHON,
+    path.resolve(process.cwd(), 'server', '.venv', 'Scripts', 'python.exe'),
     path.resolve(process.cwd(), 'server', '.venv', 'bin', 'python'),
     path.resolve(process.cwd(), 'server', '.venv', 'bin', 'python3'),
     'python3',

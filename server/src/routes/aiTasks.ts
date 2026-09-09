@@ -474,8 +474,15 @@ aiTasksRouter.post('/tasks/:id/cancel', async (req: AuthedRequest, res, next) =>
 
 aiTasksRouter.post('/tasks/:id/retry', async (req: AuthedRequest, res, next) => {
   try {
-    const body = z.object({ idempotencyKey: z.string().trim().min(8).max(128) }).parse(req.body ?? {})
-    const task = await retryAiTask(userFrom(req), idSchema.parse(req.params.id), body.idempotencyKey)
+    const body = z.object({
+      idempotencyKey: z.string().trim().min(8).max(128),
+      complianceChoice: z.object({
+        action: z.enum(['supplement', 'continue_with_gaps']),
+        snapshotId: z.string().regex(/^[a-f0-9]{64}$/),
+        supplementText: z.string().trim().max(2000).optional(),
+      }).strict().optional(),
+    }).parse(req.body ?? {})
+    const task = await retryAiTask(userFrom(req), idSchema.parse(req.params.id), body.idempotencyKey, body.complianceChoice)
     if (!task) {
       res.status(404).json({ code: 'NOT_FOUND', message: '任务不存在', details: null })
       return

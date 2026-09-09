@@ -7,6 +7,7 @@ export type DirectSkillAgentGatewayRecoveryOptions = {
 export type DirectSkillAgentFailure = {
   code: string
   recoverableGateway403: boolean
+  recoverableQuota: boolean
 }
 
 function boundedInteger(value: unknown, fallback: number, minimum: number, maximum: number) {
@@ -48,19 +49,22 @@ export function classifyDirectSkillAgentFailure(
     return {
       code: 'DIRECT_SKILL_AGENT_QUOTA_EXHAUSTED',
       recoverableGateway403: false,
+      recoverableQuota: true,
     }
   }
   if (/Failed to authenticate|authentication failed|invalid api key|unauthorized|API Error:\s*401|Response code:\s*401|HTTP\s*401/i.test(message)) {
     return {
       code: 'DIRECT_SKILL_AGENT_AUTHENTICATION_FAILED',
       recoverableGateway403: false,
+      recoverableQuota: false,
     }
   }
   if (/API Error:\s*403|Response code:\s*403|HTTP\s*403|status(?:\s+code)?\s*[=:]?\s*403|403\s+Forbidden/i.test(message)) {
     return {
       code: 'DIRECT_SKILL_AGENT_UPSTREAM_FORBIDDEN',
       recoverableGateway403: true,
+      recoverableQuota: false,
     }
   }
-  return { code: fallbackCode, recoverableGateway403: false }
+  return { code: fallbackCode, recoverableGateway403: false, recoverableQuota: false }
 }

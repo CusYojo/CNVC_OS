@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+import { ComplianceSupplementPanel } from './ComplianceSupplementPanel'
+import type { ComplianceSupplementChoice, ComplianceSupplementSnapshot } from '../../server/src/contracts/complianceSupplementContract'
 import {
   Ban,
   CheckCircle2,
@@ -45,6 +47,7 @@ export type AiTaskSource = {
 }
 
 export type AiTask = {
+  complianceSupplement?: ComplianceSupplementSnapshot
   id: string
   clientOnly?: boolean
   projectId: string
@@ -192,7 +195,7 @@ function TaskCard({
   task: AiTask
   mutating: boolean
   onCancel: (task: AiTask) => Promise<void>
-  onRetry: (task: AiTask) => Promise<void>
+  onRetry: (task: AiTask, choice?: ComplianceSupplementChoice) => Promise<void>
   onNotify?: (message: string, kind: 'success' | 'error' | 'info') => void
 }) {
   const [downloadingId, setDownloadingId] = useState<string | null>(null)
@@ -376,6 +379,8 @@ function TaskCard({
         </div>
       )}
 
+      {!task.clientOnly && task.status === 'failed' && task.complianceSupplement && <ComplianceSupplementPanel
+        snapshot={task.complianceSupplement} submitting={Boolean(mutating)} onSubmit={choice => onRetry(task, choice)} />}
       {!task.clientOnly && (isActive || task.status === 'failed') && (
         <div className="mt-3 flex justify-end">
           {isActive && (
@@ -383,7 +388,7 @@ function TaskCard({
               <Square className="h-3 w-3" />{task.cancellationRequested ? '取消中…' : '取消任务'}
             </Button>
           )}
-          {task.status === 'failed' && !templatePreparationFailed && task.retryable !== false && (
+          {task.status === 'failed' && !task.complianceSupplement && !templatePreparationFailed && task.retryable !== false && (
             <Button size="sm" variant="secondary" loading={mutating} onClick={() => { void onRetry(task) }}>
               <RotateCcw className="h-3.5 w-3.5" />继续生成
             </Button>
@@ -406,7 +411,7 @@ export function AiTaskCards({
   loading?: boolean
   mutatingTaskId?: string | null
   onCancel: (task: AiTask) => Promise<void>
-  onRetry: (task: AiTask) => Promise<void>
+  onRetry: (task: AiTask, choice?: ComplianceSupplementChoice) => Promise<void>
   onNotify?: (message: string, kind: 'success' | 'error' | 'info') => void
 }) {
   if (!loading && tasks.length === 0) return null

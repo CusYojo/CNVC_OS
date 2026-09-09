@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { z } from 'zod'
 import { execFileSupervised as execFileAsync } from '../runtime/supervisedProcessService.js'
-import { redactSensitiveText } from '../security/redactSecrets.js'
+import { redactSensitiveText, safeErrorLog } from '../security/redactSecrets.js'
 import { resolveAiModelByKey, resolveAiModelRoute } from './aiModelSettingsService.js'
 import { resolveAgentRuntimePolicy } from './aiCapabilityService.js'
 import { requestAiGatewayText } from './aiGatewayService.js'
@@ -23,6 +23,7 @@ import {
   type LeadScoringAgentExecution,
 } from './leadScoringAgentService.js'
 import { shouldAttemptLeadScoreFallback } from './leadScoreRetryPolicy.js'
+import { resolvePublicIntelPython } from './publicIntelPythonRuntime.js'
 import {
   computeLeadRatingV3,
   leadRatingV3JsonSchema,
@@ -106,20 +107,55 @@ type CollectedIntel = {
 
 export async function collectCompanyIntel(input: IntelInput) {
   const script = path.resolve(process.cwd(), 'server/assets/ai/collect_intel.py')
+  const python = resolvePublicIntelPython()
   const temporaryDirectory = await mkdtemp(path.join(tmpdir(), 'cybernaut-intel-'))
   const requestFile = path.join(temporaryDirectory, 'request.json')
   let stdout = ''
+  const startedAt = Date.now()
   try {
     await writeFile(requestFile, JSON.stringify({
       company: input.company,
       topics: input.topics || [],
       registryFields: input.registryFields || LEAD_COMPANY_INTEL_FIELDS,
     }), { mode: 0o600 })
-    const result = await execFileAsync('python3', ['-B', script, `@${requestFile}`], {
-      timeout: 120_000,
-      maxBuffer: 8 * 1024 * 1024,
+    console.log({
+      event: 'ai_public_intel_process_start',
+      runtimeSource: python.source,
+      platform: process.platform,
     })
+    let result
+    try {
+      result = await execFileAsync(python.executable, [...python.argsPrefix, '-B', script, `@${requestFile}`], {
+        timeout: 120_000,
+        maxBuffer: 8 * 1024 * 1024,
+        telemetryKey: 'ai-public-intel',
+        env: {
+          ...process.env,
+          PYTHONUTF8: '1',
+          PYTHONIOENCODING: 'utf-8',
+        },
+      })
+    } catch (error) {
+      const processError = error as Error & { stderr?: string; stdout?: string; command?: string }
+      console.error({
+        event: 'ai_public_intel_process_failed',
+        runtimeSource: python.source,
+        platform: process.platform,
+        durationMs: Date.now() - startedAt,
+        error: safeErrorLog(error),
+        stderr: redactSensitiveText(processError.stderr || '').slice(-2_000),
+        stdout: redactSensitiveText(processError.stdout || '').slice(-1_000),
+      })
+      throw error
+    }
     stdout = result.stdout
+    console.log({
+      event: 'ai_public_intel_process_succeeded',
+      runtimeSource: python.source,
+      platform: process.platform,
+      durationMs: Date.now() - startedAt,
+      responseBytes: Buffer.byteLength(stdout, 'utf8'),
+    })
   } finally {
     await rm(temporaryDirectory, { recursive: true, force: true })
   }

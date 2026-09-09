@@ -61,14 +61,14 @@
     },
     "public_verification": {
       "type": "object",
-      "required": ["mode", "record", "as_of_date", "sha256", "validation_status", "coverage_status", "decision_impact"],
+      "required": ["mode", "as_of_date", "validation_status", "coverage_status", "decision_impact"],
       "properties": {
-        "mode": {"enum": ["online", "online_limited", "offline_user_requested"]},
+        "mode": {"enum": ["online", "online_limited", "offline_user_requested", "not_performed"]},
         "record": {"type": "string"},
         "as_of_date": {"type": "string", "format": "date"},
         "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-        "validation_status": {"const": "pass"},
-        "coverage_status": {"enum": ["complete", "limited", "offline"]},
+        "validation_status": {"enum": ["pass", "not_performed"]},
+        "coverage_status": {"enum": ["complete", "limited", "offline", "not_verified"]},
         "decision_impact": {"enum": ["no_material_public_conflict_found", "conditions_added", "not_verified"]},
         "source_ids": {"type": "array", "items": {"type": "string"}},
         "notes": {"type": "string"}

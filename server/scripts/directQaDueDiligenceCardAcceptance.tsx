@@ -83,11 +83,12 @@ for (const text of [
   '已完成',
   '业务标准模板',
   '引用来源：9 条',
-  '报告 Token：120,658',
   '完成进度',
   '100%',
   '下载 DOCX · V5',
   '下载 DOCX · V6',
 ]) assert.ok(html.includes(text), `task card missing: ${text}`)
+
+assert.ok(!html.includes('报告 Token：120,658'), '普通用户任务卡不应泄露平台诊断 Token')
 
 console.log('direct Q&A and due-diligence task card acceptance passed')

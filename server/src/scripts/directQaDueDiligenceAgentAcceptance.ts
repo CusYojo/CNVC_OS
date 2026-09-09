@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { copyFile, mkdtemp, readFile, rm, stat } from 'node:fs/promises'
 import os from 'node:os'
+import { writeAcceptancePdf } from '../../tests/helpers/acceptancePdf.js'
 import path from 'node:path'
 import { getAiSkillDirectory, loadAiSkill } from '../services/aiSkillService.js'
 import {
@@ -95,6 +96,9 @@ try {
             ),
             path.join(workspace, 'output', acceptanceCase.outputFileName),
           )
+          if (acceptanceCase.taskType === 'due_diligence_report') {
+            await writeAcceptancePdf(path.join(workspace, 'output', acceptanceCase.outputFileName.replace(/\.docx$/, '.pdf')))
+          }
           yield {
             type: 'assistant',
             message: {
@@ -124,7 +128,10 @@ try {
     assert.ok((options.tools as string[]).includes('Read'))
     assert.ok((options.tools as string[]).includes('Bash'))
     assert.equal((options.sandbox as { enabled?: boolean }).enabled, true)
-    assert.equal((options.sandbox as { failIfUnavailable?: boolean }).failIfUnavailable, true)
+    assert.equal(
+      (options.sandbox as { failIfUnavailable?: boolean }).failIfUnavailable,
+      process.platform !== 'win32',
+    )
     assert.match(observedPrompt, new RegExp(`Skill 工具执行 ${acceptanceCase.skillName}`))
     assert.match(observedPrompt, /全部来源文件和全部片段/)
     assert.match(observedPrompt, /宿主不会生成问题、答案、章节、底稿或兜底正文/)
