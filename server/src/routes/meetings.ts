@@ -1,7 +1,7 @@
 import { Router } from 'express'
 import { z } from 'zod'
 import type { AuthedRequest } from '../middleware/requireAuth.js'
-import { addMeetingContribution, createMeeting, createTodo, deleteTodo, finalizeMeeting, getMeeting, getTodo, listMeetingTodos, listMeetings, listTodos, presentMeeting, presentMeetings, readMeetingNotice, todoCounts, updateMeeting, updateMeetingLifecycle, updateTodo } from '../services/meetingService.js'
+import { addMeetingContribution, archiveExpiredCompletedPersonalTodos, createMeeting, createTodo, deleteMeetingRecord, deleteTodo, finalizeMeeting, getMeeting, getTodo, listMeetingTodos, listMeetings, listTodos, presentMeeting, presentMeetings, readMeetingNotice, todoCounts, updateMeeting, updateMeetingLifecycle, updateTodo } from '../services/meetingService.js'
 import { answerQuestion, meetingSummary } from '../services/aiService.js'
 import { requireAccessibleProject } from '../services/projectAccessService.js'
 import { parseShanghaiDateTime } from '../utils/shanghaiTime.js'
@@ -27,6 +27,7 @@ meetingsRouter.get('/:id', async (req: AuthedRequest, res, next) => {
 })
 
 const CreateSchema = z.object({
+  clientRequestId: z.string().uuid().optional(),
   projectId: z.string().nullable().optional(),
   projectName: z.string().min(1),
   title: z.string().min(1),
@@ -95,7 +96,7 @@ meetingsRouter.post('/', async (req: AuthedRequest, res, next) => {
       workflowStatus: 'scheduled',
       startedAt,
       endsAt,
-    }, body.newTodos as never, req.user!.uid, req.user!.name, body.participantUserIds)
+    }, body.newTodos as never, req.user!.uid, req.user!.name, body.participantUserIds, body.clientRequestId)
     const createdTodos = await listMeetingTodos(row.id, req.user!)
     res.status(201).json({ ...await presentMeeting(row, req.user!.uid), createdTodos })
   } catch (err) { next(err) }
@@ -149,6 +150,18 @@ meetingsRouter.post('/:id/lifecycle', async (req: AuthedRequest, res, next) => {
   } catch (err) { next(err) }
 })
 
+const DeleteMeetingSchema = z.object({
+  clientRequestId: z.string().uuid(),
+  expectedVersion: z.number().int().positive(),
+  reason: z.string().trim().min(2).max(500),
+}).strict()
+meetingsRouter.delete('/:id', async (req: AuthedRequest, res, next) => {
+  try {
+    const input = DeleteMeetingSchema.parse(req.body)
+    res.json(await deleteMeetingRecord({ meetingId: routeId(req.params.id), userId: req.user!.uid, userName: req.user!.name, ...input }))
+  } catch (err) { next(err) }
+})
+
 const FinalizeSchema = z.object({
   expectedVersion: z.number().int().positive(),
   summary: z.string().trim().min(1).max(5000),
@@ -175,6 +188,7 @@ const TodoListQuerySchema = z.object({
   owner: z.string().optional(),
   projectId: z.string().uuid().optional(),
   personal: z.enum(['true']).optional(),
+  includeCompleted: z.enum(['true']).optional(),
   dateFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   dateTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
 }).refine(value => !value.dateFrom || !value.dateTo || value.dateFrom <= value.dateTo, '待办日期范围无效')
@@ -188,6 +202,7 @@ todosRouter.get('/', async (req: AuthedRequest, res, next) => {
         personalOwnerUserId: req.user!.uid,
         dateFrom: query.dateFrom,
         dateTo: query.dateTo,
+        includeCompleted: query.includeCompleted === 'true',
       } : undefined),
       counts: await todoCounts(req.user!),
     })
@@ -231,6 +246,14 @@ todosRouter.patch('/:id', async (req: AuthedRequest, res, next) => {
     }
     const row = await updateTodo(existing.id, patch, expectedVersion)
     res.json(row)
+  } catch (err) { next(err) }
+})
+
+todosRouter.delete('/personal/completed', async (req: AuthedRequest, res, next) => {
+  try {
+    const { before } = z.object({ before: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) }).parse(req.query)
+    const archived = await archiveExpiredCompletedPersonalTodos(req.user!.uid, before)
+    res.json({ ok: true, archived })
   } catch (err) { next(err) }
 })
 

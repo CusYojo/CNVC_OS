@@ -6,6 +6,7 @@ import {
   isPrivateLeadSourceAddress,
   sourceDocumentContainsQuote,
 } from '../src/services/leadSourceDocumentService.js'
+import { paperMetadataEvidenceAcceptanceMode } from '../src/services/leadEnrichmentWorkerService.js'
 
 test('normalizes tracking parameters and identifies private address ranges', () => {
   assert.equal(canonicalLeadSourceUrl('HTTPS://Example.COM/path?utm_source=x&id=1#part'), 'https://example.com/path?id=1')
@@ -63,6 +64,13 @@ test('honors a robots.txt disallow rule', async () => {
   }), /robots policy disallows/)
 })
 
+
+test('paper metadata remains usable as reference evidence when a source body cannot verify the quote', () => {
+  assert.equal(paperMetadataEvidenceAcceptanceMode(undefined, 'A paper title'), 'web_hit')
+  assert.equal(paperMetadataEvidenceAcceptanceMode('Different source content', 'A paper title'), 'web_hit')
+  assert.equal(paperMetadataEvidenceAcceptanceMode('A  paper\n title', 'A paper title'), 'strict')
+})
+
 test('WeChat reads only the nested article body, not page chrome or verification text', async () => {
   const document = await fetchLeadSourceDocument({
     url: 'https://mp.weixin.qq.com/s/test', persist: false, respectRobots: false, allowedHosts: ['mp.weixin.qq.com'],
@@ -87,4 +95,5 @@ test('restricted article redirects cannot escape the expected publisher', async 
     fetchImpl: async () => { calls++; return new Response('', { status: 302, headers: { location: 'https://example.com/verify' } }) },
   }), /not allowed/)
   assert.equal(calls, 1)
+
 })

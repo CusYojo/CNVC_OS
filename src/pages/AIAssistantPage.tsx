@@ -19,6 +19,7 @@ import {
   AiTaskConversationMessage,
 } from '../components/AiTaskConversationMessage'
 import { AiQaCards, type ProjectQaAnswer } from '../components/AiQaCards'
+import { AssistantExperiencePanel } from '../components/AssistantExperiencePanel'
 import { AiErrorBoundary, copyAiErrorId, createAiErrorId } from '../components/AiErrorBoundary'
 import { useToast } from '../components/Toast'
 import { apiGet, apiPost, apiPut, apiPatch, apiDelete, ApiError } from '../lib/api'
@@ -2379,6 +2380,12 @@ function Chat() {
         <div className="border-b border-slate-200 p-3">
           <div className="rounded-lg bg-brand-50 p-3"><p className="text-sm font-medium text-brand-800">{scope === 'project' ? currentProject?.name : '全局知识库'}</p><p className="mt-1 text-xs text-brand-600">{scope === 'project' ? `${projectFiles.length} 份项目资料可检索` : '机构知识库可检索'}</p></div>
         </div>
+        <AssistantExperiencePanel
+          conversationId={currentConversationRowId}
+          projectId={currentProject?.id}
+          refreshKey={`${messages.length}:${busy}`}
+          onNotify={showToast}
+        />
         <AiErrorBoundary level="section" title="正式交付物区域显示异常" resetKey={`${projectId}:${artifactRefreshKey}`}>
           <AiArtifactCenter
             projectId={scope === 'project' ? currentProject?.id : undefined}

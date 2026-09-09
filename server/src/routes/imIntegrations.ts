@@ -20,7 +20,13 @@ import {
   updateImBot,
   type ImActor,
 } from '../services/imIntegrationService.js'
-import { startWeixinQrLogin, waitForWeixinQrLogin } from '../services/weixinQrLoginService.js'
+import {
+  startPersonalWeixinQrLogin,
+  startWeixinQrLogin,
+  waitForPersonalWeixinQrLogin,
+  waitForWeixinQrLogin,
+} from '../services/weixinQrLoginService.js'
+import { disconnectPersonalWeixinAi, getPersonalWeixinAi } from '../services/personalWeixinAiService.js'
 
 export const imIntegrationsRouter = Router()
 export const imInboundRouter = Router()
@@ -54,6 +60,39 @@ imIntegrationsRouter.post('/weixin/login/wait', requireImAdmin, async (req: Auth
   try {
     const body = z.object({ sessionKey: uuid }).strict().parse(req.body ?? {})
     res.json(await waitForWeixinQrLogin(body.sessionKey, actor(req)))
+  } catch (error) { next(error) }
+})
+
+imIntegrationsRouter.get('/weixin/self', async (req: AuthedRequest, res, next) => {
+  try { res.json(await getPersonalWeixinAi(actor(req))) } catch (error) { next(error) }
+})
+
+imIntegrationsRouter.post('/weixin/self/login/start', async (req: AuthedRequest, res, next) => {
+  try {
+    const current = await getPersonalWeixinAi(actor(req))
+    if (!current.eligible) {
+      throw Object.assign(new Error(current.reason || '当前账号不可连接微信 AI'), {
+        code: 'PERSONAL_WEIXIN_FORBIDDEN', status: 403,
+      })
+    }
+    res.json(await startPersonalWeixinQrLogin(req.user!.uid))
+  } catch (error) { next(error) }
+})
+
+imIntegrationsRouter.post('/weixin/self/login/wait', async (req: AuthedRequest, res, next) => {
+  try {
+    const body = z.object({ sessionKey: uuid }).strict().parse(req.body ?? {})
+    res.json(await waitForPersonalWeixinQrLogin(body.sessionKey, actor(req)))
+  } catch (error) { next(error) }
+})
+
+imIntegrationsRouter.post('/weixin/self/disconnect', async (req: AuthedRequest, res, next) => {
+  try {
+    const body = z.object({
+      expectedVersion: z.number().int().positive(),
+      idempotencyKey: uuid,
+    }).strict().parse(req.body ?? {})
+    res.json(await disconnectPersonalWeixinAi(actor(req), body.expectedVersion))
   } catch (error) { next(error) }
 })
 

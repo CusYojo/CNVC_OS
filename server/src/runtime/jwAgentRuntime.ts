@@ -32,6 +32,7 @@ import {
 } from './aiRuntimeTelemetry.js'
 import type { WeixinInboundImage } from '../services/weixinInboundImage.js'
 import type { WeixinInboundDocument } from '../services/weixinInboundFile.js'
+import { loadAssistantExperiencePrompt, recordAssistantCompletedTurn } from '../services/assistantExperienceService.js'
 
 type RuntimeQuery = AsyncIterable<unknown> & {
   interrupt?: () => Promise<void>
@@ -39,6 +40,8 @@ type RuntimeQuery = AsyncIterable<unknown> & {
 }
 
 type RuntimeSession = {
+  userId: string
+  projectId: string | null
   conversationId: string
   queue: MessageQueue
   query: RuntimeQuery
@@ -1092,6 +1095,18 @@ async function runOutputLoop(session: RuntimeSession) {
         }
         session.pendingUserMessage = null
         await persistJwRuntimeEvent(session.conversationId, raw.is_error ? 'error' : 'idle', raw)
+        if (!raw.is_error && session.assistantSeenForPending) {
+          void recordAssistantCompletedTurn({
+            userId: session.userId,
+            conversationId: session.conversationId,
+            projectId: session.projectId,
+          }).then((candidate) => {
+            if (candidate) publishJwAgentChange(session.conversationId)
+          }).catch((error) => console.warn(JSON.stringify({
+            event: 'assistant_experience_turn_processing_failed',
+            message: error instanceof Error ? redactSensitiveText(error.message).slice(0, 200) : 'unknown',
+          })))
+        }
         finishAiRuntimeRequest(session.telemetryRequestId, raw.is_error ? 'failed' : 'succeeded')
         session.telemetryRequestId = null
       }
@@ -1344,6 +1359,8 @@ async function createRuntimeSession(
     },
   }) as RuntimeQuery
   session = {
+    userId,
+    projectId,
     conversationId,
     queue,
     query: sdkQuery,
@@ -1550,10 +1567,26 @@ export async function sendJwAgentMessageWithMedia(
       const runtimeText = session.quickSkillInvocation
         ? quickSkillRuntimeMessage(clean, session.quickSkillInvocation)
         : clean
+      let experiencePrompt = ''
+      try {
+        const loaded = await loadAssistantExperiencePrompt(userId, refreshed.agent.projectId)
+        experiencePrompt = loaded.prompt
+        await updateConversationState(refreshed.agent.id, 'streaming', {
+          loadedAssistantExperiences: loaded.versions,
+        })
+      } catch (error) {
+        console.warn(JSON.stringify({
+          event: 'assistant_experience_load_failed',
+          message: error instanceof Error ? redactSensitiveText(error.message).slice(0, 200) : 'unknown',
+        }))
+      }
+      const experiencedRuntimeText = experiencePrompt
+        ? `${experiencePrompt}\n\n[当前用户请求]\n${runtimeText}`
+        : runtimeText
       const content = attachments.length ? [
         ...attachments,
-        { type: 'text' as const, text: runtimeText || '请阅读并分析以上微信附件。' },
-      ] : runtimeText
+        { type: 'text' as const, text: experiencedRuntimeText || '请阅读并分析以上微信附件。' },
+      ] : experiencedRuntimeText
       const sdkSessionId = typeof fresh?.metadata?.sdkSessionId === 'string'
         ? fresh.metadata.sdkSessionId
         : null

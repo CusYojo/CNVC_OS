@@ -66,12 +66,33 @@ export function weeklyReportBody(facts: WeeklyReportFacts) {
   const m = facts.metrics
   const meetingIds = new Set(facts.meetings.map(item => item.id))
   const local = (value: string) => timeLocal(new Date(value)).replace('T', ' ')
-  const calendar = facts.calendar?.filter(item => item.source !== 'meeting' || !meetingIds.has(item.id))
-  const states: Record<string, string> = { active: '已安排', confirmed: '领导已确认', scheduled: '已安排', completed: '会议纪要已确认', cancelled: '已取消', approved: '获批安排，非执行证明' }
-  const officeBody = facts.office ? `办公申请与处理（当前修订；审批不代表执行完成）\n${facts.office.map(item => `- ${item.title}（${item.kind}，修订 ${item.revision}）：${item.status}；本周本人操作 ${item.actions.map(a => `${a.action} ${local(a.occurredAt)}`).join('、')}`).join('\n') || '本次范围无可读取的本周办公操作'}\n\n` : ''
-  const calendarBody = calendar ? `日历安排（不代表已完成或实际出席）\n${calendar.map(item => `- ${item.title}：${states[item.status] ?? item.status}，${local(item.startsAt)} 至 ${item.endsAt ? local(item.endsAt) : '结束时间未记录'}${item.visibility === 'private' ? item.source === 'personal' ? '（私人来源，仅本人）' : item.source === 'office' ? '（按原申请权限）' : '（受限参会范围）' : ''}`).join('\n') || '本次范围无新增日历安排；已列会议不重复展示'}\n\n` : ''
-  return `${facts.weekStart} 至 ${facts.weekEnd} 个人周报\n\n` +
-    `本周完成：${m.completedInWeek} 项（按正式完成时间）\n本周到期：${m.dueInWeek} 项\n前期遗留未结束：${m.overdueOpen} 项（生成时状态）\n本周期限且现已取消：${m.cancelledDueInWeek} 项（不代表本周发生取消）\n本人项目审批操作：${m.approvalActions} 次\n本人参与会议记录：${m.meetingRecords} 条\n\n` +
-    `任务进展\n${facts.tasks.map((task) => `- ${task.title}：${task.status}，有效期限 ${task.dueDate ?? '未设置'}${task.dueTime ? ` ${task.dueTime}` : ''}，进度 ${task.progress}%`).join('\n') || '本次范围无匹配记录'}\n\n` +
-    `审批与会议\n${[...facts.approvals.map((item) => `- ${item.title}：${item.action}`), ...facts.meetings.map((item) => `- 会议记录：${item.title}`)].join('\n') || '本周无匹配记录'}\n\n` + officeBody + calendarBody + (facts.milestones ? milestoneReportBody(facts.milestones) : '') + `阻塞与需要支持\n请人工补充。\n\n下周计划\n请人工补充。`
+  const calendar = facts.calendar?.filter(item => item.status !== 'cancelled' && (item.source !== 'meeting' || !meetingIds.has(item.id))) ?? []
+  const terminal = new Set(['已完成', '已关闭', '已取消', '已归档'])
+  const completed = facts.tasks.filter(task => task.status === '已完成')
+  const open = facts.tasks.filter(task => !terminal.has(task.status))
+  const overdue = open.filter(task => Boolean(task.dueDate && task.dueDate < facts.weekStart))
+  const sections: string[] = []
+  const add = (title: string, rows: string[]) => { if (rows.length) sections.push(`${title}\n${rows.join('\n')}`) }
+  const due = (task: WeeklyReportFacts['tasks'][number]) => task.dueDate ? `${task.dueDate}${task.dueTime ? ` ${task.dueTime}` : ''}` : '待排期'
+
+  const overview = [
+    m.completedInWeek ? `完成 ${m.completedInWeek} 项` : '',
+    open.length ? `推进中 ${open.length} 项` : '',
+    m.approvalActions ? `处理审批 ${m.approvalActions} 次` : '',
+    m.meetingRecords ? `参与会议 ${m.meetingRecords} 场` : '',
+    overdue.length ? `逾期 ${overdue.length} 项` : '',
+  ].filter(Boolean)
+  if (overview.length) sections.push(`本周概览\n${overview.join(' · ')}`)
+  add('已完成事项', completed.map(task => `- ${task.title}`))
+  add('重点推进', open.filter(task => !overdue.includes(task)).map(task => `- ${task.title}｜${task.status}｜${due(task)}${task.progress > 0 ? `｜${task.progress}%` : ''}`))
+  add('风险与阻塞', overdue.map(task => `- ${task.title}｜已逾期｜原定 ${due(task)}`))
+  add('审批与会议', [
+    ...facts.approvals.map(item => `- ${item.title}｜${item.action}`),
+    ...facts.meetings.map(item => `- ${item.title}｜${local(item.startedAt)}`),
+  ])
+  add('办公事项', (facts.office ?? []).map(item => `- ${item.title}｜${item.kind}｜${item.status}`))
+  add('重要安排', calendar.map(item => `- ${item.title}｜${local(item.startsAt)}${item.endsAt ? `—${local(item.endsAt)}` : ''}`))
+  if (facts.milestones?.length) sections.push(milestoneReportBody(facts.milestones).trim())
+  if (!sections.length) sections.push('本周暂无可汇总事项。')
+  return `${facts.weekStart} 至 ${facts.weekEnd} 个人周报\n\n${sections.join('\n\n')}`
 }

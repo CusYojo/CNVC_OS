@@ -22,6 +22,7 @@ import {
   KeyRound,
   Plus,
   Search,
+  QrCode,
   Sun,
 } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
@@ -84,6 +85,12 @@ function isSystemNavItemActive(item: { to: string }, pathname: string, search: s
   return path !== '/system' || getSystemWorkspace(new URLSearchParams(search).get('tab')).id === getSystemWorkspace(new URLSearchParams(query).get('tab')).id
 }
 
+function SidebarHorse() {
+  return <div className="fde-sidebar-horse" aria-hidden="true">
+    <img src="/fde-sidebar-horse.png" alt="" />
+  </div>
+}
+
 export function AppLayout() {
   const navigate = useNavigate()
   const location = useLocation()
@@ -99,6 +106,7 @@ export function AppLayout() {
   const leadPoolView = location.pathname === '/projects' && new URLSearchParams(location.search).get('view') === 'leads'
   const navigationCollapsed = collapsed || narrow && (responsibilityView || leadPoolView)
   const [showProfile, setShowProfile] = useState(false)
+  const [personalWeixinConnected, setPersonalWeixinConnected] = useState<boolean | null>(null)
   const [showCreate, setShowCreate] = useState(false)
   const [dark, setDark] = useState(false)
   const [showSearch, setShowSearch] = useState(false)
@@ -189,6 +197,14 @@ export function AppLayout() {
       window.removeEventListener('focus', onFocus)
     }
   }, [currentUser.id])
+  useEffect(() => {
+    if (!showProfile || isSystemAdminRole(currentUser.role)) return
+    let active = true
+    void apiGet<{ connected: boolean }>('/integrations/im/weixin/self')
+      .then((result) => { if (active) setPersonalWeixinConnected(result.connected) })
+      .catch(() => { if (active) setPersonalWeixinConnected(false) })
+    return () => { active = false }
+  }, [showProfile, currentUser.role])
 
   return (
     <div className={`fde-app fde-shell${navigationCollapsed ? ' is-collapsed' : ''}`} data-theme={dark ? 'dark' : 'light'}>
@@ -213,6 +229,7 @@ export function AppLayout() {
             </NavLink>
           })}
         </nav>
+        {!navigationCollapsed && <SidebarHorse />}
       </aside>
 
       <div className="fde-main-column">
@@ -233,6 +250,7 @@ export function AppLayout() {
                 <div className="fde-profile-menu absolute right-0 top-12 w-52 rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl">
                   <div className="border-b border-slate-100 px-3 py-2.5"><p className="text-xs text-slate-400">{currentUser.email}</p><p className="mt-1 text-xs text-slate-500">{currentUser.department}</p></div>
                   <button onClick={() => navigate('/ai')} className="mt-1 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-600 hover:bg-slate-50"><Sparkles className="h-4 w-4" />AI 助手</button>
+                  {!isSystemAdminRole(currentUser.role) && <button title={personalWeixinConnected ? '微信 AI 已连接' : '微信 AI 未连接'} onClick={() => { setShowProfile(false); navigate('/settings/weixin-ai') }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-600 hover:bg-slate-50"><QrCode className="h-4 w-4" />微信 AI<span className={`ml-auto h-2 w-2 rounded-full ${personalWeixinConnected ? 'bg-emerald-500' : 'bg-slate-300'}`} aria-label={personalWeixinConnected ? '已连接' : '未连接'} /></button>}
                   <button onClick={() => { setShowProfile(false); setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' }); setShowPassword(true) }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-600 hover:bg-slate-50"><KeyRound className="h-4 w-4" />修改登录密码</button>
                   {isSystemAdminRole(currentUser.role) && <button onClick={() => { setShowProfile(false); navigate('/system') }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-600 hover:bg-slate-50"><Settings className="h-4 w-4" />系统管理</button>}
                   {!isSystemAdminRole(currentUser.role) && isAiPlatformAdminRole(currentUser.role) && <button onClick={() => { setShowProfile(false); navigate('/system/ai/models') }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-600 hover:bg-slate-50"><Settings className="h-4 w-4" />AI 平台管理</button>}

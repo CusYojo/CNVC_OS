@@ -29,6 +29,8 @@ test('workbench and task center share the editable calendar interaction', async 
   assert.match(collaboration, /<FdeCalendarPanel/)
   assert.match(grid, /onClick=\{event => \{/)
   assert.match(grid, /onPointerMove=\{movePointer\}/)
+  assert.match(grid, /Math\.floor\(\(clientX-active\.gridLeft\)\/active\.trackWidth\)/)
+  assert.doesNotMatch(grid, /document\.elementFromPoint/)
   assert.match(grid, /fde-time-resize-handle/)
   assert.match(panel, /单击空白时间新建任务/)
   assert.match(panel, /\/calendar\/tasks/)

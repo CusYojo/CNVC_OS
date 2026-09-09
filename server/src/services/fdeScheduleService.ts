@@ -25,7 +25,10 @@ export async function scheduleConflicts(reader: Reader, userId: string, startsAt
       eq(personalCalendarEvents.status, 'active'), lt(personalCalendarEvents.startsAt, endsAt), gt(personalCalendarEvents.endsAt, startsAt)))
   const scheduled = await reader.select({ startsAt: meetings.startedAt, endsAt: meetings.endsAt }).from(meetings)
     .where(and(options.excludeMeetingId ? ne(meetings.id, options.excludeMeetingId) : undefined, isNotNull(meetings.endsAt), lt(meetings.startedAt, endsAt), gt(meetings.endsAt, startsAt),
-      or(eq(meetings.workflowKind, 'legacy'), inArray(meetings.workflowStatus, ['scheduled', 'completed'])),
+      or(
+        and(eq(meetings.workflowKind, 'legacy'), notInArray(meetings.workflowStatus, ['cancelled', 'deleted'])),
+        and(ne(meetings.workflowKind, 'legacy'), inArray(meetings.workflowStatus, ['scheduled', 'completed'])),
+      ),
       or(eq(meetings.hostUserId, userId), inArray(meetings.id, reader.select({ id: meetingParticipants.meetingId }).from(meetingParticipants).where(eq(meetingParticipants.userId, userId))))))
   // Never disclose another object's ID, title, project, or private reason in conflict responses.
   return [...times.map(row => ({ startsAt: row.startsAt!, endsAt: timeEnd(row.startsAt!, row.duration) })), ...personal,

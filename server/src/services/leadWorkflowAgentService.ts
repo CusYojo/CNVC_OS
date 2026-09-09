@@ -16,7 +16,11 @@ import {
   finishAiRuntimeRequest,
   markAiRuntimeFirstTokenFromSdkMessage,
 } from '../runtime/aiRuntimeTelemetry.js'
-import { runCodexStructuredOutput } from './codexStructuredOutputService.js'
+import {
+  codexStructuredOutputRuntime,
+  runCodexStructuredOutput,
+  type CodexStructuredOutputRuntime,
+} from './codexStructuredOutputService.js'
 
 export type LeadWorkflowAgentProfile =
   | 'lead-research-agent'
@@ -224,7 +228,7 @@ const PROFILE_CONTRACTS: Record<LeadWorkflowAgentProfile, {
 export type LeadWorkflowAgentExecution = {
   profile: LeadWorkflowAgentProfile
   output: unknown
-  runtime: 'claude-agent-sdk' | 'codex-cli'
+  runtime: 'claude-agent-sdk' | CodexStructuredOutputRuntime
   usage: { inputTokens: number; outputTokens: number; totalTokens: number }
   durationMs: number
   costMicrousd: number
@@ -236,8 +240,8 @@ export type LeadWorkflowAgentExecution = {
 export function leadWorkflowAgentRuntime(model?: string, forceClaudeSdk = false): LeadWorkflowAgentExecution['runtime'] {
   if (forceClaudeSdk) return 'claude-agent-sdk'
   const configured = process.env.LEAD_WORKFLOW_AGENT_BACKEND?.trim().toLowerCase()
-  if (configured === 'codex-cli' || configured === 'claude-agent-sdk') return configured
-  return /^gpt-/i.test(model || process.env.LLM_MODEL || '') ? 'codex-cli' : 'claude-agent-sdk'
+  if (configured === 'codex-cli' || configured === 'codex-gateway' || configured === 'claude-agent-sdk') return configured
+  return /^gpt-/i.test(model || process.env.LLM_MODEL || '') ? codexStructuredOutputRuntime() : 'claude-agent-sdk'
 }
 
 export type LeadWorkflowAgentQueryFactory = (params: Parameters<typeof query>[0]) => AsyncIterable<SDKMessage> & {
@@ -444,7 +448,8 @@ export async function runLeadWorkflowAgent(input: {
   if (!input.prompt.trim()) throw new Error(`${input.profile} requires immutable host input`)
   const contract = PROFILE_CONTRACTS[input.profile]
   const config = await runtimeConfig(input.profile, input.model)
-  if (leadWorkflowAgentRuntime(config.model, Boolean(options.queryFactory)) === 'codex-cli') {
+  const runtime = leadWorkflowAgentRuntime(config.model, Boolean(options.queryFactory))
+  if (runtime === 'codex-cli' || runtime === 'codex-gateway') {
     const execution = await runCodexStructuredOutput({
       profile: input.profile,
       systemPrompt: contract.systemPrompt,
@@ -453,6 +458,7 @@ export async function runLeadWorkflowAgent(input: {
       model: config.model,
       timeoutMs: options.timeoutMs ?? config.timeoutMs,
       workDir: options.workDir,
+      runtime,
     })
     try {
       return {

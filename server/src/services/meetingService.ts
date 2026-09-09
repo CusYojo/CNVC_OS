@@ -1,7 +1,7 @@
-import { randomUUID } from 'node:crypto'
-import { and, desc, eq, gte, inArray, isNull, lte, ne, notInArray, or, sql } from 'drizzle-orm'
+import { createHash, randomUUID } from 'node:crypto'
+import { and, desc, eq, gte, inArray, isNull, lt, lte, ne, notInArray, or, sql } from 'drizzle-orm'
 import { db } from '../db/client.js'
-import { directiveNotices, meetingParticipants, meetingWorkflowNotices, meetings, projectDirectives, todos, auditLogs, projectFiles, projectMembers, projects, users } from '../db/schema.js'
+import { directiveNotices, meetingParticipants, meetingWorkflowEvents, meetingWorkflowNotices, meetings, projectDirectives, todos, auditLogs, knowledgeChunks, projectFiles, projectMembers, projects, users } from '../db/schema.js'
 import {
   isSystemAdmin,
   projectAccessCondition,
@@ -59,6 +59,18 @@ function meetingAccessCondition(actor: ProjectAccessActor) {
   )!
 }
 
+const meetingRequestHash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex')
+
+function visibleProjectMeetingCondition() {
+  return and(
+    ne(meetings.workflowKind, 'committee'),
+    or(
+      and(eq(meetings.workflowKind, 'legacy'), notInArray(meetings.workflowStatus, ['cancelled', 'deleted'])),
+      and(ne(meetings.workflowKind, 'legacy'), inArray(meetings.workflowStatus, ['scheduled', 'completed'])),
+    ),
+  )
+}
+
 export function todoAccessCondition(actor: ProjectAccessActor) {
   const accessibleProjectIds = db.select({ id: projects.id }).from(projects)
     .where(projectAccessCondition(actor))
@@ -72,7 +84,7 @@ export function todoAccessCondition(actor: ProjectAccessActor) {
 }
 
 export async function listMeetings(projectId?: string, actor?: ProjectAccessActor) {
-  const conditions = [and(ne(meetings.workflowKind, 'committee'), or(eq(meetings.workflowKind, 'legacy'), inArray(meetings.workflowStatus, ['scheduled', 'completed'])))]
+  const conditions = [visibleProjectMeetingCondition()]
   if (projectId) conditions.push(eq(meetings.projectId, projectId))
   if (actor) conditions.push(meetingAccessCondition(actor))
   const where = conditions.length ? and(...conditions) : undefined
@@ -80,7 +92,7 @@ export async function listMeetings(projectId?: string, actor?: ProjectAccessActo
 }
 
 export async function getMeeting(id: string, actor?: ProjectAccessActor) {
-  const visible = and(ne(meetings.workflowKind, 'committee'), or(eq(meetings.workflowKind, 'legacy'), inArray(meetings.workflowStatus, ['scheduled', 'completed'])))
+  const visible = visibleProjectMeetingCondition()
   const where = actor
     ? and(eq(meetings.id, id), meetingAccessCondition(actor), visible)
     : and(eq(meetings.id, id), visible)
@@ -109,6 +121,7 @@ export type PublicMeeting = {
   unreadNoticeId: string | null
   canContribute: boolean
   canManage: boolean
+  canDelete: boolean
   minutesConfirmedAt: string | null
   version: number
 }
@@ -138,6 +151,7 @@ function publicMeeting(row: typeof meetings.$inferSelect, todoCount: number, unr
     unreadNoticeId,
     canContribute,
     canManage,
+    canDelete: canManage && row.workflowKind === 'legacy' && row.workflowStatus !== 'completed' && !row.confirmedAt,
     minutesConfirmedAt: row.confirmedAt?.toISOString() ?? null,
     version: row.version,
   }
@@ -187,9 +201,18 @@ export async function createMeeting(
   userId: string,
   userName = '（系统）',
   participantUserIds?: string[],
+  clientRequestId?: string,
 ) {
   if (input.workflowKind === 'friday' || input.type === '周五例会') throw Object.assign(new Error('请通过周五例会工作区创建、排期和确认纪要'), { status: 409, code: 'FDE_MEETING_WORKFLOW_REQUIRED' })
+  const requestHash = meetingRequestHash({ input, newTodos, userId, participantUserIds })
   const insertedId = await scheduleTransaction(async (tx) => {
+    if (clientRequestId) {
+      const [previous] = await tx.select().from(meetingWorkflowEvents).where(eq(meetingWorkflowEvents.requestId, clientRequestId)).limit(1)
+      if (previous) {
+        if (previous.actorId !== userId || previous.action !== 'create' || previous.requestHash !== requestHash) throw Object.assign(new Error('本次会议内容已变化，请关闭窗口后重新发起'), { status: 409, code: 'MEETING_REQUEST_REUSED' })
+        return previous.result.meetingId
+      }
+    }
     const projectIds = [...new Set([input.projectId, ...newTodos.map(todo => todo.projectId)].filter((id): id is string => Boolean(id)))].sort()
     for (const projectId of projectIds) await tx.execute(sql`SELECT ${projects.id} FROM ${projects} WHERE ${projects.id}=${projectId} FOR UPDATE`)
     let meetingInput = input
@@ -230,6 +253,17 @@ export async function createMeeting(
       module: '会议纪要',
       action: '新建并生成纪要',
       target: input.title,
+    })
+    if (clientRequestId) await tx.insert(meetingWorkflowEvents).values({
+      meetingId: inserted.id,
+      actorId: userId,
+      requestId: clientRequestId,
+      requestHash,
+      action: 'create',
+      reason: '',
+      version: 1,
+      snapshot: { title: meetingInput.title, projectId: meetingInput.projectId, startedAt: meetingInput.startedAt },
+      result: { meetingId: inserted.id },
     })
     return inserted.id
   }, { isolationLevel: 'read committed' })
@@ -301,8 +335,38 @@ export async function updateMeetingLifecycle(input: { meetingId: string; userId:
     if (meeting.workflowStatus === 'cancelled' || meeting.confirmedAt) throw Object.assign(new Error('当前会议状态不可修改'), { status: 409, code: 'MEETING_LIFECYCLE_INVALID' })
     const nextStatus = input.action === 'cancel' ? 'cancelled' : input.action === 'end' ? 'completed' : 'in_progress'
     await tx.update(meetings).set({ workflowStatus: nextStatus, ...(input.action === 'start' ? { startedAt: new Date() } : {}), ...(input.action === 'end' ? { endsAt: new Date() } : {}), version: meeting.version + 1 }).where(and(eq(meetings.id, meeting.id), eq(meetings.version, meeting.version)))
+    if (input.action === 'cancel') {
+      const now = new Date()
+      await tx.update(meetingWorkflowNotices).set({ closedAt: now }).where(and(eq(meetingWorkflowNotices.meetingId, meeting.id), isNull(meetingWorkflowNotices.closedAt)))
+      await tx.update(todos).set({ status: '已取消', closureReason: '关联会议已取消', version: sql`${todos.version} + 1` }).where(and(eq(todos.meetingId, meeting.id), notInArray(todos.status, ['已完成', '已关闭', '已取消', '已归档'])))
+      await tx.delete(knowledgeChunks).where(and(eq(knowledgeChunks.sourceType, 'meeting'), eq(knowledgeChunks.sourceId, meeting.id)))
+    }
     const [updated] = await tx.select().from(meetings).where(eq(meetings.id, meeting.id))
     return updated
+  }, { isolationLevel: 'read committed' })
+}
+
+export async function deleteMeetingRecord(input: { meetingId: string; userId: string; userName: string; expectedVersion: number; clientRequestId: string; reason: string }) {
+  const requestHash = meetingRequestHash(input)
+  return scheduleTransaction(async (tx) => {
+    const [previous] = await tx.select().from(meetingWorkflowEvents).where(eq(meetingWorkflowEvents.requestId, input.clientRequestId)).limit(1)
+    if (previous) {
+      if (previous.actorId !== input.userId || previous.action !== 'delete' || previous.requestHash !== requestHash) throw Object.assign(new Error('删除请求已用于其他操作，请重新打开确认窗口'), { status: 409, code: 'MEETING_REQUEST_REUSED' })
+      return { deleted: true as const, meetingId: previous.result.meetingId }
+    }
+    const [meeting] = await tx.select().from(meetings).where(eq(meetings.id, input.meetingId)).for('update')
+    if (!meeting || meeting.workflowKind !== 'legacy' || meeting.workflowStatus === 'deleted') throw Object.assign(new Error('会议不存在或已删除'), { status: 404, code: 'MEETING_NOT_FOUND' })
+    if (meeting.createdBy !== input.userId && meeting.hostUserId !== input.userId) throw Object.assign(new Error('只有会议发起人可以删除会议'), { status: 403, code: 'MEETING_DELETE_FORBIDDEN' })
+    if (meeting.version !== input.expectedVersion) throw businessVersionConflict('会议')
+    if (meeting.confirmedAt || meeting.workflowStatus === 'completed') throw Object.assign(new Error('已形成正式纪要的会议不能删除'), { status: 409, code: 'MEETING_DELETE_FINALIZED' })
+    const now = new Date()
+    await tx.update(meetingWorkflowNotices).set({ closedAt: now }).where(and(eq(meetingWorkflowNotices.meetingId, meeting.id), isNull(meetingWorkflowNotices.closedAt)))
+    await tx.update(todos).set({ status: '已取消', closureReason: '关联会议已删除', version: sql`${todos.version} + 1` }).where(and(eq(todos.meetingId, meeting.id), notInArray(todos.status, ['已完成', '已关闭', '已取消', '已归档'])))
+    await tx.delete(knowledgeChunks).where(and(eq(knowledgeChunks.sourceType, 'meeting'), eq(knowledgeChunks.sourceId, meeting.id)))
+    await tx.update(meetings).set({ workflowStatus: 'deleted', version: meeting.version + 1 }).where(and(eq(meetings.id, meeting.id), eq(meetings.version, meeting.version)))
+    await tx.insert(meetingWorkflowEvents).values({ meetingId: meeting.id, actorId: input.userId, requestId: input.clientRequestId, requestHash, action: 'delete', reason: input.reason, version: meeting.version + 1, snapshot: { meeting }, result: { meetingId: meeting.id } })
+    await tx.insert(auditLogs).values({ userId: input.userId, userName: input.userName, module: '项目会议', action: '删除会议', target: meeting.title })
+    return { deleted: true as const, meetingId: meeting.id }
   }, { isolationLevel: 'read committed' })
 }
 
@@ -339,13 +403,13 @@ export async function readMeetingNotice(meetingId: string, noticeId: string, use
   return { id: notice.id, read: true }
 }
 
-export async function listTodos(owner?: string, projectId?: string, actor?: ProjectAccessActor, personal?: { personalOwnerUserId: string; dateFrom?: string; dateTo?: string }) {
+export async function listTodos(owner?: string, projectId?: string, actor?: ProjectAccessActor, personal?: { personalOwnerUserId: string; dateFrom?: string; dateTo?: string; includeCompleted?: boolean }) {
   const conds = []
   if (owner) conds.push(eq(todos.owner, owner))
   if (projectId) conds.push(eq(todos.projectId, projectId))
   if (actor) conds.push(todoAccessCondition(actor))
   if (personal) {
-    conds.push(isNull(todos.projectId), eq(todos.ownerUserId, personal.personalOwnerUserId), isNull(todos.approvalRequestId), notInArray(todos.type, ['流程', '审批']), notInArray(todos.status, ['已完成', '已关闭', '已取消', '已归档']))
+    conds.push(isNull(todos.projectId), eq(todos.ownerUserId, personal.personalOwnerUserId), isNull(todos.approvalRequestId), notInArray(todos.type, ['流程', '审批']), notInArray(todos.status, personal.includeCompleted ? ['已关闭', '已取消', '已归档'] : ['已完成', '已关闭', '已取消', '已归档']))
     if (personal.dateFrom) conds.push(gte(todos.dueDate, personal.dateFrom))
     if (personal.dateTo) conds.push(lte(todos.dueDate, personal.dateTo))
   }
@@ -430,6 +494,27 @@ export async function deleteTodo(id: string) {
     const row = await assertLegacyTodoMutation(tx, id)
     if (row) await tx.delete(todos).where(eq(todos.id, id))
     return row
+  })
+}
+
+export async function archiveExpiredCompletedPersonalTodos(userId: string, beforeDate: string) {
+  return db.transaction(async (tx) => {
+    const condition = and(
+      isNull(todos.projectId),
+      eq(todos.ownerUserId, userId),
+      isNull(todos.approvalRequestId),
+      eq(todos.status, '已完成'),
+      lt(todos.dueDate, beforeDate),
+      notInArray(todos.type, ['流程', '审批', '通知']),
+    )
+    const [result] = await tx.update(todos).set({
+      status: '已归档',
+      closureReason: '已完成个人事项于次日自动归档',
+      version: sql`${todos.version} + 1`,
+    }).where(condition)
+    const archived = Number(result.affectedRows ?? 0)
+    if (archived > 0) await tx.insert(auditLogs).values({ userId, userName: '（系统）', module: '待办管理', action: '归档已完成个人事项', target: `${beforeDate} 前共 ${archived} 项` })
+    return archived
   })
 }
 

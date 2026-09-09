@@ -19,6 +19,15 @@ function LoginIcon({ name }: { name: 'user' | 'lock' | 'eye' | 'mail' }) {
 
 type RegistrationOptions = { roles: string[]; departments: string[] }
 
+async function readJsonResponse<T>(response: Response): Promise<T> {
+  // Tests and a few embedded hosts use a minimal Response-compatible object.
+  if (typeof response.text !== 'function') return response.json() as Promise<T>
+  const text = await response.text()
+  if (!text.trim()) throw new Error('服务暂时不可用，请稍后重试')
+  try { return JSON.parse(text) as T }
+  catch { throw new Error('服务暂时不可用，请稍后重试') }
+}
+
 export function LoginPage() {
   const navigate = useNavigate()
   const setAuth = useAuthStore((state) => state.setAuth)
@@ -39,7 +48,7 @@ export function LoginPage() {
     setLoading(true)
     try {
       const response = await fetch('/api/auth/registration-options', { credentials: 'include' })
-      const body = await response.json() as Partial<RegistrationOptions> & { message?: string }
+      const body = await readJsonResponse<Partial<RegistrationOptions> & { message?: string }>(response)
       if (!response.ok) throw new Error(body.message || '暂时无法读取岗位信息')
       const next = { roles: body.roles ?? [], departments: body.departments ?? [] }
       if (!next.roles.length || !next.departments.length) throw new Error('暂时没有可申请的岗位或部门')
@@ -65,7 +74,7 @@ export function LoginPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ identifier: loginForm.identifier.trim(), password: loginForm.password, remember: loginForm.remember }),
       })
-      const body = await response.json()
+      const body = await readJsonResponse<{ user?: Parameters<typeof setAuth>[0]['user']; message?: string }>(response)
       if (!response.ok || !body.user) throw new Error(body.message || '登录失败')
       setAuth({ user: body.user })
       navigate('/')
@@ -94,7 +103,7 @@ export function LoginPage() {
           password: registration.password,
         }),
       })
-      const body = await response.json() as { message?: string }
+      const body = await readJsonResponse<{ message?: string }>(response)
       if (!response.ok) throw new Error(body.message || '注册申请提交失败')
       setRegistrationDone(true)
     } catch (error) {

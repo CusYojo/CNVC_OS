@@ -66,7 +66,7 @@ assert.match(worker, /effectiveEntityStatus = sourceStatus === 'confirmed' \? 'c
 assert.match(worker, /const cached = effectiveEntityStatus === 'confirmed'/)
 assert.match(worker, /!cacheHit && effectiveEntityStatus === 'confirmed'/)
 assert.match(worker, /UPDATE \$\{topicRunsTable\} tr JOIN \$\{jobsTable\} j[\s\S]*j\.schema_version=\?/)
-assert.match(worker, /WHERE schema_version=\? AND status='running'/)
+assert.match(worker, /WHERE schema_version=\? AND \(\? IS NULL OR created_at>=\?\)[\s\S]*AND status='running'/)
 assert.match(worker, /SELECT tr\.id,tr\.job_id,tr\.lead_id,tr\.last_error[\s\S]*j\.schema_version=\?/)
 assert.match(worker, /Math\.min\(10,/)
 assert.doesNotMatch(enrichmentService, /enqueueLeadScoreJob/)

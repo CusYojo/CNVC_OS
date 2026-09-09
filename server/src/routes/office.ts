@@ -1,7 +1,7 @@
 import { Router } from 'express'
 import { z } from 'zod'
 import type { AuthedRequest } from '../middleware/requireAuth.js'
-import { actOnOfficeRequest, getOfficeAttachment, getOfficeRequest, getOfficeRevision, grantOfficeAttachment, listOfficeRequests, listReusableOfficeRequests, officeCommandReceipt, officeOptions, officeTransferCandidates, previewOfficeRequest, resolveOfficeCommand, saveOfficeRequest, uploadOfficeAttachment } from '../services/fdeOfficeService.js'
+import { actOnOfficeRequest, deleteOfficeAttachment, getOfficeAttachment, getOfficeRequest, getOfficeRevision, grantOfficeAttachment, listOfficeRequests, listReusableOfficeRequests, officeCommandReceipt, officeOptions, officeTransferCandidates, previewOfficeRequest, resolveOfficeCommand, saveOfficeRequest, uploadOfficeAttachment } from '../services/fdeOfficeService.js'
 import { projectFilePreviewContentType } from '../services/projectFileStorageService.js'
 import { canonicalizeProjectTextBuffer } from '../security/projectFileValidation.js'
 import { writeAudit } from '../services/auditService.js'
@@ -26,6 +26,7 @@ officeRouter.post('/requests/:id/commands/resolve', async (req: AuthedRequest, r
 officeRouter.post('/requests/:id/save', async (req: AuthedRequest, res, next) => { try { res.json(await saveOfficeRequest(id(req.params.id), req.user!.uid, req.body)) } catch (e) { next(e) } })
 officeRouter.post('/requests/:id/actions', async (req: AuthedRequest, res, next) => { try { res.json(await actOnOfficeRequest(id(req.params.id), req.user!.uid, req.body)) } catch (e) { next(e) } })
 officeRouter.post('/requests/:id/attachments/:fileId', async (req: AuthedRequest, res, next) => { try { res.json(await uploadOfficeAttachment(id(req.params.id), id(req.params.fileId), req.user!.uid, req.body)) } catch (e) { next(e) } })
+officeRouter.post('/requests/:id/attachments/:fileId/delete', async (req: AuthedRequest, res, next) => { try { res.json(await deleteOfficeAttachment(id(req.params.id), id(req.params.fileId), req.user!.uid, req.body)) } catch (e) { next(e) } })
 officeRouter.post('/requests/:id/attachments/:fileId/grants', async (req: AuthedRequest, res, next) => { try { res.json(await grantOfficeAttachment(id(req.params.id), id(req.params.fileId), req.user!.uid, req.body)) } catch (e) { next(e) } })
 for (const operation of ['preview', 'download'] as const) officeRouter.get(`/requests/:id/attachments/:fileId/${operation}`, async (req: AuthedRequest, res, next) => {
   try {

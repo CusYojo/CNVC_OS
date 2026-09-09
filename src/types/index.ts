@@ -132,6 +132,7 @@ export interface Meeting {
   unreadNoticeId?: string | null
   canContribute?: boolean
   canManage?: boolean
+  canDelete?: boolean
   minutesConfirmedAt?: string | null
 }
 

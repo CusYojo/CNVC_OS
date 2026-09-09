@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import test from 'node:test'
-import { reportWindow, weeklyReportActionSchema, weeklyReportCreateSchema, weeklyReportSaveSchema, weeklyReportSourceOptions } from '../src/contracts/fdeWeeklyReportContract.js'
+import { reportWindow, weeklyReportActionSchema, weeklyReportBody, weeklyReportCreateSchema, weeklyReportSaveSchema, weeklyReportSourceOptions, type WeeklyReportFacts } from '../src/contracts/fdeWeeklyReportContract.js'
 
 test('weekly report range is a Shanghai half-open week across year boundary', () => {
   const { start, end } = reportWindow('2026-12-28')
@@ -32,4 +32,23 @@ test('nonproject sources require explicit selection and private calendar opt-in 
   assert.equal(weeklyReportCreateSchema.safeParse({...input,sourceOptions:{privateCalendar:true}}).success,false)
   assert.equal(weeklyReportCreateSchema.parse({...input,sourceOptions:{calendar:true}}).sourceOptions.privateCalendar,false)
   assert.equal(JSON.stringify(weeklyReportSourceOptions.parse({calendar:true,privateCalendar:false,independentWork:false})),JSON.stringify(weeklyReportSourceOptions.parse({independentWork:false,privateCalendar:false,calendar:true})))
+})
+test('weekly report keeps useful sections and omits cancelled or implementation-focused noise', () => {
+  const facts: WeeklyReportFacts = {
+    weekStart: '2026-12-28', weekEnd: '2027-01-03', generatedAt: '2026-12-31T08:00:00.000Z', projects: [], approvals: [], meetings: [], unavailable: ['内部来源说明'],
+    tasks: [
+      { id: randomUUID(), projectId: null, title: '完成访谈纪要', version: 1, status: '已完成', dueDate: '2026-12-29', completedAt: '2026-12-29T08:00:00.000Z', progress: 100 },
+      { id: randomUUID(), projectId: null, title: '推进项目复核', version: 1, status: '进行中', dueDate: '2026-12-30', completedAt: null, progress: 60 },
+    ],
+    calendar: [
+      { id: randomUUID(), source: 'personal', projectId: null, ownerId: randomUUID(), title: '有效安排', version: 1, startsAt: '2026-12-30T02:00:00.000Z', endsAt: '2026-12-30T03:00:00.000Z', status: 'active', visibility: 'private' },
+      { id: randomUUID(), source: 'meeting', projectId: null, ownerId: randomUUID(), title: '已取消会议', version: 2, startsAt: '2026-12-30T04:00:00.000Z', endsAt: '2026-12-30T05:00:00.000Z', status: 'cancelled', visibility: 'project' },
+    ],
+    metrics: { completedInWeek: 1, dueInWeek: 2, overdueOpen: 0, cancelledDueInWeek: 1, approvalActions: 0, meetingRecords: 0 },
+  }
+  const body = weeklyReportBody(facts)
+  assert.match(body, /已完成事项\n- 完成访谈纪要/)
+  assert.match(body, /重点推进\n- 推进项目复核/)
+  assert.match(body, /重要安排\n- 有效安排/)
+  assert.doesNotMatch(body, /已取消会议|内部来源说明|请人工补充|版本|来源快照/)
 })

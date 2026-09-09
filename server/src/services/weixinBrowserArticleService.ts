@@ -4,6 +4,10 @@ import path from 'node:path'
 import { weixinArticleUrl, type LinkArticle } from '../contracts/weixinLinkIntakeContract.js'
 import { directSkillPlatformEnvironment } from './directSkillEnvironment.js'
 
+export function weixinBrowserEnvironment(env: NodeJS.ProcessEnv = process.env, platform = process.platform): NodeJS.ProcessEnv {
+  return directSkillPlatformEnvironment(process.cwd(), platform, env)
+}
+
 export function parseWeixinBrowserArticle(output: string, url: string): LinkArticle {
   const value = JSON.parse(output)
   if (value.error) throw Object.assign(new Error('微信文章浏览器读取失败'), { code: String(value.error).slice(0, 64) })
@@ -26,7 +30,7 @@ export async function fetchWeixinBrowserArticle(input: string): Promise<LinkArti
   const script = path.resolve('server/scripts/weixin-browser-article.py')
   const output = await new Promise<string>((resolve, reject) => {
     execFile(python, [script, url], { windowsHide: true, timeout: 55000, maxBuffer: 2_000_000,
-      env: directSkillPlatformEnvironment(process.cwd(), process.platform, process.env),
+      env: weixinBrowserEnvironment(),
     }, (error, stdout) => {
       if (error && !stdout.trim()) return reject(Object.assign(new Error('微信浏览器进程失败'), { code: 'SOURCE_BROWSER_FAILED' }))
       if (error) {

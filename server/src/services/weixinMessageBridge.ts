@@ -1,6 +1,8 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { closeSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
+import { pool } from '../db/client.js'
+import { mysqlConfig } from '../db/config.js'
 import { agentConversationRepository, identityRepositories, imIntegrationRepository } from '../repositories/index.js'
 import { decryptIntegrationCredential } from '../security/integrationCredentialCrypto.js'
 import {
@@ -15,6 +17,9 @@ import { createConversation } from './conversationService.js'
 import { createImBinding, routeImInboundMessage, type ImActor } from './imIntegrationService.js'
 import { getArtifactDownload } from './aiTaskService.js'
 import { weixinArticleUrl, weixinIntakeCommand, weixinIntakeBindingAuthorized } from '../contracts/weixinLinkIntakeContract.js'
+import { personalWeixinSenderAllowed } from '../contracts/personalWeixinAiContract.js'
+import { acquireWeixinBridgeLease, type WeixinBridgeLease } from './weixinBridgeLease.js'
+import { mysqlPersonalWeixinAiRepository } from '../repositories/mysql/mysqlPersonalWeixinAiRepository.js'
 import { processWeixinLinkIntake } from './weixinLinkIntakeService.js'
 import { uploadAndSendWeixinFile, weixinArtifactIdsFromMessages } from './weixinFileDelivery.js'
 import {
@@ -70,6 +75,7 @@ type ActiveBot = {
   accountId: string
   createdBy: string
   accountUserId: string
+  ownershipMode: string
   credentials: WeixinCredentials
 }
 
@@ -80,6 +86,19 @@ let bridgeTimer: NodeJS.Timeout | null = null
 let bridgeStopped = true
 let bridgeRequested = false
 let bridgeLockOwned = false
+let databaseLease: WeixinBridgeLease | null = null
+let bridgeStartPending = false
+
+export function routePersonalWeixinSender(
+  bot: { ownershipMode: string; accountUserId: string },
+  senderId: string,
+): 'shared' | 'allowed' | 'owner_mismatch' {
+  if (bot.ownershipMode !== 'personal') return 'shared'
+  return personalWeixinSenderAllowed({
+    ownershipMode: bot.ownershipMode,
+    accountUserId: bot.accountUserId,
+  }, senderId) ? 'allowed' : 'owner_mismatch'
+}
 
 type BridgeLockRecord = { pid?: number; owner?: string; startedAt?: string }
 
@@ -338,10 +357,22 @@ async function dispatchInbound(bot: ActiveBot, message: WeixinMessage) {
   const imageCount = weixinInboundImageCount(message)
   const fileCount = weixinInboundFileCount(message)
   if (!targetUserId || !contextToken || (!text && !imageCount && !fileCount)) return
+  const personalRoute = routePersonalWeixinSender(bot, targetUserId)
+  if (personalRoute === 'owner_mismatch') {
+    await sendText(bot.credentials, targetUserId, contextToken, '这是其他用户的个人微信 AI，请在投资中台连接你自己的微信。')
+    return
+  }
+  const externalConversationId = `${bot.accountId}:${targetUserId}`.slice(0, 191)
+  const personalBinding = personalRoute === 'allowed'
+    ? await imIntegrationRepository.findEnabledInboundBinding(bot.id, externalConversationId)
+    : null
+  if (personalRoute === 'allowed' && (!personalBinding || personalBinding.userId !== bot.createdBy)) {
+    await sendText(bot.credentials, targetUserId, contextToken, '个人微信 AI 绑定已失效，请在投资中台重新连接。')
+    return
+  }
   if (text && !imageCount && !fileCount && (weixinArticleUrl(text) || weixinIntakeCommand(text))) {
-    const externalConversationId = `${bot.accountId}:${targetUserId}`.slice(0, 191)
-    let intakeBinding = await imIntegrationRepository.findEnabledInboundBinding(bot.id, externalConversationId)
-    if (!intakeBinding && bot.accountUserId === targetUserId) intakeBinding = await ensureInboundBinding(bot, targetUserId)
+    let intakeBinding = personalBinding || await imIntegrationRepository.findEnabledInboundBinding(bot.id, externalConversationId)
+    if (!intakeBinding && personalRoute === 'shared' && bot.accountUserId === targetUserId) intakeBinding = await ensureInboundBinding(bot, targetUserId)
     if (!intakeBinding || !weixinIntakeBindingAuthorized({ senderId: targetUserId, accountUserId: bot.accountUserId, botOwnerId: bot.createdBy, bindingUserId: intakeBinding.userId, bindingVersion: intakeBinding.version })) {
       await sendText(bot.credentials, targetUserId, contextToken, '请先由管理员在平台的 IM 机器人“授权绑定”中绑定你的平台账号。旧的默认聊天绑定需要管理员重新确认（停用后再启用），才能使用微信收录。')
       return
@@ -379,13 +410,13 @@ async function dispatchInbound(bot: ActiveBot, message: WeixinMessage) {
   console.log(JSON.stringify({
     event: 'weixin_inbound_received', botId: bot.id, textLength: text.length, imageCount, fileCount,
   }))
-  const binding = await ensureInboundBinding(bot, targetUserId)
+  const binding = personalBinding || await ensureInboundBinding(bot, targetUserId)
   const conversation = binding.conversationId
     ? await agentConversationRepository.findAgentById(binding.conversationId)
     : null
   if (!conversation?.externalSessionId) throw new Error('微信绑定的 Agent 会话未就绪')
   const owner = await identityRepositories.users.findById(binding.userId)
-  if (!owner) throw new Error('微信绑定用户不存在')
+  if (!owner || owner.status !== '启用') throw new Error('微信绑定用户不存在或已停用')
   const before = await getJwAgentSnapshot(owner.id, conversation.externalSessionId)
   const baselineIds = new Set((before?.messages || []).map((item) => item.id))
   let dispatchedAgentId = conversation.externalSessionId
@@ -480,14 +511,23 @@ async function dispatchInbound(bot: ActiveBot, message: WeixinMessage) {
 
 async function activeBots(): Promise<ActiveBot[]> {
   const data = await imIntegrationRepository.listSettingsData()
-  return data.bots.flatMap((bot) => {
-    if (bot.platform !== 'wechat' || !bot.enabled || bot.connectionStatus !== 'connected' || !bot.createdBy) return []
+  const active: ActiveBot[] = []
+  for (const bot of data.bots) {
+    if (bot.platform !== 'wechat' || !bot.enabled || bot.connectionStatus !== 'connected' || !bot.createdBy) continue
     let raw: Record<string, string>
     try { raw = decryptIntegrationCredential(bot.credentialCiphertext, bot.id) }
-    catch { return [] }
-    if (raw.transport !== 'ilink' || !raw.botToken || !raw.accountId || !raw.baseUrl || !raw.inboundSecret) return []
-    return [{ id: bot.id, accountId: raw.accountId, createdBy: bot.createdBy, accountUserId: String(bot.config.accountUserId || ''), credentials: raw as WeixinCredentials }]
-  })
+    catch { continue }
+    if (raw.transport !== 'ilink' || !raw.botToken || !raw.accountId || !raw.baseUrl || !raw.inboundSecret) continue
+    const ownershipMode = String(bot.config.ownershipMode || 'shared')
+    if (ownershipMode === 'personal' && !(await mysqlPersonalWeixinAiRepository.eligibility(bot.createdBy)).eligible) continue
+    active.push({
+      id: bot.id, accountId: raw.accountId, createdBy: bot.createdBy,
+      accountUserId: String(bot.config.accountUserId || ''),
+      ownershipMode,
+      credentials: raw as WeixinCredentials,
+    })
+  }
+  return active
 }
 
 async function pollBot(bot: ActiveBot) {
@@ -550,18 +590,44 @@ async function bridgeTick() {
   }
 }
 
-function attemptStartWeixinMessageBridge() {
-  if (!bridgeRequested || !bridgeStopped) return
+async function attemptStartWeixinMessageBridge() {
+  if (!bridgeRequested || !bridgeStopped || bridgeStartPending) return
+  bridgeStartPending = true
   if (!tryAcquireBridgeLock()) {
     const current = readBridgeLock()
     console.warn(JSON.stringify({
       event: 'weixin_bridge_standby', leaderPid: current.pid || null,
     }))
-    bridgeTimer = setTimeout(attemptStartWeixinMessageBridge, 5_000)
+    bridgeTimer = setTimeout(() => void attemptStartWeixinMessageBridge(), 5_000)
     bridgeTimer.unref()
+    bridgeStartPending = false
+    return
+  }
+  try {
+    databaseLease = await acquireWeixinBridgeLease(pool, mysqlConfig.database)
+  } catch (error) {
+    console.error(JSON.stringify({
+      event: 'weixin_bridge_database_lock_failed',
+      error: error instanceof Error ? error.message : String(error),
+    }))
+    databaseLease = null
+  }
+  if (!bridgeRequested) {
+    await databaseLease?.release()
+    databaseLease = null
+    bridgeStartPending = false
+    releaseBridgeLock()
+    return
+  }
+  if (!databaseLease?.acquired) {
+    console.warn(JSON.stringify({ event: 'weixin_bridge_database_standby' }))
+    bridgeTimer = setTimeout(() => void attemptStartWeixinMessageBridge(), 5_000)
+    bridgeTimer.unref()
+    bridgeStartPending = false
     return
   }
   bridgeStopped = false
+  bridgeStartPending = false
   console.log(JSON.stringify({ event: 'weixin_bridge_leader', pid: process.pid }))
   void bridgeTick()
 }
@@ -573,7 +639,7 @@ export function startWeixinMessageBridge() {
     return
   }
   bridgeRequested = true
-  attemptStartWeixinMessageBridge()
+  void attemptStartWeixinMessageBridge()
 }
 
 export function isWeixinMessageBridgeEnabled(value: string | undefined) {
@@ -590,5 +656,7 @@ export async function stopWeixinMessageBridge() {
   await Promise.allSettled([...botPolls.values()])
   botPolls.clear()
   pollControllers.clear()
+  await databaseLease?.release()
+  databaseLease = null
   releaseBridgeLock()
 }

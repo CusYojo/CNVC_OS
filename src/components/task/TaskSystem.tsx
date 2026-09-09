@@ -76,7 +76,7 @@ export function TaskCard({ task, onOpen, onPrimaryAction, onMoreAction, busy, co
     ...(capabilities.canFeedback && status !== 'not_started' && status !== 'pending_acceptance' ? [{ key: 'feedback', label: '更新进度' }] : []),
     ...(capabilities.canExtend ? [{ key: 'extension', label: '申请延期' }] : []),
     ...(task.projectId ? [{ key: 'project', label: '打开项目' }] : []),
-    ...(capabilities.canCancel ? [{ key: 'cancel', label: '取消任务', danger: true }] : []),
+    ...(capabilities.canCancel ? [{ key: 'cancel', label: '删除任务', danger: true }] : []),
   ]
   return <article id={`fde-task-${task.id}`} className={`task-card${compact ? ' compact' : ''}`} onClick={onOpen} tabIndex={0} onKeyDown={event => { if (event.key === 'Enter') onOpen() }}>
     <div className="task-card-main">
@@ -125,7 +125,7 @@ export function TaskDrawer({ taskId, open, onClose, onAction }: { taskId: string
     ...(task.capabilities.canFeedback && task.status !== 'not_started' && task.status !== 'pending_acceptance' ? [{ key: 'feedback', label: '更新进度' }] : []),
     ...(task.capabilities.canExtend ? [{ key: 'extension', label: '申请延期' }] : []),
     ...(task.project ? [{ key: 'project', label: '打开项目' }] : []),
-    ...(task.capabilities.canCancel ? [{ key: 'cancel', label: '取消任务', danger: true }] : []),
+    ...(task.capabilities.canCancel ? [{ key: 'cancel', label: '删除任务', danger: true }] : []),
   ] : []
   return <Drawer open={open} onClose={onClose} title="任务详情" width="w-[min(620px,100vw)]" footer={task ? <><MoreActions actions={more} onAction={action => onAction?.(action, task)} /><PrimaryAction action={task.primaryAction} label={task.primaryActionLabel} onClick={() => onAction?.(task.primaryAction, task)} /></> : undefined}>
     {error && <ErrorState message={error} onRetry={() => setRevision(value => value + 1)} />}

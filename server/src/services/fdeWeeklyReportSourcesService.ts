@@ -1,4 +1,4 @@
-import { and, eq, gt, gte, inArray, isNotNull, isNull, lt, ne, or, sql } from 'drizzle-orm'
+import { and, eq, gt, gte, inArray, isNotNull, isNull, lt, ne, notInArray, or, sql } from 'drizzle-orm'
 import { db } from '../db/client.js'
 import { leaderTimeRequests, meetingParticipants, meetings, personalCalendarEvents, todos } from '../db/schema.js'
 import { reportWindow, type WeeklyReportCalendarFact, type WeeklyReportFacts, type WeeklyReportSourceOptions } from '../contracts/fdeWeeklyReportContract.js'
@@ -40,7 +40,10 @@ export async function collectReportCalendar(reader: Reader, authorId: string, pr
     or(ne(meetings.workflowKind, 'committee'), committeeMeetingAccess(authorId)),
     or(inArray(meetings.projectId, projectIds), options.independentWork ? isNull(meetings.projectId) : undefined),
     or(eq(meetings.hostUserId, authorId), inArray(meetings.id, participant)),
-    or(eq(meetings.workflowKind, 'legacy'), inArray(meetings.workflowStatus, ['scheduled', 'completed', 'cancelled'])),
+    or(
+      and(eq(meetings.workflowKind, 'legacy'), notInArray(meetings.workflowStatus, ['cancelled', 'deleted'])),
+      and(ne(meetings.workflowKind, 'legacy'), inArray(meetings.workflowStatus, ['scheduled', 'completed'])),
+    ),
     lt(meetings.startedAt, end), or(gt(meetings.endsAt, start), and(isNull(meetings.endsAt), gte(meetings.startedAt, start))),
   )).limit(501)
   for (const row of meetingRows) result.push({ id: row.id, source: 'meeting', projectId: row.projectId, ownerId: row.hostUserId ?? authorId,

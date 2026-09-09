@@ -3,16 +3,27 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { redactSensitiveText } from '../security/redactSecrets.js'
+import { requestAiGatewayTextWithUsage } from './aiGatewayService.js'
+
+export type CodexStructuredOutputRuntime = 'codex-cli' | 'codex-gateway'
 
 export type CodexStructuredOutputExecution = {
   output: unknown
-  runtime: 'codex-cli'
+  runtime: CodexStructuredOutputRuntime
   usage: { inputTokens: number; outputTokens: number; totalTokens: number }
   durationMs: number
   costMicrousd: 0
   toolCalls: 0
   numTurns: 1
   sessionId: null
+}
+
+export function codexStructuredOutputRuntime(
+  env: Record<string, string | undefined> = process.env,
+): CodexStructuredOutputRuntime {
+  return env.CODEX_STRUCTURED_OUTPUT_TRANSPORT?.trim().toLowerCase() === 'gateway'
+    ? 'codex-gateway'
+    : 'codex-cli'
 }
 
 type CodexExecutionError = Error & {
@@ -61,7 +72,62 @@ export async function runCodexStructuredOutput(input: {
   model: string
   timeoutMs: number
   workDir?: string
+  runtime?: CodexStructuredOutputRuntime
+  fetchImpl?: typeof fetch
 }): Promise<CodexStructuredOutputExecution> {
+  const runtime = input.runtime ?? codexStructuredOutputRuntime()
+  if (runtime === 'codex-gateway') {
+    const startedAt = Date.now()
+    const emptyMetrics: CodexStructuredOutputExecution = {
+      output: undefined,
+      runtime,
+      usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+      durationMs: 0,
+      costMicrousd: 0,
+      toolCalls: 0,
+      numTurns: 1,
+      sessionId: null,
+    }
+    try {
+      const baseUrl = (process.env.LLM_BASE_URL || process.env.OPENAI_BASE_URL || '').replace(/\/$/, '')
+      const apiKey = process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || ''
+      if (!baseUrl || !apiKey) throw new Error('Codex gateway requires LLM_BASE_URL and LLM_API_KEY/OPENAI_API_KEY')
+      const response = await requestAiGatewayTextWithUsage({
+        baseUrl,
+        apiKey,
+        model: input.model,
+        messages: [
+          { role: 'system', content: input.systemPrompt },
+          {
+            role: 'user',
+            content: [
+              input.prompt,
+              `严格按这个 JSON Schema 返回单一 JSON 对象：${JSON.stringify(input.outputSchema)}`,
+              '不得调用工具、读取文件或联网。不要输出 Markdown 或额外解释。',
+            ].join('\n\n'),
+          },
+        ],
+        maxTokens: Math.max(256, Math.min(32_000, Number(process.env.CODEX_STRUCTURED_OUTPUT_MAX_TOKENS) || 8_000)),
+        timeoutMs: Math.max(30_000, input.timeoutMs),
+        json: true,
+        fetchImpl: input.fetchImpl,
+      })
+      return {
+        ...emptyMetrics,
+        output: parseJsonObject(response.text),
+        usage: response.usage ?? emptyMetrics.usage,
+        durationMs: Date.now() - startedAt,
+      }
+    } catch (cause) {
+      const metrics = { ...emptyMetrics, durationMs: Date.now() - startedAt }
+      const error = new Error(redactSensitiveText(
+        `${input.profile} Codex gateway failed: ${cause instanceof Error ? cause.message : String(cause)}`,
+      ).slice(0, 8_000)) as CodexExecutionError
+      error.retryable = true
+      error.leadRunMetrics = metrics
+      throw error
+    }
+  }
   const ownsWorkDir = !input.workDir
   const workDir = input.workDir
     ? path.resolve(input.workDir)

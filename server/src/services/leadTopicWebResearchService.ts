@@ -1,7 +1,10 @@
 import { createHash } from 'node:crypto'
 import { z } from 'zod'
 import { redactSensitiveText } from '../security/redactSecrets.js'
-import { requestAiGatewayWebSearchText } from './aiGatewayService.js'
+import {
+  requestAiGatewayWebSearchText,
+  type AiGatewayWebSearchSource,
+} from './aiGatewayService.js'
 import { resolveAgentRuntimePolicy } from './aiCapabilityService.js'
 import { resolveAiModelByKey, resolveAiModelRoute } from './aiModelSettingsService.js'
 import {
@@ -215,14 +218,25 @@ const RESEARCH_CODEX_BATCH_TOPIC_GROUPS = [
 const codexBatchCache = new Map<string, Map<LeadEnrichmentTopicKey, CodexCliTopicWebSearchResult>>()
 const codexBatchInflight = new Map<string, Promise<void>>()
 
-async function withLeadEnrichmentResearchPermit<T>(run: () => Promise<T>): Promise<T> {
+export function leadEnrichmentResearchAgentProfile(backend: string, model: string) {
+  const routeIdentity = `${identity(backend) || 'gateway'}:${identity(model) || 'default'}`
+  return `lead-enrichment-web-research:${createHash('sha256').update(routeIdentity).digest('hex').slice(0, 16)}`
+}
+
+async function withLeadEnrichmentResearchPermit<T>(input: {
+  backend: string
+  model: string
+  run: () => Promise<T>
+}): Promise<T> {
   const reservationUsd = Math.max(0.01, Math.min(4, Number(process.env.LEAD_ENRICHMENT_RESERVATION_USD) || 0.25))
   const permit = await acquireLeadAgentRuntimePermit({
-    agentProfile: 'lead-enrichment-web-research',
+    // Isolate the circuit history by effective runtime route. A retired model
+    // running on another host must not keep a repaired production route open.
+    agentProfile: leadEnrichmentResearchAgentProfile(input.backend, input.model),
     reservationMicrousd: Math.round(reservationUsd * 1_000_000),
   })
   try {
-    const result = await run()
+    const result = await input.run()
     // Codex CLI exposes tokens but not authoritative billed cost. Charging the
     // reservation keeps the cross-process daily budget conservative.
     await finishLeadAgentRuntimePermit({
@@ -284,36 +298,60 @@ function consumeCodexBatchResult(cacheKey: string, topicKey: LeadEnrichmentTopic
   return result
 }
 
+const researchFactSchema = z.object({
+  factKey: z.string().min(1).max(128),
+  instanceKey: z.string().min(1).max(128).optional(),
+  value: z.unknown(),
+  quote: z.string().max(2_000).optional().default(''),
+  sourceUrls: z.array(z.string().max(4_000)).min(1),
+  period: z.string().max(64).optional(),
+  unit: z.string().max(32).optional(),
+  currency: z.string().max(16).optional(),
+  scope: z.string().max(256).optional(),
+})
+
+const researchGapSchema = z.union([
+  z.string().min(1).max(1_000),
+  z.record(z.string(), z.unknown()).transform((value) => JSON.stringify(value).slice(0, 1_000)),
+])
+
 const outputSchema = z.object({
-  facts: z.array(z.object({
-    factKey: z.string().min(1).max(128),
-    instanceKey: z.string().min(1).max(128).optional(),
-    value: z.unknown(),
-    quote: z.string().max(2_000).optional().default(''),
-    sourceUrls: z.array(z.string().url().max(4_000)).min(1).max(5),
-    period: z.string().max(64).optional(),
-    unit: z.string().max(32).optional(),
-    currency: z.string().max(16).optional(),
-    scope: z.string().max(256).optional(),
-  }).strict()).max(30),
-  gaps: z.array(z.string().min(1).max(1_000)).max(30),
+  facts: z.array(researchFactSchema),
+  gaps: z.array(researchGapSchema),
   conflicts: z.array(z.object({
     factKey: z.string().min(1).max(128),
     instanceKey: z.string().min(1).max(128).optional(),
     candidates: z.array(z.object({
       value: z.unknown(),
       quote: z.string().max(2_000).optional().default(''),
-      sourceUrls: z.array(z.string().url().max(4_000)).min(1).max(5),
+      sourceUrls: z.array(z.string().max(4_000)).min(1),
       period: z.string().max(64).optional(),
       unit: z.string().max(32).optional(),
       currency: z.string().max(16).optional(),
       scope: z.string().max(256).optional(),
-    }).strict()).min(2).max(10),
+    })).min(2).max(10),
     reason: z.string().min(1).max(2_000),
-  }).strict()).max(20),
-}).strict()
+  })).max(20),
+})
 
 type ParsedLeadTopicResearchConflict = z.infer<typeof outputSchema>['conflicts'][number]
+
+export function resolveLeadTopicSearchSources(input: {
+  reportedSources: AiGatewayWebSearchSource[]
+  declaredSourceUrls: string[]
+}) {
+  const sources = new Map<string, AiGatewayWebSearchSource>()
+  for (const source of input.reportedSources) {
+    if (/^https?:\/\//i.test(source.url)) sources.set(source.url, source)
+  }
+  const metadataFallback = sources.size === 0
+  if (metadataFallback) {
+    for (const url of input.declaredSourceUrls) {
+      if (/^https?:\/\//i.test(url)) sources.set(url, { url, title: '' })
+    }
+  }
+  return { sources: [...sources.values()], metadataFallback }
+}
 
 export function validateLeadTopicResearchConflict(input: {
   topicKey: LeadEnrichmentTopicKey
@@ -373,6 +411,10 @@ function extractJson(value: string): unknown {
     if (start >= 0 && end > start) return JSON.parse(candidate.slice(start, end + 1))
     throw new Error('专题联网研究未返回有效JSON')
   }
+}
+
+export function parseLeadTopicResearchOutput(value: string) {
+  return outputSchema.parse(extractJson(value))
 }
 
 function identity(value: unknown): string {
@@ -702,10 +744,13 @@ export async function researchLeadTopicWithWeb(input: {
         const inflightKey = `${cacheKey}:${batchGroup[0]}`
         let pending = codexBatchInflight.get(inflightKey)
         if (!pending) {
-          pending = withLeadEnrichmentResearchPermit(() => requestCodexCliMultiTopicWebSearchText({
-            prompt: codexMultiTopicPrompt({ ...input, topicKeys: effectiveBatchGroup }), model,
-            timeoutMs: codexTimeoutMs, topicKeys: effectiveBatchGroup,
-          })).then((results) => {
+          pending = withLeadEnrichmentResearchPermit({
+            backend: 'codex-cli', model,
+            run: () => requestCodexCliMultiTopicWebSearchText({
+              prompt: codexMultiTopicPrompt({ ...input, topicKeys: effectiveBatchGroup }), model,
+              timeoutMs: codexTimeoutMs, topicKeys: effectiveBatchGroup,
+            }),
+          }).then((results) => {
             const cached = codexBatchCache.get(cacheKey) ?? new Map()
             for (const result of results) cached.set(result.topicKey as LeadEnrichmentTopicKey, result)
             codexBatchCache.set(cacheKey, cached)
@@ -720,19 +765,25 @@ export async function researchLeadTopicWithWeb(input: {
         }
         response = consumeCodexBatchResult(cacheKey, input.topicKey)
       }
-      response ??= await withLeadEnrichmentResearchPermit(() => requestCodexCliWebSearchText({
-        prompt: messages[0].content, model, timeoutMs: codexTimeoutMs,
-      }))
+      response ??= await withLeadEnrichmentResearchPermit({
+        backend: 'codex-cli', model,
+        run: () => requestCodexCliWebSearchText({
+          prompt: messages[0].content, model, timeoutMs: codexTimeoutMs,
+        }),
+      })
     } else {
-      response = await withLeadEnrichmentResearchPermit(() => requestAiGatewayWebSearchText({
-        baseUrl,
-        apiKey,
-        model,
-        timeoutMs: Math.min(360_000, timeoutMs),
-        maxTokens: 6_000,
-        maxToolCalls: 6,
-        messages: [...messages],
-      }))
+      response = await withLeadEnrichmentResearchPermit({
+        backend: 'gateway', model,
+        run: () => requestAiGatewayWebSearchText({
+          baseUrl,
+          apiKey,
+          model,
+          timeoutMs: Math.min(360_000, timeoutMs),
+          maxTokens: 6_000,
+          maxToolCalls: 6,
+          messages: [...messages],
+        }),
+      })
     }
     const budgetMultiplier = 'budgetMultiplier' in response ? Number(response.budgetMultiplier) || 1 : 1
     const budget = validateLeadTopicResearchBudget(response.usage, process.env, budgetMultiplier)
@@ -741,8 +792,15 @@ export async function researchLeadTopicWithWeb(input: {
         code: 'LEAD_TOPIC_BUDGET_EXCEEDED', category: 'budget', retryable: false,
       })
     }
-    const parsed = outputSchema.parse(extractJson(response.text))
-    const allowedSources = new Map(response.sources.map((source) => [source.url, source]))
+    const parsed = parseLeadTopicResearchOutput(response.text)
+    const sourceResolution = resolveLeadTopicSearchSources({
+      reportedSources: response.sources,
+      declaredSourceUrls: [
+        ...parsed.facts.flatMap((fact) => fact.sourceUrls),
+        ...parsed.conflicts.flatMap((conflict) => conflict.candidates.flatMap((candidate) => candidate.sourceUrls)),
+      ],
+    })
+    const allowedSources = new Map(sourceResolution.sources.map((source) => [source.url, source]))
     const allowedFactKeys = new Set(contract.factKeys)
     let contractRejectedFactCount = 0
     const facts = parsed.facts.flatMap((fact) => {
@@ -772,6 +830,7 @@ export async function researchLeadTopicWithWeb(input: {
       gaps: parsed.gaps,
       conflicts,
       sources: [...allowedSources.values()],
+      sourceMetadataFallback: sourceResolution.metadataFallback,
       usage: response.usage,
     }
   } catch (error) {

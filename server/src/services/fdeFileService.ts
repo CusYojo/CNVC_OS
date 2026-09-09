@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { and, asc, count, desc, eq, inArray, or, sql } from 'drizzle-orm'
+import { and, asc, count, desc, eq, getTableColumns, inArray, or, sql } from 'drizzle-orm'
 import { db } from '../db/client.js'
 import { companyKnowledge, knowledgeChunks, oaApprovalRequests, projectDutyAssignments, projectFileEvents, projectFileGrants, projectFiles, projectFileVersions, projectMaterialSubmissions, projectMembers, projects, roles, todoFeedbackEvidence, userRoles, users } from '../db/schema.js'
 import { FDE_FILE_TRASH_DAYS, fileHistoryQuery, fileLifecycleCommand, filePermissionCommand, fileWorkspaceQuery, normalizeFileGrants } from '../contracts/fdeFileContract.js'
@@ -74,10 +74,22 @@ export async function listFdeFiles(projectId: string, userId: string, raw: unkno
   if (project.workflowModel !== 'fde-v1') throw fileError('FILE_WORKSPACE_UNAVAILABLE', '该项目使用原资料工作区', 400)
   const where = and(eq(projectFiles.projectId, projectId), eq(projectFiles.lifecycle, query.view), projectFileAccessCondition(userId, query.view === 'deleted' ? 'delete' : 'view', query.view === 'deleted'), query.keyword ? sql`LOCATE(${query.keyword},${projectFiles.name})>0` : undefined)
   const [total] = await db.select({ value: count() }).from(projectFiles).where(where)
-  const rows = await db.select().from(projectFiles).where(where).orderBy(desc(projectFiles.uploadedAt), desc(projectFiles.id)).limit(query.pageSize).offset((query.page - 1) * query.pageSize)
+  const rows = await db.select({
+    ...getTableColumns(projectFiles),
+    canDelete: sql<boolean>`${projectFileAccessCondition(userId, 'delete', true)}`.mapWith(Boolean),
+  }).from(projectFiles).where(where).orderBy(desc(projectFiles.uploadedAt), desc(projectFiles.id)).limit(query.pageSize).offset((query.page - 1) * query.pageSize)
   let canUpload = false
   try { await requireProjectFileUpload(db, projectId, userId); canUpload = true } catch { /* scope already checked, upload may be forbidden */ }
-  return { list: rows.map(metadata), total: total.value, ...query, canUpload }
+  return {
+    list: rows.map(({ canDelete, ...file }) => ({
+      ...metadata(file),
+      capabilities: {
+        trash: query.view === 'active' && canDelete,
+        restore: query.view === 'deleted' && project.lifecycle === 'active' && canDelete && Boolean(file.retentionUntil && file.retentionUntil > new Date()),
+      },
+    })),
+    total: total.value, ...query, canUpload,
+  }
 }
 
 export async function getFdeFile(fileId: string, userId: string, raw: unknown = {}) {

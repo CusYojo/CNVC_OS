@@ -30,6 +30,7 @@ import { imIntegrationsRouter } from './imIntegrations.js'
 import { leadPushTargetsRouter } from './leadPushTargets.js'
 import { operationsRouter } from './operations.js'
 import { systemAdministrationRouter } from './systemAdministration.js'
+import { assistantExperiencesRouter } from './assistantExperiences.js'
 import { leadIntakeRouter } from './leadIntake.js'
 import { radarRouter } from './radar.js'
 import { radarDingTalkRouter } from './radarDingTalk.js'
@@ -75,6 +76,7 @@ apiRouter.use('/integrations/radar-dingtalk', radarDingTalkRouter)
 apiRouter.use('/investment/leads/push-targets', leadPushTargetsRouter)
 apiRouter.use('/operations', operationsRouter)
 apiRouter.use('/system-administration', systemAdministrationRouter)
+apiRouter.use('/assistant-experiences', assistantExperiencesRouter)
 apiRouter.use('/conversations', conversationsRouter)
 apiRouter.use('/workspace', workspaceRouter)
 apiRouter.post('/materials/generate', createMaterial)

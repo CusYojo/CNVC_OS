@@ -4,10 +4,11 @@ import test from 'node:test'
 
 const source = (path: string) => readFile(new URL(path, import.meta.url), 'utf8')
 
-test('selected desktop stage starts its outgoing rail at the card edge', async () => {
+test('selected desktop stage rail stays between the card edge and next stage circle', async () => {
   const css = await source('../../src/pages/ProjectDetailPage.css')
-  assert.match(css, /fde-detail-stage\[aria-pressed="true"\] \.fde-detail-stage-rail::after \{ left: 100%; \}/)
-  assert.match(css, /@media \(max-width: 640px\)[\s\S]*fde-detail-stage\[aria-pressed="true"\] \.fde-detail-stage-rail::after \{ left: 50%; \}/)
+  assert.match(css, /fde-detail-stage\[aria-pressed="true"\] \.fde-detail-stage-rail::after \{ left: calc\(100% \+ 5px\); right: calc\(-50% \+ 8px\); \}/)
+  assert.match(css, /@media \(max-width: 1120px\)[\s\S]*fde-detail-stage\[aria-pressed="true"\] \.fde-detail-stage-rail::after \{ left: calc\(100% \+ 3px\); right: calc\(-50% \+ 12px\); \}/)
+  assert.match(css, /@media \(max-width: 640px\)[\s\S]*fde-detail-stage\[aria-pressed="true"\] \.fde-detail-stage-rail::after \{ left: 50%; right: auto; \}/)
 })
 
 test('diligence plan approval exposes and presents the reviewed task arrangement', async () => {

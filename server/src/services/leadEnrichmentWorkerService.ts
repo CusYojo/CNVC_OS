@@ -8,6 +8,7 @@ import {
   LEAD_ENRICHMENT_SCHEMA_VERSION,
   LEAD_ENRICHMENT_TERMINAL_TOPIC_STATUSES,
   leadDetailEnrichmentTopicApplies,
+  leadEnrichmentRuntimePolicy,
   leadResearchWebEnrichmentEnabled,
   normalizePaperIdentity,
   topicRequiresConfirmedEntity,
@@ -73,6 +74,7 @@ const pollMs = Math.max(500, Number(process.env.LEAD_ENRICHMENT_POLL_MS) || 2_00
 const leaseSeconds = Math.max(60, Number(process.env.LEAD_ENRICHMENT_LEASE_SECONDS) || 600)
 const concurrency = Math.max(1, Math.min(10, Number(process.env.LEAD_ENRICHMENT_CONCURRENCY) || 1))
 const maxAttempts = Math.max(1, Math.min(5, Number(process.env.LEAD_ENRICHMENT_MAX_ATTEMPTS) || 3))
+const processAfter = leadEnrichmentRuntimePolicy().processAfter
 const triggerTypeFilter = String(process.env.LEAD_ENRICHMENT_TRIGGER_TYPE_FILTER ?? '').normalize('NFKC').trim()
 if (triggerTypeFilter.length > 48) throw new Error('LEAD_ENRICHMENT_TRIGGER_TYPE_FILTER exceeds 48 characters')
 const active = new Map<string, Promise<void>>()
@@ -127,15 +129,17 @@ export async function recoverExpiredLeadEnrichmentLeases() {
      SET tr.status='retrying',tr.next_attempt_at=NOW(3),tr.lease_owner=NULL,tr.lease_expires_at=NULL,
          tr.metrics=JSON_SET(COALESCE(tr.metrics,JSON_OBJECT()),'$.lastLeaseDisposition','abandoned'),
          tr.last_error=CONCAT('abandoned: lease expired',IF(tr.last_error IS NULL,'',CONCAT(': ',LEFT(tr.last_error,512)))),tr.updated_at=NOW(3)
-     WHERE j.schema_version=? AND tr.status='running' AND tr.lease_expires_at IS NOT NULL AND tr.lease_expires_at<NOW(3)`,
-    [LEAD_ENRICHMENT_SCHEMA_VERSION],
+     WHERE j.schema_version=? AND (? IS NULL OR j.created_at>=?)
+       AND tr.status='running' AND tr.lease_expires_at IS NOT NULL AND tr.lease_expires_at<NOW(3)`,
+    [LEAD_ENRICHMENT_SCHEMA_VERSION, processAfter, processAfter],
   )
   await pool.query(
     `UPDATE ${jobsTable}
      SET status='queued',next_attempt_at=NOW(3),lease_owner=NULL,lease_expires_at=NULL,
          last_error=CONCAT('abandoned: job lease expired',IF(last_error IS NULL,'',CONCAT(': ',LEFT(last_error,512)))),updated_at=NOW(3)
-     WHERE schema_version=? AND status='running' AND lease_expires_at IS NOT NULL AND lease_expires_at<NOW(3)`,
-    [LEAD_ENRICHMENT_SCHEMA_VERSION],
+     WHERE schema_version=? AND (? IS NULL OR created_at>=?)
+       AND status='running' AND lease_expires_at IS NOT NULL AND lease_expires_at<NOW(3)`,
+    [LEAD_ENRICHMENT_SCHEMA_VERSION, processAfter, processAfter],
   )
   return Number((result as { affectedRows?: number }).affectedRows || 0)
 }
@@ -146,8 +150,9 @@ export async function quarantineProviderBudgetLeadEnrichmentRetries() {
   }>>(
     `SELECT tr.id,tr.job_id,tr.lead_id,tr.last_error FROM ${topicRunsTable} tr
      JOIN ${jobsTable} j ON j.id=tr.job_id
-     WHERE j.schema_version=? AND tr.status='retrying' AND tr.last_error IS NOT NULL`,
-    [LEAD_ENRICHMENT_SCHEMA_VERSION],
+     WHERE j.schema_version=? AND (? IS NULL OR j.created_at>=?)
+       AND tr.status='retrying' AND tr.last_error IS NOT NULL`,
+    [LEAD_ENRICHMENT_SCHEMA_VERSION, processAfter, processAfter],
   )
   const affected = rows.filter((row) => isLeadEnrichmentProviderBudgetError(new Error(row.last_error || '')))
   if (!affected.length) return 0
@@ -182,6 +187,7 @@ export async function claimLeadEnrichmentTopicLease(): Promise<TopicLease | null
        WHERE tr.status IN ('queued','retrying') AND tr.next_attempt_at<=NOW(3)
          AND (tr.lease_expires_at IS NULL OR tr.lease_expires_at<NOW(3))
          AND j.schema_version=?
+         AND (? IS NULL OR j.created_at>=?)
          AND (?='' OR j.trigger_type=?)
          AND j.status IN ('queued','running')
          AND (j.lease_owner IS NULL OR j.lease_owner=? OR j.lease_expires_at<NOW(3))
@@ -196,7 +202,7 @@ export async function claimLeadEnrichmentTopicLease(): Promise<TopicLease | null
          ))
        ORDER BY j.priority,tr.next_attempt_at,tr.created_at
        LIMIT 1 FOR UPDATE SKIP LOCKED`,
-      [LEAD_ENRICHMENT_SCHEMA_VERSION, triggerTypeFilter, triggerTypeFilter, owner],
+      [LEAD_ENRICHMENT_SCHEMA_VERSION, processAfter, processAfter, triggerTypeFilter, triggerTypeFilter, owner],
     )
     const row = rows[0]
     if (!row) { await connection.rollback(); return null }
@@ -280,6 +286,14 @@ function paperDeterministicFacts(topicKey: LeadEnrichmentTopicKey, radarProfile:
     }] : []
   }
   return []
+}
+
+export function paperMetadataEvidenceAcceptanceMode(documentText: unknown, quote: unknown): 'strict' | 'web_hit' {
+  return typeof documentText === 'string'
+    && typeof quote === 'string'
+    && sourceDocumentContainsQuote(documentText, quote)
+    ? 'strict'
+    : 'web_hit'
 }
 
 async function finishTopic(lease: TopicLease, input: {
@@ -425,31 +439,41 @@ async function executeTopic(lease: TopicLease) {
   const deterministic = isResearch ? paperDeterministicFacts(lease.topic_key, radarProfile) : []
   let insertedFacts = 0
   let deterministicRejectedFactCount = 0
+  let deterministicReferenceFactCount = 0
   for (const fact of deterministic) {
-    let document: Awaited<ReturnType<typeof fetchLeadSourceDocument>>
+    let document: Awaited<ReturnType<typeof fetchLeadSourceDocument>> | undefined
     try {
       document = await fetchLeadSourceDocument({ url: fact.evidence[0].sourceUrl, leadId: lease.lead_id })
-    } catch {
-      continue
-    }
-    if (!sourceDocumentContainsQuote(document.text, fact.evidence[0].quote)) continue
+    } catch { /* Retain already-ingested paper metadata as reference evidence below. */ }
+    const acceptanceMode = paperMetadataEvidenceAcceptanceMode(document?.text, fact.evidence[0].quote)
+    const strictEvidence = acceptanceMode === 'strict' ? document : undefined
     const factSubject = routedSubject(fact.factKey)
     const candidate = {
       leadId: lease.lead_id, topicRunId: lease.id, topicKey: lease.topic_key,
       subjectType: factSubject.subjectType, subjectId: factSubject.subjectId, factKey: fact.factKey, value: fact.value,
-      evidenceLevel: 'E2', verificationStatus: 'verified', evidence: fact.evidence.map((evidence) => ({
-        ...evidence, sourceDocumentId: document.id, sourceUrl: document.finalUrl,
-        contentType: document.contentType, title: document.title, publisher: document.publisher,
-        pageHash: document.contentHash, publishedAt: document.publishedAt, accessedAt: document.accessedAt,
-        reliability: 'E2',
-      })),
+      acceptanceMode,
+      evidenceLevel: strictEvidence ? 'E2' as const : 'E3' as const,
+      verificationStatus: 'verified' as const,
+      evidence: strictEvidence
+        ? fact.evidence.map((evidence) => ({
+          ...evidence, sourceDocumentId: strictEvidence.id, sourceUrl: strictEvidence.finalUrl,
+          contentType: strictEvidence.contentType, title: strictEvidence.title, publisher: strictEvidence.publisher,
+          pageHash: strictEvidence.contentHash, publishedAt: strictEvidence.publishedAt, accessedAt: strictEvidence.accessedAt,
+          reliability: 'E2',
+        }))
+        : fact.evidence.map((evidence) => ({
+          ...evidence, sourceDocumentId: null, accessedAt: new Date(), reliability: 'E3',
+        })),
     } as const
     try { validateLeadFactCandidate(candidate) } catch {
       deterministicRejectedFactCount += 1
       continue
     }
     const persisted = await persistLeadFact(candidate)
-    if (persisted.inserted || persisted.unchanged) insertedFacts += 1
+    if (persisted.inserted || persisted.unchanged) {
+      insertedFacts += 1
+      if (acceptanceMode === 'web_hit') deterministicReferenceFactCount += 1
+    }
   }
   await recordTopicPhase(lease, 'planning')
   const researchGaps = isResearch ? leadResearchTopicGaps(lease.topic_key, radarProfile) : []
@@ -460,6 +484,7 @@ async function executeTopic(lease: TopicLease) {
       metrics: {
         deterministicFacts: insertedFacts,
         deterministicRejectedFactCount,
+        deterministicReferenceFactCount,
         webResearch: 'disabled_or_before_cutoff',
         identifiedGaps: researchGaps,
         durationMs: Date.now() - topicStartedAt,
@@ -472,7 +497,12 @@ async function executeTopic(lease: TopicLease) {
   if (isResearch && researchGaps.length === 0 && insertedFacts > 0) {
     await finishTopic(lease, {
       status: 'completed',
-      metrics: { deterministicFacts: insertedFacts, identifiedGaps: [], webResearch: 'gap_driven_skip', durationMs: Date.now() - topicStartedAt },
+      metrics: {
+        deterministicFacts: insertedFacts,
+        deterministicRejectedFactCount,
+        deterministicReferenceFactCount,
+        identifiedGaps: [], webResearch: 'gap_driven_skip', durationMs: Date.now() - topicStartedAt,
+      },
       promptVersion: 'lead-research-deterministic-metadata-v1',
       queryPlan: [],
     })
@@ -654,6 +684,7 @@ async function executeTopic(lease: TopicLease) {
       subjectMismatchObserved,
       persistenceRejectedFactCount: validationRejected,
       deterministicRejectedFactCount,
+      deterministicReferenceFactCount,
       lowerPriorityRejected,
       candidateEvidenceFailed,
       gaps: web.gaps.length + Math.max(0, candidateFactCount - validatedFacts.length),
@@ -662,6 +693,7 @@ async function executeTopic(lease: TopicLease) {
       declaredConflicts: web.conflicts.length,
       declaredConflictEvidenceFailed: explicitConflictEvidenceFailed ? 1 : 0,
       searchSources: web.sources.length, fetchedSources: sourceDocuments.size, sourceFetchFailures,
+      sourceMetadataFallback: Boolean(web.sourceMetadataFallback),
       queryCount: cacheHit ? 0 : researchContract.queries.length,
       pageCount: sourceDocuments.size,
       durationMs: Date.now() - topicStartedAt,
@@ -703,7 +735,7 @@ function poll(): Promise<void> {
 }
 
 export async function startLeadEnrichmentWorker() {
-  if (started || process.env.LEAD_ENRICHMENT_ENABLED === 'false') return
+  if (started || !leadEnrichmentRuntimePolicy().workerEnabled) return
   stopping = false
   started = true
   await recoverExpiredLeadEnrichmentLeases()
@@ -729,14 +761,17 @@ export async function stopLeadEnrichmentWorker() {
 
 export async function leadEnrichmentWorkerHealth() {
   try {
+    const runtimePolicy = leadEnrichmentRuntimePolicy()
     const [rows] = await pool.query<Array<RowDataPacket & { queued: number; running: number; retrying: number; dead_letter: number }>>(
       `SELECT SUM(status='queued') queued,SUM(status='running') running,SUM(status='retrying') retrying,
               SUM(status='dead_letter') dead_letter FROM ${topicRunsTable}`,
     )
     return {
-      name: 'mysql-lead-enrichment', ok: process.env.LEAD_ENRICHMENT_ENABLED === 'false' || (started && !stopping),
-      inProcess: true, enabled: process.env.LEAD_ENRICHMENT_ENABLED !== 'false', owner, active: active.size,
+      name: 'mysql-lead-enrichment', ok: !runtimePolicy.workerEnabled || (started && !stopping),
+      inProcess: true, enabled: runtimePolicy.workerEnabled, acceptNewJobs: runtimePolicy.acceptNewJobs,
+      owner, active: active.size,
       triggerTypeFilter: triggerTypeFilter || null,
+      processAfter: processAfter?.toISOString() || null,
       localThrottleUntil: localThrottleUntilMs > Date.now() ? new Date(localThrottleUntilMs).toISOString() : null,
       queued: Number(rows[0]?.queued || 0), running: Number(rows[0]?.running || 0),
       retrying: Number(rows[0]?.retrying || 0), deadLetter: Number(rows[0]?.dead_letter || 0),
