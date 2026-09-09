@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { and, eq, sql } from 'drizzle-orm'
+import { and, eq, isNull, sql } from 'drizzle-orm'
 
 import { db } from '../../db/client.js'
 import { agentConversations, auditLogs, imBotBindings, imBots, roles, userRoles, users } from '../../db/schema.js'
@@ -104,13 +104,19 @@ class MySqlPersonalWeixinAiRepository implements PersonalWeixinAiRepository {
         eq(imBotBindings.botId, botId), eq(imBotBindings.externalConversationId, externalConversationId),
       )).limit(1)
       let conversationId = previousBinding?.conversationId ?? null
+      const externalSessionId = `weixin-personal:${externalConversationId}`
       if (!conversationId) {
         conversationId = randomUUID()
         await tx.insert(agentConversations).values({
           id: conversationId, userId: input.actor.userId, title: '微信 AI', scope: 'global',
-          status: 'idle', runtime: 'jw', metadata: { source: 'weixin', ownershipMode: PERSONAL_WEIXIN_MODE },
+          status: 'idle', runtime: 'jw', externalSessionId,
+          metadata: { source: 'weixin', ownershipMode: PERSONAL_WEIXIN_MODE },
         })
       }
+      await tx.update(agentConversations).set({ externalSessionId }).where(and(
+        eq(agentConversations.id, conversationId),
+        isNull(agentConversations.externalSessionId),
+      ))
       if (previousBinding) {
         await tx.update(imBotBindings).set({
           userId: input.actor.userId, conversationId, department: owner.department, enabled: true,
