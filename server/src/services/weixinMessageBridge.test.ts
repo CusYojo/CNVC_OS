@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { weixinExternalMessageId, weixinMessageText } from './weixinMessageBridge.js'
+import { isWeixinMessageBridgeEnabled, weixinExternalMessageId, weixinMessageText } from './weixinMessageBridge.js'
+
+test('Weixin bridge can be disabled for a local service instance', () => {
+  assert.equal(isWeixinMessageBridgeEnabled('false'), false)
+  assert.equal(isWeixinMessageBridgeEnabled('0'), false)
+  assert.equal(isWeixinMessageBridgeEnabled('off'), false)
+  assert.equal(isWeixinMessageBridgeEnabled('true'), true)
+  assert.equal(isWeixinMessageBridgeEnabled(undefined), true)
+})
 
 test('extracts Weixin text items and ignores unsupported items', () => {
   assert.equal(weixinMessageText({

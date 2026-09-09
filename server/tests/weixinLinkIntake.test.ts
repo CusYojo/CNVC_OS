@@ -36,9 +36,28 @@ test('knowledge-only never executes the lead pipeline; replay does not write aga
   assert.equal(f.counts.knowledge, 0)
   const reply = await f.send('choice', '2')
   assert.match(reply!, /知识库已保存/)
-  assert.equal(await f.send('choice', '2'), reply)
+  assert.equal(await f.send('choice', '2'), '')
   assert.deepEqual(f.counts, { fetch: 1, knowledge: 1, project: 0 })
   assert.equal(f.session.task?.status, 'completed')
+})
+
+test('deferred intake records the choice immediately and parses only in background', async () => {
+  const f = fixture()
+  let deferred = 0
+  f.deps.deferProcessing = () => { deferred += 1 }
+
+  assert.match((await f.send('link', url))!, /请选择/)
+  assert.deepEqual(f.counts, { fetch: 0, knowledge: 0, project: 0 })
+
+  const accepted = await f.send('choice', '2')
+  assert.match(accepted!, /选择已记录/)
+  assert.equal(deferred, 1)
+  assert.deepEqual(f.counts, { fetch: 0, knowledge: 0, project: 0 })
+
+  delete f.deps.deferProcessing
+  const completed = await f.send('background', '重试')
+  assert.match(completed!, /知识库已保存/)
+  assert.deepEqual(f.counts, { fetch: 1, knowledge: 1, project: 0 })
 })
 
 test('project-only uses pipeline, keeps rejection distinct from success', async () => {
@@ -112,7 +131,7 @@ test('a new submission preserves the previous task and keeps receipts task-scope
   f.deps.save = async value => { if (value.task) history.set(value.task.id, structuredClone(value)) }
   await f.send('first-link', url)
   const firstId = f.session.task!.id
-  const firstReply = await f.send('first-choice', '2')
+  await f.send('first-choice', '2')
   await f.send('second-link', `${url}2`)
   const secondId = f.session.task!.id
   assert.notEqual(firstId, secondId)
@@ -120,7 +139,7 @@ test('a new submission preserves the previous task and keeps receipts task-scope
   assert.equal(history.get(firstId)!.task!.status, 'completed')
   assert.equal(history.get(secondId)!.task!.initialMessageId, 'second-link')
   assert.equal(f.session.receipts['first-choice'], undefined)
-  assert.equal(await handleWeixinLinkIntake(history.get(firstId)!, 'first-choice', '2', f.deps), firstReply)
+  assert.equal(await handleWeixinLinkIntake(history.get(firstId)!, 'first-choice', '2', f.deps), '')
   assert.equal(history.get(secondId)!.task!.status, 'awaiting_choice')
   assert.equal(f.counts.knowledge, 1)
 })

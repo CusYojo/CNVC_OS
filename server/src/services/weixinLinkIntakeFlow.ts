@@ -7,6 +7,7 @@ export type LinkIntakeDependencies = {
   saveKnowledge: (task: LinkIntakeTask) => Promise<string>
   importProject: (task: LinkIntakeTask) => Promise<LinkProjectResult>
   link: (path: string) => string
+  deferProcessing?: (taskId: string) => void
 }
 
 function receipt(task: LinkIntakeTask, deps: LinkIntakeDependencies) {
@@ -26,7 +27,9 @@ function receipt(task: LinkIntakeTask, deps: LinkIntakeDependencies) {
 export async function handleWeixinLinkIntake(
   session: LinkIntakeSession, messageId: string, message: string, deps: LinkIntakeDependencies,
 ): Promise<string | null> {
-  if (session.receipts[messageId]) return session.receipts[messageId]
+  // WeChat may redeliver the same inbound message. The persisted receipt makes
+  // processing idempotent; returning no reply also prevents duplicate pushes.
+  if (session.receipts[messageId]) return ''
   const url = weixinArticleUrl(message), command = weixinIntakeCommand(message)
   if (!url && (!session.task || !command)) return null
   const finish = async (reply: string) => {
@@ -39,9 +42,13 @@ export async function handleWeixinLinkIntake(
     if (session.task && !['completed', 'cancelled'].includes(session.task.status)) {
       return finish('还有一篇文章待处理。请先选择用途、回复“重试”或“取消”，再发送新链接。')
     }
-    session.task = { id: randomUUID(), initialMessageId: messageId, url, status: 'processing' }
+    session.task = {
+      id: randomUUID(), initialMessageId: messageId, url,
+      status: deps.deferProcessing ? 'awaiting_choice' : 'processing',
+    }
     session.receipts = {}
     await deps.save(session)
+    if (deps.deferProcessing) return finish(receipt(session.task, deps))
   }
   const task = session.task!
   if (command === 'status') return finish(receipt(task, deps))
@@ -53,6 +60,12 @@ export async function handleWeixinLinkIntake(
   if (command && ['project', 'knowledge', 'both'].includes(command)) {
     if (task.mode && task.mode !== command) return finish('此任务已开始执行，不能改变用途。请回复“重试”或“收录状态”。')
     task.mode = command as 'project' | 'knowledge' | 'both'
+    if (deps.deferProcessing) {
+      task.status = 'processing'
+      const reply = await finish('选择已记录，正在后台读取并处理文章。完成后我会把入库结果发给你，无需在这里等待。')
+      deps.deferProcessing(task.id)
+      return reply
+    }
   }
   try {
     task.status = 'processing'

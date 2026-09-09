@@ -79,7 +79,43 @@ export async function importWeixinArticleProject(task: LinkIntakeTask, userId: s
   throw Object.assign(new Error('线索流程尚未完成，稍后重试'), { code: 'WEIXIN_INTAKE_PIPELINE_FAILED' })
 }
 
-export async function processWeixinLinkIntake(input: { bindingId: string; userId: string; messageId: string; message: string }) {
+type ProcessWeixinLinkIntakeInput = {
+  bindingId: string
+  userId: string
+  messageId: string
+  message: string
+  onBackgroundComplete?: (reply: string) => Promise<void>
+  background?: boolean
+}
+
+function deferWeixinLinkIntake(input: ProcessWeixinLinkIntakeInput, taskId: string) {
+  const run = async (attempt: number) => {
+    try {
+      const reply = await processWeixinLinkIntake({
+        ...input,
+        messageId: `background:${taskId}`,
+        message: '重试',
+        background: true,
+      })
+      if (reply && input.onBackgroundComplete) await input.onBackgroundComplete(reply)
+    } catch (error) {
+      if ((error as { code?: string }).code === 'WEIXIN_INTAKE_BUSY' && attempt < 5) {
+        const timer = setTimeout(() => void run(attempt + 1), 100 * attempt)
+        timer.unref()
+        return
+      }
+      console.error(JSON.stringify({
+        event: 'weixin_intake_background_failed',
+        taskId,
+        code: String((error as { code?: unknown }).code || 'INTAKE_FAILED').slice(0, 64),
+      }))
+    }
+  }
+  const timer = setTimeout(() => void run(1), 0)
+  timer.unref()
+}
+
+export async function processWeixinLinkIntake(input: ProcessWeixinLinkIntakeInput) {
   return withWeixinLinkIntake(input.bindingId, input.userId, input.messageId, (session, save, withResourceLock) => handleWeixinLinkIntake(session, input.messageId, input.message, {
     save,
     fetchArticle: async url => {
@@ -92,5 +128,6 @@ export async function processWeixinLinkIntake(input: { bindingId: string; userId
     saveKnowledge: task => withResourceLock(task.article!.url, () => storeKnowledge(task, input.userId)),
     importProject: task => importWeixinArticleProject(task, input.userId),
     link: platformLink,
+    deferProcessing: input.background ? undefined : taskId => deferWeixinLinkIntake(input, taskId),
   }))
 }

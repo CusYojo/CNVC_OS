@@ -352,9 +352,17 @@ async function dispatchInbound(bot: ActiveBot, message: WeixinMessage) {
       return
     }
     try {
-      const reply = await processWeixinLinkIntake({ bindingId: intakeBinding.id, userId: intakeUser.id, messageId: weixinExternalMessageId(bot.accountId, message), message: text })
-      if (reply) {
-        await sendText(bot.credentials, targetUserId, contextToken, reply)
+      const reply = await processWeixinLinkIntake({
+        bindingId: intakeBinding.id,
+        userId: intakeUser.id,
+        messageId: weixinExternalMessageId(bot.accountId, message),
+        message: text,
+        onBackgroundComplete: async backgroundReply => {
+          await sendText(bot.credentials, targetUserId, contextToken, backgroundReply)
+        },
+      })
+      if (reply !== null) {
+        if (reply) await sendText(bot.credentials, targetUserId, contextToken, reply)
         return
       }
     } catch (error) {
@@ -560,8 +568,17 @@ function attemptStartWeixinMessageBridge() {
 
 export function startWeixinMessageBridge() {
   if (bridgeRequested) return
+  if (!isWeixinMessageBridgeEnabled(process.env.WEIXIN_BRIDGE_ENABLED)) {
+    console.log(JSON.stringify({ event: 'weixin_bridge_disabled' }))
+    return
+  }
   bridgeRequested = true
   attemptStartWeixinMessageBridge()
+}
+
+export function isWeixinMessageBridgeEnabled(value: string | undefined) {
+  if (value === undefined || value.trim() === '') return true
+  return !['0', 'false', 'off', 'no'].includes(value.trim().toLowerCase())
 }
 
 export async function stopWeixinMessageBridge() {
