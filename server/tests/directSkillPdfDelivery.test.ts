@@ -4,7 +4,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { inspectDirectSkillPdf } from '../src/services/directSkillPdfDelivery.js'
-import { writeAcceptancePdf } from './helpers/acceptancePdf.js'
+import { writeAcceptancePdf } from '../src/scripts/helpers/acceptancePdf.js'
 
 test('missing PDF, malformed PDF and duplicate PDF cannot pass delivery', async () => {
   const directory = await mkdtemp(path.join(tmpdir(), 'skill-pdf-'))

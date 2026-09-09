@@ -5,7 +5,7 @@ import path from 'node:path'
 import { getAiSkillDirectory, loadAiSkill } from '../services/aiSkillService.js'
 import { runDirectInvestmentProposalAgent } from '../services/aiDirectInvestmentProposalAgentService.js'
 import { classifyDirectSkillAgentFailure } from '../services/aiDirectSkillAgentRecovery.js'
-import { writeAcceptancePdf } from '../../tests/helpers/acceptancePdf.js'
+import { writeAcceptancePdf } from './helpers/acceptancePdf.js'
 
 const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'direct-proposal-agent-'))
 

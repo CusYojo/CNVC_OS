@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { copyFile, mkdtemp, readFile, rm, stat } from 'node:fs/promises'
 import os from 'node:os'
-import { writeAcceptancePdf } from '../../tests/helpers/acceptancePdf.js'
+import { writeAcceptancePdf } from './helpers/acceptancePdf.js'
 import path from 'node:path'
 import { getAiSkillDirectory, loadAiSkill } from '../services/aiSkillService.js'
 import {
