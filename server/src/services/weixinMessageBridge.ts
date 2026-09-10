@@ -19,7 +19,7 @@ import { getArtifactDownload } from './aiTaskService.js'
 import { weixinArticleUrl, weixinIntakeCommand, weixinIntakeBindingAuthorized } from '../contracts/weixinLinkIntakeContract.js'
 import { personalWeixinSenderAllowed } from '../contracts/personalWeixinAiContract.js'
 import { acquireWeixinBridgeLease, type WeixinBridgeLease } from './weixinBridgeLease.js'
-import { mysqlPersonalWeixinAiRepository } from '../repositories/mysql/mysqlPersonalWeixinAiRepository.js'
+import { mysqlPersonalWeixinAiRepository, repairPersonalWeixinConversationPair } from '../repositories/mysql/mysqlPersonalWeixinAiRepository.js'
 import { processWeixinLinkIntake } from './weixinLinkIntakeService.js'
 import { uploadAndSendWeixinFile, weixinArtifactIdsFromMessages } from './weixinFileDelivery.js'
 import {
@@ -411,6 +411,11 @@ async function dispatchInbound(bot: ActiveBot, message: WeixinMessage) {
     event: 'weixin_inbound_received', botId: bot.id, textLength: text.length, imageCount, fileCount,
   }))
   const binding = personalBinding || await ensureInboundBinding(bot, targetUserId)
+  if (personalRoute === 'allowed' && binding.conversationId) {
+    await repairPersonalWeixinConversationPair({
+      conversationId: binding.conversationId, userId: binding.userId, externalConversationId,
+    })
+  }
   const conversation = binding.conversationId
     ? await agentConversationRepository.findAgentById(binding.conversationId)
     : null

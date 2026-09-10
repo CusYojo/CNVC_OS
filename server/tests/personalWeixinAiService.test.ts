@@ -78,3 +78,14 @@ test('self-service routes are authenticated but do not require IM admin', async 
     assert.doesNotMatch(line, /requireImAdmin/)
   }
 })
+
+test('personal WeChat repository creates and repairs the chat and agent pair atomically', async () => {
+  const source = await readFile(new URL('../src/repositories/mysql/mysqlPersonalWeixinAiRepository.ts', import.meta.url), 'utf8')
+  const bridge = await readFile(new URL('../src/services/weixinMessageBridge.ts', import.meta.url), 'utf8')
+  assert.match(source, /tx\.insert\(chatConversations\)/)
+  assert.match(source, /tx\.insert\(agentConversations\)/)
+  assert.match(source, /existingChat/)
+  assert.match(source, /existingAgent/)
+  assert.match(source, /personalWeixinSessionId\(input\.externalConversationId\)/)
+  assert.match(bridge, /repairPersonalWeixinConversationPair\(/)
+})

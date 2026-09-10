@@ -1,14 +1,16 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { and, eq, isNull, sql } from 'drizzle-orm'
+import { and, eq, sql } from 'drizzle-orm'
 
 import { db } from '../../db/client.js'
-import { agentConversations, auditLogs, imBotBindings, imBots, roles, userRoles, users } from '../../db/schema.js'
+import { agentConversations, auditLogs, chatConversations, imBotBindings, imBots, roles, userRoles, users } from '../../db/schema.js'
 import { encryptIntegrationCredential } from '../../security/integrationCredentialCrypto.js'
 import { PERSONAL_WEIXIN_MODE } from '../../contracts/personalWeixinAiContract.js'
+import { personalWeixinSessionId } from '../../services/personalWeixinSession.js'
 import type {
   PersonalWeixinAiRecord,
   PersonalWeixinAiRepository,
 } from '../../services/personalWeixinAiService.js'
+import type { MySqlAgentExecutor } from './mysqlAgentConversationRepository.js'
 
 const personalBotCondition = sql<boolean>`JSON_UNQUOTE(JSON_EXTRACT(${imBots.config}, '$.ownershipMode'))=${PERSONAL_WEIXIN_MODE}`
 
@@ -36,6 +38,54 @@ function audit(actor: { userId: string; userName: string; ip?: string }, action:
     ip: actor.ip,
     result: 'success',
   }
+}
+
+async function ensurePersonalWeixinConversationPair(tx: MySqlAgentExecutor, input: {
+  conversationId: string
+  userId: string
+  externalConversationId: string
+  updatedAt: Date
+}) {
+  const externalSessionId = personalWeixinSessionId(input.externalConversationId)
+  const [existingChat] = await tx.select().from(chatConversations)
+    .where(eq(chatConversations.id, input.conversationId)).limit(1)
+  if (existingChat) {
+    await tx.update(chatConversations).set({
+      userId: input.userId, title: '微信 AI', scope: 'global', projectId: null,
+      projectName: null, agentId: externalSessionId, updatedAt: input.updatedAt,
+    }).where(eq(chatConversations.id, input.conversationId))
+  } else {
+    await tx.insert(chatConversations).values({
+      id: input.conversationId, userId: input.userId, title: '微信 AI', scope: 'global',
+      projectId: null, projectName: null, agentId: externalSessionId, messages: [],
+    })
+  }
+  const [existingAgent] = await tx.select().from(agentConversations)
+    .where(eq(agentConversations.id, input.conversationId)).limit(1)
+  if (existingAgent) {
+    await tx.update(agentConversations).set({
+      userId: input.userId, projectId: null, title: '微信 AI', scope: 'global', runtime: 'jw',
+      externalSessionId, legacySource: 'chat_index', legacyConversationId: input.conversationId,
+      metadata: { ...existingAgent.metadata, source: 'weixin', ownershipMode: PERSONAL_WEIXIN_MODE },
+      updatedAt: input.updatedAt,
+    }).where(eq(agentConversations.id, input.conversationId))
+  } else {
+    await tx.insert(agentConversations).values({
+      id: input.conversationId, userId: input.userId, projectId: null, title: '微信 AI', scope: 'global',
+      status: 'idle', runtime: 'jw', externalSessionId,
+      legacySource: 'chat_index', legacyConversationId: input.conversationId,
+      metadata: { source: 'weixin', ownershipMode: PERSONAL_WEIXIN_MODE },
+    })
+  }
+  return externalSessionId
+}
+
+export async function repairPersonalWeixinConversationPair(input: {
+  conversationId: string
+  userId: string
+  externalConversationId: string
+}) {
+  return db.transaction(tx => ensurePersonalWeixinConversationPair(tx, { ...input, updatedAt: new Date() }))
 }
 
 class MySqlPersonalWeixinAiRepository implements PersonalWeixinAiRepository {
@@ -103,20 +153,10 @@ class MySqlPersonalWeixinAiRepository implements PersonalWeixinAiRepository {
       const [previousBinding] = await tx.select().from(imBotBindings).where(and(
         eq(imBotBindings.botId, botId), eq(imBotBindings.externalConversationId, externalConversationId),
       )).limit(1)
-      let conversationId = previousBinding?.conversationId ?? null
-      const externalSessionId = `weixin-personal:${externalConversationId}`
-      if (!conversationId) {
-        conversationId = randomUUID()
-        await tx.insert(agentConversations).values({
-          id: conversationId, userId: input.actor.userId, title: '微信 AI', scope: 'global',
-          status: 'idle', runtime: 'jw', externalSessionId,
-          metadata: { source: 'weixin', ownershipMode: PERSONAL_WEIXIN_MODE },
-        })
-      }
-      await tx.update(agentConversations).set({ externalSessionId }).where(and(
-        eq(agentConversations.id, conversationId),
-        isNull(agentConversations.externalSessionId),
-      ))
+      const conversationId = previousBinding?.conversationId ?? randomUUID()
+      await ensurePersonalWeixinConversationPair(tx, {
+        conversationId, userId: input.actor.userId, externalConversationId, updatedAt: connectedAt,
+      })
       if (previousBinding) {
         await tx.update(imBotBindings).set({
           userId: input.actor.userId, conversationId, department: owner.department, enabled: true,
