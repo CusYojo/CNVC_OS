@@ -27,14 +27,22 @@ function platformLink(path: string) {
   } catch { return `平台内路径 ${path}` }
 }
 
+function publicSourceLink(value: string) {
+  try {
+    const url = new URL(value)
+    return ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password ? url.href : ''
+  } catch { return '' }
+}
+
 async function storeKnowledge(task: LinkIntakeTask, userId: string) {
   const article = task.article!
+  const sourceLink = publicSourceLink(article.url)
   // Only deduplicate against entries the actor can already read. Never expose another author's draft.
-  const [existing] = await db.select({ id: companyKnowledge.id }).from(companyKnowledge)
+  const [existing] = sourceLink ? await db.select({ id: companyKnowledge.id }).from(companyKnowledge)
     .innerJoin(weixinLinkIntakes, eq(weixinLinkIntakes.knowledgeEntryId, companyKnowledge.id)).where(and(
-    eq(companyKnowledge.link, article.url), eq(companyKnowledge.status, 'published'),
-    eq(companyKnowledge.audience, 'company'), companyKnowledgeAccessCondition(userId),
-  )).limit(1)
+      eq(companyKnowledge.link, sourceLink), eq(companyKnowledge.status, 'published'),
+      eq(companyKnowledge.audience, 'company'), companyKnowledgeAccessCondition(userId),
+    )).limit(1) : []
   if (existing) return existing.id
   const id = stableId(`weixin-knowledge:${userId}:${article.url}:${article.contentHash}`)
   const saved = await saveCompanyKnowledge(id, userId, {
@@ -42,7 +50,7 @@ async function storeKnowledge(task: LinkIntakeTask, userId: string) {
     definition: {
       kind: '新闻链接', title: article.title.slice(0, 120),
       summary: `微信收录 · ${article.publisher || '公众号'}\n${article.text.slice(0, 450)}`.slice(0, 500),
-      link: article.url, audience: 'company', readerIds: [], editorIds: [], fileId: null, fileVersion: null,
+      link: sourceLink, audience: 'company', readerIds: [], editorIds: [], fileId: null, fileVersion: null,
     },
   })
   await attachWeixinKnowledgeBody(task.id, userId, id)
@@ -60,7 +68,7 @@ export async function importWeixinArticleProject(task: LinkIntakeTask, userId: s
   const article = task.article!
   const score = candidateScore('微信收录', article.title, article.text)
   const candidate = {
-    source: 'weixin_link', source_id: task.id, title: article.title, link: article.url,
+    source: 'weixin_link', source_id: task.id, title: article.title, link: publicSourceLink(article.url),
     article_text: article.text, article_text_length: article.text.length,
     article_markdown: article.markdown || null,
     summary: article.text.slice(0, 1000), source_name: article.publisher || '微信用户收录', source_group: '微信收录',

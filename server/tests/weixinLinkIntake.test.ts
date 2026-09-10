@@ -64,6 +64,23 @@ test('a prepared WeChat document asks for destination before writing either stor
   assert.match(accepted!, /选择已记录/)
 })
 
+test('file intake keeps its internal identity while the knowledge writer receives prepared content', async () => {
+  const f = fixture()
+  f.deps.preparedArticle = {
+    url: `weixin-file://${'c'.repeat(64)}`,
+    title: '保密管理.md',
+    text: '制度正文',
+    publisher: '微信文件',
+    contentHash: 'c'.repeat(64),
+  }
+  await f.send('file', '[微信文件：保密管理.md]')
+  delete f.deps.preparedArticle
+  const reply = await f.send('knowledge', '2')
+  assert.match(reply!, /知识库已保存/)
+  assert.equal(f.session.task?.url, `weixin-file://${'c'.repeat(64)}`)
+  assert.equal(f.session.task?.article?.text, '制度正文')
+})
+
 test('deferred intake records the choice immediately and parses only in background', async () => {
   const f = fixture()
   let deferred = 0
