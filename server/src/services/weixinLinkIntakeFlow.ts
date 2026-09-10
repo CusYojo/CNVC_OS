@@ -8,6 +8,7 @@ export type LinkIntakeDependencies = {
   importProject: (task: LinkIntakeTask) => Promise<LinkProjectResult>
   link: (path: string) => string
   deferProcessing?: (taskId: string) => void
+  preparedArticle?: LinkArticle
 }
 
 function receipt(task: LinkIntakeTask, deps: LinkIntakeDependencies) {
@@ -30,7 +31,7 @@ export async function handleWeixinLinkIntake(
   // WeChat may redeliver the same inbound message. The persisted receipt makes
   // processing idempotent; returning no reply also prevents duplicate pushes.
   if (session.receipts[messageId]) return ''
-  const url = weixinArticleUrl(message), command = weixinIntakeCommand(message)
+  const url = deps.preparedArticle?.url || weixinArticleUrl(message), command = weixinIntakeCommand(message)
   if (!url && (!session.task || !command)) return null
   const finish = async (reply: string) => {
     session.receipts[messageId] = reply
@@ -45,6 +46,7 @@ export async function handleWeixinLinkIntake(
     session.task = {
       id: randomUUID(), initialMessageId: messageId, url,
       status: deps.deferProcessing ? 'awaiting_choice' : 'processing',
+      ...(deps.preparedArticle ? { article: deps.preparedArticle } : {}),
     }
     session.receipts = {}
     await deps.save(session)

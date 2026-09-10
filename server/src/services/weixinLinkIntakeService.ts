@@ -88,6 +88,12 @@ type ProcessWeixinLinkIntakeInput = {
   background?: boolean
 }
 
+type ProcessWeixinDocumentIntakeInput = Omit<ProcessWeixinLinkIntakeInput, 'message' | 'background'> & {
+  fileName: string
+  text: string
+  contentHash: string
+}
+
 function deferWeixinLinkIntake(input: ProcessWeixinLinkIntakeInput, taskId: string) {
   const run = async (attempt: number) => {
     try {
@@ -130,4 +136,32 @@ export async function processWeixinLinkIntake(input: ProcessWeixinLinkIntakeInpu
     link: platformLink,
     deferProcessing: input.background ? undefined : taskId => deferWeixinLinkIntake(input, taskId),
   }))
+}
+
+export async function processWeixinDocumentIntake(input: ProcessWeixinDocumentIntakeInput) {
+  const article = {
+    url: `weixin-file://${input.contentHash}`,
+    title: input.fileName.slice(0, 120) || '微信文件',
+    text: input.text,
+    markdown: input.text,
+    publisher: '微信文件',
+    contentHash: input.contentHash,
+  }
+  return withWeixinLinkIntake(input.bindingId, input.userId, input.messageId, (session, save, withResourceLock) => handleWeixinLinkIntake(
+    session, input.messageId, `[微信文件：${input.fileName}]`, {
+      save,
+      preparedArticle: article,
+      fetchArticle: async () => article,
+      saveKnowledge: task => withResourceLock(task.article!.url, () => storeKnowledge(task, input.userId)),
+      importProject: task => importWeixinArticleProject(task, input.userId),
+      link: platformLink,
+      deferProcessing: taskId => deferWeixinLinkIntake({
+        bindingId: input.bindingId,
+        userId: input.userId,
+        messageId: input.messageId,
+        message: '重试',
+        onBackgroundComplete: input.onBackgroundComplete,
+      }, taskId),
+    },
+  ))
 }

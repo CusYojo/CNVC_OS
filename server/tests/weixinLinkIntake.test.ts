@@ -41,6 +41,29 @@ test('knowledge-only never executes the lead pipeline; replay does not write aga
   assert.equal(f.session.task?.status, 'completed')
 })
 
+test('a prepared WeChat document asks for destination before writing either store', async () => {
+  const f = fixture()
+  f.deps.preparedArticle = {
+    url: `weixin-file://${'a'.repeat(64)}`,
+    title: '项目材料.md',
+    text: '# 项目材料\n正文',
+    markdown: '# 项目材料\n正文',
+    publisher: '微信文件',
+    contentHash: 'a'.repeat(64),
+  }
+  f.deps.deferProcessing = () => undefined
+
+  const choice = await f.send('file-message', '[微信文件：项目材料.md]')
+  assert.match(choice!, /项目材料\.md/)
+  assert.match(choice!, /1\. 加入公共项目池/)
+  assert.deepEqual(f.counts, { fetch: 0, knowledge: 0, project: 0 })
+  assert.equal(f.session.task?.article?.text, '# 项目材料\n正文')
+
+  delete f.deps.preparedArticle
+  const accepted = await f.send('file-choice', '2')
+  assert.match(accepted!, /选择已记录/)
+})
+
 test('deferred intake records the choice immediately and parses only in background', async () => {
   const f = fixture()
   let deferred = 0

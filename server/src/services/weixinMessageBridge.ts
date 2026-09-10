@@ -20,7 +20,8 @@ import { weixinArticleUrl, weixinIntakeCommand, weixinIntakeBindingAuthorized } 
 import { personalWeixinSenderAllowed } from '../contracts/personalWeixinAiContract.js'
 import { acquireWeixinBridgeLease, type WeixinBridgeLease } from './weixinBridgeLease.js'
 import { mysqlPersonalWeixinAiRepository, repairPersonalWeixinConversationPair } from '../repositories/mysql/mysqlPersonalWeixinAiRepository.js'
-import { processWeixinLinkIntake } from './weixinLinkIntakeService.js'
+import { processWeixinDocumentIntake, processWeixinLinkIntake } from './weixinLinkIntakeService.js'
+import { weixinAgentDocumentText } from './weixinAgentDocument.js'
 import { uploadAndSendWeixinFile, weixinArtifactIdsFromMessages } from './weixinFileDelivery.js'
 import {
   downloadWeixinInboundImages,
@@ -403,6 +404,41 @@ async function dispatchInbound(bot: ActiveBot, message: WeixinMessage) {
       }
       throw error
     }
+  }
+  if (fileCount) {
+    const intakeBinding = personalBinding || await imIntegrationRepository.findEnabledInboundBinding(bot.id, externalConversationId)
+    if (!intakeBinding || !weixinIntakeBindingAuthorized({
+      senderId: targetUserId,
+      accountUserId: bot.accountUserId,
+      botOwnerId: bot.createdBy,
+      bindingUserId: intakeBinding.userId,
+      bindingVersion: intakeBinding.version,
+    })) {
+      await sendText(bot.credentials, targetUserId, contextToken, '请先完成平台账号绑定，才能使用微信文件收录。')
+      return
+    }
+    const documents = await downloadWeixinInboundFiles(message)
+    if (!documents.length) throw new WeixinInboundFileError('微信文件未能下载或解密')
+    const bodies = await Promise.all(documents.map(weixinAgentDocumentText))
+    console.log(JSON.stringify({
+      event: 'weixin_files_received', botId: bot.id, fileCount: documents.length,
+      totalBytes: documents.reduce((sum, document) => sum + document.byteSize, 0),
+      pdfCount: documents.filter((document) => document.kind === 'pdf').length,
+      textDocumentCount: documents.filter((document) => document.kind === 'text').length,
+    }))
+    const reply = await processWeixinDocumentIntake({
+      bindingId: intakeBinding.id,
+      userId: intakeBinding.userId,
+      messageId: weixinExternalMessageId(bot.accountId, message),
+      fileName: documents.map(document => document.fileName).join('、'),
+      text: bodies.join('\n\n'),
+      contentHash: createHash('sha256').update(documents.map(document => document.sha256).join(':')).digest('hex'),
+      onBackgroundComplete: async backgroundReply => {
+        await sendText(bot.credentials, targetUserId, contextToken, backgroundReply)
+      },
+    })
+    if (reply) await sendText(bot.credentials, targetUserId, contextToken, reply)
+    return
   }
   const routeMessage = text || (fileCount
     ? '请阅读并分析这个微信文件。'
