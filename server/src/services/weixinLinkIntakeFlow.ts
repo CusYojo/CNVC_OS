@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { weixinArticleUrl, weixinIntakeCommand, weixinIntakeKnowledgeComment, WEIXIN_INTAKE_CHOICE, type LinkArticle, type LinkIntakeSession, type LinkIntakeTask, type LinkProjectResult } from '../contracts/weixinLinkIntakeContract.js'
+import { redactCompletedWeixinLinkArticle, weixinArticleUrl, weixinIntakeCommand, weixinIntakeKnowledgeComment, WEIXIN_INTAKE_CHOICE, type LinkArticle, type LinkIntakeSession, type LinkIntakeTask, type LinkProjectResult } from '../contracts/weixinLinkIntakeContract.js'
 
 export type LinkIntakeDependencies = {
   save: (session: LinkIntakeSession) => Promise<void>
@@ -100,6 +100,9 @@ export async function handleWeixinLinkIntake(
     }
     task.status = 'completed'
     delete task.error
+    // Once every selected destination has completed, public-link tasks only need the
+    // derived knowledge and source URL. Remove the fetched article from task persistence.
+    redactCompletedWeixinLinkArticle(task.article)
     return finish(receipt(task, deps))
   } catch (error) {
     task.status = 'failed'

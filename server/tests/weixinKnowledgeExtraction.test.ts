@@ -27,3 +27,19 @@ test('retains a public source URL and rejects internal file identities', () => {
   assert.equal(weixinPublicSourceLink(source), source)
   assert.equal(weixinPublicSourceLink('weixin-file://abc123'), '')
 })
+
+test('removes file wrappers, page markers and WeChat video controls while joining PDF line wraps', () => {
+  const summary = extractWeixinKnowledgeSummary(`【微信文件：测试.pdf】
+纯文本 PDF 测试文件 | 第 1 页
+项目面向制造企业提供设备能耗分析与生产
+排程软件，已经完成三个工厂试点。
+已关注
+观看更多
+视频加载失败，请刷新页面再试
+主要风险是客户销售周期较长，现场数据质量仍需核验。
+-- 1 of 1 --
+【文件结束】`, '微信文件')
+  assert.match(summary, /生产 排程软件，已经完成三个工厂试点/)
+  assert.match(summary, /主要风险/)
+  assert.doesNotMatch(summary, /微信文件：|第 1 页|已关注|观看更多|视频加载失败|文件结束|of 1/)
+})

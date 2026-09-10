@@ -16,6 +16,21 @@ export type LinkIntakeTask = {
 }
 export type LinkIntakeSession = { task?: LinkIntakeTask; receipts: Record<string, string> }
 
+export function weixinIntakeStoredBody(article?: LinkArticle) {
+  if (!article) return null
+  try {
+    const source = new URL(article.url)
+    if (source.protocol === 'http:' || source.protocol === 'https:') return null
+  } catch { /* retain non-URL file content */ }
+  return article.markdown || article.text || null
+}
+
+export function redactCompletedWeixinLinkArticle(article?: LinkArticle) {
+  if (!article || weixinIntakeStoredBody(article) !== null) return
+  article.text = ''
+  delete article.markdown
+}
+
 export function weixinArticleUrl(message: string): string | null {
   const urls = message.match(/https?:\/\/[^\s<>"“”]+/gi) || []
   for (const raw of urls) {

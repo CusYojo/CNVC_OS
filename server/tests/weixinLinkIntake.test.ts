@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFile } from 'node:fs/promises'
-import { weixinArticleUrl, weixinIntakeCommand, weixinIntakeKnowledgeComment, weixinIntakeBindingAuthorized, type LinkIntakeSession } from '../src/contracts/weixinLinkIntakeContract.js'
+import { weixinArticleUrl, weixinIntakeCommand, weixinIntakeKnowledgeComment, weixinIntakeStoredBody, weixinIntakeBindingAuthorized, type LinkIntakeSession } from '../src/contracts/weixinLinkIntakeContract.js'
 import { handleWeixinLinkIntake, type LinkIntakeDependencies } from '../src/services/weixinLinkIntakeFlow.js'
 import { weixinArticleBodyHtml } from '../src/services/weixinArticleHtml.js'
 
@@ -31,6 +31,8 @@ test('only accepts exact WeChat article host and strips known tracking fields', 
   assert.equal(weixinIntakeCommand(' 2 '), 'knowledge')
   assert.equal(weixinIntakeCommand('2 很有参考价值'), 'knowledge')
   assert.equal(weixinIntakeKnowledgeComment('2 很有参考价值'), '很有参考价值')
+  assert.equal(weixinIntakeStoredBody({ url, title: '文章', text: '完整原文', publisher: '公众号', contentHash: 'x' }), null)
+  assert.equal(weixinIntakeStoredBody({ url: 'weixin-file://x', title: '文件', text: '文件正文', publisher: '微信文件', contentHash: 'x' }), '文件正文')
 })
 
 test('knowledge-only never executes the lead pipeline; replay does not write again', async () => {
@@ -42,6 +44,7 @@ test('knowledge-only never executes the lead pipeline; replay does not write aga
   assert.equal(await f.send('choice', '2'), '')
   assert.deepEqual(f.counts, { fetch: 1, knowledge: 1, comment: 0, project: 0 })
   assert.equal(f.session.task?.status, 'completed')
+  assert.equal(f.session.task?.article?.text, '')
 })
 
 test('a prepared WeChat document asks for destination before writing either store', async () => {

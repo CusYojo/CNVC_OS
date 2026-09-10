@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import type { ResultSetHeader, RowDataPacket } from 'mysql2'
 import { pool } from '../../db/client.js'
 import { mysqlTableName, quoteMysqlIdentifier } from '../../db/config.js'
-import type { LinkIntakeSession } from '../../contracts/weixinLinkIntakeContract.js'
+import { weixinIntakeStoredBody, type LinkIntakeSession } from '../../contracts/weixinLinkIntakeContract.js'
 
 const table = quoteMysqlIdentifier(mysqlTableName('weixin_link_intakes'))
 export async function attachWeixinKnowledgeBody(taskId: string, userId: string, knowledgeId: string) {
@@ -46,7 +46,7 @@ export async function withWeixinLinkIntake<T>(
       await connection.query(`INSERT INTO ${table} (id,session_key,binding_id,user_id,initial_message_id,status,mode,article_body,payload,created_at,updated_at)
         VALUES (?,?,?,?,?,?,?,?,CAST(? AS JSON),NOW(3),NOW(3))
         ON DUPLICATE KEY UPDATE status=VALUES(status),mode=VALUES(mode),article_body=VALUES(article_body),payload=VALUES(payload),updated_at=NOW(3)`,
-      [task.id, id, bindingId, userId, task.initialMessageId, task.status, task.mode || null, task.article?.markdown || task.article?.text || null, JSON.stringify(value)])
+      [task.id, id, bindingId, userId, task.initialMessageId, task.status, task.mode || null, weixinIntakeStoredBody(task.article), JSON.stringify(value)])
     }
     const withResourceLock: WithIntakeResourceLock = async (key, work) => {
       const resourceLock = `wx-article:${createHash('sha256').update(key).digest('hex').slice(0, 48)}`
