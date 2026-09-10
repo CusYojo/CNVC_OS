@@ -32,6 +32,7 @@ import {
 } from './aiRuntimeTelemetry.js'
 import type { WeixinInboundImage } from '../services/weixinInboundImage.js'
 import type { WeixinInboundDocument } from '../services/weixinInboundFile.js'
+import { weixinAgentDocumentText } from '../services/weixinAgentDocument.js'
 import { loadAssistantExperiencePrompt, recordAssistantCompletedTurn } from '../services/assistantExperienceService.js'
 
 type RuntimeQuery = AsyncIterable<unknown> & {
@@ -1542,27 +1543,13 @@ export async function sendJwAgentMessageWithMedia(
       }
       telemetryRequestId = beginAiRuntimeRequest('jw-agent')
       session.telemetryRequestId = telemetryRequestId
+      const documentTexts = await Promise.all(validDocuments.map(weixinAgentDocumentText))
       const attachments = [
         ...validImages.map((image) => ({
           type: 'image' as const,
           source: { type: 'base64' as const, media_type: image.mediaType, data: image.dataBase64 },
         })),
-        ...validDocuments.map((document) => document.kind === 'pdf' ? ({
-          type: 'document' as const,
-          source: {
-            type: 'base64' as const,
-            media_type: 'application/pdf' as const,
-            data: document.dataBase64 || '',
-          },
-          title: document.fileName,
-        }) : ({
-          type: 'document' as const,
-          source: { type: 'text' as const, media_type: 'text/plain' as const, data: document.text || '' },
-          title: document.fileName,
-          context: document.mediaType === 'text/markdown'
-            ? '该文档来自微信接收的 Markdown 文件。'
-            : '该文档来自微信接收的 DOCX 文件，已提取为纯文本。',
-        })),
+        ...documentTexts.map((text) => ({ type: 'text' as const, text })),
       ]
       const runtimeText = session.quickSkillInvocation
         ? quickSkillRuntimeMessage(clean, session.quickSkillInvocation)
