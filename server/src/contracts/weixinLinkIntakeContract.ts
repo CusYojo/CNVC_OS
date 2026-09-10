@@ -9,6 +9,8 @@ export type LinkIntakeTask = {
   mode?: LinkIntakeMode
   article?: LinkArticle
   knowledgeId?: string
+  knowledgeComment?: string
+  knowledgeCommentSaved?: boolean
   project?: LinkProjectResult
   error?: string
 }
@@ -35,16 +37,22 @@ export function weixinArticleUrl(message: string): string | null {
 
 export function weixinIntakeCommand(message: string): LinkIntakeMode | 'cancel' | 'retry' | 'status' | null {
   const text = message.trim()
-  if (['1', '加入项目池'].includes(text)) return 'project'
-  if (['2', '存入知识库'].includes(text)) return 'knowledge'
-  if (['3', '两者都做'].includes(text)) return 'both'
+  const choice = text.match(/^([123])(?:\s+[\s\S]+)?$/)?.[1]
+  if (choice === '1' || text === '加入项目池') return 'project'
+  if (choice === '2' || text === '存入知识库') return 'knowledge'
+  if (choice === '3' || text === '两者都做') return 'both'
   if (text === '取消') return 'cancel'
   if (text === '重试') return 'retry'
   if (text === '收录状态') return 'status'
   return null
 }
 
-export const WEIXIN_INTAKE_CHOICE = '请选择：\n1. 加入公共项目池\n2. 存入团队知识库（团队内共享）\n3. 两者都做\n回复数字选择，或回复“取消”。'
+export function weixinIntakeKnowledgeComment(message: string) {
+  const match = message.trim().match(/^[23]\s+([\s\S]+)$/)
+  return match?.[1].trim().slice(0, 300) || null
+}
+
+export const WEIXIN_INTAKE_CHOICE = '请选择：\n1. 加入公共项目池\n2. 存入团队知识库（团队内共享）\n3. 两者都做\n可在选择后直接带一条评价，例如：2 内容很有参考价值\n回复数字选择，或回复“取消”。'
 
 export function weixinIntakeBindingAuthorized(input: { senderId: string; accountUserId: string; botOwnerId: string; bindingUserId: string; bindingVersion: number }) {
   // Legacy first-message auto-bindings map every sender to the bot owner. Do not turn those

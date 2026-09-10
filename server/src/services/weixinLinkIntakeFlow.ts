@@ -1,10 +1,11 @@
 import { randomUUID } from 'node:crypto'
-import { weixinArticleUrl, weixinIntakeCommand, WEIXIN_INTAKE_CHOICE, type LinkArticle, type LinkIntakeSession, type LinkIntakeTask, type LinkProjectResult } from '../contracts/weixinLinkIntakeContract.js'
+import { weixinArticleUrl, weixinIntakeCommand, weixinIntakeKnowledgeComment, WEIXIN_INTAKE_CHOICE, type LinkArticle, type LinkIntakeSession, type LinkIntakeTask, type LinkProjectResult } from '../contracts/weixinLinkIntakeContract.js'
 
 export type LinkIntakeDependencies = {
   save: (session: LinkIntakeSession) => Promise<void>
   fetchArticle: (url: string) => Promise<LinkArticle>
   saveKnowledge: (task: LinkIntakeTask) => Promise<string>
+  commentKnowledge: (task: LinkIntakeTask) => Promise<void>
   importProject: (task: LinkIntakeTask) => Promise<LinkProjectResult>
   link: (path: string) => string
   deferProcessing?: (taskId: string) => void
@@ -14,6 +15,7 @@ export type LinkIntakeDependencies = {
 function receipt(task: LinkIntakeTask, deps: LinkIntakeDependencies) {
   const lines = [`《${task.article?.title || '公众号文章'}》`]
   if (task.knowledgeId) lines.push(`知识库已保存：${deps.link(`/knowledge?view=company&entry=${task.knowledgeId}`)}`)
+  if (task.knowledgeCommentSaved) lines.push('随附评价已写入知识库评论区。')
   if (task.project?.status === 'ready' && task.project.leadId) lines.push(`项目池已收录或合并：${deps.link(`/sourcing/${task.project.leadId}`)}`)
   if (task.project?.status === 'review') lines.push('项目暂未入池，已进入线索复核流程。')
   if (task.project?.status === 'rejected') lines.push('项目未通过现有线索池准入规则，未入池。')
@@ -62,6 +64,8 @@ export async function handleWeixinLinkIntake(
   if (command && ['project', 'knowledge', 'both'].includes(command)) {
     if (task.mode && task.mode !== command) return finish('此任务已开始执行，不能改变用途。请回复“重试”或“收录状态”。')
     task.mode = command as 'project' | 'knowledge' | 'both'
+    const knowledgeComment = weixinIntakeKnowledgeComment(message)
+    if (knowledgeComment && task.mode !== 'project') task.knowledgeComment = knowledgeComment
     if (deps.deferProcessing) {
       task.status = 'processing'
       const reply = await finish('选择已记录，正在后台读取并处理文章。完成后我会把入库结果发给你，无需在这里等待。')
@@ -83,6 +87,11 @@ export async function handleWeixinLinkIntake(
     }
     if (task.mode !== 'project' && !task.knowledgeId) {
       task.knowledgeId = await deps.saveKnowledge(task)
+      await deps.save(session)
+    }
+    if (task.knowledgeId && task.knowledgeComment && !task.knowledgeCommentSaved) {
+      await deps.commentKnowledge(task)
+      task.knowledgeCommentSaved = true
       await deps.save(session)
     }
     if (task.mode !== 'knowledge' && !task.project) {

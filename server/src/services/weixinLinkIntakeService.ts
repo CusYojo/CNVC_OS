@@ -3,7 +3,7 @@ import { and, eq } from 'drizzle-orm'
 import { db } from '../db/client.js'
 import { companyKnowledge, weixinLinkIntakes } from '../db/schema.js'
 import { companyKnowledgeAccessCondition } from './projectFileAccessService.js'
-import { saveCompanyKnowledge, actOnCompanyKnowledge, getCompanyKnowledge } from './fdeKnowledgeService.js'
+import { saveCompanyKnowledge, actOnCompanyKnowledge, commentCompanyKnowledge, getCompanyKnowledge } from './fdeKnowledgeService.js'
 import { fetchLeadSourceDocument } from './leadSourceDocumentService.js'
 import { recordLeadPipelineRawEvent } from './leadPipelineEventService.js'
 import { attachWeixinKnowledgeBody, withWeixinLinkIntake } from '../repositories/mysql/mysqlWeixinLinkIntakeRepository.js'
@@ -11,6 +11,7 @@ import { handleWeixinLinkIntake } from './weixinLinkIntakeFlow.js'
 import type { LinkIntakeTask } from '../contracts/weixinLinkIntakeContract.js'
 import { candidateScore } from './radarCollectorService.js'
 import { fetchWeixinBrowserArticle } from './weixinBrowserArticleService.js'
+import { extractWeixinKnowledgeSummary, weixinPublicSourceLink } from './weixinKnowledgeExtractionService.js'
 
 function stableId(value: string) {
   const hex = createHash('sha256').update(value).digest('hex')
@@ -27,16 +28,9 @@ function platformLink(path: string) {
   } catch { return `平台内路径 ${path}` }
 }
 
-function publicSourceLink(value: string) {
-  try {
-    const url = new URL(value)
-    return ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password ? url.href : ''
-  } catch { return '' }
-}
-
 async function storeKnowledge(task: LinkIntakeTask, userId: string) {
   const article = task.article!
-  const sourceLink = publicSourceLink(article.url)
+  const sourceLink = weixinPublicSourceLink(article.url)
   // Only deduplicate against entries the actor can already read. Never expose another author's draft.
   const [existing] = sourceLink ? await db.select({ id: companyKnowledge.id }).from(companyKnowledge)
     .innerJoin(weixinLinkIntakes, eq(weixinLinkIntakes.knowledgeEntryId, companyKnowledge.id)).where(and(
@@ -49,7 +43,7 @@ async function storeKnowledge(task: LinkIntakeTask, userId: string) {
     clientRequestId: stableId(`${id}:save`), expectedVersion: 0,
     definition: {
       kind: '新闻链接', title: article.title.slice(0, 120),
-      summary: `微信收录 · ${article.publisher || '公众号'}\n${article.text.slice(0, 450)}`.slice(0, 500),
+      summary: extractWeixinKnowledgeSummary(article.markdown || article.text, article.publisher),
       link: sourceLink, audience: 'company', readerIds: [], editorIds: [], fileId: null, fileVersion: null,
     },
   })
@@ -68,7 +62,7 @@ export async function importWeixinArticleProject(task: LinkIntakeTask, userId: s
   const article = task.article!
   const score = candidateScore('微信收录', article.title, article.text)
   const candidate = {
-    source: 'weixin_link', source_id: task.id, title: article.title, link: publicSourceLink(article.url),
+    source: 'weixin_link', source_id: task.id, title: article.title, link: weixinPublicSourceLink(article.url),
     article_text: article.text, article_text_length: article.text.length,
     article_markdown: article.markdown || null,
     summary: article.text.slice(0, 1000), source_name: article.publisher || '微信用户收录', source_group: '微信收录',
@@ -94,6 +88,16 @@ type ProcessWeixinLinkIntakeInput = {
   message: string
   onBackgroundComplete?: (reply: string) => Promise<void>
   background?: boolean
+}
+
+async function storeKnowledgeComment(task: LinkIntakeTask, userId: string) {
+  if (!task.knowledgeId || !task.knowledgeComment) return
+  const current = await getCompanyKnowledge(task.knowledgeId, userId)
+  await commentCompanyKnowledge(task.knowledgeId, userId, {
+    clientRequestId: stableId(`${task.id}:knowledge-comment:${task.knowledgeComment}`),
+    expectedVersion: current.entry.version,
+    content: task.knowledgeComment,
+  })
 }
 
 type ProcessWeixinDocumentIntakeInput = Omit<ProcessWeixinLinkIntakeInput, 'message' | 'background'> & {
@@ -140,6 +144,7 @@ export async function processWeixinLinkIntake(input: ProcessWeixinLinkIntakeInpu
       return { url, title: document.title || '微信公众号文章', text: document.text, publisher: document.publisher, contentHash: document.contentHash }
     },
     saveKnowledge: task => withResourceLock(task.article!.url, () => storeKnowledge(task, input.userId)),
+    commentKnowledge: task => storeKnowledgeComment(task, input.userId),
     importProject: task => importWeixinArticleProject(task, input.userId),
     link: platformLink,
     deferProcessing: input.background ? undefined : taskId => deferWeixinLinkIntake(input, taskId),
@@ -161,6 +166,7 @@ export async function processWeixinDocumentIntake(input: ProcessWeixinDocumentIn
       preparedArticle: article,
       fetchArticle: async () => article,
       saveKnowledge: task => withResourceLock(task.article!.url, () => storeKnowledge(task, input.userId)),
+      commentKnowledge: task => storeKnowledgeComment(task, input.userId),
       importProject: task => importWeixinArticleProject(task, input.userId),
       link: platformLink,
       deferProcessing: taskId => deferWeixinLinkIntake({

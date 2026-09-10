@@ -1,19 +1,20 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFile } from 'node:fs/promises'
-import { weixinArticleUrl, weixinIntakeCommand, weixinIntakeBindingAuthorized, type LinkIntakeSession } from '../src/contracts/weixinLinkIntakeContract.js'
+import { weixinArticleUrl, weixinIntakeCommand, weixinIntakeKnowledgeComment, weixinIntakeBindingAuthorized, type LinkIntakeSession } from '../src/contracts/weixinLinkIntakeContract.js'
 import { handleWeixinLinkIntake, type LinkIntakeDependencies } from '../src/services/weixinLinkIntakeFlow.js'
 import { weixinArticleBodyHtml } from '../src/services/weixinArticleHtml.js'
 
 const url = 'https://mp.weixin.qq.com/s/example'
 function fixture() {
   const session: LinkIntakeSession = { receipts: {} }
-  const counts = { fetch: 0, knowledge: 0, project: 0 }
+  const counts = { fetch: 0, knowledge: 0, comment: 0, project: 0 }
   const saved: LinkIntakeSession[] = []
   const deps: LinkIntakeDependencies = {
     save: async value => { saved.push(structuredClone(value)) },
     fetchArticle: async articleUrl => { counts.fetch++; return { url: articleUrl, title: '测试文章', text: '可靠的文章正文', publisher: '测试公众号', contentHash: 'abc' } },
     saveKnowledge: async () => { counts.knowledge++; return 'knowledge-id' },
+    commentKnowledge: async () => { counts.comment++ },
     importProject: async () => { counts.project++; return { status: 'ready', leadId: 'lead-id' } },
     link: path => `https://platform.example${path}`,
   }
@@ -28,6 +29,8 @@ test('only accepts exact WeChat article host and strips known tracking fields', 
   assert.equal(weixinArticleUrl('http://127.0.0.1/s/a'), null)
   assert.equal(weixinArticleUrl('收藏 https://mp.weixin.qq.com/s?__biz=b&mid=2&idx=1&sn=x&scene=1。'), 'https://mp.weixin.qq.com/s?__biz=b&idx=1&mid=2&sn=x')
   assert.equal(weixinIntakeCommand(' 2 '), 'knowledge')
+  assert.equal(weixinIntakeCommand('2 很有参考价值'), 'knowledge')
+  assert.equal(weixinIntakeKnowledgeComment('2 很有参考价值'), '很有参考价值')
 })
 
 test('knowledge-only never executes the lead pipeline; replay does not write again', async () => {
@@ -37,7 +40,7 @@ test('knowledge-only never executes the lead pipeline; replay does not write aga
   const reply = await f.send('choice', '2')
   assert.match(reply!, /知识库已保存/)
   assert.equal(await f.send('choice', '2'), '')
-  assert.deepEqual(f.counts, { fetch: 1, knowledge: 1, project: 0 })
+  assert.deepEqual(f.counts, { fetch: 1, knowledge: 1, comment: 0, project: 0 })
   assert.equal(f.session.task?.status, 'completed')
 })
 
@@ -56,7 +59,7 @@ test('a prepared WeChat document asks for destination before writing either stor
   const choice = await f.send('file-message', '[微信文件：项目材料.md]')
   assert.match(choice!, /项目材料\.md/)
   assert.match(choice!, /1\. 加入公共项目池/)
-  assert.deepEqual(f.counts, { fetch: 0, knowledge: 0, project: 0 })
+  assert.deepEqual(f.counts, { fetch: 0, knowledge: 0, comment: 0, project: 0 })
   assert.equal(f.session.task?.article?.text, '# 项目材料\n正文')
 
   delete f.deps.preparedArticle
@@ -81,23 +84,35 @@ test('file intake keeps its internal identity while the knowledge writer receive
   assert.equal(f.session.task?.article?.text, '制度正文')
 })
 
+test('knowledge choice can add one persisted comment without duplicate writes', async () => {
+  const f = fixture()
+  await f.send('link', url)
+  const reply = await f.send('choice-with-comment', '2 这篇材料对行业判断很有参考价值')
+  assert.match(reply!, /随附评价已写入知识库评论区/)
+  assert.equal(f.session.task?.knowledgeComment, '这篇材料对行业判断很有参考价值')
+  assert.equal(f.session.task?.knowledgeCommentSaved, true)
+  assert.deepEqual(f.counts, { fetch: 1, knowledge: 1, comment: 1, project: 0 })
+  assert.equal(await f.send('choice-with-comment', '2 这篇材料对行业判断很有参考价值'), '')
+  assert.equal(f.counts.comment, 1)
+})
+
 test('deferred intake records the choice immediately and parses only in background', async () => {
   const f = fixture()
   let deferred = 0
   f.deps.deferProcessing = () => { deferred += 1 }
 
   assert.match((await f.send('link', url))!, /请选择/)
-  assert.deepEqual(f.counts, { fetch: 0, knowledge: 0, project: 0 })
+  assert.deepEqual(f.counts, { fetch: 0, knowledge: 0, comment: 0, project: 0 })
 
   const accepted = await f.send('choice', '2')
   assert.match(accepted!, /选择已记录/)
   assert.equal(deferred, 1)
-  assert.deepEqual(f.counts, { fetch: 0, knowledge: 0, project: 0 })
+  assert.deepEqual(f.counts, { fetch: 0, knowledge: 0, comment: 0, project: 0 })
 
   delete f.deps.deferProcessing
   const completed = await f.send('background', '重试')
   assert.match(completed!, /知识库已保存/)
-  assert.deepEqual(f.counts, { fetch: 1, knowledge: 1, project: 0 })
+  assert.deepEqual(f.counts, { fetch: 1, knowledge: 1, comment: 0, project: 0 })
 })
 
 test('project-only uses pipeline, keeps rejection distinct from success', async () => {
@@ -124,7 +139,7 @@ test('both preserves successful knowledge when project fails; retry resumes only
   assert.match(partial!, /尚未全部完成/)
   fail = false
   assert.match((await f.send('retry', '重试'))!, /项目池已收录/)
-  assert.deepEqual(f.counts, { fetch: 1, knowledge: 1, project: 2 })
+  assert.deepEqual(f.counts, { fetch: 1, knowledge: 1, comment: 0, project: 2 })
 })
 
 test('failed article never enters either store; restart uses persisted task', async () => {
@@ -132,7 +147,7 @@ test('failed article never enters either store; restart uses persisted task', as
   f.deps.fetchArticle = async () => { throw new Error('verification page') }
   assert.match((await f.send('link', url))!, /尚未入库/)
   assert.equal(f.session.task?.status, 'failed')
-  assert.deepEqual(f.counts, { fetch: 0, knowledge: 0, project: 0 })
+  assert.deepEqual(f.counts, { fetch: 0, knowledge: 0, comment: 0, project: 0 })
   const restored = structuredClone(f.saved.at(-1)!)
   const deps = fixture().deps
   assert.match((await handleWeixinLinkIntake(restored, 'retry', '重试', deps))!, /请选择/)
