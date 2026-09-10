@@ -97,6 +97,7 @@ import { reviewRadarCandidatesWithAi } from '../services/radarAiReviewService.js
 import { deriveRadarChannel, isRadarPaperCandidate } from '../services/radarChannel.js'
 import { resolvePaperProjectIdentity } from '../services/paperIdentity.js'
 import { recordLeadPipelineRawEvent, transitionLeadPipelineItem } from '../services/leadPipelineEventService.js'
+import { radarUnavailableReviewTransition } from '../services/radarUserSubmissionPolicy.js'
 import { openLeadPipelineReview } from '../services/leadPipelineAuditService.js'
 import {
   listLeadPipelineReviews,
@@ -1137,14 +1138,19 @@ export async function runRadarSyncImport(input: RadarSyncInput = {}, actorUserId
       // 模型失败或要求人工复核不是业务拒绝。候选仍保留在雷达源中，且 failed
       // 缓存不会被复用，下一次同步会自动重试。
       if (!subjectReview || subjectReview.status === 'failed' || subjectReview.status === 'review') {
+        const unavailableTransition = radarUnavailableReviewTransition({
+          source: it.source,
+          reviewStatus: subjectReview?.status === 'review'
+            ? 'review'
+            : subjectReview?.status === 'failed' ? 'failed' : 'missing',
+          reason: subjectReview?.rejectReason,
+        })
         await transitionRadarCandidate(itemIndex, {
-          status: subjectReview?.status === 'review' ? 'review' : 'failed',
-          reason: subjectReview?.status === 'review'
-            ? (subjectReview.rejectReason || 'radar subject requires manual review')
-            : 'radar subject review failed',
+          status: unavailableTransition.status,
+          reason: unavailableTransition.reason,
           evidence: subjectReview?.evidence ? [{ excerpt: subjectReview.evidence }] : [],
           confidence: subjectReview ? subjectReview.confidence * 100 : 0,
-          error: subjectReview?.status === 'failed' ? subjectReview.rejectReason || 'subject review failed' : null,
+          error: unavailableTransition.error,
           actorType: 'agent',
           actorId: subjectReview?.model || 'radar-subject-review',
         })
