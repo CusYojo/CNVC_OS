@@ -1896,7 +1896,10 @@ def build_command(args: argparse.Namespace) -> int:
                     # fixed five-reason and seven-check cardinalities. The final
                     # compliance note presents those items as continuous prose,
                     # as required by the document blueprint.
-                    p = clone_with_text(ex_body, block["text"])
+                    prose = re.sub(
+                        r"^([^，。；！？\n]{2,24})[：:]\s*", r"\1，", block["text"], count=1
+                    )
+                    p = clone_with_text(ex_body, prose)
                 elif kind == "conclusion":
                     p = clone_with_text(ex_conclusion, block["text"])
                 else:

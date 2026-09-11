@@ -340,7 +340,7 @@ export async function renderComplianceStatementWithSkill(input: {
 }) {
   const skillDirectory = getAiSkillDirectory('generate-investment-compliance-note')
   const processor = path.join(skillDirectory, 'scripts', 'compliance_processor.py')
-  const template = path.join(skillDirectory, 'assets', 'reference.docx')
+  const template = path.join(skillDirectory, 'assets', 'compliance-layout-authority.docx')
   const workDirectory = path.join(path.dirname(input.outputPath), '.generate-investment-compliance-note-render')
   const contentPath = path.join(workDirectory, 'content.json')
   await mkdir(workDirectory, { recursive: true })
