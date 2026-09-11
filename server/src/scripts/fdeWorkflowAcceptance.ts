@@ -122,7 +122,7 @@ try {
       assert.equal(amended.plan?.status, 'locked')
       assert.equal(amended.plan?.actions[0].title.endsWith('（修订）'), true)
       assert.equal(amended.plan?.actions[0].participantUserIds.includes(accounts[4].id), true)
-      await expectCode(saveFdePlan({ projectId: project.id, userId: ownerId, cycleDays: 40, targetDate: '2027-02-28', expectedVersion: amended.plan?.version }), 'FDE_APPROVED_TIMELINE_EXISTS')
+      await expectCode(saveFdePlan({ projectId: project.id, userId: ownerId, cycleDays: 40, targetDate: '2027-02-28', expectedVersion: amended.plan?.version }), 'FDE_APPROVED_PLAN_ACTIONS_REQUIRED')
       checks.push('approved-plan-actions-remain-amendable-and-participants-resynchronize')
     }
   }
