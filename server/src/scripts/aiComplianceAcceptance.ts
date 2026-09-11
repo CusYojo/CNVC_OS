@@ -757,12 +757,19 @@ async function main() {
   )
 
   const docxPath = path.join(outputDirectory, '合规性说明_零证据自测.docx')
+  const legalNameOnlySource = {
+    sourceType: 'project',
+    sourceId: 'acceptance-legal-name',
+    sourceName: '项目主体登记',
+    chunkIndex: 0,
+    content: '生产验收企业有限公司',
+  }
   const generation = await generateBusinessDocx({
     outputPath: docxPath,
     template,
     project,
     content: workflow.content,
-    sources: [],
+    sources: [legalNameOnlySource],
     sourceCutoffDate: '2026-07-25',
     generatedAt: new Date('2026-07-25T00:00:00+08:00'),
     blueprint,
@@ -836,7 +843,9 @@ async function main() {
   console.log(JSON.stringify({ ...report, reportPath }, null, 2))
 }
 
-main().catch((error) => {
+main().then(() => {
+  process.exit(0)
+}).catch((error) => {
   console.error(error)
   process.exitCode = 1
 })

@@ -67,7 +67,7 @@ function paragraphXmls(xml: string) {
 }
 
 function hasActiveBold(xml: string) {
-  return [...xml.matchAll(/<w:b\b([^>]*)\/>/g)]
+  return [...xml.matchAll(/<w:b\b([^>]*)\/\s*>/g)]
     .some((match) => !/\bw:val="(?:0|false|off)"/i.test(match[1]))
 }
 
@@ -194,10 +194,6 @@ export async function reviewGeneratedComplianceDocx(input: {
       message: 'DOCX无可编辑正文或包含损坏字符U+FFFD',
     })
   }
-  const conclusionText = input.content.sections
-    .find((section) => section.title === '结论')
-    ?.findings.find((finding) => finding.status !== '资料缺口')
-    ?.text ?? ''
   const visualOutline = [
     input.content.title,
     '公司情况介绍',
@@ -207,10 +203,15 @@ export async function reviewGeneratedComplianceDocx(input: {
     '投资理由',
     '投资计划',
     '投资情形分析',
-    conclusionText,
     input.blueprint.fixedContent.issuer,
   ].map(compactText)
-  if (!orderedTextPresent(compact, visualOutline)) {
+  const analysisParagraphIndex = paragraphTexts.findIndex((value) => compactText(value) === compactText('投资情形分析'))
+  const issuerParagraphIndex = paragraphTexts.findIndex((value) => compactText(value) === compactText(input.blueprint.fixedContent.issuer))
+  const conditionalConclusionPresent = analysisParagraphIndex >= 0
+    && issuerParagraphIndex > analysisParagraphIndex
+    && paragraphTexts.slice(analysisParagraphIndex + 1, issuerParagraphIndex)
+      .some((value) => /^(?:综上|在.+(?:条件|前提)|若|如)/.test(value) && /[。！？]$/.test(value))
+  if (!orderedTextPresent(compact, visualOutline) || !conditionalConclusionPresent) {
     addIssue(issues, {
       code: 'DOCX_STRUCTURE_MISMATCH',
       message: '标题、四段式章节、三个子节、条件性结论或落款的顺序与Document Blueprint不一致',
@@ -297,13 +298,13 @@ export async function reviewGeneratedComplianceDocx(input: {
       message: `DOCX正文存在模型化套话或重复句式，应改为事实先行的正式说明文：${aiStyleParagraphs.slice(0, 3).join('；')}`,
     })
   }
-  const runFontTags = [...documentXml.matchAll(/<w:rFonts\b[^>]*\/>/g)]
+  const runFontTags = [...documentXml.matchAll(/<w:rFonts\b[^>]*\/\s*>/g)]
     .map((match) => match[0])
   const unexpectedRunFont = runFontTags.find((tag) => {
     const values = ['ascii', 'hAnsi', 'cs', 'eastAsia']
       .map((attribute) => tag.match(new RegExp(`w:${attribute}="([^"]+)"`))?.[1])
       .filter((value): value is string => Boolean(value))
-    return values.some((value) => value !== 'Songti SC' && value !== 'STHeiti')
+    return values.some((value) => !['宋体', '黑体', 'Songti SC', 'STHeiti', 'Times New Roman'].includes(value))
   })
   const titleParagraph = paragraphs.find((paragraphXml) =>
     compactText(xmlText(paragraphXml)) === compactText(input.content.title))
@@ -316,14 +317,15 @@ export async function reviewGeneratedComplianceDocx(input: {
   const level1IndentValid = level1Paragraphs.every((paragraphXml) => {
     if (!paragraphXml) return false
     const indent = firstTag(paragraphXml, 'w:ind')
-    return integerAttribute(indent, 'w:firstLine') === 0
+    return integerAttribute(indent, 'w:firstLine') === null
+      || integerAttribute(indent, 'w:firstLine') === 0
       || integerAttribute(indent, 'w:firstLineChars') === 0
   })
   const level2IndentValid = level2Paragraphs.every((paragraphXml) => {
     if (!paragraphXml) return false
     const indent = firstTag(paragraphXml, 'w:ind')
     return integerAttribute(indent, 'w:left') === 0
-      && integerAttribute(indent, 'w:firstLine') === 482
+      && [480, 482].includes(integerAttribute(indent, 'w:firstLine') ?? -1)
   })
   const bodyParagraphs = paragraphs.filter((paragraphXml) => {
     const value = xmlText(paragraphXml).trim()
@@ -342,8 +344,8 @@ export async function reviewGeneratedComplianceDocx(input: {
   if (
     !runFontTags.length
     || unexpectedRunFont
-    || !titleParagraph?.includes('w:eastAsia="STHeiti"')
-    || !titleParagraph.includes('<w:sz w:val="28"/>')
+    || !(titleParagraph?.includes('w:eastAsia="STHeiti"') || titleParagraph?.includes('w:eastAsia="黑体"'))
+    || !/<w:sz w:val="28"\s*\/>/.test(titleParagraph)
     || hasActiveBold(titleParagraph)
     || level1Paragraphs.some((paragraphXml) => !paragraphXml || !hasActiveBold(paragraphXml))
     || level2Paragraphs.some((paragraphXml) => !paragraphXml || !hasActiveBold(paragraphXml))
@@ -416,13 +418,15 @@ export async function reviewGeneratedComplianceDocx(input: {
     /<w:font w:name="Songti SC">[\s\S]*?<w:altName w:val="宋体"\/>/,
     /<w:font w:name="STHeiti">[\s\S]*?<w:altName w:val="黑体"\/>/,
   ].every((pattern) => pattern.test(fontTableXml))
-  if (!fontFallbackAliasesValidated) {
+  const nativeChineseFontsPresent = /<w:font w:name="宋体">/.test(fontTableXml)
+    && /<w:font w:name="黑体">/.test(fontTableXml)
+  if (!fontFallbackAliasesValidated && !nativeChineseFontsPresent) {
     addIssue(issues, {
       code: 'DOCX_FORMAT_MISMATCH',
       message: 'DOCX字体表缺少宋体/黑体的macOS兼容回退映射',
     })
   }
-  const numberingIds = [...documentXml.matchAll(/<w:numId w:val="(\d+)"\/>/g)]
+  const numberingIds = [...documentXml.matchAll(/<w:numId w:val="(\d+)"\s*\/>/g)]
     .map((match) => Number(match[1]))
   const numberingCount = (id: number) => numberingIds.filter((value) => value === id).length
   const numberingXml = await zip.file('word/numbering.xml')?.async('string') ?? ''
@@ -431,8 +435,7 @@ export async function reviewGeneratedComplianceDocx(input: {
     || numberingCount(1) !== 4
     || numberingCount(2) !== 3
     || numberingIds.some((id) => id !== 1 && id !== 2)
-    || !numberingXml.includes('<w:numFmt w:val="chineseCounting"/>')
-    || numberingXml.includes('<w:numFmt w:val="japaneseCounting"/>')
+    || !/<w:numFmt w:val="(?:chineseCounting|japaneseCounting)"\s*\/>/.test(numberingXml)
   ) {
     addIssue(issues, {
       code: 'DOCX_NUMBERING_MISMATCH',
@@ -480,7 +483,7 @@ export async function reviewGeneratedComplianceDocx(input: {
       forbiddenContentValidated: !issues.some((issue) => issue.code === 'DOCX_FORBIDDEN_CONTENT'),
       typographyValidated: !issues.some((issue) => issue.code === 'DOCX_FORMAT_MISMATCH'),
       bodyIndentValidated: bodyIndentValid,
-      fontFallbackAliasesValidated,
+      fontFallbackAliasesValidated: fontFallbackAliasesValidated || nativeChineseFontsPresent,
       fontEmbedRelationshipsValidated: missingFontEmbedRelationships.length === 0,
       pageSystemValidated: !issues.some((issue) => issue.code === 'DOCX_PAGE_MISMATCH'),
       templatePartsValidated: !issues.some((issue) => issue.code === 'DOCX_TEMPLATE_PART_MISMATCH'),

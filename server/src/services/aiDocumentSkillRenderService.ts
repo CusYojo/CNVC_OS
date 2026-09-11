@@ -173,9 +173,14 @@ function cleanComplianceCompanyIntro(value: string) {
 function cleanComplianceReason(value: string) {
   // Formatting must not remove qualifications or replace reviewed business facts.
   const cleaned = cleanVisibleText(value)
+    .replace(/尚待确认[，,]\s*暂不能判断[^。！？]+/g, '尚待确认')
     .replace(
       '收费方式、收入构成和订单转化情况尚待确认，暂不能判断公司的持续经营和扩张能力',
       '收费与订单转化尚待确认，暂不能判断持续经营和扩张能力',
+    )
+    .replace(
+      '项目所处细分行业和适用政策尚待确认，暂不能判断其与基金投资方向及行业趋势的匹配程度',
+      '细分行业、适用政策及基金投资方向匹配度尚待确认',
     )
     .replace(/[，,；;：:]\s*$/, '')
     .trim()
