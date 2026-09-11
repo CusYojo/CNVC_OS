@@ -72,36 +72,39 @@ try {
     assert.equal(normal.progress, 10)
   })
 
-  const unauthorized = await classifyProject({
-    projectId: normal.id,
-    toClassification: 'key',
-    reason: '普通成员不得升级重点项目',
-    expectedVersion: normal.version,
-    userId: ownerId,
-  }).then(() => null, (error) => error)
-  check('project-owner-cannot-upgrade-key-project-without-leadership-permission', () => {
-    assert.equal(unauthorized?.code, 'PROJECT_CLASSIFICATION_FORBIDDEN')
-  })
-
   const key = await classifyProject({
     projectId: normal.id,
     toClassification: 'key',
-    reason: '领导确认列为重点推进项目',
+    reason: '项目负责人确认列为重点推进项目',
     expectedVersion: normal.version,
-    userId: leaderId,
+    userId: ownerId,
     requestId: `accept-key-${marker}`,
   })
-  check('authorized-leader-upgrades-normal-project-to-key', () => {
+  check('project-lead-upgrades-normal-project-to-key', () => {
     assert.equal(key.classification, 'key')
     assert.equal(key.stage, normal.stage)
     assert.equal(key.lifecycle, normal.lifecycle)
   })
 
-  const staleVersion = await classifyProject({
+  const downgraded = await classifyProject({
     projectId: key.id,
     toClassification: 'normal',
+    reason: '领导确认调回普通项目',
+    expectedVersion: key.version,
+    userId: leaderId,
+    requestId: `accept-normal-${marker}`,
+  })
+  check('authorized-leader-downgrades-key-project-to-normal', () => {
+    assert.equal(downgraded.classification, 'normal')
+    assert.equal(downgraded.stage, key.stage)
+    assert.equal(downgraded.lifecycle, key.lifecycle)
+  })
+
+  const staleVersion = await classifyProject({
+    projectId: downgraded.id,
+    toClassification: 'key',
     reason: '使用过期版本调整分类',
-    expectedVersion: normal.version,
+    expectedVersion: key.version,
     userId: leaderId,
   }).then(() => null, (error) => error)
   check('stale-project-version-cannot-overwrite-classification', () => {
@@ -109,9 +112,9 @@ try {
   })
 
   const history = await db.select().from(projectClassificationHistory)
-    .where(eq(projectClassificationHistory.projectId, key.id))
+    .where(eq(projectClassificationHistory.projectId, downgraded.id))
   check('classification-history-is-append-only-and-complete', () => {
-    assert.deepEqual(history.map((row) => row.toClassification).sort(), ['key', 'normal', 'pool'])
+    assert.deepEqual(history.map((row) => row.toClassification).sort(), ['key', 'normal', 'normal', 'pool'])
     assert.ok(history.every((row) => row.reason.trim().length >= 2))
   })
 
