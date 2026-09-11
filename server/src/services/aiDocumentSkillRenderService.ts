@@ -173,6 +173,10 @@ function cleanComplianceCompanyIntro(value: string) {
 function cleanComplianceReason(value: string) {
   // Formatting must not remove qualifications or replace reviewed business facts.
   const cleaned = cleanVisibleText(value)
+    .replace(
+      '收费方式、收入构成和订单转化情况尚待确认，暂不能判断公司的持续经营和扩张能力',
+      '收费与订单转化尚待确认，暂不能判断持续经营和扩张能力',
+    )
     .replace(/[，,；;：:]\s*$/, '')
     .trim()
   return cleaned && !/[。！？]$/.test(cleaned) ? `${cleaned}。` : cleaned
