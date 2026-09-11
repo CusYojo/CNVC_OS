@@ -3215,6 +3215,33 @@ export const companyKnowledgeCommands = mysqlTable('company_knowledge_commands',
   createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`), completedAt: timestampColumn('completed_at'),
 }, t => ({ command: uniqueIndex('uq_knowledge_actor_command').on(t.actorId, t.commandId) }))
 
+export const adminPermanentDeletions = mysqlTable('admin_permanent_deletions', {
+  id: uuidPrimaryKey('id'),
+  tokenHash: varchar('token_hash', { length: 64 }).notNull(),
+  resourceType: varchar('resource_type', { length: 16 }).notNull(),
+  resourceId: uuidColumn('resource_id').notNull(),
+  resourceName: varchar('resource_name', { length: 255 }).notNull(),
+  resourceVersion: varchar('resource_version', { length: 128 }).notNull(),
+  impactHash: varchar('impact_hash', { length: 64 }).notNull(),
+  impactCounts: json('impact_counts').$type<import('../contracts/adminPermanentDeletionContract.js').PermanentDeletionImpact>().notNull(),
+  actorId: uuidColumn('actor_id').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  actorName: varchar('actor_name', { length: 128 }).notNull(),
+  status: varchar('status', { length: 16 }).notNull().default('preview'),
+  riskConfirmationVersion: varchar('risk_confirmation_version', { length: 32 }),
+  databaseDeletedAt: timestampColumn('database_deleted_at'),
+  fileCleanupStatus: varchar('file_cleanup_status', { length: 16 }).notNull().default('none'),
+  fileCleanupPayload: json('file_cleanup_payload').$type<{ paths: string[] }>().notNull().default(emptyJsonObject),
+  fileCleanupAttempts: int('file_cleanup_attempts').notNull().default(0),
+  fileCleanupError: varchar('file_cleanup_error', { length: 128 }),
+  expiresAt: timestampColumn('expires_at').notNull(),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+  updatedAt: timestampColumn('updated_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, t => ({
+  token: uniqueIndex('uq_admin_permanent_deletion_token').on(t.tokenHash),
+  actor: index('idx_admin_permanent_deletion_actor').on(t.actorId, t.status, t.expiresAt),
+  resource: index('idx_admin_permanent_deletion_resource').on(t.resourceType, t.resourceId, t.status),
+}))
+
 export const personalNotes = mysqlTable('personal_notes', {
   id: uuidPrimaryKey('id'),
   ownerId: uuidColumn('owner_id').notNull().references(() => users.id, { onDelete: 'restrict' }),

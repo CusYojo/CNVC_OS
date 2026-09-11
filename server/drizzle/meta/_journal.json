@@ -708,6 +708,13 @@
       "when": 1793260143000,
       "tag": "0112_add_assistant_experience_memory",
       "breakpoints": true
+    },
+    {
+      "idx": 101,
+      "version": "5",
+      "when": 1793346543000,
+      "tag": "0113_add_admin_permanent_deletions",
+      "breakpoints": true
     }
   ]
 }
