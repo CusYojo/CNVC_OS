@@ -337,6 +337,8 @@ function directAgentPrompt(input: {
   documentCount: number
   chunkCount: number
 }) {
+  const requiresPdf = input.profile.taskType === 'investment_proposal'
+  const pdfFileName = input.outputFileName.replace(/\.docx$/i, '.pdf')
   return `请直接调用 Skill 工具执行 ${input.profile.skillName}，并严格按该 Skill 的 SKILL.md、references、scripts 与模板完成当前项目${input.profile.documentLabel}。
 
 这是正式交付任务，不要创建另一个后台任务，也不要只返回文字草稿。
@@ -354,7 +356,7 @@ function directAgentPrompt(input: {
 3. 由当前 Agent 按 Skill 自主${input.profile.processContract}；宿主不会生成问题、答案、章节、底稿或兜底正文，也不会用程序替代 Skill 的业务验收。
 4. 对交易金额、估值、股比、收入、人员任职和协议日期的冲突必须保留来源边界，不得编造。
 5. 使用 Skill 自带脚本、模板和当前工作区可用 Python/LibreOffice 工具完成 DOCX；可以在工作区写临时文件。
-6. 最终在 ./output 中只保留一份 DOCX，文件名必须是 ${input.outputFileName}。${input.profile.taskType === 'project_qa' ? '按 Q&A Skill 保留已校验的 Markdown 底稿。' : ''}当前任务不生成、不导出、不检查 PDF；不得把模板文件复制到 output。
+6. 最终在 ./output 中保留一份 DOCX，文件名必须是 ${input.outputFileName}。${requiresPdf ? `同时从最终 DOCX 导出同内容、同主文件名的 PDF：${pdfFileName}，并按 Skill 完成 PDF 复核。` : `${input.profile.taskType === 'project_qa' ? '按 Q&A Skill 保留已校验的 Markdown 底稿。' : ''}当前任务不生成、不导出、不检查 PDF。`}不得把模板文件复制到 output。
 7. 只有在当前 Agent 按 Skill 完成最终审阅且确认可交付后才结束；无法完成时明确失败，不得生成占位文件。
 8. 当前系统为 ${process.platform}。Python 虚拟环境已加入 PATH；先验证 python --version。写好执行脚本后必须用 Bash 实际运行并检查返回结果，不能以写入脚本代替执行。Windows 原生运行时不存在沙箱虚拟盘符 R:/、S:/，脚本必须用 Path.cwd()、./output 和 ./.claude/skills 下的真实相对路径；不得生成或引用 R:/、S:/。Windows PowerShell 不使用反斜杠续行；Python 复制文件使用 shutil.copyfile，不使用 os.copy。不要通过反复新建包装脚本处理同一个执行错误，不得联网安装依赖。
 ${input.profile.taskType === 'investment_proposal' ? '9. 提案渲染入口为 python .claude/skills/draft-investment-proposal/scripts/proposal_processor.py --proposal-path proposal.json --output-path "./output/' + input.outputFileName + '" --template-path .claude/skills/draft-investment-proposal/assets/primary-layout-authority.docx。先写经过 Skill 审阅的 proposal.json（meta 对象、非空 sections 数组），不得虚构 --project-name 等接口参数。渲染成功不等于业务或版式验收通过，仍须完成 Skill 校验。' : ''}
@@ -383,6 +385,8 @@ function directAgentRecoveryPrompt(input: {
   outputFileName: string
   recoveryAttempt: number
 }) {
+  const requiresPdf = input.profile.taskType === 'investment_proposal'
+  const pdfFileName = input.outputFileName.replace(/\.docx$/i, '.pdf')
   return `上一个 ${input.profile.skillName} Agent 上下文因模型网关拒绝或主模型额度不足已经关闭。当前是第 ${input.recoveryAttempt} 次全新上下文恢复，工作区中的资料、Manifest、事实台账、草稿、Reviewer 结果和渲染文件均被原样保留。
 
 恢复要求：
@@ -390,7 +394,7 @@ function directAgentRecoveryPrompt(input: {
 2. 读取 ./REQUEST.json 和 ./materials/manifest.json，检查现有工作成果与 Manifest 的覆盖关系；若现有证据台账不能证明某个来源或片段已经纳入，必须补读缺失资料。
 3. 在现有工作成果上继续，不得删除已完成的事实库、冲突裁决、草稿、Reviewer 结果或渲染结果后从头降级生成。
 4. 业务判断、内容修订和最终验收只服从当前 Skill；宿主不会生成正文、替代审阅或提供旧模板兜底稿。
-5. 完成 Skill 要求的最终复核后，在 ./output 中保留一份 ${input.outputFileName}${input.profile.taskType === 'project_qa' ? '及 Q&A Skill 要求的已校验 Markdown 底稿' : ''}；当前任务不生成、不导出、不检查 PDF，未通过 Skill 最终复核不得发布工作稿。
+5. 完成 Skill 要求的最终复核后，在 ./output 中保留一份 ${input.outputFileName}${requiresPdf ? `和一份由它导出的同内容 PDF ${pdfFileName}` : `${input.profile.taskType === 'project_qa' ? '及 Q&A Skill 要求的已校验 Markdown 底稿' : ''}；当前任务不生成、不导出、不检查 PDF`}，未通过 Skill 最终复核不得发布工作稿。
 
 请检查工作区并从尚未完成的阶段继续。`
 }
@@ -646,6 +650,22 @@ export async function runDirectBusinessDocumentAgent(input: {
       code: 'DIRECT_SKILL_OUTPUT_INVALID',
     })
   }
+  const requiresPdf = profile.taskType === 'investment_proposal'
+  const expectedPdfName = outputFileName.replace(/\.docx$/i, '.pdf')
+  const pdfFiles = (await readdir(outputDirectory, { withFileTypes: true }))
+    .filter((entry) => entry.isFile() && /\.pdf$/i.test(entry.name))
+  if (requiresPdf && (pdfFiles.length !== 1 || pdfFiles[0].name !== expectedPdfName)) {
+    throw Object.assign(new Error(`文档 Agent 输出目录必须包含 ${expectedPdfName}`), {
+      code: 'DIRECT_SKILL_OUTPUT_CONTRACT_FAILED',
+    })
+  }
+  const pdfPath = requiresPdf ? path.join(outputDirectory, expectedPdfName) : undefined
+  const pdfOutput = pdfPath ? await readFile(pdfPath) : undefined
+  if (pdfOutput && (pdfOutput.length < 100 || !pdfOutput.subarray(0, 5).equals(Buffer.from('%PDF-')))) {
+    throw Object.assign(new Error('文档 Agent 生成的 PDF 为空或不完整'), {
+      code: 'DIRECT_SKILL_OUTPUT_INVALID',
+    })
+  }
   if (profile.taskType === 'due_diligence_report') {
     try {
       const validation = await assertDueDiligenceValidationEvidence({ workspace, outputPath })
@@ -665,6 +685,11 @@ export async function runDirectBusinessDocumentAgent(input: {
   await input.onProgress?.({ stage: 'Agent 已按当前 Skill 完成生成与审阅', progress: 96 })
   return {
     outputPath,
+    ...(pdfPath && pdfOutput ? {
+      pdfPath,
+      pdfBytes: pdfOutput.length,
+      pdfSha256: createHash('sha256').update(pdfOutput).digest('hex'),
+    } : {}),
     documentSha256: createHash('sha256').update(output).digest('hex'),
     bytes: output.length,
     skillInvoked,

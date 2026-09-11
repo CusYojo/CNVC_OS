@@ -99,7 +99,7 @@ try {
   const options = observedOptions as Record<string, unknown>
   assert.deepEqual(options.skills, ['draft-investment-proposal'])
   assert.deepEqual(options.settingSources, ['project'])
-  assert.equal((options.sandbox as { enabled?: boolean }).enabled, true)
+  assert.equal((options.sandbox as { enabled?: boolean }).enabled, process.platform !== 'win32')
   assert.equal(
     (options.sandbox as { failIfUnavailable?: boolean }).failIfUnavailable,
     process.platform !== 'win32',
@@ -130,28 +130,34 @@ try {
   assert.deepEqual(classifyDirectSkillAgentFailure('Failed to authenticate. API Error: 401'), {
     code: 'DIRECT_SKILL_AGENT_AUTHENTICATION_FAILED',
     recoverableGateway403: false,
+    recoverableQuota: false,
   })
   assert.deepEqual(classifyDirectSkillAgentFailure('API Error: 403 额度不足'), {
     code: 'DIRECT_SKILL_AGENT_QUOTA_EXHAUSTED',
     recoverableGateway403: false,
+    recoverableQuota: true,
   })
   assert.deepEqual(classifyDirectSkillAgentFailure(
     'Failed to authenticate. API Error: 403 令牌$额度不足：需要 0.1099，可用 0.0376',
   ), {
     code: 'DIRECT_SKILL_AGENT_QUOTA_EXHAUSTED',
     recoverableGateway403: false,
+    recoverableQuota: true,
   })
   assert.deepEqual(classifyDirectSkillAgentFailure('API Error: 403 gateway policy denied'), {
     code: 'DIRECT_SKILL_AGENT_UPSTREAM_FORBIDDEN',
     recoverableGateway403: true,
+    recoverableQuota: false,
   })
   assert.deepEqual(classifyDirectSkillAgentFailure('Request failed with status code 403'), {
     code: 'DIRECT_SKILL_AGENT_UPSTREAM_FORBIDDEN',
     recoverableGateway403: true,
+    recoverableQuota: false,
   })
   assert.deepEqual(classifyDirectSkillAgentFailure('403 Forbidden'), {
     code: 'DIRECT_SKILL_AGENT_UPSTREAM_FORBIDDEN',
     recoverableGateway403: true,
+    recoverableQuota: false,
   })
 
   const recoveryTaskDirectory = path.join(temporaryRoot, 'gateway-recovery')

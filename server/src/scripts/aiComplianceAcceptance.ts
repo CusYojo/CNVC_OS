@@ -26,6 +26,7 @@ import { isDiagnosticEvidenceSourceName } from '../services/aiEvidenceQualitySer
 import type { ProjectKnowledgeBrief } from '../services/aiProjectKnowledgeBriefService.js'
 import { loadAiSkill } from '../services/aiSkillService.js'
 import { AI_TEMPLATE_CATALOG } from '../services/aiTemplateCatalog.js'
+import { COMPLIANCE_COMPONENT_LABELS, finalizeComplianceReadiness } from '../services/complianceReadinessContract.js'
 
 type Check = {
   name: string
@@ -56,6 +57,20 @@ async function main() {
     loadAiSkill(template.skillName),
     parseComplianceDocumentBlueprint(template),
   ])
+  const readinessComponents = Object.fromEntries(Object.keys(COMPLIANCE_COMPONENT_LABELS)
+    .map(key => [key, { status: 'verified', source_ids: [] }]))
+  const complianceReadiness = finalizeComplianceReadiness({
+    components: readinessComponents,
+    review: {
+      status: 'pass', errors: [],
+      metrics: {
+        components: Object.fromEntries(Object.keys(COMPLIANCE_COMPONENT_LABELS)
+          .map(key => [key, { gaps: [], errors: [] }])),
+        pending_compliance_items: [],
+      },
+    },
+    asOfDate: '2026-07-25', missingItems: [], blockingIssues: [],
+  })
 
   check(
     'Skill 自带版式权威完整',
@@ -313,6 +328,7 @@ async function main() {
     sourceCutoffDate: '2026-07-25',
     generatedAt: new Date('2026-07-25T00:00:00+08:00'),
     blueprint,
+    complianceReadiness,
   })
   const agentDocxReview = await reviewGeneratedComplianceDocx({
     filePath: agentDocxPath,
@@ -463,6 +479,7 @@ async function main() {
     sourceCutoffDate: '2026-07-30',
     generatedAt: new Date('2026-08-05T00:00:00+08:00'),
     blueprint,
+    complianceReadiness,
   })
   const structuredDocxReview = await reviewGeneratedComplianceDocx({
     filePath: structuredDocxPath,
@@ -744,6 +761,7 @@ async function main() {
     sourceCutoffDate: '2026-07-25',
     generatedAt: new Date('2026-07-25T00:00:00+08:00'),
     blueprint,
+    complianceReadiness,
   })
   const wordReview = await reviewGeneratedComplianceDocx({
     filePath: docxPath,

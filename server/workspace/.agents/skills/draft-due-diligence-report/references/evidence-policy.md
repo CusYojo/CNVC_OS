@@ -1,5 +1,7 @@
 # 证据与事实规则
 
+多个转载同一稿件只能视为一份证据；应按内容指纹合并重复证据分片，并保留最权威的原始出处。
+
 ## V22交易新鲜度字段
 
 交易证据在通用字段之外必须记录`round_id`、`round_role`、`document_version`、`document_date`、`execution_status`、`drafting_note_status`和`freshness_status`。本轮最新、未被替代且批注已消解的文件优先于历史报告、旧版意向书和管理层口头口径。`1.2`、`7.2`和末章的每一项交易主张必须在证据台账中有同一`claim_id`，并满足`transaction-version-contract.md`。

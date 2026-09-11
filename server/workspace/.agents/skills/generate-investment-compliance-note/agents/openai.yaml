@@ -1,4 +1,4 @@
 interface:
   display_name: "生成投资合规性说明"
   short_description: "结合尽调资料与受控公开核验生成德塔式投资合规说明"
-  default_prompt: "Use $generate-investment-compliance-note to cross-check official public information, create a concise conclusion-first Deta-style compliance note, and verify the final DOCX."
+  default_prompt: "使用 $generate-investment-compliance-note 交叉核验官方公开信息，生成结论优先、简洁清晰的德塔式投资合规说明，并验证最终 DOCX 文件。"
