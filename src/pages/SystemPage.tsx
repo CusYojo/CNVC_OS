@@ -16,6 +16,7 @@ import { FdePolicyPanel } from '../components/FdePolicyPanel'
 import { FdeTypePolicyPanel } from '../components/FdeTypePolicyPanel'
 import { FdeOfficePolicyPanel } from '../components/FdeOfficePolicyPanel'
 import { FdeResponsibilityPolicyPanel } from '../components/FdeResponsibilityPolicyPanel'
+import { AdminPermanentDeletionPanel } from '../components/AdminPermanentDeletionPanel'
 import '../components/fde-workspace.css'
 
 type Department = {
@@ -71,6 +72,7 @@ const tabItems = [
   { id: 'type-rules', label: '非投资流程模板' },
   { id: 'office-rules', label: '办公审批规则' },
   { id: 'responsibility-rules', label: '责任规则' },
+  { id: 'permanent-deletion', label: '数据彻底删除' },
 ]
 const categoryLabel = (category: string | null) => FDE_ROLE_CATEGORIES.find((item) => item.code === category)?.label ?? '兼容角色（未映射）'
 
@@ -498,6 +500,7 @@ export function SystemPage() {
     'type-rules': () => <FdeTypePolicyPanel />,
     'office-rules': () => <FdeOfficePolicyPanel />,
     'responsibility-rules': () => <FdeResponsibilityPolicyPanel />,
+    'permanent-deletion': () => <AdminPermanentDeletionPanel />,
   }
 
   return <div className="fde-workspace fde-system-page">

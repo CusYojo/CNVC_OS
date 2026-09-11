@@ -30,6 +30,11 @@ import {
   updateLeadIndustryDictionaryItem,
   updateLeadInstitutionDictionaryItem,
 } from '../services/leadInvestmentProfileDictionaryService.js'
+import {
+  executePermanentDeletion,
+  previewPermanentDeletion,
+  searchPermanentDeletionTargets,
+} from '../services/adminPermanentDeletionService.js'
 
 export const systemAdministrationRouter = Router()
 // Already authenticated by /api; only one's own minimal technical receipt.
@@ -55,6 +60,27 @@ systemAdministrationRouter.post('/office-policies/:id/enabled', async (req: Auth
 
 systemAdministrationRouter.get('/integrations-summary', async (req: AuthedRequest, res, next) => {
   try { res.setHeader('Cache-Control', 'private, no-store'); res.json(await getFdeIntegrationSummary(req.user!.uid)) } catch (error) { next(error) }
+})
+
+systemAdministrationRouter.get('/permanent-deletions/search', async (req: AuthedRequest, res, next) => {
+  try {
+    res.setHeader('Cache-Control', 'private, no-store')
+    res.json(await searchPermanentDeletionTargets(actor(req), req.query))
+  } catch (error) { next(error) }
+})
+
+systemAdministrationRouter.post('/permanent-deletions/preview', async (req: AuthedRequest, res, next) => {
+  try {
+    res.setHeader('Cache-Control', 'private, no-store')
+    res.json(await previewPermanentDeletion(actor(req), req.body))
+  } catch (error) { next(error) }
+})
+
+systemAdministrationRouter.post('/permanent-deletions/execute', async (req: AuthedRequest, res, next) => {
+  try {
+    res.setHeader('Cache-Control', 'private, no-store')
+    res.json(await executePermanentDeletion(actor(req), req.body))
+  } catch (error) { next(error) }
 })
 
 systemAdministrationRouter.get('/fde-policies', async (_req, res, next) => {
