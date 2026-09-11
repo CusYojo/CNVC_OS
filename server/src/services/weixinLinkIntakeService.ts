@@ -11,7 +11,8 @@ import { handleWeixinLinkIntake } from './weixinLinkIntakeFlow.js'
 import type { LinkIntakeTask } from '../contracts/weixinLinkIntakeContract.js'
 import { candidateScore } from './radarCollectorService.js'
 import { fetchWeixinBrowserArticle } from './weixinBrowserArticleService.js'
-import { extractWeixinKnowledgeSummary, weixinPublicSourceLink } from './weixinKnowledgeExtractionService.js'
+import { weixinPublicSourceLink } from './weixinKnowledgeExtractionService.js'
+import { summarizeWeixinKnowledge } from './weixinKnowledgeAiSummaryService.js'
 
 function stableId(value: string) {
   const hex = createHash('sha256').update(value).digest('hex')
@@ -31,6 +32,7 @@ function platformLink(path: string) {
 async function storeKnowledge(task: LinkIntakeTask, userId: string) {
   const article = task.article!
   const sourceLink = weixinPublicSourceLink(article.url)
+  const summary = await summarizeWeixinKnowledge(article.markdown || article.text, article.publisher)
   // Only deduplicate against entries the actor can already read. Never expose another author's draft.
   const [existing] = sourceLink ? await db.select({ id: companyKnowledge.id }).from(companyKnowledge)
     .innerJoin(weixinLinkIntakes, eq(weixinLinkIntakes.knowledgeEntryId, companyKnowledge.id)).where(and(
@@ -43,7 +45,7 @@ async function storeKnowledge(task: LinkIntakeTask, userId: string) {
     clientRequestId: stableId(`${id}:save`), expectedVersion: 0,
     definition: {
       kind: '新闻链接', title: article.title.slice(0, 120),
-      summary: extractWeixinKnowledgeSummary(article.markdown || article.text, article.publisher),
+      summary,
       link: sourceLink, audience: 'company', readerIds: [], editorIds: [], fileId: null, fileVersion: null,
     },
   })
