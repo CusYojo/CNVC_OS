@@ -182,6 +182,7 @@ export async function executePermanentDeletion(actor: AdminActor, raw: unknown) 
   const input = permanentDeletionExecuteSchema.parse(raw)
   const connection = await pool.getConnection()
   let removeProjectDirectory = false
+  let fileCleanupStatus: 'none' | 'done' | 'failed' = 'none'
   try {
     await connection.beginTransaction()
     await assertEnabledSystemAdmin(connection, actor)
@@ -224,12 +225,14 @@ export async function executePermanentDeletion(actor: AdminActor, raw: unknown) 
       try {
         await removeProjectFileDirectory(input.resourceId)
         await pool.query(`UPDATE ${auditTable} SET file_cleanup_status='done',file_cleanup_attempts=file_cleanup_attempts+1,updated_at=? WHERE id=?`, [new Date(), audit.id])
+        fileCleanupStatus = 'done'
       } catch (error) {
         const code = String((error as { code?: unknown }).code || 'FILE_CLEANUP_FAILED').slice(0, 128)
         await pool.query(`UPDATE ${auditTable} SET file_cleanup_status='failed',file_cleanup_attempts=file_cleanup_attempts+1,file_cleanup_error=?,updated_at=? WHERE id=?`, [code, new Date(), audit.id])
+        fileCleanupStatus = 'failed'
       }
     }
-    return { deletionId: audit.id, deleted: input.resourceId, alreadyDeleted: false, fileCleanupStatus: removeProjectDirectory ? 'done' : 'none' }
+    return { deletionId: audit.id, deleted: input.resourceId, alreadyDeleted: false, fileCleanupStatus }
   } catch (error) {
     await connection.rollback().catch(() => undefined)
     throw error
