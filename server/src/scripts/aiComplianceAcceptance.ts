@@ -58,18 +58,23 @@ async function main() {
     parseComplianceDocumentBlueprint(template),
   ])
   const readinessComponents = Object.fromEntries(Object.keys(COMPLIANCE_COMPONENT_LABELS)
-    .map(key => [key, { status: 'verified', source_ids: [] }]))
+    .map(key => [key, { status: 'pending', source_ids: [] }]))
+  const acceptedMissingItems = [
+    ...Object.values(COMPLIANCE_COMPONENT_LABELS),
+    ...Array.from({ length: 7 }, (_, index) => `投资情形分析第${index + 1}项仍有待核验事项`),
+  ]
   const complianceReadiness = finalizeComplianceReadiness({
     components: readinessComponents,
     review: {
       status: 'pass', errors: [],
       metrics: {
         components: Object.fromEntries(Object.keys(COMPLIANCE_COMPONENT_LABELS)
-          .map(key => [key, { gaps: [], errors: [] }])),
-        pending_compliance_items: [],
+          .map(key => [key, { gaps: ['验收夹具未提供决定性证据'], errors: [] }])),
+        pending_compliance_items: Array.from({ length: 7 }, (_, index) => index + 1),
       },
     },
     asOfDate: '2026-07-25', missingItems: [], blockingIssues: [],
+    decision: { action: 'continue_with_gaps', acceptedMissingItems } as never,
   })
 
   check(
