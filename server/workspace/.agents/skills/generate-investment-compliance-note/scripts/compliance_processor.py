@@ -1892,12 +1892,11 @@ def build_command(args: argparse.Namespace) -> int:
                 if kind == "subheading":
                     p = clone_with_text(ex_sub, block["text"])
                 elif kind == "numbered":
-                    label = block.get("label") or ""
-                    if label and not re.search(r"[、.)）]\s*$", label):
-                        label += "、"
-                    p = clone_with_text(
-                        ex_numbered, block["text"], label=label, bold_lead=True
-                    )
+                    # ``numbered`` is a semantic input type used to validate the
+                    # fixed five-reason and seven-check cardinalities. The final
+                    # compliance note presents those items as continuous prose,
+                    # as required by the document blueprint.
+                    p = clone_with_text(ex_body, block["text"])
                 elif kind == "conclusion":
                     p = clone_with_text(ex_conclusion, block["text"])
                 else:
