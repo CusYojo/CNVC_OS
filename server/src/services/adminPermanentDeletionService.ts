@@ -114,11 +114,20 @@ export async function searchPermanentDeletionTargets(actor: AdminActor, raw: unk
   const connection = await pool.getConnection()
   try {
     await assertEnabledSystemAdmin(connection, actor)
+    const nameColumn = input.resourceType === 'knowledge' ? 'title' : 'name'
     const pattern = `%${input.query.replace(/[\\%_]/g, '\\$&')}%`
-    const suffix = `WHERE name LIKE ? ESCAPE '\\\\' OR id=? ORDER BY created_at DESC LIMIT 20`
-    const knowledgeSuffix = `WHERE title LIKE ? ESCAPE '\\\\' OR id=? ORDER BY created_at DESC LIMIT 20`
-    const [rows] = await connection.query<ResourceRow[]>(resourceSelect(input.resourceType, input.resourceType === 'knowledge' ? knowledgeSuffix : suffix), [pattern, input.query])
-    return rows.map(row => ({ id: row.id, name: row.name, status: row.status, createdAt: new Date(row.created_at).toISOString(), source: row.source }))
+    const where = input.query ? `WHERE ${nameColumn} LIKE ? ESCAPE '\\\\' OR id=?` : ''
+    const parameters = input.query ? [pattern, input.query] : []
+    const table = resourceTable(input.resourceType)
+    const [countRows] = await connection.query<Array<RowDataPacket & { total: number }>>(`SELECT COUNT(*) AS total FROM ${table} ${where}`, parameters)
+    const total = Number(countRows[0]?.total || 0)
+    const page = Math.min(input.page, Math.max(1, Math.ceil(total / input.pageSize)))
+    const suffix = `${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`
+    const [rows] = await connection.query<ResourceRow[]>(resourceSelect(input.resourceType, suffix), [...parameters, input.pageSize, (page - 1) * input.pageSize])
+    return {
+      list: rows.map(row => ({ id: row.id, name: row.name, status: row.status, createdAt: new Date(row.created_at).toISOString(), source: row.source })),
+      total, page, pageSize: input.pageSize,
+    }
   } finally { connection.release() }
 }
 

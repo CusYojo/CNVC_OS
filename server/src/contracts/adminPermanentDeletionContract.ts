@@ -6,7 +6,9 @@ export type PermanentDeletionResourceType = z.infer<typeof permanentDeletionReso
 
 export const permanentDeletionSearchSchema = z.object({
   resourceType: permanentDeletionResourceTypeSchema,
-  query: z.string().trim().min(1).max(50),
+  query: z.string().trim().max(50).default(''),
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(50).default(20),
 }).strict()
 
 export const permanentDeletionPreviewSchema = z.object({
@@ -28,6 +30,13 @@ export type PermanentDeletionTarget = {
   status: string
   createdAt: string
   source: string | null
+}
+
+export type PermanentDeletionTargetPage = {
+  list: PermanentDeletionTarget[]
+  total: number
+  page: number
+  pageSize: number
 }
 
 export type PermanentDeletionImpact = {

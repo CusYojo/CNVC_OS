@@ -14,4 +14,7 @@ test('system administration exposes a three-step permanent deletion center', asy
   assert.match(panel, /resourceName !== preview\?\.resourceName/)
   assert.match(panel, /riskText !== ADMIN_PERMANENT_DELETION_RISK_TEXT/)
   assert.match(panel, />永久删除</)
+  assert.match(panel, /useEffect\(\(\) => \{ void load\(1\) \}, \[resourceType\]\)/)
+  assert.match(panel, /留空显示全部/)
+  assert.match(panel, /上一页/)
 })
