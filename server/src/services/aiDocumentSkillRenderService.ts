@@ -194,9 +194,10 @@ function numberedBlocks(
   sources: EvidenceSource[],
   findings: BusinessContent['sections'][number]['findings'],
 ) {
-  return findings.map((finding) => {
+  return findings.map((finding, index) => {
     return {
-      type: 'paragraph',
+      type: 'numbered',
+      label: String(index + 1),
       text: finding.text,
       ...evidenceBinding(finding, sources),
     }
