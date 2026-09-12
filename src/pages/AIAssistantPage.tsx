@@ -1933,8 +1933,8 @@ function Chat() {
   }
 
   return (
-    <div className="fde-ai-page -m-6 flex h-[calc(100vh-64px)] min-h-[720px] overflow-hidden bg-white">
-      <aside className="flex w-[250px] shrink-0 flex-col border-r border-slate-200 bg-slate-50/60">
+    <div className="fde-ai-page relative -m-6 flex h-[calc(100vh-64px)] min-h-[720px] overflow-hidden bg-white">
+      <aside className="fde-ai-sessions flex w-[250px] shrink-0 flex-col border-r border-slate-200 bg-slate-50/60">
         <div className="p-4">
           <Button className="w-full" onClick={openNewSessionDialog} disabled={projectsLoading || !!projectsLoadError || selectableProjects.length === 0}>
             <MessageSquarePlus className="h-4 w-4" />新建会话
@@ -1987,7 +1987,7 @@ function Chat() {
         </div>
       </aside>
 
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="fde-ai-conversation flex min-w-0 flex-1 flex-col">
         <div className="flex items-center gap-3 border-b border-slate-200 px-6 py-3">
           <div className="input flex h-9 w-36 items-center bg-slate-50 text-xs text-slate-600" aria-label="知识范围">
             {scope === 'project' ? '当前项目' : '全局知识库'}
@@ -2043,7 +2043,7 @@ function Chat() {
         <AiErrorBoundary level="section" title="消息区域显示异常" resetKey={convId}>
           <div
             ref={scrollRef}
-            className="flex-1 space-y-6 overflow-y-auto px-6 py-6"
+            className="fde-ai-messages flex-1 space-y-6 overflow-y-auto px-6 py-6"
             onScroll={onConversationScroll}
           >
             {conversationTimeline.length === 0
@@ -2131,7 +2131,7 @@ function Chat() {
           </div>
         </AiErrorBoundary>
 
-        <div className="border-t border-slate-200 px-6 py-4">
+        <div className="fde-ai-composer border-t border-slate-200 px-6 py-4">
           <AiErrorBoundary level="section" title="快捷任务区域显示异常" resetKey={String(sending)}>
             <AiQuickActions
               disabled={scope !== 'project' || !currentSession?.projectId}

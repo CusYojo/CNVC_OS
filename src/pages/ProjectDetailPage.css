@@ -257,6 +257,14 @@ body:has(.fde-project-detail) { min-width: 320px; }
   .fde-project-detail .fde-detail-file-grid { grid-template-columns: minmax(0, 1fr); padding: 14px; }
 }
 
+@media (max-width: 720px) {
+  .fde-project-detail { width: 100%; min-width: 0; overflow-x: clip; }
+  .fde-project-detail :is(.fde-detail-hero-primary,.fde-detail-hero-secondary,.fde-current-stage-head,.fde-detail-task-heading-row) { align-items: stretch; flex-direction: column; }
+  .fde-project-detail :is(.fde-detail-actions,.fde-detail-task-toolbar) { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .fde-project-detail .fde-project-plan-summary { grid-template-columns: minmax(0, 1fr); }
+  .fde-project-detail :is(.overflow-x-auto,.fde-plan-table) { max-width: 100%; overscroll-behavior-inline: contain; }
+}
+
 /* Compact two-row project header. The first screen stays focused on the active stage. */
 .fde-project-detail > .fde-ui-card.fde-detail-hero {
   display: block;
