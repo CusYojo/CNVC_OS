@@ -1,6 +1,6 @@
 # 自进化当前验证范围
 
-> 当前状态以 `ai-evolution-change-manifest.json` 和 `docs/ai-evolution-acceptance-matrix.md` 为准。本文件后续段落保留各阶段当时的历史记录，其中出现的“最新为 0107”等结论已经被后续迁移替代；当前源码最新迁移为 `0110_add_ai_evolution_requested_rollback`。
+> 当前状态以 `ai-evolution-change-manifest.json` 和 `docs/ai-evolution-acceptance-matrix.md` 为准。本文件后续段落保留各阶段当时的历史记录，其中出现的“最新为 0107”等结论已经被后续迁移替代；当前源码最新迁移为 `0112_add_assistant_experience_memory`。
 
 本记录补充历史完成审计，不将局部测试视为原设计文档 AT-01 至 AT-18 全部通过。当前工作仍在隔离工作树，业务数据库未迁移，业务服务未重启或发布。
 
