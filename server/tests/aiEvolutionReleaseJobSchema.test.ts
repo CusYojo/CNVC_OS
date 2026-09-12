@@ -17,7 +17,7 @@ test('release jobs migration is durable, leased and registered after its depende
     entries: Array<{ idx: number; tag: string }>
   }
   const entry = journal.entries.find(item => item.tag === '0108_add_ai_evolution_release_jobs')
-  assert.deepEqual(entry, { idx: 108, version: '5', when: 1793000943000,
+  assert.deepEqual(entry, { idx: 109, version: '5', when: 1793000943000,
     tag: '0108_add_ai_evolution_release_jobs', breakpoints: true })
   assert.ok(journal.entries.findIndex(item => item.tag === '0108_add_ai_evolution_release_jobs')
     > journal.entries.findIndex(item => item.tag === '0100_add_ai_evolution_candidates'))

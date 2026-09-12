@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync, existsSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 import { runInNewContext } from 'node:vm'
 import test from 'node:test'
 
@@ -70,7 +71,7 @@ test('full selection contains each new acceptance exactly once and every script 
 })
 
 for (const mode of Object.keys(modes)) test(`${mode} still rejects an unsafe database before any resources`, () => {
-  const result = spawnSync(process.execPath, ['--import', 'tsx', new URL('../src/scripts/fdeMigrationAcceptance.ts', import.meta.url).pathname, mode], {
+  const result = spawnSync(process.execPath, ['--import', 'tsx', fileURLToPath(new URL('../src/scripts/fdeMigrationAcceptance.ts', import.meta.url)), mode], {
     env: { PATH: process.env.PATH, DB_DATABASE: 'business', DB_HOST: '127.0.0.1', DB_PORT: '1', DB_USERNAME: 'fixture', DB_PASSWORD: 'fixture', DB_FREFIX: 'fixture_', ALLOW_MYSQL_ACCEPTANCE_WRITES: '1' },
     encoding: 'utf8', timeout: 10000,
   })

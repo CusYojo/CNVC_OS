@@ -20,6 +20,7 @@
     "accept:build-release": "node --import tsx server/src/scripts/buildReleaseAcceptance.ts",
     "start:ai-evolution-release-publisher": "node --env-file-if-exists=.env --import tsx server/src/scripts/aiEvolutionReleasePublisher.ts",
     "check:ai-evolution-release-publisher": "node --env-file-if-exists=.env --import tsx server/src/scripts/aiEvolutionReleasePublisherPreflight.ts",
+    "audit:ai-evolution-schema": "node --env-file-if-exists=.env --import tsx server/src/scripts/aiEvolutionSchemaAudit.ts",
     "manifest:ai-evolution-changes": "node server/scripts/write-ai-evolution-change-manifest.mjs",
     "check:ai-evolution-change-manifest": "node server/scripts/check-ai-evolution-change-manifest.mjs",
     "check": "npm run check:platform",
