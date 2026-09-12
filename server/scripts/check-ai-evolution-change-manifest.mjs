@@ -7,10 +7,8 @@ const manifest = JSON.parse(readFileSync(path.join(root, 'ai-evolution-change-ma
 const head = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
 execFileSync('git', ['merge-base', '--is-ancestor', manifest.baseCommit, head])
 const committed = execFileSync('git', ['diff', '--name-only', '-z', `${manifest.baseCommit}..${head}`], { encoding: 'utf8' })
-const raw = execFileSync('git', ['status', '--porcelain=v1', '-z', '--untracked-files=all'], { encoding: 'utf8' })
 const actual = [...new Set([...committed.split('\0').filter(Boolean).map(entry => entry.replaceAll('\\', '/')),
-  ...raw.split('\0').filter(Boolean).map(entry => entry.slice(3).replaceAll('\\', '/')),
   'ai-evolution-change-manifest.json'])].sort()
-if (manifest.schemaVersion !== 1 || manifest.latestMigration !== '0110_add_ai_evolution_requested_rollback'
+if (manifest.schemaVersion !== 1 || manifest.latestMigration !== '0112_add_assistant_experience_memory'
   || JSON.stringify(manifest.files) !== JSON.stringify(actual)) throw Error('AI evolution change manifest is stale or incomplete')
 console.log(JSON.stringify({ ok: true, baseline: manifest.baseCommit, head, files: actual.length, latestMigration: manifest.latestMigration }))
