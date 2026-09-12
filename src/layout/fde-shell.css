@@ -293,3 +293,94 @@ body:has(.fde-app) { min-width: 320px; }
 @media (max-width: 1440px) { .fde-dashboard-grid { grid-template-columns: minmax(0,1fr); } .fde-project-hero-content { grid-template-columns: minmax(0,1fr) minmax(300px,.9fr); } .fde-project-hero-actions { grid-column: 1 / -1; max-width: none; } }
 @media (max-width: 1100px) { .fde-knowledge-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } }
 @media (max-width: 720px) { .fde-workbench-heading { align-items: flex-start; flex-direction: column; gap: 12px; } .fde-metric-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } .fde-office-layout, .fde-project-hero-content, .fde-knowledge-grid { grid-template-columns: minmax(0,1fr); } .fde-office-layout > aside { display: flex; overflow-x: auto; } .fde-office-layout > aside > button { flex-shrink: 0; width: auto; gap: 8px; } .fde-office-layout > aside > p { display: none; } .fde-page-heading { flex-wrap: wrap; } .fde-registration-entry > p { text-align: left; } }
+
+/* Mobile application shell. Keep this block last so legacy desktop rules cannot win. */
+.fde-mobile-menu-button,
+.fde-mobile-nav-backdrop,
+.fde-mobile-nav-tools { display: none; }
+
+@media (max-width: 720px) {
+  body.fde-mobile-nav-open { overflow: hidden; }
+  .fde-shell,
+  .fde-shell.is-collapsed { --sidebar-w: 0px; grid-template-columns: minmax(0, 1fr); width: 100%; overflow-x: clip; }
+  .fde-sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 70;
+    width: min(86vw, 320px);
+    height: 100dvh;
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+    transform: translateX(-105%);
+    transition: transform .22s ease;
+    box-shadow: var(--shadow-lg);
+  }
+  .is-mobile-nav-open .fde-sidebar { transform: translateX(0); }
+  .fde-mobile-nav-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    width: 100%;
+    height: 100dvh;
+    border: 0;
+    opacity: 0;
+    background: rgba(8, 24, 28, .48);
+    pointer-events: none;
+    transition: opacity .22s ease;
+  }
+  .is-mobile-nav-open .fde-mobile-nav-backdrop { display: block; opacity: 1; pointer-events: auto; }
+  .fde-mobile-menu-button { display: inline-grid; }
+  .fde-sidebar .fde-brand-row { justify-content: flex-start; padding: 0 14px; }
+  .fde-sidebar .fde-sidebar-toggle { display: none; }
+  .fde-sidebar nav { padding-top: 3px; }
+  .fde-mobile-nav-tools { position: relative; z-index: 2; display: grid; gap: 4px; padding: 10px 14px max(14px, env(safe-area-inset-bottom)); border-top: 1px solid rgba(255,255,255,.08); }
+  .fde-mobile-nav-tools button { display: flex; min-height: 44px; align-items: center; gap: 11px; padding: 0 10px; border-radius: 8px; color: #c3d2d4; font-size: 13px; text-align: left; }
+  .fde-mobile-nav-tools svg { width: 20px; height: 20px; }
+  .fde-main-column { width: 100%; min-width: 0; }
+  .fde-topbar { min-height: calc(var(--topbar-h) + env(safe-area-inset-top)); height: auto; padding: env(safe-area-inset-top) 10px 0; gap: 6px; }
+  .fde-breadcrumb { min-width: 0; max-width: none; flex: 1; overflow: hidden; }
+  .fde-breadcrumb strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fde-global-search,
+  .fde-quick-create,
+  .fde-top-actions > .fde-icon-button:first-of-type { display: none; }
+  .fde-top-actions { gap: 4px; }
+  .fde-top-profile { min-width: 44px; min-height: 44px; justify-content: center; padding: 0; }
+  .fde-top-profile .fde-avatar { width: 34px; height: 34px; flex-basis: 34px; }
+  .fde-top-profile > svg { display: none; }
+  .fde-icon-button,
+  .fde-app .fde-ui-button,
+  .fde-app .input,
+  .fde-app select,
+  .fde-app input:not([type="checkbox"]):not([type="radio"]) { min-height: 44px; }
+  .fde-page-content { min-height: calc(100dvh - var(--topbar-h) - env(safe-area-inset-top)); padding: 16px 12px calc(28px + env(safe-area-inset-bottom)); overflow-x: clip; }
+  .fde-page-wrap { width: 100%; min-width: 0; }
+  .fde-app .fde-ui-page-header,
+  .fde-page-heading { align-items: stretch; flex-direction: column; gap: 12px; }
+  .fde-app .fde-ui-page-header h1,
+  .fde-page-heading h1,
+  .fde-page-content .fde-workspace > header h1,
+  .fde-page-content .fde-workspace > div > h1 { font-size: 21px; }
+  .fde-page-heading > :last-child,
+  .fde-app .fde-ui-page-header > :last-child { width: 100%; }
+  .fde-toolbar { align-items: stretch; flex-direction: column; }
+  .fde-toolbar > *, .fde-toolbar .input { width: 100%; max-width: none; }
+  .fde-card-head { align-items: flex-start; flex-wrap: wrap; padding: 12px 14px; }
+  .fde-project-hero-content { padding: 14px; }
+  .fde-project-dual-state { grid-template-columns: minmax(0,1fr); }
+  .fde-project-dual-state > div + div { border-top: 1px solid var(--line); border-left: 0; }
+  .fde-project-hero-actions { width: 100%; max-width: none; }
+  .fde-project-hero-actions > * { flex: 1 1 140px; }
+  .fde-app .fde-workspace-tabs,
+  .fde-app .fde-saved-views { max-width: 100%; overflow-x: auto; overscroll-behavior-inline: contain; }
+  .fde-app .fde-saved-views { gap: 18px; }
+}
+
+@media (max-width: 340px) {
+  .fde-metric-grid { grid-template-columns: minmax(0, 1fr); }
+  .fde-top-actions .fde-notification-button { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fde-sidebar,
+  .fde-mobile-nav-backdrop { transition: none; }
+}
