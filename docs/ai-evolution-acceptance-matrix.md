@@ -1,6 +1,6 @@
 # AI 助手自进化验收矩阵
 
-更新时间：2026-09-08。基线提交：`dfcadbb5824e018a9aeda962e201ee7a7f41f066`。
+更新时间：2026-09-12。基线提交：`dfcadbb5824e018a9aeda962e201ee7a7f41f066`。
 
 状态只描述本仓库当前可复现证据。`PASS` 表示对应自动验收已经实际执行；`BLOCKED` 表示缺少指定隔离设施；`NOT_RUN` 表示尚未对真实部署或真实模型执行。跳过项不登记为通过。
 
@@ -22,8 +22,8 @@
 | AT-14 | PASS | skill evaluation、executor、sample suite、page reviewer 和 comparison 测试验证同输入、硬门禁和可追溯产物；实际 Docker 执行可见/隐藏样本并生成 DOCX、PDF 和页面证据，格式失败保持最终 `FAIL` | 真实模型收益数据保持 `NOT_RUN`，不影响契约验收 |
 | AT-15 | PASS | release policy、skill trial/promotion policy 和 candidate repository 契约验证哈希、修订与批准绑定 | — |
 | AT-16 | PASS | reevaluation base、real Git reevaluation、build artifacts 测试验证基线变化后重新核对 | — |
-| AT-17 | NOT_RUN | release adapter、coordinator、health、recovery、requested rollback 共覆盖激活及回退协议；人工回退已进入持久发布队列 | 未对真实服务器执行发布或回退；Docker/Linux 权限门禁未运行 |
-| AT-18 | PASS | hook 使用数据库补拉与可见时轮询；local preview、事件序列和 390px fixture 已验证刷新及窄屏基本交互 | 真实网络断连的浏览器端到端演练可在部署验收时复测 |
+| AT-17 | NOT_RUN | release adapter、coordinator、health、recovery、requested rollback 共覆盖激活及回退协议；`accept:build-release` 已验证停机激活、公开读取、回退指针和旧版本恢复，且业务源码未被改写 | 未取得真实服务器发布目标、root 管理的发布配置及部署授权，因此未执行生产发布或真实服务回退 |
+| AT-18 | PASS | hook 使用数据库补拉与可见时轮询；自包含浏览器 fixture 已通过真实会话、HTTP、MySQL 的试用提升和回退；完整代码修复运行的 1280px/390px 页面证据已人工复核 | 真实网络断连的浏览器端到端演练可在部署验收时复测 |
 
 EVO-15 的观察入口已实现：经验应用和候选均可提交绑定授权对象的反馈；工作台按 7、30、90 天展示应用率、遵守率和候选通过率，并同时展示分子、分母、样本量及未评估数。当前数据模型不能可靠证明“同一规则再次纠正”或“回归已经确认且观察期完成”，因此重复纠正率和生产回归率明确显示为证据不足，不以反馈条数冒充正式指标。对应验证为 `aiEvolutionApplicationFeedbackUi.test.ts`、`aiEvolutionFeedbackSchema.test.ts` 和 `aiEvolutionMetrics.test.ts`。
 
@@ -37,10 +37,10 @@ npm run check:types
 npm run check:ai-evolution-change-manifest
 ```
 
-2026-09-08 最新设施验证：Docker Desktop Linux engine 29.7.2 已可用；临时 `mysql:8.4.5` 只绑定 `127.0.0.1:43318`，数据库为 `evolution_isolated_test`、前缀为 `evo_test_`。服务器业务数据库未用于测试。真实固定提交候选构建生成 1,664 个产物且 `activated=false`；完整代码修复运行 `01ca377c-cec6-4b2a-b9a5-3be86b521c2b` 最终 `PASS`，候选 `5e901756-2270-4b54-9010-41a1c3de66bb`，证据目录 `C:\Users\21749\AppData\Local\Temp\evolution-full-run-Gz268Y`，桌面 1280px 与移动 390px 截图已人工复核，未见内容横向溢出或卡片重叠。宿主中断恢复运行 `62bc0817-ffe9-4616-9d59-b8c30b4668e7` 在强制结束子进程后由替代宿主回收容器并确认中断。
+2026-09-12 最新设施验证：Docker Desktop Linux engine 29.7.2 已可用；临时 `mysql:8.4.5` 只绑定 `127.0.0.1:43318`，数据库为 `evolution_isolated_test`、前缀为 `evo_test_`。共享业务数据库仅执行只读结构审计，17 张自进化表及关键字段均为 `compatible`，没有删除、重建或写入残留数据。真实固定提交候选构建生成 1,749 个产物且 `activated=false`；完整代码修复运行 `81c1786c-b083-4f2d-b1bc-cc88adf5447e` 在首轮页面门禁失败后完成一次受限修复并最终 `PASS`，候选 `db4a05bd-2f2f-4c0e-94bc-55a9dca7c996` 等待人工批准，证据目录 `C:\Users\21749\AppData\Local\Temp\evolution-full-run-1U2Klq`，桌面 1280px 与移动 390px 截图已人工复核，未见内容横向溢出或卡片重叠。宿主中断恢复测试也已在真实 Docker 与隔离 MySQL 上确认旧租约撤销、容器回收、运行中断和旧心跳拒绝。
 
 真实设施就绪后仍需执行：
 
-1. 使用受鉴权隔离预览入口复核候选访问授权、到期撤销和交互行为；是否调用真实模型需单独配置预算。
-2. 在明确授权的非生产目标完成发布、人工回退和发布器中断恢复演练。
-3. 将 AT-17 更新为实际结果并附目标版本和日志哈希。
+1. 在明确授权的非生产服务器目标完成发布、人工回退和发布器中断恢复演练。
+2. 部署后复测真实网络断连、长期任务恢复及候选访问到期撤销。
+3. 将 AT-17 更新为实际结果并附目标版本、候选哈希和发布日志哈希。
