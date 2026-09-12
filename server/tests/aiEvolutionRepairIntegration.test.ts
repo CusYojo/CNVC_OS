@@ -38,11 +38,11 @@ try {
    assert.equal(files.length,1)
    const file=files[0],before=Buffer.from(file.contentBase64,'base64').toString()
    let after:string
-   if (!feedback) after=before.replace('collapsed || narrow && (responsibilityView || leadPoolView)','collapsed || narrow')
+   if (!feedback) after=before.replace('className="fde-page-content" tabIndex={-1}', 'className="fde-page-content" style={{ display: "none" }} tabIndex={-1}')
    else {
     assert.equal(feedback.verdict,'FAIL')
     assert.ok(feedback.checks.some(check=>check.id==='page'&&check.verdict==='FAIL'))
-    after=before.replace('className="fde-page-content" tabIndex={-1}', 'className="fde-page-content" style={narrow && location.pathname.startsWith("/sourcing/") ? { paddingInline: 24 } : undefined} tabIndex={-1}')
+    after=before.replace('style={{ display: "none" }}', 'style={narrow && location.pathname.startsWith("/sourcing/") ? { paddingInline: 24 } : undefined}')
    }
    assert.notEqual(after,before)
    return{totalTokens:123,text:JSON.stringify({summary:'固定测试响应：窄屏导航收起',changes:[{path:file.path,expectedSha256:file.sha256,contentBase64:Buffer.from(after).toString('base64')}]})}

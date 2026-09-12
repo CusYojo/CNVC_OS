@@ -1,9 +1,35 @@
 import assert from 'node:assert/strict'
-import { readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import express from 'express'
 import type { AddressInfo } from 'node:net'
 import { randomUUID } from 'node:crypto'
+import { build } from 'esbuild'
+
+async function prepareEvolutionBrowserFixture(): Promise<{ root: string; stop(): Promise<void> }> {
+  const fixtureRoot = path.resolve('.runtime/evolution-ui')
+  await mkdir(fixtureRoot, { recursive: true })
+  await writeFile(path.join(fixtureRoot, 'skill-status.html'), '<main id="root"></main><script type="module" src="/\.runtime/evolution-ui/skill-status.js"></script>')
+  await writeFile(path.join(fixtureRoot, 'skill-status.tsx'), `
+    import React from 'react'
+    import { createRoot } from 'react-dom/client'
+    import { AiEvolutionSkillTrialStatus } from '../../src/components/ai-evolution/AiEvolutionSkillTrialStatus'
+    const query = new URLSearchParams(location.search)
+    createRoot(document.getElementById('root')!).render(React.createElement(AiEvolutionSkillTrialStatus, {
+      candidateId: query.get('candidateId') || '', candidateHash: query.get('candidateHash') || ''
+    }))
+  `)
+  await build({
+    entryPoints: [path.join(fixtureRoot, 'skill-status.tsx')],
+    outfile: path.join(fixtureRoot, 'skill-status.js'),
+    bundle: true,
+    platform: 'browser',
+    format: 'esm',
+    jsx: 'automatic',
+    logLevel: 'silent',
+  })
+  return { root: fixtureRoot, stop: () => rm(fixtureRoot, { recursive: true, force: true }) }
+}
 
 export async function verifyAuthorizedEvolutionHttp(input: { owner: string; capabilityId: string; conversationId: string; candidateId: string; root: string; projectId?: string }) {
   const { pool } = await import('../../src/db/client.js')
@@ -37,14 +63,8 @@ export async function verifyAuthorizedEvolutionHttp(input: { owner: string; capa
   const { errorHandler } = await import('../../src/middleware/errorHandler.js')
   const session = await createAuthSession({ userId: input.owner })
   const app = express(); app.use(express.json()); app.use('/api/ai/evolution', requireAuth, aiEvolutionRouter); app.use(errorHandler)
-  if (process.env.EVOLUTION_SKILL_BROWSER_TEST === 'true') app.use(async (req, res, next) => {
-    if (req.path.startsWith('/api/')) return next()
-    try {
-      const upstream = await fetch(`http://127.0.0.1:5187${req.originalUrl}`)
-      res.status(upstream.status).setHeader('Content-Type', upstream.headers.get('content-type') || 'text/plain')
-      res.send(Buffer.from(await upstream.arrayBuffer()))
-    } catch (error) { next(error) }
-  })
+  const browserFixture = process.env.EVOLUTION_SKILL_BROWSER_TEST === 'true' ? await prepareEvolutionBrowserFixture() : null
+  if (browserFixture) app.use('/.runtime/evolution-ui', express.static(browserFixture.root))
   const server = app.listen(0, '127.0.0.1')
   await new Promise<void>(resolve => server.once('listening', resolve))
   try {
@@ -183,6 +203,7 @@ export async function verifyAuthorizedEvolutionHttp(input: { owner: string; capa
     console.log('PASS real HTTP registration, review, trial plan, approval, concurrent activation, status and concurrent rollback')
   } finally {
     await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()))
+    await browserFixture?.stop()
     await pool.query('DELETE FROM evo_test_auth_sessions WHERE user_id=?', [input.owner])
     await pool.query('DELETE FROM evo_test_chat_conversations WHERE id=?', [input.conversationId])
     await pool.query('DELETE FROM evo_test_ai_capabilities WHERE id=?', [input.capabilityId])
