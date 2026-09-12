@@ -354,8 +354,15 @@ body:has(.fde-app) { min-width: 320px; }
   .fde-app input:not([type="checkbox"]):not([type="radio"]) { min-height: 44px; }
   .fde-page-content { min-height: calc(100dvh - var(--topbar-h) - env(safe-area-inset-top)); padding: 16px 12px calc(28px + env(safe-area-inset-bottom)); overflow-x: clip; }
   .fde-page-wrap { width: 100%; min-width: 0; }
+  .fde-app .fde-ai-page { width: 100%; height: calc(100dvh - var(--topbar-h) - env(safe-area-inset-top)); min-height: 0; margin: 0; }
+  .fde-ai-sessions { position: absolute; inset: 0 auto 0 0; z-index: 12; width: min(86vw, 300px); max-width: 100%; transform: translateX(-105%); }
+  .fde-ai-conversation { width: 100%; min-width: 0; }
+  .fde-ai-messages { min-width: 0; padding: 14px; overflow-wrap: anywhere; }
+  .fde-ai-composer { padding: 10px 12px max(10px, env(safe-area-inset-bottom)); }
   .fde-app .fde-ui-page-header,
   .fde-page-heading { align-items: stretch; flex-direction: column; gap: 12px; }
+  .fde-ui-page-header-actions { width: 100%; flex-wrap: wrap; }
+  .fde-ui-page-header-actions > * { flex: 1 1 140px; }
   .fde-app .fde-ui-page-header h1,
   .fde-page-heading h1,
   .fde-page-content .fde-workspace > header h1,
@@ -365,6 +372,19 @@ body:has(.fde-app) { min-width: 320px; }
   .fde-toolbar { align-items: stretch; flex-direction: column; }
   .fde-toolbar > *, .fde-toolbar .input { width: 100%; max-width: none; }
   .fde-card-head { align-items: flex-start; flex-wrap: wrap; padding: 12px 14px; }
+  .fde-ui-modal-backdrop { align-items: flex-end; padding: 0; }
+  .fde-app .fde-ui-modal { display: flex; width: 100%; max-width: 100%; max-height: calc(100dvh - env(safe-area-inset-top)); flex-direction: column; border-right: 0; border-bottom: 0; border-left: 0; border-radius: 16px 16px 0 0; }
+  .fde-ui-modal > div:first-child,
+  .fde-ui-drawer > div:first-child { min-height: 56px; padding: 12px 14px; }
+  .fde-ui-modal-body { max-height: none; min-height: 0; flex: 1; padding: 14px; overscroll-behavior: contain; }
+  .fde-ui-modal-footer,
+  .fde-ui-drawer-footer { padding: 12px 14px max(12px, env(safe-area-inset-bottom)); }
+  .fde-ui-modal-footer > *,
+  .fde-ui-drawer-footer > * { flex: 1 1 120px; }
+  .fde-ui-drawer-backdrop { height: 100dvh; }
+  .fde-app .fde-ui-drawer { width: min(94vw, 560px); height: 100dvh; max-width: 100%; }
+  .fde-ui-drawer-body { min-height: 0; padding: 14px; overscroll-behavior: contain; }
+  .fde-ui-table-scroll { width: 100%; max-width: 100%; overflow-x: auto; overscroll-behavior-inline: contain; -webkit-overflow-scrolling: touch; }
   .fde-project-hero-content { padding: 14px; }
   .fde-project-dual-state { grid-template-columns: minmax(0,1fr); }
   .fde-project-dual-state > div + div { border-top: 1px solid var(--line); border-left: 0; }
