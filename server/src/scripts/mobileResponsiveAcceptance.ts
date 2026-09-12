@@ -22,6 +22,7 @@ assert.match(layout, /aria-expanded=\{mobileNavigationOpen\}/, 'mobile menu must
 assert.match(layout, /aria-controls="mobile-navigation"/, 'mobile menu must reference its navigation')
 assert.match(layout, /setMobileNavigationOpen\(false\)/, 'mobile navigation needs an explicit close path')
 assert.match(layout, /fde-mobile-nav-backdrop/, 'mobile navigation requires a backdrop')
+assert.match(layout, /fde-mobile-nav-close/, 'mobile navigation requires an explicit close button')
 
 assert.match(shell, /@media\s*\(max-width:\s*720px\)/, 'the shell needs the agreed phone breakpoint')
 assert.match(shell, /\.fde-shell[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/s, 'phone shell must use the full viewport width')

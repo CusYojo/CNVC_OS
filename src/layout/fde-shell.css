@@ -296,6 +296,7 @@ body:has(.fde-app) { min-width: 320px; }
 
 /* Mobile application shell. Keep this block last so legacy desktop rules cannot win. */
 .fde-mobile-menu-button,
+.fde-mobile-nav-close,
 .fde-mobile-nav-backdrop,
 .fde-mobile-nav-tools { display: none; }
 
@@ -332,6 +333,7 @@ body:has(.fde-app) { min-width: 320px; }
   .fde-mobile-menu-button { display: inline-grid; }
   .fde-sidebar .fde-brand-row { justify-content: flex-start; padding: 0 14px; }
   .fde-sidebar .fde-sidebar-toggle { display: none; }
+  .fde-sidebar .fde-mobile-nav-close { display: inline-grid; margin-left: auto; border-color: rgba(255,255,255,.12); color: #c3d2d4; background: transparent; }
   .fde-sidebar nav { padding-top: 3px; }
   .fde-mobile-nav-tools { position: relative; z-index: 2; display: grid; gap: 4px; padding: 10px 14px max(14px, env(safe-area-inset-bottom)); border-top: 1px solid rgba(255,255,255,.08); }
   .fde-mobile-nav-tools button { display: flex; min-height: 44px; align-items: center; gap: 11px; padding: 0 10px; border-radius: 8px; color: #c3d2d4; font-size: 13px; text-align: left; }

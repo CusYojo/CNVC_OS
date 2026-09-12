@@ -249,6 +249,7 @@ export function AppLayout() {
             {!navigationCollapsed && <span className="fde-brand-copy"><strong>赛智伯乐</strong><small>INVESTMENT WORKSPACE</small></span>}
           </button>
           <button onClick={() => setCollapsed(value => !value)} className="fde-icon-button fde-sidebar-toggle" aria-label={navigationCollapsed ? '展开侧边栏' : '收起侧边栏'}>{navigationCollapsed ? <Menu /> : <ChevronLeft />}</button>
+          <button onClick={closeMobileNavigation} className="fde-icon-button fde-mobile-nav-close" aria-label="关闭主导航"><ChevronLeft /></button>
         </div>
         <nav>
           {!navigationCollapsed && <div className="fde-nav-label">统一工作空间</div>}
