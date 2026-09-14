@@ -6,7 +6,7 @@ test('FDE default policy preserves investment stages, materials and duties', () 
   assert.equal(fdeWorkflowPolicySchema.safeParse(DEFAULT_FDE_WORKFLOW_POLICY).success, true)
   assert.equal(DEFAULT_FDE_WORKFLOW_POLICY.stages.length, 9)
   assert.deepEqual(DEFAULT_FDE_WORKFLOW_POLICY.stages.map((stage) => stage.stage), [
-    '入库', '立项', '尽调计划制定', '尽调计划审核', '尽调', '内核', '投决', '打款',
+    '入库', '立项', '尽调计划制定', '尽调计划审核', '尽调', '内核', '投决', '打款', '投后',
   ])
   assert.deepEqual(DEFAULT_FDE_WORKFLOW_POLICY.stages.map((stage) => stage.approvals.map((node) => [node.duty, node.mode])), [
     [['boss', '或签']], [], [['boss', '或签']], [], [['boss', '或签']],
