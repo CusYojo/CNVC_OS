@@ -30,7 +30,7 @@ import { legacyApprovalAccessCondition } from './oaRequestAccessService.js'
 
 const fdeProjectStages = ['入库', '立项', '尽调计划制定', '尽调计划审核', '尽调', '内核', '投决', '打款', '投后'] as const
 const legacyProjectStages = ['线索', '初筛', '立项', '尽调', '上会', '投决', '投后', '退出'] as const
-type ProjectStage = typeof fdeProjectStages[number] | typeof legacyProjectStages[number] | '放弃'
+type ProjectStage = typeof fdeProjectStages[number] | typeof legacyProjectStages[number] | '放弃' | '已 Close'
 type ApprovalType =
   | '立项审批' | '尽调计划审核' | '尽调启动审批' | '内核审批' | '投决审批' | '打款审批'
   | '初筛审批' | '上会申请' | '投后移交审批' | '项目终止审批'
