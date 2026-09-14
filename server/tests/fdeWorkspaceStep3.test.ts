@@ -50,6 +50,6 @@ test('AI new-session dialog remains dismissible when the user has no projects or
   const ai = source('src/pages/AIAssistantPage.tsx')
   assert.match(ai, /onClose=\{\(\) => \{ if \(!creatingSession\) setNewSessionOpen\(false\) \}\}/)
   assert.match(ai, /<Button variant="secondary" onClick=\{\(\) => setNewSessionOpen\(false\)\} disabled=\{creatingSession\}>/)
-  assert.match(ai, /\{projects\.length === 0 && <p role="status"[^>]*>当前账号暂无可用项目，暂时不能创建项目会话。<\/p>\}/)
+  assert.match(ai, /\{!projectsLoading && !projectsLoadError && selectableProjects\.length === 0 && <p role="status"[^>]*>当前账号暂无可用项目，暂时不能创建项目会话。<\/p>\}/)
   assert.doesNotMatch(ai, /if \(!creatingSession && sessions\.length > 0\) setNewSessionOpen/)
 })

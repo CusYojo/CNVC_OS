@@ -96,6 +96,11 @@ async function normalizeWebPermissions(directory) {
 }
 
 async function validateWebPermissions(directory, files) {
+  // Windows reports synthetic mode bits and does not implement POSIX public
+  // search/read semantics. Keep this release invariant on the Linux hosts
+  // that serve the artifacts, while allowing a Windows workstation to build
+  // the exact same candidate for verification.
+  if (process.platform === 'win32') return
   assert(((await stat(directory)).mode & 0o001) !== 0, 'candidate Web root is not public-searchable')
   for (const file of files) {
     const mode = (await stat(path.join(directory, file))).mode
