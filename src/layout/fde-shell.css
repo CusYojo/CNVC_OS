@@ -299,6 +299,9 @@ body:has(.fde-app) { min-width: 320px; }
 .fde-mobile-nav-close,
 .fde-mobile-nav-backdrop,
 .fde-mobile-nav-tools { display: none; }
+.fde-ai-sessions-button,
+.fde-ai-sessions-close,
+.fde-ai-sessions-backdrop { display: none; }
 
 @media (max-width: 720px) {
   body.fde-mobile-nav-open { overflow: hidden; }
@@ -357,7 +360,16 @@ body:has(.fde-app) { min-width: 320px; }
   .fde-page-content { min-height: calc(100dvh - var(--topbar-h) - env(safe-area-inset-top)); padding: 16px 12px calc(28px + env(safe-area-inset-bottom)); overflow-x: clip; }
   .fde-page-wrap { width: 100%; min-width: 0; }
   .fde-app .fde-ai-page { width: 100%; height: calc(100dvh - var(--topbar-h) - env(safe-area-inset-top)); min-height: 0; margin: 0; }
-  .fde-ai-sessions { position: absolute; inset: 0 auto 0 0; z-index: 12; width: min(86vw, 300px); max-width: 100%; transform: translateX(-105%); }
+  .fde-ai-sessions { position: absolute; inset: 0 auto 0 0; z-index: 22; width: min(86vw, 300px); max-width: 100%; transform: translateX(-105%); transition: transform .2s ease; }
+  .fde-ai-page.is-sessions-open .fde-ai-sessions { transform: translateX(0); }
+  .fde-ai-sessions-backdrop { position: absolute; inset: 0; z-index: 21; border: 0; background: rgba(8,24,28,.42); }
+  .fde-ai-page.is-sessions-open .fde-ai-sessions-backdrop { display: block; }
+  .fde-ai-sessions-head { display: flex; align-items: center; gap: 8px; }
+  .fde-ai-sessions-head > .fde-ui-button { flex: 1; }
+  .fde-ai-sessions-button,
+  .fde-ai-sessions-close { display: inline-grid; width: 44px; min-width: 44px; height: 44px; place-items: center; border: 1px solid var(--line); border-radius: 8px; color: var(--ink-2); background: var(--surface); }
+  .fde-ai-sessions-button svg,
+  .fde-ai-sessions-close svg { width: 18px; height: 18px; }
   .fde-ai-conversation { width: 100%; min-width: 0; }
   .fde-ai-messages { min-width: 0; padding: 14px; overflow-wrap: anywhere; }
   .fde-ai-composer { padding: 10px 12px max(10px, env(safe-area-inset-bottom)); }
@@ -404,5 +416,6 @@ body:has(.fde-app) { min-width: 320px; }
 
 @media (prefers-reduced-motion: reduce) {
   .fde-sidebar,
+  .fde-ai-sessions,
   .fde-mobile-nav-backdrop { transition: none; }
 }

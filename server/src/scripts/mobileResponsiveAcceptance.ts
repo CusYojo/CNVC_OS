@@ -48,5 +48,7 @@ pageStyles.forEach((css, index) => {
   assert.match(css, /@media\s*\(max-width:\s*720px\)/, `page stylesheet ${index + 1} needs a phone breakpoint`)
 })
 assert.match(ai, /fde-ai-(?:composer|messages|page)/, 'AI page needs stable responsive hooks')
+assert.match(ai, /mobileSessionsOpen/, 'AI session history needs an accessible phone drawer')
+assert.match(ai, /fde-ai-sessions-button/, 'AI session history needs a phone trigger')
 
 console.log('mobile responsive acceptance passed')
