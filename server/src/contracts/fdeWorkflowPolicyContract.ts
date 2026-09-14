@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { FDE_PROJECT_DUTIES, type FdeProjectDuty } from './fdeGovernanceContract.js'
+import { FDE_PROJECT_DUTIES, type FdeApprovalDuty } from './fdeGovernanceContract.js'
 
 export const FDE_STAGE_REQUIREMENTS = [
   { stage: '入库', materials: [] },
@@ -12,12 +12,13 @@ export const FDE_STAGE_REQUIREMENTS = [
   { stage: '打款', materials: [{ key: 'ic_resolution', label: '投委会决议' }, { key: 'payment_order', label: '打款单' }] },
 ]
 
-const stageDuties: Record<string, FdeProjectDuty[]> = {
-  立项: ['concerned_leader'], 尽调计划制定: ['president'],
-  启动尽调: ['finance', 'legal', 'concerned_leader'], 内核: ['finance', 'legal', 'chairman', 'president'],
-  投决: ['chairman', 'president'], 打款: ['finance', 'legal', 'chairman', 'president'],
+const stageDuties: Record<string, FdeApprovalDuty[]> = {
+  入库: ['boss'], 立项: [], 尽调计划制定: ['boss'], 尽调计划审核: [], 启动尽调: ['boss'],
+  内核: ['finance', 'legal', 'boss'], 投决: ['chairman', 'president'], 打款: ['finance'],
 }
-const duty = z.custom<FdeProjectDuty>((value) => FDE_PROJECT_DUTIES.some((item) => item.code === value))
+const duty = z.custom<FdeApprovalDuty>((value) => value === 'boss' || FDE_PROJECT_DUTIES.some((item) => item.code === value))
+const approvalLabel = (value: FdeApprovalDuty) => value === 'boss' ? '董事长/总裁审批' : FDE_PROJECT_DUTIES.find((item) => item.code === value)!.label
+const approvalMode = (value: FdeApprovalDuty) => ['boss', 'finance', 'legal'].includes(value) ? '或签' as const : '会签' as const
 export const fdeWorkflowPolicySchema = z.object({
   schemaVersion: z.literal(1),
   cycleDays: z.array(z.union([z.literal(15), z.literal(30), z.literal(40)])).min(1).max(3),
@@ -44,5 +45,5 @@ export const fdeWorkflowPolicySchema = z.object({
 export type FdeWorkflowPolicyConfig = z.infer<typeof fdeWorkflowPolicySchema>
 export const DEFAULT_FDE_WORKFLOW_POLICY: FdeWorkflowPolicyConfig = {
   schemaVersion: 1, cycleDays: [15, 30, 40],
-  stages: FDE_STAGE_REQUIREMENTS.map((stage) => ({ ...stage, allowWaiver: true, requiresFund: stage.stage === '内核', approvals: (stageDuties[stage.stage] ?? []).map((duty) => ({ duty, name: `${FDE_PROJECT_DUTIES.find((item) => item.code === duty)!.label} · ${stage.stage}`, mode: '会签' })) })),
+  stages: FDE_STAGE_REQUIREMENTS.map((stage) => ({ ...stage, allowWaiver: true, requiresFund: stage.stage === '内核', approvals: (stageDuties[stage.stage] ?? []).map((duty) => ({ duty, name: `${approvalLabel(duty)} · ${stage.stage}`, mode: approvalMode(duty) })) })),
 }

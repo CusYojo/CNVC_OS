@@ -5,7 +5,11 @@ import { DEFAULT_FDE_WORKFLOW_POLICY, fdeWorkflowPolicySchema } from '../src/con
 test('FDE default policy preserves investment stages, materials and duties', () => {
   assert.equal(fdeWorkflowPolicySchema.safeParse(DEFAULT_FDE_WORKFLOW_POLICY).success, true)
   assert.equal(DEFAULT_FDE_WORKFLOW_POLICY.stages.length, 8)
-  assert.deepEqual(DEFAULT_FDE_WORKFLOW_POLICY.stages[6].approvals.map((node) => node.duty), ['chairman', 'president'])
+  assert.deepEqual(DEFAULT_FDE_WORKFLOW_POLICY.stages.map((stage) => stage.approvals.map((node) => [node.duty, node.mode])), [
+    [['boss', '或签']], [], [['boss', '或签']], [], [['boss', '或签']],
+    [['finance', '或签'], ['legal', '或签'], ['boss', '或签']],
+    [['chairman', '会签'], ['president', '会签']], [['finance', '或签']],
+  ])
 })
 
 test('FDE malformed policy returns validation errors instead of throwing TypeError', () => {

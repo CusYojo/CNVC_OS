@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm'
 import { db } from '../db/client.js'
 import { projectDutyAssignments, projectGovernanceChanges, projectMembers, projects, roles, userRoles, users } from '../db/schema.js'
-import { FDE_LEADERSHIP_DUTIES, FDE_PROJECT_DUTIES, type FdeDutyAssignment, type FdeProjectDuty } from '../contracts/fdeGovernanceContract.js'
+import { FDE_LEADERSHIP_DUTIES, FDE_PROJECT_DUTIES, type FdeApprovalDuty, type FdeDutyAssignment, type FdeProjectDuty } from '../contracts/fdeGovernanceContract.js'
 import { createMySqlIdentityRepositoryContext, identityRepositories } from '../repositories/index.js'
 import { requireAccessibleProject } from './projectAccessService.js'
 import { getProjectWorkflowPolicy } from './fdeWorkflowPolicyService.js'
@@ -265,13 +265,18 @@ export async function resolveFdeApprovalNodes(tx: Transaction, project: ProjectR
   const definitions = policy.configuration.stages.find((item) => item.stage === stage)?.approvals
   if (!definitions) throw failure(409, 'FDE_APPROVAL_STAGE_INVALID', '当前阶段没有批准的审批配置')
   return definitions.map(({ duty, name, mode }) => {
-    const bindings = assignments.filter((assignment) => assignment.duty === duty)
-    const fallbackCode = duty === 'chairman' ? 'FDE_CHAIRMAN' : duty === 'president' ? 'FDE_PRESIDENT' : null
-    const ids = bindings.length ? bindings.map((binding) => binding.userId) : fallbackCode ? people.filter((person) => person.roleCodes.includes(fallbackCode)).map((person) => person.id) : []
+    const approvalDuty = duty as FdeApprovalDuty
+    const boss = approvalDuty === 'boss'
+    const bindings = boss
+      ? assignments.filter((assignment) => assignment.duty === 'chairman' || assignment.duty === 'president')
+      : assignments.filter((assignment) => assignment.duty === approvalDuty)
+    const fallbackCode = approvalDuty === 'chairman' ? 'FDE_CHAIRMAN' : approvalDuty === 'president' ? 'FDE_PRESIDENT' : null
+    const ids = bindings.length ? bindings.map((binding) => binding.userId) : boss ? people.filter((person) => person.roleCodes.some((code) => ['FDE_CHAIRMAN', 'FDE_PRESIDENT'].includes(code))).map((person) => person.id) : fallbackCode ? people.filter((person) => person.roleCodes.includes(fallbackCode)).map((person) => person.id) : []
     const selected = [...new Set(ids)].filter((id) => id !== applicantId).map((id) => byId.get(id)).filter((person): person is Person => Boolean(person))
-    if (!selected.length || ids.some((id) => id !== applicantId && !byId.has(id))) throw failure(409, 'FDE_APPROVER_NOT_CONFIGURED', `请先配置当前项目的启用职责人员：${FDE_PROJECT_DUTIES.find((item) => item.code === duty)!.label}；申请人不可兼任审批人`)
-    const definition = FDE_PROJECT_DUTIES.find((item) => item.code === duty)!
-    if (selected.some((person) => !person.categories.some((category) => (definition.eligible as readonly string[]).includes(category)) || (fallbackCode !== null && !person.roleCodes.includes(fallbackCode)))) throw failure(409, 'FDE_APPROVER_ROLE_CHANGED', `职责人员的机构角色已变化，请重新配置：${definition.label}`)
-    return { name, mode, roleLabel: FDE_PROJECT_DUTIES.find((item) => item.code === duty)!.label, roles: [duty], approverUserIds: selected.map((person) => person.id), approverNames: selected.map((person) => person.name) }
+    const label = boss ? '董事长/总裁审批' : FDE_PROJECT_DUTIES.find((item) => item.code === approvalDuty)!.label
+    if (!selected.length || ids.some((id) => id !== applicantId && !byId.has(id))) throw failure(409, 'FDE_APPROVER_NOT_CONFIGURED', `请先配置当前项目的启用职责人员：${label}；申请人不可兼任审批人`)
+    const definition = boss ? undefined : FDE_PROJECT_DUTIES.find((item) => item.code === approvalDuty)!
+    if (selected.some((person) => (definition && !person.categories.some((category) => (definition.eligible as readonly string[]).includes(category))) || (fallbackCode !== null && !person.roleCodes.includes(fallbackCode)) || (boss && !person.roleCodes.some((code) => ['FDE_CHAIRMAN', 'FDE_PRESIDENT'].includes(code))))) throw failure(409, 'FDE_APPROVER_ROLE_CHANGED', `职责人员的机构角色已变化，请重新配置：${label}`)
+    return { name, mode, roleLabel: label, roles: [approvalDuty], approverUserIds: selected.map((person) => person.id), approverNames: selected.map((person) => person.name) }
   })
 }

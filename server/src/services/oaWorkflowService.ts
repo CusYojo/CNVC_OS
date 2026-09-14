@@ -10,7 +10,7 @@ import {
   projectFiles,
   projectPlanActions,
   projectPlans,
-  projects,
+  projects, projectMembers,
   todos,
   users,
 } from '../db/schema.js'
@@ -413,14 +413,17 @@ export async function createOaApprovalRequest(input: {
       const actor = await activeUser(identity.users, input.userId)
       const fromStage = project.stage as ProjectStage
       console.error('[OA_DEBUG] fromStage=' + fromStage + ' input.targetStage=' + input.targetStage + ' workflowModel=' + project.workflowModel + ' expectedNext=' + expectedNextStage(fromStage, project.workflowModel))
-      if (project.workflowModel === 'fde-v1' && project.ownerUserId !== actor.id) throw workflowError(403, 'FDE_OWNER_REQUIRED', 'FDE 阶段申请必须由项目负责人提交')
+      const isPlanSubmission = project.workflowModel === 'fde-v1' && fromStage === '尽调计划制定'
+      if (project.workflowModel === 'fde-v1' && project.ownerUserId !== actor.id) {
+        const [membership] = await tx.select({ userId: projectMembers.userId }).from(projectMembers).where(and(eq(projectMembers.projectId, project.id), eq(projectMembers.userId, actor.id))).limit(1)
+        if (!isPlanSubmission || !membership) throw workflowError(403, isPlanSubmission ? 'FDE_PROJECT_TEAM_REQUIRED' : 'FDE_OWNER_REQUIRED', isPlanSubmission ? '尽调计划仅限投资项目组成员提交' : 'FDE 阶段申请必须由项目负责人提交')
+      }
       if (project.lifecycle !== 'active') throw workflowError(409, 'OA_PROJECT_INACTIVE', '关闭或归档项目不能发起阶段审批')
       if (project.classification === 'pool') throw workflowError(409, 'OA_POOL_INTAKE_REQUIRED', '请先完成项目池入库初筛，再发起阶段审批')
       if (input.targetStage !== '放弃' && input.targetStage !== expectedNextStage(fromStage, project.workflowModel)) {
         throw workflowError(409, 'OA_STAGE_TRANSITION_INVALID', 'OA 只能推进到项目的下一标准阶段')
       }
       const type = approvalType(fromStage, input.targetStage)
-      const isPlanSubmission = project.workflowModel === 'fde-v1' && fromStage === '尽调计划制定'
       const requestFromStage = isPlanSubmission ? '尽调计划审核' : fromStage
       const targetStage = isPlanSubmission ? '启动尽调' : input.targetStage
       const fileRows = await tx.select({ name: projectFiles.name }).from(projectFiles).where(and(eq(projectFiles.projectId, project.id), projectFileAccessCondition(actor.id)))

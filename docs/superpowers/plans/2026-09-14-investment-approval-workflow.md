@@ -17,7 +17,7 @@
 - 修改：`server/src/services/fdeGovernanceService.ts` — 将逻辑老板节点解析为启用的项目董事长/总裁，处理投决单角色必签与资格错误。
 - 修改：`server/src/services/oaWorkflowService.ts` — 放开尽调计划阶段的项目组成员发起/重提权限，保留其他阶段负责人边界。
 - 修改：`server/drizzle/0053_add_fde_workflow_policies.sql` — 使初始数据库策略与契约默认值一致；另新增迁移发布修订版策略供新项目采用。
-- 创建：`server/drizzle/0114_update_investment_approval_workflow.sql` — 发布新版 FDE 策略版本，不改写已绑定旧版本的项目。
+- 创建：`server/drizzle/0114_update_investment_approval_workflow.sql` — 发布新版 FDE 策略版本，并将现有 FDE 投资项目切换到该版本；进行中的审批快照不变。
 - 修改：`src/pages/WorkflowPage.tsx` — 显示真实审批链与“董事长/总裁或签”“投决两人必签”文案。
 - 修改：`server/tests/fdeWorkflowPolicy.test.ts` — 锁定策略职责顺序、节点模式及不可变规则。
 - 创建：`server/tests/fdeGovernanceApprovalNodes.test.ts` — 覆盖职责解析、普通老板或签和投决双角色节点。
@@ -223,7 +223,7 @@ assert.deepEqual(policy.configuration.stages.find(stage => stage.stage === '投�
 
 - [ ] **步骤 3：新增策略版本迁移**
 
-为新策略创建一个新 `fde_workflow_policy_versions` 版本，配置与 `DEFAULT_FDE_WORKFLOW_POLICY` 完全相同，并将投资策略的 `active_version_id` 指向新版本。不要更新 `projects.workflow_policy_version_id`，确保已有项目和已发起请求保留原规则/快照。更新 `0053` 初始 JSON，使全新数据库从一开始就是新版策略。
+为新策略创建一个新 `fde_workflow_policy_versions` 版本，配置与 `DEFAULT_FDE_WORKFLOW_POLICY` 完全相同，并将投资策略的 `active_version_id` 指向新版本。更新所有 `workflow_model='fde-v1' AND project_type='投资项目'` 项目的 `workflow_policy_version_id`；不修改 `oa_approval_requests` 或 `oa_approval_nodes`，确保已发起请求保留审批快照。更新 `0053` 初始 JSON，使全新数据库从一开始就是新版策略。
 
 - [ ] **步骤 4：运行验收确认通过**
 

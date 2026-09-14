@@ -91,6 +91,15 @@ async function requireOwner(tx: Transaction, project: ProjectRow, userId: string
   return actor
 }
 
+async function requirePlanEditor(tx: Transaction, project: ProjectRow, userId: string) {
+  const [actor] = await tx.select().from(users).where(eq(users.id, userId)).limit(1)
+  if (!actor || actor.status !== '启用') throw error(403, 'USER_DISABLED_OR_MISSING', '当前用户不可用')
+  if (project.ownerUserId === userId) return actor
+  const [membership] = await tx.select({ userId: projectMembers.userId }).from(projectMembers).where(and(eq(projectMembers.projectId, project.id), eq(projectMembers.userId, userId))).limit(1)
+  if (!membership) throw error(403, 'FDE_PROJECT_TEAM_REQUIRED', '尽调计划仅限投资项目组成员编辑')
+  return actor
+}
+
 async function canAmendApprovedPlan(reader: Pick<typeof db, 'select'>, project: ProjectRow, userId: string) {
   if (project.ownerUserId === userId) return true
   const [departmentLead] = await reader.select({ id: users.id }).from(projectMembers)
@@ -274,7 +283,7 @@ export async function saveFdePlan(input: { projectId: string; userId: string; cy
     if (!policy.configuration.cycleDays.includes(input.cycleDays as 15 | 30 | 40)) throw error(400, 'FDE_PLAN_CYCLE_DISABLED', '当前项目规则不允许该周期')
     await assertNoActiveApproval(tx, project.id)
     const [previous] = await tx.select().from(projectPlans).where(eq(projectPlans.projectId, project.id)).orderBy(desc(projectPlans.revision)).limit(1)
-    const actor = previous?.status === 'locked' ? await requireApprovedPlanEditor(tx, project, input.userId) : await requireOwner(tx, project, input.userId)
+    const actor = previous?.status === 'locked' ? await requireApprovedPlanEditor(tx, project, input.userId) : await requirePlanEditor(tx, project, input.userId)
     const [approvedDate] = await tx.select({ id: projectStageDates.id }).from(projectStageDates).where(eq(projectStageDates.projectId, project.id)).limit(1)
     if (approvedDate && (input.targetDate !== project.targetDate || input.cycleDays !== project.cycleDays)) throw error(409, 'FDE_APPROVED_TIMELINE_EXISTS', '已有批准节点日期，不能通过重新生成计划覆盖日期基准；需正式整体改期流程')
     if (previous && previous.version !== input.expectedVersion) throw error(409, 'VERSION_CONFLICT', '计划已被修改，请刷新后重试')
