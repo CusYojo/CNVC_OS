@@ -10,11 +10,12 @@ export const FDE_STAGE_REQUIREMENTS = [
   { stage: '内核', materials: [{ key: 'memo_draft', label: '投资说明书初稿' }, { key: 'loi_draft', label: '投资意向书初稿' }] },
   { stage: '投决', materials: [{ key: 'memo_final', label: '投资说明书终稿' }, { key: 'dd_report', label: '尽调报告' }, { key: 'qa', label: '项目 Q&A' }, { key: 'loi_final', label: '投资意向书终稿' }] },
   { stage: '打款', materials: [{ key: 'ic_resolution', label: '投委会决议' }, { key: 'payment_order', label: '打款单' }] },
+  { stage: '投后', materials: [] },
 ]
 
 const stageDuties: Record<string, FdeApprovalDuty[]> = {
   入库: ['boss'], 立项: [], 尽调计划制定: ['boss'], 尽调计划审核: [], 尽调: ['boss'],
-  内核: ['finance', 'legal', 'boss'], 投决: ['chairman', 'president'], 打款: ['finance'],
+  内核: ['finance', 'legal', 'boss'], 投决: ['chairman', 'president'], 打款: ['finance'], 投后: [],
 }
 const duty = z.custom<FdeApprovalDuty>((value) => value === 'boss' || FDE_PROJECT_DUTIES.some((item) => item.code === value))
 const approvalLabel = (value: FdeApprovalDuty) => value === 'boss' ? '董事长/总裁审批' : FDE_PROJECT_DUTIES.find((item) => item.code === value)!.label
@@ -27,14 +28,14 @@ export const fdeWorkflowPolicySchema = z.object({
     allowWaiver: z.boolean(), requiresFund: z.boolean(),
     materials: z.array(z.object({ key: z.string().regex(/^[a-z][a-z0-9_]{1,63}$/), label: z.string().trim().min(1).max(100) }).strict()).max(30),
     approvals: z.array(z.object({ duty, name: z.string().trim().min(1).max(100), mode: z.enum(['会签', '或签']) }).strict()).max(12),
-  }).strict()).length(8),
+  }).strict()).length(9),
 }).strict().superRefine((config, context) => {
   const issue = (message: string) => context.addIssue({ code: 'custom', message })
   if (new Set(config.cycleDays).size !== config.cycleDays.length) issue('周期不可重复')
   FDE_STAGE_REQUIREMENTS.forEach((baseline, index) => {
     const stage = config.stages[index]
     if (!stage) { issue('投资模板缺少阶段'); return }
-    if (stage.stage !== baseline.stage) issue('当前投资模板必须保留八阶段名称与顺序')
+    if (stage.stage !== baseline.stage) issue('当前投资模板必须保留九阶段名称与顺序')
     if (new Set(stage.materials.map((item) => item.key)).size !== stage.materials.length) issue(`${stage.stage}材料编号重复`)
     if (baseline.materials.some((item) => !stage.materials.some((material) => material.key === item.key))) issue(`${stage.stage}不得移除基线必需材料`)
     if (stage.stage === '内核' && !stage.requiresFund) issue('内核必须明确投资基金')

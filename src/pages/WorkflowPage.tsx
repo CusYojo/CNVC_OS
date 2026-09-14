@@ -11,7 +11,7 @@ import { FdeTypePolicyPanel } from '../components/FdeTypePolicyPanel'
 import { approvalCenterReturnPath } from '../../server/src/contracts/fdeApprovalCenterContract'
 import { safeVisibleText } from '../../server/src/contracts/textIntegrityContract'
 
-const workflowStages: ProjectStage[] = ['入库', '立项', '尽调计划制定', '尽调计划审核', '尽调', '内核', '投决', '打款']
+const workflowStages: ProjectStage[] = ['入库', '立项', '尽调计划制定', '尽调计划审核', '尽调', '内核', '投决', '打款', '投后']
 const legacyWorkflowStages: ProjectStage[] = ['线索', '初筛', '立项', '尽调', '上会', '投决', '投后', '退出']
 const approvalTone = (status: ApprovalRequest['status']) => status === '已通过' ? 'green' : status === '审批中' ? 'blue' : status === '已退回' ? 'amber' : status === '已拒绝' ? 'red' : 'slate'
 const taskTone = (status: string) => status === '已完成' ? 'green' : status === '进行中' || status === '待验收' ? 'blue' : status === '已退回' ? 'amber' : status === '已取消' ? 'slate' : 'slate'

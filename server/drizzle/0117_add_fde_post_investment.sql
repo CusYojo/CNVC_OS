@@ -1,0 +1,9 @@
+CREATE TABLE `sbl_project_post_investment_updates` (`id` varchar(36) NOT NULL, `project_id` varchar(36) NOT NULL, `author_id` varchar(36) NOT NULL, `content` text NOT NULL, `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3), PRIMARY KEY (`id`), KEY `idx_post_investment_updates_project` (`project_id`,`created_at`));
+--> statement-breakpoint
+CREATE TABLE `sbl_project_post_investment_update_files` (`update_id` varchar(36) NOT NULL, `file_id` varchar(36) NOT NULL, `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3), UNIQUE KEY `uq_post_investment_update_file` (`update_id`,`file_id`));
+--> statement-breakpoint
+INSERT INTO `sbl_fde_workflow_policy_versions` (`id`,`policy_id`,`revision`,`status`,`configuration`,`sha256`,`reason`,`version`,`created_by`,`published_by`,`published_at`) SELECT 'b236f88b-7154-4551-a6f5-000000000117',`policy_id`,`revision`+1,'published',JSON_ARRAY_APPEND(`configuration`,'$.stages',JSON_OBJECT('stage','投后','materials',JSON_ARRAY(),'allowWaiver',true,'requiresFund',false,'approvals',JSON_ARRAY())),'01d1ed6fc31441c69ecc2202b0ee3e7601b969b629a78b7c8c37c4a8a98fa6a5','增加投后阶段',`version`+1,`created_by`,`published_by`,CURRENT_TIMESTAMP(3) FROM `sbl_fde_workflow_policy_versions` WHERE `id`='b236f88b-7154-4551-a6f5-000000000115';
+--> statement-breakpoint
+UPDATE `sbl_fde_workflow_policies` SET `active_version_id`='b236f88b-7154-4551-a6f5-000000000117',`next_revision`=`next_revision`+1,`version`=`version`+1 WHERE `id`='b236f88b-7154-4551-a6f5-000000000001';
+--> statement-breakpoint
+UPDATE `sbl_projects` SET `workflow_policy_version_id`='b236f88b-7154-4551-a6f5-000000000117',`stage`=IF(`stage`='已 Close','投后',`stage`),`lifecycle`=IF(`stage`='已 Close','active',`lifecycle`),`version`=`version`+1 WHERE `workflow_model`='fde-v1' AND `project_type`='投资项目';

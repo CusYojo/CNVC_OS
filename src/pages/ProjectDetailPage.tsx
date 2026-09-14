@@ -42,6 +42,7 @@ import { FdeDirectivePanel } from '../components/FdeDirectivePanel'
 import { FdeProjectRecordPanel } from '../components/FdeProjectRecordPanel'
 import { FdeFilePanel } from '../components/FdeFilePanel'
 import { ProjectDetailHero } from '../components/ProjectDetailHero'
+import { PostInvestmentPanel } from '../components/PostInvestmentPanel'
 import { projectDetailTab, projectDetailTabs } from '../lib/projectDetailPresentation'
 import './ProjectDetailPage.css'
 
@@ -66,6 +67,7 @@ export function ProjectDetailPage() {
   const deleteFile = useAppStore((state) => state.deleteFile)
   const hydrateFromServer = useAppStore((state) => state.hydrateFromServer)
   const files = useAppStore((state) => state.files)
+  const users = useAppStore((state) => state.users)
   const meetings = useAppStore((state) => state.meetings)
   const todos = useAppStore((state) => state.todos)
   const workflows = useAppStore((state) => state.workflowLogs)
@@ -523,6 +525,7 @@ export function ProjectDetailPage() {
     <div className="fde-project-detail">
       <div className="fde-detail-breadcrumb"><button onClick={() => navigate(archiveBack ?? `/projects?view=${project.classification ?? 'normal'}`)}><ArrowLeft className="h-3.5 w-3.5" />{archiveBack ? '返回项目档案' : '项目中心'}</button></div>
       <ProjectDetailHero key={project.id} project={project} incompleteTaskCount={project.workflowModel === 'fde-v1' ? canonicalTaskCount : legacyOpenTaskCount} onOverview={() => setWorkspace('overview')} onPrimary={() => project.lifecycle === 'active' ? setActiveTab('workflow') : setWorkspace('archive')} />
+      {project.stage === '投后' && <PostInvestmentPanel project={project} files={projectFiles} leaders={users} />}
       <div className="fde-detail-tabs" role="tablist" aria-label="项目详情工作区">{tabItems.map(tab => <button id={`project-tab-${tab.id}`} type="button" role="tab" aria-selected={activeTab === tab.id} aria-controls={`project-panel-${tab.id}`} tabIndex={activeTab === tab.id ? 0 : -1} className={activeTab === tab.id ? 'active' : ''} key={tab.id} onClick={() => setActiveTab(tab.id)} onKeyDown={event => {
         const index = tabItems.findIndex(item => item.id === activeTab)
         const next = event.key === 'ArrowRight' ? (index + 1) % tabItems.length : event.key === 'ArrowLeft' ? (index + tabItems.length - 1) % tabItems.length : event.key === 'Home' ? 0 : event.key === 'End' ? tabItems.length - 1 : -1
