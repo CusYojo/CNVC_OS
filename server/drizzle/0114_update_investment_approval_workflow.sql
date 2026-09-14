@@ -14,7 +14,7 @@ VALUES (
 --> statement-breakpoint
 
 UPDATE `sbl_fde_workflow_policies`
-SET `active_version_id`='b236f88b-7154-4551-a6f5-000000000114', `next_revision`=3, `version`=`version`+1, `updated_at`=CURRENT_TIMESTAMP(3)
+SET `active_version_id`='b236f88b-7154-4551-a6f5-000000000114', `next_revision`=3, `version`=`version`+1
 WHERE `id`='b236f88b-7154-4551-a6f5-000000000001';
 --> statement-breakpoint
 
