@@ -11,10 +11,12 @@ VALUES (
   '投资项目审批规则调整：老板或签、投决双签、内核串行、打款财务审批',
   CURRENT_TIMESTAMP(3)
 );
+--> statement-breakpoint
 
 UPDATE `sbl_fde_workflow_policies`
 SET `active_version_id`='b236f88b-7154-4551-a6f5-000000000114', `next_revision`=3, `version`=`version`+1, `updated_at`=CURRENT_TIMESTAMP(3)
 WHERE `id`='b236f88b-7154-4551-a6f5-000000000001';
+--> statement-breakpoint
 
 UPDATE `sbl_projects`
 SET `workflow_policy_version_id`='b236f88b-7154-4551-a6f5-000000000114', `version`=`version`+1, `updated_at`=CURRENT_TIMESTAMP(3)
