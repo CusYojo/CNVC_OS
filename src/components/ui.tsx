@@ -53,7 +53,7 @@ export function Badge({ children, tone = 'slate' }: { children: ReactNode; tone?
 
 const stageTone: Record<string, Parameters<typeof Badge>[0]['tone']> = {
   入库: 'slate', 线索: 'slate', 初筛: 'cyan', 立项: 'blue', 尽调计划制定: 'cyan', 尽调计划审核: 'blue',
-  启动尽调: 'purple', 尽调: 'purple', 内核: 'amber', 上会: 'amber', 投决: 'red', 打款: 'cyan',
+  尽调: 'purple', 内核: 'amber', 上会: 'amber', 投决: 'red', 打款: 'cyan',
   '已 Close': 'green', 投后: 'green', 退出: 'slate', 放弃: 'slate',
 }
 

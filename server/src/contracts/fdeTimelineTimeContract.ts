@@ -3,7 +3,7 @@ import { fdeDate, fdeDueTime } from './fdeTaskContract.js'
 // FDE participation is not the approval matrix: both executive duties participate in DD.
 export function timelineLeaderDuties(stage: string): Array<'concerned_leader' | 'chairman' | 'president'> {
   if (stage === '立项') return ['concerned_leader']
-  return ['启动尽调', '内核', '投决', '打款'].includes(stage) ? ['chairman', 'president'] : []
+  return ['尽调', '内核', '投决', '打款'].includes(stage) ? ['chairman', 'president'] : []
 }
 
 // Preserve the reference's 45-minute deterministic preferred/alternative proposals, not its fixed week.

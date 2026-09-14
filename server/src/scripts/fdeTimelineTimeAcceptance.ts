@@ -123,8 +123,8 @@ try {
       request = (await actOnOaApprovalRequest({ requestId: request.id, userId, expectedVersion: request.lockVersion, action: 'approve', comment: '正式核验并通过阶段申请' })).request
     }
   }
-  assert.equal((await projectNow()).stage, '启动尽调')
-  const lateTasks = await db.select().from(projectTimelineTasks).where(and(eq(projectTimelineTasks.projectId, project.id), eq(projectTimelineTasks.stage, '启动尽调'), eq(projectTimelineTasks.needLeader, true)))
+  assert.equal((await projectNow()).stage, '尽调')
+  const lateTasks = await db.select().from(projectTimelineTasks).where(and(eq(projectTimelineTasks.projectId, project.id), eq(projectTimelineTasks.stage, '尽调'), eq(projectTimelineTasks.needLeader, true)))
   assert.equal(lateTasks.length, 2)
   for (const link of lateTasks) assert.deepEqual((await rows()).filter(item => item.sourceTimelineTaskId === link.taskId).map(item => item.leaderId).sort(), [chairman.id, president.id].sort())
   checks.push('real-stage-approval-chain:formal-and-informal-DD-actions-each-derive-both-effective-executives')

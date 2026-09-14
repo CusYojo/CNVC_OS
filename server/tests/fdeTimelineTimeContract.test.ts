@@ -6,7 +6,7 @@ import { validLeaderSlot, timeActionSchema } from '../src/contracts/fdeTimeContr
 test('leadership participation differs from plan approval and never uses demo names', () => {
   for (const stage of ['入库', '尽调计划制定', '尽调计划审核', '未知']) assert.deepEqual(timelineLeaderDuties(stage), [])
   assert.deepEqual(timelineLeaderDuties('立项'), ['concerned_leader'])
-  for (const stage of ['启动尽调', '内核', '投决', '打款']) assert.deepEqual(timelineLeaderDuties(stage), ['chairman', 'president'])
+  for (const stage of ['尽调', '内核', '投决', '打款']) assert.deepEqual(timelineLeaderDuties(stage), ['chairman', 'president'])
 })
 test('source slots are stable, distinct, 45 minutes and use the actual source date', () => {
   for (let i = 0; i < 100; i++) {

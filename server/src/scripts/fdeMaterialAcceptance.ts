@@ -318,7 +318,7 @@ try {
   assert.ok((await createMaterialSubmission(project.id, member.id, scopedInput)).id, '他人的恢复请求不得封闭实际发送人的操作')
   checks.push('FDE-CONC-001/REC-002:four-round-send-versus-resolution-single-outcome-and-foreign-actor-fence-isolated')
 
-  await db.update(projects).set({ stage: '启动尽调', version: sql`${projects.version}+1` }).where(eq(projects.id, project.id))
+  await db.update(projects).set({ stage: '尽调', version: sql`${projects.version}+1` }).where(eq(projects.id, project.id))
   assert.ok((await getMaterialContext(project.id, member.id)).recipients.some(x => x.id === president.id))
   await db.update(projects).set({ stage: baseline[0].stage, version: baseline[0].version }).where(eq(projects.id, project.id))
   const stale = await payload(fourthFile.id, { expectedGovernanceVersion: 999 })

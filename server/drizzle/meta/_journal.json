@@ -722,6 +722,20 @@
       "when": 1793346544000,
       "tag": "0114_update_investment_approval_workflow",
       "breakpoints": true
+    },
+    {
+      "idx": 103,
+      "version": "5",
+      "when": 1793346545000,
+      "tag": "0115_rename_fde_due_diligence_stage",
+      "breakpoints": true
+    },
+    {
+      "idx": 104,
+      "version": "5",
+      "when": 1793346546000,
+      "tag": "0116_fix_fde_due_diligence_policy_hash",
+      "breakpoints": true
     }
   ]
 }

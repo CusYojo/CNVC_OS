@@ -30,7 +30,7 @@ oaRouter.post('/type-notices/:id/read', async (req: AuthedRequest, res, next) =>
   } catch (error) { next(error) }
 })
 
-const projectStage = z.enum(['入库', '立项', '尽调计划制定', '尽调计划审核', '启动尽调', '内核', '投决', '打款', '已 Close', '线索', '初筛', '尽调', '上会', '投后', '退出', '放弃'])
+const projectStage = z.enum(['入库', '立项', '尽调计划制定', '尽调计划审核', '尽调', '内核', '投决', '打款', '已 Close', '线索', '初筛', '上会', '投后', '退出', '放弃'])
 const createSchema = z.object({
   projectId: z.string().uuid(),
   targetStage: projectStage,

@@ -3,7 +3,7 @@ import { agentDate, agentDayOffset, projectedAgentStageDate } from './fdeProject
 
 export const agentScheduleSubmit = z.object({ clientRequestId: z.string().uuid(), expectedVersion: z.number().int().positive(), requestedDate: agentDate, reason: z.string().trim().min(6).max(600) }).strict()
 export const agentScheduleAction = z.object({ clientRequestId: z.string().uuid(), expectedVersion: z.number().int().positive(), action: z.enum(['approve', 'reject', 'withdraw']), reason: z.string().trim().min(6).max(600) }).strict()
-export const agentScheduleStages = ['入库', '立项', '尽调计划制定', '尽调计划审核', '启动尽调', '内核', '投决', '打款'] as const
+export const agentScheduleStages = ['入库', '立项', '尽调计划制定', '尽调计划审核', '尽调', '内核', '投决', '打款'] as const
 export type AgentStageDate = { stage: string; date: string; basis: 'cycle_projection' | 'approved'; version: number; approvalId: string | null; actualDate: string | null }
 export function buildAgentTimeline(targetDate: string | null, cycleDays: number, overrides: Array<{ stage: string; plannedDate: string; version: number; approvalId: string }>, actualDates: Record<string, string> = {}): AgentStageDate[] {
   return agentScheduleStages.flatMap(stage => {

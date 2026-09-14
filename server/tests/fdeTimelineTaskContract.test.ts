@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import { timelineSyncInput, timelineTaskProposals, timelineTaskProtection } from '../src/contracts/fdeTimelineTaskContract.js'
 
 test('timeline proposals retain reference stable keys, precise clocks and duty mapping', () => {
-  const items = timelineTaskProposals('启动尽调', '2026-09-10', [{ key: 'financial_dd', label: '财务尽调材料' }, { key: 'legal_dd', label: '法律尽调材料' }], true)
+  const items = timelineTaskProposals('尽调', '2026-09-10', [{ key: 'financial_dd', label: '财务尽调材料' }, { key: 'legal_dd', label: '法律尽调材料' }], true)
   assert.equal(items.find(item => item.key === 'material:financial_dd')?.duty, 'finance')
   assert.equal(items.find(item => item.key === 'material:legal_dd')?.dueDate, '2026-09-09')
   assert.equal(items.find(item => item.key === 'team_informal')?.dueTime, '19:00')

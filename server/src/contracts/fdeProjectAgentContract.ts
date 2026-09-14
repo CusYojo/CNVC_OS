@@ -68,7 +68,7 @@ export function agentDayOffset(date: string, offset: number) {
 }
 // Reference stagePlannedDate: a projection, never an invented approval or actual completion date.
 export function projectedAgentStageDate(stage: string, targetDate: string | null, cycleDays: number): string | null {
-  const positions: Record<string, number> = { 入库: 0, 立项: .10, 尽调计划制定: .18, 尽调计划审核: .22, 启动尽调: .58, 内核: .75, 投决: .90, 打款: 1 }
+  const positions: Record<string, number> = { 入库: 0, 立项: .10, 尽调计划制定: .18, 尽调计划审核: .22, 尽调: .58, 内核: .75, 投决: .90, 打款: 1 }
   if (!(stage in positions) || !agentDate.safeParse(targetDate).success || ![15, 30, 40].includes(cycleDays)) return null
   return agentDayOffset(targetDate!, -Math.round((1 - positions[stage]) * cycleDays))
 }

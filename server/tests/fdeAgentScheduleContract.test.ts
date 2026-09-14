@@ -17,7 +17,7 @@ test('timeline preserves approved date versions without pretending the entire cy
   assert.ok(timeline.every(item => item.actualDate === null))
 })
 test('date window uses prior actual completion when present and next planned date minus one', () => {
-  const timeline = buildAgentTimeline('2026-09-30', 40, [], { 启动尽调: '2026-09-18' })
+  const timeline = buildAgentTimeline('2026-09-30', 40, [], { 尽调: '2026-09-18' })
   assert.deepEqual(agentScheduleWindow(timeline, '内核', '2026-09-30', '2026-08-28'), { currentDate: '2026-09-20', minimum: '2026-09-19', maximum: '2026-09-25', available: true })
   assert.equal(agentScheduleWindow(timeline, '内核', '2026-09-30', '2026-09-26')?.available, false)
   assert.equal(agentScheduleWindow(timeline, '未知节点', '2026-09-30', '2026-08-28'), null)

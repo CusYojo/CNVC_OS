@@ -6,14 +6,14 @@ export const FDE_STAGE_REQUIREMENTS = [
   { stage: '立项', materials: [{ key: 'business_plan', label: '商业计划书' }, { key: 'initial_meeting', label: '初次交流纪要' }] },
   { stage: '尽调计划制定', materials: [] },
   { stage: '尽调计划审核', materials: [] },
-  { stage: '启动尽调', materials: [{ key: 'business_dd', label: '业务尽调材料' }, { key: 'financial_dd', label: '财务尽调材料' }, { key: 'legal_dd', label: '法律尽调材料' }] },
+  { stage: '尽调', materials: [{ key: 'business_dd', label: '业务尽调材料' }, { key: 'financial_dd', label: '财务尽调材料' }, { key: 'legal_dd', label: '法律尽调材料' }] },
   { stage: '内核', materials: [{ key: 'memo_draft', label: '投资说明书初稿' }, { key: 'loi_draft', label: '投资意向书初稿' }] },
   { stage: '投决', materials: [{ key: 'memo_final', label: '投资说明书终稿' }, { key: 'dd_report', label: '尽调报告' }, { key: 'qa', label: '项目 Q&A' }, { key: 'loi_final', label: '投资意向书终稿' }] },
   { stage: '打款', materials: [{ key: 'ic_resolution', label: '投委会决议' }, { key: 'payment_order', label: '打款单' }] },
 ]
 
 const stageDuties: Record<string, FdeApprovalDuty[]> = {
-  入库: ['boss'], 立项: [], 尽调计划制定: ['boss'], 尽调计划审核: [], 启动尽调: ['boss'],
+  入库: ['boss'], 立项: [], 尽调计划制定: ['boss'], 尽调计划审核: [], 尽调: ['boss'],
   内核: ['finance', 'legal', 'boss'], 投决: ['chairman', 'president'], 打款: ['finance'],
 }
 const duty = z.custom<FdeApprovalDuty>((value) => value === 'boss' || FDE_PROJECT_DUTIES.some((item) => item.code === value))

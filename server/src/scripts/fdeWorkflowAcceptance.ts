@@ -80,7 +80,7 @@ try {
     if (targetStage === '尽调计划审核') {
       const [submittedProject] = await db.select().from(projects).where(eq(projects.id, project.id)).limit(1)
       assert.equal(submittedProject.stage, '尽调计划审核')
-      assert.equal(request.targetStage, '启动尽调')
+      assert.equal(request.targetStage, '尽调')
       const reviewer = request.nodes[1].approverUserIds[0]
       request = (await actOnOaApprovalRequest({ userId: reviewer, requestId: request.id, action: 'return', comment: '请修订行动计划最终日期', expectedVersion: request.lockVersion })).request
       const [returnedProject] = await db.select().from(projects).where(eq(projects.id, project.id)).limit(1)
@@ -109,7 +109,7 @@ try {
     }
     const [nextProject] = await db.select().from(projects).where(eq(projects.id, project.id)).limit(1)
     project = nextProject
-    assert.equal(project.stage, targetStage === '尽调计划审核' ? '启动尽调' : targetStage)
+    assert.equal(project.stage, targetStage === '尽调计划审核' ? '尽调' : targetStage)
     if (targetStage === '尽调计划审核') {
       const workflow = await getFdeWorkflow(project.id, ownerId)
       assert.equal(workflow.plan?.status, 'locked')

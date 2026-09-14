@@ -28,7 +28,7 @@ import { projectFileAccessCondition, requireProjectFileAccess } from './projectF
 import { approveNodeTransition } from '../contracts/approvalNodeTransition.js'
 import { legacyApprovalAccessCondition } from './oaRequestAccessService.js'
 
-const fdeProjectStages = ['入库', '立项', '尽调计划制定', '尽调计划审核', '启动尽调', '内核', '投决', '打款', '已 Close'] as const
+const fdeProjectStages = ['入库', '立项', '尽调计划制定', '尽调计划审核', '尽调', '内核', '投决', '打款', '已 Close'] as const
 const legacyProjectStages = ['线索', '初筛', '立项', '尽调', '上会', '投决', '投后', '退出'] as const
 type ProjectStage = typeof fdeProjectStages[number] | typeof legacyProjectStages[number] | '放弃'
 type ApprovalType =
@@ -142,8 +142,8 @@ function approvalType(fromStage: ProjectStage, targetStage: ProjectStage): Appro
   if (targetStage === '放弃') return '项目终止审批'
   if (fromStage === '立项' && targetStage === '尽调计划制定') return '立项审批'
   if (fromStage === '尽调计划制定' && targetStage === '尽调计划审核') return '尽调计划审核'
-  if (fromStage === '尽调计划审核' && targetStage === '启动尽调') return '尽调启动审批'
-  if (fromStage === '启动尽调' && targetStage === '内核') return '内核审批'
+  if (fromStage === '尽调计划审核' && targetStage === '尽调') return '尽调启动审批'
+  if (fromStage === '尽调' && targetStage === '内核') return '内核审批'
   if (fromStage === '内核' && targetStage === '投决') return '投决审批'
   if (fromStage === '投决' && targetStage === '打款') return '投决审批'
   if (fromStage === '打款' && targetStage === '已 Close') return '打款审批'
@@ -167,7 +167,7 @@ function expectedNextStage(stage: ProjectStage, workflowModel: string): ProjectS
 
 function progressForStage(stage: ProjectStage, current: number, workflowModel: string) {
   if (stage === '放弃') return current
-  const fdeProgress: Record<string, number> = { 入库: 0, 立项: 10, 尽调计划制定: 18, 尽调计划审核: 22, 启动尽调: 58, 内核: 75, 投决: 90, 打款: 100, '已 Close': 100 }
+  const fdeProgress: Record<string, number> = { 入库: 0, 立项: 10, 尽调计划制定: 18, 尽调计划审核: 22, 尽调: 58, 内核: 75, 投决: 90, 打款: 100, '已 Close': 100 }
   if (workflowModel === 'fde-v1' && stage in fdeProgress) return fdeProgress[stage]
   const legacyIndex = legacyProjectStages.indexOf(stage as typeof legacyProjectStages[number])
   return legacyIndex >= 0 ? Math.min(100, (legacyIndex + 1) * 13) : current
@@ -425,7 +425,7 @@ export async function createOaApprovalRequest(input: {
       }
       const type = approvalType(fromStage, input.targetStage)
       const requestFromStage = isPlanSubmission ? '尽调计划审核' : fromStage
-      const targetStage = isPlanSubmission ? '启动尽调' : input.targetStage
+      const targetStage = isPlanSubmission ? '尽调' : input.targetStage
       const fileRows = await tx.select({ name: projectFiles.name }).from(projectFiles).where(and(eq(projectFiles.projectId, project.id), projectFileAccessCondition(actor.id)))
       const actualNames = new Set(fileRows.map((file) => file.name))
       const attachments = [...new Set(input.attachments ?? fileRows.map((file) => file.name))]
@@ -719,7 +719,7 @@ export async function actOnOaApprovalRequest(input: {
             updatedAt: now,
           }).where(eq(oaApprovalRequests.id, request.id))
           if (requestCompleted) {
-            if (project.workflowModel === 'fde-v1' && request.targetStage === '启动尽调') await lockApprovedFdePlan(tx, project.id)
+            if (project.workflowModel === 'fde-v1' && request.targetStage === '尽调') await lockApprovedFdePlan(tx, project.id)
             const progress = progressForStage(request.targetStage as ProjectStage, project.progress, project.workflowModel)
             const isClosed = request.targetStage === '已 Close'
             await tx.update(projects).set({
