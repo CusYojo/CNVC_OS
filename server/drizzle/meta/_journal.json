@@ -824,6 +824,8 @@
     { "idx": 117, "version": "5", "when": 1793346547000, "tag": "0117_add_fde_post_investment", "breakpoints": true
     },
     { "idx": 118, "version": "5", "when": 1793346548000, "tag": "0118_add_post_investment_foreign_keys", "breakpoints": true
+    },
+    { "idx": 119, "version": "5", "when": 1793346549000, "tag": "0119_restore_fde_establishment_approval", "breakpoints": true
     }
   ]
 }

@@ -14,7 +14,7 @@ export const FDE_STAGE_REQUIREMENTS = [
 ]
 
 const stageDuties: Record<string, FdeApprovalDuty[]> = {
-  入库: ['boss'], 立项: [], 尽调计划制定: ['boss'], 尽调计划审核: [], 尽调: ['boss'],
+  入库: ['boss'], 立项: ['boss'], 尽调计划制定: ['boss'], 尽调计划审核: [], 尽调: ['boss'],
   内核: ['finance', 'legal', 'boss'], 投决: ['chairman', 'president'], 打款: ['finance'], 投后: [],
 }
 const duty = z.custom<FdeApprovalDuty>((value) => value === 'boss' || FDE_PROJECT_DUTIES.some((item) => item.code === value))

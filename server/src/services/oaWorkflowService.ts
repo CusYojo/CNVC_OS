@@ -19,6 +19,7 @@ import { createMySqlIdentityRepositoryContext, identityRepositories } from '../r
 import { requireAccessibleProject } from './projectAccessService.js'
 import { listProjects } from './projectService.js'
 import { formatShanghaiDateKey } from '../utils/shanghaiTime.js'
+import { requireOaApprovalNodes } from '../contracts/oaApprovalNodeContract.js'
 import { evaluateFdeStageGate, lockApprovedFdePlan } from './fdeWorkflowService.js'
 import { resolveFdeApprovalNodes } from './fdeGovernanceService.js'
 import { actOnFdeTaskExtension, closeTaskExtensions } from './fdeTaskService.js'
@@ -436,9 +437,9 @@ export async function createOaApprovalRequest(input: {
         ? await evaluateFdeStageGate(tx, project) : undefined
       for (const source of gate?.snapshot ?? []) if (source.fileId) await requireProjectFileAccess(tx, source.fileId, actor.id)
       const checklist = gate?.checklist ?? blueprintByType[type].checklist.map(([label, required]) => ({ label, required, passed: false }))
-      const resolvedNodes = project.workflowModel === 'fde-v1'
+      const resolvedNodes = requireOaApprovalNodes(project.workflowModel === 'fde-v1'
         ? await resolveFdeApprovalNodes(tx, project, input.targetStage === '放弃' ? '立项' : fromStage, actor.id)
-        : await resolveBlueprintNodes(identity.users, type)
+        : await resolveBlueprintNodes(identity.users, type))
       const requestNo = `OA${formatShanghaiDateKey(new Date()).replaceAll('-', '')}-${randomUUID().slice(0, 8).toUpperCase()}`
       const submitNodeId = randomUUID()
       const approvalNodes = resolvedNodes.map((node, index) => ({
