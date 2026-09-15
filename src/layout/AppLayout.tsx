@@ -26,7 +26,7 @@ import {
   Sun,
 } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { UnifiedProjectCreateModal } from '../components/UnifiedProjectCreateModal'
 import { Drawer, EmptyState, Modal, SearchInput } from '../components/ui'
@@ -96,15 +96,28 @@ export function AppLayout() {
   const location = useLocation()
   const [collapsed, setCollapsed] = useState(false)
   const [narrow, setNarrow] = useState(() => typeof window !== 'undefined' && window.matchMedia('(max-width: 900px)').matches)
+  const [phone, setPhone] = useState(() => typeof window !== 'undefined' && window.matchMedia('(max-width: 720px)').matches)
+  const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false)
+  const mobileMenuButtonRef = useRef<HTMLButtonElement>(null)
+  const mobileNavigationRef = useRef<HTMLElement>(null)
   useEffect(() => {
     const media = window.matchMedia('(max-width: 900px)')
     const update = () => setNarrow(media.matches)
     update(); media.addEventListener('change', update)
     return () => media.removeEventListener('change', update)
   }, [])
+  useEffect(() => {
+    const media = window.matchMedia('(max-width: 720px)')
+    const update = () => {
+      setPhone(media.matches)
+      if (!media.matches) setMobileNavigationOpen(false)
+    }
+    update(); media.addEventListener('change', update)
+    return () => media.removeEventListener('change', update)
+  }, [])
   const responsibilityView = location.pathname === '/responsibility' || location.pathname === '/knowledge' && new URLSearchParams(location.search).get('view') === 'responsibility'
   const leadPoolView = location.pathname === '/projects' && new URLSearchParams(location.search).get('view') === 'leads'
-  const navigationCollapsed = collapsed || narrow && (responsibilityView || leadPoolView)
+  const navigationCollapsed = !phone && (collapsed || narrow && (responsibilityView || leadPoolView))
   const [showProfile, setShowProfile] = useState(false)
   const [personalWeixinConnected, setPersonalWeixinConnected] = useState<boolean | null>(null)
   const [showCreate, setShowCreate] = useState(false)
@@ -173,6 +186,25 @@ export function AppLayout() {
     window.addEventListener('keydown', keydown)
     return () => window.removeEventListener('keydown', keydown)
   }, [])
+  useEffect(() => setMobileNavigationOpen(false), [location.pathname, location.search])
+  useEffect(() => {
+    document.body.classList.toggle('fde-mobile-nav-open', mobileNavigationOpen)
+    if (mobileNavigationOpen) {
+      window.requestAnimationFrame(() => mobileNavigationRef.current?.querySelector<HTMLElement>('a, button')?.focus())
+    }
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && mobileNavigationOpen) setMobileNavigationOpen(false)
+    }
+    window.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.body.classList.remove('fde-mobile-nav-open')
+      window.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [mobileNavigationOpen])
+  const closeMobileNavigation = () => {
+    setMobileNavigationOpen(false)
+    window.requestAnimationFrame(() => mobileMenuButtonRef.current?.focus())
+  }
   useEffect(() => {
     if (!currentUser.id) return
     let active = true
@@ -207,15 +239,17 @@ export function AppLayout() {
   }, [showProfile, currentUser.role])
 
   return (
-    <div className={`fde-app fde-shell${navigationCollapsed ? ' is-collapsed' : ''}`} data-theme={dark ? 'dark' : 'light'}>
+    <div className={`fde-app fde-shell${navigationCollapsed ? ' is-collapsed' : ''}${mobileNavigationOpen ? ' is-mobile-nav-open' : ''}`} data-theme={dark ? 'dark' : 'light'}>
       <a className="fde-skip-link" href="#workspace-content">跳到主要内容</a>
-      <aside className="fde-sidebar" aria-label="主导航">
+      <button className="fde-mobile-nav-backdrop" aria-label="关闭主导航" tabIndex={mobileNavigationOpen ? 0 : -1} onClick={closeMobileNavigation} />
+      <aside id="mobile-navigation" ref={mobileNavigationRef} className="fde-sidebar" aria-label="主导航" aria-modal={phone && mobileNavigationOpen ? true : undefined} role={phone ? 'dialog' : undefined}>
         <div className="fde-brand-row">
           <button onClick={() => navigate('/')} className="fde-brand-home" aria-label="赛智伯乐工作台">
             <span className="fde-brand-mark"><img src="/fde-company-logo.png" alt="" /></span>
             {!navigationCollapsed && <span className="fde-brand-copy"><strong>赛智伯乐</strong><small>INVESTMENT WORKSPACE</small></span>}
           </button>
           <button onClick={() => setCollapsed(value => !value)} className="fde-icon-button fde-sidebar-toggle" aria-label={navigationCollapsed ? '展开侧边栏' : '收起侧边栏'}>{navigationCollapsed ? <Menu /> : <ChevronLeft />}</button>
+          <button onClick={closeMobileNavigation} className="fde-icon-button fde-mobile-nav-close" aria-label="关闭主导航"><ChevronLeft /></button>
         </div>
         <nav>
           {!navigationCollapsed && <div className="fde-nav-label">统一工作空间</div>}
@@ -230,10 +264,15 @@ export function AppLayout() {
           })}
         </nav>
         {!navigationCollapsed && <SidebarHorse />}
+        <div className="fde-mobile-nav-tools">
+          <button onClick={() => { setShowCreate(true); closeMobileNavigation() }}><Plus />快速新建</button>
+          <button onClick={() => setDark(value => !value)}>{dark ? <Sun /> : <Moon />}{dark ? '切换浅色主题' : '切换深色主题'}</button>
+        </div>
       </aside>
 
       <div className="fde-main-column">
         <header className="fde-topbar">
+          <button ref={mobileMenuButtonRef} className="fde-icon-button fde-mobile-menu-button" aria-label="打开主导航" aria-controls="mobile-navigation" aria-expanded={mobileNavigationOpen} onClick={() => setMobileNavigationOpen(true)}><Menu /></button>
           <div className="fde-breadcrumb"><strong>{pageTitle}</strong></div>
           <button className="fde-global-search" onClick={() => setShowSearch(true)}><Search /><span>搜索项目、文件…</span><kbd>⌘ K</kbd></button>
           <div className="fde-top-actions">

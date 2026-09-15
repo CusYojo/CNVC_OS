@@ -724,3 +724,34 @@ a.lead-review-team-card:hover, a.lead-review-team-card:focus-visible { backgroun
   .fde-personal-weixin-status { grid-template-columns: 1fr; justify-items: center; text-align: center; }
   .fde-personal-weixin-actions { width: 100%; }
 }
+
+/* Shared phone coverage for legacy administration and lead workspaces. */
+@media (max-width: 720px) {
+  .jw-admin-page { min-height: 0; overflow: visible; }
+  .jw-page-body,
+  .jw-capability-body { min-width: 0; flex-direction: column; overflow: visible; }
+  .jw-object-panel { width: 100%; min-width: 0; max-height: 38dvh; border-right: 0; border-bottom: 1px solid var(--jw-border); }
+  .jw-detail-panel,
+  .jw-capability-content { width: 100%; min-width: 0; overflow: visible; }
+  .jw-page-header,
+  .jw-tab-toolbar,
+  .jw-import-actions,
+  .jw-weixin-login-empty { align-items: stretch; flex-direction: column; }
+  .jw-page-header > *,
+  .jw-tab-toolbar > label,
+  .jw-tab-toolbar > *,
+  .jw-import-actions > * { width: 100%; min-width: 0; max-width: none; }
+  .jw-letter-tabs,
+  .jw-subtabs { max-width: 100%; overflow-x: auto; flex-wrap: nowrap; }
+  .lead-review-hero,
+  .lead-review-path,
+  .lead-review-grid { grid-template-columns: minmax(0, 1fr); }
+  .lead-review-action-panel { width: 100%; min-width: 0; align-items: stretch; }
+  .lead-pool-toolbar { align-items: stretch; flex-direction: column; }
+  .lead-pool-search { width: 100%; min-width: 0; }
+  .lead-pool-filters { width: 100%; grid-template-columns: minmax(0, 1fr); }
+  .lead-pool-table-scroll,
+  .lead-review-technical-table,
+  .lead-review-funding-table { width: 100%; max-width: 100%; overflow-x: auto; overscroll-behavior-inline: contain; }
+  .fde-personal-weixin-page { width: 100%; min-width: 0; }
+}

@@ -531,6 +531,14 @@
   .fde-dashboard .compact-status-grid,
   .fde-dashboard .capacity-card { grid-template-columns: 1fr 1fr; gap: 8px; }
 }
+
+@media (max-width: 720px) {
+  .fde-dashboard { width: 100%; min-width: 0; }
+  .fde-dashboard :is(.workbench-title-row,.todo-card-head-actions) { align-items: stretch; flex-direction: column; }
+  .fde-dashboard :is(.personal-todo-create,.personal-todo-row.editing) { grid-template-columns: minmax(0, 1fr); }
+  .fde-dashboard :is(.personal-todo-create,.personal-todo-row.editing) > * { grid-column: auto; min-width: 0; }
+  .fde-dashboard .dashboard-calendar-shell { max-width: 100%; overflow-x: clip; }
+}
 .fde-dashboard.page-wrap { max-width: 1540px; }
 .fde-dashboard .card {
   border-color: color-mix(in srgb, var(--line) 88%, transparent);

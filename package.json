@@ -302,6 +302,7 @@
     "accept:lead-enrichment:real-web": "node --env-file-if-exists=.env --import tsx server/src/scripts/leadEnrichmentRealWebAcceptance.ts",
     "prefetch:lead-enrichment:codex": "node --env-file-if-exists=.env --import tsx server/src/scripts/prefetchLeadEnrichmentResearch.ts",
     "accept:lead-pool-ui": "node --import tsx server/src/scripts/leadPoolUiAcceptance.ts",
+    "accept:mobile-responsive": "node --import tsx server/src/scripts/mobileResponsiveAcceptance.ts",
     "accept:lead-pool-http": "node --env-file-if-exists=.env --import tsx server/src/scripts/leadPoolHttpAcceptance.ts",
     "audit:lead-pool-query": "node --env-file-if-exists=.env --import tsx server/src/scripts/leadPoolQueryAudit.ts",
     "preview:lead-region-backfill": "node --env-file-if-exists=.env --import tsx server/src/scripts/previewLeadRegionBackfill.ts",

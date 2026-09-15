@@ -182,3 +182,11 @@ body:has(.fde-knowledge-page) { min-width: 320px; }
   .fde-knowledge-page .personal-notes-head > .fde-ui-button { width: 100%; }
   .fde-knowledge-page .personal-notes-pagination { align-items: flex-start; flex-direction: column; }
 }
+
+@media (max-width: 720px) {
+  .fde-knowledge-page { width: 100%; min-width: 0; overflow-x: clip; }
+  .fde-knowledge-page :is(.personal-notes-head,.personal-notes-search,.personal-notes-pagination) { align-items: stretch; flex-direction: column; }
+  .fde-knowledge-page .personal-notes-grid,
+  .personal-note-form-row { grid-template-columns: minmax(0, 1fr); }
+  .fde-knowledge-page :is(.fde-score-ledger,.overflow-x-auto) { max-width: 100%; overflow-x: auto; overscroll-behavior-inline: contain; }
+}

@@ -189,3 +189,37 @@ body:has(.fde-responsibility-workspace) { min-width: 320px; }
 .leave-balance-strip strong { margin-top: 4px; color: #244f57; font-size: 17px; }
 .leave-balance-strip small, .field-help { margin-top: 4px; color: #718096; font-size: 12px; }
 @media (max-width: 700px) { .leave-balance-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* Phone layout: stack forms and keep dense schedules/tables locally scrollable. */
+@media (max-width: 720px) {
+  .fde-workspace { width: 100%; min-width: 0; }
+  .fde-workspace-tabs { max-width: 100%; overflow-x: auto; flex-wrap: nowrap; }
+  .fde-workspace-tabs button { min-height: 44px; flex: 0 0 auto; white-space: nowrap; }
+  .fde-stage-grid,
+  .fde-responsibility-layout,
+  .fde-archive-layout,
+  .fde-plan-editor-row,
+  .fde-plan-editor-fields,
+  .office-field-grid,
+  .office-budget-grid,
+  .expense-row,
+  .expense-row-fields,
+  .expense-material-fields,
+  .expense-optional-settings { grid-template-columns: minmax(0, 1fr); }
+  .fde-responsibility-filters,
+  .fde-plan-editor-actions,
+  .fde-office-project-entry,
+  .fde-office-project-entry-actions,
+  .expense-inline-upload,
+  .office-section-title { align-items: stretch; flex-direction: column; }
+  .fde-responsibility-filters > *,
+  .fde-plan-editor-actions > *,
+  .fde-office-project-entry-actions > *,
+  .expense-inline-upload > * { width: 100%; max-width: none; }
+  .fde-collab-time-grid,
+  .fde-plan-table,
+  .office-itinerary,
+  .office-file-list { width: 100%; max-width: 100%; overflow-x: auto; overscroll-behavior-inline: contain; }
+  .fde-plan-table { min-width: 680px; }
+  .fde-panel { min-width: 0; overflow-wrap: anywhere; }
+}

@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import type { ComplianceSupplementChoice } from '../../server/src/contracts/complianceSupplementContract'
 import { createPortal } from 'react-dom'
 import { useSearchParams } from 'react-router-dom'
-import { AlertCircle, Bot, Boxes, Check, CheckCircle2, ChevronDown, ChevronRight, Copy, Download, File as FileIcon, FileText, MessageSquarePlus, Paperclip, Pencil, RefreshCw, Search, Send, Square, X } from 'lucide-react'
+import { AlertCircle, Bot, Boxes, Check, CheckCircle2, ChevronDown, ChevronRight, Copy, Download, File as FileIcon, FileText, Menu, MessageSquarePlus, Paperclip, Pencil, RefreshCw, Search, Send, Square, X } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useAppStore } from '../store/useAppStore'
@@ -922,6 +922,7 @@ function Chat() {
   const [scope, setScope] = useState<'project' | 'global'>('project')
   const [projectId, setProjectId] = useState(initialProject)
   const [input, setInput] = useState('')
+  const [mobileSessionsOpen, setMobileSessionsOpen] = useState(false)
   // 每个会话由 MySQL 会话主键和统一 Agent 会话标识关联，列表随账号跨设备同步。
   // rowId 用于改名/删除，agentId 是兼容历史数据的运行时会话标识。
   type ChatSession = {
@@ -1961,12 +1962,14 @@ function Chat() {
   }
 
   return (
-    <div className="fde-ai-page relative -m-6 flex h-[calc(100vh-64px)] min-h-[720px] overflow-hidden bg-white">
-      <aside className="flex w-[250px] shrink-0 flex-col border-r border-slate-200 bg-slate-50/60">
-        <div className="p-4">
+    <div className={`fde-ai-page relative -m-6 flex h-[calc(100vh-64px)] min-h-[720px] overflow-hidden bg-white${mobileSessionsOpen ? ' is-sessions-open' : ''}`}>
+      <button className="fde-ai-sessions-backdrop" aria-label="关闭会话列表" onClick={() => setMobileSessionsOpen(false)} />
+      <aside className="fde-ai-sessions flex w-[250px] shrink-0 flex-col border-r border-slate-200 bg-slate-50/60">
+        <div className="fde-ai-sessions-head p-4">
           <Button className="w-full" onClick={openNewSessionDialog} disabled={projectsLoading || !!projectsLoadError || selectableProjects.length === 0}>
             <MessageSquarePlus className="h-4 w-4" />新建会话
           </Button>
+          <button className="fde-ai-sessions-close" aria-label="关闭会话列表" onClick={() => setMobileSessionsOpen(false)}><X /></button>
         </div>
         <div className="flex-1 overflow-y-auto px-3">
           <p className="px-2 py-2 text-xs font-semibold uppercase tracking-wider text-slate-400">会话历史</p>
@@ -1974,7 +1977,7 @@ function Chat() {
           {sessions.map((s) => (
             <div
               key={s.rowId}
-              onClick={() => activateSession(s)}
+              onClick={() => { activateSession(s); setMobileSessionsOpen(false) }}
               className={`group mb-1 flex cursor-pointer items-center justify-between rounded-lg px-3 py-2.5 ${s.agentId === convId ? 'bg-white shadow-sm ring-1 ring-brand-200' : 'hover:bg-white/60'}`}
             >
               {renamingSessionId === s.rowId ? (
@@ -2015,8 +2018,9 @@ function Chat() {
         </div>
       </aside>
 
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="fde-ai-conversation flex min-w-0 flex-1 flex-col">
         <div className="flex items-center gap-3 border-b border-slate-200 px-6 py-3">
+          <button className="fde-ai-sessions-button" aria-label="打开会话列表" aria-expanded={mobileSessionsOpen} onClick={() => setMobileSessionsOpen(true)}><Menu /></button>
           <div className="input flex h-9 w-36 items-center bg-slate-50 text-xs text-slate-600" aria-label="知识范围">
             {scope === 'project' ? '当前项目' : '全局知识库'}
           </div>
@@ -2071,7 +2075,7 @@ function Chat() {
         <AiErrorBoundary level="section" title="消息区域显示异常" resetKey={convId}>
           <div
             ref={scrollRef}
-            className="flex-1 space-y-6 overflow-y-auto px-6 py-6"
+            className="fde-ai-messages flex-1 space-y-6 overflow-y-auto px-6 py-6"
             onScroll={onConversationScroll}
           >
             {conversationTimeline.length === 0
@@ -2169,7 +2173,7 @@ function Chat() {
           </div>
         </AiErrorBoundary>
 
-        <div className="border-t border-slate-200 px-6 py-4">
+        <div className="fde-ai-composer border-t border-slate-200 px-6 py-4">
           <AiErrorBoundary level="section" title="快捷任务区域显示异常" resetKey={String(sending)}>
             <AiQuickActions
               disabled={scope !== 'project' || !currentSession?.projectId}

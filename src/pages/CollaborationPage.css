@@ -221,3 +221,11 @@ body:has(.fde-collaboration-page) { min-width: 320px; }
   .fde-collaboration-page .fde-collab-meeting { grid-template-columns: 44px minmax(0,1fr); padding: 12px 14px; }
   .fde-collaboration-page .fde-collab-meeting-result { grid-column: 2; justify-items: start; }
 }
+
+@media (max-width: 720px) {
+  .fde-collaboration-page { width: 100%; min-width: 0; overflow-x: clip; }
+  .fde-collaboration-page :is(.fde-collab-tools,.fde-collab-card-head,.fde-collab-calendar-actions) { align-items: stretch; flex-direction: column; }
+  .fde-collaboration-page .fde-collab-time-grid { max-width: 100%; overflow-x: auto; overscroll-behavior-inline: contain; }
+  .fde-collaboration-page .fde-task-table tr { grid-template-columns: minmax(0, 1fr); }
+  .fde-collaboration-page .fde-task-table td { grid-column: auto; }
+}
