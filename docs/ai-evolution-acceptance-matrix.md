@@ -22,7 +22,7 @@
 | AT-14 | PASS | skill evaluation、executor、sample suite、page reviewer 和 comparison 测试验证同输入、硬门禁和可追溯产物；实际 Docker 执行可见/隐藏样本并生成 DOCX、PDF 和页面证据，格式失败保持最终 `FAIL` | 真实模型收益数据保持 `NOT_RUN`，不影响契约验收 |
 | AT-15 | PASS | release policy、skill trial/promotion policy 和 candidate repository 契约验证哈希、修订与批准绑定 | — |
 | AT-16 | PASS | reevaluation base、real Git reevaluation、build artifacts 测试验证基线变化后重新核对 | — |
-| AT-17 | NOT_RUN | release adapter、coordinator、health、recovery、requested rollback 共覆盖激活及回退协议；`accept:build-release` 已验证停机激活、公开读取、回退指针和旧版本恢复，且业务源码未被改写 | 未取得真实服务器发布目标、root 管理的发布配置及部署授权，因此未执行生产发布或真实服务回退 |
+| AT-17 | PASS | 2026-09-15 已在授权服务器完成 root 管理的固定发布目标、独立 publisher、成对构建激活和真实服务回退；回退前后 Web/服务端哈希均改变，旧版与恢复后的当前版本均通过 HTTP 200 健康检查。`accept:build-release` 同时验证停机激活、公开读取、回退指针、旧版本恢复和失败版本保留 | 未代替人工批准任何 AI 候选；首次真实候选仍须在工作台按候选哈希单独批准 |
 | AT-18 | PASS | hook 使用数据库补拉与可见时轮询；自包含浏览器 fixture 已通过真实会话、HTTP、MySQL 的试用提升和回退；完整代码修复运行的 1280px/390px 页面证据已人工复核 | 真实网络断连的浏览器端到端演练可在部署验收时复测 |
 
 EVO-15 的观察入口已实现：经验应用和候选均可提交绑定授权对象的反馈；工作台按 7、30、90 天展示应用率、遵守率和候选通过率，并同时展示分子、分母、样本量及未评估数。当前数据模型不能可靠证明“同一规则再次纠正”或“回归已经确认且观察期完成”，因此重复纠正率和生产回归率明确显示为证据不足，不以反馈条数冒充正式指标。对应验证为 `aiEvolutionApplicationFeedbackUi.test.ts`、`aiEvolutionFeedbackSchema.test.ts` 和 `aiEvolutionMetrics.test.ts`。
