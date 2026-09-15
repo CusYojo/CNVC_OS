@@ -71,7 +71,7 @@ try {
   assert.equal((await getFdeWeeklyPlans(project.id, secretary.id, week)).plans.find(item => item.id === planId)?.sourceChanged, true)
   assert.equal((await listWeeklyReports(secretary.id, week)).reports.find(item => item.id === reportId)?.sourceChanged, true)
   calendar = await listCalendar(secretary.id, weekStartFor((await task(conclusion.taskId)).dueDate!), 'personal')
-  assert.equal(calendar.items.find(item => item.id === conclusion.taskId)?.version, (await task(conclusion.taskId)).version)
+  assert.equal(calendar.items.find(item => item.id === conclusion.taskId)?.sourceVersion, (await task(conclusion.taskId)).version)
   const hidden = (await listCalendar(outsider.id, weekStartFor((await task(conclusion.taskId)).dueDate!), 'company')).items
   assert.ok(!JSON.stringify(hidden).includes(conclusion.taskId)); assert.ok(!hidden.some(item => item.title === '提交立项阶段结论'))
   checks.push('stale-preview-and-concurrent-change-blocked:independent-task-preserved-calendar-single-source-weekly-drafts-stale')
