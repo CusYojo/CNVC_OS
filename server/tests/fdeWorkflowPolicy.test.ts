@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { DEFAULT_FDE_WORKFLOW_POLICY, fdeWorkflowPolicySchema } from '../src/contracts/fdeWorkflowPolicyContract.js'
+import { DEFAULT_FDE_WORKFLOW_POLICY, fdeWorkflowPolicySchema, fdeWorkflowPolicySnapshotSchema } from '../src/contracts/fdeWorkflowPolicyContract.js'
 
 test('FDE default policy preserves investment stages, materials and duties', () => {
   assert.equal(fdeWorkflowPolicySchema.safeParse(DEFAULT_FDE_WORKFLOW_POLICY).success, true)
@@ -35,6 +35,13 @@ test('FDE policy cannot remove baseline material, approval duty or fund gate', (
   const missingFund = structuredClone(DEFAULT_FDE_WORKFLOW_POLICY)
   missingFund.stages[5].requiresFund = false
   assert.equal(fdeWorkflowPolicySchema.safeParse(missingFund).success, false)
+})
+
+test('FDE historical snapshots remain readable without satisfying current baseline', () => {
+  const historical = structuredClone(DEFAULT_FDE_WORKFLOW_POLICY)
+  historical.stages[1].approvals = []
+  assert.equal(fdeWorkflowPolicySnapshotSchema.safeParse(historical).success, true)
+  assert.equal(fdeWorkflowPolicySchema.safeParse(historical).success, false)
 })
 
 test('FDE policy supports stricter materials, waiver rules and allowed cycles', () => {

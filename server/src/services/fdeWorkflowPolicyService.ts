@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { and, desc, eq, sql } from 'drizzle-orm'
 import { db } from '../db/client.js'
 import { fdeWorkflowPolicies, fdeWorkflowPolicyVersions, projects } from '../db/schema.js'
-import { fdeWorkflowPolicySchema, type FdeWorkflowPolicyConfig } from '../contracts/fdeWorkflowPolicyContract.js'
+import { fdeWorkflowPolicySchema, fdeWorkflowPolicySnapshotSchema, type FdeWorkflowPolicyConfig } from '../contracts/fdeWorkflowPolicyContract.js'
 import { createMySqlIdentityRepositoryContext } from '../repositories/index.js'
 import type { SystemAdministrator } from './systemAdministrationService.js'
 
@@ -41,7 +41,7 @@ export async function listFdeWorkflowPolicies() {
   const policies = await db.select().from(fdeWorkflowPolicies).where(sql`${fdeWorkflowPolicies.code} NOT LIKE 'noninvestment:%'`)
   const versions = await db.select({ version: fdeWorkflowPolicyVersions }).from(fdeWorkflowPolicyVersions).innerJoin(fdeWorkflowPolicies, eq(fdeWorkflowPolicies.id, fdeWorkflowPolicyVersions.policyId)).where(sql`${fdeWorkflowPolicies.code} NOT LIKE 'noninvestment:%'`).orderBy(desc(fdeWorkflowPolicyVersions.revision))
   const counts = await db.select({ versionId: projects.workflowPolicyVersionId, total: sql<number>`COUNT(*)` }).from(projects).groupBy(projects.workflowPolicyVersionId)
-  return policies.map((policy) => ({ ...policy, versions: versions.map(row => row.version).filter((version) => version.policyId === policy.id).map((version) => ({ ...version, configuration: fdeWorkflowPolicySchema.parse(version.configuration), boundProjects: Number(counts.find((count) => count.versionId === version.id)?.total ?? 0) })) }))
+  return policies.map((policy) => ({ ...policy, versions: versions.map(row => row.version).filter((version) => version.policyId === policy.id).map((version) => ({ ...version, configuration: fdeWorkflowPolicySnapshotSchema.parse(version.configuration), boundProjects: Number(counts.find((count) => count.versionId === version.id)?.total ?? 0) })) }))
 }
 
 export async function createFdePolicyDraft(policyId: string, input: { sourceVersionId: string; expectedVersion: number; reason: string }, actor: SystemAdministrator) {

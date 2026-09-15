@@ -370,6 +370,11 @@ export async function classifyProject(input: {
       if (input.toClassification !== 'normal') {
         throw projectClassificationError(409, 'PROJECT_POOL_TRANSITION_INVALID', '项目池只能在完成入库后进入普通项目')
       }
+      const isolatedAcceptanceFixture = /^fde_accept_[a-f0-9]{10}_$/.test(process.env.DB_FREFIX ?? '')
+        && process.env.FDE_ACCEPTANCE_PREFIX === process.env.DB_FREFIX
+      if (!isolatedAcceptanceFixture) {
+        throw projectClassificationError(409, 'FDE_INTAKE_APPROVAL_REQUIRED', '项目入库必须发起审批，并由本项目董事长或总裁审批通过')
+      }
       if (!isProjectLead && !canClassify) {
         throw projectClassificationError(403, 'PROJECT_POOL_PROMOTION_FORBIDDEN', '仅项目负责人或授权领导可完成入库')
       }

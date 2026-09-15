@@ -57,15 +57,30 @@ try {
     assert.equal(created.progress, 0)
   })
 
-  const normal = await classifyProject({
+  const acceptancePrefix = process.env.FDE_ACCEPTANCE_PREFIX
+  delete process.env.FDE_ACCEPTANCE_PREFIX
+  const directPromotion = await classifyProject({
     projectId: created.id,
     toClassification: 'normal',
     reason: '入库初筛完成',
     expectedVersion: created.version,
     userId: ownerId,
     requestId: `accept-intake-${marker}`,
+  }).then(() => null, (error) => error)
+  process.env.FDE_ACCEPTANCE_PREFIX = acceptancePrefix
+  check('project-pool-cannot-bypass-intake-approval', () => {
+    assert.equal(directPromotion?.code, 'FDE_INTAKE_APPROVAL_REQUIRED')
   })
-  check('project-lead-completes-intake-without-approval', () => {
+
+  const normal = await classifyProject({
+    projectId: created.id,
+    toClassification: 'normal',
+    reason: '隔离验收夹具模拟已完成入库审批',
+    expectedVersion: created.version,
+    userId: ownerId,
+    requestId: `accept-fixture-intake-${marker}`,
+  })
+  check('isolated-fixture-can-prepare-established-project', () => {
     assert.equal(normal.classification, 'normal')
     assert.equal(normal.stage, '立项')
     assert.equal(normal.stageSource, '入库完成')

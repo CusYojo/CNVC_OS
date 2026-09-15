@@ -20,7 +20,7 @@ const stageDuties: Record<string, FdeApprovalDuty[]> = {
 const duty = z.custom<FdeApprovalDuty>((value) => value === 'boss' || FDE_PROJECT_DUTIES.some((item) => item.code === value))
 const approvalLabel = (value: FdeApprovalDuty) => value === 'boss' ? '董事长/总裁审批' : FDE_PROJECT_DUTIES.find((item) => item.code === value)!.label
 const approvalMode = (value: FdeApprovalDuty) => ['boss', 'finance', 'legal'].includes(value) ? '或签' as const : '会签' as const
-export const fdeWorkflowPolicySchema = z.object({
+export const fdeWorkflowPolicySnapshotSchema = z.object({
   schemaVersion: z.literal(1),
   cycleDays: z.array(z.union([z.literal(15), z.literal(30), z.literal(40)])).min(1).max(3),
   stages: z.array(z.object({
@@ -29,7 +29,8 @@ export const fdeWorkflowPolicySchema = z.object({
     materials: z.array(z.object({ key: z.string().regex(/^[a-z][a-z0-9_]{1,63}$/), label: z.string().trim().min(1).max(100) }).strict()).max(30),
     approvals: z.array(z.object({ duty, name: z.string().trim().min(1).max(100), mode: z.enum(['会签', '或签']) }).strict()).max(12),
   }).strict()).length(9),
-}).strict().superRefine((config, context) => {
+}).strict()
+export const fdeWorkflowPolicySchema = fdeWorkflowPolicySnapshotSchema.superRefine((config, context) => {
   const issue = (message: string) => context.addIssue({ code: 'custom', message })
   if (new Set(config.cycleDays).size !== config.cycleDays.length) issue('周期不可重复')
   FDE_STAGE_REQUIREMENTS.forEach((baseline, index) => {
