@@ -126,12 +126,12 @@ try {
       checks.push('approved-plan-actions-remain-amendable-and-participants-resynchronize')
     }
   }
-  assert.equal(project.lifecycle, 'closed')
+  assert.equal(project.lifecycle, 'active')
   assert.equal(project.progress, 100)
-  const [closedTodo] = await db.select().from(todos).where(eq(todos.id, unfinishedTodoId)).limit(1)
-  assert.equal(closedTodo.status, '已关闭')
+  const [postInvestmentTodo] = await db.select().from(todos).where(eq(todos.id, unfinishedTodoId)).limit(1)
+  assert.equal(postInvestmentTodo.status, '未开始')
   const bindings = await db.select().from(projectStageMaterials).where(eq(projectStageMaterials.projectId, project.id))
   assert.ok(bindings.every((binding) => Boolean(binding.waiverReason) || Boolean(binding.fileId)))
-  checks.push('eight-stage-success-chain', 'applicant-self-approval-denied', 'active-material-snapshot-frozen', 'approved-plan-baseline-locked', 'payment-closes-project-at-100-percent', 'stale-decision-version-rejected', 'direct-stage-bypass-rejected', 'mysql-null-evidence-constraint')
+  checks.push('nine-stage-success-chain', 'applicant-self-approval-denied', 'active-material-snapshot-frozen', 'approved-plan-baseline-locked', 'post-investment-remains-active-at-100-percent', 'stale-decision-version-rejected', 'direct-stage-bypass-rejected', 'mysql-null-evidence-constraint')
   console.log(JSON.stringify({ ok: true, checks }))
 } finally { await pool.end() }
