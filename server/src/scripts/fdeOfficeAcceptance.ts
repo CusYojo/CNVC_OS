@@ -135,9 +135,10 @@ try {
   await denied(actOnOaApprovalRequest({ requestId: cancelled, userId: reviewer.id, action: 'approve', comment: '旧入口不得处理通用办公申请' }), 'OA_BUSINESS_ROUTE_REQUIRED')
   checks.push('FDE-OA-002/009/CONC:real-late-constraint-rollback-request-nodes-notices-legacy-route-denies-office')
   const { id: raceId, definition: raceDefinition } = await draft('报销')
-  const save = { clientRequestId: randomUUID(), expectedVersion: 1, definition: { ...raceDefinition, title: '并发保存只执行一次' } }
+  const raceBaseVersion = await version(raceId)
+  const save = { clientRequestId: randomUUID(), expectedVersion: raceBaseVersion, definition: { ...raceDefinition, title: '并发保存只执行一次' } }
   assert.deepEqual(...await Promise.all([saveOfficeRequest(raceId, author.id, save), saveOfficeRequest(raceId, author.id, save)]))
-  const races = await Promise.allSettled([saveOfficeRequest(raceId, author.id, { ...save, clientRequestId: randomUUID(), expectedVersion: 2 }), saveOfficeRequest(raceId, author.id, { ...save, clientRequestId: randomUUID(), expectedVersion: 2 })])
+  const races = await Promise.allSettled([saveOfficeRequest(raceId, author.id, { ...save, clientRequestId: randomUUID(), expectedVersion: raceBaseVersion + 1 }), saveOfficeRequest(raceId, author.id, { ...save, clientRequestId: randomUUID(), expectedVersion: raceBaseVersion + 1 })])
   assert.equal(races.filter(r => r.status === 'fulfilled').length, 1)
   const stale = await previewOfficeRequest(raceId, author.id)
   const head = (await listOfficePolicies(admin.id)).find(p => p.kind === '报销')!
