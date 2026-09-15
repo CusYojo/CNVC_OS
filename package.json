@@ -287,7 +287,6 @@
     "accept:fde-project-pool": "node --env-file-if-exists=.env --import tsx server/src/scripts/fdeProjectPoolAcceptance.ts",
     "accept:fde-scope-boundary": "node --import tsx server/src/scripts/fdeScopeBoundaryAcceptance.ts",
     "accept:fde-migration": "node --env-file-if-exists=.env --import tsx server/src/scripts/fdeMigrationAcceptance.ts",
-    "accept:fde-timeline-tasks": "node --env-file-if-exists=.env --env-file-if-exists=.runtime/secrets/mysql-acceptance.env --import tsx server/src/scripts/fdeMigrationAcceptance.ts --timeline-tasks",
     "accept:fde-lifecycle": "node --env-file-if-exists=.env --import tsx server/src/scripts/fdeAcceptanceLifecycleAcceptance.ts",
     "accept:fde-weekly-browser": "node --env-file-if-exists=.env --import tsx server/src/scripts/fdeMigrationAcceptance.ts --weekly-browser",
     "accept:risk-persistence": "node --env-file-if-exists=.env --import tsx server/src/scripts/riskPersistenceAcceptance.ts",

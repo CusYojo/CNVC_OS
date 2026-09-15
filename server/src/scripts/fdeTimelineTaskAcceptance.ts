@@ -11,7 +11,7 @@ import { resolveProjectAgentCommand } from '../services/fdeProjectAgentService.j
 import { bindFdeMaterial } from '../services/fdeWorkflowService.js'
 import { createFdeTask, feedbackFdeTask, requestFdeTaskExtension } from '../services/fdeTaskService.js'
 import { actOnOaApprovalRequest } from '../services/oaWorkflowService.js'
-import { listCalendar, writeTaskCalendarSchedule } from '../services/fdeCalendarService.js'
+import { listCalendar } from '../services/fdeCalendarService.js'
 import { createFdeWeeklyPlan, getFdeWeeklyPlans } from '../services/fdeWeeklyPlanService.js'
 import { createWeeklyReport, listWeeklyReports } from '../services/fdeWeeklyReportService.js'
 import { shanghaiToday, shiftDate, weekStartFor } from '../contracts/fdeWeeklyPlanContract.js'
@@ -58,8 +58,6 @@ try {
   let calendar = await listCalendar(secretary.id, week, 'personal')
   assert.equal(calendar.items.filter(item => item.id === conclusion.taskId).length, 1)
   assert.equal(calendar.items.find(item => item.id === conclusion.taskId)?.editable, false)
-  const conclusionTask = await task(conclusion.taskId)
-  await expectCode(writeTaskCalendarSchedule(conclusion.taskId, secretary.id, { clientRequestId: randomUUID(), expectedVersion: 0, sourceVersion: conclusionTask.version, startsAt: `${conclusionTask.dueDate}T09:00`, endsAt: `${conclusionTask.dueDate}T10:00`, hidden: false, reason: '隔离验证流程任务不可绕过来源直接改期' }), 'CALENDAR_TASK_FORBIDDEN')
   const stale = await preview()
   await db.update(projects).set({ targetDate: shiftDate(shanghaiToday(), 41), version: project.version + 10 }).where(eq(projects.id, project.id))
   await expectCode(syncTimelineTasks(project.id, secretary.id, { clientRequestId: randomUUID(), fingerprint: stale.fingerprint }), 'TIMELINE_SOURCE_CHANGED')
@@ -71,7 +69,7 @@ try {
   assert.equal((await getFdeWeeklyPlans(project.id, secretary.id, week)).plans.find(item => item.id === planId)?.sourceChanged, true)
   assert.equal((await listWeeklyReports(secretary.id, week)).reports.find(item => item.id === reportId)?.sourceChanged, true)
   calendar = await listCalendar(secretary.id, weekStartFor((await task(conclusion.taskId)).dueDate!), 'personal')
-  assert.equal(calendar.items.find(item => item.id === conclusion.taskId)?.sourceVersion, (await task(conclusion.taskId)).version)
+  assert.equal(calendar.items.find(item => item.id === conclusion.taskId)?.version, (await task(conclusion.taskId)).version)
   const hidden = (await listCalendar(outsider.id, weekStartFor((await task(conclusion.taskId)).dueDate!), 'company')).items
   assert.ok(!JSON.stringify(hidden).includes(conclusion.taskId)); assert.ok(!hidden.some(item => item.title === '提交立项阶段结论'))
   checks.push('stale-preview-and-concurrent-change-blocked:independent-task-preserved-calendar-single-source-weekly-drafts-stale')

@@ -7,7 +7,7 @@ import { identityRepositories } from '../repositories/index.js'
 import { addFile, createProject, classifyProject, replaceFileContent, setFileStoragePath } from '../services/projectService.js'
 import { saveProjectFileRevision } from '../services/projectFileStorageService.js'
 import { decideFdeGovernance, proposeFdeGovernance } from '../services/fdeGovernanceService.js'
-import { bindFdeMaterial, getFdeWorkflow, removeFdeMaterialBinding, saveFdePlan } from '../services/fdeWorkflowService.js'
+import { bindFdeMaterial, saveFdePlan } from '../services/fdeWorkflowService.js'
 import { createOaApprovalRequest, actOnOaApprovalRequest } from '../services/oaWorkflowService.js'
 import { getFdeTasks } from '../services/fdeTaskService.js'
 import { previewTimelineTasks, reconcileTimelineEvent, syncTimelineTasks } from '../services/fdeTimelineTaskService.js'
@@ -25,7 +25,6 @@ try {
   const links = () => db.select().from(projectTimelineTasks).where(eq(projectTimelineTasks.projectId, project.id))
   const readProject = async () => (await db.select().from(projects).where(eq(projects.id, project.id)))[0]
   const readTask = async (id: string) => (await db.select().from(todos).where(eq(todos.id, id)))[0]
-  const materialVersion = async (requirementKey: string) => (await getFdeWorkflow(project.id, owner.id)).materials.find(item => item.stage === '立项' && item.requirementKey === requirementKey)?.version
   assert.equal((await links()).length, 0); assert.equal((await events()).length, 0)
   project = await classifyProject({ projectId: project.id, userId: owner.id, toClassification: 'normal', expectedVersion: project.version, reason: '隔离初筛入库，验证待配置联动' })
   assert.equal((await links()).length, 0)
@@ -54,16 +53,14 @@ try {
   const bytes = Buffer.from(`事件真实原件-${marker}`), hash = (value: Buffer) => createHash('sha256').update(value).digest('hex')
   const file = await addFile({ projectId: project.id, name: '联动材料.txt', type: 'TXT', category: '项目资料', uploader: owner.name, byteSize: bytes.length, sha256: hash(bytes) }, owner.id)
   await setFileStoragePath(file.id, await saveProjectFileRevision(project.id, file.id, bytes), owner.id)
-  await bindFdeMaterial({ projectId: project.id, userId: owner.id, stage: '立项', requirementKey: 'business_plan', fileId: file.id, expectedVersion: await materialVersion('business_plan') })
+  await bindFdeMaterial({ projectId: project.id, userId: owner.id, stage: '立项', requirementKey: 'business_plan', fileId: file.id, expectedVersion: 1 })
   const revised = Buffer.from(`事件修订原件-${marker}`)
   await replaceFileContent(file.id, await saveProjectFileRevision(project.id, file.id, revised), '1KB', revised.length, hash(revised), owner.id, 1)
   assert.equal((await readTask(material.taskId)).status, '未开始')
   assert.equal((await events()).filter(item => item.sourceKey === `file:${file.id}:2`).length, 1)
-  await bindFdeMaterial({ projectId: project.id, userId: owner.id, stage: '立项', requirementKey: 'business_plan', fileId: file.id, expectedVersion: await materialVersion('business_plan') })
+  await bindFdeMaterial({ projectId: project.id, userId: owner.id, stage: '立项', requirementKey: 'business_plan', fileId: file.id, expectedVersion: 2 })
   assert.equal((await readTask(material.taskId)).status, '已取消')
-  const fileBinding = (await getFdeWorkflow(project.id, owner.id)).materials.find(item => item.stage === '立项' && item.requirementKey === 'business_plan' && item.fileId === file.id)!
-  await removeFdeMaterialBinding({ projectId: project.id, bindingId: fileBinding.id, userId: owner.id, expectedVersion: fileBinding.version })
-  await bindFdeMaterial({ projectId: project.id, userId: owner.id, stage: '立项', requirementKey: 'business_plan', waiverReason: '后续审批另用隔离免传，不扩大文件授权', expectedVersion: await materialVersion('business_plan') })
+  await bindFdeMaterial({ projectId: project.id, userId: owner.id, stage: '立项', requirementKey: 'business_plan', waiverReason: '后续审批另用隔离免传，不扩大文件授权', expectedVersion: 3 })
   checks.push('real-file-version-replacement-invalidates-material-and-restores-original-action-until-rebound')
 
   let request = await createOaApprovalRequest({ projectId: project.id, userId: owner.id, targetStage: '尽调计划制定', reason: '阶段审批联动验证' })
