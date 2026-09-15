@@ -114,7 +114,7 @@ try {
   } finally { await db.insert(userRoles).values(savedRoles) }
   checks.push('revoked-assignee-role-invalidates-preview-and-blocks-new-work-without-implicit-regrant')
 
-  await db.update(projects).set({ stage: '启动尽调' }).where(eq(projects.id, project.id))
+  await db.update(projects).set({ stage: '尽调' }).where(eq(projects.id, project.id))
   const missingDuties = await preview(); assert.ok(missingDuties.issues.some(item => item.includes('财务')))
   await expectCode(syncTimelineTasks(project.id, secretary.id, { clientRequestId: randomUUID(), fingerprint: missingDuties.fingerprint }), 'TIMELINE_ASSIGNEE_REQUIRED')
   const unknown = randomUUID(); await resolveProjectAgentCommand(project.id, secretary.id, { clientRequestId: unknown })

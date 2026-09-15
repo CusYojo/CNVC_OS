@@ -11,7 +11,7 @@ import { formatShanghaiDateTime } from '../lib/dateTime'
 import { canDirectlyDeleteProject } from '../../server/src/contracts/adminRoleContract'
 import { fetchProjectList, type ProjectListCounts } from '../services/projectListApi'
 
-const stages: ProjectStage[] = ['入库', '立项', '尽调计划制定', '尽调计划审核', '启动尽调', '内核', '投决', '打款', '已 Close', '线索', '初筛', '尽调', '上会', '投后', '退出', '放弃']
+const stages: ProjectStage[] = ['入库', '立项', '尽调计划制定', '尽调计划审核', '尽调', '内核', '投决', '打款', '已 Close', '线索', '初筛', '上会', '投后', '退出', '放弃']
 const viewCopy: Record<ProjectClassification, { title: string; description: string }> = {
   pool: { title: '项目池', description: '已由专属项目转换或授权登记、等待完成入库初筛的项目。' },
   normal: { title: '普通项目', description: '已完成入库并进入正式投资流程的项目。' },

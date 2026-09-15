@@ -224,9 +224,9 @@ async function syncTargetProject(sourceDirectory: string) {
       await new Promise((resolve) => setTimeout(resolve, 2_000))
     }
     const materialRule = (name: string): { stage: string; requirementKey: string } | null => {
-      if (/财务尽职调查|求真专审|财务制度/.test(name)) return { stage: '启动尽调', requirementKey: 'financial_dd' }
-      if (/工商材料|营业执照|公司章程|股东协议|增资协议|股权转让|竞业协议|保密管理/.test(name)) return { stage: '启动尽调', requirementKey: 'legal_dd' }
-      if (/访谈|花名册|采购|产品与技术|科研实力|杨林|刘岩鑫|王剑雄|董海巍|elsaddik|萨院士|白皮书/.test(name)) return { stage: '启动尽调', requirementKey: 'business_dd' }
+      if (/财务尽职调查|求真专审|财务制度/.test(name)) return { stage: '尽调', requirementKey: 'financial_dd' }
+      if (/工商材料|营业执照|公司章程|股东协议|增资协议|股权转让|竞业协议|保密管理/.test(name)) return { stage: '尽调', requirementKey: 'legal_dd' }
+      if (/访谈|花名册|采购|产品与技术|科研实力|杨林|刘岩鑫|王剑雄|董海巍|elsaddik|萨院士|白皮书/.test(name)) return { stage: '尽调', requirementKey: 'business_dd' }
       if (/交流纪要|交流笔记|CTO访谈会议纪要/.test(name)) return { stage: '立项', requirementKey: 'initial_meeting' }
       if (/项目介绍|科技介绍|空间智能解决方案|长期发展战略/.test(name)) return { stage: '立项', requirementKey: 'business_plan' }
       if (/尽调报告/.test(name)) return { stage: '内核', requirementKey: 'memo_draft' }

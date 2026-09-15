@@ -123,7 +123,7 @@ export function FdeWorkflowPanel({ project, files, mode = 'workflow', onChanged,
   const requiredDuties = [['concerned_leader', '老板'], ['secretary', '项目经理'], ['legal', '法务'], ['finance', '财务']] as const
   const missingDuties = requiredDuties.filter(([duty]) => !data.duties.some(item => item.duty === duty)).map(([, label]) => label)
   const peopleConfigured = Boolean(project.ownerUserId) && missingDuties.length === 0
-  const planRequired = ['尽调计划审核', '启动尽调', '内核', '投决', '打款'].includes(stage)
+  const planRequired = ['尽调计划审核', '尽调', '内核', '投决', '打款'].includes(stage)
   const planConfirmed = data.plan?.status === 'locked'
   const blockers = [
     ...(project.classification === 'pool' ? ['项目尚未入库'] : []),

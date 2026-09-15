@@ -1006,6 +1006,18 @@ export const projectRecords = mysqlTable('project_records', {
   createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`), updatedAt: timestampColumn('updated_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
 }, t => ({ source: uniqueIndex('uq_project_record_source').on(t.sourceKey), list: index('idx_project_record_list').on(t.projectId, t.status, t.updatedAt) }))
 
+export const projectPostInvestmentUpdates = mysqlTable('project_post_investment_updates', {
+  id: uuidPrimaryKey('id'), projectId: uuidColumn('project_id').notNull().references(() => projects.id, { onDelete: 'restrict' }),
+  authorId: uuidColumn('author_id').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  content: text('content').notNull(), createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, t => ({ byProject: index('idx_post_investment_updates_project').on(t.projectId, t.createdAt) }))
+
+export const projectPostInvestmentUpdateFiles = mysqlTable('project_post_investment_update_files', {
+  updateId: uuidColumn('update_id').notNull().references(() => projectPostInvestmentUpdates.id, { onDelete: 'cascade' }),
+  fileId: uuidColumn('file_id').notNull().references(() => projectFiles.id, { onDelete: 'restrict' }),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, t => ({ uniqueFile: uniqueIndex('uq_post_investment_update_file').on(t.updateId, t.fileId) }))
+
 export const projectRecordComments = mysqlTable('project_record_comments', {
   id: uuidPrimaryKey('id'), recordId: uuidColumn('record_id').notNull().references(() => projectRecords.id, { onDelete: 'restrict' }),
   authorId: uuidColumn('author_id').notNull().references(() => users.id, { onDelete: 'restrict' }), content: text('content').notNull(),

@@ -44,7 +44,7 @@ async function run<T>(projectId: string, userId: string, write: boolean, operati
 async function recipients(tx: FileTx, scope: Context) {
   const { project, duties, actor } = scope
   const selected = new Set([project.ownerUserId, ...duties.filter(row => row.duty === 'concerned_leader').map(row => row.userId)].filter(Boolean) as string[])
-  const seniorStages = ['启动尽调', '内核', '投决', '打款']
+  const seniorStages = ['尽调', '内核', '投决', '打款']
   if (seniorStages.includes(project.stage)) {
     for (const [duty, code] of [['chairman', 'FDE_CHAIRMAN'], ['president', 'FDE_PRESIDENT']] as const) {
       const assigned = duties.filter(row => row.duty === duty)

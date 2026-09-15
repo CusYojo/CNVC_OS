@@ -101,7 +101,7 @@ try {
   await proposeFdeGovernance({ projectId: project.id, userId: accounts.otherOwner.id, ownerUserId: accounts.otherOwner.id, expectedVersion: 4, reason: '原负责人仅作为普通成员参与', assignments: [...nextAssignments, { duty: 'member', userId: accounts.owner.id }] })
   assert.ok(await getAccessibleProject(accounts.owner.id, project.id))
   await expectCode(saveFdePlan({ projectId: project.id, userId: accounts.owner.id, cycleDays: 30, targetDate: '2027-01-01' }), 'FDE_OWNER_REQUIRED')
-  await expectCode(bindFdeMaterial({ projectId: project.id, userId: accounts.owner.id, stage: '启动尽调', requirementKey: 'business_dd', waiverReason: '原创建者不再具有免传权限' }), 'FDE_OWNER_REQUIRED')
+  await expectCode(bindFdeMaterial({ projectId: project.id, userId: accounts.owner.id, stage: '尽调', requirementKey: 'business_dd', waiverReason: '原创建者不再具有免传权限' }), 'FDE_OWNER_REQUIRED')
   checks.push('former-owner-as-member-cannot-edit-plan-or-waive-materials')
 
   const administrator = { userId: accounts.admin.id, userName: accounts.admin.name }

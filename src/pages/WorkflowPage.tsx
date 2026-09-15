@@ -11,7 +11,7 @@ import { FdeTypePolicyPanel } from '../components/FdeTypePolicyPanel'
 import { approvalCenterReturnPath } from '../../server/src/contracts/fdeApprovalCenterContract'
 import { safeVisibleText } from '../../server/src/contracts/textIntegrityContract'
 
-const workflowStages: ProjectStage[] = ['入库', '立项', '尽调计划制定', '尽调计划审核', '启动尽调', '内核', '投决', '打款']
+const workflowStages: ProjectStage[] = ['入库', '立项', '尽调计划制定', '尽调计划审核', '尽调', '内核', '投决', '打款', '投后']
 const legacyWorkflowStages: ProjectStage[] = ['线索', '初筛', '立项', '尽调', '上会', '投决', '投后', '退出']
 const approvalTone = (status: ApprovalRequest['status']) => status === '已通过' ? 'green' : status === '审批中' ? 'blue' : status === '已退回' ? 'amber' : status === '已拒绝' ? 'red' : 'slate'
 const taskTone = (status: string) => status === '已完成' ? 'green' : status === '进行中' || status === '待验收' ? 'blue' : status === '已退回' ? 'amber' : status === '已取消' ? 'slate' : 'slate'
@@ -37,14 +37,14 @@ const readableDateTime = (value: unknown) => {
   }).format(new Date(timestamp)).replace(/\//g, '-')
 }
 const standardApprovalChain = [
-  ['入库 → 立项', '项目负责人完成初筛（无审批）'],
-  ['立项 → 计划制定', '关注领导审批'],
-  ['计划制定 → 计划审核', '负责人提交后进入审核'],
-  ['计划审核 → 启动尽调', '总裁审核计划'],
-  ['启动尽调 → 内核', '财务复核', '法务复核', '关注领导'],
-  ['内核 → 投决', '财务复核', '法务复核', '董事长', '总裁'],
-  ['投决 → 打款', '董事长投决', '总裁投决'],
-  ['打款 → 完成交割', '财务复核', '法务复核', '董事长', '总裁'],
+  ['入库 → 立项', '董事长/总裁审批（任意一人）'],
+  ['立项 → 计划制定', '投资项目组任意成员制定计划（无审批）'],
+  ['计划制定 → 计划审核', '投资项目组任意成员提交计划'],
+  ['计划审核 → 尽调', '董事长/总裁审批（任意一人）'],
+  ['尽调 → 内核', '董事长/总裁审批（任意一人）'],
+  ['内核 → 投决', '财务审批 → 法务审批 → 董事长/总裁审批（任意一人）'],
+  ['投决 → 打款', '董事长审批 → 总裁审批（两人均需通过）'],
+  ['打款 → 完成交割', '财务审批'],
 ]
 
 function WorkflowStageRail({ project, pending }: { project: Project; pending?: ApprovalRequest }) {

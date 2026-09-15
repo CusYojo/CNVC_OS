@@ -93,14 +93,14 @@ try {
   assert.equal((await readTask(stageConclusion.taskId)).status, '未开始')
   request = (await actOnOaApprovalRequest({ requestId: request.id, userId: owner.id, expectedVersion: request.lockVersion, action: 'resubmit', comment: '重新提交原计划验证恢复' })).request
   assert.equal((await readTask(stageConclusion.taskId)).status, '已取消')
-  await approveAll(); assert.equal((await readProject()).stage, '启动尽调')
+  await approveAll(); assert.equal((await readProject()).stage, '尽调')
   assert.ok((await links()).some(item => item.actionKey === 'team_formal'))
   checks.push('plan-save-submit-return-resubmit-final-approval-reconcile-and-reuse-stable-action-ids')
 
   const savedRoles = await db.select().from(userRoles).where(eq(userRoles.userId, secretary.id))
   await db.delete(userRoles).where(eq(userRoles.userId, secretary.id))
   try {
-    await bindFdeMaterial({ projectId: project.id, userId: owner.id, stage: '启动尽调', requirementKey: 'business_dd', waiverReason: '缺岗时保存材料但不非法分配行动' })
+    await bindFdeMaterial({ projectId: project.id, userId: owner.id, stage: '尽调', requirementKey: 'business_dd', waiverReason: '缺岗时保存材料但不非法分配行动' })
     assert.equal((await getFdeTasks(project.id, owner.id)).timelinePending.count, 1)
     assert.equal((await db.select().from(userRoles).where(eq(userRoles.userId, secretary.id))).length, 0)
   } finally { await db.insert(userRoles).values(savedRoles) }

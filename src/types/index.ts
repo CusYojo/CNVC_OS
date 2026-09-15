@@ -1,5 +1,5 @@
 export type ProjectStage =
-  | '入库' | '立项' | '尽调计划制定' | '尽调计划审核' | '启动尽调' | '内核' | '投决' | '打款' | '已 Close'
+  | '入库' | '立项' | '尽调计划制定' | '尽调计划审核' | '尽调' | '内核' | '投决' | '打款' | '投后' | '已 Close'
   | '线索' | '初筛' | '尽调' | '上会' | '投后' | '退出' | '放弃'
 export type ProjectClassification = 'pool' | 'normal' | 'key'
 export type ProjectLifecycle = 'active' | 'closed' | 'archived' | 'deleted'

@@ -34,8 +34,11 @@ import { actOnProjectRecord, commentProjectRecord, createProjectRecord, getProje
 import { actOnFdeFile, getFdeFile, listFdeFiles, setFdeFilePermissions } from '../services/fdeFileService.js'
 import { requireProjectFileAccess, requireProjectFileUpload } from '../services/projectFileAccessService.js'
 import { createMaterialSubmission, decideMaterialSubmission, getMaterialContext, getMaterialOriginal, getMaterialSubmission, listMaterialInbox, listMaterialSubmissions, readMaterialSubmission, resolveMaterialRequest, withdrawMaterialSubmission } from '../services/fdeMaterialService.js'
+import { createPostInvestmentUpdate, listPostInvestmentUpdates } from '../services/fdePostInvestmentService.js'
 
 export const projectsRouter = Router()
+projectsRouter.get('/:id/post-investment-updates', async (req: AuthedRequest, res, next) => { try { res.json({ list: await listPostInvestmentUpdates(routeId(req.params.id), req.user!.uid) }) } catch (error) { next(error) } })
+projectsRouter.post('/:id/post-investment-updates', async (req: AuthedRequest, res, next) => { try { res.status(201).json(await createPostInvestmentUpdate({ projectId: routeId(req.params.id), userId: req.user!.uid, content: z.string().trim().min(1).parse(req.body.content), fileIds: z.array(z.string().uuid()).default([]).parse(req.body.fileIds), leaderIds: z.array(z.string().uuid()).default([]).parse(req.body.leaderIds) })) } catch (error) { next(error) } })
 const routeId = (value: string | string[]) => z.string().min(1).parse(value)
 
 projectsRouter.use('/:id/type-execution', (_req, res, next) => { res.set('Cache-Control', 'private, no-store'); res.set('X-Content-Type-Options', 'nosniff'); next() })

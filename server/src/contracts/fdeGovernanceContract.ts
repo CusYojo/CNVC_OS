@@ -20,5 +20,8 @@ export const FDE_PROJECT_DUTIES = [
   { code: 'president', label: '总裁/计划审核职责', eligible: ['institution_leader'] },
 ] as const
 export type FdeProjectDuty = typeof FDE_PROJECT_DUTIES[number]['code']
+// `boss` is a workflow-only alias for the project's chairman and president.
+// It must never be persisted in project_duty_assignments.
+export type FdeApprovalDuty = FdeProjectDuty | 'boss'
 export type FdeDutyAssignment = { duty: FdeProjectDuty; userId: string }
 export const FDE_LEADERSHIP_DUTIES: readonly FdeProjectDuty[] = ['concerned_leader', 'executive_lead', 'chairman', 'president']

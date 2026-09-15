@@ -12,7 +12,7 @@ export function timelineTaskProposals(stage: string, date: string, missing: Arra
   if (stage === '尽调计划审核') return [] // The approval itself is the system-generated action.
   const materials = missing.map((item, index) => make(`material:${item.key}`, `补齐${item.label}`, /财务/.test(item.label) ? 'finance' : /法律|法务|合规|条款/.test(item.label) ? 'legal' : index ? 'owner' : 'secretary', Math.max(1, missing.length - index), '18:00', `上传并关联“${item.label}”，完成${stage}准入核验`))
   const conclusion = make('conclusion', `提交${stage}阶段结论`, 'secretary', 0, '12:00', `完成${stage}材料核验并提交阶段结论`, true)
-  const meetings = stage === '启动尽调' ? [make('team_formal', '核心团队正式会面', 'secretary', 5, '16:00', '两位领导参与核心团队交流，形成团队判断纪要', true, true), make('team_informal', '核心团队非正式交流', 'secretary', 3, '19:00', '结合深度交流补充团队韧性与价值观判断', true, true)]
+  const meetings = stage === '尽调' ? [make('team_formal', '核心团队正式会面', 'secretary', 5, '16:00', '两位领导参与核心团队交流，形成团队判断纪要', true, true), make('team_informal', '核心团队非正式交流', 'secretary', 3, '19:00', '结合深度交流补充团队韧性与价值观判断', true, true)]
     : leadership ? [make('leadership_review', `完成${stage}阶段领导复核`, 'secretary', 0, '16:00', '取得本阶段有效领导职责的意见并形成可追溯结论', true, true)] : []
   return [...materials, conclusion, ...meetings]
 }
