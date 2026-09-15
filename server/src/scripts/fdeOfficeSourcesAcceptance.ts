@@ -15,6 +15,7 @@ import { saveOfficeRequest, previewOfficeRequest, actOnOfficeRequest, getOfficeR
 import { listCalendar } from '../services/fdeCalendarService.js'
 import { createWeeklyReport, collectWeeklyReportFacts, listWeeklyReports, actOnWeeklyReport, weeklyReportRecipients, readWeeklyReport } from '../services/fdeWeeklyReportService.js'
 import { canReadOfficeSnapshot, readableOfficeSource } from '../services/fdeOfficeSourcesService.js'
+import { createProject } from '../services/projectService.js'
 
 assert.match(process.env.DB_FREFIX ?? '', /^fde_accept_[a-f0-9]{10}_$/)
 assert.equal(process.env.DB_FREFIX, process.env.FDE_ACCEPTANCE_PREFIX)
@@ -27,6 +28,8 @@ try {
   const [admin, author, reviewer, traveler, outsider] = people
   await db.insert(users).values(people)
   for (const p of people) await identityRepositories.users.synchronizeAdministrationBindings(p.id, p.role, p.department)
+  const officeProject = await createProject({ name: `办公来源关联项目-${marker}`, owner: author.name, ownerUserId: author.id }, author.id)
+  await db.insert(projectMembers).values({ projectId: officeProject.id, userId: reviewer.id, memberRole: 'collaborator', sourceName: reviewer.name })
   const role = (await db.select().from(userRoles).where(eq(userRoles.userId, reviewer.id)))[0].roleId
   for (const kind of officeKinds) {
     const id = randomUUID(), saved = await saveOfficePolicy(id, admin.id, { clientRequestId: randomUUID(), expectedVersion: 0, reason: '隔离办公来源政策，不是正式规则', configuration: { kind, requiredFields: [], attachmentRequired: false, rejectResubmission: true, routes: [{ key: 'default', when: {}, nodes: [{ key: 'finance', name: '独立财务审核', roleIds: [role], fixedUserIds: [reviewer.id], scope: 'institution', mode: '或签', allowTransfer: true }] }] } })
@@ -34,10 +37,17 @@ try {
     await publishOfficePolicy(id, admin.id, { clientRequestId: randomUUID(), expectedVersion: saved.version, expectedPolicyVersion: head.version, reason: '发布隔离办公来源规则' })
   }
   const create = async (details: unknown, title: string, projectId: string | null = null) => {
-    const id = randomUUID(); await saveOfficeRequest(id, author.id, { clientRequestId: randomUUID(), expectedVersion: 0, definition: { title: `${title}-${marker}`, reason: '敏感事由不能经日历或周报扩权泄露', projectId, priority: '普通', attachmentIds: [], details } }); return id
+    const id = randomUUID(), definition = { title: `${title}-${marker}`, reason: '敏感事由不能经日历或周报扩权泄露', projectId, priority: '普通' as const, attachmentIds: [], details }
+    await saveOfficeRequest(id, author.id, { clientRequestId: randomUUID(), expectedVersion: 0, definition })
+    if ((details as { kind?: string }).kind === '报销') {
+      const attachmentId = randomUUID()
+      await uploadOfficeAttachment(id, attachmentId, author.id, { clientRequestId: randomUUID(), expectedVersion: 1, name: '来源报销发票.pdf', dataBase64: Buffer.from('%PDF-1.4\n% isolated source fixture\n%%EOF').toString('base64'), purpose: 'application', reason: '准备来源报销材料' })
+      await saveOfficeRequest(id, author.id, { clientRequestId: randomUUID(), expectedVersion: 2, definition: { ...definition, attachmentIds: [attachmentId], details: { kind: '报销', currency: 'CNY', amount: '10', projectExplanation: '隔离来源报销事项说明', items: [{ id: randomUUID(), date: shanghaiToday(), category: '其他', description: '隔离来源费用', amount: '10', invoiceNumber: `SRC-${marker}`, attachmentId }] } } })
+    }
+    return id
   }
   const act = async (id: string, uid: string, action: string) => { const preview = action === 'submit' ? await previewOfficeRequest(id, author.id) : null; return actOnOfficeRequest(id, uid, { clientRequestId: randomUUID(), expectedVersion: (await getOfficeRequest(id, author.id)).version, action, reason: '真实执行隔离审批决定', ...(preview ? { expectedPolicyVersionId: preview.policyVersionId, expectedRouteHash: preview.routeHash, confirmAttachmentSharing: true } : {}) }) }
-  const travel = await create({ kind: '出差', travelerIds: [author.id, traveler.id], startDate: shiftDate(week, -1), endDate: week }, '跨周获批行程')
+  const travel = await create({ kind: '出差', travelerIds: [author.id, traveler.id], startDate: shiftDate(week, -1), endDate: week }, '跨周获批行程', officeProject.id)
   const leave = await create({ kind: '请假', startAt: `${shiftDate(week, 1)}T09:00`, endAt: `${shiftDate(week, 1)}T10:30` }, '私人请假')
   assert.ok(!(await listCalendar(author.id, week, 'personal')).items.some(i => i.id === travel || i.id === leave))
   await act(travel, author.id, 'submit'); await act(leave, author.id, 'submit')
@@ -58,7 +68,7 @@ try {
     assert.ok(!data.items.some(i => i.title.includes(marker))); assert.ok(data.items.some(i => i.source === 'busy' && !i.id && !i.target))
   }
   checks.push('same-name-outsider-admin-and-traveler-without-application-access-see-only-busy-no-auto-grant')
-  const unprojected = await create({ kind: '出差' }, '缺少行程不可虚构')
+  const unprojected = await create({ kind: '出差' }, '缺少行程不可虚构', officeProject.id)
   await act(unprojected, author.id, 'submit'); await act(unprojected, reviewer.id, 'approve')
   assert.ok(!(await listCalendar(author.id, week, 'personal')).items.some(i => i.id === unprojected))
   const boundary = await create({ kind: '请假', startAt: `${shiftDate(week, -1)}T23:00`, endAt: `${week}T00:00` }, '边界外请假')
