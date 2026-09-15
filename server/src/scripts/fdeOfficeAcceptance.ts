@@ -14,6 +14,7 @@ import { actOnOaApprovalRequest, listOaApprovalRequests } from '../services/oaWo
 import { listApprovalCenter } from '../services/fdeApprovalCenterService.js'
 import { seedApprovalCenterFixture } from './fdeApprovalCenterFixture.js'
 import { createProject } from '../services/projectService.js'
+import { shanghaiToday } from '../contracts/fdeWeeklyPlanContract.js'
 
 assert.match(process.env.DB_FREFIX ?? '', /^fde_accept_[a-f0-9]{10}_$/)
 assert.equal(process.env.FDE_ACCEPTANCE_PREFIX, process.env.DB_FREFIX)
@@ -50,6 +51,13 @@ try {
   const draft = async (kind: typeof officeKinds[number]) => {
     const id = randomUUID(), definition = officeDefinition.parse({ title: `${kind}-${marker}`, reason: '完整合成测试申请理由', projectId: kind === '出差' ? officeProject.id : null, priority: '普通', details: { kind }, attachmentIds: [] })
     await saveOfficeRequest(id, author.id, { clientRequestId: randomUUID(), expectedVersion: 0, definition })
+    if (kind === '报销') {
+      const attachmentId = randomUUID()
+      await uploadOfficeAttachment(id, attachmentId, author.id, { clientRequestId: randomUUID(), expectedVersion: 1, name: '报销发票.txt', dataBase64: Buffer.from('隔离报销发票').toString('base64'), purpose: 'application', reason: '准备报销验收材料' })
+      const expenseDefinition = officeDefinition.parse({ ...definition, attachmentIds: [attachmentId], details: { kind, currency: 'CNY', amount: '10', projectExplanation: '隔离测试报销事项说明', items: [{ id: randomUUID(), date: shanghaiToday(), category: '其他', description: '隔离测试费用', amount: '10', invoiceNumber: `INV-${marker}`, attachmentId }] } })
+      await saveOfficeRequest(id, author.id, { clientRequestId: randomUUID(), expectedVersion: 2, definition: expenseDefinition })
+      return { id, definition: expenseDefinition }
+    }
     return { id, definition }
   }
   const version = async (id: string) => (await getOfficeRequest(id, author.id)).version
