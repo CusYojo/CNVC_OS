@@ -7,7 +7,7 @@ import { identityRepositories } from '../repositories/index.js'
 import { addFile, createProject, classifyProject, replaceFileContent, setFileStoragePath } from '../services/projectService.js'
 import { saveProjectFileRevision } from '../services/projectFileStorageService.js'
 import { decideFdeGovernance, proposeFdeGovernance } from '../services/fdeGovernanceService.js'
-import { bindFdeMaterial, getFdeWorkflow, saveFdePlan } from '../services/fdeWorkflowService.js'
+import { bindFdeMaterial, getFdeWorkflow, removeFdeMaterialBinding, saveFdePlan } from '../services/fdeWorkflowService.js'
 import { createOaApprovalRequest, actOnOaApprovalRequest } from '../services/oaWorkflowService.js'
 import { getFdeTasks } from '../services/fdeTaskService.js'
 import { previewTimelineTasks, reconcileTimelineEvent, syncTimelineTasks } from '../services/fdeTimelineTaskService.js'
@@ -61,6 +61,8 @@ try {
   assert.equal((await events()).filter(item => item.sourceKey === `file:${file.id}:2`).length, 1)
   await bindFdeMaterial({ projectId: project.id, userId: owner.id, stage: '立项', requirementKey: 'business_plan', fileId: file.id, expectedVersion: await materialVersion('business_plan') })
   assert.equal((await readTask(material.taskId)).status, '已取消')
+  const fileBinding = (await getFdeWorkflow(project.id, owner.id)).materials.find(item => item.stage === '立项' && item.requirementKey === 'business_plan' && item.fileId === file.id)!
+  await removeFdeMaterialBinding({ projectId: project.id, bindingId: fileBinding.id, userId: owner.id, expectedVersion: fileBinding.version })
   await bindFdeMaterial({ projectId: project.id, userId: owner.id, stage: '立项', requirementKey: 'business_plan', waiverReason: '后续审批另用隔离免传，不扩大文件授权', expectedVersion: await materialVersion('business_plan') })
   checks.push('real-file-version-replacement-invalidates-material-and-restores-original-action-until-rebound')
 
