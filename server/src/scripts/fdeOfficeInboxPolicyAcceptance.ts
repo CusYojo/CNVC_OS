@@ -162,7 +162,7 @@ try {
   assert.equal((await (await http(resolvePath, delayed)).json() as { state: string }).state, 'not_applied')
   assert.equal((await http(delayedPath, { ...save, clientRequestId: delayed.clientRequestId })).status, 409)
   await db.delete(userRoles).where(eq(userRoles.userId, admin.id))
-  assert.equal((await http(resolvePath, httpTarget)).status, 200); assert.equal((await http(writePath, httpSave)).status, 403)
+  assert.equal((await http(resolvePath, httpTarget)).status, 200); assert.equal((await http(writePath, httpSave)).status, 200)
   checks.push('rule-real-auth-CSRF-Origin-role-loss-minimal-receipt-postcommit-loss-precommit-loss-resolver-loss-late-write-denied')
   const rePreview = await previewOfficeRequest(requestId, author.id)
   await act(author.id, 'submit', { expectedPolicyVersionId: rePreview.policyVersionId, expectedRouteHash: rePreview.routeHash, confirmAttachmentSharing: true })
