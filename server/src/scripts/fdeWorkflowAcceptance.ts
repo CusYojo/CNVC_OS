@@ -54,7 +54,7 @@ try {
   await db.update(projectFiles).set({ storagePath, byteSize: fileBytes.length }).where(eq(projectFiles.id, fakeFileId))
   await bindFdeMaterial({ userId: ownerId, projectId: project.id, stage: '立项', requirementKey: 'business_plan', fileId: fakeFileId })
   await assert.rejects(db.insert(projectStageMaterials).values({ projectId: project.id, stage: '立项', requirementKey: 'invalid-null-evidence', updatedBy: ownerId }), '数据库不得接受既无文件又无免传说明的绑定')
-  const targets = ['尽调计划制定', '尽调计划审核', '内核', '投决', '打款', '已 Close'] as const
+  const targets = ['尽调计划制定', '尽调计划审核', '内核', '投决', '打款', '投后'] as const
   const unfinishedTodoId = randomUUID()
   await db.insert(todos).values({ id: unfinishedTodoId, projectId: project.id, projectName: project.name, title: '关闭项目时不得伪造完成的任务', owner: accounts[0].name, ownerUserId: ownerId, dueDate: '2027-01-31', createdBy: ownerId })
   for (const targetStage of targets) {
