@@ -13,6 +13,7 @@ CREATE TABLE `sbl_ai_evolution_skill_versions` (
   FOREIGN KEY (`candidate_id`) REFERENCES `sbl_ai_evolution_candidates` (`id`),
   UNIQUE KEY `uq_evo_skill_content` (`capability_id`, `content_hash`, `package_hash`)
 );
+--> statement-breakpoint
 CREATE TABLE `sbl_ai_evolution_skill_bindings` (
   `id` varchar(36) NOT NULL PRIMARY KEY,
   `capability_id` varchar(36) NOT NULL,
@@ -29,6 +30,7 @@ CREATE TABLE `sbl_ai_evolution_skill_bindings` (
   FOREIGN KEY (`fallback_version_id`) REFERENCES `sbl_ai_evolution_skill_versions` (`id`),
   UNIQUE KEY `uq_evo_skill_scope` (`capability_id`, `scope_type`, `scope_key`)
 );
+--> statement-breakpoint
 CREATE TABLE `sbl_ai_evolution_skill_binding_changes` (
   `id` varchar(36) NOT NULL PRIMARY KEY,
   `binding_id` varchar(36) NOT NULL,
