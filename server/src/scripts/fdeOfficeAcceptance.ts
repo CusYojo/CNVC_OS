@@ -22,8 +22,8 @@ const checks: string[] = [], marker = randomUUID().slice(0, 8)
 let server: Server | undefined
 const denied = async (work: Promise<unknown>, code: string) => { const error = await work.then(() => null, e => e); assert.equal(error?.code, code, error?.message ?? 'unexpected success') }
 try {
-  const people = ['投资经理', '财务', '财务', '董事长', '系统管理员', '投资经理'].map((role, i) => ({ id: randomUUID(), name: `办公-${marker}-${i === 5 ? 0 : i}`, role, email: `office-${marker}-${i}@example.invalid`, department: `OA验收-${marker}`, passwordHash: 'not-a-login-password' }))
-  const [author, reviewer, backup, leader, admin, stranger] = people
+  const people = ['投资经理', '财务', '财务', '董事长', '系统管理员', '投资经理', '法务'].map((role, i) => ({ id: randomUUID(), name: `办公-${marker}-${i === 5 ? 0 : i}`, role, email: `office-${marker}-${i}@example.invalid`, department: `OA验收-${marker}`, passwordHash: 'not-a-login-password' }))
+  const [author, reviewer, backup, leader, admin, stranger, legal] = people
   await db.insert(users).values(people)
   for (const user of people) await identityRepositories.users.synchronizeAdministrationBindings(user.id, user.role, user.department)
   const roleId = async (uid: string) => (await db.select().from(userRoles).where(eq(userRoles.userId, uid)))[0].roleId
@@ -44,7 +44,7 @@ try {
   const officeProject = await createProject(
     { name: `办公关联项目-${marker}` },
     author.id,
-    { ownerUserId: author.id, assignments: [{ duty: 'finance', userId: reviewer.id }, { duty: 'boss', userId: leader.id }] },
+    { ownerUserId: author.id, assignments: [{ duty: 'project_manager', userId: author.id }, { duty: 'finance', userId: reviewer.id }, { duty: 'legal', userId: legal.id }, { duty: 'boss', userId: leader.id }] },
   )
   const projectCount = (await db.select({ value: count() }).from(projects))[0].value
   const draft = async (kind: typeof officeKinds[number]) => {
