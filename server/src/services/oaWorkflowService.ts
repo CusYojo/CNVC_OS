@@ -142,6 +142,7 @@ function isDuplicateKeyError(error: unknown) {
 
 function approvalType(fromStage: ProjectStage, targetStage: ProjectStage): ApprovalType {
   if (targetStage === '放弃') return '项目终止审批'
+  if (fromStage === '入库' && targetStage === '立项') return '立项审批'
   if (fromStage === '立项' && targetStage === '尽调计划制定') return '立项审批'
   if (fromStage === '尽调计划制定' && targetStage === '尽调计划审核') return '尽调计划审核'
   if (fromStage === '尽调计划审核' && targetStage === '尽调') return '尽调启动审批'
