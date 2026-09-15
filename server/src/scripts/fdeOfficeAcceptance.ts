@@ -53,7 +53,7 @@ try {
     await saveOfficeRequest(id, author.id, { clientRequestId: randomUUID(), expectedVersion: 0, definition })
     if (kind === '报销') {
       const attachmentId = randomUUID()
-      await uploadOfficeAttachment(id, attachmentId, author.id, { clientRequestId: randomUUID(), expectedVersion: 1, name: '报销发票.txt', dataBase64: Buffer.from('隔离报销发票').toString('base64'), purpose: 'application', reason: '准备报销验收材料' })
+      await uploadOfficeAttachment(id, attachmentId, author.id, { clientRequestId: randomUUID(), expectedVersion: 1, name: '报销发票.pdf', dataBase64: Buffer.from('%PDF-1.4\n% isolated expense fixture\n%%EOF').toString('base64'), purpose: 'application', reason: '准备报销验收材料' })
       const expenseDefinition = officeDefinition.parse({ ...definition, attachmentIds: [attachmentId], details: { kind, currency: 'CNY', amount: '10', projectExplanation: '隔离测试报销事项说明', items: [{ id: randomUUID(), date: shanghaiToday(), category: '其他', description: '隔离测试费用', amount: '10', invoiceNumber: `INV-${marker}`, attachmentId }] } })
       await saveOfficeRequest(id, author.id, { clientRequestId: randomUUID(), expectedVersion: 2, definition: expenseDefinition })
       return { id, definition: expenseDefinition }
