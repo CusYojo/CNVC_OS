@@ -13,6 +13,7 @@ import { actOnOfficeRequest, getOfficeAttachment, getOfficeRequest, getOfficeRev
 import { actOnOaApprovalRequest, listOaApprovalRequests } from '../services/oaWorkflowService.js'
 import { listApprovalCenter } from '../services/fdeApprovalCenterService.js'
 import { seedApprovalCenterFixture } from './fdeApprovalCenterFixture.js'
+import { createProject } from '../services/projectService.js'
 
 assert.match(process.env.DB_FREFIX ?? '', /^fde_accept_[a-f0-9]{10}_$/)
 assert.equal(process.env.FDE_ACCEPTANCE_PREFIX, process.env.DB_FREFIX)
@@ -40,9 +41,10 @@ try {
   }
   await denied(listOfficePolicies(author.id), 'OFFICE_POLICY_FORBIDDEN')
   checks.push('FDE-OA-004:admin-only-published-typed-policies-immutable-history-no-demo-defaults')
+  const officeProject = await createProject({ name: `办公关联项目-${marker}`, owner: author.name, ownerUserId: author.id }, author.id)
   const projectCount = (await db.select({ value: count() }).from(projects))[0].value
   const draft = async (kind: typeof officeKinds[number]) => {
-    const id = randomUUID(), definition = officeDefinition.parse({ title: `${kind}-${marker}`, reason: '完整合成测试申请理由', projectId: null, priority: '普通', details: { kind }, attachmentIds: [] })
+    const id = randomUUID(), definition = officeDefinition.parse({ title: `${kind}-${marker}`, reason: '完整合成测试申请理由', projectId: kind === '出差' ? officeProject.id : null, priority: '普通', details: { kind }, attachmentIds: [] })
     await saveOfficeRequest(id, author.id, { clientRequestId: randomUUID(), expectedVersion: 0, definition })
     return { id, definition }
   }
@@ -63,7 +65,7 @@ try {
   }
   assert.equal((await db.select({ value: count() }).from(projects))[0].value, projectCount)
   assert.equal((await listOaApprovalRequests(author.id)).some(r => r.businessType === 'office'), false)
-  checks.push('FDE-OA-001/002/003/015:five-kinds-no-project-sequential-approval-only-current-node-no-project-mutation-no-fake-execution')
+  checks.push('FDE-OA-001/002/003/015:typed-project-requirement-sequential-approval-only-current-node-no-project-mutation-no-fake-execution')
   const { id: fileRequest, definition: fileDefinition } = await draft('合同'), fileId = randomUUID(), bytes = Buffer.from(`冻结批准件-${marker}`)
   const upload = { clientRequestId: randomUUID(), expectedVersion: await version(fileRequest), name: '合同批准原件.txt', dataBase64: bytes.toString('base64'), purpose: 'application', reason: '保存真实申请级原始附件' }
   const uploaded = await uploadOfficeAttachment(fileRequest, fileId, author.id, upload)
