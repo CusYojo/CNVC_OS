@@ -141,11 +141,8 @@ function validateAssignments(ownerId: string, assignments: FdeDutyAssignment[], 
 }
 
 function effectiveLeadership(assignments: Array<{ duty: string; userId: string }>, people: Person[]) {
-  const result = assignments.filter((item) => FDE_LEADERSHIP_DUTIES.includes(item.duty as FdeProjectDuty))
-  for (const [duty, roleCode] of [['chairman', 'FDE_CHAIRMAN'], ['president', 'FDE_PRESIDENT']] as const) {
-    if (!result.some((item) => item.duty === duty)) result.push(...people.filter((person) => person.roleCodes.includes(roleCode)).map((person) => ({ duty, userId: person.id })))
-  }
-  return result
+  void people
+  return assignments.filter((item) => FDE_LEADERSHIP_DUTIES.includes(item.duty as FdeProjectDuty))
 }
 
 async function lockedProject(tx: Transaction, projectId: string) {

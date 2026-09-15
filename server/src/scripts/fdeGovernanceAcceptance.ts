@@ -45,7 +45,7 @@ try {
   checks.push('system-administration-separated-from-business', 'institution-and-department-scopes-use-stable-role-bindings')
 
   const assignments: FdeDutyAssignment[] = [
-    { duty: 'concerned_leader', userId: accounts.chairman.id }, { duty: 'secretary', userId: accounts.secretary.id },
+    { duty: 'concerned_leader', userId: accounts.chairman.id }, { duty: 'chairman', userId: accounts.chairman.id }, { duty: 'secretary', userId: accounts.secretary.id },
     { duty: 'member', userId: accounts.member.id }, { duty: 'finance', userId: accounts.finance.id },
     { duty: 'legal', userId: accounts.legal.id }, { duty: 'coordinator', userId: accounts.coordinator.id },
   ]
@@ -77,7 +77,9 @@ try {
   const request = await createOaApprovalRequest({ projectId: project.id, userId: accounts.owner.id, targetStage: '尽调计划制定', reason: '验证活动审批人员快照冻结' })
   assert.deepEqual(request.nodes[1].approverUserIds, [accounts.chairman.id])
   assert.ok(!(await listOaApprovalRequests(accounts.admin.id)).some((item) => item.id === request.id))
-  const nextAssignments = assignments.map((assignment) => assignment.duty === 'concerned_leader' ? { ...assignment, userId: accounts.president.id } : assignment)
+  const nextAssignments = assignments.map((assignment) => assignment.duty === 'concerned_leader'
+    ? { ...assignment, userId: accounts.president.id }
+    : assignment.duty === 'chairman' ? { duty: 'president' as const, userId: accounts.president.id } : assignment)
   const pending = await proposeFdeGovernance({ projectId: project.id, userId: accounts.owner.id, ownerUserId: accounts.owner.id, expectedVersion: 2, reason: '调整关注领导需要原领导确认', assignments: nextAssignments })
   assert.equal(pending.status, 'awaiting_confirmation')
   assert.deepEqual(pending.requiredConfirmers, [accounts.chairman.id])
