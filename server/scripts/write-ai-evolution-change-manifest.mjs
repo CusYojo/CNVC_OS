@@ -13,6 +13,6 @@ const committed = execFileSync('git', ['diff', '--name-only', '-z', `${baseCommi
 const files = committed.split('\0').filter(Boolean).map(entry => entry.replaceAll('\\', '/'))
 files.push('ai-evolution-change-manifest.json')
 const manifest = { schemaVersion: 1, objective: 'AI assistant self-evolution implementation', baseCommit,
-  latestMigration: '0112_add_assistant_experience_memory', files: [...new Set(files)].sort() }
+  latestMigration: '0113_add_admin_permanent_deletions', files: [...new Set(files)].sort() }
 writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n')
 console.log(JSON.stringify({ ok: true, baseCommit, files: manifest.files.length, latestMigration: manifest.latestMigration }))

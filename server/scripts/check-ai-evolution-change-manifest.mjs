@@ -9,6 +9,6 @@ execFileSync('git', ['merge-base', '--is-ancestor', manifest.baseCommit, head])
 const committed = execFileSync('git', ['diff', '--name-only', '-z', `${manifest.baseCommit}..${head}`], { encoding: 'utf8' })
 const actual = [...new Set([...committed.split('\0').filter(Boolean).map(entry => entry.replaceAll('\\', '/')),
   'ai-evolution-change-manifest.json'])].sort()
-if (manifest.schemaVersion !== 1 || manifest.latestMigration !== '0112_add_assistant_experience_memory'
+if (manifest.schemaVersion !== 1 || manifest.latestMigration !== '0113_add_admin_permanent_deletions'
   || JSON.stringify(manifest.files) !== JSON.stringify(actual)) throw Error('AI evolution change manifest is stale or incomplete')
 console.log(JSON.stringify({ ok: true, baseline: manifest.baseCommit, head, files: actual.length, latestMigration: manifest.latestMigration }))

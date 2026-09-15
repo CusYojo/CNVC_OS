@@ -4,6 +4,6 @@
   "worktree": "C:\\Users\\21749\\Desktop\\project\\ai-evolution-isolated",
   "baseCommit": "dfcadbb5824e018a9aeda962e201ee7a7f41f066",
   "authoritativeChangeManifest": "ai-evolution-change-manifest.json",
-  "latestMigration": "0112_add_assistant_experience_memory",
+  "latestMigration": "0113_add_admin_permanent_deletions",
   "note": "The root manifest inventories committed changes from its declared base and must pass npm run check:ai-evolution-change-manifest before transfer; unrelated untracked workspace files are excluded."
 }
