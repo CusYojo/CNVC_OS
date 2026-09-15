@@ -86,7 +86,7 @@ try {
   const made = await makeReport(true), initial = await report(made.reportId)
   assert.deepEqual([...new Set(initial.facts!.office!.map(i => i.kind))].sort(), [...officeKinds].sort())
   assert.equal(initial.facts?.metrics.completedInWeek, 0); assert.equal(initial.facts?.metrics.approvalActions, 0)
-  assert.ok(initial.body.includes('审批不代表执行完成')); assert.ok(initial.facts?.calendar?.some(i => i.id === leave && i.source === 'office'))
+  assert.ok(initial.body.includes('办公事项')); assert.ok(initial.facts?.calendar?.some(i => i.id === leave && i.source === 'office'))
   assert.ok(initial.facts?.office?.every(i => i.actions.every(a => a.action === '提交')))
   assert.ok((await weeklyReportRecipients(made.reportId, author.id)).recipients.some(p => p.id === reviewer.id))
   assert.ok(!(await weeklyReportRecipients(made.reportId, author.id)).recipients.some(p => [admin.id, traveler.id, outsider.id].some(id => id === p.id)))
