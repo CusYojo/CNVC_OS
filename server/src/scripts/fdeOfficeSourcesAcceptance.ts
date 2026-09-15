@@ -78,7 +78,7 @@ try {
   for (const kind of ['用印', '报销', '合同'] as const) { const id = await create({ kind }, kind); await act(id, author.id, 'submit'); await act(id, reviewer.id, 'approve') }
   const report = async (id: string) => (await listWeeklyReports(author.id, week)).reports.find(r => r.id === id)!
   const reportAct = async (id: string, action: string, recipientIds: string[] = []) => actOnWeeklyReport(id, author.id, { clientRequestId: randomUUID(), expectedVersion: (await report(id)).version, action, recipientIds, reason: '明确确认本次办公来源操作' })
-  const makeReport = (office: boolean, calendar = true) => createWeeklyReport(author.id, { clientRequestId: randomUUID(), weekStart: week, projectIds: [], sourceOptions: { office, calendar } })
+  const makeReport = (office: boolean, calendar = true) => createWeeklyReport(author.id, { clientRequestId: randomUUID(), weekStart: week, projectIds: [officeProject.id], sourceOptions: { office, calendar } })
   const old = await makeReport(false)
   assert.equal((await report(old.reportId)).facts?.office, undefined)
   assert.ok(!(await report(old.reportId)).facts?.calendar?.some(i => i.source === 'office'))
