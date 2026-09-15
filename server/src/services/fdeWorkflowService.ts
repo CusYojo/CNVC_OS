@@ -241,7 +241,8 @@ export async function bindFdeMaterial(input: { projectId: string; userId: string
     }
     const bindings = await tx.select().from(projectStageMaterials).where(and(eq(projectStageMaterials.projectId, project.id), eq(projectStageMaterials.stage, input.stage), eq(projectStageMaterials.requirementKey, input.requirementKey)))
     const existing = bindings.find(binding => input.fileId ? binding.fileId === input.fileId : binding.fileId === null)
-    if (!input.fileId && bindings.some(binding => binding.fileId)) throw error(409, 'FDE_MATERIAL_WAIVER_CONFLICT', '当前要求已绑定文件；如确需免传，请先逐份解除文件绑定')
+      ?? (!input.fileId && bindings.length === 1 && bindings[0]!.version === input.expectedVersion ? bindings[0] : undefined)
+    if (!input.fileId && bindings.some(binding => binding.fileId) && !existing) throw error(409, 'FDE_MATERIAL_WAIVER_CONFLICT', '当前要求存在多个文件绑定；如确需免传，请先逐份解除文件绑定')
     if (existing && existing.version !== input.expectedVersion) throw error(409, 'VERSION_CONFLICT', '材料绑定已被修改，请刷新后重试')
     const values = { fileId: input.fileId ?? null, fileVersion, waiverReason: input.fileId ? null : input.waiverReason!.trim(), updatedBy: actor.id, updatedAt: new Date() }
     const bindingId = existing?.id ?? randomUUID()

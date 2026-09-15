@@ -576,8 +576,9 @@ export async function replaceFileContent(fileId: string, storagePath: string, si
       userId, userName: '（系统）', module: '资料库',
       action: file.storagePath ? '替换原文件' : '补传原文件', target: `${file.name} v${nextVersion}`,
     })
-    const [binding] = await tx.select({ id: projectStageMaterials.id }).from(projectStageMaterials).where(eq(projectStageMaterials.fileId, fileId)).limit(1)
-    if (binding) {
+    const bindings = await tx.select({ id: projectStageMaterials.id, version: projectStageMaterials.version }).from(projectStageMaterials).where(eq(projectStageMaterials.fileId, fileId))
+    if (bindings.length) {
+      for (const binding of bindings) await tx.update(projectStageMaterials).set({ version: binding.version + 1, updatedBy: userId, updatedAt: new Date() }).where(eq(projectStageMaterials.id, binding.id))
       const { reconcileTimelineEvent } = await import('./fdeTimelineTaskService.js')
       await reconcileTimelineEvent(tx, file.projectId, userId, { source: 'material', sourceKey: `file:${fileId}:${nextVersion}` })
     }

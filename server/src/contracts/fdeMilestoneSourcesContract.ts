@@ -18,5 +18,5 @@ export function milestoneSourceTarget(item: Pick<ApprovedMilestoneFact, 'project
   return `/projects/${item.projectId}?tab=workflow&schedule=${item.approvalId}#agent-schedule-${item.approvalId}`
 }
 export function milestoneReportBody(items: ApprovedMilestoneFact[]) {
-  return `项目节点\n${items.map(item => `- ${item.projectName} · ${item.stage}：${item.previousDate === item.date ? item.date : `${item.previousDate} → ${item.date}`}`).join('\n')}`
+  return `项目节点\n${items.map(item => `- ${item.projectName} · ${item.stage}：${item.previousDate === item.date ? item.date : `${item.previousDate} → ${item.date}`}`).join('\n')}\n说明：节点日期不计任务完成、不代表阶段通过。`
 }
