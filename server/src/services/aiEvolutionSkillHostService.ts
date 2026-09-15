@@ -33,7 +33,7 @@ async function initialize() {
   if (active) throw Error('Skill evolution host already started')
   const config = parseEvolutionSkillHostConfig(await readEvolutionSkillSampleSuiteFile(file))
   const capability = await aiConfigurationRepository.findCapability(config.capabilityId)
-  if (!capability || !capability.enabled || capability.kind !== 'skill' || capability.source !== 'builtin'
+  if (!capability || !capability.enabled || capability.kind !== 'skill'
     || capability.capabilityKey !== 'draft-due-diligence-report') throw Error('Unsupported skill evolution host capability')
   const route = await resolveAiModelById(config.modelId)
   if (!route) throw Error('Skill evolution model unavailable')

@@ -9,3 +9,9 @@ test('optional evolution executors cannot prevent the business service from beco
   const hostBlock = source.slice(source.indexOf('const evolutionHosts'), source.indexOf('startResponsibilityScanner'))
   assert.doesNotMatch(hostBlock, /throw result\.reason|Promise\.reject/)
 })
+
+test('skill evolution host accepts the registered uploaded due-diligence skill', async () => {
+  const source = await readFile(new URL('../src/services/aiEvolutionSkillHostService.ts', import.meta.url), 'utf8')
+  assert.doesNotMatch(source, /capability\.source !== 'builtin'/)
+  assert.match(source, /capability\.capabilityKey !== 'draft-due-diligence-report'/)
+})
