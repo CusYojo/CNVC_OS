@@ -16,7 +16,7 @@ import { assertIsolatedMysqlAcceptanceDatabase } from './mysqlAcceptanceSafety.j
 assertIsolatedMysqlAcceptanceDatabase('fdeMigrationAcceptance')
 
 const sourcePrefix = process.env.DB_FREFIX ?? ''
-const allowedModes = ['--weekly-browser', '--time-report', '--records', '--files', '--knowledge', '--office', '--archives', '--responsibility', '--agent', '--timeline-events', '--timeline-times', '--milestone-sources', '--weekly-times', '--type-policies', '--type-execution', '--type-times', '--committee', '--type-registration', '--replans', '--office-execution']
+const allowedModes = ['--weekly-browser', '--time-report', '--records', '--files', '--knowledge', '--office', '--archives', '--responsibility', '--agent', '--timeline-tasks', '--timeline-events', '--timeline-times', '--milestone-sources', '--weekly-times', '--type-policies', '--type-execution', '--type-times', '--committee', '--type-registration', '--replans', '--office-execution']
 assert.ok(process.argv.slice(2).every(arg => allowedModes.includes(arg)), '未知验收参数；不会默默运行完整写入验收')
 assert.match(sourcePrefix, /^[A-Za-z0-9_]+$/, '必须提供合法业务表前缀')
 const targetPrefix = `fde_accept_${randomBytes(5).toString('hex')}_`
@@ -67,6 +67,7 @@ await withAcceptanceCleanup(async () => {
   const archiveMode = process.argv.includes('--archives')
   const responsibilityMode = process.argv.includes('--responsibility')
   const agentMode = process.argv.includes('--agent')
+  const timelineTasksMode = process.argv.includes('--timeline-tasks')
   const timelineEventsMode = process.argv.includes('--timeline-events')
   const timelineTimesMode = process.argv.includes('--timeline-times')
   const milestoneSourcesMode = process.argv.includes('--milestone-sources')
@@ -78,7 +79,7 @@ await withAcceptanceCleanup(async () => {
   const typeRegistrationMode = process.argv.includes('--type-registration')
   const replanMode = process.argv.includes('--replans')
   const officeExecutionMode = process.argv.includes('--office-execution')
-  assert.ok([browserMode, timeReportMode, recordMode, fileMode, knowledgeMode, officeMode, archiveMode, responsibilityMode, agentMode, timelineEventsMode, timelineTimesMode, milestoneSourcesMode, weeklyTimesMode, typePoliciesMode, typeExecutionMode, typeTimesMode, committeeMode, typeRegistrationMode, replanMode, officeExecutionMode].filter(Boolean).length <= 1, '不能混用浏览器与定向验收模式')
+  assert.ok([browserMode, timeReportMode, recordMode, fileMode, knowledgeMode, officeMode, archiveMode, responsibilityMode, agentMode, timelineTasksMode, timelineEventsMode, timelineTimesMode, milestoneSourcesMode, weeklyTimesMode, typePoliciesMode, typeExecutionMode, typeTimesMode, committeeMode, typeRegistrationMode, replanMode, officeExecutionMode].filter(Boolean).length <= 1, '不能混用浏览器与定向验收模式')
   const scripts = browserMode ? [] : fileMode ? ['fdeFileAcceptance.ts', 'fdeMaterialAcceptance.ts', 'fdeMaterialHttpAcceptance.ts', 'fdeWorkflowAcceptance.ts', 'fdeTaskAcceptance.ts'] : recordMode ? ['fdeProjectRecordAcceptance.ts', 'fdeWorkflowAcceptance.ts', 'fdeFridayMeetingAcceptance.ts'] : timeReportMode ? ['fdeScheduleTransactionAcceptance.ts', 'fdeTimeAcceptance.ts', 'fdeWeeklyReportSourcesAcceptance.ts'] : ['fdeProjectPoolAcceptance.ts', 'leadConversionAcceptance.ts', 'identityMappingAcceptance.ts', 'oaWorkflowAcceptance.ts', 'fdeWorkflowAcceptance.ts', 'fdeGovernanceAcceptance.ts', 'systemAdministrationAcceptance.ts', 'fdePolicyAcceptance.ts', 'fdeIntegrationSummaryAcceptance.ts', 'fdeTaskAcceptance.ts', 'fdeWeeklyPlanAcceptance.ts', 'fdeWeeklyReportAcceptance.ts', 'fdeFridayMeetingAcceptance.ts', 'fdeDirectiveAcceptance.ts', 'fdeScheduleTransactionAcceptance.ts', 'fdeTimeAcceptance.ts', 'fdeWeeklyReportSourcesAcceptance.ts', 'fdeProjectRecordAcceptance.ts', 'fdeFileAcceptance.ts', 'fdeMaterialAcceptance.ts', 'fdeMaterialHttpAcceptance.ts']
   if (archiveMode) scripts.splice(0, scripts.length, 'fdeArchiveAcceptance.ts', 'fdeFileAcceptance.ts', 'leadConversionAcceptance.ts')
   else if (officeMode) scripts.splice(0, scripts.length, 'fdeOfficeAcceptance.ts', 'fdeOfficeRecoveryAcceptance.ts', 'fdeOfficeInboxPolicyAcceptance.ts', 'oaWorkflowAcceptance.ts', 'fdeTaskAcceptance.ts', 'leadConversionAcceptance.ts')
@@ -89,6 +90,7 @@ await withAcceptanceCleanup(async () => {
   if (responsibilityMode) scripts.splice(0, scripts.length, 'fdeResponsibilityPolicyAcceptance.ts', 'fdeResponsibilityAcceptance.ts', 'fdeResponsibilityScannerAcceptance.ts', 'fdeTaskAcceptance.ts', 'leadConversionAcceptance.ts')
   else if (!browserMode && !officeMode && !fileMode && !recordMode && !timeReportMode && !knowledgeMode && !archiveMode) scripts.push('fdeResponsibilityPolicyAcceptance.ts', 'fdeResponsibilityAcceptance.ts', 'fdeResponsibilityScannerAcceptance.ts')
   if (agentMode) scripts.splice(0, scripts.length, 'fdeProjectAgentAcceptance.ts', 'fdeAgentScheduleAcceptance.ts', 'fdeTimelineTaskAcceptance.ts', 'fdeWorkflowAcceptance.ts', 'fdeTaskAcceptance.ts', 'fdeFileAcceptance.ts', 'leadConversionAcceptance.ts', 'fdeWeeklyPlanAcceptance.ts', 'fdeWeeklyReportSourcesAcceptance.ts', 'fdeResponsibilityAcceptance.ts')
+  else if (timelineTasksMode) scripts.splice(0, scripts.length, 'fdeTimelineTaskAcceptance.ts')
   else if (process.argv.length === 2) scripts.push('fdeProjectAgentAcceptance.ts', 'fdeAgentScheduleAcceptance.ts', 'fdeTimelineTaskAcceptance.ts')
   if (!browserMode && (agentMode || process.argv.length === 2)) scripts.push('fdeTimelineEventAcceptance.ts')
   if (timelineEventsMode) scripts.splice(0, scripts.length, 'fdeTimelineEventAcceptance.ts', 'fdeFridayMeetingAcceptance.ts', 'fdeDirectiveAcceptance.ts')
@@ -146,6 +148,7 @@ await withAcceptanceCleanup(async () => {
   if (responsibilityMode) checks.splice(0, checks.length, 'fde-responsibility-policy-foundation', 'fde-responsibility-source-ledger', 'fde-responsibility-deadline-scanner', 'fde-task-execution', 'lead-conversion', 'focused-not-full-migration')
   else if (!browserMode && !officeMode && !fileMode && !recordMode && !timeReportMode && !knowledgeMode && !archiveMode) checks.push('fde-responsibility-policy-foundation', 'fde-responsibility-source-ledger', 'fde-responsibility-deadline-scanner')
   if (agentMode) checks.splice(0, checks.length, 'fde-agent-facts-rules-human-drafts', 'fde-agent-node-date-approval', 'fde-timeline-task-sync', 'fde-workflow', 'fde-task', 'fde-file', 'lead-conversion', 'fde-weekly-plan', 'fde-weekly-report-sources', 'fde-responsibility', 'focused-not-full-migration')
+  else if (timelineTasksMode) checks.splice(0, checks.length, 'fde-timeline-task-sync', 'focused-not-full-migration')
   else if (process.argv.length === 2) checks.push('fde-agent-facts-rules-human-drafts', 'fde-agent-node-date-approval')
   if (!browserMode && (agentMode || process.argv.length === 2)) checks.push('fde-timeline-source-events-recovery')
   if (timelineEventsMode) checks.splice(0, checks.length, 'fde-timeline-source-events-recovery', 'fde-friday-meetings', 'fde-directives', 'focused-not-full-migration')

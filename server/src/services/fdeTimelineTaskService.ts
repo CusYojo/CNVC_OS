@@ -20,7 +20,7 @@ async function preview(tx: AgentTx, project: Project): Promise<Omit<TimelinePrev
   const policy = await getProjectWorkflowPolicy(tx, project), stage = policy.configuration.stages.find(item => item.stage === project.stage)!
   const gate = await inspectFdeStageGate(tx, project)
   const missing = stage.materials.filter(item => gate.checklist.some(check => check.label === item.label && !check.passed))
-  const proposals = timelineTaskProposals(project.stage, current.date, missing, stage.approvals.some(item => ['chairman', 'president', 'concerned_leader', 'executive_lead'].includes(item.duty)))
+  const proposals = timelineTaskProposals(project.stage, current.date, missing, stage.approvals.some(item => ['boss', 'chairman', 'president', 'concerned_leader', 'executive_lead'].includes(item.duty)))
   const bindings = await tx.select().from(projectDutyAssignments).where(eq(projectDutyAssignments.projectId, project.id)).orderBy(asc(projectDutyAssignments.id))
   const members = await tx.select({ id: users.id, name: users.name }).from(users).innerJoin(projectMembers, eq(projectMembers.userId, users.id)).where(and(eq(projectMembers.projectId, project.id), eq(users.status, '启用'))).orderBy(asc(users.id))
   const [owner] = project.ownerUserId ? await tx.select({ id: users.id, name: users.name }).from(users).where(and(eq(users.id, project.ownerUserId), eq(users.status, '启用'))) : []
