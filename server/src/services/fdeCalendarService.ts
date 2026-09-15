@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { and, asc, eq, gt, gte, inArray, isNull, lt, ne, notInArray, or, sql } from 'drizzle-orm'
 import { db } from '../db/client.js'
-import { personalCalendarEvents, personalCalendarHistory, todoCalendarSchedules, todoCalendarScheduleHistory, leaderTimeRequests, projectPlanActions, projectPlans, projects, todos, meetings, meetingParticipants, users } from '../db/schema.js'
+import { personalCalendarEvents, personalCalendarHistory, todoCalendarSchedules, todoCalendarScheduleHistory, leaderTimeRequests, projectPlanActions, projectPlans, projectTimelineTasks, projects, todos, meetings, meetingParticipants, users } from '../db/schema.js'
 import { calendarCancelSchema, calendarTaskCancelSchema, calendarTaskCreateSchema, calendarWriteSchema, taskCalendarScheduleSchema, timeInstant } from '../contracts/fdeTimeContract.js'
 import { fdeWeekStart, shiftDate } from '../contracts/fdeWeeklyPlanContract.js'
 import { timeActor, timeFail, type TimeTx } from './fdeTimeAccessService.js'
@@ -135,6 +135,8 @@ export async function writeTaskCalendarSchedule(id: string, userId: string, raw:
     }
     const [task] = await tx.select().from(todos).where(eq(todos.id, id))
     if (!task || task.ownerUserId !== userId || task.approvalRequestId || task.type === '流程') return timeFail('CALENDAR_TASK_FORBIDDEN', '只能调整本人的非流程任务', 403)
+    const [timelineSource] = await tx.select({ taskId: projectTimelineTasks.taskId }).from(projectTimelineTasks).where(eq(projectTimelineTasks.taskId, id))
+    if (timelineSource) return timeFail('CALENDAR_TASK_FORBIDDEN', '流程时间线任务须通过项目计划或延期审批调整', 403)
     if (task.version !== input.sourceVersion || !['未开始', '进行中', '待验收', '已退回', '待确认'].includes(task.status)) return timeFail('VERSION_CONFLICT', '任务已变化或已结束，请刷新')
     const [current] = await tx.select().from(todoCalendarSchedules).where(eq(todoCalendarSchedules.taskId, id))
     if ((current?.version ?? 0) !== input.expectedVersion || (current && current.ownerUserId !== userId)) return timeFail('VERSION_CONFLICT', '排期已变化，请刷新')
@@ -174,6 +176,7 @@ export async function listCalendar(userId: string, rawWeek: string, view: 'perso
     const scheduledTaskIds = tx.select({ id: todoCalendarSchedules.taskId }).from(todoCalendarSchedules).where(and(lt(todoCalendarSchedules.startsAt, end), gt(todoCalendarSchedules.endsAt, start)))
     const taskRows = await tx.select().from(todos).where(and(view === 'personal' ? or(eq(todos.ownerUserId, userId), inArray(todos.planActionId, participantActionIds.length ? participantActionIds : [''])) : undefined, or(and(gte(todos.dueDate, week), lt(todos.dueDate, next)), inArray(todos.id, scheduledTaskIds)), isNull(todos.approvalRequestId), notInArray(todos.type, ['流程', '通知']), inArray(todos.status, ['未开始', '进行中', '待验收', '已退回', '待确认']))).limit(501)
     const tasks = taskRows.filter(task => !legacyParticipantIds.has(task.id))
+    const timelineTaskIds = new Set(tasks.length ? (await tx.select({ taskId: projectTimelineTasks.taskId }).from(projectTimelineTasks).where(inArray(projectTimelineTasks.taskId, tasks.map(row => row.id)))).map(row => row.taskId) : [])
     const taskSchedules = tasks.length ? await tx.select().from(todoCalendarSchedules).where(inArray(todoCalendarSchedules.taskId, tasks.map(row => row.id))) : []
     const taskScheduleById = new Map(taskSchedules.map(row => [row.taskId, row]))
     const taskSlots = new Map<string, number>()
@@ -188,7 +191,7 @@ export async function listCalendar(userId: string, rawWeek: string, view: 'perso
       const automaticStart = timeInstant(`${dueDate}T${String(Math.floor(startMinutes / 60)).padStart(2, '0')}:${String(startMinutes % 60).padStart(2, '0')}`)
       const startsAt = schedule?.startsAt ?? automaticStart, endsAt = schedule?.endsAt ?? new Date(automaticStart.getTime() + 60 * 60000)
       if (startsAt >= end || endsAt <= start) continue
-      add({ id: row.id, source: 'task', title: row.title, detail: `${row.projectName ?? '个人任务'} · ${row.status}${row.dueTime ? ` · 截止 ${row.dueTime}` : ''}`, projectId: row.projectId, projectName: row.projectName ?? '个人任务', ownerId: row.ownerUserId ?? '', ownerName: row.ownerUserId ? names.get(row.ownerUserId) ?? '已停用人员' : '待绑定', startsAt: startsAt.toISOString(), endsAt: endsAt.toISOString(), allDay: false, version: schedule?.version ?? 0, sourceVersion: row.version, editable: view === 'personal' && row.ownerUserId === userId && allowed, target: row.projectId ? `/projects/${row.projectId}?tab=tasks` : '/' }, allowed)
+      add({ id: row.id, source: 'task', title: row.title, detail: `${row.projectName ?? '个人任务'} · ${row.status}${row.dueTime ? ` · 截止 ${row.dueTime}` : ''}`, projectId: row.projectId, projectName: row.projectName ?? '个人任务', ownerId: row.ownerUserId ?? '', ownerName: row.ownerUserId ? names.get(row.ownerUserId) ?? '已停用人员' : '待绑定', startsAt: startsAt.toISOString(), endsAt: endsAt.toISOString(), allDay: false, version: schedule?.version ?? 0, sourceVersion: row.version, editable: view === 'personal' && row.ownerUserId === userId && allowed && !timelineTaskIds.has(row.id), target: row.projectId ? `/projects/${row.projectId}?tab=tasks` : '/' }, allowed)
     }
     const attended = new Set((await tx.select({ id: meetingParticipants.meetingId }).from(meetingParticipants).where(eq(meetingParticipants.userId, userId))).map(row => row.id))
     const meetingRows = await tx.select().from(meetings).where(and(or(

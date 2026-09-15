@@ -11,7 +11,7 @@ import { resolveProjectAgentCommand } from '../services/fdeProjectAgentService.j
 import { bindFdeMaterial } from '../services/fdeWorkflowService.js'
 import { createFdeTask, feedbackFdeTask, requestFdeTaskExtension } from '../services/fdeTaskService.js'
 import { actOnOaApprovalRequest } from '../services/oaWorkflowService.js'
-import { listCalendar } from '../services/fdeCalendarService.js'
+import { listCalendar, writeTaskCalendarSchedule } from '../services/fdeCalendarService.js'
 import { createFdeWeeklyPlan, getFdeWeeklyPlans } from '../services/fdeWeeklyPlanService.js'
 import { createWeeklyReport, listWeeklyReports } from '../services/fdeWeeklyReportService.js'
 import { shanghaiToday, shiftDate, weekStartFor } from '../contracts/fdeWeeklyPlanContract.js'
@@ -58,6 +58,8 @@ try {
   let calendar = await listCalendar(secretary.id, week, 'personal')
   assert.equal(calendar.items.filter(item => item.id === conclusion.taskId).length, 1)
   assert.equal(calendar.items.find(item => item.id === conclusion.taskId)?.editable, false)
+  const conclusionTask = await task(conclusion.taskId)
+  await expectCode(writeTaskCalendarSchedule(conclusion.taskId, secretary.id, { clientRequestId: randomUUID(), expectedVersion: 0, sourceVersion: conclusionTask.version, startsAt: `${conclusionTask.dueDate}T09:00`, endsAt: `${conclusionTask.dueDate}T10:00`, hidden: false, reason: '隔离验证流程任务不可绕过来源直接改期' }), 'CALENDAR_TASK_FORBIDDEN')
   const stale = await preview()
   await db.update(projects).set({ targetDate: shiftDate(shanghaiToday(), 41), version: project.version + 10 }).where(eq(projects.id, project.id))
   await expectCode(syncTimelineTasks(project.id, secretary.id, { clientRequestId: randomUUID(), fingerprint: stale.fingerprint }), 'TIMELINE_SOURCE_CHANGED')
