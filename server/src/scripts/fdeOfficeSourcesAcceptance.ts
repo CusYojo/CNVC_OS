@@ -90,7 +90,7 @@ try {
   assert.ok(initial.facts?.office?.every(i => i.actions.every(a => a.action === '提交')))
   assert.ok((await weeklyReportRecipients(made.reportId, author.id)).recipients.some(p => p.id === reviewer.id))
   assert.ok(!(await weeklyReportRecipients(made.reportId, author.id)).recipients.some(p => [admin.id, traveler.id, outsider.id].some(id => id === p.id)))
-  await denied(reportAct(made.reportId, 'publish', [outsider.id]), 'REPORT_SUPPLEMENT_SCOPE')
+  await denied(reportAct(made.reportId, 'publish', [outsider.id]), 'REPORT_SOURCE_FORBIDDEN')
   checks.push('explicit-office-selection-five-types-own-week-actions-not-completion-current-source-sharing')
   // A source change after preview invalidates publication even if all content remains readable.
   const returned = await create({ kind: '合同' }, '退回再提交')
