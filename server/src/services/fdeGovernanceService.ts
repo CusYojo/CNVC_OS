@@ -271,7 +271,7 @@ export async function resolveFdeApprovalNodes(tx: Transaction, project: ProjectR
       ? assignments.filter((assignment) => assignment.duty === 'chairman' || assignment.duty === 'president')
       : assignments.filter((assignment) => assignment.duty === approvalDuty)
     const fallbackCode = approvalDuty === 'chairman' ? 'FDE_CHAIRMAN' : approvalDuty === 'president' ? 'FDE_PRESIDENT' : null
-    const ids = bindings.length ? bindings.map((binding) => binding.userId) : boss ? people.filter((person) => person.roleCodes.some((code) => ['FDE_CHAIRMAN', 'FDE_PRESIDENT'].includes(code))).map((person) => person.id) : fallbackCode ? people.filter((person) => person.roleCodes.includes(fallbackCode)).map((person) => person.id) : []
+    const ids = bindings.map((binding) => binding.userId)
     const selected = [...new Set(ids)].filter((id) => id !== applicantId).map((id) => byId.get(id)).filter((person): person is Person => Boolean(person))
     const label = boss ? '董事长/总裁审批' : FDE_PROJECT_DUTIES.find((item) => item.code === approvalDuty)!.label
     if (!selected.length || ids.some((id) => id !== applicantId && !byId.has(id))) throw failure(409, 'FDE_APPROVER_NOT_CONFIGURED', `请先配置当前项目的启用职责人员：${label}；申请人不可兼任审批人`)

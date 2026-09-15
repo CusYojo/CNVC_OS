@@ -17,7 +17,6 @@ const viewCopy: Record<ProjectClassification, { title: string; description: stri
   normal: { title: '普通项目', description: '已完成入库并进入正式投资流程的项目。' },
   key: { title: '重点项目', description: '由授权领导标记、需要重点推进和关注的项目。' },
 }
-
 export function ProjectsPage({
   classification = 'normal', embedded = false, onCountsChange,
 }: {
@@ -143,8 +142,12 @@ export function ProjectsPage({
 
   const changeClassification = async (project: Project, target: ProjectClassification) => {
     setMenuId(null)
-    const action = project.classification === 'pool' ? '完成入库' : target === 'key' ? '升级为重点项目' : '调整为普通项目'
-    const reason = window.prompt(`请填写“${action}”原因：`, project.classification === 'pool' ? '入库初筛完成' : '')
+    if (project.classification === 'pool') {
+      navigate(`/workflow?view=project&project=${project.id}`)
+      return
+    }
+    const action = target === 'key' ? '升级为重点项目' : '调整为普通项目'
+    const reason = window.prompt(`请填写“${action}”原因：`, '')
     if (!reason?.trim()) return
     try {
       await classifyProject(project.id, target, reason)
@@ -206,7 +209,7 @@ export function ProjectsPage({
                       {classification === 'normal' && canPromote(project) && <button aria-label={`将${project.name}转为重点项目`} title="转为重点项目" className="inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs font-medium text-amber-700 hover:bg-amber-50" onClick={(event) => { event.stopPropagation(); void changeClassification(project, 'key') }}><Star className="h-4 w-4" />转重点</button>}
                       <button aria-label="发起OA审批" title="发起 OA 审批" className="rounded-lg p-1.5 text-slate-400 hover:bg-white hover:text-brand-600" onClick={(event) => { event.stopPropagation(); navigate(`/workflow?view=project&project=${project.id}`) }}><GitBranch className="h-4 w-4" /></button>
                       <button aria-label="编辑项目" className="rounded-lg p-1.5 text-slate-400 hover:bg-white hover:text-brand-600" onClick={(event) => { event.stopPropagation(); setEditing(project) }}><Pencil className="h-4 w-4" /></button>
-                      <span className="relative inline-block"><button aria-label="更多操作" className="rounded-lg p-1.5 text-slate-400 hover:bg-white" onClick={(event) => { event.stopPropagation(); setMenuId(menuId === project.id ? null : project.id) }}><MoreHorizontal className="h-4 w-4" /></button>{menuId === project.id && <span className="absolute right-0 top-9 z-20 w-40 rounded-lg border border-slate-200 bg-white py-1 text-sm shadow-lg" onClick={(event) => event.stopPropagation()}>{classification === 'pool' && (project.owner === currentUser.name || canClassify) && <button className="flex w-full items-center gap-2 px-3 py-2 text-left text-brand-700 hover:bg-brand-50" onClick={() => { void changeClassification(project, 'normal') }}>完成入库</button>}{classification === 'normal' && canPromote(project) && <button className="flex w-full items-center gap-2 px-3 py-2 text-left text-brand-700 hover:bg-brand-50" onClick={() => { void changeClassification(project, 'key') }}>升级为重点项目</button>}{classification === 'key' && canClassify && <button className="flex w-full items-center gap-2 px-3 py-2 text-left text-slate-600 hover:bg-slate-50" onClick={() => { void changeClassification(project, 'normal') }}>调整为普通项目</button>}<button className="flex w-full items-center gap-2 px-3 py-2 text-left text-slate-600 hover:bg-slate-50" onClick={() => handlePin(project)}>{project.pinned ? '取消置顶' : '置顶'}</button>{canDelete && <button className="flex w-full items-center gap-2 px-3 py-2 text-left text-rose-600 hover:bg-rose-50" onClick={() => requestDelete(project)}>删除项目</button>}</span>}</span>
+                      <span className="relative inline-block"><button aria-label="更多操作" className="rounded-lg p-1.5 text-slate-400 hover:bg-white" onClick={(event) => { event.stopPropagation(); setMenuId(menuId === project.id ? null : project.id) }}><MoreHorizontal className="h-4 w-4" /></button>{menuId === project.id && <span className="absolute right-0 top-9 z-20 w-40 rounded-lg border border-slate-200 bg-white py-1 text-sm shadow-lg" onClick={(event) => event.stopPropagation()}>{classification === 'pool' && (project.owner === currentUser.name || canClassify) && <button className="flex w-full items-center gap-2 px-3 py-2 text-left text-brand-700 hover:bg-brand-50" onClick={() => { void changeClassification(project, 'normal') }}>发起入库审批</button>}{classification === 'normal' && canPromote(project) && <button className="flex w-full items-center gap-2 px-3 py-2 text-left text-brand-700 hover:bg-brand-50" onClick={() => { void changeClassification(project, 'key') }}>升级为重点项目</button>}{classification === 'key' && canClassify && <button className="flex w-full items-center gap-2 px-3 py-2 text-left text-slate-600 hover:bg-slate-50" onClick={() => { void changeClassification(project, 'normal') }}>调整为普通项目</button>}<button className="flex w-full items-center gap-2 px-3 py-2 text-left text-slate-600 hover:bg-slate-50" onClick={() => handlePin(project)}>{project.pinned ? '取消置顶' : '置顶'}</button>{canDelete && <button className="flex w-full items-center gap-2 px-3 py-2 text-left text-rose-600 hover:bg-rose-50" onClick={() => requestDelete(project)}>删除项目</button>}</span>}</span>
                     </div>
                   </TableCell>
                 </tr>
@@ -251,3 +254,4 @@ export function ProjectsPage({
     </div>
   )
 }
+

@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { eq } from 'drizzle-orm'
 import { db, pool } from '../db/client.js'
 import { projects, users, projectStageMaterials, projectFiles, projectRecords, todos } from '../db/schema.js'
-import { createProject, classifyProject, moveProjectStage } from '../services/projectService.js'
+import { createProject, moveProjectStage } from '../services/projectService.js'
 import { saveProjectFile } from '../services/projectFileStorageService.js'
 import { identityRepositories } from '../repositories/index.js'
 import { proposeFdeGovernance } from '../services/fdeGovernanceService.js'
@@ -35,11 +35,20 @@ try {
   await db.insert(users).values(accounts)
   for (const account of accounts) await identityRepositories.users.synchronizeAdministrationBindings(account.id, account.role, account.department)
   let project = await createProject({ name: `FDE主链-${marker}`, owner: accounts[0].name, ownerUserId: ownerId, collaborators: [], investmentFund: '隔离验收基金' }, ownerId)
-  await expectCode(createOaApprovalRequest({ userId: ownerId, projectId: project.id, targetStage: '立项', reason: '项目池不得跳过入库' }), 'OA_POOL_INTAKE_REQUIRED')
-  project = await classifyProject({ projectId: project.id, userId: ownerId, toClassification: 'normal', expectedVersion: project.version, reason: '隔离验收入库初筛完成' })
   await proposeFdeGovernance({ projectId: project.id, userId: ownerId, ownerUserId: ownerId, expectedVersion: project.governanceVersion, reason: '隔离验收配置真实职责', assignments: [
     { duty: 'concerned_leader', userId: accounts[5].id }, { duty: 'finance', userId: accounts[3].id }, { duty: 'legal', userId: accounts[4].id },
   ] })
+  let intakeRequest = await createOaApprovalRequest({ userId: ownerId, projectId: project.id, targetStage: '立项', reason: '隔离验收入库进入立项' })
+  const [beforeIntakeApproval] = await db.select().from(projects).where(eq(projects.id, project.id)).limit(1)
+  assert.equal(beforeIntakeApproval.stage, '入库'); assert.equal(beforeIntakeApproval.classification, 'pool')
+  while (intakeRequest.status === '审批中') {
+    const node = intakeRequest.nodes.find((item) => item.id === intakeRequest.currentNodeId)!
+    const approverId = node.approverUserIds.find((id) => id !== ownerId)!
+    intakeRequest = (await actOnOaApprovalRequest({ userId: approverId, requestId: intakeRequest.id, action: 'approve', comment: '同意入库进入立项', expectedVersion: intakeRequest.lockVersion })).request
+  }
+  ;[project] = await db.select().from(projects).where(eq(projects.id, project.id)).limit(1)
+  assert.equal(project.stage, '立项'); assert.equal(project.classification, 'normal')
+  checks.push('pool-intake-requires-boss-approval-before-establishment')
   await expectCode(moveProjectStage(project.id, '已 Close', ownerId, project.version), 'FDE_APPROVAL_REQUIRED')
   await expectCode(createOaApprovalRequest({ userId: ownerId, projectId: project.id, targetStage: '尽调计划制定', reason: '材料缺失应拒绝提交' }), 'FDE_STAGE_GATE_FAILED')
   checks.push('pool-cannot-submit-and-missing-materials-block-submission')
