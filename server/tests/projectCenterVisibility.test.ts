@@ -41,7 +41,7 @@ for (const view of ['leads', 'normal', 'key']) {
   test(`project center retains visible ${view} tab and content`, () => {
     const html = renderCenter(view, [{ classification: 'pool' }, {}, { classification: 'key' }, { classification: 'normal', lifecycle: 'archived' }])
     assert.doesNotMatch(html, /项目池/)
-    assert.equal((html.match(/role="tab"/g) ?? []).length, 3)
+    assert.equal((html.match(/role="tab"/g) ?? []).length, 4)
     assert.equal((html.match(/aria-selected="true"/g) ?? []).length, 1)
     assert.match(html, /普通项目<em>1<\/em>/)
     assert.match(html, /重点项目<em>1<\/em>/)

@@ -35,7 +35,7 @@ test('FDE navigation keeps AI first-level and configuration inside system manage
   const primary = Array.from(navigation.primaryNav, item => item.to)
   assert.deepEqual(primary, ['/', '/ai', '/projects', '/collaboration', '/workflow', '/knowledge'])
   const system = navigation.navSections.find(item => item.label === '系统管理')!
-  assert.deepEqual(Array.from(system.children, item => item.label), ['组织与权限', '模板与规则', '集成与审计', '模型设置', '能力管理', 'IM 机器人', 'Radar 钉钉告警'])
+  assert.deepEqual(Array.from(system.children, item => item.label), ['组织与权限', '模板与规则', '集成与审计', '危险操作', '模型设置', '能力管理', 'IM 机器人', 'Radar 钉钉告警'])
   for (const path of ['/system/ai/models', '/system/ai/capabilities', '/system/integrations/im-bots', '/system/integrations/radar-dingtalk']) {
     assert.ok(system.children.some(item => item.to === path))
     assert.ok(!primary.includes(path))

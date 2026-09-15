@@ -26,7 +26,7 @@ test('four AI assistant document shortcuts load same-name standalone Skills', as
     assert.equal(skill.name, skillName)
     assert.match(skill.version, /^sha256-[a-f0-9]{12}$/)
     assert.ok(existsSync(`${skillDirectory}/SKILL.md`))
-    assert.match(skillDirectory, new RegExp(`/skills/${skillName}$`))
+    assert.match(skillDirectory, new RegExp(`[/\\\\]skills[/\\\\]${skillName}$`))
     assert.equal('pluginName' in skill, false)
     assert.equal('entrySkillName' in skill, false)
   }

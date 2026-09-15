@@ -801,27 +801,29 @@
       "breakpoints": true
     },
     {
-      "idx": 102,
+      "idx": 114,
       "version": "5",
       "when": 1793346544000,
       "tag": "0114_update_investment_approval_workflow",
       "breakpoints": true
     },
     {
-      "idx": 103,
+      "idx": 115,
       "version": "5",
       "when": 1793346545000,
       "tag": "0115_rename_fde_due_diligence_stage",
       "breakpoints": true
     },
     {
-      "idx": 104,
+      "idx": 116,
       "version": "5",
       "when": 1793346546000,
       "tag": "0116_fix_fde_due_diligence_policy_hash",
       "breakpoints": true
     },
-    { "idx": 105, "version": "5", "when": 1793346547000, "tag": "0117_add_fde_post_investment", "breakpoints": true
+    { "idx": 117, "version": "5", "when": 1793346547000, "tag": "0117_add_fde_post_investment", "breakpoints": true
+    },
+    { "idx": 118, "version": "5", "when": 1793346548000, "tag": "0118_add_post_investment_foreign_keys", "breakpoints": true
     }
   ]
 }

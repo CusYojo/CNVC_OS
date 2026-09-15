@@ -11,7 +11,10 @@ const page = read('src/pages/DataKnowledgePage.tsx')
 
 test('knowledge visual rules remain scoped to this page', () => {
   postcss.parse(css).walkRules(rule => {
-    assert.match(rule.selector, /fde-knowledge-page/)
+    // Personal-note editor controls can be rendered in a modal portal, outside
+    // the page container. Their names are deliberately feature-namespaced;
+    // every other rule must remain scoped to the knowledge page.
+    assert.ok(/fde-knowledge-page/.test(rule.selector) || /^\.personal-note/.test(rule.selector.trim()))
     assert.doesNotMatch(rule.selector, /:root|\.fde-app\s*$/)
   })
 })
