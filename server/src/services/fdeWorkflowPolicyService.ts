@@ -41,7 +41,14 @@ export async function listFdeWorkflowPolicies() {
   const policies = await db.select().from(fdeWorkflowPolicies).where(sql`${fdeWorkflowPolicies.code} NOT LIKE 'noninvestment:%'`)
   const versions = await db.select({ version: fdeWorkflowPolicyVersions }).from(fdeWorkflowPolicyVersions).innerJoin(fdeWorkflowPolicies, eq(fdeWorkflowPolicies.id, fdeWorkflowPolicyVersions.policyId)).where(sql`${fdeWorkflowPolicies.code} NOT LIKE 'noninvestment:%'`).orderBy(desc(fdeWorkflowPolicyVersions.revision))
   const counts = await db.select({ versionId: projects.workflowPolicyVersionId, total: sql<number>`COUNT(*)` }).from(projects).groupBy(projects.workflowPolicyVersionId)
-  return policies.map((policy) => ({ ...policy, versions: versions.map(row => row.version).filter((version) => version.policyId === policy.id).map((version) => ({ ...version, configuration: fdeWorkflowPolicySnapshotSchema.parse(version.configuration), boundProjects: Number(counts.find((count) => count.versionId === version.id)?.total ?? 0) })) }))
+  return policies.map((policy) => ({ ...policy, versions: versions.map(row => row.version).filter((version) => version.policyId === policy.id).map((version) => ({
+    ...version,
+    // Historical rows are immutable audit evidence. Return the original JSON even
+    // when it predates the current shape; execution and draft creation stay strict.
+    configuration: version.configuration as FdeWorkflowPolicyConfig,
+    configurationValid: fdeWorkflowPolicySnapshotSchema.safeParse(version.configuration).success,
+    boundProjects: Number(counts.find((count) => count.versionId === version.id)?.total ?? 0),
+  })) }))
 }
 
 export async function createFdePolicyDraft(policyId: string, input: { sourceVersionId: string; expectedVersion: number; reason: string }, actor: SystemAdministrator) {
