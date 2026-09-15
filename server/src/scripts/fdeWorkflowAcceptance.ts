@@ -36,7 +36,7 @@ try {
   for (const account of accounts) await identityRepositories.users.synchronizeAdministrationBindings(account.id, account.role, account.department)
   let project = await createProject({ name: `FDE主链-${marker}`, owner: accounts[0].name, ownerUserId: ownerId, collaborators: [], investmentFund: '隔离验收基金' }, ownerId)
   await proposeFdeGovernance({ projectId: project.id, userId: ownerId, ownerUserId: ownerId, expectedVersion: project.governanceVersion, reason: '隔离验收配置真实职责', assignments: [
-    { duty: 'concerned_leader', userId: accounts[5].id }, { duty: 'chairman', userId: accounts[5].id },
+    { duty: 'concerned_leader', userId: accounts[5].id }, { duty: 'chairman', userId: accounts[5].id }, { duty: 'president', userId: accounts[7].id },
     { duty: 'finance', userId: accounts[3].id }, { duty: 'legal', userId: accounts[4].id },
   ] })
   let intakeRequest = await createOaApprovalRequest({ userId: ownerId, projectId: project.id, targetStage: '立项', reason: '隔离验收入库进入立项' })
