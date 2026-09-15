@@ -32,7 +32,8 @@ try {
   let report=await row(shared.reportId)
   assert.deepEqual(report.facts?.calendar?.map(r=>r.id).sort(),[cross.id,cancelled.id].sort())
   assert.ok(!JSON.stringify(report).includes(hidden.id));assert.ok(!JSON.stringify(report).includes(boundary.id))
-  assert.ok(report.body.includes('已取消'));assert.equal(report.facts?.metrics.completedInWeek,0)
+  assert.equal(report.facts?.calendar?.find(item=>item.id===cancelled.id)?.status,'cancelled')
+  assert.ok(!report.body.includes('本周已取消安排'));assert.equal(report.facts?.metrics.completedInWeek,0)
   checks.push('FDE-CAL-003:explicit-calendar-only-source-cross-week-half-open-cancelled-and-private-default-exclusion')
 
   await writeCalendarEvent(author.id,{clientRequestId:randomUUID(),expectedVersion:1,definition:{title:'公开安排已改版',startsAt:`${shiftDate(week,-1)}T23:45`,endsAt:`${week}T00:15`,visibility:'company'}},cross.id)
