@@ -41,7 +41,11 @@ try {
   }
   await denied(listOfficePolicies(author.id), 'OFFICE_POLICY_FORBIDDEN')
   checks.push('FDE-OA-004:admin-only-published-typed-policies-immutable-history-no-demo-defaults')
-  const officeProject = await createProject({ name: `办公关联项目-${marker}`, owner: author.name, ownerUserId: author.id, collaborators: [reviewer.name, leader.name] }, author.id)
+  const officeProject = await createProject(
+    { name: `办公关联项目-${marker}` },
+    author.id,
+    { ownerUserId: author.id, assignments: [{ duty: 'finance', userId: reviewer.id }, { duty: 'boss', userId: leader.id }] },
+  )
   const projectCount = (await db.select({ value: count() }).from(projects))[0].value
   const draft = async (kind: typeof officeKinds[number]) => {
     const id = randomUUID(), definition = officeDefinition.parse({ title: `${kind}-${marker}`, reason: '完整合成测试申请理由', projectId: kind === '出差' ? officeProject.id : null, priority: '普通', details: { kind }, attachmentIds: [] })
