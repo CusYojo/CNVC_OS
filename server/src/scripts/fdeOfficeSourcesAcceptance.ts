@@ -103,9 +103,11 @@ try {
   const snap = (await report(made.reportId)).facts!.office!.find(i => i.id === travel)!
   const [travelNode] = await db.select().from(nodes).where(eq(nodes.requestId, travel))
   await db.update(nodes).set({ approverUserIds: [reviewer.id, traveler.id], approverNames: [reviewer.name, traveler.name] }).where(eq(nodes.id, travelNode.id))
+  await db.insert(projectMembers).values({ projectId: officeProject.id, userId: traveler.id, memberRole: 'collaborator', sourceName: traveler.name })
   assert.ok(await readableOfficeSource(db, travel, traveler.id))
   assert.equal(await canReadOfficeSnapshot(db, snap, traveler.id), false)
   await db.update(nodes).set({ approverUserIds: travelNode.approverUserIds, approverNames: travelNode.approverNames }).where(eq(nodes.id, travelNode.id))
+  await db.delete(projectMembers).where(and(eq(projectMembers.projectId, officeProject.id), eq(projectMembers.userId, traveler.id)))
   checks.push('source-change-blocks-publish-regeneration-and-frozen-audience-cannot-expand-after-new-grant')
   await db.delete(userRoles).where(eq(userRoles.userId, reviewer.id))
   assert.ok(!(await listWeeklyReports(reviewer.id, week)).reports.some(r => r.id === made.reportId))
