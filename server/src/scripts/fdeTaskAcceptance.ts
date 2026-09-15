@@ -30,7 +30,7 @@ try {
   for (const account of accounts) await identityRepositories.users.synchronizeAdministrationBindings(account.id, account.role, account.department)
   let project = await createProject({ name: `任务闭环-${marker}`, owner: owner.name, ownerUserId: owner.id, collaborators: [], targetDate: date(90) }, owner.id)
   project = await classifyProject({ projectId: project.id, userId: owner.id, expectedVersion: project.version, toClassification: 'normal', reason: '任务隔离验收入库初筛' })
-  await proposeFdeGovernance({ projectId: project.id, userId: owner.id, ownerUserId: owner.id, expectedVersion: project.governanceVersion, reason: '配置任务负责人和验收领导', assignments: [{ duty: 'member', userId: member.id }, { duty: 'concerned_leader', userId: leader.id }] })
+  await proposeFdeGovernance({ projectId: project.id, userId: owner.id, ownerUserId: owner.id, expectedVersion: project.governanceVersion, reason: '配置任务负责人、验收领导和项目董事长', assignments: [{ duty: 'member', userId: member.id }, { duty: 'concerned_leader', userId: leader.id }, { duty: 'chairman', userId: leader.id }] })
   const getTask = async (id: string) => (await getFdeTasks(project.id, owner.id)).tasks.find((task) => task.id === id)!
   const getRequest = async (id: string) => (await listOaApprovalRequests(owner.id)).find((request) => request.id === id)!
   const createTask = async (title: string) => {
