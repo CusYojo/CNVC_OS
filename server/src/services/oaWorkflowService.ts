@@ -29,6 +29,7 @@ import { appendPlanReviewRecord } from './fdeProjectRecordService.js'
 import { projectFileAccessCondition, requireProjectFileAccess } from './projectFileAccessService.js'
 import { approveNodeTransition } from '../contracts/approvalNodeTransition.js'
 import { legacyApprovalAccessCondition } from './oaRequestAccessService.js'
+import { ADMIN_SELF_APPROVAL_NODE_NAME, isAdminSelfApprovalNode, isAdminSelfApprovalSubmission } from '../contracts/adminSelfApprovalContract.js'
 
 const fdeProjectStages = ['入库', '立项', '尽调计划制定', '尽调计划审核', '尽调', '内核', '投决', '打款', '投后'] as const
 const legacyProjectStages = ['线索', '初筛', '立项', '尽调', '上会', '投决', '投后', '退出'] as const
@@ -417,7 +418,7 @@ export async function createOaApprovalRequest(input: {
       const fromStage = project.stage as ProjectStage
       const isPlanSubmission = project.workflowModel === 'fde-v1' && fromStage === '尽调计划制定'
       const isPoolIntake = project.workflowModel === 'fde-v1' && project.classification === 'pool' && fromStage === '入库' && input.targetStage === '立项'
-      if (project.workflowModel === 'fde-v1' && project.ownerUserId !== actor.id) {
+      if (project.workflowModel === 'fde-v1' && project.ownerUserId !== actor.id && actor.role !== '系统管理员') {
         const [membership] = await tx.select({ userId: projectMembers.userId }).from(projectMembers).where(and(eq(projectMembers.projectId, project.id), eq(projectMembers.userId, actor.id))).limit(1)
         if (!isPlanSubmission || !membership) throw workflowError(403, isPlanSubmission ? 'FDE_PROJECT_TEAM_REQUIRED' : 'FDE_OWNER_REQUIRED', isPlanSubmission ? '尽调计划仅限投资项目组成员提交' : 'FDE 阶段申请必须由项目负责人提交')
       }
@@ -439,9 +440,23 @@ export async function createOaApprovalRequest(input: {
         ? await evaluateFdeStageGate(tx, project) : undefined
       for (const source of gate?.snapshot ?? []) if (source.fileId) await requireProjectFileAccess(tx, source.fileId, actor.id)
       const checklist = gate?.checklist ?? blueprintByType[type].checklist.map(([label, required]) => ({ label, required, passed: false }))
-      const resolvedNodes = requireOaApprovalNodes(project.workflowModel === 'fde-v1'
-        ? await resolveFdeApprovalNodes(tx, project, input.targetStage === '放弃' ? '立项' : fromStage, actor.id)
-        : await resolveBlueprintNodes(identity.users, type))
+      const adminSelfApproval = isAdminSelfApprovalSubmission({
+        role: actor.role,
+        workflowModel: project.workflowModel,
+        businessType: 'project_stage',
+      })
+      const resolvedNodes = requireOaApprovalNodes(adminSelfApproval
+        ? [{
+            name: ADMIN_SELF_APPROVAL_NODE_NAME,
+            roleLabel: '系统管理员',
+            roles: ['系统管理员'],
+            mode: '或签' as const,
+            approverUserIds: [actor.id],
+            approverNames: [actor.name],
+          }]
+        : project.workflowModel === 'fde-v1'
+          ? await resolveFdeApprovalNodes(tx, project, input.targetStage === '放弃' ? '立项' : fromStage, actor.id)
+          : await resolveBlueprintNodes(identity.users, type))
       const requestNo = `OA${formatShanghaiDateKey(new Date()).replaceAll('-', '')}-${randomUUID().slice(0, 8).toUpperCase()}`
       const submitNodeId = randomUUID()
       const approvalNodes = resolvedNodes.map((node, index) => ({
@@ -650,12 +665,22 @@ export async function actOnOaApprovalRequest(input: {
       } else {
         if (request.status !== '审批中' || !currentNode) throw workflowError(409, 'OA_ACTION_INVALID', '当前申请不在可审批状态')
         const isCurrentApprover = currentNode.approverUserIds.includes(actor.id)
+        const adminSelfNode = isAdminSelfApprovalNode({
+          actorRole: actor.role,
+          actorId: actor.id,
+          applicantUserId: request.applicantUserId,
+          nodeName: currentNode.name,
+          approverUserIds: currentNode.approverUserIds,
+        })
         if (input.action === 'withdraw') {
           if (!isAdmin && request.applicantUserId !== actor.id) throw workflowError(403, 'OA_ACTION_FORBIDDEN', '只有发起人可以撤回')
-        } else if (request.applicantUserId === actor.id) {
+        } else if (request.applicantUserId === actor.id && !adminSelfNode) {
           throw workflowError(403, 'OA_SELF_APPROVAL_FORBIDDEN', '申请人不能审批自己的申请')
         } else if (!isAdmin && !isCurrentApprover) {
           throw workflowError(403, 'OA_ACTION_FORBIDDEN', '当前节点不属于该用户')
+        }
+        if (adminSelfNode && (input.action === 'return' || input.action === 'reject')) {
+          throw workflowError(409, 'OA_ADMIN_SELF_ACTION_INVALID', '系统管理员本人确认节点只能确认或撤回')
         }
 
         const actionLabel = input.action === 'approve' ? '同意'
