@@ -10,6 +10,7 @@ import { FdeOfficePanel } from '../components/FdeOfficePanel'
 import { FdeTypePolicyPanel } from '../components/FdeTypePolicyPanel'
 import { approvalCenterReturnPath } from '../../server/src/contracts/fdeApprovalCenterContract'
 import { safeVisibleText } from '../../server/src/contracts/textIntegrityContract'
+import { isAdminSelfApprovalNode } from '../../server/src/contracts/adminSelfApprovalContract'
 
 const workflowStages: ProjectStage[] = ['入库', '立项', '尽调计划制定', '尽调计划审核', '尽调', '内核', '投决', '打款', '投后']
 const legacyWorkflowStages: ProjectStage[] = ['线索', '初筛', '立项', '尽调', '上会', '投决', '投后', '退出']
@@ -122,9 +123,16 @@ function ProjectWorkflowPage() {
   const isActionableByCurrentUser = (request: ApprovalRequest) => {
     if (['agent_schedule', 'project_replan'].includes(request.businessType ?? '')) return false
     if (request.status !== '审批中') return false
-    if (request.applicantUserId === currentUser.id) return false
     const node = request.nodes.find((item) => item.id === request.currentNodeId)
     if (!node) return false
+    const adminSelfNode = isAdminSelfApprovalNode({
+      actorRole: currentUser.role,
+      actorId: currentUser.id,
+      applicantUserId: request.applicantUserId ?? '',
+      nodeName: node.name,
+      approverUserIds: node.approverUserIds ?? [],
+    })
+    if (request.applicantUserId === currentUser.id && !adminSelfNode) return false
     if (currentUser.role === '系统管理员' && request.businessType !== 'task_extension' && projects.find((project) => project.id === request.projectId)?.workflowModel !== 'fde-v1') return true
     return (node.approverUserIds?.includes(currentUser.id) ?? splitApprovers(node.approver).includes(currentUser.name)) && !(node.mode === '会签' && (node.approvedByUserIds?.includes(currentUser.id) ?? node.approvedBy?.includes(currentUser.name)))
   }
@@ -157,6 +165,13 @@ function ProjectWorkflowPage() {
   const defaultTarget = selectedProject ? nextStageFor(selectedProject.stage, selectedProject.workflowModel) : null
   const activeRequest = selectedProject && requests.find((item) => item.projectId === selectedProject.id && item.status === '审批中' && item.businessType !== 'task_extension')
   const selectedCurrentNode = selected?.nodes.find((node) => node.id === selected.currentNodeId)
+  const selectedAdminSelfNode = !!selected && !!selectedCurrentNode && isAdminSelfApprovalNode({
+    actorRole: currentUser.role,
+    actorId: currentUser.id,
+    applicantUserId: selected.applicantUserId ?? '',
+    nodeName: selectedCurrentNode.name,
+    approverUserIds: selectedCurrentNode.approverUserIds ?? [],
+  })
   const canApproveSelected = !!selected && !!selectedCurrentNode && isActionableByCurrentUser(selected)
   const isSelectedApplicant = !!selected && (selected.applicantUserId ? selected.applicantUserId === currentUser.id : selected.applicant === currentUser.name)
   const selectedLegacyAdmin = !!selected && currentUser.role === '系统管理员' && selected.businessType !== 'task_extension' && projects.find((project) => project.id === selected.projectId)?.workflowModel === 'legacy'
@@ -299,8 +314,9 @@ function ProjectWorkflowPage() {
         )}
       </Card>
 
-      <Drawer open={!!selected} onClose={() => setSelected(null)} title={selected?.title ?? '审批详情'} width="w-[760px]" footer={selected?.status === '审批中' ? <>{canWithdrawSelected && <Button variant="secondary" onClick={() => act('withdraw')}>撤回</Button>}{canApproveSelected ? <><Button variant="danger" onClick={() => act('reject')}><XCircle className="h-4 w-4" />拒绝</Button><Button variant="secondary" onClick={() => { setReturnComment(''); setReturnDialogOpen(true) }}><RotateCcw className="h-4 w-4" />退回补充</Button><Button onClick={() => act('approve')}><CheckCircle2 className="h-4 w-4" />同意并流转</Button></> : <span className="text-xs text-slate-500">当前节点由 {selectedCurrentNode?.approver ?? '指定审批人'} 处理；你只能查看流程。</span>}</> : canResubmitSelected ? <Button onClick={resubmit}><Send className="h-4 w-4" />补充后重新提交</Button> : undefined}>
+      <Drawer open={!!selected} onClose={() => setSelected(null)} title={selected?.title ?? '审批详情'} width="w-[760px]" footer={selected?.status === '审批中' ? <>{canWithdrawSelected && <Button variant="secondary" onClick={() => act('withdraw')}>撤回</Button>}{canApproveSelected ? <>{!selectedAdminSelfNode && <Button variant="danger" onClick={() => act('reject')}><XCircle className="h-4 w-4" />拒绝</Button>}{!selectedAdminSelfNode && <Button variant="secondary" onClick={() => { setReturnComment(''); setReturnDialogOpen(true) }}><RotateCcw className="h-4 w-4" />退回补充</Button>}<Button onClick={() => act('approve')}><CheckCircle2 className="h-4 w-4" />{selectedAdminSelfNode ? '确认并流转' : '同意并流转'}</Button></> : <span className="text-xs text-slate-500">当前节点由 {selectedCurrentNode?.approver ?? '指定审批人'} 处理；你只能查看流程。</span>}</> : canResubmitSelected ? <Button onClick={resubmit}><Send className="h-4 w-4" />补充后重新提交</Button> : undefined}>
         {selected && <div className="space-y-6">
+          {selectedAdminSelfNode && <p className="rounded-lg bg-brand-50 p-3 text-sm text-brand-700">本申请由系统管理员本人确认后直接流转。</p>}
           <section><h3 className="mb-3 text-sm font-semibold text-slate-800">核心摘要</h3><div className="rounded-xl border border-brand-100 bg-brand-50/60 p-4"><div className="flex items-center justify-between"><div><p className="text-xs text-brand-600">{approvalReference(selected)}</p><p className="mt-1 font-semibold text-slate-800">{selected.projectName}</p></div><Badge tone={approvalTone(selected.status)}>{selected.status}</Badge></div><div className="mt-4 flex items-center gap-2">{selected.businessType === 'task_extension' ? <p className="text-sm">任务期限：{selected.businessPayload?.originalDueDate} → {selected.businessPayload?.requestedDueDate}</p> : <><StageBadge stage={selected.fromStage} /><ArrowRight className="h-4 w-4 text-slate-300" /><StageBadge stage={selected.targetStage} /></>}</div></div></section>
           <section><h3 className="mb-3 text-sm font-semibold text-slate-800">申请内容</h3><div className="grid grid-cols-2 gap-3 text-sm"><div className="rounded-lg bg-slate-50 p-3"><p className="text-xs text-slate-400">申请人 / 部门</p><p className="mt-1 text-slate-700">{selected.applicant} · {selected.department}</p></div><div className="rounded-lg bg-slate-50 p-3"><p className="text-xs text-slate-400">融资计划 / 估值</p><p className="mt-1 text-slate-700">{selected.amount || '未披露'} / {selected.valuation || '待核验'}</p></div></div>{readableApprovalText(selected.reason) && <p className="mt-3 rounded-lg bg-slate-50 p-3 text-sm leading-6 text-slate-600">{readableApprovalText(selected.reason)}</p>}</section>
           {selected.type === '尽调计划审核' && <section>
