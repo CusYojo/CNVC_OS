@@ -40,6 +40,7 @@ import { projectFileAccessCondition, requireProjectFileAccess, requireProjectFil
 import { prepareFdeCreationGovernance } from './fdeGovernanceService.js'
 import type { FdeCreationAssignment } from './fdeGovernanceService.js'
 import { canDirectlyDeleteProject } from '../contracts/adminRoleContract.js'
+import { isEnabledSystemAdmin } from './systemAdminAccessService.js'
 
 const STAGES = ['线索', '初筛', '立项', '尽调', '上会', '投决', '投后', '退出'] as const
 const ARTIFACT_ROOT = path.resolve(
@@ -453,14 +454,24 @@ export async function updateProject(
       if (!locked) throw projectClassificationError(404, 'PROJECT_NOT_FOUND', '项目不存在')
       if (expectedVersion !== undefined && locked.version !== expectedVersion) throw businessVersionConflict('项目')
       const { stage: _stage, stageSource: _source, classification: _classification, lifecycle: _lifecycle, workflowModel: _model, workflowPolicyVersionId: _policyVersion, governanceVersion: _governanceVersion, progress: _progress, owner: _owner, collaborators: _collaborators, ...fdePatch } = safePatch
-      if (('investmentFund' in fdePatch && fdePatch.investmentFund !== locked.investmentFund) || ('requirements' in fdePatch && fdePatch.requirements !== locked.requirements)) {
-        if (locked.ownerUserId !== userId) throw projectClassificationError(403, 'FDE_OWNER_REQUIRED', '项目要求和投资基金只能由负责人修改')
+      const investmentFundChanged = 'investmentFund' in fdePatch && fdePatch.investmentFund !== locked.investmentFund
+      const requirementsChanged = 'requirements' in fdePatch && fdePatch.requirements !== locked.requirements
+      if (requirementsChanged && locked.ownerUserId !== userId) {
+        throw projectClassificationError(403, 'FDE_OWNER_REQUIRED', '项目要求只能由负责人修改')
+      }
+      if (investmentFundChanged && locked.ownerUserId !== userId && !await isEnabledSystemAdmin(tx, userId)) {
+        throw projectClassificationError(403, 'FDE_OWNER_REQUIRED', '投资基金只能由负责人或系统管理员修改')
+      }
+      if (investmentFundChanged || requirementsChanged) {
         const [active] = await tx.select({ id: oaApprovalRequests.id }).from(oaApprovalRequests).where(and(eq(oaApprovalRequests.projectId, id), eq(oaApprovalRequests.status, '审批中'))).limit(1)
         if (active) throw projectClassificationError(409, 'FDE_APPROVAL_ACTIVE', '审批期间不能修改项目要求或投资基金，请先撤回修订')
       }
       await tx.update(projects).set({ ...fdePatch, version: locked.version + 1, updatedAt: new Date() }).where(eq(projects.id, id))
       const actor = await createMySqlIdentityRepositoryContext(tx).users.findById(userId)
-      await createMySqlIdentityRepositoryContext(tx).audits.append({ userId, userName: actor?.name ?? '未知用户', module: '项目管理', action: '编辑项目', target: locked.name })
+      const auditTarget = investmentFundChanged
+        ? JSON.stringify({ projectId: locked.id, projectName: locked.name, change: '投资基金变更', from: locked.investmentFund ?? '', to: fdePatch.investmentFund ?? '' })
+        : locked.name
+      await createMySqlIdentityRepositoryContext(tx).audits.append({ userId, userName: actor?.name ?? '未知用户', module: '项目管理', action: '编辑项目', target: auditTarget })
       const [updated] = await tx.select().from(projects).where(eq(projects.id, id)).limit(1)
       return updated
     })
