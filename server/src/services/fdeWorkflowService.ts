@@ -11,6 +11,7 @@ import { getProjectWorkflowPolicy } from './fdeWorkflowPolicyService.js'
 import { materializeFdePlanTasks, participantTaskId } from './fdeTaskService.js'
 import { reconcileTimelineEvent } from './fdeTimelineTaskService.js'
 import { shanghaiToday } from '../contracts/fdeWeeklyPlanContract.js'
+import { isEnabledSystemAdmin, type SystemAdminExecutor } from './systemAdminAccessService.js'
 
 type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0]
 type ProjectRow = typeof projects.$inferSelect
@@ -94,10 +95,19 @@ async function requireOwner(tx: Transaction, project: ProjectRow, userId: string
 async function requirePlanEditor(tx: Transaction, project: ProjectRow, userId: string) {
   const [actor] = await tx.select().from(users).where(eq(users.id, userId)).limit(1)
   if (!actor || actor.status !== '启用') throw error(403, 'USER_DISABLED_OR_MISSING', '当前用户不可用')
+  if (await isEnabledSystemAdmin(tx, userId)) return actor
   if (project.ownerUserId === userId) return actor
   const [membership] = await tx.select({ userId: projectMembers.userId }).from(projectMembers).where(and(eq(projectMembers.projectId, project.id), eq(projectMembers.userId, userId))).limit(1)
   if (!membership) throw error(403, 'FDE_PROJECT_TEAM_REQUIRED', '尽调计划仅限投资项目组成员编辑')
   return actor
+}
+
+async function canEditDraftPlan(reader: SystemAdminExecutor, project: ProjectRow, userId: string) {
+  if (await isEnabledSystemAdmin(reader, userId)) return true
+  if (project.ownerUserId === userId) return true
+  const [membership] = await reader.select({ userId: projectMembers.userId }).from(projectMembers)
+    .where(and(eq(projectMembers.projectId, project.id), eq(projectMembers.userId, userId))).limit(1)
+  return Boolean(membership)
 }
 
 async function canAmendApprovedPlan(reader: Pick<typeof db, 'select'>, project: ProjectRow, userId: string) {
@@ -115,6 +125,32 @@ async function requireApprovedPlanEditor(tx: Transaction, project: ProjectRow, u
   if (!actor || actor.status !== '启用') throw error(403, 'USER_DISABLED_OR_MISSING', '当前用户不可用')
   if (!await canAmendApprovedPlan(tx, project, userId)) throw error(403, 'FDE_PLAN_AMEND_FORBIDDEN', '仅项目负责人或已加入本项目的合伙人（部门负责人）可修订已通过计划')
   return actor
+}
+
+async function inspectPlanReadiness(
+  reader: SystemAdminExecutor,
+  project: ProjectRow,
+  policy: { configuration: { cycleDays: number[] } },
+  plan: typeof projectPlans.$inferSelect | undefined,
+  actions: Array<typeof projectPlanActions.$inferSelect>,
+) {
+  if (!plan || plan.status === 'archived') return { validForReview: false, reason: '尚未配置有效倒排计划' }
+  try {
+    validateFdePlan(plan.cycleDays, plan.targetDate, actions)
+    if (!policy.configuration.cycleDays.includes(plan.cycleDays)) return { validForReview: false, reason: '倒排计划尚未完整保存' }
+    const members = await reader.select({ userId: projectMembers.userId }).from(projectMembers).where(eq(projectMembers.projectId, project.id))
+    const allowedOwners = new Set([project.ownerUserId, ...members.map(member => member.userId)])
+    const selectedIds = [...new Set(actions.flatMap(action => [action.ownerUserId, ...action.participantUserIds]))]
+    const enabled = selectedIds.length
+      ? await reader.select({ id: users.id }).from(users).where(and(inArray(users.id, selectedIds), eq(users.status, '启用')))
+      : []
+    if (selectedIds.some(id => !allowedOwners.has(id)) || enabled.length !== selectedIds.length) {
+      return { validForReview: false, reason: '倒排计划尚未完整保存' }
+    }
+    return { validForReview: true, reason: '计划已配置，可提交审核' }
+  } catch {
+    return { validForReview: false, reason: '倒排计划尚未完整保存' }
+  }
 }
 
 const terminalTaskStatuses = ['已完成', '已关闭', '已取消', '已归档']
@@ -207,12 +243,15 @@ export async function getFdeWorkflow(projectId: string, userId: string) {
     const task = taskRows.find((item) => item.planActionId === action.id)
     return { ...action, participantUserIds: action.participantUserIds.length ? action.participantUserIds : [action.ownerUserId], status: task?.status ?? action.status, taskId: task?.id ?? null, effectiveDueDate: task?.dueDate ?? action.dueDate }
   })
-  const canEditPlan = project.lifecycle === 'active' && (project.ownerUserId === userId || currentPlan?.status === 'locked' && await canAmendApprovedPlan(db, project, userId))
+  const canEditPlan = project.lifecycle === 'active' && (currentPlan?.status === 'locked'
+    ? await canAmendApprovedPlan(db, project, userId)
+    : await canEditDraftPlan(db, project, userId))
+  const planReadiness = await inspectPlanReadiness(db, project, policy, currentPlan, definitions)
   const stages = policy.configuration.stages.map((stage) => ({
     ...stage,
     approvals: stage.approvals.map((approval) => ({ ...approval, approverNames: approverNames.get(approval.duty) ?? [] })),
   }))
-  return { stages, timeline: await readAgentTimeline(db, project), policy: { id: policy.id, revision: policy.revision, cycleDays: policy.configuration.cycleDays }, materials, plan: currentPlan ? { ...currentPlan, actions } : null, planHistory: plans, members: memberRows, duties, capabilities: { canEditPlan } }
+  return { stages, timeline: await readAgentTimeline(db, project), policy: { id: policy.id, revision: policy.revision, cycleDays: policy.configuration.cycleDays }, materials, plan: currentPlan ? { ...currentPlan, actions } : null, planHistory: plans, members: memberRows, duties, capabilities: { canEditPlan }, planReadiness }
 }
 
 export async function bindFdeMaterial(input: { projectId: string; userId: string; stage: string; requirementKey: string; fileId?: string; waiverReason?: string; expectedVersion?: number }) {
@@ -352,24 +391,10 @@ export async function inspectFdeStageGate(tx: Transaction, project: ProjectRow) 
   if (stage.requiresFund) checklist.push({ label: '明确投资基金', required: true, passed: Boolean(project.investmentFund?.trim()) })
   if (['尽调计划制定', '尽调计划审核'].includes(project.stage)) {
     const [plan] = await tx.select().from(projectPlans).where(eq(projectPlans.projectId, project.id)).orderBy(desc(projectPlans.revision)).limit(1)
-    let passed = false
-    if (plan && plan.status !== 'archived') {
-      const actions = await tx.select().from(projectPlanActions).where(eq(projectPlanActions.planId, plan.id))
-      try {
-        validateFdePlan(plan.cycleDays, plan.targetDate, actions)
-        if (!policy.configuration.cycleDays.includes(plan.cycleDays as 15 | 30 | 40)) throw error(409, 'FDE_PLAN_CYCLE_DISABLED', '计划周期不在项目绑定规则中')
-        const members = await tx.select({ userId: projectMembers.userId }).from(projectMembers).where(eq(projectMembers.projectId, project.id))
-        const allowedOwners = new Set([project.ownerUserId, ...members.map((member) => member.userId)])
-        passed = true
-        for (const action of actions) {
-          const selectedIds = [...new Set([action.ownerUserId, ...action.participantUserIds])]
-          const enabled = await tx.select({ id: users.id }).from(users).where(and(inArray(users.id, selectedIds), eq(users.status, '启用')))
-          if (selectedIds.some((id) => !allowedOwners.has(id)) || enabled.length !== selectedIds.length) passed = false
-        }
-        if (passed) planId = plan.id
-      } catch { /* gate reports missing/invalid plan */ }
-    }
-    checklist.push({ label: '完整且有效的倒排计划', required: true, passed })
+    const actions = plan ? await tx.select().from(projectPlanActions).where(eq(projectPlanActions.planId, plan.id)) : []
+    const planReadiness = await inspectPlanReadiness(tx, project, policy, plan, actions)
+    if (planReadiness.validForReview && plan) planId = plan.id
+    checklist.push({ label: '完整且有效的倒排计划', required: true, passed: planReadiness.validForReview })
   }
   return { checklist, snapshot, planId }
 }

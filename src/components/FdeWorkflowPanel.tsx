@@ -8,6 +8,7 @@ import { Badge, Button, Card, Modal } from './ui'
 import type { Project, ProjectFile } from '../types'
 import './fde-workspace.css'
 import { materialIsSatisfied, shortProjectDate } from '../lib/projectDetailPresentation'
+import { presentFdePlanReadiness } from '../lib/fdePlanReadinessPresentation'
 import { useAppStore } from '../store/useAppStore'
 
 type PlanAction = { id: string; actionKey: string; title: string; ownerUserId: string; participantUserIds: string[]; dueDate: string; effectiveDueDate: string; taskId: string | null; deliverable: string; status: string; version: number }
@@ -21,6 +22,7 @@ type Workflow = {
   members: Array<{ id: string; name: string; role: string }>
   duties: Array<{ duty: string; userId: string }>
   capabilities: { canEditPlan: boolean }
+  planReadiness: { validForReview: boolean; reason: string }
 }
 
 export function FdeWorkflowPanel({ project, files, mode = 'workflow', onChanged, onUpload, onGovernance }: {
@@ -123,13 +125,21 @@ export function FdeWorkflowPanel({ project, files, mode = 'workflow', onChanged,
   const requiredDuties = [['concerned_leader', '老板'], ['secretary', '项目经理'], ['legal', '法务'], ['finance', '财务']] as const
   const missingDuties = requiredDuties.filter(([duty]) => !data.duties.some(item => item.duty === duty)).map(([, label]) => label)
   const peopleConfigured = Boolean(project.ownerUserId) && missingDuties.length === 0
-  const planRequired = ['尽调计划审核', '尽调', '内核', '投决', '打款'].includes(stage)
+  const planReadiness = presentFdePlanReadiness({
+    stage,
+    loaded: Boolean(data.planReadiness),
+    validForReview: data.planReadiness?.validForReview ?? false,
+    reason: data.planReadiness?.reason ?? '',
+  })
+  const lockedPlanRequired = ['尽调', '内核', '投决', '打款'].includes(stage)
   const planConfirmed = data.plan?.status === 'locked'
+  const planBlocked = planReadiness.required ? planReadiness.blocked : lockedPlanRequired && !planConfirmed
   const blockers = [
     ...(project.classification === 'pool' ? ['项目尚未入库'] : []),
     ...(missing.length ? [`待补材料 ${missing.length} 项`] : []),
     ...(!peopleConfigured ? [`缺少${missingDuties.join('、') || '项目负责人'}`] : []),
-    ...(planRequired && !planConfirmed ? ['项目计划未确认'] : []),
+    ...(planReadiness.required && planReadiness.blocked ? [planReadiness.label] : []),
+    ...(lockedPlanRequired && !planConfirmed ? ['项目计划未确认'] : []),
   ]
   const canStartApproval = isActive && blockers.length === 0
   const remainingTasks = actions.filter(action => !['已完成', '已关闭', '已取消', '已归档'].includes(action.status)).length
@@ -192,8 +202,8 @@ export function FdeWorkflowPanel({ project, files, mode = 'workflow', onChanged,
       })()}
       <Card className="fde-detail-stage-focus">
         <div className="fde-current-stage-head"><div><span>{stage === project.stage ? '当前节点' : '节点详情'}</span><h2>{stage}</h2><p>计划日期 {shortProjectDate(stageDate?.date)}{stage === project.stage && remainingTasks ? ` · 剩余任务 ${remainingTasks} 项` : ''}</p></div><div className="fde-detail-inline-actions"><Button variant="secondary" onClick={() => setMaterialsOpen(true)}>节点材料</Button>{approval ? <Button onClick={() => navigate(`/workflow?view=project&project=${project.id}&request=${approval.id}`)}>查看阶段审批</Button> : canStartApproval ? <Button onClick={() => navigate(`/workflow?view=project&project=${project.id}`)}>发起阶段审批</Button> : null}</div></div>
-        <div className="fde-stage-readiness" aria-label="节点状态"><span data-state={missing.length ? 'warning' : 'ready'}>{stageRequirements.length ? `材料 ${stageRequirements.length - missing.length}/${stageRequirements.length}` : '无需材料'}</span><span data-state={peopleConfigured ? 'ready' : 'warning'}>{peopleConfigured ? '人员已配置' : '人员待配置'}</span><span data-state={!planRequired || planConfirmed ? 'ready' : 'warning'}>{planRequired ? planConfirmed ? '计划已确认' : '计划待确认' : '无需确认计划'}</span><span data-state={blockers.length ? 'warning' : 'ready'}>{blockers.length ? `${blockers.length} 项阻塞` : '无阻塞'}</span>{canStartApproval && !approval && <span data-state="active">可发起审批</span>}</div>
-        {approval?.status === '审批中' ? <div className="fde-stage-approval-waiting"><strong>审批进行中</strong><span>{approval.currentNodeName}</span></div> : blockers.length > 0 && <div className="fde-stage-blockers">{missing.length > 0 && <div><span>待补材料 {missing.length} 项</span>{onUpload && <Button variant="secondary" onClick={onUpload}>去上传</Button>}</div>}{!peopleConfigured && <div><span>缺少{missingDuties.join('、') || '项目负责人'}</span>{onGovernance && <Button variant="secondary" onClick={onGovernance}>配置人员</Button>}</div>}{planRequired && !planConfirmed && <div><span>项目计划未确认</span><Button variant="secondary" onClick={() => navigate(`/projects/${project.id}?tab=tasks`)}>去确认</Button></div>}{project.classification === 'pool' && <div><span>项目尚未入库</span><Button variant="secondary" onClick={() => navigate(`/workflow?view=project&project=${project.id}`)}>去处理</Button></div>}</div>}
+        <div className="fde-stage-readiness" aria-label="节点状态"><span data-state={missing.length ? 'warning' : 'ready'}>{stageRequirements.length ? `材料 ${stageRequirements.length - missing.length}/${stageRequirements.length}` : '无需材料'}</span><span data-state={peopleConfigured ? 'ready' : 'warning'}>{peopleConfigured ? '人员已配置' : '人员待配置'}</span><span data-state={planBlocked ? 'warning' : 'ready'}>{planReadiness.required ? planReadiness.label : lockedPlanRequired ? planConfirmed ? '计划已确认' : '计划待确认' : '无需确认计划'}</span><span data-state={blockers.length ? 'warning' : 'ready'}>{blockers.length ? `${blockers.length} 项阻塞` : '无阻塞'}</span>{canStartApproval && !approval && <span data-state="active">可发起审批</span>}</div>
+        {approval?.status === '审批中' ? <div className="fde-stage-approval-waiting"><strong>审批进行中</strong><span>{approval.currentNodeName}</span></div> : blockers.length > 0 && <div className="fde-stage-blockers">{missing.length > 0 && <div><span>待补材料 {missing.length} 项</span>{onUpload && <Button variant="secondary" onClick={onUpload}>去上传</Button>}</div>}{!peopleConfigured && <div><span>缺少{missingDuties.join('、') || '项目负责人'}</span>{onGovernance && <Button variant="secondary" onClick={onGovernance}>配置人员</Button>}</div>}{planReadiness.required && planReadiness.blocked && <div><span>{planReadiness.label}</span><Button variant="secondary" onClick={() => navigate(`/projects/${project.id}?tab=tasks`)}>去配置计划</Button></div>}{lockedPlanRequired && !planConfirmed && <div><span>项目计划未确认</span><Button variant="secondary" onClick={() => navigate(`/projects/${project.id}?tab=tasks`)}>去确认</Button></div>}{project.classification === 'pool' && <div><span>项目尚未入库</span><Button variant="secondary" onClick={() => navigate(`/workflow?view=project&project=${project.id}`)}>去处理</Button></div>}</div>}
       </Card></>}
 
     {mode === 'materials' && <Card className="fde-detail-material-register"><div className="fde-detail-card-head"><h2>节点材料</h2><div className="fde-detail-inline-actions"><Badge tone={totalRequired === totalSatisfied ? 'green' : 'amber'}>{totalSatisfied} / {totalRequired} 已齐备</Badge>{onUpload && isActive && <Button onClick={onUpload}>上传文件</Button>}</div></div><div>{materialStages.map(item => {
