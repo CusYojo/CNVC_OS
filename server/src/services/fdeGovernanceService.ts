@@ -52,7 +52,8 @@ function creationPerson(person: Person): FdeCreationPerson {
     capabilities: {
       canOwn: person.categories.some((category) => businessCategories.includes(category)),
       canBoss: person.roleCodes.some((code) => ['FDE_CHAIRMAN', 'FDE_PRESIDENT'].includes(code)),
-      canProjectManager: person.categories.some((category) => ['institution_leader', 'secretary', 'project_lead', 'member'].includes(category)),
+      canProjectManager: person.department === '投资部'
+        && person.categories.some((category) => ['institution_leader', 'secretary', 'project_lead', 'member'].includes(category)),
       canLegal: person.roleCodes.includes('FDE_LEGAL') || /法务/.test(person.role),
       // 当前组织没有单独的财务角色编码，专业岗均可承担财务复核；新增专岗后会自动进入候选列表。
       canFinance: person.categories.includes('specialist'),
@@ -78,7 +79,7 @@ export async function prepareFdeCreationGovernance(reader: Reader, input: { owne
     if (!selected(duty).length) throw failure(400, 'FDE_CREATION_DUTY_REQUIRED', `快速新建项目必须至少配置 1 位${label}`)
   }
   requireDuty('boss', '老板（陈斌或黄昕）')
-  requireDuty('project_manager', '项目经理')
+  requireDuty('project_manager', '投资项目组')
   requireDuty('legal', '法务')
   requireDuty('finance', '财务')
   const owner = byId.get(input.ownerUserId)
@@ -87,7 +88,7 @@ export async function prepareFdeCreationGovernance(reader: Reader, input: { owne
     const person = byId.get(assignment.userId)
     if (!person) throw failure(400, 'FDE_DUTY_PERSON_INVALID', '职责人员不存在或已禁用')
     if (assignment.duty === 'boss' && !person.capabilities.canBoss) throw failure(400, 'FDE_BOSS_INVALID', '老板只能选择陈斌或黄昕对应的启用账号')
-    if (assignment.duty === 'project_manager' && !person.capabilities.canProjectManager) throw failure(400, 'FDE_PROJECT_MANAGER_INVALID', '项目经理必须是启用的项目业务人员')
+    if (assignment.duty === 'project_manager' && !person.capabilities.canProjectManager) throw failure(400, 'FDE_PROJECT_MANAGER_INVALID', '投资项目组必须选择投资部的启用账号')
     if (assignment.duty === 'legal' && !person.capabilities.canLegal) throw failure(400, 'FDE_LEGAL_INVALID', '法务必须选择具备法务岗位的启用账号')
     if (assignment.duty === 'finance' && !person.capabilities.canFinance) throw failure(400, 'FDE_FINANCE_INVALID', '财务必须选择具备专业复核岗位的启用账号')
     if (assignment.duty === 'legal' || assignment.duty === 'finance') {

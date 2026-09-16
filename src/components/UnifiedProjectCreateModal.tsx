@@ -49,6 +49,8 @@ type TypePolicy = {
 
 type CreateStep = 'select-type' | 'fill-form'
 
+const isInvestmentDepartment = (person: CreationPerson) => person.department.trim() === '投资部'
+
 // ========== 子组件：人员选择器 ==========
 
 function PeoplePicker({ label, hint, people, value, onChange }: {
@@ -127,7 +129,14 @@ export function UnifiedProjectCreateModal({ open, onClose }: { open: boolean; on
         const current = result.people.find((person) => person.id === currentUser.id && person.capabilities.canOwn)
         const owner = current ?? result.people.find((person) => person.capabilities.canOwn)
         setOwnerUserId((value) => value || owner?.id || '')
-        if (current?.capabilities.canProjectManager) setDuties((value) => value.project_manager.length ? value : { ...value, project_manager: [current.id] })
+        const investmentManagerIds = new Set(result.people
+          .filter((person) => person.capabilities.canProjectManager && isInvestmentDepartment(person))
+          .map((person) => person.id))
+        setDuties((value) => {
+          const selectedManagers = value.project_manager.filter((id) => investmentManagerIds.has(id))
+          if (!selectedManagers.length && current && investmentManagerIds.has(current.id)) selectedManagers.push(current.id)
+          return { ...value, project_manager: selectedManagers }
+        })
       })
       .catch((error) => showToast(`加载人员失败：${(error as Error).message}`, 'error'))
       .finally(() => { if (!cancelled) setRosterLoading(false) })
@@ -158,7 +167,7 @@ export function UnifiedProjectCreateModal({ open, onClose }: { open: boolean; on
 
   const candidates = useMemo(() => ({
     boss: people.filter((person) => person.capabilities.canBoss),
-    project_manager: people.filter((person) => person.capabilities.canProjectManager),
+    project_manager: people.filter((person) => person.capabilities.canProjectManager && isInvestmentDepartment(person)),
     legal: people.filter((person) => person.capabilities.canLegal),
     finance: people.filter((person) => person.capabilities.canFinance),
   }), [people])
@@ -166,7 +175,7 @@ export function UnifiedProjectCreateModal({ open, onClose }: { open: boolean; on
   const submitInvestment = async () => {
     if (!form.name.trim()) return showToast('请填写项目名称', 'error')
     if (!ownerUserId) return showToast('请选择项目负责人', 'error')
-    const missing = ([['boss', '老板'], ['project_manager', '项目经理'], ['legal', '法务'], ['finance', '财务']] as const).find(([duty]) => duties[duty].length === 0)
+    const missing = ([['boss', '老板'], ['project_manager', '投资项目组'], ['legal', '法务'], ['finance', '财务']] as const).find(([duty]) => duties[duty].length === 0)
     if (missing) return showToast(`请至少选择 1 位${missing[1]}`, 'error')
     const owner = people.find((person) => person.id === ownerUserId)
     setSaving(true)
@@ -333,7 +342,7 @@ export function UnifiedProjectCreateModal({ open, onClose }: { open: boolean; on
         <div className="mb-3 flex items-start gap-3"><span className="grid h-9 w-9 place-items-center rounded-xl bg-brand-100 text-brand-700"><UsersRound className="h-4 w-4" /></span><div><h3 className="text-sm font-semibold text-slate-800">项目人员与强制职责</h3><p className="mt-1 text-xs text-slate-500">可一人兼任多个角色。创建成功后会原子写入项目库、成员关系和审批职责。</p></div></div>
         <div className="grid gap-3 md:grid-cols-2">
           <PeoplePicker label="老板" hint="至少 1 人，仅董事长或总裁。" people={candidates.boss} value={duties.boss} onChange={(ids) => setDuties({ ...duties, boss: ids })} />
-          <PeoplePicker label="项目经理" hint="至少 1 人，可与项目负责人为同一人。" people={candidates.project_manager} value={duties.project_manager} onChange={(ids) => setDuties({ ...duties, project_manager: ids })} />
+          <PeoplePicker label="投资项目组" hint="至少 1 人，可与项目负责人为同一人。" people={candidates.project_manager} value={duties.project_manager} onChange={(ids) => setDuties({ ...duties, project_manager: ids })} />
           <PeoplePicker label="法务" hint="至少 1 人，仅展示具备法务岗位的启用账号。" people={candidates.legal} value={duties.legal} onChange={(ids) => setDuties({ ...duties, legal: ids })} />
           <PeoplePicker label="财务" hint="至少 1 人，展示可承担专业复核的启用账号。" people={candidates.finance} value={duties.finance} onChange={(ids) => setDuties({ ...duties, finance: ids })} />
         </div>
