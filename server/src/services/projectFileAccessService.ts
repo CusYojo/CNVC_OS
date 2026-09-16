@@ -13,12 +13,15 @@ function enabledSystemAdmin(userId: string | SQL) {
     SELECT 1 FROM ${users} system_admin_actor
     WHERE system_admin_actor.id=${userId}
       AND system_admin_actor.status='启用'
-      AND EXISTS (
-        SELECT 1 FROM ${userRoles} system_admin_user_role
-        JOIN ${roles} system_admin_role ON system_admin_role.id=system_admin_user_role.role_id
-        WHERE system_admin_user_role.user_id=system_admin_actor.id
-          AND system_admin_role.status='启用'
-          AND system_admin_role.fde_category='system_admin'
+      AND (
+        system_admin_actor.role='系统管理员'
+        OR EXISTS (
+          SELECT 1 FROM ${userRoles} system_admin_user_role
+          JOIN ${roles} system_admin_role ON system_admin_role.id=system_admin_user_role.role_id
+          WHERE system_admin_user_role.user_id=system_admin_actor.id
+            AND system_admin_role.status='启用'
+            AND system_admin_role.fde_category='system_admin'
+        )
       )
   )`
 }

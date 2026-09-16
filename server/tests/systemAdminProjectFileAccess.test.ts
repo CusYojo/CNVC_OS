@@ -10,6 +10,7 @@ test('enabled system administrators receive file-domain access only', async () =
   const adminEnd = implementation.indexOf('function currentProjectScope', adminStart)
   const adminScope = implementation.slice(adminStart, adminEnd)
   assert.match(adminScope, /status='启用'/)
+  assert.match(adminScope, /role='系统管理员'/)
   assert.match(adminScope, /fde_category='system_admin'/)
 
   const businessStart = implementation.indexOf('function businessRole')
