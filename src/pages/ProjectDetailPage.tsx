@@ -44,9 +44,16 @@ import { FdeFilePanel } from '../components/FdeFilePanel'
 import { ProjectDetailHero } from '../components/ProjectDetailHero'
 import { PostInvestmentPanel } from '../components/PostInvestmentPanel'
 import { projectDetailTab, projectDetailTabs } from '../lib/projectDetailPresentation'
+import { summarizeProjectFileUpload, type ProjectFileUploadResult, type ProjectFileUploadSummary } from '../lib/projectFileUploadPresentation'
 import './ProjectDetailPage.css'
 
 const tabItems = projectDetailTabs
+const uploadSummaryToneClass: Record<ProjectFileUploadSummary['tone'], string> = {
+  success: 'border-emerald-200 bg-emerald-50/60 text-emerald-800',
+  warning: 'border-amber-200 bg-amber-50/70 text-amber-800',
+  error: 'border-rose-200 bg-rose-50/70 text-rose-800',
+  info: 'border-sky-200 bg-sky-50/70 text-sky-800',
+}
 
 function displayShanghaiDateTime(value: string | null | undefined): string {
   if (!value) return '—'
@@ -91,7 +98,7 @@ export function ProjectDetailPage() {
   useEffect(() => { setWorkspace(null) }, [id])
   const [showUpload, setShowUpload] = useState(false)
   const [uploading, setUploading] = useState<{ name: string; progress: number; id?: string; done?: number; total?: number } | null>(null)
-  const [uploadSummaries, setUploadSummaries] = useState<string[]>([])
+  const [uploadSummaries, setUploadSummaries] = useState<ProjectFileUploadSummary[]>([])
   const [generating, setGenerating] = useState(false)
   const [editingProject, setEditingProject] = useState<Project | null>(null)
   const [downloadingFileId, setDownloadingFileId] = useState<string | null>(null)
@@ -166,7 +173,7 @@ export function ProjectDetailPage() {
   }
 
   // 单文件上传：返回结果状态，供批量汇总。不在此弹 toast（批量结束统一汇总）。
-  const uploadOne = async (file: File, onProgress?: (pct: number) => void): Promise<'ok' | 'ingest-fail' | 'duplicate' | 'error'> => {
+  const uploadOne = async (file: File, onProgress?: (pct: number) => void): Promise<ProjectFileUploadResult> => {
     // 读为 base64 → 真实上传到后端，后端提取正文、切块入库供 AI 检索
     // 进度反馈：读取阶段用 FileReader.onprogress 映射到 0-70%，上传阶段推到 90%，完成 100%。
     const dataBase64: string = await new Promise((resolve, reject) => {
@@ -204,12 +211,14 @@ export function ProjectDetailPage() {
       useAppStore.setState((state) => ({ files: [{ projectId: project.id, name: file.name, type: file.name.split('.').pop()?.toUpperCase() ?? 'FILE', category: '项目资料', size: '', uploader: currentUser.name, visibility: '项目成员', version: 1, uploadedAt: new Date().toISOString(), ...created } as never, ...state.files] }))
       clearInterval(creepTimer)
       onProgress?.(100)
-      return ingest.ok ? 'ok' : 'ingest-fail'
+      return ingest.ok
+        ? { fileName: file.name, kind: 'success', message: '上传成功' }
+        : { fileName: file.name, kind: 'parse_warning', message: ingest.error || '文件已保存，内容解析失败' }
     } catch (err) {
       clearInterval(creepTimer)
       // 409 查重：资料已在库中，视为已存在（不算失败）
-      if (err instanceof ApiError && err.code === 'DUPLICATE') return 'duplicate'
-      return 'error'
+      if (err instanceof ApiError && err.code === 'DUPLICATE') return { fileName: file.name, kind: 'duplicate', message: '文件已存在' }
+      return { fileName: file.name, kind: 'error', message: err instanceof ApiError ? err.message : (err as Error).message || '上传失败，请重试' }
     }
   }
 
@@ -223,35 +232,28 @@ export function ProjectDetailPage() {
     const total = valid.length
     let done = 0
     setUploading({ name: valid.length === 1 ? valid[0].name : `批量上传 ${total} 个文件`, progress: 0, done: 0, total })
-    let okCount = 0, ingestFail = 0, dupCount = 0, errCount = 0
+    const results: ProjectFileUploadResult[] = []
     // 单文件：进度条跟随 uploadOne 的读取/上传阶段(0-100%)，不再死在 0%。
     // 多文件：进度条按 done/total 推进(单个文件的细粒度进度并入整体)。
     const single = total === 1
     try {
     await Promise.allSettled(valid.map(async (file) => {
-      let r: 'ok' | 'ingest-fail' | 'duplicate' | 'error'
+      let result: ProjectFileUploadResult
       try {
-        r = await uploadOne(file, (pct) => {
+        result = await uploadOne(file, (pct) => {
           if (single) setUploading((state) => state ? { ...state, progress: pct } : state)
         })
-      } catch { r = 'error' }
-      if (r === 'ok') okCount++
-      else if (r === 'ingest-fail') ingestFail++
-      else if (r === 'duplicate') dupCount++
-      else errCount++
+      } catch (err) {
+        result = { fileName: file.name, kind: 'error', message: err instanceof ApiError ? err.message : (err as Error).message || '上传失败，请重试' }
+      }
+      results.push(result)
       done++
       setUploading((state) => state ? { ...state, done, progress: single ? 100 : Math.round((done / total) * 100) } : state)
     }))
     // 汇总 toast
-    const parts: string[] = []
-    if (okCount) parts.push(`成功入库 ${okCount}`)
-    if (dupCount) parts.push(`已存在 ${dupCount}`)
-    if (ingestFail) parts.push(`上传成功但解析失败 ${ingestFail}`)
-    if (errCount) parts.push(`失败 ${errCount}`)
-    const tone: 'success' | 'error' | 'info' = errCount || ingestFail ? 'error' : (dupCount && !okCount ? 'info' : 'success')
-    const summary = `本批 ${total} 个：${parts.join('，')}`
+    const summary = summarizeProjectFileUpload(results)
     setUploadSummaries(current => [...current, summary])
-    showToast(`上传完成（${summary}）`, tone === 'success' ? undefined : tone)
+    showToast(`${summary.title}（${summary.text}）`, summary.tone === 'success' ? undefined : summary.tone === 'warning' ? 'error' : summary.tone)
     } finally {
       // 无论成功/失败都复位上传态，但保留弹窗，允许继续选择下一批；由用户点击“完成”后关闭。
       setUploading(null)
@@ -542,7 +544,7 @@ export function ProjectDetailPage() {
       <Modal open={showUpload} onClose={() => { if (!uploading) { setUploading(null); setShowUpload(false) } }} title="上传项目资料" footer={<Button disabled={Boolean(uploading)} onClick={() => { setUploading(null); setShowUpload(false) }}>完成</Button>}>
         {!uploading && <FileUpload onFiles={handleUploadFiles} multiple />}
         {uploading && <div className="mt-4 rounded-xl border border-slate-200 p-4"><div className="flex items-center justify-between text-sm"><span className="font-medium text-slate-700">{uploading.name}</span><span className="text-brand-600">{uploading.total && uploading.total > 1 ? `${uploading.done ?? 0}/${uploading.total}` : `${uploading.progress}%`}</span></div><div className="mt-3"><ProgressBar value={uploading.progress} /></div><p className="mt-2 text-xs text-slate-400">{uploading.total && uploading.total > 1 ? `正在批量上传并解析…（${uploading.done ?? 0}/${uploading.total}）` : (uploading.progress < 100 ? '正在安全上传…' : '上传完成，正在提取文本并写入知识库…')}</p></div>}
-        {uploadSummaries.length > 0 && <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50/60 p-4"><p className="text-sm font-medium text-emerald-800">已完成上传，窗口将保持打开</p><div className="mt-2 space-y-1">{uploadSummaries.map((summary, index) => <p key={`${summary}-${index}`} className="text-xs text-emerald-700">第 {index + 1} 批 · {summary}</p>)}</div><p className="mt-2 text-xs text-slate-500">可以继续选择一个或多个文件；全部完成后点击右下角“完成”。</p></div>}
+        {uploadSummaries.length > 0 && <div className="mt-4 space-y-3">{uploadSummaries.map((summary, index) => <div key={`${summary.title}-${index}`} className={`rounded-xl border p-4 ${uploadSummaryToneClass[summary.tone]}`}><p className="text-sm font-semibold">第 {index + 1} 批 · {summary.title}</p><p className="mt-1 text-xs opacity-90">{summary.text}</p><div className="mt-2 space-y-1">{summary.details.map((detail, detailIndex) => <p key={`${detail}-${detailIndex}`} className="text-xs opacity-80">{detail}</p>)}</div></div>)}<p className="text-xs text-slate-500">可以继续选择一个或多个文件；全部完成后点击右下角“完成”。</p></div>}
         <div className="mt-4 rounded-lg bg-slate-50 p-3 text-xs leading-5 text-slate-500">上传即表示该资料允许在当前项目范围内被 AI 检索。敏感财务与协议文件可在上传后调整可见范围。</div>
       </Modal>
 
