@@ -123,9 +123,16 @@ function ProjectWorkflowPage() {
   const isActionableByCurrentUser = (request: ApprovalRequest) => {
     if (['agent_schedule', 'project_replan'].includes(request.businessType ?? '')) return false
     if (request.status !== '审批中') return false
-    if (request.applicantUserId === currentUser.id) return false
     const node = request.nodes.find((item) => item.id === request.currentNodeId)
     if (!node) return false
+    const adminSelfNode = isAdminSelfApprovalNode({
+      actorRole: currentUser.role,
+      actorId: currentUser.id,
+      applicantUserId: request.applicantUserId ?? '',
+      nodeName: node.name,
+      approverUserIds: node.approverUserIds ?? [],
+    })
+    if (request.applicantUserId === currentUser.id && !adminSelfNode) return false
     if (currentUser.role === '系统管理员' && request.businessType !== 'task_extension' && projects.find((project) => project.id === request.projectId)?.workflowModel !== 'fde-v1') return true
     return (node.approverUserIds?.includes(currentUser.id) ?? splitApprovers(node.approver).includes(currentUser.name)) && !(node.mode === '会签' && (node.approvedByUserIds?.includes(currentUser.id) ?? node.approvedBy?.includes(currentUser.name)))
   }
