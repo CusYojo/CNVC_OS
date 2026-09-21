@@ -1,6 +1,6 @@
 import type { LeadListItem } from '../types'
 
-export type ProjectDiscoveryPeriod = 'today' | 'week'
+export type ProjectDiscoveryPeriod = 'today' | 'week' | 'all'
 export type ProjectDiscoveryKind = 'all' | 'company' | 'research'
 
 export type ProjectDiscoveryFilters = {

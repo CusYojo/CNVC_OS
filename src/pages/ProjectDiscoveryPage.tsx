@@ -23,6 +23,7 @@ import './ProjectDiscoveryPage.css'
 const periods: Array<{ value: ProjectDiscoveryPeriod; label: string }> = [
   { value: 'today', label: '今天新发现' },
   { value: 'week', label: '近 7 天' },
+  { value: 'all', label: '全部项目' },
 ]
 
 const kinds: Array<{ value: ProjectDiscoveryKind; label: string }> = [
