@@ -82,6 +82,11 @@ test('project discovery filters by local time window, type, and searchable inves
     filterProjectDiscoveryCandidates([research, company], { period: 'week', query: '触觉', kind: 'research', now }).map((item) => item.id),
     ['research-1'],
   )
+  assert.deepEqual(
+    filterProjectDiscoveryCandidates([research, company, rescoredOldLead], { period: 'all', query: '', kind: 'all', now }).map((item) => item.id),
+    ['company-1', 'research-1', 'company-rescored'],
+    '全部项目应解除近 7 天时间限制，并继续按资料时间倒序排列',
+  )
 })
 
 test('project discovery loads every page because ingestion order can differ from publication order', () => {

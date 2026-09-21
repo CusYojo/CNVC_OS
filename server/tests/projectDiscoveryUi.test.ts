@@ -17,6 +17,7 @@ test('project center exposes the imported discovery workspace without rewriting 
   assert.match(discovery, /<h1>新项目发现<\/h1>/)
   assert.match(discovery, /今天新发现/)
   assert.match(discovery, /近 7 天/)
+  assert.match(discovery, /value: 'all', label: '全部项目'/, '时间筛选应提供全部项目入口')
   assert.doesNotMatch(discovery, /label: '全部'/, '发现页不应将首页候选误标为全量')
   assert.match(discovery, /action === 'scan' \? '开始更新' : '检查更新'/, '检查期间应立即显示开始更新状态')
   assert.match(discovery, /action === 'upload' \? '上传中' : '人工上传项目'/, '标题右侧应保留人工上传项目入口')
