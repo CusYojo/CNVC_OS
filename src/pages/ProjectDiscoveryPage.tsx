@@ -1,15 +1,17 @@
 import {
-  ArrowRight, Building2, CalendarDays, CheckCircle2, FlaskConical, LoaderCircle,
-  MapPin, RefreshCw, Search, Sparkles, TrendingUp, X,
+  ArrowRight, Bot, Building2, CalendarDays, CheckCircle2, FileUp, FlaskConical, LoaderCircle,
+  MapPin, Radar, RefreshCw, Search, Sparkles, TrendingUp, X,
 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { EmptyState } from '../components/ui'
+import { apiPost } from '../lib/api'
 import {
   buildProjectDiscoverySummary,
   discoveryCandidateKind,
   filterProjectDiscoveryCandidates,
   projectDiscoveryCandidateDay,
+  shouldLoadNextProjectDiscoveryPage,
   type ProjectDiscoveryKind,
   type ProjectDiscoveryPeriod,
 } from '../lib/projectDiscovery'
@@ -20,7 +22,6 @@ import './ProjectDiscoveryPage.css'
 const periods: Array<{ value: ProjectDiscoveryPeriod; label: string }> = [
   { value: 'today', label: '今天新发现' },
   { value: 'week', label: '近 7 天' },
-  { value: 'all', label: '全部' },
 ]
 
 const kinds: Array<{ value: ProjectDiscoveryKind; label: string }> = [
@@ -29,10 +30,21 @@ const kinds: Array<{ value: ProjectDiscoveryKind; label: string }> = [
   { value: 'research', label: '科研成果' },
 ]
 
+type RadarSyncResult = { created: number; updated: number; unchanged: number; skipped: number; fetched: number }
+type BpUploadResult = { id: string; name: string; status: string; progress: number }
+
+const readFileAsDataUrl = (file: File) => new Promise<string>((resolve, reject) => {
+  const reader = new FileReader()
+  reader.onerror = () => reject(new Error('文件读取失败，请重新选择'))
+  reader.onload = () => resolve(String(reader.result))
+  reader.readAsDataURL(file)
+})
+
 export function ProjectDiscoveryPage() {
   const fetchLeads = useAppStore((state) => state.fetchLeads)
   const navigate = useNavigate()
   const location = useLocation()
+  const requestSerial = useRef(0)
   const [candidates, setCandidates] = useState<LeadListItem[]>([])
   const [period, setPeriod] = useState<ProjectDiscoveryPeriod>('week')
   const [kind, setKind] = useState<ProjectDiscoveryKind>('all')
@@ -40,18 +52,34 @@ export function ProjectDiscoveryPage() {
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState('')
+  const [action, setAction] = useState<'scan' | 'upload' | ''>('')
+  const [notice, setNotice] = useState<{ tone: 'success' | 'error'; text: string } | null>(null)
 
   const loadCandidates = useCallback(async (refresh = false) => {
+    const serial = ++requestSerial.current
     refresh ? setRefreshing(true) : setLoading(true)
     setError('')
     try {
-      const response = await fetchLeads({ page: 1, pageSize: 50, sort: 'latest' })
-      if (response) setCandidates(response.list)
+      let response = await fetchLeads({ page: 1, pageSize: 50, sort: 'latest' })
+      if (!response) return
+      const rows = [...response.list]
+      while (shouldLoadNextProjectDiscoveryPage(response.list, response.page, response.totalPages)) {
+        const next = await fetchLeads({ page: response.page + 1, pageSize: 50, sort: 'latest' })
+        if (!next) return
+        rows.push(...next.list)
+        response = next
+      }
+      if (serial === requestSerial.current) {
+        const unique = new Map(rows.map((lead) => [lead.id, lead]))
+        setCandidates([...unique.values()])
+      }
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '新项目读取失败')
+      if (serial === requestSerial.current) setError(cause instanceof Error ? cause.message : '新项目读取失败')
     } finally {
-      setLoading(false)
-      setRefreshing(false)
+      if (serial === requestSerial.current) {
+        setLoading(false)
+        setRefreshing(false)
+      }
     }
   }, [fetchLeads])
 
@@ -66,6 +94,49 @@ export function ProjectDiscoveryPage() {
     navigate(`/sourcing/${lead.id}`, { state: { from: `${location.pathname}${location.search}` } })
   }
 
+  const runRadarScan = async () => {
+    if (action) return
+    setAction('scan')
+    setNotice(null)
+    try {
+      const result = await apiPost<RadarSyncResult>('/leads/sync-radar', { limit: 50, incrementalPages: 1, source: 'all' })
+      setNotice({ tone: 'success', text: `信源扫描完成：读取 ${result.fetched} 条，新增 ${result.created} 条，更新 ${result.updated} 条。` })
+      await loadCandidates(true)
+    } catch (cause) {
+      setNotice({ tone: 'error', text: cause instanceof Error ? cause.message : '信源扫描失败，请稍后重试' })
+    } finally {
+      setAction('')
+    }
+  }
+
+  const uploadBp = async (file?: File) => {
+    if (!file || action) return
+    if (file.size > 20 * 1024 * 1024) {
+      setNotice({ tone: 'error', text: '文件不能超过 20 MB。' })
+      return
+    }
+    if (!/\.(pdf|docx|pptx|xlsx?|png|jpe?g|gif|bmp|webp|txt|md|markdown)$/i.test(file.name)) {
+      setNotice({ tone: 'error', text: '请选择 PDF、Office、图片或文本格式的项目材料。' })
+      return
+    }
+    setAction('upload')
+    setNotice(null)
+    try {
+      const uploaded = await apiPost<BpUploadResult>('/leads/bp-uploads', {
+        name: file.name,
+        declaredType: file.type || undefined,
+        dataBase64: await readFileAsDataUrl(file),
+        idempotencyKey: crypto.randomUUID(),
+      })
+      setNotice({ tone: 'success', text: `${uploaded.name} 已进入解析队列；完成后会自动出现在发现列表。` })
+      await loadCandidates(true)
+    } catch (cause) {
+      setNotice({ tone: 'error', text: cause instanceof Error ? cause.message : '项目材料上传失败，请稍后重试' })
+    } finally {
+      setAction('')
+    }
+  }
+
   return <div className="project-discovery-page">
     <header className="project-discovery-hero">
       <div className="project-discovery-title">
@@ -77,11 +148,30 @@ export function ProjectDiscoveryPage() {
       </button>
     </header>
 
+    <section className="project-discovery-actions" aria-labelledby="project-discovery-actions-title">
+      <div className="project-discovery-action-copy">
+        <span><Bot aria-hidden="true" /></span>
+        <div><h2 id="project-discovery-actions-title">补充发现来源</h2><p>扫描已配置的融资、产业与论文公开信源；新候选进入同一复核列表。</p></div>
+      </div>
+      <div className="project-discovery-action-buttons">
+        <button type="button" disabled={Boolean(action)} onClick={() => void runRadarScan()}>
+          {action === 'scan' ? <LoaderCircle className="is-spinning" aria-hidden="true" /> : <Radar aria-hidden="true" />}
+          {action === 'scan' ? '扫描中' : '启动信源扫描'}
+        </button>
+        <label className={action ? 'is-disabled' : ''}>
+          {action === 'upload' ? <LoaderCircle className="is-spinning" aria-hidden="true" /> : <FileUp aria-hidden="true" />}
+          {action === 'upload' ? '上传中' : '人工上传 BP'}
+          <input type="file" disabled={Boolean(action)} accept=".pdf,.docx,.pptx,.xls,.xlsx,.png,.jpg,.jpeg,.gif,.bmp,.webp,.txt,.md,.markdown" aria-label="人工上传项目线索" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; void uploadBp(file) }} />
+        </label>
+      </div>
+    </section>
+    {notice && <p className={`project-discovery-notice ${notice.tone}`} role={notice.tone === 'error' ? 'alert' : 'status'}>{notice.text}</p>}
+
     <section className="project-discovery-metrics" aria-label="发现概览">
-      <DiscoveryMetric icon={<TrendingUp />} label="当前结果" value={summary.total} tone="blue" />
-      <DiscoveryMetric icon={<Building2 />} label="企业项目" value={summary.companies} tone="cyan" />
-      <DiscoveryMetric icon={<FlaskConical />} label="科研成果" value={summary.research} tone="purple" />
-      <DiscoveryMetric icon={<CheckCircle2 />} label="可研判画像" value={summary.verified} tone="green" />
+      <DiscoveryMetric icon={<TrendingUp aria-hidden="true" />} label="当前结果" value={summary.total} tone="blue" />
+      <DiscoveryMetric icon={<Building2 aria-hidden="true" />} label="企业项目" value={summary.companies} tone="cyan" />
+      <DiscoveryMetric icon={<FlaskConical aria-hidden="true" />} label="科研成果" value={summary.research} tone="purple" />
+      <DiscoveryMetric icon={<CheckCircle2 aria-hidden="true" />} label="可研判画像" value={summary.verified} tone="green" />
     </section>
 
     <section className="project-discovery-toolbar" aria-label="项目发现筛选">
@@ -97,7 +187,7 @@ export function ProjectDiscoveryPage() {
       <label className="project-discovery-search">
         <Search aria-hidden="true" />
         <input value={query} maxLength={100} onChange={(event) => setQuery(event.target.value.slice(0, 100))} placeholder="搜索项目、赛道、产品或机构" aria-label="搜索新发现项目" />
-        {query && <button type="button" onClick={() => setQuery('')} aria-label="清空发现搜索"><X /></button>}
+        {query && <button type="button" onClick={() => setQuery('')} aria-label="清空发现搜索"><X aria-hidden="true" /></button>}
       </label>
     </section>
 
@@ -134,9 +224,10 @@ function DiscoveryCard({ lead, onOpen }: { lead: LeadListItem; onOpen: () => voi
   const stage = kind === 'research'
     ? research?.progress?.venue || research?.progress?.resourceType || '科研成果'
     : investment?.financing.latestRound || investment?.products[0]?.productionStage || '融资阶段未披露'
-  const institution = kind === 'research'
+  const entity = kind === 'research'
     ? research?.team?.affiliations?.[0] || lead.companyName
-    : investment?.institutions[0]?.name || lead.companyName
+    : lead.companyName || investment?.subject?.legalEntityName
+  const relatedInstitution = kind === 'company' ? investment?.institutions[0]?.name : undefined
   const dataStatus = kind === 'research' ? research?.dataStatus.status : investment?.dataStatus.status
 
   return <article className="project-discovery-card" tabIndex={0} role="button" onClick={onOpen} onKeyDown={(event) => {
@@ -144,21 +235,22 @@ function DiscoveryCard({ lead, onOpen }: { lead: LeadListItem; onOpen: () => voi
   }} aria-label={`查看${lead.name}线索详情`}>
     <header>
       <span className={`project-discovery-kind-badge ${kind}`}>
-        {kind === 'research' ? <FlaskConical /> : <Building2 />}{kind === 'research' ? '科研成果' : '企业项目'}
+        {kind === 'research' ? <FlaskConical aria-hidden="true" /> : <Building2 aria-hidden="true" />}{kind === 'research' ? '科研成果' : '企业项目'}
       </span>
-      <span className="project-discovery-date"><CalendarDays />{projectDiscoveryCandidateDay(lead).replaceAll('-', '.')}</span>
+      <span className="project-discovery-date"><CalendarDays aria-hidden="true" />{projectDiscoveryCandidateDay(lead).replaceAll('-', '.')}</span>
     </header>
     <div className="project-discovery-card-body">
       <h3>{lead.name || lead.companyName || '未命名项目'}</h3>
-      <p className="project-discovery-entity">{institution || '主体待核对'}</p>
+      <p className="project-discovery-entity">{entity || '主体待核对'}</p>
       <div className="project-discovery-tags">{tags.length ? tags.map((tag) => <span key={tag}>{tag}</span>) : <span>赛道待补充</span>}</div>
-      <div className="project-discovery-signal"><Sparkles /><p>{signal}</p></div>
+      <div className="project-discovery-signal"><Sparkles aria-hidden="true" /><p>{signal}</p></div>
       <dl>
         <div><dt>当前阶段</dt><dd>{stage}</dd></div>
-        <div><dt>所在地</dt><dd><MapPin />{lead.region || '待核对'}</dd></div>
+        {relatedInstitution && <div><dt>关联机构</dt><dd>{relatedInstitution}</dd></div>}
+        <div><dt>所在地</dt><dd><MapPin aria-hidden="true" />{lead.region || '待核对'}</dd></div>
         <div><dt>画像状态</dt><dd>{dataStatus === 'verified' ? '已核验' : dataStatus === 'partial' ? '部分核验' : '待完善'}</dd></div>
       </dl>
     </div>
-    <footer><span>查看证据与完整画像</span><ArrowRight /></footer>
+    <footer><span>查看证据、复核并决定是否入库</span><ArrowRight aria-hidden="true" /></footer>
   </article>
 }

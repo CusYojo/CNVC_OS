@@ -1,6 +1,6 @@
 import type { LeadListItem } from '../types'
 
-export type ProjectDiscoveryPeriod = 'today' | 'week' | 'all'
+export type ProjectDiscoveryPeriod = 'today' | 'week'
 export type ProjectDiscoveryKind = 'all' | 'company' | 'research'
 
 export type ProjectDiscoveryFilters = {
@@ -20,7 +20,20 @@ export function projectDiscoveryDay(value?: string): string {
 }
 
 export function projectDiscoveryCandidateDay(lead: LeadListItem): string {
-  return projectDiscoveryDay(lead.dataUpdatedAt || lead.poolEnteredAt)
+  return projectDiscoveryDay(lead.poolEnteredAt || lead.latestUpdates?.[0]?.occurredAt || lead.dataUpdatedAt)
+}
+
+export function shouldLoadNextProjectDiscoveryPage(
+  candidates: readonly LeadListItem[],
+  page: number,
+  totalPages: number,
+  now = new Date(),
+): boolean {
+  if (page >= totalPages) return false
+  if (candidates.length === 0) return false
+  const weekStart = projectDiscoveryDay(new Date(now.getTime() - 6 * 86_400_000).toISOString())
+  const lastDay = projectDiscoveryCandidateDay(candidates[candidates.length - 1])
+  return !lastDay || lastDay >= weekStart
 }
 
 export function filterProjectDiscoveryCandidates(
@@ -43,7 +56,7 @@ export function filterProjectDiscoveryCandidates(
     return projectDiscoverySearchText(lead).includes(query)
   }).sort((left, right) => (
     projectDiscoveryCandidateDay(right).localeCompare(projectDiscoveryCandidateDay(left))
-      || (right.dataUpdatedAt || right.poolEnteredAt || '').localeCompare(left.dataUpdatedAt || left.poolEnteredAt || '')
+      || (right.poolEnteredAt || right.latestUpdates?.[0]?.occurredAt || right.dataUpdatedAt || '').localeCompare(left.poolEnteredAt || left.latestUpdates?.[0]?.occurredAt || left.dataUpdatedAt || '')
       || left.id.localeCompare(right.id)
   ))
 }

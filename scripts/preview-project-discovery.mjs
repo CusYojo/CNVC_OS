@@ -7,9 +7,12 @@ const port = Number(process.env.PROJECT_DISCOVERY_PREVIEW_PORT || 4177)
 const dist = resolve(process.cwd(), 'dist')
 const indexHtml = await readFile(resolve(dist, 'index.html'), 'utf8')
 
+const shanghaiDay = (date) => new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
+}).format(date)
 const day = (offset) => {
   const date = new Date(Date.now() - offset * 86_400_000)
-  return date.toISOString().slice(0, 10)
+  return shanghaiDay(date)
 }
 const timestamp = (offset, hour) => `${day(offset)}T${String(hour).padStart(2, '0')}:30:00.000Z`
 
@@ -61,7 +64,22 @@ app.use(express.json())
 app.get('/api/auth/me', (_req, res) => res.json({ user: { id: 'preview-user', email: 'preview@example.invalid', name: '本地预览', role: '投资经理', department: '投资部', status: '启用', permissionCodes: [] } }))
 app.get('/api/leads', (req, res) => {
   const pageSize = Math.min(50, Math.max(1, Number(req.query.pageSize) || 20))
-  res.json({ list: leads.slice(0, pageSize), total: leads.length, page: 1, pageSize, totalPages: 1 })
+  const page = Math.max(1, Number(req.query.page) || 1)
+  const totalPages = Math.max(1, Math.ceil(leads.length / pageSize))
+  res.json({ list: leads.slice((page - 1) * pageSize, page * pageSize), total: leads.length, page, pageSize, totalPages })
+})
+app.post('/api/leads/sync-radar', (_req, res) => {
+  const id = 'preview-radar-new'
+  const exists = leads.some((item) => item.id === id)
+  if (!exists) leads.unshift(company({ id, name: '澄空智航', legalName: '杭州澄空智能航空有限公司', region: '浙江', industry: '高端制造', segment: '低空经济', product: '自主飞行控制平台', institution: '启航产业基金', round: '天使轮', amount: '2500万元', offset: 0, signal: '公开信源披露首轮融资与样机试飞进展' }))
+  res.json({ fetched: 18, created: exists ? 0 : 1, updated: exists ? 1 : 0, unchanged: 17, skipped: 17 })
+})
+app.post('/api/leads/bp-uploads', (req, res) => {
+  const rawName = String(req.body?.name || '人工上传项目')
+  const name = rawName.replace(/\.[^.]+$/, '').replace(/(?:商业计划书|融资计划书|项目介绍|路演材料|BP)/gi, '').trim() || '人工上传项目'
+  const id = `preview-upload-${Date.now()}`
+  leads.unshift(company({ id, name, legalName: `${name}（主体待核对）`, region: '待核对', industry: '人工上传', segment: '待研判', product: '材料解析中', institution: '待核对', round: '未披露', amount: '未披露', offset: 0, signal: '人工上传材料已保存，等待结构化核验' }))
+  res.status(202).json({ id, name: rawName, status: 'queued', progress: 5 })
 })
 app.get('/api/leads/:id/verified-profile', (req, res) => {
   const lead = leads.find((item) => item.id === req.params.id)
