@@ -1,4 +1,4 @@
-import { FolderKanban, Inbox, Star, UsersRound } from 'lucide-react'
+import { FolderKanban, Inbox, Sparkles, Star, UsersRound } from 'lucide-react'
 import { useSearchParams } from 'react-router-dom'
 import { useState } from 'react'
 import type { ProjectClassification } from '../types'
@@ -6,11 +6,13 @@ import type { ProjectListCounts } from '../services/projectListApi'
 import { ProjectsPage } from './ProjectsPage'
 import { SourcingPage } from './SourcingPage'
 import { LeadReviewPanel } from '../components/LeadReviewPanel'
+import { ProjectDiscoveryPage } from './ProjectDiscoveryPage'
 
-type ProjectCenterView = 'leads' | 'reviews' | ProjectClassification
+type ProjectCenterView = 'leads' | 'discover' | 'reviews' | ProjectClassification
 
 const views: Array<{ id: ProjectCenterView; label: string; icon: typeof Inbox }> = [
   { id: 'leads', label: '线索池', icon: Inbox },
+  { id: 'discover', label: '新项目发现', icon: Sparkles },
   { id: 'reviews', label: '待复核', icon: Inbox },
   { id: 'pool', label: '项目池', icon: FolderKanban },
   { id: 'normal', label: '普通项目', icon: UsersRound },
@@ -57,7 +59,7 @@ export function ProjectCenterPage() {
             )
           })}
         </div>
-      {view === 'leads' ? <SourcingPage /> : view === 'reviews' ? <LeadReviewPanel /> : <ProjectsPage classification={view} embedded onCountsChange={setClassificationCounts} />}
+      {view === 'leads' ? <SourcingPage /> : view === 'discover' ? <ProjectDiscoveryPage /> : view === 'reviews' ? <LeadReviewPanel /> : <ProjectsPage classification={view} embedded onCountsChange={setClassificationCounts} />}
     </div>
   )
 }
