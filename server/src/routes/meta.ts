@@ -30,6 +30,7 @@ import {
   type LeadScoreJob,
 } from '../services/aiSummaryService.js'
 import { commitManualLead } from '../services/leadIntakeService.js'
+import { writeAudit } from '../services/auditService.js'
 import {
   enqueueLeadScoreJob,
   getLeadScoreJobBinding,
@@ -1543,14 +1544,25 @@ export async function runRadarSyncImport(input: RadarSyncInput = {}, actorUserId
   }
 }
 
-metaRouter.post('/leads/sync-radar', async (req: AuthedRequest, res, next) => {
+metaRouter.post('/leads/sync-radar', requireSystemAdmin, async (req: AuthedRequest, res, next) => {
   try {
-    res.json(await runRadarSyncImport(req.body ?? {}, req.user?.uid))
+    const result = await runRadarSyncImport(req.body ?? {}, req.user!.uid)
+    await writeAudit({
+      userId: req.user!.uid, userName: req.user!.name, module: '项目获取池', action: '手动同步项目发现雷达',
+      target: `fetched:${result.fetched};created:${result.created};updated:${result.updated};skipped:${result.skipped}`,
+      ip: req.ip, requestId: String(res.locals.requestId || ''),
+    })
+    res.json(result)
   } catch (err) {
     if (err instanceof RadarSyncAlreadyRunningError) {
       res.status(409).json({ code: 'RADAR_SYNC_RUNNING', message: err.message })
       return
     }
+    await writeAudit({
+      userId: req.user!.uid, userName: req.user!.name, module: '项目获取池', action: '手动同步项目发现雷达',
+      target: err instanceof Error ? err.message : 'unknown error', result: 'failed', ip: req.ip,
+      requestId: String(res.locals.requestId || ''),
+    }).catch(() => undefined)
     next(err)
   }
 })

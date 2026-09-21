@@ -16,6 +16,7 @@ import {
   type ProjectDiscoveryPeriod,
 } from '../lib/projectDiscovery'
 import { useAppStore } from '../store/useAppStore'
+import { useAuthStore } from '../store/useAuthStore'
 import type { LeadListItem } from '../types'
 import './ProjectDiscoveryPage.css'
 
@@ -53,6 +54,7 @@ async function waitForBpUpload(id: string): Promise<BpUploadResult> {
 
 export function ProjectDiscoveryPage() {
   const fetchLeads = useAppStore((state) => state.fetchLeads)
+  const currentUser = useAuthStore((state) => state.user)
   const navigate = useNavigate()
   const location = useLocation()
   const requestSerial = useRef(0)
@@ -65,6 +67,7 @@ export function ProjectDiscoveryPage() {
   const [error, setError] = useState('')
   const [action, setAction] = useState<'scan' | 'upload' | ''>('')
   const [notice, setNotice] = useState<{ tone: 'success' | 'error'; text: string } | null>(null)
+  const canRunRadar = currentUser?.role === '系统管理员' || currentUser?.permissionCodes?.includes('system.manage')
 
   const loadCandidates = useCallback(async (refresh = false) => {
     const serial = ++requestSerial.current
@@ -110,7 +113,9 @@ export function ProjectDiscoveryPage() {
     setAction('scan')
     setNotice(null)
     try {
-      const result = await apiPost<RadarSyncResult>('/leads/sync-radar', { limit: 50, incrementalPages: 1, source: 'all' })
+      const result = await apiPost<RadarSyncResult>('/leads/sync-radar', { limit: 50, incrementalPages: 1, source: 'all' }, {
+        signal: AbortSignal.timeout(10 * 60_000),
+      })
       setNotice({ tone: 'success', text: `信源扫描完成：读取 ${result.fetched} 条，新增 ${result.created} 条，更新 ${result.updated} 条。` })
       await loadCandidates(true)
     } catch (cause) {
@@ -139,6 +144,10 @@ export function ProjectDiscoveryPage() {
         dataBase64: await readFileAsDataUrl(file),
       })
       if (!['ready', 'review', 'rejected', 'dead_letter'].includes(uploaded.status)) uploaded = await waitForBpUpload(uploaded.id)
+      if (uploaded.status === 'dead_letter') {
+        uploaded = await apiPost<BpUploadResult>(`/leads/bp-uploads/${uploaded.id}/retry`)
+        uploaded = await waitForBpUpload(uploaded.id)
+      }
       if (uploaded.status === 'dead_letter' || uploaded.status === 'rejected') {
         throw new Error(uploaded.error || '材料未通过解析或主体校验，请核对后重试。')
       }
@@ -173,10 +182,10 @@ export function ProjectDiscoveryPage() {
         <div><h2 id="project-discovery-actions-title">补充发现来源</h2><p>扫描已配置的融资、产业与论文公开信源；新候选进入同一复核列表。</p></div>
       </div>
       <div className="project-discovery-action-buttons">
-        <button type="button" disabled={Boolean(action)} onClick={() => void runRadarScan()}>
+        {canRunRadar ? <button type="button" disabled={Boolean(action)} onClick={() => void runRadarScan()}>
           {action === 'scan' ? <LoaderCircle className="is-spinning" aria-hidden="true" /> : <Radar aria-hidden="true" />}
           {action === 'scan' ? '扫描中' : '启动信源扫描'}
-        </button>
+        </button> : <span className="project-discovery-admin-note">信源扫描由系统管理员运行</span>}
         <label className={action ? 'is-disabled' : ''}>
           {action === 'upload' ? <LoaderCircle className="is-spinning" aria-hidden="true" /> : <FileUp aria-hidden="true" />}
           {action === 'upload' ? '上传中' : '人工上传 BP'}
@@ -216,7 +225,7 @@ export function ProjectDiscoveryPage() {
         <strong>{visible.length} 项</strong>
       </div>
 
-      {loading ? <div className="project-discovery-state"><LoaderCircle className="is-spinning" /><strong>正在整理最新项目信号</strong><p>读取已收录的公开信源与结构化画像。</p></div>
+      {loading ? <div className="project-discovery-state"><LoaderCircle className="is-spinning" aria-hidden="true" /><strong>正在整理最新项目信号</strong><p>读取已收录的公开信源与结构化画像。</p></div>
         : error ? <div className="project-discovery-state project-discovery-error"><strong>新项目读取失败</strong><p>{error}</p><button type="button" onClick={() => void loadCandidates()}>重新加载</button></div>
           : visible.length === 0 ? <EmptyState title="当前范围没有新项目" description="试试切换到近 7 天、全部类型，或调整搜索关键词。" />
             : <div className="project-discovery-grid">{visible.map((lead) => <DiscoveryCard key={lead.id} lead={lead} onOpen={() => openLead(lead)} />)}</div>}

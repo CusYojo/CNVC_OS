@@ -62,7 +62,7 @@ const leads = [
 const uploads = new Map()
 
 app.use(express.json())
-app.get('/api/auth/me', (_req, res) => res.json({ user: { id: 'preview-user', email: 'preview@example.invalid', name: '本地预览', role: '投资经理', department: '投资部', status: '启用', permissionCodes: [] } }))
+app.get('/api/auth/me', (_req, res) => res.json({ user: { id: 'preview-user', email: 'preview@example.invalid', name: '本地预览', role: '系统管理员', department: '投资部', status: '启用', permissionCodes: ['system.manage'] } }))
 app.get('/api/leads', (req, res) => {
   const pageSize = Math.min(50, Math.max(1, Number(req.query.pageSize) || 20))
   const page = Math.max(1, Number(req.query.page) || 1)
@@ -93,6 +93,12 @@ app.get('/api/leads/bp-uploads/:id', (req, res) => {
     leads.unshift(company({ id: upload.id, name, legalName: `${name}（主体待核对）`, region: '待核对', industry: '人工上传', segment: '待研判', product: '材料解析完成', institution: '待核对', round: '未披露', amount: '未披露', offset: 0, signal: '人工上传材料已解析，等待进一步核验' }))
     Object.assign(upload, { status: 'ready', progress: 100, leadId: upload.id })
   }
+  res.json(upload)
+})
+app.post('/api/leads/bp-uploads/:id/retry', (req, res) => {
+  const upload = uploads.get(req.params.id)
+  if (!upload || upload.status !== 'dead_letter') return res.status(409).json({ code: 'BP_RETRY_NOT_ALLOWED', message: '当前任务不可重试' })
+  Object.assign(upload, { status: 'queued', progress: 5 })
   res.json(upload)
 })
 app.get('/api/leads/:id/verified-profile', (req, res) => {

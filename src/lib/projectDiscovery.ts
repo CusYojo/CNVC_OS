@@ -20,20 +20,16 @@ export function projectDiscoveryDay(value?: string): string {
 }
 
 export function projectDiscoveryCandidateDay(lead: LeadListItem): string {
-  return projectDiscoveryDay(lead.poolEnteredAt || lead.latestUpdates?.[0]?.occurredAt || lead.dataUpdatedAt)
+  return projectDiscoveryDay(lead.radarProfile?.publishedAt || lead.latestUpdates?.[0]?.occurredAt || lead.poolEnteredAt || lead.dataUpdatedAt)
 }
 
 export function shouldLoadNextProjectDiscoveryPage(
-  candidates: readonly LeadListItem[],
+  _candidates: readonly LeadListItem[],
   page: number,
   totalPages: number,
-  now = new Date(),
+  _now = new Date(),
 ): boolean {
-  if (page >= totalPages) return false
-  if (candidates.length === 0) return false
-  const weekStart = projectDiscoveryDay(new Date(now.getTime() - 6 * 86_400_000).toISOString())
-  const lastDay = projectDiscoveryCandidateDay(candidates[candidates.length - 1])
-  return !lastDay || lastDay >= weekStart
+  return page < totalPages
 }
 
 export function filterProjectDiscoveryCandidates(
@@ -56,7 +52,7 @@ export function filterProjectDiscoveryCandidates(
     return projectDiscoverySearchText(lead).includes(query)
   }).sort((left, right) => (
     projectDiscoveryCandidateDay(right).localeCompare(projectDiscoveryCandidateDay(left))
-      || (right.poolEnteredAt || right.latestUpdates?.[0]?.occurredAt || right.dataUpdatedAt || '').localeCompare(left.poolEnteredAt || left.latestUpdates?.[0]?.occurredAt || left.dataUpdatedAt || '')
+      || (right.radarProfile?.publishedAt || right.latestUpdates?.[0]?.occurredAt || right.poolEnteredAt || right.dataUpdatedAt || '').localeCompare(left.radarProfile?.publishedAt || left.latestUpdates?.[0]?.occurredAt || left.poolEnteredAt || left.dataUpdatedAt || '')
       || left.id.localeCompare(right.id)
   ))
 }
