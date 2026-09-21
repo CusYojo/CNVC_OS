@@ -5,7 +5,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { EmptyState } from '../components/ui'
-import { apiPost } from '../lib/api'
+import { apiGet, apiPost } from '../lib/api'
 import {
   buildProjectDiscoverySummary,
   discoveryCandidateKind,
@@ -31,7 +31,7 @@ const kinds: Array<{ value: ProjectDiscoveryKind; label: string }> = [
 ]
 
 type RadarSyncResult = { created: number; updated: number; unchanged: number; skipped: number; fetched: number }
-type BpUploadResult = { id: string; name: string; status: string; progress: number }
+type BpUploadResult = { id: string; name: string; status: string; progress: number; error?: string | null; leadId?: string | null; reviewId?: string | null }
 
 const readFileAsDataUrl = (file: File) => new Promise<string>((resolve, reject) => {
   const reader = new FileReader()
@@ -39,6 +39,17 @@ const readFileAsDataUrl = (file: File) => new Promise<string>((resolve, reject) 
   reader.onload = () => resolve(String(reader.result))
   reader.readAsDataURL(file)
 })
+
+const wait = (milliseconds: number) => new Promise((resolve) => window.setTimeout(resolve, milliseconds))
+
+async function waitForBpUpload(id: string): Promise<BpUploadResult> {
+  for (let attempt = 0; attempt < 45; attempt += 1) {
+    const result = await apiGet<BpUploadResult>(`/leads/bp-uploads/${id}`)
+    if (['ready', 'review', 'rejected', 'dead_letter'].includes(result.status)) return result
+    await wait(2_000)
+  }
+  throw new Error('材料仍在后台解析，可稍后点击“刷新发现”查看结果。')
+}
 
 export function ProjectDiscoveryPage() {
   const fetchLeads = useAppStore((state) => state.fetchLeads)
@@ -122,13 +133,21 @@ export function ProjectDiscoveryPage() {
     setAction('upload')
     setNotice(null)
     try {
-      const uploaded = await apiPost<BpUploadResult>('/leads/bp-uploads', {
+      let uploaded = await apiPost<BpUploadResult>('/leads/bp-uploads', {
         name: file.name,
         declaredType: file.type || undefined,
         dataBase64: await readFileAsDataUrl(file),
-        idempotencyKey: crypto.randomUUID(),
       })
-      setNotice({ tone: 'success', text: `${uploaded.name} 已进入解析队列；完成后会自动出现在发现列表。` })
+      if (!['ready', 'review', 'rejected', 'dead_letter'].includes(uploaded.status)) uploaded = await waitForBpUpload(uploaded.id)
+      if (uploaded.status === 'dead_letter' || uploaded.status === 'rejected') {
+        throw new Error(uploaded.error || '材料未通过解析或主体校验，请核对后重试。')
+      }
+      setNotice({
+        tone: 'success',
+        text: uploaded.status === 'review'
+          ? `${uploaded.name} 已解析完成并进入人工复核队列。`
+          : `${uploaded.name} 已解析完成，新线索已加入发现列表。`,
+      })
       await loadCandidates(true)
     } catch (cause) {
       setNotice({ tone: 'error', text: cause instanceof Error ? cause.message : '项目材料上传失败，请稍后重试' })

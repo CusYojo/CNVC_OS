@@ -59,6 +59,7 @@ const leads = [
   research({ id: 'preview-photonic', name: '片上光互连工程原型', institution: '长三角集成电路创新中心', region: '江苏', category: '半导体/芯片', problem: '降低算力系统芯片间通信功耗', offset: 4, signal: '片上光互连工程样片完成流片' }),
   company({ id: 'preview-synthetic-bio', name: '合缘生物', legalName: '深圳合缘合成生物有限公司', region: '广东', industry: '生物医药', segment: '合成生物学', product: '酶催化药物中间体平台', institution: '红杉中国', round: 'Pre-A轮', amount: '未披露', offset: 8, signal: '新增两条药物中间体客户验证线' }),
 ]
+const uploads = new Map()
 
 app.use(express.json())
 app.get('/api/auth/me', (_req, res) => res.json({ user: { id: 'preview-user', email: 'preview@example.invalid', name: '本地预览', role: '投资经理', department: '投资部', status: '启用', permissionCodes: [] } }))
@@ -76,10 +77,23 @@ app.post('/api/leads/sync-radar', (_req, res) => {
 })
 app.post('/api/leads/bp-uploads', (req, res) => {
   const rawName = String(req.body?.name || '人工上传项目')
+  const previous = [...uploads.values()].find((item) => item.name === rawName)
+  if (previous) return res.status(previous.status === 'queued' ? 202 : 200).json(previous)
   const name = rawName.replace(/\.[^.]+$/, '').replace(/(?:商业计划书|融资计划书|项目介绍|路演材料|BP)/gi, '').trim() || '人工上传项目'
   const id = `preview-upload-${Date.now()}`
-  leads.unshift(company({ id, name, legalName: `${name}（主体待核对）`, region: '待核对', industry: '人工上传', segment: '待研判', product: '材料解析中', institution: '待核对', round: '未披露', amount: '未披露', offset: 0, signal: '人工上传材料已保存，等待结构化核验' }))
-  res.status(202).json({ id, name: rawName, status: 'queued', progress: 5 })
+  const upload = { id, name: rawName, status: 'queued', progress: 5, leadId: null }
+  uploads.set(id, upload)
+  res.status(202).json(upload)
+})
+app.get('/api/leads/bp-uploads/:id', (req, res) => {
+  const upload = uploads.get(req.params.id)
+  if (!upload) return res.status(404).json({ code: 'NOT_FOUND', message: '预览上传任务不存在' })
+  if (upload.status === 'queued') {
+    const name = upload.name.replace(/\.[^.]+$/, '').replace(/(?:商业计划书|融资计划书|项目介绍|路演材料|BP)/gi, '').trim() || '人工上传项目'
+    leads.unshift(company({ id: upload.id, name, legalName: `${name}（主体待核对）`, region: '待核对', industry: '人工上传', segment: '待研判', product: '材料解析完成', institution: '待核对', round: '未披露', amount: '未披露', offset: 0, signal: '人工上传材料已解析，等待进一步核验' }))
+    Object.assign(upload, { status: 'ready', progress: 100, leadId: upload.id })
+  }
+  res.json(upload)
 })
 app.get('/api/leads/:id/verified-profile', (req, res) => {
   const lead = leads.find((item) => item.id === req.params.id)
