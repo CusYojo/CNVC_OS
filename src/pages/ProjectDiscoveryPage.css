@@ -4,12 +4,10 @@
 .project-discovery-title > span { display: grid; width: 42px; height: 42px; flex: none; place-items: center; border: 1px solid #c9daf8; border-radius: 12px; background: linear-gradient(145deg,#f2f7ff,#fff); color: #2e68c4; box-shadow: 0 6px 18px rgba(48,97,170,.09); }
 .project-discovery-title > span svg { width: 20px; }
 .project-discovery-title h1 { margin: 0; color: #172033; font-size: 22px; font-weight: 700; letter-spacing: -.025em; }
-.project-discovery-title p { margin: 4px 0 0; color: #6d7a8e; font-size: 13px; }
 .is-spinning { animation: project-discovery-spin .9s linear infinite; }
 @keyframes project-discovery-spin { to { transform: rotate(360deg); } }
 
-.project-discovery-actions { display: flex; justify-content: flex-end; margin-bottom: 14px; padding: 15px 16px; border: 1px solid #cfdcf0; border-radius: 13px; background: linear-gradient(120deg,#f5f9ff,#fff); }
-.project-discovery-action-buttons { display: flex; gap: 8px; }
+.project-discovery-action-buttons { display: flex; flex: none; gap: 8px; margin-left: auto; }
 .project-discovery-action-buttons button, .project-discovery-action-buttons label { display: inline-flex; min-height: 38px; align-items: center; justify-content: center; gap: 7px; padding: 0 12px; border: 1px solid #c9d8ee; border-radius: 8px; background: #fff; color: #315f9e; font-size: 12px; font-weight: 600; cursor: pointer; }
 .project-discovery-action-buttons button:first-child { border-color: #326bc2; background: #326bc2; color: #fff; }
 .project-discovery-action-buttons button:disabled, .project-discovery-action-buttons label.is-disabled { cursor: not-allowed; opacity: .55; }
@@ -114,11 +112,10 @@
   .project-discovery-search { flex-basis: 100%; }
 }
 @media (max-width: 640px) {
-  .project-discovery-hero { align-items: flex-start; }
+  .project-discovery-hero { align-items: center; gap: 12px; }
   .project-discovery-title > span { display: none; }
-  .project-discovery-title p { line-height: 1.6; }
-  .project-discovery-action-buttons { width: 100%; }
-  .project-discovery-action-buttons button, .project-discovery-action-buttons label { min-width: 0; flex: 1; padding-inline: 8px; }
+  .project-discovery-action-buttons { width: auto; }
+  .project-discovery-action-buttons button, .project-discovery-action-buttons label { min-width: 0; padding-inline: 8px; }
   .project-discovery-metrics { grid-template-columns: 1fr 1fr; gap: 8px; }
   .project-discovery-metrics article { padding: 12px; }
   .project-discovery-periods { width: 100%; }

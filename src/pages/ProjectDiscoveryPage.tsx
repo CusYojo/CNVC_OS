@@ -169,23 +169,20 @@ export function ProjectDiscoveryPage() {
     <header className="project-discovery-hero">
       <div className="project-discovery-title">
         <span><Sparkles aria-hidden="true" /></span>
-        <div><h1>新项目发现</h1><p>从已收录的公开信源中，按时间线发现值得研判的企业与科研成果。</p></div>
+        <h1>新项目发现</h1>
       </div>
-    </header>
-
-    <section className="project-discovery-actions" aria-label="项目发现操作">
-      <div className="project-discovery-action-buttons">
+      <div className="project-discovery-action-buttons" aria-label="项目发现操作">
         {canRunRadar ? <button type="button" disabled={Boolean(action)} aria-busy={action === 'scan'} onClick={() => void runRadarScan()}>
           {action === 'scan' ? <LoaderCircle className="is-spinning" aria-hidden="true" /> : <Radar aria-hidden="true" />}
           {action === 'scan' ? '开始更新' : '检查更新'}
         </button> : <span className="project-discovery-admin-note">信源扫描由系统管理员运行</span>}
         <label className={action ? 'is-disabled' : ''}>
           {action === 'upload' ? <LoaderCircle className="is-spinning" aria-hidden="true" /> : <FileUp aria-hidden="true" />}
-          {action === 'upload' ? '上传中' : '人工上传'}
+          {action === 'upload' ? '上传中' : '人工上传项目'}
           <input type="file" disabled={Boolean(action)} accept=".pdf,.docx,.pptx,.xls,.xlsx,.png,.jpg,.jpeg,.gif,.bmp,.webp,.txt,.md,.markdown" aria-label="人工上传项目资料" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; void uploadBp(file) }} />
         </label>
       </div>
-    </section>
+    </header>
     {notice && <p className={`project-discovery-notice ${notice.tone}`} role={notice.tone === 'error' ? 'alert' : 'status'}>{notice.text}</p>}
 
     <section className="project-discovery-metrics" aria-label="发现概览">
