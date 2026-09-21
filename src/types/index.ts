@@ -675,7 +675,7 @@ export interface Lead {
 
 export type LeadListItem = Pick<Lead,
   'id' | 'name' | 'companyName' | 'region' | 'leadType' | 'businessTags'
-  | 'poolEnteredAt' | 'dataUpdatedAt' | 'latestUpdates'
+  | 'poolStatus' | 'poolEnteredAt' | 'dataUpdatedAt' | 'latestUpdates'
 > & {
   radarProfile?: {
     channel?: string

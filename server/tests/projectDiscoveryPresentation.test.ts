@@ -6,6 +6,7 @@ import {
   buildProjectDiscoverySummary,
   filterProjectDiscoveryCandidates,
   projectDiscoveryDay,
+  projectDiscoveryStatusLabel,
   shouldLoadNextProjectDiscoveryPage,
 } from '../../src/lib/projectDiscovery.js'
 
@@ -126,4 +127,11 @@ test('project discovery research cards keep the same compact two-column brief fo
       { label: '核心团队背景', value: '待补充', wide: true },
     ],
   })
+})
+
+test('project discovery status badge follows the real lead-pool lifecycle', () => {
+  assert.equal(projectDiscoveryStatusLabel('已转专属项目'), '已入库')
+  assert.equal(projectDiscoveryStatusLabel('已合并'), '已合并')
+  assert.equal(projectDiscoveryStatusLabel('公共池'), '待审核')
+  assert.equal(projectDiscoveryStatusLabel(undefined), '待审核')
 })

@@ -1,16 +1,18 @@
 import {
-  ArrowRight, Bot, Building2, CalendarDays, CheckCircle2, FileUp, FlaskConical, LoaderCircle,
-  MapPin, Radar, RefreshCw, Search, Sparkles, TrendingUp, X,
+  ArrowRight, Bot, Building2, CheckCircle2, ChevronDown, FileUp, FlaskConical, LoaderCircle,
+  Radar, RefreshCw, Search, Sparkles, TrendingUp, X,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { EmptyState } from '../components/ui'
 import { apiGet, apiPost } from '../lib/api'
 import {
+  buildProjectDiscoveryBrief,
   buildProjectDiscoverySummary,
   discoveryCandidateKind,
   filterProjectDiscoveryCandidates,
   projectDiscoveryCandidateDay,
+  projectDiscoveryStatusLabel,
   shouldLoadNextProjectDiscoveryPage,
   type ProjectDiscoveryKind,
   type ProjectDiscoveryPeriod,
@@ -221,7 +223,7 @@ export function ProjectDiscoveryPage() {
 
     <section className="project-discovery-results" aria-labelledby="project-discovery-results-title">
       <div className="project-discovery-results-heading">
-        <div><h2 id="project-discovery-results-title">待查看项目</h2><p>按最新资料时间排序，点击卡片进入线索详情核对来源与证据。</p></div>
+        <div><h2 id="project-discovery-results-title">待查看项目</h2><p>按最新资料时间排序，展开卡片核对投资速览、画像与来源。</p></div>
         <strong>{visible.length} 项</strong>
       </div>
 
@@ -238,47 +240,146 @@ function DiscoveryMetric({ icon, label, value, tone }: { icon: React.ReactNode; 
 }
 
 function DiscoveryCard({ lead, onOpen }: { lead: LeadListItem; onOpen: () => void }) {
+  const [expanded, setExpanded] = useState(false)
   const kind = discoveryCandidateKind(lead)
   const investment = lead.investmentProfile
   const research = lead.researchProfile
-  const industries = kind === 'research'
-    ? research?.direction?.categories ?? []
-    : [investment?.industry.level1, investment?.industry.level2, investment?.industry.segment, ...(lead.businessTags?.industry ?? [])].filter((value): value is string => Boolean(value))
-  const tags = [...new Set(industries)].slice(0, 3)
-  const product = investment?.products.find((item) => item.name)?.name
-  const researchProblem = research?.direction?.researchProblem
+  const name = lead.name || lead.companyName || '未命名项目'
+  const brief = buildProjectDiscoveryBrief(lead)
+  const dataStatus = kind === 'research' ? research?.dataStatus?.status : investment?.dataStatus?.status
+  const profile = projectDiscoveryProfile(lead)
+  const missingFields = projectDiscoveryMissingFields(lead)
+  const sourceUrl = safeExternalUrl(lead.radarProfile?.link)
   const latestUpdate = lead.latestUpdates?.[0]
-  const signal = latestUpdate?.title || researchProblem || product || '结构化信息待进一步核对'
-  const stage = kind === 'research'
-    ? research?.progress?.venue || research?.progress?.resourceType || '科研成果'
-    : investment?.financing.latestRound || investment?.products[0]?.productionStage || '融资阶段未披露'
-  const entity = kind === 'research'
-    ? research?.team?.affiliations?.[0] || lead.companyName
-    : lead.companyName || investment?.subject?.legalEntityName
-  const relatedInstitution = kind === 'company' ? investment?.institutions[0]?.name : undefined
-  const dataStatus = kind === 'research' ? research?.dataStatus.status : investment?.dataStatus.status
+  const verifiedDimensions = kind === 'research' ? research?.dataStatus?.verifiedDimensions : investment?.dataStatus?.verifiedDimensions
+  const applicableDimensions = kind === 'research' ? research?.dataStatus?.applicableDimensions : investment?.dataStatus?.applicableDimensions
+  const statusLabel = projectDiscoveryStatusLabel(lead.poolStatus)
 
-  return <article className="project-discovery-card" tabIndex={0} role="button" onClick={onOpen} onKeyDown={(event) => {
-    if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onOpen() }
-  }} aria-label={`查看${lead.name}线索详情`}>
-    <header>
-      <span className={`project-discovery-kind-badge ${kind}`}>
-        {kind === 'research' ? <FlaskConical aria-hidden="true" /> : <Building2 aria-hidden="true" />}{kind === 'research' ? '科研成果' : '企业项目'}
-      </span>
-      <span className="project-discovery-date"><CalendarDays aria-hidden="true" />{projectDiscoveryCandidateDay(lead).replaceAll('-', '.')}</span>
+  return <article id={`discovery-${lead.id}`} className={`project-discovery-card${expanded ? ' is-expanded' : ''}`}>
+    <header className="project-discovery-card-header">
+      <h3>{name}</h3>
+      <div className="project-discovery-card-badges">
+        <span className="source">{lead.radarProfile ? 'AI 已筛选' : '人工线索'}</span>
+        <span className={`status${statusLabel === '已入库' ? ' is-promoted' : ''}`}>{statusLabel}</span>
+      </div>
     </header>
-    <div className="project-discovery-card-body">
-      <h3>{lead.name || lead.companyName || '未命名项目'}</h3>
-      <p className="project-discovery-entity">{entity || '主体待核对'}</p>
-      <div className="project-discovery-tags">{tags.length ? tags.map((tag) => <span key={tag}>{tag}</span>) : <span>赛道待补充</span>}</div>
-      <div className="project-discovery-signal"><Sparkles aria-hidden="true" /><p>{signal}</p></div>
-      <dl>
-        <div><dt>当前阶段</dt><dd>{stage}</dd></div>
-        {relatedInstitution && <div><dt>关联机构</dt><dd>{relatedInstitution}</dd></div>}
-        <div><dt>所在地</dt><dd><MapPin aria-hidden="true" />{lead.region || '待核对'}</dd></div>
-        <div><dt>画像状态</dt><dd>{dataStatus === 'verified' ? '已核验' : dataStatus === 'partial' ? '部分核验' : '待完善'}</dd></div>
-      </dl>
-    </div>
-    <footer><span>查看证据、复核并决定是否入库</span><ArrowRight aria-hidden="true" /></footer>
+    <DiscoveryInvestmentBrief name={name} brief={brief} />
+    <button type="button" className="project-discovery-card-toggle" aria-expanded={expanded} aria-label={`查看${name}项目详情`} onClick={() => setExpanded((current) => !current)}>
+      {expanded ? '收起详细信息' : '展开详细信息'}
+      <ChevronDown className={expanded ? 'is-expanded' : ''} aria-hidden="true" />
+    </button>
+    {expanded && <>
+      <section className="project-discovery-card-details" aria-label={`${name}详细信息`}>
+        <div className="project-discovery-detail-panel project-discovery-detail-summary">
+          <strong>{kind === 'company' ? '项目摘要' : '情报摘要'}</strong>
+          <p>{brief.summary || '摘要待补充。'}</p>
+        </div>
+        <dl className="project-discovery-detail-metadata">
+          <div><dt>地区</dt><dd>{lead.region || '待核'}</dd></div>
+          <div><dt>来源渠道</dt><dd>{lead.radarProfile?.channel || '公开信源'}</dd></div>
+          <div><dt>主体类型</dt><dd>{kind === 'company' ? '公司' : '技术'}</dd></div>
+          <div><dt>完整度</dt><dd>{projectDiscoveryCompleteness(dataStatus, verifiedDimensions, applicableDimensions)}</dd></div>
+        </dl>
+        <div className="project-discovery-detail-panel project-discovery-profile">
+          <h4>{kind === 'company' ? '公司画像' : '技术画像'}</h4>
+          <dl>{profile.map((fact) => <div key={`${fact.label}:${fact.value}`}><dt>{fact.label}</dt><dd>{fact.value}</dd></div>)}</dl>
+        </div>
+        {(latestUpdate || sourceUrl) && <div className="project-discovery-detail-sources">
+          <strong>信息来源</strong>
+          <div>{sourceUrl ? <a href={sourceUrl} target="_blank" rel="noreferrer">{latestUpdate?.title || '查看原始公开信源'}</a> : <span>{latestUpdate?.title}</span>}
+            <p>{lead.radarProfile?.channel || '公开资料'}{projectDiscoveryCandidateDay(lead) ? ` · ${projectDiscoveryCandidateDay(lead)}` : ''}</p>
+          </div>
+        </div>}
+        {missingFields.length > 0 && <div className="project-discovery-detail-questions">
+          <strong>关键待核问题</strong>
+          <ul>{missingFields.map((field) => <li key={field}>补充并核验{field}</li>)}</ul>
+          <div>{missingFields.map((field) => <span key={field}>待补：{field}</span>)}</div>
+        </div>}
+      </section>
+      <footer className="project-discovery-card-actions">
+        <button type="button" onClick={onOpen}>查看完整线索并复核<ArrowRight aria-hidden="true" /></button>
+      </footer>
+    </>}
   </article>
+}
+
+function DiscoveryInvestmentBrief({ name, brief }: { name: string; brief: ReturnType<typeof buildProjectDiscoveryBrief> }) {
+  return <section aria-label={`${name}投资速览`} className="project-discovery-investment-brief">
+    <dl>{brief.facts.map((item) => {
+      const [track, ...productParts] = item.label === '行业分类' ? item.value.split(/\s*\/\s*/u) : []
+      const product = productParts.join(' / ')
+      return <div key={`${item.label}:${item.value}`} className={item.wide ? 'wide' : ''}>
+        <dt>{item.label}</dt>
+        {product ? <dd className="industry"><span>{track}</span><i aria-hidden="true">/</i><strong>{product}</strong></dd> : <dd>{item.value}</dd>}
+      </div>
+    })}</dl>
+  </section>
+}
+
+type ProjectDiscoveryProfileFact = { label: string; value: string }
+
+function projectDiscoveryProfile(lead: LeadListItem): ProjectDiscoveryProfileFact[] {
+  if (discoveryCandidateKind(lead) === 'research') {
+    const research = lead.researchProfile
+    return compactProfileFacts([
+      profileFact('研究问题', research?.direction?.researchProblem),
+      profileFact('研究方法', research?.direction?.methods?.slice(0, 3).join('、')),
+      profileFact('应用场景', research?.valueAndTransfer?.applicationScenarios?.slice(0, 3).join('、')),
+      profileFact('技术成熟度', research?.valueAndTransfer?.trl || research?.valueAndTransfer?.prototype),
+      profileFact('论文/专利', [research?.progress?.venue, ...(research?.rights?.patents ?? [])].filter(Boolean).slice(0, 3).join('、')),
+      profileFact('数据更新', research?.dataStatus?.updatedAt || lead.dataUpdatedAt?.slice(0, 10)),
+    ])
+  }
+  const investment = lead.investmentProfile
+  return compactProfileFacts([
+    profileFact('核心产品', investment?.products.slice(0, 3).map((product) => product.name).join('、')),
+    profileFact('核心技术', investment?.products.slice(0, 3).map((product) => product.technologyRoute || product.productRoute).filter(Boolean).join('；')),
+    profileFact('产业链位置', investment?.industry.chainPosition),
+    profileFact('融资与投资机构', [investment?.financing.latestRound, investment?.financing.latestAmount, investment?.institutions.slice(0, 3).map((item) => item.name).join('、')].filter(Boolean).join(' · ')),
+    profileFact('客户进展', investment?.customers.highestStage || (investment?.customers.verifiedCount ? `已核验 ${investment.customers.verifiedCount} 家` : undefined)),
+    profileFact('工商主体', investment?.subject?.legalEntityName || lead.companyName),
+  ])
+}
+
+function projectDiscoveryMissingFields(lead: LeadListItem): string[] {
+  if (discoveryCandidateKind(lead) === 'research') {
+    const research = lead.researchProfile
+    return [
+      !research?.team?.authors?.length && '核心团队背景',
+      !research?.team?.affiliations?.length && '所属机构',
+      !research?.direction?.methods?.length && '研究方法',
+    ].filter((value): value is string => Boolean(value))
+  }
+  const investment = lead.investmentProfile
+  return [
+    !investment?.products?.length && '核心产品',
+    !investment?.financing.latestAmount && '融资金额',
+    !investment?.institutions?.length && '投资方',
+    !investment?.academicLinks?.some((link) => link.person) && '核心团队背景',
+  ].filter((value): value is string => Boolean(value))
+}
+
+function projectDiscoveryCompleteness(status: string | undefined, verified?: number, applicable?: number): string {
+  const ratio = typeof verified === 'number' && typeof applicable === 'number' && applicable > 0 ? ` · ${verified}/${applicable}` : ''
+  const label = status === 'verified' ? '已核验' : status === 'partial' ? '部分核验' : status === 'conflicted' ? '存在冲突' : '待补充'
+  return `${label}${ratio}`
+}
+
+function profileFact(label: string, value?: string): ProjectDiscoveryProfileFact | null {
+  return value?.trim() ? { label, value: value.trim() } : null
+}
+
+function compactProfileFacts(facts: Array<ProjectDiscoveryProfileFact | null>): ProjectDiscoveryProfileFact[] {
+  const compact = facts.filter((fact): fact is ProjectDiscoveryProfileFact => Boolean(fact))
+  return compact.length ? compact : [{ label: '画像状态', value: '信息待进一步补充' }]
+}
+
+function safeExternalUrl(value?: string): string | null {
+  if (!value) return null
+  try {
+    const url = new URL(value)
+    return url.protocol === 'https:' ? url.toString() : null
+  } catch {
+    return null
+  }
 }

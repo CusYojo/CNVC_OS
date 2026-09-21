@@ -34,6 +34,8 @@ test('project center exposes the imported discovery workspace without rewriting 
   assert.match(discovery, /收起详细信息/)
   assert.match(discovery, /项目摘要/)
   assert.match(discovery, /公司画像/)
+  assert.match(discovery, /research\?\.dataStatus\?\.status/, '兼容型科研画像缺少 dataStatus 时卡片仍应可渲染')
+  assert.match(discovery, /projectDiscoveryStatusLabel\(lead\.poolStatus\)/, '状态徽标应反映真实线索池生命周期')
   assert.doesNotMatch(discovery, /role="button"/, '卡片整体不应充当按钮，展开与详情操作应使用独立语义按钮')
   assert.match(discoveryCss, /project-discovery-card\.is-expanded/, '展开卡片应跨越完整网格宽度')
   assert.match(discoveryCss, /project-discovery-investment-brief/, '投资速览应有独立的双列卡片样式')
