@@ -5,6 +5,7 @@ import {
   buildProjectDiscoverySummary,
   filterProjectDiscoveryCandidates,
   projectDiscoveryDay,
+  shouldLoadNextProjectDiscoveryPage,
 } from '../../src/lib/projectDiscovery.js'
 
 const company = {
@@ -53,8 +54,14 @@ test('project discovery day uses Asia/Shanghai instead of UTC boundaries', () =>
 
 test('project discovery filters by local time window, type, and searchable investment facts', () => {
   const now = new Date('2026-09-21T08:00:00.000Z')
+  const rescoredOldLead = {
+    ...company,
+    id: 'company-rescored',
+    poolEnteredAt: '2026-09-10T01:30:00.000Z',
+    dataUpdatedAt: '2026-09-21T06:00:00.000Z',
+  }
   assert.deepEqual(
-    filterProjectDiscoveryCandidates([research, company], { period: 'today', query: '', kind: 'all', now }).map((item) => item.id),
+    filterProjectDiscoveryCandidates([research, company, rescoredOldLead], { period: 'today', query: '', kind: 'all', now }).map((item) => item.id),
     ['company-1'],
   )
   assert.deepEqual(
@@ -65,6 +72,13 @@ test('project discovery filters by local time window, type, and searchable inves
     filterProjectDiscoveryCandidates([research, company], { period: 'week', query: '触觉', kind: 'research', now }).map((item) => item.id),
     ['research-1'],
   )
+})
+
+test('project discovery keeps loading while a paged result can still contain the seven-day window', () => {
+  const now = new Date('2026-09-21T08:00:00.000Z')
+  assert.equal(shouldLoadNextProjectDiscoveryPage([company], 1, 3, now), true)
+  assert.equal(shouldLoadNextProjectDiscoveryPage([{ ...company, poolEnteredAt: '2026-09-10T01:30:00.000Z' }], 2, 3, now), false)
+  assert.equal(shouldLoadNextProjectDiscoveryPage([company], 3, 3, now), false)
 })
 
 test('project discovery summary reports actionable counts from the visible result set', () => {
