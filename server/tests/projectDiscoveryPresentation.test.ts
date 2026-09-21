@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { LeadListItem } from '../../src/types/index.js'
 import {
+  buildProjectDiscoveryBrief,
   buildProjectDiscoverySummary,
   filterProjectDiscoveryCandidates,
   projectDiscoveryDay,
@@ -96,5 +97,33 @@ test('project discovery summary reports actionable counts from the visible resul
     companies: 1,
     research: 1,
     verified: 1,
+  })
+})
+
+test('project discovery company cards expose the same six-field investment brief as VC Hunter', () => {
+  assert.deepEqual(buildProjectDiscoveryBrief(company), {
+    summary: '完成 A 轮融资',
+    facts: [
+      { label: '行业分类', value: '半导体/芯片 / 光存储' },
+      { label: '最新融资日期', value: '2026-09-20' },
+      { label: '融资金额', value: '1亿元' },
+      { label: '融资轮次', value: 'A轮' },
+      { label: '投资方', value: '星河创投', wide: true },
+      { label: '核心团队背景', value: '待补充', wide: true },
+    ],
+  })
+})
+
+test('project discovery research cards keep the same compact two-column brief format', () => {
+  assert.deepEqual(buildProjectDiscoveryBrief(research), {
+    summary: '论文公开',
+    facts: [
+      { label: '研究方向', value: '具身智能触觉感知' },
+      { label: '公开日期', value: '2026-09-18' },
+      { label: '成果类型', value: '科研成果' },
+      { label: '公开场合', value: '未披露' },
+      { label: '所属机构', value: '浦江实验室', wide: true },
+      { label: '核心团队背景', value: '待补充', wide: true },
+    ],
   })
 })
