@@ -60,8 +60,15 @@ test('project discovery filters by local time window, type, and searchable inves
     poolEnteredAt: '2026-09-10T01:30:00.000Z',
     dataUpdatedAt: '2026-09-21T06:00:00.000Z',
   }
+  const lateIngestedOldLead = {
+    ...company,
+    id: 'company-late-ingest',
+    poolEnteredAt: '2026-09-21T05:00:00.000Z',
+    radarProfile: { publishedAt: '2026-09-10T01:30:00.000Z' },
+    latestUpdates: [{ occurredAt: '2026-09-10T01:30:00.000Z', title: '旧事件今日才入池' }],
+  }
   assert.deepEqual(
-    filterProjectDiscoveryCandidates([research, company, rescoredOldLead], { period: 'today', query: '', kind: 'all', now }).map((item) => item.id),
+    filterProjectDiscoveryCandidates([research, company, rescoredOldLead, lateIngestedOldLead], { period: 'today', query: '', kind: 'all', now }).map((item) => item.id),
     ['company-1'],
   )
   assert.deepEqual(
