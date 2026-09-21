@@ -3,7 +3,6 @@ import test from 'node:test'
 import type { LeadListItem } from '../../src/types/index.js'
 import {
   buildProjectDiscoveryBrief,
-  buildProjectDiscoverySummary,
   filterProjectDiscoveryCandidates,
   projectDiscoveryDay,
   projectDiscoveryStatusLabel,
@@ -90,15 +89,6 @@ test('project discovery loads every page because ingestion order can differ from
   assert.equal(shouldLoadNextProjectDiscoveryPage([company], 1, 3, now), true)
   assert.equal(shouldLoadNextProjectDiscoveryPage([{ ...company, poolEnteredAt: '2026-09-10T01:30:00.000Z', latestUpdates: [{ occurredAt: '2026-09-10T01:30:00.000Z', title: '旧事件' }] }], 2, 3, now), true)
   assert.equal(shouldLoadNextProjectDiscoveryPage([company], 3, 3, now), false)
-})
-
-test('project discovery summary reports actionable counts from the visible result set', () => {
-  assert.deepEqual(buildProjectDiscoverySummary([company, research]), {
-    total: 2,
-    companies: 1,
-    research: 1,
-    verified: 1,
-  })
 })
 
 test('project discovery company cards expose the same six-field investment brief as VC Hunter', () => {

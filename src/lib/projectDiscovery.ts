@@ -60,21 +60,6 @@ export function filterProjectDiscoveryCandidates(
   ))
 }
 
-export function buildProjectDiscoverySummary(candidates: readonly LeadListItem[]) {
-  return candidates.reduce((summary, lead) => {
-    const kind = discoveryCandidateKind(lead)
-    const status = kind === 'research'
-      ? lead.researchProfile?.dataStatus?.status
-      : lead.investmentProfile?.dataStatus?.status
-    return {
-      total: summary.total + 1,
-      companies: summary.companies + Number(kind === 'company'),
-      research: summary.research + Number(kind === 'research'),
-      verified: summary.verified + Number(status === 'verified' || status === 'partial'),
-    }
-  }, { total: 0, companies: 0, research: 0, verified: 0 })
-}
-
 export function buildProjectDiscoveryBrief(lead: LeadListItem): ProjectDiscoveryBrief {
   const kind = discoveryCandidateKind(lead)
   const summary = oneSentence(
