@@ -1,6 +1,6 @@
 import {
-  ArrowRight, Bot, Building2, CheckCircle2, ChevronDown, FileUp, FlaskConical, LoaderCircle,
-  Radar, RefreshCw, Search, Sparkles, TrendingUp, X,
+  ArrowRight, Building2, CheckCircle2, ChevronDown, FileUp, FlaskConical, LoaderCircle,
+  Radar, Search, Sparkles, TrendingUp, X,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
@@ -51,7 +51,7 @@ async function waitForBpUpload(id: string): Promise<BpUploadResult> {
     if (['ready', 'review', 'rejected', 'dead_letter'].includes(result.status)) return result
     await wait(2_000)
   }
-  throw new Error('材料仍在后台解析，可稍后点击“刷新发现”查看结果。')
+  throw new Error('材料仍在后台解析，可稍后点击“检查更新”查看结果。')
 }
 
 export function ProjectDiscoveryPage() {
@@ -65,15 +65,14 @@ export function ProjectDiscoveryPage() {
   const [kind, setKind] = useState<ProjectDiscoveryKind>('all')
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState('')
   const [action, setAction] = useState<'scan' | 'upload' | ''>('')
   const [notice, setNotice] = useState<{ tone: 'success' | 'error'; text: string } | null>(null)
   const canRunRadar = currentUser?.role === '系统管理员' || currentUser?.permissionCodes?.includes('system.manage')
 
-  const loadCandidates = useCallback(async (refresh = false) => {
+  const loadCandidates = useCallback(async (background = false) => {
     const serial = ++requestSerial.current
-    refresh ? setRefreshing(true) : setLoading(true)
+    if (!background) setLoading(true)
     setError('')
     try {
       let response = await fetchLeads({ page: 1, pageSize: 50, sort: 'latest' })
@@ -94,7 +93,6 @@ export function ProjectDiscoveryPage() {
     } finally {
       if (serial === requestSerial.current) {
         setLoading(false)
-        setRefreshing(false)
       }
     }
   }, [fetchLeads])
@@ -118,10 +116,10 @@ export function ProjectDiscoveryPage() {
       const result = await apiPost<RadarSyncResult>('/leads/sync-radar', { limit: 50, incrementalPages: 1, source: 'all' }, {
         signal: AbortSignal.timeout(10 * 60_000),
       })
-      setNotice({ tone: 'success', text: `信源扫描完成：读取 ${result.fetched} 条，新增 ${result.created} 条，更新 ${result.updated} 条。` })
+      setNotice({ tone: 'success', text: `更新检查完成：读取 ${result.fetched} 条，新增 ${result.created} 条，更新 ${result.updated} 条。` })
       await loadCandidates(true)
     } catch (cause) {
-      setNotice({ tone: 'error', text: cause instanceof Error ? cause.message : '信源扫描失败，请稍后重试' })
+      setNotice({ tone: 'error', text: cause instanceof Error ? cause.message : '检查更新失败，请稍后重试' })
     } finally {
       setAction('')
     }
@@ -173,25 +171,18 @@ export function ProjectDiscoveryPage() {
         <span><Sparkles aria-hidden="true" /></span>
         <div><h1>新项目发现</h1><p>从已收录的公开信源中，按时间线发现值得研判的企业与科研成果。</p></div>
       </div>
-      <button type="button" className="project-discovery-refresh" disabled={loading || refreshing} onClick={() => void loadCandidates(true)}>
-        <RefreshCw className={refreshing ? 'is-spinning' : ''} aria-hidden="true" />{refreshing ? '正在刷新' : '刷新发现'}
-      </button>
     </header>
 
-    <section className="project-discovery-actions" aria-labelledby="project-discovery-actions-title">
-      <div className="project-discovery-action-copy">
-        <span><Bot aria-hidden="true" /></span>
-        <div><h2 id="project-discovery-actions-title">补充发现来源</h2><p>扫描已配置的融资、产业与论文公开信源；新候选进入同一复核列表。</p></div>
-      </div>
+    <section className="project-discovery-actions" aria-label="项目发现操作">
       <div className="project-discovery-action-buttons">
-        {canRunRadar ? <button type="button" disabled={Boolean(action)} onClick={() => void runRadarScan()}>
+        {canRunRadar ? <button type="button" disabled={Boolean(action)} aria-busy={action === 'scan'} onClick={() => void runRadarScan()}>
           {action === 'scan' ? <LoaderCircle className="is-spinning" aria-hidden="true" /> : <Radar aria-hidden="true" />}
-          {action === 'scan' ? '扫描中' : '启动信源扫描'}
+          {action === 'scan' ? '开始更新' : '检查更新'}
         </button> : <span className="project-discovery-admin-note">信源扫描由系统管理员运行</span>}
         <label className={action ? 'is-disabled' : ''}>
           {action === 'upload' ? <LoaderCircle className="is-spinning" aria-hidden="true" /> : <FileUp aria-hidden="true" />}
-          {action === 'upload' ? '上传中' : '人工上传 BP'}
-          <input type="file" disabled={Boolean(action)} accept=".pdf,.docx,.pptx,.xls,.xlsx,.png,.jpg,.jpeg,.gif,.bmp,.webp,.txt,.md,.markdown" aria-label="人工上传项目线索" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; void uploadBp(file) }} />
+          {action === 'upload' ? '上传中' : '人工上传'}
+          <input type="file" disabled={Boolean(action)} accept=".pdf,.docx,.pptx,.xls,.xlsx,.png,.jpg,.jpeg,.gif,.bmp,.webp,.txt,.md,.markdown" aria-label="人工上传项目资料" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; void uploadBp(file) }} />
         </label>
       </div>
     </section>
