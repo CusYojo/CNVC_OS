@@ -1,6 +1,5 @@
 import {
-  ArrowRight, Building2, CheckCircle2, ChevronDown, FileUp, FlaskConical, LoaderCircle,
-  Radar, Search, Sparkles, TrendingUp, X,
+  ArrowRight, ChevronDown, FileUp, LoaderCircle, Radar, Search, Sparkles, X,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
@@ -8,7 +7,6 @@ import { EmptyState } from '../components/ui'
 import { apiGet, apiPost } from '../lib/api'
 import {
   buildProjectDiscoveryBrief,
-  buildProjectDiscoverySummary,
   discoveryCandidateKind,
   filterProjectDiscoveryCandidates,
   projectDiscoveryCandidateDay,
@@ -102,7 +100,6 @@ export function ProjectDiscoveryPage() {
   const visible = useMemo(() => filterProjectDiscoveryCandidates(candidates, {
     period, query, kind,
   }), [candidates, kind, period, query])
-  const summary = useMemo(() => buildProjectDiscoverySummary(visible), [visible])
 
   const openLead = (lead: LeadListItem) => {
     navigate(`/sourcing/${lead.id}`, { state: { from: `${location.pathname}${location.search}` } })
@@ -185,13 +182,6 @@ export function ProjectDiscoveryPage() {
     </header>
     {notice && <p className={`project-discovery-notice ${notice.tone}`} role={notice.tone === 'error' ? 'alert' : 'status'}>{notice.text}</p>}
 
-    <section className="project-discovery-metrics" aria-label="发现概览">
-      <DiscoveryMetric icon={<TrendingUp aria-hidden="true" />} label="当前结果" value={summary.total} tone="blue" />
-      <DiscoveryMetric icon={<Building2 aria-hidden="true" />} label="企业项目" value={summary.companies} tone="cyan" />
-      <DiscoveryMetric icon={<FlaskConical aria-hidden="true" />} label="科研成果" value={summary.research} tone="purple" />
-      <DiscoveryMetric icon={<CheckCircle2 aria-hidden="true" />} label="可研判画像" value={summary.verified} tone="green" />
-    </section>
-
     <section className="project-discovery-toolbar" aria-label="项目发现筛选">
       <div className="project-discovery-periods" role="group" aria-label="发现时间范围">
         {periods.map((item) => <button key={item.value} type="button" aria-pressed={period === item.value} onClick={() => setPeriod(item.value)}>{item.label}</button>)}
@@ -221,10 +211,6 @@ export function ProjectDiscoveryPage() {
             : <div className="project-discovery-grid">{visible.map((lead) => <DiscoveryCard key={lead.id} lead={lead} onOpen={() => openLead(lead)} />)}</div>}
     </section>
   </div>
-}
-
-function DiscoveryMetric({ icon, label, value, tone }: { icon: React.ReactNode; label: string; value: number; tone: string }) {
-  return <article data-tone={tone}><span>{icon}</span><div><strong>{value}</strong><small>{label}</small></div></article>
 }
 
 function DiscoveryCard({ lead, onOpen }: { lead: LeadListItem; onOpen: () => void }) {
