@@ -59,6 +59,8 @@ test('project discovery filters by local time window, type, and searchable inves
     id: 'company-rescored',
     poolEnteredAt: '2026-09-10T01:30:00.000Z',
     dataUpdatedAt: '2026-09-21T06:00:00.000Z',
+    radarProfile: { publishedAt: '2026-09-10T01:30:00.000Z' },
+    latestUpdates: [{ occurredAt: '2026-09-10T01:30:00.000Z', title: '旧事件今日重新评分' }],
   }
   const lateIngestedOldLead = {
     ...company,
@@ -81,10 +83,10 @@ test('project discovery filters by local time window, type, and searchable inves
   )
 })
 
-test('project discovery keeps loading while a paged result can still contain the seven-day window', () => {
+test('project discovery loads every page because ingestion order can differ from publication order', () => {
   const now = new Date('2026-09-21T08:00:00.000Z')
   assert.equal(shouldLoadNextProjectDiscoveryPage([company], 1, 3, now), true)
-  assert.equal(shouldLoadNextProjectDiscoveryPage([{ ...company, poolEnteredAt: '2026-09-10T01:30:00.000Z' }], 2, 3, now), false)
+  assert.equal(shouldLoadNextProjectDiscoveryPage([{ ...company, poolEnteredAt: '2026-09-10T01:30:00.000Z', latestUpdates: [{ occurredAt: '2026-09-10T01:30:00.000Z', title: '旧事件' }] }], 2, 3, now), true)
   assert.equal(shouldLoadNextProjectDiscoveryPage([company], 3, 3, now), false)
 })
 
