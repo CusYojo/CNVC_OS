@@ -33,10 +33,6 @@
 .project-discovery-search button svg { width: 14px; }
 
 .project-discovery-results { overflow: hidden; border: 1px solid #e1e7ef; border-radius: 14px; background: #fff; box-shadow: 0 8px 25px rgba(20,45,95,.045); }
-.project-discovery-results-heading { display: flex; min-height: 72px; align-items: center; justify-content: space-between; gap: 24px; padding: 14px 18px; border-bottom: 1px solid #e7ebf1; }
-.project-discovery-results-heading h2 { margin: 0; color: #24344e; font-size: 16px; font-weight: 700; }
-.project-discovery-results-heading p { margin: 4px 0 0; color: #7a8799; font-size: 12px; }
-.project-discovery-results-heading > strong { flex: none; color: #62718a; font-size: 12px; }
 .project-discovery-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; padding: 14px; background: #f8fafc; }
 .project-discovery-card { display: flex; min-width: 0; flex-direction: column; padding: 16px; border: 1px solid #e0e6ee; border-radius: 12px; background: #fff; transition: border-color .16s ease; }
 .project-discovery-card:hover { border-color: #a8c3eb; }
@@ -108,7 +104,6 @@
   .project-discovery-periods button { flex: 1; padding-inline: 8px; }
   .project-discovery-kind, .project-discovery-kind select { width: 100%; }
   .project-discovery-grid { grid-template-columns: 1fr; padding: 10px; }
-  .project-discovery-results-heading p { display: none; }
   .project-discovery-card-header { align-items: stretch; flex-direction: column; }
   .project-discovery-card-badges { justify-content: flex-start; }
   .project-discovery-profile dl { grid-template-columns: 1fr; }

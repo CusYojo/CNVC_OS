@@ -199,12 +199,7 @@ export function ProjectDiscoveryPage() {
       </label>
     </section>
 
-    <section className="project-discovery-results" aria-labelledby="project-discovery-results-title">
-      <div className="project-discovery-results-heading">
-        <div><h2 id="project-discovery-results-title">待查看项目</h2><p>按最新资料时间排序，展开卡片核对投资速览、画像与来源。</p></div>
-        <strong>{visible.length} 项</strong>
-      </div>
-
+    <section className="project-discovery-results" aria-label="待查看项目">
       {loading ? <div className="project-discovery-state"><LoaderCircle className="is-spinning" aria-hidden="true" /><strong>正在整理最新项目信号</strong><p>读取已收录的公开信源与结构化画像。</p></div>
         : error ? <div className="project-discovery-state project-discovery-error"><strong>新项目读取失败</strong><p>{error}</p><button type="button" onClick={() => void loadCandidates()}>重新加载</button></div>
           : visible.length === 0 ? <EmptyState title="当前范围没有新项目" description="试试切换到近 7 天、全部类型，或调整搜索关键词。" />
