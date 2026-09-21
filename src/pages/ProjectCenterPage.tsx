@@ -1,4 +1,4 @@
-import { FolderKanban, Inbox, Star, UsersRound } from 'lucide-react'
+import { FolderKanban, Inbox, Sparkles, Star, UsersRound } from 'lucide-react'
 import { useSearchParams } from 'react-router-dom'
 import { useState } from 'react'
 import type { ProjectClassification } from '../types'
@@ -6,11 +6,13 @@ import type { ProjectListCounts } from '../services/projectListApi'
 import { ProjectsPage } from './ProjectsPage'
 import { SourcingPage } from './SourcingPage'
 import { LeadReviewPanel } from '../components/LeadReviewPanel'
+import { ProjectDiscoveryPage } from './ProjectDiscoveryPage'
 
-type ProjectCenterView = 'leads' | 'reviews' | ProjectClassification
+type ProjectCenterView = 'leads' | 'discover' | 'reviews' | ProjectClassification
 
 const views: Array<{ id: ProjectCenterView; label: string; icon: typeof Inbox }> = [
   { id: 'leads', label: '线索池', icon: Inbox },
+  { id: 'discover', label: '新项目发现', icon: Sparkles },
   { id: 'reviews', label: '待复核', icon: Inbox },
   { id: 'pool', label: '项目池', icon: FolderKanban },
   { id: 'normal', label: '普通项目', icon: UsersRound },
@@ -35,6 +37,12 @@ export function ProjectCenterPage() {
     setSearchParams(params)
   }
 
+  const selectAdjacentView = (current: ProjectCenterView, direction: -1 | 1) => {
+    const currentIndex = visibleViews.findIndex((item) => item.id === current)
+    const nextIndex = (currentIndex + direction + visibleViews.length) % visibleViews.length
+    selectView(visibleViews[nextIndex].id)
+  }
+
   return (
     <div className="fde-project-center">
       <div className="fde-page-heading">
@@ -48,16 +56,30 @@ export function ProjectCenterPage() {
                 key={item.id}
                 type="button"
                 role="tab"
+                id={`project-center-tab-${item.id}`}
+                aria-controls="project-center-panel"
                 aria-selected={active}
+                tabIndex={active ? 0 : -1}
                 onClick={() => selectView(item.id)}
+                onKeyDown={(event) => {
+                  if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+                  event.preventDefault()
+                  const direction = event.key === 'ArrowLeft' ? -1 : 1
+                  const currentIndex = visibleViews.findIndex((viewItem) => viewItem.id === item.id)
+                  const next = visibleViews[(currentIndex + direction + visibleViews.length) % visibleViews.length]
+                  selectAdjacentView(item.id, direction)
+                  requestAnimationFrame(() => document.getElementById(`project-center-tab-${next.id}`)?.focus())
+                }}
                 className={active ? 'active' : ''}
               >
-                {item.label}{item.id !== 'leads' && item.id !== 'reviews' && item.id !== 'pool' && <em>{classificationCounts[item.id]}</em>}
+                {item.label}{item.id !== 'leads' && item.id !== 'discover' && item.id !== 'reviews' && item.id !== 'pool' && <em>{classificationCounts[item.id]}</em>}
               </button>
             )
           })}
         </div>
-      {view === 'leads' ? <SourcingPage /> : view === 'reviews' ? <LeadReviewPanel /> : <ProjectsPage classification={view} embedded onCountsChange={setClassificationCounts} />}
+      <div id="project-center-panel" role="tabpanel" aria-labelledby={`project-center-tab-${view}`}>
+        {view === 'leads' ? <SourcingPage /> : view === 'discover' ? <ProjectDiscoveryPage /> : view === 'reviews' ? <LeadReviewPanel /> : <ProjectsPage classification={view} embedded onCountsChange={setClassificationCounts} />}
+      </div>
     </div>
   )
 }

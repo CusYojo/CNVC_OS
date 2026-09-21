@@ -1109,6 +1109,7 @@ function leadPoolListItem(row: typeof leads.$inferSelect, candidateFacts: LeadLi
     companyName: enriched.companyName,
     region: enriched.region,
     leadType: enriched.leadType,
+    poolStatus: enriched.poolStatus,
     businessTags: enriched.businessTags,
     poolEnteredAt: enriched.poolEnteredAt,
     dataUpdatedAt: enriched.dataUpdatedAt,

@@ -1,0 +1,355 @@
+import {
+  ArrowRight, ChevronDown, FileUp, LoaderCircle, Radar, Search, Sparkles, X,
+} from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
+import { EmptyState } from '../components/ui'
+import { apiGet, apiPost } from '../lib/api'
+import {
+  buildProjectDiscoveryBrief,
+  discoveryCandidateKind,
+  filterProjectDiscoveryCandidates,
+  projectDiscoveryCandidateDay,
+  projectDiscoveryStatusLabel,
+  shouldLoadNextProjectDiscoveryPage,
+  type ProjectDiscoveryKind,
+  type ProjectDiscoveryPeriod,
+} from '../lib/projectDiscovery'
+import { useAppStore } from '../store/useAppStore'
+import { useAuthStore } from '../store/useAuthStore'
+import type { LeadListItem } from '../types'
+import './ProjectDiscoveryPage.css'
+
+const periods: Array<{ value: ProjectDiscoveryPeriod; label: string }> = [
+  { value: 'today', label: '今天新发现' },
+  { value: 'week', label: '近 7 天' },
+  { value: 'all', label: '全部项目' },
+]
+
+const kinds: Array<{ value: ProjectDiscoveryKind; label: string }> = [
+  { value: 'all', label: '全部类型' },
+  { value: 'company', label: '企业项目' },
+  { value: 'research', label: '科研成果' },
+]
+
+type RadarSyncResult = { created: number; updated: number; unchanged: number; skipped: number; fetched: number }
+type BpUploadResult = { id: string; name: string; status: string; progress: number; error?: string | null; leadId?: string | null; reviewId?: string | null }
+
+const readFileAsDataUrl = (file: File) => new Promise<string>((resolve, reject) => {
+  const reader = new FileReader()
+  reader.onerror = () => reject(new Error('文件读取失败，请重新选择'))
+  reader.onload = () => resolve(String(reader.result))
+  reader.readAsDataURL(file)
+})
+
+const wait = (milliseconds: number) => new Promise((resolve) => window.setTimeout(resolve, milliseconds))
+
+async function waitForBpUpload(id: string): Promise<BpUploadResult> {
+  for (let attempt = 0; attempt < 45; attempt += 1) {
+    const result = await apiGet<BpUploadResult>(`/leads/bp-uploads/${id}`)
+    if (['ready', 'review', 'rejected', 'dead_letter'].includes(result.status)) return result
+    await wait(2_000)
+  }
+  throw new Error('材料仍在后台解析，可稍后点击“检查更新”查看结果。')
+}
+
+export function ProjectDiscoveryPage() {
+  const fetchLeads = useAppStore((state) => state.fetchLeads)
+  const currentUser = useAuthStore((state) => state.user)
+  const navigate = useNavigate()
+  const location = useLocation()
+  const requestSerial = useRef(0)
+  const [candidates, setCandidates] = useState<LeadListItem[]>([])
+  const [period, setPeriod] = useState<ProjectDiscoveryPeriod>('week')
+  const [kind, setKind] = useState<ProjectDiscoveryKind>('all')
+  const [query, setQuery] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [action, setAction] = useState<'scan' | 'upload' | ''>('')
+  const [notice, setNotice] = useState<{ tone: 'success' | 'error'; text: string } | null>(null)
+  const canRunRadar = currentUser?.role === '系统管理员' || currentUser?.permissionCodes?.includes('system.manage')
+
+  const loadCandidates = useCallback(async (background = false) => {
+    const serial = ++requestSerial.current
+    if (!background) setLoading(true)
+    setError('')
+    try {
+      let response = await fetchLeads({ page: 1, pageSize: 50, sort: 'latest' })
+      if (!response) return
+      const rows = [...response.list]
+      while (shouldLoadNextProjectDiscoveryPage(response.list, response.page, response.totalPages)) {
+        const next = await fetchLeads({ page: response.page + 1, pageSize: 50, sort: 'latest' })
+        if (!next) return
+        rows.push(...next.list)
+        response = next
+      }
+      if (serial === requestSerial.current) {
+        const unique = new Map(rows.map((lead) => [lead.id, lead]))
+        setCandidates([...unique.values()])
+      }
+    } catch (cause) {
+      if (serial === requestSerial.current) setError(cause instanceof Error ? cause.message : '新项目读取失败')
+    } finally {
+      if (serial === requestSerial.current) {
+        setLoading(false)
+      }
+    }
+  }, [fetchLeads])
+
+  useEffect(() => { void loadCandidates() }, [loadCandidates])
+
+  const visible = useMemo(() => filterProjectDiscoveryCandidates(candidates, {
+    period, query, kind,
+  }), [candidates, kind, period, query])
+
+  const openLead = (lead: LeadListItem) => {
+    navigate(`/sourcing/${lead.id}`, { state: { from: `${location.pathname}${location.search}` } })
+  }
+
+  const runRadarScan = async () => {
+    if (action) return
+    setAction('scan')
+    setNotice(null)
+    try {
+      const result = await apiPost<RadarSyncResult>('/leads/sync-radar', { limit: 50, incrementalPages: 1, source: 'all' }, {
+        signal: AbortSignal.timeout(10 * 60_000),
+      })
+      setNotice({ tone: 'success', text: `更新检查完成：读取 ${result.fetched} 条，新增 ${result.created} 条，更新 ${result.updated} 条。` })
+      await loadCandidates(true)
+    } catch (cause) {
+      setNotice({ tone: 'error', text: cause instanceof Error ? cause.message : '检查更新失败，请稍后重试' })
+    } finally {
+      setAction('')
+    }
+  }
+
+  const uploadBp = async (file?: File) => {
+    if (!file || action) return
+    if (file.size > 20 * 1024 * 1024) {
+      setNotice({ tone: 'error', text: '文件不能超过 20 MB。' })
+      return
+    }
+    if (!/\.(pdf|docx|pptx|xlsx?|png|jpe?g|gif|bmp|webp|txt|md|markdown)$/i.test(file.name)) {
+      setNotice({ tone: 'error', text: '请选择 PDF、Office、图片或文本格式的项目材料。' })
+      return
+    }
+    setAction('upload')
+    setNotice(null)
+    try {
+      let uploaded = await apiPost<BpUploadResult>('/leads/bp-uploads', {
+        name: file.name,
+        declaredType: file.type || undefined,
+        dataBase64: await readFileAsDataUrl(file),
+      })
+      if (!['ready', 'review', 'rejected', 'dead_letter'].includes(uploaded.status)) uploaded = await waitForBpUpload(uploaded.id)
+      if (uploaded.status === 'dead_letter') {
+        uploaded = await apiPost<BpUploadResult>(`/leads/bp-uploads/${uploaded.id}/retry`)
+        uploaded = await waitForBpUpload(uploaded.id)
+      }
+      if (uploaded.status === 'dead_letter' || uploaded.status === 'rejected') {
+        throw new Error(uploaded.error || '材料未通过解析或主体校验，请核对后重试。')
+      }
+      setNotice({
+        tone: 'success',
+        text: uploaded.status === 'review'
+          ? `${uploaded.name} 已解析完成并进入人工复核队列。`
+          : `${uploaded.name} 已解析完成，新线索已加入发现列表。`,
+      })
+      await loadCandidates(true)
+    } catch (cause) {
+      setNotice({ tone: 'error', text: cause instanceof Error ? cause.message : '项目材料上传失败，请稍后重试' })
+    } finally {
+      setAction('')
+    }
+  }
+
+  return <div className="project-discovery-page">
+    <header className="project-discovery-hero">
+      <div className="project-discovery-title">
+        <span><Sparkles aria-hidden="true" /></span>
+        <h1>新项目发现</h1>
+      </div>
+      <div className="project-discovery-action-buttons" aria-label="项目发现操作">
+        {canRunRadar ? <button type="button" disabled={Boolean(action)} aria-busy={action === 'scan'} onClick={() => void runRadarScan()}>
+          {action === 'scan' ? <LoaderCircle className="is-spinning" aria-hidden="true" /> : <Radar aria-hidden="true" />}
+          {action === 'scan' ? '开始更新' : '检查更新'}
+        </button> : <span className="project-discovery-admin-note">信源扫描由系统管理员运行</span>}
+        <label className={action ? 'is-disabled' : ''}>
+          {action === 'upload' ? <LoaderCircle className="is-spinning" aria-hidden="true" /> : <FileUp aria-hidden="true" />}
+          {action === 'upload' ? '上传中' : '人工上传项目'}
+          <input type="file" disabled={Boolean(action)} accept=".pdf,.docx,.pptx,.xls,.xlsx,.png,.jpg,.jpeg,.gif,.bmp,.webp,.txt,.md,.markdown" aria-label="人工上传项目资料" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; void uploadBp(file) }} />
+        </label>
+      </div>
+    </header>
+    {notice && <p className={`project-discovery-notice ${notice.tone}`} role={notice.tone === 'error' ? 'alert' : 'status'}>{notice.text}</p>}
+
+    <section className="project-discovery-toolbar" aria-label="项目发现筛选">
+      <div className="project-discovery-periods" role="group" aria-label="发现时间范围">
+        {periods.map((item) => <button key={item.value} type="button" aria-pressed={period === item.value} onClick={() => setPeriod(item.value)}>{item.label}</button>)}
+      </div>
+      <label className="project-discovery-kind">
+        <span className="sr-only">发现类型</span>
+        <select value={kind} aria-label="发现类型" onChange={(event) => setKind(event.target.value as ProjectDiscoveryKind)}>
+          {kinds.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+        </select>
+      </label>
+      <label className="project-discovery-search">
+        <Search aria-hidden="true" />
+        <input value={query} maxLength={100} onChange={(event) => setQuery(event.target.value.slice(0, 100))} placeholder="搜索项目、赛道、产品或机构" aria-label="搜索新发现项目" />
+        {query && <button type="button" onClick={() => setQuery('')} aria-label="清空发现搜索"><X aria-hidden="true" /></button>}
+      </label>
+    </section>
+
+    <section className="project-discovery-results" aria-label="待查看项目">
+      {loading ? <div className="project-discovery-state"><LoaderCircle className="is-spinning" aria-hidden="true" /><strong>正在整理最新项目信号</strong><p>读取已收录的公开信源与结构化画像。</p></div>
+        : error ? <div className="project-discovery-state project-discovery-error"><strong>新项目读取失败</strong><p>{error}</p><button type="button" onClick={() => void loadCandidates()}>重新加载</button></div>
+          : visible.length === 0 ? <EmptyState title="当前范围没有新项目" description="试试切换到近 7 天、全部类型，或调整搜索关键词。" />
+            : <div className="project-discovery-grid">{visible.map((lead) => <DiscoveryCard key={lead.id} lead={lead} onOpen={() => openLead(lead)} />)}</div>}
+    </section>
+  </div>
+}
+
+function DiscoveryCard({ lead, onOpen }: { lead: LeadListItem; onOpen: () => void }) {
+  const [expanded, setExpanded] = useState(false)
+  const kind = discoveryCandidateKind(lead)
+  const investment = lead.investmentProfile
+  const research = lead.researchProfile
+  const name = lead.name || lead.companyName || '未命名项目'
+  const brief = buildProjectDiscoveryBrief(lead)
+  const dataStatus = kind === 'research' ? research?.dataStatus?.status : investment?.dataStatus?.status
+  const profile = projectDiscoveryProfile(lead)
+  const missingFields = projectDiscoveryMissingFields(lead)
+  const sourceUrl = safeExternalUrl(lead.radarProfile?.link)
+  const latestUpdate = lead.latestUpdates?.[0]
+  const verifiedDimensions = kind === 'research' ? research?.dataStatus?.verifiedDimensions : investment?.dataStatus?.verifiedDimensions
+  const applicableDimensions = kind === 'research' ? research?.dataStatus?.applicableDimensions : investment?.dataStatus?.applicableDimensions
+  const statusLabel = projectDiscoveryStatusLabel(lead.poolStatus)
+
+  return <article id={`discovery-${lead.id}`} className={`project-discovery-card${expanded ? ' is-expanded' : ''}`}>
+    <header className="project-discovery-card-header">
+      <h3>{name}</h3>
+      <div className="project-discovery-card-badges">
+        <span className="source">{lead.radarProfile ? 'AI 已筛选' : '人工线索'}</span>
+        <span className={`status${statusLabel === '已入库' ? ' is-promoted' : ''}`}>{statusLabel}</span>
+      </div>
+    </header>
+    <DiscoveryInvestmentBrief name={name} brief={brief} />
+    <button type="button" className="project-discovery-card-toggle" aria-expanded={expanded} aria-label={`查看${name}项目详情`} onClick={() => setExpanded((current) => !current)}>
+      {expanded ? '收起详细信息' : '展开详细信息'}
+      <ChevronDown className={expanded ? 'is-expanded' : ''} aria-hidden="true" />
+    </button>
+    {expanded && <>
+      <section className="project-discovery-card-details" aria-label={`${name}详细信息`}>
+        <div className="project-discovery-detail-panel project-discovery-detail-summary">
+          <strong>{kind === 'company' ? '项目摘要' : '情报摘要'}</strong>
+          <p>{brief.summary || '摘要待补充。'}</p>
+        </div>
+        <dl className="project-discovery-detail-metadata">
+          <div><dt>地区</dt><dd>{lead.region || '待核'}</dd></div>
+          <div><dt>来源渠道</dt><dd>{lead.radarProfile?.channel || '公开信源'}</dd></div>
+          <div><dt>主体类型</dt><dd>{kind === 'company' ? '公司' : '技术'}</dd></div>
+          <div><dt>完整度</dt><dd>{projectDiscoveryCompleteness(dataStatus, verifiedDimensions, applicableDimensions)}</dd></div>
+        </dl>
+        <div className="project-discovery-detail-panel project-discovery-profile">
+          <h4>{kind === 'company' ? '公司画像' : '技术画像'}</h4>
+          <dl>{profile.map((fact) => <div key={`${fact.label}:${fact.value}`}><dt>{fact.label}</dt><dd>{fact.value}</dd></div>)}</dl>
+        </div>
+        {(latestUpdate || sourceUrl) && <div className="project-discovery-detail-sources">
+          <strong>信息来源</strong>
+          <div>{sourceUrl ? <a href={sourceUrl} target="_blank" rel="noreferrer">{latestUpdate?.title || '查看原始公开信源'}</a> : <span>{latestUpdate?.title}</span>}
+            <p>{lead.radarProfile?.channel || '公开资料'}{projectDiscoveryCandidateDay(lead) ? ` · ${projectDiscoveryCandidateDay(lead)}` : ''}</p>
+          </div>
+        </div>}
+        {missingFields.length > 0 && <div className="project-discovery-detail-questions">
+          <strong>关键待核问题</strong>
+          <ul>{missingFields.map((field) => <li key={field}>补充并核验{field}</li>)}</ul>
+          <div>{missingFields.map((field) => <span key={field}>待补：{field}</span>)}</div>
+        </div>}
+      </section>
+      <footer className="project-discovery-card-actions">
+        <button type="button" onClick={onOpen}>查看完整线索并复核<ArrowRight aria-hidden="true" /></button>
+      </footer>
+    </>}
+  </article>
+}
+
+function DiscoveryInvestmentBrief({ name, brief }: { name: string; brief: ReturnType<typeof buildProjectDiscoveryBrief> }) {
+  return <section aria-label={`${name}投资速览`} className="project-discovery-investment-brief">
+    <dl>{brief.facts.map((item) => {
+      const [track, ...productParts] = item.label === '行业分类' ? item.value.split(/\s*\/\s*/u) : []
+      const product = productParts.join(' / ')
+      return <div key={`${item.label}:${item.value}`} className={item.wide ? 'wide' : ''}>
+        <dt>{item.label}</dt>
+        {product ? <dd className="industry"><span>{track}</span><i aria-hidden="true">/</i><strong>{product}</strong></dd> : <dd>{item.value}</dd>}
+      </div>
+    })}</dl>
+  </section>
+}
+
+type ProjectDiscoveryProfileFact = { label: string; value: string }
+
+function projectDiscoveryProfile(lead: LeadListItem): ProjectDiscoveryProfileFact[] {
+  if (discoveryCandidateKind(lead) === 'research') {
+    const research = lead.researchProfile
+    return compactProfileFacts([
+      profileFact('研究问题', research?.direction?.researchProblem),
+      profileFact('研究方法', research?.direction?.methods?.slice(0, 3).join('、')),
+      profileFact('应用场景', research?.valueAndTransfer?.applicationScenarios?.slice(0, 3).join('、')),
+      profileFact('技术成熟度', research?.valueAndTransfer?.trl || research?.valueAndTransfer?.prototype),
+      profileFact('论文/专利', [research?.progress?.venue, ...(research?.rights?.patents ?? [])].filter(Boolean).slice(0, 3).join('、')),
+      profileFact('数据更新', research?.dataStatus?.updatedAt || lead.dataUpdatedAt?.slice(0, 10)),
+    ])
+  }
+  const investment = lead.investmentProfile
+  return compactProfileFacts([
+    profileFact('核心产品', investment?.products.slice(0, 3).map((product) => product.name).join('、')),
+    profileFact('核心技术', investment?.products.slice(0, 3).map((product) => product.technologyRoute || product.productRoute).filter(Boolean).join('；')),
+    profileFact('产业链位置', investment?.industry.chainPosition),
+    profileFact('融资与投资机构', [investment?.financing.latestRound, investment?.financing.latestAmount, investment?.institutions.slice(0, 3).map((item) => item.name).join('、')].filter(Boolean).join(' · ')),
+    profileFact('客户进展', investment?.customers.highestStage || (investment?.customers.verifiedCount ? `已核验 ${investment.customers.verifiedCount} 家` : undefined)),
+    profileFact('工商主体', investment?.subject?.legalEntityName || lead.companyName),
+  ])
+}
+
+function projectDiscoveryMissingFields(lead: LeadListItem): string[] {
+  if (discoveryCandidateKind(lead) === 'research') {
+    const research = lead.researchProfile
+    return [
+      !research?.team?.authors?.length && '核心团队背景',
+      !research?.team?.affiliations?.length && '所属机构',
+      !research?.direction?.methods?.length && '研究方法',
+    ].filter((value): value is string => Boolean(value))
+  }
+  const investment = lead.investmentProfile
+  return [
+    !investment?.products?.length && '核心产品',
+    !investment?.financing.latestAmount && '融资金额',
+    !investment?.institutions?.length && '投资方',
+    !investment?.academicLinks?.some((link) => link.person) && '核心团队背景',
+  ].filter((value): value is string => Boolean(value))
+}
+
+function projectDiscoveryCompleteness(status: string | undefined, verified?: number, applicable?: number): string {
+  const ratio = typeof verified === 'number' && typeof applicable === 'number' && applicable > 0 ? ` · ${verified}/${applicable}` : ''
+  const label = status === 'verified' ? '已核验' : status === 'partial' ? '部分核验' : status === 'conflicted' ? '存在冲突' : '待补充'
+  return `${label}${ratio}`
+}
+
+function profileFact(label: string, value?: string): ProjectDiscoveryProfileFact | null {
+  return value?.trim() ? { label, value: value.trim() } : null
+}
+
+function compactProfileFacts(facts: Array<ProjectDiscoveryProfileFact | null>): ProjectDiscoveryProfileFact[] {
+  const compact = facts.filter((fact): fact is ProjectDiscoveryProfileFact => Boolean(fact))
+  return compact.length ? compact : [{ label: '画像状态', value: '信息待进一步补充' }]
+}
+
+function safeExternalUrl(value?: string): string | null {
+  if (!value) return null
+  try {
+    const url = new URL(value)
+    return url.protocol === 'https:' ? url.toString() : null
+  } catch {
+    return null
+  }
+}

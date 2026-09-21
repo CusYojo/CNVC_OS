@@ -386,7 +386,8 @@
     "start": "node --env-file-if-exists=.env server-dist/index.js",
     "start:app": "node --env-file-if-exists=.env server-dist/index.js",
     "start:all": "npm run start:app",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "preview:project-discovery": "node scripts/preview-project-discovery.mjs"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.141",
@@ -398,7 +399,7 @@
     "drizzle-orm": "^0.45.2",
     "exceljs": "^4.4.0",
     "express": "^5.1.0",
-    "image-size": "^1.2.1",
+    "image-size": "^2.0.4",
     "jsonwebtoken": "^9.0.3",
     "jszip": "^3.10.1",
     "lucide-react": "^0.468.0",
@@ -442,6 +443,9 @@
   "overrides": {
     "exceljs": {
       "uuid": "^11.1.1"
+    },
+    "pptxgenjs": {
+      "image-size": "2.0.4"
     }
   }
 }
