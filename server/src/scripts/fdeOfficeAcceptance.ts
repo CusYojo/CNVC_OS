@@ -23,7 +23,7 @@ const checks: string[] = [], marker = randomUUID().slice(0, 8)
 let server: Server | undefined
 const denied = async (work: Promise<unknown>, code: string) => { const error = await work.then(() => null, e => e); assert.equal(error?.code, code, error?.message ?? 'unexpected success') }
 try {
-  const people = ['投资经理', '财务', '财务', '董事长', '系统管理员', '投资经理', '法务'].map((role, i) => ({ id: randomUUID(), name: `办公-${marker}-${i === 5 ? 0 : i}`, role, email: `office-${marker}-${i}@example.invalid`, department: `OA验收-${marker}`, passwordHash: 'not-a-login-password' }))
+  const people = ['投资经理', '财务', '财务', '董事长', '系统管理员', '投资经理', '法务'].map((role, i) => ({ id: randomUUID(), name: `办公-${marker}-${i === 5 ? 0 : i}`, role, email: `office-${marker}-${i}@example.invalid`, department: i === 0 ? '投资部' : `OA验收-${marker}`, passwordHash: 'not-a-login-password' }))
   const [author, reviewer, backup, leader, admin, stranger, legal] = people
   await db.insert(users).values(people)
   for (const user of people) await identityRepositories.users.synchronizeAdministrationBindings(user.id, user.role, user.department)

@@ -3,7 +3,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import type { Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import express from 'express'
-import { and, eq, inArray, ne, sql } from 'drizzle-orm'
+import { and, eq, inArray, sql } from 'drizzle-orm'
 import { db, pool } from '../db/client.js'
 import { auditLogs, projectDutyAssignments, projectFiles, projectFileGrants, projectFileVersions, projectMembers, projects, roles, userRoles, users } from '../db/schema.js'
 import { identityRepositories } from '../repositories/index.js'
@@ -64,9 +64,7 @@ try {
   assert.equal((await listProjectArchives(member.id, { keyword: '%' })).total, 0)
   assert.equal(JSON.stringify(all).includes('storagePath'), false); assert.equal(JSON.stringify(all).includes('contentText'), false)
   checks.push('FDE-FILE-001/AUTH/CONC:SQL-scoped-facets-stable-IDs-two-pages-tied-order-clamped-page-literal-search-no-private-metadata')
-  const legacyProjects = await db.select({ id: projects.id }).from(projects).where(ne(projects.workflowModel, 'fde-v1'))
-  if (legacyProjects.length) assert.equal((await listProjectArchives(admin.id, { projectId: p1.id })).total, 0)
-  else await denied(listProjectArchives(admin.id), 'ARCHIVE_ACCESS_FORBIDDEN')
+  assert.equal((await listProjectArchives(admin.id, { projectId: p1.id })).total, 12)
   await denied(listProjectArchives(coordinator.id), 'ARCHIVE_ACCESS_FORBIDDEN')
   assert.equal((await listProjectArchives(outsider.id, { projectId: p1.id })).total, 0)
   assert.equal((await listProjectArchives(finance.id, { projectId: p1.id, category: '财务尽调' })).total, 6)
@@ -75,7 +73,7 @@ try {
   await denied(getArchiveFile(files[0].id, outsider.id), 'PROJECT_FILE_FORBIDDEN')
   await denied(listArchiveAudit(member.id, { fileId: files[0].id }), 'ARCHIVE_AUDIT_FORBIDDEN')
   assert.equal((await listArchiveAudit(member.id)).total, 0)
-  checks.push('FDE-AUTH-003/004/005:admin-coordinator-no-business-access-same-name-outsider-denied-view-not-download-audit-independent')
+  checks.push('FDE-AUTH-003/004/005:admin-file-workspace-exception-coordinator-no-business-access-same-name-outsider-denied-view-not-download-audit-independent')
   const manifest = await exportProjectArchives(member.id, { projectId: p1.id, type: 'TXT', category: '财务尽调', keyword: '档案样本', page: 2 })
   assert.equal(manifest.count, 1); assert.ok(manifest.csv.includes(files[7].id)); assert.equal(manifest.csv.includes(files[1].id), false)
   const whole = await exportProjectArchives(member.id, { projectId: p1.id })
@@ -168,10 +166,10 @@ try {
   await db.insert(projects).values({ id: legacyId, name: '原系统有权空项目', owner: owner.name, ownerUserId: owner.id, workflowModel: 'legacy', createdBy: owner.id })
   const adminCapability = await getDataKnowledgeCapabilities(admin.id)
   assert.equal(adminCapability.company, false); assert.equal(adminCapability.archives, true); assert.ok(adminCapability.uploadProjectIds.includes(legacyId))
-  assert.equal(adminCapability.uploadProjectIds.includes(p1.id), false, 'legacy administrator exception cannot grant FDE uploads')
-  assert.equal((await listProjectArchives(admin.id, { projectId: p1.id })).total, 0)
+  assert.equal(adminCapability.uploadProjectIds.includes(p1.id), true, 'administrator file workspace exception grants FDE uploads')
+  assert.equal((await listProjectArchives(admin.id, { projectId: p1.id })).total, 12)
   await db.update(users).set({ status: '禁用' }).where(eq(users.id, emptyId))
   await denied(getDataKnowledgeCapabilities(emptyId), 'DATA_KNOWLEDGE_ACTOR_FORBIDDEN')
-  checks.push('FDE-AUTH/SCOPE:UI-eligibility-reuses-project-duty-without-file-grants-revocation-legacy-admin-resource-compatibility-no-FDE-expansion-disabled-actor')
+  checks.push('FDE-AUTH/SCOPE:UI-eligibility-reuses-project-duty-without-file-grants-revocation-admin-file-workspace-exception-company-knowledge-separated-disabled-actor')
   console.log(JSON.stringify({ ok: true, checks, projectIds: [p1.id, p2.id], fileIds: files.map(row => row.id) }))
 } finally { if (server) await new Promise<void>((resolve, reject) => server!.close(error => error ? reject(error) : resolve())); await pool.end() }

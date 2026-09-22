@@ -65,11 +65,16 @@ try {
   await db.insert(todos).values({ projectId: project.id, projectName: project.name, title: '隔离任务', owner: accounts.owner.name, ownerUserId: accounts.owner.id, dueDate: '2027-01-01', createdBy: accounts.owner.id })
   await db.insert(risks).values({ projectId: project.id, projectName: project.name, type: '合规', title: '隔离风险', createdBy: accounts.owner.id })
   assert.ok(!(await listProjects({ page: 1, pageSize: 100 }, accounts.admin.id)).list.some((item) => item.id === project.id))
-  assert.ok(!(await listAllFiles(accounts.admin.id)).some((item) => item.projectId === project.id))
+  assert.ok((await listAllFiles(accounts.admin.id)).some((item) => item.projectId === project.id))
+  assert.ok(!(await listAllFiles(accounts.outsider.id)).some((item) => item.projectId === project.id))
   assert.equal((await listMeetings(project.id, actor('admin'))).length, 0)
   assert.ok(!(await listTodos(undefined, undefined, actor('admin'))).some((item) => item.projectId === project.id))
   assert.equal((await listRisks(project.id, undefined, actor('admin'))).length, 0)
-  checks.push('project-files-meetings-todos-risks-share-one-fde-scope')
+  checks.push(
+    'system-admin-project-file-access-is-an-explicit-exception',
+    'ordinary-outsider-cannot-read-project-files',
+    'project-meetings-todos-risks-remain-fde-scoped',
+  )
 
   project = (await getProject(project.id))!
   project = await classifyProject({ projectId: project.id, userId: accounts.owner.id, toClassification: 'normal', expectedVersion: project.version, reason: '入库职责配置完备' })
