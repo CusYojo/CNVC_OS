@@ -16,7 +16,6 @@ import {
   type ProjectDiscoveryPeriod,
 } from '../lib/projectDiscovery'
 import { useAppStore } from '../store/useAppStore'
-import { useAuthStore } from '../store/useAuthStore'
 import type { LeadListItem } from '../types'
 import './ProjectDiscoveryPage.css'
 
@@ -32,7 +31,6 @@ const kinds: Array<{ value: ProjectDiscoveryKind; label: string }> = [
   { value: 'research', label: '科研成果' },
 ]
 
-type RadarSyncResult = { created: number; updated: number; unchanged: number; skipped: number; fetched: number }
 type BpUploadResult = { id: string; name: string; status: string; progress: number; error?: string | null; leadId?: string | null; reviewId?: string | null }
 
 const readFileAsDataUrl = (file: File) => new Promise<string>((resolve, reject) => {
@@ -55,7 +53,6 @@ async function waitForBpUpload(id: string): Promise<BpUploadResult> {
 
 export function ProjectDiscoveryPage() {
   const fetchLeads = useAppStore((state) => state.fetchLeads)
-  const currentUser = useAuthStore((state) => state.user)
   const navigate = useNavigate()
   const location = useLocation()
   const requestSerial = useRef(0)
@@ -65,9 +62,8 @@ export function ProjectDiscoveryPage() {
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [action, setAction] = useState<'scan' | 'upload' | ''>('')
+  const [action, setAction] = useState<'refresh' | 'upload' | ''>('')
   const [notice, setNotice] = useState<{ tone: 'success' | 'error'; text: string } | null>(null)
-  const canRunRadar = currentUser?.role === '系统管理员' || currentUser?.permissionCodes?.includes('system.manage')
 
   const loadCandidates = useCallback(async (background = false) => {
     const serial = ++requestSerial.current
@@ -75,11 +71,11 @@ export function ProjectDiscoveryPage() {
     setError('')
     try {
       let response = await fetchLeads({ page: 1, pageSize: 50, sort: 'latest' })
-      if (!response) return
+      if (!response) return false
       const rows = [...response.list]
       while (shouldLoadNextProjectDiscoveryPage(response.list, response.page, response.totalPages)) {
         const next = await fetchLeads({ page: response.page + 1, pageSize: 50, sort: 'latest' })
-        if (!next) return
+        if (!next) return false
         rows.push(...next.list)
         response = next
       }
@@ -87,8 +83,10 @@ export function ProjectDiscoveryPage() {
         const unique = new Map(rows.map((lead) => [lead.id, lead]))
         setCandidates([...unique.values()])
       }
+      return true
     } catch (cause) {
       if (serial === requestSerial.current) setError(cause instanceof Error ? cause.message : '新项目读取失败')
+      return false
     } finally {
       if (serial === requestSerial.current) {
         setLoading(false)
@@ -106,18 +104,15 @@ export function ProjectDiscoveryPage() {
     navigate(`/sourcing/${lead.id}`, { state: { from: `${location.pathname}${location.search}` } })
   }
 
-  const runRadarScan = async () => {
+  const refreshFromDatabase = async () => {
     if (action) return
-    setAction('scan')
+    setAction('refresh')
     setNotice(null)
     try {
-      const result = await apiPost<RadarSyncResult>('/leads/sync-radar', { limit: 50, incrementalPages: 1, source: 'all' }, {
-        signal: AbortSignal.timeout(10 * 60_000),
-      })
-      setNotice({ tone: 'success', text: `更新检查完成：读取 ${result.fetched} 条，新增 ${result.created} 条，更新 ${result.updated} 条。` })
-      await loadCandidates(true)
-    } catch (cause) {
-      setNotice({ tone: 'error', text: cause instanceof Error ? cause.message : '检查更新失败，请稍后重试' })
+      const refreshed = await loadCandidates(true)
+      setNotice(refreshed
+        ? { tone: 'success', text: '已从数据库读取最新项目数据。' }
+        : { tone: 'error', text: '数据库读取失败，请稍后重试。' })
     } finally {
       setAction('')
     }
@@ -170,10 +165,10 @@ export function ProjectDiscoveryPage() {
         <h1>新项目发现</h1>
       </div>
       <div className="project-discovery-action-buttons" aria-label="项目发现操作">
-        {canRunRadar ? <button type="button" disabled={Boolean(action)} aria-busy={action === 'scan'} onClick={() => void runRadarScan()}>
-          {action === 'scan' ? <LoaderCircle className="is-spinning" aria-hidden="true" /> : <Radar aria-hidden="true" />}
-          {action === 'scan' ? '开始更新' : '检查更新'}
-        </button> : <span className="project-discovery-admin-note">信源扫描由系统管理员运行</span>}
+        <button type="button" disabled={Boolean(action)} aria-busy={action === 'refresh'} onClick={() => void refreshFromDatabase()}>
+          {action === 'refresh' ? <LoaderCircle className="is-spinning" aria-hidden="true" /> : <Radar aria-hidden="true" />}
+          {action === 'refresh' ? '开始更新' : '检查更新'}
+        </button>
         <label className={action ? 'is-disabled' : ''}>
           {action === 'upload' ? <LoaderCircle className="is-spinning" aria-hidden="true" /> : <FileUp aria-hidden="true" />}
           {action === 'upload' ? '上传中' : '人工上传项目'}
