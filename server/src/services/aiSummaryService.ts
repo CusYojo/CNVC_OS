@@ -995,7 +995,11 @@ function publicResearchProfilePayload(value: Record<string, unknown>) {
   return publicProfile
 }
 
-function leadPoolListItem(row: typeof leads.$inferSelect, candidateFacts: LeadListCandidateFact[] = []) {
+function leadPoolListItem(
+  row: typeof leads.$inferSelect,
+  candidateFacts: LeadListCandidateFact[] = [],
+  options: { showCandidateData?: boolean } = {},
+) {
   const enriched = enrichLead(row)
   const radarProfile = objectValue(enriched.radarProfile)
   const radarProfileCore = objectValue(radarProfile.profile)
@@ -1164,7 +1168,7 @@ function leadPoolListItem(row: typeof leads.$inferSelect, candidateFacts: LeadLi
     researchProfile: leadResearchProfileEnabled() && enriched.leadType === 'research' && Object.keys(publicResearchProfile).length
       ? publicResearchProfile
       : undefined,
-    availableData: leadPoolCandidateDataEnabled() && hasAvailableData ? availableData : undefined,
+    availableData: options.showCandidateData && hasAvailableData ? availableData : undefined,
   }
 }
 
@@ -1573,13 +1577,14 @@ export async function listLeads(options: {
                 : desc(leads.createdAt),
       desc(leads.id),
     ).limit(pageSize).offset(pageOffset)
+  const showCandidateData = Boolean(options.projectDiscoveryOnly) || leadPoolCandidateDataEnabled()
   const { rows, pagination, candidateFacts } = await db.transaction(async (tx) => {
     const totalRow = await tx.select({ n: sql<number>`count(*)` }).from(leads)
       .leftJoin(leadInvestmentProfileProjections, eq(leadInvestmentProfileProjections.leadId, leads.id)).where(whereClause)
     const total = totalRow[0]?.n ?? 0
     const pagination = normalizeLeadListPage(requestedPage, pageSize, total)
     const rows = await selectPage(tx, (pagination.page - 1) * pageSize)
-    const candidateFacts = leadPoolCandidateDataEnabled() && rows.length ? await tx.select({
+    const candidateFacts = showCandidateData && rows.length ? await tx.select({
       leadId: leadFacts.leadId,
       factKey: leadFacts.factKey,
       instanceKey: leadFacts.instanceKey,
@@ -1604,6 +1609,7 @@ export async function listLeads(options: {
     list: rows.map((r) => leadPoolListItem(
       r as unknown as typeof leads.$inferSelect,
       candidateFactsByLead.get(r.id) ?? [],
+      { showCandidateData },
     )),
     ...pagination,
   }
