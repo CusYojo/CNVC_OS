@@ -228,6 +228,32 @@ test('project discovery prefers human-edited keywords over derived facts', () =>
   ])
 })
 
+test('project discovery prefers human-edited card content over derived facts', () => {
+  const edited = {
+    ...vcHunterCandidate,
+    radarProfile: {
+      ...vcHunterCandidate.radarProfile,
+      profile: {
+        ...vcHunterCandidate.radarProfile?.profile,
+        discoveryCardEdits: {
+          name: '弋途科技（更新）',
+          primaryDate: '2026-09-22',
+          summary: '用户补充的项目摘要',
+          region: '苏州',
+          sourceChannel: '人工补充',
+          briefFacts: { 融资金额: '超亿元', 投资方: '用户确认基金' },
+          profileFacts: { 核心产品: '新一代座舱系统' },
+        },
+      },
+    },
+  } as unknown as LeadListItem
+
+  assert.equal(projectDiscoveryPrimaryDate(edited).value, '2026-09-22')
+  assert.equal(buildProjectDiscoveryBrief(edited).summary, '用户补充的项目摘要')
+  assert.equal(buildProjectDiscoveryBrief(edited).facts.find((fact) => fact.label === '融资金额')?.value, '超亿元')
+  assert.equal(buildProjectDiscoveryBrief(edited).facts.find((fact) => fact.label === '投资方')?.value, '用户确认基金')
+})
+
 test('plain-text keyword editing accepts common separators and preserves known keyword metadata', () => {
   const existing = buildProjectDiscoveryKeywords(vcHunterCandidate)
 

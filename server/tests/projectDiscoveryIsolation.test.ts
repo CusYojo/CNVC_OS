@@ -5,6 +5,7 @@ import {
   canAssignProjectDiscoveryOwner,
   isProjectDiscoveryLead,
   isProjectDiscoverySourceKey,
+  normalizeProjectDiscoveryCardEdits,
   normalizeProjectDiscoveryKeywords,
 } from '../src/services/projectDiscoveryScope.js'
 
@@ -36,6 +37,34 @@ test('editable discovery keywords are normalized and bounded at the API boundary
   assert.throws(() => normalizeProjectDiscoveryKeywords(Array.from({ length: 9 }, (_, index) => ({
     kind: 'industry', label: '产业', value: `关键词${index}`,
   }))), /最多保留/)
+})
+
+test('editable discovery card content is normalized and bounded at the API boundary', () => {
+  assert.deepEqual(normalizeProjectDiscoveryCardEdits({
+    name: '  光河芯存  ',
+    primaryDate: ' 2026-09-20 ',
+    summary: '  完成 A 轮融资  ',
+    region: ' 上海 ',
+    sourceChannel: ' VC Hunter ',
+    briefFacts: { ' 融资金额 ': ' 1亿元 ', '融资轮次': ' A轮 ' },
+    profileFacts: { ' 核心产品 ': ' 光电混合存储芯片 ' },
+  }), {
+    name: '光河芯存',
+    primaryDate: '2026-09-20',
+    summary: '完成 A 轮融资',
+    region: '上海',
+    sourceChannel: 'VC Hunter',
+    briefFacts: { 融资金额: '1亿元', 融资轮次: 'A轮' },
+    profileFacts: { 核心产品: '光电混合存储芯片' },
+  })
+  assert.throws(() => normalizeProjectDiscoveryCardEdits({
+    name: '', primaryDate: '', summary: '', region: '', sourceChannel: '', briefFacts: {}, profileFacts: {},
+  }), /项目名称/)
+  assert.throws(() => normalizeProjectDiscoveryCardEdits({
+    name: '项目', primaryDate: '', summary: '', region: '', sourceChannel: '',
+    briefFacts: Object.fromEntries(Array.from({ length: 13 }, (_, index) => [`字段${index}`, '值'])),
+    profileFacts: {},
+  }), /速览字段最多保留 12 项/)
 })
 
 test('owner delegation requires project classification or system management permission', () => {
