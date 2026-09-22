@@ -71,6 +71,7 @@ test('project center exposes the imported discovery workspace without rewriting 
   assert.match(discoveryCss, /project-discovery-investment-brief/, '投资速览应有独立的双列卡片样式')
   assert.match(discoveryCss, /project-discovery-keyword-chip/, '关键词应使用可换行的气泡样式')
   assert.doesNotMatch(discovery, /<span>\{keyword\.label\}<\/span>/, '关键词气泡不应显示机构、院校、产业或技术前缀')
+  assert.doesNotMatch(discovery, /title=\{`\$\{keyword\.label\}：/, '关键词悬停提示也不应附加分类前缀')
   assert.match(discovery, /project-discovery-keyword-chip[^>]*>[\s\S]*?<strong>\{keyword\.value\}<\/strong>/, '关键词气泡应直接显示关键词内容')
   assert.match(discoveryCss, /project-discovery-keyword-editor/, '关键词编辑态应保留卡片内布局')
   assert.match(discoveryCss, /project-discovery-assignment-form/, '入库分配应在卡片内完成')

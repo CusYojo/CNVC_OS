@@ -539,7 +539,7 @@ function DiscoveryInvestmentBrief({ name, brief, keywords, onEdit }: {
             {keywords.map((keyword) => <li
               key={`${keyword.kind}:${keyword.value}`}
             >
-              <button type="button" className={`project-discovery-keyword-chip is-${keyword.kind}`} title={`${keyword.label}：${keyword.value}`} aria-label={`编辑关键词${keyword.value}`} onClick={onEdit}>
+              <button type="button" className={`project-discovery-keyword-chip is-${keyword.kind}`} title={keyword.value} aria-label={`编辑关键词${keyword.value}`} onClick={onEdit}>
                 <strong>{keyword.value}</strong>
                 <Pencil aria-hidden="true" />
               </button>
