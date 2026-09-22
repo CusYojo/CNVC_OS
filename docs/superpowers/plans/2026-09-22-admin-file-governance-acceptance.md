@@ -13,6 +13,7 @@
 ## 文件结构
 
 - 修改：`server/src/scripts/fdeGovernanceAcceptance.ts:63-72` — 定义管理员文件域例外、普通非成员文件隔离以及其他项目业务域隔离的验收契约。
+- 修改：`server/src/scripts/fdeFileAcceptance.ts:72-78` — 定义管理员可读取文件，时间协调人和普通非成员仍被拒绝的文件访问契约。
 - 参考：`server/src/scripts/fdeMigrationAcceptance.ts:13-58,116-139` — 创建随机表前缀、调度治理验收并核验业务表集合与清理生命周期；不修改。
 - 参考：`docs/superpowers/specs/2026-09-22-admin-file-governance-acceptance-design.md` — 已批准的权限边界；不修改。
 
@@ -84,10 +85,38 @@ npm run check:types
 
 ```powershell
 git diff --check
-git diff -- server/src/scripts/fdeGovernanceAcceptance.ts
+git diff -- server/src/scripts/fdeGovernanceAcceptance.ts server/src/scripts/fdeFileAcceptance.ts
 ```
 
 预期：`git diff --check` 无输出；代码差异只包含上述治理验收断言与 checks 名称。
+
+### 任务 2B：同步文件访问验收契约
+
+**文件：**
+- 修改：`server/src/scripts/fdeFileAcceptance.ts:72-78`
+
+- [ ] **步骤 1：将管理员从统一拒绝名单移到允许访问断言**
+
+将第 75 行改为：
+
+```ts
+  await requireProjectFileAccess(db, file.id, admin.id)
+  for (const person of [coordinator, outsider]) await code(requireProjectFileAccess(db, file.id, person.id), 'PROJECT_FILE_FORBIDDEN')
+```
+
+不得改变成员下载权限、显式授权、协调人隔离或普通非成员隔离的其他断言。
+
+- [ ] **步骤 2：运行 TypeScript 类型检查与差异检查**
+
+运行：
+
+```powershell
+npm run check:types
+git diff --check
+git diff -- server/src/scripts/fdeGovernanceAcceptance.ts server/src/scripts/fdeFileAcceptance.ts
+```
+
+预期：类型检查和差异检查退出码均为 0；代码差异只包含两处过期验收契约。
 
 ### 任务 3：运行完整 FDE 验收并提交
 
@@ -134,17 +163,17 @@ WHERE TABLE_SCHEMA = 'sbl_jedi_acceptance_20260828'
 ```powershell
 git status --short
 git diff --check
-git diff -- server/src/scripts/fdeGovernanceAcceptance.ts
+git diff -- server/src/scripts/fdeGovernanceAcceptance.ts server/src/scripts/fdeFileAcceptance.ts
 ```
 
-预期：除实现计划文档外，待提交代码只有 `server/src/scripts/fdeGovernanceAcceptance.ts`；无空白错误，也无生产代码、数据库、API 或 UI 变更。
+预期：除实现计划文档外，待提交代码只有 `server/src/scripts/fdeGovernanceAcceptance.ts` 和 `server/src/scripts/fdeFileAcceptance.ts`；无空白错误，也无生产代码、数据库、API 或 UI 变更。
 
 - [ ] **步骤 4：提交验收契约修正**
 
 运行：
 
 ```powershell
-git add -- server/src/scripts/fdeGovernanceAcceptance.ts
+git add -- server/src/scripts/fdeGovernanceAcceptance.ts server/src/scripts/fdeFileAcceptance.ts
 git commit -m "test: align admin project file governance acceptance"
 ```
 
