@@ -452,7 +452,7 @@ function candidateFactMoney(fact: LeadListCandidateFact | undefined): string | u
 
 function looksLikeInvestmentInstitution(value: string): boolean {
   if (/(?:行长|董事长|创始人|企业家|先生|女士|个人|自然人|未透露|未披露)/u.test(value)) return false
-  return /(?:资本|基金|投资|创投|创坛|科创|金控|证券|银行|保险|控股|集团|资产|孵化|合伙|公司|Capital|Ventures|Partners|Fund|Bank|Investment)/iu.test(value)
+  return /(?:资本|基金|投资|创投|创坛|科创|金控|证券|银行|保险|控股|集团|资产|股权|私募|孵化|合伙|公司|Capital|Ventures|Partners|Fund|Bank|Investment)/iu.test(value)
 }
 
 function leadListWebCandidateData(facts: LeadListCandidateFact[]) {
