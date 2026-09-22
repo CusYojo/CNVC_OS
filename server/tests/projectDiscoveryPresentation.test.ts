@@ -50,6 +50,48 @@ const research = {
   },
 } as LeadListItem
 
+const vcHunterCandidate = {
+  id: 'vc-hunter-1',
+  name: '弋途科技',
+  companyName: '上海弋途科技有限公司',
+  region: '上海',
+  leadType: 'company',
+  poolStatus: '公共池',
+  poolEnteredAt: '2026-09-21T08:00:00.000Z',
+  dataUpdatedAt: '2026-09-21T08:00:00.000Z',
+  businessTags: { industry: ['其他'], region: ['上海'] },
+  latestUpdates: [{ occurredAt: '2026-09-21', title: '完成近亿元 Pre-B 轮融资' }],
+  radarProfile: {
+    channel: 'VC_Hunter',
+    publishedAt: '2026-09-21',
+    profile: {
+      teamComposition: 'CEO 吴小航、CTO 陈震、COO 夏永峰均毕业于上海交大。',
+      sourceIndustries: ['人工智能', '智能座舱'],
+    },
+  },
+  availableData: {
+    dataStatus: 'candidate',
+    verificationStatus: 'unverified',
+    displayLabel: '已有资料 · 待核验',
+    sourceKinds: ['intake'],
+    conflictFields: [],
+    industryTags: ['人工智能', '智能座舱'],
+    products: [{ name: '心界 AIOS' }],
+    institutions: [
+      { name: '上海半导体装备材料产业投资基金', round: 'Pre-B轮', role: 'lead', major: false },
+      { name: 'Sands Talk Capital', round: 'Pre-B轮', role: 'lead', major: false },
+    ],
+    academicLinks: [],
+    financing: {
+      status: '已融资',
+      latestRound: 'Pre-B轮',
+      latestRoundDate: '2026-09-21',
+      latestAmount: '近亿元',
+      completedRoundCount: 1,
+    },
+  },
+} as unknown as LeadListItem
+
 test('project discovery day uses Asia/Shanghai instead of UTC boundaries', () => {
   assert.equal(projectDiscoveryDay('2026-09-20T16:30:00.000Z'), '2026-09-21')
 })
@@ -130,6 +172,20 @@ test('project discovery company cards expose the same six-field investment brief
       { label: '融资轮次', value: 'A轮' },
       { label: '投资方', value: '星河创投', wide: true },
       { label: '核心团队背景', value: '待补充', wide: true },
+    ],
+  })
+})
+
+test('project discovery uses imported VC Hunter candidate facts when a verified projection is not available yet', () => {
+  assert.deepEqual(buildProjectDiscoveryBrief(vcHunterCandidate), {
+    summary: '完成近亿元 Pre-B 轮融资',
+    facts: [
+      { label: '行业分类', value: '人工智能 / 智能座舱' },
+      { label: '最新融资日期', value: '2026-09-21' },
+      { label: '融资金额', value: '近亿元' },
+      { label: '融资轮次', value: 'Pre-B轮' },
+      { label: '投资方', value: '上海半导体装备材料产业投资基金、Sands Talk Capital', wide: true },
+      { label: '核心团队背景', value: 'CEO 吴小航、CTO 陈震、COO 夏永峰均毕业于上海交大。', wide: true },
     ],
   })
 })
