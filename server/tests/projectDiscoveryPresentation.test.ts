@@ -206,6 +206,27 @@ test('project discovery promotes the financing date and turns priority facts int
   ])
 })
 
+test('project discovery prefers human-edited keyword bubbles over derived facts', () => {
+  const edited = {
+    ...vcHunterCandidate,
+    radarProfile: {
+      ...vcHunterCandidate.radarProfile,
+      profile: {
+        ...vcHunterCandidate.radarProfile?.profile,
+        discoveryKeywords: [
+          { kind: 'institution', label: '机构', value: '用户确认基金' },
+          { kind: 'technology', label: '技术', value: '端侧推理引擎' },
+        ],
+      },
+    },
+  } as LeadListItem
+
+  assert.deepEqual(buildProjectDiscoveryKeywords(edited), [
+    { kind: 'institution', label: '机构', value: '用户确认基金' },
+    { kind: 'technology', label: '技术', value: '端侧推理引擎' },
+  ])
+})
+
 test('project discovery research cards keep the same compact two-column brief format', () => {
   assert.deepEqual(buildProjectDiscoveryBrief(research), {
     summary: '论文公开',

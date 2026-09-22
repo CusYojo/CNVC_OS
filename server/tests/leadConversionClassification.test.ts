@@ -18,8 +18,13 @@ type Row = Record<string, any>
 type Predicate = (row: Row) => boolean
 type Table = Record<string, string>
 
-function fixture(leadPatch: Row = {}, actorPatch: Row = {}) {
+function fixture(
+  leadPatch: Row = {},
+  actorPatch: Row = {},
+  options: { ownerPatch?: Row; permissionCodes?: string[] } = {},
+) {
   const actor = { id: 'current-user', name: '当前用户', status: '启用', ...actorPatch }
+  const owner = { id: 'assigned-owner', name: '目标负责人', department: '硬科技部', status: '启用', ...options.ownerPatch }
   const tableNames = ['projects', 'leads', 'migrationEntityMappings', 'projectMembers', 'projectClassificationHistory', 'auditLogs', 'leadScoreJobs', 'leadEnrichmentTopicRuns', 'leadEnrichmentJobs']
   const tables = Object.fromEntries(tableNames.map(name => [name, Object.fromEntries(['id', 'targetId', 'sourceSystem', 'sourceTable', 'sourceId', 'leadId', 'status'].map(key => [key, key]))])) as Record<string, Table>
   const rows = new Map<Table, Row[]>(Object.values(tables).map(table => [table, []]))
@@ -41,15 +46,26 @@ function fixture(leadPatch: Row = {}, actorPatch: Row = {}) {
   const convertLead = runInNewContext(`${code}\nconvertLead`, {
     exports: {}, ...tables,
     db: { ...tx, transaction: async (callback: (value: typeof tx) => unknown) => callback(tx) },
-    createMySqlIdentityRepositoryContext: () => ({ users: { findById: async (id: string) => id === actor.id ? actor : undefined } }),
+    createMySqlIdentityRepositoryContext: () => ({ users: {
+      findById: async (id: string) => id === actor.id ? actor : id === owner.id ? owner : undefined,
+      listPermissionCodes: async () => options.permissionCodes ?? [],
+    } }),
+    canAssignProjectDiscoveryOwner: (actorId: string, ownerId: string, permissionCodes: string[]) => (
+      actorId === ownerId || permissionCodes.includes('project.classify') || permissionCodes.includes('system.manage')
+    ),
     activeWorkflowPolicyVersion: async () => 'active-policy',
     sanitizeScoringCompetitors: (value: unknown) => value,
     eq: (field: string, value: unknown): Predicate => row => row[field] === value,
     and: (...conditions: Predicate[]): Predicate => row => conditions.every(matches => matches(row)),
     inArray: (field: string, values: unknown[]): Predicate => row => values.includes(row[field]),
     sql: () => ({}),
-  }) as (leadId: string, userId: string) => Promise<{ project: Row; lead: Row }>
-  return { convert: (leadId = 'lead-1', userId = actor.id) => convertLead(leadId, userId), read, actor }
+  }) as (leadId: string, userId: string, assignment?: { ownerUserId?: string; department?: string }) => Promise<{ project: Row; lead: Row }>
+  return {
+    convert: (leadId = 'lead-1', userId = actor.id, assignment?: { ownerUserId?: string; department?: string }) => convertLead(leadId, userId, assignment),
+    read,
+    actor,
+    owner,
+  }
 }
 
 test('lead conversion returns an active normal project owned by the current user', async () => {
@@ -94,6 +110,32 @@ test('conversion retains source facts and handles absent optional fields', async
   assert.equal(empty.project.companyName, undefined)
   assert.equal(empty.project.round, undefined)
   assert.equal(empty.project.financing, undefined)
+})
+
+test('authorized discovery conversion assigns the project to the selected department owner', async () => {
+  const { convert, read, actor, owner } = fixture({}, {}, { permissionCodes: ['project.classify'] })
+  const result = await convert('lead-1', actor.id, { ownerUserId: owner.id, department: owner.department })
+  assert.equal(result.project.ownerUserId, owner.id)
+  assert.equal(result.project.owner, owner.name)
+  assert.equal(result.project.createdBy, actor.id)
+  assert.equal(read('projectMembers')[0].userId, owner.id)
+  assert.equal(result.lead.claimedBy, owner.name)
+})
+
+test('discovery conversion rejects unauthorized or mismatched owner assignment', async () => {
+  const unauthorized = fixture()
+  await assert.rejects(
+    unauthorized.convert('lead-1', unauthorized.actor.id, { ownerUserId: unauthorized.owner.id, department: unauthorized.owner.department }),
+    { code: 'LEAD_ASSIGNMENT_FORBIDDEN', status: 403 },
+  )
+  assert.equal(unauthorized.read('projects').length, 0)
+
+  const mismatch = fixture({}, {}, { permissionCodes: ['system.manage'] })
+  await assert.rejects(
+    mismatch.convert('lead-1', mismatch.actor.id, { ownerUserId: mismatch.owner.id, department: '错误部门' }),
+    { code: 'LEAD_ASSIGNMENT_DEPARTMENT_MISMATCH', status: 400 },
+  )
+  assert.equal(mismatch.read('projects').length, 0)
 })
 
 test('repeat conversion still rejects without a second project or history row', async () => {
