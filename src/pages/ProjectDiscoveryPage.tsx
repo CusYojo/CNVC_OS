@@ -540,7 +540,6 @@ function DiscoveryInvestmentBrief({ name, brief, keywords, onEdit }: {
               key={`${keyword.kind}:${keyword.value}`}
             >
               <button type="button" className={`project-discovery-keyword-chip is-${keyword.kind}`} title={`${keyword.label}：${keyword.value}`} aria-label={`编辑关键词${keyword.value}`} onClick={onEdit}>
-                <span>{keyword.label}</span>
                 <strong>{keyword.value}</strong>
                 <Pencil aria-hidden="true" />
               </button>
