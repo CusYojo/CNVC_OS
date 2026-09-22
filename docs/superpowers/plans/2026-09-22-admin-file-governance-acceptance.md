@@ -14,6 +14,7 @@
 
 - 修改：`server/src/scripts/fdeGovernanceAcceptance.ts:63-72` — 定义管理员文件域例外、普通非成员文件隔离以及其他项目业务域隔离的验收契约。
 - 修改：`server/src/scripts/fdeFileAcceptance.ts:72-78` — 定义管理员可读取文件，时间协调人和普通非成员仍被拒绝的文件访问契约。
+- 修改：`server/src/scripts/fdeOfficeAcceptance.ts:26-29` — 让创建关联项目的合成负责人满足投资部资格，不改变生产校验。
 - 参考：`server/src/scripts/fdeMigrationAcceptance.ts:13-58,116-139` — 创建随机表前缀、调度治理验收并核验业务表集合与清理生命周期；不修改。
 - 参考：`docs/superpowers/specs/2026-09-22-admin-file-governance-acceptance-design.md` — 已批准的权限边界；不修改。
 
@@ -118,6 +119,33 @@ git diff -- server/src/scripts/fdeGovernanceAcceptance.ts server/src/scripts/fde
 
 预期：类型检查和差异检查退出码均为 0；代码差异只包含两处过期验收契约。
 
+### 任务 2C：修正办公验收的项目负责人夹具
+
+**文件：**
+- 修改：`server/src/scripts/fdeOfficeAcceptance.ts:26-29`
+
+- [ ] **步骤 1：只给合成 author 设置投资部**
+
+将 people 映射中的 `department` 属性改为：
+
+```ts
+department: i === 0 ? '投资部' : `OA验收-${marker}`,
+```
+
+其中索引 0 是创建关联项目的 `author`。不得更改 `createProject` 的生产校验或其他合成账号的隔离部门。
+
+- [ ] **步骤 2：运行类型与差异检查**
+
+运行：
+
+```powershell
+npm run check:types
+git diff --check
+git diff -- server/src/scripts/fdeGovernanceAcceptance.ts server/src/scripts/fdeFileAcceptance.ts server/src/scripts/fdeOfficeAcceptance.ts
+```
+
+预期：退出码均为 0；办公验收差异只有合成账号部门选择表达式。
+
 ### 任务 3：运行完整 FDE 验收并提交
 
 **文件：**
@@ -163,17 +191,17 @@ WHERE TABLE_SCHEMA = 'sbl_jedi_acceptance_20260828'
 ```powershell
 git status --short
 git diff --check
-git diff -- server/src/scripts/fdeGovernanceAcceptance.ts server/src/scripts/fdeFileAcceptance.ts
+git diff -- server/src/scripts/fdeGovernanceAcceptance.ts server/src/scripts/fdeFileAcceptance.ts server/src/scripts/fdeOfficeAcceptance.ts
 ```
 
-预期：除实现计划文档外，待提交代码只有 `server/src/scripts/fdeGovernanceAcceptance.ts` 和 `server/src/scripts/fdeFileAcceptance.ts`；无空白错误，也无生产代码、数据库、API 或 UI 变更。
+预期：除实现计划文档外，待提交代码只有 `server/src/scripts/fdeGovernanceAcceptance.ts`、`server/src/scripts/fdeFileAcceptance.ts` 和 `server/src/scripts/fdeOfficeAcceptance.ts`；无生产代码、数据库、API 或 UI 变更。
 
 - [ ] **步骤 4：提交验收契约修正**
 
 运行：
 
 ```powershell
-git add -- server/src/scripts/fdeGovernanceAcceptance.ts server/src/scripts/fdeFileAcceptance.ts
+git add -- server/src/scripts/fdeGovernanceAcceptance.ts server/src/scripts/fdeFileAcceptance.ts server/src/scripts/fdeOfficeAcceptance.ts
 git commit -m "test: align admin project file governance acceptance"
 ```
 
