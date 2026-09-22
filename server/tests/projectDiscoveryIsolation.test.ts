@@ -12,12 +12,15 @@ test('project discovery accepts only migrated VC Hunter and future page uploads'
 })
 
 test('project discovery uses an isolated endpoint instead of the shared lead pool endpoint', async () => {
-  const [page, routes] = await Promise.all([
+  const [page, routes, leadService] = await Promise.all([
     readFile(new URL('../../src/pages/ProjectDiscoveryPage.tsx', import.meta.url), 'utf8'),
     readFile(new URL('../src/routes/meta.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../src/services/aiSummaryService.ts', import.meta.url), 'utf8'),
   ])
   assert.match(page, /\/project-discovery\/leads/)
   assert.doesNotMatch(page, /fetchLeads\(/)
   assert.match(routes, /get\('\/project-discovery\/leads'/)
   assert.match(routes, /projectDiscoveryOnly:\s*true/)
+  assert.match(leadService, /JSON_SEARCH\(/, '生产 MySQL 应直接匹配 radar_source_keys JSON 数组')
+  assert.doesNotMatch(leadService, /JSON_TABLE\([\s\S]{0,300}project_discovery_source/, '发现池筛选不得使用当前生产库不兼容的 JSON_TABLE 路径')
 })

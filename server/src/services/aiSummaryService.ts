@@ -1193,16 +1193,13 @@ export async function listLeads(options: {
   const conds: ReturnType<typeof sql>[] = [visiblePublicLeadExpr]
   if (options.projectDiscoveryOnly) {
     const sourceKeyMatches = PROJECT_DISCOVERY_SOURCE_PREFIXES.map(
-      (prefix) => sql`project_discovery_source.source_key LIKE ${`${prefix}%`}`,
-    )
-    conds.push(sql`EXISTS (
-      SELECT 1
-      FROM JSON_TABLE(
+      (prefix) => sql`JSON_SEARCH(
         COALESCE(${leads.radarSourceKeys}, JSON_ARRAY()),
-        '$[*]' COLUMNS (source_key VARCHAR(255) PATH '$')
-      ) AS project_discovery_source
-      WHERE ${sql.join(sourceKeyMatches, sql` OR `)}
-    )`)
+        'one',
+        ${`${prefix}%`}
+      ) IS NOT NULL`,
+    )
+    conds.push(sql`(${sql.join(sourceKeyMatches, sql` OR `)})`)
   }
   // 已入库线索全部可见；未完成 AI 分析的记录由 enrichLead 标为 pending。
   // 同步和 AI 评分解耦，避免“已经同步但列表看不到”。
