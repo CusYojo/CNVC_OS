@@ -1,10 +1,10 @@
 import {
-  ArrowRight, CalendarDays, ChevronDown, FileUp, LoaderCircle, Radar, Search, Sparkles, X,
+  ArrowRight, CalendarDays, ChevronDown, FileUp, LoaderCircle, Pencil, Plus, Radar, Search, Sparkles, Trash2, X,
 } from 'lucide-react'
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { EmptyState } from '../components/ui'
-import { apiGet, apiPost } from '../lib/api'
+import { apiGet, apiPatch, apiPost } from '../lib/api'
 import {
   buildProjectDiscoveryKeywords,
   buildProjectDiscoveryBrief,
@@ -34,6 +34,19 @@ const kinds: Array<{ value: ProjectDiscoveryKind; label: string }> = [
 ]
 
 type BpUploadResult = { id: string; name: string; status: string; progress: number; error?: string | null; leadId?: string | null; reviewId?: string | null }
+type ProjectDiscoveryAssignmentPerson = { id: string; name: string; department: string }
+type ProjectDiscoveryAssignmentOptions = {
+  canAssignOthers: boolean
+  departments: string[]
+  people: ProjectDiscoveryAssignmentPerson[]
+}
+
+const keywordKinds: Array<{ value: ProjectDiscoveryKeyword['kind']; label: string }> = [
+  { value: 'institution', label: '机构' },
+  { value: 'academic', label: '院校' },
+  { value: 'industry', label: '产业' },
+  { value: 'technology', label: '技术' },
+]
 
 const readFileAsDataUrl = (file: File) => new Promise<string>((resolve, reject) => {
   const reader = new FileReader()
@@ -152,6 +165,25 @@ export function ProjectDiscoveryPage() {
     navigate(`/sourcing/${lead.id}`, { state: { from: `${location.pathname}${location.search}` } })
   }
 
+  const updateCandidateKeywords = (leadId: string, keywords: ProjectDiscoveryKeyword[]) => {
+    const next = candidatesRef.current.map((lead) => lead.id !== leadId ? lead : ({
+      ...lead,
+      radarProfile: {
+        ...lead.radarProfile,
+        profile: { ...lead.radarProfile?.profile, discoveryKeywords: keywords },
+      },
+    }))
+    candidatesRef.current = next
+    setCandidates(next)
+  }
+
+  const removeCandidate = (leadId: string, message: string) => {
+    const next = candidatesRef.current.filter((lead) => lead.id !== leadId)
+    candidatesRef.current = next
+    setCandidates(next)
+    setNotice({ tone: 'success', text: message })
+  }
+
   const refreshFromDatabase = async () => {
     if (action) return
     setAction('refresh')
@@ -247,13 +279,33 @@ export function ProjectDiscoveryPage() {
       {loading ? <div className="project-discovery-state"><LoaderCircle className="is-spinning" aria-hidden="true" /><strong>正在整理最新项目信号</strong><p>读取已收录的公开信源与结构化画像。</p></div>
         : error ? <div className="project-discovery-state project-discovery-error"><strong>新项目读取失败</strong><p>{error}</p><button type="button" onClick={() => void loadCandidates()}>重新加载</button></div>
           : visible.length === 0 ? <EmptyState title="当前范围没有新项目" description="试试切换到近 7 天、全部类型，或调整搜索关键词。" />
-            : <div className="project-discovery-grid">{visible.map((lead) => <DiscoveryCard key={lead.id} lead={lead} onOpen={() => openLead(lead)} />)}</div>}
+            : <div className="project-discovery-grid">{visible.map((lead) => <DiscoveryCard
+              key={lead.id}
+              lead={lead}
+              onOpen={() => openLead(lead)}
+              onKeywordsUpdated={(keywords) => updateCandidateKeywords(lead.id, keywords)}
+              onRemoved={(message) => removeCandidate(lead.id, message)}
+            />)}</div>}
     </section>
   </div>
 }
 
-function DiscoveryCard({ lead, onOpen }: { lead: LeadListItem; onOpen: () => void }) {
+function DiscoveryCard({ lead, onOpen, onKeywordsUpdated, onRemoved }: {
+  lead: LeadListItem
+  onOpen: () => void
+  onKeywordsUpdated: (keywords: ProjectDiscoveryKeyword[]) => void
+  onRemoved: (message: string) => void
+}) {
   const [expanded, setExpanded] = useState(false)
+  const [editingKeywords, setEditingKeywords] = useState(false)
+  const [keywordDraft, setKeywordDraft] = useState<ProjectDiscoveryKeyword[]>([])
+  const [assignmentOpen, setAssignmentOpen] = useState(false)
+  const [assignmentOptions, setAssignmentOptions] = useState<ProjectDiscoveryAssignmentOptions | null>(null)
+  const [selectedDepartment, setSelectedDepartment] = useState('')
+  const [selectedOwnerId, setSelectedOwnerId] = useState('')
+  const [confirmDefer, setConfirmDefer] = useState(false)
+  const [cardAction, setCardAction] = useState<'keywords' | 'options' | 'defer' | 'convert' | ''>('')
+  const [cardError, setCardError] = useState('')
   const kind = discoveryCandidateKind(lead)
   const investment = lead.investmentProfile
   const research = lead.researchProfile
@@ -269,6 +321,87 @@ function DiscoveryCard({ lead, onOpen }: { lead: LeadListItem; onOpen: () => voi
   const verifiedDimensions = kind === 'research' ? research?.dataStatus?.verifiedDimensions : investment?.dataStatus?.verifiedDimensions
   const applicableDimensions = kind === 'research' ? research?.dataStatus?.applicableDimensions : investment?.dataStatus?.applicableDimensions
   const primaryDateTime = /^\d{4}-\d{2}-\d{2}/u.exec(primaryDate.value)?.[0]
+  const eligiblePeople = assignmentOptions?.people.filter((person) => person.department === selectedDepartment) ?? []
+
+  const beginKeywordEdit = () => {
+    setKeywordDraft(keywords.map((keyword) => ({ ...keyword })))
+    setEditingKeywords(true)
+    setCardError('')
+  }
+
+  const saveKeywords = async () => {
+    if (keywordDraft.some((keyword) => !keyword.value.trim())) {
+      setCardError('请填写关键词内容，或删除空白气泡。')
+      return
+    }
+    setCardAction('keywords')
+    setCardError('')
+    try {
+      const normalized = keywordDraft.map((keyword) => ({ ...keyword, value: keyword.value.trim() }))
+      const result = await apiPatch<{ leadId: string; keywords: ProjectDiscoveryKeyword[] }>(
+        `/project-discovery/leads/${lead.id}/keywords`,
+        { keywords: normalized },
+      )
+      onKeywordsUpdated(result.keywords)
+      setEditingKeywords(false)
+    } catch (cause) {
+      setCardError(cause instanceof Error ? cause.message : '关键词保存失败，请重试。')
+    } finally {
+      setCardAction('')
+    }
+  }
+
+  const openAssignment = async () => {
+    setAssignmentOpen(true)
+    setConfirmDefer(false)
+    setCardError('')
+    if (assignmentOptions || cardAction === 'options') return
+    setCardAction('options')
+    try {
+      const options = await apiGet<ProjectDiscoveryAssignmentOptions>('/project-discovery/assignment-options')
+      setAssignmentOptions(options)
+      const department = options.departments[0] ?? ''
+      setSelectedDepartment(department)
+      setSelectedOwnerId(options.people.find((person) => person.department === department)?.id ?? '')
+    } catch (cause) {
+      setCardError(cause instanceof Error ? cause.message : '部门与人员读取失败，请重试。')
+    } finally {
+      setCardAction('')
+    }
+  }
+
+  const convertProject = async () => {
+    if (!selectedDepartment || !selectedOwnerId) {
+      setCardError('请选择归属部门和项目负责人。')
+      return
+    }
+    setCardAction('convert')
+    setCardError('')
+    try {
+      await apiPost(`/leads/${lead.id}/convert`, {
+        ownerUserId: selectedOwnerId,
+        department: selectedDepartment,
+      })
+      const owner = assignmentOptions?.people.find((person) => person.id === selectedOwnerId)
+      onRemoved(`${name} 已入库并分配给${owner?.name ? ` ${owner.name}` : '所选负责人'}。`)
+    } catch (cause) {
+      setCardError(cause instanceof Error ? cause.message : '项目入库失败，请重试。')
+    } finally {
+      setCardAction('')
+    }
+  }
+
+  const deferProject = async () => {
+    setCardAction('defer')
+    setCardError('')
+    try {
+      await apiPost(`/project-discovery/leads/${lead.id}/defer`)
+      onRemoved(`${name} 已标记为暂不跟进。`)
+    } catch (cause) {
+      setCardError(cause instanceof Error ? cause.message : '暂不跟进操作失败，请重试。')
+      setCardAction('')
+    }
+  }
 
   return <article id={`discovery-${lead.id}`} className={`project-discovery-card${expanded ? ' is-expanded' : ''}`}>
     <header className="project-discovery-card-header">
@@ -279,7 +412,38 @@ function DiscoveryCard({ lead, onOpen }: { lead: LeadListItem; onOpen: () => voi
         <strong>{primaryDate.value}</strong>
       </time>
     </header>
-    <DiscoveryInvestmentBrief name={name} brief={brief} keywords={keywords} />
+    <DiscoveryInvestmentBrief name={name} brief={brief} keywords={keywords} onEdit={beginKeywordEdit} />
+    {editingKeywords && <section className="project-discovery-keyword-editor" aria-label={`${name}重点关键词编辑`}>
+      <div className="project-discovery-inline-heading">
+        <strong>编辑重点关键词</strong>
+        <span>最多 8 个，每个关键词不超过 80 个字</span>
+      </div>
+      <div className="project-discovery-keyword-rows">
+        {keywordDraft.map((keyword, index) => <div key={`${index}:${keyword.kind}`} className="project-discovery-keyword-row">
+          <label>
+            <span className="sr-only">关键词类型</span>
+            <select value={keyword.kind} onChange={(event) => {
+              const kind = event.target.value as ProjectDiscoveryKeyword['kind']
+              const label = keywordKinds.find((item) => item.value === kind)?.label ?? keyword.label
+              setKeywordDraft((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, kind, label } : item))
+            }}>
+              {keywordKinds.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+            </select>
+          </label>
+          <label>
+            <span className="sr-only">关键词内容</span>
+            <input value={keyword.value} maxLength={80} onChange={(event) => setKeywordDraft((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, value: event.target.value } : item))} />
+          </label>
+          <button type="button" className="icon-button" aria-label={`删除关键词${keyword.value}`} onClick={() => setKeywordDraft((current) => current.filter((_, itemIndex) => itemIndex !== index))}><Trash2 aria-hidden="true" /></button>
+        </div>)}
+      </div>
+      <div className="project-discovery-inline-actions">
+        <button type="button" className="text-button" disabled={keywordDraft.length >= 8} onClick={() => setKeywordDraft((current) => [...current, { kind: 'industry', label: '产业', value: '' }])}><Plus aria-hidden="true" />添加关键词</button>
+        <span />
+        <button type="button" className="text-button" disabled={cardAction === 'keywords'} onClick={() => setEditingKeywords(false)}>取消</button>
+        <button type="button" className="primary-button" disabled={cardAction === 'keywords'} onClick={() => void saveKeywords()}>{cardAction === 'keywords' ? '保存中' : '保存关键词'}</button>
+      </div>
+    </section>}
     <button type="button" className="project-discovery-card-toggle" aria-expanded={expanded} aria-label={`查看${name}项目详情`} onClick={() => setExpanded((current) => !current)}>
       {expanded ? '收起详细信息' : '展开详细信息'}
       <ChevronDown className={expanded ? 'is-expanded' : ''} aria-hidden="true" />
@@ -312,17 +476,52 @@ function DiscoveryCard({ lead, onOpen }: { lead: LeadListItem; onOpen: () => voi
           <div>{missingFields.map((field) => <span key={field}>待补：{field}</span>)}</div>
         </div>}
       </section>
-      <footer className="project-discovery-card-actions">
-        <button type="button" onClick={onOpen}>查看完整线索并复核<ArrowRight aria-hidden="true" /></button>
-      </footer>
     </>}
+    {assignmentOpen && <section className="project-discovery-assignment-form" aria-label={`${name}项目入库分配`}>
+      <div className="project-discovery-inline-heading"><strong>项目入库分配</strong><span>入库后进入立项阶段</span></div>
+      {cardAction === 'options' ? <p className="project-discovery-inline-loading"><LoaderCircle className="is-spinning" aria-hidden="true" />正在读取部门和人员</p> : <div className="project-discovery-assignment-fields">
+        <label>归属部门
+          <select value={selectedDepartment} onChange={(event) => {
+            const department = event.target.value
+            setSelectedDepartment(department)
+            setSelectedOwnerId(assignmentOptions?.people.find((person) => person.department === department)?.id ?? '')
+          }}>
+            <option value="">请选择部门</option>
+            {assignmentOptions?.departments.map((department) => <option key={department} value={department}>{department}</option>)}
+          </select>
+        </label>
+        <label>项目负责人
+          <select value={selectedOwnerId} onChange={(event) => setSelectedOwnerId(event.target.value)}>
+            <option value="">请选择负责人</option>
+            {eligiblePeople.map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}
+          </select>
+        </label>
+      </div>}
+      <div className="project-discovery-inline-actions">
+        <span />
+        <button type="button" className="text-button" disabled={Boolean(cardAction)} onClick={() => setAssignmentOpen(false)}>取消</button>
+        <button type="button" className="primary-button" disabled={Boolean(cardAction) || !selectedOwnerId} onClick={() => void convertProject()}>{cardAction === 'convert' ? '入库中' : '确认入库'}</button>
+      </div>
+    </section>}
+    {confirmDefer && <section className="project-discovery-defer-confirm" aria-label={`${name}暂不跟进确认`}>
+      <p>确认将该项目标记为“暂不跟进”？它将从当前发现列表移出。</p>
+      <div><button type="button" disabled={cardAction === 'defer'} onClick={() => setConfirmDefer(false)}>取消</button><button type="button" disabled={cardAction === 'defer'} onClick={() => void deferProject()}>{cardAction === 'defer' ? '处理中' : '确认暂不跟进'}</button></div>
+    </section>}
+    {cardError && <p className="project-discovery-card-error" role="alert">{cardError}</p>}
+    <footer className="project-discovery-card-actions">
+      <button type="button" className="detail-button" onClick={onOpen}>查看完整线索<ArrowRight aria-hidden="true" /></button>
+      <span />
+      <button type="button" className="defer-button" disabled={Boolean(cardAction)} onClick={() => { setConfirmDefer(true); setAssignmentOpen(false); setCardError('') }}>暂不跟进</button>
+      <button type="button" className="convert-button" disabled={Boolean(cardAction)} onClick={() => void openAssignment()}>项目入库</button>
+    </footer>
   </article>
 }
 
-function DiscoveryInvestmentBrief({ name, brief, keywords }: {
+function DiscoveryInvestmentBrief({ name, brief, keywords, onEdit }: {
   name: string
   brief: ReturnType<typeof buildProjectDiscoveryBrief>
   keywords: ProjectDiscoveryKeyword[]
+  onEdit: () => void
 }) {
   const facts = brief.facts.filter((item) => item.label !== '最新融资日期' && item.label !== '公开日期')
   return <section aria-label={`${name}投资速览`} className="project-discovery-investment-brief">
@@ -339,13 +538,16 @@ function DiscoveryInvestmentBrief({ name, brief, keywords }: {
           <dd>{keywords.length > 0 ? <ul aria-label={`${name}重点关键词`}>
             {keywords.map((keyword) => <li
               key={`${keyword.kind}:${keyword.value}`}
-              className={`project-discovery-keyword-chip is-${keyword.kind}`}
-              title={`${keyword.label}：${keyword.value}`}
             >
-              <span>{keyword.label}</span>
-              <strong>{keyword.value}</strong>
+              <button type="button" className={`project-discovery-keyword-chip is-${keyword.kind}`} title={`${keyword.label}：${keyword.value}`} aria-label={`编辑关键词${keyword.value}`} onClick={onEdit}>
+                <span>{keyword.label}</span>
+                <strong>{keyword.value}</strong>
+                <Pencil aria-hidden="true" />
+              </button>
             </li>)}
-          </ul> : <span className="project-discovery-keywords-empty">重点信息待补充</span>}</dd>
+          </ul> : <button type="button" className="project-discovery-keywords-empty" onClick={onEdit}><Plus aria-hidden="true" />添加重点关键词</button>}
+            <button type="button" className="project-discovery-keywords-edit" onClick={onEdit}><Pencil aria-hidden="true" />编辑关键词</button>
+          </dd>
         </div>}
       </Fragment>
     })}</dl>

@@ -28,7 +28,7 @@ function fixture(
   const tableNames = ['projects', 'leads', 'migrationEntityMappings', 'projectMembers', 'projectClassificationHistory', 'auditLogs', 'leadScoreJobs', 'leadEnrichmentTopicRuns', 'leadEnrichmentJobs']
   const tables = Object.fromEntries(tableNames.map(name => [name, Object.fromEntries(['id', 'targetId', 'sourceSystem', 'sourceTable', 'sourceId', 'leadId', 'status'].map(key => [key, key]))])) as Record<string, Table>
   const rows = new Map<Table, Row[]>(Object.values(tables).map(table => [table, []]))
-  rows.set(tables.leads, [{ id: 'lead-1', name: '待转换线索', companyName: '企业主体', source: '公开报道', poolStatus: '公共池', score: 68, fundingRounds: [{ round: 'A轮', amount: '人民币1亿元' }], ...leadPatch }])
+  rows.set(tables.leads, [{ id: 'lead-1', name: '待转换线索', companyName: '企业主体', source: '公开报道', poolStatus: '公共池', score: 68, fundingRounds: [{ round: 'A轮', amount: '人民币1亿元' }], radarSourceKeys: ['vc-hunter:test'], ...leadPatch }])
   const read = (name: string) => rows.get(tables[name])!
   const tx = {
     select: () => ({ from: (table: Table) => ({ where: (matches: Predicate) => ({ limit: async (size: number) => rows.get(table)!.filter(matches).slice(0, size) }) }) }),
@@ -53,6 +53,8 @@ function fixture(
     canAssignProjectDiscoveryOwner: (actorId: string, ownerId: string, permissionCodes: string[]) => (
       actorId === ownerId || permissionCodes.includes('project.classify') || permissionCodes.includes('system.manage')
     ),
+    isProjectDiscoveryLead: (sourceKeys: unknown) => Array.isArray(sourceKeys)
+      && sourceKeys.some((key) => typeof key === 'string' && (key.startsWith('vc-hunter:') || key.startsWith('bp-upload:'))),
     activeWorkflowPolicyVersion: async () => 'active-policy',
     sanitizeScoringCompetitors: (value: unknown) => value,
     eq: (field: string, value: unknown): Predicate => row => row[field] === value,
@@ -136,6 +138,13 @@ test('discovery conversion rejects unauthorized or mismatched owner assignment',
     { code: 'LEAD_ASSIGNMENT_DEPARTMENT_MISMATCH', status: 400 },
   )
   assert.equal(mismatch.read('projects').length, 0)
+
+  const sharedPool = fixture({ radarSourceKeys: ['radar:legacy'] }, {}, { permissionCodes: ['system.manage'] })
+  await assert.rejects(
+    sharedPool.convert('lead-1', sharedPool.actor.id, { ownerUserId: sharedPool.owner.id, department: sharedPool.owner.department }),
+    { code: 'LEAD_ASSIGNMENT_SCOPE_FORBIDDEN', status: 403 },
+  )
+  assert.equal(sharedPool.read('projects').length, 0)
 })
 
 test('repeat conversion still rejects without a second project or history row', async () => {

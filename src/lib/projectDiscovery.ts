@@ -172,6 +172,21 @@ export function projectDiscoveryPrimaryDate(lead: LeadListItem): { label: string
 }
 
 export function buildProjectDiscoveryKeywords(lead: LeadListItem): ProjectDiscoveryKeyword[] {
+  const editedKeywords = lead.radarProfile?.profile?.discoveryKeywords
+  if (Array.isArray(editedKeywords)) {
+    return editedKeywords.filter((keyword): keyword is ProjectDiscoveryKeyword => (
+      Boolean(keyword)
+      && ['institution', 'academic', 'industry', 'technology'].includes(keyword.kind)
+      && typeof keyword.label === 'string'
+      && Boolean(keyword.label.trim())
+      && typeof keyword.value === 'string'
+      && Boolean(keyword.value.trim())
+    )).slice(0, 8).map((keyword) => ({
+      kind: keyword.kind,
+      label: keyword.label.trim(),
+      value: keyword.value.trim(),
+    }))
+  }
   if (discoveryCandidateKind(lead) === 'research') return buildResearchKeywords(lead)
 
   const investment = lead.investmentProfile

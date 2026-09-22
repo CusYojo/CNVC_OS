@@ -547,7 +547,7 @@ export interface Lead {
   name: string
   companyName: string
   channel: LeadChannel
-  poolStatus?: '公共池' | '已转专属项目' | '已注销' | '已删除' | '已合并' | '解析失败'
+  poolStatus?: '公共池' | '暂不跟进' | '已转专属项目' | '已注销' | '已删除' | '已合并' | '解析失败'
   claimedBy?: string
   convertedProjectId?: string
   source: string
@@ -690,6 +690,11 @@ export type LeadListItem = Pick<Lead,
       sourceIndustries?: string[]
       products?: string[]
       coreTechnologies?: string[]
+      discoveryKeywords?: Array<{
+        kind: 'institution' | 'academic' | 'industry' | 'technology'
+        label: string
+        value: string
+      }>
     }
     paperMeta?: Pick<PaperMetadata,
       'titleZh' | 'projectName' | 'projectNameOriginal' | 'authors' | 'categories' | 'pdfUrl' | 'rights'

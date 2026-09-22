@@ -64,10 +64,44 @@ const uploads = new Map()
 app.use(express.json())
 app.get('/api/auth/me', (_req, res) => res.json({ user: { id: 'preview-user', email: 'preview@example.invalid', name: '本地预览', role: '系统管理员', department: '投资部', status: '启用', permissionCodes: ['system.manage'] } }))
 app.get(['/api/leads', '/api/project-discovery/leads'], (req, res) => {
+  const visibleLeads = leads.filter((lead) => !['暂不跟进', '已转专属项目'].includes(lead.poolStatus))
   const pageSize = Math.min(50, Math.max(1, Number(req.query.pageSize) || 20))
   const page = Math.max(1, Number(req.query.page) || 1)
-  const totalPages = Math.max(1, Math.ceil(leads.length / pageSize))
-  res.json({ list: leads.slice((page - 1) * pageSize, page * pageSize), total: leads.length, page, pageSize, totalPages })
+  const totalPages = Math.max(1, Math.ceil(visibleLeads.length / pageSize))
+  res.json({ list: visibleLeads.slice((page - 1) * pageSize, page * pageSize), total: visibleLeads.length, page, pageSize, totalPages })
+})
+app.get('/api/project-discovery/assignment-options', (_req, res) => res.json({
+  canAssignOthers: true,
+  departments: ['投资部', '硬科技部'],
+  people: [
+    { id: 'preview-user', name: '本地预览', department: '投资部' },
+    { id: 'preview-owner-1', name: '张研', department: '硬科技部' },
+    { id: 'preview-owner-2', name: '李策', department: '硬科技部' },
+  ],
+}))
+app.patch('/api/project-discovery/leads/:id/keywords', (req, res) => {
+  const lead = leads.find((item) => item.id === req.params.id)
+  if (!lead) return res.status(404).json({ code: 'NOT_FOUND', message: '预览项目不存在' })
+  const keywords = Array.isArray(req.body?.keywords) ? req.body.keywords.slice(0, 8) : []
+  lead.radarProfile = {
+    ...lead.radarProfile,
+    profile: { ...lead.radarProfile?.profile, discoveryKeywords: keywords },
+  }
+  res.json({ leadId: lead.id, keywords })
+})
+app.post('/api/project-discovery/leads/:id/defer', (req, res) => {
+  const lead = leads.find((item) => item.id === req.params.id)
+  if (!lead) return res.status(404).json({ code: 'NOT_FOUND', message: '预览项目不存在' })
+  lead.poolStatus = '暂不跟进'
+  res.json({ leadId: lead.id, status: '暂不跟进' })
+})
+app.post('/api/leads/:id/convert', (req, res) => {
+  const lead = leads.find((item) => item.id === req.params.id)
+  if (!lead) return res.status(404).json({ code: 'NOT_FOUND', message: '预览项目不存在' })
+  const owner = ['preview-user', 'preview-owner-1', 'preview-owner-2'].includes(req.body?.ownerUserId)
+  if (!owner || !req.body?.department) return res.status(400).json({ code: 'ASSIGNMENT_INVALID', message: '请选择有效的部门和负责人' })
+  lead.poolStatus = '已转专属项目'
+  res.json({ project: { id: `project-${lead.id}`, ownerUserId: req.body.ownerUserId }, lead })
 })
 app.post('/api/leads/sync-radar', (_req, res) => {
   const id = 'preview-radar-new'

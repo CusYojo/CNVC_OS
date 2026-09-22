@@ -15,17 +15,20 @@ import {
 import { requireAccessibleProject } from '../services/projectAccessService.js'
 import {
   convertLead,
+  deferProjectDiscoveryLead,
   deleteLeadFromPublicPool,
   getLeadById,
   ingestLeadProfile,
   leadPoolStats,
   listLeads,
   listLeadScoresForRanking,
+  listProjectDiscoveryAssignmentOptions,
   listRecoverableLeadScoreIds,
   clearLeadScoreJob,
   isLeadEligibleForScoring,
   readLeadScoreJob,
   saveLeadScoreJob,
+  updateProjectDiscoveryKeywords,
   commitRadarLeadPipelineReady,
   type LeadScoreJob,
 } from '../services/aiSummaryService.js'
@@ -365,6 +368,37 @@ metaRouter.get('/project-discovery/leads', async (req, res, next) => {
   try {
     const query = projectDiscoveryLeadsQuery.parse(req.query)
     res.json(await listLeads({ ...query, projectDiscoveryOnly: true }))
+  } catch (err) { next(err) }
+})
+
+const projectDiscoveryKeywordSchema = z.object({
+  kind: z.enum(['institution', 'academic', 'industry', 'technology']),
+  label: z.string().trim().min(1).max(8),
+  value: z.string().trim().min(1).max(80),
+}).strict()
+
+metaRouter.get('/project-discovery/assignment-options', async (req: AuthedRequest, res, next) => {
+  try {
+    res.json(await listProjectDiscoveryAssignmentOptions(req.user!.uid))
+  } catch (err) { next(err) }
+})
+
+metaRouter.patch('/project-discovery/leads/:id/keywords', async (req: AuthedRequest, res, next) => {
+  try {
+    const body = z.object({ keywords: z.array(projectDiscoveryKeywordSchema).max(8) }).strict().parse(req.body)
+    res.json(await updateProjectDiscoveryKeywords(metaRouteId(req.params.id), body.keywords, {
+      id: req.user!.uid,
+      name: req.user!.name,
+    }))
+  } catch (err) { next(err) }
+})
+
+metaRouter.post('/project-discovery/leads/:id/defer', async (req: AuthedRequest, res, next) => {
+  try {
+    res.json(await deferProjectDiscoveryLead(metaRouteId(req.params.id), {
+      id: req.user!.uid,
+      name: req.user!.name,
+    }))
   } catch (err) { next(err) }
 })
 
@@ -2029,7 +2063,11 @@ metaRouter.get('/leads/:id/score', (_req, res) => {
 metaRouter.post('/leads/:id/convert', async (req: AuthedRequest, res, next) => {
   try {
     const leadId = String(req.params.id)
-    const row = await convertLead(leadId, req.user!.uid)
+    const assignment = z.object({
+      ownerUserId: z.string().trim().min(1).max(64).optional(),
+      department: z.string().trim().min(1).max(64).optional(),
+    }).strict().parse(req.body ?? {})
+    const row = await convertLead(leadId, req.user!.uid, assignment)
     res.json(row)
   } catch (err) { next(err) }
 })

@@ -54,14 +54,47 @@
 .project-discovery-investment-brief dd.industry strong { color: #326bc2; font-size: 18px; font-weight: 600; }
 .project-discovery-investment-brief .project-discovery-keywords dd { margin-top: 6px; font-size: 11px; font-weight: 500; line-height: 1.3; }
 .project-discovery-keywords ul { display: flex; min-width: 0; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
-.project-discovery-keyword-chip { display: inline-flex; min-width: 0; max-width: 100%; min-height: 26px; align-items: flex-start; gap: 4px; padding: 5px 8px; border: 1px solid #d8e2f0; border-radius: 999px; background: #fff; color: #4e5d73; line-height: 1.35; }
+.project-discovery-keyword-chip { display: inline-flex; min-width: 0; max-width: 100%; min-height: 26px; align-items: flex-start; gap: 4px; padding: 5px 8px; border: 1px solid #d8e2f0; border-radius: 999px; outline: none; background: #fff; color: #4e5d73; line-height: 1.35; cursor: pointer; }
 .project-discovery-keyword-chip span { flex: none; color: #75839a; font-size: 10px; font-weight: 500; }
 .project-discovery-keyword-chip strong { min-width: 0; overflow-wrap: anywhere; color: inherit; font-size: 11px; font-weight: 600; }
+.project-discovery-keyword-chip svg { width: 11px; height: 11px; flex: none; margin-top: 1px; opacity: 0; transition: opacity .15s ease; }
+.project-discovery-keyword-chip:hover svg, .project-discovery-keyword-chip:focus-visible svg { opacity: .8; }
+.project-discovery-keyword-chip:focus-visible, .project-discovery-keywords-edit:focus-visible, .project-discovery-keywords-empty:focus-visible { box-shadow: 0 0 0 3px rgba(50,107,194,.16); }
 .project-discovery-keyword-chip.is-institution { border-color: #cbdcf6; background: #f4f8ff; color: #2c5fa8; }
 .project-discovery-keyword-chip.is-academic { border-color: #d9d2f2; background: #f8f6ff; color: #65549a; }
 .project-discovery-keyword-chip.is-industry { border-color: #bfe1d5; background: #f3fbf8; color: #317461; }
 .project-discovery-keyword-chip.is-technology { border-color: #ead8bd; background: #fff9f0; color: #8a6431; }
-.project-discovery-keywords-empty { color: #8a96a8; font-size: 12px; font-weight: 500; }
+.project-discovery-keywords-empty, .project-discovery-keywords-edit { display: inline-flex; align-items: center; gap: 4px; border: 0; border-radius: 5px; outline: none; background: transparent; color: #6f7d91; font-size: 11px; font-weight: 500; cursor: pointer; }
+.project-discovery-keywords-empty svg, .project-discovery-keywords-edit svg { width: 12px; }
+.project-discovery-keywords-edit { margin-top: 7px; color: #326bc2; }
+
+.project-discovery-keyword-editor, .project-discovery-assignment-form, .project-discovery-defer-confirm { margin-top: 10px; padding: 12px; border: 1px solid #d7e3f5; border-radius: 8px; background: #f9fbff; }
+.project-discovery-inline-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.project-discovery-inline-heading strong { color: #2b3d58; font-size: 13px; }
+.project-discovery-inline-heading span { color: #8793a5; font-size: 10px; }
+.project-discovery-keyword-rows { display: grid; gap: 7px; margin-top: 10px; }
+.project-discovery-keyword-row { display: grid; grid-template-columns: 88px minmax(0,1fr) 34px; gap: 7px; }
+.project-discovery-keyword-row select, .project-discovery-keyword-row input, .project-discovery-assignment-fields select { width: 100%; height: 36px; padding: 0 9px; border: 1px solid #d5deeb; border-radius: 7px; outline: none; background: #fff; color: #334155; font-size: 12px; }
+.project-discovery-keyword-row select:focus-visible, .project-discovery-keyword-row input:focus-visible, .project-discovery-assignment-fields select:focus-visible { border-color: #8eb3ec; box-shadow: 0 0 0 3px rgba(50,107,194,.1); }
+.project-discovery-keyword-row .icon-button { display: grid; width: 34px; height: 36px; place-items: center; border: 1px solid #e3d5d7; border-radius: 7px; background: #fff; color: #a14b54; cursor: pointer; }
+.project-discovery-keyword-row .icon-button svg { width: 14px; }
+.project-discovery-inline-actions { display: grid; grid-template-columns: auto 1fr auto auto; align-items: center; gap: 7px; margin-top: 10px; }
+.project-discovery-inline-actions button { display: inline-flex; min-height: 34px; align-items: center; justify-content: center; gap: 5px; padding: 0 10px; border-radius: 7px; font-size: 11px; font-weight: 600; cursor: pointer; }
+.project-discovery-inline-actions button:disabled { cursor: not-allowed; opacity: .5; }
+.project-discovery-inline-actions .text-button { border: 1px solid #d9e1ec; background: #fff; color: #536075; }
+.project-discovery-inline-actions .primary-button { border: 1px solid #326bc2; background: #326bc2; color: #fff; }
+.project-discovery-inline-actions svg { width: 13px; }
+.project-discovery-assignment-fields { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; margin-top: 10px; }
+.project-discovery-assignment-fields label { color: #657288; font-size: 11px; font-weight: 500; }
+.project-discovery-assignment-fields select { display: block; margin-top: 5px; }
+.project-discovery-inline-loading { display: flex; min-height: 56px; align-items: center; justify-content: center; gap: 8px; margin: 8px 0 0; color: #718097; font-size: 11px; }
+.project-discovery-inline-loading svg { width: 15px; }
+.project-discovery-defer-confirm { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-color: #ecd7c0; background: #fffaf3; }
+.project-discovery-defer-confirm p { margin: 0; color: #6d5b48; font-size: 11px; line-height: 1.6; }
+.project-discovery-defer-confirm div { display: flex; flex: none; gap: 7px; }
+.project-discovery-defer-confirm button { min-height: 34px; padding: 0 10px; border: 1px solid #decbb6; border-radius: 7px; background: #fff; color: #765533; font-size: 11px; font-weight: 600; cursor: pointer; }
+.project-discovery-defer-confirm button:last-child { border-color: #c67b3a; background: #c67b3a; color: #fff; }
+.project-discovery-card-error { margin: 8px 0 0; color: #aa3f4a; font-size: 11px; line-height: 1.5; }
 
 .project-discovery-card-toggle { display: flex; min-height: 44px; align-items: center; justify-content: space-between; gap: 12px; margin-top: 8px; padding: 0 8px; border: 0; border-radius: 8px; outline: none; background: transparent; color: #326bc2; font-size: 14px; font-weight: 500; text-align: left; cursor: pointer; }
 .project-discovery-card-toggle:hover { background: rgba(50,107,194,.05); }
@@ -87,9 +120,14 @@
 .project-discovery-detail-questions ul { margin: 4px 0 0; padding-left: 20px; color: #657288; line-height: 1.7; }
 .project-discovery-detail-questions > div { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .project-discovery-detail-questions span { padding: 4px 8px; border-radius: 5px; background: #eee9df; color: #756d5e; font-size: 12px; }
-.project-discovery-card-actions { margin-top: 8px; padding-top: 12px; border-top: 1px solid #e0e6ee; }
-.project-discovery-card-actions button { display: flex; width: 100%; min-height: 44px; align-items: center; justify-content: center; gap: 8px; border: 1px solid #326bc2; border-radius: 8px; outline: none; background: #326bc2; color: #fff; font-size: 13px; font-weight: 600; cursor: pointer; }
-.project-discovery-card-actions button:hover { background: #285ca9; }
+.project-discovery-card-actions { display: grid; grid-template-columns: auto 1fr auto auto; align-items: center; gap: 8px; margin-top: 8px; padding-top: 12px; border-top: 1px solid #e0e6ee; }
+.project-discovery-card-actions button { display: flex; min-height: 38px; align-items: center; justify-content: center; gap: 6px; padding: 0 11px; border: 1px solid #c9d8ee; border-radius: 8px; outline: none; background: #fff; color: #315f9e; font-size: 11px; font-weight: 600; cursor: pointer; }
+.project-discovery-card-actions button:hover { background: #f3f7fd; }
+.project-discovery-card-actions button:disabled { cursor: not-allowed; opacity: .5; }
+.project-discovery-card-actions .detail-button { border-color: transparent; padding-left: 4px; color: #60718a; }
+.project-discovery-card-actions .defer-button { color: #87633d; }
+.project-discovery-card-actions .convert-button { border-color: #326bc2; background: #326bc2; color: #fff; }
+.project-discovery-card-actions .convert-button:hover { background: #285ca9; }
 .project-discovery-card-actions svg { width: 15px; }
 .project-discovery-state { display: flex; min-height: 330px; flex-direction: column; align-items: center; justify-content: center; padding: 30px; color: #79869a; text-align: center; }
 .project-discovery-state > svg { width: 27px; margin-bottom: 12px; color: #6e91c7; }
@@ -115,6 +153,12 @@
   .project-discovery-card-header { align-items: flex-start; }
   .project-discovery-card-date { min-width: 102px; padding-inline: 8px; }
   .project-discovery-profile dl { grid-template-columns: 1fr; }
+  .project-discovery-assignment-fields { grid-template-columns: 1fr; }
+  .project-discovery-defer-confirm { align-items: stretch; flex-direction: column; }
+  .project-discovery-defer-confirm div { justify-content: flex-end; }
+  .project-discovery-card-actions { grid-template-columns: 1fr 1fr; }
+  .project-discovery-card-actions > span { display: none; }
+  .project-discovery-card-actions .detail-button { grid-column: 1 / -1; }
 }
 @media (prefers-reduced-motion: reduce) {
   .is-spinning { animation: none; }

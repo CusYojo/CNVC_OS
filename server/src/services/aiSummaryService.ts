@@ -47,7 +47,13 @@ import { publicLeadScoreDeadLetterError, publicLeadScoreError } from './leadScor
 import { companyRegistrationEligibility, normalizeLeadRegistry } from './leadRegistry.js'
 import { publicLeadStageDisplay } from './leadDataQualityService.js'
 import { mergeLeadScoringWithRetainedSources } from './leadReserveProjection.js'
-import { PROJECT_DISCOVERY_SOURCE_PREFIXES } from './projectDiscoveryScope.js'
+import {
+  PROJECT_DISCOVERY_SOURCE_PREFIXES,
+  canAssignProjectDiscoveryOwner,
+  isProjectDiscoveryLead,
+  normalizeProjectDiscoveryKeywords,
+  type ProjectDiscoveryKeyword,
+} from './projectDiscoveryScope.js'
 
 export async function getSummary(projectId: string, userId?: string) {
   if (userId && !await canReadAllProjectFiles(db, projectId, userId)) return undefined
@@ -207,6 +213,8 @@ const visibleProjectDiscoveryLeadExpr = sql<boolean>`NOT (
   OR ${leads.poolStatus} = '已合并'
   OR ${leads.poolStatus} = '已删除'
   OR ${leads.poolStatus} = '已注销'
+  OR ${leads.poolStatus} = '暂不跟进'
+  OR ${leads.poolStatus} = '已转专属项目'
 )`
 
 export type LeadScoreJobStatus = 'queued' | 'running' | 'retrying' | 'done' | 'failed' | 'dead_letter'
@@ -1160,6 +1168,9 @@ function leadPoolListItem(
             sourceIndustries,
             products: profileProducts,
             coreTechnologies: profileTechnologies,
+            discoveryKeywords: Array.isArray(radarProfileCore.discoveryKeywords)
+              ? radarProfileCore.discoveryKeywords
+              : undefined,
           },
           paperMeta: enriched.leadType === 'research' ? objectValue(radarProfile.paperMeta) : undefined,
         }
@@ -1475,6 +1486,7 @@ export async function listLeads(options: {
           'sourceIndustries', COALESCE(${jsonValue(leads.radarProfile, '$.profile.sourceIndustries')}, JSON_ARRAY()),
           'products', COALESCE(${jsonValue(leads.radarProfile, '$.profile.products')}, JSON_ARRAY()),
           'coreTechnologies', COALESCE(${jsonValue(leads.radarProfile, '$.profile.coreTechnologies')}, JSON_ARRAY()),
+          'discoveryKeywords', ${jsonValue(leads.radarProfile, '$.profile.discoveryKeywords')},
           'latestValuation', ${jsonValue(leads.radarProfile, '$.profile.latestValuation')}
         ),
         'channel', ${jsonValue(leads.radarProfile, '$.channel')},
@@ -2161,11 +2173,113 @@ function textValue(value: unknown): string | undefined {
   return valueText || undefined
 }
 
-export async function convertLead(leadId: string, userId: string) {
+function projectDiscoveryMutationError(status: number, code: string, message: string) {
+  return Object.assign(new Error(message), { status, code })
+}
+
+export async function listProjectDiscoveryAssignmentOptions(userId: string) {
+  return db.transaction(async (tx) => {
+    const repository = createMySqlIdentityRepositoryContext(tx).users
+    const actor = await repository.findById(userId)
+    if (!actor || actor.status !== '启用') {
+      throw projectDiscoveryMutationError(403, 'PROJECT_DISCOVERY_ACTOR_INVALID', '当前账号不可分配项目')
+    }
+    const permissionCodes = await repository.listPermissionCodes(actor.id)
+    const canAssignOthers = permissionCodes.includes('project.classify') || permissionCodes.includes('system.manage')
+    const safeUsers = canAssignOthers ? await repository.listSafe() : [actor]
+    const people = safeUsers
+      .filter((user) => user.status === '启用')
+      .map((user) => ({ id: user.id, name: user.name, department: user.department }))
+      .sort((left, right) => left.department.localeCompare(right.department, 'zh-CN') || left.name.localeCompare(right.name, 'zh-CN'))
+    return {
+      canAssignOthers,
+      departments: [...new Set(people.map((person) => person.department).filter(Boolean))],
+      people,
+    }
+  })
+}
+
+export async function updateProjectDiscoveryKeywords(
+  leadId: string,
+  keywordsInput: unknown,
+  actor: { id: string; name: string },
+): Promise<{ leadId: string; keywords: ProjectDiscoveryKeyword[] }> {
+  const keywords = normalizeProjectDiscoveryKeywords(keywordsInput)
+  await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT ${leads.id} FROM ${leads} WHERE ${leads.id}=${leadId} FOR UPDATE`)
+    const [lead] = await tx.select().from(leads).where(eq(leads.id, leadId)).limit(1)
+    if (!lead) throw projectDiscoveryMutationError(404, 'PROJECT_DISCOVERY_LEAD_NOT_FOUND', '新项目不存在')
+    if (!isProjectDiscoveryLead(lead.radarSourceKeys)) {
+      throw projectDiscoveryMutationError(403, 'PROJECT_DISCOVERY_SCOPE_FORBIDDEN', '只能编辑新项目发现池中的项目')
+    }
+    const radarProfile = objectValue(lead.radarProfile)
+    const profile = objectValue(radarProfile.profile)
+    await tx.update(leads).set({
+      radarProfile: {
+        ...radarProfile,
+        profile: { ...profile, discoveryKeywords: keywords },
+      },
+    }).where(eq(leads.id, lead.id))
+    await tx.insert(auditLogs).values({
+      userId: actor.id,
+      userName: actor.name,
+      module: '新项目发现',
+      action: '编辑重点关键词',
+      target: lead.name,
+    })
+  })
+  return { leadId, keywords }
+}
+
+export async function deferProjectDiscoveryLead(
+  leadId: string,
+  actor: { id: string; name: string },
+): Promise<{ leadId: string; status: '暂不跟进' }> {
+  await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT ${leads.id} FROM ${leads} WHERE ${leads.id}=${leadId} FOR UPDATE`)
+    const [lead] = await tx.select().from(leads).where(eq(leads.id, leadId)).limit(1)
+    if (!lead) throw projectDiscoveryMutationError(404, 'PROJECT_DISCOVERY_LEAD_NOT_FOUND', '新项目不存在')
+    if (!isProjectDiscoveryLead(lead.radarSourceKeys)) {
+      throw projectDiscoveryMutationError(403, 'PROJECT_DISCOVERY_SCOPE_FORBIDDEN', '只能处理新项目发现池中的项目')
+    }
+    if (lead.convertedProjectId) {
+      throw projectDiscoveryMutationError(409, 'PROJECT_DISCOVERY_ALREADY_CONVERTED', '项目已经入库')
+    }
+    await tx.update(leads).set({ poolStatus: '暂不跟进' }).where(eq(leads.id, lead.id))
+    await tx.insert(auditLogs).values({
+      userId: actor.id,
+      userName: actor.name,
+      module: '新项目发现',
+      action: '暂不跟进',
+      target: lead.name,
+    })
+  })
+  return { leadId, status: '暂不跟进' }
+}
+
+export async function convertLead(
+  leadId: string,
+  userId: string,
+  assignment: { ownerUserId?: string; department?: string } = {},
+) {
   const converted = await db.transaction(async (tx) => {
-    const actor = await createMySqlIdentityRepositoryContext(tx).users.findById(userId)
+    const userRepository = createMySqlIdentityRepositoryContext(tx).users
+    const actor = await userRepository.findById(userId)
     if (!actor || actor.status !== '启用') {
       throw leadConversionError(403, 'LEAD_CONVERT_ACTOR_INVALID', '当前账号不可执行线索转项目')
+    }
+    const ownerUserId = assignment.ownerUserId?.trim() || actor.id
+    const owner = ownerUserId === actor.id ? actor : await userRepository.findById(ownerUserId)
+    if (!owner || owner.status !== '启用') {
+      throw leadConversionError(400, 'LEAD_ASSIGNMENT_OWNER_INVALID', '所选项目负责人不可用')
+    }
+    const permissionCodes = owner.id === actor.id ? [] : await userRepository.listPermissionCodes(actor.id)
+    if (!canAssignProjectDiscoveryOwner(actor.id, owner.id, permissionCodes)) {
+      throw leadConversionError(403, 'LEAD_ASSIGNMENT_FORBIDDEN', '当前账号无权将项目分配给其他人员')
+    }
+    const requestedDepartment = assignment.department?.trim()
+    if (requestedDepartment && requestedDepartment !== owner.department) {
+      throw leadConversionError(400, 'LEAD_ASSIGNMENT_DEPARTMENT_MISMATCH', '所选负责人不属于该部门')
     }
 
     const [mapping] = await tx.select({ targetId: migrationEntityMappings.targetId })
@@ -2179,6 +2293,9 @@ export async function convertLead(leadId: string, userId: string) {
     await tx.execute(sql`SELECT ${leads.id} FROM ${leads} WHERE ${leads.id}=${canonicalLeadId} FOR UPDATE`)
     const [lead] = await tx.select().from(leads).where(eq(leads.id, canonicalLeadId)).limit(1)
     if (!lead) throw leadConversionError(404, 'LEAD_NOT_FOUND', '线索不存在')
+    if (owner.id !== actor.id && !isProjectDiscoveryLead(lead.radarSourceKeys)) {
+      throw leadConversionError(403, 'LEAD_ASSIGNMENT_SCOPE_FORBIDDEN', '只有新项目发现池支持入库时分配负责人')
+    }
     if (lead.poolStatus === '已注销') {
       throw leadConversionError(409, 'COMPANY_DEREGISTERED', '登记状态明确为注销的企业不能转为专属项目')
     }
@@ -2207,8 +2324,8 @@ export async function convertLead(leadId: string, userId: string) {
       workflowModel: 'fde-v1',
       workflowPolicyVersionId,
       projectType: '投资项目',
-      owner: actor.name,
-      ownerUserId: actor.id,
+      owner: owner.name,
+      ownerUserId: owner.id,
       collaborators: [],
       source: textValue(lead.source),
       financing: textValue(firstFunding.amount) ?? textValue(profile.financing_amount),
@@ -2226,22 +2343,22 @@ export async function convertLead(leadId: string, userId: string) {
     }).$returningId()
     await tx.insert(projectMembers).values({
       projectId: inserted.id,
-      userId: actor.id,
+      userId: owner.id,
       memberRole: 'owner',
-      sourceName: actor.name,
+      sourceName: owner.name,
     })
     await tx.insert(projectClassificationHistory).values({
       projectId: inserted.id,
       fromClassification: null,
       toClassification: 'normal',
-      reason: '线索执行“转为我的专属项目”，直接进入普通项目',
+      reason: owner.id === actor.id ? '线索执行“项目入库”，由当前用户负责' : `线索执行“项目入库”，分配给${owner.name}`,
       changedBy: actor.id,
       changedByName: actor.name,
     })
     await tx.update(leads).set({
       poolStatus: '已转专属项目',
       convertedProjectId: inserted.id,
-      claimedBy: actor.name,
+      claimedBy: owner.name,
     }).where(eq(leads.id, lead.id))
     await tx.delete(leadScoreJobs).where(eq(leadScoreJobs.leadId, lead.id))
     await tx.update(leadEnrichmentTopicRuns).set({
@@ -2254,7 +2371,7 @@ export async function convertLead(leadId: string, userId: string) {
     }).where(and(eq(leadEnrichmentJobs.leadId, lead.id), inArray(leadEnrichmentJobs.status, ['queued', 'running'])))
     await tx.insert(auditLogs).values([
       { userId: actor.id, userName: actor.name, module: '项目管理', action: '从线索创建项目', target: lead.name },
-      { userId: actor.id, userName: actor.name, module: '项目获取池', action: '领取为我的专属项目', target: lead.name },
+      { userId: actor.id, userName: actor.name, module: '新项目发现', action: '项目入库', target: `${lead.name} → ${owner.name}` },
     ])
     return { projectId: inserted.id, leadId: lead.id }
   })
