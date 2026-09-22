@@ -31,7 +31,7 @@ test('project center exposes the imported discovery workspace without rewriting 
   assert.doesNotMatch(discovery, /<DiscoveryMetric/, '应删除已无用途的统计卡片组件调用')
   assert.doesNotMatch(discovery, /buildProjectDiscoverySummary/, '应删除已无用途的统计汇总计算')
   assert.doesNotMatch(discoveryCss, /\.project-discovery-metrics/, '应删除统计卡片及其响应式样式')
-  assert.match(discovery, /<section className="project-discovery-results" aria-label="待查看项目">/, '结果卡片应保留一个带无障碍名称的外框')
+  assert.match(discovery, /<section className="project-discovery-results" aria-label="待查看项目"[^>]*>/, '结果卡片应保留一个带无障碍名称的外框')
   assert.doesNotMatch(discovery, /project-discovery-results-heading/, '结果外框不应再显示标题、说明或数量栏')
   assert.doesNotMatch(discoveryCss, /\.project-discovery-results-heading/, '应删除结果标题栏样式')
   assert.doesNotMatch(discovery, /\/leads\/sync-radar/, '新项目发现不得再调用原自动找项目 Agent')

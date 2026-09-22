@@ -4,7 +4,7 @@ import { db } from '../db/client.js'
 import { auditLogs, leads } from '../db/schema.js'
 import { aiTaskRepository, identityRepositories } from '../repositories/index.js'
 import { z } from 'zod'
-import { listLeadsQuery } from '../contracts/leadPoolQueryContract.js'
+import { listLeadsQuery, projectDiscoveryLeadsQuery } from '../contracts/leadPoolQueryContract.js'
 import type { AuthedRequest } from '../middleware/requireAuth.js'
 import { requireSystemAdmin } from '../middleware/requireAuth.js'
 import {
@@ -358,6 +358,13 @@ metaRouter.get('/leads', async (req, res, next) => {
   try {
     const query = listLeadsQuery.parse(req.query)
     res.json(await listLeads(query))
+  } catch (err) { next(err) }
+})
+
+metaRouter.get('/project-discovery/leads', async (req, res, next) => {
+  try {
+    const query = projectDiscoveryLeadsQuery.parse(req.query)
+    res.json(await listLeads({ ...query, projectDiscoveryOnly: true }))
   } catch (err) { next(err) }
 })
 

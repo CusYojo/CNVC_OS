@@ -95,6 +95,12 @@ export const listLeadsQuery = z.object({
   }
 })
 
+export const projectDiscoveryLeadsQuery = z.object({
+  page: strictPositiveIntegerQuery(10_000, 1),
+  pageSize: strictPositiveIntegerQuery(100, 50),
+  sort: z.literal('latest').optional(),
+}).strict()
+
 export type ListLeadsQuery = z.infer<typeof listLeadsQuery>
 
 export function normalizeLeadListPage(requestedPage: number, pageSize: number, total: number) {

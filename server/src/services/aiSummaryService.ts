@@ -47,6 +47,7 @@ import { publicLeadScoreDeadLetterError, publicLeadScoreError } from './leadScor
 import { companyRegistrationEligibility, normalizeLeadRegistry } from './leadRegistry.js'
 import { publicLeadStageDisplay } from './leadDataQualityService.js'
 import { mergeLeadScoringWithRetainedSources } from './leadReserveProjection.js'
+import { PROJECT_DISCOVERY_SOURCE_PREFIXES } from './projectDiscoveryScope.js'
 
 export async function getSummary(projectId: string, userId?: string) {
   if (userId && !await canReadAllProjectFiles(db, projectId, userId)) return undefined
@@ -1174,6 +1175,7 @@ export async function listLeads(options: {
   hasVerifiedCustomer?: boolean
   profileStatus?: string
   hasConflict?: boolean
+  projectDiscoveryOnly?: boolean
 } = {}) {
   const requestedPage = Math.max(1, Math.floor(options.page ?? 1))
   const pageSize = Math.min(100, Math.max(1, Math.floor(options.pageSize ?? 20)))
@@ -1189,6 +1191,19 @@ export async function listLeads(options: {
   const region = (options.region ?? '').trim()
   const stage = (options.stage ?? '').trim()
   const conds: ReturnType<typeof sql>[] = [visiblePublicLeadExpr]
+  if (options.projectDiscoveryOnly) {
+    const sourceKeyMatches = PROJECT_DISCOVERY_SOURCE_PREFIXES.map(
+      (prefix) => sql`project_discovery_source.source_key LIKE ${`${prefix}%`}`,
+    )
+    conds.push(sql`EXISTS (
+      SELECT 1
+      FROM JSON_TABLE(
+        COALESCE(${leads.radarSourceKeys}, JSON_ARRAY()),
+        '$[*]' COLUMNS (source_key VARCHAR(255) PATH '$')
+      ) AS project_discovery_source
+      WHERE ${sql.join(sourceKeyMatches, sql` OR `)}
+    )`)
+  }
   // 已入库线索全部可见；未完成 AI 分析的记录由 enrichLead 标为 pending。
   // 同步和 AI 评分解耦，避免“已经同步但列表看不到”。
   const is36KrSource = sql`(
@@ -1511,7 +1526,11 @@ export async function listLeads(options: {
       .leftJoin(leadInvestmentProfileProjections, eq(leadInvestmentProfileProjections.leadId, leads.id))
       .leftJoin(leadResearchProfileProjections, eq(leadResearchProfileProjections.leadId, leads.id))
       .where(whereClause).orderBy(
-      options.sort === 'funding' ? desc(leadInvestmentProfileProjections.latestRoundDate)
+      options.projectDiscoveryOnly ? desc(sql`COALESCE(
+        STR_TO_DATE(LEFT(${jsonText(leads.radarProfile, '$.publishedAt')}, 10), '%Y-%m-%d'),
+        ${leads.createdAt}
+      )`)
+        : options.sort === 'funding' ? desc(leadInvestmentProfileProjections.latestRoundDate)
           : options.sort === 'valuation' ? desc(leadInvestmentProfileProjections.valuationValue)
             : options.sort === 'customer' ? desc(leadInvestmentProfileProjections.highestCustomerStage)
               : options.sort === 'profileUpdated' ? desc(leadInvestmentProfileProjections.factsUpdatedAt)

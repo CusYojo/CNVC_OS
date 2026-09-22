@@ -4,7 +4,7 @@ import type { LeadListItem } from '../../src/types/index.js'
 import {
   buildProjectDiscoveryBrief,
   filterProjectDiscoveryCandidates,
-  loadProjectDiscoveryPages,
+  loadProjectDiscoveryPage,
   projectDiscoveryDay,
   projectDiscoveryStatusLabel,
   shouldLoadNextProjectDiscoveryPage,
@@ -97,27 +97,26 @@ test('project discovery loads every page because ingestion order can differ from
   assert.equal(shouldLoadNextProjectDiscoveryPage([company], 3, 3, now), false)
 })
 
-test('project discovery renders the first database page before later pages finish', async () => {
+test('project discovery renders page one without preloading later pages', async () => {
   type Page = { list: LeadListItem[]; page: number; totalPages: number }
-  let releaseSecondPage!: (page: Page) => void
-  const secondPage = new Promise<Page>((resolve) => { releaseSecondPage = resolve })
   const requestedPages: number[] = []
   const renderedBatches: string[][] = []
 
-  const loading = loadProjectDiscoveryPages(async (page) => {
+  const fetchPage = async (page: number): Promise<Page> => {
     requestedPages.push(page)
     if (page === 1) return { list: [company], page: 1, totalPages: 2 }
-    return secondPage
-  }, (items) => {
+    return { list: [research], page: 2, totalPages: 2 }
+  }
+  const render = (items: LeadListItem[]) => {
     renderedBatches.push(items.map((item) => item.id))
-  })
+  }
 
-  await new Promise((resolve) => setImmediate(resolve))
-  assert.deepEqual(requestedPages, [1, 2])
+  const first = await loadProjectDiscoveryPage(fetchPage, 1, [], render)
+  assert.deepEqual(requestedPages, [1], '首次打开只能读取第一页')
   assert.deepEqual(renderedBatches, [['company-1']], '首批数据库结果应立即呈现，不能等待全库分页完成')
 
-  releaseSecondPage({ list: [research], page: 2, totalPages: 2 })
-  assert.equal(await loading, true)
+  await loadProjectDiscoveryPage(fetchPage, 2, first?.items ?? [], render)
+  assert.deepEqual(requestedPages, [1, 2], '只有打开全部项目后才读取下一页')
   assert.deepEqual(renderedBatches, [['company-1'], ['company-1', 'research-1']])
 })
 

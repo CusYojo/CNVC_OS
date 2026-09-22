@@ -12,6 +12,22 @@ export type ProjectDiscoveryFilters = {
 
 export type ProjectDiscoveryBriefFact = { label: string; value: string; wide?: boolean }
 export type ProjectDiscoveryBrief = { summary: string; facts: ProjectDiscoveryBriefFact[] }
+export type ProjectDiscoveryPage<T> = { list: T[]; page: number; totalPages: number }
+export type LoadedProjectDiscoveryPage<T> = ProjectDiscoveryPage<T> & { items: T[] }
+
+export async function loadProjectDiscoveryPage<T extends { id: string }>(
+  fetchPage: (page: number) => Promise<ProjectDiscoveryPage<T> | null | undefined>,
+  page: number,
+  existing: readonly T[],
+  onItems: (items: T[]) => void,
+): Promise<LoadedProjectDiscoveryPage<T> | null> {
+  const response = await fetchPage(page)
+  if (!response) return null
+  const unique = new Map([...existing, ...response.list].map((item) => [item.id, item]))
+  const items = [...unique.values()]
+  onItems(items)
+  return { ...response, items }
+}
 
 export function projectDiscoveryDay(value?: string): string {
   if (!value) return ''

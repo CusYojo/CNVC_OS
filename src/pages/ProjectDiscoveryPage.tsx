@@ -9,13 +9,13 @@ import {
   buildProjectDiscoveryBrief,
   discoveryCandidateKind,
   filterProjectDiscoveryCandidates,
+  loadProjectDiscoveryPage,
   projectDiscoveryCandidateDay,
   projectDiscoveryStatusLabel,
-  shouldLoadNextProjectDiscoveryPage,
   type ProjectDiscoveryKind,
   type ProjectDiscoveryPeriod,
 } from '../lib/projectDiscovery'
-import { useAppStore } from '../store/useAppStore'
+import type { LeadListResponse } from '../store/useAppStore'
 import type { LeadListItem } from '../types'
 import './ProjectDiscoveryPage.css'
 
@@ -51,16 +51,24 @@ async function waitForBpUpload(id: string): Promise<BpUploadResult> {
   throw new Error('材料仍在后台解析，可稍后点击“检查更新”查看结果。')
 }
 
+const fetchProjectDiscoveryPage = (page: number) => apiGet<LeadListResponse>(
+  `/project-discovery/leads?page=${page}&pageSize=50&sort=latest`,
+)
+
 export function ProjectDiscoveryPage() {
-  const fetchLeads = useAppStore((state) => state.fetchLeads)
   const navigate = useNavigate()
   const location = useLocation()
   const requestSerial = useRef(0)
+  const candidatesRef = useRef<LeadListItem[]>([])
+  const paginationRef = useRef({ page: 1, totalPages: 1 })
+  const loadingMoreRef = useRef(false)
   const [candidates, setCandidates] = useState<LeadListItem[]>([])
+  const [pagination, setPagination] = useState({ page: 1, totalPages: 1 })
   const [period, setPeriod] = useState<ProjectDiscoveryPeriod>('week')
   const [kind, setKind] = useState<ProjectDiscoveryKind>('all')
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState('')
   const [action, setAction] = useState<'refresh' | 'upload' | ''>('')
   const [notice, setNotice] = useState<{ tone: 'success' | 'error'; text: string } | null>(null)
@@ -70,19 +78,15 @@ export function ProjectDiscoveryPage() {
     if (!background) setLoading(true)
     setError('')
     try {
-      let response = await fetchLeads({ page: 1, pageSize: 50, sort: 'latest' })
-      if (!response) return false
-      const rows = [...response.list]
-      while (shouldLoadNextProjectDiscoveryPage(response.list, response.page, response.totalPages)) {
-        const next = await fetchLeads({ page: response.page + 1, pageSize: 50, sort: 'latest' })
-        if (!next) return false
-        rows.push(...next.list)
-        response = next
-      }
-      if (serial === requestSerial.current) {
-        const unique = new Map(rows.map((lead) => [lead.id, lead]))
-        setCandidates([...unique.values()])
-      }
+      const loaded = await loadProjectDiscoveryPage(fetchProjectDiscoveryPage, 1, [], (items) => {
+        if (serial !== requestSerial.current) return
+        candidatesRef.current = items
+        setCandidates(items)
+      })
+      if (!loaded || serial !== requestSerial.current) return false
+      const nextPagination = { page: loaded.page, totalPages: loaded.totalPages }
+      paginationRef.current = nextPagination
+      setPagination(nextPagination)
       return true
     } catch (cause) {
       if (serial === requestSerial.current) setError(cause instanceof Error ? cause.message : '新项目读取失败')
@@ -92,9 +96,51 @@ export function ProjectDiscoveryPage() {
         setLoading(false)
       }
     }
-  }, [fetchLeads])
+  }, [])
+
+  const loadRemainingCandidates = useCallback(async () => {
+    if (loadingMoreRef.current || paginationRef.current.page >= paginationRef.current.totalPages) return true
+    const serial = ++requestSerial.current
+    loadingMoreRef.current = true
+    setLoadingMore(true)
+    try {
+      let items = candidatesRef.current
+      while (paginationRef.current.page < paginationRef.current.totalPages) {
+        if (serial !== requestSerial.current) return false
+        const loaded = await loadProjectDiscoveryPage(
+          fetchProjectDiscoveryPage,
+          paginationRef.current.page + 1,
+          items,
+          (nextItems) => {
+            if (serial !== requestSerial.current) return
+            candidatesRef.current = nextItems
+            setCandidates(nextItems)
+          },
+        )
+        if (!loaded || serial !== requestSerial.current) return false
+        items = loaded.items
+        const nextPagination = { page: loaded.page, totalPages: loaded.totalPages }
+        paginationRef.current = nextPagination
+        setPagination(nextPagination)
+      }
+      return true
+    } catch (cause) {
+      if (serial === requestSerial.current) {
+        setNotice({ tone: 'error', text: cause instanceof Error ? cause.message : '其余项目读取失败，请稍后重试。' })
+      }
+      return false
+    } finally {
+      loadingMoreRef.current = false
+      setLoadingMore(false)
+    }
+  }, [])
 
   useEffect(() => { void loadCandidates() }, [loadCandidates])
+  useEffect(() => {
+    if (period === 'all' && !loading && pagination.page < pagination.totalPages) {
+      void loadRemainingCandidates()
+    }
+  }, [loadRemainingCandidates, loading, pagination.page, pagination.totalPages, period])
 
   const visible = useMemo(() => filterProjectDiscoveryCandidates(candidates, {
     period, query, kind,
@@ -195,7 +241,7 @@ export function ProjectDiscoveryPage() {
       </label>
     </section>
 
-    <section className="project-discovery-results" aria-label="待查看项目">
+    <section className="project-discovery-results" aria-label="待查看项目" aria-busy={loading || loadingMore}>
       {loading ? <div className="project-discovery-state"><LoaderCircle className="is-spinning" aria-hidden="true" /><strong>正在整理最新项目信号</strong><p>读取已收录的公开信源与结构化画像。</p></div>
         : error ? <div className="project-discovery-state project-discovery-error"><strong>新项目读取失败</strong><p>{error}</p><button type="button" onClick={() => void loadCandidates()}>重新加载</button></div>
           : visible.length === 0 ? <EmptyState title="当前范围没有新项目" description="试试切换到近 7 天、全部类型，或调整搜索关键词。" />
