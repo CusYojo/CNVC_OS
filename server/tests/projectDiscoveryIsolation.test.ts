@@ -23,4 +23,5 @@ test('project discovery uses an isolated endpoint instead of the shared lead poo
   assert.match(routes, /projectDiscoveryOnly:\s*true/)
   assert.match(leadService, /JSON_SEARCH\(/, '生产 MySQL 应直接匹配 radar_source_keys JSON 数组')
   assert.doesNotMatch(leadService, /JSON_TABLE\([\s\S]{0,300}project_discovery_source/, '发现池筛选不得使用当前生产库不兼容的 JSON_TABLE 路径')
+  assert.match(leadService, /projectDiscoveryOnly \? visibleProjectDiscoveryLeadExpr : visiblePublicLeadExpr/, 'VC Hunter 迁移项目不得再次被共享池噪音规则排除')
 })

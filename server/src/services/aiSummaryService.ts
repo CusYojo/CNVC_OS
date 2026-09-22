@@ -197,6 +197,18 @@ const visiblePublicLeadExpr = sql<boolean>`NOT (
   OR ${leads.poolStatus} = '已注销'
 )`
 
+// The discovery workspace has an explicit source-key allowlist. Do not apply
+// the shared radar noise heuristic here: an imported VC Hunter project may
+// have merged into an older canonical lead whose original source starts with
+// “项目发现雷达”, but it still belongs to the user-managed discovery pool.
+const visibleProjectDiscoveryLeadExpr = sql<boolean>`NOT (
+  COALESCE(${jsonText(leads.radarProfile, '$.qualityRejected')}, '') = 'true'
+  OR ${leads.poolStatus} = '解析失败'
+  OR ${leads.poolStatus} = '已合并'
+  OR ${leads.poolStatus} = '已删除'
+  OR ${leads.poolStatus} = '已注销'
+)`
+
 export type LeadScoreJobStatus = 'queued' | 'running' | 'retrying' | 'done' | 'failed' | 'dead_letter'
 
 export interface LeadScoreJob {
@@ -1190,7 +1202,9 @@ export async function listLeads(options: {
   const industry = (options.industry ?? '').trim()
   const region = (options.region ?? '').trim()
   const stage = (options.stage ?? '').trim()
-  const conds: ReturnType<typeof sql>[] = [visiblePublicLeadExpr]
+  const conds: ReturnType<typeof sql>[] = [
+    options.projectDiscoveryOnly ? visibleProjectDiscoveryLeadExpr : visiblePublicLeadExpr,
+  ]
   if (options.projectDiscoveryOnly) {
     const sourceKeyMatches = PROJECT_DISCOVERY_SOURCE_PREFIXES.map(
       (prefix) => sql`JSON_SEARCH(
