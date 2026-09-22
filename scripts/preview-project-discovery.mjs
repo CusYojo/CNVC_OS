@@ -16,7 +16,7 @@ const day = (offset) => {
 }
 const timestamp = (offset, hour) => `${day(offset)}T${String(hour).padStart(2, '0')}:30:00.000Z`
 
-const company = ({ id, name, legalName, region, industry, segment, product, institution, round, amount, offset, signal }) => ({
+const company = ({ id, name, legalName, region, industry, segment, product, institution, school = '上海交大', round, amount, offset, signal }) => ({
   id, name, companyName: legalName, region, leadType: 'company',
   poolEnteredAt: timestamp(offset, 1), dataUpdatedAt: timestamp(offset, 6),
   latestUpdates: [{ occurredAt: day(offset), title: signal }],
@@ -26,7 +26,7 @@ const company = ({ id, name, legalName, region, industry, segment, product, inst
     industry: { level1: industry, level2: segment, segment },
     products: [{ name: product, productRoute: segment, productionStage: '中试', productionStageStatus: 'realized' }],
     institutions: [{ name: institution, round, role: 'lead', major: true }],
-    academicLinks: [],
+    academicLinks: [{ institution: school, relationType: '创始人校友', person: '创始人', commercialization: false }],
     financing: { status: '已完成融资', latestRound: round, latestRoundDate: day(offset), latestAmount: amount, completedRoundCount: 1 },
     valuation: { type: 'undisclosed', currency: 'CNY' },
     customers: { highestStage: 'L3', verifiedCount: 1, tierACount: 1, tierBCount: 0, tierCCount: 0, representatives: [] },
@@ -63,7 +63,7 @@ const uploads = new Map()
 
 app.use(express.json())
 app.get('/api/auth/me', (_req, res) => res.json({ user: { id: 'preview-user', email: 'preview@example.invalid', name: '本地预览', role: '系统管理员', department: '投资部', status: '启用', permissionCodes: ['system.manage'] } }))
-app.get('/api/leads', (req, res) => {
+app.get(['/api/leads', '/api/project-discovery/leads'], (req, res) => {
   const pageSize = Math.min(50, Math.max(1, Number(req.query.pageSize) || 20))
   const page = Math.max(1, Number(req.query.page) || 1)
   const totalPages = Math.max(1, Math.ceil(leads.length / pageSize))

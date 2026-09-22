@@ -12,6 +12,8 @@ export type ProjectDiscoveryFilters = {
 
 export type ProjectDiscoveryBriefFact = { label: string; value: string; wide?: boolean }
 export type ProjectDiscoveryBrief = { summary: string; facts: ProjectDiscoveryBriefFact[] }
+export type ProjectDiscoveryKeywordKind = 'institution' | 'academic' | 'industry' | 'technology'
+export type ProjectDiscoveryKeyword = { kind: ProjectDiscoveryKeywordKind; label: string; value: string }
 export type ProjectDiscoveryPage<T> = { list: T[]; page: number; totalPages: number }
 export type LoadedProjectDiscoveryPage<T> = ProjectDiscoveryPage<T> & { items: T[] }
 
@@ -148,6 +150,76 @@ export function buildProjectDiscoveryBrief(lead: LeadListItem): ProjectDiscovery
   }
 }
 
+export function projectDiscoveryPrimaryDate(lead: LeadListItem): { label: string; value: string } {
+  if (discoveryCandidateKind(lead) === 'research') {
+    return {
+      label: '公开日期',
+      value: lead.researchProfile?.progress?.publishedAt || projectDiscoveryCandidateDay(lead) || '未披露',
+    }
+  }
+
+  const investment = lead.investmentProfile
+  const financing = investment?.financing.latestRound
+    || investment?.financing.latestAmount
+    || investment?.financing.latestRoundDate
+    ? investment.financing
+    : lead.availableData?.financing ?? investment?.financing
+
+  return {
+    label: '融资日期',
+    value: financing?.latestRoundDate || investment?.financing.latestCompletedAt || '未披露',
+  }
+}
+
+export function buildProjectDiscoveryKeywords(lead: LeadListItem): ProjectDiscoveryKeyword[] {
+  if (discoveryCandidateKind(lead) === 'research') return buildResearchKeywords(lead)
+
+  const investment = lead.investmentProfile
+  const candidate = lead.availableData
+  const profile = lead.radarProfile?.profile
+  const institutions = investment?.institutions?.length ? investment.institutions : candidate?.institutions ?? []
+  const rankedInstitutions = institutions
+    .map((institution, index) => ({ institution, index }))
+    .sort((left, right) => (
+      Number(right.institution.major) - Number(left.institution.major)
+      || Number(right.institution.role === 'lead') - Number(left.institution.role === 'lead')
+      || left.index - right.index
+    ))
+    .map(({ institution }) => institution.name)
+
+  const academicInstitutions = uniqueMeaningful([
+    ...(investment?.academicLinks?.map((link) => link.institution) ?? []),
+    ...(candidate?.academicLinks?.map((link) => link.institution) ?? []),
+    ...(investment?.academicLinks?.flatMap((link) => extractAcademicInstitutions(link.departmentLab)) ?? []),
+    ...extractAcademicInstitutions(profile?.teamComposition),
+  ])
+  const industry = firstMeaningful([
+    investment?.industry.level2,
+    investment?.industry.segment,
+    investment?.industry.chainPosition,
+    ...(candidate?.industryTags.slice(1) ?? []),
+    ...(candidate?.industryTags ?? []),
+    ...(profile?.sourceIndustries?.slice(1) ?? []),
+    ...(profile?.sourceIndustries ?? []),
+    ...(lead.businessTags?.industry ?? []),
+  ])
+  const products = investment?.products?.length ? investment.products : candidate?.products ?? []
+  const technology = firstMeaningful([
+    ...(profile?.coreTechnologies ?? []),
+    ...products.map((product) => product.technologyRoute),
+    ...products.map((product) => product.name),
+    ...products.map((product) => product.productRoute),
+    ...(profile?.products ?? []),
+  ])
+
+  return [
+    ...uniqueMeaningful(rankedInstitutions).slice(0, 2).map((value): ProjectDiscoveryKeyword => ({ kind: 'institution', label: '机构', value })),
+    ...academicInstitutions.slice(0, 1).map((value): ProjectDiscoveryKeyword => ({ kind: 'academic', label: '院校', value })),
+    ...(industry ? [{ kind: 'industry', label: '产业', value: industry } as ProjectDiscoveryKeyword] : []),
+    ...(technology ? [{ kind: 'technology', label: '技术', value: technology } as ProjectDiscoveryKeyword] : []),
+  ]
+}
+
 export function discoveryCandidateKind(lead: LeadListItem): Exclude<ProjectDiscoveryKind, 'all'> {
   return lead.leadType === 'research' || lead.radarProfile?.channel === '论文' ? 'research' : 'company'
 }
@@ -187,4 +259,41 @@ function oneSentence(value: string): string {
   const normalized = value.replace(/\s+/gu, ' ').trim()
   const selected = (normalized.match(/[^。！？!?]+[。！？!?]?/u)?.[0] ?? normalized).trim()
   return selected.length > 120 ? `${selected.slice(0, 119).trimEnd()}…` : selected
+}
+
+const academicInstitutionPattern = /清华大学|清华|北京大学|北大|上海交通大学|上海交大|浙江大学|浙大|复旦大学|复旦|中国科学技术大学|中科大|南京大学|南大|哈尔滨工业大学|哈工大|北京航空航天大学|北航|西安交通大学|西安交大|同济大学|同济|武汉大学|武大|华中科技大学|华中科大|东南大学|电子科技大学|电子科大|西北工业大学|西工大|厦门大学|厦大|中山大学|天津大学|南开大学|中国科学院|中科院/gu
+
+function extractAcademicInstitutions(value?: string): string[] {
+  if (!value?.trim()) return []
+  return value.match(academicInstitutionPattern) ?? []
+}
+
+function uniqueMeaningful(values: Array<string | undefined>): string[] {
+  return [...new Set(values.map((value) => value?.trim()).filter((value): value is string => (
+    typeof value === 'string' && value.length > 0 && !/^(?:其他|待补充|未披露|不适用)$/u.test(value)
+  )))]
+}
+
+function firstMeaningful(values: Array<string | undefined>): string | undefined {
+  return uniqueMeaningful(values)[0]
+}
+
+function buildResearchKeywords(lead: LeadListItem): ProjectDiscoveryKeyword[] {
+  const research = lead.researchProfile
+  const academic = uniqueMeaningful([
+    ...(research?.team?.affiliations ?? []),
+    lead.radarProfile?.profile?.lab,
+    lead.companyName,
+  ])[0]
+  const industry = firstMeaningful([
+    ...(research?.direction?.categories ?? []),
+    research?.direction?.researchProblem,
+  ])
+  const technology = firstMeaningful(research?.direction?.methods ?? [])
+
+  return [
+    ...(academic ? [{ kind: 'academic', label: '机构', value: academic } as ProjectDiscoveryKeyword] : []),
+    ...(industry ? [{ kind: 'industry', label: '方向', value: industry } as ProjectDiscoveryKeyword] : []),
+    ...(technology ? [{ kind: 'technology', label: '方法', value: technology } as ProjectDiscoveryKeyword] : []),
+  ]
 }

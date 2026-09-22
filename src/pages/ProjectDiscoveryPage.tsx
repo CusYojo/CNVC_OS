@@ -1,17 +1,19 @@
 import {
-  ArrowRight, ChevronDown, FileUp, LoaderCircle, Radar, Search, Sparkles, X,
+  ArrowRight, CalendarDays, ChevronDown, FileUp, LoaderCircle, Radar, Search, Sparkles, X,
 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { EmptyState } from '../components/ui'
 import { apiGet, apiPost } from '../lib/api'
 import {
+  buildProjectDiscoveryKeywords,
   buildProjectDiscoveryBrief,
   discoveryCandidateKind,
   filterProjectDiscoveryCandidates,
   loadProjectDiscoveryPage,
   projectDiscoveryCandidateDay,
-  projectDiscoveryStatusLabel,
+  projectDiscoveryPrimaryDate,
+  type ProjectDiscoveryKeyword,
   type ProjectDiscoveryKind,
   type ProjectDiscoveryPeriod,
 } from '../lib/projectDiscovery'
@@ -257,6 +259,8 @@ function DiscoveryCard({ lead, onOpen }: { lead: LeadListItem; onOpen: () => voi
   const research = lead.researchProfile
   const name = lead.name || lead.companyName || '未命名项目'
   const brief = buildProjectDiscoveryBrief(lead)
+  const keywords = buildProjectDiscoveryKeywords(lead)
+  const primaryDate = projectDiscoveryPrimaryDate(lead)
   const dataStatus = kind === 'research' ? research?.dataStatus?.status : investment?.dataStatus?.status
   const profile = projectDiscoveryProfile(lead)
   const missingFields = projectDiscoveryMissingFields(lead)
@@ -264,17 +268,18 @@ function DiscoveryCard({ lead, onOpen }: { lead: LeadListItem; onOpen: () => voi
   const latestUpdate = lead.latestUpdates?.[0]
   const verifiedDimensions = kind === 'research' ? research?.dataStatus?.verifiedDimensions : investment?.dataStatus?.verifiedDimensions
   const applicableDimensions = kind === 'research' ? research?.dataStatus?.applicableDimensions : investment?.dataStatus?.applicableDimensions
-  const statusLabel = projectDiscoveryStatusLabel(lead.poolStatus)
+  const primaryDateTime = /^\d{4}-\d{2}-\d{2}/u.exec(primaryDate.value)?.[0]
 
   return <article id={`discovery-${lead.id}`} className={`project-discovery-card${expanded ? ' is-expanded' : ''}`}>
     <header className="project-discovery-card-header">
       <h3>{name}</h3>
-      <div className="project-discovery-card-badges">
-        <span className="source">{lead.radarProfile ? 'AI 已筛选' : '人工线索'}</span>
-        <span className={`status${statusLabel === '已入库' ? ' is-promoted' : ''}`}>{statusLabel}</span>
-      </div>
+      <time className="project-discovery-card-date" dateTime={primaryDateTime}>
+        <CalendarDays aria-hidden="true" />
+        <span>{primaryDate.label}</span>
+        <strong>{primaryDate.value}</strong>
+      </time>
     </header>
-    <DiscoveryInvestmentBrief name={name} brief={brief} />
+    <DiscoveryInvestmentBrief name={name} brief={brief} keywords={keywords} />
     <button type="button" className="project-discovery-card-toggle" aria-expanded={expanded} aria-label={`查看${name}项目详情`} onClick={() => setExpanded((current) => !current)}>
       {expanded ? '收起详细信息' : '展开详细信息'}
       <ChevronDown className={expanded ? 'is-expanded' : ''} aria-hidden="true" />
@@ -314,15 +319,35 @@ function DiscoveryCard({ lead, onOpen }: { lead: LeadListItem; onOpen: () => voi
   </article>
 }
 
-function DiscoveryInvestmentBrief({ name, brief }: { name: string; brief: ReturnType<typeof buildProjectDiscoveryBrief> }) {
+function DiscoveryInvestmentBrief({ name, brief, keywords }: {
+  name: string
+  brief: ReturnType<typeof buildProjectDiscoveryBrief>
+  keywords: ProjectDiscoveryKeyword[]
+}) {
+  const facts = brief.facts.filter((item) => item.label !== '最新融资日期' && item.label !== '公开日期')
   return <section aria-label={`${name}投资速览`} className="project-discovery-investment-brief">
-    <dl>{brief.facts.map((item) => {
+    <dl>{facts.map((item, index) => {
       const [track, ...productParts] = item.label === '行业分类' ? item.value.split(/\s*\/\s*/u) : []
       const product = productParts.join(' / ')
-      return <div key={`${item.label}:${item.value}`} className={item.wide ? 'wide' : ''}>
-        <dt>{item.label}</dt>
-        {product ? <dd className="industry"><span>{track}</span><i aria-hidden="true">/</i><strong>{product}</strong></dd> : <dd>{item.value}</dd>}
-      </div>
+      return <Fragment key={`${item.label}:${item.value}`}>
+        <div className={item.wide ? 'wide' : ''}>
+          <dt>{item.label}</dt>
+          {product ? <dd className="industry"><span>{track}</span><i aria-hidden="true">/</i><strong>{product}</strong></dd> : <dd>{item.value}</dd>}
+        </div>
+        {index === 0 && <div className="project-discovery-keywords">
+          <dt>重点关键词</dt>
+          <dd>{keywords.length > 0 ? <ul aria-label={`${name}重点关键词`}>
+            {keywords.map((keyword) => <li
+              key={`${keyword.kind}:${keyword.value}`}
+              className={`project-discovery-keyword-chip is-${keyword.kind}`}
+              title={`${keyword.label}：${keyword.value}`}
+            >
+              <span>{keyword.label}</span>
+              <strong>{keyword.value}</strong>
+            </li>)}
+          </ul> : <span className="project-discovery-keywords-empty">重点信息待补充</span>}</dd>
+        </div>}
+      </Fragment>
     })}</dl>
   </section>
 }
