@@ -89,6 +89,17 @@ app.patch('/api/project-discovery/leads/:id/keywords', (req, res) => {
   }
   res.json({ leadId: lead.id, keywords })
 })
+app.patch('/api/project-discovery/leads/:id/card', (req, res) => {
+  const lead = leads.find((item) => item.id === req.params.id)
+  if (!lead) return res.status(404).json({ code: 'NOT_FOUND', message: '预览项目不存在' })
+  const card = req.body && typeof req.body === 'object' ? req.body : null
+  if (!card || !String(card.name || '').trim()) return res.status(400).json({ code: 'CARD_INVALID', message: '项目名称不能为空' })
+  lead.radarProfile = {
+    ...lead.radarProfile,
+    profile: { ...lead.radarProfile?.profile, discoveryCardEdits: card },
+  }
+  res.json({ leadId: lead.id, card })
+})
 app.post('/api/project-discovery/leads/:id/defer', (req, res) => {
   const lead = leads.find((item) => item.id === req.params.id)
   if (!lead) return res.status(404).json({ code: 'NOT_FOUND', message: '预览项目不存在' })
