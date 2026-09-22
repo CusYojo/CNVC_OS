@@ -122,6 +122,16 @@ test('authorized discovery conversion assigns the project to the selected depart
   assert.equal(result.project.createdBy, actor.id)
   assert.equal(read('projectMembers')[0].userId, owner.id)
   assert.equal(result.lead.claimedBy, owner.name)
+  assert.equal(read('auditLogs')[1].module, '新项目发现')
+  assert.equal(read('auditLogs')[1].action, '项目入库')
+})
+
+test('shared lead pool self conversion keeps its existing audit semantics', async () => {
+  const { convert, read } = fixture({ radarSourceKeys: ['radar:legacy'] })
+  await convert()
+  assert.equal(read('projectClassificationHistory')[0].reason, '线索执行“转为我的专属项目”，直接进入普通项目')
+  assert.equal(read('auditLogs')[1].module, '项目获取池')
+  assert.equal(read('auditLogs')[1].action, '领取为我的专属项目')
 })
 
 test('discovery conversion rejects unauthorized or mismatched owner assignment', async () => {

@@ -2293,7 +2293,8 @@ export async function convertLead(
     await tx.execute(sql`SELECT ${leads.id} FROM ${leads} WHERE ${leads.id}=${canonicalLeadId} FOR UPDATE`)
     const [lead] = await tx.select().from(leads).where(eq(leads.id, canonicalLeadId)).limit(1)
     if (!lead) throw leadConversionError(404, 'LEAD_NOT_FOUND', '线索不存在')
-    if (owner.id !== actor.id && !isProjectDiscoveryLead(lead.radarSourceKeys)) {
+    const discoveryLead = isProjectDiscoveryLead(lead.radarSourceKeys)
+    if (owner.id !== actor.id && !discoveryLead) {
       throw leadConversionError(403, 'LEAD_ASSIGNMENT_SCOPE_FORBIDDEN', '只有新项目发现池支持入库时分配负责人')
     }
     if (lead.poolStatus === '已注销') {
@@ -2351,7 +2352,9 @@ export async function convertLead(
       projectId: inserted.id,
       fromClassification: null,
       toClassification: 'normal',
-      reason: owner.id === actor.id ? '线索执行“项目入库”，由当前用户负责' : `线索执行“项目入库”，分配给${owner.name}`,
+      reason: discoveryLead
+        ? owner.id === actor.id ? '线索执行“项目入库”，由当前用户负责' : `线索执行“项目入库”，分配给${owner.name}`
+        : '线索执行“转为我的专属项目”，直接进入普通项目',
       changedBy: actor.id,
       changedByName: actor.name,
     })
@@ -2371,7 +2374,9 @@ export async function convertLead(
     }).where(and(eq(leadEnrichmentJobs.leadId, lead.id), inArray(leadEnrichmentJobs.status, ['queued', 'running'])))
     await tx.insert(auditLogs).values([
       { userId: actor.id, userName: actor.name, module: '项目管理', action: '从线索创建项目', target: lead.name },
-      { userId: actor.id, userName: actor.name, module: '新项目发现', action: '项目入库', target: `${lead.name} → ${owner.name}` },
+      discoveryLead
+        ? { userId: actor.id, userName: actor.name, module: '新项目发现', action: '项目入库', target: `${lead.name} → ${owner.name}` }
+        : { userId: actor.id, userName: actor.name, module: '项目获取池', action: '领取为我的专属项目', target: lead.name },
     ])
     return { projectId: inserted.id, leadId: lead.id }
   })
