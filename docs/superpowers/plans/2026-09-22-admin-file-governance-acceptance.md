@@ -15,6 +15,7 @@
 - 修改：`server/src/scripts/fdeGovernanceAcceptance.ts:63-72` — 定义管理员文件域例外、普通非成员文件隔离以及其他项目业务域隔离的验收契约。
 - 修改：`server/src/scripts/fdeFileAcceptance.ts:72-78` — 定义管理员可读取文件，时间协调人和普通非成员仍被拒绝的文件访问契约。
 - 修改：`server/src/scripts/fdeOfficeAcceptance.ts:26-29` — 让创建关联项目的合成负责人满足投资部资格，不改变生产校验。
+- 修改：`server/src/scripts/fdeArchiveAcceptance.ts:67-78,167-175` — 同步管理员查看归档和上传 FDE 项目材料的既有生产权限。
 - 参考：`server/src/scripts/fdeMigrationAcceptance.ts:13-58,116-139` — 创建随机表前缀、调度治理验收并核验业务表集合与清理生命周期；不修改。
 - 参考：`docs/superpowers/specs/2026-09-22-admin-file-governance-acceptance-design.md` — 已批准的权限边界；不修改。
 
@@ -146,6 +147,44 @@ git diff -- server/src/scripts/fdeGovernanceAcceptance.ts server/src/scripts/fde
 
 预期：退出码均为 0；办公验收差异只有合成账号部门选择表达式。
 
+### 任务 2D：同步管理员项目归档与上传验收
+
+**文件：**
+- 修改：`server/src/scripts/fdeArchiveAcceptance.ts:67-78,167-175`
+
+- [ ] **步骤 1：更新管理员归档可见性断言**
+
+将旧的 legacy 条件分支替换为：
+
+```ts
+  assert.equal((await listProjectArchives(admin.id, { projectId: p1.id })).total, 12)
+```
+
+保留协调人禁止访问和普通外部人员结果为 0 的断言，并将对应检查名中的管理员“无业务访问”描述改为“文件域例外”。
+
+- [ ] **步骤 2：更新管理员 FDE 上传工作区断言**
+
+保留管理员 company=false、archives=true 和 legacy 项目可上传断言，将 FDE 项目断言改为：
+
+```ts
+  assert.ok(adminCapability.uploadProjectIds.includes(p1.id), 'enabled administrator can upload FDE project files')
+  assert.equal((await listProjectArchives(admin.id, { projectId: p1.id })).total, 12)
+```
+
+更新检查名以表达管理员文件工作区例外，不授予公司知识域权限。
+
+- [ ] **步骤 3：运行类型与差异检查**
+
+运行：
+
+```powershell
+npm run check:types
+git diff --check
+git diff -- server/src/scripts/fdeGovernanceAcceptance.ts server/src/scripts/fdeFileAcceptance.ts server/src/scripts/fdeOfficeAcceptance.ts server/src/scripts/fdeArchiveAcceptance.ts
+```
+
+预期：退出码均为 0；没有生产服务、API、数据库结构或 UI 变更。
+
 ### 任务 3：运行完整 FDE 验收并提交
 
 **文件：**
@@ -191,17 +230,17 @@ WHERE TABLE_SCHEMA = 'sbl_jedi_acceptance_20260828'
 ```powershell
 git status --short
 git diff --check
-git diff -- server/src/scripts/fdeGovernanceAcceptance.ts server/src/scripts/fdeFileAcceptance.ts server/src/scripts/fdeOfficeAcceptance.ts
+git diff -- server/src/scripts/fdeGovernanceAcceptance.ts server/src/scripts/fdeFileAcceptance.ts server/src/scripts/fdeOfficeAcceptance.ts server/src/scripts/fdeArchiveAcceptance.ts
 ```
 
-预期：除实现计划文档外，待提交代码只有 `server/src/scripts/fdeGovernanceAcceptance.ts`、`server/src/scripts/fdeFileAcceptance.ts` 和 `server/src/scripts/fdeOfficeAcceptance.ts`；无生产代码、数据库、API 或 UI 变更。
+预期：除实现计划文档外，待提交代码只有 `server/src/scripts/fdeGovernanceAcceptance.ts`、`server/src/scripts/fdeFileAcceptance.ts`、`server/src/scripts/fdeOfficeAcceptance.ts` 和 `server/src/scripts/fdeArchiveAcceptance.ts`；无生产代码、数据库、API 或 UI 变更。
 
 - [ ] **步骤 4：提交验收契约修正**
 
 运行：
 
 ```powershell
-git add -- server/src/scripts/fdeGovernanceAcceptance.ts server/src/scripts/fdeFileAcceptance.ts server/src/scripts/fdeOfficeAcceptance.ts
+git add -- server/src/scripts/fdeGovernanceAcceptance.ts server/src/scripts/fdeFileAcceptance.ts server/src/scripts/fdeOfficeAcceptance.ts server/src/scripts/fdeArchiveAcceptance.ts
 git commit -m "test: align admin project file governance acceptance"
 ```
 

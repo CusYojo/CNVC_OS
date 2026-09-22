@@ -24,6 +24,7 @@
 - 更新 checks 名称，明确这是“管理员文件域例外，其他 FDE 业务域仍隔离”。
 - 在 `server/src/scripts/fdeFileAcceptance.ts` 中，将管理员从统一拒绝访问名单中移出并增加允许访问断言；时间协调人和普通非成员仍必须被拒绝。
 - 在 `server/src/scripts/fdeOfficeAcceptance.ts` 中，仅将创建关联项目的合成 `author` 账号部门设为 `投资部`，使办公验收夹具满足当前项目负责人资格；其他合成账号继续使用随机隔离部门。
+- 在 `server/src/scripts/fdeArchiveAcceptance.ts` 中，将管理员的项目归档查看和 FDE 项目上传工作区断言改为允许；继续保留协调人、普通非成员及公司知识非文件域隔离。
 
 不修改生产权限实现、数据库结构、API 或前端行为。
 
