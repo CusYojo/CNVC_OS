@@ -6,6 +6,7 @@ import {
   buildProjectDiscoveryBrief,
   filterProjectDiscoveryCandidates,
   loadProjectDiscoveryPage,
+  parseProjectDiscoveryKeywordText,
   projectDiscoveryDay,
   projectDiscoveryPrimaryDate,
   projectDiscoveryStatusLabel,
@@ -192,7 +193,7 @@ test('project discovery uses imported VC Hunter candidate facts when a verified 
   })
 })
 
-test('project discovery promotes the financing date and turns priority facts into labeled keyword bubbles', () => {
+test('project discovery promotes the financing date and turns priority facts into editable keywords', () => {
   assert.deepEqual(projectDiscoveryPrimaryDate(vcHunterCandidate), {
     label: '融资日期',
     value: '2026-09-21',
@@ -206,7 +207,7 @@ test('project discovery promotes the financing date and turns priority facts int
   ])
 })
 
-test('project discovery prefers human-edited keyword bubbles over derived facts', () => {
+test('project discovery prefers human-edited keywords over derived facts', () => {
   const edited = {
     ...vcHunterCandidate,
     radarProfile: {
@@ -225,6 +226,28 @@ test('project discovery prefers human-edited keyword bubbles over derived facts'
     { kind: 'institution', label: '机构', value: '用户确认基金' },
     { kind: 'technology', label: '技术', value: '端侧推理引擎' },
   ])
+})
+
+test('plain-text keyword editing accepts common separators and preserves known keyword metadata', () => {
+  const existing = buildProjectDiscoveryKeywords(vcHunterCandidate)
+
+  assert.deepEqual(parseProjectDiscoveryKeywordText(
+    '上海半导体装备材料产业投资基金、Sands Talk Capital\n新增关键词，上海交大',
+    existing,
+  ), [
+    { kind: 'institution', label: '机构', value: '上海半导体装备材料产业投资基金' },
+    { kind: 'institution', label: '机构', value: 'Sands Talk Capital' },
+    { kind: 'industry', label: '关键词', value: '新增关键词' },
+    { kind: 'academic', label: '院校', value: '上海交大' },
+  ])
+})
+
+test('plain-text keyword editing enforces the existing keyword boundaries', () => {
+  assert.throws(
+    () => parseProjectDiscoveryKeywordText(Array.from({ length: 9 }, (_, index) => `关键词${index}`).join('、'), []),
+    /最多 8 个/,
+  )
+  assert.throws(() => parseProjectDiscoveryKeywordText('词'.repeat(81), []), /不超过 80 个字/)
 })
 
 test('project discovery research cards keep the same compact two-column brief format', () => {
