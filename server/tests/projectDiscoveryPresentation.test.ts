@@ -2,10 +2,12 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { LeadListItem } from '../../src/types/index.js'
 import {
+  buildProjectDiscoveryKeywords,
   buildProjectDiscoveryBrief,
   filterProjectDiscoveryCandidates,
   loadProjectDiscoveryPage,
   projectDiscoveryDay,
+  projectDiscoveryPrimaryDate,
   projectDiscoveryStatusLabel,
   shouldLoadNextProjectDiscoveryPage,
 } from '../../src/lib/projectDiscovery.js'
@@ -188,6 +190,20 @@ test('project discovery uses imported VC Hunter candidate facts when a verified 
       { label: '核心团队背景', value: 'CEO 吴小航、CTO 陈震、COO 夏永峰均毕业于上海交大。', wide: true },
     ],
   })
+})
+
+test('project discovery promotes the financing date and turns priority facts into labeled keyword bubbles', () => {
+  assert.deepEqual(projectDiscoveryPrimaryDate(vcHunterCandidate), {
+    label: '融资日期',
+    value: '2026-09-21',
+  })
+  assert.deepEqual(buildProjectDiscoveryKeywords(vcHunterCandidate), [
+    { kind: 'institution', label: '机构', value: '上海半导体装备材料产业投资基金' },
+    { kind: 'institution', label: '机构', value: 'Sands Talk Capital' },
+    { kind: 'academic', label: '院校', value: '上海交大' },
+    { kind: 'industry', label: '产业', value: '智能座舱' },
+    { kind: 'technology', label: '技术', value: '心界 AIOS' },
+  ])
 })
 
 test('project discovery research cards keep the same compact two-column brief format', () => {
