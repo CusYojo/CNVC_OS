@@ -29,6 +29,7 @@ import {
   readLeadScoreJob,
   saveLeadScoreJob,
   updateProjectDiscoveryKeywords,
+  updateProjectDiscoveryCard,
   commitRadarLeadPipelineReady,
   type LeadScoreJob,
 } from '../services/aiSummaryService.js'
@@ -391,6 +392,31 @@ metaRouter.patch('/project-discovery/leads/:id/keywords', async (req: AuthedRequ
       name: req.user!.name,
     }))
   } catch (err) { next(err) }
+})
+
+const projectDiscoveryCardTextRecordSchema = (maxEntries: number) => z.record(
+  z.string().trim().min(1).max(40),
+  z.string().trim().max(1_000),
+).refine((value) => Object.keys(value).length <= maxEntries, `字段最多保留 ${maxEntries} 项`)
+
+const projectDiscoveryCardSchema = z.object({
+  name: z.string().trim().min(1).max(160),
+  primaryDate: z.string().trim().max(40),
+  summary: z.string().trim().max(2_000),
+  region: z.string().trim().max(100),
+  sourceChannel: z.string().trim().max(100),
+  briefFacts: projectDiscoveryCardTextRecordSchema(12),
+  profileFacts: projectDiscoveryCardTextRecordSchema(16),
+}).strict()
+
+metaRouter.patch('/project-discovery/leads/:id/card', async (req: AuthedRequest, res, next) => {
+  try {
+    const body = projectDiscoveryCardSchema.parse(req.body)
+    res.json(await updateProjectDiscoveryCard(metaRouteId(req.params.id), body, {
+      id: req.user!.uid,
+      name: req.user!.name,
+    }))
+  } catch (error) { next(error) }
 })
 
 metaRouter.post('/project-discovery/leads/:id/defer', async (req: AuthedRequest, res, next) => {

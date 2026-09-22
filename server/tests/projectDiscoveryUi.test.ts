@@ -57,7 +57,7 @@ test('project center exposes the imported discovery workspace without rewriting 
   assert.match(discovery, /\/project-discovery\/leads\/\$\{lead\.id\}\/defer/, '暂不跟进必须写入发现池专用接口')
   assert.match(discovery, /<textarea[^>]*className="project-discovery-keyword-input"/, '重点关键词区域应直接提供文本编辑')
   assert.match(discovery, /aria-label=\{`编辑\$\{name\}重点关键词`\}/, '关键词文本编辑应提供明确的无障碍名称')
-  assert.match(discovery, /onBlur=\{\(\) => void saveKeywords\(\)\}/, '关键词文本应在离开编辑区域时保存')
+  assert.match(discovery, /onKeywordBlur=\{\(\) => void saveKeywords\(\)\}/, '关键词文本应在离开编辑区域时保存')
   assert.doesNotMatch(discovery, /编辑关键词/, '关键词区域不应再要求先点击编辑按钮')
   assert.match(discovery, /project-discovery-investment-brief/, '卡片应使用 VC Hunter 同款投资速览区')
   assert.match(discovery, /className="project-discovery-title-input"/, '项目名称应能在卡片原位置直接编辑')

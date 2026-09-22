@@ -51,7 +51,9 @@ import {
   PROJECT_DISCOVERY_SOURCE_PREFIXES,
   canAssignProjectDiscoveryOwner,
   isProjectDiscoveryLead,
+  normalizeProjectDiscoveryCardEdits,
   normalizeProjectDiscoveryKeywords,
+  type ProjectDiscoveryCardEdits,
   type ProjectDiscoveryKeyword,
 } from './projectDiscoveryScope.js'
 
@@ -1171,6 +1173,9 @@ function leadPoolListItem(
             discoveryKeywords: Array.isArray(radarProfileCore.discoveryKeywords)
               ? radarProfileCore.discoveryKeywords
               : undefined,
+            discoveryCardEdits: Object.keys(objectValue(radarProfileCore.discoveryCardEdits)).length
+              ? objectValue(radarProfileCore.discoveryCardEdits)
+              : undefined,
           },
           paperMeta: enriched.leadType === 'research' ? objectValue(radarProfile.paperMeta) : undefined,
         }
@@ -2229,6 +2234,38 @@ export async function updateProjectDiscoveryKeywords(
     })
   })
   return { leadId, keywords }
+}
+
+export async function updateProjectDiscoveryCard(
+  leadId: string,
+  cardInput: unknown,
+  actor: { id: string; name: string },
+): Promise<{ leadId: string; card: ProjectDiscoveryCardEdits }> {
+  const card = normalizeProjectDiscoveryCardEdits(cardInput)
+  await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT ${leads.id} FROM ${leads} WHERE ${leads.id}=${leadId} FOR UPDATE`)
+    const [lead] = await tx.select().from(leads).where(eq(leads.id, leadId)).limit(1)
+    if (!lead) throw projectDiscoveryMutationError(404, 'PROJECT_DISCOVERY_LEAD_NOT_FOUND', '新项目不存在')
+    if (!isProjectDiscoveryLead(lead.radarSourceKeys)) {
+      throw projectDiscoveryMutationError(403, 'PROJECT_DISCOVERY_SCOPE_FORBIDDEN', '只能编辑新项目发现池中的项目')
+    }
+    const radarProfile = objectValue(lead.radarProfile)
+    const profile = objectValue(radarProfile.profile)
+    await tx.update(leads).set({
+      radarProfile: {
+        ...radarProfile,
+        profile: { ...profile, discoveryCardEdits: card },
+      },
+    }).where(eq(leads.id, lead.id))
+    await tx.insert(auditLogs).values({
+      userId: actor.id,
+      userName: actor.name,
+      module: '新项目发现',
+      action: '编辑项目卡片',
+      target: lead.name,
+    })
+  })
+  return { leadId, card }
 }
 
 export async function deferProjectDiscoveryLead(

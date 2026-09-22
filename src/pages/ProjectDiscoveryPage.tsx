@@ -14,13 +14,17 @@ import {
   loadProjectDiscoveryPage,
   parseProjectDiscoveryKeywordText,
   projectDiscoveryCandidateDay,
+  projectDiscoveryDisplayName,
+  projectDiscoveryDisplayRegion,
+  projectDiscoveryDisplaySourceChannel,
   projectDiscoveryPrimaryDate,
+  readProjectDiscoveryCardEdits,
   type ProjectDiscoveryKeyword,
   type ProjectDiscoveryKind,
   type ProjectDiscoveryPeriod,
 } from '../lib/projectDiscovery'
 import type { LeadListResponse } from '../store/useAppStore'
-import type { LeadListItem } from '../types'
+import type { LeadListItem, ProjectDiscoveryCardEdits } from '../types'
 import './ProjectDiscoveryPage.css'
 
 const periods: Array<{ value: ProjectDiscoveryPeriod; label: string }> = [
@@ -172,6 +176,18 @@ export function ProjectDiscoveryPage() {
     setCandidates(next)
   }
 
+  const updateCandidateCard = (leadId: string, card: ProjectDiscoveryCardEdits) => {
+    const next = candidatesRef.current.map((lead) => lead.id !== leadId ? lead : ({
+      ...lead,
+      radarProfile: {
+        ...lead.radarProfile,
+        profile: { ...lead.radarProfile?.profile, discoveryCardEdits: card },
+      },
+    }))
+    candidatesRef.current = next
+    setCandidates(next)
+  }
+
   const removeCandidate = (leadId: string, message: string) => {
     const next = candidatesRef.current.filter((lead) => lead.id !== leadId)
     candidatesRef.current = next
@@ -279,16 +295,18 @@ export function ProjectDiscoveryPage() {
               lead={lead}
               onOpen={() => openLead(lead)}
               onKeywordsUpdated={(keywords) => updateCandidateKeywords(lead.id, keywords)}
+              onCardUpdated={(card) => updateCandidateCard(lead.id, card)}
               onRemoved={(message) => removeCandidate(lead.id, message)}
             />)}</div>}
     </section>
   </div>
 }
 
-function DiscoveryCard({ lead, onOpen, onKeywordsUpdated, onRemoved }: {
+function DiscoveryCard({ lead, onOpen, onKeywordsUpdated, onCardUpdated, onRemoved }: {
   lead: LeadListItem
   onOpen: () => void
   onKeywordsUpdated: (keywords: ProjectDiscoveryKeyword[]) => void
+  onCardUpdated: (card: ProjectDiscoveryCardEdits) => void
   onRemoved: (message: string) => void
 }) {
   const [expanded, setExpanded] = useState(false)
@@ -298,30 +316,74 @@ function DiscoveryCard({ lead, onOpen, onKeywordsUpdated, onRemoved }: {
   const [selectedDepartment, setSelectedDepartment] = useState('')
   const [selectedOwnerId, setSelectedOwnerId] = useState('')
   const [confirmDefer, setConfirmDefer] = useState(false)
-  const [cardAction, setCardAction] = useState<'keywords' | 'options' | 'defer' | 'convert' | ''>('')
+  const [cardAction, setCardAction] = useState<'keywords' | 'card' | 'options' | 'defer' | 'convert' | ''>('')
   const [cardError, setCardError] = useState('')
+  const [cardNotice, setCardNotice] = useState('')
   const kind = discoveryCandidateKind(lead)
   const investment = lead.investmentProfile
   const research = lead.researchProfile
-  const name = lead.name || lead.companyName || '未命名项目'
+  const name = projectDiscoveryDisplayName(lead)
   const brief = buildProjectDiscoveryBrief(lead)
   const keywords = buildProjectDiscoveryKeywords(lead)
   const persistedKeywordText = formatProjectDiscoveryKeywordText(keywords)
   const primaryDate = projectDiscoveryPrimaryDate(lead)
   const dataStatus = kind === 'research' ? research?.dataStatus?.status : investment?.dataStatus?.status
   const profile = projectDiscoveryProfile(lead)
-  const missingFields = projectDiscoveryMissingFields(lead)
+  const persistedCard = buildProjectDiscoveryCardDraft(lead, brief, profile)
+  const [cardDraft, setCardDraft] = useState<ProjectDiscoveryCardEdits>(() => persistedCard)
+  const missingFields = projectDiscoveryMissingFields(lead).filter((field) => !(
+    cardDraft.briefFacts[field]?.trim() || cardDraft.profileFacts[field]?.trim()
+  ))
   const sourceUrl = safeExternalUrl(lead.radarProfile?.link)
   const latestUpdate = lead.latestUpdates?.[0]
   const verifiedDimensions = kind === 'research' ? research?.dataStatus?.verifiedDimensions : investment?.dataStatus?.verifiedDimensions
   const applicableDimensions = kind === 'research' ? research?.dataStatus?.applicableDimensions : investment?.dataStatus?.applicableDimensions
-  const primaryDateTime = /^\d{4}-\d{2}-\d{2}/u.exec(primaryDate.value)?.[0]
+  const primaryDateTime = /^\d{4}-\d{2}-\d{2}/u.exec(cardDraft.primaryDate)?.[0]
   const eligiblePeople = assignmentOptions?.people.filter((person) => person.department === selectedDepartment) ?? []
+  const cardDirty = JSON.stringify(cardDraft) !== JSON.stringify(persistedCard)
+  const persistedCardKey = JSON.stringify(readProjectDiscoveryCardEdits(lead) ?? null)
 
   useEffect(() => setKeywordText(persistedKeywordText), [persistedKeywordText])
+  useEffect(() => setCardDraft(persistedCard), [persistedCardKey])
+
+  const updateCardDraft = <Key extends keyof ProjectDiscoveryCardEdits>(key: Key, value: ProjectDiscoveryCardEdits[Key]) => {
+    setCardDraft((current) => ({ ...current, [key]: value }))
+    setCardError('')
+    setCardNotice('')
+  }
+
+  const updateCardFact = (group: 'briefFacts' | 'profileFacts', label: string, value: string) => {
+    setCardDraft((current) => ({ ...current, [group]: { ...current[group], [label]: value } }))
+    setCardError('')
+    setCardNotice('')
+  }
+
+  const saveCard = async () => {
+    if (!cardDirty || cardAction) return
+    if (!cardDraft.name.trim()) {
+      setCardError('项目名称不能为空。')
+      return
+    }
+    setCardAction('card')
+    setCardError('')
+    setCardNotice('')
+    try {
+      const result = await apiPatch<{ leadId: string; card: ProjectDiscoveryCardEdits }>(
+        `/project-discovery/leads/${lead.id}/card`,
+        cardDraft,
+      )
+      setCardDraft(result.card)
+      onCardUpdated(result.card)
+      setCardNotice('卡片内容已保存。')
+    } catch (cause) {
+      setCardError(cause instanceof Error ? cause.message : '卡片内容保存失败，请重试。')
+    } finally {
+      setCardAction('')
+    }
+  }
 
   const saveKeywords = async () => {
-    if (cardAction === 'keywords' || keywordText.trim() === persistedKeywordText) return
+    if (cardAction || keywordText.trim() === persistedKeywordText) return
     let normalized: ProjectDiscoveryKeyword[]
     try {
       normalized = parseProjectDiscoveryKeywordText(keywordText, keywords)
@@ -399,40 +461,71 @@ function DiscoveryCard({ lead, onOpen, onKeywordsUpdated, onRemoved }: {
 
   return <article id={`discovery-${lead.id}`} className={`project-discovery-card${expanded ? ' is-expanded' : ''}`}>
     <header className="project-discovery-card-header">
-      <h3>{name}</h3>
+      <h3><input
+        className="project-discovery-title-input"
+        value={cardDraft.name}
+        maxLength={160}
+        disabled={cardAction === 'card'}
+        aria-label={`编辑${name}项目名称`}
+        onChange={(event) => updateCardDraft('name', event.target.value)}
+      /></h3>
       <time className="project-discovery-card-date" dateTime={primaryDateTime}>
         <CalendarDays aria-hidden="true" />
         <span>{primaryDate.label}</span>
-        <strong>{primaryDate.value}</strong>
+        <input
+          className="project-discovery-date-input"
+          value={cardDraft.primaryDate}
+          maxLength={40}
+          disabled={cardAction === 'card'}
+          aria-label={`编辑${name}${primaryDate.label}`}
+          onChange={(event) => updateCardDraft('primaryDate', event.target.value)}
+        />
       </time>
     </header>
     <DiscoveryInvestmentBrief
+      leadId={lead.id}
       name={name}
       brief={brief}
+      factValues={cardDraft.briefFacts}
       keywordText={keywordText}
-      savingKeywords={cardAction === 'keywords'}
-      onChange={(value) => { setKeywordText(value); setCardError('') }}
-      onBlur={() => void saveKeywords()}
+      saving={cardAction === 'keywords' || cardAction === 'card'}
+      onFactChange={(label, value) => updateCardFact('briefFacts', label, value)}
+      onKeywordChange={(value) => { setKeywordText(value); setCardError(''); setCardNotice('') }}
+      onKeywordBlur={() => void saveKeywords()}
     />
-    <button type="button" className="project-discovery-card-toggle" aria-expanded={expanded} aria-label={`查看${name}项目详情`} onClick={() => setExpanded((current) => !current)}>
-      {expanded ? '收起详细信息' : '展开详细信息'}
-      <ChevronDown className={expanded ? 'is-expanded' : ''} aria-hidden="true" />
-    </button>
+    {!expanded && <CardDetailsToggle expanded={false} name={name} onToggle={() => setExpanded(true)} />}
     {expanded && <>
       <section className="project-discovery-card-details" aria-label={`${name}详细信息`}>
         <div className="project-discovery-detail-panel project-discovery-detail-summary">
-          <strong>{kind === 'company' ? '项目摘要' : '情报摘要'}</strong>
-          <p>{brief.summary || '摘要待补充。'}</p>
+          <label htmlFor={`discovery-summary-${lead.id}`}>{kind === 'company' ? '项目摘要' : '情报摘要'}</label>
+          <textarea
+            id={`discovery-summary-${lead.id}`}
+            className="project-discovery-summary-input"
+            value={cardDraft.summary}
+            rows={3}
+            maxLength={2_000}
+            disabled={cardAction === 'card'}
+            placeholder="摘要待补充"
+            onChange={(event) => updateCardDraft('summary', event.target.value)}
+          />
         </div>
         <dl className="project-discovery-detail-metadata">
-          <div><dt>地区</dt><dd>{lead.region || '待核'}</dd></div>
-          <div><dt>来源渠道</dt><dd>{lead.radarProfile?.channel || '公开信源'}</dd></div>
+          <div><dt><label htmlFor={`discovery-region-${lead.id}`}>地区</label></dt><dd><input id={`discovery-region-${lead.id}`} value={cardDraft.region} maxLength={100} disabled={cardAction === 'card'} onChange={(event) => updateCardDraft('region', event.target.value)} /></dd></div>
+          <div><dt><label htmlFor={`discovery-source-${lead.id}`}>来源渠道</label></dt><dd><input id={`discovery-source-${lead.id}`} value={cardDraft.sourceChannel} maxLength={100} disabled={cardAction === 'card'} onChange={(event) => updateCardDraft('sourceChannel', event.target.value)} /></dd></div>
           <div><dt>主体类型</dt><dd>{kind === 'company' ? '公司' : '技术'}</dd></div>
           <div><dt>完整度</dt><dd>{projectDiscoveryCompleteness(dataStatus, verifiedDimensions, applicableDimensions)}</dd></div>
         </dl>
         <div className="project-discovery-detail-panel project-discovery-profile">
           <h4>{kind === 'company' ? '公司画像' : '技术画像'}</h4>
-          <dl>{profile.map((fact) => <div key={`${fact.label}:${fact.value}`}><dt>{fact.label}</dt><dd>{fact.value}</dd></div>)}</dl>
+          <dl>{profile.map((fact) => <div key={fact.label}><dt><label htmlFor={`discovery-profile-${lead.id}-${fact.label}`}>{fact.label}</label></dt><dd><textarea
+            id={`discovery-profile-${lead.id}-${fact.label}`}
+            className="project-discovery-profile-input"
+            value={cardDraft.profileFacts[fact.label] ?? ''}
+            rows={2}
+            maxLength={1_000}
+            disabled={cardAction === 'card'}
+            onChange={(event) => updateCardFact('profileFacts', fact.label, event.target.value)}
+          /></dd></div>)}</dl>
         </div>
         {(latestUpdate || sourceUrl) && <div className="project-discovery-detail-sources">
           <strong>信息来源</strong>
@@ -447,6 +540,13 @@ function DiscoveryCard({ lead, onOpen, onKeywordsUpdated, onRemoved }: {
         </div>}
       </section>
     </>}
+    {cardDirty && <div className="project-discovery-card-save" role="status">
+      <span>{cardAction === 'card' ? '正在保存卡片内容…' : '卡片内容已修改'}</span>
+      <div>
+        <button type="button" disabled={cardAction === 'card'} onClick={() => { setCardDraft(persistedCard); setCardError(''); setCardNotice('') }}>取消修改</button>
+        <button type="button" disabled={cardAction === 'card'} onClick={() => void saveCard()}>{cardAction === 'card' ? '保存中' : '保存卡片'}</button>
+      </div>
+    </div>}
     {assignmentOpen && <section className="project-discovery-assignment-form" aria-label={`${name}项目入库分配`}>
       <div className="project-discovery-inline-heading"><strong>项目入库分配</strong><span>入库后进入立项阶段</span></div>
       {cardAction === 'options' ? <p className="project-discovery-inline-loading"><LoaderCircle className="is-spinning" aria-hidden="true" />正在读取部门和人员</p> : <div className="project-discovery-assignment-fields">
@@ -478,32 +578,49 @@ function DiscoveryCard({ lead, onOpen, onKeywordsUpdated, onRemoved }: {
       <div><button type="button" disabled={cardAction === 'defer'} onClick={() => setConfirmDefer(false)}>取消</button><button type="button" disabled={cardAction === 'defer'} onClick={() => void deferProject()}>{cardAction === 'defer' ? '处理中' : '确认暂不跟进'}</button></div>
     </section>}
     {cardError && <p className="project-discovery-card-error" role="alert">{cardError}</p>}
+    {cardNotice && <p className="project-discovery-card-notice" role="status">{cardNotice}</p>}
     <footer className="project-discovery-card-actions">
       <button type="button" className="detail-button" onClick={onOpen}>查看完整线索<ArrowRight aria-hidden="true" /></button>
       <span />
       <button type="button" className="defer-button" disabled={Boolean(cardAction)} onClick={() => { setConfirmDefer(true); setAssignmentOpen(false); setCardError('') }}>暂不跟进</button>
       <button type="button" className="convert-button" disabled={Boolean(cardAction)} onClick={() => void openAssignment()}>项目入库</button>
     </footer>
+    {expanded && <CardDetailsToggle expanded name={name} onToggle={() => setExpanded(false)} />}
   </article>
 }
 
-function DiscoveryInvestmentBrief({ name, brief, keywordText, savingKeywords, onChange, onBlur }: {
+function CardDetailsToggle({ expanded, name, onToggle }: { expanded: boolean; name: string; onToggle: () => void }) {
+  return <button type="button" className="project-discovery-card-toggle" aria-expanded={expanded} aria-label={`${expanded ? '收起' : '查看'}${name}项目详情`} onClick={onToggle}>
+    {expanded ? '收起详细信息' : '展开详细信息'}
+    <ChevronDown className={expanded ? 'is-expanded' : ''} aria-hidden="true" />
+  </button>
+}
+
+function DiscoveryInvestmentBrief({ leadId, name, brief, factValues, keywordText, saving, onFactChange, onKeywordChange, onKeywordBlur }: {
+  leadId: string
   name: string
   brief: ReturnType<typeof buildProjectDiscoveryBrief>
+  factValues: Record<string, string>
   keywordText: string
-  savingKeywords: boolean
-  onChange: (value: string) => void
-  onBlur: () => void
+  saving: boolean
+  onFactChange: (label: string, value: string) => void
+  onKeywordChange: (value: string) => void
+  onKeywordBlur: () => void
 }) {
   const facts = brief.facts.filter((item) => item.label !== '最新融资日期' && item.label !== '公开日期')
   return <section aria-label={`${name}投资速览`} className="project-discovery-investment-brief">
-    <dl>{facts.map((item, index) => {
-      const [track, ...productParts] = item.label === '行业分类' ? item.value.split(/\s*\/\s*/u) : []
-      const product = productParts.join(' / ')
-      return <Fragment key={`${item.label}:${item.value}`}>
+    <dl>{facts.map((item, index) => <Fragment key={item.label}>
         <div className={item.wide ? 'wide' : ''}>
-          <dt>{item.label}</dt>
-          {product ? <dd className="industry"><span>{track}</span><i aria-hidden="true">/</i><strong>{product}</strong></dd> : <dd>{item.value}</dd>}
+          <dt><label htmlFor={`discovery-fact-${leadId}-${item.label}`}>{item.label}</label></dt>
+          <dd><textarea
+            id={`discovery-fact-${leadId}-${item.label}`}
+            className="project-discovery-fact-input"
+            value={factValues[item.label] ?? ''}
+            rows={item.wide ? 2 : 1}
+            maxLength={1_000}
+            disabled={saving}
+            onChange={(event) => onFactChange(item.label, event.target.value)}
+          /></dd>
         </div>
         {index === 0 && <div className="project-discovery-keywords">
           <dt>重点关键词</dt>
@@ -513,33 +630,51 @@ function DiscoveryInvestmentBrief({ name, brief, keywordText, savingKeywords, on
               value={keywordText}
               rows={2}
               maxLength={655}
-              disabled={savingKeywords}
-              aria-busy={savingKeywords}
+              disabled={saving}
+              aria-busy={saving}
               aria-label={`编辑${name}重点关键词`}
               placeholder="输入关键词，用顿号、逗号或换行分隔"
-              onChange={(event) => onChange(event.target.value)}
-              onBlur={onBlur}
+              onChange={(event) => onKeywordChange(event.target.value)}
+              onBlur={onKeywordBlur}
             />
           </dd>
         </div>}
-      </Fragment>
-    })}</dl>
+      </Fragment>)}</dl>
   </section>
 }
 
 type ProjectDiscoveryProfileFact = { label: string; value: string }
 
+function buildProjectDiscoveryCardDraft(
+  lead: LeadListItem,
+  brief: ReturnType<typeof buildProjectDiscoveryBrief>,
+  profile: ProjectDiscoveryProfileFact[],
+): ProjectDiscoveryCardEdits {
+  return {
+    name: projectDiscoveryDisplayName(lead),
+    primaryDate: projectDiscoveryPrimaryDate(lead).value,
+    summary: brief.summary,
+    region: projectDiscoveryDisplayRegion(lead),
+    sourceChannel: projectDiscoveryDisplaySourceChannel(lead),
+    briefFacts: Object.fromEntries(brief.facts
+      .filter((fact) => fact.label !== '最新融资日期' && fact.label !== '公开日期')
+      .map((fact) => [fact.label, fact.value])),
+    profileFacts: Object.fromEntries(profile.map((fact) => [fact.label, fact.value])),
+  }
+}
+
 function projectDiscoveryProfile(lead: LeadListItem): ProjectDiscoveryProfileFact[] {
+  const edits = readProjectDiscoveryCardEdits(lead)
   if (discoveryCandidateKind(lead) === 'research') {
     const research = lead.researchProfile
-    return compactProfileFacts([
+    return applyProfileEdits(compactProfileFacts([
       profileFact('研究问题', research?.direction?.researchProblem),
       profileFact('研究方法', research?.direction?.methods?.slice(0, 3).join('、')),
       profileFact('应用场景', research?.valueAndTransfer?.applicationScenarios?.slice(0, 3).join('、')),
       profileFact('技术成熟度', research?.valueAndTransfer?.trl || research?.valueAndTransfer?.prototype),
       profileFact('论文/专利', [research?.progress?.venue, ...(research?.rights?.patents ?? [])].filter(Boolean).slice(0, 3).join('、')),
       profileFact('数据更新', research?.dataStatus?.updatedAt || lead.dataUpdatedAt?.slice(0, 10)),
-    ])
+    ]), edits)
   }
   const investment = lead.investmentProfile
   const candidate = lead.availableData
@@ -551,7 +686,7 @@ function projectDiscoveryProfile(lead: LeadListItem): ProjectDiscoveryProfileFac
     || investment?.financing.latestRoundDate
     ? investment.financing
     : candidate?.financing ?? investment?.financing
-  return compactProfileFacts([
+  return applyProfileEdits(compactProfileFacts([
     profileFact('核心产品', products.slice(0, 3).map((product) => product.name).filter(Boolean).join('、') || profile?.products?.slice(0, 3).join('、')),
     profileFact('核心技术', products.slice(0, 3).map((product) => product.technologyRoute || product.productRoute).filter(Boolean).join('；') || profile?.coreTechnologies?.slice(0, 3).join('；')),
     profileFact('产业链位置', investment?.industry.chainPosition),
@@ -559,7 +694,17 @@ function projectDiscoveryProfile(lead: LeadListItem): ProjectDiscoveryProfileFac
     profileFact('客户进展', investment?.customers.highestStage || (investment?.customers.verifiedCount ? `已核验 ${investment.customers.verifiedCount} 家` : undefined)),
     profileFact('工商主体', investment?.subject?.legalEntityName || profile?.companyName || lead.companyName),
     profileFact('经营范围', profile?.businessScope),
-  ])
+  ]), edits)
+}
+
+function applyProfileEdits(facts: ProjectDiscoveryProfileFact[], edits?: ProjectDiscoveryCardEdits): ProjectDiscoveryProfileFact[] {
+  if (!edits) return facts
+  return facts.map((fact) => ({
+    ...fact,
+    value: Object.prototype.hasOwnProperty.call(edits.profileFacts, fact.label)
+      ? edits.profileFacts[fact.label]
+      : fact.value,
+  }))
 }
 
 function projectDiscoveryMissingFields(lead: LeadListItem): string[] {
@@ -589,7 +734,7 @@ function projectDiscoveryCompleteness(status: string | undefined, verified?: num
 }
 
 function profileFact(label: string, value?: string): ProjectDiscoveryProfileFact | null {
-  return value?.trim() ? { label, value: value.trim() } : null
+  return { label, value: value?.trim() ?? '' }
 }
 
 function compactProfileFacts(facts: Array<ProjectDiscoveryProfileFact | null>): ProjectDiscoveryProfileFact[] {

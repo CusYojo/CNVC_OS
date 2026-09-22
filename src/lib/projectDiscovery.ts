@@ -1,4 +1,4 @@
-import type { LeadListItem } from '../types'
+import type { LeadListItem, ProjectDiscoveryCardEdits } from '../types'
 
 export type ProjectDiscoveryPeriod = 'today' | 'week' | 'all'
 export type ProjectDiscoveryKind = 'all' | 'company' | 'research'
@@ -80,6 +80,7 @@ export function filterProjectDiscoveryCandidates(
 
 export function buildProjectDiscoveryBrief(lead: LeadListItem): ProjectDiscoveryBrief {
   const kind = discoveryCandidateKind(lead)
+  const edits = readProjectDiscoveryCardEdits(lead)
   const summary = oneSentence(
     lead.latestUpdates?.[0]?.title
       || lead.researchProfile?.direction?.researchProblem
@@ -95,7 +96,7 @@ export function buildProjectDiscoveryBrief(lead: LeadListItem): ProjectDiscovery
       || legacyDirection
       || '待补充'
     const team = research?.team?.authors?.slice(0, 3).map((author) => author.name).filter(Boolean).join('、') || '待补充'
-    return {
+    return applyProjectDiscoveryBriefEdits({
       summary,
       facts: [
         { label: '研究方向', value: direction },
@@ -105,7 +106,7 @@ export function buildProjectDiscoveryBrief(lead: LeadListItem): ProjectDiscovery
         { label: '所属机构', value: research?.team?.affiliations?.slice(0, 3).join('、') || lead.companyName || lead.radarProfile?.profile?.lab || '待补充', wide: true },
         { label: '核心团队背景', value: team, wide: true },
       ],
-    }
+    }, edits)
   }
 
   const investment = lead.investmentProfile
@@ -137,7 +138,7 @@ export function buildProjectDiscoveryBrief(lead: LeadListItem): ProjectDiscovery
     : candidate?.financing ?? investment?.financing
   const institutions = investment?.institutions?.length ? investment.institutions : candidate?.institutions ?? []
 
-  return {
+  return applyProjectDiscoveryBriefEdits({
     summary,
     facts: [
       { label: '行业分类', value: industry },
@@ -147,14 +148,15 @@ export function buildProjectDiscoveryBrief(lead: LeadListItem): ProjectDiscovery
       { label: '投资方', value: institutions.slice(0, 4).map((institution) => institution.name).filter(Boolean).join('、') || '未披露', wide: true },
       { label: '核心团队背景', value: team, wide: true },
     ],
-  }
+  }, edits)
 }
 
 export function projectDiscoveryPrimaryDate(lead: LeadListItem): { label: string; value: string } {
+  const editedDate = readProjectDiscoveryCardEdits(lead)?.primaryDate
   if (discoveryCandidateKind(lead) === 'research') {
     return {
       label: '公开日期',
-      value: lead.researchProfile?.progress?.publishedAt || projectDiscoveryCandidateDay(lead) || '未披露',
+      value: editedDate !== undefined ? editedDate : lead.researchProfile?.progress?.publishedAt || projectDiscoveryCandidateDay(lead) || '未披露',
     }
   }
 
@@ -167,7 +169,43 @@ export function projectDiscoveryPrimaryDate(lead: LeadListItem): { label: string
 
   return {
     label: '融资日期',
-    value: financing?.latestRoundDate || investment?.financing.latestCompletedAt || '未披露',
+    value: editedDate !== undefined ? editedDate : financing?.latestRoundDate || investment?.financing.latestCompletedAt || '未披露',
+  }
+}
+
+export function readProjectDiscoveryCardEdits(lead: LeadListItem): ProjectDiscoveryCardEdits | undefined {
+  const edits = lead.radarProfile?.profile?.discoveryCardEdits
+  if (!edits || typeof edits !== 'object' || Array.isArray(edits)) return undefined
+  return edits
+}
+
+export function projectDiscoveryDisplayName(lead: LeadListItem): string {
+  return readProjectDiscoveryCardEdits(lead)?.name || lead.name || lead.companyName || '未命名项目'
+}
+
+export function projectDiscoveryDisplayRegion(lead: LeadListItem): string {
+  const edits = readProjectDiscoveryCardEdits(lead)
+  return edits ? edits.region : lead.region || '待核'
+}
+
+export function projectDiscoveryDisplaySourceChannel(lead: LeadListItem): string {
+  const edits = readProjectDiscoveryCardEdits(lead)
+  return edits ? edits.sourceChannel : lead.radarProfile?.channel || '公开信源'
+}
+
+function applyProjectDiscoveryBriefEdits(
+  brief: ProjectDiscoveryBrief,
+  edits?: ProjectDiscoveryCardEdits,
+): ProjectDiscoveryBrief {
+  if (!edits) return brief
+  return {
+    summary: edits.summary,
+    facts: brief.facts.map((fact) => ({
+      ...fact,
+      value: Object.prototype.hasOwnProperty.call(edits.briefFacts, fact.label)
+        ? edits.briefFacts[fact.label]
+        : fact.value,
+    })),
   }
 }
 
@@ -266,7 +304,14 @@ export function projectDiscoveryStatusLabel(poolStatus: LeadListItem['poolStatus
 export function projectDiscoverySearchText(lead: LeadListItem): string {
   const investment = lead.investmentProfile
   const research = lead.researchProfile
+  const edits = readProjectDiscoveryCardEdits(lead)
   return [
+    edits?.name,
+    edits?.summary,
+    edits?.region,
+    edits?.sourceChannel,
+    ...Object.values(edits?.briefFacts ?? {}),
+    ...Object.values(edits?.profileFacts ?? {}),
     lead.name,
     lead.companyName,
     lead.region,

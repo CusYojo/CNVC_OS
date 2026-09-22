@@ -85,6 +85,7 @@ test('project discovery uses an isolated endpoint instead of the shared lead poo
   assert.match(routes, /get\('\/project-discovery\/leads'/)
   assert.match(routes, /get\('\/project-discovery\/assignment-options'/)
   assert.match(routes, /patch\('\/project-discovery\/leads\/:id\/keywords'/)
+  assert.match(routes, /patch\('\/project-discovery\/leads\/:id\/card'/)
   assert.match(routes, /post\('\/project-discovery\/leads\/:id\/defer'/)
   assert.match(routes, /projectDiscoveryOnly:\s*true/)
   assert.match(leadService, /JSON_SEARCH\(/, '生产 MySQL 应直接匹配 radar_source_keys JSON 数组')

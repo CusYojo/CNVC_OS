@@ -544,6 +544,16 @@ export interface LeadResearchProfile {
   dataStatus: { status: 'verified' | 'partial' | 'missing' | 'conflicted' | 'stale'; verifiedDimensions: number; applicableDimensions: number; conflictCount: number; source: 'paper_metadata' | 'snapshot' | 'paper_metadata+snapshot'; updatedAt?: string }
 }
 
+export type ProjectDiscoveryCardEdits = {
+  name: string
+  primaryDate: string
+  summary: string
+  region: string
+  sourceChannel: string
+  briefFacts: Record<string, string>
+  profileFacts: Record<string, string>
+}
+
 export interface Lead {
   id: string
   name: string
@@ -697,6 +707,7 @@ export type LeadListItem = Pick<Lead,
         label: string
         value: string
       }>
+      discoveryCardEdits?: ProjectDiscoveryCardEdits
     }
     paperMeta?: Pick<PaperMetadata,
       'titleZh' | 'projectName' | 'projectNameOriginal' | 'authors' | 'categories' | 'pdfUrl' | 'rights'
