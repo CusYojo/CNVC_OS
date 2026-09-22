@@ -4,6 +4,7 @@ import type { LeadListItem } from '../../src/types/index.js'
 import {
   buildProjectDiscoveryBrief,
   filterProjectDiscoveryCandidates,
+  loadProjectDiscoveryPages,
   projectDiscoveryDay,
   projectDiscoveryStatusLabel,
   shouldLoadNextProjectDiscoveryPage,
@@ -94,6 +95,30 @@ test('project discovery loads every page because ingestion order can differ from
   assert.equal(shouldLoadNextProjectDiscoveryPage([company], 1, 3, now), true)
   assert.equal(shouldLoadNextProjectDiscoveryPage([{ ...company, poolEnteredAt: '2026-09-10T01:30:00.000Z', latestUpdates: [{ occurredAt: '2026-09-10T01:30:00.000Z', title: '旧事件' }] }], 2, 3, now), true)
   assert.equal(shouldLoadNextProjectDiscoveryPage([company], 3, 3, now), false)
+})
+
+test('project discovery renders the first database page before later pages finish', async () => {
+  type Page = { list: LeadListItem[]; page: number; totalPages: number }
+  let releaseSecondPage!: (page: Page) => void
+  const secondPage = new Promise<Page>((resolve) => { releaseSecondPage = resolve })
+  const requestedPages: number[] = []
+  const renderedBatches: string[][] = []
+
+  const loading = loadProjectDiscoveryPages(async (page) => {
+    requestedPages.push(page)
+    if (page === 1) return { list: [company], page: 1, totalPages: 2 }
+    return secondPage
+  }, (items) => {
+    renderedBatches.push(items.map((item) => item.id))
+  })
+
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.deepEqual(requestedPages, [1, 2])
+  assert.deepEqual(renderedBatches, [['company-1']], '首批数据库结果应立即呈现，不能等待全库分页完成')
+
+  releaseSecondPage({ list: [research], page: 2, totalPages: 2 })
+  assert.equal(await loading, true)
+  assert.deepEqual(renderedBatches, [['company-1'], ['company-1', 'research-1']])
 })
 
 test('project discovery company cards expose the same six-field investment brief as VC Hunter', () => {
