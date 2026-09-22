@@ -1,5 +1,5 @@
 import {
-  ArrowRight, CalendarDays, ChevronDown, FileUp, LoaderCircle, Pencil, Plus, Radar, Search, Sparkles, Trash2, X,
+  ArrowRight, CalendarDays, ChevronDown, FileUp, LoaderCircle, Radar, Search, Sparkles, X,
 } from 'lucide-react'
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
@@ -10,7 +10,9 @@ import {
   buildProjectDiscoveryBrief,
   discoveryCandidateKind,
   filterProjectDiscoveryCandidates,
+  formatProjectDiscoveryKeywordText,
   loadProjectDiscoveryPage,
+  parseProjectDiscoveryKeywordText,
   projectDiscoveryCandidateDay,
   projectDiscoveryPrimaryDate,
   type ProjectDiscoveryKeyword,
@@ -40,13 +42,6 @@ type ProjectDiscoveryAssignmentOptions = {
   departments: string[]
   people: ProjectDiscoveryAssignmentPerson[]
 }
-
-const keywordKinds: Array<{ value: ProjectDiscoveryKeyword['kind']; label: string }> = [
-  { value: 'institution', label: '机构' },
-  { value: 'academic', label: '院校' },
-  { value: 'industry', label: '产业' },
-  { value: 'technology', label: '技术' },
-]
 
 const readFileAsDataUrl = (file: File) => new Promise<string>((resolve, reject) => {
   const reader = new FileReader()
@@ -297,8 +292,7 @@ function DiscoveryCard({ lead, onOpen, onKeywordsUpdated, onRemoved }: {
   onRemoved: (message: string) => void
 }) {
   const [expanded, setExpanded] = useState(false)
-  const [editingKeywords, setEditingKeywords] = useState(false)
-  const [keywordDraft, setKeywordDraft] = useState<ProjectDiscoveryKeyword[]>([])
+  const [keywordText, setKeywordText] = useState(() => formatProjectDiscoveryKeywordText(buildProjectDiscoveryKeywords(lead)))
   const [assignmentOpen, setAssignmentOpen] = useState(false)
   const [assignmentOptions, setAssignmentOptions] = useState<ProjectDiscoveryAssignmentOptions | null>(null)
   const [selectedDepartment, setSelectedDepartment] = useState('')
@@ -312,6 +306,7 @@ function DiscoveryCard({ lead, onOpen, onKeywordsUpdated, onRemoved }: {
   const name = lead.name || lead.companyName || '未命名项目'
   const brief = buildProjectDiscoveryBrief(lead)
   const keywords = buildProjectDiscoveryKeywords(lead)
+  const persistedKeywordText = formatProjectDiscoveryKeywordText(keywords)
   const primaryDate = projectDiscoveryPrimaryDate(lead)
   const dataStatus = kind === 'research' ? research?.dataStatus?.status : investment?.dataStatus?.status
   const profile = projectDiscoveryProfile(lead)
@@ -323,27 +318,26 @@ function DiscoveryCard({ lead, onOpen, onKeywordsUpdated, onRemoved }: {
   const primaryDateTime = /^\d{4}-\d{2}-\d{2}/u.exec(primaryDate.value)?.[0]
   const eligiblePeople = assignmentOptions?.people.filter((person) => person.department === selectedDepartment) ?? []
 
-  const beginKeywordEdit = () => {
-    setKeywordDraft(keywords.map((keyword) => ({ ...keyword })))
-    setEditingKeywords(true)
-    setCardError('')
-  }
+  useEffect(() => setKeywordText(persistedKeywordText), [persistedKeywordText])
 
   const saveKeywords = async () => {
-    if (keywordDraft.some((keyword) => !keyword.value.trim())) {
-      setCardError('请填写关键词内容，或删除空白气泡。')
+    if (cardAction === 'keywords' || keywordText.trim() === persistedKeywordText) return
+    let normalized: ProjectDiscoveryKeyword[]
+    try {
+      normalized = parseProjectDiscoveryKeywordText(keywordText, keywords)
+    } catch (cause) {
+      setCardError(cause instanceof Error ? cause.message : '关键词格式不正确。')
       return
     }
     setCardAction('keywords')
     setCardError('')
     try {
-      const normalized = keywordDraft.map((keyword) => ({ ...keyword, value: keyword.value.trim() }))
       const result = await apiPatch<{ leadId: string; keywords: ProjectDiscoveryKeyword[] }>(
         `/project-discovery/leads/${lead.id}/keywords`,
         { keywords: normalized },
       )
+      setKeywordText(formatProjectDiscoveryKeywordText(result.keywords))
       onKeywordsUpdated(result.keywords)
-      setEditingKeywords(false)
     } catch (cause) {
       setCardError(cause instanceof Error ? cause.message : '关键词保存失败，请重试。')
     } finally {
@@ -412,38 +406,14 @@ function DiscoveryCard({ lead, onOpen, onKeywordsUpdated, onRemoved }: {
         <strong>{primaryDate.value}</strong>
       </time>
     </header>
-    <DiscoveryInvestmentBrief name={name} brief={brief} keywords={keywords} onEdit={beginKeywordEdit} />
-    {editingKeywords && <section className="project-discovery-keyword-editor" aria-label={`${name}重点关键词编辑`}>
-      <div className="project-discovery-inline-heading">
-        <strong>编辑重点关键词</strong>
-        <span>最多 8 个，每个关键词不超过 80 个字</span>
-      </div>
-      <div className="project-discovery-keyword-rows">
-        {keywordDraft.map((keyword, index) => <div key={`${index}:${keyword.kind}`} className="project-discovery-keyword-row">
-          <label>
-            <span className="sr-only">关键词类型</span>
-            <select value={keyword.kind} onChange={(event) => {
-              const kind = event.target.value as ProjectDiscoveryKeyword['kind']
-              const label = keywordKinds.find((item) => item.value === kind)?.label ?? keyword.label
-              setKeywordDraft((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, kind, label } : item))
-            }}>
-              {keywordKinds.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-            </select>
-          </label>
-          <label>
-            <span className="sr-only">关键词内容</span>
-            <input value={keyword.value} maxLength={80} onChange={(event) => setKeywordDraft((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, value: event.target.value } : item))} />
-          </label>
-          <button type="button" className="icon-button" aria-label={`删除关键词${keyword.value}`} onClick={() => setKeywordDraft((current) => current.filter((_, itemIndex) => itemIndex !== index))}><Trash2 aria-hidden="true" /></button>
-        </div>)}
-      </div>
-      <div className="project-discovery-inline-actions">
-        <button type="button" className="text-button" disabled={keywordDraft.length >= 8} onClick={() => setKeywordDraft((current) => [...current, { kind: 'industry', label: '产业', value: '' }])}><Plus aria-hidden="true" />添加关键词</button>
-        <span />
-        <button type="button" className="text-button" disabled={cardAction === 'keywords'} onClick={() => setEditingKeywords(false)}>取消</button>
-        <button type="button" className="primary-button" disabled={cardAction === 'keywords'} onClick={() => void saveKeywords()}>{cardAction === 'keywords' ? '保存中' : '保存关键词'}</button>
-      </div>
-    </section>}
+    <DiscoveryInvestmentBrief
+      name={name}
+      brief={brief}
+      keywordText={keywordText}
+      savingKeywords={cardAction === 'keywords'}
+      onChange={(value) => { setKeywordText(value); setCardError('') }}
+      onBlur={() => void saveKeywords()}
+    />
     <button type="button" className="project-discovery-card-toggle" aria-expanded={expanded} aria-label={`查看${name}项目详情`} onClick={() => setExpanded((current) => !current)}>
       {expanded ? '收起详细信息' : '展开详细信息'}
       <ChevronDown className={expanded ? 'is-expanded' : ''} aria-hidden="true" />
@@ -517,11 +487,13 @@ function DiscoveryCard({ lead, onOpen, onKeywordsUpdated, onRemoved }: {
   </article>
 }
 
-function DiscoveryInvestmentBrief({ name, brief, keywords, onEdit }: {
+function DiscoveryInvestmentBrief({ name, brief, keywordText, savingKeywords, onChange, onBlur }: {
   name: string
   brief: ReturnType<typeof buildProjectDiscoveryBrief>
-  keywords: ProjectDiscoveryKeyword[]
-  onEdit: () => void
+  keywordText: string
+  savingKeywords: boolean
+  onChange: (value: string) => void
+  onBlur: () => void
 }) {
   const facts = brief.facts.filter((item) => item.label !== '最新融资日期' && item.label !== '公开日期')
   return <section aria-label={`${name}投资速览`} className="project-discovery-investment-brief">
@@ -535,17 +507,19 @@ function DiscoveryInvestmentBrief({ name, brief, keywords, onEdit }: {
         </div>
         {index === 0 && <div className="project-discovery-keywords">
           <dt>重点关键词</dt>
-          <dd>{keywords.length > 0 ? <ul aria-label={`${name}重点关键词`}>
-            {keywords.map((keyword) => <li
-              key={`${keyword.kind}:${keyword.value}`}
-            >
-              <button type="button" className={`project-discovery-keyword-chip is-${keyword.kind}`} title={keyword.value} aria-label={`编辑关键词${keyword.value}`} onClick={onEdit}>
-                <strong>{keyword.value}</strong>
-                <Pencil aria-hidden="true" />
-              </button>
-            </li>)}
-          </ul> : <button type="button" className="project-discovery-keywords-empty" onClick={onEdit}><Plus aria-hidden="true" />添加重点关键词</button>}
-            <button type="button" className="project-discovery-keywords-edit" onClick={onEdit}><Pencil aria-hidden="true" />编辑关键词</button>
+          <dd>
+            <textarea
+              className="project-discovery-keyword-input"
+              value={keywordText}
+              rows={2}
+              maxLength={655}
+              disabled={savingKeywords}
+              aria-busy={savingKeywords}
+              aria-label={`编辑${name}重点关键词`}
+              placeholder="输入关键词，用顿号、逗号或换行分隔"
+              onChange={(event) => onChange(event.target.value)}
+              onBlur={onBlur}
+            />
           </dd>
         </div>}
       </Fragment>

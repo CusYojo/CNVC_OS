@@ -171,6 +171,24 @@ export function projectDiscoveryPrimaryDate(lead: LeadListItem): { label: string
   }
 }
 
+export function formatProjectDiscoveryKeywordText(keywords: readonly ProjectDiscoveryKeyword[]): string {
+  return keywords.map((keyword) => keyword.value.trim()).filter(Boolean).join('、')
+}
+
+export function parseProjectDiscoveryKeywordText(
+  text: string,
+  existingKeywords: readonly ProjectDiscoveryKeyword[],
+): ProjectDiscoveryKeyword[] {
+  const values = text.split(/[、，,；;\n]+/u).map((value) => value.trim()).filter(Boolean)
+  if (values.length > 8) throw new Error('重点关键词最多 8 个')
+  if (values.some((value) => value.length > 80)) throw new Error('每个关键词不超过 80 个字')
+
+  return values.map((value) => {
+    const existing = existingKeywords.find((keyword) => keyword.value.trim() === value)
+    return existing ? { ...existing, value } : { kind: 'industry', label: '关键词', value }
+  })
+}
+
 export function buildProjectDiscoveryKeywords(lead: LeadListItem): ProjectDiscoveryKeyword[] {
   const editedKeywords = lead.radarProfile?.profile?.discoveryKeywords
   if (Array.isArray(editedKeywords)) {
