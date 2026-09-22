@@ -236,7 +236,7 @@ async function main() {
       conclusions: ['MySQL ready'],
     }, [], user.id)
     meetingId = meeting.id
-    await updateMeeting(meeting.id, { aiSummary: 'updated' })
+    await updateMeeting(meeting.id, { aiSummary: 'updated' }, meeting.version, user.id)
 
     const todo = await createTodo({
       projectId: project.id,

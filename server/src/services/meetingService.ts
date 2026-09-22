@@ -16,6 +16,30 @@ import { prepareFdeTodo } from './fdeTaskService.js'
 import { directiveTaskAccessCondition } from './fdeDirectiveLinksService.js'
 import { scheduleTransaction } from './fdeScheduleTransactionService.js'
 import { requireProjectFileAccess } from './projectFileAccessService.js'
+import { assertMeetingMutation } from '../contracts/meetingMutationContract.js'
+
+type MeetingTx = Parameters<Parameters<typeof db.transaction>[0]>[0]
+
+async function requireMeetingProjectAccess(tx: MeetingTx, projectId: string | null, userId: string) {
+  const [actor] = await tx.select().from(users).where(and(eq(users.id, userId), eq(users.status, '启用'))).limit(1)
+  if (!actor) throw Object.assign(new Error('当前账号不可用'), { status: 403, code: 'USER_DISABLED_OR_MISSING' })
+  if (!projectId) return
+  const [project] = await tx.select().from(projects).where(and(eq(projects.id, projectId), projectAccessCondition({ uid: actor.id, name: actor.name, role: actor.role }))).limit(1)
+  if (!project) throw Object.assign(new Error('项目不存在或无权访问'), { status: 403, code: 'PROJECT_FORBIDDEN' })
+  if (project.lifecycle !== 'active') throw Object.assign(new Error('项目已关闭，不能继续修改会议'), { status: 409, code: 'FDE_PROJECT_INACTIVE' })
+}
+
+async function lockWritableMeeting(tx: MeetingTx, meetingId: string, userId: string, targetProjectId?: string | null) {
+  const [initial] = await tx.select().from(meetings).where(eq(meetings.id, meetingId)).limit(1)
+  if (!initial) throw Object.assign(new Error('会议不存在或已删除'), { status: 404, code: 'MEETING_NOT_FOUND' })
+  const projectIds = [...new Set([initial.projectId, targetProjectId].filter((id): id is string => Boolean(id)))].sort()
+  for (const projectId of projectIds) await tx.execute(sql`SELECT ${projects.id} FROM ${projects} WHERE ${projects.id}=${projectId} FOR UPDATE`)
+  const [meeting] = await tx.select().from(meetings).where(eq(meetings.id, meetingId)).for('update')
+  if (!meeting || meeting.projectId !== initial.projectId) throw businessVersionConflict('会议')
+  await requireMeetingProjectAccess(tx, meeting.projectId, userId)
+  if (targetProjectId && targetProjectId !== meeting.projectId) await requireMeetingProjectAccess(tx, targetProjectId, userId)
+  return meeting
+}
 
 type MeetingContribution = {
   id: string
@@ -278,19 +302,21 @@ export async function createMeeting(
   return row
 }
 
-export async function updateMeeting(id: string, patch: Partial<typeof meetings.$inferInsert>, expectedVersion?: number) {
+export async function updateMeeting(id: string, patch: Partial<typeof meetings.$inferInsert>, expectedVersion?: number, actorId?: string) {
   const { id: _id, createdBy: _createdBy, hostUserId: _hostUserId, version: _version, workflowKind: _kind, workflowStatus: _status, weeklyReview: _review, confirmedBy: _confirmedBy, confirmedAt: _confirmedAt, ...safePatch } = patch
   const condition = expectedVersion === undefined
     ? eq(meetings.id, id)
     : and(eq(meetings.id, id), eq(meetings.version, expectedVersion))
   const result = await scheduleTransaction(async (tx) => {
-    const [existing] = await tx.select().from(meetings).where(eq(meetings.id, id))
-    const projectIds = [...new Set([existing?.projectId, safePatch.projectId].filter((value): value is string => Boolean(value)))].sort()
-    for (const projectId of projectIds) await tx.execute(sql`SELECT ${projects.id} FROM ${projects} WHERE ${projects.id}=${projectId} FOR UPDATE`)
-    const [current] = await tx.select().from(meetings).where(eq(meetings.id, id)).for('update')
-    if (current?.projectId !== existing?.projectId) throw businessVersionConflict('会议')
+    const [existing] = await tx.select().from(meetings).where(eq(meetings.id, id)).limit(1)
+    if (!existing) throw Object.assign(new Error('会议不存在'), { status: 404, code: 'MEETING_NOT_FOUND' })
     // Specialized meetings cannot be edited/rebound through legacy PATCH or internal callers.
-    if (current && current.workflowKind !== 'legacy' || safePatch.type === '周五例会') throw Object.assign(new Error('请在对应专用会议工作区修改；已确认纪要不可覆盖'), { status: 409, code: 'FDE_MEETING_WORKFLOW_REQUIRED' })
+    assertMeetingMutation(existing, actorId, expectedVersion, 'edit')
+    const current = await lockWritableMeeting(tx, id, actorId!, safePatch.projectId)
+    assertMeetingMutation(current, actorId, expectedVersion, 'edit')
+    if (safePatch.type === '周五例会') throw Object.assign(new Error('请在对应专用会议工作区修改'), { status: 409, code: 'FDE_MEETING_WORKFLOW_REQUIRED' })
+    const startsAt = safePatch.startedAt ?? current.startedAt, endsAt = safePatch.endsAt === undefined ? current.endsAt : safePatch.endsAt
+    if (endsAt && endsAt <= startsAt) throw Object.assign(new Error('会议结束时间必须晚于开始时间'), { status: 400, code: 'INVALID_MEETING_TIME_RANGE' })
     const [updated] = await tx.update(meetings).set({ ...safePatch, version: sql`${meetings.version} + 1` }).where(condition)
     if (updated.affectedRows === 1) {
       const [row] = await tx.select().from(meetings).where(eq(meetings.id, id))
@@ -306,9 +332,8 @@ export async function updateMeeting(id: string, patch: Partial<typeof meetings.$
 
 export async function addMeetingContribution(input: { meetingId: string; userId: string; content: string; fileIds: string[]; expectedVersion: number }) {
   return scheduleTransaction(async (tx) => {
-    const [meeting] = await tx.select().from(meetings).where(eq(meetings.id, input.meetingId)).for('update')
-    if (!meeting || meeting.workflowKind !== 'legacy') throw Object.assign(new Error('会议不存在或不支持此操作'), { status: 404, code: 'MEETING_NOT_FOUND' })
-    if (meeting.version !== input.expectedVersion) throw businessVersionConflict('会议')
+    const meeting = await lockWritableMeeting(tx, input.meetingId, input.userId)
+    assertMeetingMutation(meeting, input.userId, input.expectedVersion, 'contribute')
     const [participant] = await tx.select({ id: meetingParticipants.userId }).from(meetingParticipants).where(and(eq(meetingParticipants.meetingId, meeting.id), eq(meetingParticipants.userId, input.userId))).limit(1)
     if (!participant && meeting.createdBy !== input.userId && meeting.hostUserId !== input.userId) throw Object.assign(new Error('只有本场会议的参会人员可以发布想法和文件'), { status: 403, code: 'MEETING_CONTRIBUTION_FORBIDDEN' })
     const [author] = await tx.select({ name: users.name }).from(users).where(and(eq(users.id, input.userId), eq(users.status, '启用'))).limit(1)
@@ -328,11 +353,8 @@ export async function addMeetingContribution(input: { meetingId: string; userId:
 
 export async function updateMeetingLifecycle(input: { meetingId: string; userId: string; expectedVersion: number; action: 'start' | 'end' | 'cancel' }) {
   return scheduleTransaction(async (tx) => {
-    const [meeting] = await tx.select().from(meetings).where(eq(meetings.id, input.meetingId)).for('update')
-    if (!meeting || meeting.workflowKind !== 'legacy') throw Object.assign(new Error('会议不存在或不支持此操作'), { status: 404, code: 'MEETING_NOT_FOUND' })
-    if (meeting.createdBy !== input.userId && meeting.hostUserId !== input.userId) throw Object.assign(new Error('只有会议发起人可以修改会议状态'), { status: 403, code: 'MEETING_LIFECYCLE_FORBIDDEN' })
-    if (meeting.version !== input.expectedVersion) throw businessVersionConflict('会议')
-    if (meeting.workflowStatus === 'cancelled' || meeting.confirmedAt) throw Object.assign(new Error('当前会议状态不可修改'), { status: 409, code: 'MEETING_LIFECYCLE_INVALID' })
+    const meeting = await lockWritableMeeting(tx, input.meetingId, input.userId)
+    assertMeetingMutation(meeting, input.userId, input.expectedVersion, input.action)
     const nextStatus = input.action === 'cancel' ? 'cancelled' : input.action === 'end' ? 'completed' : 'in_progress'
     await tx.update(meetings).set({ workflowStatus: nextStatus, ...(input.action === 'start' ? { startedAt: new Date() } : {}), ...(input.action === 'end' ? { endsAt: new Date() } : {}), version: meeting.version + 1 }).where(and(eq(meetings.id, meeting.id), eq(meetings.version, meeting.version)))
     if (input.action === 'cancel') {
@@ -354,11 +376,8 @@ export async function deleteMeetingRecord(input: { meetingId: string; userId: st
       if (previous.actorId !== input.userId || previous.action !== 'delete' || previous.requestHash !== requestHash) throw Object.assign(new Error('删除请求已用于其他操作，请重新打开确认窗口'), { status: 409, code: 'MEETING_REQUEST_REUSED' })
       return { deleted: true as const, meetingId: previous.result.meetingId }
     }
-    const [meeting] = await tx.select().from(meetings).where(eq(meetings.id, input.meetingId)).for('update')
-    if (!meeting || meeting.workflowKind !== 'legacy' || meeting.workflowStatus === 'deleted') throw Object.assign(new Error('会议不存在或已删除'), { status: 404, code: 'MEETING_NOT_FOUND' })
-    if (meeting.createdBy !== input.userId && meeting.hostUserId !== input.userId) throw Object.assign(new Error('只有会议发起人可以删除会议'), { status: 403, code: 'MEETING_DELETE_FORBIDDEN' })
-    if (meeting.version !== input.expectedVersion) throw businessVersionConflict('会议')
-    if (meeting.confirmedAt || meeting.workflowStatus === 'completed') throw Object.assign(new Error('已形成正式纪要的会议不能删除'), { status: 409, code: 'MEETING_DELETE_FINALIZED' })
+    const meeting = await lockWritableMeeting(tx, input.meetingId, input.userId)
+    assertMeetingMutation(meeting, input.userId, input.expectedVersion, 'delete')
     const now = new Date()
     await tx.update(meetingWorkflowNotices).set({ closedAt: now }).where(and(eq(meetingWorkflowNotices.meetingId, meeting.id), isNull(meetingWorkflowNotices.closedAt)))
     await tx.update(todos).set({ status: '已取消', closureReason: '关联会议已删除', version: sql`${todos.version} + 1` }).where(and(eq(todos.meetingId, meeting.id), notInArray(todos.status, ['已完成', '已关闭', '已取消', '已归档'])))
@@ -372,12 +391,8 @@ export async function deleteMeetingRecord(input: { meetingId: string; userId: st
 
 export async function finalizeMeeting(input: { meetingId: string; userId: string; userName: string; expectedVersion: number; summary: string; conclusions: string[]; tasks: Array<{ title: string; ownerUserId: string; dueDate: string }> }) {
   const updated = await scheduleTransaction(async (tx) => {
-    const [meeting] = await tx.select().from(meetings).where(eq(meetings.id, input.meetingId)).for('update')
-    if (!meeting || meeting.workflowKind !== 'legacy') throw Object.assign(new Error('会议不存在或不支持此操作'), { status: 404, code: 'MEETING_NOT_FOUND' })
-    if (meeting.createdBy !== input.userId && meeting.hostUserId !== input.userId) throw Object.assign(new Error('只有会议发起人可以确认最终纪要'), { status: 403, code: 'MEETING_MINUTES_FORBIDDEN' })
-    if (meeting.version !== input.expectedVersion) throw businessVersionConflict('会议')
-    if (meeting.workflowStatus === 'cancelled' || meeting.confirmedAt) throw Object.assign(new Error('会议已取消或纪要已确认'), { status: 409, code: 'MEETING_MINUTES_IMMUTABLE' })
-    if (meeting.workflowStatus === 'scheduled' && (!meeting.endsAt || meeting.endsAt.getTime() > Date.now())) throw Object.assign(new Error('会议结束后才能确认最终纪要'), { status: 409, code: 'MEETING_NOT_ENDED' })
+    const meeting = await lockWritableMeeting(tx, input.meetingId, input.userId)
+    assertMeetingMutation(meeting, input.userId, input.expectedVersion, 'finalize')
     const assignees = input.tasks.length ? await tx.select({ id: users.id, name: users.name }).from(users).where(and(inArray(users.id, [...new Set(input.tasks.map(task => task.ownerUserId))]), eq(users.status, '启用'))) : []
     const names = new Map(assignees.map(person => [person.id, person.name]))
     if (names.size !== new Set(input.tasks.map(task => task.ownerUserId)).size) throw Object.assign(new Error('任务负责人不存在或已停用'), { status: 400, code: 'MEETING_TASK_OWNER_INVALID' })

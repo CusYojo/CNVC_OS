@@ -82,6 +82,7 @@ export async function getUnifiedTask(taskId: string, actor: ProjectAccessActor):
     id: base.id, title: base.title, category: source === 'approval' ? 'approval' : source === 'personal' ? 'personal' : 'project',
     source, sourceLabel: TASK_SOURCE_LABELS[source], status, statusLabel: TASK_STATUS_LABELS[status], rawStatus: base.status,
     primaryAction: primary.key, primaryActionLabel: primary.label,
+    approvalRequestId: base.approvalRequestId ?? null,
     project: base.projectId ? { id: base.projectId, name: base.projectName ?? '' } : null,
     owner, participants: people, startsAt: schedule && !schedule.hidden ? schedule.startsAt.toISOString() : null,
     dueDate: base.dueDate ?? null, dueTime: base.dueTime ?? null, deliverable: base.deliverable ?? null,

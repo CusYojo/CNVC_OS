@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { approvalCenterDetailPath, approvalNoticeReadPath, type ApprovalCenterResult, type ApprovalCenterRow } from '../../server/src/contracts/fdeApprovalCenterContract'
+import { APPROVAL_CHANGED } from '../lib/approvalWorkspace'
 import { apiGet, apiPost } from '../lib/api'
 import { useAuthStore } from '../store/useAuthStore'
 import { Badge, Button, Card } from './ui'
@@ -13,7 +14,7 @@ export function useApprovalInbox() {
   const generation = useRef(0), readOperation = useRef(0), readingRef = useRef(false)
   const reload = useCallback(() => setReloadKey(value => value + 1), [])
   useEffect(() => { ++readOperation.current; setPage(1); setSnapshot(null); setError(''); setReading(''); readingRef.current = false }, [userId])
-  useEffect(() => { window.addEventListener('focus', reload); return () => window.removeEventListener('focus', reload) }, [reload])
+  useEffect(() => { window.addEventListener('focus', reload); window.addEventListener(APPROVAL_CHANGED, reload); return () => { window.removeEventListener('focus', reload); window.removeEventListener(APPROVAL_CHANGED, reload) } }, [reload])
   useEffect(() => {
     const token = ++generation.current
     setSnapshot(null); setLoading(true); setError('')
@@ -43,7 +44,7 @@ export function FdeApprovalInbox({ inbox }: { inbox: ReturnType<typeof useApprov
   return <Card className="mb-5 overflow-hidden">
     <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 p-4">
       <h2 className="font-semibold">待我审批</h2>
-      <div className="flex items-center gap-3"><Link className="text-sm text-[#315f68]" to="/workflow?view=pending">全部审批</Link><Button variant="secondary" disabled={loading || Boolean(reading)} onClick={reload}>刷新审批待办</Button></div>
+      <div className="flex items-center gap-3"><Link className="text-sm text-[#315f68]" to="/workflow?view=pending">展开待办</Link><Button variant="secondary" disabled={loading || Boolean(reading)} onClick={reload}>刷新</Button></div>
     </div>
     {error && <p role="alert" className="p-4 text-sm text-red-700">{error}</p>}
     {loading ? <p className="p-4 text-sm text-slate-500">正在核对当前审批节点…</p> : data && <>

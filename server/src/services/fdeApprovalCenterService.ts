@@ -7,6 +7,8 @@ import { createMySqlIdentityRepositoryContext } from '../repositories/index.js'
 import { legacyApprovalAccessCondition } from './oaRequestAccessService.js'
 import { projectAccessCondition } from './projectAccessService.js'
 import { typeApprovalAccessCondition, typeApprovalPendingCondition, typeReviewApplicant, typeReviewNodeKey, typeReviewNodeName, typeReviewStageName } from './fdeTypeApprovalService.js'
+import { projectApprovalOperableCondition } from './oaProjectLifecycleService.js'
+import { ADMIN_SELF_APPROVAL_NODE_NAME } from '../contracts/adminSelfApprovalContract.js'
 
 // The inbox, counts and notice acknowledgements use the same current-action
 // predicate. Partial countersignature is still pending for the remaining users.
@@ -15,9 +17,13 @@ export function approvalPendingCondition(userId: string) {
     WHERE current_node.id=${requests.currentNodeId} AND current_node.request_id=${requests.id}
     AND current_node.status IN ('待审批','会签中')
     AND (${requests.businessType}<>'office' OR current_node.office_revision=${requests.officeRevision})
+    AND (${requests.applicantUserId}<>${userId} OR (${requests.businessType}='project_stage'
+      AND current_node.name=${ADMIN_SELF_APPROVAL_NODE_NAME} AND JSON_LENGTH(current_node.approver_user_ids)=1
+      AND EXISTS (SELECT 1 FROM ${users} current_actor WHERE current_actor.id=${userId} AND current_actor.status='启用' AND current_actor.role='系统管理员')
+      AND EXISTS (SELECT 1 FROM ${projects} admin_project WHERE admin_project.id=${requests.projectId} AND admin_project.workflow_model='fde-v1')))
     AND JSON_CONTAINS(current_node.approver_user_ids,JSON_QUOTE(${userId}))
     AND NOT JSON_CONTAINS(current_node.approved_by_user_ids,JSON_QUOTE(${userId})))`
-  return and(eq(requests.status, '审批中'), ne(requests.applicantUserId, userId), pendingNode,
+  return and(eq(requests.status, '审批中'), projectApprovalOperableCondition(), pendingNode,
     or(ne(requests.businessType, 'office'), officeCurrentNodeCondition(userId)))!
 }
 
@@ -65,7 +71,7 @@ export async function listApprovalCenter(userId: string, raw: unknown, scope: 'a
     const terminal = inArray(requests.status, ['已通过', '已拒绝', '已驳回', '已撤回'])
     const views: Record<ApprovalCenterView, SQL> = {
       pending,
-      tracking: and(ne(requests.status, '草稿'), not(terminal), not(pending))!,
+      tracking: and(ne(requests.status, '草稿'), not(terminal), not(pending), projectApprovalOperableCondition())!,
       processed: sql<boolean>`EXISTS (SELECT 1 FROM ${records} processed WHERE processed.request_id=${requests.id}
         AND processed.operator_user_id=${userId} AND processed.action IN ('同意','退回','拒绝'))`,
       mine: eq(requests.applicantUserId, userId),

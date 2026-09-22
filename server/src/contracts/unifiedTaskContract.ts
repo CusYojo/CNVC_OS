@@ -56,6 +56,7 @@ export type UnifiedTask = {
   rawStatus: string
   primaryAction: UnifiedTaskPrimaryAction
   primaryActionLabel: string
+  approvalRequestId?: string | null
   project: { id: string; name: string } | null
   owner: UnifiedTaskPerson
   participants: UnifiedTaskPerson[]

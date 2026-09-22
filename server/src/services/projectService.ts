@@ -41,6 +41,7 @@ import { prepareFdeCreationGovernance } from './fdeGovernanceService.js'
 import type { FdeCreationAssignment } from './fdeGovernanceService.js'
 import { canDirectlyDeleteProject } from '../contracts/adminRoleContract.js'
 import { isEnabledSystemAdmin } from './systemAdminAccessService.js'
+import { closeDeletedProjectApprovals } from './oaProjectLifecycleService.js'
 
 const STAGES = ['线索', '初筛', '立项', '尽调', '上会', '投决', '投后', '退出'] as const
 const ARTIFACT_ROOT = path.resolve(
@@ -672,6 +673,7 @@ export async function deleteProject(id: string, userId: string, input?: { confir
     const [accessible] = await tx.select({ id: projects.id }).from(projects).where(and(eq(projects.id, id), projectAccessCondition({ uid: actor.id, name: actor.name, role: actor.role })))
     if (!accessible && !canDeleteWithHistory) throw Object.assign(new Error('无权删除该项目'), { status: 403, code: 'PROJECT_FORBIDDEN' })
     if (canDeleteWithHistory) {
+      await closeDeletedProjectApprovals(tx, project.id, actor)
       await tx.update(projects).set({ lifecycle: 'deleted', pinned: false, version: sql`${projects.version} + 1`, updatedAt: new Date() }).where(eq(projects.id, id))
       await tx.update(todos).set({ status: '已关闭', closureReason: '所属项目已删除', version: sql`${todos.version} + 1` }).where(and(
         eq(todos.projectId, id),

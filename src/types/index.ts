@@ -189,6 +189,8 @@ export interface ApprovalRecord {
 }
 
 export interface ApprovalRequest {
+  actionBlockedReason?: string
+  projectLifecycle?: ProjectLifecycle
   businessType?: 'project_stage' | 'task_extension' | 'agent_schedule' | 'project_replan'
   taskId?: string | null
   businessPayload?: { originalDueDate?: string; requestedDueDate?: string }

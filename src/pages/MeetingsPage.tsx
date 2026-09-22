@@ -8,6 +8,7 @@ import { apiGet, apiPost } from '../lib/api'
 import { useAuthStore } from '../store/useAuthStore'
 import type { Meeting, ProjectFile } from '../types'
 import { addShanghaiDaysDateKey, formatShanghaiDateTime, shanghaiDateTimeInputValue } from '../lib/dateTime'
+import { acknowledgeNotice, clearSentMeetingDraft, meetingSelection, updateMeetingDraft, type MeetingDraft } from '../lib/meetingWorkspace'
 
 type MeetingTodoSuggestion = {
   title: string
@@ -51,7 +52,8 @@ function readFileBase64(file: File) {
 
 export function MeetingsPage() {
   const navigate = useNavigate()
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const requestedMeetingId = searchParams.get('meeting')
   const projects = useAppStore((state) => state.projects)
   const meetings = useAppStore((state) => state.meetings)
   const addMeeting = useAppStore((state) => state.addMeeting)
@@ -61,13 +63,20 @@ export function MeetingsPage() {
   const { showToast } = useToast()
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState('')
-  const [selectedId, setSelectedId] = useState<string | undefined>(searchParams.get('meeting') ?? meetings[0]?.id)
+  const [meetingLoad, setMeetingLoad] = useState<{ id: string; loading: boolean; error: string; meeting?: Meeting } | null>(null)
+  const [meetingReload, setMeetingReload] = useState(0)
+  const setSelectedId = (id: string | undefined) => setSearchParams(previous => {
+    const next = new URLSearchParams(previous)
+    if (id) next.set('meeting', id)
+    else next.delete('meeting')
+    next.delete('project')
+    return next
+  })
   const [showNew, setShowNew] = useState(!!searchParams.get('project'))
   const [generating, setGenerating] = useState(false)
   const [members, setMembers] = useState<ProjectMember[]>([])
   const [membersLoading, setMembersLoading] = useState(false)
-  const [contributionText, setContributionText] = useState('')
-  const [contributionFiles, setContributionFiles] = useState<File[]>([])
+  const [contributionDrafts, setContributionDrafts] = useState<Record<string, MeetingDraft>>({})
   const [preMeetingFiles, setPreMeetingFiles] = useState<File[]>([])
   const [contributing, setContributing] = useState(false)
   const [minutesOpen, setMinutesOpen] = useState(false)
@@ -92,7 +101,30 @@ export function MeetingsPage() {
     rawText: '',
   })
   const filtered = useMemo(() => meetings.filter((meeting) => (!query || `${meeting.title}${meeting.projectName}`.includes(query)) && (!status || meeting.status === status)), [meetings, query, status])
-  const selected = meetings.find((meeting) => meeting.id === selectedId) ?? filtered[0]
+  const loadedTarget = meetingLoad?.id === requestedMeetingId ? meetingLoad : null
+  const selected = requestedMeetingId
+    ? loadedTarget && !loadedTarget.loading && !loadedTarget.error ? meetingSelection(meetings, requestedMeetingId) ?? loadedTarget.meeting : undefined
+    : meetingSelection(filtered, null)
+  const contributionDraft = selected ? contributionDrafts[selected.id] : undefined
+  const contributionText = contributionDraft?.text ?? ''
+  const contributionFiles = contributionDraft?.files ?? []
+  const setContributionText = (text: string) => { if (selected) setContributionDrafts(previous => updateMeetingDraft(previous, selected.id, { text, files: previous[selected.id]?.files ?? [] })) }
+  const setContributionFiles = (files: File[]) => { if (selected) setContributionDrafts(previous => updateMeetingDraft(previous, selected.id, { text: previous[selected.id]?.text ?? '', files })) }
+
+  useEffect(() => {
+    setMinutesOpen(false)
+    if (!requestedMeetingId) { setMeetingLoad(null); return }
+    let active = true
+    setMeetingLoad({ id: requestedMeetingId, loading: true, error: '' })
+    void apiGet<Meeting>(`/meetings/${encodeURIComponent(requestedMeetingId)}`).then(meeting => {
+      if (!active) return
+      setMeetingLoad({ id: requestedMeetingId, loading: false, error: '', meeting })
+      useAppStore.setState(state => ({ meetings: [meeting, ...state.meetings.filter(item => item.id !== meeting.id)] }))
+    }).catch(error => {
+      if (active) setMeetingLoad({ id: requestedMeetingId, loading: false, error: (error as Error).message })
+    })
+    return () => { active = false }
+  }, [requestedMeetingId, meetingReload])
 
   useEffect(() => {
     if (!form.projectId) { setMembers([]); return }
@@ -115,9 +147,9 @@ export function MeetingsPage() {
   useEffect(() => {
     if (!selected?.unreadNoticeId) return
     const noticeId = selected.unreadNoticeId
-    void apiPost(`/meetings/${selected.id}/notices/${noticeId}/read`, {}).then(() => {
-      useAppStore.setState((state) => ({ meetings: state.meetings.map((meeting) => meeting.id === selected.id ? { ...meeting, unreadNoticeId: null } : meeting) }))
-    }).catch(() => {})
+    void acknowledgeNotice(() => apiPost(`/meetings/${selected.id}/notices/${noticeId}/read`, {}), () => {
+      useAppStore.setState((state) => ({ meetings: state.meetings.map((meeting) => meeting.id === selected.id && meeting.unreadNoticeId === noticeId ? { ...meeting, unreadNoticeId: null } : meeting) }))
+    }).catch(() => showToast('会议已打开，提醒暂未标记已读，请稍后重试', 'error'))
   }, [selected?.id, selected?.unreadNoticeId])
 
   const generate = async () => {
@@ -254,7 +286,7 @@ export function MeetingsPage() {
         fileIds: uploaded.map((file) => file.id),
       })
       useAppStore.setState((state) => ({ meetings: state.meetings.map((meeting) => meeting.id === updated.id ? updated : meeting) }))
-      setContributionText(''); setContributionFiles([])
+      if (contributionDraft) setContributionDrafts(previous => clearSentMeetingDraft(previous, selected.id, contributionDraft))
       await hydrateFromServer().catch(() => {})
       showToast('会议想法和文件已同步给本场参会人员')
     } catch (error) {
@@ -363,10 +395,10 @@ export function MeetingsPage() {
               <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4"><div><h3 className="font-semibold text-slate-800">参会交流与会议文件</h3><p className="mt-1 text-xs text-slate-400">{selected.contributions?.length ?? 0} 条内容</p></div><UsersRound className="h-5 w-5 text-brand-500" /></div>
               <div className="divide-y divide-slate-100">{selected.contributions?.map((item) => <article key={item.id} className="p-5"><div className="flex items-center justify-between gap-3"><strong className="text-sm text-slate-700">{item.authorName}</strong><time className="text-xs text-slate-400">{formatShanghaiDateTime(item.createdAt)}</time></div>{item.content && <p className="mt-3 whitespace-pre-wrap text-sm leading-7 text-slate-600">{item.content}</p>}{item.files.length > 0 && <div className="mt-3 flex flex-wrap gap-2">{item.files.map((file) => <button key={file.id} className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600 hover:border-brand-200 hover:bg-brand-50" onClick={() => navigate(`/projects/${selected.projectId}?tab=files&file=${encodeURIComponent(file.id)}`)}><FileText className="h-3.5 w-3.5 text-brand-600" />{file.name}<span className="text-slate-400">V{file.version}</span></button>)}</div>}</article>)}</div>
               {!selected.contributions?.length && <p className="p-6 text-center text-sm text-slate-400">暂无参会交流或会议文件</p>}
-              {selected.canContribute && <div className="border-t border-slate-100 bg-slate-50/60 p-5"><label className="block"><span className="label">我的想法 / 会议纪要</span><textarea className="textarea mt-2 min-h-24 w-full bg-white" maxLength={4000} value={contributionText} onChange={(event) => setContributionText(event.target.value)} placeholder="填写观点、结论、补充说明或会议纪要" /></label><div className="mt-3 flex flex-wrap items-center justify-between gap-3"><label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-600 hover:border-brand-200"><Paperclip className="h-4 w-4" />选择文件<input className="sr-only" type="file" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.txt,.md,.csv" onChange={(event) => setContributionFiles(Array.from(event.target.files ?? []))} /></label><span className="min-w-0 flex-1 truncate text-xs text-slate-400">{contributionFiles.length ? `已选择 ${contributionFiles.length} 个：${contributionFiles.map((file) => file.name).join('、')}` : '支持 PDF、Office、图片及常见文本格式'}</span><Button loading={contributing} disabled={!contributionText.trim() && !contributionFiles.length} onClick={() => { void submitContribution() }}><UploadCloud className="h-4 w-4" />发布给参会人员</Button></div></div>}
+              {selected.canContribute && <div className="border-t border-slate-100 bg-slate-50/60 p-5"><label className="block"><span className="label">我的想法 / 会议纪要</span><textarea className="textarea mt-2 min-h-24 w-full bg-white" maxLength={4000} value={contributionText} onChange={(event) => setContributionText(event.target.value)} placeholder="填写观点、结论、补充说明或会议纪要" /></label><div className="mt-3 flex flex-wrap items-center justify-between gap-3"><label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-600 hover:border-brand-200"><Paperclip className="h-4 w-4" />选择文件<input key={selected.id} className="sr-only" type="file" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.txt,.md,.csv" onChange={(event) => setContributionFiles(Array.from(event.target.files ?? []))} /></label><span className="min-w-0 flex-1 truncate text-xs text-slate-400">{contributionFiles.length ? `已选择 ${contributionFiles.length} 个：${contributionFiles.map((file) => file.name).join('、')}` : '支持 PDF、Office、图片及常见文本格式'}</span><Button loading={contributing} disabled={!contributionText.trim() && !contributionFiles.length} onClick={() => { void submitContribution() }}><UploadCloud className="h-4 w-4" />发布给参会人员</Button></div></div>}
             </Card>
           </div>
-        ) : <Card className="grid place-items-center text-sm text-slate-400">请选择一场会议</Card>}
+        ) : <Card className="grid place-items-center p-6 text-sm text-slate-500"><div className="space-y-3 text-center"><p role={loadedTarget?.error ? 'alert' : undefined}>{loadedTarget?.error || (requestedMeetingId ? '正在读取会议…' : '请选择一场会议')}</p>{loadedTarget?.error && <Button variant="secondary" onClick={() => setMeetingReload(value => value + 1)}>重新读取会议</Button>}</div></Card>}
       </div>
 
       <Modal open={showNew} onClose={() => !generating && setShowNew(false)} title="发起项目会议" width="max-w-4xl" footer={<><Button variant="secondary" onClick={() => setShowNew(false)}>取消</Button><Button loading={generating} disabled={membersLoading} onClick={generate}>发起会议并提醒成员</Button></>}>

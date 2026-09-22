@@ -71,7 +71,7 @@ test('entry uses fresh authorized scope, role-specific views and guarded canonic
   assert.match(page, /\['admin', 'coordinator'\]\.includes/)
   assert.match(task, /if \(allowed\) open\(action as Mode, task\)/)
   assert.match(task, /expectedVersion/)
-  assert.match(task, /task\.capabilities\.canAccept/)
+  assert.match(task, /canPerformTaskAction\(action, task\)/)
   assert.match(read('src/components/FdeCollaborationWeekly.tsx'), /PrimaryAction/)
   assert.doesNotMatch(read('src/components/FdeCollaborationWeekly.tsx'), /localStorage/)
 })

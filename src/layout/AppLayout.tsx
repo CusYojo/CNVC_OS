@@ -36,6 +36,13 @@ import { isAiPlatformAdminRole, isSystemAdminRole } from '../../server/src/contr
 import { apiGet, apiPost } from '../lib/api'
 import { useToast } from '../components/Toast'
 import type { Meeting, Todo } from '../types'
+import { ApprovalWorkspaceHost } from '../components/ApprovalWorkspaceHost'
+import { TaskActionHost } from '../components/TaskActionHost'
+import { APPROVAL_CHANGED, openApprovalPath } from '../lib/approvalWorkspace'
+import { openTaskPath } from '../lib/taskWorkspace'
+import { WorkbenchQuote } from '../components/WorkbenchQuote'
+import '../components/WorkbenchQuote.css'
+import { acknowledgeNotice, hasUnreadDirective } from '../lib/meetingWorkspace'
 
 type MessageItem = {
   id: string
@@ -47,6 +54,7 @@ type MessageItem = {
   readPath?: string
   meetingId?: string
   todoId?: string
+  noticeId?: string
 }
 
 const primaryNav = [
@@ -54,7 +62,7 @@ const primaryNav = [
   { to: '/ai', label: 'AI 智能助手', icon: Bot },
   { to: '/projects', label: '项目中心', icon: FolderKanban },
   { to: '/collaboration', label: '任务与日历', icon: BriefcaseBusiness },
-  { to: '/workflow', label: '审批与办公', icon: ClipboardCheck },
+  { to: '/workflow', label: '申请与记录', icon: ClipboardCheck },
   { to: '/knowledge', label: '知识库', icon: BookOpen },
 ]
 const navSections = [
@@ -140,11 +148,12 @@ export function AppLayout() {
   const notifications = useAppStore((state) => state.notifications)
   const approvalMessages: MessageItem[] = approvalRequests.filter(request => {
     if (request.status !== '审批中') return false
+    if (request.actionBlockedReason || request.projectLifecycle && request.projectLifecycle !== 'active') return false
     const currentNode = request.nodes.find(node => node.id === request.currentNodeId) ?? request.nodes.find(node => ['待审批', '会签中'].includes(node.status))
     return currentNode?.approverUserIds?.includes(currentUser.id)
   }).map(request => ({ id: `approval:${request.id}`, kind: '审批', title: request.title, detail: `${request.projectName} · ${request.currentNodeName}`, path: `/workflow?view=project&project=${request.projectId}&request=${request.id}`, priority: request.priority === '紧急' ? 0 : 1 }))
   const warningMessages: MessageItem[] = risks.filter(risk => risk.level === '高' && !['已关闭', '误报'].includes(risk.status)).map(risk => ({ id: `risk:${risk.id}`, kind: '预警', title: risk.type, detail: `${risk.projectName} · ${risk.description}`, path: `/risks?project=${risk.projectId}`, priority: 0 }))
-  const directiveMessages: MessageItem[] = todos.filter(item => item.directiveId && item.directiveNoticeId && !['已完成', '已关闭', '已取消', '已归档'].includes(item.status)).map(item => ({ id: `directive:${item.directiveNoticeId}`, kind: '批示', title: item.title, detail: `${item.projectName || '项目'} · ${item.owner || '待接办'}`, path: item.projectId ? `/projects/${item.projectId}?tab=collaboration&directive=${item.directiveId}` : '/collaboration', priority: item.priority === '高' ? 0 : 1, readPath: `/projects/${item.projectId}/directive-notices/${item.directiveNoticeId}/read`, todoId: item.id }))
+  const directiveMessages: MessageItem[] = todos.filter(hasUnreadDirective).map(item => ({ id: `directive:${item.directiveNoticeId}`, kind: '批示', title: item.title, detail: `${item.projectName || '项目'} · ${item.owner || '待接办'} · ${item.status}`, path: item.projectId ? `/projects/${item.projectId}?tab=collaboration&directive=${item.directiveId}` : '/collaboration', priority: item.priority === '高' ? 0 : 1, readPath: `/projects/${item.projectId}/directive-notices/${item.directiveNoticeId}/read`, todoId: item.id, noticeId: item.directiveNoticeId ?? undefined }))
   const collaborationMessages: MessageItem[] = todos.filter(item => item.ownerUserId === currentUser.id && item.type === '通知' && !['已完成', '已关闭', '已取消', '已归档'].includes(item.status)).map(item => ({ id: `interaction:${item.id}`, kind: '协作', title: item.title, detail: item.projectName || '协作消息', path: item.projectId ? `/projects/${item.projectId}?tab=collaboration` : '/collaboration', priority: item.priority === '高' ? 0 : 2 }))
   const meetingMessages: MessageItem[] = meetings.filter(item => item.unreadNoticeId).map(item => ({ id: `meeting:${item.id}`, kind: '会议', title: item.title, detail: `${item.projectName} · ${item.meetingTime.slice(0, 16).replace('T', ' ')}`, path: `/meetings?meeting=${item.id}`, priority: 1, readPath: `/meetings/${item.id}/notices/${item.unreadNoticeId}/read`, meetingId: item.id }))
   const storedMessages: MessageItem[] = notifications.filter(item => !item.isRead).map(item => ({ id: `notice:${item.id}`, kind: item.type || '消息', title: item.title, detail: item.content, path: '/collaboration', priority: 2 }))
@@ -154,13 +163,15 @@ export function AppLayout() {
       : location.pathname === '/responsibility' ? '知识库'
         : primaryNav.find(item => item.to === '/' ? location.pathname === '/' : location.pathname.startsWith(item.to))?.label ?? '投资工作空间'
   const query = search.trim().toLowerCase()
+  const showWorkbenchQuote = location.pathname === '/' || location.pathname === '/projects/boss-dashboard'
   const matchedProjects = query ? projects.filter(item => item.lifecycle !== 'deleted' && `${item.name} ${item.companyName}`.toLowerCase().includes(query)).slice(0, 8) : []
   const matchedFiles = query ? files.filter(item => item.name.toLowerCase().includes(query)).slice(0, 8) : []
-  const openResult = (path: string) => { setShowSearch(false); setShowNotifications(false); setShowProfile(false); navigate(path) }
+  const openResult = (path: string) => { setShowSearch(false); setShowNotifications(false); setShowProfile(false); if (!openApprovalPath(path) && !openTaskPath(path)) navigate(path) }
   const openMessage = (item: MessageItem) => {
-    if (item.meetingId) useAppStore.setState((state) => ({ meetings: state.meetings.map(meeting => meeting.id === item.meetingId ? { ...meeting, unreadNoticeId: null } : meeting) }))
-    if (item.todoId) useAppStore.setState((state) => ({ todos: state.todos.map(todo => todo.id === item.todoId ? { ...todo, directiveNoticeId: null } : todo) }))
-    if (item.readPath) void apiPost(item.readPath, {}).catch(() => {})
+    // Meeting reminders are acknowledged only after the requested meeting opens.
+    if (item.readPath && !item.meetingId) void acknowledgeNotice(() => apiPost(item.readPath!, {}), () => {
+      if (item.todoId) useAppStore.setState((state) => ({ todos: state.todos.map(todo => todo.id === item.todoId && todo.directiveNoticeId === item.noticeId ? { ...todo, directiveNoticeId: null } : todo) }))
+    }).catch(() => showToast('提醒暂未标记已读，请稍后重试', 'error'))
     openResult(item.path)
   }
   const changePassword = async () => {
@@ -222,11 +233,11 @@ export function AppLayout() {
     const onFocus = () => { void refreshMessages() }
     void refreshMessages()
     const timer = window.setInterval(refreshMessages, 30_000)
-    window.addEventListener('focus', onFocus)
+    window.addEventListener('focus', onFocus); window.addEventListener(APPROVAL_CHANGED, onFocus)
     return () => {
       active = false
       window.clearInterval(timer)
-      window.removeEventListener('focus', onFocus)
+      window.removeEventListener('focus', onFocus); window.removeEventListener(APPROVAL_CHANGED, onFocus)
     }
   }, [currentUser.id])
   useEffect(() => {
@@ -273,7 +284,7 @@ export function AppLayout() {
       <div className="fde-main-column">
         <header className="fde-topbar">
           <button ref={mobileMenuButtonRef} className="fde-icon-button fde-mobile-menu-button" aria-label="打开主导航" aria-controls="mobile-navigation" aria-expanded={mobileNavigationOpen} onClick={() => setMobileNavigationOpen(true)}><Menu /></button>
-          <div className="fde-breadcrumb"><strong>{pageTitle}</strong></div>
+          <div className={`fde-breadcrumb${showWorkbenchQuote ? ' fde-breadcrumb-quote' : ''}`}>{showWorkbenchQuote ? <><span className="sr-only">工作台</span><WorkbenchQuote /></> : <strong>{pageTitle}</strong>}</div>
           <button className="fde-global-search" onClick={() => setShowSearch(true)}><Search /><span>搜索项目、文件…</span><kbd>⌘ K</kbd></button>
           <div className="fde-top-actions">
             <button className="fde-quick-create" onClick={() => setShowCreate(true)}><Plus /><span>快速新建</span></button>
@@ -330,6 +341,8 @@ export function AppLayout() {
           <p className="text-xs leading-5 text-slate-500">至少 14 位，包含大小写字母、数字和符号。修改后需要重新登录。</p>
         </div>
       </Modal>
+      <ApprovalWorkspaceHost />
+      <TaskActionHost />
       <UnifiedProjectCreateModal open={showCreate} onClose={() => setShowCreate(false)} />
     </div>
   )

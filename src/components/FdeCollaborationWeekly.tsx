@@ -1,6 +1,8 @@
+import { openTaskAction } from '../lib/taskWorkspace'
+import { subscribeWorkspaceRefresh } from '../lib/workspaceRefresh'
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { apiGet, apiPost } from '../lib/api'
+import { apiGet } from '../lib/api'
 import type { Project } from '../types'
 import {
   collaborationDeadlineGroups, mapCollaborationProjects, taskDeadlineGroup, weeklyActions,
@@ -9,7 +11,6 @@ import {
 import { Button } from './ui'
 import { normalizeTaskStatus, taskPrimaryAction, type UnifiedTaskPrimaryAction } from '../../server/src/contracts/unifiedTaskContract'
 import { MoreActions, PrimaryAction, StatusBadge, TaskDrawer, TaskSourceBadge } from './task/TaskSystem'
-import { useToast } from './Toast'
 import { useAuthStore } from '../store/useAuthStore'
 
 type PlanBoard = { canDraft: boolean; canPublish: boolean; plans: Array<{ revision: number; status: string; items: Array<{ taskId: string | null; needLeader: boolean; leaderTimeSource: unknown }> }> }
@@ -17,11 +18,9 @@ type PlanBoard = { canDraft: boolean; canPublish: boolean; plans: Array<{ revisi
 export function FdeCollaborationWeekly({ projects, week, onPlan }: { projects: Project[]; week: string; onPlan: (projectId: string) => void }) {
   const navigate = useNavigate()
   const userId = useAuthStore(state => state.user?.id ?? '')
-  const { showToast } = useToast()
   const [data, setData] = useState<{ actions: CollaborationAction[]; managers: Project[] } | null>(null)
   const [error, setError] = useState(''), [revision, setRevision] = useState(0)
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
-  const [busyTaskId, setBusyTaskId] = useState('')
   useEffect(() => {
     let current = true
     setData(null); setError('')
@@ -36,19 +35,17 @@ export function FdeCollaborationWeekly({ projects, week, onPlan }: { projects: P
     return () => { current = false }
   }, [projects, week, revision, userId])
 
+  useEffect(() => subscribeWorkspaceRefresh(() => setRevision(value => value + 1)), [])
   const items = weeklyActions(data?.actions ?? [], week, 'date')
-  const taskLink = (item: CollaborationAction, action?: string) => navigate(`/projects/${item.projectId}?tab=tasks&task=${item.id}${action ? `&action=${action}` : ''}`)
+  const taskLink = (item: CollaborationAction, action = 'view') => openTaskAction(item.projectId, item.id, action)
   const primaryFor = async (item: CollaborationAction, action: UnifiedTaskPrimaryAction) => {
     if (action === 'not_started') {
-      setBusyTaskId(item.id)
-      try { await apiPost(`/projects/${item.projectId}/fde-tasks/${item.id}/start`, { expectedVersion: item.version }); setRevision(value => value + 1); showToast('任务已开始') }
-      catch (cause) { showToast((cause as Error).message, 'error') }
-      finally { setBusyTaskId('') }
+      taskLink(item, 'start')
       return
     }
     if (action === 'in_progress' || action === 'returned') taskLink(item, 'submission')
     else if (action === 'pending_acceptance') taskLink(item, 'accept')
-    else if (action === 'approval') navigate(`/workflow?view=project&project=${item.projectId}`)
+    else if (action === 'approval') taskLink(item)
     else setSelectedTaskId(item.id)
   }
   const moreFor = (item: CollaborationAction, action: string) => {
@@ -71,7 +68,7 @@ export function FdeCollaborationWeekly({ projects, week, onPlan }: { projects: P
           const enabled = primary.key === 'not_started' || primary.key === 'in_progress' || primary.key === 'returned' ? capabilities.canFeedback : primary.key === 'pending_acceptance' ? capabilities.canAccept : true
           const source = item.executionModel === 'approval' ? 'approval' : item.directiveId ? 'directive' : item.timelineSource ? 'workflow' : item.planActionId ? 'plan' : 'project'
           const more = [...(capabilities.canFeedback && status !== 'not_started' && status !== 'pending_acceptance' ? [{ key: 'feedback', label: '更新进度' }] : []), ...(capabilities.canExtend ? [{ key: 'extension', label: '申请延期' }] : []), { key: 'project', label: '打开项目' }, ...(capabilities.canCancel ? [{ key: 'cancel', label: '取消任务', danger: true }] : [])]
-          return <tr key={`${item.projectId}:${item.id}`} onClick={() => setSelectedTaskId(item.id)}><td><button type="button" className="fde-task-name" onClick={() => setSelectedTaskId(item.id)}><strong>{item.title}</strong><TaskSourceBadge source={source} /></button></td><td>{item.projectName}</td><td><time>{item.dueDate}{item.dueTime ? ` ${item.dueTime}` : ''}</time></td><td><StatusBadge status={status} /></td><td onClick={event => event.stopPropagation()}><div className="fde-task-current-action"><PrimaryAction action={primary.key} label={primary.label} disabled={!enabled || busyTaskId === item.id} loading={busyTaskId === item.id} onClick={() => enabled ? void primaryFor(item, primary.key) : setSelectedTaskId(item.id)} /><MoreActions actions={more} onAction={action => moreFor(item, action)} /></div></td></tr>
+          return <tr key={`${item.projectId}:${item.id}`} onClick={() => setSelectedTaskId(item.id)}><td><button type="button" className="fde-task-name" onClick={() => setSelectedTaskId(item.id)}><strong>{item.title}</strong><TaskSourceBadge source={source} /></button></td><td>{item.projectName}</td><td><time>{item.dueDate}{item.dueTime ? ` ${item.dueTime}` : ''}</time></td><td><StatusBadge status={status} /></td><td onClick={event => event.stopPropagation()}><div className="fde-task-current-action"><PrimaryAction action={primary.key} label={primary.label} disabled={!enabled} onClick={() => enabled ? void primaryFor(item, primary.key) : setSelectedTaskId(item.id)} /><MoreActions actions={more} onAction={action => moreFor(item, action)} /></div></td></tr>
         })}</tbody></table></div></section>
       })}{!items.length && <div className="fde-collab-state"><strong>本周暂无任务</strong></div>}</div>}
     </section>

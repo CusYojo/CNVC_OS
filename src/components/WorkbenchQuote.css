@@ -1,0 +1,24 @@
+.fde-topbar .fde-breadcrumb.fde-breadcrumb-quote { flex: 1; min-width: 0; max-width: 460px; overflow: visible; white-space: normal; }
+.fde-topbar:has(.fde-workbench-quote) .fde-global-search { width: clamp(150px, 24vw, 360px); }
+.fde-workbench-quote { display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0; height: 52px; }
+.fde-quote-viewport { position: relative; flex: 1; min-width: 0; height: 52px; overflow: hidden; }
+.fde-quote-content { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: center; gap: 2px; margin: 0; }
+.fde-quote-content > span { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; color: var(--brand-strong); font-size: 14px; font-weight: 550; line-height: 18px; text-wrap: pretty; }
+.fde-quote-controls { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
+.fde-quote-control { display: inline-grid; place-items: center; flex: 0 0 26px; width: 26px; height: 28px; border-radius: 8px; color: var(--ink-3); opacity: .55; background: transparent; }
+.fde-quote-control.fde-quote-next { display: inline-flex; justify-content: center; gap: 4px; flex-basis: auto; width: auto; padding: 0 6px; opacity: 1; color: var(--brand-strong); font-size: 12px; line-height: 1; white-space: nowrap; }
+.fde-workbench-quote:hover .fde-quote-control, .fde-workbench-quote:focus-within .fde-quote-control, .fde-quote-control[aria-pressed="true"] { opacity: 1; }
+.fde-quote-control:hover { color: var(--brand-strong); background: var(--brand-soft); }
+.fde-quote-control:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.fde-quote-content.is-entering { animation: fde-quote-in .6s cubic-bezier(.22,.7,.25,1) both; }
+.fde-quote-content.is-leaving { animation: fde-quote-out .4s ease both; pointer-events: none; }
+@keyframes fde-quote-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes fde-quote-out { from { opacity: 1; transform: translateY(0); } to { opacity: 0; transform: translateY(-8px); } }
+@media (max-width: 900px) {
+  .fde-topbar:has(.fde-workbench-quote) .fde-global-search { width: 40px; flex-shrink: 0; }
+  .fde-quote-control { flex-basis: 24px; width: 24px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fde-quote-content.is-entering, .fde-quote-content.is-leaving { animation: none; transform: none; }
+  .fde-quote-content.is-leaving { display: none; }
+}

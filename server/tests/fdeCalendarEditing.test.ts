@@ -38,6 +38,7 @@ test('workbench and task center share the editable calendar interaction', async 
   assert.match(routes, /calendarRouter\.post\('\/tasks\/:id\/cancel'/)
   assert.match(service, /createCalendarTask/)
   assert.match(service, /cancelPersonalCalendarTask/)
+  assert.ok(service.includes('`/projects/${row.projectId}?tab=tasks&task=${row.id}`'), 'calendar task sources retain the exact task ID')
   assert.match(service, /const meetingEnd = row\.endsAt \?\? new Date\(row\.startedAt\.getTime\(\) \+ 60 \* 60000\)/)
   assert.match(grid, /const normalizedItems = useMemo/)
   assert.doesNotMatch(grid, />\s*日期\/<br \/>截止|'日期 \/ 截止'/)

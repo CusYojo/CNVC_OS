@@ -1,7 +1,10 @@
 import { AlertCircle, CalendarDays, CheckCircle2, ChevronDown, CircleHelp, Clock3, FileText, FolderKanban, History, MessageSquareText, MoreHorizontal, Users } from 'lucide-react'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
-import { apiGet } from '../../lib/api'
+import { apiErrorFromResponse, apiGet } from '../../lib/api'
+import { authedFetch } from '../../store/useAuthStore'
+import { canPerformTaskAction, taskEvidencePath } from '../../lib/taskInteraction'
+import { useToast } from '../Toast'
 import {
   TASK_SOURCE_LABELS, TASK_STATUS_LABELS, normalizeTaskStatus, taskPrimaryAction,
   type UnifiedTask, type UnifiedTaskPrimaryAction, type UnifiedTaskSource, type UnifiedTaskStatus,
@@ -15,7 +18,7 @@ export type TaskPreview = {
   dueDate?: string | null; dueTime?: string | null; status: string; progress?: number
   deliverable?: string | null; source?: UnifiedTaskSource; directiveId?: string | null
   planActionId?: string | null; timelineSource?: { stage?: string } | null; executionModel?: string
-  capabilities?: { canFeedback?: boolean; canAccept?: boolean; canExtend?: boolean; canCancel?: boolean }
+  capabilities?: { canStart?: boolean; canSubmit?: boolean; canFeedback?: boolean; canAccept?: boolean; canExtend?: boolean; canCancel?: boolean }
 }
 
 function sourceOf(task: TaskPreview): UnifiedTaskSource {
@@ -69,9 +72,7 @@ export function TaskCard({ task, onOpen, onPrimaryAction, onMoreAction, busy, co
   const status = normalizeTaskStatus(task.status), source = sourceOf(task)
   const primary = taskPrimaryAction(status, source === 'approval')
   const capabilities = task.capabilities ?? {}
-  const enabled = primary.key === 'not_started' ? capabilities.canFeedback
-    : primary.key === 'in_progress' || primary.key === 'returned' ? capabilities.canFeedback
-      : primary.key === 'pending_acceptance' ? capabilities.canAccept : true
+  const enabled = canPerformTaskAction(primary.key, task)
   const more: TaskMoreAction[] = [
     ...(capabilities.canFeedback && status !== 'not_started' && status !== 'pending_acceptance' ? [{ key: 'feedback', label: '更新进度' }] : []),
     ...(capabilities.canExtend ? [{ key: 'extension', label: '申请延期' }] : []),
@@ -112,30 +113,64 @@ export function AuditDetails({ task }: { task: UnifiedTask }) {
   return <details className="task-audit"><summary><History />版本与操作记录 <span>V{task.version}</span><ChevronDown /></summary><ol>{task.history.map(item => <li key={item.id}><i /><div><strong>{item.title}</strong><time>{new Date(item.createdAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}</time>{item.detail && <p>{item.detail}</p>}</div></li>)}</ol>{!task.history.length && <p className="task-muted">暂无操作记录</p>}</details>
 }
 
-export function TaskDrawer({ taskId, open, onClose, onAction }: { taskId: string | null; open: boolean; onClose: () => void; onAction?: (action: string, task: UnifiedTask) => void }) {
+export function TaskEvidenceButton({ fileId, version, name, disabled = false }: { fileId: string; version: number; name: string; disabled?: boolean }) {
+  const { showToast } = useToast()
+  const [busy, setBusy] = useState(false)
+  const locked = useRef(false)
+  const path = taskEvidencePath(fileId, version)
+  const download = async () => {
+    if (!path || disabled || locked.current) return
+    locked.current = true; setBusy(true)
+    try {
+      const response = await authedFetch(path)
+      if (!response.ok) throw apiErrorFromResponse(response.status, await response.json().catch(() => null), response.headers.get('x-request-id'))
+      const url = URL.createObjectURL(await response.blob()), link = document.createElement('a')
+      link.href = url; link.download = name; document.body.appendChild(link); link.click(); link.remove()
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+    } catch (cause) { showToast((cause as Error).message, 'error') }
+    finally { locked.current = false; setBusy(false) }
+  }
+  return <button type="button" className="text-left text-sm text-brand-700 underline underline-offset-4 disabled:opacity-50" disabled={disabled || busy || !path} onClick={() => { void download() }}>{busy ? '正在读取…' : `${name} · 提交版本 ${version}`}</button>
+}
+
+export function TaskDrawer({ taskId, open, onClose, onAction, busy = false, refreshKey = 0, notice = '' }: { taskId: string | null; open: boolean; onClose: () => void; onAction?: (action: string, task: UnifiedTask) => void | Promise<void>; busy?: boolean; refreshKey?: number; notice?: string }) {
   const [task, setTask] = useState<UnifiedTask | null>(null), [error, setError] = useState(''), [revision, setRevision] = useState(0)
+  const resultsSection = useRef<HTMLElement>(null), historySection = useRef<HTMLDivElement>(null)
   useEffect(() => {
     if (!open || !taskId) return
     let current = true
     setTask(null); setError('')
     void apiGet<UnifiedTask>(`/tasks/${taskId}`).then(value => { if (current) setTask(value) }).catch(cause => { if (current) setError((cause as Error).message) })
     return () => { current = false }
-  }, [open, taskId, revision])
+  }, [open, taskId, revision, refreshKey])
   const more: TaskMoreAction[] = task ? [
-    ...(task.capabilities.canFeedback && task.status !== 'not_started' && task.status !== 'pending_acceptance' ? [{ key: 'feedback', label: '更新进度' }] : []),
-    ...(task.capabilities.canExtend ? [{ key: 'extension', label: '申请延期' }] : []),
+    ...(canPerformTaskAction('feedback', task) && task.status !== 'not_started' ? [{ key: 'feedback', label: '更新进度' }] : []),
+    ...(canPerformTaskAction('extension', task) ? [{ key: 'extension', label: '申请延期' }] : []),
     ...(task.project ? [{ key: 'project', label: '打开项目' }] : []),
-    ...(task.capabilities.canCancel ? [{ key: 'cancel', label: '删除任务', danger: true }] : []),
+    ...(canPerformTaskAction('cancel', task) ? [{ key: 'cancel', label: '删除任务', danger: true }] : []),
   ] : []
-  return <Drawer open={open} onClose={onClose} title="任务详情" width="w-[min(620px,100vw)]" footer={task ? <><MoreActions actions={more} onAction={action => onAction?.(action, task)} /><PrimaryAction action={task.primaryAction} label={task.primaryActionLabel} onClick={() => onAction?.(task.primaryAction, task)} /></> : undefined}>
+  const allowed = task ? canPerformTaskAction(task.primaryAction, task) : false
+  const readonlyLabel = task?.status === 'pending_acceptance' ? '等待有权人员验收' : task?.status === 'not_started' || task?.status === 'in_progress' || task?.status === 'returned' ? '由负责人处理' : '仅查看'
+  const perform = (action: string) => {
+    if (busy || !task || !canPerformTaskAction(action, task)) return
+    if (action === 'completed') { resultsSection.current?.scrollIntoView({ block: 'start', behavior: 'smooth' }); return }
+    if (action === 'cancelled') {
+      const details = historySection.current?.querySelector('details')
+      if (details) details.open = true
+      historySection.current?.scrollIntoView({ block: 'start', behavior: 'smooth' }); return
+    }
+    void onAction?.(action, task)
+  }
+  return <Drawer open={open} onClose={() => { if (!busy) onClose() }} title="任务详情" width="w-[min(620px,100vw)]" footer={task ? <><MoreActions actions={more.map(action => ({ ...action, disabled: busy || !onAction }))} onAction={perform} />{allowed ? <PrimaryAction action={task.primaryAction} label={task.primaryActionLabel} disabled={busy || (!onAction && !['completed', 'cancelled'].includes(task.primaryAction))} loading={busy} onClick={() => perform(task.primaryAction)} /> : <span className="text-sm text-slate-500">{readonlyLabel}</span>}</> : undefined}>
+    {notice && <p role="alert" className="mb-4 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">{notice}</p>}
     {error && <ErrorState message={error} onRetry={() => setRevision(value => value + 1)} />}
     {!task && !error && <div className="task-drawer-loading"><span />正在读取任务…</div>}
     {task && <div className="task-drawer-content">
-      <header><div className="task-card-badges"><StatusBadge status={task.status} /><TaskSourceBadge source={task.source} /></div><h2>{task.title}</h2>{task.project && <Link to={`/projects/${task.project.id}?tab=tasks`} onClick={onClose}><FolderKanban />{task.project.name}</Link>}</header>
+      <header><div className="task-card-badges"><StatusBadge status={task.status} /><TaskSourceBadge source={task.source} /></div><h2>{task.title}</h2>{task.project && <Link to={`/projects/${task.project.id}?tab=tasks`} aria-disabled={busy} onClick={event => { if (busy) event.preventDefault(); else onClose() }}><FolderKanban />{task.project.name}</Link>}</header>
       <section className="task-detail-grid"><div><span>负责人</span><strong>{task.owner.name}</strong></div><div><span>截止时间</span><strong>{task.dueDate ? `${task.dueDate}${task.dueTime ? ` ${task.dueTime}` : ''}` : '未设置'}</strong></div><div className="wide"><span>参与人员</span><strong>{task.participants.map(person => person.name).join('、') || '仅负责人'}</strong></div>{task.calendar && !task.calendar.hidden && <div className="wide"><span>日历安排</span><strong>{new Date(task.calendar.startsAt).toLocaleString('zh-CN')} — {new Date(task.calendar.endsAt).toLocaleString('zh-CN')}</strong></div>}</section>
       <section className="task-detail-section"><h3><FileText />交付要求</h3><p>{task.deliverable || '未设置交付要求'}</p></section>
-      <section className="task-detail-section"><h3><MessageSquareText />反馈与成果</h3>{task.feedbacks.map(item => <article key={item.id}><div><strong>{item.kind === 'submission' ? '成果提交' : '进度更新'} · {item.progress}%</strong><time>{new Date(item.submittedAt).toLocaleString('zh-CN')}</time></div><p>{item.result}</p>{item.blocker && <p className="task-blocker">阻塞：{item.blocker}</p>}{item.evidence.length > 0 && <ul>{item.evidence.map(file => <li key={`${file.fileId}:${file.version}`}><FileText />{file.name} V{file.version}</li>)}</ul>}{item.acceptance && <p className="task-acceptance">{item.acceptance.decision === 'accept' ? '验收通过' : '验收退回'}：{item.acceptance.reason}</p>}</article>)}{!task.feedbacks.length && <p className="task-muted">尚无反馈或成果</p>}</section>
-      <AuditDetails task={task} />
+      <section className="task-detail-section" ref={resultsSection}><h3><MessageSquareText />反馈与成果</h3>{task.feedbacks.map(item => <article key={item.id}><div><strong>{item.kind === 'submission' ? '成果提交' : '进度更新'} · {item.progress}%</strong><time>{new Date(item.submittedAt).toLocaleString('zh-CN')}</time></div><p>{item.result}</p>{item.blocker && <p className="task-blocker">阻塞：{item.blocker}</p>}{item.evidence.length > 0 && <ul>{item.evidence.map(file => <li key={`${file.fileId}:${file.version}`}><FileText /><TaskEvidenceButton {...file} disabled={busy} /></li>)}</ul>}{item.acceptance && <p className="task-acceptance">{item.acceptance.decision === 'accept' ? '验收通过' : '验收退回'}：{item.acceptance.reason}</p>}</article>)}{!task.feedbacks.length && <p className="task-muted">尚无反馈或成果</p>}</section>
+      <div ref={historySection}><AuditDetails task={task} /></div>
     </div>}
   </Drawer>
 }

@@ -1,11 +1,10 @@
-import { useEffect } from 'react'
+import { lazy, Suspense, useEffect } from 'react'
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { AppLayout } from './layout/AppLayout'
 import { AiErrorBoundary } from './components/AiErrorBoundary'
 import { useAuthStore } from './store/useAuthStore'
 import { useAppStore } from './store/useAppStore'
 import { LoginPage } from './pages/LoginPage'
-import { DashboardPage } from './pages/DashboardPage'
 import { ProjectCenterPage } from './pages/ProjectCenterPage'
 import { ProjectDetailPage } from './pages/ProjectDetailPage'
 import { LeadDetailPage } from './pages/LeadDetailPage'
@@ -27,6 +26,11 @@ import { PersonalWeixinAiPage } from './pages/PersonalWeixinAiPage'
 import { NotFoundPage } from './pages/NotFoundPage'
 import { isAiPlatformAdminRole, isSystemAdminRole } from '../server/src/contracts/adminRoleContract'
 import { legacySourcingRedirectTarget } from './lib/leadPoolFilters'
+import { EXECUTIVE_DASHBOARD_PATH } from './lib/executiveDashboard'
+import { APPROVAL_CHANGED } from './lib/approvalWorkspace'
+import { TASK_CHANGED } from './lib/taskWorkspace'
+
+const ExecutiveDashboardPage = lazy(() => import('./pages/ExecutiveDashboardPage').then(module => ({ default: module.ExecutiveDashboardPage })))
 
 function ProtectedLayout() {
   const authenticated = useAuthStore((state) => state.isAuthenticated)
@@ -35,6 +39,15 @@ function ProtectedLayout() {
   if (!initialized) return <div className="grid min-h-screen place-items-center text-sm text-slate-500">正在恢复登录状态…</div>
   if (!authenticated) return <Navigate to="/login" state={{ from: location }} replace />
   return <AppLayout />
+}
+
+function WorkspaceHome() {
+  return <Suspense fallback={<div role="status" className="p-5 text-sm text-slate-500">正在打开工作台…</div>}><ExecutiveDashboardPage /></Suspense>
+}
+
+function LegacyExecutiveHome() {
+  const location = useLocation()
+  return <Navigate to={{ pathname: '/', search: location.search, hash: location.hash }} replace />
 }
 
 function SystemAdminOnly({ children }: { children: React.ReactNode }) {
@@ -72,10 +85,14 @@ export default function App() {
     const refresh = () => { if (document.visibilityState === 'visible') void refreshProjectDomain() }
     const timer = window.setInterval(refresh, 15_000)
     window.addEventListener('focus', refresh)
+    window.addEventListener(APPROVAL_CHANGED, refresh)
+    window.addEventListener(TASK_CHANGED, refresh)
     document.addEventListener('visibilitychange', refresh)
     return () => {
       window.clearInterval(timer)
       window.removeEventListener('focus', refresh)
+      window.removeEventListener(APPROVAL_CHANGED, refresh)
+      window.removeEventListener(TASK_CHANGED, refresh)
       document.removeEventListener('visibilitychange', refresh)
     }
   }, [authenticated, refreshProjectDomain])
@@ -83,7 +100,8 @@ export default function App() {
     <Routes>
       <Route path="/login" element={initialized && authenticated ? <Navigate to="/" replace /> : <LoginPage />} />
       <Route element={<ProtectedLayout />}>
-        <Route index element={<DashboardPage />} />
+        <Route index element={<WorkspaceHome />} />
+        <Route path={EXECUTIVE_DASHBOARD_PATH} element={<LegacyExecutiveHome />} />
         <Route path="/projects" element={<ProjectCenterPage />} />
         <Route path="/projects/:id" element={<ProjectDetailPage />} />
         <Route path="/sourcing" element={<SourcingRedirect />} />

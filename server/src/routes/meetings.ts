@@ -122,7 +122,7 @@ meetingsRouter.patch('/:id', async (req: AuthedRequest, res, next) => {
       ...(body.meetingTime !== undefined ? { startedAt: parseMeetingTime(body.meetingTime) } : {}),
       ...(body.meetingEndTime !== undefined ? { endsAt: body.meetingEndTime ? parseMeetingTime(body.meetingEndTime) : null } : {}),
     }
-    const row = await updateMeeting(existing.id, patch, expectedVersion)
+    const row = await updateMeeting(existing.id, patch, expectedVersion, req.user!.uid)
     res.json(await presentMeeting(row, req.user!.uid))
   } catch (err) { next(err) }
 })

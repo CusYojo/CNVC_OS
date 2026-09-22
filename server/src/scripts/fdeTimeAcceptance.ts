@@ -124,7 +124,7 @@ try {
   await code(createMeeting(legacyInput,[],owner.id),'MEETING_TIME_CONFLICT')
   assert.equal((await db.select().from(meetings)).length,meetingCount)
   const legacy=await createMeeting({...legacyInput,startedAt:timeInstant(`${friday}T13:00`),endsAt:timeInstant(`${friday}T14:00`)},[],owner.id)
-  await code(updateMeeting(legacy.id,{startedAt:timeInstant(`${friday}T11:00`)},legacy.version),'MEETING_TIME_CONFLICT')
+  await code(updateMeeting(legacy.id,{startedAt:timeInstant(`${friday}T11:00`)},legacy.version,owner.id),'MEETING_TIME_CONFLICT')
   assert.equal((await meetingRow(legacy.id)).startedAt.toISOString(),legacy.startedAt.toISOString())
   const againstLegacy=await createLeaderTime(owner.id,{...createInput,clientRequestId:randomUUID(),preferredStart:`${friday}T13:00`,alternativeStart:`${friday}T16:00`})
   await act(againstLegacy.id,owner.id,'submit');await code(act(againstLegacy.id,leader.id,'confirm'),'TIME_CONFLICT')

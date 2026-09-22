@@ -1,14 +1,19 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { Link } from 'react-router-dom'
+import { notifyTaskChanged, openTaskAction } from '../lib/taskWorkspace'
+import { createLatestRequestGuard, subscribeWorkspaceRefresh } from '../lib/workspaceRefresh'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
 import { Check, Eye, NotebookPen, Pencil, Plus, RotateCcw, Trash2, X } from 'lucide-react'
 import { api, apiDelete, apiGet, apiPatch, apiPost } from '../lib/api'
 import { useAuthStore } from '../store/useAuthStore'
 import { formatShanghaiDate } from '../lib/dateTime'
 import { workbenchTone, type WorkbenchAttention, type WorkbenchData, type WorkbenchTone } from '../../server/src/contracts/fdeWorkbenchContract'
 import { FdeCalendarPanel } from '../components/FdeCalendarPanel'
+import { PersonalScheduleSidebar } from '../components/PersonalScheduleSidebar'
 import './DashboardPage.css'
 import './CollaborationPage.css'
 import { TaskDrawer } from '../components/task/TaskSystem'
+import { FdeApprovalInbox, useApprovalInbox } from '../components/FdeApprovalInbox'
+import { openApproval } from '../lib/approvalWorkspace'
 
 function Badge({ children, tone = 'neutral' }: { children: ReactNode; tone?: WorkbenchTone }) {
   return <span className={`badge ${tone}`}>{children}</span>
@@ -18,6 +23,9 @@ function Empty({ title = '当前没有待处理事项', note = '新的授权事�
 }
 function Panel({ title, children, to, action = '查看全部 →', count, className = '' }: { title: string; children: ReactNode; to?: string; action?: string; count?: number; className?: string }) {
   return <section className={`card ${className}`}><div className="card-head"><div><h2>{title}</h2></div>{to ? <Link className="button link" to={to}>{action}</Link> : count !== undefined ? <Badge tone={count ? 'warning' : 'neutral'}>{count} 项</Badge> : null}</div>{children}</section>
+}
+function WorkbenchLayout({ embedded, children }: { embedded: boolean; children: ReactNode }) {
+  return embedded ? <div className="dashboard-personal-layout">{children}</div> : <>{children}</>
 }
 function FocusList({ rows, showStatus = true }: { rows: WorkbenchAttention[]; showStatus?: boolean }) {
   return <div className="focus-list">{rows.length ? rows.map(row => <Link className="focus-row" to={row.to} key={row.id}><span className="focus-icon">{row.icon}</span><div><strong>{row.title}</strong><small>{row.detail}</small></div>{showStatus && row.status ? <Badge tone={workbenchTone(row.status)}>{row.status}</Badge> : <span aria-hidden="true">→</span>}</Link>) : <Empty />}</div>
@@ -62,31 +70,37 @@ function PersonalTodoPanel({ data, onOpenTask }: { data: WorkbenchData; onOpenTa
   const completionModeKey = `fde-dashboard-todo-completion-mode:${data.actorId}`
   const [todos, setTodos] = useState<PersonalTodo[]>([])
   const [draft, setDraft] = useState({ title: '', priority: '中' as PersonalTodo['priority'] })
-  const [editing, setEditing] = useState<{ id: string; title: string; priority: PersonalTodo['priority'] } | null>(null)
+  const [editing, setEditing] = useState<{ id: string; title: string; priority: PersonalTodo['priority']; version: number } | null>(null)
   const [completionMode, setCompletionMode] = useState<TodoCompletionMode>(() => {
     try { return localStorage.getItem(completionModeKey) === 'strike' ? 'strike' : 'hide' } catch { return 'hide' }
   })
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
+  const busyRef = useRef(false)
+  const reads = useRef(createLatestRequestGuard())
 
-  useEffect(() => {
-    let active = true
-    setLoading(true); setError('')
-    void Promise.all([
-      apiDelete<{ ok: true; archived: number }>(`/todos/personal/completed?before=${data.today}`).catch(() => null),
+  const reloadTodos = useCallback(async () => {
+    const current = reads.current.begin()
+    setLoading(true)
+    try {
+      const [open, recent] = await Promise.all([
         apiGet<{ list: PersonalTodo[] }>(`/todos?personal=true&dateTo=${lastDay}`),
         apiGet<{ list: PersonalTodo[] }>(`/todos?personal=true&includeCompleted=true&dateFrom=${data.today}&dateTo=${data.today}`),
       ])
-      .then(([, open, recent]) => {
-        if (active) setTodos([...new Map([...open.list, ...recent.list].map(todo => [todo.id, todo])).values()])
-      }).catch(cause => {
-      if (active) setError(cause instanceof Error ? cause.message : '个人事项加载失败')
-    }).finally(() => {
-      if (active) setLoading(false)
-    })
-    return () => { active = false }
+      if (current()) { setTodos([...new Map([...open.list, ...recent.list].map(todo => [todo.id, todo])).values()]); setError('') }
+    } catch (cause) {
+      if (current()) setError(cause instanceof Error ? cause.message : '个人事项加载失败')
+    } finally { if (current()) setLoading(false) }
   }, [data.actorId, data.today, lastDay])
+  useEffect(() => { void reloadTodos(); return () => reads.current.invalidate() }, [reloadTodos])
+  useEffect(() => subscribeWorkspaceRefresh(() => { void reloadTodos() }), [reloadTodos])
+  useEffect(() => {
+    let active = true
+    void apiDelete<{ ok: true; archived: number }>(`/todos/personal/completed?before=${data.today}`)
+      .then(result => { if (active && result.archived) notifyTaskChanged() }).catch(() => {})
+    return () => { active = false }
+  }, [data.actorId, data.today])
 
   useEffect(() => {
     try { setCompletionMode(localStorage.getItem(completionModeKey) === 'strike' ? 'strike' : 'hide') } catch { setCompletionMode('hide') }
@@ -109,7 +123,8 @@ function PersonalTodoPanel({ data, onOpenTask }: { data: WorkbenchData; onOpenTa
 
   const createTodo = async () => {
     const title = draft.title.trim()
-    if (!title || busy) return
+    if (!title || busyRef.current) return
+    busyRef.current = true
     setBusy('create'); setError('')
     try {
       const created = await apiPost<PersonalTodo>('/todos', {
@@ -123,56 +138,71 @@ function PersonalTodoPanel({ data, onOpenTask }: { data: WorkbenchData; onOpenTa
         type: '待办',
         status: '未开始',
       })
+      reads.current.invalidate()
       setTodos(current => [created, ...current.filter(todo => todo.id !== created.id)])
       setDraft(current => ({ ...current, title: '' }))
+      notifyTaskChanged()
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '新增待办失败')
-    } finally { setBusy('') }
+    } finally { busyRef.current = false; setBusy('') }
   }
 
   const saveTodo = async () => {
-    if (!editing || !editing.title.trim() || busy) return
+    if (!editing || !editing.title.trim() || busyRef.current) return
     const current = todos.find(todo => todo.id === editing.id)
     if (!current) return
+    if (current.version !== editing.version) { setError('待办已更新，请重新编辑最新内容'); return }
+    busyRef.current = true
     setBusy(editing.id); setError('')
     try {
       const updated = await apiPatch<PersonalTodo>(`/todos/${editing.id}`, {
-        expectedVersion: current.version,
+        expectedVersion: editing.version,
         title: editing.title.trim(),
         dueDate: current.dueDate,
         priority: editing.priority,
       })
+      reads.current.invalidate()
       setTodos(rows => rows.map(todo => todo.id === updated.id ? updated : todo))
       setEditing(null)
+      notifyTaskChanged()
     } catch (cause) {
+      await reloadTodos()
       setError(cause instanceof Error ? cause.message : '保存待办失败')
-    } finally { setBusy('') }
+    } finally { busyRef.current = false; setBusy('') }
   }
 
   const toggleTodoCompletion = async (todo: PersonalTodo) => {
-    if (busy) return
+    if (busyRef.current) return
+    busyRef.current = true
     setBusy(todo.id); setError('')
     try {
       const updated = await apiPatch<PersonalTodo>(`/todos/${todo.id}`, {
         expectedVersion: todo.version,
         status: todo.status === '已完成' ? '未开始' : '已完成',
       })
+      reads.current.invalidate()
       setTodos(rows => rows.map(row => row.id === updated.id ? updated : row))
+      notifyTaskChanged()
     } catch (cause) {
+      await reloadTodos()
       setError(cause instanceof Error ? cause.message : '更新待办失败')
-    } finally { setBusy('') }
+    } finally { busyRef.current = false; setBusy('') }
   }
 
   const removeTodo = async (todo: PersonalTodo) => {
-    if (busy || !window.confirm(`确定删除待办“${todo.title}”吗？`)) return
+    if (busyRef.current || !window.confirm(`确定删除待办“${todo.title}”吗？`)) return
+    busyRef.current = true
     setBusy(todo.id); setError('')
     try {
       await apiDelete(`/todos/${todo.id}`)
+      reads.current.invalidate()
       setTodos(rows => rows.filter(row => row.id !== todo.id))
       if (editing?.id === todo.id) setEditing(null)
+      notifyTaskChanged()
     } catch (cause) {
+      await reloadTodos()
       setError(cause instanceof Error ? cause.message : '删除待办失败')
-    } finally { setBusy('') }
+    } finally { busyRef.current = false; setBusy('') }
   }
 
   const renderTodo = (todo: PersonalTodo, historical = false) => {
@@ -180,12 +210,12 @@ function PersonalTodoPanel({ data, onOpenTask }: { data: WorkbenchData; onOpenTa
     if (!completed && editing?.id === todo.id) return <form className={`personal-todo-row editing${historical ? ' is-historical' : ''}`} key={todo.id} onSubmit={event => { event.preventDefault(); void saveTodo() }}>
       <input className="input todo-edit-title" aria-label="待办内容" maxLength={255} value={editing.title} onChange={event => setEditing({ ...editing, title: event.target.value })} autoFocus />
       <select className="input" aria-label="优先级" value={editing.priority} onChange={event => setEditing({ ...editing, priority: event.target.value as PersonalTodo['priority'] })}><option value="高">高</option><option value="中">中</option><option value="低">低</option></select>
-      <div className="todo-row-actions"><button className="todo-icon-button confirm" type="submit" aria-label="保存待办" title="保存" disabled={busy === todo.id || !editing.title.trim()}><Check size={16} /></button><button className="todo-icon-button" type="button" aria-label="取消编辑" title="取消" disabled={busy === todo.id} onClick={() => setEditing(null)}><X size={16} /></button></div>
+      <div className="todo-row-actions">{editing.version !== todo.version && <button className="button small" type="button" onClick={() => { setEditing({ id: todo.id, title: todo.title, priority: todo.priority, version: todo.version }); setError('') }}>重新编辑最新内容</button>}<button className="todo-icon-button confirm" type="submit" aria-label="保存待办" title="保存" disabled={Boolean(busy) || !editing.title.trim() || editing.version !== todo.version}><Check size={16} /></button><button className="todo-icon-button" type="button" aria-label="取消编辑" title="取消" disabled={Boolean(busy)} onClick={() => setEditing(null)}><X size={16} /></button></div>
     </form>
     return <div className={`personal-todo-row${historical ? ' is-historical' : ''}${completed ? ' is-completed' : ''}`} key={todo.id}>
       <button className={completed ? 'todo-completed-mark' : 'todo-complete-button'} type="button" aria-label={`${completed ? '恢复' : '完成'}待办：${todo.title}`} title={completed ? '恢复为未完成' : '标记完成'} disabled={busy === todo.id} onClick={() => void toggleTodoCompletion(todo)}><Check size={15} /></button>
       <div className="personal-todo-main"><strong>{todo.title}</strong><small>{completed ? '已完成' : todoDateLabel(todo.dueDate!, data.today)} · {todo.priority}优先级</small></div>
-      <div className="todo-row-actions">{!completed && <button className="todo-icon-button" type="button" aria-label={`编辑待办：${todo.title}`} title="编辑" disabled={Boolean(busy)} onClick={() => setEditing({ id: todo.id, title: todo.title, priority: todo.priority })}><Pencil size={15} /></button>}<button className="todo-icon-button danger" type="button" aria-label={`删除待办：${todo.title}`} title="删除" disabled={Boolean(busy)} onClick={() => void removeTodo(todo)}><Trash2 size={15} /></button></div>
+      <div className="todo-row-actions">{!completed && <button className="todo-icon-button" type="button" aria-label={`编辑待办：${todo.title}`} title="编辑" disabled={Boolean(busy)} onClick={() => setEditing({ id: todo.id, title: todo.title, priority: todo.priority, version: todo.version })}><Pencil size={15} /></button>}<button className="todo-icon-button danger" type="button" aria-label={`删除待办：${todo.title}`} title="删除" disabled={Boolean(busy)} onClick={() => void removeTodo(todo)}><Trash2 size={15} /></button></div>
     </div>
   }
 
@@ -203,6 +233,7 @@ function PersonalTodoPanel({ data, onOpenTask }: { data: WorkbenchData; onOpenTa
       <button className="button primary" type="submit" disabled={!draft.title.trim() || Boolean(busy)}><Plus size={16} />新增事项</button>
     </form>
     {error && <div className="personal-todo-error" role="alert">{error}</div>}
+    <div className="personal-todo-body">
     <div className="personal-todo-list" aria-busy={loading}>
       {todayProjectActions.map(action => <div className="personal-todo-row project-work-todo" key={`project-${action.id}`}>
         <span className={`todo-project-state ${workbenchTone(action.status)}`} aria-hidden="true" />
@@ -224,6 +255,7 @@ function PersonalTodoPanel({ data, onOpenTask }: { data: WorkbenchData; onOpenTa
         {historicalTodos.map(todo => renderTodo(todo, true))}
       </div>
     </div>}
+    </div>
   </section>
 }
 function roleHeading(data: WorkbenchData) {
@@ -282,19 +314,23 @@ function primaryAction(data: WorkbenchData) {
   return actions[data.view]
 }
 
-export function DashboardPage() {
+export function DashboardPage({ embedded = false }: { embedded?: boolean } = {}) {
+  const navigate = useNavigate()
+  const inbox = useApprovalInbox()
   const userId = useAuthStore(state => state.user?.id)
   const calendarKey = `fde-dashboard-calendar-hidden:${userId ?? 'anonymous'}`
   const [calendarHidden, setCalendarHidden] = useState(() => { try { return localStorage.getItem(calendarKey) === '1' } catch { return false } })
   const [data, setData] = useState<WorkbenchData | null>(null), [error, setError] = useState('')
   const [revision, setRevision] = useState(0), generation = useRef(0)
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
+  useEffect(() => subscribeWorkspaceRefresh(() => setRevision(value => value + 1)), [])
   useEffect(() => {
     let controller: AbortController | undefined
     const refresh = async () => {
       const token = ++generation.current
       controller?.abort(); controller = new AbortController()
-      setData(null); setError('')
+      // Keep same-account forms mounted during refresh; `current` isolates account changes.
+      setError('')
       if (!userId) return
       const options = { cache: 'no-store' as const, signal: controller.signal }
       try {
@@ -310,7 +346,7 @@ export function DashboardPage() {
     void refresh()
     window.addEventListener('focus', refresh); document.addEventListener('visibilitychange', visible)
     return () => { ++generation.current; controller?.abort(); window.removeEventListener('focus', refresh); document.removeEventListener('visibilitychange', visible) }
-  }, [userId, revision])
+  }, [userId, revision, embedded])
   useEffect(() => {
     if (!data?.today) return
     const nextShanghaiMidnight = Date.parse(`${data.today}T16:00:02Z`)
@@ -339,21 +375,33 @@ export function DashboardPage() {
     const detail = overdue ? `目标日已逾期 · ${project.stage}` : near ? `目标日临近 · ${project.targetDate}` : changed ? `阶段已更新为 ${project.stage}` : `${project.total} 项任务需要关注`
     return { id: project.id, title: project.name, detail, icon: project.name.slice(0, 1), to: `/projects/${project.id}`, status: overdue ? '已逾期' : project.health }
   })
-  return <div className="fde-dashboard page-wrap role-workbench" data-view={current.view}>
-    {current.view === 'admin' ? <div className="page-heading"><div><EditableWorkbenchHeading data={current}/></div><div className="page-actions"><Link className="button dashboard-note-shortcut" to="/knowledge?view=notes" title="进入个人笔记"><NotebookPen size={16}/><span>个人笔记</span></Link><span className="view-chip secure">配置权限视角</span><Link className="button primary" to="/system">进入系统管理</Link></div></div> : <div className="workbench-heading"><div><div className="eyebrow-row"><span className="view-chip">{current.perspective}</span><span>{formatShanghaiDate(`${current.today}T12:00:00+08:00`, { year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' })}</span></div><EditableWorkbenchHeading data={current}/></div><div className="page-actions"><Link className="button dashboard-note-shortcut" to="/knowledge?view=notes" title="进入个人笔记"><NotebookPen size={16}/><span>个人笔记</span></Link><span className="update-note">更新于 {formatShanghaiDate(current.asOf, { hour: '2-digit', minute: '2-digit' })}</span>{action.length > 0 && <Link className="button primary" to={action[1]}>{action[0]}</Link>}</div></div>}
+  const workbenchTools = <details className="workbench-notes"><summary>更多工作入口</summary>{current.view !== 'admin' && current.view !== 'unassigned' && <div><Link to="/workflow?view=pending">审批待办</Link><Link to="/responsibility?view=mine">我的职责</Link><Link to="/knowledge">知识库</Link><Link to="/risks">风险提醒</Link>{embedded && <><Link to="/knowledge?view=notes">个人笔记</Link>{action.length > 0 && <Link to={action[1]}>{action[0]}</Link>}</>}</div>}<button className="button small" onClick={() => setRevision(n => n + 1)}>刷新工作台</button></details>
+  return <div className="fde-dashboard page-wrap role-workbench" data-view={current.view} data-embedded={embedded || undefined}>
+    {!embedded && (current.view === 'admin' ? <div className="page-heading"><div><EditableWorkbenchHeading data={current}/></div><div className="page-actions"><Link className="button dashboard-note-shortcut" to="/knowledge?view=notes" title="进入个人笔记"><NotebookPen size={16}/><span>个人笔记</span></Link><span className="view-chip secure">配置权限视角</span><Link className="button primary" to="/system">进入系统管理</Link></div></div> : <div className="workbench-heading"><div><div className="eyebrow-row"><span className="view-chip">{current.perspective}</span><span>{formatShanghaiDate(`${current.today}T12:00:00+08:00`, { year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' })}</span></div><EditableWorkbenchHeading data={current}/></div><div className="page-actions"><Link className="button dashboard-note-shortcut" to="/knowledge?view=notes" title="进入个人笔记"><NotebookPen size={16}/><span>个人笔记</span></Link><span className="update-note">更新于 {formatShanghaiDate(current.asOf, { hour: '2-digit', minute: '2-digit' })}</span>{action.length > 0 && <Link className="button primary" to={action[1]}>{action[0]}</Link>}</div></div>)}
+    {!embedded && current.view !== 'admin' && current.view !== 'unassigned' && <FdeApprovalInbox inbox={inbox} />}
+    {error && <div className="workbench-warning" role="alert"><span>工作台暂时无法更新，当前显示上次读取的内容。</span><button className="button small" onClick={() => setRevision(n => n + 1)}>重试</button></div>}
     {current.warnings.length > 0 && <div className="workbench-warning" role="alert"><span>{current.warnings.join(' ')}</span><button className="button small" onClick={() => setRevision(n => n + 1)}>重新核对</button></div>}
-    {current.view !== 'admin' && current.view !== 'unassigned' && (calendarHidden
+    <WorkbenchLayout embedded={embedded}>
+    {(embedded || current.view !== 'admin' && current.view !== 'unassigned') && (calendarHidden && !embedded
       ? <button type="button" className="dashboard-calendar-reveal" onClick={showCalendar}><Eye size={16}/><span>显示任务时间轴</span></button>
-      : <section className="dashboard-calendar-shell fde-collaboration-page" aria-label="任务时间轴"><FdeCalendarPanel compact allowLeader={false} onHide={hideCalendar}/></section>)}
+      : <section className="dashboard-calendar-shell fde-collaboration-page" aria-label="任务时间轴"><FdeCalendarPanel compact overview={embedded} allowLeader={false} onHide={embedded ? undefined : hideCalendar}/></section>)}
+    {embedded ? <PersonalScheduleSidebar
+      today={<PersonalTodoPanel data={current} onOpenTask={setSelectedTaskId} />}
+      future={<ActionList rows={futureActions} today={current.today} onOpen={setSelectedTaskId} />}
+      futureCount={futureActions.length}
+      tools={workbenchTools}
+    /> : <>
     <div className={`workspace-grid ${current.view === 'admin' ? 'two' : 'workbench-four-regions'}`}>
       {current.view === 'admin' ? <Panel title="系统管理"><FocusList rows={[{ id: 'settings', title: '组织、权限与系统配置', detail: '进入管理员后台', icon: '管', to: '/system' }]} /></Panel> :
         current.view === 'unassigned' ? <Panel title="角色待核对"><Empty title="请先绑定业务角色" note="" /></Panel> : <>
           <PersonalTodoPanel data={current} onOpenTask={setSelectedTaskId} />
           <Panel title="未来三天" to="/collaboration" action="查看我的任务 →"><ActionList rows={futureActions} today={current.today} onOpen={setSelectedTaskId} /></Panel>
-          <Panel title="重点项目风险" to="/projects?view=key"><FocusList rows={projectRows} /></Panel>
+          {!embedded && <Panel title="重点项目风险" to="/projects?view=key"><FocusList rows={projectRows} /></Panel>}
         </>}
     </div>
-    <TaskDrawer taskId={selectedTaskId} open={Boolean(selectedTaskId)} onClose={() => setSelectedTaskId(null)} onAction={(action, task) => { if (!task.project) return; if (action === 'not_started') { void apiPost(`/projects/${task.project.id}/fde-tasks/${task.id}/start`, { expectedVersion: task.version }).then(() => { setSelectedTaskId(null); setRevision(value => value + 1) }); return } setSelectedTaskId(null); const route = action === 'in_progress' || action === 'returned' ? 'submission' : action === 'pending_acceptance' ? 'accept' : action === 'feedback' ? 'progress' : action === 'extension' || action === 'cancel' ? action : ''; window.location.assign(`/projects/${task.project.id}?tab=tasks&task=${task.id}${route ? `&action=${route}` : ''}`) }} />
-    <details className="workbench-notes"><summary>更多工作入口</summary>{current.view !== 'admin' && current.view !== 'unassigned' && <div><Link to="/workflow?view=pending">审批待办</Link><Link to="/responsibility?view=mine">我的职责</Link><Link to="/knowledge">知识库</Link><Link to="/risks">风险提醒</Link></div>}<button className="button small" onClick={() => setRevision(n => n + 1)}>刷新工作台</button></details>
+    {workbenchTools}
+    </>}
+    </WorkbenchLayout>
+    <TaskDrawer taskId={selectedTaskId} open={Boolean(selectedTaskId)} onClose={() => setSelectedTaskId(null)} onAction={(action, task) => { if (!task.project) return; if (action === 'approval') { setSelectedTaskId(null); openApproval(task.approvalRequestId ? { id: task.approvalRequestId, kind: 'project', projectId: task.project.id } : undefined); return } setSelectedTaskId(null); const route = action === 'not_started' ? 'start' : action === 'in_progress' || action === 'returned' ? 'submission' : action === 'pending_acceptance' ? 'accept' : action === 'feedback' ? 'progress' : action === 'extension' || action === 'cancel' ? action : ''; route ? openTaskAction(task.project.id, task.id, route) : navigate(`/projects/${task.project.id}?tab=tasks&task=${task.id}`) }} />
   </div>
 }

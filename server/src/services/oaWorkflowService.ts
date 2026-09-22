@@ -30,6 +30,7 @@ import { projectFileAccessCondition, requireProjectFileAccess } from './projectF
 import { approveNodeTransition } from '../contracts/approvalNodeTransition.js'
 import { legacyApprovalAccessCondition } from './oaRequestAccessService.js'
 import { ADMIN_SELF_APPROVAL_NODE_NAME, isAdminSelfApprovalNode, isAdminSelfApprovalSubmission } from '../contracts/adminSelfApprovalContract.js'
+import { projectApprovalActionBlockedReason } from '../contracts/oaProjectLifecycleContract.js'
 
 const fdeProjectStages = ['入库', '立项', '尽调计划制定', '尽调计划审核', '尽调', '内核', '投决', '打款', '投后'] as const
 const legacyProjectStages = ['线索', '初筛', '立项', '尽调', '上会', '投决', '投后', '退出'] as const
@@ -256,6 +257,10 @@ async function loadPublicRequests(requestIds: string[]) {
   for (const node of nodeRows) nodesByRequest.set(node.requestId, [...(nodesByRequest.get(node.requestId) ?? []), node])
   const recordsByRequest = new Map<string, typeof recordRows>()
   for (const record of recordRows) recordsByRequest.set(record.requestId, [...(recordsByRequest.get(record.requestId) ?? []), record])
+  const projectIds = [...new Set(requestRows.map(request => request.projectId).filter((id): id is string => Boolean(id)))]
+  const projectRows = projectIds.length ? await db.select({ id: projects.id, stage: projects.stage, lifecycle: projects.lifecycle, workflowModel: projects.workflowModel })
+    .from(projects).where(inArray(projects.id, projectIds)) : []
+  const projectById = new Map(projectRows.map(project => [project.id, project]))
   const planIds = [...new Set(requestRows.map((request) => request.planId).filter((id): id is string => Boolean(id)))]
   const [planRows, planActionRows] = planIds.length ? await Promise.all([
     db.select().from(projectPlans).where(inArray(projectPlans.id, planIds)),
@@ -273,6 +278,7 @@ async function loadPublicRequests(requestIds: string[]) {
   return requestIds.flatMap((id) => {
     const request = byId.get(id)
     if (!request) return []
+    const project = request.projectId ? projectById.get(request.projectId) : undefined
     const plan = request.planId ? planById.get(request.planId) : undefined
     const planReview = plan ? {
       revision: plan.revision,
@@ -292,6 +298,8 @@ async function loadPublicRequests(requestIds: string[]) {
     } : undefined
     return [{
       id: request.id,
+      actionBlockedReason: projectApprovalActionBlockedReason(request, project),
+      projectLifecycle: project?.lifecycle,
       requestNo: request.requestNo,
       projectId: request.projectId,
       projectName: request.projectName,
@@ -598,6 +606,8 @@ export async function actOnOaApprovalRequest(input: {
       await tx.execute(sql`SELECT ${projects.id} FROM ${projects} WHERE ${projects.id}=${request.projectId} FOR UPDATE`)
       const [project] = await tx.select().from(projects).where(eq(projects.id, request.projectId)).limit(1)
       if (!project) throw workflowError(409, 'OA_PROJECT_MISSING', '审批关联项目不存在')
+      const actionBlockedReason = projectApprovalActionBlockedReason(request, project)
+      if (actionBlockedReason) throw workflowError(409, 'OA_PROJECT_STATE_CHANGED', actionBlockedReason)
       if ((project.workflowModel === 'fde-v1' || input.expectedVersion !== undefined) && input.expectedVersion !== request.lockVersion) {
         throw workflowError(409, 'OA_VERSION_CONFLICT', '审批已被处理或版本已变化，请刷新后重试')
       }
