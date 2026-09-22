@@ -342,13 +342,23 @@ function projectDiscoveryProfile(lead: LeadListItem): ProjectDiscoveryProfileFac
     ])
   }
   const investment = lead.investmentProfile
+  const candidate = lead.availableData
+  const profile = lead.radarProfile?.profile
+  const products = investment?.products?.length ? investment.products : candidate?.products ?? []
+  const institutions = investment?.institutions?.length ? investment.institutions : candidate?.institutions ?? []
+  const financing = investment?.financing.latestRound
+    || investment?.financing.latestAmount
+    || investment?.financing.latestRoundDate
+    ? investment.financing
+    : candidate?.financing ?? investment?.financing
   return compactProfileFacts([
-    profileFact('核心产品', investment?.products.slice(0, 3).map((product) => product.name).join('、')),
-    profileFact('核心技术', investment?.products.slice(0, 3).map((product) => product.technologyRoute || product.productRoute).filter(Boolean).join('；')),
+    profileFact('核心产品', products.slice(0, 3).map((product) => product.name).filter(Boolean).join('、') || profile?.products?.slice(0, 3).join('、')),
+    profileFact('核心技术', products.slice(0, 3).map((product) => product.technologyRoute || product.productRoute).filter(Boolean).join('；') || profile?.coreTechnologies?.slice(0, 3).join('；')),
     profileFact('产业链位置', investment?.industry.chainPosition),
-    profileFact('融资与投资机构', [investment?.financing.latestRound, investment?.financing.latestAmount, investment?.institutions.slice(0, 3).map((item) => item.name).join('、')].filter(Boolean).join(' · ')),
+    profileFact('融资与投资机构', [financing?.latestRound, financing?.latestAmount, institutions.slice(0, 3).map((item) => item.name).join('、')].filter(Boolean).join(' · ')),
     profileFact('客户进展', investment?.customers.highestStage || (investment?.customers.verifiedCount ? `已核验 ${investment.customers.verifiedCount} 家` : undefined)),
-    profileFact('工商主体', investment?.subject?.legalEntityName || lead.companyName),
+    profileFact('工商主体', investment?.subject?.legalEntityName || profile?.companyName || lead.companyName),
+    profileFact('经营范围', profile?.businessScope),
   ])
 }
 
@@ -362,11 +372,13 @@ function projectDiscoveryMissingFields(lead: LeadListItem): string[] {
     ].filter((value): value is string => Boolean(value))
   }
   const investment = lead.investmentProfile
+  const candidate = lead.availableData
+  const profile = lead.radarProfile?.profile
   return [
-    !investment?.products?.length && '核心产品',
-    !investment?.financing.latestAmount && '融资金额',
-    !investment?.institutions?.length && '投资方',
-    !investment?.academicLinks?.some((link) => link.person) && '核心团队背景',
+    !investment?.products?.length && !candidate?.products.length && !profile?.products?.length && '核心产品',
+    !investment?.financing.latestAmount && !candidate?.financing?.latestAmount && '融资金额',
+    !investment?.institutions?.length && !candidate?.institutions.length && '投资方',
+    !investment?.academicLinks?.some((link) => link.person) && !profile?.teamComposition && '核心团队背景',
   ].filter((value): value is string => Boolean(value))
 }
 

@@ -107,25 +107,42 @@ export function buildProjectDiscoveryBrief(lead: LeadListItem): ProjectDiscovery
   }
 
   const investment = lead.investmentProfile
+  const candidate = lead.availableData
+  const profile = lead.radarProfile?.profile
   const industry = [investment?.industry.level1, investment?.industry.level2]
     .filter((value): value is string => Boolean(value?.trim()))
     .join(' / ')
+    || candidate?.industryTags.slice(0, 2).join(' / ')
+    || profile?.sourceIndustries?.slice(0, 2).join(' / ')
     || lead.businessTags?.industry?.slice(0, 2).join(' / ')
     || '待补充'
   const team = investment?.academicLinks
     .flatMap((link) => [link.person, link.departmentLab, link.institution])
     .filter((value): value is string => Boolean(value?.trim()))
     .slice(0, 3)
-    .join('、') || '待补充'
+    .join('、')
+    || profile?.teamComposition
+    || candidate?.academicLinks
+      .flatMap((link) => [link.person, link.institution])
+      .filter((value): value is string => Boolean(value?.trim()))
+      .slice(0, 3)
+      .join('、')
+    || '待补充'
+  const financing = investment?.financing.latestRound
+    || investment?.financing.latestAmount
+    || investment?.financing.latestRoundDate
+    ? investment.financing
+    : candidate?.financing ?? investment?.financing
+  const institutions = investment?.institutions?.length ? investment.institutions : candidate?.institutions ?? []
 
   return {
     summary,
     facts: [
       { label: '行业分类', value: industry },
-      { label: '最新融资日期', value: investment?.financing.latestRoundDate || investment?.financing.latestCompletedAt || '未披露' },
-      { label: '融资金额', value: investment?.financing.latestAmount || investment?.financing.latestAmountSummary?.raw || '未披露' },
-      { label: '融资轮次', value: investment?.financing.latestRound || investment?.financing.latestCompletedRound || '未披露' },
-      { label: '投资方', value: investment?.institutions.slice(0, 4).map((institution) => institution.name).filter(Boolean).join('、') || '未披露', wide: true },
+      { label: '最新融资日期', value: financing?.latestRoundDate || investment?.financing.latestCompletedAt || '未披露' },
+      { label: '融资金额', value: financing?.latestAmount || investment?.financing.latestAmountSummary?.raw || '未披露' },
+      { label: '融资轮次', value: financing?.latestRound || investment?.financing.latestCompletedRound || '未披露' },
+      { label: '投资方', value: institutions.slice(0, 4).map((institution) => institution.name).filter(Boolean).join('、') || '未披露', wide: true },
       { label: '核心团队背景', value: team, wide: true },
     ],
   }
@@ -150,6 +167,9 @@ export function projectDiscoverySearchText(lead: LeadListItem): string {
     lead.region,
     ...(lead.businessTags?.industry ?? []),
     ...(lead.businessTags?.region ?? []),
+    ...(lead.availableData?.industryTags ?? []),
+    ...lead.availableData?.products.flatMap((item) => [item.name, item.productRoute, item.technologyRoute, item.productionStage]) ?? [],
+    ...lead.availableData?.institutions.map((item) => item.name) ?? [],
     investment?.industry.level1,
     investment?.industry.level2,
     investment?.industry.segment,

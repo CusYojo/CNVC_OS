@@ -1007,6 +1007,15 @@ function leadPoolListItem(row: typeof leads.$inferSelect, candidateFacts: LeadLi
   const sourceProduct = meaningfulCandidateText(objectValue(sourceLabeledProfile.product).value)
     ?? meaningfulCandidateText(objectValue(sourceLabeledProfile.mainBusiness).value)
   const sourceProductRoute = meaningfulCandidateText(objectValue(sourceLabeledProfile.mainBusiness).value)
+  const sourceIndustries = Array.isArray(radarProfileCore.sourceIndustries)
+    ? radarProfileCore.sourceIndustries.map((value) => meaningfulCandidateText(value)).filter((value): value is string => Boolean(value))
+    : []
+  const profileProducts = Array.isArray(radarProfileCore.products)
+    ? radarProfileCore.products.map((value) => meaningfulCandidateText(value)).filter((value): value is string => Boolean(value))
+    : []
+  const profileTechnologies = Array.isArray(radarProfileCore.coreTechnologies)
+    ? radarProfileCore.coreTechnologies.map((value) => meaningfulCandidateText(value)).filter((value): value is string => Boolean(value))
+    : []
   const firstFundingRound = objectValue(Array.isArray(enriched.fundingRounds) ? enriched.fundingRounds[0] : undefined)
   const fundingRound = meaningfulCandidateText(firstFundingRound.round)
   const investors = (Array.isArray(firstFundingRound.investors)
@@ -1032,7 +1041,10 @@ function leadPoolListItem(row: typeof leads.$inferSelect, candidateFacts: LeadLi
     && !/(?:大学生|大学城)/u.test(value)
   ))
   const webCandidateData = leadListWebCandidateData(candidateFacts)
-  const legacyProducts = sourceProduct ? [{
+  const legacyProducts = profileProducts.length ? profileProducts.map((name, index) => ({
+    name,
+    technologyRoute: profileTechnologies[index],
+  })) : sourceProduct ? [{
     name: sourceProduct,
     productRoute: sourceProductRoute && sourceProductRoute !== sourceProduct ? sourceProductRoute : undefined,
   }] : []
@@ -1091,7 +1103,7 @@ function leadPoolListItem(row: typeof leads.$inferSelect, candidateFacts: LeadLi
     displayLabel: financingConflict ? '候选冲突 · 待核验' : sourceKinds.includes('web_research')
       ? sourceKinds.includes('intake') ? '已有/联网资料 · 待核验' : '联网候选 · 待核验'
       : '已有资料 · 待核验',
-    industryTags: [...new Set([...industryTags, ...webCandidateData.industryTags])].slice(0, 8),
+    industryTags: [...new Set([...sourceIndustries, ...industryTags, ...webCandidateData.industryTags])].slice(0, 8),
     products: legacyProducts.length ? legacyProducts : webCandidateData.products,
     institutions,
     academicLinks,
@@ -1130,12 +1142,21 @@ function leadPoolListItem(row: typeof leads.$inferSelect, candidateFacts: LeadLi
       occurredAt: item.occurredAt,
       title: item.title,
     })),
-    radarProfile: typeof radarProfile.channel === 'string' || typeof radarProfileCore.lab === 'string'
+    radarProfile: typeof radarProfile.channel === 'string' || Object.keys(radarProfileCore).length > 0
       ? {
           channel: radarProfile.channel,
           link: radarProfile.link,
           publishedAt: radarProfile.publishedAt,
-          profile: { lab: radarProfileCore.lab },
+          profile: {
+            lab: radarProfileCore.lab,
+            companyName: radarProfileCore.companyName,
+            projectName: radarProfileCore.projectName,
+            businessScope: radarProfileCore.businessScope,
+            teamComposition: radarProfileCore.teamComposition,
+            sourceIndustries,
+            products: profileProducts,
+            coreTechnologies: profileTechnologies,
+          },
           paperMeta: enriched.leadType === 'research' ? objectValue(radarProfile.paperMeta) : undefined,
         }
       : undefined,
@@ -1446,6 +1467,10 @@ export async function listLeads(options: {
           'projectName', ${jsonValue(leads.radarProfile, '$.profile.projectName')},
           'lab', ${jsonValue(leads.radarProfile, '$.profile.lab')},
           'teamComposition', ${jsonValue(leads.radarProfile, '$.profile.teamComposition')},
+          'businessScope', ${jsonValue(leads.radarProfile, '$.profile.businessScope')},
+          'sourceIndustries', COALESCE(${jsonValue(leads.radarProfile, '$.profile.sourceIndustries')}, JSON_ARRAY()),
+          'products', COALESCE(${jsonValue(leads.radarProfile, '$.profile.products')}, JSON_ARRAY()),
+          'coreTechnologies', COALESCE(${jsonValue(leads.radarProfile, '$.profile.coreTechnologies')}, JSON_ARRAY()),
           'latestValuation', ${jsonValue(leads.radarProfile, '$.profile.latestValuation')}
         ),
         'channel', ${jsonValue(leads.radarProfile, '$.channel')},

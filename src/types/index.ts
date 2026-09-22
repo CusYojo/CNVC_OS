@@ -681,7 +681,16 @@ export type LeadListItem = Pick<Lead,
     channel?: string
     link?: string
     publishedAt?: string
-    profile?: { lab?: string }
+    profile?: {
+      lab?: string
+      companyName?: string
+      projectName?: string
+      businessScope?: string
+      teamComposition?: string
+      sourceIndustries?: string[]
+      products?: string[]
+      coreTechnologies?: string[]
+    }
     paperMeta?: Pick<PaperMetadata,
       'titleZh' | 'projectName' | 'projectNameOriginal' | 'authors' | 'categories' | 'pdfUrl' | 'rights'
     >
