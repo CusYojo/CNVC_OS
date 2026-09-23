@@ -1492,6 +1492,7 @@ export async function listLeads(options: {
           'products', COALESCE(${jsonValue(leads.radarProfile, '$.profile.products')}, JSON_ARRAY()),
           'coreTechnologies', COALESCE(${jsonValue(leads.radarProfile, '$.profile.coreTechnologies')}, JSON_ARRAY()),
           'discoveryKeywords', ${jsonValue(leads.radarProfile, '$.profile.discoveryKeywords')},
+          'discoveryCardEdits', ${jsonValue(leads.radarProfile, '$.profile.discoveryCardEdits')},
           'latestValuation', ${jsonValue(leads.radarProfile, '$.profile.latestValuation')}
         ),
         'channel', ${jsonValue(leads.radarProfile, '$.channel')},

@@ -17,6 +17,7 @@ import { meetingsRouter, todosRouter, aiRouter } from './meetings.js'
 import { unifiedTasksRouter } from './unifiedTasks.js'
 import { risksRouter } from './risks.js'
 import { metaRouter } from './meta.js'
+import { institutionTrackingRouter } from './institutionTracking.js'
 import { conversationsRouter } from './conversations.js'
 import { workspaceRouter } from './workspace.js'
 import { createMaterial } from '../controllers/materialController.js'
@@ -66,6 +67,7 @@ apiRouter.use('/risks', risksRouter)
 apiRouter.use('/', leadIntakeRouter)
 apiRouter.use('/', radarRouter)
 apiRouter.use('/', metaRouter) // /users /templates /audit-logs /leads /ai-summaries
+apiRouter.use('/institutions', institutionTrackingRouter)
 apiRouter.use('/oa', oaRouter)
 apiRouter.use('/ai', aiRouter)
 apiRouter.use('/ai', aiTasksRouter)

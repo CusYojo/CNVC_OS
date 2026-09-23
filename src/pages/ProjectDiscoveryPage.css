@@ -56,6 +56,12 @@
 .project-discovery-investment-brief dt { color: #7a8799; font-size: 14px; font-weight: 500; }
 .project-discovery-investment-brief dd { margin: 4px 0 0; overflow-wrap: anywhere; color: #24344e; font-size: 16px; font-weight: 600; line-height: 1.6; }
 .project-discovery-fact-input { min-height: 32px; margin: -2px -4px; field-sizing: content; color: #24344e; font-size: 16px; font-weight: 600; line-height: 1.6; }
+.project-discovery-institution-links { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 6px; }
+.project-discovery-institution-link { display: inline-flex; min-height: 44px; align-items: center; gap: 4px; border-radius: 6px; color: #2d66b5; font-size: 12px; font-weight: 500; line-height: 1.4; text-decoration: none; }
+.project-discovery-institution-link:hover { color: #174d98; text-decoration: underline; }
+.project-discovery-institution-link:focus-visible { outline: 2px solid #326bc2; outline-offset: 2px; }
+.project-discovery-institution-link svg { width: 13px; height: 13px; }
+.project-discovery-institution-hint { margin: 6px 0 0; color: #6f7e92; font-size: 12px; font-weight: 500; }
 .project-discovery-investment-brief dd.industry { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; }
 .project-discovery-investment-brief dd.industry span, .project-discovery-investment-brief dd.industry i { color: #7a8799; font-size: 14px; font-style: normal; font-weight: 500; }
 .project-discovery-investment-brief dd.industry strong { color: #326bc2; font-size: 18px; font-weight: 600; }

@@ -69,6 +69,7 @@ test('institution tracking keys are URL safe and reversible', () => {
   const key = encodeInstitutionTrackingKey('上海半导体装备材料产业投资基金')
   assert.match(key, /^[a-f0-9]+$/)
   assert.equal(decodeInstitutionTrackingKey(key), '上海半导体装备材料产业投资基金')
+  assert.equal(decodeInstitutionTrackingKey(encodeInstitutionTrackingKey('中'.repeat(255))), '中'.repeat(255))
   assert.equal(decodeInstitutionTrackingKey('../bad-key'), null)
 })
 
@@ -97,6 +98,18 @@ test('new discovery projects bind to canonical institutions and aliases automati
     summary: '光电混合存储芯片项目',
     sourceChannel: '公开融资信息',
   })
+})
+
+test('malformed institution facts do not break tracking or create false matches', () => {
+  const malformedLead = {
+    id: 'malformed-lead',
+    name: '待核验项目',
+    radarProfile: { profile: { discoveryCardEdits: { name: '待核验项目', briefFacts: { '投资方': 42 } } } },
+    investmentProfile: { institutions: [{ name: 42 }, null] },
+    availableData: { institutions: [{ name: '星河资本' }, { name: null }] },
+  }
+  const directory = buildInstitutionTrackingDirectory([malformedLead] as never, dictionary)
+  assert.equal(directory.find((institution) => institution.name === '星河创投')?.projectCount, 1)
 })
 
 test('CNVC OS exposes institution tracking routes and discovery-card deep links', async () => {

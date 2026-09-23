@@ -2,7 +2,8 @@ import {
   ArrowRight, CalendarDays, ChevronDown, FileUp, LoaderCircle, Radar, Search, Sparkles, X,
 } from 'lucide-react'
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { encodeInstitutionTrackingKey } from '../../server/src/contracts/institutionTrackingContract'
 import { EmptyState } from '../components/ui'
 import { apiGet, apiPatch, apiPost } from '../lib/api'
 import {
@@ -487,6 +488,8 @@ function DiscoveryCard({ lead, onOpen, onKeywordsUpdated, onCardUpdated, onRemov
       name={name}
       brief={brief}
       factValues={cardDraft.briefFacts}
+      investorNames={(cardDraft.briefFacts['投资方'] ?? '').split(/[、,，;；\n]+/u).map((value) => value.trim()).filter((value) => value && !['未披露', '待补充', '待核验'].includes(value))}
+      institutionLinksEnabled={!cardDirty}
       keywordText={keywordText}
       saving={cardAction === 'keywords' || cardAction === 'card'}
       onFactChange={(label, value) => updateCardFact('briefFacts', label, value)}
@@ -596,11 +599,13 @@ function CardDetailsToggle({ expanded, name, onToggle }: { expanded: boolean; na
   </button>
 }
 
-function DiscoveryInvestmentBrief({ leadId, name, brief, factValues, keywordText, saving, onFactChange, onKeywordChange, onKeywordBlur }: {
+function DiscoveryInvestmentBrief({ leadId, name, brief, factValues, investorNames, institutionLinksEnabled, keywordText, saving, onFactChange, onKeywordChange, onKeywordBlur }: {
   leadId: string
   name: string
   brief: ReturnType<typeof buildProjectDiscoveryBrief>
   factValues: Record<string, string>
+  investorNames: string[]
+  institutionLinksEnabled: boolean
   keywordText: string
   saving: boolean
   onFactChange: (label: string, value: string) => void
@@ -620,7 +625,15 @@ function DiscoveryInvestmentBrief({ leadId, name, brief, factValues, keywordText
             maxLength={1_000}
             disabled={saving}
             onChange={(event) => onFactChange(item.label, event.target.value)}
-          /></dd>
+          />{item.label === '投资方' && (institutionLinksEnabled
+            ? <div className="project-discovery-institution-links" aria-label="关联投资机构">
+              {[...new Set(investorNames)].map((investor) => <Link
+                key={investor}
+                className="project-discovery-institution-link"
+                to={`/institutions/${encodeInstitutionTrackingKey(investor)}`}
+              >查看{investor}最近投资项目<ArrowRight aria-hidden="true" /></Link>)}
+            </div>
+            : <p className="project-discovery-institution-hint">保存后将自动关联至机构追踪</p>)}</dd>
         </div>
         {index === 0 && <div className="project-discovery-keywords">
           <dt>重点关键词</dt>

@@ -6,6 +6,7 @@ import { useAuthStore } from './store/useAuthStore'
 import { useAppStore } from './store/useAppStore'
 import { LoginPage } from './pages/LoginPage'
 import { ProjectCenterPage } from './pages/ProjectCenterPage'
+import { InstitutionTrackingDirectoryPage, InstitutionTrackingProfilePage } from './pages/InstitutionTrackingPage'
 import { ProjectDetailPage } from './pages/ProjectDetailPage'
 import { LeadDetailPage } from './pages/LeadDetailPage'
 import { AIAssistantPage } from './pages/AIAssistantPage'
@@ -104,6 +105,8 @@ export default function App() {
         <Route path={EXECUTIVE_DASHBOARD_PATH} element={<LegacyExecutiveHome />} />
         <Route path="/projects" element={<ProjectCenterPage />} />
         <Route path="/projects/:id" element={<ProjectDetailPage />} />
+        <Route path="/institutions" element={<InstitutionTrackingDirectoryPage />} />
+        <Route path="/institutions/:institutionKey" element={<InstitutionTrackingProfilePage />} />
         <Route path="/sourcing" element={<SourcingRedirect />} />
         <Route path="/sourcing/:id" element={<LeadDetailPage />} />
         <Route

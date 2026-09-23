@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import express from 'express'
+import { buildInstitutionTrackingDirectory, findInstitutionTrackingProfile } from '../server-dist/services/institutionTrackingPresentation.js'
 
 const app = express()
 const port = Number(process.env.PROJECT_DISCOVERY_PREVIEW_PORT || 4177)
@@ -60,15 +61,23 @@ const leads = [
   company({ id: 'preview-synthetic-bio', name: '合缘生物', legalName: '深圳合缘合成生物有限公司', region: '广东', industry: '生物医药', segment: '合成生物学', product: '酶催化药物中间体平台', institution: '红杉中国', round: 'Pre-A轮', amount: '未披露', offset: 8, signal: '新增两条药物中间体客户验证线' }),
 ]
 const uploads = new Map()
+const institutions = [{ id: 'preview-star', canonicalName: '星河创投', aliases: ['星河资本'], institutionType: 'financial_vc', tier: 'T1', major: true, status: 'active' }]
+const visibleDiscoveryLeads = () => leads.filter((lead) => !['暂不跟进', '已转专属项目'].includes(lead.poolStatus))
 
 app.use(express.json())
 app.get('/api/auth/me', (_req, res) => res.json({ user: { id: 'preview-user', email: 'preview@example.invalid', name: '本地预览', role: '系统管理员', department: '投资部', status: '启用', permissionCodes: ['system.manage'] } }))
 app.get(['/api/leads', '/api/project-discovery/leads'], (req, res) => {
-  const visibleLeads = leads.filter((lead) => !['暂不跟进', '已转专属项目'].includes(lead.poolStatus))
+  const visibleLeads = visibleDiscoveryLeads()
   const pageSize = Math.min(50, Math.max(1, Number(req.query.pageSize) || 20))
   const page = Math.max(1, Number(req.query.page) || 1)
   const totalPages = Math.max(1, Math.ceil(visibleLeads.length / pageSize))
   res.json({ list: visibleLeads.slice((page - 1) * pageSize, page * pageSize), total: visibleLeads.length, page, pageSize, totalPages })
+})
+app.get('/api/institutions', (_req, res) => res.json({ list: buildInstitutionTrackingDirectory(visibleDiscoveryLeads(), institutions) }))
+app.get('/api/institutions/:key', (req, res) => {
+  const profile = findInstitutionTrackingProfile(req.params.key, visibleDiscoveryLeads(), institutions)
+  if (!profile) return res.status(404).json({ code: 'INSTITUTION_NOT_FOUND', message: '机构不存在' })
+  res.json(profile)
 })
 app.get('/api/project-discovery/assignment-options', (_req, res) => res.json({
   canAssignOthers: true,

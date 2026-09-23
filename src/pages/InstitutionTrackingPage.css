@@ -1,0 +1,61 @@
+.institution-tracking-page { display: grid; gap: 16px; min-width: 0; color: #26354d; }
+.institution-tracking-header { display: flex; align-items: center; gap: 14px; padding: 20px; border: 1px solid #dfe7f1; border-radius: 14px; background: #fff; }
+.institution-tracking-header-icon, .institution-tracking-card-icon { display: grid; flex: none; place-items: center; border: 1px solid #d2e1f6; border-radius: 12px; background: #f3f8ff; color: #326bc2; }
+.institution-tracking-header-icon { width: 48px; height: 48px; }
+.institution-tracking-header-icon svg { width: 23px; }
+.institution-tracking-header h1 { margin: 0; color: #1d2d45; font-size: 24px; line-height: 1.35; }
+.institution-tracking-header p { margin: 4px 0 0; color: #687991; font-size: 13px; line-height: 1.5; }
+.institution-tracking-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px; border: 1px solid #dfe7f1; border-radius: 12px; background: #fff; color: #687991; font-size: 13px; }
+.institution-tracking-search { display: flex; width: min(100%,420px); min-height: 44px; align-items: center; gap: 8px; padding: 0 10px; border: 1px solid #d7e2f0; border-radius: 9px; }
+.institution-tracking-search:focus-within { border-color: #326bc2; box-shadow: 0 0 0 3px rgba(50,107,194,.12); }
+.institution-tracking-search > svg { width: 17px; flex: none; color: #71849e; }
+.institution-tracking-search input { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; color: #26354d; font: inherit; }
+.institution-tracking-search button { display: grid; width: 34px; height: 34px; flex: none; place-items: center; border: 0; border-radius: 7px; background: transparent; color: #71849e; cursor: pointer; }
+.institution-tracking-search button svg { width: 15px; }
+.institution-tracking-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; }
+.institution-tracking-card { display: grid; min-width: 0; gap: 14px; padding: 17px; border: 1px solid #dfe7f1; border-radius: 12px; background: #fff; color: inherit; text-decoration: none; transition: border-color .15s ease, box-shadow .15s ease; }
+.institution-tracking-card:hover { border-color: #9bbbe9; box-shadow: 0 8px 20px rgba(30,75,130,.06); }
+.institution-tracking-card:focus-visible, .institution-tracking-project:focus-visible, .institution-tracking-back:focus-visible, .institution-tracking-state button:focus-visible { outline: 2px solid #326bc2; outline-offset: 2px; }
+.institution-tracking-card-heading { display: flex; min-width: 0; align-items: flex-start; gap: 10px; }
+.institution-tracking-card-icon { width: 38px; height: 38px; }
+.institution-tracking-card-icon svg { width: 18px; }
+.institution-tracking-card-heading div { min-width: 0; flex: 1; }
+.institution-tracking-card-heading h2 { margin: 0; color: #24344e; font-size: 16px; line-height: 1.45; overflow-wrap: anywhere; }
+.institution-tracking-card-heading p, .institution-tracking-aliases { margin: 3px 0 0; color: #718097; font-size: 12px; line-height: 1.5; }
+.institution-tracking-card-heading > svg { width: 15px; flex: none; color: #326bc2; }
+.institution-tracking-tags, .institution-tracking-project-facts { display: flex; flex-wrap: wrap; gap: 6px; }
+.institution-tracking-tags span, .institution-tracking-project-facts span { padding: 4px 8px; border-radius: 6px; background: #f1f6fd; color: #4a6892; font-size: 12px; }
+.institution-tracking-card-footer { display: flex; justify-content: space-between; gap: 12px; padding-top: 12px; border-top: 1px solid #e8edf4; color: #687991; font-size: 12px; }
+.institution-tracking-card-footer strong { color: #2c5fa8; font-size: 15px; }
+.institution-tracking-state { display: grid; min-height: 180px; align-content: center; justify-items: center; gap: 8px; padding: 24px; border: 1px solid #dfe7f1; border-radius: 12px; background: #fff; color: #6d7c91; text-align: center; }
+.institution-tracking-state p { margin: 0; }
+.institution-tracking-state button { min-height: 44px; padding: 0 15px; border: 1px solid #b9cdec; border-radius: 8px; background: #fff; color: #2c5fa8; cursor: pointer; }
+.institution-tracking-spinner { width: 22px; animation: institution-tracking-spin .9s linear infinite; }
+@keyframes institution-tracking-spin { to { transform: rotate(360deg); } }
+.institution-tracking-back { display: inline-flex; min-height: 44px; width: fit-content; align-items: center; gap: 7px; border-radius: 7px; color: #2d66b5; font-size: 13px; text-decoration: none; }
+.institution-tracking-back svg { width: 16px; }
+.institution-tracking-profile-header { flex-wrap: wrap; }
+.institution-tracking-profile-header > div:nth-child(2) { min-width: 0; flex: 1; }
+.institution-tracking-count { display: grid; justify-items: end; gap: 2px; color: #718097; font-size: 12px; }
+.institution-tracking-count strong { color: #2c5fa8; font-size: 25px; }
+.institution-tracking-overview { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 0; padding: 16px; border: 1px solid #dfe7f1; border-radius: 12px; background: #fff; }
+.institution-tracking-overview > div { display: grid; gap: 6px; min-width: 0; padding: 8px 14px; }
+.institution-tracking-overview > div + div { border-left: 1px solid #e8edf4; }
+.institution-tracking-overview span { color: #718097; font-size: 12px; }
+.institution-tracking-overview strong { overflow-wrap: anywhere; font-size: 14px; font-weight: 600; }
+.institution-tracking-history { padding: 20px; border: 1px solid #dfe7f1; border-radius: 12px; background: #fff; }
+.institution-tracking-history h2 { margin: 0; font-size: 18px; }
+.institution-tracking-history header p { margin: 5px 0 16px; color: #718097; font-size: 12px; line-height: 1.6; }
+.institution-tracking-projects { display: grid; gap: 10px; }
+.institution-tracking-project { display: grid; gap: 10px; min-width: 0; padding: 15px; border: 1px solid #e0e7f1; border-radius: 10px; color: inherit; text-decoration: none; }
+.institution-tracking-project:hover { border-color: #9bbbe9; background: #fbfdff; }
+.institution-tracking-project-top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.institution-tracking-project h3 { margin: 0; color: #24344e; font-size: 15px; }
+.institution-tracking-project-top span, .institution-tracking-company, .institution-tracking-summary { color: #718097; font-size: 12px; }
+.institution-tracking-company, .institution-tracking-summary { margin: 0; line-height: 1.6; }
+.institution-tracking-project-source { display: flex; justify-content: space-between; gap: 12px; padding-top: 9px; border-top: 1px solid #edf1f6; color: #718097; font-size: 12px; }
+.institution-tracking-project-source span:last-child { display: inline-flex; align-items: center; gap: 4px; color: #2c5fa8; }
+.institution-tracking-project-source svg { width: 13px; }
+@media (max-width: 1100px) { .institution-tracking-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } }
+@media (max-width: 700px) { .institution-tracking-grid, .institution-tracking-overview { grid-template-columns: 1fr; } .institution-tracking-overview > div + div { border-left: 0; border-top: 1px solid #e8edf4; } .institution-tracking-toolbar { align-items: stretch; flex-direction: column; } .institution-tracking-search { width: 100%; } .institution-tracking-profile-header { align-items: flex-start; } }
+@media (prefers-reduced-motion: reduce) { .institution-tracking-spinner { animation: none; } .institution-tracking-card { transition: none; } }
