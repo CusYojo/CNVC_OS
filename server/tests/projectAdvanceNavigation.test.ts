@@ -14,6 +14,7 @@ test('project hero uses the approval route instead of reselecting the already ac
   const source = await detailPage()
   assert.match(source, /onPrimary=\{\(\) => project\.lifecycle === 'active' \? navigate\(projectAdvancePath\(project\.id/)
   assert.doesNotMatch(source, /onPrimary=\{\(\) => project\.lifecycle === 'active' \? setActiveTab\('workflow'\)/)
+  assert.match(source, /onClick=\{\(\) => navigate\(projectAdvancePath\(project\.id\)\)\}[^>]*><Plus[^>]*\/>发起 OA/)
 })
 
 test('an empty effective-stage timeline explains that approval is required', async () => {
