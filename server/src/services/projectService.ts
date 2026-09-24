@@ -6,6 +6,7 @@ import {
   projects,
   projectClassificationHistory,
   projectDutyAssignments,
+  projectGovernanceChanges,
   projectMembers,
   projectFiles,
   projectFileVersions,
@@ -27,6 +28,7 @@ import {
   projectTimelineSyncs,
   projectStageMaterials,
   todos,
+  users,
 } from '../db/schema.js'
 import { createMySqlIdentityRepositoryContext, identityRepositories } from '../repositories/index.js'
 import { sanitizeScoringCompetitors } from './competitorEvidence.js'
@@ -37,11 +39,12 @@ import { businessVersionConflict } from './businessOptimisticLock.js'
 import { activeWorkflowPolicyVersion } from './fdeWorkflowPolicyService.js'
 import { initializeFdeFileGrants } from './fdeFileService.js'
 import { projectFileAccessCondition, requireProjectFileAccess, requireProjectFileUpload } from './projectFileAccessService.js'
-import { prepareFdeCreationGovernance } from './fdeGovernanceService.js'
+import { isEligibleFdeProjectOwner, prepareFdeCreationGovernance } from './fdeGovernanceService.js'
 import type { FdeCreationAssignment } from './fdeGovernanceService.js'
 import { canDirectlyDeleteProject } from '../contracts/adminRoleContract.js'
 import { isEnabledSystemAdmin } from './systemAdminAccessService.js'
 import { closeDeletedProjectApprovals } from './oaProjectLifecycleService.js'
+import { projectProgressForStage, type AdminEditableProjectStage } from '../contracts/projectAdminEditContract.js'
 
 const STAGES = ['线索', '初筛', '立项', '尽调', '上会', '投决', '投后', '退出'] as const
 const ARTIFACT_ROOT = path.resolve(
@@ -493,6 +496,133 @@ export async function updateProject(
   }
   const [boundRow] = await db.select().from(projects).where(eq(projects.id, id)).limit(1)
   return boundRow
+}
+
+export async function updateProjectAsAdministrator(
+  id: string,
+  patch: Partial<typeof projects.$inferInsert> & { stage?: AdminEditableProjectStage; ownerUserId?: string },
+  actor: { userId: string; userName: string },
+  expectedVersion: number,
+) {
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT ${projects.id} FROM ${projects} WHERE ${projects.id}=${id} FOR UPDATE`)
+    const [locked] = await tx.select().from(projects).where(eq(projects.id, id)).limit(1)
+    if (!locked) throw projectClassificationError(404, 'PROJECT_NOT_FOUND', '项目不存在')
+    if (!await isEnabledSystemAdmin(tx, actor.userId)) {
+      throw projectClassificationError(403, 'ROLE_FORBIDDEN', '仅启用的系统管理员可直接修改项目阶段和负责人')
+    }
+    if (locked.version !== expectedVersion) throw businessVersionConflict('项目')
+
+    const {
+      id: _id,
+      createdBy: _createdBy,
+      ownerUserId,
+      owner: _owner,
+      collaborators: _collaborators,
+      version: _version,
+      stage,
+      stageSource: _stageSource,
+      classification: _classification,
+      lifecycle: _lifecycle,
+      workflowModel: _workflowModel,
+      workflowPolicyVersionId: _workflowPolicyVersionId,
+      governanceVersion: _governanceVersion,
+      progress: _progress,
+      ...editablePatch
+    } = patch
+
+    const stageChanged = stage !== undefined && stage !== locked.stage
+    const ownerChanged = ownerUserId !== undefined && ownerUserId !== locked.ownerUserId
+    const investmentFundChanged = 'investmentFund' in editablePatch && editablePatch.investmentFund !== locked.investmentFund
+    const requirementsChanged = 'requirements' in editablePatch && editablePatch.requirements !== locked.requirements
+    if ((stageChanged || ownerChanged) && locked.lifecycle !== 'active') {
+      throw projectClassificationError(409, 'PROJECT_INACTIVE', '关闭、归档或已删除项目不能直接修改阶段和负责人')
+    }
+    if (requirementsChanged && locked.workflowModel === 'fde-v1' && locked.ownerUserId !== actor.userId) {
+      throw projectClassificationError(403, 'FDE_OWNER_REQUIRED', '项目要求只能由负责人修改')
+    }
+    if (stageChanged || investmentFundChanged || requirementsChanged) {
+      const [activeApproval] = await tx.select({ id: oaApprovalRequests.id }).from(oaApprovalRequests)
+        .where(and(eq(oaApprovalRequests.projectId, id), eq(oaApprovalRequests.status, '审批中'))).limit(1)
+      if (activeApproval) {
+        throw projectClassificationError(409, 'ADMIN_PROJECT_APPROVAL_ACTIVE', '当前项目存在审批中的流程，请先处理该流程再直接修改阶段或受控项目信息')
+      }
+    }
+
+    let nextOwner = { id: locked.ownerUserId, name: locked.owner }
+    let collaboratorNames = locked.collaborators
+    if (ownerChanged) {
+      const [candidate] = await tx.select({ id: users.id, name: users.name, status: users.status }).from(users)
+        .where(eq(users.id, ownerUserId!)).limit(1)
+      if (!candidate || candidate.status !== '启用') {
+        throw projectClassificationError(400, 'PROJECT_OWNER_INVALID', '项目负责人必须是已启用的用户')
+      }
+      if (locked.workflowModel === 'fde-v1' && !await isEligibleFdeProjectOwner(tx, candidate.id)) {
+        throw projectClassificationError(400, 'FDE_OWNER_INVALID', 'FDE 项目负责人必须是启用的业务人员')
+      }
+      nextOwner = { id: candidate.id, name: candidate.name }
+
+      const currentMembers = await tx.select({ userId: projectMembers.userId }).from(projectMembers)
+        .where(eq(projectMembers.projectId, id))
+      const collaboratorIds = [...new Set([
+        ...currentMembers.map((member) => member.userId),
+        ...(locked.ownerUserId ? [locked.ownerUserId] : []),
+      ])].filter((userId) => userId !== candidate.id)
+      const collaboratorUsers = collaboratorIds.length
+        ? await tx.select({ id: users.id, name: users.name }).from(users).where(inArray(users.id, collaboratorIds))
+        : []
+      const collaboratorById = new Map(collaboratorUsers.map((user) => [user.id, user]))
+      const collaborators = collaboratorIds.map((userId) => collaboratorById.get(userId)).filter((user): user is { id: string; name: string } => Boolean(user))
+      collaboratorNames = collaborators.map((user) => user.name)
+
+      await tx.delete(projectMembers).where(eq(projectMembers.projectId, id))
+      await tx.insert(projectMembers).values([
+        { projectId: id, userId: candidate.id, memberRole: 'owner', sourceName: candidate.name },
+        ...collaborators.map((user) => ({ projectId: id, userId: user.id, memberRole: 'collaborator', sourceName: user.name })),
+      ])
+      if (locked.workflowModel === 'fde-v1') {
+        await tx.update(projectGovernanceChanges).set({
+          status: 'cancelled', activeKey: null, version: sql`${projectGovernanceChanges.version} + 1`, updatedAt: new Date(),
+        }).where(and(eq(projectGovernanceChanges.projectId, id), eq(projectGovernanceChanges.status, 'awaiting_confirmation')))
+      }
+    }
+
+    const values: Partial<typeof projects.$inferInsert> = {
+      ...editablePatch,
+      ...(stageChanged ? {
+        stage,
+        stageSource: '管理员修正',
+        progress: projectProgressForStage(stage),
+      } : {}),
+      ...(ownerChanged ? {
+        ownerUserId: nextOwner.id,
+        owner: nextOwner.name,
+        collaborators: collaboratorNames,
+        ...(locked.workflowModel === 'fde-v1' ? { governanceVersion: locked.governanceVersion + 1 } : {}),
+      } : {}),
+      version: locked.version + 1,
+      updatedAt: new Date(),
+    }
+    await tx.update(projects).set(values).where(eq(projects.id, id))
+    await createMySqlIdentityRepositoryContext(tx).audits.append({
+      userId: actor.userId,
+      userName: actor.userName,
+      module: '项目管理',
+      action: '管理员直接编辑项目',
+      target: JSON.stringify({
+        projectId: locked.id,
+        projectName: locked.name,
+        before: { stage: locked.stage, ownerUserId: locked.ownerUserId, owner: locked.owner },
+        after: {
+          stage: stageChanged ? stage : locked.stage,
+          ownerUserId: ownerChanged ? nextOwner.id : locked.ownerUserId,
+          owner: ownerChanged ? nextOwner.name : locked.owner,
+        },
+      }),
+    })
+    const [updated] = await tx.select().from(projects).where(eq(projects.id, id)).limit(1)
+    return publicProject(updated)
+  })
 }
 
 export async function moveProjectStage(id: string, nextStage: string, userId: string, expectedVersion?: number) {

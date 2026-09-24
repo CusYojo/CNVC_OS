@@ -70,6 +70,11 @@ export async function getFdeProjectCreationRoster(userId: string) {
   return { people }
 }
 
+export async function isEligibleFdeProjectOwner(reader: Reader, userId: string) {
+  const person = (await enabledPeople(reader)).find((candidate) => candidate.id === userId)
+  return Boolean(person?.categories.some((category) => ['institution_leader', 'project_lead', 'member'].includes(category)))
+}
+
 export async function prepareFdeCreationGovernance(reader: Reader, input: { ownerUserId: string; assignments: FdeCreationAssignment[] }) {
   const people = await enabledPeople(reader)
   const byId = new Map(people.map((person) => [person.id, creationPerson(person)]))
