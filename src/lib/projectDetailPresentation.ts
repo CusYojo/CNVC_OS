@@ -13,6 +13,12 @@ export function projectDetailTab(value: string | null): string {
   return projectDetailTabs.some(tab => tab.id === value) ? value! : 'workflow'
 }
 
+export function projectAdvancePath(projectId: string, pendingRequestId?: string): string {
+  const params = new URLSearchParams({ view: 'board', project: projectId })
+  if (pendingRequestId) params.set('request', pendingRequestId)
+  return `/workflow?${params.toString()}`
+}
+
 export function shortProjectDate(value?: string | null): string {
   return value && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value.slice(5).replace('-', '.') : '未设置'
 }
