@@ -44,7 +44,9 @@ import type { FdeCreationAssignment } from './fdeGovernanceService.js'
 import { canDirectlyDeleteProject } from '../contracts/adminRoleContract.js'
 import { isEnabledSystemAdmin } from './systemAdminAccessService.js'
 import { closeDeletedProjectApprovals } from './oaProjectLifecycleService.js'
-import { projectProgressForStage, type AdminEditableProjectStage } from '../contracts/projectAdminEditContract.js'
+import { isAdminEditableStageForWorkflow, projectProgressForStage, type AdminEditableProjectStage, type ProjectWorkflowModel } from '../contracts/projectAdminEditContract.js'
+import { closeTaskExtensions } from './fdeTaskService.js'
+import { closeProjectDirectiveSchedules } from './fdeDirectiveLinksService.js'
 
 const STAGES = ['线索', '初筛', '立项', '尽调', '上会', '投决', '投后', '退出'] as const
 const ARTIFACT_ROOT = path.resolve(
@@ -533,6 +535,10 @@ export async function updateProjectAsAdministrator(
 
     const stageChanged = stage !== undefined && stage !== locked.stage
     const ownerChanged = ownerUserId !== undefined && ownerUserId !== locked.ownerUserId
+    const workflowModel: ProjectWorkflowModel = locked.workflowModel === 'fde-v1' ? 'fde-v1' : 'legacy'
+    if (stage !== undefined && !isAdminEditableStageForWorkflow(workflowModel, stage)) {
+      throw projectClassificationError(400, 'PROJECT_STAGE_INVALID_FOR_WORKFLOW', '所选项目阶段不适用于当前项目工作流')
+    }
     const investmentFundChanged = 'investmentFund' in editablePatch && editablePatch.investmentFund !== locked.investmentFund
     const requirementsChanged = 'requirements' in editablePatch && editablePatch.requirements !== locked.requirements
     if ((stageChanged || ownerChanged) && locked.lifecycle !== 'active') {
@@ -592,7 +598,8 @@ export async function updateProjectAsAdministrator(
       ...(stageChanged ? {
         stage,
         stageSource: '管理员修正',
-        progress: projectProgressForStage(stage),
+        progress: projectProgressForStage(stage, workflowModel, locked.progress),
+        ...(stage === '已 Close' ? { lifecycle: 'closed' as const } : {}),
       } : {}),
       ...(ownerChanged ? {
         ownerUserId: nextOwner.id,
@@ -604,6 +611,29 @@ export async function updateProjectAsAdministrator(
       updatedAt: new Date(),
     }
     await tx.update(projects).set(values).where(eq(projects.id, id))
+    if (stageChanged && stage === '已 Close') {
+      const taskRows = await tx.select({ id: todos.id }).from(todos).where(eq(todos.projectId, id))
+      await closeTaskExtensions(tx, taskRows.map((task) => task.id), actor.userId, '管理员将项目设为已 Close，未决延期关闭')
+      await tx.update(todos).set({
+        status: '已关闭',
+        closureReason: '管理员将项目设为已 Close；未伪造成果验收通过',
+        version: sql`${todos.version} + 1`,
+      }).where(and(
+        eq(todos.projectId, id),
+        ne(todos.status, '已完成'),
+        ne(todos.status, '已取消'),
+        ne(todos.status, '已归档'),
+        ne(todos.status, '已关闭'),
+      ))
+      await closeProjectDirectiveSchedules(tx, id, actor.userId, '管理员将项目设为已 Close，未确认批示排期关闭，保留任务成果')
+    }
+    if (stageChanged) {
+      const { reconcileTimelineEvent } = await import('./fdeTimelineTaskService.js')
+      await reconcileTimelineEvent(tx, id, actor.userId, {
+        source: 'stage',
+        sourceKey: `admin-stage:${locked.version + 1}:${stage}`,
+      })
+    }
     await createMySqlIdentityRepositoryContext(tx).audits.append({
       userId: actor.userId,
       userName: actor.userName,

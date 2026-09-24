@@ -47,7 +47,7 @@ import { ProjectDetailHero } from '../components/ProjectDetailHero'
 import { PostInvestmentPanel } from '../components/PostInvestmentPanel'
 import { projectDetailTab, projectDetailTabs } from '../lib/projectDetailPresentation'
 import { summarizeProjectFileUpload, type ProjectFileUploadResult, type ProjectFileUploadSummary } from '../lib/projectFileUploadPresentation'
-import { ADMIN_EDITABLE_PROJECT_STAGES, canAdministrativelyEditProject } from '../../server/src/contracts/projectAdminEditContract'
+import { adminEditableStagesForWorkflow, canAdministrativelyEditProject } from '../../server/src/contracts/projectAdminEditContract'
 import './ProjectDetailPage.css'
 
 const tabItems = projectDetailTabs
@@ -577,7 +577,7 @@ export function ProjectDetailPage() {
           <label><span className="label">投资基金（内核必填）</span><input className="input" value={editingProject.investmentFund ?? ''} onChange={(event) => setEditingProject({ ...editingProject, investmentFund: event.target.value })} /></label>
           <label><span className="label">风险等级</span><select className="input" value={editingProject.riskLevel} onChange={(event) => setEditingProject({ ...editingProject, riskLevel: event.target.value as RiskLevel })}><option>低</option><option>中</option><option>高</option></select></label>
           {canAdminEditProject && <>
-            <label><span className="label">项目阶段</span><select className="input" value={editingProject.stage} onChange={(event) => setEditingProject({ ...editingProject, stage: event.target.value as Project['stage'] })}>{ADMIN_EDITABLE_PROJECT_STAGES.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+            <label><span className="label">项目阶段</span><select className="input" value={editingProject.stage} onChange={(event) => setEditingProject({ ...editingProject, stage: event.target.value as Project['stage'] })}>{adminEditableStagesForWorkflow(editingProject.workflowModel ?? 'legacy').map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
             <label><span className="label">项目负责人</span><select className="input" value={editingProject.ownerUserId ?? ''} onChange={(event) => setEditingProject({ ...editingProject, ownerUserId: event.target.value || undefined })}><option value="">请选择负责人</option>{editableOwners.map((user) => <option key={user.id} value={user.id}>{user.name} · {user.department}</option>)}</select></label>
           </>}
           <label><span className="label">项目标签</span><input className="input" value={editingProject.tags.join('、')} onChange={(event) => setEditingProject({ ...editingProject, tags: event.target.value.split(/[、,，]/).map((item) => item.trim()).filter(Boolean) })} /></label>

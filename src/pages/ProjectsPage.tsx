@@ -9,7 +9,7 @@ import { useAuthStore } from '../store/useAuthStore'
 import type { Project, ProjectClassification, ProjectStage, RiskLevel } from '../types'
 import { formatShanghaiDateTime } from '../lib/dateTime'
 import { canDirectlyDeleteProject } from '../../server/src/contracts/adminRoleContract'
-import { ADMIN_EDITABLE_PROJECT_STAGES, canAdministrativelyEditProject } from '../../server/src/contracts/projectAdminEditContract'
+import { ADMIN_EDITABLE_PROJECT_STAGES, adminEditableStagesForWorkflow, canAdministrativelyEditProject } from '../../server/src/contracts/projectAdminEditContract'
 import { fetchProjectList, type ProjectListCounts } from '../services/projectListApi'
 
 const stages: ProjectStage[] = [...ADMIN_EDITABLE_PROJECT_STAGES]
@@ -260,7 +260,7 @@ export function ProjectsPage({
           <div className="grid grid-cols-2 gap-4"><label><span className="label">所属行业</span><input className="input" value={editing.industry ?? ''} onChange={(event) => setEditing({ ...editing, industry: event.target.value })} /></label><label><span className="label">融资轮次</span><input className="input" value={editing.round ?? ''} onChange={(event) => setEditing({ ...editing, round: event.target.value })} /></label></div>
           <div className="grid grid-cols-2 gap-4"><label><span className="label">计划融资</span><input className="input" value={editing.financing ?? ''} onChange={(event) => setEditing({ ...editing, financing: event.target.value })} /></label><label><span className="label">估值</span><input className="input" value={editing.valuation ?? ''} onChange={(event) => setEditing({ ...editing, valuation: event.target.value })} /></label></div>
           {canAdminEditProject && <div className="grid grid-cols-2 gap-4">
-            <label><span className="label">项目阶段</span><select className="input" value={editing.stage} onChange={(event) => setEditing({ ...editing, stage: event.target.value as ProjectStage })}>{ADMIN_EDITABLE_PROJECT_STAGES.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+            <label><span className="label">项目阶段</span><select className="input" value={editing.stage} onChange={(event) => setEditing({ ...editing, stage: event.target.value as ProjectStage })}>{adminEditableStagesForWorkflow(editing.workflowModel ?? 'legacy').map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
             <label><span className="label">项目负责人</span><select className="input" value={editing.ownerUserId ?? ''} onChange={(event) => setEditing({ ...editing, ownerUserId: event.target.value || undefined })}><option value="">请选择负责人</option>{editableOwners.map((user) => <option key={user.id} value={user.id}>{user.name} · {user.department}</option>)}</select></label>
           </div>}
           <label><span className="label">风险等级</span><select className="input" value={editing.riskLevel} onChange={(event) => setEditing({ ...editing, riskLevel: event.target.value as RiskLevel })}><option>低</option><option>中</option><option>高</option></select></label>
