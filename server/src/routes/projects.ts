@@ -14,7 +14,7 @@ import { listProjectMembers, replaceProjectMembers } from '../services/identityA
 import {
   addFile, classifyProject, createProject, getFile, getFileVersion, getProject, listFiles,
   listFileVersions, listProjectClassificationHistory, listProjects, moveProjectStage,
-  replaceFileContent, setFileStoragePath, updateProject, deleteProject, pinProject, listAllFiles,
+  replaceFileContent, setFileStoragePath, updateProject, updateProjectAsAdministrator, deleteProject, pinProject, listAllFiles,
 } from '../services/projectService.js'
 import { openProjectFile, projectFileContentType, projectFilePreviewContentType, readProjectFileBuffer, removeProjectFile, saveProjectFileRevision } from '../services/projectFileStorageService.js'
 import { requireAccessibleProject } from '../services/projectAccessService.js'
@@ -35,6 +35,7 @@ import { actOnFdeFile, getFdeFile, listFdeFiles, setFdeFilePermissions } from '.
 import { requireProjectFileAccess, requireProjectFileUpload } from '../services/projectFileAccessService.js'
 import { createMaterialSubmission, decideMaterialSubmission, getMaterialContext, getMaterialOriginal, getMaterialSubmission, listMaterialInbox, listMaterialSubmissions, readMaterialSubmission, resolveMaterialRequest, withdrawMaterialSubmission } from '../services/fdeMaterialService.js'
 import { createPostInvestmentUpdate, listPostInvestmentUpdates } from '../services/fdePostInvestmentService.js'
+import { ADMIN_EDITABLE_PROJECT_STAGES, canAdministrativelyEditProject } from '../contracts/projectAdminEditContract.js'
 
 export const projectsRouter = Router()
 projectsRouter.get('/:id/post-investment-updates', async (req: AuthedRequest, res, next) => { try { res.json({ list: await listPostInvestmentUpdates(routeId(req.params.id), req.user!.uid) }) } catch (error) { next(error) } })
@@ -234,6 +235,11 @@ const ProjectPatchSchema = ProjectCreateSchema.omit({ stage: true, stageSource: 
   expectedVersion: z.number().int().positive(),
 }).strict()
 
+const AdminProjectPatchSchema = ProjectPatchSchema.extend({
+  stage: z.enum(ADMIN_EDITABLE_PROJECT_STAGES).optional(),
+  ownerUserId: z.string().uuid().optional(),
+}).strict()
+
 const ProjectClassificationSchema = z.object({
   toClassification: z.enum(['pool', 'normal', 'key']),
   reason: z.string().trim().min(2).max(500),
@@ -415,18 +421,27 @@ projectsRouter.patch('/:id', async (req: AuthedRequest, res, next) => {
   try {
     const projectId = routeId(req.params.id)
     await requireAccessibleProject(req.user!.uid, projectId)
+    const admin = canAdministrativelyEditProject(req.user!.role)
     if (
       req.body
       && typeof req.body === 'object'
-      && ('owner' in req.body || 'ownerUserId' in req.body || 'collaborators' in req.body)
+      && ('owner' in req.body || 'collaborators' in req.body || (!admin && ('ownerUserId' in req.body || 'stage' in req.body)))
     ) {
-      const admin = req.user!.role === '系统管理员'
       throw Object.assign(new Error(admin
         ? '请通过项目成员管理接口修改负责人和协作成员'
-        : '项目负责人和协作成员只能由系统管理员修改'), {
+        : '项目阶段、负责人和协作成员只能由系统管理员直接修改'), {
         status: admin ? 409 : 403,
         code: admin ? 'PROJECT_MEMBERSHIP_ENDPOINT_REQUIRED' : 'PROJECT_MEMBERSHIP_FORBIDDEN',
       })
+    }
+    if (admin && req.body && typeof req.body === 'object' && ('stage' in req.body || 'ownerUserId' in req.body)) {
+      const { expectedVersion, ...patch } = AdminProjectPatchSchema.parse(req.body)
+      const row = await updateProjectAsAdministrator(projectId, patch, {
+        userId: req.user!.uid,
+        userName: req.user!.name,
+      }, expectedVersion)
+      res.json(row)
+      return
     }
     const { expectedVersion, ...patch } = ProjectPatchSchema.parse(req.body)
     const row = await updateProject(projectId, patch, req.user!.uid, expectedVersion)

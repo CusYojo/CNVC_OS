@@ -9,9 +9,10 @@ import { useAuthStore } from '../store/useAuthStore'
 import type { Project, ProjectClassification, ProjectStage, RiskLevel } from '../types'
 import { formatShanghaiDateTime } from '../lib/dateTime'
 import { canDirectlyDeleteProject } from '../../server/src/contracts/adminRoleContract'
+import { ADMIN_EDITABLE_PROJECT_STAGES, canAdministrativelyEditProject } from '../../server/src/contracts/projectAdminEditContract'
 import { fetchProjectList, type ProjectListCounts } from '../services/projectListApi'
 
-const stages: ProjectStage[] = ['入库', '立项', '尽调计划制定', '尽调计划审核', '尽调', '内核', '投决', '打款', '已 Close', '线索', '初筛', '上会', '投后', '退出', '放弃']
+const stages: ProjectStage[] = [...ADMIN_EDITABLE_PROJECT_STAGES]
 const viewCopy: Record<ProjectClassification, { title: string; description: string }> = {
   pool: { title: '项目池', description: '已由专属项目转换或授权登记、等待完成入库初筛的项目。' },
   normal: { title: '普通项目', description: '已完成入库并进入正式投资流程的项目。' },
@@ -27,6 +28,7 @@ export function ProjectsPage({
   const navigate = useNavigate()
   const { showToast } = useToast()
   const projects = useAppStore((state) => state.projects)
+  const users = useAppStore((state) => state.users)
   const currentUser = useAuthStore((state) => state.user ?? { id: '', email: '', name: '', role: '', department: '', status: '启用' })
   const approvalRequests = useAppStore((state) => state.approvalRequests)
   const updateProject = useAppStore((state) => state.updateProject)
@@ -105,6 +107,10 @@ export function ProjectsPage({
         valuation: editing.valuation,
         riskLevel: editing.riskLevel,
         summary: editing.summary,
+        ...(canAdministrativelyEditProject(currentUser.role) ? {
+          stage: editing.stage,
+          ownerUserId: editing.ownerUserId,
+        } : {}),
       })
       showToast('项目信息已保存')
       setEditing(null)
@@ -160,6 +166,12 @@ export function ProjectsPage({
 
   const canClassify = currentUser.permissionCodes?.includes('project.classify') ?? false
   const canDelete = canDirectlyDeleteProject(currentUser.role, currentUser.permissionCodes)
+  const canAdminEditProject = canAdministrativelyEditProject(currentUser.role)
+  const editableOwners = users.filter((user) => user.status === '启用' && (user.role !== '系统管理员' || user.id === editing?.ownerUserId))
+  const openEditor = (project: Project) => setEditing({
+    ...project,
+    ownerUserId: project.ownerUserId ?? users.find((user) => user.name === project.owner && user.status === '启用')?.id,
+  })
   const canPromote = (project: Project) => canClassify || project.ownerUserId === currentUser.id || ['owner', 'project_lead'].includes(project.participantRole ?? '')
   const currentCopy = viewCopy[classification]
 
@@ -208,7 +220,7 @@ export function ProjectsPage({
                     <div className="flex items-center gap-1 transition">
                       {classification === 'normal' && canPromote(project) && <button aria-label={`将${project.name}转为重点项目`} title="转为重点项目" className="inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs font-medium text-amber-700 hover:bg-amber-50" onClick={(event) => { event.stopPropagation(); void changeClassification(project, 'key') }}><Star className="h-4 w-4" />转重点</button>}
                       <button aria-label="发起OA审批" title="发起 OA 审批" className="rounded-lg p-1.5 text-slate-400 hover:bg-white hover:text-brand-600" onClick={(event) => { event.stopPropagation(); navigate(`/workflow?view=project&project=${project.id}`) }}><GitBranch className="h-4 w-4" /></button>
-                      <button aria-label="编辑项目" className="rounded-lg p-1.5 text-slate-400 hover:bg-white hover:text-brand-600" onClick={(event) => { event.stopPropagation(); setEditing(project) }}><Pencil className="h-4 w-4" /></button>
+                      <button aria-label="编辑项目" className="rounded-lg p-1.5 text-slate-400 hover:bg-white hover:text-brand-600" onClick={(event) => { event.stopPropagation(); openEditor(project) }}><Pencil className="h-4 w-4" /></button>
                       <span className="relative inline-block"><button aria-label="更多操作" className="rounded-lg p-1.5 text-slate-400 hover:bg-white" onClick={(event) => { event.stopPropagation(); setMenuId(menuId === project.id ? null : project.id) }}><MoreHorizontal className="h-4 w-4" /></button>{menuId === project.id && <span className="absolute right-0 top-9 z-20 w-40 rounded-lg border border-slate-200 bg-white py-1 text-sm shadow-lg" onClick={(event) => event.stopPropagation()}>{classification === 'pool' && (project.owner === currentUser.name || canClassify) && <button className="flex w-full items-center gap-2 px-3 py-2 text-left text-brand-700 hover:bg-brand-50" onClick={() => { void changeClassification(project, 'normal') }}>发起入库审批</button>}{classification === 'normal' && canPromote(project) && <button className="flex w-full items-center gap-2 px-3 py-2 text-left text-brand-700 hover:bg-brand-50" onClick={() => { void changeClassification(project, 'key') }}>升级为重点项目</button>}{classification === 'key' && canClassify && <button className="flex w-full items-center gap-2 px-3 py-2 text-left text-slate-600 hover:bg-slate-50" onClick={() => { void changeClassification(project, 'normal') }}>调整为普通项目</button>}<button className="flex w-full items-center gap-2 px-3 py-2 text-left text-slate-600 hover:bg-slate-50" onClick={() => handlePin(project)}>{project.pinned ? '取消置顶' : '置顶'}</button>{canDelete && <button className="flex w-full items-center gap-2 px-3 py-2 text-left text-rose-600 hover:bg-rose-50" onClick={() => requestDelete(project)}>删除项目</button>}</span>}</span>
                     </div>
                   </TableCell>
@@ -247,6 +259,10 @@ export function ProjectsPage({
           <label><span className="label">公司名称</span><input className="input" value={editing.companyName ?? ''} onChange={(event) => setEditing({ ...editing, companyName: event.target.value })} /></label>
           <div className="grid grid-cols-2 gap-4"><label><span className="label">所属行业</span><input className="input" value={editing.industry ?? ''} onChange={(event) => setEditing({ ...editing, industry: event.target.value })} /></label><label><span className="label">融资轮次</span><input className="input" value={editing.round ?? ''} onChange={(event) => setEditing({ ...editing, round: event.target.value })} /></label></div>
           <div className="grid grid-cols-2 gap-4"><label><span className="label">计划融资</span><input className="input" value={editing.financing ?? ''} onChange={(event) => setEditing({ ...editing, financing: event.target.value })} /></label><label><span className="label">估值</span><input className="input" value={editing.valuation ?? ''} onChange={(event) => setEditing({ ...editing, valuation: event.target.value })} /></label></div>
+          {canAdminEditProject && <div className="grid grid-cols-2 gap-4">
+            <label><span className="label">项目阶段</span><select className="input" value={editing.stage} onChange={(event) => setEditing({ ...editing, stage: event.target.value as ProjectStage })}>{ADMIN_EDITABLE_PROJECT_STAGES.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+            <label><span className="label">项目负责人</span><select className="input" value={editing.ownerUserId ?? ''} onChange={(event) => setEditing({ ...editing, ownerUserId: event.target.value || undefined })}><option value="">请选择负责人</option>{editableOwners.map((user) => <option key={user.id} value={user.id}>{user.name} · {user.department}</option>)}</select></label>
+          </div>}
           <label><span className="label">风险等级</span><select className="input" value={editing.riskLevel} onChange={(event) => setEditing({ ...editing, riskLevel: event.target.value as RiskLevel })}><option>低</option><option>中</option><option>高</option></select></label>
           <label><span className="label">项目简介</span><textarea className="textarea min-h-28" value={editing.summary ?? ''} onChange={(event) => setEditing({ ...editing, summary: event.target.value })} /></label>
         </div>}
@@ -254,4 +270,3 @@ export function ProjectsPage({
     </div>
   )
 }
-

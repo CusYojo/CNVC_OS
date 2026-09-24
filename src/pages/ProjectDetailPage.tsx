@@ -47,6 +47,7 @@ import { ProjectDetailHero } from '../components/ProjectDetailHero'
 import { PostInvestmentPanel } from '../components/PostInvestmentPanel'
 import { projectDetailTab, projectDetailTabs } from '../lib/projectDetailPresentation'
 import { summarizeProjectFileUpload, type ProjectFileUploadResult, type ProjectFileUploadSummary } from '../lib/projectFileUploadPresentation'
+import { ADMIN_EDITABLE_PROJECT_STAGES, canAdministrativelyEditProject } from '../../server/src/contracts/projectAdminEditContract'
 import './ProjectDetailPage.css'
 
 const tabItems = projectDetailTabs
@@ -111,6 +112,12 @@ export function ProjectDetailPage() {
   const [projectFilesError, setProjectFilesError] = useState('')
   const [projectFilesReloadKey, setProjectFilesReloadKey] = useState(0)
   const [taskRevision, setTaskRevision] = useState(0)
+  const canAdminEditProject = canAdministrativelyEditProject(currentUser.role)
+  const editableOwners = users.filter((user) => user.status === '启用' && (user.role !== '系统管理员' || user.id === editingProject?.ownerUserId))
+  const openProjectEditor = (item: Project) => setEditingProject({
+    ...item,
+    ownerUserId: item.ownerUserId ?? users.find((user) => user.name === item.owner && user.status === '启用')?.id,
+  })
   useEffect(() => {
     const refresh = () => setTaskRevision(value => value + 1)
     window.addEventListener(APPROVAL_CHANGED, refresh); window.addEventListener(TASK_CHANGED, refresh)
@@ -370,7 +377,7 @@ export function ProjectDetailPage() {
     <div className="grid grid-cols-[1fr_300px] gap-5">
       <div className="space-y-5">
         <Card className="p-5">
-          <div className="mb-5 flex items-center justify-between"><h2 className="font-semibold text-slate-800">项目概况</h2><button onClick={() => setEditingProject(project)} className="flex items-center gap-1 text-xs text-brand-600"><Pencil className="h-3.5 w-3.5" />编辑信息</button></div>
+          <div className="mb-5 flex items-center justify-between"><h2 className="font-semibold text-slate-800">项目概况</h2><button onClick={() => openProjectEditor(project)} className="flex items-center gap-1 text-xs text-brand-600"><Pencil className="h-3.5 w-3.5" />编辑信息</button></div>
           <div className="grid grid-cols-3 gap-x-8 gap-y-5">
             {[['公司主体', project.companyName], ['所属行业', project.industry], ['融资轮次', project.round], ['计划融资', project.financing], ['投前估值', project.valuation], ['项目来源', project.source], ['项目负责人', project.owner], ['协作成员', project.collaborators.join('、') || '暂无'], ['创建时间', displayShanghaiDateTime(project.createdAt)]].map(([label, value]) => <div key={label}><p className="text-xs text-slate-400">{label}</p><p className="mt-1.5 text-sm font-medium text-slate-700">{value || '—'}</p></div>)}
           </div>
@@ -394,7 +401,7 @@ export function ProjectDetailPage() {
         </Card>
         <Card className="p-5">
           <h2 className="mb-3 text-sm font-semibold text-slate-800">项目标签</h2>
-          <div className="flex flex-wrap gap-2">{project.tags.map((tag) => <Badge key={tag} tone="blue">{tag}</Badge>)}<button onClick={() => setEditingProject(project)} className="rounded-md border border-dashed border-slate-300 px-2 py-1 text-xs text-slate-400">+ 添加</button></div>
+          <div className="flex flex-wrap gap-2">{project.tags.map((tag) => <Badge key={tag} tone="blue">{tag}</Badge>)}<button onClick={() => openProjectEditor(project)} className="rounded-md border border-dashed border-slate-300 px-2 py-1 text-xs text-slate-400">+ 添加</button></div>
         </Card>
         <Card className="overflow-hidden">
           <div className="border-b border-slate-100 px-5 py-4"><h2 className="text-sm font-semibold text-slate-800">快捷操作</h2></div>
@@ -489,9 +496,13 @@ export function ProjectDetailPage() {
         riskLevel: editingProject.riskLevel,
         tags: editingProject.tags,
         summary: editingProject.summary,
+        ...(canAdministrativelyEditProject(currentUser.role) ? {
+          stage: editingProject.stage,
+          ownerUserId: editingProject.ownerUserId,
+        } : {}),
       })
       setEditingProject(null)
-      showToast('项目档案已更新，项目阶段未发生变化')
+      showToast(canAdminEditProject ? '项目档案、阶段和负责人已更新' : '项目档案已更新')
     } catch (error) {
       showToast(`保存失败：${(error as Error).message}`, 'error')
     } finally {
@@ -542,7 +553,7 @@ export function ProjectDetailPage() {
       }}>{tab.label}</button>)}</div>
       <div className="fde-detail-tab-content" id={`project-panel-${activeTab}`} role="tabpanel" aria-labelledby={`project-tab-${activeTab}`} key={`${project.id}:${activeTab}`}>{tabContent[activeTab]?.()}</div>
 
-      <Drawer open={workspace === 'overview'} onClose={() => setWorkspace(null)} title="项目概况" width="w-[min(720px,100vw)]" footer={<><Button variant="secondary" onClick={() => setEditingProject(project)}>编辑项目</Button><Button onClick={() => setWorkspace('governance')}>项目成员</Button></>}>{renderProjectOverviewDrawer()}</Drawer>
+      <Drawer open={workspace === 'overview'} onClose={() => setWorkspace(null)} title="项目概况" width="w-[min(720px,100vw)]" footer={<><Button variant="secondary" onClick={() => openProjectEditor(project)}>编辑项目</Button><Button onClick={() => setWorkspace('governance')}>项目成员</Button></>}>{renderProjectOverviewDrawer()}</Drawer>
 
       <Modal open={(workspace !== null && workspace !== 'overview') || searchParams.has('replan') || ['overview', 'intelligence', 'summary', 'risks'].includes(requestedTab ?? '')} onClose={() => { setWorkspace(null); if (searchParams.has('replan')) { const next = new URLSearchParams(searchParams); next.delete('replan'); setSearchParams(next) } if (['overview', 'intelligence', 'summary', 'risks'].includes(requestedTab ?? '')) setActiveTab('workflow') }} title={workspace === 'directives' ? '领导批示' : workspace === 'weekly' ? '本周工作与周计划' : workspace === 'governance' ? '项目成员与职责' : '项目档案与历史'} width="max-w-6xl">
         {workspace === 'directives' ? <FdeDirectivePanel projectId={project.id} onChanged={hydrateFromServer} /> : workspace === 'weekly' ? <FdeWeeklyPlanPanel projectId={project.id} onChanged={hydrateFromServer} /> : workspace === 'governance' ? <ProjectGovernancePanel projectId={project.id} onChanged={hydrateFromServer} /> : renderProjectArchive()}
@@ -565,9 +576,13 @@ export function ProjectDetailPage() {
           <label><span className="label">投前估值</span><input className="input" value={editingProject.valuation ?? ''} onChange={(event) => setEditingProject({ ...editingProject, valuation: event.target.value })} /></label>
           <label><span className="label">投资基金（内核必填）</span><input className="input" value={editingProject.investmentFund ?? ''} onChange={(event) => setEditingProject({ ...editingProject, investmentFund: event.target.value })} /></label>
           <label><span className="label">风险等级</span><select className="input" value={editingProject.riskLevel} onChange={(event) => setEditingProject({ ...editingProject, riskLevel: event.target.value as RiskLevel })}><option>低</option><option>中</option><option>高</option></select></label>
+          {canAdminEditProject && <>
+            <label><span className="label">项目阶段</span><select className="input" value={editingProject.stage} onChange={(event) => setEditingProject({ ...editingProject, stage: event.target.value as Project['stage'] })}>{ADMIN_EDITABLE_PROJECT_STAGES.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+            <label><span className="label">项目负责人</span><select className="input" value={editingProject.ownerUserId ?? ''} onChange={(event) => setEditingProject({ ...editingProject, ownerUserId: event.target.value || undefined })}><option value="">请选择负责人</option>{editableOwners.map((user) => <option key={user.id} value={user.id}>{user.name} · {user.department}</option>)}</select></label>
+          </>}
           <label><span className="label">项目标签</span><input className="input" value={editingProject.tags.join('、')} onChange={(event) => setEditingProject({ ...editingProject, tags: event.target.value.split(/[、,，]/).map((item) => item.trim()).filter(Boolean) })} /></label>
           <label className="col-span-2"><span className="label">项目简介</span><textarea className="textarea min-h-24" value={editingProject.summary ?? ''} onChange={(event) => setEditingProject({ ...editingProject, summary: event.target.value })} /></label>
-          <p className="col-span-2 rounded-lg bg-blue-50 p-3 text-xs text-blue-700">项目阶段在此不可编辑；如需推进或终止，请从 OA 项目流程发起申请。</p>
+          {!canAdminEditProject && <p className="col-span-2 rounded-lg bg-blue-50 p-3 text-xs text-blue-700">项目阶段和负责人由管理员维护；业务推进或终止仍请从 OA 项目流程发起申请。</p>}
         </div>}
       </Modal>
     </div>
