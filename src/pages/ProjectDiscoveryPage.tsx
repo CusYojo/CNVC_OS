@@ -342,6 +342,9 @@ function DiscoveryCard({ lead, onOpen, onKeywordsUpdated, onCardUpdated, onRemov
   const primaryDateTime = /^\d{4}-\d{2}-\d{2}/u.exec(cardDraft.primaryDate)?.[0]
   const eligiblePeople = assignmentOptions?.people.filter((person) => person.department === selectedDepartment) ?? []
   const cardDirty = JSON.stringify(cardDraft) !== JSON.stringify(persistedCard)
+  const investorNames = [...new Set((cardDraft.briefFacts['投资方'] ?? '').split(/[、,，;；\n]+/u)
+    .map((value) => value.trim())
+    .filter((value) => value && !['未披露', '待补充', '待核验'].includes(value)))]
   const persistedCardKey = JSON.stringify(readProjectDiscoveryCardEdits(lead) ?? null)
 
   useEffect(() => setKeywordText(persistedKeywordText), [persistedKeywordText])
@@ -488,8 +491,6 @@ function DiscoveryCard({ lead, onOpen, onKeywordsUpdated, onCardUpdated, onRemov
       name={name}
       brief={brief}
       factValues={cardDraft.briefFacts}
-      investorNames={(cardDraft.briefFacts['投资方'] ?? '').split(/[、,，;；\n]+/u).map((value) => value.trim()).filter((value) => value && !['未披露', '待补充', '待核验'].includes(value))}
-      institutionLinksEnabled={!cardDirty}
       keywordText={keywordText}
       saving={cardAction === 'keywords' || cardAction === 'card'}
       onFactChange={(label, value) => updateCardFact('briefFacts', label, value)}
@@ -541,6 +542,15 @@ function DiscoveryCard({ lead, onOpen, onKeywordsUpdated, onCardUpdated, onRemov
           <ul>{missingFields.map((field) => <li key={field}>补充并核验{field}</li>)}</ul>
           <div>{missingFields.map((field) => <span key={field}>待补：{field}</span>)}</div>
         </div>}
+        {cardDirty
+          ? <p className="project-discovery-institution-hint">保存后将自动关联至机构追踪</p>
+          : investorNames.length > 0 && <div className="project-discovery-institution-links" aria-label="关联投资机构">
+            {investorNames.map((investor) => <Link
+              key={investor}
+              className="project-discovery-institution-link"
+              to={`/institutions/${encodeInstitutionTrackingKey(investor)}`}
+            >查看{investor}最近投资项目<ArrowRight aria-hidden="true" /></Link>)}
+          </div>}
       </section>
     </>}
     {cardDirty && <div className="project-discovery-card-save" role="status">
@@ -599,13 +609,11 @@ function CardDetailsToggle({ expanded, name, onToggle }: { expanded: boolean; na
   </button>
 }
 
-function DiscoveryInvestmentBrief({ leadId, name, brief, factValues, investorNames, institutionLinksEnabled, keywordText, saving, onFactChange, onKeywordChange, onKeywordBlur }: {
+function DiscoveryInvestmentBrief({ leadId, name, brief, factValues, keywordText, saving, onFactChange, onKeywordChange, onKeywordBlur }: {
   leadId: string
   name: string
   brief: ReturnType<typeof buildProjectDiscoveryBrief>
   factValues: Record<string, string>
-  investorNames: string[]
-  institutionLinksEnabled: boolean
   keywordText: string
   saving: boolean
   onFactChange: (label: string, value: string) => void
@@ -625,15 +633,7 @@ function DiscoveryInvestmentBrief({ leadId, name, brief, factValues, investorNam
             maxLength={1_000}
             disabled={saving}
             onChange={(event) => onFactChange(item.label, event.target.value)}
-          />{item.label === '投资方' && (institutionLinksEnabled
-            ? <div className="project-discovery-institution-links" aria-label="关联投资机构">
-              {[...new Set(investorNames)].map((investor) => <Link
-                key={investor}
-                className="project-discovery-institution-link"
-                to={`/institutions/${encodeInstitutionTrackingKey(investor)}`}
-              >查看{investor}最近投资项目<ArrowRight aria-hidden="true" /></Link>)}
-            </div>
-            : <p className="project-discovery-institution-hint">保存后将自动关联至机构追踪</p>)}</dd>
+          /></dd>
         </div>
         {index === 0 && <div className="project-discovery-keywords">
           <dt>重点关键词</dt>
