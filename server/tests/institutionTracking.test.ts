@@ -132,3 +132,16 @@ test('CNVC OS exposes institution tracking routes and discovery-card deep links'
   assert.match(discoveryCss, /\.project-discovery-institution-link:focus-visible/)
   assert.match(service, /'discoveryCardEdits', \$\{jsonValue\(leads\.radarProfile, '\$\.profile\.discoveryCardEdits'\)\}/)
 })
+
+test('discovery card shows institution project links only inside expanded details', async () => {
+  const discovery = await read('src/pages/ProjectDiscoveryPage.tsx')
+  const card = discovery.split('function DiscoveryCard(')[1]?.split('function CardDetailsToggle(')[0]
+  const brief = discovery.split('function DiscoveryInvestmentBrief(')[1]?.split('type ProjectDiscoveryProfileFact')[0]
+  assert.ok(card && brief, '应保留发现卡片与投资速览组件')
+
+  const expandedDetails = card.split('{expanded && <>')[1]?.split('</>}')[0]
+  assert.ok(expandedDetails, '应保留仅在展开时渲染的详情区域')
+  assert.doesNotMatch(brief, /project-discovery-institution-links|project-discovery-institution-hint/, '缩略卡片不应显示机构项目链接或提示')
+  assert.match(expandedDetails, /className="project-discovery-institution-links"/, '机构项目链接应放在展开区域')
+  assert.match(expandedDetails, /to=\{`\/institutions\/\$\{encodeInstitutionTrackingKey\(investor\)\}`\}/, '展开后应仍可跳转至对应机构')
+})
