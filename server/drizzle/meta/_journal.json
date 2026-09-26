@@ -826,6 +826,26 @@
     { "idx": 118, "version": "5", "when": 1793346548000, "tag": "0118_add_post_investment_foreign_keys", "breakpoints": true
     },
     { "idx": 119, "version": "5", "when": 1793346549000, "tag": "0119_restore_fde_establishment_approval", "breakpoints": true
+    },
+    { "idx": 120, "version": "5", "when": 1793432949000, "tag": "0120_add_due_diligence_workbench", "breakpoints": true
+    },
+    { "idx": 121, "version": "5", "when": 1793432950000, "tag": "0121_expand_due_diligence_workbench", "breakpoints": true
+    },
+    { "idx": 122, "version": "5", "when": 1793432951000, "tag": "0122_add_due_diligence_question_packs", "breakpoints": true
+    },
+    { "idx": 123, "version": "5", "when": 1793432952000, "tag": "0123_simplify_due_diligence_questions", "breakpoints": true
+    },
+    { "idx": 124, "version": "5", "when": 1793432953000, "tag": "0124_add_due_diligence_interview_media", "breakpoints": true
+    },
+    { "idx": 125, "version": "5", "when": 1793432954000, "tag": "0125_add_digital_twin_evolution", "breakpoints": true
+    },
+    { "idx": 126, "version": "5", "when": 1793432955000, "tag": "0126_add_due_diligence_question_attention_source", "breakpoints": true
+    },
+    { "idx": 127, "version": "5", "when": 1793432956000, "tag": "0127_streamline_due_diligence_experience_assets", "breakpoints": true
+    },
+    { "idx": 128, "version": "5", "when": 1793432957000, "tag": "0128_refine_due_diligence_workbench", "breakpoints": true
+    },
+    { "idx": 129, "version": "5", "when": 1793432958000, "tag": "0129_link_interview_project_materials", "breakpoints": true
     }
   ]
 }
