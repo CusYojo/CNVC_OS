@@ -5,6 +5,7 @@ import {
   BriefcaseBusiness,
   ChevronDown,
   ClipboardCheck,
+  ClipboardList,
   FolderKanban,
   Gauge,
   LogOut,
@@ -65,6 +66,7 @@ const primaryNav = [
   { to: '/institutions', label: '机构追踪', icon: Building2 },
   { to: '/collaboration', label: '任务与日历', icon: BriefcaseBusiness },
   { to: '/workflow', label: '申请与记录', icon: ClipboardCheck },
+  { to: '/due-diligence', label: '尽调工作台', icon: ClipboardList },
   { to: '/knowledge', label: '知识库', icon: BookOpen },
 ]
 const navSections = [
