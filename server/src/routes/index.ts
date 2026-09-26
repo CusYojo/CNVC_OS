@@ -16,6 +16,7 @@ import { leaderTimeRouter, calendarRouter } from './fdeTime.js'
 import { meetingsRouter, todosRouter, aiRouter } from './meetings.js'
 import { unifiedTasksRouter } from './unifiedTasks.js'
 import { risksRouter } from './risks.js'
+import { dueDiligenceRouter } from './dueDiligence.js'
 import { metaRouter } from './meta.js'
 import { institutionTrackingRouter } from './institutionTracking.js'
 import { conversationsRouter } from './conversations.js'
@@ -64,6 +65,7 @@ apiRouter.use('/meetings', meetingsRouter)
 apiRouter.use('/todos', todosRouter)
 apiRouter.use('/tasks', unifiedTasksRouter)
 apiRouter.use('/risks', risksRouter)
+apiRouter.use('/due-diligence', dueDiligenceRouter)
 apiRouter.use('/', leadIntakeRouter)
 apiRouter.use('/', radarRouter)
 apiRouter.use('/', metaRouter) // /users /templates /audit-logs /leads /ai-summaries

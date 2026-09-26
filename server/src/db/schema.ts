@@ -634,6 +634,208 @@ export const projectFileVersions = mysqlTable('project_file_versions', {
   byHash: index('idx_project_file_versions_sha256').on(t.sha256),
 }))
 
+// 尽调工作台只保存对既有项目、风险和材料的稳定 ID 引用；项目、人员、文件和
+// 风险主数据仍分别由其原有领域模型负责，后续接入 OA 时可仅替换适配层。
+export const dueDiligenceQuestions = mysqlTable('due_diligence_questions', {
+  id: uuidPrimaryKey('id'),
+  projectId: uuidColumn('project_id').notNull().references(() => projects.id, { onDelete: 'cascade' }),
+  title: varchar('title', { length: 255 }).notNull(),
+  category: varchar('category', { length: 32 }).notNull().default('业务'),
+  priority: varchar('priority', { length: 8 }).notNull().default('中'),
+  status: varchar('status', { length: 16 }).notNull().default('待核查'),
+  evidenceRequirement: text('evidence_requirement'),
+  assigneeName: varchar('assignee_name', { length: 64 }),
+  assigneeUserId: uuidColumn('assignee_user_id').references(() => users.id, { onDelete: 'set null' }),
+  riskId: uuidColumn('risk_id').references(() => risks.id, { onDelete: 'set null' }),
+  fileId: uuidColumn('file_id').references(() => projectFiles.id, { onDelete: 'set null' }),
+  dueDate: varchar('due_date', { length: 10 }),
+  conclusion: text('conclusion'),
+  followUpNote: text('follow_up_note'),
+  attentionSource: varchar('attention_source', { length: 512 }),
+  source: varchar('source', { length: 32 }).notNull().default('人工创建'),
+  sortOrder: int('sort_order').notNull().default(0),
+  createdBy: uuidColumn('created_by').references(() => users.id, { onDelete: 'set null' }),
+  version: int('version').notNull().default(1),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+  updatedAt: timestampColumn('updated_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({
+  byProject: index('idx_dd_questions_project').on(t.projectId, t.status, t.priority),
+  byRisk: index('idx_dd_questions_risk').on(t.riskId),
+  byAssignee: index('idx_dd_questions_assignee').on(t.assigneeUserId, t.status),
+}))
+
+export const dueDiligenceQuestionEvidence = mysqlTable('due_diligence_question_evidence', {
+  id: uuidPrimaryKey('id'),
+  questionId: uuidColumn('question_id').notNull().references(() => dueDiligenceQuestions.id, { onDelete: 'cascade' }),
+  fileId: uuidColumn('file_id').notNull().references(() => projectFiles.id, { onDelete: 'restrict' }),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({ uniqueLink: uniqueIndex('uq_dd_question_evidence').on(t.questionId, t.fileId), byQuestion: index('idx_dd_question_evidence_question').on(t.questionId) }))
+
+export const dueDiligenceQuestionPacks = mysqlTable('due_diligence_question_packs', {
+  id: uuidPrimaryKey('id'),
+  projectId: uuidColumn('project_id').notNull().references(() => projects.id, { onDelete: 'cascade' }),
+  createdBy: uuidColumn('created_by').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  title: varchar('title', { length: 255 }).notNull(),
+  sourceFileIds: json('source_file_ids').$type<string[]>().notNull().default(emptyJsonArray),
+  questions: json('questions').$type<Array<{ title: string; category: string; priority: '高' | '中' | '低'; evidenceRequirement: string; rationale: string; sourceNames: string[]; attentionSource?: string; publicationIds?: string[] }>>().notNull(),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({ byProject: index('idx_dd_question_packs_project').on(t.projectId, t.createdAt) }))
+
+export const dueDiligenceInterviews = mysqlTable('due_diligence_interviews', {
+  id: uuidPrimaryKey('id'),
+  projectId: uuidColumn('project_id').notNull().references(() => projects.id, { onDelete: 'cascade' }),
+  title: varchar('title', { length: 255 }).notNull(),
+  mode: varchar('mode', { length: 16 }).notNull().default('现场'),
+  status: varchar('status', { length: 16 }).notNull().default('筹备中'),
+  scheduledAt: timestampColumn('scheduled_at'),
+  agenda: text('agenda'),
+  notes: longtext('notes'),
+  summary: longtext('summary'),
+  counterparty: varchar('counterparty', { length: 255 }),
+  location: varchar('location', { length: 512 }),
+  participantNames: json('participant_names').$type<string[]>().notNull().default(emptyJsonArray),
+  sortOrder: int('sort_order').notNull().default(0),
+  createdBy: uuidColumn('created_by').references(() => users.id, { onDelete: 'set null' }),
+  version: int('version').notNull().default(1),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+  updatedAt: timestampColumn('updated_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({
+  byProject: index('idx_dd_interviews_project').on(t.projectId, t.scheduledAt),
+}))
+
+export const dueDiligenceInterviewActions = mysqlTable('due_diligence_interview_actions', {
+  id: uuidPrimaryKey('id'),
+  interviewId: uuidColumn('interview_id').notNull().references(() => dueDiligenceInterviews.id, { onDelete: 'cascade' }),
+  title: varchar('title', { length: 255 }).notNull(),
+  ownerUserId: uuidColumn('owner_user_id').references(() => users.id, { onDelete: 'set null' }),
+  ownerName: varchar('owner_name', { length: 64 }),
+  dueDate: varchar('due_date', { length: 10 }),
+  status: varchar('status', { length: 16 }).notNull().default('草稿'),
+  // todos is declared later in this schema module; retain only the stable task ID here.
+  todoId: uuidColumn('todo_id'),
+  createdBy: uuidColumn('created_by').references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+  updatedAt: timestampColumn('updated_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({ byInterview: index('idx_dd_interview_actions_interview').on(t.interviewId, t.status), uniqueTodo: uniqueIndex('uq_dd_interview_action_todo').on(t.todoId) }))
+
+export const dueDiligenceInterviewPrompts = mysqlTable('due_diligence_interview_prompts', {
+  id: uuidPrimaryKey('id'),
+  interviewId: uuidColumn('interview_id').notNull().references(() => dueDiligenceInterviews.id, { onDelete: 'cascade' }),
+  questionId: uuidColumn('question_id').references(() => dueDiligenceQuestions.id, { onDelete: 'set null' }),
+  content: text('content').notNull(),
+  status: varchar('status', { length: 16 }).notNull().default('待确认'),
+  response: text('response'),
+  handledBy: uuidColumn('handled_by').references(() => users.id, { onDelete: 'set null' }),
+  handledAt: timestampColumn('handled_at'),
+  createdBy: uuidColumn('created_by').references(() => users.id, { onDelete: 'set null' }),
+  createdByName: varchar('created_by_name', { length: 64 }).notNull(),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({
+  byInterview: index('idx_dd_interview_prompts_interview').on(t.interviewId, t.createdAt),
+}))
+
+/** Provider-neutral artifacts. Audio bytes stay in the governed project file store. */
+export const dueDiligenceInterviewArtifacts = mysqlTable('due_diligence_interview_artifacts', {
+  id: uuidPrimaryKey('id'),
+  interviewId: uuidColumn('interview_id').notNull().references(() => dueDiligenceInterviews.id, { onDelete: 'cascade' }),
+  fileId: uuidColumn('file_id').notNull().references(() => projectFiles.id, { onDelete: 'restrict' }),
+  kind: varchar('kind', { length: 16 }).notNull(), // 录音 / 转写 / 纪要
+  source: varchar('source', { length: 32 }).notNull().default('manual'), // browser / provider / manual
+  durationSeconds: int('duration_seconds'),
+  createdBy: uuidColumn('created_by').references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({ byInterview: index('idx_dd_interview_artifacts_interview').on(t.interviewId, t.createdAt), uniqueInterviewFile: uniqueIndex('uq_dd_interview_artifact_file').on(t.interviewId, t.fileId) }))
+
+export const dueDiligenceInterviewTranscripts = mysqlTable('due_diligence_interview_transcripts', {
+  id: uuidPrimaryKey('id'),
+  interviewId: uuidColumn('interview_id').notNull().references(() => dueDiligenceInterviews.id, { onDelete: 'cascade' }),
+  content: longtext('content').notNull(),
+  source: varchar('source', { length: 32 }).notNull().default('browser'),
+  status: varchar('status', { length: 16 }).notNull().default('草稿'),
+  version: int('version').notNull().default(1),
+  createdBy: uuidColumn('created_by').references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+  updatedAt: timestampColumn('updated_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({ uniqueInterview: uniqueIndex('uq_dd_interview_transcript_interview').on(t.interviewId) }))
+
+export const digitalTwins = mysqlTable('digital_twins', {
+  id: uuidPrimaryKey('id'),
+  ownerUserId: uuidColumn('owner_user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  name: varchar('name', { length: 64 }).notNull(),
+  role: varchar('role', { length: 64 }).notNull(),
+  rules: longtext('rules').notNull(),
+  cases: longtext('cases').notNull(),
+  activeVersion: int('active_version').notNull().default(1),
+  deletedAt: timestampColumn('deleted_at'),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+  updatedAt: timestampColumn('updated_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({ byOwner: index('idx_digital_twins_owner').on(t.ownerUserId, t.updatedAt) }))
+
+export const digitalTwinAssetArchives = mysqlTable('digital_twin_asset_archives', {
+  id: uuidPrimaryKey('id'), ownerUserId: uuidColumn('owner_user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  assetType: varchar('asset_type', { length: 24 }).notNull(), sourceTwinId: uuidColumn('source_twin_id'), name: varchar('name', { length: 255 }).notNull(), snapshot: json('snapshot').$type<Record<string, unknown>>().notNull(),
+  deletedAt: timestampColumn('deleted_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`), restoredAt: timestampColumn('restored_at'),
+}, (t) => ({ byOwner: index('idx_digital_twin_asset_archives_owner').on(t.ownerUserId, t.deletedAt) }))
+
+export const digitalTwinVersions = mysqlTable('digital_twin_versions', {
+  id: uuidPrimaryKey('id'),
+  twinId: uuidColumn('twin_id').notNull().references(() => digitalTwins.id, { onDelete: 'cascade' }),
+  ownerUserId: uuidColumn('owner_user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  version: int('version').notNull(),
+  rules: longtext('rules').notNull(),
+  cases: longtext('cases').notNull(),
+  source: varchar('source', { length: 16 }).notNull().default('manual'),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({
+  uniqueVersion: uniqueIndex('uq_digital_twin_versions').on(t.twinId, t.version),
+  byOwner: index('idx_digital_twin_versions_owner').on(t.ownerUserId, t.createdAt),
+}))
+
+export const digitalTwinConversations = mysqlTable('digital_twin_conversations', {
+  id: uuidPrimaryKey('id'), twinId: uuidColumn('twin_id').notNull().references(() => digitalTwins.id, { onDelete: 'cascade' }),
+  ownerUserId: uuidColumn('owner_user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  projectId: uuidColumn('project_id').references(() => projects.id, { onDelete: 'set null' }),
+  conversationId: uuidColumn('conversation_id').notNull(), agentId: varchar('agent_id', { length: 128 }).notNull(),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`), updatedAt: timestampColumn('updated_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({ uniqueScope: uniqueIndex('uq_digital_twin_conversation_scope').on(t.twinId, t.projectId), byOwner: index('idx_digital_twin_conversations_owner').on(t.ownerUserId, t.updatedAt) }))
+
+export const digitalTwinUpdateCandidates = mysqlTable('digital_twin_update_candidates', {
+  id: uuidPrimaryKey('id'), twinId: uuidColumn('twin_id').notNull().references(() => digitalTwins.id, { onDelete: 'cascade' }),
+  ownerUserId: uuidColumn('owner_user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  rules: longtext('rules').notNull(), cases: longtext('cases').notNull(), sourceNote: text('source_note').notNull(),
+  status: varchar('status', { length: 16 }).notNull().default('待确认'), createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`), decidedAt: timestampColumn('decided_at'),
+}, (t) => ({ byTwin: index('idx_digital_twin_candidates_twin').on(t.twinId, t.status, t.createdAt) }))
+
+export const digitalTwinPublications = mysqlTable('digital_twin_publications', {
+  id: uuidPrimaryKey('id'), twinId: uuidColumn('twin_id').notNull().references(() => digitalTwins.id, { onDelete: 'cascade' }),
+  ownerUserId: uuidColumn('owner_user_id').notNull().references(() => users.id, { onDelete: 'cascade' }), publishedVersion: int('published_version').notNull(),
+  introduction: text('introduction').notNull(), publicRules: longtext('public_rules').notNull(), publicCases: longtext('public_cases').notNull(),
+  industryTags: json('industry_tags').$type<string[]>().notNull().default(emptyJsonArray), capabilityTags: json('capability_tags').$type<string[]>().notNull().default(emptyJsonArray),
+  status: varchar('status', { length: 16 }).notNull().default('已发布'), publishedAt: timestampColumn('published_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`), withdrawnAt: timestampColumn('withdrawn_at'),
+}, (t) => ({ uniqueTwin: uniqueIndex('uq_digital_twin_publication_twin').on(t.twinId), directory: index('idx_digital_twin_publications_directory').on(t.status, t.ownerUserId) }))
+
+export const digitalTwinInvocationLogs = mysqlTable('digital_twin_invocation_logs', {
+  id: uuidPrimaryKey('id'), publicationId: uuidColumn('publication_id').notNull().references(() => digitalTwinPublications.id, { onDelete: 'restrict' }),
+  callerUserId: uuidColumn('caller_user_id').notNull().references(() => users.id, { onDelete: 'restrict' }), projectId: uuidColumn('project_id').references(() => projects.id, { onDelete: 'set null' }),
+  usage: varchar('usage', { length: 32 }).notNull(), inputSummary: text('input_summary').notNull(), outputSummary: text('output_summary').notNull(), createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({ byPublication: index('idx_twin_invocation_publication').on(t.publicationId, t.createdAt), byCaller: index('idx_twin_invocation_caller').on(t.callerUserId, t.createdAt) }))
+
+export const digitalTwinLearningCandidates = mysqlTable('digital_twin_learning_candidates', {
+  id: uuidPrimaryKey('id'), twinId: uuidColumn('twin_id').notNull().references(() => digitalTwins.id, { onDelete: 'cascade' }), ownerUserId: uuidColumn('owner_user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  sourceFileId: uuidColumn('source_file_id').references(() => projectFiles.id, { onDelete: 'restrict' }), sourceHash: varchar('source_hash', { length: 64 }).notNull(), sourceName: varchar('source_name', { length: 255 }).notNull(), sourceType: varchar('source_type', { length: 32 }).notNull().default('正式材料'), sourceKey: varchar('source_key', { length: 128 }).notNull(), projectId: uuidColumn('project_id').notNull().references(() => projects.id, { onDelete: 'restrict' }),
+  topic: varchar('topic', { length: 128 }).notNull().default('尽调判断'), confidence: int('confidence').notNull().default(80), rules: longtext('rules').notNull(), cases: longtext('cases').notNull(), boundaries: text('boundaries').notNull(), rationale: text('rationale').notNull(), status: varchar('status', { length: 16 }).notNull().default('待确认'), decidedAt: timestampColumn('decided_at'), createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({ uniqueSource: uniqueIndex('uq_twin_learning_source').on(t.twinId, t.sourceKey, t.sourceHash), byOwner: index('idx_twin_learning_owner').on(t.ownerUserId, t.status, t.createdAt) }))
+
+export const digitalTwinSkills = mysqlTable('digital_twin_skills', {
+  id: uuidPrimaryKey('id'), twinId: uuidColumn('twin_id').notNull().references(() => digitalTwins.id, { onDelete: 'cascade' }), ownerUserId: uuidColumn('owner_user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  name: varchar('name', { length: 128 }).notNull(), activeVersion: int('active_version').notNull().default(0), status: varchar('status', { length: 16 }).notNull().default('试用中'), createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`), updatedAt: timestampColumn('updated_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({ uniqueTwin: uniqueIndex('uq_twin_skill_twin').on(t.twinId), byOwner: index('idx_twin_skill_owner').on(t.ownerUserId, t.updatedAt) }))
+
+export const digitalTwinSkillVersions = mysqlTable('digital_twin_skill_versions', {
+  id: uuidPrimaryKey('id'), skillId: uuidColumn('skill_id').notNull().references(() => digitalTwinSkills.id, { onDelete: 'cascade' }), version: int('version').notNull(),
+  trigger: text('trigger').notNull(), instructions: longtext('instructions').notNull(), checklist: json('checklist').$type<string[]>().notNull().default(emptyJsonArray), outputFormat: text('output_format').notNull(), boundaries: text('boundaries').notNull(), sourceCandidateId: uuidColumn('source_candidate_id').references(() => digitalTwinLearningCandidates.id, { onDelete: 'set null' }), status: varchar('status', { length: 16 }).notNull().default('试用中'), createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({ uniqueVersion: uniqueIndex('uq_twin_skill_version').on(t.skillId, t.version) }))
+
 export const projectMaterialSubmissions = mysqlTable('project_material_submissions', {
   id: uuidPrimaryKey('id'), projectId: uuidColumn('project_id').notNull().references(() => projects.id, { onDelete: 'restrict' }),
   fileId: uuidColumn('file_id').notNull(), fileVersion: int('file_version').notNull(), fileName: varchar('file_name', { length: 255 }).notNull(),
