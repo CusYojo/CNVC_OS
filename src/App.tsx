@@ -15,6 +15,7 @@ import { CollaborationPage } from './pages/CollaborationPage'
 import { CommitteePage } from './pages/CommitteePage'
 import { WorkflowPage } from './pages/WorkflowPage'
 import { RisksPage } from './pages/RisksPage'
+import { DueDiligencePage } from './pages/DueDiligencePage'
 import { DataKnowledgePage } from './pages/DataKnowledgePage'
 import { ResponsibilityPage } from './pages/ResponsibilityPage'
 import { FdeResponsibilityPolicyPanel } from './components/FdeResponsibilityPolicyPanel'
@@ -100,6 +101,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={initialized && authenticated ? <Navigate to="/" replace /> : <LoginPage />} />
+      <Route path="/due-diligence/preview" element={<DueDiligencePage preview />} />
       <Route element={<ProtectedLayout />}>
         <Route index element={<WorkspaceHome />} />
         <Route path={EXECUTIVE_DASHBOARD_PATH} element={<LegacyExecutiveHome />} />
@@ -123,6 +125,7 @@ export default function App() {
         <Route path="/committee" element={<CommitteePage />} />
         <Route path="/workflow" element={<WorkflowPage />} />
         <Route path="/risks" element={<RisksPage />} />
+        <Route path="/due-diligence" element={<DueDiligencePage />} />
         <Route path="/post-investment" element={<Navigate to="/projects" replace />} />
         <Route path="/knowledge" element={<DataKnowledgePage />} />
         <Route path="/responsibility" element={<ResponsibilityPage />} />

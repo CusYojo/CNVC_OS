@@ -1,4 +1,5 @@
-import { ArrowRight, Info, Target } from 'lucide-react'
+import { ArrowRight, ClipboardList, Info, Target } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 import { projectCountdown, shortProjectDate } from '../lib/projectDetailPresentation'
 import type { Project } from '../types'
 import { Badge, Button, Card, StageBadge } from './ui'
@@ -9,6 +10,7 @@ export function ProjectDetailHero({ project, incompleteTaskCount, onOverview, on
   onOverview: () => void
   onPrimary: () => void
 }) {
+  const navigate = useNavigate()
   const active = (project.lifecycle ?? 'active') === 'active'
   const classification = { pool: '项目池', normal: '普通项目', key: '重点项目' }[project.classification ?? 'normal']
   const riskTone = project.healthStatus === '正常' ? 'green' : project.healthStatus === '存在风险' ? 'red' : project.healthStatus === '需关注' ? 'amber' : 'slate'
@@ -25,6 +27,7 @@ export function ProjectDetailHero({ project, incompleteTaskCount, onOverview, on
       </dl>
       <div className="fde-detail-actions">
         <Button variant="secondary" onClick={onOverview}><Info className="h-4 w-4" />项目概况</Button>
+        <Button variant="secondary" onClick={() => navigate(`/due-diligence?project=${project.id}`)}><ClipboardList className="h-4 w-4" />尽调工作台</Button>
         <Button onClick={onPrimary}>{active ? <><Target className="h-4 w-4" />推进当前阶段</> : <><ArrowRight className="h-4 w-4" />查看项目档案</>}</Button>
       </div>
     </div>

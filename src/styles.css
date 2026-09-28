@@ -2,6 +2,19 @@
 @tailwind components;
 @tailwind utilities;
 
+/* The workbench owns interview selection; the legacy detail component supplies only its working area. */
+.due-diligence-interview-content > div > :first-child {
+  display: none;
+}
+
+.due-diligence-interview-content > div {
+  grid-template-columns: minmax(0, 1fr) !important;
+}
+
+.due-diligence-interview-content > div > :nth-child(2) > :first-child {
+  display: none;
+}
+
 @layer base {
   * {
     box-sizing: border-box;

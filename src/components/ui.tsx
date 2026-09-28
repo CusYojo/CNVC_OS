@@ -10,12 +10,13 @@ export function Button({
   loading,
   ...props
 }: ButtonHTMLAttributes<HTMLButtonElement> & {
-  variant?: 'primary' | 'secondary' | 'ghost' | 'danger'
+  variant?: 'primary' | 'secondary' | 'ghost' | 'danger' | 'default'
   size?: 'sm' | 'md'
   loading?: boolean
 }) {
   const variants = {
     primary: 'bg-brand-600 text-white hover:bg-brand-700 border-brand-600',
+    default: 'bg-brand-600 text-white hover:bg-brand-700 border-brand-600',
     secondary: 'bg-white text-slate-700 hover:bg-slate-50 border-slate-200',
     ghost: 'bg-transparent text-slate-600 hover:bg-slate-100 border-transparent',
     danger: 'bg-white text-rose-600 hover:bg-rose-50 border-rose-200',
@@ -38,7 +39,7 @@ export function Card({ children, className = '', id }: { children: ReactNode; cl
   return <section id={id} className={`fde-ui-card rounded-xl border border-slate-200/90 bg-white ${className}`}>{children}</section>
 }
 
-export function Badge({ children, tone = 'slate' }: { children: ReactNode; tone?: 'blue' | 'green' | 'amber' | 'red' | 'purple' | 'slate' | 'cyan' }) {
+export function Badge({ children, tone = 'slate', className = '' }: { children: ReactNode; tone?: 'blue' | 'green' | 'amber' | 'red' | 'purple' | 'slate' | 'cyan'; className?: string }) {
   const tones = {
     blue: 'bg-blue-50 text-blue-700 ring-blue-100',
     green: 'bg-emerald-50 text-emerald-700 ring-emerald-100',
@@ -48,7 +49,7 @@ export function Badge({ children, tone = 'slate' }: { children: ReactNode; tone?
     slate: 'bg-slate-100 text-slate-600 ring-slate-200',
     cyan: 'bg-cyan-50 text-cyan-700 ring-cyan-100',
   }
-  return <span data-tone={tone} className={`fde-ui-badge inline-flex items-center whitespace-nowrap rounded-md px-2 py-1 text-xs font-medium ring-1 ring-inset ${tones[tone]}`}>{children}</span>
+  return <span data-tone={tone} className={`fde-ui-badge inline-flex items-center whitespace-nowrap rounded-md px-2 py-1 text-xs font-medium ring-1 ring-inset ${tones[tone]} ${className}`}>{children}</span>
 }
 
 const stageTone: Record<string, Parameters<typeof Badge>[0]['tone']> = {

@@ -7,7 +7,7 @@ type FileKind = {
   label: string
   mime: string
   acceptedMimes: readonly string[]
-  signature: 'pdf' | 'ooxml-word' | 'ooxml-sheet' | 'ooxml-presentation' | 'ole' | 'png' | 'jpeg' | 'gif' | 'bmp' | 'webp' | 'text'
+  signature: 'pdf' | 'ooxml-word' | 'ooxml-sheet' | 'ooxml-presentation' | 'ole' | 'png' | 'jpeg' | 'gif' | 'bmp' | 'webp' | 'mp3' | 'wav' | 'm4a' | 'webm' | 'text'
 }
 
 const FILE_KINDS: Record<string, FileKind> = {
@@ -33,6 +33,10 @@ const FILE_KINDS: Record<string, FileKind> = {
   gif: { label: 'GIF', mime: 'image/gif', acceptedMimes: ['image/gif', 'application/octet-stream'], signature: 'gif' },
   bmp: { label: 'BMP', mime: 'image/bmp', acceptedMimes: ['image/bmp', 'image/x-ms-bmp', 'application/octet-stream'], signature: 'bmp' },
   webp: { label: 'WEBP', mime: 'image/webp', acceptedMimes: ['image/webp', 'application/octet-stream'], signature: 'webp' },
+  mp3: { label: 'MP3', mime: 'audio/mpeg', acceptedMimes: ['audio/mpeg', 'audio/mp3', 'application/octet-stream'], signature: 'mp3' },
+  wav: { label: 'WAV', mime: 'audio/wav', acceptedMimes: ['audio/wav', 'audio/x-wav', 'audio/wave', 'application/octet-stream'], signature: 'wav' },
+  m4a: { label: 'M4A', mime: 'audio/mp4', acceptedMimes: ['audio/mp4', 'audio/x-m4a', 'video/mp4', 'application/octet-stream'], signature: 'm4a' },
+  webm: { label: 'WEBM', mime: 'audio/webm', acceptedMimes: ['audio/webm', 'video/webm', 'application/octet-stream'], signature: 'webm' },
 }
 
 function fileError(status: number, code: string, message: string): Error {
@@ -119,6 +123,10 @@ async function assertSignature(extension: string, kind: FileKind, buffer: Buffer
     case 'gif': valid = ['GIF87a', 'GIF89a'].includes(buffer.subarray(0, 6).toString('ascii')); break
     case 'bmp': valid = buffer.subarray(0, 2).toString('ascii') === 'BM'; break
     case 'webp': valid = buffer.subarray(0, 4).toString('ascii') === 'RIFF' && buffer.subarray(8, 12).toString('ascii') === 'WEBP'; break
+    case 'mp3': valid = buffer.subarray(0, 3).toString('ascii') === 'ID3' || (buffer.length > 1 && buffer[0] === 0xff && (buffer[1] & 0xe0) === 0xe0); break
+    case 'wav': valid = buffer.subarray(0, 4).toString('ascii') === 'RIFF' && buffer.subarray(8, 12).toString('ascii') === 'WAVE'; break
+    case 'm4a': valid = buffer.subarray(4, 8).toString('ascii') === 'ftyp' && /M4A |isom|mp42|M4B /.test(buffer.subarray(8, 12).toString('ascii')); break
+    case 'webm': valid = startsWith(buffer, [0x1a, 0x45, 0xdf, 0xa3]); break
     case 'ole': valid = startsWith(buffer, [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]); break
     case 'text': {
       if (valid && extension === 'json') {
@@ -169,7 +177,7 @@ export async function decodeAndValidateProjectFile(input: { name: string; dataBa
   }
   const extension = path.extname(name).slice(1).toLowerCase()
   const kind = FILE_KINDS[extension]
-  if (!kind) throw fileError(415, 'FILE_UNSUPPORTED_TYPE', '仅支持 PDF、Word、Excel、PPT、图片和文本类项目资料')
+  if (!kind) throw fileError(415, 'FILE_UNSUPPORTED_TYPE', '仅支持 PDF、Word、Excel、PPT、图片、音频和文本类项目资料')
 
   const { payload: rawPayload, dataUrlMime } = parseBase64(input.dataBase64)
   const payload = rawPayload.replace(/[\r\n]/g, '')

@@ -168,11 +168,18 @@ export async function applySchemaMigrations(): Promise<void> {
     .digest('hex')
     .slice(0, 32)}`
   let lockAcquired = false
+  let restoreLegacyTimestampDefaults = false
   let prepared: Awaited<ReturnType<typeof prepareMigrationsFolder>> | null = null
   try {
     const [lockRows] = await connection.query<RowDataPacket[]>('SELECT GET_LOCK(?, 60) AS acquired', [lockName])
     lockAcquired = Number(lockRows[0]?.acquired || 0) === 1
     if (!lockAcquired) throw new Error('[mysql migration] timed out waiting for schema migration lock')
+    const [timestampDefaults] = await connection.query<RowDataPacket[]>(
+      'SELECT @@session.explicit_defaults_for_timestamp AS enabled',
+    )
+    restoreLegacyTimestampDefaults = Number(timestampDefaults[0]?.enabled) === 0
+    // Keep immutable migration SQL compatible with servers using legacy TIMESTAMP defaults.
+    await connection.query('SET SESSION explicit_defaults_for_timestamp = ON')
     prepared = await prepareMigrationsFolder()
     const migrationDb = drizzle({ client: connection })
     await migrate(migrationDb, {
@@ -180,9 +187,16 @@ export async function applySchemaMigrations(): Promise<void> {
       migrationsTable: mysqlTableName('__drizzle_migrations'),
     })
   } finally {
-    await prepared?.cleanup()
-    if (lockAcquired) await connection.query('SELECT RELEASE_LOCK(?)', [lockName]).catch(() => undefined)
-    connection.release()
+    try {
+      await prepared?.cleanup()
+    } finally {
+      if (lockAcquired) await connection.query('SELECT RELEASE_LOCK(?)', [lockName]).catch(() => undefined)
+      if (restoreLegacyTimestampDefaults) {
+        try { await connection.query('SET SESSION explicit_defaults_for_timestamp = OFF') }
+        catch (error) { connection.destroy(); throw error }
+      }
+      connection.release()
+    }
   }
   console.log(`[mysql] schema migrations ready prefix=${mysqlConfig.tablePrefix}`)
 }
