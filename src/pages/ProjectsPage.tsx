@@ -37,7 +37,7 @@ export function ProjectsPage({
   const classifyProject = useAppStore((state) => state.classifyProject)
   const [query, setQuery] = useState('')
   const [menuId, setMenuId] = useState<string | null>(null)
-  const [scope, setScope] = useState('mine')
+  const [scope, setScope] = useState(classification === 'normal' ? 'all' : 'mine')
   const [stage, setStage] = useState('')
   const [industry, setIndustry] = useState('')
   const [owner, setOwner] = useState('')
@@ -67,6 +67,18 @@ export function ProjectsPage({
   }, [query])
 
   useEffect(() => {
+    const refreshVisibleList = () => {
+      if (document.visibilityState === 'visible') setRefreshKey((value) => value + 1)
+    }
+    const timer = window.setInterval(refreshVisibleList, 60_000)
+    document.addEventListener('visibilitychange', refreshVisibleList)
+    return () => {
+      window.clearInterval(timer)
+      document.removeEventListener('visibilitychange', refreshVisibleList)
+    }
+  }, [])
+
+  useEffect(() => {
     const requestId = ++latestRequest.current
     setLoading(true)
     setLoadError('')
@@ -91,7 +103,7 @@ export function ProjectsPage({
   }, [classification, debouncedQuery, industry, onCountsChange, owner, page, refreshKey, risk, scope, stage])
 
   const clearFilters = () => {
-    setQuery(''); setScope('mine'); setStage(''); setIndustry(''); setOwner(''); setRisk(''); setPage(1)
+    setQuery(''); setScope(classification === 'normal' ? 'all' : 'mine'); setStage(''); setIndustry(''); setOwner(''); setRisk(''); setPage(1)
   }
 
   const saveEdit = async () => {
