@@ -115,6 +115,12 @@
 .sai-agent-send:disabled { opacity: .35; }
 .sai-agent-send.is-stop { color: var(--ink-2); background: var(--surface-3); }
 .sai-agent-send svg { width: 16px; height: 16px; }
+.sai-agent-voice { display: grid; width: 34px; height: 34px; flex: 0 0 34px; place-items: center; border-radius: 10px; color: var(--ink-2); background: var(--surface-3); transition: color .16s ease, background .16s ease; }
+.sai-agent-voice:hover:not(:disabled), .sai-agent-voice.is-listening { color: var(--brand-strong); background: var(--brand-soft); }
+.sai-agent-voice:disabled { opacity: .4; }
+.sai-agent-voice svg { width: 16px; height: 16px; }
+.sai-agent-composer > .sai-agent-speech-error { color: var(--danger); }
+.sai-agent-composer > .sai-agent-speech-status { color: var(--brand-strong); }
 .sai-agent-composer > p { display: flex; align-items: center; gap: 5px; margin-top: 7px; padding: 0 2px; color: var(--ink-3); font-size: 9px; }
 .sai-agent-composer > p svg { width: 11px; height: 11px; color: var(--positive); }
 .sai-agent-composer > p span { margin-left: auto; }

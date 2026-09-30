@@ -1,5 +1,13 @@
 export type JwAgentResponseMode = 'standard' | 'compact'
 
+export function compactJwAgentThinkingConfig(model: string, mode: JwAgentResponseMode) {
+  if (mode !== 'compact') return undefined
+  const normalizedModel = model.toLowerCase().replace(/[^a-z0-9]/g, '')
+  return normalizedModel.startsWith('doubaoseed20mini')
+    ? { type: 'disabled' as const }
+    : undefined
+}
+
 const COMPACT_READ_TOOLS = new Set([
   'mcp__investment__search_project_docs',
   'mcp__investment__get_project_summary',

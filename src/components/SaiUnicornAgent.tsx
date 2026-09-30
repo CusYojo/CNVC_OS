@@ -8,6 +8,8 @@ import {
   ExternalLink,
   FileSearch,
   ListChecks,
+  Mic,
+  MicOff,
   RotateCcw,
   ShieldCheck,
   Sparkles,
@@ -37,6 +39,19 @@ type ConversationRow = {
   agentId?: string
   title: string
 }
+
+type SpeechRecognizer = {
+  lang: string
+  continuous: boolean
+  interimResults: boolean
+  onresult: ((event: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null
+  onerror: ((event: { error: string }) => void) | null
+  onend: (() => void) | null
+  start: () => void
+  stop: () => void
+}
+
+type SpeechRecognizerConstructor = new () => SpeechRecognizer
 
 const actionIcons = {
   'project-brief': BrainCircuit,
@@ -83,6 +98,8 @@ export function SaiUnicornAgent() {
   const [agentId, setAgentId] = useState<string>()
   const [sending, setSending] = useState(false)
   const [localError, setLocalError] = useState<string>()
+  const [listening, setListening] = useState(false)
+  const [speechError, setSpeechError] = useState<string>()
   const [interactionAnswers, setInteractionAnswers] = useState<Record<string, string | string[]>>({})
   const [turnReceipt, setTurnReceipt] = useState<(
     ReturnType<typeof buildSaiTurnReceipt> & { assistantBaseline: number }
@@ -90,6 +107,7 @@ export function SaiUnicornAgent() {
   const triggerRef = useRef<HTMLButtonElement>(null)
   const closeRef = useRef<HTMLButtonElement>(null)
   const composerRef = useRef<HTMLTextAreaElement>(null)
+  const recognizerRef = useRef<SpeechRecognizer | null>(null)
   const agent = useJwAgent(agentId)
 
   const currentContext = useMemo(
@@ -155,7 +173,60 @@ export function SaiUnicornAgent() {
     setInteractionAnswers({})
   }, [agent.interaction?.id])
 
+  useEffect(() => () => {
+    if (recognizerRef.current) {
+      recognizerRef.current.onend = null
+      recognizerRef.current.stop()
+      recognizerRef.current = null
+    }
+  }, [])
+
+  const toggleVoiceInput = () => {
+    if (recognizerRef.current) {
+      recognizerRef.current.stop()
+      return
+    }
+    const speechWindow = window as typeof window & {
+      SpeechRecognition?: SpeechRecognizerConstructor
+      webkitSpeechRecognition?: SpeechRecognizerConstructor
+    }
+    const Speech = speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition
+    if (!Speech) {
+      setSpeechError('当前浏览器不支持语音识别，请使用文字输入。')
+      return
+    }
+    const recognizer = new Speech()
+    recognizer.lang = 'zh-CN'
+    recognizer.continuous = false
+    recognizer.interimResults = false
+    recognizer.onresult = (event) => {
+      const transcript = Array.from(event.results).map((result) => result[0]?.transcript ?? '').join('').trim()
+      if (transcript) {
+        setComposer((current) => `${current}${current.trim() ? ' ' : ''}${transcript}`)
+        window.requestAnimationFrame(() => composerRef.current?.focus())
+      }
+    }
+    recognizer.onerror = (event) => {
+      if (event.error !== 'aborted') setSpeechError(`语音识别未完成：${event.error}`)
+      setListening(false)
+      recognizerRef.current = null
+    }
+    recognizer.onend = () => {
+      setListening(false)
+      recognizerRef.current = null
+    }
+    try {
+      setSpeechError(undefined)
+      recognizer.start()
+      recognizerRef.current = recognizer
+      setListening(true)
+    } catch {
+      setSpeechError('无法启动语音识别，请检查麦克风权限。')
+    }
+  }
+
   const closePanel = () => {
+    recognizerRef.current?.stop()
     setOpen(false)
     window.requestAnimationFrame(() => triggerRef.current?.focus())
   }
@@ -383,10 +454,15 @@ export function SaiUnicornAgent() {
               onChange={(event) => setComposer(event.target.value)}
               onKeyDown={onComposerKeyDown}
             />
+            <button type="button" className={`sai-agent-voice${listening ? ' is-listening' : ''}`} aria-label={listening ? '停止语音输入' : '开始语音输入'} aria-pressed={listening} title={listening ? '停止语音输入' : '语音输入'} disabled={busy} onClick={toggleVoiceInput}>
+              {listening ? <MicOff aria-hidden="true" /> : <Mic aria-hidden="true" />}
+            </button>
             {agent.status === 'streaming' || agent.status === 'submitted'
               ? <button type="button" className="sai-agent-send is-stop" aria-label="停止生成" onClick={() => void agent.abort()}><Square /></button>
               : <button type="submit" className="sai-agent-send" aria-label="发送给小赛" disabled={!composer.trim() || busy}><ArrowUp /></button>}
           </form>
+          {speechError && <p className="sai-agent-speech-error" role="alert">{speechError}</p>}
+          {listening && <p className="sai-agent-speech-status" role="status">正在聆听，识别后请确认文字再发送</p>}
           <p><ShieldCheck aria-hidden="true" />默认只读 · 业务写入前会先请你确认 <span>Enter 发送</span></p>
         </footer>
       </section>

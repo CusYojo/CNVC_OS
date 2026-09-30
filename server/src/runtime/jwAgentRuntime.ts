@@ -40,6 +40,7 @@ import { weixinAgentDocumentText } from '../services/weixinAgentDocument.js'
 import { loadAssistantExperiencePrompt, recordAssistantCompletedTurn } from '../services/assistantExperienceService.js'
 import {
   compactJwAgentInstruction,
+  compactJwAgentThinkingConfig,
   evaluateCompactInteraction,
   jwAgentToolsForResponseMode,
   type JwAgentResponseMode,
@@ -1393,6 +1394,7 @@ async function createRuntimeSession(
     options: {
       cwd,
       model: config.model,
+      thinking: compactJwAgentThinkingConfig(config.model, responseMode),
       maxTurns: config.maxTurns,
       maxBudgetUsd: config.maxBudgetUsd,
       resume: typeof metadata.sdkSessionId === 'string' ? metadata.sdkSessionId : undefined,
@@ -1426,17 +1428,17 @@ async function createRuntimeSession(
       settingSources: ['project'],
       mcpServers: hostInvestmentEnabled ? { investment: investmentTools } : {},
       env: restrictedJwAgentEnvironment(config, cwd),
-      systemPrompt: {
-        type: 'preset',
-        preset: 'claude_code',
-        append: [
-          jwAgentSystemPrompt(projectId, responseMode),
-          ...(responseMode === 'compact'
-            ? []
-            : pluginPrompts.map((prompt, index) => `\n[已安装 Plugin ${index + 1} 行为说明]\n${prompt}`)),
-          ...(responseMode === 'compact' ? [] : uploadedCapabilityPrompts),
-        ].join('\n'),
-      },
+      systemPrompt: responseMode === 'compact'
+        ? jwAgentSystemPrompt(projectId, responseMode)
+        : {
+            type: 'preset',
+            preset: 'claude_code',
+            append: [
+              jwAgentSystemPrompt(projectId, responseMode),
+              ...pluginPrompts.map((prompt, index) => `\n[已安装 Plugin ${index + 1} 行为说明]\n${prompt}`),
+              ...uploadedCapabilityPrompts,
+            ].join('\n'),
+          },
     },
   }) as RuntimeQuery
   session = {
