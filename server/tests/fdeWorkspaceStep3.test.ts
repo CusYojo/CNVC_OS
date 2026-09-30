@@ -36,7 +36,7 @@ test('knowledge and AI surfaces use business language and keep diagnostics behin
   const ai = source('src/pages/AIAssistantPage.tsx')
   const actions = source('src/components/AiQuickActions.tsx')
   assert.match(knowledge, /<h1>知识库<\/h1>/)
-  assert.match(actions, /常用工具/)
+  assert.match(actions, /常用Skill/)
   for (const label of ['投资提案', '投资建议书', '尽调报告', '合规说明', '项目问答']) assert.match(actions, new RegExp(label))
   assert.match(actions, /id: 'custom_template'.*hidden: true/)
   assert.match(actions, /ACTIONS\.filter\(\(action\) => !action\.hidden\)\.map/)

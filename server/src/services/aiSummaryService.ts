@@ -1161,6 +1161,7 @@ function leadPoolListItem(
           channel: radarProfile.channel,
           link: radarProfile.link,
           publishedAt: radarProfile.publishedAt,
+          discoveryDate: radarProfile.discoveryDate,
           profile: {
             lab: radarProfileCore.lab,
             companyName: radarProfileCore.companyName,
@@ -1500,6 +1501,7 @@ export async function listLeads(options: {
         'sourceGroup', ${jsonValue(leads.radarProfile, '$.sourceGroup')},
         'sourceTitle', COALESCE(${jsonValue(leads.radarProfile, '$.sourceTitle')}, ${jsonValue(leads.sources, '$[0].title')}),
         'publishedAt', ${jsonValue(leads.radarProfile, '$.publishedAt')},
+        'discoveryDate', ${jsonValue(leads.radarProfile, '$.discoveryDate')},
         'link', ${jsonValue(leads.radarProfile, '$.link')},
         'thesis', ${jsonValue(leads.radarProfile, '$.thesis')},
         'team', COALESCE(${jsonValue(leads.radarProfile, '$.team')}, JSON_ARRAY()),
@@ -1585,6 +1587,7 @@ export async function listLeads(options: {
       .leftJoin(leadResearchProfileProjections, eq(leadResearchProfileProjections.leadId, leads.id))
       .where(whereClause).orderBy(
       options.projectDiscoveryOnly ? desc(sql`COALESCE(
+        STR_TO_DATE(${jsonText(leads.radarProfile, '$.discoveryDate')}, '%Y-%m-%d'),
         STR_TO_DATE(LEFT(${jsonText(leads.radarProfile, '$.publishedAt')}, 10), '%Y-%m-%d'),
         ${leads.createdAt}
       )`)

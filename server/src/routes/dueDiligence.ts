@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNull, or, sql } from 'drizzle-orm'
 import { createHash, randomUUID } from 'node:crypto'
 import { AlignmentType, Document, Packer, Paragraph, Table, TableCell, TableRow, TextRun, WidthType } from 'docx'
 import { Router } from 'express'
@@ -6,7 +6,8 @@ import { z } from 'zod'
 import { db } from '../db/client.js'
 import { auditLogs, companyKnowledge, digitalTwinAssetArchives, digitalTwinConversations, digitalTwinExperienceEvents, digitalTwinInvocationLogs, digitalTwinLearningCandidates, digitalTwinPublications, digitalTwinSkills, digitalTwinSkillVersions, digitalTwinUpdateCandidates, digitalTwins, digitalTwinVersions, dueDiligenceInterviewArtifacts, dueDiligenceInterviewPrompts, dueDiligenceInterviewTranscripts, dueDiligenceInterviews, dueDiligenceQuestionEvidence, dueDiligenceQuestionPacks, dueDiligenceQuestions, personalNotes, projectFiles, projectMembers, projects, risks, users } from '../db/schema.js'
 import type { AuthedRequest } from '../middleware/requireAuth.js'
-import { requireAccessibleProject } from '../services/projectAccessService.js'
+import { projectAccessCondition, requireAccessibleProject } from '../services/projectAccessService.js'
+import { canReadAllProjectFiles, projectFileAccessCondition, projectSummaryFileAccessCondition, requireProjectFileAccess } from '../services/projectFileAccessService.js'
 import { parseShanghaiDateTime } from '../utils/shanghaiTime.js'
 import { createConversation } from '../services/conversationService.js'
 import { fetchAiGatewayChatCompatible } from '../services/aiGatewayService.js'
@@ -20,14 +21,38 @@ async function audit(req: AuthedRequest, action: string, target: string) {
   await db.insert(auditLogs).values({ userId: current.userId, userName: current.userName, module: '尽调工作台', action, target })
 }
 
-async function validateProjectLinks(projectId: string, riskId?: string | null, fileId?: string | null) {
+// Until shared question/interview text has complete source lineage, use the same
+// conservative source boundary as cached project summaries, including revoked files.
+async function requireDueDiligenceProject(userId: string, projectId: string) {
+  const project = await requireAccessibleProject(userId, projectId)
+  if (!await canReadAllProjectFiles(db, projectId, userId)) {
+    throw Object.assign(new Error('当前账号无法访问尽调内容的全部来源材料'), { status: 403, code: 'DUE_DILIGENCE_SOURCE_FORBIDDEN' })
+  }
+  return project
+}
+
+function learningProjectAccessCondition(userId: string) {
+  return inArray(projects.id, db.select({ id: projects.id }).from(projects).where(and(
+    projectAccessCondition({ uid: userId, name: '', role: '' }), projectSummaryFileAccessCondition(userId),
+  )))
+}
+
+function learningCandidateAccessCondition(userId: string) {
+  return and(
+    inArray(digitalTwinLearningCandidates.projectId, db.select({ id: projects.id }).from(projects).where(learningProjectAccessCondition(userId))),
+    or(isNull(digitalTwinLearningCandidates.sourceFileId), inArray(digitalTwinLearningCandidates.sourceFileId, db.select({ id: projectFiles.id }).from(projectFiles).where(projectFileAccessCondition(userId)))),
+  )
+}
+
+async function validateProjectLinks(projectId: string, riskId?: string | null, fileId?: string | null, userId?: string) {
   if (riskId) {
     const [risk] = await db.select({ id: risks.id }).from(risks).where(and(eq(risks.id, riskId), eq(risks.projectId, projectId))).limit(1)
     if (!risk) throw Object.assign(new Error('关联风险不存在或不属于当前项目'), { status: 400, code: 'INVALID_RISK_LINK' })
   }
   if (fileId) {
-    const [file] = await db.select({ id: projectFiles.id }).from(projectFiles).where(and(eq(projectFiles.id, fileId), eq(projectFiles.projectId, projectId))).limit(1)
-    if (!file) throw Object.assign(new Error('关联材料不存在或不属于当前项目'), { status: 400, code: 'INVALID_FILE_LINK' })
+    if (!userId) throw Object.assign(new Error('文件访问缺少用户身份'), { status: 403, code: 'PROJECT_FILE_FORBIDDEN' })
+    const file = await requireProjectFileAccess(db, fileId, userId)
+    if (file.projectId !== projectId) throw Object.assign(new Error('关联材料不存在或不属于当前项目'), { status: 400, code: 'INVALID_FILE_LINK' })
   }
 }
 
@@ -55,12 +80,12 @@ const InterviewSchema = z.object({
 const InterviewPatchSchema = InterviewSchema.partial().extend({ expectedVersion: z.number().int().positive() }).strict()
 
 dueDiligenceRouter.get('/projects/:projectId/members', async (req: AuthedRequest, res, next) => {
-  try { const projectId = routeId(req.params.projectId); await requireAccessibleProject(req.user!.uid, projectId); res.json({ list: await db.select({ id: users.id, name: users.name, role: projectMembers.memberRole }).from(projectMembers).innerJoin(users, eq(users.id, projectMembers.userId)).where(and(eq(projectMembers.projectId, projectId), eq(users.status, '启用'))).orderBy(users.name) }) } catch (error) { next(error) }
+  try { const projectId = routeId(req.params.projectId); await requireDueDiligenceProject(req.user!.uid, projectId); res.json({ list: await db.select({ id: users.id, name: users.name, role: projectMembers.memberRole }).from(projectMembers).innerJoin(users, eq(users.id, projectMembers.userId)).where(and(eq(projectMembers.projectId, projectId), eq(users.status, '启用'))).orderBy(users.name) }) } catch (error) { next(error) }
 })
 
 dueDiligenceRouter.get('/projects/:projectId/questions', async (req: AuthedRequest, res, next) => {
   try {
-    const projectId = routeId(req.params.projectId); await requireAccessibleProject(req.user!.uid, projectId)
+    const projectId = routeId(req.params.projectId); await requireDueDiligenceProject(req.user!.uid, projectId)
     const list = await db.select().from(dueDiligenceQuestions).where(eq(dueDiligenceQuestions.projectId, projectId)).orderBy(asc(dueDiligenceQuestions.sortOrder), desc(dueDiligenceQuestions.createdAt))
     const evidence = list.length ? await db.select().from(dueDiligenceQuestionEvidence).where(inArray(dueDiligenceQuestionEvidence.questionId, list.map(item => item.id))) : []
     res.json({ list: list.map(item => ({ ...item, status: item.status === '已完成' ? '已完成' : '待核查', fileIds: evidence.filter(link => link.questionId === item.id).map(link => link.fileId) })) })
@@ -69,9 +94,9 @@ dueDiligenceRouter.get('/projects/:projectId/questions', async (req: AuthedReque
 
 dueDiligenceRouter.post('/projects/:projectId/questions', async (req: AuthedRequest, res, next) => {
   try {
-    const projectId = routeId(req.params.projectId); await requireAccessibleProject(req.user!.uid, projectId)
-    const body = QuestionSchema.parse(req.body); const current = actor(req); await validateProjectLinks(projectId, body.riskId, body.fileId)
-    for (const fileId of body.fileIds) await validateProjectLinks(projectId, null, fileId)
+    const projectId = routeId(req.params.projectId); await requireDueDiligenceProject(req.user!.uid, projectId)
+    const body = QuestionSchema.parse(req.body); const current = actor(req); await validateProjectLinks(projectId, body.riskId, body.fileId, req.user!.uid)
+    for (const fileId of body.fileIds) await validateProjectLinks(projectId, null, fileId, req.user!.uid)
     const assignee = await projectMember(projectId, body.assigneeUserId)
     const { fileIds, assigneeUserId, ...question } = body
     const id = await db.transaction(async tx => { const [inserted] = await tx.insert(dueDiligenceQuestions).values({ ...question, projectId, createdBy: current.userId, assigneeUserId: assignee?.id ?? null, assigneeName: assignee?.name ?? (question.assigneeName || null), riskId: body.riskId ?? null, fileId: body.fileId ?? null }).$returningId(); if (fileIds.length) await tx.insert(dueDiligenceQuestionEvidence).values(fileIds.map(fileId => ({ id: randomUUID(), questionId: inserted.id, fileId }))); return inserted.id })
@@ -83,9 +108,9 @@ dueDiligenceRouter.post('/projects/:projectId/questions', async (req: AuthedRequ
 
 dueDiligenceRouter.patch('/projects/:projectId/questions/:id', async (req: AuthedRequest, res, next) => {
   try {
-    const projectId = routeId(req.params.projectId); const id = routeId(req.params.id); await requireAccessibleProject(req.user!.uid, projectId)
-    const { expectedVersion, fileIds, assigneeUserId, ...body } = QuestionPatchSchema.parse(req.body); await validateProjectLinks(projectId, body.riskId, body.fileId)
-    if (fileIds) for (const fileId of fileIds) await validateProjectLinks(projectId, null, fileId)
+    const projectId = routeId(req.params.projectId); const id = routeId(req.params.id); await requireDueDiligenceProject(req.user!.uid, projectId)
+    const { expectedVersion, fileIds, assigneeUserId, ...body } = QuestionPatchSchema.parse(req.body); await validateProjectLinks(projectId, body.riskId, body.fileId, req.user!.uid)
+    if (fileIds) for (const fileId of fileIds) await validateProjectLinks(projectId, null, fileId, req.user!.uid)
     const assignee = await projectMember(projectId, assigneeUserId)
     const patch = { ...body, ...(assigneeUserId !== undefined ? { assigneeUserId: assignee?.id ?? null, assigneeName: assignee?.name ?? body.assigneeName ?? null } : {}), version: sql`${dueDiligenceQuestions.version} + 1`, updatedAt: new Date() }
     const [result] = await db.update(dueDiligenceQuestions).set(patch).where(and(eq(dueDiligenceQuestions.id, id), eq(dueDiligenceQuestions.projectId, projectId), eq(dueDiligenceQuestions.version, expectedVersion)))
@@ -98,10 +123,10 @@ dueDiligenceRouter.patch('/projects/:projectId/questions/:id', async (req: Authe
   } catch (error) { next(error) }
 })
 dueDiligenceRouter.delete('/projects/:projectId/questions/:id', async (req: AuthedRequest, res, next) => {
-  try { const projectId = routeId(req.params.projectId); const id = routeId(req.params.id); await requireAccessibleProject(req.user!.uid, projectId); const [question] = await db.select().from(dueDiligenceQuestions).where(and(eq(dueDiligenceQuestions.id, id), eq(dueDiligenceQuestions.projectId, projectId))).limit(1); const [result] = await db.delete(dueDiligenceQuestions).where(and(eq(dueDiligenceQuestions.id, id), eq(dueDiligenceQuestions.projectId, projectId))); if (result.affectedRows !== 1 || !question) throw Object.assign(new Error('核查问题不存在或已删除'), { status: 404, code: 'NOT_FOUND' }); await recordExperienceEvent({ ownerUserId: req.user!.uid, projectId, eventType: 'question.deleted', entityType: 'question', entityId: id, topic: question.category || '尽调核验', fingerprint: `${id}:deleted:v${question.version}`, payload: { title: question.title, priority: question.priority, source: question.source } }); await audit(req, '删除核查问题', id); res.status(204).end() } catch (error) { next(error) }
+  try { const projectId = routeId(req.params.projectId); const id = routeId(req.params.id); await requireDueDiligenceProject(req.user!.uid, projectId); const [question] = await db.select().from(dueDiligenceQuestions).where(and(eq(dueDiligenceQuestions.id, id), eq(dueDiligenceQuestions.projectId, projectId))).limit(1); const [result] = await db.delete(dueDiligenceQuestions).where(and(eq(dueDiligenceQuestions.id, id), eq(dueDiligenceQuestions.projectId, projectId))); if (result.affectedRows !== 1 || !question) throw Object.assign(new Error('核查问题不存在或已删除'), { status: 404, code: 'NOT_FOUND' }); await recordExperienceEvent({ ownerUserId: req.user!.uid, projectId, eventType: 'question.deleted', entityType: 'question', entityId: id, topic: question.category || '尽调核验', fingerprint: `${id}:deleted:v${question.version}`, payload: { title: question.title, priority: question.priority, source: question.source } }); await audit(req, '删除核查问题', id); res.status(204).end() } catch (error) { next(error) }
 })
 dueDiligenceRouter.post('/projects/:projectId/questions/reorder', async (req: AuthedRequest, res, next) => {
-  try { const projectId = routeId(req.params.projectId); await requireAccessibleProject(req.user!.uid, projectId); const ids = z.object({ ids: z.array(z.string().uuid()).min(1).max(500) }).parse(req.body).ids; const rows = await db.select({ id: dueDiligenceQuestions.id }).from(dueDiligenceQuestions).where(eq(dueDiligenceQuestions.projectId, projectId)); if (rows.length !== ids.length || rows.some(row => !ids.includes(row.id))) throw Object.assign(new Error('排序清单与当前项目问题不一致，请刷新后重试'), { status: 409, code: 'QUESTION_LIST_CONFLICT' }); await db.transaction(async tx => { for (const [index, id] of ids.entries()) await tx.update(dueDiligenceQuestions).set({ sortOrder: index + 1, updatedAt: new Date() }).where(eq(dueDiligenceQuestions.id, id)) }); await audit(req, '调整核查问题顺序', projectId); res.json({ ok: true }) } catch (error) { next(error) }
+  try { const projectId = routeId(req.params.projectId); await requireDueDiligenceProject(req.user!.uid, projectId); const ids = z.object({ ids: z.array(z.string().uuid()).min(1).max(500) }).parse(req.body).ids; const rows = await db.select({ id: dueDiligenceQuestions.id }).from(dueDiligenceQuestions).where(eq(dueDiligenceQuestions.projectId, projectId)); if (rows.length !== ids.length || rows.some(row => !ids.includes(row.id))) throw Object.assign(new Error('排序清单与当前项目问题不一致，请刷新后重试'), { status: 409, code: 'QUESTION_LIST_CONFLICT' }); await db.transaction(async tx => { for (const [index, id] of ids.entries()) await tx.update(dueDiligenceQuestions).set({ sortOrder: index + 1, updatedAt: new Date() }).where(eq(dueDiligenceQuestions.id, id)) }); await audit(req, '调整核查问题顺序', projectId); res.json({ ok: true }) } catch (error) { next(error) }
 })
 
 const GeneratedQuestionSchema = z.object({
@@ -158,7 +183,8 @@ async function persistQuestionPack(input: { projectId: string; userId: string; t
 async function generateQuestionPack(projectId: string, userId: string, body: z.infer<typeof QuestionPackGenerateSchema>) {
   const [project] = await db.select({ name: projects.name, companyName: projects.companyName, industry: projects.industry, summary: projects.summary }).from(projects).where(eq(projects.id, projectId)).limit(1)
   if (!project) throw Object.assign(new Error('项目不存在'), { status: 404, code: 'NOT_FOUND' })
-  const files = await db.select({ id: projectFiles.id, name: projectFiles.name, contentText: projectFiles.contentText, parseStatus: projectFiles.parseStatus }).from(projectFiles).where(eq(projectFiles.projectId, projectId))
+  const files = await db.select({ id: projectFiles.id, name: projectFiles.name, contentText: projectFiles.contentText, parseStatus: projectFiles.parseStatus }).from(projectFiles).where(and(eq(projectFiles.projectId, projectId), projectFileAccessCondition(userId)))
+  for (const fileId of body.fileIds) await validateProjectLinks(projectId, null, fileId, userId)
   const chosen = body.fileIds.length ? files.filter(file => body.fileIds.includes(file.id)) : files
   const selected = chosen.filter(file => file.parseStatus === '成功' && file.contentText?.trim())
   const baseline = buildBaselineQuestions(project, chosen)
@@ -196,11 +222,11 @@ async function generateQuestionPack(projectId: string, userId: string, body: z.i
 }
 
 dueDiligenceRouter.post('/projects/:projectId/question-packs/generate', async (req: AuthedRequest, res, next) => {
-  try { const projectId = routeId(req.params.projectId); await requireAccessibleProject(req.user!.uid, projectId); const pack = await generateQuestionPack(projectId, req.user!.uid, QuestionPackGenerateSchema.parse(req.body)); await audit(req, '生成尽调问题清单', pack.title); res.status(201).json(pack) } catch (error) { next(error) }
+  try { const projectId = routeId(req.params.projectId); await requireDueDiligenceProject(req.user!.uid, projectId); const pack = await generateQuestionPack(projectId, req.user!.uid, QuestionPackGenerateSchema.parse(req.body)); await audit(req, '生成尽调问题清单', pack.title); res.status(201).json(pack) } catch (error) { next(error) }
 })
 dueDiligenceRouter.post('/projects/:projectId/question-packs/:id/apply', async (req: AuthedRequest, res, next) => {
   try {
-    const projectId = routeId(req.params.projectId); const id = routeId(req.params.id); await requireAccessibleProject(req.user!.uid, projectId)
+    const projectId = routeId(req.params.projectId); const id = routeId(req.params.id); await requireDueDiligenceProject(req.user!.uid, projectId)
     const [pack] = await db.select().from(dueDiligenceQuestionPacks).where(and(eq(dueDiligenceQuestionPacks.id, id), eq(dueDiligenceQuestionPacks.projectId, projectId))).limit(1)
     if (!pack) throw Object.assign(new Error('尽调问题清单不存在'), { status: 404, code: 'NOT_FOUND' })
     await db.transaction(async tx => { await tx.insert(dueDiligenceQuestions).values(pack.questions.map(question => ({ id: randomUUID(), projectId, title: question.title, category: question.category, priority: question.priority, evidenceRequirement: question.evidenceRequirement, attentionSource: question.attentionSource, source: question.sourceKind || (pack.generationMode === 'ai' ? 'AI生成' : '标准模板'), createdBy: req.user!.uid, fileId: pack.sourceFileIds[0] ?? null }))) })
@@ -209,7 +235,7 @@ dueDiligenceRouter.post('/projects/:projectId/question-packs/:id/apply', async (
 })
 dueDiligenceRouter.get('/projects/:projectId/question-packs/:id/docx', async (req: AuthedRequest, res, next) => {
   try {
-    const projectId = routeId(req.params.projectId); const id = routeId(req.params.id); await requireAccessibleProject(req.user!.uid, projectId)
+    const projectId = routeId(req.params.projectId); const id = routeId(req.params.id); await requireDueDiligenceProject(req.user!.uid, projectId)
     const [pack] = await db.select().from(dueDiligenceQuestionPacks).where(and(eq(dueDiligenceQuestionPacks.id, id), eq(dueDiligenceQuestionPacks.projectId, projectId))).limit(1)
     const [project] = await db.select({ name: projects.name }).from(projects).where(eq(projects.id, projectId)).limit(1); if (!pack || !project) throw Object.assign(new Error('尽调问题清单不存在'), { status: 404, code: 'NOT_FOUND' })
     const rows = [new TableRow({ children: ['序号', '核查问题', '类别', '优先级', '关注来源', '核查目标与所需证据'].map(text => new TableCell({ children: [new Paragraph({ children: [new TextRun({ text, bold: true })] })] })) }), ...pack.questions.map((question, index) => new TableRow({ children: [String(index + 1), question.title, question.category, question.priority, question.attentionSource || '标准模板', `${question.rationale}\n证据：${question.evidenceRequirement}`].map(text => new TableCell({ children: [new Paragraph(text)] })) }))]
@@ -222,10 +248,10 @@ dueDiligenceRouter.get('/projects/:projectId/question-packs/:id/docx', async (re
 
 dueDiligenceRouter.get('/projects/:projectId/interviews', async (req: AuthedRequest, res, next) => {
   try {
-    const projectId = routeId(req.params.projectId); await requireAccessibleProject(req.user!.uid, projectId)
+    const projectId = routeId(req.params.projectId); await requireDueDiligenceProject(req.user!.uid, projectId)
     const list = await db.select().from(dueDiligenceInterviews).where(eq(dueDiligenceInterviews.projectId, projectId)).orderBy(asc(dueDiligenceInterviews.sortOrder), desc(dueDiligenceInterviews.createdAt))
     const prompts = await Promise.all(list.map(async interview => ({ interviewId: interview.id, list: await db.select().from(dueDiligenceInterviewPrompts).where(eq(dueDiligenceInterviewPrompts.interviewId, interview.id)).orderBy(desc(dueDiligenceInterviewPrompts.createdAt)) })))
-    const artifacts = await Promise.all(list.map(async interview => ({ interviewId: interview.id, list: await db.select({ id: dueDiligenceInterviewArtifacts.id, interviewId: dueDiligenceInterviewArtifacts.interviewId, fileId: dueDiligenceInterviewArtifacts.fileId, kind: dueDiligenceInterviewArtifacts.kind, source: dueDiligenceInterviewArtifacts.source, durationSeconds: dueDiligenceInterviewArtifacts.durationSeconds, name: projectFiles.name, createdAt: dueDiligenceInterviewArtifacts.createdAt }).from(dueDiligenceInterviewArtifacts).innerJoin(projectFiles, eq(projectFiles.id, dueDiligenceInterviewArtifacts.fileId)).where(eq(dueDiligenceInterviewArtifacts.interviewId, interview.id)).orderBy(desc(dueDiligenceInterviewArtifacts.createdAt)) })))
+    const artifacts = await Promise.all(list.map(async interview => ({ interviewId: interview.id, list: await db.select({ id: dueDiligenceInterviewArtifacts.id, interviewId: dueDiligenceInterviewArtifacts.interviewId, fileId: dueDiligenceInterviewArtifacts.fileId, kind: dueDiligenceInterviewArtifacts.kind, source: dueDiligenceInterviewArtifacts.source, durationSeconds: dueDiligenceInterviewArtifacts.durationSeconds, name: projectFiles.name, createdAt: dueDiligenceInterviewArtifacts.createdAt }).from(dueDiligenceInterviewArtifacts).innerJoin(projectFiles, eq(projectFiles.id, dueDiligenceInterviewArtifacts.fileId)).where(and(eq(dueDiligenceInterviewArtifacts.interviewId, interview.id), projectFileAccessCondition(req.user!.uid))).orderBy(desc(dueDiligenceInterviewArtifacts.createdAt)) })))
     const transcriptRows = list.length ? await db.select().from(dueDiligenceInterviewTranscripts).where(inArray(dueDiligenceInterviewTranscripts.interviewId, list.map(item => item.id))) : []
     res.json({ list, prompts, artifacts, transcripts: transcriptRows })
   } catch (error) { next(error) }
@@ -233,11 +259,11 @@ dueDiligenceRouter.get('/projects/:projectId/interviews', async (req: AuthedRequ
 
 dueDiligenceRouter.post('/projects/:projectId/interviews', async (req: AuthedRequest, res, next) => {
   try {
-    const projectId = routeId(req.params.projectId); await requireAccessibleProject(req.user!.uid, projectId)
+    const projectId = routeId(req.params.projectId); await requireDueDiligenceProject(req.user!.uid, projectId)
     const body = InterviewSchema.parse(req.body); const scheduledAt = body.scheduledAt ? parseShanghaiDateTime(body.scheduledAt) : null
     const [last] = await db.select({ sortOrder: dueDiligenceInterviews.sortOrder }).from(dueDiligenceInterviews).where(eq(dueDiligenceInterviews.projectId, projectId)).orderBy(desc(dueDiligenceInterviews.sortOrder)).limit(1)
     const [inserted] = await db.insert(dueDiligenceInterviews).values({ ...body, scheduledAt, sortOrder: (last?.sortOrder ?? 0) + 1, projectId, createdBy: req.user!.uid }).$returningId()
-    const importedFiles = await db.select({ id: projectFiles.id }).from(projectFiles).where(eq(projectFiles.projectId, projectId))
+    const importedFiles = await db.select({ id: projectFiles.id }).from(projectFiles).where(and(eq(projectFiles.projectId, projectId), projectFileAccessCondition(req.user!.uid)))
     if (importedFiles.length) await db.insert(dueDiligenceInterviewArtifacts).values(importedFiles.map(file => ({ id: randomUUID(), interviewId: inserted.id, fileId: file.id, kind: '项目材料', source: 'manual', createdBy: req.user!.uid })))
     const [row] = await db.select().from(dueDiligenceInterviews).where(eq(dueDiligenceInterviews.id, inserted.id)).limit(1)
     await audit(req, '创建现场访谈', body.title); res.status(201).json(row)
@@ -246,7 +272,7 @@ dueDiligenceRouter.post('/projects/:projectId/interviews', async (req: AuthedReq
 
 dueDiligenceRouter.patch('/projects/:projectId/interviews/:id', async (req: AuthedRequest, res, next) => {
   try {
-    const projectId = routeId(req.params.projectId); const id = routeId(req.params.id); await requireAccessibleProject(req.user!.uid, projectId)
+    const projectId = routeId(req.params.projectId); const id = routeId(req.params.id); await requireDueDiligenceProject(req.user!.uid, projectId)
     const { expectedVersion, scheduledAt, ...body } = InterviewPatchSchema.parse(req.body)
     const patch = { ...body, ...(scheduledAt !== undefined ? { scheduledAt: scheduledAt ? parseShanghaiDateTime(scheduledAt) : null } : {}), version: sql`${dueDiligenceInterviews.version} + 1`, updatedAt: new Date() }
     const [result] = await db.update(dueDiligenceInterviews).set(patch).where(and(eq(dueDiligenceInterviews.id, id), eq(dueDiligenceInterviews.projectId, projectId), eq(dueDiligenceInterviews.version, expectedVersion)))
@@ -258,10 +284,10 @@ dueDiligenceRouter.patch('/projects/:projectId/interviews/:id', async (req: Auth
 })
 
 dueDiligenceRouter.post('/projects/:projectId/interviews/reorder', async (req: AuthedRequest, res, next) => {
-  try { const projectId = routeId(req.params.projectId); await requireAccessibleProject(req.user!.uid, projectId); const ids = z.object({ ids: z.array(z.string().uuid()).min(1).max(200) }).parse(req.body).ids; const rows = await db.select({ id: dueDiligenceInterviews.id }).from(dueDiligenceInterviews).where(eq(dueDiligenceInterviews.projectId, projectId)); if (rows.length !== ids.length || rows.some(row => !ids.includes(row.id))) throw Object.assign(new Error('访谈排序已变化，请刷新后重试'), { status: 409, code: 'INTERVIEW_LIST_CONFLICT' }); await db.transaction(async tx => { for (const [index, id] of ids.entries()) await tx.update(dueDiligenceInterviews).set({ sortOrder: index + 1, updatedAt: new Date() }).where(eq(dueDiligenceInterviews.id, id)) }); await audit(req, '调整访谈顺序', projectId); res.json({ ok: true }) } catch (error) { next(error) }
+  try { const projectId = routeId(req.params.projectId); await requireDueDiligenceProject(req.user!.uid, projectId); const ids = z.object({ ids: z.array(z.string().uuid()).min(1).max(200) }).parse(req.body).ids; const rows = await db.select({ id: dueDiligenceInterviews.id }).from(dueDiligenceInterviews).where(eq(dueDiligenceInterviews.projectId, projectId)); if (rows.length !== ids.length || rows.some(row => !ids.includes(row.id))) throw Object.assign(new Error('访谈排序已变化，请刷新后重试'), { status: 409, code: 'INTERVIEW_LIST_CONFLICT' }); await db.transaction(async tx => { for (const [index, id] of ids.entries()) await tx.update(dueDiligenceInterviews).set({ sortOrder: index + 1, updatedAt: new Date() }).where(eq(dueDiligenceInterviews.id, id)) }); await audit(req, '调整访谈顺序', projectId); res.json({ ok: true }) } catch (error) { next(error) }
 })
 dueDiligenceRouter.delete('/projects/:projectId/interviews/:id', async (req: AuthedRequest, res, next) => {
-  try { const projectId = routeId(req.params.projectId); const id = routeId(req.params.id); await requireAccessibleProject(req.user!.uid, projectId); const [result] = await db.delete(dueDiligenceInterviews).where(and(eq(dueDiligenceInterviews.id, id), eq(dueDiligenceInterviews.projectId, projectId))); if (result.affectedRows !== 1) throw Object.assign(new Error('访谈不存在或已删除'), { status: 404, code: 'NOT_FOUND' }); await audit(req, '删除现场访谈', id); res.status(204).end() } catch (error) { next(error) }
+  try { const projectId = routeId(req.params.projectId); const id = routeId(req.params.id); await requireDueDiligenceProject(req.user!.uid, projectId); const [result] = await db.delete(dueDiligenceInterviews).where(and(eq(dueDiligenceInterviews.id, id), eq(dueDiligenceInterviews.projectId, projectId))); if (result.affectedRows !== 1) throw Object.assign(new Error('访谈不存在或已删除'), { status: 404, code: 'NOT_FOUND' }); await audit(req, '删除现场访谈', id); res.status(204).end() } catch (error) { next(error) }
 })
 
 const InterviewArtifactSchema = z.object({ fileId: z.string().uuid(), kind: z.enum(['项目材料', '录音', '转写', '纪要']), source: z.enum(['browser', 'provider', 'manual']).default('manual'), durationSeconds: z.number().int().min(0).max(86_400).nullable().optional() })
@@ -275,8 +301,8 @@ async function requireInterview(projectId: string, interviewId: string) {
 
 dueDiligenceRouter.post('/projects/:projectId/interviews/:id/artifacts', async (req: AuthedRequest, res, next) => {
   try {
-    const projectId = routeId(req.params.projectId); const interviewId = routeId(req.params.id); await requireAccessibleProject(req.user!.uid, projectId); await requireInterview(projectId, interviewId)
-    const body = InterviewArtifactSchema.parse(req.body); await validateProjectLinks(projectId, null, body.fileId)
+    const projectId = routeId(req.params.projectId); const interviewId = routeId(req.params.id); await requireDueDiligenceProject(req.user!.uid, projectId); await requireInterview(projectId, interviewId)
+    const body = InterviewArtifactSchema.parse(req.body); await validateProjectLinks(projectId, null, body.fileId, req.user!.uid)
     const [existing] = await db.select({ id: dueDiligenceInterviewArtifacts.id }).from(dueDiligenceInterviewArtifacts).where(and(eq(dueDiligenceInterviewArtifacts.interviewId, interviewId), eq(dueDiligenceInterviewArtifacts.fileId, body.fileId))).limit(1)
     if (existing) { res.json({ id: existing.id, alreadyLinked: true }); return }
     const [inserted] = await db.insert(dueDiligenceInterviewArtifacts).values({ id: randomUUID(), interviewId, ...body, createdBy: req.user!.uid }).$returningId()
@@ -288,7 +314,7 @@ dueDiligenceRouter.post('/projects/:projectId/interviews/:id/artifacts', async (
 dueDiligenceRouter.delete('/projects/:projectId/interviews/:id/artifacts/:artifactId', async (req: AuthedRequest, res, next) => {
   try {
     const projectId = routeId(req.params.projectId); const interviewId = routeId(req.params.id); const artifactId = routeId(req.params.artifactId)
-    await requireAccessibleProject(req.user!.uid, projectId); await requireInterview(projectId, interviewId)
+    await requireDueDiligenceProject(req.user!.uid, projectId); await requireInterview(projectId, interviewId)
     const [result] = await db.delete(dueDiligenceInterviewArtifacts).where(and(eq(dueDiligenceInterviewArtifacts.id, artifactId), eq(dueDiligenceInterviewArtifacts.interviewId, interviewId), eq(dueDiligenceInterviewArtifacts.kind, '项目材料')))
     if (result.affectedRows !== 1) throw Object.assign(new Error('访谈材料不存在或已移除'), { status: 404, code: 'NOT_FOUND' })
     await audit(req, '移除访谈项目材料引用', artifactId); res.status(204).end()
@@ -297,7 +323,7 @@ dueDiligenceRouter.delete('/projects/:projectId/interviews/:id/artifacts/:artifa
 
 dueDiligenceRouter.put('/projects/:projectId/interviews/:id/transcript', async (req: AuthedRequest, res, next) => {
   try {
-    const projectId = routeId(req.params.projectId); const interviewId = routeId(req.params.id); await requireAccessibleProject(req.user!.uid, projectId); await requireInterview(projectId, interviewId)
+    const projectId = routeId(req.params.projectId); const interviewId = routeId(req.params.id); await requireDueDiligenceProject(req.user!.uid, projectId); await requireInterview(projectId, interviewId)
     const body = TranscriptSchema.parse(req.body)
     const [current] = await db.select().from(dueDiligenceInterviewTranscripts).where(eq(dueDiligenceInterviewTranscripts.interviewId, interviewId)).limit(1)
     if (current) {
@@ -312,7 +338,7 @@ dueDiligenceRouter.put('/projects/:projectId/interviews/:id/transcript', async (
 
 dueDiligenceRouter.post('/projects/:projectId/interviews/:id/summary/generate', async (req: AuthedRequest, res, next) => {
   try {
-    const projectId = routeId(req.params.projectId); const interviewId = routeId(req.params.id); await requireAccessibleProject(req.user!.uid, projectId); const interview = await requireInterview(projectId, interviewId)
+    const projectId = routeId(req.params.projectId); const interviewId = routeId(req.params.id); await requireDueDiligenceProject(req.user!.uid, projectId); const interview = await requireInterview(projectId, interviewId)
     const [transcript] = await db.select().from(dueDiligenceInterviewTranscripts).where(eq(dueDiligenceInterviewTranscripts.interviewId, interviewId)).limit(1)
     if (!transcript?.content.trim()) throw Object.assign(new Error('请先保存至少一段访谈转写'), { status: 400, code: 'EMPTY_TRANSCRIPT' })
     let response: Response
@@ -326,7 +352,7 @@ dueDiligenceRouter.post('/projects/:projectId/interviews/:id/summary/generate', 
 
 dueDiligenceRouter.get('/projects/:projectId/interviews/:id/export/:kind', async (req: AuthedRequest, res, next) => {
   try {
-    const projectId = routeId(req.params.projectId); const interviewId = routeId(req.params.id); await requireAccessibleProject(req.user!.uid, projectId)
+    const projectId = routeId(req.params.projectId); const interviewId = routeId(req.params.id); await requireDueDiligenceProject(req.user!.uid, projectId)
     const kind = z.enum(['transcript', 'summary']).parse(req.params.kind); const interview = await requireInterview(projectId, interviewId)
     const [project] = await db.select({ name: projects.name }).from(projects).where(eq(projects.id, projectId)).limit(1)
     const [transcript] = await db.select().from(dueDiligenceInterviewTranscripts).where(eq(dueDiligenceInterviewTranscripts.interviewId, interviewId)).limit(1)
@@ -341,22 +367,26 @@ dueDiligenceRouter.get('/projects/:projectId/interviews/:id/export/:kind', async
 
 dueDiligenceRouter.post('/projects/:projectId/interviews/:id/prompts', async (req: AuthedRequest, res, next) => {
   try {
-    const projectId = routeId(req.params.projectId); const interviewId = routeId(req.params.id); await requireAccessibleProject(req.user!.uid, projectId)
+    const projectId = routeId(req.params.projectId); const interviewId = routeId(req.params.id); await requireDueDiligenceProject(req.user!.uid, projectId)
     const body = z.object({ content: z.string().trim().min(1).max(4000), questionId: z.string().uuid().nullable().optional() }).parse(req.body)
     const [interview] = await db.select({ id: dueDiligenceInterviews.id }).from(dueDiligenceInterviews).where(and(eq(dueDiligenceInterviews.id, interviewId), eq(dueDiligenceInterviews.projectId, projectId))).limit(1)
     if (!interview) { res.status(404).json({ code: 'NOT_FOUND', message: '访谈不存在' }); return }
+    if (body.questionId) {
+      const [question] = await db.select({ id: dueDiligenceQuestions.id }).from(dueDiligenceQuestions).where(and(eq(dueDiligenceQuestions.id, body.questionId), eq(dueDiligenceQuestions.projectId, projectId))).limit(1)
+      if (!question) throw Object.assign(new Error('关联核查问题不属于当前项目'), { status: 400, code: 'INVALID_QUESTION_LINK' })
+    }
     const [inserted] = await db.insert(dueDiligenceInterviewPrompts).values({ interviewId, content: body.content, questionId: body.questionId ?? null, createdBy: req.user!.uid, createdByName: req.user!.name }).$returningId()
     const [row] = await db.select().from(dueDiligenceInterviewPrompts).where(eq(dueDiligenceInterviewPrompts.id, inserted.id)).limit(1)
     await audit(req, '提交远程插问', body.content); res.status(201).json(row)
   } catch (error) { next(error) }
 })
 dueDiligenceRouter.get('/projects/:projectId/interviews/:id/prompts', async (req: AuthedRequest, res, next) => {
-  try { const projectId = routeId(req.params.projectId); const interviewId = routeId(req.params.id); await requireAccessibleProject(req.user!.uid, projectId); await requireInterview(projectId, interviewId); res.json({ list: await db.select().from(dueDiligenceInterviewPrompts).where(eq(dueDiligenceInterviewPrompts.interviewId, interviewId)).orderBy(desc(dueDiligenceInterviewPrompts.createdAt)) }) } catch (error) { next(error) }
+  try { const projectId = routeId(req.params.projectId); const interviewId = routeId(req.params.id); await requireDueDiligenceProject(req.user!.uid, projectId); await requireInterview(projectId, interviewId); res.json({ list: await db.select().from(dueDiligenceInterviewPrompts).where(eq(dueDiligenceInterviewPrompts.interviewId, interviewId)).orderBy(desc(dueDiligenceInterviewPrompts.createdAt)) }) } catch (error) { next(error) }
 })
 
 dueDiligenceRouter.patch('/projects/:projectId/interviews/:id/prompts/:promptId', async (req: AuthedRequest, res, next) => {
   try {
-    const projectId = routeId(req.params.projectId); const interviewId = routeId(req.params.id); const promptId = routeId(req.params.promptId); await requireAccessibleProject(req.user!.uid, projectId)
+    const projectId = routeId(req.params.projectId); const interviewId = routeId(req.params.id); const promptId = routeId(req.params.promptId); await requireDueDiligenceProject(req.user!.uid, projectId)
     const { status, response } = z.object({ status: z.enum(['待确认', '已确认', '已忽略']), response: z.string().trim().max(4000).optional().default('') }).parse(req.body)
     const [interview] = await db.select({ id: dueDiligenceInterviews.id }).from(dueDiligenceInterviews).where(and(eq(dueDiligenceInterviews.id, interviewId), eq(dueDiligenceInterviews.projectId, projectId))).limit(1)
     if (!interview) { res.status(404).json({ code: 'NOT_FOUND', message: '访谈不存在' }); return }
@@ -406,18 +436,19 @@ async function createExperienceCandidate(input: { twinId: string; ownerUserId: s
 }
 
 async function synthesizeRuleCandidates(twinId: string, ownerUserId: string) {
-  const events = await db.select().from(digitalTwinExperienceEvents).where(eq(digitalTwinExperienceEvents.ownerUserId, ownerUserId)).orderBy(desc(digitalTwinExperienceEvents.createdAt)).limit(500)
+  const events = await db.select().from(digitalTwinExperienceEvents).where(and(eq(digitalTwinExperienceEvents.ownerUserId, ownerUserId), inArray(digitalTwinExperienceEvents.projectId, db.select({ id: projects.id }).from(projects).where(learningProjectAccessCondition(ownerUserId))))).orderBy(desc(digitalTwinExperienceEvents.createdAt)).limit(500)
   const groups = new Map<string, typeof events>()
   for (const event of events) {
     if (!event.projectId || event.eventType === 'candidate.feedback') continue
-    const list = groups.get(event.topic) ?? []; list.push(event); groups.set(event.topic, list)
+    const key = `${event.projectId}:${event.topic}`; const list = groups.get(key) ?? []; list.push(event); groups.set(key, list)
   }
   let created = 0
-  for (const [topic, evidence] of groups) {
+  for (const [groupKey, evidence] of groups) {
+    const topic = evidence[0].topic
     if (evidence.length < 3) continue
     const batch = Math.floor(evidence.length / 3)
-    const sourceKey = `events:${createHash('sha256').update(topic).digest('hex').slice(0, 16)}:${batch}`
-    const sourceHash = createHash('sha256').update(`${topic}|batch:${batch}`).digest('hex')
+    const sourceKey = `events:${createHash('sha256').update(groupKey).digest('hex').slice(0, 16)}:${batch}`
+    const sourceHash = createHash('sha256').update(`${groupKey}|batch:${batch}`).digest('hex')
     const excerpt = evidence.slice(0, 12).map(item => `${item.eventType}：${String(item.payload.title || item.payload.note || item.payload.decision || '')}`).join('\n')
     if (await createExperienceCandidate({ twinId, ownerUserId, projectId: evidence[0].projectId!, sourceHash, sourceName: `行为沉淀：${topic}`, sourceType: '平台行为统计', sourceKey, topic, confidence: Math.min(90, 55 + evidence.length * 5), excerpt, engine: 'rules', evidenceCount: evidence.length })) created += 1
   }
@@ -425,9 +456,10 @@ async function synthesizeRuleCandidates(twinId: string, ownerUserId: string) {
 }
 
 async function enrichExperienceEventsWithModel(twinId: string, ownerUserId: string) {
-  const rows = await db.select().from(digitalTwinExperienceEvents).where(eq(digitalTwinExperienceEvents.ownerUserId, ownerUserId)).orderBy(desc(digitalTwinExperienceEvents.createdAt)).limit(100)
+  const rows = await db.select().from(digitalTwinExperienceEvents).where(and(eq(digitalTwinExperienceEvents.ownerUserId, ownerUserId), inArray(digitalTwinExperienceEvents.projectId, db.select({ id: projects.id }).from(projects).where(learningProjectAccessCondition(ownerUserId))))).orderBy(desc(digitalTwinExperienceEvents.createdAt)).limit(100)
   const retryBefore = Date.now() - 10 * 60 * 1000
-  const pending = rows.filter(row => row.projectId && row.modelStatus !== '已完成' && (row.modelAttempts < 3 || !row.modelProcessedAt || row.modelProcessedAt.getTime() < retryBefore)).slice(0, 20)
+  const eligible = rows.filter(row => row.projectId && row.modelStatus !== '已完成' && (row.modelAttempts < 3 || !row.modelProcessedAt || row.modelProcessedAt.getTime() < retryBefore))
+  const pending = eligible.filter(row => row.projectId === eligible[0]?.projectId).slice(0, 20)
   if (!pending.length) return
   try {
     const response = await fetchAiGatewayChatCompatible((process.env.LLM_BASE_URL || process.env.OPENAI_BASE_URL || 'http://127.0.0.1:18081/v1').replace(/\/$/, ''), { method: 'POST', headers: { 'Content-Type': 'application/json', ...(process.env.OPENAI_API_KEY || process.env.LLM_API_KEY ? { Authorization: `Bearer ${process.env.OPENAI_API_KEY || process.env.LLM_API_KEY}` } : {}) }, body: JSON.stringify({ model: process.env.LLM_MODEL || 'claude-sonnet-4-6', response_format: { type: 'json_object' }, max_tokens: 4000, messages: [{ role: 'system', content: '你是投资团队经验整理助手。从员工业务行为中提炼可复用、不含项目隐私的判断偏好与 Skill。合并相似经验，识别适用边界，不得编造。只返回 JSON：{"candidates":[{"topic":"","rules":"","cases":"","boundaries":"","confidence":80}]}' }, { role: 'user', content: JSON.stringify(pending.map(row => ({ type: row.eventType, topic: row.topic, evidence: row.payload }))).slice(0, 60000) }] }), signal: AbortSignal.timeout(120_000) }, fetch, 120_000)
@@ -447,7 +479,7 @@ async function enrichExperienceEventsWithModel(twinId: string, ownerUserId: stri
 }
 
 async function scanExperienceMaterials(twinId: string, ownerUserId: string) {
-  const sources = await db.select({ id: projectFiles.id, projectId: projectFiles.projectId, name: projectFiles.name, hash: projectFiles.sha256, text: projectFiles.contentText, category: projectFiles.category }).from(projectFiles).innerJoin(projectMembers, and(eq(projectMembers.projectId, projectFiles.projectId), eq(projectMembers.userId, ownerUserId))).where(and(eq(projectFiles.uploadedBy, ownerUserId), eq(projectFiles.parseStatus, '成功')))
+  const sources = await db.select({ id: projectFiles.id, projectId: projectFiles.projectId, name: projectFiles.name, hash: projectFiles.sha256, text: projectFiles.contentText, category: projectFiles.category }).from(projectFiles).innerJoin(projectMembers, and(eq(projectMembers.projectId, projectFiles.projectId), eq(projectMembers.userId, ownerUserId))).where(and(eq(projectFiles.uploadedBy, ownerUserId), eq(projectFiles.parseStatus, '成功'), projectFileAccessCondition(ownerUserId)))
   const eligible = sources.filter(file => file.hash && file.text?.trim() && /立项|尽调|报告/i.test(`${file.name} ${file.category}`)).slice(0, 30)
   let created = 0
   for (const file of eligible) {
@@ -483,12 +515,12 @@ dueDiligenceRouter.post('/twins/:id/learning/scan', async (req: AuthedRequest, r
   } catch (error) { next(error) }
 })
 dueDiligenceRouter.get('/twins/:id/learning-candidates', async (req: AuthedRequest, res, next) => {
-  try { const id = routeId(req.params.id); const [twin] = await db.select({ id: digitalTwins.id }).from(digitalTwins).where(and(eq(digitalTwins.id, id), eq(digitalTwins.ownerUserId, req.user!.uid))).limit(1); if (!twin) throw Object.assign(new Error('数字分身不存在'), { status: 404, code: 'NOT_FOUND' }); await scanExperienceMaterials(id, req.user!.uid); await synthesizeRuleCandidates(id, req.user!.uid); void enrichExperienceEventsWithModel(id, req.user!.uid).catch(() => undefined); const list = await db.select().from(digitalTwinLearningCandidates).where(and(eq(digitalTwinLearningCandidates.twinId, id), eq(digitalTwinLearningCandidates.ownerUserId, req.user!.uid))).orderBy(desc(digitalTwinLearningCandidates.createdAt)); res.json({ list }) } catch (error) { next(error) }
+  try { const id = routeId(req.params.id); const [twin] = await db.select({ id: digitalTwins.id }).from(digitalTwins).where(and(eq(digitalTwins.id, id), eq(digitalTwins.ownerUserId, req.user!.uid))).limit(1); if (!twin) throw Object.assign(new Error('数字分身不存在'), { status: 404, code: 'NOT_FOUND' }); const list = await db.select().from(digitalTwinLearningCandidates).where(and(eq(digitalTwinLearningCandidates.twinId, id), eq(digitalTwinLearningCandidates.ownerUserId, req.user!.uid), learningCandidateAccessCondition(req.user!.uid))).orderBy(desc(digitalTwinLearningCandidates.createdAt)); res.json({ list }) } catch (error) { next(error) }
 })
 dueDiligenceRouter.post('/twins/:id/learning-candidates/:candidateId/decision', async (req: AuthedRequest, res, next) => {
   try {
     const twinId = routeId(req.params.id); const candidateId = routeId(req.params.candidateId); const body = z.object({ decision: z.enum(['确认', '拒绝']) }).parse(req.body); const current = actor(req)
-    const [twin] = await db.select().from(digitalTwins).where(and(eq(digitalTwins.id, twinId), eq(digitalTwins.ownerUserId, current.userId))).limit(1); const [candidate] = await db.select().from(digitalTwinLearningCandidates).where(and(eq(digitalTwinLearningCandidates.id, candidateId), eq(digitalTwinLearningCandidates.twinId, twinId), eq(digitalTwinLearningCandidates.ownerUserId, current.userId), eq(digitalTwinLearningCandidates.status, '待确认'))).limit(1)
+    const [twin] = await db.select().from(digitalTwins).where(and(eq(digitalTwins.id, twinId), eq(digitalTwins.ownerUserId, current.userId))).limit(1); const [candidate] = await db.select().from(digitalTwinLearningCandidates).where(and(eq(digitalTwinLearningCandidates.id, candidateId), eq(digitalTwinLearningCandidates.twinId, twinId), eq(digitalTwinLearningCandidates.ownerUserId, current.userId), eq(digitalTwinLearningCandidates.status, '待确认'), learningCandidateAccessCondition(current.userId))).limit(1)
     if (!twin || !candidate) throw Object.assign(new Error('学习候选不存在或已处理'), { status: 404, code: 'NOT_FOUND' })
     if (body.decision === '拒绝') { await db.update(digitalTwinLearningCandidates).set({ status: '已拒绝', decidedAt: new Date() }).where(eq(digitalTwinLearningCandidates.id, candidateId)); await recordExperienceEvent({ ownerUserId: current.userId, twinId, projectId: candidate.projectId, eventType: 'candidate.feedback', entityType: 'candidate', entityId: candidateId, topic: candidate.topic, fingerprint: `${candidateId}:拒绝`, payload: { decision: '拒绝', sourceName: candidate.sourceName } }); await audit(req, '拒绝数字分身学习候选', candidate.sourceName); res.json({ status: '已拒绝' }); return }
     const nextVersion = twin.activeVersion + 1; const rules = `${twin.rules}${twin.rules ? '\n\n' : ''}${candidate.rules}`; const cases = `${twin.cases}${twin.cases ? '\n\n' : ''}${candidate.cases}\n边界：${candidate.boundaries}`
@@ -588,7 +620,7 @@ dueDiligenceRouter.get('/twins/importable-sources', async (req: AuthedRequest, r
     const userId = req.user!.uid
     const [notes, files] = await Promise.all([
       db.select({ id: personalNotes.id, name: personalNotes.title, text: personalNotes.plainText, sourceType: sql<string>`'个人笔记'` }).from(personalNotes).where(eq(personalNotes.ownerId, userId)).orderBy(desc(personalNotes.updatedAt)).limit(100),
-      db.select({ id: projectFiles.id, name: projectFiles.name, text: projectFiles.contentText, sourceType: sql<string>`'知识库材料'` }).from(projectFiles).innerJoin(projectMembers, and(eq(projectMembers.projectId, projectFiles.projectId), eq(projectMembers.userId, userId))).where(and(eq(projectFiles.parseStatus, '成功'), eq(projectFiles.uploadedBy, userId))).orderBy(desc(projectFiles.uploadedAt)).limit(100),
+      db.select({ id: projectFiles.id, name: projectFiles.name, text: projectFiles.contentText, sourceType: sql<string>`'知识库材料'` }).from(projectFiles).innerJoin(projectMembers, and(eq(projectMembers.projectId, projectFiles.projectId), eq(projectMembers.userId, userId))).where(and(eq(projectFiles.parseStatus, '成功'), eq(projectFiles.uploadedBy, userId), projectFileAccessCondition(userId))).orderBy(desc(projectFiles.uploadedAt)).limit(100),
     ])
     res.json({ list: [...notes, ...files].filter(item => item.text?.trim()).map(item => ({ ...item, text: item.text!.slice(0, 60000) })) })
   } catch (error) { next(error) }

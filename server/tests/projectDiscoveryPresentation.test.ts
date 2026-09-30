@@ -116,9 +116,14 @@ test('project discovery filters by local time window, type, and searchable inves
     radarProfile: { publishedAt: '2026-09-10T01:30:00.000Z' },
     latestUpdates: [{ occurredAt: '2026-09-10T01:30:00.000Z', title: '旧事件今日才入池' }],
   }
+  const uploadedOldLead = {
+    ...lateIngestedOldLead,
+    id: 'company-uploaded-today',
+    radarProfile: { publishedAt: '2026-09-10T01:30:00.000Z', discoveryDate: '2026-09-21' },
+  }
   assert.deepEqual(
-    filterProjectDiscoveryCandidates([research, company, rescoredOldLead, lateIngestedOldLead], { period: 'today', query: '', kind: 'all', now }).map((item) => item.id),
-    ['company-1'],
+    filterProjectDiscoveryCandidates([research, company, rescoredOldLead, lateIngestedOldLead, uploadedOldLead], { period: 'today', query: '', kind: 'all', now }).map((item) => item.id),
+    ['company-1', 'company-uploaded-today'],
   )
   assert.deepEqual(
     filterProjectDiscoveryCandidates([research, company], { period: 'week', query: '星河创投', kind: 'company', now }).map((item) => item.id),
@@ -252,6 +257,33 @@ test('project discovery prefers human-edited card content over derived facts', (
   assert.equal(buildProjectDiscoveryBrief(edited).summary, '用户补充的项目摘要')
   assert.equal(buildProjectDiscoveryBrief(edited).facts.find((fact) => fact.label === '融资金额')?.value, '超亿元')
   assert.equal(buildProjectDiscoveryBrief(edited).facts.find((fact) => fact.label === '投资方')?.value, '用户确认基金')
+})
+
+test('project discovery highlights a sourced core strength on the collapsed company card', () => {
+  const enriched = {
+    ...company,
+    radarProfile: {
+      ...company.radarProfile,
+      profile: {
+        ...company.radarProfile?.profile,
+        discoveryCardEdits: {
+          name: company.name,
+          primaryDate: '2026-09-20',
+          summary: '已向客户交付并形成复购，仍需核对收入。',
+          region: '上海',
+          sourceChannel: '公司公告',
+          briefFacts: { 核心优势: '自研工艺已获量产订单；订单与收入需分别核对。' },
+          profileFacts: {},
+        },
+      },
+    },
+  } as LeadListItem
+
+  assert.deepEqual(
+    buildProjectDiscoveryBrief(enriched).facts.find((fact) => fact.label === '核心优势'),
+    { label: '核心优势', value: '自研工艺已获量产订单；订单与收入需分别核对。', wide: true },
+  )
+  assert.equal(buildProjectDiscoveryBrief(company).facts.some((fact) => fact.label === '核心优势'), false)
 })
 
 test('plain-text keyword editing accepts common separators and preserves known keyword metadata', () => {

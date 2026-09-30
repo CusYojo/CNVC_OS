@@ -360,7 +360,7 @@ export function AiQuickActions({
       <div className="mb-3">
         <div className="mb-2 flex items-center gap-2 text-xs font-medium text-slate-500">
           <FileCheck2 className="h-3.5 w-3.5 text-brand-600" />
-          常用工具
+          常用Skill
         </div>
         <div className="flex gap-2 overflow-x-auto pb-1">
           {ACTIONS.filter((action) => !action.hidden).map((action) => {

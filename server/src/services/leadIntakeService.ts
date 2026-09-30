@@ -171,6 +171,7 @@ async function commitNormalizedLead(input: {
   sourceId: string
   actor: IntakeActor
   evidenceQuote: string
+  submittedAt?: Date
 }) {
   const payload = {
     title: input.lead.name,
@@ -248,6 +249,9 @@ async function commitNormalizedLead(input: {
         sources: [{ title: sourceLabel, sourceId: input.sourceId }, ...(input.lead.sources ?? [])],
         radarProfile: {
           channel: input.sourceType === 'bp-upload' ? 'BP上传' : input.sourceType === 'batch-import' ? '批量导入' : '人工录入',
+          discoveryDate: new Intl.DateTimeFormat('en-CA', {
+            timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
+          }).format(input.submittedAt ?? new Date()),
           qualityRejected: false,
           intake: { sourceType: input.sourceType, sourceId: input.sourceId, decisionId: decision.id },
           articleText: input.evidenceQuote.slice(0, 50_000),
@@ -564,7 +568,7 @@ async function processBpJob(row: IntakeFileRow) {
     await pool.query(`UPDATE ${filesTable} SET stage='structuring',progress=55,updated_at=NOW(3) WHERE id=? AND lease_owner=?`, [row.id, owner])
     const lead = candidateFromBp(row.original_name, text.slice(0, MAX_BP_TEXT))
     const result = await commitNormalizedLead({
-      lead, sourceType: 'bp-upload', sourceId: row.id,
+      lead, sourceType: 'bp-upload', sourceId: row.id, submittedAt: row.created_at,
       actor: { userId: row.uploaded_by, userName: row.uploaded_by_name }, evidenceQuote: text,
     })
     const status = result.status === 'review' ? 'review' : result.status === 'rejected' ? 'rejected' : 'ready'

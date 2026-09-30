@@ -693,6 +693,7 @@ export type LeadListItem = Pick<Lead,
     channel?: string
     link?: string
     publishedAt?: string
+    discoveryDate?: string
     profile?: {
       lab?: string
       companyName?: string

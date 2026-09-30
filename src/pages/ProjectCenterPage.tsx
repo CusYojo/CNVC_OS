@@ -81,7 +81,7 @@ export function ProjectCenterPage() {
           })}
         </div>
       <div id="project-center-panel" role="tabpanel" aria-labelledby={`project-center-tab-${view}`}>
-        {view === 'discover' ? <ProjectDiscoveryPage /> : view === 'reviews' ? <LeadReviewPanel /> : <ProjectsPage classification={view} embedded onCountsChange={setClassificationCounts} />}
+        {view === 'discover' ? <ProjectDiscoveryPage /> : view === 'reviews' ? <LeadReviewPanel /> : <ProjectsPage key={view} classification={view} embedded onCountsChange={setClassificationCounts} />}
       </div>
     </div>
   )

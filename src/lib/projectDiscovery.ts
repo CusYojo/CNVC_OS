@@ -41,7 +41,7 @@ export function projectDiscoveryDay(value?: string): string {
 }
 
 export function projectDiscoveryCandidateDay(lead: LeadListItem): string {
-  return projectDiscoveryDay(lead.radarProfile?.publishedAt || lead.latestUpdates?.[0]?.occurredAt || lead.poolEnteredAt || lead.dataUpdatedAt)
+  return projectDiscoveryDay(lead.radarProfile?.discoveryDate || lead.radarProfile?.publishedAt || lead.latestUpdates?.[0]?.occurredAt || lead.poolEnteredAt || lead.dataUpdatedAt)
 }
 
 export function shouldLoadNextProjectDiscoveryPage(
@@ -73,7 +73,7 @@ export function filterProjectDiscoveryCandidates(
     return projectDiscoverySearchText(lead).includes(query)
   }).sort((left, right) => (
     projectDiscoveryCandidateDay(right).localeCompare(projectDiscoveryCandidateDay(left))
-      || (right.radarProfile?.publishedAt || right.latestUpdates?.[0]?.occurredAt || right.poolEnteredAt || right.dataUpdatedAt || '').localeCompare(left.radarProfile?.publishedAt || left.latestUpdates?.[0]?.occurredAt || left.poolEnteredAt || left.dataUpdatedAt || '')
+      || (right.radarProfile?.discoveryDate || right.radarProfile?.publishedAt || right.latestUpdates?.[0]?.occurredAt || right.poolEnteredAt || right.dataUpdatedAt || '').localeCompare(left.radarProfile?.discoveryDate || left.radarProfile?.publishedAt || left.latestUpdates?.[0]?.occurredAt || left.poolEnteredAt || left.dataUpdatedAt || '')
       || left.id.localeCompare(right.id)
   ))
 }
@@ -147,6 +147,9 @@ export function buildProjectDiscoveryBrief(lead: LeadListItem): ProjectDiscovery
       { label: '融资轮次', value: financing?.latestRound || investment?.financing.latestCompletedRound || '未披露' },
       { label: '投资方', value: institutions.slice(0, 4).map((institution) => institution.name).filter(Boolean).join('、') || '未披露', wide: true },
       { label: '核心团队背景', value: team, wide: true },
+      ...(edits?.briefFacts?.['核心优势']?.trim()
+        ? [{ label: '核心优势', value: edits.briefFacts['核心优势'], wide: true }]
+        : []),
     ],
   }, edits)
 }
