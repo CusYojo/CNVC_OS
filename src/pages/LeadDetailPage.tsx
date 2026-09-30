@@ -323,7 +323,7 @@ export function LeadDetailPage() {
   useEffect(() => { void load() }, [load])
 
   const state = location.state as { from?: string } | null
-  const goBack = () => navigate(state?.from || '/sourcing')
+  const goBack = () => navigate(state?.from || '/projects?view=discover')
 
   const handleConvert = async () => {
     if (!lead || lead.poolStatus === '已转专属项目') return
@@ -345,7 +345,7 @@ export function LeadDetailPage() {
     try {
       const result = await apiDelete<{ code: number; message: string; deleted: string; name: string }>(`/leads/${lead.id}`)
       showToast(`已删除线索「${result.name || lead.name}」`, 'success')
-      navigate(state?.from || '/sourcing', { replace: true })
+      navigate(state?.from || '/projects?view=discover', { replace: true })
     } catch (cause) {
       showToast(cause instanceof Error ? cause.message : '删除失败，请稍后重试', 'error')
       setDeleting(false)

@@ -101,7 +101,6 @@ export function resolveSaiAgentContext(
 
   if (pathname === '/projects/boss-dashboard') return context('workspace', '管理驾驶舱', '组织级项目视图', path)
   if (pathname === '/projects' && params.get('view') === 'discover') return context('discovery', '新项目发现', '候选项目研判', path)
-  if (pathname === '/projects' && params.get('view') === 'leads') return context('discovery', '线索池', '项目线索筛选', path)
   if (pathname === '/projects') return context('workspace', '项目中心', '项目组合与进展', path)
   if (pathname.startsWith('/institutions')) return context('institution', '机构追踪', pathname === '/institutions' ? '投资机构全景' : '机构详情', path)
   if (pathname.startsWith('/due-diligence')) return context('due-diligence', '尽调工作台', '证据、访谈与核查', path)

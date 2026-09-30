@@ -1,17 +1,15 @@
 import { FolderKanban, Inbox, Sparkles, Star, UsersRound } from 'lucide-react'
 import { useSearchParams } from 'react-router-dom'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { ProjectClassification } from '../types'
 import type { ProjectListCounts } from '../services/projectListApi'
 import { ProjectsPage } from './ProjectsPage'
-import { SourcingPage } from './SourcingPage'
 import { LeadReviewPanel } from '../components/LeadReviewPanel'
 import { ProjectDiscoveryPage } from './ProjectDiscoveryPage'
 
-type ProjectCenterView = 'leads' | 'discover' | 'reviews' | ProjectClassification
+type ProjectCenterView = 'discover' | 'reviews' | ProjectClassification
 
 const views: Array<{ id: ProjectCenterView; label: string; icon: typeof Inbox }> = [
-  { id: 'leads', label: '线索池', icon: Inbox },
   { id: 'discover', label: '新项目发现', icon: Sparkles },
   { id: 'reviews', label: '待复核', icon: Inbox },
   { id: 'pool', label: '项目池', icon: FolderKanban },
@@ -23,6 +21,7 @@ const views: Array<{ id: ProjectCenterView; label: string; icon: typeof Inbox }>
 const visibleViews = views.filter(item => item.id !== 'pool')
 
 function validView(value: string | null): ProjectCenterView {
+  if (value === 'leads') return 'discover'
   return visibleViews.some((item) => item.id === value) ? value as ProjectCenterView : 'normal'
 }
 
@@ -30,6 +29,10 @@ export function ProjectCenterPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const view = validView(searchParams.get('view'))
   const [classificationCounts, setClassificationCounts] = useState<ProjectListCounts>({ normal: 0, key: 0 })
+
+  useEffect(() => {
+    if (searchParams.get('view') === 'leads') setSearchParams({ view: 'discover' }, { replace: true })
+  }, [searchParams, setSearchParams])
 
   const selectView = (next: ProjectCenterView) => {
     const params = new URLSearchParams(searchParams)
@@ -72,13 +75,13 @@ export function ProjectCenterPage() {
                 }}
                 className={active ? 'active' : ''}
               >
-                {item.label}{item.id !== 'leads' && item.id !== 'discover' && item.id !== 'reviews' && item.id !== 'pool' && <em>{classificationCounts[item.id]}</em>}
+                {item.label}{item.id !== 'discover' && item.id !== 'reviews' && item.id !== 'pool' && <em>{classificationCounts[item.id]}</em>}
               </button>
             )
           })}
         </div>
       <div id="project-center-panel" role="tabpanel" aria-labelledby={`project-center-tab-${view}`}>
-        {view === 'leads' ? <SourcingPage /> : view === 'discover' ? <ProjectDiscoveryPage /> : view === 'reviews' ? <LeadReviewPanel /> : <ProjectsPage classification={view} embedded onCountsChange={setClassificationCounts} />}
+        {view === 'discover' ? <ProjectDiscoveryPage /> : view === 'reviews' ? <LeadReviewPanel /> : <ProjectsPage classification={view} embedded onCountsChange={setClassificationCounts} />}
       </div>
     </div>
   )

@@ -226,16 +226,9 @@ test('changing type, channel, or stage keeps research mode filters consistent', 
   assert.equal(backToCompany.has('stage'), false)
 })
 
-test('legacy sourcing route preserves lead-pool filters while redirecting into project center', () => {
+test('legacy sourcing route opens project discovery instead of retired lead pool', () => {
   const target = legacySourcingRedirectTarget('?leadType=research&page=4&pageSize=50&keyword=world-model')
-  const [pathname, search = ''] = target.split('?')
-  const params = new URLSearchParams(search)
-  assert.equal(pathname, '/projects')
-  assert.equal(params.get('view'), 'leads')
-  assert.equal(params.get('leadType'), 'research')
-  assert.equal(params.get('page'), '4')
-  assert.equal(params.get('pageSize'), '50')
-  assert.equal(params.get('keyword'), 'world-model')
+  assert.equal(target, '/projects?view=discover')
 })
 
 test('keyword filtering avoids unbounded full-JSON text scans', async () => {

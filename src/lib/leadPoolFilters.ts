@@ -309,10 +309,8 @@ export function leadPoolFilterSearchParams(params: URLSearchParams, key: string,
   return next
 }
 
-export function legacySourcingRedirectTarget(search: string): string {
-  const params = new URLSearchParams(search)
-  params.set('view', 'leads')
-  return `/projects?${params.toString()}`
+export function legacySourcingRedirectTarget(_search: string): string {
+  return '/projects?view=discover'
 }
 
 export function syncLeadPoolKeywordInput(current: string, urlKeyword: string): string {
