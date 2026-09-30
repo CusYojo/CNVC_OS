@@ -24,6 +24,7 @@ jwAgentRouter.post('/conversations/:agentId/messages', async (req: AuthedRequest
   try {
     const body = z.object({
       message: z.string().min(1).max(200_000),
+      responseMode: z.enum(['standard', 'compact']).optional(),
       skillName: z.enum([
         'draft-investment-proposal',
         'generate-investment-compliance-note',
@@ -44,6 +45,7 @@ jwAgentRouter.post('/conversations/:agentId/messages', async (req: AuthedRequest
       agentId(req.params.agentId),
       body.message,
       {
+        responseMode: body.responseMode,
         skillName: body.skillName,
         attachmentFileIds: body.attachmentFileIds,
         attachmentFileNames: body.attachmentFileNames,

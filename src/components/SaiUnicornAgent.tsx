@@ -3,6 +3,7 @@ import {
   Bot,
   BrainCircuit,
   Check,
+  CheckCircle2,
   ChevronRight,
   ExternalLink,
   FileSearch,
@@ -21,6 +22,7 @@ import { apiPost } from '../lib/api'
 import { openApproval } from '../lib/approvalWorkspace'
 import {
   buildSaiAgentPrompt,
+  buildSaiTurnReceipt,
   extractSaiPromptGoal,
   getSaiAgentActions,
   getSaiConversationScopeKey,
@@ -82,6 +84,9 @@ export function SaiUnicornAgent() {
   const [sending, setSending] = useState(false)
   const [localError, setLocalError] = useState<string>()
   const [interactionAnswers, setInteractionAnswers] = useState<Record<string, string | string[]>>({})
+  const [turnReceipt, setTurnReceipt] = useState<(
+    ReturnType<typeof buildSaiTurnReceipt> & { assistantBaseline: number }
+  )>()
   const triggerRef = useRef<HTMLButtonElement>(null)
   const closeRef = useRef<HTMLButtonElement>(null)
   const composerRef = useRef<HTMLTextAreaElement>(null)
@@ -105,6 +110,7 @@ export function SaiUnicornAgent() {
     [agent.messages],
   )
   const busy = sending || agent.status === 'submitted' || agent.status === 'streaming' || agent.status === 'connecting'
+  const assistantMessageCount = messages.filter((message) => message.role === 'assistant').length
   const statusLabel = agent.status === 'streaming' || agent.status === 'submitted'
     ? '思考中'
     : agent.status === 'connecting' || sending
@@ -123,7 +129,12 @@ export function SaiUnicornAgent() {
     setAgentId(undefined)
     setLocalError(undefined)
     setInteractionAnswers({})
+    setTurnReceipt(undefined)
   }, [conversationScopeKey])
+
+  useEffect(() => {
+    if (turnReceipt && assistantMessageCount > turnReceipt.assistantBaseline) setTurnReceipt(undefined)
+  }, [assistantMessageCount, turnReceipt])
 
   useEffect(() => {
     if (!open) return
@@ -154,12 +165,22 @@ export function SaiUnicornAgent() {
     if (!cleanGoal || busy) return
     const prompt = buildSaiAgentPrompt(currentContext, cleanGoal)
     const requestScopeKey = conversationScopeKey
+    const currentProject = projects.find((project) => project.id === currentContext.projectId)
+    setTurnReceipt({
+      ...buildSaiTurnReceipt(currentContext, cleanGoal, currentProject, {
+        activeTodos: activeTodoCount,
+        upcomingMeetings: upcomingMeetingCount,
+        pendingApprovals: pendingApprovalCount,
+        highRisks: highRiskCount,
+      }),
+      assistantBaseline: assistantMessageCount,
+    })
     setComposer('')
     setLocalError(undefined)
     setSending(true)
     try {
       if (agentId) {
-        await agent.sendMessage(prompt)
+        await agent.sendMessage(prompt, { responseMode: 'compact' })
       } else {
         const row = await apiPost<ConversationRow>('/conversations', {
           title: `小赛 · ${currentContext.label}`,
@@ -170,7 +191,10 @@ export function SaiUnicornAgent() {
         const nextAgentId = row.agentId || row.id
         if (conversationScopeRef.current !== requestScopeKey) return
         setAgentId(nextAgentId)
-        await apiPost(`/agent/conversations/${encodeURIComponent(nextAgentId)}/messages`, { message: prompt })
+        await apiPost(`/agent/conversations/${encodeURIComponent(nextAgentId)}/messages`, {
+          message: prompt,
+          responseMode: 'compact',
+        })
       }
     } catch (error) {
       setLocalError(formatAgentError(error))
@@ -268,7 +292,7 @@ export function SaiUnicornAgent() {
             </span>
           </div>
           <div className="sai-agent-header-actions">
-            {agentId && <button type="button" title="开始新对话" aria-label="开始新对话" onClick={() => { setAgentId(undefined); setLocalError(undefined) }}><RotateCcw /></button>}
+            {agentId && <button type="button" title="开始新对话" aria-label="开始新对话" onClick={() => { setAgentId(undefined); setLocalError(undefined); setTurnReceipt(undefined) }}><RotateCcw /></button>}
             <button ref={closeRef} type="button" aria-label="关闭小赛" onClick={closePanel}><X /></button>
           </div>
         </header>
@@ -292,7 +316,19 @@ export function SaiUnicornAgent() {
             </div>
           </div>}
 
-          {!messages.length && <div className="sai-agent-suggestions" aria-label="小赛建议">
+          {turnReceipt && <section className="sai-agent-receipt" aria-label="小赛处理回执">
+            <header>
+              <span><CheckCircle2 aria-hidden="true" /></span>
+              <div><strong>{turnReceipt.title}</strong><small>{turnReceipt.goal}</small></div>
+            </header>
+            <div className="sai-agent-receipt-facts">
+              {turnReceipt.facts.map((fact) => <span key={fact}>{fact}</span>)}
+            </div>
+            <ol>{turnReceipt.steps.map((step) => <li key={step}>{step}</li>)}</ol>
+            <p>{turnReceipt.clarification}</p>
+          </section>}
+
+          {!messages.length && !turnReceipt && <div className="sai-agent-suggestions" aria-label="小赛建议">
             <div className="sai-agent-section-title"><span>现在可以做</span><small>随页面变化</small></div>
             {actions.map((action) => <button key={action.id} type="button" onClick={() => runAction(action)} disabled={busy}>
               <span className="sai-agent-action-icon"><ActionIcon action={action} /></span>
@@ -314,7 +350,7 @@ export function SaiUnicornAgent() {
           </div>}
 
           {agent.interaction && <div className="sai-agent-interaction">
-            <div className="sai-agent-section-title"><span>需要你确认</span><small>你始终保持控制</small></div>
+            <div className="sai-agent-section-title"><span>唯一一次信息补充</span><small>回答后直接给结果</small></div>
             {agent.interaction.questions.map((question) => <fieldset key={question.id}>
               <legend>{question.question}</legend>
               <div>{question.options.map((option) => {

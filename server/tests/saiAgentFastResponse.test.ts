@@ -100,13 +100,17 @@ test('轻量模式约束答案有结论、依据与下一步', () => {
 })
 
 test('小赛前后端通过现有消息 API 显式开启轻量模式', async () => {
-  const [component, hook, route] = await Promise.all([
+  const [component, hook, route, runtime] = await Promise.all([
     readFile(new URL('../../src/components/SaiUnicornAgent.tsx', import.meta.url), 'utf8'),
     readFile(new URL('../../src/hooks/useJwAgent.ts', import.meta.url), 'utf8'),
     readFile(new URL('../src/routes/jwAgent.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../src/runtime/jwAgentRuntime.ts', import.meta.url), 'utf8'),
   ])
 
   assert.match(component, /responseMode:\s*'compact'/)
   assert.match(hook, /responseMode\?:\s*'standard'\s*\|\s*'compact'/)
   assert.match(route, /responseMode:\s*z\.enum\(\['standard',\s*'compact'\]\)/)
+  assert.match(runtime, /jwAgentToolsForResponseMode\(/)
+  assert.match(runtime, /responseMode === 'compact' \? 5/)
+  assert.match(runtime, /session\.compactInteractionRoundsUsed = 0/)
 })

@@ -52,6 +52,7 @@ export type JwQuickSkillName =
   | 'generate-document-from-template'
 
 export type JwSendMessageOptions = {
+  responseMode?: 'standard' | 'compact'
   skillName?: JwQuickSkillName
   attachmentFileIds?: string[]
   attachmentFileNames?: string[]
@@ -159,6 +160,7 @@ export function useJwAgent(agentId?: string) {
     try {
       await apiPost(`/agent/conversations/${encodeURIComponent(agentId)}/messages`, {
         message,
+        ...(options.responseMode ? { responseMode: options.responseMode } : {}),
         ...(options.skillName ? { skillName: options.skillName } : {}),
         ...(options.attachmentFileIds?.length ? { attachmentFileIds: options.attachmentFileIds } : {}),
         ...(options.attachmentFileNames?.length ? { attachmentFileNames: options.attachmentFileNames } : {}),

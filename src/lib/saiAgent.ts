@@ -32,6 +32,25 @@ type ProjectSummary = {
   companyName?: string
   stage?: string
   lifecycle?: string
+  owner?: string
+  riskLevel?: string
+  score?: number
+  progress?: number
+}
+
+export type SaiWorkspacePulse = {
+  activeTodos: number
+  upcomingMeetings: number
+  pendingApprovals: number
+  highRisks: number
+}
+
+export type SaiTurnReceipt = {
+  title: string
+  goal: string
+  facts: string[]
+  steps: string[]
+  clarification: string
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -154,8 +173,58 @@ export function buildSaiAgentPrompt(current: SaiAgentContext, userGoal: string):
     `【页面路径】${current.path}${projectContext}`,
     `【用户目标】${userGoal.trim()}`,
     '【安全边界】默认只读：先检索、分析、引用与草拟。任何创建、修改、删除、发送、审批、数据回填或其他业务写入，必须先明确列出计划、影响范围和可回退方式，等待用户确认后再执行。',
-    '【回答方式】先给结论，再给依据和下一步；区分已验证事实、推断与待核实项，不要编造系统中不存在的信息。',
+    '【回答方式】先给结论，再给依据和下一步；区分已验证事实、推断与待核实项，不要编造系统中不存在的信息。优先使用现有信息完成；只有关键缺口会导致结论误导时，才合并为一个问题补充一次，随后必须完成回答。',
   ].join('\n')
+}
+
+function saiReceiptSteps(kind: SaiAgentContextKind): string[] {
+  if (kind === 'project') return [
+    '读取当前项目主记录与页面上下文',
+    '只检索与本次需求相关的材料和证据',
+    '输出明确结论、依据缺口和可执行的下一步',
+  ]
+  if (kind === 'discovery' || kind === 'institution') return [
+    '锁定当前页面的候选对象与评估口径',
+    '区分已验证事实、搜索摘要和待核实主张',
+    '输出明确结论、依据缺口和可执行的下一步',
+  ]
+  if (kind === 'due-diligence' || kind === 'knowledge') return [
+    '按当前问题确定最小证据范围',
+    '检查口径冲突、证据缺口和不确定性',
+    '输出明确结论、依据缺口和可执行的下一步',
+  ]
+  return [
+    '对齐当前工作台的任务、会议、审批与风险',
+    '按紧急度和影响程度组织现有信息',
+    '输出明确结论、依据缺口和可执行的下一步',
+  ]
+}
+
+export function buildSaiTurnReceipt(
+  current: SaiAgentContext,
+  userGoal: string,
+  project: ProjectSummary | undefined,
+  pulse: SaiWorkspacePulse,
+): SaiTurnReceipt {
+  const scopedProject = project?.id === current.projectId ? project : undefined
+  const facts = scopedProject
+    ? [
+        `当前项目：${scopedProject.name}`,
+        `阶段：${scopedProject.stage || '未分阶段'} · 负责人：${scopedProject.owner || '待确认'}`,
+        `风险等级：${scopedProject.riskLevel || '未标记'} · 项目评分：${Number.isFinite(scopedProject.score) ? scopedProject.score : '待评估'}`,
+      ]
+    : [
+        `进行中任务：${pulse.activeTodos}`,
+        `待开会议：${pulse.upcomingMeetings} · 审批中：${pulse.pendingApprovals}`,
+        `未关闭高风险：${pulse.highRisks}`,
+      ]
+  return {
+    title: '已接收，先用现有信息开始',
+    goal: userGoal.trim().replace(/\s+/g, ' ').slice(0, 160),
+    facts,
+    steps: saiReceiptSteps(current.kind),
+    clarification: '如果缺少会改变结论的关键信息，最多只补充 1 次；否则直接给结果。',
+  }
 }
 
 export function extractSaiPromptGoal(message: string): string {
