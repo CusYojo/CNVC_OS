@@ -1,0 +1,359 @@
+import {
+  ArrowUp,
+  Bot,
+  BrainCircuit,
+  Check,
+  ChevronRight,
+  ExternalLink,
+  FileSearch,
+  ListChecks,
+  RotateCcw,
+  ShieldCheck,
+  Sparkles,
+  Square,
+  X,
+} from 'lucide-react'
+import { FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
+import { useJwAgent } from '../hooks/useJwAgent'
+import { extractTextParts, normalizeAgentMessages } from '../lib/aiMessageSafety'
+import { apiPost } from '../lib/api'
+import { openApproval } from '../lib/approvalWorkspace'
+import {
+  buildSaiAgentPrompt,
+  extractSaiPromptGoal,
+  getSaiAgentActions,
+  getSaiConversationScopeKey,
+  resolveSaiAgentContext,
+  type SaiAgentAction,
+} from '../lib/saiAgent'
+import { useAppStore } from '../store/useAppStore'
+import './SaiUnicornAgent.css'
+
+type ConversationRow = {
+  id: string
+  agentId?: string
+  title: string
+}
+
+const actionIcons = {
+  'project-brief': BrainCircuit,
+  'project-risks': FileSearch,
+  'project-next': ListChecks,
+  'screen-candidates': FileSearch,
+  'compare-leads': BrainCircuit,
+  'dd-checklist': ListChecks,
+  'evidence-conflicts': FileSearch,
+  'today-plan': ListChecks,
+  'meeting-prep': BrainCircuit,
+  'approval-summary': FileSearch,
+  'open-approvals': ListChecks,
+  'institution-map': BrainCircuit,
+  'institution-followup': ListChecks,
+  'knowledge-answer': FileSearch,
+  'policy-check': ShieldCheck,
+  'daily-brief': Sparkles,
+  'open-knowledge': ExternalLink,
+  'open-ai': ExternalLink,
+} as const
+
+function ActionIcon({ action }: { action: SaiAgentAction }) {
+  const Icon = actionIcons[action.id as keyof typeof actionIcons] ?? Sparkles
+  return <Icon aria-hidden="true" />
+}
+
+function formatAgentError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error || '')
+  if (!message) return '小赛暂时无法响应，请稍后重试。'
+  return message.length > 120 ? `${message.slice(0, 120)}…` : message
+}
+
+export function SaiUnicornAgent() {
+  const location = useLocation()
+  const navigate = useNavigate()
+  const projects = useAppStore((state) => state.projects)
+  const todos = useAppStore((state) => state.todos)
+  const meetings = useAppStore((state) => state.meetings)
+  const approvalRequests = useAppStore((state) => state.approvalRequests)
+  const risks = useAppStore((state) => state.risks)
+  const [open, setOpen] = useState(false)
+  const [composer, setComposer] = useState('')
+  const [agentId, setAgentId] = useState<string>()
+  const [sending, setSending] = useState(false)
+  const [localError, setLocalError] = useState<string>()
+  const [interactionAnswers, setInteractionAnswers] = useState<Record<string, string | string[]>>({})
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const closeRef = useRef<HTMLButtonElement>(null)
+  const composerRef = useRef<HTMLTextAreaElement>(null)
+  const agent = useJwAgent(agentId)
+
+  const currentContext = useMemo(
+    () => resolveSaiAgentContext(location.pathname, location.search, projects),
+    [location.pathname, location.search, projects],
+  )
+  const conversationScopeKey = getSaiConversationScopeKey(currentContext)
+  const conversationScopeRef = useRef(conversationScopeKey)
+  const actions = useMemo(() => getSaiAgentActions(currentContext), [currentContext])
+  const messages = useMemo(
+    () => normalizeAgentMessages(agent.messages)
+      .map((message) => {
+        const text = extractTextParts(message).trim()
+        return { ...message, text: message.role === 'user' ? extractSaiPromptGoal(text) : text }
+      })
+      .filter((message) => message.text)
+      .slice(-8),
+    [agent.messages],
+  )
+  const busy = sending || agent.status === 'submitted' || agent.status === 'streaming' || agent.status === 'connecting'
+  const statusLabel = agent.status === 'streaming' || agent.status === 'submitted'
+    ? '思考中'
+    : agent.status === 'connecting' || sending
+      ? '连接中'
+      : agent.status === 'error' || localError
+        ? '需要重试'
+        : '就绪'
+  const activeTodoCount = todos.filter((item) => !['已完成', '已关闭', '已取消', '已归档'].includes(item.status)).length
+  const upcomingMeetingCount = meetings.filter((item) => new Date(item.meetingTime).getTime() >= Date.now()).length
+  const pendingApprovalCount = approvalRequests.filter((item) => item.status === '审批中').length
+  const highRiskCount = risks.filter((item) => item.level === '高' && !['已关闭', '误报'].includes(item.status)).length
+
+  useEffect(() => {
+    if (conversationScopeRef.current === conversationScopeKey) return
+    conversationScopeRef.current = conversationScopeKey
+    setAgentId(undefined)
+    setLocalError(undefined)
+    setInteractionAnswers({})
+  }, [conversationScopeKey])
+
+  useEffect(() => {
+    if (!open) return
+    const frame = window.requestAnimationFrame(() => closeRef.current?.focus())
+    const onEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      setOpen(false)
+      window.requestAnimationFrame(() => triggerRef.current?.focus())
+    }
+    window.addEventListener('keydown', onEscape)
+    return () => {
+      window.cancelAnimationFrame(frame)
+      window.removeEventListener('keydown', onEscape)
+    }
+  }, [open])
+
+  useEffect(() => {
+    setInteractionAnswers({})
+  }, [agent.interaction?.id])
+
+  const closePanel = () => {
+    setOpen(false)
+    window.requestAnimationFrame(() => triggerRef.current?.focus())
+  }
+
+  const sendGoal = async (goal: string) => {
+    const cleanGoal = goal.trim()
+    if (!cleanGoal || busy) return
+    const prompt = buildSaiAgentPrompt(currentContext, cleanGoal)
+    const requestScopeKey = conversationScopeKey
+    setComposer('')
+    setLocalError(undefined)
+    setSending(true)
+    try {
+      if (agentId) {
+        await agent.sendMessage(prompt)
+      } else {
+        const row = await apiPost<ConversationRow>('/conversations', {
+          title: `小赛 · ${currentContext.label}`,
+          scope: currentContext.projectId ? 'project' : 'global',
+          projectId: currentContext.projectId ?? null,
+          projectName: currentContext.projectName ?? null,
+        })
+        const nextAgentId = row.agentId || row.id
+        if (conversationScopeRef.current !== requestScopeKey) return
+        setAgentId(nextAgentId)
+        await apiPost(`/agent/conversations/${encodeURIComponent(nextAgentId)}/messages`, { message: prompt })
+      }
+    } catch (error) {
+      setLocalError(formatAgentError(error))
+    } finally {
+      setSending(false)
+    }
+  }
+
+  const submit = (event?: FormEvent) => {
+    event?.preventDefault()
+    void sendGoal(composer)
+  }
+
+  const onComposerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return
+    event.preventDefault()
+    submit()
+  }
+
+  const runAction = (action: SaiAgentAction) => {
+    if (action.kind === 'navigate') {
+      navigate(action.value)
+      closePanel()
+      return
+    }
+    if (action.kind === 'approval') {
+      openApproval('inbox')
+      closePanel()
+      return
+    }
+    void sendGoal(action.value)
+  }
+
+  const toggleInteractionAnswer = (questionId: string, label: string, multiSelect: boolean) => {
+    setInteractionAnswers((current) => {
+      if (!multiSelect) return { ...current, [questionId]: label }
+      const selected = Array.isArray(current[questionId]) ? current[questionId] as string[] : []
+      return {
+        ...current,
+        [questionId]: selected.includes(label) ? selected.filter((item) => item !== label) : [...selected, label],
+      }
+    })
+  }
+
+  const answerInteraction = async () => {
+    if (!agent.interaction) return
+    setSending(true)
+    setLocalError(undefined)
+    try {
+      await agent.respondInteraction(agent.interaction.id, 'answer', interactionAnswers)
+    } catch (error) {
+      setLocalError(formatAgentError(error))
+    } finally {
+      setSending(false)
+    }
+  }
+
+  const interactionComplete = agent.interaction?.questions.every((question) => {
+    const answer = interactionAnswers[question.id]
+    return Array.isArray(answer) ? answer.length > 0 : Boolean(answer)
+  }) ?? false
+
+  return (
+    <div className={`sai-agent${open ? ' is-open' : ''}${busy ? ' is-busy' : ''}`}>
+      <button
+        ref={triggerRef}
+        type="button"
+        className="sai-agent-trigger"
+        aria-label={open ? '小赛 Agent 控制台已打开' : '打开小赛 Agent 控制台'}
+        aria-controls="sai-agent-panel"
+        aria-expanded={open}
+        onClick={() => setOpen(true)}
+      >
+        <span className="sai-agent-trigger-glow" aria-hidden="true" />
+        <img src="/sai-unicorn-agent.png" alt="" />
+        <span className="sai-agent-trigger-status" aria-hidden="true" />
+        <span className="sai-agent-trigger-label">问小赛</span>
+      </button>
+
+      {open && <button type="button" className="sai-agent-backdrop" aria-label="关闭小赛" onClick={closePanel} />}
+      <section
+        id="sai-agent-panel"
+        className="sai-agent-panel"
+        role="dialog"
+        aria-modal="false"
+        aria-labelledby="sai-agent-title"
+        aria-hidden={!open}
+      >
+        <header className="sai-agent-header">
+          <div className="sai-agent-identity">
+            <span className="sai-agent-miniature"><img src="/sai-unicorn-agent.png" alt="" /></span>
+            <span>
+              <span className="sai-agent-eyebrow">赛智 AGENT</span>
+              <strong id="sai-agent-title">小赛</strong>
+            </span>
+          </div>
+          <div className="sai-agent-header-actions">
+            {agentId && <button type="button" title="开始新对话" aria-label="开始新对话" onClick={() => { setAgentId(undefined); setLocalError(undefined) }}><RotateCcw /></button>}
+            <button ref={closeRef} type="button" aria-label="关闭小赛" onClick={closePanel}><X /></button>
+          </div>
+        </header>
+
+        <div className="sai-agent-context">
+          <span className="sai-agent-context-dot" aria-hidden="true" />
+          <span><small>正在看</small><strong>{currentContext.label}</strong><em>{currentContext.detail}</em></span>
+          <span className={`sai-agent-state${busy ? ' is-active' : ''}`}>{statusLabel}</span>
+        </div>
+
+        <div className="sai-agent-scroll" aria-live="polite">
+          {!messages.length && !busy && <div className="sai-agent-welcome">
+            <div className="sai-agent-welcome-mark"><Sparkles aria-hidden="true" /></div>
+            <h2>我已经读到你当前的工作场景</h2>
+            <p>我会先理解、分析和草拟；如果需要改动业务数据，会先说明计划并等你确认。</p>
+            <div className="sai-agent-pulse-summary" aria-label="当前工作摘要">
+              <span><strong>{activeTodoCount}</strong><small>进行中任务</small></span>
+              <span><strong>{upcomingMeetingCount}</strong><small>待开会议</small></span>
+              <span><strong>{pendingApprovalCount}</strong><small>审批中</small></span>
+              <span><strong>{highRiskCount}</strong><small>高风险</small></span>
+            </div>
+          </div>}
+
+          {!messages.length && <div className="sai-agent-suggestions" aria-label="小赛建议">
+            <div className="sai-agent-section-title"><span>现在可以做</span><small>随页面变化</small></div>
+            {actions.map((action) => <button key={action.id} type="button" onClick={() => runAction(action)} disabled={busy}>
+              <span className="sai-agent-action-icon"><ActionIcon action={action} /></span>
+              <span><strong>{action.label}</strong><small>{action.description}</small></span>
+              <ChevronRight aria-hidden="true" />
+            </button>)}
+          </div>}
+
+          {messages.length > 0 && <div className="sai-agent-messages">
+            {messages.map((message) => <article key={message.id} className={`sai-agent-message is-${message.role}`}>
+              <span className="sai-agent-message-role">{message.role === 'assistant' ? '小赛' : '你'}</span>
+              <p>{message.text}</p>
+            </article>)}
+          </div>}
+
+          {busy && <div className="sai-agent-thinking" role="status">
+            <span aria-hidden="true"><i /><i /><i /></span>
+            <p><strong>小赛正在整理</strong><small>我会先给结论，再附上依据与下一步</small></p>
+          </div>}
+
+          {agent.interaction && <div className="sai-agent-interaction">
+            <div className="sai-agent-section-title"><span>需要你确认</span><small>你始终保持控制</small></div>
+            {agent.interaction.questions.map((question) => <fieldset key={question.id}>
+              <legend>{question.question}</legend>
+              <div>{question.options.map((option) => {
+                const answer = interactionAnswers[question.id]
+                const selected = Array.isArray(answer) ? answer.includes(option.label) : answer === option.label
+                return <button key={option.label} type="button" aria-pressed={selected} onClick={() => toggleInteractionAnswer(question.id, option.label, question.multiSelect)}>
+                  <span>{selected && <Check />}</span><strong>{option.label}</strong><small>{option.description}</small>
+                </button>
+              })}</div>
+            </fieldset>)}
+            <button type="button" className="sai-agent-confirm" disabled={!interactionComplete || sending} onClick={() => void answerInteraction()}>确认并继续</button>
+          </div>}
+
+          {(localError || agent.error) && <div className="sai-agent-error" role="alert">
+            <strong>这次连接没有完成</strong>
+            <p>{localError || formatAgentError(agent.error)}</p>
+            <button type="button" onClick={() => { setLocalError(undefined); void agent.refresh() }}>重新连接</button>
+          </div>}
+        </div>
+
+        <footer className="sai-agent-composer">
+          <form onSubmit={submit}>
+            <textarea
+              ref={composerRef}
+              rows={2}
+              value={composer}
+              disabled={busy}
+              aria-label="告诉小赛你想做什么"
+              placeholder={`在${currentContext.label}里，你想让我帮你做什么？`}
+              onChange={(event) => setComposer(event.target.value)}
+              onKeyDown={onComposerKeyDown}
+            />
+            {agent.status === 'streaming' || agent.status === 'submitted'
+              ? <button type="button" className="sai-agent-send is-stop" aria-label="停止生成" onClick={() => void agent.abort()}><Square /></button>
+              : <button type="submit" className="sai-agent-send" aria-label="发送给小赛" disabled={!composer.trim() || busy}><ArrowUp /></button>}
+          </form>
+          <p><ShieldCheck aria-hidden="true" />默认只读 · 业务写入前会先请你确认 <span>Enter 发送</span></p>
+        </footer>
+      </section>
+    </div>
+  )
+}

@@ -45,6 +45,7 @@ import { openTaskPath } from '../lib/taskWorkspace'
 import { WorkbenchQuote } from '../components/WorkbenchQuote'
 import '../components/WorkbenchQuote.css'
 import { acknowledgeNotice, hasUnreadDirective } from '../lib/meetingWorkspace'
+import { SaiUnicornAgent } from '../components/SaiUnicornAgent'
 
 type MessageItem = {
   id: string
@@ -348,6 +349,7 @@ export function AppLayout() {
       <ApprovalWorkspaceHost />
       <TaskActionHost />
       <UnifiedProjectCreateModal open={showCreate} onClose={() => setShowCreate(false)} />
+      <SaiUnicornAgent />
     </div>
   )
 }

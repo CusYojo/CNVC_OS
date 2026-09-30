@@ -3,7 +3,9 @@ import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 import {
   buildSaiAgentPrompt,
+  extractSaiPromptGoal,
   getSaiAgentActions,
+  getSaiConversationScopeKey,
   resolveSaiAgentContext,
 } from '../../src/lib/saiAgent.js'
 
@@ -76,6 +78,42 @@ test('全局提示词不夹带无关项目标识', () => {
 
   assert.match(prompt, /全局工作台/)
   assert.doesNotMatch(prompt, /11111111-1111-4111-8111-111111111111/)
+})
+
+test('对话气泡只回显用户目标，不暴露 Agent 上下文指令', () => {
+  const context = resolveSaiAgentContext('/', '', projects)
+  const prompt = buildSaiAgentPrompt(context, '帮我梳理今天的事')
+
+  assert.equal(extractSaiPromptGoal(prompt), '帮我梳理今天的事')
+  assert.equal(extractSaiPromptGoal('这是普通历史消息'), '这是普通历史消息')
+})
+
+test('跨项目或项目与全局之间切换时隔离 Agent 会话', () => {
+  const projectFiles = resolveSaiAgentContext('/projects/11111111-1111-4111-8111-111111111111', '?tab=files', projects)
+  const projectTasks = resolveSaiAgentContext('/projects/11111111-1111-4111-8111-111111111111', '?tab=tasks', projects)
+  const workspace = resolveSaiAgentContext('/', '', projects)
+
+  assert.equal(getSaiConversationScopeKey(projectFiles), getSaiConversationScopeKey(projectTasks))
+  assert.notEqual(getSaiConversationScopeKey(projectFiles), getSaiConversationScopeKey(workspace))
+})
+
+test('主要业务页面都能获得完整的情境标签与操作', () => {
+  const scenarios = [
+    ['/projects/11111111-1111-4111-8111-111111111111', '', 'project'],
+    ['/projects', '?view=leads', 'discovery'],
+    ['/institutions', '', 'institution'],
+    ['/institutions/example', '', 'institution'],
+    ['/meetings', '', 'collaboration'],
+    ['/workflow', '', 'workflow'],
+    ['/knowledge', '', 'knowledge'],
+    ['/ai', '', 'ai'],
+  ] as const
+
+  for (const [pathname, search, expectedKind] of scenarios) {
+    const current = resolveSaiAgentContext(pathname, search, projects)
+    assert.equal(current.kind, expectedKind)
+    assert.equal(getSaiAgentActions(current).length, 3)
+  }
 })
 
 test('全局布局挂载小赛，并尊重减少动效设置', async () => {
