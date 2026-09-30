@@ -79,7 +79,7 @@ export function ProjectDiscoveryPage() {
   const loadingMoreRef = useRef(false)
   const [candidates, setCandidates] = useState<LeadListItem[]>([])
   const [pagination, setPagination] = useState({ page: 1, totalPages: 1 })
-  const [period, setPeriod] = useState<ProjectDiscoveryPeriod>('week')
+  const [period, setPeriod] = useState<ProjectDiscoveryPeriod>('today')
   const [kind, setKind] = useState<ProjectDiscoveryKind>('all')
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(true)
