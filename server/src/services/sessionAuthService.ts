@@ -19,6 +19,8 @@ import {
   authSessionKeyTelemetryModule,
   previousAuthSessionKeyAction,
 } from '../runtime/authSessionKeyTelemetry.js'
+import { requestOriginAllowed } from '../security/requestOrigin.js'
+export { requestOriginAllowed } from '../security/requestOrigin.js'
 
 export const SESSION_COOKIE_NAME = 'cybernaut_session'
 export const CSRF_COOKIE_NAME = 'cybernaut_csrf'
@@ -198,27 +200,6 @@ export async function authenticateHttpRequest(req: Request): Promise<RequestAuth
     return { user, mode: 'legacy-bearer' }
   }
   throw Object.assign(new Error('未提供有效登录会话'), { code: 'AUTH_REQUIRED' })
-}
-
-export function requestOriginAllowed(headers: Request['headers']): boolean {
-  const origin = typeof headers.origin === 'string' ? headers.origin : ''
-  if (!origin) return true
-  const forwardedProto = typeof headers['x-forwarded-proto'] === 'string'
-    ? headers['x-forwarded-proto'].split(',')[0].trim()
-    : ''
-  const protocol = forwardedProto || (process.env.NODE_ENV === 'production' ? 'https' : 'http')
-  const host = typeof headers.host === 'string' ? headers.host : ''
-  const sameOrigin = host ? `${protocol}://${host}` : ''
-  const allowed = (process.env.AUTH_ALLOWED_ORIGINS || '').split(',').map((item) => item.trim()).filter(Boolean)
-  if (origin === sameOrigin || allowed.includes(origin)) return true
-  // The development proxy may be restarted on a different loopback port.
-  // Keep this narrowly scoped to non-production: production always requires
-  // its explicit HTTPS allow-list.
-  if (process.env.NODE_ENV !== 'production') {
-    try { return ['127.0.0.1', 'localhost', '[::1]'].includes(new URL(origin).hostname) }
-    catch { return false }
-  }
-  return false
 }
 
 export function assertRequestCsrf(req: Request, auth: RequestAuth): void {

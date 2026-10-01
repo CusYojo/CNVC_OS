@@ -17,6 +17,8 @@ import { readDigitalTwinPrivateAsset, saveDigitalTwinPrivateAsset } from '../ser
 import { resolveAiModelRoute } from '../services/aiModelSettingsService.js'
 
 export const dueDiligenceRouter = Router()
+const DUE_DILIGENCE_API_VERSION = 2
+const DUE_DILIGENCE_SCHEMA_VERSION = '0133_add_twin_avatars_and_skill_library'
 const routeId = (value: string | string[]) => z.string().uuid().parse(value)
 const actor = (req: AuthedRequest) => ({ userId: req.user!.uid, userName: req.user!.name })
 const avatarPresets = new Set(['fox', 'owl', 'panda', 'otter', 'cat', 'penguin'])
@@ -97,16 +99,18 @@ const InterviewPatchSchema = InterviewSchema.partial().extend({ expectedVersion:
 
 dueDiligenceRouter.get('/capabilities', async (req: AuthedRequest, res) => {
   const role = req.user!.role
-  const [documentModel, interactiveModel, transcriptionSchemaReady, twinSchemaReady, assetSchemaReady] = await Promise.all([
+  const [documentModel, interactiveModel, transcriptionSchemaReady, twinSchemaReady, assetSchemaReady, skillSchemaReady] = await Promise.all([
     resolveAiModelRoute('ai-document', role).catch(() => null),
     resolveAiModelRoute('interactive-assistant', role).catch(() => null),
     db.select({ id: dueDiligenceTranscriptionJobs.id }).from(dueDiligenceTranscriptionJobs).limit(1).then(() => true).catch(() => false),
-    db.select({ clientRequestId: digitalTwins.clientRequestId, learningTargetAt: digitalTwins.learningTargetAt }).from(digitalTwins).limit(1).then(() => true).catch(() => false),
+    db.select({ clientRequestId: digitalTwins.clientRequestId, learningTargetAt: digitalTwins.learningTargetAt, avatarKind: digitalTwins.avatarKind }).from(digitalTwins).limit(1).then(() => true).catch(() => false),
     db.select({ id: digitalTwinPrivateAssets.id }).from(digitalTwinPrivateAssets).limit(1).then(() => true).catch(() => false),
+    db.select({ id: digitalTwinSkillImports.id }).from(digitalTwinSkillImports).limit(1).then(() => true).catch(() => false),
   ])
-  const migrationReady = transcriptionSchemaReady && twinSchemaReady && assetSchemaReady
+  const migrationReady = transcriptionSchemaReady && twinSchemaReady && assetSchemaReady && skillSchemaReady
   res.json({
-    database: { ready: migrationReady, migration: '0132_stabilize_due_diligence_workbench' },
+    apiVersion: DUE_DILIGENCE_API_VERSION,
+    database: { ready: migrationReady, migration: DUE_DILIGENCE_SCHEMA_VERSION },
     models: {
       document: { ready: Boolean(documentModel), model: documentModel?.model ?? null },
       interactive: { ready: Boolean(interactiveModel), model: interactiveModel?.model ?? null },
@@ -114,6 +118,11 @@ dueDiligenceRouter.get('/capabilities', async (req: AuthedRequest, res) => {
     asr: getDueDiligenceAsrCapability(),
     fileParsing: { ready: true },
   })
+})
+// Auth and CSRF middleware run before this route. A successful response proves
+// that the browser origin can safely perform writes without changing data.
+dueDiligenceRouter.post('/capabilities/write-probe', async (_req: AuthedRequest, res) => {
+  res.json({ ok: true, apiVersion: DUE_DILIGENCE_API_VERSION, schemaVersion: DUE_DILIGENCE_SCHEMA_VERSION })
 })
 
 dueDiligenceRouter.get('/projects/:projectId/members', async (req: AuthedRequest, res, next) => {
@@ -520,7 +529,19 @@ dueDiligenceRouter.post('/twin-directory/:id/invoke', async (req: AuthedRequest,
   } catch (error) { next(error) }
 })
 dueDiligenceRouter.post('/twins/:id/publish', async (req: AuthedRequest, res, next) => {
-  try { const id = routeId(req.params.id); const body = PublicationSchema.parse(req.body); const current = actor(req); const [twin] = await db.select().from(digitalTwins).where(and(eq(digitalTwins.id, id), eq(digitalTwins.ownerUserId, current.userId), isNull(digitalTwins.deletedAt))).limit(1); if (!twin) throw Object.assign(new Error('数字分身不存在'), { status: 404, code: 'NOT_FOUND' }); const snapshot = { avatarKind: twin.avatarKind, avatarPreset: twin.avatarPreset, avatarStoragePath: twin.avatarStoragePath, avatarMimeType: twin.avatarMimeType }; const [existing] = await db.select().from(digitalTwinPublications).where(eq(digitalTwinPublications.twinId, id)).limit(1); if (existing) await db.update(digitalTwinPublications).set({ ...body, ...snapshot, publishedVersion: twin.activeVersion, status: '已发布', publishedAt: new Date(), withdrawnAt: null }).where(eq(digitalTwinPublications.id, existing.id)); else await db.insert(digitalTwinPublications).values({ id: randomUUID(), twinId: id, ownerUserId: current.userId, publishedVersion: twin.activeVersion, ...snapshot, ...body }); await audit(req, '发布公司数字分身', twin.name); res.json({ ok: true, version: twin.activeVersion }) } catch (error) { next(error) }
+  try {
+    const id = routeId(req.params.id); const body = PublicationSchema.parse(req.body); const current = actor(req)
+    const twin = await db.transaction(async tx => {
+      const [owned] = await tx.select().from(digitalTwins).where(and(eq(digitalTwins.id, id), eq(digitalTwins.ownerUserId, current.userId), isNull(digitalTwins.deletedAt))).limit(1)
+      if (!owned) throw Object.assign(new Error('数字分身不存在'), { status: 404, code: 'NOT_FOUND' })
+      const snapshot = { avatarKind: owned.avatarKind, avatarPreset: owned.avatarPreset, avatarStoragePath: owned.avatarStoragePath, avatarMimeType: owned.avatarMimeType }
+      const [existing] = await tx.select().from(digitalTwinPublications).where(eq(digitalTwinPublications.twinId, id)).limit(1)
+      if (existing) await tx.update(digitalTwinPublications).set({ ...body, ...snapshot, publishedVersion: owned.activeVersion, status: '已发布', publishedAt: new Date(), withdrawnAt: null }).where(eq(digitalTwinPublications.id, existing.id))
+      else await tx.insert(digitalTwinPublications).values({ id: randomUUID(), twinId: id, ownerUserId: current.userId, publishedVersion: owned.activeVersion, ...snapshot, ...body })
+      return owned
+    })
+    await audit(req, '发布公司数字分身', twin.name); res.json({ ok: true, version: twin.activeVersion })
+  } catch (error) { next(error) }
 })
 dueDiligenceRouter.post('/twins/:id/withdraw-publication', async (req: AuthedRequest, res, next) => {
   try { const id = routeId(req.params.id); const current = actor(req); const [twin] = await db.select().from(digitalTwins).where(and(eq(digitalTwins.id, id), eq(digitalTwins.ownerUserId, current.userId), isNull(digitalTwins.deletedAt))).limit(1); if (!twin) throw Object.assign(new Error('数字分身不存在'), { status: 404, code: 'NOT_FOUND' }); await db.update(digitalTwinPublications).set({ status: '已撤回', withdrawnAt: new Date() }).where(eq(digitalTwinPublications.twinId, id)); await audit(req, '撤回公司数字分身', twin.name); res.json({ ok: true }) } catch (error) { next(error) }
@@ -646,6 +667,19 @@ dueDiligenceRouter.post('/twins/:id/learning-candidates/:candidateId/decision', 
     await db.transaction(async tx => { await tx.update(digitalTwinLearningCandidates).set({ status: '已采纳', decidedAt: new Date() }).where(eq(digitalTwinLearningCandidates.id, candidateId)); await tx.insert(digitalTwinSkills).values({ id: skillId, twinId, ownerUserId: current.userId, name: `${candidate.topic} Skill`, activeVersion: 1, status: '已生效', sourceType: '经验候选', contentHash }); await tx.insert(digitalTwinSkillVersions).values({ id: randomUUID(), skillId, version: 1, trigger: '尽调问题清单、项目核查与投资判断', instructions: candidate.rules, checklist: ['列明事实来源', '识别证据缺口', '说明反证与不确定性'], outputFormat: '结论、支持证据、反证、待补证事项', boundaries: candidate.boundaries, sourceCandidateId: candidateId, status: '已生效' }) })
     await recordExperienceEvent({ ownerUserId: current.userId, twinId, projectId: candidate.projectId, eventType: 'candidate.feedback', entityType: 'candidate', entityId: candidateId, topic: candidate.topic, fingerprint: `${candidateId}:确认`, payload: { decision: '确认', sourceName: candidate.sourceName, skillId } })
     await audit(req, '采纳数字分身学习候选', candidate.sourceName); res.json({ status: '已采纳', skillId })
+  } catch (error) { next(error) }
+})
+dueDiligenceRouter.get('/twins/:id/skill-library', async (req: AuthedRequest, res, next) => {
+  try {
+    const twinId = routeId(req.params.id); await requireOwnedTwin(twinId, req.user!.uid)
+    const [assets, candidates, skillRows, imports] = await Promise.all([
+      db.select().from(digitalTwinPrivateAssets).where(and(eq(digitalTwinPrivateAssets.twinId, twinId), eq(digitalTwinPrivateAssets.ownerUserId, req.user!.uid))).orderBy(desc(digitalTwinPrivateAssets.createdAt)),
+      db.select().from(digitalTwinLearningCandidates).where(and(eq(digitalTwinLearningCandidates.twinId, twinId), eq(digitalTwinLearningCandidates.ownerUserId, req.user!.uid), learningCandidateAccessCondition(req.user!.uid))).orderBy(desc(digitalTwinLearningCandidates.createdAt)),
+      db.select().from(digitalTwinSkills).where(and(eq(digitalTwinSkills.twinId, twinId), eq(digitalTwinSkills.ownerUserId, req.user!.uid))).orderBy(desc(digitalTwinSkills.updatedAt)),
+      db.select().from(digitalTwinSkillImports).where(and(eq(digitalTwinSkillImports.twinId, twinId), eq(digitalTwinSkillImports.ownerUserId, req.user!.uid))).orderBy(desc(digitalTwinSkillImports.createdAt)),
+    ])
+    const skills = await Promise.all(skillRows.map(async skill => ({ ...skill, versions: await db.select().from(digitalTwinSkillVersions).where(eq(digitalTwinSkillVersions.skillId, skill.id)).orderBy(desc(digitalTwinSkillVersions.version)) })))
+    res.json({ apiVersion: DUE_DILIGENCE_API_VERSION, twinId, assets, candidates, skills, imports })
   } catch (error) { next(error) }
 })
 dueDiligenceRouter.get('/twins/:id/skills', async (req: AuthedRequest, res, next) => {
