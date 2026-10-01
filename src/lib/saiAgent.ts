@@ -35,7 +35,7 @@ export function resolveSaiUploadAction(current: SaiAgentContext, goal: string): 
   if (/(?:不要|不用|无需|禁止).{0,8}(?:上传|导入|添加)/.test(goal)) return null
   const wantsUpload = /(?:上传|导入|添加).{0,12}(?:文件|资料|材料|文档|附件|BP)|(?:文件|资料|材料|文档|附件|BP).{0,12}(?:上传|导入)/i.test(goal)
   if (!wantsUpload) return null
-  if (current.kind === 'discovery' || current.kind === 'review') return '/projects?view=discover&saiUpload=1'
+  if (current.kind === 'discovery' || current.kind === 'review') return '/discovery?saiUpload=1'
   return current.projectId
     ? `/projects/${encodeURIComponent(current.projectId)}?tab=files&saiUpload=1`
     : '/knowledge?view=archives&archiveTool=upload'
@@ -49,11 +49,11 @@ export function resolveSaiCreateAction(goal: string): '/projects?saiCreate=1' | 
   return null
 }
 
-export function resolveSaiNavigationAction(goal: string): 'approvals' | '/' | '/ai' | '/knowledge' | '/collaboration' | '/meetings' | '/institutions' | '/workflow' | '/committee' | '/projects' | '/projects?view=discover' | '/projects?view=reviews' | '/due-diligence' | '/risks' | null {
+export function resolveSaiNavigationAction(goal: string): 'approvals' | '/' | '/ai' | '/knowledge' | '/collaboration' | '/meetings' | '/institutions' | '/workflow' | '/committee' | '/projects' | '/discovery' | '/projects?view=reviews' | '/due-diligence' | '/risks' | null {
   if (!/^(?:小赛[，,]?\s*)?(?:请?帮我|我要|给我|现在|请|可以)?\s*(?:打开|进入|跳转到|去)(?:一下)?/.test(goal)) return null
   if (/(?:待我审批|待审事项|审批工作台)/.test(goal)) return 'approvals'
   if (/(?:待复核|人工复核)/.test(goal)) return '/projects?view=reviews'
-  if (/(?:新项目发现|发现项目|项目发现)/.test(goal)) return '/projects?view=discover'
+  if (/(?:新项目发现|发现项目|项目发现)/.test(goal)) return '/discovery'
   if (/(?:项目中心)/.test(goal)) return '/projects'
   if (/(?:项目会议|会议日历|会议列表)/.test(goal)) return '/meetings'
   if (/(?:投委会|投决会)/.test(goal)) return '/committee'
@@ -289,6 +289,7 @@ export function resolveSaiAgentContext(
   }
 
   if (pathname === '/projects/boss-dashboard') return context('workspace', '管理驾驶舱', '组织级项目视图', path)
+  if (pathname === '/discovery' || pathname === '/discovery/leads') return context('discovery', '新项目发现', '候选项目研判', path)
   if (pathname === '/projects' && params.get('view') === 'reviews') return context('review', '线索人工复核', '微信文件、链接与其他来源', path)
   if (pathname.startsWith('/sourcing/')) return context('discovery', '候选项目详情', '来源、画像与研判', path)
   if (pathname === '/projects' && ['discover', 'leads'].includes(params.get('view') || '')) return context('discovery', '新项目发现', '候选项目研判', path)
@@ -319,7 +320,7 @@ const sharedOpenAi: SaiAgentAction = {
 export function getSaiAgentActions(current: SaiAgentContext): SaiAgentAction[] {
   if (current.kind === 'review') return [
     { id: 'review-guidance', label: '复核口径', description: '明确主体与证据标准', kind: 'prompt', value: '请说明线索人工复核时如何核对主体、原文证据和重复线索；不要代替我接受或拒绝。' },
-    { id: 'open-discovery', label: '查看新项目发现', description: '查看已入池候选项目', kind: 'navigate', value: '/projects?view=discover' },
+    { id: 'open-discovery', label: '查看新项目发现', description: '查看已入池候选项目', kind: 'navigate', value: '/discovery' },
     sharedOpenAi,
   ]
   if (current.kind === 'risk') return [

@@ -11,6 +11,7 @@ import { canReadAllProjectFiles, projectFileAccessCondition, projectSummaryFileA
 import { parseShanghaiDateTime } from '../utils/shanghaiTime.js'
 import { createConversation } from '../services/conversationService.js'
 import { fetchAiGatewayChatCompatible } from '../services/aiGatewayService.js'
+import { resolveDueDiligenceModelRuntime } from '../services/aiDueDiligenceSkillRuntimeService.js'
 
 export const dueDiligenceRouter = Router()
 const routeId = (value: string | string[]) => z.string().uuid().parse(value)
@@ -180,7 +181,7 @@ async function persistQuestionPack(input: { projectId: string; userId: string; t
   return { id, projectId: input.projectId, title: input.title, sourceFileIds: input.sourceFileIds, questions: ordered, templateVersion: QUESTION_TEMPLATE_VERSION, generationMode: input.generationMode, modelStatus: input.modelStatus, warning: input.warning ?? null, created }
 }
 
-async function generateQuestionPack(projectId: string, userId: string, body: z.infer<typeof QuestionPackGenerateSchema>) {
+async function generateQuestionPack(projectId: string, userId: string, body: z.infer<typeof QuestionPackGenerateSchema>, role: string) {
   const [project] = await db.select({ name: projects.name, companyName: projects.companyName, industry: projects.industry, summary: projects.summary }).from(projects).where(eq(projects.id, projectId)).limit(1)
   if (!project) throw Object.assign(new Error('项目不存在'), { status: 404, code: 'NOT_FOUND' })
   const files = await db.select({ id: projectFiles.id, name: projectFiles.name, contentText: projectFiles.contentText, parseStatus: projectFiles.parseStatus }).from(projectFiles).where(and(eq(projectFiles.projectId, projectId), projectFileAccessCondition(userId)))
@@ -198,9 +199,10 @@ async function generateQuestionPack(projectId: string, userId: string, body: z.i
   const sourceText = selected.map(file => `【${file.name}】\n${file.contentText?.slice(0, 18000)}`).join('\n\n').slice(0, 120000)
   const twinContext = publications.length ? `\n【已选择的公司分身公开建议】\n${publications.map(item => `- ${item.ownerName}分身 v${item.version}（ID:${item.id}）：${item.introduction}\n关注规则：${item.rules}\n适用边界：${item.cases}\n标签：${[...item.industryTags, ...item.capabilityTags].join('、')}`).join('\n')}` : ''
   try {
-    const response = await fetchAiGatewayChatCompatible((process.env.LLM_BASE_URL || process.env.OPENAI_BASE_URL || 'http://127.0.0.1:18081/v1').replace(/\/$/, ''), {
-      method: 'POST', headers: { 'Content-Type': 'application/json', ...(process.env.OPENAI_API_KEY || process.env.LLM_API_KEY ? { Authorization: `Bearer ${process.env.OPENAI_API_KEY || process.env.LLM_API_KEY}` } : {}) },
-      body: JSON.stringify({ model: process.env.LLM_MODEL || 'claude-sonnet-4-6', response_format: { type: 'json_object' }, max_tokens: 12000, messages: [
+    const runtime = await resolveDueDiligenceModelRuntime(role)
+    const response = await fetchAiGatewayChatCompatible(runtime.baseUrl, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...(runtime.apiKey ? { Authorization: `Bearer ${runtime.apiKey}` } : {}) },
+      body: JSON.stringify({ model: runtime.model, response_format: { type: 'json_object' }, max_tokens: 12000, messages: [
         { role: 'system', content: '你是股权投资商业尽调负责人。仅依据提供材料和公司分身的公开建议生成专业尽调问题清单；不得编造事实。覆盖业务、财务、法务、团队、技术、合规六类，优先识别证据缺口、矛盾与投资风险。每题必须明确核查目标与所需证据。若某题对应某个公开分身的关注点，填其 publicationIds；否则为空。只返回 JSON：{"title":"","questions":[{"title":"","category":"业务|财务|法务|团队|技术|合规","priority":"高|中|低","evidenceRequirement":"","rationale":"","sourceNames":[""],"publicationIds":[""]}]}' },
         { role: 'user', content: `项目：${JSON.stringify(project)}\n材料：\n${sourceText}${twinContext}` },
       ] }), signal: AbortSignal.timeout(180_000),
@@ -222,7 +224,7 @@ async function generateQuestionPack(projectId: string, userId: string, body: z.i
 }
 
 dueDiligenceRouter.post('/projects/:projectId/question-packs/generate', async (req: AuthedRequest, res, next) => {
-  try { const projectId = routeId(req.params.projectId); await requireDueDiligenceProject(req.user!.uid, projectId); const pack = await generateQuestionPack(projectId, req.user!.uid, QuestionPackGenerateSchema.parse(req.body)); await audit(req, '生成尽调问题清单', pack.title); res.status(201).json(pack) } catch (error) { next(error) }
+  try { const projectId = routeId(req.params.projectId); await requireDueDiligenceProject(req.user!.uid, projectId); const pack = await generateQuestionPack(projectId, req.user!.uid, QuestionPackGenerateSchema.parse(req.body), req.user!.role); await audit(req, '生成尽调问题清单', pack.title); res.status(201).json(pack) } catch (error) { next(error) }
 })
 dueDiligenceRouter.post('/projects/:projectId/question-packs/:id/apply', async (req: AuthedRequest, res, next) => {
   try {
@@ -342,7 +344,7 @@ dueDiligenceRouter.post('/projects/:projectId/interviews/:id/summary/generate', 
     const [transcript] = await db.select().from(dueDiligenceInterviewTranscripts).where(eq(dueDiligenceInterviewTranscripts.interviewId, interviewId)).limit(1)
     if (!transcript?.content.trim()) throw Object.assign(new Error('请先保存至少一段访谈转写'), { status: 400, code: 'EMPTY_TRANSCRIPT' })
     let response: Response
-    try { response = await fetchAiGatewayChatCompatible((process.env.LLM_BASE_URL || process.env.OPENAI_BASE_URL || 'http://127.0.0.1:18081/v1').replace(/\/$/, ''), { method: 'POST', headers: { 'Content-Type': 'application/json', ...(process.env.OPENAI_API_KEY || process.env.LLM_API_KEY ? { Authorization: `Bearer ${process.env.OPENAI_API_KEY || process.env.LLM_API_KEY}` } : {}) }, body: JSON.stringify({ model: process.env.LLM_MODEL || 'claude-sonnet-4-6', max_tokens: 4000, messages: [{ role: 'system', content: '你是股权投资尽调助理。仅根据转写整理简洁访谈纪要，按“确认事实、待核验事项、风险提示”输出；不得编造。' }, { role: 'user', content: `访谈：${interview.title}\n转写：\n${transcript.content.slice(0, 60000)}` }] }), signal: AbortSignal.timeout(120_000) }, fetch, 120_000) } catch (error) { throw Object.assign(new Error('模型服务暂不可用，转写已保留，可稍后再生成纪要。'), { status: 503, code: 'AI_GATEWAY_UNAVAILABLE', cause: error }) }
+    try { const runtime = await resolveDueDiligenceModelRuntime(req.user!.role); response = await fetchAiGatewayChatCompatible(runtime.baseUrl, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(runtime.apiKey ? { Authorization: `Bearer ${runtime.apiKey}` } : {}) }, body: JSON.stringify({ model: runtime.model, max_tokens: 4000, messages: [{ role: 'system', content: '你是股权投资尽调助理。仅根据转写整理简洁访谈纪要，按“确认事实、待核验事项、风险提示”输出；不得编造。' }, { role: 'user', content: `访谈：${interview.title}\n转写：\n${transcript.content.slice(0, 60000)}` }] }), signal: AbortSignal.timeout(120_000) }, fetch, 120_000) } catch (error) { throw Object.assign(new Error('模型服务暂不可用，转写已保留，可稍后再生成纪要。'), { status: 503, code: 'AI_GATEWAY_UNAVAILABLE', cause: error }) }
     if (!response.ok) throw Object.assign(new Error(`纪要生成失败（HTTP ${response.status}）`), { status: 502, code: 'MODEL_UNAVAILABLE' })
     const summary = ((await response.json()) as { choices?: Array<{ message?: { content?: string } }> }).choices?.[0]?.message?.content?.trim()
     if (!summary) throw Object.assign(new Error('模型未返回可用纪要'), { status: 502, code: 'MODEL_INVALID_OUTPUT' })
@@ -455,14 +457,15 @@ async function synthesizeRuleCandidates(twinId: string, ownerUserId: string) {
   return { created, events: events.length }
 }
 
-async function enrichExperienceEventsWithModel(twinId: string, ownerUserId: string) {
+async function enrichExperienceEventsWithModel(twinId: string, ownerUserId: string, role: string) {
   const rows = await db.select().from(digitalTwinExperienceEvents).where(and(eq(digitalTwinExperienceEvents.ownerUserId, ownerUserId), inArray(digitalTwinExperienceEvents.projectId, db.select({ id: projects.id }).from(projects).where(learningProjectAccessCondition(ownerUserId))))).orderBy(desc(digitalTwinExperienceEvents.createdAt)).limit(100)
   const retryBefore = Date.now() - 10 * 60 * 1000
   const eligible = rows.filter(row => row.projectId && row.modelStatus !== '已完成' && (row.modelAttempts < 3 || !row.modelProcessedAt || row.modelProcessedAt.getTime() < retryBefore))
   const pending = eligible.filter(row => row.projectId === eligible[0]?.projectId).slice(0, 20)
   if (!pending.length) return
   try {
-    const response = await fetchAiGatewayChatCompatible((process.env.LLM_BASE_URL || process.env.OPENAI_BASE_URL || 'http://127.0.0.1:18081/v1').replace(/\/$/, ''), { method: 'POST', headers: { 'Content-Type': 'application/json', ...(process.env.OPENAI_API_KEY || process.env.LLM_API_KEY ? { Authorization: `Bearer ${process.env.OPENAI_API_KEY || process.env.LLM_API_KEY}` } : {}) }, body: JSON.stringify({ model: process.env.LLM_MODEL || 'claude-sonnet-4-6', response_format: { type: 'json_object' }, max_tokens: 4000, messages: [{ role: 'system', content: '你是投资团队经验整理助手。从员工业务行为中提炼可复用、不含项目隐私的判断偏好与 Skill。合并相似经验，识别适用边界，不得编造。只返回 JSON：{"candidates":[{"topic":"","rules":"","cases":"","boundaries":"","confidence":80}]}' }, { role: 'user', content: JSON.stringify(pending.map(row => ({ type: row.eventType, topic: row.topic, evidence: row.payload }))).slice(0, 60000) }] }), signal: AbortSignal.timeout(120_000) }, fetch, 120_000)
+    const runtime = await resolveDueDiligenceModelRuntime(role)
+    const response = await fetchAiGatewayChatCompatible(runtime.baseUrl, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(runtime.apiKey ? { Authorization: `Bearer ${runtime.apiKey}` } : {}) }, body: JSON.stringify({ model: runtime.model, response_format: { type: 'json_object' }, max_tokens: 4000, messages: [{ role: 'system', content: '你是投资团队经验整理助手。从员工业务行为中提炼可复用、不含项目隐私的判断偏好与 Skill。合并相似经验，识别适用边界，不得编造。只返回 JSON：{"candidates":[{"topic":"","rules":"","cases":"","boundaries":"","confidence":80}]}' }, { role: 'user', content: JSON.stringify(pending.map(row => ({ type: row.eventType, topic: row.topic, evidence: row.payload }))).slice(0, 60000) }] }), signal: AbortSignal.timeout(120_000) }, fetch, 120_000)
     if (!response.ok) throw new Error(`HTTP ${response.status}`)
     const raw = ((await response.json()) as { choices?: Array<{ message?: { content?: string } }> }).choices?.[0]?.message?.content?.trim().replace(/^```json\s*/i, '').replace(/\s*```$/, '')
     const output = z.object({ candidates: z.array(z.object({ topic: z.string().trim().min(1).max(128), rules: z.string().trim().min(1).max(12000), cases: z.string().trim().max(12000).default(''), boundaries: z.string().trim().min(1).max(4000), confidence: z.number().int().min(1).max(100).default(80) })).min(1).max(12) }).parse(JSON.parse(raw || ''))
@@ -509,7 +512,7 @@ dueDiligenceRouter.get('/twins/:id/versions', async (req: AuthedRequest, res, ne
 dueDiligenceRouter.post('/twins/:id/learning/scan', async (req: AuthedRequest, res, next) => {
   try {
     const twinId = routeId(req.params.id); const current = actor(req); const [twin] = await db.select().from(digitalTwins).where(and(eq(digitalTwins.id, twinId), eq(digitalTwins.ownerUserId, current.userId))).limit(1); if (!twin) throw Object.assign(new Error('数字分身不存在'), { status: 404, code: 'NOT_FOUND' })
-    const materialResult = await scanExperienceMaterials(twinId, current.userId); const ruleResult = await synthesizeRuleCandidates(twinId, current.userId); void enrichExperienceEventsWithModel(twinId, current.userId).catch(() => undefined)
+    const materialResult = await scanExperienceMaterials(twinId, current.userId); const ruleResult = await synthesizeRuleCandidates(twinId, current.userId); void enrichExperienceEventsWithModel(twinId, current.userId, req.user!.role).catch(() => undefined)
     const result = { created: materialResult.created + ruleResult.created, materials: materialResult.scanned, events: ruleResult.events }
     await audit(req, '扫描数字分身学习来源', `${twin.name}：${result.created} 条候选`); res.json(result)
   } catch (error) { next(error) }
@@ -594,7 +597,7 @@ dueDiligenceRouter.post('/twins/:id/extract-traits', async (req: AuthedRequest, 
     const [twin] = await db.select().from(digitalTwins).where(and(eq(digitalTwins.id, id), eq(digitalTwins.ownerUserId, current.userId), isNull(digitalTwins.deletedAt))).limit(1)
     if (!twin) throw Object.assign(new Error('数字分身不存在'), { status: 404, code: 'NOT_FOUND' })
     let response: Response
-    try { response = await fetchAiGatewayChatCompatible((process.env.LLM_BASE_URL || process.env.OPENAI_BASE_URL || 'http://127.0.0.1:18081/v1').replace(/\/$/, ''), { method: 'POST', headers: { 'Content-Type': 'application/json', ...(process.env.OPENAI_API_KEY || process.env.LLM_API_KEY ? { Authorization: `Bearer ${process.env.OPENAI_API_KEY || process.env.LLM_API_KEY}` } : {}) }, body: JSON.stringify({ model: process.env.LLM_MODEL || 'claude-sonnet-4-6', max_tokens: 1200, messages: [{ role: 'system', content: '你是投资团队知识整理助手。仅从材料中提炼可复用的尽调判断偏好、核查习惯与适用边界；不得添加材料没有的事实、姓名或公司信息。使用简洁中文要点。' }, { role: 'user', content: `材料名称：${body.sourceName}\n材料内容：\n${body.text.slice(0, 50000)}` }] }), signal: AbortSignal.timeout(120_000) }, fetch, 120_000) } catch (error) { throw Object.assign(new Error('模型服务暂不可用，材料已保留，可稍后解析。'), { status: 503, code: 'AI_GATEWAY_UNAVAILABLE', cause: error }) }
+    try { const runtime = await resolveDueDiligenceModelRuntime(req.user!.role); response = await fetchAiGatewayChatCompatible(runtime.baseUrl, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(runtime.apiKey ? { Authorization: `Bearer ${runtime.apiKey}` } : {}) }, body: JSON.stringify({ model: runtime.model, max_tokens: 1200, messages: [{ role: 'system', content: '你是投资团队知识整理助手。仅从材料中提炼可复用的尽调判断偏好、核查习惯与适用边界；不得添加材料没有的事实、姓名或公司信息。使用简洁中文要点。' }, { role: 'user', content: `材料名称：${body.sourceName}\n材料内容：\n${body.text.slice(0, 50000)}` }] }), signal: AbortSignal.timeout(120_000) }, fetch, 120_000) } catch (error) { throw Object.assign(new Error('模型服务暂不可用，材料已保留，可稍后解析。'), { status: 503, code: 'AI_GATEWAY_UNAVAILABLE', cause: error }) }
     if (!response.ok) throw Object.assign(new Error('模型服务暂不可用，材料已保留，可稍后解析。'), { status: 503, code: 'AI_GATEWAY_UNAVAILABLE' })
     const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> }; const traits = payload.choices?.[0]?.message?.content?.trim()
     if (!traits) throw Object.assign(new Error('模型未返回可用的分身特质。'), { status: 502, code: 'AI_EMPTY_RESPONSE' })

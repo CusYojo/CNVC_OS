@@ -3188,6 +3188,27 @@ export const aiConversationCapabilities = mysqlTable('ai_conversation_capabiliti
   byUser: index('idx_ai_conversation_capabilities_user').on(t.userId, t.conversationId),
 }))
 
+// Prompt Library is a document catalog, never an executable AI capability.
+export const promptLibraryItems = mysqlTable('prompt_library_items', {
+  id: uuidPrimaryKey('id'),
+  kind: varchar('kind', { length: 16 }).notNull(),
+  name: varchar('name', { length: 128 }).notNull(),
+  description: text('description').notNull(),
+  markdown: longtext('markdown').notNull(),
+  fileName: varchar('file_name', { length: 128 }),
+  sourceUrl: varchar('source_url', { length: 2048 }),
+  license: varchar('license', { length: 128 }),
+  ownerUserId: uuidColumn('owner_user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  visibility: varchar('visibility', { length: 16 }).notNull().default('private'),
+  version: int('version').notNull().default(1),
+  deletedAt: timestampColumn('deleted_at'),
+  createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+  updatedAt: timestampColumn('updated_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({
+  byCatalog: index('idx_prompt_library_catalog').on(t.kind, t.visibility, t.deletedAt, t.updatedAt),
+  byOwner: index('idx_prompt_library_owner').on(t.ownerUserId, t.deletedAt, t.updatedAt),
+}))
+
 // IM 机器人由统一业务进程管理。凭据只保存 AES-GCM 密文；绑定使用稳定
 // MySQL 用户/项目/会话 ID，外部会话标识不能直接决定内部授权范围。
 export const imBots = mysqlTable('im_bots', {

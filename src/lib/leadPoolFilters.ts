@@ -8,7 +8,7 @@ export const LEAD_POOL_INDUSTRIES = [
   '消费科技', '文化娱乐', '教育', '农业科技',
   '自然语言处理', '计算机视觉', '网络安全', '数据科学', '软件工程',
   '金融', '智能硬件/传感器', '工具软件', '算力基础设施', '能源环保', '物联网/硬件',
-  '低空经济', '本地生活', '跨境出海', '物流', '旅游', '其他',
+  '航空航天', '低空经济', '本地生活', '跨境出海', '物流', '旅游', '其他',
 ] as const
 
 export const LEAD_POOL_REGIONS = [
@@ -309,8 +309,11 @@ export function leadPoolFilterSearchParams(params: URLSearchParams, key: string,
   return next
 }
 
-export function legacySourcingRedirectTarget(_search: string): string {
-  return '/projects?view=discover'
+export function legacySourcingRedirectTarget(search: string): string {
+  const params = new URLSearchParams(search)
+  params.delete('view')
+  const query = params.toString()
+  return `/discovery/leads${query ? `?${query}` : ''}`
 }
 
 export function syncLeadPoolKeywordInput(current: string, urlKeyword: string): string {

@@ -436,7 +436,7 @@ export function ProjectDetailPage() {
         <Card className="p-5"><h3 className="text-sm font-semibold text-slate-800">来源证据</h3><div className="mt-3 space-y-3">{(companyIntelligence.sources ?? []).map((source) => <a key={source.id} href={source.url} target={(source.url ?? '').startsWith('http') ? '_blank' : undefined} rel="noreferrer" className="block rounded-lg border border-slate-100 p-3 hover:border-brand-200"><div className="flex items-center justify-between"><Badge tone={source.reliability === '高' ? 'green' : source.reliability === '中' ? 'amber' : 'slate'}>{source.category} · {source.reliability}</Badge><ExternalLink className="h-3.5 w-3.5 text-brand-500" /></div><p className="mt-2 text-sm font-medium text-slate-700">{source.title}</p><p className="mt-1 text-xs leading-5 text-slate-400">{source.excerpt}</p></a>)}</div></Card>
       </div>
     </div>
-  ) : <Card className="p-12 text-center"><Building2 className="mx-auto h-9 w-9 text-slate-300" /><p className="mt-3 text-sm text-slate-500">该项目尚未关联公司情报。可从新项目发现查看候选项目。</p><Button className="mt-4" onClick={() => navigate('/projects?view=discover')}>前往新项目发现</Button></Card>
+  ) : <Card className="p-12 text-center"><Building2 className="mx-auto h-9 w-9 text-slate-300" /><p className="mt-3 text-sm text-slate-500">该项目尚未关联公司情报。可从新项目发现查看候选项目。</p><Button className="mt-4" onClick={() => navigate('/discovery')}>前往新项目发现</Button></Card>
 
   const handleDeleteFile = async (file: { id: string; name: string }) => {
     if (!window.confirm(`确认删除资料「${file.name}」？\n相关索引也会一并删除，此操作不可恢复。`)) return

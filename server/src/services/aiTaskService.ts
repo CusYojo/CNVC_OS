@@ -2759,8 +2759,12 @@ async function executeTaskWithinUsage(taskId: string) {
       task.type === 'custom_template_document' ? content.title : undefined,
     )
     const outputPath = path.join(taskDir, fileName)
-    const generateCurrentDocx = async (): Promise<Record<string, unknown>> => task.type === 'due_diligence_report'
-      ? generateDueDiligenceReportWithSkill({
+    const generateCurrentDocx = async (): Promise<Record<string, unknown>> => {
+      if (task.type === 'due_diligence_report') {
+        const taskUser = await identityRepositories.users.findById(task.userId)
+        if (!taskUser) throw new Error('任务用户不存在或已删除')
+        return generateDueDiligenceReportWithSkill({
+          role: taskUser.role,
           outputPath,
           taskDirectory: taskDir,
           project,
@@ -2770,7 +2774,8 @@ async function executeTaskWithinUsage(taskId: string) {
           diligenceScope: parameters.diligenceScope,
           sectionTitles: template.sections,
         })
-      : generateBusinessDocx({
+      }
+      return generateBusinessDocx({
           outputPath,
           template,
           project,
@@ -2780,6 +2785,7 @@ async function executeTaskWithinUsage(taskId: string) {
           blueprint: complianceBlueprint,
           complianceReadiness,
         })
+    }
     let imageDeckArtifactVersion: number | undefined
     const publishImageDeck = async (imageDeck: {
       path: string

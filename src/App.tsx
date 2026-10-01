@@ -6,6 +6,9 @@ import { useAuthStore } from './store/useAuthStore'
 import { useAppStore } from './store/useAppStore'
 import { LoginPage } from './pages/LoginPage'
 import { ProjectCenterPage } from './pages/ProjectCenterPage'
+import { ProjectDiscoveryPage } from './pages/ProjectDiscoveryPage'
+import { SourcingPage } from './pages/SourcingPage'
+import { PromptLibraryPage } from './pages/PromptLibraryPage'
 import { InstitutionTrackingDirectoryPage, InstitutionTrackingProfilePage } from './pages/InstitutionTrackingPage'
 import { ProjectDetailPage } from './pages/ProjectDetailPage'
 import { LeadDetailPage } from './pages/LeadDetailPage'
@@ -107,6 +110,8 @@ export default function App() {
         <Route path={EXECUTIVE_DASHBOARD_PATH} element={<LegacyExecutiveHome />} />
         <Route path="/projects" element={<ProjectCenterPage />} />
         <Route path="/projects/:id" element={<ProjectDetailPage />} />
+        <Route path="/discovery" element={<ProjectDiscoveryPage />} />
+        <Route path="/discovery/leads" element={<SourcingPage />} />
         <Route path="/institutions" element={<InstitutionTrackingDirectoryPage />} />
         <Route path="/institutions/:institutionKey" element={<InstitutionTrackingProfilePage />} />
         <Route path="/sourcing" element={<SourcingRedirect />} />
@@ -119,6 +124,8 @@ export default function App() {
             </AiErrorBoundary>
           )}
         />
+        <Route path="/ai/skills" element={<PromptLibraryPage kind="skill" />} />
+        <Route path="/ai/agents" element={<PromptLibraryPage kind="agent" />} />
         <Route path="/materials" element={<Navigate to="/ai" replace />} />
         <Route path="/meetings" element={<MeetingsPage />} />
         <Route path="/collaboration" element={<CollaborationPage />} />

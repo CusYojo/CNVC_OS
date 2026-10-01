@@ -6,12 +6,13 @@ async function source(path: string) {
   return await readFile(new URL(`../../src/${path}`, import.meta.url), 'utf8')
 }
 
-test('project center retires the broad lead-pool tab but keeps discovery and review', async () => {
-  const page = await source('pages/ProjectCenterPage.tsx')
+test('project center keeps review as an icon and redirects discovery to its workspace', async () => {
+  const [page, app] = await Promise.all([source('pages/ProjectCenterPage.tsx'), source('App.tsx')])
   assert.doesNotMatch(page, /SourcingPage|id: 'leads'/)
-  assert.match(page, /ProjectDiscoveryPage/)
   assert.match(page, /LeadReviewPanel/)
-  assert.match(page, /view=discover|view: 'discover'/)
+  assert.match(page, /aria-label="打开待复核"/)
+  assert.match(page, /legacyView === 'discover'/)
+  assert.match(app, /path="\/discovery" element=\{<ProjectDiscoveryPage \/>\}/)
 })
 
 test('shared lead detail remains reachable and defaults back to discovery', async () => {
@@ -20,7 +21,7 @@ test('shared lead detail remains reachable and defaults back to discovery', asyn
     source('pages/ProjectDetailPage.tsx'), source('lib/saiAgent.ts'),
   ])
   assert.match(app, /path="\/sourcing\/:id" element=\{<LeadDetailPage \/>\}/)
-  assert.match(detail, /state\?\.from \|\| '\/projects\?view=discover'/)
-  assert.match(project, /navigate\('\/projects\?view=discover'\)/)
+  assert.match(detail, /state\?\.from \|\| '\/discovery'/)
+  assert.match(project, /navigate\('\/discovery'\)/)
   assert.doesNotMatch(agent, /params\.get\('view'\) === 'leads'/)
 })
