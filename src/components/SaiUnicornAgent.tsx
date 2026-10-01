@@ -29,8 +29,10 @@ import {
   extractSaiPromptGoal,
   getSaiAgentActions,
   getSaiConversationScopeKey,
+  needsSaiWorkspaceSnapshot,
   resolveSaiAgentContext,
   resolveSaiNavigationAction,
+  resolveSaiToolMode,
   resolveSaiUploadAction,
   type SaiAgentAction,
 } from '../lib/saiAgent'
@@ -213,7 +215,7 @@ export function SaiUnicornAgent() {
       }
       draftConversationRef.current = { id: row.id, used: false }
       setAgentId(nextAgentId)
-      void apiPost(`/agent/conversations/${encodeURIComponent(nextAgentId)}/prewarm`, { responseMode: 'compact' }).catch(() => {
+      void apiPost(`/agent/conversations/${encodeURIComponent(nextAgentId)}/prewarm`, { responseMode: 'compact', toolMode: resolveSaiToolMode(currentContext) }).catch(() => {
         // The normal message path can still initialize the session if warming fails.
       })
       return nextAgentId
@@ -412,12 +414,13 @@ export function SaiUnicornAgent() {
       return
     }
     const prompt = buildSaiAgentPrompt(currentContext, cleanGoal)
-      + (['workspace', 'collaboration', 'workflow', 'risk', 'committee'].includes(currentContext.kind)
+      + (['workspace', 'collaboration', 'workflow', 'risk', 'committee'].includes(currentContext.kind) && needsSaiWorkspaceSnapshot(cleanGoal)
         ? buildSaiWorkspaceSnapshot({ projects, todos, meetings, risks, approvals: approvalRequests })
         : '')
       + (currentContext.kind === 'discovery' ? discoverySnapshot : '')
       + (currentContext.kind === 'review' ? reviewSnapshot : '')
     const requestScopeKey = conversationScopeKey
+    const toolMode = resolveSaiToolMode(currentContext, cleanGoal)
     const currentProject = projects.find((project) => project.id === currentContext.projectId)
     setTurnReceipt({
       ...buildSaiTurnReceipt(currentContext, cleanGoal, currentProject, {
@@ -435,7 +438,7 @@ export function SaiUnicornAgent() {
     try {
       if (agentId) {
         if (draftConversationRef.current) draftConversationRef.current.used = true
-        await agent.sendMessage(prompt, { responseMode: 'compact' })
+        await agent.sendMessage(prompt, { responseMode: 'compact', toolMode })
       } else {
         const nextAgentId = await ensureConversation()
         if (!nextAgentId || conversationScopeRef.current !== requestScopeKey) return
@@ -443,6 +446,7 @@ export function SaiUnicornAgent() {
         await apiPost(`/agent/conversations/${encodeURIComponent(nextAgentId)}/messages`, {
           message: prompt,
           responseMode: 'compact',
+          toolMode,
         })
       }
     } catch (error) {

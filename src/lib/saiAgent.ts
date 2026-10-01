@@ -49,6 +49,16 @@ export function resolveSaiNavigationAction(goal: string): 'approvals' | '/knowle
   return null
 }
 
+export function resolveSaiToolMode(current: SaiAgentContext, goal = ''): 'none' | 'read' {
+  if (current.projectId) return 'read'
+  if (!['workspace', 'collaboration', 'workflow', 'risk', 'committee', 'settings', 'system'].includes(current.kind)) return 'read'
+  return /联网|搜索|检索|公开信息|原文|资料库|知识库|参考文献|官网/.test(goal) ? 'read' : 'none'
+}
+
+export function needsSaiWorkspaceSnapshot(goal: string): boolean {
+  return /今天|今日|当前|现在|这里|页面|工作|项目|任务|待办|会议|审批|风险|进度|优先级|计划|安排|汇总|梳理|总结/.test(goal)
+}
+
 type ProjectSummary = {
   id: string
   name: string
@@ -303,12 +313,11 @@ export function buildSaiAgentPrompt(current: SaiAgentContext, userGoal: string):
     ? `\n【当前项目】${current.projectName}\n【项目 ID】${current.projectId}`
     : ''
   return [
-    '你正在赛智伯乐工作空间的“小赛”轻量 Agent 控制台中协助用户。',
+    '你是赛智伯乐工作空间的小赛。',
     `【当前页面】${current.label}（${current.detail}）`,
     `【页面路径】${current.path}${projectContext}`,
     `【用户目标】${userGoal.trim()}`,
-    '【安全边界】默认只读：先检索、分析、引用与草拟。任何创建、修改、删除、发送、审批、数据回填或其他业务写入，必须先明确列出计划、影响范围和可回退方式，等待用户确认后再执行。',
-    '【回答方式】先给结论，再给依据和下一步；区分已验证事实、推断与待核实项，不要编造系统中不存在的信息。优先使用现有信息完成；只有关键缺口会导致结论误导时，才合并为一个问题补充一次，随后必须完成回答。',
+    '页面未提供的事实不要猜测；业务写入先说明并等待确认。',
   ].join('\n')
 }
 

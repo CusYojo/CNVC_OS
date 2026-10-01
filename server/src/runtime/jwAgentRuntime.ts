@@ -68,6 +68,7 @@ type RuntimeSession = {
   selectedSkillNames: Set<string>
   quickSkillInvocation: QuickSkillInvocation | null
   responseMode: JwAgentResponseMode
+  toolMode: 'read' | 'none'
   compactInteractionRoundsUsed: number
 }
 
@@ -87,6 +88,7 @@ export type JwMessageOptions = {
   customTemplateName?: string
   outputFormat?: 'DOCX' | 'PPTX' | 'PDF'
   responseMode?: JwAgentResponseMode
+  toolMode?: 'read' | 'none'
 }
 
 export const JW_AGENT_BUILT_IN_AI_TASK_TYPES = [
@@ -1194,6 +1196,7 @@ async function createRuntimeSession(
   userRole: string,
   modelId?: string | null,
   responseMode: JwAgentResponseMode = 'standard',
+  toolMode: 'read' | 'none' = 'read',
 ) {
   const { createSdkMcpServer, query, tool } = await import('@anthropic-ai/claude-agent-sdk')
   const runtimeUser = await identityRepositories.users.findById(userId)
@@ -1254,6 +1257,7 @@ async function createRuntimeSession(
     ] : []),
   ])
   const hostInvestmentEnabled = Boolean(mcpCapabilities.length || pluginToolNames.size || mcpToolNames.size)
+    && (responseMode !== 'compact' || toolMode === 'read')
   const allowedAgentTools = jwAgentToolsForResponseMode(
     jwAgentToolsForScope(
       JW_AGENT_ALLOWED_TOOLS.filter((name) => selectedAgentToolNames.has(name)),
@@ -1465,6 +1469,7 @@ async function createRuntimeSession(
     selectedSkillNames,
     quickSkillInvocation: null,
     responseMode,
+    toolMode,
     compactInteractionRoundsUsed: 0,
   }
   session.outputLoop = runOutputLoop(session)
@@ -1487,6 +1492,7 @@ export async function prewarmJwAgentConversation(
   userRole: string,
   agentId: string,
   responseMode: JwAgentResponseMode = 'compact',
+  toolMode: 'read' | 'none' = 'read',
 ) {
   const resolved = await resolveConversation(userId, agentId)
   if (!resolved) return null
@@ -1497,11 +1503,11 @@ export async function prewarmJwAgentConversation(
       return { ready: false, reason: 'busy' }
     }
     const active = sessions.get(refreshed.agent.id)
-    if (active?.responseMode === responseMode) return { ready: true, reused: true }
+    if (active?.responseMode === responseMode && active.toolMode === toolMode) return { ready: true, reused: true }
     if (active) await closeJwRuntimeSession(refreshed.agent.id)
     const warmed = await createRuntimeSession(
       userId, refreshed.agent.id, refreshed.agent.metadata || {}, refreshed.agent.projectId,
-      userRole, refreshed.agent.modelId, responseMode,
+      userRole, refreshed.agent.modelId, responseMode, toolMode,
     )
     clearPrewarmIdleTimer(refreshed.agent.id)
     const timer = setTimeout(() => {
@@ -1548,8 +1554,9 @@ export async function sendJwAgentMessageWithMedia(
       })
     }
     const responseMode = options.responseMode ?? 'standard'
+    const toolMode = responseMode === 'compact' ? options.toolMode ?? 'read' : 'read'
     const activeSession = sessions.get(refreshed.agent.id)
-    if (activeSession && activeSession.responseMode !== responseMode) {
+    if (activeSession && (activeSession.responseMode !== responseMode || activeSession.toolMode !== toolMode)) {
       await closeJwRuntimeSession(refreshed.agent.id)
     }
     const clean = message.trim()
@@ -1652,6 +1659,7 @@ export async function sendJwAgentMessageWithMedia(
           userRole,
           fresh?.modelId,
           responseMode,
+          toolMode,
         )
       session.compactInteractionRoundsUsed = 0
       if (quickBinding && options.skillName) {

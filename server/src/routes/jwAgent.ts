@@ -23,8 +23,8 @@ jwAgentRouter.get('/conversations/:agentId', async (req: AuthedRequest, res, nex
 
 jwAgentRouter.post('/conversations/:agentId/prewarm', async (req: AuthedRequest, res, next) => {
   try {
-    const body = z.object({ responseMode: z.enum(['standard', 'compact']).default('compact') }).parse(req.body ?? {})
-    const result = await prewarmJwAgentConversation(req.user!.uid, req.user!.role, agentId(req.params.agentId), body.responseMode)
+    const body = z.object({ responseMode: z.enum(['standard', 'compact']).default('compact'), toolMode: z.enum(['read', 'none']).default('read') }).parse(req.body ?? {})
+    const result = await prewarmJwAgentConversation(req.user!.uid, req.user!.role, agentId(req.params.agentId), body.responseMode, body.toolMode)
     if (!result) return res.status(404).json({ code: 'NOT_FOUND', message: '会话不存在' })
     res.json(result)
   } catch (error) { next(error) }
@@ -35,6 +35,7 @@ jwAgentRouter.post('/conversations/:agentId/messages', async (req: AuthedRequest
     const body = z.object({
       message: z.string().min(1).max(200_000),
       responseMode: z.enum(['standard', 'compact']).optional(),
+      toolMode: z.enum(['read', 'none']).optional(),
       skillName: z.enum([
         'draft-investment-proposal',
         'generate-investment-compliance-note',
@@ -56,6 +57,7 @@ jwAgentRouter.post('/conversations/:agentId/messages', async (req: AuthedRequest
       body.message,
       {
         responseMode: body.responseMode,
+        toolMode: body.toolMode,
         skillName: body.skillName,
         attachmentFileIds: body.attachmentFileIds,
         attachmentFileNames: body.attachmentFileNames,

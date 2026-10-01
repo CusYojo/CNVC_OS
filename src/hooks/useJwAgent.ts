@@ -53,6 +53,7 @@ export type JwQuickSkillName =
 
 export type JwSendMessageOptions = {
   responseMode?: 'standard' | 'compact'
+  toolMode?: 'read' | 'none'
   skillName?: JwQuickSkillName
   attachmentFileIds?: string[]
   attachmentFileNames?: string[]
@@ -161,6 +162,7 @@ export function useJwAgent(agentId?: string) {
       await apiPost(`/agent/conversations/${encodeURIComponent(agentId)}/messages`, {
         message,
         ...(options.responseMode ? { responseMode: options.responseMode } : {}),
+        ...(options.toolMode ? { toolMode: options.toolMode } : {}),
         ...(options.skillName ? { skillName: options.skillName } : {}),
         ...(options.attachmentFileIds?.length ? { attachmentFileIds: options.attachmentFileIds } : {}),
         ...(options.attachmentFileNames?.length ? { attachmentFileNames: options.attachmentFileNames } : {}),
