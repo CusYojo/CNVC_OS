@@ -24,6 +24,7 @@ import { apiPost } from '../lib/api'
 import { openApproval } from '../lib/approvalWorkspace'
 import {
   buildSaiAgentPrompt,
+  buildSaiWorkspaceSnapshot,
   buildSaiTurnReceipt,
   extractSaiPromptGoal,
   getSaiAgentActions,
@@ -252,6 +253,9 @@ export function SaiUnicornAgent() {
       return
     }
     const prompt = buildSaiAgentPrompt(currentContext, cleanGoal)
+      + (['workspace', 'collaboration', 'workflow'].includes(currentContext.kind)
+        ? buildSaiWorkspaceSnapshot({ projects, todos, meetings, risks, approvals: approvalRequests })
+        : '')
     const requestScopeKey = conversationScopeKey
     const currentProject = projects.find((project) => project.id === currentContext.projectId)
     setTurnReceipt({

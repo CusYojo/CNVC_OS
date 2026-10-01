@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 import {
   buildSaiAgentPrompt,
+  buildSaiWorkspaceSnapshot,
   extractSaiPromptGoal,
   getSaiAgentActions,
   getSaiConversationScopeKey,
@@ -101,10 +102,28 @@ test('全局提示词不夹带无关项目标识', () => {
 
 test('对话气泡只回显用户目标，不暴露 Agent 上下文指令', () => {
   const context = resolveSaiAgentContext('/', '', projects)
-  const prompt = buildSaiAgentPrompt(context, '帮我梳理今天的事')
+  const prompt = buildSaiAgentPrompt(context, '帮我梳理今天的事') + buildSaiWorkspaceSnapshot({
+    projects: [], todos: [{ title: '核对财务资料', projectName: '星河半导体', priority: '高', status: '进行中', dueDate: '2026-10-01' }],
+    meetings: [], risks: [], approvals: [],
+  })
 
   assert.equal(extractSaiPromptGoal(prompt), '帮我梳理今天的事')
+  assert.match(prompt, /核对财务资料/)
   assert.equal(extractSaiPromptGoal('这是普通历史消息'), '这是普通历史消息')
+})
+
+test('工作台摘要只提供未完成事项，并优先呈现高优先级任务', () => {
+  const snapshot = buildSaiWorkspaceSnapshot({
+    projects: [],
+    todos: [
+      { title: '低优先级', projectName: '项目甲', priority: '低', status: '进行中', dueDate: '2026-10-01' },
+      { title: '已完成任务', projectName: '项目甲', priority: '高', status: '已完成', dueDate: '2026-10-01' },
+      { title: '高优先级', projectName: '项目乙', priority: '高', status: '待办', dueDate: '2026-10-02' },
+    ],
+    meetings: [], risks: [], approvals: [],
+  })
+  assert.ok(snapshot.indexOf('高优先级') < snapshot.indexOf('低优先级'))
+  assert.doesNotMatch(snapshot, /已完成任务/)
 })
 
 test('跨项目或项目与全局之间切换时隔离 Agent 会话', () => {
