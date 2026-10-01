@@ -109,3 +109,17 @@ test('discovery workspace keeps lead-pool layout, monitoring controls and people
   assert.match(nav, /to: '\/discovery\/people', label: '人物发掘'/)
   assert.match(people, /科研人物线索，不代表创业或融资意愿/)
 })
+
+test('all discovery cards use the compact timeline layout without visible keywords', async () => {
+  const [discovery, css] = await Promise.all([
+    read('src/pages/ProjectDiscoveryPage.tsx'),
+    read('src/pages/ProjectDiscoveryPage.css'),
+  ])
+  assert.match(discovery, /candidates\.map\(\(lead\) => <div[^>]*project-discovery-timeline-item/)
+  assert.match(css, /\.project-discovery-grid\s*\{[^}]*grid-template-columns:\s*minmax\(0,1fr\)/s)
+  assert.match(discovery, /function DiscoveryInvestmentBrief[\s\S]*item\.label === '最新融资日期'/)
+  assert.doesNotMatch(discovery, /className="project-discovery-keywords"|className="project-discovery-keyword-input"/)
+  assert.match(discovery, /className=\{`project-discovery-fact-input\$\{item\.label === '核心团队背景' \|\| item\.label === '核心优势' \? ' is-secondary' : ''\}`\}/)
+  assert.match(css, /\.project-discovery-fact-input\.is-secondary\s*\{[^}]*font-weight:\s*400/s)
+  assert.match(discovery, /\{expanded && <>[\s\S]*<footer className="project-discovery-card-actions">[\s\S]*<CardDetailsToggle expanded/)
+})

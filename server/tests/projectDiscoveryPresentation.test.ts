@@ -4,6 +4,7 @@ import type { LeadListItem } from '../../src/types/index.js'
 import {
   buildProjectDiscoveryKeywords,
   buildProjectDiscoveryBrief,
+  compactProjectDiscoveryFactValue,
   filterProjectDiscoveryCandidates,
   loadProjectDiscoveryPage,
   parseProjectDiscoveryKeywordText,
@@ -284,6 +285,17 @@ test('project discovery highlights a sourced core strength on the collapsed comp
     { label: '核心优势', value: '自研工艺已获量产订单；订单与收入需分别核对。', wide: true },
   )
   assert.equal(buildProjectDiscoveryBrief(company).facts.some((fact) => fact.label === '核心优势'), false)
+})
+
+test('compact discovery facts remove review notes without inventing rejected financing claims', () => {
+  assert.equal(compactProjectDiscoveryFactValue('融资金额', '近亿元（待核验）'), '近亿元')
+  assert.equal(compactProjectDiscoveryFactValue('融资轮次', '天使轮（原库在途；截图推测天使不采信）'), '天使轮')
+  assert.equal(compactProjectDiscoveryFactValue('融资轮次', '截图推测天使轮'), '预计天使轮')
+  assert.equal(compactProjectDiscoveryFactValue('融资轮次', '原库在途；截图推测天使不采信'), '未披露')
+  assert.equal(compactProjectDiscoveryFactValue('融资金额', '（推测约 2 亿元）'), '约 2 亿元')
+  assert.equal(compactProjectDiscoveryFactValue('融资金额', '融资金额待核验'), '未披露')
+  assert.equal(compactProjectDiscoveryFactValue('核心团队背景', '创始人毕业于清华大学（待核验）'), '创始人毕业于清华大学')
+  assert.equal(compactProjectDiscoveryFactValue('核心团队背景', '创始人毕业于清华大学（计算机系）'), '创始人毕业于清华大学（计算机系）')
 })
 
 test('plain-text keyword editing accepts common separators and preserves known keyword metadata', () => {
