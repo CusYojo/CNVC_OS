@@ -5,6 +5,8 @@ type SaiPageContextState = {
   setDiscoverySnapshot: (snapshot: string) => void
   reviewSnapshot: string
   setReviewSnapshot: (snapshot: string) => void
+  knowledgeSnapshot: string
+  setKnowledgeSnapshot: (snapshot: string) => void
 }
 
 export const useSaiPageContext = create<SaiPageContextState>((set) => ({
@@ -12,4 +14,6 @@ export const useSaiPageContext = create<SaiPageContextState>((set) => ({
   setDiscoverySnapshot: (discoverySnapshot) => set({ discoverySnapshot }),
   reviewSnapshot: '',
   setReviewSnapshot: (reviewSnapshot) => set({ reviewSnapshot }),
+  knowledgeSnapshot: '',
+  setKnowledgeSnapshot: (knowledgeSnapshot) => set({ knowledgeSnapshot }),
 }))

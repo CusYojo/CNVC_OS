@@ -7,6 +7,8 @@ import { useToast } from './Toast'
 import { knowledgeDefinition, knowledgeKinds } from '../../server/src/contracts/fdeKnowledgeContract'
 import type { z } from 'zod'
 import { useAuthStore } from '../store/useAuthStore'
+import { useSaiPageContext } from '../store/useSaiPageContext'
+import { buildSaiKnowledgeSnapshot } from '../lib/saiAgent'
 import { forgetKnowledgePending, knowledgeCommandPath, knowledgeRecoveryKey, knowledgeResolvedResult, knowledgeWriteReceipt, knowledgeWriteResultUnknown, readKnowledgePending, rememberKnowledgePending, type KnowledgePending } from '../lib/fdeKnowledgeRecovery'
 import './fde-workspace.css'
 import { HelpPopover } from './task/TaskSystem'
@@ -27,11 +29,23 @@ export function FdeCompanyKnowledgePanel() {
 }
 
 function KnowledgeAccountPanel({ userId }: { userId: string }) {
+  const setKnowledgeSnapshot = useSaiPageContext(state => state.setKnowledgeSnapshot)
   const { showToast } = useToast()
   const [params, setParams] = useSearchParams(), selected = params.get('entry')
   const [view, setView] = useState('published'), [kind, setKind] = useState(''), [keyword, setKeyword] = useState(''), [search, setSearch] = useState(''), [page, setPage] = useState(1)
   const [list, setList] = useState<List | null>(null), [error, setError] = useState(''), [refresh, setRefresh] = useState(0)
   const [detail, setDetail] = useState<Detail | null>(null), [detailError, setDetailError] = useState(''), [busy, setBusy] = useState(false)
+  useEffect(() => {
+    setKnowledgeSnapshot(buildSaiKnowledgeSnapshot({
+      scope: `公司知识库当前${view === 'published' ? '已发布' : view === 'draft' ? '草稿' : '归档'}筛选列表`,
+      total: list?.total ?? null,
+      rows: (list?.list ?? []).map(item => ({ title: item.title, kind: item.kind, summary: item.summary })),
+      selected: detail ? { title: detail.entry.title, kind: detail.entry.kind, summary: detail.entry.summary } : null,
+      loading: !list && !error,
+      error,
+    }))
+    return () => setKnowledgeSnapshot('')
+  }, [list, detail, error, view, setKnowledgeSnapshot])
   const [editor, setEditor] = useState<{ id: string; version: number; audience: boolean } | null>(null), [form, setForm] = useState<Form>(empty), [options, setOptions] = useState<Options | null>(null)
   const [comment, setComment] = useState(''), [score, setScore] = useState(5), [reason, setReason] = useState(''), [action, setAction] = useState<'publish' | 'archive' | null>(null)
   const [shortcut, setShortcut] = useState<{ id: string; action: 'edit' | 'rate' | 'comment' } | null>(null)

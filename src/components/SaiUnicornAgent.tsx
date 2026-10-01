@@ -114,6 +114,7 @@ export function SaiUnicornAgent() {
   const risks = useAppStore((state) => state.risks)
   const discoverySnapshot = useSaiPageContext((state) => state.discoverySnapshot)
   const reviewSnapshot = useSaiPageContext((state) => state.reviewSnapshot)
+  const knowledgeSnapshot = useSaiPageContext((state) => state.knowledgeSnapshot)
   const [open, setOpen] = useState(false)
   const [composer, setComposer] = useState('')
   const [agentId, setAgentId] = useState<string>()
@@ -419,6 +420,7 @@ export function SaiUnicornAgent() {
         : '')
       + (currentContext.kind === 'discovery' ? discoverySnapshot : '')
       + (currentContext.kind === 'review' ? reviewSnapshot : '')
+      + (currentContext.kind === 'knowledge' ? knowledgeSnapshot : '')
     const requestScopeKey = conversationScopeKey
     const toolMode = resolveSaiToolMode(currentContext, cleanGoal)
     const currentProject = projects.find((project) => project.id === currentContext.projectId)

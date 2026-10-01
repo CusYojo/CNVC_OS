@@ -1,16 +1,19 @@
 import { BookOpen, FolderOpen, Grid2X2, List, UploadCloud } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useToast } from '../components/Toast'
 import { Badge, Button, Card, DataTable, FileUpload, Modal, PageHeader, SearchInput, StatusBadge, TableCell } from '../components/ui'
 import { useAuthStore } from '../store/useAuthStore'
 import { apiPost } from '../lib/api'
 import { getFileTypeLabel } from '../lib/fileType'
+import { buildSaiKnowledgeSnapshot } from '../lib/saiAgent'
+import { useSaiPageContext } from '../store/useSaiPageContext'
 import type { ProjectFile } from '../types'
 
 const fileCategories = ['全部分类', '项目资料', '尽调资料', '会议资料', '上会材料', '公开情报', '公司知识库']
 
 export function KnowledgePage({ initialTab = 'files', initialUpload = false, allowedTools, uploadProjectIds }: { initialTab?: 'files' | 'input' | 'meetings'; initialUpload?: boolean; allowedTools?: { upload: boolean; input: boolean; meetings: boolean }; uploadProjectIds?: string[] } = {}) {
+  const setKnowledgeSnapshot = useSaiPageContext(state => state.setKnowledgeSnapshot)
   const files = useAppStore((state) => state.files)
   const meetings = useAppStore((state) => state.meetings)
   const projects = useAppStore((state) => state.projects)
@@ -38,6 +41,18 @@ export function KnowledgePage({ initialTab = 'files', initialUpload = false, all
     const categoryMatched = category === '全部分类' || file.category === category || file.category.includes(category.replace('资料', ''))
     return projectMatched && categoryMatched && (!query || `${file.name}${file.category}`.toLowerCase().includes(query.toLowerCase())) && (!visibility || file.visibility === visibility)
   }), [files, selectedProjectId, category, query, visibility])
+  useEffect(() => {
+    setKnowledgeSnapshot(kbTab === 'files'
+      ? buildSaiKnowledgeSnapshot({
+        scope: '当前已加载的项目资料列表',
+        total: filtered.length,
+        rows: filtered.slice(0, 8).map(file => ({ title: file.name, kind: file.category, project: projects.find(project => project.id === file.projectId)?.name || '', summary: `解析状态：${file.parseStatus}` })),
+        loading: false,
+        error: '',
+      })
+      : `\n【当前显示知识库${kbTab === 'input' ? '输入' : '会议'}工具，未提供完整资料列表】`)
+    return () => setKnowledgeSnapshot('')
+  }, [kbTab, filtered, projects, setKnowledgeSnapshot])
 
   const handleDeleteFile = async (file: { id: string; name: string }) => {
     if (!window.confirm(`确认删除资料「${file.name}」？\n相关索引也会一并删除，此操作不可恢复。`)) return
