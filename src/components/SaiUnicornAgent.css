@@ -120,6 +120,8 @@
 .sai-agent-voice:disabled { opacity: .4; }
 .sai-agent-voice svg { width: 16px; height: 16px; }
 .sai-agent-composer > .sai-agent-speech-error { color: var(--danger); }
+.sai-agent-composer > .sai-agent-local-speech { margin-top: 7px; padding: 0 2px; color: var(--brand-strong); font-size: 10px; text-align: left; text-decoration: underline; }
+.sai-agent-composer > .sai-agent-local-speech:disabled { opacity: .5; }
 .sai-agent-composer > .sai-agent-speech-status { color: var(--brand-strong); }
 .sai-agent-composer > p { display: flex; align-items: center; gap: 5px; margin-top: 7px; padding: 0 2px; color: var(--ink-3); font-size: 9px; }
 .sai-agent-composer > p svg { width: 11px; height: 11px; color: var(--positive); }

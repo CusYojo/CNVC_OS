@@ -48,6 +48,7 @@ type SpeechRecognizer = {
   lang: string
   continuous: boolean
   interimResults: boolean
+  processLocally?: boolean
   onresult: ((event: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null
   onerror: ((event: { error: string }) => void) | null
   onend: (() => void) | null
@@ -55,7 +56,11 @@ type SpeechRecognizer = {
   stop: () => void
 }
 
-type SpeechRecognizerConstructor = new () => SpeechRecognizer
+type SpeechRecognizerConstructor = {
+  new (): SpeechRecognizer
+  available?: (options: { langs: string[]; processLocally: boolean; quality: 'command' }) => Promise<'available' | 'downloadable' | 'downloading' | 'unavailable'>
+  install?: (options: { langs: string[]; processLocally: boolean; quality: 'command' }) => Promise<boolean>
+}
 
 const actionIcons = {
   'project-brief': BrainCircuit,
@@ -114,6 +119,10 @@ export function SaiUnicornAgent() {
   const [localError, setLocalError] = useState<string>()
   const [listening, setListening] = useState(false)
   const [speechError, setSpeechError] = useState<string>()
+  const [localSpeechStatus, setLocalSpeechStatus] = useState<'available' | 'downloadable' | 'downloading' | 'unavailable'>()
+  const [installingLocalSpeech, setInstallingLocalSpeech] = useState(false)
+  const [offerLocalSpeech, setOfferLocalSpeech] = useState(false)
+  const [preferLocalSpeech, setPreferLocalSpeech] = useState(false)
   const [interactionAnswers, setInteractionAnswers] = useState<Record<string, string | string[]>>({})
   const [turnReceipt, setTurnReceipt] = useState<(
     ReturnType<typeof buildSaiTurnReceipt> & { assistantBaseline: number }
@@ -229,6 +238,18 @@ export function SaiUnicornAgent() {
   }, [open])
 
   useEffect(() => {
+    if (!open) return
+    const speechWindow = window as typeof window & { SpeechRecognition?: SpeechRecognizerConstructor; webkitSpeechRecognition?: SpeechRecognizerConstructor }
+    const Speech = speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition
+    if (!Speech?.available) return
+    let active = true
+    void Speech.available({ langs: ['zh-CN'], processLocally: true, quality: 'command' })
+      .then((status) => { if (active) setLocalSpeechStatus(status) })
+      .catch(() => { if (active) setLocalSpeechStatus('unavailable') })
+    return () => { active = false }
+  }, [open])
+
+  useEffect(() => {
     setInteractionAnswers({})
   }, [agent.interaction?.id])
 
@@ -264,6 +285,7 @@ export function SaiUnicornAgent() {
     recognizer.lang = 'zh-CN'
     recognizer.continuous = false
     recognizer.interimResults = true
+    if (preferLocalSpeech && localSpeechStatus === 'available') recognizer.processLocally = true
     recognizer.onresult = (event) => {
       const transcript = Array.from(event.results).map((result) => result[0]?.transcript ?? '').join('').trim()
       if (transcript) {
@@ -274,6 +296,7 @@ export function SaiUnicornAgent() {
     }
     recognizer.onerror = (event) => {
       failed = true
+      if (event.error === 'network') setOfferLocalSpeech(true)
       if (event.error !== 'aborted') setSpeechError(formatSpeechError(event.error))
       setListening(false)
       recognizerRef.current = null
@@ -285,11 +308,37 @@ export function SaiUnicornAgent() {
     }
     try {
       setSpeechError(undefined)
+      setOfferLocalSpeech(false)
       recognizer.start()
       recognizerRef.current = recognizer
       setListening(true)
     } catch {
       setSpeechError('无法启动语音识别，请检查麦克风权限。')
+    }
+  }
+
+  const enableLocalSpeech = async () => {
+    if (localSpeechStatus === 'available') {
+      setPreferLocalSpeech(true)
+      setSpeechError(undefined)
+      setOfferLocalSpeech(false)
+      return
+    }
+    const speechWindow = window as typeof window & { SpeechRecognition?: SpeechRecognizerConstructor; webkitSpeechRecognition?: SpeechRecognizerConstructor }
+    const Speech = speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition
+    if (!Speech?.install || (localSpeechStatus !== 'downloadable' && localSpeechStatus !== 'downloading')) return
+    setInstallingLocalSpeech(true)
+    try {
+      const installed = await Speech.install({ langs: ['zh-CN'], processLocally: true, quality: 'command' })
+      if (!installed) throw new Error('download failed')
+      setLocalSpeechStatus('available')
+      setPreferLocalSpeech(true)
+      setOfferLocalSpeech(false)
+      setSpeechError(undefined)
+    } catch {
+      setSpeechError('离线中文短指令语音包安装失败，请稍后重试。')
+    } finally {
+      setInstallingLocalSpeech(false)
     }
   }
 
@@ -564,6 +613,7 @@ export function SaiUnicornAgent() {
               : <button type="submit" className="sai-agent-send" aria-label="发送给小赛" disabled={!composer.trim() || busy}><ArrowUp /></button>}
           </form>
           {speechError && <p className="sai-agent-speech-error" role="alert">{speechError}</p>}
+          {offerLocalSpeech && ['available', 'downloadable', 'downloading'].includes(localSpeechStatus || '') && !preferLocalSpeech && <button type="button" className="sai-agent-local-speech" disabled={installingLocalSpeech} onClick={() => void enableLocalSpeech()}>{installingLocalSpeech ? '正在安装中文语音包…' : localSpeechStatus === 'available' ? '改用离线短指令识别' : '安装离线中文短指令识别'}</button>}
           {listening && <p className="sai-agent-speech-status" role="status">正在聆听，识别后请确认文字再发送</p>}
           <p><ShieldCheck aria-hidden="true" />默认只读 · 业务写入前会先请你确认 <span>Enter 发送</span></p>
         </footer>
