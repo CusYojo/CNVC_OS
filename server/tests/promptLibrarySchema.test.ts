@@ -14,3 +14,11 @@ test('prompt library has a separate forward-only MySQL table, migration, and sta
   assert.match(migrate, /'prompt_library_items'/)
   assert.doesNotMatch(migration, /ai_capabilit/)
 })
+
+test('prompt library catalog query projects metadata without reading Markdown longtext', () => {
+  const source = readFileSync(new URL('../src/repositories/mysql/mysqlPromptLibraryRepository.ts', import.meta.url), 'utf8')
+  const catalogQuery = source.split('async listVisible(')[1]?.split('async findById(')[0] ?? ''
+  assert.ok(catalogQuery)
+  assert.doesNotMatch(catalogQuery, /db\.select\(\)/)
+  assert.doesNotMatch(catalogQuery, /promptLibraryItems\.markdown/)
+})
