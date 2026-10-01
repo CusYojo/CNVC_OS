@@ -86,6 +86,7 @@ export type InterruptedAgentRecovery = {
 
 export interface AgentConversationRepository {
   listChatsForUser(userId: string, limit?: number): Promise<ChatConversationRecord[]>
+  countMessagesForConversations(conversationIds: string[]): Promise<Array<{ conversationId: string; messageCount: number }>>
   findChatByIdForUser(userId: string, conversationId: string): Promise<ChatConversationRecord | null>
   findChatByAgentForUser(userId: string, agentId: string): Promise<ChatConversationRecord | null>
   findAgentById(conversationId: string): Promise<AgentConversationRecord | null>

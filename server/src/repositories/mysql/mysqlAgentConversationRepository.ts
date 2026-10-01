@@ -39,6 +39,18 @@ class MySqlAgentConversationRepository implements AgentConversationRepository {
       .limit(Math.max(1, Math.min(1_000, Math.trunc(limit)))))
   }
 
+  async countMessagesForConversations(conversationIds: string[]) {
+    if (conversationIds.length === 0) return []
+    return mapped('agent.countMessagesForConversations', async () => {
+      const rows = await this.executor.select({
+        conversationId: agentMessages.conversationId,
+        messageCount: sql<number>`count(*)`,
+      }).from(agentMessages).where(inArray(agentMessages.conversationId, conversationIds))
+        .groupBy(agentMessages.conversationId)
+      return rows.map((row) => ({ ...row, messageCount: Number(row.messageCount) }))
+    })
+  }
+
   async findChatByIdForUser(userId: string, conversationId: string) {
     return mapped('agent.findChatByIdForUser', async () => {
       const [row] = await this.executor.select().from(chatConversations).where(and(

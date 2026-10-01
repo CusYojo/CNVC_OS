@@ -18,18 +18,25 @@ export type ChatMessageRow = {
 
 // 列出当前用户的会话（不含消息体，列表更轻）
 export async function listConversations(userId: string) {
-  const rows = await agentConversationRepository.listChatsForUser(userId, 100)
+  const rows = await agentConversationRepository.listChatsForUser(userId, 1_000)
   const accessible = await Promise.all(rows.map(async (row) => (
     !row.projectId || await getAccessibleProject(userId, row.projectId) ? row : null
   )))
   const ids = accessible.flatMap((row) => row ? [row.id] : [])
-  const modelRows = await agentConversationRepository.findAgentModels(ids)
+  const [modelRows, messageCounts] = await Promise.all([
+    agentConversationRepository.findAgentModels(ids),
+    agentConversationRepository.countMessagesForConversations(ids),
+  ])
   const modelByConversation = new Map(modelRows.map((row) => [row.id, row.modelId]))
-  return accessible.filter((row): row is NonNullable<typeof row> => Boolean(row)).map(({ messages, ...rest }) => ({
-    ...rest,
-    modelId: modelByConversation.get(rest.id) || null,
-    messageCount: Array.isArray(messages) ? messages.length : 0,
-  }))
+  const countByConversation = new Map(messageCounts.map((row) => [row.conversationId, row.messageCount]))
+  return accessible.filter((row): row is NonNullable<typeof row> => Boolean(row))
+    .map(({ messages, ...rest }) => ({
+      ...rest,
+      modelId: modelByConversation.get(rest.id) || null,
+      messageCount: Math.max(Array.isArray(messages) ? messages.length : 0, countByConversation.get(rest.id) || 0),
+    }))
+    .filter((row) => !row.title.startsWith('小赛 ·') || row.messageCount > 0)
+    .slice(0, 100)
 }
 
 // 取单个会话（含全部消息）
