@@ -17,7 +17,7 @@ export type ProjectDiscoveryKeyword = { kind: ProjectDiscoveryKeywordKind; label
 export type ProjectDiscoveryPage<T> = { list: T[]; page: number; totalPages: number }
 export type LoadedProjectDiscoveryPage<T> = ProjectDiscoveryPage<T> & { items: T[] }
 
-const reviewNote = /(?:待核验|待核实|待确认|原库在途|截图推测|不采信|仅供参考|来源待核)/u
+const reviewNote = /(?:待核验|待核实|待确认|原库在途|推测|预计|估计|估算|不采信|仅供参考|来源待核)/u
 const amountPattern = /(?:约|近|超|数)?\s*\d+(?:\.\d+)?\s*(?:亿元|万元|亿|万)(?:人民币|美元)?/u
 const roundPattern = /(?:Pre[-\s]?[A-F]\+?|[A-F]\+?|天使|种子|战略)(?:轮(?:融资)?|融资)/iu
 
@@ -28,13 +28,14 @@ export function compactProjectDiscoveryFactValue(label: string, value: string): 
     reviewNote.test(note) ? '' : matched
   )).trim()
   const rejected = /不采信|不可采信|不能采信/u.test(raw)
+  const estimated = /推测|预计|估计|估算/u.test(raw)
   const explicit = concise && !reviewNote.test(concise) ? concise : ''
   if (label === '融资金额' || label === '融资轮次') {
     const candidate = explicit || (rejected ? '' : raw)
     const match = label === '融资金额' ? candidate.match(amountPattern) : candidate.match(roundPattern)
     if (match) {
       const direct = match[0].replace(/\s+/gu, ' ').trim()
-      return !explicit && /推测|预计|估计/u.test(raw)
+      return estimated
         ? `${label === '融资金额' ? '约' : '预计'}${direct.replace(/^(?:约|预计)/u, '')}`
         : direct
     }

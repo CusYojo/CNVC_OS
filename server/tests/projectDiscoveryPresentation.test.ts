@@ -289,8 +289,10 @@ test('project discovery highlights a sourced core strength on the collapsed comp
 
 test('compact discovery facts remove review notes without inventing rejected financing claims', () => {
   assert.equal(compactProjectDiscoveryFactValue('融资金额', '近亿元（待核验）'), '近亿元')
-  assert.equal(compactProjectDiscoveryFactValue('融资轮次', '天使轮（原库在途；截图推测天使不采信）'), '天使轮')
+  assert.equal(compactProjectDiscoveryFactValue('融资轮次', '天使轮（原库在途；截图推测天使不采信）'), '预计天使轮')
   assert.equal(compactProjectDiscoveryFactValue('融资轮次', '截图推测天使轮'), '预计天使轮')
+  assert.equal(compactProjectDiscoveryFactValue('融资轮次', 'Pre-B轮（推测）'), '预计Pre-B轮')
+  assert.equal(compactProjectDiscoveryFactValue('融资金额', '2亿元（估算）'), '约2亿元')
   assert.equal(compactProjectDiscoveryFactValue('融资轮次', '原库在途；截图推测天使不采信'), '未披露')
   assert.equal(compactProjectDiscoveryFactValue('融资金额', '（推测约 2 亿元）'), '约 2 亿元')
   assert.equal(compactProjectDiscoveryFactValue('融资金额', '融资金额待核验'), '未披露')
