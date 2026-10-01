@@ -5,10 +5,48 @@ import type { BusinessContent, EvidenceSource } from './aiBusinessContentService
 import { getAiSkillDirectory } from './aiSkillService.js'
 import { execFileSupervised as execFileAsync } from '../runtime/supervisedProcessService.js'
 import { fetchAiGatewayChatCompatible } from './aiGatewayService.js'
+import { aiConfigurationRepository } from '../repositories/index.js'
+import { resolveAiModelRoute } from './aiModelSettingsService.js'
 const SKILL_NAME = 'draft-due-diligence-report' as const
-const GW_BASE = (process.env.LLM_BASE_URL || process.env.OPENAI_BASE_URL || 'http://127.0.0.1:18081/v1').replace(/\/$/, '')
-const GW_KEY = process.env.OPENAI_API_KEY || process.env.LLM_API_KEY || ''
-const MODEL = process.env.LLM_MODEL || 'claude-sonnet-4-6'
+
+type DueDiligenceModelRuntime = { baseUrl: string; apiKey: string; model: string }
+type ModelRouteDependencies = {
+  resolveRoute: (profile: 'ai-document', role: string) => Promise<DueDiligenceModelRuntime | null>
+  hasConfiguredModel: () => Promise<boolean>
+  env: NodeJS.ProcessEnv
+}
+
+export async function resolveDueDiligenceModelRuntime(
+  role: string,
+  dependencies: Partial<ModelRouteDependencies> = {},
+): Promise<DueDiligenceModelRuntime> {
+  if (!role.trim()) {
+    throw Object.assign(new Error('尽调模型调用缺少用户角色'), {
+      code: 'DUE_DILIGENCE_ROLE_REQUIRED', status: 403,
+    })
+  }
+  const configured = await (dependencies.resolveRoute ?? resolveAiModelRoute)('ai-document', role)
+  if (configured) return {
+    baseUrl: configured.baseUrl.replace(/\/$/, ''),
+    apiKey: configured.apiKey,
+    model: configured.model,
+  }
+  const hasConfiguredModel = dependencies.hasConfiguredModel ?? (async () => Boolean(
+    await aiConfigurationRepository.findEnabledRoute('ai-document')
+    || await aiConfigurationRepository.findDefaultEnabledModelId(),
+  ))
+  if (await hasConfiguredModel()) {
+    throw Object.assign(new Error('当前账号无可用的尽调模型路由'), {
+      code: 'DUE_DILIGENCE_MODEL_ROUTE_UNAVAILABLE', status: 503,
+    })
+  }
+  const env = dependencies.env ?? process.env
+  return {
+    baseUrl: (env.LLM_BASE_URL || env.OPENAI_BASE_URL || 'http://127.0.0.1:18081/v1').replace(/\/$/, ''),
+    apiKey: env.OPENAI_API_KEY || env.LLM_API_KEY || '',
+    model: env.LLM_MODEL || env.JW_AGENT_MODEL || env.SCORE_MODEL || 'gpt-5.6-sol',
+  }
+}
 
 import { compactText, buildEvidenceLedger, requestedReportMode, dueDiligencePackageContract, normalizeDueDiligencePackage, buildDueDiligencePackageModelInput } from './aiDueDiligencePackage.js'
 import type { ProjectLike, DueDiligencePackage, NormalizedDueDiligencePackage } from './aiDueDiligencePackage.js'
@@ -42,20 +80,21 @@ async function readModelJson(response: Response) {
   }
 }
 
-async function generatePackage(input: Parameters<typeof buildDueDiligencePackageModelInput>[0]) {
+async function generatePackage(input: Parameters<typeof buildDueDiligencePackageModelInput>[0], role: string) {
   const { desiredMode, messages } = buildDueDiligencePackageModelInput(input)
+  const runtime = await resolveDueDiligenceModelRuntime(role)
   const packageTimeoutMs = Math.min(
     600_000,
     Math.max(180_000, Number(process.env.AI_DD_SKILL_PACKAGE_TIMEOUT_MS) || 360_000),
   )
-  const response = await fetchAiGatewayChatCompatible(GW_BASE, {
+  const response = await fetchAiGatewayChatCompatible(runtime.baseUrl, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      ...(GW_KEY ? { Authorization: `Bearer ${GW_KEY}` } : {}),
+      ...(runtime.apiKey ? { Authorization: `Bearer ${runtime.apiKey}` } : {}),
     },
     body: JSON.stringify({
-      model: MODEL,
+      model: runtime.model,
       messages,
       max_tokens: 32_000,
       reasoning_effort: 'low',
@@ -80,6 +119,7 @@ async function generatePackage(input: Parameters<typeof buildDueDiligencePackage
 }
 
 async function repairPackage(input: {
+  role: string
   project: ProjectLike
   evidence: ReturnType<typeof buildEvidenceLedger>
   sourceCutoffDate: string
@@ -87,6 +127,7 @@ async function repairPackage(input: {
   generated: NormalizedDueDiligencePackage
   auditIssues: string[]
 }) {
+  const runtime = await resolveDueDiligenceModelRuntime(input.role)
   const systemPrompt = `你是 draft-due-diligence-report 的 JSON 修复器。当前尽调包未通过原生审计，请只修复字段结构、证据绑定、报告块结构和人工文风问题，并返回完整 JSON 对象。
 
 不得新增证据台账中不存在的事实或证据 ID；不得把 absent/conflicted 字段伪装为 supported；不得用“待补充”、免责声明、资料清单或检索过程凑内容。若证据确实不能支撑任何允许模式，必须在 blockedReasons 中列明缺失字段。
@@ -108,14 +149,14 @@ ${dueDiligencePackageContract(input.desiredMode)}`
     600_000,
     Math.max(180_000, Number(process.env.AI_DD_SKILL_REPAIR_TIMEOUT_MS) || 360_000),
   )
-  const response = await fetchAiGatewayChatCompatible(GW_BASE, {
+  const response = await fetchAiGatewayChatCompatible(runtime.baseUrl, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      ...(GW_KEY ? { Authorization: `Bearer ${GW_KEY}` } : {}),
+      ...(runtime.apiKey ? { Authorization: `Bearer ${runtime.apiKey}` } : {}),
     },
     body: JSON.stringify({
-      model: MODEL,
+      model: runtime.model,
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },
@@ -245,6 +286,7 @@ async function runPackageAudits(input: {
 }
 
 export async function generateDueDiligenceReportWithSkill(input: {
+  role: string
   outputPath: string
   taskDirectory: string
   project: ProjectLike
@@ -273,7 +315,7 @@ export async function generateDueDiligenceReportWithSkill(input: {
     label: '尽调 Skill 运行时检查',
   })
   const evidence = buildEvidenceLedger(input)
-  const generated = await generatePackage({ ...input, evidence })
+  const generated = await generatePackage({ ...input, evidence }, input.role)
   await Promise.all([
     writeFile(evidencePath, JSON.stringify(evidence, null, 2), 'utf8'),
     writeFile(diligenceDataPath, JSON.stringify(generated.diligenceData, null, 2), 'utf8'),
