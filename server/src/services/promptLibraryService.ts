@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
 import { isAiPlatformAdminRole } from '../contracts/adminRoleContract.js'
+import { PROMPT_LIBRARY_CATEGORIES, type PromptLibraryCategory } from '../contracts/promptLibraryCategories.js'
 import type { BuiltinPromptTemplate } from '../data/builtinPromptTemplates.js'
 
 export const PROMPT_LIBRARY_KINDS = ['skill', 'agent'] as const
@@ -11,6 +12,7 @@ export type PromptLibraryActor = { userId: string; userName: string; role: strin
 export type PromptLibraryRecord = {
   id: string
   kind: PromptLibraryKind
+  category: PromptLibraryCategory
   name: string
   description: string
   markdown: string
@@ -42,7 +44,7 @@ export type PromptLibraryAuditRecord = {
 }
 
 export type PromptLibraryRepository = {
-  listVisible(userId: string, kind: PromptLibraryKind, includePrivateForAdmin?: boolean): Promise<PromptLibrarySummaryRecord[]>
+  listVisible(userId: string, kind: PromptLibraryKind, includePrivateForAdmin?: boolean, category?: PromptLibraryCategory): Promise<PromptLibrarySummaryRecord[]>
   findById(id: string): Promise<PromptLibraryRecord | null>
   createWithAudit(item: PromptLibraryRecord, audit: PromptLibraryAuditRecord): Promise<PromptLibraryRecord>
   updateWithAudit(id: string, expectedVersion: number, patch: Partial<PromptLibraryRecord>, audit: PromptLibraryAuditRecord): Promise<boolean>
@@ -54,6 +56,7 @@ const fileName = z.string().trim().max(128).regex(/^[\p{L}\p{N}][\p{L}\p{N} _.-]
 const sourceUrl = z.string().trim().max(2048).url().refine(value => /^https?:\/\//i.test(value), '来源必须为 HTTP(S) 链接').nullable().optional()
 const inputSchema = z.object({
   kind: z.enum(PROMPT_LIBRARY_KINDS),
+  category: z.enum(PROMPT_LIBRARY_CATEGORIES.map(item => item.id) as [PromptLibraryCategory, ...PromptLibraryCategory[]]).default('general'),
   name: safeText.trim().min(1).max(128),
   description: safeText.trim().max(4000).default(''),
   markdown: safeText.trim().min(1).refine(value => Buffer.byteLength(value, 'utf8') <= 128 * 1024, 'Markdown 不能超过 128KB'),
@@ -87,7 +90,7 @@ function mutationAudit(actor: PromptLibraryActor, action: string, itemId: string
 
 function builtinView(item: BuiltinPromptTemplate): PromptLibraryItem {
   return {
-    id: `builtin:${item.slug}`, kind: item.kind, name: item.name, description: item.description,
+    id: `builtin:${item.slug}`, kind: item.kind, category: item.category, name: item.name, description: item.description,
     markdown: item.markdown, fileName: `${item.slug}.md`, sourceUrl: item.sourceUrl,
     license: item.license ?? null, ownerUserId: '', visibility: 'organization',
     version: 1, createdAt: null, updatedAt: null, source: 'builtin', editable: false,
@@ -126,10 +129,11 @@ export function createPromptLibraryService(
   }
 
   return {
-    async list(actor: PromptLibraryActor, kind: PromptLibraryKind): Promise<PromptLibrarySummaryItem[]> {
+    async list(actor: PromptLibraryActor, kind: PromptLibraryKind, category?: PromptLibraryCategory): Promise<PromptLibrarySummaryItem[]> {
       if (!PROMPT_LIBRARY_KINDS.includes(kind)) throw serviceError('提示词类型无效', 'PROMPT_KIND_INVALID', 400)
-      const items = await repository.listVisible(actor.userId, kind, isAiPlatformAdminRole(actor.role))
-      return [...builtins.filter(item => item.kind === kind).map(item => summaryView(builtinView(item), actor)), ...items.map(item => summaryView(item, actor))]
+      if (category && !PROMPT_LIBRARY_CATEGORIES.some(item => item.id === category)) throw serviceError('提示词分类无效', 'PROMPT_CATEGORY_INVALID', 400)
+      const items = await repository.listVisible(actor.userId, kind, isAiPlatformAdminRole(actor.role), category)
+      return [...builtins.filter(item => item.kind === kind && (!category || item.category === category)).map(item => summaryView(builtinView(item), actor)), ...items.map(item => summaryView(item, actor))]
     },
     get,
     async download(actor: PromptLibraryActor, id: string): Promise<PromptLibraryItem> {
@@ -141,7 +145,7 @@ export function createPromptLibraryService(
       const value = parsePromptLibraryInput(input)
       const now = new Date()
       const item = {
-        id: randomUUID(), kind: value.kind, name: value.name, description: value.description,
+        id: randomUUID(), kind: value.kind, category: value.category, name: value.name, description: value.description,
         markdown: value.markdown, fileName: value.fileName ?? null,
         sourceUrl: value.sourceUrl ?? null, license: value.license ?? null,
         ownerUserId: actor.userId, visibility: value.visibility, version: 1,
@@ -158,7 +162,7 @@ export function createPromptLibraryService(
       const { expectedVersion, ...rawPatch } = input
       const patch = inputSchema.omit({ kind: true }).partial().strict().parse(rawPatch)
       const value = parsePromptLibraryInput({
-        kind: existing.kind, name: patch.name ?? existing.name,
+        kind: existing.kind, category: patch.category ?? existing.category, name: patch.name ?? existing.name,
         description: patch.description ?? existing.description,
         markdown: patch.markdown ?? existing.markdown,
         fileName: patch.fileName ?? existing.fileName ?? undefined,
@@ -167,7 +171,7 @@ export function createPromptLibraryService(
         visibility: patch.visibility ?? existing.visibility,
       })
       const changed = await repository.updateWithAudit(id, expectedVersion, {
-        name: value.name, description: value.description, markdown: value.markdown,
+        name: value.name, category: value.category, description: value.description, markdown: value.markdown,
         fileName: value.fileName ?? null, sourceUrl: value.sourceUrl ?? null,
         license: value.license ?? null, visibility: value.visibility,
       }, mutationAudit(actor, '修改提示词', id))
