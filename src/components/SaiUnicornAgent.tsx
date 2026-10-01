@@ -159,6 +159,12 @@ export function SaiUnicornAgent() {
   useEffect(() => {
     if (conversationScopeRef.current === conversationScopeKey) return
     conversationScopeRef.current = conversationScopeKey
+    if (recognizerRef.current) {
+      recognizerRef.current.onend = null
+      recognizerRef.current.stop()
+      recognizerRef.current = null
+      setListening(false)
+    }
     pendingConversationRef.current = null
     setAgentId(undefined)
     setLocalError(undefined)
@@ -212,6 +218,14 @@ export function SaiUnicornAgent() {
       window.cancelAnimationFrame(frame)
       window.removeEventListener('keydown', onEscape)
     }
+  }, [open])
+
+  useEffect(() => {
+    if (open || !recognizerRef.current) return
+    recognizerRef.current.onend = null
+    recognizerRef.current.stop()
+    recognizerRef.current = null
+    setListening(false)
   }, [open])
 
   useEffect(() => {
