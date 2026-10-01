@@ -1,16 +1,16 @@
 import {
   ArrowRight, CalendarDays, ChevronDown, FileUp, LoaderCircle, Radar, Search, Sparkles, X,
 } from 'lucide-react'
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { encodeInstitutionTrackingKey } from '../../server/src/contracts/institutionTrackingContract'
 import { EmptyState } from '../components/ui'
 import { apiGet, apiPatch, apiPost } from '../lib/api'
+import { LEAD_POOL_INDUSTRIES, LEAD_POOL_REGIONS } from '../lib/leadPoolFilters'
 import {
   buildProjectDiscoveryKeywords,
   buildProjectDiscoveryBrief,
   discoveryCandidateKind,
-  filterProjectDiscoveryCandidates,
   formatProjectDiscoveryKeywordText,
   loadProjectDiscoveryPage,
   parseProjectDiscoveryKeywordText,
@@ -40,6 +40,13 @@ const kinds: Array<{ value: ProjectDiscoveryKind; label: string }> = [
   { value: 'research', label: '科研成果' },
 ]
 
+type ProjectDiscoverySort = 'latest' | 'funding' | 'score'
+const sorts: Array<{ value: ProjectDiscoverySort; label: string }> = [
+  { value: 'latest', label: '按时间排序' },
+  { value: 'funding', label: '按融资金额排序' },
+  { value: 'score', label: '按综合评分排序' },
+]
+
 type BpUploadResult = { id: string; name: string; status: string; progress: number; error?: string | null; leadId?: string | null; reviewId?: string | null }
 type ProjectDiscoveryAssignmentPerson = { id: string; name: string; department: string }
 type ProjectDiscoveryAssignmentOptions = {
@@ -66,14 +73,11 @@ async function waitForBpUpload(id: string): Promise<BpUploadResult> {
   throw new Error('材料仍在后台解析，可稍后点击“检查更新”查看结果。')
 }
 
-const fetchProjectDiscoveryPage = (page: number) => apiGet<LeadListResponse>(
-  `/project-discovery/leads?page=${page}&pageSize=50&sort=latest`,
-)
-
 export function ProjectDiscoveryPage() {
   const navigate = useNavigate()
   const location = useLocation()
   const requestSerial = useRef(0)
+  const moreRequestSerial = useRef(0)
   const candidatesRef = useRef<LeadListItem[]>([])
   const paginationRef = useRef({ page: 1, totalPages: 1 })
   const loadingMoreRef = useRef(false)
@@ -81,16 +85,45 @@ export function ProjectDiscoveryPage() {
   const [pagination, setPagination] = useState({ page: 1, totalPages: 1 })
   const [period, setPeriod] = useState<ProjectDiscoveryPeriod>('today')
   const [kind, setKind] = useState<ProjectDiscoveryKind>('all')
+  const [industry, setIndustry] = useState('')
+  const [region, setRegion] = useState('')
+  const [sort, setSort] = useState<ProjectDiscoverySort>('latest')
   const [query, setQuery] = useState('')
+  const [submittedQuery, setSubmittedQuery] = useState('')
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState('')
   const [action, setAction] = useState<'refresh' | 'upload' | ''>('')
   const [notice, setNotice] = useState<{ tone: 'success' | 'error'; text: string } | null>(null)
 
+  useEffect(() => {
+    const timer = window.setTimeout(() => setSubmittedQuery(query.trim()), 300)
+    return () => window.clearTimeout(timer)
+  }, [query])
+
+  const fetchProjectDiscoveryPage = useCallback((page: number) => {
+    const params = new URLSearchParams({ page: String(page), pageSize: '50' })
+    params.set('period', period)
+    params.set('sort', sort)
+    if (kind !== 'all') params.set('leadType', kind)
+    if (industry) params.set('industry', industry)
+    if (region) params.set('region', region)
+    if (submittedQuery) params.set('keyword', submittedQuery)
+    return apiGet<LeadListResponse>(`/project-discovery/leads?${params.toString()}`)
+  }, [period, sort, kind, industry, region, submittedQuery])
+
   const loadCandidates = useCallback(async (background = false) => {
     const serial = ++requestSerial.current
-    if (!background) setLoading(true)
+    moreRequestSerial.current += 1
+    loadingMoreRef.current = false
+    setLoadingMore(false)
+    if (!background) {
+      setLoading(true)
+      candidatesRef.current = []
+      setCandidates([])
+      paginationRef.current = { page: 1, totalPages: 1 }
+      setPagination({ page: 1, totalPages: 1 })
+    }
     setError('')
     try {
       const loaded = await loadProjectDiscoveryPage(fetchProjectDiscoveryPage, 1, [], (items) => {
@@ -111,33 +144,29 @@ export function ProjectDiscoveryPage() {
         setLoading(false)
       }
     }
-  }, [])
+  }, [fetchProjectDiscoveryPage])
 
   const loadRemainingCandidates = useCallback(async () => {
     if (loadingMoreRef.current || paginationRef.current.page >= paginationRef.current.totalPages) return true
-    const serial = ++requestSerial.current
+    const serial = requestSerial.current
+    const moreSerial = ++moreRequestSerial.current
     loadingMoreRef.current = true
     setLoadingMore(true)
     try {
-      let items = candidatesRef.current
-      while (paginationRef.current.page < paginationRef.current.totalPages) {
-        if (serial !== requestSerial.current) return false
-        const loaded = await loadProjectDiscoveryPage(
-          fetchProjectDiscoveryPage,
-          paginationRef.current.page + 1,
-          items,
-          (nextItems) => {
-            if (serial !== requestSerial.current) return
-            candidatesRef.current = nextItems
-            setCandidates(nextItems)
-          },
-        )
-        if (!loaded || serial !== requestSerial.current) return false
-        items = loaded.items
-        const nextPagination = { page: loaded.page, totalPages: loaded.totalPages }
-        paginationRef.current = nextPagination
-        setPagination(nextPagination)
-      }
+      const loaded = await loadProjectDiscoveryPage(
+        fetchProjectDiscoveryPage,
+        paginationRef.current.page + 1,
+        candidatesRef.current,
+        (nextItems) => {
+          if (serial !== requestSerial.current) return
+          candidatesRef.current = nextItems
+          setCandidates(nextItems)
+        },
+      )
+      if (!loaded || serial !== requestSerial.current) return false
+      const nextPagination = { page: loaded.page, totalPages: loaded.totalPages }
+      paginationRef.current = nextPagination
+      setPagination(nextPagination)
       return true
     } catch (cause) {
       if (serial === requestSerial.current) {
@@ -145,21 +174,14 @@ export function ProjectDiscoveryPage() {
       }
       return false
     } finally {
-      loadingMoreRef.current = false
-      setLoadingMore(false)
+      if (moreSerial === moreRequestSerial.current) {
+        loadingMoreRef.current = false
+        setLoadingMore(false)
+      }
     }
-  }, [])
+  }, [fetchProjectDiscoveryPage])
 
   useEffect(() => { void loadCandidates() }, [loadCandidates])
-  useEffect(() => {
-    if (period === 'all' && !loading && pagination.page < pagination.totalPages) {
-      void loadRemainingCandidates()
-    }
-  }, [loadRemainingCandidates, loading, pagination.page, pagination.totalPages, period])
-
-  const visible = useMemo(() => filterProjectDiscoveryCandidates(candidates, {
-    period, query, kind,
-  }), [candidates, kind, period, query])
 
   const openLead = (lead: LeadListItem) => {
     navigate(`/sourcing/${lead.id}`, { state: { from: `${location.pathname}${location.search}` } })
@@ -280,6 +302,26 @@ export function ProjectDiscoveryPage() {
           {kinds.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
         </select>
       </label>
+      <label className="project-discovery-kind">
+        <span className="sr-only">行业筛选</span>
+        <select value={industry} aria-label="行业筛选" onChange={(event) => setIndustry(event.target.value)}>
+          <option value="">全部行业</option>
+          {LEAD_POOL_INDUSTRIES.map((item) => <option key={item} value={item}>{item}</option>)}
+        </select>
+      </label>
+      <label className="project-discovery-kind">
+        <span className="sr-only">地区筛选</span>
+        <select value={region} aria-label="地区筛选" onChange={(event) => setRegion(event.target.value)}>
+          <option value="">全部地区</option>
+          {LEAD_POOL_REGIONS.map((item) => <option key={item} value={item}>{item}</option>)}
+        </select>
+      </label>
+      <label className="project-discovery-kind">
+        <span className="sr-only">项目排序</span>
+        <select value={sort} aria-label="项目排序" onChange={(event) => setSort(event.target.value as ProjectDiscoverySort)}>
+          {sorts.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+        </select>
+      </label>
       <label className="project-discovery-search">
         <Search aria-hidden="true" />
         <input value={query} maxLength={100} onChange={(event) => setQuery(event.target.value.slice(0, 100))} placeholder="搜索项目、赛道、产品或机构" aria-label="搜索新发现项目" />
@@ -290,8 +332,8 @@ export function ProjectDiscoveryPage() {
     <section className="project-discovery-results" aria-label="待查看项目" aria-busy={loading || loadingMore}>
       {loading ? <div className="project-discovery-state"><LoaderCircle className="is-spinning" aria-hidden="true" /><strong>正在整理最新项目信号</strong><p>读取已收录的公开信源与结构化画像。</p></div>
         : error ? <div className="project-discovery-state project-discovery-error"><strong>新项目读取失败</strong><p>{error}</p><button type="button" onClick={() => void loadCandidates()}>重新加载</button></div>
-          : visible.length === 0 ? <EmptyState title="当前范围没有新项目" description="试试切换到近 7 天、全部类型，或调整搜索关键词。" />
-            : <div className="project-discovery-grid">{visible.map((lead) => <DiscoveryCard
+          : candidates.length === 0 ? <EmptyState title="当前范围没有新项目" description="试试切换到近 7 天、全部类型，或调整搜索关键词。" />
+            : <div className="project-discovery-grid">{candidates.map((lead) => <DiscoveryCard
               key={lead.id}
               lead={lead}
               onOpen={() => openLead(lead)}
@@ -299,6 +341,9 @@ export function ProjectDiscoveryPage() {
               onCardUpdated={(card) => updateCandidateCard(lead.id, card)}
               onRemoved={(message) => removeCandidate(lead.id, message)}
             />)}</div>}
+      {!loading && !error && pagination.page < pagination.totalPages && <div className="project-discovery-load-more">
+        <button type="button" disabled={loadingMore} onClick={() => void loadRemainingCandidates()}>{loadingMore ? '加载中…' : '加载更多项目'}</button>
+      </div>}
     </section>
   </div>
 }
@@ -335,8 +380,13 @@ function DiscoveryCard({ lead, onOpen, onKeywordsUpdated, onCardUpdated, onRemov
   const missingFields = projectDiscoveryMissingFields(lead).filter((field) => !(
     cardDraft.briefFacts[field]?.trim() || cardDraft.profileFacts[field]?.trim()
   ))
-  const sourceUrl = safeExternalUrl(lead.radarProfile?.link)
   const latestUpdate = lead.latestUpdates?.[0]
+  const reportedSourceUrl = safeExternalUrl(latestUpdate?.sourceUrl)
+  const sourceUrl = reportedSourceUrl ?? safeExternalUrl(lead.radarProfile?.link)
+  const discoveryScore = lead.discoveryScore
+  const scoreCoverage = discoveryScore?.coverage ?? discoveryScore?.dimensions.filter((dimension) => dimension.status === 'ready').length ?? 0
+  const scoreLabel = discoveryScore?.overall == null ? `待评分（${scoreCoverage}/4维）`
+    : scoreCoverage < 4 ? `参考分（${scoreCoverage}/4维）` : '综合评分'
   const verifiedDimensions = kind === 'research' ? research?.dataStatus?.verifiedDimensions : investment?.dataStatus?.verifiedDimensions
   const applicableDimensions = kind === 'research' ? research?.dataStatus?.applicableDimensions : investment?.dataStatus?.applicableDimensions
   const primaryDateTime = /^\d{4}-\d{2}-\d{2}/u.exec(cardDraft.primaryDate)?.[0]
@@ -473,18 +523,23 @@ function DiscoveryCard({ lead, onOpen, onKeywordsUpdated, onCardUpdated, onRemov
         aria-label={`编辑${name}项目名称`}
         onChange={(event) => updateCardDraft('name', event.target.value)}
       /></h3>
-      <time className="project-discovery-card-date" dateTime={primaryDateTime}>
-        <CalendarDays aria-hidden="true" />
-        <span>{primaryDate.label}</span>
-        <input
-          className="project-discovery-date-input"
-          value={cardDraft.primaryDate}
-          maxLength={40}
-          disabled={cardAction === 'card'}
-          aria-label={`编辑${name}${primaryDate.label}`}
-          onChange={(event) => updateCardDraft('primaryDate', event.target.value)}
-        />
-      </time>
+      <div className="project-discovery-card-header-meta">
+        <time className="project-discovery-card-date" dateTime={primaryDateTime}>
+          <CalendarDays aria-hidden="true" />
+          <span>{primaryDate.label}</span>
+          <input
+            className="project-discovery-date-input"
+            value={cardDraft.primaryDate}
+            maxLength={40}
+            disabled={cardAction === 'card'}
+            aria-label={`编辑${name}${primaryDate.label}`}
+            onChange={(event) => updateCardDraft('primaryDate', event.target.value)}
+          />
+        </time>
+        <div className="project-discovery-card-score" aria-label={`${name}${scoreLabel}${discoveryScore?.overall == null ? '' : `${discoveryScore.overall}分`}`}>
+          <span>{scoreLabel}</span><strong>{discoveryScore?.overall == null ? '待评分' : `${discoveryScore.overall} 分`}</strong>
+        </div>
+      </div>
     </header>
     <DiscoveryInvestmentBrief
       leadId={lead.id}
@@ -531,12 +586,19 @@ function DiscoveryCard({ lead, onOpen, onKeywordsUpdated, onCardUpdated, onRemov
             onChange={(event) => updateCardFact('profileFacts', fact.label, event.target.value)}
           /></dd></div>)}</dl>
         </div>
-        {(latestUpdate || sourceUrl) && <div className="project-discovery-detail-sources">
+        <div className="project-discovery-detail-panel project-discovery-score-details">
+          <h4>项目发现评分</h4>
+          {discoveryScore?.dimensions?.length ? <dl>{discoveryScore.dimensions.map((dimension) => <div key={dimension.key}>
+            <dt>{dimension.label}</dt>
+            <dd><strong>{dimension.score == null || dimension.status === 'insufficient' ? '信息不足' : `${dimension.score} 分`}</strong><span>{dimension.evidence || '暂无可核验依据'}</span></dd>
+          </div>)}</dl> : <p>信息不足，待评分</p>}
+        </div>
+        <div className="project-discovery-detail-sources">
           <strong>信息来源</strong>
-          <div>{sourceUrl ? <a href={sourceUrl} target="_blank" rel="noreferrer">{latestUpdate?.title || '查看原始公开信源'}</a> : <span>{latestUpdate?.title}</span>}
+          <div>{sourceUrl ? <a href={sourceUrl} target="_blank" rel="noopener noreferrer">{reportedSourceUrl ? latestUpdate?.title || '查看原始公开信源' : '查看原始公开信源'}</a> : <span>暂无可核验报道</span>}
             <p>{lead.radarProfile?.channel || '公开资料'}{projectDiscoveryCandidateDay(lead) ? ` · ${projectDiscoveryCandidateDay(lead)}` : ''}</p>
           </div>
-        </div>}
+        </div>
         {missingFields.length > 0 && <div className="project-discovery-detail-questions">
           <strong>关键待核问题</strong>
           <ul>{missingFields.map((field) => <li key={field}>补充并核验{field}</li>)}</ul>
@@ -593,7 +655,11 @@ function DiscoveryCard({ lead, onOpen, onKeywordsUpdated, onCardUpdated, onRemov
     {cardError && <p className="project-discovery-card-error" role="alert">{cardError}</p>}
     {cardNotice && <p className="project-discovery-card-notice" role="status">{cardNotice}</p>}
     <footer className="project-discovery-card-actions">
-      <button type="button" className="detail-button" onClick={onOpen}>查看完整线索<ArrowRight aria-hidden="true" /></button>
+      <div className="project-discovery-card-links">
+        <button type="button" className="detail-button" onClick={onOpen}>查看完整线索<ArrowRight aria-hidden="true" /></button>
+        {sourceUrl ? <a className="project-discovery-news-link" href={sourceUrl} target="_blank" rel="noopener noreferrer">查看新闻/公开来源<ArrowRight aria-hidden="true" /></a>
+          : <span className="project-discovery-news-missing">暂无可核验报道</span>}
+      </div>
       <span />
       <button type="button" className="defer-button" disabled={Boolean(cardAction)} onClick={() => { setConfirmDefer(true); setAssignmentOpen(false); setCardError('') }}>暂不跟进</button>
       <button type="button" className="convert-button" disabled={Boolean(cardAction)} onClick={() => void openAssignment()}>项目入库</button>
@@ -759,7 +825,7 @@ function safeExternalUrl(value?: string): string | null {
   if (!value) return null
   try {
     const url = new URL(value)
-    return url.protocol === 'https:' ? url.toString() : null
+    return url.protocol === 'https:' || url.protocol === 'http:' ? url.toString() : null
   } catch {
     return null
   }

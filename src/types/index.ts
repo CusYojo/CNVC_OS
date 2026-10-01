@@ -435,6 +435,18 @@ export interface LeadPoolRatingSummary {
   status: 'ready' | 'pending' | 'running' | 'failed' | 'stale'
 }
 
+export interface ProjectDiscoveryScore {
+  overall: number | null
+  coverage: number
+  dimensions: Array<{
+    key: string
+    label: string
+    score: number | null
+    evidence: string
+    status: 'ready' | 'insufficient'
+  }>
+}
+
 export interface LeadValuationDisplay {
   value?: string
   status: 'available' | 'pending' | 'unavailable'
@@ -689,6 +701,7 @@ export type LeadListItem = Pick<Lead,
   'id' | 'name' | 'companyName' | 'region' | 'leadType' | 'businessTags'
   | 'poolStatus' | 'poolEnteredAt' | 'dataUpdatedAt' | 'latestUpdates'
 > & {
+  discoveryScore?: ProjectDiscoveryScore | null
   radarProfile?: {
     channel?: string
     link?: string
