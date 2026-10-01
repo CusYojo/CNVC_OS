@@ -42,6 +42,11 @@ test('小赛把明确的页面操作路由到现有工作区', () => {
   assert.equal(resolveSaiNavigationAction('帮我打开知识库'), '/knowledge')
   assert.equal(resolveSaiNavigationAction('请帮我打开知识库'), '/knowledge')
   assert.equal(resolveSaiNavigationAction('进入任务日历'), '/collaboration')
+  assert.equal(resolveSaiNavigationAction('打开待复核'), '/projects?view=reviews')
+  assert.equal(resolveSaiNavigationAction('进入新项目发现'), '/projects?view=discover')
+  assert.equal(resolveSaiNavigationAction('打开项目中心'), '/projects')
+  assert.equal(resolveSaiNavigationAction('打开尽调工作台'), '/due-diligence')
+  assert.equal(resolveSaiNavigationAction('打开风险预警'), '/risks')
   assert.equal(resolveSaiNavigationAction('请分析待审事项'), null)
 })
 
@@ -93,8 +98,7 @@ test('项目提示词带入当前上下文，并明确先计划再写入', () =>
   assert.match(prompt, /星河半导体/)
   assert.match(prompt, /11111111-1111-4111-8111-111111111111/)
   assert.match(prompt, /项目材料/)
-  assert.match(prompt, /默认只读/)
-  assert.match(prompt, /等待用户确认/)
+  assert.match(prompt, /业务写入先说明并等待确认/)
   assert.match(prompt, /找出当前材料的主要风险/)
 })
 

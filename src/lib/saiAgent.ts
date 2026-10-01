@@ -41,9 +41,14 @@ export function resolveSaiUploadAction(current: SaiAgentContext, goal: string): 
     : '/knowledge?view=archives&archiveTool=upload'
 }
 
-export function resolveSaiNavigationAction(goal: string): 'approvals' | '/knowledge' | '/collaboration' | null {
+export function resolveSaiNavigationAction(goal: string): 'approvals' | '/knowledge' | '/collaboration' | '/projects' | '/projects?view=discover' | '/projects?view=reviews' | '/due-diligence' | '/risks' | null {
   if (!/^(?:小赛[，,]?\s*)?(?:请?帮我|我要|给我|现在|请|可以)?\s*(?:打开|进入|跳转到|去)(?:一下)?/.test(goal)) return null
   if (/(?:待我审批|待审事项|审批工作台)/.test(goal)) return 'approvals'
+  if (/(?:待复核|人工复核)/.test(goal)) return '/projects?view=reviews'
+  if (/(?:新项目发现|发现项目|项目发现)/.test(goal)) return '/projects?view=discover'
+  if (/(?:项目中心)/.test(goal)) return '/projects'
+  if (/(?:尽调工作台|尽职调查)/.test(goal)) return '/due-diligence'
+  if (/(?:风险预警|风险列表)/.test(goal)) return '/risks'
   if (/知识库/.test(goal)) return '/knowledge'
   if (/(?:任务日历|任务与日历|会议日历)/.test(goal)) return '/collaboration'
   return null
@@ -404,7 +409,7 @@ export function buildSaiTurnReceipt(
 }
 
 export function extractSaiPromptGoal(message: string): string {
-  const match = message.match(/【用户目标】([\s\S]*?)\n【安全边界】/)
+  const match = message.match(/【用户目标】([\s\S]*?)(?:\n页面未提供的事实不要猜测；业务写入先说明并等待确认。|\n【安全边界】)/)
   return match?.[1]?.trim() || message
 }
 
