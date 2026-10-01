@@ -20,9 +20,7 @@ import {
   replaceManagedUniversitySources,
 } from '../services/radarSourceManagementService.js'
 import {
-  runRadarArxivCollection,
   runRadarInvestmentCollection,
-  runRadarOpenAlexCollection,
   runRadarUniversityWechatRss,
   runRadarWechatCollection,
 } from '../services/radarCollectorService.js'
@@ -308,33 +306,6 @@ radarRouter.post('/investment/run', requireSystemAdmin, async (req: AuthedReques
     }).parse(req.body ?? {})
     const result = await runRadarInvestmentCollection({ groups: body.groups, maxEntriesPerSource: body.max_entries_per_source, keyword: body.keyword }, AbortSignal.timeout(20 * 60_000))
     await writeAudit({ userId: req.user!.uid, userName: req.user!.name, module: 'Radar采集', action: '单次多渠道采集', target: `fetched:${result.fetched ?? 0}`, ip: req.ip, requestId: String(res.locals.requestId || '') })
-    res.json(result)
-  } catch (error) { next(error) }
-})
-radarRouter.post('/arxiv/run', requireSystemAdmin, async (req: AuthedRequest, res, next) => {
-  try {
-    const body = z.object({
-      categories: z.array(z.string().max(32)).max(20).default(['cs.AI', 'cs.CL', 'cs.CV', 'cs.LG']),
-      keywords: z.array(z.string().max(100)).max(20).default([]),
-      max_results: z.number().int().min(1).max(100).default(20),
-      days: z.number().int().min(1).max(90).default(14),
-      watch_authors: z.array(z.string().max(255)).max(100).default([]),
-    }).parse(req.body ?? {})
-    const result = await runRadarArxivCollection({ categories: body.categories, keywords: body.keywords, maxResults: body.max_results, days: body.days, watchAuthors: body.watch_authors }, AbortSignal.timeout(10 * 60_000))
-    await writeAudit({ userId: req.user!.uid, userName: req.user!.name, module: 'Radar采集', action: '单次 arXiv 采集', target: `fetched:${result.fetched ?? 0}`, ip: req.ip, requestId: String(res.locals.requestId || '') })
-    res.json(result)
-  } catch (error) { next(error) }
-})
-
-radarRouter.post('/openalex/run', requireSystemAdmin, async (req: AuthedRequest, res, next) => {
-  try {
-    const body = z.object({
-      query: z.string().max(500).optional(),
-      max_results: z.number().int().min(1).max(100).default(50),
-      days: z.number().int().min(1).max(90).default(14),
-    }).parse(req.body ?? {})
-    const result = await runRadarOpenAlexCollection({ query: body.query, maxResults: body.max_results, days: body.days }, AbortSignal.timeout(10 * 60_000))
-    await writeAudit({ userId: req.user!.uid, userName: req.user!.name, module: 'Radar采集', action: '单次 OpenAlex 采集', target: `fetched:${result.fetched ?? 0}`, ip: req.ip, requestId: String(res.locals.requestId || '') })
     res.json(result)
   } catch (error) { next(error) }
 })

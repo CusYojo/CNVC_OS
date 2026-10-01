@@ -79,7 +79,6 @@ const concurrency = readIntegerEnv('RUNTIME_JOB_CONCURRENCY', 1, 1)
 const active = new Map<string, { controller: AbortController; promise: Promise<void> }>()
 const managedRadarJobIds = new Set([
   'radar-collect-sync',
-  'radar-paper-daily',
   'radar-wechat-daily',
   'radar-wechat-retry',
   'radar-wechat-institution',
@@ -229,8 +228,6 @@ export function runtimeJobDefinitions(): RuntimeJobDefinition[] {
   const kr36SyncStartDelayMs = readIntegerEnv('KR36_PROJECT_SYNC_START_DELAY_MS', 5 * 60_000, 0)
   const kr36AdmissionHour = Math.min(23, readIntegerEnv('KR36_PROJECT_ADMISSION_HOUR', 9, 0))
   const kr36AdmissionMinute = Math.min(59, readIntegerEnv('KR36_PROJECT_ADMISSION_MINUTE', 10, 0))
-  const paperHour = Math.min(23, readIntegerEnv('RADAR_PAPER_DAILY_HOUR', 7, 0))
-  const paperMinute = Math.min(59, readIntegerEnv('RADAR_PAPER_DAILY_MINUTE', 30, 0))
   return [
     {
       id: 'im-outbox-dispatch',
@@ -349,18 +346,6 @@ export function runtimeJobDefinitions(): RuntimeJobDefinition[] {
         const sync = await runRadarSyncWhenAvailable(syncInput)
         return { collection, sync }
       },
-    },
-    {
-      id: 'radar-paper-daily',
-      task: 'radar-paper-daily',
-      enabled: enabledEnv('RADAR_PAPER_CRAWL_ENABLED', false),
-      scheduleKind: 'daily',
-      dailyHour: paperHour,
-      dailyMinute: paperMinute,
-      initialDelayMs: millisecondsUntilShanghai(paperHour, paperMinute),
-      timeoutMs: 30 * 60_000,
-      maxAttempts: 2,
-      run: async (signal) => await runRadarCollectorAction('paper-daily', signal),
     },
     {
       id: 'radar-wechat-daily',
