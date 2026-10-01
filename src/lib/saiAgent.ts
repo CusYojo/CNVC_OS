@@ -6,8 +6,13 @@ export type SaiAgentContextKind =
   | 'due-diligence'
   | 'collaboration'
   | 'workflow'
+  | 'review'
+  | 'risk'
+  | 'committee'
   | 'knowledge'
   | 'ai'
+  | 'settings'
+  | 'system'
 
 export type SaiAgentContext = {
   kind: SaiAgentContextKind
@@ -30,7 +35,7 @@ export function resolveSaiUploadAction(current: SaiAgentContext, goal: string): 
   if (/(?:不要|不用|无需|禁止).{0,8}(?:上传|导入|添加)/.test(goal)) return null
   const wantsUpload = /(?:上传|导入|添加).{0,12}(?:文件|资料|材料|文档|附件|BP)|(?:文件|资料|材料|文档|附件|BP).{0,12}(?:上传|导入)/i.test(goal)
   if (!wantsUpload) return null
-  if (current.kind === 'discovery') return '/projects?view=discover&saiUpload=1'
+  if (current.kind === 'discovery' || current.kind === 'review') return '/projects?view=discover&saiUpload=1'
   return current.projectId
     ? `/projects/${encodeURIComponent(current.projectId)}?tab=files&saiUpload=1`
     : '/knowledge?view=archives&archiveTool=upload'
@@ -173,17 +178,26 @@ export function resolveSaiAgentContext(
       const tab = params.get('tab') || 'overview'
       return context('project', project.name, `${project.stage || '未分阶段'} · ${projectTabLabels[tab] || '项目工作区'}`, path, project)
     }
+    return context('project', '当前项目', '项目资料正在加载或当前账号无权访问', path, { id: projectId, name: '当前项目' })
   }
 
   if (pathname === '/projects/boss-dashboard') return context('workspace', '管理驾驶舱', '组织级项目视图', path)
-  if ((pathname === '/projects' && ['discover', 'leads'].includes(params.get('view') || '')) || pathname.startsWith('/sourcing/')) return context('discovery', '新项目发现', '候选项目研判', path)
-  if (pathname === '/projects') return context('workspace', '项目中心', '项目组合与进展', path)
+  if (pathname === '/projects' && params.get('view') === 'reviews') return context('review', '线索人工复核', '微信文件、链接与其他来源', path)
+  if (pathname.startsWith('/sourcing/')) return context('discovery', '候选项目详情', '来源、画像与研判', path)
+  if (pathname === '/projects' && ['discover', 'leads'].includes(params.get('view') || '')) return context('discovery', '新项目发现', '候选项目研判', path)
+  if (pathname === '/projects') return context('workspace', '项目中心', params.get('view') === 'key' ? '重点项目' : '普通项目与进展', path)
   if (pathname.startsWith('/institutions')) return context('institution', '机构追踪', pathname === '/institutions' ? '投资机构全景' : '机构详情', path)
   if (pathname.startsWith('/due-diligence')) return context('due-diligence', '尽调工作台', '证据、访谈与核查', path)
-  if (pathname === '/meetings' || pathname === '/committee' || pathname === '/collaboration') return context('collaboration', '任务与日历', '协作、会议与计划', path)
+  if (pathname === '/meetings') return context('collaboration', '会议日历', '会议安排与会前准备', path)
+  if (pathname === '/collaboration') return context('collaboration', '任务与日历', '协作、会议与计划', path)
+  if (pathname === '/committee') return context('committee', '投委会', '议题、决策与会议记录', path)
   if (pathname === '/workflow') return context('workflow', '申请与记录', '待办审批与流程', path)
-  if (pathname === '/knowledge' || pathname.startsWith('/responsibility')) return context('knowledge', '知识库', '制度、档案与知识', path)
+  if (pathname === '/risks') return context('risk', '风险预警', '未关闭风险与核验进度', path)
+  if (pathname === '/knowledge') return context('knowledge', '知识库', '制度、档案与知识', path)
+  if (pathname.startsWith('/responsibility')) return context('knowledge', '职责与制度', '职责分工与管理规则', path)
   if (pathname === '/ai') return context('ai', 'AI 智能助手', '完整 Agent 工作台', path)
+  if (pathname === '/settings/weixin-ai') return context('settings', '微信 AI 设置', '个人微信助手与账号绑定', path)
+  if (pathname.startsWith('/system')) return context('system', '系统管理', pathname.includes('/ai/models') ? '模型配置' : pathname.includes('/ai/capabilities') ? '能力配置' : pathname.includes('/integrations/') ? '集成配置' : '人员与平台设置', path)
   return context('workspace', '今日工作台', '全局工作台', path)
 }
 
@@ -196,6 +210,26 @@ const sharedOpenAi: SaiAgentAction = {
 }
 
 export function getSaiAgentActions(current: SaiAgentContext): SaiAgentAction[] {
+  if (current.kind === 'review') return [
+    { id: 'review-guidance', label: '复核口径', description: '明确主体与证据标准', kind: 'prompt', value: '请说明线索人工复核时如何核对主体、原文证据和重复线索；不要代替我接受或拒绝。' },
+    { id: 'open-discovery', label: '查看新项目发现', description: '查看已入池候选项目', kind: 'navigate', value: '/projects?view=discover' },
+    sharedOpenAi,
+  ]
+  if (current.kind === 'risk') return [
+    { id: 'risk-priority', label: '梳理风险优先级', description: '先看未关闭的高风险', kind: 'prompt', value: '请根据当前可用的风险和项目记录，按严重性与时效性梳理优先核验事项，区分事实与推断。' },
+    { id: 'risk-checklist', label: '草拟核验清单', description: '给出证据与负责人建议', kind: 'prompt', value: '请为当前风险草拟核验清单，列出所需证据、建议负责角色和完成标准，不直接修改风险状态。' },
+    sharedOpenAi,
+  ]
+  if (current.kind === 'committee') return [
+    { id: 'committee-prep', label: '准备投委会议题', description: '整理决策点与材料缺口', kind: 'prompt', value: '请根据可用的投委会与项目资料草拟议题准备清单，列出决策点、证据和缺口。' },
+    { id: 'committee-questions', label: '草拟投委会问题', description: '聚焦关键风险和假设', kind: 'prompt', value: '请草拟投委会应追问的关键问题，说明每个问题需要的证据，不编造会议结论。' },
+    sharedOpenAi,
+  ]
+  if (current.kind === 'settings' || current.kind === 'system') return [
+    { id: 'settings-help', label: '说明当前设置', description: '解释页面用途与操作步骤', kind: 'prompt', value: '请根据当前页面名称说明该设置的用途和操作步骤；无法读取的配置值请明确说明，不要猜测。' },
+    { id: 'open-workspace', label: '返回工作台', description: '查看今日任务', kind: 'navigate', value: '/' },
+    sharedOpenAi,
+  ]
   if (current.kind === 'project') return [
     { id: 'project-brief', label: '一页研判', description: '提炼价值、证据与疑点', kind: 'prompt', value: '请基于当前项目已有材料，给出一页式投资研判，区分已验证事实、待核实主张和你的推断。' },
     { id: 'project-risks', label: '风险与缺口', description: '找出证据冲突和遗漏', kind: 'prompt', value: '请检查当前项目的重大风险、证据冲突和材料缺口，按严重性排序并给出核验方法。' },

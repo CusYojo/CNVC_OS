@@ -307,7 +307,7 @@ export function SaiUnicornAgent() {
       return
     }
     const prompt = buildSaiAgentPrompt(currentContext, cleanGoal)
-      + (['workspace', 'collaboration', 'workflow'].includes(currentContext.kind)
+      + (['workspace', 'collaboration', 'workflow', 'risk', 'committee'].includes(currentContext.kind)
         ? buildSaiWorkspaceSnapshot({ projects, todos, meetings, risks, approvals: approvalRequests })
         : '')
       + (currentContext.kind === 'discovery' ? discoverySnapshot : '')

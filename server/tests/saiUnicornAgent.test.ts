@@ -27,9 +27,11 @@ test('小赛在项目页打开对应资料上传窗口，其他页面打开知�
   const project = resolveSaiAgentContext(`/projects/${projects[0].id}`, '?tab=files', projects)
   const workspace = resolveSaiAgentContext('/', '', projects)
   const discovery = resolveSaiAgentContext('/projects', '?view=discover', projects)
+  const review = resolveSaiAgentContext('/projects', '?view=reviews', projects)
   assert.equal(resolveSaiUploadAction(project, '帮我上传项目材料'), `/projects/${projects[0].id}?tab=files&saiUpload=1`)
   assert.equal(resolveSaiUploadAction(workspace, '我要上传文件'), '/knowledge?view=archives&archiveTool=upload')
   assert.equal(resolveSaiUploadAction(discovery, '帮我上传项目 BP'), '/projects?view=discover&saiUpload=1')
+  assert.equal(resolveSaiUploadAction(review, '上传项目资料'), '/projects?view=discover&saiUpload=1')
   assert.equal(resolveSaiUploadAction(project, '请分析这份材料'), null)
   assert.equal(resolveSaiUploadAction(project, '不要上传文件，只分析已有材料'), null)
 })
@@ -115,6 +117,14 @@ test('对话气泡只回显用户目标，不暴露 Agent 上下文指令', () =
   assert.equal(extractSaiPromptGoal('这是普通历史消息'), '这是普通历史消息')
 })
 
+test('项目主记录尚未加载时仍保持项目作用域', () => {
+  const current = resolveSaiAgentContext('/projects/11111111-1111-4111-8111-111111111111', '?tab=files', [])
+  assert.equal(current.kind, 'project')
+  assert.equal(current.projectId, projects[0].id)
+  assert.equal(getSaiConversationScopeKey(current), `project:${projects[0].id}`)
+  assert.match(current.detail, /正在加载或当前账号无权访问/)
+})
+
 test('工作台摘要保留总数，并优先呈现到期任务', () => {
   const snapshot = buildSaiWorkspaceSnapshot({
     projects: [],
@@ -171,8 +181,13 @@ test('主要业务页面都能获得完整的情境标签与操作', () => {
     ['/institutions', '', 'institution'],
     ['/institutions/example', '', 'institution'],
     ['/meetings', '', 'collaboration'],
+    ['/committee', '', 'committee'],
     ['/workflow', '', 'workflow'],
+    ['/risks', '', 'risk'],
+    ['/projects', '?view=reviews', 'review'],
     ['/knowledge', '', 'knowledge'],
+    ['/settings/weixin-ai', '', 'settings'],
+    ['/system/ai/models', '', 'system'],
     ['/ai', '', 'ai'],
   ] as const
 
@@ -181,6 +196,12 @@ test('主要业务页面都能获得完整的情境标签与操作', () => {
     assert.equal(current.kind, expectedKind)
     assert.equal(getSaiAgentActions(current).length, 3)
   }
+})
+
+test('小赛不会把待复核、风险或投委会页面误称为工作台', () => {
+  assert.equal(resolveSaiAgentContext('/projects', '?view=reviews', projects).label, '线索人工复核')
+  assert.equal(resolveSaiAgentContext('/risks', '', projects).label, '风险预警')
+  assert.equal(resolveSaiAgentContext('/committee', '', projects).label, '投委会')
 })
 
 test('全局布局挂载小赛，并尊重减少动效设置', async () => {
