@@ -44,4 +44,13 @@ test('discovery rating stays adjacent to financing date and exposes evidence-bac
   assert.match(css, /\.project-discovery-card-score/)
   assert.match(types, /discoveryScore\?:/)
   assert.match(types, /sourceUrl\?: string/)
+  assert.match(page, /初筛参考分（\$\{scoreCoverage\}\/4维）/)
+  assert.match(page, /discoveryScore\?\.overall \?\? discoveryScore\?\.referenceScore/)
+  assert.match(page, /所有候选信息均待人工核验/)
+})
+
+test('discovery list reads the third article URL for provisional scoring', async () => {
+  const service = await read('server/src/services/aiSummaryService.ts')
+  assert.match(service, /\$\[2\]\.url/)
+  assert.match(service, /sourceUrls: \[\.\.\.sourceUrls/)
 })

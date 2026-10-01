@@ -11,6 +11,13 @@ export type DiscoveryScoreDimension = {
 }
 
 type ScoreInput = {
+  summary?: string | null
+  sourceUrls?: Array<string | null | undefined> | null
+  industryTags?: string[] | null
+  technologies?: string[] | null
+  teamDescription?: string | null
+  candidateInstitutions?: Array<{ name?: string }> | null
+  candidateFinancing?: { status?: string; latestAmount?: string } | null
   investmentProfileStatus?: string | null
   institutions?: Array<{ name?: string; major?: boolean; role?: string }> | null
   hasMajorInstitution?: boolean | null
@@ -24,6 +31,69 @@ type ScoreInput = {
 }
 
 const weights = { investor: 20, funding: 20, frontier: 25, technology: 35 } as const
+
+const priorityIndustry = /人工智能|^AI$|大模型|具身智能|机器人|半导体|芯片|集成电路|生物医药|创新药|航空航天|商业航天/u
+const strategicIndustry = /先进制造|高端装备|新材料|新能源|储能|量子|低空经济|医疗器械|生物技术|生命科学/u
+const specificSegment = /算力|智能体|工业软件|光刻|先进封装|第三代半导体|功率半导体|基因|细胞治疗|脑机接口|合成生物|卫星|火箭|无人机/u
+
+function safeArticleUrl(value: string | null | undefined): string | null {
+  if (!value) return null
+  try {
+    const url = new URL(value)
+    return ['http:', 'https:'].includes(url.protocol) && url.hostname ? url.href : null
+  } catch {
+    return null
+  }
+}
+
+function provisionalReferenceScore(input: ScoreInput) {
+  const sourceUrl = input.sourceUrls?.map(safeArticleUrl).find((value): value is string => Boolean(value)) ?? null
+  if (!input.summary?.trim() || !sourceUrl) return { referenceScore: null, referenceSourceUrl: null, referenceEvidence: [] as string[] }
+
+  const industryTags = (input.industryTags ?? []).filter((value) => value && value !== '其他' && value !== '待核验')
+  const industryText = industryTags.join(' ')
+  const evidence = ['有项目摘要及公开来源链接；原文和实体归属仍待核验']
+  let score = 50
+  if (priorityIndustry.test(industryText)) {
+    score += 8
+    evidence.push('入池行业标注涉及重点硬科技赛道（待核验） +8')
+  } else if (strategicIndustry.test(industryText)) {
+    score += 5
+    evidence.push('入池行业标注涉及战略性新兴产业（待核验） +5')
+  } else if (industryTags.length) {
+    score += 2
+    evidence.push('入池资料含具体行业标注（待核验） +2')
+  }
+  if (specificSegment.test(industryText)) {
+    score += 2
+    evidence.push('入池资料含明确产业细分方向（待核验） +2')
+  }
+  if (input.technologies?.some((value) => value.trim().length >= 4)) {
+    score += 3
+    evidence.push('入池资料含技术路线描述（待核验） +3')
+  }
+  const team = input.teamDescription ?? ''
+  if (/(?:来自|毕业于|依托|联合)(?:.{0,18})(?:清华大学|北京大学|上海交通大学|复旦大学|浙江大学|中国科学技术大学|中国科学院)/u.test(team)) {
+    score += 2
+    evidence.push('团队资料提示重点高校或科研院所背景（待核验） +2')
+  }
+  if (/(?:曾任|来自|任职于).{0,20}(?:华为|中芯国际|宁德时代|比亚迪|大疆|字节跳动|腾讯|阿里巴巴)/u.test(team)) {
+    score += 2
+    evidence.push('团队资料提示龙头企业产业背景（待核验） +2')
+  }
+  const ranked = (input.candidateInstitutions ?? []).map((item) => lookupDiscoveryInstitutionRanking(item.name ?? ''))
+    .filter((item) => item !== null).sort((a, b) => a!.rank - b!.rank)[0]
+  if (ranked) {
+    const bonus = ranked.rank <= 30 ? 5 : ranked.rank <= 50 ? 4 : 3
+    score += bonus
+    evidence.push(`候选投资机构命中 ${ranked.year} 投中榜 TOP100（机构关系待核验） +${bonus}`)
+  }
+  if (input.candidateFinancing?.status !== '候选冲突' && /^(?:人民币)?\d+(?:\.\d+)?(?:亿元|万元)(?:人民币)?$/u.test(input.candidateFinancing?.latestAmount?.trim() ?? '')) {
+    score += 3
+    evidence.push('入池资料含明确人民币融资金额（待核验） +3')
+  }
+  return { referenceScore: Math.min(score, 75), referenceSourceUrl: sourceUrl, referenceEvidence: evidence }
+}
 
 export function fundingAmountDiscoveryScore(value: unknown, currency: unknown, round: unknown): number | null {
   if (currency !== 'CNY' || typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return null
@@ -96,5 +166,5 @@ export function buildProjectDiscoveryScore(input: ScoreInput) {
   const overall = frontier && technology && ready.length >= 3 && sumWeight > 0
     ? Number((ready.reduce((sum, item) => sum + item.score! * weights[item.key], 0) / sumWeight).toFixed(1))
     : null
-  return { overall, coverage: ready.length, dimensions }
+  return { overall, coverage: ready.length, dimensions, ...provisionalReferenceScore(input) }
 }

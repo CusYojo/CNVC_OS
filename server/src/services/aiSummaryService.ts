@@ -1662,7 +1662,10 @@ export async function listLeads(options: {
           'publishedAt', ${jsonValue(leads.sources, '$[0].publishedAt')}),
         JSON_OBJECT('title', LEFT(${jsonText(leads.sources, '$[1].title')}, 240),
           'url', LEFT(COALESCE(${jsonText(leads.sources, '$[1].url')}, ${jsonText(leads.sources, '$[1].sourceUrl')}), 2048),
-          'publishedAt', ${jsonValue(leads.sources, '$[1].publishedAt')})
+          'publishedAt', ${jsonValue(leads.sources, '$[1].publishedAt')}),
+        JSON_OBJECT('title', LEFT(${jsonText(leads.sources, '$[2].title')}, 240),
+          'url', LEFT(COALESCE(${jsonText(leads.sources, '$[2].url')}, ${jsonText(leads.sources, '$[2].sourceUrl')}), 2048),
+          'publishedAt', ${jsonValue(leads.sources, '$[2].publishedAt')})
       )`,
       completeness: completenessExpr,
       investmentProfile: sql<unknown>`CASE WHEN ${leadInvestmentProfileProjections.leadId} IS NULL THEN NULL ELSE COALESCE(
@@ -1767,10 +1770,15 @@ export async function listLeads(options: {
     candidateFactsByLead.set(fact.leadId, [...(candidateFactsByLead.get(fact.leadId) ?? []), fact])
   }
   return {
-    list: rows.map((r) => leadPoolListItem(
-      r as unknown as typeof leads.$inferSelect,
-      candidateFactsByLead.get(r.id) ?? [],
-      { showCandidateData, discoveryScore: options.projectDiscoveryOnly ? buildProjectDiscoveryScore({
+    list: rows.map((r) => {
+      const item = leadPoolListItem(r as unknown as typeof leads.$inferSelect, candidateFactsByLead.get(r.id) ?? [], { showCandidateData })
+      if (!options.projectDiscoveryOnly) return item
+      const sourceUrls = (Array.isArray(r.sources) ? r.sources : [])
+        .map((source) => objectValue(source).url)
+        .filter((url): url is string => typeof url === 'string')
+      const candidate = item.availableData
+      const profile = objectValue(objectValue(r.radarProfile).profile)
+      return { ...item, discoveryScore: buildProjectDiscoveryScore({
         investmentProfileStatus: r.discoveryScoreStaleReason != null ? 'stale' : r.discoveryScoreProfileStatus,
         institutions: r.discoveryScoreInstitutions,
         financing: {
@@ -1779,8 +1787,17 @@ export async function listLeads(options: {
           latestRound: r.discoveryScoreRound,
         },
         ratingV3: objectValue(objectValue(r.scoring).ratingV3),
-      }) : undefined },
-    )),
+        summary: r.summary,
+        sourceUrls: [...sourceUrls,
+          ...item.latestUpdates.map((update) => update.sourceUrl).filter((url): url is string => typeof url === 'string'),
+          typeof item.radarProfile?.link === 'string' ? item.radarProfile.link : undefined],
+        industryTags: candidate?.industryTags,
+        technologies: Array.isArray(profile.coreTechnologies) ? profile.coreTechnologies.filter((value): value is string => typeof value === 'string') : [],
+        teamDescription: typeof profile.teamComposition === 'string' ? profile.teamComposition : r.team,
+        candidateInstitutions: candidate?.institutions,
+        candidateFinancing: candidate?.financing,
+      }) }
+    }),
     ...pagination,
   }
 }
