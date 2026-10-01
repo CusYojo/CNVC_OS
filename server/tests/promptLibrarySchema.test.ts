@@ -11,7 +11,7 @@ test('prompt library has a separate forward-only MySQL table, migration, and sta
   assert.match(schema, /export const promptLibraryItems = mysqlTable\('prompt_library_items'/)
   assert.match(migration, /CREATE TABLE `sbl_prompt_library_items`/)
   assert.match(migration, /`owner_user_id`.*NOT NULL/)
-  assert.equal(journal.entries.at(-1)?.tag, '0132_add_prompt_library_category')
+  assert.equal(journal.entries.find(entry => entry.tag === '0132_add_prompt_library_category')?.idx, 132)
   assert.match(schema, /category: varchar\('category'.*default\('general'\)/)
   assert.match(categoryMigration, /ALTER TABLE `sbl_prompt_library_items` ADD COLUMN `category` varchar\(32\) NOT NULL DEFAULT 'general'/)
   assert.match(migrate, /'prompt_library_items'/)

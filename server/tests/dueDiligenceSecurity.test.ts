@@ -57,7 +57,7 @@ test('listing learning candidates never scans materials or calls the model', asy
   const query = { from() { return this }, where() { return this }, limit: async () => [{ id: 'twin' }], orderBy: async () => [] }
   const handler = route('get', '/twins/:id/learning-candidates', {
     routeId: (id: string) => id, db: { select: () => query }, digitalTwins: table, digitalTwinLearningCandidates: table,
-    eq: () => true, and: () => true, desc: () => true, learningCandidateAccessCondition: () => true,
+    eq: () => true, and: () => true, desc: () => true, isNull: () => true, learningCandidateAccessCondition: () => true,
     scanExperienceMaterials: () => { throw new Error('GET performed a write') },
     synthesizeRuleCandidates: () => { throw new Error('GET performed a write') },
     enrichExperienceEventsWithModel: () => { throw new Error('GET called a model') },
@@ -106,7 +106,9 @@ test('baseline generation excludes restricted and recycled files before reading 
 
 test('learning remains an explicit POST action from the workspace', () => {
   const ui = readFileSync(new URL('../../src/pages/DueDiligencePage.tsx', import.meta.url), 'utf8')
-  assert.match(ui, /apiPost<\{ created: number \}>\(`\/due-diligence\/twins\/\$\{twinDraft.id\}\/learning\/scan`\)/)
+  const workspace = readFileSync(new URL('../../src/components/dueDiligence/ExperienceAssetsWorkspace.tsx', import.meta.url), 'utf8')
+  assert.match(ui, /apiPost<\{ created: number \}>\(`\/due-diligence\/twins\/\$\{selectedTwin.id\}\/learning\/scan`\)/)
+  assert.match(workspace, /onScanLearning/)
   assert.match(text, /dueDiligenceRouter.post\('\/twins\/:id\/learning\/scan'/)
 })
 

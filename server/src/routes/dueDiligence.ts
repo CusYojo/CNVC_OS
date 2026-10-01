@@ -1,10 +1,10 @@
-import { and, asc, desc, eq, inArray, isNull, or, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNotNull, isNull, or, sql } from 'drizzle-orm'
 import { createHash, randomUUID } from 'node:crypto'
 import { AlignmentType, Document, Packer, Paragraph, Table, TableCell, TableRow, TextRun, WidthType } from 'docx'
 import { Router } from 'express'
 import { z } from 'zod'
 import { db } from '../db/client.js'
-import { auditLogs, companyKnowledge, digitalTwinAssetArchives, digitalTwinConversations, digitalTwinExperienceEvents, digitalTwinInvocationLogs, digitalTwinLearningCandidates, digitalTwinPublications, digitalTwinSkills, digitalTwinSkillVersions, digitalTwinUpdateCandidates, digitalTwins, digitalTwinVersions, dueDiligenceInterviewArtifacts, dueDiligenceInterviewPrompts, dueDiligenceInterviewTranscripts, dueDiligenceInterviews, dueDiligenceQuestionEvidence, dueDiligenceQuestionPacks, dueDiligenceQuestions, personalNotes, projectFiles, projectMembers, projects, risks, users } from '../db/schema.js'
+import { auditLogs, companyKnowledge, digitalTwinAssetArchives, digitalTwinConversations, digitalTwinExperienceEvents, digitalTwinInvocationLogs, digitalTwinLearningCandidates, digitalTwinPrivateAssets, digitalTwinPublications, digitalTwinSkillImports, digitalTwinSkills, digitalTwinSkillVersions, digitalTwinUpdateCandidates, digitalTwins, digitalTwinVersions, dueDiligenceInterviewArtifacts, dueDiligenceInterviewPrompts, dueDiligenceInterviewTranscripts, dueDiligenceInterviews, dueDiligenceQuestionEvidence, dueDiligenceQuestionPacks, dueDiligenceQuestions, dueDiligenceTranscriptionJobs, personalNotes, projectFiles, projectMembers, projects, risks, users } from '../db/schema.js'
 import type { AuthedRequest } from '../middleware/requireAuth.js'
 import { projectAccessCondition, requireAccessibleProject } from '../services/projectAccessService.js'
 import { canReadAllProjectFiles, projectFileAccessCondition, projectSummaryFileAccessCondition, requireProjectFileAccess } from '../services/projectFileAccessService.js'
@@ -12,10 +12,26 @@ import { parseShanghaiDateTime } from '../utils/shanghaiTime.js'
 import { createConversation } from '../services/conversationService.js'
 import { fetchAiGatewayChatCompatible } from '../services/aiGatewayService.js'
 import { resolveDueDiligenceModelRuntime } from '../services/aiDueDiligenceSkillRuntimeService.js'
+import { getDueDiligenceAsrCapability, transcribeDueDiligenceBuffer, transcribeDueDiligenceRecording } from '../services/dueDiligenceAsrService.js'
+import { readDigitalTwinPrivateAsset, saveDigitalTwinPrivateAsset } from '../services/digitalTwinPrivateAssetStorageService.js'
+import { resolveAiModelRoute } from '../services/aiModelSettingsService.js'
 
 export const dueDiligenceRouter = Router()
+const DUE_DILIGENCE_API_VERSION = 2
+const DUE_DILIGENCE_SCHEMA_VERSION = '0134_add_twin_avatars_and_skill_library'
 const routeId = (value: string | string[]) => z.string().uuid().parse(value)
 const actor = (req: AuthedRequest) => ({ userId: req.user!.uid, userName: req.user!.name })
+const avatarPresets = new Set(['fox', 'owl', 'panda', 'otter', 'cat', 'penguin'])
+function avatarData(value?: string | null) {
+  if (!value) return null
+  const match = /^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=]+)$/.exec(value)
+  if (!match) throw Object.assign(new Error('头像只支持 PNG、JPEG 或 WebP 图片'), { status: 400, code: 'INVALID_AVATAR' })
+  const buffer = Buffer.from(match[2], 'base64')
+  if (!buffer.length || buffer.length > 2 * 1024 * 1024) throw Object.assign(new Error('头像大小不能超过 2MB'), { status: 400, code: 'AVATAR_TOO_LARGE' })
+  const png = buffer.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])); const jpeg = buffer.subarray(0, 3).equals(Buffer.from([255, 216, 255])); const webp = buffer.subarray(0, 4).toString() === 'RIFF' && buffer.subarray(8, 12).toString() === 'WEBP'
+  if (!(png || jpeg || webp)) throw Object.assign(new Error('头像文件格式与声明不一致'), { status: 400, code: 'INVALID_AVATAR' })
+  return { buffer, mimeType: match[1] }
+}
 
 async function audit(req: AuthedRequest, action: string, target: string) {
   const current = actor(req)
@@ -40,7 +56,7 @@ function learningProjectAccessCondition(userId: string) {
 
 function learningCandidateAccessCondition(userId: string) {
   return and(
-    inArray(digitalTwinLearningCandidates.projectId, db.select({ id: projects.id }).from(projects).where(learningProjectAccessCondition(userId))),
+    or(isNull(digitalTwinLearningCandidates.projectId), inArray(digitalTwinLearningCandidates.projectId, db.select({ id: projects.id }).from(projects).where(learningProjectAccessCondition(userId)))),
     or(isNull(digitalTwinLearningCandidates.sourceFileId), inArray(digitalTwinLearningCandidates.sourceFileId, db.select({ id: projectFiles.id }).from(projectFiles).where(projectFileAccessCondition(userId)))),
   )
 }
@@ -76,9 +92,38 @@ const QuestionPatchSchema = QuestionSchema.partial().extend({ expectedVersion: z
 const InterviewSchema = z.object({
   title: z.string().trim().min(1).max(255), mode: z.enum(['现场', '远程']).default('现场'), status: z.enum(['筹备中', '进行中', '已结束']).default('筹备中'),
   scheduledAt: z.string().min(1).nullable().optional(), agenda: z.string().trim().max(8000).optional().default(''), notes: z.string().max(30000).optional().default(''), summary: z.string().max(12000).optional().default(''),
+  summaryTranscriptVersion: z.number().int().positive().nullable().optional(),
   counterparty: z.string().trim().max(255).optional().default(''), location: z.string().trim().max(512).optional().default(''), participantNames: z.array(z.string().trim().min(1).max(64)).max(30).optional().default([]),
 })
 const InterviewPatchSchema = InterviewSchema.partial().extend({ expectedVersion: z.number().int().positive() }).strict()
+
+dueDiligenceRouter.get('/capabilities', async (req: AuthedRequest, res) => {
+  const role = req.user!.role
+  const [documentModel, interactiveModel, transcriptionSchemaReady, twinSchemaReady, assetSchemaReady, skillSchemaReady] = await Promise.all([
+    resolveAiModelRoute('ai-document', role).catch(() => null),
+    resolveAiModelRoute('interactive-assistant', role).catch(() => null),
+    db.select({ id: dueDiligenceTranscriptionJobs.id }).from(dueDiligenceTranscriptionJobs).limit(1).then(() => true).catch(() => false),
+    db.select({ clientRequestId: digitalTwins.clientRequestId, learningTargetAt: digitalTwins.learningTargetAt, avatarKind: digitalTwins.avatarKind }).from(digitalTwins).limit(1).then(() => true).catch(() => false),
+    db.select({ id: digitalTwinPrivateAssets.id }).from(digitalTwinPrivateAssets).limit(1).then(() => true).catch(() => false),
+    db.select({ id: digitalTwinSkillImports.id }).from(digitalTwinSkillImports).limit(1).then(() => true).catch(() => false),
+  ])
+  const migrationReady = transcriptionSchemaReady && twinSchemaReady && assetSchemaReady && skillSchemaReady
+  res.json({
+    apiVersion: DUE_DILIGENCE_API_VERSION,
+    database: { ready: migrationReady, migration: DUE_DILIGENCE_SCHEMA_VERSION },
+    models: {
+      document: { ready: Boolean(documentModel), model: documentModel?.model ?? null },
+      interactive: { ready: Boolean(interactiveModel), model: interactiveModel?.model ?? null },
+    },
+    asr: getDueDiligenceAsrCapability(),
+    fileParsing: { ready: true },
+  })
+})
+// Auth and CSRF middleware run before this route. A successful response proves
+// that the browser origin can safely perform writes without changing data.
+dueDiligenceRouter.post('/capabilities/write-probe', async (_req: AuthedRequest, res) => {
+  res.json({ ok: true, apiVersion: DUE_DILIGENCE_API_VERSION, schemaVersion: DUE_DILIGENCE_SCHEMA_VERSION })
+})
 
 dueDiligenceRouter.get('/projects/:projectId/members', async (req: AuthedRequest, res, next) => {
   try { const projectId = routeId(req.params.projectId); await requireDueDiligenceProject(req.user!.uid, projectId); res.json({ list: await db.select({ id: users.id, name: users.name, role: projectMembers.memberRole }).from(projectMembers).innerJoin(users, eq(users.id, projectMembers.userId)).where(and(eq(projectMembers.projectId, projectId), eq(users.status, '启用'))).orderBy(users.name) }) } catch (error) { next(error) }
@@ -169,16 +214,16 @@ function buildBaselineQuestions(project: { industry: string | null; summary: str
   return [...STANDARD_QUESTIONS, ...rules]
 }
 
-async function persistQuestionPack(input: { projectId: string; userId: string; title: string; sourceFileIds: string[]; questions: GeneratedQuestion[]; generationMode: 'baseline' | 'ai'; modelStatus: string; warning?: string | null; publications?: Array<{ id: string; name: string }>; projectName: string }) {
+async function persistQuestionPack(input: { projectId: string; userId: string; title: string; sourceFileIds: string[]; questions: GeneratedQuestion[]; generationMode: 'baseline' | 'ai'; modelStatus: string; modelProfile?: string | null; modelName?: string | null; warning?: string | null; publications?: Array<{ id: string; name: string }>; projectName: string }) {
   const id = randomUUID(); const priorityRank = { 高: 0, 中: 1, 低: 2 }; const seen = new Set<string>(); const ordered = input.questions.filter(question => { const key = question.title.replace(/[\s，。！？、]/g, ''); if (seen.has(key)) return false; seen.add(key); return true }).sort((a, b) => priorityRank[a.priority] - priorityRank[b.priority])
   let created = 0
   await db.transaction(async tx => {
-    await tx.insert(dueDiligenceQuestionPacks).values({ id, projectId: input.projectId, createdBy: input.userId, title: input.title, templateVersion: QUESTION_TEMPLATE_VERSION, generationMode: input.generationMode, modelStatus: input.modelStatus, warning: input.warning ?? null, sourceFileIds: input.sourceFileIds, questions: ordered })
+    await tx.insert(dueDiligenceQuestionPacks).values({ id, projectId: input.projectId, createdBy: input.userId, title: input.title, templateVersion: QUESTION_TEMPLATE_VERSION, generationMode: input.generationMode, modelStatus: input.modelStatus, modelProfile: input.modelProfile ?? null, modelName: input.modelName ?? null, warning: input.warning ?? null, sourceFileIds: input.sourceFileIds, questions: ordered })
     const existing = await tx.select({ title: dueDiligenceQuestions.title }).from(dueDiligenceQuestions).where(eq(dueDiligenceQuestions.projectId, input.projectId)); const existingTitles = new Set(existing.map(item => item.title.replace(/[\s，。！？、]/g, ''))); const additions = ordered.filter(question => !existingTitles.has(question.title.replace(/[\s，。！？、]/g, ''))); created = additions.length
     if (additions.length) await tx.insert(dueDiligenceQuestions).values(additions.map((question, index) => ({ id: randomUUID(), projectId: input.projectId, title: question.title, category: question.category, priority: question.priority, evidenceRequirement: question.evidenceRequirement, attentionSource: question.attentionSource, source: question.sourceKind || (input.generationMode === 'ai' ? 'AI生成' : '标准模板'), sortOrder: existing.length + index + 1, createdBy: input.userId, fileId: input.sourceFileIds[0] ?? null })))
-    if (input.publications?.length) await tx.insert(digitalTwinInvocationLogs).values(input.publications.map(item => ({ id: randomUUID(), publicationId: item.id, callerUserId: input.userId, projectId: input.projectId, usage: '问题清单生成', inputSummary: `项目：${input.projectName}`, outputSummary: `生成 ${ordered.length} 条问题` })))
+    if (input.publications?.length) await tx.insert(digitalTwinInvocationLogs).values(input.publications.map(item => ({ id: randomUUID(), publicationId: item.id, callerUserId: input.userId, projectId: input.projectId, usage: '问题清单生成', inputSummary: `项目：${input.projectName}`, outputSummary: `生成 ${ordered.length} 条问题`, modelProfile: input.modelProfile ?? null, modelName: input.modelName ?? null, modelStatus: input.modelStatus })))
   })
-  return { id, projectId: input.projectId, title: input.title, sourceFileIds: input.sourceFileIds, questions: ordered, templateVersion: QUESTION_TEMPLATE_VERSION, generationMode: input.generationMode, modelStatus: input.modelStatus, warning: input.warning ?? null, created }
+  return { id, projectId: input.projectId, title: input.title, sourceFileIds: input.sourceFileIds, questions: ordered, templateVersion: QUESTION_TEMPLATE_VERSION, generationMode: input.generationMode, modelStatus: input.modelStatus, modelProfile: input.modelProfile ?? null, modelName: input.modelName ?? null, warning: input.warning ?? null, created }
 }
 
 async function generateQuestionPack(projectId: string, userId: string, body: z.infer<typeof QuestionPackGenerateSchema>, role: string) {
@@ -189,7 +234,7 @@ async function generateQuestionPack(projectId: string, userId: string, body: z.i
   const chosen = body.fileIds.length ? files.filter(file => body.fileIds.includes(file.id)) : files
   const selected = chosen.filter(file => file.parseStatus === '成功' && file.contentText?.trim())
   const baseline = buildBaselineQuestions(project, chosen)
-  const publications = body.publicationIds.length ? await db.select({ id: digitalTwinPublications.id, ownerName: users.name, version: digitalTwinPublications.publishedVersion, introduction: digitalTwinPublications.introduction, rules: digitalTwinPublications.publicRules, cases: digitalTwinPublications.publicCases, industryTags: digitalTwinPublications.industryTags, capabilityTags: digitalTwinPublications.capabilityTags }).from(digitalTwinPublications).innerJoin(users, eq(users.id, digitalTwinPublications.ownerUserId)).where(and(inArray(digitalTwinPublications.id, body.publicationIds), eq(digitalTwinPublications.status, '已发布'))) : []
+  const publications = body.publicationIds.length ? await db.select({ id: digitalTwinPublications.id, ownerName: users.name, version: digitalTwinPublications.publishedVersion, introduction: digitalTwinPublications.introduction, rules: digitalTwinPublications.publicRules, cases: digitalTwinPublications.publicCases, industryTags: digitalTwinPublications.industryTags, capabilityTags: digitalTwinPublications.capabilityTags }).from(digitalTwinPublications).innerJoin(digitalTwins, eq(digitalTwins.id, digitalTwinPublications.twinId)).innerJoin(users, eq(users.id, digitalTwinPublications.ownerUserId)).where(and(inArray(digitalTwinPublications.id, body.publicationIds), eq(digitalTwinPublications.status, '已发布'), isNull(digitalTwins.deletedAt))) : []
   if (publications.length !== body.publicationIds.length) throw Object.assign(new Error('所选公司分身已撤回或不存在，请刷新后重试'), { status: 409, code: 'TWIN_PUBLICATION_UNAVAILABLE' })
   const publicationRefs = publications.map(item => ({ id: item.id, name: item.ownerName }))
   const fallback = (warning: string, modelStatus = '未调用') => persistQuestionPack({ projectId, userId, title: body.title || `${project.name}尽调问题清单`, sourceFileIds: chosen.map(file => file.id), questions: baseline, generationMode: 'baseline', modelStatus, warning, projectName: project.name })
@@ -216,7 +261,7 @@ async function generateQuestionPack(projectId: string, userId: string, body: z.i
       const validPublicationIds = question.publicationIds.filter(value => publicationMap.has(value))
       return { ...question, publicationIds: validPublicationIds, attentionSource: validPublicationIds.map(value => publicationMap.get(value)).join('；') || '项目材料分析', sourceKind: validPublicationIds.length ? '专家分身' : '项目材料分析' }
     })
-    return persistQuestionPack({ projectId, userId, title: body.title || output.title, sourceFileIds: selected.map(file => file.id), questions: [...baseline, ...enhanced], generationMode: 'ai', modelStatus: '可用', publications: publicationRefs, projectName: project.name })
+    return persistQuestionPack({ projectId, userId, title: body.title || output.title, sourceFileIds: selected.map(file => file.id), questions: [...baseline, ...enhanced], generationMode: 'ai', modelStatus: '可用', modelProfile: runtime.profile, modelName: runtime.model, publications: publicationRefs, projectName: project.name })
   } catch (error) {
     const message = error instanceof Error ? error.message : '未知错误'
     return fallback(`智能增强暂不可用，已使用标准清单：${message.slice(0, 160)}`, '不可用')
@@ -293,7 +338,7 @@ dueDiligenceRouter.delete('/projects/:projectId/interviews/:id', async (req: Aut
 })
 
 const InterviewArtifactSchema = z.object({ fileId: z.string().uuid(), kind: z.enum(['项目材料', '录音', '转写', '纪要']), source: z.enum(['browser', 'provider', 'manual']).default('manual'), durationSeconds: z.number().int().min(0).max(86_400).nullable().optional() })
-const TranscriptSchema = z.object({ content: z.string().max(200_000), source: z.enum(['browser', 'provider', 'manual']).default('browser'), status: z.enum(['草稿', '已确认']).default('草稿') })
+const TranscriptSchema = z.object({ content: z.string().max(200_000), source: z.enum(['browser', 'provider', 'manual']).default('browser'), status: z.enum(['草稿', '已确认']).default('草稿'), expectedVersion: z.number().int().positive().nullable().optional() })
 
 async function requireInterview(projectId: string, interviewId: string) {
   const [interview] = await db.select().from(dueDiligenceInterviews).where(and(eq(dueDiligenceInterviews.id, interviewId), eq(dueDiligenceInterviews.projectId, projectId))).limit(1)
@@ -326,11 +371,13 @@ dueDiligenceRouter.delete('/projects/:projectId/interviews/:id/artifacts/:artifa
 dueDiligenceRouter.put('/projects/:projectId/interviews/:id/transcript', async (req: AuthedRequest, res, next) => {
   try {
     const projectId = routeId(req.params.projectId); const interviewId = routeId(req.params.id); await requireDueDiligenceProject(req.user!.uid, projectId); await requireInterview(projectId, interviewId)
-    const body = TranscriptSchema.parse(req.body)
+    const { expectedVersion, ...body } = TranscriptSchema.parse(req.body)
     const [current] = await db.select().from(dueDiligenceInterviewTranscripts).where(eq(dueDiligenceInterviewTranscripts.interviewId, interviewId)).limit(1)
     if (current) {
+      if (expectedVersion !== undefined && expectedVersion !== null && expectedVersion !== current.version) throw Object.assign(new Error('转写稿已在其他页面更新，请刷新并合并后重试'), { status: 409, code: 'TRANSCRIPT_VERSION_CONFLICT' })
       await db.update(dueDiligenceInterviewTranscripts).set({ ...body, version: sql`${dueDiligenceInterviewTranscripts.version} + 1`, updatedAt: new Date() }).where(eq(dueDiligenceInterviewTranscripts.id, current.id))
     } else {
+      if (expectedVersion) throw Object.assign(new Error('转写稿版本已变化，请刷新后重试'), { status: 409, code: 'TRANSCRIPT_VERSION_CONFLICT' })
       await db.insert(dueDiligenceInterviewTranscripts).values({ id: randomUUID(), interviewId, ...body, createdBy: req.user!.uid })
     }
     const [row] = await db.select().from(dueDiligenceInterviewTranscripts).where(eq(dueDiligenceInterviewTranscripts.interviewId, interviewId)).limit(1)
@@ -341,15 +388,70 @@ dueDiligenceRouter.put('/projects/:projectId/interviews/:id/transcript', async (
 dueDiligenceRouter.post('/projects/:projectId/interviews/:id/summary/generate', async (req: AuthedRequest, res, next) => {
   try {
     const projectId = routeId(req.params.projectId); const interviewId = routeId(req.params.id); await requireDueDiligenceProject(req.user!.uid, projectId); const interview = await requireInterview(projectId, interviewId)
+    const { transcriptVersion } = z.object({ transcriptVersion: z.number().int().positive() }).parse(req.body)
     const [transcript] = await db.select().from(dueDiligenceInterviewTranscripts).where(eq(dueDiligenceInterviewTranscripts.interviewId, interviewId)).limit(1)
     if (!transcript?.content.trim()) throw Object.assign(new Error('请先保存至少一段访谈转写'), { status: 400, code: 'EMPTY_TRANSCRIPT' })
+    if (transcript.version !== transcriptVersion) throw Object.assign(new Error('转写稿已更新，请基于最新版本重新生成纪要'), { status: 409, code: 'TRANSCRIPT_VERSION_CONFLICT' })
     let response: Response
     try { const runtime = await resolveDueDiligenceModelRuntime(req.user!.role); response = await fetchAiGatewayChatCompatible(runtime.baseUrl, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(runtime.apiKey ? { Authorization: `Bearer ${runtime.apiKey}` } : {}) }, body: JSON.stringify({ model: runtime.model, max_tokens: 4000, messages: [{ role: 'system', content: '你是股权投资尽调助理。仅根据转写整理简洁访谈纪要，按“确认事实、待核验事项、风险提示”输出；不得编造。' }, { role: 'user', content: `访谈：${interview.title}\n转写：\n${transcript.content.slice(0, 60000)}` }] }), signal: AbortSignal.timeout(120_000) }, fetch, 120_000) } catch (error) { throw Object.assign(new Error('模型服务暂不可用，转写已保留，可稍后再生成纪要。'), { status: 503, code: 'AI_GATEWAY_UNAVAILABLE', cause: error }) }
     if (!response.ok) throw Object.assign(new Error(`纪要生成失败（HTTP ${response.status}）`), { status: 502, code: 'MODEL_UNAVAILABLE' })
     const summary = ((await response.json()) as { choices?: Array<{ message?: { content?: string } }> }).choices?.[0]?.message?.content?.trim()
     if (!summary) throw Object.assign(new Error('模型未返回可用纪要'), { status: 502, code: 'MODEL_INVALID_OUTPUT' })
-    await audit(req, '生成访谈纪要', interview.title); res.json({ summary })
+    await audit(req, '生成访谈纪要', interview.title); res.json({ summary, transcriptVersion, modelStatus: '可用' })
   } catch (error) { next(error) }
+})
+
+function recordingMimeType(file: { type: string; name: string }) {
+  const value = `${file.type} ${file.name}`.toLowerCase()
+  if (value.includes('m4a') || value.includes('mp4')) return 'audio/mp4'
+  if (value.includes('wav')) return 'audio/wav'
+  if (value.includes('mpeg') || value.includes('mp3')) return 'audio/mpeg'
+  return 'audio/webm'
+}
+
+async function processTranscriptionJob(jobId: string) {
+  const [job] = await db.select().from(dueDiligenceTranscriptionJobs).where(eq(dueDiligenceTranscriptionJobs.id, jobId)).limit(1)
+  if (!job) return
+  const [file] = await db.select({ name: projectFiles.name, type: projectFiles.type, storagePath: projectFiles.storagePath }).from(projectFiles).where(eq(projectFiles.id, job.recordingFileId)).limit(1)
+  if (!file?.storagePath) {
+    await db.update(dueDiligenceTranscriptionJobs).set({ status: '失败', errorMessage: '录音原文件不存在', attempts: sql`${dueDiligenceTranscriptionJobs.attempts} + 1`, updatedAt: new Date() }).where(eq(dueDiligenceTranscriptionJobs.id, jobId))
+    return
+  }
+  await db.update(dueDiligenceTranscriptionJobs).set({ status: '转写中', errorMessage: null, attempts: sql`${dueDiligenceTranscriptionJobs.attempts} + 1`, updatedAt: new Date() }).where(eq(dueDiligenceTranscriptionJobs.id, jobId))
+  try {
+    const result = await transcribeDueDiligenceRecording({ storagePath: file.storagePath, fileName: file.name, mimeType: recordingMimeType(file) })
+    await db.update(dueDiligenceTranscriptionJobs).set({ status: '待合并', provider: `${result.provider}/${result.model}`, providerText: result.text, mergedText: [job.browserText.trim(), result.text].filter(Boolean).join('\n\n'), errorMessage: null, updatedAt: new Date() }).where(eq(dueDiligenceTranscriptionJobs.id, jobId))
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '后台转写失败'
+    await db.update(dueDiligenceTranscriptionJobs).set({ status: message.includes('未配置') ? '未配置' : '失败', errorMessage: message.slice(0, 1000), updatedAt: new Date() }).where(eq(dueDiligenceTranscriptionJobs.id, jobId))
+  }
+}
+
+dueDiligenceRouter.post('/projects/:projectId/interviews/:id/transcriptions', async (req: AuthedRequest, res, next) => {
+  try {
+    const projectId = routeId(req.params.projectId); const interviewId = routeId(req.params.id)
+    await requireDueDiligenceProject(req.user!.uid, projectId); await requireInterview(projectId, interviewId)
+    const body = z.object({ recordingFileId: z.string().uuid(), browserText: z.string().max(200_000).default(''), sourceTranscriptVersion: z.number().int().positive().nullable().optional() }).parse(req.body)
+    const file = await requireProjectFileAccess(db, body.recordingFileId, req.user!.uid)
+    if (file.projectId !== projectId) throw Object.assign(new Error('录音文件不属于当前项目'), { status: 400, code: 'INVALID_RECORDING_FILE' })
+    const [artifact] = await db.select({ id: dueDiligenceInterviewArtifacts.id }).from(dueDiligenceInterviewArtifacts).where(and(eq(dueDiligenceInterviewArtifacts.interviewId, interviewId), eq(dueDiligenceInterviewArtifacts.fileId, body.recordingFileId), eq(dueDiligenceInterviewArtifacts.kind, '录音'))).limit(1)
+    if (!artifact) throw Object.assign(new Error('请先将录音归档到当前访谈'), { status: 400, code: 'RECORDING_NOT_ARCHIVED' })
+    const [existing] = await db.select().from(dueDiligenceTranscriptionJobs).where(and(eq(dueDiligenceTranscriptionJobs.interviewId, interviewId), eq(dueDiligenceTranscriptionJobs.recordingFileId, body.recordingFileId))).limit(1)
+    const jobId = existing?.id ?? randomUUID()
+    if (existing) await db.update(dueDiligenceTranscriptionJobs).set({ browserText: body.browserText, sourceTranscriptVersion: body.sourceTranscriptVersion ?? null, status: '待处理', errorMessage: null, updatedAt: new Date() }).where(eq(dueDiligenceTranscriptionJobs.id, jobId))
+    else await db.insert(dueDiligenceTranscriptionJobs).values({ id: jobId, interviewId, recordingFileId: body.recordingFileId, browserText: body.browserText, sourceTranscriptVersion: body.sourceTranscriptVersion ?? null, createdBy: req.user!.uid, status: getDueDiligenceAsrCapability().configured ? '待处理' : '未配置' })
+    if (getDueDiligenceAsrCapability().configured) void processTranscriptionJob(jobId)
+    const [row] = await db.select().from(dueDiligenceTranscriptionJobs).where(eq(dueDiligenceTranscriptionJobs.id, jobId)).limit(1)
+    await audit(req, '创建访谈后台转写任务', interviewId); res.status(existing ? 200 : 201).json(row)
+  } catch (error) { next(error) }
+})
+
+dueDiligenceRouter.get('/projects/:projectId/interviews/:id/transcriptions', async (req: AuthedRequest, res, next) => {
+  try { const projectId = routeId(req.params.projectId); const interviewId = routeId(req.params.id); await requireDueDiligenceProject(req.user!.uid, projectId); await requireInterview(projectId, interviewId); res.json({ list: await db.select().from(dueDiligenceTranscriptionJobs).where(eq(dueDiligenceTranscriptionJobs.interviewId, interviewId)).orderBy(desc(dueDiligenceTranscriptionJobs.createdAt)) }) } catch (error) { next(error) }
+})
+
+dueDiligenceRouter.post('/projects/:projectId/interviews/:id/transcriptions/:jobId/retry', async (req: AuthedRequest, res, next) => {
+  try { const projectId = routeId(req.params.projectId); const interviewId = routeId(req.params.id); const jobId = routeId(req.params.jobId); await requireDueDiligenceProject(req.user!.uid, projectId); await requireInterview(projectId, interviewId); const [job] = await db.select().from(dueDiligenceTranscriptionJobs).where(and(eq(dueDiligenceTranscriptionJobs.id, jobId), eq(dueDiligenceTranscriptionJobs.interviewId, interviewId))).limit(1); if (!job) throw Object.assign(new Error('转写任务不存在'), { status: 404, code: 'NOT_FOUND' }); if (!getDueDiligenceAsrCapability().configured) throw Object.assign(new Error('未配置后台转写服务'), { status: 503, code: 'ASR_NOT_CONFIGURED' }); await db.update(dueDiligenceTranscriptionJobs).set({ status: '待处理', errorMessage: null, updatedAt: new Date() }).where(eq(dueDiligenceTranscriptionJobs.id, jobId)); void processTranscriptionJob(jobId); res.json({ ok: true }) } catch (error) { next(error) }
 })
 
 dueDiligenceRouter.get('/projects/:projectId/interviews/:id/export/:kind', async (req: AuthedRequest, res, next) => {
@@ -399,18 +501,53 @@ dueDiligenceRouter.patch('/projects/:projectId/interviews/:id/prompts/:promptId'
 
 const PublicationSchema = z.object({ introduction: z.string().trim().min(1).max(1000), publicRules: z.string().trim().min(1).max(12000), publicCases: z.string().trim().max(12000).default(''), industryTags: z.array(z.string().trim().min(1).max(32)).max(12).default([]), capabilityTags: z.array(z.string().trim().min(1).max(32)).max(12).default([]) })
 dueDiligenceRouter.get('/twin-directory', async (req: AuthedRequest, res, next) => {
-  try { const list = await db.select({ id: digitalTwinPublications.id, twinId: digitalTwinPublications.twinId, ownerUserId: digitalTwinPublications.ownerUserId, ownerName: users.name, role: users.role, department: users.department, publishedVersion: digitalTwinPublications.publishedVersion, introduction: digitalTwinPublications.introduction, publicRules: digitalTwinPublications.publicRules, publicCases: digitalTwinPublications.publicCases, industryTags: digitalTwinPublications.industryTags, capabilityTags: digitalTwinPublications.capabilityTags, publishedAt: digitalTwinPublications.publishedAt }).from(digitalTwinPublications).innerJoin(users, eq(users.id, digitalTwinPublications.ownerUserId)).where(eq(digitalTwinPublications.status, '已发布')).orderBy(users.name); res.json({ list }) } catch (error) { next(error) }
+  try { const list = await db.select({ id: digitalTwinPublications.id, twinId: digitalTwinPublications.twinId, twinName: digitalTwins.name, ownerUserId: digitalTwinPublications.ownerUserId, ownerName: users.name, role: users.role, department: users.department, avatarKind: digitalTwinPublications.avatarKind, avatarPreset: digitalTwinPublications.avatarPreset, publishedVersion: digitalTwinPublications.publishedVersion, introduction: digitalTwinPublications.introduction, publicRules: digitalTwinPublications.publicRules, publicCases: digitalTwinPublications.publicCases, industryTags: digitalTwinPublications.industryTags, capabilityTags: digitalTwinPublications.capabilityTags, publishedAt: digitalTwinPublications.publishedAt }).from(digitalTwinPublications).innerJoin(digitalTwins, eq(digitalTwins.id, digitalTwinPublications.twinId)).innerJoin(users, eq(users.id, digitalTwinPublications.ownerUserId)).where(and(eq(digitalTwinPublications.status, '已发布'), isNull(digitalTwins.deletedAt))).orderBy(users.name); res.json({ list }) } catch (error) { next(error) }
 })
 dueDiligenceRouter.post('/twin-directory/:id/invoke', async (req: AuthedRequest, res, next) => {
-  try { const id = routeId(req.params.id); const body = z.object({ projectId: z.string().uuid().nullable().optional(), question: z.string().trim().min(1).max(4000) }).parse(req.body); if (body.projectId) await requireAccessibleProject(req.user!.uid, body.projectId); const [publication] = await db.select({ id: digitalTwinPublications.id, ownerName: users.name, version: digitalTwinPublications.publishedVersion, introduction: digitalTwinPublications.introduction, rules: digitalTwinPublications.publicRules, cases: digitalTwinPublications.publicCases }).from(digitalTwinPublications).innerJoin(users, eq(users.id, digitalTwinPublications.ownerUserId)).where(and(eq(digitalTwinPublications.id, id), eq(digitalTwinPublications.status, '已发布'))).limit(1); if (!publication) throw Object.assign(new Error('公司分身已撤回或不存在'), { status: 404, code: 'TWIN_PUBLICATION_UNAVAILABLE' }); const advice = `【${publication.ownerName}分身 v${publication.version}】\n公开关注点：${publication.rules}\n适用边界：${publication.cases || '未设置'}\n\n针对你的问题“${body.question}”，请优先按上述公开关注点核验事实、证据和反证。数字分身建议不替代负责人判断。`; await db.insert(digitalTwinInvocationLogs).values({ id: randomUUID(), publicationId: id, callerUserId: req.user!.uid, projectId: body.projectId ?? null, usage: '直接调用', inputSummary: body.question.slice(0, 1000), outputSummary: advice.slice(0, 2000) }); await audit(req, '调用公司数字分身', publication.ownerName); res.json({ advice, ownerName: publication.ownerName, version: publication.version }) } catch (error) { next(error) }
+  try {
+    const id = routeId(req.params.id); const body = z.object({ projectId: z.string().uuid().nullable().optional(), question: z.string().trim().min(1).max(4000) }).parse(req.body)
+    if (body.projectId) await requireAccessibleProject(req.user!.uid, body.projectId)
+    const [publication] = await db.select({ id: digitalTwinPublications.id, ownerName: users.name, version: digitalTwinPublications.publishedVersion, introduction: digitalTwinPublications.introduction, rules: digitalTwinPublications.publicRules, cases: digitalTwinPublications.publicCases }).from(digitalTwinPublications).innerJoin(digitalTwins, eq(digitalTwins.id, digitalTwinPublications.twinId)).innerJoin(users, eq(users.id, digitalTwinPublications.ownerUserId)).where(and(eq(digitalTwinPublications.id, id), eq(digitalTwinPublications.status, '已发布'), isNull(digitalTwins.deletedAt))).limit(1)
+    if (!publication) throw Object.assign(new Error('公司分身已撤回或不存在'), { status: 404, code: 'TWIN_PUBLICATION_UNAVAILABLE' })
+    let runtime: Awaited<ReturnType<typeof resolveDueDiligenceModelRuntime>> | null = null
+    let advice = ''
+    try {
+      runtime = await resolveDueDiligenceModelRuntime(req.user!.role, 'interactive-assistant')
+      const response = await fetchAiGatewayChatCompatible(runtime.baseUrl, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(runtime.apiKey ? { Authorization: `Bearer ${runtime.apiKey}` } : {}) }, body: JSON.stringify({ model: runtime.model, max_tokens: 2000, messages: [{ role: 'system', content: `你是${publication.ownerName}已公开的投资数字分身。只能依据以下公开内容回答，不得推测或调用任何私有案例、材料和未发布规则。\n简介：${publication.introduction}\n公开关注点：${publication.rules}\n公开适用边界：${publication.cases || '未设置'}\n回答应区分事实、建议和待核验事项，结尾注明“数字分身建议，不替代负责人判断”。` }, { role: 'user', content: body.question }] }), signal: AbortSignal.timeout(120_000) }, fetch, 120_000)
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      advice = ((await response.json()) as { choices?: Array<{ message?: { content?: string } }> }).choices?.[0]?.message?.content?.trim() || ''
+      if (!advice) throw new Error('模型未返回可用回答')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '未知错误'
+      const [failedLog] = await db.insert(digitalTwinInvocationLogs).values({ id: randomUUID(), publicationId: id, callerUserId: req.user!.uid, projectId: body.projectId ?? null, usage: '公开分身对话', inputSummary: body.question.slice(0, 1000), outputSummary: `调用失败：${message}`.slice(0, 2000), modelProfile: runtime?.profile ?? 'interactive-assistant', modelName: runtime?.model ?? null, modelStatus: '不可用' }).$returningId()
+      await audit(req, '调用公司数字分身失败', `${publication.ownerName}：${failedLog.id}`)
+      throw Object.assign(new Error(`公司分身模型暂不可用：${message}`), { status: 503, code: 'TWIN_MODEL_UNAVAILABLE' })
+    }
+    if (!runtime) throw Object.assign(new Error('公司分身模型暂不可用'), { status: 503, code: 'TWIN_MODEL_UNAVAILABLE' })
+    const [log] = await db.insert(digitalTwinInvocationLogs).values({ id: randomUUID(), publicationId: id, callerUserId: req.user!.uid, projectId: body.projectId ?? null, usage: '公开分身对话', inputSummary: body.question.slice(0, 1000), outputSummary: advice.slice(0, 2000), modelProfile: runtime.profile, modelName: runtime.model, modelStatus: '可用' }).$returningId()
+    await audit(req, '调用公司数字分身', publication.ownerName); res.json({ advice, ownerName: publication.ownerName, version: publication.version, modelStatus: '可用', model: runtime.model, auditId: log.id })
+  } catch (error) { next(error) }
 })
 dueDiligenceRouter.post('/twins/:id/publish', async (req: AuthedRequest, res, next) => {
-  try { const id = routeId(req.params.id); const body = PublicationSchema.parse(req.body); const current = actor(req); const [twin] = await db.select().from(digitalTwins).where(and(eq(digitalTwins.id, id), eq(digitalTwins.ownerUserId, current.userId))).limit(1); if (!twin) throw Object.assign(new Error('数字分身不存在'), { status: 404, code: 'NOT_FOUND' }); const [existing] = await db.select().from(digitalTwinPublications).where(eq(digitalTwinPublications.twinId, id)).limit(1); if (existing) await db.update(digitalTwinPublications).set({ ...body, publishedVersion: twin.activeVersion, status: '已发布', publishedAt: new Date(), withdrawnAt: null }).where(eq(digitalTwinPublications.id, existing.id)); else await db.insert(digitalTwinPublications).values({ id: randomUUID(), twinId: id, ownerUserId: current.userId, publishedVersion: twin.activeVersion, ...body }); await audit(req, '发布公司数字分身', twin.name); res.json({ ok: true, version: twin.activeVersion }) } catch (error) { next(error) }
+  try {
+    const id = routeId(req.params.id); const body = PublicationSchema.parse(req.body); const current = actor(req)
+    const twin = await db.transaction(async tx => {
+      const [owned] = await tx.select().from(digitalTwins).where(and(eq(digitalTwins.id, id), eq(digitalTwins.ownerUserId, current.userId), isNull(digitalTwins.deletedAt))).limit(1)
+      if (!owned) throw Object.assign(new Error('数字分身不存在'), { status: 404, code: 'NOT_FOUND' })
+      const snapshot = { avatarKind: owned.avatarKind, avatarPreset: owned.avatarPreset, avatarStoragePath: owned.avatarStoragePath, avatarMimeType: owned.avatarMimeType }
+      const [existing] = await tx.select().from(digitalTwinPublications).where(eq(digitalTwinPublications.twinId, id)).limit(1)
+      if (existing) await tx.update(digitalTwinPublications).set({ ...body, ...snapshot, publishedVersion: owned.activeVersion, status: '已发布', publishedAt: new Date(), withdrawnAt: null }).where(eq(digitalTwinPublications.id, existing.id))
+      else await tx.insert(digitalTwinPublications).values({ id: randomUUID(), twinId: id, ownerUserId: current.userId, publishedVersion: owned.activeVersion, ...snapshot, ...body })
+      return owned
+    })
+    await audit(req, '发布公司数字分身', twin.name); res.json({ ok: true, version: twin.activeVersion })
+  } catch (error) { next(error) }
 })
 dueDiligenceRouter.post('/twins/:id/withdraw-publication', async (req: AuthedRequest, res, next) => {
-  try { const id = routeId(req.params.id); const current = actor(req); const [twin] = await db.select().from(digitalTwins).where(and(eq(digitalTwins.id, id), eq(digitalTwins.ownerUserId, current.userId))).limit(1); if (!twin) throw Object.assign(new Error('数字分身不存在'), { status: 404, code: 'NOT_FOUND' }); await db.update(digitalTwinPublications).set({ status: '已撤回', withdrawnAt: new Date() }).where(eq(digitalTwinPublications.twinId, id)); await audit(req, '撤回公司数字分身', twin.name); res.json({ ok: true }) } catch (error) { next(error) }
+  try { const id = routeId(req.params.id); const current = actor(req); const [twin] = await db.select().from(digitalTwins).where(and(eq(digitalTwins.id, id), eq(digitalTwins.ownerUserId, current.userId), isNull(digitalTwins.deletedAt))).limit(1); if (!twin) throw Object.assign(new Error('数字分身不存在'), { status: 404, code: 'NOT_FOUND' }); await db.update(digitalTwinPublications).set({ status: '已撤回', withdrawnAt: new Date() }).where(eq(digitalTwinPublications.twinId, id)); await audit(req, '撤回公司数字分身', twin.name); res.json({ ok: true }) } catch (error) { next(error) }
 })
-const TwinSchema = z.object({ name: z.string().trim().min(1).max(64), role: z.string().trim().min(1).max(64), rules: z.string().trim().max(30000), cases: z.string().trim().max(30000), source: z.enum(['manual', 'voice']).optional().default('manual') })
+const TwinSchema = z.object({ name: z.string().trim().min(1).max(64), role: z.string().trim().min(1).max(64), rules: z.string().trim().max(30000), cases: z.string().trim().max(30000), avatarPreset: z.string().optional().nullable(), avatarDataUrl: z.string().optional().nullable(), source: z.enum(['manual', 'voice']).optional().default('manual') })
+const TwinCreateSchema = TwinSchema.extend({ clientRequestId: z.string().uuid() })
 
 async function recordExperienceEvent(input: { ownerUserId: string; projectId?: string | null; twinId?: string | null; eventType: string; entityType: string; entityId?: string | null; topic: string; fingerprint: string; payload?: Record<string, unknown> }) {
   try {
@@ -419,8 +556,8 @@ async function recordExperienceEvent(input: { ownerUserId: string; projectId?: s
     if (existing) return false
     let twinId = input.twinId ?? null
     if (!twinId) {
-      const [latestTwin] = await db.select({ id: digitalTwins.id }).from(digitalTwins).where(and(eq(digitalTwins.ownerUserId, input.ownerUserId), isNull(digitalTwins.deletedAt))).orderBy(desc(digitalTwins.updatedAt)).limit(1)
-      twinId = latestTwin?.id ?? null
+      const [learningTarget] = await db.select({ id: digitalTwins.id }).from(digitalTwins).where(and(eq(digitalTwins.ownerUserId, input.ownerUserId), isNull(digitalTwins.deletedAt), isNotNull(digitalTwins.learningTargetAt))).orderBy(desc(digitalTwins.learningTargetAt)).limit(1)
+      twinId = learningTarget?.id ?? null
     }
     await db.insert(digitalTwinExperienceEvents).values({ id: randomUUID(), ownerUserId: input.ownerUserId, twinId, projectId: input.projectId ?? null, eventType: input.eventType.slice(0, 48), entityType: input.entityType.slice(0, 32), entityId: input.entityId ?? null, topic: input.topic.slice(0, 128), sourceHash, payload: input.payload ?? {} })
     return true
@@ -429,16 +566,16 @@ async function recordExperienceEvent(input: { ownerUserId: string; projectId?: s
   }
 }
 
-async function createExperienceCandidate(input: { twinId: string; ownerUserId: string; projectId: string; sourceFileId?: string | null; sourceHash: string; sourceName: string; sourceType: string; sourceKey: string; topic: string; confidence: number; excerpt: string; engine?: 'rules' | 'model'; evidenceCount?: number }) {
+async function createExperienceCandidate(input: { twinId: string; ownerUserId: string; projectId?: string | null; sourceFileId?: string | null; sourceHash: string; sourceName: string; sourceType: string; sourceKey: string; topic: string; confidence: number; excerpt: string; engine?: 'rules' | 'model'; evidenceCount?: number }) {
   const [existing] = await db.select({ id: digitalTwinLearningCandidates.id }).from(digitalTwinLearningCandidates).where(and(eq(digitalTwinLearningCandidates.twinId, input.twinId), eq(digitalTwinLearningCandidates.sourceKey, input.sourceKey), eq(digitalTwinLearningCandidates.sourceHash, input.sourceHash))).limit(1)
   if (existing) return false
   const safeExcerpt = input.excerpt.replace(/\s+/g, ' ').slice(0, 1_200)
-  await db.insert(digitalTwinLearningCandidates).values({ id: randomUUID(), twinId: input.twinId, ownerUserId: input.ownerUserId, projectId: input.projectId, sourceFileId: input.sourceFileId ?? null, sourceHash: input.sourceHash.slice(0, 64), sourceName: input.sourceName.slice(0, 255), sourceType: input.sourceType, sourceKey: input.sourceKey.slice(0, 128), topic: input.topic.slice(0, 128), confidence: Math.max(1, Math.min(100, input.confidence)), engine: input.engine ?? 'rules', evidenceCount: input.evidenceCount ?? 1, rules: `围绕“${input.topic}”形成投资判断时，先区分已核验事实、管理层口径与待补证假设；结论必须同时列出关键支持证据与反证。`, cases: `来源摘要：${safeExcerpt}`, boundaries: '仅作为个人私有经验候选；不得把原始材料、客户名称或未核验结论发布到公司分身。', rationale: `系统根据${input.sourceType}自动提炼，需由本人批量筛选确认后才写入分身。` })
+  await db.insert(digitalTwinLearningCandidates).values({ id: randomUUID(), twinId: input.twinId, ownerUserId: input.ownerUserId, projectId: input.projectId ?? null, sourceFileId: input.sourceFileId ?? null, sourceHash: input.sourceHash.slice(0, 64), sourceName: input.sourceName.slice(0, 255), sourceType: input.sourceType, sourceKey: input.sourceKey.slice(0, 128), topic: input.topic.slice(0, 128), confidence: Math.max(1, Math.min(100, input.confidence)), engine: input.engine ?? 'rules', evidenceCount: input.evidenceCount ?? 1, rules: `围绕“${input.topic}”形成投资判断时，先区分已核验事实、管理层口径与待补证假设；结论必须同时列出关键支持证据与反证。`, cases: `来源摘要：${safeExcerpt}`, boundaries: '仅作为个人私有经验候选；不得把原始材料、客户名称或未核验结论发布到公司分身。', rationale: `系统根据${input.sourceType}自动提炼，需由本人批量筛选确认后才写入分身。` })
   return true
 }
 
 async function synthesizeRuleCandidates(twinId: string, ownerUserId: string) {
-  const events = await db.select().from(digitalTwinExperienceEvents).where(and(eq(digitalTwinExperienceEvents.ownerUserId, ownerUserId), inArray(digitalTwinExperienceEvents.projectId, db.select({ id: projects.id }).from(projects).where(learningProjectAccessCondition(ownerUserId))))).orderBy(desc(digitalTwinExperienceEvents.createdAt)).limit(500)
+  const events = await db.select().from(digitalTwinExperienceEvents).where(and(eq(digitalTwinExperienceEvents.ownerUserId, ownerUserId), eq(digitalTwinExperienceEvents.twinId, twinId), inArray(digitalTwinExperienceEvents.projectId, db.select({ id: projects.id }).from(projects).where(learningProjectAccessCondition(ownerUserId))))).orderBy(desc(digitalTwinExperienceEvents.createdAt)).limit(500)
   const groups = new Map<string, typeof events>()
   for (const event of events) {
     if (!event.projectId || event.eventType === 'candidate.feedback') continue
@@ -458,7 +595,7 @@ async function synthesizeRuleCandidates(twinId: string, ownerUserId: string) {
 }
 
 async function enrichExperienceEventsWithModel(twinId: string, ownerUserId: string, role: string) {
-  const rows = await db.select().from(digitalTwinExperienceEvents).where(and(eq(digitalTwinExperienceEvents.ownerUserId, ownerUserId), inArray(digitalTwinExperienceEvents.projectId, db.select({ id: projects.id }).from(projects).where(learningProjectAccessCondition(ownerUserId))))).orderBy(desc(digitalTwinExperienceEvents.createdAt)).limit(100)
+  const rows = await db.select().from(digitalTwinExperienceEvents).where(and(eq(digitalTwinExperienceEvents.ownerUserId, ownerUserId), eq(digitalTwinExperienceEvents.twinId, twinId), inArray(digitalTwinExperienceEvents.projectId, db.select({ id: projects.id }).from(projects).where(learningProjectAccessCondition(ownerUserId))))).orderBy(desc(digitalTwinExperienceEvents.createdAt)).limit(100)
   const retryBefore = Date.now() - 10 * 60 * 1000
   const eligible = rows.filter(row => row.projectId && row.modelStatus !== '已完成' && (row.modelAttempts < 3 || !row.modelProcessedAt || row.modelProcessedAt.getTime() < retryBefore))
   const pending = eligible.filter(row => row.projectId === eligible[0]?.projectId).slice(0, 20)
@@ -494,13 +631,13 @@ async function scanExperienceMaterials(twinId: string, ownerUserId: string) {
 }
 
 async function createCurrentUserExperienceCandidate(userId: string, input: Omit<Parameters<typeof createExperienceCandidate>[0], 'twinId' | 'ownerUserId'>) {
-  const [twin] = await db.select({ id: digitalTwins.id }).from(digitalTwins).where(eq(digitalTwins.ownerUserId, userId)).orderBy(desc(digitalTwins.updatedAt)).limit(1)
+  const [twin] = await db.select({ id: digitalTwins.id }).from(digitalTwins).where(and(eq(digitalTwins.ownerUserId, userId), isNull(digitalTwins.deletedAt), isNotNull(digitalTwins.learningTargetAt))).orderBy(desc(digitalTwins.learningTargetAt)).limit(1)
   if (!twin) return false
   return createExperienceCandidate({ ...input, twinId: twin.id, ownerUserId: userId })
 }
 
 dueDiligenceRouter.get('/twins', async (req: AuthedRequest, res, next) => {
-  try { res.json({ list: await db.select().from(digitalTwins).where(and(eq(digitalTwins.ownerUserId, req.user!.uid), isNull(digitalTwins.deletedAt))).orderBy(desc(digitalTwins.updatedAt)) }) } catch (error) { next(error) }
+  try { res.json({ list: await db.select().from(digitalTwins).where(and(eq(digitalTwins.ownerUserId, req.user!.uid), isNull(digitalTwins.deletedAt))).orderBy(desc(digitalTwins.learningTargetAt), desc(digitalTwins.updatedAt)) }) } catch (error) { next(error) }
 })
 dueDiligenceRouter.get('/twins/history', async (req: AuthedRequest, res, next) => {
   try { res.json({ list: await db.select().from(digitalTwinAssetArchives).where(eq(digitalTwinAssetArchives.ownerUserId, req.user!.uid)).orderBy(desc(digitalTwinAssetArchives.deletedAt)) }) } catch (error) { next(error) }
@@ -511,49 +648,108 @@ dueDiligenceRouter.get('/twins/:id/versions', async (req: AuthedRequest, res, ne
 
 dueDiligenceRouter.post('/twins/:id/learning/scan', async (req: AuthedRequest, res, next) => {
   try {
-    const twinId = routeId(req.params.id); const current = actor(req); const [twin] = await db.select().from(digitalTwins).where(and(eq(digitalTwins.id, twinId), eq(digitalTwins.ownerUserId, current.userId))).limit(1); if (!twin) throw Object.assign(new Error('数字分身不存在'), { status: 404, code: 'NOT_FOUND' })
-    const materialResult = await scanExperienceMaterials(twinId, current.userId); const ruleResult = await synthesizeRuleCandidates(twinId, current.userId); void enrichExperienceEventsWithModel(twinId, current.userId, req.user!.role).catch(() => undefined)
+    const twinId = routeId(req.params.id); const current = actor(req); const [twin] = await db.select().from(digitalTwins).where(and(eq(digitalTwins.id, twinId), eq(digitalTwins.ownerUserId, current.userId), isNull(digitalTwins.deletedAt))).limit(1); if (!twin) throw Object.assign(new Error('数字分身不存在'), { status: 404, code: 'NOT_FOUND' })
+    const materialResult = await scanExperienceMaterials(twinId, current.userId); const ruleResult = await synthesizeRuleCandidates(twinId, current.userId); await enrichExperienceEventsWithModel(twinId, current.userId, req.user!.role).catch(() => undefined)
     const result = { created: materialResult.created + ruleResult.created, materials: materialResult.scanned, events: ruleResult.events }
     await audit(req, '扫描数字分身学习来源', `${twin.name}：${result.created} 条候选`); res.json(result)
   } catch (error) { next(error) }
 })
 dueDiligenceRouter.get('/twins/:id/learning-candidates', async (req: AuthedRequest, res, next) => {
-  try { const id = routeId(req.params.id); const [twin] = await db.select({ id: digitalTwins.id }).from(digitalTwins).where(and(eq(digitalTwins.id, id), eq(digitalTwins.ownerUserId, req.user!.uid))).limit(1); if (!twin) throw Object.assign(new Error('数字分身不存在'), { status: 404, code: 'NOT_FOUND' }); const list = await db.select().from(digitalTwinLearningCandidates).where(and(eq(digitalTwinLearningCandidates.twinId, id), eq(digitalTwinLearningCandidates.ownerUserId, req.user!.uid), learningCandidateAccessCondition(req.user!.uid))).orderBy(desc(digitalTwinLearningCandidates.createdAt)); res.json({ list }) } catch (error) { next(error) }
+  try {
+    const id = routeId(req.params.id)
+    const [twin] = await db.select({ id: digitalTwins.id }).from(digitalTwins).where(and(eq(digitalTwins.id, id), eq(digitalTwins.ownerUserId, req.user!.uid), isNull(digitalTwins.deletedAt))).limit(1)
+    if (!twin) throw Object.assign(new Error('数字分身不存在'), { status: 404, code: 'NOT_FOUND' })
+    const list = await db.select().from(digitalTwinLearningCandidates).where(and(eq(digitalTwinLearningCandidates.twinId, id), eq(digitalTwinLearningCandidates.ownerUserId, req.user!.uid), learningCandidateAccessCondition(req.user!.uid))).orderBy(desc(digitalTwinLearningCandidates.createdAt))
+    res.json({ list })
+  } catch (error) { next(error) }
 })
 dueDiligenceRouter.post('/twins/:id/learning-candidates/:candidateId/decision', async (req: AuthedRequest, res, next) => {
   try {
     const twinId = routeId(req.params.id); const candidateId = routeId(req.params.candidateId); const body = z.object({ decision: z.enum(['确认', '拒绝']) }).parse(req.body); const current = actor(req)
-    const [twin] = await db.select().from(digitalTwins).where(and(eq(digitalTwins.id, twinId), eq(digitalTwins.ownerUserId, current.userId))).limit(1); const [candidate] = await db.select().from(digitalTwinLearningCandidates).where(and(eq(digitalTwinLearningCandidates.id, candidateId), eq(digitalTwinLearningCandidates.twinId, twinId), eq(digitalTwinLearningCandidates.ownerUserId, current.userId), eq(digitalTwinLearningCandidates.status, '待确认'), learningCandidateAccessCondition(current.userId))).limit(1)
+    const [twin] = await db.select().from(digitalTwins).where(and(eq(digitalTwins.id, twinId), eq(digitalTwins.ownerUserId, current.userId), isNull(digitalTwins.deletedAt))).limit(1); const [candidate] = await db.select().from(digitalTwinLearningCandidates).where(and(eq(digitalTwinLearningCandidates.id, candidateId), eq(digitalTwinLearningCandidates.twinId, twinId), eq(digitalTwinLearningCandidates.ownerUserId, current.userId), eq(digitalTwinLearningCandidates.status, '待确认'), learningCandidateAccessCondition(current.userId))).limit(1)
     if (!twin || !candidate) throw Object.assign(new Error('学习候选不存在或已处理'), { status: 404, code: 'NOT_FOUND' })
     if (body.decision === '拒绝') { await db.update(digitalTwinLearningCandidates).set({ status: '已拒绝', decidedAt: new Date() }).where(eq(digitalTwinLearningCandidates.id, candidateId)); await recordExperienceEvent({ ownerUserId: current.userId, twinId, projectId: candidate.projectId, eventType: 'candidate.feedback', entityType: 'candidate', entityId: candidateId, topic: candidate.topic, fingerprint: `${candidateId}:拒绝`, payload: { decision: '拒绝', sourceName: candidate.sourceName } }); await audit(req, '拒绝数字分身学习候选', candidate.sourceName); res.json({ status: '已拒绝' }); return }
-    const nextVersion = twin.activeVersion + 1; const rules = `${twin.rules}${twin.rules ? '\n\n' : ''}${candidate.rules}`; const cases = `${twin.cases}${twin.cases ? '\n\n' : ''}${candidate.cases}\n边界：${candidate.boundaries}`
-    await db.transaction(async tx => { await tx.update(digitalTwins).set({ rules, cases, activeVersion: nextVersion, updatedAt: new Date() }).where(eq(digitalTwins.id, twinId)); await tx.insert(digitalTwinVersions).values({ id: randomUUID(), twinId, ownerUserId: current.userId, version: nextVersion, rules, cases, source: 'learning' }); await tx.update(digitalTwinLearningCandidates).set({ status: '已采纳', decidedAt: new Date() }).where(eq(digitalTwinLearningCandidates.id, candidateId)); const [skill] = await tx.select().from(digitalTwinSkills).where(eq(digitalTwinSkills.twinId, twinId)).limit(1); const skillId = skill?.id ?? randomUUID(); const skillVersion = (skill?.activeVersion ?? 0) + 1; if (skill) await tx.update(digitalTwinSkills).set({ activeVersion: skillVersion, status: '试用中', updatedAt: new Date() }).where(eq(digitalTwinSkills.id, skillId)); else await tx.insert(digitalTwinSkills).values({ id: skillId, twinId, ownerUserId: current.userId, name: `${twin.name}·尽调判断 Skill`, activeVersion: skillVersion, status: '试用中' }); await tx.insert(digitalTwinSkillVersions).values({ id: randomUUID(), skillId, version: skillVersion, trigger: '尽调问题清单、项目核查与投资判断', instructions: candidate.rules, checklist: ['列明事实来源', '识别证据缺口', '说明反证与不确定性'], outputFormat: '结论、支持证据、反证、待补证事项', boundaries: candidate.boundaries, sourceCandidateId: candidateId, status: '试用中' }) })
-    await recordExperienceEvent({ ownerUserId: current.userId, twinId, projectId: candidate.projectId, eventType: 'candidate.feedback', entityType: 'candidate', entityId: candidateId, topic: candidate.topic, fingerprint: `${candidateId}:确认`, payload: { decision: '确认', sourceName: candidate.sourceName, twinVersion: nextVersion } })
-    await audit(req, '采纳数字分身学习候选', candidate.sourceName); res.json({ status: '已采纳', twinVersion: nextVersion })
+    const contentHash = createHash('sha256').update(`${candidate.topic}|${candidate.rules}|${candidate.cases}|${candidate.boundaries}`).digest('hex'); const skillId = randomUUID()
+    await db.transaction(async tx => { await tx.update(digitalTwinLearningCandidates).set({ status: '已采纳', decidedAt: new Date() }).where(eq(digitalTwinLearningCandidates.id, candidateId)); await tx.insert(digitalTwinSkills).values({ id: skillId, twinId, ownerUserId: current.userId, name: `${candidate.topic} Skill`, activeVersion: 1, status: '已生效', sourceType: '经验候选', contentHash }); await tx.insert(digitalTwinSkillVersions).values({ id: randomUUID(), skillId, version: 1, trigger: '尽调问题清单、项目核查与投资判断', instructions: candidate.rules, checklist: ['列明事实来源', '识别证据缺口', '说明反证与不确定性'], outputFormat: '结论、支持证据、反证、待补证事项', boundaries: candidate.boundaries, sourceCandidateId: candidateId, status: '已生效' }) })
+    await recordExperienceEvent({ ownerUserId: current.userId, twinId, projectId: candidate.projectId, eventType: 'candidate.feedback', entityType: 'candidate', entityId: candidateId, topic: candidate.topic, fingerprint: `${candidateId}:确认`, payload: { decision: '确认', sourceName: candidate.sourceName, skillId } })
+    await audit(req, '采纳数字分身学习候选', candidate.sourceName); res.json({ status: '已采纳', skillId })
+  } catch (error) { next(error) }
+})
+dueDiligenceRouter.get('/twins/:id/skill-library', async (req: AuthedRequest, res, next) => {
+  try {
+    const twinId = routeId(req.params.id); await requireOwnedTwin(twinId, req.user!.uid)
+    const [assets, candidates, skillRows, imports] = await Promise.all([
+      db.select().from(digitalTwinPrivateAssets).where(and(eq(digitalTwinPrivateAssets.twinId, twinId), eq(digitalTwinPrivateAssets.ownerUserId, req.user!.uid))).orderBy(desc(digitalTwinPrivateAssets.createdAt)),
+      db.select().from(digitalTwinLearningCandidates).where(and(eq(digitalTwinLearningCandidates.twinId, twinId), eq(digitalTwinLearningCandidates.ownerUserId, req.user!.uid), learningCandidateAccessCondition(req.user!.uid))).orderBy(desc(digitalTwinLearningCandidates.createdAt)),
+      db.select().from(digitalTwinSkills).where(and(eq(digitalTwinSkills.twinId, twinId), eq(digitalTwinSkills.ownerUserId, req.user!.uid))).orderBy(desc(digitalTwinSkills.updatedAt)),
+      db.select().from(digitalTwinSkillImports).where(and(eq(digitalTwinSkillImports.twinId, twinId), eq(digitalTwinSkillImports.ownerUserId, req.user!.uid))).orderBy(desc(digitalTwinSkillImports.createdAt)),
+    ])
+    const skills = await Promise.all(skillRows.map(async skill => ({ ...skill, versions: await db.select().from(digitalTwinSkillVersions).where(eq(digitalTwinSkillVersions.skillId, skill.id)).orderBy(desc(digitalTwinSkillVersions.version)) })))
+    res.json({ apiVersion: DUE_DILIGENCE_API_VERSION, twinId, assets, candidates, skills, imports })
   } catch (error) { next(error) }
 })
 dueDiligenceRouter.get('/twins/:id/skills', async (req: AuthedRequest, res, next) => {
-  try { const id = routeId(req.params.id); const [skill] = await db.select().from(digitalTwinSkills).where(and(eq(digitalTwinSkills.twinId, id), eq(digitalTwinSkills.ownerUserId, req.user!.uid))).limit(1); const versions = skill ? await db.select().from(digitalTwinSkillVersions).where(eq(digitalTwinSkillVersions.skillId, skill.id)).orderBy(desc(digitalTwinSkillVersions.version)) : []; res.json({ skill: skill ?? null, versions }) } catch (error) { next(error) }
+  try { const id = routeId(req.params.id); const skills = await db.select().from(digitalTwinSkills).where(and(eq(digitalTwinSkills.twinId, id), eq(digitalTwinSkills.ownerUserId, req.user!.uid))).orderBy(desc(digitalTwinSkills.updatedAt)); const list = await Promise.all(skills.map(async skill => ({ ...skill, versions: await db.select().from(digitalTwinSkillVersions).where(eq(digitalTwinSkillVersions.skillId, skill.id)).orderBy(desc(digitalTwinSkillVersions.version)) }))); res.json({ list }) } catch (error) { next(error) }
 })
+dueDiligenceRouter.get('/twins/:id/skill-imports', async (req: AuthedRequest, res, next) => {
+  try { const twinId = routeId(req.params.id); await requireOwnedTwin(twinId, req.user!.uid); res.json({ list: await db.select().from(digitalTwinSkillImports).where(and(eq(digitalTwinSkillImports.twinId, twinId), eq(digitalTwinSkillImports.ownerUserId, req.user!.uid))).orderBy(desc(digitalTwinSkillImports.createdAt)) }) } catch (error) { next(error) }
+})
+const SkillImportSchema = z.object({ sourceType: z.enum(['本机文件夹', 'GitHub', '平台Skill库']), sourceName: z.string().trim().min(1).max(255), sourceUrl: z.string().url().max(2048).optional(), relativePath: z.string().trim().max(512).optional(), content: z.string().trim().min(1).max(512000) })
+function parseSkill(content: string, fallbackName: string) { const lines = content.split(/\r?\n/); const title = lines.find(line => /^#\s+/.test(line))?.replace(/^#\s+/, '').trim() || fallbackName.replace(/\.[^.]+$/, ''); const checklist = lines.filter(line => /^\s*[-*]\s+/.test(line)).slice(0, 20).map(line => line.replace(/^\s*[-*]\s+/, '').trim()); return { name: title.slice(0, 128), trigger: '在相关尽调场景主动启用', instructions: content.slice(0, 30000), checklist, outputFormat: '结论、依据、待核验事项', boundaries: '仅作为私有分身的辅助 Skill；不得执行外部脚本或读取未授权内容。' } }
+function safeSkillContent(content: string) { if (/-----BEGIN [A-Z ]*PRIVATE KEY-----|(?:api[_-]?key|password|secret)\s*[:=]\s*['\"]?[A-Za-z0-9_\-]{12,}/i.test(content)) throw Object.assign(new Error('Skill 内容疑似包含密钥或凭据，已拒绝导入'), { status: 400, code: 'SKILL_SECRET_REJECTED' }) }
+dueDiligenceRouter.post('/twins/:id/skill-imports', async (req: AuthedRequest, res, next) => {
+  try { const twinId = routeId(req.params.id); await requireOwnedTwin(twinId, req.user!.uid); const body = SkillImportSchema.parse(req.body); safeSkillContent(body.content); const contentHash = createHash('sha256').update(body.content).digest('hex'); const [existing] = await db.select({ id: digitalTwinSkillImports.id }).from(digitalTwinSkillImports).where(and(eq(digitalTwinSkillImports.twinId, twinId), eq(digitalTwinSkillImports.contentHash, contentHash))).limit(1); if (existing) { res.json({ id: existing.id, duplicate: true }); return }; const id = randomUUID(); await db.insert(digitalTwinSkillImports).values({ id, twinId, ownerUserId: req.user!.uid, ...body, contentHash, parsed: parseSkill(body.content, body.sourceName) }); await audit(req, '导入私有Skill', body.sourceName); res.status(201).json({ id }) } catch (error) { next(error) }
+})
+dueDiligenceRouter.post('/twins/:id/skill-imports/github', async (req: AuthedRequest, res, next) => {
+  try {
+    const twinId = routeId(req.params.id); await requireOwnedTwin(twinId, req.user!.uid); const { url } = z.object({ url: z.string().url().max(2048) }).parse(req.body); const parsed = new URL(url)
+    if (!['github.com', 'raw.githubusercontent.com'].includes(parsed.hostname)) throw Object.assign(new Error('仅支持公开 GitHub 链接'), { status: 400, code: 'SKILL_GITHUB_FORBIDDEN' })
+    let raw = url
+    if (parsed.hostname === 'github.com') { const parts = parsed.pathname.split('/').filter(Boolean); const marker = parts.findIndex(value => value === 'blob' || value === 'raw'); if (marker < 0 || parts.length <= marker + 2) throw Object.assign(new Error('请粘贴 GitHub 中具体的 SKILL.md、README.md 或说明文件链接'), { status: 400, code: 'SKILL_GITHUB_FILE_REQUIRED' }); raw = `https://raw.githubusercontent.com/${parts.slice(0, marker).join('/')}/${parts.slice(marker + 1).join('/')}` }
+    const response = await fetch(raw, { redirect: 'error', headers: { Accept: 'text/plain, text/markdown, application/json, text/yaml', 'User-Agent': 'CNVC-OS-Skill-Importer' }, signal: AbortSignal.timeout(15_000) }); const length = Number(response.headers.get('content-length') || 0); if (!response.ok || length > 512_000) throw Object.assign(new Error('GitHub Skill 无法读取或文件过大'), { status: 400, code: 'SKILL_GITHUB_FETCH_FAILED' }); const content = await response.text(); if (Buffer.byteLength(content) > 512_000) throw Object.assign(new Error('GitHub Skill 文件过大'), { status: 400, code: 'SKILL_TOO_LARGE' }); safeSkillContent(content); const sourceName = decodeURIComponent(parsed.pathname.split('/').pop() || 'GitHub Skill'); const contentHash = createHash('sha256').update(content).digest('hex'); const [existing] = await db.select({ id: digitalTwinSkillImports.id }).from(digitalTwinSkillImports).where(and(eq(digitalTwinSkillImports.twinId, twinId), eq(digitalTwinSkillImports.contentHash, contentHash))).limit(1); if (existing) { res.json({ id: existing.id, duplicate: true }); return }; const id = randomUUID(); await db.insert(digitalTwinSkillImports).values({ id, twinId, ownerUserId: req.user!.uid, sourceType: 'GitHub', sourceName, sourceUrl: url, content, contentHash, parsed: parseSkill(content, sourceName) }); await audit(req, '从GitHub导入Skill', sourceName); res.status(201).json({ id })
+  } catch (error) { next(error) }
+})
+dueDiligenceRouter.post('/twins/:id/skill-imports/:importId/learn', async (req: AuthedRequest, res, next) => {
+  try { const twinId = routeId(req.params.id); const importId = routeId(req.params.importId); await requireOwnedTwin(twinId, req.user!.uid); const [item] = await db.select().from(digitalTwinSkillImports).where(and(eq(digitalTwinSkillImports.id, importId), eq(digitalTwinSkillImports.twinId, twinId), eq(digitalTwinSkillImports.ownerUserId, req.user!.uid), eq(digitalTwinSkillImports.status, '待学习'))).limit(1); if (!item) throw Object.assign(new Error('待学习 Skill 不存在或已处理'), { status: 404, code: 'NOT_FOUND' }); const parsed = item.parsed as ReturnType<typeof parseSkill>; const skillId = randomUUID(); await db.transaction(async tx => { await tx.insert(digitalTwinSkills).values({ id: skillId, twinId, ownerUserId: req.user!.uid, name: parsed.name, activeVersion: 1, status: '已生效', sourceType: item.sourceType, sourceUrl: item.sourceUrl ?? null, contentHash: item.contentHash }); await tx.insert(digitalTwinSkillVersions).values({ id: randomUUID(), skillId, version: 1, trigger: parsed.trigger, instructions: parsed.instructions, checklist: parsed.checklist, outputFormat: parsed.outputFormat, boundaries: parsed.boundaries, status: '已生效' }); await tx.update(digitalTwinSkillImports).set({ status: '已学习', skillId, updatedAt: new Date() }).where(eq(digitalTwinSkillImports.id, importId)) }); await audit(req, '让数字分身学习Skill', item.sourceName); res.status(201).json({ skillId }) } catch (error) { next(error) }
+})
+dueDiligenceRouter.patch('/twins/:id/skills/:skillId', async (req: AuthedRequest, res, next) => { try { const twinId = routeId(req.params.id); const skillId = routeId(req.params.skillId); const body = z.object({ enabled: z.boolean() }).parse(req.body); await db.update(digitalTwinSkills).set({ status: body.enabled ? '已生效' : '已停用', updatedAt: new Date() }).where(and(eq(digitalTwinSkills.id, skillId), eq(digitalTwinSkills.twinId, twinId), eq(digitalTwinSkills.ownerUserId, req.user!.uid))); res.json({ ok: true }) } catch (error) { next(error) } })
+dueDiligenceRouter.get('/twins/:id/skills/:skillId/download', async (req: AuthedRequest, res, next) => { try { const twinId = routeId(req.params.id); const skillId = routeId(req.params.skillId); const [skill] = await db.select().from(digitalTwinSkills).where(and(eq(digitalTwinSkills.id, skillId), eq(digitalTwinSkills.twinId, twinId), eq(digitalTwinSkills.ownerUserId, req.user!.uid))).limit(1); const [version] = skill ? await db.select().from(digitalTwinSkillVersions).where(and(eq(digitalTwinSkillVersions.skillId, skill.id), eq(digitalTwinSkillVersions.version, skill.activeVersion))).limit(1) : []; if (!skill || !version) throw Object.assign(new Error('Skill 不存在'), { status: 404, code: 'NOT_FOUND' }); res.attachment('SKILL.md').type('text/markdown; charset=utf-8').send(`# ${skill.name}\n\n## 触发场景\n${version.trigger}\n\n## 操作步骤\n${version.instructions}\n\n## 核查清单\n${(version.checklist as string[]).map(item => `- ${item}`).join('\n')}\n\n## 输出格式\n${version.outputFormat}\n\n## 适用边界\n${version.boundaries}\n`) } catch (error) { next(error) } })
 dueDiligenceRouter.post('/twins/:id/skills/:version/activate', async (req: AuthedRequest, res, next) => {
   try { const twinId = routeId(req.params.id); const version = z.coerce.number().int().positive().parse(req.params.version); const [skill] = await db.select().from(digitalTwinSkills).where(and(eq(digitalTwinSkills.twinId, twinId), eq(digitalTwinSkills.ownerUserId, req.user!.uid))).limit(1); const [target] = skill ? await db.select().from(digitalTwinSkillVersions).where(and(eq(digitalTwinSkillVersions.skillId, skill.id), eq(digitalTwinSkillVersions.version, version))).limit(1) : []; if (!skill || !target) throw Object.assign(new Error('个人 Skill 版本不存在'), { status: 404, code: 'NOT_FOUND' }); await db.transaction(async tx => { await tx.update(digitalTwinSkills).set({ activeVersion: version, status: '已生效', updatedAt: new Date() }).where(eq(digitalTwinSkills.id, skill.id)); await tx.update(digitalTwinSkillVersions).set({ status: '已生效' }).where(eq(digitalTwinSkillVersions.id, target.id)) }); await audit(req, '启用个人数字分身Skill', `${skill.name} v${version}`); res.json({ ok: true }) } catch (error) { next(error) }
 })
 dueDiligenceRouter.post('/twins', async (req: AuthedRequest, res, next) => {
   try {
-    const body = TwinSchema.parse(req.body); const current = actor(req)
-    const { source, ...twin } = body
-    const id = await db.transaction(async tx => { const [inserted] = await tx.insert(digitalTwins).values({ ...twin, ownerUserId: current.userId, activeVersion: 1 }).$returningId(); await tx.insert(digitalTwinVersions).values({ twinId: inserted.id, ownerUserId: current.userId, version: 1, rules: body.rules, cases: body.cases, source }); return inserted.id })
+    const body = TwinCreateSchema.parse(req.body); const current = actor(req)
+    const [existing] = await db.select().from(digitalTwins).where(and(eq(digitalTwins.ownerUserId, current.userId), eq(digitalTwins.clientRequestId, body.clientRequestId))).limit(1)
+    if (existing) { res.json({ ...existing, idempotentReplay: true }); return }
+    const { source, clientRequestId, avatarDataUrl, avatarPreset, ...twin } = body; if (avatarPreset && !avatarPresets.has(avatarPreset)) throw Object.assign(new Error('未识别的内置头像'), { status: 400, code: 'INVALID_AVATAR' }); const avatar = avatarData(avatarDataUrl); const id = randomUUID(); const storedAvatar = avatar ? await saveDigitalTwinPrivateAsset(current.userId, `${id}.avatar`, avatar.buffer) : null
+    await db.transaction(async tx => { await tx.update(digitalTwins).set({ learningTargetAt: null }).where(eq(digitalTwins.ownerUserId, current.userId)); await tx.insert(digitalTwins).values({ id, ...twin, clientRequestId, ownerUserId: current.userId, learningTargetAt: new Date(), activeVersion: 1, avatarKind: avatar ? 'upload' : 'preset', avatarPreset: avatar ? null : avatarPreset || null, avatarStoragePath: storedAvatar, avatarMimeType: avatar?.mimeType ?? null }); await tx.insert(digitalTwinVersions).values({ twinId: id, ownerUserId: current.userId, version: 1, rules: body.rules, cases: body.cases, source }) })
     const [row] = await db.select().from(digitalTwins).where(eq(digitalTwins.id, id)).limit(1); await audit(req, '创建数字分身', body.name); res.status(201).json(row)
+  } catch (error) { next(error) }
+})
+dueDiligenceRouter.post('/twins/:id/select-learning-target', async (req: AuthedRequest, res, next) => {
+  try {
+    const id = routeId(req.params.id); const current = actor(req); const twin = await requireOwnedTwin(id, current.userId)
+    await db.transaction(async tx => { await tx.update(digitalTwins).set({ learningTargetAt: null }).where(eq(digitalTwins.ownerUserId, current.userId)); await tx.update(digitalTwins).set({ learningTargetAt: new Date(), updatedAt: new Date() }).where(eq(digitalTwins.id, id)) })
+    await audit(req, '选择数字分身学习目标', twin.name); res.json({ ok: true })
   } catch (error) { next(error) }
 })
 dueDiligenceRouter.patch('/twins/:id', async (req: AuthedRequest, res, next) => {
   try {
     const id = routeId(req.params.id); const body = TwinSchema.parse(req.body); const current = actor(req)
-    const [existing] = await db.select().from(digitalTwins).where(and(eq(digitalTwins.id, id), eq(digitalTwins.ownerUserId, current.userId))).limit(1)
+    const [existing] = await db.select().from(digitalTwins).where(and(eq(digitalTwins.id, id), eq(digitalTwins.ownerUserId, current.userId), isNull(digitalTwins.deletedAt))).limit(1)
     if (!existing) { res.status(404).json({ code: 'NOT_FOUND', message: '数字分身不存在' }); return }
-    const nextVersion = existing.activeVersion + 1
-    await db.transaction(async tx => { await tx.update(digitalTwins).set({ name: body.name, role: body.role, rules: body.rules, cases: body.cases, activeVersion: nextVersion, updatedAt: new Date() }).where(eq(digitalTwins.id, id)); await tx.insert(digitalTwinVersions).values({ twinId: id, ownerUserId: current.userId, version: nextVersion, rules: body.rules, cases: body.cases, source: body.source }) })
+    if (body.avatarPreset && !avatarPresets.has(body.avatarPreset)) throw Object.assign(new Error('未识别的内置头像'), { status: 400, code: 'INVALID_AVATAR' }); const avatar = avatarData(body.avatarDataUrl); const storedAvatar = avatar ? await saveDigitalTwinPrivateAsset(current.userId, `${id}.avatar.${randomUUID()}`, avatar.buffer) : null; const nextVersion = existing.activeVersion + 1
+    await db.transaction(async tx => { await tx.update(digitalTwins).set({ name: body.name, role: body.role, rules: body.rules, cases: body.cases, activeVersion: nextVersion, updatedAt: new Date(), ...(avatar ? { avatarKind: 'upload', avatarPreset: null, avatarStoragePath: storedAvatar, avatarMimeType: avatar.mimeType } : body.avatarPreset ? { avatarKind: 'preset', avatarPreset: body.avatarPreset, avatarStoragePath: null, avatarMimeType: null } : {}) }).where(eq(digitalTwins.id, id)); await tx.insert(digitalTwinVersions).values({ twinId: id, ownerUserId: current.userId, version: nextVersion, rules: body.rules, cases: body.cases, source: body.source }) })
     const [row] = await db.select().from(digitalTwins).where(eq(digitalTwins.id, id)).limit(1); await audit(req, '保存数字分身版本', body.name); res.json(row)
+  } catch (error) { next(error) }
+})
+dueDiligenceRouter.get('/twins/:id/avatar', async (req: AuthedRequest, res, next) => {
+  try {
+    const id = routeId(req.params.id); const [twin] = await db.select().from(digitalTwins).where(eq(digitalTwins.id, id)).limit(1); if (!twin?.avatarStoragePath) { res.status(404).end(); return }
+    const owner = twin.ownerUserId === req.user!.uid; const [publication] = owner ? [null] : await db.select().from(digitalTwinPublications).where(and(eq(digitalTwinPublications.twinId, id), eq(digitalTwinPublications.status, '已发布'))).limit(1)
+    const storagePath = owner ? twin.avatarStoragePath : publication?.avatarStoragePath; const mime = owner ? twin.avatarMimeType : publication?.avatarMimeType
+    if (!storagePath) { res.status(404).end(); return }; res.setHeader('Cache-Control', 'private, max-age=300'); res.type(mime || 'image/png').send(await readDigitalTwinPrivateAsset(storagePath))
   } catch (error) { next(error) }
 })
 dueDiligenceRouter.delete('/twins/:id', async (req: AuthedRequest, res, next) => {
@@ -569,14 +765,14 @@ dueDiligenceRouter.get('/twins/:id/candidates', async (req: AuthedRequest, res, 
 dueDiligenceRouter.post('/twins/:id/candidates', async (req: AuthedRequest, res, next) => {
   try {
     const id = routeId(req.params.id); const body = z.object({ rules: z.string().trim().min(1).max(30000), cases: z.string().trim().max(30000).default(''), sourceNote: z.string().trim().min(1).max(8000) }).parse(req.body)
-    const [twin] = await db.select().from(digitalTwins).where(and(eq(digitalTwins.id, id), eq(digitalTwins.ownerUserId, req.user!.uid))).limit(1); if (!twin) throw Object.assign(new Error('数字分身不存在'), { status: 404, code: 'NOT_FOUND' })
+    const [twin] = await db.select().from(digitalTwins).where(and(eq(digitalTwins.id, id), eq(digitalTwins.ownerUserId, req.user!.uid), isNull(digitalTwins.deletedAt))).limit(1); if (!twin) throw Object.assign(new Error('数字分身不存在'), { status: 404, code: 'NOT_FOUND' })
     const [inserted] = await db.insert(digitalTwinUpdateCandidates).values({ id: randomUUID(), twinId: id, ownerUserId: req.user!.uid, ...body }).$returningId(); const [row] = await db.select().from(digitalTwinUpdateCandidates).where(eq(digitalTwinUpdateCandidates.id, inserted.id)).limit(1); await audit(req, '创建数字分身更新候选', twin.name); res.status(201).json(row)
   } catch (error) { next(error) }
 })
 dueDiligenceRouter.post('/twins/:id/candidates/:candidateId/accept', async (req: AuthedRequest, res, next) => {
   try {
     const id = routeId(req.params.id); const candidateId = routeId(req.params.candidateId); const current = actor(req)
-    const [twin] = await db.select().from(digitalTwins).where(and(eq(digitalTwins.id, id), eq(digitalTwins.ownerUserId, current.userId))).limit(1); const [candidate] = await db.select().from(digitalTwinUpdateCandidates).where(and(eq(digitalTwinUpdateCandidates.id, candidateId), eq(digitalTwinUpdateCandidates.twinId, id), eq(digitalTwinUpdateCandidates.ownerUserId, current.userId), eq(digitalTwinUpdateCandidates.status, '待确认'))).limit(1)
+    const [twin] = await db.select().from(digitalTwins).where(and(eq(digitalTwins.id, id), eq(digitalTwins.ownerUserId, current.userId), isNull(digitalTwins.deletedAt))).limit(1); const [candidate] = await db.select().from(digitalTwinUpdateCandidates).where(and(eq(digitalTwinUpdateCandidates.id, candidateId), eq(digitalTwinUpdateCandidates.twinId, id), eq(digitalTwinUpdateCandidates.ownerUserId, current.userId), eq(digitalTwinUpdateCandidates.status, '待确认'))).limit(1)
     if (!twin || !candidate) throw Object.assign(new Error('候选不存在或已处理'), { status: 404, code: 'NOT_FOUND' }); const version = twin.activeVersion + 1
     await db.transaction(async tx => { await tx.update(digitalTwins).set({ rules: candidate.rules, cases: candidate.cases, activeVersion: version, updatedAt: new Date() }).where(eq(digitalTwins.id, id)); await tx.insert(digitalTwinVersions).values({ id: randomUUID(), twinId: id, ownerUserId: current.userId, version, rules: candidate.rules, cases: candidate.cases, source: 'candidate' }); await tx.update(digitalTwinUpdateCandidates).set({ status: '已采纳', decidedAt: new Date() }).where(eq(digitalTwinUpdateCandidates.id, candidateId)) })
     await audit(req, '采纳数字分身更新候选', twin.name); res.json({ version })
@@ -585,7 +781,7 @@ dueDiligenceRouter.post('/twins/:id/candidates/:candidateId/accept', async (req:
 dueDiligenceRouter.post('/twins/:id/restore/:version', async (req: AuthedRequest, res, next) => {
   try {
     const id = routeId(req.params.id); const version = z.coerce.number().int().positive().parse(req.params.version); const current = actor(req)
-    const [twin] = await db.select().from(digitalTwins).where(and(eq(digitalTwins.id, id), eq(digitalTwins.ownerUserId, current.userId))).limit(1); const [source] = await db.select().from(digitalTwinVersions).where(and(eq(digitalTwinVersions.twinId, id), eq(digitalTwinVersions.ownerUserId, current.userId), eq(digitalTwinVersions.version, version))).limit(1)
+    const [twin] = await db.select().from(digitalTwins).where(and(eq(digitalTwins.id, id), eq(digitalTwins.ownerUserId, current.userId), isNull(digitalTwins.deletedAt))).limit(1); const [source] = await db.select().from(digitalTwinVersions).where(and(eq(digitalTwinVersions.twinId, id), eq(digitalTwinVersions.ownerUserId, current.userId), eq(digitalTwinVersions.version, version))).limit(1)
     if (!twin || !source) throw Object.assign(new Error('分身或版本不存在'), { status: 404, code: 'NOT_FOUND' }); const nextVersion = twin.activeVersion + 1
     await db.transaction(async tx => { await tx.update(digitalTwins).set({ rules: source.rules, cases: source.cases, activeVersion: nextVersion, updatedAt: new Date() }).where(eq(digitalTwins.id, id)); await tx.insert(digitalTwinVersions).values({ id: randomUUID(), twinId: id, ownerUserId: current.userId, version: nextVersion, rules: source.rules, cases: source.cases, source: 'restore' }) })
     await audit(req, '恢复数字分身版本', `${id}:v${version}`); res.json({ version: nextVersion })
@@ -604,18 +800,81 @@ dueDiligenceRouter.post('/twins/:id/extract-traits', async (req: AuthedRequest, 
     await audit(req, '解析数字分身材料特质', body.sourceName); res.json({ traits })
   } catch (error) { next(error) }
 })
+
+async function requireOwnedTwin(twinId: string, ownerUserId: string) {
+  const [twin] = await db.select().from(digitalTwins).where(and(eq(digitalTwins.id, twinId), eq(digitalTwins.ownerUserId, ownerUserId), isNull(digitalTwins.deletedAt))).limit(1)
+  if (!twin) throw Object.assign(new Error('数字分身不存在'), { status: 404, code: 'NOT_FOUND' })
+  return twin
+}
+
+dueDiligenceRouter.get('/twins/:id/assets', async (req: AuthedRequest, res, next) => {
+  try { const twinId = routeId(req.params.id); await requireOwnedTwin(twinId, req.user!.uid); res.json({ list: await db.select().from(digitalTwinPrivateAssets).where(and(eq(digitalTwinPrivateAssets.twinId, twinId), eq(digitalTwinPrivateAssets.ownerUserId, req.user!.uid))).orderBy(desc(digitalTwinPrivateAssets.createdAt)) }) } catch (error) { next(error) }
+})
+
+dueDiligenceRouter.post('/twins/:id/assets', async (req: AuthedRequest, res, next) => {
+  try {
+    const twinId = routeId(req.params.id); await requireOwnedTwin(twinId, req.user!.uid)
+    const body = z.object({ sourceType: z.enum(['本地素材', '个人笔记', '知识库材料']), sourceName: z.string().trim().min(1).max(255), sourceId: z.string().uuid().optional(), mimeType: z.string().trim().max(128).optional().default('text/plain'), dataBase64: z.string().max(140_000_000).optional(), contentText: z.string().max(200_000).optional() }).parse(req.body)
+    const id = randomUUID(); let contentText = body.contentText?.trim() || null; let storagePath: string | null = null; let sourceFileId: string | null = null; let sourceNoteId: string | null = null
+    if (body.sourceType === '个人笔记') {
+      if (!body.sourceId) throw Object.assign(new Error('缺少个人笔记引用'), { status: 400, code: 'SOURCE_REQUIRED' })
+      const [note] = await db.select({ id: personalNotes.id, text: personalNotes.plainText }).from(personalNotes).where(and(eq(personalNotes.id, body.sourceId), eq(personalNotes.ownerId, req.user!.uid))).limit(1)
+      if (!note) throw Object.assign(new Error('个人笔记不存在或无权访问'), { status: 404, code: 'SOURCE_NOT_FOUND' }); sourceNoteId = note.id; contentText = note.text
+    } else if (body.sourceType === '知识库材料') {
+      if (!body.sourceId) throw Object.assign(new Error('缺少知识库材料引用'), { status: 400, code: 'SOURCE_REQUIRED' })
+      const file = await requireProjectFileAccess(db, body.sourceId, req.user!.uid); sourceFileId = file.id; contentText = file.contentText
+    } else if (body.dataBase64) {
+      const raw = body.dataBase64.includes(',') ? body.dataBase64.slice(body.dataBase64.indexOf(',') + 1) : body.dataBase64
+      const buffer = Buffer.from(raw, 'base64'); if (!buffer.length || buffer.length > 100 * 1024 * 1024) throw Object.assign(new Error('分身素材为空或超过 100MB'), { status: 400, code: 'INVALID_ASSET' })
+      storagePath = await saveDigitalTwinPrivateAsset(req.user!.uid, id, buffer)
+    }
+    const parseStatus = contentText ? '可解析' : (storagePath ? '待解析' : '缺少内容')
+    await db.insert(digitalTwinPrivateAssets).values({ id, twinId, ownerUserId: req.user!.uid, sourceType: body.sourceType, sourceName: body.sourceName, mimeType: body.mimeType, sourceFileId, sourceNoteId, storagePath, contentText, parseStatus })
+    const [row] = await db.select().from(digitalTwinPrivateAssets).where(eq(digitalTwinPrivateAssets.id, id)).limit(1); await audit(req, '导入数字分身私有素材', body.sourceName); res.status(201).json(row)
+  } catch (error) { next(error) }
+})
+
+dueDiligenceRouter.post('/twins/:id/assets/:assetId/parse', async (req: AuthedRequest, res, next) => {
+  try {
+    const twinId = routeId(req.params.id); const assetId = routeId(req.params.assetId); await requireOwnedTwin(twinId, req.user!.uid)
+    const [asset] = await db.select().from(digitalTwinPrivateAssets).where(and(eq(digitalTwinPrivateAssets.id, assetId), eq(digitalTwinPrivateAssets.twinId, twinId), eq(digitalTwinPrivateAssets.ownerUserId, req.user!.uid))).limit(1)
+    if (!asset) throw Object.assign(new Error('分身素材不存在'), { status: 404, code: 'NOT_FOUND' })
+    let text = asset.contentText?.trim() || ''
+    await db.update(digitalTwinPrivateAssets).set({ parseStatus: '解析中', parseError: null, updatedAt: new Date() }).where(eq(digitalTwinPrivateAssets.id, assetId))
+    try {
+      if (!text && asset.storagePath && asset.mimeType?.startsWith('audio/')) {
+        const result = await transcribeDueDiligenceBuffer({ buffer: await readDigitalTwinPrivateAsset(asset.storagePath), fileName: asset.sourceName, mimeType: asset.mimeType }); text = result.text
+      }
+      if (!text) throw Object.assign(new Error('该素材尚无可解析文字；请导入已解析的知识库材料，或配置后台音频转写。'), { status: 400, code: 'ASSET_TEXT_UNAVAILABLE' })
+      const runtime = await resolveDueDiligenceModelRuntime(req.user!.role, 'ai-document')
+      const response = await fetchAiGatewayChatCompatible(runtime.baseUrl, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(runtime.apiKey ? { Authorization: `Bearer ${runtime.apiKey}` } : {}) }, body: JSON.stringify({ model: runtime.model, max_tokens: 1600, messages: [{ role: 'system', content: '从员工本人材料中提炼可编辑的投资判断偏好建议。只总结可复用的关注点、核查习惯、反证要求和适用边界；不得披露项目名称、客户姓名或原文。使用简洁中文要点。' }, { role: 'user', content: `材料名称：${asset.sourceName}\n${text.slice(0, 60000)}` }] }), signal: AbortSignal.timeout(120_000) }, fetch, 120_000)
+      if (!response.ok) throw new Error(`模型服务 HTTP ${response.status}`)
+      const traits = ((await response.json()) as { choices?: Array<{ message?: { content?: string } }> }).choices?.[0]?.message?.content?.trim(); if (!traits) throw new Error('模型未返回判断偏好建议')
+      await db.update(digitalTwinPrivateAssets).set({ contentText: text, traitSuggestion: traits, parseStatus: '待采纳', parseError: null, updatedAt: new Date() }).where(eq(digitalTwinPrivateAssets.id, assetId))
+      await audit(req, '解析数字分身私有素材', asset.sourceName); res.json({ traits, parseStatus: '待采纳' })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '素材解析失败'; await db.update(digitalTwinPrivateAssets).set({ parseStatus: '失败', parseError: message.slice(0, 1000), updatedAt: new Date() }).where(eq(digitalTwinPrivateAssets.id, assetId)); throw error
+    }
+  } catch (error) { next(error) }
+})
 dueDiligenceRouter.post('/twins/:id/conversation-candidates', async (req: AuthedRequest, res, next) => {
   try {
-    const id = routeId(req.params.id); const body = z.object({ content: z.string().trim().min(1).max(8000), projectId: z.string().uuid().nullable().optional() }).parse(req.body); const current = actor(req)
+    const id = routeId(req.params.id); const body = z.object({ userQuestion: z.string().trim().min(1).max(8000), assistantAnswer: z.string().trim().min(1).max(16000), feedback: z.enum(['采纳', '修改', '拒绝']), feedbackNote: z.string().trim().max(8000).optional().default(''), projectId: z.string().uuid().nullable().optional() }).parse(req.body); const current = actor(req)
     const [twin] = await db.select().from(digitalTwins).where(and(eq(digitalTwins.id, id), eq(digitalTwins.ownerUserId, current.userId), isNull(digitalTwins.deletedAt))).limit(1)
     if (!twin) throw Object.assign(new Error('数字分身不存在'), { status: 404, code: 'NOT_FOUND' })
-    if (!body.projectId) { res.json({ created: false }); return }
-    await requireAccessibleProject(current.userId, body.projectId)
-    const sourceHash = Buffer.from(body.content).toString('base64url').slice(0, 64)
+    if (body.projectId) await requireAccessibleProject(current.userId, body.projectId)
+    const sourceHash = createHash('sha256').update(`${body.userQuestion}|${body.assistantAnswer}|${body.feedback}|${body.feedbackNote}`).digest('hex')
     const [existing] = await db.select({ id: digitalTwinLearningCandidates.id }).from(digitalTwinLearningCandidates).where(and(eq(digitalTwinLearningCandidates.twinId, id), eq(digitalTwinLearningCandidates.sourceHash, sourceHash))).limit(1)
-    await recordExperienceEvent({ ownerUserId: current.userId, twinId: id, projectId: body.projectId, eventType: 'conversation.insight', entityType: 'conversation', topic: '对话中的尽调判断', fingerprint: sourceHash, payload: { note: body.content.slice(0, 1000) } })
-    if (!existing) await db.insert(digitalTwinLearningCandidates).values({ id: randomUUID(), twinId: id, ownerUserId: current.userId, projectId: body.projectId, sourceHash, sourceName: '实时分身对话', sourceType: '实时分身对话', sourceKey: `conversation:${sourceHash}`, topic: '对话中的尽调判断', confidence: 60, engine: 'rules', evidenceCount: 1, rules: `在后续相似尽调中，复核这段对话中提出的判断：${body.content.slice(0, 1000)}`, cases: '', boundaries: '该候选只记录对话中出现的偏好或假设，需本人确认后才写入分身。', rationale: '系统根据实时分身对话自动提炼。' })
-    await audit(req, '提炼实时分身对话经验', twin.name); res.json({ created: !existing })
+    await recordExperienceEvent({ ownerUserId: current.userId, twinId: id, projectId: body.projectId ?? null, eventType: 'conversation.feedback', entityType: 'conversation', topic: '对话中的尽调判断', fingerprint: sourceHash, payload: { question: body.userQuestion.slice(0, 1000), answer: body.assistantAnswer.slice(0, 2000), feedback: body.feedback, note: body.feedbackNote.slice(0, 1000) } })
+    if (body.feedback === '拒绝' || existing) { res.json({ created: false }); return }
+    const runtime = await resolveDueDiligenceModelRuntime(req.user!.role, 'ai-document')
+    const response = await fetchAiGatewayChatCompatible(runtime.baseUrl, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(runtime.apiKey ? { Authorization: `Bearer ${runtime.apiKey}` } : {}) }, body: JSON.stringify({ model: runtime.model, response_format: { type: 'json_object' }, max_tokens: 1800, messages: [{ role: 'system', content: '根据一次数字分身对话及员工反馈，判断是否形成可复用的个人投资经验。不得把问题本身直接当偏好。只返回 JSON：{"useful":true,"topic":"","rules":"","cases":"","boundaries":"","confidence":80,"rationale":""}' }, { role: 'user', content: JSON.stringify(body) }] }), signal: AbortSignal.timeout(120_000) }, fetch, 120_000)
+    if (!response.ok) throw Object.assign(new Error('经验提炼模型暂不可用'), { status: 503, code: 'AI_GATEWAY_UNAVAILABLE' })
+    const raw = ((await response.json()) as { choices?: Array<{ message?: { content?: string } }> }).choices?.[0]?.message?.content?.trim().replace(/^```json\s*/i, '').replace(/\s*```$/, '')
+    const insight = z.object({ useful: z.boolean(), topic: z.string().trim().max(128).default('对话中的尽调判断'), rules: z.string().trim().max(12000).default(''), cases: z.string().trim().max(12000).default(''), boundaries: z.string().trim().max(4000).default(''), confidence: z.number().int().min(1).max(100).default(75), rationale: z.string().trim().max(4000).default('') }).parse(JSON.parse(raw || '{}'))
+    if (!insight.useful || !insight.rules) { res.json({ created: false }); return }
+    await db.insert(digitalTwinLearningCandidates).values({ id: randomUUID(), twinId: id, ownerUserId: current.userId, projectId: body.projectId ?? null, sourceHash, sourceName: '分身对话反馈', sourceType: '分身对话反馈', sourceKey: `conversation:${sourceHash}`, topic: insight.topic || '对话中的尽调判断', confidence: insight.confidence, engine: 'model', evidenceCount: 1, rules: insight.rules, cases: insight.cases, boundaries: insight.boundaries || '仅适用于与本次对话相似且证据条件一致的尽调场景。', rationale: insight.rationale || '根据分身回答和员工采纳/修改反馈提炼。' })
+    await audit(req, '提炼分身对话反馈经验', twin.name); res.json({ created: true })
   } catch (error) { next(error) }
 })
 dueDiligenceRouter.get('/twins/importable-sources', async (req: AuthedRequest, res, next) => {
@@ -631,7 +890,7 @@ dueDiligenceRouter.get('/twins/importable-sources', async (req: AuthedRequest, r
 dueDiligenceRouter.post('/twins/:id/conversation', async (req: AuthedRequest, res, next) => {
   try {
     const id = routeId(req.params.id); const body = z.object({ projectId: z.string().uuid().nullable().optional() }).parse(req.body ?? {}); const current = actor(req)
-    const [twin] = await db.select().from(digitalTwins).where(and(eq(digitalTwins.id, id), eq(digitalTwins.ownerUserId, current.userId))).limit(1); if (!twin) throw Object.assign(new Error('数字分身不存在'), { status: 404, code: 'NOT_FOUND' })
+    const [twin] = await db.select().from(digitalTwins).where(and(eq(digitalTwins.id, id), eq(digitalTwins.ownerUserId, current.userId), isNull(digitalTwins.deletedAt))).limit(1); if (!twin) throw Object.assign(new Error('数字分身不存在'), { status: 404, code: 'NOT_FOUND' })
     if (body.projectId) await requireAccessibleProject(current.userId, body.projectId)
     const [existing] = await db.select().from(digitalTwinConversations).where(and(eq(digitalTwinConversations.twinId, id), body.projectId ? eq(digitalTwinConversations.projectId, body.projectId) : isNull(digitalTwinConversations.projectId))).limit(1)
     if (existing) { res.json(existing); return }
