@@ -65,6 +65,16 @@ type SpeechRecognizerConstructor = {
   install?: (options: { langs: string[]; processLocally: boolean; quality: 'dictation' | 'command' }) => Promise<boolean>
 }
 
+function stopSpeechRecognizer(ref: { current: SpeechRecognizer | null }) {
+  const recognizer = ref.current
+  if (!recognizer) return
+  ref.current = null
+  recognizer.onresult = null
+  recognizer.onerror = null
+  recognizer.onend = null
+  recognizer.stop()
+}
+
 const actionIcons = {
   'project-brief': BrainCircuit,
   'project-risks': FileSearch,
@@ -198,9 +208,7 @@ export function SaiUnicornAgent() {
     draftConversationRef.current = null
     conversationScopeRef.current = conversationScopeKey
     if (recognizerRef.current) {
-      recognizerRef.current.onend = null
-      recognizerRef.current.stop()
-      recognizerRef.current = null
+      stopSpeechRecognizer(recognizerRef)
       setListening(false)
     }
     pendingConversationRef.current = null
@@ -270,9 +278,7 @@ export function SaiUnicornAgent() {
 
   useEffect(() => {
     if (open || !recognizerRef.current) return
-    recognizerRef.current.onend = null
-    recognizerRef.current.stop()
-    recognizerRef.current = null
+    stopSpeechRecognizer(recognizerRef)
     setListening(false)
   }, [open])
 
@@ -301,18 +307,12 @@ export function SaiUnicornAgent() {
   }, [agent.interaction?.id])
 
   useEffect(() => () => {
-    if (recognizerRef.current) {
-      recognizerRef.current.onend = null
-      recognizerRef.current.stop()
-      recognizerRef.current = null
-    }
+    stopSpeechRecognizer(recognizerRef)
   }, [])
 
   const toggleVoiceInput = () => {
     if (recognizerRef.current) {
-      recognizerRef.current.onend = null
-      recognizerRef.current.stop()
-      recognizerRef.current = null
+      stopSpeechRecognizer(recognizerRef)
       setListening(false)
       return
     }
@@ -334,6 +334,7 @@ export function SaiUnicornAgent() {
     recognizer.interimResults = true
     if (preferLocalSpeech && localSpeechStatus === 'available') recognizer.processLocally = true
     recognizer.onresult = (event) => {
+      if (recognizerRef.current !== recognizer) return
       const transcript = Array.from(event.results).map((result) => result[0]?.transcript ?? '').join('').trim()
       if (transcript) {
         recognized = true
@@ -342,24 +343,34 @@ export function SaiUnicornAgent() {
       }
     }
     recognizer.onerror = (event) => {
+      if (recognizerRef.current !== recognizer) return
       failed = true
       if (event.error === 'network') setOfferLocalSpeech(true)
       if (event.error !== 'aborted') setSpeechError(formatSpeechError(event.error))
       setListening(false)
       recognizerRef.current = null
+      recognizer.onresult = null
+      recognizer.onerror = null
+      recognizer.onend = null
     }
     recognizer.onend = () => {
+      if (recognizerRef.current !== recognizer) return
       if (!recognized && !failed) setSpeechError('未识别到语音，请重试或使用文字输入。')
       setListening(false)
       recognizerRef.current = null
+      recognizer.onresult = null
+      recognizer.onerror = null
+      recognizer.onend = null
     }
     try {
       setSpeechError(undefined)
       setOfferLocalSpeech(false)
-      recognizer.start()
       recognizerRef.current = recognizer
       setListening(true)
+      recognizer.start()
     } catch {
+      if (recognizerRef.current === recognizer) recognizerRef.current = null
+      setListening(false)
       setSpeechError('无法启动语音识别，请检查麦克风权限。')
     }
   }
@@ -391,9 +402,7 @@ export function SaiUnicornAgent() {
 
   const closePanel = () => {
     if (recognizerRef.current) {
-      recognizerRef.current.onend = null
-      recognizerRef.current.stop()
-      recognizerRef.current = null
+      stopSpeechRecognizer(recognizerRef)
       setListening(false)
     }
     setOpen(false)
