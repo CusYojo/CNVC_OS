@@ -116,6 +116,8 @@ export function SaiUnicornAgent() {
   const discoverySnapshot = useSaiPageContext((state) => state.discoverySnapshot)
   const reviewSnapshot = useSaiPageContext((state) => state.reviewSnapshot)
   const knowledgeSnapshot = useSaiPageContext((state) => state.knowledgeSnapshot)
+  const institutionSnapshot = useSaiPageContext((state) => state.institutionSnapshot)
+  const institutionName = useSaiPageContext((state) => state.institutionName)
   const dueDiligenceSnapshot = useSaiPageContext((state) => state.dueDiligenceSnapshot)
   const dueDiligenceProject = useSaiPageContext((state) => state.dueDiligenceProject)
   const [open, setOpen] = useState(false)
@@ -142,11 +144,12 @@ export function SaiUnicornAgent() {
   const currentContext = useMemo(
     () => {
       const context = resolveSaiAgentContext(location.pathname, location.search, projects)
+      if (context.kind === 'institution' && institutionName && location.pathname !== '/institutions') return { ...context, detail: `${institutionName} · ${context.detail}` }
       return context.kind === 'due-diligence' && dueDiligenceProject
         ? { ...context, projectId: dueDiligenceProject.id, projectName: dueDiligenceProject.name, detail: `${dueDiligenceProject.name} · ${context.detail}` }
         : context
     },
-    [location.pathname, location.search, projects, dueDiligenceProject],
+    [location.pathname, location.search, projects, dueDiligenceProject, institutionName],
   )
   const conversationScopeKey = getSaiConversationScopeKey(currentContext)
   const conversationScopeRef = useRef(conversationScopeKey)
@@ -436,6 +439,7 @@ export function SaiUnicornAgent() {
       + (currentContext.kind === 'discovery' ? discoverySnapshot : '')
       + (currentContext.kind === 'review' ? reviewSnapshot : '')
       + (currentContext.kind === 'knowledge' ? knowledgeSnapshot : '')
+      + (currentContext.kind === 'institution' ? institutionSnapshot : '')
       + (currentContext.kind === 'due-diligence' ? dueDiligenceSnapshot : '')
     const requestScopeKey = conversationScopeKey
     const toolMode = resolveSaiToolMode(currentContext, cleanGoal)
