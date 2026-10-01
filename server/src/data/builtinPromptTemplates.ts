@@ -1,6 +1,10 @@
+import type { PromptLibraryCategory } from '../contracts/promptLibraryCategories.js'
+import { EXPANDED_PROMPT_TEMPLATES } from './expandedPromptTemplates.js'
+
 export type BuiltinPromptTemplate = {
   slug: string
   kind: 'skill' | 'agent'
+  category: PromptLibraryCategory
   name: string
   description: string
   markdown: string
@@ -67,6 +71,7 @@ export const BUILTIN_PROMPT_TEMPLATES: readonly BuiltinPromptTemplate[] = [
   {
     slug: 'investment-meeting-prep',
     kind: 'skill',
+    category: 'investment',
     name: '投资访谈会前准备',
     description: '把项目材料、参会信息与已知疑问整理成一页访谈准备提纲。',
     sourceUrl: callPrepSource,
@@ -84,6 +89,7 @@ export const BUILTIN_PROMPT_TEMPLATES: readonly BuiltinPromptTemplate[] = [
   {
     slug: 'investment-meeting-notes',
     kind: 'skill',
+    category: 'investment',
     name: '投资会议纪要与待办',
     description: '把访谈转写或手记整理成事实、争议、决定与可执行待办。',
     sourceUrl: callSummarySource,
@@ -101,6 +107,7 @@ export const BUILTIN_PROMPT_TEMPLATES: readonly BuiltinPromptTemplate[] = [
   {
     slug: 'evidence-synthesis',
     kind: 'skill',
+    category: 'general',
     name: '多源研究资料归纳',
     description: '汇总新闻、访谈和报告中的证据、冲突与研究空白。',
     sourceUrl: synthesisSource,
@@ -118,6 +125,7 @@ export const BUILTIN_PROMPT_TEMPLATES: readonly BuiltinPromptTemplate[] = [
   {
     slug: 'vc-diligence-checklist',
     kind: 'skill',
+    category: 'investment',
     name: 'VC 尽调资料清单',
     description: '按项目阶段和行业生成有优先级、证据要求及风险提示的尽调清单。',
     sourceUrl: diligenceSource,
@@ -135,6 +143,7 @@ export const BUILTIN_PROMPT_TEMPLATES: readonly BuiltinPromptTemplate[] = [
   {
     slug: 'sector-landscape-analyst',
     kind: 'agent',
+    category: 'investment',
     name: '行业赛道研究 Agent',
     description: '围绕指定赛道持续组织市场、价值链、技术、玩家和风险证据。',
     sourceUrl: sectorSource,
@@ -152,6 +161,7 @@ export const BUILTIN_PROMPT_TEMPLATES: readonly BuiltinPromptTemplate[] = [
   {
     slug: 'competitive-technology-analyst',
     kind: 'agent',
+    category: 'technology',
     name: '竞品与技术路线分析 Agent',
     description: '比较目标企业与可比公司、技术路线及商业化进展。',
     sourceUrl: competitorsSource,
@@ -166,4 +176,5 @@ export const BUILTIN_PROMPT_TEMPLATES: readonly BuiltinPromptTemplate[] = [
       sourceUrl: competitorsSource,
     }),
   },
+  ...EXPANDED_PROMPT_TEMPLATES,
 ]

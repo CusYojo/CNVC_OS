@@ -25,6 +25,7 @@ test('prompt library catalog query projects metadata without reading Markdown lo
   assert.doesNotMatch(catalogQuery, /db\.select\(\)/)
   assert.doesNotMatch(catalogQuery, /promptLibraryItems\.markdown/)
   assert.match(catalogQuery, /category: promptLibraryItems\.category/)
+  assert.match(catalogQuery, /category \? eq\(promptLibraryItems\.category, category\)/)
 })
 
 test('prompt library writes audit and mutation in the same MySQL transaction', () => {

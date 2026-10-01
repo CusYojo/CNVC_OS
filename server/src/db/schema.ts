@@ -3192,6 +3192,7 @@ export const aiConversationCapabilities = mysqlTable('ai_conversation_capabiliti
 export const promptLibraryItems = mysqlTable('prompt_library_items', {
   id: uuidPrimaryKey('id'),
   kind: varchar('kind', { length: 16 }).notNull(),
+  category: varchar('category', { length: 32 }).notNull().default('general'),
   name: varchar('name', { length: 128 }).notNull(),
   description: text('description').notNull(),
   markdown: longtext('markdown').notNull(),

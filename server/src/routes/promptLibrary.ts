@@ -1,5 +1,6 @@
 import { Router } from 'express'
 import { z } from 'zod'
+import { PROMPT_LIBRARY_CATEGORIES, type PromptLibraryCategory } from '../contracts/promptLibraryCategories.js'
 import type { AuthedRequest } from '../middleware/requireAuth.js'
 import { PROMPT_LIBRARY_KINDS, safePromptDownloadFileName, type PromptLibraryActor, type createPromptLibraryService } from '../services/promptLibraryService.js'
 
@@ -29,8 +30,11 @@ export function createPromptLibraryRouter(service: PromptLibraryService) {
 
   router.get('/', async (req: AuthedRequest, res, next) => {
     try {
-      const query = z.object({ kind: z.enum(PROMPT_LIBRARY_KINDS) }).strict().parse(req.query)
-      res.json({ list: await service.list(actor(req), query.kind) })
+      const query = z.object({
+        kind: z.enum(PROMPT_LIBRARY_KINDS),
+        category: z.enum(PROMPT_LIBRARY_CATEGORIES.map(item => item.id) as [PromptLibraryCategory, ...PromptLibraryCategory[]]).optional(),
+      }).strict().parse(req.query)
+      res.json({ list: await service.list(actor(req), query.kind, query.category) })
     } catch (error) { next(error) }
   })
 

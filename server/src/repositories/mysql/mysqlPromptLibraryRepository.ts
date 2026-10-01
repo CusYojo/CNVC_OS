@@ -7,7 +7,7 @@ type SummaryRow = Pick<typeof promptLibraryItems.$inferSelect, keyof PromptLibra
 
 function summaryRecord(row: SummaryRow): PromptLibrarySummaryRecord {
   return {
-    id: row.id, kind: row.kind as PromptLibraryKind, name: row.name,
+    id: row.id, kind: row.kind as PromptLibraryKind, category: row.category as PromptLibraryRecord['category'], name: row.name,
     description: row.description, fileName: row.fileName,
     sourceUrl: row.sourceUrl, license: row.license,
     ownerUserId: row.ownerUserId, visibility: row.visibility as PromptLibraryRecord['visibility'],
@@ -20,9 +20,9 @@ function record(row: typeof promptLibraryItems.$inferSelect): PromptLibraryRecor
 }
 
 export const mysqlPromptLibraryRepository: PromptLibraryRepository = {
-  async listVisible(userId, kind, includePrivateForAdmin = false) {
+  async listVisible(userId, kind, includePrivateForAdmin = false, category) {
     const rows = await db.select({
-      id: promptLibraryItems.id, kind: promptLibraryItems.kind, name: promptLibraryItems.name,
+      id: promptLibraryItems.id, kind: promptLibraryItems.kind, category: promptLibraryItems.category, name: promptLibraryItems.name,
       description: promptLibraryItems.description, fileName: promptLibraryItems.fileName,
       sourceUrl: promptLibraryItems.sourceUrl, license: promptLibraryItems.license,
       ownerUserId: promptLibraryItems.ownerUserId, visibility: promptLibraryItems.visibility,
@@ -30,6 +30,7 @@ export const mysqlPromptLibraryRepository: PromptLibraryRepository = {
       updatedAt: promptLibraryItems.updatedAt,
     }).from(promptLibraryItems).where(and(
       eq(promptLibraryItems.kind, kind), isNull(promptLibraryItems.deletedAt),
+      category ? eq(promptLibraryItems.category, category) : undefined,
       includePrivateForAdmin ? undefined : or(eq(promptLibraryItems.ownerUserId, userId), eq(promptLibraryItems.visibility, 'organization')),
     )).orderBy(desc(promptLibraryItems.updatedAt)).limit(500)
     return rows.map(summaryRecord)

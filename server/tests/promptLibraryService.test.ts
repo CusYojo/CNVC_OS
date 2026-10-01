@@ -21,8 +21,8 @@ const builtin = {
 function memoryRepository(writeAudit: (audit: PromptLibraryAuditRecord) => Promise<void> = async () => undefined) {
   const records = new Map<string, PromptLibraryRecord>()
   const repository: PromptLibraryRepository = {
-    async listVisible(userId, kind) {
-      return [...records.values()].filter(item => item.kind === kind && (item.visibility === 'organization' || item.ownerUserId === userId))
+    async listVisible(userId, kind, _includePrivateForAdmin, category) {
+      return [...records.values()].filter(item => item.kind === kind && (!category || item.category === category) && (item.visibility === 'organization' || item.ownerUserId === userId))
     },
     async findById(id) { return records.get(id) ?? null },
     async createWithAudit(item, audit) {
@@ -75,6 +75,8 @@ test('builtin templates are readable but immutable', async () => {
   const items = await service.list(colleague, 'skill')
   assert.equal(items[0]?.id, 'builtin:research-brief')
   assert.equal(items[0]?.category, 'research')
+  assert.equal((await service.list(colleague, 'skill', 'research')).length, 1)
+  assert.deepEqual(await service.list(colleague, 'skill', 'office'), [])
   assert.equal(Object.hasOwn(items[0] ?? {}, 'markdown'), false)
   assert.equal((await service.get(colleague, 'builtin:research-brief')).markdown, builtin.markdown)
   await assert.rejects(service.update(admin, 'builtin:research-brief', { expectedVersion: 1, name: '替换' }), { status: 403 })
@@ -100,6 +102,8 @@ test('private draft is visible only to its author and admins can edit but not by
   const colleagueList = await service.list(colleague, 'agent')
   assert.equal(colleagueList.length, 1)
   assert.equal(colleagueList[0]?.category, 'finance')
+  assert.equal((await service.list(colleague, 'agent', 'finance')).length, 1)
+  assert.equal((await service.list(colleague, 'agent', 'investment')).length, 0)
   assert.equal(Object.hasOwn(colleagueList[0] ?? {}, 'markdown'), false)
   assert.equal((await service.get(colleague, created.id)).markdown, created.markdown)
   await assert.rejects(service.update(author, created.id, { expectedVersion: 1, name: '旧版本' }), { status: 409 })
