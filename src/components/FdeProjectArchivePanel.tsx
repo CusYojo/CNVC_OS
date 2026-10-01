@@ -5,6 +5,8 @@ import { apiGet, apiErrorFromResponse } from '../lib/api'
 import { authedFetch, useAuthStore } from '../store/useAuthStore'
 import { Button, Card, Drawer } from './ui'
 import { useToast } from './Toast'
+import { useSaiPageContext } from '../store/useSaiPageContext'
+import { buildSaiKnowledgeSnapshot } from '../lib/saiAgent'
 import { archiveQuery, type ArchiveAudit, type ArchiveDetail, type ArchiveFile, type ArchiveList } from '../../server/src/contracts/fdeArchiveContract'
 import type { DataKnowledgeCapabilities } from '../../server/src/contracts/fdeDataKnowledgeContract'
 import './fde-workspace.css'
@@ -23,6 +25,7 @@ export function FdeProjectArchivePanel(props: { onOpenTools: (tool: Tools) => vo
 }
 
 function ArchiveWorkspace({ userId, onOpenTools, capabilities }: { userId: string; onOpenTools: (tool: Tools) => void; capabilities: DataKnowledgeCapabilities }) {
+  const setKnowledgeSnapshot = useSaiPageContext(state => state.setKnowledgeSnapshot)
   const [params, setParams] = useSearchParams(), location = useLocation(), navigate = useNavigate(), { showToast } = useToast()
   const [keyword, setKeyword] = useState(params.get('archiveQ') ?? ''), [refresh, setRefresh] = useState(0)
   const [list, setList] = useState<ArchiveList | null>(null), [error, setError] = useState('')
@@ -35,6 +38,17 @@ function ArchiveWorkspace({ userId, onOpenTools, capabilities }: { userId: strin
   const query = parsed.success ? parsed.data : null
   const queryString = query ? new URLSearchParams(Object.entries(query).filter(([, value]) => value !== undefined && value !== '').map(([key, value]) => [key, String(value)])).toString() : ''
   const selected = params.get('file'), grid = params.get('archiveLayout') === 'grid'
+  useEffect(() => {
+    setKnowledgeSnapshot(buildSaiKnowledgeSnapshot({
+      scope: '项目档案当前筛选列表',
+      total: list?.total ?? null,
+      rows: (list?.list ?? []).map(file => ({ title: file.name, kind: file.category, project: file.projectName, summary: `解析状态：${file.parseStatus}` })),
+      selected: detail ? { title: detail.file.name, kind: detail.file.category, project: detail.file.projectName, summary: `解析状态：${detail.file.parseStatus}` } : null,
+      loading: !list && !error,
+      error,
+    }))
+    return () => setKnowledgeSnapshot('')
+  }, [list, detail, error, setKnowledgeSnapshot])
   const update = (values: Record<string, string | null>, resetPage = false) => {
     const next = new URLSearchParams(params)
     for (const [key, value] of Object.entries(values)) value ? next.set(key, value) : next.delete(key)

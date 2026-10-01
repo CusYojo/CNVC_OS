@@ -8,34 +8,71 @@ import {
   ExternalLink,
   FileSearch,
   ListChecks,
+  Mic,
+  MicOff,
   RotateCcw,
   ShieldCheck,
   Sparkles,
   Square,
   X,
 } from 'lucide-react'
-import { FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react'
+import { FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useJwAgent } from '../hooks/useJwAgent'
 import { extractTextParts, normalizeAgentMessages } from '../lib/aiMessageSafety'
-import { apiPost } from '../lib/api'
+import { apiDelete, apiGet, apiPost } from '../lib/api'
 import { openApproval } from '../lib/approvalWorkspace'
 import {
   buildSaiAgentPrompt,
+  buildSaiWorkspaceSnapshot,
   buildSaiTurnReceipt,
   extractSaiPromptGoal,
   getSaiAgentActions,
   getSaiConversationScopeKey,
+  needsSaiWorkspaceSnapshot,
   resolveSaiAgentContext,
+  resolveSaiNavigationAction,
+  resolveSaiCreateAction,
+  resolveSaiToolMode,
+  resolveSaiUploadAction,
   type SaiAgentAction,
 } from '../lib/saiAgent'
 import { useAppStore } from '../store/useAppStore'
+import { useSaiPageContext } from '../store/useSaiPageContext'
 import './SaiUnicornAgent.css'
 
 type ConversationRow = {
   id: string
   agentId?: string
   title: string
+}
+
+type SpeechRecognizer = {
+  lang: string
+  continuous: boolean
+  interimResults: boolean
+  processLocally?: boolean
+  onresult: ((event: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null
+  onerror: ((event: { error: string }) => void) | null
+  onend: (() => void) | null
+  start: () => void
+  stop: () => void
+}
+
+type SpeechRecognizerConstructor = {
+  new (): SpeechRecognizer
+  available?: (options: { langs: string[]; processLocally: boolean; quality: 'dictation' | 'command' }) => Promise<'available' | 'downloadable' | 'downloading' | 'unavailable'>
+  install?: (options: { langs: string[]; processLocally: boolean; quality: 'dictation' | 'command' }) => Promise<boolean>
+}
+
+function stopSpeechRecognizer(ref: { current: SpeechRecognizer | null }) {
+  const recognizer = ref.current
+  if (!recognizer) return
+  ref.current = null
+  recognizer.onresult = null
+  recognizer.onerror = null
+  recognizer.onend = null
+  recognizer.stop()
 }
 
 const actionIcons = {
@@ -70,6 +107,14 @@ function formatAgentError(error: unknown): string {
   return message.length > 120 ? `${message.slice(0, 120)}…` : message
 }
 
+function formatSpeechError(error: string): string {
+  if (error === 'not-allowed' || error === 'service-not-allowed') return '麦克风权限未开启，请在浏览器地址栏允许麦克风后重试。'
+  if (error === 'audio-capture') return '未检测到可用麦克风，请检查设备连接。'
+  if (error === 'network') return '语音识别服务暂时无法连接，请稍后重试或使用文字输入。'
+  if (error === 'no-speech') return '没有听清语音，请靠近麦克风后重试。'
+  return '语音识别未完成，请重试或使用文字输入。'
+}
+
 export function SaiUnicornAgent() {
   const location = useLocation()
   const navigate = useNavigate()
@@ -78,11 +123,25 @@ export function SaiUnicornAgent() {
   const meetings = useAppStore((state) => state.meetings)
   const approvalRequests = useAppStore((state) => state.approvalRequests)
   const risks = useAppStore((state) => state.risks)
+  const discoverySnapshot = useSaiPageContext((state) => state.discoverySnapshot)
+  const reviewSnapshot = useSaiPageContext((state) => state.reviewSnapshot)
+  const knowledgeSnapshot = useSaiPageContext((state) => state.knowledgeSnapshot)
+  const institutionSnapshot = useSaiPageContext((state) => state.institutionSnapshot)
+  const institutionName = useSaiPageContext((state) => state.institutionName)
+  const dueDiligenceSnapshot = useSaiPageContext((state) => state.dueDiligenceSnapshot)
+  const dueDiligenceProject = useSaiPageContext((state) => state.dueDiligenceProject)
   const [open, setOpen] = useState(false)
   const [composer, setComposer] = useState('')
   const [agentId, setAgentId] = useState<string>()
   const [sending, setSending] = useState(false)
   const [localError, setLocalError] = useState<string>()
+  const [listening, setListening] = useState(false)
+  const [speechError, setSpeechError] = useState<string>()
+  const [localSpeechStatus, setLocalSpeechStatus] = useState<'available' | 'downloadable' | 'downloading' | 'unavailable'>()
+  const [localSpeechQuality, setLocalSpeechQuality] = useState<'dictation' | 'command'>('command')
+  const [installingLocalSpeech, setInstallingLocalSpeech] = useState(false)
+  const [offerLocalSpeech, setOfferLocalSpeech] = useState(false)
+  const [preferLocalSpeech, setPreferLocalSpeech] = useState(false)
   const [interactionAnswers, setInteractionAnswers] = useState<Record<string, string | string[]>>({})
   const [turnReceipt, setTurnReceipt] = useState<(
     ReturnType<typeof buildSaiTurnReceipt> & { assistantBaseline: number }
@@ -90,14 +149,34 @@ export function SaiUnicornAgent() {
   const triggerRef = useRef<HTMLButtonElement>(null)
   const closeRef = useRef<HTMLButtonElement>(null)
   const composerRef = useRef<HTMLTextAreaElement>(null)
+  const recognizerRef = useRef<SpeechRecognizer | null>(null)
   const agent = useJwAgent(agentId)
 
   const currentContext = useMemo(
-    () => resolveSaiAgentContext(location.pathname, location.search, projects),
-    [location.pathname, location.search, projects],
+    () => {
+      const context = resolveSaiAgentContext(location.pathname, location.search, projects)
+      if (context.kind === 'institution' && institutionName && location.pathname !== '/institutions') return { ...context, detail: `${institutionName} · ${context.detail}` }
+      return context.kind === 'due-diligence' && dueDiligenceProject
+        ? { ...context, projectId: dueDiligenceProject.id, projectName: dueDiligenceProject.name, detail: `${dueDiligenceProject.name} · ${context.detail}` }
+        : context
+    },
+    [location.pathname, location.search, projects, dueDiligenceProject, institutionName],
   )
   const conversationScopeKey = getSaiConversationScopeKey(currentContext)
   const conversationScopeRef = useRef(conversationScopeKey)
+  const pendingConversationRef = useRef<{ scope: string; promise: Promise<string | null> } | null>(null)
+  const draftConversationRef = useRef<{ id: string; used: boolean } | null>(null)
+  const submittingRef = useRef(false)
+  const panelOpenRef = useRef(open)
+  panelOpenRef.current = open
+  const discardUnusedConversation = useCallback(() => {
+    const draft = draftConversationRef.current
+    if (draft?.used || submittingRef.current) return
+    draftConversationRef.current = null
+    pendingConversationRef.current = null
+    if (draft) void apiDelete(`/conversations/${encodeURIComponent(draft.id)}`).catch(() => undefined)
+    setAgentId(undefined)
+  }, [])
   const actions = useMemo(() => getSaiAgentActions(currentContext), [currentContext])
   const messages = useMemo(
     () => normalizeAgentMessages(agent.messages)
@@ -125,12 +204,58 @@ export function SaiUnicornAgent() {
 
   useEffect(() => {
     if (conversationScopeRef.current === conversationScopeKey) return
+    discardUnusedConversation()
+    draftConversationRef.current = null
     conversationScopeRef.current = conversationScopeKey
+    if (recognizerRef.current) {
+      stopSpeechRecognizer(recognizerRef)
+      setListening(false)
+    }
+    pendingConversationRef.current = null
     setAgentId(undefined)
     setLocalError(undefined)
     setInteractionAnswers({})
     setTurnReceipt(undefined)
-  }, [conversationScopeKey])
+  }, [conversationScopeKey, discardUnusedConversation])
+
+  const ensureConversation = useCallback((): Promise<string | null> => {
+    if (agentId) return Promise.resolve(agentId)
+    if (pendingConversationRef.current?.scope === conversationScopeKey) return pendingConversationRef.current.promise
+    const promise = apiPost<ConversationRow>('/conversations', {
+      title: `小赛 · ${currentContext.label}`,
+      scope: currentContext.projectId ? 'project' : 'global',
+      projectId: currentContext.projectId ?? null,
+      projectName: currentContext.projectName ?? null,
+    }).then((row) => {
+      const nextAgentId = row.agentId || row.id
+      if (conversationScopeRef.current !== conversationScopeKey ||
+        pendingConversationRef.current?.promise !== promise ||
+        (!panelOpenRef.current && !submittingRef.current)) {
+        void apiDelete(`/conversations/${encodeURIComponent(row.id)}`).catch(() => undefined)
+        return null
+      }
+      draftConversationRef.current = { id: row.id, used: false }
+      setAgentId(nextAgentId)
+      void apiPost(`/agent/conversations/${encodeURIComponent(nextAgentId)}/prewarm`, { responseMode: 'compact', toolMode: resolveSaiToolMode(currentContext) }).catch(() => {
+        // The normal message path can still initialize the session if warming fails.
+      })
+      return nextAgentId
+    }).catch((error) => {
+      if (pendingConversationRef.current?.promise === promise) pendingConversationRef.current = null
+      throw error
+    })
+    pendingConversationRef.current = { scope: conversationScopeKey, promise }
+    return promise
+  }, [agentId, conversationScopeKey, currentContext.label, currentContext.projectId, currentContext.projectName])
+
+  useEffect(() => {
+    if (!open || agentId) return
+    void ensureConversation().catch((error) => setLocalError(formatAgentError(error)))
+  }, [open, agentId, ensureConversation])
+
+  useEffect(() => {
+    if (!open) discardUnusedConversation()
+  }, [open, discardUnusedConversation])
 
   useEffect(() => {
     if (turnReceipt && assistantMessageCount > turnReceipt.assistantBaseline) setTurnReceipt(undefined)
@@ -152,10 +277,134 @@ export function SaiUnicornAgent() {
   }, [open])
 
   useEffect(() => {
+    if (open || !recognizerRef.current) return
+    stopSpeechRecognizer(recognizerRef)
+    setListening(false)
+  }, [open])
+
+  useEffect(() => {
+    if (!open) return
+    const speechWindow = window as typeof window & { SpeechRecognition?: SpeechRecognizerConstructor; webkitSpeechRecognition?: SpeechRecognizerConstructor }
+    const Speech = speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition
+    if (!Speech?.available) return
+    let active = true
+    void (async () => {
+      for (const quality of ['dictation', 'command'] as const) {
+        try {
+          const status = await Speech.available!({ langs: ['zh-CN'], processLocally: true, quality })
+          if (status === 'unavailable') continue
+          if (active) { setLocalSpeechQuality(quality); setLocalSpeechStatus(status) }
+          return
+        } catch { /* Try the smaller pack or keep online recognition. */ }
+      }
+      if (active) setLocalSpeechStatus('unavailable')
+    })()
+    return () => { active = false }
+  }, [open])
+
+  useEffect(() => {
     setInteractionAnswers({})
   }, [agent.interaction?.id])
 
+  useEffect(() => () => {
+    stopSpeechRecognizer(recognizerRef)
+  }, [])
+
+  const toggleVoiceInput = () => {
+    if (recognizerRef.current) {
+      stopSpeechRecognizer(recognizerRef)
+      setListening(false)
+      return
+    }
+    const speechWindow = window as typeof window & {
+      SpeechRecognition?: SpeechRecognizerConstructor
+      webkitSpeechRecognition?: SpeechRecognizerConstructor
+    }
+    const Speech = speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition
+    if (!Speech) {
+      setSpeechError('当前浏览器不支持语音识别，请使用文字输入。')
+      return
+    }
+    const recognizer = new Speech()
+    let recognized = false
+    let failed = false
+    const initialComposer = composer
+    recognizer.lang = 'zh-CN'
+    recognizer.continuous = false
+    recognizer.interimResults = true
+    if (preferLocalSpeech && localSpeechStatus === 'available') recognizer.processLocally = true
+    recognizer.onresult = (event) => {
+      if (recognizerRef.current !== recognizer) return
+      const transcript = Array.from(event.results).map((result) => result[0]?.transcript ?? '').join('').trim()
+      if (transcript) {
+        recognized = true
+        setComposer(`${initialComposer}${initialComposer.trim() ? ' ' : ''}${transcript}`)
+        window.requestAnimationFrame(() => composerRef.current?.focus())
+      }
+    }
+    recognizer.onerror = (event) => {
+      if (recognizerRef.current !== recognizer) return
+      failed = true
+      if (event.error === 'network') setOfferLocalSpeech(true)
+      if (event.error !== 'aborted') setSpeechError(formatSpeechError(event.error))
+      setListening(false)
+      recognizerRef.current = null
+      recognizer.onresult = null
+      recognizer.onerror = null
+      recognizer.onend = null
+    }
+    recognizer.onend = () => {
+      if (recognizerRef.current !== recognizer) return
+      if (!recognized && !failed) setSpeechError('未识别到语音，请重试或使用文字输入。')
+      setListening(false)
+      recognizerRef.current = null
+      recognizer.onresult = null
+      recognizer.onerror = null
+      recognizer.onend = null
+    }
+    try {
+      setSpeechError(undefined)
+      setOfferLocalSpeech(false)
+      recognizerRef.current = recognizer
+      setListening(true)
+      recognizer.start()
+    } catch {
+      if (recognizerRef.current === recognizer) recognizerRef.current = null
+      setListening(false)
+      setSpeechError('无法启动语音识别，请检查麦克风权限。')
+    }
+  }
+
+  const enableLocalSpeech = async () => {
+    if (localSpeechStatus === 'available') {
+      setPreferLocalSpeech(true)
+      setSpeechError(undefined)
+      setOfferLocalSpeech(false)
+      return
+    }
+    const speechWindow = window as typeof window & { SpeechRecognition?: SpeechRecognizerConstructor; webkitSpeechRecognition?: SpeechRecognizerConstructor }
+    const Speech = speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition
+    if (!Speech?.install || (localSpeechStatus !== 'downloadable' && localSpeechStatus !== 'downloading')) return
+    setInstallingLocalSpeech(true)
+    try {
+      const installed = await Speech.install({ langs: ['zh-CN'], processLocally: true, quality: localSpeechQuality })
+      if (!installed) throw new Error('download failed')
+      setLocalSpeechStatus('available')
+      setPreferLocalSpeech(true)
+      setOfferLocalSpeech(false)
+      setSpeechError(undefined)
+    } catch {
+      setSpeechError('离线中文语音包安装失败，请稍后重试。')
+    } finally {
+      setInstallingLocalSpeech(false)
+    }
+  }
+
   const closePanel = () => {
+    if (recognizerRef.current) {
+      stopSpeechRecognizer(recognizerRef)
+      setListening(false)
+    }
     setOpen(false)
     window.requestAnimationFrame(() => triggerRef.current?.focus())
   }
@@ -163,8 +412,55 @@ export function SaiUnicornAgent() {
   const sendGoal = async (goal: string) => {
     const cleanGoal = goal.trim()
     if (!cleanGoal || busy) return
+    const createPath = resolveSaiCreateAction(cleanGoal)
+    if (createPath) {
+      setComposer('')
+      navigate(createPath)
+      closePanel()
+      return
+    }
+    const uploadPath = resolveSaiUploadAction(currentContext, cleanGoal)
+    if (uploadPath) {
+      if (uploadPath.startsWith('/knowledge?')) {
+        setSending(true)
+        setLocalError(undefined)
+        try {
+          const capabilities = await apiGet<{ upload: boolean; uploadProjectIds: string[] }>('/data-knowledge/capabilities')
+          if (!capabilities.upload || capabilities.uploadProjectIds.length === 0) {
+            setLocalError('当前账号没有可上传资料的项目。请先确认项目归属和上传权限。')
+            return
+          }
+        } catch (error) {
+          setLocalError(formatAgentError(error))
+          return
+        } finally {
+          setSending(false)
+        }
+      }
+      setComposer('')
+      navigate(uploadPath)
+      closePanel()
+      return
+    }
+    const navigation = resolveSaiNavigationAction(cleanGoal)
+    if (navigation) {
+      setComposer('')
+      if (navigation === 'approvals') openApproval('inbox')
+      else navigate(navigation)
+      closePanel()
+      return
+    }
     const prompt = buildSaiAgentPrompt(currentContext, cleanGoal)
+      + (['workspace', 'collaboration', 'workflow', 'risk', 'committee'].includes(currentContext.kind) && needsSaiWorkspaceSnapshot(cleanGoal)
+        ? buildSaiWorkspaceSnapshot({ projects, todos, meetings, risks, approvals: approvalRequests })
+        : '')
+      + (currentContext.kind === 'discovery' ? discoverySnapshot : '')
+      + (currentContext.kind === 'review' ? reviewSnapshot : '')
+      + (currentContext.kind === 'knowledge' ? knowledgeSnapshot : '')
+      + (currentContext.kind === 'institution' ? institutionSnapshot : '')
+      + (currentContext.kind === 'due-diligence' ? dueDiligenceSnapshot : '')
     const requestScopeKey = conversationScopeKey
+    const toolMode = resolveSaiToolMode(currentContext, cleanGoal)
     const currentProject = projects.find((project) => project.id === currentContext.projectId)
     setTurnReceipt({
       ...buildSaiTurnReceipt(currentContext, cleanGoal, currentProject, {
@@ -178,27 +474,25 @@ export function SaiUnicornAgent() {
     setComposer('')
     setLocalError(undefined)
     setSending(true)
+    submittingRef.current = true
     try {
       if (agentId) {
-        await agent.sendMessage(prompt, { responseMode: 'compact' })
+        if (draftConversationRef.current) draftConversationRef.current.used = true
+        await agent.sendMessage(prompt, { responseMode: 'compact', toolMode })
       } else {
-        const row = await apiPost<ConversationRow>('/conversations', {
-          title: `小赛 · ${currentContext.label}`,
-          scope: currentContext.projectId ? 'project' : 'global',
-          projectId: currentContext.projectId ?? null,
-          projectName: currentContext.projectName ?? null,
-        })
-        const nextAgentId = row.agentId || row.id
-        if (conversationScopeRef.current !== requestScopeKey) return
-        setAgentId(nextAgentId)
+        const nextAgentId = await ensureConversation()
+        if (!nextAgentId || conversationScopeRef.current !== requestScopeKey) return
+        if (draftConversationRef.current) draftConversationRef.current.used = true
         await apiPost(`/agent/conversations/${encodeURIComponent(nextAgentId)}/messages`, {
           message: prompt,
           responseMode: 'compact',
+          toolMode,
         })
       }
     } catch (error) {
       setLocalError(formatAgentError(error))
     } finally {
+      submittingRef.current = false
       setSending(false)
     }
   }
@@ -292,7 +586,7 @@ export function SaiUnicornAgent() {
             </span>
           </div>
           <div className="sai-agent-header-actions">
-            {agentId && <button type="button" title="开始新对话" aria-label="开始新对话" onClick={() => { setAgentId(undefined); setLocalError(undefined); setTurnReceipt(undefined) }}><RotateCcw /></button>}
+            {agentId && <button type="button" title="开始新对话" aria-label="开始新对话" onClick={() => { discardUnusedConversation(); draftConversationRef.current = null; pendingConversationRef.current = null; setAgentId(undefined); setLocalError(undefined); setTurnReceipt(undefined) }}><RotateCcw /></button>}
             <button ref={closeRef} type="button" aria-label="关闭小赛" onClick={closePanel}><X /></button>
           </div>
         </header>
@@ -383,10 +677,16 @@ export function SaiUnicornAgent() {
               onChange={(event) => setComposer(event.target.value)}
               onKeyDown={onComposerKeyDown}
             />
+            <button type="button" className={`sai-agent-voice${listening ? ' is-listening' : ''}`} aria-label={listening ? '停止语音输入' : '开始语音输入'} aria-pressed={listening} title={listening ? '停止语音输入' : '语音输入'} disabled={busy} onClick={toggleVoiceInput}>
+              {listening ? <MicOff aria-hidden="true" /> : <Mic aria-hidden="true" />}
+            </button>
             {agent.status === 'streaming' || agent.status === 'submitted'
               ? <button type="button" className="sai-agent-send is-stop" aria-label="停止生成" onClick={() => void agent.abort()}><Square /></button>
               : <button type="submit" className="sai-agent-send" aria-label="发送给小赛" disabled={!composer.trim() || busy}><ArrowUp /></button>}
           </form>
+          {speechError && <p className="sai-agent-speech-error" role="alert">{speechError}</p>}
+          {offerLocalSpeech && ['available', 'downloadable', 'downloading'].includes(localSpeechStatus || '') && !preferLocalSpeech && <button type="button" className="sai-agent-local-speech" disabled={installingLocalSpeech} onClick={() => void enableLocalSpeech()}>{installingLocalSpeech ? '正在安装中文语音包…' : localSpeechStatus === 'available' ? `改用离线中文${localSpeechQuality === 'dictation' ? '听写' : '短指令'}识别` : `安装离线中文${localSpeechQuality === 'dictation' ? '听写' : '短指令'}识别`}</button>}
+          {listening && <p className="sai-agent-speech-status" role="status">正在聆听，识别后请确认文字再发送</p>}
           <p><ShieldCheck aria-hidden="true" />默认只读 · 业务写入前会先请你确认 <span>Enter 发送</span></p>
         </footer>
       </section>

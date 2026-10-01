@@ -18,18 +18,30 @@ export type ChatMessageRow = {
 
 // 列出当前用户的会话（不含消息体，列表更轻）
 export async function listConversations(userId: string) {
-  const rows = await agentConversationRepository.listChatsForUser(userId, 100)
-  const accessible = await Promise.all(rows.map(async (row) => (
-    !row.projectId || await getAccessibleProject(userId, row.projectId) ? row : null
-  )))
-  const ids = accessible.flatMap((row) => row ? [row.id] : [])
-  const modelRows = await agentConversationRepository.findAgentModels(ids)
-  const modelByConversation = new Map(modelRows.map((row) => [row.id, row.modelId]))
-  return accessible.filter((row): row is NonNullable<typeof row> => Boolean(row)).map(({ messages, ...rest }) => ({
-    ...rest,
-    modelId: modelByConversation.get(rest.id) || null,
-    messageCount: Array.isArray(messages) ? messages.length : 0,
-  }))
+  const result: Array<Omit<Awaited<ReturnType<typeof agentConversationRepository.listChatsForUser>>[number], 'messages'> & {
+    modelId: string | null; messageCount: number
+  }> = []
+  for (let offset = 0; offset < 1_000 && result.length < 100; offset += 100) {
+    const rows = await agentConversationRepository.listChatsForUser(userId, 100, offset)
+    if (rows.length === 0) break
+    const messageCounts = await agentConversationRepository.countMessagesForConversations(rows.map((row) => row.id))
+    const countByConversation = new Map(messageCounts.map((row) => [row.conversationId, row.messageCount]))
+    const nonempty = rows.filter((row) => !row.title.startsWith('小赛 ·') ||
+      Math.max(Array.isArray(row.messages) ? row.messages.length : 0, countByConversation.get(row.id) || 0) > 0)
+    const accessible = await Promise.all(nonempty.map(async (row) => (
+      !row.projectId || await getAccessibleProject(userId, row.projectId) ? row : null
+    )))
+    const visible = accessible.filter((row): row is NonNullable<typeof row> => Boolean(row))
+    const modelRows = await agentConversationRepository.findAgentModels(visible.map((row) => row.id))
+    const modelByConversation = new Map(modelRows.map((row) => [row.id, row.modelId]))
+    result.push(...visible.map(({ messages, ...rest }) => ({
+      ...rest,
+      modelId: modelByConversation.get(rest.id) || null,
+      messageCount: Math.max(Array.isArray(messages) ? messages.length : 0, countByConversation.get(rest.id) || 0),
+    })))
+    if (rows.length < 100) break
+  }
+  return result.slice(0, 100)
 }
 
 // 取单个会话（含全部消息）

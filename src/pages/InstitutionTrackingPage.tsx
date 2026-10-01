@@ -2,6 +2,8 @@ import { ArrowLeft, ArrowRight, Building2, LoaderCircle, Search, X } from 'lucid
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { apiGet } from '../lib/api'
+import { buildSaiInstitutionSnapshot } from '../lib/saiAgent'
+import { useSaiPageContext } from '../store/useSaiPageContext'
 import type { InstitutionTrackingProfile } from '../../server/src/services/institutionTrackingPresentation'
 import './InstitutionTrackingPage.css'
 
@@ -54,6 +56,7 @@ function ErrorState({ message, retry }: { message: string; retry: () => void }) 
 }
 
 export function InstitutionTrackingDirectoryPage() {
+  const setInstitutionContext = useSaiPageContext(state => state.setInstitutionContext)
   const { data, error, loading, retry } = useInstitutionData<DirectoryResponse>('/institutions')
   const [query, setQuery] = useState('')
   const visible = useMemo(() => {
@@ -62,6 +65,10 @@ export function InstitutionTrackingDirectoryPage() {
       institution.name, ...institution.aliases, ...institution.focusIndustries,
     ].some((value) => value.normalize('NFKC').toLocaleLowerCase('zh-CN').includes(needle)))
   }, [data, query])
+  useEffect(() => {
+    setInstitutionContext(loading ? '\n【机构追踪列表正在加载】' : error ? '\n【机构追踪列表读取失败，不能据此判断为空】' : buildSaiInstitutionSnapshot({ scope: '机构列表', total: visible.length, rows: visible }), '')
+  }, [loading, error, visible, setInstitutionContext])
+  useEffect(() => () => setInstitutionContext('', ''), [setInstitutionContext])
 
   return <main className="institution-tracking-page">
     <header className="institution-tracking-header">
@@ -84,8 +91,13 @@ export function InstitutionTrackingDirectoryPage() {
 }
 
 export function InstitutionTrackingProfilePage() {
+  const setInstitutionContext = useSaiPageContext(state => state.setInstitutionContext)
   const { institutionKey = '' } = useParams()
   const { data, error, loading, retry } = useInstitutionData<InstitutionTrackingProfile>(`/institutions/${institutionKey}`)
+  useEffect(() => {
+    setInstitutionContext(loading ? '\n【机构详情正在加载】' : error || !data ? '\n【机构详情读取失败或当前账号无权访问】' : buildSaiInstitutionSnapshot({ scope: '机构详情', total: 1, rows: [data] }), data?.name || '')
+  }, [data, error, loading, setInstitutionContext])
+  useEffect(() => () => setInstitutionContext('', ''), [setInstitutionContext])
 
   return <main className="institution-tracking-page">
     <Link className="institution-tracking-back" to="/institutions"><ArrowLeft aria-hidden="true" />返回机构追踪</Link>

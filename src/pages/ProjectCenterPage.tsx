@@ -16,10 +16,10 @@ const views: Array<{ id: ProjectCenterView; label: string; icon: typeof Inbox }>
 ]
 
 // 暂时隐藏项目池，保留分类和页面能力，恢复时移除此过滤。
-const visibleViews = views.filter(item => item.id !== 'pool')
+const visibleViews = views.filter(item => item.id !== 'pool' && item.id !== 'reviews')
 
 function validView(value: string | null): ProjectCenterView {
-  return visibleViews.some((item) => item.id === value) ? value as ProjectCenterView : 'normal'
+  return value === 'reviews' || visibleViews.some((item) => item.id === value) ? value as ProjectCenterView : 'normal'
 }
 
 export function ProjectCenterPage() {
@@ -31,8 +31,8 @@ export function ProjectCenterPage() {
   if (legacyView === 'discover' || legacyView === 'leads') {
     const params = new URLSearchParams(searchParams)
     params.delete('view')
-    const query = legacyView === 'leads' ? params.toString() : ''
-    return <Navigate to={legacyView === 'leads' ? `/discovery/leads${query ? `?${query}` : ''}` : '/discovery'} replace />
+    const query = params.toString()
+    return <Navigate to={`${legacyView === 'leads' ? '/discovery/leads' : '/discovery'}${query ? `?${query}` : ''}`} replace />
   }
 
   const selectView = (next: ProjectCenterView) => {
@@ -51,6 +51,7 @@ export function ProjectCenterPage() {
     <div className="fde-project-center">
       <div className="fde-page-heading">
         <div><h1>项目中心</h1><p className="mt-1 text-sm text-slate-500">使用顶部导航栏的"快速新建"按钮创建投资项目或登记非投资项目。</p></div>
+        <button type="button" className={`fde-project-review-entry${view === 'reviews' ? ' active' : ''}`} aria-label="打开待复核" aria-current={view === 'reviews' ? 'page' : undefined} title="待复核" onClick={() => selectView('reviews')}><Inbox aria-hidden="true" /></button>
       </div>
         <div className="fde-workspace-tabs fde-saved-views" role="tablist" aria-label="项目中心">
           {visibleViews.map((item) => {
@@ -81,7 +82,7 @@ export function ProjectCenterPage() {
             )
           })}
         </div>
-      <div id="project-center-panel" role="tabpanel" aria-labelledby={`project-center-tab-${view}`}>
+      <div id="project-center-panel" role="tabpanel" aria-labelledby={view === 'reviews' ? undefined : `project-center-tab-${view}`}>
         {view === 'reviews' ? <LeadReviewPanel /> : <ProjectsPage key={view} classification={view} embedded onCountsChange={setClassificationCounts} />}
       </div>
     </div>

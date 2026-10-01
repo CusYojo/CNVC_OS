@@ -4,8 +4,9 @@ import {
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { encodeInstitutionTrackingKey } from '../../server/src/contracts/institutionTrackingContract'
-import { EmptyState } from '../components/ui'
+import { EmptyState, Modal } from '../components/ui'
 import { apiGet, apiPatch, apiPost } from '../lib/api'
+import { buildSaiDiscoverySnapshot } from '../lib/saiAgent'
 import { LEAD_POOL_INDUSTRIES, LEAD_POOL_REGIONS } from '../lib/leadPoolFilters'
 import {
   buildProjectDiscoveryKeywords,
@@ -21,10 +22,10 @@ import {
   projectDiscoveryPrimaryDate,
   readProjectDiscoveryCardEdits,
   type ProjectDiscoveryKeyword,
-  type ProjectDiscoveryKind,
   type ProjectDiscoveryPeriod,
 } from '../lib/projectDiscovery'
 import type { LeadListResponse } from '../store/useAppStore'
+import { useSaiPageContext } from '../store/useSaiPageContext'
 import type { LeadListItem, ProjectDiscoveryCardEdits } from '../types'
 import './ProjectDiscoveryPage.css'
 
@@ -32,12 +33,6 @@ const periods: Array<{ value: ProjectDiscoveryPeriod; label: string }> = [
   { value: 'today', label: '今天新发现' },
   { value: 'week', label: '近 7 天' },
   { value: 'all', label: '全部项目' },
-]
-
-const kinds: Array<{ value: ProjectDiscoveryKind; label: string }> = [
-  { value: 'all', label: '全部类型' },
-  { value: 'company', label: '企业项目' },
-  { value: 'research', label: '科研成果' },
 ]
 
 type ProjectDiscoverySort = 'latest' | 'funding' | 'score'
@@ -84,7 +79,6 @@ export function ProjectDiscoveryPage() {
   const [candidates, setCandidates] = useState<LeadListItem[]>([])
   const [pagination, setPagination] = useState({ page: 1, totalPages: 1 })
   const [period, setPeriod] = useState<ProjectDiscoveryPeriod>('today')
-  const [kind, setKind] = useState<ProjectDiscoveryKind>('all')
   const [industry, setIndustry] = useState('')
   const [region, setRegion] = useState('')
   const [sort, setSort] = useState<ProjectDiscoverySort>('latest')
@@ -95,6 +89,16 @@ export function ProjectDiscoveryPage() {
   const [error, setError] = useState('')
   const [action, setAction] = useState<'refresh' | 'upload' | ''>('')
   const [notice, setNotice] = useState<{ tone: 'success' | 'error'; text: string } | null>(null)
+  const [saiUploadOpen, setSaiUploadOpen] = useState(false)
+  const setDiscoverySnapshot = useSaiPageContext((state) => state.setDiscoverySnapshot)
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search)
+    if (params.get('saiUpload') !== '1') return
+    setSaiUploadOpen(true)
+    params.delete('saiUpload')
+    navigate({ pathname: location.pathname, search: params.toString() ? `?${params}` : '' }, { replace: true })
+  }, [location.pathname, location.search, navigate])
 
   useEffect(() => {
     const timer = window.setTimeout(() => setSubmittedQuery(query.trim()), 300)
@@ -105,12 +109,12 @@ export function ProjectDiscoveryPage() {
     const params = new URLSearchParams({ page: String(page), pageSize: '50' })
     params.set('period', period)
     params.set('sort', sort)
-    if (kind !== 'all') params.set('leadType', kind)
+    params.set('leadType', 'company')
     if (industry) params.set('industry', industry)
     if (region) params.set('region', region)
     if (submittedQuery) params.set('keyword', submittedQuery)
     return apiGet<LeadListResponse>(`/project-discovery/leads?${params.toString()}`)
-  }, [period, sort, kind, industry, region, submittedQuery])
+  }, [period, sort, industry, region, submittedQuery])
 
   const loadCandidates = useCallback(async (background = false) => {
     const serial = ++requestSerial.current
@@ -182,6 +186,10 @@ export function ProjectDiscoveryPage() {
   }, [fetchProjectDiscoveryPage])
 
   useEffect(() => { void loadCandidates() }, [loadCandidates])
+  useEffect(() => {
+    setDiscoverySnapshot(buildSaiDiscoverySnapshot(candidates, loading, error))
+    return () => setDiscoverySnapshot('')
+  }, [candidates, loading, error, setDiscoverySnapshot])
 
   const openLead = (lead: LeadListItem) => {
     navigate(`/sourcing/${lead.id}`, { state: { from: `${location.pathname}${location.search}` } })
@@ -273,6 +281,10 @@ export function ProjectDiscoveryPage() {
   }
 
   return <div className="project-discovery-page">
+    <Modal open={saiUploadOpen} title="上传项目材料" onClose={() => setSaiUploadOpen(false)}>
+      <p className="mb-4 text-sm text-slate-600">选择项目 BP 或其他资料，解析后会加入新项目发现；需要核对的材料会进入人工复核。</p>
+      <input type="file" disabled={Boolean(action)} accept=".pdf,.docx,.pptx,.xls,.xlsx,.png,.jpg,.jpeg,.gif,.bmp,.webp,.txt,.md,.markdown" aria-label="选择项目材料" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; if (file) { setSaiUploadOpen(false); void uploadBp(file) } }} />
+    </Modal>
     <header className="project-discovery-hero">
       <div className="project-discovery-title">
         <span><Sparkles aria-hidden="true" /></span>
@@ -296,12 +308,6 @@ export function ProjectDiscoveryPage() {
       <div className="project-discovery-periods" role="group" aria-label="发现时间范围">
         {periods.map((item) => <button key={item.value} type="button" aria-pressed={period === item.value} onClick={() => setPeriod(item.value)}>{item.label}</button>)}
       </div>
-      <label className="project-discovery-kind">
-        <span className="sr-only">发现类型</span>
-        <select value={kind} aria-label="发现类型" onChange={(event) => setKind(event.target.value as ProjectDiscoveryKind)}>
-          {kinds.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-        </select>
-      </label>
       <label className="project-discovery-kind">
         <span className="sr-only">行业筛选</span>
         <select value={industry} aria-label="行业筛选" onChange={(event) => setIndustry(event.target.value)}>
@@ -332,7 +338,7 @@ export function ProjectDiscoveryPage() {
     <section className="project-discovery-results" aria-label="待查看项目" aria-busy={loading || loadingMore}>
       {loading ? <div className="project-discovery-state"><LoaderCircle className="is-spinning" aria-hidden="true" /><strong>正在整理最新项目信号</strong><p>读取已收录的公开信源与结构化画像。</p></div>
         : error ? <div className="project-discovery-state project-discovery-error"><strong>新项目读取失败</strong><p>{error}</p><button type="button" onClick={() => void loadCandidates()}>重新加载</button></div>
-          : candidates.length === 0 ? <EmptyState title="当前范围没有新项目" description="试试切换到近 7 天、全部类型，或调整搜索关键词。" />
+          : candidates.length === 0 ? <EmptyState title="当前范围没有新项目" description="试试切换到近 7 天、全部项目，或调整搜索关键词。" />
             : <div className="project-discovery-grid">{candidates.map((lead) => <DiscoveryCard
               key={lead.id}
               lead={lead}

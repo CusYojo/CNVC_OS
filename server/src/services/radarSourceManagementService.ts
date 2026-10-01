@@ -35,7 +35,7 @@ export async function listManagedRadarSources() {
     const item = value as Record<string, unknown>
     return [[String(item.source || ''), String(item.error || '').slice(0, 500)] as const]
   }))
-  return rows.map((row) => ({
+  return rows.filter((row) => row.sourceGroup !== '论文').map((row) => ({
     id: row.id,
     kind: row.sourceKind,
     group: row.sourceGroup || '',
@@ -59,6 +59,12 @@ export async function setManagedRadarSourceEnabled(id: string, enabled: boolean)
     error.code = 'RADAR_SOURCE_NOT_FOUND'
     throw error
   }
+  if (current.sourceGroup === '论文') {
+    const error = new Error('该论文来源已退出当前系统') as Error & { status?: number; code?: string }
+    error.status = 404
+    error.code = 'RADAR_SOURCE_RETIRED'
+    throw error
+  }
   await db.update(radarSourceRegistry).set({ enabled, updatedAt: new Date() })
     .where(eq(radarSourceRegistry.id, id))
   return (await listManagedRadarSources()).find((item) => item.id === id)
@@ -74,6 +80,12 @@ export async function updateManagedRadarSourceMetadata(id: string, input: {
     const error = new Error('Radar 来源不存在') as Error & { status?: number; code?: string }
     error.status = 404
     error.code = 'RADAR_SOURCE_NOT_FOUND'
+    throw error
+  }
+  if (current.sourceGroup === '论文') {
+    const error = new Error('该论文来源已退出当前系统') as Error & { status?: number; code?: string }
+    error.status = 404
+    error.code = 'RADAR_SOURCE_RETIRED'
     throw error
   }
   const config = {

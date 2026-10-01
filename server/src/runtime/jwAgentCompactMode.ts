@@ -1,5 +1,13 @@
 export type JwAgentResponseMode = 'standard' | 'compact'
 
+export function compactJwAgentThinkingConfig(model: string, mode: JwAgentResponseMode) {
+  if (mode !== 'compact') return undefined
+  const normalizedModel = model.toLowerCase().replace(/[^a-z0-9]/g, '')
+  return normalizedModel.startsWith('doubaoseed20mini')
+    ? { type: 'disabled' as const }
+    : undefined
+}
+
 const COMPACT_READ_TOOLS = new Set([
   'mcp__investment__search_project_docs',
   'mcp__investment__get_project_summary',
@@ -24,7 +32,7 @@ export function compactJwAgentInstruction(projectScoped: boolean): string {
       ? '对项目问题先读取项目主记录；只在问题确实依赖材料证据时再检索或读取文件，不做无目的全量遍历。'
       : '对全局问题使用当前会话和已授权信息直接回答，不主动要求绑定项目。',
     '只有缺少某个关键条件会导致结论误导时，才可以进行最多一次补充信息；该次只提一个合并问题。用户回答后不得再次追问，剩余缺口应作为限制条件明确列出。',
-    '首个完整答案必须给出有效结果，至少包含：1）直接结论；2）可追溯依据、已知事实或明确的信息缺口；3）一个可执行的下一步。能在当前信息下回答时，直接回答，不调用工具。',
+    '首个答案直接回应用户目标。涉及事实判断时说明依据或缺口，涉及行动时给出可执行的下一步；用户要求一句话或简单操作时保持简短。能用当前信息回答就直接回答。',
     '本模式不创建 AI 文档任务、不提交业务写入、不执行 Agent 演化；如用户需要这些操作，给出准备清单并引导到完整 AI 助手。',
   ].join('\n')
 }

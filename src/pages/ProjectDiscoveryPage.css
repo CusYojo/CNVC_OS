@@ -22,9 +22,7 @@
 .project-discovery-periods { display: flex; flex: none; gap: 3px; padding: 3px; border-radius: 9px; background: #f4f6f9; }
 .project-discovery-periods button { min-height: 34px; padding: 0 13px; border: 0; border-radius: 7px; background: transparent; color: #69768a; font-size: 12px; font-weight: 600; }
 .project-discovery-periods button[aria-pressed="true"] { background: #fff; color: #245da9; box-shadow: 0 1px 5px rgba(33,67,117,.12); }
-.project-discovery-kind { flex: none; }
-.project-discovery-kind select { height: 40px; padding: 0 32px 0 12px; border: 1px solid #e0e6ee; border-radius: 8px; outline: none; background: #fff; color: #536075; font-size: 12px; }
-.project-discovery-kind select:focus-visible, .project-discovery-search:focus-within { border-color: #8eb3ec; box-shadow: 0 0 0 3px rgba(50,107,194,.1); }
+.project-discovery-search:focus-within { border-color: #8eb3ec; box-shadow: 0 0 0 3px rgba(50,107,194,.1); }
 .project-discovery-search { display: flex; height: 40px; min-width: 220px; flex: 1; align-items: center; border: 1px solid #e0e6ee; border-radius: 8px; background: #fff; }
 .project-discovery-search > svg { width: 16px; margin-left: 12px; color: #9aa7b8; }
 .project-discovery-search input { min-width: 0; flex: 1; height: 100%; padding: 0 10px; border: 0; outline: none; background: transparent; color: #334155; font-size: 12px; }
@@ -183,7 +181,6 @@
   .project-discovery-action-buttons button, .project-discovery-action-buttons label { min-width: 0; padding-inline: 8px; }
   .project-discovery-periods { width: 100%; }
   .project-discovery-periods button { flex: 1; padding-inline: 8px; }
-  .project-discovery-kind, .project-discovery-kind select { width: 100%; }
   .project-discovery-grid { grid-template-columns: 1fr; padding: 10px; }
   .project-discovery-card-header { align-items: flex-start; }
   .project-discovery-card-header-meta { flex-direction: column; }

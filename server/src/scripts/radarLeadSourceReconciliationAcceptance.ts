@@ -184,7 +184,7 @@ async function main(): Promise<void> {
     collectorStates: await count(`SELECT COUNT(*) count FROM ${table('radar_collector_states')}`),
     sourceRegistry: await count(`SELECT COUNT(*) count FROM ${table('radar_source_registry')}`),
     syncStates: await count(`SELECT COUNT(*) count FROM ${table('radar_sync_state')}`),
-    runtimeJobs: await count(`SELECT COUNT(*) count FROM ${table('runtime_jobs')} WHERE id IN ('radar-collect-sync','radar-paper-daily','radar-wechat-daily','radar-wechat-retry','radar-wechat-institution')`),
+    runtimeJobs: await count(`SELECT COUNT(*) count FROM ${table('runtime_jobs')} WHERE id IN ('radar-collect-sync','radar-wechat-daily','radar-wechat-retry','radar-wechat-institution')`),
   }
   const radarViolations = {
     rawSourceIdentity: await count(`SELECT COUNT(*) count FROM ${table('radar_raw_events')} WHERE source_key_hash<>SHA2(source_key,256) OR content_hash NOT REGEXP '^[a-f0-9]{64}$' OR cursor_digest NOT REGEXP '^[a-f0-9]{64}$' OR cursor_timestamp<0`),
@@ -194,7 +194,9 @@ async function main(): Promise<void> {
     duplicateSourceRegistryKey: await count(`SELECT COUNT(*) count FROM (SELECT source_kind,external_key FROM ${table('radar_source_registry')} WHERE external_key IS NOT NULL GROUP BY source_kind,external_key HAVING COUNT(*)>1) d`),
     malformedCollectorState: await count(`SELECT COUNT(*) count FROM ${table('radar_collector_states')} WHERE content_hash NOT REGEXP '^[a-f0-9]{64}$' OR NOT JSON_VALID(state)`),
     malformedSourceRegistry: await count(`SELECT COUNT(*) count FROM ${table('radar_source_registry')} WHERE content_hash NOT REGEXP '^[a-f0-9]{64}$' OR NOT JSON_VALID(config)`),
-    runtimeJobDefinitionMissing: Math.max(0, 5 - await count(`SELECT COUNT(DISTINCT id) count FROM ${table('runtime_jobs')} WHERE id IN ('radar-collect-sync','radar-paper-daily','radar-wechat-daily','radar-wechat-retry','radar-wechat-institution')`)),
+    runtimeJobDefinitionMissing: Math.max(0, 4 - await count(`SELECT COUNT(DISTINCT id) count FROM ${table('runtime_jobs')} WHERE id IN ('radar-collect-sync','radar-wechat-daily','radar-wechat-retry','radar-wechat-institution')`)),
+    retiredPaperJobEnabled: await count(`SELECT COUNT(*) count FROM ${table('runtime_jobs')} WHERE id='radar-paper-daily' AND enabled=1`),
+    retiredPaperSourceEnabled: await count(`SELECT COUNT(*) count FROM ${table('radar_source_registry')} WHERE source_group='论文' AND enabled=1`),
   }
 
   const localInventory = await localAdapterInventory()
@@ -217,9 +219,11 @@ async function main(): Promise<void> {
     radarStatesAndSourcesAreRecoverable: radar.collectorStates > 0
       && radar.sourceRegistry > 0
       && radarViolations.malformedCollectorState === 0
-      && radarViolations.malformedSourceRegistry === 0,
-    radarSchedulesMovedIntoMySqlRuntimeJobs: radar.runtimeJobs === 5
-      && radarViolations.runtimeJobDefinitionMissing === 0,
+      && radarViolations.malformedSourceRegistry === 0
+      && radarViolations.retiredPaperSourceEnabled === 0,
+    radarSchedulesMovedIntoMySqlRuntimeJobs: radar.runtimeJobs === 4
+      && radarViolations.runtimeJobDefinitionMissing === 0
+      && radarViolations.retiredPaperJobEnabled === 0,
     legacyAdapterAssetsAreRetiredOrReadable: localInventory.retired || (
       localAssets.length === 5
       && localAssets.every((asset) => asset.structurallyReadable && /^[a-f0-9]{64}$/.test(asset.sha256))

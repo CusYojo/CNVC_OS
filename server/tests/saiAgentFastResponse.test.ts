@@ -7,6 +7,7 @@ import {
 } from '../../src/lib/saiAgent.js'
 import {
   compactJwAgentInstruction,
+  compactJwAgentThinkingConfig,
   evaluateCompactInteraction,
   jwAgentToolsForResponseMode,
 } from '../src/runtime/jwAgentCompactMode.js'
@@ -74,6 +75,13 @@ test('轻量模式只暴露读取和检索工具', () => {
   assert.deepEqual(jwAgentToolsForResponseMode(tools, 'standard'), tools)
 })
 
+test('仅小赛使用 Doubao Seed 2.0 Mini 时关闭深度思考', () => {
+  assert.deepEqual(compactJwAgentThinkingConfig('Doubao-seed-2-0-mini', 'compact'), { type: 'disabled' })
+  assert.deepEqual(compactJwAgentThinkingConfig('doubao-seed-2-0-mini-260428', 'compact'), { type: 'disabled' })
+  assert.equal(compactJwAgentThinkingConfig('Doubao-seed-2-0-mini', 'standard'), undefined)
+  assert.equal(compactJwAgentThinkingConfig('another-model', 'compact'), undefined)
+})
+
 test('轻量模式最多向用户采集一步信息', () => {
   assert.deepEqual(evaluateCompactInteraction(1, 0), { allowed: true, nextUsedRounds: 1, reason: null })
   assert.deepEqual(evaluateCompactInteraction(2, 0), {
@@ -112,5 +120,6 @@ test('小赛前后端通过现有消息 API 显式开启轻量模式', async () 
   assert.match(route, /responseMode:\s*z\.enum\(\['standard',\s*'compact'\]\)/)
   assert.match(runtime, /jwAgentToolsForResponseMode\(/)
   assert.match(runtime, /responseMode === 'compact' \? 5/)
+  assert.match(runtime, /systemPrompt: responseMode === 'compact'\s*\? jwAgentSystemPrompt\(projectId, responseMode\)/)
   assert.match(runtime, /session\.compactInteractionRoundsUsed = 0/)
 })

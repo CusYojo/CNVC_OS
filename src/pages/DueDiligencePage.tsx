@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 import { useSearchParams } from 'react-router-dom'
 import { Bot, ClipboardList, UsersRound } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
+import { useSaiPageContext } from '../store/useSaiPageContext'
+import { buildSaiDueDiligenceSnapshot } from '../lib/saiAgent'
 import { useAuthStore } from '../store/useAuthStore'
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut } from '../lib/api'
 import { useToast } from '../components/Toast'
@@ -26,6 +28,7 @@ function Tab({ active, onClick, icon, children }: { active: boolean; onClick: ()
 const fileToDataUrl = (file: Blob) => new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result || '')); reader.onerror = () => reject(new Error('文件读取失败')); reader.readAsDataURL(file) })
 
 export function DueDiligencePage({ preview = false }: { preview?: boolean }) {
+  const setDueDiligenceContext = useSaiPageContext(state => state.setDueDiligenceContext)
   const [searchParams, setSearchParams] = useSearchParams()
   const storeProjects = useAppStore(state => state.projects)
   const storeFiles = useAppStore(state => state.files)
@@ -69,6 +72,23 @@ export function DueDiligencePage({ preview = false }: { preview?: boolean }) {
   const selectedTwin = twins.find(item => item.id === selectedTwinId)
   const twinDirty = savedTwinDraft ? JSON.stringify(twinDraft) !== JSON.stringify(savedTwinDraft) : Boolean(twinDraft.name || twinDraft.rules || twinDraft.cases)
   const isNewTwin = Boolean(newTwinRequestId) && !selectedTwin
+  const project = projects.find(item => item.id === projectId)
+
+  useEffect(() => {
+    if (preview) return
+    setDueDiligenceContext(project
+      ? buildSaiDueDiligenceSnapshot({
+        projectName: project.name,
+        activeTab: active,
+        questions: questions.filter(item => item.projectId === project.id),
+        interviews: interviews.filter(item => item.projectId === project.id),
+        files: files.filter(item => item.projectId === project.id),
+        loading: loadingProject,
+      })
+      : '\n【当前尽调工作台没有已选中的可访问项目】',
+    project ? { id: project.id, name: project.name } : null)
+  }, [preview, project?.id, project?.name, active, questions, interviews, files, loadingProject, setDueDiligenceContext])
+  useEffect(() => () => setDueDiligenceContext('', null), [setDueDiligenceContext])
 
   const loadWorkspace = useCallback(async (quiet = false) => {
     if (!projectId || preview) return

@@ -32,11 +32,24 @@ async function mapped<T>(operation: string, work: () => Promise<T>): Promise<T> 
 class MySqlAgentConversationRepository implements AgentConversationRepository {
   constructor(private readonly executor: MySqlAgentExecutor) {}
 
-  async listChatsForUser(userId: string, limit = 100) {
+  async listChatsForUser(userId: string, limit = 100, offset = 0) {
     return mapped('agent.listChatsForUser', () => this.executor.select().from(chatConversations)
       .where(eq(chatConversations.userId, userId))
       .orderBy(desc(chatConversations.updatedAt), desc(chatConversations.id))
-      .limit(Math.max(1, Math.min(1_000, Math.trunc(limit)))))
+      .limit(Math.max(1, Math.min(1_000, Math.trunc(limit))))
+      .offset(Math.max(0, Math.trunc(offset))))
+  }
+
+  async countMessagesForConversations(conversationIds: string[]) {
+    if (conversationIds.length === 0) return []
+    return mapped('agent.countMessagesForConversations', async () => {
+      const rows = await this.executor.select({
+        conversationId: agentMessages.conversationId,
+        messageCount: sql<number>`count(*)`,
+      }).from(agentMessages).where(inArray(agentMessages.conversationId, conversationIds))
+        .groupBy(agentMessages.conversationId)
+      return rows.map((row) => ({ ...row, messageCount: Number(row.messageCount) }))
+    })
   }
 
   async findChatByIdForUser(userId: string, conversationId: string) {

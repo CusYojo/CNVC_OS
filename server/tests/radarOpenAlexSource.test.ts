@@ -3,9 +3,10 @@ import test from 'node:test'
 import { buildOpenAlexWorksUrl } from '../src/services/radarCollectorService.js'
 import { DEFAULT_RADAR_PUBLIC_SOURCES } from '../src/services/radarSourceCatalog.js'
 
-test('OpenAlex paper source is a default enabled fallback and does not require an API key', () => {
+test('OpenAlex paper source is not in the active source catalog', () => {
   const source = DEFAULT_RADAR_PUBLIC_SOURCES.find((item) => item.key === 'openalex_ai')
-  assert.equal(source?.enabled, true)
+  assert.equal(source, undefined)
+  assert.equal(DEFAULT_RADAR_PUBLIC_SOURCES.some((item) => item.group === '论文'), false)
   const url = new URL(buildOpenAlexWorksUrl({
     sourceUrl: 'https://api.openalex.org/works',
     query: 'artificial intelligence',

@@ -40,6 +40,7 @@ import { weixinAgentDocumentText } from '../services/weixinAgentDocument.js'
 import { loadAssistantExperiencePrompt, recordAssistantCompletedTurn } from '../services/assistantExperienceService.js'
 import {
   compactJwAgentInstruction,
+  compactJwAgentThinkingConfig,
   evaluateCompactInteraction,
   jwAgentToolsForResponseMode,
   type JwAgentResponseMode,
@@ -67,6 +68,7 @@ type RuntimeSession = {
   selectedSkillNames: Set<string>
   quickSkillInvocation: QuickSkillInvocation | null
   responseMode: JwAgentResponseMode
+  toolMode: 'read' | 'none'
   compactInteractionRoundsUsed: number
 }
 
@@ -86,6 +88,7 @@ export type JwMessageOptions = {
   customTemplateName?: string
   outputFormat?: 'DOCX' | 'PPTX' | 'PDF'
   responseMode?: JwAgentResponseMode
+  toolMode?: 'read' | 'none'
 }
 
 export const JW_AGENT_BUILT_IN_AI_TASK_TYPES = [
@@ -245,6 +248,13 @@ class MessageQueue implements AsyncIterable<unknown>, AsyncIterator<unknown> {
 }
 
 const sessions = new Map<string, RuntimeSession>()
+const prewarmIdleTimers = new Map<string, NodeJS.Timeout>()
+
+function clearPrewarmIdleTimer(conversationId: string) {
+  const timer = prewarmIdleTimers.get(conversationId)
+  if (timer) clearTimeout(timer)
+  prewarmIdleTimers.delete(conversationId)
+}
 const pendingInteractions = new Map<string, PendingJwInteractionController>()
 const conversationOperationTails = new Map<string, Promise<void>>()
 export const JW_AGENT_ALLOWED_TOOLS = [
@@ -1186,6 +1196,7 @@ async function createRuntimeSession(
   userRole: string,
   modelId?: string | null,
   responseMode: JwAgentResponseMode = 'standard',
+  toolMode: 'read' | 'none' = 'read',
 ) {
   const { createSdkMcpServer, query, tool } = await import('@anthropic-ai/claude-agent-sdk')
   const runtimeUser = await identityRepositories.users.findById(userId)
@@ -1246,6 +1257,7 @@ async function createRuntimeSession(
     ] : []),
   ])
   const hostInvestmentEnabled = Boolean(mcpCapabilities.length || pluginToolNames.size || mcpToolNames.size)
+    && (responseMode !== 'compact' || toolMode === 'read')
   const allowedAgentTools = jwAgentToolsForResponseMode(
     jwAgentToolsForScope(
       JW_AGENT_ALLOWED_TOOLS.filter((name) => selectedAgentToolNames.has(name)),
@@ -1393,6 +1405,7 @@ async function createRuntimeSession(
     options: {
       cwd,
       model: config.model,
+      thinking: compactJwAgentThinkingConfig(config.model, responseMode),
       maxTurns: config.maxTurns,
       maxBudgetUsd: config.maxBudgetUsd,
       resume: typeof metadata.sdkSessionId === 'string' ? metadata.sdkSessionId : undefined,
@@ -1426,17 +1439,17 @@ async function createRuntimeSession(
       settingSources: ['project'],
       mcpServers: hostInvestmentEnabled ? { investment: investmentTools } : {},
       env: restrictedJwAgentEnvironment(config, cwd),
-      systemPrompt: {
-        type: 'preset',
-        preset: 'claude_code',
-        append: [
-          jwAgentSystemPrompt(projectId, responseMode),
-          ...(responseMode === 'compact'
-            ? []
-            : pluginPrompts.map((prompt, index) => `\n[已安装 Plugin ${index + 1} 行为说明]\n${prompt}`)),
-          ...(responseMode === 'compact' ? [] : uploadedCapabilityPrompts),
-        ].join('\n'),
-      },
+      systemPrompt: responseMode === 'compact'
+        ? jwAgentSystemPrompt(projectId, responseMode)
+        : {
+            type: 'preset',
+            preset: 'claude_code',
+            append: [
+              jwAgentSystemPrompt(projectId, responseMode),
+              ...pluginPrompts.map((prompt, index) => `\n[已安装 Plugin ${index + 1} 行为说明]\n${prompt}`),
+              ...uploadedCapabilityPrompts,
+            ].join('\n'),
+          },
     },
   }) as RuntimeQuery
   session = {
@@ -1456,6 +1469,7 @@ async function createRuntimeSession(
     selectedSkillNames,
     quickSkillInvocation: null,
     responseMode,
+    toolMode,
     compactInteractionRoundsUsed: 0,
   }
   session.outputLoop = runOutputLoop(session)
@@ -1471,6 +1485,43 @@ export async function sendJwAgentMessage(
   options: JwMessageOptions = {},
 ) {
   return await sendJwAgentMessageWithMedia(userId, userRole, agentId, message, {}, options)
+}
+
+export async function prewarmJwAgentConversation(
+  userId: string,
+  userRole: string,
+  agentId: string,
+  responseMode: JwAgentResponseMode = 'compact',
+  toolMode: 'read' | 'none' = 'read',
+) {
+  const resolved = await resolveConversation(userId, agentId)
+  if (!resolved) return null
+  return await withJwConversationOperation(resolved.agent.id, async () => {
+    const refreshed = await resolveConversation(userId, agentId)
+    if (!refreshed) return null
+    if (refreshed.agent.status === 'streaming' || pendingInteractions.has(refreshed.agent.id)) {
+      return { ready: false, reason: 'busy' }
+    }
+    const active = sessions.get(refreshed.agent.id)
+    if (active?.responseMode === responseMode && active.toolMode === toolMode) return { ready: true, reused: true }
+    if (active) await closeJwRuntimeSession(refreshed.agent.id)
+    const warmed = await createRuntimeSession(
+      userId, refreshed.agent.id, refreshed.agent.metadata || {}, refreshed.agent.projectId,
+      userRole, refreshed.agent.modelId, responseMode, toolMode,
+    )
+    clearPrewarmIdleTimer(refreshed.agent.id)
+    const timer = setTimeout(() => {
+      prewarmIdleTimers.delete(refreshed.agent.id)
+      void withJwConversationOperation(refreshed.agent.id, async () => {
+        if (sessions.get(refreshed.agent.id) !== warmed) return
+        const current = await agentConversationRepository.findAgentById(refreshed.agent.id)
+        if (current?.status === 'idle') await closeJwRuntimeSession(refreshed.agent.id)
+      }).catch(() => undefined)
+    }, 120_000)
+    timer.unref()
+    prewarmIdleTimers.set(refreshed.agent.id, timer)
+    return { ready: true, reused: false }
+  })
 }
 
 export async function sendJwAgentMessageWithImages(
@@ -1493,6 +1544,7 @@ export async function sendJwAgentMessageWithMedia(
 ) {
   const resolved = await resolveConversation(userId, agentId)
   if (!resolved) return null
+  clearPrewarmIdleTimer(resolved.agent.id)
   return await withJwConversationOperation(resolved.agent.id, async () => {
     const refreshed = await resolveConversation(userId, agentId)
     if (!refreshed) return null
@@ -1502,8 +1554,9 @@ export async function sendJwAgentMessageWithMedia(
       })
     }
     const responseMode = options.responseMode ?? 'standard'
+    const toolMode = responseMode === 'compact' ? options.toolMode ?? 'read' : 'read'
     const activeSession = sessions.get(refreshed.agent.id)
-    if (activeSession && activeSession.responseMode !== responseMode) {
+    if (activeSession && (activeSession.responseMode !== responseMode || activeSession.toolMode !== toolMode)) {
       await closeJwRuntimeSession(refreshed.agent.id)
     }
     const clean = message.trim()
@@ -1606,6 +1659,7 @@ export async function sendJwAgentMessageWithMedia(
           userRole,
           fresh?.modelId,
           responseMode,
+          toolMode,
         )
       session.compactInteractionRoundsUsed = 0
       if (quickBinding && options.skillName) {
@@ -1760,6 +1814,7 @@ async function closeJwRuntimeSession(
   conversationId: string,
   reason: RuntimeSession['stoppingReason'] = 'dispose',
 ): Promise<boolean> {
+  clearPrewarmIdleTimer(conversationId)
   const session = sessions.get(conversationId)
   if (!session) return false
   sessions.delete(conversationId)
@@ -1895,6 +1950,7 @@ export async function switchJwAgentModel(input: {
 }
 
 export async function shutdownJwAgentRuntime() {
+  for (const conversationId of prewarmIdleTimers.keys()) clearPrewarmIdleTimer(conversationId)
   for (const conversationId of [...pendingInteractions.keys()]) {
     await settleJwInteraction(conversationId, 'shutdown').catch(() => false)
   }
