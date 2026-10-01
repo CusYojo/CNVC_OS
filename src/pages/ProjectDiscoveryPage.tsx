@@ -6,6 +6,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { encodeInstitutionTrackingKey } from '../../server/src/contracts/institutionTrackingContract'
 import { EmptyState, Modal } from '../components/ui'
 import { apiGet, apiPatch, apiPost } from '../lib/api'
+import { buildSaiDiscoverySnapshot } from '../lib/saiAgent'
 import {
   buildProjectDiscoveryKeywords,
   buildProjectDiscoveryBrief,
@@ -24,6 +25,7 @@ import {
   type ProjectDiscoveryPeriod,
 } from '../lib/projectDiscovery'
 import type { LeadListResponse } from '../store/useAppStore'
+import { useSaiPageContext } from '../store/useSaiPageContext'
 import type { LeadListItem, ProjectDiscoveryCardEdits } from '../types'
 import './ProjectDiscoveryPage.css'
 
@@ -80,6 +82,7 @@ export function ProjectDiscoveryPage() {
   const [action, setAction] = useState<'refresh' | 'upload' | ''>('')
   const [notice, setNotice] = useState<{ tone: 'success' | 'error'; text: string } | null>(null)
   const [saiUploadOpen, setSaiUploadOpen] = useState(false)
+  const setDiscoverySnapshot = useSaiPageContext((state) => state.setDiscoverySnapshot)
 
   useEffect(() => {
     const params = new URLSearchParams(location.search)
@@ -161,6 +164,11 @@ export function ProjectDiscoveryPage() {
   const visible = useMemo(() => filterProjectDiscoveryCandidates(candidates, {
     period, query, kind: 'company',
   }), [candidates, period, query])
+
+  useEffect(() => {
+    setDiscoverySnapshot(buildSaiDiscoverySnapshot(visible, loading, error))
+    return () => setDiscoverySnapshot('')
+  }, [visible, loading, error, setDiscoverySnapshot])
 
   const openLead = (lead: LeadListItem) => {
     navigate(`/sourcing/${lead.id}`, { state: { from: `${location.pathname}${location.search}` } })

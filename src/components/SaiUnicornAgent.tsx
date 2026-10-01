@@ -35,6 +35,7 @@ import {
   type SaiAgentAction,
 } from '../lib/saiAgent'
 import { useAppStore } from '../store/useAppStore'
+import { useSaiPageContext } from '../store/useSaiPageContext'
 import './SaiUnicornAgent.css'
 
 type ConversationRow = {
@@ -96,6 +97,7 @@ export function SaiUnicornAgent() {
   const meetings = useAppStore((state) => state.meetings)
   const approvalRequests = useAppStore((state) => state.approvalRequests)
   const risks = useAppStore((state) => state.risks)
+  const discoverySnapshot = useSaiPageContext((state) => state.discoverySnapshot)
   const [open, setOpen] = useState(false)
   const [composer, setComposer] = useState('')
   const [agentId, setAgentId] = useState<string>()
@@ -256,6 +258,7 @@ export function SaiUnicornAgent() {
       + (['workspace', 'collaboration', 'workflow'].includes(currentContext.kind)
         ? buildSaiWorkspaceSnapshot({ projects, todos, meetings, risks, approvals: approvalRequests })
         : '')
+      + (currentContext.kind === 'discovery' ? discoverySnapshot : '')
     const requestScopeKey = conversationScopeKey
     const currentProject = projects.find((project) => project.id === currentContext.projectId)
     setTurnReceipt({

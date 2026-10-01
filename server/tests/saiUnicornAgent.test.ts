@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 import {
   buildSaiAgentPrompt,
+  buildSaiDiscoverySnapshot,
   buildSaiWorkspaceSnapshot,
   extractSaiPromptGoal,
   getSaiAgentActions,
@@ -126,6 +127,17 @@ test('工作台摘要只提供未完成事项，并优先呈现高优先级任�
   })
   assert.ok(snapshot.indexOf('高优先级') < snapshot.indexOf('低优先级'))
   assert.doesNotMatch(snapshot, /已完成任务/)
+})
+
+test('项目发现摘要只包含当前筛选列表，并区分加载失败与无候选', () => {
+  const visible = [{ id: 'lead-1', name: '原始名称', companyName: '星河公司', region: '杭州', radarProfile: { channel: '公众号', profile: { discoveryCardEdits: { name: '编辑后的项目', summary: '待核实的公开线索' } } } }]
+  const snapshot = buildSaiDiscoverySnapshot(visible, false, '')
+  assert.match(snapshot, /编辑后的项目/)
+  assert.match(snapshot, /待核实的公开线索/)
+  assert.match(snapshot, /未经核实/)
+  assert.doesNotMatch(snapshot, /原始名称/)
+  assert.match(buildSaiDiscoverySnapshot([], true, ''), /正在加载/)
+  assert.match(buildSaiDiscoverySnapshot([], false, '请求失败'), /读取失败/)
 })
 
 test('跨项目或项目与全局之间切换时隔离 Agent 会话', () => {
