@@ -44,21 +44,27 @@ export function resolveSaiUploadAction(current: SaiAgentContext, goal: string): 
 export function resolveSaiCreateAction(goal: string): '/projects?saiCreate=1' | '/meetings?saiCreate=1' | null {
   if (/(?:不要|不用|无需|取消).{0,8}(?:新建|创建|发起)/.test(goal)) return null
   if (!/^(?:小赛[，,]?\s*)?(?:请?帮我|我要|给我|现在|请|可以)?\s*(?:打开|进入|去|新建|创建|发起)/.test(goal)) return null
-  if (/(?:新建|创建).{0,8}(?:项目|投资项目)|(?:项目|投资项目).{0,8}(?:新建|创建)/.test(goal)) return '/projects?saiCreate=1'
   if (/(?:新建|创建|发起).{0,8}(?:项目会议|会议)|(?:项目会议|会议).{0,8}(?:新建|创建|发起)/.test(goal)) return '/meetings?saiCreate=1'
+  if (/(?:新建|创建).{0,8}(?:项目|投资项目)|(?:项目|投资项目).{0,8}(?:新建|创建)/.test(goal)) return '/projects?saiCreate=1'
   return null
 }
 
-export function resolveSaiNavigationAction(goal: string): 'approvals' | '/knowledge' | '/collaboration' | '/projects' | '/projects?view=discover' | '/projects?view=reviews' | '/due-diligence' | '/risks' | null {
+export function resolveSaiNavigationAction(goal: string): 'approvals' | '/' | '/ai' | '/knowledge' | '/collaboration' | '/meetings' | '/institutions' | '/workflow' | '/committee' | '/projects' | '/projects?view=discover' | '/projects?view=reviews' | '/due-diligence' | '/risks' | null {
   if (!/^(?:小赛[，,]?\s*)?(?:请?帮我|我要|给我|现在|请|可以)?\s*(?:打开|进入|跳转到|去)(?:一下)?/.test(goal)) return null
   if (/(?:待我审批|待审事项|审批工作台)/.test(goal)) return 'approvals'
   if (/(?:待复核|人工复核)/.test(goal)) return '/projects?view=reviews'
   if (/(?:新项目发现|发现项目|项目发现)/.test(goal)) return '/projects?view=discover'
   if (/(?:项目中心)/.test(goal)) return '/projects'
+  if (/(?:项目会议|会议日历|会议列表)/.test(goal)) return '/meetings'
+  if (/(?:投委会|投决会)/.test(goal)) return '/committee'
+  if (/(?:机构追踪|投资机构)/.test(goal)) return '/institutions'
+  if (/(?:申请与记录|流程记录)/.test(goal)) return '/workflow'
   if (/(?:尽调工作台|尽职调查)/.test(goal)) return '/due-diligence'
   if (/(?:风险预警|风险列表)/.test(goal)) return '/risks'
+  if (/(?:AI\s*智能助手|完整\s*AI\s*助手)/i.test(goal)) return '/ai'
   if (/知识库/.test(goal)) return '/knowledge'
-  if (/(?:任务日历|任务与日历|会议日历)/.test(goal)) return '/collaboration'
+  if (/(?:任务日历|任务与日历)/.test(goal)) return '/collaboration'
+  if (/(?:今日工作台|工作台首页)/.test(goal)) return '/'
   return null
 }
 
