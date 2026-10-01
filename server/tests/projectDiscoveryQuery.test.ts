@@ -21,4 +21,6 @@ test('discovery list retains bounded news source URLs and filters before server 
   assert.equal(/sourceUrl:\s*item\.sourceUrl/.test(source), true)
   assert.equal(/options\.projectDiscoveryOnly\s*&&\s*options\.period/.test(source), true)
   assert.equal(/options\.projectDiscoveryOnly\s*&&\s*options\.sort === 'score'/.test(source), true)
+  assert.equal(source.includes('DATE(${leads.createdAt})'), true, 'MySQL sessions already use Shanghai timezone')
+  assert.equal(source.includes('DATE_ADD(${leads.createdAt}, INTERVAL 8 HOUR)'), false)
 })

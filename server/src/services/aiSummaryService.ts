@@ -1306,11 +1306,19 @@ export async function listLeads(options: {
     )
     conds.push(sql`(${sql.join(sourceKeyMatches, sql` OR `)})`)
   }
+  const discoveryPublishedAtExpr = jsonText(leads.radarProfile, '$.publishedAt')
   const discoveryDayExpr = sql<string>`COALESCE(
     STR_TO_DATE(LEFT(${jsonText(leads.radarProfile, '$.discoveryDate')}, 10), '%Y-%m-%d'),
-    STR_TO_DATE(LEFT(${jsonText(leads.radarProfile, '$.publishedAt')}, 10), '%Y-%m-%d'),
-    DATE(DATE_ADD(${leads.createdAt}, INTERVAL 8 HOUR))
+    CASE WHEN ${discoveryPublishedAtExpr} REGEXP 'Z$'
+      THEN DATE(DATE_ADD(
+        STR_TO_DATE(REPLACE(LEFT(${discoveryPublishedAtExpr}, 19), 'T', ' '), '%Y-%m-%d %H:%i:%s'),
+        INTERVAL 8 HOUR
+      ))
+      ELSE STR_TO_DATE(LEFT(${discoveryPublishedAtExpr}, 10), '%Y-%m-%d')
+    END,
+    DATE(${leads.createdAt})
   )`
+  if (options.projectDiscoveryOnly) conds.push(sql`${discoveryDayExpr} <= ${formatShanghaiDateKey(new Date())}`)
   if (options.projectDiscoveryOnly && options.period && options.period !== 'all') {
     const today = formatShanghaiDateKey(new Date())
     const start = options.period === 'today'
