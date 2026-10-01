@@ -35,6 +35,14 @@ export function resolveSaiUploadAction(current: SaiAgentContext, goal: string): 
     : '/knowledge?view=archives&archiveTool=upload'
 }
 
+export function resolveSaiNavigationAction(goal: string): 'approvals' | '/knowledge' | '/collaboration' | null {
+  if (!/^(?:小赛[，,]?\s*)?(?:请?帮我|我要|给我|现在|请|可以)?\s*(?:打开|进入|跳转到|去)(?:一下)?/.test(goal)) return null
+  if (/(?:待我审批|待审事项|审批工作台)/.test(goal)) return 'approvals'
+  if (/知识库/.test(goal)) return '/knowledge'
+  if (/(?:任务日历|任务与日历|会议日历)/.test(goal)) return '/collaboration'
+  return null
+}
+
 type ProjectSummary = {
   id: string
   name: string

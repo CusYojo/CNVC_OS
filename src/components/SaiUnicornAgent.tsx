@@ -29,6 +29,7 @@ import {
   getSaiAgentActions,
   getSaiConversationScopeKey,
   resolveSaiAgentContext,
+  resolveSaiNavigationAction,
   resolveSaiUploadAction,
   type SaiAgentAction,
 } from '../lib/saiAgent'
@@ -239,6 +240,14 @@ export function SaiUnicornAgent() {
     if (uploadPath) {
       setComposer('')
       navigate(uploadPath)
+      closePanel()
+      return
+    }
+    const navigation = resolveSaiNavigationAction(cleanGoal)
+    if (navigation) {
+      setComposer('')
+      if (navigation === 'approvals') openApproval('inbox')
+      else navigate(navigation)
       closePanel()
       return
     }

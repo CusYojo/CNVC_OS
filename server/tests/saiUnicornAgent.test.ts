@@ -7,6 +7,7 @@ import {
   getSaiAgentActions,
   getSaiConversationScopeKey,
   resolveSaiAgentContext,
+  resolveSaiNavigationAction,
   resolveSaiUploadAction,
 } from '../../src/lib/saiAgent.js'
 
@@ -27,6 +28,14 @@ test('小赛在项目页打开对应资料上传窗口，其他页面打开知�
   assert.equal(resolveSaiUploadAction(workspace, '我要上传文件'), '/knowledge?view=archives&archiveTool=upload')
   assert.equal(resolveSaiUploadAction(project, '请分析这份材料'), null)
   assert.equal(resolveSaiUploadAction(project, '不要上传文件，只分析已有材料'), null)
+})
+
+test('小赛把明确的页面操作路由到现有工作区', () => {
+  assert.equal(resolveSaiNavigationAction('打开待我审批'), 'approvals')
+  assert.equal(resolveSaiNavigationAction('帮我打开知识库'), '/knowledge')
+  assert.equal(resolveSaiNavigationAction('请帮我打开知识库'), '/knowledge')
+  assert.equal(resolveSaiNavigationAction('进入任务日历'), '/collaboration')
+  assert.equal(resolveSaiNavigationAction('请分析待审事项'), null)
 })
 
 test('小赛能从项目路由安全解析当前项目', () => {
