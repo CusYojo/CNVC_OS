@@ -33,6 +33,7 @@ server/ai-artifacts/
 server/ai-template-data/
 server/ai-template-skills/
 server/project-files/
+server/digital-twin-assets/
 .runtime/
 cybernaut-assistant/data/
 cybernaut-assistant/workspace/
