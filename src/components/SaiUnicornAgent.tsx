@@ -20,7 +20,7 @@ import { FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useRef, useS
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useJwAgent } from '../hooks/useJwAgent'
 import { extractTextParts, normalizeAgentMessages } from '../lib/aiMessageSafety'
-import { apiPost } from '../lib/api'
+import { apiGet, apiPost } from '../lib/api'
 import { openApproval } from '../lib/approvalWorkspace'
 import {
   buildSaiAgentPrompt,
@@ -309,6 +309,22 @@ export function SaiUnicornAgent() {
     if (!cleanGoal || busy) return
     const uploadPath = resolveSaiUploadAction(currentContext, cleanGoal)
     if (uploadPath) {
+      if (uploadPath.startsWith('/knowledge?')) {
+        setSending(true)
+        setLocalError(undefined)
+        try {
+          const capabilities = await apiGet<{ upload: boolean; uploadProjectIds: string[] }>('/data-knowledge/capabilities')
+          if (!capabilities.upload || capabilities.uploadProjectIds.length === 0) {
+            setLocalError('当前账号没有可上传资料的项目。请先确认项目归属和上传权限。')
+            return
+          }
+        } catch (error) {
+          setLocalError(formatAgentError(error))
+          return
+        } finally {
+          setSending(false)
+        }
+      }
       setComposer('')
       navigate(uploadPath)
       closePanel()
