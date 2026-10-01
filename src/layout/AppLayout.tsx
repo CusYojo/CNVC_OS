@@ -8,6 +8,7 @@ import {
   ClipboardList,
   FolderKanban,
   Gauge,
+  Inbox,
   LogOut,
   Menu,
   Settings,
@@ -62,8 +63,22 @@ type MessageItem = {
 
 const primaryNav = [
   { to: '/', label: '工作台', icon: Gauge },
-  { to: '/ai', label: 'AI 智能助手', icon: Bot },
   { to: '/projects', label: '项目中心', icon: FolderKanban },
+  {
+    to: '/discovery', label: '新项目发现', icon: Sparkles,
+    children: [
+      { to: '/discovery', label: '新项目发现', icon: Sparkles },
+      { to: '/discovery/leads', label: '线索池', icon: Inbox },
+    ],
+  },
+  {
+    to: '/ai', label: 'AI 智能平台', icon: Bot,
+    children: [
+      { to: '/ai', label: 'AI 智能助手', icon: Bot },
+      { to: '/ai/skills', label: '智能 Skill 库', icon: BookOpen },
+      { to: '/ai/agents', label: '智能 Agent 库', icon: Boxes },
+    ],
+  },
   { to: '/institutions', label: '机构追踪', icon: Building2 },
   { to: '/collaboration', label: '任务与日历', icon: BriefcaseBusiness },
   { to: '/workflow', label: '申请与记录', icon: ClipboardCheck },
@@ -129,8 +144,10 @@ export function AppLayout() {
     return () => media.removeEventListener('change', update)
   }, [])
   const responsibilityView = location.pathname === '/responsibility' || location.pathname === '/knowledge' && new URLSearchParams(location.search).get('view') === 'responsibility'
-  const leadPoolView = location.pathname === '/projects' && new URLSearchParams(location.search).get('view') === 'leads'
-  const navigationCollapsed = !phone && (collapsed || narrow && (responsibilityView || leadPoolView))
+  const navigationCollapsed = !phone && (collapsed || narrow && responsibilityView)
+  const activeSection = primaryNav.find((item) => item.children && (location.pathname === item.to || location.pathname.startsWith(`${item.to}/`)))?.to ?? null
+  const [expandedSection, setExpandedSection] = useState<string | null>(activeSection)
+  useEffect(() => setExpandedSection(activeSection), [location.pathname])
   const [showProfile, setShowProfile] = useState(false)
   const [personalWeixinConnected, setPersonalWeixinConnected] = useState<boolean | null>(null)
   const [showCreate, setShowCreate] = useState(false)
@@ -163,10 +180,13 @@ export function AppLayout() {
   const meetingMessages: MessageItem[] = meetings.filter(item => item.unreadNoticeId).map(item => ({ id: `meeting:${item.id}`, kind: '会议', title: item.title, detail: `${item.projectName} · ${item.meetingTime.slice(0, 16).replace('T', ' ')}`, path: `/meetings?meeting=${item.id}`, priority: 1, readPath: `/meetings/${item.id}/notices/${item.unreadNoticeId}/read`, meetingId: item.id }))
   const storedMessages: MessageItem[] = notifications.filter(item => !item.isRead).map(item => ({ id: `notice:${item.id}`, kind: item.type || '消息', title: item.title, detail: item.content, path: '/collaboration', priority: 2 }))
   const messageItems = [...approvalMessages, ...warningMessages, ...directiveMessages, ...meetingMessages, ...collaborationMessages, ...storedMessages].sort((left, right) => left.priority - right.priority)
+  const workspacePages = primaryNav.flatMap((item) => item.children ?? [item])
   const pageTitle = location.pathname.startsWith('/system') ? '系统管理'
     : location.pathname === '/committee' || location.pathname === '/meetings' ? '任务与日历'
       : location.pathname === '/responsibility' ? '知识库'
-        : primaryNav.find(item => item.to === '/' ? location.pathname === '/' : location.pathname.startsWith(item.to))?.label ?? '投资工作空间'
+        : workspacePages.find((item) => item.to === location.pathname)?.label
+          ?? workspacePages.find((item) => item.to !== '/' && location.pathname.startsWith(`${item.to}/`))?.label
+          ?? '投资工作空间'
   const query = search.trim().toLowerCase()
   const showWorkbenchQuote = location.pathname === '/' || location.pathname === '/projects/boss-dashboard'
   const matchedProjects = query ? projects.filter(item => item.lifecycle !== 'deleted' && `${item.name} ${item.companyName}`.toLowerCase().includes(query)).slice(0, 8) : []
@@ -269,7 +289,39 @@ export function AppLayout() {
         </div>
         <nav>
           {!navigationCollapsed && <div className="fde-nav-label">统一工作空间</div>}
-          {primaryNav.map((item) => <NavLink key={item.to} to={item.to} end={item.to === '/'} title={item.label} className={({ isActive }) => `fde-nav-item${isActive ? ' active' : ''}`}><item.icon className="fde-nav-icon" />{!navigationCollapsed && <span>{item.label}</span>}</NavLink>)}
+          {primaryNav.map((item) => {
+            if (!item.children) return <NavLink key={item.to} to={item.to} end={item.to === '/'} title={item.label} className={({ isActive }) => `fde-nav-item${isActive ? ' active' : ''}`}><item.icon className="fde-nav-icon" />{!navigationCollapsed && <span>{item.label}</span>}</NavLink>
+            const sectionActive = activeSection === item.to
+            const sectionExpanded = !navigationCollapsed && expandedSection === item.to
+            const sectionId = `workspace-nav-${item.to.slice(1)}`
+            return <div key={item.to} className="fde-nav-group">
+              <button
+                type="button"
+                title={item.label}
+                className={`fde-nav-item fde-nav-parent${sectionActive ? ' active' : ''}`}
+                aria-expanded={sectionExpanded}
+                aria-controls={sectionId}
+                onClick={() => {
+                  if (navigationCollapsed) {
+                    setCollapsed(false)
+                    setExpandedSection(item.to)
+                    if (!sectionActive) navigate(item.to)
+                  } else if (sectionActive) {
+                    setExpandedSection((current) => current === item.to ? null : item.to)
+                  } else {
+                    setExpandedSection(item.to)
+                    navigate(item.to)
+                  }
+                }}
+              >
+                <item.icon className="fde-nav-icon" />
+                {!navigationCollapsed && <><span>{item.label}</span><ChevronDown className={`fde-nav-chevron${sectionExpanded ? ' is-expanded' : ''}`} aria-hidden="true" /></>}
+              </button>
+              <div id={sectionId} className="fde-nav-subitems" hidden={!sectionExpanded}>
+                {item.children.map((child) => <NavLink key={child.to} to={child.to} end title={child.label} aria-current={location.pathname === child.to ? 'page' : undefined} className={({ isActive }) => `fde-nav-subitem${isActive ? ' active' : ''}`}><child.icon aria-hidden="true" /><span>{child.label}</span></NavLink>)}
+              </div>
+            </div>
+          })}
           {navSections.filter((section) => section.label !== '系统管理').map((section) => {
             const visibleChildren = section.children.filter((item) => canSeeNavItem(item, currentUser.role, currentUser.permissionCodes))
             const sectionActive = visibleChildren.some((item) => location.pathname === item.to.split('?')[0])

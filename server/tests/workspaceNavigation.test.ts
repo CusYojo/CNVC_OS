@@ -17,6 +17,7 @@ test('discovery and AI platform have independent nested sidebar navigation', asy
   assert.match(layout, /aria-current=\{[^}]+\}/)
   assert.match(layout, /setExpandedSection\(/)
   assert.match(layout, /\[location\.pathname\]/, 'route changes should update open section')
+  assert.match(layout, /workspacePages\.find\(\(item\) => item\.to === location\.pathname\)/, 'breadcrumb should prefer the selected child page')
   assert.match(shell, /\.fde-nav-subitems/)
   assert.match(shell, /\.fde-nav-subitem:focus-visible/)
 })

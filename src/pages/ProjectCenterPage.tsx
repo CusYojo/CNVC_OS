@@ -1,16 +1,14 @@
-import { FolderKanban, Inbox, Sparkles, Star, UsersRound } from 'lucide-react'
-import { useSearchParams } from 'react-router-dom'
-import { useEffect, useState } from 'react'
+import { FolderKanban, Inbox, Star, UsersRound } from 'lucide-react'
+import { Navigate, useSearchParams } from 'react-router-dom'
+import { useState } from 'react'
 import type { ProjectClassification } from '../types'
 import type { ProjectListCounts } from '../services/projectListApi'
 import { ProjectsPage } from './ProjectsPage'
 import { LeadReviewPanel } from '../components/LeadReviewPanel'
-import { ProjectDiscoveryPage } from './ProjectDiscoveryPage'
 
-type ProjectCenterView = 'discover' | 'reviews' | ProjectClassification
+type ProjectCenterView = 'reviews' | ProjectClassification
 
 const views: Array<{ id: ProjectCenterView; label: string; icon: typeof Inbox }> = [
-  { id: 'discover', label: '新项目发现', icon: Sparkles },
   { id: 'reviews', label: '待复核', icon: Inbox },
   { id: 'pool', label: '项目池', icon: FolderKanban },
   { id: 'normal', label: '普通项目', icon: UsersRound },
@@ -21,7 +19,6 @@ const views: Array<{ id: ProjectCenterView; label: string; icon: typeof Inbox }>
 const visibleViews = views.filter(item => item.id !== 'pool')
 
 function validView(value: string | null): ProjectCenterView {
-  if (value === 'leads') return 'discover'
   return visibleViews.some((item) => item.id === value) ? value as ProjectCenterView : 'normal'
 }
 
@@ -29,10 +26,14 @@ export function ProjectCenterPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const view = validView(searchParams.get('view'))
   const [classificationCounts, setClassificationCounts] = useState<ProjectListCounts>({ normal: 0, key: 0 })
+  const legacyView = searchParams.get('view')
 
-  useEffect(() => {
-    if (searchParams.get('view') === 'leads') setSearchParams({ view: 'discover' }, { replace: true })
-  }, [searchParams, setSearchParams])
+  if (legacyView === 'discover' || legacyView === 'leads') {
+    const params = new URLSearchParams(searchParams)
+    params.delete('view')
+    const query = legacyView === 'leads' ? params.toString() : ''
+    return <Navigate to={legacyView === 'leads' ? `/discovery/leads${query ? `?${query}` : ''}` : '/discovery'} replace />
+  }
 
   const selectView = (next: ProjectCenterView) => {
     const params = new URLSearchParams(searchParams)
@@ -75,13 +76,13 @@ export function ProjectCenterPage() {
                 }}
                 className={active ? 'active' : ''}
               >
-                {item.label}{item.id !== 'discover' && item.id !== 'reviews' && item.id !== 'pool' && <em>{classificationCounts[item.id]}</em>}
+                {item.label}{item.id !== 'reviews' && item.id !== 'pool' && <em>{classificationCounts[item.id]}</em>}
               </button>
             )
           })}
         </div>
       <div id="project-center-panel" role="tabpanel" aria-labelledby={`project-center-tab-${view}`}>
-        {view === 'discover' ? <ProjectDiscoveryPage /> : view === 'reviews' ? <LeadReviewPanel /> : <ProjectsPage key={view} classification={view} embedded onCountsChange={setClassificationCounts} />}
+        {view === 'reviews' ? <LeadReviewPanel /> : <ProjectsPage key={view} classification={view} embedded onCountsChange={setClassificationCounts} />}
       </div>
     </div>
   )
