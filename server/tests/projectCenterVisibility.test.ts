@@ -20,10 +20,13 @@ function renderCenter(view: string | null, projects: Array<{ classification?: st
     FolderKanban: 'svg', Inbox: 'svg', Sparkles: 'svg', Star: 'svg', UsersRound: 'svg',
     useSearchParams: () => [params, () => {}],
     useState: () => [{ normal: 1, key: 1 }, () => {}],
+    useEffect: () => {},
+    Navigate: ({ to }: { to: string }) => React.createElement('div', { 'data-redirect': to }),
     useAppStore: (select: (state: { projects: typeof projects }) => unknown) => select({ projects }),
     ProjectsPage: ({ classification }: { classification: string }) => React.createElement('div', { 'data-classification': classification }),
     SourcingPage: () => React.createElement('div', { 'data-view': 'leads' }),
     ProjectDiscoveryPage: () => React.createElement('div', { 'data-view': 'discover' }),
+    LeadReviewPanel: () => React.createElement('div', { 'data-view': 'reviews' }),
     FdeTypeRegistrationPanel: () => null,
   }) as React.ComponentType
   return renderToStaticMarkup(React.createElement(Component))
@@ -38,14 +41,22 @@ for (const view of [null, '', 'pool', 'unknown']) {
   })
 }
 
-for (const view of ['leads', 'discover', 'normal', 'key']) {
+for (const view of ['reviews', 'normal', 'key']) {
   test(`project center retains visible ${view} tab and content`, () => {
     const html = renderCenter(view, [{ classification: 'pool' }, {}, { classification: 'key' }, { classification: 'normal', lifecycle: 'archived' }])
     assert.doesNotMatch(html, /项目池/)
-    assert.equal((html.match(/role="tab"/g) ?? []).length, 5)
+    assert.equal((html.match(/role="tab"/g) ?? []).length, 3)
     assert.equal((html.match(/aria-selected="true"/g) ?? []).length, 1)
     assert.match(html, /普通项目<em>1<\/em>/)
     assert.match(html, /重点项目<em>1<\/em>/)
-    assert.ok(html.includes(view === 'leads' || view === 'discover' ? `data-view="${view}"` : `data-classification="${view}"`))
+    assert.ok(html.includes(view === 'reviews' ? 'data-view="reviews"' : `data-classification="${view}"`))
+  })
+}
+
+for (const [view, target] of [['discover', '/discovery'], ['leads', '/discovery/leads']]) {
+  test(`legacy project center ${view} view redirects to ${target}`, () => {
+    const html = renderCenter(view)
+    assert.match(html, new RegExp(`data-redirect="${target}"`))
+    assert.doesNotMatch(html, /role="tab"/)
   })
 }

@@ -4,16 +4,18 @@ import test from 'node:test'
 
 const read = (path: string) => readFile(new URL(`../../${path}`, import.meta.url), 'utf8')
 
-test('project center exposes the imported discovery workspace without rewriting the lead pool', async () => {
-  const [center, discovery, discoveryCss, sourcing] = await Promise.all([
+test('independent discovery workspace keeps the existing project discovery presentation and lead pool', async () => {
+  const [center, discovery, discoveryCss, sourcing, app] = await Promise.all([
     read('src/pages/ProjectCenterPage.tsx'),
     read('src/pages/ProjectDiscoveryPage.tsx'),
     read('src/pages/ProjectDiscoveryPage.css'),
     read('src/pages/SourcingPage.tsx'),
+    read('src/App.tsx'),
   ])
 
-  assert.match(center, /id: 'discover', label: '新项目发现'/)
-  assert.match(center, /view === 'discover' \? <ProjectDiscoveryPage \/>/)
+  assert.doesNotMatch(center, /id: 'discover', label: '新项目发现'/)
+  assert.match(app, /path="\/discovery" element=\{<ProjectDiscoveryPage\s*\/>\}/)
+  assert.match(app, /path="\/discovery\/leads" element=\{<SourcingPage\s*\/>\}/)
   assert.match(discovery, /<h1>新项目发现<\/h1>/)
   assert.match(discovery, /今天新发现/)
   assert.match(discovery, /近 7 天/)
