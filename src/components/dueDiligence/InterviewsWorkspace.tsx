@@ -50,6 +50,8 @@ export function InterviewsWorkspace(props: {
   const chunks = useRef<Blob[]>([])
   const segmentStartedAt = useRef(0)
   const accumulatedSeconds = useRef(0)
+  const pendingRecording = useRef<{ blob: Blob; content: string; seconds: number } | null>(null)
+  const [saveError, setSaveError] = useState('')
 
   const appendTranscript = (text: string) => setDraft(value => { const next = `${value}${value.trim() ? '\n' : ''}${text}`; draftRef.current = next; return next })
   const speech = useSpeechRecognition({ continuous: true, onFinal: appendTranscript, onInterim: setInterim })
@@ -83,20 +85,33 @@ export function InterviewsWorkspace(props: {
     current.onstop = () => resolve(new Blob(chunks.current, { type: current.mimeType || 'audio/webm' }))
     current.stop()
   })
+  const describeSaveError = (error: unknown) => {
+    const message = error instanceof Error ? error.message : '未知错误'
+    return /来源不信任|ORIGIN_FORBIDDEN/i.test(message) ? '当前访问地址未加入可信来源。请使用配置的本地地址后重新保存。' : message
+  }
+  const persistRecording = async (item: { blob: Blob; content: string; seconds: number }) => {
+    if (!props.selected) return false
+    // Archive audio first, then commit its corresponding transcript. Both stay
+    // in browser memory until the complete chain succeeds, enabling retry.
+    const recordingFileId = item.blob.size ? await props.onUploadRecording(props.selected, item.blob, item.seconds) : null
+    if (item.blob.size && !recordingFileId) throw new Error('录音保存未完成')
+    const saved = item.content ? await props.onSaveTranscript(props.selected, item.content, '已确认', props.transcript?.version ?? null) : null
+    if (item.content && !saved) throw new Error('转写保存未完成')
+    if (recordingFileId) await props.onStartAsr(props.selected, recordingFileId, item.content, saved?.version ?? props.transcript?.version ?? null)
+    pendingRecording.current = null; setSaveError('')
+    if (saved && window.confirm('录入已结束，是否基于已保存的转写生成访谈纪要？')) { const result = await props.onGenerateSummary(props.selected, saved.version); if (result) setSummary(result.summary) }
+    return true
+  }
   const finish = async () => {
     if (!props.selected) return
     if (recordState === 'recording') accumulatedSeconds.current += (Date.now() - segmentStartedAt.current) / 1000
     setRecordState('finishing'); speech.stop(); await new Promise(resolve => window.setTimeout(resolve, 80))
     try {
       const blob = await stopRecorder(); stream.current?.getTracks().forEach(track => track.stop()); stream.current = null; recorder.current = null
-      const content = draftRef.current.trim(); const saved = content ? await props.onSaveTranscript(props.selected, content, '已确认', props.transcript?.version ?? null) : null
-      const recordingFileId = blob.size ? await props.onUploadRecording(props.selected, blob, Math.round(accumulatedSeconds.current)) : null
-      if (recordingFileId) await props.onStartAsr(props.selected, recordingFileId, content, saved?.version ?? props.transcript?.version ?? null)
+      const item = { blob, content: draftRef.current.trim(), seconds: Math.round(accumulatedSeconds.current) }; pendingRecording.current = item
+      await persistRecording(item)
       setRecordState('idle'); setElapsed(0); accumulatedSeconds.current = 0; chunks.current = []
-      if (saved && window.confirm('录入已结束，是否基于已保存的转写生成访谈纪要？')) {
-        const result = await props.onGenerateSummary(props.selected, saved.version); if (result) setSummary(result.summary)
-      }
-    } catch (error) { setRecordState('paused'); window.alert(`结束录入失败：${error instanceof Error ? error.message : '未知错误'}`) }
+    } catch (error) { setRecordState('paused'); setSaveError(describeSaveError(error)) }
   }
 
   const selected = props.selected
@@ -110,6 +125,7 @@ export function InterviewsWorkspace(props: {
       <Card className="p-5"><div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-semibold">项目相关材料</h2><p className="mt-1 text-xs text-slate-500">创建访谈时从项目中心导入；在此移除不会删除项目中心原文件。</p></div></div><div className="mt-3 grid gap-2 md:grid-cols-2">{projectMaterials.map(item => <div key={item.id} className="flex items-center justify-between rounded-lg border border-slate-200 p-3 text-sm"><a className="min-w-0 truncate text-brand-700" href={`/api/projects/files/${item.fileId}/download`}>{item.name}</a><button className="ml-3 text-rose-500" onClick={() => void props.onRemoveMaterial(item)}><Trash2 className="h-4 w-4" /></button></div>)}{!projectMaterials.length && <p className="text-sm text-slate-400">当前访谈没有项目材料引用。</p>}</div></Card>
       <Card className="p-5"><div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-semibold">录音与实时转写</h2><p className="mt-1 text-xs text-slate-500">浏览器文字实时出现；结束后可用后台 ASR 补转写并人工合并。</p></div><div className="flex flex-wrap gap-2">{recordState === 'idle' && <Button onClick={() => void begin()}><Mic className="h-4 w-4" />开始录入</Button>}{recordState === 'requesting' && <Button disabled>正在申请权限…</Button>}{recordState === 'recording' && <Button variant="secondary" onClick={pause}><Pause className="h-4 w-4" />暂停 {formatTime(elapsed)}</Button>}{recordState === 'paused' && <Button onClick={resume}><Play className="h-4 w-4" />继续录入</Button>}{recordState !== 'idle' && recordState !== 'requesting' && <Button variant="secondary" disabled={recordState === 'finishing'} onClick={() => void finish()}><Square className="h-4 w-4" />{recordState === 'finishing' ? '正在结束…' : '结束'}</Button>}</div></div>
         {speech.error && <p className="mt-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-800">{speech.error} 录音不受影响，结束后仍会尝试后台转写。</p>}
+        {saveError && <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-rose-50 p-3 text-sm text-rose-800"><span>保存未完成：{saveError}。录音和转写仍保留在当前页面。</span><Button size="sm" variant="secondary" disabled={!pendingRecording.current} onClick={() => { const item = pendingRecording.current; if (item) void persistRecording(item).then(ok => { if (ok) { setRecordState('idle'); setElapsed(0); accumulatedSeconds.current = 0; chunks.current = [] } }).catch(error => setSaveError(describeSaveError(error))) }}>重新保存</Button></div>}
         <textarea className="textarea mt-4 min-h-72 w-full" value={draft} onChange={event => { setDraft(event.target.value); draftRef.current = event.target.value }} placeholder="实时转写会持续显示在这里，也可随时手工修订。" />{interim && <p className="mt-2 text-sm text-slate-400">正在识别：{interim}</p>}
         <div className="mt-3 flex flex-wrap justify-end gap-2"><Button variant="secondary" disabled={!draft.trim()} onClick={() => void props.onSaveTranscript(selected, draft, '草稿', props.transcript?.version ?? null)}><Save className="h-4 w-4" />保存草稿</Button><Button variant="secondary" disabled={!draft.trim()} onClick={() => void props.onArchiveText(selected, '转写稿', draft)}>保存到项目材料</Button><a className="inline-flex items-center rounded-lg border px-3 py-2 text-sm" href={`/api/due-diligence/projects/${props.projectId}/interviews/${selected.id}/export/transcript`}><Download className="mr-1 h-4 w-4" />导出转写稿</a></div>
         {newestJob && <div className="mt-4 rounded-lg border border-slate-200 p-3 text-sm"><div className="flex items-center justify-between"><strong>后台转写：{newestJob.status}</strong>{(newestJob.status === '失败' || newestJob.status === '未配置') && <Button size="sm" variant="secondary" onClick={() => void props.onRetryAsr(selected, newestJob)}>重试</Button>}</div>{newestJob.providerText && <><p className="mt-3 text-xs text-slate-500">后台 ASR 结果</p><textarea className="textarea mt-1 min-h-32" value={newestJob.providerText} readOnly /><Button className="mt-2" size="sm" onClick={() => { const merged = newestJob.mergedText || [draft, newestJob.providerText].filter(Boolean).join('\n\n'); setDraft(merged); draftRef.current = merged }}>载入合并预览</Button></>}{newestJob.errorMessage && <p className="mt-2 text-amber-700">{newestJob.errorMessage}</p>}</div>}

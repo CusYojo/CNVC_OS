@@ -6,7 +6,9 @@ export default defineConfig(() => {
     plugins: [react()],
     server: {
       host: '127.0.0.1',
-      port: 5173,
+      // Never silently move to a fallback port: API writes use an origin allow-list.
+      port: 5174,
+      strictPort: true,
       proxy: {
         '/api': 'http://127.0.0.1:4100',
         '/generated': 'http://127.0.0.1:4100',

@@ -792,6 +792,10 @@ export const digitalTwins = mysqlTable('digital_twins', {
   role: varchar('role', { length: 64 }).notNull(),
   rules: longtext('rules').notNull(),
   cases: longtext('cases').notNull(),
+  avatarKind: varchar('avatar_kind', { length: 16 }).notNull().default('preset'),
+  avatarPreset: varchar('avatar_preset', { length: 32 }),
+  avatarStoragePath: text('avatar_storage_path'),
+  avatarMimeType: varchar('avatar_mime_type', { length: 128 }),
   clientRequestId: uuidColumn('client_request_id'),
   learningTargetAt: timestampColumn('learning_target_at'),
   activeVersion: int('active_version').notNull().default(1),
@@ -861,7 +865,7 @@ export const digitalTwinPublications = mysqlTable('digital_twin_publications', {
   ownerUserId: uuidColumn('owner_user_id').notNull().references(() => users.id, { onDelete: 'cascade' }), publishedVersion: int('published_version').notNull(),
   introduction: text('introduction').notNull(), publicRules: longtext('public_rules').notNull(), publicCases: longtext('public_cases').notNull(),
   industryTags: json('industry_tags').$type<string[]>().notNull().default(emptyJsonArray), capabilityTags: json('capability_tags').$type<string[]>().notNull().default(emptyJsonArray),
-  status: varchar('status', { length: 16 }).notNull().default('已发布'), publishedAt: timestampColumn('published_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`), withdrawnAt: timestampColumn('withdrawn_at'),
+  status: varchar('status', { length: 16 }).notNull().default('已发布'), publishedAt: timestampColumn('published_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`), withdrawnAt: timestampColumn('withdrawn_at'), avatarKind: varchar('avatar_kind', { length: 16 }).notNull().default('preset'), avatarPreset: varchar('avatar_preset', { length: 32 }), avatarStoragePath: text('avatar_storage_path'), avatarMimeType: varchar('avatar_mime_type', { length: 128 }),
 }, (t) => ({ uniqueTwin: uniqueIndex('uq_digital_twin_publication_twin').on(t.twinId), directory: index('idx_digital_twin_publications_directory').on(t.status, t.ownerUserId) }))
 
 export const digitalTwinInvocationLogs = mysqlTable('digital_twin_invocation_logs', {
@@ -887,8 +891,12 @@ export const digitalTwinExperienceEvents = mysqlTable('digital_twin_experience_e
 
 export const digitalTwinSkills = mysqlTable('digital_twin_skills', {
   id: uuidPrimaryKey('id'), twinId: uuidColumn('twin_id').notNull().references(() => digitalTwins.id, { onDelete: 'cascade' }), ownerUserId: uuidColumn('owner_user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-  name: varchar('name', { length: 128 }).notNull(), activeVersion: int('active_version').notNull().default(0), status: varchar('status', { length: 16 }).notNull().default('试用中'), createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`), updatedAt: timestampColumn('updated_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
-}, (t) => ({ uniqueTwin: uniqueIndex('uq_twin_skill_twin').on(t.twinId), byOwner: index('idx_twin_skill_owner').on(t.ownerUserId, t.updatedAt) }))
+  name: varchar('name', { length: 128 }).notNull(), activeVersion: int('active_version').notNull().default(0), status: varchar('status', { length: 16 }).notNull().default('试用中'), sourceType: varchar('source_type', { length: 32 }).notNull().default('经验候选'), sourceUrl: varchar('source_url', { length: 2048 }), contentHash: varchar('content_hash', { length: 64 }), createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`), updatedAt: timestampColumn('updated_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({ uniqueContent: uniqueIndex('uq_twin_skill_content').on(t.twinId, t.contentHash), byOwner: index('idx_twin_skill_owner').on(t.ownerUserId, t.updatedAt) }))
+
+export const digitalTwinSkillImports = mysqlTable('digital_twin_skill_imports', {
+  id: uuidPrimaryKey('id'), twinId: uuidColumn('twin_id').notNull().references(() => digitalTwins.id, { onDelete: 'cascade' }), ownerUserId: uuidColumn('owner_user_id').notNull().references(() => users.id, { onDelete: 'cascade' }), sourceType: varchar('source_type', { length: 32 }).notNull(), sourceName: varchar('source_name', { length: 255 }).notNull(), sourceUrl: varchar('source_url', { length: 2048 }), relativePath: varchar('relative_path', { length: 512 }), contentHash: varchar('content_hash', { length: 64 }).notNull(), content: longtext('content').notNull(), parsed: json('parsed').$type<Record<string, unknown>>().notNull().default(emptyJsonObject), status: varchar('status', { length: 16 }).notNull().default('待学习'), errorMessage: text('error_message'), skillId: uuidColumn('skill_id').references(() => digitalTwinSkills.id, { onDelete: 'set null' }), createdAt: timestampColumn('created_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`), updatedAt: timestampColumn('updated_at').notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+}, (t) => ({ uniqueContent: uniqueIndex('uq_twin_skill_import_hash').on(t.twinId, t.contentHash), byTwin: index('idx_twin_skill_import_twin').on(t.twinId, t.status, t.createdAt) }))
 
 export const digitalTwinSkillVersions = mysqlTable('digital_twin_skill_versions', {
   id: uuidPrimaryKey('id'), skillId: uuidColumn('skill_id').notNull().references(() => digitalTwinSkills.id, { onDelete: 'cascade' }), version: int('version').notNull(),
