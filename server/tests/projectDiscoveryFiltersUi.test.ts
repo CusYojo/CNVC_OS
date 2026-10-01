@@ -26,14 +26,15 @@ test('every discovery card shows sourced reporting or an explicit missing-eviden
   assert.match(page, /url\.protocol === 'https:' \|\| url\.protocol === 'http:'/)
 })
 
-test('discovery rating stays adjacent to financing date and exposes evidence-backed dimensions', async () => {
+test('discovery card keeps a compact score badge and exposes evidence-backed dimensions', async () => {
   const [page, css, types] = await Promise.all([
     read('src/pages/ProjectDiscoveryPage.tsx'),
     read('src/pages/ProjectDiscoveryPage.css'),
     read('src/types/index.ts'),
   ])
 
-  assert.match(page, /project-discovery-card-header[\s\S]*project-discovery-card-date[\s\S]*project-discovery-card-score[\s\S]*<\/header>/)
+  assert.match(page, /project-discovery-card-header[\s\S]*project-discovery-card-score[\s\S]*<\/header>/)
+  assert.match(page, /item\.label === '最新融资日期' \|\| item\.label === '公开日期'/)
   assert.match(page, /discoveryScore\?\.dimensions/)
   assert.match(page, /discoveryScore\?\.coverage/)
   assert.match(page, /参考分（\$\{scoreCoverage\}\/4维）/)

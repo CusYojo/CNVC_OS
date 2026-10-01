@@ -17,6 +17,32 @@ export type ProjectDiscoveryKeyword = { kind: ProjectDiscoveryKeywordKind; label
 export type ProjectDiscoveryPage<T> = { list: T[]; page: number; totalPages: number }
 export type LoadedProjectDiscoveryPage<T> = ProjectDiscoveryPage<T> & { items: T[] }
 
+const reviewNote = /(?:待核验|待核实|待确认|原库在途|截图推测|不采信|仅供参考|来源待核)/u
+const amountPattern = /(?:约|近|超|数)?\s*\d+(?:\.\d+)?\s*(?:亿元|万元|亿|万)(?:人民币|美元)?/u
+const roundPattern = /(?:Pre[-\s]?[A-F]\+?|[A-F]\+?|天使|种子|战略)(?:轮(?:融资)?|融资)/iu
+
+/** Keep the source record intact; only shorten review notes in the discovery-card view. */
+export function compactProjectDiscoveryFactValue(label: string, value: string): string {
+  const raw = value.trim()
+  const concise = raw.replace(/\s*[（(]([^（）()]*)[）)]/gu, (matched, note: string) => (
+    reviewNote.test(note) ? '' : matched
+  )).trim()
+  const rejected = /不采信|不可采信|不能采信/u.test(raw)
+  const explicit = concise && !reviewNote.test(concise) ? concise : ''
+  if (label === '融资金额' || label === '融资轮次') {
+    const candidate = explicit || (rejected ? '' : raw)
+    const match = label === '融资金额' ? candidate.match(amountPattern) : candidate.match(roundPattern)
+    if (match) {
+      const direct = match[0].replace(/\s+/gu, ' ').trim()
+      return !explicit && /推测|预计|估计/u.test(raw)
+        ? `${label === '融资金额' ? '约' : '预计'}${direct.replace(/^(?:约|预计)/u, '')}`
+        : direct
+    }
+  }
+  if (!explicit && (reviewNote.test(raw) || !raw)) return '未披露'
+  return explicit || concise
+}
+
 export async function loadProjectDiscoveryPage<T extends { id: string }>(
   fetchPage: (page: number) => Promise<ProjectDiscoveryPage<T> | null | undefined>,
   page: number,
@@ -159,7 +185,7 @@ export function projectDiscoveryPrimaryDate(lead: LeadListItem): { label: string
   if (discoveryCandidateKind(lead) === 'research') {
     return {
       label: '公开日期',
-      value: editedDate !== undefined ? editedDate : lead.researchProfile?.progress?.publishedAt || projectDiscoveryCandidateDay(lead) || '未披露',
+      value: compactProjectDiscoveryFactValue('公开日期', editedDate !== undefined ? editedDate : lead.researchProfile?.progress?.publishedAt || projectDiscoveryCandidateDay(lead) || '未披露'),
     }
   }
 
@@ -172,7 +198,7 @@ export function projectDiscoveryPrimaryDate(lead: LeadListItem): { label: string
 
   return {
     label: '融资日期',
-    value: editedDate !== undefined ? editedDate : financing?.latestRoundDate || investment?.financing.latestCompletedAt || '未披露',
+    value: compactProjectDiscoveryFactValue('最新融资日期', editedDate !== undefined ? editedDate : financing?.latestRoundDate || investment?.financing.latestCompletedAt || '未披露'),
   }
 }
 
@@ -200,14 +226,13 @@ function applyProjectDiscoveryBriefEdits(
   brief: ProjectDiscoveryBrief,
   edits?: ProjectDiscoveryCardEdits,
 ): ProjectDiscoveryBrief {
-  if (!edits) return brief
   return {
-    summary: edits.summary,
+    summary: edits?.summary ?? brief.summary,
     facts: brief.facts.map((fact) => ({
       ...fact,
-      value: Object.prototype.hasOwnProperty.call(edits.briefFacts, fact.label)
+      value: compactProjectDiscoveryFactValue(fact.label, edits && Object.prototype.hasOwnProperty.call(edits.briefFacts, fact.label)
         ? edits.briefFacts[fact.label]
-        : fact.value,
+        : fact.value),
     })),
   }
 }

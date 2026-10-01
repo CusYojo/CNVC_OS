@@ -31,32 +31,33 @@
 .project-discovery-search button svg { width: 14px; }
 
 .project-discovery-results { overflow: hidden; border: 1px solid #e1e7ef; border-radius: 14px; background: #fff; box-shadow: 0 8px 25px rgba(20,45,95,.045); }
-.project-discovery-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; padding: 14px; background: #f8fafc; }
-.project-discovery-card { display: flex; min-width: 0; flex-direction: column; padding: 16px; border: 1px solid #e0e6ee; border-radius: 12px; background: #fff; transition: border-color .16s ease; }
+.project-discovery-grid { display: grid; grid-template-columns: minmax(0,1fr); gap: 14px; padding: 16px; background: #f8fafc; }
+.project-discovery-timeline-item { display: grid; grid-template-columns: 110px minmax(0,1fr); align-items: stretch; gap: 12px; min-width: 0; }
+.project-discovery-timeline-item > time { display: flex; align-items: center; gap: 8px; color: #69768a; font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.project-discovery-timeline-item > time svg { width: 10px; height: 10px; flex: none; fill: #7e9bed; color: #7e9bed; }
+.project-discovery-card { display: flex; min-width: 0; flex-direction: column; padding: 20px; border: 1px solid #e0e6ee; border-radius: 12px; background: #fff; transition: border-color .16s ease; }
 .project-discovery-card:hover { border-color: #a8c3eb; }
-.project-discovery-card.is-expanded { grid-column: 1 / -1; }
+.project-discovery-card.is-expanded { border-color: #cbdcf6; }
 .project-discovery-card-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .project-discovery-card-header-meta { display: flex; flex: none; align-items: stretch; gap: 8px; }
 .project-discovery-card-header h3 { min-width: 0; flex: 1; margin: 0; color: #24344e; font-size: 18px; font-weight: 600; letter-spacing: -.02em; line-height: 1.45; }
-.project-discovery-card-date { display: grid; grid-template-columns: auto auto; flex: none; align-items: center; gap: 1px 6px; min-width: 108px; padding: 6px 9px; border: 1px solid #d7e3f5; border-radius: 8px; background: #f7faff; color: #687892; font-size: 10px; line-height: 1.25; }
-.project-discovery-card-date svg { grid-row: 1 / span 2; width: 15px; color: #326bc2; }
-.project-discovery-card-date strong { color: #2c5fa8; font-size: 12px; font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
-.project-discovery-card-score { display: flex; min-width: 92px; flex-direction: column; justify-content: center; gap: 2px; padding: 6px 9px; border: 1px solid #d7e3f5; border-radius: 8px; background: #f7faff; color: #687892; font-size: 10px; line-height: 1.25; }
-.project-discovery-card-score strong { color: #2c5fa8; font-size: 14px; font-variant-numeric: tabular-nums; font-weight: 700; white-space: nowrap; }
+.project-discovery-card-score { display: inline-flex; min-height: 28px; align-items: center; padding: 3px 10px; border: 1px solid #cbdcf6; border-radius: 999px; background: #f7faff; color: #2c5fa8; }
+.project-discovery-card-score strong { font-size: 12px; font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
 .project-discovery-title-input, .project-discovery-date-input, .project-discovery-fact-input, .project-discovery-summary-input, .project-discovery-profile-input, .project-discovery-detail-metadata input { display: block; width: 100%; min-width: 0; padding: 2px 4px; border: 1px solid transparent; border-radius: 5px; outline: none; background: transparent; color: inherit; font: inherit; overflow-wrap: anywhere; resize: none; }
 .project-discovery-title-input { margin: -2px -4px; color: #24344e; font-size: 18px; font-weight: 600; letter-spacing: -.02em; line-height: 1.45; }
-.project-discovery-date-input { width: 84px; margin: -2px -4px; color: #2c5fa8; font-size: 12px; font-variant-numeric: tabular-nums; font-weight: 600; line-height: 1.25; }
+.project-discovery-date-input { margin: -2px -4px; color: #24344e; font-size: 16px; font-variant-numeric: tabular-nums; font-weight: 600; line-height: 1.6; }
 .project-discovery-title-input:hover, .project-discovery-date-input:hover, .project-discovery-fact-input:hover, .project-discovery-summary-input:hover, .project-discovery-profile-input:hover, .project-discovery-detail-metadata input:hover { border-color: #d5deeb; background: rgba(255,255,255,.72); }
 .project-discovery-title-input:focus-visible, .project-discovery-date-input:focus-visible, .project-discovery-fact-input:focus-visible, .project-discovery-summary-input:focus-visible, .project-discovery-profile-input:focus-visible, .project-discovery-detail-metadata input:focus-visible { border-color: #8eb3ec; background: #fff; box-shadow: 0 0 0 3px rgba(50,107,194,.1); }
 .project-discovery-title-input:disabled, .project-discovery-date-input:disabled, .project-discovery-fact-input:disabled, .project-discovery-summary-input:disabled, .project-discovery-profile-input:disabled, .project-discovery-detail-metadata input:disabled { cursor: wait; opacity: .65; }
 
-.project-discovery-investment-brief { margin-top: 12px; padding: 16px; border: 1px solid #cbdcf6; border-radius: 8px; background: rgba(50,107,194,.035); }
-.project-discovery-investment-brief dl { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 16px; margin: 0; }
+.project-discovery-investment-brief { margin-top: 14px; padding: 18px; border: 1px solid #cbdcf6; border-radius: 10px; background: #f7f9ff; }
+.project-discovery-investment-brief dl { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 20px 28px; margin: 0; }
 .project-discovery-investment-brief dl > div { min-width: 0; }
 .project-discovery-investment-brief dl > div.wide { grid-column: span 2; }
 .project-discovery-investment-brief dt { color: #7a8799; font-size: 14px; font-weight: 500; }
 .project-discovery-investment-brief dd { margin: 4px 0 0; overflow-wrap: anywhere; color: #24344e; font-size: 16px; font-weight: 600; line-height: 1.6; }
 .project-discovery-fact-input { min-height: 32px; margin: -2px -4px; field-sizing: content; color: #24344e; font-size: 16px; font-weight: 600; line-height: 1.6; }
+.project-discovery-fact-input.is-secondary { font-weight: 400; }
 .project-discovery-institution-links { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 6px; }
 .project-discovery-institution-link { display: inline-flex; min-height: 44px; align-items: center; gap: 4px; border-radius: 6px; color: #2d66b5; font-size: 12px; font-weight: 500; line-height: 1.4; text-decoration: none; }
 .project-discovery-institution-link:hover { color: #174d98; text-decoration: underline; }
@@ -66,12 +67,6 @@
 .project-discovery-investment-brief dd.industry { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; }
 .project-discovery-investment-brief dd.industry span, .project-discovery-investment-brief dd.industry i { color: #7a8799; font-size: 14px; font-style: normal; font-weight: 500; }
 .project-discovery-investment-brief dd.industry strong { color: #326bc2; font-size: 18px; font-weight: 600; }
-.project-discovery-investment-brief .project-discovery-keywords dd { margin-top: 4px; }
-.project-discovery-keyword-input { display: block; width: 100%; min-height: 52px; padding: 0; border: 1px solid transparent; border-radius: 5px; outline: none; background: transparent; color: #24344e; field-sizing: content; font-family: inherit; font-size: 16px; font-weight: 600; line-height: 1.6; overflow-wrap: anywhere; resize: none; }
-.project-discovery-keyword-input::placeholder { color: #97a2b3; font-weight: 500; }
-.project-discovery-keyword-input:hover { border-color: #d5deeb; }
-.project-discovery-keyword-input:focus-visible { border-color: #8eb3ec; box-shadow: 0 0 0 3px rgba(50,107,194,.1); }
-.project-discovery-keyword-input:disabled { cursor: wait; opacity: .65; }
 
 .project-discovery-assignment-form, .project-discovery-defer-confirm { margin-top: 10px; padding: 12px; border: 1px solid #d7e3f5; border-radius: 8px; background: #f9fbff; }
 .project-discovery-inline-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
@@ -169,7 +164,6 @@
 .project-discovery-state button { margin-top: 14px; padding: 7px 13px; border: 1px solid #bad0ef; border-radius: 8px; background: #f3f7fd; color: #275ea8; font-size: 12px; }
 .project-discovery-error strong { color: #b84954; }
 
-@media (max-width: 1180px) { .project-discovery-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } }
 @media (max-width: 860px) {
   .project-discovery-toolbar { align-items: stretch; flex-wrap: wrap; }
   .project-discovery-search { flex-basis: 100%; }
@@ -181,10 +175,14 @@
   .project-discovery-action-buttons button, .project-discovery-action-buttons label { min-width: 0; padding-inline: 8px; }
   .project-discovery-periods { width: 100%; }
   .project-discovery-periods button { flex: 1; padding-inline: 8px; }
-  .project-discovery-grid { grid-template-columns: 1fr; padding: 10px; }
+  .project-discovery-grid { padding: 10px; }
+  .project-discovery-timeline-item { grid-template-columns: minmax(0,1fr); gap: 6px; }
+  .project-discovery-timeline-item > time { padding-left: 4px; }
+  .project-discovery-card { padding: 16px; }
   .project-discovery-card-header { align-items: flex-start; }
   .project-discovery-card-header-meta { flex-direction: column; }
-  .project-discovery-card-date { min-width: 102px; padding-inline: 8px; }
+  .project-discovery-investment-brief dl { grid-template-columns: minmax(0,1fr); gap: 14px; }
+  .project-discovery-investment-brief dl > div.wide { grid-column: auto; }
   .project-discovery-profile dl { grid-template-columns: 1fr; }
   .project-discovery-score-details dl { grid-template-columns: 1fr; }
   .project-discovery-assignment-fields { grid-template-columns: 1fr; }
