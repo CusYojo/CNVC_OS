@@ -7,7 +7,7 @@ import { createPromptLibraryService, type PromptLibraryRecord, type PromptLibrar
 function mockService() {
   const records = new Map<string, PromptLibraryRecord>()
   const repository: PromptLibraryRepository = {
-    async listVisible(userId, kind) { return [...records.values()].filter(item => item.kind === kind && (item.visibility === 'organization' || item.ownerUserId === userId)) },
+    async listVisible(userId, kind, _includePrivateForAdmin, category) { return [...records.values()].filter(item => item.kind === kind && (!category || item.category === category) && (item.visibility === 'organization' || item.ownerUserId === userId)) },
     async findById(id) { return records.get(id) ?? null },
     async createWithAudit(item) { records.set(item.id, item); return item },
     async updateWithAudit() { return false },
@@ -38,7 +38,7 @@ test('prompt library API requires login and serves only authorized Markdown as a
     assert.equal((await fetch(`${url}?kind=skill`)).status, 401)
     const created = await fetch(url, {
       method: 'POST', headers: { 'content-type': 'application/json', 'x-test-user': 'author' },
-      body: JSON.stringify({ kind: 'skill', name: '研究助手', markdown: '# 研究助手\n\n只引用资料。', fileName: '研究助手.md' }),
+      body: JSON.stringify({ kind: 'skill', category: 'research', name: '研究助手', markdown: '# 研究助手\n\n只引用资料。', fileName: '研究助手.md' }),
     })
     assert.equal(created.status, 201)
     const item = await created.json() as { id: string }
@@ -46,6 +46,9 @@ test('prompt library API requires login and serves only authorized Markdown as a
     const listedBody = await listed.json() as { list: Array<Record<string, unknown>> }
     assert.equal(listed.status, 200)
     assert.equal(listedBody.list[0]?.id, item.id)
+    assert.equal(listedBody.list[0]?.category, 'research')
+    const filtered = await fetch(`${url}?kind=skill&category=finance`, { headers: { 'x-test-user': 'author' } })
+    assert.deepEqual((await filtered.json() as { list: unknown[] }).list, [])
     assert.equal(Object.hasOwn(listedBody.list[0] ?? {}, 'markdown'), false)
     const detail = await fetch(`${url}/${item.id}`, { headers: { 'x-test-user': 'author' } })
     assert.equal((await detail.json() as { markdown: string }).markdown, '# 研究助手\n\n只引用资料。')

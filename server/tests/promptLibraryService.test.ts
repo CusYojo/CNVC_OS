@@ -13,7 +13,7 @@ const author = { userId: 'author', role: '投资经理', userName: '作者' }
 const colleague = { userId: 'colleague', role: '投资经理', userName: '同事' }
 const admin = { userId: 'admin', role: '系统管理员', userName: '管理员' }
 const builtin = {
-  slug: 'research-brief', kind: 'skill' as const, name: '研究简报',
+  slug: 'research-brief', kind: 'skill' as const, category: 'research' as const, name: '研究简报',
   description: '按证据写简报', markdown: '# 研究简报\n\n只引用可核查来源。',
   sourceUrl: 'https://example.org/research', license: '原创',
 }
@@ -21,8 +21,8 @@ const builtin = {
 function memoryRepository(writeAudit: (audit: PromptLibraryAuditRecord) => Promise<void> = async () => undefined) {
   const records = new Map<string, PromptLibraryRecord>()
   const repository: PromptLibraryRepository = {
-    async listVisible(userId, kind) {
-      return [...records.values()].filter(item => item.kind === kind && (item.visibility === 'organization' || item.ownerUserId === userId))
+    async listVisible(userId, kind, _includePrivateForAdmin, category) {
+      return [...records.values()].filter(item => item.kind === kind && (!category || item.category === category) && (item.visibility === 'organization' || item.ownerUserId === userId))
     },
     async findById(id) { return records.get(id) ?? null },
     async createWithAudit(item, audit) {
@@ -55,6 +55,9 @@ test('validates a UTF-8 Markdown document without accepting paths or oversized c
   })
   assert.equal(parsed.name, '研究技能')
   assert.equal(parsed.markdown, '# 标题\n\n执行研究。')
+  assert.equal(parsed.category, 'general')
+  assert.equal(parsePromptLibraryInput({ ...parsed, category: 'finance' }).category, 'finance')
+  assert.throws(() => parsePromptLibraryInput({ ...parsed, category: 'unknown' }))
   assert.throws(() => parsePromptLibraryInput({ ...parsed, fileName: '../secret.md' }))
   assert.throws(() => parsePromptLibraryInput({ ...parsed, markdown: 'x'.repeat(128 * 1024 + 1) }))
   assert.throws(() => parsePromptLibraryInput({ ...parsed, markdown: 'bad\u0000text' }))
@@ -71,6 +74,9 @@ test('builtin templates are readable but immutable', async () => {
   const service = createPromptLibraryService(repository, [builtin], async () => undefined)
   const items = await service.list(colleague, 'skill')
   assert.equal(items[0]?.id, 'builtin:research-brief')
+  assert.equal(items[0]?.category, 'research')
+  assert.equal((await service.list(colleague, 'skill', 'research')).length, 1)
+  assert.deepEqual(await service.list(colleague, 'skill', 'office'), [])
   assert.equal(Object.hasOwn(items[0] ?? {}, 'markdown'), false)
   assert.equal((await service.get(colleague, 'builtin:research-brief')).markdown, builtin.markdown)
   await assert.rejects(service.update(admin, 'builtin:research-brief', { expectedVersion: 1, name: '替换' }), { status: 403 })
@@ -83,16 +89,21 @@ test('private draft is visible only to its author and admins can edit but not by
   const service = createPromptLibraryService(repository, [], async () => undefined)
   const created = await service.create(author, {
     kind: 'agent', name: '尽调助理', description: '', markdown: '# 尽调助理\n\n仅依据材料。',
-    fileName: 'diligence.md', visibility: 'private',
+    fileName: 'diligence.md', visibility: 'private', category: 'investment',
   })
   assert.equal(created.ownerUserId, author.userId)
+  assert.equal(created.category, 'investment')
   assert.deepEqual(await service.list(colleague, 'agent'), [])
   await assert.rejects(service.get(colleague, created.id), { status: 403 })
   await assert.rejects(service.update(colleague, created.id, { expectedVersion: 1, name: '篡改' }), { status: 403 })
-  const changed = await service.update(admin, created.id, { expectedVersion: 1, visibility: 'organization' })
+  const changed = await service.update(admin, created.id, { expectedVersion: 1, visibility: 'organization', category: 'finance' })
   assert.equal(changed.version, 2)
+  assert.equal(changed.category, 'finance')
   const colleagueList = await service.list(colleague, 'agent')
   assert.equal(colleagueList.length, 1)
+  assert.equal(colleagueList[0]?.category, 'finance')
+  assert.equal((await service.list(colleague, 'agent', 'finance')).length, 1)
+  assert.equal((await service.list(colleague, 'agent', 'investment')).length, 0)
   assert.equal(Object.hasOwn(colleagueList[0] ?? {}, 'markdown'), false)
   assert.equal((await service.get(colleague, created.id)).markdown, created.markdown)
   await assert.rejects(service.update(author, created.id, { expectedVersion: 1, name: '旧版本' }), { status: 409 })

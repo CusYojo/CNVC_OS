@@ -12,4 +12,6 @@ test('Skill and Agent libraries present distinct accessible headings and creatio
   assert.match(skill, /创建 Skill/)
   assert.match(agent, /创建 Agent/)
   assert.match(skill, /搜索提示词/)
+  assert.match(skill, /按分类筛选/)
+  assert.match(agent, /按分类筛选/)
 })
