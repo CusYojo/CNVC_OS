@@ -443,6 +443,7 @@ export interface ProjectDiscoveryScore {
     label: string
     score: number | null
     evidence: string
+    sourceUrl?: string
     status: 'ready' | 'insufficient'
   }>
 }

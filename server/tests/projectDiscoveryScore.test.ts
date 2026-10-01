@@ -14,13 +14,13 @@ const rating = {
 
 test('discovery score uses four evidence-backed dimensions and weighted coverage', () => {
   const score = buildProjectDiscoveryScore({
-    institutions: [{ name: '甲基金', major: true }],
-    financing: { latestAmountValue: 100_000_000, latestAmountCurrency: 'CNY' },
+    institutions: [{ name: 'IDG资本', role: 'lead' }],
+    financing: { latestAmountValue: 100_000_000, latestAmountCurrency: 'CNY', latestRound: 'A轮' },
     ratingV3: rating,
   })
-  assert.equal(score.overall, 84.5)
+  assert.equal(score.overall, 83.5)
   assert.deepEqual(score.dimensions.map((item) => [item.key, item.score, item.status]), [
-    ['investor', 90, 'ready'], ['funding', 90, 'ready'],
+    ['investor', 95, 'ready'], ['funding', 80, 'ready'],
     ['frontier', 75, 'ready'], ['technology', 85, 'ready'],
   ])
   assert.equal(score.coverage, 4)
@@ -28,7 +28,7 @@ test('discovery score uses four evidence-backed dimensions and weighted coverage
 
 test('discovery score leaves unknown dimensions unscored and does not fabricate a composite', () => {
   const score = buildProjectDiscoveryScore({
-    institutions: [{ name: '无词典依据基金', major: false }],
+    institutions: [],
     financing: { latestAmount: '近亿元', latestAmountCurrency: 'CNY' },
     ratingV3: { ...rating, status: 'stale' },
   })
@@ -43,27 +43,66 @@ test('research-only ratings remain a clearly partial composite and foreign curre
     financing: { latestAmountValue: 100_000_000, latestAmountCurrency: 'USD' },
     ratingV3: rating,
   })
-  assert.equal(score.overall, 80.8)
+  assert.equal(score.overall, null)
   assert.equal(score.coverage, 2)
   assert.equal(score.dimensions[1].score, null)
 })
 
-test('full institution projection flag survives a shortened display institution list', () => {
+test('institution score follows published rank bands and rewards a verified lead investor only once', () => {
+  const score = buildProjectDiscoveryScore({
+    institutions: [{ name: 'IDG资本', role: 'lead' }, { name: '锡创投', role: 'follow' }],
+    ratingV3: rating,
+  })
+  assert.equal(score.dimensions[0].score, 95)
+  assert.match(score.dimensions[0].evidence, /2025|TOP100|Top100/u)
+  assert.equal(score.dimensions[0].sourceUrl, 'https://www.chinaventure.com.cn/rank/210/3182.html')
+  assert.equal(score.overall, 84.4)
+})
+
+test('a verified unranked investor receives a neutral score instead of a celebrity score', () => {
+  const score = buildProjectDiscoveryScore({
+    institutions: [{ name: '某已核验地方基金', role: 'follow', major: true }],
+    ratingV3: rating,
+  })
+  assert.equal(score.dimensions[0].score, 50)
+  assert.doesNotMatch(score.dimensions[0].evidence, /重点机构/u)
+})
+
+test('stale investment projections cannot contribute institution or financing points', () => {
+  const score = buildProjectDiscoveryScore({
+    investmentProfileStatus: 'stale',
+    institutions: [{ name: 'IDG资本', role: 'lead' }],
+    financing: { latestAmountValue: 100_000_000, latestAmountCurrency: 'CNY', latestRound: 'A轮' },
+    ratingV3: rating,
+  })
+  assert.deepEqual(score.dimensions.slice(0, 2).map((item) => item.score), [null, null])
+  assert.equal(score.coverage, 2)
+  assert.equal(score.overall, null)
+})
+
+test('funding reference bands compare like financing rounds and never treat an undisclosed round as a precise amount', () => {
+  assert.equal(fundingAmountDiscoveryScore(100_000_000, 'CNY', 'A轮'), 80)
+  assert.equal(fundingAmountDiscoveryScore(100_000_000, 'CNY', '天使轮'), 90)
+  assert.equal(fundingAmountDiscoveryScore(100_000_000, 'CNY', 'B轮'), 65)
+  assert.equal(fundingAmountDiscoveryScore(100_000_000, 'CNY', undefined), null)
+})
+
+test('an opaque major-institution flag does not invent a rank when names are unavailable', () => {
   const score = buildProjectDiscoveryScore({
     institutions: [{ name: '普通机构', major: false }],
     hasMajorInstitution: true,
     ratingV3: rating,
   })
-  assert.equal(score.dimensions[0].score, 90)
-  assert.equal(score.overall, 83.1)
-  assert.match(score.dimensions[0].evidence, /机构词典/)
+  assert.equal(score.dimensions[0].score, 50)
+  assert.equal(score.overall, 73.1)
+  assert.doesNotMatch(score.dimensions[0].evidence, /重点机构/u)
 })
 
 test('funding bands and rating dimension positions remain consistent with database sort expression', () => {
   assert.equal(LEAD_RATING_DIMENSIONS[2].key, 'technology_rd')
   assert.equal(LEAD_RATING_DIMENSIONS[3].key, 'industry_policy_space')
-  assert.deepEqual([500_000, 1_000_000, 10_000_000, 100_000_000, 1_000_000_000]
-    .map((value) => fundingAmountDiscoveryScore(value, 'CNY')), [45, 60, 75, 90, 100])
-  assert.equal(fundingAmountDiscoveryScore(0, 'CNY'), null)
-  assert.equal(fundingAmountDiscoveryScore(Number.NaN, 'CNY'), null)
+  assert.deepEqual([5_000_000, 10_000_000, 30_000_000, 100_000_000]
+    .map((value) => fundingAmountDiscoveryScore(value, 'CNY', '天使轮')), [50, 65, 80, 90])
+  assert.equal(fundingAmountDiscoveryScore(0, 'CNY', 'A轮'), null)
+  assert.equal(fundingAmountDiscoveryScore(Number.NaN, 'CNY', 'A轮'), null)
 })

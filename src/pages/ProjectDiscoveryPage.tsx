@@ -588,9 +588,10 @@ function DiscoveryCard({ lead, onOpen, onKeywordsUpdated, onCardUpdated, onRemov
         </div>
         <div className="project-discovery-detail-panel project-discovery-score-details">
           <h4>项目发现评分</h4>
+          <p>投资机构 20% · 融资金额 20% · 产业前沿度 25% · 技术含量 35%。机构按 2025 年投中榜 TOP30/50/100 分别计 90/80/70 分，领投加 5 分，未上榜但有机构记录计 50 分。融资金额按轮次临时参考档比较，并非同赛道分位数；产业与技术沿用已有研究评级。资料不足时不补造分数。</p>
           {discoveryScore?.dimensions?.length ? <dl>{discoveryScore.dimensions.map((dimension) => <div key={dimension.key}>
             <dt>{dimension.label}</dt>
-            <dd><strong>{dimension.score == null || dimension.status === 'insufficient' ? '信息不足' : `${dimension.score} 分`}</strong><span>{dimension.evidence || '暂无可核验依据'}</span></dd>
+            <dd><strong>{dimension.score == null || dimension.status === 'insufficient' ? '信息不足' : `${dimension.score} 分`}</strong><span>{dimension.evidence || '暂无可核验依据'}{safeExternalUrl(dimension.sourceUrl) ? <> · <a href={safeExternalUrl(dimension.sourceUrl)!} target="_blank" rel="noopener noreferrer">查看榜单来源</a></> : null}</span></dd>
           </div>)}</dl> : <p>信息不足，待评分</p>}
         </div>
         <div className="project-discovery-detail-sources">

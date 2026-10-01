@@ -43,6 +43,7 @@ import { openLeadPipelineReview, recordLeadPipelineDecision } from './leadPipeli
 import { recordLeadPipelineEntityMatch } from './leadPipelineEntityMatchService.js'
 import { formatShanghaiDateKey } from '../utils/shanghaiTime.js'
 import { buildProjectDiscoveryScore } from './projectDiscoveryScore.js'
+import { DISCOVERY_INSTITUTION_RANKINGS, normalizeDiscoveryInstitutionName } from '../data/discoveryInstitutionRankings.js'
 import { resolvePaperProjectIdentity } from './paperIdentity.js'
 import { publicLeadScoreDeadLetterError, publicLeadScoreError } from './leadScoreRetryPolicy.js'
 import { companyRegistrationEligibility, normalizeLeadRegistry } from './leadRegistry.js'
@@ -140,19 +141,42 @@ const overallScoreExpr = sql<number>`CASE
   ELSE ${leads.score}
 END`
 
-// The display score intentionally uses only structured financing and the two
-// snapshot-bound V3 research dimensions. Never infer a score from a headline.
+// Keep SQL sorting on the same verified projection and rank catalog as the card score.
+// The catalog is a bound JSON parameter, never interpolated into raw SQL.
+const discoveryInstitutionRankJson = JSON.stringify(DISCOVERY_INSTITUTION_RANKINGS.map(({ name, score }) => ({ name: normalizeDiscoveryInstitutionName(name), score })))
 const discoveryInvestorScoreExpr = sql<number | null>`CASE
-  WHEN ${leadInvestmentProfileProjections.hasMajorInstitution} = TRUE THEN 90 ELSE NULL END`
+  WHEN ${leadInvestmentProfileProjections.profileStatus} = 'stale'
+    OR ${leadInvestmentProfileProjections.staleReason} IS NOT NULL
+    OR COALESCE(JSON_LENGTH(${leadInvestmentProfileProjections.institutions}), 0) = 0 THEN NULL
+  ELSE (
+  SELECT MAX(CASE WHEN investor.name IS NULL OR TRIM(investor.name) = '' THEN NULL
+    ELSE LEAST(95, COALESCE(ranked.score, 50) + IF(investor.role = 'lead' AND ranked.score IS NOT NULL, 5, 0)) END)
+  FROM JSON_TABLE(COALESCE(${leadInvestmentProfileProjections.institutions}, JSON_ARRAY()), '$[*]'
+    COLUMNS (name VARCHAR(255) PATH '$.name', role VARCHAR(32) PATH '$.role')) AS investor
+  LEFT JOIN JSON_TABLE(${discoveryInstitutionRankJson}, '$[*]'
+    COLUMNS (name VARCHAR(255) PATH '$.name', score INT PATH '$.score')) AS ranked
+    ON BINARY ranked.name = BINARY REPLACE(REPLACE(REPLACE(
+      REGEXP_REPLACE(investor.name, '[[:space:]　]+', ''), '／', '/'), '（', '('), '）', ')')
+  ) END`
+const discoveryRoundExpr = sql<string>`LOWER(TRIM(COALESCE(${leadInvestmentProfileProjections.latestRound}, '')))`
+const discoveryFundingBandExpr = (low: number, medium: number, high: number) => sql<number>`CASE
+  WHEN ${leadInvestmentProfileProjections.latestAmountValue} >= ${high} THEN 90
+  WHEN ${leadInvestmentProfileProjections.latestAmountValue} >= ${medium} THEN 80
+  WHEN ${leadInvestmentProfileProjections.latestAmountValue} >= ${low} THEN 65
+  ELSE 50 END`
 const discoveryFundingScoreExpr = sql<number | null>`CASE
-  WHEN ${leadInvestmentProfileProjections.latestAmountCurrency} <> 'CNY'
+  WHEN ${leadInvestmentProfileProjections.profileStatus} = 'stale'
+    OR ${leadInvestmentProfileProjections.staleReason} IS NOT NULL
+    OR ${leadInvestmentProfileProjections.latestAmountCurrency} <> 'CNY'
     OR ${leadInvestmentProfileProjections.latestAmountValue} IS NULL
     OR ${leadInvestmentProfileProjections.latestAmountValue} <= 0 THEN NULL
-  WHEN ${leadInvestmentProfileProjections.latestAmountValue} >= 1000000000 THEN 100
-  WHEN ${leadInvestmentProfileProjections.latestAmountValue} >= 100000000 THEN 90
-  WHEN ${leadInvestmentProfileProjections.latestAmountValue} >= 10000000 THEN 75
-  WHEN ${leadInvestmentProfileProjections.latestAmountValue} >= 1000000 THEN 60
-  ELSE 45 END`
+  WHEN ${discoveryRoundExpr} REGEXP '^(种子|天使|seed|angel|pre-?a)'
+    THEN ${discoveryFundingBandExpr(10_000_000, 30_000_000, 100_000_000)}
+  WHEN ${discoveryRoundExpr} REGEXP '^a(轮|[+]|$| round)'
+    THEN ${discoveryFundingBandExpr(30_000_000, 100_000_000, 300_000_000)}
+  WHEN ${discoveryRoundExpr} REGEXP '^[b-z](轮|[+]|$| round)'
+    THEN ${discoveryFundingBandExpr(100_000_000, 300_000_000, 1_000_000_000)}
+  ELSE NULL END`
 const discoveryRatingDimensionExpr = (index: number, key: string) => {
   const dimensionKey = jsonText(leads.scoring, `$.ratingV3.detailView.dimensionScores[${index}].key`)
   const rawScore = jsonText(leads.scoring, `$.ratingV3.detailView.dimensionScores[${index}].score`)
@@ -168,7 +192,8 @@ const discoveryRatingDimensionExpr = (index: number, key: string) => {
 const discoveryTechnologyScoreExpr = discoveryRatingDimensionExpr(2, 'technology_rd')
 const discoveryFrontierScoreExpr = discoveryRatingDimensionExpr(3, 'industry_policy_space')
 const discoveryCompositeScoreExpr = sql<number | null>`CASE
-  WHEN ${discoveryTechnologyScoreExpr} IS NULL OR ${discoveryFrontierScoreExpr} IS NULL THEN NULL
+  WHEN ${discoveryTechnologyScoreExpr} IS NULL OR ${discoveryFrontierScoreExpr} IS NULL
+    OR (${discoveryInvestorScoreExpr} IS NULL AND ${discoveryFundingScoreExpr} IS NULL) THEN NULL
   ELSE ROUND((
     COALESCE(${discoveryInvestorScoreExpr}, 0) * 20
     + COALESCE(${discoveryFundingScoreExpr}, 0) * 20
@@ -1689,6 +1714,12 @@ export async function listLeads(options: {
         )
       )) END`,
       hasMajorInstitution: leadInvestmentProfileProjections.hasMajorInstitution,
+      discoveryScoreInstitutions: leadInvestmentProfileProjections.institutions,
+      discoveryScoreAmountValue: leadInvestmentProfileProjections.latestAmountValue,
+      discoveryScoreAmountCurrency: leadInvestmentProfileProjections.latestAmountCurrency,
+      discoveryScoreRound: leadInvestmentProfileProjections.latestRound,
+      discoveryScoreProfileStatus: leadInvestmentProfileProjections.profileStatus,
+      discoveryScoreStaleReason: leadInvestmentProfileProjections.staleReason,
       researchProfile: sql<unknown>`CASE WHEN ${leadResearchProfileProjections.leadId} IS NULL THEN NULL ELSE ${leadResearchProfileProjections.profilePayload} END`,
       createdAt: leads.createdAt,
     }).from(leads)
@@ -1740,9 +1771,13 @@ export async function listLeads(options: {
       r as unknown as typeof leads.$inferSelect,
       candidateFactsByLead.get(r.id) ?? [],
       { showCandidateData, discoveryScore: options.projectDiscoveryOnly ? buildProjectDiscoveryScore({
-        institutions: (objectValue(r.investmentProfile).institutions as Array<{ name?: string; major?: boolean }> | undefined),
-        hasMajorInstitution: r.hasMajorInstitution,
-        financing: objectValue(objectValue(r.investmentProfile).financing),
+        investmentProfileStatus: r.discoveryScoreStaleReason != null ? 'stale' : r.discoveryScoreProfileStatus,
+        institutions: r.discoveryScoreInstitutions,
+        financing: {
+          latestAmountValue: r.discoveryScoreAmountValue,
+          latestAmountCurrency: r.discoveryScoreAmountCurrency,
+          latestRound: r.discoveryScoreRound,
+        },
         ratingV3: objectValue(objectValue(r.scoring).ratingV3),
       }) : undefined },
     )),
