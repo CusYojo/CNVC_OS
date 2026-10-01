@@ -236,6 +236,10 @@ body:has(.fde-app) { min-width: 320px; }
 .fde-micro-actions button { display: flex; align-items: flex-start; gap: 7px; text-align: left; font-size: 12px; line-height: 1.5; }
 .fde-micro-actions i { width: 5px; height: 5px; flex: 0 0 5px; margin-top: 5px; border: 1px solid var(--brand); border-radius: 50%; }
 .fde-project-center > .fde-page-heading { align-items: flex-start; }
+.fde-project-review-entry { display: grid; width: 36px; height: 36px; margin-left: auto; place-items: center; border: 1px solid var(--line); border-radius: 9px; color: var(--ink-2); background: var(--surface); }
+.fde-project-review-entry:hover, .fde-project-review-entry.active { color: var(--brand-strong); background: var(--brand-soft); }
+.fde-project-review-entry svg { width: 18px; height: 18px; }
+@media (max-width: 720px) { .fde-project-center > .fde-page-heading { flex-direction: row; align-items: center; } .fde-project-center > .fde-page-heading > .fde-project-review-entry { width: 36px; flex: 0 0 36px; } }
 .fde-app .fde-registration-entry { max-width: 480px; margin: 0; padding: 0; border: 0; background: transparent; box-shadow: none; }
 .fde-registration-entry > div:first-child { justify-content: flex-end; }
 .fde-registration-entry > p { max-width: 480px; text-align: right; }

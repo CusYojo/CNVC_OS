@@ -21,7 +21,6 @@ import {
   projectDiscoveryPrimaryDate,
   readProjectDiscoveryCardEdits,
   type ProjectDiscoveryKeyword,
-  type ProjectDiscoveryKind,
   type ProjectDiscoveryPeriod,
 } from '../lib/projectDiscovery'
 import type { LeadListResponse } from '../store/useAppStore'
@@ -32,12 +31,6 @@ const periods: Array<{ value: ProjectDiscoveryPeriod; label: string }> = [
   { value: 'today', label: '今天新发现' },
   { value: 'week', label: '近 7 天' },
   { value: 'all', label: '全部项目' },
-]
-
-const kinds: Array<{ value: ProjectDiscoveryKind; label: string }> = [
-  { value: 'all', label: '全部类型' },
-  { value: 'company', label: '企业项目' },
-  { value: 'research', label: '科研成果' },
 ]
 
 type BpUploadResult = { id: string; name: string; status: string; progress: number; error?: string | null; leadId?: string | null; reviewId?: string | null }
@@ -80,7 +73,6 @@ export function ProjectDiscoveryPage() {
   const [candidates, setCandidates] = useState<LeadListItem[]>([])
   const [pagination, setPagination] = useState({ page: 1, totalPages: 1 })
   const [period, setPeriod] = useState<ProjectDiscoveryPeriod>('today')
-  const [kind, setKind] = useState<ProjectDiscoveryKind>('all')
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
@@ -158,8 +150,8 @@ export function ProjectDiscoveryPage() {
   }, [loadRemainingCandidates, loading, pagination.page, pagination.totalPages, period])
 
   const visible = useMemo(() => filterProjectDiscoveryCandidates(candidates, {
-    period, query, kind,
-  }), [candidates, kind, period, query])
+    period, query, kind: 'company',
+  }), [candidates, period, query])
 
   const openLead = (lead: LeadListItem) => {
     navigate(`/sourcing/${lead.id}`, { state: { from: `${location.pathname}${location.search}` } })
@@ -276,9 +268,6 @@ export function ProjectDiscoveryPage() {
       </div>
       <label className="project-discovery-kind">
         <span className="sr-only">发现类型</span>
-        <select value={kind} aria-label="发现类型" onChange={(event) => setKind(event.target.value as ProjectDiscoveryKind)}>
-          {kinds.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-        </select>
       </label>
       <label className="project-discovery-search">
         <Search aria-hidden="true" />

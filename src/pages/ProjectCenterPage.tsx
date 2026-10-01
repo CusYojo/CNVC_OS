@@ -11,7 +11,6 @@ type ProjectCenterView = 'discover' | 'reviews' | ProjectClassification
 
 const views: Array<{ id: ProjectCenterView; label: string; icon: typeof Inbox }> = [
   { id: 'discover', label: '新项目发现', icon: Sparkles },
-  { id: 'reviews', label: '待复核', icon: Inbox },
   { id: 'pool', label: '项目池', icon: FolderKanban },
   { id: 'normal', label: '普通项目', icon: UsersRound },
   { id: 'key', label: '重点项目', icon: Star },
@@ -22,7 +21,7 @@ const visibleViews = views.filter(item => item.id !== 'pool')
 
 function validView(value: string | null): ProjectCenterView {
   if (value === 'leads') return 'discover'
-  return visibleViews.some((item) => item.id === value) ? value as ProjectCenterView : 'normal'
+  return value === 'reviews' || visibleViews.some((item) => item.id === value) ? value as ProjectCenterView : 'normal'
 }
 
 export function ProjectCenterPage() {
@@ -50,6 +49,7 @@ export function ProjectCenterPage() {
     <div className="fde-project-center">
       <div className="fde-page-heading">
         <div><h1>项目中心</h1><p className="mt-1 text-sm text-slate-500">使用顶部导航栏的"快速新建"按钮创建投资项目或登记非投资项目。</p></div>
+        <button type="button" className={`fde-project-review-entry${view === 'reviews' ? ' active' : ''}`} aria-label="打开待复核" aria-current={view === 'reviews' ? 'page' : undefined} title="待复核" onClick={() => selectView('reviews')}><Inbox aria-hidden="true" /></button>
       </div>
         <div className="fde-workspace-tabs fde-saved-views" role="tablist" aria-label="项目中心">
           {visibleViews.map((item) => {
@@ -80,7 +80,7 @@ export function ProjectCenterPage() {
             )
           })}
         </div>
-      <div id="project-center-panel" role="tabpanel" aria-labelledby={`project-center-tab-${view}`}>
+      <div id="project-center-panel" role="tabpanel" aria-labelledby={view === 'reviews' ? undefined : `project-center-tab-${view}`}>
         {view === 'discover' ? <ProjectDiscoveryPage /> : view === 'reviews' ? <LeadReviewPanel /> : <ProjectsPage key={view} classification={view} embedded onCountsChange={setClassificationCounts} />}
       </div>
     </div>

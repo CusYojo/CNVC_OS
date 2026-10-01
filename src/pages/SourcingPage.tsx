@@ -214,11 +214,11 @@ export function SourcingPage() {
 
     <section className="lead-pool-filter-panel" aria-label="线索筛选">
       <div className="lead-pool-filters">
-        <PoolSelect label="线索类型" value={effectiveLeadType} options={[{ value: 'company', label: '企业线索' }, { value: 'research', label: '科研项目' }]} onChange={(value) => updateParam('leadType', value || 'company')} />
+        <PoolSelect label="线索类型" value={effectiveLeadType} options={[{ value: 'company', label: '企业线索' }]} onChange={(value) => updateParam('leadType', value || 'company')} />
         <PoolSelect label="行业" value={industry} options={LEAD_POOL_INDUSTRIES.map((value) => ({ value, label: value }))} onChange={(value) => updateParam('industry', value)} />
-        <PoolSelect label="阶段" value={stage} options={LEAD_POOL_STAGES.map((value) => ({ value, label: value }))} onChange={(value) => updateParam('stage', value)} />
+        <PoolSelect label="阶段" value={stage} options={LEAD_POOL_STAGES.filter((value) => value !== '科研成果').map((value) => ({ value, label: value }))} onChange={(value) => updateParam('stage', value)} />
         <PoolSelect label="地区" value={region} options={LEAD_POOL_REGIONS.map((value) => ({ value, label: value }))} onChange={(value) => updateParam('region', value)} />
-        <PoolSelect label="渠道" value={channel} options={LEAD_POOL_CHANNELS.map((value) => ({ value, label: value }))} onChange={(value) => updateParam('channel', value)} />
+        <PoolSelect label="渠道" value={channel} options={LEAD_POOL_CHANNELS.filter((value) => value !== '论文').map((value) => ({ value, label: value }))} onChange={(value) => updateParam('channel', value)} />
         <PoolSelect label="更新时间" value={updatedRange} options={LEAD_POOL_UPDATED_RANGES.map((option) => ({ ...option }))} onChange={(value) => updateParam('updatedRange', value)} />
       </div>
       {(activeFilterCount > 0 || queryInput) && <button className="lead-pool-clear" type="button" onClick={resetFilters}>清空筛选{activeFilterCount ? ` · ${activeFilterCount}` : ''}</button>}
