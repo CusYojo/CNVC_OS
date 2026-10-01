@@ -210,7 +210,15 @@ export function requestOriginAllowed(headers: Request['headers']): boolean {
   const host = typeof headers.host === 'string' ? headers.host : ''
   const sameOrigin = host ? `${protocol}://${host}` : ''
   const allowed = (process.env.AUTH_ALLOWED_ORIGINS || '').split(',').map((item) => item.trim()).filter(Boolean)
-  return origin === sameOrigin || allowed.includes(origin)
+  if (origin === sameOrigin || allowed.includes(origin)) return true
+  // The development proxy may be restarted on a different loopback port.
+  // Keep this narrowly scoped to non-production: production always requires
+  // its explicit HTTPS allow-list.
+  if (process.env.NODE_ENV !== 'production') {
+    try { return ['127.0.0.1', 'localhost', '[::1]'].includes(new URL(origin).hostname) }
+    catch { return false }
+  }
+  return false
 }
 
 export function assertRequestCsrf(req: Request, auth: RequestAuth): void {
