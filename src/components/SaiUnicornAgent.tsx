@@ -61,8 +61,8 @@ type SpeechRecognizer = {
 
 type SpeechRecognizerConstructor = {
   new (): SpeechRecognizer
-  available?: (options: { langs: string[]; processLocally: boolean; quality: 'command' }) => Promise<'available' | 'downloadable' | 'downloading' | 'unavailable'>
-  install?: (options: { langs: string[]; processLocally: boolean; quality: 'command' }) => Promise<boolean>
+  available?: (options: { langs: string[]; processLocally: boolean; quality: 'dictation' | 'command' }) => Promise<'available' | 'downloadable' | 'downloading' | 'unavailable'>
+  install?: (options: { langs: string[]; processLocally: boolean; quality: 'dictation' | 'command' }) => Promise<boolean>
 }
 
 const actionIcons = {
@@ -128,6 +128,7 @@ export function SaiUnicornAgent() {
   const [listening, setListening] = useState(false)
   const [speechError, setSpeechError] = useState<string>()
   const [localSpeechStatus, setLocalSpeechStatus] = useState<'available' | 'downloadable' | 'downloading' | 'unavailable'>()
+  const [localSpeechQuality, setLocalSpeechQuality] = useState<'dictation' | 'command'>('command')
   const [installingLocalSpeech, setInstallingLocalSpeech] = useState(false)
   const [offerLocalSpeech, setOfferLocalSpeech] = useState(false)
   const [preferLocalSpeech, setPreferLocalSpeech] = useState(false)
@@ -281,9 +282,17 @@ export function SaiUnicornAgent() {
     const Speech = speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition
     if (!Speech?.available) return
     let active = true
-    void Speech.available({ langs: ['zh-CN'], processLocally: true, quality: 'command' })
-      .then((status) => { if (active) setLocalSpeechStatus(status) })
-      .catch(() => { if (active) setLocalSpeechStatus('unavailable') })
+    void (async () => {
+      for (const quality of ['dictation', 'command'] as const) {
+        try {
+          const status = await Speech.available!({ langs: ['zh-CN'], processLocally: true, quality })
+          if (status === 'unavailable') continue
+          if (active) { setLocalSpeechQuality(quality); setLocalSpeechStatus(status) }
+          return
+        } catch { /* Try the smaller pack or keep online recognition. */ }
+      }
+      if (active) setLocalSpeechStatus('unavailable')
+    })()
     return () => { active = false }
   }, [open])
 
@@ -367,14 +376,14 @@ export function SaiUnicornAgent() {
     if (!Speech?.install || (localSpeechStatus !== 'downloadable' && localSpeechStatus !== 'downloading')) return
     setInstallingLocalSpeech(true)
     try {
-      const installed = await Speech.install({ langs: ['zh-CN'], processLocally: true, quality: 'command' })
+      const installed = await Speech.install({ langs: ['zh-CN'], processLocally: true, quality: localSpeechQuality })
       if (!installed) throw new Error('download failed')
       setLocalSpeechStatus('available')
       setPreferLocalSpeech(true)
       setOfferLocalSpeech(false)
       setSpeechError(undefined)
     } catch {
-      setSpeechError('离线中文短指令语音包安装失败，请稍后重试。')
+      setSpeechError('离线中文语音包安装失败，请稍后重试。')
     } finally {
       setInstallingLocalSpeech(false)
     }
@@ -667,7 +676,7 @@ export function SaiUnicornAgent() {
               : <button type="submit" className="sai-agent-send" aria-label="发送给小赛" disabled={!composer.trim() || busy}><ArrowUp /></button>}
           </form>
           {speechError && <p className="sai-agent-speech-error" role="alert">{speechError}</p>}
-          {offerLocalSpeech && ['available', 'downloadable', 'downloading'].includes(localSpeechStatus || '') && !preferLocalSpeech && <button type="button" className="sai-agent-local-speech" disabled={installingLocalSpeech} onClick={() => void enableLocalSpeech()}>{installingLocalSpeech ? '正在安装中文语音包…' : localSpeechStatus === 'available' ? '改用离线短指令识别' : '安装离线中文短指令识别'}</button>}
+          {offerLocalSpeech && ['available', 'downloadable', 'downloading'].includes(localSpeechStatus || '') && !preferLocalSpeech && <button type="button" className="sai-agent-local-speech" disabled={installingLocalSpeech} onClick={() => void enableLocalSpeech()}>{installingLocalSpeech ? '正在安装中文语音包…' : localSpeechStatus === 'available' ? `改用离线中文${localSpeechQuality === 'dictation' ? '听写' : '短指令'}识别` : `安装离线中文${localSpeechQuality === 'dictation' ? '听写' : '短指令'}识别`}</button>}
           {listening && <p className="sai-agent-speech-status" role="status">正在聆听，识别后请确认文字再发送</p>}
           <p><ShieldCheck aria-hidden="true" />默认只读 · 业务写入前会先请你确认 <span>Enter 发送</span></p>
         </footer>
