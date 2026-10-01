@@ -260,14 +260,15 @@ export function SaiUnicornAgent() {
     const recognizer = new Speech()
     let recognized = false
     let failed = false
+    const initialComposer = composer
     recognizer.lang = 'zh-CN'
     recognizer.continuous = false
-    recognizer.interimResults = false
+    recognizer.interimResults = true
     recognizer.onresult = (event) => {
       const transcript = Array.from(event.results).map((result) => result[0]?.transcript ?? '').join('').trim()
       if (transcript) {
         recognized = true
-        setComposer((current) => `${current}${current.trim() ? ' ' : ''}${transcript}`)
+        setComposer(`${initialComposer}${initialComposer.trim() ? ' ' : ''}${transcript}`)
         window.requestAnimationFrame(() => composerRef.current?.focus())
       }
     }
