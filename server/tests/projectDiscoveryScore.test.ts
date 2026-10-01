@@ -106,3 +106,42 @@ test('funding bands and rating dimension positions remain consistent with databa
   assert.equal(fundingAmountDiscoveryScore(0, 'CNY', 'A轮'), null)
   assert.equal(fundingAmountDiscoveryScore(Number.NaN, 'CNY', 'A轮'), null)
 })
+
+test('a sourced project without four verified dimensions receives only a provisional reference score', () => {
+  const score = buildProjectDiscoveryScore({
+    summary: '企业研发用于工业场景的具身智能机器人控制系统。',
+    sourceUrls: ['javascript:alert(1)', 'https://example.org/news/project'],
+    industryTags: ['具身智能/机器人'],
+    technologies: ['机器人控制算法'],
+    teamDescription: '创始团队来自清华大学并有产业化经验。',
+  })
+  assert.equal(score.overall, null)
+  assert.equal(score.coverage, 0)
+  assert.ok(score.referenceScore !== null && score.referenceScore > 50 && score.referenceScore <= 75)
+  assert.equal(score.referenceSourceUrl, 'https://example.org/news/project')
+  assert.match(score.referenceEvidence.join('；'), /待核验/u)
+  assert.ok(score.dimensions.every((item) => item.score === null))
+})
+
+test('a missing summary or safe article URL cannot receive an initial reference score', () => {
+  assert.equal(buildProjectDiscoveryScore({ summary: '', sourceUrls: ['https://example.org/news'] }).referenceScore, null)
+  assert.equal(buildProjectDiscoveryScore({ summary: '公司披露新产品', sourceUrls: ['javascript:alert(1)'] }).referenceScore, null)
+})
+
+test('generic industry and ambiguous financing do not invent premium evidence', () => {
+  const base = { summary: '公司披露了产品及应用场景。', sourceUrls: ['https://example.org/news'], industryTags: ['其他'] }
+  const neutral = buildProjectDiscoveryScore(base)
+  const ambiguous = buildProjectDiscoveryScore({ ...base, financing: { latestAmountValue: 100_000_000, latestAmountCurrency: 'USD' }, candidateFinancing: { latestAmount: '近亿元', status: '候选冲突' } })
+  assert.equal(neutral.referenceScore, 50)
+  assert.equal(ambiguous.referenceScore, neutral.referenceScore)
+})
+
+test('a recent page of 100 sourced summaries can be scored without fabricating four-dimension ratings', () => {
+  const scores = Array.from({ length: 100 }, (_, index) => buildProjectDiscoveryScore({
+    summary: `项目 ${index + 1} 披露了产品和应用场景。`,
+    sourceUrls: ['', 'about:blank', `https://example.org/news/${index + 1}`],
+    industryTags: index % 5 === 0 ? ['其他'] : ['半导体'],
+  }))
+  assert.equal(scores.filter((score) => typeof score.referenceScore === 'number').length, 100)
+  assert.equal(scores.filter((score) => score.overall !== null).length, 0)
+})
