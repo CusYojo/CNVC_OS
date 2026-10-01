@@ -108,7 +108,7 @@ export function LeadReviewPanel() {
         <p className="text-sm">{row.resolution?.reason || row.reason}</p>
         {row.pipeline.leadId && <Link className="text-teal-700 underline" to={`/sourcing/${row.pipeline.leadId}`}>查看入池项目</Link>}
       </article>)}
-      <div className="flex items-center gap-3"><Button variant="secondary" disabled={page <= 1 || loading} onClick={() => setPage(n => n - 1)}>上一页</Button><span>{page} / {Math.max(1, data.totalPages)}</span><Button variant="secondary" disabled={page >= data.totalPages || loading} onClick={() => setPage(n => n + 1)}>下一页</Button><Button variant="secondary" disabled={page >= data.totalPages || loading} onClick={() => setPage(data.totalPages)}>末页（最新）</Button></div>
+      {data.totalPages > 1 && <div className="flex items-center gap-3"><Button variant="secondary" disabled={page <= 1 || loading} onClick={() => setPage(n => n - 1)}>上一页</Button><span>{page} / {data.totalPages}</span><Button variant="secondary" disabled={page >= data.totalPages || loading} onClick={() => setPage(n => n + 1)}>下一页</Button><Button variant="secondary" disabled={page >= data.totalPages || loading} onClick={() => setPage(data.totalPages)}>末页（最新）</Button></div>}
     </>}
     <Modal open={Boolean(selected)} title="线索来源与人工复核" width="max-w-5xl" onClose={() => { if (!locked) setSelected(null) }}>
       {selected && <div className="space-y-4">
