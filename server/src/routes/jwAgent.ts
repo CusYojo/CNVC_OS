@@ -4,6 +4,7 @@ import type { AuthedRequest } from '../middleware/requireAuth.js'
 import {
   abortJwAgent,
   getJwAgentSnapshot,
+  prewarmJwAgentConversation,
   respondJwAgentInteraction,
   sendJwAgentMessage,
   switchJwAgentModel,
@@ -17,6 +18,15 @@ jwAgentRouter.get('/conversations/:agentId', async (req: AuthedRequest, res, nex
     const snapshot = await getJwAgentSnapshot(req.user!.uid, agentId(req.params.agentId))
     if (!snapshot) return res.status(404).json({ code: 'NOT_FOUND', message: '会话不存在' })
     res.json(snapshot)
+  } catch (error) { next(error) }
+})
+
+jwAgentRouter.post('/conversations/:agentId/prewarm', async (req: AuthedRequest, res, next) => {
+  try {
+    const body = z.object({ responseMode: z.enum(['standard', 'compact']).default('compact') }).parse(req.body ?? {})
+    const result = await prewarmJwAgentConversation(req.user!.uid, req.user!.role, agentId(req.params.agentId), body.responseMode)
+    if (!result) return res.status(404).json({ code: 'NOT_FOUND', message: '会话不存在' })
+    res.json(result)
   } catch (error) { next(error) }
 })
 

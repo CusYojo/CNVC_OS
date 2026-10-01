@@ -16,7 +16,7 @@ import {
   Square,
   X,
 } from 'lucide-react'
-import { FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react'
+import { FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useJwAgent } from '../hooks/useJwAgent'
 import { extractTextParts, normalizeAgentMessages } from '../lib/aiMessageSafety'
@@ -121,6 +121,7 @@ export function SaiUnicornAgent() {
   )
   const conversationScopeKey = getSaiConversationScopeKey(currentContext)
   const conversationScopeRef = useRef(conversationScopeKey)
+  const pendingConversationRef = useRef<{ scope: string; promise: Promise<string | null> } | null>(null)
   const actions = useMemo(() => getSaiAgentActions(currentContext), [currentContext])
   const messages = useMemo(
     () => normalizeAgentMessages(agent.messages)
@@ -149,11 +150,41 @@ export function SaiUnicornAgent() {
   useEffect(() => {
     if (conversationScopeRef.current === conversationScopeKey) return
     conversationScopeRef.current = conversationScopeKey
+    pendingConversationRef.current = null
     setAgentId(undefined)
     setLocalError(undefined)
     setInteractionAnswers({})
     setTurnReceipt(undefined)
   }, [conversationScopeKey])
+
+  const ensureConversation = useCallback((): Promise<string | null> => {
+    if (agentId) return Promise.resolve(agentId)
+    if (pendingConversationRef.current?.scope === conversationScopeKey) return pendingConversationRef.current.promise
+    const promise = apiPost<ConversationRow>('/conversations', {
+      title: `小赛 · ${currentContext.label}`,
+      scope: currentContext.projectId ? 'project' : 'global',
+      projectId: currentContext.projectId ?? null,
+      projectName: currentContext.projectName ?? null,
+    }).then((row) => {
+      const nextAgentId = row.agentId || row.id
+      if (conversationScopeRef.current !== conversationScopeKey) return null
+      setAgentId(nextAgentId)
+      void apiPost(`/agent/conversations/${encodeURIComponent(nextAgentId)}/prewarm`, { responseMode: 'compact' }).catch(() => {
+        // The normal message path can still initialize the session if warming fails.
+      })
+      return nextAgentId
+    }).catch((error) => {
+      if (pendingConversationRef.current?.promise === promise) pendingConversationRef.current = null
+      throw error
+    })
+    pendingConversationRef.current = { scope: conversationScopeKey, promise }
+    return promise
+  }, [agentId, conversationScopeKey, currentContext.label, currentContext.projectId, currentContext.projectName])
+
+  useEffect(() => {
+    if (!open || agentId) return
+    void ensureConversation().catch((error) => setLocalError(formatAgentError(error)))
+  }, [open, agentId, ensureConversation])
 
   useEffect(() => {
     if (turnReceipt && assistantMessageCount > turnReceipt.assistantBaseline) setTurnReceipt(undefined)
@@ -277,15 +308,8 @@ export function SaiUnicornAgent() {
       if (agentId) {
         await agent.sendMessage(prompt, { responseMode: 'compact' })
       } else {
-        const row = await apiPost<ConversationRow>('/conversations', {
-          title: `小赛 · ${currentContext.label}`,
-          scope: currentContext.projectId ? 'project' : 'global',
-          projectId: currentContext.projectId ?? null,
-          projectName: currentContext.projectName ?? null,
-        })
-        const nextAgentId = row.agentId || row.id
-        if (conversationScopeRef.current !== requestScopeKey) return
-        setAgentId(nextAgentId)
+        const nextAgentId = await ensureConversation()
+        if (!nextAgentId || conversationScopeRef.current !== requestScopeKey) return
         await apiPost(`/agent/conversations/${encodeURIComponent(nextAgentId)}/messages`, {
           message: prompt,
           responseMode: 'compact',
@@ -387,7 +411,7 @@ export function SaiUnicornAgent() {
             </span>
           </div>
           <div className="sai-agent-header-actions">
-            {agentId && <button type="button" title="开始新对话" aria-label="开始新对话" onClick={() => { setAgentId(undefined); setLocalError(undefined); setTurnReceipt(undefined) }}><RotateCcw /></button>}
+            {agentId && <button type="button" title="开始新对话" aria-label="开始新对话" onClick={() => { pendingConversationRef.current = null; setAgentId(undefined); setLocalError(undefined); setTurnReceipt(undefined) }}><RotateCcw /></button>}
             <button ref={closeRef} type="button" aria-label="关闭小赛" onClick={closePanel}><X /></button>
           </div>
         </header>

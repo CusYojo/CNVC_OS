@@ -246,6 +246,13 @@ class MessageQueue implements AsyncIterable<unknown>, AsyncIterator<unknown> {
 }
 
 const sessions = new Map<string, RuntimeSession>()
+const prewarmIdleTimers = new Map<string, NodeJS.Timeout>()
+
+function clearPrewarmIdleTimer(conversationId: string) {
+  const timer = prewarmIdleTimers.get(conversationId)
+  if (timer) clearTimeout(timer)
+  prewarmIdleTimers.delete(conversationId)
+}
 const pendingInteractions = new Map<string, PendingJwInteractionController>()
 const conversationOperationTails = new Map<string, Promise<void>>()
 export const JW_AGENT_ALLOWED_TOOLS = [
@@ -1475,6 +1482,42 @@ export async function sendJwAgentMessage(
   return await sendJwAgentMessageWithMedia(userId, userRole, agentId, message, {}, options)
 }
 
+export async function prewarmJwAgentConversation(
+  userId: string,
+  userRole: string,
+  agentId: string,
+  responseMode: JwAgentResponseMode = 'compact',
+) {
+  const resolved = await resolveConversation(userId, agentId)
+  if (!resolved) return null
+  return await withJwConversationOperation(resolved.agent.id, async () => {
+    const refreshed = await resolveConversation(userId, agentId)
+    if (!refreshed) return null
+    if (refreshed.agent.status === 'streaming' || pendingInteractions.has(refreshed.agent.id)) {
+      return { ready: false, reason: 'busy' }
+    }
+    const active = sessions.get(refreshed.agent.id)
+    if (active?.responseMode === responseMode) return { ready: true, reused: true }
+    if (active) await closeJwRuntimeSession(refreshed.agent.id)
+    const warmed = await createRuntimeSession(
+      userId, refreshed.agent.id, refreshed.agent.metadata || {}, refreshed.agent.projectId,
+      userRole, refreshed.agent.modelId, responseMode,
+    )
+    clearPrewarmIdleTimer(refreshed.agent.id)
+    const timer = setTimeout(() => {
+      prewarmIdleTimers.delete(refreshed.agent.id)
+      void withJwConversationOperation(refreshed.agent.id, async () => {
+        if (sessions.get(refreshed.agent.id) !== warmed) return
+        const current = await agentConversationRepository.findAgentById(refreshed.agent.id)
+        if (current?.status === 'idle') await closeJwRuntimeSession(refreshed.agent.id)
+      }).catch(() => undefined)
+    }, 120_000)
+    timer.unref()
+    prewarmIdleTimers.set(refreshed.agent.id, timer)
+    return { ready: true, reused: false }
+  })
+}
+
 export async function sendJwAgentMessageWithImages(
   userId: string,
   userRole: string,
@@ -1495,6 +1538,7 @@ export async function sendJwAgentMessageWithMedia(
 ) {
   const resolved = await resolveConversation(userId, agentId)
   if (!resolved) return null
+  clearPrewarmIdleTimer(resolved.agent.id)
   return await withJwConversationOperation(resolved.agent.id, async () => {
     const refreshed = await resolveConversation(userId, agentId)
     if (!refreshed) return null
@@ -1762,6 +1806,7 @@ async function closeJwRuntimeSession(
   conversationId: string,
   reason: RuntimeSession['stoppingReason'] = 'dispose',
 ): Promise<boolean> {
+  clearPrewarmIdleTimer(conversationId)
   const session = sessions.get(conversationId)
   if (!session) return false
   sessions.delete(conversationId)
@@ -1897,6 +1942,7 @@ export async function switchJwAgentModel(input: {
 }
 
 export async function shutdownJwAgentRuntime() {
+  for (const conversationId of prewarmIdleTimers.keys()) clearPrewarmIdleTimer(conversationId)
   for (const conversationId of [...pendingInteractions.keys()]) {
     await settleJwInteraction(conversationId, 'shutdown').catch(() => false)
   }
