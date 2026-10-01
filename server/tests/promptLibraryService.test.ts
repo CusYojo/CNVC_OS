@@ -93,3 +93,26 @@ test('private draft is visible only to its author and admins can edit but not by
   assert.equal((await service.list(colleague, 'agent')).length, 0)
   assert.deepEqual(events, ['创建提示词', '修改提示词', '删除提示词'])
 })
+
+test('failed audit leaves create, update, and delete uncommitted', async () => {
+  const { repository, records } = memoryRepository()
+  let failedAction = '创建提示词'
+  const service = createPromptLibraryService(repository, [], async (_actor, action) => {
+    if (action === failedAction) throw new Error('audit unavailable')
+  })
+  const input = { kind: 'skill' as const, name: '研究助手', markdown: '# 研究助手', visibility: 'private' as const }
+
+  await assert.rejects(service.create(author, input), /audit unavailable/)
+  assert.equal(records.size, 0)
+
+  failedAction = ''
+  const created = await service.create(author, input)
+  failedAction = '修改提示词'
+  await assert.rejects(service.update(author, created.id, { expectedVersion: 1, name: '篡改结果' }), /audit unavailable/)
+  assert.equal(records.get(created.id)?.name, created.name)
+  assert.equal(records.get(created.id)?.version, 1)
+
+  failedAction = '删除提示词'
+  await assert.rejects(service.remove(author, created.id, 1), /audit unavailable/)
+  assert.equal(records.has(created.id), true)
+})
