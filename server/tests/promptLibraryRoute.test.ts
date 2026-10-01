@@ -25,7 +25,12 @@ test('prompt library API requires login and serves only authorized Markdown as a
     next()
   })
   app.use('/api/ai/prompt-library', createPromptLibraryRouter(mockService()))
-  const server = app.listen(0, '127.0.0.1')
+  app.use((error: Error & { status?: number }, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    res.status(error.status ?? 500).json({ code: 'TEST_ERROR' })
+  })
+  const server = await new Promise<ReturnType<typeof app.listen>>(resolve => {
+    const listening = app.listen(0, '127.0.0.1', () => resolve(listening))
+  })
   try {
     const address = server.address()
     assert.ok(address && typeof address !== 'string')

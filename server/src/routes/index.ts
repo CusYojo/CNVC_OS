@@ -28,6 +28,10 @@ import { aiTasksRouter } from './aiTasks.js'
 import { jwAgentRouter } from './jwAgent.js'
 import { aiModelSettingsRouter } from './aiModelSettings.js'
 import { aiCapabilitiesRouter } from './aiCapabilities.js'
+import { createPromptLibraryRouter } from './promptLibrary.js'
+import { createPromptLibraryService } from '../services/promptLibraryService.js'
+import { mysqlPromptLibraryRepository } from '../repositories/mysql/mysqlPromptLibraryRepository.js'
+import { BUILTIN_PROMPT_TEMPLATES } from '../data/builtinPromptTemplates.js'
 import { aiEvolutionRouter } from './aiEvolution.js'
 import { imIntegrationsRouter } from './imIntegrations.js'
 import { leadPushTargetsRouter } from './leadPushTargets.js'
@@ -76,6 +80,14 @@ apiRouter.use('/ai', aiTasksRouter)
 apiRouter.use('/agent', jwAgentRouter)
 apiRouter.use('/ai/model-settings', aiModelSettingsRouter)
 apiRouter.use('/ai/capabilities', aiCapabilitiesRouter)
+apiRouter.use('/ai/prompt-library', createPromptLibraryRouter(createPromptLibraryService(
+  mysqlPromptLibraryRepository,
+  BUILTIN_PROMPT_TEMPLATES,
+  (actor, action, itemId) => writeAudit({
+    userId: actor.userId, userName: actor.userName, module: '提示词库', action,
+    target: itemId, ip: actor.ip,
+  }),
+)))
 apiRouter.use('/ai/evolution', aiEvolutionRouter)
 apiRouter.use('/integrations/im', imIntegrationsRouter)
 apiRouter.use('/integrations/radar-dingtalk', radarDingTalkRouter)

@@ -112,7 +112,7 @@ const REQUIRED_RUNTIME_TABLES = [
   'oa_approval_requests', 'oa_approval_nodes', 'oa_approval_records', 'oa_approval_revisions', 'oa_workflow_logs',
   'ai_tasks', 'ai_task_templates', 'ai_task_sources', 'ai_artifacts', 'ai_custom_templates',
   'ai_model_providers', 'ai_models', 'ai_model_routes',
-  'ai_capabilities', 'ai_capability_bindings', 'ai_conversation_capabilities',
+  'ai_capabilities', 'ai_capability_bindings', 'ai_conversation_capabilities', 'prompt_library_items',
   'im_bots', 'im_bot_bindings', 'im_outbox', 'im_delivery_logs', 'im_inbound_messages',
   'im_lead_push_rules',
   'ai_template_analysis_progress', 'ai_summaries',
