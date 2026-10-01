@@ -30,9 +30,11 @@ export type PromptLibraryItem = Omit<PromptLibraryRecord, 'createdAt' | 'updated
   updatedAt: Date | null
   editable: boolean
 }
+export type PromptLibrarySummaryRecord = Omit<PromptLibraryRecord, 'markdown'>
+export type PromptLibrarySummaryItem = Omit<PromptLibraryItem, 'markdown'>
 
 export type PromptLibraryRepository = {
-  listVisible(userId: string, kind: PromptLibraryKind, includePrivateForAdmin?: boolean): Promise<PromptLibraryRecord[]>
+  listVisible(userId: string, kind: PromptLibraryKind, includePrivateForAdmin?: boolean): Promise<PromptLibrarySummaryRecord[]>
   findById(id: string): Promise<PromptLibraryRecord | null>
   create(item: PromptLibraryRecord): Promise<PromptLibraryRecord>
   update(id: string, expectedVersion: number, patch: Partial<PromptLibraryRecord>): Promise<boolean>
@@ -81,6 +83,15 @@ function userView(item: PromptLibraryRecord, actor: PromptLibraryActor): PromptL
   return { ...item, source: 'user', editable: item.ownerUserId === actor.userId || isAiPlatformAdminRole(actor.role) }
 }
 
+function summaryView(item: PromptLibraryItem | (PromptLibrarySummaryRecord & { markdown?: string }), actor: PromptLibraryActor): PromptLibrarySummaryItem {
+  const { markdown: _markdown, ...summary } = item
+  if ('source' in summary) return summary
+  return {
+    ...summary, source: 'user',
+    editable: summary.ownerUserId === actor.userId || isAiPlatformAdminRole(actor.role),
+  }
+}
+
 export function createPromptLibraryService(
   repository: PromptLibraryRepository,
   builtins: readonly BuiltinPromptTemplate[],
@@ -100,10 +111,10 @@ export function createPromptLibraryService(
   }
 
   return {
-    async list(actor: PromptLibraryActor, kind: PromptLibraryKind): Promise<PromptLibraryItem[]> {
+    async list(actor: PromptLibraryActor, kind: PromptLibraryKind): Promise<PromptLibrarySummaryItem[]> {
       if (!PROMPT_LIBRARY_KINDS.includes(kind)) throw serviceError('提示词类型无效', 'PROMPT_KIND_INVALID', 400)
       const items = await repository.listVisible(actor.userId, kind, isAiPlatformAdminRole(actor.role))
-      return [...builtins.filter(item => item.kind === kind).map(builtinView), ...items.map(item => userView(item, actor))]
+      return [...builtins.filter(item => item.kind === kind).map(item => summaryView(builtinView(item), actor)), ...items.map(item => summaryView(item, actor))]
     },
     get,
     async download(actor: PromptLibraryActor, id: string): Promise<PromptLibraryItem> {

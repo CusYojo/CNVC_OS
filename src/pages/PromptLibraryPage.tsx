@@ -22,6 +22,7 @@ type PromptItem = {
   editable: boolean
   updatedAt: string | null
 }
+type PromptSummary = Omit<PromptItem, 'markdown'>
 type Draft = { name: string; description: string; markdown: string; fileName: string; visibility: Visibility }
 const emptyDraft = (): Draft => ({ name: '', description: '', markdown: '', fileName: '', visibility: 'private' })
 const libraryRoot = '/ai/prompt-library'
@@ -33,7 +34,7 @@ function errorMessage(error: unknown) {
 export function PromptLibraryPage({ kind }: { kind: Kind }) {
   const label = kind === 'skill' ? 'Skill' : 'Agent'
   const Icon = kind === 'skill' ? BookOpenText : Bot
-  const [items, setItems] = useState<PromptItem[]>([])
+  const [items, setItems] = useState<PromptSummary[]>([])
   const [selectedId, setSelectedId] = useState('')
   const [selected, setSelected] = useState<PromptItem | null>(null)
   const [search, setSearch] = useState('')
@@ -48,7 +49,7 @@ export function PromptLibraryPage({ kind }: { kind: Kind }) {
   const refresh = useCallback(async (preferredId?: string) => {
     setLoading(true)
     try {
-      const result = await apiGet<{ list: PromptItem[] }>(`${libraryRoot}?kind=${kind}`)
+      const result = await apiGet<{ list: PromptSummary[] }>(`${libraryRoot}?kind=${kind}`)
       setItems(result.list)
       setSelectedId(current => {
         if (preferredId && result.list.some(item => item.id === preferredId)) return preferredId
