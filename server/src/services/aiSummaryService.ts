@@ -1688,6 +1688,7 @@ export async function listLeads(options: {
           'updatedAt', ${leadInvestmentProfileProjections.factsUpdatedAt}
         )
       )) END`,
+      hasMajorInstitution: leadInvestmentProfileProjections.hasMajorInstitution,
       researchProfile: sql<unknown>`CASE WHEN ${leadResearchProfileProjections.leadId} IS NULL THEN NULL ELSE ${leadResearchProfileProjections.profilePayload} END`,
       createdAt: leads.createdAt,
     }).from(leads)
@@ -1740,6 +1741,7 @@ export async function listLeads(options: {
       candidateFactsByLead.get(r.id) ?? [],
       { showCandidateData, discoveryScore: options.projectDiscoveryOnly ? buildProjectDiscoveryScore({
         institutions: (objectValue(r.investmentProfile).institutions as Array<{ name?: string; major?: boolean }> | undefined),
+        hasMajorInstitution: r.hasMajorInstitution,
         financing: objectValue(objectValue(r.investmentProfile).financing),
         ratingV3: objectValue(objectValue(r.scoring).ratingV3),
       }) : undefined },

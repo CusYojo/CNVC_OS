@@ -9,6 +9,7 @@ export type DiscoveryScoreDimension = {
 
 type ScoreInput = {
   institutions?: Array<{ name?: string; major?: boolean }> | null
+  hasMajorInstitution?: boolean | null
   financing?: { latestAmountValue?: unknown; latestAmountCurrency?: unknown } | null
   ratingV3?: {
     schemaVersion?: unknown
@@ -53,13 +54,14 @@ export function buildProjectDiscoveryScore(input: ScoreInput) {
   const majorNames = (input.institutions ?? [])
     .filter((item) => item.major === true && typeof item.name === 'string')
     .map((item) => item.name!.trim()).filter(Boolean).slice(0, 2)
+  const hasMajorInstitution = input.hasMajorInstitution === true || majorNames.length > 0
   const amount = input.financing?.latestAmountValue
   const amountScore = fundingAmountDiscoveryScore(amount, input.financing?.latestAmountCurrency)
   const frontier = ratedDimension(input.ratingV3, 'industry_policy_space')
   const technology = ratedDimension(input.ratingV3, 'technology_rd')
   const dimensions = [
-    dimension('investor', '投资机构知名度', majorNames.length ? 90 : null,
-      majorNames.length ? `机构词典标记为重点机构：${majorNames.join('、')}` : ''),
+    dimension('investor', '投资机构知名度', hasMajorInstitution ? 90 : null,
+      majorNames.length ? `机构词典标记为重点机构：${majorNames.join('、')}` : '机构词典含重点机构；名称请在详情中核对'),
     dimension('funding', '融资金额', amountScore,
       amountScore === null ? '' : `已结构化融资金额：人民币 ${Number(amount).toLocaleString('zh-CN')} 元；按固定金额分档`),
     dimension('frontier', '产业前沿度', frontier?.score ?? null, frontier?.assessment ?? ''),

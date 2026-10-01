@@ -48,6 +48,17 @@ test('research-only ratings remain a clearly partial composite and foreign curre
   assert.equal(score.dimensions[1].score, null)
 })
 
+test('full institution projection flag survives a shortened display institution list', () => {
+  const score = buildProjectDiscoveryScore({
+    institutions: [{ name: '普通机构', major: false }],
+    hasMajorInstitution: true,
+    ratingV3: rating,
+  })
+  assert.equal(score.dimensions[0].score, 90)
+  assert.equal(score.overall, 83.1)
+  assert.match(score.dimensions[0].evidence, /机构词典/)
+})
+
 test('funding bands and rating dimension positions remain consistent with database sort expression', () => {
   assert.equal(LEAD_RATING_DIMENSIONS[2].key, 'technology_rd')
   assert.equal(LEAD_RATING_DIMENSIONS[3].key, 'industry_policy_space')
