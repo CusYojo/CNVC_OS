@@ -4,6 +4,7 @@ import test from 'node:test'
 import {
   buildSaiAgentPrompt,
   buildSaiDiscoverySnapshot,
+  buildSaiReviewSnapshot,
   buildSaiWorkspaceSnapshot,
   extractSaiPromptGoal,
   getSaiAgentActions,
@@ -163,6 +164,22 @@ test('项目发现摘要只包含当前筛选列表，并区分加载失败与�
   assert.doesNotMatch(snapshot, /原始名称/)
   assert.match(buildSaiDiscoverySnapshot([], true, ''), /正在加载/)
   assert.match(buildSaiDiscoverySnapshot([], false, '请求失败'), /读取失败/)
+})
+
+test('待复核摘要保留筛选总数，只提供有限的当前记录与所选证据', () => {
+  const rows = Array.from({ length: 10 }, (_, index) => ({
+    id: `review-${index}`, reason: '主体待确认',
+    event: { sourceType: 'radar', payload: { source: 'weixin_link', title: `文件${index}`, article_text: '证据内容'.repeat(200) } },
+    triggerDecision: { subjectName: `候选${index}` },
+  }))
+  const snapshot = buildSaiReviewSnapshot({ source: 'weixin_file', status: 'pending', total: 42, rows, selected: rows[0], loading: false, error: '' })
+  const parsed = JSON.parse(snapshot.slice(snapshot.indexOf('{')))
+  assert.equal(parsed.rows.length, 8)
+  assert.equal(parsed.selected.id, 'review-0')
+  assert.ok(parsed.selected.excerpt.length <= 600)
+  assert.match(snapshot, /匹配总数 42/)
+  assert.doesNotMatch(snapshot, /文件9/)
+  assert.match(buildSaiReviewSnapshot({ source: 'weixin_file', status: 'pending', total: 0, rows: [], loading: true, error: '' }), /正在加载/)
 })
 
 test('跨项目或项目与全局之间切换时隔离 Agent 会话', () => {

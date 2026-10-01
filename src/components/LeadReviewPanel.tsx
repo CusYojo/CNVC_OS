@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../lib/api'
+import { buildSaiReviewSnapshot } from '../lib/saiAgent'
 import { useAuthStore } from '../store/useAuthStore'
+import { useSaiPageContext } from '../store/useSaiPageContext'
 import { Button, Modal } from './ui'
 
 type Subject = 'company' | 'project' | 'team' | 'lab' | 'paper'
@@ -48,6 +50,11 @@ export function LeadReviewPanel() {
   const [submitError, setSubmitError] = useState('')
   // Keep the exact request on uncertain failures; retry never invents a new key.
   const [pending, setPending] = useState<{ reviewId: string; body: Record<string, unknown> } | null>(null)
+  const setReviewSnapshot = useSaiPageContext(state => state.setReviewSnapshot)
+  useEffect(() => {
+    setReviewSnapshot(buildSaiReviewSnapshot({ source, status, total: data?.total ?? 0, rows: data?.list ?? [], selected, loading, error }))
+    return () => setReviewSnapshot('')
+  }, [source, status, data, selected, loading, error, setReviewSnapshot])
   useEffect(() => {
     let active = true
     if (!allowed) return

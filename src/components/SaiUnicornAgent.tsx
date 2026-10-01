@@ -106,6 +106,7 @@ export function SaiUnicornAgent() {
   const approvalRequests = useAppStore((state) => state.approvalRequests)
   const risks = useAppStore((state) => state.risks)
   const discoverySnapshot = useSaiPageContext((state) => state.discoverySnapshot)
+  const reviewSnapshot = useSaiPageContext((state) => state.reviewSnapshot)
   const [open, setOpen] = useState(false)
   const [composer, setComposer] = useState('')
   const [agentId, setAgentId] = useState<string>()
@@ -311,6 +312,7 @@ export function SaiUnicornAgent() {
         ? buildSaiWorkspaceSnapshot({ projects, todos, meetings, risks, approvals: approvalRequests })
         : '')
       + (currentContext.kind === 'discovery' ? discoverySnapshot : '')
+      + (currentContext.kind === 'review' ? reviewSnapshot : '')
     const requestScopeKey = conversationScopeKey
     const currentProject = projects.find((project) => project.id === currentContext.projectId)
     setTurnReceipt({
