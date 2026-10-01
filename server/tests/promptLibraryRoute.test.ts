@@ -9,9 +9,9 @@ function mockService() {
   const repository: PromptLibraryRepository = {
     async listVisible(userId, kind) { return [...records.values()].filter(item => item.kind === kind && (item.visibility === 'organization' || item.ownerUserId === userId)) },
     async findById(id) { return records.get(id) ?? null },
-    async create(item) { records.set(item.id, item); return item },
-    async update() { return false },
-    async delete() { return false },
+    async createWithAudit(item) { records.set(item.id, item); return item },
+    async updateWithAudit() { return false },
+    async deleteWithAudit() { return false },
   }
   return createPromptLibraryService(repository, [], async () => undefined)
 }

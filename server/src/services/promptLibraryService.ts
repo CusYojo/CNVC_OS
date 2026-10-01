@@ -32,13 +32,21 @@ export type PromptLibraryItem = Omit<PromptLibraryRecord, 'createdAt' | 'updated
 }
 export type PromptLibrarySummaryRecord = Omit<PromptLibraryRecord, 'markdown'>
 export type PromptLibrarySummaryItem = Omit<PromptLibraryItem, 'markdown'>
+export type PromptLibraryAuditRecord = {
+  userId: string
+  userName: string
+  module: '提示词库'
+  action: string
+  target: string
+  ip?: string
+}
 
 export type PromptLibraryRepository = {
   listVisible(userId: string, kind: PromptLibraryKind, includePrivateForAdmin?: boolean): Promise<PromptLibrarySummaryRecord[]>
   findById(id: string): Promise<PromptLibraryRecord | null>
-  create(item: PromptLibraryRecord): Promise<PromptLibraryRecord>
-  update(id: string, expectedVersion: number, patch: Partial<PromptLibraryRecord>): Promise<boolean>
-  delete(id: string, expectedVersion: number): Promise<boolean>
+  createWithAudit(item: PromptLibraryRecord, audit: PromptLibraryAuditRecord): Promise<PromptLibraryRecord>
+  updateWithAudit(id: string, expectedVersion: number, patch: Partial<PromptLibraryRecord>, audit: PromptLibraryAuditRecord): Promise<boolean>
+  deleteWithAudit(id: string, expectedVersion: number, audit: PromptLibraryAuditRecord): Promise<boolean>
 }
 
 const safeText = z.string().refine(value => !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\ufffd]|[\ud800-\udfff]/u.test(value), '正文包含不可用字符')
@@ -68,6 +76,13 @@ export function safePromptDownloadFileName(name: string, kind: PromptLibraryKind
 
 function serviceError(message: string, code: string, status: number) {
   return Object.assign(new Error(message), { code, status })
+}
+
+function mutationAudit(actor: PromptLibraryActor, action: string, itemId: string): PromptLibraryAuditRecord {
+  return {
+    userId: actor.userId, userName: actor.userName.slice(0, 64),
+    module: '提示词库', action, target: itemId, ip: actor.ip?.slice(0, 45),
+  }
 }
 
 function builtinView(item: BuiltinPromptTemplate): PromptLibraryItem {
@@ -125,14 +140,14 @@ export function createPromptLibraryService(
     async create(actor: PromptLibraryActor, input: unknown): Promise<PromptLibraryItem> {
       const value = parsePromptLibraryInput(input)
       const now = new Date()
-      const created = await repository.create({
+      const item = {
         id: randomUUID(), kind: value.kind, name: value.name, description: value.description,
         markdown: value.markdown, fileName: value.fileName ?? null,
         sourceUrl: value.sourceUrl ?? null, license: value.license ?? null,
         ownerUserId: actor.userId, visibility: value.visibility, version: 1,
         createdAt: now, updatedAt: now,
-      })
-      await audit(actor, '创建提示词', created.id)
+      }
+      const created = await repository.createWithAudit(item, mutationAudit(actor, '创建提示词', item.id))
       return userView(created, actor)
     },
     async update(actor: PromptLibraryActor, id: string, input: { expectedVersion: number } & Record<string, unknown>): Promise<PromptLibraryItem> {
@@ -151,13 +166,12 @@ export function createPromptLibraryService(
         license: patch.license === undefined ? existing.license : patch.license,
         visibility: patch.visibility ?? existing.visibility,
       })
-      const changed = await repository.update(id, expectedVersion, {
+      const changed = await repository.updateWithAudit(id, expectedVersion, {
         name: value.name, description: value.description, markdown: value.markdown,
         fileName: value.fileName ?? null, sourceUrl: value.sourceUrl ?? null,
         license: value.license ?? null, visibility: value.visibility,
-      })
+      }, mutationAudit(actor, '修改提示词', id))
       if (!changed) throw serviceError('提示词已被更新，请刷新后重试', 'PROMPT_VERSION_CONFLICT', 409)
-      await audit(actor, '修改提示词', id)
       return get(actor, id)
     },
     async remove(actor: PromptLibraryActor, id: string, expectedVersion: number): Promise<void> {
@@ -165,8 +179,9 @@ export function createPromptLibraryService(
       const existing = await get(actor, id)
       if (!existing.editable) throw serviceError('无权删除此提示词', 'PROMPT_FORBIDDEN', 403)
       if (!Number.isInteger(expectedVersion) || expectedVersion < 1) throw serviceError('版本无效', 'PROMPT_VERSION_INVALID', 400)
-      if (!await repository.delete(id, expectedVersion)) throw serviceError('提示词已被更新，请刷新后重试', 'PROMPT_VERSION_CONFLICT', 409)
-      await audit(actor, '删除提示词', id)
+      if (!await repository.deleteWithAudit(id, expectedVersion, mutationAudit(actor, '删除提示词', id))) {
+        throw serviceError('提示词已被更新，请刷新后重试', 'PROMPT_VERSION_CONFLICT', 409)
+      }
     },
   }
 }

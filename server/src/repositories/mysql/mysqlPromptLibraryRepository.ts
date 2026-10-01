@@ -1,6 +1,6 @@
 import { and, desc, eq, isNull, or, sql } from 'drizzle-orm'
 import { db } from '../../db/client.js'
-import { promptLibraryItems } from '../../db/schema.js'
+import { auditLogs, promptLibraryItems } from '../../db/schema.js'
 import type { PromptLibraryKind, PromptLibraryRecord, PromptLibraryRepository, PromptLibrarySummaryRecord } from '../../services/promptLibraryService.js'
 
 type SummaryRow = Pick<typeof promptLibraryItems.$inferSelect, keyof PromptLibrarySummaryRecord>
@@ -40,24 +40,35 @@ export const mysqlPromptLibraryRepository: PromptLibraryRepository = {
     )).limit(1)
     return row ? record(row) : null
   },
-  async create(item) {
-    await db.insert(promptLibraryItems).values(item)
-    return item
+  async createWithAudit(item, audit) {
+    return db.transaction(async (tx) => {
+      await tx.insert(promptLibraryItems).values(item)
+      await tx.insert(auditLogs).values(audit)
+      return item
+    })
   },
-  async update(id, expectedVersion, patch) {
-    const [result] = await db.update(promptLibraryItems).set({
-      ...patch, version: sql`${promptLibraryItems.version} + 1`, updatedAt: new Date(),
-    }).where(and(
-      eq(promptLibraryItems.id, id), eq(promptLibraryItems.version, expectedVersion), isNull(promptLibraryItems.deletedAt),
-    ))
-    return result.affectedRows === 1
+  async updateWithAudit(id, expectedVersion, patch, audit) {
+    return db.transaction(async (tx) => {
+      const [result] = await tx.update(promptLibraryItems).set({
+        ...patch, version: sql`${promptLibraryItems.version} + 1`, updatedAt: new Date(),
+      }).where(and(
+        eq(promptLibraryItems.id, id), eq(promptLibraryItems.version, expectedVersion), isNull(promptLibraryItems.deletedAt),
+      ))
+      if (result.affectedRows !== 1) return false
+      await tx.insert(auditLogs).values(audit)
+      return true
+    })
   },
-  async delete(id, expectedVersion) {
-    const [result] = await db.update(promptLibraryItems).set({
-      deletedAt: new Date(), version: sql`${promptLibraryItems.version} + 1`, updatedAt: new Date(),
-    }).where(and(
-      eq(promptLibraryItems.id, id), eq(promptLibraryItems.version, expectedVersion), isNull(promptLibraryItems.deletedAt),
-    ))
-    return result.affectedRows === 1
+  async deleteWithAudit(id, expectedVersion, audit) {
+    return db.transaction(async (tx) => {
+      const [result] = await tx.update(promptLibraryItems).set({
+        deletedAt: new Date(), version: sql`${promptLibraryItems.version} + 1`, updatedAt: new Date(),
+      }).where(and(
+        eq(promptLibraryItems.id, id), eq(promptLibraryItems.version, expectedVersion), isNull(promptLibraryItems.deletedAt),
+      ))
+      if (result.affectedRows !== 1) return false
+      await tx.insert(auditLogs).values(audit)
+      return true
+    })
   },
 }

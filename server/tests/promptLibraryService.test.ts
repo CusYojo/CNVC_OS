@@ -4,6 +4,7 @@ import {
   createPromptLibraryService,
   parsePromptLibraryInput,
   safePromptDownloadFileName,
+  type PromptLibraryAuditRecord,
   type PromptLibraryRecord,
   type PromptLibraryRepository,
 } from '../src/services/promptLibraryService.js'
@@ -17,23 +18,29 @@ const builtin = {
   sourceUrl: 'https://example.org/research', license: '原创',
 }
 
-function memoryRepository() {
+function memoryRepository(writeAudit: (audit: PromptLibraryAuditRecord) => Promise<void> = async () => undefined) {
   const records = new Map<string, PromptLibraryRecord>()
   const repository: PromptLibraryRepository = {
     async listVisible(userId, kind) {
       return [...records.values()].filter(item => item.kind === kind && (item.visibility === 'organization' || item.ownerUserId === userId))
     },
     async findById(id) { return records.get(id) ?? null },
-    async create(item) { records.set(item.id, item); return item },
-    async update(id, expectedVersion, patch) {
+    async createWithAudit(item, audit) {
+      await writeAudit(audit)
+      records.set(item.id, item)
+      return item
+    },
+    async updateWithAudit(id, expectedVersion, patch, audit) {
       const existing = records.get(id)
       if (!existing || existing.version !== expectedVersion) return false
+      await writeAudit(audit)
       records.set(id, { ...existing, ...patch, version: expectedVersion + 1, updatedAt: new Date() })
       return true
     },
-    async delete(id, expectedVersion) {
+    async deleteWithAudit(id, expectedVersion, audit) {
       const existing = records.get(id)
       if (!existing || existing.version !== expectedVersion) return false
+      await writeAudit(audit)
       records.delete(id)
       return true
     },
@@ -71,9 +78,9 @@ test('builtin templates are readable but immutable', async () => {
 })
 
 test('private draft is visible only to its author and admins can edit but not bypass stale versions', async () => {
-  const { repository } = memoryRepository()
   const events: string[] = []
-  const service = createPromptLibraryService(repository, [], async (_actor, action) => { events.push(action) })
+  const { repository } = memoryRepository(async (audit) => { events.push(audit.action) })
+  const service = createPromptLibraryService(repository, [], async () => undefined)
   const created = await service.create(author, {
     kind: 'agent', name: '尽调助理', description: '', markdown: '# 尽调助理\n\n仅依据材料。',
     fileName: 'diligence.md', visibility: 'private',
@@ -95,11 +102,11 @@ test('private draft is visible only to its author and admins can edit but not by
 })
 
 test('failed audit leaves create, update, and delete uncommitted', async () => {
-  const { repository, records } = memoryRepository()
   let failedAction = '创建提示词'
-  const service = createPromptLibraryService(repository, [], async (_actor, action) => {
-    if (action === failedAction) throw new Error('audit unavailable')
+  const { repository, records } = memoryRepository(async (audit) => {
+    if (audit.action === failedAction) throw new Error('audit unavailable')
   })
+  const service = createPromptLibraryService(repository, [], async () => undefined)
   const input = { kind: 'skill' as const, name: '研究助手', markdown: '# 研究助手', visibility: 'private' as const }
 
   await assert.rejects(service.create(author, input), /audit unavailable/)
