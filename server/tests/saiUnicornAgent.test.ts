@@ -115,18 +115,33 @@ test('对话气泡只回显用户目标，不暴露 Agent 上下文指令', () =
   assert.equal(extractSaiPromptGoal('这是普通历史消息'), '这是普通历史消息')
 })
 
-test('工作台摘要只提供未完成事项，并优先呈现高优先级任务', () => {
+test('工作台摘要保留总数，并优先呈现到期任务', () => {
   const snapshot = buildSaiWorkspaceSnapshot({
     projects: [],
     todos: [
-      { title: '低优先级', projectName: '项目甲', priority: '低', status: '进行中', dueDate: '2026-10-01' },
+      { title: '低优先级', projectName: '项目甲', priority: '低', status: '进行中', dueDate: '2026-10-03' },
       { title: '已完成任务', projectName: '项目甲', priority: '高', status: '已完成', dueDate: '2026-10-01' },
-      { title: '高优先级', projectName: '项目乙', priority: '高', status: '待办', dueDate: '2026-10-02' },
+      { title: '高优先级', projectName: '项目乙', priority: '高', status: '待办', dueDate: '2026-10-01' },
     ],
     meetings: [], risks: [], approvals: [],
+    now: new Date('2026-10-01T08:00:00'),
   })
+  const parsed = JSON.parse(snapshot.slice(snapshot.indexOf('{')))
+  assert.equal(parsed.counts.todos, 2)
   assert.ok(snapshot.indexOf('高优先级') < snapshot.indexOf('低优先级'))
   assert.doesNotMatch(snapshot, /已完成任务/)
+})
+
+test('工作台摘要截断列表时仍报告完整任务数', () => {
+  const snapshot = buildSaiWorkspaceSnapshot({
+    projects: [], meetings: [], risks: [], approvals: [],
+    todos: Array.from({ length: 8 }, (_, index) => ({ title: `任务${index}`, projectName: '项目', priority: '中', status: '待办', dueDate: '2026-10-01' })),
+    now: new Date('2026-10-01T08:00:00'),
+  })
+  const parsed = JSON.parse(snapshot.slice(snapshot.indexOf('{')))
+  assert.equal(parsed.counts.todos, 8)
+  assert.equal(parsed.todos.length, 6)
+  assert.match(snapshot, /不要把列表长度说成总数/)
 })
 
 test('项目发现摘要只包含当前筛选列表，并区分加载失败与无候选', () => {
