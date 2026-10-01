@@ -100,6 +100,13 @@ export function ProjectDetailPage() {
   const [workspace, setWorkspace] = useState<'directives' | 'weekly' | 'archive' | 'governance' | 'overview' | null>(null)
   useEffect(() => { setWorkspace(null) }, [id])
   const [showUpload, setShowUpload] = useState(false)
+  useEffect(() => {
+    if (!project || searchParams.get('saiUpload') !== '1') return
+    setShowUpload(true)
+    const next = new URLSearchParams(searchParams)
+    next.delete('saiUpload')
+    setSearchParams(next, { replace: true })
+  }, [project, searchParams, setSearchParams])
   const [uploading, setUploading] = useState<{ name: string; progress: number; id?: string; done?: number; total?: number } | null>(null)
   const [uploadSummaries, setUploadSummaries] = useState<ProjectFileUploadSummary[]>([])
   const [generating, setGenerating] = useState(false)

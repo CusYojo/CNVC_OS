@@ -29,6 +29,7 @@ import {
   getSaiAgentActions,
   getSaiConversationScopeKey,
   resolveSaiAgentContext,
+  resolveSaiUploadAction,
   type SaiAgentAction,
 } from '../lib/saiAgent'
 import { useAppStore } from '../store/useAppStore'
@@ -234,6 +235,13 @@ export function SaiUnicornAgent() {
   const sendGoal = async (goal: string) => {
     const cleanGoal = goal.trim()
     if (!cleanGoal || busy) return
+    const uploadPath = resolveSaiUploadAction(currentContext, cleanGoal)
+    if (uploadPath) {
+      setComposer('')
+      navigate(uploadPath)
+      closePanel()
+      return
+    }
     const prompt = buildSaiAgentPrompt(currentContext, cleanGoal)
     const requestScopeKey = conversationScopeKey
     const currentProject = projects.find((project) => project.id === currentContext.projectId)

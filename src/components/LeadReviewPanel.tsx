@@ -25,6 +25,7 @@ export function LeadReviewPanel() {
   const userId = useAuthStore(s => s.user?.id)
   const allowed = roles.includes(role)
   const [status, setStatus] = useState('pending')
+  const [source, setSource] = useState<'weixin_link' | 'all'>('weixin_link')
   const [page, setPage] = useState(1)
   const [refresh, setRefresh] = useState(0)
   const [data, setData] = useState<Listing | null>(null)
@@ -48,12 +49,12 @@ export function LeadReviewPanel() {
     let active = true
     if (!allowed) return
     setLoading(true); setError(''); setData(null)
-    api<Listing>(`/lead-pipeline/reviews?status=${status}&page=${page}&pageSize=20`)
+    api<Listing>(`/lead-pipeline/reviews?status=${status}&source=${source}&page=${page}&pageSize=20`)
       .then(result => { if (active) setData(result) })
       .catch(e => { if (active) setError(e.message || '复核列表读取失败') })
       .finally(() => { if (active) setLoading(false) })
     return () => { active = false }
-  }, [allowed, role, userId, status, page, refresh])
+  }, [allowed, role, userId, status, source, page, refresh])
   function open(row: Review) {
     setSelected(row); setSubjectType(row.triggerDecision.subjectType || 'company')
     setName(row.triggerDecision.subjectName || ''); setLegalName(row.triggerDecision.legalName || '')
@@ -85,7 +86,7 @@ export function LeadReviewPanel() {
   const locked = busy || Boolean(pending)
   return <section className="space-y-4">
     <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-lg font-semibold">线索人工复核</h2><p className="text-sm text-slate-500">核对来源与证据后，决定是否加入线索池。待复核记录尚未正式入池。</p></div>
-      <div className="flex gap-2"><select aria-label="复核状态" value={status} onChange={e => { setStatus(e.target.value); setPage(1) }} className="rounded border p-2"><option value="pending">待复核</option><option value="resolved">已处理</option></select><Button variant="secondary" onClick={() => setRefresh(n => n + 1)}>刷新</Button></div></div>
+      <div className="flex flex-wrap gap-2"><select aria-label="复核来源" value={source} onChange={e => { setSource(e.target.value as 'weixin_link' | 'all'); setPage(1) }} className="rounded border p-2"><option value="weixin_link">微信提交</option><option value="all">全部来源</option></select><select aria-label="复核状态" value={status} onChange={e => { setStatus(e.target.value); setPage(1) }} className="rounded border p-2"><option value="pending">待复核</option><option value="resolved">已处理</option></select><Button variant="secondary" onClick={() => setRefresh(n => n + 1)}>刷新</Button></div></div>
     {notice && <p role="status" className="text-emerald-700">{notice}</p>}
     {error && <p role="alert" className="text-red-600">{error}</p>}
     {loading ? <p role="status">正在读取复核记录…</p> : data && <>

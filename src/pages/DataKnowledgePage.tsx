@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useLocation, useSearchParams } from 'react-router-dom'
 import { KnowledgePage } from './KnowledgePage'
 import { FdeCompanyKnowledgePanel } from '../components/FdeCompanyKnowledgePanel'
 import { FdeProjectArchivePanel } from '../components/FdeProjectArchivePanel'
@@ -19,6 +19,7 @@ export function DataKnowledgePage() {
 }
 
 function DataKnowledgeWorkspace({ userId }: { userId: string }) {
+  const location = useLocation()
   const [params, setParams] = useSearchParams()
   const [capabilities, setCapabilities] = useState<DataKnowledgeCapabilities | null>(null)
   const [management, setManagement] = useState(false)
@@ -58,7 +59,7 @@ function DataKnowledgeWorkspace({ userId }: { userId: string }) {
     if (!capabilities || !selection) return <Card className="p-6"><p role={error ? 'alert' : 'status'} className="text-sm text-slate-600">{error || '正在核验当前账号的知识与档案访问资格…'}</p>{error && <Button className="mt-4" variant="secondary" onClick={() => setRefresh(value => value + 1)}>重新核验权限</Button>}</Card>
     if (!selection.allowed) return <Card className="p-6"><h2 className="font-semibold">当前职责无权使用此入口</h2><p role="alert" className="mt-2 text-sm text-slate-500">项目档案、公司知识和上传权限分别核验。请切换到有权页签，或联系管理员核对当前岗位与项目职责。</p><Button className="mt-4" variant="secondary" onClick={() => setRefresh(value => value + 1)}>重新核验权限</Button></Card>
     if (selection.view === 'company') return <FdeCompanyKnowledgePanel />
-    if (selection.tool) return <div key={`${userId}:${selection.tool}`}><button className="mb-4 text-sm font-medium text-[#315f68]" onClick={() => openTool(null)}>← 返回项目档案</button><KnowledgePage initialTab={selection.tool === 'input' ? 'input' : selection.tool === 'meetings' ? 'meetings' : 'files'} initialUpload={selection.tool === 'upload'} allowedTools={capabilities} uploadProjectIds={capabilities.uploadProjectIds} /></div>
+    if (selection.tool) return <div key={`${userId}:${selection.tool}:${selection.tool === 'upload' ? location.key : ''}`}><button className="mb-4 text-sm font-medium text-[#315f68]" onClick={() => openTool(null)}>← 返回项目档案</button><KnowledgePage initialTab={selection.tool === 'input' ? 'input' : selection.tool === 'meetings' ? 'meetings' : 'files'} initialUpload={selection.tool === 'upload'} allowedTools={capabilities} uploadProjectIds={capabilities.uploadProjectIds} /></div>
     return <FdeProjectArchivePanel capabilities={capabilities} onOpenTools={openTool} />
   }
   return <div className="fde-workspace fde-knowledge-page">
