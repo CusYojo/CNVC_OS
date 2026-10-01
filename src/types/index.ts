@@ -437,12 +437,16 @@ export interface LeadPoolRatingSummary {
 
 export interface ProjectDiscoveryScore {
   overall: number | null
+  referenceScore: number | null
+  referenceSourceUrl: string | null
+  referenceEvidence: string[]
   coverage: number
   dimensions: Array<{
     key: string
     label: string
     score: number | null
     evidence: string
+    sourceUrl?: string
     status: 'ready' | 'insufficient'
   }>
 }

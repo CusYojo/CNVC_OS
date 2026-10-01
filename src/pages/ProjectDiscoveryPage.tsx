@@ -44,7 +44,7 @@ type ProjectDiscoverySort = 'latest' | 'funding' | 'score'
 const sorts: Array<{ value: ProjectDiscoverySort; label: string }> = [
   { value: 'latest', label: '按时间排序' },
   { value: 'funding', label: '按融资金额排序' },
-  { value: 'score', label: '按综合评分排序' },
+  { value: 'score', label: '按四维评分排序' },
 ]
 
 type BpUploadResult = { id: string; name: string; status: string; progress: number; error?: string | null; leadId?: string | null; reviewId?: string | null }
@@ -385,8 +385,10 @@ function DiscoveryCard({ lead, onOpen, onKeywordsUpdated, onCardUpdated, onRemov
   const sourceUrl = reportedSourceUrl ?? safeExternalUrl(lead.radarProfile?.link)
   const discoveryScore = lead.discoveryScore
   const scoreCoverage = discoveryScore?.coverage ?? discoveryScore?.dimensions.filter((dimension) => dimension.status === 'ready').length ?? 0
-  const scoreLabel = discoveryScore?.overall == null ? `待评分（${scoreCoverage}/4维）`
-    : scoreCoverage < 4 ? `参考分（${scoreCoverage}/4维）` : '综合评分'
+  const displayScore = discoveryScore?.overall ?? discoveryScore?.referenceScore ?? null
+  const scoreLabel = discoveryScore?.overall != null
+    ? scoreCoverage < 4 ? `参考分（${scoreCoverage}/4维）` : '综合评分'
+    : discoveryScore?.referenceScore != null ? `初筛参考分（${scoreCoverage}/4维）` : `待评分（${scoreCoverage}/4维）`
   const verifiedDimensions = kind === 'research' ? research?.dataStatus?.verifiedDimensions : investment?.dataStatus?.verifiedDimensions
   const applicableDimensions = kind === 'research' ? research?.dataStatus?.applicableDimensions : investment?.dataStatus?.applicableDimensions
   const primaryDateTime = /^\d{4}-\d{2}-\d{2}/u.exec(cardDraft.primaryDate)?.[0]
@@ -536,8 +538,8 @@ function DiscoveryCard({ lead, onOpen, onKeywordsUpdated, onCardUpdated, onRemov
             onChange={(event) => updateCardDraft('primaryDate', event.target.value)}
           />
         </time>
-        <div className="project-discovery-card-score" aria-label={`${name}${scoreLabel}${discoveryScore?.overall == null ? '' : `${discoveryScore.overall}分`}`}>
-          <span>{scoreLabel}</span><strong>{discoveryScore?.overall == null ? '待评分' : `${discoveryScore.overall} 分`}</strong>
+        <div className="project-discovery-card-score" aria-label={`${name}${scoreLabel}${displayScore == null ? '' : `${displayScore}分`}`}>
+          <span>{scoreLabel}</span><strong>{displayScore == null ? '待评分' : `${displayScore} 分`}</strong>
         </div>
       </div>
     </header>
@@ -588,9 +590,16 @@ function DiscoveryCard({ lead, onOpen, onKeywordsUpdated, onCardUpdated, onRemov
         </div>
         <div className="project-discovery-detail-panel project-discovery-score-details">
           <h4>项目发现评分</h4>
+          <p>投资机构 20% · 融资金额 20% · 产业前沿度 25% · 技术含量 35%。机构按 2025 年投中榜 TOP30/50/100 分别计 90/80/70 分，领投加 5 分，未上榜但有机构记录计 50 分。融资金额按轮次临时参考档比较，并非同赛道分位数；产业与技术沿用已有研究评级。四维资料不足时不补造完整评级。</p>
+          {discoveryScore?.overall == null && discoveryScore?.referenceScore != null && <div className="project-discovery-reference-note">
+            <strong>公开资料初筛参考分：{discoveryScore.referenceScore} 分</strong>
+            <p>仅用于初步研判，不是四维综合评级；以有摘要和原始链接为 50 分基准，明确赛道、技术、团队、机构和金额线索可小幅加分，最高 75 分。所有候选信息均待人工核验。</p>
+            <ul>{discoveryScore.referenceEvidence.map((evidence) => <li key={evidence}>{evidence}</li>)}</ul>
+            {safeExternalUrl(discoveryScore.referenceSourceUrl ?? undefined) && <a href={safeExternalUrl(discoveryScore.referenceSourceUrl ?? undefined)!} target="_blank" rel="noopener noreferrer">查看初筛来源</a>}
+          </div>}
           {discoveryScore?.dimensions?.length ? <dl>{discoveryScore.dimensions.map((dimension) => <div key={dimension.key}>
             <dt>{dimension.label}</dt>
-            <dd><strong>{dimension.score == null || dimension.status === 'insufficient' ? '信息不足' : `${dimension.score} 分`}</strong><span>{dimension.evidence || '暂无可核验依据'}</span></dd>
+            <dd><strong>{dimension.score == null || dimension.status === 'insufficient' ? '信息不足' : `${dimension.score} 分`}</strong><span>{dimension.evidence || '暂无可核验依据'}{safeExternalUrl(dimension.sourceUrl) ? <> · <a href={safeExternalUrl(dimension.sourceUrl)!} target="_blank" rel="noopener noreferrer">查看榜单来源</a></> : null}</span></dd>
           </div>)}</dl> : <p>信息不足，待评分</p>}
         </div>
         <div className="project-discovery-detail-sources">
