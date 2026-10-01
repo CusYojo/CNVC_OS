@@ -25,8 +25,10 @@ const projects = [
 test('小赛在项目页打开对应资料上传窗口，其他页面打开知识库上传窗口', () => {
   const project = resolveSaiAgentContext(`/projects/${projects[0].id}`, '?tab=files', projects)
   const workspace = resolveSaiAgentContext('/', '', projects)
+  const discovery = resolveSaiAgentContext('/projects', '?view=discover', projects)
   assert.equal(resolveSaiUploadAction(project, '帮我上传项目材料'), `/projects/${projects[0].id}?tab=files&saiUpload=1`)
   assert.equal(resolveSaiUploadAction(workspace, '我要上传文件'), '/knowledge?view=archives&archiveTool=upload')
+  assert.equal(resolveSaiUploadAction(discovery, '帮我上传项目 BP'), '/projects?view=discover&saiUpload=1')
   assert.equal(resolveSaiUploadAction(project, '请分析这份材料'), null)
   assert.equal(resolveSaiUploadAction(project, '不要上传文件，只分析已有材料'), null)
 })

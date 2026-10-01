@@ -30,6 +30,7 @@ export function resolveSaiUploadAction(current: SaiAgentContext, goal: string): 
   if (/(?:不要|不用|无需|禁止).{0,8}(?:上传|导入|添加)/.test(goal)) return null
   const wantsUpload = /(?:上传|导入|添加).{0,12}(?:文件|资料|材料|文档|附件|BP)|(?:文件|资料|材料|文档|附件|BP).{0,12}(?:上传|导入)/i.test(goal)
   if (!wantsUpload) return null
+  if (current.kind === 'discovery') return '/projects?view=discover&saiUpload=1'
   return current.projectId
     ? `/projects/${encodeURIComponent(current.projectId)}?tab=files&saiUpload=1`
     : '/knowledge?view=archives&archiveTool=upload'

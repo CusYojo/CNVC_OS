@@ -4,7 +4,7 @@ import {
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { encodeInstitutionTrackingKey } from '../../server/src/contracts/institutionTrackingContract'
-import { EmptyState } from '../components/ui'
+import { EmptyState, Modal } from '../components/ui'
 import { apiGet, apiPatch, apiPost } from '../lib/api'
 import {
   buildProjectDiscoveryKeywords,
@@ -79,6 +79,15 @@ export function ProjectDiscoveryPage() {
   const [error, setError] = useState('')
   const [action, setAction] = useState<'refresh' | 'upload' | ''>('')
   const [notice, setNotice] = useState<{ tone: 'success' | 'error'; text: string } | null>(null)
+  const [saiUploadOpen, setSaiUploadOpen] = useState(false)
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search)
+    if (params.get('saiUpload') !== '1') return
+    setSaiUploadOpen(true)
+    params.delete('saiUpload')
+    navigate({ pathname: location.pathname, search: params.toString() ? `?${params}` : '' }, { replace: true })
+  }, [location.pathname, location.search, navigate])
 
   const loadCandidates = useCallback(async (background = false) => {
     const serial = ++requestSerial.current
@@ -243,6 +252,10 @@ export function ProjectDiscoveryPage() {
   }
 
   return <div className="project-discovery-page">
+    <Modal open={saiUploadOpen} title="上传项目材料" onClose={() => setSaiUploadOpen(false)}>
+      <p className="mb-4 text-sm text-slate-600">选择项目 BP 或其他资料，解析后会加入新项目发现；需要核对的材料会进入人工复核。</p>
+      <input type="file" disabled={Boolean(action)} accept=".pdf,.docx,.pptx,.xls,.xlsx,.png,.jpg,.jpeg,.gif,.bmp,.webp,.txt,.md,.markdown" aria-label="选择项目材料" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; if (file) { setSaiUploadOpen(false); void uploadBp(file) } }} />
+    </Modal>
     <header className="project-discovery-hero">
       <div className="project-discovery-title">
         <span><Sparkles aria-hidden="true" /></span>
