@@ -32,11 +32,12 @@ async function mapped<T>(operation: string, work: () => Promise<T>): Promise<T> 
 class MySqlAgentConversationRepository implements AgentConversationRepository {
   constructor(private readonly executor: MySqlAgentExecutor) {}
 
-  async listChatsForUser(userId: string, limit = 100) {
+  async listChatsForUser(userId: string, limit = 100, offset = 0) {
     return mapped('agent.listChatsForUser', () => this.executor.select().from(chatConversations)
       .where(eq(chatConversations.userId, userId))
       .orderBy(desc(chatConversations.updatedAt), desc(chatConversations.id))
-      .limit(Math.max(1, Math.min(1_000, Math.trunc(limit)))))
+      .limit(Math.max(1, Math.min(1_000, Math.trunc(limit))))
+      .offset(Math.max(0, Math.trunc(offset))))
   }
 
   async countMessagesForConversations(conversationIds: string[]) {
