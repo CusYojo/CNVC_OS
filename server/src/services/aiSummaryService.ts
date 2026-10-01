@@ -42,6 +42,7 @@ import { transitionLeadPipelineItem, type LeadPipelineTransitionInput } from './
 import { openLeadPipelineReview, recordLeadPipelineDecision } from './leadPipelineAuditService.js'
 import { recordLeadPipelineEntityMatch } from './leadPipelineEntityMatchService.js'
 import { formatShanghaiDateKey } from '../utils/shanghaiTime.js'
+import { buildProjectDiscoveryScore } from './projectDiscoveryScore.js'
 import { resolvePaperProjectIdentity } from './paperIdentity.js'
 import { publicLeadScoreDeadLetterError, publicLeadScoreError } from './leadScoreRetryPolicy.js'
 import { companyRegistrationEligibility, normalizeLeadRegistry } from './leadRegistry.js'
@@ -138,6 +139,45 @@ const overallScoreExpr = sql<number>`CASE
     THEN ROUND(CAST(${jsonText(leads.scoring, '$.total')} AS DECIMAL(10,2)))
   ELSE ${leads.score}
 END`
+
+// The display score intentionally uses only structured financing and the two
+// snapshot-bound V3 research dimensions. Never infer a score from a headline.
+const discoveryInvestorScoreExpr = sql<number | null>`CASE
+  WHEN ${leadInvestmentProfileProjections.hasMajorInstitution} = TRUE THEN 90 ELSE NULL END`
+const discoveryFundingScoreExpr = sql<number | null>`CASE
+  WHEN ${leadInvestmentProfileProjections.latestAmountCurrency} <> 'CNY'
+    OR ${leadInvestmentProfileProjections.latestAmountValue} IS NULL
+    OR ${leadInvestmentProfileProjections.latestAmountValue} <= 0 THEN NULL
+  WHEN ${leadInvestmentProfileProjections.latestAmountValue} >= 1000000000 THEN 100
+  WHEN ${leadInvestmentProfileProjections.latestAmountValue} >= 100000000 THEN 90
+  WHEN ${leadInvestmentProfileProjections.latestAmountValue} >= 10000000 THEN 75
+  WHEN ${leadInvestmentProfileProjections.latestAmountValue} >= 1000000 THEN 60
+  ELSE 45 END`
+const discoveryRatingDimensionExpr = (index: number, key: string) => {
+  const dimensionKey = jsonText(leads.scoring, `$.ratingV3.detailView.dimensionScores[${index}].key`)
+  const rawScore = jsonText(leads.scoring, `$.ratingV3.detailView.dimensionScores[${index}].score`)
+  return sql<number | null>`CASE
+    WHEN ${jsonText(leads.scoring, '$.ratingV3.schemaVersion')} = 'lead-rating-v3'
+      AND COALESCE(${jsonText(leads.scoring, '$.ratingV3.status')}, '') NOT IN ('stale', 'invalidated')
+      AND COALESCE(${jsonText(leads.scoring, '$.ratingV3.computed.ratingStatus')}, '') <> '无法评级'
+      AND ${dimensionKey} = ${key}
+      AND ${rawScore} REGEXP '^(10|[0-9])([.][0-9]+)?$'
+    THEN ROUND(CAST(${rawScore} AS DECIMAL(5,2)) * 10)
+    ELSE NULL END`
+}
+const discoveryTechnologyScoreExpr = discoveryRatingDimensionExpr(2, 'technology_rd')
+const discoveryFrontierScoreExpr = discoveryRatingDimensionExpr(3, 'industry_policy_space')
+const discoveryCompositeScoreExpr = sql<number | null>`CASE
+  WHEN ${discoveryTechnologyScoreExpr} IS NULL OR ${discoveryFrontierScoreExpr} IS NULL THEN NULL
+  ELSE ROUND((
+    COALESCE(${discoveryInvestorScoreExpr}, 0) * 20
+    + COALESCE(${discoveryFundingScoreExpr}, 0) * 20
+    + ${discoveryFrontierScoreExpr} * 25
+    + ${discoveryTechnologyScoreExpr} * 35
+  ) / (60
+    + IF(${discoveryInvestorScoreExpr} IS NULL, 0, 20)
+    + IF(${discoveryFundingScoreExpr} IS NULL, 0, 20)
+  ), 1) END`
 
 const publicLeadSignalTextExpr = sql<string>`CONCAT_WS(
   ' ',
@@ -315,6 +355,7 @@ const BUSINESS_INDUSTRY_RULES: Array<{ label: string; terms: string[] }> = [
   { label: '具身智能/机器人', terms: ['具身智能', '机器人'] },
   { label: '网络安全', terms: ['网络安全'] },
   { label: '半导体/芯片', terms: ['半导体', '芯片', '集成电路'] },
+  { label: '航空航天', terms: ['航空航天', '航天', '商业航天', '卫星', '火箭'] },
   { label: '数据科学', terms: ['数据科学', '信息检索', '社交网络', '信息论', '计算与社会'] },
   { label: '软件工程', terms: ['软件工程', '计算逻辑', '计算经济', '多智能体系统'] },
   { label: '前沿技术', terms: ['前沿技术', '量子', '航空航天', '数学与计算'] },
@@ -752,10 +793,14 @@ function leadPoolRating(scoring: Record<string, unknown>, scoreJob: LeadScoreJob
   return { displayGrade: grade, status }
 }
 
-function leadPoolLatestUpdates(scoring: Record<string, unknown>, radarProfile: Record<string, unknown>, createdAt: Date | null) {
+function leadPoolLatestUpdates(
+  scoring: Record<string, unknown>, radarProfile: Record<string, unknown>,
+  sources: unknown, createdAt: Date | null,
+) {
   const structuredNews = Array.isArray(scoring.structuredNews) ? scoring.structuredNews : []
   const radarNews = Array.isArray(radarProfile.news) ? radarProfile.news : []
-  const rows = [...structuredNews, ...radarNews]
+  const sourceNews = Array.isArray(sources) ? sources.slice(0, 2) : []
+  const rows = [...structuredNews, ...radarNews, ...sourceNews]
     .map((value) => value && typeof value === 'object' ? value as Record<string, unknown> : {})
     .map((item) => ({
       occurredAt: meaningfulPresentationText(item.date)
@@ -768,6 +813,7 @@ function leadPoolLatestUpdates(scoring: Record<string, unknown>, radarProfile: R
         ?? '',
       sourceUrl: meaningfulPresentationText(item.sourceUrl)
         ?? meaningfulPresentationText(item.url)
+        ?? meaningfulPresentationText(item.link)
         ?? meaningfulPresentationText(radarProfile.link),
     }))
     .filter((item) => item.title)
@@ -990,7 +1036,7 @@ function enrichLead(row: typeof leads.$inferSelect) {
     foundedAtDisplay: foundedAtDisplay ?? (isPaper ? meaningfulPresentationText(paperMeta.publishedAt) ?? '待核验' : '待核验'),
     companyRegistry,
     backgroundTags: leadPoolBackgroundTags(sc, rp),
-    latestUpdates: leadPoolLatestUpdates(sc, rp, row.createdAt),
+    latestUpdates: leadPoolLatestUpdates(sc, rp, row.sources, row.createdAt),
     rating: leadPoolRating(sc, publicScoreJob),
     scoreJob: publicScoreJob,
     // “最新入池”只认首次进入公共线索池的数据库时间，不受原文发布时间、
@@ -1008,7 +1054,7 @@ function publicResearchProfilePayload(value: Record<string, unknown>) {
 function leadPoolListItem(
   row: typeof leads.$inferSelect,
   candidateFacts: LeadListCandidateFact[] = [],
-  options: { showCandidateData?: boolean } = {},
+  options: { showCandidateData?: boolean; discoveryScore?: ReturnType<typeof buildProjectDiscoveryScore> } = {},
 ) {
   const enriched = enrichLead(row)
   const radarProfile = objectValue(enriched.radarProfile)
@@ -1155,7 +1201,9 @@ function leadPoolListItem(
     latestUpdates: (enriched.latestUpdates ?? []).slice(0, 2).map((item) => ({
       occurredAt: item.occurredAt,
       title: item.title,
+      sourceUrl: item.sourceUrl,
     })),
+    ...(options.discoveryScore ? { discoveryScore: options.discoveryScore } : {}),
     radarProfile: typeof radarProfile.channel === 'string' || Object.keys(radarProfileCore).length > 0
       ? {
           channel: radarProfile.channel,
@@ -1230,6 +1278,7 @@ export async function listLeads(options: {
   profileStatus?: string
   hasConflict?: boolean
   projectDiscoveryOnly?: boolean
+  period?: 'today' | 'week' | 'all'
 } = {}) {
   const requestedPage = Math.max(1, Math.floor(options.page ?? 1))
   const pageSize = Math.min(100, Math.max(1, Math.floor(options.pageSize ?? 20)))
@@ -1256,6 +1305,18 @@ export async function listLeads(options: {
       ) IS NOT NULL`,
     )
     conds.push(sql`(${sql.join(sourceKeyMatches, sql` OR `)})`)
+  }
+  const discoveryDayExpr = sql<string>`COALESCE(
+    STR_TO_DATE(LEFT(${jsonText(leads.radarProfile, '$.discoveryDate')}, 10), '%Y-%m-%d'),
+    STR_TO_DATE(LEFT(${jsonText(leads.radarProfile, '$.publishedAt')}, 10), '%Y-%m-%d'),
+    DATE(DATE_ADD(${leads.createdAt}, INTERVAL 8 HOUR))
+  )`
+  if (options.projectDiscoveryOnly && options.period && options.period !== 'all') {
+    const today = formatShanghaiDateKey(new Date())
+    const start = options.period === 'today'
+      ? today
+      : formatShanghaiDateKey(new Date(Date.now() - 6 * 86_400_000))
+    conds.push(sql`${discoveryDayExpr} >= ${start} AND ${discoveryDayExpr} <= ${today}`)
   }
   // 已入库线索全部可见；未完成 AI 分析的记录由 enrichLead 标为 pending。
   // 同步和 AI 评分解耦，避免“已经同步但列表看不到”。
@@ -1472,8 +1533,27 @@ export async function listLeads(options: {
           'status', ${jsonValue(leads.scoring, '$.ratingV3.status')},
           'scoredAt', ${jsonValue(leads.scoring, '$.ratingV3.scoredAt')},
           'mainView', JSON_OBJECT('displayGrade', ${jsonValue(leads.scoring, '$.ratingV3.mainView.displayGrade')}),
-          'detailView', JSON_OBJECT('project', JSON_OBJECT('stage', ${jsonValue(leads.scoring, '$.ratingV3.detailView.project.stage')}))
+          'computed', JSON_OBJECT('ratingStatus', ${jsonValue(leads.scoring, '$.ratingV3.computed.ratingStatus')}),
+          'detailView', JSON_OBJECT(
+            'project', JSON_OBJECT('stage', ${jsonValue(leads.scoring, '$.ratingV3.detailView.project.stage')}),
+            'dimensionScores', JSON_ARRAY(
+              JSON_OBJECT('key', ${jsonValue(leads.scoring, '$.ratingV3.detailView.dimensionScores[2].key')},
+                'score', ${jsonValue(leads.scoring, '$.ratingV3.detailView.dimensionScores[2].score')},
+                'assessment', LEFT(${jsonText(leads.scoring, '$.ratingV3.detailView.dimensionScores[2].assessment')}, 240)),
+              JSON_OBJECT('key', ${jsonValue(leads.scoring, '$.ratingV3.detailView.dimensionScores[3].key')},
+                'score', ${jsonValue(leads.scoring, '$.ratingV3.detailView.dimensionScores[3].score')},
+                'assessment', LEFT(${jsonText(leads.scoring, '$.ratingV3.detailView.dimensionScores[3].assessment')}, 240))
+            )
+          )
         ) END,
+        'structuredNews', JSON_ARRAY(
+          JSON_OBJECT('date', ${jsonValue(leads.scoring, '$.structuredNews[0].date')},
+            'title', LEFT(${jsonText(leads.scoring, '$.structuredNews[0].title')}, 240),
+            'sourceUrl', LEFT(${jsonText(leads.scoring, '$.structuredNews[0].sourceUrl')}, 2048)),
+          JSON_OBJECT('date', ${jsonValue(leads.scoring, '$.structuredNews[1].date')},
+            'title', LEFT(${jsonText(leads.scoring, '$.structuredNews[1].title')}, 240),
+            'sourceUrl', LEFT(${jsonText(leads.scoring, '$.structuredNews[1].sourceUrl')}, 2048))
+        ),
         'dataQualityV1', ${jsonValue(leads.scoring, '$.dataQualityV1')},
         'registry', COALESCE(${jsonValue(leads.scoring, '$.registry')}, JSON_OBJECT())
       ) END`,
@@ -1502,7 +1582,19 @@ export async function listLeads(options: {
         'sourceTitle', COALESCE(${jsonValue(leads.radarProfile, '$.sourceTitle')}, ${jsonValue(leads.sources, '$[0].title')}),
         'publishedAt', ${jsonValue(leads.radarProfile, '$.publishedAt')},
         'discoveryDate', ${jsonValue(leads.radarProfile, '$.discoveryDate')},
-        'link', ${jsonValue(leads.radarProfile, '$.link')},
+        'link', COALESCE(
+          ${jsonValue(leads.radarProfile, '$.link')},
+          ${jsonValue(leads.sources, '$[0].url')},
+          ${jsonValue(leads.sources, '$[0].sourceUrl')}
+        ),
+        'news', JSON_ARRAY(
+          JSON_OBJECT('date', ${jsonValue(leads.radarProfile, '$.news[0].date')},
+            'title', LEFT(${jsonText(leads.radarProfile, '$.news[0].title')}, 240),
+            'sourceUrl', LEFT(COALESCE(${jsonText(leads.radarProfile, '$.news[0].sourceUrl')}, ${jsonText(leads.radarProfile, '$.news[0].url')}), 2048)),
+          JSON_OBJECT('date', ${jsonValue(leads.radarProfile, '$.news[1].date')},
+            'title', LEFT(${jsonText(leads.radarProfile, '$.news[1].title')}, 240),
+            'sourceUrl', LEFT(COALESCE(${jsonText(leads.radarProfile, '$.news[1].sourceUrl')}, ${jsonText(leads.radarProfile, '$.news[1].url')}), 2048))
+        ),
         'thesis', ${jsonValue(leads.radarProfile, '$.thesis')},
         'team', COALESCE(${jsonValue(leads.radarProfile, '$.team')}, JSON_ARRAY()),
         'registry', COALESCE(${jsonValue(leads.radarProfile, '$.registry')}, JSON_OBJECT()),
@@ -1531,6 +1623,14 @@ export async function listLeads(options: {
         ))
         ELSE JSON_ARRAY()
       END`,
+      sources: sql<unknown[]>`JSON_ARRAY(
+        JSON_OBJECT('title', LEFT(${jsonText(leads.sources, '$[0].title')}, 240),
+          'url', LEFT(COALESCE(${jsonText(leads.sources, '$[0].url')}, ${jsonText(leads.sources, '$[0].sourceUrl')}), 2048),
+          'publishedAt', ${jsonValue(leads.sources, '$[0].publishedAt')}),
+        JSON_OBJECT('title', LEFT(${jsonText(leads.sources, '$[1].title')}, 240),
+          'url', LEFT(COALESCE(${jsonText(leads.sources, '$[1].url')}, ${jsonText(leads.sources, '$[1].sourceUrl')}), 2048),
+          'publishedAt', ${jsonValue(leads.sources, '$[1].publishedAt')})
+      )`,
       completeness: completenessExpr,
       investmentProfile: sql<unknown>`CASE WHEN ${leadInvestmentProfileProjections.leadId} IS NULL THEN NULL ELSE COALESCE(
         ${leadInvestmentProfileProjections.profilePayload}, JSON_OBJECT(
@@ -1586,11 +1686,11 @@ export async function listLeads(options: {
       .leftJoin(leadInvestmentProfileProjections, eq(leadInvestmentProfileProjections.leadId, leads.id))
       .leftJoin(leadResearchProfileProjections, eq(leadResearchProfileProjections.leadId, leads.id))
       .where(whereClause).orderBy(
-      options.projectDiscoveryOnly ? desc(sql`COALESCE(
-        STR_TO_DATE(${jsonText(leads.radarProfile, '$.discoveryDate')}, '%Y-%m-%d'),
-        STR_TO_DATE(LEFT(${jsonText(leads.radarProfile, '$.publishedAt')}, 10), '%Y-%m-%d'),
-        ${leads.createdAt}
-      )`)
+      options.projectDiscoveryOnly && options.sort === 'score' ? desc(discoveryCompositeScoreExpr)
+        : options.projectDiscoveryOnly && options.sort === 'funding' ? desc(sql`CASE
+          WHEN ${leadInvestmentProfileProjections.latestAmountCurrency} = 'CNY'
+          THEN ${leadInvestmentProfileProjections.latestAmountValue} ELSE NULL END`)
+        : options.projectDiscoveryOnly ? desc(discoveryDayExpr)
         : options.sort === 'funding' ? desc(leadInvestmentProfileProjections.latestRoundDate)
           : options.sort === 'valuation' ? desc(leadInvestmentProfileProjections.valuationValue)
             : options.sort === 'customer' ? desc(leadInvestmentProfileProjections.highestCustomerStage)
@@ -1630,7 +1730,11 @@ export async function listLeads(options: {
     list: rows.map((r) => leadPoolListItem(
       r as unknown as typeof leads.$inferSelect,
       candidateFactsByLead.get(r.id) ?? [],
-      { showCandidateData },
+      { showCandidateData, discoveryScore: options.projectDiscoveryOnly ? buildProjectDiscoveryScore({
+        institutions: (objectValue(r.investmentProfile).institutions as Array<{ name?: string; major?: boolean }> | undefined),
+        financing: objectValue(objectValue(r.investmentProfile).financing),
+        ratingV3: objectValue(objectValue(r.scoring).ratingV3),
+      }) : undefined },
     )),
     ...pagination,
   }

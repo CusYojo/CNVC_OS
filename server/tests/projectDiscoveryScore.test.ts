@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { buildProjectDiscoveryScore } from '../src/services/projectDiscoveryScore.js'
+import { buildProjectDiscoveryScore, fundingAmountDiscoveryScore } from '../src/services/projectDiscoveryScore.js'
+import { LEAD_RATING_DIMENSIONS } from '../src/services/leadRatingV3Service.js'
 
 const rating = {
   schemaVersion: 'lead-rating-v3',
@@ -45,4 +46,13 @@ test('research-only ratings remain a clearly partial composite and foreign curre
   assert.equal(score.overall, 80.8)
   assert.equal(score.coverage, 2)
   assert.equal(score.dimensions[1].score, null)
+})
+
+test('funding bands and rating dimension positions remain consistent with database sort expression', () => {
+  assert.equal(LEAD_RATING_DIMENSIONS[2].key, 'technology_rd')
+  assert.equal(LEAD_RATING_DIMENSIONS[3].key, 'industry_policy_space')
+  assert.deepEqual([500_000, 1_000_000, 10_000_000, 100_000_000, 1_000_000_000]
+    .map((value) => fundingAmountDiscoveryScore(value, 'CNY')), [45, 60, 75, 90, 100])
+  assert.equal(fundingAmountDiscoveryScore(0, 'CNY'), null)
+  assert.equal(fundingAmountDiscoveryScore(Number.NaN, 'CNY'), null)
 })

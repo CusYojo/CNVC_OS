@@ -10,7 +10,7 @@ export const SERVER_LEAD_POOL_INDUSTRIES = [
   '企业服务', '医疗健康', '生物医药', '新能源', '新材料', '汽车出行',
   '消费科技', '文化娱乐', '教育', '农业科技',
   '自然语言处理', '计算机视觉', '网络安全', '数据科学', '软件工程',
-  '金融', '智能硬件/传感器', '工具软件', '算力基础设施', '能源环保', '物联网/硬件',
+  '金融', '智能硬件/传感器', '工具软件', '算力基础设施', '能源环保', '物联网/硬件', '航空航天',
   '低空经济', '本地生活', '跨境出海', '物流', '旅游', '其他',
 ] as const
 
@@ -98,7 +98,12 @@ export const listLeadsQuery = z.object({
 export const projectDiscoveryLeadsQuery = z.object({
   page: strictPositiveIntegerQuery(10_000, 1),
   pageSize: strictPositiveIntegerQuery(100, 50),
-  sort: z.literal('latest').optional(),
+  period: z.enum(['today', 'week', 'all']).optional(),
+  sort: z.enum(['latest', 'funding', 'score']).optional(),
+  industry: z.enum(SERVER_LEAD_POOL_INDUSTRIES).optional(),
+  region: z.enum(BUSINESS_REGIONS).optional(),
+  leadType: z.enum(['company', 'research']).optional(),
+  keyword: z.string().trim().min(1).max(100).optional(),
 }).strict()
 
 export type ListLeadsQuery = z.infer<typeof listLeadsQuery>
