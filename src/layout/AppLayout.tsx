@@ -134,6 +134,14 @@ export function AppLayout() {
   const [showProfile, setShowProfile] = useState(false)
   const [personalWeixinConnected, setPersonalWeixinConnected] = useState<boolean | null>(null)
   const [showCreate, setShowCreate] = useState(false)
+  useEffect(() => {
+    if (location.pathname !== '/projects') return
+    const params = new URLSearchParams(location.search)
+    if (params.get('saiCreate') !== '1') return
+    setShowCreate(true)
+    params.delete('saiCreate')
+    navigate({ pathname: location.pathname, search: params.toString() ? `?${params}` : '' }, { replace: true })
+  }, [location.pathname, location.search, navigate])
   const [dark, setDark] = useState(false)
   const [showSearch, setShowSearch] = useState(false)
   const [search, setSearch] = useState('')

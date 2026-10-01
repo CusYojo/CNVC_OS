@@ -10,6 +10,7 @@ import {
   getSaiAgentActions,
   getSaiConversationScopeKey,
   resolveSaiAgentContext,
+  resolveSaiCreateAction,
   resolveSaiNavigationAction,
   resolveSaiUploadAction,
 } from '../../src/lib/saiAgent.js'
@@ -48,6 +49,13 @@ test('小赛把明确的页面操作路由到现有工作区', () => {
   assert.equal(resolveSaiNavigationAction('打开尽调工作台'), '/due-diligence')
   assert.equal(resolveSaiNavigationAction('打开风险预警'), '/risks')
   assert.equal(resolveSaiNavigationAction('请分析待审事项'), null)
+})
+
+test('小赛能打开项目和会议的创建窗口，普通问答不会触发创建', () => {
+  assert.equal(resolveSaiCreateAction('帮我新建项目'), '/projects?saiCreate=1')
+  assert.equal(resolveSaiCreateAction('发起项目会议'), '/meetings?saiCreate=1')
+  assert.equal(resolveSaiCreateAction('请分析新建项目的流程'), null)
+  assert.equal(resolveSaiCreateAction('不要新建项目'), null)
 })
 
 test('小赛能从项目路由安全解析当前项目', () => {

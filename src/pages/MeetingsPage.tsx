@@ -72,7 +72,16 @@ export function MeetingsPage() {
     next.delete('project')
     return next
   })
-  const [showNew, setShowNew] = useState(!!searchParams.get('project'))
+  const [showNew, setShowNew] = useState(!!searchParams.get('project') || searchParams.get('saiCreate') === '1')
+  useEffect(() => {
+    if (searchParams.get('saiCreate') !== '1') return
+    setShowNew(true)
+    setSearchParams(previous => {
+      const next = new URLSearchParams(previous)
+      next.delete('saiCreate')
+      return next
+    }, { replace: true })
+  }, [searchParams, setSearchParams])
   const [generating, setGenerating] = useState(false)
   const [members, setMembers] = useState<ProjectMember[]>([])
   const [membersLoading, setMembersLoading] = useState(false)

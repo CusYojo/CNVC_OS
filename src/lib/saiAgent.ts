@@ -41,6 +41,14 @@ export function resolveSaiUploadAction(current: SaiAgentContext, goal: string): 
     : '/knowledge?view=archives&archiveTool=upload'
 }
 
+export function resolveSaiCreateAction(goal: string): '/projects?saiCreate=1' | '/meetings?saiCreate=1' | null {
+  if (/(?:不要|不用|无需|取消).{0,8}(?:新建|创建|发起)/.test(goal)) return null
+  if (!/^(?:小赛[，,]?\s*)?(?:请?帮我|我要|给我|现在|请|可以)?\s*(?:打开|进入|去|新建|创建|发起)/.test(goal)) return null
+  if (/(?:新建|创建).{0,8}(?:项目|投资项目)|(?:项目|投资项目).{0,8}(?:新建|创建)/.test(goal)) return '/projects?saiCreate=1'
+  if (/(?:新建|创建|发起).{0,8}(?:项目会议|会议)|(?:项目会议|会议).{0,8}(?:新建|创建|发起)/.test(goal)) return '/meetings?saiCreate=1'
+  return null
+}
+
 export function resolveSaiNavigationAction(goal: string): 'approvals' | '/knowledge' | '/collaboration' | '/projects' | '/projects?view=discover' | '/projects?view=reviews' | '/due-diligence' | '/risks' | null {
   if (!/^(?:小赛[，,]?\s*)?(?:请?帮我|我要|给我|现在|请|可以)?\s*(?:打开|进入|跳转到|去)(?:一下)?/.test(goal)) return null
   if (/(?:待我审批|待审事项|审批工作台)/.test(goal)) return 'approvals'

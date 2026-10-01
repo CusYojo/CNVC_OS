@@ -32,6 +32,7 @@ import {
   needsSaiWorkspaceSnapshot,
   resolveSaiAgentContext,
   resolveSaiNavigationAction,
+  resolveSaiCreateAction,
   resolveSaiToolMode,
   resolveSaiUploadAction,
   type SaiAgentAction,
@@ -390,6 +391,13 @@ export function SaiUnicornAgent() {
   const sendGoal = async (goal: string) => {
     const cleanGoal = goal.trim()
     if (!cleanGoal || busy) return
+    const createPath = resolveSaiCreateAction(cleanGoal)
+    if (createPath) {
+      setComposer('')
+      navigate(createPath)
+      closePanel()
+      return
+    }
     const uploadPath = resolveSaiUploadAction(currentContext, cleanGoal)
     if (uploadPath) {
       if (uploadPath.startsWith('/knowledge?')) {
