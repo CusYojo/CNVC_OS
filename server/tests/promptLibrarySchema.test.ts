@@ -22,3 +22,13 @@ test('prompt library catalog query projects metadata without reading Markdown lo
   assert.doesNotMatch(catalogQuery, /db\.select\(\)/)
   assert.doesNotMatch(catalogQuery, /promptLibraryItems\.markdown/)
 })
+
+test('prompt library writes audit and mutation in the same MySQL transaction', () => {
+  const source = readFileSync(new URL('../src/repositories/mysql/mysqlPromptLibraryRepository.ts', import.meta.url), 'utf8')
+  for (const method of ['createWithAudit', 'updateWithAudit', 'deleteWithAudit']) {
+    const body = source.split(`async ${method}(`)[1]?.split('\n  },')[0] ?? ''
+    assert.ok(body, `${method} must exist`)
+    assert.match(body, /db\.transaction\(async \(tx\) =>/)
+    assert.match(body, /tx\.insert\(auditLogs\)/)
+  }
+})
