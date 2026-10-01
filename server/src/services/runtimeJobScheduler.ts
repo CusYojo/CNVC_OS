@@ -353,7 +353,7 @@ export function runtimeJobDefinitions(): RuntimeJobDefinition[] {
     {
       id: 'radar-paper-daily',
       task: 'radar-paper-daily',
-      enabled: enabledEnv('RADAR_PAPER_CRAWL_ENABLED'),
+      enabled: enabledEnv('RADAR_PAPER_CRAWL_ENABLED', false),
       scheduleKind: 'daily',
       dailyHour: paperHour,
       dailyMinute: paperMinute,

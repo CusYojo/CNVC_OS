@@ -266,9 +266,6 @@ export function ProjectDiscoveryPage() {
       <div className="project-discovery-periods" role="group" aria-label="发现时间范围">
         {periods.map((item) => <button key={item.value} type="button" aria-pressed={period === item.value} onClick={() => setPeriod(item.value)}>{item.label}</button>)}
       </div>
-      <label className="project-discovery-kind">
-        <span className="sr-only">发现类型</span>
-      </label>
       <label className="project-discovery-search">
         <Search aria-hidden="true" />
         <input value={query} maxLength={100} onChange={(event) => setQuery(event.target.value.slice(0, 100))} placeholder="搜索项目、赛道、产品或机构" aria-label="搜索新发现项目" />
@@ -279,7 +276,7 @@ export function ProjectDiscoveryPage() {
     <section className="project-discovery-results" aria-label="待查看项目" aria-busy={loading || loadingMore}>
       {loading ? <div className="project-discovery-state"><LoaderCircle className="is-spinning" aria-hidden="true" /><strong>正在整理最新项目信号</strong><p>读取已收录的公开信源与结构化画像。</p></div>
         : error ? <div className="project-discovery-state project-discovery-error"><strong>新项目读取失败</strong><p>{error}</p><button type="button" onClick={() => void loadCandidates()}>重新加载</button></div>
-          : visible.length === 0 ? <EmptyState title="当前范围没有新项目" description="试试切换到近 7 天、全部类型，或调整搜索关键词。" />
+          : visible.length === 0 ? <EmptyState title="当前范围没有新项目" description="试试切换到近 7 天、全部项目，或调整搜索关键词。" />
             : <div className="project-discovery-grid">{visible.map((lead) => <DiscoveryCard
               key={lead.id}
               lead={lead}
