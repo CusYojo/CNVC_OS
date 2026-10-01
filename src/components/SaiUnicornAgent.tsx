@@ -89,6 +89,14 @@ function formatAgentError(error: unknown): string {
   return message.length > 120 ? `${message.slice(0, 120)}…` : message
 }
 
+function formatSpeechError(error: string): string {
+  if (error === 'not-allowed' || error === 'service-not-allowed') return '麦克风权限未开启，请在浏览器地址栏允许麦克风后重试。'
+  if (error === 'audio-capture') return '未检测到可用麦克风，请检查设备连接。'
+  if (error === 'network') return '语音识别服务暂时无法连接，请稍后重试或使用文字输入。'
+  if (error === 'no-speech') return '没有听清语音，请靠近麦克风后重试。'
+  return '语音识别未完成，请重试或使用文字输入。'
+}
+
 export function SaiUnicornAgent() {
   const location = useLocation()
   const navigate = useNavigate()
@@ -219,7 +227,10 @@ export function SaiUnicornAgent() {
 
   const toggleVoiceInput = () => {
     if (recognizerRef.current) {
+      recognizerRef.current.onend = null
       recognizerRef.current.stop()
+      recognizerRef.current = null
+      setListening(false)
       return
     }
     const speechWindow = window as typeof window & {
@@ -232,22 +243,27 @@ export function SaiUnicornAgent() {
       return
     }
     const recognizer = new Speech()
+    let recognized = false
+    let failed = false
     recognizer.lang = 'zh-CN'
     recognizer.continuous = false
     recognizer.interimResults = false
     recognizer.onresult = (event) => {
       const transcript = Array.from(event.results).map((result) => result[0]?.transcript ?? '').join('').trim()
       if (transcript) {
+        recognized = true
         setComposer((current) => `${current}${current.trim() ? ' ' : ''}${transcript}`)
         window.requestAnimationFrame(() => composerRef.current?.focus())
       }
     }
     recognizer.onerror = (event) => {
-      if (event.error !== 'aborted') setSpeechError(`语音识别未完成：${event.error}`)
+      failed = true
+      if (event.error !== 'aborted') setSpeechError(formatSpeechError(event.error))
       setListening(false)
       recognizerRef.current = null
     }
     recognizer.onend = () => {
+      if (!recognized && !failed) setSpeechError('未识别到语音，请重试或使用文字输入。')
       setListening(false)
       recognizerRef.current = null
     }
@@ -262,7 +278,12 @@ export function SaiUnicornAgent() {
   }
 
   const closePanel = () => {
-    recognizerRef.current?.stop()
+    if (recognizerRef.current) {
+      recognizerRef.current.onend = null
+      recognizerRef.current.stop()
+      recognizerRef.current = null
+      setListening(false)
+    }
     setOpen(false)
     window.requestAnimationFrame(() => triggerRef.current?.focus())
   }
