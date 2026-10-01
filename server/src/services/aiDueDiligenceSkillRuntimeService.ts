@@ -5,19 +5,18 @@ import type { BusinessContent, EvidenceSource } from './aiBusinessContentService
 import { getAiSkillDirectory } from './aiSkillService.js'
 import { execFileSupervised as execFileAsync } from '../runtime/supervisedProcessService.js'
 import { fetchAiGatewayChatCompatible } from './aiGatewayService.js'
-import { aiConfigurationRepository } from '../repositories/index.js'
 import { resolveAiModelRoute } from './aiModelSettingsService.js'
 const SKILL_NAME = 'draft-due-diligence-report' as const
 
-type DueDiligenceModelRuntime = { baseUrl: string; apiKey: string; model: string }
+export type DueDiligenceModelProfile = 'ai-document' | 'interactive-assistant'
+type DueDiligenceModelRuntime = { baseUrl: string; apiKey: string; model: string; profile: DueDiligenceModelProfile }
 type ModelRouteDependencies = {
-  resolveRoute: (profile: 'ai-document', role: string) => Promise<DueDiligenceModelRuntime | null>
-  hasConfiguredModel: () => Promise<boolean>
-  env: NodeJS.ProcessEnv
+  resolveRoute: (profile: DueDiligenceModelProfile, role: string) => Promise<Omit<DueDiligenceModelRuntime, 'profile'> | null>
 }
 
 export async function resolveDueDiligenceModelRuntime(
   role: string,
+  profile: DueDiligenceModelProfile = 'ai-document',
   dependencies: Partial<ModelRouteDependencies> = {},
 ): Promise<DueDiligenceModelRuntime> {
   if (!role.trim()) {
@@ -25,27 +24,16 @@ export async function resolveDueDiligenceModelRuntime(
       code: 'DUE_DILIGENCE_ROLE_REQUIRED', status: 403,
     })
   }
-  const configured = await (dependencies.resolveRoute ?? resolveAiModelRoute)('ai-document', role)
+  const configured = await (dependencies.resolveRoute ?? resolveAiModelRoute)(profile, role)
   if (configured) return {
     baseUrl: configured.baseUrl.replace(/\/$/, ''),
     apiKey: configured.apiKey,
     model: configured.model,
+    profile,
   }
-  const hasConfiguredModel = dependencies.hasConfiguredModel ?? (async () => Boolean(
-    await aiConfigurationRepository.findEnabledRoute('ai-document')
-    || await aiConfigurationRepository.findDefaultEnabledModelId(),
-  ))
-  if (await hasConfiguredModel()) {
-    throw Object.assign(new Error('当前账号无可用的尽调模型路由'), {
-      code: 'DUE_DILIGENCE_MODEL_ROUTE_UNAVAILABLE', status: 503,
-    })
-  }
-  const env = dependencies.env ?? process.env
-  return {
-    baseUrl: (env.LLM_BASE_URL || env.OPENAI_BASE_URL || 'http://127.0.0.1:18081/v1').replace(/\/$/, ''),
-    apiKey: env.OPENAI_API_KEY || env.LLM_API_KEY || '',
-    model: env.LLM_MODEL || env.JW_AGENT_MODEL || env.SCORE_MODEL || 'gpt-5.6-sol',
-  }
+  throw Object.assign(new Error('当前账号无可用的平台模型路由'), {
+    code: 'DUE_DILIGENCE_MODEL_ROUTE_UNAVAILABLE', status: 503,
+  })
 }
 
 import { compactText, buildEvidenceLedger, requestedReportMode, dueDiligencePackageContract, normalizeDueDiligencePackage, buildDueDiligencePackageModelInput } from './aiDueDiligencePackage.js'
