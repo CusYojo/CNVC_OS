@@ -297,7 +297,7 @@ const LeadCreateSchema = z.object({
 
 const LeadReviewListQuery = z.object({
   status: z.enum(['pending', 'resolved', 'all']).default('pending'),
-  source: z.enum(['all', 'weixin_link']).default('all'),
+  source: z.enum(['all', 'weixin_file', 'weixin_link']).default('all'),
   page: z.coerce.number().int().min(1).max(10_000).default(1),
   pageSize: z.coerce.number().int().min(1).max(50).default(20),
 })

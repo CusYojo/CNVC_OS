@@ -16,6 +16,9 @@ type Review = {
 type Listing = { list: Review[]; total: number; totalPages: number }
 const roles = ['系统管理员', '投资总监', '投资经理', '风控与法务', '投委会秘书']
 const text = (value: unknown) => typeof value === 'string' ? value : ''
+const sourceLabel = (payload: Record<string, unknown>, fallback: string) => payload.source === 'weixin_link'
+  ? (text(payload.link) ? '微信链接' : '微信文件')
+  : fallback
 function safeUrl(value: unknown) {
   try { const url = new URL(text(value)); return ['https:', 'http:'].includes(url.protocol) && !url.username && !url.password ? url.href : undefined } catch { return undefined }
 }
@@ -25,7 +28,7 @@ export function LeadReviewPanel() {
   const userId = useAuthStore(s => s.user?.id)
   const allowed = roles.includes(role)
   const [status, setStatus] = useState('pending')
-  const [source, setSource] = useState<'weixin_link' | 'all'>('weixin_link')
+  const [source, setSource] = useState<'weixin_file' | 'weixin_link' | 'all'>('weixin_file')
   const [page, setPage] = useState(1)
   const [refresh, setRefresh] = useState(0)
   const [data, setData] = useState<Listing | null>(null)
@@ -86,15 +89,15 @@ export function LeadReviewPanel() {
   const locked = busy || Boolean(pending)
   return <section className="space-y-4">
     <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-lg font-semibold">线索人工复核</h2><p className="text-sm text-slate-500">核对来源与证据后，决定是否加入线索池。待复核记录尚未正式入池。</p></div>
-      <div className="flex flex-wrap gap-2"><select aria-label="复核来源" value={source} onChange={e => { setSource(e.target.value as 'weixin_link' | 'all'); setPage(1) }} className="rounded border p-2"><option value="weixin_link">微信提交</option><option value="all">全部来源</option></select><select aria-label="复核状态" value={status} onChange={e => { setStatus(e.target.value); setPage(1) }} className="rounded border p-2"><option value="pending">待复核</option><option value="resolved">已处理</option></select><Button variant="secondary" onClick={() => setRefresh(n => n + 1)}>刷新</Button></div></div>
+      <div className="flex flex-wrap gap-2"><select aria-label="复核来源" value={source} onChange={e => { setSource(e.target.value as 'weixin_file' | 'weixin_link' | 'all'); setPage(1) }} className="rounded border p-2"><option value="weixin_file">微信文件</option><option value="weixin_link">微信链接</option><option value="all">全部来源</option></select><select aria-label="复核状态" value={status} onChange={e => { setStatus(e.target.value); setPage(1) }} className="rounded border p-2"><option value="pending">待复核</option><option value="resolved">已处理</option></select><Button variant="secondary" onClick={() => setRefresh(n => n + 1)}>刷新</Button></div></div>
     {notice && <p role="status" className="text-emerald-700">{notice}</p>}
     {error && <p role="alert" className="text-red-600">{error}</p>}
     {loading ? <p role="status">正在读取复核记录…</p> : data && <>
       <p className="text-sm text-slate-500">共 {data.total} 条</p>
-      {!data.list.length && <div className="fde-card p-8 text-center text-slate-500">暂无{status === 'pending' ? '待复核' : '已处理'}记录</div>}
+      {!data.list.length && <div className="fde-card p-8 text-center text-slate-500">暂无{status === 'pending' ? '待复核' : '已处理'}{source === 'weixin_file' ? '微信文件' : source === 'weixin_link' ? '微信链接' : ''}记录</div>}
       {data.list.map(row => <article key={row.id} className="fde-card space-y-2 p-4">
         <div className="flex items-start justify-between gap-4"><h3 className="font-semibold">{text(row.event.payload.title) || row.triggerDecision.subjectName || '未命名线索'}</h3><Button variant="secondary" onClick={() => open(row)}>{row.status === 'pending' ? '查看并复核' : '查看结果'}</Button></div>
-        <p className="text-sm text-slate-500">{row.event.payload.source === 'weixin_link' ? '微信输入' : row.event.sourceType} · {text(row.event.payload.source_name) || '未注明来源'} · {new Date(row.createdAt).toLocaleString('zh-CN')}</p>
+        <p className="text-sm text-slate-500">{sourceLabel(row.event.payload, row.event.sourceType)} · {text(row.event.payload.source_name) || '未注明来源'} · {new Date(row.createdAt).toLocaleString('zh-CN')}</p>
         <p className="text-sm">{row.resolution?.reason || row.reason}</p>
         {row.pipeline.leadId && <Link className="text-teal-700 underline" to={`/sourcing/${row.pipeline.leadId}`}>查看入池项目</Link>}
       </article>)}
@@ -103,7 +106,7 @@ export function LeadReviewPanel() {
     <Modal open={Boolean(selected)} title="线索来源与人工复核" width="max-w-5xl" onClose={() => { if (!locked) setSelected(null) }}>
       {selected && <div className="space-y-4">
         <h3 className="font-semibold">{text(payload.title) || name}</h3>
-        <p>来源：{payload.source === 'weixin_link' ? '微信输入' : selected.event.sourceType} · {text(payload.source_name) || '未注明'}</p>
+        <p>来源：{sourceLabel(payload, selected.event.sourceType)} · {text(payload.source_name) || '未注明'}</p>
         {text(payload.submitted_by) && <p className="text-sm text-slate-500">提交账号：{text(payload.submitted_by)}</p>}
         {sourceUrl && <a href={sourceUrl} target="_blank" rel="noreferrer" className="break-all text-teal-700 underline">打开原文：{sourceUrl}</a>}
         <div className="rounded bg-amber-50 p-3"><strong>复核原因</strong><p className="mt-1 whitespace-pre-wrap">{selected.reason}</p></div>

@@ -264,7 +264,7 @@ const REVIEW_SELECT = `
 export async function listLeadPipelineReviews(input: {
   actor: LeadPipelineReviewActor
   status?: 'pending' | 'resolved' | 'all'
-  source?: 'all' | 'weixin_link'
+  source?: 'all' | 'weixin_file' | 'weixin_link'
   page?: number
   pageSize?: number
 }) {
@@ -278,9 +278,10 @@ export async function listLeadPipelineReviews(input: {
     clauses.push('r.status=?')
     params.push(status)
   }
-  if (input.source === 'weixin_link') {
+  if (input.source === 'weixin_file' || input.source === 'weixin_link') {
     clauses.push("JSON_UNQUOTE(JSON_EXTRACT(raw.payload, '$.source'))=?")
     params.push('weixin_link')
+    clauses.push(`COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(raw.payload, '$.link')), 'null'), '') ${input.source === 'weixin_file' ? '=' : '<>'} ''`)
   }
   if (input.actor.role !== '系统管理员') {
     clauses.push("((r.status='pending' AND (r.assigned_user_id IS NULL OR r.assigned_user_id=?)) OR (r.status='resolved' AND r.reviewer_user_id=?))")
