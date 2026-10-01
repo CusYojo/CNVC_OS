@@ -5,6 +5,7 @@ import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { encodeInstitutionTrackingKey } from '../../server/src/contracts/institutionTrackingContract'
 import { EmptyState, Modal } from '../components/ui'
+import { DiscoveryMonitoringPanel } from '../components/DiscoveryMonitoringPanel'
 import { apiGet, apiPatch, apiPost } from '../lib/api'
 import { buildSaiDiscoverySnapshot } from '../lib/saiAgent'
 import { LEAD_POOL_INDUSTRIES, LEAD_POOL_REGIONS } from '../lib/leadPoolFilters'
@@ -303,6 +304,8 @@ export function ProjectDiscoveryPage() {
       </div>
     </header>
     {notice && <p className={`project-discovery-notice ${notice.tone}`} role={notice.tone === 'error' ? 'alert' : 'status'}>{notice.text}</p>}
+
+    <DiscoveryMonitoringPanel />
 
     <section className="project-discovery-toolbar" aria-label="项目发现筛选">
       <div className="project-discovery-periods" role="group" aria-label="发现时间范围">

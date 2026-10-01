@@ -93,3 +93,19 @@ test('independent discovery workspace keeps the existing project discovery prese
   assert.match(discoveryCss, /\.project-discovery-card-actions button\s*\{[^}]*height:\s*38px;/s, '卡片操作按钮应使用统一固定高度')
   assert.match(sourcing, /<h1>共享线索池<\/h1>/, '原线索池仍需独立保留')
 })
+
+test('discovery workspace keeps lead-pool layout, monitoring controls and people route visible', async () => {
+  const [styles, app, nav, discovery, people] = await Promise.all([
+    read('src/styles.css'), read('src/App.tsx'), read('src/layout/AppLayout.tsx'),
+    read('src/pages/ProjectDiscoveryPage.tsx'), read('src/pages/DiscoveryPeoplePage.tsx'),
+  ])
+  assert.match(styles, /\.lead-pool-hero\s*\{/)
+  assert.match(styles, /\.lead-pool-filters\s*\{[^}]*repeat\(5,/s)
+  assert.match(styles, /\.lead-pool-table-scroll\s*\{[^}]*overflow-x:\s*auto/s)
+  assert.match(styles, /\.lead-pool-row:hover,\s*\.lead-pool-row:focus-visible/)
+  assert.match(styles, /\.lead-pool-pagination\s*\{/)
+  assert.match(discovery, /<DiscoveryMonitoringPanel\s*\/>/)
+  assert.match(app, /path="\/discovery\/people" element=\{<DiscoveryPeoplePage\s*\/>\}/)
+  assert.match(nav, /to: '\/discovery\/people', label: '人物发掘'/)
+  assert.match(people, /科研人物线索，不代表创业或融资意愿/)
+})

@@ -9,6 +9,7 @@ import {
   FolderKanban,
   Gauge,
   Inbox,
+  UsersRound,
   LogOut,
   Menu,
   Settings,
@@ -69,6 +70,7 @@ const primaryNav = [
     children: [
       { to: '/discovery', label: '新项目发现', icon: Sparkles },
       { to: '/discovery/leads', label: '线索池', icon: Inbox },
+      { to: '/discovery/people', label: '人物发掘', icon: UsersRound },
     ],
   },
   {

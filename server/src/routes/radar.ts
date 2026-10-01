@@ -28,6 +28,8 @@ import { db } from '../db/client.js'
 import { radarCollectorStates } from '../db/schema.js'
 import { eq } from 'drizzle-orm'
 import { writeAudit } from '../services/auditService.js'
+import { isDiscoveryMonitorKey, redactDiscoveryMonitoringPlans } from '../contracts/discoveryMonitoringContract.js'
+import { listDiscoveryMonitoringPlans, setDiscoveryMonitoringPlanEnabled } from '../services/discoveryMonitoringService.js'
 import {
   claimRadarWebhookReceipt,
   releaseRadarWebhookReceipt,
@@ -36,6 +38,31 @@ import {
 
 export const radarRouter = Router()
 export const radarInboundRouter = Router()
+
+radarRouter.get('/discovery/monitoring', async (_req, res, next) => {
+  try {
+    res.setHeader('Cache-Control', 'private, no-store')
+    res.json({ plans: redactDiscoveryMonitoringPlans(await listDiscoveryMonitoringPlans()) })
+  } catch (error) { next(error) }
+})
+
+radarRouter.patch('/discovery/monitoring/:key', requireSystemAdmin, async (req: AuthedRequest, res, next) => {
+  try {
+    const key = z.string().max(32).parse(req.params.key)
+    if (!isDiscoveryMonitorKey(key)) {
+      res.status(404).json({ code: 'DISCOVERY_MONITOR_NOT_FOUND', message: '监测类型不存在' })
+      return
+    }
+    const { enabled } = z.object({ enabled: z.boolean() }).strict().parse(req.body)
+    const plan = await setDiscoveryMonitoringPlanEnabled(key, enabled)
+    await writeAudit({
+      userId: req.user!.uid, userName: req.user!.name, module: '新项目发现监测',
+      action: enabled ? '启用监测' : '停用监测', target: key,
+      ip: req.ip, requestId: String(res.locals.requestId || ''),
+    })
+    res.json(plan ? redactDiscoveryMonitoringPlans([plan])[0] : null)
+  } catch (error) { next(error) }
+})
 
 const optionalText = z.union([z.string(), z.number(), z.null()]).optional()
 const chatFileSchema = z.object({

@@ -1,0 +1,42 @@
+.discovery-people-page { min-height: calc(100vh - 140px); color: #24344e; }
+.discovery-people-hero { margin-bottom: 16px; }
+.discovery-people-heading { display: flex; align-items: center; gap: 13px; }
+.discovery-people-heading > span { display: grid; width: 42px; height: 42px; place-items: center; border: 1px solid #c9daf8; border-radius: 12px; background: #f2f7ff; color: #326bc2; }
+.discovery-people-heading svg { width: 20px; }
+.discovery-people-heading h1 { margin: 0; color: #172033; font-size: 22px; }
+.discovery-people-heading p { margin: 4px 0 0; color: #6f7e92; font-size: 13px; }
+.discovery-people-disclaimer { margin: 0 0 16px; padding: 11px 14px; border: 1px solid #d8e5f6; border-radius: 9px; background: #f4f8fe; color: #49617f; font-size: 12px; line-height: 1.6; }
+.discovery-people-toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 13px; padding: 12px; border: 1px solid #e1e7ef; border-radius: 12px; background: #fff; }
+.discovery-people-tabs { display: flex; flex-wrap: wrap; gap: 4px; }
+.discovery-people-tabs button { min-height: 36px; padding: 0 11px; border: 0; border-radius: 7px; background: transparent; color: #67778d; font-size: 12px; }
+.discovery-people-tabs button[aria-pressed="true"] { background: #eaf2ff; color: #245da9; font-weight: 700; }
+.discovery-people-search { display: flex; width: min(290px,100%); height: 38px; align-items: center; gap: 8px; padding: 0 10px; border: 1px solid #dce5ef; border-radius: 8px; }
+.discovery-people-search:focus-within { border-color: #8eb3ec; box-shadow: 0 0 0 3px rgba(50,107,194,.1); }
+.discovery-people-search svg { width: 16px; color: #9aa7b8; }
+.discovery-people-search input { width: 100%; border: 0; outline: 0; color: #334155; font-size: 12px; }
+.discovery-people-source-note { margin: 0 0 12px; color: #778397; font-size: 11px; line-height: 1.6; }
+.discovery-people-results { min-height: 250px; }
+.discovery-people-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; }
+.discovery-people-card { display: flex; min-width: 0; min-height: 225px; flex-direction: column; padding: 16px; border: 1px solid #e1e7ef; border-radius: 12px; background: #fff; box-shadow: 0 5px 20px rgba(20,45,95,.04); }
+.discovery-people-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: #617592; font-size: 11px; }
+.discovery-people-card-head span:first-child { padding: 3px 7px; border-radius: 6px; background: #eaf2ff; color: #3168b2; }
+.discovery-people-card h2 { margin: 12px 0 3px; color: #24344e; font-size: 18px; }
+.discovery-people-organization { margin: 0; color: #465a77; font-size: 13px; font-weight: 600; }
+.discovery-people-field { margin: 7px 0 10px; color: #6f7e92; font-size: 12px; }
+.discovery-people-evidence { display: grid; gap: 5px; margin-top: auto; padding-top: 9px; border-top: 1px solid #ecf0f5; }
+.discovery-people-evidence strong { color: #53647a; font-size: 11px; }
+.discovery-people-evidence a { display: flex; align-items: flex-start; gap: 4px; color: #2b65af; font-size: 12px; line-height: 1.5; text-decoration: none; }
+.discovery-people-evidence a:hover { text-decoration: underline; }
+.discovery-people-evidence a:focus-visible { outline: 2px solid #8eb3ec; outline-offset: 2px; }
+.discovery-people-evidence a svg { width: 13px; min-width: 13px; }
+.discovery-people-evidence small, .discovery-people-card footer { color: #8b96a7; font-size: 11px; }
+.discovery-people-card footer { margin-top: 12px; }
+.discovery-people-state { display: flex; min-height: 250px; align-items: center; justify-content: center; gap: 8px; border: 1px solid #e1e7ef; border-radius: 12px; background: #fff; color: #6f7e92; font-size: 13px; }
+.discovery-people-state svg { width: 17px; }
+.discovery-people-state button { border: 0; background: transparent; color: #245da9; text-decoration: underline; }
+.discovery-people-pagination { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 15px; color: #64748b; font-size: 12px; }
+.discovery-people-pagination div { display: flex; gap: 7px; }
+.discovery-people-pagination button { min-height: 34px; padding: 0 12px; border: 1px solid #d8e2ef; border-radius: 7px; background: #fff; color: #245da9; }
+.discovery-people-pagination button:disabled { opacity: .45; cursor: not-allowed; }
+@media (max-width: 1100px) { .discovery-people-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } }
+@media (max-width: 670px) { .discovery-people-grid { grid-template-columns: 1fr; } .discovery-people-search { width: 100%; } .discovery-people-state { padding: 20px; text-align: center; } }

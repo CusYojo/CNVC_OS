@@ -7,6 +7,7 @@ import { useAppStore } from './store/useAppStore'
 import { LoginPage } from './pages/LoginPage'
 import { ProjectCenterPage } from './pages/ProjectCenterPage'
 import { ProjectDiscoveryPage } from './pages/ProjectDiscoveryPage'
+import { DiscoveryPeoplePage } from './pages/DiscoveryPeoplePage'
 import { SourcingPage } from './pages/SourcingPage'
 import { PromptLibraryPage } from './pages/PromptLibraryPage'
 import { InstitutionTrackingDirectoryPage, InstitutionTrackingProfilePage } from './pages/InstitutionTrackingPage'
@@ -112,6 +113,7 @@ export default function App() {
         <Route path="/projects/:id" element={<ProjectDetailPage />} />
         <Route path="/discovery" element={<ProjectDiscoveryPage />} />
         <Route path="/discovery/leads" element={<SourcingPage />} />
+        <Route path="/discovery/people" element={<DiscoveryPeoplePage />} />
         <Route path="/institutions" element={<InstitutionTrackingDirectoryPage />} />
         <Route path="/institutions/:institutionKey" element={<InstitutionTrackingProfilePage />} />
         <Route path="/sourcing" element={<SourcingRedirect />} />

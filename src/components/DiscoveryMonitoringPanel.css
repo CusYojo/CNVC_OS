@@ -1,0 +1,33 @@
+.discovery-monitoring { margin-bottom: 18px; padding: 18px; border: 1px solid #dfe5ed; border-radius: 14px; background: #fff; box-shadow: 0 5px 20px rgba(20,45,95,.04); }
+.discovery-monitoring-heading h2 { display: flex; align-items: center; gap: 9px; margin: 0; color: #263249; font-size: 18px; font-weight: 700; }
+.discovery-monitoring-heading h2 svg { width: 20px; color: #326bc2; }
+.discovery-monitoring-heading p { margin: 8px 0 16px; color: #6d7788; font-size: 13px; line-height: 1.6; }
+.discovery-monitoring-grid { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 12px; }
+.discovery-monitoring-card { display: flex; min-width: 0; min-height: 185px; flex-direction: column; padding: 15px; border: 1px solid #dfe5ed; border-radius: 10px; background: #fff; }
+.discovery-monitoring-card-title { display: flex; align-items: center; justify-content: space-between; gap: 7px; }
+.discovery-monitoring-card-title h3 { margin: 0; color: #303945; font-size: 15px; font-weight: 700; }
+.discovery-monitoring-card-title span { flex: none; padding: 2px 8px; border: 1px solid #e2e5e9; border-radius: 999px; color: #67717f; font-size: 11px; }
+.discovery-monitoring-card-title span.is-on { border-color: #a6d8c2; background: #effaf5; color: #19714d; }
+.discovery-monitoring-card > p { min-height: 43px; margin: 13px 0 7px; color: #798394; font-size: 12px; line-height: 1.6; }
+.discovery-monitoring-schedule { color: #4d5969; font-size: 11px; line-height: 1.5; }
+.discovery-monitoring-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: auto; padding-top: 13px; }
+.discovery-monitoring-actions button { min-height: 36px; border: 1px solid #cdd7e4; border-radius: 8px; background: #fff; color: #3c4858; font-size: 12px; font-weight: 600; }
+.discovery-monitoring-actions .discovery-monitoring-toggle { background: #e9eef5; }
+.discovery-monitoring-actions .discovery-monitoring-toggle[aria-pressed="true"] { border-color: #326bc2; background: #326bc2; color: #fff; }
+.discovery-monitoring-actions button:disabled { cursor: not-allowed; opacity: .55; }
+.discovery-monitoring-actions button:focus-visible, .discovery-monitoring-config button:focus-visible { outline: 3px solid #93baf0; outline-offset: 2px; }
+.discovery-monitoring-loading { display: flex; align-items: center; gap: 8px; color: #64748b; font-size: 13px; }
+.discovery-monitoring-loading svg { width: 17px; }
+.discovery-monitoring-error { margin: 0 0 10px; color: #ae3d49; font-size: 12px; }
+.discovery-monitoring-error button { margin-left: 5px; border: 0; background: transparent; color: #245da9; text-decoration: underline; }
+.discovery-monitoring-config > p { margin: 0 0 12px; color: #66758a; font-size: 13px; line-height: 1.6; }
+.discovery-monitoring-config ul { display: grid; max-height: 55vh; gap: 8px; overflow-y: auto; margin: 0; padding: 0; list-style: none; }
+.discovery-monitoring-config li { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 10px; border: 1px solid #e1e7ef; border-radius: 8px; }
+.discovery-monitoring-config li strong, .discovery-monitoring-config li small { display: block; }
+.discovery-monitoring-config li small { margin-top: 3px; color: #7c8797; font-size: 11px; }
+.discovery-monitoring-config li small.is-error { color: #ad4652; }
+.discovery-monitoring-config li button { min-width: 60px; min-height: 32px; border: 1px solid #cdd7e4; border-radius: 7px; background: #fff; color: #38557e; }
+.discovery-monitoring-config li button:disabled { opacity: .45; }
+.discovery-monitoring-empty { padding: 18px; border-radius: 8px; background: #f7f9fc; }
+@media (max-width: 1260px) { .discovery-monitoring-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } }
+@media (max-width: 640px) { .discovery-monitoring { padding: 13px; } .discovery-monitoring-grid { grid-template-columns: 1fr; } .discovery-monitoring-card { min-height: 155px; } }

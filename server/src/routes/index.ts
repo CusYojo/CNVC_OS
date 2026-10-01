@@ -36,6 +36,7 @@ import { aiEvolutionRouter } from './aiEvolution.js'
 import { imIntegrationsRouter } from './imIntegrations.js'
 import { leadPushTargetsRouter } from './leadPushTargets.js'
 import { operationsRouter } from './operations.js'
+import { discoveryPeopleRouter } from './discoveryPeople.js'
 import { systemAdministrationRouter } from './systemAdministration.js'
 import { assistantExperiencesRouter } from './assistantExperiences.js'
 import { leadIntakeRouter } from './leadIntake.js'
@@ -93,6 +94,7 @@ apiRouter.use('/integrations/im', imIntegrationsRouter)
 apiRouter.use('/integrations/radar-dingtalk', radarDingTalkRouter)
 apiRouter.use('/investment/leads/push-targets', leadPushTargetsRouter)
 apiRouter.use('/operations', operationsRouter)
+apiRouter.use('/discovery', discoveryPeopleRouter)
 apiRouter.use('/system-administration', systemAdministrationRouter)
 apiRouter.use('/assistant-experiences', assistantExperiencesRouter)
 apiRouter.use('/conversations', conversationsRouter)
