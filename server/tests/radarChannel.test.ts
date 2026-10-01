@@ -48,3 +48,8 @@ test('paper classification takes precedence over source channel classification',
   assert.equal(isRadarPaperCandidate(candidate), true)
   assert.equal(deriveRadarChannel(candidate), '论文')
 })
+
+test('identifies retired OpenAlex records even when the source group is missing', () => {
+  assert.equal(isRadarPaperCandidate({ source: 'openalex', source_group: '其他' }), true)
+  assert.equal(isRadarPaperCandidate({ source: 'investment', source_group: '创投新闻', link: 'https://arxiv.org/abs/2609.12345' }), true)
+})

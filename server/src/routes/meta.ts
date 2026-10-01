@@ -1001,18 +1001,6 @@ export async function runRadarSyncImport(input: RadarSyncInput = {}, actorUserId
       nextCursor = incremental.nextCursor
       hasMore = incremental.hasMore
 
-      // “全部渠道”的最新候选常被高频创投新闻占满。论文单独拉取一个窗口，
-      // 避免即使雷达已采集 arXiv，公共池同步仍永远看不到论文。
-      if (src === 'all') {
-        const papers = await fetchRadarWindow({
-          pageSize: limit,
-          maxPages: 1,
-          group: '论文',
-        })
-        fetchedItems.push(...papers.items)
-        pagesFetched += papers.pages
-      }
-
       const state = await readRadarSyncState(stateId)
       if (!state.backfillComplete && backfillPages > 0 && incremental.hasMore) {
         const backfillCursor = state.backfillCursor || incremental.nextCursor
@@ -1037,6 +1025,9 @@ export async function runRadarSyncImport(input: RadarSyncInput = {}, actorUserId
 
     const uniqueItems = new Map<string, Record<string, unknown>>()
     for (const item of fetchedItems) {
+      // Retired paper feeds may still appear in an all-source window or a legacy cursor.
+      // Keep historical rows, but do not create new pipeline reviews or public leads.
+      if (isRadarPaperCandidate(item)) continue
       const key = radarCandidateSourceKey(item)
       uniqueItems.set(key || `anonymous:${uniqueItems.size}`, item)
     }

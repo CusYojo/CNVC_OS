@@ -12,7 +12,7 @@ function radarPaperSourceText(candidate: RadarChannelCandidate) {
 
 export function isRadarPaperCandidate(candidate: RadarChannelCandidate) {
   return String(candidate.source_group ?? '') === '论文'
-    || /arxiv/i.test(radarPaperSourceText(candidate))
+    || /arxiv|openalex/i.test(radarPaperSourceText(candidate))
 }
 
 export function is36KrRadarCandidate(candidate: RadarChannelCandidate) {
