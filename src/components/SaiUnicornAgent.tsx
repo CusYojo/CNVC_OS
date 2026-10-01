@@ -20,7 +20,7 @@ import { FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useRef, useS
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useJwAgent } from '../hooks/useJwAgent'
 import { extractTextParts, normalizeAgentMessages } from '../lib/aiMessageSafety'
-import { apiGet, apiPost } from '../lib/api'
+import { apiDelete, apiGet, apiPost } from '../lib/api'
 import { openApproval } from '../lib/approvalWorkspace'
 import {
   buildSaiAgentPrompt,
@@ -140,6 +140,18 @@ export function SaiUnicornAgent() {
   const conversationScopeKey = getSaiConversationScopeKey(currentContext)
   const conversationScopeRef = useRef(conversationScopeKey)
   const pendingConversationRef = useRef<{ scope: string; promise: Promise<string | null> } | null>(null)
+  const draftConversationRef = useRef<{ id: string; used: boolean } | null>(null)
+  const submittingRef = useRef(false)
+  const panelOpenRef = useRef(open)
+  panelOpenRef.current = open
+  const discardUnusedConversation = useCallback(() => {
+    const draft = draftConversationRef.current
+    if (draft?.used || submittingRef.current) return
+    draftConversationRef.current = null
+    pendingConversationRef.current = null
+    if (draft) void apiDelete(`/conversations/${encodeURIComponent(draft.id)}`).catch(() => undefined)
+    setAgentId(undefined)
+  }, [])
   const actions = useMemo(() => getSaiAgentActions(currentContext), [currentContext])
   const messages = useMemo(
     () => normalizeAgentMessages(agent.messages)
@@ -167,6 +179,8 @@ export function SaiUnicornAgent() {
 
   useEffect(() => {
     if (conversationScopeRef.current === conversationScopeKey) return
+    discardUnusedConversation()
+    draftConversationRef.current = null
     conversationScopeRef.current = conversationScopeKey
     if (recognizerRef.current) {
       recognizerRef.current.onend = null
@@ -179,7 +193,7 @@ export function SaiUnicornAgent() {
     setLocalError(undefined)
     setInteractionAnswers({})
     setTurnReceipt(undefined)
-  }, [conversationScopeKey])
+  }, [conversationScopeKey, discardUnusedConversation])
 
   const ensureConversation = useCallback((): Promise<string | null> => {
     if (agentId) return Promise.resolve(agentId)
@@ -191,7 +205,13 @@ export function SaiUnicornAgent() {
       projectName: currentContext.projectName ?? null,
     }).then((row) => {
       const nextAgentId = row.agentId || row.id
-      if (conversationScopeRef.current !== conversationScopeKey) return null
+      if (conversationScopeRef.current !== conversationScopeKey ||
+        pendingConversationRef.current?.promise !== promise ||
+        (!panelOpenRef.current && !submittingRef.current)) {
+        void apiDelete(`/conversations/${encodeURIComponent(row.id)}`).catch(() => undefined)
+        return null
+      }
+      draftConversationRef.current = { id: row.id, used: false }
       setAgentId(nextAgentId)
       void apiPost(`/agent/conversations/${encodeURIComponent(nextAgentId)}/prewarm`, { responseMode: 'compact' }).catch(() => {
         // The normal message path can still initialize the session if warming fails.
@@ -209,6 +229,10 @@ export function SaiUnicornAgent() {
     if (!open || agentId) return
     void ensureConversation().catch((error) => setLocalError(formatAgentError(error)))
   }, [open, agentId, ensureConversation])
+
+  useEffect(() => {
+    if (!open) discardUnusedConversation()
+  }, [open, discardUnusedConversation])
 
   useEffect(() => {
     if (turnReceipt && assistantMessageCount > turnReceipt.assistantBaseline) setTurnReceipt(undefined)
@@ -407,12 +431,15 @@ export function SaiUnicornAgent() {
     setComposer('')
     setLocalError(undefined)
     setSending(true)
+    submittingRef.current = true
     try {
       if (agentId) {
+        if (draftConversationRef.current) draftConversationRef.current.used = true
         await agent.sendMessage(prompt, { responseMode: 'compact' })
       } else {
         const nextAgentId = await ensureConversation()
         if (!nextAgentId || conversationScopeRef.current !== requestScopeKey) return
+        if (draftConversationRef.current) draftConversationRef.current.used = true
         await apiPost(`/agent/conversations/${encodeURIComponent(nextAgentId)}/messages`, {
           message: prompt,
           responseMode: 'compact',
@@ -421,6 +448,7 @@ export function SaiUnicornAgent() {
     } catch (error) {
       setLocalError(formatAgentError(error))
     } finally {
+      submittingRef.current = false
       setSending(false)
     }
   }
@@ -514,7 +542,7 @@ export function SaiUnicornAgent() {
             </span>
           </div>
           <div className="sai-agent-header-actions">
-            {agentId && <button type="button" title="开始新对话" aria-label="开始新对话" onClick={() => { pendingConversationRef.current = null; setAgentId(undefined); setLocalError(undefined); setTurnReceipt(undefined) }}><RotateCcw /></button>}
+            {agentId && <button type="button" title="开始新对话" aria-label="开始新对话" onClick={() => { discardUnusedConversation(); draftConversationRef.current = null; pendingConversationRef.current = null; setAgentId(undefined); setLocalError(undefined); setTurnReceipt(undefined) }}><RotateCcw /></button>}
             <button ref={closeRef} type="button" aria-label="关闭小赛" onClick={closePanel}><X /></button>
           </div>
         </header>
