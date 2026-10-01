@@ -380,7 +380,7 @@ function DiscoveryCard({ lead, onOpen, onKeywordsUpdated, onCardUpdated, onRemov
   const missingFields = projectDiscoveryMissingFields(lead).filter((field) => !(
     cardDraft.briefFacts[field]?.trim() || cardDraft.profileFacts[field]?.trim()
   ))
-  const latestUpdate = lead.latestUpdates?.[0]
+  const latestUpdate = lead.latestUpdates?.find((update) => safeExternalUrl(update.sourceUrl)) ?? lead.latestUpdates?.[0]
   const reportedSourceUrl = safeExternalUrl(latestUpdate?.sourceUrl)
   const sourceUrl = reportedSourceUrl ?? safeExternalUrl(lead.radarProfile?.link)
   const discoveryScore = lead.discoveryScore

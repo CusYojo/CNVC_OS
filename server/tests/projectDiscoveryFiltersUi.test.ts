@@ -19,6 +19,7 @@ test('every discovery card shows sourced reporting or an explicit missing-eviden
   const page = await read('src/pages/ProjectDiscoveryPage.tsx')
 
   assert.match(page, /latestUpdate\?\.sourceUrl/)
+  assert.match(page, /latestUpdates\?\.find\(\(update\) => safeExternalUrl\(update\.sourceUrl\)\)/)
   assert.match(page, /radarProfile\?\.link/)
   assert.match(page, /暂无可核验报道/)
   assert.match(page, /target="_blank" rel="noopener noreferrer"/)
