@@ -115,6 +115,8 @@ export function SaiUnicornAgent() {
   const discoverySnapshot = useSaiPageContext((state) => state.discoverySnapshot)
   const reviewSnapshot = useSaiPageContext((state) => state.reviewSnapshot)
   const knowledgeSnapshot = useSaiPageContext((state) => state.knowledgeSnapshot)
+  const dueDiligenceSnapshot = useSaiPageContext((state) => state.dueDiligenceSnapshot)
+  const dueDiligenceProject = useSaiPageContext((state) => state.dueDiligenceProject)
   const [open, setOpen] = useState(false)
   const [composer, setComposer] = useState('')
   const [agentId, setAgentId] = useState<string>()
@@ -137,8 +139,13 @@ export function SaiUnicornAgent() {
   const agent = useJwAgent(agentId)
 
   const currentContext = useMemo(
-    () => resolveSaiAgentContext(location.pathname, location.search, projects),
-    [location.pathname, location.search, projects],
+    () => {
+      const context = resolveSaiAgentContext(location.pathname, location.search, projects)
+      return context.kind === 'due-diligence' && dueDiligenceProject
+        ? { ...context, projectId: dueDiligenceProject.id, projectName: dueDiligenceProject.name, detail: `${dueDiligenceProject.name} · ${context.detail}` }
+        : context
+    },
+    [location.pathname, location.search, projects, dueDiligenceProject],
   )
   const conversationScopeKey = getSaiConversationScopeKey(currentContext)
   const conversationScopeRef = useRef(conversationScopeKey)
@@ -421,6 +428,7 @@ export function SaiUnicornAgent() {
       + (currentContext.kind === 'discovery' ? discoverySnapshot : '')
       + (currentContext.kind === 'review' ? reviewSnapshot : '')
       + (currentContext.kind === 'knowledge' ? knowledgeSnapshot : '')
+      + (currentContext.kind === 'due-diligence' ? dueDiligenceSnapshot : '')
     const requestScopeKey = conversationScopeKey
     const toolMode = resolveSaiToolMode(currentContext, cleanGoal)
     const currentProject = projects.find((project) => project.id === currentContext.projectId)

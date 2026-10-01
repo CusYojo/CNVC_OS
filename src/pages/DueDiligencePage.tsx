@@ -2,6 +2,8 @@ import { useSearchParams } from 'react-router-dom'
 import { Bot, CheckCircle2, Circle, ClipboardList, Download, GripVertical, Mic, MicOff, Plus, Save, Send, Square, Trash2, UsersRound } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useAppStore } from '../store/useAppStore'
+import { useSaiPageContext } from '../store/useSaiPageContext'
+import { buildSaiDueDiligenceSnapshot } from '../lib/saiAgent'
 import { useAuthStore } from '../store/useAuthStore'
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut } from '../lib/api'
 import { useToast } from '../components/Toast'
@@ -39,6 +41,7 @@ const demoPrompt: InterviewPrompt = { id: 'd0d00000-0000-4000-8000-000000000501'
 const demoTwin: Twin = { id: 'd0d00000-0000-4000-8000-000000000601', name: '姜波的尽调分身', role: '投资经理', rules: '优先核验现金流、客户集中度和收入确认口径；结论必须同时说明支持证据与反证。', cases: '当关键客户贡献超过 30% 时，要求核验续约、替代性和回款记录。', activeVersion: 2, updatedAt: '2026-09-25T08:00:00.000Z' }
 
 export function DueDiligencePage({ preview = false }: { preview?: boolean }) {
+  const setDueDiligenceContext = useSaiPageContext(state => state.setDueDiligenceContext)
   const [searchParams, setSearchParams] = useSearchParams()
   const platformProjects = useAppStore(state => state.projects)
   const platformFiles = useAppStore(state => state.files)
@@ -54,6 +57,21 @@ export function DueDiligencePage({ preview = false }: { preview?: boolean }) {
   const [prompts, setPrompts] = useState<Record<string, InterviewPrompt[]>>({})
   const [twins, setTwins] = useState<Twin[]>([])
   const [loading, setLoading] = useState(false)
+  useEffect(() => {
+    if (preview) return
+    setDueDiligenceContext(project
+      ? buildSaiDueDiligenceSnapshot({
+        projectName: project.name,
+        activeTab: active,
+        questions: questions.filter(item => item.projectId === project.id),
+        interviews: interviews.filter(item => item.projectId === project.id),
+        files: files.filter(item => item.projectId === project.id),
+        loading,
+      })
+      : '\n【当前尽调工作台没有已选中的可访问项目】',
+    project ? { id: project.id, name: project.name } : null)
+  }, [preview, project?.id, project?.name, active, questions, interviews, files, loading, setDueDiligenceContext])
+  useEffect(() => () => setDueDiligenceContext('', null), [setDueDiligenceContext])
   const [questionForm, setQuestionForm] = useState(emptyQuestion)
   const [interviewForm, setInterviewForm] = useState(emptyInterview)
   const [showQuestion, setShowQuestion] = useState(false)
