@@ -5,6 +5,7 @@ import {
   JW_AGENT_CREATE_AI_TASK_INPUT_SCHEMA,
   JW_AGENT_QUICK_SKILL_BINDINGS,
   jwAgentSystemPrompt,
+  jwAgentMcpToolsForAllowedSet,
   jwAgentToolsForScope,
 } from './jwAgentRuntime.js'
 
@@ -20,6 +21,12 @@ test('global conversations do not expose project-only tools', () => {
     'mcp__investment__search_project_docs',
     'mcp__investment__collect_public_intel',
   ])
+})
+
+test('SDK MCP server advertises only tools available to the current scope', () => {
+  const definitions = [{ name: 'search_project_docs' }, { name: 'get_project_summary' }]
+  const allowed = new Set(jwAgentToolsForScope(tools, null))
+  assert.deepEqual(jwAgentMcpToolsForAllowedSet(definitions, allowed), [{ name: 'search_project_docs' }])
 })
 
 test('project conversations retain project tools', () => {
