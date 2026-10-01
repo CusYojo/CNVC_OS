@@ -42,6 +42,13 @@ test('prompt library API requires login and serves only authorized Markdown as a
     })
     assert.equal(created.status, 201)
     const item = await created.json() as { id: string }
+    const listed = await fetch(`${url}?kind=skill`, { headers: { 'x-test-user': 'author' } })
+    const listedBody = await listed.json() as { list: Array<Record<string, unknown>> }
+    assert.equal(listed.status, 200)
+    assert.equal(listedBody.list[0]?.id, item.id)
+    assert.equal(Object.hasOwn(listedBody.list[0] ?? {}, 'markdown'), false)
+    const detail = await fetch(`${url}/${item.id}`, { headers: { 'x-test-user': 'author' } })
+    assert.equal((await detail.json() as { markdown: string }).markdown, '# 研究助手\n\n只引用资料。')
     assert.equal((await fetch(`${url}/${item.id}/download`, { headers: { 'x-test-user': 'colleague' } })).status, 403)
     const downloaded = await fetch(`${url}/${item.id}/download`, { headers: { 'x-test-user': 'author' } })
     assert.equal(downloaded.status, 200)
