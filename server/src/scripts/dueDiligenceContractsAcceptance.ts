@@ -14,9 +14,10 @@ try {
   if (originalOrigins === undefined) delete process.env.AUTH_ALLOWED_ORIGINS; else process.env.AUTH_ALLOWED_ORIGINS = originalOrigins
 }
 
-const [page, workspace, routes] = await Promise.all([
+const [page, workspace, interviews, routes] = await Promise.all([
   readFile(new URL('../../../src/pages/DueDiligencePage.tsx', import.meta.url), 'utf8'),
   readFile(new URL('../../../src/components/dueDiligence/ExperienceAssetsWorkspace.tsx', import.meta.url), 'utf8'),
+  readFile(new URL('../../../src/components/dueDiligence/InterviewsWorkspace.tsx', import.meta.url), 'utf8'),
   readFile(new URL('../routes/dueDiligence.ts', import.meta.url), 'utf8'),
 ])
 assert.match(page, /\/capabilities\/write-probe/)
@@ -24,6 +25,10 @@ assert.match(page, /\/skill-library/)
 assert.match(workspace, /沉淀的 Skill 库/)
 assert.match(workspace, /从网址链接导入/)
 assert.doesNotMatch(workspace, /待确认经验/)
+assert.match(interviews, /放弃本次/)
+assert.match(interviews, /放弃本次语音/)
+assert.match(interviews, /recordingBaseDraft\.current/)
+assert.match(interviews, /promptVoiceBase\.current/)
 assert.match(routes, /DUE_DILIGENCE_API_VERSION = 2/)
 assert.match(routes, /db\.transaction\(async tx =>/)
-console.log(JSON.stringify({ ok: true, checks: ['forwarded-origin', 'untrusted-origin', 'write-probe', 'unified-skill-library', 'transactional-publication'] }))
+console.log(JSON.stringify({ ok: true, checks: ['forwarded-origin', 'untrusted-origin', 'write-probe', 'unified-skill-library', 'transactional-publication', 'recording-discard', 'prompt-voice-discard'] }))
