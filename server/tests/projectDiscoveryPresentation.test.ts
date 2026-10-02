@@ -288,16 +288,31 @@ test('project discovery highlights a sourced core strength on the collapsed comp
 })
 
 test('compact discovery facts remove review notes without inventing rejected financing claims', () => {
-  assert.equal(compactProjectDiscoveryFactValue('融资金额', '近亿元（待核验）'), '近亿元')
-  assert.equal(compactProjectDiscoveryFactValue('融资轮次', '天使轮（原库在途；截图推测天使不采信）'), '预计天使轮')
+  assert.equal(compactProjectDiscoveryFactValue('融资金额', '近亿元（待核验）'), '推测近亿元')
+  assert.equal(compactProjectDiscoveryFactValue('融资轮次', '天使轮（原库在途；截图推测天使不采信）'), '未披露')
   assert.equal(compactProjectDiscoveryFactValue('融资轮次', '截图推测天使轮'), '预计天使轮')
   assert.equal(compactProjectDiscoveryFactValue('融资轮次', 'Pre-B轮（推测）'), '预计Pre-B轮')
   assert.equal(compactProjectDiscoveryFactValue('融资金额', '2亿元（估算）'), '约2亿元')
   assert.equal(compactProjectDiscoveryFactValue('融资轮次', '原库在途；截图推测天使不采信'), '未披露')
   assert.equal(compactProjectDiscoveryFactValue('融资金额', '（推测约 2 亿元）'), '约 2 亿元')
   assert.equal(compactProjectDiscoveryFactValue('融资金额', '融资金额待核验'), '未披露')
-  assert.equal(compactProjectDiscoveryFactValue('核心团队背景', '创始人毕业于清华大学（待核验）'), '创始人毕业于清华大学')
+  assert.equal(compactProjectDiscoveryFactValue('核心团队背景', '创始人毕业于清华大学（待核验）'), '推测：创始人毕业于清华大学')
   assert.equal(compactProjectDiscoveryFactValue('核心团队背景', '创始人毕业于清华大学（计算机系）'), '创始人毕业于清华大学（计算机系）')
+})
+
+test('card draft source facts retain caveats when unrelated fields are edited', () => {
+  const unverified = {
+    ...company,
+    investmentProfile: {
+      ...company.investmentProfile,
+      financing: { ...company.investmentProfile?.financing, latestAmount: '近亿元（待核验）', latestRound: '天使轮（原库在途；截图推测天使不采信）' },
+    },
+    radarProfile: { profile: { teamComposition: '创始人毕业于清华大学（待核验）' } },
+  } as LeadListItem
+  const facts = buildProjectDiscoveryBrief(unverified).facts
+  assert.equal(facts.find((fact) => fact.label === '融资金额')?.value, '近亿元（待核验）')
+  assert.equal(facts.find((fact) => fact.label === '融资轮次')?.value, '天使轮（原库在途；截图推测天使不采信）')
+  assert.equal(facts.find((fact) => fact.label === '核心团队背景')?.value, '创始人毕业于清华大学（待核验）')
 })
 
 test('plain-text keyword editing accepts common separators and preserves known keyword metadata', () => {
