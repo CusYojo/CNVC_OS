@@ -25,12 +25,12 @@ const roundPattern = /(?:Pre[-\s]?[A-F]\+?|[A-F]\+?|天使|种子|战略)(?:轮(
 export function compactProjectDiscoveryFactValue(label: string, value: string): string {
   const raw = value.trim()
   if (/不采信|不可采信|不能采信/u.test(raw)) return '未披露'
-  if (/^(?:推测|预计|约)\S/u.test(raw) && !/[（(]/u.test(raw)) return raw
+  if (/^(?:推测|预计|约)\S/u.test(raw) && !/[（(]|待核验|待核实|待确认|来源待核|原库在途|仅供参考/u.test(raw)) return raw
   const concise = raw.replace(/\s*[（(]([^（）()]*)[）)]/gu, (matched, note: string) => (
     reviewNote.test(note) ? '' : matched
   )).trim()
   const estimated = /推测|预计|估计|估算/u.test(raw)
-  const unverified = /待核验|待核实|待确认|来源待核/u.test(raw)
+  const unverified = /待核验|待核实|待确认|来源待核|原库在途|仅供参考/u.test(raw)
   const explicit = concise && !reviewNote.test(concise) ? concise : ''
   if (label === '融资金额' || label === '融资轮次') {
     const candidate = explicit || raw
