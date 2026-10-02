@@ -298,6 +298,8 @@ test('compact discovery facts remove review notes without inventing rejected fin
   assert.equal(compactProjectDiscoveryFactValue('融资金额', '融资金额待核验'), '未披露')
   assert.equal(compactProjectDiscoveryFactValue('核心团队背景', '创始人毕业于清华大学（待核验）'), '推测：创始人毕业于清华大学')
   assert.equal(compactProjectDiscoveryFactValue('核心团队背景', '创始人毕业于清华大学（计算机系）'), '创始人毕业于清华大学（计算机系）')
+  assert.equal(compactProjectDiscoveryFactValue('融资金额', '推测近亿元'), '推测近亿元')
+  assert.equal(compactProjectDiscoveryFactValue('核心团队背景', '推测：创始人毕业于清华大学'), '推测：创始人毕业于清华大学')
 })
 
 test('card draft source facts retain caveats when unrelated fields are edited', () => {

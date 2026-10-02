@@ -11,6 +11,7 @@ import { buildSaiDiscoverySnapshot } from '../lib/saiAgent'
 import { LEAD_POOL_INDUSTRIES, LEAD_POOL_REGIONS } from '../lib/leadPoolFilters'
 import {
   buildProjectDiscoveryBrief,
+  compactProjectDiscoveryFactValue,
   discoveryCandidateKind,
   loadProjectDiscoveryPage,
   projectDiscoveryCandidateDay,
@@ -489,7 +490,7 @@ function DiscoveryCard({ lead, onOpen, onCardUpdated, onRemoved }: {
       /></h3>
       <div className="project-discovery-card-header-meta">
         <div className="project-discovery-card-score" aria-label={`${name}${scoreLabel}${displayScore == null ? '' : `${displayScore}分`}`}>
-          <strong>{displayScore == null ? '待评分' : `${displayScore} 分`}</strong>
+          <strong>{displayScore == null ? '待评分' : `${discoveryScore?.overall != null && scoreCoverage === 4 ? '综合' : '参考'} ${displayScore} 分`}</strong>
         </div>
       </div>
     </header>
@@ -651,14 +652,14 @@ function DiscoveryInvestmentBrief({ leadId, name, brief, factValues, primaryDate
           <dd>{isDate ? <input
             id={`discovery-fact-${leadId}-${item.label}`}
             className="project-discovery-date-input"
-            value={primaryDate}
+            value={compactProjectDiscoveryFactValue(item.label, primaryDate)}
             maxLength={40}
             disabled={saving}
             onChange={(event) => onDateChange(event.target.value)}
           /> : <textarea
             id={`discovery-fact-${leadId}-${item.label}`}
             className={`project-discovery-fact-input${item.label === '核心团队背景' || item.label === '核心优势' ? ' is-secondary' : ''}`}
-            value={factValues[item.label] ?? ''}
+            value={compactProjectDiscoveryFactValue(item.label, factValues[item.label] ?? '')}
             rows={item.wide ? 2 : 1}
             maxLength={1_000}
             disabled={saving}

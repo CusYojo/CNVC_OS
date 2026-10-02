@@ -122,7 +122,7 @@ test('all discovery cards use the compact timeline layout without visible keywor
 
 test('compact labels retain score provenance and do not rewrite the saved card draft', async () => {
   const discovery = await read('src/pages/ProjectDiscoveryPage.tsx')
-  assert.match(discovery, /<strong>\{displayScore == null \? '待评分' : `\$\{scoreCoverage < 4 \? '参考' : '综合'\} \$\{displayScore\} 分`\}<\/strong>/)
+  assert.match(discovery, /<strong>\{displayScore == null \? '待评分' : `\$\{discoveryScore\?\.overall != null && scoreCoverage === 4 \? '综合' : '参考'\} \$\{displayScore\} 分`\}<\/strong>/)
   assert.match(discovery, /value=\{compactProjectDiscoveryFactValue\(item\.label, factValues\[item\.label\] \?\? ''\)\}/)
   assert.match(discovery, /value=\{compactProjectDiscoveryFactValue\(item\.label, primaryDate\)\}/)
   assert.match(discovery, /briefFacts: Object\.fromEntries\(brief\.facts/)
