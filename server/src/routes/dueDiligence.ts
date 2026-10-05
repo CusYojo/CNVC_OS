@@ -499,6 +499,20 @@ dueDiligenceRouter.patch('/projects/:projectId/interviews/:id/prompts/:promptId'
   } catch (error) { next(error) }
 })
 
+dueDiligenceRouter.delete('/projects/:projectId/interviews/:id/prompts/:promptId', async (req: AuthedRequest, res, next) => {
+  try {
+    const projectId = routeId(req.params.projectId); const interviewId = routeId(req.params.id); const promptId = routeId(req.params.promptId)
+    await requireDueDiligenceProject(req.user!.uid, projectId); await requireInterview(projectId, interviewId)
+    const [prompt] = await db.select({ status: dueDiligenceInterviewPrompts.status }).from(dueDiligenceInterviewPrompts)
+      .where(and(eq(dueDiligenceInterviewPrompts.id, promptId), eq(dueDiligenceInterviewPrompts.interviewId, interviewId))).limit(1)
+    if (!prompt) throw Object.assign(new Error('远程插问不存在或已删除'), { status: 404, code: 'NOT_FOUND' })
+    if (prompt.status !== '已忽略') throw Object.assign(new Error('只有已忽略的远程插问可以删除'), { status: 409, code: 'PROMPT_NOT_IGNORED' })
+    const [result] = await db.delete(dueDiligenceInterviewPrompts).where(and(eq(dueDiligenceInterviewPrompts.id, promptId), eq(dueDiligenceInterviewPrompts.interviewId, interviewId), eq(dueDiligenceInterviewPrompts.status, '已忽略')))
+    if (result.affectedRows !== 1) throw Object.assign(new Error('远程插问状态已变化，请刷新后重试'), { status: 409, code: 'PROMPT_STATUS_CHANGED' })
+    await audit(req, '删除已忽略远程插问', promptId); res.status(204).end()
+  } catch (error) { next(error) }
+})
+
 const PublicationSchema = z.object({ introduction: z.string().trim().min(1).max(1000), publicRules: z.string().trim().min(1).max(12000), publicCases: z.string().trim().max(12000).default(''), industryTags: z.array(z.string().trim().min(1).max(32)).max(12).default([]), capabilityTags: z.array(z.string().trim().min(1).max(32)).max(12).default([]) })
 dueDiligenceRouter.get('/twin-directory', async (req: AuthedRequest, res, next) => {
   try { const list = await db.select({ id: digitalTwinPublications.id, twinId: digitalTwinPublications.twinId, twinName: digitalTwins.name, ownerUserId: digitalTwinPublications.ownerUserId, ownerName: users.name, role: users.role, department: users.department, avatarKind: digitalTwinPublications.avatarKind, avatarPreset: digitalTwinPublications.avatarPreset, publishedVersion: digitalTwinPublications.publishedVersion, introduction: digitalTwinPublications.introduction, publicRules: digitalTwinPublications.publicRules, publicCases: digitalTwinPublications.publicCases, industryTags: digitalTwinPublications.industryTags, capabilityTags: digitalTwinPublications.capabilityTags, publishedAt: digitalTwinPublications.publishedAt }).from(digitalTwinPublications).innerJoin(digitalTwins, eq(digitalTwins.id, digitalTwinPublications.twinId)).innerJoin(users, eq(users.id, digitalTwinPublications.ownerUserId)).where(and(eq(digitalTwinPublications.status, '已发布'), isNull(digitalTwins.deletedAt))).orderBy(users.name); res.json({ list }) } catch (error) { next(error) }
